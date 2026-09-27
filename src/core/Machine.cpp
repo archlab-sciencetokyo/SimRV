@@ -1544,11 +1544,11 @@ Machine::~Machine() {
 }
 
 void Machine::advance_ca_global_cycle() {
-    primary_hart().advance_ca_cycle(*this);
+    primary_hart().run_cycle(*this);
     if (simrv::compiler::unlikely(!runtime_->secondary_harts.empty())) {
         for (const auto [i, secondary] : std::views::enumerate(runtime_->secondary_harts)) {
             if (secondary->hart_status.load(std::memory_order_relaxed) == HartStatus::Started) {
-                secondary->advance_ca_cycle(*this);
+                secondary->run_cycle(*this);
             }
         }
     }
@@ -1557,7 +1557,7 @@ void Machine::advance_ca_global_cycle() {
 }
 
 void Machine::advance_ca_primary_cycle() {
-    primary_hart().advance_ca_cycle(*this);
+    primary_hart().run_cycle(*this);
     advance_ca_platform_cycle(false);
 }
 
@@ -1567,9 +1567,8 @@ void Machine::advance_ca_platform_cycle(bool synchronize_secondary_harts) {
     // independently. The timer transition follows the interconnect transition and is
     // sampled by hart pipelines at a retirement boundary in the next global cycle.
     auto& cpu = primary_hart();
-    memory().system_bus().advance_cycle();
-    ++cpu.clint_mmio.rtc_divider;
-    if (simrv::compiler::unlikely(cpu.clint_mmio.rtc_divider >= 10)) {
+    memory_.system_bus().advance_cycle();
+    if (simrv::compiler::unlikely(++cpu.clint_mmio.rtc_divider >= 10)) {
         ++cpu.clint_mmio.mtime;
         cpu.clint_mmio.rtc_divider = 0;
         cpu.evaluate_timer_interrupt();

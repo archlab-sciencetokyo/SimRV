@@ -65,18 +65,33 @@ struct BranchPredictorConfig {
  * @brief Result of a branch prediction lookup at Fetch stage.
  */
 struct BranchPrediction {
+    Address predicted_target = 0;
+    BhtIndex bht_index = 0;
+    GlobalHistory ghr_snapshot = 0;
     bool is_control = false;
     bool is_branch = false;
     bool is_jump = false;
     bool is_call = false;
     bool is_return = false;
     bool predicted_taken = false;
-    Address predicted_target = 0;
-    BhtIndex bht_index = 0;
-    GlobalHistory ghr_snapshot = 0;
     bool btb_hit = false;
     bool ras_hit = false;
     bool false_control_alias = false;
+
+    constexpr void reset() noexcept {
+        predicted_target = 0;
+        bht_index = 0;
+        ghr_snapshot = 0;
+        is_control = false;
+        is_branch = false;
+        is_jump = false;
+        is_call = false;
+        is_return = false;
+        predicted_taken = false;
+        btb_hit = false;
+        ras_hit = false;
+        false_control_alias = false;
+    }
 
     [[nodiscard]] constexpr auto direction() const noexcept -> BranchDirection {
         return predicted_taken ? BranchDirection::Taken : BranchDirection::NotTaken;
@@ -200,6 +215,10 @@ class BranchPredictor {
     [[nodiscard]] auto predict(Address pc, const DecodedInstruction& inst) -> BranchPrediction;
     [[nodiscard]] auto predict(VirtAddr pc, const DecodedInstruction& inst) -> BranchPrediction {
         return predict(pc.raw(), inst);
+    }
+    void predict(Address pc, const DecodedInstruction& inst, BranchPrediction& pred) noexcept;
+    void predict(VirtAddr pc, const DecodedInstruction& inst, BranchPrediction& pred) noexcept {
+        predict(pc.raw(), inst, pred);
     }
     void latch_btb_read(Address pc);
     void restore_speculation(const BranchPrediction& prediction);

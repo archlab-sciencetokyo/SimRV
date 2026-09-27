@@ -183,6 +183,28 @@ class PipelineSim {
         ca_kernel_active_ = true;
         update_stats(metrics);
     }
+    SIMRV_ALWAYS_INLINE void record_cycle_stats(bool fetch_stalled, bool decode_stalled,
+                                                bool execute_stalled, bool memory_stalled,
+                                                bool writeback_stalled, bool data_hazard_stall,
+                                                bool control_flush, bool icache_miss,
+                                                bool dcache_miss, bool tlb_miss) noexcept {
+        ca_kernel_active_ = true;
+        ++ca_stats_.cycle_count;
+        const bool stalled = fetch_stalled || decode_stalled || execute_stalled || memory_stalled ||
+                             writeback_stalled;
+        if (simrv::compiler::unlikely(stalled)) {
+            ++ca_stats_.stall_cycles;
+            ca_stats_.icache_stalls += icache_miss && fetch_stalled;
+            ca_stats_.dcache_stalls += dcache_miss && (memory_stalled || writeback_stalled);
+            ca_stats_.tlb_stalls += tlb_miss;
+            ca_stats_.structural_stalls += execute_stalled;
+            ca_stats_.data_hazard_stalls += data_hazard_stall;
+        }
+        if (simrv::compiler::unlikely(control_flush)) {
+            ++ca_stats_.control_hazard_bubbles;
+            ++ca_stats_.bubble_cycles;
+        }
+    }
 
     // Getters for statistics
     [[nodiscard]] auto cycle_count() const -> Counter;

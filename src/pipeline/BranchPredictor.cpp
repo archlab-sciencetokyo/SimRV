@@ -171,6 +171,13 @@ auto BranchPredictor::bht_distribution() const noexcept -> std::array<size_t, 4>
 
 auto BranchPredictor::predict(Address pc, const DecodedInstruction& inst) -> BranchPrediction {
     BranchPrediction pred{};
+    predict(pc, inst, pred);
+    return pred;
+}
+
+void BranchPredictor::predict(Address pc, const DecodedInstruction& inst,
+                              BranchPrediction& pred) noexcept {
+    pred.reset();
     const auto opcode = inst.opcode;
     const bool is_branch = (opcode == isa::Opcode::Branch);
     const bool is_jal = (opcode == isa::Opcode::Jal);
@@ -196,7 +203,7 @@ auto BranchPredictor::predict(Address pc, const DecodedInstruction& inst) -> Bra
                 pred.false_control_alias = true;
             }
         }
-        return pred;
+        return;
     }
 
     pred.is_branch = is_branch;
@@ -206,7 +213,7 @@ auto BranchPredictor::predict(Address pc, const DecodedInstruction& inst) -> Bra
     if (config_.type == BranchPredictorType::Disabled) {
         pred.predicted_taken = false;
         pred.predicted_target = pc + (inst.cinsn != 0u ? 2 : 4);
-        return pred;
+        return;
     }
 
     const Address inst_len = (inst.cinsn != 0u ? 2 : 4);
@@ -244,7 +251,7 @@ auto BranchPredictor::predict(Address pc, const DecodedInstruction& inst) -> Bra
         if (pred.is_call && config_.enable_ras) {
             ras_push(ret_addr);
         }
-        return pred;
+        return;
     }
 
     if (is_jalr) {
@@ -253,7 +260,7 @@ auto BranchPredictor::predict(Address pc, const DecodedInstruction& inst) -> Bra
             if (auto top = ras_pop()) {
                 pred.predicted_target = *top;
                 pred.ras_hit = true;
-                return pred;
+                return;
             }
         }
         if (pred.is_call && config_.enable_ras) {
@@ -266,12 +273,12 @@ auto BranchPredictor::predict(Address pc, const DecodedInstruction& inst) -> Bra
             if (entry.valid && (config_.untagged_btb || entry.tag == pc)) {
                 pred.predicted_target = entry.target;
                 pred.btb_hit = true;
-                return pred;
+                return;
             }
         }
         pred.predicted_target = 0;  // Unknown target until execute/decode
         pred.btb_hit = false;
-        return pred;
+        return;
     }
 
     // Conditional Branch
@@ -285,8 +292,6 @@ auto BranchPredictor::predict(Address pc, const DecodedInstruction& inst) -> Bra
 
     // Speculative GHR shift for conditional branches
     ghr_ = ((ghr_ << 1) | (pred.predicted_taken ? 1u : 0u)) & ghr_mask_;
-
-    return pred;
 }
 
 void BranchPredictor::restore_speculation(const BranchPrediction& prediction) {

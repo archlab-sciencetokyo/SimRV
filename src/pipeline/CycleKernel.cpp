@@ -460,8 +460,8 @@ void CPU::run_ca_pipeline_cycle(Machine& machine) {
             const Address sequential = (fetch->context.cpc + width).raw();
 
             if (fetch->context.traits.is_control || branch_predictor.config().predict_non_control) {
-                fetch->prediction =
-                    branch_predictor.predict(fetch->context.cpc.raw(), fetch->context);
+                branch_predictor.predict(fetch->context.cpc.raw(), fetch->context,
+                                         fetch->prediction);
                 if (fetch->prediction.predicted_taken && fetch->prediction.predicted_target != 0) {
                     pipe.fetch_pc = fetch->prediction.predicted_target;
                     pipe.frontend_blocked = fetch->serializing;

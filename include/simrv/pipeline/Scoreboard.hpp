@@ -31,7 +31,7 @@ class Scoreboard {
     struct Entry {
         Register forwarded_value{0};
         LatencyCycles latency{0};
-        PipelineStage stage{PipelineStage::Execute};
+        PipelineStage stage{PipelineStage::Fetch};
         bool busy{false};
         bool can_forward{false};
     };
@@ -41,21 +41,9 @@ class Scoreboard {
     static constexpr size_t kNumVecRegisters = 32;
 
     constexpr void reset() noexcept {
-        while (int_busy_mask_ != 0) {
-            const auto idx = std::countr_zero(int_busy_mask_);
-            int_registers_[idx] = Entry{};
-            int_busy_mask_ &= int_busy_mask_ - 1;
-        }
-        while (fp_busy_mask_ != 0) {
-            const auto idx = std::countr_zero(fp_busy_mask_);
-            fp_registers_[idx] = Entry{};
-            fp_busy_mask_ &= fp_busy_mask_ - 1;
-        }
-        while (vec_busy_mask_ != 0) {
-            const auto idx = std::countr_zero(vec_busy_mask_);
-            vec_registers_[idx] = Entry{};
-            vec_busy_mask_ &= vec_busy_mask_ - 1;
-        }
+        int_busy_mask_ = 0;
+        fp_busy_mask_ = 0;
+        vec_busy_mask_ = 0;
     }
 
     constexpr void reserve(operation::RegBank bank, RegId reg, PipelineStage stage,
@@ -107,17 +95,14 @@ class Scoreboard {
             case operation::RegBank::Integer:
                 if (index == 0 || index >= kNumIntRegisters) return;
                 int_busy_mask_ &= ~(1U << index);
-                int_registers_[index] = Entry{};
                 return;
             case operation::RegBank::Float:
                 if (index >= kNumFpRegisters) return;
                 fp_busy_mask_ &= ~(1U << index);
-                fp_registers_[index] = Entry{};
                 return;
             case operation::RegBank::Vector:
                 if (index >= kNumVecRegisters) return;
                 vec_busy_mask_ &= ~(1U << index);
-                vec_registers_[index] = Entry{};
                 return;
             default:
                 return;
@@ -250,13 +235,12 @@ class Scoreboard {
     }
 
     constexpr void flush_from_stage(PipelineStage stage) noexcept {
-        const auto flush_bank = [stage](auto& array, uint32_t& mask) {
+        const auto flush_bank = [stage](const auto& array, uint32_t& mask) {
             uint32_t cur = mask;
             while (cur != 0) {
                 const auto idx = std::countr_zero(cur);
-                auto& entry = array[idx];
+                const auto& entry = array[idx];
                 if (static_cast<uint8_t>(entry.stage) <= static_cast<uint8_t>(stage)) {
-                    entry = Entry{};
                     mask &= ~(1U << idx);
                 }
                 cur &= cur - 1;

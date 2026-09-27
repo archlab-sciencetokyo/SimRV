@@ -378,14 +378,8 @@ void CPU::run_cycle(Machine& machine) {
             (!machine.tui_enabled() || captures_tui_execution_detail(machine));
         const bool three_stage =
             pipeline_sim.config.pipeline_type == pipeline::PipelineType::ThreeStage;
-        const bool icache_miss = ca_state.instruction_fill.active || ca_pipeline.fetch->icache_miss;
-        const bool dcache_miss = ca_pipeline.memory->dcache_miss ||
-                                 ca_pipeline.writeback->dcache_miss ||
-                                 ca_pipeline.retired->dcache_miss;
         const bool instruction_walk = ca_state.instruction_walk.active;
         const bool data_walk = ca_state.data_walk.active;
-        const bool tlb_miss = instruction_walk || data_walk || ca_pipeline.fetch->tlb_miss ||
-                              ca_pipeline.memory->tlb_miss || ca_pipeline.writeback->tlb_miss;
         const bool fetch_stalled = ca_pipeline.fetch->remaining_latency != 0 ||
                                    ca_state.instruction_fill.active || instruction_walk;
         const bool decode_stalled = !three_stage && ca_pipeline.data_hazard_stall;
@@ -397,20 +391,14 @@ void CPU::run_cycle(Machine& machine) {
         const bool writeback_stalled =
             ca_pipeline.writeback->remaining_latency != 0 ||
             (three_stage && (ca_state.data_transfer.active || data_walk));
-        const pipeline::PipelineCycleMetrics metrics{
-            .fetch_stalled = fetch_stalled,
-            .decode_stalled = decode_stalled,
-            .execute_stalled = execute_stalled,
-            .memory_stalled = memory_stalled,
-            .writeback_stalled = writeback_stalled,
-            .retired = ca_pipeline.retired_this_cycle,
-            .icache_miss = icache_miss,
-            .dcache_miss = dcache_miss,
-            .tlb_miss = tlb_miss,
-            .data_hazard_stall = ca_pipeline.data_hazard_stall,
-            .control_flush = ca_pipeline.control_flush,
-        };
         if (simrv::compiler::unlikely(record_snapshots)) {
+            const bool icache_miss =
+                ca_state.instruction_fill.active || ca_pipeline.fetch->icache_miss;
+            const bool dcache_miss = ca_pipeline.memory->dcache_miss ||
+                                     ca_pipeline.writeback->dcache_miss ||
+                                     ca_pipeline.retired->dcache_miss;
+            const bool tlb_miss = instruction_walk || data_walk || ca_pipeline.fetch->tlb_miss ||
+                                  ca_pipeline.memory->tlb_miss || ca_pipeline.writeback->tlb_miss;
             auto stage_event = [](const pipeline::CycleInstructionSlot& slot, bool stalled) {
                 return pipeline::PipelineStageEvent{
                     .instruction = {.pc = slot.context.cpc.raw(),
@@ -440,15 +428,22 @@ void CPU::run_cycle(Machine& machine) {
                 .writeback = stage_event(
                     ca_pipeline.writeback->valid ? *ca_pipeline.writeback : *ca_pipeline.retired,
                     writeback_stalled),
-                .retired = metrics.retired,
-                .icache_miss = metrics.icache_miss,
-                .dcache_miss = metrics.dcache_miss,
-                .tlb_miss = metrics.tlb_miss,
-                .data_hazard_stall = metrics.data_hazard_stall,
-                .control_flush = metrics.control_flush,
+                .retired = ca_pipeline.retired_this_cycle,
+                .icache_miss = icache_miss,
+                .dcache_miss = dcache_miss,
+                .tlb_miss = tlb_miss,
+                .data_hazard_stall = ca_pipeline.data_hazard_stall,
+                .control_flush = ca_pipeline.control_flush,
             });
         } else {
-            pipeline_sim.advance_cycle_fast(metrics);
+            pipeline_sim.record_cycle_stats(
+                fetch_stalled, decode_stalled, execute_stalled, memory_stalled, writeback_stalled,
+                ca_pipeline.data_hazard_stall, ca_pipeline.control_flush,
+                ca_state.instruction_fill.active || ca_pipeline.fetch->icache_miss,
+                ca_pipeline.memory->dcache_miss || ca_pipeline.writeback->dcache_miss ||
+                    ca_pipeline.retired->dcache_miss,
+                instruction_walk || data_walk || ca_pipeline.fetch->tlb_miss ||
+                    ca_pipeline.memory->tlb_miss || ca_pipeline.writeback->tlb_miss);
         }
         const auto retired_pc = state_.pc;
         if (simrv::compiler::unlikely(ca_pipeline.retired_this_cycle &&
