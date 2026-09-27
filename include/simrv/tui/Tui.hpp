@@ -198,7 +198,6 @@ class Tui : public core::ITelemetrySink, public core::IConsoleSink {
         status_override_expires_at_ = {};
     }
 
-    void cycle_layout();
     void apply_layout_preset(LayoutPreset preset);
     void focus_next_slot();
     void focus_prev_slot();

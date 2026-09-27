@@ -369,8 +369,6 @@ auto key_action_for_footer(TuiFooterAction action) -> KeyAction {
             return KeyAction::RunPause;
         case TuiFooterAction::Quit:
             return KeyAction::Quit;
-        case TuiFooterAction::CycleLayout:
-            return KeyAction::OpenLayoutPresets;
         case TuiFooterAction::ToggleStudentGuide:
             return KeyAction::ToggleStudentGuide;
         case TuiFooterAction::TogglePanel:

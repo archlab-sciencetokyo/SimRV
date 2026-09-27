@@ -1230,34 +1230,6 @@ void Tui::sync_workbench_slots() {
     update_trace_active_cache();
 }
 
-void Tui::cycle_layout() {
-    winsize w{};
-    ioctl(STDOUT_FILENO, TIOCGWINSZ, &w);
-    int const term_width =
-        (cached_term_width_ > 0) ? cached_term_width_ : (w.ws_col > 0 ? w.ws_col : 80);
-    int const max_cols = framework::max_supported_columns(term_width);
-
-    if (layout_ == TuiLayout::Split) {
-        layout_ = (max_cols >= 3) ? TuiLayout::ThreeColumn : TuiLayout::FullRight;
-    } else if (layout_ == TuiLayout::ThreeColumn) {
-        layout_ = (max_cols >= 4) ? TuiLayout::FourColumn : TuiLayout::FullRight;
-    } else if (layout_ == TuiLayout::FourColumn) {
-        layout_ = TuiLayout::FullRight;
-    } else if (layout_ == TuiLayout::FullRight) {
-        layout_ = TuiLayout::FullLeft;
-    } else {
-        layout_ = (max_cols >= 2) ? TuiLayout::Split : TuiLayout::FullLeft;
-    }
-    sync_workbench_slots();
-    const char* name = (layout_ == TuiLayout::Split)         ? "2-Column Split"
-                       : (layout_ == TuiLayout::ThreeColumn) ? "3-Column Tri-Pane"
-                       : (layout_ == TuiLayout::FourColumn)  ? "4-Column Quad-Pane"
-                       : (layout_ == TuiLayout::FullRight)   ? "Full Console"
-                                                             : "Full Registers";
-    set_status_override(std::format("Workbench Layout: {}", name));
-    render(true);
-}
-
 void Tui::apply_layout_preset(LayoutPreset preset) {
     winsize w{};
     ioctl(STDOUT_FILENO, TIOCGWINSZ, &w);
@@ -3045,9 +3017,6 @@ void Tui::execute_footer_action(TuiFooterAction action) {
             break;
         case TuiFooterAction::Quit:
             machine_.request_exit();
-            break;
-        case TuiFooterAction::CycleLayout:
-            cycle_layout();
             break;
         case TuiFooterAction::ToggleStudentGuide:
             toggle_student_guide();

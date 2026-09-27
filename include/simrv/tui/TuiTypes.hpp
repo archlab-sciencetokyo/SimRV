@@ -141,7 +141,6 @@ enum class TuiFooterAction : uint8_t {
     TogglePcBreakpoint,
     ManageBreakpoints,
     InspectMem,
-    CycleLayout,
     ToggleStudentGuide,
     ToggleLearn = ToggleStudentGuide,  // Compatibility alias for the former name.
     LoadBinary,

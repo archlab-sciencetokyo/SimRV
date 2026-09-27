@@ -29,7 +29,6 @@ enum class KeyAction : uint8_t {
     Settings,
     Help,
     Quit,
-    CycleLayout,
     FocusNextPane,
     FocusPrevPane,
     CycleRegPage,
