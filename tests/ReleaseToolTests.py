@@ -72,10 +72,9 @@ class ReleaseToolTests(unittest.TestCase):
         self.assertEqual(
             manifest["artifacts"],
             [
-                "SimRV-rv32-linux-x86_64-v3.0.0-beta.2.tar.gz",
-                "SimRV-rv64-linux-x86_64-v3.0.0-beta.2.tar.gz",
-                "SimRV-rpm-packages-v3.0.0-beta.2.tar.gz",
-                "SimRV-deb-packages-v3.0.0-beta.2.tar.gz",
+                "SimRV-linux-x86_64-v3.0.0-beta.3.tar.gz",
+                "SimRV-rpm-packages-v3.0.0-beta.3.tar.gz",
+                "SimRV-deb-packages-v3.0.0-beta.3.tar.gz",
             ],
         )
 
@@ -103,11 +102,11 @@ class ReleaseToolTests(unittest.TestCase):
         self.assertIn("simrv --version", installation)
 
     def test_native_package_versions_match_release_semver(self):
-        version = "3.0.0-beta.2"
-        self.assertTrue(release_check.artifact_contains_version("SimRV-v3.0.0-beta.2.tar.gz", version))
-        self.assertTrue(release_check.artifact_contains_version("simrv_3.0.0~beta.2_amd64.deb", version))
-        self.assertTrue(release_check.artifact_contains_version("simrv-3.0.0-0.beta.2.x86_64.rpm", version))
-        self.assertFalse(release_check.artifact_contains_version("simrv-3.0.0-0.beta.1.x86_64.rpm", version))
+        version = "3.0.0-beta.3"
+        self.assertTrue(release_check.artifact_contains_version("SimRV-v3.0.0-beta.3.tar.gz", version))
+        self.assertTrue(release_check.artifact_contains_version("simrv_3.0.0~beta.3_amd64.deb", version))
+        self.assertTrue(release_check.artifact_contains_version("simrv-3.0.0-0.beta.3.x86_64.rpm", version))
+        self.assertFalse(release_check.artifact_contains_version("simrv-3.0.0-0.beta.2.x86_64.rpm", version))
 
     def test_configuration_fingerprint_is_stable(self):
         first = {"xlen": 64, "isa": "rv64gc", "vlen": 256}

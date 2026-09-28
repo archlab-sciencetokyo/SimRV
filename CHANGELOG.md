@@ -3,6 +3,19 @@
 All notable changes to SimRV are documented here.
 Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v3.0.0-beta.3] — 2026-09-29
+
+This beta packages the RV64-capable `simrv` runtime as the single public simulator build and
+improves installation and versioned documentation for lab and artifact users.
+
+### Distribution & Documentation
+
+- Consolidated CPack TGZ, RPM, and DEB outputs around the public `simrv` command.
+- Added package dependency manifests, clean-install validation, and package linting.
+- Published stable and development MkDocs trees together on GitHub Pages, with installation
+  guidance for portable archives and native packages.
+- Retained native RV32 qualification and hosted RV32 guest coverage as strict-width checks.
+
 ## [v3.0.0-beta.2] — 2026-09-28
 
 This beta consolidates the architecture-debugging, reproducibility, platform-timing, and native
