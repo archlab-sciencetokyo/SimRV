@@ -58,11 +58,11 @@ Explore the in-progress **[SimRV development documentation](https://archlab-scie
       </ul>
     </td>
     <td width="50%" valign="top">
-      <h3>🛠️ <a href="https://archlab-sciencetokyo.github.io/SimRV/dev/dev/contributing/">Development & Verification</a></h3>
+      <h3>🛠️ <a href="https://archlab-sciencetokyo.github.io/SimRV/dev/development/contributing/">Development & Verification</a></h3>
       <p>Developer standards, dual-architecture CTest validation gates, Spike lockstep co-simulation, and release qualification.</p>
       <ul>
-        <li><a href="https://archlab-sciencetokyo.github.io/SimRV/dev/dev/contributing/">Contributing Standards</a> (<a href="docs/dev/contributing.md">source</a>)</li>
-        <li><a href="https://archlab-sciencetokyo.github.io/SimRV/dev/dev/migration/">2.x to 3.0 Migration</a> (<a href="docs/dev/migration.md">source</a>)</li>
+        <li><a href="https://archlab-sciencetokyo.github.io/SimRV/dev/development/contributing/">Contributing Standards</a> (<a href="docs/development/contributing.md">source</a>)</li>
+        <li><a href="https://archlab-sciencetokyo.github.io/SimRV/dev/development/migration/">2.x to 3.0 Migration</a> (<a href="docs/development/migration.md">source</a>)</li>
       </ul>
     </td>
   </tr>
@@ -243,7 +243,7 @@ RV32GCBV and RV64GCBV are implementation-target names, not complete conformance 
 
 See [RISC-V compliance scope](docs/architecture/compliance.md) for the precise architectural boundary,
 the [TileLink-C profile](docs/architecture/tilelink.md) for protocol/coherence scope, and the
-[3.0 migration guide](docs/dev/migration.md) for intentional host-interface breakage.
+[3.0 migration guide](docs/development/migration.md) for intentional host-interface breakage.
 SBI/OpenSBI distinction, and the evidence required before treating a feature as verified. The
 profile names are implementation targets and do not by themselves claim RISC-V certification.
 

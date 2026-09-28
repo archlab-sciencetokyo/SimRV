@@ -102,6 +102,6 @@ nav:
       - RTL Parity Verification: hardware/rtl_parity.md
       - Custom Extensions & CFU: hardware/extensions.md
   - Development & Contributing:
-      - Developer Guide & Standards: dev/contributing.md
-      - Version Migration (2.x to 3.0): dev/migration.md
-      - Performance Roadmap: dev/performance-roadmap.md
+      - Developer Guide & Standards: development/contributing.md
+      - Version Migration (2.x to 3.0): development/migration.md
+      - Performance Roadmap: development/performance-roadmap.md
