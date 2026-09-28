@@ -7,6 +7,7 @@
 #include <atomic>
 
 #include "simrv/core/Machine.hpp"
+#include "simrv/core/PlatformTiming.hpp"
 #include "simrv/core/Pmp.hpp"
 #include "simrv/core/Tracer.hpp"
 #include "simrv/debug/GdbStub.hpp"
@@ -560,7 +561,7 @@ SIMRV_ALWAYS_INLINE void CPU::tick_cycle_clock(Machine& machine, bool interrupt_
     }
     if (state_.mhartid == 0) {
         ++clint_mmio.rtc_divider;
-        if (clint_mmio.rtc_divider == 10) {
+        if (clint_mmio.rtc_divider == timing::kCyclesPerTimebaseTick) {
             ++clint_mmio.mtime;
             clint_mmio.rtc_divider = 0;
             evaluate_timer_interrupt();
@@ -659,7 +660,7 @@ void CPU::run_cycle_baremetal_miss(Machine& machine) {
 
     clint_mmio.mcycle++;
     clint_mmio.rtc_divider++;
-    if (clint_mmio.rtc_divider == 10) {
+    if (clint_mmio.rtc_divider == timing::kCyclesPerTimebaseTick) {
         clint_mmio.mtime++;
         clint_mmio.rtc_divider = 0;
         evaluate_timer_interrupt();
@@ -726,7 +727,7 @@ void CPU::run_cycle_baremetal(Machine& machine) {
             }
             clint_mmio.mcycle++;
             clint_mmio.rtc_divider++;
-            if (clint_mmio.rtc_divider == 10) {
+            if (clint_mmio.rtc_divider == timing::kCyclesPerTimebaseTick) {
                 clint_mmio.mtime++;
                 clint_mmio.rtc_divider = 0;
                 evaluate_timer_interrupt();
@@ -1878,10 +1879,10 @@ void CPU::run_fast_baremetal_batch(Machine& machine, uint32_t batch_size,
 
     if (cached_ops > 0) {
         clint_mmio.mcycle += cached_ops;
-        clint_mmio.rtc_divider += static_cast<int>(cached_ops);
-        if (clint_mmio.rtc_divider >= 10) {
-            clint_mmio.mtime += clint_mmio.rtc_divider / 10;
-            clint_mmio.rtc_divider %= 10;
+        clint_mmio.rtc_divider += cached_ops;
+        if (clint_mmio.rtc_divider >= timing::kCyclesPerTimebaseTick) {
+            clint_mmio.mtime += clint_mmio.rtc_divider / timing::kCyclesPerTimebaseTick;
+            clint_mmio.rtc_divider %= timing::kCyclesPerTimebaseTick;
             evaluate_timer_interrupt();
         }
     }
@@ -1897,10 +1898,10 @@ SIMRV_ALWAYS_INLINE auto CPU::run_fast_os_kernel(Machine& machine, uint32_t batc
     auto flush_clint_and_retired = [&]() {
         if (chunk_cycles > 0) {
             clint_mmio.mcycle += chunk_cycles;
-            clint_mmio.rtc_divider += static_cast<int>(chunk_cycles);
-            if (clint_mmio.rtc_divider >= 10) {
-                clint_mmio.mtime += clint_mmio.rtc_divider / 10;
-                clint_mmio.rtc_divider %= 10;
+            clint_mmio.rtc_divider += chunk_cycles;
+            if (clint_mmio.rtc_divider >= timing::kCyclesPerTimebaseTick) {
+                clint_mmio.mtime += clint_mmio.rtc_divider / timing::kCyclesPerTimebaseTick;
+                clint_mmio.rtc_divider %= timing::kCyclesPerTimebaseTick;
                 evaluate_timer_interrupt();
                 handle_cached_interrupts();
             }

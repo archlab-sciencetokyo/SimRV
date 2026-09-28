@@ -53,7 +53,7 @@ class Clint : public memory::TileLinkNode {
     std::array<std::atomic<Counter>, kMaxClintHarts> hart_mtimecmp{};
     std::array<std::atomic<bool>, kMaxClintHarts> hart_supervisor_timer{};
     Counter mcycle{1};
-    int rtc_divider{0};
+    uint32_t rtc_divider{0};
 
    private:
     core::CPU& cpu_;

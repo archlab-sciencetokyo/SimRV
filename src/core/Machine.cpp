@@ -19,6 +19,7 @@
 
 #include "MachineRuntime.hpp"
 #include "simrv/core/Logger.hpp"
+#include "simrv/core/PlatformTiming.hpp"
 #include "simrv/device/AIA.hpp"
 #include "simrv/device/Aclint.hpp"
 #include "simrv/device/Power.hpp"
@@ -1374,16 +1375,16 @@ void Machine::pace_realtime() noexcept {
         reset_realtime_anchor();
         return;
     }
-    // 1 mtime tick = 100 ns (10 MHz timebase). Check pacing every 1 ms of virtual time (10,000
-    // ticks).
-    constexpr uint64_t kPaceIntervalTicks = 10'000;
+    // Check pacing every millisecond of architectural virtual time.
+    constexpr uint64_t kPaceIntervalTicks = timing::kTimebaseHz / 1'000;
     if (cur_mtime < last_pace_check_mtime_ + kPaceIntervalTicks) {
         return;
     }
     last_pace_check_mtime_ = cur_mtime;
 
     const auto now = std::chrono::steady_clock::now();
-    const auto sim_elapsed_ns = static_cast<int64_t>((cur_mtime - realtime_anchor_mtime_) * 100);
+    const auto sim_elapsed_ns = static_cast<int64_t>((cur_mtime - realtime_anchor_mtime_) *
+                                                     timing::kNanosecondsPerTimebaseTick);
     const auto host_elapsed_ns =
         std::chrono::duration_cast<std::chrono::nanoseconds>(now - realtime_anchor_host_).count();
 
@@ -1568,7 +1569,7 @@ void Machine::advance_ca_platform_cycle(bool synchronize_secondary_harts) {
     // sampled by hart pipelines at a retirement boundary in the next global cycle.
     auto& cpu = primary_hart();
     memory_.system_bus().advance_cycle();
-    if (simrv::compiler::unlikely(++cpu.clint_mmio.rtc_divider >= 10)) {
+    if (simrv::compiler::unlikely(++cpu.clint_mmio.rtc_divider >= timing::kCyclesPerTimebaseTick)) {
         ++cpu.clint_mmio.mtime;
         cpu.clint_mmio.rtc_divider = 0;
         cpu.evaluate_timer_interrupt();

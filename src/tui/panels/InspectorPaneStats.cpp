@@ -11,6 +11,7 @@
 #include "simrv/Define.hpp"
 #include "simrv/core/Cpu.hpp"
 #include "simrv/core/Machine.hpp"
+#include "simrv/core/PlatformTiming.hpp"
 #include "simrv/debug/GdbStub.hpp"
 #include "simrv/debug/SpikeLockstep.hpp"
 #include "simrv/pipeline/PipelineConfig.hpp"
@@ -80,11 +81,12 @@ auto InspectorPane::performance_start_row(bool single_column) const -> int {
 
 auto InspectorPane::render_machine_performance_stats(const simrv::core::CPU& cpu, int stats_row,
                                                      int width) -> std::string {
-    const auto simulated_seconds = static_cast<double>(cpu.clint_mmio.mtime.load()) / 10000000.0;
+    const auto simulated_seconds =
+        simrv::core::timing::timer_ticks_to_seconds(cpu.clint_mmio.mtime.load());
     if (stats_row == 0) return section_line("Performance", width);
     if (stats_row == 1) {
         return render_pair("retired", simrv::util::format_with_commas(cpu.e_icount), kThemeMint,
-                           "sim", std::format("{:.3f} s", simulated_seconds), kThemeSky, width / 2,
+                           "virt", std::format("{:.3f} s", simulated_seconds), kThemeSky, width / 2,
                            width - width / 2, width < 45 ? 0 : 7);
     }
     if (stats_row == 2) {
@@ -123,12 +125,13 @@ auto InspectorPane::render_machine_performance_stats(const simrv::core::CPU& cpu
 
 auto InspectorPane::render_sampled_machine_performance_stats(
     const simrv::core::TuiExecutionSnapshot& snapshot, int stats_row, int width) -> std::string {
-    const auto simulated_seconds = static_cast<double>(snapshot.timer_ticks) / 10000000.0;
+    const auto simulated_seconds =
+        simrv::core::timing::timer_ticks_to_seconds(snapshot.timer_ticks);
     if (stats_row == 0) return section_line("Performance", width);
     if (stats_row == 1) {
         return render_pair("retired", simrv::util::format_with_commas(snapshot.instruction_count),
-                           kThemeMint, "sim", std::format("{:.3f} s", simulated_seconds), kThemeSky,
-                           width / 2, width - width / 2, width < 45 ? 0 : 7);
+                           kThemeMint, "virt", std::format("{:.3f} s", simulated_seconds),
+                           kThemeSky, width / 2, width - width / 2, width < 45 ? 0 : 7);
     }
     if (stats_row == 2) {
         return render_pair("engine", std::string(machine_.runtime_profile.execution_name()),
@@ -170,7 +173,8 @@ auto InspectorPane::render_cycle_accurate_stats(const simrv::core::TuiExecutionS
     const int half = width / 2;
     const int label_pad = width < 45 ? 0 : 7;
     const uint64_t cycles = snapshot.cycle_count;
-    const auto simulated_seconds = static_cast<double>(snapshot.timer_ticks) / 10000000.0;
+    const auto simulated_seconds =
+        simrv::core::timing::timer_ticks_to_seconds(snapshot.timer_ticks);
     if (stats_row == 0) return section_line("Performance · Cycle Accurate", width);
     if (stats_row == 1) {
         return render_pair("retired", simrv::util::format_with_commas(snapshot.instruction_count),

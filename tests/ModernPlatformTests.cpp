@@ -18,6 +18,7 @@
 #include "simrv/core/Cpu.hpp"
 #include "simrv/core/CsrTypes.hpp"
 #include "simrv/core/Machine.hpp"
+#include "simrv/core/PlatformTiming.hpp"
 #include "simrv/core/RuntimeProfile.hpp"
 #include "simrv/device/AIA.hpp"
 #include "simrv/device/Aclint.hpp"
@@ -857,7 +858,7 @@ void test_global_cycle_timer_phase_ordering() {
     machine.hart(0).state().pc = pc;
     machine.hart(1).state().pc = pc;
     machine.cpu.clint_mmio.mtime = 4;
-    machine.cpu.clint_mmio.rtc_divider = 9;
+    machine.cpu.clint_mmio.rtc_divider = simrv::core::timing::kCyclesPerTimebaseTick - 1;
     machine.cpu.clint_mmio.mtimecmp = 5;
     machine.cpu.clint_mmio.hart_mtimecmp.at(1) = 5;
 
@@ -945,7 +946,8 @@ void test_ca_quantum_single_hart_batching() {
     machine.execute_cycle_for_testing();
     check(machine.cpu.clint_mmio.mcycle - initial_cycles == kQuantum);
     check(machine.memory().system_bus().cycle() == kQuantum);
-    check(machine.cpu.clint_mmio.rtc_divider == 1);
+    check(machine.cpu.clint_mmio.rtc_divider ==
+          kQuantum % simrv::core::timing::kCyclesPerTimebaseTick);
     std::cout << "[PASS] test_ca_quantum_single_hart_batching\n";
 }
 

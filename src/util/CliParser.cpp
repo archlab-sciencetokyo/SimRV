@@ -392,8 +392,8 @@ auto parse_execution_options(std::string_view arg, std::span<char* const> args, 
 
 auto parse_mode_options(std::string_view arg, std::span<char* const> args, std::size_t& i,
                         ParseResult& result) -> std::expected<bool, std::string> {
-    if (arg == "--misa") {
-        auto value = next_argument(args, i, "--misa");
+    if (arg == "--isa") {
+        auto value = next_argument(args, i, "--isa");
         if (!value) return std::unexpected(value.error());
         auto parsed_misa = parse_misa_profile(*value);
         if (!parsed_misa) return std::unexpected(parsed_misa.error());
@@ -1210,7 +1210,7 @@ auto needs_memory_image(const ParseResult& result) -> bool {
                "default: 128M)\n",
                style(kBrightGreen), style(kBrightBlack), style(kReset), style(kReset));
     std::print(stdout,
-               "  {}--misa {}{}<PROFILE>{}              Select ISA profile: rv{}i | rv{}imac | "
+               "  {}--isa {}{}<PROFILE>{}               Select ISA profile: rv{}i | rv{}imac | "
                "rv{}gc | rv{}gcbv\n",
                style(kBrightGreen), style(kBrightBlack), style(kReset), style(kReset), xlen_suffix,
                xlen_suffix, xlen_suffix, xlen_suffix);

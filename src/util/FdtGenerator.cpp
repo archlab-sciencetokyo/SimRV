@@ -10,6 +10,8 @@
 #include <format>
 #include <unordered_map>
 
+#include "simrv/core/PlatformTiming.hpp"
+
 namespace simrv::util {
 
 namespace {
@@ -237,7 +239,7 @@ auto FdtGenerator::generate(const FdtConfig& config) -> std::vector<uint8_t> {
     b.begin_node("cpus");
     b.add_prop_u32("#address-cells", 1);
     b.add_prop_u32("#size-cells", 0);
-    b.add_prop_u32("timebase-frequency", 10000000);
+    b.add_prop_u32("timebase-frequency", static_cast<uint32_t>(simrv::core::timing::kTimebaseHz));
 
     for (uint32_t h = 0; h < config.num_harts; ++h) {
         const std::string cpu_name = std::format("cpu@{}", h);
@@ -254,7 +256,7 @@ auto FdtGenerator::generate(const FdtConfig& config) -> std::vector<uint8_t> {
             "riscv,isa-extensions",
             {"i", "m", "a", "f", "d", "c", "b", "v", "zicntr", "zicsr", "zifencei", "zihintpause"});
         b.add_prop_string("mmu-type", (config.xlen == 64) ? "riscv,sv39" : "riscv,sv32");
-        b.add_prop_u32("clock-frequency", 1000000000);
+        b.add_prop_u32("clock-frequency", static_cast<uint32_t>(simrv::core::timing::kCpuClockHz));
 
         // cpu_intc
         b.begin_node("interrupt-controller");
