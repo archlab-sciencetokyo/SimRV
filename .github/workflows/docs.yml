@@ -32,20 +32,27 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+      - name: Checkout documentation source
+        uses: actions/checkout@v4
+        with:
+          ref: dev
+          path: docs-source
       - name: Set up uv
         uses: astral-sh/setup-uv@v7
         with:
           enable-cache: true
       - name: Install MkDocs dependencies
+        working-directory: docs-source
         run: uv sync --group docs --frozen
       - name: Build documentation site
+        working-directory: docs-source
         env:
           SIMRV_DOCS_CHANNEL: development
         run: uv run --frozen mkdocs build --strict
       - name: Check documentation links
         uses: lycheeverse/lychee-action@v2
         with:
-          args: --offline --no-progress --root-dir "${{ github.workspace }}/site" --exclude 'file:///.*\/site\/SimRV(/|$)' "site/**/*.html"
+          args: --offline --no-progress --root-dir "${{ github.workspace }}/docs-source/site" --exclude 'file:///.*\/site\/SimRV(/|$)' "docs-source/site/**/*.html"
           fail: true
 
   deploy-docs:
