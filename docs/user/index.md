@@ -226,4 +226,3 @@ python3 scripts/reproduce.py --mode quick
 - [Student Educational Reference](classroom.md)
 - [RISC-V Compliance Scope](../architecture/compliance.md)
 - [Custom ISA Extensions](../hardware/extensions.md)
-- [Release Qualification & Contract](../evaluation/release.md)

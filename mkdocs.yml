@@ -38,6 +38,10 @@ theme:
     - content.code.annotate
     - content.tabs.link
 
+extra:
+  version:
+    provider: mike
+
 markdown_extensions:
   - admonition
   - pymdownx.details
@@ -84,9 +88,6 @@ nav:
       - ISA Compliance & Boundaries: architecture/compliance.md
   - Hardware & Extensions:
       - Custom Extensions & Instructions: hardware/extensions.md
-  - Evaluation & Reviewers:
-      - Reviewer & Replication Guide: evaluation/reviewer.md
-      - Release Qualification & Evidence: evaluation/release.md
   - Development & Contributing:
       - Developer Guide & Standards: dev/contributing.md
       - Version Migration (2.x to 3.0): dev/migration.md

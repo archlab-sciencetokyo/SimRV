@@ -51,12 +51,10 @@ Explore the full documentation, guides, and specifications online at **[archlab-
       </ul>
     </td>
     <td width="50%" valign="top">
-      <h3>🛠️ <a href="https://archlab-sciencetokyo.github.io/SimRV/dev/contributing/">Development & Verification</a></h3>
+      <h3>🛠️ <a href="https://archlab-sciencetokyo.github.io/SimRV/stable/dev/contributing/">Development & Verification</a></h3>
       <p>Developer standards, dual-architecture CTest validation gates, Spike lockstep co-simulation, and release qualification.</p>
       <ul>
-        <li><a href="https://archlab-sciencetokyo.github.io/SimRV/dev/contributing/">Contributing Standards</a> (<a href="docs/dev/contributing.md">source</a>)</li>
-        <li><a href="https://archlab-sciencetokyo.github.io/SimRV/evaluation/reviewer/">Artifact Evaluation Guide</a> (<a href="docs/evaluation/reviewer.md">source</a>)</li>
-        <li><a href="https://archlab-sciencetokyo.github.io/SimRV/evaluation/release/">Release Governance</a> (<a href="docs/evaluation/release.md">source</a>)</li>
+        <li><a href="https://archlab-sciencetokyo.github.io/SimRV/stable/dev/contributing/">Contributing Standards</a> (<a href="docs/dev/contributing.md">source</a>)</li>
       </ul>
     </td>
   </tr>
@@ -249,7 +247,6 @@ Pre-compiled standalone binaries (`SimRV`) are available under GitHub Releases f
 - `scripts/`: Regression, ISA testing, and Linux image build helpers
 - `docs/`: Architecture and design notes (`docs/architecture/overview.md`, `docs/user/baremetal.md`)
 - `CHANGELOG.md`: Version release log
-- `docs/evaluation/release.md`: 2.0 support contract, validation matrix, and publishing checklist
 - `docs/user/tui.md`: TUI input focus, rendering layers, and test coverage
 - `repro/`: Versioned experiment manifest and research-companion instructions
 - `release/schemas/`: Machine-readable release and experiment interfaces
