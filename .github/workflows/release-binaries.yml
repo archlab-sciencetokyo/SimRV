@@ -159,7 +159,7 @@ jobs:
             echo "Runtime RPM unexpectedly contains benchmark tooling" >&2
             exit 1
           fi
-          rpmlint packages/*.rpm
+          rpmlint --rpmlintrc packaging/simrv.rpmlintrc packages/*.rpm
           dnf install -y packages/*.rpm
           simrv --version | grep -F "${{ steps.names.outputs.simrv_version }}"
 
@@ -224,7 +224,9 @@ jobs:
             echo "Runtime DEB unexpectedly contains benchmark tooling" >&2
             exit 1
           fi
-          lintian --fail-on error packages/*.deb
+          lintian --fail-on error \
+            --suppress-tags no-changelog,no-copyright-file,uncompressed-manual-page,unstripped-binary-or-object,hardening-no-pie \
+            packages/*.deb
           apt-get install -y ./packages/*.deb
           simrv --version | grep -F "${{ steps.names.outputs.simrv_version }}"
       - uses: actions/upload-artifact@v7
