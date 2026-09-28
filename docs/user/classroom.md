@@ -102,13 +102,13 @@ the reusable programs under [`examples/isa/`](https://github.com/archlab-science
 
 ```bash
 # Student-facing mode: start paused with the interactive Student Guide visible
-./build/rv64-release/SimRV --tui --baremetal -m program.elf --class
+./build/rv64-release/simrv --tui --baremetal -m program.elf --class
 
 # Headless / CLI-only mode (fast execution)
-./build/rv64-release/SimRV --cli --baremetal -m program.elf --mode fast
+./build/rv64-release/simrv --cli --baremetal -m program.elf --mode fast
 
 # Configure a portable report destination, then press x while paused
-./build/rv64-release/SimRV --tui --baremetal -m program.elf --class \
+./build/rv64-release/simrv --tui --baremetal -m program.elf --class \
     --inspection-output inspection.json
 ```
 
@@ -146,7 +146,7 @@ reconstruction of any instruction hex value.
 #### Example: Explaining an ADD instruction
 
 ```bash
-./build/rv32-release/SimRV --explain-inst 0x00B502B3
+./build/rv32-release/simrv --explain-inst 0x00B502B3
 ```
 
 **Output:**
@@ -192,7 +192,7 @@ Description (Behavior):
 1. Run your binary on SimRV:
 
    ```bash
-   ./build/rv32-release/SimRV --tui --baremetal -m program.elf --class
+   ./build/rv32-release/simrv --tui --baremetal -m program.elf --class
    ```
 
 2. The simulation starts paused (`[PAUSED]`). Press `c` to unpause and run continuously, or press `s` / `Space` to single-step instructions.

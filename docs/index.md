@@ -7,8 +7,8 @@
 <p align="center">
   <a href="https://github.com/archlab-sciencetokyo/SimRV/actions/workflows/c-cpp.yml"><img src="https://github.com/archlab-sciencetokyo/SimRV/actions/workflows/c-cpp.yml/badge.svg?branch=dev" alt="C/C++ CI"/></a>
   <a href="https://github.com/archlab-sciencetokyo/SimRV/actions/workflows/docs.yml"><img src="https://github.com/archlab-sciencetokyo/SimRV/actions/workflows/docs.yml/badge.svg?branch=dev" alt="Docs CI"/></a>
-  <a href="https://archlab-sciencetokyo.github.io/SimRV/"><img src="https://img.shields.io/badge/docs-GitHub_Pages-blue.svg" alt="Documentation"/></a>
-  <a href="https://github.com/archlab-sciencetokyo/SimRV/releases"><img src="https://img.shields.io/badge/version-3.0.0--alpha.4-blue.svg" alt="SimRV Version"/></a>
+  <a href="https://archlab-sciencetokyo.github.io/SimRV/stable/"><img src="https://img.shields.io/badge/docs-GitHub_Pages-blue.svg" alt="Documentation"/></a>
+  <a href="https://github.com/archlab-sciencetokyo/SimRV/releases"><img src="https://img.shields.io/github/v/release/archlab-sciencetokyo/SimRV?include_prereleases" alt="Latest SimRV release"/></a>
   <a href="https://github.com/archlab-sciencetokyo/SimRV/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-MIT-green.svg" alt="License"/></a>
   <img src="https://img.shields.io/badge/C%2B%2B-23-purple.svg" alt="C++23"/>
   <img src="https://img.shields.io/badge/architecture-RV32GCBV%20%7C%20RV64GCBV-orange.svg" alt="Architecture"/>
@@ -34,6 +34,10 @@
 ---
 
 ## Quickstart
+
+Download the portable archive or native package bundle from
+[GitHub Releases](https://github.com/archlab-sciencetokyo/SimRV/releases), then follow the
+[installation guide](user/install.md). Build from source when developing SimRV itself.
 
 ### 1. Build from Source
 
@@ -64,22 +68,22 @@ SimRV requires a modern C++23 compiler (**Clang 22+** or **GCC 16+**), **CMake 3
 === "Interactive TUI Mode (Default)"
     ```bash
     # Launch interactive terminal workbench
-    ./build/rv64-release/SimRV -m examples/isa/bin/demo.elf
+    ./build/rv64-release/simrv -m examples/isa/bin/demo.elf
     ```
 
 === "Headless CLI Execution"
     ```bash
     # Fast instruction simulation
-    ./build/rv64-release/SimRV --cli -m examples/isa/bin/demo.elf -b
+    ./build/rv64-release/simrv --cli -m examples/isa/bin/demo.elf -b
 
     # Cycle-accurate simulation with 5-stage pipeline
-    ./build/rv64-release/SimRV --cli --mode cycle-accurate --pipeline 5stage -m examples/isa/bin/demo.elf
+    ./build/rv64-release/simrv --cli --mode cycle-accurate --pipeline 5stage -m examples/isa/bin/demo.elf
     ```
 
 === "Boot SMP Linux (2 Cores)"
     ```bash
     # Boot Linux kernel across 2 SMP harts with dynamic device tree
-    ./build/rv64-release/SimRV --cli --smp 2 \
+    ./build/rv64-release/simrv --cli --smp 2 \
       -m linux-images/rv64/fw_payload.bin \
       --dtb dynamic \
       -D linux-images/rv64/root.img \
@@ -91,6 +95,12 @@ SimRV requires a modern C++23 compiler (**Clang 22+** or **GCC 16+**), **CMake 3
 ## Documentation Navigation
 
 <div class="grid cards" markdown>
+
+- :material-download:{ .lg .middle } **[Install SimRV](user/install.md)**
+
+    ---
+
+    Portable archive, RPM, DEB, source-build, upgrade, and removal instructions.
 
 - :material-book-open-page-variant:{ .lg .middle } **[User Guide](user/index.md)**
 
@@ -141,7 +151,7 @@ If you use SimRV in your academic research, please cite:
   title = {{SimRV: A Dual-Width Explainable RISC-V System Simulator}},
   author = {{SimRV Contributors}},
   url = {https://github.com/archlab-sciencetokyo/SimRV},
-  version = {3.0.0-alpha.4},
+  note = {Cite the exact tagged release used for the experiment},
   year = {2026}
 }
 ```

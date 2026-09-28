@@ -235,6 +235,28 @@ void test_decode_cache_compact_round_robin() {
     expect(fld_op.align_mask() == 7, "FLD align_mask is 7");
 }
 
+void test_hosted_rv32_cached_shift_width() {
+    if constexpr (simrv::xlen::kIsXLen64) {
+        simrv::core::Machine machine;
+        auto& cpu = machine.hart(HartId{0});
+        auto& state = cpu.state();
+        state.misa = (state.misa & ~(CSRValue{3} << 62U)) | (CSRValue{1} << 62U);
+        state.initialize_lower_xlen_fields();
+        expect(state.regs.xlen == 32, "RV64 build enters the RV32 guest personality");
+
+        simrv::core::CachedOp shift{};
+        shift.op_id = simrv::isa::SRL;
+        shift.rd = RegId::A0;
+        shift.rs1 = RegId::A1;
+        shift.rs2 = RegId::A2;
+        state.regs.write(RegId::A1, 0x80000000U);
+        state.regs.write(RegId::A2, 33U);
+        cpu.execute_cached_op_fast<false, false>(machine, shift);
+        expect(state.regs.read(RegId::A0) == 0x40000000U,
+               "hosted RV32 cached SRL truncates its operand and masks shift amounts to five bits");
+    }
+}
+
 void test_compressed_instruction_decode_and_flush() {
     // 1. Decompression correctness for representative compressed instructions
     // C.ADDI4SPN: 0x0000 -> quadrant 0, op 0, nzuimm=0 -> illegal/reserved (returns 0)
@@ -3126,6 +3148,7 @@ int main() {
     test_cache_hierarchy_semantics();
     test_unaligned_host_access();
     test_decode_cache_compact_round_robin();
+    test_hosted_rv32_cached_shift_width();
     test_compressed_instruction_decode_and_flush();
     test_selective_tlb_and_decode_cache_flush();
     test_tlb_and_decode_cache_deduplication();

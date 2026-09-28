@@ -743,7 +743,12 @@ if(BUILD_TESTING)
     if(is_smoke)
       list(APPEND labels "smoke")
     endif()
-    list(APPEND labels "rv${SIMRV_XLEN}gc")
+    if(test_name MATCHES "^rv(32|64)")
+      list(APPEND labels "rv${CMAKE_MATCH_1}gc")
+      if(SIMRV_XLEN STREQUAL "64" AND CMAKE_MATCH_1 STREQUAL "32")
+        list(APPEND labels "hosted-rv32")
+      endif()
+    endif()
 
     add_test(
       NAME "isa-${test_name}"
@@ -782,6 +787,17 @@ if(BUILD_TESTING)
   foreach(test_name IN LISTS SMOKE_LIST)
     register_isa_test("${test_name}" TRUE)
   endforeach()
+
+  # The distributed RV64-capable binary must retain its RV32 personality. Run
+  # the RV32 smoke corpus through it in addition to validating the native RV32
+  # build; the latter remains a strict compile-time-width oracle in CI.
+  if(SIMRV_XLEN STREQUAL "64")
+    foreach(test_name IN LISTS ISA_SMOKE_RV32GC)
+      if(EXISTS "${ISA_DIR}/${test_name}")
+        register_isa_test("${test_name}" TRUE)
+      endif()
+    endforeach()
+  endif()
 
   function(register_ca_isa_test test_name pipeline_type)
     if(NOT EXISTS "${ISA_DIR}/${test_name}")
@@ -951,7 +967,7 @@ endif()
 include(GNUInstallDirs)
 include(CMakePackageConfigHelpers)
 
-set_target_properties(SimRV PROPERTIES EXPORT_NAME cli)
+set_target_properties(SimRV PROPERTIES EXPORT_NAME cli OUTPUT_NAME simrv)
 
 install(
   TARGETS SimRV simrv-runtime
@@ -1164,7 +1180,7 @@ set(CPACK_PACKAGE_CONTACT "ArchLab, Science Tokyo")
 set(CPACK_PACKAGE_INSTALL_DIRECTORY "SimRV")
 set(CPACK_PACKAGING_INSTALL_PREFIX "/usr")
 set(CPACK_PACKAGE_FILE_NAME
-    "SimRV-rv${SIMRV_XLEN}-${SIMRV_VERSION}-${CMAKE_SYSTEM_NAME}-${CMAKE_SYSTEM_PROCESSOR}")
+    "SimRV-${SIMRV_VERSION}-${CMAKE_SYSTEM_NAME}-${CMAKE_SYSTEM_PROCESSOR}")
 set(CPACK_RESOURCE_FILE_LICENSE "${PROJECT_SOURCE_DIR}/LICENSE")
 set(CPACK_RESOURCE_FILE_README "${PROJECT_SOURCE_DIR}/README.md")
 set(CPACK_GENERATOR "TGZ" CACHE STRING
@@ -1197,11 +1213,11 @@ set(CPACK_DEBIAN_RUNTIME_PACKAGE_NAME "simrv")
 set(CPACK_DEBIAN_TOOLS_PACKAGE_NAME "simrv-tools")
 set(CPACK_DEBIAN_BENCHMARK_PACKAGE_NAME "simrv-benchmark")
 set(CPACK_DEBIAN_RUNTIME_FILE_NAME
-    "simrv-rv${SIMRV_XLEN}_${CPACK_DEBIAN_PACKAGE_VERSION}_x86_64.deb")
+    "simrv_${CPACK_DEBIAN_PACKAGE_VERSION}_amd64.deb")
 set(CPACK_DEBIAN_TOOLS_FILE_NAME
-    "simrv-tools-rv${SIMRV_XLEN}_${CPACK_DEBIAN_PACKAGE_VERSION}_x86_64.deb")
+    "simrv-tools_${CPACK_DEBIAN_PACKAGE_VERSION}_amd64.deb")
 set(CPACK_DEBIAN_BENCHMARK_FILE_NAME
-    "simrv-benchmark-rv${SIMRV_XLEN}_${CPACK_DEBIAN_PACKAGE_VERSION}_x86_64.deb")
+    "simrv-benchmark_${CPACK_DEBIAN_PACKAGE_VERSION}_amd64.deb")
 set(CPACK_DEBIAN_TOOLS_PACKAGE_DEPENDS
     "simrv (= ${CPACK_DEBIAN_PACKAGE_VERSION})")
 set(CPACK_DEBIAN_BENCHMARK_PACKAGE_DEPENDS
@@ -1227,11 +1243,11 @@ set(CPACK_RPM_RUNTIME_PACKAGE_NAME "simrv")
 set(CPACK_RPM_TOOLS_PACKAGE_NAME "simrv-tools")
 set(CPACK_RPM_BENCHMARK_PACKAGE_NAME "simrv-benchmark")
 set(CPACK_RPM_RUNTIME_FILE_NAME
-    "simrv-rv${SIMRV_XLEN}-${CPACK_RPM_PACKAGE_VERSION}-${CPACK_RPM_PACKAGE_RELEASE}.x86_64.rpm")
+    "simrv-${CPACK_RPM_PACKAGE_VERSION}-${CPACK_RPM_PACKAGE_RELEASE}.x86_64.rpm")
 set(CPACK_RPM_TOOLS_FILE_NAME
-    "simrv-tools-rv${SIMRV_XLEN}-${CPACK_RPM_PACKAGE_VERSION}-${CPACK_RPM_PACKAGE_RELEASE}.x86_64.rpm")
+    "simrv-tools-${CPACK_RPM_PACKAGE_VERSION}-${CPACK_RPM_PACKAGE_RELEASE}.x86_64.rpm")
 set(CPACK_RPM_BENCHMARK_FILE_NAME
-    "simrv-benchmark-rv${SIMRV_XLEN}-${CPACK_RPM_PACKAGE_VERSION}-${CPACK_RPM_PACKAGE_RELEASE}.x86_64.rpm")
+    "simrv-benchmark-${CPACK_RPM_PACKAGE_VERSION}-${CPACK_RPM_PACKAGE_RELEASE}.x86_64.rpm")
 set(CPACK_RPM_TOOLS_PACKAGE_REQUIRES
     "simrv = ${CPACK_RPM_PACKAGE_VERSION}-${CPACK_RPM_PACKAGE_RELEASE}")
 set(CPACK_RPM_BENCHMARK_PACKAGE_REQUIRES

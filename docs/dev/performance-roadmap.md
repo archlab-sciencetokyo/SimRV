@@ -28,12 +28,12 @@ cmake --build --preset rv64-release -j8
 hyperfine --warmup 5 --runs 30 \
   --export-json build/hyperfine-coremark-20m-shared-isa.json \
   --command-name "SimRV 20M" \
-  'build/rv64-release/SimRV --cli --isa rv64gc_zicsr_zifencei_zicntr -m ../../tests/coremark/coremark.riscv -e 20000000 -b -H 0x80001000' \
+  'build/rv64-release/simrv --cli --isa rv64gc_zicsr_zifencei_zicntr -m ../../tests/coremark/coremark.riscv -e 20000000 -b -H 0x80001000' \
   --command-name "Spike 20M" \
   'spike --isa=rv64gc_zicsr_zifencei_zicntr --instructions=20000000 ../../tests/coremark/coremark.riscv'
 
 python3 scripts/benchmark.py \
-  --simrv build/rv64-release/SimRV \
+  --simrv build/rv64-release/simrv \
   --spike "$(command -v spike)" \
   --test ../../tests/coremark/coremark.riscv \
   --runs 20 --warmups 3 --timeout 30 \

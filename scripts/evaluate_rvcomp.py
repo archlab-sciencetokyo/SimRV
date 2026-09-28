@@ -181,9 +181,9 @@ def main(arguments=None):
     if args.simrv_bin:
         simrv_bin = Path(args.simrv_bin)
     else:
-        simrv_bin = repo_root / "build/rv32-release/SimRV"
+        simrv_bin = repo_root / "build/rv32-release/simrv"
         if not simrv_bin.exists():
-            simrv_bin = repo_root / "build/rv64-release/SimRV"
+            simrv_bin = repo_root / "build/rv64-release/simrv"
     if not simrv_bin.exists():
         raise RuntimeError(f"SimRV binary not found under build/rv32-release or build/rv64-release")
 

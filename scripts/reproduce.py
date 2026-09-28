@@ -212,7 +212,7 @@ def main() -> None:
             raise SystemExit("--riscv-tests-dir is required for full performance evidence")
         selected_ids = set(EXPERIMENT["performance"]["configurations"])
         for configuration in (item for item in configurations if item["id"] in selected_ids):
-            simrv = ROOT / "build/repro" / f"gcc-rv{configuration['xlen']}" / "SimRV"
+            simrv = ROOT / "build/repro" / f"gcc-rv{configuration['xlen']}" / "simrv"
             simrv_args = ["--mode", configuration["execution_mode"], "--vlen",
                           str(configuration["vlen"]), *configuration.get("simrv_args", [])]
             for workload in EXPERIMENT["performance"]["workloads"]:

@@ -1484,18 +1484,23 @@ void CPU::execute_cached_op_fast(Machine& machine, CachedOp& op) {
         }
         case isa::SLL: {
             const Register rrs2 = state_.regs.read(op.rs2);
-            wb_data = rrs1 << (rrs2 & simrv::xlen::xlen_shift_mask());
+            const Register shift_mask = state_.regs.xlen == 32 ? 0x1f : 0x3f;
+            wb_data = rrs1 << (rrs2 & shift_mask);
             break;
         }
         case isa::SRL: {
             const Register rrs2 = state_.regs.read(op.rs2);
-            wb_data = rrs1 >> (rrs2 & simrv::xlen::xlen_shift_mask());
+            if (state_.regs.xlen == 32) {
+                wb_data = static_cast<uint32_t>(rrs1) >> (rrs2 & 0x1f);
+            } else {
+                wb_data = rrs1 >> (rrs2 & 0x3f);
+            }
             break;
         }
         case isa::SRA: {
             const Register rrs2 = state_.regs.read(op.rs2);
-            wb_data = static_cast<Register>(static_cast<SignedWord>(rrs1) >>
-                                            (rrs2 & simrv::xlen::xlen_shift_mask()));
+            const Register shift_mask = state_.regs.xlen == 32 ? 0x1f : 0x3f;
+            wb_data = static_cast<Register>(static_cast<SignedWord>(rrs1) >> (rrs2 & shift_mask));
             break;
         }
         case isa::SLT: {
@@ -1554,14 +1559,18 @@ void CPU::execute_cached_op_fast(Machine& machine, CachedOp& op) {
             wb_data = rrs1 ^ op.imm;
             break;
         case isa::SLLI:
-            wb_data = rrs1 << (op.imm & simrv::xlen::xlen_shift_mask());
+            wb_data = rrs1 << (op.imm & (state_.regs.xlen == 32 ? 0x1f : 0x3f));
             break;
         case isa::SRLI:
-            wb_data = rrs1 >> (op.imm & simrv::xlen::xlen_shift_mask());
+            if (state_.regs.xlen == 32) {
+                wb_data = static_cast<uint32_t>(rrs1) >> (op.imm & 0x1f);
+            } else {
+                wb_data = rrs1 >> (op.imm & 0x3f);
+            }
             break;
         case isa::SRAI:
             wb_data = static_cast<Register>(static_cast<SignedWord>(rrs1) >>
-                                            (op.imm & simrv::xlen::xlen_shift_mask()));
+                                            (op.imm & (state_.regs.xlen == 32 ? 0x1f : 0x3f)));
             break;
         case isa::SLTI:
             wb_data = static_cast<Register>(static_cast<SignedWord>(rrs1) <

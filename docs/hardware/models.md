@@ -26,12 +26,12 @@ SimRV automatically resolves CPU models by profile name or direct file path:
 
 ```bash
 # Run with canonical pre-installed model profile
-SimRV --ca --cpu-profile rvcomp -m program.elf
+simrv --ca --cpu-profile rvcomp -m program.elf
 
 # Run with an explicit custom configuration file
-SimRV --ca --cpu-profile configs/models/my_core.cfg -m program.elf
+simrv --ca --cpu-profile configs/models/my_core.cfg -m program.elf
 # or equivalently:
-SimRV --ca --cpu-model-file configs/models/my_core.cfg -m program.elf
+simrv --ca --cpu-model-file configs/models/my_core.cfg -m program.elf
 ```
 
 ### Generating a New Model Configuration
@@ -50,19 +50,19 @@ python3 scripts/cpu_model_wizard.py --template rvcomp --name rvcomp_tuned --outp
 
 #### Option B: Simulator Scaffolding Flags
 
-Generate an annotated `.cfg` configuration directly from the `SimRV` executable:
+Generate an annotated `.cfg` configuration directly from the `simrv` executable:
 
 ```bash
 # Dump an existing profile to stdout or a file
-SimRV --dump-cpu-model rvcomp configs/models/rvcomp_copy.cfg
+simrv --dump-cpu-model rvcomp configs/models/rvcomp_copy.cfg
 
 # Scaffold a default balanced template
-SimRV --scaffold-cpu-model configs/models/new_core.cfg
+simrv --scaffold-cpu-model configs/models/new_core.cfg
 ```
 
 #### Option C: In the Interactive TUI
 
-1. Launch SimRV in cycle-accurate mode (`SimRV --ca -m program.elf`).
+1. Launch SimRV in cycle-accurate mode (`simrv --ca -m program.elf`).
 2. Press `F12` or open Settings (`[3]` Microarchitecture tab).
 3. Adjust pipeline latencies, predictor capacities, or forwarding rules with arrows or number keys.
 4. Press `[S]` or select **Save configuration** to open the **Save CPU Model Configuration** modal.
@@ -239,7 +239,7 @@ Generic presets are compiled directly into the simulator runtime so no external 
 To scaffold or inspect any generic preset as an editable `.cfg`, use:
 
 ```bash
-SimRV --dump-cpu-model balanced my_balanced.cfg
+simrv --dump-cpu-model balanced my_balanced.cfg
 ```
 
 ### Hardware-Specific Models (`configs/models/`)

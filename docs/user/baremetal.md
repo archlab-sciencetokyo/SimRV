@@ -92,16 +92,16 @@ default:
 
 ```bash
 # Interactive TUI mode (Default)
-./build/rv32-release/SimRV -b -m program.elf
+./build/rv32-release/simrv -b -m program.elf
 
 # Headless / CLI-only mode (fast execution)
-./build/rv32-release/SimRV -b -m program.elf --mode fast --cli
+./build/rv32-release/simrv -b -m program.elf --mode fast --cli
 
 # Cycle-accurate five-stage pipeline simulation
-./build/rv32-release/SimRV -b -m program.elf --mode cycle-accurate --cli
+./build/rv32-release/simrv -b -m program.elf --mode cycle-accurate --cli
 
 # 5-stage classic pipeline simulation
-./build/rv32-release/SimRV -b -m program.elf --mode cycle-accurate --pipeline 5stage --cli
+./build/rv32-release/simrv -b -m program.elf --mode cycle-accurate --pipeline 5stage --cli
 ```
 
 ---

@@ -1,13 +1,25 @@
 site_name: SimRV
 site_description: An explainable, dual-width (RV32 / RV64) RISC-V architectural simulator with interactive TUI, cycle-accurate modeling, hardware RTL parity, and full-system Linux emulation.
 site_author: SimRV Contributors
-site_url: https://archlab-sciencetokyo.github.io/SimRV/
+site_url: !ENV [SIMRV_DOCS_SITE_URL, 'https://archlab-sciencetokyo.github.io/SimRV/']
 repo_name: archlab-sciencetokyo/SimRV
 repo_url: https://github.com/archlab-sciencetokyo/SimRV
-edit_uri: edit/dev/docs/
+edit_uri: !ENV [SIMRV_DOCS_EDIT_URI, 'edit/dev/docs/']
 
 theme:
   name: material
+  custom_dir: docs/overrides
+  features:
+    - navigation.tabs
+    - navigation.sections
+    - navigation.top
+    - navigation.indexes
+    - navigation.expand
+    - search.suggest
+    - search.highlight
+    - content.code.copy
+    - content.code.annotate
+    - content.tabs.link
   palette:
     # Light mode
     - scheme: default
@@ -26,17 +38,10 @@ theme:
   font:
     text: Roboto
     code: Roboto Mono
-  features:
-    - navigation.tabs
-    - navigation.sections
-    - navigation.top
-    - navigation.indexes
-    - navigation.expand
-    - search.suggest
-    - search.highlight
-    - content.code.copy
-    - content.code.annotate
-    - content.tabs.link
+extra:
+  docs_channel: !ENV [SIMRV_DOCS_CHANNEL, 'development']
+  version:
+    provider: mike
 
 markdown_extensions:
   - admonition
@@ -74,6 +79,7 @@ extra_javascript:
 nav:
   - Home: index.md
   - User Guide:
+      - Installation: user/install.md
       - Quickstart & CLI: user/index.md
       - Interactive TUI Workbench: user/tui.md
       - Bare-Metal & Embedded: user/baremetal.md
@@ -93,3 +99,4 @@ nav:
   - Development & Contributing:
       - Developer Guide & Standards: dev/contributing.md
       - Version Migration (2.x to 3.0): dev/migration.md
+      - Performance Roadmap: dev/performance-roadmap.md

@@ -22,7 +22,7 @@ Build one example directly for RV64:
 ```bash
 riscv64-unknown-elf-gcc -march=rv64gc -mabi=lp64d -nostdlib -static \
   -T examples/isa/linker.ld -o /tmp/simrv-arithmetic.elf examples/isa/arithmetic.S
-./build/rv64-release/SimRV --tui --baremetal -m /tmp/simrv-arithmetic.elf --class
+./build/rv64-release/simrv --tui --baremetal -m /tmp/simrv-arithmetic.elf --class
 ```
 
 For RV32, use `-march=rv32gc -mabi=ilp32d` and the RV32 SimRV build. Each program stops in a
@@ -70,7 +70,7 @@ not as a simulator-only classroom marker.
 Build the examples, then launch the named ELF with the classroom mission:
 
 ```bash
-./build/rv64-release/SimRV --tui --baremetal \
+./build/rv64-release/simrv --tui --baremetal \
   -m /tmp/simrv-isa-rv64/control-flow-calls.elf --class \
   --mission examples/isa/lessons/control-flow-calls.mission
 ```
@@ -87,7 +87,7 @@ rebuilding SimRV; unknown or incomplete fields are rejected with a local guide m
 For the interactive UART example:
 
 ```bash
-./build/rv64-release/SimRV --tui --baremetal \
+./build/rv64-release/simrv --tui --baremetal \
   -m /tmp/simrv-isa-rv64/uart-input-echo.elf --class
 ```
 

@@ -99,7 +99,7 @@ def run(arguments):
     args = create_parser().parse_args(arguments)
     repo_root = Path(__file__).resolve().parents[3]
     cfu_dir = Path(args.cfu_dir).resolve() if args.cfu_dir else repo_root.parent / "CFU-Proving-Ground"
-    simrv_bin = Path(args.simrv_bin).resolve() if args.simrv_bin else repo_root / "build/rv32-release/SimRV"
+    simrv_bin = Path(args.simrv_bin).resolve() if args.simrv_bin else repo_root / "build/rv32-release/simrv"
     cpu_config = (Path(args.cpu_config).resolve() if args.cpu_config
                   else repo_root / "configs/models/cfu-provingground.cfg")
     verilator = args.verilator or shutil.which("verilator")

@@ -201,7 +201,7 @@ def compare(report, baseline, threshold):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--simrv", default="./build/rv64-release/SimRV")
+    parser.add_argument("--simrv", default="./build/rv64-release/simrv")
     parser.add_argument("--image", required=True)
     parser.add_argument("--boot", action="store_true", help="measure Linux boot through a shell command")
     parser.add_argument("--smp-multithreaded", action="store_true")

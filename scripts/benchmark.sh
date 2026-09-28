@@ -6,9 +6,9 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
 
-SIMRV_BIN="${SIMRV_BIN:-./build/rv64-release/SimRV}"
-if [[ ! -x "$SIMRV_BIN" && -x "./build/rv32-release/SimRV" ]]; then
-  SIMRV_BIN="./build/rv32-release/SimRV"
+SIMRV_BIN="${SIMRV_BIN:-./build/rv64-release/simrv}"
+if [[ ! -x "$SIMRV_BIN" && -x "./build/rv32-release/simrv" ]]; then
+  SIMRV_BIN="./build/rv32-release/simrv"
 fi
 
 BENCH_ITERS="${SIMRV_BENCH_ITERS:-5}"

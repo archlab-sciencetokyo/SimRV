@@ -52,13 +52,23 @@ class ReleaseToolTests(unittest.TestCase):
         self.assertIn('test "${#debs[@]}" -eq 3', workflow)
         self.assertIn("prerelease: ${{ contains(github.ref_name, '-') }}", workflow)
         self.assertIn("dpkg-scanpackages . /dev/null > Packages", workflow)
-        self.assertIn("deb-packages/rv32", workflow)
-        self.assertIn("deb-packages/rv64", workflow)
+        self.assertNotIn("deb-packages/rv32", workflow)
+        self.assertNotIn("deb-packages/rv64", workflow)
         self.assertIn("grep -c '^Package: '", workflow)
-        self.assertIn('createrepo_c "rpm-packages/${arch}"', workflow)
-        self.assertIn("rpm-packages/rv32", workflow)
-        self.assertIn("rpm-packages/rv64", workflow)
+        self.assertIn("createrepo_c rpm-packages", workflow)
+        self.assertNotIn("rpm-packages/rv32", workflow)
+        self.assertNotIn("rpm-packages/rv64", workflow)
         self.assertIn("repodata/repomd.xml", workflow)
+        self.assertIn("if: matrix.arch == 'rv64'", workflow)
+        self.assertIn("rpmlint packages/*.rpm", workflow)
+        self.assertIn("lintian --fail-on error packages/*.deb", workflow)
+        self.assertIn("dnf install -y packages/*.rpm", workflow)
+        self.assertIn("apt-get install -y ./packages/*.deb", workflow)
+        self.assertIn('ASSET_BASE="SimRV-linux-x86_64-${VERSION_TAG}"', workflow)
+        self.assertIn("-D CPACK_COMPONENTS_ALL=Runtime", workflow)
+        self.assertNotIn("tar -C dist", workflow)
+        self.assertIn('"simrv_${CPACK_DEBIAN_PACKAGE_VERSION}_amd64.deb"', cmake)
+        self.assertNotIn('"simrv-rv${SIMRV_XLEN}', cmake)
         self.assertEqual(
             manifest["artifacts"],
             [
@@ -68,6 +78,29 @@ class ReleaseToolTests(unittest.TestCase):
                 "SimRV-deb-packages-v3.0.0-beta.2.tar.gz",
             ],
         )
+
+    def test_documentation_workflow_publishes_stable_and_development(self):
+        workflow = (ROOT / ".github/workflows/docs.yml").read_text()
+        mkdocs = (ROOT / "mkdocs.yml").read_text()
+        override = (ROOT / "docs/overrides/main.html").read_text()
+        installation = (ROOT / "docs/user/install.md").read_text()
+        self.assertIn("ref: main", workflow)
+        self.assertIn("ref: dev", workflow)
+        self.assertIn('site/stable', workflow)
+        self.assertIn('site/dev', workflow)
+        self.assertIn('site/versions.json', workflow)
+        self.assertIn("'pyproject.toml'", workflow)
+        self.assertIn("'uv.lock'", workflow)
+        self.assertIn("lycheeverse/lychee-action@v2", workflow)
+        self.assertIn('SIMRV_DOCS_CHANNEL="stable"', workflow)
+        self.assertIn('SIMRV_DOCS_CHANNEL="development"', workflow)
+        self.assertIn("actions/deploy-pages@v4", workflow)
+        self.assertIn("group: documentation-pages", workflow)
+        self.assertIn("provider: mike", mkdocs)
+        self.assertIn("custom_dir: docs/overrides", mkdocs)
+        self.assertIn("user/install.md", mkdocs)
+        self.assertIn("development documentation", override)
+        self.assertIn("simrv --version", installation)
 
     def test_native_package_versions_match_release_semver(self):
         version = "3.0.0-beta.2"
@@ -217,6 +250,21 @@ class ReleaseToolTests(unittest.TestCase):
             path.write_bytes(b"not an archive")
             with self.assertRaises(SystemExit):
                 release_check.verify_archive(path, "2.0.0")
+
+    def test_archive_accepts_cpack_runtime_layout(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            binary = root / "payload" / "usr" / "bin" / "simrv"
+            binary.parent.mkdir(parents=True)
+            binary.write_text(
+                "#!/bin/sh\n"
+                "if [ \"$1\" = --help ]; then echo 'Usage: SimRV'; else echo 'SimRV 2.0.0'; fi\n"
+            )
+            binary.chmod(0o755)
+            archive = root / "runtime.tar.gz"
+            with tarfile.open(archive, "w:gz") as output:
+                output.add(root / "payload" / "usr", arcname="usr")
+            release_check.verify_archive(archive, "2.0.0")
 
     def test_checksum_mismatch_is_rejected(self):
         with tempfile.TemporaryDirectory() as directory:
