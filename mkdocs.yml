@@ -101,9 +101,6 @@ nav:
       - Microarchitectural Models & Tuning: hardware/models.md
       - RTL Parity Verification: hardware/rtl_parity.md
       - Custom Extensions & CFU: hardware/extensions.md
-  - Evaluation & Reviewers:
-      - Reviewer & Artifact Replication: evaluation/reviewer.md
-      - Release Qualification & Evidence: evaluation/release.md
   - Development & Contributing:
       - Developer Guide & Standards: dev/contributing.md
       - Version Migration (2.x to 3.0): dev/migration.md
