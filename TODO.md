@@ -20,7 +20,7 @@ Immediate continuation tasks:
 
 Local context intended to reduce repeated discovery:
 
-- CPack components are `Runtime`, `Tools`, `Benchmark`, and `Development`.
+- Native CPack components are `Runtime`, `Tools`, and `Benchmark`; source installs retain the SDK.
 - Fedora release jobs build RPMs; the `gcc:16` Debian-based job builds DEBs to avoid glibc skew.
 - `simrv` intentionally excludes benchmark tooling; it is supplied by `simrv-benchmark`.
 - SimRV official builds use DRAM base `0x80000000` and a 256 MiB configured default, while

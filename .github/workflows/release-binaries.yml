@@ -140,7 +140,7 @@ jobs:
         run: |
           set -euo pipefail
           mapfile -t rpms < <(find packages -maxdepth 1 -name '*.rpm' -type f | sort)
-          test "${#rpms[@]}" -eq 4
+          test "${#rpms[@]}" -eq 3
           for package in "${rpms[@]}"; do rpm -qpl "$package" >/dev/null; done
           runtime_rpm="$(find packages -maxdepth 1 -name 'simrv-rv*.rpm' -type f)"
           rpm -qpl "$runtime_rpm" > packages/runtime-rpm-contents.txt
@@ -200,13 +200,12 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          mkdir -p packages extracted
+          mkdir -p packages
           cpack --config build/${{ matrix.arch }}-release/CPackConfig.cmake -G DEB -B packages
           mapfile -t debs < <(find packages -maxdepth 1 -name '*.deb' -type f | sort)
-          test "${#debs[@]}" -eq 4
+          test "${#debs[@]}" -eq 3
           for package in "${debs[@]}"; do dpkg-deb --contents "$package" >/dev/null; done
           runtime_deb="$(find packages -maxdepth 1 -name 'simrv-rv*.deb' -type f)"
-          development_deb="$(find packages -maxdepth 1 -name 'simrv-dev-rv*.deb' -type f)"
           dpkg-deb --contents "$runtime_deb" > packages/runtime-deb-contents.txt
           grep -q '/usr/bin/SimRV$' packages/runtime-deb-contents.txt
           dpkg-deb --field "$runtime_deb" Depends > packages/runtime-deb-depends.txt
@@ -215,11 +214,6 @@ jobs:
             echo "Runtime DEB unexpectedly contains benchmark tooling" >&2
             exit 1
           fi
-          dpkg-deb --extract "$runtime_deb" extracted
-          dpkg-deb --extract "$development_deb" extracted
-          package_dir="$(find extracted/usr -path '*/cmake/SimRV' -type d -print -quit)"
-          cmake -S tests/package-consumer -B consumer -D "SimRV_DIR=${PWD}/${package_dir}"
-          cmake --build consumer
       - uses: actions/upload-artifact@v7
         with:
           name: ${{ steps.names.outputs.asset_base }}-deb
@@ -248,8 +242,8 @@ jobs:
           mkdir -p dist rpm-packages deb-packages
           find staging -type f -name '*.rpm' -exec cp {} rpm-packages/ \;
           find staging -type f -name '*.deb' -exec cp {} deb-packages/ \;
-          test "$(find rpm-packages -maxdepth 1 -type f | wc -l)" -eq 8
-          test "$(find deb-packages -maxdepth 1 -type f | wc -l)" -eq 8
+          test "$(find rpm-packages -maxdepth 1 -type f | wc -l)" -eq 6
+          test "$(find deb-packages -maxdepth 1 -type f | wc -l)" -eq 6
           tar --sort=name --mtime=@0 --owner=0 --group=0 --numeric-owner \
             -C rpm-packages -czf "dist/SimRV-rpm-packages-v${VERSION}.tar.gz" .
           tar --sort=name --mtime=@0 --owner=0 --group=0 --numeric-owner \

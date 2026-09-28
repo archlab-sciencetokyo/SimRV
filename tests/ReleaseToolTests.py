@@ -34,6 +34,7 @@ metadata = load("experiment_metadata", ROOT / "scripts/experiment_metadata.py")
 class ReleaseToolTests(unittest.TestCase):
     def test_release_workflow_publishes_curated_assets(self):
         workflow = (ROOT / ".github/workflows/release-binaries.yml").read_text()
+        cmake = (ROOT / "CMakeLists.txt").read_text()
         self.assertIn("publish-release:", workflow)
         self.assertIn("SimRV-rpm-packages-v${VERSION}.tar.gz", workflow)
         self.assertIn("SimRV-deb-packages-v${VERSION}.tar.gz", workflow)
@@ -42,6 +43,13 @@ class ReleaseToolTests(unittest.TestCase):
         self.assertNotIn("documentation:", workflow)
         self.assertNotIn("--contents \"$runtime_deb\" | grep -q", workflow)
         self.assertNotIn("-qpl \"$runtime_rpm\" | grep -q", workflow)
+        self.assertIn("set(CPACK_COMPONENTS_ALL Runtime Tools Benchmark)", cmake)
+        self.assertNotIn("CPACK_DEBIAN_DEVELOPMENT", cmake)
+        self.assertNotIn("CPACK_RPM_DEVELOPMENT", cmake)
+        self.assertNotIn("development_deb", workflow)
+        self.assertIn('test "${#rpms[@]}" -eq 3', workflow)
+        self.assertIn('test "${#debs[@]}" -eq 3', workflow)
+        self.assertIn("prerelease: ${{ contains(github.ref_name, '-') }}", workflow)
 
     def test_native_package_versions_match_release_semver(self):
         version = "3.0.0-beta.2"

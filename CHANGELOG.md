@@ -11,7 +11,7 @@ packaging work intended for evaluation of SimRV 3.0.
 ### Distribution & Reproducibility
 
 - Added component RPM and DEB packages for RV32 and RV64 release builds: a small simulator runtime,
-  optional architecture tools, separate benchmark tooling, and development files.
+  optional architecture tools, and separate benchmark tooling.
 - Added GitHub Release publication and package-content validation, with RPMs built on Fedora and
   DEBs built in a Debian-based GCC 16 environment.
 - Hardened benchmark provenance, stopping-policy comparison, event cleanup, JSON-schema validation,
