@@ -306,7 +306,7 @@ jobs:
           mkdir -p repro/results
           python3 -c 'import json,pathlib; pathlib.Path("repro/results/index.json").write_text(json.dumps({"schema_version":1,"status":"framework-only","note":"Raw results and complete evidence are published only after the full release matrix passes."},indent=2)+"\n")'
       - name: Package reproducibility framework
-        run: python3 scripts/package_repro.py --results repro/results
+        run: python3 scripts/reproduce.py --package --output repro/results
       - uses: actions/upload-artifact@v7
         with:
           name: SimRV-reproducibility-framework
