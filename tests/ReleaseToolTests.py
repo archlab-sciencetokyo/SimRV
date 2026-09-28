@@ -98,6 +98,9 @@ class ReleaseToolTests(unittest.TestCase):
         self.assertIn("provider: mike", mkdocs)
         self.assertIn("custom_dir: docs/overrides", mkdocs)
         self.assertIn("user/install.md", mkdocs)
+        self.assertIn("navigation.instant", mkdocs)
+        self.assertIn("toc.follow", mkdocs)
+        self.assertIn("search.share", mkdocs)
         self.assertIn("development documentation", override)
         self.assertIn("simrv --version", installation)
 
