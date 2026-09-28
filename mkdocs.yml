@@ -15,21 +15,28 @@ theme:
     - navigation.top
     - navigation.indexes
     - navigation.expand
+    - navigation.instant
+    - navigation.instant.prefetch
+    - navigation.tracking
+    - navigation.footer
     - search.suggest
     - search.highlight
+    - search.share
+    - toc.follow
     - content.code.copy
     - content.code.annotate
     - content.tabs.link
   palette:
-    # Light mode
-    - scheme: default
+    # Follow the browser/OS preference by default.
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
       primary: indigo
       accent: deep purple
       toggle:
         icon: material/brightness-7
         name: Switch to dark mode
-    # Dark mode
-    - scheme: slate
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
       primary: indigo
       accent: deep purple
       toggle:
@@ -42,6 +49,7 @@ extra:
   docs_channel: !ENV [SIMRV_DOCS_CHANNEL, 'development']
   version:
     provider: mike
+
 
 markdown_extensions:
   - admonition
