@@ -1166,9 +1166,9 @@ endif()
 
 set(CPACK_PACKAGE_NAME "${PROJECT_NAME}")
 set(CPACK_PACKAGE_VENDOR "archlab-sciencetokyo")
-set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "${PROJECT_DESCRIPTION}")
+set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "Explainable RISC-V architectural simulator")
 set(CPACK_PACKAGE_DESCRIPTION
-    "SimRV is a dual-width RISC-V architectural simulator with CLI debugging, an interactive terminal workbench, microarchitecture models, and Linux support.")
+    "SimRV is an explainable RISC-V architectural simulator.\n It provides CLI execution, an interactive terminal workbench, microarchitecture models, and Linux support.")
 set(CPACK_PACKAGE_HOMEPAGE_URL "${PROJECT_HOMEPAGE_URL}")
 if(NOT SIMRV_VERSION MATCHES "^([0-9]+\\.[0-9]+\\.[0-9]+)(-(.+))?$")
   message(FATAL_ERROR "SIMRV_VERSION is not packageable: ${SIMRV_VERSION}")
@@ -1176,7 +1176,7 @@ endif()
 set(SIMRV_PACKAGE_BASE_VERSION "${CMAKE_MATCH_1}")
 set(SIMRV_PACKAGE_PRERELEASE "${CMAKE_MATCH_3}")
 set(CPACK_PACKAGE_VERSION "${SIMRV_PACKAGE_BASE_VERSION}")
-set(CPACK_PACKAGE_CONTACT "ArchLab, Science Tokyo")
+set(CPACK_PACKAGE_CONTACT "ArchLab Science Tokyo")
 set(CPACK_PACKAGE_INSTALL_DIRECTORY "SimRV")
 set(CPACK_PACKAGING_INSTALL_PREFIX "/usr")
 set(CPACK_PACKAGE_FILE_NAME
@@ -1190,14 +1190,20 @@ set(CPACK_ARCHIVE_COMPONENT_INSTALL ON)
 set(CPACK_COMPONENT_TOOLS_DEPENDS Runtime)
 set(CPACK_COMPONENT_BENCHMARK_DEPENDS Runtime)
 set(CPACK_COMPONENT_RUNTIME_DISPLAY_NAME "SimRV")
+set(CPACK_COMPONENT_RUNTIME_DESCRIPTION
+    "Explainable RISC-V simulator runtime for RV64 and RV32 guests.")
 set(CPACK_COMPONENT_TOOLS_DISPLAY_NAME "SimRV architecture tools")
+set(CPACK_COMPONENT_TOOLS_DESCRIPTION
+    "Optional CPU model, RTL parity, and architecture configuration tools.")
 set(CPACK_COMPONENT_BENCHMARK_DISPLAY_NAME "SimRV benchmark tools")
+set(CPACK_COMPONENT_BENCHMARK_DESCRIPTION
+    "Optional benchmark and reproducibility measurement tools.")
 
 # Native Linux package metadata. CPack's RPM and DEB generators derive runtime
 # library dependencies from the installed ELF when the host packaging tools are
 # available; package creation never bundles a compiler or guest image.
 set(CPACK_DEBIAN_PACKAGE_NAME "simrv")
-set(CPACK_DEBIAN_PACKAGE_MAINTAINER "ArchLab, Science Tokyo")
+set(CPACK_DEBIAN_PACKAGE_MAINTAINER "ArchLab Science Tokyo")
 set(CPACK_DEBIAN_PACKAGE_SECTION "science")
 set(CPACK_DEBIAN_PACKAGE_PRIORITY "optional")
 if(SIMRV_PACKAGE_PRERELEASE)
@@ -1219,7 +1225,7 @@ set(CPACK_DEBIAN_TOOLS_FILE_NAME
 set(CPACK_DEBIAN_BENCHMARK_FILE_NAME
     "simrv-benchmark_${CPACK_DEBIAN_PACKAGE_VERSION}_amd64.deb")
 set(CPACK_DEBIAN_TOOLS_PACKAGE_DEPENDS
-    "simrv (= ${CPACK_DEBIAN_PACKAGE_VERSION})")
+    "simrv (= ${CPACK_DEBIAN_PACKAGE_VERSION}), python3")
 set(CPACK_DEBIAN_BENCHMARK_PACKAGE_DEPENDS
     "simrv (= ${CPACK_DEBIAN_PACKAGE_VERSION}), python3")
 
@@ -1228,6 +1234,11 @@ set(CPACK_RPM_PACKAGE_LICENSE "MIT")
 set(CPACK_RPM_PACKAGE_GROUP "Development/Tools")
 set(CPACK_RPM_PACKAGE_AUTOREQPROV ON)
 set(CPACK_RPM_COMPONENT_INSTALL ON)
+set(CPACK_RPM_PACKAGE_DESCRIPTION "${CPACK_PACKAGE_DESCRIPTION}")
+set(CPACK_RPM_EXCLUDE_FROM_AUTO_FILELIST_ADDITION
+    /usr/share/man
+    /usr/share/man/man1)
+set(CPACK_STRIP_FILES "${CMAKE_INSTALL_BINDIR}/simrv")
 # Keep rpmbuild temporary files inside the caller-selected temporary area. This
 # avoids host-specific /var/tmp policy and makes local/CI package builds easier
 # to isolate.
