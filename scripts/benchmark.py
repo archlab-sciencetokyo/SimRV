@@ -13,12 +13,25 @@ import math
 import os
 import pathlib
 import platform
+import random
 import re
 import statistics
 import subprocess
 import sys
 import time
 from shutil import which
+
+# Installed command-line tools live in <prefix>/bin while their supporting
+# modules live in <prefix>/share/SimRV/scripts. Keep the in-tree path first so
+# development and packaged execution use the same entry point.
+_here = pathlib.Path(__file__).resolve().parent
+for _candidate in (_here, _here.parent / "share" / "SimRV" / "scripts"):
+    if (_candidate / "experiment_metadata.py").is_file():
+        if str(_candidate) not in sys.path:
+            sys.path.insert(0, str(_candidate))
+        break
+
+from experiment_metadata import experiment_provenance
 
 REALWORLD_BENCHMARKS = [
     "coremark",
@@ -118,15 +131,15 @@ def resolve_tohost(elf_path, nm_tool):
         return None
     try:
         res = subprocess.run(
-            [nm_tool, "-g", elf_path], capture_output=True, text=True, timeout=5
+            [nm_tool, "-g", elf_path], capture_output=True, text=True, timeout=5, check=False
         )
         for line in res.stdout.splitlines():
             parts = line.split()
             if len(parts) >= 3 and parts[2] == "tohost":
                 addr = parts[0].lstrip("0")
                 return f"0x{addr}" if addr else "0x0"
-    except Exception:
-        pass
+    except (OSError, subprocess.SubprocessError):
+        return None
     return None
 
 
@@ -137,8 +150,8 @@ def detect_elf_xlen(elf_path):
                 header = f.read(5)
                 if len(header) >= 5 and header[:4] == b"\x7fELF":
                     return 64 if header[4] == 2 else 32
-        except Exception:
-            pass
+        except OSError:
+            return None
     return None
 
 
@@ -149,14 +162,14 @@ def detect_xlen(simrv_bin, elf_path=None):
 
     try:
         result = subprocess.run(
-            [simrv_bin, "--version"], capture_output=True, text=True, timeout=5
+            [simrv_bin, "--version"], capture_output=True, text=True, timeout=5, check=False
         )
         if "RV64" in result.stdout:
             return 64
         elif "RV32" in result.stdout:
             return 32
-    except Exception:
-        pass
+    except (OSError, subprocess.SubprocessError):
+        return 64 if "rv64" in simrv_bin.lower() else 32
     if "rv64" in simrv_bin.lower():
         return 64
     return 32
@@ -563,9 +576,7 @@ def generate_latex_table(suite_results, filepath):
         name = res["test_name"].replace("_", r"\_")
         insts = format_instrs(res["instructions"])
         s_time = res["simrv"]["stats"]["time"]["mean"]
-        s_ci = res["simrv"]["stats"]["time"]["ci95"]
         sp_time = res["spike"]["stats"]["time"]["mean"]
-        sp_ci = res["spike"]["stats"]["time"]["ci95"]
         s_mips = res["simrv"]["stats"]["wall_speed"]["mean"] / 1000.0
         s_rss = res["simrv"]["stats"].get("rss", {}).get("mean", 0.0)
         sp_rss = res["spike"]["stats"].get("rss", {}).get("mean", 0.0)
@@ -862,7 +873,7 @@ def run_benchmark_single(
         subprocess.run(
             [objcopy_tool, "-O", "binary", elf_path, bin_path], check=True
         )
-    except Exception as e:
+    except (OSError, subprocess.CalledProcessError) as e:
         print(f"ERROR: objcopy conversion failed: {e}", file=sys.stderr)
         return None
 
@@ -918,6 +929,7 @@ def run_benchmark_single(
             stderr=subprocess.DEVNULL,
             timeout=timeout,
             stdin=subprocess.DEVNULL,
+            check=False,
         )
         if warmup.returncode != 0:
             print(f"  [ERROR] SimRV warmup failed on {test_basename}", file=sys.stderr)
@@ -929,6 +941,7 @@ def run_benchmark_single(
                 stderr=subprocess.PIPE,
                 timeout=timeout,
                 stdin=subprocess.DEVNULL,
+                check=False,
             )
             if spike_warmup.returncode != 0:
                 detail = spike_warmup.stderr.decode("utf-8", errors="ignore").strip()
@@ -1087,6 +1100,7 @@ def run_benchmark_single(
                     capture_output=True,
                     timeout=timeout,
                     stdin=subprocess.DEVNULL,
+                    check=False,
                 )
                 end_t = time.perf_counter()
                 if res.returncode != 0:
@@ -1149,7 +1163,16 @@ def run_benchmark_single(
         if "decode_cache_hit_rate" in last_ev:
             decode_cache_hit_rate = last_ev["decode_cache_hit_rate"] / 10000.0
 
+    configuration = {"xlen": xlen, "isa": isa, "simrv_args": list(simrv_args),
+                     "instruction_limit": limit, "tohost": tohost_addr}
+    provenance = experiment_provenance(
+        root=root_dir, simrv=simrv_bin, spike=spike_bin if spike_available else None,
+        workload=elf_path, configuration=configuration, simrv_command=simrv_base_cmd,
+        spike_command=spike_base_cmd if spike_available else None,
+    )
+
     return {
+        "schema_version": 1,
         "test_name": test_basename,
         "workload_path": os.path.realpath(elf_path),
         "workload_sha256": sha256_file(elf_path),
@@ -1161,6 +1184,8 @@ def run_benchmark_single(
         "xlen": xlen,
         "isa": isa,
         "spike_isa": isa,
+        "configuration_fingerprint": provenance["configuration_fingerprint"],
+        "provenance": provenance,
         "simrv_args": list(simrv_args),
         "simrv_binary_sha256": sha256_file(simrv_bin),
         "simrv_version": command_version(simrv_bin),       # kept for backwards compat
@@ -1194,6 +1219,9 @@ def run_benchmark_single(
 def load_compare_results(path: pathlib.Path | str) -> dict[str, float]:
     p = pathlib.Path(path)
     report = json.loads(p.read_text(encoding="utf-8"))
+    if "results" in report:
+        return {f"rv{row['xlen']}:{row['workload']}": row["median_kips"]
+                for row in report["results"] if row["median_kips"] > 0}
     results = report.get("suite_results", [report])
     speeds = {}
     for result in results:
@@ -1211,6 +1239,7 @@ def compare_main(argv: list[str]) -> int:
     parser.add_argument("candidate", type=pathlib.Path)
     parser.add_argument("--minimum-geomean", type=float, default=5.0)
     parser.add_argument("--maximum-regression", type=float, default=3.0)
+    parser.add_argument("--json", type=pathlib.Path)
     parser.add_argument("--enforce", action="store_true", help="Return nonzero when supplied thresholds are exceeded")
     args = parser.parse_args(argv)
 
@@ -1227,8 +1256,8 @@ def compare_main(argv: list[str]) -> int:
                         "Wall-time comparison may be invalid.",
                         file=sys.stderr,
                     )
-        except Exception:
-            pass
+        except (OSError, json.JSONDecodeError):
+            continue
 
     baseline = load_compare_results(args.baseline)
     candidate = load_compare_results(args.candidate)
@@ -1255,18 +1284,56 @@ def compare_main(argv: list[str]) -> int:
         failed = True
     if failed and not args.enforce:
         print("threshold observations are informational (evidence-only policy)")
+    if args.json:
+        report = {"schema_version": 1, "minimum_geomean_percent": args.minimum_geomean,
+                  "maximum_regression_percent": args.maximum_regression,
+                  "geomean_change_percent": geomean, "passed": not failed,
+                  "results": [{"benchmark": name, "baseline_kips": baseline[name],
+                               "candidate_kips": candidate[name],
+                               "change_percent": (candidate[name] / baseline[name] - 1.0) * 100.0}
+                              for name in names]}
+        args.json.parent.mkdir(parents=True, exist_ok=True)
+        args.json.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     return 1 if failed and args.enforce else 0
 
 
-def load_aggregate_rows(paths: list[pathlib.Path | str]) -> list[dict]:
+def bootstrap_median_ci(samples: list[float], resamples: int = 10_000,
+                        confidence: float = 0.95, seed: str = "simrv") -> list[float]:
+    if not samples:
+        return [0.0, 0.0]
+    if len(samples) == 1:
+        return [samples[0], samples[0]]
+    generator = random.Random(int(hashlib.sha256(seed.encode()).hexdigest()[:16], 16))
+    medians = sorted(statistics.median(generator.choices(samples, k=len(samples)))
+                     for _ in range(resamples))
+    tail = (1.0 - confidence) / 2.0
+    return [medians[round(tail * (resamples - 1))],
+            medians[round((1.0 - tail) * (resamples - 1))]]
+
+
+def load_aggregate_rows(paths: list[pathlib.Path | str], resamples: int = 10_000,
+                        confidence: float = 0.95) -> list[dict]:
     rows = []
     for p in sorted(paths):
         path = pathlib.Path(p)
         report = json.loads(path.read_text(encoding="utf-8"))
         for result in report.get("suite_results", [report]):
             speeds = result["simrv"].get("runs_wall_speed_kips", [])
-            rows.append({"source": path.name, "xlen": result["xlen"], "workload": result["test_name"],
-                         "samples": len(speeds), "median_kips": statistics.median(speeds) if speeds else 0.0})
+            spike = result.get("spike", {}).get("runs_wall_speed_kips", [])
+            median_simrv = statistics.median(speeds) if speeds else 0.0
+            median_spike = statistics.median(spike) if spike else 0.0
+            fingerprint = result.get("configuration_fingerprint", "unknown")
+            rows.append({"source": path.name, "configuration_fingerprint": fingerprint,
+                         "xlen": result["xlen"], "workload": path.stem,
+                         "target": result["test_name"], "samples": len(speeds),
+                         "median_kips": median_simrv,
+                         "median_kips_ci": bootstrap_median_ci(
+                             speeds, resamples, confidence, f"{fingerprint}:{path.stem}:simrv"),
+                         "cv_percent": result["simrv"].get("stats", {}).get("wall_speed", {}).get("cv", 0.0),
+                         "spike_median_kips": median_spike,
+                         "spike_median_kips_ci": bootstrap_median_ci(
+                             spike, resamples, confidence, f"{fingerprint}:{path.stem}:spike"),
+                         "simrv_over_spike": median_simrv / median_spike if median_spike else None})
     return sorted(rows, key=lambda row: (row["xlen"], row["workload"], row["source"]))
 
 load_rows = load_aggregate_rows
@@ -1278,28 +1345,42 @@ def aggregate_main(argv: list[str]) -> int:
     parser.add_argument("--json", type=pathlib.Path, required=True)
     parser.add_argument("--table", type=pathlib.Path, required=True)
     parser.add_argument("--plot", type=pathlib.Path, required=True)
+    parser.add_argument("--bootstrap-resamples", type=int, default=10_000)
+    parser.add_argument("--confidence", type=float, default=0.95)
     args = parser.parse_args(argv)
+    if args.bootstrap_resamples < 1 or not 0.0 < args.confidence < 1.0:
+        parser.error("bootstrap resamples must be positive and confidence must be between 0 and 1")
 
-    rows = load_aggregate_rows(args.inputs)
-    aggregate = {"schema_version": 1, "statistic": "median", "unit": "KIPS", "results": rows}
+    rows = load_aggregate_rows(args.inputs, args.bootstrap_resamples, args.confidence)
+    aggregate = {"schema_version": 1, "statistic": "median", "unit": "KIPS",
+                 "confidence": args.confidence, "bootstrap_resamples": args.bootstrap_resamples,
+                 "results": rows}
     for path in (args.json, args.table, args.plot):
         path.parent.mkdir(parents=True, exist_ok=True)
     args.json.write_text(json.dumps(aggregate, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-    lines = ["| XLEN | Workload | Samples | Median KIPS |", "| ---: | --- | ---: | ---: |"]
-    lines.extend(f"| {r['xlen']} | {r['workload']} | {r['samples']} | {r['median_kips']:.3f} |" for r in rows)
+    lines = ["| XLEN | Workload | N | SimRV median KIPS (CI) | CV | Spike median KIPS | SimRV/Spike |",
+             "| ---: | --- | ---: | ---: | ---: | ---: | ---: |"]
+    for row in rows:
+        low, high = row["median_kips_ci"]
+        ratio = f"{row['simrv_over_spike']:.3f}×" if row["simrv_over_spike"] else "N/A"
+        lines.append(f"| {row['xlen']} | {row['workload']} | {row['samples']} | "
+                     f"{row['median_kips']:.3f} [{low:.3f}, {high:.3f}] | "
+                     f"{row['cv_percent']:.2f}% | {row['spike_median_kips']:.3f} | {ratio} |")
     args.table.write_text("\n".join(lines) + "\n", encoding="utf-8")
     width, row_height = 760, 26
-    maximum = max((r["median_kips"] for r in rows), default=1.0)
+    maximum = max(1.0, max((max(r["median_kips"], r["spike_median_kips"])
+                            for r in rows), default=0.0))
     svg = [f'<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{50 + row_height * len(rows)}" viewBox="0 0 {width} {50 + row_height * len(rows)}">',
-           '<style>text{font:12px sans-serif}.title{font:bold 15px sans-serif}.bar{fill:#4c78a8}</style>',
-           '<text class="title" x="10" y="20">SimRV median throughput (KIPS)</text>']
+           '<style>text{font:12px sans-serif}.title{font:bold 15px sans-serif}.simrv{fill:#4c78a8}.spike{fill:#f58518}</style>',
+           '<text class="title" x="10" y="20">Median throughput: SimRV (blue) vs Spike (orange)</text>']
     for index, row in enumerate(rows):
         y = 42 + index * row_height
         label = html.escape(f"RV{row['xlen']} {row['workload']}")
         bar = 450 * row["median_kips"] / maximum
+        spike_bar = 450 * row["spike_median_kips"] / maximum
         svg.extend([f'<text x="10" y="{y + 12}">{label}</text>',
-                    f'<rect class="bar" x="210" y="{y}" width="{bar:.2f}" height="16"/>',
-                    f'<text x="{220 + bar:.2f}" y="{y + 12}">{row["median_kips"]:.3f}</text>'])
+                    f'<rect class="simrv" x="210" y="{y}" width="{bar:.2f}" height="8"/>',
+                    f'<rect class="spike" x="210" y="{y + 9}" width="{spike_bar:.2f}" height="8"/>'])
     svg.append("</svg>")
     args.plot.write_text("\n".join(svg) + "\n", encoding="utf-8")
     return 0

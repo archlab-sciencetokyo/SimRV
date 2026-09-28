@@ -132,7 +132,11 @@ void uart_puts(const char* s) {
 ```
 
 ### Real-Time Clock / Timer Delay
-Use the RTC `mtime` register at `0x70000000` to measure accurate delays. `mtime` runs at approximately 10 MHz (10,000 ticks = 1 ms).
+Use the RTC `mtime` register at `0x70000000` to measure virtual-platform delays. `mtime`
+runs at 10 MHz (10,000 ticks = 1 ms). In cycle-accurate mode this is derived from the
+advertised 160 MHz CPU clock at one timer tick per 16 modeled CPU cycles. In instruction-accurate
+mode it is virtual time based on the one-cycle-per-instruction timing policy, not a hardware timing
+prediction.
 
 ```c
 #define RTC_MTIME ((volatile uint64_t*)0x70000000)

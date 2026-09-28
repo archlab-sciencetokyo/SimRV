@@ -167,7 +167,10 @@ SimRV --cli -m build/my_program.elf -H 0x80001000
 ### Hardware Peripherals Emulated
 
 - **16550A UART**: Serial I/O mapped at base address `0x10000000`.
-- **CLINT**: Core Local Interruptor at base address `0x02000000` providing `mtime` and `mtimecmp` registers (10 MHz timebase).
+- **CLINT**: Core Local Interruptor at base address `0x02000000` providing `mtime` and
+  `mtimecmp` registers (10 MHz timebase). In cycle-accurate mode each timer tick corresponds to 16
+  cycles of the advertised 160 MHz CPU clock; instruction-accurate modes expose deterministic virtual
+  time rather than predicted hardware time.
 - **PLIC**: Platform-Level Interrupt Controller at base address `0x0c000000` supporting priority thresholds and interrupt claims.
 
 ---
@@ -189,7 +192,8 @@ SimRV --kernel linux-images/Image \
 - `--disk <root.img>`: Ext4 root filesystem image (attached as `/dev/vda` via VirtIO Block).
 - `--smp <2..16>`: Number of active SMP harts (default is 1 for single-hart execution).
 - `--dtb <virt.dtb>`: Optional custom Device Tree Blob (SimRV automatically synthesizes a device tree if omitted).
-- `--ram <MB>`: Guest RAM capacity in megabytes (default: 2048 MB).
+- `--dram-size <SIZE>`, `--ram-size <SIZE>`: Guest DRAM size with an optional
+  scaled suffix such as `128M` or `2G` (official release default: 256 MiB).
 
 ---
 

@@ -11,21 +11,18 @@ import shutil
 import subprocess
 import sys
 import tarfile
-import time
 
+from experiment_metadata import repository_revision
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 EXPERIMENT = json.loads((ROOT / "repro/experiment-manifest.json").read_text())
 MANIFEST = json.loads((ROOT / "release/release-manifest.json").read_text())
-STATIC_MEMBERS = [
-    "CITATION.cff", "LICENSE", "README.md", "SECURITY.md", "docs/evaluation/release.md",
-    "docs/architecture/compliance.md", "repro/README.md", "repro/experiment-manifest.json"
-]
-
-
 def run(command: list[str], cwd: pathlib.Path | None = None, env: dict[str, str] | None = None) -> None:
     print("+", " ".join(command), flush=True)
-    subprocess.run(command, cwd=cwd or ROOT, env=env, check=True)
+    ccache_temp = ROOT / "build/repro/.ccache-tmp"
+    ccache_temp.mkdir(parents=True, exist_ok=True)
+    environment = {**os.environ, "CCACHE_TEMPDIR": str(ccache_temp), **(env or {})}
+    subprocess.run(command, cwd=cwd or ROOT, env=environment, check=True)
 
 
 def git_revision(path: pathlib.Path) -> str:
@@ -102,9 +99,10 @@ def merge_evidence(report_paths: list[pathlib.Path], output: pathlib.Path) -> No
 
 def package_repro(results_dir: pathlib.Path, output: pathlib.Path | None = None) -> pathlib.Path:
     tar_output = output or (ROOT / f"SimRV-repro-v{MANIFEST['version']}.tar.gz")
-    members = [(ROOT / path, pathlib.Path(path)) for path in STATIC_MEMBERS]
-    members += [(path, path.relative_to(ROOT)) for path in sorted((ROOT / "release/schemas").glob("*.json"))]
-    members += [(path, path.relative_to(ROOT)) for path in sorted((ROOT / "scripts").glob("*.py"))]
+    tracked = subprocess.run(["git", "ls-files", "-z"], cwd=ROOT, capture_output=True,
+                             check=True, timeout=10).stdout
+    members = [(ROOT / name.decode(), pathlib.Path(name.decode()))
+               for name in tracked.split(b"\0") if name]
     if results_dir.is_dir():
         members += [(p, pathlib.Path("results") / p.relative_to(results_dir))
                     for p in sorted(results_dir.rglob("*")) if p.is_file()]
@@ -113,16 +111,16 @@ def package_repro(results_dir: pathlib.Path, output: pathlib.Path | None = None)
         raise SystemExit(f"missing reproduction inputs: {missing}")
 
     tar_output.parent.mkdir(parents=True, exist_ok=True)
-    with tar_output.open("wb") as raw:
-        with gzip.GzipFile(filename="", mode="wb", fileobj=raw, mtime=0) as compressed:
-            with tarfile.open(fileobj=compressed, mode="w") as archive:
-                for src, arcname in sorted(set(members), key=lambda item: str(item[1])):
-                    info = archive.gettarinfo(str(src), arcname=str(arcname))
-                    info.uid = info.gid = 0
-                    info.uname = info.gname = ""
-                    info.mtime = 0
-                    with src.open("rb") as s:
-                        archive.addfile(info, s)
+    with (tar_output.open("wb") as raw,
+          gzip.GzipFile(filename="", mode="wb", fileobj=raw, mtime=0) as compressed,
+          tarfile.open(fileobj=compressed, mode="w") as archive):
+        for src, arcname in sorted(set(members), key=lambda item: str(item[1])):
+            info = archive.gettarinfo(str(src), arcname=str(arcname))
+            info.uid = info.gid = 0
+            info.uname = info.gname = ""
+            info.mtime = 0
+            with src.open("rb") as source:
+                archive.addfile(info, source)
 
     digest = hashlib.sha256(tar_output.read_bytes()).hexdigest()
     tar_output.with_suffix(tar_output.suffix + ".sha256").write_text(f"{digest}  {tar_output.name}\n", encoding="utf-8")
@@ -147,6 +145,9 @@ def main() -> None:
     parser.add_argument("--vector-tests-dir", type=pathlib.Path)
     parser.add_argument("--spike", default="spike")
     parser.add_argument("--linux-images-root", type=pathlib.Path, default=ROOT / "linux-images")
+    parser.add_argument("--baseline", type=pathlib.Path)
+    parser.add_argument("--archive", type=pathlib.Path)
+    parser.add_argument("--no-package", action="store_true")
 
     args = parser.parse_args()
 
@@ -159,7 +160,11 @@ def main() -> None:
         return
 
     # Normal reproduction execution
+    args.output = args.output.resolve()
     args.output.mkdir(parents=True, exist_ok=True)
+    if args.mode == "full" and args.compiler != "all":
+        parser.error("full artifact generation requires --compiler all")
+    run([sys.executable, "scripts/validate_schemas.py"])
     run([sys.executable, "scripts/release_check.py"])
 
     generator = "Ninja" if shutil.which("ninja") else "Unix Makefiles"
@@ -171,6 +176,7 @@ def main() -> None:
         for configuration in configurations:
             arch = configuration["xlen"]
             build_dir = ROOT / "build/repro" / f"{compiler}-rv{arch}"
+            shutil.rmtree(build_dir, ignore_errors=True)
             cc, cxx = (("gcc", "g++") if compiler == "gcc" else ("clang", "clang++"))
             configure = ["cmake", "-S", ".", "-B", str(build_dir), "-G", generator,
                          "-DCMAKE_BUILD_TYPE=Release", f"-DSIMRV_XLEN={arch}",
@@ -200,23 +206,37 @@ def main() -> None:
             run(evidence)
             reports.append(output)
 
-            if args.mode == "full" and compiler == "gcc" and arch == 64:
-                if not args.riscv_tests_dir:
-                    raise SystemExit("--riscv-tests-dir is required for full performance evidence")
-                raw = args.output / "raw" / f"benchmark-rv{arch}.json"
-                run([sys.executable, "scripts/benchmark.py", "--simrv", str(build_dir / "SimRV"),
-                     "--spike", args.spike, "--suite", "realworld",
-                     "--runs", str(EXPERIMENT["repetitions"]), "--warmups", str(EXPERIMENT["warmups"]),
-                     "--timeout", str(EXPERIMENT["timeout_seconds"]),
-                     "--riscv-tests-dir", str(args.riscv_tests_dir.resolve()), "--json", str(raw)])
-
+    raw_reports = []
     if args.mode == "full":
+        if not args.riscv_tests_dir:
+            raise SystemExit("--riscv-tests-dir is required for full performance evidence")
+        selected_ids = set(EXPERIMENT["performance"]["configurations"])
+        for configuration in (item for item in configurations if item["id"] in selected_ids):
+            simrv = ROOT / "build/repro" / f"gcc-rv{configuration['xlen']}" / "SimRV"
+            simrv_args = ["--mode", configuration["execution_mode"], "--vlen",
+                          str(configuration["vlen"]), *configuration.get("simrv_args", [])]
+            for workload in EXPERIMENT["performance"]["workloads"]:
+                raw = args.output / EXPERIMENT["outputs"]["raw"] / configuration["id"] / f"{workload['id']}.json"
+                command = [sys.executable, "scripts/benchmark.py", "--simrv", str(simrv),
+                           "--spike", args.spike, "--test", workload["target"],
+                           "--runs", str(EXPERIMENT["repetitions"]),
+                           "--warmups", str(EXPERIMENT["warmups"]),
+                           "--timeout", str(EXPERIMENT["timeout_seconds"]),
+                           "--limit", str(workload["instruction_limit"]),
+                           "--isa", configuration["isa"],
+                           *[f"--simrv-arg={value}" for value in simrv_args],
+                           "--riscv-tests-dir", str(args.riscv_tests_dir.resolve()),
+                           "--json", str(raw)]
+                run(command)
+                raw_reports.append(raw)
+
         sanitizer_builds = [
             ("asan-ubsan", ["-DSIMRV_ENABLE_ASAN=ON", "-DSIMRV_ENABLE_UBSAN=ON"]),
             ("tsan", ["-DSIMRV_ENABLE_TSAN=ON"]),
         ]
         for suite, flags in sanitizer_builds:
             build_dir = ROOT / "build/repro" / suite
+            shutil.rmtree(build_dir, ignore_errors=True)
             run(["cmake", "-S", ".", "-B", str(build_dir), "-G", generator,
                  "-DCMAKE_BUILD_TYPE=Debug", "-DSIMRV_XLEN=64",
                  "-DSIMRV_WARNINGS_AS_ERRORS=ON", *flags])
@@ -226,21 +246,50 @@ def main() -> None:
                  "--arch", "64", "--compiler", "gcc", "--suite", suite, "--output", str(output)])
             reports.append(output)
 
-        raw_reports = sorted((args.output / "raw").glob("*.json"))
+        performance = EXPERIMENT["performance"]
+        aggregate = args.output / EXPERIMENT["outputs"]["aggregate"]
         run([sys.executable, "scripts/benchmark.py", "aggregate", *map(str, raw_reports),
-             "--json", str(args.output / "aggregate.json"), "--table", str(args.output / "table.md"),
-             "--plot", str(args.output / "throughput.svg")])
+             "--json", str(aggregate), "--table", str(args.output / EXPERIMENT["outputs"]["table"]),
+             "--plot", str(args.output / EXPERIMENT["outputs"]["plot"]),
+             "--bootstrap-resamples", str(performance["bootstrap_resamples"]),
+             "--confidence", str(performance["confidence"])])
+        aggregate_data = json.loads(aggregate.read_text(encoding="utf-8"))
+        unstable = [{"workload": row["workload"], "xlen": row["xlen"],
+                     "cv_percent": row["cv_percent"]} for row in aggregate_data["results"]
+                    if row["cv_percent"] > performance["maximum_cv_percent"]]
+        if unstable and performance["policy"] == "enforced":
+            raise SystemExit(f"benchmark CV threshold exceeded: {unstable}")
+        if args.baseline:
+            comparison = [sys.executable, "scripts/benchmark.py", "compare",
+                          str(args.baseline.resolve()), str(aggregate), "--maximum-regression",
+                          str(performance["maximum_regression_percent"]), "--minimum-geomean",
+                          str(performance["minimum_geomean_percent"]), "--json",
+                          str(args.output / EXPERIMENT["outputs"]["comparison"])]
+            if performance["policy"] == "enforced":
+                comparison.append("--enforce")
+            run(comparison)
 
-    merged = args.output / "evidence.json"
+    merged = args.output / EXPERIMENT["outputs"]["evidence"]
     merge_evidence(reports, merged)
     if args.mode == "full":
         run([sys.executable, "scripts/release_check.py", "--evidence", str(merged)])
 
+    archive = args.archive.resolve() if args.archive else ROOT / "SimRV-3.0-paper-artifact.tar.gz"
     index = {"schema_version": 1, "mode": args.mode,
              "manifest": "repro/experiment-manifest.json", "evidence": [str(path) for path in reports],
-             "merged_evidence": str(merged)}
-    (args.output / "index.json").write_text(json.dumps(index, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-    print(f"reproduction complete: {args.output / 'index.json'}")
+             "repository_revision": repository_revision(ROOT),
+             "raw_benchmarks": [str(path.relative_to(args.output)) for path in raw_reports],
+             "merged_evidence": str(merged),
+             "aggregate": EXPERIMENT["outputs"]["aggregate"] if args.mode == "full" else None,
+             "comparison": EXPERIMENT["outputs"]["comparison"] if args.baseline else None,
+             "unstable_benchmarks": unstable if args.mode == "full" else [], "archive": str(archive)}
+    index_path = args.output / EXPERIMENT["outputs"]["index"]
+    index_path.write_text(json.dumps(index, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    if args.mode == "full" and not args.no_package:
+        package_repro(args.output, archive)
+        run([sys.executable, "scripts/release_check.py", "--checksum",
+             str(archive.with_suffix(archive.suffix + ".sha256"))])
+    print(f"reproduction complete: {index_path}")
 
 
 if __name__ == "__main__":

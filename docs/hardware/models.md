@@ -2,6 +2,20 @@
 
 SimRV provides a microarchitectural CPU modeling framework that enables cycle-accurate (CA) simulation calibrated to real hardware, FPGA soft cores, and SystemVerilog RTL designs. Microarchitectural definitions are decoupled from the simulator binary and managed via human-readable, sectioned `.cfg` files.
 
+## Platform clock contract
+
+SimRV's virtual platform currently uses a fixed 160 MHz CPU clock and a 10 MHz `mtime` timebase.
+Thus, 16 cycle-accurate model cycles equal one `mtime` tick (100 ns). The power-of-two divider keeps
+timer accumulation exact and inexpensive. Pipeline, cache,
+interconnect, and host-interface latency settings are expressed in CPU clock cycles. Their absolute
+time is therefore `cycles / 160 MHz`, while timer delays are `mtime_ticks / 10 MHz`.
+
+This conversion is hardware-meaningful only in `--mode cycle-accurate`, and only to the extent that
+the selected model's cycle latencies match the target RTL or processor. Fast and detailed modes use
+one virtual cycle per instruction step to keep counters and guest timers deterministic; their
+reported virtual time must not be treated as a hardware performance prediction. `minstret` remains
+a retired-instruction count in all modes.
+
 ---
 
 ## 1. Quick Start

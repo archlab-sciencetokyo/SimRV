@@ -6,9 +6,8 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(dirname "$SCRIPT_DIR")"
-BUILD_DIR="$ROOT_DIR/linux-build"
+BUILD_DIR="${SIMRV_LINUX_BUILD_DIR:-$ROOT_DIR/linux-build}"
 ARCH="${ARCH:-rv64}"
-IMAGES_DIR="$ROOT_DIR/linux-images/$ARCH"
 
 # Versions
 OPENSBI_VER="1.9"
@@ -28,6 +27,7 @@ print_error() { echo -e "${RED}[ERROR]${NC} $1"; }
 
 LIBC="${LIBC:-auto}"
 CROSS_COMPILE="${CROSS_COMPILE:-}"
+CLEAN_ACTION=""
 
 # Parse arguments
 while [[ $# -gt 0 ]]; do
@@ -49,24 +49,13 @@ while [[ $# -gt 0 ]]; do
             shift
             ;;
         --clean)
-            print_step "Cleaning build and images directories..."
-            rm -rf "$BUILD_DIR" "$IMAGES_DIR"
-            exit 0
+            CLEAN_ACTION="all"
             ;;
         --clean-build)
-            print_step "Cleaning intermediate build directory ($BUILD_DIR) while preserving $IMAGES_DIR..."
-            rm -rf "$BUILD_DIR"
-            exit 0
+            CLEAN_ACTION="build"
             ;;
         --clean-old-kernels)
-            print_step "Pruning old kernel build trees in $BUILD_DIR..."
-            if [[ -d "$BUILD_DIR" ]]; then
-                find "$BUILD_DIR" -mindepth 1 -maxdepth 1 -type d -name "linux-*" ! -name "linux-${LINUX_VER}" -exec rm -rf {} +
-                print_info "Kept current kernel tree (linux-${LINUX_VER}) if present."
-            else
-                print_info "Build directory ($BUILD_DIR) does not exist."
-            fi
-            exit 0
+            CLEAN_ACTION="old-kernels"
             ;;
         -h|--help)
             echo "Usage: $0 [options]"
@@ -90,6 +79,30 @@ while [[ $# -gt 0 ]]; do
     shift
 done
 
+IMAGES_ROOT="${SIMRV_LINUX_IMAGES_ROOT:-$ROOT_DIR/linux-images}"
+IMAGES_DIR="$IMAGES_ROOT/$ARCH"
+case "$CLEAN_ACTION" in
+    all)
+        print_step "Cleaning build and ${ARCH} image directories..."
+        rm -rf "$BUILD_DIR" "$IMAGES_DIR"
+        exit 0
+        ;;
+    build)
+        print_step "Cleaning intermediate build directory ($BUILD_DIR) while preserving $IMAGES_DIR..."
+        rm -rf "$BUILD_DIR"
+        exit 0
+        ;;
+    old-kernels)
+        print_step "Pruning old kernel build trees in $BUILD_DIR..."
+        if [[ -d "$BUILD_DIR" ]]; then
+            find "$BUILD_DIR" -mindepth 1 -maxdepth 1 -type d -name "linux-*" ! -name "linux-${LINUX_VER}" -exec rm -rf {} +
+            print_info "Kept current kernel tree (linux-${LINUX_VER}) if present."
+        else
+            print_info "Build directory ($BUILD_DIR) does not exist."
+        fi
+        exit 0
+        ;;
+esac
 mkdir -p "$BUILD_DIR/sources" "$IMAGES_DIR"
 
 # Auto-detect cross compiler if not set
@@ -202,28 +215,23 @@ mkdir -p "$INITRAMFS_DIR"
 if [[ "$XLEN" == "32" ]]; then
     BUSYBOX_BUILD="$BUILD_DIR/busybox-${BUSYBOX_VER}"
     if [[ ! -f "$BUSYBOX_BUILD/_install/bin/busybox" ]]; then
+        # BusyBox uses CC for its final link. Passing the ISA/ABI only through
+        # EXTRA_CFLAGS compiles RV32 objects correctly but lets the compiler
+        # driver select its default RV64 sysroot at link time.
+        BUSYBOX_CC="${CROSS_COMPILE}gcc -march=${M_ARCH} -mabi=${M_ABI}"
         print_step "Configuring BusyBox..."
         make -C "$BUSYBOX_BUILD" clean || true
-        make -C "$BUSYBOX_BUILD" ARCH=riscv CROSS_COMPILE="$CROSS_COMPILE" LD="${CROSS_COMPILE}ld -m elf32lriscv" "EXTRA_CFLAGS=-march=${M_ARCH} -mabi=${M_ABI}" defconfig
+        make -C "$BUSYBOX_BUILD" ARCH=riscv CROSS_COMPILE="$CROSS_COMPILE" CC="$BUSYBOX_CC" LD="${CROSS_COMPILE}ld -m elf32lriscv" defconfig
         sed -i 's/# CONFIG_STATIC is not set/CONFIG_STATIC=y/' "$BUSYBOX_BUILD/.config"
         sed -i 's/CONFIG_TC=y/# CONFIG_TC is not set/' "$BUSYBOX_BUILD/.config"
         sed -i 's/CONFIG_FEATURE_TC_INGRESS=y/# CONFIG_FEATURE_TC_INGRESS is not set/' "$BUSYBOX_BUILD/.config"
         print_step "Compiling BusyBox (RV32)..."
-        make -C "$BUSYBOX_BUILD" ARCH=riscv CROSS_COMPILE="$CROSS_COMPILE" LD="${CROSS_COMPILE}ld -m elf32lriscv" "EXTRA_CFLAGS=-march=${M_ARCH} -mabi=${M_ABI}" "EXTRA_LDFLAGS=-Wl,-m,elf32lriscv" -j"$(nproc)" install
+        make -C "$BUSYBOX_BUILD" ARCH=riscv CROSS_COMPILE="$CROSS_COMPILE" CC="$BUSYBOX_CC" LD="${CROSS_COMPILE}ld -m elf32lriscv" "EXTRA_LDFLAGS=-Wl,-m,elf32lriscv" -j"$(nproc)" install
     fi
     cp -a "$BUSYBOX_BUILD/_install/"* "$INITRAMFS_DIR/"
 else
     print_step "Extracting Alpine Linux minirootfs (RV64)..."
     tar -xf "sources/alpine-minirootfs-${ALPINE_VER}-riscv64.tar.gz" -C "$INITRAMFS_DIR"
-fi
-
-# Compile custom Snake game
-print_step "Compiling custom Snake game..."
-SNAKE_SRC="$ROOT_DIR/examples/terminal/snake.c"
-if [[ "$ARCH" == "rv64" ]] && [[ -f "$INITRAMFS_DIR/lib/libc.musl-riscv64.so.1" ]]; then
-    "${CROSS_COMPILE}gcc" -O2 -march="${M_ARCH}" -mabi="${M_ABI}" -Wl,-dynamic-linker=/lib/ld-musl-riscv64.so.1 -nodefaultlibs "$SNAKE_SRC" "$INITRAMFS_DIR/lib/libc.musl-riscv64.so.1" -lgcc -o "$INITRAMFS_DIR/usr/bin/snake"
-else
-    "${CROSS_COMPILE}gcc" -static -O2 -march="${M_ARCH}" -mabi="${M_ABI}" "$SNAKE_SRC" -o "$INITRAMFS_DIR/usr/bin/snake"
 fi
 
 # Set up init script and inittab
@@ -369,9 +377,14 @@ fi
 LINUX_BUILD="$BUILD_DIR/linux-${LINUX_VER}"
 cd "$LINUX_BUILD"
 
+# The source tree is shared by RV32 and RV64 builds. Remove generated objects
+# before changing XLEN so stale architecture-specific objects cannot be linked
+# into the next kernel.
+print_step "Cleaning Linux build tree before configuring ${ARCH}..."
+make ARCH=riscv CROSS_COMPILE="$CROSS_COMPILE" mrproper
+
 cp "$BUILD_DIR/initramfs_${ARCH}.cpio" "$LINUX_BUILD/initramfs.cpio"
 
-rm -f .config
 print_step "Configuring Linux Kernel..."
 make ARCH=riscv CROSS_COMPILE="$CROSS_COMPILE" "$LINUX_DEFCONFIG"
 
@@ -439,7 +452,15 @@ cd "$OPENSBI_BUILD"
 rm -rf "$OPENSBI_BUILD/build"
 
 # Compile DTS to DTB
-dtc -I dts -O dtb -o "$IMAGES_DIR/devicetree.dtb" "$SCRIPT_DIR/templates/virt-rv${XLEN}.dts"
+DTC_BIN="$(command -v dtc || true)"
+if [[ -z "$DTC_BIN" && -x "$LINUX_BUILD/scripts/dtc/dtc" ]]; then
+    DTC_BIN="$LINUX_BUILD/scripts/dtc/dtc"
+fi
+if [[ -z "$DTC_BIN" ]]; then
+    print_error "Device-tree compiler 'dtc' was not found in PATH or the Linux build tree."
+    exit 1
+fi
+"$DTC_BIN" -I dts -O dtb -o "$IMAGES_DIR/devicetree.dtb" "$SCRIPT_DIR/templates/virt-rv${XLEN}.dts"
 
 print_step "Compiling OpenSBI v${OPENSBI_VER} (FW_PAYLOAD)..."
 

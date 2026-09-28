@@ -13,8 +13,8 @@ import types
 import unittest
 from unittest import mock
 
-
 ROOT = pathlib.Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "scripts"))
 
 
 def load(name: str, path: pathlib.Path):
@@ -28,9 +28,26 @@ release_check = load("release_check", ROOT / "scripts/release_check.py")
 benchmark = load("benchmark", ROOT / "scripts/benchmark.py")
 aggregate = benchmark
 benchmark_modes = load("benchmark_modes", ROOT / "scripts/benchmark_modes.py")
+metadata = load("experiment_metadata", ROOT / "scripts/experiment_metadata.py")
 
 
 class ReleaseToolTests(unittest.TestCase):
+    def test_configuration_fingerprint_is_stable(self):
+        first = {"xlen": 64, "isa": "rv64gc", "vlen": 256}
+        second = {"vlen": 256, "isa": "rv64gc", "xlen": 64}
+        first_json, first_id = metadata.configuration_fingerprint(first)
+        second_json, second_id = metadata.configuration_fingerprint(second)
+        self.assertEqual(first_json, second_json)
+        self.assertEqual(first_id, second_id)
+        self.assertEqual(len(first_id), 16)
+
+    def test_experiment_manifest_declares_stopping_policies(self):
+        manifest = json.loads((ROOT / "repro/experiment-manifest.json").read_text())
+        ids = [item["id"] for item in manifest["performance"]["workloads"]]
+        self.assertEqual(len(ids), len(set(ids)))
+        self.assertIn(0, [item["instruction_limit"]
+                          for item in manifest["performance"]["workloads"]])
+
     def test_benchmark_commands_share_isa_and_symmetric_limit(self):
         isa = "rv64gc_zicsr_zifencei_zicntr"
         simrv = benchmark.simrv_benchmark_command(
@@ -177,6 +194,7 @@ class ReleaseToolTests(unittest.TestCase):
             second = aggregate.load_rows([source])
             self.assertEqual(first, second)
             self.assertEqual(first[0]["median_kips"], 2.0)
+            self.assertEqual(first[0]["median_kips_ci"], second[0]["median_kips_ci"])
 
     def test_compare_is_evidence_only_by_default(self):
         def report(speed):

@@ -33,7 +33,7 @@
             riscv,isa-base = "rv32i";
             riscv,isa-extensions = "i", "m", "a", "f", "d", "c", "b", "v", "zicntr", "zicsr", "zifencei", "zihintpause";
             mmu-type = "riscv,sv32";
-            clock-frequency = <1000000000>;
+            clock-frequency = <160000000>;
 
             cpu0_intc: interrupt-controller {
                 #interrupt-cells = <1>;

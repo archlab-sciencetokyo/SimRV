@@ -37,6 +37,27 @@ In cycle-accurate and pipeline modes, instruction slots traverse stages with exp
 structural hazard stalls, and branch-prediction redirection. Architectural effects commit strictly
 at the retirement boundary.
 
+### Counters, clocks, and virtual time
+
+The virtual platform advertises a 160 MHz CPU clock and a 10 MHz architectural timer timebase.
+These values are defined together in `PlatformTiming.hpp`; consequently, `mtime` advances once per
+16 modeled CPU cycles and one timer tick represents 100 ns. The power-of-two divider keeps timer
+accumulation exact and inexpensive.
+
+Counter interpretation depends on the execution policy:
+
+- In cycle-accurate mode, `mcycle`/`cycle` advances for every modeled clock cycle, including stalls,
+  bubbles, cache/interconnect waits, and recovery cycles. Cycle-based device and memory delays can
+  therefore be converted to virtual seconds using the advertised 160 MHz clock.
+- In fast and detailed instruction-accurate modes, one execution step is assigned one virtual CPU
+  cycle. `mcycle` and `mtime` remain deterministic and useful to guest software, but elapsed virtual
+  time is not a prediction of physical hardware time or workload latency.
+- In every mode, `minstret`/`instret` counts successfully retired instructions. Instructions that
+  trap before retirement do not increment it.
+
+The TUI labels the instruction-accurate value as `virt` and the cycle-accurate value as `sim` to
+make this distinction explicit. Host elapsed time and execution speed are separate measurements.
+
 ### Fast-Batch Execution Engine & Debug Fallbacks
 
 In `--mode fast` (Instruction-Accurate), single-hart OS kernels and baremetal applications run via the
@@ -44,7 +65,7 @@ In `--mode fast` (Instruction-Accurate), single-hart OS kernels and baremetal ap
 
 - **Batched Retirement & Telemetry**: Eliminates per-instruction atomic operations on machine-wide retirement
   counters, synchronizing only at chunk, decode miss, or batch boundaries.
-- **CLINT Chunking**: Architectural timebase (`mcycle`, `mtime`, and timer interrupt evaluations) updates in
+- **CLINT Chunking**: Virtual counters (`mcycle`, `mtime`, and timer interrupt evaluations) update in
   64-instruction chunks during tight loops, preventing timer evaluation overhead on every single instruction.
 - **Inlined Cached Helpers**: Load, store, branch, and jump operations inline directly into the opcode dispatcher
   without function call frames.

@@ -20,7 +20,7 @@ Spike lockstep workloads run by the release gates.
 extensions; they are not implied by `G`. MISA contains the single-letter extension bits only and
 therefore cannot describe individual `Zb*` subsets.
 
-The `--misa gc` profile selects G plus C and does not implicitly enable B or V. SimRV's historical
+The `--isa gc` profile selects G plus C and does not implicitly enable B or V. SimRV's historical
 default target is now named explicitly as `gcbv`; XLEN-qualified forms such as `rv64gcbv` are also
 accepted. Naming the profile explicitly does not override the vector qualification limits below.
 
