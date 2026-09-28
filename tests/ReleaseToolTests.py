@@ -35,6 +35,7 @@ class ReleaseToolTests(unittest.TestCase):
     def test_release_workflow_publishes_curated_assets(self):
         workflow = (ROOT / ".github/workflows/release-binaries.yml").read_text()
         cmake = (ROOT / "CMakeLists.txt").read_text()
+        manifest = json.loads((ROOT / "release/release-manifest.json").read_text())
         self.assertIn("publish-release:", workflow)
         self.assertIn("SimRV-rpm-packages-v${VERSION}.tar.gz", workflow)
         self.assertIn("SimRV-deb-packages-v${VERSION}.tar.gz", workflow)
@@ -58,6 +59,15 @@ class ReleaseToolTests(unittest.TestCase):
         self.assertIn("rpm-packages/rv32", workflow)
         self.assertIn("rpm-packages/rv64", workflow)
         self.assertIn("repodata/repomd.xml", workflow)
+        self.assertEqual(
+            manifest["artifacts"],
+            [
+                "SimRV-rv32-linux-x86_64-v3.0.0-beta.2.tar.gz",
+                "SimRV-rv64-linux-x86_64-v3.0.0-beta.2.tar.gz",
+                "SimRV-rpm-packages-v3.0.0-beta.2.tar.gz",
+                "SimRV-deb-packages-v3.0.0-beta.2.tar.gz",
+            ],
+        )
 
     def test_native_package_versions_match_release_semver(self):
         version = "3.0.0-beta.2"
