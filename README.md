@@ -7,7 +7,7 @@
 <p align="center">
   <a href="https://github.com/archlab-sciencetokyo/SimRV/actions/workflows/c-cpp.yml"><img src="https://github.com/archlab-sciencetokyo/SimRV/actions/workflows/c-cpp.yml/badge.svg?branch=dev" alt="C/C++ CI"/></a>
   <a href="https://github.com/archlab-sciencetokyo/SimRV/actions/workflows/docs.yml"><img src="https://github.com/archlab-sciencetokyo/SimRV/actions/workflows/docs.yml/badge.svg?branch=dev" alt="Docs CI"/></a>
-  <a href="https://archlab-sciencetokyo.github.io/SimRV/stable/"><img src="https://img.shields.io/badge/docs-GitHub_Pages-blue.svg" alt="Documentation"/></a>
+  <a href="https://archlab-sciencetokyo.github.io/SimRV/dev/"><img src="https://img.shields.io/badge/docs-GitHub_Pages-blue.svg" alt="Documentation"/></a>
   <a href="https://github.com/archlab-sciencetokyo/SimRV/releases"><img src="https://img.shields.io/github/v/release/archlab-sciencetokyo/SimRV?include_prereleases" alt="Latest SimRV release"/></a>
   <a href="https://github.com/archlab-sciencetokyo/SimRV/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-MIT-green.svg" alt="License"/></a>
   <img src="https://img.shields.io/badge/C%2B%2B-23-purple.svg" alt="C++23"/>
@@ -23,38 +23,38 @@ SimRV is not RISC-V certified. `RV32GCBV` and `RV64GCBV` are implementation targ
 
 ## Documentation
 
-Explore the released documentation at **[SimRV stable documentation](https://archlab-sciencetokyo.github.io/SimRV/stable/)**. The version selector also exposes documentation for the `dev` branch.
+Explore the in-progress **[SimRV development documentation](https://archlab-sciencetokyo.github.io/SimRV/dev/)**. The stable release documentation is available at [the stable site](https://archlab-sciencetokyo.github.io/SimRV/stable/).
 
 <table>
   <tr>
     <td width="50%" valign="top">
-      <h3>📖 <a href="https://archlab-sciencetokyo.github.io/SimRV/stable/user/">User Guide</a></h3>
+      <h3>📖 <a href="https://archlab-sciencetokyo.github.io/SimRV/dev/user/">User Guide</a></h3>
       <p>CLI flags, interactive TUI controls, hotkeys, execution modes, and student architecture guide.</p>
       <ul>
-        <li><a href="https://archlab-sciencetokyo.github.io/SimRV/stable/user/">Quickstart & CLI Flags</a> (<a href="docs/user/index.md">source</a>)</li>
-        <li><a href="https://archlab-sciencetokyo.github.io/SimRV/stable/user/tui/">TUI Controls & Keybindings</a> (<a href="docs/user/tui.md">source</a>)</li>
-        <li><a href="https://archlab-sciencetokyo.github.io/SimRV/stable/user/classroom/">Student Reference Guide</a> (<a href="docs/user/classroom.md">source</a>)</li>
+        <li><a href="https://archlab-sciencetokyo.github.io/SimRV/dev/user/">Quickstart & CLI Flags</a> (<a href="docs/user/index.md">source</a>)</li>
+        <li><a href="https://archlab-sciencetokyo.github.io/SimRV/dev/user/tui/">TUI Controls & Keybindings</a> (<a href="docs/user/tui.md">source</a>)</li>
+        <li><a href="https://archlab-sciencetokyo.github.io/SimRV/dev/user/classroom/">Student Reference Guide</a> (<a href="docs/user/classroom.md">source</a>)</li>
       </ul>
     </td>
     <td width="50%" valign="top">
-      <h3>⚙️ <a href="https://archlab-sciencetokyo.github.io/SimRV/stable/architecture/overview/">Architecture & Models</a></h3>
+      <h3>⚙️ <a href="https://archlab-sciencetokyo.github.io/SimRV/dev/architecture/overview/">Architecture & Models</a></h3>
       <p>Core execution units, 3/5-stage pipelines, TileLink-C cache coherence, CPU models, and RTL parity.</p>
       <ul>
-        <li><a href="https://archlab-sciencetokyo.github.io/SimRV/stable/architecture/overview/">Architectural Overview</a> (<a href="docs/architecture/overview.md">source</a>)</li>
-        <li><a href="https://archlab-sciencetokyo.github.io/SimRV/stable/architecture/tilelink/">TileLink-C Coherence</a> (<a href="docs/architecture/tilelink.md">source</a>)</li>
-        <li><a href="https://archlab-sciencetokyo.github.io/SimRV/stable/hardware/models/">CPU Models & Calibration</a> (<a href="docs/hardware/models.md">source</a>)</li>
-        <li><a href="https://archlab-sciencetokyo.github.io/SimRV/stable/hardware/rtl_parity/">RTL Parity Verification</a> (<a href="docs/hardware/rtl_parity.md">source</a>)</li>
+        <li><a href="https://archlab-sciencetokyo.github.io/SimRV/dev/architecture/overview/">Architectural Overview</a> (<a href="docs/architecture/overview.md">source</a>)</li>
+        <li><a href="https://archlab-sciencetokyo.github.io/SimRV/dev/architecture/tilelink/">TileLink-C Coherence</a> (<a href="docs/architecture/tilelink.md">source</a>)</li>
+        <li><a href="https://archlab-sciencetokyo.github.io/SimRV/dev/hardware/models/">CPU Models & Calibration</a> (<a href="docs/hardware/models.md">source</a>)</li>
+        <li><a href="https://archlab-sciencetokyo.github.io/SimRV/dev/hardware/rtl_parity/">RTL Parity Verification</a> (<a href="docs/hardware/rtl_parity.md">source</a>)</li>
       </ul>
     </td>
   </tr>
   <tr>
     <td width="50%" valign="top">
-      <h3>🐧 <a href="https://archlab-sciencetokyo.github.io/SimRV/stable/user/linux/">Bare-Metal & Linux</a></h3>
+      <h3>🐧 <a href="https://archlab-sciencetokyo.github.io/SimRV/dev/user/linux/">Bare-Metal & Linux</a></h3>
       <p>Bare-metal firmware, memory maps, MMIO peripherals (16550A UART, CLINT, PLIC, VirtIO block), and multi-hart SMP Linux.</p>
       <ul>
-        <li><a href="https://archlab-sciencetokyo.github.io/SimRV/stable/user/baremetal/">Bare-Metal Development</a> (<a href="docs/user/baremetal.md">source</a>)</li>
-        <li><a href="https://archlab-sciencetokyo.github.io/SimRV/stable/user/linux/">Booting SMP Linux</a> (<a href="docs/user/linux.md">source</a>)</li>
-        <li><a href="https://archlab-sciencetokyo.github.io/SimRV/stable/architecture/compliance/">RISC-V Compliance Scope</a> (<a href="docs/architecture/compliance.md">source</a>)</li>
+        <li><a href="https://archlab-sciencetokyo.github.io/SimRV/dev/user/baremetal/">Bare-Metal Development</a> (<a href="docs/user/baremetal.md">source</a>)</li>
+        <li><a href="https://archlab-sciencetokyo.github.io/SimRV/dev/user/linux/">Booting SMP Linux</a> (<a href="docs/user/linux.md">source</a>)</li>
+        <li><a href="https://archlab-sciencetokyo.github.io/SimRV/dev/architecture/compliance/">RISC-V Compliance Scope</a> (<a href="docs/architecture/compliance.md">source</a>)</li>
       </ul>
     </td>
     <td width="50%" valign="top">
@@ -63,8 +63,6 @@ Explore the released documentation at **[SimRV stable documentation](https://arc
       <ul>
         <li><a href="https://archlab-sciencetokyo.github.io/SimRV/dev/dev/contributing/">Contributing Standards</a> (<a href="docs/dev/contributing.md">source</a>)</li>
         <li><a href="https://archlab-sciencetokyo.github.io/SimRV/dev/dev/migration/">2.x to 3.0 Migration</a> (<a href="docs/dev/migration.md">source</a>)</li>
-        <li><a href="https://archlab-sciencetokyo.github.io/SimRV/stable/evaluation/reviewer/">Artifact Evaluation Guide</a> (<a href="docs/evaluation/reviewer.md">source</a>)</li>
-        <li><a href="https://archlab-sciencetokyo.github.io/SimRV/stable/evaluation/release/">Release Governance</a> (<a href="docs/evaluation/release.md">source</a>)</li>
       </ul>
     </td>
   </tr>
@@ -248,8 +246,6 @@ the [TileLink-C profile](docs/architecture/tilelink.md) for protocol/coherence s
 [3.0 migration guide](docs/dev/migration.md) for intentional host-interface breakage.
 SBI/OpenSBI distinction, and the evidence required before treating a feature as verified. The
 profile names are implementation targets and do not by themselves claim RISC-V certification.
-The cross-subsystem qualification status is summarized in the
-[release support boundary](docs/evaluation/release.md#support-and-qualification-boundary).
 
 | Extension | Status | Description & Features |
 | --- | --- | --- |
@@ -361,7 +357,6 @@ for portable archive, RPM, DEB, upgrade, and removal instructions.
 - `docs/`: Focused architecture, user, contributor, compliance, and release guides
 - `CHANGELOG.md`: Version release log
 - `docs/hardware/models.md`: CPU model configuration framework, parameters, wizard, and RTL calibration
-- `docs/evaluation/release.md`: 2.0/3.0 support contract, validation matrix, and publishing checklist
 - `docs/user/tui.md`: TUI input focus, rendering layers, and test coverage
 - `repro/`: Research-companion scripts and reproducibility instructions
 - `release/`: Release metadata, evidence schemas, and publishing inputs
