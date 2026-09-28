@@ -133,11 +133,11 @@ def main():
         simrv_bin = Path(args.simrv_bin).resolve()
     else:
         candidates = [
-            repo_root / "build/rv64-release/SimRV",
-            repo_root / "build/rv32-release/SimRV",
-            Path(__file__).resolve().parent / "SimRV",
+            repo_root / "build/rv64-release/simrv",
+            repo_root / "build/rv32-release/simrv",
+            Path(__file__).resolve().parent / "simrv",
         ]
-        which_simrv = shutil.which("SimRV")
+        which_simrv = shutil.which("simrv")
         if which_simrv:
             candidates.append(Path(which_simrv))
         simrv_bin = next((c for c in candidates if c.exists()), candidates[0])

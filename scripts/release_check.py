@@ -128,7 +128,18 @@ def verify_archive(archive: pathlib.Path, version: str) -> None:
                 if any(pathlib.PurePosixPath(m.name).is_absolute() or ".." in pathlib.PurePosixPath(m.name).parts for m in members):
                     fail(f"unsafe path in archive: {archive}")
                 tar.extractall(temp_dir, filter="data")
-            verify_binary(pathlib.Path(temp_dir) / "SimRV", version)
+            extracted = pathlib.Path(temp_dir)
+            candidates = (
+                extracted / "simrv",
+                extracted / "usr" / "bin" / "simrv",
+                # Accept pre-beta.3 archives for historical release validation.
+                extracted / "SimRV",
+                extracted / "usr" / "bin" / "SimRV",
+            )
+            binary = next((candidate for candidate in candidates if candidate.is_file()), None)
+            if binary is None:
+                fail(f"archive has no SimRV runtime binary: {archive}")
+            verify_binary(binary, version)
     except (tarfile.TarError, OSError) as error:
         fail(f"cannot validate archive {archive}: {error}")
 

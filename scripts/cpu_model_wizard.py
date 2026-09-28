@@ -467,7 +467,7 @@ def main():
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_text(content, encoding="utf-8")
     print(f"\n[+] Successfully wrote CPU model configuration to: {out_path.resolve()}")
-    print(f"    Run with: SimRV --ca --cpu-profile {out_path} -m <program.elf>")
+    print(f"    Run with: simrv --ca --cpu-profile {out_path} -m <program.elf>")
 
 if __name__ == "__main__":
     main()

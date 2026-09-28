@@ -41,7 +41,7 @@ def main():
     if not simrv_bin:
         script_dir = os.path.dirname(os.path.abspath(__file__))
         repo_root = os.path.dirname(script_dir)
-        simrv_bin = os.path.join(repo_root, "build", "rv64-release", "SimRV")
+        simrv_bin = os.path.join(repo_root, "build", "rv64-release", "simrv")
 
     images_dir = os.environ.get("SIMRV_IMAGES_DIR")
     if not images_dir:

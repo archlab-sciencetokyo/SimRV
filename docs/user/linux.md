@@ -70,7 +70,7 @@ reboot     # Cleanly restarts the guest system
 
 ```bash
 source ./linux-images/rv32/setup.sh
-./build/rv32-release/SimRV \
+./build/rv32-release/simrv \
     -m $SIMRV_LINUX_MEM_IMG \
     -D $SIMRV_LINUX_DISK_IMG \
     --fdt $SIMRV_LINUX_DTB \
@@ -414,6 +414,6 @@ in `integration-gate`.
 After images are ready:
 
 1. ✅ Export environment: `source linux-images/rv32/setup.sh`
-2. ✅ Manual boot test: `./build/rv32-release/SimRV -m $SIMRV_LINUX_MEM_IMG -D $SIMRV_LINUX_DISK_IMG --fdt $SIMRV_LINUX_DTB --cli`
+2. ✅ Manual boot test: `./build/rv32-release/simrv -m $SIMRV_LINUX_MEM_IMG -D $SIMRV_LINUX_DISK_IMG --fdt $SIMRV_LINUX_DTB --cli`
 3. ✅ TUI boot: `cmake --build --preset rv32-release --target run-tui`
 4. ✅ Full validation: `cmake --build --preset rv32-release --target integration-gate`

@@ -45,6 +45,10 @@ cmake --preset rv64-debug
 cmake --build --preset rv64-debug -j$(nproc)
 ```
 
+Published documentation exposes `stable` (from `main`) and `dev` versions through the header
+selector. Keep branch-specific claims accurate: changes pushed to `dev` are visible before they
+become part of the stable documentation.
+
 ### Formatting Verification
 
 Code formatting strictly follows Google C++ style with a 100-column margin. Run dry-run checks before committing:
@@ -58,7 +62,9 @@ clang-format --dry-run --Werror $(find include src tests -name "*.cpp" -o -name 
 ## 3. C++23 Architectural & Coding Idioms
 
 1. **Compile-Time Fixed XLEN**:
-   - Architecture bitwidth is compile-time fixed via `SIMRV_XLEN` (32 or 64). There is no runtime XLEN switching.
+   - Implementation bitwidth is compile-time fixed via `SIMRV_XLEN` (32 or 64). The
+     RV64 implementation also supports an RV32 guest personality selected from an ELF
+     or with `--isa rv32...`; it remains internally distinct from the native RV32 build.
 2. **Domain-Specific Type Aliases**:
    - Avoid generic primitive types (`uint64_t`, `uint32_t`, `int`) when domain aliases exist:
      - `Word`, `Address`, `PhysAddr`, `VirtAddr`, `RegId`, `CSRValue`, `TrapCause`.
@@ -89,7 +95,7 @@ SimRV development follows strict branch hygiene defined in `.agents/rules/branch
 
 ### Release Qualification Branches
 
-- **Naming**: Strictly follow `release/<semver>` (e.g., `release/3.0.0-alpha.4`).
+- **Naming**: Strictly follow `release/<semver>` (for example, `release/3.0.0-beta.3`).
 - **Release Metadata Bumps**: Version bumps across `CMakeLists.txt`, `release/release-manifest.json`, `CITATION.cff`, `CHANGELOG.md`, and `TODO.md` must be committed directly to the release branch with message:
   `chore(release): bump version to <version> and update release metadata`
 - **Delivery Vehicle**: Use the PR targeting `dev` as the delivery tracking vehicle. **Do not create Git tags or publish GitHub releases** until all CI matrix jobs are green and merged.
@@ -133,5 +139,5 @@ ctest --test-dir build/rv64-release --output-on-failure -L gate
 ctest --test-dir build/rv32-release --output-on-failure -L gate
 
 # Release metadata conformance
-python3 scripts/release_check.py --binary build/rv64-release/SimRV
+python3 scripts/release_check.py --binary build/rv64-release/simrv
 ```

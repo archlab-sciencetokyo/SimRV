@@ -58,7 +58,7 @@ def main() -> None:
                 elapsed += run([
                     "ctest", "--test-dir", str(build_dir), "--output-on-failure", "-L", "gate"
                 ], env=os.environ.copy())
-                binary = build_dir / "SimRV"
+                binary = build_dir / "simrv"
                 run([sys.executable, "scripts/release_check.py", "--binary", str(binary)])
                 report["configurations"].append({
                     "iteration": iteration,

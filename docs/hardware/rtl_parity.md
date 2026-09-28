@@ -9,12 +9,12 @@ python3 scripts/evaluate_rtl_parity.py --list-targets
 
 python3 scripts/evaluate_rtl_parity.py rvcomp \
   --rvcomp-dir ../RVComp \
-  --simrv-bin build/rv32-release/SimRV \
+  --simrv-bin build/rv32-release/simrv \
   --trace-dir build/rvcomp_parity_traces
 
 python3 scripts/evaluate_rtl_parity.py cfu-pg \
   --cfu-dir ../CFU-Proving-Ground \
-  --simrv-bin build/rv32-release/SimRV \
+  --simrv-bin build/rv32-release/simrv \
   --trace-dir build/cfu_pg_parity_traces
 ```
 

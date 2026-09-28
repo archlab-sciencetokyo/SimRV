@@ -114,7 +114,7 @@ the target paused, and relistens.
 
 The native `gdb-stub` suite is labelled `gate;regress;debug;thread` and uses ephemeral ports with
 command/reply synchronization. Compare CLI throughput to a connected, running debugger with
-`python3 scripts/benchmark.py gdb --simrv build/rv64-release/SimRV --runs 5 --json build/gdb-benchmark.json`.
+`python3 scripts/benchmark.py gdb --simrv build/rv64-release/simrv --runs 5 --json build/gdb-benchmark.json`.
 It interleaves five runs of each mode on one CPU and checks the median throughput against a 5%
 regression limit. `--trace-prefix build/gdb-syscalls` records a separate short syscall trace for
 confirming that socket activity stays on the server thread.

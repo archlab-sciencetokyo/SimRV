@@ -1430,7 +1430,7 @@ def gdb_main(argv: list[str]) -> int:
                 process.wait()
 
     parser = argparse.ArgumentParser(description="Compare paired CLI/GDB runs")
-    parser.add_argument("--simrv", default="build/rv64-release/SimRV")
+    parser.add_argument("--simrv", default="build/rv64-release/simrv")
     parser.add_argument("--instructions", type=int, default=100_000_000)
     parser.add_argument("--runs", type=int, default=5)
     parser.add_argument("--json", type=pathlib.Path)
@@ -1602,18 +1602,18 @@ def main():
     # 3. Resolve SimRV binary
     simrv_bin = args.simrv
     if not simrv_bin:
-        simrv_64 = os.path.join(root_dir, "build/rv64-release/SimRV")
-        simrv_32 = os.path.join(root_dir, "build/rv32-release/SimRV")
+        simrv_64 = os.path.join(root_dir, "build/rv64-release/simrv")
+        simrv_32 = os.path.join(root_dir, "build/rv32-release/simrv")
         if is_executable(simrv_64):
             simrv_bin = simrv_64
         elif is_executable(simrv_32):
             simrv_bin = simrv_32
-        elif which("SimRV"):
-            simrv_bin = which("SimRV")
-        elif is_executable(os.path.join(os.path.dirname(os.path.abspath(__file__)), "SimRV")):
-            simrv_bin = os.path.join(os.path.dirname(os.path.abspath(__file__)), "SimRV")
+        elif which("simrv"):
+            simrv_bin = which("simrv")
+        elif is_executable(os.path.join(os.path.dirname(os.path.abspath(__file__)), "simrv")):
+            simrv_bin = os.path.join(os.path.dirname(os.path.abspath(__file__)), "simrv")
         else:
-            simrv_bin = os.path.join(root_dir, "SimRV")
+            simrv_bin = os.path.join(root_dir, "simrv")
 
     if not is_executable(simrv_bin):
         print(

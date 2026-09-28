@@ -60,6 +60,9 @@ jobs:
         ./configure
         ARCH="${{ matrix.arch }}"
         make -C isa -j$(nproc) RISCV_PREFIX=riscv-none-elf- XLEN="${ARCH#rv}"
+        if [[ "${ARCH}" == "rv64" ]]; then
+          make -C isa -j$(nproc) RISCV_PREFIX=riscv-none-elf- XLEN=32
+        fi
 
     - name: Fetch and build pinned vector tests
       if: matrix.compiler == 'gcc'

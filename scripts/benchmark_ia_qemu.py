@@ -87,7 +87,7 @@ def render(report):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--simrv", default="./build/rv64-release/SimRV")
+    parser.add_argument("--simrv", default="./build/rv64-release/simrv")
     parser.add_argument("--qemu", default="qemu-system-riscv64")
     parser.add_argument("--firmware", default="linux-images/rv64/fw_payload.bin")
     parser.add_argument("--disk", default="linux-images/rv64/root.img")

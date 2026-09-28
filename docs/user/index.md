@@ -6,16 +6,16 @@ SimRV is an explainable, dual-width (RV32 / RV64) RISC-V architectural simulator
 
 ## Table of Contents
 
-1. [Architecture & Features Overview](#1-architecture--features-overview)
-2. [Installation & Quickstart](#2-installation--quickstart)
+1. [Architecture & Features Overview](#1-architecture-features-overview)
+2. [Installation & Quickstart](#2-installation-quickstart)
 3. [Command-Line Interface (CLI)](#3-command-line-interface-cli)
 4. [Interactive TUI Workbench](#4-interactive-tui-workbench)
-5. [Bare-Metal & Embedded Simulation](#5-bare-metal--embedded-simulation)
+5. [Bare-Metal & Embedded Simulation](#5-bare-metal-embedded-simulation)
 6. [Full-System Linux Emulation](#6-full-system-linux-emulation)
-7. [CPU Model Profiles & Microarchitecture Tuning](#7-cpu-model-profiles--microarchitecture-tuning)
+7. [CPU Model Profiles & Microarchitecture Tuning](#7-cpu-model-profiles-microarchitecture-tuning)
 8. [RTL Parity Verification](#8-rtl-parity-verification)
 9. [Benchmarking Suite](#9-benchmarking-suite)
-10. [Troubleshooting & Reference](#10-troubleshooting--reference)
+10. [Troubleshooting & Reference](#10-troubleshooting-reference)
 
 ---
 
@@ -34,6 +34,9 @@ SimRV simulates standard 32-bit and 64-bit RISC-V systems:
 
 ## 2. Installation & Quickstart
 
+For the portable archive and native RPM or DEB packages, start with the dedicated
+[installation guide](install.md). The instructions below cover source builds.
+
 ### Prerequisites
 
 - Modern C++23 compiler: **Clang 22+** or **GCC 16+**
@@ -49,16 +52,17 @@ SimRV requires using standard CMake presets:
 git clone https://github.com/archlab-sciencetokyo/SimRV.git
 cd SimRV
 
-# Build RV64 Release (default target)
+# Build the normal RV64-capable release target
 cmake --preset rv64-release
 cmake --build --preset rv64-release -j$(nproc)
 
-# Build RV32 Release
+# Optional: build the strict-width RV32 verification target
 cmake --preset rv32-release
 cmake --build --preset rv32-release -j$(nproc)
 ```
 
-The resulting simulator executable is located at `build/rv64-release/SimRV` (or `build/rv32-release/SimRV`).
+The normal executable is `build/rv64-release/simrv`. It runs RV64 guests and RV32 guests; the
+separate `build/rv32-release/simrv` target is primarily retained for strict-width validation.
 
 ### Installing System-Wide
 
@@ -69,7 +73,7 @@ sudo cmake --install build/rv64-release --prefix /usr/local
 
 Installed files include:
 
-- Executables: `/usr/local/bin/SimRV`, `/usr/local/bin/simrv-cpu-wizard`, `/usr/local/bin/simrv-tune`, `/usr/local/bin/simrv-parity`, `/usr/local/bin/simrv-benchmark`
+- Executables: `/usr/local/bin/simrv`, `/usr/local/bin/simrv-cpu-wizard`, `/usr/local/bin/simrv-tune`, `/usr/local/bin/simrv-parity`, `/usr/local/bin/simrv-benchmark`
 - CPU Model Templates: `/usr/local/share/SimRV/models/`
 - JSON Schemas: `/usr/local/share/SimRV/schemas/`
 - Documentation & Man Page: `/usr/local/share/doc/SimRV/USER_GUIDE.md`, `/usr/local/share/man/man1/simrv.1`
@@ -78,22 +82,22 @@ Installed files include:
 
 ## 3. Command-Line Interface (CLI)
 
-By default, launching `SimRV` without arguments launches the interactive TUI workbench. For non-interactive batch scripts or automated testing, provide `--cli`.
+By default, launching `simrv` without arguments launches the interactive TUI workbench. For non-interactive batch scripts or automated testing, provide `--cli`.
 
 ### Common Invocations
 
 ```bash
 # Run a bare-metal ELF binary in fast headless CLI mode
-SimRV --cli -m program.elf
+simrv --cli -m program.elf
 
 # Run in cycle-accurate (CA) mode with step limit
-SimRV --cli --ca -m program.elf -s 1000000
+simrv --cli --ca -m program.elf -s 1000000
 
 # Load a custom CPU model profile
-SimRV --cli --ca --cpu-profile configs/models/rvcomp.cfg -m program.elf
+simrv --cli --ca --cpu-profile configs/models/rvcomp.cfg -m program.elf
 
 # Launch TUI workbench with loaded binary
-SimRV -m program.elf
+simrv -m program.elf
 ```
 
 ### Key CLI Options
@@ -161,7 +165,7 @@ SimRV can execute freestanding bare-metal ELFs compiled with standard RISC-V GCC
 
 ```bash
 # Run baremetal ELF with standard tohost exit reporting
-SimRV --cli -m build/my_program.elf -H 0x80001000
+simrv --cli -m build/my_program.elf -H 0x80001000
 ```
 
 ### Hardware Peripherals Emulated
@@ -181,7 +185,7 @@ SimRV boots full Linux distributions with OpenSBI and dynamic device-tree genera
 
 ```bash
 # Launch Linux with OpenSBI and root filesystem image
-SimRV --kernel linux-images/Image \
+simrv --kernel linux-images/Image \
       --disk linux-images/root.img \
       --smp 2
 ```
@@ -270,7 +274,7 @@ simrv-benchmark --suite realworld --latex-table
   *A:* Keyboard input routes automatically based on execution state: while running, keystrokes are delivered directly to the guest terminal; while paused (via `F5` or `Ctrl-P`), keystrokes control simulator inspection and navigation.
 
 - **Q: Why does headless CLI mode finish without displaying the TUI?**
-  *A:* The `--cli` flag enforces non-interactive headless operation. To see the graphical TUI workbench, run `SimRV` without `--cli`.
+  *A:* The `--cli` flag enforces non-interactive headless operation. To see the graphical TUI workbench, run `simrv` without `--cli`.
 
 - **Q: Where are instruction traces written when passing `--trace`?**
   *A:* Traces are saved in the `trace/` directory relative to your working directory (`trace/trace.txt`, `trace/tracepc.txt`).

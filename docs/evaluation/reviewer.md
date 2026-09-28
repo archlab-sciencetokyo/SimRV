@@ -48,7 +48,7 @@ ctest --test-dir build/rv64-release --output-on-failure -L gate
 ctest --test-dir build/rv32-release --output-on-failure -L gate
 
 # Run release metadata conformance check
-python3 scripts/release_check.py --binary build/rv64-release/SimRV
+python3 scripts/release_check.py --binary build/rv64-release/simrv
 ```
 
 ### Step 3: Full Clean-Checkout Reproducibility Suite
@@ -73,7 +73,7 @@ To run parity verification against a local checkout of CFU-Proving-Ground or RVC
 ```bash
 python3 scripts/evaluate_rtl_parity.py cfu-pg \
   --cfu-dir ../CFU-Proving-Ground \
-  --simrv-bin build/rv32-release/SimRV \
+  --simrv-bin build/rv32-release/simrv \
   --trace-dir build/cfu_pg_parity_traces
 ```
 
@@ -83,14 +83,14 @@ Verify that dynamic multi-core Linux boots cleanly and concurrently executes acr
 
 ```bash
 # Boot 2-hart SMP Linux for 20 million instructions
-./build/rv64-release/SimRV --cli --smp 2 \
+./build/rv64-release/simrv --cli --smp 2 \
   -m linux-images/rv64/fw_payload.bin \
   --dtb dynamic \
   -D linux-images/rv64/root.img \
   -s 20000000
 
 # Boot 4-hart SMP Linux for 20 million instructions
-./build/rv64-release/SimRV --cli --smp 4 \
+./build/rv64-release/simrv --cli --smp 4 \
   -m linux-images/rv64/fw_payload.bin \
   --dtb dynamic \
   -D linux-images/rv64/root.img \
@@ -124,7 +124,7 @@ Notice that instructions retire evenly across harts (e.g. 5.00M per core for 4 h
    - Simulation throughput depends heavily on host CPU microarchitecture, compiler optimization levels, and guest workload characteristics. Users and reviewers are encouraged to record local baseline measurements on their own hardware using the bundled benchmark tooling:
 
      ```bash
-     python3 scripts/benchmark.py --binary build/rv64-release/SimRV
+     python3 scripts/benchmark.py --binary build/rv64-release/simrv
      ```
 
 ---
@@ -138,7 +138,7 @@ If you reference SimRV in peer-reviewed publications, please cite the software r
   title = {{SimRV: A Dual-Width Explainable RISC-V System Simulator}},
   author = {{SimRV Contributors}},
   url = {https://github.com/archlab-sciencetokyo/SimRV},
-  version = {3.0.0-alpha.4},
+  note = {Cite the exact tagged release used for the experiment},
   year = {2026}
 }
 ```

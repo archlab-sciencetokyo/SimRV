@@ -35,7 +35,7 @@ jobs:
       - name: Install build tools
         run: |
           dnf update -y
-          dnf install -y git cmake ninja-build gcc gcc-c++ clang-tools-extra wget tar xz autoconf make which rpm-build
+          dnf install -y git cmake ninja-build gcc gcc-c++ clang-tools-extra wget tar xz autoconf make which rpm-build rpmlint
 
       - name: Fetch and compile riscv-tests
         run: |
@@ -59,6 +59,9 @@ jobs:
           ./configure
           ARCH="${{ matrix.arch }}"
           make -C isa -j$(nproc) RISCV_PREFIX=riscv-none-elf- XLEN="${ARCH#rv}"
+          if [[ "${ARCH}" == "rv64" ]]; then
+            make -C isa -j$(nproc) RISCV_PREFIX=riscv-none-elf- XLEN=32
+          fi
 
       - name: Configure
         env:
@@ -102,27 +105,33 @@ jobs:
             exit 1
           fi
 
-          ASSET_BASE="SimRV-${{ matrix.arch }}-linux-x86_64-${VERSION_TAG}"
+          ASSET_BASE="SimRV-linux-x86_64-${VERSION_TAG}"
           echo "simrv_version=${SIMRV_VERSION}" >> "$GITHUB_OUTPUT"
           echo "version_tag=${VERSION_TAG}" >> "$GITHUB_OUTPUT"
           echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
           echo "asset_base=${ASSET_BASE}" >> "$GITHUB_OUTPUT"
 
-      - name: Package binary
+      - name: Package portable runtime with CPack
+        if: matrix.arch == 'rv64'
         shell: bash
         run: |
           set -euo pipefail
-          mkdir -p dist
-          cp build/${{ matrix.arch }}-release/SimRV dist/SimRV
-          tar -C dist -czf "${{ steps.names.outputs.asset_base }}.tar.gz" SimRV
+          mkdir -p portable-package
+          cpack --config build/rv64-release/CPackConfig.cmake -G TGZ \
+            -D CPACK_COMPONENTS_ALL=Runtime -B portable-package
+          mapfile -t archives < <(find portable-package -maxdepth 1 -name '*.tar.gz' -type f)
+          test "${#archives[@]}" -eq 1
+          mv "${archives[0]}" "${{ steps.names.outputs.asset_base }}.tar.gz"
 
       - name: Validate packaged release
+        if: matrix.arch == 'rv64'
         run: >-
           python3 scripts/release_check.py
-          --binary build/${{ matrix.arch }}-release/SimRV
+          --binary build/${{ matrix.arch }}-release/simrv
           --archive "${{ steps.names.outputs.asset_base }}.tar.gz"
 
       - name: Build CPack RPM packages
+        if: matrix.arch == 'rv64'
         shell: bash
         run: |
           set -euo pipefail
@@ -136,21 +145,26 @@ jobs:
           cpack --config build/${{ matrix.arch }}-release/CPackConfig.cmake -G RPM -B packages
 
       - name: Validate native package contents
+        if: matrix.arch == 'rv64'
         shell: bash
         run: |
           set -euo pipefail
           mapfile -t rpms < <(find packages -maxdepth 1 -name '*.rpm' -type f | sort)
           test "${#rpms[@]}" -eq 3
           for package in "${rpms[@]}"; do rpm -qpl "$package" >/dev/null; done
-          runtime_rpm="$(find packages -maxdepth 1 -name 'simrv-rv*.rpm' -type f)"
+          runtime_rpm="$(find packages -maxdepth 1 -name 'simrv-[0-9]*.rpm' -type f)"
           rpm -qpl "$runtime_rpm" > packages/runtime-rpm-contents.txt
-          grep -q '/usr/bin/SimRV$' packages/runtime-rpm-contents.txt
+          grep -q '/usr/bin/simrv$' packages/runtime-rpm-contents.txt
           if grep -q 'simrv-benchmark' packages/runtime-rpm-contents.txt; then
             echo "Runtime RPM unexpectedly contains benchmark tooling" >&2
             exit 1
           fi
+          rpmlint packages/*.rpm
+          dnf install -y packages/*.rpm
+          simrv --version | grep -F "${{ steps.names.outputs.simrv_version }}"
 
       - name: Upload workflow artifacts
+        if: matrix.arch == 'rv64'
         uses: actions/upload-artifact@v7
         with:
           name: ${{ steps.names.outputs.asset_base }}
@@ -166,16 +180,12 @@ jobs:
       contents: write
     container:
       image: gcc:16
-    strategy:
-      fail-fast: false
-      matrix:
-        arch: [rv32, rv64]
     steps:
       - uses: actions/checkout@v6
       - name: Install package build tools
         run: |
           apt-get update
-          apt-get install -y --no-install-recommends python3 python3-pip dpkg-dev xz-utils
+          apt-get install -y --no-install-recommends python3 python3-pip dpkg-dev xz-utils lintian
           python3 -m pip install --break-system-packages cmake==4.3.0 ninja
       - name: Validate release tag
         id: names
@@ -187,33 +197,36 @@ jobs:
           test "${SIMRV_VERSION%%.*}" -ge 3
           echo "simrv_version=${SIMRV_VERSION}" >> "$GITHUB_OUTPUT"
           echo "version_tag=v${SIMRV_VERSION}" >> "$GITHUB_OUTPUT"
-          echo "asset_base=SimRV-${{ matrix.arch }}-linux-x86_64-v${SIMRV_VERSION}" >> "$GITHUB_OUTPUT"
+          echo "asset_base=SimRV-linux-x86_64-v${SIMRV_VERSION}" >> "$GITHUB_OUTPUT"
       - name: Configure and build
         run: |
-          cmake --preset ${{ matrix.arch }}-release \
+          cmake --preset rv64-release \
             -DCMAKE_C_COMPILER=gcc -DCMAKE_CXX_COMPILER=g++ \
             -DSIMRV_ENABLE_SDL=OFF
-          cmake --build --preset ${{ matrix.arch }}-release --parallel 2
+          cmake --build --preset rv64-release --parallel 2
       - name: Validate install tree
-        run: ctest --test-dir build/${{ matrix.arch }}-release --output-on-failure -R package-install-consumer
+        run: ctest --test-dir build/rv64-release --output-on-failure -R package-install-consumer
       - name: Build and validate DEB packages
         shell: bash
         run: |
           set -euo pipefail
           mkdir -p packages
-          cpack --config build/${{ matrix.arch }}-release/CPackConfig.cmake -G DEB -B packages
+          cpack --config build/rv64-release/CPackConfig.cmake -G DEB -B packages
           mapfile -t debs < <(find packages -maxdepth 1 -name '*.deb' -type f | sort)
           test "${#debs[@]}" -eq 3
           for package in "${debs[@]}"; do dpkg-deb --contents "$package" >/dev/null; done
-          runtime_deb="$(find packages -maxdepth 1 -name 'simrv-rv*.deb' -type f)"
+          runtime_deb="$(find packages -maxdepth 1 -name 'simrv_[0-9]*.deb' -type f)"
           dpkg-deb --contents "$runtime_deb" > packages/runtime-deb-contents.txt
-          grep -q '/usr/bin/SimRV$' packages/runtime-deb-contents.txt
+          grep -q '/usr/bin/simrv$' packages/runtime-deb-contents.txt
           dpkg-deb --field "$runtime_deb" Depends > packages/runtime-deb-depends.txt
           grep -q 'libc6' packages/runtime-deb-depends.txt
           if grep -q 'simrv-benchmark' packages/runtime-deb-contents.txt; then
             echo "Runtime DEB unexpectedly contains benchmark tooling" >&2
             exit 1
           fi
+          lintian --fail-on error packages/*.deb
+          apt-get install -y ./packages/*.deb
+          simrv --version | grep -F "${{ steps.names.outputs.simrv_version }}"
       - uses: actions/upload-artifact@v7
         with:
           name: ${{ steps.names.outputs.asset_base }}-deb
@@ -243,29 +256,24 @@ jobs:
           set -euo pipefail
           VERSION="$(sed -nE 's/^set\(SIMRV_VERSION "([^"]+)"\)$/\1/p' CMakeLists.txt)"
           test "${GITHUB_REF_NAME}" = "v${VERSION}"
-          mkdir -p dist rpm-packages/rv32 rpm-packages/rv64 deb-packages/rv32 deb-packages/rv64
-          find staging -type f -name '*rv32*.rpm' -exec cp {} rpm-packages/rv32/ \;
-          find staging -type f -name '*rv64*.rpm' -exec cp {} rpm-packages/rv64/ \;
-          find staging -type f -name '*rv32*.deb' -exec cp {} deb-packages/rv32/ \;
-          find staging -type f -name '*rv64*.deb' -exec cp {} deb-packages/rv64/ \;
-          test "$(find rpm-packages -type f -name '*.rpm' | wc -l)" -eq 6
-          test "$(find deb-packages -type f -name '*.deb' | wc -l)" -eq 6
-          for arch in rv32 rv64; do
-            createrepo_c "rpm-packages/${arch}"
-            test -f "rpm-packages/${arch}/repodata/repomd.xml"
-            grep -q 'type="primary"' "rpm-packages/${arch}/repodata/repomd.xml"
-            (cd "deb-packages/${arch}" && dpkg-scanpackages . /dev/null > Packages)
-            test "$(grep -c '^Package: ' "deb-packages/${arch}/Packages")" -eq 3
-            grep -q '^Filename: \./simrv-' "deb-packages/${arch}/Packages"
-            grep -q '^Depends: simrv ' "deb-packages/${arch}/Packages"
-          done
+          mkdir -p dist rpm-packages deb-packages
+          find staging -type f -name '*.rpm' -exec cp {} rpm-packages/ \;
+          find staging -type f -name '*.deb' -exec cp {} deb-packages/ \;
+          test "$(find rpm-packages -type f -name '*.rpm' | wc -l)" -eq 3
+          test "$(find deb-packages -type f -name '*.deb' | wc -l)" -eq 3
+          createrepo_c rpm-packages
+          test -f rpm-packages/repodata/repomd.xml
+          grep -q 'type="primary"' rpm-packages/repodata/repomd.xml
+          (cd deb-packages && dpkg-scanpackages . /dev/null > Packages)
+          test "$(grep -c '^Package: ' deb-packages/Packages)" -eq 3
+          grep -q '^Filename: \./simrv' deb-packages/Packages
+          grep -q '^Depends: simrv ' deb-packages/Packages
           tar --sort=name --mtime=@0 --owner=0 --group=0 --numeric-owner \
             -C rpm-packages -czf "dist/SimRV-rpm-packages-v${VERSION}.tar.gz" .
           tar --sort=name --mtime=@0 --owner=0 --group=0 --numeric-owner \
             -C deb-packages -czf "dist/SimRV-deb-packages-v${VERSION}.tar.gz" .
-          cp staging/SimRV-rv32-linux-x86_64-v${VERSION}.tar.gz dist/
-          cp staging/SimRV-rv64-linux-x86_64-v${VERSION}.tar.gz dist/
-          test "$(find dist -maxdepth 1 -type f | wc -l)" -eq 4
+          cp staging/SimRV-linux-x86_64-v${VERSION}.tar.gz dist/
+          test "$(find dist -maxdepth 1 -type f | wc -l)" -eq 3
       - uses: actions/upload-artifact@v7
         with:
           name: SimRV-release-assets

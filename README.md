@@ -7,15 +7,15 @@
 <p align="center">
   <a href="https://github.com/archlab-sciencetokyo/SimRV/actions/workflows/c-cpp.yml"><img src="https://github.com/archlab-sciencetokyo/SimRV/actions/workflows/c-cpp.yml/badge.svg?branch=dev" alt="C/C++ CI"/></a>
   <a href="https://github.com/archlab-sciencetokyo/SimRV/actions/workflows/docs.yml"><img src="https://github.com/archlab-sciencetokyo/SimRV/actions/workflows/docs.yml/badge.svg?branch=dev" alt="Docs CI"/></a>
-  <a href="https://archlab-sciencetokyo.github.io/SimRV/"><img src="https://img.shields.io/badge/docs-GitHub_Pages-blue.svg" alt="Documentation"/></a>
-  <a href="https://github.com/archlab-sciencetokyo/SimRV/releases"><img src="https://img.shields.io/badge/version-3.0.0--alpha.4-blue.svg" alt="SimRV Version"/></a>
+  <a href="https://archlab-sciencetokyo.github.io/SimRV/stable/"><img src="https://img.shields.io/badge/docs-GitHub_Pages-blue.svg" alt="Documentation"/></a>
+  <a href="https://github.com/archlab-sciencetokyo/SimRV/releases"><img src="https://img.shields.io/github/v/release/archlab-sciencetokyo/SimRV?include_prereleases" alt="Latest SimRV release"/></a>
   <a href="https://github.com/archlab-sciencetokyo/SimRV/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-MIT-green.svg" alt="License"/></a>
   <img src="https://img.shields.io/badge/C%2B%2B-23-purple.svg" alt="C++23"/>
   <img src="https://img.shields.io/badge/architecture-RV32GCBV%20%7C%20RV64GCBV-orange.svg" alt="Architecture"/>
   <img src="https://img.shields.io/badge/SMP-2%20to%2016%20cores-brightgreen.svg" alt="SMP"/>
 </p>
 
-SimRV is an explainable, dual-width (RV32 / RV64) RISC-V research simulator featuring an interactive terminal workbench (TUI), cycle-accurate in-order pipeline modeling, cache hierarchy inspection, and full-system Linux OS emulation. It provides functional and cycle-accurate modes for compile-time fixed **RV64GCBV** and **RV32GCBV** implementation targets.
+SimRV is an explainable, dual-width (RV32 / RV64) RISC-V research simulator featuring an interactive terminal workbench (TUI), cycle-accurate in-order pipeline modeling, cache hierarchy inspection, and full-system Linux OS emulation. It provides functional and cycle-accurate modes for compile-time fixed **RV64GCBV** and **RV32GCBV** implementation targets. The distributed RV64-capable binary also runs RV32 guests; the native RV32 target remains a strict-width verification build.
 
 SimRV is not RISC-V certified. `RV32GCBV` and `RV64GCBV` are implementation targets; see the [compliance scope](docs/architecture/compliance.md) for verified coverage and known gaps.
 
@@ -23,48 +23,48 @@ SimRV is not RISC-V certified. `RV32GCBV` and `RV64GCBV` are implementation targ
 
 ## Documentation
 
-Explore the full documentation, guides, and specifications online at **[archlab-sciencetokyo.github.io/SimRV](https://archlab-sciencetokyo.github.io/SimRV/)**:
+Explore the released documentation at **[SimRV stable documentation](https://archlab-sciencetokyo.github.io/SimRV/stable/)**. The version selector also exposes documentation for the `dev` branch.
 
 <table>
   <tr>
     <td width="50%" valign="top">
-      <h3>📖 <a href="https://archlab-sciencetokyo.github.io/SimRV/user/">User Guide</a></h3>
+      <h3>📖 <a href="https://archlab-sciencetokyo.github.io/SimRV/stable/user/">User Guide</a></h3>
       <p>CLI flags, interactive TUI controls, hotkeys, execution modes, and student architecture guide.</p>
       <ul>
-        <li><a href="https://archlab-sciencetokyo.github.io/SimRV/user/">Quickstart & CLI Flags</a> (<a href="docs/user/index.md">source</a>)</li>
-        <li><a href="https://archlab-sciencetokyo.github.io/SimRV/user/tui/">TUI Controls & Keybindings</a> (<a href="docs/user/tui.md">source</a>)</li>
-        <li><a href="https://archlab-sciencetokyo.github.io/SimRV/user/classroom/">Student Reference Guide</a> (<a href="docs/user/classroom.md">source</a>)</li>
+        <li><a href="https://archlab-sciencetokyo.github.io/SimRV/stable/user/">Quickstart & CLI Flags</a> (<a href="docs/user/index.md">source</a>)</li>
+        <li><a href="https://archlab-sciencetokyo.github.io/SimRV/stable/user/tui/">TUI Controls & Keybindings</a> (<a href="docs/user/tui.md">source</a>)</li>
+        <li><a href="https://archlab-sciencetokyo.github.io/SimRV/stable/user/classroom/">Student Reference Guide</a> (<a href="docs/user/classroom.md">source</a>)</li>
       </ul>
     </td>
     <td width="50%" valign="top">
-      <h3>⚙️ <a href="https://archlab-sciencetokyo.github.io/SimRV/architecture/overview/">Architecture & Models</a></h3>
+      <h3>⚙️ <a href="https://archlab-sciencetokyo.github.io/SimRV/stable/architecture/overview/">Architecture & Models</a></h3>
       <p>Core execution units, 3/5-stage pipelines, TileLink-C cache coherence, CPU models, and RTL parity.</p>
       <ul>
-        <li><a href="https://archlab-sciencetokyo.github.io/SimRV/architecture/overview/">Architectural Overview</a> (<a href="docs/architecture/overview.md">source</a>)</li>
-        <li><a href="https://archlab-sciencetokyo.github.io/SimRV/architecture/tilelink/">TileLink-C Coherence</a> (<a href="docs/architecture/tilelink.md">source</a>)</li>
-        <li><a href="https://archlab-sciencetokyo.github.io/SimRV/hardware/models/">CPU Models & Calibration</a> (<a href="docs/hardware/models.md">source</a>)</li>
-        <li><a href="https://archlab-sciencetokyo.github.io/SimRV/hardware/rtl_parity/">RTL Parity Verification</a> (<a href="docs/hardware/rtl_parity.md">source</a>)</li>
+        <li><a href="https://archlab-sciencetokyo.github.io/SimRV/stable/architecture/overview/">Architectural Overview</a> (<a href="docs/architecture/overview.md">source</a>)</li>
+        <li><a href="https://archlab-sciencetokyo.github.io/SimRV/stable/architecture/tilelink/">TileLink-C Coherence</a> (<a href="docs/architecture/tilelink.md">source</a>)</li>
+        <li><a href="https://archlab-sciencetokyo.github.io/SimRV/stable/hardware/models/">CPU Models & Calibration</a> (<a href="docs/hardware/models.md">source</a>)</li>
+        <li><a href="https://archlab-sciencetokyo.github.io/SimRV/stable/hardware/rtl_parity/">RTL Parity Verification</a> (<a href="docs/hardware/rtl_parity.md">source</a>)</li>
       </ul>
     </td>
   </tr>
   <tr>
     <td width="50%" valign="top">
-      <h3>🐧 <a href="https://archlab-sciencetokyo.github.io/SimRV/user/linux/">Bare-Metal & Linux</a></h3>
+      <h3>🐧 <a href="https://archlab-sciencetokyo.github.io/SimRV/stable/user/linux/">Bare-Metal & Linux</a></h3>
       <p>Bare-metal firmware, memory maps, MMIO peripherals (16550A UART, CLINT, PLIC, VirtIO block), and multi-hart SMP Linux.</p>
       <ul>
-        <li><a href="https://archlab-sciencetokyo.github.io/SimRV/user/baremetal/">Bare-Metal Development</a> (<a href="docs/user/baremetal.md">source</a>)</li>
-        <li><a href="https://archlab-sciencetokyo.github.io/SimRV/user/linux/">Booting SMP Linux</a> (<a href="docs/user/linux.md">source</a>)</li>
-        <li><a href="https://archlab-sciencetokyo.github.io/SimRV/architecture/compliance/">RISC-V Compliance Scope</a> (<a href="docs/architecture/compliance.md">source</a>)</li>
+        <li><a href="https://archlab-sciencetokyo.github.io/SimRV/stable/user/baremetal/">Bare-Metal Development</a> (<a href="docs/user/baremetal.md">source</a>)</li>
+        <li><a href="https://archlab-sciencetokyo.github.io/SimRV/stable/user/linux/">Booting SMP Linux</a> (<a href="docs/user/linux.md">source</a>)</li>
+        <li><a href="https://archlab-sciencetokyo.github.io/SimRV/stable/architecture/compliance/">RISC-V Compliance Scope</a> (<a href="docs/architecture/compliance.md">source</a>)</li>
       </ul>
     </td>
     <td width="50%" valign="top">
-      <h3>🛠️ <a href="https://archlab-sciencetokyo.github.io/SimRV/dev/contributing/">Development & Verification</a></h3>
+      <h3>🛠️ <a href="https://archlab-sciencetokyo.github.io/SimRV/dev/dev/contributing/">Development & Verification</a></h3>
       <p>Developer standards, dual-architecture CTest validation gates, Spike lockstep co-simulation, and release qualification.</p>
       <ul>
-        <li><a href="https://archlab-sciencetokyo.github.io/SimRV/dev/contributing/">Contributing Standards</a> (<a href="docs/dev/contributing.md">source</a>)</li>
-        <li><a href="https://archlab-sciencetokyo.github.io/SimRV/dev/migration/">2.x to 3.0 Migration</a> (<a href="docs/dev/migration.md">source</a>)</li>
-        <li><a href="https://archlab-sciencetokyo.github.io/SimRV/evaluation/reviewer/">Artifact Evaluation Guide</a> (<a href="docs/evaluation/reviewer.md">source</a>)</li>
-        <li><a href="https://archlab-sciencetokyo.github.io/SimRV/evaluation/release/">Release Governance</a> (<a href="docs/evaluation/release.md">source</a>)</li>
+        <li><a href="https://archlab-sciencetokyo.github.io/SimRV/dev/dev/contributing/">Contributing Standards</a> (<a href="docs/dev/contributing.md">source</a>)</li>
+        <li><a href="https://archlab-sciencetokyo.github.io/SimRV/dev/dev/migration/">2.x to 3.0 Migration</a> (<a href="docs/dev/migration.md">source</a>)</li>
+        <li><a href="https://archlab-sciencetokyo.github.io/SimRV/stable/evaluation/reviewer/">Artifact Evaluation Guide</a> (<a href="docs/evaluation/reviewer.md">source</a>)</li>
+        <li><a href="https://archlab-sciencetokyo.github.io/SimRV/stable/evaluation/release/">Release Governance</a> (<a href="docs/evaluation/release.md">source</a>)</li>
       </ul>
     </td>
   </tr>
@@ -74,17 +74,21 @@ Explore the full documentation, guides, and specifications online at **[archlab-
 
 ## Quick Start
 
+For release archives and RPM or DEB packages, follow the
+**[installation guide](https://archlab-sciencetokyo.github.io/SimRV/stable/user/install/)**.
+The source build below is intended for development and architecture work.
+
 ### Interactive and headless runs
 
-Launch `SimRV` normally (or pass `--tui`) to explore an image with the interactive TUI. Use
+Launch `simrv` normally (or pass `--tui`) to explore an image with the interactive TUI. Use
 `--cli` for scripted and headless runs; command-line options are the supported run interface.
 
 ```bash
 # Interactive image loading and inspection.
-./build/rv64-release/SimRV -b -m img/hello.bin --tui
+./build/rv64-release/simrv -b -m img/hello.bin --tui
 
 # Headless execution with an explicit instruction limit.
-./build/rv64-release/SimRV -b -m img/hello.bin --cli --steps 200000
+./build/rv64-release/simrv -b -m img/hello.bin --cli --steps 200000
 ```
 
 ### Prerequisites
@@ -95,11 +99,11 @@ Launch `SimRV` normally (or pass `--tui`) to explore an image with the interacti
 ### Build
 
 ```bash
-# RV64 build (Default)
+# RV64-capable build (default; runs RV64 and RV32 guests)
 cmake --preset rv64-release
 cmake --build --preset rv64-release
 
-# RV32 build
+# Native RV32 strict-width verification build
 cmake --preset rv32-release
 cmake --build --preset rv32-release
 ```
@@ -128,39 +132,39 @@ If a host ccache wrapper has no writable cache, prefix configure and build comma
 Run a baremetal binary in interactive TUI mode (Default):
 
 ```bash
-./build/rv64-release/SimRV -b -m img/hello.bin
+./build/rv64-release/simrv -b -m img/hello.bin
 ```
 
 Run headless in CLI-only mode:
 
 ```bash
-./build/rv64-release/SimRV -b -m img/hello.bin --cli
+./build/rv64-release/simrv -b -m img/hello.bin --cli
 ```
 
 Select execution mode across fast, detailed, or cycle-accurate microarchitectures:
 
 ```bash
 # Fast functional execution
-./build/rv64-release/SimRV -b -m img/hello.bin --mode fast --cli
+./build/rv64-release/simrv -b -m img/hello.bin --mode fast --cli
 
 # Cycle-accurate five-stage pipeline execution
-./build/rv64-release/SimRV -b -m img/hello.bin --mode cycle-accurate --cli
+./build/rv64-release/simrv -b -m img/hello.bin --mode cycle-accurate --cli
 
 # Choose the three-stage educational pipeline.
-./build/rv64-release/SimRV -b -m img/hello.bin --mode cycle-accurate --pipeline 3stage --cli
+./build/rv64-release/simrv -b -m img/hello.bin --mode cycle-accurate --pipeline 3stage --cli
 ```
 
 Mirror configuration, diagnostics, termination, cache, bus, and performance summaries to a log:
 
 ```bash
-./build/rv64-release/SimRV -b -m img/hello.bin --mode cycle-accurate --cli --log-file run.log
+./build/rv64-release/simrv -b -m img/hello.bin --mode cycle-accurate --cli --log-file run.log
 ```
 
 Load custom or preset CPU microarchitecture models (see [CPU Models Guide](docs/hardware/models.md)):
 
 ```bash
 # Load a predefined CPU model (searches configs/models/ or custom path)
-./build/rv64-release/SimRV -b -m img/hello.bin --mode cycle-accurate --cpu-profile rvcomp --cli
+./build/rv64-release/simrv -b -m img/hello.bin --mode cycle-accurate --cpu-profile rvcomp --cli
 
 # Generate a scaffold model configuration with the wizard
 python3 scripts/cpu_model_wizard.py --name my_core --template five-stage
@@ -169,14 +173,14 @@ python3 scripts/cpu_model_wizard.py --name my_core --template five-stage
 Run Linux OS image with disk & devicetree:
 
 ```bash
-./build/rv64-release/SimRV --os -m linux-images/rv64/fw_payload.bin -D linux-images/rv64/root.img -f linux-images/rv64/devicetree.dtb --cli
+./build/rv64-release/simrv --os -m linux-images/rv64/fw_payload.bin -D linux-images/rv64/root.img -f linux-images/rv64/devicetree.dtb --cli
 ```
 
 Override MISA profile or Vector register length (VLEN):
 
 ```bash
 # Select the explicit RV64GCBV target profile and a 512-bit VLEN
-./build/rv64-release/SimRV -m img/vector.bin --isa rv64gcbv --vlen 512
+./build/rv64-release/simrv -m img/vector.bin --isa rv64gcbv --vlen 512
 ```
 
 ---
@@ -192,7 +196,7 @@ use the same command across exercises; `--class` starts the TUI paused with the 
 Guide visible, while students remain free to inspect any subsystem.
 
 ```bash
-./build/rv64-release/SimRV --tui --baremetal -m exercise.elf --class \
+./build/rv64-release/simrv --tui --baremetal -m exercise.elf --class \
   --inspection-output inspection.json
 ```
 
@@ -308,7 +312,7 @@ also incompatible with Spike lockstep.
 
 ```bash
 # Start SimRV with GDB server on port 1234
-./build/rv64-release/SimRV -m path/to/hello.bin --gdb
+./build/rv64-release/simrv -m path/to/hello.bin --gdb
 
 # Connect from GDB in another terminal
 riscv64-unknown-elf-gdb hello.elf -ex "target remote :1234"
@@ -324,7 +328,7 @@ and inspection are always available while paused—there is no separate debug-mo
 Verify execution against Spike instruction-by-instruction:
 
 ```bash
-./build/rv64-release/SimRV -m path/to/hello.bin --lockstep
+./build/rv64-release/simrv -m path/to/hello.bin --lockstep
 ```
 
 Lockstep is a verification workflow for reproducible experiments, not an
@@ -338,10 +342,14 @@ and GDB are intentionally mutually exclusive.
 
 ## Release Assets & Pre-built Binaries
 
-Pre-compiled standalone binaries (`SimRV`) are available under GitHub Releases for Linux (`x86_64`).
+Pre-compiled `simrv` packages are available under GitHub Releases for Linux (`x86_64`).
+See the [installation guide](https://archlab-sciencetokyo.github.io/SimRV/stable/user/install/)
+for portable archive, RPM, DEB, upgrade, and removal instructions.
 
 > [!NOTE]
-> Pre-built release assets package the standalone simulator binary only. They do **not** bundle the complementary build scripts (`scripts/`), benchmark tooling, or sample guest disk images. For the full suite of scripts and development tools, clone the repository.
+> Pre-built releases provide the RV64-capable simulator archive plus optional `simrv-tools` and
+> `simrv-benchmark` native packages. Guest Linux images are not bundled. Clone the repository for
+> development scripts and source-level workflows.
 
 ---
 

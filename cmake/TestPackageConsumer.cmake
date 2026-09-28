@@ -32,6 +32,17 @@ if(NOT install_result EQUAL 0)
   message(FATAL_ERROR "SimRV install step failed: ${install_result}")
 endif()
 
+if(NOT EXISTS "${install_root}/bin/simrv")
+  message(FATAL_ERROR "Expected installed simulator ${install_root}/bin/simrv")
+endif()
+execute_process(
+  COMMAND "${install_root}/bin/simrv" --version
+  RESULT_VARIABLE simulator_version_result
+  OUTPUT_QUIET ERROR_QUIET)
+if(NOT simulator_version_result EQUAL 0)
+  message(FATAL_ERROR "Installed simrv --version failed: ${simulator_version_result}")
+endif()
+
 foreach(tool IN ITEMS simrv-cpu-wizard simrv-tune simrv-parity simrv-benchmark)
   if(NOT EXISTS "${install_root}/bin/${tool}")
     message(
