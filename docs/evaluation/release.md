@@ -57,8 +57,8 @@ controlled local measurements rather than portable release artifacts.
 The gate writes versioned evidence with compiler, architecture, MISA/VLEN, dependency revisions,
 test counts, skips, elapsed time, and binary size. A required suite that is absent or skipped is a
 failure, never a pass.
-Release CI additionally runs sanitizer checks, builds Doxygen output, validates archives and
-checksums, extracts packaged binaries, and repeats CLI version/help smoke tests.
+Release CI additionally runs sanitizer checks, builds Doxygen output, validates archives,
+extracts packaged binaries, and repeats CLI version/help smoke tests.
 
 ## Native packages
 
@@ -71,13 +71,14 @@ cpack --config build/rv64-release/CPackConfig.cmake -G DEB -B packages
 ```
 
 The `simrv` package contains the simulator, manual page, user documentation, ISA examples, and
-license files. Architecture-model helpers are in `simrv-tools`, publication-oriented benchmarking
-is in `simrv-benchmark`, and headers/static libraries/CMake exports are in `simrv-devel` (RPM) or
-`simrv-dev` (DEB). The RV32 and RV64 packages are alternative guest-architecture builds and are
-not currently co-installable because both provide `/usr/bin/SimRV`.
+license files. Architecture-model helpers are in `simrv-tools`, and publication-oriented
+benchmarking is in `simrv-benchmark`. Native release packages intentionally omit headers, static
+libraries, and CMake exports; install from a source build when developing against the SimRV SDK.
+The RV32 and RV64 packages are alternative guest-architecture builds and are not currently
+co-installable because both provide `/usr/bin/SimRV`.
 
-Starting with the 3.0 release series, tagged release CI publishes all four RPM and DEB components
-for both guest architectures, plus a checksum file, as GitHub Release assets.
+Starting with the 3.0 release series, tagged release CI publishes the three RPM and DEB components
+for both guest architectures as two consolidated GitHub Release assets.
 
 ## Performance acceptance
 
@@ -109,8 +110,8 @@ evidence report. See [`repro/README.md`](https://github.com/archlab-sciencetokyo
 
 ## Publishing
 
-The release tag, CMake version, changelog heading, manifest, binary-reported version, asset names,
-and checksums must agree. Release automation publishes RV32/RV64 GCC-built binaries, component RPM
-and DEB packages, and separate generated API-documentation and reproducibility archives. Generated
-Doxygen HTML is never committed. The final candidate requires two consecutive complete CI runs
-without blocker fixes or changes to the release contract.
+The release tag, CMake version, changelog heading, manifest, binary-reported version, and asset
+names must agree. Release automation publishes RV32/RV64 GCC-built portable archives plus
+consolidated RPM and DEB package bundles. Generated Doxygen HTML is never committed. The final
+candidate requires two consecutive complete CI runs without blocker fixes or changes to the
+release contract.
