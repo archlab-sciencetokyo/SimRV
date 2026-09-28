@@ -41,8 +41,10 @@ def preflight(args: argparse.Namespace) -> tuple[dict, list[str]]:
         "riscv_tests": str(args.riscv_tests_dir.resolve()),
         "vector_tests": str(args.vector_tests_dir.resolve()),
         "spike": str(pathlib.Path(args.spike).resolve()) if "/" in args.spike else executable(args.spike),
-        "linux_rv32": str((args.linux_images_root / "rv32").resolve()),
-        "linux_rv64": str((args.linux_images_root / "rv64").resolve()),
+        "linux_rv32_firmware": str((args.linux_images_root / "rv32/fw_payload.bin").resolve()),
+        "linux_rv32_rootfs": str((args.linux_images_root / "rv32/root.bin").resolve()),
+        "linux_rv64_firmware": str((args.linux_images_root / "rv64/fw_payload.bin").resolve()),
+        "linux_rv64_rootfs": str((args.linux_images_root / "rv64/root.bin").resolve()),
     }
     missing = [f"tool:{name}" for name, path in tools.items() if not path]
     missing.extend(f"path:{name}" for name, path in paths.items()
