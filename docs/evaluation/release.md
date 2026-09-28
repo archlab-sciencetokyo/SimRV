@@ -72,10 +72,8 @@ cpack --config build/rv64-release/CPackConfig.cmake -G DEB -B packages
 
 The `simrv` package contains the simulator, manual page, user documentation, ISA examples, and
 license files. Architecture-model helpers are in `simrv-tools`, and publication-oriented
-benchmarking is in `simrv-benchmark`. Native release packages intentionally omit headers, static
-libraries, and CMake exports; install from a source build when developing against the SimRV SDK.
-The RV32 and RV64 packages are alternative guest-architecture builds and are not currently
-co-installable because both provide `/usr/bin/SimRV`.
+benchmarking is in `simrv-benchmark`. The RV32 and RV64 packages are alternative guest-architecture
+builds and are not currently co-installable because both provide `/usr/bin/SimRV`.
 
 Starting with the 3.0 release series, tagged release CI publishes the three RPM and DEB components
 for both guest architectures as two consolidated GitHub Release assets. Both bundles separate RV32

@@ -160,24 +160,7 @@
   "artifacts": [
     "SimRV-rv32-linux-x86_64-v3.0.0-beta.2.tar.gz",
     "SimRV-rv64-linux-x86_64-v3.0.0-beta.2.tar.gz",
-    "simrv-rv32-3.0.0-0.beta.2.x86_64.rpm",
-    "simrv-tools-rv32-3.0.0-0.beta.2.x86_64.rpm",
-    "simrv-benchmark-rv32-3.0.0-0.beta.2.x86_64.rpm",
-    "simrv-devel-rv32-3.0.0-0.beta.2.x86_64.rpm",
-    "simrv-rv64-3.0.0-0.beta.2.x86_64.rpm",
-    "simrv-tools-rv64-3.0.0-0.beta.2.x86_64.rpm",
-    "simrv-benchmark-rv64-3.0.0-0.beta.2.x86_64.rpm",
-    "simrv-devel-rv64-3.0.0-0.beta.2.x86_64.rpm",
-    "simrv-rv32_3.0.0~beta.2_x86_64.deb",
-    "simrv-tools-rv32_3.0.0~beta.2_x86_64.deb",
-    "simrv-benchmark-rv32_3.0.0~beta.2_x86_64.deb",
-    "simrv-dev-rv32_3.0.0~beta.2_x86_64.deb",
-    "simrv-rv64_3.0.0~beta.2_x86_64.deb",
-    "simrv-tools-rv64_3.0.0~beta.2_x86_64.deb",
-    "simrv-benchmark-rv64_3.0.0~beta.2_x86_64.deb",
-    "simrv-dev-rv64_3.0.0~beta.2_x86_64.deb",
-    "SimRV-docs-v3.0.0-beta.2.tar.gz",
-    "SimRV-repro-v3.0.0-beta.2.tar.gz",
-    "SimRV-evidence-v3.0.0-beta.2.json"
+    "SimRV-rpm-packages-v3.0.0-beta.2.tar.gz",
+    "SimRV-deb-packages-v3.0.0-beta.2.tar.gz"
   ]
 }
