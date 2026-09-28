@@ -416,6 +416,9 @@ if(BUILD_TESTING)
   add_test(NAME cli-help COMMAND $<TARGET_FILE:SimRV> -h)
   set_tests_properties(cli-help PROPERTIES PASS_REGULAR_EXPRESSION "Usage:"
                                            LABELS "gate;regress;cli")
+  add_test(NAME cli-help-isa COMMAND $<TARGET_FILE:SimRV> -h)
+  set_tests_properties(cli-help-isa PROPERTIES PASS_REGULAR_EXPRESSION "--isa"
+                                               LABELS "gate;regress;cli")
 
   add_test(NAME cli-license COMMAND $<TARGET_FILE:SimRV> --license)
   set_tests_properties(
@@ -953,60 +956,87 @@ set_target_properties(SimRV PROPERTIES EXPORT_NAME cli)
 install(
   TARGETS SimRV simrv-runtime
   EXPORT SimRVTargets
-  RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
-  ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
-  LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
+  RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR} COMPONENT Runtime
+  ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR} COMPONENT Development
+  LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR} COMPONENT Development
   INCLUDES
   DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
 
 install(
   DIRECTORY include/simrv
   DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
+  COMPONENT Development
   FILES_MATCHING
   PATTERN "*.hpp")
 install(
   DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/generated/"
   DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
+  COMPONENT Development
   FILES_MATCHING
   PATTERN "*.hpp")
 install(
   DIRECTORY schemas/
   DESTINATION ${CMAKE_INSTALL_DATADIR}/SimRV/schemas
+  COMPONENT Tools
   FILES_MATCHING
   PATTERN "*.json")
 
 install(
   PROGRAMS scripts/cpu_model_wizard.py
   DESTINATION ${CMAKE_INSTALL_BINDIR}
-  RENAME simrv-cpu-wizard)
+  RENAME simrv-cpu-wizard
+  COMPONENT Tools)
 install(
   PROGRAMS scripts/tune_cpu_model.py
   DESTINATION ${CMAKE_INSTALL_BINDIR}
-  RENAME simrv-tune)
+  RENAME simrv-tune
+  COMPONENT Tools)
 install(
   PROGRAMS scripts/evaluate_rtl_parity.py
   DESTINATION ${CMAKE_INSTALL_BINDIR}
-  RENAME simrv-parity)
+  RENAME simrv-parity
+  COMPONENT Tools)
 install(
   PROGRAMS scripts/benchmark.py
   DESTINATION ${CMAKE_INSTALL_BINDIR}
-  RENAME simrv-benchmark)
+  RENAME simrv-benchmark
+  COMPONENT Benchmark)
 
 install(
   DIRECTORY scripts/rtl_parity/
   DESTINATION ${CMAKE_INSTALL_DATADIR}/SimRV/scripts/rtl_parity
+  COMPONENT Tools
   FILES_MATCHING
-  PATTERN "*.py")
+  PATTERN "*.py"
+  PATTERN "__pycache__" EXCLUDE)
+install(FILES scripts/experiment_metadata.py
+        DESTINATION ${CMAKE_INSTALL_DATADIR}/SimRV/scripts
+        COMPONENT Benchmark)
 
 install(
   DIRECTORY configs/models/
   DESTINATION ${CMAKE_INSTALL_DATADIR}/SimRV/models
+  COMPONENT Tools
   FILES_MATCHING
   PATTERN "*.cfg")
 
-install(FILES docs/user/index.md DESTINATION ${CMAKE_INSTALL_DOCDIR} RENAME USER_GUIDE.md)
+install(FILES docs/user/index.md DESTINATION ${CMAKE_INSTALL_DOCDIR}
+        RENAME USER_GUIDE.md COMPONENT Runtime)
+install(
+  DIRECTORY docs/user/
+  DESTINATION ${CMAKE_INSTALL_DOCDIR}/user
+  COMPONENT Runtime
+  FILES_MATCHING
+  PATTERN "*.md")
+install(
+  DIRECTORY examples/isa/
+  DESTINATION ${CMAKE_INSTALL_DOCDIR}/examples/isa
+  COMPONENT Runtime
+  PATTERN ".gitignore" EXCLUDE
+  PATTERN "build-*" EXCLUDE)
 
-install(FILES docs/man/simrv.1 DESTINATION ${CMAKE_INSTALL_MANDIR}/man1)
+install(FILES docs/man/simrv.1 DESTINATION ${CMAKE_INSTALL_MANDIR}/man1
+        COMPONENT Runtime)
 
 configure_package_config_file(
   cmake/SimRVConfig.cmake.in "${CMAKE_CURRENT_BINARY_DIR}/SimRVConfig.cmake"
@@ -1019,16 +1049,19 @@ install(
   EXPORT SimRVTargets
   FILE SimRVTargets.cmake
   NAMESPACE SimRV::
-  DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/SimRV")
+  DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/SimRV"
+  COMPONENT Development)
 export(
   EXPORT SimRVTargets
   FILE "${CMAKE_CURRENT_BINARY_DIR}/SimRVTargets.cmake"
   NAMESPACE SimRV::)
 install(FILES "${CMAKE_CURRENT_BINARY_DIR}/SimRVConfig.cmake"
               "${CMAKE_CURRENT_BINARY_DIR}/SimRVConfigVersion.cmake"
-        DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/SimRV")
+        DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/SimRV"
+        COMPONENT Development)
 install(FILES LICENSE THIRD_PARTY_NOTICES.md
-        DESTINATION ${CMAKE_INSTALL_DATADIR}/licenses/SimRV)
+        DESTINATION ${CMAKE_INSTALL_DATADIR}/licenses/SimRV
+        COMPONENT Runtime)
 
 if(BUILD_TESTING)
   add_test(NAME mit-license-audit
@@ -1118,12 +1151,103 @@ endif()
 set(CPACK_PACKAGE_NAME "${PROJECT_NAME}")
 set(CPACK_PACKAGE_VENDOR "archlab-sciencetokyo")
 set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "${PROJECT_DESCRIPTION}")
+set(CPACK_PACKAGE_DESCRIPTION
+    "SimRV is a dual-width RISC-V architectural simulator with CLI debugging, an interactive terminal workbench, microarchitecture models, and Linux support.")
 set(CPACK_PACKAGE_HOMEPAGE_URL "${PROJECT_HOMEPAGE_URL}")
-set(CPACK_PACKAGE_VERSION "${PROJECT_VERSION}")
+if(NOT SIMRV_VERSION MATCHES "^([0-9]+\\.[0-9]+\\.[0-9]+)(-(.+))?$")
+  message(FATAL_ERROR "SIMRV_VERSION is not packageable: ${SIMRV_VERSION}")
+endif()
+set(SIMRV_PACKAGE_BASE_VERSION "${CMAKE_MATCH_1}")
+set(SIMRV_PACKAGE_PRERELEASE "${CMAKE_MATCH_3}")
+set(CPACK_PACKAGE_VERSION "${SIMRV_PACKAGE_BASE_VERSION}")
+set(CPACK_PACKAGE_CONTACT "ArchLab, Science Tokyo")
+set(CPACK_PACKAGE_INSTALL_DIRECTORY "SimRV")
+set(CPACK_PACKAGING_INSTALL_PREFIX "/usr")
 set(CPACK_PACKAGE_FILE_NAME
-    "SimRV-${PROJECT_VERSION}-${CMAKE_SYSTEM_NAME}-${CMAKE_SYSTEM_PROCESSOR}")
+    "SimRV-rv${SIMRV_XLEN}-${SIMRV_VERSION}-${CMAKE_SYSTEM_NAME}-${CMAKE_SYSTEM_PROCESSOR}")
 set(CPACK_RESOURCE_FILE_LICENSE "${PROJECT_SOURCE_DIR}/LICENSE")
 set(CPACK_RESOURCE_FILE_README "${PROJECT_SOURCE_DIR}/README.md")
+set(CPACK_GENERATOR "TGZ" CACHE STRING
+    "Semicolon-separated CPack generators (for example TGZ;RPM;DEB)")
+set(CPACK_COMPONENTS_ALL Runtime Tools Benchmark Development)
+set(CPACK_ARCHIVE_COMPONENT_INSTALL ON)
+set(CPACK_COMPONENT_TOOLS_DEPENDS Runtime)
+set(CPACK_COMPONENT_BENCHMARK_DEPENDS Runtime)
+set(CPACK_COMPONENT_DEVELOPMENT_DEPENDS Runtime)
+set(CPACK_COMPONENT_RUNTIME_DISPLAY_NAME "SimRV")
+set(CPACK_COMPONENT_TOOLS_DISPLAY_NAME "SimRV architecture tools")
+set(CPACK_COMPONENT_BENCHMARK_DISPLAY_NAME "SimRV benchmark tools")
+set(CPACK_COMPONENT_DEVELOPMENT_DISPLAY_NAME "SimRV development files")
+
+# Native Linux package metadata. CPack's RPM and DEB generators derive runtime
+# library dependencies from the installed ELF when the host packaging tools are
+# available; package creation never bundles a compiler or guest image.
+set(CPACK_DEBIAN_PACKAGE_NAME "simrv")
+set(CPACK_DEBIAN_PACKAGE_MAINTAINER "ArchLab, Science Tokyo")
+set(CPACK_DEBIAN_PACKAGE_SECTION "science")
+set(CPACK_DEBIAN_PACKAGE_PRIORITY "optional")
+if(SIMRV_PACKAGE_PRERELEASE)
+  set(CPACK_DEBIAN_PACKAGE_VERSION
+      "${SIMRV_PACKAGE_BASE_VERSION}~${SIMRV_PACKAGE_PRERELEASE}")
+else()
+  set(CPACK_DEBIAN_PACKAGE_VERSION "${SIMRV_PACKAGE_BASE_VERSION}")
+endif()
+set(CPACK_DEBIAN_PACKAGE_SHLIBDEPS ON)
+set(CPACK_DEB_COMPONENT_INSTALL ON)
+set(CPACK_DEBIAN_RUNTIME_PACKAGE_SHLIBDEPS ON)
+set(CPACK_DEBIAN_RUNTIME_PACKAGE_NAME "simrv")
+set(CPACK_DEBIAN_TOOLS_PACKAGE_NAME "simrv-tools")
+set(CPACK_DEBIAN_BENCHMARK_PACKAGE_NAME "simrv-benchmark")
+set(CPACK_DEBIAN_DEVELOPMENT_PACKAGE_NAME "simrv-dev")
+set(CPACK_DEBIAN_RUNTIME_FILE_NAME
+    "simrv-rv${SIMRV_XLEN}_${CPACK_DEBIAN_PACKAGE_VERSION}_x86_64.deb")
+set(CPACK_DEBIAN_TOOLS_FILE_NAME
+    "simrv-tools-rv${SIMRV_XLEN}_${CPACK_DEBIAN_PACKAGE_VERSION}_x86_64.deb")
+set(CPACK_DEBIAN_BENCHMARK_FILE_NAME
+    "simrv-benchmark-rv${SIMRV_XLEN}_${CPACK_DEBIAN_PACKAGE_VERSION}_x86_64.deb")
+set(CPACK_DEBIAN_DEVELOPMENT_FILE_NAME
+    "simrv-dev-rv${SIMRV_XLEN}_${CPACK_DEBIAN_PACKAGE_VERSION}_x86_64.deb")
+set(CPACK_DEBIAN_TOOLS_PACKAGE_DEPENDS
+    "simrv (= ${CPACK_DEBIAN_PACKAGE_VERSION})")
+set(CPACK_DEBIAN_BENCHMARK_PACKAGE_DEPENDS
+    "simrv (= ${CPACK_DEBIAN_PACKAGE_VERSION}), python3")
+set(CPACK_DEBIAN_DEVELOPMENT_PACKAGE_DEPENDS
+    "simrv (= ${CPACK_DEBIAN_PACKAGE_VERSION})")
+
+set(CPACK_RPM_PACKAGE_NAME "simrv")
+set(CPACK_RPM_PACKAGE_LICENSE "MIT")
+set(CPACK_RPM_PACKAGE_GROUP "Development/Tools")
+set(CPACK_RPM_PACKAGE_AUTOREQPROV ON)
+set(CPACK_RPM_COMPONENT_INSTALL ON)
+# Keep rpmbuild temporary files inside the caller-selected temporary area. This
+# avoids host-specific /var/tmp policy and makes local/CI package builds easier
+# to isolate.
+set(CPACK_RPM_SPEC_MORE_DEFINE "%define _tmppath /tmp")
+set(CPACK_RPM_PACKAGE_VERSION "${SIMRV_PACKAGE_BASE_VERSION}")
+if(SIMRV_PACKAGE_PRERELEASE)
+  string(REPLACE "-" "." SIMRV_RPM_PRERELEASE "${SIMRV_PACKAGE_PRERELEASE}")
+  set(CPACK_RPM_PACKAGE_RELEASE "0.${SIMRV_RPM_PRERELEASE}")
+else()
+  set(CPACK_RPM_PACKAGE_RELEASE "1")
+endif()
+set(CPACK_RPM_RUNTIME_PACKAGE_NAME "simrv")
+set(CPACK_RPM_TOOLS_PACKAGE_NAME "simrv-tools")
+set(CPACK_RPM_BENCHMARK_PACKAGE_NAME "simrv-benchmark")
+set(CPACK_RPM_DEVELOPMENT_PACKAGE_NAME "simrv-devel")
+set(CPACK_RPM_RUNTIME_FILE_NAME
+    "simrv-rv${SIMRV_XLEN}-${CPACK_RPM_PACKAGE_VERSION}-${CPACK_RPM_PACKAGE_RELEASE}.x86_64.rpm")
+set(CPACK_RPM_TOOLS_FILE_NAME
+    "simrv-tools-rv${SIMRV_XLEN}-${CPACK_RPM_PACKAGE_VERSION}-${CPACK_RPM_PACKAGE_RELEASE}.x86_64.rpm")
+set(CPACK_RPM_BENCHMARK_FILE_NAME
+    "simrv-benchmark-rv${SIMRV_XLEN}-${CPACK_RPM_PACKAGE_VERSION}-${CPACK_RPM_PACKAGE_RELEASE}.x86_64.rpm")
+set(CPACK_RPM_DEVELOPMENT_FILE_NAME
+    "simrv-devel-rv${SIMRV_XLEN}-${CPACK_RPM_PACKAGE_VERSION}-${CPACK_RPM_PACKAGE_RELEASE}.x86_64.rpm")
+set(CPACK_RPM_TOOLS_PACKAGE_REQUIRES
+    "simrv = ${CPACK_RPM_PACKAGE_VERSION}-${CPACK_RPM_PACKAGE_RELEASE}")
+set(CPACK_RPM_BENCHMARK_PACKAGE_REQUIRES
+    "simrv = ${CPACK_RPM_PACKAGE_VERSION}-${CPACK_RPM_PACKAGE_RELEASE}, python3")
+set(CPACK_RPM_DEVELOPMENT_PACKAGE_REQUIRES
+    "simrv = ${CPACK_RPM_PACKAGE_VERSION}-${CPACK_RPM_PACKAGE_RELEASE}")
 # Reproducible archive metadata (CMP0206 in CMake 4.3+)
 set(CPACK_ARCHIVE_UID 0)
 set(CPACK_ARCHIVE_GID 0)

@@ -55,8 +55,9 @@ Attach virtual disk image via VirtIO Block device.
 .BR \-\-smp " " \fIN\fR
 Configure number of active SMP harts (2 to 16; default: 1 for single-hart).
 .TP
-.BR \-\-ram " " \fIMB\fR
-Configure guest RAM capacity in megabytes (default: 2048 MB).
+.BR \-\-dram\-size ", " \-\-ram\-size " " \fISIZE\fR
+Configure guest DRAM size in bytes with an optional scaled suffix, such as
+\fB128M\fR or \fB2G\fR. Official release builds default to 256 MiB.
 .SS "Debugging & Tracing"
 .TP
 .BR \-\-trace

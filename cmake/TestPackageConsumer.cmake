@@ -39,10 +39,24 @@ foreach(tool IN ITEMS simrv-cpu-wizard simrv-tune simrv-parity simrv-benchmark)
   endif()
 endforeach()
 
+foreach(tool IN ITEMS simrv-cpu-wizard simrv-tune simrv-parity simrv-benchmark)
+  execute_process(
+    COMMAND "${install_root}/bin/${tool}" --help
+    RESULT_VARIABLE tool_help_result
+    OUTPUT_QUIET ERROR_QUIET)
+  if(NOT tool_help_result EQUAL 0)
+    message(FATAL_ERROR "Installed tool ${tool} --help failed: ${tool_help_result}")
+  endif()
+endforeach()
+
 if(NOT EXISTS "${install_root}/share/man/man1/simrv.1")
   message(
     FATAL_ERROR
       "Expected installed man page at ${install_root}/share/man/man1/simrv.1")
+endif()
+
+if(NOT EXISTS "${install_root}/share/SimRV/scripts/experiment_metadata.py")
+  message(FATAL_ERROR "Expected installed benchmark support module")
 endif()
 
 file(GLOB installed_guides "${install_root}/share/doc/*/USER_GUIDE.md")

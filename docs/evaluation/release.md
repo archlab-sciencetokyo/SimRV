@@ -60,6 +60,25 @@ failure, never a pass.
 Release CI additionally runs sanitizer checks, builds Doxygen output, validates archives and
 checksums, extracts packaged binaries, and repeats CLI version/help smoke tests.
 
+## Native packages
+
+CPack produces component packages for Linux x86-64 hosts. Configure and build an RV32 or RV64
+release tree, then generate either native format:
+
+```bash
+cpack --config build/rv64-release/CPackConfig.cmake -G RPM -B packages
+cpack --config build/rv64-release/CPackConfig.cmake -G DEB -B packages
+```
+
+The `simrv` package contains the simulator, manual page, user documentation, ISA examples, and
+license files. Architecture-model helpers are in `simrv-tools`, publication-oriented benchmarking
+is in `simrv-benchmark`, and headers/static libraries/CMake exports are in `simrv-devel` (RPM) or
+`simrv-dev` (DEB). The RV32 and RV64 packages are alternative guest-architecture builds and are
+not currently co-installable because both provide `/usr/bin/SimRV`.
+
+Starting with the 3.0 release series, tagged release CI publishes all four RPM and DEB components
+for both guest architectures, plus a checksum file, as GitHub Release assets.
+
 ## Performance acceptance
 
 Benchmark reports use an unmeasured warmup, at least five measured samples, median throughput,
@@ -91,7 +110,7 @@ evidence report. See [`repro/README.md`](https://github.com/archlab-sciencetokyo
 ## Publishing
 
 The release tag, CMake version, changelog heading, manifest, binary-reported version, asset names,
-and checksums must agree. Release automation publishes RV32/RV64 GCC-built headless binaries and a
-separate generated API-documentation archive, reproducibility bundle, and evidence JSON. Generated
+and checksums must agree. Release automation publishes RV32/RV64 GCC-built binaries, component RPM
+and DEB packages, and separate generated API-documentation and reproducibility archives. Generated
 Doxygen HTML is never committed. The final candidate requires two consecutive complete CI runs
 without blocker fixes or changes to the release contract.
