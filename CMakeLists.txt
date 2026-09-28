@@ -1176,7 +1176,7 @@ endif()
 set(SIMRV_PACKAGE_BASE_VERSION "${CMAKE_MATCH_1}")
 set(SIMRV_PACKAGE_PRERELEASE "${CMAKE_MATCH_3}")
 set(CPACK_PACKAGE_VERSION "${SIMRV_PACKAGE_BASE_VERSION}")
-set(CPACK_PACKAGE_CONTACT "SimRV Maintainers <simrv@archlab-sciencetokyo.github.io>")
+set(CPACK_PACKAGE_CONTACT "ArchLab Science Tokyo")
 set(CPACK_PACKAGE_INSTALL_DIRECTORY "SimRV")
 set(CPACK_PACKAGING_INSTALL_PREFIX "/usr")
 set(CPACK_PACKAGE_FILE_NAME
@@ -1203,8 +1203,7 @@ set(CPACK_COMPONENT_BENCHMARK_DESCRIPTION
 # library dependencies from the installed ELF when the host packaging tools are
 # available; package creation never bundles a compiler or guest image.
 set(CPACK_DEBIAN_PACKAGE_NAME "simrv")
-set(CPACK_DEBIAN_PACKAGE_MAINTAINER
-    "SimRV Maintainers <simrv@archlab-sciencetokyo.github.io>")
+set(CPACK_DEBIAN_PACKAGE_MAINTAINER "ArchLab Science Tokyo")
 set(CPACK_DEBIAN_PACKAGE_SECTION "science")
 set(CPACK_DEBIAN_PACKAGE_PRIORITY "optional")
 if(SIMRV_PACKAGE_PRERELEASE)
