@@ -1,10 +1,9 @@
 # CPack-generated component packages intentionally contain a runtime binary plus
 # script-only optional components. These filters cover packaging-tool limitations
 # and paths owned by the host filesystem; package contents are validated separately.
-addFilter("standard-dir-owned-by-package")
-addFilter("unstripped-binary-or-object")
 addFilter("position-independent-executable-suggested")
 addFilter("no-binary")
 addFilter("no-documentation")
 addFilter("no-manual-page-for-binary")
 addFilter("non-executable-script")
+addFilter("spelling-error.*reproducibility")
