@@ -193,14 +193,6 @@ else
     tar -xf "sources/alpine-minirootfs-${ALPINE_VER}-riscv64.tar.gz" -C "$INITRAMFS_DIR"
 fi
 
-# Compile custom Snake game
-print_step "Compiling custom Snake game..."
-if [[ "$ARCH" == "rv64" ]] && [[ -f "$INITRAMFS_DIR/lib/libc.musl-riscv64.so.1" ]]; then
-    "${CROSS_COMPILE}gcc" -O2 -march="${M_ARCH}" -mabi="${M_ABI}" -Wl,-dynamic-linker=/lib/ld-musl-riscv64.so.1 -nodefaultlibs "$SCRIPT_DIR/snake.c" "$INITRAMFS_DIR/lib/libc.musl-riscv64.so.1" -lgcc -o "$INITRAMFS_DIR/usr/bin/snake"
-else
-    "${CROSS_COMPILE}gcc" -static -O2 -march="${M_ARCH}" -mabi="${M_ABI}" "$SCRIPT_DIR/snake.c" -o "$INITRAMFS_DIR/usr/bin/snake"
-fi
-
 # Install a small fallback for testing the platform power device directly.  Native
 # reboot(2)/poweroff remains the preferred path; this helper is useful when an
 # init system or kernel reset driver is unavailable.
