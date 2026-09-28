@@ -115,16 +115,12 @@ jobs:
           mkdir -p dist
           cp build/${{ matrix.arch }}-release/SimRV dist/SimRV
           tar -C dist -czf "${{ steps.names.outputs.asset_base }}.tar.gz" SimRV
-          cp build/${{ matrix.arch }}-release/SimRV "${{ steps.names.outputs.asset_base }}.bin"
-          sha256sum "${{ steps.names.outputs.asset_base }}.tar.gz" > "${{ steps.names.outputs.asset_base }}.sha256"
-          sha256sum "${{ steps.names.outputs.asset_base }}.bin" >> "${{ steps.names.outputs.asset_base }}.sha256"
 
       - name: Validate packaged release
         run: >-
           python3 scripts/release_check.py
-          --binary "${{ steps.names.outputs.asset_base }}.bin"
+          --binary build/${{ matrix.arch }}-release/SimRV
           --archive "${{ steps.names.outputs.asset_base }}.tar.gz"
-          --checksum "${{ steps.names.outputs.asset_base }}.sha256"
 
       - name: Build CPack RPM packages
         shell: bash
@@ -138,8 +134,6 @@ jobs:
           fi
           mkdir -p packages
           cpack --config build/${{ matrix.arch }}-release/CPackConfig.cmake -G RPM -B packages
-          sha256sum packages/*.rpm > \
-            "packages/${{ steps.names.outputs.asset_base }}-rpm.sha256"
 
       - name: Validate native package contents
         shell: bash
@@ -149,8 +143,9 @@ jobs:
           test "${#rpms[@]}" -eq 4
           for package in "${rpms[@]}"; do rpm -qpl "$package" >/dev/null; done
           runtime_rpm="$(find packages -maxdepth 1 -name 'simrv-rv*.rpm' -type f)"
-          rpm -qpl "$runtime_rpm" | grep -q '/usr/bin/SimRV$'
-          if rpm -qpl "$runtime_rpm" | grep -q 'simrv-benchmark'; then
+          rpm -qpl "$runtime_rpm" > packages/runtime-rpm-contents.txt
+          grep -q '/usr/bin/SimRV$' packages/runtime-rpm-contents.txt
+          if grep -q 'simrv-benchmark' packages/runtime-rpm-contents.txt; then
             echo "Runtime RPM unexpectedly contains benchmark tooling" >&2
             exit 1
           fi
@@ -161,23 +156,8 @@ jobs:
           name: ${{ steps.names.outputs.asset_base }}
           path: |
             ${{ steps.names.outputs.asset_base }}.tar.gz
-            ${{ steps.names.outputs.asset_base }}.bin
-            ${{ steps.names.outputs.asset_base }}.sha256
             packages/*.rpm
-            packages/*-rpm.sha256
           retention-days: 14
-
-      - name: Upload release assets
-        uses: softprops/action-gh-release@v2
-        with:
-          files: |
-            ${{ steps.names.outputs.asset_base }}.tar.gz
-            ${{ steps.names.outputs.asset_base }}.bin
-            ${{ steps.names.outputs.asset_base }}.sha256
-            packages/*.rpm
-            packages/*-rpm.sha256
-          tag_name: ${{ steps.names.outputs.version_tag }}
-          prerelease: ${{ contains(steps.names.outputs.version_tag, '-') }}
 
   debian-packages:
     runs-on: ubuntu-latest
@@ -227,9 +207,11 @@ jobs:
           for package in "${debs[@]}"; do dpkg-deb --contents "$package" >/dev/null; done
           runtime_deb="$(find packages -maxdepth 1 -name 'simrv-rv*.deb' -type f)"
           development_deb="$(find packages -maxdepth 1 -name 'simrv-dev-rv*.deb' -type f)"
-          dpkg-deb --contents "$runtime_deb" | grep -q '/usr/bin/SimRV$'
-          dpkg-deb --field "$runtime_deb" Depends | grep -q 'libc6'
-          if dpkg-deb --contents "$runtime_deb" | grep -q 'simrv-benchmark'; then
+          dpkg-deb --contents "$runtime_deb" > packages/runtime-deb-contents.txt
+          grep -q '/usr/bin/SimRV$' packages/runtime-deb-contents.txt
+          dpkg-deb --field "$runtime_deb" Depends > packages/runtime-deb-depends.txt
+          grep -q 'libc6' packages/runtime-deb-depends.txt
+          if grep -q 'simrv-benchmark' packages/runtime-deb-contents.txt; then
             echo "Runtime DEB unexpectedly contains benchmark tooling" >&2
             exit 1
           fi
@@ -238,85 +220,50 @@ jobs:
           package_dir="$(find extracted/usr -path '*/cmake/SimRV' -type d -print -quit)"
           cmake -S tests/package-consumer -B consumer -D "SimRV_DIR=${PWD}/${package_dir}"
           cmake --build consumer
-          sha256sum packages/*.deb > \
-            "packages/${{ steps.names.outputs.asset_base }}-deb.sha256"
       - uses: actions/upload-artifact@v7
         with:
           name: ${{ steps.names.outputs.asset_base }}-deb
-          path: |
-            packages/*.deb
-            packages/*-deb.sha256
+          path: packages/*.deb
           retention-days: 14
-      - name: Upload DEB release assets
-        uses: softprops/action-gh-release@v2
-        with:
-          files: |
-            packages/*.deb
-            packages/*-deb.sha256
-          tag_name: ${{ steps.names.outputs.version_tag }}
-          prerelease: ${{ contains(steps.names.outputs.version_tag, '-') }}
 
-  documentation:
+  publish-release:
+    needs: [build-and-upload, debian-packages]
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 10
     permissions:
       contents: write
-    container:
-      image: fedora:44
     steps:
       - uses: actions/checkout@v6
-      - name: Install documentation tools
-        run: dnf install -y doxygen graphviz tar gzip python3
-      - name: Validate release metadata
-        run: |
-          python3 scripts/release_check.py
-          python3 tests/ReleaseToolTests.py
-      - name: Build documentation
-        run: doxygen Doxyfile
-      - name: Package documentation
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: SimRV-*-linux-x86_64-v*
+          path: staging
+          merge-multiple: true
+      - name: Bundle native packages
         shell: bash
         run: |
-          VERSION="$(python3 -c 'import json; print(json.load(open("release/release-manifest.json"))["version"])')"
-          tar -C docs/api -czf "SimRV-docs-v${VERSION}.tar.gz" html
+          set -euo pipefail
+          VERSION="$(sed -nE 's/^set\(SIMRV_VERSION "([^"]+)"\)$/\1/p' CMakeLists.txt)"
+          test "${GITHUB_REF_NAME}" = "v${VERSION}"
+          mkdir -p dist rpm-packages deb-packages
+          find staging -type f -name '*.rpm' -exec cp {} rpm-packages/ \;
+          find staging -type f -name '*.deb' -exec cp {} deb-packages/ \;
+          test "$(find rpm-packages -maxdepth 1 -type f | wc -l)" -eq 8
+          test "$(find deb-packages -maxdepth 1 -type f | wc -l)" -eq 8
+          tar --sort=name --mtime=@0 --owner=0 --group=0 --numeric-owner \
+            -C rpm-packages -czf "dist/SimRV-rpm-packages-v${VERSION}.tar.gz" .
+          tar --sort=name --mtime=@0 --owner=0 --group=0 --numeric-owner \
+            -C deb-packages -czf "dist/SimRV-deb-packages-v${VERSION}.tar.gz" .
+          cp staging/SimRV-rv32-linux-x86_64-v${VERSION}.tar.gz dist/
+          cp staging/SimRV-rv64-linux-x86_64-v${VERSION}.tar.gz dist/
+          test "$(find dist -maxdepth 1 -type f | wc -l)" -eq 4
       - uses: actions/upload-artifact@v7
         with:
-          name: SimRV-documentation
-          path: SimRV-docs-*.tar.gz
+          name: SimRV-release-assets
+          path: dist/*.tar.gz
           retention-days: 14
-      - name: Upload documentation release asset
+      - name: Upload curated release assets
         uses: softprops/action-gh-release@v2
         with:
-          files: SimRV-docs-*.tar.gz
-
-  reproducibility-framework:
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    permissions:
-      contents: write
-    container:
-      image: fedora:44
-    steps:
-      - uses: actions/checkout@v6
-      - name: Install Python
-        run: dnf install -y python3
-      - name: Validate research interfaces
-        run: |
-          python3 scripts/release_check.py
-          python3 tests/ReleaseToolTests.py
-          mkdir -p repro/results
-          python3 -c 'import json,pathlib; pathlib.Path("repro/results/index.json").write_text(json.dumps({"schema_version":1,"status":"framework-only","note":"Raw results and complete evidence are published only after the full release matrix passes."},indent=2)+"\n")'
-      - name: Package reproducibility framework
-        run: python3 scripts/package_repro.py --results repro/results
-      - uses: actions/upload-artifact@v7
-        with:
-          name: SimRV-reproducibility-framework
-          path: |
-            SimRV-repro-*.tar.gz
-            SimRV-repro-*.sha256
-          retention-days: 14
-      - name: Upload reproducibility release asset
-        uses: softprops/action-gh-release@v2
-        with:
-          files: |
-            SimRV-repro-*.tar.gz
-            SimRV-repro-*.sha256
+          files: dist/*.tar.gz
+          prerelease: ${{ contains(github.ref_name, '-') }}

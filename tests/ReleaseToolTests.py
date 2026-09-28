@@ -32,6 +32,17 @@ metadata = load("experiment_metadata", ROOT / "scripts/experiment_metadata.py")
 
 
 class ReleaseToolTests(unittest.TestCase):
+    def test_release_workflow_publishes_curated_assets(self):
+        workflow = (ROOT / ".github/workflows/release-binaries.yml").read_text()
+        self.assertIn("publish-release:", workflow)
+        self.assertIn("SimRV-rpm-packages-v${VERSION}.tar.gz", workflow)
+        self.assertIn("SimRV-deb-packages-v${VERSION}.tar.gz", workflow)
+        self.assertNotIn(".sha256", workflow)
+        self.assertNotIn("reproducibility-framework:", workflow)
+        self.assertNotIn("documentation:", workflow)
+        self.assertNotIn("--contents \"$runtime_deb\" | grep -q", workflow)
+        self.assertNotIn("-qpl \"$runtime_rpm\" | grep -q", workflow)
+
     def test_native_package_versions_match_release_semver(self):
         version = "3.0.0-beta.2"
         self.assertTrue(release_check.artifact_contains_version("SimRV-v3.0.0-beta.2.tar.gz", version))

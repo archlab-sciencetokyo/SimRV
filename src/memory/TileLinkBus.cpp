@@ -36,9 +36,7 @@ struct SmpLockGuard {
 }  // namespace
 
 TileLinkBus::TileLinkBus(simrv::core::Machine& machine)
-    : machine_(machine),
-      coherence_hub_(machine),
-      is_smp_enabled_(machine.configuration().execution.smp_multithreaded) {}
+    : machine_(machine), coherence_hub_(machine) {}
 
 void TileLinkBus::record_transaction(TileLinkChannel ch, std::string_view opcode, TlSourceId source,
                                      TlSinkId sink, Address address, std::string_view detail) {
