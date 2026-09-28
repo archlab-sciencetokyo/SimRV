@@ -50,6 +50,14 @@ class ReleaseToolTests(unittest.TestCase):
         self.assertIn('test "${#rpms[@]}" -eq 3', workflow)
         self.assertIn('test "${#debs[@]}" -eq 3', workflow)
         self.assertIn("prerelease: ${{ contains(github.ref_name, '-') }}", workflow)
+        self.assertIn("dpkg-scanpackages . /dev/null > Packages", workflow)
+        self.assertIn("deb-packages/rv32", workflow)
+        self.assertIn("deb-packages/rv64", workflow)
+        self.assertIn("grep -c '^Package: '", workflow)
+        self.assertIn('createrepo_c "rpm-packages/${arch}"', workflow)
+        self.assertIn("rpm-packages/rv32", workflow)
+        self.assertIn("rpm-packages/rv64", workflow)
+        self.assertIn("repodata/repomd.xml", workflow)
 
     def test_native_package_versions_match_release_semver(self):
         version = "3.0.0-beta.2"

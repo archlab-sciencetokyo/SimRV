@@ -228,6 +228,10 @@ jobs:
       contents: write
     steps:
       - uses: actions/checkout@v6
+      - name: Install native repository tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends createrepo-c dpkg-dev
       - uses: actions/download-artifact@v8
         with:
           pattern: SimRV-*-linux-x86_64-v*
@@ -239,11 +243,22 @@ jobs:
           set -euo pipefail
           VERSION="$(sed -nE 's/^set\(SIMRV_VERSION "([^"]+)"\)$/\1/p' CMakeLists.txt)"
           test "${GITHUB_REF_NAME}" = "v${VERSION}"
-          mkdir -p dist rpm-packages deb-packages
-          find staging -type f -name '*.rpm' -exec cp {} rpm-packages/ \;
-          find staging -type f -name '*.deb' -exec cp {} deb-packages/ \;
-          test "$(find rpm-packages -maxdepth 1 -type f | wc -l)" -eq 6
-          test "$(find deb-packages -maxdepth 1 -type f | wc -l)" -eq 6
+          mkdir -p dist rpm-packages/rv32 rpm-packages/rv64 deb-packages/rv32 deb-packages/rv64
+          find staging -type f -name '*rv32*.rpm' -exec cp {} rpm-packages/rv32/ \;
+          find staging -type f -name '*rv64*.rpm' -exec cp {} rpm-packages/rv64/ \;
+          find staging -type f -name '*rv32*.deb' -exec cp {} deb-packages/rv32/ \;
+          find staging -type f -name '*rv64*.deb' -exec cp {} deb-packages/rv64/ \;
+          test "$(find rpm-packages -type f -name '*.rpm' | wc -l)" -eq 6
+          test "$(find deb-packages -type f -name '*.deb' | wc -l)" -eq 6
+          for arch in rv32 rv64; do
+            createrepo_c "rpm-packages/${arch}"
+            test -f "rpm-packages/${arch}/repodata/repomd.xml"
+            grep -q 'type="primary"' "rpm-packages/${arch}/repodata/repomd.xml"
+            (cd "deb-packages/${arch}" && dpkg-scanpackages . /dev/null > Packages)
+            test "$(grep -c '^Package: ' "deb-packages/${arch}/Packages")" -eq 3
+            grep -q '^Filename: \./simrv-' "deb-packages/${arch}/Packages"
+            grep -q '^Depends: simrv ' "deb-packages/${arch}/Packages"
+          done
           tar --sort=name --mtime=@0 --owner=0 --group=0 --numeric-owner \
             -C rpm-packages -czf "dist/SimRV-rpm-packages-v${VERSION}.tar.gz" .
           tar --sort=name --mtime=@0 --owner=0 --group=0 --numeric-owner \
