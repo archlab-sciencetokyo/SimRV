@@ -169,14 +169,18 @@ mkdir -p "$INITRAMFS_DIR"
 if [[ "$XLEN" == "32" ]]; then
     BUSYBOX_BUILD="$BUILD_DIR/busybox-${BUSYBOX_VER}"
     if [[ ! -f "$BUSYBOX_BUILD/_install/bin/busybox" ]]; then
+        # BusyBox uses CC for its final link. Passing the ISA/ABI only through
+        # EXTRA_CFLAGS compiles RV32 objects correctly but lets the compiler
+        # driver select its default RV64 sysroot at link time.
+        BUSYBOX_CC="${CROSS_COMPILE}gcc -march=${M_ARCH} -mabi=${M_ABI}"
         print_step "Configuring BusyBox..."
         make -C "$BUSYBOX_BUILD" clean || true
-        make -C "$BUSYBOX_BUILD" ARCH=riscv CROSS_COMPILE="$CROSS_COMPILE" LD="${CROSS_COMPILE}ld -m elf32lriscv" "EXTRA_CFLAGS=-march=${M_ARCH} -mabi=${M_ABI}" defconfig
+        make -C "$BUSYBOX_BUILD" ARCH=riscv CROSS_COMPILE="$CROSS_COMPILE" CC="$BUSYBOX_CC" LD="${CROSS_COMPILE}ld -m elf32lriscv" defconfig
         sed -i 's/# CONFIG_STATIC is not set/CONFIG_STATIC=y/' "$BUSYBOX_BUILD/.config"
         sed -i 's/CONFIG_TC=y/# CONFIG_TC is not set/' "$BUSYBOX_BUILD/.config"
         sed -i 's/CONFIG_FEATURE_TC_INGRESS=y/# CONFIG_FEATURE_TC_INGRESS is not set/' "$BUSYBOX_BUILD/.config"
         print_step "Compiling BusyBox (RV32)..."
-        make -C "$BUSYBOX_BUILD" ARCH=riscv CROSS_COMPILE="$CROSS_COMPILE" LD="${CROSS_COMPILE}ld -m elf32lriscv" "EXTRA_CFLAGS=-march=${M_ARCH} -mabi=${M_ABI}" "EXTRA_LDFLAGS=-Wl,-m,elf32lriscv" -j"$(nproc)" install
+        make -C "$BUSYBOX_BUILD" ARCH=riscv CROSS_COMPILE="$CROSS_COMPILE" CC="$BUSYBOX_CC" LD="${CROSS_COMPILE}ld -m elf32lriscv" "EXTRA_LDFLAGS=-Wl,-m,elf32lriscv" -j"$(nproc)" install
     fi
     cp -a "$BUSYBOX_BUILD/_install/"* "$INITRAMFS_DIR/"
 else
