@@ -32,6 +32,13 @@ metadata = load("experiment_metadata", ROOT / "scripts/experiment_metadata.py")
 
 
 class ReleaseToolTests(unittest.TestCase):
+    def test_native_package_versions_match_release_semver(self):
+        version = "3.0.0-beta.2"
+        self.assertTrue(release_check.artifact_contains_version("SimRV-v3.0.0-beta.2.tar.gz", version))
+        self.assertTrue(release_check.artifact_contains_version("simrv_3.0.0~beta.2_amd64.deb", version))
+        self.assertTrue(release_check.artifact_contains_version("simrv-3.0.0-0.beta.2.x86_64.rpm", version))
+        self.assertFalse(release_check.artifact_contains_version("simrv-3.0.0-0.beta.1.x86_64.rpm", version))
+
     def test_configuration_fingerprint_is_stable(self):
         first = {"xlen": 64, "isa": "rv64gc", "vlen": 256}
         second = {"vlen": 256, "isa": "rv64gc", "xlen": 64}

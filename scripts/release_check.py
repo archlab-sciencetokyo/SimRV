@@ -33,6 +33,16 @@ def source_version() -> str:
     return match.group(1)
 
 
+def artifact_contains_version(artifact: str, version: str) -> bool:
+    """Accept SemVer plus the native prerelease encodings used by DEB/RPM."""
+    candidates = {version}
+    match = re.fullmatch(r"(\d+\.\d+\.\d+)(?:-(.+))?", version)
+    if match and match.group(2):
+        base, prerelease = match.groups()
+        candidates.update((f"{base}~{prerelease}", f"{base}-0.{prerelease}"))
+    return any(candidate in artifact for candidate in candidates)
+
+
 def verify_metadata(manifest: dict) -> None:
     if manifest.get("schema_version") != 2:
         fail("release manifest schema_version must be 2")
@@ -49,7 +59,7 @@ def verify_metadata(manifest: dict) -> None:
     if f"## [{expected_tag}]" not in changelog:
         fail(f"CHANGELOG.md has no {expected_tag} heading")
     for artifact in manifest.get("artifacts", []):
-        if version not in artifact:
+        if not artifact_contains_version(artifact, version):
             fail(f"artifact name does not contain version: {artifact}")
     dependencies = manifest.get("dependencies", {})
     for name, dependency in dependencies.items():
