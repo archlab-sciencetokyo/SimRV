@@ -18,6 +18,10 @@ def executable(name: str) -> str | None:
     return str(pathlib.Path(value).resolve()) if value else None
 
 
+def first_executable(*names: str) -> str | None:
+    return next((path for name in names if (path := executable(name))), None)
+
+
 def default_spike() -> str:
     installed = executable("spike")
     local = ROOT / ".cache/repro/spike/build/spike"
@@ -26,8 +30,13 @@ def default_spike() -> str:
 
 def preflight(args: argparse.Namespace) -> tuple[dict, list[str]]:
     tools = {name: executable(name) for name in
-             ("cmake", "ninja", "git", "gcc", "g++", "clang", "clang++", "go",
-              "riscv64-linux-gnu-objcopy", "riscv64-linux-gnu-nm")}
+             ("cmake", "ninja", "git", "gcc", "g++", "clang", "clang++", "go")}
+    tools["riscv-objcopy"] = first_executable(
+        "riscv64-unknown-elf-objcopy", "riscv64-linux-gnu-objcopy",
+        "riscv32-unknown-elf-objcopy", "riscv32-linux-gnu-objcopy")
+    tools["riscv-nm"] = first_executable(
+        "riscv64-unknown-elf-nm", "riscv64-linux-gnu-nm",
+        "riscv32-unknown-elf-nm", "riscv32-linux-gnu-nm")
     paths = {
         "riscv_tests": str(args.riscv_tests_dir.resolve()),
         "vector_tests": str(args.vector_tests_dir.resolve()),
