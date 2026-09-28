@@ -32,10 +32,14 @@ metadata = load("experiment_metadata", ROOT / "scripts/experiment_metadata.py")
 
 
 class ReleaseToolTests(unittest.TestCase):
-    def test_release_workflow_uses_unified_reproduction_packager(self):
+    def test_release_workflow_publishes_curated_assets(self):
         workflow = (ROOT / ".github/workflows/release-binaries.yml").read_text()
-        self.assertIn("scripts/reproduce.py --package --output repro/results", workflow)
-        self.assertNotIn("scripts/package_repro.py", workflow)
+        self.assertIn("publish-release:", workflow)
+        self.assertIn("SimRV-rpm-packages-v${VERSION}.tar.gz", workflow)
+        self.assertIn("SimRV-deb-packages-v${VERSION}.tar.gz", workflow)
+        self.assertNotIn(".sha256", workflow)
+        self.assertNotIn("reproducibility-framework:", workflow)
+        self.assertNotIn("documentation:", workflow)
         self.assertNotIn("--contents \"$runtime_deb\" | grep -q", workflow)
         self.assertNotIn("-qpl \"$runtime_rpm\" | grep -q", workflow)
 
