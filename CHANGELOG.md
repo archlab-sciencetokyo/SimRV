@@ -3,6 +3,28 @@
 All notable changes to SimRV are documented here.
 Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v3.0.0-beta.2] — 2026-09-28
+
+This beta consolidates the architecture-debugging, reproducibility, platform-timing, and native
+packaging work intended for evaluation of SimRV 3.0.
+
+### Distribution & Reproducibility
+
+- Added component RPM and DEB packages for RV32 and RV64 release builds: a small simulator runtime,
+  optional architecture tools, separate benchmark tooling, and development files.
+- Added GitHub Release publication and package-content validation, with RPMs built on Fedora and
+  DEBs built in a Debian-based GCC 16 environment.
+- Hardened benchmark provenance, stopping-policy comparison, event cleanup, JSON-schema validation,
+  and the paper artifact workflow.
+
+### Platform & User Interface
+
+- Replaced the legacy CLI `--misa` spelling with canonical `--isa` profiles.
+- Centralized CPU clock and architectural timebase constants across execution, generated device
+  trees, real-time pacing, and TUI statistics.
+- Updated Linux image tooling and user documentation for reproducible scratch-based builds and
+  current RISC-V toolchains.
+
 ## [v3.0.0-beta.1] — 2026-09-24
 
 This first beta release of SimRV 3.0 concludes Milestone 1: Performance Acceleration & TUI Hardening. It delivers unified inlined fast memory access, RVV 1.0 high-throughput bulk memory transfers, branch predictor optimizations, 2D viewport navigation overhaul, vector register and CSR status inspection, differential TUI line rendering with execution burst throttling, and full dual-architecture gate qualification across RV64 and RV32.

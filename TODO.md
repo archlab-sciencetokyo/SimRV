@@ -1,11 +1,30 @@
-# SimRV 3.0 beta handoff
+# SimRV 3.0 beta.2 handoff
 
-Branch: `release/3.0.0-beta.1`
+Branch: `release/3.0.0-beta.2`
 Target: `dev`
-Latest functional commit: `26f1c1f perf(tui): implement differential rendering and execution throttling`
+Latest functional commit: `2ffe1a1 feat(release): package native Linux distributions`
 
 Do not create a tag or GitHub release. Keep the PR as the delivery vehicle until all
 required qualification checks are green.
+
+Immediate continuation tasks:
+
+1. Confirm the pushed `dev` CI matrix is green and push this release branch for qualification.
+2. Rebuild RV32/RV64 RPM and DEB artifacts with beta.2 metadata and inspect package dependencies.
+3. Install the base and development packages on clean Fedora and Debian/Ubuntu hosts; compile the
+   SDK consumer from the installed CMake package.
+4. Merge the qualified release branch into `dev`, then create and push `v3.0.0-beta.2` so GitHub
+   Releases publishes the native package matrix.
+5. Resume the lab `riscv-buildchain` project: finish the Newlib/musl toolchain validation, exercise
+   CFU-Proving-Ground and RVComp through their existing Makefile interfaces, then add Buildroot.
+
+Local context intended to reduce repeated discovery:
+
+- CPack components are `Runtime`, `Tools`, `Benchmark`, and `Development`.
+- Fedora release jobs build RPMs; the `gcc:16` Debian-based job builds DEBs to avoid glibc skew.
+- `simrv` intentionally excludes benchmark tooling; it is supplied by `simrv-benchmark`.
+- SimRV official builds use DRAM base `0x80000000` and a 256 MiB configured default, while
+  `--ram-size` remains runtime-configurable.
 
 ---
 
