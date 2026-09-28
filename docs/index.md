@@ -126,7 +126,7 @@ SimRV requires a modern C++23 compiler (**Clang 22+** or **GCC 16+**), **CMake 3
 
     Framework for cycle-by-cycle retirement trace comparison against physical Verilog designs.
 
-- :material-code-braces:{ .lg .middle } **[Developer & Contributing](dev/contributing.md)**
+- :material-code-braces:{ .lg .middle } **[Developer & Contributing](development/contributing.md)**
 
     ---
 
