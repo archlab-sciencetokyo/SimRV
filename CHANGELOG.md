@@ -13,18 +13,13 @@ Maintenance release ensuring side-effect-free instruction explanation in the TUI
 
 ## [v2.0.1] — 2026-08-28
 
-Maintenance release addressing cache hit/miss accounting accuracy, TUI cache visual inspector state synchronization, and adding cache educational study session materials.
+Maintenance release addressing cache hit/miss accounting accuracy and TUI cache visual inspector state synchronization.
 
 ### Bug Fixes & Microarchitecture
 
 - **Cache Accounting**: Fixed an issue where refill reads immediately following miss insertions generated spurious hit events and corrupted hit rate statistics.
 - **TUI Cache Inspector**: Corrected hit vs. eviction highlight priority in the Left Pane Cache view to prevent stale replacement markers from masking current hit indications.
 - **Base Cache State**: Ensured `BaseCache::insert` marks the current access as a compulsory/conflict miss state rather than inheriting stale hit indicators.
-
-### Educational & Workload Tooling
-
-- Added comprehensive 60-minute Cache Technologies study guides (`docs/STUDY_SESSION_CACHE.md` and `docs/STUDY_SESSION_CACHE_JA.md`) covering spatial/temporal locality, 4-way set associativity, conflict thrashing, and multicore cache coherence (MESI/MOESI, false sharing).
-- Added runnable bare-metal RISC-V assembly workloads in `examples/study_session_cache/` and `/mnt/archlab/study/cache/`.
 
 ## [v2.0.0] — 2026-08-19
 
