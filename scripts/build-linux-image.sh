@@ -8,7 +8,6 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(dirname "$SCRIPT_DIR")"
 BUILD_DIR="$ROOT_DIR/linux-build"
 ARCH="${ARCH:-rv64}"
-IMAGES_DIR="$ROOT_DIR/linux-images/$ARCH"
 
 # Versions
 OPENSBI_VER="1.9"
@@ -57,6 +56,7 @@ while [[ $# -gt 0 ]]; do
     shift
 done
 
+IMAGES_DIR="$ROOT_DIR/linux-images/$ARCH"
 mkdir -p "$BUILD_DIR/sources" "$IMAGES_DIR"
 
 # Auto-detect cross compiler if not set
