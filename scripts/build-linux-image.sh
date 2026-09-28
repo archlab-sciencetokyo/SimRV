@@ -417,7 +417,15 @@ cd "$OPENSBI_BUILD"
 rm -rf "$OPENSBI_BUILD/build"
 
 # Compile DTS to DTB
-dtc -I dts -O dtb -o "$IMAGES_DIR/devicetree.dtb" "$SCRIPT_DIR/templates/virt-rv${XLEN}.dts"
+DTC_BIN="$(command -v dtc || true)"
+if [[ -z "$DTC_BIN" && -x "$LINUX_BUILD/scripts/dtc/dtc" ]]; then
+    DTC_BIN="$LINUX_BUILD/scripts/dtc/dtc"
+fi
+if [[ -z "$DTC_BIN" ]]; then
+    print_error "Device-tree compiler 'dtc' was not found in PATH or the Linux build tree."
+    exit 1
+fi
+"$DTC_BIN" -I dts -O dtb -o "$IMAGES_DIR/devicetree.dtb" "$SCRIPT_DIR/templates/virt-rv${XLEN}.dts"
 
 print_step "Compiling OpenSBI v${OPENSBI_VER} (FW_PAYLOAD)..."
 
