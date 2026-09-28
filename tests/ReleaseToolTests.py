@@ -26,11 +26,22 @@ release_check = load("release_check", ROOT / "scripts/release_check.py")
 aggregate = load("aggregate_experiments", ROOT / "scripts/aggregate_experiments.py")
 metadata = load("experiment_metadata", ROOT / "scripts/experiment_metadata.py")
 benchmark = load("benchmark", ROOT / "scripts/benchmark.py")
+server_runner = load("run_paper_server", ROOT / "scripts/run_paper_server.py")
 comparison = load("compare_benchmarks", ROOT / "scripts/compare_benchmarks.py")
 reproduce = load("reproduce", ROOT / "scripts/reproduce.py")
 
 
 class ReleaseToolTests(unittest.TestCase):
+    def test_server_runner_constructs_full_artifact_command(self):
+        args = type("Args", (), {"output": ROOT / "out", "riscv_tests_dir": ROOT / "tests",
+                    "vector_tests_dir": ROOT / "vectors", "spike": "spike",
+                    "linux_images_root": ROOT / "linux-images", "archive": ROOT / "artifact.tar.gz",
+                    "baseline": None})()
+        command = server_runner.reproduction_command(args)
+        self.assertEqual(command[command.index("--mode") + 1], "full")
+        self.assertIn("--archive", command)
+        self.assertNotIn("--baseline", command)
+
     def test_configuration_fingerprint_is_stable(self):
         first = {"xlen": 64, "isa": "rv64gc", "vlen": 256}
         second = {"vlen": 256, "isa": "rv64gc", "xlen": 64}

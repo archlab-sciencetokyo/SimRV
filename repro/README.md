@@ -33,6 +33,18 @@ and obtain it from the URL recorded in the release manifest.
 
 ## Run
 
+On a benchmark server, run the preflight first. Its defaults use dependencies prepared under
+`.cache/repro` and Linux images under `linux-images`:
+
+```bash
+uv run --frozen python scripts/run_paper_server.py --preflight-only
+uv run --frozen python scripts/run_paper_server.py
+```
+
+Override `--riscv-tests-dir`, `--vector-tests-dir`, `--linux-images-root`, or `--spike` when the
+server keeps shared dependencies elsewhere. The executed run stores `server-preflight.json` inside
+the packaged results so the submission records the resolved tools and inputs.
+
 ```bash
 uv run --frozen python scripts/reproduce.py --mode quick --output repro/results
 uv run --frozen python scripts/reproduce.py --mode full --output repro/results \
