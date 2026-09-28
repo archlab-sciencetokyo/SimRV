@@ -6,7 +6,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(dirname "$SCRIPT_DIR")"
-BUILD_DIR="$ROOT_DIR/linux-build"
+BUILD_DIR="${SIMRV_LINUX_BUILD_DIR:-$ROOT_DIR/linux-build}"
 ARCH="${ARCH:-rv64}"
 
 # Versions
@@ -27,6 +27,7 @@ print_error() { echo -e "${RED}[ERROR]${NC} $1"; }
 
 LIBC="${LIBC:-auto}"
 CROSS_COMPILE="${CROSS_COMPILE:-}"
+CLEAN_REQUESTED=false
 
 # Parse arguments
 while [[ $# -gt 0 ]]; do
@@ -44,9 +45,7 @@ while [[ $# -gt 0 ]]; do
             shift
             ;;
         --clean)
-            print_step "Cleaning build and images directories..."
-            rm -rf "$BUILD_DIR" "$IMAGES_DIR"
-            exit 0
+            CLEAN_REQUESTED=true
             ;;
         *)
             print_error "Unknown option: $1"
@@ -56,7 +55,13 @@ while [[ $# -gt 0 ]]; do
     shift
 done
 
-IMAGES_DIR="$ROOT_DIR/linux-images/$ARCH"
+IMAGES_ROOT="${SIMRV_LINUX_IMAGES_ROOT:-$ROOT_DIR/linux-images}"
+IMAGES_DIR="$IMAGES_ROOT/$ARCH"
+if [[ "$CLEAN_REQUESTED" == true ]]; then
+    print_step "Cleaning build and ${ARCH} image directories..."
+    rm -rf "$BUILD_DIR" "$IMAGES_DIR"
+    exit 0
+fi
 mkdir -p "$BUILD_DIR/sources" "$IMAGES_DIR"
 
 # Auto-detect cross compiler if not set
