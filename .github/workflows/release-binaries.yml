@@ -149,8 +149,9 @@ jobs:
           test "${#rpms[@]}" -eq 4
           for package in "${rpms[@]}"; do rpm -qpl "$package" >/dev/null; done
           runtime_rpm="$(find packages -maxdepth 1 -name 'simrv-rv*.rpm' -type f)"
-          rpm -qpl "$runtime_rpm" | grep -q '/usr/bin/SimRV$'
-          if rpm -qpl "$runtime_rpm" | grep -q 'simrv-benchmark'; then
+          rpm -qpl "$runtime_rpm" > packages/runtime-rpm-contents.txt
+          grep -q '/usr/bin/SimRV$' packages/runtime-rpm-contents.txt
+          if grep -q 'simrv-benchmark' packages/runtime-rpm-contents.txt; then
             echo "Runtime RPM unexpectedly contains benchmark tooling" >&2
             exit 1
           fi
@@ -227,9 +228,11 @@ jobs:
           for package in "${debs[@]}"; do dpkg-deb --contents "$package" >/dev/null; done
           runtime_deb="$(find packages -maxdepth 1 -name 'simrv-rv*.deb' -type f)"
           development_deb="$(find packages -maxdepth 1 -name 'simrv-dev-rv*.deb' -type f)"
-          dpkg-deb --contents "$runtime_deb" | grep -q '/usr/bin/SimRV$'
-          dpkg-deb --field "$runtime_deb" Depends | grep -q 'libc6'
-          if dpkg-deb --contents "$runtime_deb" | grep -q 'simrv-benchmark'; then
+          dpkg-deb --contents "$runtime_deb" > packages/runtime-deb-contents.txt
+          grep -q '/usr/bin/SimRV$' packages/runtime-deb-contents.txt
+          dpkg-deb --field "$runtime_deb" Depends > packages/runtime-deb-depends.txt
+          grep -q 'libc6' packages/runtime-deb-depends.txt
+          if grep -q 'simrv-benchmark' packages/runtime-deb-contents.txt; then
             echo "Runtime DEB unexpectedly contains benchmark tooling" >&2
             exit 1
           fi

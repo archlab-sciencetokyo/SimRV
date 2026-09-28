@@ -36,6 +36,8 @@ class ReleaseToolTests(unittest.TestCase):
         workflow = (ROOT / ".github/workflows/release-binaries.yml").read_text()
         self.assertIn("scripts/reproduce.py --package --output repro/results", workflow)
         self.assertNotIn("scripts/package_repro.py", workflow)
+        self.assertNotIn("--contents \"$runtime_deb\" | grep -q", workflow)
+        self.assertNotIn("-qpl \"$runtime_rpm\" | grep -q", workflow)
 
     def test_native_package_versions_match_release_semver(self):
         version = "3.0.0-beta.2"
