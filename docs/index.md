@@ -114,7 +114,7 @@ SimRV requires a modern C++23 compiler (**Clang 20+** or **GCC 14+**), **CMake 3
 
     ---
 
-    Contributing standards, CTest gate suites, [reviewer reproduction guide](evaluation/reviewer.md), and [release qualification](evaluation/release.md).
+    Contributing standards and CTest gate suites for simulator development.
 
 </div>
 
