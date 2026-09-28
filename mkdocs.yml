@@ -89,8 +89,8 @@ nav:
   - Hardware & Extensions:
       - Custom Extensions & Instructions: hardware/extensions.md
   - Development & Contributing:
-      - Developer Guide & Standards: dev/contributing.md
-      - Version Migration (2.x to 3.0): dev/migration.md
+      - Developer Guide & Standards: development/contributing.md
+      - Version Migration (2.x to 3.0): development/migration.md
 
 not_in_nav: |
   SUPPORT_MATRIX.md
