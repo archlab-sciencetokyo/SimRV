@@ -124,9 +124,19 @@ sudo apt-get install -y \
 
 ```bash
 sudo dnf install -y \
-    gcc g++ flex bison bc openssl-devel \
-    git wget texinfo dtc
+    gcc gcc-c++ clang cmake ninja-build make ccache \
+    flex bison bc perl python3 git wget curl \
+    tar xz bzip2 cpio fakeroot patch rsync dtc dwarves \
+    openssl openssl-devel elfutils-libelf-devel ncurses-devel \
+    zlib-devel libzstd-devel e2fsprogs \
+    gcc-riscv64-linux-gnu gcc-c++-riscv64-linux-gnu \
+    binutils-riscv64-linux-gnu
 ```
+
+`e2fsprogs` provides `mkfs.ext4`, which is required when packaging the RV64
+Alpine root disk. Fedora's RISC-V GCC packages provide a kernel-capable cross
+compiler and binutils, but do **not** provide a target glibc sysroot. They
+therefore cannot statically link the RV32 BusyBox rootfs by themselves.
 
 ---
 
@@ -136,18 +146,60 @@ The build script needs a RISC-V cross-compilation toolchain. You have two option
 
 ### Option A: Pre-installed Toolchain (Recommended)
 
-Install the [riscv-gnu-toolchain](https://github.com/riscv-collab/riscv-gnu-toolchain)
-and make sure `riscv64-unknown-linux-gnu-gcc` (for RV32) or `riscv64-linux-gnu-gcc`
-is in your `PATH`, or set `RISCV_GNU_TOOLCHAIN_DIR`:
+Install complete Linux-targeting
+[riscv-gnu-toolchain](https://github.com/riscv-collab/riscv-gnu-toolchain)
+builds with glibc. A locally built multilib toolchain can serve both targets;
+the official release archives use separate RV32 and RV64 prefixes. Verify that
+each compiler resolves its target startup files before building:
 
 ```bash
-RISCV_GNU_TOOLCHAIN_DIR=/opt/riscv ./scripts/build-linux-image.sh
+export PATH=/opt/riscv/linux-glibc-rv64/bin:/opt/riscv/linux-glibc-rv32/bin:$PATH
+riscv64-unknown-linux-gnu-gcc -march=rv64gc -mabi=lp64d -print-file-name=crt1.o
+riscv32-unknown-linux-gnu-gcc -march=rv32gc -mabi=ilp32d -print-file-name=crt1.o
+
+./scripts/build-linux-image.sh --arch rv32 \
+    --cross-compile riscv32-unknown-linux-gnu-
+./scripts/build-linux-image.sh --arch rv64 \
+    --cross-compile riscv64-unknown-linux-gnu-
 ```
+
+Each command must print an existing target path rather than the bare string
+`crt1.o`.
 
 ### Option B: Build Toolchain from Source
 
-If no toolchain is found, the script will automatically build one from source.
-This adds ~25–40 minutes to the first run and requires ~3–5 GB of disk space.
+Install the additional toolchain-build prerequisites, then build a multilib
+Linux/glibc toolchain:
+
+```bash
+sudo dnf install -y \
+    autoconf automake libmpc-devel mpfr-devel gmp-devel gawk \
+    texinfo patchutils expat-devel libslirp-devel meson
+
+git clone https://github.com/riscv-collab/riscv-gnu-toolchain
+cd riscv-gnu-toolchain
+./configure --prefix=/opt/riscv --enable-linux --enable-multilib
+make linux -j"$(nproc)"
+```
+
+The source checkout and build require several gigabytes. The image script does
+not build the cross-toolchain automatically.
+
+### Building on Scratch Storage
+
+Keep large kernel trees, root filesystems, and generated images off the source
+filesystem by setting both supported roots:
+
+```bash
+export SIMRV_LINUX_BUILD_DIR=/scratch/$USER/simrv-linux/build
+export SIMRV_LINUX_IMAGES_ROOT=/scratch/$USER/simrv-linux/images
+mkdir -p "$SIMRV_LINUX_BUILD_DIR" "$SIMRV_LINUX_IMAGES_ROOT"
+
+./scripts/build-linux-image.sh --arch rv32 \
+    --cross-compile riscv32-unknown-linux-gnu-
+./scripts/build-linux-image.sh --arch rv64 \
+    --cross-compile riscv64-unknown-linux-gnu-
+```
 
 ---
 
