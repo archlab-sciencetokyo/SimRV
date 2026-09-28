@@ -347,9 +347,14 @@ fi
 LINUX_BUILD="$BUILD_DIR/linux-${LINUX_VER}"
 cd "$LINUX_BUILD"
 
+# The source tree is shared by RV32 and RV64 builds. Remove generated objects
+# before changing XLEN so stale architecture-specific objects cannot be linked
+# into the next kernel.
+print_step "Cleaning Linux build tree before configuring ${ARCH}..."
+make ARCH=riscv CROSS_COMPILE="$CROSS_COMPILE" mrproper
+
 cp "$BUILD_DIR/initramfs_${ARCH}.cpio" "$LINUX_BUILD/initramfs.cpio"
 
-rm -f .config
 print_step "Configuring Linux Kernel..."
 make ARCH=riscv CROSS_COMPILE="$CROSS_COMPILE" "$LINUX_DEFCONFIG"
 
