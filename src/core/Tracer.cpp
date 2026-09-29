@@ -542,9 +542,18 @@ auto Tracer::write_summary_json(const std::string& path) -> bool {
         << "  \"hart_stats\": [\n";
     for (size_t hart = 0; hart < machine_.num_harts(); ++hart) {
         const auto& cpu = machine_.hart(hart);
+        const auto& hart_bp = cpu.branch_predictor.stats();
         out << "    {\"hart\": " << hart << ", \"retired_instructions\": "
             << cpu.e_icount << ", \"compressed_instructions\": " << cpu.e_ccount
-            << ", \"pc\": " << cpu.state().pc << "}"
+            << ", \"pc\": " << cpu.state().pc
+            << ", \"cycles\": " << cpu.clint_mmio.mcycle
+            << ", \"performance\": {\"icache_hits\": " << cpu.icache.hit_count()
+            << ", \"icache_misses\": " << cpu.icache.miss_count()
+            << ", \"dcache_hits\": " << cpu.dcache.hit_count()
+            << ", \"dcache_misses\": " << cpu.dcache.miss_count()
+            << ", \"branch_predictions\": " << hart_bp.direction_predictions
+            << ", \"branch_hits\": " << hart_bp.direction_hits
+            << ", \"branch_misses\": " << hart_bp.direction_misses << "}}"
             << (hart + 1 == machine_.num_harts() ? "\n" : ",\n");
     }
     out << "  ]\n}\n";
