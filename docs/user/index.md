@@ -20,6 +20,9 @@ teaching and validation builds.
 
 ## 1. Architecture & Features Overview
 
+Start with a small ELF before adding Linux, cycle accuracy, or external tools. This keeps image,
+entry-point, and memory-map problems easy to isolate.
+
 SimRV simulates standard 32-bit and 64-bit RISC-V architectures:
 
 - **ISA Support**: RV32GCBV / RV64GCBV (Base Integer `I`/`E`, Standard Multiply/Divide `M`, Atomic `A`, Single/Double Floating Point `F`/`D`, Compressed `C`, Bit Manipulation `B`, and Vector 1.0 `V`).
@@ -79,6 +82,9 @@ By default, launching `SimRV` launches the interactive TUI workbench. For non-in
 
 ### Common Invocations
 
+The default launch mode is interactive. Add `--cli` whenever the command is part of a script or
+you want only guest output and diagnostics.
+
 ```bash
 # Run a bare-metal binary in interactive TUI mode (Default)
 ./build/rv64-release/SimRV -b -m img/hello.bin
@@ -95,6 +101,10 @@ By default, launching `SimRV` launches the interactive TUI workbench. For non-in
   -D linux-images/rv64/root.bin \
   -f linux-images/rv64/devicetree.dtb
 ```
+
+A successful bare-metal run normally ends with a `tohost` or guest-termination message. If the
+program appears idle, add an instruction limit and verify that it was linked for the configured
+guest RAM address.
 
 ### Key CLI Options
 
