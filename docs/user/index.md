@@ -121,9 +121,11 @@ simrv -m program.elf
 
 ### Unix composition
 
-The canonical automation form is `simrv run IMAGE`; the legacy flag-only form is no longer
-accepted. Interactive sessions can use `simrv tui [IMAGE]`, while `simrv explain INSTRUCTION` and
-`simrv attach ENDPOINT` cover standalone tools.
+The canonical automation form is `simrv --cli --image IMAGE`; `simrv run IMAGE` is an optional
+explicit-command spelling. Interactive sessions can use ordinary flags such as
+`simrv --tui --image IMAGE`, while `simrv explain INSTRUCTION` and `simrv attach ENDPOINT` cover
+standalone tools. When connected to a TTY, ordinary image arguments continue to launch the TUI
+unless `--cli` is specified.
 
 Image metadata can be inspected without booting a guest:
 
@@ -133,6 +135,9 @@ simrv inspect image program.elf
 
 Builds with optional toml++ support also accept `--config FILE` and expose resolved settings via
 `simrv inspect config`.
+
+TOML support is build-time only: Fedora uses `tomlplusplus-devel`, while Debian/Ubuntu uses
+`libtomlplusplus-dev`. Installed SimRV runtime packages do not depend on toml++.
 
 `--cli` exposes a stream-oriented process interface, so normal Unix tools can capture or transform
 a run without the TUI. Use `--log` for a separate simulator log when a clean guest-console stream

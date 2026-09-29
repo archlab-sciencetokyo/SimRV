@@ -13,6 +13,11 @@
 #include <print>
 #include <span>
 #include <string>
+#include <unordered_set>
+
+#ifdef SIMRV_HAS_TOML
+#include <toml++/toml.hpp>
+#endif
 
 #include "simrv/core/CpuConfigParser.hpp"
 #include "simrv/core/Logger.hpp"
@@ -89,6 +94,64 @@ auto parse_u32_base0(std::string_view num, uint32_t& out) -> bool {
     out = static_cast<uint32_t>(value);
     return true;
 }
+
+#ifdef SIMRV_HAS_TOML
+auto toml_config_args(std::string_view path) -> std::expected<std::vector<std::string>, std::string> {
+    toml::table table;
+    try {
+        table = toml::parse_file(std::string(path));
+    } catch (const toml::parse_error& error) {
+        return std::unexpected(std::format("cannot parse TOML config '{}': {}", path, error.what()));
+    }
+    static const std::unordered_set<std::string_view> known = {
+        "image", "disk", "dtb", "os", "baremetal", "isa", "vlen", "ram_size", "harts",
+        "smp_quantum", "smp_multithreaded", "steps", "start_pc", "mode", "pipeline",
+        "no_forwarding", "platform", "net", "cpu_config", "cpu_profile", "bram_prewarm",
+        "log_level", "quiet", "verbose", "log_file", "trap_log", "instmix", "trace_bpred",
+        "gdb", "gdb_port", "lockstep", "spike_bin", "spike_elf", "uart", "events", "summary",
+        "tui", "class", "mission", "high_contrast", "mouse_sensitivity", "config"
+    };
+    for (const auto& [key, value] : table) {
+        if (!known.contains(key)) return std::unexpected(std::format("unknown TOML config key '{}'", key));
+    }
+    std::vector<std::string> args;
+    auto string_value = [&](std::string_view key, std::string_view option) {
+        if (auto value = table[key].value<std::string>()) {
+            args.emplace_back(option);
+            args.emplace_back(*value);
+        }
+    };
+    auto integer_value = [&](std::string_view key, std::string_view option) {
+        if (auto value = table[key].value<int64_t>()) {
+            args.emplace_back(option);
+            args.emplace_back(std::to_string(*value));
+        }
+    };
+    auto boolean_flag = [&](std::string_view key, std::string_view option) {
+        if (auto value = table[key].value<bool>(); value && *value) args.emplace_back(option);
+    };
+    string_value("image", "--image"); string_value("disk", "--disk"); string_value("dtb", "--dtb");
+    string_value("isa", "--isa"); string_value("mode", "--mode"); string_value("pipeline", "--pipeline");
+    string_value("platform", "--platform"); string_value("net", "--net");
+    string_value("cpu_config", "--cpu-config"); string_value("cpu_profile", "--cpu-profile");
+    string_value("log_level", "--log-level"); string_value("log_file", "--log-file");
+    string_value("trap_log", "--trap-log"); string_value("spike_bin", "--spike-bin");
+    string_value("spike_elf", "--spike-elf"); string_value("uart", "--uart");
+    string_value("events", "--events"); string_value("summary", "--summary");
+    string_value("mission", "--mission");
+    integer_value("vlen", "--vlen"); integer_value("ram_size", "--ram-size");
+    string_value("ram_size", "--ram-size");
+    integer_value("harts", "--harts"); integer_value("smp_quantum", "--smp-quantum");
+    integer_value("steps", "--steps"); integer_value("start_pc", "--start-pc");
+    integer_value("gdb_port", "--gdb-port");
+    boolean_flag("os", "--os"); boolean_flag("baremetal", "--baremetal"); boolean_flag("smp_multithreaded", "--smp-multithreaded");
+    boolean_flag("no_forwarding", "--no-forwarding"); boolean_flag("bram_prewarm", "--bram-prewarm");
+    boolean_flag("quiet", "--quiet"); boolean_flag("verbose", "--verbose"); boolean_flag("instmix", "--instmix");
+    boolean_flag("trace_bpred", "--trace-bpred"); boolean_flag("gdb", "--gdb"); boolean_flag("lockstep", "--lockstep");
+    boolean_flag("tui", "--tui"); boolean_flag("class", "--class"); boolean_flag("high_contrast", "--high-contrast");
+    return args;
+}
+#endif
 
 auto next_argument(std::span<char* const> args, std::size_t& index, std::string_view option_name)
     -> std::expected<std::string_view, std::string> {
@@ -994,12 +1057,39 @@ auto parse_command_line(std::span<char* const> args) -> std::expected<ParseResul
     if (command == "run" || command == "tui") {
         canonical.emplace_back(command == "run" ? "--cli" : "--tui");
         std::size_t next = command_index + 1;
+        [[maybe_unused]] bool positional_image = false;
         if (next < args.size() && args[next][0] != '-') {
             canonical.emplace_back("--image");
             canonical.emplace_back(args[next++]);
+            positional_image = true;
         } else if (command == "run") {
-            return std::unexpected("run requires a positional IMAGE argument");
+            bool has_config = false;
+            for (std::size_t j = next; j + 1 < args.size(); ++j) {
+                if (std::string_view(args[j]) == "--config") has_config = true;
+            }
+            if (!has_config) return std::unexpected("run requires a positional IMAGE argument");
         }
+        std::string config_path;
+        for (std::size_t j = next; j + 1 < args.size(); ++j) {
+            if (std::string_view(args[j]) == "--config") config_path = args[j + 1];
+        }
+#ifdef SIMRV_HAS_TOML
+        if (!config_path.empty()) {
+            auto config_args = toml_config_args(config_path);
+            if (!config_args) return std::unexpected(config_args.error());
+            for (std::size_t j = 0; j < config_args->size(); ++j) {
+                if (positional_image && (*config_args)[j] == "--image") {
+                    if (j + 1 < config_args->size()) ++j;
+                    continue;
+                }
+                canonical.emplace_back((*config_args)[j]);
+            }
+        }
+#else
+        if (!config_path.empty()) {
+            return std::unexpected("--config requires a TOML-enabled build; install toml++ or configure with SIMRV_WITH_TOML=ON");
+        }
+#endif
         append_tail(next);
     } else if (command == "explain") {
         if (command_index + 1 >= args.size()) return std::unexpected("explain requires INSTRUCTION");
@@ -1014,7 +1104,11 @@ auto parse_command_line(std::span<char* const> args) -> std::expected<ParseResul
         if (command_index + 1 >= args.size()) return std::unexpected("inspect requires config or image");
         const std::string_view kind(args[command_index + 1]);
         if (kind == "config") {
-            return std::unexpected("inspect config is not available until TOML support is enabled");
+            if (command_index + 2 >= args.size()) return std::unexpected("inspect config requires FILE");
+            ParseResult inspected{};
+            inspected.action = CliAction::InspectConfig;
+            inspected.options.fn_config = args[command_index + 2];
+            return inspected;
         }
         if (kind == "image") {
             if (command_index + 2 >= args.size()) return std::unexpected("inspect image requires FILE");

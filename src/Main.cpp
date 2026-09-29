@@ -31,6 +31,9 @@
 #include "simrv/util/FormatUtil.hpp"
 #include "simrv/util/InstructionExplainer.hpp"
 #include "simrv/xlen/Types.hpp"
+#ifdef SIMRV_HAS_TOML
+#include <toml++/toml.hpp>
+#endif
 
 using namespace simrv::util;
 
@@ -89,24 +92,11 @@ auto main(int argc, char* argv[]) -> int {  // NOLINT(bugprone-exception-escape)
     int final_exit_code = 0;
     while (keep_running) {
         std::span<char* const> const args(argv, static_cast<std::size_t>(argc));
-        if (argc > 1) {
-            std::string_view first_command(argv[1]);
-            if (first_command.starts_with('-') && first_command != "--help" &&
-                first_command != "-h" && first_command != "--version" &&
-                first_command != "--license" && first_command != "--quiet" &&
-                first_command != "-q" && first_command != "--verbose" &&
-                first_command != "-v") {
-                option_error("legacy flag-only syntax was removed; use 'simrv run IMAGE' (see --help)", 1);
-            }
-        }
         auto parsed = parse_command_line(args);
         if (!parsed) {
             option_error(parsed.error());
         }
         simrv::log::set_cli_mode(!parsed->options.tuimode);
-        if (!parsed->options.fn_config.empty()) {
-            option_error("--config requires a TOML-enabled build; this binary was built without TOML support", 1);
-        }
         if (!parsed->options.fn_uart.empty() && !simrv::device::set_uart_output(parsed->options.fn_uart)) {
             option_error("cannot open UART output: " + parsed->options.fn_uart, 1);
         }
@@ -216,8 +206,20 @@ auto main(int argc, char* argv[]) -> int {  // NOLINT(bugprone-exception-escape)
                     "compatible with this simulator.");
                 std::exit(0);
             }
-            case CliAction::InspectConfig:
-                option_error("inspect action is not available in this build", 1);
+            case CliAction::InspectConfig: {
+#ifdef SIMRV_HAS_TOML
+                try {
+                    auto table = toml::parse_file(parsed->options.fn_config);
+                    std::cout << table << '\n';
+                } catch (const toml::parse_error& error) {
+                    option_error(std::format("cannot parse TOML config '{}': {}",
+                                             parsed->options.fn_config, error.what()), 1);
+                }
+#else
+                option_error("inspect config requires a TOML-enabled build", 1);
+#endif
+                std::exit(0);
+            }
             case CliAction::InspectImage: {
                 std::error_code ec;
                 const auto size = std::filesystem::file_size(parsed->options.fn_memimg, ec);
@@ -245,7 +247,7 @@ auto main(int argc, char* argv[]) -> int {  // NOLINT(bugprone-exception-escape)
         }
         auto machine_config = staged_configuration.value_or(parsed->options.to_machine_config());
         if (const auto valid = machine_config.validate(); !valid) {
-            option_error(valid.error(), 0);
+            option_error(valid.error(), 1);
         }
         auto sim_machine = std::make_unique<simrv::core::Machine>(std::move(machine_config));
 

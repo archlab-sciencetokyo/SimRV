@@ -71,7 +71,7 @@ def main():
     if transport not in ("pty", "pipe"):
         print(f"unsupported SIMRV_CLI_TRANSPORT={transport}", file=sys.stderr)
         return 2
-    cmd = [simrv, "--cli", "--os", "-m", mem, "-D", disk, "-e", "2000000000"]
+    cmd = [simrv, "run", mem, "--os", "--disk", disk, "--steps", "2000000000"]
     if dtb not in ("", "dynamic", "NONE") and os.path.exists(dtb):
         cmd.extend(["-f", dtb])
     cmd.extend(os.environ.get("SIMRV_TEST_EXTRA_ARGS", "").split())
@@ -93,12 +93,27 @@ def main():
     started = time.monotonic()
     output = bytearray()
     try:
+        # Do not inject commands while Linux is still booting: the UART input queue is finite and
+        # early bytes can be consumed by firmware/kernel console setup instead of the shell.
+        prompt_deadline = min(started + timeout, started + 60.0)
+        while time.monotonic() < prompt_deadline and b"~ #" not in output:
+            readable, _, _ = select.select([output_fd], [], [], 0.25)
+            if readable:
+                try:
+                    chunk = os.read(output_fd, 65536)
+                except OSError:
+                    break
+                if not chunk:
+                    break
+                output.extend(chunk)
+        if b"~ #" not in output:
+            print("Linux shell prompt did not appear before command injection", file=sys.stderr)
+            print(output[-6000:].decode("utf-8", errors="replace"), file=sys.stderr)
+            return 1
         if transport == "pipe":
             proc.stdin.write(COMMANDS.encode())
             proc.stdin.flush()
         else:
-            # CLI mode starts running immediately; wait briefly for the shell before sending input.
-            time.sleep(0.5)
             os.write(master, COMMANDS.encode())
         while time.monotonic() - started < timeout:
             if proc.poll() is not None and not select.select([output_fd], [], [], 0)[0]:

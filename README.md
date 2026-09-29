@@ -19,6 +19,9 @@ SimRV is an explainable, dual-width (RV32 / RV64) RISC-V research simulator feat
 
 SimRV is not RISC-V certified. `RV32GCBV` and `RV64GCBV` are implementation targets; see the [compliance scope](docs/architecture/compliance.md) for verified coverage and known gaps.
 
+RISC-V is a registered trademark of RISC-V International. SimRV is an independent project and
+is not affiliated with or endorsed by RISC-V International.
+
 ---
 
 ## Documentation
@@ -78,9 +81,10 @@ The source build below is intended for development and architecture work.
 
 ### Interactive and headless runs
 
-Launch `simrv` normally from an interactive terminal to explore an image with the TUI. Use the
-canonical subcommands `simrv tui IMAGE` for interactive work and `simrv run IMAGE` for scripted
-headless runs. The former flag-only interface has been removed in the 3.0 prerelease.
+Launch `simrv` normally from an interactive terminal to explore an image with the TUI. Arguments
+such as `simrv --baremetal --image IMAGE` continue to use the TUI when attached to a terminal;
+pass `--cli` to force headless execution. The optional `run` and `tui` subcommands are available
+for scripts that prefer an explicit command name.
 
 ```bash
 # Interactive image loading and inspection.

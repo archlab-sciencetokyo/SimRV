@@ -1,0 +1,11 @@
+# Optional SimRV run configuration. CLI options override these values.
+image = "program.elf"
+baremetal = true
+isa = "rv64gcbv"
+vlen = 256
+ram_size = 134217728
+harts = 1
+mode = "fast"
+platform = "pcie"
+log_level = "warn"
+summary = "simrv-summary.json"

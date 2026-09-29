@@ -17,6 +17,7 @@ if(SIMRV_WITH_TOML)
   find_package(tomlplusplus QUIET)
   if(tomlplusplus_FOUND)
     message(STATUS "TOML configuration support enabled")
+    set(SIMRV_HAS_TOML ON)
   else()
     message(STATUS "toml++ not found; --config will report unavailable support")
   endif()
@@ -249,6 +250,11 @@ add_executable(SimRV::cli ALIAS SimRV)
 target_include_directories(SimRV PRIVATE ${PROJECT_SOURCE_DIR}/include
                                          ${PROJECT_BINARY_DIR}/generated)
 target_link_libraries(SimRV PRIVATE simrv-runtime)
+if(SIMRV_HAS_TOML)
+  target_compile_definitions(simrv-runtime PUBLIC SIMRV_HAS_TOML=1)
+  target_compile_definitions(simrv-core PRIVATE SIMRV_HAS_TOML=1)
+  target_compile_definitions(SimRV PRIVATE SIMRV_HAS_TOML=1)
+endif()
 simrv_apply_options(SimRV)
 
 include(CheckCXXCompilerFlag)
@@ -1066,6 +1072,9 @@ install(FILES scripts/experiment_metadata.py
         COMPONENT Benchmark)
 install(FILES scripts/completions/simrv.bash scripts/completions/_simrv
         DESTINATION ${CMAKE_INSTALL_DATADIR}/SimRV/completions
+        COMPONENT Runtime)
+install(FILES configs/simrv.example.toml
+        DESTINATION ${CMAKE_INSTALL_DATADIR}/SimRV/configs
         COMPONENT Runtime)
 
 install(
