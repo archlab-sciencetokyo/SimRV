@@ -168,7 +168,7 @@ jobs:
         run: |
           apt-get update
           apt-get install -y --no-install-recommends \
-            bash musl-tools libstdc++-dev libgcc-dev \
+            bash musl-tools libstdc++-14-dev \
             python3 python3-pip tar gzip file ca-certificates
           python3 -m pip install --break-system-packages cmake==4.3.0 ninja
       - name: Validate release tag
