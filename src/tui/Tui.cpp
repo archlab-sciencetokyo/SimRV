@@ -752,12 +752,11 @@ void Tui::render(bool force) {
                     row, width, static_cast<int>(col_idx), total_cols, is_focused, multi_headers);
                 if (selection_.is_active && selection_.pane == SelectionPane::InspectorPane &&
                     selection_.col_idx == col_idx) {
-                    // The composed frame has a different number of header rows for a
-                    // single-column inspector versus the multi-column workbench.  Match the
-                    // coordinates used by mouse selection so the inverse highlight follows the
-                    // selected rows in both layouts.
-                    const int content_start_y = multi_headers ? 5 : 6;
-                    const int screen_y = content_start_y + row;
+                    // The composed body always starts on terminal row 4.  The selected content
+                    // starts at row 5 for multi-column headers and row 6 for a single inspector,
+                    // so compare against the actual screen row rather than adding the content
+                    // origin twice.
+                    const int screen_y = 4 + row;
                     int start_y = selection_.start_y;
                     int end_y = selection_.end_y;
                     if (start_y > end_y) std::swap(start_y, end_y);
@@ -3499,7 +3498,9 @@ auto Tui::consume_control_sequence(uint8_t first_byte) -> bool {
                 selection_.end_x = local_end_x;
                 selection_.end_y = selection_.bounds.clamp_y(y);
                 selection_.is_active = true;
-                render(false);
+                // Paused frames are normally suppressed unless forced. Drag motion is an
+                // explicit presentation update, so repaint immediately while the pointer moves.
+                render(true);
             }
             return true;
         }
