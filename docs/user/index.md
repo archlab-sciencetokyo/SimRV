@@ -113,12 +113,50 @@ simrv -m program.elf
 | `--cpu-profile <path.cfg>` | Load human-editable CPU microarchitecture profile. |
 | `-p, --pipeline <type>` | Pipeline microarchitecture target (`three-stage`, `five-stage`, `dual-issue`). |
 | `-H, --tohost <addr>` | Specify physical address of `tohost` communication symbol for tests. |
+| `--summary <file>` | Write a machine-readable JSON execution summary when the run ends. |
+| `--events <file>` | Write newline-delimited lifecycle events for automation. |
 | `--trace` | Write architectural instruction trace to `trace/trace.txt`. |
 | `--tracepc` | Write PC stream trace to `trace/tracepc.txt`. |
 | `--gdb` | Start GDB Remote Serial Protocol (RSP) server. |
 | `--gdb-port <port>` | Set GDB RSP TCP listener port (default: 1234). |
 | `-v, --version` | Display version and build information. |
 | `-h, --help` | Show full command-line help message. |
+
+### Automation summary
+
+Use `--summary` when a script needs architectural results without parsing human-readable logs:
+
+```bash
+simrv --cli --baremetal -m program.elf --summary results/run.json
+python3 -m json.tool results/run.json
+```
+
+The JSON document has schema version `1` and includes the simulator version, XLEN, hart count,
+execution engine, stop reason, exit status, final PC, retired instructions, cycles, CPI, IPC,
+per-hart retirement counts, cache hit/miss counts, branch prediction outcomes, and bus traffic.
+The summary is written after execution; a failure to write it
+causes a nonzero simulator exit status. `--summary -` is rejected so guest UART output remains
+unambiguous on stdout.
+
+For streaming automation, `--events` writes one JSON object per lifecycle transition. Events
+include `started`, `stopped`, `reboot_requested`, and `exit_requested`, with schema version,
+timestamp, status, stop reason, hart, PC, retired instructions, and cycles. Like summaries,
+`--events -` is rejected because stdout belongs to guest UART output.
+
+### Checkpoint and resume
+
+Save a versioned architectural snapshot when a run ends and resume it with the same machine
+configuration:
+
+```bash
+simrv --cli -m program.elf --save-checkpoint run.ckpt --steps 1000000
+simrv --cli -m program.elf --load-checkpoint run.ckpt --steps 1000000
+```
+
+Snapshots contain guest DRAM, hart registers and CSRs, retirement counters, and `mcycle`. The
+XLEN, VLEN, hart count, and DRAM geometry must match. Device queues, host sockets, and external
+time are intentionally not serialized; use this for deterministic bare-metal and architectural
+experiments, not transparent VM migration.
 
 ---
 

@@ -1,5 +1,8 @@
 #include <cstdlib>
+#include <filesystem>
+#include <fstream>
 #include <iostream>
+#include <vector>
 
 #include "simrv/core/Machine.hpp"
 #include "simrv/core/MachineConfig.hpp"
@@ -203,6 +206,70 @@ auto main() -> int {
             expect(!cfg.execution.realtime_pacing,
                    "--no-realtime overrides TUI default in MachineConfig");
         }
+    }
+
+    // Architectural checkpoint round-trip and rejection coverage.  Keep the image small so this
+    // remains a fast native gate while exercising vector/CSR state and RAM contents.
+    {
+        const auto checkpoint =
+            std::filesystem::temp_directory_path() / "simrv-checkpoint-test.bin";
+        const auto malformed =
+            std::filesystem::temp_directory_path() / "simrv-checkpoint-bad.bin";
+        simrv::core::MachineConfig checkpoint_config{};
+        checkpoint_config.memory.dram_base = 0x80000000;
+        checkpoint_config.memory.dram_size = 4096;
+        checkpoint_config.isa.vlen = 256;
+        std::vector<Byte> source_ram(4096, Byte{0});
+        std::vector<Byte> restored_ram(4096, Byte{0});
+        simrv::core::Machine source(checkpoint_config);
+        source.set_ram_for_testing(source_ram.data(), source_ram.size());
+        auto& source_state = source.primary_hart().state();
+        source_state.pc = 0x80000100;
+        source_state.regs.vlen = 256;
+        source_state.regs.write(simrv::RegId::T2, 0x12345678);
+        source_state.vtype = 0x23;
+        source_state.vl = 17;
+        source_state.mstatus = 0x1800;
+        source_state.mepc = 0x80000200;
+        source_state.pmpaddr[0] = 0x1234;
+        source.primary_hart().e_icount = 77;
+        source.primary_hart().e_ccount = 91;
+        source.primary_hart().clint_mmio.mcycle = 105;
+        source_ram[123] = Byte{0xA5};
+        expect(source.save_checkpoint(checkpoint.string()).has_value(),
+               "checkpoint saves architectural state");
+
+        simrv::core::Machine restored(checkpoint_config);
+        restored.set_ram_for_testing(restored_ram.data(), restored_ram.size());
+        expect(restored.load_checkpoint(checkpoint.string()).has_value(),
+               "checkpoint restores architectural state");
+        const auto& restored_state = restored.primary_hart().state();
+        expect(restored_state.pc == source_state.pc &&
+                   restored_state.regs.read(simrv::RegId::T2) == 0x12345678,
+               "checkpoint restores PC and integer registers");
+        expect(restored_state.vtype == source_state.vtype && restored_state.vl == source_state.vl &&
+                   restored_state.mepc == source_state.mepc && restored_state.pmpaddr[0] == 0x1234,
+               "checkpoint restores vector, CSR, and PMP state");
+        expect(restored.primary_hart().e_icount == 77 && restored.primary_hart().e_ccount == 91 &&
+                   restored.primary_hart().clint_mmio.mcycle == 105 &&
+                   restored_ram[123] == Byte{0xA5},
+               "checkpoint restores counters and physical RAM");
+
+        {
+            std::ofstream bad(malformed, std::ios::binary | std::ios::trunc);
+            bad << "SIMRVCP";
+        }
+        expect(!restored.load_checkpoint(malformed.string()).has_value(),
+               "truncated checkpoint is rejected");
+        auto mismatched_config = checkpoint_config;
+        mismatched_config.isa.vlen = 128;
+        simrv::core::Machine mismatched(mismatched_config);
+        mismatched.set_ram_for_testing(restored_ram.data(), restored_ram.size());
+        expect(!mismatched.load_checkpoint(checkpoint.string()).has_value(),
+               "checkpoint with mismatched VLEN is rejected");
+        std::error_code cleanup_error;
+        std::filesystem::remove(checkpoint, cleanup_error);
+        std::filesystem::remove(malformed, cleanup_error);
     }
 
     return failures == 0 ? EXIT_SUCCESS : EXIT_FAILURE;

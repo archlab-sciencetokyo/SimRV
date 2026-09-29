@@ -32,6 +32,8 @@ class Tracer {
     void dump_init_artifacts();
     void write_instruction_mix_report();
     void print_summary();
+    /** Write a stable machine-readable execution summary for automation. */
+    [[nodiscard]] auto write_summary_json(const std::string& path) -> bool;
     void emit_periodic_pc_trace(Counter mtime, Register cpc);
     void emit_branch_prediction_trace(Counter mtime, Register cpc, Register jmp_pc,
                                       isa::Opcode r_opcode, bool r_tkn);

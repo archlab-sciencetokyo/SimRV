@@ -33,6 +33,39 @@
 
 using namespace simrv::util;
 
+namespace {
+
+auto lifecycle_event_name(simrv::core::LifecycleEventKind kind) -> std::string_view {
+    switch (kind) {
+        case simrv::core::LifecycleEventKind::Started: return "started";
+        case simrv::core::LifecycleEventKind::Stopped: return "stopped";
+        case simrv::core::LifecycleEventKind::RebootRequested: return "reboot_requested";
+        case simrv::core::LifecycleEventKind::ExitRequested: return "exit_requested";
+    }
+    return "unknown";
+}
+
+auto write_lifecycle_event(std::ofstream& out, const simrv::core::Machine& machine,
+                           simrv::core::LifecycleEventKind kind, int status = 0) -> void {
+    if (!out) return;
+    const auto timestamp = std::chrono::duration_cast<std::chrono::milliseconds>(
+                               std::chrono::system_clock::now().time_since_epoch())
+                               .count();
+    const auto& hart = machine.primary_hart();
+    out << "{\"schema_version\":1,\"event\":\"" << lifecycle_event_name(kind)
+        << "\",\"timestamp_ms\":" << timestamp << ",\"status\":\""
+        << (status == 0 ? "ok" : "failed") << "\",\"stop_reason\":\""
+        << simrv::core::Machine::stop_reason_name(machine.stop_reason())
+        << "\",\"hart\":0,\"pc\":" << hart.state().pc
+        << ",\"retired_instructions\":" << hart.e_icount
+        << ",\"cycles\":" << hart.clint_mmio.mcycle;
+    if (status != 0) out << ",\"exit_status\":" << status;
+    out << "}\n";
+    out.flush();
+}
+
+}  // namespace
+
 auto main(int argc, char* argv[]) -> int {  // NOLINT(bugprone-exception-escape)
     bool is_tui = (::isatty(STDIN_FILENO) != 0);
     bool skip_banner = false;
@@ -76,6 +109,8 @@ auto main(int argc, char* argv[]) -> int {  // NOLINT(bugprone-exception-escape)
     std::optional<simrv::core::RuntimeProfile> staged_runtime_profile;
 
     std::shared_ptr<simrv::net::SimRvServer> ipc_server;
+    std::ofstream event_stream;
+    bool event_stream_opened = false;
     bool keep_running = true;
     int final_exit_code = 0;
     while (keep_running) {
@@ -219,10 +254,39 @@ auto main(int argc, char* argv[]) -> int {  // NOLINT(bugprone-exception-escape)
         }
 
         sim_machine->set_persistent_control(parsed->options.server_mode);
+        if (!parsed->options.fn_events.empty() && !event_stream_opened) {
+            event_stream.open(parsed->options.fn_events, std::ios::trunc);
+            event_stream_opened = true;
+            if (!event_stream) {
+                simrv::log::error("Cannot open lifecycle event stream {}",
+                                  parsed->options.fn_events);
+                return 1;
+            }
+        }
+
         const auto init_result = sim_machine->initialize();
         if (!init_result) {
             simrv::log::error("Machine initialization failed: {}", init_result.error());
+            if (event_stream) {
+                event_stream << "{\"schema_version\":1,\"event\":\"error\",\"status\":\"failed\",\"error\":\"initialization failed\"}\n";
+                event_stream.flush();
+            }
             return 1;
+        }
+        if (!parsed->options.fn_load_checkpoint.empty()) {
+            const auto restored = sim_machine->load_checkpoint(parsed->options.fn_load_checkpoint);
+            if (!restored) {
+                simrv::log::error("Checkpoint restore failed: {}", restored.error());
+                return 1;
+            }
+        }
+
+        if (event_stream) {
+            (void)sim_machine->add_lifecycle_observer(
+                [&event_stream, machine = sim_machine.get()](
+                    const simrv::core::LifecycleEvent& event) {
+                    write_lifecycle_event(event_stream, *machine, event.kind, event.exit_status);
+                });
         }
 
         sim_machine->set_start_time(std::chrono::steady_clock::now());
@@ -285,6 +349,19 @@ auto main(int argc, char* argv[]) -> int {  // NOLINT(bugprone-exception-escape)
             final_exit_code = sim_machine->exit_code.load();
             if (!sim_machine->tui_enabled()) {
                 sim_machine->trace().print_summary();
+            }
+            if (!parsed->options.fn_summary.empty() &&
+                !sim_machine->trace().write_summary_json(parsed->options.fn_summary)) {
+                simrv::log::error("Cannot write execution summary to {}",
+                                  parsed->options.fn_summary);
+                if (final_exit_code == 0) final_exit_code = 1;
+            }
+            if (!parsed->options.fn_save_checkpoint.empty()) {
+                const auto saved = sim_machine->save_checkpoint(parsed->options.fn_save_checkpoint);
+                if (!saved) {
+                    simrv::log::error("Checkpoint save failed: {}", saved.error());
+                    if (final_exit_code == 0) final_exit_code = 1;
+                }
             }
             if (!sim_machine->configuration().files.dump_dmem_path.empty()) {
                 std::ofstream out(sim_machine->configuration().files.dump_dmem_path);

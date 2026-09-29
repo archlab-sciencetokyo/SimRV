@@ -227,6 +227,11 @@ class Machine final : public core::IInterruptController {
      */
     auto initialize() -> std::expected<void, std::string>;
     auto load_program_binary(const std::string& filepath) -> std::expected<void, std::string>;
+    /// Save/restore a versioned architectural snapshot. Device state is not included.
+    [[nodiscard]] auto save_checkpoint(const std::string& filepath) const
+        -> std::expected<void, std::string>;
+    [[nodiscard]] auto load_checkpoint(const std::string& filepath)
+        -> std::expected<void, std::string>;
     struct LoadedMemorySegment {
         Address paddr = 0;
         size_t size = 0;

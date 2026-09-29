@@ -725,6 +725,38 @@ auto parse_debug_cosrv_options(std::string_view arg, std::span<char* const> args
         options.log_level = level;
         return true;
     }
+    if (arg == "--summary") {
+        auto value = next_argument(args, i, "--summary");
+        if (!value) return std::unexpected(value.error());
+        if (value->empty() || *value == "-") {
+            return std::unexpected("--summary requires a writable file path (stdout is reserved for guest UART)");
+        }
+        options.fn_summary = std::string(*value);
+        return true;
+    }
+    if (arg == "--events") {
+        auto value = next_argument(args, i, "--events");
+        if (!value) return std::unexpected(value.error());
+        if (value->empty() || *value == "-") {
+            return std::unexpected("--events requires a writable file path (stdout is reserved for guest UART)");
+        }
+        options.fn_events = std::string(*value);
+        return true;
+    }
+    if (arg == "--save-checkpoint" || arg == "--checkpoint-out") {
+        auto value = next_argument(args, i, arg);
+        if (!value) return std::unexpected(value.error());
+        if (value->empty()) return std::unexpected(std::format("{} requires a file path", arg));
+        options.fn_save_checkpoint = std::string(*value);
+        return true;
+    }
+    if (arg == "--load-checkpoint" || arg == "--checkpoint-in") {
+        auto value = next_argument(args, i, arg);
+        if (!value) return std::unexpected(value.error());
+        if (value->empty()) return std::unexpected(std::format("{} requires a file path", arg));
+        options.fn_load_checkpoint = std::string(*value);
+        return true;
+    }
     if (arg == "-q" || arg == "--quiet") {
         options.quiet = true;
         if (!options.log_level.has_value()) {
@@ -1371,6 +1403,18 @@ auto needs_memory_image(const ParseResult& result) -> bool {
     std::print(stdout,
                "  {}--inspection-output {}{}<FILE>{}    Set paused-state TUI inspection report "
                "destination\n\n",
+               style(kBrightGreen), style(kBrightBlack), style(kReset), style(kReset));
+    std::print(stdout,
+               "  {}--summary {}{}<FILE>{}                  Write a JSON execution summary on exit\n\n",
+               style(kBrightGreen), style(kBrightBlack), style(kReset), style(kReset));
+    std::print(stdout,
+               "  {}--events {}{}<FILE>{}                   Write newline-delimited lifecycle events\n\n",
+               style(kBrightGreen), style(kBrightBlack), style(kReset), style(kReset));
+    std::print(stdout,
+               "  {}--save-checkpoint {}{}<FILE>{}          Save architectural state on exit\n",
+               style(kBrightGreen), style(kBrightBlack), style(kReset), style(kReset));
+    std::print(stdout,
+               "  {}--load-checkpoint {}{}<FILE>{}          Resume from an architectural snapshot\n\n",
                style(kBrightGreen), style(kBrightBlack), style(kReset), style(kReset));
 
     // Debug & Verification
