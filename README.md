@@ -51,10 +51,10 @@ Explore the full documentation, guides, and specifications online at **[archlab-
       </ul>
     </td>
     <td width="50%" valign="top">
-      <h3>🛠️ <a href="https://archlab-sciencetokyo.github.io/SimRV/stable/dev/contributing/">Development & Verification</a></h3>
+      <h3>🛠️ <a href="https://archlab-sciencetokyo.github.io/SimRV/stable/development/contributing/">Development & Verification</a></h3>
       <p>Developer standards, dual-architecture CTest validation gates, Spike lockstep co-simulation, and release qualification.</p>
       <ul>
-        <li><a href="https://archlab-sciencetokyo.github.io/SimRV/stable/dev/contributing/">Contributing Standards</a> (<a href="docs/dev/contributing.md">source</a>)</li>
+        <li><a href="https://archlab-sciencetokyo.github.io/SimRV/stable/development/contributing/">Contributing Standards</a> (<a href="docs/development/contributing.md">source</a>)</li>
       </ul>
     </td>
   </tr>

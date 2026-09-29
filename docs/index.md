@@ -110,7 +110,7 @@ SimRV requires a modern C++23 compiler (**Clang 20+** or **GCC 14+**), **CMake 3
 
     [Bare-metal development](user/baremetal.md), memory map, peripheral MMIO, and [booting full-system Linux](user/linux.md).
 
-- :material-code-braces:{ .lg .middle } **[Development & Verification](dev/contributing.md)**
+- :material-code-braces:{ .lg .middle } **[Development & Verification](development/contributing.md)**
 
     ---
 
