@@ -2,6 +2,20 @@
 
 SimRV is an explainable, dual-width (RV32 / RV64) RISC-V research simulator with an interactive terminal workbench (TUI), cycle-accurate in-order pipeline modeling, cache hierarchy inspection, and full-system Linux OS emulation.
 
+## Choose your path
+
+| Goal | Start here |
+| --- | --- |
+| Install a prebuilt simulator | [Installation](install.md) |
+| Run a bare-metal program | [Bare-Metal & Embedded](baremetal.md) |
+| Boot a RISC-V Linux image | [Full-System Linux](linux.md) |
+| Inspect registers and pipeline state | [Interactive TUI](tui.md) |
+| Compare execution with Spike or GDB | [Debugging](#7-co-simulation-debugging) |
+
+The normal user workflow is: choose an RV64 release, run in the TUI while learning, and add
+`--cli` when the same workload must run unattended. RV32 remains available for strict-width
+teaching and validation builds.
+
 ---
 
 ## 1. Architecture & Features Overview

@@ -78,6 +78,7 @@ extra_javascript:
 nav:
   - Home: index.md
   - User Guide:
+      - Installation: user/install.md
       - Quickstart & CLI: user/index.md
       - Interactive TUI Workbench: user/tui.md
       - Bare-Metal & Embedded: user/baremetal.md
