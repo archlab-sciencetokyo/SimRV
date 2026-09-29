@@ -64,8 +64,8 @@ Explore the full documentation, guides, and specifications online at **[archlab-
 
 ### Build Prerequisites
 
-- **Clang 20+** (default in CMake presets) or **GCC 14+** (required for full C++23 feature support)
-- **CMake 3.20+** & **Ninja**
+- A C++23-capable compiler; the main-branch CI baseline is **Clang 20+** or **GCC 14+**
+- **CMake 3.25+** (the project minimum) and **Ninja**
 
 ### Building SimRV
 
