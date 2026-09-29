@@ -160,8 +160,10 @@ jobs:
       contents: read
     container:
       # Alpine supplies a musl-native C++ runtime. This release-only job uses
-      # its GCC14 toolchain with the explicit unqualified-toolchain exception.
-      image: alpine:3.22
+      # its GCC15 toolchain with the explicit unqualified-toolchain exception.
+      # Alpine edge is required because GCC15 provides the C++23 headers used by
+      # SimRV; the cache has a small mdspan fallback for the still-missing header.
+      image: alpine:edge
     steps:
       - uses: actions/checkout@v6
       - name: Install musl build tools
