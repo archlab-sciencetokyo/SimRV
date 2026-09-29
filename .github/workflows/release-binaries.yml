@@ -150,7 +150,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          if ldd "${{ steps.names.outputs.asset_base }}.bin" 2>&1 | grep -Eiq 'not a dynamic executable|statically linked'; then :; else exit 1; fi
+          file "${{ steps.names.outputs.asset_base }}.bin" | grep -Eiq 'statically linked|static-pie linked'
           python3 scripts/release_check.py \
             --binary "${{ steps.names.outputs.asset_base }}.bin" \
             --archive "${{ steps.names.outputs.asset_base }}.tar.gz" \
