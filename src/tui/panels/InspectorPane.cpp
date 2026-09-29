@@ -657,7 +657,20 @@ auto InspectorPane::render_log_bottom_row(int row_idx, int num_rows, int width) 
     int const max_entries = num_rows - 1;
     if (row_idx == 0) {
         if (total > max_entries) {
-            std::string summary = log_scroll_view_.header_summary("Log");
+            // Log rows are rendered newest-first: offset zero is the bottom of
+            // the log, so ScrollView's logical "below" count is visually
+            // above and its logical "above" count is visually below.
+            auto const& bounds = log_scroll_view_.bounds();
+            int const above = bounds.remaining_below();
+            int const below = bounds.remaining_above();
+            std::string summary = "Log";
+            if (above > 0 && below > 0) {
+                summary = std::format("Log (▲ {} above · ▼ {} below)", above, below);
+            } else if (above > 0) {
+                summary = std::format("Log (▲ {} above)", above);
+            } else if (below > 0) {
+                summary = std::format("Log (▼ {} below)", below);
+            }
             return section_line(summary + " · click to jump · u/d scroll", width);
         }
         return section_line("Log · u/d scroll", width);

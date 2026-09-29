@@ -303,6 +303,7 @@ class Tui : public core::ITelemetrySink, public core::IConsoleSink {
     [[nodiscard]] auto is_sixel_supported() const -> bool { return sixel_supported_; }
 
     int user_inspector_width_{-1};
+    framework::ColumnWidthOverrides user_column_widths_ = framework::kNoColumnWidthOverrides;
     int cell_width_px_ = 8;
     int cell_height_px_ = 16;
     bool sixel_supported_{false};
@@ -398,6 +399,7 @@ class Tui : public core::ITelemetrySink, public core::IConsoleSink {
 
     void execute_footer_action(TuiFooterAction action);
     void execute_header_action(HeaderHitResult hit);
+    [[nodiscard]] auto column_widths(int terminal_width) const -> framework::ColumnWidths;
     auto handle_alt_key(char key, uint8_t byte) -> bool;
     auto handle_arrow_key_sequence() -> bool;
     auto handle_modal_keyboard_input(uint8_t byte, TuiKey key) -> bool;

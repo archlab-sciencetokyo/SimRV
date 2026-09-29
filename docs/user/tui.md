@@ -45,6 +45,10 @@ open at once. Use `Tab`/`Shift-Tab` (or `Ctrl-Right`/`Ctrl-Left`) to change the 
 
 - `Up`/`Down` moves one row; `PageUp`/`PageDown` moves a page; `Home` returns to the top.
 - `Shift-Left`/`Shift-Right` and horizontal mouse-wheel events move an overflowing panel sideways.
+- `[`/`]` resize the focused panel. In a multi-column layout, width is transferred from the
+  adjacent panel, preserving the minimum readable width.
+- `Ctrl-A`/`Ctrl-N` add a panel immediately to the right of the focused panel; `Tab` then moves focus
+  through the resulting columns.
 - The mouse wheel always scrolls the panel under the pointer. In an inspector, the bottom Log
   region has its own bounded scroll position; `u`/`d` move it by a few lines when the inspector is
   focused.

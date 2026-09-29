@@ -71,6 +71,9 @@ struct TuiTestAccess {
     static auto workbench_slots(const Tui& tui) -> const std::vector<WorkbenchSlot>& {
         return tui.workbench_slots_;
     }
+    static auto column_widths(const Tui& tui, int width) -> framework::ColumnWidths {
+        return tui.column_widths(width);
+    }
     static auto layout(const Tui& tui) -> TuiLayout { return tui.layout_; }
     static auto status_bar(const Tui& tui) -> StatusBar* { return tui.status_bar_.get(); }
     static auto handle_modal_key(Tui& tui, uint8_t byte, TuiKey key) -> bool {
@@ -1426,6 +1429,33 @@ void test_multicolumn_refinement() {
     expect(f4_slots[0].page != f4_slots[1].page,
            "preset 4 slots 0 and 1 have distinct pages in functional mode");
 
+    // Resizing applies to the focused column and transfers space to its neighbor.
+    simrv::core::Machine resize_machine;
+    simrv::tui::Tui resize_tui(resize_machine);
+    simrv::tui::TuiTestAccess::set_cached_term_width(resize_tui, 180);
+    resize_tui.apply_layout_preset(simrv::tui::LayoutPreset::GeneralDebug);
+    auto before_widths = simrv::tui::TuiTestAccess::column_widths(resize_tui, 180);
+    expect(before_widths.count == 3, "wide preset selects the three-column layout");
+    resize_tui.adjust_inspector_width(2);
+    auto after_widths = simrv::tui::TuiTestAccess::column_widths(resize_tui, 180);
+    expect(after_widths.widths[0] == before_widths.widths[0] + 2 &&
+               after_widths.widths[1] == before_widths.widths[1] - 2 &&
+               after_widths.widths[2] == before_widths.widths[2],
+           "bracket resize transfers width from the next focused-panel neighbor");
+
+    // A new column is inserted immediately to the right of the selected column.
+    simrv::core::Machine insert_machine;
+    simrv::tui::Tui insert_tui(insert_machine);
+    simrv::tui::TuiTestAccess::set_cached_term_width(insert_tui, 160);
+    auto const old_slots = simrv::tui::TuiTestAccess::workbench_slots(insert_tui);
+    expect(old_slots.size() == 2, "default workbench starts with two columns");
+    expect(insert_tui.add_workbench_column(), "adding a workbench column succeeds");
+    auto const& inserted_slots = simrv::tui::TuiTestAccess::workbench_slots(insert_tui);
+    expect(inserted_slots.size() == 3 &&
+               inserted_slots[0].page == simrv::tui::TuiRegPage::GPR &&
+               inserted_slots[2].page == simrv::tui::TuiRegPage::CONSOLE,
+           "new workbench column is inserted beside the selected column");
+
     // 6. Multi-column right border junction connects on horizontal rule
     const auto geom = simrv::tui::calculate_frame_geometry(120, 20, simrv::tui::TuiLayout::Split);
     simrv::tui::framework::ColumnWidths col_widths{.widths = {30, 30, 0, 0}, .count = 2};
@@ -1506,9 +1536,19 @@ void test_horizontal_scrolling() {
     // The log is a separate reusable viewport and remains independent from page scrolling.
     pane.set_log_lines({"log-00", "log-01", "log-02", "log-03", "log-04", "log-05",
                         "log-06", "log-07", "log-08", "log-09"});
+    pane.set_page(simrv::tui::TuiRegPage::GPR);
+    pane.set_paused(true);
+    pane.set_visible_rows(20);
     expect(pane.get_log_scroll_offset() == 0, "log viewport starts at the newest entries");
+    auto const newest_log_header = strip_ansi(pane.render_row(14, 80));
+    expect(newest_log_header.find("▲ 5 above") != std::string::npos,
+           "newest log view reports older entries above");
     pane.scroll_log(2);
     expect(pane.get_log_scroll_offset() == 2, "log viewport scrolls independently");
+    auto const scrolled_log_header = strip_ansi(pane.render_row(14, 80));
+    expect(scrolled_log_header.find("▲ 3 above") != std::string::npos &&
+               scrolled_log_header.find("▼ 2 below") != std::string::npos,
+           "scrolled log header reports visual directions correctly");
     pane.set_page(simrv::tui::TuiRegPage::PIPELINE);
     expect(pane.get_scroll_offset() == 0,
            "switching inspector pages does not inherit the log scroll position");
