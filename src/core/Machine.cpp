@@ -9,12 +9,14 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <fstream>
 #include <limits>
 #include <new>
 #include <print>
 #include <ranges>
 #include <span>
 #include <thread>
+#include <type_traits>
 #include <variant>
 
 #include "MachineRuntime.hpp"
@@ -33,6 +35,19 @@
 namespace simrv::core {
 
 namespace {
+
+struct CheckpointHeader {
+    char magic[8] = {'S', 'I', 'M', 'R', 'V', 'C', 'P', 0};
+    uint32_t version = 1;
+    uint32_t xlen = 0;
+    uint32_t vlen = 0;
+    uint32_t harts = 0;
+    uint64_t ram_base = 0;
+    uint64_t ram_size = 0;
+};
+
+static_assert(std::is_trivially_copyable_v<CheckpointHeader>);
+static_assert(std::is_trivially_copyable_v<ArchState>);
 
 thread_local bool g_primary_runner_active = false;
 thread_local bool g_secondary_runner_active = false;
@@ -186,6 +201,63 @@ auto Machine::ram_data() const noexcept -> const Byte* { return runtime_->ram.da
 
 auto Machine::ram_view() const noexcept -> simrv::memory::RamView {
     return {runtime_->ram.data(), config.memory.dram_base, config.memory.dram_size};
+}
+
+auto Machine::save_checkpoint(const std::string& filepath) const
+    -> std::expected<void, std::string> {
+    std::ofstream out(filepath, std::ios::binary | std::ios::trunc);
+    if (!out) return std::unexpected("cannot open checkpoint for writing: " + filepath);
+
+    const CheckpointHeader header{.xlen = simrv::xlen::kXLenBits,
+                                  .vlen = config.isa.vlen,
+                                  .harts = static_cast<uint32_t>(num_harts()),
+                                  .ram_base = config.memory.dram_base,
+                                  .ram_size = config.memory.dram_size};
+    out.write(reinterpret_cast<const char*>(&header), sizeof(header));
+    for (size_t i = 0; i < num_harts(); ++i) {
+        const auto& cpu = hart(i);
+        out.write(reinterpret_cast<const char*>(&cpu.state()), sizeof(ArchState));
+        out.write(reinterpret_cast<const char*>(&cpu.e_icount), sizeof(cpu.e_icount));
+        out.write(reinterpret_cast<const char*>(&cpu.e_ccount), sizeof(cpu.e_ccount));
+        out.write(reinterpret_cast<const char*>(&cpu.clint_mmio.mcycle),
+                  sizeof(cpu.clint_mmio.mcycle));
+    }
+    const auto ram = ram_view();
+    out.write(reinterpret_cast<const char*>(ram.data()), static_cast<std::streamsize>(ram.size()));
+    if (!out) return std::unexpected("failed while writing checkpoint: " + filepath);
+    return {};
+}
+
+auto Machine::load_checkpoint(const std::string& filepath) -> std::expected<void, std::string> {
+    std::ifstream in(filepath, std::ios::binary);
+    if (!in) return std::unexpected("cannot open checkpoint for reading: " + filepath);
+
+    CheckpointHeader header{};
+    in.read(reinterpret_cast<char*>(&header), sizeof(header));
+    const CheckpointHeader expected{};
+    if (!in || std::memcmp(header.magic, expected.magic, sizeof(header.magic)) != 0 ||
+        header.version != 1) {
+        return std::unexpected("unsupported or corrupt checkpoint header");
+    }
+    if (header.xlen != simrv::xlen::kXLenBits || header.vlen != config.isa.vlen ||
+        header.harts != num_harts() || header.ram_base != config.memory.dram_base ||
+        header.ram_size != config.memory.dram_size) {
+        return std::unexpected("checkpoint configuration does not match this machine");
+    }
+    for (size_t i = 0; i < num_harts(); ++i) {
+        auto& cpu = hart(i);
+        in.read(reinterpret_cast<char*>(&cpu.state()), sizeof(ArchState));
+        in.read(reinterpret_cast<char*>(&cpu.e_icount), sizeof(cpu.e_icount));
+        in.read(reinterpret_cast<char*>(&cpu.e_ccount), sizeof(cpu.e_ccount));
+        in.read(reinterpret_cast<char*>(&cpu.clint_mmio.mcycle),
+                sizeof(cpu.clint_mmio.mcycle));
+        if (!in) return std::unexpected("truncated checkpoint architectural state");
+        cpu.TLB_flush();
+    }
+    const auto ram = ram_view();
+    in.read(reinterpret_cast<char*>(ram.data()), static_cast<std::streamsize>(ram.size()));
+    if (!in) return std::unexpected("truncated checkpoint RAM image");
+    return {};
 }
 
 void Machine::set_platform_irq(IrqNumber irq, bool asserted) {

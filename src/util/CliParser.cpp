@@ -743,6 +743,20 @@ auto parse_debug_cosrv_options(std::string_view arg, std::span<char* const> args
         options.fn_events = std::string(*value);
         return true;
     }
+    if (arg == "--save-checkpoint" || arg == "--checkpoint-out") {
+        auto value = next_argument(args, i, arg);
+        if (!value) return std::unexpected(value.error());
+        if (value->empty()) return std::unexpected(std::format("{} requires a file path", arg));
+        options.fn_save_checkpoint = std::string(*value);
+        return true;
+    }
+    if (arg == "--load-checkpoint" || arg == "--checkpoint-in") {
+        auto value = next_argument(args, i, arg);
+        if (!value) return std::unexpected(value.error());
+        if (value->empty()) return std::unexpected(std::format("{} requires a file path", arg));
+        options.fn_load_checkpoint = std::string(*value);
+        return true;
+    }
     if (arg == "-q" || arg == "--quiet") {
         options.quiet = true;
         if (!options.log_level.has_value()) {
@@ -1395,6 +1409,12 @@ auto needs_memory_image(const ParseResult& result) -> bool {
                style(kBrightGreen), style(kBrightBlack), style(kReset), style(kReset));
     std::print(stdout,
                "  {}--events {}{}<FILE>{}                   Write newline-delimited lifecycle events\n\n",
+               style(kBrightGreen), style(kBrightBlack), style(kReset), style(kReset));
+    std::print(stdout,
+               "  {}--save-checkpoint {}{}<FILE>{}          Save architectural state on exit\n",
+               style(kBrightGreen), style(kBrightBlack), style(kReset), style(kReset));
+    std::print(stdout,
+               "  {}--load-checkpoint {}{}<FILE>{}          Resume from an architectural snapshot\n\n",
                style(kBrightGreen), style(kBrightBlack), style(kReset), style(kReset));
 
     // Debug & Verification

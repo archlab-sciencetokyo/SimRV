@@ -273,6 +273,13 @@ auto main(int argc, char* argv[]) -> int {  // NOLINT(bugprone-exception-escape)
             }
             return 1;
         }
+        if (!parsed->options.fn_load_checkpoint.empty()) {
+            const auto restored = sim_machine->load_checkpoint(parsed->options.fn_load_checkpoint);
+            if (!restored) {
+                simrv::log::error("Checkpoint restore failed: {}", restored.error());
+                return 1;
+            }
+        }
 
         if (event_stream) {
             (void)sim_machine->add_lifecycle_observer(
@@ -348,6 +355,13 @@ auto main(int argc, char* argv[]) -> int {  // NOLINT(bugprone-exception-escape)
                 simrv::log::error("Cannot write execution summary to {}",
                                   parsed->options.fn_summary);
                 if (final_exit_code == 0) final_exit_code = 1;
+            }
+            if (!parsed->options.fn_save_checkpoint.empty()) {
+                const auto saved = sim_machine->save_checkpoint(parsed->options.fn_save_checkpoint);
+                if (!saved) {
+                    simrv::log::error("Checkpoint save failed: {}", saved.error());
+                    if (final_exit_code == 0) final_exit_code = 1;
+                }
             }
             if (!sim_machine->configuration().files.dump_dmem_path.empty()) {
                 std::ofstream out(sim_machine->configuration().files.dump_dmem_path);

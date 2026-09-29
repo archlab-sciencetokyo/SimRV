@@ -143,6 +143,21 @@ include `started`, `stopped`, `reboot_requested`, and `exit_requested`, with sch
 timestamp, status, stop reason, hart, PC, retired instructions, and cycles. Like summaries,
 `--events -` is rejected because stdout belongs to guest UART output.
 
+### Checkpoint and resume
+
+Save a versioned architectural snapshot when a run ends and resume it with the same machine
+configuration:
+
+```bash
+simrv --cli -m program.elf --save-checkpoint run.ckpt --steps 1000000
+simrv --cli -m program.elf --load-checkpoint run.ckpt --steps 1000000
+```
+
+Snapshots contain guest DRAM, hart registers and CSRs, retirement counters, and `mcycle`. The
+XLEN, VLEN, hart count, and DRAM geometry must match. Device queues, host sockets, and external
+time are intentionally not serialized; use this for deterministic bare-metal and architectural
+experiments, not transparent VM migration.
+
 ---
 
 ## 4. Interactive TUI Workbench
