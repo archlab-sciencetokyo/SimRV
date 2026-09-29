@@ -3495,9 +3495,9 @@ auto Tui::consume_control_sequence(uint8_t first_byte) -> bool {
             if (selection_.is_selecting) {
                 int local_end_x = std::clamp(x - selection_.col_start_x, 0,
                                              std::max(0, selection_.pane_width - 1));
+                local_end_x = selection_.bounds.clamp_x(local_end_x);
                 selection_.end_x = local_end_x;
-                selection_.end_y = std::clamp(y, selection_.content_start_y,
-                                              selection_.content_end_y);
+                selection_.end_y = selection_.bounds.clamp_y(y);
                 selection_.is_active = true;
                 render(false);
             }
@@ -3643,14 +3643,37 @@ auto Tui::consume_control_sequence(uint8_t first_byte) -> bool {
             selection_.pane = sel_pane;
             selection_.col_idx = sel_col_idx;
             selection_.col_start_x = col_start_x;
-            selection_.content_start_y =
+            int const panel_content_start =
                 (sel_cols.count >= 2) ? 5 : (sel_pane == SelectionPane::TerminalPane ? 4 : 6);
-            selection_.content_end_y = std::max(selection_.content_start_y, term_h - 3);
+            int subpanel_start_y = panel_content_start;
+            int subpanel_end_y = std::max(panel_content_start, term_h - 3);
+            if (sel_pane == SelectionPane::InspectorPane && sel_col_idx == 0 &&
+                sel_col_idx < workbench_slots_.size()) {
+                auto const page = workbench_slots_[sel_col_idx].page;
+                int const num_rows = std::max(1, term_h - 5);
+                bool const has_log = num_rows >= 15 && page != TuiRegPage::EXPLAIN &&
+                                     page != TuiRegPage::TRACE;
+                if (has_log) {
+                    int const log_start_y = 4 + (num_rows - 6);
+                    if (y >= log_start_y) {
+                        subpanel_start_y = log_start_y;
+                    } else {
+                        subpanel_end_y = log_start_y - 1;
+                    }
+                }
+            }
+            selection_.content_start_y = subpanel_start_y;
+            selection_.content_end_y = std::max(subpanel_start_y, subpanel_end_y);
             if (y < selection_.content_start_y || y > selection_.content_end_y) {
                 selection_ = SelectionState{};
                 return true;
             }
             selection_.pane_width = col_w;
+            selection_.bounds = {.x = 0,
+                                 .y = selection_.content_start_y,
+                                 .width = col_w,
+                                 .height = selection_.content_end_y -
+                                           selection_.content_start_y + 1};
             selection_.start_x = col_local_x;
             selection_.start_y = y;
             selection_.end_x = col_local_x;

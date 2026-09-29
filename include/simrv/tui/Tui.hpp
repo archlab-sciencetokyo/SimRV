@@ -29,6 +29,7 @@
 #include "simrv/tui/TuiModal.hpp"
 #include "simrv/tui/TuiTypes.hpp"
 #include "simrv/tui/VirtualTerminal.hpp"
+#include "simrv/tui/framework/Subpanel.hpp"
 #include "simrv/util/UniqueFd.hpp"
 #include "simrv/xlen/Types.hpp"
 
@@ -53,6 +54,7 @@ struct SelectionState {
     int content_start_y = 4;
     int content_end_y = 22;
     int pane_width = 80;
+    framework::SubpanelBounds bounds{.x = 0, .y = 4, .width = 80, .height = 19};
     int start_x = -1;
     int start_y = -1;
     int end_x = -1;

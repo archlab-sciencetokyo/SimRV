@@ -6,6 +6,7 @@
 #include "simrv/tui/framework/Components.hpp"
 #include "simrv/tui/framework/Modal.hpp"
 #include "simrv/tui/framework/ScrollView.hpp"
+#include "simrv/tui/framework/Subpanel.hpp"
 #include "simrv/tui/framework/Text.hpp"
 #include "simrv/tui/framework/Theme.hpp"
 
@@ -76,6 +77,13 @@ int main() {
     expect(sv.offset_y() == 15 && sv.can_scroll_up(), "vertical scrolling advances offset");
     sv.scroll_x(10);
     expect(sv.offset_x() == 10 && sv.can_scroll_left(), "horizontal scrolling advances offset");
+
+    SubpanelBounds subpanel{.x = 4, .y = 6, .width = 20, .height = 8};
+    expect(subpanel.contains(4, 6) && subpanel.contains(23, 13) &&
+               !subpanel.contains(24, 13) && !subpanel.contains(23, 14),
+           "subpanel bounds use terminal-cell half-open hit testing");
+    expect(subpanel.clamp_x(99) == 23 && subpanel.clamp_y(0) == 6,
+           "subpanel bounds clamp pointer coordinates safely");
 
     auto const top_row =
         sv.render_row(0, 40, [](RowIndex r, ColumnIndex, int) { return std::format("row-{}", r); });

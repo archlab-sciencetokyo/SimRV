@@ -2267,11 +2267,18 @@ void test_multi_column_panel_management_and_modal_usability() {
     simrv::tui::TuiTestAccess::consume_control_seq(tui, "\033[<0;10;5M");
     const auto& sel = simrv::tui::TuiTestAccess::selection(tui);
     expect(sel.content_start_y == 5, "selection content_start_y is 5 in 2-panel mode");
-    expect(sel.content_end_y == 21, "selection content_end_y stops before the footer");
+    expect(sel.content_end_y == 16,
+           "main inspector selection stops before the separate Log subpanel");
     simrv::tui::TuiTestAccess::consume_control_seq(tui, "\033[<32;200;30M");
     expect(sel.end_y == sel.content_end_y && sel.end_x == sel.pane_width - 1,
            "selection drag clamps to the originating subpanel bounds");
     expect(slots[0].page == simrv::tui::TuiRegPage::GPR, "row 5 click does not alter GPR page");
+    tui.clear_selection();
+    if (tui.is_modal_active()) tui.close_modal();
+    simrv::tui::TuiTestAccess::consume_control_seq(tui, "\033[<0;10;18M");
+    const auto& log_sel = simrv::tui::TuiTestAccess::selection(tui);
+    expect(log_sel.content_start_y == 17 && log_sel.content_end_y == 21,
+           "Log selection is constrained to the Log subpanel");
     tui.clear_selection();
 
     // Click on column 0 row 5 content: verify row 5 does not alter GPR page
