@@ -1477,11 +1477,17 @@ void test_multicolumn_refinement() {
     simrv::tui::TuiTestAccess::set_cached_term_width(header_tui, 240);
     simrv::tui::TuiTestAccess::set_cached_term_height(header_tui, 24);
     header_tui.apply_layout_preset(simrv::tui::LayoutPreset::GeneralDebug);
+    auto const before_rule = strip_ansi(
+        simrv::tui::TuiTestAccess::last_screen_lines(header_tui).at(2));
     auto const before_header = strip_ansi(
         simrv::tui::TuiTestAccess::last_screen_lines(header_tui).at(4));
     header_tui.adjust_inspector_width(2);
+    auto const after_rule = strip_ansi(
+        simrv::tui::TuiTestAccess::last_screen_lines(header_tui).at(2));
     auto const after_header = strip_ansi(
         simrv::tui::TuiTestAccess::last_screen_lines(header_tui).at(4));
+    expect(before_rule != after_rule,
+           "top header junctions are redrawn after focused-panel resize");
     expect(before_header != after_header,
            "four-column header is redrawn after focused-panel resize");
     expect(simrv::tui::get_display_width(after_header) == 240,
@@ -1501,6 +1507,13 @@ void test_multicolumn_refinement() {
                cascade_after.widths[1] >= simrv::tui::framework::kMultiColumnUnitWidth &&
                cascade_after.widths[2] >= simrv::tui::framework::kMultiColumnUnitWidth,
            "four-column resize pushes through exhausted adjacent panel limits");
+    cascade_tui.adjust_inspector_width(-6);
+    auto const cascade_restored = simrv::tui::TuiTestAccess::column_widths(cascade_tui, 220);
+    expect(cascade_restored.widths[0] == cascade_before.widths[0] &&
+               cascade_restored.widths[1] == cascade_before.widths[1] &&
+               cascade_restored.widths[2] == cascade_before.widths[2] &&
+               cascade_restored.widths[3] == cascade_before.widths[3],
+           "opposite resize restores the prior multi-panel distribution");
 
     // 6. Multi-column right border junction connects on horizontal rule
     const auto geom = simrv::tui::calculate_frame_geometry(120, 20, simrv::tui::TuiLayout::Split);
@@ -2299,7 +2312,7 @@ void test_multi_column_panel_management_and_modal_usability() {
     simrv::tui::TuiTestAccess::consume_control_seq(tui, "\033[<0;10;5M");
     const auto& sel = simrv::tui::TuiTestAccess::selection(tui);
     expect(sel.content_start_y == 5, "selection content_start_y is 5 in 2-panel mode");
-    expect(sel.content_end_y == 16,
+    expect(sel.content_end_y == 14,
            "main inspector selection stops before the separate Log subpanel");
     simrv::tui::TuiTestAccess::consume_control_seq(tui, "\033[<32;200;30M");
     expect(sel.end_y == sel.content_end_y && sel.end_x == sel.pane_width - 1,
@@ -2309,7 +2322,7 @@ void test_multi_column_panel_management_and_modal_usability() {
     if (tui.is_modal_active()) tui.close_modal();
     simrv::tui::TuiTestAccess::consume_control_seq(tui, "\033[<0;10;18M");
     const auto& log_sel = simrv::tui::TuiTestAccess::selection(tui);
-    expect(log_sel.content_start_y == 17 && log_sel.content_end_y == 21,
+    expect(log_sel.content_start_y == 15 && log_sel.content_end_y == 20,
            "Log selection is constrained to the Log subpanel");
     tui.clear_selection();
 
@@ -2320,6 +2333,7 @@ void test_multi_column_panel_management_and_modal_usability() {
 
     // Register-pane wheel events must advance the page viewport independently of the log
     // viewport.  Render first so the pane has the same visible-row geometry as the live TUI.
+    if (tui.is_modal_active()) tui.close_modal();
     tui.render(true);
     auto* register_pane = simrv::tui::TuiTestAccess::inspector(tui);
     const int register_offset_before = register_pane->get_scroll_offset();
@@ -2328,6 +2342,24 @@ void test_multi_column_panel_management_and_modal_usability() {
            "mouse wheel scrolls the register subpanel");
     expect(register_pane->get_log_scroll_offset() == 0,
            "register wheel does not move the independent Log subpanel");
+    const auto& scrolled_screen = simrv::tui::TuiTestAccess::last_screen_lines(tui);
+    size_t log_header_row = scrolled_screen.size();
+    for (size_t i = 0; i < scrolled_screen.size(); ++i) {
+        if (strip_ansi(scrolled_screen.at(i)).find("Log · u/d scroll") != std::string::npos) {
+            log_header_row = i;
+            break;
+        }
+    }
+    expect(log_header_row < scrolled_screen.size(), "rendered register pane contains a Log boundary");
+    bool marker_in_log = false;
+    for (size_t i = log_header_row; i < scrolled_screen.size(); ++i) {
+        if (strip_ansi(scrolled_screen.at(i)).find("more lines below - scroll down") !=
+            std::string::npos) {
+            marker_in_log = true;
+            break;
+        }
+    }
+    expect(!marker_in_log, "register scroll indicators stay above the Log subpanel");
 
     // In a four-column layout the first register pane can be narrow while the last inspector
     // pane is wide.  The wheel must still use the focused pane's geometry, not the last-rendered

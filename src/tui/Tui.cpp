@@ -55,6 +55,19 @@ static bool g_tui_active = false;     // NOLINT(cppcoreguidelines-avoid-non-cons
 
 namespace {
 
+constexpr int kInspectorContentStartRow = 4;
+constexpr int kInspectorLogAreaHeight = 6;
+
+[[nodiscard]] auto inspector_log_start_row(int terminal_height) -> int {
+    int const content_rows = std::max(1, terminal_height - framework::kFrameChromeRows);
+    return kInspectorContentStartRow + (content_rows - kInspectorLogAreaHeight);
+}
+
+[[nodiscard]] auto inspector_content_end_row(int terminal_height) -> int {
+    int const content_rows = std::max(1, terminal_height - framework::kFrameChromeRows);
+    return kInspectorContentStartRow + content_rows - 1;
+}
+
 void write_all(int fd, std::string_view data) {
     while (!data.empty()) {
         const auto written = ::write(fd, data.data(), data.size());
@@ -587,6 +600,7 @@ void Tui::render_build_lines(int inspector_width, int terminal_width, int num_ro
     status_bar_->set_active_page(inspector_pane_->get_page());
     status_bar_->set_scroll_offset(scroll_offset_);
     status_bar_->set_pane_widths(inspector_width, terminal_width);
+    status_bar_->set_column_width_overrides(user_column_widths_);
     status_bar_->set_right_panel_mode(panel_mode);
 }
 
@@ -884,13 +898,12 @@ void Tui::render(bool force) {
 
 void Tui::handle_mouse_inspector(int x, int y, int b, bool multi_column, bool is_secondary,
                                  int col_width) {
-    constexpr int kLogAreaHeight = 6;
     winsize w{};
     ioctl(STDOUT_FILENO, TIOCGWINSZ, &w);
     int const term_height =
         (cached_term_height_ > 0) ? cached_term_height_ : (w.ws_row > 0 ? w.ws_row : 24);
-    int const num_rows = std::max(1, term_height - 5);
-    int const log_start_y = 4 + (num_rows - kLogAreaHeight);
+    int const num_rows = std::max(1, term_height - framework::kFrameChromeRows);
+    int const log_start_y = inspector_log_start_row(term_height);
     bool const has_log_area = (!is_secondary && inspector_pane_ && num_rows >= 15 &&
                                inspector_pane_->get_page() != TuiRegPage::EXPLAIN &&
                                inspector_pane_->get_page() != TuiRegPage::TRACE);
@@ -1109,9 +1122,8 @@ void Tui::handle_mouse(int x, int y, int b) {
                 scroll(5);
             } else {
                 inspector_pane_->set_page(page);
-                constexpr int kLogAreaHeight = 6;
-                int const num_rows = std::max(1, term_height - 5);
-                int const log_start_y = 4 + (num_rows - kLogAreaHeight);
+                int const num_rows = std::max(1, term_height - framework::kFrameChromeRows);
+                int const log_start_y = inspector_log_start_row(term_height);
                 bool const log_area = clicked_col == 0 && num_rows >= 15 &&
                                       page != TuiRegPage::EXPLAIN && page != TuiRegPage::TRACE &&
                                       y >= log_start_y;
@@ -1129,9 +1141,8 @@ void Tui::handle_mouse(int x, int y, int b) {
                 scroll(-5);
             } else {
                 inspector_pane_->set_page(page);
-                constexpr int kLogAreaHeight = 6;
-                int const num_rows = std::max(1, term_height - 5);
-                int const log_start_y = 4 + (num_rows - kLogAreaHeight);
+                int const num_rows = std::max(1, term_height - framework::kFrameChromeRows);
+                int const log_start_y = inspector_log_start_row(term_height);
                 bool const log_area = clicked_col == 0 && num_rows >= 15 &&
                                       page != TuiRegPage::EXPLAIN && page != TuiRegPage::TRACE &&
                                       y >= log_start_y;
@@ -1285,6 +1296,7 @@ void Tui::apply_layout_preset(LayoutPreset preset) {
     const bool is_cycle = machine_.runtime_profile.is_cycle_mode();
     user_inspector_width_ = -1;
     user_column_widths_ = framework::kNoColumnWidthOverrides;
+    resize_history_.clear();
 
     switch (preset) {
         case LayoutPreset::GeneralDebug:
@@ -1404,6 +1416,7 @@ void Tui::apply_layout_preset(LayoutPreset preset) {
     if (inspector_pane_) {
         inspector_pane_->set_page(workbench_slots_[focused_slot_index_].page);
     }
+    resize_history_.clear();
     update_trace_active_cache();
     request_full_screen_redraw();
     render(true);
@@ -1468,6 +1481,7 @@ void Tui::swap_workbench_slots(size_t slot_a, size_t slot_b) {
     if (inspector_pane_) {
         inspector_pane_->set_page(workbench_slots_[focused_slot_index_].page);
     }
+    resize_history_.clear();
     update_trace_active_cache();
     set_status_override(std::format("Swapped Column {} and Column {}", slot_a + 1, slot_b + 1));
     render(true);
@@ -1481,6 +1495,7 @@ void Tui::move_focused_column_left() {
     if (inspector_pane_) {
         inspector_pane_->set_page(workbench_slots_[focused_slot_index_].page);
     }
+    resize_history_.clear();
     update_trace_active_cache();
     set_status_override(std::format("Moved Column to Position {}", focused_slot_index_ + 1));
     render(true);
@@ -1494,6 +1509,7 @@ void Tui::move_focused_column_right() {
     if (inspector_pane_) {
         inspector_pane_->set_page(workbench_slots_[focused_slot_index_].page);
     }
+    resize_history_.clear();
     update_trace_active_cache();
     set_status_override(std::format("Moved Column to Position {}", focused_slot_index_ + 1));
     render(true);
@@ -1552,6 +1568,7 @@ auto Tui::add_workbench_column() -> bool {
     }
     user_inspector_width_ = -1;
     user_column_widths_ = framework::kNoColumnWidthOverrides;
+    resize_history_.clear();
 
     focused_slot_index_ = insert_at;
     if (inspector_pane_ && new_page != TuiRegPage::CONSOLE) {
@@ -1589,6 +1606,7 @@ auto Tui::close_column(size_t slot_idx) -> bool {
     }
     user_inspector_width_ = -1;
     user_column_widths_ = framework::kNoColumnWidthOverrides;
+    resize_history_.clear();
 
     if (focused_slot_index_ >= workbench_slots_.size()) {
         focused_slot_index_ = workbench_slots_.size() - 1;
@@ -2169,6 +2187,25 @@ void Tui::adjust_inspector_width(int delta) {
     int const proposed = current.widths[focused] + delta;
     if (proposed < minimum) return;
 
+    // Reversing the immediately preceding resize restores the exact donor distribution.  This
+    // matters when an expansion crossed several minimum-width panels; a fresh redistribution
+    // would otherwise leave the columns shifted after the user presses the opposite key.
+    if (!resize_history_.empty()) {
+        auto const& previous = resize_history_.back();
+        if (previous.focused == focused && previous.count == current.count &&
+            previous.delta == -delta) {
+            for (size_t i = 0; i < current.count; ++i) {
+                current.widths[i] -= previous.changes[i];
+            }
+            resize_history_.pop_back();
+            for (size_t i = 0; i < current.count; ++i) user_column_widths_[i] = current.widths[i];
+            if (current.count == 2) user_inspector_width_ = current.widths[0];
+            request_full_screen_redraw();
+            render(true);
+            return;
+        }
+    }
+
     // Keep the adjacent divider moving first, then continue through neighbouring columns when
     // one reaches its minimum.  This makes [/] useful in three- and four-panel layouts instead
     // of silently refusing a resize as soon as the immediate donor is exhausted.
@@ -2189,19 +2226,24 @@ void Tui::adjust_inspector_width(int delta) {
     if (need > available) return;
 
     current.widths[focused] = proposed;
+    ColumnResizeRecord record{.focused = focused, .count = current.count, .delta = delta};
+    record.changes[focused] = delta;
     int remaining = need;
     if (delta < 0 && donor_count > 0) {
         // Shrinking the focused panel gives its space to the nearest neighbour, preserving the
         // intuitive single-divider behaviour at the edge of a layout.
         current.widths[donor_order[0]] -= delta;
+        record.changes[donor_order[0]] = -delta;
     } else {
         for (size_t i = 0; i < donor_count && remaining > 0; ++i) {
             int const donor = donor_order[i];
             int const take = std::min(remaining, std::max(0, current.widths[donor] - minimum));
             current.widths[donor] -= take;
+            record.changes[donor] = -take;
             remaining -= take;
         }
     }
+    resize_history_.push_back(record);
     for (size_t i = 0; i < current.count; ++i) user_column_widths_[i] = current.widths[i];
     if (current.count == 2) user_inspector_width_ = current.widths[0];
     request_full_screen_redraw();
@@ -3686,15 +3728,16 @@ auto Tui::consume_control_sequence(uint8_t first_byte) -> bool {
             int const panel_content_start =
                 (sel_cols.count >= 2) ? 5 : (sel_pane == SelectionPane::TerminalPane ? 4 : 6);
             int subpanel_start_y = panel_content_start;
-            int subpanel_end_y = std::max(panel_content_start, term_h - 3);
+            int subpanel_end_y =
+                std::max(panel_content_start, inspector_content_end_row(term_h));
             if (sel_pane == SelectionPane::InspectorPane && sel_col_idx == 0 &&
                 sel_col_idx < workbench_slots_.size()) {
                 auto const page = workbench_slots_[sel_col_idx].page;
-                int const num_rows = std::max(1, term_h - 5);
+                int const num_rows = std::max(1, term_h - framework::kFrameChromeRows);
                 bool const has_log = num_rows >= 15 && page != TuiRegPage::EXPLAIN &&
                                      page != TuiRegPage::TRACE;
                 if (has_log) {
-                    int const log_start_y = 4 + (num_rows - 6);
+                    int const log_start_y = inspector_log_start_row(term_h);
                     if (y >= log_start_y) {
                         subpanel_start_y = log_start_y;
                     } else {

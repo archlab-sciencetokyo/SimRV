@@ -307,6 +307,13 @@ class Tui : public core::ITelemetrySink, public core::IConsoleSink {
 
     int user_inspector_width_{-1};
     framework::ColumnWidthOverrides user_column_widths_ = framework::kNoColumnWidthOverrides;
+    struct ColumnResizeRecord {
+        size_t focused = 0;
+        uint8_t count = 0;
+        int delta = 0;
+        std::array<int, 4> changes{};
+    };
+    std::vector<ColumnResizeRecord> resize_history_;
     int cell_width_px_ = 8;
     int cell_height_px_ = 16;
     bool sixel_supported_{false};
