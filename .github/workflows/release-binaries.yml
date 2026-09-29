@@ -159,12 +159,17 @@ jobs:
     permissions:
       contents: read
     container:
-      image: alpine:3.22
+      # Use the same GCC baseline as the release builds, with Debian's musl
+      # specs wrapper for a genuinely static musl-linked executable.
+      image: gcc:16
     steps:
       - uses: actions/checkout@v6
       - name: Install musl build tools
         run: |
-          apk add --no-cache bash build-base cmake ninja python3 tar gzip file
+          apt-get update
+          apt-get install -y --no-install-recommends \
+            bash musl-tools python3 python3-pip tar gzip file ca-certificates
+          python3 -m pip install --break-system-packages cmake==4.3.0 ninja
       - name: Validate release tag
         id: names
         shell: bash
@@ -178,11 +183,17 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          musl_specs=/usr/lib/x86_64-linux-musl/musl-gcc.specs
+          test -f "${musl_specs}"
           cmake -S . -B build/rv64-musl-release -G Ninja \
             -DCMAKE_BUILD_TYPE=Release -DSIMRV_XLEN=64 \
             -DSIMRV_X86_64_V3_BASELINE=OFF \
             -DSIMRV_WARNINGS_AS_ERRORS=ON \
-            -DCMAKE_EXE_LINKER_FLAGS="-static -static-libgcc -static-libstdc++"
+            -DCMAKE_C_COMPILER=musl-gcc \
+            -DCMAKE_CXX_COMPILER=g++ \
+            -DCMAKE_C_FLAGS="-specs=${musl_specs}" \
+            -DCMAKE_CXX_FLAGS="-specs=${musl_specs}" \
+            -DCMAKE_EXE_LINKER_FLAGS="-specs=${musl_specs} -static -static-libgcc -static-libstdc++"
           cmake --build build/rv64-musl-release --parallel 2
           file build/rv64-musl-release/simrv | grep -E 'statically linked|static-pie linked'
           ! ldd build/rv64-musl-release/simrv
