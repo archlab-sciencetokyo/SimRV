@@ -26,8 +26,11 @@ RV64 hello images plus the assembly source, linker script, and Makefile used to 
 ```bash
 tar -xzf SimRV-hello-samples-vVERSION.tar.gz
 ./SimRV-rv64-linux-x86_64-vVERSION.bin --cli \
-  -b -m SimRV-hello-samples-vVERSION/bin/hello-rv64.bin
+  -b -m SimRV-hello-samples-vVERSION/build-rv64/hello.bin
 ```
+
+The RV32 image is at `SimRV-hello-samples-vVERSION/build-rv32/hello.bin`. These paths match
+the output directories produced by the sample Makefile.
 
 The same archive can be rebuilt from `examples/hello/` in the source tree.
 
