@@ -310,13 +310,14 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          simrv_command=simrv
           if [[ "${{ matrix.family }}" == tgz ]]; then
             archive="$(find staging -name 'SimRV-linux-x86_64-v*.tar.gz' -type f | head -n 1)"
             test -n "${archive}"
             mkdir extracted
             tar -xzf "${archive}" -C extracted
             test -x extracted/usr/bin/simrv
-            extracted/usr/bin/simrv --version
+            simrv_command=extracted/usr/bin/simrv
           elif [[ "${{ matrix.family }}" == rpm ]]; then
             dnf install -y findutils
             runtime="$(find staging -name 'simrv-[0-9]*.rpm' -type f | head -n 1)"
@@ -330,8 +331,10 @@ jobs:
             test -n "${runtime}"
             apt-get install -y "${runtime}"
           fi
-          simrv --version
-          command -v simrv
+          "${simrv_command}" --version
+          if [[ "${{ matrix.family }}" != tgz ]]; then
+            command -v simrv
+          fi
 
   publish-release:
     needs: [build-and-upload, debian-packages, portable-musl, package-distro-matrix]
