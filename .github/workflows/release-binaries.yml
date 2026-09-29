@@ -25,6 +25,7 @@ jobs:
       image: almalinux:10
 
     strategy:
+      fail-fast: false
       matrix:
         arch: [rv32, rv64]
 
@@ -87,6 +88,7 @@ jobs:
           tar -xJf "$RUNNER_TEMP/musl-cross.tar.xz" -C "$RUNNER_TEMP"
           test -x "$MUSL_ROOT/bin/x86_64-unknown-linux-musl-g++"
           echo "MUSL_TOOLCHAIN_ROOT=$MUSL_ROOT" >> "$GITHUB_ENV"
+          export MUSL_TOOLCHAIN_ROOT="$MUSL_ROOT"
           cmake --preset ${{ matrix.arch }}-musl-release \
             -DMUSL_TOOLCHAIN_ROOT="$MUSL_ROOT" -DBUILD_TESTING=OFF
           cmake --build --preset ${{ matrix.arch }}-musl-release --target SimRV

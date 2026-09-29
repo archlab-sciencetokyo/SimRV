@@ -11,8 +11,8 @@ import tarfile
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 MANIFEST = json.loads((ROOT / "release/release-manifest.json").read_text())
-STATIC = ["CITATION.cff", "LICENSE", "README.md", "SECURITY.md", "docs/RELEASE.md",
-          "docs/RISCV_COMPLIANCE.md", "repro/README.md", "repro/experiment-manifest.json"]
+STATIC = ["CITATION.cff", "LICENSE", "README.md", "SECURITY.md", "docs/SUPPORT_MATRIX.md",
+          "docs/index.md", "repro/README.md", "repro/experiment-manifest.json"]
 
 
 def main() -> None:
