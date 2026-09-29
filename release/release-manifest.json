@@ -1,8 +1,8 @@
 {
   "$schema": "schemas/release-manifest.schema.json",
   "schema_version": 2,
-  "version": "3.0.0-beta.3",
-  "release_tag": "v3.0.0-beta.3",
+  "version": "3.0.0-rc.1",
+  "release_tag": "v3.0.0-rc.1",
   "host_support": {
     "os": "Linux",
     "architecture": "x86_64",
@@ -10,6 +10,17 @@
       "gcc": "16+",
       "clang": "22+"
     }
+  },
+  "package_support": {
+    "rpm": ["Fedora 44"],
+    "deb": ["Debian sid"],
+    "portable_static": [
+      "Fedora 40",
+      "Ubuntu 22.04",
+      "Ubuntu 24.04",
+      "Debian 12",
+      "Debian 13"
+    ]
   },
   "guest_profiles": [
     "RV32GCBV",
@@ -158,8 +169,8 @@
     ]
   },
   "artifacts": [
-    "SimRV-linux-x86_64-v3.0.0-beta.3.tar.gz",
-    "SimRV-rpm-packages-v3.0.0-beta.3.tar.gz",
-    "SimRV-deb-packages-v3.0.0-beta.3.tar.gz"
+    "SimRV-linux-x86_64-v3.0.0-rc.1.tar.gz",
+    "SimRV-rpm-packages-v3.0.0-rc.1.tar.gz",
+    "SimRV-deb-packages-v3.0.0-rc.1.tar.gz"
   ]
 }

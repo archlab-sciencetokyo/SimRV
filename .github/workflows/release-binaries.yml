@@ -111,25 +111,6 @@ jobs:
           echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
           echo "asset_base=${ASSET_BASE}" >> "$GITHUB_OUTPUT"
 
-      - name: Package portable runtime with CPack
-        if: matrix.arch == 'rv64'
-        shell: bash
-        run: |
-          set -euo pipefail
-          mkdir -p portable-package
-          cpack --config build/rv64-release/CPackConfig.cmake -G TGZ \
-            -D CPACK_COMPONENTS_ALL=Runtime -B portable-package
-          mapfile -t archives < <(find portable-package -maxdepth 1 -name '*.tar.gz' -type f)
-          test "${#archives[@]}" -eq 1
-          mv "${archives[0]}" "${{ steps.names.outputs.asset_base }}.tar.gz"
-
-      - name: Validate packaged release
-        if: matrix.arch == 'rv64'
-        run: >-
-          python3 scripts/release_check.py
-          --binary build/${{ matrix.arch }}-release/simrv
-          --archive "${{ steps.names.outputs.asset_base }}.tar.gz"
-
       - name: Build CPack RPM packages
         if: matrix.arch == 'rv64'
         shell: bash
@@ -167,10 +148,60 @@ jobs:
         if: matrix.arch == 'rv64'
         uses: actions/upload-artifact@v7
         with:
-          name: ${{ steps.names.outputs.asset_base }}
+          name: ${{ steps.names.outputs.asset_base }}-rpm
           path: |
-            ${{ steps.names.outputs.asset_base }}.tar.gz
             packages/*.rpm
+          retention-days: 14
+
+  portable-musl:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    permissions:
+      contents: read
+    container:
+      image: alpine:3.22
+    steps:
+      - uses: actions/checkout@v6
+      - name: Install musl build tools
+        run: |
+          apk add --no-cache bash build-base cmake ninja python3 tar gzip file
+      - name: Validate release tag
+        id: names
+        shell: bash
+        run: |
+          set -euo pipefail
+          SIMRV_VERSION="$(sed -nE 's/^set\(SIMRV_VERSION "([^"]+)"\)$/\1/p' CMakeLists.txt | head -n 1)"
+          test "${GITHUB_REF_NAME}" = "v${SIMRV_VERSION}"
+          echo "simrv_version=${SIMRV_VERSION}" >> "$GITHUB_OUTPUT"
+          echo "asset_base=SimRV-linux-x86_64-v${SIMRV_VERSION}" >> "$GITHUB_OUTPUT"
+      - name: Build static RV64 runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          cmake -S . -B build/rv64-musl-release -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release -DSIMRV_XLEN=64 \
+            -DSIMRV_X86_64_V3_BASELINE=OFF \
+            -DSIMRV_ENABLE_SDL=OFF -DSIMRV_WARNINGS_AS_ERRORS=ON \
+            -DCMAKE_EXE_LINKER_FLAGS="-static -static-libgcc -static-libstdc++"
+          cmake --build build/rv64-musl-release --parallel 2
+          file build/rv64-musl-release/simrv | grep -E 'statically linked|static-pie linked'
+          ! ldd build/rv64-musl-release/simrv
+      - name: Package and validate static archive
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p portable-package
+          cpack --config build/rv64-musl-release/CPackConfig.cmake -G TGZ \
+            -D CPACK_COMPONENTS_ALL=Runtime -B portable-package
+          mapfile -t archives < <(find portable-package -maxdepth 1 -name '*.tar.gz' -type f)
+          test "${#archives[@]}" -eq 1
+          mv "${archives[0]}" "${{ steps.names.outputs.asset_base }}.tar.gz"
+          python3 scripts/release_check.py --binary build/rv64-musl-release/simrv \
+            --archive "${{ steps.names.outputs.asset_base }}.tar.gz"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: ${{ steps.names.outputs.asset_base }}
+          path: ${{ steps.names.outputs.asset_base }}.tar.gz
           retention-days: 14
 
   debian-packages:
@@ -235,8 +266,67 @@ jobs:
           path: packages/*.deb
           retention-days: 14
 
-  publish-release:
+  package-distro-matrix:
     needs: [build-and-upload, debian-packages]
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - image: fedora:44
+            family: rpm
+          - image: debian:sid
+            family: deb
+          - image: fedora:40
+            family: tgz
+          - image: ubuntu:22.04
+            family: tgz
+          - image: ubuntu:24.04
+            family: tgz
+          - image: debian:12
+            family: tgz
+          - image: debian:13
+            family: tgz
+    container:
+      image: ${{ matrix.image }}
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: SimRV-linux-x86_64-v*
+          path: staging
+          merge-multiple: true
+      - name: Install runtime package
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "${{ matrix.family }}" == tgz ]]; then
+            archive="$(find staging -name 'SimRV-linux-x86_64-v*.tar.gz' -type f | head -n 1)"
+            test -n "${archive}"
+            mkdir extracted
+            tar -xzf "${archive}" -C extracted
+            test -x extracted/usr/bin/simrv
+            extracted/usr/bin/simrv --version
+          elif [[ "${{ matrix.family }}" == rpm ]]; then
+            dnf install -y findutils
+            runtime="$(find staging -name 'simrv-[0-9]*.rpm' -type f | head -n 1)"
+            test -n "${runtime}"
+            dnf install -y "${runtime}"
+          else
+            export DEBIAN_FRONTEND=noninteractive
+            apt-get update
+            apt-get install -y --no-install-recommends ca-certificates
+            runtime="$(find staging -name 'simrv_[0-9]*_amd64.deb' -type f | head -n 1)"
+            test -n "${runtime}"
+            apt-get install -y "${runtime}"
+          fi
+          simrv --version
+          command -v simrv
+
+  publish-release:
+    needs: [build-and-upload, debian-packages, portable-musl, package-distro-matrix]
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:

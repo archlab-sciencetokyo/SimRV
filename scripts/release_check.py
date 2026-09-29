@@ -74,6 +74,10 @@ def verify_metadata(manifest: dict) -> None:
     performance = manifest.get("performance", {})
     if performance.get("policy") != "evidence-only" or performance.get("blocking") is not False:
         fail("performance policy must be non-blocking evidence-only")
+    package_support = manifest.get("package_support", {})
+    for family in ("rpm", "deb", "portable_static"):
+        if not isinstance(package_support.get(family), list) or not package_support[family]:
+            fail(f"package_support.{family} must be a non-empty distribution list")
 
 
 def verify_evidence(path: pathlib.Path, manifest: dict) -> None:

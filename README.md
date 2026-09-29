@@ -89,6 +89,11 @@ Launch `simrv` normally (or pass `--tui`) to explore an image with the interacti
 ./build/rv64-release/simrv -b -m img/hello.bin --cli --steps 200000
 ```
 
+### Host platform
+
+SimRV currently supports x86-64 Linux hosts. On Windows, use WSL2 with a supported Linux
+distribution; native Windows builds are not currently supported.
+
 ### Prerequisites
 
 - **Clang 22+** or **GCC 16+** (required for the C++23 baseline).

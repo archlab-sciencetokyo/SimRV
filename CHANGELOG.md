@@ -3,6 +3,27 @@
 All notable changes to SimRV are documented here.
 Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v3.0.0-rc.1] — 2026-09-30
+
+This release candidate completes the local attachable TUI path for the 3.0 architecture-debugging
+workflow.
+
+### Attach and inspect
+
+- Hardened `--listen-tui`/`--attach` Unix-socket sessions with protocol validation, bounded queues,
+  stale-endpoint recovery, local-only permissions, reconnect lifecycle notifications, and clean
+  detach behavior.
+- Added plain-output attach behavior for pipes and scripts; interactive attachments retain the full
+  split-screen TUI.
+- Made the inspector log pane scrollable with visible position hints and disabled stale value
+  hitboxes while execution is running.
+
+### Release qualification
+
+- Added IPC stream, malformed-frame, endpoint cleanup, reconnect, and controller-isolation tests.
+- Added a supported Linux distribution matrix for native packages and a fully static musl portable
+  archive build.
+
 ## [v3.0.0-beta.3] — 2026-09-29
 
 This beta packages the RV64-capable `simrv` runtime as the single public simulator build and
@@ -630,6 +651,7 @@ on inspector polish, correctness fixes, and CLI normalization.
 
 - Initial public alpha: CMake preset infrastructure, Clang-20 CI, base RISC-V pipeline
 
+[v3.0.0-rc.1]: https://github.com/archlab-sciencetokyo/SimRV/releases/tag/v3.0.0-rc.1
 [v3.0.0-alpha.2]: https://github.com/archlab-sciencetokyo/SimRV/releases/tag/v3.0.0-alpha.2
 [v3.0.0-alpha.1]: https://github.com/archlab-sciencetokyo/SimRV/releases/tag/v3.0.0-alpha.1
 [v2.1.0-alpha.2]: https://github.com/archlab-sciencetokyo/SimRV/releases/tag/v2.1.0-alpha.2

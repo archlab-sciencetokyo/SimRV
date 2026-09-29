@@ -95,7 +95,7 @@ SimRV development follows strict branch hygiene defined in `.agents/rules/branch
 
 ### Release Qualification Branches
 
-- **Naming**: Strictly follow `release/<semver>` (for example, `release/3.0.0-beta.3`).
+- **Naming**: Strictly follow `release/<semver>` (for example, `release/3.0.0-rc.1`).
 - **Release Metadata Bumps**: Version bumps across `CMakeLists.txt`, `release/release-manifest.json`, `CITATION.cff`, `CHANGELOG.md`, and `TODO.md` must be committed directly to the release branch with message:
   `chore(release): bump version to <version> and update release metadata`
 - **Delivery Vehicle**: Use the PR targeting `dev` as the delivery tracking vehicle. **Do not create Git tags or publish GitHub releases** until all CI matrix jobs are green and merged.
