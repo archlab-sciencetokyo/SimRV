@@ -14,8 +14,7 @@ SimRV is an explainable, dual-width (RV32 / RV64) RISC-V architectural simulator
 6. [Full-System Linux Emulation](#6-full-system-linux-emulation)
 7. [CPU Model Profiles & Microarchitecture Tuning](#7-cpu-model-profiles-microarchitecture-tuning)
 8. [RTL Parity Verification](#8-rtl-parity-verification)
-9. [Benchmarking Suite](#9-benchmarking-suite)
-10. [Troubleshooting & Reference](#10-troubleshooting-reference)
+9. [Troubleshooting & Reference](#9-troubleshooting-reference)
 
 ---
 
@@ -126,19 +125,13 @@ simrv -m program.elf
 
 The SimRV TUI provides an educational visual inspection environment for architecture students and hardware engineers.
 
-```
-┌─ SimRV 3.0 ─────────────────────────────────────────── [Hart 0: RUNNING] ─┐
-│ [Regs] [Cache] [TLB] [Pipeline] [Hazards] [Explainer] │ Guest Terminal PTY │
-│                                                      │                    │
-│ PC: 0x80000000   ra: 0x00000000   sp: 0x80010000     │ Linux version 7.2  │
-│ IF: [0x80000020] addi a0, a0, 1                      │ buildroot login:   │
-│ ID: [0x8000001c] lw   a1, 0(sp)                      │                    │
-│ EX: [0x80000018] mul  a2, a1, a0                     │                    │
-│ MEM:[0x80000014] sw   s0, 4(sp)                      │                    │
-│ WB: [0x80000010] addi sp, sp, -16                    │                    │
-├──────────────────────────────────────────────────────┴────────────────────┤
-│ [F1:Help] [F2:Load] [F5:Run] [F6:Step] [F8:Break] [Alt-M:MISA] [F4:Presets]
-└───────────────────────────────────────────────────────────────────────────┘
+```mermaid
+flowchart LR
+  K[Keyboard] --> R[Input router]
+  R -->|running| G[Guest UART / PTY]
+  R -->|paused| I[Inspector panels]
+  I --> S[Registers · pipeline · cache · memory]
+  G --> V[Virtual terminal]
 ```
 
 ### Focus & Input Navigation
@@ -249,24 +242,7 @@ For more details on registering new hardware RTL targets, refer to [RTL Parity V
 
 ---
 
-## 9. Benchmarking Suite
-
-The `simrv-benchmark` suite measures simulation throughput (KIPS/MIPS), memory footprint (RSS), and compares results against Spike or previous SimRV versions.
-
-```bash
-# Run standard realworld benchmarks
-simrv-benchmark --suite realworld
-
-# Compare performance against Spike
-simrv-benchmark --suite realworld --spike $(which spike) --output results.json
-
-# Generate LaTeX performance comparison table
-simrv-benchmark --suite realworld --latex-table
-```
-
----
-
-## 10. Troubleshooting & Reference
+## 9. Troubleshooting & Reference
 
 ### Common Questions
 

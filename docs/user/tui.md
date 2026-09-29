@@ -83,32 +83,3 @@ and the Classic ANSI theme remains usable without Unicode glyphs.
 Selected keycaps, badges, and primary tabs are filled and clickable. Passive telemetry remains
 plain text. Modal titles and action rows are centred; forms and explanatory content are
 left-aligned. Scrollable regions show direction markers whenever content exists beyond the view.
-
-## Tests
-
-`tui-framework` is a native CTest covering input routing, CR/LF, cursor movement, SGR attributes,
-cursor visibility, scrollback, selection, resize/reset behavior, UTF-8 cells, themes, and keybinding
-registry integrity. It is part of the `gate`, `regress`, and `tui` labels and runs under sanitizer
-configurations.
-
-While simulation is running, status and CA performance views consume stable per-hart snapshots.
-Detailed register, pipeline, cache, and TLB inspection resumes only after all SMP workers have
-acknowledged pause.
-
-`linux-boot-pty` is the baseline end-to-end test for Linux boot and TUI/PTY/UART interaction. The
-`linux-ca-boot-pty`, `linux-ca-quantum-smp-pty`, and `linux-ca-mt-smp-pty` variants cover CA and
-verify that both CPUs reach the shell in SMP configurations. The tests run the TUI
-under a pseudo-terminal, wait for getty, send Enter, and verify a command executed by the guest
-shell. Run the focused tests with:
-
-```bash
-ctest --test-dir build/rv64-release --output-on-failure -R 'tui-framework|linux-(boot|ca-.*)-pty'
-```
-
-## Roadmap: Attachable Out-of-Process Architecture (3.0.0 Goal)
-
-To achieve zero-overhead headless simulation while supporting rich visual inspection, the TUI is targeted to decouple into an attachable client:
-
-- **Transport**: Hybrid IPC with Unix Domain Sockets for bidirectional RPC (pause, resume, step, logical breakpoints, inspection queries) and POSIX Shared Memory (`/dev/shm`) for 60 Hz live telemetry (`TuiSnapshotSlot`) and lock-free circular ring buffers for guest UART streams.
-- **Attach/Detach**: Tmux/GDB-style on-demand attach (`simrv --attach <sock>`). The headless simulator (`simrv --listen-tui <sock>`) runs at uninhibited native throughput when detached, and begins publishing shared-memory frames only while a client is attached.
-- **Multi-call Binary**: Preserves existing embedded execution while introducing headless server and attach client sub-modes in the unified `simrv` binary.

@@ -21,6 +21,18 @@ structures, L1 I/D-caches, branch predictor, and execution pipeline model.
 | **Debug & Tracing** | `Tracer`, `GdbStub`, `BreakpointManager`, `SpikeLockstep` | Structured traces, logical break/watchpoints, GDB RSP, Spike co-simulation |
 | **Presentation** | `Tui`, `TuiFrameRenderer`, `VirtualTerminal` | Multi-hart state visualizer, terminal console PTY, educational glossary & inspector |
 
+```mermaid
+flowchart TD
+  M[Machine] --> C[CPU harts]
+  M --> R[Physical DRAM]
+  M --> D[MMIO devices]
+  C --> F[Fetch + MMU]
+  F --> X[Decode + execute]
+  X --> W[Writeback + commit]
+  W -->|loads and stores| R
+  W -->|UART · timers · interrupts · VirtIO| D
+```
+
 ## Execution Policies & Microarchitectures
 
 Execution is configured via `--mode <name>` and resolved into runtime profiles:
@@ -148,22 +160,6 @@ Squashed fetch and data requests are cancelled by hart/port source identity.
 CA page walks are resumable transactions. PTE reads and accessed/dirty updates
 share the bus ordering model; A/D updates use an atomic OR. This preserves a
 single translation behavior while allowing CA to expose latency.
-
-## Source layout
-
-```text
-include/simrv/  Interfaces and inline implementation
-src/            Implementation units mirroring include/
-tests/          Native semantic, pipeline, UI, platform, and CLI tests
-scripts/        Build, benchmark, release, and reproduction helpers
-docs/           User, contributor, compliance, and release documentation
-```
-
-Useful entry points are `src/Main.cpp`, `src/core/Machine.cpp`,
-`src/core/Cpu.cpp`, and `src/pipeline/CycleKernel.cpp`. See
-[TUI architecture](../user/tui.md), [bare-metal development](../user/baremetal.md),
-[Linux image building](../user/linux.md), and
-[extension development](../hardware/extensions.md) for focused workflows.
 
 ## Build and validation
 
