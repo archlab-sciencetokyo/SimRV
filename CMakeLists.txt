@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.25)
 
-project(SimRV VERSION 2.0.2 LANGUAGES C CXX)
+project(SimRV VERSION 2.0.3 LANGUAGES C CXX)
 
 enable_testing()
 find_program(PYTHON_BIN NAMES "python3" "python" DOC "Path to Python interpreter")
@@ -8,7 +8,7 @@ if(NOT PYTHON_BIN)
   set(PYTHON_BIN "python3")
 endif()
 
-set(SIMRV_VERSION "2.0.2")
+set(SIMRV_VERSION "2.0.3")
 set(SIMRV_GIT_BRANCH "unknown")
 set(SIMRV_GIT_SHA "unknown")
 
@@ -71,6 +71,8 @@ if(SIMRV_ENABLE_CLANG_TIDY)
 endif()
 
 option(SIMRV_WARNINGS_AS_ERRORS "Treat project compiler warnings as errors" OFF)
+option(SIMRV_PORTABLE_BUILD
+       "Build a baseline x86-64 binary suitable for redistribution" OFF)
 option(SIMRV_ENABLE_ASAN "Enable AddressSanitizer" OFF)
 option(SIMRV_ENABLE_UBSAN "Enable UndefinedBehaviorSanitizer" OFF)
 option(SIMRV_ENABLE_TSAN "Enable ThreadSanitizer" OFF)
@@ -226,11 +228,15 @@ endif()
 if(CMAKE_BUILD_TYPE STREQUAL "Release")
   target_compile_options(SimRV PRIVATE -O3)
   
-  include(CheckCXXCompilerFlag)
-  check_cxx_compiler_flag("-march=x86-64-v3" COMPILER_SUPPORTS_MARCH_X86_64_V3)
-  if(COMPILER_SUPPORTS_MARCH_X86_64_V3)
-    target_compile_options(SimRV PRIVATE -march=x86-64-v3)
-    message(STATUS "x86-64-v3 instruction set architecture (AVX2/FMA/BMI) enabled.")
+  if(NOT SIMRV_PORTABLE_BUILD)
+    include(CheckCXXCompilerFlag)
+    check_cxx_compiler_flag("-march=x86-64-v3" COMPILER_SUPPORTS_MARCH_X86_64_V3)
+    if(COMPILER_SUPPORTS_MARCH_X86_64_V3)
+      target_compile_options(SimRV PRIVATE -march=x86-64-v3)
+      message(STATUS "x86-64-v3 instruction set architecture (AVX2/FMA/BMI) enabled.")
+    endif()
+  else()
+    message(STATUS "Portable baseline x86-64 build enabled.")
   endif()
   
   include(CheckIPOSupported)

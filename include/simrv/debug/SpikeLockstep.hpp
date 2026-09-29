@@ -23,6 +23,10 @@
 #include <string>
 #include <vector>
 
+#if defined(__linux__)
+#include <sys/types.h>
+#endif
+
 #include "simrv/Define.hpp"
 #include "simrv/xlen/Types.hpp"
 

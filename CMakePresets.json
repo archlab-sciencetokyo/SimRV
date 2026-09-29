@@ -37,7 +37,8 @@
             "cacheVariables": {
                 "CMAKE_BUILD_TYPE": "Release",
                 "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
-                "SIMRV_XLEN": "32"
+                "SIMRV_XLEN": "32",
+                "SIMRV_PORTABLE_BUILD": "ON"
             }
         },
         {
@@ -49,7 +50,8 @@
             "cacheVariables": {
                 "CMAKE_BUILD_TYPE": "Release",
                 "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
-                "SIMRV_XLEN": "64"
+                "SIMRV_XLEN": "64",
+                "SIMRV_PORTABLE_BUILD": "ON"
             }
         },
         {

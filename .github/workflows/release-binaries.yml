@@ -81,14 +81,15 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          MUSL_ROOT="$RUNNER_TEMP/x86_64-linux-musl-cross"
-          wget -q https://musl.cc/x86_64-linux-musl-cross.tgz -O "$RUNNER_TEMP/musl-cross.tgz"
-          tar -xzf "$RUNNER_TEMP/musl-cross.tgz" -C "$RUNNER_TEMP"
-          test -x "$MUSL_ROOT/bin/x86_64-linux-musl-g++"
+          MUSL_ROOT="$RUNNER_TEMP/x86_64-unknown-linux-musl"
+          wget -q https://github.com/cross-tools/musl-cross/releases/download/20250520/x86_64-unknown-linux-musl.tar.xz -O "$RUNNER_TEMP/musl-cross.tar.xz"
+          echo "a896bad67a4dae7cd7baece62d537fda07f8c74e65fee1b450a691b83e151a9c  $RUNNER_TEMP/musl-cross.tar.xz" | sha256sum -c -
+          tar -xJf "$RUNNER_TEMP/musl-cross.tar.xz" -C "$RUNNER_TEMP"
+          test -x "$MUSL_ROOT/bin/x86_64-unknown-linux-musl-g++"
           echo "MUSL_TOOLCHAIN_ROOT=$MUSL_ROOT" >> "$GITHUB_ENV"
           cmake --preset ${{ matrix.arch }}-musl-release \
             -DMUSL_TOOLCHAIN_ROOT="$MUSL_ROOT" -DBUILD_TESTING=OFF
-          cmake --build --preset ${{ matrix.arch }}-musl-release
+          cmake --build --preset ${{ matrix.arch }}-musl-release --target SimRV
 
       - name: Run CTest gate suite
         env:

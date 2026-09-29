@@ -3,6 +3,15 @@
 All notable changes to SimRV are documented here.
 Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v2.0.3] — 2026-09-29
+
+Maintenance release adding a fully static, baseline x86-64 musl portable binary for broad Linux distribution compatibility, including Ubuntu 22.04 and newer.
+
+### Release portability
+
+- Added checksum-verified GCC 15 musl release builds for RV32 and RV64 host binaries.
+- Portable builds avoid x86-64-v3 instructions and require no host glibc or libstdc++ runtime.
+
 ## [v2.0.2] — 2026-08-28
 
 Maintenance release ensuring side-effect-free instruction explanation in the TUI left pane to prevent spurious ICache hits during tool tab navigation.
