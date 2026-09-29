@@ -23,6 +23,7 @@
 #include "simrv/core/CpuConfigParser.hpp"
 #include "simrv/core/Logger.hpp"
 #include "simrv/core/Machine.hpp"
+#include "simrv/device/Uart.hpp"
 #include "simrv/net/Client.hpp"
 #include "simrv/net/Server.hpp"
 #include "simrv/tui/Tui.hpp"
@@ -38,7 +39,14 @@ auto main(int argc, char* argv[]) -> int {  // NOLINT(bugprone-exception-escape)
     bool skip_banner = false;
     for (int i = 1; i < argc; ++i) {
         std::string_view const arg(argv[i]);
-        if (arg == "--cli" || arg == "-c") {
+        if (i == 1 && (arg == "run" || arg == "inspect" || arg == "explain" || arg == "attach")) {
+            is_tui = false;
+            skip_banner = true;
+        } else if (arg == "run") {
+            is_tui = false;
+        } else if (arg == "tui") {
+            is_tui = true;
+        } else if (arg == "--cli" || arg == "-c") {
             is_tui = false;
         } else if (arg == "--gdb") {
             is_tui = false;
@@ -62,6 +70,7 @@ auto main(int argc, char* argv[]) -> int {  // NOLINT(bugprone-exception-escape)
     }
 
     simrv::log::set_tui_mode(is_tui);
+    simrv::log::set_cli_mode(!is_tui);
 
     if (!is_tui && !skip_banner) {
         simrv::log::info("{} v{} ({}@{})\nPlease type Control+'q' to quit the simulation\n",
@@ -80,9 +89,30 @@ auto main(int argc, char* argv[]) -> int {  // NOLINT(bugprone-exception-escape)
     int final_exit_code = 0;
     while (keep_running) {
         std::span<char* const> const args(argv, static_cast<std::size_t>(argc));
+        if (argc > 1) {
+            std::string_view first_command(argv[1]);
+            if (first_command.starts_with('-') && first_command != "--help" &&
+                first_command != "-h" && first_command != "--version" &&
+                first_command != "--license" && first_command != "--quiet" &&
+                first_command != "-q" && first_command != "--verbose" &&
+                first_command != "-v") {
+                option_error("legacy flag-only syntax was removed; use 'simrv run IMAGE' (see --help)", 1);
+            }
+        }
         auto parsed = parse_command_line(args);
         if (!parsed) {
             option_error(parsed.error());
+        }
+        simrv::log::set_cli_mode(!parsed->options.tuimode);
+        if (!parsed->options.fn_config.empty()) {
+            option_error("--config requires a TOML-enabled build; this binary was built without TOML support", 1);
+        }
+        if (!parsed->options.fn_uart.empty() && !simrv::device::set_uart_output(parsed->options.fn_uart)) {
+            option_error("cannot open UART output: " + parsed->options.fn_uart, 1);
+        }
+        if ((parsed->options.fn_events == "-" || parsed->options.fn_json_summary == "-") &&
+            parsed->options.fn_uart.empty()) {
+            option_error("stdout is reserved for UART; use --uart FILE when writing events or summary to '-'", 1);
         }
 
         switch (parsed->action) {
@@ -186,6 +216,16 @@ auto main(int argc, char* argv[]) -> int {  // NOLINT(bugprone-exception-escape)
                     "compatible with this simulator.");
                 std::exit(0);
             }
+            case CliAction::InspectConfig:
+                option_error("inspect action is not available in this build", 1);
+            case CliAction::InspectImage: {
+                std::error_code ec;
+                const auto size = std::filesystem::file_size(parsed->options.fn_memimg, ec);
+                if (ec) option_error("cannot inspect image: " + parsed->options.fn_memimg, 1);
+                std::println("{{\"path\":\"{}\",\"size\":{}}}",
+                             parsed->options.fn_memimg, size);
+                std::exit(0);
+            }
             case CliAction::Run:
                 break;
         }
@@ -209,6 +249,18 @@ auto main(int argc, char* argv[]) -> int {  // NOLINT(bugprone-exception-escape)
         }
         auto sim_machine = std::make_unique<simrv::core::Machine>(std::move(machine_config));
 
+        std::ofstream event_file;
+        std::ostream* event_out = nullptr;
+        if (!parsed->options.fn_events.empty()) {
+            if (parsed->options.fn_events == "-") {
+                event_out = &std::cout;
+            } else {
+                event_file.open(parsed->options.fn_events, std::ios::out | std::ios::trunc);
+                if (!event_file) option_error("cannot open event file: " + parsed->options.fn_events, 1);
+                event_out = &event_file;
+            }
+        }
+
         if (staged_runtime_profile.has_value()) {
             sim_machine->runtime_profile = *staged_runtime_profile;
         } else {
@@ -226,6 +278,21 @@ auto main(int argc, char* argv[]) -> int {  // NOLINT(bugprone-exception-escape)
         }
 
         sim_machine->set_start_time(std::chrono::steady_clock::now());
+        auto emit_event = [&](std::string_view name, std::string_view message = "") {
+            if (event_out == nullptr) return;
+            const auto& hart = sim_machine->primary_hart();
+            std::println(*event_out,
+                         "{{\"schema\":1,\"event\":\"{}\",\"status\":{},"
+                         "\"message\":\"{}\",\"stop_reason\":\"{}\",\"hart\":0,"
+                         "\"pc\":\"0x{:x}\",\"instructions\":{},\"cycles\":{}}}",
+                         name, sim_machine->exit_code.load(), message,
+                         simrv::core::Machine::stop_reason_name(sim_machine->stop_reason()),
+                         hart.state().pc, sim_machine->retired_instruction_count(),
+                         hart.clint_mmio.mcycle);
+            event_out->flush();
+        };
+        emit_event("started");
+        emit_event("ready");
 
         std::shared_ptr<simrv::tui::Tui> tui;
         if (sim_machine->tui_enabled()) {
@@ -283,6 +350,7 @@ auto main(int argc, char* argv[]) -> int {  // NOLINT(bugprone-exception-escape)
         } else {
             keep_running = false;
             final_exit_code = sim_machine->exit_code.load();
+            emit_event("stopped");
             if (!sim_machine->tui_enabled()) {
                 sim_machine->trace().print_summary();
             }
@@ -337,7 +405,8 @@ auto main(int argc, char* argv[]) -> int {  // NOLINT(bugprone-exception-escape)
                                  simrv::buildinfo::kVersion, simrv::xlen::kXLenBits,
                                  sim_machine->num_harts(), final_exit_code,
                                  simrv::core::Machine::stop_reason_name(sim_machine->stop_reason()),
-                                 sim_machine->retired_instruction_count(), hart.e_ccount,
+                                 sim_machine->retired_instruction_count(),
+                                 hart.clint_mmio.mcycle,
                                  hart.state().pc);
                 }
             }

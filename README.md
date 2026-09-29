@@ -78,15 +78,16 @@ The source build below is intended for development and architecture work.
 
 ### Interactive and headless runs
 
-Launch `simrv` normally (or pass `--tui`) to explore an image with the interactive TUI. Use
-`--cli` for scripted and headless runs; command-line options are the supported run interface.
+Launch `simrv` normally from an interactive terminal to explore an image with the TUI. Use the
+canonical subcommands `simrv tui IMAGE` for interactive work and `simrv run IMAGE` for scripted
+headless runs. The former flag-only interface has been removed in the 3.0 prerelease.
 
 ```bash
 # Interactive image loading and inspection.
-./build/rv64-release/simrv -b -m img/hello.bin --tui
+./build/rv64-release/simrv tui img/hello.bin --baremetal
 
 # Headless execution with an explicit instruction limit.
-./build/rv64-release/simrv -b -m img/hello.bin --cli --steps 200000
+./build/rv64-release/simrv run img/hello.bin --baremetal --steps 200000
 ```
 
 ### Prerequisites

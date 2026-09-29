@@ -336,6 +336,30 @@ auto parse_file_options(std::string_view arg, std::span<char* const> args, std::
         options.fn_json_summary = std::string(*value);
         return true;
     }
+    if (arg == "--summary") {
+        auto value = next_argument(args, i, arg);
+        if (!value) return std::unexpected(value.error());
+        options.fn_json_summary = std::string(*value);
+        return true;
+    }
+    if (arg == "--events") {
+        auto value = next_argument(args, i, arg);
+        if (!value) return std::unexpected(value.error());
+        options.fn_events = std::string(*value);
+        return true;
+    }
+    if (arg == "--uart") {
+        auto value = next_argument(args, i, arg);
+        if (!value) return std::unexpected(value.error());
+        options.fn_uart = std::string(*value);
+        return true;
+    }
+    if (arg == "--config") {
+        auto value = next_argument(args, i, arg);
+        if (!value) return std::unexpected(value.error());
+        options.fn_config = std::string(*value);
+        return true;
+    }
     return false;
 }
 
@@ -850,7 +874,8 @@ auto expand_short_flags(const std::vector<std::string>& original_args) -> std::v
 
 }  // namespace
 
-auto parse_command_line(std::span<char* const> args) -> std::expected<ParseResult, std::string> {
+auto parse_legacy_command_line(std::span<char* const> args)
+    -> std::expected<ParseResult, std::string> {
     std::vector<std::string> original_args;
     original_args.reserve(args.size());
     for (auto* ptr : args) {
@@ -938,6 +963,77 @@ auto parse_command_line(std::span<char* const> args) -> std::expected<ParseResul
     }
 
     return result;
+}
+
+auto parse_command_line(std::span<char* const> args) -> std::expected<ParseResult, std::string> {
+    if (args.size() <= 1) {
+        if (::isatty(STDIN_FILENO) != 0) return parse_legacy_command_line(args);
+        return std::unexpected("a command is required in non-interactive mode; use 'simrv run IMAGE' or 'simrv --help'");
+    }
+
+    std::vector<std::string> canonical;
+    canonical.emplace_back(args.front());
+    std::size_t command_index = 1;
+    while (command_index < args.size()) {
+        const std::string_view token(args[command_index]);
+        if (token == "--help" || token == "--version" || token == "--license" ||
+            token == "--quiet" || token == "-q" || token == "--verbose" || token == "-v") {
+            canonical.emplace_back(token);
+            ++command_index;
+            continue;
+        }
+        break;
+    }
+    if (command_index >= args.size()) {
+        return parse_legacy_command_line(args);
+    }
+    const std::string_view command(args[command_index]);
+    auto append_tail = [&](std::size_t start) {
+        for (std::size_t i = start; i < args.size(); ++i) canonical.emplace_back(args[i]);
+    };
+    if (command == "run" || command == "tui") {
+        canonical.emplace_back(command == "run" ? "--cli" : "--tui");
+        std::size_t next = command_index + 1;
+        if (next < args.size() && args[next][0] != '-') {
+            canonical.emplace_back("--image");
+            canonical.emplace_back(args[next++]);
+        } else if (command == "run") {
+            return std::unexpected("run requires a positional IMAGE argument");
+        }
+        append_tail(next);
+    } else if (command == "explain") {
+        if (command_index + 1 >= args.size()) return std::unexpected("explain requires INSTRUCTION");
+        canonical.emplace_back("--explain-inst");
+        canonical.emplace_back(args[command_index + 1]);
+    } else if (command == "attach") {
+        if (command_index + 1 >= args.size()) return std::unexpected("attach requires ENDPOINT");
+        canonical.emplace_back("--attach");
+        canonical.emplace_back(args[command_index + 1]);
+        append_tail(command_index + 2);
+    } else if (command == "inspect") {
+        if (command_index + 1 >= args.size()) return std::unexpected("inspect requires config or image");
+        const std::string_view kind(args[command_index + 1]);
+        if (kind == "config") {
+            return std::unexpected("inspect config is not available until TOML support is enabled");
+        }
+        if (kind == "image") {
+            if (command_index + 2 >= args.size()) return std::unexpected("inspect image requires FILE");
+            ParseResult inspected{};
+            inspected.action = CliAction::InspectImage;
+            inspected.options.fn_memimg = args[command_index + 2];
+            return inspected;
+        }
+        return std::unexpected("inspect expects 'config' or 'image'");
+    } else {
+        if (command.starts_with('-')) return parse_legacy_command_line(args);
+        return std::unexpected(std::format("unknown command '{}'; use 'simrv run IMAGE' or 'simrv --help'", command));
+    }
+    std::vector<char*> pointers;
+    pointers.reserve(canonical.size());
+    for (auto& value : canonical) pointers.push_back(value.data());
+    auto parsed = parse_legacy_command_line(std::span<char* const>(pointers.data(), pointers.size()));
+    if (parsed) parsed->options.canonical_cli = true;
+    return parsed;
 }
 
 auto resolve_runtime_profile(const RuntimeOptions& options) -> simrv::core::RuntimeProfile {
@@ -1169,8 +1265,17 @@ auto needs_memory_image(const ParseResult& result) -> bool {
                style(kBold), style(kBrightWhite), style(kReset), style(kReset));
 
     // Usage
-    std::print(stdout, "{}Usage:{} {}{} [options]{}\n\n", style(kBold), style(kReset),
+    std::print(stdout, "{}Usage:{} {}{} <command> [options]{}\n\n", style(kBold), style(kReset),
                style(kBrightGreen), prog_name, style(kReset));
+    std::print(stdout,
+               "Commands:\n  {}run IMAGE{}       Headless simulation (automation default)\n"
+               "  {}tui [IMAGE]{}     Interactive terminal workbench\n"
+               "  {}inspect ...{}     Inspect configuration or image metadata\n"
+               "  {}explain INST{}    Decode a raw instruction\n"
+               "  {}attach EP{}       Attach to a running simulator\n\n",
+               style(kBrightGreen), style(kReset), style(kBrightGreen), style(kReset),
+               style(kBrightGreen), style(kReset), style(kBrightGreen), style(kReset),
+               style(kBrightGreen), style(kReset));
 
     // Basic & Image Loading
     std::print(stdout, "{}{}:{}{}\n", style(kBoldFgBrightBlue), "Basic and Image Loading",
@@ -1321,7 +1426,16 @@ auto needs_memory_image(const ParseResult& result) -> bool {
         "  {}--log-file {}{}<FILE>{}             Mirror timestamped console log messages to file\n",
         style(kBrightGreen), style(kBrightBlack), style(kReset), style(kReset));
     std::print(stdout,
-               "  {}--json-summary {}{}<FILE>|-{}        Write a machine-readable run summary\n",
+               "  {}--summary {}{}<FILE>|-{}             Write a machine-readable run summary\n",
+               style(kBrightGreen), style(kBrightBlack), style(kReset), style(kReset));
+    std::print(stdout,
+               "  {}--events {}{}<FILE>|-{}              Write lifecycle JSON events\n",
+               style(kBrightGreen), style(kBrightBlack), style(kReset), style(kReset));
+    std::print(stdout,
+               "  {}--uart {}{}<FILE>|-{}                Route guest UART output\n",
+               style(kBrightGreen), style(kBrightBlack), style(kReset), style(kReset));
+    std::print(stdout,
+               "  {}--config {}{}<FILE>{}                Load optional TOML configuration\n",
                style(kBrightGreen), style(kBrightBlack), style(kReset), style(kReset));
     std::print(
         stdout,

@@ -12,6 +12,15 @@ option(SIMRV_ENABLE_TOOLING
        "Enable release, documentation, and formatting helper targets" OFF)
 option(SIMRV_ENABLE_LINUX_TOOLS
        "Enable Linux image build and launch helper targets" OFF)
+option(SIMRV_WITH_TOML "Enable TOML configuration-file support when toml++ is available" ON)
+if(SIMRV_WITH_TOML)
+  find_package(tomlplusplus QUIET)
+  if(tomlplusplus_FOUND)
+    message(STATUS "TOML configuration support enabled")
+  else()
+    message(STATUS "toml++ not found; --config will report unavailable support")
+  endif()
+endif()
 if(BUILD_TESTING OR SIMRV_ENABLE_TOOLING)
   find_package(
     Python3
@@ -426,23 +435,22 @@ if(BUILD_TESTING)
     PROPERTIES PASS_REGULAR_EXPRESSION "Licensed under the MIT License" LABELS
                "gate;regress;cli;license")
 
-  add_test(NAME cli-invalid-option COMMAND $<TARGET_FILE:SimRV> -Z)
+  add_test(NAME cli-invalid-option COMMAND $<TARGET_FILE:SimRV> run dummy.elf --Z)
   set_tests_properties(
     cli-invalid-option PROPERTIES PASS_REGULAR_EXPRESSION "unknown option"
                                   LABELS "gate;regress;cli")
 
-  add_test(NAME cli-invalid-pipeline COMMAND $<TARGET_FILE:SimRV> --pipeline
-                                             dual)
+  add_test(NAME cli-invalid-pipeline COMMAND $<TARGET_FILE:SimRV> run dummy.elf --pipeline dual)
   set_tests_properties(cli-invalid-pipeline PROPERTIES WILL_FAIL TRUE LABELS
                                                        "gate;regress;cli")
 
-  add_test(NAME cli-gdb-tui-conflict COMMAND $<TARGET_FILE:SimRV> --tui --gdb)
+  add_test(NAME cli-gdb-tui-conflict COMMAND $<TARGET_FILE:SimRV> tui --gdb)
   set_tests_properties(
     cli-gdb-tui-conflict
     PROPERTIES PASS_REGULAR_EXPRESSION "--gdb and --tui are mutually exclusive"
                LABELS "gate;regress;cli;debug")
 
-  add_test(NAME cli-gdb-lockstep-conflict COMMAND $<TARGET_FILE:SimRV> --gdb
+  add_test(NAME cli-gdb-lockstep-conflict COMMAND $<TARGET_FILE:SimRV> run dummy.elf --gdb
                                                   --lockstep)
   set_tests_properties(
     cli-gdb-lockstep-conflict
@@ -465,7 +473,7 @@ if(BUILD_TESTING)
     string(MAKE_C_IDENTIFIER "${removed_debug_option}"
                              removed_debug_test_suffix)
     add_test(NAME "cli-removed-debug-option-${removed_debug_test_suffix}"
-             COMMAND $<TARGET_FILE:SimRV> "${removed_debug_option}")
+             COMMAND $<TARGET_FILE:SimRV> run dummy.elf "${removed_debug_option}")
     set_tests_properties(
       "cli-removed-debug-option-${removed_debug_test_suffix}"
       PROPERTIES PASS_REGULAR_EXPRESSION "unknown option" LABELS
@@ -487,8 +495,8 @@ if(BUILD_TESTING)
 
   # Optional App/Linux smoke tests
   if(DEFINED ENV{SIMRV_APP_IMG})
-    add_test(NAME app-smoke COMMAND $<TARGET_FILE:SimRV> -m $ENV{SIMRV_APP_IMG}
-                                    -b -e 200000)
+    add_test(NAME app-smoke COMMAND $<TARGET_FILE:SimRV> run $ENV{SIMRV_APP_IMG}
+                                    --baremetal --steps 200000)
     set_tests_properties(app-smoke PROPERTIES TIMEOUT 20 LABELS "external;app")
   endif()
 

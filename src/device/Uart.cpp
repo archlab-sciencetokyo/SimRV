@@ -7,6 +7,7 @@
 #include <sys/select.h>
 #include <sys/time.h>
 #include <unistd.h>
+#include <fcntl.h>
 
 #include <cerrno>
 #include <thread>
@@ -17,6 +18,7 @@
 namespace simrv::device {
 
 namespace {
+int g_uart_fd = STDOUT_FILENO;
 constexpr int D_UART_IRQ_NUM = 3;
 constexpr std::size_t kMaxRxFifoSize = 2048;
 
@@ -29,6 +31,18 @@ void update_uart_irq(simrv::core::Machine& machine, bool uart_rx_ready, uint8_t 
 }
 
 }  // namespace
+
+auto set_uart_output(std::string_view path) -> bool {
+    if (path.empty() || path == "-") {
+        g_uart_fd = STDOUT_FILENO;
+        return true;
+    }
+    const int fd = ::open(std::string(path).c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0644);
+    if (fd < 0) return false;
+    if (g_uart_fd != STDOUT_FILENO && g_uart_fd != STDERR_FILENO) ::close(g_uart_fd);
+    g_uart_fd = fd;
+    return true;
+}
 
 Uart::Uart(simrv::core::Machine& machine) : machine_(machine) {}
 
@@ -200,7 +214,7 @@ auto Uart::handle_request(const memory::TlChannelA& req, memory::TlChannelD& res
                     if (machine_.console_sink()) {
                         machine_.console_sink()->handle_char_write(static_cast<char>(ch));
                     } else if (!pty_.is_open()) {
-                        (void)(::write(STDOUT_FILENO, &ch, 1) == 0);
+                        (void)(::write(g_uart_fd, &ch, 1) == 0);
                     }
                     tx_irq_pending_ = true;
                     const bool has_rx = rx_ready_.load(std::memory_order_acquire);

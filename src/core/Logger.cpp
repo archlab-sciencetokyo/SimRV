@@ -30,6 +30,7 @@ struct PendingLog {
 constexpr std::size_t kStartupLogLimit = 256;
 std::atomic<Level> g_log_level{Level::Info};
 bool g_tui_mode = false;  // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
+bool g_cli_mode = false;  // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 simrv::log::LogCallback
     g_tui_callback;  // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 std::deque<PendingLog>
@@ -76,11 +77,12 @@ void emit_log(Level level, FILE* stream, std::string_view ansi_color, std::strin
             g_startup_logs.push_back({level, msg});
             return;
         } else {
-            const int fd = (stream == stderr) ? STDERR_FILENO : STDOUT_FILENO;
+            FILE* output = (g_cli_mode && stream == stdout) ? stderr : stream;
+            const int fd = (output == stderr) ? STDERR_FILENO : STDOUT_FILENO;
             if (simrv::util::is_terminal(fd)) {
-                std::println(stream, "{}{}\033[0m", ansi_color, msg);
+                std::println(output, "{}{}\033[0m", ansi_color, msg);
             } else {
-                std::println(stream, "[{}] {}", plain_tag, msg);
+                std::println(output, "[{}] {}", plain_tag, msg);
             }
         }
     }
@@ -126,6 +128,11 @@ auto get_level() noexcept -> Level { return g_log_level.load(std::memory_order_r
 void set_tui_mode(bool enable) {
     std::scoped_lock lock(g_log_mutex);
     g_tui_mode = enable;
+}
+
+void set_cli_mode(bool enable) {
+    std::scoped_lock lock(g_log_mutex);
+    g_cli_mode = enable;
 }
 
 void set_tui_callback(LogCallback cb) {

@@ -38,6 +38,8 @@ void set_level(Level level) noexcept;
 
 /// Enable or disable TUI mode (suppresses raw stdout leaks during early startup).
 void set_tui_mode(bool enable);
+/// Route human-readable CLI diagnostics to stderr instead of stdout.
+void set_cli_mode(bool enable);
 
 /// Register a callback to route logs to the TUI (if active).
 void set_tui_callback(LogCallback cb);

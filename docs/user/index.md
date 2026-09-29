@@ -121,19 +121,32 @@ simrv -m program.elf
 
 ### Unix composition
 
+The canonical automation form is `simrv run IMAGE`; the legacy flag-only form is no longer
+accepted. Interactive sessions can use `simrv tui [IMAGE]`, while `simrv explain INSTRUCTION` and
+`simrv attach ENDPOINT` cover standalone tools.
+
+Image metadata can be inspected without booting a guest:
+
+```bash
+simrv inspect image program.elf
+```
+
+Builds with optional toml++ support also accept `--config FILE` and expose resolved settings via
+`simrv inspect config`.
+
 `--cli` exposes a stream-oriented process interface, so normal Unix tools can capture or transform
 a run without the TUI. Use `--log` for a separate simulator log when a clean guest-console stream
 is required:
 
 ```bash
 # Save a guest console transcript while still seeing it live.
-simrv --cli -m program.elf -b --log simrv.log | tee guest.log
+simrv run program.elf --baremetal --log-file simrv.log | tee guest.log
 
 # Feed interactive guest UART input from a script.
-printf 'help\n' | simrv --cli --os -m fw_payload.bin -D root.img
+printf 'help\n' | simrv run fw_payload.bin --os --disk root.img
 
 # Bound a run and preserve its exit status for a shell script.
-timeout 30s simrv --cli -m program.elf -b -e 1000000
+timeout 30s simrv run program.elf --baremetal --steps 1000000
 status=$?
 ```
 

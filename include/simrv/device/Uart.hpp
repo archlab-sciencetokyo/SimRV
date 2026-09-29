@@ -8,6 +8,7 @@
 #include <cstdint>
 #include <mutex>
 #include <queue>
+#include <string_view>
 #include <thread>
 
 #include "simrv/device/PtyBridge.hpp"
@@ -24,6 +25,8 @@ class Tui;
 }
 
 namespace simrv::device {
+
+[[nodiscard]] auto set_uart_output(std::string_view path) -> bool;
 
 class Uart : public memory::TileLinkNode {
    public:
