@@ -9,9 +9,16 @@
 #include <bit>
 #include <cstdint>
 #include <cstring>
-#include <mdspan>
 #include <optional>
 #include <utility>
+
+#if __has_include(<mdspan>)
+#include <mdspan>
+#define SIMRV_HAS_STD_MDSPAN 1
+#else
+#include "simrv/compat/Mdspan.hpp"
+#define SIMRV_HAS_STD_MDSPAN 0
+#endif
 
 #include "simrv/Define.hpp"
 #include "simrv/memory/Bus.hpp"
@@ -51,8 +58,15 @@ class BaseCache {
         std::array<Byte, kLineBytes> data{};
     };
 
+#if SIMRV_HAS_STD_MDSPAN
     using CacheView = std::mdspan<CacheLine, std::dextents<uint32_t, 2>>;
     using ConstCacheView = std::mdspan<const CacheLine, std::dextents<uint32_t, 2>>;
+#else
+    using CacheView = simrv::compat::Mdspan2D<CacheLine>;
+    using ConstCacheView = simrv::compat::Mdspan2D<const CacheLine>;
+#endif
+
+#undef SIMRV_HAS_STD_MDSPAN
 
     [[nodiscard]] constexpr auto cache_view() noexcept -> CacheView {
         return CacheView(lines_.data(), active_sets_, active_ways_);
