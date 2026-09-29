@@ -85,6 +85,15 @@ By default, launching `SimRV` launches the interactive TUI workbench. For non-in
 The default launch mode is interactive. Add `--cli` whenever the command is part of a script or
 you want only guest output and diagnostics.
 
+Build the small included sample first:
+
+```bash
+make -C examples/hello XLEN=64
+./build/rv64-release/SimRV -b -m examples/hello/build-rv64/hello.bin --cli
+```
+
+Use `XLEN=32` with the RV32 compiler and simulator when you want a strict RV32 example.
+
 ```bash
 # Run a bare-metal binary in interactive TUI mode (Default)
 ./build/rv64-release/SimRV -b -m img/hello.bin
