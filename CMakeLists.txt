@@ -419,6 +419,11 @@ if(BUILD_TESTING)
   add_test(NAME cli-help-isa COMMAND $<TARGET_FILE:SimRV> -h)
   set_tests_properties(cli-help-isa PROPERTIES PASS_REGULAR_EXPRESSION "--isa"
                                                LABELS "gate;regress;cli")
+  add_test(NAME cli-summary-rejects-stdout COMMAND $<TARGET_FILE:SimRV> --summary -)
+  set_tests_properties(
+    cli-summary-rejects-stdout
+    PROPERTIES PASS_REGULAR_EXPRESSION "stdout is reserved for guest UART"
+               LABELS "gate;regress;cli")
 
   add_test(NAME cli-license COMMAND $<TARGET_FILE:SimRV> --license)
   set_tests_properties(

@@ -113,12 +113,28 @@ simrv -m program.elf
 | `--cpu-profile <path.cfg>` | Load human-editable CPU microarchitecture profile. |
 | `-p, --pipeline <type>` | Pipeline microarchitecture target (`three-stage`, `five-stage`, `dual-issue`). |
 | `-H, --tohost <addr>` | Specify physical address of `tohost` communication symbol for tests. |
+| `--summary <file>` | Write a machine-readable JSON execution summary when the run ends. |
 | `--trace` | Write architectural instruction trace to `trace/trace.txt`. |
 | `--tracepc` | Write PC stream trace to `trace/tracepc.txt`. |
 | `--gdb` | Start GDB Remote Serial Protocol (RSP) server. |
 | `--gdb-port <port>` | Set GDB RSP TCP listener port (default: 1234). |
 | `-v, --version` | Display version and build information. |
 | `-h, --help` | Show full command-line help message. |
+
+### Automation summary
+
+Use `--summary` when a script needs architectural results without parsing human-readable logs:
+
+```bash
+simrv --cli --baremetal -m program.elf --summary results/run.json
+python3 -m json.tool results/run.json
+```
+
+The JSON document has schema version `1` and includes the simulator version, XLEN, hart count,
+execution engine, stop reason, exit status, final PC, retired instructions, cycles, CPI, IPC,
+and per-hart retirement counts. The summary is written after execution; a failure to write it
+causes a nonzero simulator exit status. `--summary -` is rejected so guest UART output remains
+unambiguous on stdout.
 
 ---
 

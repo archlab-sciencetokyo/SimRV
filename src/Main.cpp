@@ -286,6 +286,12 @@ auto main(int argc, char* argv[]) -> int {  // NOLINT(bugprone-exception-escape)
             if (!sim_machine->tui_enabled()) {
                 sim_machine->trace().print_summary();
             }
+            if (!parsed->options.fn_summary.empty() &&
+                !sim_machine->trace().write_summary_json(parsed->options.fn_summary)) {
+                simrv::log::error("Cannot write execution summary to {}",
+                                  parsed->options.fn_summary);
+                if (final_exit_code == 0) final_exit_code = 1;
+            }
             if (!sim_machine->configuration().files.dump_dmem_path.empty()) {
                 std::ofstream out(sim_machine->configuration().files.dump_dmem_path);
                 if (out) {

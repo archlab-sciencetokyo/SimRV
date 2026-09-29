@@ -33,6 +33,7 @@ struct RuntimeOptions {
     std::string fn_dvtree;
     std::string fn_traplog;
     std::string fn_log;
+    std::string fn_summary;
     std::string inspection_output;
 
     Address start_pc = simrv::boot::kStartPc;

@@ -21,6 +21,7 @@
 #include <vector>
 
 #include "simrv/Define.hpp"
+#include "simrv/core/BuildInfo.hpp"
 #include "simrv/core/Cpu.hpp"
 #include "simrv/core/Logger.hpp"
 #include "simrv/core/Machine.hpp"
@@ -491,6 +492,48 @@ void Tracer::print_summary() {
         write_instruction_mix_report();
     }
     flush_all();
+}
+
+auto Tracer::write_summary_json(const std::string& path) -> bool {
+    std::ofstream out(path, std::ios::trunc);
+    if (!out) return false;
+
+    Counter retired = 0;
+    Counter compressed = 0;
+    for (size_t hart = 0; hart < machine_.num_harts(); ++hart) {
+        retired += machine_.hart(hart).e_icount;
+        compressed += machine_.hart(hart).e_ccount;
+    }
+    const auto cycles = machine_.primary_hart().clint_mmio.mcycle;
+    const auto pc = machine_.primary_hart().state().pc;
+    const double cpi = retired == 0 ? 0.0 : static_cast<double>(cycles) / retired;
+    const double ipc = cycles == 0 ? 0.0 : static_cast<double>(retired) / cycles;
+
+    out << "{\n"
+        << "  \"schema_version\": 1,\n"
+        << "  \"simrv_version\": \"" << simrv::buildinfo::kVersion << "\",\n"
+        << "  \"xlen\": " << simrv::xlen::kXLenBits << ",\n"
+        << "  \"harts\": " << machine_.num_harts() << ",\n"
+        << "  \"engine\": \"" << machine_.runtime_profile.execution_name() << "\",\n"
+        << "  \"stop_reason\": \"" << Machine::stop_reason_name(machine_.stop_reason())
+        << "\",\n"
+        << "  \"exit_status\": " << machine_.exit_code.load() << ",\n"
+        << "  \"retired_instructions\": " << retired << ",\n"
+        << "  \"cycles\": " << cycles << ",\n"
+        << "  \"pc\": " << pc << ",\n"
+        << "  \"compressed_instructions\": " << compressed << ",\n"
+        << "  \"cpi\": " << std::format("{:.9f}", cpi) << ",\n"
+        << "  \"ipc\": " << std::format("{:.9f}", ipc) << ",\n"
+        << "  \"hart_stats\": [\n";
+    for (size_t hart = 0; hart < machine_.num_harts(); ++hart) {
+        const auto& cpu = machine_.hart(hart);
+        out << "    {\"hart\": " << hart << ", \"retired_instructions\": "
+            << cpu.e_icount << ", \"compressed_instructions\": " << cpu.e_ccount
+            << ", \"pc\": " << cpu.state().pc << "}"
+            << (hart + 1 == machine_.num_harts() ? "\n" : ",\n");
+    }
+    out << "  ]\n}\n";
+    return static_cast<bool>(out);
 }
 
 void Tracer::emit_periodic_pc_trace(Counter mtime, Register cpc) {
