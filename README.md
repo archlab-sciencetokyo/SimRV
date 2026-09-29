@@ -62,9 +62,12 @@ Explore the full documentation, guides, and specifications online at **[archlab-
 
 ## Quick Start
 
+SimRV currently supports x86-64 Linux hosts. On Windows, use WSL2 with a supported Linux
+distribution; native Windows builds are not currently supported.
+
 ### Build Prerequisites
 
-- A C++23-capable compiler; the main-branch CI baseline is **Clang 20+** or **GCC 14+**
+- A C++23-capable compiler, such as **Clang 20+** or **GCC 14+**
 - **CMake 3.25+** (the project minimum) and **Ninja**
 
 ### Building SimRV

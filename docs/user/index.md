@@ -35,9 +35,12 @@ SimRV simulates standard 32-bit and 64-bit RISC-V architectures:
 
 ## 2. Installation & Quickstart
 
+SimRV currently supports x86-64 Linux hosts. On Windows, use WSL2 with a supported Linux
+distribution; native Windows builds are not currently supported.
+
 ### Prerequisites
 
-- C++23-capable compiler: **Clang 20+** or **GCC 14+** (the CI baselines)
+- C++23-capable compiler: **Clang 20+** or **GCC 14+**
 - Build tools: **CMake 3.25+** (the project minimum), **Ninja**
 - Python: **Python 3.10+** (for utility tools and test suites)
 
