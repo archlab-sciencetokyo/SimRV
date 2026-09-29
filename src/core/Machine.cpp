@@ -38,7 +38,11 @@ namespace {
 
 struct CheckpointHeader {
     char magic[8] = {'S', 'I', 'M', 'R', 'V', 'C', 'P', 0};
-    uint32_t version = 1;
+    uint32_t version = 2;
+    uint32_t endian_marker = 0x01020304;
+    uint32_t header_size = 0;
+    uint32_t arch_state_size = 0;
+    uint32_t counter_size = 0;
     uint32_t xlen = 0;
     uint32_t vlen = 0;
     uint32_t harts = 0;
@@ -48,6 +52,15 @@ struct CheckpointHeader {
 
 static_assert(std::is_trivially_copyable_v<CheckpointHeader>);
 static_assert(std::is_trivially_copyable_v<ArchState>);
+
+struct CheckpointHart {
+    ArchState state{};
+    Counter instruction_count{};
+    Counter cycle_count{};
+    Counter mcycle{};
+};
+
+static_assert(std::is_trivially_copyable_v<CheckpointHart>);
 
 thread_local bool g_primary_runner_active = false;
 thread_local bool g_secondary_runner_active = false;
@@ -205,10 +218,17 @@ auto Machine::ram_view() const noexcept -> simrv::memory::RamView {
 
 auto Machine::save_checkpoint(const std::string& filepath) const
     -> std::expected<void, std::string> {
+    const auto ram = ram_view();
+    if (ram.data() == nullptr || ram.size() == 0) {
+        return std::unexpected("cannot save checkpoint without allocated RAM");
+    }
     std::ofstream out(filepath, std::ios::binary | std::ios::trunc);
     if (!out) return std::unexpected("cannot open checkpoint for writing: " + filepath);
 
-    const CheckpointHeader header{.xlen = simrv::xlen::kXLenBits,
+    const CheckpointHeader header{.header_size = sizeof(CheckpointHeader),
+                                  .arch_state_size = sizeof(ArchState),
+                                  .counter_size = sizeof(Counter),
+                                  .xlen = simrv::xlen::kXLenBits,
                                   .vlen = config.isa.vlen,
                                   .harts = static_cast<uint32_t>(num_harts()),
                                   .ram_base = config.memory.dram_base,
@@ -216,13 +236,12 @@ auto Machine::save_checkpoint(const std::string& filepath) const
     out.write(reinterpret_cast<const char*>(&header), sizeof(header));
     for (size_t i = 0; i < num_harts(); ++i) {
         const auto& cpu = hart(i);
-        out.write(reinterpret_cast<const char*>(&cpu.state()), sizeof(ArchState));
-        out.write(reinterpret_cast<const char*>(&cpu.e_icount), sizeof(cpu.e_icount));
-        out.write(reinterpret_cast<const char*>(&cpu.e_ccount), sizeof(cpu.e_ccount));
-        out.write(reinterpret_cast<const char*>(&cpu.clint_mmio.mcycle),
-                  sizeof(cpu.clint_mmio.mcycle));
+        const CheckpointHart hart_state{.state = cpu.state(),
+                                       .instruction_count = cpu.e_icount,
+                                       .cycle_count = cpu.e_ccount,
+                                       .mcycle = cpu.clint_mmio.mcycle};
+        out.write(reinterpret_cast<const char*>(&hart_state), sizeof(hart_state));
     }
-    const auto ram = ram_view();
     out.write(reinterpret_cast<const char*>(ram.data()), static_cast<std::streamsize>(ram.size()));
     if (!out) return std::unexpected("failed while writing checkpoint: " + filepath);
     return {};
@@ -236,7 +255,9 @@ auto Machine::load_checkpoint(const std::string& filepath) -> std::expected<void
     in.read(reinterpret_cast<char*>(&header), sizeof(header));
     const CheckpointHeader expected{};
     if (!in || std::memcmp(header.magic, expected.magic, sizeof(header.magic)) != 0 ||
-        header.version != 1) {
+        header.version != 2 || header.endian_marker != 0x01020304 ||
+        header.header_size != sizeof(CheckpointHeader) ||
+        header.arch_state_size != sizeof(ArchState) || header.counter_size != sizeof(Counter)) {
         return std::unexpected("unsupported or corrupt checkpoint header");
     }
     if (header.xlen != simrv::xlen::kXLenBits || header.vlen != config.isa.vlen ||
@@ -244,19 +265,28 @@ auto Machine::load_checkpoint(const std::string& filepath) -> std::expected<void
         header.ram_size != config.memory.dram_size) {
         return std::unexpected("checkpoint configuration does not match this machine");
     }
-    for (size_t i = 0; i < num_harts(); ++i) {
-        auto& cpu = hart(i);
-        in.read(reinterpret_cast<char*>(&cpu.state()), sizeof(ArchState));
-        in.read(reinterpret_cast<char*>(&cpu.e_icount), sizeof(cpu.e_icount));
-        in.read(reinterpret_cast<char*>(&cpu.e_ccount), sizeof(cpu.e_ccount));
-        in.read(reinterpret_cast<char*>(&cpu.clint_mmio.mcycle),
-                sizeof(cpu.clint_mmio.mcycle));
+    std::vector<CheckpointHart> hart_states(num_harts());
+    for (auto& hart_state : hart_states) {
+        in.read(reinterpret_cast<char*>(&hart_state), sizeof(hart_state));
         if (!in) return std::unexpected("truncated checkpoint architectural state");
-        cpu.TLB_flush();
     }
     const auto ram = ram_view();
-    in.read(reinterpret_cast<char*>(ram.data()), static_cast<std::streamsize>(ram.size()));
+    if (ram.data() == nullptr || ram.size() == 0) {
+        return std::unexpected("cannot load checkpoint without allocated RAM");
+    }
+    std::vector<Byte> ram_image(ram.size());
+    in.read(reinterpret_cast<char*>(ram_image.data()), static_cast<std::streamsize>(ram_image.size()));
     if (!in) return std::unexpected("truncated checkpoint RAM image");
+    for (size_t i = 0; i < num_harts(); ++i) {
+        auto& cpu = hart(i);
+        auto& hart_state = hart_states[i];
+        cpu.state() = hart_state.state;
+        cpu.e_icount = hart_state.instruction_count;
+        cpu.e_ccount = hart_state.cycle_count;
+        cpu.clint_mmio.mcycle = hart_state.mcycle;
+        cpu.TLB_flush();
+    }
+    std::memcpy(ram.data(), ram_image.data(), ram_image.size());
     return {};
 }
 
