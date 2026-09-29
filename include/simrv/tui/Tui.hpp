@@ -51,6 +51,7 @@ struct SelectionState {
     size_t col_idx = 0;
     int col_start_x = 2;
     int content_start_y = 4;
+    int content_end_y = 22;
     int pane_width = 80;
     int start_x = -1;
     int start_y = -1;

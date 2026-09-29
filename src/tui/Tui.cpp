@@ -1404,6 +1404,7 @@ void Tui::apply_layout_preset(LayoutPreset preset) {
         inspector_pane_->set_page(workbench_slots_[focused_slot_index_].page);
     }
     update_trace_active_cache();
+    request_full_screen_redraw();
     render(true);
 }
 
@@ -1558,6 +1559,7 @@ auto Tui::add_workbench_column() -> bool {
     update_trace_active_cache();
     set_status_override(
         std::format("Added Column {}: {}", workbench_slots_.size(), get_page_name(new_page)));
+    request_full_screen_redraw();
     render(true);
     return true;
 }
@@ -1599,6 +1601,7 @@ auto Tui::close_column(size_t slot_idx) -> bool {
     update_trace_active_cache();
     set_status_override(
         std::format("Closed Column {} ({})", slot_idx + 1, get_page_name(closed_page)));
+    request_full_screen_redraw();
     render(true);
     return true;
 }
@@ -2172,6 +2175,7 @@ void Tui::adjust_inspector_width(int delta) {
     }
     for (size_t i = 0; i < current.count; ++i) user_column_widths_[i] = current.widths[i];
     if (current.count == 2) user_inspector_width_ = current.widths[0];
+    request_full_screen_redraw();
     render(true);
 }
 
@@ -3492,7 +3496,8 @@ auto Tui::consume_control_sequence(uint8_t first_byte) -> bool {
                 int local_end_x = std::clamp(x - selection_.col_start_x, 0,
                                              std::max(0, selection_.pane_width - 1));
                 selection_.end_x = local_end_x;
-                selection_.end_y = y;
+                selection_.end_y = std::clamp(y, selection_.content_start_y,
+                                              selection_.content_end_y);
                 selection_.is_active = true;
                 render(false);
             }
@@ -3640,6 +3645,11 @@ auto Tui::consume_control_sequence(uint8_t first_byte) -> bool {
             selection_.col_start_x = col_start_x;
             selection_.content_start_y =
                 (sel_cols.count >= 2) ? 5 : (sel_pane == SelectionPane::TerminalPane ? 4 : 6);
+            selection_.content_end_y = std::max(selection_.content_start_y, term_h - 3);
+            if (y < selection_.content_start_y || y > selection_.content_end_y) {
+                selection_ = SelectionState{};
+                return true;
+            }
             selection_.pane_width = col_w;
             selection_.start_x = col_local_x;
             selection_.start_y = y;

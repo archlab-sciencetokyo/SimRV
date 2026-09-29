@@ -71,6 +71,7 @@ struct TuiTestAccess {
     static auto workbench_slots(const Tui& tui) -> const std::vector<WorkbenchSlot>& {
         return tui.workbench_slots_;
     }
+    static void set_focused_slot(Tui& tui, size_t slot) { tui.focused_slot_index_ = slot; }
     static auto column_widths(const Tui& tui, int width) -> framework::ColumnWidths {
         return tui.column_widths(width);
     }
@@ -92,7 +93,6 @@ struct TuiTestAccess {
         return false;
     }
     static auto selection(const Tui& tui) -> const SelectionState& { return tui.selection_; }
-    static void set_focused_slot(Tui& tui, size_t slot) { tui.focused_slot_index_ = slot; }
     static auto handle_nav_key(Tui& tui, uint8_t byte, TuiKey key) -> bool {
         return tui.handle_navigation_keyboard_input(byte, key);
     }
@@ -1456,6 +1456,20 @@ void test_multicolumn_refinement() {
                inserted_slots[2].page == simrv::tui::TuiRegPage::CONSOLE,
            "new workbench column is inserted beside the selected column");
 
+    simrv::core::Machine selected_insert_machine;
+    simrv::tui::Tui selected_insert_tui(selected_insert_machine);
+    simrv::tui::TuiTestAccess::set_cached_term_width(selected_insert_tui, 220);
+    simrv::tui::TuiTestAccess::set_focused_slot(selected_insert_tui, 1);
+    expect(selected_insert_tui.add_workbench_column(),
+           "adding a workbench column beside a non-primary selection succeeds");
+    auto const& selected_inserted_slots =
+        simrv::tui::TuiTestAccess::workbench_slots(selected_insert_tui);
+    expect(selected_inserted_slots.size() == 3 &&
+               selected_inserted_slots[0].page == simrv::tui::TuiRegPage::GPR &&
+               selected_inserted_slots[1].page == simrv::tui::TuiRegPage::CONSOLE &&
+               selected_inserted_slots[2].page == simrv::tui::TuiRegPage::STACK,
+           "new workbench column is inserted immediately right of the focused column");
+
     // 6. Multi-column right border junction connects on horizontal rule
     const auto geom = simrv::tui::calculate_frame_geometry(120, 20, simrv::tui::TuiLayout::Split);
     simrv::tui::framework::ColumnWidths col_widths{.widths = {30, 30, 0, 0}, .count = 2};
@@ -2249,9 +2263,14 @@ void test_multi_column_panel_management_and_modal_usability() {
     tui.close_modal();
 
     // Click on column 0 row 5 (content row 0): start selection drag
+    simrv::tui::TuiTestAccess::set_cached_term_height(tui, 24);
     simrv::tui::TuiTestAccess::consume_control_seq(tui, "\033[<0;10;5M");
     const auto& sel = simrv::tui::TuiTestAccess::selection(tui);
     expect(sel.content_start_y == 5, "selection content_start_y is 5 in 2-panel mode");
+    expect(sel.content_end_y == 21, "selection content_end_y stops before the footer");
+    simrv::tui::TuiTestAccess::consume_control_seq(tui, "\033[<32;200;30M");
+    expect(sel.end_y == sel.content_end_y && sel.end_x == sel.pane_width - 1,
+           "selection drag clamps to the originating subpanel bounds");
     expect(slots[0].page == simrv::tui::TuiRegPage::GPR, "row 5 click does not alter GPR page");
     tui.clear_selection();
 
