@@ -38,6 +38,21 @@ remain available after guest shutdown and wake the stopped simulation loop for c
 restart. The optional VirtIO console is a separate device and does not
 receive copies of UART keystrokes.
 
+### Scrolling and panel focus
+
+Scrolling is routed to the focused subpanel, so the same controls work when several inspectors are
+open at once. Use `Tab`/`Shift-Tab` (or `Ctrl-Right`/`Ctrl-Left`) to change the focused column:
+
+- `Up`/`Down` moves one row; `PageUp`/`PageDown` moves a page; `Home` returns to the top.
+- `Shift-Left`/`Shift-Right` and horizontal mouse-wheel events move an overflowing panel sideways.
+- The mouse wheel always scrolls the panel under the pointer. In an inspector, the bottom Log
+  region has its own bounded scroll position; `u`/`d` move it by a few lines when the inspector is
+  focused.
+- The guest console retains its own scrollback position, independent of inspector panels.
+
+Each inspector page owns a reusable two-dimensional `ScrollView`, so changing focus or opening
+another page does not lose the previous page's vertical or horizontal position.
+
 The host terminal's carriage-return Enter byte is normalized to newline at the virtual-terminal
 boundary, matching PTY line input and shells that read the UART without enabling `ICRNL` themselves.
 

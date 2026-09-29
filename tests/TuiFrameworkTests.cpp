@@ -1503,6 +1503,20 @@ void test_horizontal_scrolling() {
     pane.reset_horizontal_scroll();
     expect(pane.get_horizontal_scroll_offset() == 0, "reset_horizontal_scroll clears offset");
 
+    // The log is a separate reusable viewport and remains independent from page scrolling.
+    pane.set_log_lines({"log-00", "log-01", "log-02", "log-03", "log-04", "log-05",
+                        "log-06", "log-07", "log-08", "log-09"});
+    expect(pane.get_log_scroll_offset() == 0, "log viewport starts at the newest entries");
+    pane.scroll_log(2);
+    expect(pane.get_log_scroll_offset() == 2, "log viewport scrolls independently");
+    pane.set_page(simrv::tui::TuiRegPage::PIPELINE);
+    expect(pane.get_scroll_offset() == 0,
+           "switching inspector pages does not inherit the log scroll position");
+    pane.scroll_log(100);
+    expect(pane.get_log_scroll_offset() == 5, "log viewport clamps to its visible capacity");
+    pane.reset_log_scroll();
+    expect(pane.get_log_scroll_offset() == 0, "reset_log_scroll returns to newest entries");
+
     // Standard pane widths (80 cols) fit content inside without horizontal scrolling
     pane.set_page(simrv::tui::TuiRegPage::PIPELINE);
     (void)pane.render_column_row(1, 80, 1, 3, true);
