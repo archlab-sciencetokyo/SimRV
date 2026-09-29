@@ -114,6 +114,7 @@ simrv -m program.elf
 | `-p, --pipeline <type>` | Pipeline microarchitecture target (`three-stage`, `five-stage`, `dual-issue`). |
 | `-H, --tohost <addr>` | Specify physical address of `tohost` communication symbol for tests. |
 | `--summary <file>` | Write a machine-readable JSON execution summary when the run ends. |
+| `--events <file>` | Write newline-delimited lifecycle events for automation. |
 | `--trace` | Write architectural instruction trace to `trace/trace.txt`. |
 | `--tracepc` | Write PC stream trace to `trace/tracepc.txt`. |
 | `--gdb` | Start GDB Remote Serial Protocol (RSP) server. |
@@ -135,6 +136,11 @@ execution engine, stop reason, exit status, final PC, retired instructions, cycl
 and per-hart retirement counts. The summary is written after execution; a failure to write it
 causes a nonzero simulator exit status. `--summary -` is rejected so guest UART output remains
 unambiguous on stdout.
+
+For streaming automation, `--events` writes one JSON object per lifecycle transition. Events
+include `started`, `stopped`, `reboot_requested`, and `exit_requested`, with schema version,
+timestamp, status, stop reason, hart, PC, retired instructions, and cycles. Like summaries,
+`--events -` is rejected because stdout belongs to guest UART output.
 
 ---
 

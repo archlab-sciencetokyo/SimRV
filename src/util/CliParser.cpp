@@ -734,6 +734,15 @@ auto parse_debug_cosrv_options(std::string_view arg, std::span<char* const> args
         options.fn_summary = std::string(*value);
         return true;
     }
+    if (arg == "--events") {
+        auto value = next_argument(args, i, "--events");
+        if (!value) return std::unexpected(value.error());
+        if (value->empty() || *value == "-") {
+            return std::unexpected("--events requires a writable file path (stdout is reserved for guest UART)");
+        }
+        options.fn_events = std::string(*value);
+        return true;
+    }
     if (arg == "-q" || arg == "--quiet") {
         options.quiet = true;
         if (!options.log_level.has_value()) {
@@ -1383,6 +1392,9 @@ auto needs_memory_image(const ParseResult& result) -> bool {
                style(kBrightGreen), style(kBrightBlack), style(kReset), style(kReset));
     std::print(stdout,
                "  {}--summary {}{}<FILE>{}                  Write a JSON execution summary on exit\n\n",
+               style(kBrightGreen), style(kBrightBlack), style(kReset), style(kReset));
+    std::print(stdout,
+               "  {}--events {}{}<FILE>{}                   Write newline-delimited lifecycle events\n\n",
                style(kBrightGreen), style(kBrightBlack), style(kReset), style(kReset));
 
     // Debug & Verification

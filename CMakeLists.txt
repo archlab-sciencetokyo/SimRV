@@ -424,6 +424,11 @@ if(BUILD_TESTING)
     cli-summary-rejects-stdout
     PROPERTIES PASS_REGULAR_EXPRESSION "stdout is reserved for guest UART"
                LABELS "gate;regress;cli")
+  add_test(NAME cli-events-reject-stdout COMMAND $<TARGET_FILE:SimRV> --events -)
+  set_tests_properties(
+    cli-events-reject-stdout
+    PROPERTIES PASS_REGULAR_EXPRESSION "stdout is reserved for guest UART"
+               LABELS "gate;regress;cli")
 
   add_test(NAME cli-license COMMAND $<TARGET_FILE:SimRV> --license)
   set_tests_properties(
