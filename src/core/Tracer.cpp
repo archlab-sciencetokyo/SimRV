@@ -405,6 +405,12 @@ void Tracer::write_instruction_mix_report() {
     std::println(out, "                         INSTRUCTION MIX REPORT");
     std::println(
         out, "================================================================================");
+    std::println(out, " Target: RV{} | Primary hart: {} | Configured harts: {} | Engine: {}",
+                 simrv::xlen::kXLenBits,
+                 static_cast<unsigned>(machine_.primary_hart().state().mhartid),
+                 machine_.num_harts(), machine_.runtime_profile.execution_name());
+    std::println(out, " Counts below are retired instructions from the primary hart.");
+    std::println(out, "");
     std::println(out,
                  " Rank  Instruction             Category              Count      Share  Cumul");
     std::println(
