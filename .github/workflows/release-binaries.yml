@@ -329,7 +329,7 @@ jobs:
             apt-get install -y --no-install-recommends ca-certificates
             runtime="$(find staging -name 'simrv_[0-9]*_amd64.deb' -type f | head -n 1)"
             test -n "${runtime}"
-            apt-get install -y "${runtime}"
+            apt-get install -y "./${runtime}"
           fi
           "${simrv_command}" --version
           if [[ "${{ matrix.family }}" != tgz ]]; then
