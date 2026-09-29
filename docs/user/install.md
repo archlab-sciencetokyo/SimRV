@@ -4,14 +4,19 @@ SimRV publishes one Linux x86-64 simulator build. The installed `simrv` executab
 guests and provides RV32 guest compatibility. Native RV32 builds remain a source-level validation
 target and are not distributed separately.
 
+The supported host platform is x86-64 Linux. Windows users should run SimRV inside
+[WSL2](https://learn.microsoft.com/windows/wsl/) with a supported Linux distribution; native
+Windows builds are not currently supported.
+
 Download the newest package bundle or portable archive from
 [GitHub Releases](https://github.com/archlab-sciencetokyo/SimRV/releases). Beta releases are marked
 as prereleases.
 
 ## Portable archive
 
-The portable archive contains the runtime component only. Extract it into `/usr/local` while
-removing the archive's leading `usr/` directory:
+The portable archive contains the runtime component only and is fully statically linked against
+musl. It needs an x86-64 Linux kernel but no host glibc or SimRV runtime libraries. Extract it into
+`/usr/local` while removing the archive's leading `usr/` directory:
 
 ```bash
 tar -tzf SimRV-linux-x86_64-vVERSION.tar.gz
@@ -19,6 +24,8 @@ sudo tar -xzf SimRV-linux-x86_64-vVERSION.tar.gz \
   --strip-components=1 -C /usr/local
 simrv --version
 ```
+
+This is the recommended option for older distributions, containers, and compute servers.
 
 Remove the installed files using the archive's file list, or replace them by extracting a newer
 archive at the same prefix. Use a native package when managed upgrades and removal matter.
@@ -52,6 +59,19 @@ simrv --version
 The optional tools and benchmark packages depend on `simrv`. Install their `.deb` files with the
 same command when needed. Upgrade from a newer bundle or remove the packages with
 `sudo apt remove simrv simrv-tools simrv-benchmark`.
+
+## Supported Linux distributions
+
+Native packages are qualified in release CI on the following x86-64 distributions:
+
+| Package | Tested distributions | Notes |
+| --- | --- | --- |
+| RPM | Fedora 44 (the release-build baseline) | Install with `dnf`; older RPM distributions should use the static TGZ unless their glibc/libstdc++ ABI is newer enough. |
+| DEB | Debian sid (the release-build baseline) | Install with `apt`; older Debian/Ubuntu releases should use the static TGZ. |
+| Static TGZ | Fedora 40, Ubuntu 22.04/24.04, Debian 12/13, and newer x86-64 Linux | Does not require glibc, libstdc++, or TOML runtime packages. |
+
+The native packages are tested rather than promised for every derivative. Use the static TGZ when a
+distribution is outside this matrix or when package-manager integration is unavailable.
 
 ## Build from source
 

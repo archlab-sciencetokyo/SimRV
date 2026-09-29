@@ -38,6 +38,25 @@ remain available after guest shutdown and wake the stopped simulation loop for c
 restart. The optional VirtIO console is a separate device and does not
 receive copies of UART keystrokes.
 
+### Scrolling and panel focus
+
+Scrolling is routed to the focused subpanel, so the same controls work when several inspectors are
+open at once. Use `Tab`/`Shift-Tab` (or `Ctrl-Right`/`Ctrl-Left`) to change the focused column:
+
+- `Up`/`Down` moves one row; `PageUp`/`PageDown` moves a page; `Home` returns to the top.
+- `Shift-Left`/`Shift-Right` and horizontal mouse-wheel events move an overflowing panel sideways.
+- `[`/`]` resize the focused panel. In a multi-column layout, width is transferred from the
+  adjacent panel, preserving the minimum readable width.
+- `Ctrl-A`/`Ctrl-N` add a panel immediately to the right of the focused panel; `Tab` then moves focus
+  through the resulting columns.
+- The mouse wheel always scrolls the panel under the pointer. In an inspector, the bottom Log
+  region has its own bounded scroll position; `u`/`d` move it by a few lines when the inspector is
+  focused.
+- The guest console retains its own scrollback position, independent of inspector panels.
+
+Each inspector page owns a reusable two-dimensional `ScrollView`, so changing focus or opening
+another page does not lose the previous page's vertical or horizontal position.
+
 The host terminal's carriage-return Enter byte is normalized to newline at the virtual-terminal
 boundary, matching PTY line input and shells that read the UART without enabling `ICRNL` themselves.
 
@@ -105,10 +124,27 @@ shell. Run the focused tests with:
 ctest --test-dir build/rv64-release --output-on-failure -R 'tui-framework|linux-(boot|ca-.*)-pty'
 ```
 
-## Roadmap: Attachable Out-of-Process Architecture (3.0.0 Goal)
+## Attachable TUI sessions
 
-To achieve zero-overhead headless simulation while supporting rich visual inspection, the TUI is targeted to decouple into an attachable client:
+The simulator can run headlessly and expose the same inspection workbench through a local Unix
+socket. This is useful for long Linux boots, remote terminals, and scripts that should not keep a
+full-screen UI attached:
 
-- **Transport**: Hybrid IPC with Unix Domain Sockets for bidirectional RPC (pause, resume, step, logical breakpoints, inspection queries) and POSIX Shared Memory (`/dev/shm`) for 60 Hz live telemetry (`TuiSnapshotSlot`) and lock-free circular ring buffers for guest UART streams.
-- **Attach/Detach**: Tmux/GDB-style on-demand attach (`simrv --attach <sock>`). The headless simulator (`simrv --listen-tui <sock>`) runs at uninhibited native throughput when detached, and begins publishing shared-memory frames only while a client is attached.
-- **Multi-call Binary**: Preserves existing embedded execution while introducing headless server and attach client sub-modes in the unified `simrv` binary.
+```bash
+# Start a headless server. The guest continues at normal execution speed while detached.
+simrv --cli --listen-tui /tmp/simrv.sock -m examples/hello/build-rv64/hello.elf
+
+# Attach the interactive split-screen workbench from another terminal.
+simrv --attach /tmp/simrv.sock
+
+# Attach from a pipe or automation script using plain screen snapshots.
+simrv --cli --attach /tmp/simrv.sock > guest-screen.log
+```
+
+The server accepts one controller at a time. Detaching leaves guest state and execution intact;
+an attached client can pause, resume, step, inspect registers and memory, manage breakpoints, and
+send UART input. Guest reboot is reported as a new session so cached inspection data is discarded.
+The protocol is local-only, bounded, versioned, and rejects malformed or oversized frames.
+
+`--server PATH` remains an alias for `--listen-tui PATH`. POSIX shared-memory telemetry is reserved
+for a future release; 3.0 uses the stable framed Unix-socket transport.

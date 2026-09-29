@@ -11,6 +11,7 @@
 #include "simrv/tui/TuiTheme.hpp"
 #include "simrv/tui/TuiTypes.hpp"
 #include "simrv/tui/TuiWidget.hpp"
+#include "simrv/tui/framework/Layout.hpp"
 
 namespace simrv::core {
 class Machine;
@@ -36,6 +37,9 @@ class StatusBar : public TuiWidget {
         left_width_ = left;
         right_width_ = right;
     }
+    void set_column_width_overrides(framework::ColumnWidthOverrides widths) {
+        column_width_overrides_ = widths;
+    }
     void set_right_panel_mode(TuiRightPanelMode mode) { right_panel_mode_ = mode; }
 
     [[nodiscard]] auto is_pos_on_status_badge(int x, int width) const -> bool;
@@ -59,6 +63,7 @@ class StatusBar : public TuiWidget {
     int scroll_offset_ = 0;
     int left_width_ = 0;
     int right_width_ = 0;
+    framework::ColumnWidthOverrides column_width_overrides_ = framework::kNoColumnWidthOverrides;
 
     [[maybe_unused]] uint64_t last_icount_ = 0;
     uint64_t kips_ = 0;

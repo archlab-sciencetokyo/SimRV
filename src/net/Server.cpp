@@ -4,6 +4,7 @@
 #include <poll.h>
 #include <sys/eventfd.h>
 #include <sys/socket.h>
+#include <sys/stat.h>
 #include <sys/un.h>
 #include <unistd.h>
 
@@ -15,6 +16,25 @@
 #include "simrv/device/Uart.hpp"
 
 namespace simrv::net {
+namespace {
+bool send_all(int fd, const uint8_t* data, size_t size) {
+    while (size != 0) {
+        const auto written = ::send(fd, data, size, MSG_NOSIGNAL);
+        if (written > 0) {
+            data += written;
+            size -= static_cast<size_t>(written);
+        } else if (written < 0 && errno == EINTR) {
+            continue;
+        } else if (written < 0 && errno == EAGAIN) {
+            pollfd ready{fd, POLLOUT, 0};
+            if (::poll(&ready, 1, 1000) <= 0) return false;
+        } else {
+            return false;
+        }
+    }
+    return true;
+}
+}
 auto parse_endpoint(std::string_view value) -> Endpoint {
     Endpoint endpoint;
     if (value.empty()) return endpoint;
@@ -67,18 +87,49 @@ bool SimRvServer::start() {
         log::error("TUI server requires a local Unix socket path");
         return false;
     }
-    listener_.reset(::socket(AF_UNIX, SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0));
-    wake_.reset(::eventfd(0, EFD_NONBLOCK | EFD_CLOEXEC));
     sockaddr_un address{};
     address.sun_family = AF_UNIX;
     std::memcpy(address.sun_path, endpoint_.path.c_str(), endpoint_.path.size() + 1);
-    // Never unlink another running server's endpoint.
-    if (!listener_ || !wake_ ||
-        ::bind(listener_.get(), reinterpret_cast<sockaddr*>(&address), sizeof(address)) < 0 ||
-        ::listen(listener_.get(), 4) < 0) {
-        log::error("Cannot listen on {}: {}", endpoint_.path, std::strerror(errno));
+    struct stat metadata {};
+    if (::lstat(endpoint_.path.c_str(), &metadata) == 0) {
+        if (!S_ISSOCK(metadata.st_mode)) {
+            log::error("TUI endpoint is not a socket: {}", endpoint_.path);
+            return false;
+        }
+        util::UniqueFd probe(::socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0));
+        const bool active = probe &&
+                            ::connect(probe.get(), reinterpret_cast<sockaddr*>(&address),
+                                      sizeof(address)) == 0;
+        if (active) {
+            log::error("TUI endpoint is already in use: {}", endpoint_.path);
+            return false;
+        }
+        if (::unlink(endpoint_.path.c_str()) != 0) {
+            log::error("Cannot remove stale TUI socket {}: {}", endpoint_.path,
+                       std::strerror(errno));
+            return false;
+        }
+    } else if (errno != ENOENT) {
+        log::error("Cannot inspect TUI endpoint {}: {}", endpoint_.path, std::strerror(errno));
         return false;
     }
+    listener_.reset(::socket(AF_UNIX, SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0));
+    wake_.reset(::eventfd(0, EFD_NONBLOCK | EFD_CLOEXEC));
+    if (!listener_ || !wake_ ||
+        ::bind(listener_.get(), reinterpret_cast<sockaddr*>(&address), sizeof(address)) < 0) {
+        log::error("Cannot listen on {}: {}", endpoint_.path, std::strerror(errno));
+        listener_.reset();
+        wake_.reset();
+        return false;
+    }
+    if (::chmod(endpoint_.path.c_str(), 0600) != 0 || ::listen(listener_.get(), 4) < 0) {
+        log::error("Cannot prepare TUI endpoint {}: {}", endpoint_.path, std::strerror(errno));
+        ::unlink(endpoint_.path.c_str());
+        listener_.reset();
+        wake_.reset();
+        return false;
+    }
+    endpoint_bound_ = true;
     running_ = true;
     worker_ = std::thread([this] { loop(); });
     return true;
@@ -88,7 +139,11 @@ void SimRvServer::stop() {
     wake();
     if (worker_.joinable()) worker_.join();
     listener_.reset();
-    ::unlink(endpoint_.path.c_str());
+    wake_.reset();
+    if (endpoint_bound_) {
+        ::unlink(endpoint_.path.c_str());
+        endpoint_bound_ = false;
+    }
 }
 void SimRvServer::set_target_fps(uint32_t fps) { fps_ = std::clamp(fps, 1u, 120u); }
 void SimRvServer::handle_char_write(char ch) {
@@ -203,8 +258,16 @@ void SimRvServer::loop() {
         if (now >= next_frame) next_frame = now + std::chrono::milliseconds(1000 / fps_);
         size_t queued = sending.size();
         for (const auto& frame : reliable) queued += frame.size();
-        if (overflow_.exchange(false) || queued > kMaxPayload ||
-            (client && !handshake && now >= hello_deadline))
+        if (client && !handshake && now >= hello_deadline) {
+            static constexpr std::string_view timeout = "handshake timeout";
+            const auto frame = make_frame(
+                ChannelId::Reply,
+                {reinterpret_cast<const uint8_t*>(timeout.data()), timeout.size()});
+            (void)send_all(client.get(), frame.data(), frame.size());
+            disconnect();
+            continue;
+        }
+        if (overflow_.exchange(false) || queued > kMaxPayload)
             disconnect();
         if (sending.empty()) {
             if (!reliable.empty()) {
@@ -234,7 +297,7 @@ void SimRvServer::loop() {
                 const std::string busy = "controller already attached";
                 auto error = make_frame(
                     ChannelId::Reply, {reinterpret_cast<const uint8_t*>(busy.data()), busy.size()});
-                (void)::send(accepted.get(), error.data(), error.size(), MSG_NOSIGNAL);
+                (void)send_all(accepted.get(), error.data(), error.size());
             } else if (accepted) {
                 client = std::move(accepted);
                 ++connection;
@@ -331,7 +394,7 @@ void SimRvServer::loop() {
             const auto frame =
                 make_frame(ChannelId::Reply,
                            {reinterpret_cast<const uint8_t*>(message.data()), message.size()});
-            (void)::send(client.get(), frame.data(), frame.size(), MSG_NOSIGNAL);
+            (void)send_all(client.get(), frame.data(), frame.size());
             disconnect();
         }
     }

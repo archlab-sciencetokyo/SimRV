@@ -53,6 +53,7 @@ class SimRvServer : public core::ITelemetrySink, public core::IConsoleSink {
     std::atomic<uint32_t> fps_{30};
     util::UniqueFd listener_, wake_;
     std::thread worker_;
+    bool endpoint_bound_ = false;
     std::mutex mutex_;
     core::Machine* machine_ = nullptr;
     std::shared_ptr<tui::LocalTuiBackend> backend_;

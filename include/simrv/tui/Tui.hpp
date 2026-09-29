@@ -29,6 +29,7 @@
 #include "simrv/tui/TuiModal.hpp"
 #include "simrv/tui/TuiTypes.hpp"
 #include "simrv/tui/VirtualTerminal.hpp"
+#include "simrv/tui/framework/Subpanel.hpp"
 #include "simrv/util/UniqueFd.hpp"
 #include "simrv/xlen/Types.hpp"
 
@@ -51,7 +52,9 @@ struct SelectionState {
     size_t col_idx = 0;
     int col_start_x = 2;
     int content_start_y = 4;
+    int content_end_y = 22;
     int pane_width = 80;
+    framework::SubpanelBounds bounds{.x = 0, .y = 4, .width = 80, .height = 19};
     int start_x = -1;
     int start_y = -1;
     int end_x = -1;
@@ -303,6 +306,14 @@ class Tui : public core::ITelemetrySink, public core::IConsoleSink {
     [[nodiscard]] auto is_sixel_supported() const -> bool { return sixel_supported_; }
 
     int user_inspector_width_{-1};
+    framework::ColumnWidthOverrides user_column_widths_ = framework::kNoColumnWidthOverrides;
+    struct ColumnResizeRecord {
+        size_t focused = 0;
+        uint8_t count = 0;
+        int delta = 0;
+        std::array<int, 4> changes{};
+    };
+    std::vector<ColumnResizeRecord> resize_history_;
     int cell_width_px_ = 8;
     int cell_height_px_ = 16;
     bool sixel_supported_{false};
@@ -398,6 +409,7 @@ class Tui : public core::ITelemetrySink, public core::IConsoleSink {
 
     void execute_footer_action(TuiFooterAction action);
     void execute_header_action(HeaderHitResult hit);
+    [[nodiscard]] auto column_widths(int terminal_width) const -> framework::ColumnWidths;
     auto handle_alt_key(char key, uint8_t byte) -> bool;
     auto handle_arrow_key_sequence() -> bool;
     auto handle_modal_keyboard_input(uint8_t byte, TuiKey key) -> bool;

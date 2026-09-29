@@ -13,6 +13,7 @@
 #include <cstring>
 #include <format>
 #include <iostream>
+#include <print>
 #include <sstream>
 
 #include "simrv/tui/framework/Text.hpp"
@@ -34,6 +35,24 @@ void write_terminal(std::string_view text) {
             break;
     }
 }
+
+bool send_all(int fd, const uint8_t* data, size_t size) {
+    while (size != 0) {
+        const auto written = ::send(fd, data, size, MSG_NOSIGNAL);
+        if (written > 0) {
+            data += written;
+            size -= static_cast<size_t>(written);
+        } else if (written < 0 && errno == EINTR) {
+            continue;
+        } else if (written < 0 && errno == EAGAIN) {
+            pollfd ready{fd, POLLOUT, 0};
+            if (::poll(&ready, 1, 1000) <= 0) return false;
+        } else {
+            return false;
+        }
+    }
+    return true;
+}
 }  // namespace
 SimRvClient::SimRvClient(std::string_view endpoint) : endpoint_(parse_endpoint(endpoint)) {}
 SimRvClient::~SimRvClient() { disconnect(); }
@@ -51,8 +70,7 @@ bool SimRvClient::connect() {
     std::vector<uint8_t> hello;
     put_u64(hello, kProtocolVersion);
     const auto frame = make_frame(ChannelId::Hello, hello);
-    if (::send(socket_.get(), frame.data(), frame.size(), MSG_NOSIGNAL) !=
-        static_cast<ssize_t>(frame.size()))
+    if (!send_all(socket_.get(), frame.data(), frame.size()))
         return false;
     std::vector<uint8_t> incoming, payload;
     const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
@@ -306,6 +324,7 @@ auto run_client(std::string_view endpoint, bool cli_mode) -> int {
     }
     termios saved{};
     const bool terminal = tcgetattr(STDIN_FILENO, &saved) == 0;
+    const bool visual_tui = !cli_mode && terminal && ::isatty(STDOUT_FILENO);
     if (terminal) {
         auto raw = saved;
         cfmakeraw(&raw);
@@ -313,13 +332,14 @@ auto run_client(std::string_view endpoint, bool cli_mode) -> int {
     }
     struct Restore {
         bool terminal;
+        bool visual;
         termios saved;
         ~Restore() {
-            write_terminal("\033[0m\033[?25h\033[?1049l");
+            if (visual) write_terminal("\033[0m\033[?25h\033[?1049l");
             if (terminal) tcsetattr(STDIN_FILENO, TCSANOW, &saved);
         }
-    } restore{terminal, saved};
-    write_terminal("\033[?1049h\033[2J");
+    } restore{terminal, visual_tui, saved};
+    if (visual_tui) write_terminal("\033[?1049h\033[2J");
     bool done = false, editing = false;
     std::string command, escape;
     uint32_t selected_hart = 0;
@@ -335,11 +355,11 @@ auto run_client(std::string_view endpoint, bool cli_mode) -> int {
     };
     while (client.is_connected() && !done) {
         winsize size{};
-        ioctl(STDOUT_FILENO, TIOCGWINSZ, &size);
+        if (visual_tui) ioctl(STDOUT_FILENO, TIOCGWINSZ, &size);
         const int width = std::clamp<int>(size.ws_col ? size.ws_col : 100, 40, 512);
         const int height = std::clamp<int>(size.ws_row ? size.ws_row : 30, 10, 200);
         const int left_width = cli_mode ? 0 : std::min(50, width / 2);
-        if (width != last_width || height != last_height) {
+        if (visual_tui && (width != last_width || height != last_height)) {
             client.submit(
                 {tui::BackendCommand::Resize, 0, 0, static_cast<uint64_t>(width - left_width), 0,
                  static_cast<uint32_t>(height - (cli_mode ? 0 : 3))},
@@ -353,7 +373,8 @@ auto run_client(std::string_view endpoint, bool cli_mode) -> int {
                             view.harts.front().execution_state != core::ExecutionState::Running;
         const bool focus_guest = !paused;
         bool input_changed = false;
-        pollfd fds[] = {{STDIN_FILENO, POLLIN, 0}, {client.notification_fd(), POLLIN, 0}};
+        pollfd fds[] = {{terminal ? STDIN_FILENO : -1, POLLIN, 0},
+                        {client.notification_fd(), POLLIN, 0}};
         (void)::poll(fds, 2, 10);
         if (fds[1].revents & POLLIN) {
             uint64_t n;
@@ -362,7 +383,10 @@ auto run_client(std::string_view endpoint, bool cli_mode) -> int {
         if (fds[0].revents & POLLIN) {
             char bytes[256];
             const auto n = ::read(STDIN_FILENO, bytes, sizeof(bytes));
-            if (n <= 0) break;
+            if (n <= 0) {
+                if (terminal) break;
+                continue;
+            }
             for (ssize_t i = 0; i < n; ++i) {
                 const char ch = bytes[i];
                 input_changed = true;
@@ -461,6 +485,14 @@ auto run_client(std::string_view endpoint, bool cli_mode) -> int {
         if (!input_changed && now < next_draw) continue;
         next_draw = now + std::chrono::milliseconds(33);
         auto console = client.terminal_lines();
+        if (!visual_tui) {
+            if (console != previous) {
+                for (const auto& line : console) std::println("{}", line);
+                std::cout.flush();
+                previous = std::move(console);
+            }
+            continue;
+        }
         std::vector<std::string> lines;
         if (!cli_mode) {
             lines.push_back(std::format("SimRV attached | {} | hart {} | {} input",

@@ -5,6 +5,7 @@
 #pragma once
 
 #include <algorithm>
+#include <array>
 #include <cstdint>
 
 #include "simrv/tui/framework/Types.hpp"
@@ -22,6 +23,11 @@ struct ColumnWidths {
     DisplayWidth widths[4] = {0, 0, 0, 0};
     uint8_t count = 0;
 };
+
+/// Optional per-column width overrides used by interactive multi-panel layouts.
+/// A non-positive entry means that the responsive default should be used.
+using ColumnWidthOverrides = std::array<DisplayWidth, 4>;
+inline constexpr ColumnWidthOverrides kNoColumnWidthOverrides = {-1, -1, -1, -1};
 
 struct FrameGeometry {
     PaneWidths panes{};
@@ -62,8 +68,9 @@ inline constexpr int kFrameChromeRows = 7;
     return 192;
 }
 
-[[nodiscard]] constexpr auto multi_column_widths(int terminal_width, Layout layout,
-                                                 int requested_left = -1) -> ColumnWidths {
+[[nodiscard]] constexpr auto multi_column_widths(
+    int terminal_width, Layout layout, int requested_left = -1,
+    ColumnWidthOverrides requested_columns = kNoColumnWidthOverrides) -> ColumnWidths {
     int const full_width = std::max(0, terminal_width - 2);
     if (layout == Layout::FullLeft || layout == Layout::FullRight) {
         return {.widths = {full_width, 0, 0, 0}, .count = 1};
@@ -71,6 +78,16 @@ inline constexpr int kFrameChromeRows = 7;
 
     if (layout == Layout::FourColumn && terminal_width >= 192) {
         int const usable = std::max(0, terminal_width - 5);  // 3 inner dividers + 2 borders
+        int const requested_total = requested_columns[0] + requested_columns[1] +
+                                    requested_columns[2] + requested_columns[3];
+        if (requested_columns[0] >= kMultiColumnUnitWidth &&
+            requested_columns[1] >= kMultiColumnUnitWidth &&
+            requested_columns[2] >= kMultiColumnUnitWidth &&
+            requested_columns[3] >= kMultiColumnUnitWidth && requested_total == usable) {
+            return {.widths = {requested_columns[0], requested_columns[1], requested_columns[2],
+                               requested_columns[3]},
+                    .count = 4};
+        }
         int const c_left = std::clamp((usable * 22) / 100, kMultiColumnUnitWidth, 60);
         int const c3 = usable - (c_left * 3);
         return {.widths = {c_left, c_left, c_left, c3}, .count = 4};
@@ -78,6 +95,14 @@ inline constexpr int kFrameChromeRows = 7;
 
     if ((layout == Layout::ThreeColumn || layout == Layout::FourColumn) && terminal_width >= 144) {
         int const usable = std::max(0, terminal_width - 4);  // 2 inner dividers + 2 borders
+        int const requested_total = requested_columns[0] + requested_columns[1] +
+                                    requested_columns[2];
+        if (requested_columns[0] >= kMultiColumnUnitWidth &&
+            requested_columns[1] >= kMultiColumnUnitWidth &&
+            requested_columns[2] >= kMultiColumnUnitWidth && requested_total == usable) {
+            return {.widths = {requested_columns[0], requested_columns[1], requested_columns[2], 0},
+                    .count = 3};
+        }
         int const c_left = std::clamp((usable * 30) / 100, kMultiColumnUnitWidth, 60);
         int const c2 = usable - (c_left * 2);
         return {.widths = {c_left, c_left, c2, 0}, .count = 3};
@@ -90,6 +115,11 @@ inline constexpr int kFrameChromeRows = 7;
         return {.widths = {full_width, 0, 0, 0}, .count = 1};
     }
 
+    int const requested_split_total = requested_columns[0] + requested_columns[1];
+    if (requested_columns[0] >= kBaseColumnUnitWidth && requested_columns[1] > 0 &&
+        requested_split_total == split_width) {
+        return {.widths = {requested_columns[0], requested_columns[1], 0, 0}, .count = 2};
+    }
     int desired_left = requested_left;
     if (desired_left <= 0) {
         if (terminal_width <= 82) {
@@ -107,9 +137,10 @@ inline constexpr int kFrameChromeRows = 7;
     return {.widths = {left, split_width - left, 0, 0}, .count = 2};
 }
 
-[[nodiscard]] constexpr auto pane_widths(int terminal_width, Layout layout, int requested_left = -1)
-    -> PaneWidths {
-    auto cols = multi_column_widths(terminal_width, layout, requested_left);
+[[nodiscard]] constexpr auto pane_widths(
+    int terminal_width, Layout layout, int requested_left = -1,
+    ColumnWidthOverrides requested_columns = kNoColumnWidthOverrides) -> PaneWidths {
+    auto cols = multi_column_widths(terminal_width, layout, requested_left, requested_columns);
     if (cols.count == 1) {
         if (layout == Layout::FullLeft) return {.left = cols.widths[0], .right = 0};
         return {.left = 0, .right = cols.widths[0]};
@@ -117,12 +148,13 @@ inline constexpr int kFrameChromeRows = 7;
     return {.left = cols.widths[0], .right = cols.widths[1]};
 }
 
-[[nodiscard]] constexpr auto frame_geometry(int terminal_width, int terminal_height, Layout layout,
-                                            int requested_left = -1) -> FrameGeometry {
+[[nodiscard]] constexpr auto frame_geometry(
+    int terminal_width, int terminal_height, Layout layout, int requested_left = -1,
+    ColumnWidthOverrides requested_columns = kNoColumnWidthOverrides) -> FrameGeometry {
     if (terminal_width < kMinimumTerminalWidth || terminal_height < kMinimumTerminalHeight)
         return {};
     int const rows = terminal_height - kFrameChromeRows;
-    return {.panes = pane_widths(terminal_width, layout, requested_left),
+    return {.panes = pane_widths(terminal_width, layout, requested_left, requested_columns),
             .content_rows = rows,
             .frame_rows = rows + kFrameChromeRows,
             .renderable = true};

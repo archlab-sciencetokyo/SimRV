@@ -765,7 +765,8 @@ auto StatusBar::render_row(int row_idx, int width) -> std::string {
                 static_cast<std::size_t>(inner_w - get_display_width(header_line)), ' ');
         }
 
-        auto col_widths = framework::multi_column_widths(width, layout_, left_width_);
+        auto col_widths = framework::multi_column_widths(width, layout_, left_width_,
+                                                         column_width_overrides_);
 
         std::string screen;
         const auto style = get_active_theme_style();

@@ -71,6 +71,10 @@ struct TuiTestAccess {
     static auto workbench_slots(const Tui& tui) -> const std::vector<WorkbenchSlot>& {
         return tui.workbench_slots_;
     }
+    static void set_focused_slot(Tui& tui, size_t slot) { tui.focused_slot_index_ = slot; }
+    static auto column_widths(const Tui& tui, int width) -> framework::ColumnWidths {
+        return tui.column_widths(width);
+    }
     static auto layout(const Tui& tui) -> TuiLayout { return tui.layout_; }
     static auto status_bar(const Tui& tui) -> StatusBar* { return tui.status_bar_.get(); }
     static auto handle_modal_key(Tui& tui, uint8_t byte, TuiKey key) -> bool {
@@ -89,7 +93,6 @@ struct TuiTestAccess {
         return false;
     }
     static auto selection(const Tui& tui) -> const SelectionState& { return tui.selection_; }
-    static void set_focused_slot(Tui& tui, size_t slot) { tui.focused_slot_index_ = slot; }
     static auto handle_nav_key(Tui& tui, uint8_t byte, TuiKey key) -> bool {
         return tui.handle_navigation_keyboard_input(byte, key);
     }
@@ -1426,6 +1429,92 @@ void test_multicolumn_refinement() {
     expect(f4_slots[0].page != f4_slots[1].page,
            "preset 4 slots 0 and 1 have distinct pages in functional mode");
 
+    // Resizing applies to the focused column and transfers space to its neighbor.
+    simrv::core::Machine resize_machine;
+    simrv::tui::Tui resize_tui(resize_machine);
+    simrv::tui::TuiTestAccess::set_cached_term_width(resize_tui, 180);
+    resize_tui.apply_layout_preset(simrv::tui::LayoutPreset::GeneralDebug);
+    auto before_widths = simrv::tui::TuiTestAccess::column_widths(resize_tui, 180);
+    expect(before_widths.count == 3, "wide preset selects the three-column layout");
+    resize_tui.adjust_inspector_width(2);
+    auto after_widths = simrv::tui::TuiTestAccess::column_widths(resize_tui, 180);
+    expect(after_widths.widths[0] == before_widths.widths[0] + 2 &&
+               after_widths.widths[1] == before_widths.widths[1] - 2 &&
+               after_widths.widths[2] == before_widths.widths[2],
+           "bracket resize transfers width from the next focused-panel neighbor");
+
+    // A new column is inserted immediately to the right of the selected column.
+    simrv::core::Machine insert_machine;
+    simrv::tui::Tui insert_tui(insert_machine);
+    simrv::tui::TuiTestAccess::set_cached_term_width(insert_tui, 160);
+    auto const old_slots = simrv::tui::TuiTestAccess::workbench_slots(insert_tui);
+    expect(old_slots.size() == 2, "default workbench starts with two columns");
+    expect(insert_tui.add_workbench_column(), "adding a workbench column succeeds");
+    auto const& inserted_slots = simrv::tui::TuiTestAccess::workbench_slots(insert_tui);
+    expect(inserted_slots.size() == 3 &&
+               inserted_slots[0].page == simrv::tui::TuiRegPage::GPR &&
+               inserted_slots[2].page == simrv::tui::TuiRegPage::CONSOLE,
+           "new workbench column is inserted beside the selected column");
+
+    simrv::core::Machine selected_insert_machine;
+    simrv::tui::Tui selected_insert_tui(selected_insert_machine);
+    simrv::tui::TuiTestAccess::set_cached_term_width(selected_insert_tui, 220);
+    simrv::tui::TuiTestAccess::set_focused_slot(selected_insert_tui, 1);
+    expect(selected_insert_tui.add_workbench_column(),
+           "adding a workbench column beside a non-primary selection succeeds");
+    auto const& selected_inserted_slots =
+        simrv::tui::TuiTestAccess::workbench_slots(selected_insert_tui);
+    expect(selected_inserted_slots.size() == 3 &&
+               selected_inserted_slots[0].page == simrv::tui::TuiRegPage::GPR &&
+               selected_inserted_slots[1].page == simrv::tui::TuiRegPage::CONSOLE &&
+               selected_inserted_slots[2].page == simrv::tui::TuiRegPage::STACK,
+           "new workbench column is inserted immediately right of the focused column");
+
+    // A four-column header must use the same resolved widths as its body after a resize.
+    simrv::core::Machine header_machine;
+    simrv::tui::Tui header_tui(header_machine);
+    simrv::tui::TuiTestAccess::init_panes(header_tui, header_machine);
+    simrv::tui::TuiTestAccess::set_cached_term_width(header_tui, 240);
+    simrv::tui::TuiTestAccess::set_cached_term_height(header_tui, 24);
+    header_tui.apply_layout_preset(simrv::tui::LayoutPreset::GeneralDebug);
+    auto const before_rule = strip_ansi(
+        simrv::tui::TuiTestAccess::last_screen_lines(header_tui).at(2));
+    auto const before_header = strip_ansi(
+        simrv::tui::TuiTestAccess::last_screen_lines(header_tui).at(4));
+    header_tui.adjust_inspector_width(2);
+    auto const after_rule = strip_ansi(
+        simrv::tui::TuiTestAccess::last_screen_lines(header_tui).at(2));
+    auto const after_header = strip_ansi(
+        simrv::tui::TuiTestAccess::last_screen_lines(header_tui).at(4));
+    expect(before_rule != after_rule,
+           "top header junctions are redrawn after focused-panel resize");
+    expect(before_header != after_header,
+           "four-column header is redrawn after focused-panel resize");
+    expect(simrv::tui::get_display_width(after_header) == 240,
+           "four-column header retains updated internal junctions");
+
+    // A resize may consume more than one donor column, while every panel remains above its
+    // minimum width.  This keeps [/] responsive even after an adjacent panel is exhausted.
+    simrv::core::Machine cascade_machine;
+    simrv::tui::Tui cascade_tui(cascade_machine);
+    simrv::tui::TuiTestAccess::init_panes(cascade_tui, cascade_machine);
+    simrv::tui::TuiTestAccess::set_cached_term_width(cascade_tui, 220);
+    cascade_tui.apply_layout_preset(simrv::tui::LayoutPreset::GeneralDebug);
+    auto const cascade_before = simrv::tui::TuiTestAccess::column_widths(cascade_tui, 220);
+    cascade_tui.adjust_inspector_width(6);
+    auto const cascade_after = simrv::tui::TuiTestAccess::column_widths(cascade_tui, 220);
+    expect(cascade_after.widths[0] == cascade_before.widths[0] + 6 &&
+               cascade_after.widths[1] >= simrv::tui::framework::kMultiColumnUnitWidth &&
+               cascade_after.widths[2] >= simrv::tui::framework::kMultiColumnUnitWidth,
+           "four-column resize pushes through exhausted adjacent panel limits");
+    cascade_tui.adjust_inspector_width(-6);
+    auto const cascade_restored = simrv::tui::TuiTestAccess::column_widths(cascade_tui, 220);
+    expect(cascade_restored.widths[0] == cascade_before.widths[0] &&
+               cascade_restored.widths[1] == cascade_before.widths[1] &&
+               cascade_restored.widths[2] == cascade_before.widths[2] &&
+               cascade_restored.widths[3] == cascade_before.widths[3],
+           "opposite resize restores the prior multi-panel distribution");
+
     // 6. Multi-column right border junction connects on horizontal rule
     const auto geom = simrv::tui::calculate_frame_geometry(120, 20, simrv::tui::TuiLayout::Split);
     simrv::tui::framework::ColumnWidths col_widths{.widths = {30, 30, 0, 0}, .count = 2};
@@ -1502,6 +1591,30 @@ void test_horizontal_scrolling() {
     pane.set_page(simrv::tui::TuiRegPage::TRACE);
     pane.reset_horizontal_scroll();
     expect(pane.get_horizontal_scroll_offset() == 0, "reset_horizontal_scroll clears offset");
+
+    // The log is a separate reusable viewport and remains independent from page scrolling.
+    pane.set_log_lines({"log-00", "log-01", "log-02", "log-03", "log-04", "log-05",
+                        "log-06", "log-07", "log-08", "log-09"});
+    pane.set_page(simrv::tui::TuiRegPage::GPR);
+    pane.set_paused(true);
+    pane.set_visible_rows(20);
+    expect(pane.get_log_scroll_offset() == 0, "log viewport starts at the newest entries");
+    auto const newest_log_header = strip_ansi(pane.render_row(14, 80));
+    expect(newest_log_header.find("▲ 5 above") != std::string::npos,
+           "newest log view reports older entries above");
+    pane.scroll_log(2);
+    expect(pane.get_log_scroll_offset() == 2, "log viewport scrolls independently");
+    auto const scrolled_log_header = strip_ansi(pane.render_row(14, 80));
+    expect(scrolled_log_header.find("▲ 3 above") != std::string::npos &&
+               scrolled_log_header.find("▼ 2 below") != std::string::npos,
+           "scrolled log header reports visual directions correctly");
+    pane.set_page(simrv::tui::TuiRegPage::PIPELINE);
+    expect(pane.get_scroll_offset() == 0,
+           "switching inspector pages does not inherit the log scroll position");
+    pane.scroll_log(100);
+    expect(pane.get_log_scroll_offset() == 5, "log viewport clamps to its visible capacity");
+    pane.reset_log_scroll();
+    expect(pane.get_log_scroll_offset() == 0, "reset_log_scroll returns to newest entries");
 
     // Standard pane widths (80 cols) fit content inside without horizontal scrolling
     pane.set_page(simrv::tui::TuiRegPage::PIPELINE);
@@ -2195,16 +2308,76 @@ void test_multi_column_panel_management_and_modal_usability() {
     tui.close_modal();
 
     // Click on column 0 row 5 (content row 0): start selection drag
+    simrv::tui::TuiTestAccess::set_cached_term_height(tui, 24);
     simrv::tui::TuiTestAccess::consume_control_seq(tui, "\033[<0;10;5M");
     const auto& sel = simrv::tui::TuiTestAccess::selection(tui);
     expect(sel.content_start_y == 5, "selection content_start_y is 5 in 2-panel mode");
+    expect(sel.content_end_y == 14,
+           "main inspector selection stops before the separate Log subpanel");
+    simrv::tui::TuiTestAccess::consume_control_seq(tui, "\033[<32;200;30M");
+    expect(sel.end_y == sel.content_end_y && sel.end_x == sel.pane_width - 1,
+           "selection drag clamps to the originating subpanel bounds");
     expect(slots[0].page == simrv::tui::TuiRegPage::GPR, "row 5 click does not alter GPR page");
+    tui.clear_selection();
+    if (tui.is_modal_active()) tui.close_modal();
+    simrv::tui::TuiTestAccess::consume_control_seq(tui, "\033[<0;10;18M");
+    const auto& log_sel = simrv::tui::TuiTestAccess::selection(tui);
+    expect(log_sel.content_start_y == 15 && log_sel.content_end_y == 20,
+           "Log selection is constrained to the Log subpanel");
     tui.clear_selection();
 
     // Click on column 0 row 5 content: verify row 5 does not alter GPR page
     tui.handle_mouse(10, 5, 0);
     expect(slots[0].page == simrv::tui::TuiRegPage::GPR,
            "handle_mouse row 5 content preserves page");
+
+    // Register-pane wheel events must advance the page viewport independently of the log
+    // viewport.  Render first so the pane has the same visible-row geometry as the live TUI.
+    if (tui.is_modal_active()) tui.close_modal();
+    tui.render(true);
+    auto* register_pane = simrv::tui::TuiTestAccess::inspector(tui);
+    const int register_offset_before = register_pane->get_scroll_offset();
+    tui.handle_mouse(10, 6, 65);  // wheel down over the GPR body, above the Log subpanel
+    expect(register_pane->get_scroll_offset() > register_offset_before,
+           "mouse wheel scrolls the register subpanel");
+    expect(register_pane->get_log_scroll_offset() == 0,
+           "register wheel does not move the independent Log subpanel");
+    const auto& scrolled_screen = simrv::tui::TuiTestAccess::last_screen_lines(tui);
+    size_t log_header_row = scrolled_screen.size();
+    for (size_t i = 0; i < scrolled_screen.size(); ++i) {
+        if (strip_ansi(scrolled_screen.at(i)).find("Log · u/d scroll") != std::string::npos) {
+            log_header_row = i;
+            break;
+        }
+    }
+    expect(log_header_row < scrolled_screen.size(), "rendered register pane contains a Log boundary");
+    bool marker_in_log = false;
+    for (size_t i = log_header_row; i < scrolled_screen.size(); ++i) {
+        if (strip_ansi(scrolled_screen.at(i)).find("more lines below - scroll down") !=
+            std::string::npos) {
+            marker_in_log = true;
+            break;
+        }
+    }
+    expect(!marker_in_log, "register scroll indicators stay above the Log subpanel");
+
+    // In a four-column layout the first register pane can be narrow while the last inspector
+    // pane is wide.  The wheel must still use the focused pane's geometry, not the last-rendered
+    // pane's width (which would incorrectly clamp this scroll to zero).
+    simrv::core::Machine geometry_machine;
+    simrv::tui::Tui geometry_tui(geometry_machine);
+    simrv::tui::TuiTestAccess::init_panes(geometry_tui, geometry_machine);
+    simrv::tui::TuiTestAccess::set_cached_term_width(geometry_tui, 220);
+    simrv::tui::TuiTestAccess::set_cached_term_height(geometry_tui, 45);
+    geometry_tui.apply_layout_preset(simrv::tui::LayoutPreset::GeneralDebug);
+    geometry_tui.set_workbench_slot_page(3, simrv::tui::TuiRegPage::STACK);
+    geometry_tui.render(true);
+    auto* geometry_pane = simrv::tui::TuiTestAccess::inspector(geometry_tui);
+    simrv::tui::TuiTestAccess::set_focused_slot(geometry_tui, 0);
+    geometry_tui.handle_mouse(10, 6, 65);
+    geometry_pane->set_page(simrv::tui::TuiRegPage::GPR);
+    expect(geometry_pane->get_scroll_offset() > 0,
+           "register wheel uses the focused pane width in a heterogeneous layout");
 
     // Click [×] on column 1 header (x ~ 118, y = 4)
     tui.handle_mouse(118, 4, 0);

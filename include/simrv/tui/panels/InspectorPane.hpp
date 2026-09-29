@@ -99,13 +99,15 @@ class InspectorPane : public TuiWidget {
     void set_visible_rows(int rows) { visible_rows_ = rows; }
     [[nodiscard]] auto get_visible_content_rows() const -> int;
     void set_active_runtime(double secs) { active_runtime_ = secs; }
-    void scroll(int lines);
+    /// Scroll the current page by lines.  When supplied, width is the actual focused-column
+    /// width; this avoids using the last-rendered column's geometry in multi-panel layouts.
+    void scroll(int lines, int width = -1, bool secondary = false);
     void reset_scroll();
     [[nodiscard]] auto get_scroll_offset() const -> int;
-    void scroll_horizontal(int columns);
+    void scroll_horizontal(int columns, int width = -1, bool secondary = false);
     void reset_horizontal_scroll();
     [[nodiscard]] auto get_horizontal_scroll_offset() const -> int;
-    [[nodiscard]] auto supports_horizontal_scroll() const -> bool;
+    [[nodiscard]] auto supports_horizontal_scroll(int width = -1) const -> bool;
     void scroll_log(int lines);
     void reset_log_scroll();
     [[nodiscard]] auto get_log_scroll_offset() const -> int;
@@ -118,7 +120,11 @@ class InspectorPane : public TuiWidget {
     void set_explain_pc(Register pc) { explain_pc_ = pc; }
     [[nodiscard]] auto get_explain_pc() const -> Register { return explain_pc_; }
     void set_trace_buffer(const std::vector<std::string>* trace_buf) { trace_buffer_ = trace_buf; }
-    void set_log_lines(std::vector<std::string> log_lines) { log_lines_ = std::move(log_lines); }
+    void set_log_lines(std::vector<std::string> log_lines) {
+        log_lines_ = std::move(log_lines);
+        // The log header occupies one of the six fixed rows.
+        log_scroll_view_.set_geometry(static_cast<int>(log_lines_.size()), 5);
+    }
     void set_previous_page(TuiRegPage p) { previous_page_ = p; }
     [[nodiscard]] auto get_previous_page() const -> std::optional<TuiRegPage> {
         return previous_page_;

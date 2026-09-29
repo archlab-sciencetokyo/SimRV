@@ -66,17 +66,26 @@ class ReleaseToolTests(unittest.TestCase):
         self.assertIn("apt-get install -y ./packages/*.deb", workflow)
         self.assertIn('ASSET_BASE="SimRV-linux-x86_64-${VERSION_TAG}"', workflow)
         self.assertIn("-D CPACK_COMPONENTS_ALL=Runtime", workflow)
+        self.assertIn("portable-musl:", workflow)
+        self.assertIn("-static -static-libgcc -static-libstdc++", workflow)
+        self.assertIn("-DSIMRV_X86_64_V3_BASELINE=OFF", workflow)
+        self.assertIn("package-distro-matrix:", workflow)
+        self.assertIn("fedora:40", workflow)
+        self.assertIn("ubuntu:22.04", workflow)
+        self.assertIn("debian:13", workflow)
         self.assertNotIn("tar -C dist", workflow)
         self.assertIn('"simrv_${CPACK_DEBIAN_PACKAGE_VERSION}_amd64.deb"', cmake)
         self.assertNotIn('"simrv-rv${SIMRV_XLEN}', cmake)
         self.assertEqual(
             manifest["artifacts"],
             [
-                "SimRV-linux-x86_64-v3.0.0-beta.3.tar.gz",
-                "SimRV-rpm-packages-v3.0.0-beta.3.tar.gz",
-                "SimRV-deb-packages-v3.0.0-beta.3.tar.gz",
+                "SimRV-linux-x86_64-v3.0.0-rc.1.tar.gz",
+                "SimRV-rpm-packages-v3.0.0-rc.1.tar.gz",
+                "SimRV-deb-packages-v3.0.0-rc.1.tar.gz",
             ],
         )
+        self.assertIn("Ubuntu 22.04", manifest["package_support"]["portable_static"])
+        self.assertEqual(manifest["package_support"]["rpm"], ["Fedora 44"])
 
     def test_documentation_workflow_publishes_stable_and_development(self):
         workflow = (ROOT / ".github/workflows/docs.yml").read_text()
@@ -103,13 +112,17 @@ class ReleaseToolTests(unittest.TestCase):
         self.assertIn("search.share", mkdocs)
         self.assertIn("development documentation", override)
         self.assertIn("simrv --version", installation)
+        self.assertIn("fully statically linked", installation)
+        self.assertIn("Ubuntu 22.04", installation)
+        self.assertIn("Fedora 44", installation)
+        self.assertIn("Debian sid", installation)
 
     def test_native_package_versions_match_release_semver(self):
-        version = "3.0.0-beta.3"
-        self.assertTrue(release_check.artifact_contains_version("SimRV-v3.0.0-beta.3.tar.gz", version))
-        self.assertTrue(release_check.artifact_contains_version("simrv_3.0.0~beta.3_amd64.deb", version))
-        self.assertTrue(release_check.artifact_contains_version("simrv-3.0.0-0.beta.3.x86_64.rpm", version))
-        self.assertFalse(release_check.artifact_contains_version("simrv-3.0.0-0.beta.2.x86_64.rpm", version))
+        version = "3.0.0-rc.1"
+        self.assertTrue(release_check.artifact_contains_version("SimRV-v3.0.0-rc.1.tar.gz", version))
+        self.assertTrue(release_check.artifact_contains_version("simrv_3.0.0~rc.1_amd64.deb", version))
+        self.assertTrue(release_check.artifact_contains_version("simrv-3.0.0-0.rc.1.x86_64.rpm", version))
+        self.assertFalse(release_check.artifact_contains_version("simrv-3.0.0-0.beta.3.x86_64.rpm", version))
 
     def test_configuration_fingerprint_is_stable(self):
         first = {"xlen": 64, "isa": "rv64gc", "vlen": 256}
