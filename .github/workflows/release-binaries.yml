@@ -159,18 +159,14 @@ jobs:
     permissions:
       contents: read
     container:
-      # Use the same GCC baseline as the release builds, with Debian's musl
-      # specs wrapper for a genuinely static musl-linked executable.
-      image: gcc:16
+      # Alpine supplies a musl-native C++ runtime. This release-only job uses
+      # its GCC14 toolchain with the explicit unqualified-toolchain exception.
+      image: alpine:3.22
     steps:
       - uses: actions/checkout@v6
       - name: Install musl build tools
         run: |
-          apt-get update
-          apt-get install -y --no-install-recommends \
-            bash musl-tools libstdc++-14-dev \
-            python3 python3-pip tar gzip file ca-certificates
-          python3 -m pip install --break-system-packages cmake==4.3.0 ninja
+          apk add --no-cache bash build-base cmake ninja python3 tar gzip file
       - name: Validate release tag
         id: names
         shell: bash
@@ -184,40 +180,12 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          musl_specs=/usr/lib/x86_64-linux-musl/musl-gcc.specs
-          test -f "${musl_specs}"
-          atomic_archive="$(gcc -print-file-name=libatomic.a)"
-          test -f "${atomic_archive}"
-          atomic_dir="$(mktemp -d)"
-          ln -s "${atomic_archive}" "${atomic_dir}/libatomic_asneeded.a"
-          stdcxx_archive="$(find /usr/lib/gcc /usr/local/lib/gcc -type f -name libstdc++.a -print -quit)"
-          test -f "${stdcxx_archive}"
-          stdcxx_dir="$(dirname "${stdcxx_archive}")"
-          cat > /usr/local/bin/musl-g++ <<'EOF'
-          #!/bin/sh
-          set -eu
-          compile=0
-          for arg in "$@"; do
-            case "${arg}" in
-              -c|-E|-S|-M|-MM|-MD|-MMD) compile=1 ;;
-            esac
-          done
-          if [ "${compile}" -eq 1 ]; then
-            exec g++ "$@"
-          fi
-          exec g++ -specs=/usr/lib/x86_64-linux-musl/musl-gcc.specs "$@"
-          EOF
-          chmod 755 /usr/local/bin/musl-g++
           cmake -S . -B build/rv64-musl-release -G Ninja \
             -DCMAKE_BUILD_TYPE=Release -DSIMRV_XLEN=64 \
             -DSIMRV_X86_64_V3_BASELINE=OFF \
             -DSIMRV_WARNINGS_AS_ERRORS=ON \
-            -DCMAKE_C_COMPILER=musl-gcc \
-            -DCMAKE_CXX_COMPILER=/usr/local/bin/musl-g++ \
-            -DCMAKE_CXX_COMPILER_AR=ar \
-            -DCMAKE_CXX_COMPILER_RANLIB=ranlib \
-            -DCMAKE_SHARED_LINKER_FLAGS="-L${atomic_dir} -L${stdcxx_dir}" \
-            -DCMAKE_EXE_LINKER_FLAGS="-L${atomic_dir} -L${stdcxx_dir} -static -static-libgcc -static-libstdc++"
+            -DSIMRV_ALLOW_UNQUALIFIED_TOOLCHAIN=ON \
+            -DCMAKE_EXE_LINKER_FLAGS="-static -static-libgcc -static-libstdc++"
           cmake --build build/rv64-musl-release --parallel 2
           file build/rv64-musl-release/simrv | grep -E 'statically linked|static-pie linked'
           ! ldd build/rv64-musl-release/simrv

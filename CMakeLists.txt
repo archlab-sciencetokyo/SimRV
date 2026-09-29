@@ -103,6 +103,10 @@ if(SIMRV_ENABLE_INSTRUMENTATION)
 endif()
 
 option(SIMRV_WARNINGS_AS_ERRORS "Treat project compiler warnings as errors" OFF)
+option(
+  SIMRV_ALLOW_UNQUALIFIED_TOOLCHAIN
+  "Allow release-only packaging builds below the supported compiler baseline"
+  OFF)
 option(SIMRV_ENABLE_ASAN "Enable AddressSanitizer" OFF)
 option(SIMRV_ENABLE_UBSAN "Enable UndefinedBehaviorSanitizer" OFF)
 option(SIMRV_ENABLE_TSAN "Enable ThreadSanitizer" OFF)
@@ -183,14 +187,16 @@ endif()
 # GCC 16 is the minimum supported GNU toolchain. It is the GNU baseline
 # validated for this C++23 codebase; use Clang 22+ when GNU 16+ is unavailable.
 if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU" AND CMAKE_CXX_COMPILER_VERSION
-                                            VERSION_LESS 16)
+                                            VERSION_LESS 16
+   AND NOT SIMRV_ALLOW_UNQUALIFIED_TOOLCHAIN)
   message(
     FATAL_ERROR
       "GCC 16 or newer is required (found ${CMAKE_CXX_COMPILER_VERSION})")
 endif()
 
 if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang" AND CMAKE_CXX_COMPILER_VERSION
-                                              VERSION_LESS 22)
+                                              VERSION_LESS 22
+   AND NOT SIMRV_ALLOW_UNQUALIFIED_TOOLCHAIN)
   message(
     FATAL_ERROR
       "Clang 22 or newer is required (found ${CMAKE_CXX_COMPILER_VERSION})")
