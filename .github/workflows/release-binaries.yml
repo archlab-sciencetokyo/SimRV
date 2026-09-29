@@ -190,7 +190,10 @@ jobs:
             -DCMAKE_EXE_LINKER_FLAGS="-static -static-libgcc -static-libstdc++"
           cmake --build build/rv64-musl-release --parallel 2
           file build/rv64-musl-release/simrv | grep -E 'statically linked|static-pie linked'
-          ! ldd build/rv64-musl-release/simrv
+          # Alpine's ldd exits successfully for static-pie binaries because they
+          # carry the musl interpreter path. Inspect the ELF dynamic table instead
+          # so the check rejects only actual shared-library dependencies.
+          ! readelf -d build/rv64-musl-release/simrv | grep -q ' NEEDED '
       - name: Package and validate static archive
         shell: bash
         run: |
