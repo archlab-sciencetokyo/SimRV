@@ -92,6 +92,9 @@ make -C examples/hello XLEN=64
 ./build/rv64-release/SimRV -b -m examples/hello/build-rv64/hello.bin --cli
 ```
 
+Release users can download the matching `SimRV-hello-samples` archive from GitHub Releases;
+it includes both prebuilt guest-width images and their source.
+
 Use `XLEN=32` with the RV32 compiler and simulator when you want a strict RV32 example.
 
 ```bash

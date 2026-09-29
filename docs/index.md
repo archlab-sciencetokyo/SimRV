@@ -35,7 +35,7 @@
 
 Choose the shortest path for your goal:
 
-- **Install a release:** use the [installation guide](user/install.md).
+- **Install a release:** use the [installation guide](user/install.md), including the hello samples.
 - **Build from source:** follow the build steps below.
 - **Run a program:** start with the [CLI and TUI guide](user/index.md).
 - **Study the machine:** read the [architecture overview](architecture/overview.md).

@@ -18,6 +18,19 @@ tar -xzf SimRV-rv64-linux-x86_64-vVERSION.tar.gz
 Use the RV32 archive when the simulator itself must model XLEN=32. The host is still x86-64;
 RV32 and RV64 describe the guest architecture.
 
+## Hello samples
+
+The release also includes `SimRV-hello-samples-vVERSION.tar.gz`. It contains prebuilt RV32 and
+RV64 hello images plus the assembly source, linker script, and Makefile used to build them:
+
+```bash
+tar -xzf SimRV-hello-samples-vVERSION.tar.gz
+./SimRV-rv64-linux-x86_64-vVERSION.bin --cli \
+  -b -m SimRV-hello-samples-vVERSION/bin/hello-rv64.bin
+```
+
+The same archive can be rebuilt from `examples/hello/` in the source tree.
+
 ## Build from source
 
 Source builds require a C++23 compiler, CMake, and Ninja. Configure the target width explicitly:

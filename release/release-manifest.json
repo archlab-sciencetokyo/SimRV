@@ -69,6 +69,7 @@
     "required_provenance": ["host", "compiler", "simrv_revision", "workload_revision", "configuration"]
   },
   "artifacts": [
+    "SimRV-hello-samples-v2.0.3.tar.gz",
     "SimRV-rv32-linux-x86_64-v2.0.3.tar.gz",
     "SimRV-rv64-linux-x86_64-v2.0.3.tar.gz"
   ]
