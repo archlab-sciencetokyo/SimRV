@@ -168,7 +168,7 @@ jobs:
         run: |
           apt-get update
           apt-get install -y --no-install-recommends \
-            bash musl-tools libstdc++-16-dev libgcc-16-dev \
+            bash musl-tools libstdc++-dev libgcc-dev \
             python3 python3-pip tar gzip file ca-certificates
           python3 -m pip install --break-system-packages cmake==4.3.0 ninja
       - name: Validate release tag
@@ -190,7 +190,7 @@ jobs:
           test -f "${atomic_archive}"
           atomic_dir="$(mktemp -d)"
           ln -s "${atomic_archive}" "${atomic_dir}/libatomic_asneeded.a"
-          stdcxx_archive="$(g++ -print-file-name=libstdc++.a)"
+          stdcxx_archive="$(find /usr/lib/gcc /usr/local/lib/gcc -type f -name libstdc++.a -print -quit)"
           test -f "${stdcxx_archive}"
           stdcxx_dir="$(dirname "${stdcxx_archive}")"
           cmake -S . -B build/rv64-musl-release -G Ninja \
