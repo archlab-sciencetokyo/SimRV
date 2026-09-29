@@ -330,6 +330,12 @@ auto parse_file_options(std::string_view arg, std::span<char* const> args, std::
         options.fn_log = std::string(*value);
         return true;
     }
+    if (arg == "--json-summary") {
+        auto value = next_argument(args, i, arg);
+        if (!value) return std::unexpected(value.error());
+        options.fn_json_summary = std::string(*value);
+        return true;
+    }
     return false;
 }
 
@@ -1314,6 +1320,9 @@ auto needs_memory_image(const ParseResult& result) -> bool {
         stdout,
         "  {}--log-file {}{}<FILE>{}             Mirror timestamped console log messages to file\n",
         style(kBrightGreen), style(kBrightBlack), style(kReset), style(kReset));
+    std::print(stdout,
+               "  {}--json-summary {}{}<FILE>|-{}        Write a machine-readable run summary\n",
+               style(kBrightGreen), style(kBrightBlack), style(kReset), style(kReset));
     std::print(
         stdout,
         "  {}--log-mmio, --dlog{}                Record MMIO transactions to trace/dlog.txt\n",

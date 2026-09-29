@@ -1,0 +1,2 @@
+#compdef simrv
+_arguments '*:option:(--help --version --license --cli --tui --os --isa --steps --max-steps --entry --log-file --json-summary --log-level --quiet --verbose --gdb --gdb-port --disk --fdt --dtb --platform --harts --vlen --dram-size --net --trace --instmix)'

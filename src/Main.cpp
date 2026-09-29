@@ -313,6 +313,34 @@ auto main(int argc, char* argv[]) -> int {  // NOLINT(bugprone-exception-escape)
                     }
                 }
             }
+            if (!parsed->options.fn_json_summary.empty()) {
+                std::ostream* output = nullptr;
+                std::ofstream summary_file;
+                if (parsed->options.fn_json_summary == "-") {
+                    output = &std::cout;
+                } else {
+                    summary_file.open(parsed->options.fn_json_summary,
+                                      std::ios::out | std::ios::trunc);
+                    if (!summary_file) {
+                        simrv::log::error("Cannot write JSON summary: {}",
+                                          parsed->options.fn_json_summary);
+                    } else {
+                        output = &summary_file;
+                    }
+                }
+                if (output != nullptr) {
+                    const auto& hart = sim_machine->primary_hart();
+                    std::println(*output,
+                                 "{{\"version\":\"{}\",\"xlen\":{},\"harts\":{},"
+                                 "\"exit_code\":{},\"stop_reason\":\"{}\","
+                                 "\"instructions\":{},\"cycles\":{},\"pc\":\"0x{:x}\"}}",
+                                 simrv::buildinfo::kVersion, simrv::xlen::kXLenBits,
+                                 sim_machine->num_harts(), final_exit_code,
+                                 simrv::core::Machine::stop_reason_name(sim_machine->stop_reason()),
+                                 sim_machine->retired_instruction_count(), hart.e_ccount,
+                                 hart.state().pc);
+                }
+            }
         }
     }
     return final_exit_code;

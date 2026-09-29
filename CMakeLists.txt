@@ -1056,6 +1056,9 @@ install(
 install(FILES scripts/experiment_metadata.py
         DESTINATION ${CMAKE_INSTALL_DATADIR}/SimRV/scripts
         COMPONENT Benchmark)
+install(FILES scripts/completions/simrv.bash scripts/completions/_simrv
+        DESTINATION ${CMAKE_INSTALL_DATADIR}/SimRV/completions
+        COMPONENT Runtime)
 
 install(
   DIRECTORY configs/models/

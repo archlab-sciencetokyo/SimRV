@@ -140,6 +140,11 @@ status=$?
 The Linux CLI smoke tests exercise pipelines, redirection, environment propagation, exit status,
 command substitution, signals, file descriptors, and both PTY and pipe transports.
 
+For automation, `--json-summary FILE` writes one compact record containing the exit code, stop
+reason, retired instructions, cycles, final PC, XLEN, and hart count. Use `-` to write it to
+standard output (normally together with `--quiet`). Bash and zsh completion templates are shipped
+under `scripts/completions/`.
+
 ---
 
 ## 4. Interactive TUI Workbench
