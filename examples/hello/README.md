@@ -9,5 +9,11 @@ Build it with a RISC-V bare-metal toolchain:
 make -C examples/hello XLEN=64
 ```
 
-The output is `examples/hello/build-rv64/hello.bin`. Use `XLEN=32` and a matching
-`riscv32-unknown-elf-` prefix for an RV32 image.
+The output is `examples/hello/build-rv64/hello.bin`. The Makefile also supports `XLEN=32`
+with the same multilib-capable `riscv64-unknown-elf-` prefix:
+
+```bash
+make -C examples/hello XLEN=32
+```
+
+This writes `examples/hello/build-rv32/hello.bin`.

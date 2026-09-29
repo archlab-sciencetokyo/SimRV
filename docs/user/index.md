@@ -98,16 +98,18 @@ it includes both prebuilt guest-width images and their source.
 Use `XLEN=32` with the RV32 compiler and simulator when you want a strict RV32 example.
 
 ```bash
-# Run a bare-metal binary in interactive TUI mode (Default)
-./build/rv64-release/SimRV -b -m img/hello.bin
+# Run the included hello binary in interactive TUI mode (Default)
+./build/rv64-release/SimRV -b -m examples/hello/build-rv64/hello.bin
 
 # Run in fast headless CLI mode
-./build/rv64-release/SimRV -b -m img/hello.bin --cli
+./build/rv64-release/SimRV -b -m examples/hello/build-rv64/hello.bin --cli
 
 # Run in cycle-accurate (CA) mode with a step limit
-./build/rv64-release/SimRV -b -m img/hello.bin --ca --cli -s 1000000
+./build/rv64-release/SimRV -b -m examples/hello/build-rv64/hello.bin --ca --cli -s 1000000
 
-# Boot Linux OS with root filesystem and device tree
+# Build Linux images first, then load the generated firmware, disk, and device tree
+./scripts/build-linux-image.sh --arch rv64
+source linux-images/rv64/setup.sh
 ./build/rv64-release/SimRV --os \
   -m linux-images/rv64/fw_payload.bin \
   -D linux-images/rv64/root.bin \
@@ -192,7 +194,7 @@ SimRV executes freestanding bare-metal programs compiled with standard RISC-V GC
 
 ```bash
 # Run baremetal binary with standard tohost exit reporting
-./build/rv64-release/SimRV -b -m img/hello.bin -H 0x80001000 --cli
+./build/rv64-release/SimRV -b -m examples/hello/build-rv64/hello.bin -H 0x80001000 --cli
 ```
 
 For complete linker scripts, startup assembly, and MMIO peripheral maps, refer to the [Bare-Metal Guide](baremetal.md).
@@ -205,6 +207,8 @@ SimRV boots full Linux distributions with OpenSBI and device-tree hardware descr
 
 ```bash
 # Launch Linux with root filesystem and device tree
+./scripts/build-linux-image.sh --arch rv64
+source linux-images/rv64/setup.sh
 ./build/rv64-release/SimRV --os \
   -m linux-images/rv64/fw_payload.bin \
   -D linux-images/rv64/root.bin \
@@ -222,7 +226,7 @@ For image building instructions and prebuilt configurations, refer to the [Linux
 Validate execution correctness instruction-by-instruction against the official Spike reference simulator:
 
 ```bash
-./build/rv64-release/SimRV -b -m img/hello.bin --lockstep --cli
+./build/rv64-release/SimRV -b -m examples/hello/build-rv64/hello.bin --lockstep --cli
 ```
 
 ### GDB Remote Serial Protocol (RSP)

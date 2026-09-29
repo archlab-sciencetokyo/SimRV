@@ -69,24 +69,27 @@ SimRV requires a modern C++23 compiler (**Clang 20+** or **GCC 14+**), **CMake 3
 === "Interactive TUI Mode (Default)"
     ```bash
     # Launch interactive terminal workbench with a baremetal binary
-    ./build/rv64-release/SimRV -b -m img/hello.bin
+    make -C examples/hello XLEN=64
+    ./build/rv64-release/SimRV -b -m examples/hello/build-rv64/hello.bin
     ```
 
 === "Headless Fast CLI Execution"
     ```bash
     # Fast functional execution without TUI
-    ./build/rv64-release/SimRV -b -m img/hello.bin --cli
+    ./build/rv64-release/SimRV -b -m examples/hello/build-rv64/hello.bin --cli
     ```
 
 === "Cycle-Accurate Simulation"
     ```bash
     # Run in cycle-accurate mode with step limit
-    ./build/rv64-release/SimRV -b -m img/hello.bin --ca --cli -s 1000000
+    ./build/rv64-release/SimRV -b -m examples/hello/build-rv64/hello.bin --ca --cli -s 1000000
     ```
 
 === "Full-System Linux Boot"
     ```bash
     # Boot Linux kernel with root filesystem and devicetree
+    ./scripts/build-linux-image.sh --arch rv64
+    source linux-images/rv64/setup.sh
     ./build/rv64-release/SimRV --os \
       -m linux-images/rv64/fw_payload.bin \
       -D linux-images/rv64/root.bin \

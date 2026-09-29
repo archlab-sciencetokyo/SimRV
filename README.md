@@ -81,25 +81,33 @@ cmake --build --preset rv32-release
 
 ### Running Applications
 
-Run a baremetal binary in interactive TUI mode (Default):
+Build the included hello workload first:
 
 ```bash
-./build/rv64-release/SimRV -b -m img/hello.bin
+make -C examples/hello XLEN=64
+```
+
+Run it in interactive TUI mode (Default):
+
+```bash
+./build/rv64-release/SimRV -b -m examples/hello/build-rv64/hello.bin
 ```
 
 Run headless in CLI-only mode:
 
 ```bash
 # Fast functional execution
-./build/rv64-release/SimRV -b -m img/hello.bin --cli
+./build/rv64-release/SimRV -b -m examples/hello/build-rv64/hello.bin --cli
 
 # Cycle-accurate five-stage pipeline execution
-./build/rv64-release/SimRV -b -m img/hello.bin --ca --cli
+./build/rv64-release/SimRV -b -m examples/hello/build-rv64/hello.bin --ca --cli
 ```
 
-Run Linux OS image with disk & devicetree:
+Linux images are generated separately; see the [Linux image guide](docs/user/linux.md). After
+running `scripts/build-linux-image.sh` and sourcing its generated environment file:
 
 ```bash
+source linux-images/rv64/setup.sh
 ./build/rv64-release/SimRV --os -m linux-images/rv64/fw_payload.bin -D linux-images/rv64/root.bin -f linux-images/rv64/devicetree.dtb
 ```
 
