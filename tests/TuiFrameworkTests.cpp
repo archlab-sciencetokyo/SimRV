@@ -1470,6 +1470,38 @@ void test_multicolumn_refinement() {
                selected_inserted_slots[2].page == simrv::tui::TuiRegPage::STACK,
            "new workbench column is inserted immediately right of the focused column");
 
+    // A four-column header must use the same resolved widths as its body after a resize.
+    simrv::core::Machine header_machine;
+    simrv::tui::Tui header_tui(header_machine);
+    simrv::tui::TuiTestAccess::init_panes(header_tui, header_machine);
+    simrv::tui::TuiTestAccess::set_cached_term_width(header_tui, 240);
+    simrv::tui::TuiTestAccess::set_cached_term_height(header_tui, 24);
+    header_tui.apply_layout_preset(simrv::tui::LayoutPreset::GeneralDebug);
+    auto const before_header = strip_ansi(
+        simrv::tui::TuiTestAccess::last_screen_lines(header_tui).at(4));
+    header_tui.adjust_inspector_width(2);
+    auto const after_header = strip_ansi(
+        simrv::tui::TuiTestAccess::last_screen_lines(header_tui).at(4));
+    expect(before_header != after_header,
+           "four-column header is redrawn after focused-panel resize");
+    expect(simrv::tui::get_display_width(after_header) == 240,
+           "four-column header retains updated internal junctions");
+
+    // A resize may consume more than one donor column, while every panel remains above its
+    // minimum width.  This keeps [/] responsive even after an adjacent panel is exhausted.
+    simrv::core::Machine cascade_machine;
+    simrv::tui::Tui cascade_tui(cascade_machine);
+    simrv::tui::TuiTestAccess::init_panes(cascade_tui, cascade_machine);
+    simrv::tui::TuiTestAccess::set_cached_term_width(cascade_tui, 220);
+    cascade_tui.apply_layout_preset(simrv::tui::LayoutPreset::GeneralDebug);
+    auto const cascade_before = simrv::tui::TuiTestAccess::column_widths(cascade_tui, 220);
+    cascade_tui.adjust_inspector_width(6);
+    auto const cascade_after = simrv::tui::TuiTestAccess::column_widths(cascade_tui, 220);
+    expect(cascade_after.widths[0] == cascade_before.widths[0] + 6 &&
+               cascade_after.widths[1] >= simrv::tui::framework::kMultiColumnUnitWidth &&
+               cascade_after.widths[2] >= simrv::tui::framework::kMultiColumnUnitWidth,
+           "four-column resize pushes through exhausted adjacent panel limits");
+
     // 6. Multi-column right border junction connects on horizontal rule
     const auto geom = simrv::tui::calculate_frame_geometry(120, 20, simrv::tui::TuiLayout::Split);
     simrv::tui::framework::ColumnWidths col_widths{.widths = {30, 30, 0, 0}, .count = 2};
@@ -2285,6 +2317,35 @@ void test_multi_column_panel_management_and_modal_usability() {
     tui.handle_mouse(10, 5, 0);
     expect(slots[0].page == simrv::tui::TuiRegPage::GPR,
            "handle_mouse row 5 content preserves page");
+
+    // Register-pane wheel events must advance the page viewport independently of the log
+    // viewport.  Render first so the pane has the same visible-row geometry as the live TUI.
+    tui.render(true);
+    auto* register_pane = simrv::tui::TuiTestAccess::inspector(tui);
+    const int register_offset_before = register_pane->get_scroll_offset();
+    tui.handle_mouse(10, 6, 65);  // wheel down over the GPR body, above the Log subpanel
+    expect(register_pane->get_scroll_offset() > register_offset_before,
+           "mouse wheel scrolls the register subpanel");
+    expect(register_pane->get_log_scroll_offset() == 0,
+           "register wheel does not move the independent Log subpanel");
+
+    // In a four-column layout the first register pane can be narrow while the last inspector
+    // pane is wide.  The wheel must still use the focused pane's geometry, not the last-rendered
+    // pane's width (which would incorrectly clamp this scroll to zero).
+    simrv::core::Machine geometry_machine;
+    simrv::tui::Tui geometry_tui(geometry_machine);
+    simrv::tui::TuiTestAccess::init_panes(geometry_tui, geometry_machine);
+    simrv::tui::TuiTestAccess::set_cached_term_width(geometry_tui, 220);
+    simrv::tui::TuiTestAccess::set_cached_term_height(geometry_tui, 45);
+    geometry_tui.apply_layout_preset(simrv::tui::LayoutPreset::GeneralDebug);
+    geometry_tui.set_workbench_slot_page(3, simrv::tui::TuiRegPage::STACK);
+    geometry_tui.render(true);
+    auto* geometry_pane = simrv::tui::TuiTestAccess::inspector(geometry_tui);
+    simrv::tui::TuiTestAccess::set_focused_slot(geometry_tui, 0);
+    geometry_tui.handle_mouse(10, 6, 65);
+    geometry_pane->set_page(simrv::tui::TuiRegPage::GPR);
+    expect(geometry_pane->get_scroll_offset() > 0,
+           "register wheel uses the focused pane width in a heterogeneous layout");
 
     // Click [×] on column 1 header (x ~ 118, y = 4)
     tui.handle_mouse(118, 4, 0);

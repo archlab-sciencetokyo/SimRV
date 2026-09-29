@@ -1032,23 +1032,29 @@ void InspectorPane::reset_horizontal_scroll() { current_scroll_view().reset_x();
 
 void InspectorPane::reset_log_scroll() { log_scroll_view_.reset_y(); }
 
-void InspectorPane::scroll(int lines) {
-    int w = last_width_ > 0 ? last_width_ : 60;
+void InspectorPane::scroll(int lines, int width, bool secondary) {
+    int const w = width > 0 ? width : (last_width_ > 0 ? last_width_ : 60);
+    last_width_ = w;
+    secondary_column_mode_ = secondary;
     configure_current_viewport(w);
     current_scroll_view().scroll_y(lines);
 }
 
-void InspectorPane::scroll_horizontal(int columns) {
-    int const width = last_width_ > 0 ? last_width_ : 60;
-    configure_current_viewport(width);
-    if (!supports_horizontal_scroll()) return;
+void InspectorPane::scroll_horizontal(int columns, int width, bool secondary) {
+    int const width_for_viewport = width > 0 ? width : (last_width_ > 0 ? last_width_ : 60);
+    last_width_ = width_for_viewport;
+    secondary_column_mode_ = secondary;
+    configure_current_viewport(width_for_viewport);
+    if (!supports_horizontal_scroll(width_for_viewport)) return;
     current_scroll_view().scroll_x(columns);
 }
 
-auto InspectorPane::supports_horizontal_scroll() const -> bool {
-    int const width = last_width_ > 0 ? last_width_ : 60;
-    const int total_cols = content_total_columns(width);
-    const int viewport_width = (total_cols > width) ? std::max(1, width - 2) : width;
+auto InspectorPane::supports_horizontal_scroll(int width) const -> bool {
+    int const width_for_viewport =
+        width > 0 ? width : (last_width_ > 0 ? last_width_ : 60);
+    const int total_cols = content_total_columns(width_for_viewport);
+    const int viewport_width =
+        (total_cols > width_for_viewport) ? std::max(1, width_for_viewport - 2) : width_for_viewport;
     return total_cols > viewport_width;
 }
 

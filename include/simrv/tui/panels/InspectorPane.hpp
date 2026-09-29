@@ -99,13 +99,15 @@ class InspectorPane : public TuiWidget {
     void set_visible_rows(int rows) { visible_rows_ = rows; }
     [[nodiscard]] auto get_visible_content_rows() const -> int;
     void set_active_runtime(double secs) { active_runtime_ = secs; }
-    void scroll(int lines);
+    /// Scroll the current page by lines.  When supplied, width is the actual focused-column
+    /// width; this avoids using the last-rendered column's geometry in multi-panel layouts.
+    void scroll(int lines, int width = -1, bool secondary = false);
     void reset_scroll();
     [[nodiscard]] auto get_scroll_offset() const -> int;
-    void scroll_horizontal(int columns);
+    void scroll_horizontal(int columns, int width = -1, bool secondary = false);
     void reset_horizontal_scroll();
     [[nodiscard]] auto get_horizontal_scroll_offset() const -> int;
-    [[nodiscard]] auto supports_horizontal_scroll() const -> bool;
+    [[nodiscard]] auto supports_horizontal_scroll(int width = -1) const -> bool;
     void scroll_log(int lines);
     void reset_log_scroll();
     [[nodiscard]] auto get_log_scroll_offset() const -> int;

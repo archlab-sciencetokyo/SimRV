@@ -1118,7 +1118,7 @@ void Tui::handle_mouse(int x, int y, int b) {
                 if (log_area)
                     inspector_pane_->scroll_log(2);
                 else
-                    inspector_pane_->scroll(-2);
+                    inspector_pane_->scroll(-2, col_widths.widths[clicked_col], clicked_col > 0);
                 render(true);
             }
             return;
@@ -1138,7 +1138,7 @@ void Tui::handle_mouse(int x, int y, int b) {
                 if (log_area)
                     inspector_pane_->scroll_log(-2);
                 else
-                    inspector_pane_->scroll(2);
+                    inspector_pane_->scroll(2, col_widths.widths[clicked_col], clicked_col > 0);
                 render(true);
             }
             return;
@@ -1147,8 +1147,10 @@ void Tui::handle_mouse(int x, int y, int b) {
             focused_slot_index_ = clicked_col;
             if (page != TuiRegPage::CONSOLE) {
                 inspector_pane_->set_page(page);
-                if (inspector_pane_->supports_horizontal_scroll()) {
-                    inspector_pane_->scroll_horizontal((b == 66 || b == 68) ? -4 : 4);
+                if (inspector_pane_->supports_horizontal_scroll(col_widths.widths[clicked_col])) {
+                    inspector_pane_->scroll_horizontal((b == 66 || b == 68) ? -4 : 4,
+                                                        col_widths.widths[clicked_col],
+                                                        clicked_col > 0);
                     render(true);
                 }
             }
@@ -2109,8 +2111,12 @@ void Tui::reset_scroll() {
 
 void Tui::scroll_inspector(int lines) {
     if (inspector_pane_) {
+        auto const widths = column_widths(cached_term_width_ > 0 ? cached_term_width_ : 80);
+        auto const focused = std::min(
+            focused_slot_index_, static_cast<size_t>(std::max<int>(1, widths.count) - 1));
+        int const pane_width = widths.count > 0 ? widths.widths[focused] : 0;
         inspector_pane_->set_page(focused_page());
-        inspector_pane_->scroll(lines);
+        inspector_pane_->scroll(lines, pane_width, focused > 0);
         render();
         frame_dirty_ = true;
         render(true);
@@ -2158,19 +2164,43 @@ void Tui::adjust_inspector_width(int delta) {
         return;
 
     size_t const focused = std::min(focused_slot_index_, static_cast<size_t>(current.count - 1));
-    size_t donor = focused + 1 < current.count ? focused + 1 : focused - 1;
     int const minimum = (current.count == 2) ? framework::kBaseColumnUnitWidth
                                               : framework::kMultiColumnUnitWidth;
     int const proposed = current.widths[focused] + delta;
-    int const donor_width = current.widths[donor] - delta;
-    if (proposed < minimum || donor_width < minimum) return;
+    if (proposed < minimum) return;
 
-    if (focused < donor) {
-        current.widths[focused] = proposed;
-        current.widths[donor] = donor_width;
+    // Keep the adjacent divider moving first, then continue through neighbouring columns when
+    // one reaches its minimum.  This makes [/] useful in three- and four-panel layouts instead
+    // of silently refusing a resize as soon as the immediate donor is exhausted.
+    std::array<int, 4> donor_order{};
+    size_t donor_count = 0;
+    if (focused + 1 < current.count) {
+        for (size_t i = focused + 1; i < current.count; ++i) donor_order[donor_count++] = i;
+        for (size_t i = focused; i-- > 0;) donor_order[donor_count++] = i;
     } else {
-        current.widths[donor] = donor_width;
-        current.widths[focused] = proposed;
+        for (size_t i = focused; i-- > 0;) donor_order[donor_count++] = i;
+    }
+
+    int const need = std::max(0, delta);
+    int available = 0;
+    for (size_t i = 0; i < donor_count; ++i) {
+        available += std::max(0, current.widths[donor_order[i]] - minimum);
+    }
+    if (need > available) return;
+
+    current.widths[focused] = proposed;
+    int remaining = need;
+    if (delta < 0 && donor_count > 0) {
+        // Shrinking the focused panel gives its space to the nearest neighbour, preserving the
+        // intuitive single-divider behaviour at the edge of a layout.
+        current.widths[donor_order[0]] -= delta;
+    } else {
+        for (size_t i = 0; i < donor_count && remaining > 0; ++i) {
+            int const donor = donor_order[i];
+            int const take = std::min(remaining, std::max(0, current.widths[donor] - minimum));
+            current.widths[donor] -= take;
+            remaining -= take;
+        }
     }
     for (size_t i = 0; i < current.count; ++i) user_column_widths_[i] = current.widths[i];
     if (current.count == 2) user_inspector_width_ = current.widths[0];
@@ -3269,9 +3299,14 @@ auto Tui::handle_arrow_key_sequence() -> bool {
 
     if (esc_buf_ == "\033[1;2C" || esc_buf_ == "\033[1;2D") {
         if (!is_modal_active() && inspector_pane_) {
+            auto const widths = column_widths(cached_term_width_ > 0 ? cached_term_width_ : 80);
+            auto const focused = std::min(
+                focused_slot_index_, static_cast<size_t>(std::max<int>(1, widths.count) - 1));
+            int const pane_width = widths.count > 0 ? widths.widths[focused] : 0;
             inspector_pane_->set_page(focused_page());
-            if (inspector_pane_->supports_horizontal_scroll()) {
-                inspector_pane_->scroll_horizontal(esc_buf_.back() == 'C' ? 8 : -8);
+            if (inspector_pane_->supports_horizontal_scroll(pane_width)) {
+                inspector_pane_->scroll_horizontal(esc_buf_.back() == 'C' ? 8 : -8, pane_width,
+                                                    focused > 0);
                 frame_dirty_ = true;
                 render(true);
                 return true;
@@ -3354,9 +3389,13 @@ auto Tui::handle_arrow_key_sequence() -> bool {
                 render(true);
                 return true;
             }
+            auto const widths = column_widths(cached_term_width_ > 0 ? cached_term_width_ : 80);
+            auto const focused = std::min(
+                focused_slot_index_, static_cast<size_t>(std::max<int>(1, widths.count) - 1));
+            int const pane_width = widths.count > 0 ? widths.widths[focused] : 0;
             inspector_pane_->set_page(page);
-            if (inspector_pane_->supports_horizontal_scroll()) {
-                inspector_pane_->scroll_horizontal(4 * direction);
+            if (inspector_pane_->supports_horizontal_scroll(pane_width)) {
+                inspector_pane_->scroll_horizontal(4 * direction, pane_width, focused > 0);
                 frame_dirty_ = true;
                 render(true);
                 return true;
