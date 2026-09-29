@@ -116,7 +116,7 @@ simrv -m program.elf
 | `--summary <file>` | Write a machine-readable JSON execution summary when the run ends. |
 | `--events <file>` | Write newline-delimited lifecycle events for automation. |
 | `--arch-trace <file>` | Write a versioned JSONL retirement trace for RTL/Spike comparison. |
-| `--trace` | Write architectural instruction trace to `trace/trace.txt`. |
+| `--trace` | Write an aligned, labeled architectural instruction trace to `trace/trace.txt`. |
 | `--tracepc` | Write PC stream trace to `trace/tracepc.txt`. |
 | `--gdb` | Start GDB Remote Serial Protocol (RSP) server. |
 | `--gdb-port <port>` | Set GDB RSP TCP listener port (default: 1234). |
@@ -328,7 +328,9 @@ simrv-benchmark --suite realworld --latex-table
   *A:* The `--cli` flag enforces non-interactive headless operation. To see the graphical TUI workbench, run `simrv` without `--cli`.
 
 - **Q: Where are instruction traces written when passing `--trace`?**
-  *A:* Traces are saved in the `trace/` directory relative to your working directory (`trace/trace.txt`, `trace/tracepc.txt`).
+  *A:* Traces are saved in the `trace/` directory relative to your working directory. The
+  `trace/trace.txt` file presents labeled, aligned cycle, instruction, register, and CSR fields;
+  periodic PC samples remain in `trace/tracepc.txt`.
 
 - **Q: How can I connect GDB to debug a running binary?**
   *A:* Launch SimRV with `--gdb --cli -m program.elf`, then in another terminal run:

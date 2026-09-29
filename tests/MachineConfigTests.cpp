@@ -223,6 +223,16 @@ auto main() -> int {
                    "architecture trace path is projected into MachineConfig");
         }
     }
+    {
+        std::array<std::string, 4> trace_flag_str = {"SimRV", "--trace", "-m", "guest.bin"};
+        std::array<char*, 4> trace_flag = {trace_flag_str[0].data(), trace_flag_str[1].data(),
+                                           trace_flag_str[2].data(), trace_flag_str[3].data()};
+        auto parsed = simrv::util::parse_command_line(trace_flag);
+        expect(parsed.has_value() && parsed->options.trace_enabled &&
+                   parsed->options.trace_begin == 0 &&
+                   parsed->options.trace_end == std::numeric_limits<Counter>::max(),
+               "--trace enables the complete aligned instruction trace");
+    }
 
     // Architectural checkpoint round-trip and rejection coverage.  Keep the image small so this
     // remains a fast native gate while exercising vector/CSR state and RAM contents.

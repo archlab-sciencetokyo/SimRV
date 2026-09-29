@@ -373,6 +373,14 @@ auto parse_execution_options(std::string_view arg, std::span<char* const> args, 
         if (!trace) return std::unexpected(trace.error());
         return true;
     }
+    if (arg == "--trace") {
+        options.trace_enabled = true;
+        options.trace_begin = 0;
+        options.trace_end = std::numeric_limits<Counter>::max();
+        options.execution_mode = RequestedExecutionMode::Detailed;
+        options.execution_mode_explicit = true;
+        return true;
+    }
     if (arg == "--trace-pc-period" || arg == "--trace-pc") {
         auto value = parse_scaled_required(args, i, arg);
         if (!value) return std::unexpected(value.error());
@@ -1371,6 +1379,10 @@ auto needs_memory_image(const ParseResult& result) -> bool {
         stdout,
         "  {}--arch-trace <FILE>{}                Write JSONL retirement trace (detailed mode)\n",
         style(kBrightGreen), style(kReset));
+    std::print(stdout,
+               "  {}--trace{}                          Record an aligned full architectural trace "
+               "to trace/trace.txt\n",
+               style(kBrightGreen), style(kReset));
     std::print(stdout,
                "  {}-r, --trace-range {}{}<BG> <EN>{}   Record execution trace snapshot to "
                "trace/trace.txt\n",

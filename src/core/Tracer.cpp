@@ -671,65 +671,36 @@ void Tracer::write_trace_snapshot() {
     std::lock_guard lock(mutex_);
     const auto& cpu = machine_.primary_hart();
     const auto& st = cpu.state();
-
-    std::print(fp_trace, "{:08} {:0{}x} {:08x}", static_cast<Counter>(cpu.clint_mmio.mtime.load()),
-               cpu.pipeline_context.cpc.raw(), D_TRACE_HEX_WIDTH,
-               static_cast<uint32_t>(cpu.pipeline_context.ir));
+    const auto& context = cpu.pipeline_context;
+    const auto operation = pipeline::operation_name(context.op_id);
+    std::println(fp_trace,
+                 "cycle {:>10} | hart {:>2} | pc 0x{:0{}x} | ir 0x{:08x} | {:<12} | next 0x{:0{}x}",
+                 static_cast<Counter>(cpu.clint_mmio.mtime),
+                 static_cast<unsigned>(st.mhartid), static_cast<uint64_t>(context.cpc.raw()),
+                 D_TRACE_HEX_WIDTH, static_cast<uint32_t>(context.ir), operation,
+                 static_cast<uint64_t>(st.pc), D_TRACE_HEX_WIDTH);
+    for (unsigned row = 0; row < 8; ++row) {
+        std::print(fp_trace, "  ");
+        for (unsigned column = 0; column < 4; ++column) {
+            const unsigned index = row * 4 + column;
+            std::print(fp_trace, "x{:>2}=0x{:0{}x}{}", index,
+                       static_cast<uint64_t>(st.regs.read(static_cast<RegId>(index))),
+                       D_TRACE_HEX_WIDTH, column == 3 ? "\n" : "  ");
+        }
+    }
+    std::println(fp_trace,
+                 "  mstatus=0x{:0{}x}  mepc=0x{:0{}x}  mcause=0x{:0{}x}  satp=0x{:0{}x}",
+                 static_cast<uint64_t>(st.mstatus), D_TRACE_HEX_WIDTH,
+                 static_cast<uint64_t>(st.mepc), D_TRACE_HEX_WIDTH,
+                 static_cast<uint64_t>(st.mcause), D_TRACE_HEX_WIDTH,
+                 static_cast<uint64_t>(st.satp), D_TRACE_HEX_WIDTH);
+    std::println(fp_trace,
+                 "  vstart=0x{:0{}x}  vl=0x{:0{}x}  vtype=0x{:0{}x}  privilege={}",
+                 static_cast<uint64_t>(st.vstart), D_TRACE_HEX_WIDTH,
+                 static_cast<uint64_t>(st.vl), D_TRACE_HEX_WIDTH,
+                 static_cast<uint64_t>(st.vtype), D_TRACE_HEX_WIDTH,
+                 std::to_underlying(st.priv));
     std::println(fp_trace, "");
-
-    for (int i = 0; i < 4; i++) {
-        for (int j = 0; j < 8; j++) {
-            std::print(fp_trace, "{:0{}x}{}", st.regs.read(static_cast<RegId>((i * 8) + j)),
-                       D_TRACE_HEX_WIDTH, (j != 7 ? " " : "\n"));
-        }
-    }
-
-    if (!machine_.appmode_enabled()) {
-        std::println(fp_trace, "{:0{}x} {:0{}x} {:0{}x} {:0{}x} {:0{}x} {:0{}x} {:0{}x} {:0{}x}",
-                     st.mstatus, D_TRACE_HEX_WIDTH, st.mtvec, D_TRACE_HEX_WIDTH, st.mscratch,
-                     D_TRACE_HEX_WIDTH, st.mepc, D_TRACE_HEX_WIDTH, st.mcause, D_TRACE_HEX_WIDTH,
-                     st.mtval, D_TRACE_HEX_WIDTH, st.mhartid, D_TRACE_HEX_WIDTH, st.misa,
-                     D_TRACE_HEX_WIDTH);
-
-        std::print(fp_trace, "{:0{}x} {:0{}x} {:0{}x} {:0{}x} {:0{}x} ", st.mie, D_TRACE_HEX_WIDTH,
-                   st.mip, D_TRACE_HEX_WIDTH, st.medeleg, D_TRACE_HEX_WIDTH, st.mideleg,
-                   D_TRACE_HEX_WIDTH, st.mcounteren, D_TRACE_HEX_WIDTH);
-
-        std::println(fp_trace, "{:0{}x} {:0{}x} {:0{}x}", st.stvec, D_TRACE_HEX_WIDTH, st.sscratch,
-                     D_TRACE_HEX_WIDTH, st.sepc, D_TRACE_HEX_WIDTH);
-
-        std::print(fp_trace, "{:0{}x} {:0{}x} {:0{}x} {:0{}x} {:0{}x} ", st.scause,
-                   D_TRACE_HEX_WIDTH, st.stval, D_TRACE_HEX_WIDTH, st.satp, D_TRACE_HEX_WIDTH,
-                   st.scounteren, D_TRACE_HEX_WIDTH, st.load_res, D_TRACE_HEX_WIDTH);
-        std::println(fp_trace, "{:0{}x} {:0{}x} {:0{}x}",
-                     cpu.pipeline_context.pending_exception
-                         ? std::to_underlying(*cpu.pipeline_context.pending_exception)
-                         : simrv::xlen::kWordAllOnes,
-                     D_TRACE_HEX_WIDTH, cpu.pipeline_context.pending_tval, D_TRACE_HEX_WIDTH,
-                     std::to_underlying(st.priv), D_TRACE_HEX_WIDTH);
-
-        for (int i = 0; i < 4; i++) {
-            std::print(
-                fp_trace, "{:0{}x} {:0{}x} ",
-                cpu.tlb.inst_r.at(static_cast<std::size_t>(i)).at(0).v_addr, D_TRACE_HEX_WIDTH,
-                cpu.tlb.inst_r.at(static_cast<std::size_t>(i)).at(0).p_addr, D_TRACE_HEX_WIDTH);
-        }
-        std::println(fp_trace, "");
-        for (int i = 0; i < 4; i++) {
-            std::print(
-                fp_trace, "{:0{}x} {:0{}x} ",
-                cpu.tlb.data_r.at(static_cast<std::size_t>(i)).at(0).v_addr, D_TRACE_HEX_WIDTH,
-                cpu.tlb.data_r.at(static_cast<std::size_t>(i)).at(0).p_addr, D_TRACE_HEX_WIDTH);
-        }
-        std::println(fp_trace, "");
-        for (int i = 0; i < 4; i++) {
-            std::print(
-                fp_trace, "{:0{}x} {:0{}x} ",
-                cpu.tlb.data_w.at(static_cast<std::size_t>(i)).at(0).v_addr, D_TRACE_HEX_WIDTH,
-                cpu.tlb.data_w.at(static_cast<std::size_t>(i)).at(0).p_addr, D_TRACE_HEX_WIDTH);
-        }
-        std::println(fp_trace, "");
-    }
 }
 
 }  // namespace simrv::core
