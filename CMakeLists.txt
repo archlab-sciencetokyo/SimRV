@@ -525,6 +525,34 @@ if(BUILD_TESTING)
         TRUE
         LABELS
         "external;linux;pty;required")
+    add_test(NAME linux-cli-unix-pty
+             COMMAND ${PYTHON_BIN}
+                     ${CMAKE_SOURCE_DIR}/scripts/test_linux_cli.py)
+    set_tests_properties(
+      linux-cli-unix-pty
+      PROPERTIES
+        ENVIRONMENT
+        "SIMRV_BIN=$<TARGET_FILE:SimRV>;SIMRV_IMAGES_DIR=${TEST_IMAGES_DIR};SIMRV_CLI_TRANSPORT=pty;SIMRV_TEST_TIMEOUT=180"
+        TIMEOUT
+        200
+        RUN_SERIAL
+        TRUE
+        LABELS
+        "external;linux;cli;pty;required")
+    add_test(NAME linux-cli-unix-pipe
+             COMMAND ${PYTHON_BIN}
+                     ${CMAKE_SOURCE_DIR}/scripts/test_linux_cli.py)
+    set_tests_properties(
+      linux-cli-unix-pipe
+      PROPERTIES
+        ENVIRONMENT
+        "SIMRV_BIN=$<TARGET_FILE:SimRV>;SIMRV_IMAGES_DIR=${TEST_IMAGES_DIR};SIMRV_CLI_TRANSPORT=pipe;SIMRV_TEST_TIMEOUT=180"
+        TIMEOUT
+        200
+        RUN_SERIAL
+        TRUE
+        LABELS
+        "external;linux;cli;pipe;required")
     add_test(NAME linux-ia-quantum-smp-pty
              COMMAND ${PYTHON_BIN}
                      ${CMAKE_SOURCE_DIR}/scripts/test_linux_pty.py)

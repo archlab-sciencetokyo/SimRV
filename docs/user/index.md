@@ -119,6 +119,27 @@ simrv -m program.elf
 | `-v, --version` | Display version and build information. |
 | `-h, --help` | Show full command-line help message. |
 
+### Unix composition
+
+`--cli` exposes a stream-oriented process interface, so normal Unix tools can capture or transform
+a run without the TUI. Use `--log` for a separate simulator log when a clean guest-console stream
+is required:
+
+```bash
+# Save a guest console transcript while still seeing it live.
+simrv --cli -m program.elf -b --log simrv.log | tee guest.log
+
+# Feed interactive guest UART input from a script.
+printf 'help\n' | simrv --cli --os -m fw_payload.bin -D root.img
+
+# Bound a run and preserve its exit status for a shell script.
+timeout 30s simrv --cli -m program.elf -b -e 1000000
+status=$?
+```
+
+The Linux CLI smoke tests exercise pipelines, redirection, environment propagation, exit status,
+command substitution, signals, file descriptors, and both PTY and pipe transports.
+
 ---
 
 ## 4. Interactive TUI Workbench
