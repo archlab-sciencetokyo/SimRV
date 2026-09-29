@@ -7,10 +7,7 @@
 <p align="center">
   <a href="https://github.com/archlab-sciencetokyo/SimRV/actions/workflows/c-cpp.yml"><img src="https://github.com/archlab-sciencetokyo/SimRV/actions/workflows/c-cpp.yml/badge.svg?branch=main" alt="C/C++ CI"/></a>
   <a href="https://github.com/archlab-sciencetokyo/SimRV/actions/workflows/docs.yml"><img src="https://github.com/archlab-sciencetokyo/SimRV/actions/workflows/docs.yml/badge.svg?branch=main" alt="Docs CI"/></a>
-  <a href="https://github.com/archlab-sciencetokyo/SimRV/releases"><img src="https://img.shields.io/badge/version-2.0.2-blue.svg" alt="SimRV Version"/></a>
   <a href="https://github.com/archlab-sciencetokyo/SimRV/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-MIT-green.svg" alt="License"/></a>
-  <img src="https://img.shields.io/badge/C%2B%2B-23-purple.svg" alt="C++23"/>
-  <img src="https://img.shields.io/badge/architecture-RV32%20%7C%20RV64-orange.svg" alt="Architecture"/>
 </p>
 
 ---
@@ -42,7 +39,10 @@ Choose the shortest path for your goal:
 
 ### 1. Build from Source
 
-SimRV requires a modern C++23 compiler (**Clang 20+** or **GCC 14+**), **CMake 3.20+**, and **Ninja**.
+SimRV supports x86-64 Linux hosts. On Windows, use WSL2 with a supported Linux
+distribution; native Windows builds are not currently supported.
+
+SimRV requires a modern C++23 compiler (**Clang 20+** or **GCC 14+**), **CMake 3.25+**, and **Ninja**.
 
 === "RV64 Target (Default)"
     ```bash
