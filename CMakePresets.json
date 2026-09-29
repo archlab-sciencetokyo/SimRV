@@ -29,6 +29,30 @@
             }
         },
         {
+            "name": "rv32-musl-release",
+            "displayName": "RV32 Static musl Release (Ninja)",
+            "generator": "Ninja",
+            "toolchainFile": "${sourceDir}/cmake/toolchains/x86_64-musl.cmake",
+            "binaryDir": "${sourceDir}/build/rv32-musl-release",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Release",
+                "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
+                "SIMRV_XLEN": "32"
+            }
+        },
+        {
+            "name": "rv64-musl-release",
+            "displayName": "RV64 Static musl Release (Ninja)",
+            "generator": "Ninja",
+            "toolchainFile": "${sourceDir}/cmake/toolchains/x86_64-musl.cmake",
+            "binaryDir": "${sourceDir}/build/rv64-musl-release",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Release",
+                "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
+                "SIMRV_XLEN": "64"
+            }
+        },
+        {
             "name": "rv32-debug",
             "displayName": "RV32 Debug (Ninja)",
             "generator": "Ninja",
@@ -59,6 +83,14 @@
         {
             "name": "rv64-release",
             "configurePreset": "rv64-release"
+        },
+        {
+            "name": "rv32-musl-release",
+            "configurePreset": "rv32-musl-release"
+        },
+        {
+            "name": "rv64-musl-release",
+            "configurePreset": "rv64-musl-release"
         },
         {
             "name": "rv32-debug",

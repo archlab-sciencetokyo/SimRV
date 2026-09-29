@@ -39,7 +39,7 @@ jobs:
           dnf update -y
           dnf install -y dnf-plugins-core
           dnf config-manager --enable crb || dnf config-manager --set-enabled crb || true
-          dnf install -y git cmake ninja-build gcc gcc-c++ clang-tools-extra wget tar xz autoconf make which
+          dnf install -y git cmake ninja-build gcc gcc-c++ clang-tools-extra wget tar xz autoconf make which file
 
       - name: Fetch and compile riscv-tests
         run: |
@@ -76,6 +76,19 @@ jobs:
 
       - name: Build
         run: cmake --build --preset ${{ matrix.arch }}-release
+
+      - name: Build static musl release
+        shell: bash
+        run: |
+          set -euo pipefail
+          MUSL_ROOT="$RUNNER_TEMP/x86_64-linux-musl-cross"
+          wget -q https://musl.cc/x86_64-linux-musl-cross.tgz -O "$RUNNER_TEMP/musl-cross.tgz"
+          tar -xzf "$RUNNER_TEMP/musl-cross.tgz" -C "$RUNNER_TEMP"
+          test -x "$MUSL_ROOT/bin/x86_64-linux-musl-g++"
+          echo "MUSL_TOOLCHAIN_ROOT=$MUSL_ROOT" >> "$GITHUB_ENV"
+          cmake --preset ${{ matrix.arch }}-musl-release \
+            -DMUSL_TOOLCHAIN_ROOT="$MUSL_ROOT" -DBUILD_TESTING=OFF
+          cmake --build --preset ${{ matrix.arch }}-musl-release
 
       - name: Run CTest gate suite
         env:
@@ -123,18 +136,22 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p dist
-          cp build/${{ matrix.arch }}-release/SimRV dist/SimRV
+          file build/${{ matrix.arch }}-musl-release/SimRV | grep -Eiq 'statically linked|static-pie linked'
+          cp build/${{ matrix.arch }}-musl-release/SimRV dist/SimRV
           tar -C dist -czf "${{ steps.names.outputs.asset_base }}.tar.gz" SimRV
           cp build/${{ matrix.arch }}-release/SimRV "${{ steps.names.outputs.asset_base }}.bin"
           sha256sum "${{ steps.names.outputs.asset_base }}.tar.gz" > "${{ steps.names.outputs.asset_base }}.sha256"
           sha256sum "${{ steps.names.outputs.asset_base }}.bin" >> "${{ steps.names.outputs.asset_base }}.sha256"
 
       - name: Validate packaged release
-        run: >-
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ldd "${{ steps.names.outputs.asset_base }}.bin" 2>&1 | grep -Eiq 'not a dynamic executable|statically linked'; then :; else exit 1; fi
           python3 scripts/release_check.py
-          --binary "${{ steps.names.outputs.asset_base }}.bin"
-          --archive "${{ steps.names.outputs.asset_base }}.tar.gz"
-          --checksum "${{ steps.names.outputs.asset_base }}.sha256"
+            --binary "${{ steps.names.outputs.asset_base }}.bin"
+            --archive "${{ steps.names.outputs.asset_base }}.tar.gz"
+            --checksum "${{ steps.names.outputs.asset_base }}.sha256"
 
       - name: Upload workflow artifacts
         uses: actions/upload-artifact@v7
