@@ -168,7 +168,8 @@ jobs:
         run: |
           apt-get update
           apt-get install -y --no-install-recommends \
-            bash musl-tools python3 python3-pip tar gzip file ca-certificates
+            bash musl-tools libstdc++-16-dev libgcc-16-dev \
+            python3 python3-pip tar gzip file ca-certificates
           python3 -m pip install --break-system-packages cmake==4.3.0 ninja
       - name: Validate release tag
         id: names
@@ -189,6 +190,9 @@ jobs:
           test -f "${atomic_archive}"
           atomic_dir="$(mktemp -d)"
           ln -s "${atomic_archive}" "${atomic_dir}/libatomic_asneeded.a"
+          stdcxx_archive="$(g++ -print-file-name=libstdc++.a)"
+          test -f "${stdcxx_archive}"
+          stdcxx_dir="$(dirname "${stdcxx_archive}")"
           cmake -S . -B build/rv64-musl-release -G Ninja \
             -DCMAKE_BUILD_TYPE=Release -DSIMRV_XLEN=64 \
             -DSIMRV_X86_64_V3_BASELINE=OFF \
@@ -196,7 +200,7 @@ jobs:
             -DCMAKE_C_COMPILER=musl-gcc \
             -DCMAKE_CXX_COMPILER=g++ \
             -DCMAKE_CXX_FLAGS="-specs=${musl_specs}" \
-            -DCMAKE_EXE_LINKER_FLAGS="-L${atomic_dir} -static -static-libgcc -static-libstdc++"
+            -DCMAKE_EXE_LINKER_FLAGS="-L${atomic_dir} -L${stdcxx_dir} -static -static-libgcc -static-libstdc++"
           cmake --build build/rv64-musl-release --parallel 2
           file build/rv64-musl-release/simrv | grep -E 'statically linked|static-pie linked'
           ! ldd build/rv64-musl-release/simrv
