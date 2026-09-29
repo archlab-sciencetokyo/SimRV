@@ -185,6 +185,10 @@ jobs:
           set -euo pipefail
           musl_specs=/usr/lib/x86_64-linux-musl/musl-gcc.specs
           test -f "${musl_specs}"
+          atomic_archive="$(gcc -print-file-name=libatomic.a)"
+          test -f "${atomic_archive}"
+          atomic_dir="$(mktemp -d)"
+          ln -s "${atomic_archive}" "${atomic_dir}/libatomic_asneeded.a"
           cmake -S . -B build/rv64-musl-release -G Ninja \
             -DCMAKE_BUILD_TYPE=Release -DSIMRV_XLEN=64 \
             -DSIMRV_X86_64_V3_BASELINE=OFF \
@@ -192,7 +196,7 @@ jobs:
             -DCMAKE_C_COMPILER=musl-gcc \
             -DCMAKE_CXX_COMPILER=g++ \
             -DCMAKE_CXX_FLAGS="-specs=${musl_specs}" \
-            -DCMAKE_EXE_LINKER_FLAGS="-static -static-libgcc -static-libstdc++"
+            -DCMAKE_EXE_LINKER_FLAGS="-L${atomic_dir} -static -static-libgcc -static-libstdc++"
           cmake --build build/rv64-musl-release --parallel 2
           file build/rv64-musl-release/simrv | grep -E 'statically linked|static-pie linked'
           ! ldd build/rv64-musl-release/simrv
