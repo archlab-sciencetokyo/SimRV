@@ -193,13 +193,29 @@ jobs:
           stdcxx_archive="$(find /usr/lib/gcc /usr/local/lib/gcc -type f -name libstdc++.a -print -quit)"
           test -f "${stdcxx_archive}"
           stdcxx_dir="$(dirname "${stdcxx_archive}")"
+          cat > /usr/local/bin/musl-g++ <<'EOF'
+          #!/bin/sh
+          set -eu
+          compile=0
+          for arg in "$@"; do
+            case "${arg}" in
+              -c|-E|-S|-M|-MM|-MD|-MMD) compile=1 ;;
+            esac
+          done
+          if [ "${compile}" -eq 1 ]; then
+            exec g++ "$@"
+          fi
+          exec g++ -specs=/usr/lib/x86_64-linux-musl/musl-gcc.specs "$@"
+          EOF
+          chmod 755 /usr/local/bin/musl-g++
           cmake -S . -B build/rv64-musl-release -G Ninja \
             -DCMAKE_BUILD_TYPE=Release -DSIMRV_XLEN=64 \
             -DSIMRV_X86_64_V3_BASELINE=OFF \
             -DSIMRV_WARNINGS_AS_ERRORS=ON \
             -DCMAKE_C_COMPILER=musl-gcc \
-            -DCMAKE_CXX_COMPILER=g++ \
-            -DCMAKE_CXX_FLAGS="-specs=${musl_specs}" \
+            -DCMAKE_CXX_COMPILER=/usr/local/bin/musl-g++ \
+            -DCMAKE_CXX_COMPILER_AR=ar \
+            -DCMAKE_CXX_COMPILER_RANLIB=ranlib \
             -DCMAKE_EXE_LINKER_FLAGS="-L${atomic_dir} -L${stdcxx_dir} -static -static-libgcc -static-libstdc++"
           cmake --build build/rv64-musl-release --parallel 2
           file build/rv64-musl-release/simrv | grep -E 'statically linked|static-pie linked'
