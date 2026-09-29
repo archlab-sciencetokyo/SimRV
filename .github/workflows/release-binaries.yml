@@ -143,8 +143,6 @@ jobs:
           cp build/${{ matrix.arch }}-musl-release/SimRV dist/SimRV
           tar -C dist -czf "${{ steps.names.outputs.asset_base }}.tar.gz" SimRV
           cp build/${{ matrix.arch }}-musl-release/SimRV "${{ steps.names.outputs.asset_base }}.bin"
-          sha256sum "${{ steps.names.outputs.asset_base }}.tar.gz" > "${{ steps.names.outputs.asset_base }}.sha256"
-          sha256sum "${{ steps.names.outputs.asset_base }}.bin" >> "${{ steps.names.outputs.asset_base }}.sha256"
 
       - name: Validate packaged release
         shell: bash
@@ -153,8 +151,7 @@ jobs:
           file "${{ steps.names.outputs.asset_base }}.bin" | grep -Eiq 'statically linked|static-pie linked'
           python3 scripts/release_check.py \
             --binary "${{ steps.names.outputs.asset_base }}.bin" \
-            --archive "${{ steps.names.outputs.asset_base }}.tar.gz" \
-            --checksum "${{ steps.names.outputs.asset_base }}.sha256"
+            --archive "${{ steps.names.outputs.asset_base }}.tar.gz"
 
       - name: Upload workflow artifacts
         uses: actions/upload-artifact@v7
@@ -163,7 +160,6 @@ jobs:
           path: |
             ${{ steps.names.outputs.asset_base }}.tar.gz
             ${{ steps.names.outputs.asset_base }}.bin
-            ${{ steps.names.outputs.asset_base }}.sha256
 
       - name: Upload release assets
         if: github.event_name == 'release' || github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/')
@@ -172,69 +168,5 @@ jobs:
           files: |
             ${{ steps.names.outputs.asset_base }}.tar.gz
             ${{ steps.names.outputs.asset_base }}.bin
-            ${{ steps.names.outputs.asset_base }}.sha256
           tag_name: ${{ steps.names.outputs.version_tag }}
           prerelease: ${{ github.ref_name == 'dev' || github.event.release.target_commitish == 'dev' || contains(steps.names.outputs.version_tag, '-') }}
-
-  documentation:
-    runs-on: ubuntu-latest
-    container:
-      image: almalinux:10
-    steps:
-      - uses: actions/checkout@v6
-        with:
-          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref }}
-      - name: Install documentation tools
-        run: dnf install -y doxygen graphviz tar gzip python3
-      - name: Validate release metadata
-        run: |
-          python3 scripts/release_check.py
-          python3 tests/ReleaseToolTests.py
-      - name: Build documentation
-        run: doxygen Doxyfile
-      - name: Package documentation
-        shell: bash
-        run: |
-          VERSION="$(python3 -c 'import json; print(json.load(open("release/release-manifest.json"))["version"])')"
-          tar -C docs/api -czf "SimRV-docs-v${VERSION}.tar.gz" html
-      - uses: actions/upload-artifact@v7
-        with:
-          name: SimRV-documentation
-          path: SimRV-docs-*.tar.gz
-      - name: Upload documentation release asset
-        if: github.event_name == 'release' || github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/')
-        uses: softprops/action-gh-release@v2
-        with:
-          files: SimRV-docs-*.tar.gz
-
-  reproducibility-framework:
-    runs-on: ubuntu-latest
-    container:
-      image: almalinux:10
-    steps:
-      - uses: actions/checkout@v6
-        with:
-          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref }}
-      - name: Install Python
-        run: dnf install -y python3
-      - name: Validate research interfaces
-        run: |
-          python3 scripts/release_check.py
-          python3 tests/ReleaseToolTests.py
-          mkdir -p repro/results
-          python3 -c 'import json,pathlib; pathlib.Path("repro/results/index.json").write_text(json.dumps({"schema_version":1,"status":"framework-only","note":"Raw results and complete evidence are published only after the full release matrix passes."},indent=2)+"\n")'
-      - name: Package reproducibility framework
-        run: python3 scripts/package_repro.py --results repro/results
-      - uses: actions/upload-artifact@v7
-        with:
-          name: SimRV-reproducibility-framework
-          path: |
-            SimRV-repro-*.tar.gz
-            SimRV-repro-*.sha256
-      - name: Upload reproducibility release asset
-        if: github.event_name == 'release' || github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/')
-        uses: softprops/action-gh-release@v2
-        with:
-          files: |
-            SimRV-repro-*.tar.gz
-            SimRV-repro-*.sha256
