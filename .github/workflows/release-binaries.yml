@@ -140,7 +140,7 @@ jobs:
           file build/${{ matrix.arch }}-musl-release/SimRV | grep -Eiq 'statically linked|static-pie linked'
           cp build/${{ matrix.arch }}-musl-release/SimRV dist/SimRV
           tar -C dist -czf "${{ steps.names.outputs.asset_base }}.tar.gz" SimRV
-          cp build/${{ matrix.arch }}-release/SimRV "${{ steps.names.outputs.asset_base }}.bin"
+          cp build/${{ matrix.arch }}-musl-release/SimRV "${{ steps.names.outputs.asset_base }}.bin"
           sha256sum "${{ steps.names.outputs.asset_base }}.tar.gz" > "${{ steps.names.outputs.asset_base }}.sha256"
           sha256sum "${{ steps.names.outputs.asset_base }}.bin" >> "${{ steps.names.outputs.asset_base }}.sha256"
 
@@ -149,9 +149,9 @@ jobs:
         run: |
           set -euo pipefail
           if ldd "${{ steps.names.outputs.asset_base }}.bin" 2>&1 | grep -Eiq 'not a dynamic executable|statically linked'; then :; else exit 1; fi
-          python3 scripts/release_check.py
-            --binary "${{ steps.names.outputs.asset_base }}.bin"
-            --archive "${{ steps.names.outputs.asset_base }}.tar.gz"
+          python3 scripts/release_check.py \
+            --binary "${{ steps.names.outputs.asset_base }}.bin" \
+            --archive "${{ steps.names.outputs.asset_base }}.tar.gz" \
             --checksum "${{ steps.names.outputs.asset_base }}.sha256"
 
       - name: Upload workflow artifacts
