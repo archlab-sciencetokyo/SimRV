@@ -216,6 +216,7 @@ jobs:
             -DCMAKE_CXX_COMPILER=/usr/local/bin/musl-g++ \
             -DCMAKE_CXX_COMPILER_AR=ar \
             -DCMAKE_CXX_COMPILER_RANLIB=ranlib \
+            -DCMAKE_SHARED_LINKER_FLAGS="-L${atomic_dir} -L${stdcxx_dir}" \
             -DCMAKE_EXE_LINKER_FLAGS="-L${atomic_dir} -L${stdcxx_dir} -static -static-libgcc -static-libstdc++"
           cmake --build build/rv64-musl-release --parallel 2
           file build/rv64-musl-release/simrv | grep -E 'statically linked|static-pie linked'
