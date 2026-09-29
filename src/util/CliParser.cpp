@@ -324,6 +324,14 @@ auto parse_file_options(std::string_view arg, std::span<char* const> args, std::
         options.traplog_mode = true;
         return true;
     }
+    if (arg == "--arch-trace" || arg == "--architecture-trace") {
+        auto value = next_argument(args, i, arg);
+        if (!value) return std::unexpected(value.error());
+        options.fn_archtrace = std::string(*value);
+        options.execution_mode = RequestedExecutionMode::Detailed;
+        options.execution_mode_explicit = true;
+        return true;
+    }
     if (arg == "--log-file") {
         auto value = next_argument(args, i, arg);
         if (!value) return std::unexpected(value.error());
@@ -1036,6 +1044,7 @@ auto RuntimeOptions::to_machine_config() const -> simrv::core::MachineConfig {
     cfg.debug.traplog_mode = traplog_mode;
     cfg.debug.bp_trace = bp_trace;
     cfg.debug.use_mix = use_mix;
+    cfg.debug.architecture_trace_path = fn_archtrace;
 
     cfg.isa.isatest_tohost = isatest_tohost;
     cfg.isa.misa_profile = misa_profile_bits(effective_misa_profile(*this));
@@ -1146,6 +1155,10 @@ auto apply_runtime_options(simrv::core::Machine* machine, const RuntimeOptions& 
     }
 
     machine->trace().init_trace(options.trace_enabled);
+    machine->trace().init_architecture_trace(options.fn_archtrace);
+    if (!options.fn_archtrace.empty() && !machine->trace().is_architecture_trace_enabled()) {
+        return std::unexpected("cannot open architecture trace file: " + options.fn_archtrace);
+    }
     machine->trace().init_dlog(options.dlog_mode);
 
     machine->primary_hart().trap_log_stream = nullptr;
@@ -1354,6 +1367,10 @@ auto needs_memory_image(const ParseResult& result) -> bool {
         stdout,
         "  {}--trap-log, --traplog {}{}<FILE>{}  Write architectural trap and SBI trace log\n",
         style(kBrightGreen), style(kBrightBlack), style(kReset), style(kReset));
+    std::print(
+        stdout,
+        "  {}--arch-trace <FILE>{}                Write JSONL retirement trace (detailed mode)\n",
+        style(kBrightGreen), style(kReset));
     std::print(stdout,
                "  {}-r, --trace-range {}{}<BG> <EN>{}   Record execution trace snapshot to "
                "trace/trace.txt\n",

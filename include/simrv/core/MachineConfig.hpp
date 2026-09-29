@@ -75,6 +75,7 @@ struct DebugConfig {
     bool traplog_mode = false;
     bool bp_trace = false;
     bool use_mix = false;
+    std::string architecture_trace_path;
 };
 
 struct IsaConfig {

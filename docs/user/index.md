@@ -115,6 +115,7 @@ simrv -m program.elf
 | `-H, --tohost <addr>` | Specify physical address of `tohost` communication symbol for tests. |
 | `--summary <file>` | Write a machine-readable JSON execution summary when the run ends. |
 | `--events <file>` | Write newline-delimited lifecycle events for automation. |
+| `--arch-trace <file>` | Write a versioned JSONL retirement trace for RTL/Spike comparison. |
 | `--trace` | Write architectural instruction trace to `trace/trace.txt`. |
 | `--tracepc` | Write PC stream trace to `trace/tracepc.txt`. |
 | `--gdb` | Start GDB Remote Serial Protocol (RSP) server. |
@@ -142,6 +143,18 @@ For streaming automation, `--events` writes one JSON object per lifecycle transi
 include `started`, `stopped`, `reboot_requested`, and `exit_requested`, with schema version,
 timestamp, status, stop reason, hart, PC, retired instructions, and cycles. Like summaries,
 `--events -` is rejected because stdout belongs to guest UART output.
+
+For instruction-by-instruction architectural comparison, use the opt-in JSONL trace:
+
+```bash
+simrv --cli -m program.elf --arch-trace results/retire.jsonl --steps 10000
+```
+
+The first record identifies the trace schema, XLEN, VLEN, and hart count. Each subsequent
+`retire` record contains the hart, cycle, cumulative retired count, instruction PC and encoding,
+decoded operation, next PC, and privilege mode. The option selects detailed execution so every
+committed instruction is represented; it is intended for RTL/Spike parity work and is not a
+throughput mode.
 
 ### Checkpoint and resume
 

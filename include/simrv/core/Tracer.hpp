@@ -15,6 +15,7 @@
 namespace simrv::core {
 
 class Machine;
+class CPU;
 
 class Tracer {
    public:
@@ -22,10 +23,12 @@ class Tracer {
     ~Tracer();
 
     void init_trace(bool trace_enabled);
+    void init_architecture_trace(const std::string& path);
     void init_trap_log(bool traplog_mode, const std::string& fn_traplog);
     void init_dlog(bool dlog_mode);
 
     [[nodiscard]] auto is_trace_enabled() const noexcept -> bool;
+    [[nodiscard]] auto is_architecture_trace_enabled() const noexcept -> bool;
     [[nodiscard]] auto is_trap_log_enabled() const noexcept -> bool;
     [[nodiscard]] auto is_dlog_enabled() const noexcept -> bool;
 
@@ -43,11 +46,13 @@ class Tracer {
                   const ArchState& state, CSRValue tval);
     void log_sbi(Counter mtime, unsigned cause, Word ext_id, Word func_id, Word a0, Word a1,
                  Address pc);
+    void log_architecture_retirement(const CPU& cpu);
     void flush_all();
 
     std::ofstream fp_trace;
     std::ofstream fp_dlog;
     std::ofstream fp_traplog;
+    std::ofstream fp_archtrace;
 
    private:
     Machine& machine_;

@@ -81,6 +81,24 @@ void Tracer::init_trace(bool trace_enabled) {
     }
 }
 
+void Tracer::init_architecture_trace(const std::string& path) {
+    fp_archtrace.close();
+    if (path.empty()) return;
+    std::error_code ec;
+    const std::filesystem::path trace_path(path);
+    if (trace_path.has_parent_path()) {
+        std::filesystem::create_directories(trace_path.parent_path(), ec);
+    }
+    fp_archtrace.clear();
+    fp_archtrace.open(trace_path, std::ios::out | std::ios::trunc);
+    if (fp_archtrace.is_open()) {
+        std::println(fp_archtrace,
+                     "{{\"schema_version\":1,\"event\":\"header\",\"xlen\":{},"
+                     "\"vlen\":{},\"harts\":{}}}",
+                     simrv::xlen::kXLenBits, machine_.isa_config().vlen, machine_.num_harts());
+    }
+}
+
 void Tracer::init_trap_log(bool traplog_mode, const std::string& fn_traplog) {
     fp_traplog.close();
     if (traplog_mode) {
@@ -105,6 +123,9 @@ void Tracer::init_dlog(bool dlog_mode) {
 }
 
 auto Tracer::is_trace_enabled() const noexcept -> bool { return fp_trace.is_open(); }
+auto Tracer::is_architecture_trace_enabled() const noexcept -> bool {
+    return fp_archtrace.is_open();
+}
 auto Tracer::is_trap_log_enabled() const noexcept -> bool { return fp_traplog.is_open(); }
 auto Tracer::is_dlog_enabled() const noexcept -> bool { return fp_dlog.is_open(); }
 
@@ -113,6 +134,7 @@ void Tracer::flush_all() {
     if (fp_trace.is_open()) fp_trace.flush();
     if (fp_dlog.is_open()) fp_dlog.flush();
     if (fp_traplog.is_open()) fp_traplog.flush();
+    if (fp_archtrace.is_open()) fp_archtrace.flush();
     if (fp_tracepc_.is_open()) fp_tracepc_.flush();
     if (fp_bpred_.is_open()) fp_bpred_.flush();
 }
@@ -129,39 +151,83 @@ void Tracer::log_mmio(std::string_view dev_name, Address addr, uint32_t size, Wo
 
 void Tracer::log_trap(Counter mtime, TrapCause cause, Address trap_pc, PrivilegeLevel priv,
                       const ArchState& state, CSRValue tval) {
-    if (!fp_traplog.is_open()) return;
+    if (!fp_traplog.is_open() && !fp_archtrace.is_open()) return;
     constexpr int kLogHexWidth = static_cast<int>(kXLenHexDigits);
     std::lock_guard lock(mutex_);
-    std::println(
-        fp_traplog,
-        "TRAP mtime={} cause={:0{}x} ({}) pc={:0{}x} priv={} ra={:0{}x} sp={:0{}x} tp={:0{}x} "
-        "a0={:0{}x} a1={:0{}x} mtvec={:0{}x} stvec={:0{}x} mepc={:0{}x} sepc={:0{}x} satp={:0{}x} "
-        "tval={:0{}x}",
-        mtime, static_cast<uint64_t>(cause), kLogHexWidth, trap_cause_name(cause),
-        static_cast<uint64_t>(trap_pc), kLogHexWidth, static_cast<unsigned>(priv),
-        static_cast<uint64_t>(state.regs.read(RegId::Ra)), kLogHexWidth,
-        static_cast<uint64_t>(state.regs.read(RegId::Sp)), kLogHexWidth,
-        static_cast<uint64_t>(state.regs.read(RegId::Tp)), kLogHexWidth,
-        static_cast<uint64_t>(state.regs.read(RegId::A0)), kLogHexWidth,
-        static_cast<uint64_t>(state.regs.read(RegId::A1)), kLogHexWidth,
-        static_cast<uint64_t>(state.mtvec), kLogHexWidth, static_cast<uint64_t>(state.stvec),
-        kLogHexWidth, static_cast<uint64_t>(state.mepc), kLogHexWidth,
-        static_cast<uint64_t>(state.sepc), kLogHexWidth, static_cast<uint64_t>(state.satp),
-        kLogHexWidth, static_cast<uint64_t>(tval), kLogHexWidth);
+    if (fp_traplog.is_open()) {
+        std::println(
+            fp_traplog,
+            "TRAP mtime={} cause={:0{}x} ({}) pc={:0{}x} priv={} ra={:0{}x} sp={:0{}x} "
+            "tp={:0{}x} a0={:0{}x} a1={:0{}x} mtvec={:0{}x} stvec={:0{}x} mepc={:0{}x} "
+            "sepc={:0{}x} satp={:0{}x} tval={:0{}x}",
+            mtime, static_cast<uint64_t>(cause), kLogHexWidth, trap_cause_name(cause),
+            static_cast<uint64_t>(trap_pc), kLogHexWidth, static_cast<unsigned>(priv),
+            static_cast<uint64_t>(state.regs.read(RegId::Ra)), kLogHexWidth,
+            static_cast<uint64_t>(state.regs.read(RegId::Sp)), kLogHexWidth,
+            static_cast<uint64_t>(state.regs.read(RegId::Tp)), kLogHexWidth,
+            static_cast<uint64_t>(state.regs.read(RegId::A0)), kLogHexWidth,
+            static_cast<uint64_t>(state.regs.read(RegId::A1)), kLogHexWidth,
+            static_cast<uint64_t>(state.mtvec), kLogHexWidth, static_cast<uint64_t>(state.stvec),
+            kLogHexWidth, static_cast<uint64_t>(state.mepc), kLogHexWidth,
+            static_cast<uint64_t>(state.sepc), kLogHexWidth, static_cast<uint64_t>(state.satp),
+            kLogHexWidth, static_cast<uint64_t>(tval), kLogHexWidth);
+    }
+    if (fp_archtrace.is_open()) {
+        std::println(fp_archtrace,
+                     "{{\"schema_version\":1,\"event\":\"trap\",\"hart\":{},"
+                     "\"cycle\":{},\"cause\":{},\"cause_name\":\"{}\","
+                     "\"pc\":\"0x{:x}\",\"tval\":\"0x{:x}\",\"privilege\":{}}}",
+                     static_cast<unsigned>(state.mhartid), mtime, static_cast<uint64_t>(cause),
+                     trap_cause_name(cause), static_cast<uint64_t>(trap_pc),
+                     static_cast<uint64_t>(tval), std::to_underlying(priv));
+    }
 }
 
 void Tracer::log_sbi(Counter mtime, unsigned cause, Word ext_id, Word func_id, Word a0, Word a1,
                      Address pc) {
-    if (!fp_traplog.is_open()) return;
+    if (!fp_traplog.is_open() && !fp_archtrace.is_open()) return;
     constexpr int kLogHexWidth = static_cast<int>(kXLenHexDigits);
     std::lock_guard lock(mutex_);
-    std::println(fp_traplog,
-                 "__ SBI ecall mtime={} cause={} ext={:0{}x} fid={:0{}x} a0={:0{}x} a1={:0{}x} "
-                 "pc={:0{}x}",
-                 mtime, cause, static_cast<uint64_t>(ext_id), kLogHexWidth,
-                 static_cast<uint64_t>(func_id), kLogHexWidth, static_cast<uint64_t>(a0),
-                 kLogHexWidth, static_cast<uint64_t>(a1), kLogHexWidth, static_cast<uint64_t>(pc),
-                 kLogHexWidth);
+    if (fp_traplog.is_open()) {
+        std::println(fp_traplog,
+                     "__ SBI ecall mtime={} cause={} ext={:0{}x} fid={:0{}x} a0={:0{}x} a1={:0{}x} "
+                     "pc={:0{}x}",
+                     mtime, cause, static_cast<uint64_t>(ext_id), kLogHexWidth,
+                     static_cast<uint64_t>(func_id), kLogHexWidth, static_cast<uint64_t>(a0),
+                     kLogHexWidth, static_cast<uint64_t>(a1), kLogHexWidth,
+                     static_cast<uint64_t>(pc), kLogHexWidth);
+    }
+    if (fp_archtrace.is_open()) {
+        std::println(fp_archtrace,
+                     "{{\"schema_version\":1,\"event\":\"sbi\",\"cycle\":{},"
+                     "\"cause\":{},\"extension\":\"0x{:x}\",\"function\":\"0x{:x}\","
+                     "\"a0\":\"0x{:x}\",\"a1\":\"0x{:x}\",\"pc\":\"0x{:x}\"}}",
+                     mtime, cause, static_cast<uint64_t>(ext_id), static_cast<uint64_t>(func_id),
+                     static_cast<uint64_t>(a0), static_cast<uint64_t>(a1),
+                     static_cast<uint64_t>(pc));
+    }
+}
+
+void Tracer::log_architecture_retirement(const CPU& cpu) {
+    if (!fp_archtrace.is_open()) return;
+    const auto& context = cpu.pipeline_context;
+    const auto& state = cpu.state();
+    std::lock_guard lock(mutex_);
+    std::println(
+        fp_archtrace,
+        "{{\"schema_version\":1,\"event\":\"retire\",\"hart\":{},\"cycle\":{},"
+        "\"retired\":{},\"pc\":\"0x{:x}\",\"instruction\":\"0x{:x}\","
+        "\"operation\":\"{}\",\"next_pc\":\"0x{:x}\","
+        "\"privilege\":{},\"mstatus\":\"0x{:x}\",\"mepc\":\"0x{:x}\","
+        "\"mcause\":\"0x{:x}\",\"satp\":\"0x{:x}\",\"vl\":\"0x{:x}\","
+        "\"vtype\":\"0x{:x}\"}}",
+        static_cast<unsigned>(state.mhartid), cpu.clint_mmio.mcycle, cpu.e_icount,
+        static_cast<uint64_t>(context.cpc.raw()), static_cast<uint32_t>(context.ir),
+        pipeline::operation_name(context.op_id), static_cast<uint64_t>(state.pc),
+        std::to_underlying(state.priv), static_cast<uint64_t>(state.mstatus),
+        static_cast<uint64_t>(state.mepc), static_cast<uint64_t>(state.mcause),
+        static_cast<uint64_t>(state.satp), static_cast<uint64_t>(state.vl),
+        static_cast<uint64_t>(state.vtype));
 }
 
 void Tracer::dump_init_artifacts() {

@@ -348,6 +348,9 @@ void CPU::run_fast_cycle_miss(Machine& machine) {
             }
         }
     }
+    if (e_icount != retired_before && machine.trace().is_architecture_trace_enabled()) {
+        machine.trace().log_architecture_retirement(*this);
+    }
     machine.record_retired_instructions(e_icount - retired_before);
 }
 
@@ -466,6 +469,9 @@ void CPU::run_cycle(Machine& machine) {
             ca_state.data_walk.reset();
         }
         if (ca_pipeline.retired_this_cycle) {
+            if (e_icount != retired_before && machine.trace().is_architecture_trace_enabled()) {
+                machine.trace().log_architecture_retirement(*this);
+            }
             machine.record_retired_instructions(e_icount - retired_before);
         }
         return;
@@ -536,6 +542,9 @@ void CPU::run_cycle(Machine& machine) {
                 sink->pause_loop();
             }
         }
+    }
+    if (e_icount != retired_before && machine.trace().is_architecture_trace_enabled()) {
+        machine.trace().log_architecture_retirement(*this);
     }
     machine.record_retired_instructions(e_icount - retired_before);
 }
@@ -679,6 +688,9 @@ void CPU::run_cycle_baremetal_miss(Machine& machine) {
             }
         }
     }
+    if (e_icount != retired_before && machine.trace().is_architecture_trace_enabled()) {
+        machine.trace().log_architecture_retirement(*this);
+    }
     machine.record_retired_instructions(e_icount - retired_before);
 }
 
@@ -745,6 +757,9 @@ void CPU::run_cycle_baremetal(Machine& machine) {
                         sink->pause_loop();
                     }
                 }
+            }
+            if (e_icount != retired_before && machine.trace().is_architecture_trace_enabled()) {
+                machine.trace().log_architecture_retirement(*this);
             }
             machine.record_retired_instructions(e_icount - retired_before);
             return;

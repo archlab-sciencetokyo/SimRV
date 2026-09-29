@@ -207,6 +207,22 @@ auto main() -> int {
                    "--no-realtime overrides TUI default in MachineConfig");
         }
     }
+    {
+        std::array<std::string, 5> trace_args_str = {"SimRV", "--arch-trace", "trace.jsonl",
+                                                     "-m", "guest.bin"};
+        std::array<char*, 5> trace_args = {trace_args_str[0].data(), trace_args_str[1].data(),
+                                           trace_args_str[2].data(), trace_args_str[3].data(),
+                                           trace_args_str[4].data()};
+        auto parsed = simrv::util::parse_command_line(trace_args);
+        expect(parsed.has_value() && parsed->options.fn_archtrace == "trace.jsonl" &&
+                   parsed->options.execution_mode == simrv::util::RequestedExecutionMode::Detailed,
+               "--arch-trace selects detailed execution and retains its output path");
+        if (parsed) {
+            const auto cfg = parsed->options.to_machine_config();
+            expect(cfg.debug.architecture_trace_path == "trace.jsonl",
+                   "architecture trace path is projected into MachineConfig");
+        }
+    }
 
     // Architectural checkpoint round-trip and rejection coverage.  Keep the image small so this
     // remains a fast native gate while exercising vector/CSR state and RAM contents.
