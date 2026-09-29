@@ -747,8 +747,24 @@ void Tui::render(bool force) {
                     return terminal_pane_->render_row(row, width);
                 }
                 inspector_pane_->set_page(page);
-                return inspector_pane_->render_column_row(row, width, static_cast<int>(col_idx),
-                                                          total_cols, is_focused, multi_headers);
+                auto rendered = inspector_pane_->render_column_row(
+                    row, width, static_cast<int>(col_idx), total_cols, is_focused, multi_headers);
+                if (selection_.is_active && selection_.pane == SelectionPane::InspectorPane &&
+                    selection_.col_idx == col_idx) {
+                    // The composed frame has a different number of header rows for a
+                    // single-column inspector versus the multi-column workbench.  Match the
+                    // coordinates used by mouse selection so the inverse highlight follows the
+                    // selected rows in both layouts.
+                    const int content_start_y = multi_headers ? 5 : 6;
+                    const int screen_y = content_start_y + row;
+                    int start_y = selection_.start_y;
+                    int end_y = selection_.end_y;
+                    if (start_y > end_y) std::swap(start_y, end_y);
+                    if (screen_y >= start_y && screen_y <= end_y) {
+                        rendered = std::format("\033[7m{}\033[0m", rendered);
+                    }
+                }
+                return rendered;
             }
             return "";
         });
@@ -922,6 +938,10 @@ void Tui::handle_mouse_inspector(int x, int y, int b, bool multi_column, bool is
             int const target_width = (col_width > 0) ? col_width : pane_width_cached_;
             int logical_row = (y - content_start_y) + inspector_pane_->get_scroll_offset();
             auto page = inspector_pane_->get_page();
+            // Running panes render a sampled/spinner view and deliberately hide values that
+            // require a coherent architectural snapshot. Their old hitboxes must not remain
+            // active while the visible value is unavailable.
+            if (!paused_) return;
             if (page == TuiRegPage::CACHE) {
                 if (logical_row == 0 || logical_row == 4) {
                     inspector_pane_->toggle_cache_inspect_type();
@@ -2650,11 +2670,21 @@ auto Tui::handle_navigation_keyboard_input(uint8_t byte, TuiKey key) -> bool {
             return true;
         case simrv::tui::TuiKey::u:
         case simrv::tui::TuiKey::U:
-            scroll(5);
+            if (focused_page() == TuiRegPage::CONSOLE) {
+                scroll(5);
+            } else if (inspector_pane_) {
+                inspector_pane_->scroll_log(2);
+                render(true);
+            }
             return true;
         case simrv::tui::TuiKey::d:
         case simrv::tui::TuiKey::D:
-            scroll(-5);
+            if (focused_page() == TuiRegPage::CONSOLE) {
+                scroll(-5);
+            } else if (inspector_pane_) {
+                inspector_pane_->scroll_log(-2);
+                render(true);
+            }
             return true;
         case simrv::tui::TuiKey::o:
         case simrv::tui::TuiKey::O:
@@ -3546,6 +3576,7 @@ auto Tui::consume_control_sequence(uint8_t first_byte) -> bool {
                         workbench_slots_[ci].page == TuiRegPage::CONSOLE) {
                         sel_pane = SelectionPane::TerminalPane;
                     } else {
+                        if (!paused_) return true;
                         sel_pane = SelectionPane::InspectorPane;
                     }
                     break;

@@ -118,7 +118,11 @@ class InspectorPane : public TuiWidget {
     void set_explain_pc(Register pc) { explain_pc_ = pc; }
     [[nodiscard]] auto get_explain_pc() const -> Register { return explain_pc_; }
     void set_trace_buffer(const std::vector<std::string>* trace_buf) { trace_buffer_ = trace_buf; }
-    void set_log_lines(std::vector<std::string> log_lines) { log_lines_ = std::move(log_lines); }
+    void set_log_lines(std::vector<std::string> log_lines) {
+        log_lines_ = std::move(log_lines);
+        // The log header occupies one of the six fixed rows.
+        log_scroll_view_.set_geometry(static_cast<int>(log_lines_.size()), 5);
+    }
     void set_previous_page(TuiRegPage p) { previous_page_ = p; }
     [[nodiscard]] auto get_previous_page() const -> std::optional<TuiRegPage> {
         return previous_page_;

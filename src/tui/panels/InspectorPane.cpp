@@ -658,9 +658,9 @@ auto InspectorPane::render_log_bottom_row(int row_idx, int num_rows, int width) 
     if (row_idx == 0) {
         if (total > max_entries) {
             std::string summary = log_scroll_view_.header_summary("Log");
-            return section_line(summary + " · click to jump", width);
+            return section_line(summary + " · click to jump · u/d scroll", width);
         }
-        return section_line("Log", width);
+        return section_line("Log · u/d scroll", width);
     }
     if (log_lines_.empty()) {
         return format_to_width("", width);
