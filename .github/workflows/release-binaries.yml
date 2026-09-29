@@ -181,7 +181,7 @@ jobs:
           cmake -S . -B build/rv64-musl-release -G Ninja \
             -DCMAKE_BUILD_TYPE=Release -DSIMRV_XLEN=64 \
             -DSIMRV_X86_64_V3_BASELINE=OFF \
-            -DSIMRV_ENABLE_SDL=OFF -DSIMRV_WARNINGS_AS_ERRORS=ON \
+            -DSIMRV_WARNINGS_AS_ERRORS=ON \
             -DCMAKE_EXE_LINKER_FLAGS="-static -static-libgcc -static-libstdc++"
           cmake --build build/rv64-musl-release --parallel 2
           file build/rv64-musl-release/simrv | grep -E 'statically linked|static-pie linked'
