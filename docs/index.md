@@ -8,11 +8,7 @@
   <a href="https://github.com/archlab-sciencetokyo/SimRV/actions/workflows/c-cpp.yml"><img src="https://github.com/archlab-sciencetokyo/SimRV/actions/workflows/c-cpp.yml/badge.svg?branch=dev" alt="C/C++ CI"/></a>
   <a href="https://github.com/archlab-sciencetokyo/SimRV/actions/workflows/docs.yml"><img src="https://github.com/archlab-sciencetokyo/SimRV/actions/workflows/docs.yml/badge.svg?branch=dev" alt="Docs CI"/></a>
   <a href="https://archlab-sciencetokyo.github.io/SimRV/stable/"><img src="https://img.shields.io/badge/docs-GitHub_Pages-blue.svg" alt="Documentation"/></a>
-  <a href="https://github.com/archlab-sciencetokyo/SimRV/releases"><img src="https://img.shields.io/github/v/release/archlab-sciencetokyo/SimRV?include_prereleases" alt="Latest SimRV release"/></a>
   <a href="https://github.com/archlab-sciencetokyo/SimRV/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-MIT-green.svg" alt="License"/></a>
-  <img src="https://img.shields.io/badge/C%2B%2B-23-purple.svg" alt="C++23"/>
-  <img src="https://img.shields.io/badge/architecture-RV32GCBV%20%7C%20RV64GCBV-orange.svg" alt="Architecture"/>
-  <img src="https://img.shields.io/badge/SMP-2%20to%2016%20cores-brightgreen.svg" alt="SMP"/>
 </p>
 
 ---
@@ -40,6 +36,9 @@ Download the portable archive or native package bundle from
 [installation guide](user/install.md). Build from source when developing SimRV itself.
 
 ### 1. Build from Source
+
+SimRV supports x86-64 Linux hosts. On Windows, use WSL2 with a supported Linux
+distribution; native Windows builds are not currently supported.
 
 SimRV requires a modern C++23 compiler (**Clang 22+** or **GCC 16+**), **CMake 3.31+**, and **Ninja**.
 
