@@ -506,6 +506,9 @@ auto Tracer::write_summary_json(const std::string& path) -> bool {
     }
     const auto cycles = machine_.primary_hart().clint_mmio.mcycle;
     const auto pc = machine_.primary_hart().state().pc;
+    const auto& cpu = machine_.primary_hart();
+    const auto& bp = cpu.branch_predictor.stats();
+    const auto& bus = machine_.memory().system_bus();
     const double cpi = retired == 0 ? 0.0 : static_cast<double>(cycles) / retired;
     const double ipc = cycles == 0 ? 0.0 : static_cast<double>(retired) / cycles;
 
@@ -524,6 +527,18 @@ auto Tracer::write_summary_json(const std::string& path) -> bool {
         << "  \"compressed_instructions\": " << compressed << ",\n"
         << "  \"cpi\": " << std::format("{:.9f}", cpi) << ",\n"
         << "  \"ipc\": " << std::format("{:.9f}", ipc) << ",\n"
+        << "  \"performance\": {\n"
+        << "    \"icache_hits\": " << cpu.icache.hit_count() << ",\n"
+        << "    \"icache_misses\": " << cpu.icache.miss_count() << ",\n"
+        << "    \"dcache_hits\": " << cpu.dcache.hit_count() << ",\n"
+        << "    \"dcache_misses\": " << cpu.dcache.miss_count() << ",\n"
+        << "    \"branch_predictions\": " << bp.direction_predictions << ",\n"
+        << "    \"branch_hits\": " << bp.direction_hits << ",\n"
+        << "    \"branch_misses\": " << bp.direction_misses << ",\n"
+        << "    \"branch_misprediction_cycles\": " << bp.misprediction_penalty_cycles << ",\n"
+        << "    \"bus_reads\": " << bus.read_count() << ",\n"
+        << "    \"bus_writes\": " << bus.write_count() << "\n"
+        << "  },\n"
         << "  \"hart_stats\": [\n";
     for (size_t hart = 0; hart < machine_.num_harts(); ++hart) {
         const auto& cpu = machine_.hart(hart);

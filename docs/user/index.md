@@ -133,7 +133,8 @@ python3 -m json.tool results/run.json
 
 The JSON document has schema version `1` and includes the simulator version, XLEN, hart count,
 execution engine, stop reason, exit status, final PC, retired instructions, cycles, CPI, IPC,
-and per-hart retirement counts. The summary is written after execution; a failure to write it
+per-hart retirement counts, cache hit/miss counts, branch prediction outcomes, and bus traffic.
+The summary is written after execution; a failure to write it
 causes a nonzero simulator exit status. `--summary -` is rejected so guest UART output remains
 unambiguous on stdout.
 
