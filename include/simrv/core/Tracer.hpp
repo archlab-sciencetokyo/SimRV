@@ -4,6 +4,7 @@
  */
 #pragma once
 
+#include <filesystem>
 #include <fstream>
 #include <string>
 
@@ -16,6 +17,9 @@ class Machine;
 class Tracer {
    public:
     explicit Tracer(Machine& machine);
+
+    /** Ensure that the target trace directory exists before generating traces. */
+    static void ensure_trace_directory(const std::filesystem::path& dir = "trace");
 
     void init_trace(bool trace_enabled);
     void init_trap_log(bool traplog_mode, const std::string& fn_traplog);

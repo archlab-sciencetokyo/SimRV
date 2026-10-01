@@ -8,6 +8,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
+#include <filesystem>
 #include <format>
 #include <fstream>
 #include <ostream>
@@ -38,9 +39,15 @@ constexpr Counter D_TRACEPC_INTERVAL = 1000;
 
 Tracer::Tracer(Machine& machine) : machine_(machine) {}
 
+void Tracer::ensure_trace_directory(const std::filesystem::path& dir) {
+    std::error_code ec;
+    std::filesystem::create_directories(dir, ec);
+}
+
 void Tracer::init_trace(bool trace_enabled) {
     fp_trace.close();
     if (trace_enabled) {
+        ensure_trace_directory("trace");
         fp_trace.clear();
         fp_trace.open("trace/trace.txt");
     }
@@ -49,6 +56,10 @@ void Tracer::init_trace(bool trace_enabled) {
 void Tracer::init_trap_log(bool traplog_mode, const std::string& fn_traplog) {
     fp_traplog.close();
     if (traplog_mode) {
+        const std::filesystem::path path(fn_traplog);
+        if (path.has_parent_path()) {
+            ensure_trace_directory(path.parent_path());
+        }
         fp_traplog.clear();
         fp_traplog.open(fn_traplog, std::ios::out | std::ios::trunc);
     }
@@ -57,6 +68,7 @@ void Tracer::init_trap_log(bool traplog_mode, const std::string& fn_traplog) {
 void Tracer::init_dlog(bool dlog_mode) {
     fp_dlog.close();
     if (dlog_mode) {
+        ensure_trace_directory("trace");
         fp_dlog.clear();
         fp_dlog.open("init_virtio.txt");
     }
@@ -68,6 +80,8 @@ void Tracer::dump_init_artifacts() {
     auto* console = machine_.console.get();
     auto* disk = machine_.disk.get();
     auto* sector = disk->sector;
+
+    ensure_trace_directory("trace");
 
     {
         std::ofstream out("trace/init_mem.txt");
@@ -199,6 +213,7 @@ void Tracer::dump_init_artifacts() {
 }
 
 void Tracer::write_instruction_mix_report() {
+    ensure_trace_directory("trace");
     std::ofstream out("trace/instmix.txt");
     if (!out.is_open()) {
         simrv::log::error("cannot open instmix.txt");
@@ -291,6 +306,7 @@ void Tracer::emit_periodic_pc_trace(Counter mtime, Register cpc) {
     if ((mtime % D_TRACEPC_INTERVAL) == 0) {
         if (!tracepc_opened_) {
             tracepc_opened_ = true;
+            ensure_trace_directory("trace");
             fp_tracepc_.open("trace/tracepc.txt");
             simrv::log::info("generate trace file: tracepc.txt\n");
         }
@@ -304,6 +320,7 @@ void Tracer::emit_branch_prediction_trace(Counter mtime, Register cpc, Register 
                                           Opcode r_opcode, bool r_tkn) {
     if (!bpred_opened_) {
         bpred_opened_ = true;
+        ensure_trace_directory("trace");
         fp_bpred_.open("trace/bpred.txt");
         simrv::log::info("generate trace file: bpred.txt\n");
     }
