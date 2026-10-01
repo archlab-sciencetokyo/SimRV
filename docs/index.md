@@ -139,7 +139,7 @@ If you use SimRV in your academic research, please cite:
   title = {{SimRV: A Dual-Width Explainable RISC-V System Simulator}},
   author = {{SimRV Contributors}},
   url = {https://github.com/archlab-sciencetokyo/SimRV},
-  version = {2.0.3},
+  version = {2.0.4},
   year = {2026}
 }
 ```

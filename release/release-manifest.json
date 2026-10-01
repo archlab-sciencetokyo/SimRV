@@ -1,8 +1,8 @@
 {
   "$schema": "schemas/release-manifest.schema.json",
   "schema_version": 2,
-  "version": "2.0.3",
-  "release_tag": "v2.0.3",
+  "version": "2.0.4",
+  "release_tag": "v2.0.4",
   "host_support": {
     "os": "Linux",
     "architecture": "x86_64",
@@ -69,8 +69,8 @@
     "required_provenance": ["host", "compiler", "simrv_revision", "workload_revision", "configuration"]
   },
   "artifacts": [
-    "SimRV-hello-samples-v2.0.3.tar.gz",
-    "SimRV-rv32-linux-x86_64-v2.0.3.tar.gz",
-    "SimRV-rv64-linux-x86_64-v2.0.3.tar.gz"
+    "SimRV-hello-samples-v2.0.4.tar.gz",
+    "SimRV-rv32-linux-x86_64-v2.0.4.tar.gz",
+    "SimRV-rv64-linux-x86_64-v2.0.4.tar.gz"
   ]
 }

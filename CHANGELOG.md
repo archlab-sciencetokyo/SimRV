@@ -3,6 +3,14 @@
 All notable changes to SimRV are documented here.
 Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v2.0.4] — 2026-10-01
+
+Maintenance release ensuring automatic trace directory creation so simulation trace and log files are reliably generated even if the target directory does not exist.
+
+### Tracing & Diagnostics
+
+- **Automatic Directory Creation**: Added `Tracer::ensure_trace_directory` and directory existence validation before opening trace files (`trace/trace.txt`, `trace/tracepc.txt`, `trace/bpred.txt`, `trace/instmix.txt`, initialization memory/register/disk dumps, and trap logs), preventing silent file open failures when no `trace` directory exists.
+
 ## [v2.0.3] — 2026-09-29
 
 Maintenance release adding a fully static, baseline x86-64 musl portable binary for broad Linux distribution compatibility, including Ubuntu 22.04 and newer.
@@ -425,6 +433,8 @@ on inspector polish, correctness fixes, and CLI normalization.
 
 - Initial public alpha: CMake preset infrastructure, Clang-20 CI, base RISC-V pipeline
 
+[v2.0.4]: https://github.com/archlab-sciencetokyo/SimRV/releases/tag/v2.0.4
+[v2.0.3]: https://github.com/archlab-sciencetokyo/SimRV/releases/tag/v2.0.3
 [v2.0.2]: https://github.com/archlab-sciencetokyo/SimRV/releases/tag/v2.0.2
 [v2.0.1]: https://github.com/archlab-sciencetokyo/SimRV/releases/tag/v2.0.1
 [v2.0.0]: https://github.com/archlab-sciencetokyo/SimRV/releases/tag/v2.0.0
