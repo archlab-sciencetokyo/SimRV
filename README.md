@@ -3,49 +3,49 @@
 <p align="center">
   <a href="https://github.com/archlab-sciencetokyo/SimRV/actions/workflows/c-cpp.yml"><img src="https://github.com/archlab-sciencetokyo/SimRV/actions/workflows/c-cpp.yml/badge.svg?branch=main" alt="C/C++ CI"/></a>
   <a href="https://github.com/archlab-sciencetokyo/SimRV/actions/workflows/docs.yml"><img src="https://github.com/archlab-sciencetokyo/SimRV/actions/workflows/docs.yml/badge.svg?branch=main" alt="Docs CI"/></a>
-  <a href="https://archlab-sciencetokyo.github.io/SimRV/"><img src="https://img.shields.io/badge/docs-GitHub_Pages-blue.svg" alt="Documentation"/></a>
+  <a href="https://archlab-sciencetokyo.github.io/SimRV/stable/"><img src="https://img.shields.io/badge/docs-GitHub_Pages-blue.svg" alt="Documentation"/></a>
   <a href="https://github.com/archlab-sciencetokyo/SimRV/releases"><img src="https://img.shields.io/badge/version-2.0.4-blue.svg" alt="SimRV Version"/></a>
   <a href="https://github.com/archlab-sciencetokyo/SimRV/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-MIT-green.svg" alt="License"/></a>
 </p>
 
 SimRV is an explainable, dual-width (RV32 / RV64) RISC-V research simulator featuring an interactive terminal workbench (TUI), cycle-accurate in-order pipeline modeling, cache hierarchy inspection, and full-system Linux OS emulation. It provides functional and cycle-accurate modes for compile-time fixed **RV64GCBV** and **RV32GCBV** implementation targets.
 
-SimRV is not RISC-V certified. `RV32GCBV` and `RV64GCBV` are implementation targets; see the [compliance scope](docs/architecture/compliance.md) for verified coverage and known gaps.
+SimRV is not RISC-V certified. `RV32GCBV` and `RV64GCBV` are implementation targets; see the [compliance scope](https://archlab-sciencetokyo.github.io/SimRV/stable/architecture/compliance/) for verified coverage and known gaps.
 
 ---
 
 ## Documentation
 
-Explore the full documentation, guides, and specifications online at **[archlab-sciencetokyo.github.io/SimRV](https://archlab-sciencetokyo.github.io/SimRV/)**:
+Explore the full documentation, guides, and specifications online at **[archlab-sciencetokyo.github.io/SimRV/stable](https://archlab-sciencetokyo.github.io/SimRV/stable/)**:
 
 <table>
   <tr>
     <td width="50%" valign="top">
-      <h3>📖 <a href="https://archlab-sciencetokyo.github.io/SimRV/user/">User Guide</a></h3>
+      <h3>📖 <a href="https://archlab-sciencetokyo.github.io/SimRV/stable/user/">User Guide</a></h3>
       <p>CLI flags, interactive TUI controls, hotkeys, execution modes, and student architecture guide.</p>
       <ul>
-        <li><a href="https://archlab-sciencetokyo.github.io/SimRV/user/">Quickstart & CLI Flags</a> (<a href="docs/user/index.md">source</a>)</li>
-        <li><a href="https://archlab-sciencetokyo.github.io/SimRV/user/tui/">TUI Controls & Keybindings</a> (<a href="docs/user/tui.md">source</a>)</li>
-        <li><a href="https://archlab-sciencetokyo.github.io/SimRV/user/classroom/">Student Reference Guide</a> (<a href="docs/user/classroom.md">source</a>)</li>
+        <li><a href="https://archlab-sciencetokyo.github.io/SimRV/stable/user/">Quickstart & CLI Flags</a> (<a href="docs/user/index.md">source</a>)</li>
+        <li><a href="https://archlab-sciencetokyo.github.io/SimRV/stable/user/tui/">TUI Controls & Keybindings</a> (<a href="docs/user/tui.md">source</a>)</li>
+        <li><a href="https://archlab-sciencetokyo.github.io/SimRV/stable/user/classroom/">Student Reference Guide</a> (<a href="docs/user/classroom.md">source</a>)</li>
       </ul>
     </td>
     <td width="50%" valign="top">
-      <h3>⚙️ <a href="https://archlab-sciencetokyo.github.io/SimRV/architecture/overview/">Architecture & Compliance</a></h3>
+      <h3>⚙️ <a href="https://archlab-sciencetokyo.github.io/SimRV/stable/architecture/overview/">Architecture & Compliance</a></h3>
       <p>Core execution units, 6-stage in-order pipeline, cache hierarchy, MMU translation, and verified ISA scope.</p>
       <ul>
-        <li><a href="https://archlab-sciencetokyo.github.io/SimRV/architecture/overview/">Architectural Overview</a> (<a href="docs/architecture/overview.md">source</a>)</li>
-        <li><a href="https://archlab-sciencetokyo.github.io/SimRV/architecture/compliance/">RISC-V Compliance Scope</a> (<a href="docs/architecture/compliance.md">source</a>)</li>
-        <li><a href="https://archlab-sciencetokyo.github.io/SimRV/hardware/extensions/">Extension Implementation</a> (<a href="docs/hardware/extensions.md">source</a>)</li>
+        <li><a href="https://archlab-sciencetokyo.github.io/SimRV/stable/architecture/overview/">Architectural Overview</a> (<a href="docs/architecture/overview.md">source</a>)</li>
+        <li><a href="https://archlab-sciencetokyo.github.io/SimRV/stable/architecture/compliance/">RISC-V Compliance Scope</a> (<a href="docs/architecture/compliance.md">source</a>)</li>
+        <li><a href="https://archlab-sciencetokyo.github.io/SimRV/stable/hardware/extensions/">Extension Implementation</a> (<a href="docs/hardware/extensions.md">source</a>)</li>
       </ul>
     </td>
   </tr>
   <tr>
     <td width="50%" valign="top">
-      <h3>🐧 <a href="https://archlab-sciencetokyo.github.io/SimRV/user/linux/">Bare-Metal & Linux</a></h3>
+      <h3>🐧 <a href="https://archlab-sciencetokyo.github.io/SimRV/stable/user/linux/">Bare-Metal & Linux</a></h3>
       <p>Bare-metal firmware, memory maps, MMIO peripherals (16550A UART, CLINT, PLIC, VirtIO block), and Linux OS boot.</p>
       <ul>
-        <li><a href="https://archlab-sciencetokyo.github.io/SimRV/user/baremetal/">Bare-Metal Development</a> (<a href="docs/user/baremetal.md">source</a>)</li>
-        <li><a href="https://archlab-sciencetokyo.github.io/SimRV/user/linux/">Booting Full-System Linux</a> (<a href="docs/user/linux.md">source</a>)</li>
+        <li><a href="https://archlab-sciencetokyo.github.io/SimRV/stable/user/baremetal/">Bare-Metal Development</a> (<a href="docs/user/baremetal.md">source</a>)</li>
+        <li><a href="https://archlab-sciencetokyo.github.io/SimRV/stable/user/linux/">Booting Full-System Linux</a> (<a href="docs/user/linux.md">source</a>)</li>
       </ul>
     </td>
     <td width="50%" valign="top">
@@ -106,7 +106,7 @@ Run headless in CLI-only mode:
 ./build/rv64-release/SimRV -b -m examples/hello/build-rv64/hello.bin --ca --cli
 ```
 
-Linux images are generated separately; see the [Linux image guide](docs/user/linux.md). After
+Linux images are generated separately; see the [Linux image guide](https://archlab-sciencetokyo.github.io/SimRV/stable/user/linux/). After
 running `scripts/build-linux-image.sh` and sourcing its generated environment file:
 
 ```bash
@@ -125,7 +125,7 @@ Override MISA profile or Vector register length (VLEN):
 
 ## Interactive TUI Split-Screen Monitor
 
-SimRV includes a rich terminal user interface (TUI) for hardware inspection, step-by-step instruction execution, and educational visualization. See the [educational reference](docs/user/classroom.md), [bare-metal guide](docs/user/baremetal.md), and [TUI guide](docs/user/tui.md).
+SimRV includes a rich terminal user interface (TUI) for hardware inspection, step-by-step instruction execution, and educational visualization. See the [educational reference](https://archlab-sciencetokyo.github.io/SimRV/stable/user/classroom/), [bare-metal guide](https://archlab-sciencetokyo.github.io/SimRV/stable/user/baremetal/), and [TUI guide](https://archlab-sciencetokyo.github.io/SimRV/stable/user/tui/).
 
 ### Key Shortcuts
 
@@ -154,10 +154,10 @@ SimRV includes a rich terminal user interface (TUI) for hardware inspection, ste
 
 Both RV32GCBV and RV64GCBV instruction sets are supported.
 
-See [RISC-V compliance scope](docs/architecture/compliance.md) for the precise architectural boundary,
+See [RISC-V compliance scope](https://archlab-sciencetokyo.github.io/SimRV/stable/architecture/compliance/) for the precise architectural boundary,
 SBI/OpenSBI distinction, and the evidence required before treating a feature as verified. The
 profile names are implementation targets and do not by themselves claim RISC-V certification.
-The cross-subsystem qualification status is summarized in the [2.0 support matrix](docs/SUPPORT_MATRIX.md).
+The cross-subsystem qualification status is summarized in the [2.0 support matrix](https://archlab-sciencetokyo.github.io/SimRV/stable/SUPPORT_MATRIX.md).
 
 | Extension | Status | Description & Features |
 | --- | --- | --- |

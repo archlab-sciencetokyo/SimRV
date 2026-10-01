@@ -9,40 +9,40 @@ Maintenance release ensuring automatic trace directory creation so simulation tr
 
 ### Tracing & Diagnostics
 
-- **Automatic Directory Creation**: Added `Tracer::ensure_trace_directory` and directory existence validation before opening trace files (`trace/trace.txt`, `trace/tracepc.txt`, `trace/bpred.txt`, `trace/instmix.txt`, initialization memory/register/disk dumps, and trap logs), preventing silent file open failures when no `trace` directory exists.
+- **Automatic Directory Creation**: Added `Tracer::ensure_trace_directory` to automatically create missing trace directories prior to emitting simulation and architectural traces (`trace/trace.txt`, `trace/tracepc.txt`, `trace/bpred.txt`, `trace/instmix.txt`, trap logs, and initialization memory/register/disk dumps), preventing silent file open failures when no `trace/` folder exists.
 
 ## [v2.0.3] — 2026-09-29
 
-Maintenance release adding a fully static, baseline x86-64 musl portable binary for broad Linux distribution compatibility, including Ubuntu 22.04 and newer.
+Maintenance release adding fully static, baseline x86-64 musl portable binaries for broad Linux distribution compatibility, including Ubuntu 22.04 and newer.
 
-### Release portability
+### Packaging & Portability
 
-- Added checksum-verified GCC 15 musl release builds for RV32 and RV64 host binaries.
-- Portable builds avoid x86-64-v3 instructions and require no host glibc or libstdc++ runtime.
+- **Static musl Release Binaries**: Added checksum-verified GCC 15 musl release builds for RV32 and RV64 host binaries.
+- **Broad Distribution Compatibility**: Configured portable builds to avoid host-specific x86-64-v3 instructions, requiring no host glibc or libstdc++ runtime.
 
 ## [v2.0.2] — 2026-08-28
 
 Maintenance release ensuring side-effect-free instruction explanation in the TUI left pane to prevent spurious ICache hits during tool tab navigation.
 
-### Bug Fixes & TUI Stability
+### Bug Fixes & Stability
 
-- **Instruction Explainer Side-Effect Removal**: Refactored `LeftPaneExplain::get_explain_rows()` to use an isolated, side-effect-free direct memory decode path instead of executing the core CPU `fetch_stage()` coroutine, eliminating spurious ICache hit counter increments and pipeline context mutations during TUI page cycling.
+- **Side-Effect-Free Instruction Explainer**: Refactored `LeftPaneExplain::get_explain_rows()` to use an isolated, side-effect-free direct memory decode path instead of executing the core CPU `fetch_stage()` coroutine, eliminating spurious ICache hit counter increments and pipeline context mutations during TUI page cycling.
 
 ## [v2.0.1] — 2026-08-28
 
 Maintenance release addressing cache hit/miss accounting accuracy and TUI cache visual inspector state synchronization.
 
-### Bug Fixes & Microarchitecture
+### Microarchitecture & Cache
 
-- **Cache Accounting**: Fixed an issue where refill reads immediately following miss insertions generated spurious hit events and corrupted hit rate statistics.
-- **TUI Cache Inspector**: Corrected hit vs. eviction highlight priority in the Left Pane Cache view to prevent stale replacement markers from masking current hit indications.
+- **Cache Refill Accounting**: Fixed an issue where refill reads immediately following miss insertions generated spurious hit events and corrupted hit rate statistics.
+- **TUI Cache Inspector Highlights**: Corrected hit vs. eviction highlight priority in the Left Pane Cache view to prevent stale replacement markers from masking current hit indications.
 - **Base Cache State**: Ensured `BaseCache::insert` marks the current access as a compulsory/conflict miss state rather than inheriting stale hit indicators.
 
 ## [v2.0.0] — 2026-08-19
 
 General Availability release of SimRV 2.0: A dual-width explainable RISC-V full-system simulator written in modern ISO C++23, providing high-throughput functional simulation, in-terminal visual inspection, and multi-OS/RTOS execution.
 
-### Architectural Highlights & Major Capabilities
+### Major Capabilities
 
 - **Dual-Width Parametric Engine**: Compile-time parameterization (`SIMRV_XLEN`) for RV32GCBV and RV64GCBV with zero runtime virtualization overhead.
 - **High-Throughput Execution**: Optimized fast-path functional engine delivering 195+ MIPS on CoreMark with an overall 1.66x geometric mean speedup over Spike across 20-run statistical benchmark evaluation.
@@ -55,29 +55,25 @@ General Availability release of SimRV 2.0: A dual-width explainable RISC-V full-
 
 Release candidate 10 hardens release engineering workflows, adds strict required-suite schemas, streamlines dependencies by removing host SDL bridges while preserving simulated MMIO devices, and fixes headless execution across the vector test suite.
 
-### Release engineering and reproducibility
+### Release Engineering & Reproducibility
 
-- Added versioned release, evidence, and experiment schemas with strict required-suite coverage.
-- Added portable dependency inputs, machine-readable evidence, deterministic aggregation/plotting,
-  and reproducibility archive tooling.
-- Changed performance qualification to an evidence-only policy and retained explicit FP/RVV gaps.
-- Added citation metadata, a support matrix, research-companion documentation, and academic support
-  and security boundaries.
-- Hardened Linux PTY shutdown validation against the expected terminal-close race.
-- Fixed vector test runner to execute in headless `--cli` mode, achieving 100% pass across all 1,067 tests.
-- Removed experimental SDL3 host audio/display bridges and third-party soundfont headers (`tsf.h`, `tml.h`) while preserving simulated MMIO device models (`Audio`, `Framebuffer`, `InputDevice`).
+- **Release & Evidence Schemas**: Added versioned release, evidence, and experiment schemas with strict required-suite coverage.
+- **Reproducibility Tooling**: Added portable dependency inputs, machine-readable evidence, deterministic aggregation and plotting, and reproducibility archive generation tooling.
+- **Evidence-Only Performance Policy**: Changed performance qualification to an evidence-only policy while retaining explicit FP/RVV gaps.
+- **Documentation & Research Interfaces**: Added citation metadata, a host support matrix, research-companion documentation, and academic support/security boundaries.
+- **Linux PTY Shutdown Validation**: Hardened Linux PTY shutdown validation against the expected terminal-close race.
+- **Headless Vector Testing**: Fixed vector test runner to execute in headless `--cli` mode, achieving 100% pass across all 1,067 vector tests.
+- **Host Dependency Streamlining**: Removed experimental SDL3 host audio/display bridges and third-party soundfont headers (`tsf.h`, `tml.h`) while preserving simulated MMIO device models (`Audio`, `Framebuffer`, `InputDevice`).
 
 ## [v2.0.0-rc.9] — 2026-08-14
 
-Release candidate 9 focuses on architectural compliance, trap and interrupt correctness,
-OS lifecycle control, MMIO safety, and TUI/UART stability ahead of v2.0.0.
+Release candidate 9 focuses on architectural compliance, trap and interrupt correctness, OS lifecycle control, MMIO safety, and TUI/UART stability ahead of v2.0.0.
 
-### Breaking CLI cleanup
+### CLI Modernization
 
-SimRV 2.0 removes ambiguous and deprecated aliases. Removed options fail with an explicit
-replacement instead of silently changing behavior.
+SimRV 2.0 standardizes command-line options. Deprecated aliases fail with explicit replacements:
 
-| Removed | Replacement |
+| Removed Option | Modern Replacement |
 |---|---|
 | `-k`, `-i`, `--kernel` | `-m`, `--image` |
 | `--dtb` | `-f`, `--fdt` |
@@ -90,348 +86,260 @@ replacement instead of silently changing behavior.
 | `--mouse-speed` | `--mouse-sensitivity` |
 | `--contrast` | `--high-contrast` |
 | `--disable-forwarding` | `--no-forwarding` |
-| `-B`, `--opensbi` | Remove it; OpenSBI is automatic with `--fdt` |
+| `-B`, `--opensbi` | Automatic with `--fdt` |
 
-The conflicting `-G` alias is now GUI-only; use `--gdb` for the GDB server. The conflicting `-c`
-alias is now CLI-only; use `-f` or `--fdt` for a device tree.
+The conflicting `-G` alias is GUI-only (`--gdb` for GDB server); `-c` is CLI-only (`-f`/`--fdt` for device tree).
 
-### TUI framework hardening
+### Terminal UI & Visual Inspection
 
-- Corrected Unicode display-cell accounting for wide and combining characters, centralized frame
-  and modal resize geometry, and kept constrained modal borders closed with a clipping notice.
-- Generated footer labels and online action help from the canonical keybinding registry, with
-  exact-width two-column help rows and resize-stable mouse hit-testing.
-- Extracted full-frame composition into a pure tested renderer and removed the stale `k` alias for
-  setting breakpoints; `[:]` sets a breakpoint and `[k]` toggles one at the current PC.
-- Kept `Ctrl-R` reboot and `Ctrl-Q` quit globally available after shutdown and over modals; quit
-  now uses the machine exit request without transiently resuming stopped execution.
-- Made the educational guidance strip opt-in with `[g]`; it remains hidden while running and in
-  terminals too short to show it without displacing architectural state.
-- Split byte-routing policy from terminal I/O so focused guest input, modal input, and paused
-  navigation have deterministic behavior and native test coverage.
-- Added native tests for Enter routing, ANSI/UTF-8 parsing, scrollback, selection, resize/reset,
-  themes, and keybinding registry integrity.
-- Invalid TUI keybinding actions now report an error instead of silently resolving to Step.
+- **Display Cell Accounting**: Corrected Unicode display-cell accounting for wide and combining characters, centralized frame/modal resize geometry, and ensured constrained modal borders remain closed with clipping indicators.
+- **Keybinding Registry Help**: Generated footer labels and online action help dynamically from the canonical keybinding registry with exact-width two-column help rows and resize-stable mouse hit-testing.
+- **Frame Composition**: Extracted full-frame composition into a pure tested renderer; standardized breakpoint controls (`[:]` sets breakpoint, `[k]` toggles at current PC).
+- **Global Control Keys**: Maintained `Ctrl-R` reboot and `Ctrl-Q` quit availability globally across modals and post-shutdown states.
+- **Opt-In Guidance Strip**: Made the educational guidance pane opt-in with `[g]`, automatically suppressing it during active execution or on compact terminal viewports.
+- **Input Routing & Terminal Isolation**: Separated byte-routing policy from terminal I/O so guest input, modal forms, and paused inspection operate deterministically.
+- **TUI Test Coverage**: Added native regression coverage for Enter routing, ANSI/UTF-8 parsing, scrollback buffers, text selection, terminal resize, themes, and keybinding registry integrity.
 
-### Machine, interrupt, and memory correctness
+### Core Architecture, Interrupts & Memory
 
-- Reset now clears PLIC, CLINT, pipeline, timer-target, and interrupt-controller state instead of
-  carrying device state across a reboot.
-- CLINT timer writes generate machine timer interrupts; directly emulated SBI timers generate
-  supervisor timer interrupts without asserting both causes simultaneously.
-- PLIC claims now honor context thresholds.
-- MMIO registration rejects empty, wrapping, overlapping, and containing ranges; transactions that
-  cross a device boundary or use unsupported opcodes return bus errors.
-- Unaligned guest RAM accesses no longer rely on undefined host pointer casts, and framebuffer
-  accesses are checked across their complete width.
-- Bare-metal fast batches honor instruction limits exactly and stop promptly after a halt request.
-- Generated Linux images include a root-only `simrv-power` `/dev/mem` helper for direct poweroff,
-  reboot, crash, and simulator-exit requests when the normal OS lifecycle path is unavailable.
-  Its SimRV-specific `exit` request terminates the monitor as well as guest execution, while
-  poweroff retains the shut-down machine for TUI inspection.
+- **State Reset Cleanups**: Ensured simulator reset clears PLIC, CLINT, pipeline, timer-target, and interrupt-controller state without carrying stale device state across reboots.
+- **CLINT & SBI Timer Isolation**: Directed CLINT timer writes to generate machine timer interrupts and emulated SBI timers to generate supervisor timer interrupts without asserting both simultaneously.
+- **PLIC Context Thresholds**: Enforced context priority threshold checking on all PLIC interrupt claims.
+- **MMIO Range Safety**: Enforced strict validation rejecting empty, wrapping, overlapping, and containing MMIO ranges; transactions crossing device boundaries or using unsupported opcodes return bus errors.
+- **Safe Memory Alignment**: Eliminated undefined host pointer casts on unaligned guest RAM accesses and validated framebuffer access across full width bounds.
+- **Lifecycle Control Helper**: Included a guest `simrv-power` `/dev/mem` utility in generated Linux images for clean programmatic poweroff, reboot, crash, and simulator-exit requests.
 
 ## [v2.0.0-rc.8] — 2026-08-08
 
-Release candidate 8 for v2.0.0. Focuses on CMake user presets modularization, scrubbing hardcoded workspace paths, floating-point rounding precision under Clang, dual-architecture `riscv-tests` integration, and repository documentation polish.
+Release candidate 8 focuses on CMake user presets modularization, scrubbing hardcoded workspace paths, floating-point rounding precision under Clang, dual-architecture `riscv-tests` integration, and repository documentation polish.
 
 ### Build System & Developer Presets
-- **Preset Modularization**:
-  - Reverted `CMakePresets.json` to general, portable presets without hardcoded compiler binaries.
-  - Added local-only `CMakeUserPresets.json` (gitignored) for developer-specific Clang/GCC configuration (`CMAKE_C_COMPILER` and `CMAKE_CXX_COMPILER`).
-- **Floating-Point Rounding & Exception Semantics**:
-  - Added `-frounding-math` compiler flag check to preserve floating-point rounding mode semantics (`std::fesetround`) and exception raising under Clang `-O3` / ThinLTO optimization passes.
+
+- **Portable CMake Presets**: Restored `CMakePresets.json` to general portable configurations without hardcoded toolchain paths; added local `CMakeUserPresets.json` (gitignored) for developer-specific compiler configurations.
+- **Floating-Point Rounding Semantics**: Added `-frounding-math` flag validation to preserve IEEE 754 floating-point rounding mode semantics (`std::fesetround`) and exception raising under Clang `-O3` / ThinLTO passes.
 
 ### Test Automation & ISA Verification
-- **Dual-Architecture `riscv-tests` Integration**:
-  - Built 64-bit (`make`) and 32-bit (`make XLEN=32`) `riscv-tests` test suites in `../../tests/riscv-tests`.
-  - Achieved 100% CTest gate pass rate (230 test cases) across both `rv64-release` and `rv32-release` targets.
 
-### Repository Polish & Cleanups
-- **Hardcoded Path Scrubbing**:
-  - Replaced absolute `/home/archlab/` paths in `scripts/run_benchmarks.py` with dynamic `TESTS_DIR` path resolution relative to `script_dir`.
-  - Fixed hardcoded absolute file link to `LICENSE` in `README.md`.
-- **Legacy File Cleanups & Script Updates**:
-  - Updated `scripts/build-linux-image.sh` to target latest OpenSBI v1.9, Linux Kernel v7.1.7, and BusyBox v1.38.0.
-  - Added `--libc (musl|glibc)` and `--cross-compile` flags with auto-detection for both `musl` (`riscv64-unknown-linux-musl-`) and `glibc` (`riscv64-unknown-linux-gnu-`) toolchains.
-  - Removed obsolete `help.txt` and `Makefrag` files from repository root.
-  - Updated documentation version headers (`ARCHITECTURE.md`).
+- **Dual-Architecture ISA Verification**: Built and integrated 64-bit and 32-bit `riscv-tests` suites, achieving 100% CTest gate pass rate (230 test cases) across both `rv64-release` and `rv32-release` targets.
+
+### Tooling & Cleanups
+
+- **Dynamic Test Path Resolution**: Replaced absolute paths in benchmark runners with dynamic path resolution relative to repository root.
+- **Linux Image Builder Modernization**: Updated `scripts/build-linux-image.sh` to target OpenSBI v1.9, Linux Kernel v7.1.7, and BusyBox v1.38.0 with automated musl and glibc cross-compiler detection.
+- **Repository Tree Cleanups**: Removed obsolete root `help.txt` and `Makefrag` files and aligned documentation version headers.
 
 ## [v2.0.0-rc.6] — 2026-08-05
 
-Release candidate 6 for v2.0.0. Focuses on atomic state synchronization, $O(1)$ TLB generation epoch flushes, selective hardware/soft TLB invalidation, deterministic CLINT timer integration, devicetree syscon-poweroff standard bindings, and post-shutdown execution retention.
+Release candidate 6 focuses on atomic state synchronization, $O(1)$ TLB generation epoch flushes, selective hardware/soft TLB invalidation, deterministic CLINT timer integration, devicetree syscon-poweroff standard bindings, and post-shutdown execution retention.
 
 ### Performance & Cache / TLB Optimizations
-- **$O(1)$ Soft TLB Generation Epoch Flushing**:
-  - Replaced $O(N)$ 4096-entry memory loops during `soft_tlb_flush()` with a single-instruction `++soft_tlb_epoch` generation increment.
-- **Selective Hardware & Soft TLB Invalidation**:
-  - Implemented page-level selective invalidation in `Tlb::flush_selective` and `soft_tlb_flush_selective`, ensuring `SFENCE.VMA vaddr` invalidates only target page entries rather than wiping the entire 2048-entry TLB.
-- **Cache & TLB Struct Compaction**:
-  - Aligned `CacheLine` to 64 bytes (`alignas(64)`) to match host L1 CPU cache line boundaries.
-  - Aligned `SoftTlbEntry` and `TLBEntry` to 32 bytes (`alignas(32)`), enabling power-of-two bit-shift indexing (`shl rax, 5`).
-  - Replaced bounds-checked `.at()` array accesses with direct subscript indexing across `BaseCache`, `ICache`, and `DCache`.
 
-### State Atomization & Synchronization
-- **Lock-Free Execution State Machine**:
-  - Atomized `ExecutionState` and cross-thread shared state (`tohost`, `mtime`, `mtimecmp`, `e_icount`) with `std::atomic<T>`.
-  - Eliminates data races and torn 32-bit reads across simulation, TUI rendering, and GDB control threads.
+- **O(1) Soft TLB Epoch Flushing**: Replaced $O(N)$ 4096-entry memory loops during `soft_tlb_flush()` with a single-instruction generation epoch counter increment (`++soft_tlb_epoch`).
+- **Selective Page Invalidation**: Implemented selective page invalidation in `Tlb::flush_selective` and `soft_tlb_flush_selective`, ensuring `SFENCE.VMA vaddr` invalidates only target page entries rather than wiping the complete 2048-entry TLB.
+- **Cache & TLB Memory Alignment**: Aligned `CacheLine` to 64 bytes (`alignas(64)`) to match host L1 cache lines; aligned TLB entries to 32 bytes (`alignas(32)`) for power-of-two bit-shift indexing.
+- **Direct Subscript Indexing**: Replaced bounds-checked `.at()` array lookups with direct subscript indexing across `BaseCache`, `ICache`, and `DCache`.
 
-### Devices & Devicetree Standard Compliance
-- **Deterministic CLINT MMIO Time Advancement**:
-  - Derived simulated clock time strictly from `clint_mmio.mtime`, guaranteeing deterministic cycle progress and freezing time advancement during simulation pause.
-- **Standard Devicetree Syscon Poweroff & Reboot Bindings**:
-  - Added `regmap = <&test>;` links to `poweroff` and `reboot` nodes in `virt-rv64.dts` and `virt-rv32.dts`.
-  - Recompiled `linux-images/rv64/devicetree.dtb` and `linux-images/rv32/devicetree.dtb` for native OpenSBI `sifive_test` / `syscon-poweroff` reset driver parsing.
+### State Synchronization & Devices
 
-### TUI & System Lifecycle UX
-- **Post-Shutdown Execution Safety & Window Retention**:
-  - Halting or shutting down the guest system (`poweroff` / `halt`) pauses execution and renders `[SHUTDOWN]` badge while keeping the TUI window open for full inspection of registers, memory, stats, and logs.
-  - Prohibits stepping or unpausing from a shut-down state, presenting a clear guidance modal (`"SYSTEM SHUTDOWN - Please reboot [Ctrl-R], load [o], or quit [q]"`).
-- **Simulator Reload on Guest Reboot**:
-  - Updated `request_reboot()` and `[Ctrl-R]` keybinding to signal simulation loop exit, cleanly re-instantiating the simulator with preserved settings.
+- **Lock-Free State Machine**: Atomized `ExecutionState` and shared cross-thread variables (`tohost`, `mtime`, `mtimecmp`, `e_icount`) with `std::atomic<T>`, eliminating data races across simulation, TUI rendering, and GDB stub threads.
+- **Deterministic CLINT Time Advancement**: Derived simulated clock time strictly from `clint_mmio.mtime`, guaranteeing deterministic cycle progress and freezing time advancement during simulation pause.
+- **Standard Syscon Reset Bindings**: Added standard devicetree `syscon-poweroff` and `reboot` nodes across `virt-rv64.dts` and `virt-rv32.dts` for native OpenSBI driver reset integration.
 
----
+### Terminal UI & System Lifecycle
+
+- **Post-Shutdown Window Retention**: Retained the full TUI window after guest shutdown (`poweroff`/`halt`) with a `[SHUTDOWN]` badge, enabling post-mortem inspection of registers, memory, statistics, and logs without hanging.
+- **Clean Reload on Reboot**: Configured `request_reboot()` and `[Ctrl-R]` to cleanly re-instantiate the simulation engine while preserving user settings.
 
 ## [v2.0.0-rc.3] — 2026-07-31
 
-Release candidate 3 for v2.0.0. Focuses on TUI keybinding centralization, Notice Modals UX enhancement, automatic reboot on post-shutdown resume, and licensing compliance.
+Release candidate 3 focuses on TUI keybinding centralization, Notice Modals UX enhancement, automatic reboot on post-shutdown resume, and licensing compliance.
 
-### TUI & Visualizers
-- **Centralized TUI Keybindings Registry (`TuiKeybindings`)**:
-  - Centralized all key action mappings, footer labels, and online help definitions in `TuiKeybindings.hpp` / `TuiKeybindings.cpp`.
-  - Re-assigned intuitive, semantic hotkeys: `[n]` for Next step, `[b]` for Backstep, `[m]` for Manage Break/Watchpoints, `[i]` for Inspect Memory, `[w]` for Set Watchpoint, and `[:]`/`[k]` for PC Breakpoint.
-  - Isolated comma (`[,]`) strictly to opening the Simulator Settings modal.
-- **Notice Modals & Modal Collision Safety**:
-  - Moved status notices, warnings, and settings confirmations to centered Notice Modals.
-  - Formatted multi-line text across Breakpoint and Watchpoint creation modals to prevent text clipping.
-  - Re-mapped Manage Breakpoints modal to `[a]`, leaving `[b]` dedicated strictly to reverse step execution (`perform_backstep`).
-- **Post-Shutdown Automatic System Reload**:
-  - Resuming or single-stepping after guest system shutdown (`machine_.is_shutdown_ == true`) now triggers `machine_.request_reboot()`, reloading the guest binary image cleanly instead of hanging.
-  - Re-enabled execution on `perform_backstep()` when stepping backward out of shutdown state.
+### Terminal UI & Visual Inspection
 
-### License & Documentation
-- **MIT License & Third-Party Notices**:
-  - Added repository `LICENSE` file under the MIT License (Copyright (c) 2024-2026 ArchLab @ ScienceTokyo).
-  - Included third-party software notices for TinySoundFont (`tsf.h`, MIT License) and TinyMidiLoader (`tml.h`, zlib License).
-  - Updated `README.md` with a dedicated License section documenting core and third-party licenses.
+- **Centralized Keybinding Registry**: Unified key action bindings, status footer labels, and online help definitions in `TuiKeybindings`.
+- **Intuitive Navigation Hotkeys**: Mapped `[n]` for Next step, `[b]` for Backstep, `[m]` for Manage Break/Watchpoints, `[i]` for Inspect Memory, `[w]` for Set Watchpoint, and `[:]`/`[k]` for PC Breakpoints.
+- **Centered Notice Modals**: Migrated status notices, warnings, and settings confirmations to centered dialog modals with auto-wrapped text to prevent clipping.
+- **Automatic Post-Shutdown Reload**: Configured stepping or resuming from a shut-down guest state to trigger `request_reboot()` automatically, reloading binary images cleanly without hanging.
 
----
+### Licensing & Compliance
+
+- **MIT Licensing**: Added repository `LICENSE` file under MIT License and documented third-party component licenses in `README.md`.
 
 ## [v2.0.0-rc.2] — 2026-07-31
 
-Release candidate 2 for v2.0.0. Focuses on TUI UX refinements, pipeline execution timeline correctness, hardware Sixel capability detection, and compiler prerequisite updates.
+Release candidate 2 focuses on TUI UX refinements, pipeline execution timeline correctness, hardware Sixel capability detection, and compiler prerequisite updates.
 
-### TUI & Visualizers
-- **Pipeline Execution Timeline Overhaul**:
-  - Assigned a unique 64-bit dynamic instruction sequence ID (`inst_id`) to stage registers and cycle snapshots.
-  - Fixed a stage merging bug where instructions in a loop (sharing the same static PC) merged across iterations, producing repeating stage artifacts like `WB ID EX MEM WB ID EX MEM WB`.
-  - Dynamic instruction instances now render as distinct rows in chronological order, producing clean textbook pipeline execution diagrams (`IF → ID → EX → MEM → WB`).
-- **Arrows-Only Cache Inspector Navigation**:
-  - Simplified Cache Inspector navigation: Up/Down arrow keys (`[↑/↓]`) cycle Cache Ways (`0-3`), and Left/Right arrow keys (`[←/→]`) cycle Cache Sets (`0-15`).
-  - Removed redundant keybindings (`w`/`W`, `j`/`k`, number keys `0-3`) from the Cache page, leaving `[w]` dedicated strictly to the Set Watchpoint dialog.
-  - Arrow keys automatically pass through to the guest virtual terminal / UART when the simulator is running.
-- **High-Legibility Bold Key Badges & Styling**:
-  - Key shortcut brackets `[key]` across status bars, help modals, and inspector hints are now formatted in distinct ANSI bold (`\033[1m`) paired with vibrant theme accent colors (`kThemeSky` cyan).
-- **Automatic Sixel Terminal Query & ANSI Fallback**:
-  - Added Primary Device Attributes (DA1 - `\033[c`) query and environment checks (`TERM`, `TERM_PROGRAM`) to detect Sixel graphics support.
-  - Automatically falls back to clean standard ANSI text and diff cell rendering on unsupported terminals without producing escape artifacts.
-- **Cache Statistics Persistence**:
-  - Preserved cumulative cache hit, miss, and replacement statistics across `FENCE.I` cache line flushes (`BaseCache::flush()`).
-  - Performance counters now accumulate accurately throughout guest execution and only reset on explicit machine reset/reboot.
+### Terminal UI & Visual Inspection
 
-### Build & Documentation
-- **Compiler Prerequisites**: Updated minimum compiler requirements in `README.md` to Clang 20+ and GCC 14+ for complete C++23 standard library compatibility.
-- **Release Assets Note**: Added guidance in `README.md` noting that GitHub release packed binaries contain standalone executables without supplementary test scripts or images.
+- **Pipeline Chronological Execution Timeline**: Assigned unique 64-bit dynamic instruction sequence IDs (`inst_id`) to stage snapshots, preventing loop iterations from merging and rendering clean textbook pipeline execution timelines (`IF → ID → EX → MEM → WB`).
+- **Simplified Cache Navigation**: Streamlined Cache Inspector navigation to use arrow keys (`[↑/↓]` for cache ways, `[←/→]` for cache sets), automatically passing arrow keys through to UART during active execution.
+- **ANSI Styling & High-Legibility Badges**: Formatted key shortcut brackets `[key]` in distinct bold ANSI styling with vibrant theme accents.
+- **Automatic Sixel Terminal Detection**: Added terminal capability queries (DA1 `\033[c`) and environment checks to detect hardware Sixel support, falling back to clean ANSI text on unsupported terminals.
+- **Persistent Cache Statistics**: Preserved cumulative cache hit, miss, and replacement statistics across `FENCE.I` cache line flushes (`BaseCache::flush()`).
 
----
+### Documentation & Prerequisites
+
+- **Compiler Requirements**: Updated documentation specifying Clang 20+ and GCC 14+ for complete ISO C++23 standard library compatibility.
 
 ## [v2.0.0-rc.1] — 2026-07-30
 
-Release candidate for v2.0.0. All major features are complete; this cycle focuses
-on inspector polish, correctness fixes, and CLI normalization.
+Release candidate 1 for v2.0.0, completing major architectural features and focusing on inspector polish, correctness fixes, and CLI normalization.
 
-### TUI Inspectors
-- **Cache inspector**: per-way hit/miss markers (`◄ HIT` / `◄ MISS ▸ REPLACED`)
-  now correctly annotate only the exact hit way using `last_hit_way` tracking;
-  `[Cache:IC]` / `[Cache:DC]` tab click now correctly toggles IC ↔ DC (duplicate
-  `esc_buf_` handler that swallowed the toggle was fixed)
-- **MISA + VLEN modal**: added VLEN setting (32–1024 bits, power of 2, default 256)
-  to the MISA configuration modal; displayed on row 8; applied to `s_vlen` at reboot
-- **MMIO/Bus inspector**: live VirtIO status flags, IRQ state, Virtqueue 0 ring
-  physical addresses (Desc / Avail / Used), UART NS16550A settings
-- **Hazard inspector**: aligned stage labels (`IF `, `ID `, `EX `, `WB `) for
-  uniform column layout
-- **TLB, BP, Bus pages**: clamped to 36–46 visible characters per row; removed
-  overflow that was clipping text on narrow terminals
+### Terminal UI & Visual Inspection
 
-### CLI
-- `--vlen <N>` / `--vector-len <N>`: VLEN can now be set from the command line;
-  the non-standard `-VLEN` alias has been replaced with `--vector-len`
-- Debug mode (`-d`) no longer implicitly enables branch prediction trace output;
-  use `--trace-bpred` explicitly
+- **Cache Inspector Accuracy**: Annotated exact hit ways using `last_hit_way` tracking and resolved toggle event conflicts between ICache and DCache views.
+- **MISA & VLEN Configuration Modal**: Added interactive vector register length configuration (`VLEN`, 32–1024 bits) to the MISA configuration modal.
+- **MMIO & Bus Inspector**: Added live inspection views for VirtIO device status flags, IRQ states, Virtqueue 0 physical addresses, and NS16550A UART configuration.
+- **Hazard & Page Layout Alignment**: Aligned stage labels (`IF`, `ID`, `EX`, `WB`) across hazard panels and bounded TLB, BP, and Bus pages to prevent line wrapping on narrow terminals.
 
-### Bug Fixes
-- Stack inspector clicks no longer pollute the Explainer target PC
-  (`explain_pc_` is now separate from `inspect_addr_`)
+### Command-Line Interface
 
----
+- **Command-Line VLEN Configuration**: Added `--vlen <N>` command-line option for runtime vector register length configuration.
+- **Explicit Branch Prediction Tracing**: Decoupled debug mode (`-d`) from branch prediction tracing, requiring explicit `--trace-bpred`.
+
+### Bug Fixes & Stability
+
+- **Target Address Isolation**: Separated stack inspector click coordinates from instruction explainer target PC to prevent unintended address pollution.
 
 ## [v2.0.0-beta.36] — 2026-07-30
 
-### TUI
-- Cache section headers and `[Cache:IC]` / `[Cache:DC]` tab entries toggle between
-  ICache and DCache inspector views
-- Regs tab click cycles GPR → FPR → VEC → GPR
+### Terminal UI & Visual Inspection
 
----
+- **Cache Header Toggles**: Enabled section headers and `[Cache:IC]` / `[Cache:DC]` tab entries to toggle directly between ICache and DCache inspector views.
+- **Register Tab Cycling**: Enabled clicking the `Regs` tab header to cycle consecutively across GPR → FPR → VEC views.
 
 ## [v2.0.0-beta.34] — 2026-07-29
 
-### TUI
-- Machine settings (cycle-accurate mode, debug mode, MISA profile, theme) persist
-  across simulator reloads and binary hot-swaps
+### Terminal UI & Visual Inspection
 
----
+- **Settings Persistence**: Ensured machine settings (cycle-accurate mode, debug mode, MISA profile, and color theme) persist across simulator reloads and binary hot-swaps.
 
 ## [v2.0.0-beta.33] — 2026-07-29
 
-### TUI — Cache Inspector
-- Individual Way cursor navigation inside cache sets
-- Full 32-byte hex + ASCII cache line data inspection for the selected way
+### Terminal UI & Visual Inspection
 
----
+- **Individual Way Navigation**: Added cursor navigation across individual cache ways within selected cache sets.
+- **32-Byte Line Inspection**: Added full 32-byte hex and ASCII cache line data inspection for selected ways.
 
 ## [v2.0.0-beta.32] — 2026-07-28
 
-### TUI — Cache Inspector
-- Interactive cache Set inspector with set selection (`j`/`k`), way selection
-  (`0`–`3`, `w`), and a live set occupancy map
-- Replacement tracking: last-evicted tag, last-replaced set/way displayed
-- Collision-free keybindings for cache navigation
+### Terminal UI & Visual Inspection
 
----
+- **Interactive Cache Set Inspector**: Added set selection (`j`/`k`), way selection (`0`–`3`, `w`), and live set occupancy map visualization.
+- **Cache Replacement Tracking**: Added display tracking for last-evicted tag and last-replaced set/way.
+- **Keybinding Collision Audit**: Disambiguated cache inspector keybindings from global navigation shortcuts.
 
 ## [v2.0.0-beta.31] — 2026-07-27
 
-### Performance & TUI
-- Optimized rendering throughput in high-speed simulation
-- Cache inspector tab hidden in high-performance (IA) mode
-- Debug keybindings hidden from status bar footer in normal mode
+### Terminal UI & Performance
 
----
+- **TUI Rendering Optimization**: Optimized rendering throughput to prevent frame lag during high-speed simulation.
+- **Context-Sensitive Tab Visibility**: Automatically hid cache inspector tab in high-performance (IA) mode and suppressed debug shortcuts in normal mode footer.
 
 ## [v2.0.0-beta.30] — 2026-07-26
 
-### TUI
-- **MISA CSR modal** (`Alt-M`): configure ISA extensions (A/B/C/D/F/M/V/S/U) and
-  XLEN mode interactively with draft preview and quick presets (Base / IMAC / GC)
-- Settings modal options are mode-aware (CA vs IA)
+### Terminal UI & Configuration
 
----
+- **Interactive MISA Modal**: Added `Alt-M` modal to configure ISA extensions (A/B/C/D/F/M/V/S/U) and XLEN mode interactively with draft preview and presets.
+- **Mode-Aware Settings**: Updated simulator settings modal options to reflect active simulation mode (cycle-accurate vs high-performance).
 
 ## [v2.0.0-beta.27] — 2026-07-25
 
-### ISA — RVV
-- Fixed several RVV vector memory and permute bugs
+### Core Architecture & RVV
 
-### TUI
-- Interactive binary loading modal: browse and reload `.bin` images at runtime
-- Disambiguated conflicting key bindings
+- **Vector Instruction Fixes**: Corrected several RVV vector memory addressing and element permute edge cases.
 
----
+### Terminal UI & Visual Inspection
+
+- **Runtime Binary Reloading**: Added interactive binary loading modal (`[o]`) to browse and reload `.bin` workloads at runtime.
+- **Shortcut Disambiguation**: Resolved conflicting keybindings across inspector tabs.
 
 ## [v2.0.0-beta.26] — 2026-07-24
 
-### TUI — Pipeline Inspector
-- Reworked pipeline page layout for improved student readability
-- Cleaner stage-slot display with stall/bubble indicators
+### Terminal UI & Visual Inspection
 
----
+- **Pipeline Inspector Overhaul**: Redesigned pipeline page layout for educational readability with clearer stage slots and stall/bubble indicators.
 
 ## [v2.0.0-beta.25] — 2026-07-23
 
-### TUI — Education Tools
-- Overhauled pipeline visualizer with colour-coded in-flight instruction slots
-- Modularized `TuiModal` into separate per-modal handler files
+### Terminal UI & Education Tools
 
----
+- **Color-Coded Pipeline Visualizer**: Added color-coded in-flight instruction slots across pipeline stages.
+- **Modular Modal Handlers**: Refactored `TuiModal` into independent per-modal handler implementations.
 
 ## [v2.0.0-beta.24] — 2026-07-22
 
-### TUI
-- Simulation speed configurable by target frequency (Hz) via `[f]` key
+### Terminal UI & Controls
 
----
+- **Frequency-Based Rate Limiter**: Added runtime simulation speed throttling configurable by target frequency (Hz) via the `[f]` key.
 
 ## [v2.0.0-beta.22] — 2026-07-21
 
-### TUI
-- Grouped register tabs (GPR / FPR / VEC) under a single `Regs` tab entry
-- `[l]` / `Alt-L` cycles through tool inspector tabs
-- Cache page column alignment fixed across all themes
+### Terminal UI & Visual Inspection
 
----
+- **Consolidated Register Tabs**: Grouped GPR, FPR, and VEC register views under a unified `Regs` tab entry.
+- **Tab Navigation**: Mapped `[l]` / `Alt-L` to cycle through tool inspector tabs sequentially.
+- **Theme Layout Consistency**: Corrected cache page column alignment across light and dark color themes.
 
 ## [v2.0.0-beta.19] — 2026-07-20
 
-### TUI — Log & Trace
-- Execution log and instruction trace views integrated into the LeftPane tab system
-- Refactored pane class hierarchy to support pluggable inspector panels
+### Terminal UI & Visual Inspection
 
----
+- **Log & Trace Integration**: Integrated execution logging and instruction trace views directly into the LeftPane tab system.
+- **Pluggable Panel Hierarchy**: Refactored pane class hierarchy to support pluggable inspector panels.
 
 ## [v2.0.0-beta.17] — 2026-07-18
 
-### TUI — Educational Visualizers
-- Guest stack inspector with symbol-resolved frame layout
-- Cache heatmap with set occupancy heat levels
-- Data forwarding path diagram with active forwarding highlight
+### Terminal UI & Education Tools
 
----
+- **Guest Stack Frame Inspector**: Added stack inspector panel with symbol-resolved frame layouts.
+- **Cache Heatmap Visualizer**: Added cache occupancy heatmap displaying set access frequency levels.
+- **Operand Forwarding Diagram**: Added visual data forwarding path diagram highlighting active bypass stages.
 
 ## [v2.0.0-beta.15] — 2026-07-17
 
-### TUI — Instruction Explainer
-- Complete FP (F/D) explanations: rounding modes, NaN semantics, exception flags
-- Complete RVV (V) explanations: LMUL, SEW, VLEN, element group layout
-- Fixed vector register multi-word display formatting for VLEN > 64
+### Terminal UI & Instruction Explainer
 
----
+- **Floating-Point Explanations**: Added complete F/D instruction explanations detailing rounding modes, NaN semantics, and exception flags.
+- **Vector Extension Explanations**: Added RVV instruction explanations detailing LMUL, SEW, VLEN, and element group layouts.
+- **Multi-Word Vector Registers**: Corrected vector register formatting for register lengths exceeding 64 bits.
 
 ## [v2.0.0-beta.10] — 2026-07-10
 
-### Cycle-Accurate Core
-- Pipeline data hazard analysis (RAW / WAW / WAR) in the instruction explainer
-- Control hazard detection with branch misprediction penalty annotation
+### Microarchitecture & Pipeline
 
----
+- **Data Hazard Attribution**: Added dynamic pipeline hazard analysis (RAW, WAW, WAR) inside the instruction explainer.
+- **Branch Misprediction Penalty**: Added control hazard detection and branch misprediction penalty cycle annotation.
 
 ## [v2.0.0-beta.7] — 2026-07-07
 
-### Architecture
-- High-performance (IA) vs cycle-accurate (CA) simulation modes selectable at runtime
-- Modularized CLI argument parsing into logical groups
-- ISA test suite consolidated under the standard baremetal `appmode` runner
+### Core Architecture & CLI
 
----
+- **Dual Simulation Modes**: Added runtime selection between high-performance (IA) and cycle-accurate (CA) simulation engines.
+- **Modular Command-Line Parser**: Modularized CLI argument parsing into logical functional groups.
+- **Consolidated Test Runner**: Consolidated ISA test execution under the standard bare-metal `appmode` runner.
 
 ## [v2.0.0-beta.1] — 2026-07-01
 
-### Foundation
-- XLEN abstraction layer: unified RV32/RV64 register and CSR handling
-- Interactive TUI split-screen monitor with mouse and keyboard support
-- OpenSBI boot support for supervisor-mode Linux images
-- VirtIO console and disk block device models
-- MMU with TLB and page table walker (Sv39 / Sv32)
+### Foundation Architecture
 
----
+- **Dual-Width Abstraction**: Implemented XLEN abstraction layer unifying RV32 and RV64 register files and CSR state.
+- **Split-Screen Terminal Workbench**: Implemented interactive split-screen TUI monitor with mouse and keyboard input.
+- **Supervisor OS Support**: Added OpenSBI boot support and supervisor-mode execution for Linux kernels.
+- **Virtual Device Models**: Added VirtIO console and block disk device models.
+- **Memory Management Unit**: Added hardware page table walker and TLB models for Sv39 and Sv32 virtual memory.
 
 ## [v2.0.0-alpha.4] — 2026-06-15
 
-- Performance benchmarks and initial release asset packaging
+### Release & Packaging
+
+- **Packaging Infrastructure**: Initial automated release asset packaging and baseline performance benchmarks.
 
 ## [v2.0.0-alpha.3] — 2026-06-14
 
-- Initial public alpha: CMake preset infrastructure, Clang-20 CI, base RISC-V pipeline
+### Initial Alpha
+
+- **Initial Public Alpha**: Initial public release featuring CMake preset infrastructure, Clang-20 CI matrix, and base RISC-V in-order pipeline.
 
 [v2.0.4]: https://github.com/archlab-sciencetokyo/SimRV/releases/tag/v2.0.4
 [v2.0.3]: https://github.com/archlab-sciencetokyo/SimRV/releases/tag/v2.0.3
