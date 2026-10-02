@@ -839,8 +839,13 @@ auto Tui::display_coords_to_fb(int x, int y, size_t col_idx, int term_width, int
     const int rel_col = x - display_x;
     const int rel_row = y - display_y;
     if (rel_col >= 0 && rel_col < image_cols && rel_row >= 0 && rel_row < image_rows) {
-        const int fb_x = std::clamp(rel_col * source_width / image_cols, 0, source_width - 1);
-        const int fb_y = std::clamp(rel_row * source_height / image_rows, 0, source_height - 1);
+        // Mouse coordinates address terminal cells, while the sixel image fills each
+        // cell. Map through the cell center to avoid the visible half-cell cursor bias
+        // caused by sampling the upper-left corner.
+        const int fb_x = std::clamp((rel_col * 2 + 1) * source_width / (image_cols * 2),
+                                    0, source_width - 1);
+        const int fb_y = std::clamp((rel_row * 2 + 1) * source_height / (image_rows * 2),
+                                    0, source_height - 1);
         return std::make_pair(fb_x, fb_y);
     }
     return std::nullopt;
