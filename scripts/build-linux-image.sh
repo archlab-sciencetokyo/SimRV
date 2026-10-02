@@ -613,7 +613,8 @@ chmod 1777 /tmp/.X11-unix /tmp/.ICE-unix
 if [ ! -x /usr/bin/xinit ]; then
     echo "[JWM] Installing X11 desktop packages on first boot..." > /dev/ttyS0
     if ! apk add --no-cache xorg-server xinit jwm xterm xf86-video-fbdev \
-        xf86-input-evdev font-misc-misc font-dejavu > /tmp/simrv-apk.log 2>&1; then
+        xf86-input-evdev font-misc-misc font-dejavu links-graphics bsd-games \
+        gnuchess > /tmp/simrv-apk.log 2>&1; then
         echo "[JWM] X11 package installation failed; see /tmp/simrv-apk.log" > /dev/ttyS0
         sed -n '1,24p' /tmp/simrv-apk.log > /dev/ttyS0 2>/dev/null || true
         exit 1
@@ -636,6 +637,14 @@ if [ -f /etc/system.jwmrc ]; then
     sed -i 's/Sans-12:bold/DejaVu Sans-12:bold/g; s/>Sans-12</>DejaVu Sans-12</g' \
         /etc/system.jwmrc
     sed -i 's/<TrayButton label="JWM">root:1<\//<TrayButton label="SimRV">root:1<\//; s/<Background type="solid">#111111<\//<Background type="gradient">#21152b:#071622<\//' /etc/system.jwmrc
+    sed -i 's#<Program icon="web-browser" label="Firefox">firefox</Program>#<Program icon="web-browser" label="Web Browser">links -g</Program>#' /etc/system.jwmrc
+    sed -i '/label="Gimp"/i\
+            <Menu icon="games" label="Games">\
+                <Program label="Chess">xterm -T Chess -e gnuchess</Program>\
+                <Program label="Gomoku">xterm -T Gomoku -e gomoku</Program>\
+                <Program label="Klondike">xterm -T Klondike -e klondike</Program>\
+                <Program label="Snake">xterm -T Snake -e snake</Program>\
+            </Menu>' /etc/system.jwmrc
 fi
 
 if [ -r /tmp/.X0-lock ]; then
@@ -781,7 +790,7 @@ EOF
         "$qemu_riscv64" -L "$ROOTFS_DISK_DIR" "$ROOTFS_DISK_DIR/sbin/apk" \
             --root "$ROOTFS_DISK_DIR" --no-cache --no-scripts add \
             xorg-server xinit jwm xterm xf86-video-fbdev xf86-input-evdev \
-            font-misc-misc font-dejavu
+            font-misc-misc font-dejavu links-graphics bsd-games gnuchess
         apk_status=$?
         set -e
         if [[ -x "$ROOTFS_DISK_DIR/usr/bin/xinit" &&
@@ -791,6 +800,14 @@ EOF
             sed -i 's/Sans-12:bold/DejaVu Sans-12:bold/g; s/>Sans-12</>DejaVu Sans-12</g' \
                 "$ROOTFS_DISK_DIR/etc/system.jwmrc"
             sed -i 's/<TrayButton label="JWM">root:1<\//<TrayButton label="SimRV">root:1<\//; s/<Background type="solid">#111111<\//<Background type="gradient">#21152b:#071622<\//' "$ROOTFS_DISK_DIR/etc/system.jwmrc"
+            sed -i 's#<Program icon="web-browser" label="Firefox">firefox</Program>#<Program icon="web-browser" label="Web Browser">links -g</Program>#' "$ROOTFS_DISK_DIR/etc/system.jwmrc"
+            sed -i '/label="Gimp"/i\
+            <Menu icon="games" label="Games">\
+                <Program label="Chess">xterm -T Chess -e gnuchess</Program>\
+                <Program label="Gomoku">xterm -T Gomoku -e gomoku</Program>\
+                <Program label="Klondike">xterm -T Klondike -e klondike</Program>\
+                <Program label="Snake">xterm -T Snake -e snake</Program>\
+            </Menu>' "$ROOTFS_DISK_DIR/etc/system.jwmrc"
         else
             print_info "X11 bundle unavailable; retaining first-boot APK fallback."
         fi
@@ -799,10 +816,10 @@ EOF
     fi
 
     DISK_MB=$(du -sm "$ROOTFS_DISK_DIR" | cut -f1)
-    DISK_MB=$(( DISK_MB + 48 ))
-    # Leave room for the optional X11/JWM packages installed on first boot and
-    # for normal Alpine package-manager use.
-    if [ "$DISK_MB" -lt 512 ]; then DISK_MB=512; fi
+    DISK_MB=$(( DISK_MB + 128 ))
+    # Keep a generous writable package/data area for browsers, games, and
+    # normal Alpine package-manager use.
+    if [ "$DISK_MB" -lt 4096 ]; then DISK_MB=4096; fi
     dd if=/dev/zero of="$IMAGES_DIR/root.img" bs=1M count="$DISK_MB" status=none
     mkfs.ext4 -d "$ROOTFS_DISK_DIR" -F "$IMAGES_DIR/root.img"
     cp -f "$IMAGES_DIR/root.img" "$IMAGES_DIR/root.bin"
