@@ -89,6 +89,7 @@ nav:
   - User Guide:
       - Installation: user/install.md
       - Quickstart & CLI: user/index.md
+      - VS Code Debugging: user/vscode.md
       - Interactive TUI Workbench: user/tui.md
       - Bare-Metal & Embedded: user/baremetal.md
       - Full-System Linux & SMP: user/linux.md

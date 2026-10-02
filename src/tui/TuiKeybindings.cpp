@@ -116,23 +116,17 @@ static const auto kKeyBindings =
                                     .footer_label = "[F10] Quit",
                                     .help_label = "Quit Simulator"},
                                    {.action = KeyAction::CycleRegPage,
-                                    .key_display = "[F3] / [r] (fwd) / [R] (rev)",
-                                    .primary_char = 'r',
-                                    .alt_char = 'R',
+                                    .key_display = "[F3]",
+                                    .primary_char = '\0',
+                                    .alt_char = '\0',
                                     .footer_label = "[F3] Regs",
-                                    .help_label = "Cycle Register Page (r: fwd, R: rev)"},
+                                    .help_label = "Cycle Register Page"},
                                    {.action = KeyAction::CycleToolPage,
-                                    .key_display = "[l] (fwd) / [L] (rev)",
-                                    .primary_char = 'l',
-                                    .alt_char = 'L',
-                                    .footer_label = "[l] Tools",
-                                    .help_label = "Cycle Tool Tabs (l: fwd, L: rev)"},
-                                   {.action = KeyAction::CycleRightPanel,
-                                    .key_display = "[p] / click header",
-                                    .primary_char = 'p',
-                                    .alt_char = 'P',
-                                    .footer_label = "[p] Panel",
-                                    .help_label = "Cycle Right Pane"},
+                                    .key_display = "[F11]",
+                                    .primary_char = '\0',
+                                    .alt_char = '\0',
+                                    .footer_label = "[F11] Tools",
+                                    .help_label = "Cycle Tool Tabs"},
                                    {.action = KeyAction::ToggleStudentGuide,
                                     .key_display = "[g]",
                                     .primary_char = 'g',
@@ -371,8 +365,6 @@ auto key_action_for_footer(TuiFooterAction action) -> KeyAction {
             return KeyAction::Quit;
         case TuiFooterAction::ToggleStudentGuide:
             return KeyAction::ToggleStudentGuide;
-        case TuiFooterAction::TogglePanel:
-            return KeyAction::CycleRightPanel;
         case TuiFooterAction::OpenSettings:
             return KeyAction::Settings;
         case TuiFooterAction::ManageBreakpoints:

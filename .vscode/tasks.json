@@ -2,18 +2,51 @@
     "version": "2.0.0",
     "tasks": [
         {
-            "label": "build-debug",
+            "label": "build-guest-hello",
+            "type": "shell",
+            "command": "make",
+            "args": [
+                "-C",
+                "${workspaceFolder}/examples/hello",
+                "-B",
+                "all",
+                "XLEN=64",
+                "DEBUG=1"
+            ],
+            "group": {
+                "kind": "build",
+                "isDefault": false
+            },
+            "problemMatcher": [
+                "$gcc"
+            ],
+            "presentation": {
+                "echo": true,
+                "reveal": "always",
+                "focus": false,
+                "panel": "shared"
+            }
+        },
+        {
+            "label": "configure-debug",
             "type": "shell",
             "command": "cmake",
             "args": [
                 "--preset",
-                "ninja-clang-debug",
-                "&&",
-                "cmake",
+                "rv64-debug"
+            ],
+            "problemMatcher": []
+        },
+        {
+            "label": "build-debug",
+            "type": "shell",
+            "command": "cmake",
+            "args": [
                 "--build",
                 "--preset",
-                "ninja-clang-debug"
+                "rv64-debug"
             ],
+            "dependsOn": "configure-debug",
             "group": {
                 "kind": "build",
                 "isDefault": false
@@ -31,18 +64,25 @@
             "isBackground": false
         },
         {
-            "label": "build-release",
+            "label": "configure-release",
             "type": "shell",
             "command": "cmake",
             "args": [
                 "--preset",
-                "ninja-clang-release",
-                "&&",
-                "cmake",
+                "rv64-release"
+            ],
+            "problemMatcher": []
+        },
+        {
+            "label": "build-release",
+            "type": "shell",
+            "command": "cmake",
+            "args": [
                 "--build",
                 "--preset",
-                "ninja-clang-release"
+                "rv64-release"
             ],
+            "dependsOn": "configure-release",
             "group": {
                 "kind": "build",
                 "isDefault": true
@@ -66,7 +106,7 @@
             "args": [
                 "--build",
                 "--preset",
-                "ninja-clang-release",
+                "rv64-release",
                 "--target",
                 "phase1-gate"
             ],

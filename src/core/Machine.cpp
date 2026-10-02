@@ -216,6 +216,14 @@ auto Machine::ram_view() const noexcept -> simrv::memory::RamView {
     return {runtime_->ram.data(), config.memory.dram_base, config.memory.dram_size};
 }
 
+auto Machine::framebuffer_view() const noexcept -> simrv::memory::RamView {
+    constexpr Address base = 0x84000000ULL;
+    constexpr Address size = 640ULL * 480ULL * 4ULL;
+    const auto ram = ram_view();
+    if (!ram.contains(base, static_cast<std::size_t>(size))) return {};
+    return {ram.unchecked_ptr(base), base, size};
+}
+
 auto Machine::save_checkpoint(const std::string& filepath) const
     -> std::expected<void, std::string> {
     const auto ram = ram_view();
@@ -237,9 +245,9 @@ auto Machine::save_checkpoint(const std::string& filepath) const
     for (size_t i = 0; i < num_harts(); ++i) {
         const auto& cpu = hart(i);
         const CheckpointHart hart_state{.state = cpu.state(),
-                                       .instruction_count = cpu.e_icount,
-                                       .cycle_count = cpu.e_ccount,
-                                       .mcycle = cpu.clint_mmio.mcycle};
+                                        .instruction_count = cpu.e_icount,
+                                        .cycle_count = cpu.e_ccount,
+                                        .mcycle = cpu.clint_mmio.mcycle};
         out.write(reinterpret_cast<const char*>(&hart_state), sizeof(hart_state));
     }
     out.write(reinterpret_cast<const char*>(ram.data()), static_cast<std::streamsize>(ram.size()));
@@ -275,7 +283,8 @@ auto Machine::load_checkpoint(const std::string& filepath) -> std::expected<void
         return std::unexpected("cannot load checkpoint without allocated RAM");
     }
     std::vector<Byte> ram_image(ram.size());
-    in.read(reinterpret_cast<char*>(ram_image.data()), static_cast<std::streamsize>(ram_image.size()));
+    in.read(reinterpret_cast<char*>(ram_image.data()),
+            static_cast<std::streamsize>(ram_image.size()));
     if (!in) return std::unexpected("truncated checkpoint RAM image");
     for (size_t i = 0; i < num_harts(); ++i) {
         auto& cpu = hart(i);
@@ -353,6 +362,28 @@ auto Machine::uart_device() const noexcept -> const simrv::device::Uart* {
     return runtime_->uart.get();
 }
 
+void Machine::send_input_key(uint16_t code, bool pressed) {
+    const std::scoped_lock lock(input_mutex_);
+    pending_input_events_.push_back(
+        {.type = PendingInputEvent::Type::Key, .code = code, .pressed = pressed});
+}
+
+void Machine::send_input_mouse_motion(int32_t x, int32_t y) {
+    const std::scoped_lock lock(input_mutex_);
+    pending_input_events_.push_back({.type = PendingInputEvent::Type::MouseMotion, .x = x, .y = y});
+}
+
+void Machine::send_input_mouse_button(uint16_t button, bool pressed) {
+    const std::scoped_lock lock(input_mutex_);
+    pending_input_events_.push_back(
+        {.type = PendingInputEvent::Type::MouseButton, .code = button, .pressed = pressed});
+}
+
+void Machine::send_input_mouse_wheel(int32_t delta) {
+    const std::scoped_lock lock(input_mutex_);
+    pending_input_events_.push_back({.type = PendingInputEvent::Type::MouseWheel, .x = delta});
+}
+
 auto Machine::pcie_root() noexcept -> simrv::device::PcieRootComplex* {
     return runtime_->pcie.get();
 }
@@ -424,6 +455,53 @@ void Machine::wait_for_runner_quiescence() {
 
 void Machine::prepare_runner_cycle() {
     std::visit([this](auto& runner) { runner.prepare(*this); }, runtime_->runner);
+}
+
+void Machine::service_pending_input() {
+    std::deque<PendingInputEvent> events;
+    {
+        const std::scoped_lock lock(input_mutex_);
+        events.swap(pending_input_events_);
+    }
+
+    for (const auto& event : events) {
+        if (runtime_->mmio_input) {
+            switch (event.type) {
+                case PendingInputEvent::Type::Key:
+                    runtime_->mmio_input->push_key_event(event.code, event.pressed);
+                    break;
+                case PendingInputEvent::Type::MouseMotion:
+                    runtime_->mmio_input->push_mouse_motion(event.x, event.y);
+                    break;
+                case PendingInputEvent::Type::MouseButton:
+                    runtime_->mmio_input->push_mouse_button(event.code, event.pressed);
+                    break;
+                case PendingInputEvent::Type::MouseWheel:
+                    runtime_->mmio_input->push_mouse_wheel(event.x);
+                    break;
+            }
+        } else if (runtime_->pci_input) {
+            switch (event.type) {
+                case PendingInputEvent::Type::Key:
+                    runtime_->pci_input->push_key_event(event.code, event.pressed);
+                    break;
+                case PendingInputEvent::Type::MouseMotion:
+                    runtime_->pci_input->push_mouse_motion(event.x, event.y);
+                    break;
+                case PendingInputEvent::Type::MouseButton:
+                    runtime_->pci_input->push_mouse_button(event.code, event.pressed);
+                    break;
+                case PendingInputEvent::Type::MouseWheel:
+                    runtime_->pci_input->push_mouse_wheel(event.x);
+                    break;
+            }
+        }
+    }
+}
+
+void Machine::service_network() {
+    if (runtime_->pci_net) runtime_->pci_net->poll_backend();
+    if (runtime_->mmio_net) runtime_->mmio_net->poll_backend();
 }
 
 void Machine::execute_runner_cycle() {
@@ -927,7 +1005,9 @@ void Machine::switch_execution_engine_sync(ExecutionEngine engine) {
             cpu.dcache.flush(true);
             cpu.branch_predictor.configure(cpu.pipeline_sim.config.branch_predictor);
             cpu.branch_predictor.reset();
-            cpu.pipeline_sim.config.record_snapshots = is_observable_engine(engine);
+            cpu.pipeline_sim.config.record_snapshots =
+                is_observable_engine(engine) ||
+                (engine == ExecutionEngine::CycleFast && runtime_profile.gdb);
         } else {
             cpu.pipeline_sim.config.record_snapshots = false;
             cpu.decode_cache.flush();
@@ -1341,6 +1421,9 @@ void Machine::run() {
         if (telemetry_sink_) {
             telemetry_sink_->set_sim_thread_sleeping(false);
         }
+
+        service_network();
+        service_pending_input();
 
         if (execute_runner_fast_batch(runtime_profile.fast_batch_quantum())) {
             if (simrv::compiler::unlikely(trace().fp_trace.is_open())) {

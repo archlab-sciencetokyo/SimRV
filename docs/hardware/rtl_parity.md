@@ -8,12 +8,12 @@ Ground:
 python3 scripts/evaluate_rtl_parity.py --list-targets
 
 python3 scripts/evaluate_rtl_parity.py rvcomp \
-  --rvcomp-dir ../RVComp \
+  --rvcomp-dir /path/to/RVComp \
   --simrv-bin build/rv32-release/simrv \
   --trace-dir build/rvcomp_parity_traces
 
 python3 scripts/evaluate_rtl_parity.py cfu-pg \
-  --cfu-dir ../CFU-Proving-Ground \
+  --cfu-dir /path/to/CFU-Proving-Ground \
   --simrv-bin build/rv32-release/simrv \
   --trace-dir build/cfu_pg_parity_traces
 ```

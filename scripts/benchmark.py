@@ -851,7 +851,6 @@ def run_benchmark_single(
             os.path.join(riscv_tests_dir, "..", "coremark", f"{test_target}64.riscv"),
             os.path.join(riscv_tests_dir, "coremark", f"{test_target}.riscv"),
             os.path.join(riscv_tests_dir, "coremark", f"{test_target}64.riscv"),
-            "/home/archlab/ltrunk/workspace/tests/coremark/coremark64.riscv",
         ]
         for cand in candidates:
             if os.path.isfile(cand):
@@ -1575,16 +1574,13 @@ def main():
     script_dir = os.path.dirname(os.path.abspath(__file__))
     root_dir = os.path.dirname(script_dir)
 
-    # 1. Resolve riscv-tests directory
-    default_dir = os.path.join(root_dir, "../../tests/riscv-tests")
-    if args.riscv_tests_dir:
-        riscv_tests_dir = args.riscv_tests_dir
-    elif os.path.isdir(default_dir):
-        riscv_tests_dir = default_dir
-    else:
-        riscv_tests_dir = os.environ.get("RISCV_TESTS_DIR") or default_dir
+    # 1. Resolve riscv-tests directory from an explicit argument or environment.
+    riscv_tests_dir = args.riscv_tests_dir or os.environ.get("RISCV_TESTS_DIR")
+    if not riscv_tests_dir and not args.test:
+        print("ERROR: Set --riscv-tests-dir or RISCV_TESTS_DIR when using benchmark names", file=sys.stderr)
+        sys.exit(2)
 
-    if os.path.isdir(os.path.join(riscv_tests_dir, "share", "riscv-tests")):
+    if riscv_tests_dir and os.path.isdir(os.path.join(riscv_tests_dir, "share", "riscv-tests")):
         riscv_tests_dir = os.path.join(riscv_tests_dir, "share", "riscv-tests")
 
     # 2. Resolve tools

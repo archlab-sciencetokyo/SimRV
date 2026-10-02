@@ -9,6 +9,7 @@
 
 #include <atomic>
 #include <chrono>
+#include <cstdio>
 #include <deque>
 #include <filesystem>
 #include <fstream>
@@ -82,6 +83,10 @@ void emit_log(Level level, FILE* stream, std::string_view ansi_color, std::strin
             } else {
                 std::println(stream, "[{}] {}", plain_tag, msg);
             }
+            // CLI consumers such as the VS Code launcher may read logs through a pipe.
+            // Keep readiness and guest-console diagnostics observable without waiting for
+            // stdout's block buffer to fill.
+            std::fflush(stream);
         }
     }
     if (callback) {

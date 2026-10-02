@@ -30,6 +30,7 @@ enum class TuiRegPage : uint8_t {
     EXPLAIN,
     STACK,
     CONSOLE,
+    DISPLAY,
     DISASM = CONSOLE
 };
 
@@ -63,6 +64,7 @@ struct WorkbenchSlot {
         case TuiRegPage::TRACE:
         case TuiRegPage::EXPLAIN:
         case TuiRegPage::CONSOLE:
+        case TuiRegPage::DISPLAY:
         default:
             return TuiCategoryGroup::Tools;
     }
@@ -96,6 +98,8 @@ struct WorkbenchSlot {
             return "Stack & Memory";
         case TuiRegPage::CONSOLE:
             return "Console";
+        case TuiRegPage::DISPLAY:
+            return "Display";
     }
     return "Tool View";
 }
@@ -168,7 +172,6 @@ enum class TuiFooterAction : uint8_t {
     CycleRegs,
     CycleTools,
     ToggleHelp,
-    TogglePanel,
     OpenSettings,
     Reboot,
     SwitchHart,

@@ -13,6 +13,7 @@
 #include <mutex>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <thread>
 
 #include "simrv/util/UniqueFd.hpp"
@@ -128,6 +129,7 @@ class GdbStub {
     [[nodiscard]] auto handle_packet(const std::string& packet, simrv::core::Machine& machine)
         -> CommandResult;
     auto handle_query(const std::string& packet, simrv::core::Machine& machine) -> std::string;
+    auto cmd_monitor(std::string_view command, simrv::core::Machine& machine) -> std::string;
     auto handle_qxfer(const std::string& packet) -> std::string;
     auto cmd_read_registers(simrv::core::Machine& machine) -> std::string;
     auto cmd_write_registers(const std::string& packet, simrv::core::Machine& machine)

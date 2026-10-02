@@ -19,6 +19,7 @@ class VirtioPciNet : public VirtioPciDevice {
 
     auto backend() -> virtio::NetBackend& { return backend_; }
     [[nodiscard]] auto backend() const -> const virtio::NetBackend& { return backend_; }
+    void poll_backend();
 
    protected:
     auto get_device_features(uint32_t select) -> uint32_t override;

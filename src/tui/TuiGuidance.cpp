@@ -132,6 +132,7 @@ auto guidance_for_context(const GuidanceContext& context) -> PageGuidance {
                         0};
             break;
         case TuiRegPage::CONSOLE:
+        case TuiRegPage::DISPLAY:
             guidance = {"Console",
                         "Terminal or display output from the simulated system.",
                         "Direct guest UART terminal and framebuffer display output.",

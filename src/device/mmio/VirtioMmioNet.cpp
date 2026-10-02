@@ -31,17 +31,24 @@ VirtioMmioNet::VirtioMmioNet(Address base_address, uint32_t irq_num, core::Machi
     add_queue(64);  // tx
 }
 
+void VirtioMmioNet::poll_backend() {
+    if (backend_.poll_host_rx() != 0) on_queue_notify(0);
+}
+
 auto VirtioMmioNet::read_device_config(Address offset, std::size_t size) -> uint64_t {
-    (void)size;
     const auto& mac = backend_.get_mac();
-    if (offset == 0) {
-        return mac[0] | (static_cast<uint32_t>(mac[1]) << 8) |
-               (static_cast<uint32_t>(mac[2]) << 16) | (static_cast<uint32_t>(mac[3]) << 24);
+    uint64_t value = 0;
+    for (std::size_t byte = 0; byte < size && byte < sizeof(value); ++byte) {
+        const auto config_offset = offset + byte;
+        uint8_t value_byte = 0;
+        if (config_offset < mac.size()) {
+            value_byte = mac[config_offset];
+        } else if (config_offset == 6) {
+            value_byte = 1;  // VIRTIO_NET_S_LINK_UP
+        }
+        value |= static_cast<uint64_t>(value_byte) << (byte * 8);
     }
-    if (offset == 4) {
-        return mac[4] | (static_cast<uint32_t>(mac[5]) << 8) | (1U << 16);  // Link up
-    }
-    return 0;
+    return value;
 }
 
 void VirtioMmioNet::on_queue_notify(uint32_t q_idx) {

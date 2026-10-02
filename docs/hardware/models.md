@@ -264,7 +264,7 @@ To calibrate SimRV to an external RTL core:
 3. **Verify via Evaluation Tooling**:
 
    ```bash
-   python3 scripts/evaluate_rvcomp.py --rvcomp-dir ../RVComp \
+   python3 scripts/evaluate_rvcomp.py --rvcomp-dir /path/to/RVComp \
      --trace-dir build/rvcomp_traces
    ```
 
@@ -274,7 +274,7 @@ To calibrate SimRV to an external RTL core:
 
    The evaluator uses the RISC-V tools already on `PATH`; it does not assume a
    site-specific toolchain directory. `--rvcomp-bin` can select a prebuilt RTL
-   simulator when the default `../RVComp/obj_dir/rvcom` is not appropriate.
+   simulator when the checkout's `obj_dir/rvcom` is not appropriate.
 
 4. **Automated Microarchitecture Calibration Optimizer**:
 

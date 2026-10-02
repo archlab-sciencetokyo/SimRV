@@ -87,7 +87,7 @@ extern "C" void emergency_terminal_restore() {
     std::fflush(stdout);
     if (g_tui_active) {
         const char* shutdown_seq =
-            "\033[0m\033[?1006l\033[?1002l\033[?1000l\033[?25h\033[2J\033[H\033[?1049l\n";
+            "\033[0m\033[?1006l\033[?1003l\033[?1000l\033[?25h\033[2J\033[H\033[?1049l\n";
         (void)(::write(STDOUT_FILENO, shutdown_seq, std::strlen(shutdown_seq)) == 0);
         g_tui_active = false;
     }
@@ -100,7 +100,7 @@ static void handle_termination_signal(int sig) {
     if (g_tui_active) {
         using namespace std::string_view_literals;
         auto constexpr shutdown_seq =
-            "\033[0m\033[?1006l\033[?1002l\033[?1000l\033[?25h\033[2J\033[H\033[?1049l\n"sv;
+            "\033[0m\033[?1006l\033[?1003l\033[?1000l\033[?25h\033[2J\033[H\033[?1049l\n"sv;
         (void)(::write(STDOUT_FILENO, shutdown_seq.data(), shutdown_seq.size()) == 0);
         g_tui_active = false;
     }
@@ -128,7 +128,6 @@ Tui::Tui(simrv::core::Machine& machine) : machine_(machine), modal_(machine) {
     last_speed_update_ = std::chrono::steady_clock::now();
     student_guide_enabled_ = machine_.class_mode_enabled();
     mission_.configure(machine_.mission_id(), machine_.binary_path());
-    right_panel_mode_.store(TuiRightPanelMode::Terminal, std::memory_order_relaxed);
     update_trace_active_cache();
     vt_.set_scroll_offset_callback([this](int lines) -> void {
         if (scroll_offset_ > 0) {
@@ -314,7 +313,7 @@ void Tui::initialize() {
 
     g_tui_active = true;
 
-    const char* init_seq = "\033[?1049h\033[2J\033[H\033[?1000h\033[?1002h\033[?1006h\033[?25l";
+    const char* init_seq = "\033[?1049h\033[2J\033[H\033[?1000h\033[?1003h\033[?1006h\033[?25l";
     (void)(::write(STDOUT_FILENO, init_seq, strlen(init_seq)) == 0);
 
     struct sigaction sa{};
@@ -383,31 +382,38 @@ void Tui::trigger_immediate_render() {
 void Tui::ui_render_loop(const std::stop_token& stop_token) {
     auto next_sample = std::chrono::steady_clock::now();
     while (!stop_token.stop_requested() && ui_running_.load(std::memory_order_relaxed)) {
-        render_requested_.store(false, std::memory_order_release);
-        processing_ui_input_.store(true, std::memory_order_release);
-        update();
-        processing_ui_input_.store(false, std::memory_order_release);
-        const auto now = std::chrono::steady_clock::now();
-        const auto interval =
-            std::chrono::milliseconds(std::max(1u, 1000 / std::clamp(target_fps(), 1u, 120u)));
-        if (now >= next_sample) {
-            if (!is_paused() && backend_) backend_->request_sample();
-            next_sample = now + interval;
-        }
-        const bool force = full_render_requested_.exchange(false, std::memory_order_acq_rel);
-        if (is_paused() && (force || g_resized)) update_cache();
-        render(force);
-        const auto deadline = is_paused() && !frame_dirty_ ? now + std::chrono::milliseconds(200)
-                                                           : last_draw_time_ + interval;
-        const int timeout = static_cast<int>(
-            std::max<int64_t>(0, std::chrono::duration_cast<std::chrono::milliseconds>(
-                                     deadline - std::chrono::steady_clock::now())
-                                     .count()));
-        pollfd fds[] = {{STDIN_FILENO, POLLIN, 0}, {ui_wake_.get(), POLLIN, 0}};
-        (void)::poll(fds, 2, timeout);
-        if (fds[1].revents & POLLIN) {
-            uint64_t pending;
-            (void)::read(ui_wake_.get(), &pending, sizeof(pending));
+        try {
+            render_requested_.store(false, std::memory_order_release);
+            processing_ui_input_.store(true, std::memory_order_release);
+            update();
+            processing_ui_input_.store(false, std::memory_order_release);
+            const auto now = std::chrono::steady_clock::now();
+            const auto interval =
+                std::chrono::milliseconds(std::max(1u, 1000 / std::clamp(target_fps(), 1u, 120u)));
+            if (now >= next_sample) {
+                if (!is_paused() && backend_) backend_->request_sample();
+                next_sample = now + interval;
+            }
+            const bool force = full_render_requested_.exchange(false, std::memory_order_acq_rel);
+            if (is_paused() && (force || g_resized)) update_cache();
+            render(force);
+            const auto deadline = is_paused() && !frame_dirty_
+                                      ? now + std::chrono::milliseconds(200)
+                                      : last_draw_time_ + interval;
+            const int timeout = static_cast<int>(
+                std::max<int64_t>(0, std::chrono::duration_cast<std::chrono::milliseconds>(
+                                         deadline - std::chrono::steady_clock::now())
+                                         .count()));
+            pollfd fds[] = {{STDIN_FILENO, POLLIN, 0}, {ui_wake_.get(), POLLIN, 0}};
+            (void)::poll(fds, 2, timeout);
+            if (fds[1].revents & POLLIN) {
+                uint64_t pending;
+                (void)::read(ui_wake_.get(), &pending, sizeof(pending));
+            }
+        } catch (const std::exception& e) {
+            simrv::log::error("TUI render loop exception: {}", e.what());
+        } catch (...) {
+            simrv::log::error("TUI render loop unknown exception");
         }
     }
 }
@@ -502,68 +508,63 @@ void Tui::render_build_lines(int inspector_width, int terminal_width, int num_ro
     cached_num_rows_ = num_rows;
     lines_to_draw_.clear();
     if (terminal_width > 0 && num_rows > 0) {
-        if (panel_mode == TuiRightPanelMode::Terminal) {
-            vt_.resize(terminal_width, num_rows);
-            int total = vt_.get_lines_count();
-            int start = get_terminal_pane_start_line(num_rows);
-            int end_exclusive = std::min(total, start + num_rows);
+        vt_.resize(terminal_width, num_rows);
+        int total = vt_.get_lines_count();
+        int start = get_terminal_pane_start_line(num_rows);
+        int end_exclusive = std::min(total, start + num_rows);
 
-            // Terminal output is parsed in guest-sized chunks. Reuse complete ANSI rows when a
-            // frame observes the same chunk and geometry; selections intentionally bypass this
-            // cache because they add presentation-only attributes.
-            const uint64_t terminal_generation = vt_.generation();
-            const bool reuse_terminal_rows =
-                !selection_.is_active && terminal_rows_generation_ == terminal_generation &&
-                terminal_rows_width_ == terminal_width && terminal_rows_count_ == num_rows &&
-                terminal_rows_start_ == start;
-            if (reuse_terminal_rows) {
-                lines_to_draw_ = terminal_rows_cache_;
-            } else {
-                int const content_start_y = selection_.content_start_y;
-                int vt_sel_start = start + (selection_.start_y - content_start_y);
-                int vt_sel_end = start + (selection_.end_y - content_start_y);
-                int sx1 = selection_.start_x;
-                int sx2 = selection_.end_x;
-                if (vt_sel_start > vt_sel_end || (vt_sel_start == vt_sel_end && sx1 > sx2)) {
-                    std::swap(vt_sel_start, vt_sel_end);
-                    std::swap(sx1, sx2);
-                }
+        // Terminal output is parsed in guest-sized chunks. Reuse complete ANSI rows when a
+        // frame observes the same chunk and geometry; selections intentionally bypass this
+        // cache because they add presentation-only attributes.
+        const uint64_t terminal_generation = vt_.generation();
+        const bool reuse_terminal_rows =
+            !selection_.is_active && terminal_rows_generation_ == terminal_generation &&
+            terminal_rows_width_ == terminal_width && terminal_rows_count_ == num_rows &&
+            terminal_rows_start_ == start;
+        if (reuse_terminal_rows) {
+            lines_to_draw_ = terminal_rows_cache_;
+        } else {
+            int const content_start_y = selection_.content_start_y;
+            int vt_sel_start = start + (selection_.start_y - content_start_y);
+            int vt_sel_end = start + (selection_.end_y - content_start_y);
+            int sx1 = selection_.start_x;
+            int sx2 = selection_.end_x;
+            if (vt_sel_start > vt_sel_end || (vt_sel_start == vt_sel_end && sx1 > sx2)) {
+                std::swap(vt_sel_start, vt_sel_end);
+                std::swap(sx1, sx2);
+            }
 
-                for (int i = start; i < end_exclusive; ++i) {
-                    bool draw_cursor = false;
-                    int sel_start_x = -1;
-                    int sel_end_x = -1;
-                    if (selection_.is_active && selection_.pane == SelectionPane::TerminalPane) {
-                        if (i >= vt_sel_start && i <= vt_sel_end) {
-                            if (vt_sel_start == vt_sel_end) {
-                                sel_start_x = sx1;
-                                sel_end_x = sx2;
-                            } else if (i == vt_sel_start) {
-                                sel_start_x = sx1;
-                                sel_end_x = terminal_width - 1;
-                            } else if (i == vt_sel_end) {
-                                sel_start_x = 0;
-                                sel_end_x = sx2;
-                            } else {
-                                sel_start_x = 0;
-                                sel_end_x = terminal_width - 1;
-                            }
+            for (int i = start; i < end_exclusive; ++i) {
+                bool draw_cursor = false;
+                int sel_start_x = -1;
+                int sel_end_x = -1;
+                if (selection_.is_active && selection_.pane == SelectionPane::TerminalPane) {
+                    if (i >= vt_sel_start && i <= vt_sel_end) {
+                        if (vt_sel_start == vt_sel_end) {
+                            sel_start_x = sx1;
+                            sel_end_x = sx2;
+                        } else if (i == vt_sel_start) {
+                            sel_start_x = sx1;
+                            sel_end_x = terminal_width - 1;
+                        } else if (i == vt_sel_end) {
+                            sel_start_x = 0;
+                            sel_end_x = sx2;
+                        } else {
+                            sel_start_x = 0;
+                            sel_end_x = terminal_width - 1;
                         }
                     }
-                    lines_to_draw_.push_back(vt_.get_line_as_string(i, terminal_width, draw_cursor,
-                                                                    sel_start_x, sel_end_x));
                 }
-                if (!selection_.is_active) {
-                    terminal_rows_cache_ = lines_to_draw_;
-                    terminal_rows_generation_ = terminal_generation;
-                    terminal_rows_width_ = terminal_width;
-                    terminal_rows_count_ = num_rows;
-                    terminal_rows_start_ = start;
-                }
+                lines_to_draw_.push_back(
+                    vt_.get_line_as_string(i, terminal_width, draw_cursor, sel_start_x, sel_end_x));
             }
-        } else if (panel_mode == TuiRightPanelMode::Display) {
-            for (int i = 0; i < num_rows; ++i)
-                lines_to_draw_.emplace_back(static_cast<size_t>(terminal_width), ' ');
+            if (!selection_.is_active) {
+                terminal_rows_cache_ = lines_to_draw_;
+                terminal_rows_generation_ = terminal_generation;
+                terminal_rows_width_ = terminal_width;
+                terminal_rows_count_ = num_rows;
+                terminal_rows_start_ = start;
+            }
         }
         while (lines_to_draw_.size() < static_cast<std::size_t>(num_rows)) {
             lines_to_draw_.emplace_back(static_cast<std::size_t>(terminal_width), ' ');
@@ -604,28 +605,270 @@ void Tui::render_build_lines(int inspector_width, int terminal_width, int num_ro
     status_bar_->set_right_panel_mode(panel_mode);
 }
 
-void Tui::render_draw_sixel(int inspector_width, int terminal_width, int num_rows,
+void Tui::render_draw_sixel(int panel_x, int display_width, int display_rows,
                             std::string& update_cmds) {
-    (void)terminal_width;
-    if (!modal_.is_active()) {
-        for (int i = 0; i < num_rows; ++i) {
-            std::string left = inspector_pane_->render_row(i, inspector_width);
-            if (selection_.is_active && selection_.pane == SelectionPane::InspectorPane) {
-                int sy1 = selection_.start_y - selection_.content_start_y;
-                int sy2 = selection_.end_y - selection_.content_start_y;
-                int sx1 = selection_.start_x;
-                int sx2 = selection_.end_x;
-                if (sy1 > sy2 || (sy1 == sy2 && sx1 > sx2)) {
-                    std::swap(sy1, sy2);
-                    std::swap(sx1, sx2);
-                }
-                if (i >= sy1 && i <= sy2) {
-                    left = std::format("\033[7m{}\033[0m", left);
+    if (modal_.is_active() || display_width <= 0 || display_rows <= 0) return;
+
+    // Ensure a clean background across the entire display body before positioning
+    // the Sixel graphic, clearing any leftover modal or text layer cells.
+    if (!sixel_rendered_) {
+        const std::string blank_row(static_cast<size_t>(display_width), ' ');
+        for (int r = 5; r < 4 + display_rows; ++r) {
+            update_cmds += std::format("\033[0m\033[{};{}H{}", r, panel_x, blank_row);
+        }
+    }
+
+    const auto fb = machine_.framebuffer_view();
+    if (fb.data() == nullptr) return;
+
+    constexpr int source_width = 640;
+    constexpr int source_height = 480;
+    constexpr int palette_side = 6;
+    constexpr int palette_size = palette_side * palette_side * palette_side;
+    // Fit the 4:3 framebuffer to the panel's pixel rectangle, then round to whole terminal
+    // cells so the placement remains stable as the terminal is resized.
+    // The first row is the column header in the multi-column workbench.  Fit only
+    // inside the body so the sixel never reaches the footer and triggers terminal
+    // scrolling while it is placed.
+    const int body_rows = std::max(1, display_rows - 1);
+    const int cell_width = std::max(1, cell_width_px_);
+    const int cell_height = std::max(1, cell_height_px_);
+    // Fit the native framebuffer in pixels. Keep the source raster at native
+    // resolution whenever the panel is large enough; resampling the 640x480
+    // console font is what made the boot text unreadable.
+    int width = std::min(source_width, std::max(1, display_width * cell_width));
+    int height = std::max(1, width * source_height / source_width);
+    const int max_height = std::max(1, body_rows * cell_height);
+    if (height > max_height) {
+        height = max_height;
+        width = std::max(1, height * source_width / source_height);
+    }
+    const int image_cols = std::max(1, (width + cell_width - 1) / cell_width);
+    const int image_rows = std::max(1, (height + cell_height - 1) / cell_height);
+
+    const int x_offset = std::max(0, (display_width - image_cols) / 2);
+    const int y_offset = std::max(0, (body_rows - image_rows) / 2);
+    const int display_x = panel_x + x_offset;
+
+    static constexpr auto kColorLut = [] {
+        std::array<uint8_t, 256> lut{};
+        for (int i = 0; i < 256; ++i) {
+            lut[i] = static_cast<uint8_t>((i * (palette_side - 1) + 127) / 255);
+        }
+        return lut;
+    }();
+
+    static const std::string kSixelPaletteHeader = [] {
+        std::string header;
+        header.reserve(palette_size * 20);
+        for (int color = 0; color < palette_size; ++color) {
+            const int red = (color / (palette_side * palette_side)) % palette_side;
+            const int green = (color / palette_side) % palette_side;
+            const int blue = color % palette_side;
+            header +=
+                std::format("#{};2;{};{};{}", color, red * 100 / (palette_side - 1),
+                            green * 100 / (palette_side - 1), blue * 100 / (palette_side - 1));
+        }
+        return header;
+    }();
+
+    // Raster attributes bound the graphic to the display column's pixel-sized rectangle.
+    // Anchor at the top of the display body.  Anchoring at the bottom makes terminals
+    // reserve space for the graphic and scroll the character grid to fit it.
+    // Windows Terminal interprets the raster attributes as vertical:horizontal
+    // pixel aspect values, so 1:1 is required here.  Using 7:1 makes the console
+    // glyphs seven times taller than their native framebuffer shape.
+    // Use cursor-positioned sixel so the graphic can live in its assigned panel.
+    // The dimensions above ensure it fits before the footer, avoiding scroll.
+    update_cmds += std::format("\033[5;{}r\033[?80l\033[{};{}H\033Pq\"1;1;{};{}", 4 + display_rows,
+                               5 + y_offset, display_x, width, height);
+    update_cmds += kSixelPaletteHeader;
+
+    const auto* fb_bytes = reinterpret_cast<const uint8_t*>(fb.data());
+    const bool same_dims = (width == source_width && height == source_height);
+    std::vector<int> src_x_offset;
+    if (!same_dims) {
+        src_x_offset.resize(width);
+        for (int x = 0; x < width; ++x) {
+            src_x_offset[x] = std::min(source_width - 1, x * source_width / width) * 4;
+        }
+    }
+
+    std::vector<uint8_t> strip_masks(static_cast<size_t>(palette_size * width), 0);
+    std::array<int16_t, palette_size> last_x_for_color;
+
+    auto append_uint = [](std::string& out, unsigned val) {
+        char buf[16];
+        auto [ptr, ec] = std::to_chars(buf, buf + sizeof(buf), val);
+        out.append(buf, static_cast<size_t>(ptr - buf));
+    };
+
+    for (int y = 0; y < height; y += 6) {
+        std::fill(strip_masks.begin(), strip_masks.end(), 0);
+        last_x_for_color.fill(-1);
+
+        const int max_bits = std::min(6, height - y);
+        std::array<const uint8_t*, 6> row_ptrs;
+
+        if (same_dims) {
+            for (int bit = 0; bit < max_bits; ++bit) {
+                row_ptrs[bit] = fb_bytes + static_cast<size_t>((y + bit) * source_width * 4);
+            }
+            for (int x = 0; x < width; ++x) {
+                const int x4 = x * 4;
+                for (int bit = 0; bit < max_bits; ++bit) {
+                    const auto* p = row_ptrs[bit] + x4;
+                    const uint8_t c = static_cast<uint8_t>((kColorLut[p[2]] * 36) +
+                                                           (kColorLut[p[1]] * 6) + kColorLut[p[0]]);
+                    strip_masks[c * width + x] |= static_cast<uint8_t>(1 << bit);
+                    last_x_for_color[c] = static_cast<int16_t>(x);
                 }
             }
-            update_cmds += std::format("\033[{};1H{}║\033[0m{}{}│\033[0m", i + 4, kThemeBorder,
-                                       left, kThemeBorder);
+        } else {
+            for (int bit = 0; bit < max_bits; ++bit) {
+                const int src_y = std::min(source_height - 1, (y + bit) * source_height / height);
+                row_ptrs[bit] = fb_bytes + static_cast<size_t>(src_y * source_width * 4);
+            }
+            for (int x = 0; x < width; ++x) {
+                const int x_off = src_x_offset[x];
+                for (int bit = 0; bit < max_bits; ++bit) {
+                    const auto* p = row_ptrs[bit] + x_off;
+                    const uint8_t c = static_cast<uint8_t>((kColorLut[p[2]] * 36) +
+                                                           (kColorLut[p[1]] * 6) + kColorLut[p[0]]);
+                    strip_masks[c * width + x] |= static_cast<uint8_t>(1 << bit);
+                    last_x_for_color[c] = static_cast<int16_t>(x);
+                }
+            }
         }
+
+        for (int color = 0; color < palette_size; ++color) {
+            const int last_x = last_x_for_color[color];
+            if (last_x < 0) continue;
+
+            update_cmds += '#';
+            append_uint(update_cmds, color);
+
+            const uint8_t* masks = &strip_masks[color * width];
+            int x = 0;
+            while (x <= last_x) {
+                const uint8_t mask = masks[x];
+                int run = 1;
+                while (x + run <= last_x && masks[x + run] == mask && run < 255) {
+                    ++run;
+                }
+                const char sixel_char = static_cast<char>(63 + mask);
+                if (run >= 3) {
+                    update_cmds += '!';
+                    append_uint(update_cmds, run);
+                    update_cmds += sixel_char;
+                } else {
+                    update_cmds.append(static_cast<size_t>(run), sixel_char);
+                }
+                x += run;
+            }
+            update_cmds += '$';
+        }
+        update_cmds += '-';
+    }
+    update_cmds += "\033\\\033[r\033[?80l";
+}
+
+auto Tui::render_framebuffer_row(int row, int width, int rows) const -> std::string {
+    const auto fb = machine_.framebuffer_view();
+    constexpr int source_width = 640;
+    constexpr int source_height = 480;
+    if (fb.data() == nullptr || width <= 0 || rows <= 0)
+        return std::string(std::max(0, width), ' ');
+
+    const int pixel_width = std::max(1, width);
+    const int pixel_height = std::max(2, rows * 2);
+    const int top = std::clamp(row * 2, 0, pixel_height - 1);
+    const int bottom = std::min(pixel_height - 1, top + 1);
+    std::string result;
+    result.reserve(static_cast<size_t>(width) * 32);
+    for (int x = 0; x < width; ++x) {
+        const int source_x = std::min(source_width - 1, x * source_width / pixel_width);
+        const int source_top = std::min(source_height - 1, top * source_height / pixel_height);
+        const int source_bottom =
+            std::min(source_height - 1, bottom * source_height / pixel_height);
+        const auto* p_top = fb.unchecked_ptr(
+            fb.base() + static_cast<Address>((source_top * source_width + source_x) * 4));
+        const auto* p_bottom = fb.unchecked_ptr(
+            fb.base() + static_cast<Address>((source_bottom * source_width + source_x) * 4));
+        result += std::format(
+            "\033[38;2;{};{};{}m\033[48;2;{};{};{}m▀", std::to_integer<uint8_t>(p_top[2]),
+            std::to_integer<uint8_t>(p_top[1]), std::to_integer<uint8_t>(p_top[0]),
+            std::to_integer<uint8_t>(p_bottom[2]), std::to_integer<uint8_t>(p_bottom[1]),
+            std::to_integer<uint8_t>(p_bottom[0]));
+    }
+    result += "\033[0m";
+    return result;
+}
+
+auto Tui::display_coords_to_fb(int x, int y, size_t col_idx, int term_width, int term_height) const
+    -> std::optional<std::pair<int, int>> {
+    auto const col_widths = column_widths(term_width);
+    if (col_idx >= col_widths.count) return std::nullopt;
+
+    int display_panel_x = 2;
+    for (size_t c = 0; c < col_idx && c < col_widths.count; ++c) {
+        display_panel_x += col_widths.widths[c] + 1;
+    }
+    const int col_width = col_widths.widths[col_idx];
+    const int num_rows = std::max(1, term_height - framework::kFrameChromeRows);
+    const int body_rows = std::max(1, num_rows - 1);
+    const int cell_width = std::max(1, cell_width_px_);
+    const int cell_height = std::max(1, cell_height_px_);
+    constexpr int source_width = 640;
+    constexpr int source_height = 480;
+
+    int width = std::min(source_width, std::max(1, col_width * cell_width));
+    int height = width * source_height / source_width;
+    const int max_height = std::max(1, body_rows * cell_height);
+    if (height > max_height) {
+        height = max_height;
+        width = std::max(1, height * source_width / source_height);
+    }
+    const int image_cols = std::max(1, (width + cell_width - 1) / cell_width);
+    const int image_rows = std::max(1, (height + cell_height - 1) / cell_height);
+    const int x_offset = std::max(0, (col_width - image_cols) / 2);
+    const int y_offset = std::max(0, (body_rows - image_rows) / 2);
+    const int display_x = display_panel_x + x_offset;
+    const int display_y = 5 + y_offset;
+
+    const int rel_col = x - display_x;
+    const int rel_row = y - display_y;
+    if (rel_col >= 0 && rel_col < image_cols && rel_row >= 0 && rel_row < image_rows) {
+        const int fb_x = std::clamp(rel_col * source_width / image_cols, 0, source_width - 1);
+        const int fb_y = std::clamp(rel_row * source_height / image_rows, 0, source_height - 1);
+        return std::make_pair(fb_x, fb_y);
+    }
+    return std::nullopt;
+}
+
+void Tui::handle_display_mouse(int x, int y, int b, size_t col_idx, int term_width,
+                               int term_height) {
+    if (b == 64 || b == 65) {
+        machine_.send_input_mouse_wheel(b == 64 ? 1 : -1);
+        return;
+    }
+    auto const fb_pos = display_coords_to_fb(x, y, col_idx, term_width, term_height);
+    if (!fb_pos) return;
+    const auto [fb_x, fb_y] = *fb_pos;
+    if (display_mouse_last_fb_.has_value()) {
+        machine_.send_input_mouse_motion(fb_x - display_mouse_last_fb_->first,
+                                         fb_y - display_mouse_last_fb_->second);
+    }
+    display_mouse_last_fb_ = std::make_pair(fb_x, fb_y);
+    uint16_t btn = 0;
+    if (b == 0)
+        btn = 0x110;  // BTN_LEFT
+    else if (b == 1)
+        btn = 0x112;  // BTN_MIDDLE
+    else if (b == 2)
+        btn = 0x111;  // BTN_RIGHT
+    if (btn != 0) {
+        machine_.send_input_mouse_button(btn, true);
     }
 }
 
@@ -659,10 +902,25 @@ void Tui::render(bool force) {
 
     if (!inspector_pane_ || !terminal_pane_ || !status_bar_) return;
 
-    TuiRightPanelMode const panel_mode = right_panel_mode_.load(std::memory_order_relaxed);
+    bool has_display = false;
+    size_t display_col = 0;
+    bool has_console = false;
+    size_t console_col = 0;
+    for (size_t c = 0; c < workbench_slots_.size(); ++c) {
+        if (workbench_slots_[c].page == TuiRegPage::DISPLAY) {
+            has_display = true;
+            display_col = c;
+        } else if (workbench_slots_[c].page == TuiRegPage::CONSOLE) {
+            has_console = true;
+            console_col = c;
+        }
+    }
+    TuiRightPanelMode const panel_mode =
+        has_display && !has_console ? TuiRightPanelMode::Display : TuiRightPanelMode::Terminal;
     auto now = std::chrono::steady_clock::now();
-    auto elapsed_ms =
-        std::chrono::duration_cast<std::chrono::milliseconds>(now - last_draw_time_).count();
+    const auto min_interval_us = 1'000'000U / std::clamp(target_fps(), 1u, 120u);
+    const auto elapsed_us =
+        std::chrono::duration_cast<std::chrono::microseconds>(now - last_draw_time_).count();
     const bool resized = g_resized != 0;
     const bool status_expiring =
         !status_override_.empty() &&
@@ -676,14 +934,13 @@ void Tui::render(bool force) {
         return;
     }
 
-    const auto min_interval_ms = std::max(1u, 1000 / std::clamp(target_fps(), 1u, 120u));
     if (ui_running_.load(std::memory_order_relaxed) && !resized && !status_expiring &&
-        elapsed_ms < min_interval_ms) {
+        elapsed_us + 1000 < min_interval_us) {
         frame_dirty_ = true;
         render_stats_.throttled_frames++;
         return;
     }
-    if (!force && !resized && elapsed_ms < min_interval_ms) {
+    if (!force && !resized && elapsed_us + 1000 < min_interval_us) {
         render_stats_.suppressed_frames++;
         return;
     }
@@ -707,9 +964,8 @@ void Tui::render(bool force) {
     }
     int const term_width = cached_term_width_;
     int const term_height = cached_term_height_;
-    const FrameGeometry frame =
-        calculate_frame_geometry(term_width, term_height, layout_, user_inspector_width_,
-                                 user_column_widths_);
+    const FrameGeometry frame = calculate_frame_geometry(
+        term_width, term_height, layout_, user_inspector_width_, user_column_widths_);
     if (!frame.renderable) return;
 
     render_update_speed(now);
@@ -724,17 +980,48 @@ void Tui::render(bool force) {
         sync_workbench_slots();
     }
     const bool multi_headers = (col_widths.count >= 2);
+    const bool draw_sixel = sixel_supported_ && has_display && !modal_.is_active();
+    uint64_t framebuffer_signature = 0;
+    if (draw_sixel) {
+        const auto fb = machine_.framebuffer_view();
+        if (fb.data() != nullptr && fb.size() >= sizeof(uint64_t)) {
+            constexpr uint64_t fnv_offset = 1469598103934665603ULL;
+            constexpr uint64_t fnv_prime = 1099511628211ULL;
+            const auto* p64 = reinterpret_cast<const uint64_t*>(fb.data());
+            const size_t n64 = fb.size() / sizeof(uint64_t);
+            uint64_t h1 = fnv_offset;
+            uint64_t h2 = fnv_prime;
+            for (size_t i = 0; i < n64; i += 2) {
+                h1 = (h1 ^ p64[i]) * fnv_prime;
+                h2 = (h2 ^ p64[i + 1]) * fnv_offset;
+            }
+            framebuffer_signature = h1 ^ (h2 * 31ULL);
+        }
+    }
+    const bool sixel_geometry_changed =
+        draw_sixel && sixel_rendered_ &&
+        (sixel_column_ != display_col || sixel_panel_width_ != col_widths.widths[display_col] ||
+         sixel_panel_rows_ != num_rows);
+    // A sixel graphic is a terminal-side object, not a character-grid cell.  Re-emitting it
+    // on every ordinary render appends another graphic and can make terminals scroll the TUI
+    // away.  Only emit a new object when it first becomes visible or its panel geometry changes.
+    const bool sixel_needs_draw =
+        draw_sixel && (!sixel_rendered_ || sixel_geometry_changed ||
+                       framebuffer_signature != sixel_framebuffer_signature_);
+    int display_panel_x = 2;
+    if (has_display) {
+        for (size_t c = 0; c < display_col && c < col_widths.count; ++c)
+            display_panel_x += col_widths.widths[c] + 1;
+    }
     int const term_content_rows = multi_headers ? std::max(1, num_rows - 1) : num_rows;
 
     int console_width = terminal_width;
-    for (size_t c = 0; c < workbench_slots_.size() && c < col_widths.count; ++c) {
-        if (workbench_slots_[c].page == TuiRegPage::CONSOLE) {
-            console_width = col_widths.widths[c];
-            break;
-        }
+    if (has_console && console_col < col_widths.count) {
+        console_width = col_widths.widths[console_col];
     }
 
-    int total = (panel_mode == TuiRightPanelMode::Terminal) ? vt_.get_lines_count() : 0;
+    int total =
+        (has_console || panel_mode == TuiRightPanelMode::Terminal) ? vt_.get_lines_count() : 0;
     scroll_offset_ = std::min(scroll_offset_, std::max(0, total - term_content_rows));
 
     render_build_lines(inspector_width, console_width, term_content_rows, panel_mode);
@@ -743,8 +1030,8 @@ void Tui::render(bool force) {
     std::vector<std::string> new_lines = compose_multi_frame_lines(
         frame, term_width, col_widths, status_bar_->render_row(0, term_width),
         status_bar_->render_row(1, term_width),
-        [this, total_cols = col_widths.count, panel_mode, multi_headers](size_t col_idx, int row,
-                                                                         int width) -> std::string {
+        [this, total_cols = col_widths.count, multi_headers](size_t col_idx, int row,
+                                                             int width) -> std::string {
             if (col_idx < workbench_slots_.size()) {
                 const auto page = workbench_slots_[col_idx].page;
                 const bool is_focused = (col_idx == focused_slot_index_);
@@ -753,13 +1040,19 @@ void Tui::render(bool force) {
                     if (multi_headers) {
                         if (row == 0) {
                             return inspector_pane_->render_column_header(
-                                static_cast<int>(col_idx),
-                                (panel_mode == TuiRightPanelMode::Display) ? "Display" : "Console",
-                                is_focused, width, "", true, total_cols > 1);
+                                static_cast<int>(col_idx), "Console", is_focused, width, "", true,
+                                total_cols > 1);
                         }
                         return terminal_pane_->render_row(row - 1, width);
                     }
                     return terminal_pane_->render_row(row, width);
+                }
+                if (page == TuiRegPage::DISPLAY) {
+                    if (multi_headers && row == 0)
+                        return inspector_pane_->render_column_header(static_cast<int>(col_idx),
+                                                                     "Display", is_focused, width,
+                                                                     "", true, total_cols > 1);
+                    return std::string(static_cast<size_t>(std::max(0, width)), ' ');
                 }
                 inspector_pane_->set_page(page);
                 auto rendered = inspector_pane_->render_column_row(
@@ -785,7 +1078,13 @@ void Tui::render(bool force) {
     modal_.render_overlay(new_lines, term_width, term_height);
 
     const bool geometry_changed = (last_screen_lines_.size() != new_lines.size());
-    const bool is_full_redraw = geometry_changed || resized || full_screen_redraw_requested_;
+    const bool modal_closed = modal_active_last_frame_ && !modal_.is_active();
+    modal_active_last_frame_ = modal_.is_active();
+    const bool clear_sixel =
+        sixel_rendered_ && (!draw_sixel || resized || full_screen_redraw_requested_ ||
+                            geometry_changed || sixel_geometry_changed);
+    const bool is_full_redraw =
+        geometry_changed || resized || full_screen_redraw_requested_ || clear_sixel || modal_closed;
     full_screen_redraw_requested_ = false;
 
     std::string update_cmds;
@@ -801,13 +1100,62 @@ void Tui::render(bool force) {
         render_stats_.full_redraws++;
     } else {
         bool any_line_changed = false;
+        auto ansi_slice = [](std::string_view line, int begin_col, int end_col) {
+            std::string result;
+            int column = 0;
+            for (size_t i = 0; i < line.size();) {
+                if (line[i] == '\033') {
+                    size_t end = i + 1;
+                    if (end < line.size() && line[end] == '[') {
+                        ++end;
+                        while (end < line.size() && !(line[end] >= '@' && line[end] <= '~')) ++end;
+                        if (end < line.size()) ++end;
+                    } else if (end < line.size()) {
+                        ++end;
+                    }
+                    if (column < end_col) result.append(line.substr(i, end - i));
+                    i = end;
+                    continue;
+                }
+
+                size_t bytes = 1;
+                const auto lead = static_cast<unsigned char>(line[i]);
+                if ((lead & 0xE0U) == 0xC0U)
+                    bytes = 2;
+                else if ((lead & 0xF0U) == 0xE0U)
+                    bytes = 3;
+                else if ((lead & 0xF8U) == 0xF0U)
+                    bytes = 4;
+                bytes = std::min(bytes, line.size() - i);
+                const int glyph_width = get_display_width(line.substr(i, bytes));
+                if (column >= begin_col && column < end_col) result.append(line.substr(i, bytes));
+                column += glyph_width;
+                i += bytes;
+                if (column >= end_col && begin_col == 0) break;
+            }
+            return result;
+        };
+
+        const int display_panel_begin = display_panel_x - 1;
+        const int display_panel_end = display_panel_begin + col_widths.widths[display_col];
+
         for (size_t i = 0; i < new_lines.size(); ++i) {
-            if (sixel_supported_ && panel_mode == TuiRightPanelMode::Display &&
-                layout_ == TuiLayout::Split && i >= 3 && i < 3 + static_cast<size_t>(num_rows))
-                continue;
             if (new_lines[i] != last_screen_lines_[i]) {
                 any_line_changed = true;
-                update_cmds += std::format("\033[{};1H{}", i + 1, new_lines[i]);
+                const bool preserve_sixel = draw_sixel && sixel_rendered_ && !sixel_needs_draw &&
+                                            !modal_.is_active() && i >= 4 &&
+                                            i < 4 + static_cast<size_t>(num_rows);
+                if (preserve_sixel) {
+                    // Keep the display column's image-bearing cells untouched, but continue
+                    // updating the inspector and neighboring columns on the same screen row.
+                    update_cmds +=
+                        std::format("\033[{};1H{}\033[{};{}H{}", i + 1,
+                                    ansi_slice(new_lines[i], 0, display_panel_begin), i + 1,
+                                    display_panel_end + 1,
+                                    ansi_slice(new_lines[i], display_panel_end, term_width));
+                } else {
+                    update_cmds += std::format("\033[{};1H{}", i + 1, new_lines[i]);
+                }
                 last_screen_lines_[i] = new_lines[i];
                 render_stats_.lines_drawn++;
             } else {
@@ -823,40 +1171,33 @@ void Tui::render(bool force) {
     int target_cursor_y = -1;
     bool target_cursor_visible = false;
 
-    if (sixel_supported_ && panel_mode == TuiRightPanelMode::Display &&
-        layout_ == TuiLayout::Split) {
-        render_draw_sixel(inspector_width, terminal_width, num_rows, update_cmds);
+    if (sixel_needs_draw && has_display && display_col < col_widths.count &&
+        col_widths.widths[display_col] > 0) {
+        render_draw_sixel(display_panel_x, col_widths.widths[display_col], num_rows, update_cmds);
+    }
+    if (has_console && console_col < col_widths.count && !modal_.is_active()) {
+        size_t const c_idx = console_col;
+        int col_start_x = 2;
+        for (size_t c = 0; c < c_idx && c < col_widths.count; ++c) {
+            col_start_x += col_widths.widths[c] + 1;
+        }
+        int const target_x = std::clamp(col_start_x + vt_.get_cursor_x(), col_start_x,
+                                        col_start_x + col_widths.widths[c_idx] - 1);
+        int const cursor_abs_line = vt_.get_scrollback_size() + vt_.get_cursor_y();
+        int const start_line = get_terminal_pane_start_line(term_content_rows);
+        int const line_offset = cursor_abs_line - start_line;
+        if (line_offset >= 0 && line_offset < term_content_rows) {
+            int const content_start_y = multi_headers ? 5 : 4;
+            target_cursor_y = content_start_y + line_offset;
+            target_cursor_x = target_x;
+            if (!paused_ && vt_.is_cursor_visible()) {
+                target_cursor_visible = true;
+            }
+        }
+    } else {
         target_cursor_y = term_height;
         target_cursor_x = 1;
         target_cursor_visible = false;
-    } else if (panel_mode == TuiRightPanelMode::Terminal && !modal_.is_active()) {
-        std::optional<size_t> console_slot_idx;
-        for (size_t c = 0; c < workbench_slots_.size() && c < col_widths.count; ++c) {
-            if (workbench_slots_[c].page == TuiRegPage::CONSOLE) {
-                console_slot_idx = c;
-                break;
-            }
-        }
-        if (console_slot_idx.has_value()) {
-            size_t const c_idx = *console_slot_idx;
-            int col_start_x = 2;
-            for (size_t c = 0; c < c_idx; ++c) {
-                col_start_x += col_widths.widths[c] + 1;
-            }
-            int const target_x = std::clamp(col_start_x + vt_.get_cursor_x(), col_start_x,
-                                            col_start_x + col_widths.widths[c_idx] - 1);
-            int const cursor_abs_line = vt_.get_scrollback_size() + vt_.get_cursor_y();
-            int const start_line = get_terminal_pane_start_line(term_content_rows);
-            int const line_offset = cursor_abs_line - start_line;
-            if (line_offset >= 0 && line_offset < term_content_rows) {
-                int const content_start_y = multi_headers ? 5 : 4;
-                target_cursor_y = content_start_y + line_offset;
-                target_cursor_x = target_x;
-                if (!paused_ && vt_.is_cursor_visible()) {
-                    target_cursor_visible = true;
-                }
-            }
-        }
     }
 
     const bool cursor_pos_changed =
@@ -888,12 +1229,57 @@ void Tui::render(bool force) {
         return;
     }
 
+    std::string clear_graphic;
+    if (clear_sixel) {
+        // Sixel graphics live in a terminal-side layer. Explicitly overwrite the old
+        // placement with reset spaces before drawing a modal or the normal TUI again.
+        // Keep this as a standalone VT write: Windows Terminal may retain the image
+        // layer when the erase is bundled inside synchronized output or an alt-screen
+        // reset sequence.
+        clear_graphic = "\033[0m\033[?7l";
+        for (int row = 5; row < 4 + sixel_panel_rows_; ++row) {
+            clear_graphic +=
+                std::format("\033[0m\033[{};{}H{}", row, sixel_panel_x_,
+                            std::string(static_cast<size_t>(std::max(0, sixel_panel_width_)), ' '));
+        }
+        clear_graphic += "\033[0m\033[?7h";
+    }
+
+    const bool clean_panel_before_first_sixel =
+        draw_sixel && (!sixel_rendered_ || sixel_geometry_changed || is_full_redraw);
+    if (clean_panel_before_first_sixel && has_display && display_col < col_widths.count &&
+        num_rows > 0 && col_widths.widths[display_col] > 0) {
+        clear_graphic += "\033[0m\033[?7l";
+        const int display_width = std::max(0, col_widths.widths[display_col]);
+        const std::string blank_row(static_cast<size_t>(display_width), ' ');
+        for (int row = 5; row < 4 + num_rows; ++row) {
+            clear_graphic += std::format("\033[0m\033[{};{}H{}", row, display_panel_x, blank_row);
+        }
+        clear_graphic += "\033[0m\033[?7h";
+    }
+
+    if (!clear_graphic.empty()) write_all(STDOUT_FILENO, clear_graphic);
+
     std::string frame_output;
     frame_output.reserve(update_cmds.size() + 16);
     frame_output += "\033[?2026h";
     frame_output += update_cmds;
     frame_output += "\033[?2026l";
     write_all(STDOUT_FILENO, frame_output);
+    sixel_rendered_ = draw_sixel;
+    if (draw_sixel) {
+        sixel_column_ = display_col;
+        sixel_panel_width_ = col_widths.widths[display_col];
+        sixel_panel_rows_ = num_rows;
+        sixel_panel_x_ = display_panel_x;
+        sixel_framebuffer_signature_ = framebuffer_signature;
+    } else {
+        sixel_column_ = std::numeric_limits<size_t>::max();
+        sixel_panel_width_ = 0;
+        sixel_panel_rows_ = 0;
+        sixel_panel_x_ = 0;
+        sixel_framebuffer_signature_ = 0;
+    }
 }
 
 void Tui::handle_mouse_inspector(int x, int y, int b, bool multi_column, bool is_secondary,
@@ -1120,6 +1506,9 @@ void Tui::handle_mouse(int x, int y, int b) {
             focused_slot_index_ = clicked_col;
             if (page == TuiRegPage::CONSOLE) {
                 scroll(5);
+            } else if (page == TuiRegPage::DISPLAY) {
+                machine_.send_input_mouse_wheel(1);
+                return;
             } else {
                 inspector_pane_->set_page(page);
                 int const num_rows = std::max(1, term_height - framework::kFrameChromeRows);
@@ -1139,6 +1528,9 @@ void Tui::handle_mouse(int x, int y, int b) {
             focused_slot_index_ = clicked_col;
             if (page == TuiRegPage::CONSOLE) {
                 scroll(-5);
+            } else if (page == TuiRegPage::DISPLAY) {
+                machine_.send_input_mouse_wheel(-1);
+                return;
             } else {
                 inspector_pane_->set_page(page);
                 int const num_rows = std::max(1, term_height - framework::kFrameChromeRows);
@@ -1160,8 +1552,8 @@ void Tui::handle_mouse(int x, int y, int b) {
                 inspector_pane_->set_page(page);
                 if (inspector_pane_->supports_horizontal_scroll(col_widths.widths[clicked_col])) {
                     inspector_pane_->scroll_horizontal((b == 66 || b == 68) ? -4 : 4,
-                                                        col_widths.widths[clicked_col],
-                                                        clicked_col > 0);
+                                                       col_widths.widths[clicked_col],
+                                                       clicked_col > 0);
                     render(true);
                 }
             }
@@ -1198,6 +1590,12 @@ void Tui::handle_mouse(int x, int y, int b) {
             if (b == 0) {
                 render(false);
             }
+            return;
+        }
+
+        if (page == TuiRegPage::DISPLAY) {
+            if (b == 0 || b == 1 || b == 2) display_mouse_capture_ = clicked_col;
+            handle_display_mouse(x, y, b, clicked_col, term_width, term_height);
             return;
         }
 
@@ -1845,15 +2243,6 @@ void Tui::toggle_explain() {
     }
 }
 
-void Tui::cycle_right_panel_mode() {
-    TuiRightPanelMode current = right_panel_mode_.load(std::memory_order_relaxed);
-    TuiRightPanelMode next = (current == TuiRightPanelMode::Terminal) ? TuiRightPanelMode::Display
-                                                                      : TuiRightPanelMode::Terminal;
-    right_panel_mode_.store(next, std::memory_order_relaxed);
-    scroll_offset_ = 0;
-    render(true);
-}
-
 void Tui::export_inspection_report() {
     if (!is_paused()) {
         modal_.open_notice("PAUSE REQUIRED",
@@ -1909,9 +2298,145 @@ void Tui::toggle_execution_mode() {
     render(true);
 }
 
+namespace {
+constexpr auto ascii_to_linux_keycode_and_shift(uint8_t byte) -> std::pair<uint16_t, bool> {
+    if (byte >= 'a' && byte <= 'z') {
+        constexpr uint16_t kAlpha[26] = {
+            30, 48, 46, 32, 18, 33, 34, 35, 23, 36, 37, 38, 50,  // a-m
+            49, 24, 25, 16, 19, 31, 20, 22, 47, 17, 45, 21, 44   // n-z
+        };
+        return {kAlpha[byte - 'a'], false};
+    }
+    if (byte >= 'A' && byte <= 'Z') {
+        constexpr uint16_t kAlpha[26] = {
+            30, 48, 46, 32, 18, 33, 34, 35, 23, 36, 37, 38, 50,  // A-M
+            49, 24, 25, 16, 19, 31, 20, 22, 47, 17, 45, 21, 44   // N-Z
+        };
+        return {kAlpha[byte - 'A'], true};
+    }
+    if (byte >= '1' && byte <= '9') {
+        return {static_cast<uint16_t>(2 + (byte - '1')), false};
+    }
+    if (byte == '0') return {11, false};
+
+    switch (byte) {
+        case '!':
+            return {2, true};
+        case '@':
+            return {3, true};
+        case '#':
+            return {4, true};
+        case '$':
+            return {5, true};
+        case '%':
+            return {6, true};
+        case '^':
+            return {7, true};
+        case '&':
+            return {8, true};
+        case '*':
+            return {9, true};
+        case '(':
+            return {10, true};
+        case ')':
+            return {11, true};
+        case '\n':
+        case '\r':
+            return {28, false};  // KEY_ENTER
+        case '\t':
+            return {15, false};  // KEY_TAB
+        case ' ':
+            return {57, false};  // KEY_SPACE
+        case '\b':
+        case 127:
+            return {14, false};  // KEY_BACKSPACE
+        case 27:
+            return {1, false};  // KEY_ESC
+        case '-':
+            return {12, false};  // KEY_MINUS
+        case '_':
+            return {12, true};
+        case '=':
+            return {13, false};  // KEY_EQUAL
+        case '+':
+            return {13, true};
+        case '[':
+            return {26, false};  // KEY_LEFTBRACE
+        case '{':
+            return {26, true};
+        case ']':
+            return {27, false};  // KEY_RIGHTBRACE
+        case '}':
+            return {27, true};
+        case ';':
+            return {39, false};  // KEY_SEMICOLON
+        case ':':
+            return {39, true};
+        case '\'':
+            return {40, false};  // KEY_APOSTROPHE
+        case '"':
+            return {40, true};
+        case '`':
+            return {41, false};  // KEY_GRAVE
+        case '~':
+            return {41, true};
+        case '\\':
+            return {43, false};  // KEY_BACKSLASH
+        case '|':
+            return {43, true};
+        case ',':
+            return {51, false};  // KEY_COMMA
+        case '<':
+            return {51, true};
+        case '.':
+            return {52, false};  // KEY_DOT
+        case '>':
+            return {52, true};
+        case '/':
+            return {53, false};  // KEY_SLASH
+        case '?':
+            return {53, true};
+        default:
+            return {0, false};
+    }
+}
+}  // namespace
+
 void Tui::write_guest_input(uint8_t byte) {
-    if (machine_.uart_device()) {
-        machine_.uart_device()->push_rx_byte(normalize_guest_terminal_byte(byte));
+    const auto page = focused_page();
+    if (page == TuiRegPage::CONSOLE) {
+        if (machine_.uart_device()) {
+            machine_.uart_device()->push_rx_byte(normalize_guest_terminal_byte(byte));
+        }
+        return;
+    }
+    if (page != TuiRegPage::DISPLAY) return;
+
+    if (byte >= 1 && byte <= 26) {
+        const auto [keycode, unused_shift] =
+            ascii_to_linux_keycode_and_shift(static_cast<uint8_t>('a' + byte - 1));
+        (void)unused_shift;
+        if (keycode != 0) {
+            machine_.send_input_key(29 /* KEY_LEFTCTRL */, true);
+            machine_.send_input_key(keycode, true);
+            machine_.send_input_key(keycode, false);
+            machine_.send_input_key(29 /* KEY_LEFTCTRL */, false);
+        }
+        return;
+    }
+
+    {
+        const auto [keycode, is_shift] = ascii_to_linux_keycode_and_shift(byte);
+        if (keycode != 0) {
+            if (is_shift) {
+                machine_.send_input_key(42 /* KEY_LEFTSHIFT */, true);
+            }
+            machine_.send_input_key(keycode, true);
+            machine_.send_input_key(keycode, false);
+            if (is_shift) {
+                machine_.send_input_key(42 /* KEY_LEFTSHIFT */, false);
+            }
+        }
     }
 }
 
@@ -2130,8 +2655,8 @@ void Tui::reset_scroll() {
 void Tui::scroll_inspector(int lines) {
     if (inspector_pane_) {
         auto const widths = column_widths(cached_term_width_ > 0 ? cached_term_width_ : 80);
-        auto const focused = std::min(
-            focused_slot_index_, static_cast<size_t>(std::max<int>(1, widths.count) - 1));
+        auto const focused =
+            std::min(focused_slot_index_, static_cast<size_t>(std::max<int>(1, widths.count) - 1));
         int const pane_width = widths.count > 0 ? widths.widths[focused] : 0;
         inspector_pane_->set_page(focused_page());
         inspector_pane_->scroll(lines, pane_width, focused > 0);
@@ -2182,8 +2707,8 @@ void Tui::adjust_inspector_width(int delta) {
         return;
 
     size_t const focused = std::min(focused_slot_index_, static_cast<size_t>(current.count - 1));
-    int const minimum = (current.count == 2) ? framework::kBaseColumnUnitWidth
-                                              : framework::kMultiColumnUnitWidth;
+    int const minimum =
+        (current.count == 2) ? framework::kBaseColumnUnitWidth : framework::kMultiColumnUnitWidth;
     int const proposed = current.widths[focused] + delta;
     if (proposed < minimum) return;
 
@@ -2573,12 +3098,18 @@ auto Tui::handle_modal_keyboard_input(uint8_t byte, TuiKey key) -> bool {
             submit_modal();
             return true;
         }
-        char acc = static_cast<char>(std::tolower(byte));
+        char acc = static_cast<char>(std::tolower(static_cast<unsigned char>(byte)));
+        if (key == simrv::tui::TuiKey::y || key == simrv::tui::TuiKey::Y) acc = 'y';
         auto found_page = modals::ToolPickerModal::find_by_accelerator(acc);
         if (found_page.has_value()) {
-            auto const target_slot = static_cast<size_t>(modal_.get_tool_picker_slot());
-            set_workbench_slot_page(target_slot, *found_page);
-            close_modal();
+            const auto& tools = modals::ToolPickerModal::all_tools();
+            for (size_t i = 0; i < tools.size(); ++i) {
+                if (tools[i].page == *found_page) {
+                    modal_.set_tool_picker_cursor(static_cast<int>(i));
+                    break;
+                }
+            }
+            submit_modal();
             return true;
         }
         return true;
@@ -2734,17 +3265,8 @@ auto Tui::handle_navigation_keyboard_input(uint8_t byte, TuiKey key) -> bool {
         case simrv::tui::TuiKey::F10:
             machine_.request_exit();
             return true;
-        case simrv::tui::TuiKey::r:
-            cycle_reg_page(false);
-            return true;
-        case simrv::tui::TuiKey::R:
-            cycle_reg_page(true);
-            return true;
-        case simrv::tui::TuiKey::l:
-            cycle_tool_page(false);
-            return true;
-        case simrv::tui::TuiKey::L:
-            cycle_tool_page(true);
+        case simrv::tui::TuiKey::F11:
+            cycle_tool_page();
             return true;
         case simrv::tui::TuiKey::e:
         case simrv::tui::TuiKey::E:
@@ -2781,10 +3303,6 @@ auto Tui::handle_navigation_keyboard_input(uint8_t byte, TuiKey key) -> bool {
         case simrv::tui::TuiKey::v:
         case simrv::tui::TuiKey::V:
             toggle_execution_mode();
-            return true;
-        case simrv::tui::TuiKey::p:
-        case simrv::tui::TuiKey::P:
-            cycle_right_panel_mode();
             return true;
         case simrv::tui::TuiKey::g:
         case simrv::tui::TuiKey::G:
@@ -2921,6 +3439,10 @@ auto Tui::handle_normal_keyboard_input(uint8_t byte, TuiKey key) -> void {
     }
     if (key == simrv::tui::TuiKey::Enter || key == simrv::tui::TuiKey::Newline) {
         reset_scroll();
+        return;
+    }
+    if (key == simrv::tui::TuiKey::CtrlC && focused_page() == TuiRegPage::DISPLAY) {
+        write_guest_input(3);
         return;
     }
     if (key == simrv::tui::TuiKey::CtrlQ || key == simrv::tui::TuiKey::CtrlC ||
@@ -3067,7 +3589,7 @@ void Tui::execute_header_action(HeaderHitResult hit) {
             }
             break;
         case HeaderAction::TogglePanelMode:
-            cycle_right_panel_mode();
+            open_tool_picker(focused_slot_index_);
             break;
         case HeaderAction::ToggleAttached:
             toggle_run_state();
@@ -3182,9 +3704,6 @@ void Tui::execute_footer_action(TuiFooterAction action) {
         case TuiFooterAction::ToggleStudentGuide:
             toggle_student_guide();
             break;
-        case TuiFooterAction::TogglePanel:
-            cycle_right_panel_mode();
-            break;
         case TuiFooterAction::OpenSettings:
             open_modal(ModalType::Settings);
             break;
@@ -3267,18 +3786,6 @@ auto Tui::handle_alt_key(char key, uint8_t byte) -> bool {
         case 'X':
             close_focused_column();
             return true;
-        case 'p':
-        case 'P':
-            cycle_right_panel_mode();
-            return true;
-        case 'r':
-        case 'R':
-            cycle_reg_page();
-            return true;
-        case 'l':
-        case 'L':
-            cycle_tool_page();
-            return true;
         case 'e':
         case 'E':
             toggle_explain();
@@ -3342,13 +3849,13 @@ auto Tui::handle_arrow_key_sequence() -> bool {
     if (esc_buf_ == "\033[1;2C" || esc_buf_ == "\033[1;2D") {
         if (!is_modal_active() && inspector_pane_) {
             auto const widths = column_widths(cached_term_width_ > 0 ? cached_term_width_ : 80);
-            auto const focused = std::min(
-                focused_slot_index_, static_cast<size_t>(std::max<int>(1, widths.count) - 1));
+            auto const focused = std::min(focused_slot_index_,
+                                          static_cast<size_t>(std::max<int>(1, widths.count) - 1));
             int const pane_width = widths.count > 0 ? widths.widths[focused] : 0;
             inspector_pane_->set_page(focused_page());
             if (inspector_pane_->supports_horizontal_scroll(pane_width)) {
                 inspector_pane_->scroll_horizontal(esc_buf_.back() == 'C' ? 8 : -8, pane_width,
-                                                    focused > 0);
+                                                   focused > 0);
                 frame_dirty_ = true;
                 render(true);
                 return true;
@@ -3432,8 +3939,8 @@ auto Tui::handle_arrow_key_sequence() -> bool {
                 return true;
             }
             auto const widths = column_widths(cached_term_width_ > 0 ? cached_term_width_ : 80);
-            auto const focused = std::min(
-                focused_slot_index_, static_cast<size_t>(std::max<int>(1, widths.count) - 1));
+            auto const focused = std::min(focused_slot_index_,
+                                          static_cast<size_t>(std::max<int>(1, widths.count) - 1));
             int const pane_width = widths.count > 0 ? widths.widths[focused] : 0;
             inspector_pane_->set_page(page);
             if (inspector_pane_->supports_horizontal_scroll(pane_width)) {
@@ -3565,12 +4072,25 @@ auto Tui::consume_control_sequence(uint8_t first_byte) -> bool {
                 }
                 render(true);
             }
+            if (display_mouse_capture_.has_value()) {
+                uint16_t btn = 0;
+                if (button == 0)
+                    btn = 0x110;  // BTN_LEFT
+                else if (button == 1)
+                    btn = 0x112;  // BTN_MIDDLE
+                else if (button == 2)
+                    btn = 0x111;  // BTN_RIGHT
+                if (btn != 0) {
+                    machine_.send_input_mouse_button(btn, false);
+                }
+                display_mouse_capture_.reset();
+                display_mouse_last_fb_.reset();
+            }
             return true;
         }
 
-        // Motion event while button held (button | 32): update drag endpoint.
-        // These are generated by ?1002h (button-motion mode) and must be consumed
-        // here - never forwarded to the guest UART.
+        // Motion events (button | 32) are generated by ?1003h (all-motion mode) and
+        // must be consumed here - never forwarded to the guest UART.
         if (esc_buf_.back() == 'M' && (button & 32) != 0) {
             if (selection_.is_selecting) {
                 int local_end_x = std::clamp(x - selection_.col_start_x, 0,
@@ -3582,6 +4102,23 @@ auto Tui::consume_control_sequence(uint8_t first_byte) -> bool {
                 // Paused frames are normally suppressed unless forced. Drag motion is an
                 // explicit presentation update, so repaint immediately while the pointer moves.
                 render(true);
+            } else if (display_mouse_capture_.has_value() ||
+                       focused_page() == TuiRegPage::DISPLAY) {
+                struct winsize w{};
+                ioctl(STDOUT_FILENO, TIOCGWINSZ, &w);
+                int const tw =
+                    (cached_term_width_ > 0) ? cached_term_width_ : (w.ws_col > 0 ? w.ws_col : 80);
+                int const th = (cached_term_height_ > 0) ? cached_term_height_
+                                                         : (w.ws_row > 0 ? w.ws_row : 24);
+                const size_t display_col = display_mouse_capture_.value_or(focused_slot_index_);
+                if (auto fb = display_coords_to_fb(x, y, display_col, tw, th)) {
+                    if (display_mouse_last_fb_.has_value()) {
+                        machine_.send_input_mouse_motion(
+                            fb->first - display_mouse_last_fb_->first,
+                            fb->second - display_mouse_last_fb_->second);
+                    }
+                    display_mouse_last_fb_ = fb;
+                }
             }
             return true;
         }
@@ -3664,8 +4201,7 @@ auto Tui::consume_control_sequence(uint8_t first_byte) -> bool {
             }
         }
 
-        auto const mouse_columns =
-        column_widths(term_w);
+        auto const mouse_columns = column_widths(term_w);
         bool const has_tab_bar = (mouse_columns.count == 1);
         if (esc_buf_.back() == 'M' && button == 0 && has_tab_bar && (y == 4 || y == 5)) {
             int pane_w = get_pane_width();
@@ -3690,7 +4226,7 @@ auto Tui::consume_control_sequence(uint8_t first_byte) -> bool {
             }
         }
 
-        if (esc_buf_.back() == 'M' && button == 0 && y >= 4) {
+        if (esc_buf_.back() == 'M' && button == 0 && y >= 5) {
             // Start a new selection drag on left-button press in the content area.
             struct winsize w_sel{};
             ioctl(STDOUT_FILENO, TIOCGWINSZ, &w_sel);
@@ -3713,6 +4249,15 @@ auto Tui::consume_control_sequence(uint8_t first_byte) -> bool {
                     if (ci < workbench_slots_.size() &&
                         workbench_slots_[ci].page == TuiRegPage::CONSOLE) {
                         sel_pane = SelectionPane::TerminalPane;
+                    } else if (ci < workbench_slots_.size() &&
+                               workbench_slots_[ci].page == TuiRegPage::DISPLAY) {
+                        // A running DISPLAY column is an interactive guest surface. Do not
+                        // enter the paused inspector-selection path; route the click directly
+                        // to the guest's virtio-input device instead.
+                        focused_slot_index_ = ci;
+                        display_mouse_capture_ = ci;
+                        handle_display_mouse(x, y, button, ci, sel_w, term_h);
+                        return true;
                     } else {
                         if (!paused_) return true;
                         sel_pane = SelectionPane::InspectorPane;
@@ -3728,14 +4273,13 @@ auto Tui::consume_control_sequence(uint8_t first_byte) -> bool {
             int const panel_content_start =
                 (sel_cols.count >= 2) ? 5 : (sel_pane == SelectionPane::TerminalPane ? 4 : 6);
             int subpanel_start_y = panel_content_start;
-            int subpanel_end_y =
-                std::max(panel_content_start, inspector_content_end_row(term_h));
+            int subpanel_end_y = std::max(panel_content_start, inspector_content_end_row(term_h));
             if (sel_pane == SelectionPane::InspectorPane && sel_col_idx == 0 &&
                 sel_col_idx < workbench_slots_.size()) {
                 auto const page = workbench_slots_[sel_col_idx].page;
                 int const num_rows = std::max(1, term_h - framework::kFrameChromeRows);
-                bool const has_log = num_rows >= 15 && page != TuiRegPage::EXPLAIN &&
-                                     page != TuiRegPage::TRACE;
+                bool const has_log =
+                    num_rows >= 15 && page != TuiRegPage::EXPLAIN && page != TuiRegPage::TRACE;
                 if (has_log) {
                     int const log_start_y = inspector_log_start_row(term_h);
                     if (y >= log_start_y) {
@@ -3752,11 +4296,11 @@ auto Tui::consume_control_sequence(uint8_t first_byte) -> bool {
                 return true;
             }
             selection_.pane_width = col_w;
-            selection_.bounds = {.x = 0,
-                                 .y = selection_.content_start_y,
-                                 .width = col_w,
-                                 .height = selection_.content_end_y -
-                                           selection_.content_start_y + 1};
+            selection_.bounds = {
+                .x = 0,
+                .y = selection_.content_start_y,
+                .width = col_w,
+                .height = selection_.content_end_y - selection_.content_start_y + 1};
             selection_.start_x = col_local_x;
             selection_.start_y = y;
             selection_.end_x = col_local_x;
@@ -3786,6 +4330,25 @@ auto Tui::consume_control_sequence(uint8_t first_byte) -> bool {
     }
 
     if (!paused_.load(std::memory_order_relaxed)) {
+        if (focused_page() == TuiRegPage::DISPLAY) {
+            if (esc_buf_ == "\033[A" || esc_buf_ == "\033OA") {
+                machine_.send_input_key(103 /* KEY_UP */, true);
+                machine_.send_input_key(103, false);
+                return true;
+            } else if (esc_buf_ == "\033[B" || esc_buf_ == "\033OB") {
+                machine_.send_input_key(108 /* KEY_DOWN */, true);
+                machine_.send_input_key(108, false);
+                return true;
+            } else if (esc_buf_ == "\033[C" || esc_buf_ == "\033OC") {
+                machine_.send_input_key(106 /* KEY_RIGHT */, true);
+                machine_.send_input_key(106, false);
+                return true;
+            } else if (esc_buf_ == "\033[D" || esc_buf_ == "\033OD") {
+                machine_.send_input_key(105 /* KEY_LEFT */, true);
+                machine_.send_input_key(105, false);
+                return true;
+            }
+        }
         for (char c : esc_buf_) {
             write_guest_input(static_cast<uint8_t>(c));
         }

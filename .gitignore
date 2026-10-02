@@ -89,6 +89,9 @@ GEMINI.md
 # Standalone paper repository guard
 /paper/
 
+# Local tools directory
+tools/
+
 # Editor and OS artifacts
 *.swp
 *.swo

@@ -1,22 +1,7 @@
 {
-    "cmake.configureOnOpen": true,
-    "cmake.copyCompileCommands": "${workspaceFolder}/compile_commands.json",
-    "clangd.arguments": [
-        "--background-index",
-        "--compile-commands-dir=${workspaceFolder}",
-        "--header-insertion=never",
-        "--pch-storage=memory"
-    ],
-    "C_Cpp.intelliSenseEngine": "disabled",
-    "chat.tools.terminal.autoApprove": {
-        "true": true,
-        "command": true
-    },
-    "markdown.validate.enabled": true,
-    "files.watcherExclude": {
-        "**/.git/objects/**": true,
-        "**/.git/subtree-cache/**": true,
-        "**/build/**": true,
-        "**/linux-images/**": true
+    "debug.allowBreakpointsEverywhere": true,
+    "files.associations": {
+        "*.S": "asm",
+        "*.s": "asm"
     }
 }

@@ -20,11 +20,17 @@ struct FdtConfig {
     uint64_t dram_size = 256ULL * 1024ULL * 1024ULL;
     unsigned int xlen = 64;
     std::string bootargs =
-        "console=ttyS0,115200 earlycon=uart8250,mmio,0x10000000,115200n8 root=/dev/vda rw "
+        "console=tty0 console=ttyS0,115200 earlycon=uart8250,mmio,0x10000000,115200n8 "
+        "root=/dev/vda rw "
         "loglevel=7";
     std::string isa_string = (SIMRV_XLEN == 64) ? "rv64imafdcbv" : "rv32imafdcbv";
     bool enable_pcie = true;
     bool enable_mmio = false;
+    bool enable_framebuffer = true;
+    uint64_t framebuffer_base = 0x84000000ULL;
+    uint32_t framebuffer_width = 640;
+    uint32_t framebuffer_height = 480;
+    uint32_t framebuffer_stride = 640 * 4;
 };
 
 class FdtGenerator {

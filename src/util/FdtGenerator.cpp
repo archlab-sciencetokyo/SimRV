@@ -235,6 +235,34 @@ auto FdtGenerator::generate(const FdtConfig& config) -> std::vector<uint8_t> {
     b.add_prop_u32_array("reg", mem_reg);
     b.end_node();  // memory
 
+    if (config.enable_framebuffer && config.framebuffer_base >= config.dram_base &&
+        config.framebuffer_base +
+                static_cast<uint64_t>(config.framebuffer_stride) * config.framebuffer_height <=
+            config.dram_base + config.dram_size) {
+        b.begin_node("reserved-memory");
+        b.add_prop_u32("#address-cells", 2);
+        b.add_prop_u32("#size-cells", 2);
+        b.add_prop_empty("ranges");
+        b.begin_node(std::format("framebuffer@{:x}", config.framebuffer_base));
+        b.add_prop_u32_array("reg", {static_cast<uint32_t>(config.framebuffer_base >> 32),
+                                     static_cast<uint32_t>(config.framebuffer_base), 0,
+                                     config.framebuffer_stride * config.framebuffer_height});
+        b.add_prop_empty("no-map");
+        b.end_node();
+        b.end_node();
+
+        b.begin_node(std::format("framebuffer@{:x}", config.framebuffer_base));
+        b.add_prop_string("compatible", "simple-framebuffer");
+        b.add_prop_u32_array("reg", {static_cast<uint32_t>(config.framebuffer_base >> 32),
+                                     static_cast<uint32_t>(config.framebuffer_base), 0,
+                                     config.framebuffer_stride * config.framebuffer_height});
+        b.add_prop_u32("width", config.framebuffer_width);
+        b.add_prop_u32("height", config.framebuffer_height);
+        b.add_prop_u32("stride", config.framebuffer_stride);
+        b.add_prop_string("format", "a8r8g8b8");
+        b.end_node();
+    }
+
     // cpus
     b.begin_node("cpus");
     b.add_prop_u32("#address-cells", 1);

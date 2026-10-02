@@ -745,7 +745,8 @@ auto parse_debug_cosrv_options(std::string_view arg, std::span<char* const> args
         auto value = next_argument(args, i, "--summary");
         if (!value) return std::unexpected(value.error());
         if (value->empty() || *value == "-") {
-            return std::unexpected("--summary requires a writable file path (stdout is reserved for guest UART)");
+            return std::unexpected(
+                "--summary requires a writable file path (stdout is reserved for guest UART)");
         }
         options.fn_summary = std::string(*value);
         return true;
@@ -754,7 +755,8 @@ auto parse_debug_cosrv_options(std::string_view arg, std::span<char* const> args
         auto value = next_argument(args, i, "--events");
         if (!value) return std::unexpected(value.error());
         if (value->empty() || *value == "-") {
-            return std::unexpected("--events requires a writable file path (stdout is reserved for guest UART)");
+            return std::unexpected(
+                "--events requires a writable file path (stdout is reserved for guest UART)");
         }
         options.fn_events = std::string(*value);
         return true;
@@ -1014,7 +1016,8 @@ auto resolve_runtime_profile(const RuntimeOptions& options) -> simrv::core::Runt
 auto RuntimeOptions::to_machine_config() const -> simrv::core::MachineConfig {
     simrv::core::MachineConfig cfg{};
     cfg.memory.dram_base = simrv::memory::kDramBaseAddress;
-    cfg.memory.dram_size = (dram_size != 0 ? dram_size : simrv::memory::kDramSize);
+    const auto default_dram_size = appmode ? simrv::memory::kDramSize : (1ULL << 30);
+    cfg.memory.dram_size = (dram_size != 0 ? dram_size : default_dram_size);
 
     cfg.execution.appmode = appmode;
     cfg.execution.start_pc = start_pc;
@@ -1112,8 +1115,7 @@ auto apply_runtime_options(simrv::core::Machine* machine, const RuntimeOptions& 
     simrv::log::info("Run configuration: RV{}, {}-mode, {} hart(s), {} platform, {} MiB RAM",
                      simrv::xlen::kXLenBits, options.appmode ? "bare-metal" : "OS",
                      options.num_harts, platform_name,
-                     (options.dram_size != 0 ? options.dram_size : simrv::memory::kDramSize) /
-                         (1024ULL * 1024ULL));
+                     machine->configuration().memory.dram_size / (1024ULL * 1024ULL));
     simrv::log::info("Guest image: {}", options.fn_memimg.empty() ? "<none>" : options.fn_memimg);
     if (machine->runtime_profile.is_cycle_mode()) {
         simrv::log::info("CA policy: {} pipeline, forwarding {}",
@@ -1260,7 +1262,7 @@ auto needs_memory_image(const ParseResult& result) -> bool {
                style(kBrightGreen), style(kReset));
     std::print(stdout,
                "  {}--dram-size, --ram-size {}{}<SIZE>{} DRAM size in bytes (e.g. 128M, 2G; "
-               "default: 128M)\n",
+               "default: 1G for Linux, 256M otherwise)\n",
                style(kBrightGreen), style(kBrightBlack), style(kReset), style(kReset));
     std::print(stdout,
                "  {}--isa {}{}<PROFILE>{}               Select ISA profile: rv{}i | rv{}imac | "
@@ -1433,18 +1435,21 @@ auto needs_memory_image(const ParseResult& result) -> bool {
                "  {}--inspection-output {}{}<FILE>{}    Set paused-state TUI inspection report "
                "destination\n\n",
                style(kBrightGreen), style(kBrightBlack), style(kReset), style(kReset));
-    std::print(stdout,
-               "  {}--summary {}{}<FILE>{}                  Write a JSON execution summary on exit\n\n",
-               style(kBrightGreen), style(kBrightBlack), style(kReset), style(kReset));
-    std::print(stdout,
-               "  {}--events {}{}<FILE>{}                   Write newline-delimited lifecycle events\n\n",
-               style(kBrightGreen), style(kBrightBlack), style(kReset), style(kReset));
+    std::print(
+        stdout,
+        "  {}--summary {}{}<FILE>{}                  Write a JSON execution summary on exit\n\n",
+        style(kBrightGreen), style(kBrightBlack), style(kReset), style(kReset));
+    std::print(
+        stdout,
+        "  {}--events {}{}<FILE>{}                   Write newline-delimited lifecycle events\n\n",
+        style(kBrightGreen), style(kBrightBlack), style(kReset), style(kReset));
     std::print(stdout,
                "  {}--save-checkpoint {}{}<FILE>{}          Save architectural state on exit\n",
                style(kBrightGreen), style(kBrightBlack), style(kReset), style(kReset));
-    std::print(stdout,
-               "  {}--load-checkpoint {}{}<FILE>{}          Resume from an architectural snapshot\n\n",
-               style(kBrightGreen), style(kBrightBlack), style(kReset), style(kReset));
+    std::print(
+        stdout,
+        "  {}--load-checkpoint {}{}<FILE>{}          Resume from an architectural snapshot\n\n",
+        style(kBrightGreen), style(kBrightBlack), style(kReset), style(kReset));
 
     // Debug & Verification
     std::print(stdout, "{}{}:{}{}\n", style(kBoldFgBrightBlue), "Debug and Verification",

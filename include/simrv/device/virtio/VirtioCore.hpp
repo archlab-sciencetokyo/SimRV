@@ -7,13 +7,16 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include <deque>
 #include <fstream>
+#include <mutex>
 #include <random>
 #include <span>
 #include <string>
 #include <string_view>
 #include <vector>
 
+#include "simrv/util/UniqueFd.hpp"
 #include "simrv/xlen/Types.hpp"
 
 namespace simrv::device::virtio {
@@ -196,12 +199,22 @@ class NetBackend {
         None = 3,    // Disabled
     };
 
-    explicit NetBackend(Mode mode = Mode::User) : mode_(mode) {}
+    explicit NetBackend(Mode mode = Mode::User);
+    ~NetBackend();
+
+    NetBackend(const NetBackend&) = delete;
+    auto operator=(const NetBackend&) -> NetBackend& = delete;
+    NetBackend(NetBackend&&) noexcept = default;
+    auto operator=(NetBackend&&) noexcept -> NetBackend& = default;
 
     void set_mac(std::array<uint8_t, 6> mac) { mac_ = mac; }
     [[nodiscard]] auto get_mac() const -> const std::array<uint8_t, 6>& { return mac_; }
     [[nodiscard]] auto mode() const -> Mode { return mode_; }
     void set_mode(Mode m) { mode_ = m; }
+    auto poll_host_rx() -> std::size_t;
+    [[nodiscard]] auto host_backend_available() const noexcept -> bool {
+        return host_fd_.get() >= 0;
+    }
 
     void push_rx_packet(const std::vector<uint8_t>& packet) { rx_queue_.push_back(packet); }
     void push_rx_packet(std::span<const uint8_t> packet) {
@@ -226,6 +239,8 @@ class NetBackend {
                 // If destination matches our MAC or broadcast, echo
                 push_rx_packet(pkt);
             }
+        } else if (mode_ == Mode::Tap && host_fd_) {
+            (void)::write(host_fd_.get(), pkt.data(), pkt.size());
         }
     }
 
@@ -240,37 +255,64 @@ class NetBackend {
     std::array<uint8_t, 6> mac_{0x52, 0x54, 0x00, 0x12, 0x34, 0x56};
     std::vector<std::vector<uint8_t>> rx_queue_;
     std::vector<std::vector<uint8_t>> tx_history_;
+    util::UniqueFd host_fd_;
+};
+
+struct VirtioInputEvent {
+    uint16_t type{0};
+    uint16_t code{0};
+    uint32_t value{0};
+};
+
+struct VirtioInputAbsInfo {
+    uint32_t min{0};
+    uint32_t max{0};
+    uint32_t fuzz{0};
+    uint32_t flat{0};
+    uint32_t res{0};
 };
 
 class InputBackend {
    public:
     uint8_t select{0};
     uint8_t subsel{0};
+    std::deque<VirtioInputEvent> event_queue;
+    std::mutex event_mutex;
 
-    [[nodiscard]] auto read_config(Address offset, uint8_t size) const -> uint32_t {
-        if (offset == 0) return select;
-        if (offset == 1) return subsel;
-        if (offset == 2) {
-            return get_config_size();
+    [[nodiscard]] auto read_config(Address offset, uint8_t size) const -> uint64_t {
+        uint64_t res = 0;
+        const uint8_t bytes_to_read = std::min<uint8_t>(size, 8);
+        for (uint8_t b = 0; b < bytes_to_read; ++b) {
+            const Address off = offset + b;
+            uint8_t val = 0;
+            if (off == 0) {
+                val = select;
+            } else if (off == 1) {
+                val = subsel;
+            } else if (off == 2) {
+                val = get_config_size();
+            } else if (off >= 8) {
+                val = get_config_u_byte(off - 8);
+            }
+            res |= (static_cast<uint64_t>(val) << (b * 8));
         }
-        if (offset >= 8) {
-            const Address u_offset = offset - 8;
-            return get_config_u(u_offset, size);
-        }
-        return 0;
+        return res;
     }
 
-    void write_config(Address offset, uint32_t val, uint8_t size) {
-        (void)size;
-        if (offset == 0) select = static_cast<uint8_t>(val);
-        if (offset == 1) subsel = static_cast<uint8_t>(val);
+    void write_config(Address offset, uint64_t val, uint8_t size) {
+        for (uint8_t b = 0; b < size; ++b) {
+            const Address off = offset + b;
+            const uint8_t byte_val = static_cast<uint8_t>((val >> (b * 8)) & 0xFF);
+            if (off == 0) select = byte_val;
+            if (off == 1) subsel = byte_val;
+        }
     }
 
    private:
     [[nodiscard]] auto get_config_size() const -> uint8_t {
         switch (select) {
             case 0x01: {  // VIRTIO_INPUT_CFG_ID_NAME
-                static constexpr std::string_view kName = "SimRV Keyboard";
+                static constexpr std::string_view kName = "SimRV Combined Input";
                 return static_cast<uint8_t>(kName.size());
             }
             case 0x02: {  // VIRTIO_INPUT_CFG_ID_SERIAL
@@ -281,36 +323,45 @@ class InputBackend {
                 return 8;
             case 0x11:                       // VIRTIO_INPUT_CFG_EV_BITS
                 if (subsel == 0) return 1;   // EV_SYN
-                if (subsel == 1) return 16;  // EV_KEY
-                if (subsel == 2) return 1;   // EV_REL
+                if (subsel == 1) return 48;  // EV_KEY (keys 0..127 + mouse buttons)
+                if (subsel == 2) return 2;   // EV_REL
+                if (subsel == 3) return 1;   // EV_ABS
+                return 0;
+            case 0x12:  // VIRTIO_INPUT_CFG_ABS_INFO
+                if (subsel == 0 || subsel == 1) return sizeof(VirtioInputAbsInfo);
                 return 0;
             default:
                 return 0;
         }
     }
 
-    [[nodiscard]] auto get_config_u(Address u_offset, uint8_t size) const -> uint32_t {
-        uint32_t res = 0;
-        for (uint8_t b = 0; b < size; ++b) {
-            const Address off = u_offset + b;
-            uint8_t val = 0;
-            if (select == 0x01) {
-                static constexpr std::string_view kName = "SimRV Keyboard";
-                if (off < kName.size()) val = static_cast<uint8_t>(kName[off]);
-            } else if (select == 0x02) {
-                static constexpr std::string_view kSerial = "simrv-input-0";
-                if (off < kSerial.size()) val = static_cast<uint8_t>(kSerial[off]);
-            } else if (select == 0x11) {
-                if (subsel == 0 && off == 0)
-                    val = 0x01;  // SYN_REPORT
-                else if (subsel == 1 && off < 16)
-                    val = 0xFF;  // Key map
-                else if (subsel == 2 && off == 0)
-                    val = 0x03;  // REL_X | REL_Y
+    [[nodiscard]] auto get_config_u_byte(Address off) const -> uint8_t {
+        if (select == 0x01) {
+            static constexpr std::string_view kName = "SimRV Combined Input";
+            if (off < kName.size()) return static_cast<uint8_t>(kName[off]);
+        } else if (select == 0x02) {
+            static constexpr std::string_view kSerial = "simrv-input-0";
+            if (off < kSerial.size()) return static_cast<uint8_t>(kSerial[off]);
+        } else if (select == 0x11) {
+            if (subsel == 0 && off == 0) return 0x01;  // SYN_REPORT
+            if (subsel == 1) {
+                if (off < 16) return 0xFF;   // Standard keys (0..127)
+                if (off == 34) return 0x07;  // BTN_LEFT(0x110), BTN_RIGHT(0x111), BTN_MIDDLE(0x112)
+            } else if (subsel == 2) {
+                if (off == 0) return 0x03;  // REL_X | REL_Y
+                if (off == 1) return 0x01;  // REL_WHEEL
+            } else if (subsel == 3 && off == 0) {
+                return 0x03;  // ABS_X | ABS_Y
             }
-            res |= (static_cast<uint32_t>(val) << (b * 8));
+        } else if (select == 0x12 && (subsel == 0 || subsel == 1) &&
+                   off < sizeof(VirtioInputAbsInfo)) {
+            VirtioInputAbsInfo info{};
+            info.min = 0;
+            info.max = (subsel == 0) ? 639 : 479;
+            const auto* p = reinterpret_cast<const uint8_t*>(&info);
+            return p[off];
         }
-        return res;
+        return 0;
     }
 };
 

@@ -109,6 +109,16 @@ struct TuiExecutionSnapshot {
 class Machine final : public core::IInterruptController {
    private:
     class Runtime;
+    struct PendingInputEvent {
+        enum class Type : uint8_t { Key, MouseMotion, MouseButton, MouseWheel };
+
+        Type type;
+        uint16_t code = 0;
+        int32_t x = 0;
+        int32_t y = 0;
+        bool pressed = false;
+    };
+
     std::unique_ptr<Runtime> runtime_;
 
    public:
@@ -367,6 +377,7 @@ class Machine final : public core::IInterruptController {
     [[nodiscard]] auto ram_data() noexcept -> Byte*;
     [[nodiscard]] auto ram_data() const noexcept -> const Byte*;
     [[nodiscard]] auto ram_view() const noexcept -> simrv::memory::RamView;
+    [[nodiscard]] auto framebuffer_view() const noexcept -> simrv::memory::RamView;
     [[nodiscard]] auto tui_execution_snapshot(size_t hart = 0) const noexcept
         -> TuiExecutionSnapshot;
     /// Platform capability used by built-in devices to publish an external interrupt level.
@@ -385,6 +396,10 @@ class Machine final : public core::IInterruptController {
     [[nodiscard]] auto rtc_device() const noexcept -> const simrv::Rtc*;
     [[nodiscard]] auto uart_device() noexcept -> simrv::device::Uart*;
     [[nodiscard]] auto uart_device() const noexcept -> const simrv::device::Uart*;
+    void send_input_key(uint16_t code, bool pressed);
+    void send_input_mouse_motion(int32_t x, int32_t y);
+    void send_input_mouse_button(uint16_t button, bool pressed);
+    void send_input_mouse_wheel(int32_t delta);
     [[nodiscard]] auto pcie_root() noexcept -> simrv::device::PcieRootComplex*;
     [[nodiscard]] auto pcie_root() const noexcept -> const simrv::device::PcieRootComplex*;
     [[nodiscard]] auto debugger() noexcept -> simrv::debug::GdbStub*;
@@ -490,6 +505,8 @@ class Machine final : public core::IInterruptController {
     void execute_runner_cycle();
     [[nodiscard]] auto execute_runner_fast_batch(uint32_t batch_size) -> bool;
     void prepare_runner_cycle();
+    void service_pending_input();
+    void service_network();
     void finalize_runner_cycle();
     void publish_tui_execution_snapshot() noexcept;
     void publish_tui_execution_snapshot_for_hart(size_t hart) noexcept;
@@ -502,6 +519,8 @@ class Machine final : public core::IInterruptController {
     std::mutex control_mutex_;
     std::deque<std::function<void(Machine&)>> control_commands_;
     std::atomic<bool> controls_pending_{false};
+    std::mutex input_mutex_;
+    std::deque<PendingInputEvent> pending_input_events_;
     bool persistent_control_ = false;
     std::function<void(Machine&)> step_completion_;
     mutable std::mutex staged_configuration_mutex_;

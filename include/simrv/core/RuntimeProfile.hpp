@@ -52,7 +52,10 @@ struct RuntimeProfile {
         return engine == ExecutionEngine::InstructionFast;
     }
     [[nodiscard]] constexpr auto records_cycle_history() const -> bool {
-        return engine == ExecutionEngine::CycleObservable;
+        // GDB's CA pipeline view is an observable client even when the process
+        // was launched in the otherwise fast CLI profile.
+        return engine == ExecutionEngine::CycleObservable ||
+               (engine == ExecutionEngine::CycleFast && gdb);
     }
     [[nodiscard]] constexpr auto allows_fast_batch() const -> bool {
         const bool fast_instruction_engine = is_fast_engine(engine) && is_instruction_mode();

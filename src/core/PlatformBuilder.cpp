@@ -26,6 +26,13 @@ namespace simrv::core {
 void PlatformBuilder::compose(Machine& machine) {
     const auto composition = platform_composition(machine.config.platform_profile);
     const auto& disk_path = machine.config.files.disk_path;
+    const auto network_mode = [&]() {
+        using Mode = simrv::device::virtio::NetBackend::Mode;
+        if (machine.config.network.mode == "tap") return Mode::Tap;
+        if (machine.config.network.mode == "socket") return Mode::Socket;
+        if (machine.config.network.mode == "none") return Mode::None;
+        return Mode::User;
+    }();
 
     if (composition.pcie) {
         machine.runtime_->pcie = std::make_unique<simrv::device::PcieRootComplex>(
@@ -36,7 +43,7 @@ void PlatformBuilder::compose(Machine& machine) {
         machine.runtime_->pci_gpu = std::make_shared<simrv::device::VirtioPciGpu>();
         machine.runtime_->pci_input = std::make_shared<simrv::device::VirtioPciInput>();
         machine.runtime_->pci_sound = std::make_shared<simrv::device::VirtioPciSound>();
-        machine.runtime_->pci_net = std::make_shared<simrv::device::VirtioPciNet>();
+        machine.runtime_->pci_net = std::make_shared<simrv::device::VirtioPciNet>(network_mode);
         const std::array<std::shared_ptr<simrv::device::PciDevice>, 7> pci_devices = {
             machine.runtime_->pci_disk, machine.runtime_->pci_console, machine.runtime_->pci_rng,
             machine.runtime_->pci_gpu,  machine.runtime_->pci_input,   machine.runtime_->pci_sound,
@@ -60,7 +67,7 @@ void PlatformBuilder::compose(Machine& machine) {
         machine.runtime_->mmio_sound =
             std::make_shared<simrv::device::VirtioMmioSound>(0x10006000, 7, &machine);
         machine.runtime_->mmio_net =
-            std::make_shared<simrv::device::VirtioMmioNet>(0x10007000, 8, &machine);
+            std::make_shared<simrv::device::VirtioMmioNet>(0x10007000, 8, &machine, network_mode);
     }
 }
 

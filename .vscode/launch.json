@@ -5,13 +5,14 @@
             "name": "SimRV Debug (Linux)",
             "type": "lldb-dap",
             "request": "launch",
-            "program": "${workspaceFolder}/build/ninja-clang-debug/SimRV",
+            "program": "${workspaceFolder}/build/rv64-debug/SimRV",
             "args": [
+                "--os",
                 "-m",
                 "${workspaceFolder}/linux-images/vmlinux",
-                "-d",
+                "-D",
                 "${workspaceFolder}/linux-images/root.bin",
-                "-c",
+                "-f",
                 "${workspaceFolder}/linux-images/devicetree.dtb",
                 "-e",
                 "200000000"
@@ -30,7 +31,7 @@
             "name": "SimRV Debug (Simple)",
             "type": "lldb-dap",
             "request": "launch",
-            "program": "${workspaceFolder}/build/ninja-clang-debug/SimRV",
+            "program": "${workspaceFolder}/build/rv64-debug/SimRV",
             "args": [
                 "--help"
             ],
@@ -40,6 +41,50 @@
             "externalConsole": false,
             "MIMode": "lldb",
             "preLaunchTask": "build-debug"
+        },
+        {
+            "name": "SimRV Guest (IA)",
+            "type": "cppdbg",
+            "request": "launch",
+            "program": "/home/ren/workspace/lab/simulators/SimRV/examples/hello/build-rv64/hello.elf",
+            "cwd": "/home/ren/workspace/lab/simulators/SimRV",
+            "MIMode": "gdb",
+            "miDebuggerPath": "gdb",
+            "miDebuggerServerAddress": "${command:simrv.gdbServerAddressIA}",
+            "stopAtEntry": true,
+            "externalConsole": false,
+            "customLaunchSetupCommands": [],
+            "launchCompleteCommand": "None",
+            "setupCommands": [
+                {
+                    "description": "Select the RISC-V RV64 target architecture",
+                    "text": "set architecture riscv:rv64",
+                    "ignoreFailures": false
+                }
+            ],
+            "preLaunchTask": "build-guest-hello"
+        },
+        {
+            "name": "SimRV Guest (CA)",
+            "type": "cppdbg",
+            "request": "launch",
+            "program": "/home/ren/workspace/lab/simulators/SimRV/examples/hello/build-rv64/hello.elf",
+            "cwd": "/home/ren/workspace/lab/simulators/SimRV",
+            "MIMode": "gdb",
+            "miDebuggerPath": "gdb",
+            "miDebuggerServerAddress": "${command:simrv.gdbServerAddressCA}",
+            "stopAtEntry": true,
+            "externalConsole": false,
+            "customLaunchSetupCommands": [],
+            "launchCompleteCommand": "None",
+            "setupCommands": [
+                {
+                    "description": "Select the RISC-V RV64 target architecture",
+                    "text": "set architecture riscv:rv64",
+                    "ignoreFailures": false
+                }
+            ],
+            "preLaunchTask": "build-guest-hello"
         }
     ]
 }

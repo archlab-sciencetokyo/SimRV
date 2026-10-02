@@ -1,0 +1,10 @@
+{
+    "simrv": "${workspaceFolder}/build/rv64-release/simrv",
+    "program": "${workspaceFolder}/examples/hello/build-rv64/hello.elf",
+    "gdb": "gdb",
+    "args": [
+        "--baremetal"
+    ],
+    "stopAtEntry": true,
+    "preLaunchTask": "build-guest-hello"
+}

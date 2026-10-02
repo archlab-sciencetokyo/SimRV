@@ -219,6 +219,22 @@ static void test_checksum() {
     EXPECT_EQ(GdbStub::checksum("qSupported"), expected);
 }
 
+static auto monitor_packet(std::string_view command) -> std::string {
+    std::string encoded = "qRcmd,";
+    for (const auto byte : command)
+        encoded += std::format("{:02x}", static_cast<unsigned char>(byte));
+    return encoded;
+}
+
+static auto decode_monitor_response(std::string_view response) -> std::string {
+    std::string decoded;
+    for (size_t i = 0; i + 1 < response.size(); i += 2) {
+        decoded.push_back(
+            static_cast<char>(std::stoul(std::string(response.substr(i, 2)), nullptr, 16)));
+    }
+    return decoded;
+}
+
 // ---------------------------------------------------------------------------
 // Test: sw_breakpoint state is empty on construction (no network)
 // ---------------------------------------------------------------------------
@@ -303,6 +319,7 @@ static void test_qsupported() {
     const auto resp = client.transact("qSupported:multiprocess+;swbreak+;hwbreak+");
     EXPECT_TRUE(resp.find("PacketSize") != std::string::npos);
     EXPECT_TRUE(resp.find("swbreak+") != std::string::npos);
+    EXPECT_TRUE(resp.find("hwbreak+") != std::string::npos);
     EXPECT_TRUE(resp.find("qXfer:features:read+") != std::string::npos);
 }
 
@@ -335,6 +352,8 @@ static void test_target_xml() {
         if (chunk.front() == 'l') break;
     }
     EXPECT_TRUE(xml.find("org.gnu.gdb.riscv.fpu") != std::string::npos);
+    EXPECT_TRUE(xml.find("name=\"mstatus\"") != std::string::npos);
+    EXPECT_TRUE(xml.find("name=\"mcycle\"") != std::string::npos);
 }
 
 // ---------------------------------------------------------------------------
@@ -410,9 +429,8 @@ static void test_register_read() {
     negotiate_no_ack(client);
 
     const auto resp = client.transact("g");
-    // RV64: 33 regs * 16 hex chars + 32 FP regs * 16 hex = 33*16 + 32*16 = 1040 chars
-    // RV32: 33 regs * 8 hex chars + 32 FP regs * 16 hex = 264 + 512 = 776 chars
-    const size_t expected_len = (sizeof(Register) == 8) ? (33 * 16 + 32 * 16) : (33 * 8 + 32 * 16);
+    // Base integer/PC + FP registers, followed by the advertised CSR/counter registers.
+    const size_t expected_len = (33 + 11) * sizeof(Register) * 2 + 32 * 16;
     EXPECT_EQ(resp.size(), expected_len);
 }
 
@@ -434,6 +452,11 @@ static void test_single_reg_read() {
     // Should be all-zero hex, length = sizeof(Register)*2
     EXPECT_EQ(resp.size(), sizeof(Register) * 2);
     for (char c : resp) EXPECT_TRUE(c == '0');
+
+    const auto mstatus = client.transact("p41");
+    EXPECT_EQ(mstatus.size(), sizeof(Register) * 2);
+    const auto mcycle = client.transact("p48");
+    EXPECT_EQ(mcycle.size(), sizeof(Register) * 2);
 }
 
 // ---------------------------------------------------------------------------
@@ -495,13 +518,26 @@ static void test_logical_breakpoints_and_watchpoints() {
     EXPECT_EQ(client.transact(std::format("Z0,{:x},4", base)), std::string("OK"));
     EXPECT_TRUE(h.machine.breakpoint_manager().has_pc_breakpoint(base));
     EXPECT_EQ(static_cast<uint8_t>(*ram.unchecked_ptr(base)), uint8_t{0x13});
+    EXPECT_EQ(client.transact(std::format("Z1,{:x},4", base + 4)), std::string("OK"));
+    EXPECT_TRUE(h.machine.breakpoint_manager().has_pc_breakpoint(base + 4));
     EXPECT_EQ(client.transact(std::format("Z2,{:x},4", base + 8)), std::string("OK"));
     EXPECT_EQ(client.transact(std::format("Z3,{:x},4", base + 16)), std::string("OK"));
     EXPECT_EQ(client.transact(std::format("Z4,{:x},4", base + 24)), std::string("OK"));
     EXPECT_EQ(h.machine.breakpoint_manager().get_watchpoints().size(), 3U);
 
+    const auto monitor = [&](std::string_view command) {
+        return decode_monitor_response(client.transact(monitor_packet(command)));
+    };
+    EXPECT_TRUE(monitor("help").find("info watchpoints") != std::string::npos);
+    EXPECT_TRUE(monitor("info breakpoints").find("0x80000000") != std::string::npos);
+    EXPECT_TRUE(monitor("info watchpoints").find("watchpoint") != std::string::npos);
+    EXPECT_TRUE(monitor("info pipeline").find("cycle-accurate mode is disabled") !=
+                std::string::npos);
+
     EXPECT_EQ(client.transact(std::format("z0,{:x},4", base)), std::string("OK"));
     EXPECT_TRUE(!h.machine.breakpoint_manager().has_pc_breakpoint(base));
+    EXPECT_EQ(client.transact(std::format("z1,{:x},4", base + 4)), std::string("OK"));
+    EXPECT_TRUE(!h.machine.breakpoint_manager().has_pc_breakpoint(base + 4));
     EXPECT_EQ(client.transact(std::format("z2,{:x},4", base + 8)), std::string("OK"));
     EXPECT_EQ(h.machine.breakpoint_manager().get_watchpoints().size(), 2U);
 }

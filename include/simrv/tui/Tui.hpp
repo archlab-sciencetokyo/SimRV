@@ -168,20 +168,23 @@ class Tui : public core::ITelemetrySink, public core::IConsoleSink {
     }
     void close_modal() {
         modal_.close();
+        full_screen_redraw_requested_ = true;
         render(true);
     }
     void submit_modal() {
         if (modal_.get_type() == ModalType::ToolPicker) {
             auto const page = modal_.get_selected_tool_page();
             auto const target_slot = static_cast<size_t>(modal_.get_tool_picker_slot());
+            modal_.close();
+            full_screen_redraw_requested_ = true;
             set_workbench_slot_page(target_slot, page);
-            close_modal();
             return;
         }
         modal_.submit(
             inspector_pane_.get(), step_delay_us_, [this](TuiRegPage page) { set_reg_page(page); },
             [this](const std::string& status) { set_status_override(status); },
             [this]() { reset_speed_history(); });
+        full_screen_redraw_requested_ = true;
         render(true);
     }
     [[nodiscard]] auto is_modal_active() const -> bool { return modal_.is_active(); }
@@ -225,7 +228,6 @@ class Tui : public core::ITelemetrySink, public core::IConsoleSink {
     void cycle_tool_page(bool reverse = false);
     void set_reg_page(TuiRegPage page);
     void toggle_explain();
-    void cycle_right_panel_mode();
     void record_instruction(Register pc, simrv::isa::Opcode opcode, simrv::isa::OperationId op_id,
                             uint8_t rd, Register rd_val, uint8_t rs1, Register rs1_val, uint8_t rs2,
                             Register rs2_val, int64_t imm, uint8_t hart) override;
@@ -254,9 +256,6 @@ class Tui : public core::ITelemetrySink, public core::IConsoleSink {
     void scroll_inspector(int lines);
     void reset_scroll_inspector();
     [[nodiscard]] auto get_scroll_offset() const -> int { return scroll_offset_; }
-    [[nodiscard]] auto get_right_panel_mode() const -> TuiRightPanelMode {
-        return right_panel_mode_.load(std::memory_order_relaxed);
-    }
     [[nodiscard]] auto get_pane_width() const -> int { return pane_width_cached_; }
     [[nodiscard]] auto get_layout() const -> TuiLayout { return layout_; }
     void adjust_inspector_width(int delta);
@@ -317,6 +316,15 @@ class Tui : public core::ITelemetrySink, public core::IConsoleSink {
     int cell_width_px_ = 8;
     int cell_height_px_ = 16;
     bool sixel_supported_{false};
+    bool sixel_rendered_{false};
+    size_t sixel_column_{std::numeric_limits<size_t>::max()};
+    int sixel_panel_width_{0};
+    int sixel_panel_rows_{0};
+    int sixel_panel_x_{0};
+    uint64_t sixel_framebuffer_signature_{0};
+    bool modal_active_last_frame_{false};
+    std::optional<size_t> display_mouse_capture_;
+    std::optional<std::pair<int, int>> display_mouse_last_fb_;
     VirtualTerminal vt_;
     LogBuffer log_buffer_;
     std::vector<std::string> trace_buffer_;
@@ -335,7 +343,6 @@ class Tui : public core::ITelemetrySink, public core::IConsoleSink {
     size_t focused_slot_index_ = 0;
     size_t selected_hart_ = 0;
     TuiLayout layout_ = TuiLayout::Split;
-    std::atomic<TuiRightPanelMode> right_panel_mode_{TuiRightPanelMode::Terminal};
     std::atomic<uint64_t> current_instruction_count_{0};
     std::atomic<bool> trace_or_livetrace_active_{false};
     std::atomic<bool> pipeline_or_detail_visible_{false};
@@ -427,8 +434,13 @@ class Tui : public core::ITelemetrySink, public core::IConsoleSink {
     void render_update_speed(std::chrono::steady_clock::time_point now);
     void render_build_lines(int inspector_width, int terminal_width, int num_rows,
                             TuiRightPanelMode panel_mode);
-    void render_draw_sixel(int inspector_width, int terminal_width, int num_rows,
+    [[nodiscard]] auto render_framebuffer_row(int row, int width, int rows) const -> std::string;
+    void render_draw_sixel(int display_x, int display_width, int display_rows,
                            std::string& update_cmds);
+    [[nodiscard]] auto display_coords_to_fb(int x, int y, size_t col_idx, int term_width,
+                                            int term_height) const
+        -> std::optional<std::pair<int, int>>;
+    void handle_display_mouse(int x, int y, int b, size_t col_idx, int term_width, int term_height);
     void init_terminal_raw_mode();
     void detect_terminal_sixel_support(const std::string& resp);
 };

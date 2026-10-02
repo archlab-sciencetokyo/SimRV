@@ -265,10 +265,15 @@ echo "SimRV" > "$INITRAMFS_DIR/etc/hostname"
 
 cat > "$INITRAMFS_DIR/init" <<'EOF'
 #!/bin/sh
-mkdir -p /dev /proc /sys /etc /tmp /run
+mkdir -p /dev /proc /sys /etc /tmp /run /dev/pts
+# These belong to the previous guest lifetime. A simulator restart cannot
+# preserve a live Xorg process, so remove them before BusyBox starts tty1.
+rm -f /tmp/.X0-lock /tmp/.X11-unix/X0 /tmp/simrv-jwm.lock/pid
+rmdir /tmp/simrv-jwm.lock 2>/dev/null || true
 /bin/mount -t proc proc /proc 2>/dev/null || true
 /bin/mount -t sysfs sysfs /sys 2>/dev/null || true
 /bin/mount -t devtmpfs devtmpfs /dev 2>/dev/null || true
+/bin/mount -t devpts devpts /dev/pts 2>/dev/null || true
 
 # Fallback device nodes if devtmpfs is absent
 [ -c /dev/console ] || mknod -m 600 /dev/console c 5 1 2>/dev/null || true
@@ -277,6 +282,34 @@ mkdir -p /dev /proc /sys /etc /tmp /run
 [ -c /dev/null ] || mknod -m 666 /dev/null c 1 3 2>/dev/null || true
 [ -c /dev/zero ] || mknod -m 666 /dev/zero c 1 5 2>/dev/null || true
 [ -c /dev/mem ] || mknod -m 600 /dev/mem c 1 1 2>/dev/null || true
+
+if [ -c /dev/fb0 ]; then
+    echo "Framebuffer: /dev/fb0 detected (640x480x32)"
+fi
+
+# If an external root disk (/dev/vda) is provided, mount and switch_root into it
+if [ -b /dev/vda ]; then
+    mkdir -p /newroot
+    mounted=0
+    # VirtIO block discovery can race init on fast boots. Give the device and
+    # its ext4 journal a few seconds to become readable before falling back to
+    # the initramfs shell.
+    for _ in 1 2 3 4 5; do
+        if mount -t ext4 /dev/vda /newroot 2>/dev/null; then
+            mounted=1
+            break
+        fi
+        echo "Waiting for /dev/vda ext4 filesystem..." > /dev/ttyS0
+        sleep 1
+    done
+    if [ "$mounted" -eq 1 ]; then
+        echo "Mounted /dev/vda as root filesystem"
+        mount --move /dev /newroot/dev 2>/dev/null || true
+        mount --move /proc /newroot/proc 2>/dev/null || true
+        mount --move /sys /newroot/sys 2>/dev/null || true
+        exec switch_root /newroot /init
+    fi
+fi
 
 [ -f /etc/hostname ] && hostname -F /etc/hostname 2>/dev/null || true
 
@@ -405,6 +438,11 @@ make ARCH=riscv CROSS_COMPILE="$CROSS_COMPILE" "$LINUX_DEFCONFIG"
 ./scripts/config --enable CONFIG_VIRTIO_MMIO
 ./scripts/config --enable CONFIG_VIRTIO_BLK
 ./scripts/config --enable CONFIG_VIRTIO_CONSOLE
+./scripts/config --enable CONFIG_INPUT
+./scripts/config --enable CONFIG_INPUT_EVDEV
+./scripts/config --enable CONFIG_INPUT_KEYBOARD
+./scripts/config --enable CONFIG_INPUT_MOUSE
+./scripts/config --enable CONFIG_VIRTIO_INPUT
 ./scripts/config --enable CONFIG_POWER_RESET
 ./scripts/config --enable CONFIG_POWER_RESET_SYSCON
 ./scripts/config --enable CONFIG_POWER_RESET_SYSCON_POWEROFF
@@ -413,6 +451,9 @@ make ARCH=riscv CROSS_COMPILE="$CROSS_COMPILE" "$LINUX_DEFCONFIG"
 ./scripts/config --enable CONFIG_DEVMEM
 ./scripts/config --enable CONFIG_TTY
 ./scripts/config --enable CONFIG_VT
+./scripts/config --enable CONFIG_FB
+./scripts/config --enable CONFIG_FB_SIMPLE
+./scripts/config --enable CONFIG_FRAMEBUFFER_CONSOLE
 
 # High-speed boot optimizations: disable heavy debug features, RAID6 benchmarks, and unused subsystems
 ./scripts/config --disable CONFIG_SLUB_DEBUG
@@ -510,14 +551,189 @@ if [[ "$XLEN" == "64" ]]; then
     mkdir -p "$ROOTFS_DISK_DIR/proc" "$ROOTFS_DISK_DIR/sys" "$ROOTFS_DISK_DIR/dev" "$ROOTFS_DISK_DIR/etc" "$ROOTFS_DISK_DIR/tmp" "$ROOTFS_DISK_DIR/run"
     cat > "$ROOTFS_DISK_DIR/etc/inittab" <<'EOF'
 ttyS0::respawn:/sbin/getty -n -l /bin/sh 115200 ttyS0 vt100
+::sysinit:/usr/local/bin/simrv-network
+# Xorg must be started by a process attached to the virtual terminal it owns.
+# Starting it as a global `::once` action leaves it without a controlling tty and
+# causes xf86OpenConsole() to fail with "cannot open virtual terminal".
+tty1::once:/usr/local/bin/start-jwm
 EOF
     echo "SimRV" > "$ROOTFS_DISK_DIR/etc/hostname"
+    echo -e "127.0.0.1\tlocalhost SimRV\n::1\t\tlocalhost SimRV" > "$ROOTFS_DISK_DIR/etc/hosts"
+mkdir -p "$ROOTFS_DISK_DIR/usr/local/bin" "$ROOTFS_DISK_DIR/root" \
+             "$ROOTFS_DISK_DIR/etc/X11/xinit"
+    cat > "$ROOTFS_DISK_DIR/etc/X11/xinit/xserverrc" <<'EOF'
+#!/bin/sh
+exec /usr/libexec/Xorg -config /etc/X11/xorg.conf -ac "$@"
+EOF
+    chmod 755 "$ROOTFS_DISK_DIR/etc/X11/xinit/xserverrc"
+    cat > "$ROOTFS_DISK_DIR/usr/local/bin/start-jwm" <<'EOF'
+#!/bin/sh
+set -eu
+
+echo "[JWM] Starting Xorg and JWM on framebuffer..." > /dev/ttyS0
+export DISPLAY=:0
+export HOME=/root
+export XAUTHORITY=/root/.Xauthority
+export XDG_RUNTIME_DIR=/tmp/runtime-root
+LOCK_DIR=/tmp/simrv-jwm.lock
+
+pid_is_process() {
+    pid=$1
+    name=$2
+    [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null || return 1
+    [ -r "/proc/$pid/cmdline" ] || return 1
+    tr '\000' ' ' < "/proc/$pid/cmdline" | grep -q "$name"
+}
+
+# BusyBox init can retry a once action after a console/session transition. Keep
+# X server startup idempotent so a second xinit cannot collide with :0.
+if ! mkdir "$LOCK_DIR" 2>/dev/null; then
+    if [ -r "$LOCK_DIR/pid" ] && pid_is_process "$(cat "$LOCK_DIR/pid")" start-jwm; then
+        echo "[JWM] X session is already starting or running; skipping duplicate launch." > /dev/ttyS0
+        exit 0
+    fi
+    rm -f "$LOCK_DIR/pid"
+    rmdir "$LOCK_DIR" 2>/dev/null || exit 0
+    mkdir "$LOCK_DIR"
+fi
+echo "$$" > "$LOCK_DIR/pid"
+cleanup() {
+    rm -f "$LOCK_DIR/pid"
+    rmdir "$LOCK_DIR" 2>/dev/null || true
+}
+trap cleanup EXIT INT TERM
+
+mkdir -p "$XDG_RUNTIME_DIR" /tmp/.X11-unix /tmp/.ICE-unix /var/log
+chmod 700 "$XDG_RUNTIME_DIR"
+chmod 1777 /tmp/.X11-unix /tmp/.ICE-unix
+
+# The Alpine minirootfs is intentionally small and does not include the X11
+# desktop packages. Install them lazily on the first networked boot so a clean
+# image and a rebuilt image have the same GUI behavior.
+if [ ! -x /usr/bin/xinit ]; then
+    echo "[JWM] Installing X11 desktop packages on first boot..." > /dev/ttyS0
+    if ! apk add --no-cache xorg-server xinit jwm xterm xf86-video-fbdev \
+        xf86-input-evdev font-misc-misc font-dejavu > /tmp/simrv-apk.log 2>&1; then
+        echo "[JWM] X11 package installation failed; see /tmp/simrv-apk.log" > /dev/ttyS0
+        sed -n '1,24p' /tmp/simrv-apk.log > /dev/ttyS0 2>/dev/null || true
+        exit 1
+    fi
+fi
+
+# APK font triggers cannot run under host-side RISC-V emulation. Build the
+# legacy X11 font index and refresh fontconfig on the guest before xterm starts.
+if [ -x /usr/bin/mkfontscale ] && [ -d /usr/share/fonts/misc ]; then
+    mkfontscale /usr/share/fonts/misc 2>/dev/null || true
+    mkfontdir /usr/share/fonts/misc 2>/dev/null || true
+fi
+if [ -f /usr/share/fonts/misc/6x13.pcf.gz ]; then
+    cat > /usr/share/fonts/misc/fonts.dir <<'FONTDIR'
+1
+6x13.pcf.gz -misc-fixed-medium-r-semicondensed--13-120-75-75-c-60-iso8859-1
+FONTDIR
+fi
+if [ -f /etc/system.jwmrc ]; then
+    sed -i 's/Sans-12:bold/DejaVu Sans-12:bold/g; s/>Sans-12</>DejaVu Sans-12</g' \
+        /etc/system.jwmrc
+    sed -i 's/<TrayButton label="JWM">root:1<\//<TrayButton label="SimRV">root:1<\//; s/<Background type="solid">#111111<\//<Background type="gradient">#21152b:#071622<\//' /etc/system.jwmrc
+fi
+
+if [ -r /tmp/.X0-lock ]; then
+    xpid=$(tr -d '[:space:]' < /tmp/.X0-lock)
+    if pid_is_process "$xpid" Xorg; then
+        echo "[JWM] Xorg is already running on :0; skipping duplicate launch." > /dev/ttyS0
+        exit 0
+    fi
+    echo "[JWM] Removing stale :0 lock." > /dev/ttyS0
+    rm -f /tmp/.X0-lock /tmp/.X11-unix/X0
+fi
+
+# devtmpfs and virtio-input create these devices after the root filesystem is
+# handed off. Do not race Xorg against them; otherwise it can exit with "no
+# screens found" or start without a keyboard/pointer.
+for _ in 1 2 3 4 5 6 7 8 9 10; do
+    [ -c /dev/fb0 ] && [ -c /dev/input/event0 ] && break
+    sleep 1
+done
+
+cd /root
+/usr/bin/xinit /root/.xinitrc -- :0 -config /etc/X11/xorg.conf -ac vt1 \
+    2>&1 | tee /tmp/xorg.log > /dev/ttyS0
+EOF
+    chmod 755 "$ROOTFS_DISK_DIR/usr/local/bin/start-jwm"
+    cat > "$ROOTFS_DISK_DIR/usr/local/bin/simrv-network" <<'EOF'
+#!/bin/sh
+set -eu
+
+# The TAP helper on the host provides 10.0.2.1/24. Keep this quiet when the
+# guest is launched without a network device or with the deterministic user backend.
+if ! ip link show eth0 >/dev/null 2>&1; then
+    exit 0
+fi
+ip link set eth0 up 2>/dev/null || true
+ip addr add 10.0.2.2/24 dev eth0 2>/dev/null || true
+ip route add default via 10.0.2.1 dev eth0 2>/dev/null || true
+# 10.255.255.254 is the WSL host resolver; public resolvers remain useful on
+# native Linux hosts where the WSL resolver is not routable.
+printf '%s\n' 'nameserver 10.255.255.254' 'nameserver 1.1.1.1' 'nameserver 8.8.8.8' > /etc/resolv.conf
+echo '[NET] eth0 configured as 10.0.2.2/24' > /dev/ttyS0
+EOF
+    chmod 755 "$ROOTFS_DISK_DIR/usr/local/bin/simrv-network"
+    cat > "$ROOTFS_DISK_DIR/root/.xinitrc" <<'EOF'
+#!/bin/sh
+export DISPLAY=:0
+export XAUTHORITY=/root/.Xauthority
+xhost + 2>/dev/null || true
+xterm -fn 6x13 -geometry 60x18+10+10 -bg '#1e293b' -fg '#f8fafc' -title "SimRV Terminal" &
+exec jwm
+EOF
+    chmod 755 "$ROOTFS_DISK_DIR/root/.xinitrc"
+    cat > "$ROOTFS_DISK_DIR/etc/X11/xorg.conf" <<'EOF'
+Section "ServerLayout"
+    Identifier "Layout0"
+    Screen 0 "Screen0"
+    InputDevice "VirtioInput" "CoreKeyboard"
+    InputDevice "VirtioInput" "CorePointer"
+EndSection
+
+Section "InputDevice"
+    Identifier "VirtioInput"
+    Driver "evdev"
+    Option "Device" "/dev/input/event0"
+EndSection
+
+Section "Files"
+    FontPath "/usr/share/fonts/misc"
+    FontPath "/usr/share/fonts/TTF"
+    FontPath "/usr/share/fonts/100dpi"
+    FontPath "/usr/share/fonts/75dpi"
+EndSection
+
+Section "Device"
+    Identifier "Card0"
+    Driver "fbdev"
+    Option "fbdev" "/dev/fb0"
+EndSection
+
+Section "Screen"
+    Identifier "Screen0"
+    Device "Card0"
+    DefaultDepth 24
+    DefaultFbBpp 32
+    SubSection "Display"
+        Depth 24
+        FbBpp 32
+        Modes "640x480"
+    EndSubSection
+EndSection
+EOF
     cat > "$ROOTFS_DISK_DIR/init" <<'EOF'
 #!/bin/sh
-mkdir -p /dev /proc /sys /etc /tmp /run
+mkdir -p /dev /proc /sys /etc /tmp /run /dev/pts
 /bin/mount -t proc proc /proc 2>/dev/null || true
 /bin/mount -t sysfs sysfs /sys 2>/dev/null || true
 /bin/mount -t devtmpfs devtmpfs /dev 2>/dev/null || true
+/bin/mount -t devpts devpts /dev/pts 2>/dev/null || true
 
 [ -c /dev/console ] || mknod -m 600 /dev/console c 5 1 2>/dev/null || true
 [ -c /dev/tty ] || mknod -m 666 /dev/tty c 5 0 2>/dev/null || true
@@ -525,6 +741,15 @@ mkdir -p /dev /proc /sys /etc /tmp /run
 [ -c /dev/null ] || mknod -m 666 /dev/null c 1 3 2>/dev/null || true
 [ -c /dev/zero ] || mknod -m 666 /dev/zero c 1 5 2>/dev/null || true
 [ -c /dev/mem ] || mknod -m 600 /dev/mem c 1 1 2>/dev/null || true
+
+if [ -c /dev/fb0 ]; then
+    echo "Framebuffer: /dev/fb0 detected (640x480x32)"
+        if [ -w /dev/fb0 ]; then
+            echo "Framebuffer: /dev/fb0 is writable"
+        fi
+else
+    echo "Framebuffer: /dev/fb0 is not available"
+fi
 
 [ -f /etc/hostname ] && hostname -F /etc/hostname 2>/dev/null || true
 
@@ -541,7 +766,44 @@ echo ""
 exec /sbin/init
 EOF
     chmod +x "$ROOTFS_DISK_DIR/init"
-    dd if=/dev/zero of="$IMAGES_DIR/root.img" bs=1M count=64 status=none
+
+    # Bundle the desktop stack when a RISC-V user emulator is available. APK
+    # post-install triggers need to run on the guest kernel, so tolerate their
+    # failure during host-side packaging as long as the required binaries were
+    # extracted; the first-boot fallback below remains available otherwise.
+    qemu_riscv64="${SIMRV_QEMU_RISCV64:-}"
+    if [[ -z "$qemu_riscv64" && -x /opt/riscv/linux-glibc-rv64/bin/qemu-riscv64 ]]; then
+        qemu_riscv64=/opt/riscv/linux-glibc-rv64/bin/qemu-riscv64
+    fi
+    if [[ -x "$qemu_riscv64" && -x "$ROOTFS_DISK_DIR/sbin/apk" ]]; then
+        print_step "Bundling Alpine X11/JWM packages into the root disk..."
+        set +e
+        "$qemu_riscv64" -L "$ROOTFS_DISK_DIR" "$ROOTFS_DISK_DIR/sbin/apk" \
+            --root "$ROOTFS_DISK_DIR" --no-cache --no-scripts add \
+            xorg-server xinit jwm xterm xf86-video-fbdev xf86-input-evdev \
+            font-misc-misc font-dejavu
+        apk_status=$?
+        set -e
+        if [[ -x "$ROOTFS_DISK_DIR/usr/bin/xinit" &&
+              -x "$ROOTFS_DISK_DIR/usr/libexec/Xorg" &&
+              -x "$ROOTFS_DISK_DIR/usr/bin/jwm" ]]; then
+            print_info "X11/JWM package files bundled (apk status ${apk_status})."
+            sed -i 's/Sans-12:bold/DejaVu Sans-12:bold/g; s/>Sans-12</>DejaVu Sans-12</g' \
+                "$ROOTFS_DISK_DIR/etc/system.jwmrc"
+            sed -i 's/<TrayButton label="JWM">root:1<\//<TrayButton label="SimRV">root:1<\//; s/<Background type="solid">#111111<\//<Background type="gradient">#21152b:#071622<\//' "$ROOTFS_DISK_DIR/etc/system.jwmrc"
+        else
+            print_info "X11 bundle unavailable; retaining first-boot APK fallback."
+        fi
+    else
+        print_info "RISC-V QEMU unavailable; retaining first-boot APK fallback."
+    fi
+
+    DISK_MB=$(du -sm "$ROOTFS_DISK_DIR" | cut -f1)
+    DISK_MB=$(( DISK_MB + 48 ))
+    # Leave room for the optional X11/JWM packages installed on first boot and
+    # for normal Alpine package-manager use.
+    if [ "$DISK_MB" -lt 512 ]; then DISK_MB=512; fi
+    dd if=/dev/zero of="$IMAGES_DIR/root.img" bs=1M count="$DISK_MB" status=none
     mkfs.ext4 -d "$ROOTFS_DISK_DIR" -F "$IMAGES_DIR/root.img"
     cp -f "$IMAGES_DIR/root.img" "$IMAGES_DIR/root.bin"
 else

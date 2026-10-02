@@ -85,8 +85,8 @@ def prepare_rtl(cfu_dir, build_dir, elf_path, objcopy, verilator):
 
 def create_parser():
     parser = argparse.ArgumentParser(description="Evaluate CFU-PG RTL against SimRV")
-    parser.add_argument("--cfu-dir", default=None,
-                        help="CFU-Proving-Ground checkout (default: sibling checkout)")
+    parser.add_argument("--cfu-dir", default=os.environ.get("CFU_PG_DIR"),
+                        help="CFU-Proving-Ground checkout (or set CFU_PG_DIR; required)")
     parser.add_argument("--simrv-bin", default=None)
     parser.add_argument("--cpu-config", default=None)
     parser.add_argument("--trace-dir", default=None)
@@ -98,7 +98,9 @@ def create_parser():
 def run(arguments):
     args = create_parser().parse_args(arguments)
     repo_root = Path(__file__).resolve().parents[3]
-    cfu_dir = Path(args.cfu_dir).resolve() if args.cfu_dir else repo_root.parent / "CFU-Proving-Ground"
+    if not args.cfu_dir:
+        raise RuntimeError("CFU-Proving-Ground checkout is required; pass --cfu-dir or set CFU_PG_DIR")
+    cfu_dir = Path(args.cfu_dir).resolve()
     simrv_bin = Path(args.simrv_bin).resolve() if args.simrv_bin else repo_root / "build/rv32-release/simrv"
     cpu_config = (Path(args.cpu_config).resolve() if args.cpu_config
                   else repo_root / "configs/models/cfu-provingground.cfg")

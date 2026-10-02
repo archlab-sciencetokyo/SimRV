@@ -19,7 +19,11 @@ sample arrays are empty. Do not use the historical "within 10%" estimate as a ba
 ## Reproduce the comparison
 
 Build the native and portable release configurations, then use the same ISA string and stopping
-policy for both engines:
+policy for both engines. Set `COREMARK_ELF` to the CoreMark ELF under test:
+
+```bash
+export COREMARK_ELF=/path/to/coremark.riscv
+```
 
 ```bash
 cmake --preset rv64-release
@@ -28,14 +32,14 @@ cmake --build --preset rv64-release -j8
 hyperfine --warmup 5 --runs 30 \
   --export-json build/hyperfine-coremark-20m-shared-isa.json \
   --command-name "SimRV 20M" \
-  'build/rv64-release/simrv --cli --isa rv64gc_zicsr_zifencei_zicntr -m ../../tests/coremark/coremark.riscv -e 20000000 -b -H 0x80001000' \
+  'build/rv64-release/simrv --cli --isa rv64gc_zicsr_zifencei_zicntr -m "$COREMARK_ELF" -e 20000000 -b -H 0x80001000' \
   --command-name "Spike 20M" \
-  'spike --isa=rv64gc_zicsr_zifencei_zicntr --instructions=20000000 ../../tests/coremark/coremark.riscv'
+  'spike --isa=rv64gc_zicsr_zifencei_zicntr --instructions=20000000 "$COREMARK_ELF"'
 
 python3 scripts/benchmark.py \
   --simrv build/rv64-release/simrv \
   --spike "$(command -v spike)" \
-  --test ../../tests/coremark/coremark.riscv \
+  --test "$COREMARK_ELF" \
   --runs 20 --warmups 3 --timeout 30 \
   --json build/coremark-shared-isa.json
 ```

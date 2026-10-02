@@ -153,6 +153,9 @@ void test_runtime_profile_policy() {
     TEST_CHECK(profile.execution_name() == "cycle-fast");
     TEST_CHECK(!profile.records_cycle_history());
 
+    profile.gdb = true;
+    TEST_CHECK(profile.records_cycle_history());
+
     profile.engine = ExecutionEngine::CycleObservable;
     TEST_CHECK(profile.records_cycle_history());
 

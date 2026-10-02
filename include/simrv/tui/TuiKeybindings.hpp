@@ -33,7 +33,6 @@ enum class KeyAction : uint8_t {
     FocusPrevPane,
     CycleRegPage,
     CycleToolPage,
-    CycleRightPanel,
     ToggleStudentGuide,
     ToggleLearn = ToggleStudentGuide,  // Compatibility alias for the former name.
     ActivateStudentGuide,

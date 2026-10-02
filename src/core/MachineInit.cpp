@@ -620,6 +620,7 @@ auto Machine::initialize() -> std::expected<void, std::string> {
                 .xlen = simrv::xlen::kXLenBits,
                 .enable_pcie = composition.pcie,
                 .enable_mmio = composition.mmio,
+                .enable_framebuffer = true,
             };
             auto fdt_blob = simrv::util::FdtGenerator::generate(fdt_cfg);
             if (fdt_blob.size() <= static_cast<std::size_t>(0x00100000U)) {

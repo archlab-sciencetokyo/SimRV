@@ -13,6 +13,9 @@ endif
 CC := $(RISCV_PREFIX)gcc
 OBJCOPY := $(RISCV_PREFIX)objcopy
 CFLAGS := -march=rv$(XLEN)imac -mabi=$(MABI) -mno-relax -ffreestanding -nostdlib -nostartfiles -O2
+ifeq ($(DEBUG),1)
+  CFLAGS += -g -O0
+endif
 LDFLAGS := -T linker.ld -nostdlib -Wl,--gc-sections
 
 .PHONY: all clean

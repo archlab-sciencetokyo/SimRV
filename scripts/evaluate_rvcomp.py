@@ -168,7 +168,7 @@ def main(arguments=None):
     parser.add_argument('--cpu-config', type=str, default=None, help='Path to custom .cfg model file')
     parser.add_argument('--simrv-bin', type=str, default=None, help='Explicit path to SimRV executable')
     parser.add_argument('--rvcomp-dir', type=str, default=os.environ.get('RVCOMP_DIR'),
-                        help='RVComp checkout (default: $RVCOMP_DIR or sibling ../RVComp)')
+                        help='RVComp checkout (or set RVCOMP_DIR; required unless --rvcomp-bin is given)')
     parser.add_argument('--rvcomp-bin', type=str, default=None,
                         help='Explicit RVComp Verilator executable')
     parser.add_argument('--trace-dir', type=str, default=None,
@@ -176,7 +176,7 @@ def main(arguments=None):
     args = parser.parse_args(arguments)
 
     repo_root = Path(__file__).resolve().parents[1]
-    rvcomp_dir = Path(args.rvcomp_dir).expanduser() if args.rvcomp_dir else repo_root.parent / "RVComp"
+    rvcomp_dir = Path(args.rvcomp_dir).expanduser() if args.rvcomp_dir else None
 
     if args.simrv_bin:
         simrv_bin = Path(args.simrv_bin)
@@ -187,7 +187,10 @@ def main(arguments=None):
     if not simrv_bin.exists():
         raise RuntimeError(f"SimRV binary not found under build/rv32-release or build/rv64-release")
 
-    rvcom_bin = Path(args.rvcomp_bin).expanduser() if args.rvcomp_bin else rvcomp_dir / "obj_dir/rvcom"
+    if not args.rvcomp_bin and rvcomp_dir is None:
+        raise RuntimeError("RVComp checkout is required; pass --rvcomp-dir, set RVCOMP_DIR, or pass --rvcomp-bin")
+    rvcom_bin = (Path(args.rvcomp_bin).expanduser() if args.rvcomp_bin
+                 else rvcomp_dir / "obj_dir/rvcom")
     if not rvcom_bin.exists():
         raise RuntimeError(f"RVComp Verilator simulator binary not found at {rvcom_bin}")
 

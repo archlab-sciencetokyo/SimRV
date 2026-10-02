@@ -20,6 +20,7 @@ class VirtioMmioNet : public VirtioMmioDevice {
 
     auto backend() -> virtio::NetBackend& { return backend_; }
     [[nodiscard]] auto backend() const -> const virtio::NetBackend& { return backend_; }
+    void poll_backend();
 
    protected:
     void on_queue_notify(uint32_t q_idx) override;

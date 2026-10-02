@@ -96,6 +96,25 @@ struct TuiTestAccess {
     static auto handle_nav_key(Tui& tui, uint8_t byte, TuiKey key) -> bool {
         return tui.handle_navigation_keyboard_input(byte, key);
     }
+    static void set_sixel_supported(Tui& tui, bool s) { tui.sixel_supported_ = s; }
+    static void set_sixel_rendered(Tui& tui, bool rendered) { tui.sixel_rendered_ = rendered; }
+    static auto sixel_framebuffer_signature(const Tui& tui) -> uint64_t {
+        return tui.sixel_framebuffer_signature_;
+    }
+    static void render_draw_sixel(Tui& tui, int panel_x, int display_width, int display_rows,
+                                  std::string& update_cmds) {
+        tui.render_draw_sixel(panel_x, display_width, display_rows, update_cmds);
+    }
+    static auto display_coords_to_fb(const Tui& tui, int x, int y, size_t col_idx, int tw, int th) {
+        return tui.display_coords_to_fb(x, y, col_idx, tw, th);
+    }
+    static void handle_display_mouse(Tui& tui, int x, int y, int b, size_t col_idx, int tw,
+                                     int th) {
+        tui.handle_display_mouse(x, y, b, col_idx, tw, th);
+    }
+    static void set_workbench_slots(Tui& tui, std::vector<WorkbenchSlot> slots) {
+        tui.workbench_slots_ = std::move(slots);
+    }
 };
 }  // namespace simrv::tui
 
@@ -235,7 +254,7 @@ void test_utf8_and_theme_helpers() {
 
 void test_key_registry() {
     const auto bindings = simrv::tui::Keybindings::all();
-    expect(bindings.size() == 36, "all key actions have registry entries");
+    expect(bindings.size() == 35, "all key actions have registry entries");
     std::set<simrv::tui::KeyAction> actions;
     std::set<char> claimed_chars;
     for (const auto& binding : bindings) {
@@ -270,6 +289,17 @@ void test_key_registry() {
     expect(simrv::tui::Keybindings::get_help_key(simrv::tui::KeyAction::CycleRegPage).find("F3") !=
                std::string::npos,
            "canonical F3 is CycleRegPage");
+    expect(simrv::tui::Keybindings::get_help_key(simrv::tui::KeyAction::CycleRegPage).find("[r]") ==
+               std::string::npos,
+           "legacy r register alias is removed");
+    expect(
+        simrv::tui::Keybindings::get_help_key(simrv::tui::KeyAction::CycleToolPage).find("F11") !=
+            std::string::npos,
+        "canonical F11 is CycleToolPage");
+    expect(
+        simrv::tui::Keybindings::get_help_key(simrv::tui::KeyAction::CycleToolPage).find("[l]") ==
+            std::string::npos,
+        "legacy l tools alias is removed");
     expect(simrv::tui::Keybindings::get_help_key(simrv::tui::KeyAction::OpenLayoutPresets)
                    .find("F4") != std::string::npos,
            "canonical F4 is Layout Presets");
@@ -303,7 +333,6 @@ void test_key_registry() {
         simrv::tui::TuiFooterAction::RunPause,
         simrv::tui::TuiFooterAction::Quit,
         simrv::tui::TuiFooterAction::ToggleStudentGuide,
-        simrv::tui::TuiFooterAction::TogglePanel,
         simrv::tui::TuiFooterAction::OpenSettings,
         simrv::tui::TuiFooterAction::ManageBreakpoints,
         simrv::tui::TuiFooterAction::Reboot,
@@ -1451,8 +1480,7 @@ void test_multicolumn_refinement() {
     expect(old_slots.size() == 2, "default workbench starts with two columns");
     expect(insert_tui.add_workbench_column(), "adding a workbench column succeeds");
     auto const& inserted_slots = simrv::tui::TuiTestAccess::workbench_slots(insert_tui);
-    expect(inserted_slots.size() == 3 &&
-               inserted_slots[0].page == simrv::tui::TuiRegPage::GPR &&
+    expect(inserted_slots.size() == 3 && inserted_slots[0].page == simrv::tui::TuiRegPage::GPR &&
                inserted_slots[2].page == simrv::tui::TuiRegPage::CONSOLE,
            "new workbench column is inserted beside the selected column");
 
@@ -1477,15 +1505,15 @@ void test_multicolumn_refinement() {
     simrv::tui::TuiTestAccess::set_cached_term_width(header_tui, 240);
     simrv::tui::TuiTestAccess::set_cached_term_height(header_tui, 24);
     header_tui.apply_layout_preset(simrv::tui::LayoutPreset::GeneralDebug);
-    auto const before_rule = strip_ansi(
-        simrv::tui::TuiTestAccess::last_screen_lines(header_tui).at(2));
-    auto const before_header = strip_ansi(
-        simrv::tui::TuiTestAccess::last_screen_lines(header_tui).at(4));
+    auto const before_rule =
+        strip_ansi(simrv::tui::TuiTestAccess::last_screen_lines(header_tui).at(2));
+    auto const before_header =
+        strip_ansi(simrv::tui::TuiTestAccess::last_screen_lines(header_tui).at(4));
     header_tui.adjust_inspector_width(2);
-    auto const after_rule = strip_ansi(
-        simrv::tui::TuiTestAccess::last_screen_lines(header_tui).at(2));
-    auto const after_header = strip_ansi(
-        simrv::tui::TuiTestAccess::last_screen_lines(header_tui).at(4));
+    auto const after_rule =
+        strip_ansi(simrv::tui::TuiTestAccess::last_screen_lines(header_tui).at(2));
+    auto const after_header =
+        strip_ansi(simrv::tui::TuiTestAccess::last_screen_lines(header_tui).at(4));
     expect(before_rule != after_rule,
            "top header junctions are redrawn after focused-panel resize");
     expect(before_header != after_header,
@@ -1593,8 +1621,8 @@ void test_horizontal_scrolling() {
     expect(pane.get_horizontal_scroll_offset() == 0, "reset_horizontal_scroll clears offset");
 
     // The log is a separate reusable viewport and remains independent from page scrolling.
-    pane.set_log_lines({"log-00", "log-01", "log-02", "log-03", "log-04", "log-05",
-                        "log-06", "log-07", "log-08", "log-09"});
+    pane.set_log_lines({"log-00", "log-01", "log-02", "log-03", "log-04", "log-05", "log-06",
+                        "log-07", "log-08", "log-09"});
     pane.set_page(simrv::tui::TuiRegPage::GPR);
     pane.set_paused(true);
     pane.set_visible_rows(20);
@@ -2004,7 +2032,7 @@ void test_tui_differential_rendering_and_throttling() {
 void test_multi_column_workbench_tools_and_swapping() {
     // 1. ToolPickerModal catalog and accelerator lookup
     const auto& tools = simrv::tui::modals::ToolPickerModal::all_tools();
-    expect(tools.size() == 13, "tool picker provides 13 selectable workbench tools");
+    expect(tools.size() == 14, "tool picker provides 14 selectable workbench tools");
     expect(simrv::tui::modals::ToolPickerModal::find_by_accelerator('g') ==
                simrv::tui::TuiRegPage::GPR,
            "accelerator 'g' maps to GPR");
@@ -2044,6 +2072,9 @@ void test_multi_column_workbench_tools_and_swapping() {
     expect(simrv::tui::modals::ToolPickerModal::find_by_accelerator('t') ==
                simrv::tui::TuiRegPage::CONSOLE,
            "accelerator 't' maps to CONSOLE");
+    expect(simrv::tui::modals::ToolPickerModal::find_by_accelerator('y') ==
+               simrv::tui::TuiRegPage::DISPLAY,
+           "accelerator 'y' maps to DISPLAY");
     expect(!simrv::tui::modals::ToolPickerModal::find_by_accelerator('q').has_value(),
            "accelerator 'q' is not bound to a tool (reserved for exit/close)");
 
@@ -2096,6 +2127,15 @@ void test_multi_column_workbench_tools_and_swapping() {
     expect(!tui.is_modal_active(), "modal is closed after submit");
     expect(slots[0].page == simrv::tui::TuiRegPage::CACHE, "slot 0 page updated to CACHE");
 
+    // The display accelerator must assign the selected column and close the picker in one path.
+    tui.open_tool_picker(1);
+    expect(simrv::tui::TuiTestAccess::handle_modal_key(tui, static_cast<uint8_t>('y'),
+                                                       static_cast<simrv::tui::TuiKey>('y')),
+           "display accelerator is consumed by tool picker");
+    expect(!tui.is_modal_active(), "display accelerator closes tool picker");
+    expect(slots[1].page == simrv::tui::TuiRegPage::DISPLAY,
+           "display accelerator assigns DISPLAY to target column");
+
     // 4. ToolPickerModal row mapping and clickable selection
     expect(simrv::tui::modals::ToolPickerModal::tool_index_at_row(3) == 0,
            "row 3 maps to tool 0 (GPR)");
@@ -2107,6 +2147,8 @@ void test_multi_column_workbench_tools_and_swapping() {
            "row 16 maps to tool 10 (TRACE)");
     expect(simrv::tui::modals::ToolPickerModal::tool_index_at_row(18) == 12,
            "row 18 maps to tool 12 (CONSOLE)");
+    expect(simrv::tui::modals::ToolPickerModal::tool_index_at_row(19) == 13,
+           "row 19 maps to tool 13 (DISPLAY)");
     expect(!simrv::tui::modals::ToolPickerModal::tool_index_at_row(2).has_value(),
            "row 2 is category banner, maps to no tool");
     expect(simrv::tui::modals::ToolPickerModal::row_for_tool_index(0) == 3,
@@ -2350,7 +2392,8 @@ void test_multi_column_panel_management_and_modal_usability() {
             break;
         }
     }
-    expect(log_header_row < scrolled_screen.size(), "rendered register pane contains a Log boundary");
+    expect(log_header_row < scrolled_screen.size(),
+           "rendered register pane contains a Log boundary");
     bool marker_in_log = false;
     for (size_t i = log_header_row; i < scrolled_screen.size(); ++i) {
         if (strip_ansi(scrolled_screen.at(i)).find("more lines below - scroll down") !=
@@ -2481,6 +2524,215 @@ void test_multi_column_panel_management_and_modal_usability() {
     expect(simrv::tui::TuiTestAccess::layout(tui) == layout_before, "Ctrl-L did not cycle layout");
 }
 
+void test_sixel_display_modal_clearing() {
+    using namespace simrv::tui;
+    using namespace simrv::core;
+
+    Machine machine(MachineConfig{.execution = {.appmode = true}, .tui = {.enabled = true}});
+    std::vector<Byte> ram(1024 * 1024, Byte{0});
+    machine.set_ram_for_testing(ram.data(), ram.size());
+    machine.primary_hart().reset();
+
+    Tui tui(machine);
+    TuiTestAccess::init_panes(tui, machine);
+    TuiTestAccess::set_cached_term_width(tui, 120);
+    TuiTestAccess::set_cached_term_height(tui, 30);
+    TuiTestAccess::set_sixel_supported(tui, true);
+    tui.apply_layout_preset(LayoutPreset::GeneralDebug);
+
+    // Initial render establishing clean baseline
+    tui.render(true);
+
+    // 1. Switching to Sixel Display from ToolPickerModal
+    tui.open_tool_picker(1);
+    tui.render(true);
+    expect(tui.is_modal_active(), "tool picker modal is active");
+
+    bool has_tool_picker_text = false;
+    for (const auto& line : TuiTestAccess::last_screen_lines(tui)) {
+        if (line.find("Assign a tool to Column 2") != std::string::npos ||
+            line.find("Sixel Display") != std::string::npos) {
+            has_tool_picker_text = true;
+            break;
+        }
+    }
+    expect(has_tool_picker_text, "rendered lines contain tool picker modal text while active");
+
+    // Submit Sixel Display via accelerator 'y'
+    expect(TuiTestAccess::handle_modal_key(tui, static_cast<uint8_t>('y'), TuiKey::y),
+           "display accelerator handled");
+    expect(!tui.is_modal_active(), "modal closed after selecting Sixel Display");
+    expect(tui.get_workbench_slots()[1].page == TuiRegPage::DISPLAY, "slot 1 is now DISPLAY");
+
+    // Render frame after modal close
+    tui.render(true);
+
+    // Verify all modal text is cleared from the screen lines
+    for (const auto& line : TuiTestAccess::last_screen_lines(tui)) {
+        expect(line.find("Assign a tool to Column 2") == std::string::npos,
+               "tool picker header cleared when switching to sixel display");
+        expect(line.find("ANALYSIS & SYSTEM") == std::string::npos,
+               "tool picker category header cleared when switching to sixel display");
+    }
+
+    // 2. Opening and closing a modal while Sixel Display is already active
+    tui.open_modal(ModalType::Help);
+    tui.render(true);
+    expect(tui.is_modal_active(), "help modal is active on top of sixel display");
+
+    bool has_help_text = false;
+    for (const auto& line : TuiTestAccess::last_screen_lines(tui)) {
+        if (line.find("KEYBOARD SHORTCUTS") != std::string::npos ||
+            line.find("SIMULATOR CONTROL") != std::string::npos) {
+            has_help_text = true;
+            break;
+        }
+    }
+    expect(has_help_text, "rendered lines contain help modal text while active");
+
+    // Close the modal
+    tui.close_modal();
+    expect(!tui.is_modal_active(), "help modal is closed");
+
+    // Render frame after closing
+    tui.render(true);
+
+    for (const auto& line : TuiTestAccess::last_screen_lines(tui)) {
+        expect(line.find("KEYBOARD SHORTCUTS") == std::string::npos,
+               "help modal content cleared when closing modal on sixel display");
+        expect(line.find("SIMULATOR CONTROL") == std::string::npos,
+               "help modal header cleared when closing modal on sixel display");
+    }
+
+    // 3. Verify clean background generation before first sixel image
+    TuiTestAccess::set_sixel_rendered(tui, false);
+    std::string first_sixel_cmds;
+    TuiTestAccess::render_draw_sixel(tui, 60, 50, 20, first_sixel_cmds);
+    expect(first_sixel_cmds.find("\033[0m\033[5;60H") != std::string::npos,
+           "first sixel image forces clean background spaces in panel body");
+    expect(first_sixel_cmds.find(std::string(50, ' ')) != std::string::npos,
+           "clean background covers entire panel width with spaces");
+
+    // Subsequent sixel image when already rendered does not re-emit blank spaces
+    TuiTestAccess::set_sixel_rendered(tui, true);
+    std::string subsequent_sixel_cmds;
+    TuiTestAccess::render_draw_sixel(tui, 60, 50, 20, subsequent_sixel_cmds);
+    expect(subsequent_sixel_cmds.find("\033[0m\033[5;60H") == std::string::npos,
+           "subsequent sixel image does not prepend blank rows, preserving fluid updates");
+}
+
+void test_sixel_fluid_framebuffer_updates() {
+    using namespace simrv::tui;
+    using namespace simrv::core;
+
+    constexpr size_t test_dram_size = 128 * 1024 * 1024;
+    Machine machine(MachineConfig{.memory = {.dram_size = test_dram_size},
+                                  .execution = {.appmode = true},
+                                  .tui = {.enabled = true}});
+    std::vector<Byte> ram(test_dram_size, Byte{0});
+    machine.set_ram_for_testing(ram.data(), ram.size());
+    machine.primary_hart().reset();
+
+    const auto fb = machine.framebuffer_view();
+    expect(fb.data() != nullptr && fb.size() == 640 * 480 * 4,
+           "valid 640x480 framebuffer mapped for testing");
+
+    Tui tui(machine);
+    TuiTestAccess::init_panes(tui, machine);
+    TuiTestAccess::set_cached_term_width(tui, 120);
+    TuiTestAccess::set_cached_term_height(tui, 30);
+    TuiTestAccess::set_sixel_supported(tui, true);
+    tui.apply_layout_preset(LayoutPreset::GeneralDebug);
+
+    // Assign Sixel Display to Column 2
+    tui.open_tool_picker(1);
+    expect(TuiTestAccess::handle_modal_key(tui, static_cast<uint8_t>('y'), TuiKey::y),
+           "display accelerator selects DISPLAY");
+    tui.render(true);
+
+    const auto sig0 = TuiTestAccess::sixel_framebuffer_signature(tui);
+    expect(sig0 != 0, "initial sixel framebuffer signature is non-zero");
+
+    // Modify a single pixel at an unaligned byte offset (offset 13, was skipped by 64-byte stride)
+    auto* fb_bytes = const_cast<Byte*>(fb.data());
+    fb_bytes[13] = Byte{0x42};
+    tui.render(true);
+
+    const auto sig1 = TuiTestAccess::sixel_framebuffer_signature(tui);
+    expect(sig1 != sig0,
+           "unaligned pixel write immediately updates sixel signature without missing frames");
+
+    // Verify re-rendering an unchanged buffer keeps signature stable
+    tui.render(true);
+    expect(TuiTestAccess::sixel_framebuffer_signature(tui) == sig1,
+           "unchanged framebuffer preserves signature");
+}
+
+void test_virtio_input_and_display_mouse() {
+    using namespace simrv::tui;
+    simrv::core::Machine machine;
+    Tui tui(machine);
+
+    // Verify coordinate mapping in display panel
+    const auto out_pos = TuiTestAccess::display_coords_to_fb(tui, 0, 0, 0, 80, 24);
+    expect(!out_pos.has_value(), "out-of-bounds coordinates return nullopt");
+
+    // Configure workbench with DISPLAY slot
+    tui.set_workbench_slot_page(0, TuiRegPage::DISPLAY);
+    expect(tui.is_page_visible(TuiRegPage::DISPLAY), "DISPLAY is visible in workbench");
+
+    // Test machine input forwarding APIs
+    machine.send_input_key(30 /* KEY_A */, true);
+    machine.send_input_key(30, false);
+    machine.send_input_mouse_motion(320, 240);
+    machine.send_input_mouse_button(0x110 /* BTN_LEFT */, true);
+    machine.send_input_mouse_button(0x110, false);
+    machine.send_input_mouse_wheel(1);
+
+    // Test mouse wheel handling on DISPLAY
+    TuiTestAccess::handle_display_mouse(tui, 10, 10, 64, 0, 80, 24);
+    TuiTestAccess::handle_display_mouse(tui, 10, 10, 65, 0, 80, 24);
+}
+
+void test_concurrent_terminal_and_sixel_display() {
+    using namespace simrv::tui;
+    simrv::core::Machine machine;
+    Tui tui(machine);
+    TuiTestAccess::init_panes(tui, machine);
+    TuiTestAccess::set_cached_term_width(tui, 120);
+    TuiTestAccess::set_cached_term_height(tui, 30);
+
+    // Configure workbench with both CONSOLE and DISPLAY side-by-side
+    TuiTestAccess::set_workbench_slots(tui, {{TuiRegPage::CONSOLE, 0}, {TuiRegPage::DISPLAY, 0}});
+    expect(tui.is_page_visible(TuiRegPage::CONSOLE), "CONSOLE is visible in workbench");
+    expect(tui.is_page_visible(TuiRegPage::DISPLAY), "DISPLAY is visible in workbench");
+
+    // Render frame
+    tui.render(true);
+    const auto& lines = TuiTestAccess::last_screen_lines(tui);
+    expect(!lines.empty(), "rendered lines is not empty");
+
+    // Check that line 3 (header line) contains both Console and Display headers
+    bool found_console_hdr = false;
+    bool found_display_hdr = false;
+    for (const auto& line : lines) {
+        if (line.find("Console") != std::string::npos) found_console_hdr = true;
+        if (line.find("Display") != std::string::npos) found_display_hdr = true;
+    }
+    expect(found_console_hdr, "header contains Console column header");
+    expect(found_display_hdr, "header contains Display column header");
+
+    // Push UART output and verify terminal content updates without error
+    tui.handle_char_write('H');
+    tui.handle_char_write('i');
+    tui.render(true);
+
+    // Test scrolling with CONSOLE focused
+    TuiTestAccess::set_focused_slot(tui, 0);
+    tui.scroll(5);
+    tui.reset_scroll();
+}
+
 }  // namespace
 
 int main() {
@@ -2517,6 +2769,10 @@ int main() {
     test_tui_differential_rendering_and_throttling();
     test_multi_column_workbench_tools_and_swapping();
     test_multi_column_panel_management_and_modal_usability();
+    test_sixel_display_modal_clearing();
+    test_sixel_fluid_framebuffer_updates();
+    test_virtio_input_and_display_mouse();
+    test_concurrent_terminal_and_sixel_display();
     if (failures != 0) return EXIT_FAILURE;
     std::cout << "TUI framework tests passed\n";
     return EXIT_SUCCESS;

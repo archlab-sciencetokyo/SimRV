@@ -46,28 +46,49 @@ auto VirtioMmioDevice::dma_write_bytes(uint64_t phys_addr, const std::byte* src,
 }
 
 auto VirtioMmioDevice::read8(Address offset) -> uint8_t {
+    if (offset >= 0x100) {
+        return static_cast<uint8_t>(read_device_config(offset - 0x100, 1));
+    }
     return static_cast<uint8_t>(read32(offset & ~3ULL) >> ((offset & 3ULL) * 8));
 }
 
 auto VirtioMmioDevice::read16(Address offset) -> uint16_t {
+    if (offset >= 0x100) {
+        return static_cast<uint16_t>(read_device_config(offset - 0x100, 2));
+    }
     return static_cast<uint16_t>(read32(offset & ~3ULL) >> ((offset & 2ULL) * 8));
 }
 
 auto VirtioMmioDevice::read64(Address offset) -> uint64_t {
+    if (offset >= 0x100) {
+        return read_device_config(offset - 0x100, 8);
+    }
     const uint64_t lo = read32(offset);
     const uint64_t hi = read32(offset + 4);
     return lo | (hi << 32);
 }
 
 void VirtioMmioDevice::write8(Address offset, uint8_t val) {
+    if (offset >= 0x100) {
+        write_device_config(offset - 0x100, val, 1);
+        return;
+    }
     write32(offset & ~3ULL, static_cast<uint32_t>(val) << ((offset & 3ULL) * 8));
 }
 
 void VirtioMmioDevice::write16(Address offset, uint16_t val) {
+    if (offset >= 0x100) {
+        write_device_config(offset - 0x100, val, 2);
+        return;
+    }
     write32(offset & ~3ULL, static_cast<uint32_t>(val) << ((offset & 2ULL) * 8));
 }
 
 void VirtioMmioDevice::write64(Address offset, uint64_t val) {
+    if (offset >= 0x100) {
+        write_device_config(offset - 0x100, val, 8);
+        return;
+    }
     write32(offset, static_cast<uint32_t>(val & 0xFFFFFFFFULL));
     write32(offset + 4, static_cast<uint32_t>(val >> 32));
 }

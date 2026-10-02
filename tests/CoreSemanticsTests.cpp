@@ -2852,6 +2852,19 @@ void test_dynamic_fdt_generator() {
     expect(fdt_text.find("enable-method") != std::string::npos &&
                fdt_text.find("riscv,sbi") != std::string::npos,
            "every generated CPU advertises SBI HSM startup for Linux SMP");
+    expect(fdt_text.find("pci@30000000") != std::string::npos,
+           "PCIe platform FDT advertises the PCIe root complex");
+    expect(fdt_text.find("virtio@10001000") == std::string::npos,
+           "PCIe platform FDT does not advertise inactive virtio-MMIO devices");
+
+    config.enable_pcie = false;
+    config.enable_mmio = true;
+    auto mmio_fdt = simrv::util::FdtGenerator::generate(config);
+    const std::string mmio_fdt_text(mmio_fdt.begin(), mmio_fdt.end());
+    expect(mmio_fdt_text.find("virtio@10001000") != std::string::npos,
+           "MMIO platform FDT advertises the virtio-MMIO disk");
+    expect(mmio_fdt_text.find("pci@30000000") == std::string::npos,
+           "MMIO platform FDT does not advertise an inactive PCIe root complex");
 }
 
 void test_pmp_semantics() {
