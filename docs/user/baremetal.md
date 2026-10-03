@@ -48,7 +48,6 @@ SECTIONS
   .bss : { *(.bss .bss.*) }
 }
 ```
-
 ### 2. Startup Assembly (`startup.S`)
 
 Initialize the stack pointer `sp` to a safe region in RAM (e.g., `0x8E000000`) and call `main`:
@@ -204,4 +203,3 @@ void dma_manual_transfer(uintptr_t src, uintptr_t dst, uint32_t bytes) {
     DMA_REG(0x1C) = 1;
 }
 ```
-
