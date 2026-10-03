@@ -226,10 +226,13 @@ void TileLinkBus::process_request(const TimedRequest& request) {
     }
     const uint8_t beat_count = has_line_data ? kTlBlockBytes / kTlBeatBytes : 1;
     const bool data_port = (req.source & 1u) == static_cast<TlSourceId>(TlPort::Data);
-    const uint32_t response_latency =
+    uint32_t response_latency =
         data_port && data_response_count_ == 0 && startup_data_response_latency_ != 0
             ? startup_data_response_latency_
             : (data_port ? data_response_latency_ : response_latency_);
+    if (machine_.dma_engine().is_transfer_active(cycle_)) {
+        response_latency += machine_.dma_engine().config().memory_contention_penalty;
+    }
     if (data_port) ++data_response_count_;
     for (uint8_t beat = 0; beat < beat_count; ++beat) {
         TlChannelD payload = resp;

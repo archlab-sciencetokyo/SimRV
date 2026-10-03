@@ -58,6 +58,23 @@ struct InterconnectTiming {
     LatencyCycles startup_data_response_latency = 0;
 };
 
+struct DmaTimingConfig {
+    bool enabled = false;
+    uint32_t setup_latency = 32;
+    uint32_t bandwidth_bytes_per_cycle = 8;
+    uint32_t memory_contention_penalty = 2;
+};
+
+struct AxiConfig {
+    bool enabled{false};
+    uint32_t data_width_bytes{8};
+    uint32_t id_width_bits{4};
+    uint32_t max_outstanding_reads{8};
+    uint32_t max_outstanding_writes{8};
+    uint32_t burst_length_max{256};
+    bool trace_axi{false};
+};
+
 struct CpuModelConfig {
     CpuModelProfile profile = CpuModelProfile::Balanced;
     isa::MisaProfile misa_profile = isa::MisaProfile::GCBV;
@@ -69,6 +86,8 @@ struct CpuModelConfig {
     L1CacheConfig data_cache{};
     FrontCacheConfig instruction_front_cache{};
     InterconnectTiming interconnect{};
+    DmaTimingConfig dma{};
+    AxiConfig axi{};
     bool enable_idle_spans = true;
 
     [[nodiscard]] auto validate() const -> std::expected<void, std::string> {

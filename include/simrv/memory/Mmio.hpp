@@ -49,6 +49,11 @@ inline constexpr Address kPcieMmioSize = static_cast<Address>(0x10000000u);
 inline constexpr Address kVirtioMmioBaseAddress = static_cast<Address>(0x10001000u);
 inline constexpr Address kVirtioMmioSlotSize = static_cast<Address>(0x1000u);
 
+// Standalone DMA Controller (0x10009000..0x1000A000)
+inline constexpr Address kDmaControllerBaseAddress = static_cast<Address>(0x10009000u);
+inline constexpr Address kDmaControllerSize = static_cast<Address>(0x00001000u);
+inline constexpr uint32_t kDmaControllerIrq = 12;
+
 inline constexpr Address kTohostAddress = static_cast<Address>(0x40008000u);
 inline constexpr Address kUartBaseAddress = static_cast<Address>(0x10000000u);
 inline constexpr Address kUartSize = static_cast<Address>(0x00000100u);

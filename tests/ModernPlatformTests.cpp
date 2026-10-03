@@ -22,11 +22,13 @@
 #include "simrv/core/RuntimeProfile.hpp"
 #include "simrv/device/AIA.hpp"
 #include "simrv/device/Aclint.hpp"
+#include "simrv/device/DmaController.hpp"
 #include "simrv/device/Uart.hpp"
 #include "simrv/device/mmio/VirtioMmioBlock.hpp"
 #include "simrv/device/mmio/VirtioMmioConsole.hpp"
 #include "simrv/device/mmio/VirtioMmioNet.hpp"
 #include "simrv/device/mmio/VirtioMmioRng.hpp"
+#include "simrv/device/mmio/VirtioMmioSound.hpp"
 #include "simrv/device/pci/PciDevice.hpp"
 #include "simrv/device/pci/PcieRootComplex.hpp"
 #include "simrv/device/pci/VirtioPciBlock.hpp"
@@ -36,6 +38,9 @@
 #include "simrv/device/pci/VirtioPciNet.hpp"
 #include "simrv/device/pci/VirtioPciRng.hpp"
 #include "simrv/device/pci/VirtioPciSound.hpp"
+#include "simrv/device/virtio/HostAudioSink.hpp"
+#include "simrv/device/virtio/VirtioSoundCore.hpp"
+#include "simrv/memory/Axi4.hpp"
 #include "simrv/memory/MemoryUtil.hpp"
 #include "simrv/memory/MmioDevice.hpp"
 #include "simrv/tui/modals/SystemConfigModal.hpp"
@@ -150,6 +155,235 @@ void test_mmio_device_and_dma() {
     assert(dev.dma_read(simrv::memory::kDramBaseAddress + 0x100, dst));
     assert(dst == src);
     std::cout << "[PASS] test_mmio_device_and_dma\n";
+}
+
+void test_ca_dma_latency_and_contention() {
+    ConcreteMachine machine;
+    std::vector<Byte> ram(1024 * 1024, Byte{0});
+    machine.set_ram_for_testing(ram.data(), ram.size());
+
+    auto& dma = machine.dma_engine();
+    assert(!dma.is_enabled());
+
+    // In default / Fast Mode: schedule_transfer completes immediately
+    bool fast_completed = false;
+    dma.schedule_transfer(64, 0, [&fast_completed]() { fast_completed = true; });
+    assert(fast_completed);
+
+    // Configure CA DMA timing model
+    simrv::pipeline::DmaTimingConfig cfg{
+        .enabled = true,
+        .setup_latency = 5,
+        .bandwidth_bytes_per_cycle = 4,
+        .memory_contention_penalty = 12,
+    };
+    dma.set_config(cfg);
+    assert(dma.is_enabled());
+
+    // 64 bytes @ 4 B/cycle = 16 cycles + 5 setup = 21 cycles
+    assert(dma.calculate_latency(64) == 21);
+
+    bool ca_completed = false;
+    const auto completion_cycle =
+        dma.schedule_transfer(64, 100, [&ca_completed]() { ca_completed = true; });
+    assert(completion_cycle == 121);
+    (void)completion_cycle;
+    assert(dma.pending_tasks() == 1);
+    assert(!ca_completed);
+
+    // Check active status
+    assert(!dma.is_transfer_active(122));
+    assert(dma.is_transfer_active(100));
+    assert(dma.is_transfer_active(120));
+    assert(dma.is_transfer_active(121));
+
+    // Advance before completion
+    dma.advance_cycle(120);
+    assert(!ca_completed);
+    assert(dma.pending_tasks() == 1);
+
+    // Advance to completion cycle
+    dma.advance_cycle(121);
+    assert(ca_completed);
+    assert(dma.pending_tasks() == 0);
+    assert(!dma.is_transfer_active(121));
+
+    // Test back-to-back transfer serialization
+    bool first_done = false;
+    bool second_done = false;
+    dma.schedule_transfer(32, 200,
+                          [&first_done]() { first_done = true; });  // 5 + 8 = 13 cycles -> 213
+    dma.schedule_transfer(
+        32, 205, [&second_done]() { second_done = true; });  // queued after 213 -> 213 + 13 = 226
+    assert(dma.pending_tasks() == 2);
+
+    dma.advance_cycle(213);
+    assert(first_done);
+    assert(!second_done);
+    assert(dma.pending_tasks() == 1);
+
+    dma.advance_cycle(226);
+    assert(second_done);
+    assert(dma.pending_tasks() == 0);
+
+    std::cout << "[PASS] test_ca_dma_latency_and_contention\n";
+}
+
+void test_dma_controller() {
+    const auto check = [](bool condition) {
+        if (!condition) std::abort();
+    };
+
+    ConcreteMachine machine;
+    std::vector<Byte> ram(1024 * 1024, Byte{0});
+    machine.set_ram_for_testing(ram.data(), ram.size());
+    machine.memory().initialize_mmu();
+
+    simrv::device::DmaController dma(&machine);
+    check(dma.base_address() == simrv::device::DmaController::kDefaultBaseAddress);
+    check(dma.size() == simrv::device::DmaController::kDefaultSize);
+    check(dma.irq_num() == simrv::device::DmaController::kDefaultIrq);
+    check(std::string_view(dma.name()) == "dma-controller");
+
+    // 1. Initial register state
+    check(dma.read32(simrv::device::DmaController::kRegControl) == 0);
+    check(dma.read32(simrv::device::DmaController::kRegStatus) == 0);
+    check(dma.read32(simrv::device::DmaController::kRegSrcAddrLo) == 0);
+    check(dma.read32(simrv::device::DmaController::kRegSrcAddrHi) == 0);
+    check(dma.read32(simrv::device::DmaController::kRegDstAddrLo) == 0);
+    check(dma.read32(simrv::device::DmaController::kRegDstAddrHi) == 0);
+    check(dma.read32(simrv::device::DmaController::kRegByteCount) == 0);
+    check(!dma.is_busy());
+    check(!dma.is_done());
+    check(!dma.is_error());
+
+    // 2. TileLink read/write requests
+    simrv::memory::TlChannelA write_req{};
+    write_req.opcode = simrv::memory::TlOpcodeA::PutFullData;
+    write_req.address = dma.base_address() + simrv::device::DmaController::kRegByteCount;
+    write_req.size = 2;
+    write_req.data = 512;
+    simrv::memory::TlChannelD resp{};
+    check(dma.handle_request(write_req, resp));
+    check(dma.read32(simrv::device::DmaController::kRegByteCount) == 512);
+
+    simrv::memory::TlChannelA read_req{};
+    read_req.opcode = simrv::memory::TlOpcodeA::Get;
+    read_req.address = dma.base_address() + simrv::device::DmaController::kRegByteCount;
+    read_req.size = 2;
+    check(dma.handle_request(read_req, resp));
+    check(resp.data == 512);
+
+    // 3. Fast mode transfer and interrupt assertion
+    const Address src_addr = simrv::memory::kDramBaseAddress + 0x1000;
+    const Address dst_addr = simrv::memory::kDramBaseAddress + 0x2000;
+    const uint32_t transfer_size = 128;
+
+    for (uint32_t i = 0; i < transfer_size; ++i) {
+        ram[0x1000 + i] = static_cast<Byte>(0xA0 + (i & 0x3F));
+        ram[0x2000 + i] = Byte{0};
+    }
+
+    dma.write32(simrv::device::DmaController::kRegSrcAddrLo, static_cast<uint32_t>(src_addr));
+    dma.write32(simrv::device::DmaController::kRegSrcAddrHi, 0);
+    dma.write32(simrv::device::DmaController::kRegDstAddrLo, static_cast<uint32_t>(dst_addr));
+    dma.write32(simrv::device::DmaController::kRegDstAddrHi, 0);
+    dma.write32(simrv::device::DmaController::kRegByteCount, transfer_size);
+
+    constexpr Word kDmaIrqMask = static_cast<Word>(1) << simrv::device::DmaController::kDefaultIrq;
+    check((machine.cpu.plic_mmio.plic_pending[0] & kDmaIrqMask) == 0);
+
+    // Start with interrupt enabled
+    dma.write32(simrv::device::DmaController::kRegControl,
+                simrv::device::DmaController::kControlStart |
+                    simrv::device::DmaController::kControlIntEnable);
+
+    // In fast mode, transfer is immediate
+    check(!dma.is_busy());
+    check(dma.is_done());
+    check(!dma.is_error());
+    check((machine.cpu.plic_mmio.plic_pending[0] & kDmaIrqMask) != 0);
+
+    // Check data integrity
+    for (uint32_t i = 0; i < transfer_size; ++i) {
+        check(ram[0x2000 + i] == static_cast<Byte>(0xA0 + (i & 0x3F)));
+    }
+
+    // 4. Acknowledge and clear interrupt
+    dma.write32(simrv::device::DmaController::kRegInterruptAck, 1);
+    check((machine.cpu.plic_mmio.plic_pending[0] & kDmaIrqMask) == 0);
+    check(!dma.is_done());
+
+    // 5. Cycle-Accurate mode deferred transfer and interrupt
+    machine.runtime_profile.engine = simrv::core::ExecutionEngine::CycleFast;
+    simrv::pipeline::DmaTimingConfig ca_cfg{
+        .enabled = true,
+        .setup_latency = 10,
+        .bandwidth_bytes_per_cycle = 4,
+        .memory_contention_penalty = 8,
+    };
+    machine.dma_engine().set_config(ca_cfg);
+
+    const Address ca_src_addr = simrv::memory::kDramBaseAddress + 0x3000;
+    const Address ca_dst_addr = simrv::memory::kDramBaseAddress + 0x4000;
+    const uint32_t ca_size = 64;  // 10 setup + 16 transfer = 26 cycles
+
+    for (uint32_t i = 0; i < ca_size; ++i) {
+        ram[0x3000 + i] = static_cast<Byte>(0x55 ^ i);
+        ram[0x4000 + i] = Byte{0};
+    }
+
+    dma.write32(simrv::device::DmaController::kRegSrcAddrLo, static_cast<uint32_t>(ca_src_addr));
+    dma.write32(simrv::device::DmaController::kRegSrcAddrHi, 0);
+    dma.write32(simrv::device::DmaController::kRegDstAddrLo, static_cast<uint32_t>(ca_dst_addr));
+    dma.write32(simrv::device::DmaController::kRegDstAddrHi, 0);
+    dma.write32(simrv::device::DmaController::kRegByteCount, ca_size);
+
+    const auto start_cycle = machine.memory().system_bus().cycle();
+    dma.write32(simrv::device::DmaController::kRegControl,
+                simrv::device::DmaController::kControlStart |
+                    simrv::device::DmaController::kControlIntEnable);
+
+    // In CA mode, transfer is scheduled
+    check(dma.is_busy());
+    check(!dma.is_done());
+    check((machine.cpu.plic_mmio.plic_pending[0] & kDmaIrqMask) == 0);
+    check(ram[0x4000] == Byte{0});
+
+    // Advance 25 cycles (1 before completion)
+    machine.dma_engine().advance_cycle(start_cycle + 25);
+    check(dma.is_busy());
+    check(!dma.is_done());
+    check((machine.cpu.plic_mmio.plic_pending[0] & kDmaIrqMask) == 0);
+
+    // Advance to 26 cycles (completion)
+    machine.dma_engine().advance_cycle(start_cycle + 26);
+    check(!dma.is_busy());
+    check(dma.is_done());
+    check((machine.cpu.plic_mmio.plic_pending[0] & kDmaIrqMask) != 0);
+
+    // Data must now be fully copied
+    for (uint32_t i = 0; i < ca_size; ++i) {
+        check(ram[0x4000 + i] == static_cast<Byte>(0x55 ^ i));
+    }
+
+    // Clear interrupt
+    dma.write32(simrv::device::DmaController::kRegInterruptAck, 1);
+    check((machine.cpu.plic_mmio.plic_pending[0] & kDmaIrqMask) == 0);
+
+    // 6. Error handling
+    machine.runtime_profile.engine = simrv::core::ExecutionEngine::InstructionFast;
+    dma.reset();
+    dma.write32(simrv::device::DmaController::kRegByteCount, 0);
+    dma.write32(simrv::device::DmaController::kRegControl,
+                simrv::device::DmaController::kControlStart |
+                    simrv::device::DmaController::kControlIntEnable);
+    check(dma.is_error());
+    check((machine.cpu.plic_mmio.plic_pending[0] & kDmaIrqMask) != 0);
+    dma.write32(simrv::device::DmaController::kRegInterruptAck, 1);
+    check((machine.cpu.plic_mmio.plic_pending[0] & kDmaIrqMask) == 0);
+
+    std::cout << "[PASS] test_dma_controller\n";
 }
 
 void test_tui_uart_input_irq_publication() {
@@ -2540,6 +2774,309 @@ void test_load_after_amo_readonly_page() {
     std::cout << "[PASS] test_load_after_amo_readonly_page\n";
 }
 
+void test_virtio_sound_negotiation_and_playback() {
+    const auto check = [](bool condition) {
+        if (!condition) std::abort();
+    };
+
+    ConcreteMachine machine;
+    std::vector<Byte> ram(1024 * 1024, Byte{0});
+    machine.set_ram_for_testing(ram.data(), ram.size());
+    machine.memory().initialize_mmu();
+
+    simrv::device::VirtioMmioSound sound(0x10006000, 6, &machine);
+
+    // 1. MMIO Discovery
+    check(sound.read32(0x00) == 0x74726976);                          // "virt" magic
+    check(sound.read32(0x04) == 2);                                   // Version 2
+    check(sound.read32(0x08) == simrv::device::virtio::kDevIdSound);  // ID 25
+    check(sound.device_status() == 0);
+
+    // 2. Config space
+    check(sound.read32(0x100) == 1);  // jacks
+    check(sound.read32(0x104) == 1);  // streams
+    check(sound.read32(0x108) == 1);  // chmaps
+
+    // 3. Status negotiation
+    sound.write32(0x70, 0x01);  // ACKNOWLEDGE
+    check(sound.device_status() == 0x01);
+    sound.write32(0x70, 0x03);  // DRIVER
+    check(sound.device_status() == 0x03);
+    sound.write32(0x70, 0x0B);  // FEATURES_OK
+    check(sound.device_status() == 0x0B);
+    sound.write32(0x70, 0x0F);  // DRIVER_OK
+    check(sound.device_status() == 0x0F);
+
+    // 4. Queue 0 (Control Queue) setup
+    constexpr Address kDesc0Addr = 0x80010000;
+    constexpr Address kAvail0Addr = 0x80011000;
+    constexpr Address kUsed0Addr = 0x80012000;
+    constexpr Address kReqBufAddr = 0x80013000;
+    constexpr Address kRespBufAddr = 0x80014000;
+
+    sound.write32(0x30, simrv::device::virtio::kVirtioSndVqControl);
+    check(sound.read32(0x34) == 64);
+    sound.write32(0x38, 16);
+    sound.write32(0x80, static_cast<uint32_t>(kDesc0Addr));
+    sound.write32(0x84, 0);
+    sound.write32(0x90, static_cast<uint32_t>(kAvail0Addr));
+    sound.write32(0x94, 0);
+    sound.write32(0xA0, static_cast<uint32_t>(kUsed0Addr));
+    sound.write32(0xA4, 0);
+    sound.write32(0x44, 1);
+    check(sound.read32(0x44) == 1);
+
+    auto ram_ptr = [&](Address paddr) -> uint8_t* {
+        return reinterpret_cast<uint8_t*>(ram.data()) + (paddr - 0x80000000);
+    };
+
+    auto submit_control_request = [&](const void* req_data, size_t req_len, void* resp_data,
+                                      size_t resp_len) {
+        std::memcpy(ram_ptr(kReqBufAddr), req_data, req_len);
+        std::memset(ram_ptr(kRespBufAddr), 0, resp_len);
+
+        simrv::device::virtio::VirtqDesc descs[2]{};
+        descs[0].addr = kReqBufAddr;
+        descs[0].len = static_cast<uint32_t>(req_len);
+        descs[0].flags = simrv::device::virtio::kVirtqDescFNext;
+        descs[0].next = 1;
+
+        descs[1].addr = kRespBufAddr;
+        descs[1].len = static_cast<uint32_t>(resp_len);
+        descs[1].flags = simrv::device::virtio::kVirtqDescFWrite;
+        descs[1].next = 0;
+
+        std::memcpy(ram_ptr(kDesc0Addr), descs, sizeof(descs));
+
+        uint16_t avail_idx = 0;
+        std::memcpy(&avail_idx, ram_ptr(kAvail0Addr + 2), 2);
+        uint16_t head = 0;
+        std::memcpy(ram_ptr(kAvail0Addr + 4 + (avail_idx % 16) * 2), &head, 2);
+        avail_idx++;
+        std::memcpy(ram_ptr(kAvail0Addr + 2), &avail_idx, 2);
+
+        sound.write32(0x50, simrv::device::virtio::kVirtioSndVqControl);
+
+        std::memcpy(resp_data, ram_ptr(kRespBufAddr), resp_len);
+    };
+
+    // Test Jack Info Query
+    simrv::device::virtio::VirtioSndQueryInfo jack_query{
+        .hdr = {.code = simrv::device::virtio::kVirtioSndRJackInfo},
+        .start_id = 0,
+        .count = 1,
+        .size = sizeof(simrv::device::virtio::VirtioSndJackInfo),
+    };
+    simrv::device::virtio::VirtioSndJackInfo jack_info{};
+    submit_control_request(&jack_query, sizeof(jack_query), &jack_info, sizeof(jack_info));
+    check(jack_info.connected == 1);
+
+    // Test PCM Info Query
+    simrv::device::virtio::VirtioSndQueryInfo pcm_query{
+        .hdr = {.code = simrv::device::virtio::kVirtioSndRPcmInfo},
+        .start_id = 0,
+        .count = 1,
+        .size = sizeof(simrv::device::virtio::VirtioSndPcmInfo),
+    };
+    simrv::device::virtio::VirtioSndPcmInfo pcm_info{};
+    submit_control_request(&pcm_query, sizeof(pcm_query), &pcm_info, sizeof(pcm_info));
+    check(pcm_info.direction == simrv::device::virtio::kVirtioSndDOutput);
+    check(pcm_info.channels_max == 2);
+
+    // Test Set Params (48000 Hz, 2ch, S16_LE)
+    simrv::device::virtio::VirtioSndPcmSetParams set_params{
+        .hdr = {.hdr = {.code = simrv::device::virtio::kVirtioSndRPcmSetParams}, .stream_id = 0},
+        .buffer_bytes = 4096,
+        .period_bytes = 1024,
+        .features = 0,
+        .channels = 2,
+        .format = simrv::device::virtio::kVirtioSndPcmFmtS16,
+        .rate = simrv::device::virtio::kVirtioSndPcmRate48000,
+    };
+    simrv::device::virtio::VirtioSndHdr set_resp{};
+    submit_control_request(&set_params, sizeof(set_params), &set_resp, sizeof(set_resp));
+    check(set_resp.code == simrv::device::virtio::kVirtioSndSOk);
+    check(sound.backend().sample_rate() == 48000);
+    check(sound.backend().channels() == 2);
+    check(sound.backend().is_active());
+
+    // 5. Queue 2 (TX Queue) PCM Playback
+    constexpr Address kDesc2Addr = 0x80020000;
+    constexpr Address kAvail2Addr = 0x80021000;
+    constexpr Address kUsed2Addr = 0x80022000;
+    constexpr Address kPcmBufAddr = 0x80023000;
+    constexpr Address kPcmStatusAddr = 0x80024000;
+
+    sound.write32(0x30, simrv::device::virtio::kVirtioSndVqTx);
+    sound.write32(0x38, 16);
+    sound.write32(0x80, static_cast<uint32_t>(kDesc2Addr));
+    sound.write32(0x84, 0);
+    sound.write32(0x90, static_cast<uint32_t>(kAvail2Addr));
+    sound.write32(0x94, 0);
+    sound.write32(0xA0, static_cast<uint32_t>(kUsed2Addr));
+    sound.write32(0xA4, 0);
+    sound.write32(0x44, 1);
+
+    constexpr size_t kSampleBytes = 128;
+    std::vector<uint8_t> pcm_packet(sizeof(simrv::device::virtio::VirtioSndPcmXfer) + kSampleBytes,
+                                    0x42);
+    reinterpret_cast<simrv::device::virtio::VirtioSndPcmXfer*>(pcm_packet.data())->stream_id = 0;
+    std::memcpy(ram_ptr(kPcmBufAddr), pcm_packet.data(), pcm_packet.size());
+
+    simrv::device::virtio::VirtqDesc tx_descs[2]{};
+    tx_descs[0].addr = kPcmBufAddr;
+    tx_descs[0].len = static_cast<uint32_t>(pcm_packet.size());
+    tx_descs[0].flags = simrv::device::virtio::kVirtqDescFNext;
+    tx_descs[0].next = 1;
+
+    tx_descs[1].addr = kPcmStatusAddr;
+    tx_descs[1].len = sizeof(simrv::device::virtio::VirtioSndPcmStatus);
+    tx_descs[1].flags = simrv::device::virtio::kVirtqDescFWrite;
+    tx_descs[1].next = 0;
+
+    std::memcpy(ram_ptr(kDesc2Addr), tx_descs, sizeof(tx_descs));
+
+    uint16_t avail2_idx = 0;
+    uint16_t head2 = 0;
+    std::memcpy(ram_ptr(kAvail2Addr + 4), &head2, 2);
+    avail2_idx = 1;
+    std::memcpy(ram_ptr(kAvail2Addr + 2), &avail2_idx, 2);
+
+    const uint64_t prev_total = simrv::device::virtio::HostAudioSink::instance().total_bytes();
+    sound.write32(0x50, simrv::device::virtio::kVirtioSndVqTx);
+
+    check(simrv::device::virtio::HostAudioSink::instance().total_bytes() ==
+          prev_total + kSampleBytes);
+
+    simrv::device::virtio::VirtioSndPcmStatus tx_st{};
+    std::memcpy(&tx_st, ram_ptr(kPcmStatusAddr), sizeof(tx_st));
+    check(tx_st.status == simrv::device::virtio::kVirtioSndSOk);
+
+    // Stop playback
+    simrv::device::virtio::VirtioSndPcmHdr stop_cmd{
+        .hdr = {.code = simrv::device::virtio::kVirtioSndRPcmStop},
+        .stream_id = 0,
+    };
+    simrv::device::virtio::VirtioSndHdr stop_resp{};
+    submit_control_request(&stop_cmd, sizeof(stop_cmd), &stop_resp, sizeof(stop_resp));
+    check(stop_resp.code == simrv::device::virtio::kVirtioSndSOk);
+    check(!sound.backend().is_active());
+
+    // 6. Test VirtioPciSound Device Discovery
+    auto pci_sound = std::make_shared<simrv::device::VirtioPciSound>();
+    check(pci_sound->config_read(0x00, 2) == 0x1AF4);
+    check(pci_sound->config_read(0x02, 2) == 0x1059);  // Modern Sound PCI ID
+
+    std::cout << "[PASS] test_virtio_sound_negotiation_and_playback\n";
+}
+
+void test_axi4_bridge_and_tracer() {
+    const auto check = [](bool condition) {
+        if (!condition) std::abort();
+    };
+
+    ConcreteMachine machine;
+    std::vector<Byte> ram(1024 * 1024, Byte{0});
+    machine.set_ram_for_testing(ram.data(), ram.size());
+    machine.memory().initialize_mmu();
+
+    check(machine.axi_bridge() != nullptr);
+
+    // 1. Configure AXI bridge
+    simrv::pipeline::AxiConfig cfg{
+        .enabled = true,
+        .data_width_bytes = static_cast<uint32_t>(sizeof(Word)),
+        .id_width_bits = 4,
+        .max_outstanding_reads = 4,
+        .max_outstanding_writes = 4,
+        .burst_length_max = 16,
+        .trace_axi = true,
+    };
+    machine.axi_bridge()->set_config(cfg);
+    check(machine.axi_bridge()->config().enabled);
+    check(machine.axi_bridge()->tracer().is_enabled());
+
+    // 2. Pre-seed RAM with test data at 0x80004000
+    constexpr Address kTestAddr = 0x80004000;
+    constexpr uint8_t kBeatSize = sizeof(Word) == 8 ? 3 : 2;
+    const Word val0 = static_cast<Word>(0x12345678ULL);
+    const Word val1 = static_cast<Word>(0x9ABCDEF0ULL);
+    std::memcpy(ram.data() + (kTestAddr - 0x80000000), &val0, sizeof(Word));
+    std::memcpy(ram.data() + (kTestAddr + sizeof(Word) - 0x80000000), &val1, sizeof(Word));
+
+    // 3. Test AR read burst (2 beats of sizeof(Word) bytes)
+    simrv::memory::Axi4Ar ar{
+        .id = 5,
+        .addr = kTestAddr,
+        .len = 1,  // 2 beats (len = beats - 1)
+        .size = kBeatSize,
+        .burst = simrv::memory::AxiBurst::Incr,
+    };
+    check(machine.axi_bridge()->send_ar(ar));
+
+    simrv::memory::Axi4R r0{};
+    check(machine.axi_bridge()->recv_r(r0));
+    check(r0.id == 5);
+    check(r0.resp == simrv::memory::AxiResp::Okay);
+    check(r0.data == val0);
+    check(!r0.last);
+
+    simrv::memory::Axi4R r1{};
+    check(machine.axi_bridge()->recv_r(r1));
+    check(r1.id == 5);
+    check(r1.resp == simrv::memory::AxiResp::Okay);
+    check(r1.data == val1);
+    check(r1.last);
+
+    simrv::memory::Axi4R r2{};
+    check(!machine.axi_bridge()->recv_r(r2));  // queue drained
+
+    // 4. Test AW and W write burst
+    constexpr Address kWriteAddr = 0x80005000;
+    simrv::memory::Axi4Aw aw{
+        .id = 7,
+        .addr = kWriteAddr,
+        .len = 0,  // 1 beat
+        .size = kBeatSize,
+        .burst = simrv::memory::AxiBurst::Incr,
+    };
+    check(machine.axi_bridge()->send_aw(aw));
+
+    const Word write_val = static_cast<Word>(0xA1B2C3D4ULL);
+    simrv::memory::Axi4W w{
+        .data = write_val,
+        .strb = 0xFF,
+        .last = true,
+    };
+    check(machine.axi_bridge()->send_w(w));
+
+    simrv::memory::Axi4B b{};
+    check(machine.axi_bridge()->recv_b(b));
+    check(b.id == 7);
+    check(b.resp == simrv::memory::AxiResp::Okay);
+
+    Word read_back{0};
+    std::memcpy(&read_back, ram.data() + (kWriteAddr - 0x80000000), sizeof(Word));
+    check(read_back == write_val);
+
+    // 5. Test decode error (DECERR) for unmapped address via AXI bridge
+    simrv::memory::Axi4Ar mmio_ar{
+        .id = 9,
+        .addr = 0x10000000,
+        .len = 0,
+        .size = 2,  // 4 bytes
+        .burst = simrv::memory::AxiBurst::Incr,
+    };
+    check(machine.axi_bridge()->send_ar(mmio_ar));
+    simrv::memory::Axi4R mmio_r{};
+    check(machine.axi_bridge()->recv_r(mmio_r));
+    check(mmio_r.id == 9);
+    check(mmio_r.resp == simrv::memory::AxiResp::Decerr);
+    check(mmio_r.last);
+
+    std::cout << "[PASS] test_axi4_bridge_and_tracer\n";
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -2552,6 +3089,10 @@ int main(int argc, char** argv) {
     test_left_pane_runtime_summaries();
     test_ca_model_cache_application();
     test_mmio_device_and_dma();
+    test_ca_dma_latency_and_contention();
+    test_dma_controller();
+    test_virtio_sound_negotiation_and_playback();
+    test_axi4_bridge_and_tracer();
     test_tui_uart_input_irq_publication();
     test_ia_tui_uart_input_is_immediate();
     test_os_sampled_fast_batch_eligibility();

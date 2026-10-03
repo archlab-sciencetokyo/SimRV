@@ -117,7 +117,10 @@ void RunnerBase::stop_threads() {
 }
 
 Machine::Runtime::Runtime(Machine& machine, bool appmode)
-    : tracer(machine), memory(machine), runner(std::in_place_type<BaremetalRunner>) {
+    : axi_bridge(std::make_unique<simrv::memory::Axi4Bridge>(&machine)),
+      tracer(machine),
+      memory(machine),
+      runner(std::in_place_type<BaremetalRunner>) {
     memory.system_bus().router().set_tracer(&tracer);
     if (!appmode) {
         runner.emplace<OsRunner>();
@@ -360,6 +363,22 @@ auto Machine::uart_device() noexcept -> simrv::device::Uart* { return runtime_->
 
 auto Machine::uart_device() const noexcept -> const simrv::device::Uart* {
     return runtime_->uart.get();
+}
+
+auto Machine::dma_controller() noexcept -> simrv::device::DmaController* {
+    return runtime_ ? runtime_->dma_controller.get() : nullptr;
+}
+
+auto Machine::dma_controller() const noexcept -> const simrv::device::DmaController* {
+    return runtime_ ? runtime_->dma_controller.get() : nullptr;
+}
+
+auto Machine::axi_bridge() noexcept -> simrv::memory::Axi4Bridge* {
+    return runtime_ ? runtime_->axi_bridge.get() : nullptr;
+}
+
+auto Machine::axi_bridge() const noexcept -> const simrv::memory::Axi4Bridge* {
+    return runtime_ ? runtime_->axi_bridge.get() : nullptr;
 }
 
 void Machine::send_input_key(uint16_t code, bool pressed) {
@@ -1754,6 +1773,7 @@ void Machine::advance_ca_platform_cycle(bool synchronize_secondary_harts) {
     // sampled by hart pipelines at a retirement boundary in the next global cycle.
     auto& cpu = primary_hart();
     memory_.system_bus().advance_cycle();
+    dma_engine_.advance_cycle(memory_.system_bus().cycle());
     if (simrv::compiler::unlikely(++cpu.clint_mmio.rtc_divider >= timing::kCyclesPerTimebaseTick)) {
         ++cpu.clint_mmio.mtime;
         cpu.clint_mmio.rtc_divider = 0;

@@ -13,6 +13,7 @@ SimRV uses a physical memory map where memory-mapped I/O (MMIO) and PCIe devices
 | **Power Controller** | `0x00100000` | `0x00001000` (4 KB) | SiFive test-finisher poweroff / reboot port |
 | **UART 16550A** | `0x10000000` | `0x00000100` (256 B) | Serial console input/output port |
 | **VirtIO MMIO Slots** | `0x10001000` | `0x00008000` (32 KB) | VirtIO MMIO transport slots (Disk, Net, Console, GPU, Input, Sound, RNG) |
+| **DMA Controller** | `0x10009000` | `0x00001000` (4 KB) | Standalone interrupt-driven DMA controller (IRQ 12) |
 | **PCIe ECAM Space** | `0x30000000` | `0x10000000` (256 MB) | PCI Express enhanced configuration space |
 | **PCIe 32-bit MMIO** | `0x40000000` | `0x10000000` (256 MB) | PCI Express non-prefetchable 32-bit BAR window |
 | **PLIC / AIA APLIC** | `0x0C000000` / `0x50000000` | `0x04000000` (64 MB) | Platform-Level Interrupt Controller / AIA APLIC |
@@ -165,3 +166,42 @@ void power_reboot() {
     *POWER_BASE = 0x7777; // Reset / Warm Reboot
 }
 ```
+
+### Generic DMA Controller (0x10009000, IRQ 12)
+SimRV provides a hardware DMA controller accessible via standard 32-bit MMIO registers. Any baremetal firmware, RTOS, or operating system driver can perform zero-copy bulk transfers.
+
+Include `<simrv/device/simrv_dma.h>` or define the registers directly:
+
+```c
+#include <simrv/device/simrv_dma.h>
+
+void test_dma_copy() {
+    static char src[1024] = "Hello, high-speed DMA from baremetal!";
+    static char dst[1024] = {0};
+
+    // Synchronous memory-to-memory DMA copy
+    int ret = simrv_dma_memcpy(SIMRV_DMA_BASE_ADDR, dst, src, sizeof(src));
+    if (ret == 0) {
+        uart_puts("DMA transfer completed successfully!\n");
+    }
+}
+
+// Or manually using registers (polling or PLIC interrupt on IRQ 12):
+#define DMA_REG(off) (*(volatile uint32_t*)(0x10009000 + (off)))
+
+void dma_manual_transfer(uintptr_t src, uintptr_t dst, uint32_t bytes) {
+    DMA_REG(0x08) = (uint32_t)(src & 0xFFFFFFFF); // SRC_ADDR_LO
+    DMA_REG(0x0C) = (uint32_t)(src >> 32);         // SRC_ADDR_HI
+    DMA_REG(0x10) = (uint32_t)(dst & 0xFFFFFFFF); // DST_ADDR_LO
+    DMA_REG(0x14) = (uint32_t)(dst >> 32);         // DST_ADDR_HI
+    DMA_REG(0x18) = bytes;                        // BYTE_COUNT
+    DMA_REG(0x00) = 0x1;                          // START (Bit 0)
+
+    // Wait for completion (Bit 2: BUSY)
+    while (DMA_REG(0x00) & 0x4);
+
+    // Acknowledge status and clear completion interrupt
+    DMA_REG(0x1C) = 1;
+}
+```
+

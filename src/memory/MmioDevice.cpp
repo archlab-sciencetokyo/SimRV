@@ -118,19 +118,19 @@ auto MmioDevice::dma_read(Address paddr, std::span<uint8_t> dst) -> bool {
         return false;
     }
     const auto geometry = machine_->memory_geometry();
-    const Address dram_base = geometry.dram_base;
-    const uint64_t dram_size = geometry.dram_size;
-
-    if (paddr < dram_base || (paddr + dst.size()) > (dram_base + dram_size)) {
+    if (!geometry.contains(paddr, dst.size())) {
         return false;
     }
-    const Address first_line = paddr & ~(Address{CoherenceHub::kLineBytes - 1u});
-    const Address last_line = (paddr + dst.size() - 1u) & ~(Address{CoherenceHub::kLineBytes - 1u});
-    for (Address line = first_line;; line += CoherenceHub::kLineBytes) {
-        machine_->memory().system_bus().coherence_hub().invalidate_line_external(line);
-        if (line == last_line) break;
+    if (!machine_->runtime_profile.is_instruction_mode()) {
+        const Address first_line = paddr & ~(Address{CoherenceHub::kLineBytes - 1u});
+        const Address last_line =
+            (paddr + dst.size() - 1u) & ~(Address{CoherenceHub::kLineBytes - 1u});
+        for (Address line = first_line;; line += CoherenceHub::kLineBytes) {
+            machine_->memory().system_bus().coherence_hub().invalidate_line_external(line);
+            if (line == last_line) break;
+        }
     }
-    std::memcpy(dst.data(), machine_->ram_data() + (paddr - dram_base), dst.size());
+    std::memcpy(dst.data(), machine_->ram_data() + (paddr - geometry.dram_base), dst.size());
     return true;
 }
 
@@ -139,19 +139,19 @@ auto MmioDevice::dma_write(Address paddr, std::span<const uint8_t> src) -> bool 
         return false;
     }
     const auto geometry = machine_->memory_geometry();
-    const Address dram_base = geometry.dram_base;
-    const uint64_t dram_size = geometry.dram_size;
-
-    if (paddr < dram_base || (paddr + src.size()) > (dram_base + dram_size)) {
+    if (!geometry.contains(paddr, src.size())) {
         return false;
     }
-    const Address first_line = paddr & ~(Address{CoherenceHub::kLineBytes - 1u});
-    const Address last_line = (paddr + src.size() - 1u) & ~(Address{CoherenceHub::kLineBytes - 1u});
-    for (Address line = first_line;; line += CoherenceHub::kLineBytes) {
-        machine_->memory().system_bus().coherence_hub().invalidate_line_external(line);
-        if (line == last_line) break;
+    if (!machine_->runtime_profile.is_instruction_mode()) {
+        const Address first_line = paddr & ~(Address{CoherenceHub::kLineBytes - 1u});
+        const Address last_line =
+            (paddr + src.size() - 1u) & ~(Address{CoherenceHub::kLineBytes - 1u});
+        for (Address line = first_line;; line += CoherenceHub::kLineBytes) {
+            machine_->memory().system_bus().coherence_hub().invalidate_line_external(line);
+            if (line == last_line) break;
+        }
     }
-    std::memcpy(machine_->ram_data() + (paddr - dram_base), src.data(), src.size());
+    std::memcpy(machine_->ram_data() + (paddr - geometry.dram_base), src.data(), src.size());
     return true;
 }
 

@@ -29,10 +29,12 @@
 #include "simrv/debug/SymbolTable.hpp"
 #include "simrv/device/Rtc.hpp"
 #include "simrv/device/Uart.hpp"
+#include "simrv/memory/DmaEngine.hpp"
 #include "simrv/memory/MemorySubsystem.hpp"
 
 namespace simrv::device {
 class PowerMmio;
+class DmaController;
 class AclintMtimer;
 class AclintMswi;
 class Imsic;
@@ -54,6 +56,10 @@ class VirtioMmioSound;
 class VirtioMmioNet;
 }  // namespace simrv::device
 
+namespace simrv::memory {
+class Axi4Bridge;
+}
+
 namespace simrv::core {
 
 class BaremetalRunner;
@@ -73,6 +79,11 @@ struct PlatformStatusSnapshot {
     uint32_t console_status = 0;
     uint32_t rng_status = 0;
     uint32_t gpu_status = 0;
+    uint32_t sound_status = 0;
+    bool sound_active = false;
+    uint32_t sound_sample_rate = 0;
+    uint8_t sound_channels = 0;
+    bool dma_busy = false;
 };
 
 // NOLINTBEGIN(misc-non-private-member-variables-in-classes)
@@ -396,6 +407,10 @@ class Machine final : public core::IInterruptController {
     [[nodiscard]] auto rtc_device() const noexcept -> const simrv::Rtc*;
     [[nodiscard]] auto uart_device() noexcept -> simrv::device::Uart*;
     [[nodiscard]] auto uart_device() const noexcept -> const simrv::device::Uart*;
+    [[nodiscard]] auto dma_controller() noexcept -> simrv::device::DmaController*;
+    [[nodiscard]] auto dma_controller() const noexcept -> const simrv::device::DmaController*;
+    [[nodiscard]] auto axi_bridge() noexcept -> simrv::memory::Axi4Bridge*;
+    [[nodiscard]] auto axi_bridge() const noexcept -> const simrv::memory::Axi4Bridge*;
     void send_input_key(uint16_t code, bool pressed);
     void send_input_mouse_motion(int32_t x, int32_t y);
     void send_input_mouse_button(uint16_t button, bool pressed);
@@ -443,6 +458,12 @@ class Machine final : public core::IInterruptController {
         return memory_;
     }
     simrv::memory::MemorySubsystem& memory_;
+
+    [[nodiscard]] auto dma_engine() noexcept -> simrv::memory::DmaEngine& { return dma_engine_; }
+    [[nodiscard]] auto dma_engine() const noexcept -> const simrv::memory::DmaEngine& {
+        return dma_engine_;
+    }
+    simrv::memory::DmaEngine dma_engine_{};
 
     /// Internal test support for deterministic component fixtures. Not part of the SDK contract.
     void set_ram_for_testing(Byte* ram, size_t size) noexcept;

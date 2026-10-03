@@ -96,7 +96,7 @@ void CoherenceHub::probe_hart_dcache(HartId hart_id, const TlChannelB& probe_req
     }
     machine_.memory().system_bus().record_transaction(
         TileLinkChannel::B, to_string(probe_req.opcode), probe_req.source, 0,
-        probe_req.address.raw(), std::format("Hart {} {}", hart_id.val, to_string(probe_req.cap)));
+        probe_req.address.raw(), to_string(probe_req.cap));
     auto& target_cpu = machine_.hart(hart_id);
     if (target_cpu.dcache.handle_probe(probe_req, probe_resp, dirty_data)) {
         stats_.probe_count++;
@@ -147,23 +147,33 @@ void CoherenceHub::invalidate_line_broadcast(LineAddress line_base, HartId initi
 
 void CoherenceHub::invalidate_line_external(LineAddress line_base) {
     const LineAddress aligned_addr = line_base & ~(static_cast<LineAddress>(kLineBytes - 1u));
-    TlChannelB probe{};
-    probe.opcode = TlOpcodeB::ProbeBlock;
-    probe.cap = TlCap::ToN;
-    probe.address = aligned_addr;
-    for (uint32_t hart = 0; hart < machine_.num_harts(); ++hart) {
-        TlChannelC response{};
-        std::array<Byte, kLineBytes> dirty{};
-        probe_hart_dcache(hart, probe, response, dirty);
-        if (response.opcode == TlOpcodeC::ProbeAckData) {
-            auto* dram = machine_.ram_data();
-            const auto geometry = machine_.memory_geometry();
-            if (dram != nullptr && geometry.contains(aligned_addr, kLineBytes)) {
-                std::memcpy(dram + (aligned_addr - geometry.dram_base), dirty.data(), kLineBytes);
+    DirectoryEntry dir_entry{};
+    const bool is_tracked = lookup_dir_entry(aligned_addr, dir_entry);
+
+    if (is_tracked && dir_entry.state != MesiState::Invalid) {
+        TlChannelB probe{};
+        probe.opcode = TlOpcodeB::ProbeBlock;
+        probe.cap = TlCap::ToN;
+        probe.address = aligned_addr;
+        for (uint32_t hart = 0; hart < machine_.num_harts(); ++hart) {
+            if ((dir_entry.sharers_mask & (1ULL << hart)) == 0 &&
+                (!dir_entry.owner_hart.has_value() || *dir_entry.owner_hart != hart)) {
+                continue;
             }
+            TlChannelC response{};
+            std::array<Byte, kLineBytes> dirty{};
+            probe_hart_dcache(hart, probe, response, dirty);
+            if (response.opcode == TlOpcodeC::ProbeAckData) {
+                auto* dram = machine_.ram_data();
+                const auto geometry = machine_.memory_geometry();
+                if (dram != nullptr && geometry.contains(aligned_addr, kLineBytes)) {
+                    std::memcpy(dram + (aligned_addr - geometry.dram_base), dirty.data(),
+                                kLineBytes);
+                }
+            }
+            probe_hart_icache(hart, probe);
+            ++stats_.invalidation_count;
         }
-        probe_hart_icache(hart, probe);
-        ++stats_.invalidation_count;
     }
     machine_.memory_.reservation_table().invalidate_matching(aligned_addr);
     l3_cache_.invalidate_line(aligned_addr);

@@ -10,5 +10,6 @@ simrv_add_component(simrv-memory
   TileLinkBus.cpp
   TileLinkProtocolChecker.cpp
   CoherenceHub.cpp
+  Axi4.cpp
 )
 add_library(simrv::memory ALIAS simrv-memory)

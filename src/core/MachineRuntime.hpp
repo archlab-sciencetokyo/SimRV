@@ -21,6 +21,7 @@
 #include "simrv/debug/SymbolTable.hpp"
 #include "simrv/device/AIA.hpp"
 #include "simrv/device/Aclint.hpp"
+#include "simrv/device/DmaController.hpp"
 #include "simrv/device/Power.hpp"
 #include "simrv/device/Rtc.hpp"
 #include "simrv/device/Uart.hpp"
@@ -39,6 +40,7 @@
 #include "simrv/device/pci/VirtioPciNet.hpp"
 #include "simrv/device/pci/VirtioPciRng.hpp"
 #include "simrv/device/pci/VirtioPciSound.hpp"
+#include "simrv/memory/Axi4.hpp"
 #include "simrv/memory/MemorySubsystem.hpp"
 #include "simrv/xlen/Types.hpp"
 
@@ -130,6 +132,8 @@ class Machine::Runtime {
     std::unique_ptr<simrv::Rtc> rtc;
     std::unique_ptr<simrv::device::Uart> uart;
     std::unique_ptr<simrv::device::PowerMmio> power;
+    std::unique_ptr<simrv::device::DmaController> dma_controller;
+    std::unique_ptr<simrv::memory::Axi4Bridge> axi_bridge;
     std::unique_ptr<simrv::device::AclintMtimer> aclint_mtimer;
     std::unique_ptr<simrv::device::AclintMswi> aclint_mswi;
     std::unique_ptr<simrv::device::Imsic> imsic_m;

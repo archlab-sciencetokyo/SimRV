@@ -6,6 +6,7 @@ simrv_add_component(simrv-platform
   Rtc.cpp
   Uart.cpp
   Power.cpp
+  DmaController.cpp
   pci/PciDevice.cpp
   pci/PcieRootComplex.cpp
   pci/VirtioPciDevice.cpp
@@ -24,5 +25,8 @@ simrv_add_component(simrv-platform
   mmio/VirtioMmioRng.cpp
   mmio/VirtioMmioSound.cpp
   mmio/VirtioMmioNet.cpp
+  virtio/HostAudioSink.cpp
+  virtio/VirtioSoundBackend.cpp
 )
+target_link_libraries(simrv-platform PUBLIC ${CMAKE_DL_LIBS})
 add_library(simrv::platform ALIAS simrv-platform)

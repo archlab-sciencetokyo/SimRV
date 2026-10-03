@@ -470,6 +470,14 @@ auto FdtGenerator::generate(const FdtConfig& config) -> std::vector<uint8_t> {
     b.add_prop_u32("interrupts", 11);
     b.end_node();
 
+    // dma-controller (dma@10009000)
+    b.begin_node("dma@10009000");
+    b.add_prop_string_list("compatible", {"simrv,dma-1.0", "generic-dma-controller"});
+    b.add_prop_u32_array("reg", {0, 0x10009000, 0, 0x1000});
+    b.add_prop_u32("interrupt-parent", plic_phandle);
+    b.add_prop_u32("interrupts", 12);
+    b.end_node();
+
     b.end_node();  // soc
 
     b.end_node();  // root
