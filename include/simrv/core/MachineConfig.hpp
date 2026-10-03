@@ -12,6 +12,7 @@
 #include <utility>
 
 #include "simrv/Define.hpp"
+#include "simrv/core/SoCConfig.hpp"
 #include "simrv/memory/MemoryUtil.hpp"
 #include "simrv/pipeline/CpuModel.hpp"
 #include "simrv/pipeline/PipelineSim.hpp"
@@ -21,6 +22,7 @@ namespace simrv::core {
 enum class PlatformProfile : uint8_t {
     Pcie = 0,
     Mmio = 1,
+    None = 2,
 };
 
 struct MemoryGeometry {
@@ -118,6 +120,7 @@ struct MachineConfig {
     bool bram_prewarm = false;
     unsigned disk_size_mb = SIMRV_DISK_SIZE_MB;
     PlatformProfile platform_profile = PlatformProfile::Pcie;
+    SoCConfig soc = SoCConfig::virt_pcie();
 
     [[nodiscard]] auto validate() const -> std::expected<void, std::string> {
         if (memory.dram_size == 0 || (memory.dram_size & (memory.dram_size - 1U)) != 0) {
@@ -145,6 +148,9 @@ struct MachineConfig {
         if (debug.gdb_enabled && debug.lockstep_enabled) {
             return std::unexpected(
                 "GDB remote debugging and Spike lockstep are mutually exclusive");
+        }
+        if (auto soc_result = soc.validate(); !soc_result.has_value()) {
+            return std::unexpected(soc_result.error());
         }
         return {};
     }

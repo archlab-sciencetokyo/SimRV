@@ -647,21 +647,27 @@ auto parse_tui_options(std::string_view arg, std::span<char* const> args, std::s
         result.options.disable_forwarding = true;
         return true;
     }
-    if (arg == "--platform" || arg.starts_with("--platform=")) {
-        std::string_view p = arg.starts_with("--platform=") ? arg.substr(11) : "";
+    if (arg == "--soc" || arg.starts_with("--soc=") || arg == "--platform" ||
+        arg.starts_with("--platform=")) {
+        const bool is_soc_option = arg == "--soc" || arg.starts_with("--soc=");
+        const std::string_view option_name = is_soc_option ? "--soc" : "--platform";
+        const std::string_view prefix = is_soc_option ? "--soc=" : "--platform=";
+        std::string_view p = arg.starts_with(prefix) ? arg.substr(prefix.size()) : "";
         if (p.empty()) {
-            auto value = next_argument(args, i, arg);
+            auto value = next_argument(args, i, option_name);
             if (!value) return std::unexpected(value.error());
             p = *value;
         }
-        if (p == "pcie") {
-            result.options.platform_profile = simrv::core::PlatformProfile::Pcie;
-        } else if (p == "mmio") {
-            result.options.platform_profile = simrv::core::PlatformProfile::Mmio;
-        } else {
+        const auto preset = simrv::core::SoCConfig::preset(p);
+        if (!preset.has_value()) {
             return std::unexpected(
-                std::format("invalid platform profile: {}. Allowed: pcie, mmio", p));
+                std::format("unknown SoC preset: {}. Allowed: virt-pcie, virt-mmio, rvcomp", p));
         }
+        result.options.soc_preset = std::string(p);
+        result.options.platform_profile =
+            preset->enable_mmio ? simrv::core::PlatformProfile::Mmio
+            : preset->enable_pcie       ? simrv::core::PlatformProfile::Pcie
+                                         : simrv::core::PlatformProfile::None;
         return true;
     }
     if (arg == "--net") {
@@ -1090,6 +1096,33 @@ auto RuntimeOptions::to_machine_config() const -> simrv::core::MachineConfig {
 
     cfg.network.mode = net_mode;
     cfg.platform_profile = platform_profile;
+    if (const auto preset = simrv::core::SoCConfig::preset(soc_preset)) {
+        cfg.soc = *preset;
+        if (const auto model_path = simrv::core::resolve_cpu_model_path(soc_preset)) {
+            simrv::core::parse_soc_config(*model_path, cfg.soc);
+            if (cfg.files.cpuconfig_path.empty() && !cfg.soc.cpu_model.empty()) {
+                cfg.files.cpuconfig_path = *model_path;
+            }
+            if (!cfg.soc.cpu_model.empty()) {
+                simrv::pipeline::CpuModelConfig model{};
+                if (simrv::core::parse_cpu_config(*model_path, model)) {
+                    cfg.isa.misa_xlen = model.supported_xlen;
+                    cfg.isa.misa_profile = simrv::isa::misa_profile_bits(model.misa_profile);
+                    cfg.isa.misa_override = true;
+                }
+            }
+        }
+        if (cfg.soc.dram_base.has_value()) cfg.memory.dram_base = *cfg.soc.dram_base;
+        if (dram_size == 0 && cfg.soc.dram_size.has_value()) {
+            cfg.memory.dram_size = *cfg.soc.dram_size;
+        }
+        if (cfg.execution.start_pc == simrv::boot::kStartPc && cfg.soc.reset_pc.has_value()) {
+            cfg.execution.start_pc = *cfg.soc.reset_pc;
+        }
+        if (cfg.isa.isatest_tohost == 0x80001000 && cfg.soc.tohost.has_value()) {
+            cfg.isa.isatest_tohost = *cfg.soc.tohost;
+        }
+    }
     return cfg;
 }
 
@@ -1111,9 +1144,10 @@ auto apply_runtime_options(simrv::core::Machine* machine, const RuntimeOptions& 
     const auto platform_name =
         options.platform_profile == simrv::core::PlatformProfile::Pcie   ? "pcie"
         : options.platform_profile == simrv::core::PlatformProfile::Mmio ? "mmio"
-                                                                         : "hybrid";
+                                                                          : "none";
     simrv::log::info("Run configuration: RV{}, {}-mode, {} hart(s), {} platform, {} MiB RAM",
-                     simrv::xlen::kXLenBits, options.appmode ? "bare-metal" : "OS",
+                     machine->primary_hart().state().regs.xlen,
+                     options.appmode ? "bare-metal" : "OS",
                      options.num_harts, platform_name,
                      machine->configuration().memory.dram_size / (1024ULL * 1024ULL));
     simrv::log::info("Guest image: {}", options.fn_memimg.empty() ? "<none>" : options.fn_memimg);
@@ -1275,7 +1309,7 @@ auto needs_memory_image(const ParseResult& result) -> bool {
                style(kBrightGreen), style(kBrightBlack), style(kReset), style(kReset));
     std::print(
         stdout,
-        "  {}--platform {}{}<PROFILE>{}          Peripheral interconnect profile: pcie | mmio\n",
+               "  {}--soc, --platform {}{}<PRESET>{}    Select the complete SoC: virt-pcie | virt-mmio | rvcomp\n",
         style(kBrightGreen), style(kBrightBlack), style(kReset), style(kReset));
     std::print(stdout,
                "  {}--net {}{}<BACKEND>{}               VirtIO network backend: user | tap | "

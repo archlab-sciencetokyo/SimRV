@@ -12,6 +12,7 @@
 #include <vector>
 
 #include "simrv/core/Logger.hpp"
+#include "simrv/core/SoCConfig.hpp"
 #include "simrv/isa/Base.hpp"
 #include "simrv/pipeline/CpuModel.hpp"
 #include "simrv/pipeline/PipelineConfig.hpp"
@@ -79,6 +80,23 @@ inline auto parse_misa_profile_string(std::string_view val)
         return simrv::isa::MisaProfile::GCBV;
     }
     return std::nullopt;
+}
+
+inline auto parse_scaled_u64(std::string_view value) -> std::optional<uint64_t> {
+    value = unquote(value);
+    if (value.empty()) return std::nullopt;
+    uint64_t multiplier = 1;
+    const char suffix = static_cast<char>(std::tolower(static_cast<unsigned char>(value.back())));
+    if (suffix == 'k' || suffix == 'm' || suffix == 'g') {
+        multiplier = suffix == 'k' ? 1024ULL : suffix == 'm' ? 1024ULL * 1024ULL
+                                                             : 1024ULL * 1024ULL * 1024ULL;
+        value.remove_suffix(1);
+    }
+    try {
+        return std::stoull(std::string(value), nullptr, 0) * multiplier;
+    } catch (const std::exception&) {
+        return std::nullopt;
+    }
 }
 
 inline auto misa_profile_name(simrv::isa::MisaProfile profile) -> std::string_view {
@@ -192,7 +210,13 @@ inline auto parse_cpu_config_stream(std::istream& stream, simrv::pipeline::CpuMo
         InstructionFrontCache,
         InstructionCache,
         DataCache,
-        Interconnect
+        Interconnect,
+        Dma,
+        Axi,
+        SocMetadata,
+        MemoryMetadata,
+        BootMetadata,
+        UartMetadata
     };
     Section current_section = Section::Global;
 
@@ -232,6 +256,18 @@ inline auto parse_cpu_config_stream(std::istream& stream, simrv::pipeline::CpuMo
             } else if (detail::iequals(sec_name, "interconnect") ||
                        detail::iequals(sec_name, "bus") || detail::iequals(sec_name, "fabric")) {
                 current_section = Section::Interconnect;
+            } else if (detail::iequals(sec_name, "dma")) {
+                current_section = Section::Dma;
+            } else if (detail::iequals(sec_name, "axi") || detail::iequals(sec_name, "bus.axi")) {
+                current_section = Section::Axi;
+            } else if (detail::iequals(sec_name, "soc") || detail::iequals(sec_name, "platform")) {
+                current_section = Section::SocMetadata;
+            } else if (detail::iequals(sec_name, "memory")) {
+                current_section = Section::MemoryMetadata;
+            } else if (detail::iequals(sec_name, "boot")) {
+                current_section = Section::BootMetadata;
+            } else if (detail::iequals(sec_name, "uart") || detail::iequals(sec_name, "device.uart")) {
+                current_section = Section::UartMetadata;
             } else {
                 simrv::log::warn("Unknown CPU config section: [{}]", sec_name);
             }
@@ -245,6 +281,13 @@ inline auto parse_cpu_config_stream(std::istream& stream, simrv::pipeline::CpuMo
         const auto val_raw = detail::trim(trimmed.substr(eq_pos + 1));
         const auto val_str = detail::unquote(val_raw);
         if (key.empty() || val_str.empty()) continue;
+
+        // SoC metadata is parsed separately by parse_soc_config_stream. Keep the
+        // combined preset file valid when it is consumed as a CPU model.
+        if (current_section == Section::SocMetadata || current_section == Section::MemoryMetadata ||
+            current_section == Section::BootMetadata || current_section == Section::UartMetadata) {
+            continue;
+        }
 
         try {
             // 1. CPU Section & Profile Presets
@@ -600,6 +643,48 @@ inline auto parse_cpu_config_stream(std::istream& stream, simrv::pipeline::CpuMo
                        current_section == Section::Interconnect) {
                 config.interconnect.startup_data_response_latency =
                     static_cast<uint32_t>(std::stoul(std::string(val_str)));
+            } else if (current_section == Section::Dma && (key == "enabled" || key == "enable")) {
+                if (const auto b = detail::parse_bool(val_str); b.has_value()) {
+                    config.dma.enabled = *b;
+                }
+            } else if (current_section == Section::Dma &&
+                       (key == "setup_latency" || key == "setup")) {
+                config.dma.setup_latency = static_cast<uint32_t>(std::stoul(std::string(val_str)));
+            } else if (current_section == Section::Dma &&
+                       (key == "bandwidth_bytes_per_cycle" || key == "bandwidth" ||
+                        key == "bytes_per_cycle")) {
+                config.dma.bandwidth_bytes_per_cycle =
+                    std::max(1u, static_cast<uint32_t>(std::stoul(std::string(val_str))));
+            } else if (current_section == Section::Dma &&
+                       (key == "memory_contention_penalty" || key == "contention_penalty")) {
+                config.dma.memory_contention_penalty =
+                    static_cast<uint32_t>(std::stoul(std::string(val_str)));
+            } else if (current_section == Section::Axi && (key == "enabled" || key == "enable")) {
+                if (const auto b = detail::parse_bool(val_str); b.has_value()) {
+                    config.axi.enabled = *b;
+                }
+            } else if (current_section == Section::Axi &&
+                       (key == "data_width_bytes" || key == "width_bytes" || key == "data_width")) {
+                config.axi.data_width_bytes =
+                    static_cast<uint32_t>(std::stoul(std::string(val_str)));
+            } else if (current_section == Section::Axi &&
+                       (key == "id_width_bits" || key == "id_width")) {
+                config.axi.id_width_bits = static_cast<uint32_t>(std::stoul(std::string(val_str)));
+            } else if (current_section == Section::Axi && key == "max_outstanding_reads") {
+                config.axi.max_outstanding_reads =
+                    static_cast<uint32_t>(std::stoul(std::string(val_str)));
+            } else if (current_section == Section::Axi && key == "max_outstanding_writes") {
+                config.axi.max_outstanding_writes =
+                    static_cast<uint32_t>(std::stoul(std::string(val_str)));
+            } else if (current_section == Section::Axi &&
+                       (key == "burst_length_max" || key == "max_burst_length" ||
+                        key == "burst_len")) {
+                config.axi.burst_length_max =
+                    static_cast<uint32_t>(std::stoul(std::string(val_str)));
+            } else if (current_section == Section::Axi && (key == "trace_axi" || key == "trace")) {
+                if (const auto b = detail::parse_bool(val_str); b.has_value()) {
+                    config.axi.trace_axi = *b;
+                }
             } else if (key == "enable_idle_spans") {
                 if (const auto b = detail::parse_bool(val_str); b.has_value()) {
                     config.enable_idle_spans = *b;
@@ -613,6 +698,100 @@ inline auto parse_cpu_config_stream(std::istream& stream, simrv::pipeline::CpuMo
     }
 
     return true;
+}
+
+/** Parse the platform portion of a combined CPU/SoC preset file. */
+inline auto parse_soc_config_stream(std::istream& stream, simrv::core::SoCConfig& config) -> bool {
+    enum class Section { Global, Soc, Memory, Boot, Uart };
+    Section section = Section::Global;
+    simrv::core::SoCDeviceConfig* device = nullptr;
+    std::string line;
+    while (std::getline(stream, line)) {
+        const auto comment_hash = line.find('#');
+        if (comment_hash != std::string::npos) line = line.substr(0, comment_hash);
+        const auto comment_semi = line.find(';');
+        if (comment_semi != std::string::npos) line = line.substr(0, comment_semi);
+        const auto trimmed = detail::trim(line);
+        if (trimmed.empty()) continue;
+
+        if (trimmed.front() == '[' && trimmed.back() == ']') {
+            const auto name = detail::trim(trimmed.substr(1, trimmed.size() - 2));
+            device = nullptr;
+            if (detail::iequals(name, "soc") || detail::iequals(name, "platform")) {
+                section = Section::Soc;
+            } else if (detail::iequals(name, "memory")) {
+                section = Section::Memory;
+            } else if (detail::iequals(name, "boot")) {
+                section = Section::Boot;
+            } else if (detail::iequals(name, "uart") || detail::iequals(name, "device.uart")) {
+                section = Section::Uart;
+                const auto existing = std::ranges::find_if(config.devices, [](const auto& item) {
+                    return item.kind == SoCDeviceKind::Uart;
+                });
+                if (existing == config.devices.end()) {
+                    config.devices.push_back(
+                        {SoCDeviceKind::Uart, "uart0", 0x10000000, 0x100, 10});
+                    device = &config.devices.back();
+                } else {
+                    device = &*existing;
+                }
+            } else {
+                section = Section::Global;
+            }
+            continue;
+        }
+
+        const auto eq_pos = trimmed.find('=');
+        if (eq_pos == std::string_view::npos) continue;
+        const auto key = detail::trim(trimmed.substr(0, eq_pos));
+        const auto value = detail::unquote(detail::trim(trimmed.substr(eq_pos + 1)));
+        if (key.empty() || value.empty()) continue;
+
+        if (section == Section::Soc) {
+            if (key == "name") config.name = std::string(value);
+            else if (key == "cpu_model" || key == "cpu_profile") config.cpu_model = std::string(value);
+            else if (key == "platform") {
+                config.enable_pcie = detail::iequals(value, "pcie");
+                config.enable_mmio = detail::iequals(value, "mmio");
+            } else if (key == "enable_pcie") {
+                if (const auto parsed = detail::parse_bool(value)) config.enable_pcie = *parsed;
+            } else if (key == "enable_mmio") {
+                if (const auto parsed = detail::parse_bool(value)) config.enable_mmio = *parsed;
+            } else if (key == "device_policy") {
+                config.disable_unlisted_devices = detail::iequals(value, "explicit") ||
+                                                  detail::iequals(value, "listed-only");
+            } else if (key == "disable_unlisted_devices") {
+                if (const auto parsed = detail::parse_bool(value)) {
+                    config.disable_unlisted_devices = *parsed;
+                }
+            }
+        } else if (section == Section::Memory) {
+            if (const auto parsed = detail::parse_scaled_u64(value)) {
+                if (key == "dram_base" || key == "base") config.dram_base = *parsed;
+                else if (key == "dram_size" || key == "size") config.dram_size = *parsed;
+            }
+        } else if (section == Section::Boot) {
+            if (const auto parsed = detail::parse_scaled_u64(value)) {
+                if (key == "reset_pc" || key == "start_pc") config.reset_pc = *parsed;
+                else if (key == "tohost") config.tohost = *parsed;
+            }
+        } else if (section == Section::Uart && device != nullptr) {
+            if (const auto parsed = detail::parse_scaled_u64(value)) {
+                if (key == "base") device->base = *parsed;
+                else if (key == "size") device->size = *parsed;
+                else if (key == "irq") device->irq = static_cast<uint32_t>(*parsed);
+            } else if (key == "name") {
+                device->name = std::string(value);
+            }
+        }
+    }
+    return true;
+}
+
+inline auto parse_soc_config(const std::filesystem::path& path, simrv::core::SoCConfig& config)
+    -> bool {
+    std::ifstream file(path);
+    return file.is_open() && parse_soc_config_stream(file, config);
 }
 
 /**
@@ -837,6 +1016,22 @@ inline void serialize_cpu_config(const simrv::pipeline::CpuModelConfig& config, 
         out << "startup_data_response_latency = "
             << config.interconnect.startup_data_response_latency << "\n";
     }
+    out << "\n";
+
+    out << "[dma]\n";
+    out << "enabled = " << (config.dma.enabled ? "true" : "false") << "\n";
+    out << "setup_latency = " << config.dma.setup_latency << "\n";
+    out << "bandwidth_bytes_per_cycle = " << config.dma.bandwidth_bytes_per_cycle << "\n";
+    out << "memory_contention_penalty = " << config.dma.memory_contention_penalty << "\n\n";
+
+    out << "[axi]\n";
+    out << "enabled = " << (config.axi.enabled ? "true" : "false") << "\n";
+    out << "data_width_bytes = " << config.axi.data_width_bytes << "\n";
+    out << "id_width_bits = " << config.axi.id_width_bits << "\n";
+    out << "max_outstanding_reads = " << config.axi.max_outstanding_reads << "\n";
+    out << "max_outstanding_writes = " << config.axi.max_outstanding_writes << "\n";
+    out << "burst_length_max = " << config.axi.burst_length_max << "\n";
+    out << "trace_axi = " << (config.axi.trace_axi ? "true" : "false") << "\n";
 }
 
 /**

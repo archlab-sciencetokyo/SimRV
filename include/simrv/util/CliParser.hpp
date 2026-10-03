@@ -103,6 +103,7 @@ struct RuntimeOptions {
     bool smp_multithreaded = false;
     uint64_t dram_size = 0;
     simrv::core::PlatformProfile platform_profile = simrv::core::PlatformProfile::Pcie;
+    std::string soc_preset = "virt-pcie";
     std::string net_mode = "user";
     bool server_mode = false;
     std::string server_endpoint;
