@@ -29,6 +29,7 @@
 #include "simrv/util/CliParser.hpp"
 #include "simrv/util/FormatUtil.hpp"
 #include "simrv/util/InstructionExplainer.hpp"
+#include "simrv/util/SoCManifest.hpp"
 #include "simrv/xlen/Types.hpp"
 
 using namespace simrv::util;
@@ -77,7 +78,8 @@ auto main(int argc, char* argv[]) -> int {  // NOLINT(bugprone-exception-escape)
             is_tui = false;
         } else if (arg == "--tui" || arg == "-u") {
             is_tui = true;
-        } else if (arg == "-h" || arg == "--help" || arg == "--version" || arg == "--license") {
+        } else if (arg == "-h" || arg == "--help" || arg == "--version" || arg == "--license" ||
+                   arg == "--dump-soc-manifest" || arg == "--export-soc-manifest") {
             skip_banner = true;
         } else if (arg == "-q" || arg == "--quiet") {
             skip_banner = true;
@@ -161,6 +163,35 @@ auto main(int argc, char* argv[]) -> int {  // NOLINT(bugprone-exception-escape)
                                  parsed->options.dump_cpu_model_output);
                 } else {
                     simrv::core::serialize_cpu_config(cfg, std::cout, target);
+                }
+                std::exit(0);
+            }
+            case CliAction::ExportSoCManifest: {
+                const auto target = parsed->options.soc_manifest_preset;
+                auto config = simrv::core::SoCConfig::preset(target);
+                if (!config.has_value()) {
+                    simrv::log::error("Unknown SoC preset: {}", target);
+                    std::exit(1);
+                }
+                if (const auto resolved = simrv::core::resolve_cpu_model_path(target)) {
+                    (void)simrv::core::parse_soc_config(*resolved, *config);
+                }
+                if (const auto valid = config->validate(); !valid) {
+                    simrv::log::error("Invalid SoC preset '{}': {}", target, valid.error());
+                    std::exit(1);
+                }
+                if (parsed->options.soc_manifest_output.empty()) {
+                    if (!simrv::util::serialize_soc_manifest(*config, std::cout)) {
+                        simrv::log::error("Failed to write SoC manifest");
+                        std::exit(1);
+                    }
+                } else if (!simrv::util::save_soc_manifest(parsed->options.soc_manifest_output,
+                                                           *config)) {
+                    simrv::log::error("Failed to write SoC manifest to {}",
+                                      parsed->options.soc_manifest_output);
+                    std::exit(1);
+                } else {
+                    std::println("Wrote SoC manifest to {}", parsed->options.soc_manifest_output);
                 }
                 std::exit(0);
             }
@@ -283,8 +314,7 @@ auto main(int argc, char* argv[]) -> int {  // NOLINT(bugprone-exception-escape)
 
         if (event_stream) {
             (void)sim_machine->add_lifecycle_observer(
-                [&event_stream, machine = sim_machine.get()](
-                    const simrv::core::LifecycleEvent& event) {
+                [&event_stream, machine = sim_machine.get()](const simrv::core::LifecycleEvent& event) {
                     write_lifecycle_event(event_stream, *machine, event.kind, event.exit_status);
                 });
         }

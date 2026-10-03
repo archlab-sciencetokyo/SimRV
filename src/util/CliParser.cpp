@@ -722,6 +722,18 @@ auto parse_tui_options(std::string_view arg, std::span<char* const> args, std::s
         }
         return true;
     }
+    if (arg == "--dump-soc-manifest" || arg == "--export-soc-manifest") {
+        result.action = CliAction::ExportSoCManifest;
+        auto value = next_argument(args, i, arg);
+        if (!value) return std::unexpected(value.error());
+        result.options.soc_manifest_preset = std::string(*value);
+        if (i + 1 < args.size() && args[i + 1] != nullptr && args[i + 1][0] != '\0' &&
+            args[i + 1][0] != '-') {
+            ++i;
+            result.options.soc_manifest_output = args[i];
+        }
+        return true;
+    }
     if (arg == "--validate-cpu-config" || arg == "--check-cpu-model" ||
         arg == "--verify-cpu-model") {
         result.action = CliAction::ValidateCpuModel;
@@ -1234,7 +1246,9 @@ auto needs_memory_image(const ParseResult& result) -> bool {
            result.action != CliAction::ExplainInstruction && result.action != CliAction::ShowHelp &&
            result.action != CliAction::ShowVersion && result.action != CliAction::ShowLicense &&
            result.action != CliAction::Attach && !result.options.attach_mode &&
-           result.action != CliAction::DumpCpuModel && result.action != CliAction::ValidateCpuModel;
+           result.action != CliAction::DumpCpuModel &&
+           result.action != CliAction::ExportSoCManifest &&
+           result.action != CliAction::ValidateCpuModel;
 }
 
 [[noreturn]] auto usage(std::string_view prog_name, int status) -> void {
@@ -1311,6 +1325,10 @@ auto needs_memory_image(const ParseResult& result) -> bool {
         stdout,
                "  {}--soc, --platform {}{}<PRESET>{}    Select the complete SoC: virt-pcie | virt-mmio | rvcomp\n",
         style(kBrightGreen), style(kBrightBlack), style(kReset), style(kReset));
+    std::print(stdout,
+               "  {}--dump-soc-manifest {}{}<PRESET> [FILE]{} Export the normalized SoC registry "
+               "as JSON\n",
+               style(kBrightGreen), style(kBrightBlack), style(kReset), style(kReset));
     std::print(stdout,
                "  {}--net {}{}<BACKEND>{}               VirtIO network backend: user | tap | "
                "socket | none\n\n",

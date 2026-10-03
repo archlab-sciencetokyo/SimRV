@@ -1,6 +1,7 @@
 simrv_add_component(simrv-foundation
   Logger.cpp
   ../util/FdtGenerator.cpp
+  ../util/SoCManifest.cpp
 )
 add_library(simrv::foundation ALIAS simrv-foundation)
 

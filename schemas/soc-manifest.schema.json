@@ -1,0 +1,50 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://simrv.dev/schemas/v3/soc-manifest.schema.json",
+  "title": "SimRV SoC Manifest",
+  "type": "object",
+  "required": ["schema_version", "name", "cpu_model", "platform", "device_policy", "memory", "boot", "devices"],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "name": { "type": "string" },
+    "cpu_model": { "type": "string" },
+    "platform": { "enum": ["pcie", "mmio", "none"] },
+    "device_policy": { "enum": ["implicit", "explicit"] },
+    "memory": {
+      "type": "object",
+      "required": ["dram_base", "dram_size"],
+      "properties": {
+        "dram_base": { "type": "integer", "minimum": 0 },
+        "dram_size": { "type": "integer", "minimum": 0 }
+      },
+      "additionalProperties": false
+    },
+    "boot": {
+      "type": "object",
+      "required": ["reset_pc", "tohost"],
+      "properties": {
+        "reset_pc": { "type": "integer", "minimum": 0 },
+        "tohost": { "type": "integer", "minimum": 0 }
+      },
+      "additionalProperties": false
+    },
+    "devices": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["kind", "name", "transport", "base", "size", "irq", "enabled"],
+        "properties": {
+          "kind": { "type": "string" },
+          "name": { "type": "string" },
+          "transport": { "enum": ["mmio", "pci"] },
+          "base": { "type": "integer", "minimum": 0 },
+          "size": { "type": "integer", "minimum": 0 },
+          "irq": { "type": "integer", "minimum": 0 },
+          "enabled": { "type": "boolean" }
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "additionalProperties": false
+}

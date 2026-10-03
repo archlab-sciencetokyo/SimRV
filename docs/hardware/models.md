@@ -53,6 +53,15 @@ normalized map controls runtime MMIO registration and generated Linux device tre
 `[dma]` section remains reserved for CPU timing configuration, so it is not a hardware device
 declaration.
 
+To export the resolved registry for tooling or HDL-generation scripts:
+
+```bash
+simrv --dump-soc-manifest rvcomp build/rvcomp-soc.json
+```
+
+The output follows `schemas/soc-manifest.schema.json` and contains the effective platform, memory,
+boot, transport, address, and interrupt metadata after preset-file overrides are applied.
+
 ### Generating a New Model Configuration
 
 #### Option A: Interactive CLI Wizard

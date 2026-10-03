@@ -36,6 +36,46 @@ enum class SoCDeviceKind : uint8_t {
     DmaController,
 };
 
+[[nodiscard]] inline auto soc_device_kind_name(SoCDeviceKind kind) -> std::string_view {
+    switch (kind) {
+        case SoCDeviceKind::Uart:
+            return "uart";
+        case SoCDeviceKind::Rtc:
+            return "rtc";
+        case SoCDeviceKind::Power:
+            return "power";
+        case SoCDeviceKind::AclintMtimer:
+            return "aclint-mtimer";
+        case SoCDeviceKind::AclintMswi:
+            return "aclint-mswi";
+        case SoCDeviceKind::Imsic:
+            return "imsic";
+        case SoCDeviceKind::Aplic:
+            return "aplic";
+        case SoCDeviceKind::Plic:
+            return "plic";
+        case SoCDeviceKind::Clint:
+            return "clint";
+        case SoCDeviceKind::VirtioMmioBlock:
+            return "virtio-block";
+        case SoCDeviceKind::VirtioMmioConsole:
+            return "virtio-console";
+        case SoCDeviceKind::VirtioMmioRng:
+            return "virtio-rng";
+        case SoCDeviceKind::VirtioMmioGpu:
+            return "virtio-gpu";
+        case SoCDeviceKind::VirtioMmioInput:
+            return "virtio-input";
+        case SoCDeviceKind::VirtioMmioSound:
+            return "virtio-sound";
+        case SoCDeviceKind::VirtioMmioNet:
+            return "virtio-net";
+        case SoCDeviceKind::DmaController:
+            return "dma";
+    }
+    return "unknown";
+}
+
 struct SoCDeviceConfig {
     SoCDeviceKind kind{};
     std::string name;

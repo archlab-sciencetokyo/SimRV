@@ -16,6 +16,7 @@
 #include "simrv/isa/Base.hpp"
 #include "simrv/isa/Common.hpp"
 #include "simrv/pipeline/CpuModel.hpp"
+#include "simrv/util/SoCManifest.hpp"
 #include "simrv/xlen/Types.hpp"
 
 #define TEST_CHECK(cond)                                                                  \
@@ -190,12 +191,28 @@ irq = 19
                net->size == 8192 && net->irq == 19);
 }
 
+void test_soc_manifest_export() {
+    auto soc = simrv::core::SoCConfig::rvcomp();
+    const auto path = simrv::core::resolve_cpu_model_path("rvcomp");
+    TEST_CHECK(path.has_value());
+    TEST_CHECK(simrv::core::parse_soc_config(*path, soc));
+
+    std::ostringstream manifest;
+    TEST_CHECK(simrv::util::serialize_soc_manifest(soc, manifest));
+    const auto text = manifest.str();
+    TEST_CHECK(text.find("\"name\": \"rvcomp\"") != std::string::npos);
+    TEST_CHECK(text.find("\"device_policy\": \"explicit\"") != std::string::npos);
+    TEST_CHECK(text.find("\"kind\": \"uart\"") != std::string::npos);
+    TEST_CHECK(text.find("\"kind\": \"dma\"") == std::string::npos);
+}
+
 int main() {
     test_timing_front_cache();
     std::cout << "=== Running RVComp Profile Tests ===" << std::endl;
     test_rvcomp_profile_validation();
     test_rvcomp_machine_application();
     test_soc_metadata_parser();
+    test_soc_manifest_export();
     std::cout << "All RVComp profile tests passed successfully." << std::endl;
     return 0;
 }
