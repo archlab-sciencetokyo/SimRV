@@ -34,6 +34,18 @@ simrv --ca --cpu-profile configs/models/my_core.cfg -m program.elf
 simrv --ca --cpu-model-file configs/models/my_core.cfg -m program.elf
 ```
 
+Hardware-backed presets can also describe the complete SoC in the same file. For example,
+`configs/models/rvcomp.cfg` contains the RVComp CPU timing model, DRAM/boot metadata, UART map,
+and an explicit device policy:
+
+```bash
+simrv --soc rvcomp --ca -m program.elf
+```
+
+`--platform` remains a compatibility alias for `--soc`. A preset with
+`device_policy = "explicit"` registers only the devices listed in its file; legacy presets retain
+their existing implicit platform devices.
+
 ### Generating a New Model Configuration
 
 #### Option A: Interactive CLI Wizard
