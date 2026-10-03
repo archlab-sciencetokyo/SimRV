@@ -3,6 +3,18 @@
 All notable changes to SimRV are documented here.
 Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v3.0.0-rc.4] — 2026-10-04
+
+This release candidate hardens the Linux GUI smoke path and makes repeated profiling safer.
+
+- Bundle the Alpine X11/JWM desktop stack when host-side RISC-V emulation is available, refresh
+  guest font caches, and remove the optional `xclock` dependency so JWM starts reliably.
+- Build the Linux root filesystem without ext4 journaling, validate it with `e2fsck`, and add a
+  safe per-run clone helper for profiling and emulator smoke tests.
+- Add TAP gateway DNS relay documentation and use the gateway resolver before public fallbacks.
+- Use the absolute `/sbin/switch_root` path in the initramfs handoff.
+- Qualify RV32/RV64 gates and the GUI/TAP browser smoke path for this release candidate.
+
 ## [v3.0.0-rc.3] — 2026-10-03
 
 This release candidate clarifies SimRV terminology by reserving “profile” for standards-defined
@@ -691,6 +703,7 @@ on inspector polish, correctness fixes, and CLI normalization.
 
 - Initial public alpha: CMake preset infrastructure, Clang-20 CI, base RISC-V pipeline
 
+[v3.0.0-rc.4]: https://github.com/archlab-sciencetokyo/SimRV/releases/tag/v3.0.0-rc.4
 [v3.0.0-rc.3]: https://github.com/archlab-sciencetokyo/SimRV/releases/tag/v3.0.0-rc.3
 [v3.0.0-rc.2]: https://github.com/archlab-sciencetokyo/SimRV/releases/tag/v3.0.0-rc.2
 [v3.0.0-rc.1]: https://github.com/archlab-sciencetokyo/SimRV/releases/tag/v3.0.0-rc.1

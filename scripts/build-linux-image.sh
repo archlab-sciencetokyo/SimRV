@@ -307,7 +307,9 @@ if [ -b /dev/vda ]; then
         mount --move /dev /newroot/dev 2>/dev/null || true
         mount --move /proc /newroot/proc 2>/dev/null || true
         mount --move /sys /newroot/sys 2>/dev/null || true
-        exec switch_root /newroot /init
+        # BusyBox places the applet in /sbin; use an absolute path because the
+        # initramfs shell may not have a usable PATH during early handoff.
+        exec /sbin/switch_root /newroot /init
     fi
 fi
 
@@ -627,6 +629,12 @@ if [ -x /usr/bin/mkfontscale ] && [ -d /usr/share/fonts/misc ]; then
     mkfontscale /usr/share/fonts/misc 2>/dev/null || true
     mkfontdir /usr/share/fonts/misc 2>/dev/null || true
 fi
+# Host-side package bundling intentionally skips APK triggers. Rebuild the
+# fontconfig cache inside the guest before starting pango/JWM; stale or absent
+# caches can make the graphical session crash during font discovery.
+if [ -x /usr/bin/fc-cache ]; then
+    fc-cache -f >/tmp/simrv-font-cache.log 2>&1 || true
+fi
 if [ -f /usr/share/fonts/misc/6x13.pcf.gz ]; then
     cat > /usr/share/fonts/misc/fonts.dir <<'FONTDIR'
 1
@@ -638,6 +646,7 @@ if [ -f /etc/system.jwmrc ]; then
         /etc/system.jwmrc
     sed -i 's/<TrayButton label="JWM">root:1<\//<TrayButton label="SimRV">root:1<\//; s/<Background type="solid">#111111<\//<Background type="gradient">#21152b:#071622<\//' /etc/system.jwmrc
     sed -i 's#<Program icon="web-browser" label="Firefox">firefox</Program>#<Program icon="web-browser" label="Web Browser">links -g</Program>#' /etc/system.jwmrc
+    sed -i '/<Swallow width="32" height="32" name="xclock">xclock<\/Swallow>/d; /<Clock format=.*exec:xclock<\/Clock>/d' /etc/system.jwmrc
     # Rebuild the custom Games submenu instead of appending it on every boot.
     # The rootfs is persistent, so this must also clean menus produced by older
     # non-idempotent versions of start-jwm.
@@ -688,9 +697,9 @@ fi
 ip link set eth0 up 2>/dev/null || true
 ip addr add 10.0.2.2/24 dev eth0 2>/dev/null || true
 ip route add default via 10.0.2.1 dev eth0 2>/dev/null || true
-# 10.255.255.254 is the WSL host resolver; public resolvers remain useful on
-# native Linux hosts where the WSL resolver is not routable.
-printf '%s\n' 'nameserver 10.255.255.254' 'nameserver 1.1.1.1' 'nameserver 8.8.8.8' > /etc/resolv.conf
+# The TAP helper relays DNS from the host at the guest gateway. Keep public
+# fallbacks for native hosts where the relay is unavailable.
+printf '%s\n' 'nameserver 10.0.2.1' 'nameserver 1.1.1.1' 'nameserver 8.8.8.8' > /etc/resolv.conf
 echo '[NET] eth0 configured as 10.0.2.2/24' > /dev/ttyS0
 EOF
     chmod 755 "$ROOTFS_DISK_DIR/usr/local/bin/simrv-network"
@@ -807,6 +816,7 @@ EOF
                 "$ROOTFS_DISK_DIR/etc/system.jwmrc"
             sed -i 's/<TrayButton label="JWM">root:1<\//<TrayButton label="SimRV">root:1<\//; s/<Background type="solid">#111111<\//<Background type="gradient">#21152b:#071622<\//' "$ROOTFS_DISK_DIR/etc/system.jwmrc"
             sed -i 's#<Program icon="web-browser" label="Firefox">firefox</Program>#<Program icon="web-browser" label="Web Browser">links -g</Program>#' "$ROOTFS_DISK_DIR/etc/system.jwmrc"
+            sed -i '/<Swallow width="32" height="32" name="xclock">xclock<\/Swallow>/d; /<Clock format=.*exec:xclock<\/Clock>/d' "$ROOTFS_DISK_DIR/etc/system.jwmrc"
             # Keep the persistent JWM menu idempotent across image rebuilds.
             sed -i '/^[[:space:]]*<Menu icon="games" label="Games">$/,/^[[:space:]]*<\/Menu>$/d' \
                 "$ROOTFS_DISK_DIR/etc/system.jwmrc"
@@ -831,7 +841,15 @@ EOF
     # normal Alpine package-manager use.
     if [ "$DISK_MB" -lt 4096 ]; then DISK_MB=4096; fi
     dd if=/dev/zero of="$IMAGES_DIR/root.img" bs=1M count="$DISK_MB" status=none
-    mkfs.ext4 -d "$ROOTFS_DISK_DIR" -F "$IMAGES_DIR/root.img"
+    # Keep the guest root disk deterministic and resilient across repeated
+    # simulator boots. SimRV profiling and smoke runs commonly reuse the
+    # image, so journal replay can otherwise dominate boot time or preserve
+    # host-aborted journal state between runs.
+    mkfs.ext4 -O ^has_journal -d "$ROOTFS_DISK_DIR" -F "$IMAGES_DIR/root.img"
+    # mkfs -d can leave metadata checksum/free-count discrepancies on large
+    # no-journal images. Repair the newly-created golden before publishing it;
+    # future disposable-run clones can then be validated without mutation.
+    e2fsck -fy "$IMAGES_DIR/root.img" >/dev/null
     cp -f "$IMAGES_DIR/root.img" "$IMAGES_DIR/root.bin"
 else
     dd if=/dev/zero of="$IMAGES_DIR/root.img" bs=1M count=1 status=none

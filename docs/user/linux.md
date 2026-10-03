@@ -68,15 +68,36 @@ reboot     # Cleanly restarts the guest system
 
 ### RV64 graphical smoke path
 
-The RV64 disk image contains an idempotent `start-jwm` service. On the first networked boot it
-installs the pinned desktop packages, waits for `/dev/fb0` and the VirtIO input device, then starts
-Xorg on the simulated framebuffer and JWM on `tty1`. The JWM Applications menu includes one
-SimRV Games submenu for Chess, Gomoku, Klondike, and Snake; it is rebuilt idempotently on every
+The RV64 disk image contains an idempotent `start-jwm` service. The image builder bundles the
+pinned desktop packages when the RISC-V user emulator is available; otherwise the service falls
+back to installing them on the first networked boot. It waits for `/dev/fb0` and the VirtIO input
+device, then starts Xorg on the simulated framebuffer and JWM on `tty1`. The JWM Applications
+menu includes one SimRV Games submenu for Chess, Gomoku, Klondike, and Snake; it is rebuilt idempotently on every
 boot so persistent root filesystems do not accumulate duplicate menus. The guest log reports
 `[JWM]` and `[NET]` milestones on the UART, which makes the path suitable for headless CI smoke
 checks as well as interactive TUI/Sixel sessions. If the host terminal has no Sixel support, use
 the framebuffer or a plain terminal attachment; guest graphics are independent of Sixel
 presentation.
+
+For TAP networking, run `scripts/setup-simrv-tap.sh` before launching the guest. It configures the
+gateway/NAT path and, when `socat` is available, relays UDP and TCP DNS on `10.0.2.1:53` to the
+host's first non-loopback resolver. The guest network service uses that gateway resolver first, which
+avoids depending on a WSL-specific resolver address.
+The emulator process itself must also have permission to open `/dev/net/tun`; grant that device
+access to the launching user or run the TAP-backed emulator with the host's appropriate privilege.
+
+For repeated profiling or emulator smoke runs, keep the generated `root.img` as a golden image and
+clone it for each run instead of reusing the writable disk. The helper below uses a reflink when the
+host filesystem supports one, refuses to overwrite an existing run image, and validates the clone
+read-only before launch:
+
+```sh
+scripts/clone-linux-disk.sh linux-images/rv64/root.img /tmp/simrv-run/root.img
+```
+
+Discard a run image after a timeout or failed shutdown. A successful guest poweroff should still be
+followed by a read-only check such as `e2fsck -fn /tmp/simrv-run/root.img`; the helper intentionally
+does not repair or modify either image.
 
 ### Run Linux Boot Test
 
@@ -278,9 +299,9 @@ linux-images/
 Combined Berkeley Boot Loader (BBL) + Linux kernel image. Loaded by SimRV via
 `-m` and executed starting at `0x80000000`.
 
-#### `root.bin` (Root Filesystem)
+#### `root.img` / `root.bin` (Root Filesystem)
 
-Minimal ext2 filesystem containing:
+Minimal ext4 filesystem without a journal, containing:
 
 - BusyBox shell utilities
 - Essential C libraries (musl or glibc)

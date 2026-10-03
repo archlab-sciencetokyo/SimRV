@@ -9,10 +9,36 @@ fi
 tap_iface=${SIMRV_TAP_IFACE:-simrv0}
 guest_user=${SUDO_USER:-${USER:-root}}
 uplink=$(ip route show default 2>/dev/null | awk 'NR == 1 {print $5}')
+dns_upstream=$(awk '$1 == "nameserver" && $2 !~ /^127\./ {print $2; exit}' /etc/resolv.conf)
 
 ip tuntap add dev "$tap_iface" mode tap user "$guest_user" 2>/dev/null || true
 ip addr replace 10.0.2.1/24 dev "$tap_iface"
 ip link set "$tap_iface" up
+
+# The guest cannot reliably reach WSL's resolver directly through the TAP
+# subnet. Relay DNS from the TAP gateway so the guest always has a resolver at
+# its configured gateway address. Keep separate PID files for idempotent setup.
+if command -v socat >/dev/null 2>&1 && [ -n "$dns_upstream" ]; then
+    dns_dir=/run/simrv
+    mkdir -p "$dns_dir"
+    for transport in udp tcp; do
+        pid_file="$dns_dir/dns-$transport.pid"
+        if [ -r "$pid_file" ] && kill -0 "$(cat "$pid_file")" 2>/dev/null; then
+            continue
+        fi
+        rm -f "$pid_file"
+        if [ "$transport" = udp ]; then
+            socat "UDP-LISTEN:53,bind=10.0.2.1,reuseaddr,fork" "UDP:$dns_upstream:53" \
+                >/var/log/simrv-dns-udp.log 2>&1 &
+        else
+            socat "TCP-LISTEN:53,bind=10.0.2.1,reuseaddr,fork" "TCP:$dns_upstream:53" \
+                >/var/log/simrv-dns-tcp.log 2>&1 &
+        fi
+        echo "$!" > "$pid_file"
+    done
+else
+    echo "warning: socat or a non-loopback host resolver is unavailable; guest DNS relay not started" >&2
+fi
 
 sysctl -q -w net.ipv4.ip_forward=1
 if command -v iptables >/dev/null 2>&1 && [ -n "$uplink" ]; then
