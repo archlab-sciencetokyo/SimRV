@@ -20,9 +20,9 @@ Spike lockstep workloads run by the release gates.
 extensions; they are not implied by `G`. MISA contains the single-letter extension bits only and
 therefore cannot describe individual `Zb*` subsets.
 
-The `--isa gc` profile selects G plus C and does not implicitly enable B or V. SimRV's historical
+The `--isa gc` preset selects G plus C and does not implicitly enable B or V. SimRV's historical
 default target is now named explicitly as `gcbv`; XLEN-qualified forms such as `rv64gcbv` are also
-accepted. Naming the profile explicitly does not override the vector qualification limits below.
+accepted. Naming the preset explicitly does not override the vector qualification limits below.
 
 For Vector 1.0, `vlenb` reflects the configured VLEN, `vstart` has enough writable bits for the
 maximum VLMAX, prestart elements remain undisturbed, and successful vector instructions clear
@@ -55,7 +55,7 @@ Invalid dynamic rounding modes and scalar FP widths/extensions cause illegal-ins
   IALIGN from 16 to 32. RV64-hosted RV32 cause values translate the architectural interrupt bit
   without changing native RV32 cause storage.
 - SXL and UXL accept only the implemented RV32/RV64 WARL encodings and are initialized consistently
-  with the selected machine XLEN. When a profile omits S or U, its lower-mode status fields are
+  with the selected machine XLEN. When an ISA preset omits S or U, its lower-mode status fields are
   read-only zero; MPP accepts only implemented privilege modes and xRET resets it to the least
   implemented mode. TVM, TW, TSR, MPRV, SUM, MXR, FS, and VS follow their privilege/extension
   presence rules. Obsolete draft-N user interrupt bits, delegation CSRs, and URET are not

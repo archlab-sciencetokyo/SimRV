@@ -70,10 +70,13 @@ reboot     # Cleanly restarts the guest system
 
 The RV64 disk image contains an idempotent `start-jwm` service. On the first networked boot it
 installs the pinned desktop packages, waits for `/dev/fb0` and the VirtIO input device, then starts
-Xorg on the simulated framebuffer and JWM on `tty1`. The guest log reports `[JWM]` and `[NET]`
-milestones on the UART, which makes the path suitable for headless CI smoke checks as well as
-interactive TUI/Sixel sessions. If the host terminal has no Sixel support, use the framebuffer
-or a plain terminal attachment; guest graphics are independent of Sixel presentation.
+Xorg on the simulated framebuffer and JWM on `tty1`. The JWM Applications menu includes one
+SimRV Games submenu for Chess, Gomoku, Klondike, and Snake; it is rebuilt idempotently on every
+boot so persistent root filesystems do not accumulate duplicate menus. The guest log reports
+`[JWM]` and `[NET]` milestones on the UART, which makes the path suitable for headless CI smoke
+checks as well as interactive TUI/Sixel sessions. If the host terminal has no Sixel support, use
+the framebuffer or a plain terminal attachment; guest graphics are independent of Sixel
+presentation.
 
 ### Run Linux Boot Test
 

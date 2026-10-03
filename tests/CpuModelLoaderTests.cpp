@@ -155,7 +155,7 @@ void test_multi_letter_isa_extensions() {
     std::cout << "[Test] Parsing multi-letter ISA extensions and Zk shorthand...\n";
     simrv::pipeline::CpuModelConfig config{};
     TEST_CHECK(simrv::core::parse_cpu_config_string(
-        "[cpu]\nname = \"crypto-test\"\nmisa = \"rv64im_zkn\"\n\n"
+        "[cpu]\nname = \"crypto-test\"\nisa_preset = \"rv64im_zkn\"\n\n"
         "[isa]\nextensions = \"zkr,zkt\"\n",
         config));
     TEST_CHECK(config.isa_preset == IsaPreset::IM);
@@ -165,7 +165,7 @@ void test_multi_letter_isa_extensions() {
 
     simrv::pipeline::CpuModelConfig shorthand{};
     TEST_CHECK(simrv::core::parse_cpu_config_string(
-        "[cpu]\nmisa = \"rv64im\"\n[isa]\nextensions = \"zk\"\n", shorthand));
+        "[cpu]\nisa_preset = \"rv64im\"\n[isa]\nextensions = \"zk\"\n", shorthand));
     TEST_CHECK(shorthand.has_isa_extension("zkn"));
     TEST_CHECK(shorthand.has_isa_extension("zkr"));
     TEST_CHECK(shorthand.has_isa_extension("zkt"));
@@ -184,7 +184,7 @@ void test_rv32e_profile() {
     std::cout << "[Test] Parsing and validating RV32E profiles...\n";
     simrv::pipeline::CpuModelConfig config{};
     TEST_CHECK(simrv::core::parse_cpu_config_string(
-        "[cpu]\nname = \"rv32e-test\"\nmisa = \"rv32e\"\n", config));
+        "[cpu]\nname = \"rv32e-test\"\nisa_preset = \"rv32e\"\n", config));
     TEST_CHECK(config.isa_preset == IsaPreset::E);
     TEST_CHECK(config.supported_xlen == 32);
     TEST_CHECK(config.validate().has_value());
@@ -196,7 +196,7 @@ void test_rv32e_profile() {
 
     simrv::pipeline::CpuModelConfig extended{};
     TEST_CHECK(simrv::core::parse_cpu_config_string(
-        "[cpu]\nname = \"rv32e-zba\"\nmisa = \"e_zba\"\n", extended));
+        "[cpu]\nname = \"rv32e-zba\"\nisa_preset = \"e_zba\"\n", extended));
     TEST_CHECK(extended.isa_preset == IsaPreset::E);
     TEST_CHECK(extended.supported_xlen == 32);
     TEST_CHECK(extended.has_isa_extension("zba"));
@@ -248,7 +248,7 @@ void test_serialize_and_roundtrip() {
     TEST_CHECK(text.find("div_latency = 22") != std::string::npos);
     TEST_CHECK(text.find("branch_mispredict_penalty = 6") != std::string::npos);
     TEST_CHECK(text.find("bht_initial_state = 2") != std::string::npos);
-    TEST_CHECK(text.find("misa = \"gcbv\"") != std::string::npos);
+    TEST_CHECK(text.find("isa_preset = \"gcbv\"") != std::string::npos);
 
     simrv::pipeline::CpuModelConfig reloaded{};
     const bool ok = simrv::core::load_cpu_config_string(text, reloaded);

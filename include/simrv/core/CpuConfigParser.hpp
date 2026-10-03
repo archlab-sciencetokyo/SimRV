@@ -371,18 +371,18 @@ inline auto parse_cpu_config_stream(std::istream& stream, simrv::pipeline::CpuMo
                 config.supported_xlen = static_cast<uint8_t>(std::stoul(std::string(val_str)));
                 continue;
             }
-            if (key == "misa" || key == "isa" || key == "isa_preset") {
+            if (key == "isa_preset") {
                 const auto parsed = detail::parse_isa_preset_string(val_str);
                 const auto separator = val_str.find_first_of("_ ,\t");
                 const auto base = val_str.substr(0, separator);
-                const auto base_profile = detail::parse_isa_preset_string(base);
+                const auto base_preset = detail::parse_isa_preset_string(base);
                 if (parsed.has_value()) {
                     config.isa_preset = *parsed;
                 } else {
-                    // Accept strings such as "im_zkn_zkt" while retaining the legacy
+                    // Accept strings such as "im_zkn_zkt" while retaining the base
                     // ISA preset for the single-letter portion.
-                    if (base_profile.has_value()) {
-                        config.isa_preset = *base_profile;
+                    if (base_preset.has_value()) {
+                        config.isa_preset = *base_preset;
                     } else {
                         simrv::log::warn("Unknown ISA preset '{}'", val_str);
                     }
@@ -393,10 +393,10 @@ inline auto parse_cpu_config_stream(std::istream& stream, simrv::pipeline::CpuMo
                 }
                 const auto unquoted = detail::unquote(val_str);
                 if (unquoted.starts_with("rv32") || unquoted.starts_with("RV32") ||
-                    (base_profile.has_value() &&
-                     (*base_profile == simrv::isa::IsaPreset::E ||
-                      *base_profile == simrv::isa::IsaPreset::EM ||
-                      *base_profile == simrv::isa::IsaPreset::EMAC))) {
+                    (base_preset.has_value() &&
+                     (*base_preset == simrv::isa::IsaPreset::E ||
+                      *base_preset == simrv::isa::IsaPreset::EM ||
+                      *base_preset == simrv::isa::IsaPreset::EMAC))) {
                     if (config.supported_xlen == 0) config.supported_xlen = 32;
                 } else if (unquoted.starts_with("rv64") || unquoted.starts_with("RV64")) {
                     if (config.supported_xlen == 0) config.supported_xlen = 64;
@@ -443,7 +443,7 @@ inline auto parse_cpu_config_stream(std::istream& stream, simrv::pipeline::CpuMo
                 }
             }
 
-            // Explicit overrides mark profile as custom unless matched
+            // Explicit overrides mark the preset as custom unless matched
             if (config.preset != simrv::pipeline::CpuModelPreset::Tiny &&
                 config.preset != simrv::pipeline::CpuModelPreset::Balanced &&
                 config.preset != simrv::pipeline::CpuModelPreset::Performance) {
@@ -1030,7 +1030,7 @@ inline void serialize_cpu_config(const simrv::pipeline::CpuModelConfig& config, 
     if (config.supported_xlen != 0) {
         out << "xlen = " << static_cast<unsigned int>(config.supported_xlen) << "\n";
     }
-    out << "misa = \"" << detail::isa_preset_name(config.isa_preset) << "\"\n";
+    out << "isa_preset = \"" << detail::isa_preset_name(config.isa_preset) << "\"\n";
     out << "\n";
 
     if (!config.isa_extensions.empty()) {

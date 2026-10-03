@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 SimRV CPU Model Scaffolding and Preset Wizard.
-Interactive tool to generate, customize, and validate human-editable .cfg microarchitecture profiles.
+Interactive tool to generate, customize, and validate human-editable .cfg microarchitecture presets.
 """
 
 import argparse
@@ -13,7 +13,7 @@ TEMPLATES = {
     "tiny": {
         "description": "Minimal 3-stage microcontroller core",
         "xlen": 0,
-        "misa": "imac",
+        "isa_preset": "imac",
         "pipeline_type": "three-stage",
         "enable_forwarding": False,
         "mul_latency": 3,
@@ -51,7 +51,7 @@ TEMPLATES = {
     "balanced": {
         "description": "Default balanced 5-stage general-purpose core",
         "xlen": 0,
-        "misa": "gcbv",
+        "isa_preset": "gcbv",
         "pipeline_type": "five-stage",
         "enable_forwarding": True,
         "mul_latency": 3,
@@ -89,7 +89,7 @@ TEMPLATES = {
     "performance": {
         "description": "High-throughput 5-stage core with aggressive prediction",
         "xlen": 0,
-        "misa": "gcbv",
+        "isa_preset": "gcbv",
         "pipeline_type": "five-stage",
         "enable_forwarding": True,
         "mul_latency": 1,
@@ -127,7 +127,7 @@ TEMPLATES = {
     "rvcomp": {
         "description": "Archlab RVComp 5-stage educational RISC-V processor",
         "xlen": 32,
-        "misa": "ima",
+        "isa_preset": "ima",
         "pipeline_type": "five-stage",
         "enable_forwarding": True,
         "mul_latency": 2,
@@ -165,7 +165,7 @@ TEMPLATES = {
     "cfu-provingground": {
         "description": "Tokyo Tech Archlab CFU-ProvingGround FPGA processor",
         "xlen": 32,
-        "misa": "im",
+        "isa_preset": "im",
         "pipeline_type": "five-stage",
         "enable_forwarding": True,
         "mul_latency": 3,
@@ -214,7 +214,7 @@ def render_cfg(name: str, cfg: dict) -> str:
     if cfg.get("xlen", 0):
         lines.append(f'xlen = {cfg["xlen"]}')
     lines.extend([
-        f'misa = "{cfg["misa"]}"',
+        f'isa_preset = "{cfg["isa_preset"]}"',
         "",
         "[pipeline]",
         f'type = "{cfg["pipeline_type"]}"',
@@ -280,7 +280,7 @@ def run_interactive(base_template: str, name: str) -> tuple[str, dict]:
     name = prompt_val("Model identifier (name)", name)
     cfg["description"] = prompt_val("Description", cfg["description"])
     cfg["xlen"] = prompt_val("Supported XLEN (32, 64, or 0 for both)", cfg.get("xlen", 0))
-    cfg["misa"] = prompt_val("ISA preset (e.g. gcbv, imac, ima, gc, im, i)", cfg["misa"])
+    cfg["isa_preset"] = prompt_val("ISA preset (e.g. gcbv, imac, ima, gc, im, i)", cfg["isa_preset"])
 
     print("\n--- Pipeline & Execution Latencies ---")
     cfg["pipeline_type"] = prompt_val("Pipeline type (five-stage, three-stage)", cfg["pipeline_type"])
@@ -351,10 +351,10 @@ def validate_cfg(path: Path) -> bool:
         except ValueError:
             errors.append(f"[cpu] invalid integer for xlen: '{xlen_str}'")
 
-        misa = cp["cpu"].get("misa", "").strip('"\'').lower()
-        valid_misa = {"i", "im", "ima", "imac", "gc", "gcbv", "rv32i", "rv32im", "rv32ima", "rv32imac", "rv32gc", "rv32gcbv", "rv64i", "rv64im", "rv64ima", "rv64imac", "rv64gc", "rv64gcbv"}
-        if misa and misa not in valid_misa:
-            warnings.append(f"[cpu] unrecognized misa profile '{misa}'")
+        isa_preset = cp["cpu"].get("isa_preset", "").strip('"\'').lower()
+        valid_isa_presets = {"i", "im", "ima", "imac", "gc", "gcbv", "rv32i", "rv32im", "rv32ima", "rv32imac", "rv32gc", "rv32gcbv", "rv64i", "rv64im", "rv64ima", "rv64imac", "rv64gc", "rv64gcbv"}
+        if isa_preset and isa_preset not in valid_isa_presets:
+            warnings.append(f"[cpu] unrecognized ISA preset '{isa_preset}'")
 
     # Check [pipeline]
     if "pipeline" in cp:
@@ -428,7 +428,7 @@ def main():
     valid_choices = list(TEMPLATES.keys()) + list(TEMPLATE_ALIASES.keys())
     parser.add_argument("--template", choices=valid_choices, default="balanced",
                         help="Base template preset to scaffold from")
-    parser.add_argument("--name", default="", help="Name of the model profile")
+    parser.add_argument("--name", default="", help="Name of the model preset")
     parser.add_argument("--output", "-o", default="", help="Output .cfg file path")
     parser.add_argument("--non-interactive", action="store_true", help="Generate directly from template without prompts")
     parser.add_argument("--list-templates", action="store_true", help="List available template presets")

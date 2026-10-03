@@ -122,7 +122,7 @@ SimRV CPU model configurations follow a clean INI/TOML sectioned format with sup
 name = "rvcomp"
 description = "Archlab RVComp 5-stage educational RISC-V processor"
 xlen = 32
-misa = "ima"
+isa_preset = "ima"
 
 [pipeline]
 type = "five-stage"
@@ -177,10 +177,11 @@ response_latency = 1
 
 | Parameter | Type | Default | Description |
 | :--- | :--- | :--- | :--- |
-| `name` | string | `"custom"` | Identifier for the CPU model preset. |
+| `preset` | string | `"balanced"` | Built-in CPU model preset: `tiny`, `balanced`, or `performance`. Use a model `name` for custom configurations. |
+| `name` | string | `"custom"` | Identifier for the CPU model or custom configuration. |
 | `description` | string | `""` | Human-readable documentation of the core architecture. |
 | `xlen` | integer | `0` | Supported machine XLEN: `32` (RV32-only), `64` (RV64-only), or `0` (supports both RV32 and RV64 targets). Verified on startup against simulator build. |
-| `misa` | string | `"gcbv"` | Target ISA extension preset: `gcbv`, `imac`, `ima`, `gc`, `im`, `i`. Setting extension names without `rv32`/`rv64` prefix allows the model to support both 32-bit and 64-bit simulator targets. Explicit `rv32*` and `rv64*` targets are also accepted. |
+| `isa_preset` | string | `"gcbv"` | Target ISA extension preset: `gcbv`, `imac`, `ima`, `gc`, `im`, `i`. Setting extension names without `rv32`/`rv64` prefix allows the model to support both 32-bit and 64-bit simulator targets. Explicit `rv32*` and `rv64*` targets are also accepted. |
 
 ### `[pipeline]` Section
 
@@ -274,8 +275,8 @@ simrv --dump-cpu-model balanced my_balanced.cfg
 
 The `configs/models/` folder contains authoritative configurations calibrated to specific hardware/FPGA processor RTL:
 
-1. **`rvcomp.cfg`**: Calibrated to the Archlab RVComp 5-stage SystemVerilog processor (`xlen = 32`, `misa = "ima"`). Features a 34-stall-cycle non-restoring divider (`div_latency = 35` because SimRV includes the issue cycle), 2-cycle multiplier, untagged 512-entry BTB, 8192-entry BHT with weak-not-taken reset state (`2'b01`), 4-cycle branch mispredict penalty, and 4-cycle L1 D-Cache hit latency.
-2. **`cfu-provingground.cfg`**: Calibrated to Tokyo Tech Archlab's CFU-ProvingGround FPGA core (RVProc, `xlen = 32`, `misa = "im"`). Features registered BTB reads (1-cycle branch prediction bubble), reset counter delay of 2 cycles, and custom function unit (CFU) hardware interface.
+1. **`rvcomp.cfg`**: Calibrated to the Archlab RVComp 5-stage SystemVerilog processor (`xlen = 32`, `isa_preset = "ima"`). Features a 34-stall-cycle non-restoring divider (`div_latency = 35` because SimRV includes the issue cycle), 2-cycle multiplier, untagged 512-entry BTB, 8192-entry BHT with weak-not-taken reset state (`2'b01`), 4-cycle branch mispredict penalty, and 4-cycle L1 D-Cache hit latency.
+2. **`cfu-provingground.cfg`**: Calibrated to Tokyo Tech Archlab's CFU-ProvingGround FPGA core (RVProc, `xlen = 32`, `isa_preset = "im"`). Features registered BTB reads (1-cycle branch prediction bubble), reset counter delay of 2 cycles, and custom function unit (CFU) hardware interface.
 
 ---
 

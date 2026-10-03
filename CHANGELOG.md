@@ -18,6 +18,8 @@ RISC-V profiles and naming SimRV-selectable configurations as presets.
   `isa_preset`.
 - Removed unused compatibility facades and wrappers from the TUI, trap controller, and CPU
   interrupt-device plumbing.
+- Made the Alpine/JWM Games submenu idempotent so repeated boots do not duplicate it on the
+  persistent root filesystem.
 
 ## [v3.0.0-rc.2] — 2026-10-03
 
