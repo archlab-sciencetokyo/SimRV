@@ -83,12 +83,14 @@ auto VirtioPciDevice::dma_read(Address paddr, void* dst, size_t len) -> bool {
     auto* mem = machine.ram_data();
     const auto geometry = machine.memory_geometry();
     if (!geometry.contains(paddr, len) || len == 0) return false;
-    const Address first_line = paddr & ~(Address{simrv::memory::CoherenceHub::kLineBytes - 1u});
-    const Address last_line =
-        (paddr + len - 1u) & ~(Address{simrv::memory::CoherenceHub::kLineBytes - 1u});
-    for (Address line = first_line;; line += simrv::memory::CoherenceHub::kLineBytes) {
-        machine.memory().system_bus().coherence_hub().invalidate_line_external(line);
-        if (line == last_line) break;
+    if (!machine.runtime_profile.is_instruction_mode()) {
+        const Address first_line = paddr & ~(Address{simrv::memory::CoherenceHub::kLineBytes - 1u});
+        const Address last_line =
+            (paddr + len - 1u) & ~(Address{simrv::memory::CoherenceHub::kLineBytes - 1u});
+        for (Address line = first_line;; line += simrv::memory::CoherenceHub::kLineBytes) {
+            machine.memory().system_bus().coherence_hub().invalidate_line_external(line);
+            if (line == last_line) break;
+        }
     }
     Address offset = paddr - geometry.dram_base;
     std::memcpy(dst, mem + offset, len);
@@ -102,12 +104,14 @@ auto VirtioPciDevice::dma_write(Address paddr, const void* src, size_t len) -> b
     auto* mem = machine.ram_data();
     const auto geometry = machine.memory_geometry();
     if (!geometry.contains(paddr, len) || len == 0) return false;
-    const Address first_line = paddr & ~(Address{simrv::memory::CoherenceHub::kLineBytes - 1u});
-    const Address last_line =
-        (paddr + len - 1u) & ~(Address{simrv::memory::CoherenceHub::kLineBytes - 1u});
-    for (Address line = first_line;; line += simrv::memory::CoherenceHub::kLineBytes) {
-        machine.memory().system_bus().coherence_hub().invalidate_line_external(line);
-        if (line == last_line) break;
+    if (!machine.runtime_profile.is_instruction_mode()) {
+        const Address first_line = paddr & ~(Address{simrv::memory::CoherenceHub::kLineBytes - 1u});
+        const Address last_line =
+            (paddr + len - 1u) & ~(Address{simrv::memory::CoherenceHub::kLineBytes - 1u});
+        for (Address line = first_line;; line += simrv::memory::CoherenceHub::kLineBytes) {
+            machine.memory().system_bus().coherence_hub().invalidate_line_external(line);
+            if (line == last_line) break;
+        }
     }
     Address offset = paddr - geometry.dram_base;
     std::memcpy(mem + offset, src, len);

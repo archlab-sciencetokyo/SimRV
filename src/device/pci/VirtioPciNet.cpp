@@ -16,6 +16,8 @@
 #include <vector>
 
 #include "simrv/core/Logger.hpp"
+#include "simrv/core/Machine.hpp"
+#include "simrv/device/pci/PcieRootComplex.hpp"
 
 namespace simrv::device {
 
@@ -114,6 +116,10 @@ void VirtioPciNet::on_queue_notify(uint16_t queue_index) {
     uint16_t avail_idx = 0;
     if (!dma_read(q.driver_addr + 2, &avail_idx, 2)) return;
 
+    core::Machine* machine = root_complex_ != nullptr ? root_complex_->machine() : nullptr;
+    const bool defer_completion = machine != nullptr && machine->runtime_profile.is_cycle_mode() &&
+                                  machine->dma_engine().is_enabled();
+
     bool processed_any = false;
     if (queue_index == 0) {  // RX Queue (receive packets from backend)
         while (q.last_avail_idx != avail_idx && backend_.has_rx_packet()) {
@@ -141,15 +147,33 @@ void VirtioPciNet::on_queue_notify(uint16_t queue_index) {
                 }
             }
 
-            uint16_t used_idx = 0;
-            dma_read(q.device_addr + 2, &used_idx, 2);
-            virtio::VirtqUsedElem elem{head_desc_idx, written};
-            dma_write(q.device_addr + 4 + (used_idx % q.num) * sizeof(elem), &elem, sizeof(elem));
-            used_idx++;
-            dma_write(q.device_addr + 2, &used_idx, 2);
+            if (defer_completion) {
+                const auto current_cycle = machine->memory().system_bus().cycle();
+                machine->dma_engine().schedule_transfer(
+                    written, current_cycle, [this, queue_index, head_desc_idx, written]() {
+                        auto& q = queues_[queue_index];
+                        uint16_t used_idx = 0;
+                        dma_read(q.device_addr + 2, &used_idx, 2);
+                        virtio::VirtqUsedElem elem{head_desc_idx, written};
+                        dma_write(q.device_addr + 4 + (used_idx % q.num) * sizeof(elem), &elem,
+                                  sizeof(elem));
+                        used_idx++;
+                        dma_write(q.device_addr + 2, &used_idx, 2);
+                        isr_status_ |= 0x1;
+                        trigger_irq();
+                    });
+            } else {
+                uint16_t used_idx = 0;
+                dma_read(q.device_addr + 2, &used_idx, 2);
+                virtio::VirtqUsedElem elem{head_desc_idx, written};
+                dma_write(q.device_addr + 4 + (used_idx % q.num) * sizeof(elem), &elem,
+                          sizeof(elem));
+                used_idx++;
+                dma_write(q.device_addr + 2, &used_idx, 2);
+                processed_any = true;
+            }
 
             q.last_avail_idx++;
-            processed_any = true;
         }
     } else if (queue_index == 1) {  // TX Queue (send packet out)
         while (q.last_avail_idx != avail_idx) {
@@ -168,19 +192,38 @@ void VirtioPciNet::on_queue_notify(uint16_t queue_index) {
                 backend_.send_tx_packet(pkt.data(), pkt.size());
             }
 
-            uint16_t used_idx = 0;
-            dma_read(q.device_addr + 2, &used_idx, 2);
-            virtio::VirtqUsedElem elem{head_desc_idx, desc.len};
-            dma_write(q.device_addr + 4 + (used_idx % q.num) * sizeof(elem), &elem, sizeof(elem));
-            used_idx++;
-            dma_write(q.device_addr + 2, &used_idx, 2);
+            if (defer_completion) {
+                const auto current_cycle = machine->memory().system_bus().cycle();
+                const auto len = desc.len;
+                machine->dma_engine().schedule_transfer(
+                    len, current_cycle, [this, queue_index, head_desc_idx, len]() {
+                        auto& q = queues_[queue_index];
+                        uint16_t used_idx = 0;
+                        dma_read(q.device_addr + 2, &used_idx, 2);
+                        virtio::VirtqUsedElem elem{head_desc_idx, len};
+                        dma_write(q.device_addr + 4 + (used_idx % q.num) * sizeof(elem), &elem,
+                                  sizeof(elem));
+                        used_idx++;
+                        dma_write(q.device_addr + 2, &used_idx, 2);
+                        isr_status_ |= 0x1;
+                        trigger_irq();
+                    });
+            } else {
+                uint16_t used_idx = 0;
+                dma_read(q.device_addr + 2, &used_idx, 2);
+                virtio::VirtqUsedElem elem{head_desc_idx, desc.len};
+                dma_write(q.device_addr + 4 + (used_idx % q.num) * sizeof(elem), &elem,
+                          sizeof(elem));
+                used_idx++;
+                dma_write(q.device_addr + 2, &used_idx, 2);
+                processed_any = true;
+            }
 
             q.last_avail_idx++;
-            processed_any = true;
         }
     }
 
-    if (processed_any) {
+    if (!defer_completion && processed_any) {
         isr_status_ |= 0x1;
         trigger_irq();
     }

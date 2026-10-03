@@ -7,6 +7,8 @@
 #include <cstring>
 #include <vector>
 
+#include "simrv/core/Machine.hpp"
+
 namespace simrv::device {
 
 // VirtIO Net Header
@@ -59,6 +61,10 @@ void VirtioMmioNet::on_queue_notify(uint32_t q_idx) {
     uint16_t avail_idx = 0;
     if (!dma_read_bytes(q.driver_addr + 2, reinterpret_cast<std::byte*>(&avail_idx), 2)) return;
 
+    const bool defer_completion = machine_ != nullptr &&
+                                  machine_->runtime_profile.is_cycle_mode() &&
+                                  machine_->dma_engine().is_enabled();
+
     bool processed_any = false;
     if (q_idx == 0) {  // RX
         while (q.last_avail_idx != avail_idx && backend_.has_rx_packet()) {
@@ -89,16 +95,34 @@ void VirtioMmioNet::on_queue_notify(uint32_t q_idx) {
                 }
             }
 
-            uint16_t used_idx = 0;
-            dma_read_bytes(q.device_addr + 2, reinterpret_cast<std::byte*>(&used_idx), 2);
-            virtio::VirtqUsedElem elem{head_desc_idx, written};
-            dma_write_bytes(q.device_addr + 4 + (used_idx % q.num) * sizeof(elem),
-                            reinterpret_cast<std::byte*>(&elem), sizeof(elem));
-            used_idx++;
-            dma_write_bytes(q.device_addr + 2, reinterpret_cast<std::byte*>(&used_idx), 2);
+            if (defer_completion) {
+                const auto current_cycle = machine_->memory().system_bus().cycle();
+                machine_->dma_engine().schedule_transfer(
+                    written, current_cycle, [this, q_idx, head_desc_idx, written]() {
+                        auto& q = queues_[q_idx];
+                        uint16_t used_idx = 0;
+                        dma_read_bytes(q.device_addr + 2, reinterpret_cast<std::byte*>(&used_idx),
+                                       2);
+                        virtio::VirtqUsedElem elem{head_desc_idx, written};
+                        dma_write_bytes(q.device_addr + 4 + (used_idx % q.num) * sizeof(elem),
+                                        reinterpret_cast<std::byte*>(&elem), sizeof(elem));
+                        used_idx++;
+                        dma_write_bytes(q.device_addr + 2, reinterpret_cast<std::byte*>(&used_idx),
+                                        2);
+                        trigger_irq();
+                    });
+            } else {
+                uint16_t used_idx = 0;
+                dma_read_bytes(q.device_addr + 2, reinterpret_cast<std::byte*>(&used_idx), 2);
+                virtio::VirtqUsedElem elem{head_desc_idx, written};
+                dma_write_bytes(q.device_addr + 4 + (used_idx % q.num) * sizeof(elem),
+                                reinterpret_cast<std::byte*>(&elem), sizeof(elem));
+                used_idx++;
+                dma_write_bytes(q.device_addr + 2, reinterpret_cast<std::byte*>(&used_idx), 2);
+                processed_any = true;
+            }
 
             q.last_avail_idx++;
-            processed_any = true;
         }
     } else if (q_idx == 1) {  // TX
         while (q.last_avail_idx != avail_idx) {
@@ -120,20 +144,39 @@ void VirtioMmioNet::on_queue_notify(uint32_t q_idx) {
                 backend_.send_tx_packet(pkt.data(), pkt.size());
             }
 
-            uint16_t used_idx = 0;
-            dma_read_bytes(q.device_addr + 2, reinterpret_cast<std::byte*>(&used_idx), 2);
-            virtio::VirtqUsedElem elem{head_desc_idx, desc.len};
-            dma_write_bytes(q.device_addr + 4 + (used_idx % q.num) * sizeof(elem),
-                            reinterpret_cast<std::byte*>(&elem), sizeof(elem));
-            used_idx++;
-            dma_write_bytes(q.device_addr + 2, reinterpret_cast<std::byte*>(&used_idx), 2);
+            if (defer_completion) {
+                const auto current_cycle = machine_->memory().system_bus().cycle();
+                const auto len = desc.len;
+                machine_->dma_engine().schedule_transfer(
+                    len, current_cycle, [this, q_idx, head_desc_idx, len]() {
+                        auto& q = queues_[q_idx];
+                        uint16_t used_idx = 0;
+                        dma_read_bytes(q.device_addr + 2, reinterpret_cast<std::byte*>(&used_idx),
+                                       2);
+                        virtio::VirtqUsedElem elem{head_desc_idx, len};
+                        dma_write_bytes(q.device_addr + 4 + (used_idx % q.num) * sizeof(elem),
+                                        reinterpret_cast<std::byte*>(&elem), sizeof(elem));
+                        used_idx++;
+                        dma_write_bytes(q.device_addr + 2, reinterpret_cast<std::byte*>(&used_idx),
+                                        2);
+                        trigger_irq();
+                    });
+            } else {
+                uint16_t used_idx = 0;
+                dma_read_bytes(q.device_addr + 2, reinterpret_cast<std::byte*>(&used_idx), 2);
+                virtio::VirtqUsedElem elem{head_desc_idx, desc.len};
+                dma_write_bytes(q.device_addr + 4 + (used_idx % q.num) * sizeof(elem),
+                                reinterpret_cast<std::byte*>(&elem), sizeof(elem));
+                used_idx++;
+                dma_write_bytes(q.device_addr + 2, reinterpret_cast<std::byte*>(&used_idx), 2);
+                processed_any = true;
+            }
 
             q.last_avail_idx++;
-            processed_any = true;
         }
     }
 
-    if (processed_any) {
+    if (!defer_completion && processed_any) {
         trigger_irq();
     }
 }

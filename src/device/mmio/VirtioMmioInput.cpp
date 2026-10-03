@@ -81,8 +81,8 @@ void VirtioMmioInput::push_key_event(uint16_t code, bool pressed) {
 }
 
 void VirtioMmioInput::push_mouse_motion(int32_t x, int32_t y) {
-    push_event(0x02 /* EV_REL */, 0 /* REL_X */, static_cast<uint32_t>(x));
-    push_event(0x02 /* EV_REL */, 1 /* REL_Y */, static_cast<uint32_t>(y));
+    push_event(0x03 /* EV_ABS */, 0 /* ABS_X */, static_cast<uint32_t>(std::clamp(x, 0, 639)));
+    push_event(0x03 /* EV_ABS */, 1 /* ABS_Y */, static_cast<uint32_t>(std::clamp(y, 0, 479)));
     push_event(0x00 /* EV_SYN */, 0 /* SYN_REPORT */, 0);
 }
 

@@ -6,6 +6,9 @@
 
 #include <vector>
 
+#include "simrv/core/Machine.hpp"
+#include "simrv/device/pci/PcieRootComplex.hpp"
+
 namespace simrv::device {
 
 VirtioPciBlock::VirtioPciBlock(const std::string& disk_path)
@@ -37,6 +40,10 @@ void VirtioPciBlock::on_queue_notify(uint16_t queue_index) {
     uint16_t avail_idx = 0;
     if (!dma_read(q.driver_addr + 2, &avail_idx, 2)) return;
 
+    core::Machine* machine = root_complex_ != nullptr ? root_complex_->machine() : nullptr;
+    const bool defer_completion = machine != nullptr && machine->runtime_profile.is_cycle_mode() &&
+                                  machine->dma_engine().is_enabled();
+
     bool processed_any = false;
     while (q.last_avail_idx != avail_idx) {
         const uint16_t ring_idx = q.last_avail_idx % q.num;
@@ -58,6 +65,7 @@ void VirtioPciBlock::on_queue_notify(uint16_t queue_index) {
         }
 
         uint32_t total_written = 0;
+        size_t transfer_bytes = 0;
         if ((desc0.flags & virtio::kVirtqDescFNext) != 0) {
             virtio::VirtqDesc desc1{};
             if (dma_read(q.desc_addr + desc0.next * sizeof(virtio::VirtqDesc), &desc1,
@@ -67,10 +75,14 @@ void VirtioPciBlock::on_queue_notify(uint16_t queue_index) {
                     backend_.read_sectors(hdr.sector, std::span<std::byte>(io_buffer_));
                     dma_write(desc1.addr, io_buffer_.data(), desc1.len);
                     total_written = desc1.len;
+                    transfer_bytes = desc1.len;
                 } else if (hdr.type == 1) {  // WRITE
                     io_buffer_.resize(desc1.len);
                     dma_read(desc1.addr, io_buffer_.data(), desc1.len);
                     backend_.write_sectors(hdr.sector, std::span<const std::byte>(io_buffer_));
+                    transfer_bytes = desc1.len;
+                } else if (hdr.type == 4) {  // FLUSH
+                    backend_.flush();
                 }
 
                 if ((desc1.flags & virtio::kVirtqDescFNext) != 0) {
@@ -84,18 +96,35 @@ void VirtioPciBlock::on_queue_notify(uint16_t queue_index) {
             }
         }
 
-        uint16_t used_idx = 0;
-        dma_read(q.device_addr + 2, &used_idx, 2);
-        virtio::VirtqUsedElem elem{head_desc_idx, total_written};
-        dma_write(q.device_addr + 4 + (used_idx % q.num) * sizeof(elem), &elem, sizeof(elem));
-        used_idx++;
-        dma_write(q.device_addr + 2, &used_idx, 2);
+        if (defer_completion) {
+            const auto current_cycle = machine->memory().system_bus().cycle();
+            machine->dma_engine().schedule_transfer(
+                transfer_bytes, current_cycle, [this, queue_index, head_desc_idx, total_written]() {
+                    auto& q = queues_[queue_index];
+                    uint16_t used_idx = 0;
+                    dma_read(q.device_addr + 2, &used_idx, 2);
+                    virtio::VirtqUsedElem elem{head_desc_idx, total_written};
+                    dma_write(q.device_addr + 4 + (used_idx % q.num) * sizeof(elem), &elem,
+                              sizeof(elem));
+                    used_idx++;
+                    dma_write(q.device_addr + 2, &used_idx, 2);
+                    isr_status_ |= 0x1;
+                    trigger_irq();
+                });
+        } else {
+            uint16_t used_idx = 0;
+            dma_read(q.device_addr + 2, &used_idx, 2);
+            virtio::VirtqUsedElem elem{head_desc_idx, total_written};
+            dma_write(q.device_addr + 4 + (used_idx % q.num) * sizeof(elem), &elem, sizeof(elem));
+            used_idx++;
+            dma_write(q.device_addr + 2, &used_idx, 2);
+            processed_any = true;
+        }
 
         q.last_avail_idx++;
-        processed_any = true;
     }
 
-    if (processed_any) {
+    if (!defer_completion && processed_any) {
         isr_status_ |= 0x1;
         trigger_irq();
     }

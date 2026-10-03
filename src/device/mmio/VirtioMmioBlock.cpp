@@ -6,6 +6,8 @@
 
 #include <vector>
 
+#include "simrv/core/Machine.hpp"
+
 namespace simrv::device {
 
 VirtioMmioBlock::VirtioMmioBlock(Address base_address, uint32_t irq_num, core::Machine* machine,
@@ -32,6 +34,10 @@ void VirtioMmioBlock::on_queue_notify(uint32_t q_idx) {
     uint16_t avail_idx = 0;
     if (!dma_read_bytes(q.driver_addr + 2, reinterpret_cast<std::byte*>(&avail_idx), 2)) return;
 
+    const bool defer_completion = machine_ != nullptr &&
+                                  machine_->runtime_profile.is_cycle_mode() &&
+                                  machine_->dma_engine().is_enabled();
+
     bool processed_any = false;
     while (q.last_avail_idx != avail_idx) {
         const uint16_t ring_idx = q.last_avail_idx % q.num;
@@ -55,6 +61,7 @@ void VirtioMmioBlock::on_queue_notify(uint32_t q_idx) {
         }
 
         uint32_t total_written = 0;
+        size_t transfer_bytes = 0;
         if ((desc0.flags & virtio::kVirtqDescFNext) != 0) {
             virtio::VirtqDesc desc1{};
             if (dma_read_bytes(q.desc_addr + desc0.next * sizeof(virtio::VirtqDesc),
@@ -64,10 +71,14 @@ void VirtioMmioBlock::on_queue_notify(uint32_t q_idx) {
                     backend_.read_sectors(hdr.sector, std::span<std::byte>(io_buffer_));
                     dma_write_bytes(desc1.addr, io_buffer_.data(), desc1.len);
                     total_written = desc1.len;
+                    transfer_bytes = desc1.len;
                 } else if (hdr.type == 1) {  // WRITE
                     io_buffer_.resize(desc1.len);
                     dma_read_bytes(desc1.addr, io_buffer_.data(), desc1.len);
                     backend_.write_sectors(hdr.sector, std::span<const std::byte>(io_buffer_));
+                    transfer_bytes = desc1.len;
+                } else if (hdr.type == 4) {  // FLUSH
+                    backend_.flush();
                 }
 
                 if ((desc1.flags & virtio::kVirtqDescFNext) != 0) {
@@ -81,19 +92,35 @@ void VirtioMmioBlock::on_queue_notify(uint32_t q_idx) {
             }
         }
 
-        uint16_t used_idx = 0;
-        dma_read_bytes(q.device_addr + 2, reinterpret_cast<std::byte*>(&used_idx), 2);
-        virtio::VirtqUsedElem elem{head_desc_idx, total_written};
-        dma_write_bytes(q.device_addr + 4 + (used_idx % q.num) * sizeof(elem),
-                        reinterpret_cast<std::byte*>(&elem), sizeof(elem));
-        used_idx++;
-        dma_write_bytes(q.device_addr + 2, reinterpret_cast<std::byte*>(&used_idx), 2);
+        if (defer_completion) {
+            const auto current_cycle = machine_->memory().system_bus().cycle();
+            machine_->dma_engine().schedule_transfer(
+                transfer_bytes, current_cycle, [this, q_idx, head_desc_idx, total_written]() {
+                    auto& q = queues_[q_idx];
+                    uint16_t used_idx = 0;
+                    dma_read_bytes(q.device_addr + 2, reinterpret_cast<std::byte*>(&used_idx), 2);
+                    virtio::VirtqUsedElem elem{head_desc_idx, total_written};
+                    dma_write_bytes(q.device_addr + 4 + (used_idx % q.num) * sizeof(elem),
+                                    reinterpret_cast<std::byte*>(&elem), sizeof(elem));
+                    used_idx++;
+                    dma_write_bytes(q.device_addr + 2, reinterpret_cast<std::byte*>(&used_idx), 2);
+                    trigger_irq();
+                });
+        } else {
+            uint16_t used_idx = 0;
+            dma_read_bytes(q.device_addr + 2, reinterpret_cast<std::byte*>(&used_idx), 2);
+            virtio::VirtqUsedElem elem{head_desc_idx, total_written};
+            dma_write_bytes(q.device_addr + 4 + (used_idx % q.num) * sizeof(elem),
+                            reinterpret_cast<std::byte*>(&elem), sizeof(elem));
+            used_idx++;
+            dma_write_bytes(q.device_addr + 2, reinterpret_cast<std::byte*>(&used_idx), 2);
+            processed_any = true;
+        }
 
         q.last_avail_idx++;
-        processed_any = true;
     }
 
-    if (processed_any) {
+    if (!defer_completion && processed_any) {
         trigger_irq();
     }
 }

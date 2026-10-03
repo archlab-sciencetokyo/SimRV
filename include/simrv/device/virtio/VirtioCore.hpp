@@ -133,12 +133,17 @@ class BlockBackend {
         file_.seekp(static_cast<std::streamoff>(sector * 512ULL));
         file_.write(reinterpret_cast<const char*>(src.data()),
                     static_cast<std::streamsize>(src.size()));
-        file_.flush();
         return true;
     }
 
     auto write_sectors(uint64_t sector, const std::byte* src, std::size_t len) -> bool {
         return write_sectors(sector, std::span<const std::byte>(src, len));
+    }
+
+    void flush() {
+        if (file_.is_open()) {
+            file_.flush();
+        }
     }
 
    private:
@@ -348,7 +353,7 @@ class InputBackend {
                 if (off < 16) return 0xFF;   // Standard keys (0..127)
                 if (off == 34) return 0x07;  // BTN_LEFT(0x110), BTN_RIGHT(0x111), BTN_MIDDLE(0x112)
             } else if (subsel == 2) {
-                if (off == 0) return 0x03;  // REL_X | REL_Y
+                if (off == 0) return 0x00;  // No REL_X / REL_Y (absolute pointer)
                 if (off == 1) return 0x01;  // REL_WHEEL
             } else if (subsel == 3 && off == 0) {
                 return 0x03;  // ABS_X | ABS_Y
