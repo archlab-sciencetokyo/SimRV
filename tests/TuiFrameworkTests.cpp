@@ -2677,6 +2677,19 @@ void test_virtio_input_and_display_mouse() {
     const auto out_pos = TuiTestAccess::display_coords_to_fb(tui, 0, 0, 0, 80, 24);
     expect(!out_pos.has_value(), "out-of-bounds coordinates return nullopt");
 
+    // In-bounds cell mapping
+    const auto in_pos = TuiTestAccess::display_coords_to_fb(tui, 40, 15, 0, 80, 24);
+    expect(in_pos.has_value(), "valid display coordinates map to framebuffer pixel");
+    expect(in_pos->first >= 0 && in_pos->first < 640, "fb_x within 640 width");
+    expect(in_pos->second >= 0 && in_pos->second < 480, "fb_y within 480 height");
+
+    // Pixel mode coordinate mapping (x > term_width or y > term_height)
+    const auto px_pos = TuiTestAccess::display_coords_to_fb(tui, 250, 120, 0, 80, 24);
+    if (px_pos.has_value()) {
+        expect(px_pos->first >= 0 && px_pos->first < 640, "pixel-mode fb_x within 640 width");
+        expect(px_pos->second >= 0 && px_pos->second < 480, "pixel-mode fb_y within 480 height");
+    }
+
     // Configure workbench with DISPLAY slot
     tui.set_workbench_slot_page(0, TuiRegPage::DISPLAY);
     expect(tui.is_page_visible(TuiRegPage::DISPLAY), "DISPLAY is visible in workbench");
@@ -2689,7 +2702,8 @@ void test_virtio_input_and_display_mouse() {
     machine.send_input_mouse_button(0x110, false);
     machine.send_input_mouse_wheel(1);
 
-    // Test mouse wheel handling on DISPLAY
+    // Test mouse click and wheel handling on DISPLAY
+    TuiTestAccess::handle_display_mouse(tui, 40, 15, 0 /* BTN_LEFT */, 0, 80, 24);
     TuiTestAccess::handle_display_mouse(tui, 10, 10, 64, 0, 80, 24);
     TuiTestAccess::handle_display_mouse(tui, 10, 10, 65, 0, 80, 24);
 }

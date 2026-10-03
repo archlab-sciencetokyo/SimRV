@@ -149,10 +149,10 @@ class Tui : public core::ITelemetrySink, public core::IConsoleSink {
     void reset_speed_history();
 
     std::atomic<uint64_t> step_delay_us_{0};
-    std::atomic<uint32_t> tui_target_fps_{30};
+    std::atomic<uint32_t> tui_target_fps_{60};
 
     void set_target_fps(uint32_t fps) override {
-        tui_target_fps_.store(fps > 0 ? fps : 30, std::memory_order_relaxed);
+        tui_target_fps_.store(fps > 0 ? fps : 60, std::memory_order_relaxed);
     }
     [[nodiscard]] auto target_fps() const -> uint32_t override {
         return tui_target_fps_.load(std::memory_order_relaxed);
@@ -322,6 +322,10 @@ class Tui : public core::ITelemetrySink, public core::IConsoleSink {
     int sixel_panel_rows_{0};
     int sixel_panel_x_{0};
     uint64_t sixel_framebuffer_signature_{0};
+    std::vector<uint64_t> sixel_strip_signatures_{};
+    std::vector<std::string> sixel_cached_strips_{};
+    int sixel_cached_width_{0};
+    int sixel_cached_height_{0};
     bool modal_active_last_frame_{false};
     std::optional<size_t> display_mouse_capture_;
     std::optional<std::pair<int, int>> display_mouse_last_fb_;

@@ -147,11 +147,29 @@ auto InspectorPane::render_io_stats(const simrv::core::CPU& cpu, int logical_row
         uint32_t gpu_status = platform.gpu_status;
         auto rng_str = format_dev_status(rng_status);
         auto gpu_str = format_dev_status(gpu_status);
+        std::string sound_str =
+            platform.sound_active
+                ? std::format("\033[38;5;120m{}kHz {}\033[0m", platform.sound_sample_rate / 1000,
+                              platform.sound_channels == 2 ? "Stereo" : "Mono")
+                : (platform.sound_status != 0 ? format_dev_status(platform.sound_status)
+                                              : "\033[38;5;244mSTANDBY\033[0m");
+        std::string dma_str =
+            platform.dma_busy ? "\033[38;5;215mBUSY\033[0m" : "\033[38;5;120mREADY\033[0m";
 
-        return format_to_width(std::format("  {}RNG:\033[0m {} │ {}GPU:\033[0m {} │ {}RTC:\033[0m "
-                                           "\033[38;5;120mGoldfish\033[0m",
-                                           kThemeText, rng_str, kThemeText, gpu_str, kThemeText),
-                               width);
+        if (width < 65) {
+            return format_to_width(
+                std::format(
+                    "  {}RNG:\033[0m {} │ {}GPU:\033[0m {} │ {}Snd:\033[0m {} │ {}DMA:\033[0m {}",
+                    kThemeText, rng_str, kThemeText, gpu_str, kThemeText, sound_str, kThemeText,
+                    dma_str),
+                width);
+        }
+        return format_to_width(
+            std::format(
+                "  {}RNG:\033[0m {} │ {}GPU:\033[0m {} │ {}Sound:\033[0m {} │ {}DMA:\033[0m {}",
+                kThemeText, rng_str, kThemeText, gpu_str, kThemeText, sound_str, kThemeText,
+                dma_str),
+            width);
     }
     if (logical_row == 8) {
         return section_line("Advanced Interrupt Architecture (AIA) & ACLINT", width);

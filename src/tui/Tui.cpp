@@ -87,7 +87,8 @@ extern "C" void emergency_terminal_restore() {
     std::fflush(stdout);
     if (g_tui_active) {
         const char* shutdown_seq =
-            "\033[0m\033[?1006l\033[?1003l\033[?1000l\033[?25h\033[2J\033[H\033[?1049l\n";
+            "\033[0m\033[?1016l\033[?1006l\033[?1003l\033[?1000l\033[?25h\033[2J\033[H\033[?"
+            "1049l\n";
         (void)(::write(STDOUT_FILENO, shutdown_seq, std::strlen(shutdown_seq)) == 0);
         g_tui_active = false;
     }
@@ -100,7 +101,7 @@ static void handle_termination_signal(int sig) {
     if (g_tui_active) {
         using namespace std::string_view_literals;
         auto constexpr shutdown_seq =
-            "\033[0m\033[?1006l\033[?1003l\033[?1000l\033[?25h\033[2J\033[H\033[?1049l\n"sv;
+            "\033[0m\033[?1016l\033[?1006l\033[?1003l\033[?1000l\033[?25h\033[2J\033[H\033[?1049l\n"sv;
         (void)(::write(STDOUT_FILENO, shutdown_seq.data(), shutdown_seq.size()) == 0);
         g_tui_active = false;
     }
@@ -313,7 +314,8 @@ void Tui::initialize() {
 
     g_tui_active = true;
 
-    const char* init_seq = "\033[?1049h\033[2J\033[H\033[?1000h\033[?1003h\033[?1006h\033[?25l";
+    const char* init_seq =
+        "\033[?1049h\033[2J\033[H\033[?1000h\033[?1003h\033[?1006h\033[?1016h\033[?25l";
     (void)(::write(STDOUT_FILENO, init_seq, strlen(init_seq)) == 0);
 
     struct sigaction sa{};
@@ -694,8 +696,23 @@ void Tui::render_draw_sixel(int panel_x, int display_width, int display_rows,
         }
     }
 
+    const size_t total_strips = static_cast<size_t>((height + 5) / 6);
+    if (sixel_cached_width_ != width || sixel_cached_height_ != height) {
+        sixel_cached_width_ = width;
+        sixel_cached_height_ = height;
+        sixel_strip_signatures_.clear();
+        sixel_cached_strips_.clear();
+    }
+    if (sixel_strip_signatures_.size() != total_strips) {
+        sixel_strip_signatures_.assign(total_strips, 0);
+        sixel_cached_strips_.resize(total_strips);
+    }
+
     std::vector<uint8_t> strip_masks(static_cast<size_t>(palette_size * width), 0);
     std::array<int16_t, palette_size> last_x_for_color;
+    last_x_for_color.fill(-1);
+    std::vector<uint8_t> present_colors;
+    present_colors.reserve(32);
 
     auto append_uint = [](std::string& out, unsigned val) {
         char buf[16];
@@ -704,12 +721,38 @@ void Tui::render_draw_sixel(int panel_x, int display_width, int display_rows,
     };
 
     for (int y = 0; y < height; y += 6) {
-        std::fill(strip_masks.begin(), strip_masks.end(), 0);
-        last_x_for_color.fill(-1);
-
+        const size_t strip_idx = static_cast<size_t>(y / 6);
         const int max_bits = std::min(6, height - y);
-        std::array<const uint8_t*, 6> row_ptrs;
 
+        uint64_t strip_hash = 1469598103934665603ULL;
+        if (same_dims) {
+            const auto* p64 = reinterpret_cast<const uint64_t*>(
+                fb_bytes + static_cast<size_t>(y * source_width * 4));
+            const size_t num_words =
+                static_cast<size_t>(max_bits * source_width * 4) / sizeof(uint64_t);
+            for (size_t w = 0; w < num_words; ++w) {
+                strip_hash = (strip_hash ^ p64[w]) * 1099511628211ULL;
+            }
+        } else {
+            for (int bit = 0; bit < max_bits; ++bit) {
+                const int src_y = std::min(source_height - 1, (y + bit) * source_height / height);
+                const auto* p64 = reinterpret_cast<const uint64_t*>(
+                    fb_bytes + static_cast<size_t>(src_y * source_width * 4));
+                const size_t words_per_row =
+                    static_cast<size_t>(source_width * 4) / sizeof(uint64_t);
+                for (size_t w = 0; w < words_per_row; ++w) {
+                    strip_hash = (strip_hash ^ p64[w]) * 1099511628211ULL;
+                }
+            }
+        }
+
+        if (strip_hash != 0 && strip_hash == sixel_strip_signatures_[strip_idx] &&
+            !sixel_cached_strips_[strip_idx].empty()) {
+            update_cmds += sixel_cached_strips_[strip_idx];
+            continue;
+        }
+
+        std::array<const uint8_t*, 6> row_ptrs;
         if (same_dims) {
             for (int bit = 0; bit < max_bits; ++bit) {
                 row_ptrs[bit] = fb_bytes + static_cast<size_t>((y + bit) * source_width * 4);
@@ -720,6 +763,9 @@ void Tui::render_draw_sixel(int panel_x, int display_width, int display_rows,
                     const auto* p = row_ptrs[bit] + x4;
                     const uint8_t c = static_cast<uint8_t>((kColorLut[p[2]] * 36) +
                                                            (kColorLut[p[1]] * 6) + kColorLut[p[0]]);
+                    if (last_x_for_color[c] < 0) {
+                        present_colors.push_back(c);
+                    }
                     strip_masks[c * width + x] |= static_cast<uint8_t>(1 << bit);
                     last_x_for_color[c] = static_cast<int16_t>(x);
                 }
@@ -735,18 +781,22 @@ void Tui::render_draw_sixel(int panel_x, int display_width, int display_rows,
                     const auto* p = row_ptrs[bit] + x_off;
                     const uint8_t c = static_cast<uint8_t>((kColorLut[p[2]] * 36) +
                                                            (kColorLut[p[1]] * 6) + kColorLut[p[0]]);
+                    if (last_x_for_color[c] < 0) {
+                        present_colors.push_back(c);
+                    }
                     strip_masks[c * width + x] |= static_cast<uint8_t>(1 << bit);
                     last_x_for_color[c] = static_cast<int16_t>(x);
                 }
             }
         }
 
-        for (int color = 0; color < palette_size; ++color) {
+        std::string strip_cmds;
+        for (const uint8_t color : present_colors) {
             const int last_x = last_x_for_color[color];
             if (last_x < 0) continue;
 
-            update_cmds += '#';
-            append_uint(update_cmds, color);
+            strip_cmds += '#';
+            append_uint(strip_cmds, color);
 
             const uint8_t* masks = &strip_masks[color * width];
             int x = 0;
@@ -757,18 +807,31 @@ void Tui::render_draw_sixel(int panel_x, int display_width, int display_rows,
                     ++run;
                 }
                 const char sixel_char = static_cast<char>(63 + mask);
-                if (run >= 3) {
-                    update_cmds += '!';
-                    append_uint(update_cmds, run);
-                    update_cmds += sixel_char;
+                if (run >= 4) {
+                    strip_cmds += '!';
+                    append_uint(strip_cmds, run);
+                    strip_cmds += sixel_char;
                 } else {
-                    update_cmds.append(static_cast<size_t>(run), sixel_char);
+                    strip_cmds.append(static_cast<size_t>(run), sixel_char);
                 }
                 x += run;
             }
-            update_cmds += '$';
+            strip_cmds += '$';
         }
-        update_cmds += '-';
+        strip_cmds += '-';
+
+        for (const uint8_t c : present_colors) {
+            const int last_x = last_x_for_color[c];
+            if (last_x >= 0) {
+                std::memset(&strip_masks[c * width], 0, static_cast<size_t>(last_x + 1));
+                last_x_for_color[c] = -1;
+            }
+        }
+        present_colors.clear();
+
+        sixel_strip_signatures_[strip_idx] = strip_hash;
+        sixel_cached_strips_[strip_idx] = strip_cmds;
+        update_cmds += strip_cmds;
     }
     update_cmds += "\033\\\033[r\033[?80l";
 }
@@ -836,16 +899,29 @@ auto Tui::display_coords_to_fb(int x, int y, size_t col_idx, int term_width, int
     const int display_x = display_panel_x + x_offset;
     const int display_y = 5 + y_offset;
 
+    // Check if coordinates are reporting in SGR-Pixel mode (1016)
+    if (x > term_width || y > term_height) {
+        const int panel_pixel_x = (display_x - 1) * cell_width;
+        const int panel_pixel_y = (display_y - 1) * cell_height;
+        const int px = (x - 1) - panel_pixel_x;
+        const int py = (y - 1) - panel_pixel_y;
+        if (px >= 0 && px < width && py >= 0 && py < height) {
+            const int fb_x = std::clamp(px * source_width / width, 0, source_width - 1);
+            const int fb_y = std::clamp(py * source_height / height, 0, source_height - 1);
+            return std::make_pair(fb_x, fb_y);
+        }
+        return std::nullopt;
+    }
+
     const int rel_col = x - display_x;
     const int rel_row = y - display_y;
     if (rel_col >= 0 && rel_col < image_cols && rel_row >= 0 && rel_row < image_rows) {
-        // Mouse coordinates address terminal cells, while the sixel image fills each
-        // cell. Map through the cell center to avoid the visible half-cell cursor bias
-        // caused by sampling the upper-left corner.
-        const int fb_x = std::clamp((rel_col * 2 + 1) * source_width / (image_cols * 2),
-                                    0, source_width - 1);
-        const int fb_y = std::clamp((rel_row * 2 + 1) * source_height / (image_rows * 2),
-                                    0, source_height - 1);
+        // Map through the cell center, scaled by the actual rendered image dimension
+        // rather than the cell-padded image_cols/image_rows, preserving exact aspect ratio.
+        const int px = std::clamp(rel_col * cell_width + (cell_width / 2), 0, width - 1);
+        const int py = std::clamp(rel_row * cell_height + (cell_height / 2), 0, height - 1);
+        const int fb_x = std::clamp(px * source_width / width, 0, source_width - 1);
+        const int fb_y = std::clamp(py * source_height / height, 0, source_height - 1);
         return std::make_pair(fb_x, fb_y);
     }
     return std::nullopt;
@@ -860,10 +936,7 @@ void Tui::handle_display_mouse(int x, int y, int b, size_t col_idx, int term_wid
     auto const fb_pos = display_coords_to_fb(x, y, col_idx, term_width, term_height);
     if (!fb_pos) return;
     const auto [fb_x, fb_y] = *fb_pos;
-    if (display_mouse_last_fb_.has_value()) {
-        machine_.send_input_mouse_motion(fb_x - display_mouse_last_fb_->first,
-                                         fb_y - display_mouse_last_fb_->second);
-    }
+    machine_.send_input_mouse_motion(fb_x, fb_y);
     display_mouse_last_fb_ = std::make_pair(fb_x, fb_y);
     uint16_t btn = 0;
     if (b == 0)
@@ -939,13 +1012,13 @@ void Tui::render(bool force) {
         return;
     }
 
-    if (ui_running_.load(std::memory_order_relaxed) && !resized && !status_expiring &&
-        elapsed_us + 1000 < min_interval_us) {
+    if (!has_display && ui_running_.load(std::memory_order_relaxed) && !resized &&
+        !status_expiring && elapsed_us + 1000 < min_interval_us) {
         frame_dirty_ = true;
         render_stats_.throttled_frames++;
         return;
     }
-    if (!force && !resized && elapsed_us + 1000 < min_interval_us) {
+    if (!has_display && !force && !resized && elapsed_us + 1000 < min_interval_us) {
         render_stats_.suppressed_frames++;
         return;
     }
@@ -1009,7 +1082,8 @@ void Tui::render(bool force) {
          sixel_panel_rows_ != num_rows);
     // A sixel graphic is a terminal-side object, not a character-grid cell.  Re-emitting it
     // on every ordinary render appends another graphic and can make terminals scroll the TUI
-    // away.  Only emit a new object when it first becomes visible or its panel geometry changes.
+    // away.  Only emit a new object when it first becomes visible or its panel geometry
+    // changes.
     const bool sixel_needs_draw =
         draw_sixel && (!sixel_rendered_ || sixel_geometry_changed ||
                        framebuffer_signature != sixel_framebuffer_signature_);
@@ -1065,9 +1139,9 @@ void Tui::render(bool force) {
                 if (selection_.is_active && selection_.pane == SelectionPane::InspectorPane &&
                     selection_.col_idx == col_idx) {
                     // The composed body always starts on terminal row 4.  The selected content
-                    // starts at row 5 for multi-column headers and row 6 for a single inspector,
-                    // so compare against the actual screen row rather than adding the content
-                    // origin twice.
+                    // starts at row 5 for multi-column headers and row 6 for a single
+                    // inspector, so compare against the actual screen row rather than adding
+                    // the content origin twice.
                     const int screen_y = 4 + row;
                     int start_y = selection_.start_y;
                     int end_y = selection_.end_y;
@@ -4117,11 +4191,7 @@ auto Tui::consume_control_sequence(uint8_t first_byte) -> bool {
                                                          : (w.ws_row > 0 ? w.ws_row : 24);
                 const size_t display_col = display_mouse_capture_.value_or(focused_slot_index_);
                 if (auto fb = display_coords_to_fb(x, y, display_col, tw, th)) {
-                    if (display_mouse_last_fb_.has_value()) {
-                        machine_.send_input_mouse_motion(
-                            fb->first - display_mouse_last_fb_->first,
-                            fb->second - display_mouse_last_fb_->second);
-                    }
+                    machine_.send_input_mouse_motion(fb->first, fb->second);
                     display_mouse_last_fb_ = fb;
                 }
             }
