@@ -8,6 +8,29 @@
     "schema_version": { "const": 1 },
     "name": { "type": "string" },
     "cpu_model": { "type": "string" },
+    "cpu": {
+      "type": "object",
+      "required": ["name", "xlen", "misa", "extensions", "cfu"],
+      "properties": {
+        "name": { "type": "string" },
+        "xlen": { "type": "integer", "minimum": 0 },
+        "misa": { "type": "string" },
+        "extensions": { "type": "array", "items": { "type": "string" } },
+        "cfu": {
+          "type": "object",
+          "required": ["enabled", "opcode", "default_latency", "rtl_module", "interface"],
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "opcode": { "type": "string" },
+            "default_latency": { "type": "integer", "minimum": 1 },
+            "rtl_module": { "type": "string" },
+            "interface": { "type": "string" }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
     "platform": { "enum": ["pcie", "mmio", "none"] },
     "device_policy": { "enum": ["implicit", "explicit"] },
     "memory": {

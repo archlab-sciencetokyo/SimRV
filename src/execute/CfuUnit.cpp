@@ -76,7 +76,7 @@ auto CfuUnit::load_plugin(std::string_view path) -> bool {
 }
 
 void CfuUnit::reset() {
-    last_latency_ = 1;
+    last_latency_ = default_latency_;
     if (plugin_ != nullptr && plugin_->reset != nullptr) {
         plugin_->reset();
     }
@@ -92,7 +92,7 @@ auto CfuUnit::execute(uint32_t funct7, uint32_t funct3, uint32_t src1, uint32_t 
 
     // Default built-in CFU behavior matching CFU-Proving-Ground's cfu.v:
     // assign rslt_o = (en_i) ? src1_i | src2_i : 0;
-    last_latency_ = 1;
+    last_latency_ = default_latency_;
     return src1 | src2;
 }
 
@@ -102,7 +102,7 @@ auto CfuUnit::query_latency(uint32_t funct7, uint32_t funct3) const -> uint32_t 
         plugin_->execute(funct7, funct3, 0, 0, &latency);
         return latency > 0 ? latency : 1;
     }
-    return 1;
+    return default_latency_;
 }
 
 }  // namespace simrv::execute

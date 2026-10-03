@@ -375,9 +375,11 @@ auto Machine::initialize() -> std::expected<void, std::string> {
             }
         }
     }
-    if (!config.files.cfu_plugin_path.empty()) {
-        if (!primary_hart().cfu_unit.load_plugin(config.files.cfu_plugin_path)) {
-            const std::string err = "Failed to load CFU plugin: " + config.files.cfu_plugin_path;
+    std::string cfu_plugin_path = config.files.cfu_plugin_path;
+    if (cfu_plugin_path.empty()) cfu_plugin_path = primary_hart().cpu_model_config.cfu.plugin;
+    if (!cfu_plugin_path.empty()) {
+        if (!primary_hart().cfu_unit.load_plugin(cfu_plugin_path)) {
+            const std::string err = "Failed to load CFU plugin: " + cfu_plugin_path;
             simrv::log::error("{}", err);
             return std::unexpected(err);
         }
@@ -576,9 +578,7 @@ auto Machine::initialize() -> std::expected<void, std::string> {
             auto sec_cpu = std::make_unique<simrv::core::CPU>();
             sec_cpu->machine_ = this;
             sec_cpu->apply_cpu_model_config(primary_hart().cpu_model_config);
-            if (!config.files.cfu_plugin_path.empty()) {
-                sec_cpu->cfu_unit.load_plugin(config.files.cfu_plugin_path);
-            }
+            if (!cfu_plugin_path.empty()) sec_cpu->cfu_unit.load_plugin(cfu_plugin_path);
             sec_cpu->state().mhartid = i;
             sec_cpu->state().misa = initial_misa;
             sec_cpu->state().regs.vlen = config.isa.vlen ? config.isa.vlen : 256;

@@ -10,7 +10,11 @@
 #include <sstream>
 
 #include "simrv/core/CpuConfigParser.hpp"
+#include "simrv/execute/ExecuteUnit.hpp"
 #include "simrv/isa/Base.hpp"
+#include "simrv/isa/Common.hpp"
+#include "simrv/isa/Zb.hpp"
+#include "simrv/isa/Zk.hpp"
 #include "simrv/pipeline/CpuModel.hpp"
 
 #define TEST_CHECK(cond)                                                                  \
@@ -36,6 +40,10 @@ void test_resolve_cpu_model_path() {
     const auto cfu_res = simrv::core::resolve_cpu_model_path("cfu-provingground");
     TEST_CHECK(cfu_res.has_value());
     TEST_CHECK(cfu_res->ends_with("cfu-provingground.cfg"));
+
+    const auto rv32e_res = simrv::core::resolve_cpu_model_path("rv32e");
+    TEST_CHECK(rv32e_res.has_value());
+    TEST_CHECK(rv32e_res->ends_with("rv32e.cfg"));
 
     const auto direct_res = simrv::core::resolve_cpu_model_path("configs/models/rvcomp.cfg");
     TEST_CHECK(direct_res.has_value());
@@ -116,6 +124,12 @@ void test_load_canonical_cfu_provingground_cfg() {
     TEST_CHECK(config.supported_xlen == 32);
     TEST_CHECK(config.profile == CpuModelProfile::Custom);
     TEST_CHECK(config.misa_profile == MisaProfile::IM);
+    TEST_CHECK(config.isa_extensions.size() == 1);
+    TEST_CHECK(config.has_isa_extension("x-cfu"));
+    TEST_CHECK(config.cfu.enabled);
+    TEST_CHECK(config.cfu.opcode == "custom-0");
+    TEST_CHECK(config.cfu.default_latency == 1);
+    TEST_CHECK(config.cfu.rtl_module == "rvproc_cfu");
 
     simrv::pipeline::CpuModelConfig loaded{};
     TEST_CHECK(simrv::core::load_cpu_config(*path, loaded));
@@ -135,6 +149,86 @@ void test_load_canonical_cfu_provingground_cfg() {
     TEST_CHECK(bp.jump_uses_current_btb == true);
     TEST_CHECK(bp.registered_btb_read == true);
     TEST_CHECK(bp.bht_initial_state == 0);
+}
+
+void test_multi_letter_isa_extensions() {
+    std::cout << "[Test] Parsing multi-letter ISA extensions and Zk shorthand...\n";
+    simrv::pipeline::CpuModelConfig config{};
+    TEST_CHECK(simrv::core::parse_cpu_config_string(
+        "[cpu]\nname = \"crypto-test\"\nmisa = \"rv64im_zkn\"\n\n"
+        "[isa]\nextensions = \"zkr,zkt\"\n",
+        config));
+    TEST_CHECK(config.misa_profile == MisaProfile::IM);
+    TEST_CHECK(config.has_isa_extension("zkn"));
+    TEST_CHECK(config.has_isa_extension("zkr"));
+    TEST_CHECK(config.has_isa_extension("zkt"));
+
+    simrv::pipeline::CpuModelConfig shorthand{};
+    TEST_CHECK(simrv::core::parse_cpu_config_string(
+        "[cpu]\nmisa = \"rv64im\"\n[isa]\nextensions = \"zk\"\n", shorthand));
+    TEST_CHECK(shorthand.has_isa_extension("zkn"));
+    TEST_CHECK(shorthand.has_isa_extension("zkr"));
+    TEST_CHECK(shorthand.has_isa_extension("zkt"));
+    TEST_CHECK(simrv::isa::is_zkn_operation(simrv::isa::OperationId::CLMUL));
+    TEST_CHECK(simrv::isa::is_zkn_operation(simrv::isa::OperationId::PACK));
+    TEST_CHECK(simrv::isa::is_zb_operation(simrv::isa::OperationId::ROL));
+    TEST_CHECK(simrv::isa::is_zb_crypto_operation(simrv::isa::OperationId::CLMUL));
+    TEST_CHECK(!simrv::isa::is_zkn_operation(simrv::isa::OperationId::ROL));
+    using simrv::execute::ExecuteUnit;
+    using simrv::isa::OperationId;
+    TEST_CHECK(ExecuteUnit::aluInt(0x12, 0x34, OperationId::CLMUL, 32) == 0x328);
+    TEST_CHECK(ExecuteUnit::aluInt(0x1122, 0x3344, OperationId::PACK, 32) == 0x33441122);
+}
+
+void test_rv32e_profile() {
+    std::cout << "[Test] Parsing and validating RV32E profiles...\n";
+    simrv::pipeline::CpuModelConfig config{};
+    TEST_CHECK(simrv::core::parse_cpu_config_string(
+        "[cpu]\nname = \"rv32e-test\"\nmisa = \"rv32e\"\n", config));
+    TEST_CHECK(config.misa_profile == MisaProfile::E);
+    TEST_CHECK(config.supported_xlen == 32);
+    TEST_CHECK(config.validate().has_value());
+
+    const auto e = simrv::isa::misa_profile_bits(MisaProfile::E);
+    TEST_CHECK(simrv::isa::misa_has_extension(e, simrv::isa::IsaExtension::E));
+    TEST_CHECK(!simrv::isa::misa_has_extension(e, simrv::isa::IsaExtension::I));
+    TEST_CHECK(simrv::isa::instruction_enabled_by_misa(e, simrv::isa::OperationId::ADD));
+
+    simrv::pipeline::CpuModelConfig extended{};
+    TEST_CHECK(simrv::core::parse_cpu_config_string(
+        "[cpu]\nname = \"rv32e-zba\"\nmisa = \"e_zba\"\n", extended));
+    TEST_CHECK(extended.misa_profile == MisaProfile::E);
+    TEST_CHECK(extended.supported_xlen == 32);
+    TEST_CHECK(extended.has_isa_extension("zba"));
+
+    const auto em = simrv::isa::misa_profile_bits(MisaProfile::EM);
+    TEST_CHECK(simrv::isa::misa_has_extension(em, simrv::isa::IsaExtension::E));
+    TEST_CHECK(simrv::isa::misa_has_extension(em, simrv::isa::IsaExtension::M));
+    TEST_CHECK(!simrv::isa::misa_has_extension(em, simrv::isa::IsaExtension::I));
+    const auto emac = simrv::isa::misa_profile_bits(MisaProfile::EMAC);
+    TEST_CHECK(simrv::isa::misa_has_extension(emac, simrv::isa::IsaExtension::A));
+    TEST_CHECK(simrv::isa::misa_has_extension(emac, simrv::isa::IsaExtension::C));
+
+    simrv::pipeline::CpuModelConfig preset{};
+    TEST_CHECK(simrv::core::parse_cpu_config(*simrv::core::resolve_cpu_model_path("rv32e"),
+                                              preset));
+    TEST_CHECK(preset.name == "rv32e");
+    TEST_CHECK(preset.supported_xlen == 32);
+    TEST_CHECK(preset.pipeline.pipeline_type == PipelineType::ThreeStage);
+
+    using simrv::RegId;
+    TEST_CHECK(simrv::isa::rv32e_register_is_valid(RegId::A5));
+    TEST_CHECK(!simrv::isa::rv32e_register_is_valid(RegId::A6));
+    TEST_CHECK(simrv::isa::rv32e_register_operands_valid(
+        true, RegId::A5, true, RegId::A4, true, RegId::A3));
+    TEST_CHECK(!simrv::isa::rv32e_register_operands_valid(
+        true, RegId::A6, true, RegId::A4, true, RegId::A3));
+    TEST_CHECK(!simrv::isa::rv32e_register_operands_valid(
+        true, RegId::A5, true, RegId::A6, true, RegId::A3));
+    TEST_CHECK(!simrv::isa::rv32e_register_operands_valid(
+        true, RegId::A5, true, RegId::A4, true, RegId::A6));
+    TEST_CHECK(simrv::isa::rv32e_register_operands_valid(
+        false, RegId::A6, false, RegId::A6, false, RegId::A6));
 }
 
 void test_serialize_and_roundtrip() {
@@ -220,6 +314,8 @@ int main() {
     test_resolve_cpu_model_path();
     test_load_canonical_rvcomp_cfg();
     test_load_canonical_cfu_provingground_cfg();
+    test_multi_letter_isa_extensions();
+    test_rv32e_profile();
     test_serialize_and_roundtrip();
     test_save_cpu_config_file();
     test_xlen_compatibility_rules();

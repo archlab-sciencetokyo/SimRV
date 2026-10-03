@@ -92,6 +92,7 @@ void CPU::apply_cpu_model_config(const simrv::pipeline::CpuModelConfig& config) 
     // Validation is performed by the parser/editor.  Keeping this operation atomic at the CPU
     // boundary prevents partially-applied timing models from leaking into a live CA pipeline.
     cpu_model_config = config;
+    cfu_unit.set_default_latency(config.cfu.default_latency);
     pipeline_sim.config = config.pipeline;
     cycle_counter_start_delay_ = pipeline_sim.config.cycle_counter_start_delay;
     // BaseCache has bounded 16 KiB / 8-way backing, enough for the shipped FPGA profiles.

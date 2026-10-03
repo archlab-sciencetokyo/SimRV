@@ -6,6 +6,39 @@ Bit-Manipulation `Zb*`, Crypto `K`) into the SimRV architecture.
 The simulator uses a decode-and-dispatch pipeline model, so new extensions follow a
 linear integration path through define → decode → execute → state → TUI.
 
+Extension-family policy is kept in canonical modules: `isa/Zb.hpp`/`Zb.cpp` for bit manipulation,
+`isa/Zk.hpp`/`Zk.cpp` for scalar cryptography, and `execute/ExecuteUnitZb.cpp` for Zb execution.
+The central decoder remains the dispatcher; extension-specific classification should live in the
+corresponding ISA module.
+
+## Preset-level CFU and crypto declarations
+
+CPU presets can describe integration requirements before the RTL implementation is connected.
+This keeps the simulator, RTL wrapper generator, and software build using one source of truth:
+
+```ini
+[isa]
+extensions = "zkn,zkr,zkt"
+
+[cfu]
+enabled = true
+opcode = "custom-0"
+default_latency = 1
+rtl_module = "rvproc_cfu"
+interface = "rs1-rs2-rd"
+```
+
+`zk` is accepted as shorthand for `zkn,zkr,zkt`. These are multi-letter extensions and are
+reported separately from the legacy `misa` profile; they do not consume individual MISA bits.
+The current implementation executes the available `Zbkb`/`Zbkc` building blocks (`pack*` and
+`clmul*`) through the existing integer B unit when `zkn` is enabled. AES/SHA instructions and
+the `seed` CSR are added incrementally.
+
+CFUs use the existing `custom-0` execution path. A simulator plugin can be supplied with
+`--cfu-plugin`; the preset's `default_latency` controls the built-in CFU model and
+`rtl_module`/`interface` provide the information needed by an HDL wrapper or hand-written RTL.
+The current decoder intentionally reserves the complete `custom-0` opcode for the configured CFU.
+
 ---
 
 ## 1. Register the Extension and Opcodes

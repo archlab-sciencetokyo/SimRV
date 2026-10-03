@@ -72,9 +72,9 @@ class ExecuteUnit {
 
    private:
     static auto aluInt32(Register in1, Register in2, isa::OperationId op_id) -> Register;
-    static auto aluIntB(Register in1, Register in2, isa::OperationId op_id,
-                        unsigned xlen = simrv::xlen::kXLenBits) -> Register;
-    static auto aluIntBW(Register in1, Register in2, isa::OperationId op_id) -> Register;
+    static auto aluIntZb(Register in1, Register in2, isa::OperationId op_id,
+                         unsigned xlen = simrv::xlen::kXLenBits) -> Register;
+    static auto aluIntZbW(Register in1, Register in2, isa::OperationId op_id) -> Register;
 
     static void execute_vector_config(core::CPU& cpu, isa::OperationId op_id, Instruction ir,
                                       RegId rd, RegId rs1, RegId rs2);

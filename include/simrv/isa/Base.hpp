@@ -114,6 +114,7 @@ enum class Funct3 : uint8_t {
  * @brief Identifies standard RISC-V extensions mapped to their bit positions in the MISA CSR.
  */
 enum class IsaExtension : uint8_t {
+    E = 4,   ///< Reduced 32-bit integer register-set extension
     A = 0,   ///< Atomic Instructions extension
     B = 1,   ///< Bitmanip Instructions extension
     C = 2,   ///< Compressed Instructions extension
@@ -131,6 +132,9 @@ enum class IsaExtension : uint8_t {
  * @brief Pre-configured machine profiles matching common RISC-V extension sets.
  */
 enum class MisaProfile : uint8_t {
+    E,     ///< RV32E reduced-register integer base
+    EM,    ///< RV32E plus Multiply/Divide
+    EMAC,  ///< RV32E plus Multiply/Divide, Atomic, and Compressed
     I,     ///< RV32I / RV64I base integer only
     IM,    ///< Integer, Multiply/Divide
     IMA,   ///< Integer, Multiply/Divide, Atomic, Supervisor, User

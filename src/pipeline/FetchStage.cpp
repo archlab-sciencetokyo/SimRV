@@ -15,6 +15,7 @@
 #include "simrv/debug/SpikeLockstep.hpp"
 #include "simrv/device/Uart.hpp"
 #include "simrv/execute/ExecuteUnit.hpp"
+#include "simrv/isa/Zk.hpp"
 #include "simrv/memory/MemoryAccess.hpp"
 #include "simrv/memory/MemorySubsystem.hpp"
 #include "simrv/memory/MemoryUtil.hpp"
@@ -635,6 +636,22 @@ void CPU::decode_and_normalize_instruction(Machine& machine) {
 
     const isa::OperationId op_id = simrv::pipeline::decoder(w_ir_tmp);
     bool is_valid = instruction_enabled_by_misa(state_.misa, op_id, w_compressed);
+    if (!is_valid && simrv::isa::is_zkn_operation(op_id) &&
+        cpu_model_config.has_isa_extension("zkn")) {
+        // Zbkb/Zbkc are multi-letter extensions.  They use the existing B execution unit but do
+        // not require the legacy B MISA bit when enabled through a preset.
+        is_valid = true;
+    }
+    if (is_valid && misa_has_extension(state_.misa, isa::IsaExtension::E) &&
+        state_.regs.xlen == 32) {
+        const auto decoded = simrv::pipeline::Decoder(w_ir_tmp);
+        const auto traits = simrv::pipeline::operation::make_dependency_traits(
+            op_id, decoded.opcode(), decoded.rd(), (w_ir_tmp >> 27) & 0x1Fu);
+        if (!rv32e_register_operands_valid(traits.writes_int, decoded.rd(), traits.reads_rs1_int,
+                                           decoded.rs1(), traits.reads_rs2_int, decoded.rs2())) {
+            is_valid = false;
+        }
+    }
     if (simrv::compiler::unlikely(op_id == isa::UNKNOWN)) {
         if (!machine.tui_enabled()) {
             simrv::log::warn("[DECODER] Unknown instruction: PC=0x{:x}, HEX=0x{:x}", state_.pc,

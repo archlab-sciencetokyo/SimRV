@@ -141,7 +141,7 @@ auto ExecuteUnit::aluInt32(Register in1, Register in2, isa::OperationId op_id) -
             break;
 
         default:
-            return ExecuteUnit::aluIntB(in1, in2, op_id, 32);
+            return ExecuteUnit::aluIntZb(in1, in2, op_id, 32);
     }
     return static_cast<Register>(static_cast<int64_t>(res32));
 }
@@ -224,7 +224,7 @@ auto ExecuteUnit::aluInt(Register in1, Register in2, isa::OperationId op_id, uns
             return in1 % in2;
         }
 
-        // B-Extension cases (delegated to ExecuteUnitB.cpp)
+        // Zb-family cases (delegated to ExecuteUnitZb.cpp)
         case SH1ADD:
         case SH2ADD:
         case SH3ADD:
@@ -258,7 +258,7 @@ auto ExecuteUnit::aluInt(Register in1, Register in2, isa::OperationId op_id, uns
         case ORC_B:
         case REV8:
         case PACK:
-            return aluIntB(in1, in2, op_id, xlen);
+            return aluIntZb(in1, in2, op_id, xlen);
 
         default:
             return 0;
@@ -315,7 +315,7 @@ auto ExecuteUnit::aluIntW(Register in1, Register in2, isa::OperationId op_id) ->
                 return aluInt32(lhs32, rhs32, base_op);
             }
 
-            // B-Extension W cases (delegated to ExecuteUnitB.cpp)
+            // Zb-family W cases (delegated to ExecuteUnitZb.cpp)
             case ADD_UW:
             case SLLI_UW:
             case SH1ADD_UW:
@@ -328,7 +328,7 @@ auto ExecuteUnit::aluIntW(Register in1, Register in2, isa::OperationId op_id) ->
             case RORW:
             case RORIW:
             case PACKW:
-                return aluIntBW(in1, in2, op_id);
+                return aluIntZbW(in1, in2, op_id);
 
             default:
                 return 0;

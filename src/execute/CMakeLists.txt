@@ -1,6 +1,6 @@
 simrv_add_component(simrv-execution
   ExecuteUnitInt.cpp
-  ExecuteUnitB.cpp
+  ExecuteUnitZb.cpp
   ExecuteUnitFloat.cpp
   ExecuteUnit.cpp
   CfuUnit.cpp

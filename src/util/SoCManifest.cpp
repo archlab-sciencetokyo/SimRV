@@ -4,6 +4,7 @@
 #include <format>
 #include <fstream>
 
+#include "simrv/core/CpuConfigParser.hpp"
 #include "simrv/core/SoCDeviceRegistry.hpp"
 
 namespace simrv::util {
@@ -68,10 +69,33 @@ auto transport_name(const simrv::core::SoCConfig& config, simrv::core::SoCDevice
 
 auto serialize_soc_manifest(const simrv::core::SoCConfig& config, std::ostream& out) -> bool {
     const auto devices = simrv::core::SoCDeviceRegistry::resolve(config);
+    simrv::pipeline::CpuModelConfig cpu{};
+    if (const auto cpu_path = simrv::core::resolve_cpu_model_path(config.cpu_model)) {
+        (void)simrv::core::parse_cpu_config(*cpu_path, cpu);
+    }
     out << "{\n";
     out << "  \"schema_version\": 1,\n";
     out << "  \"name\": " << quoted(config.name) << ",\n";
     out << "  \"cpu_model\": " << quoted(config.cpu_model) << ",\n";
+    out << "  \"cpu\": {\n";
+    out << "    \"name\": " << quoted(cpu.name) << ",\n";
+    out << "    \"xlen\": " << static_cast<unsigned int>(cpu.supported_xlen) << ",\n";
+    out << "    \"misa\": " << quoted(simrv::core::detail::misa_profile_name(cpu.misa_profile))
+        << ",\n";
+    out << "    \"extensions\": [";
+    for (size_t i = 0; i < cpu.isa_extensions.size(); ++i) {
+        if (i != 0) out << ", ";
+        out << quoted(cpu.isa_extensions[i]);
+    }
+    out << "],\n";
+    out << "    \"cfu\": {\n";
+    out << "      \"enabled\": " << (cpu.cfu.enabled ? "true" : "false") << ",\n";
+    out << "      \"opcode\": " << quoted(cpu.cfu.opcode) << ",\n";
+    out << "      \"default_latency\": " << cpu.cfu.default_latency << ",\n";
+    out << "      \"rtl_module\": " << quoted(cpu.cfu.rtl_module) << ",\n";
+    out << "      \"interface\": " << quoted(cpu.cfu.interface) << "\n";
+    out << "    }\n";
+    out << "  },\n";
     out << "  \"platform\": " << quoted(platform_name(config)) << ",\n";
     out << "  \"device_policy\": "
         << quoted(config.disable_unlisted_devices ? "explicit" : "implicit") << ",\n";

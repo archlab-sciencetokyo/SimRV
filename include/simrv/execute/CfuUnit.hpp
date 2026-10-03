@@ -51,6 +51,9 @@ class CfuUnit {
     /// Query the execution latency in cycles for the specified funct7/funct3 operation.
     [[nodiscard]] auto query_latency(uint32_t funct7, uint32_t funct3) const -> uint32_t;
 
+    /// Set the latency used by the built-in CFU implementation.
+    void set_default_latency(uint32_t latency) noexcept { default_latency_ = latency == 0 ? 1 : latency; }
+
     /// Returns the latency in cycles produced by the most recent execute() invocation.
     [[nodiscard]] auto last_latency() const noexcept -> uint32_t { return last_latency_; }
 
@@ -65,6 +68,7 @@ class CfuUnit {
     const SimRvCfuPlugin* plugin_ = nullptr;
     std::string plugin_path_{};
     uint32_t last_latency_ = 1;
+    uint32_t default_latency_ = 1;
 };
 
 }  // namespace simrv::execute

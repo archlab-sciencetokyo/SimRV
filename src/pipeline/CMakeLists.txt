@@ -1,5 +1,7 @@
 simrv_add_component(simrv-isa
   Decoder.cpp
+  ../isa/Zb.cpp
+  ../isa/Zk.cpp
 )
 add_library(simrv::isa ALIAS simrv-isa)
 

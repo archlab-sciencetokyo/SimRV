@@ -121,6 +121,13 @@ constexpr auto misa_base_bits() -> CSRValue {
  */
 constexpr auto misa_profile_bits(MisaProfile profile) -> CSRValue {
     switch (profile) {
+        case MisaProfile::E:
+            return misa_extension_bit(IsaExtension::E);
+        case MisaProfile::EM:
+            return misa_extension_bit(IsaExtension::E) | misa_extension_bit(IsaExtension::M);
+        case MisaProfile::EMAC:
+            return misa_extension_bit(IsaExtension::E) | misa_extension_bit(IsaExtension::M) |
+                   misa_extension_bit(IsaExtension::A) | misa_extension_bit(IsaExtension::C);
         case MisaProfile::I:
             return misa_extension_bit(IsaExtension::I);
         case MisaProfile::IM:
@@ -433,8 +440,29 @@ constexpr auto required_misa_extensions(OperationId op_id, bool compressed = fal
 /** Verify the complete extension requirement of an already decoded instruction. */
 constexpr auto instruction_enabled_by_misa(CSRValue misa, OperationId op_id,
                                            bool compressed = false) -> bool {
-    const CSRValue required = required_misa_extensions(op_id, compressed);
+    CSRValue required = required_misa_extensions(op_id, compressed);
+    // The base integer operation tables are shared by RV32I and RV32E.  Substitute E for I
+    // when the reduced-register base is active; E and I are mutually exclusive in MISA.
+    if (misa_has_extension(misa, IsaExtension::E) &&
+        (required & misa_extension_bit(IsaExtension::I)) != 0) {
+        required = (required & ~misa_extension_bit(IsaExtension::I)) |
+                   misa_extension_bit(IsaExtension::E);
+    }
     return required != 0 && (misa & required) == required;
+}
+
+/** RV32E exposes only x0-x15; floating-point and vector register banks are unaffected. */
+constexpr auto rv32e_register_is_valid(RegId reg) noexcept -> bool {
+    return std::to_underlying(reg) < 16;
+}
+
+/** Check only the integer register operands used by a decoded operation. */
+constexpr auto rv32e_register_operands_valid(bool writes_int, RegId rd, bool reads_rs1_int,
+                                             RegId rs1, bool reads_rs2_int,
+                                             RegId rs2) noexcept -> bool {
+    return (!writes_int || rv32e_register_is_valid(rd)) &&
+           (!reads_rs1_int || rv32e_register_is_valid(rs1)) &&
+           (!reads_rs2_int || rv32e_register_is_valid(rs2));
 }
 
 /**

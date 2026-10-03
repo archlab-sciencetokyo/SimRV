@@ -75,6 +75,26 @@ struct AxiConfig {
     bool trace_axi{false};
 };
 
+/** Declarative integration contract for a custom function unit. */
+struct CfuConfig {
+    bool enabled{false};
+    std::string opcode{"custom-0"};
+    std::string plugin{};
+    std::string rtl_module{};
+    std::string interface{"rs1-rs2-rd"};
+    uint32_t default_latency{1};
+
+    [[nodiscard]] auto validate() const -> std::expected<void, std::string> {
+        if (default_latency == 0) {
+            return std::unexpected("CFU default latency must be at least one cycle");
+        }
+        if (enabled && opcode != "custom-0") {
+            return std::unexpected("the current CFU decoder supports only opcode custom-0");
+        }
+        return {};
+    }
+};
+
 struct CpuModelConfig {
     CpuModelProfile profile = CpuModelProfile::Balanced;
     isa::MisaProfile misa_profile = isa::MisaProfile::GCBV;
@@ -88,7 +108,15 @@ struct CpuModelConfig {
     InterconnectTiming interconnect{};
     DmaTimingConfig dma{};
     AxiConfig axi{};
+    CfuConfig cfu{};
+    // Multi-letter extensions do not have individual MISA bits.  Keep them alongside the
+    // legacy MISA profile so presets can describe extensions such as Zkn/Zkr/Zkt losslessly.
+    std::vector<std::string> isa_extensions{};
     bool enable_idle_spans = true;
+
+    [[nodiscard]] auto has_isa_extension(std::string_view extension) const -> bool {
+        return std::ranges::find(isa_extensions, extension) != isa_extensions.end();
+    }
 
     [[nodiscard]] auto validate() const -> std::expected<void, std::string> {
         if (supported_xlen != 0 && supported_xlen != 32 && supported_xlen != 64) {
@@ -99,6 +127,13 @@ struct CpuModelConfig {
         if (supported_xlen == 64 && simrv::xlen::kXLenBits == 32) {
             return std::unexpected(
                 std::format("CPU model '{}' requires XLEN=64 (this simulator build is RV32)",
+                            name.empty() ? "custom" : name));
+        }
+        if ((misa_profile == isa::MisaProfile::E || misa_profile == isa::MisaProfile::EM ||
+             misa_profile == isa::MisaProfile::EMAC) &&
+            supported_xlen != 32) {
+            return std::unexpected(
+                std::format("CPU model '{}' uses RV32E and must specify XLEN=32",
                             name.empty() ? "custom" : name));
         }
         const auto valid_cache = [](const L1CacheConfig& cache,
@@ -175,6 +210,9 @@ struct CpuModelConfig {
         if (pipeline.mul_latency == 0 || pipeline.div_latency == 0 ||
             pipeline.fp_alu_latency == 0 || pipeline.fp_div_latency == 0) {
             return std::unexpected("execution-unit latency must be at least one cycle");
+        }
+        if (const auto cfu_result = cfu.validate(); !cfu_result) {
+            return std::unexpected(cfu_result.error());
         }
         return {};
     }

@@ -9,11 +9,13 @@
 #include <sstream>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 #include "simrv/core/Logger.hpp"
 #include "simrv/core/SoCConfig.hpp"
 #include "simrv/isa/Base.hpp"
+#include "simrv/isa/Zk.hpp"
 #include "simrv/pipeline/CpuModel.hpp"
 #include "simrv/pipeline/PipelineConfig.hpp"
 #include "simrv/pipeline/PipelineSim.hpp"
@@ -64,6 +66,15 @@ inline auto parse_misa_profile_string(std::string_view val)
     if (iequals(val, "i") || iequals(val, "rv32i") || iequals(val, "rv64i")) {
         return simrv::isa::MisaProfile::I;
     }
+    if (iequals(val, "e") || iequals(val, "rv32e")) {
+        return simrv::isa::MisaProfile::E;
+    }
+    if (iequals(val, "em") || iequals(val, "rv32em")) {
+        return simrv::isa::MisaProfile::EM;
+    }
+    if (iequals(val, "emac") || iequals(val, "rv32emac")) {
+        return simrv::isa::MisaProfile::EMAC;
+    }
     if (iequals(val, "im") || iequals(val, "rv32im") || iequals(val, "rv64im")) {
         return simrv::isa::MisaProfile::IM;
     }
@@ -80,6 +91,36 @@ inline auto parse_misa_profile_string(std::string_view val)
         return simrv::isa::MisaProfile::GCBV;
     }
     return std::nullopt;
+}
+
+inline void add_isa_extension(std::vector<std::string>& extensions, std::string_view value) {
+    std::string normalized;
+    normalized.reserve(value.size());
+    for (const char ch : value) {
+        normalized.push_back(static_cast<char>(std::tolower(static_cast<unsigned char>(ch))));
+    }
+    if (normalized.empty()) return;
+    if (simrv::isa::is_zk_extension(normalized)) {
+        simrv::isa::add_zk_extension(extensions, normalized);
+        return;
+    }
+    if (std::ranges::find(extensions, normalized) == extensions.end()) {
+        extensions.push_back(std::move(normalized));
+    }
+}
+
+inline void parse_isa_extensions(std::vector<std::string>& extensions, std::string_view value) {
+    value = unquote(value);
+    std::string token;
+    for (const char ch : value) {
+        if (ch == ',' || ch == '_' || ch == ' ' || ch == '\t') {
+            add_isa_extension(extensions, token);
+            token.clear();
+        } else {
+            token.push_back(ch);
+        }
+    }
+    add_isa_extension(extensions, token);
 }
 
 inline auto parse_scaled_u64(std::string_view value) -> std::optional<uint64_t> {
@@ -102,6 +143,12 @@ inline auto parse_scaled_u64(std::string_view value) -> std::optional<uint64_t> 
 
 inline auto misa_profile_name(simrv::isa::MisaProfile profile) -> std::string_view {
     switch (profile) {
+        case simrv::isa::MisaProfile::E:
+            return "e";
+        case simrv::isa::MisaProfile::EM:
+            return "em";
+        case simrv::isa::MisaProfile::EMAC:
+            return "emac";
         case simrv::isa::MisaProfile::I:
             return "i";
         case simrv::isa::MisaProfile::IM:
@@ -214,6 +261,8 @@ inline auto parse_cpu_config_stream(std::istream& stream, simrv::pipeline::CpuMo
         Interconnect,
         Dma,
         Axi,
+        Isa,
+        Cfu,
         SocMetadata,
         MemoryMetadata,
         BootMetadata,
@@ -261,6 +310,12 @@ inline auto parse_cpu_config_stream(std::istream& stream, simrv::pipeline::CpuMo
                 current_section = Section::Dma;
             } else if (detail::iequals(sec_name, "axi") || detail::iequals(sec_name, "bus.axi")) {
                 current_section = Section::Axi;
+            } else if (detail::iequals(sec_name, "isa") ||
+                       detail::iequals(sec_name, "extensions")) {
+                current_section = Section::Isa;
+            } else if (detail::iequals(sec_name, "cfu") ||
+                       detail::iequals(sec_name, "custom_unit")) {
+                current_section = Section::Cfu;
             } else if (detail::iequals(sec_name, "soc") || detail::iequals(sec_name, "platform")) {
                 current_section = Section::SocMetadata;
             } else if (detail::iequals(sec_name, "memory")) {
@@ -318,22 +373,74 @@ inline auto parse_cpu_config_stream(std::istream& stream, simrv::pipeline::CpuMo
             }
             if (key == "misa" || key == "isa" || key == "misa_profile") {
                 const auto parsed = detail::parse_misa_profile_string(val_str);
+                const auto separator = val_str.find_first_of("_ ,\t");
+                const auto base = val_str.substr(0, separator);
+                const auto base_profile = detail::parse_misa_profile_string(base);
                 if (parsed.has_value()) {
                     config.misa_profile = *parsed;
                 } else {
-                    simrv::log::warn("Unknown MISA profile '{}'", val_str);
+                    // Accept strings such as "im_zkn_zkt" while retaining the legacy
+                    // MISA profile for the single-letter portion.
+                    if (base_profile.has_value()) {
+                        config.misa_profile = *base_profile;
+                    } else {
+                        simrv::log::warn("Unknown MISA profile '{}'", val_str);
+                    }
+                    if (separator != std::string_view::npos) {
+                        detail::parse_isa_extensions(config.isa_extensions,
+                                                     val_str.substr(separator + 1));
+                    }
                 }
                 const auto unquoted = detail::unquote(val_str);
-                if (unquoted.starts_with("rv32") || unquoted.starts_with("RV32")) {
+                if (unquoted.starts_with("rv32") || unquoted.starts_with("RV32") ||
+                    (base_profile.has_value() &&
+                     (*base_profile == simrv::isa::MisaProfile::E ||
+                      *base_profile == simrv::isa::MisaProfile::EM ||
+                      *base_profile == simrv::isa::MisaProfile::EMAC))) {
                     if (config.supported_xlen == 0) config.supported_xlen = 32;
                 } else if (unquoted.starts_with("rv64") || unquoted.starts_with("RV64")) {
                     if (config.supported_xlen == 0) config.supported_xlen = 64;
                 }
                 continue;
             }
+            if ((current_section == Section::Isa && key == "extensions") ||
+                key == "isa_extensions") {
+                detail::parse_isa_extensions(config.isa_extensions, val_str);
+                continue;
+            }
             if (key == "description") {
                 config.description = std::string(val_str);
                 continue;
+            }
+
+            if (current_section == Section::Cfu) {
+                if (key == "enabled" || key == "enable") {
+                    if (const auto b = detail::parse_bool(val_str); b.has_value()) {
+                        config.cfu.enabled = *b;
+                    }
+                    continue;
+                }
+                if (key == "opcode") {
+                    config.cfu.opcode = std::string(val_str);
+                    continue;
+                }
+                if (key == "plugin") {
+                    config.cfu.plugin = std::string(val_str);
+                    continue;
+                }
+                if (key == "rtl_module" || key == "module") {
+                    config.cfu.rtl_module = std::string(val_str);
+                    continue;
+                }
+                if (key == "interface") {
+                    config.cfu.interface = std::string(val_str);
+                    continue;
+                }
+                if (key == "default_latency" || key == "latency") {
+                    config.cfu.default_latency =
+                        static_cast<uint32_t>(std::stoul(std::string(val_str)));
+                    continue;
+                }
             }
 
             // Explicit overrides mark profile as custom unless matched
@@ -925,6 +1032,26 @@ inline void serialize_cpu_config(const simrv::pipeline::CpuModelConfig& config, 
     }
     out << "misa = \"" << detail::misa_profile_name(config.misa_profile) << "\"\n";
     out << "\n";
+
+    if (!config.isa_extensions.empty()) {
+        out << "[isa]\n";
+        out << "extensions = \"";
+        for (size_t index = 0; index < config.isa_extensions.size(); ++index) {
+            if (index != 0) out << ',';
+            out << config.isa_extensions[index];
+        }
+        out << "\"\n\n";
+    }
+
+    out << "[cfu]\n";
+    out << "enabled = " << (config.cfu.enabled ? "true" : "false") << "\n";
+    out << "opcode = \"" << config.cfu.opcode << "\"\n";
+    out << "default_latency = " << config.cfu.default_latency << "\n";
+    if (!config.cfu.plugin.empty()) out << "plugin = \"" << config.cfu.plugin << "\"\n";
+    if (!config.cfu.rtl_module.empty()) {
+        out << "rtl_module = \"" << config.cfu.rtl_module << "\"\n";
+    }
+    out << "interface = \"" << config.cfu.interface << "\"\n\n";
 
     out << "[pipeline]\n";
     out << "type = \""

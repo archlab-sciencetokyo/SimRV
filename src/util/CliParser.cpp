@@ -167,6 +167,15 @@ auto parse_misa_profile(std::string_view value) -> std::expected<ParsedMisa, std
     if (iequals(value, "i")) {
         return ParsedMisa{.profile = MisaProfile::I, .xlen = 0};
     }
+    if (iequals(value, "e")) {
+        return ParsedMisa{.profile = MisaProfile::E, .xlen = 32};
+    }
+    if (iequals(value, "em")) {
+        return ParsedMisa{.profile = MisaProfile::EM, .xlen = 32};
+    }
+    if (iequals(value, "emac")) {
+        return ParsedMisa{.profile = MisaProfile::EMAC, .xlen = 32};
+    }
     if (iequals(value, "im")) {
         return ParsedMisa{.profile = MisaProfile::IM, .xlen = 0};
     }
@@ -187,7 +196,19 @@ auto parse_misa_profile(std::string_view value) -> std::expected<ParsedMisa, std
     MisaProfile profile = MisaProfile::GCBV;
     bool valid = false;
 
-    if (iequals(value, "rv32i")) {
+    if (iequals(value, "rv32e")) {
+        parsed_xlen = 32;
+        profile = MisaProfile::E;
+        valid = true;
+    } else if (iequals(value, "rv32em")) {
+        parsed_xlen = 32;
+        profile = MisaProfile::EM;
+        valid = true;
+    } else if (iequals(value, "rv32emac")) {
+        parsed_xlen = 32;
+        profile = MisaProfile::EMAC;
+        valid = true;
+    } else if (iequals(value, "rv32i")) {
         parsed_xlen = 32;
         profile = MisaProfile::I;
         valid = true;
@@ -247,7 +268,8 @@ auto parse_misa_profile(std::string_view value) -> std::expected<ParsedMisa, std
 
     const auto xlen_suffix = simrv::xlen::kIsXLen64 ? "64" : "32";
     auto supported = std::format(
-        "i, im, ima, imac, gc, gcbv, rv{}i, rv{}im, rv{}ima, rv{}imac, rv{}gc, rv{}gcbv",
+        "e, em, emac, i, im, ima, imac, gc, gcbv, rv32e, rv32em, rv32emac, rv{}i, rv{}im, "
+        "rv{}ima, rv{}imac, rv{}gc, rv{}gcbv",
         xlen_suffix, xlen_suffix, xlen_suffix, xlen_suffix, xlen_suffix, xlen_suffix);
     if constexpr (simrv::xlen::kIsXLen64) {
         supported += ", rv32i, rv32im, rv32ima, rv32imac, rv32gc, rv32gcbv";

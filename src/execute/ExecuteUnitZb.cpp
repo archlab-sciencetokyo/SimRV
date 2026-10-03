@@ -128,7 +128,8 @@ constexpr auto alu_int_b_eval(T in1, T in2, isa::OperationId op_id, int xlen) ->
 
 }  // namespace
 
-auto ExecuteUnit::aluIntB(Register in1, Register in2, isa::OperationId op_id, unsigned xlen_param)
+auto ExecuteUnit::aluIntZb(Register in1, Register in2, isa::OperationId op_id,
+                           unsigned xlen_param)
     -> Register {
     if (xlen_param == 32) {
         const auto res = alu_int_b_eval<uint32_t>(static_cast<uint32_t>(in1),
@@ -138,7 +139,7 @@ auto ExecuteUnit::aluIntB(Register in1, Register in2, isa::OperationId op_id, un
     return alu_int_b_eval<Register>(in1, in2, op_id, static_cast<int>(xlen_param));
 }
 
-auto ExecuteUnit::aluIntBW(Register in1, Register in2, isa::OperationId op_id) -> Register {
+auto ExecuteUnit::aluIntZbW(Register in1, Register in2, isa::OperationId op_id) -> Register {
     if constexpr (!simrv::xlen::kIsXLen64) {
         return 0;
     } else {
