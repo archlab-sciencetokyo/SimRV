@@ -91,19 +91,6 @@ class TrapController {
     static auto can_access_csr(PrivilegeLevel current_priv, CSRValue misa, CSRAddress csr_addr,
                                bool is_write) -> bool;
 
-    // Backward-compatibility wrappers
-    static void raiseException(CPU& cpu, TrapCause cause, CSRValue tval) {
-        raise_exception(cpu, cause, tval);
-    }
-    static auto canExecutePrivilegedInstruction(PrivilegeLevel current_priv, CSRValue misa,
-                                                CSRValue mstatus, Instruction funct12, Word funct7)
-        -> bool {
-        return can_execute_privileged_instruction(current_priv, misa, mstatus, funct12, funct7);
-    }
-    static auto canAccessCsr(PrivilegeLevel current_priv, CSRValue misa, CSRAddress csr_addr,
-                             bool is_write) -> bool {
-        return can_access_csr(current_priv, misa, csr_addr, is_write);
-    }
 };
 
 }  // namespace simrv::core

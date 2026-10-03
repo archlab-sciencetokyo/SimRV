@@ -12,7 +12,7 @@ SimRV is an explainable, dual-width (RV32 / RV64) RISC-V architectural simulator
 4. [Interactive TUI Workbench](#4-interactive-tui-workbench)
 5. [Bare-Metal & Embedded Simulation](#5-bare-metal-embedded-simulation)
 6. [Full-System Linux Emulation](#6-full-system-linux-emulation)
-7. [CPU Model Profiles & Microarchitecture Tuning](#7-cpu-model-profiles-microarchitecture-tuning)
+7. [CPU Model Presets & Microarchitecture Tuning](#7-cpu-model-presets-microarchitecture-tuning)
 8. [RTL Parity Verification](#8-rtl-parity-verification)
 9. [Benchmarking Suite](#9-benchmarking-suite)
 10. [Troubleshooting & Reference](#10-troubleshooting-reference)
@@ -93,8 +93,8 @@ simrv --cli -m program.elf
 # Run in cycle-accurate (CA) mode with step limit
 simrv --cli --ca -m program.elf -s 1000000
 
-# Load a custom CPU model profile
-simrv --cli --ca --cpu-profile configs/models/rvcomp.cfg -m program.elf
+# Load a custom CPU model preset
+simrv --cli --ca --cpu-preset configs/models/rvcomp.cfg -m program.elf
 
 # Launch TUI workbench with loaded binary
 simrv -m program.elf
@@ -110,7 +110,7 @@ simrv -m program.elf
 | `--ca` | Select cycle-accurate pipeline simulation kernel. |
 | `--ia` | Select fast instruction-accurate simulation mode. |
 | `-s, -e, --steps <N>` | Evaluate machine-wide instruction limit across all harts before stopping. |
-| `--cpu-profile <path.cfg>` | Load human-editable CPU microarchitecture profile. |
+| `--cpu-preset <path.cfg>` | Load human-editable CPU microarchitecture preset. |
 | `-p, --pipeline <type>` | Pipeline microarchitecture target (`three-stage`, `five-stage`, `dual-issue`). |
 | `-H, --tohost <addr>` | Specify physical address of `tohost` communication symbol for tests. |
 | `--summary <file>` | Write a machine-readable JSON execution summary when the run ends. |
@@ -254,7 +254,7 @@ simrv --kernel linux-images/Image \
 
 ---
 
-## 7. CPU Model Profiles & Microarchitecture Tuning
+## 7. CPU Model Presets & Microarchitecture Tuning
 
 SimRV allows defining custom processor pipelines and timing parameters in human-editable `.cfg` files.
 

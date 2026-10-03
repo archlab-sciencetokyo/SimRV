@@ -280,7 +280,7 @@ def run_interactive(base_template: str, name: str) -> tuple[str, dict]:
     name = prompt_val("Model identifier (name)", name)
     cfg["description"] = prompt_val("Description", cfg["description"])
     cfg["xlen"] = prompt_val("Supported XLEN (32, 64, or 0 for both)", cfg.get("xlen", 0))
-    cfg["misa"] = prompt_val("MISA profile (e.g. gcbv, imac, ima, gc, im, i)", cfg["misa"])
+    cfg["misa"] = prompt_val("ISA preset (e.g. gcbv, imac, ima, gc, im, i)", cfg["misa"])
 
     print("\n--- Pipeline & Execution Latencies ---")
     cfg["pipeline_type"] = prompt_val("Pipeline type (five-stage, three-stage)", cfg["pipeline_type"])
@@ -467,7 +467,7 @@ def main():
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_text(content, encoding="utf-8")
     print(f"\n[+] Successfully wrote CPU model configuration to: {out_path.resolve()}")
-    print(f"    Run with: simrv --ca --cpu-profile {out_path} -m <program.elf>")
+    print(f"    Run with: simrv --ca --cpu-preset {out_path} -m <program.elf>")
 
 if __name__ == "__main__":
     main()

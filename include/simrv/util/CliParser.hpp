@@ -51,7 +51,7 @@ struct RuntimeOptions {
     Counter trace_end = std::numeric_limits<Counter>::max();
     Counter enabletimer = 0UL;
     Address isatest_tohost = 0x80001000;
-    isa::MisaProfile misa_profile = isa::MisaProfile::GCBV;
+    isa::IsaPreset isa_preset = isa::IsaPreset::GCBV;
     bool misa_override = false;
     unsigned int misa_xlen = 0;
 
@@ -91,8 +91,8 @@ struct RuntimeOptions {
     std::string spike_elf;
 
     std::string fn_cpuconfig;
-    std::optional<simrv::pipeline::CpuModelProfile> cpu_model_profile;
-    std::string dump_cpu_model_profile;
+    std::optional<simrv::pipeline::CpuModelPreset> cpu_model_preset;
+    std::string dump_cpu_model_preset;
     std::string dump_cpu_model_output;
     std::string soc_manifest_preset;
     std::string soc_manifest_output;

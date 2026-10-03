@@ -310,10 +310,10 @@ auto Machine::platform_status() const -> PlatformStatusSnapshot {
 }
 
 auto Machine::initialize() -> std::expected<void, std::string> {
-    if (config.cpu_model_profile.has_value()) {
-        auto model = simrv::pipeline::make_cpu_model_profile(*config.cpu_model_profile);
+    if (config.cpu_model_preset.has_value()) {
+        auto model = simrv::pipeline::make_cpu_model_preset(*config.cpu_model_preset);
         const auto profile_name =
-            simrv::pipeline::cpu_model_profile_name(*config.cpu_model_profile);
+            simrv::pipeline::cpu_model_preset_name(*config.cpu_model_preset);
         if (const auto resolved = simrv::core::resolve_cpu_model_path(profile_name)) {
             (void)simrv::core::load_cpu_config(*resolved, model);
         }
@@ -470,34 +470,34 @@ auto Machine::initialize() -> std::expected<void, std::string> {
         linux_boot ? static_cast<Address>(effective_dram_size - static_cast<size_t>(0x00100000U))
                    : simrv::boot::kInitDataAddress;
 
-    auto effective_misa_profile = [&]() -> isa::MisaProfile {
+    auto effective_isa_preset = [&]() -> isa::IsaPreset {
         if (!config.files.cpuconfig_path.empty()) {
             simrv::pipeline::CpuModelConfig cfg{};
             if (simrv::core::load_cpu_config(config.files.cpuconfig_path, cfg)) {
-                return cfg.misa_profile;
+                return cfg.isa_preset;
             }
         }
-        if (config.cpu_model_profile.has_value()) {
+        if (config.cpu_model_preset.has_value()) {
             const auto profile_name =
-                simrv::pipeline::cpu_model_profile_name(*config.cpu_model_profile);
+                simrv::pipeline::cpu_model_preset_name(*config.cpu_model_preset);
             if (const auto resolved = simrv::core::resolve_cpu_model_path(profile_name)) {
                 simrv::pipeline::CpuModelConfig cfg{};
                 if (simrv::core::load_cpu_config(*resolved, cfg)) {
-                    return cfg.misa_profile;
+                    return cfg.isa_preset;
                 }
             }
-            return pipeline::make_cpu_model_profile(*config.cpu_model_profile).misa_profile;
+            return pipeline::make_cpu_model_preset(*config.cpu_model_preset).isa_preset;
         }
-        return isa::MisaProfile::GCBV;
+        return isa::IsaPreset::GCBV;
     };
 
     const unsigned int model_xlen = primary_hart().cpu_model_config.supported_xlen;
     const unsigned int target_xlen = (model_xlen != 0) ? model_xlen : simrv::xlen::kXLenBits;
     CSRValue initial_misa = isa::misa_with_mxl(
-        config.isa.misa_override ? config.isa.misa_profile
-                                 : isa::misa_profile_bits(effective_misa_profile()),
+        config.isa.misa_override ? config.isa.isa_preset
+                                 : isa::isa_preset_bits(effective_isa_preset()),
         target_xlen);
-    config.isa.misa_profile = initial_misa;
+    config.isa.isa_preset = initial_misa;
     if constexpr (simrv::xlen::kIsXLen64) {
         bool is_32bit = (target_xlen == 32);
         if (config.isa.misa_override && config.isa.misa_xlen == 32) {
@@ -694,7 +694,7 @@ auto Machine::initialize() -> std::expected<void, std::string> {
 
     // ---- Spike lockstep initialization ----
     if (lockstep_enabled()) {
-        // Derive the ISA string from the active MISA profile and compile-time XLEN
+        // Derive the ISA string from the active ISA preset and compile-time XLEN
         const std::string isa_str = simrv::debug::spike_isa_string(primary_hart().state().misa);
         const std::string spike_img = spike_elf().empty() ? binary_path() : spike_elf();
         runtime_->spike_lockstep = std::make_unique<simrv::debug::SpikeLockstep>(

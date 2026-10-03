@@ -167,7 +167,7 @@ Load custom or preset CPU microarchitecture models (see [CPU Models Guide](docs/
 
 ```bash
 # Load a predefined CPU model (searches configs/models/ or custom path)
-./build/rv64-release/simrv -b -m img/hello.bin --mode cycle-accurate --cpu-profile rvcomp --cli
+./build/rv64-release/simrv -b -m img/hello.bin --mode cycle-accurate --cpu-preset rvcomp --cli
 
 # Generate a scaffold model configuration with the wizard
 python3 scripts/cpu_model_wizard.py --name my_core --template five-stage
@@ -179,7 +179,7 @@ Run Linux OS image with disk & devicetree:
 ./build/rv64-release/simrv --os -m linux-images/rv64/fw_payload.bin -D linux-images/rv64/root.img -f linux-images/rv64/devicetree.dtb --cli
 ```
 
-Override MISA profile or Vector register length (VLEN):
+Override ISA preset or Vector register length (VLEN):
 
 ```bash
 # Select the explicit RV64GCBV target profile and a 512-bit VLEN
@@ -334,7 +334,7 @@ Verify execution against Spike instruction-by-instruction:
 
 Lockstep is a verification workflow for reproducible experiments, not an
 interactive TUI feature. Use a caller-supplied Spike built for the same XLEN
-and ISA profile as the image under test; `--spike-bin` selects a non-default
+and ISA preset as the image under test; `--spike-bin` selects a non-default
 binary and `--spike-elf` selects its comparison image. Keep the command line,
 Spike revision, image hash, and SimRV revision with paper evidence. Lockstep
 and GDB are intentionally mutually exclusive.

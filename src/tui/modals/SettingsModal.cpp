@@ -238,9 +238,9 @@ void SettingsModal::pop_digit(SettingsDraft& draft, std::string& input) {
     }
 }
 
-void SettingsModal::apply_misa_profile(SettingsDraft& draft, int profile_idx) {
+void SettingsModal::apply_isa_preset(SettingsDraft& draft, int preset_idx) {
     if (draft.active_tab == 1) {
-        MisaModal::apply_profile(draft.misa, profile_idx);
+        MisaModal::apply_preset(draft.misa, preset_idx);
     }
 }
 
@@ -306,7 +306,7 @@ auto SettingsModal::submit(const SettingsDraft& draft, simrv::core::Machine& mac
                                                         machine.primary_hart().state().regs.xlen);
     if (machine.primary_hart().state().misa != 0 &&
         (current_misa != new_misa || current_vlen != draft.misa.vlen)) {
-        next.isa.misa_profile = new_misa;
+        next.isa.isa_preset = new_misa;
         next.isa.misa_override = true;
         next.isa.misa_xlen = draft.misa.xlen_bits;
         next.isa.vlen = draft.misa.vlen;

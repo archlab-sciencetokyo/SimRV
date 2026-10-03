@@ -22,14 +22,14 @@ a retired-instruction count in all modes.
 
 ### Using a Built-In Preset or Model File
 
-SimRV automatically resolves CPU models by profile name or direct file path:
+SimRV automatically resolves CPU models by preset name or direct file path:
 
 ```bash
-# Run with canonical pre-installed model profile
-simrv --ca --cpu-profile rvcomp -m program.elf
+# Run with canonical pre-installed model preset
+simrv --ca --cpu-preset rvcomp -m program.elf
 
 # Run with an explicit custom configuration file
-simrv --ca --cpu-profile configs/models/my_core.cfg -m program.elf
+simrv --ca --cpu-preset configs/models/my_core.cfg -m program.elf
 # or equivalently:
 simrv --ca --cpu-model-file configs/models/my_core.cfg -m program.elf
 ```
@@ -81,7 +81,7 @@ python3 scripts/cpu_model_wizard.py --template rvcomp --name rvcomp_tuned --outp
 Generate an annotated `.cfg` configuration directly from the `simrv` executable:
 
 ```bash
-# Dump an existing profile to stdout or a file
+# Dump an existing preset to stdout or a file
 simrv --dump-cpu-model rvcomp configs/models/rvcomp_copy.cfg
 
 # Scaffold a default balanced template
@@ -100,7 +100,7 @@ simrv --scaffold-cpu-model configs/models/new_core.cfg
 
 ## 2. Configuration Folder Convention & Lookup Hierarchy
 
-SimRV looks for CPU model configuration files in the canonical `configs/models/` directory. When `--cpu-profile <TARGET>` is supplied:
+SimRV looks for CPU model configuration files in the canonical `configs/models/` directory. When `--cpu-preset <TARGET>` is supplied:
 
 1. **Direct Path**: If `<TARGET>` is a valid file path, it is loaded immediately.
 2. **Path with Extension**: If `<TARGET>.cfg` exists, it is loaded.
@@ -177,10 +177,10 @@ response_latency = 1
 
 | Parameter | Type | Default | Description |
 | :--- | :--- | :--- | :--- |
-| `name` | string | `"custom"` | Identifier for the CPU model profile. |
+| `name` | string | `"custom"` | Identifier for the CPU model preset. |
 | `description` | string | `""` | Human-readable documentation of the core architecture. |
 | `xlen` | integer | `0` | Supported machine XLEN: `32` (RV32-only), `64` (RV64-only), or `0` (supports both RV32 and RV64 targets). Verified on startup against simulator build. |
-| `misa` | string | `"gcbv"` | Target ISA extension profile: `gcbv`, `imac`, `ima`, `gc`, `im`, `i`. Setting extension names without `rv32`/`rv64` prefix allows the model to support both 32-bit and 64-bit simulator targets. Explicit `rv32*` and `rv64*` targets are also accepted. |
+| `misa` | string | `"gcbv"` | Target ISA extension preset: `gcbv`, `imac`, `ima`, `gc`, `im`, `i`. Setting extension names without `rv32`/`rv64` prefix allows the model to support both 32-bit and 64-bit simulator targets. Explicit `rv32*` and `rv64*` targets are also accepted. |
 
 ### `[pipeline]` Section
 

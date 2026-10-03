@@ -48,8 +48,8 @@ void MisaModal::move_cursor(int& cursor, int delta) {
     cursor = (cursor + delta + kNumMisaItems) % kNumMisaItems;
 }
 
-void MisaModal::apply_profile(MisaDraft& draft, int profile_idx) {
-    switch (profile_idx) {
+void MisaModal::apply_preset(MisaDraft& draft, int preset_idx) {
+    switch (preset_idx) {
         case 0:  // Base (I)
             draft.ext_a = false;
             draft.ext_b = false;
@@ -141,13 +141,13 @@ void MisaModal::toggle_item(MisaDraft& draft, int index) {
             break;
         }
         case 10:
-            apply_profile(draft, 0);
+            apply_preset(draft, 0);
             break;
         case 11:
-            apply_profile(draft, 1);
+            apply_preset(draft, 1);
             break;
         case 12:
-            apply_profile(draft, 2);
+            apply_preset(draft, 2);
             break;
         default:
             break;
@@ -159,7 +159,7 @@ auto MisaModal::submit(const MisaDraft& draft, simrv::core::Machine& machine,
     -> bool {
     uint64_t new_misa = draft.to_misa_val();
     auto next = machine.configuration();
-    next.isa.misa_profile = new_misa;
+    next.isa.isa_preset = new_misa;
     next.isa.misa_override = true;
     next.isa.misa_xlen = draft.xlen_bits;
     next.isa.vlen = draft.vlen;

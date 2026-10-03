@@ -2232,11 +2232,11 @@ void test_satp_modes() {
     }
 }
 
-void test_named_misa_profiles() {
-    const CSRValue im = simrv::isa::misa_profile_bits(simrv::isa::MisaProfile::IM);
-    const CSRValue ima = simrv::isa::misa_profile_bits(simrv::isa::MisaProfile::IMA);
-    const CSRValue gc = simrv::isa::misa_profile_bits(simrv::isa::MisaProfile::GC);
-    const CSRValue gcbv = simrv::isa::misa_profile_bits(simrv::isa::MisaProfile::GCBV);
+void test_named_isa_presets() {
+    const CSRValue im = simrv::isa::isa_preset_bits(simrv::isa::IsaPreset::IM);
+    const CSRValue ima = simrv::isa::isa_preset_bits(simrv::isa::IsaPreset::IMA);
+    const CSRValue gc = simrv::isa::isa_preset_bits(simrv::isa::IsaPreset::GC);
+    const CSRValue gcbv = simrv::isa::isa_preset_bits(simrv::isa::IsaPreset::GCBV);
 
     expect(simrv::isa::misa_has_extension(im, simrv::isa::IsaExtension::I) &&
                simrv::isa::misa_has_extension(im, simrv::isa::IsaExtension::M),
@@ -3202,7 +3202,7 @@ int main() {
     test_vector_floating_arithmetic();
     test_exception_delegation_mask();
     test_satp_modes();
-    test_named_misa_profiles();
+    test_named_isa_presets();
     test_sv32_page_walk();
     test_sv39_reserved_pte_bits();
     test_atomic_alignment();

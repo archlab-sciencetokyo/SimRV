@@ -73,7 +73,7 @@ void SystemConfigModal::open(SysConfigDraft& draft, int& cursor,
                              const simrv::core::Machine& machine) {
     cursor = 0;
     draft.cycle_accurate = machine.runtime_profile.is_cycle_mode();
-    draft.profile = static_cast<uint8_t>(machine.primary_hart().cpu_model_config.profile);
+    draft.preset = static_cast<uint8_t>(machine.primary_hart().cpu_model_config.preset);
     const auto& cfg = machine.primary_hart().pipeline_sim.config;
     draft.pipeline_type = static_cast<uint8_t>(cfg.pipeline_type);
     draft.mul_latency = cfg.mul_latency;
@@ -105,10 +105,10 @@ void SystemConfigModal::adjust_setting(SysConfigDraft& draft, int index, int dir
     }
     if (index == 12) {
         constexpr int kProfiles = 4;
-        draft.profile = static_cast<uint8_t>((draft.profile + dir + kProfiles) % kProfiles);
-        const auto profile = static_cast<simrv::pipeline::CpuModelProfile>(draft.profile);
-        if (profile != simrv::pipeline::CpuModelProfile::Custom) {
-            assign_pipeline(draft, simrv::pipeline::make_cpu_model_profile(profile));
+        draft.preset = static_cast<uint8_t>((draft.preset + dir + kProfiles) % kProfiles);
+        const auto preset = static_cast<simrv::pipeline::CpuModelPreset>(draft.preset);
+        if (preset != simrv::pipeline::CpuModelPreset::Custom) {
+            assign_pipeline(draft, simrv::pipeline::make_cpu_model_preset(preset));
         }
         return;
     }
@@ -179,9 +179,9 @@ void SystemConfigModal::toggle_setting(SysConfigDraft& draft, int index) {
 auto SystemConfigModal::submit(const SysConfigDraft& draft, simrv::core::Machine& machine) -> bool {
     if (!draft.cycle_accurate) return true;
     auto model = machine.primary_hart().cpu_model_config;
-    const auto selected_profile = static_cast<simrv::pipeline::CpuModelProfile>(draft.profile);
-    if (selected_profile != simrv::pipeline::CpuModelProfile::Custom) {
-        model = simrv::pipeline::make_cpu_model_profile(selected_profile);
+    const auto selected_preset = static_cast<simrv::pipeline::CpuModelPreset>(draft.preset);
+    if (selected_preset != simrv::pipeline::CpuModelPreset::Custom) {
+        model = simrv::pipeline::make_cpu_model_preset(selected_preset);
     }
     auto& cfg = model.pipeline;
     {
@@ -199,8 +199,8 @@ auto SystemConfigModal::submit(const SysConfigDraft& draft, simrv::core::Machine
         cfg.branch_predictor.btb_entries = draft.btb_entries;
         cfg.branch_predictor.ras_entries = draft.ras_entries;
     }
-    // Explicit field editing retains the named profile only while it remains an exact preset.
-    model.profile = selected_profile;
+    // Explicit field editing retains the named preset only while it remains an exact preset.
+    model.preset = selected_preset;
     if (!model.validate()) return false;
     for (size_t hart = 0; hart < machine.num_harts(); ++hart) {
         auto& cpu = machine.hart(hart);
@@ -263,8 +263,8 @@ void SystemConfigModal::render(std::vector<std::string>& content_rows,
         {"BHT capacity", entries(draft.bht_entries, 9)},
         {"BTB capacity", entries(draft.btb_entries, 10)},
         {"RAS capacity", entries(draft.ras_entries, 11)},
-        {"FPGA core profile", std::string(simrv::pipeline::cpu_model_profile_name(
-                                  static_cast<simrv::pipeline::CpuModelProfile>(draft.profile)))},
+        {"FPGA core preset", std::string(simrv::pipeline::cpu_model_preset_name(
+                                  static_cast<simrv::pipeline::CpuModelPreset>(draft.preset)))},
         {"Save configuration", "\033[1;32m[S] Export to .cfg...\033[0m"},
         {"Load configuration", "\033[1;36m[L] Import from .cfg...\033[0m"},
     });
@@ -273,9 +273,9 @@ void SystemConfigModal::render(std::vector<std::string>& content_rows,
         const bool selected = static_cast<int>(i) == cursor;
         add_row(build_menu_item_row(settings[i].name, settings[i].value, selected, 29));
     }
-    const auto profile = static_cast<simrv::pipeline::CpuModelProfile>(draft.profile);
-    if (profile != simrv::pipeline::CpuModelProfile::Custom) {
-        const auto model = simrv::pipeline::make_cpu_model_profile(profile);
+    const auto preset = static_cast<simrv::pipeline::CpuModelPreset>(draft.preset);
+    if (preset != simrv::pipeline::CpuModelPreset::Custom) {
+        const auto model = simrv::pipeline::make_cpu_model_preset(preset);
         add_row(std::format("{}BRAM L1: I {} KiB/{}-way · D {} KiB/{}-way · {} B lines\033[0m",
                             kThemeMuted, model.instruction_cache.capacity_bytes / 1024,
                             model.instruction_cache.associativity,

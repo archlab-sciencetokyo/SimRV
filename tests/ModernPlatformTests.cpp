@@ -129,9 +129,9 @@ void test_ca_model_cache_application() {
 
     simrv::tui::SysConfigDraft draft{};
     draft.cycle_accurate = true;
-    draft.profile = static_cast<uint8_t>(simrv::pipeline::CpuModelProfile::Performance);
+    draft.preset = static_cast<uint8_t>(simrv::pipeline::CpuModelPreset::Performance);
     check(simrv::tui::modals::SystemConfigModal::submit(draft, machine));
-    check(machine.cpu.cpu_model_config.profile == simrv::pipeline::CpuModelProfile::Performance);
+    check(machine.cpu.cpu_model_config.preset == simrv::pipeline::CpuModelPreset::Performance);
     check(machine.cpu.dcache.capacity_bytes() == 16384);
     check(machine.cpu.dcache.associativity() == 4);
 }

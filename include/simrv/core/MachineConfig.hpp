@@ -82,7 +82,7 @@ struct DebugConfig {
 
 struct IsaConfig {
     Address isatest_tohost = 0x80001000;
-    CSRValue misa_profile = isa::kMisaDefault;
+    CSRValue isa_preset = isa::kMisaDefault;
     bool misa_override = false;
     unsigned int misa_xlen = 0;
     unsigned int vlen = 0;
@@ -112,7 +112,7 @@ struct MachineConfig {
     IsaConfig isa{};
     FilesConfig files{};
     NetworkConfig network{};
-    std::optional<simrv::pipeline::CpuModelProfile> cpu_model_profile{};
+    std::optional<simrv::pipeline::CpuModelPreset> cpu_model_preset{};
     std::optional<simrv::pipeline::BranchPredictorType> branch_predictor_type{};
     uint32_t bht_entries = 0;
     uint32_t btb_entries = 0;

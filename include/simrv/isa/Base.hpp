@@ -1,6 +1,6 @@
 /**
  * @file Base.hpp
- * @brief Base instruction set opcodes, profiles, and extensions.
+ * @brief Base instruction set opcodes, ISA presets, and extensions.
  */
 #pragma once
 
@@ -128,10 +128,12 @@ enum class IsaExtension : uint8_t {
 };
 
 /**
- * @enum MisaProfile
- * @brief Pre-configured machine profiles matching common RISC-V extension sets.
+ * @enum IsaPreset
+ * @brief SimRV ISA presets matching common RISC-V extension sets.
+ *
+ * These are implementation presets, not ratified RISC-V architecture profiles.
  */
-enum class MisaProfile : uint8_t {
+enum class IsaPreset : uint8_t {
     E,     ///< RV32E reduced-register integer base
     EM,    ///< RV32E plus Multiply/Divide
     EMAC,  ///< RV32E plus Multiply/Divide, Atomic, and Compressed
@@ -140,7 +142,7 @@ enum class MisaProfile : uint8_t {
     IMA,   ///< Integer, Multiply/Divide, Atomic, Supervisor, User
     IMAC,  ///< Integer, Multiply/Divide, Atomic, and Compressed
     GC,    ///< General Purpose (IMAFD) + Compressed (equivalent to RV32GC or RV64GC)
-    GCBV,  ///< SimRV target profile: GC plus ratified B and V extension bits
+    GCBV,  ///< SimRV target preset: GC plus ratified B and V extension bits
 };
 
 /**

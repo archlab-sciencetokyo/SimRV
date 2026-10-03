@@ -39,7 +39,7 @@ using simrv::execute::CfuUnit;
 using simrv::isa::Opcode;
 using simrv::isa::OperationId;
 using simrv::pipeline::BranchPredictorType;
-using simrv::pipeline::CpuModelProfile;
+using simrv::pipeline::CpuModelPreset;
 using simrv::pipeline::PipelineType;
 
 auto load_cfu_provingground_profile() -> simrv::pipeline::CpuModelConfig {
@@ -289,7 +289,7 @@ void test_bram_prewarm_and_cli() {
     // 1. CLI default for cfu-provingground: bram_prewarm is true
     {
         std::array<char*, 4> argv = {const_cast<char*>("SimRV"), const_cast<char*>("--tui"),
-                                     const_cast<char*>("--cpu-profile"),
+                                     const_cast<char*>("--cpu-preset"),
                                      const_cast<char*>("cfu-provingground")};
         const auto res = simrv::util::parse_command_line(argv);
         TEST_CHECK(res.has_value());
@@ -301,7 +301,7 @@ void test_bram_prewarm_and_cli() {
     {
         std::array<char*, 6> argv = {
             const_cast<char*>("SimRV"),         const_cast<char*>("--tui"),
-            const_cast<char*>("--cpu-profile"), const_cast<char*>("cfu-provingground"),
+            const_cast<char*>("--cpu-preset"), const_cast<char*>("cfu-provingground"),
             const_cast<char*>("--bpred"),       const_cast<char*>("none")};
         const auto res = simrv::util::parse_command_line(argv);
         TEST_CHECK(res.has_value());
@@ -312,7 +312,7 @@ void test_bram_prewarm_and_cli() {
     // 2. CLI explicit override: --no-bram-prewarm
     {
         std::array<char*, 5> argv = {const_cast<char*>("SimRV"), const_cast<char*>("--tui"),
-                                     const_cast<char*>("--cpu-profile"),
+                                     const_cast<char*>("--cpu-preset"),
                                      const_cast<char*>("cfu-provingground"),
                                      const_cast<char*>("--no-bram-prewarm")};
         const auto res = simrv::util::parse_command_line(argv);
@@ -324,7 +324,7 @@ void test_bram_prewarm_and_cli() {
     // 3. CLI explicit flag: --bram-prewarm for other profiles
     {
         std::array<char*, 5> argv = {const_cast<char*>("SimRV"), const_cast<char*>("--tui"),
-                                     const_cast<char*>("--cpu-profile"),
+                                     const_cast<char*>("--cpu-preset"),
                                      const_cast<char*>("balanced"),
                                      const_cast<char*>("--bram-prewarm")};
         const auto res = simrv::util::parse_command_line(argv);

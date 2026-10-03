@@ -28,9 +28,9 @@
         }                                                                                 \
     } while (0)
 
-using simrv::isa::MisaProfile;
+using simrv::isa::IsaPreset;
 using simrv::pipeline::BranchPredictorType;
-using simrv::pipeline::CpuModelProfile;
+using simrv::pipeline::CpuModelPreset;
 using simrv::pipeline::PipelineType;
 
 void test_timing_front_cache() {
@@ -65,7 +65,7 @@ void test_rvcomp_profile_validation() {
 
     TEST_CHECK(profile.name == "rvcomp");
     TEST_CHECK(profile.supported_xlen == 32);
-    TEST_CHECK(profile.misa_profile == MisaProfile::IMA);
+    TEST_CHECK(profile.isa_preset == IsaPreset::IMA);
     TEST_CHECK(profile.pipeline.pipeline_type == PipelineType::FiveStage);
     TEST_CHECK(profile.pipeline.enable_forwarding == true);
     TEST_CHECK(profile.pipeline.mul_latency == 2);
@@ -110,7 +110,7 @@ void test_rvcomp_profile_validation() {
     simrv::pipeline::CpuModelConfig loaded{};
     TEST_CHECK(simrv::core::load_cpu_config(*path, loaded));
     TEST_CHECK(profile.validate().has_value());
-    const CSRValue ima_bits = simrv::isa::misa_profile_bits(MisaProfile::IMA);
+    const CSRValue ima_bits = simrv::isa::isa_preset_bits(IsaPreset::IMA);
     const CSRValue ima_misa = simrv::isa::misa_with_mxl(ima_bits, 32);
     // In RVComp Verilog (RVComp/src/rvcom.vh): `define ISA_CODE 32'h40141101
     if constexpr (!simrv::xlen::kIsXLen64) {

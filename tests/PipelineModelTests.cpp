@@ -84,10 +84,10 @@ void test_pipeline_factory_and_names() {
     TEST_CHECK(simrv::pipeline::pipeline_type_name(PipelineType::ThreeStage) == "3-Stage In-Order");
 }
 
-void test_cpu_model_profiles_and_validation() {
-    using simrv::pipeline::CpuModelProfile;
+void test_cpu_model_presets_and_validation() {
+    using simrv::pipeline::CpuModelPreset;
     using simrv::pipeline::PipelineType;
-    const auto tiny = simrv::pipeline::make_cpu_model_profile(CpuModelProfile::Tiny);
+    const auto tiny = simrv::pipeline::make_cpu_model_preset(CpuModelPreset::Tiny);
     TEST_CHECK(tiny.validate().has_value());
     TEST_CHECK(tiny.pipeline.pipeline_type == PipelineType::ThreeStage);
     TEST_CHECK(!tiny.pipeline.enable_forwarding);
@@ -95,14 +95,14 @@ void test_cpu_model_profiles_and_validation() {
     TEST_CHECK(tiny.instruction_cache.capacity_bytes == 2048);
     TEST_CHECK(tiny.instruction_cache.associativity == 1);
 
-    const auto balanced = simrv::pipeline::make_cpu_model_profile(CpuModelProfile::Balanced);
+    const auto balanced = simrv::pipeline::make_cpu_model_preset(CpuModelPreset::Balanced);
     TEST_CHECK(balanced.validate().has_value());
     TEST_CHECK(balanced.pipeline.pipeline_type == PipelineType::FiveStage);
     TEST_CHECK(!balanced.pipeline.enable_instruction_prefetch);
     TEST_CHECK(balanced.instruction_cache.capacity_bytes == 4096);
     TEST_CHECK(balanced.instruction_cache.associativity == 2);
 
-    const auto performance = simrv::pipeline::make_cpu_model_profile(CpuModelProfile::Performance);
+    const auto performance = simrv::pipeline::make_cpu_model_preset(CpuModelPreset::Performance);
     TEST_CHECK(performance.validate().has_value());
     TEST_CHECK(performance.pipeline.enable_instruction_prefetch);
     TEST_CHECK(performance.instruction_cache.capacity_bytes == 16384);
@@ -114,9 +114,9 @@ void test_cpu_model_profiles_and_validation() {
     invalid = balanced;
     invalid.instruction_cache.capacity_bytes = 3072;
     TEST_CHECK(!invalid.validate().has_value());
-    TEST_CHECK(simrv::pipeline::parse_cpu_model_profile("performance") ==
-               CpuModelProfile::Performance);
-    TEST_CHECK(!simrv::pipeline::parse_cpu_model_profile("superscalar").has_value());
+    TEST_CHECK(simrv::pipeline::parse_cpu_model_preset("performance") ==
+               CpuModelPreset::Performance);
+    TEST_CHECK(!simrv::pipeline::parse_cpu_model_preset("superscalar").has_value());
 }
 
 void test_runtime_cache_geometry() {
@@ -243,7 +243,7 @@ auto main() -> int {
     test_operation_traits();
     test_writeback_effects();
     test_pipeline_factory_and_names();
-    test_cpu_model_profiles_and_validation();
+    test_cpu_model_presets_and_validation();
     test_runtime_cache_geometry();
     test_runtime_profile_policy();
     test_pipeline_sim_wrapper();

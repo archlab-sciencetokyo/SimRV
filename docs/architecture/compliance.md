@@ -60,7 +60,7 @@ Invalid dynamic rounding modes and scalar FP widths/extensions cause illegal-ins
   implemented mode. TVM, TW, TSR, MPRV, SUM, MXR, FS, and VS follow their privilege/extension
   presence rules. Obsolete draft-N user interrupt bits, delegation CSRs, and URET are not
   implemented and remain reserved/illegal. Supervisor CSR encodings are inaccessible when the
-  selected MISA profile omits S, including from M-mode.
+  selected ISA preset omits S, including from M-mode.
 - `medeleg` exposes only exception causes that can originate below S-mode: causes 0-8, 12, 13,
   and 15. Supervisor/Machine ECALL, hypervisor, reserved, and double-trap causes are read-only zero.
 - RV32 high-half counter CSRs are illegal in an RV64 personality. Unimplemented HPM counters and
@@ -106,7 +106,7 @@ RTOSes can use the same UART, interrupt controller, timer, PCIe/VirtIO, and sysc
 ## Interpreting test results
 
 A passing native build is not evidence of ISA compliance. Release evidence should record the XLEN,
-MISA profile, VLEN, compiler, external test-suite revision, reference-model revision, and any skipped
+ISA preset, VLEN, compiler, external test-suite revision, reference-model revision, and any skipped
 tests. Missing external suites are reported as unavailable and must not be presented as passes.
 
 Known deviations or untested optional behavior must be removed from the advertised profile or

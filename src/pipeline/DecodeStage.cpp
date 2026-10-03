@@ -66,8 +66,8 @@ void CPU::fetch_operands(Machine& /*machine*/) {
                                                                     : 0;
 
     if (funct3 == Funct3::Priv) {
-        if (!TrapController::canExecutePrivilegedInstruction(state_.priv, state_.misa,
-                                                             state_.mstatus, funct12, ctx.funct7)) {
+        if (!TrapController::can_execute_privileged_instruction(state_.priv, state_.misa,
+                                                                state_.mstatus, funct12, ctx.funct7)) {
             ctx.pending_exception = ExceptionCode::IllegalInstruction;
             ctx.pending_tval = ctx.ir_org;
             return;
@@ -75,7 +75,7 @@ void CPU::fetch_operands(Machine& /*machine*/) {
     } else {
         const bool is_write =
             ((static_cast<uint8_t>(funct3) & 0x3u) == 0x1u) || (std::to_underlying(ctx.rs1) != 0);
-        if (!TrapController::canAccessCsr(state_.priv, state_.misa, w_csr_addr, is_write)) {
+        if (!TrapController::can_access_csr(state_.priv, state_.misa, w_csr_addr, is_write)) {
             ctx.pending_exception = ExceptionCode::IllegalInstruction;
             ctx.pending_tval = ctx.ir_org;
             return;

@@ -29,7 +29,7 @@ interface = "rs1-rs2-rd"
 ```
 
 `zk` is accepted as shorthand for `zkn,zkr,zkt`. These are multi-letter extensions and are
-reported separately from the legacy `misa` profile; they do not consume individual MISA bits.
+reported separately from the legacy `misa` preset; they do not consume individual MISA bits.
 The current implementation executes the available `Zbkb`/`Zbkc` building blocks (`pack*` and
 `clmul*`) through the existing integer B unit when `zkn` is enabled. AES/SHA instructions and
 the `seed` CSR are added incrementally.
@@ -50,7 +50,7 @@ All core ISA definitions and shared constants live in
    (e.g., `V = 21` for Vector).
 
 2. **`misa` Profiles:** Ensure the extension bit is included in the appropriate
-   `misa_profile_bits()` entries if it belongs to a standard profile.
+   `isa_preset_bits()` entries if it belongs to a standard profile.
 
 3. **Opcodes and Funct fields:**
    - Add new major opcodes to the `Opcode` enum.

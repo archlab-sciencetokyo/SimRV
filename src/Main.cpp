@@ -187,15 +187,15 @@ auto main(int argc, char* argv[]) -> int {  // NOLINT(bugprone-exception-escape)
                                               !parsed->options.tuimode);
             case CliAction::DumpCpuModel: {
                 simrv::pipeline::CpuModelConfig cfg{};
-                std::string target = parsed->options.dump_cpu_model_profile;
+                std::string target = parsed->options.dump_cpu_model_preset;
                 if (target.empty()) target = "balanced";
                 if (auto resolved = simrv::core::resolve_cpu_model_path(target)) {
                     (void)simrv::core::load_cpu_config(*resolved, cfg);
-                } else if (auto p = simrv::pipeline::parse_cpu_model_profile(target)) {
-                    cfg = simrv::pipeline::make_cpu_model_profile(*p);
+                } else if (auto p = simrv::pipeline::parse_cpu_model_preset(target)) {
+                    cfg = simrv::pipeline::make_cpu_model_preset(*p);
                 } else {
-                    cfg = simrv::pipeline::make_cpu_model_profile(
-                        simrv::pipeline::CpuModelProfile::Balanced);
+                    cfg = simrv::pipeline::make_cpu_model_preset(
+                        simrv::pipeline::CpuModelPreset::Balanced);
                 }
                 if (!parsed->options.dump_cpu_model_output.empty()) {
                     if (!simrv::core::save_cpu_config(parsed->options.dump_cpu_model_output, cfg,
@@ -241,7 +241,7 @@ auto main(int argc, char* argv[]) -> int {  // NOLINT(bugprone-exception-escape)
                 std::exit(0);
             }
             case CliAction::ValidateCpuModel: {
-                std::string target = parsed->options.dump_cpu_model_profile;
+                std::string target = parsed->options.dump_cpu_model_preset;
                 if (target.empty()) {
                     simrv::log::error("No CPU model path specified to validate.");
                     std::exit(1);
@@ -271,7 +271,7 @@ auto main(int argc, char* argv[]) -> int {  // NOLINT(bugprone-exception-escape)
                                                      : std::format("RV{}", cfg.supported_xlen));
                 std::println("  Simulator XLEN  : RV{}", simrv::xlen::kXLenBits);
                 std::println("  MISA Profile    : {}",
-                             simrv::core::detail::misa_profile_name(cfg.misa_profile));
+                             simrv::core::detail::isa_preset_name(cfg.isa_preset));
                 std::println("  Pipeline Type   : {}",
                              simrv::pipeline::pipeline_type_name(cfg.pipeline.pipeline_type));
                 std::println("  Branch Predictor: {}",

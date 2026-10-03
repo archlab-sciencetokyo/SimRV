@@ -2,7 +2,7 @@
 """
 Evaluate cycle-accuracy and behavioral parity between RVComp (synthesizable
 SystemVerilog RTL simulated with Verilator) and SimRV's cycle-accurate 5-stage
-pipeline model using --cpu-profile rvcomp.
+pipeline model using --cpu-preset rvcomp.
 """
 
 import argparse
@@ -164,7 +164,8 @@ def analyze_rtl_ifu_trace(rtl_out):
 def main(arguments=None):
     parser = argparse.ArgumentParser(description="Evaluate RVComp RTL vs SimRV Cycle Parity")
     parser.add_argument('--out', type=str, default=None, help='Output path for JSON results')
-    parser.add_argument('--cpu-profile', type=str, default="rvcomp", help='CPU profile name (default: rvcomp)')
+    parser.add_argument('--cpu-preset', dest='cpu_preset', type=str,
+                        default="rvcomp", help='CPU preset name (default: rvcomp)')
     parser.add_argument('--cpu-config', type=str, default=None, help='Path to custom .cfg model file')
     parser.add_argument('--simrv-bin', type=str, default=None, help='Explicit path to SimRV executable')
     parser.add_argument('--rvcomp-dir', type=str, default=os.environ.get('RVCOMP_DIR'),
@@ -257,7 +258,7 @@ def main(arguments=None):
         if args.cpu_config:
             model_arg = f"--cpu-config {Path(args.cpu_config).resolve()}"
         else:
-            model_arg = f"--cpu-profile {args.cpu_profile}"
+            model_arg = f"--cpu-preset {args.cpu_preset}"
         simrv_cmd = f"{simrv_bin} --cli --ca -m {elf_path.resolve()} -H 0x80000000 {model_arg}"
         simrv_out = run_cmd(
             simrv_cmd,

@@ -45,7 +45,7 @@ enum class ModalType : uint8_t {
 };
 
 struct SysConfigDraft {
-    uint8_t profile = 1;        // tiny, balanced, performance, custom
+    uint8_t preset = 1;        // tiny, balanced, performance, custom
     uint8_t pipeline_type = 0;  // 0: 5-stage, 1: 3-stage
     uint32_t mul_latency = 3;
     uint32_t div_latency = 18;
@@ -157,7 +157,7 @@ class TuiModal {
     void toggle_setting_by_index(int index);
     void push_settings_digit(char c);
     void pop_settings_digit();
-    void apply_settings_misa_profile(int profile_idx);
+    void apply_settings_isa_preset(int preset_idx);
 
     void move_bp_cursor(int delta);
     auto remove_bp_at_cursor(const std::function<void(const std::string&)>& set_status_override_cb)

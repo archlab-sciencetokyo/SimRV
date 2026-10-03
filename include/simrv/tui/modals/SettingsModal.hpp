@@ -32,7 +32,7 @@ class SettingsModal {
                                const simrv::core::Machine* machine = nullptr);
     static void push_digit(SettingsDraft& draft, std::string& input, char c);
     static void pop_digit(SettingsDraft& draft, std::string& input);
-    static void apply_misa_profile(SettingsDraft& draft, int profile_idx);
+    static void apply_isa_preset(SettingsDraft& draft, int preset_idx);
     static auto submit(const SettingsDraft& draft, simrv::core::Machine& machine,
                        const std::function<void(TuiRegPage)>& set_reg_page_cb) -> bool;
     static void render(std::vector<std::string>& content_rows,

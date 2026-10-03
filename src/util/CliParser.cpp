@@ -25,7 +25,7 @@
 
 namespace simrv::util {
 
-using isa::MisaProfile;
+using isa::IsaPreset;
 
 namespace {
 
@@ -158,112 +158,112 @@ inline auto iequals(std::string_view a, std::string_view b) -> bool {
     });
 }
 
-struct ParsedMisa {
-    MisaProfile profile;
+struct ParsedIsaPreset {
+    IsaPreset preset;
     unsigned int xlen;
 };
 
-auto parse_misa_profile(std::string_view value) -> std::expected<ParsedMisa, std::string> {
+auto parse_isa_preset(std::string_view value) -> std::expected<ParsedIsaPreset, std::string> {
     if (iequals(value, "i")) {
-        return ParsedMisa{.profile = MisaProfile::I, .xlen = 0};
+        return ParsedIsaPreset{.preset = IsaPreset::I, .xlen = 0};
     }
     if (iequals(value, "e")) {
-        return ParsedMisa{.profile = MisaProfile::E, .xlen = 32};
+        return ParsedIsaPreset{.preset = IsaPreset::E, .xlen = 32};
     }
     if (iequals(value, "em")) {
-        return ParsedMisa{.profile = MisaProfile::EM, .xlen = 32};
+        return ParsedIsaPreset{.preset = IsaPreset::EM, .xlen = 32};
     }
     if (iequals(value, "emac")) {
-        return ParsedMisa{.profile = MisaProfile::EMAC, .xlen = 32};
+        return ParsedIsaPreset{.preset = IsaPreset::EMAC, .xlen = 32};
     }
     if (iequals(value, "im")) {
-        return ParsedMisa{.profile = MisaProfile::IM, .xlen = 0};
+        return ParsedIsaPreset{.preset = IsaPreset::IM, .xlen = 0};
     }
     if (iequals(value, "ima")) {
-        return ParsedMisa{.profile = MisaProfile::IMA, .xlen = 0};
+        return ParsedIsaPreset{.preset = IsaPreset::IMA, .xlen = 0};
     }
     if (iequals(value, "imac")) {
-        return ParsedMisa{.profile = MisaProfile::IMAC, .xlen = 0};
+        return ParsedIsaPreset{.preset = IsaPreset::IMAC, .xlen = 0};
     }
     if (iequals(value, "gc")) {
-        return ParsedMisa{.profile = MisaProfile::GC, .xlen = 0};
+        return ParsedIsaPreset{.preset = IsaPreset::GC, .xlen = 0};
     }
     if (iequals(value, "gcbv")) {
-        return ParsedMisa{.profile = MisaProfile::GCBV, .xlen = 0};
+        return ParsedIsaPreset{.preset = IsaPreset::GCBV, .xlen = 0};
     }
 
     unsigned int parsed_xlen = 0;
-    MisaProfile profile = MisaProfile::GCBV;
+    IsaPreset preset = IsaPreset::GCBV;
     bool valid = false;
 
     if (iequals(value, "rv32e")) {
         parsed_xlen = 32;
-        profile = MisaProfile::E;
+        preset = IsaPreset::E;
         valid = true;
     } else if (iequals(value, "rv32em")) {
         parsed_xlen = 32;
-        profile = MisaProfile::EM;
+        preset = IsaPreset::EM;
         valid = true;
     } else if (iequals(value, "rv32emac")) {
         parsed_xlen = 32;
-        profile = MisaProfile::EMAC;
+        preset = IsaPreset::EMAC;
         valid = true;
     } else if (iequals(value, "rv32i")) {
         parsed_xlen = 32;
-        profile = MisaProfile::I;
+        preset = IsaPreset::I;
         valid = true;
     } else if (iequals(value, "rv64i")) {
         parsed_xlen = 64;
-        profile = MisaProfile::I;
+        preset = IsaPreset::I;
         valid = true;
     } else if (iequals(value, "rv32im")) {
         parsed_xlen = 32;
-        profile = MisaProfile::IM;
+        preset = IsaPreset::IM;
         valid = true;
     } else if (iequals(value, "rv64im")) {
         parsed_xlen = 64;
-        profile = MisaProfile::IM;
+        preset = IsaPreset::IM;
         valid = true;
     } else if (iequals(value, "rv32ima")) {
         parsed_xlen = 32;
-        profile = MisaProfile::IMA;
+        preset = IsaPreset::IMA;
         valid = true;
     } else if (iequals(value, "rv64ima")) {
         parsed_xlen = 64;
-        profile = MisaProfile::IMA;
+        preset = IsaPreset::IMA;
         valid = true;
     } else if (iequals(value, "rv32imac")) {
         parsed_xlen = 32;
-        profile = MisaProfile::IMAC;
+        preset = IsaPreset::IMAC;
         valid = true;
     } else if (iequals(value, "rv64imac")) {
         parsed_xlen = 64;
-        profile = MisaProfile::IMAC;
+        preset = IsaPreset::IMAC;
         valid = true;
     } else if (iequals(value, "rv32gc")) {
         parsed_xlen = 32;
-        profile = MisaProfile::GC;
+        preset = IsaPreset::GC;
         valid = true;
     } else if (iequals(value, "rv64gc")) {
         parsed_xlen = 64;
-        profile = MisaProfile::GC;
+        preset = IsaPreset::GC;
         valid = true;
     } else if (iequals(value, "rv32gcbv")) {
         parsed_xlen = 32;
-        profile = MisaProfile::GCBV;
+        preset = IsaPreset::GCBV;
         valid = true;
     } else if (iequals(value, "rv64gcbv")) {
         parsed_xlen = 64;
-        profile = MisaProfile::GCBV;
+        preset = IsaPreset::GCBV;
         valid = true;
     }
 
     if (valid) {
         if (parsed_xlen == 64 && simrv::xlen::kXLenBits == 32) {
             return std::unexpected(std::format(
-                "cannot run a 64-bit MISA profile ({}) on a 32-bit simulator build", value));
+                "cannot run a 64-bit ISA preset ({}) on a 32-bit simulator build", value));
         }
-        return ParsedMisa{.profile = profile, .xlen = parsed_xlen};
+        return ParsedIsaPreset{.preset = preset, .xlen = parsed_xlen};
     }
 
     const auto xlen_suffix = simrv::xlen::kIsXLen64 ? "64" : "32";
@@ -275,17 +275,17 @@ auto parse_misa_profile(std::string_view value) -> std::expected<ParsedMisa, std
         supported += ", rv32i, rv32im, rv32ima, rv32imac, rv32gc, rv32gcbv";
     }
     return std::unexpected(
-        std::format("unsupported MISA profile '{}' (supported: {})", value, supported));
+        std::format("unsupported ISA preset '{}' (supported: {})", value, supported));
 }
 
-auto effective_misa_profile(const RuntimeOptions& options) -> MisaProfile {
+auto effective_isa_preset(const RuntimeOptions& options) -> IsaPreset {
     if (options.misa_override) {
-        return options.misa_profile;
+        return options.isa_preset;
     }
-    if (options.cpu_model_profile.has_value()) {
-        return pipeline::make_cpu_model_profile(*options.cpu_model_profile).misa_profile;
+    if (options.cpu_model_preset.has_value()) {
+        return pipeline::make_cpu_model_preset(*options.cpu_model_preset).isa_preset;
     }
-    return MisaProfile::GCBV;
+    return IsaPreset::GCBV;
 }
 
 auto parse_file_options(std::string_view arg, std::span<char* const> args, std::size_t& i,
@@ -433,9 +433,9 @@ auto parse_mode_options(std::string_view arg, std::span<char* const> args, std::
     if (arg == "--isa") {
         auto value = next_argument(args, i, "--isa");
         if (!value) return std::unexpected(value.error());
-        auto parsed_misa = parse_misa_profile(*value);
+        auto parsed_misa = parse_isa_preset(*value);
         if (!parsed_misa) return std::unexpected(parsed_misa.error());
-        result.options.misa_profile = parsed_misa->profile;
+        result.options.isa_preset = parsed_misa->preset;
         result.options.misa_xlen = parsed_misa->xlen;
         result.options.misa_override = true;
         return true;
@@ -499,7 +499,7 @@ auto parse_mode_options(std::string_view arg, std::span<char* const> args, std::
         result.options.pipeline_type = std::string(*value);
         return true;
     }
-    if (arg == "--cpu-profile" || arg == "--profile") {
+    if (arg == "--cpu-preset") {
         auto value = next_argument(args, i, arg);
         if (!value) return std::unexpected(value.error());
         const auto resolved = simrv::core::resolve_cpu_model_path(*value);
@@ -510,17 +510,17 @@ auto parse_mode_options(std::string_view arg, std::span<char* const> args, std::
                 return std::unexpected(
                     std::format("failed to load CPU model configuration from '{}'", *resolved));
             }
-            result.options.cpu_model_profile = loaded.profile;
+            result.options.cpu_model_preset = loaded.preset;
             return true;
         }
-        auto parsed = simrv::pipeline::parse_cpu_model_profile(*value);
+        auto parsed = simrv::pipeline::parse_cpu_model_preset(*value);
         if (!parsed) {
             return std::unexpected(std::format(
-                "unsupported CPU model profile '{}' (supported presets: tiny, balanced, "
+                "unsupported CPU model preset '{}' (supported presets: tiny, balanced, "
                 "performance, or path/name of model .cfg)",
                 *value));
         }
-        result.options.cpu_model_profile = parsed;
+        result.options.cpu_model_preset = parsed;
         return true;
     }
     if (arg == "--bpred" || arg == "--bpred-type") {
@@ -726,7 +726,7 @@ auto parse_tui_options(std::string_view arg, std::span<char* const> args, std::s
     if (arg == "--dump-cpu-model" || arg == "--export-cpu-model" || arg == "--scaffold-cpu-model") {
         result.action = CliAction::DumpCpuModel;
         if (arg == "--scaffold-cpu-model") {
-            result.options.dump_cpu_model_profile = "balanced";
+            result.options.dump_cpu_model_preset = "balanced";
             if (i + 1 < args.size() && args[i + 1] != nullptr && args[i + 1][0] != '\0' &&
                 args[i + 1][0] != '-') {
                 ++i;
@@ -735,7 +735,7 @@ auto parse_tui_options(std::string_view arg, std::span<char* const> args, std::s
         } else {
             auto value = next_argument(args, i, arg);
             if (!value) return std::unexpected(value.error());
-            result.options.dump_cpu_model_profile = std::string(*value);
+            result.options.dump_cpu_model_preset = std::string(*value);
             if (i + 1 < args.size() && args[i + 1] != nullptr && args[i + 1][0] != '\0' &&
                 args[i + 1][0] != '-') {
                 ++i;
@@ -761,7 +761,7 @@ auto parse_tui_options(std::string_view arg, std::span<char* const> args, std::s
         result.action = CliAction::ValidateCpuModel;
         auto value = next_argument(args, i, arg);
         if (!value) return std::unexpected(value.error());
-        result.options.dump_cpu_model_profile = std::string(*value);
+        result.options.dump_cpu_model_preset = std::string(*value);
         return true;
     }
     return false;
@@ -1106,11 +1106,11 @@ auto RuntimeOptions::to_machine_config() const -> simrv::core::MachineConfig {
     cfg.debug.architecture_trace_path = fn_archtrace;
 
     cfg.isa.isatest_tohost = isatest_tohost;
-    cfg.isa.misa_profile = misa_profile_bits(effective_misa_profile(*this));
+    cfg.isa.isa_preset = isa_preset_bits(effective_isa_preset(*this));
     cfg.isa.misa_override =
         misa_override ||
-        (cpu_model_profile.has_value() &&
-         pipeline::make_cpu_model_profile(*cpu_model_profile).misa_profile != MisaProfile::GCBV);
+        (cpu_model_preset.has_value() &&
+         pipeline::make_cpu_model_preset(*cpu_model_preset).isa_preset != IsaPreset::GCBV);
     cfg.isa.misa_xlen = misa_xlen;
     cfg.isa.vlen = vlen;
 
@@ -1122,7 +1122,7 @@ auto RuntimeOptions::to_machine_config() const -> simrv::core::MachineConfig {
     cfg.files.cpuconfig_path = fn_cpuconfig;
     cfg.files.cfu_plugin_path = fn_cfu_plugin;
     cfg.files.dump_dmem_path = fn_dump_dmem;
-    cfg.cpu_model_profile = cpu_model_profile;
+    cfg.cpu_model_preset = cpu_model_preset;
     if (!bpred_type.empty()) {
         cfg.branch_predictor_type = pipeline::parse_branch_predictor_type(bpred_type);
     }
@@ -1149,7 +1149,7 @@ auto RuntimeOptions::to_machine_config() const -> simrv::core::MachineConfig {
                 simrv::pipeline::CpuModelConfig model{};
                 if (simrv::core::parse_cpu_config(*model_path, model)) {
                     cfg.isa.misa_xlen = model.supported_xlen;
-                    cfg.isa.misa_profile = simrv::isa::misa_profile_bits(model.misa_profile);
+                    cfg.isa.isa_preset = simrv::isa::isa_preset_bits(model.isa_preset);
                     cfg.isa.misa_override = true;
                 }
             }
@@ -1207,9 +1207,9 @@ auto apply_runtime_options(simrv::core::Machine* machine, const RuntimeOptions& 
     if (options.traplog_mode) simrv::log::info("Trap/SBI log: {}", options.fn_traplog);
 
     auto apply_config_to_cpu = [&](simrv::core::CPU& cpu) {
-        if (options.cpu_model_profile.has_value()) {
+        if (options.cpu_model_preset.has_value()) {
             cpu.apply_cpu_model_config(
-                simrv::pipeline::make_cpu_model_profile(*options.cpu_model_profile));
+                simrv::pipeline::make_cpu_model_preset(*options.cpu_model_preset));
         }
         if (!options.fn_cfu_plugin.empty()) {
             cpu.cfu_unit.load_plugin(options.fn_cfu_plugin);
@@ -1343,7 +1343,7 @@ auto needs_memory_image(const ParseResult& result) -> bool {
                "default: 1G for Linux, 256M otherwise)\n",
                style(kBrightGreen), style(kBrightBlack), style(kReset), style(kReset));
     std::print(stdout,
-               "  {}--isa {}{}<PROFILE>{}               Select ISA profile: rv{}i | rv{}imac | "
+               "  {}--isa {}{}<PRESET>{}                Select ISA preset: rv{}i | rv{}imac | "
                "rv{}gc | rv{}gcbv\n",
                style(kBrightGreen), style(kBrightBlack), style(kReset), style(kReset), xlen_suffix,
                xlen_suffix, xlen_suffix, xlen_suffix);
@@ -1410,7 +1410,7 @@ auto needs_memory_image(const ParseResult& result) -> bool {
         "  {}--cpu-config {}{}<FILE>{}           Load microarchitectural latency configuration\n",
         style(kBrightGreen), style(kBrightBlack), style(kReset), style(kReset));
     std::print(stdout,
-               "  {}--cpu-profile {}{}<PROFILE>{}       Microarchitectural preset (tiny, balanced, "
+               "  {}--cpu-preset {}{}<PRESET>{}       Microarchitectural preset (tiny, balanced, "
                "performance) or model (.cfg)\n",
                style(kBrightGreen), style(kBrightBlack), style(kReset), style(kReset));
     std::print(stdout,

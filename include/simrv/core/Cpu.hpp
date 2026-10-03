@@ -20,7 +20,9 @@
 #include "simrv/core/DecodeCache.hpp"
 #include "simrv/core/RegisterFile.hpp"
 #include "simrv/core/Sbi.hpp"
-#include "simrv/core/StateControl.hpp"
+#include "simrv/core/TrapController.hpp"
+#include "simrv/device/Clint.hpp"
+#include "simrv/device/Plic.hpp"
 #include "simrv/core/Tlb.hpp"
 #include "simrv/execute/CfuUnit.hpp"
 #include "simrv/execute/ExecuteUnit.hpp"
@@ -652,8 +654,8 @@ class CPU {
 
     Tlb tlb;
 
-    PlicMmio plic_mmio;
-    ClintMmio clint_mmio;
+    simrv::device::Plic plic_mmio;
+    simrv::device::Clint clint_mmio;
     CsrFile csr_file;
     execute::ExecuteUnit execute_unit;
     execute::CfuUnit cfu_unit;

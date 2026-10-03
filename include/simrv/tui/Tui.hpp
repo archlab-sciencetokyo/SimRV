@@ -245,9 +245,6 @@ class Tui : public core::ITelemetrySink, public core::IConsoleSink {
     [[nodiscard]] auto mission_progress() const noexcept -> const MissionProgress& {
         return mission_;
     }
-    // Source-compatible wrappers for the former "learn mode" API.
-    void toggle_learn_mode() { toggle_student_guide(); }
-    [[nodiscard]] auto is_learn_mode_enabled() const -> bool { return is_student_guide_enabled(); }
     [[nodiscard]] auto is_trace_active() const -> bool override {
         return trace_or_livetrace_active_.load(std::memory_order_relaxed);
     }

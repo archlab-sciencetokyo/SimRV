@@ -1,6 +1,6 @@
 /**
  * @file Common.hpp
- * @brief Common ISA decoding utilities, field extraction, and MISA profile logic.
+ * @brief Common ISA decoding utilities, field extraction, and ISA preset logic.
  */
 #pragma once
 
@@ -115,36 +115,36 @@ constexpr auto misa_base_bits() -> CSRValue {
 }
 
 /**
- * @brief Decodes the extension set mask matching a specified MISA profile.
- * @param profile The profile definition (I, IMAC, GC, or GCBV).
- * @return CSRValue bitmask containing the profile's extensions.
+ * @brief Decodes the extension set mask matching a specified ISA preset.
+ * @param preset The preset definition (I, IMAC, GC, or GCBV).
+ * @return CSRValue bitmask containing the preset's extensions.
  */
-constexpr auto misa_profile_bits(MisaProfile profile) -> CSRValue {
-    switch (profile) {
-        case MisaProfile::E:
+constexpr auto isa_preset_bits(IsaPreset preset) -> CSRValue {
+    switch (preset) {
+        case IsaPreset::E:
             return misa_extension_bit(IsaExtension::E);
-        case MisaProfile::EM:
+        case IsaPreset::EM:
             return misa_extension_bit(IsaExtension::E) | misa_extension_bit(IsaExtension::M);
-        case MisaProfile::EMAC:
+        case IsaPreset::EMAC:
             return misa_extension_bit(IsaExtension::E) | misa_extension_bit(IsaExtension::M) |
                    misa_extension_bit(IsaExtension::A) | misa_extension_bit(IsaExtension::C);
-        case MisaProfile::I:
+        case IsaPreset::I:
             return misa_extension_bit(IsaExtension::I);
-        case MisaProfile::IM:
+        case IsaPreset::IM:
             return misa_extension_bit(IsaExtension::I) | misa_extension_bit(IsaExtension::M);
-        case MisaProfile::IMA:
+        case IsaPreset::IMA:
             return misa_extension_bit(IsaExtension::I) | misa_extension_bit(IsaExtension::M) |
                    misa_extension_bit(IsaExtension::A) | misa_extension_bit(IsaExtension::S) |
                    misa_extension_bit(IsaExtension::U);
-        case MisaProfile::IMAC:
+        case IsaPreset::IMAC:
             return misa_extension_bit(IsaExtension::I) | misa_extension_bit(IsaExtension::M) |
                    misa_extension_bit(IsaExtension::A) | misa_extension_bit(IsaExtension::C);
-        case MisaProfile::GC:
+        case IsaPreset::GC:
             return misa_extension_bit(IsaExtension::I) | misa_extension_bit(IsaExtension::M) |
                    misa_extension_bit(IsaExtension::A) | misa_extension_bit(IsaExtension::F) |
                    misa_extension_bit(IsaExtension::D) | misa_extension_bit(IsaExtension::C) |
                    misa_extension_bit(IsaExtension::S) | misa_extension_bit(IsaExtension::U);
-        case MisaProfile::GCBV:
+        case IsaPreset::GCBV:
             return misa_base_bits();
         default:
             return misa_extension_bit(IsaExtension::I);
@@ -192,7 +192,7 @@ constexpr auto misa_with_mxl(CSRValue misa_extensions,
 
 /** Default advertised target; V remains subject to the qualification limits documented separately.
  */
-constexpr CSRValue kMisaDefault = misa_profile_bits(MisaProfile::GCBV);
+constexpr CSRValue kMisaDefault = isa_preset_bits(IsaPreset::GCBV);
 
 /**
  * @brief Checks if a specific extension bit is set in a MISA CSR value.

@@ -117,7 +117,7 @@ void CPU::apply_cpu_model_config(const simrv::pipeline::CpuModelConfig& config) 
     branch_predictor.reset();
     const unsigned int target_xlen =
         (config.supported_xlen != 0) ? config.supported_xlen : simrv::xlen::kXLenBits;
-    state_.misa = isa::misa_with_mxl(isa::misa_profile_bits(config.misa_profile), target_xlen);
+    state_.misa = isa::misa_with_mxl(isa::isa_preset_bits(config.isa_preset), target_xlen);
     state_.initialize_lower_xlen_fields();
     if (machine_ != nullptr) {
         machine_->dma_engine().set_config(config.dma);
@@ -250,22 +250,22 @@ void CPU::mret() { TrapController::mret(state_); }
 
 void CPU::sret() { TrapController::sret(state_); }
 
-void CPU::plic_update_mip() { InterruptController::updateMip(plic_mmio, state_); }
+void CPU::plic_update_mip() { plic_mmio.update_mip(); }
 
 void CPU::plic_set_irq(IrqNumber irq_num, IrqLevel state) {
-    InterruptController::setIrq(plic_mmio, irq_num, state == IrqLevel::Asserted ? 1 : 0);
+    plic_mmio.set_irq(irq_num, state == IrqLevel::Asserted ? 1 : 0);
 }
 
 void CPU::plic_set_irq(IrqNumber irq_num, bool asserted) {
-    InterruptController::setIrq(plic_mmio, irq_num, asserted ? 1 : 0);
+    plic_mmio.set_irq(irq_num, asserted ? 1 : 0);
 }
 
 void CPU::plic_set_irq(IrqNumber irq_num, int state) {
-    InterruptController::setIrq(plic_mmio, irq_num, state != 0 ? 1 : 0);
+    plic_mmio.set_irq(irq_num, state != 0 ? 1 : 0);
 }
 
 void CPU::raise_exception(TrapCause cause, CSRValue tval) {
-    TrapController::raiseException(*this, cause, tval);
+    TrapController::raise_exception(*this, cause, tval);
 }
 
 void CPU::evaluate_timer_interrupt() {
@@ -280,7 +280,7 @@ void CPU::evaluate_timer_interrupt() {
         if (hid == 0) {
             cur_mtimecmp = primary_clint.mtimecmp.load(std::memory_order_relaxed);
             is_supervisor_timer = primary_clint.supervisor_timer.load(std::memory_order_relaxed);
-        } else if (hid < ClintMmio::kMaxClintHarts) {
+        } else if (hid < simrv::device::Clint::kMaxClintHarts) {
             cur_mtimecmp = primary_clint.hart_mtimecmp.at(hid).load(std::memory_order_relaxed);
             is_supervisor_timer =
                 primary_clint.hart_supervisor_timer.at(hid).load(std::memory_order_relaxed);

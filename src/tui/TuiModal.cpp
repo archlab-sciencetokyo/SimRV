@@ -90,9 +90,9 @@ void TuiModal::open(ModalType type, InspectorPane* inspector_pane, uint64_t step
 void TuiModal::open_save_cpu_config() {
     active_modal_ = ModalType::SaveCpuConfig;
     rendered_box_width_ = 0;
-    const auto profile =
-        static_cast<simrv::pipeline::CpuModelProfile>(settings_draft_.sys_config.profile);
-    const auto name = simrv::pipeline::cpu_model_profile_name(profile);
+    const auto preset =
+        static_cast<simrv::pipeline::CpuModelPreset>(settings_draft_.sys_config.preset);
+    const auto name = simrv::pipeline::cpu_model_preset_name(preset);
     input_ = std::format("configs/models/{}.cfg", name);
 }
 
@@ -139,8 +139,8 @@ void TuiModal::push_settings_digit(char c) {
 
 void TuiModal::pop_settings_digit() { modals::SettingsModal::pop_digit(settings_draft_, input_); }
 
-void TuiModal::apply_settings_misa_profile(int profile_idx) {
-    modals::SettingsModal::apply_misa_profile(settings_draft_, profile_idx);
+void TuiModal::apply_settings_isa_preset(int preset_idx) {
+    modals::SettingsModal::apply_isa_preset(settings_draft_, preset_idx);
 }
 
 void TuiModal::move_bp_cursor(int delta) {
@@ -302,10 +302,10 @@ auto TuiModal::submit(InspectorPane* inspector_pane, std::atomic<uint64_t>& step
                 path += ".cfg";
             }
             auto model = machine_.primary_hart().cpu_model_config;
-            const auto selected_profile =
-                static_cast<simrv::pipeline::CpuModelProfile>(settings_draft_.sys_config.profile);
-            if (selected_profile != simrv::pipeline::CpuModelProfile::Custom) {
-                model = simrv::pipeline::make_cpu_model_profile(selected_profile);
+            const auto selected_preset =
+                static_cast<simrv::pipeline::CpuModelPreset>(settings_draft_.sys_config.preset);
+            if (selected_preset != simrv::pipeline::CpuModelPreset::Custom) {
+                model = simrv::pipeline::make_cpu_model_preset(selected_preset);
             }
             model.pipeline.pipeline_type = static_cast<simrv::pipeline::PipelineType>(
                 settings_draft_.sys_config.pipeline_type);

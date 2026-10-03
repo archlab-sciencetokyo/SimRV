@@ -26,9 +26,9 @@
         }                                                                                 \
     } while (0)
 
-using simrv::isa::MisaProfile;
+using simrv::isa::IsaPreset;
 using simrv::pipeline::BranchPredictorType;
-using simrv::pipeline::CpuModelProfile;
+using simrv::pipeline::CpuModelPreset;
 using simrv::pipeline::PipelineType;
 
 void test_resolve_cpu_model_path() {
@@ -51,7 +51,7 @@ void test_resolve_cpu_model_path() {
     // Generic presets are compiled-in defaults, not config files
     const auto balanced_res = simrv::core::resolve_cpu_model_path("balanced");
     TEST_CHECK(!balanced_res.has_value());
-    TEST_CHECK(simrv::pipeline::parse_cpu_model_profile("balanced") == CpuModelProfile::Balanced);
+    TEST_CHECK(simrv::pipeline::parse_cpu_model_preset("balanced") == CpuModelPreset::Balanced);
 
     const auto nonexistent = simrv::core::resolve_cpu_model_path("non_existent_core_profile_xyz");
     TEST_CHECK(!nonexistent.has_value());
@@ -68,8 +68,8 @@ void test_load_canonical_rvcomp_cfg() {
 
     TEST_CHECK(config.name == "rvcomp");
     TEST_CHECK(config.supported_xlen == 32);
-    TEST_CHECK(config.profile == CpuModelProfile::Custom);
-    TEST_CHECK(config.misa_profile == MisaProfile::IMA);
+    TEST_CHECK(config.preset == CpuModelPreset::Custom);
+    TEST_CHECK(config.isa_preset == IsaPreset::IMA);
 
     simrv::pipeline::CpuModelConfig loaded{};
     TEST_CHECK(simrv::core::load_cpu_config(*path, loaded));
@@ -122,8 +122,8 @@ void test_load_canonical_cfu_provingground_cfg() {
 
     TEST_CHECK(config.name == "cfu-provingground");
     TEST_CHECK(config.supported_xlen == 32);
-    TEST_CHECK(config.profile == CpuModelProfile::Custom);
-    TEST_CHECK(config.misa_profile == MisaProfile::IM);
+    TEST_CHECK(config.preset == CpuModelPreset::Custom);
+    TEST_CHECK(config.isa_preset == IsaPreset::IM);
     TEST_CHECK(config.isa_extensions.size() == 1);
     TEST_CHECK(config.has_isa_extension("x-cfu"));
     TEST_CHECK(config.cfu.enabled);
@@ -158,7 +158,7 @@ void test_multi_letter_isa_extensions() {
         "[cpu]\nname = \"crypto-test\"\nmisa = \"rv64im_zkn\"\n\n"
         "[isa]\nextensions = \"zkr,zkt\"\n",
         config));
-    TEST_CHECK(config.misa_profile == MisaProfile::IM);
+    TEST_CHECK(config.isa_preset == IsaPreset::IM);
     TEST_CHECK(config.has_isa_extension("zkn"));
     TEST_CHECK(config.has_isa_extension("zkr"));
     TEST_CHECK(config.has_isa_extension("zkt"));
@@ -185,11 +185,11 @@ void test_rv32e_profile() {
     simrv::pipeline::CpuModelConfig config{};
     TEST_CHECK(simrv::core::parse_cpu_config_string(
         "[cpu]\nname = \"rv32e-test\"\nmisa = \"rv32e\"\n", config));
-    TEST_CHECK(config.misa_profile == MisaProfile::E);
+    TEST_CHECK(config.isa_preset == IsaPreset::E);
     TEST_CHECK(config.supported_xlen == 32);
     TEST_CHECK(config.validate().has_value());
 
-    const auto e = simrv::isa::misa_profile_bits(MisaProfile::E);
+    const auto e = simrv::isa::isa_preset_bits(IsaPreset::E);
     TEST_CHECK(simrv::isa::misa_has_extension(e, simrv::isa::IsaExtension::E));
     TEST_CHECK(!simrv::isa::misa_has_extension(e, simrv::isa::IsaExtension::I));
     TEST_CHECK(simrv::isa::instruction_enabled_by_misa(e, simrv::isa::OperationId::ADD));
@@ -197,15 +197,15 @@ void test_rv32e_profile() {
     simrv::pipeline::CpuModelConfig extended{};
     TEST_CHECK(simrv::core::parse_cpu_config_string(
         "[cpu]\nname = \"rv32e-zba\"\nmisa = \"e_zba\"\n", extended));
-    TEST_CHECK(extended.misa_profile == MisaProfile::E);
+    TEST_CHECK(extended.isa_preset == IsaPreset::E);
     TEST_CHECK(extended.supported_xlen == 32);
     TEST_CHECK(extended.has_isa_extension("zba"));
 
-    const auto em = simrv::isa::misa_profile_bits(MisaProfile::EM);
+    const auto em = simrv::isa::isa_preset_bits(IsaPreset::EM);
     TEST_CHECK(simrv::isa::misa_has_extension(em, simrv::isa::IsaExtension::E));
     TEST_CHECK(simrv::isa::misa_has_extension(em, simrv::isa::IsaExtension::M));
     TEST_CHECK(!simrv::isa::misa_has_extension(em, simrv::isa::IsaExtension::I));
-    const auto emac = simrv::isa::misa_profile_bits(MisaProfile::EMAC);
+    const auto emac = simrv::isa::isa_preset_bits(IsaPreset::EMAC);
     TEST_CHECK(simrv::isa::misa_has_extension(emac, simrv::isa::IsaExtension::A));
     TEST_CHECK(simrv::isa::misa_has_extension(emac, simrv::isa::IsaExtension::C));
 
@@ -233,7 +233,7 @@ void test_rv32e_profile() {
 
 void test_serialize_and_roundtrip() {
     std::cout << "[Test] Serialize & round-trip...\n";
-    auto original = simrv::pipeline::make_cpu_model_profile(CpuModelProfile::Performance);
+    auto original = simrv::pipeline::make_cpu_model_preset(CpuModelPreset::Performance);
     original.pipeline.mul_latency = 5;
     original.pipeline.div_latency = 22;
     original.pipeline.branch_mispredict_penalty = 6;
@@ -253,7 +253,7 @@ void test_serialize_and_roundtrip() {
     simrv::pipeline::CpuModelConfig reloaded{};
     const bool ok = simrv::core::load_cpu_config_string(text, reloaded);
     TEST_CHECK(ok);
-    TEST_CHECK(reloaded.misa_profile == MisaProfile::GCBV);
+    TEST_CHECK(reloaded.isa_preset == IsaPreset::GCBV);
     TEST_CHECK(reloaded.pipeline.mul_latency == 5);
     TEST_CHECK(reloaded.pipeline.div_latency == 22);
     TEST_CHECK(reloaded.pipeline.branch_mispredict_penalty == 6);
@@ -265,7 +265,7 @@ void test_save_cpu_config_file() {
     const auto temp_dir = std::filesystem::temp_directory_path();
     const auto temp_file = temp_dir / "simrv_test_model_save.cfg";
 
-    auto original = simrv::pipeline::make_cpu_model_profile(CpuModelProfile::Tiny);
+    auto original = simrv::pipeline::make_cpu_model_preset(CpuModelPreset::Tiny);
     original.pipeline.mul_latency = 7;
 
     const bool saved = simrv::core::save_cpu_config(temp_file.string(), original, "temp_tiny");
@@ -283,7 +283,7 @@ void test_save_cpu_config_file() {
 
 void test_xlen_compatibility_rules() {
     std::cout << "[Test] test_xlen_compatibility_rules...\n";
-    auto base = simrv::pipeline::make_cpu_model_profile(CpuModelProfile::Tiny);
+    auto base = simrv::pipeline::make_cpu_model_preset(CpuModelPreset::Tiny);
 
     // 1. Any model with supported_xlen = 0 is neutral and validates on both RV32 and RV64
     base.supported_xlen = 0;

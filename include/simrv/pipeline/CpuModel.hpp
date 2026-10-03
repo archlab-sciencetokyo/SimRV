@@ -24,7 +24,7 @@
 
 namespace simrv::pipeline {
 
-enum class CpuModelProfile : uint8_t {
+enum class CpuModelPreset : uint8_t {
     Tiny,
     Balanced,
     Performance,
@@ -96,8 +96,8 @@ struct CfuConfig {
 };
 
 struct CpuModelConfig {
-    CpuModelProfile profile = CpuModelProfile::Balanced;
-    isa::MisaProfile misa_profile = isa::MisaProfile::GCBV;
+    CpuModelPreset preset = CpuModelPreset::Balanced;
+    isa::IsaPreset isa_preset = isa::IsaPreset::GCBV;
     std::string name = "balanced";
     std::string description{};
     uint8_t supported_xlen = 0;  // 0 = any/both 32 and 64, 32 = RV32 only, 64 = RV64 only
@@ -110,7 +110,7 @@ struct CpuModelConfig {
     AxiConfig axi{};
     CfuConfig cfu{};
     // Multi-letter extensions do not have individual MISA bits.  Keep them alongside the
-    // legacy MISA profile so presets can describe extensions such as Zkn/Zkr/Zkt losslessly.
+    // legacy ISA preset so CPU presets can describe extensions such as Zkn/Zkr/Zkt losslessly.
     std::vector<std::string> isa_extensions{};
     bool enable_idle_spans = true;
 
@@ -129,8 +129,8 @@ struct CpuModelConfig {
                 std::format("CPU model '{}' requires XLEN=64 (this simulator build is RV32)",
                             name.empty() ? "custom" : name));
         }
-        if ((misa_profile == isa::MisaProfile::E || misa_profile == isa::MisaProfile::EM ||
-             misa_profile == isa::MisaProfile::EMAC) &&
+        if ((isa_preset == isa::IsaPreset::E || isa_preset == isa::IsaPreset::EM ||
+             isa_preset == isa::IsaPreset::EMAC) &&
             supported_xlen != 32) {
             return std::unexpected(
                 std::format("CPU model '{}' uses RV32E and must specify XLEN=32",
@@ -218,37 +218,37 @@ struct CpuModelConfig {
     }
 };
 
-[[nodiscard]] constexpr auto cpu_model_profile_name(CpuModelProfile profile) -> std::string_view {
-    switch (profile) {
-        case CpuModelProfile::Tiny:
+[[nodiscard]] constexpr auto cpu_model_preset_name(CpuModelPreset preset) -> std::string_view {
+    switch (preset) {
+        case CpuModelPreset::Tiny:
             return "tiny";
-        case CpuModelProfile::Balanced:
+        case CpuModelPreset::Balanced:
             return "balanced";
-        case CpuModelProfile::Performance:
+        case CpuModelPreset::Performance:
             return "performance";
-        case CpuModelProfile::Custom:
+        case CpuModelPreset::Custom:
             return "custom";
     }
     return "custom";
 }
 
-[[nodiscard]] inline auto parse_cpu_model_profile(std::string_view value)
-    -> std::optional<CpuModelProfile> {
-    if (value == "tiny") return CpuModelProfile::Tiny;
-    if (value == "balanced") return CpuModelProfile::Balanced;
-    if (value == "performance") return CpuModelProfile::Performance;
-    if (value == "custom") return CpuModelProfile::Custom;
+[[nodiscard]] inline auto parse_cpu_model_preset(std::string_view value)
+    -> std::optional<CpuModelPreset> {
+    if (value == "tiny") return CpuModelPreset::Tiny;
+    if (value == "balanced") return CpuModelPreset::Balanced;
+    if (value == "performance") return CpuModelPreset::Performance;
+    if (value == "custom") return CpuModelPreset::Custom;
     return std::nullopt;
 }
 
-[[nodiscard]] inline auto make_cpu_model_profile(CpuModelProfile profile) -> CpuModelConfig {
+[[nodiscard]] inline auto make_cpu_model_preset(CpuModelPreset preset) -> CpuModelConfig {
     CpuModelConfig result{};
-    result.profile = profile;
-    result.name = std::string(cpu_model_profile_name(profile));
-    switch (profile) {
-        case CpuModelProfile::Tiny:
+    result.preset = preset;
+    result.name = std::string(cpu_model_preset_name(preset));
+    switch (preset) {
+        case CpuModelPreset::Tiny:
             result.description = "Minimal 3-stage microcontroller core";
-            result.misa_profile = isa::MisaProfile::IMAC;
+            result.isa_preset = isa::IsaPreset::IMAC;
             result.pipeline.pipeline_type = PipelineType::ThreeStage;
             result.pipeline.enable_forwarding = false;
             result.pipeline.branch_predictor.type = BranchPredictorType::Static;
@@ -256,18 +256,18 @@ struct CpuModelConfig {
             result.instruction_cache = {2048, 1, 32, 1, 12};
             result.data_cache = result.instruction_cache;
             break;
-        case CpuModelProfile::Balanced:
+        case CpuModelPreset::Balanced:
             result.description = "Default balanced 5-stage general-purpose core";
-            result.misa_profile = isa::MisaProfile::GCBV;
+            result.isa_preset = isa::IsaPreset::GCBV;
             result.pipeline.pipeline_type = PipelineType::FiveStage;
             result.pipeline.enable_forwarding = true;
             result.pipeline.branch_predictor.type = BranchPredictorType::Bimodal;
             result.instruction_cache = {4096, 2, 32, 1, 10};
             result.data_cache = result.instruction_cache;
             break;
-        case CpuModelProfile::Performance:
+        case CpuModelPreset::Performance:
             result.description = "High-throughput 5-stage core with aggressive prediction";
-            result.misa_profile = isa::MisaProfile::GCBV;
+            result.isa_preset = isa::IsaPreset::GCBV;
             result.pipeline.pipeline_type = PipelineType::FiveStage;
             result.pipeline.enable_forwarding = true;
             result.pipeline.enable_instruction_prefetch = true;
@@ -275,8 +275,8 @@ struct CpuModelConfig {
             result.instruction_cache = {16384, 4, 32, 1, 8};
             result.data_cache = result.instruction_cache;
             break;
-        case CpuModelProfile::Custom:
-            result.profile = CpuModelProfile::Custom;
+        case CpuModelPreset::Custom:
+            result.preset = CpuModelPreset::Custom;
             break;
     }
     return result;

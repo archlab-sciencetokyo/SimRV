@@ -7,7 +7,7 @@ simrv \- Dual-width explainable RISC-V architectural simulator and TUI workbench
 [\fB\-\-ca\fR|\fB\-\-ia\fR]
 [\fB\-m\fR \fIelf_file\fR]
 [\fB\-s\fR \fIsteps\fR]
-[\fB\-\-cpu\-profile\fR \fIcfg_file\fR]
+[\fB\-\-cpu\-preset\fR \fIcfg_file\fR]
 [\fIoptions\fR...]
 .SH DESCRIPTION
 .B SimRV
@@ -33,8 +33,8 @@ Select high-speed instruction-accurate simulation kernel.
 .BR \-p ", " \-\-pipeline " " \fItype\fR
 Select pipeline microarchitecture target (\fBthree-stage\fR, \fBfive-stage\fR, or \fBdual-issue\fR).
 .TP
-.BR \-\-cpu\-profile " " \fIpath.cfg\fR
-Load a human-editable CPU microarchitecture profile (.cfg).
+.BR \-\-cpu\-preset " " \fIpath.cfg\fR
+Load a human-editable CPU microarchitecture preset (.cfg).
 .TP
 .BR \-s ", " \-e ", " \-\-steps " " \fIN\fR
 Stop simulation after \fIN\fR total instructions have retired across all harts.

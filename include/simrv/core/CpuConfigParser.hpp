@@ -60,35 +60,35 @@ inline auto parse_bool(std::string_view val) -> std::optional<bool> {
     return std::nullopt;
 }
 
-inline auto parse_misa_profile_string(std::string_view val)
-    -> std::optional<simrv::isa::MisaProfile> {
+inline auto parse_isa_preset_string(std::string_view val)
+    -> std::optional<simrv::isa::IsaPreset> {
     val = unquote(val);
     if (iequals(val, "i") || iequals(val, "rv32i") || iequals(val, "rv64i")) {
-        return simrv::isa::MisaProfile::I;
+        return simrv::isa::IsaPreset::I;
     }
     if (iequals(val, "e") || iequals(val, "rv32e")) {
-        return simrv::isa::MisaProfile::E;
+        return simrv::isa::IsaPreset::E;
     }
     if (iequals(val, "em") || iequals(val, "rv32em")) {
-        return simrv::isa::MisaProfile::EM;
+        return simrv::isa::IsaPreset::EM;
     }
     if (iequals(val, "emac") || iequals(val, "rv32emac")) {
-        return simrv::isa::MisaProfile::EMAC;
+        return simrv::isa::IsaPreset::EMAC;
     }
     if (iequals(val, "im") || iequals(val, "rv32im") || iequals(val, "rv64im")) {
-        return simrv::isa::MisaProfile::IM;
+        return simrv::isa::IsaPreset::IM;
     }
     if (iequals(val, "ima") || iequals(val, "rv32ima") || iequals(val, "rv64ima")) {
-        return simrv::isa::MisaProfile::IMA;
+        return simrv::isa::IsaPreset::IMA;
     }
     if (iequals(val, "imac") || iequals(val, "rv32imac") || iequals(val, "rv64imac")) {
-        return simrv::isa::MisaProfile::IMAC;
+        return simrv::isa::IsaPreset::IMAC;
     }
     if (iequals(val, "gc") || iequals(val, "rv32gc") || iequals(val, "rv64gc")) {
-        return simrv::isa::MisaProfile::GC;
+        return simrv::isa::IsaPreset::GC;
     }
     if (iequals(val, "gcbv") || iequals(val, "rv32gcbv") || iequals(val, "rv64gcbv")) {
-        return simrv::isa::MisaProfile::GCBV;
+        return simrv::isa::IsaPreset::GCBV;
     }
     return std::nullopt;
 }
@@ -141,25 +141,25 @@ inline auto parse_scaled_u64(std::string_view value) -> std::optional<uint64_t> 
     }
 }
 
-inline auto misa_profile_name(simrv::isa::MisaProfile profile) -> std::string_view {
-    switch (profile) {
-        case simrv::isa::MisaProfile::E:
+inline auto isa_preset_name(simrv::isa::IsaPreset preset) -> std::string_view {
+    switch (preset) {
+        case simrv::isa::IsaPreset::E:
             return "e";
-        case simrv::isa::MisaProfile::EM:
+        case simrv::isa::IsaPreset::EM:
             return "em";
-        case simrv::isa::MisaProfile::EMAC:
+        case simrv::isa::IsaPreset::EMAC:
             return "emac";
-        case simrv::isa::MisaProfile::I:
+        case simrv::isa::IsaPreset::I:
             return "i";
-        case simrv::isa::MisaProfile::IM:
+        case simrv::isa::IsaPreset::IM:
             return "im";
-        case simrv::isa::MisaProfile::IMA:
+        case simrv::isa::IsaPreset::IMA:
             return "ima";
-        case simrv::isa::MisaProfile::IMAC:
+        case simrv::isa::IsaPreset::IMAC:
             return "imac";
-        case simrv::isa::MisaProfile::GC:
+        case simrv::isa::IsaPreset::GC:
             return "gc";
-        case simrv::isa::MisaProfile::GCBV:
+        case simrv::isa::IsaPreset::GCBV:
             return "gcbv";
     }
     return "gcbv";
@@ -347,23 +347,23 @@ inline auto parse_cpu_config_stream(std::istream& stream, simrv::pipeline::CpuMo
         }
 
         try {
-            // 1. CPU Section & Profile Presets
-            if (key == "profile" || key == "cpu_profile") {
-                const auto parsed = simrv::pipeline::parse_cpu_model_profile(val_str);
-                if (!parsed || *parsed == simrv::pipeline::CpuModelProfile::Custom) {
-                    simrv::log::warn("Unsupported CPU model profile '{}'", val_str);
+            // 1. CPU Section & Presets
+            if (key == "preset" || key == "cpu_preset") {
+                const auto parsed = simrv::pipeline::parse_cpu_model_preset(val_str);
+                if (!parsed || *parsed == simrv::pipeline::CpuModelPreset::Custom) {
+                    simrv::log::warn("Unsupported CPU model preset '{}'", val_str);
                     return false;
                 }
-                config = simrv::pipeline::make_cpu_model_profile(*parsed);
+                config = simrv::pipeline::make_cpu_model_preset(*parsed);
                 continue;
             }
             if (key == "name" || key == "model_name") {
                 config.name = std::string(val_str);
-                const auto parsed = simrv::pipeline::parse_cpu_model_profile(val_str);
+                const auto parsed = simrv::pipeline::parse_cpu_model_preset(val_str);
                 if (parsed.has_value()) {
-                    config.profile = *parsed;
+                    config.preset = *parsed;
                 } else {
-                    config.profile = simrv::pipeline::CpuModelProfile::Custom;
+                    config.preset = simrv::pipeline::CpuModelPreset::Custom;
                 }
                 continue;
             }
@@ -371,20 +371,20 @@ inline auto parse_cpu_config_stream(std::istream& stream, simrv::pipeline::CpuMo
                 config.supported_xlen = static_cast<uint8_t>(std::stoul(std::string(val_str)));
                 continue;
             }
-            if (key == "misa" || key == "isa" || key == "misa_profile") {
-                const auto parsed = detail::parse_misa_profile_string(val_str);
+            if (key == "misa" || key == "isa" || key == "isa_preset") {
+                const auto parsed = detail::parse_isa_preset_string(val_str);
                 const auto separator = val_str.find_first_of("_ ,\t");
                 const auto base = val_str.substr(0, separator);
-                const auto base_profile = detail::parse_misa_profile_string(base);
+                const auto base_profile = detail::parse_isa_preset_string(base);
                 if (parsed.has_value()) {
-                    config.misa_profile = *parsed;
+                    config.isa_preset = *parsed;
                 } else {
                     // Accept strings such as "im_zkn_zkt" while retaining the legacy
-                    // MISA profile for the single-letter portion.
+                    // ISA preset for the single-letter portion.
                     if (base_profile.has_value()) {
-                        config.misa_profile = *base_profile;
+                        config.isa_preset = *base_profile;
                     } else {
-                        simrv::log::warn("Unknown MISA profile '{}'", val_str);
+                        simrv::log::warn("Unknown ISA preset '{}'", val_str);
                     }
                     if (separator != std::string_view::npos) {
                         detail::parse_isa_extensions(config.isa_extensions,
@@ -394,9 +394,9 @@ inline auto parse_cpu_config_stream(std::istream& stream, simrv::pipeline::CpuMo
                 const auto unquoted = detail::unquote(val_str);
                 if (unquoted.starts_with("rv32") || unquoted.starts_with("RV32") ||
                     (base_profile.has_value() &&
-                     (*base_profile == simrv::isa::MisaProfile::E ||
-                      *base_profile == simrv::isa::MisaProfile::EM ||
-                      *base_profile == simrv::isa::MisaProfile::EMAC))) {
+                     (*base_profile == simrv::isa::IsaPreset::E ||
+                      *base_profile == simrv::isa::IsaPreset::EM ||
+                      *base_profile == simrv::isa::IsaPreset::EMAC))) {
                     if (config.supported_xlen == 0) config.supported_xlen = 32;
                 } else if (unquoted.starts_with("rv64") || unquoted.starts_with("RV64")) {
                     if (config.supported_xlen == 0) config.supported_xlen = 64;
@@ -444,10 +444,10 @@ inline auto parse_cpu_config_stream(std::istream& stream, simrv::pipeline::CpuMo
             }
 
             // Explicit overrides mark profile as custom unless matched
-            if (config.profile != simrv::pipeline::CpuModelProfile::Tiny &&
-                config.profile != simrv::pipeline::CpuModelProfile::Balanced &&
-                config.profile != simrv::pipeline::CpuModelProfile::Performance) {
-                config.profile = simrv::pipeline::CpuModelProfile::Custom;
+            if (config.preset != simrv::pipeline::CpuModelPreset::Tiny &&
+                config.preset != simrv::pipeline::CpuModelPreset::Balanced &&
+                config.preset != simrv::pipeline::CpuModelPreset::Performance) {
+                config.preset = simrv::pipeline::CpuModelPreset::Custom;
             }
 
             // 2. Pipeline settings
@@ -864,7 +864,7 @@ inline auto parse_soc_config_stream(std::istream& stream, simrv::core::SoCConfig
         if (section == Section::Soc) {
             if (key == "name")
                 config.name = std::string(value);
-            else if (key == "cpu_model" || key == "cpu_profile")
+            else if (key == "cpu_model" || key == "cpu_preset")
                 config.cpu_model = std::string(value);
             else if (key == "platform") {
                 config.enable_pcie = detail::iequals(value, "pcie");
@@ -1016,7 +1016,7 @@ inline void serialize_cpu_config(const simrv::pipeline::CpuModelConfig& config, 
                                  std::string_view description = "") {
     const auto name =
         model_name.empty()
-            ? (config.name.empty() ? simrv::pipeline::cpu_model_profile_name(config.profile)
+            ? (config.name.empty() ? simrv::pipeline::cpu_model_preset_name(config.preset)
                                    : std::string_view(config.name))
             : model_name;
 
@@ -1030,7 +1030,7 @@ inline void serialize_cpu_config(const simrv::pipeline::CpuModelConfig& config, 
     if (config.supported_xlen != 0) {
         out << "xlen = " << static_cast<unsigned int>(config.supported_xlen) << "\n";
     }
-    out << "misa = \"" << detail::misa_profile_name(config.misa_profile) << "\"\n";
+    out << "misa = \"" << detail::isa_preset_name(config.isa_preset) << "\"\n";
     out << "\n";
 
     if (!config.isa_extensions.empty()) {

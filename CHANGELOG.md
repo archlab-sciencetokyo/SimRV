@@ -3,6 +3,22 @@
 All notable changes to SimRV are documented here.
 Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v3.0.0-rc.3] — 2026-10-03
+
+This release candidate clarifies SimRV terminology by reserving “profile” for standards-defined
+RISC-V profiles and naming SimRV-selectable configurations as presets.
+
+### Terminology
+
+- Renamed the internal `CpuModelProfile` API to `CpuModelPreset` and made `--cpu-preset` the
+  only supported CLI spelling.
+- Renamed the internal MISA preset API to `IsaPreset`, including parser, serializer, and runtime
+  configuration names.
+- Renamed CPU-model configuration keys to `preset`/`cpu_preset` and ISA configuration to
+  `isa_preset`.
+- Removed unused compatibility facades and wrappers from the TUI, trap controller, and CPU
+  interrupt-device plumbing.
+
 ## [v3.0.0-rc.2] — 2026-10-03
 
 This release candidate hardens the 3.0 GA workflow around portable operation, capability
@@ -673,6 +689,7 @@ on inspector polish, correctness fixes, and CLI normalization.
 
 - Initial public alpha: CMake preset infrastructure, Clang-20 CI, base RISC-V pipeline
 
+[v3.0.0-rc.3]: https://github.com/archlab-sciencetokyo/SimRV/releases/tag/v3.0.0-rc.3
 [v3.0.0-rc.2]: https://github.com/archlab-sciencetokyo/SimRV/releases/tag/v3.0.0-rc.2
 [v3.0.0-rc.1]: https://github.com/archlab-sciencetokyo/SimRV/releases/tag/v3.0.0-rc.1
 [v3.0.0-alpha.2]: https://github.com/archlab-sciencetokyo/SimRV/releases/tag/v3.0.0-alpha.2

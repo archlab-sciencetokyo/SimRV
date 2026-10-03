@@ -2964,13 +2964,13 @@ auto Tui::handle_modal_settings(ModalType mtype, uint8_t byte, TuiKey key) -> bo
             render(true);
             return true;
         } else if (byte == 'p' || byte == 'P') {
-            modal_.apply_settings_misa_profile(0);
+            modal_.apply_settings_isa_preset(0);
             render(true);
         } else if (byte == 'i' || byte == 'I') {
-            modal_.apply_settings_misa_profile(1);
+            modal_.apply_settings_isa_preset(1);
             render(true);
         } else if (byte == 'g' || byte == 'G') {
-            modal_.apply_settings_misa_profile(2);
+            modal_.apply_settings_isa_preset(2);
             render(true);
         } else if (byte >= '0' && byte <= '9') {
             modal_.push_settings_digit(static_cast<char>(byte));
