@@ -32,7 +32,7 @@
       "required": ["engine", "platform", "baremetal", "harts", "pipeline", "dram_base", "dram_size", "vlen"],
       "properties": {
         "engine": { "type": "string" },
-        "platform": { "enum": ["pcie", "mmio"] },
+        "platform": { "enum": ["pcie", "mmio", "none"] },
         "baremetal": { "type": "boolean" },
         "harts": { "type": "integer", "minimum": 1 },
         "pipeline": { "type": "string" },

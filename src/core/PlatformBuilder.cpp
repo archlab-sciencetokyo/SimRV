@@ -54,20 +54,24 @@ void PlatformBuilder::compose(Machine& machine) {
         }
     }
     if (composition.mmio) {
-        machine.runtime_->mmio_disk =
-            std::make_shared<simrv::device::VirtioMmioBlock>(0x10001000, 2, &machine, disk_path);
-        machine.runtime_->mmio_console =
-            std::make_shared<simrv::device::VirtioMmioConsole>(0x10002000, 1, &machine);
-        machine.runtime_->mmio_rng =
-            std::make_shared<simrv::device::VirtioMmioRng>(0x10003000, 4, &machine);
-        machine.runtime_->mmio_gpu =
-            std::make_shared<simrv::device::VirtioMmioGpu>(0x10004000, 5, &machine);
-        machine.runtime_->mmio_input =
-            std::make_shared<simrv::device::VirtioMmioInput>(0x10005000, 6, &machine);
-        machine.runtime_->mmio_sound =
-            std::make_shared<simrv::device::VirtioMmioSound>(0x10006000, 7, &machine);
-        machine.runtime_->mmio_net =
-            std::make_shared<simrv::device::VirtioMmioNet>(0x10007000, 8, &machine, network_mode);
+        const auto base_for = [&](simrv::core::SoCDeviceKind kind, Address fallback) {
+            if (const auto* device = machine.config.soc.find(kind)) return device->base;
+            return fallback;
+        };
+        machine.runtime_->mmio_disk = std::make_shared<simrv::device::VirtioMmioBlock>(
+            base_for(SoCDeviceKind::VirtioMmioBlock, 0x10001000), 2, &machine, disk_path);
+        machine.runtime_->mmio_console = std::make_shared<simrv::device::VirtioMmioConsole>(
+            base_for(SoCDeviceKind::VirtioMmioConsole, 0x10002000), 1, &machine);
+        machine.runtime_->mmio_rng = std::make_shared<simrv::device::VirtioMmioRng>(
+            base_for(SoCDeviceKind::VirtioMmioRng, 0x10003000), 4, &machine);
+        machine.runtime_->mmio_gpu = std::make_shared<simrv::device::VirtioMmioGpu>(
+            base_for(SoCDeviceKind::VirtioMmioGpu, 0x10004000), 5, &machine);
+        machine.runtime_->mmio_input = std::make_shared<simrv::device::VirtioMmioInput>(
+            base_for(SoCDeviceKind::VirtioMmioInput, 0x10005000), 6, &machine);
+        machine.runtime_->mmio_sound = std::make_shared<simrv::device::VirtioMmioSound>(
+            base_for(SoCDeviceKind::VirtioMmioSound, 0x10006000), 7, &machine);
+        machine.runtime_->mmio_net = std::make_shared<simrv::device::VirtioMmioNet>(
+            base_for(SoCDeviceKind::VirtioMmioNet, 0x10007000), 8, &machine, network_mode);
     }
 }
 

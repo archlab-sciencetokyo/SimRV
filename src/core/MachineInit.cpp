@@ -19,6 +19,7 @@
 #include "simrv/debug/SpikeLockstep.hpp"
 #include "simrv/device/AIA.hpp"
 #include "simrv/device/Aclint.hpp"
+#include "simrv/device/DmaController.hpp"
 #include "simrv/device/Power.hpp"
 #include "simrv/device/Rtc.hpp"
 #include "simrv/device/Uart.hpp"
@@ -290,6 +291,20 @@ auto Machine::platform_status() const -> PlatformStatusSnapshot {
     snapshot.gpu_status = runtime_->pci_gpu
                               ? runtime_->pci_gpu->device_status()
                               : (runtime_->mmio_gpu ? runtime_->mmio_gpu->device_status() : 0);
+    if (runtime_->pci_sound) {
+        snapshot.sound_status = runtime_->pci_sound->device_status();
+        snapshot.sound_active = runtime_->pci_sound->backend().is_active();
+        snapshot.sound_sample_rate = runtime_->pci_sound->backend().sample_rate();
+        snapshot.sound_channels = runtime_->pci_sound->backend().channels();
+    } else if (runtime_->mmio_sound) {
+        snapshot.sound_status = runtime_->mmio_sound->device_status();
+        snapshot.sound_active = runtime_->mmio_sound->backend().is_active();
+        snapshot.sound_sample_rate = runtime_->mmio_sound->backend().sample_rate();
+        snapshot.sound_channels = runtime_->mmio_sound->backend().channels();
+    }
+    if (runtime_->dma_controller) {
+        snapshot.dma_busy = runtime_->dma_controller->is_busy();
+    }
     return snapshot;
 }
 
@@ -320,12 +335,14 @@ auto Machine::initialize() -> std::expected<void, std::string> {
             model.interconnect.startup_data_response_latency);
         if (model.name == "cfu-provingground" || model.name == "rvproc") {
             config.memory.dram_base = 0x00000000;
-            if (config.memory.dram_size < Address{512} * 1024 * 1024) {
+            if (!config.soc.dram_size.has_value() &&
+                config.memory.dram_size < Address{512} * 1024 * 1024) {
                 config.memory.dram_size = Address{512} * 1024 * 1024;
             }
         } else if (model.name == "rvcomp") {
-            config.memory.dram_base = 0x80000000;
-            if (config.memory.dram_size < Address{512} * 1024 * 1024) {
+            if (!config.soc.dram_base.has_value()) config.memory.dram_base = 0x80000000;
+            if (!config.soc.dram_size.has_value() &&
+                config.memory.dram_size < Address{512} * 1024 * 1024) {
                 config.memory.dram_size = Address{512} * 1024 * 1024;
             }
         }
@@ -345,12 +362,14 @@ auto Machine::initialize() -> std::expected<void, std::string> {
             model.interconnect.startup_data_response_latency);
         if (model.name == "cfu-provingground" || model.name == "rvproc") {
             config.memory.dram_base = 0x00000000;
-            if (config.memory.dram_size < Address{512} * 1024 * 1024) {
+            if (!config.soc.dram_size.has_value() &&
+                config.memory.dram_size < Address{512} * 1024 * 1024) {
                 config.memory.dram_size = Address{512} * 1024 * 1024;
             }
         } else if (model.name == "rvcomp") {
-            config.memory.dram_base = 0x80000000;
-            if (config.memory.dram_size < Address{512} * 1024 * 1024) {
+            if (!config.soc.dram_base.has_value()) config.memory.dram_base = 0x80000000;
+            if (!config.soc.dram_size.has_value() &&
+                config.memory.dram_size < Address{512} * 1024 * 1024) {
                 config.memory.dram_size = Address{512} * 1024 * 1024;
             }
         }
@@ -366,6 +385,15 @@ auto Machine::initialize() -> std::expected<void, std::string> {
     runtime_->rtc = std::make_unique<simrv::Rtc>(*this);
     runtime_->uart = std::make_unique<simrv::device::Uart>(*this);
     runtime_->power = std::make_unique<simrv::device::PowerMmio>(*this);
+    if (!runtime_->dma_controller) {
+        runtime_->dma_controller = std::make_unique<simrv::device::DmaController>(this);
+    }
+    if (!runtime_->axi_bridge) {
+        runtime_->axi_bridge =
+            std::make_unique<simrv::memory::Axi4Bridge>(this, primary_hart().cpu_model_config.axi);
+    } else {
+        runtime_->axi_bridge->set_config(primary_hart().cpu_model_config.axi);
+    }
     if (tui_enabled() || debugger_enabled()) {
         execution_state_.store(ExecutionState::Paused, std::memory_order_release);
     }
@@ -397,14 +425,23 @@ auto Machine::initialize() -> std::expected<void, std::string> {
         simrv::mmio::kAplicSSize, runtime_->imsic_s.get());
     PlatformBuilder::compose(*this);
 
-    const std::array<simrv::memory::TileLinkNode*, 9> base_nodes = {
-        runtime_->aclint_mtimer.get(), runtime_->aclint_mswi.get(), runtime_->imsic_m.get(),
-        runtime_->imsic_s.get(),       runtime_->aplic_m.get(),     runtime_->aplic_s.get(),
-        runtime_->rtc.get(),           runtime_->uart.get(),        runtime_->power.get(),
+    const auto device_enabled = [&](simrv::core::SoCDeviceKind kind) {
+        return !config.soc.disable_unlisted_devices || config.soc.find(kind) != nullptr;
     };
-    for (auto* node : base_nodes) {
-        if (node != nullptr) memory().system_bus().add_node(node);
-    }
+    const auto add_base_node = [&](simrv::core::SoCDeviceKind kind,
+                                   simrv::memory::TileLinkNode* node) {
+        if (device_enabled(kind) && node != nullptr) memory().system_bus().add_node(node);
+    };
+    add_base_node(SoCDeviceKind::AclintMtimer, runtime_->aclint_mtimer.get());
+    add_base_node(SoCDeviceKind::AclintMswi, runtime_->aclint_mswi.get());
+    add_base_node(SoCDeviceKind::Imsic, runtime_->imsic_m.get());
+    add_base_node(SoCDeviceKind::Imsic, runtime_->imsic_s.get());
+    add_base_node(SoCDeviceKind::Aplic, runtime_->aplic_m.get());
+    add_base_node(SoCDeviceKind::Aplic, runtime_->aplic_s.get());
+    add_base_node(SoCDeviceKind::Rtc, runtime_->rtc.get());
+    add_base_node(SoCDeviceKind::Uart, runtime_->uart.get());
+    add_base_node(SoCDeviceKind::Power, runtime_->power.get());
+    add_base_node(SoCDeviceKind::DmaController, runtime_->dma_controller.get());
 
     if (runtime_->pcie) {
         memory().system_bus().add_node(&runtime_->pcie->ecam_node());
@@ -419,8 +456,8 @@ auto Machine::initialize() -> std::expected<void, std::string> {
         if (dev) memory().system_bus().add_node(dev.get());
     }
 
-    memory().system_bus().add_node(&primary_hart().plic_mmio);
-    memory().system_bus().add_node(&primary_hart().clint_mmio);
+    add_base_node(SoCDeviceKind::Plic, &primary_hart().plic_mmio);
+    add_base_node(SoCDeviceKind::Clint, &primary_hart().clint_mmio);
     const bool linux_boot = !config.execution.appmode;
     if (linux_boot && effective_dram_size < static_cast<size_t>(0x00100000U)) {
         simrv::log::error("DRAM must be at least 1 MiB for an OS device tree");

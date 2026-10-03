@@ -77,7 +77,9 @@ auto privilege_name(PrivilegeLevel privilege) -> std::string_view {
 }
 
 auto platform_name(simrv::core::PlatformProfile profile) -> std::string_view {
-    return profile == simrv::core::PlatformProfile::Pcie ? "pcie" : "mmio";
+    if (profile == simrv::core::PlatformProfile::Pcie) return "pcie";
+    if (profile == simrv::core::PlatformProfile::Mmio) return "mmio";
+    return "none";
 }
 
 }  // namespace
