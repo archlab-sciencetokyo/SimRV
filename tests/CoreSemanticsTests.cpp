@@ -2865,6 +2865,21 @@ void test_dynamic_fdt_generator() {
            "MMIO platform FDT advertises the virtio-MMIO disk");
     expect(mmio_fdt_text.find("pci@30000000") == std::string::npos,
            "MMIO platform FDT does not advertise an inactive PCIe root complex");
+
+    config.soc = simrv::core::SoCConfig::virt_mmio();
+    config.soc.disable_unlisted_devices = true;
+    config.soc.devices = {
+        {simrv::core::SoCDeviceKind::Uart, "debug-uart", 0x20000000, 0x200, 17},
+        {simrv::core::SoCDeviceKind::VirtioMmioNet, "net1", 0x20001000, 0x2000, 19},
+    };
+    auto custom_fdt = simrv::util::FdtGenerator::generate(config);
+    const std::string custom_fdt_text(custom_fdt.begin(), custom_fdt.end());
+    expect(custom_fdt_text.find("serial@20000000") != std::string::npos,
+           "custom SoC UART address is reflected in the generated FDT");
+    expect(custom_fdt_text.find("virtio@20001000") != std::string::npos,
+           "custom SoC VirtIO address is reflected in the generated FDT");
+    expect(custom_fdt_text.find("virtio@10001000") == std::string::npos,
+           "explicit SoC device policy omits unlisted VirtIO devices from the FDT");
 }
 
 void test_pmp_semantics() {

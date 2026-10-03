@@ -46,6 +46,13 @@ simrv --soc rvcomp --ca -m program.elf
 `device_policy = "explicit"` registers only the devices listed in its file; legacy presets retain
 their existing implicit platform devices.
 
+Device-specific SoC entries use `[device.<kind>]` sections. Supported kinds include `uart`,
+`rtc`, `dma`, `virtio-block`, `virtio-console`, `virtio-rng`, `virtio-gpu`, `virtio-input`,
+`virtio-sound`, and `virtio-net`; each can override `name`, `base`, `size`, and `irq`. The same
+normalized map controls runtime MMIO registration and generated Linux device trees. The plain
+`[dma]` section remains reserved for CPU timing configuration, so it is not a hardware device
+declaration.
+
 ### Generating a New Model Configuration
 
 #### Option A: Interactive CLI Wizard

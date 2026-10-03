@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <cstdlib>
 #include <iostream>
+#include <sstream>
 
 #include "simrv/core/Cpu.hpp"
 #include "simrv/core/CpuConfigParser.hpp"
@@ -156,11 +157,42 @@ void test_rvcomp_machine_application() {
     }
 }
 
+void test_soc_metadata_parser() {
+    std::cout << "[Test] SoC metadata parser...\n";
+    const auto path = simrv::core::resolve_cpu_model_path("rvcomp");
+    TEST_CHECK(path.has_value());
+
+    auto soc = simrv::core::SoCConfig::rvcomp();
+    TEST_CHECK(simrv::core::parse_soc_config(*path, soc));
+    TEST_CHECK(soc.name == "rvcomp");
+    TEST_CHECK(soc.disable_unlisted_devices);
+    const auto* uart = soc.find(simrv::core::SoCDeviceKind::Uart);
+    TEST_CHECK(uart != nullptr && uart->base == 0x10000000 && uart->irq == 10);
+    TEST_CHECK(soc.find(simrv::core::SoCDeviceKind::DmaController) == nullptr);
+
+    std::istringstream custom(R"cfg(
+[soc]
+device_policy = "explicit"
+platform = "mmio"
+[device.virtio-net]
+name = "net1"
+base = 0x20000000
+size = 8K
+irq = 19
+)cfg");
+    simrv::core::SoCConfig parsed = simrv::core::SoCConfig::virt_mmio();
+    TEST_CHECK(simrv::core::parse_soc_config_stream(custom, parsed));
+    const auto* net = parsed.find(simrv::core::SoCDeviceKind::VirtioMmioNet);
+    TEST_CHECK(net != nullptr && net->name == "net1" && net->base == 0x20000000 &&
+               net->size == 8192 && net->irq == 19);
+}
+
 int main() {
     test_timing_front_cache();
     std::cout << "=== Running RVComp Profile Tests ===" << std::endl;
     test_rvcomp_profile_validation();
     test_rvcomp_machine_application();
+    test_soc_metadata_parser();
     std::cout << "All RVComp profile tests passed successfully." << std::endl;
     return 0;
 }

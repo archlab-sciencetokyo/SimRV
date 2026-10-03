@@ -10,6 +10,7 @@
 #include <vector>
 
 #include "simrv/Define.hpp"
+#include "simrv/core/SoCConfig.hpp"
 #include "simrv/xlen/Types.hpp"
 
 namespace simrv::util {
@@ -31,6 +32,7 @@ struct FdtConfig {
     uint32_t framebuffer_width = 640;
     uint32_t framebuffer_height = 480;
     uint32_t framebuffer_stride = 640 * 4;
+    simrv::core::SoCConfig soc = simrv::core::SoCConfig::virt_pcie();
 };
 
 class FdtGenerator {

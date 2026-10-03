@@ -200,6 +200,15 @@ class FdtBuilder {
 auto FdtGenerator::generate(const FdtConfig& config) -> std::vector<uint8_t> {
     FdtBuilder b;
 
+    const auto device_enabled = [&](simrv::core::SoCDeviceKind kind) {
+        return !config.soc.disable_unlisted_devices || config.soc.find(kind) != nullptr;
+    };
+    const auto device_config = [&](simrv::core::SoCDeviceKind kind) {
+        if (const auto* device = config.soc.find(kind)) return *device;
+        return simrv::core::soc_device_default(kind);
+    };
+    const auto uart = device_config(simrv::core::SoCDeviceKind::Uart);
+
     const uint32_t plic_phandle = config.num_harts + 1;
     const uint32_t test_phandle = config.num_harts + 2;
     const uint32_t pcie_phandle = config.num_harts + 3;
@@ -213,7 +222,9 @@ auto FdtGenerator::generate(const FdtConfig& config) -> std::vector<uint8_t> {
 
     // aliases
     b.begin_node("aliases");
-    b.add_prop_string("serial0", "/soc/serial@10000000");
+    if (device_enabled(simrv::core::SoCDeviceKind::Uart)) {
+        b.add_prop_string("serial0", std::format("/soc/serial@{:x}", uart.base));
+    }
     b.end_node();
 
     // chosen
@@ -300,21 +311,23 @@ auto FdtGenerator::generate(const FdtConfig& config) -> std::vector<uint8_t> {
     }
     b.end_node();  // cpus
 
-    // poweroff
-    b.begin_node("poweroff");
-    b.add_prop_string("compatible", "syscon-poweroff");
-    b.add_prop_u32("regmap", test_phandle);
-    b.add_prop_u32("offset", 0);
-    b.add_prop_u32("value", 0x5555);
-    b.end_node();
+    if (device_enabled(simrv::core::SoCDeviceKind::Power)) {
+        // poweroff
+        b.begin_node("poweroff");
+        b.add_prop_string("compatible", "syscon-poweroff");
+        b.add_prop_u32("regmap", test_phandle);
+        b.add_prop_u32("offset", 0);
+        b.add_prop_u32("value", 0x5555);
+        b.end_node();
 
-    // reboot
-    b.begin_node("reboot");
-    b.add_prop_string("compatible", "syscon-reboot");
-    b.add_prop_u32("regmap", test_phandle);
-    b.add_prop_u32("offset", 0);
-    b.add_prop_u32("value", 0x7777);
-    b.end_node();
+        // reboot
+        b.begin_node("reboot");
+        b.add_prop_string("compatible", "syscon-reboot");
+        b.add_prop_u32("regmap", test_phandle);
+        b.add_prop_u32("offset", 0);
+        b.add_prop_u32("value", 0x7777);
+        b.end_node();
+    }
 
     // soc
     b.begin_node("soc");
@@ -324,11 +337,16 @@ auto FdtGenerator::generate(const FdtConfig& config) -> std::vector<uint8_t> {
     b.add_prop_empty("ranges");
 
     // test / syscon power device
-    b.begin_node("test@100000");
-    b.add_prop_string_list("compatible", {"sifive,test1", "sifive,test0", "syscon"});
-    b.add_prop_u32_array("reg", {0, 0x100000, 0, 0x1000});
-    b.add_prop_u32("phandle", test_phandle);
-    b.end_node();
+    if (device_enabled(simrv::core::SoCDeviceKind::Power)) {
+        const auto power = device_config(simrv::core::SoCDeviceKind::Power);
+        b.begin_node(std::format("test@{:x}", power.base));
+        b.add_prop_string_list("compatible", {"sifive,test1", "sifive,test0", "syscon"});
+        b.add_prop_u32_array(
+            "reg", {static_cast<uint32_t>(power.base >> 32), static_cast<uint32_t>(power.base),
+                    static_cast<uint32_t>(power.size >> 32), static_cast<uint32_t>(power.size)});
+        b.add_prop_u32("phandle", test_phandle);
+        b.end_node();
+    }
 
     // clint
     b.begin_node("timer@60000000");
@@ -369,75 +387,45 @@ auto FdtGenerator::generate(const FdtConfig& config) -> std::vector<uint8_t> {
     b.end_node();
 
     // uart (serial@10000000)
-    b.begin_node("serial@10000000");
-    b.add_prop_string("compatible", "ns16550a");
-    b.add_prop_u32_array("reg", {0, 0x10000000, 0, 0x100});
-    b.add_prop_u32("clock-frequency", 3686400);
-    b.add_prop_u32("current-speed", 115200);
-    b.add_prop_u32("reg-shift", 0);
-    b.add_prop_u32("reg-io-width", 1);
-    b.add_prop_u32("interrupt-parent", plic_phandle);
-    b.add_prop_u32("interrupts", 3);
-    b.end_node();
+    if (device_enabled(simrv::core::SoCDeviceKind::Uart)) {
+        b.begin_node(std::format("serial@{:x}", uart.base));
+        b.add_prop_string("compatible", "ns16550a");
+        b.add_prop_u32_array(
+            "reg", {static_cast<uint32_t>(uart.base >> 32), static_cast<uint32_t>(uart.base),
+                    static_cast<uint32_t>(uart.size >> 32), static_cast<uint32_t>(uart.size)});
+        b.add_prop_u32("clock-frequency", 3686400);
+        b.add_prop_u32("current-speed", 115200);
+        b.add_prop_u32("reg-shift", 0);
+        b.add_prop_u32("reg-io-width", 1);
+        b.add_prop_u32("interrupt-parent", plic_phandle);
+        b.add_prop_u32("interrupts", uart.irq);
+        b.end_node();
+    }
 
     // VirtIO-MMIO v2 nodes
     if (config.enable_mmio) {
-        // virtio-console (virtio@10002000)
-        b.begin_node("virtio@10002000");
-        b.add_prop_string("compatible", "virtio,mmio");
-        b.add_prop_u32_array("reg", {0, 0x10002000, 0, 0x1000});
-        b.add_prop_u32("interrupt-parent", plic_phandle);
-        b.add_prop_u32("interrupts", 1);
-        b.end_node();
-
-        // virtio-disk (virtio@10001000)
-        b.begin_node("virtio@10001000");
-        b.add_prop_string("compatible", "virtio,mmio");
-        b.add_prop_u32_array("reg", {0, 0x10001000, 0, 0x1000});
-        b.add_prop_u32("interrupt-parent", plic_phandle);
-        b.add_prop_u32("interrupts", 2);
-        b.end_node();
-
-        // virtio-rng (virtio@10003000)
-        b.begin_node("virtio@10003000");
-        b.add_prop_string("compatible", "virtio,mmio");
-        b.add_prop_u32_array("reg", {0, 0x10003000, 0, 0x1000});
-        b.add_prop_u32("interrupt-parent", plic_phandle);
-        b.add_prop_u32("interrupts", 4);
-        b.end_node();
-
-        // virtio-gpu (virtio@10004000)
-        b.begin_node("virtio@10004000");
-        b.add_prop_string("compatible", "virtio,mmio");
-        b.add_prop_u32_array("reg", {0, 0x10004000, 0, 0x1000});
-        b.add_prop_u32("interrupt-parent", plic_phandle);
-        b.add_prop_u32("interrupts", 5);
-        b.end_node();
-
-        // virtio-input (virtio@10005000)
-        b.begin_node("virtio@10005000");
-        b.add_prop_string("compatible", "virtio,mmio");
-        b.add_prop_u32_array("reg", {0, 0x10005000, 0, 0x1000});
-        b.add_prop_u32("interrupt-parent", plic_phandle);
-        b.add_prop_u32("interrupts", 6);
-        b.end_node();
-
-        // virtio-sound (virtio@10006000)
-        b.begin_node("virtio@10006000");
-        b.add_prop_string("compatible", "virtio,mmio");
-        b.add_prop_u32_array("reg", {0, 0x10006000, 0, 0x1000});
-        b.add_prop_u32("interrupt-parent", plic_phandle);
-        b.add_prop_u32("interrupts", 7);
-        b.end_node();
-
-        // virtio-net (virtio@10007000)
-        b.begin_node("virtio@10007000");
-        b.add_prop_string("compatible", "virtio,mmio");
-        b.add_prop_u32_array("reg", {0, 0x10007000, 0, 0x1000});
-        b.add_prop_u32("interrupt-parent", plic_phandle);
-        b.add_prop_u32("interrupts", 8);
-        b.add_prop_bytes("local-mac-address", {0x52, 0x54, 0x00, 0x12, 0x34, 0x56});
-        b.end_node();
+        const auto emit_virtio = [&](simrv::core::SoCDeviceKind kind, uint32_t fallback_irq,
+                                     bool net = false) {
+            if (!device_enabled(kind)) return;
+            const auto device = device_config(kind);
+            b.begin_node(std::format("virtio@{:x}", device.base));
+            b.add_prop_string("compatible", "virtio,mmio");
+            b.add_prop_u32_array(
+                "reg",
+                {static_cast<uint32_t>(device.base >> 32), static_cast<uint32_t>(device.base),
+                 static_cast<uint32_t>(device.size >> 32), static_cast<uint32_t>(device.size)});
+            b.add_prop_u32("interrupt-parent", plic_phandle);
+            b.add_prop_u32("interrupts", device.irq == 0 ? fallback_irq : device.irq);
+            if (net) b.add_prop_bytes("local-mac-address", {0x52, 0x54, 0x00, 0x12, 0x34, 0x56});
+            b.end_node();
+        };
+        emit_virtio(simrv::core::SoCDeviceKind::VirtioMmioConsole, 1);
+        emit_virtio(simrv::core::SoCDeviceKind::VirtioMmioBlock, 2);
+        emit_virtio(simrv::core::SoCDeviceKind::VirtioMmioRng, 4);
+        emit_virtio(simrv::core::SoCDeviceKind::VirtioMmioGpu, 5);
+        emit_virtio(simrv::core::SoCDeviceKind::VirtioMmioInput, 6);
+        emit_virtio(simrv::core::SoCDeviceKind::VirtioMmioSound, 7);
+        emit_virtio(simrv::core::SoCDeviceKind::VirtioMmioNet, 8, true);
     }
 
     if (config.enable_pcie) {
@@ -463,20 +451,30 @@ auto FdtGenerator::generate(const FdtConfig& config) -> std::vector<uint8_t> {
     }
 
     // rtc (rtc@70000000)
-    b.begin_node("rtc@70000000");
-    b.add_prop_string("compatible", "google,goldfish-rtc");
-    b.add_prop_u32_array("reg", {0, 0x70000000, 0, 0x1000});
-    b.add_prop_u32("interrupt-parent", plic_phandle);
-    b.add_prop_u32("interrupts", 11);
-    b.end_node();
+    if (device_enabled(simrv::core::SoCDeviceKind::Rtc)) {
+        const auto rtc = device_config(simrv::core::SoCDeviceKind::Rtc);
+        b.begin_node(std::format("rtc@{:x}", rtc.base));
+        b.add_prop_string("compatible", "google,goldfish-rtc");
+        b.add_prop_u32_array(
+            "reg", {static_cast<uint32_t>(rtc.base >> 32), static_cast<uint32_t>(rtc.base),
+                    static_cast<uint32_t>(rtc.size >> 32), static_cast<uint32_t>(rtc.size)});
+        b.add_prop_u32("interrupt-parent", plic_phandle);
+        b.add_prop_u32("interrupts", rtc.irq);
+        b.end_node();
+    }
 
     // dma-controller (dma@10009000)
-    b.begin_node("dma@10009000");
-    b.add_prop_string_list("compatible", {"simrv,dma-1.0", "generic-dma-controller"});
-    b.add_prop_u32_array("reg", {0, 0x10009000, 0, 0x1000});
-    b.add_prop_u32("interrupt-parent", plic_phandle);
-    b.add_prop_u32("interrupts", 12);
-    b.end_node();
+    if (device_enabled(simrv::core::SoCDeviceKind::DmaController)) {
+        const auto dma = device_config(simrv::core::SoCDeviceKind::DmaController);
+        b.begin_node(std::format("dma@{:x}", dma.base));
+        b.add_prop_string_list("compatible", {"simrv,dma-1.0", "generic-dma-controller"});
+        b.add_prop_u32_array(
+            "reg", {static_cast<uint32_t>(dma.base >> 32), static_cast<uint32_t>(dma.base),
+                    static_cast<uint32_t>(dma.size >> 32), static_cast<uint32_t>(dma.size)});
+        b.add_prop_u32("interrupt-parent", plic_phandle);
+        b.add_prop_u32("interrupts", dma.irq);
+        b.end_node();
+    }
 
     b.end_node();  // soc
 

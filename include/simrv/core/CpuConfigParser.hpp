@@ -88,8 +88,9 @@ inline auto parse_scaled_u64(std::string_view value) -> std::optional<uint64_t> 
     uint64_t multiplier = 1;
     const char suffix = static_cast<char>(std::tolower(static_cast<unsigned char>(value.back())));
     if (suffix == 'k' || suffix == 'm' || suffix == 'g') {
-        multiplier = suffix == 'k' ? 1024ULL : suffix == 'm' ? 1024ULL * 1024ULL
-                                                             : 1024ULL * 1024ULL * 1024ULL;
+        multiplier = suffix == 'k'   ? 1024ULL
+                     : suffix == 'm' ? 1024ULL * 1024ULL
+                                     : 1024ULL * 1024ULL * 1024ULL;
         value.remove_suffix(1);
     }
     try {
@@ -266,7 +267,8 @@ inline auto parse_cpu_config_stream(std::istream& stream, simrv::pipeline::CpuMo
                 current_section = Section::MemoryMetadata;
             } else if (detail::iequals(sec_name, "boot")) {
                 current_section = Section::BootMetadata;
-            } else if (detail::iequals(sec_name, "uart") || detail::iequals(sec_name, "device.uart")) {
+            } else if (detail::iequals(sec_name, "uart") ||
+                       detail::iequals(sec_name, "device.uart")) {
                 current_section = Section::UartMetadata;
             } else {
                 simrv::log::warn("Unknown CPU config section: [{}]", sec_name);
@@ -702,7 +704,7 @@ inline auto parse_cpu_config_stream(std::istream& stream, simrv::pipeline::CpuMo
 
 /** Parse the platform portion of a combined CPU/SoC preset file. */
 inline auto parse_soc_config_stream(std::istream& stream, simrv::core::SoCConfig& config) -> bool {
-    enum class Section { Global, Soc, Memory, Boot, Uart };
+    enum class Section { Global, Soc, Memory, Boot, Device };
     Section section = Section::Global;
     simrv::core::SoCDeviceConfig* device = nullptr;
     std::string line;
@@ -723,20 +725,25 @@ inline auto parse_soc_config_stream(std::istream& stream, simrv::core::SoCConfig
                 section = Section::Memory;
             } else if (detail::iequals(name, "boot")) {
                 section = Section::Boot;
-            } else if (detail::iequals(name, "uart") || detail::iequals(name, "device.uart")) {
-                section = Section::Uart;
-                const auto existing = std::ranges::find_if(config.devices, [](const auto& item) {
-                    return item.kind == SoCDeviceKind::Uart;
-                });
-                if (existing == config.devices.end()) {
-                    config.devices.push_back(
-                        {SoCDeviceKind::Uart, "uart0", 0x10000000, 0x100, 10});
-                    device = &config.devices.back();
-                } else {
-                    device = &*existing;
-                }
             } else {
-                section = Section::Global;
+                auto device_name = name;
+                const bool legacy_uart = device_name == "uart";
+                const bool explicit_device = device_name.starts_with("device.");
+                if (explicit_device) device_name.remove_prefix(7);
+                if ((legacy_uart || explicit_device) && soc_device_kind(device_name)) {
+                    const auto kind = soc_device_kind(device_name);
+                    section = Section::Device;
+                    const auto existing = std::ranges::find_if(
+                        config.devices, [kind](const auto& item) { return item.kind == *kind; });
+                    if (existing == config.devices.end()) {
+                        config.devices.push_back(soc_device_default(*kind));
+                        device = &config.devices.back();
+                    } else {
+                        device = &*existing;
+                    }
+                } else {
+                    section = Section::Global;
+                }
             }
             continue;
         }
@@ -748,8 +755,10 @@ inline auto parse_soc_config_stream(std::istream& stream, simrv::core::SoCConfig
         if (key.empty() || value.empty()) continue;
 
         if (section == Section::Soc) {
-            if (key == "name") config.name = std::string(value);
-            else if (key == "cpu_model" || key == "cpu_profile") config.cpu_model = std::string(value);
+            if (key == "name")
+                config.name = std::string(value);
+            else if (key == "cpu_model" || key == "cpu_profile")
+                config.cpu_model = std::string(value);
             else if (key == "platform") {
                 config.enable_pcie = detail::iequals(value, "pcie");
                 config.enable_mmio = detail::iequals(value, "mmio");
@@ -758,8 +767,8 @@ inline auto parse_soc_config_stream(std::istream& stream, simrv::core::SoCConfig
             } else if (key == "enable_mmio") {
                 if (const auto parsed = detail::parse_bool(value)) config.enable_mmio = *parsed;
             } else if (key == "device_policy") {
-                config.disable_unlisted_devices = detail::iequals(value, "explicit") ||
-                                                  detail::iequals(value, "listed-only");
+                config.disable_unlisted_devices =
+                    detail::iequals(value, "explicit") || detail::iequals(value, "listed-only");
             } else if (key == "disable_unlisted_devices") {
                 if (const auto parsed = detail::parse_bool(value)) {
                     config.disable_unlisted_devices = *parsed;
@@ -767,19 +776,26 @@ inline auto parse_soc_config_stream(std::istream& stream, simrv::core::SoCConfig
             }
         } else if (section == Section::Memory) {
             if (const auto parsed = detail::parse_scaled_u64(value)) {
-                if (key == "dram_base" || key == "base") config.dram_base = *parsed;
-                else if (key == "dram_size" || key == "size") config.dram_size = *parsed;
+                if (key == "dram_base" || key == "base")
+                    config.dram_base = *parsed;
+                else if (key == "dram_size" || key == "size")
+                    config.dram_size = *parsed;
             }
         } else if (section == Section::Boot) {
             if (const auto parsed = detail::parse_scaled_u64(value)) {
-                if (key == "reset_pc" || key == "start_pc") config.reset_pc = *parsed;
-                else if (key == "tohost") config.tohost = *parsed;
+                if (key == "reset_pc" || key == "start_pc")
+                    config.reset_pc = *parsed;
+                else if (key == "tohost")
+                    config.tohost = *parsed;
             }
-        } else if (section == Section::Uart && device != nullptr) {
+        } else if (section == Section::Device && device != nullptr) {
             if (const auto parsed = detail::parse_scaled_u64(value)) {
-                if (key == "base") device->base = *parsed;
-                else if (key == "size") device->size = *parsed;
-                else if (key == "irq") device->irq = static_cast<uint32_t>(*parsed);
+                if (key == "base")
+                    device->base = *parsed;
+                else if (key == "size")
+                    device->size = *parsed;
+                else if (key == "irq")
+                    device->irq = static_cast<uint32_t>(*parsed);
             } else if (key == "name") {
                 device->name = std::string(value);
             }

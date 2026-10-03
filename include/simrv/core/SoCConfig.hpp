@@ -45,6 +45,67 @@ struct SoCDeviceConfig {
     bool enabled = true;
 };
 
+[[nodiscard]] inline auto soc_device_kind(std::string_view name) -> std::optional<SoCDeviceKind> {
+    if (name == "uart") return SoCDeviceKind::Uart;
+    if (name == "rtc") return SoCDeviceKind::Rtc;
+    if (name == "power") return SoCDeviceKind::Power;
+    if (name == "aclint-mtimer" || name == "timer") return SoCDeviceKind::AclintMtimer;
+    if (name == "aclint-mswi" || name == "software-interrupt") return SoCDeviceKind::AclintMswi;
+    if (name == "imsic") return SoCDeviceKind::Imsic;
+    if (name == "aplic") return SoCDeviceKind::Aplic;
+    if (name == "plic") return SoCDeviceKind::Plic;
+    if (name == "clint") return SoCDeviceKind::Clint;
+    if (name == "virtio-block" || name == "block") return SoCDeviceKind::VirtioMmioBlock;
+    if (name == "virtio-console" || name == "console") return SoCDeviceKind::VirtioMmioConsole;
+    if (name == "virtio-rng" || name == "rng") return SoCDeviceKind::VirtioMmioRng;
+    if (name == "virtio-gpu" || name == "gpu") return SoCDeviceKind::VirtioMmioGpu;
+    if (name == "virtio-input" || name == "input") return SoCDeviceKind::VirtioMmioInput;
+    if (name == "virtio-sound" || name == "sound") return SoCDeviceKind::VirtioMmioSound;
+    if (name == "virtio-net" || name == "net") return SoCDeviceKind::VirtioMmioNet;
+    if (name == "dma" || name == "dma-controller") return SoCDeviceKind::DmaController;
+    return std::nullopt;
+}
+
+[[nodiscard]] inline auto soc_device_default(SoCDeviceKind kind) -> SoCDeviceConfig {
+    switch (kind) {
+        case SoCDeviceKind::Uart:
+            return {kind, "uart0", 0x10000000, 0x100, 10};
+        case SoCDeviceKind::Rtc:
+            return {kind, "rtc0", 0x70000000, 0x1000, 11};
+        case SoCDeviceKind::Power:
+            return {kind, "power0", 0x00100000, 0x1000, 0};
+        case SoCDeviceKind::AclintMtimer:
+            return {kind, "timer0", 0x60000000, 0x4000, 7};
+        case SoCDeviceKind::AclintMswi:
+            return {kind, "mswi0", 0x60000000, 0x4000, 3};
+        case SoCDeviceKind::Imsic:
+            return {kind, "imsic0", 0x24000000, 0x100000, 0};
+        case SoCDeviceKind::Aplic:
+            return {kind, "aplic0", 0x0c000000, 0x400000, 0};
+        case SoCDeviceKind::Plic:
+            return {kind, "plic0", 0x50000000, 0x4000000, 0};
+        case SoCDeviceKind::Clint:
+            return {kind, "clint0", 0x60000000, 0xc0000, 0};
+        case SoCDeviceKind::VirtioMmioBlock:
+            return {kind, "disk0", 0x10001000, 0x1000, 2};
+        case SoCDeviceKind::VirtioMmioConsole:
+            return {kind, "console0", 0x10002000, 0x1000, 1};
+        case SoCDeviceKind::VirtioMmioRng:
+            return {kind, "rng0", 0x10003000, 0x1000, 4};
+        case SoCDeviceKind::VirtioMmioGpu:
+            return {kind, "gpu0", 0x10004000, 0x1000, 5};
+        case SoCDeviceKind::VirtioMmioInput:
+            return {kind, "input0", 0x10005000, 0x1000, 6};
+        case SoCDeviceKind::VirtioMmioSound:
+            return {kind, "sound0", 0x10006000, 0x1000, 7};
+        case SoCDeviceKind::VirtioMmioNet:
+            return {kind, "net0", 0x10007000, 0x1000, 8};
+        case SoCDeviceKind::DmaController:
+            return {kind, "dma0", 0x10009000, 0x1000, 12};
+    }
+    return {};
+}
+
 /** Normalized platform description shared by composition and generated metadata. */
 struct SoCConfig {
     std::string name = "virt-pcie";
@@ -99,6 +160,10 @@ struct SoCConfig {
                 .enable_pcie = false,
                 .enable_mmio = false,
                 .disable_unlisted_devices = true,
+                .dram_base = std::nullopt,
+                .dram_size = std::nullopt,
+                .reset_pc = std::nullopt,
+                .tohost = std::nullopt,
                 .devices = {}};
     }
 
