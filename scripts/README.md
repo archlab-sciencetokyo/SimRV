@@ -31,6 +31,8 @@ This directory contains development, benchmarking, release verification, and Lin
 
 - **`build-linux-image.sh`**: Multi-stage compiler for OpenSBI, Linux kernel, and BusyBox/Alpine rootfs images. Includes storage management flags (`--clean-build`, `--clean-old-kernels`).
 - **`test_linux_pty.py`**: Automated headless pseudo-terminal interaction tests verifying guest login, shell commands, and poweroff lifecycles.
+- **`ga_smoke.py`**: Distribution-independent release smoke check for versioning, capability discovery,
+  environment diagnostics, SoC manifest compatibility, and an optional guest run.
 - **`templates/`**: Device tree sources (`virt-rv64.dts`, `virt-rv32.dts`) and early boot payloads.
 
 ### 4. Code Quality & Extension Verification

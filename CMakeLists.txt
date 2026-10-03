@@ -20,7 +20,7 @@ if(BUILD_TESTING OR SIMRV_ENABLE_TOOLING)
   set(PYTHON_BIN "${Python3_EXECUTABLE}")
 endif()
 
-set(SIMRV_VERSION "3.0.0-rc.1")
+set(SIMRV_VERSION "3.0.0-rc.2")
 set(SIMRV_GIT_BRANCH "unknown")
 set(SIMRV_GIT_SHA "unknown")
 
@@ -425,6 +425,12 @@ if(BUILD_TESTING)
   add_test(NAME cli-help-isa COMMAND $<TARGET_FILE:SimRV> -h)
   set_tests_properties(cli-help-isa PROPERTIES PASS_REGULAR_EXPRESSION "--isa"
                                                LABELS "gate;regress;cli")
+  add_test(NAME cli-isa-info COMMAND $<TARGET_FILE:SimRV> --isa-info)
+  set_tests_properties(cli-isa-info PROPERTIES PASS_REGULAR_EXPRESSION "RV64GCBV"
+                                               LABELS "gate;regress;cli;release")
+  add_test(NAME cli-doctor COMMAND $<TARGET_FILE:SimRV> --doctor)
+  set_tests_properties(cli-doctor PROPERTIES PASS_REGULAR_EXPRESSION "attach transport"
+                                             LABELS "gate;regress;cli;release")
   add_test(NAME cli-summary-rejects-stdout COMMAND $<TARGET_FILE:SimRV> --summary -)
   set_tests_properties(
     cli-summary-rejects-stdout
@@ -495,6 +501,10 @@ if(BUILD_TESTING)
   add_test(NAME release-tools
            COMMAND ${PYTHON_BIN} ${CMAKE_SOURCE_DIR}/tests/ReleaseToolTests.py)
   set_tests_properties(release-tools PROPERTIES LABELS "gate;regress;release")
+  add_test(NAME ga-smoke
+           COMMAND ${PYTHON_BIN} ${CMAKE_SOURCE_DIR}/scripts/ga_smoke.py --simrv
+                   $<TARGET_FILE:SimRV>)
+  set_tests_properties(ga-smoke PROPERTIES LABELS "gate;regress;release" TIMEOUT 30)
   add_test(NAME rtl-parity-tools
            COMMAND ${PYTHON_BIN}
                    ${CMAKE_SOURCE_DIR}/tests/RtlParityToolTests.py)

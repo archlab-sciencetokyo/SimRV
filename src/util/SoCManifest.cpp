@@ -5,6 +5,7 @@
 #include <fstream>
 
 #include "simrv/core/CpuConfigParser.hpp"
+#include "simrv/core/BuildInfo.hpp"
 #include "simrv/core/SoCDeviceRegistry.hpp"
 
 namespace simrv::util {
@@ -75,6 +76,9 @@ auto serialize_soc_manifest(const simrv::core::SoCConfig& config, std::ostream& 
     }
     out << "{\n";
     out << "  \"schema_version\": 1,\n";
+    out << "  \"manifest_version\": \"3.0\",\n";
+    out << "  \"generator\": \"simrv "
+        << json_escape(simrv::buildinfo::kVersion) << "\",\n";
     out << "  \"name\": " << quoted(config.name) << ",\n";
     out << "  \"cpu_model\": " << quoted(config.cpu_model) << ",\n";
     out << "  \"cpu\": {\n";

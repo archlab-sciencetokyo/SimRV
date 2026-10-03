@@ -65,6 +65,45 @@ auto write_lifecycle_event(std::ofstream& out, const simrv::core::Machine& machi
     out.flush();
 }
 
+auto print_isa_info() -> void {
+    std::println("SimRV {} capabilities", simrv::buildinfo::kVersion);
+    std::println("  host build       : RV{}", simrv::xlen::kXLenBits);
+    std::println("  public profiles  : RV32GCBV, RV64GCBV");
+    std::println("  selectable       : rv{}i, rv{}imac, rv{}gc, rv{}gcbv", simrv::xlen::kXLenBits,
+                 simrv::xlen::kXLenBits, simrv::xlen::kXLenBits, simrv::xlen::kXLenBits);
+    std::println("  vector           : RVV 1.0 implemented subset; VLEN 128..1024 bits");
+    std::println("  privilege         : M/S/U, Sv32 (RV32), Sv39/Sv48 (RV64)");
+    std::println("  debug frontends   : TUI, attachable Unix socket, GDB RSP");
+    std::println("  qualified caveats : RMM arithmetic and complete RVV are not claimed");
+    std::println("  see               : docs/architecture/compliance.md");
+}
+
+auto print_doctor() -> int {
+    const char* term = std::getenv("TERM");
+    const char* colorterm = std::getenv("COLORTERM");
+    const char* term_program = std::getenv("TERM_PROGRAM");
+    const bool tty = ::isatty(STDIN_FILENO) != 0 && ::isatty(STDOUT_FILENO) != 0;
+    const std::string_view term_value = term != nullptr ? term : "";
+    const std::string_view color_value = colorterm != nullptr ? colorterm : "";
+    const std::string_view program_value = term_program != nullptr ? term_program : "";
+    const bool sixel = term_value.contains("sixel") || color_value.contains("sixel") ||
+                       program_value.contains("foot") || program_value.contains("contour") ||
+                       program_value.contains("WezTerm");
+
+    std::println("SimRV environment diagnostics");
+    std::println("  version          : {}", simrv::buildinfo::kVersion);
+    std::println("  host             : Linux x86-64 expected for release binaries");
+    std::println("  interactive TTY  : {}", tty ? "yes" : "no (use --cli or --attach for pipes)");
+    std::println("  TERM             : {}", term_value.empty() ? "(unset)" : term_value);
+    std::println("  Sixel hint       : {}",
+                 sixel ? "detected" : "not detected (text TUI remains available)");
+    std::println("  mouse protocol   : SGR-pixel mode requested by interactive TUI");
+    std::println("  attach transport : local framed Unix socket, bounded and versioned");
+    std::println(
+        "  package runtime  : use the static musl archive outside the tested native package matrix");
+    return 0;
+}
+
 }  // namespace
 
 auto main(int argc, char* argv[]) -> int {  // NOLINT(bugprone-exception-escape)
@@ -79,6 +118,7 @@ auto main(int argc, char* argv[]) -> int {  // NOLINT(bugprone-exception-escape)
         } else if (arg == "--tui" || arg == "-u") {
             is_tui = true;
         } else if (arg == "-h" || arg == "--help" || arg == "--version" || arg == "--license" ||
+                   arg == "--isa-info" || arg == "--capabilities" || arg == "--doctor" ||
                    arg == "--dump-soc-manifest" || arg == "--export-soc-manifest") {
             skip_banner = true;
         } else if (arg == "-q" || arg == "--quiet") {
@@ -128,6 +168,11 @@ auto main(int argc, char* argv[]) -> int {  // NOLINT(bugprone-exception-escape)
             case CliAction::ShowVersion:
                 std::println("{} (RV{})", simrv::buildinfo::kVersion, simrv::xlen::kXLenBits);
                 std::exit(0);
+            case CliAction::ShowIsaInfo:
+                print_isa_info();
+                std::exit(0);
+            case CliAction::Doctor:
+                std::exit(print_doctor());
             case CliAction::ShowLicense:
                 std::println("SimRV {} (RV{})", simrv::buildinfo::kVersion, simrv::xlen::kXLenBits);
                 std::println("Licensed under the MIT License.");

@@ -3,6 +3,28 @@
 All notable changes to SimRV are documented here.
 Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v3.0.0-rc.2] — 2026-10-03
+
+This release candidate hardens the 3.0 GA workflow around portable operation, capability
+discovery, and reproducible release qualification.
+
+### Release workflow and diagnostics
+
+- Added `simrv --isa-info` to expose the qualified ISA, vector, privilege, and debugger contract,
+  including explicit RVV and RMM qualification boundaries.
+- Added `simrv --doctor` for terminal, Sixel, mouse, attach-transport, and package-runtime
+  diagnostics.
+- Added a repeatable GA smoke workflow covering binary versioning, capability discovery, SoC
+  manifest export, schema compatibility, and optional guest execution.
+- Added release-gate and CTest coverage for the GA smoke workflow and new CLI diagnostics.
+
+### SoC and Linux usability
+
+- Versioned exported SoC manifests with a 3.0 compatibility contract and generator identity.
+- Documented the Alpine/JWM graphical Linux path, VirtIO framebuffer/input behavior, and the
+  attachable TUI/GDB acceptance workflow.
+- Kept Sixel presentation optional while validating guest framebuffer behavior independently.
+
 ## [v3.0.0-rc.1] — 2026-09-30
 
 This release candidate completes the local attachable TUI path for the 3.0 architecture-debugging
@@ -651,6 +673,7 @@ on inspector polish, correctness fixes, and CLI normalization.
 
 - Initial public alpha: CMake preset infrastructure, Clang-20 CI, base RISC-V pipeline
 
+[v3.0.0-rc.2]: https://github.com/archlab-sciencetokyo/SimRV/releases/tag/v3.0.0-rc.2
 [v3.0.0-rc.1]: https://github.com/archlab-sciencetokyo/SimRV/releases/tag/v3.0.0-rc.1
 [v3.0.0-alpha.2]: https://github.com/archlab-sciencetokyo/SimRV/releases/tag/v3.0.0-alpha.2
 [v3.0.0-alpha.1]: https://github.com/archlab-sciencetokyo/SimRV/releases/tag/v3.0.0-alpha.1

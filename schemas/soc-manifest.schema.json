@@ -3,9 +3,11 @@
   "$id": "https://simrv.dev/schemas/v3/soc-manifest.schema.json",
   "title": "SimRV SoC Manifest",
   "type": "object",
-  "required": ["schema_version", "name", "cpu_model", "platform", "device_policy", "memory", "boot", "devices"],
+  "required": ["schema_version", "manifest_version", "generator", "name", "cpu_model", "platform", "device_policy", "memory", "boot", "devices"],
   "properties": {
     "schema_version": { "const": 1 },
+    "manifest_version": { "const": "3.0" },
+    "generator": { "type": "string", "pattern": "^simrv [0-9]+\\.[0-9]+\\.[0-9]+" },
     "name": { "type": "string" },
     "cpu_model": { "type": "string" },
     "cpu": {

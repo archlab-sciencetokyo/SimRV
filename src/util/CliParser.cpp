@@ -965,6 +965,14 @@ auto parse_command_line(std::span<char* const> args) -> std::expected<ParseResul
             result.action = CliAction::ShowLicense;
             return result;
         }
+        if (arg == "--isa-info" || arg == "--capabilities") {
+            result.action = CliAction::ShowIsaInfo;
+            return result;
+        }
+        if (arg == "--doctor") {
+            result.action = CliAction::Doctor;
+            return result;
+        }
 
         // Try parsing file options
         auto res_file = parse_file_options(arg, expanded_span, i, result.options);
@@ -1555,6 +1563,14 @@ auto needs_memory_image(const ParseResult& result) -> bool {
     std::print(stdout,
                "  {}--version{}                         Display simulator version and target "
                "architecture\n",
+               style(kBrightGreen), style(kReset));
+    std::print(
+        stdout,
+        "  {}--isa-info{}                        Show qualified ISA and frontend capabilities\n",
+               style(kBrightGreen), style(kReset));
+    std::print(
+        stdout,
+        "  {}--doctor{}                          Diagnose terminal and release runtime environment\n",
                style(kBrightGreen), style(kReset));
     std::print(
         stdout,

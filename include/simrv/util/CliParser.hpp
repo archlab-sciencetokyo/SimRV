@@ -20,6 +20,8 @@ enum class CliAction : uint8_t {
     ShowHelp,
     ShowVersion,
     ShowLicense,
+    ShowIsaInfo,
+    Doctor,
     ExplainInstruction,
     Attach,
     DumpCpuModel,

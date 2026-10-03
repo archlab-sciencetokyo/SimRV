@@ -1,7 +1,9 @@
 # Building Linux Images for SimRV
 
 This guide explains how to build RISC-V RV32GC (or RV64GC) Linux kernel and rootfs
-images for SimRV testing.
+images for SimRV testing. The RV64 image builder also provisions a reproducible Alpine
+Linux graphical path using Xorg, JWM, VirtIO framebuffer/input, a terminal, and small
+offline-friendly demo applications.
 
 ## Overview
 
@@ -34,9 +36,9 @@ building them from source.
 This will:
 
 1. ✅ Check for a pre-installed RISC-V GNU toolchain (or build one from source)
-2. ✅ Download Linux kernel and Buildroot sources
+2. ✅ Download Linux kernel, OpenSBI, and Alpine sources
 3. ✅ Build kernel and rootfs
-4. ✅ Create compatible images in `./linux-images/rv32/`
+4. ✅ Create compatible images in `./linux-images/<arch>/`
 
 **Time estimate:**
 
@@ -63,6 +65,15 @@ SimRV supports clean guest shutdown and reboot via standard OpenSBI SBI reset se
 poweroff   # Syncs filesystems, stops services, and halts SimRV
 reboot     # Cleanly restarts the guest system
 ```
+
+### RV64 graphical smoke path
+
+The RV64 disk image contains an idempotent `start-jwm` service. On the first networked boot it
+installs the pinned desktop packages, waits for `/dev/fb0` and the VirtIO input device, then starts
+Xorg on the simulated framebuffer and JWM on `tty1`. The guest log reports `[JWM]` and `[NET]`
+milestones on the UART, which makes the path suitable for headless CI smoke checks as well as
+interactive TUI/Sixel sessions. If the host terminal has no Sixel support, use the framebuffer
+or a plain terminal attachment; guest graphics are independent of Sixel presentation.
 
 ### Run Linux Boot Test
 

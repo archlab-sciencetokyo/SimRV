@@ -120,6 +120,8 @@ simrv -m program.elf
 | `--tracepc` | Write PC stream trace to `trace/tracepc.txt`. |
 | `--gdb` | Start GDB Remote Serial Protocol (RSP) server. |
 | `--gdb-port <port>` | Set GDB RSP TCP listener port (default: 1234). |
+| `--isa-info` | Show the qualified ISA, vector, privilege, and debugger capability contract. |
+| `--doctor` | Diagnose terminal presentation and portable-runtime conditions. |
 | `-v, --version` | Display version and build information. |
 | `-h, --help` | Show full command-line help message. |
 

@@ -201,6 +201,8 @@ void test_soc_manifest_export() {
     TEST_CHECK(simrv::util::serialize_soc_manifest(soc, manifest));
     const auto text = manifest.str();
     TEST_CHECK(text.find("\"name\": \"rvcomp\"") != std::string::npos);
+    TEST_CHECK(text.find("\"manifest_version\": \"3.0\"") != std::string::npos);
+    TEST_CHECK(text.find("\"generator\": \"simrv ") != std::string::npos);
     TEST_CHECK(text.find("\"device_policy\": \"explicit\"") != std::string::npos);
     TEST_CHECK(text.find("\"kind\": \"uart\"") != std::string::npos);
     TEST_CHECK(text.find("\"kind\": \"dma\"") == std::string::npos);

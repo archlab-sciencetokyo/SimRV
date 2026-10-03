@@ -81,6 +81,9 @@ jobs:
           RISCV_TESTS_DIR: ${{ runner.temp }}/riscv-tests
         run: ctest --test-dir build/${{ matrix.arch }}-release --output-on-failure -L gate
 
+      - name: Run GA smoke workflow
+        run: python3 scripts/ga_smoke.py --simrv build/${{ matrix.arch }}-release/simrv
+
       - name: Validate source release metadata
         run: |
           python3 scripts/release_check.py

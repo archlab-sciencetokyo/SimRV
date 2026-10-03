@@ -91,6 +91,7 @@ nav:
       - Quickstart & CLI: user/index.md
       - VS Code Debugging: user/vscode.md
       - Interactive TUI Workbench: user/tui.md
+      - 3.0 GA Workflow: user/ga-workflow.md
       - Bare-Metal & Embedded: user/baremetal.md
       - Full-System Linux & SMP: user/linux.md
       - Student Reference Guide: user/classroom.md
