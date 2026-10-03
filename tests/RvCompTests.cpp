@@ -12,6 +12,7 @@
 #include "simrv/core/CpuConfigParser.hpp"
 #include "simrv/core/Machine.hpp"
 #include "simrv/core/MachineConfig.hpp"
+#include "simrv/core/SoCDeviceRegistry.hpp"
 #include "simrv/isa/Base.hpp"
 #include "simrv/isa/Common.hpp"
 #include "simrv/pipeline/CpuModel.hpp"
@@ -169,6 +170,8 @@ void test_soc_metadata_parser() {
     const auto* uart = soc.find(simrv::core::SoCDeviceKind::Uart);
     TEST_CHECK(uart != nullptr && uart->base == 0x10000000 && uart->irq == 10);
     TEST_CHECK(soc.find(simrv::core::SoCDeviceKind::DmaController) == nullptr);
+    const auto resolved = simrv::core::SoCDeviceRegistry::resolve(soc);
+    TEST_CHECK(resolved.size() == 1 && resolved.front().kind == simrv::core::SoCDeviceKind::Uart);
 
     std::istringstream custom(R"cfg(
 [soc]

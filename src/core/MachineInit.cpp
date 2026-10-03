@@ -15,6 +15,7 @@
 #include "simrv/core/Logger.hpp"
 #include "simrv/core/Machine.hpp"
 #include "simrv/core/PlatformBuilder.hpp"
+#include "simrv/core/SoCDeviceRegistry.hpp"
 #include "simrv/debug/GdbStub.hpp"
 #include "simrv/debug/SpikeLockstep.hpp"
 #include "simrv/device/AIA.hpp"
@@ -426,7 +427,7 @@ auto Machine::initialize() -> std::expected<void, std::string> {
     PlatformBuilder::compose(*this);
 
     const auto device_enabled = [&](simrv::core::SoCDeviceKind kind) {
-        return !config.soc.disable_unlisted_devices || config.soc.find(kind) != nullptr;
+        return simrv::core::SoCDeviceRegistry::enabled(config.soc, kind);
     };
     const auto add_base_node = [&](simrv::core::SoCDeviceKind kind,
                                    simrv::memory::TileLinkNode* node) {

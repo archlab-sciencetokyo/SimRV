@@ -11,6 +11,7 @@
 #include <unordered_map>
 
 #include "simrv/core/PlatformTiming.hpp"
+#include "simrv/core/SoCDeviceRegistry.hpp"
 
 namespace simrv::util {
 
@@ -201,10 +202,12 @@ auto FdtGenerator::generate(const FdtConfig& config) -> std::vector<uint8_t> {
     FdtBuilder b;
 
     const auto device_enabled = [&](simrv::core::SoCDeviceKind kind) {
-        return !config.soc.disable_unlisted_devices || config.soc.find(kind) != nullptr;
+        return simrv::core::SoCDeviceRegistry::enabled(config.soc, kind);
     };
     const auto device_config = [&](simrv::core::SoCDeviceKind kind) {
-        if (const auto* device = config.soc.find(kind)) return *device;
+        if (const auto device = simrv::core::SoCDeviceRegistry::descriptor(config.soc, kind)) {
+            return *device;
+        }
         return simrv::core::soc_device_default(kind);
     };
     const auto uart = device_config(simrv::core::SoCDeviceKind::Uart);
