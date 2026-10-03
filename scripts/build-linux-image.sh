@@ -638,7 +638,13 @@ if [ -f /etc/system.jwmrc ]; then
         /etc/system.jwmrc
     sed -i 's/<TrayButton label="JWM">root:1<\//<TrayButton label="SimRV">root:1<\//; s/<Background type="solid">#111111<\//<Background type="gradient">#21152b:#071622<\//' /etc/system.jwmrc
     sed -i 's#<Program icon="web-browser" label="Firefox">firefox</Program>#<Program icon="web-browser" label="Web Browser">links -g</Program>#' /etc/system.jwmrc
+    # Rebuild the custom Games submenu instead of appending it on every boot.
+    # The rootfs is persistent, so this must also clean menus produced by older
+    # non-idempotent versions of start-jwm.
+    sed -i '/^[[:space:]]*<Menu icon="games" label="Games">$/,/^[[:space:]]*<\/Menu>$/d' \
+        /etc/system.jwmrc
     sed -i '/label="Gimp"/i\
+            <!-- SimRV Games submenu -->\
             <Menu icon="games" label="Games">\
                 <Program label="Chess">xterm -T Chess -e gnuchess</Program>\
                 <Program label="Gomoku">xterm -T Gomoku -e gomoku</Program>\
@@ -801,7 +807,11 @@ EOF
                 "$ROOTFS_DISK_DIR/etc/system.jwmrc"
             sed -i 's/<TrayButton label="JWM">root:1<\//<TrayButton label="SimRV">root:1<\//; s/<Background type="solid">#111111<\//<Background type="gradient">#21152b:#071622<\//' "$ROOTFS_DISK_DIR/etc/system.jwmrc"
             sed -i 's#<Program icon="web-browser" label="Firefox">firefox</Program>#<Program icon="web-browser" label="Web Browser">links -g</Program>#' "$ROOTFS_DISK_DIR/etc/system.jwmrc"
+            # Keep the persistent JWM menu idempotent across image rebuilds.
+            sed -i '/^[[:space:]]*<Menu icon="games" label="Games">$/,/^[[:space:]]*<\/Menu>$/d' \
+                "$ROOTFS_DISK_DIR/etc/system.jwmrc"
             sed -i '/label="Gimp"/i\
+            <!-- SimRV Games submenu -->\
             <Menu icon="games" label="Games">\
                 <Program label="Chess">xterm -T Chess -e gnuchess</Program>\
                 <Program label="Gomoku">xterm -T Gomoku -e gomoku</Program>\
