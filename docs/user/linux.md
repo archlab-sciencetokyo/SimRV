@@ -9,7 +9,7 @@ offline-friendly demo applications.
 
 SimRV supports full Linux OS boot as part of its integration validation gate. You need:
 
-- **`SIMRV_LINUX_MEM_IMG`**: Firmware payload image (BBL + Linux kernel)
+- **`SIMRV_LINUX_MEM_IMG`**: OpenSBI `FW_PAYLOAD` image containing the Linux kernel
 - **`SIMRV_LINUX_DISK_IMG`**: Root filesystem image
 - **`SIMRV_LINUX_DTB`** (optional): Device tree blob
 
@@ -283,7 +283,7 @@ linux-build/
 
 linux-images/
 ├── rv32/
-│   ├── fw_payload.bin    # Berkeley Boot Loader + Linux kernel
+│   ├── fw_payload.bin    # OpenSBI FW_PAYLOAD + Linux kernel
 │   ├── root.bin          # Root filesystem image
 │   ├── devicetree.dtb    # Device tree blob
 │   ├── virt.dts          # Device tree source
@@ -294,10 +294,10 @@ linux-images/
 
 ### Output Components
 
-#### `fw_payload.bin` (Firmware Payload)
+#### `fw_payload.bin` (OpenSBI Firmware Payload)
 
-Combined Berkeley Boot Loader (BBL) + Linux kernel image. Loaded by SimRV via
-`-m` and executed starting at `0x80000000`.
+OpenSBI generic-platform `FW_PAYLOAD` image containing the Linux kernel and the generated device
+tree. Loaded by SimRV via `-m` and executed starting at `0x80000000`.
 
 #### `root.img` / `root.bin` (Root Filesystem)
 
