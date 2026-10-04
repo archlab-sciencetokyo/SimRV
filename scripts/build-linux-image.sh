@@ -841,14 +841,11 @@ EOF
     # normal Alpine package-manager use.
     if [ "$DISK_MB" -lt 4096 ]; then DISK_MB=4096; fi
     dd if=/dev/zero of="$IMAGES_DIR/root.img" bs=1M count="$DISK_MB" status=none
-    # Keep the guest root disk deterministic and resilient across repeated
-    # simulator boots. SimRV profiling and smoke runs commonly reuse the
-    # image, so journal replay can otherwise dominate boot time or preserve
-    # host-aborted journal state between runs.
-    mkfs.ext4 -O ^has_journal -d "$ROOTFS_DISK_DIR" -F "$IMAGES_DIR/root.img"
-    # mkfs -d can leave metadata checksum/free-count discrepancies on large
-    # no-journal images. Repair the newly-created golden before publishing it;
-    # future disposable-run clones can then be validated without mutation.
+    # Keep the guest root disk aligned with normal Linux ext4 behavior. The
+    # journal provides crash recovery when a simulator or host is interrupted.
+    mkfs.ext4 -d "$ROOTFS_DISK_DIR" -F "$IMAGES_DIR/root.img"
+    # Repair the newly-created golden before publishing it; future disposable-
+    # run clones can then be validated without mutation.
     e2fsck -fy "$IMAGES_DIR/root.img" >/dev/null
     cp -f "$IMAGES_DIR/root.img" "$IMAGES_DIR/root.bin"
 else

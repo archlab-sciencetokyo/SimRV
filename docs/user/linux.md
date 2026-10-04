@@ -301,7 +301,7 @@ Combined Berkeley Boot Loader (BBL) + Linux kernel image. Loaded by SimRV via
 
 #### `root.img` / `root.bin` (Root Filesystem)
 
-Minimal ext4 filesystem without a journal, containing:
+Standard ext4 filesystem with journaling enabled, containing:
 
 - BusyBox shell utilities
 - Essential C libraries (musl or glibc)

@@ -9,8 +9,8 @@ This release candidate hardens the Linux GUI smoke path and makes repeated profi
 
 - Bundle the Alpine X11/JWM desktop stack when host-side RISC-V emulation is available, refresh
   guest font caches, and remove the optional `xclock` dependency so JWM starts reliably.
-- Build the Linux root filesystem without ext4 journaling, validate it with `e2fsck`, and add a
-  safe per-run clone helper for profiling and emulator smoke tests.
+- Build the Linux root filesystem as standard journaled ext4, validate it with `e2fsck`, and add
+  a safe per-run clone helper for profiling and emulator smoke tests.
 - Add TAP gateway DNS relay documentation and use the gateway resolver before public fallbacks.
 - Use the absolute `/sbin/switch_root` path in the initramfs handoff.
 - Qualify RV32/RV64 gates and the GUI/TAP browser smoke path for this release candidate.
