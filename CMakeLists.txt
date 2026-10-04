@@ -20,7 +20,7 @@ if(BUILD_TESTING OR SIMRV_ENABLE_TOOLING)
   set(PYTHON_BIN "${Python3_EXECUTABLE}")
 endif()
 
-set(SIMRV_VERSION "3.0.0-rc.4")
+set(SIMRV_VERSION "3.0.0-rc.5")
 set(SIMRV_GIT_BRANCH "unknown")
 set(SIMRV_GIT_SHA "unknown")
 
@@ -537,6 +537,11 @@ if(BUILD_TESTING)
 
   set(TEST_IMAGES_DIR "${SIMRV_LINUX_IMAGES_DIR}")
   if(EXISTS "${TEST_IMAGES_DIR}/fw_payload.bin")
+    set(LINUX_PTY_COMMON_ENV
+        "SIMRV_BIN=$<TARGET_FILE:SimRV>;SIMRV_IMAGES_DIR=${TEST_IMAGES_DIR}")
+    set(LINUX_PTY_PROFILE_ENV
+        "${LINUX_PTY_COMMON_ENV};SIMRV_LINUX_DTB=${TEST_IMAGES_DIR}/devicetree.dtb")
+    set(LINUX_PTY_DYNAMIC_ENV "${LINUX_PTY_COMMON_ENV};SIMRV_LINUX_DTB=NONE")
     add_test(NAME linux-boot-pty
              COMMAND ${PYTHON_BIN}
                      ${CMAKE_SOURCE_DIR}/scripts/test_linux_pty.py)
@@ -544,13 +549,27 @@ if(BUILD_TESTING)
       linux-boot-pty
       PROPERTIES
         ENVIRONMENT
-        "SIMRV_BIN=$<TARGET_FILE:SimRV>;SIMRV_IMAGES_DIR=${TEST_IMAGES_DIR};SIMRV_TEST_TIMEOUT=180"
+        "${LINUX_PTY_PROFILE_ENV};SIMRV_TEST_INSTRUCTIONS=20000000000;SIMRV_TEST_TIMEOUT=300"
         TIMEOUT
         200
         RUN_SERIAL
         TRUE
         LABELS
         "external;linux;pty;required")
+    add_test(NAME linux-privilege-pty
+             COMMAND ${PYTHON_BIN}
+                     ${CMAKE_SOURCE_DIR}/scripts/test_linux_pty.py)
+    set_tests_properties(
+      linux-privilege-pty
+      PROPERTIES
+        ENVIRONMENT
+        "${LINUX_PTY_PROFILE_ENV};SIMRV_TEST_PRIVILEGE=1;SIMRV_TEST_INSTRUCTIONS=20000000000;SIMRV_TEST_TIMEOUT=300"
+        TIMEOUT
+        200
+        RUN_SERIAL
+        TRUE
+        LABELS
+        "external;linux;pty;privilege")
     add_test(NAME linux-ia-quantum-smp-pty
              COMMAND ${PYTHON_BIN}
                      ${CMAKE_SOURCE_DIR}/scripts/test_linux_pty.py)
@@ -558,7 +577,7 @@ if(BUILD_TESTING)
       linux-ia-quantum-smp-pty
       PROPERTIES
         ENVIRONMENT
-        "SIMRV_BIN=$<TARGET_FILE:SimRV>;SIMRV_IMAGES_DIR=${TEST_IMAGES_DIR};SIMRV_LINUX_DTB=NONE;SIMRV_TEST_EXTRA_ARGS=--smp 2 --smp-quantum 100;SIMRV_TEST_EXPECT_CPUS=2;SIMRV_TEST_TIMEOUT=180"
+        "${LINUX_PTY_DYNAMIC_ENV};SIMRV_TEST_EXTRA_ARGS=--smp 2 --smp-quantum 100;SIMRV_TEST_EXPECT_CPUS=2;SIMRV_TEST_INSTRUCTIONS=12000000000;SIMRV_TEST_TIMEOUT=180"
         TIMEOUT
         200
         RUN_SERIAL
@@ -572,7 +591,7 @@ if(BUILD_TESTING)
       linux-ca-boot-pty
       PROPERTIES
         ENVIRONMENT
-        "SIMRV_BIN=$<TARGET_FILE:SimRV>;SIMRV_IMAGES_DIR=${TEST_IMAGES_DIR};SIMRV_TEST_EXTRA_ARGS=--mode cycle-accurate;SIMRV_TEST_TIMEOUT=420"
+        "${LINUX_PTY_COMMON_ENV};SIMRV_TEST_EXTRA_ARGS=--mode cycle-accurate;SIMRV_TEST_INSTRUCTIONS=12000000000;SIMRV_TEST_TIMEOUT=420"
         TIMEOUT
         440
         RUN_SERIAL
@@ -586,7 +605,7 @@ if(BUILD_TESTING)
       linux-ca-quantum-smp-pty
       PROPERTIES
         ENVIRONMENT
-        "SIMRV_BIN=$<TARGET_FILE:SimRV>;SIMRV_IMAGES_DIR=${TEST_IMAGES_DIR};SIMRV_LINUX_DTB=NONE;SIMRV_TEST_EXTRA_ARGS=--mode cycle-accurate --smp 2 --smp-quantum 100;SIMRV_TEST_EXPECT_CPUS=2;SIMRV_TEST_TIMEOUT=480"
+        "${LINUX_PTY_DYNAMIC_ENV};SIMRV_TEST_EXTRA_ARGS=--mode cycle-accurate --smp 2 --smp-quantum 100;SIMRV_TEST_EXPECT_CPUS=2;SIMRV_TEST_INSTRUCTIONS=12000000000;SIMRV_TEST_TIMEOUT=480"
         TIMEOUT
         500
         RUN_SERIAL
@@ -600,7 +619,7 @@ if(BUILD_TESTING)
       linux-ca-mt-smp-pty
       PROPERTIES
         ENVIRONMENT
-        "SIMRV_BIN=$<TARGET_FILE:SimRV>;SIMRV_IMAGES_DIR=${TEST_IMAGES_DIR};SIMRV_LINUX_DTB=NONE;SIMRV_TEST_EXTRA_ARGS=--mode cycle-accurate --smp 2 --smp-quantum 100 --smp-multithreaded;SIMRV_TEST_EXPECT_CPUS=2;SIMRV_TEST_TIMEOUT=480"
+        "${LINUX_PTY_DYNAMIC_ENV};SIMRV_TEST_EXTRA_ARGS=--mode cycle-accurate --smp 2 --smp-quantum 100 --smp-multithreaded;SIMRV_TEST_EXPECT_CPUS=2;SIMRV_TEST_INSTRUCTIONS=12000000000;SIMRV_TEST_TIMEOUT=480"
         TIMEOUT
         500
         RUN_SERIAL
@@ -614,7 +633,7 @@ if(BUILD_TESTING)
       linux-poweroff-quit-pty
       PROPERTIES
         ENVIRONMENT
-        "SIMRV_BIN=$<TARGET_FILE:SimRV>;SIMRV_IMAGES_DIR=${TEST_IMAGES_DIR};SIMRV_TEST_LIFECYCLE=poweroff;SIMRV_TEST_TIMEOUT=180"
+        "${LINUX_PTY_PROFILE_ENV};SIMRV_TEST_LIFECYCLE=poweroff;SIMRV_TEST_INSTRUCTIONS=12000000000;SIMRV_TEST_TIMEOUT=180"
         TIMEOUT
         200
         RUN_SERIAL
@@ -628,7 +647,7 @@ if(BUILD_TESTING)
       linux-poweroff-reboot-pty
       PROPERTIES
         ENVIRONMENT
-        "SIMRV_BIN=$<TARGET_FILE:SimRV>;SIMRV_IMAGES_DIR=${TEST_IMAGES_DIR};SIMRV_TEST_LIFECYCLE=poweroff-reboot;SIMRV_TEST_TIMEOUT=180"
+        "${LINUX_PTY_PROFILE_ENV};SIMRV_TEST_LIFECYCLE=poweroff-reboot;SIMRV_TEST_INSTRUCTIONS=12000000000;SIMRV_TEST_TIMEOUT=180"
         TIMEOUT
         200
         RUN_SERIAL
@@ -941,6 +960,24 @@ if(SIMRV_ENABLE_LINUX_TOOLS)
       ${CMAKE_SOURCE_DIR}/scripts/build-linux-image.sh --arch rv${SIMRV_XLEN}
     WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
     COMMENT "Building RV${SIMRV_XLEN}GC Linux kernel and rootfs images"
+    VERBATIM USES_TERMINAL)
+  add_custom_target(
+    linux-images-buildroot
+    COMMAND
+      ${CMAKE_COMMAND} -E env SIMRV_USE_LOCAL_SCRATCH=1 bash
+      ${CMAKE_SOURCE_DIR}/scripts/build-linux-image.sh --arch rv${SIMRV_XLEN}
+      --rootfs buildroot --profile fpga
+    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+    COMMENT "Building RV${SIMRV_XLEN}GC Buildroot FPGA Linux profile"
+    VERBATIM USES_TERMINAL)
+  add_custom_target(
+    linux-images-debug
+    COMMAND
+      ${CMAKE_COMMAND} -E env SIMRV_USE_LOCAL_SCRATCH=1 bash
+      ${CMAKE_SOURCE_DIR}/scripts/build-linux-image.sh --arch rv${SIMRV_XLEN}
+      --rootfs alpine --profile debug
+    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+    COMMENT "Building RV${SIMRV_XLEN}GC expanded Alpine debug Linux profile"
     VERBATIM USES_TERMINAL)
 endif()
 

@@ -1,6 +1,6 @@
 # SimRV 3.0.0 release-candidate handoff
 
-Branch: `release/3.0.0-rc.4`
+Branch: `release/3.0.0-rc.5`
 Target: `dev`
 
 This RC consolidates the public RV64-capable runtime, native package bundles, static musl portable
@@ -15,7 +15,7 @@ Release qualification:
 3. Confirm clean package installs and `simrv --version` across the supported distro matrix.
 4. Soak attach/detach, reconnect, reboot lifecycle notifications, and non-TTY output.
 5. Run the GA smoke workflow on both native binaries and validate the exported SoC manifest schema.
-6. Merge this release branch into `dev`, then create and push `v3.0.0-rc.4` as a prerelease.
+6. Merge this release branch into `dev`, then create and push `v3.0.0-rc.5` as a prerelease.
 
 The public artifact is the RV64-capable `simrv` binary; native RV32 remains a strict-width CI
 oracle. Keep generated packages and qualification output under `/tmp` or `/scratch`.

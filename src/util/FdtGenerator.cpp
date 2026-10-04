@@ -42,6 +42,11 @@ auto to_be64(uint64_t val) -> uint64_t {
     }
 }
 
+auto reg_cells(uint64_t base, uint64_t size) -> std::vector<uint32_t> {
+    return {static_cast<uint32_t>(base >> 32), static_cast<uint32_t>(base),
+            static_cast<uint32_t>(size >> 32), static_cast<uint32_t>(size)};
+}
+
 class FdtBuilder {
    public:
     void begin_node(std::string_view name) {
@@ -344,9 +349,7 @@ auto FdtGenerator::generate(const FdtConfig& config) -> std::vector<uint8_t> {
         const auto power = device_config(simrv::core::SoCDeviceKind::Power);
         b.begin_node(std::format("test@{:x}", power.base));
         b.add_prop_string_list("compatible", {"sifive,test1", "sifive,test0", "syscon"});
-        b.add_prop_u32_array(
-            "reg", {static_cast<uint32_t>(power.base >> 32), static_cast<uint32_t>(power.base),
-                    static_cast<uint32_t>(power.size >> 32), static_cast<uint32_t>(power.size)});
+        b.add_prop_u32_array("reg", reg_cells(power.base, power.size));
         b.add_prop_u32("phandle", test_phandle);
         b.end_node();
     }
@@ -393,9 +396,7 @@ auto FdtGenerator::generate(const FdtConfig& config) -> std::vector<uint8_t> {
     if (device_enabled(simrv::core::SoCDeviceKind::Uart)) {
         b.begin_node(std::format("serial@{:x}", uart.base));
         b.add_prop_string("compatible", "ns16550a");
-        b.add_prop_u32_array(
-            "reg", {static_cast<uint32_t>(uart.base >> 32), static_cast<uint32_t>(uart.base),
-                    static_cast<uint32_t>(uart.size >> 32), static_cast<uint32_t>(uart.size)});
+        b.add_prop_u32_array("reg", reg_cells(uart.base, uart.size));
         b.add_prop_u32("clock-frequency", 3686400);
         b.add_prop_u32("current-speed", 115200);
         b.add_prop_u32("reg-shift", 0);
@@ -413,10 +414,7 @@ auto FdtGenerator::generate(const FdtConfig& config) -> std::vector<uint8_t> {
             const auto device = device_config(kind);
             b.begin_node(std::format("virtio@{:x}", device.base));
             b.add_prop_string("compatible", "virtio,mmio");
-            b.add_prop_u32_array(
-                "reg",
-                {static_cast<uint32_t>(device.base >> 32), static_cast<uint32_t>(device.base),
-                 static_cast<uint32_t>(device.size >> 32), static_cast<uint32_t>(device.size)});
+            b.add_prop_u32_array("reg", reg_cells(device.base, device.size));
             b.add_prop_u32("interrupt-parent", plic_phandle);
             b.add_prop_u32("interrupts", device.irq == 0 ? fallback_irq : device.irq);
             if (net) b.add_prop_bytes("local-mac-address", {0x52, 0x54, 0x00, 0x12, 0x34, 0x56});
@@ -458,9 +456,7 @@ auto FdtGenerator::generate(const FdtConfig& config) -> std::vector<uint8_t> {
         const auto rtc = device_config(simrv::core::SoCDeviceKind::Rtc);
         b.begin_node(std::format("rtc@{:x}", rtc.base));
         b.add_prop_string("compatible", "google,goldfish-rtc");
-        b.add_prop_u32_array(
-            "reg", {static_cast<uint32_t>(rtc.base >> 32), static_cast<uint32_t>(rtc.base),
-                    static_cast<uint32_t>(rtc.size >> 32), static_cast<uint32_t>(rtc.size)});
+        b.add_prop_u32_array("reg", reg_cells(rtc.base, rtc.size));
         b.add_prop_u32("interrupt-parent", plic_phandle);
         b.add_prop_u32("interrupts", rtc.irq);
         b.end_node();
@@ -471,9 +467,7 @@ auto FdtGenerator::generate(const FdtConfig& config) -> std::vector<uint8_t> {
         const auto dma = device_config(simrv::core::SoCDeviceKind::DmaController);
         b.begin_node(std::format("dma@{:x}", dma.base));
         b.add_prop_string_list("compatible", {"simrv,dma-1.0", "generic-dma-controller"});
-        b.add_prop_u32_array(
-            "reg", {static_cast<uint32_t>(dma.base >> 32), static_cast<uint32_t>(dma.base),
-                    static_cast<uint32_t>(dma.size >> 32), static_cast<uint32_t>(dma.size)});
+        b.add_prop_u32_array("reg", reg_cells(dma.base, dma.size));
         b.add_prop_u32("interrupt-parent", plic_phandle);
         b.add_prop_u32("interrupts", dma.irq);
         b.end_node();

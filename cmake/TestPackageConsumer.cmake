@@ -7,7 +7,7 @@ set(consumer_root "${SIMRV_BINARY_DIR}/package-consumer-check")
 set(install_root "${consumer_root}/install")
 
 execute_process(
-  COMMAND "${CMAKE_COMMAND}" -S "${consumer_source}" -B
+  COMMAND "${CMAKE_COMMAND}" -E env CCACHE_DISABLE=1 "${CMAKE_COMMAND}" -S "${consumer_source}" -B
           "${consumer_root}/build-tree" -D "SimRV_DIR=${SIMRV_BINARY_DIR}"
   RESULT_VARIABLE build_tree_configure_result)
 if(NOT build_tree_configure_result EQUAL 0)

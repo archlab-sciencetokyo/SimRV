@@ -35,6 +35,12 @@ def main() -> None:
     arches = ["rv32", "rv64"] if args.arch == "all" else [args.arch]
     compiler_bins = {"gcc": ("gcc", "g++"), "clang": ("clang", "clang++")}
     report = {"iterations": args.iterations, "configurations": []}
+    release_env = os.environ.copy()
+    release_env["CCACHE_DIR"] = str(ROOT / "build" / ".ccache")
+    release_env["CCACHE_TEMPDIR"] = str(ROOT / "build" / ".ccache-tmp")
+    release_env["SIMRV_CONFIG_DIR"] = str(ROOT / "configs")
+    pathlib.Path(release_env["CCACHE_DIR"]).mkdir(parents=True, exist_ok=True)
+    pathlib.Path(release_env["CCACHE_TEMPDIR"]).mkdir(parents=True, exist_ok=True)
 
     run([sys.executable, "scripts/release_check.py"])
     for iteration in range(1, args.iterations + 1):
@@ -53,13 +59,13 @@ def main() -> None:
                     f"-DCMAKE_C_COMPILER={cc}", f"-DCMAKE_CXX_COMPILER={cxx}",
                     "-DSIMRV_WARNINGS_AS_ERRORS=ON",
                 ]
-                elapsed = run(configure)
-                elapsed += run(["cmake", "--build", str(build_dir)])
+                elapsed = run(configure, env=release_env)
+                elapsed += run(["cmake", "--build", str(build_dir)], env=release_env)
                 elapsed += run([
                     "ctest", "--test-dir", str(build_dir), "--output-on-failure", "-L", "gate"
-                ], env=os.environ.copy())
+                ], env=release_env)
                 binary = build_dir / "simrv"
-                run([sys.executable, "scripts/release_check.py", "--binary", str(binary)])
+                run([sys.executable, "scripts/release_check.py", "--binary", str(binary)], env=release_env)
                 report["configurations"].append({
                     "iteration": iteration,
                     "compiler": compiler,

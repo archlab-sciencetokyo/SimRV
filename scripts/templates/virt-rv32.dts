@@ -8,7 +8,7 @@
 
     chosen {
         stdout-path = "serial0:115200n8";
-        bootargs = "console=tty0 console=ttyS0,115200 earlycon=uart8250,mmio,0x10000000,115200n8 rdinit=/init rw loglevel=7";
+        bootargs = "console=tty0 console=ttyS0,115200 earlycon=uart8250,mmio,0x10000000,115200n8 root=LABEL=simrv-alpine rootfstype=ext4 rootwait rw loglevel=7";
     };
 
     aliases {
@@ -17,7 +17,7 @@
 
     memory@80000000 {
         device_type = "memory";
-        reg = <0x80000000 0x40000000>;
+        reg = <0x80000000 0x20000000>;
     };
 
     reserved-memory {

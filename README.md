@@ -127,8 +127,9 @@ cmake --preset rv64-asan && cmake --build --preset rv64-asan
 cmake --preset rv64-tidy && cmake --build --preset rv64-tidy
 ```
 
-If a host ccache wrapper has no writable cache, prefix configure and build commands with
-`CCACHE_DISABLE=1`.
+The presets place ccache state under the writable project build tree (`build/.ccache`), so
+read-only home-directory cache mounts do not break CMake compiler or LTO probes. To disable
+compiler caching explicitly, prefix configure and build commands with `CCACHE_DISABLE=1`.
 
 ### Run
 

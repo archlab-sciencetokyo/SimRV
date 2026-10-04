@@ -36,6 +36,11 @@ def visible_text(data, parser_state):
     parser_state[0] = state
     return "".join(output)
 
+
+def shell_prompt_seen(text):
+    """Recognize BusyBox/Alpine prompts such as '~#', '~ #', and '# '."""
+    return re.search(r"(?:~#|~ #|# )", text) is not None
+
 def main():
     simrv_bin = os.environ.get("SIMRV_BIN")
     if not simrv_bin:
@@ -53,12 +58,14 @@ def main():
     disk_img_default = os.path.join(images_dir, "root.img") if os.path.exists(os.path.join(images_dir, "root.img")) else os.path.join(images_dir, "root.bin")
     disk_img = os.environ.get("SIMRV_LINUX_DISK_IMG", disk_img_default)
     dtb_img = os.environ.get("SIMRV_LINUX_DTB", "dynamic")
-    timeout_secs = int(os.environ.get("SIMRV_TEST_TIMEOUT", "90"))
+    timeout_secs = int(os.environ.get("SIMRV_TEST_TIMEOUT", "300"))
+    instruction_limit = os.environ.get("SIMRV_TEST_INSTRUCTIONS", "20000000000")
     expected_cpus = int(os.environ.get("SIMRV_TEST_EXPECT_CPUS", "0"))
     if expected_cpus < 0:
         print("Error: SIMRV_TEST_EXPECT_CPUS must be non-negative", file=sys.stderr)
         sys.exit(2)
     lifecycle_action = os.environ.get("SIMRV_TEST_LIFECYCLE", "shell")
+    privilege_check = os.environ.get("SIMRV_TEST_PRIVILEGE") == "1"
     if lifecycle_action not in ("shell", "poweroff", "reboot", "poweroff-reboot"):
         print(f"Error: unsupported SIMRV_TEST_LIFECYCLE '{lifecycle_action}'", file=sys.stderr)
         sys.exit(2)
@@ -77,7 +84,7 @@ def main():
         "-m", mem_img,
         "-D", disk_img,
         "--tui",
-        "-e", "10000000000"  # Leave enough execution time to interact after boot.
+        "-e", instruction_limit  # Leave enough execution time for rootfs handoff and login.
     ]
     if dtb_img and dtb_img != "dynamic" and dtb_img != "NONE" and os.path.exists(dtb_img):
         cmd.extend(["-f", dtb_img])
@@ -107,10 +114,17 @@ def main():
     enter_boundary = 0
     command_sent = False
     passed = False
+    login_sent = False
+    password_sent = False
     run_sent = False
     lifecycle_sent = False
+    reboot_seen = False
     shutdown_control_sent = False
     shutdown_control_boundary = 0
+
+    def write_guest(data):
+        """Send guest input through the serial endpoint once it is available."""
+        os.write(uart_fd if uart_fd is not None else master_fd, data)
 
     try:
         while True:
@@ -156,14 +170,23 @@ def main():
                     if len(guest_buffer) > 1_000_000:
                         guest_buffer = guest_buffer[-500_000:]
 
-                if not enter_sent and "~ #" in guest_buffer:
+                if not login_sent and re.search(r"(?:login:|Login:)", guest_buffer):
+                    time.sleep(0.1)
+                    write_guest(b"root\r")
+                    login_sent = True
+                    enter_boundary = len(guest_buffer)
+                if login_sent and not password_sent and re.search(r"[Pp]assword:", guest_buffer[enter_boundary:]):
+                    time.sleep(0.1)
+                    write_guest(b"\r")
+                    password_sent = True
+                if not enter_sent and (shell_prompt_seen(guest_buffer) or (login_sent and shell_prompt_seen(guest_buffer[enter_boundary:]))):
                     # UART mirroring reaches this PTY just before the TUI parser answers the shell's
                     # trailing CSI 6 n query. Let one render interval deliver that response first.
                     time.sleep(0.1)
-                    os.write(master_fd, b"\r")
+                    if not login_sent:
+                        write_guest(b"\r")
                     enter_sent = True
-                    enter_boundary = len(guest_buffer)
-                if enter_sent and not command_sent and "~ #" in guest_buffer[enter_boundary:]:
+                if enter_sent and not command_sent and shell_prompt_seen(guest_buffer[enter_boundary:]):
                     # Keep the exact token out of the echoed command line, so seeing it proves the
                     # shell ran the command instead of merely echoing keyboard input.
                     time.sleep(0.1)
@@ -172,15 +195,21 @@ def main():
                         cpu_check = (
                             f'test "$(getconf _NPROCESSORS_ONLN)" -eq {expected_cpus} && '
                         )
-                    command = cpu_check + 'echo __SIMRV_TUI_ENTER_"OK__"\r'
-                    os.write(master_fd, command.encode("ascii"))
+                    privilege = ""
+                    if privilege_check:
+                        privilege = (
+                            "test \"$(id -u)\" -eq 0 && "
+                            "su nobody -s /bin/sh -c 'test \"$(id -u)\" -eq 65534' && "
+                        )
+                    command = cpu_check + privilege + 'echo __SIMRV_TUI_ENTER_"OK__"\r'
+                    write_guest(command.encode("ascii"))
                     command_sent = True
                 if command_sent and SHELL_TOKEN in guest_buffer and not lifecycle_sent:
                     if lifecycle_action == "shell":
                         passed = True
                         break
                     token_end = guest_buffer.find(SHELL_TOKEN) + len(SHELL_TOKEN)
-                    if "~ #" not in guest_buffer[token_end:]:
+                    if not shell_prompt_seen(guest_buffer[token_end:]):
                         continue
                     # The shell emits a cursor-position query after drawing its prompt. Give the
                     # terminal response a render interval to reach UART before the next command.
@@ -190,8 +219,12 @@ def main():
                     command = os.environ.get("SIMRV_TEST_LIFECYCLE_COMMAND", command)
                     if os.environ.get("SIMRV_TEST_LIFECYCLE_DIAGNOSTICS") == "1":
                         command = "dmesg | grep -Ei 'sbi|reset|reboot|power|syscon'; " + command
-                    os.write(master_fd, (command + "\r").encode("ascii"))
+                    write_guest((command + "\r").encode("ascii"))
                     lifecycle_sent = True
+                if (lifecycle_action == "reboot" and reboot_seen and
+                        command_sent and SHELL_TOKEN in guest_buffer):
+                    passed = True
+                    break
                 if lifecycle_sent:
                     if lifecycle_action in ("poweroff", "poweroff-reboot") and "SHUTDOWN" in buffer and not shutdown_control_sent:
                         shutdown_control_boundary = len(buffer)
@@ -202,9 +235,17 @@ def main():
                             "[UART] PTY slave:" in buffer[shutdown_control_boundary:]):
                         passed = True
                         break
-                    if lifecycle_action == "reboot" and "Rebooting guest system" in buffer:
-                        passed = True
-                        break
+                    if (lifecycle_action == "reboot" and not reboot_seen and
+                            "Rebooting guest system" in buffer):
+                        # A guest reboot resets the virtual machine in-process. Require the
+                        # second serial login and shell command so this test cannot pass merely
+                        # because the reset request was printed.
+                        reboot_seen = True
+                        login_sent = False
+                        password_sent = False
+                        enter_sent = False
+                        enter_boundary = len(guest_buffer)
+                        command_sent = False
             except OSError:
                 # A clean Ctrl-Q shutdown can close the PTY before poll() observes
                 # the child exit. Once the guest poweroff and host shutdown control
@@ -238,7 +279,7 @@ def main():
     if passed:
         print(f"[PASS] Linux TUI lifecycle action completed: {lifecycle_action}.")
         sys.exit(0)
-    print(f"[FAIL] run_sent={run_sent}, enter_sent={enter_sent}, "
+    print(f"[FAIL] run_sent={run_sent}, login_sent={login_sent}, password_sent={password_sent}, enter_sent={enter_sent}, "
           f"command_sent={command_sent}, lifecycle_sent={lifecycle_sent}, "
           f"shutdown_control_sent={shutdown_control_sent}, passed={passed}",
           file=sys.stderr)

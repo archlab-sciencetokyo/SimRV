@@ -228,13 +228,23 @@ inline auto resolve_cpu_model_path(std::string_view name_or_path) -> std::option
 
     const char* env_dir = std::getenv("SIMRV_CONFIG_DIR");
     if (env_dir != nullptr && *env_dir != '\0') {
-        const std::filesystem::path env_p =
-            std::filesystem::path(env_dir) / "models" / (std::string(name_or_path) + ".cfg");
-        if (std::filesystem::is_regular_file(env_p, ec)) {
-            return env_p.string();
+        const std::filesystem::path env_root(env_dir);
+        for (const auto& root : {env_root, env_root.parent_path()}) {
+            const std::filesystem::path env_p = root / p;
+            if (std::filesystem::is_regular_file(env_p, ec)) {
+                return env_p.string();
+            }
+            const std::filesystem::path env_p_ext = root / p_ext;
+            if (std::filesystem::is_regular_file(env_p_ext, ec)) {
+                return env_p_ext.string();
+            }
         }
-        const std::filesystem::path env_direct =
-            std::filesystem::path(env_dir) / (std::string(name_or_path) + ".cfg");
+        const std::filesystem::path env_model =
+            env_root / "models" / (std::string(name_or_path) + ".cfg");
+        if (std::filesystem::is_regular_file(env_model, ec)) {
+            return env_model.string();
+        }
+        const std::filesystem::path env_direct = env_root / (std::string(name_or_path) + ".cfg");
         if (std::filesystem::is_regular_file(env_direct, ec)) {
             return env_direct.string();
         }

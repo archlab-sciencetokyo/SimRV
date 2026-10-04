@@ -3,6 +3,19 @@
 All notable changes to SimRV are documented here.
 Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v3.0.0-rc.5] — 2026-10-04
+
+This release candidate adds the standard Linux and FPGA-ready boot profiles and completes the
+interactive Alpine login/privilege profiling path.
+
+- Add opt-in Alpine debug and Buildroot FPGA profiles with separable OpenSBI, Linux, DTB, and
+  journaled ext4 artifacts plus reproducibility manifests.
+- Use conventional BusyBox `/sbin/init`, serial getty, ext4 UUID/label mounting, and explicit
+  debug-only early-userspace tracing.
+- Qualify authenticated serial login, post-login JWM startup, root-to-nobody privilege checks,
+  and clean poweroff/reboot on disposable filesystem clones.
+- Improve the Linux PTY harness for direct UART input and Alpine shell prompt detection.
+
 ## [v3.0.0-rc.4] — 2026-10-04
 
 This release candidate hardens the Linux GUI smoke path and makes repeated profiling safer.
@@ -703,6 +716,7 @@ on inspector polish, correctness fixes, and CLI normalization.
 
 - Initial public alpha: CMake preset infrastructure, Clang-20 CI, base RISC-V pipeline
 
+[v3.0.0-rc.5]: https://github.com/archlab-sciencetokyo/SimRV/releases/tag/v3.0.0-rc.5
 [v3.0.0-rc.4]: https://github.com/archlab-sciencetokyo/SimRV/releases/tag/v3.0.0-rc.4
 [v3.0.0-rc.3]: https://github.com/archlab-sciencetokyo/SimRV/releases/tag/v3.0.0-rc.3
 [v3.0.0-rc.2]: https://github.com/archlab-sciencetokyo/SimRV/releases/tag/v3.0.0-rc.2

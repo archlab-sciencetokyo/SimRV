@@ -1,0 +1,6 @@
+NAME="SimRV FPGA Linux"
+ID=simrv
+ID_LIKE=buildroot
+PRETTY_NAME="SimRV FPGA Linux"
+VERSION_ID="3.0"
+HOME_URL="https://github.com/archlab-sciencetokyo/SimRV"

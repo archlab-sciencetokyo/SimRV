@@ -11,6 +11,12 @@
   <a href="https://github.com/archlab-sciencetokyo/SimRV/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-MIT-green.svg" alt="License"/></a>
 </p>
 
+!!! success "SimRV 3.0 release line"
+
+    The 3.0 workflow brings the simulator, Linux guest images, and FPGA bring-up artifacts under
+    one conventional boot contract. Start with the [3.0 release guide](user/release-3.0.md) for
+    the supported GUI and headless profiles, separable OpenSBI boot, and qualification commands.
+
 ---
 
 ## Key Highlights
@@ -130,6 +136,11 @@ SimRV requires a modern C++23 compiler (**Clang 22+** or **GCC 16+**), **CMake 3
     ---
 
     Subsystem organization, C++23 standards, branching model, and writing CTest suites.
+
+- :material-rocket-launch:{ .lg .middle } **[SimRV 3.0 Release Guide](user/release-3.0.md)**
+
+    Release-oriented workflows for desktop GUI use, FPGA handoff, reproducible CMake builds, and
+    Linux/OpenSBI artifact validation.
 
 </div>
 

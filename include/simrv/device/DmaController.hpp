@@ -87,7 +87,7 @@ class DmaController : public memory::MmioDevice {
     }
     [[nodiscard]] auto byte_count() const noexcept -> uint32_t { return byte_count_; }
 
-    void reset() noexcept;
+    void reset() noexcept override;
 
    private:
     void start_transfer();

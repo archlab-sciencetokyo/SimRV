@@ -1,0 +1,8 @@
+# SimRV FPGA baseline filesystem table. LABEL discovery remains stable when a
+# bootloader or FPGA integration renames the virtio block device.
+LABEL=simrv-root /     ext4      defaults                    0 1
+proc      /proc     proc      defaults                    0 0
+sysfs     /sys      sysfs     defaults                    0 0
+devtmpfs  /dev      devtmpfs  mode=0755,nosuid            0 0
+devpts    /dev/pts  devpts    gid=5,mode=620              0 0
+tmpfs     /run      tmpfs     mode=0755,nosuid,nodev       0 0

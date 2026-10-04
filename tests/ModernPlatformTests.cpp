@@ -2892,6 +2892,7 @@ void test_virtio_sound_negotiation_and_playback() {
         .channels = 2,
         .format = simrv::device::virtio::kVirtioSndPcmFmtS16,
         .rate = simrv::device::virtio::kVirtioSndPcmRate48000,
+        .padding = 0,
     };
     simrv::device::virtio::VirtioSndHdr set_resp{};
     submit_control_request(&set_params, sizeof(set_params), &set_resp, sizeof(set_resp));

@@ -10,6 +10,10 @@
             "name": "simrv-base",
             "hidden": true,
             "generator": "Ninja",
+            "environment": {
+                "CCACHE_DIR": "${sourceDir}/build/.ccache",
+                "CCACHE_TEMPDIR": "${sourceDir}/build/.ccache-tmp"
+            },
             "cacheVariables": {
                 "CMAKE_EXPORT_COMPILE_COMMANDS": "ON"
             }
@@ -169,48 +173,67 @@
     ],
     "buildPresets": [
         {
+            "name": "simrv-build-base",
+            "hidden": true,
+            "environment": {
+                "CCACHE_DIR": "${sourceDir}/build/.ccache",
+                "CCACHE_TEMPDIR": "${sourceDir}/build/.ccache-tmp"
+            }
+        },
+        {
             "name": "rv32-release",
-            "configurePreset": "rv32-release"
+            "configurePreset": "rv32-release",
+            "inherits": "simrv-build-base"
         },
         {
             "name": "rv64-release",
-            "configurePreset": "rv64-release"
+            "configurePreset": "rv64-release",
+            "inherits": "simrv-build-base"
         },
         {
             "name": "rv64-native-release",
-            "configurePreset": "rv64-native-release"
+            "configurePreset": "rv64-native-release",
+            "inherits": "simrv-build-base"
         },
         {
             "name": "rv64-clang-release",
-            "configurePreset": "rv64-clang-release"
+            "configurePreset": "rv64-clang-release",
+            "inherits": "simrv-build-base"
         },
         {
             "name": "rv64-clang-libcxx-release",
-            "configurePreset": "rv64-clang-libcxx-release"
+            "configurePreset": "rv64-clang-libcxx-release",
+            "inherits": "simrv-build-base"
         },
         {
             "name": "rv64-gcc-release",
-            "configurePreset": "rv64-gcc-release"
+            "configurePreset": "rv64-gcc-release",
+            "inherits": "simrv-build-base"
         },
         {
             "name": "rv32-debug",
-            "configurePreset": "rv32-debug"
+            "configurePreset": "rv32-debug",
+            "inherits": "simrv-build-base"
         },
         {
             "name": "rv64-debug",
-            "configurePreset": "rv64-debug"
+            "configurePreset": "rv64-debug",
+            "inherits": "simrv-build-base"
         },
         {
             "name": "rv64-asan",
-            "configurePreset": "rv64-asan"
+            "configurePreset": "rv64-asan",
+            "inherits": "simrv-build-base"
         },
         {
             "name": "rv64-tidy",
-            "configurePreset": "rv64-tidy"
+            "configurePreset": "rv64-tidy",
+            "inherits": "simrv-build-base"
         },
         {
             "name": "rv64-tsan",
-            "configurePreset": "rv64-tsan"
+            "configurePreset": "rv64-tsan",
+            "inherits": "simrv-build-base"
         }
     ],
     "testPresets": [
