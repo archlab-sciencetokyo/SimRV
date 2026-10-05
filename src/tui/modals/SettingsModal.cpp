@@ -409,17 +409,17 @@ void SettingsModal::render(std::vector<std::string>& content_rows,
                         : (draft.lockstep_mode ? "\033[1;32m[ON]\033[0m" : "\033[90m[OFF]\033[0m")},
             {.name = "Branch Prediction Log",
              .val = bp_disabled ? "\033[90m[OFF (Requires CA mode)]\033[0m"
-                                : (draft.bp_trace ? "\033[1;32m[ON (trace/bpred.txt)]\033[0m"
+                                : (draft.bp_trace ? "\033[1;32m[ON (<trace-dir>/bpred.txt)]\033[0m"
                                                   : "\033[90m[OFF]\033[0m")},
             {.name = "Instruction Mix Summary",
-             .val = draft.use_mix ? "\033[1;32m[ON (trace/instmix.txt)]\033[0m"
+             .val = draft.use_mix ? "\033[1;32m[ON (<trace-dir>/instmix.txt)]\033[0m"
                                   : "\033[90m[OFF]\033[0m"},
             {.name = "Architectural Trap Log",
-             .val = draft.traplog_mode ? "\033[1;32m[ON (trace/traplog.txt)]\033[0m"
+             .val = draft.traplog_mode ? "\033[1;32m[ON (<trace-dir>/traplog.txt)]\033[0m"
                                        : "\033[90m[OFF]\033[0m"},
             {.name = "Device MMIO Access Log",
              .val = dlog_disabled ? "\033[90m[OFF (Disabled in App Mode)]\033[0m"
-                                  : (draft.dlog_mode ? "\033[1;32m[ON (trace/dlog.txt)]\033[0m"
+                                  : (draft.dlog_mode ? "\033[1;32m[ON (<trace-dir>/dlog.txt)]\033[0m"
                                                      : "\033[90m[OFF]\033[0m")},
         });
 

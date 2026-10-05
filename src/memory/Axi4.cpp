@@ -15,7 +15,8 @@ namespace simrv::memory {
 
 Axi4Tracer::Axi4Tracer(const std::string& path) {
     if (!path.empty()) {
-        std::filesystem::create_directories(std::filesystem::path(path).parent_path());
+        const auto parent = std::filesystem::path(path).parent_path();
+        if (!parent.empty()) std::filesystem::create_directories(parent);
         out_.open(path, std::ios::out | std::ios::trunc);
     }
 }
@@ -70,7 +71,12 @@ void Axi4Tracer::trace_r(uint64_t cycle, const Axi4R& r) {
 // -----------------------------------------------------------------------------
 
 Axi4Bridge::Axi4Bridge(core::Machine* machine, pipeline::AxiConfig config)
-    : machine_(machine), config_(config) {
+    : machine_(machine),
+      config_(config),
+      tracer_(machine != nullptr
+                  ? (std::filesystem::path(machine->configuration().debug.trace_dir) / "axi.txt")
+                        .string()
+                  : "") {
     if (config_.trace_axi) {
         tracer_.enable(true);
     }

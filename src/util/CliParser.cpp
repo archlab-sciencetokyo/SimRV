@@ -360,6 +360,13 @@ auto parse_file_options(std::string_view arg, std::span<char* const> args, std::
         options.fn_log = std::string(*value);
         return true;
     }
+    if (arg == "--trace-dir" || arg == "--trace-directory") {
+        auto value = next_argument(args, i, arg);
+        if (!value) return std::unexpected(value.error());
+        if (value->empty()) return std::unexpected(std::format("{} requires a directory", arg));
+        options.trace_dir = std::string(*value);
+        return true;
+    }
     return false;
 }
 
@@ -1103,6 +1110,7 @@ auto RuntimeOptions::to_machine_config() const -> simrv::core::MachineConfig {
     cfg.debug.traplog_mode = traplog_mode;
     cfg.debug.bp_trace = bp_trace;
     cfg.debug.use_mix = use_mix;
+    cfg.debug.trace_dir = trace_dir;
     cfg.debug.architecture_trace_path = fn_archtrace;
 
     cfg.isa.isatest_tohost = isatest_tohost;
@@ -1451,9 +1459,13 @@ auto needs_memory_image(const ParseResult& result) -> bool {
         stdout,
         "  {}--log-file {}{}<FILE>{}             Mirror timestamped console log messages to file\n",
         style(kBrightGreen), style(kBrightBlack), style(kReset), style(kReset));
+    std::print(stdout,
+               "  {}--trace-dir {}{}<DIR>{}             Root directory for generated trace artifacts "
+               "(default: trace)\n",
+               style(kBrightGreen), style(kBrightBlack), style(kReset), style(kReset));
     std::print(
         stdout,
-        "  {}--log-mmio, --dlog{}                Record MMIO transactions to trace/dlog.txt\n",
+        "  {}--log-mmio, --dlog{}                Record MMIO transactions to <DIR>/dlog.txt\n",
         style(kBrightGreen), style(kReset));
     std::print(
         stdout,
@@ -1465,19 +1477,19 @@ auto needs_memory_image(const ParseResult& result) -> bool {
         style(kBrightGreen), style(kReset));
     std::print(stdout,
                "  {}--trace{}                          Record an aligned full architectural trace "
-               "to trace/trace.txt\n",
+               "to <DIR>/trace.txt\n",
                style(kBrightGreen), style(kReset));
     std::print(stdout,
                "  {}-r, --trace-range {}{}<BG> <EN>{}   Record execution trace snapshot to "
-               "trace/trace.txt\n",
+               "<DIR>/trace.txt\n",
                style(kBrightGreen), style(kBrightBlack), style(kReset), style(kReset));
     std::print(stdout,
                "  {}--trace-pc-period {}{}<N>{}         Sample periodic PC trace to "
-               "trace/tracepc.txt every N steps\n",
+               "<DIR>/tracepc.txt every N steps\n",
                style(kBrightGreen), style(kBrightBlack), style(kReset), style(kReset));
     std::print(stdout,
                "  {}--trace-bpred{}                     Record branch prediction trace to "
-               "trace/bpred.txt\n",
+               "<DIR>/bpred.txt\n",
                style(kBrightGreen), style(kReset));
     std::print(stdout,
                "  {}-I, --dump-init {}{}<N>{}           Dump architectural memory and TLB state at "
@@ -1485,7 +1497,7 @@ auto needs_memory_image(const ParseResult& result) -> bool {
                style(kBrightGreen), style(kBrightBlack), style(kReset), style(kReset));
     std::print(stdout,
                "  {}--instmix{}                         Write instruction mix report to "
-               "trace/instmix.txt on exit\n\n",
+               "<DIR>/instmix.txt on exit\n\n",
                style(kBrightGreen), style(kReset));
 
     // Interactive & TUI Mode

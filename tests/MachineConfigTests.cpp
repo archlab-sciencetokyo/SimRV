@@ -233,6 +233,22 @@ auto main() -> int {
                    parsed->options.trace_end == std::numeric_limits<Counter>::max(),
                "--trace enables the complete aligned instruction trace");
     }
+    {
+        std::array<std::string, 6> trace_dir_str = {"SimRV", "--trace-dir", "run-artifacts",
+                                                    "--instmix", "-m", "guest.bin"};
+        std::array<char*, 6> trace_dir_args = {trace_dir_str[0].data(), trace_dir_str[1].data(),
+                                               trace_dir_str[2].data(), trace_dir_str[3].data(),
+                                               trace_dir_str[4].data(), trace_dir_str[5].data()};
+        auto parsed = simrv::util::parse_command_line(trace_dir_args);
+        expect(parsed.has_value() && parsed->options.trace_dir == "run-artifacts" &&
+                   parsed->options.use_mix,
+               "--trace-dir selects the generated artifact root");
+        if (parsed) {
+            const auto cfg = parsed->options.to_machine_config();
+            expect(cfg.debug.trace_dir == "run-artifacts",
+                   "trace artifact root is projected into MachineConfig");
+        }
+    }
 
     // Architectural checkpoint round-trip and rejection coverage.  Keep the image small so this
     // remains a fast native gate while exercising vector/CSR state and RAM contents.

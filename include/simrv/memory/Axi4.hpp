@@ -116,7 +116,7 @@ struct Axi4R {
 
 class Axi4Tracer {
    public:
-    explicit Axi4Tracer(const std::string& path = "trace/axi.txt");
+    explicit Axi4Tracer(const std::string& path = "");
     ~Axi4Tracer();
 
     void enable(bool en = true);

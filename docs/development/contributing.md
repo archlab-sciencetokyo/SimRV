@@ -72,7 +72,7 @@ clang-format --dry-run --Werror $(find include src tests -name "*.cpp" -o -name 
 3. **Logging & Tracing Standards**:
    - Use `simrv::log::info`, `simrv::log::warn`, and `simrv::log::error` from `simrv/core/Logger.hpp` for console and TUI messages.
    - **Never** write raw `std::cout`, `std::cerr`, or `printf` calls inside core simulation logic.
-   - Use `simrv::core::Tracer` for architectural simulation artifacts in `trace/` (`trace.txt`, `traplog.txt`, `bpred.txt`, `instmix.txt`).
+   - Use `simrv::core::Tracer` for architectural simulation artifacts under the configured trace directory (`trace.txt`, `traplog.txt`, `bpred.txt`, `instmix.txt`).
 4. **Physical Memory Protection (PMP)**:
    - PMP access permissions are centralized in `simrv::core::pmp::check_access` and evaluated across all memory requests: instruction fetch, load/store execution, and hardware page table walks.
    - Any modification to PMP CSRs must call `cpu_.state().refresh_pmp_status()` and flush translation buffers (`cpu_.TLB_flush()`).

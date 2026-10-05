@@ -77,6 +77,8 @@ struct DebugConfig {
     bool traplog_mode = false;
     bool bp_trace = false;
     bool use_mix = false;
+    /// Root directory for simulator-generated trace artifacts.
+    std::string trace_dir = "trace";
     std::string architecture_trace_path;
 };
 

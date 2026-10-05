@@ -39,6 +39,7 @@ struct RuntimeOptions {
     std::string fn_summary;
     std::string fn_events;
     std::string fn_archtrace;
+    std::string trace_dir = "trace";
     std::string fn_save_checkpoint;
     std::string fn_load_checkpoint;
     std::string inspection_output;
