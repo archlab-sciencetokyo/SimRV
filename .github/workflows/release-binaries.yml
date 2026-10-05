@@ -171,7 +171,7 @@ jobs:
       - uses: actions/checkout@v6
       - name: Install musl build tools
         run: |
-          apk add --no-cache bash build-base cmake ninja python3 tar gzip file
+          apk add --no-cache bash build-base cmake ninja python3 tar gzip file linux-headers
       - name: Validate release tag
         id: names
         shell: bash
@@ -282,7 +282,7 @@ jobs:
           retention-days: 14
 
   package-distro-matrix:
-    needs: [build-and-upload, debian-packages]
+    needs: [build-and-upload, debian-packages, portable-musl]
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
