@@ -353,7 +353,7 @@ void CPU::run_fast_cycle_miss(Machine& machine) {
         }
     }
     if (e_icount != retired_before && machine.trace().is_architecture_trace_enabled()) {
-        machine.trace().log_architecture_retirement(*this);
+        machine.trace().log_architecture_retirement(*this, pipeline_context);
     }
     machine.record_retired_instructions(e_icount - retired_before);
 }
@@ -454,13 +454,22 @@ void CPU::run_cycle(Machine& machine) {
                     ca_pipeline.memory->tlb_miss || ca_pipeline.writeback->tlb_miss);
         }
         const auto retired_pc = state_.pc;
-        if (simrv::compiler::unlikely(ca_pipeline.retired_this_cycle &&
-                                      captures_tui_execution_detail(machine))) {
+        const bool capture_tui = captures_tui_execution_detail(machine);
+        const bool trace_architecture = machine.trace().is_architecture_trace_enabled();
+        const bool retain_retiring_context = capture_tui || trace_architecture;
+        if (simrv::compiler::unlikely(ca_pipeline.retired_this_cycle && retain_retiring_context)) {
             std::swap(pipeline_context, ca_pipeline.retired->context);
-            record_trace_for_tui(machine);
-            std::swap(pipeline_context, ca_pipeline.retired->context);
+            if (capture_tui) record_trace_for_tui(machine);
         }
         tick_cycle_clock(machine, ca_pipeline.retired_this_cycle);
+        if (ca_pipeline.retired_this_cycle) {
+            if (e_icount != retired_before && trace_architecture) {
+                machine.trace().log_architecture_retirement(*this, pipeline_context);
+            }
+            if (retain_retiring_context) {
+                std::swap(pipeline_context, ca_pipeline.retired->context);
+            }
+        }
         if (ca_pipeline.retired_this_cycle && state_.pc != retired_pc) {
             machine.memory().system_bus().cancel_source(simrv::memory::make_tl_source(
                 static_cast<HartId>(state_.mhartid), simrv::memory::TlPort::Instruction));
@@ -473,9 +482,6 @@ void CPU::run_cycle(Machine& machine) {
             ca_state.data_walk.reset();
         }
         if (ca_pipeline.retired_this_cycle) {
-            if (e_icount != retired_before && machine.trace().is_architecture_trace_enabled()) {
-                machine.trace().log_architecture_retirement(*this);
-            }
             machine.record_retired_instructions(e_icount - retired_before);
         }
         return;
@@ -488,6 +494,7 @@ void CPU::run_cycle(Machine& machine) {
         auto* cached = decode_cache.lookup(state_.pc);
         if (simrv::compiler::likely(cached != nullptr)) {
             const bool copy_ctx = captures_tui_execution_detail(machine) ||
+                                  machine.trace().is_architecture_trace_enabled() ||
                                   machine.lockstep_enabled() || machine.debugger_enabled() ||
                                   machine.branch_trace_enabled() ||
                                   (machine.configuration().execution.strace != 0);
@@ -548,7 +555,7 @@ void CPU::run_cycle(Machine& machine) {
         }
     }
     if (e_icount != retired_before && machine.trace().is_architecture_trace_enabled()) {
-        machine.trace().log_architecture_retirement(*this);
+        machine.trace().log_architecture_retirement(*this, pipeline_context);
     }
     machine.record_retired_instructions(e_icount - retired_before);
 }
@@ -693,7 +700,7 @@ void CPU::run_cycle_baremetal_miss(Machine& machine) {
         }
     }
     if (e_icount != retired_before && machine.trace().is_architecture_trace_enabled()) {
-        machine.trace().log_architecture_retirement(*this);
+        machine.trace().log_architecture_retirement(*this, pipeline_context);
     }
     machine.record_retired_instructions(e_icount - retired_before);
 }
@@ -727,6 +734,7 @@ void CPU::run_cycle_baremetal(Machine& machine) {
         auto* cached = decode_cache.lookup(state_.pc);
         if (simrv::compiler::likely(cached != nullptr)) {
             const bool copy_ctx = captures_tui_execution_detail(machine) ||
+                                  machine.trace().is_architecture_trace_enabled() ||
                                   machine.lockstep_enabled() || machine.debugger_enabled() ||
                                   machine.branch_trace_enabled() ||
                                   (machine.configuration().execution.strace != 0);
@@ -763,7 +771,7 @@ void CPU::run_cycle_baremetal(Machine& machine) {
                 }
             }
             if (e_icount != retired_before && machine.trace().is_architecture_trace_enabled()) {
-                machine.trace().log_architecture_retirement(*this);
+                machine.trace().log_architecture_retirement(*this, pipeline_context);
             }
             machine.record_retired_instructions(e_icount - retired_before);
             return;

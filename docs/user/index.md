@@ -116,8 +116,8 @@ simrv -m program.elf
 | `--summary <file>` | Write a machine-readable JSON execution summary when the run ends. |
 | `--events <file>` | Write newline-delimited lifecycle events for automation. |
 | `--arch-trace <file>` | Write a versioned JSONL retirement trace for RTL/Spike comparison. |
-| `--trace` | Write an aligned, labeled architectural instruction trace to `trace/trace.txt`. |
-| `--tracepc` | Write PC stream trace to `trace/tracepc.txt`. |
+| `--trace` | Write an aligned, labeled architectural instruction trace to `<trace-dir>/trace.txt`. |
+| `--tracepc` | Write PC stream trace to `<trace-dir>/tracepc.txt`. |
 | `--gdb` | Start GDB Remote Serial Protocol (RSP) server. |
 | `--gdb-port <port>` | Set GDB RSP TCP listener port (default: 1234). |
 | `--isa-info` | Show the qualified ISA, vector, privilege, and debugger capability contract. |
@@ -157,6 +157,21 @@ The first record identifies the trace schema, XLEN, VLEN, and hart count. Each s
 decoded operation, next PC, and privilege mode. The option selects detailed execution so every
 committed instruction is represented; it is intended for RTL/Spike parity work and is not a
 throughput mode.
+
+Architectural tracing also emits optional versioned `call` and `return` records. These preserve
+the `retire` record format and are emitted only when `--arch-trace` is enabled. Calls are direct
+or indirect `jal`/`jalr` instructions writing `ra`; returns are `jalr x0, ra, 0`. The simulator
+records PCs and dynamic depth, leaving symbol and source resolution to downstream ELF-aware
+tools:
+
+```json
+{"schema_version":1,"event":"call","hart":0,"cycle":42,
+ "source_pc":"0x80000000","target_pc":"0x80000120","return_pc":"0x80000004",
+ "call_depth":1}
+{"schema_version":1,"event":"return","hart":0,"cycle":57,
+ "source_pc":"0x80000124","target_pc":"0x80000004","return_pc":"0x80000004",
+ "call_depth":0}
+```
 
 ### Checkpoint and resume
 
@@ -330,9 +345,9 @@ simrv-benchmark --suite realworld --latex-table
   *A:* The `--cli` flag enforces non-interactive headless operation. To see the graphical TUI workbench, run `simrv` without `--cli`.
 
 - **Q: Where are instruction traces written when passing `--trace`?**
-  *A:* Traces are saved in the `trace/` directory relative to your working directory. The
-  `trace/trace.txt` file presents labeled, aligned cycle, instruction, register, and CSR fields;
-  periodic PC samples remain in `trace/tracepc.txt`.
+  *A:* Traces are saved in the `trace/` directory relative to your working directory by default.
+  Use `--trace-dir DIR` to select another root. The `trace.txt` file presents labeled, aligned
+  cycle, instruction, register, and CSR fields; periodic PC samples remain in `tracepc.txt`.
 
 - **Q: How can I connect GDB to debug a running binary?**
   *A:* Launch SimRV with `--gdb --cli -m program.elf`, then in another terminal run:

@@ -3,6 +3,14 @@
 All notable changes to SimRV are documented here.
 Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## Unreleased
+
+- Fixed cycle-accurate architectural retirement traces to record the retiring pipeline slot's
+  PC, instruction, operation, and next PC without depending on TUI execution-detail capture.
+- Added optional schema-versioned `call` and `return` JSONL events to `--arch-trace`, including
+  hart, cycle, source/target/return PCs, and dynamic call depth. Existing `retire` events remain
+  compatible.
+
 ## [v3.0.0-rc.5] — 2026-10-04
 
 This release candidate adds the standard Linux and FPGA-ready boot profiles and completes the

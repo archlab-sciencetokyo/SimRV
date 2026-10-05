@@ -392,6 +392,8 @@ if(BUILD_TESTING)
   simrv_add_runtime_test(
     simrv-modern-platform-tests tests/ModernPlatformTests.cpp modern-platform
     "gate;regress;semantic;device;mmio;pcie;aia")
+  simrv_add_runtime_test(simrv-trace-tests tests/TraceTests.cpp architectural-trace
+                         "gate;regress;core;trace")
   if(SIMRV_ENABLE_TSAN)
     set_property(
       TEST modern-platform

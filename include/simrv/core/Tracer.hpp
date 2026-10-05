@@ -9,8 +9,13 @@
 #include <mutex>
 #include <string>
 #include <string_view>
+#include <vector>
 
 #include "simrv/Define.hpp"
+
+namespace simrv::pipeline {
+struct PipelineContext;
+}
 
 namespace simrv::core {
 
@@ -46,7 +51,8 @@ class Tracer {
                   const ArchState& state, CSRValue tval);
     void log_sbi(Counter mtime, unsigned cause, Word ext_id, Word func_id, Word a0, Word a1,
                  Address pc);
-    void log_architecture_retirement(const CPU& cpu);
+    void log_architecture_retirement(const CPU& cpu,
+                                     const pipeline::PipelineContext& retiring_context);
     void flush_all();
 
     std::ofstream fp_trace;
@@ -55,12 +61,16 @@ class Tracer {
     std::ofstream fp_archtrace;
 
    private:
+    [[nodiscard]] auto artifact_path(std::string_view filename) const -> std::filesystem::path;
+    void ensure_artifact_directory() const;
+
     Machine& machine_;
     mutable std::mutex mutex_;
     std::ofstream fp_tracepc_;
     bool tracepc_opened_ = false;
     std::ofstream fp_bpred_;
     bool bpred_opened_ = false;
+    std::vector<unsigned> call_depth_;
 };
 
 }  // namespace simrv::core

@@ -71,18 +71,27 @@ Tracer::Tracer(Machine& machine) : machine_(machine) {}
 
 Tracer::~Tracer() { flush_all(); }
 
+auto Tracer::artifact_path(std::string_view filename) const -> std::filesystem::path {
+    return std::filesystem::path(machine_.configuration().debug.trace_dir) / filename;
+}
+
+void Tracer::ensure_artifact_directory() const {
+    std::error_code ec;
+    std::filesystem::create_directories(machine_.configuration().debug.trace_dir, ec);
+}
+
 void Tracer::init_trace(bool trace_enabled) {
     fp_trace.close();
     if (trace_enabled) {
-        std::error_code ec;
-        std::filesystem::create_directories("trace", ec);
+        ensure_artifact_directory();
         fp_trace.clear();
-        fp_trace.open("trace/trace.txt");
+        fp_trace.open(artifact_path("trace.txt"));
     }
 }
 
 void Tracer::init_architecture_trace(const std::string& path) {
     fp_archtrace.close();
+    call_depth_.clear();
     if (path.empty()) return;
     std::error_code ec;
     const std::filesystem::path trace_path(path);
@@ -92,6 +101,7 @@ void Tracer::init_architecture_trace(const std::string& path) {
     fp_archtrace.clear();
     fp_archtrace.open(trace_path, std::ios::out | std::ios::trunc);
     if (fp_archtrace.is_open()) {
+        call_depth_.assign(machine_.num_harts(), 0);
         std::println(fp_archtrace,
                      "{{\"schema_version\":1,\"event\":\"header\",\"xlen\":{},"
                      "\"vlen\":{},\"harts\":{}}}",
@@ -102,23 +112,23 @@ void Tracer::init_architecture_trace(const std::string& path) {
 void Tracer::init_trap_log(bool traplog_mode, const std::string& fn_traplog) {
     fp_traplog.close();
     if (traplog_mode) {
+        const std::filesystem::path path =
+            fn_traplog.empty() ? artifact_path("traplog.txt") : std::filesystem::path(fn_traplog);
         std::error_code ec;
-        const std::filesystem::path path(fn_traplog);
         if (path.has_parent_path()) {
             std::filesystem::create_directories(path.parent_path(), ec);
         }
         fp_traplog.clear();
-        fp_traplog.open(fn_traplog, std::ios::out | std::ios::trunc);
+        fp_traplog.open(path, std::ios::out | std::ios::trunc);
     }
 }
 
 void Tracer::init_dlog(bool dlog_mode) {
     fp_dlog.close();
     if (dlog_mode) {
-        std::error_code ec;
-        std::filesystem::create_directories("trace", ec);
+        ensure_artifact_directory();
         fp_dlog.clear();
-        fp_dlog.open("trace/dlog.txt", std::ios::out | std::ios::trunc);
+        fp_dlog.open(artifact_path("dlog.txt"), std::ios::out | std::ios::trunc);
     }
 }
 
@@ -208,36 +218,70 @@ void Tracer::log_sbi(Counter mtime, unsigned cause, Word ext_id, Word func_id, W
     }
 }
 
-void Tracer::log_architecture_retirement(const CPU& cpu) {
+void Tracer::log_architecture_retirement(const CPU& cpu,
+                                         const pipeline::PipelineContext& retiring_context) {
     if (!fp_archtrace.is_open()) return;
-    const auto& context = cpu.pipeline_context;
     const auto& state = cpu.state();
     std::lock_guard lock(mutex_);
-    std::println(
-        fp_archtrace,
-        "{{\"schema_version\":1,\"event\":\"retire\",\"hart\":{},\"cycle\":{},"
-        "\"retired\":{},\"pc\":\"0x{:x}\",\"instruction\":\"0x{:x}\","
-        "\"operation\":\"{}\",\"next_pc\":\"0x{:x}\","
-        "\"privilege\":{},\"mstatus\":\"0x{:x}\",\"mepc\":\"0x{:x}\","
-        "\"mcause\":\"0x{:x}\",\"satp\":\"0x{:x}\",\"vl\":\"0x{:x}\","
-        "\"vtype\":\"0x{:x}\"}}",
-        static_cast<unsigned>(state.mhartid), cpu.clint_mmio.mcycle, cpu.e_icount,
-        static_cast<uint64_t>(context.cpc.raw()), static_cast<uint32_t>(context.ir),
-        pipeline::operation_name(context.op_id), static_cast<uint64_t>(state.pc),
-        std::to_underlying(state.priv), static_cast<uint64_t>(state.mstatus),
-        static_cast<uint64_t>(state.mepc), static_cast<uint64_t>(state.mcause),
-        static_cast<uint64_t>(state.satp), static_cast<uint64_t>(state.vl),
-        static_cast<uint64_t>(state.vtype));
+    std::println(fp_archtrace,
+                 "{{\"schema_version\":1,\"event\":\"retire\",\"hart\":{},\"cycle\":{},"
+                 "\"retired\":{},\"pc\":\"0x{:x}\",\"instruction\":\"0x{:x}\","
+                 "\"operation\":\"{}\",\"next_pc\":\"0x{:x}\","
+                 "\"privilege\":{},\"mstatus\":\"0x{:x}\",\"mepc\":\"0x{:x}\","
+                 "\"mcause\":\"0x{:x}\",\"satp\":\"0x{:x}\",\"vl\":\"0x{:x}\","
+                 "\"vtype\":\"0x{:x}\"}}",
+                 static_cast<unsigned>(state.mhartid), cpu.clint_mmio.mcycle, cpu.e_icount,
+                 static_cast<uint64_t>(retiring_context.cpc.raw()),
+                 static_cast<uint32_t>(retiring_context.ir),
+                 pipeline::operation_name(retiring_context.op_id), static_cast<uint64_t>(state.pc),
+                 std::to_underlying(state.priv), static_cast<uint64_t>(state.mstatus),
+                 static_cast<uint64_t>(state.mepc), static_cast<uint64_t>(state.mcause),
+                 static_cast<uint64_t>(state.satp), static_cast<uint64_t>(state.vl),
+                 static_cast<uint64_t>(state.vtype));
+
+    const auto hart = static_cast<size_t>(state.mhartid);
+    if (hart >= call_depth_.size()) call_depth_.resize(hart + 1);
+    const auto source_pc = retiring_context.cpc.raw();
+    const auto target_pc = retiring_context.jmp_pc.raw();
+    const auto return_pc = source_pc + (retiring_context.cinsn != 0 ? 2 : 4);
+    const bool is_return = retiring_context.opcode == isa::Opcode::Jalr &&
+                           retiring_context.rd == RegId::Zero &&
+                           retiring_context.rs1 == RegId::Ra && retiring_context.imm == 0;
+    const bool is_call = retiring_context.tkn &&
+                         (retiring_context.opcode == isa::Opcode::Jal ||
+                          retiring_context.opcode == isa::Opcode::Jalr) &&
+                         retiring_context.rd == RegId::Ra;
+    if (is_call) {
+        const auto depth = ++call_depth_[hart];
+        std::println(fp_archtrace,
+                     "{{\"schema_version\":1,\"event\":\"call\",\"hart\":{},"
+                     "\"cycle\":{},\"source_pc\":\"0x{:x}\","
+                     "\"target_pc\":\"0x{:x}\",\"return_pc\":\"0x{:x}\","
+                     "\"call_depth\":{}}}",
+                     static_cast<unsigned>(state.mhartid), cpu.clint_mmio.mcycle,
+                     static_cast<uint64_t>(source_pc), static_cast<uint64_t>(target_pc),
+                     static_cast<uint64_t>(return_pc), depth);
+    } else if (is_return) {
+        const auto depth = call_depth_[hart] == 0 ? 0 : --call_depth_[hart];
+        std::println(fp_archtrace,
+                     "{{\"schema_version\":1,\"event\":\"return\",\"hart\":{},"
+                     "\"cycle\":{},\"source_pc\":\"0x{:x}\","
+                     "\"target_pc\":\"0x{:x}\",\"return_pc\":\"0x{:x}\","
+                     "\"call_depth\":{}}}",
+                     static_cast<unsigned>(state.mhartid), cpu.clint_mmio.mcycle,
+                     static_cast<uint64_t>(source_pc), static_cast<uint64_t>(target_pc),
+                     static_cast<uint64_t>(target_pc), depth);
+    }
 }
 
 void Tracer::dump_init_artifacts() {
     auto* cpu = &machine_.primary_hart();
     const auto ram = machine_.ram_view();
     std::error_code ec;
-    std::filesystem::create_directories("trace", ec);
+    ensure_artifact_directory();
 
     {
-        std::ofstream out("trace/init_mem.txt");
+        std::ofstream out(artifact_path("init_mem.txt"));
         const auto dram_base = machine_.memory_geometry().dram_base;
         const auto dram_size = static_cast<uint64_t>(machine_.memory_geometry().dram_size);
         constexpr uint64_t kBlockSize = 16;
@@ -278,11 +322,11 @@ void Tracer::dump_init_artifacts() {
             }
             std::println(out, "|");
         }
-        simrv::log::info("file trace/init_mem.txt was generated after {} cycle(s)",
+        simrv::log::info("file {} was generated after {} cycle(s)", artifact_path("init_mem.txt").string(),
                          static_cast<Counter>(cpu->clint_mmio.mtime.load()));
     }
 
-    std::ofstream out("trace/init_reg.txt");
+    std::ofstream out(artifact_path("init_reg.txt"));
     auto write_xlen = [&out](std::string_view lhs, Word value) -> void {
         std::println(out, "{}={}'h{:0{}x};", lhs, simrv::xlen::kXLenBits, value, kXLenHexDigits);
     };
@@ -362,16 +406,17 @@ void Tracer::dump_init_artifacts() {
     write_32("platform.virtio_disk.isr      ", platform.disk_isr);
     write_64("platform.virtio_disk.capacity ", platform.disk_capacity_sectors);
 
-    simrv::log::info("file trace/init_reg.txt was generated after {} cycle(s)",
+    simrv::log::info("file {} was generated after {} cycle(s)", artifact_path("init_reg.txt").string(),
                      static_cast<Counter>(cpu->clint_mmio.mtime.load()));
 }
 
 void Tracer::write_instruction_mix_report() {
     std::error_code ec;
-    std::filesystem::create_directories("trace", ec);
-    std::ofstream out("trace/instmix.txt");
+    ensure_artifact_directory();
+    const auto path = artifact_path("instmix.txt");
+    std::ofstream out(path);
     if (!out.is_open()) {
-        simrv::log::error("cannot open trace/instmix.txt");
+        simrv::log::error("cannot open {}", path.string());
         return;
     }
 
@@ -447,7 +492,7 @@ void Tracer::write_instruction_mix_report() {
                      simrv::util::format_with_commas(cat_cnt), cat_share);
     }
 
-    simrv::log::info("file trace/instmix.txt was generated after {} cycle(s)",
+    simrv::log::info("file {} was generated after {} cycle(s)", path.string(),
                      static_cast<Counter>(machine_.primary_hart().clint_mmio.mtime.load()));
 }
 
@@ -637,10 +682,10 @@ void Tracer::emit_periodic_pc_trace(Counter mtime, Register cpc) {
         std::lock_guard lock(mutex_);
         if (!tracepc_opened_) {
             tracepc_opened_ = true;
-            std::error_code ec;
-            std::filesystem::create_directories("trace", ec);
-            fp_tracepc_.open("trace/tracepc.txt");
-            simrv::log::info("generate trace file: trace/tracepc.txt");
+            ensure_artifact_directory();
+            const auto path = artifact_path("tracepc.txt");
+            fp_tracepc_.open(path);
+            simrv::log::info("generate trace file: {}", path.string());
         }
         std::println(fp_tracepc_, "{:08} {:0{}x}", static_cast<int>(mtime / D_TRACEPC_INTERVAL),
                      cpc, D_TRACE_HEX_WIDTH);
@@ -652,10 +697,10 @@ void Tracer::emit_branch_prediction_trace(Counter mtime, Register cpc, Register 
     std::lock_guard lock(mutex_);
     if (!bpred_opened_) {
         bpred_opened_ = true;
-        std::error_code ec;
-        std::filesystem::create_directories("trace", ec);
-        fp_bpred_.open("trace/bpred.txt");
-        simrv::log::info("generate trace file: trace/bpred.txt");
+        ensure_artifact_directory();
+        const auto path = artifact_path("bpred.txt");
+        fp_bpred_.open(path);
+        simrv::log::info("generate trace file: {}", path.string());
     }
 
     const auto opcode = r_opcode;

@@ -3,6 +3,7 @@
 
 #include "simrv/core/Cpu.hpp"
 #include "simrv/core/Machine.hpp"
+#include "simrv/core/Tracer.hpp"
 #include "simrv/pipeline/OperationTraits.hpp"
 #include "simrv/tui/Tui.hpp"
 
@@ -15,12 +16,14 @@ void CPU::run_ca_pipeline_cycle(Machine& machine) {
     const bool three_stage =
         pipeline_sim.config.pipeline_type == pipeline::PipelineType::ThreeStage;
     // The retired slot is presentation state: fast CA only consumes the retirement bit, while
-    // observable snapshots and TUI tracing need the full instruction context.  Avoid copying a
-    // complete PipelineContext on every retirement when neither consumer is active.
+    // Observable snapshots, TUI tracing, and architectural tracing need the full retiring
+    // instruction context. Avoid copying a complete PipelineContext on every retirement when
+    // none of those consumers is active.
     const bool retain_retired_slot =
-        pipeline_sim.config.record_snapshots &&
-        (!machine.tui_enabled() ||
-         (machine.telemetry_sink() && machine.telemetry_sink()->captures_execution_detail()));
+        machine.trace().is_architecture_trace_enabled() ||
+        (pipeline_sim.config.record_snapshots &&
+         (!machine.tui_enabled() ||
+          (machine.telemetry_sink() && machine.telemetry_sink()->captures_execution_detail())));
     pipe.retired_this_cycle = false;
     if (retain_retired_slot) pipe.retired->clear();
     pipe.data_hazard_stall = false;
