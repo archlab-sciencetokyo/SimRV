@@ -1,7 +1,20 @@
 # Hello sample
 
-This is the smallest included SimRV workload. It writes a short message to the simulated UART,
-then writes `1` to the SimRV `tohost` address (`0x80001000`) so the run terminates cleanly.
+This is a small included SimRV workload. It writes a greeting to the simulated UART, then calls
+named assembly routines that demonstrate string output, loops, conditional branches, and repeated
+addition before writing `1` to the SimRV `tohost` address (`0x80001000`) so the run terminates
+cleanly. Its output is:
+
+```
+Hello from SimRV!
+Counting: 0 1 2 3 4
+Parity:1 odd
+2 even
+3 odd
+4 even
+5 odd
+sum_to_n(5) = 15
+```
 
 Build it with a RISC-V bare-metal toolchain:
 
