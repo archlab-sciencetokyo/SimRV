@@ -5,6 +5,7 @@ import importlib.util
 import io
 import json
 import pathlib
+import re
 import subprocess
 import sys
 import tarfile
@@ -45,6 +46,9 @@ class ReleaseToolTests(unittest.TestCase):
         self.assertNotIn("--contents \"$runtime_deb\" | grep -q", workflow)
         self.assertNotIn("-qpl \"$runtime_rpm\" | grep -q", workflow)
         self.assertIn("set(CPACK_COMPONENTS_ALL Runtime Tools Benchmark)", cmake)
+        self.assertIn("SimRVBuildMetadata.json", cmake)
+        self.assertIn("CPACK_DEBIAN_PACKAGE_HOMEPAGE", cmake)
+        self.assertIn("CPACK_RPM_PACKAGE_URL", cmake)
         self.assertNotIn("CPACK_DEBIAN_DEVELOPMENT", cmake)
         self.assertNotIn("CPACK_RPM_DEVELOPMENT", cmake)
         self.assertNotIn("development_deb", workflow)
@@ -87,6 +91,12 @@ class ReleaseToolTests(unittest.TestCase):
         )
         self.assertIn("Ubuntu 22.04", manifest["package_support"]["portable_static"])
         self.assertEqual(manifest["package_support"]["rpm"], ["Fedora 44"])
+
+    def test_citation_matches_release_version(self):
+        version = json.loads((ROOT / "release/release-manifest.json").read_text())["version"]
+        citation = (ROOT / "CITATION.cff").read_text()
+        self.assertIn(f"version: {version}", citation)
+        self.assertIsNotNone(re.search(r"^date-released:\s+", citation, re.MULTILINE))
 
     def test_documentation_workflow_publishes_stable_and_development(self):
         workflow = (ROOT / ".github/workflows/docs.yml").read_text()

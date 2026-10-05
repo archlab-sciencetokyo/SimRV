@@ -1,8 +1,14 @@
 cmake_minimum_required(VERSION 3.31...4.3)
 
+# Keep the release version authoritative here. The project() version is derived
+# from it so CMake, BuildInfo, CPack, release tooling, and citation checks use
+# the same source value.
+set(SIMRV_VERSION "3.0.0-rc.5")
+string(REGEX REPLACE "-.*$" "" SIMRV_PROJECT_VERSION "${SIMRV_VERSION}")
+
 project(
   SimRV
-  VERSION 3.0.0
+  VERSION ${SIMRV_PROJECT_VERSION}
   DESCRIPTION "SimCore/RISC-V Functional Simulator"
   HOMEPAGE_URL "https://github.com/archlab-sciencetokyo/SimRV"
   LANGUAGES C CXX)
@@ -20,7 +26,6 @@ if(BUILD_TESTING OR SIMRV_ENABLE_TOOLING)
   set(PYTHON_BIN "${Python3_EXECUTABLE}")
 endif()
 
-set(SIMRV_VERSION "3.0.0-rc.5")
 set(SIMRV_GIT_BRANCH "unknown")
 set(SIMRV_GIT_SHA "unknown")
 
@@ -226,6 +231,15 @@ set(SIMRV_SPIKE_PATH
       STRING
       "Path to Spike binary for lockstep co-simulation (runtime default, not used at build time)"
 )
+
+set(SIMRV_SOURCE_DATE_EPOCH_JSON "null")
+if(DEFINED ENV{SOURCE_DATE_EPOCH} AND "$ENV{SOURCE_DATE_EPOCH}" MATCHES "^[0-9]+$")
+  set(SIMRV_SOURCE_DATE_EPOCH_JSON "$ENV{SOURCE_DATE_EPOCH}")
+endif()
+configure_file(
+  cmake/SimRVBuildMetadata.json.in
+  "${CMAKE_CURRENT_BINARY_DIR}/SimRVBuildMetadata.json"
+  @ONLY)
 
 list(APPEND CMAKE_MODULE_PATH "${PROJECT_SOURCE_DIR}/cmake")
 include(SimRVOptions)
@@ -1058,7 +1072,12 @@ install(
   DESTINATION ${CMAKE_INSTALL_DATADIR}/SimRV/schemas
   COMPONENT Tools
   FILES_MATCHING
-  PATTERN "*.json")
+  PATTERN "*.json"
+  PATTERN "simrv-build-metadata.schema.json" EXCLUDE)
+install(
+  FILES schemas/simrv-build-metadata.schema.json
+  DESTINATION ${CMAKE_INSTALL_DATADIR}/SimRV/schemas
+  COMPONENT Runtime)
 
 install(
   PROGRAMS scripts/cpu_model_wizard.py
@@ -1098,6 +1117,10 @@ install(
   COMPONENT Tools
   FILES_MATCHING
   PATTERN "*.cfg")
+install(
+  FILES "${CMAKE_CURRENT_BINARY_DIR}/SimRVBuildMetadata.json"
+  DESTINATION ${CMAKE_INSTALL_DATADIR}/SimRV
+  COMPONENT Runtime)
 
 install(FILES docs/user/index.md DESTINATION ${CMAKE_INSTALL_DOCDIR}
         RENAME USER_GUIDE.md COMPONENT Runtime)
@@ -1228,7 +1251,7 @@ if(SIMRV_ENABLE_TOOLING)
 endif()
 
 set(CPACK_PACKAGE_NAME "${PROJECT_NAME}")
-set(CPACK_PACKAGE_VENDOR "archlab-sciencetokyo")
+set(CPACK_PACKAGE_VENDOR "ArchLab Science Tokyo")
 set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "Explainable RISC-V architectural simulator")
 set(CPACK_PACKAGE_DESCRIPTION
     "SimRV is an explainable RISC-V architectural simulator.\n It provides CLI execution, an interactive terminal workbench, microarchitecture models, and Linux support.")
@@ -1240,6 +1263,7 @@ set(SIMRV_PACKAGE_BASE_VERSION "${CMAKE_MATCH_1}")
 set(SIMRV_PACKAGE_PRERELEASE "${CMAKE_MATCH_3}")
 set(CPACK_PACKAGE_VERSION "${SIMRV_PACKAGE_BASE_VERSION}")
 set(CPACK_PACKAGE_CONTACT "ArchLab Science Tokyo")
+set(CPACK_PACKAGE_URL "${PROJECT_HOMEPAGE_URL}")
 set(CPACK_PACKAGE_INSTALL_DIRECTORY "SimRV")
 set(CPACK_PACKAGING_INSTALL_PREFIX "/usr")
 set(CPACK_PACKAGE_FILE_NAME
@@ -1267,6 +1291,8 @@ set(CPACK_COMPONENT_BENCHMARK_DESCRIPTION
 # available; package creation never bundles a compiler or guest image.
 set(CPACK_DEBIAN_PACKAGE_NAME "simrv")
 set(CPACK_DEBIAN_PACKAGE_MAINTAINER "ArchLab Science Tokyo")
+set(CPACK_DEBIAN_PACKAGE_HOMEPAGE "${PROJECT_HOMEPAGE_URL}")
+set(CPACK_DEBIAN_PACKAGE_DESCRIPTION "SimRV is an explainable RISC-V architectural simulator.\n It provides CLI execution, an interactive terminal workbench, microarchitecture models, and Linux support.")
 set(CPACK_DEBIAN_PACKAGE_SECTION "science")
 set(CPACK_DEBIAN_PACKAGE_PRIORITY "optional")
 if(SIMRV_PACKAGE_PRERELEASE)
@@ -1293,6 +1319,8 @@ set(CPACK_DEBIAN_BENCHMARK_PACKAGE_DEPENDS
     "simrv (= ${CPACK_DEBIAN_PACKAGE_VERSION}), python3")
 
 set(CPACK_RPM_PACKAGE_NAME "simrv")
+set(CPACK_RPM_PACKAGE_SUMMARY "Explainable RISC-V architectural simulator")
+set(CPACK_RPM_PACKAGE_URL "${PROJECT_HOMEPAGE_URL}")
 set(CPACK_RPM_PACKAGE_LICENSE "MIT")
 set(CPACK_RPM_PACKAGE_GROUP "Development/Tools")
 set(CPACK_RPM_PACKAGE_AUTOREQPROV ON)

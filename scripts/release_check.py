@@ -50,6 +50,14 @@ def verify_metadata(manifest: dict) -> None:
         if not (SCHEMA_DIR / schema).is_file():
             fail(f"missing schema: release/schemas/{schema}")
     version = source_version()
+    citation_text = (ROOT / "CITATION.cff").read_text(encoding="utf-8")
+    citation_match = re.search(
+        r"^version:\s*['\"]?([^'\"\s]+)", citation_text, re.MULTILINE
+    )
+    if not citation_match or citation_match.group(1) != version:
+        fail(f"CITATION.cff version must match source version {version!r}")
+    if not re.search(r"^date-released:\s*['\"]?[^'\"\s]+", citation_text, re.MULTILINE):
+        fail("CITATION.cff must define date-released")
     expected_tag = f"v{version}"
     if manifest.get("version") != version:
         fail(f"manifest version {manifest.get('version')!r} != source version {version!r}")

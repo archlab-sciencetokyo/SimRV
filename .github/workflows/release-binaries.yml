@@ -207,6 +207,10 @@ jobs:
           mapfile -t archives < <(find portable-package -maxdepth 1 -name '*.tar.gz' -type f)
           test "${#archives[@]}" -eq 1
           mv "${archives[0]}" "${{ steps.names.outputs.asset_base }}.tar.gz"
+          tar -tzf "${{ steps.names.outputs.asset_base }}.tar.gz" \
+            | grep -q '^usr/share/SimRV/SimRVBuildMetadata.json$'
+          tar -tzf "${{ steps.names.outputs.asset_base }}.tar.gz" \
+            | grep -q '^usr/share/SimRV/schemas/simrv-build-metadata.schema.json$'
           python3 scripts/release_check.py --binary build/rv64-musl-release/simrv \
             --archive "${{ steps.names.outputs.asset_base }}.tar.gz"
       - uses: actions/upload-artifact@v7

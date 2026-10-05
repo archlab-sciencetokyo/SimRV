@@ -92,6 +92,11 @@ sudo cmake --install build/rv64-release --prefix /usr/local
 simrv --version
 ```
 
+The install also includes `/usr/local/share/SimRV/SimRVBuildMetadata.json`. It records the SimRV
+version, source Git revision, target XLEN, compiler, generator, host platform, and optional
+`SOURCE_DATE_EPOCH` used for reproducible builds. Its schema is installed at
+`/usr/local/share/SimRV/schemas/simrv-build-metadata.schema.json`.
+
 Build `rv32-release` only when a native RV32 strict-width implementation is required for
 verification. Normal users should use the RV64-capable build.
 

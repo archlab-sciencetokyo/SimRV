@@ -35,6 +35,9 @@ endif()
 if(NOT EXISTS "${install_root}/bin/simrv")
   message(FATAL_ERROR "Expected installed simulator ${install_root}/bin/simrv")
 endif()
+if(NOT EXISTS "${install_root}/share/SimRV/SimRVBuildMetadata.json")
+  message(FATAL_ERROR "Expected installed SimRV build metadata manifest")
+endif()
 execute_process(
   COMMAND "${install_root}/bin/simrv" --version
   RESULT_VARIABLE simulator_version_result
