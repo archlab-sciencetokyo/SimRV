@@ -39,6 +39,7 @@ init_virtio.txt
 trace.txt
 tracepc.txt
 .simrv/
+.vscode/
 
 # Benchmark and profiling outputs
 benchmark_logs/

@@ -1,7 +1,0 @@
-{
-    "debug.allowBreakpointsEverywhere": true,
-    "files.associations": {
-        "*.S": "asm",
-        "*.s": "asm"
-    }
-}
