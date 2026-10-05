@@ -42,6 +42,9 @@ building them from source.
 
 # Optional alternate Alpine mirror (also settable via SIMRV_ALPINE_MIRROR)
 ./scripts/build-linux-image.sh --alpine-mirror https://dl-5.alpinelinux.org/alpine
+
+# Show full make/compiler commands when diagnosing a failed build
+./scripts/build-linux-image.sh --verbose
 ```
 
 This will:
@@ -50,6 +53,12 @@ This will:
 2. ✅ Download Linux kernel, OpenSBI, and the selected Alpine or Buildroot sources
 3. ✅ Build kernel and rootfs
 4. ✅ Create compatible images in `./linux-images/<arch>/` or the profile subdirectory
+
+Build output is concise by default: timestamped stage markers and warnings/errors remain visible,
+while repetitive compiler command lines are suppressed. Use `--verbose` or set
+`SIMRV_LINUX_VERBOSE=1` to restore the full make transcript. In interactive terminals, the
+builder also updates the terminal title, sends a completion notice, and emits clickable OSC 8
+links for the published image directory and manifest; redirected output stays escape-code free.
 
 **Time estimate:**
 

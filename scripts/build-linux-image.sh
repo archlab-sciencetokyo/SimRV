@@ -18,15 +18,51 @@ ALPINE_MIRROR="${SIMRV_ALPINE_MIRROR:-https://dl-cdn.alpinelinux.org/alpine/v3.2
 BUILDROOT_VER="2025.02.18"
 BUILDROOT_SHA256="e38ad1df6ea0479fff6419a87a64535d02131674d463be154a763ef725b55321"
 
-# Colors
-GREEN='\033[0;32m'
-BLUE='\033[0;34m'
-RED='\033[0;31m'
-NC='\033[0m'
+# Terminal UI
+INTERACTIVE=0
+if [[ -t 1 ]]; then
+    INTERACTIVE=1
+    GREEN='\033[0;32m'
+    BLUE='\033[0;34m'
+    RED='\033[0;31m'
+    NC='\033[0m'
+else
+    GREEN=''
+    BLUE=''
+    RED=''
+    NC=''
+fi
 
-print_step() { echo -e "${GREEN}[STEP]${NC} $1"; }
-print_info() { echo -e "${BLUE}[INFO]${NC} $1"; }
-print_error() { echo -e "${RED}[ERROR]${NC} $1"; }
+log_stamp() { date '+%H:%M:%S'; }
+print_step() { printf '%s%s==>%s %s\n' "$GREEN" "$(log_stamp)" "$NC" "$1"; }
+print_info() { printf '%s%s  |%s %s\n' "$BLUE" "$(log_stamp)" "$NC" "$1"; }
+print_error() { printf '%s%s  !%s %s\n' "$RED" "$(log_stamp)" "$NC" "$1" >&2; }
+
+# OSC helpers are emitted only to an interactive terminal. This keeps CI logs,
+# redirected transcripts, and shell command substitution free of escape codes.
+terminal_title() {
+    [[ "$INTERACTIVE" == "1" ]] || return 0
+    printf '\033]0;%s\007' "$1"
+}
+
+terminal_notice() {
+    [[ "$INTERACTIVE" == "1" ]] || return 0
+    printf '\033]9;%s\007' "$1"
+}
+
+link_path() {
+    local path="$1"
+    if [[ "$INTERACTIVE" == "1" ]]; then
+        printf '\033]8;;file://%s\033\\%s\033]8;;\033\\' "$path" "$path"
+    else
+        printf '%s' "$path"
+    fi
+}
+
+format_duration() {
+    local seconds="$1"
+    printf '%02dh %02dm %02ds' "$((seconds / 3600))" "$(((seconds % 3600) / 60))" "$((seconds % 60))"
+}
 
 LIBC="${LIBC:-auto}"
 CROSS_COMPILE="${CROSS_COMPILE:-}"
@@ -34,6 +70,7 @@ ROOTFS_VARIANT="${ROOTFS_VARIANT:-alpine}"
 PROFILE="${PROFILE:-gui}"
 DRAM_SIZE_MB="${SIMRV_LINUX_DRAM_SIZE_MB:-512}"
 CLEAN_ACTION=""
+VERBOSE="${SIMRV_LINUX_VERBOSE:-0}"
 
 # Parse arguments
 while [[ $# -gt 0 ]]; do
@@ -70,6 +107,9 @@ while [[ $# -gt 0 ]]; do
             ALPINE_MIRROR="$2"
             shift
             ;;
+        --verbose)
+            VERBOSE=1
+            ;;
         --clean)
             CLEAN_ACTION="all"
             ;;
@@ -90,6 +130,7 @@ while [[ $# -gt 0 ]]; do
             echo "  --profile <gui|fpga|debug>      Linux deployment profile (default: gui)"
             echo "  --dram-size-mb <mb>             DTB DRAM size (default: 512)"
             echo "  --alpine-mirror <url>           Alpine v3.24 mirror base URL"
+            echo "  --verbose                       Show full make/compiler command output"
             echo "  --clean                         Clean build and images directories"
             echo "  --clean-build                   Clean build directory while keeping images"
             echo "  --clean-old-kernels             Prune older kernel trees, keeping current version"
@@ -104,6 +145,20 @@ while [[ $# -gt 0 ]]; do
 esac
 shift
 done
+
+BUILD_STARTED=$(date +%s)
+terminal_title "SimRV Linux build: starting"
+trap 'status=$?; if [[ "$status" -eq 0 ]]; then terminal_title "SimRV Linux build: complete"; terminal_notice "SimRV Linux build complete"; else terminal_title "SimRV Linux build: failed"; terminal_notice "SimRV Linux build failed"; fi; exit "$status"' EXIT
+
+# Keep the normal build transcript focused on the meaningful stage markers.
+# The function wrapper applies to every make invocation below, including
+# BusyBox and Buildroot, while --verbose preserves the traditional transcript
+# for compiler/debugging work.
+MAKE_QUIET_ARGS=()
+if [[ "$VERBOSE" != "1" ]]; then
+    MAKE_QUIET_ARGS=(-s --no-print-directory)
+fi
+make() { command make "${MAKE_QUIET_ARGS[@]}" "$@"; }
 
 if [[ "$ROOTFS_VARIANT" != "alpine" && "$ROOTFS_VARIANT" != "buildroot" ]]; then
     print_error "Unsupported rootfs '$ROOTFS_VARIANT' (expected alpine or buildroot)."
@@ -202,7 +257,14 @@ else
     LINUX_DEFCONFIG="rv32_defconfig"
 fi
 
-print_info "Building Linux Image for Target: ${ARCH} (XLEN=${XLEN}, ${M_ARCH}, ${M_ABI})"
+print_info "Target: ${ARCH} (XLEN=${XLEN}, ${M_ARCH}, ${M_ABI})"
+print_info "Profile: ${ROOTFS_VARIANT}/${PROFILE}; libc=${LIBC}; jobs=$(nproc)"
+print_info "Output: $(link_path "$IMAGES_DIR")"
+if [[ "$VERBOSE" == "1" ]]; then
+    print_info "Verbose make output enabled"
+else
+    print_info "Concise make output enabled (use --verbose for compiler commands)"
+fi
 
 # ----------------------------------------------------------------------------
 # Step 1: Download Sources
@@ -1113,5 +1175,7 @@ fi
     echo '}'
 } > "$MANIFEST"
 
-print_step "Success! Output images placed in: $IMAGES_DIR"
-print_info "Profile manifest: $MANIFEST"
+print_step "Build complete"
+print_info "Images: $(link_path "$IMAGES_DIR")"
+print_info "Manifest: $(link_path "$MANIFEST")"
+print_info "Duration: $(format_duration "$(( $(date +%s) - BUILD_STARTED ))")"
