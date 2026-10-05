@@ -119,6 +119,7 @@ class Axi4Tracer {
     explicit Axi4Tracer(const std::string& path = "");
     ~Axi4Tracer();
 
+    void set_path(const std::string& path);
     void enable(bool en = true);
     [[nodiscard]] auto is_enabled() const noexcept -> bool { return enabled_; }
 

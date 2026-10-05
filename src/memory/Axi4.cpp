@@ -14,11 +14,7 @@
 namespace simrv::memory {
 
 Axi4Tracer::Axi4Tracer(const std::string& path) {
-    if (!path.empty()) {
-        const auto parent = std::filesystem::path(path).parent_path();
-        if (!parent.empty()) std::filesystem::create_directories(parent);
-        out_.open(path, std::ios::out | std::ios::trunc);
-    }
+    set_path(path);
 }
 
 Axi4Tracer::~Axi4Tracer() {
@@ -29,6 +25,15 @@ Axi4Tracer::~Axi4Tracer() {
 }
 
 void Axi4Tracer::enable(bool en) { enabled_ = en; }
+
+void Axi4Tracer::set_path(const std::string& path) {
+    const std::lock_guard lock(mutex_);
+    if (out_.is_open()) out_.close();
+    if (path.empty()) return;
+    const auto parent = std::filesystem::path(path).parent_path();
+    if (!parent.empty()) std::filesystem::create_directories(parent);
+    out_.open(path, std::ios::out | std::ios::trunc);
+}
 
 void Axi4Tracer::trace_aw(uint64_t cycle, const Axi4Aw& aw) {
     if (!enabled_ || !out_.is_open()) return;
@@ -71,12 +76,7 @@ void Axi4Tracer::trace_r(uint64_t cycle, const Axi4R& r) {
 // -----------------------------------------------------------------------------
 
 Axi4Bridge::Axi4Bridge(core::Machine* machine, pipeline::AxiConfig config)
-    : machine_(machine),
-      config_(config),
-      tracer_(machine != nullptr
-                  ? (std::filesystem::path(machine->configuration().debug.trace_dir) / "axi.txt")
-                        .string()
-                  : "") {
+    : machine_(machine), config_(config), tracer_{} {
     if (config_.trace_axi) {
         tracer_.enable(true);
     }

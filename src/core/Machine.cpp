@@ -10,6 +10,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <fstream>
+#include <filesystem>
 #include <limits>
 #include <new>
 #include <print>
@@ -136,6 +137,10 @@ Machine::Machine(MachineConfig machine_config)
 
 void Machine::apply_configuration(MachineConfig machine_config) {
     config = std::move(machine_config);
+    if (runtime_->axi_bridge != nullptr) {
+        runtime_->axi_bridge->tracer().set_path(
+            (std::filesystem::path(config.debug.trace_dir) / "axi.txt").string());
+    }
     resolved_start_pc_ = config.execution.start_pc;
     resolved_isatest_tohost_ = config.isa.isatest_tohost;
     memory_.system_bus().set_smp_enabled(config.execution.smp_multithreaded);
