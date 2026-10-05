@@ -116,6 +116,7 @@ simrv -m program.elf
 | `--summary <file>` | Write a machine-readable JSON execution summary when the run ends. |
 | `--events <file>` | Write newline-delimited lifecycle events for automation. |
 | `--arch-trace <file>` | Write a versioned JSONL retirement trace for RTL/Spike comparison. |
+| `--trace-level <0-4>` | Limit architectural event detail: devices, calls, retirement, or detailed state. |
 | `--trace` | Write an aligned, labeled architectural instruction trace to `<trace-dir>/trace.txt`. |
 | `--tracepc` | Write PC stream trace to `<trace-dir>/tracepc.txt`. |
 | `--gdb` | Start GDB Remote Serial Protocol (RSP) server. |
@@ -158,19 +159,33 @@ decoded operation, next PC, and privilege mode. The option selects detailed exec
 committed instruction is represented; it is intended for RTL/Spike parity work and is not a
 throughput mode.
 
-Architectural tracing also emits optional versioned `call` and `return` records. These preserve
-the `retire` record format and are emitted only when `--arch-trace` is enabled. Calls are direct
-or indirect `jal`/`jalr` instructions writing `ra`; returns are `jalr x0, ra, 0`. The simulator
-records PCs and dynamic depth, leaving symbol and source resolution to downstream ELF-aware
-tools:
+Architectural tracing keeps `retire.jsonl` compact and compatibility-oriented. It does not repeat
+the full CSR/vector snapshot on every line. Additional streams are written beside it:
+`calls.jsonl`, `devices.jsonl`, and `metadata.json`. Lifecycle events remain in the separate file
+selected by `--events`.
+
+The default trace level is 3. Level 1 enables trap, exception, and device events; level 2 adds
+calls and returns; level 3 adds instruction retirement; level 4 is reserved for detailed register
+and memory events. New streams use a schema-2 envelope with RISC-V privilege-mode names (`U`,
+`S`, and `M`):
 
 ```json
-{"schema_version":1,"event":"call","hart":0,"cycle":42,
- "source_pc":"0x80000000","target_pc":"0x80000120","return_pc":"0x80000004",
- "call_depth":1}
-{"schema_version":1,"event":"return","hart":0,"cycle":57,
- "source_pc":"0x80000124","target_pc":"0x80000004","return_pc":"0x80000004",
- "call_depth":0}
+{"schema_version":2,"event":"mmio_write","timestamp":"2026-10-05T12:34:56.123Z",
+ "cycle":18420,"hart":0,"pc":"0x800125bc","mode":"M","component":"uart0",
+ "payload":{"address":"0x40001000","value":"0x1","width":1,"access":"mmio"}}
+```
+
+Calls are direct or indirect `jal`/`jalr` instructions writing `ra`; returns are `jalr x0, ra, 0`.
+The simulator records PCs and dynamic depth, leaving symbol and source resolution to downstream
+ELF-aware tools:
+
+```json
+{"schema_version":2,"event":"call","timestamp":"2026-10-05T12:34:56.123Z",
+ "cycle":42,"hart":0,"mode":"M","payload":{"source_pc":"0x80000000",
+ "target_pc":"0x80000120","return_pc":"0x80000004","call_depth":1}}
+{"schema_version":2,"event":"return","timestamp":"2026-10-05T12:34:56.124Z",
+ "cycle":57,"hart":0,"mode":"M","payload":{"source_pc":"0x80000124",
+ "target_pc":"0x80000004","return_pc":"0x80000004","call_depth":0}}
 ```
 
 ### Checkpoint and resume

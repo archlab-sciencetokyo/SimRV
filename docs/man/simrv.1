@@ -148,6 +148,10 @@ Write an instruction-mix report to \fBtrace/instmix.txt\fR on exit.
 .B \-\-arch-trace=\fIfile.jsonl\fR
 Write a JSONL architectural retirement trace in detailed mode.
 .TP
+.B \-\-trace-level=\fI0\-4\fR
+Limit architectural event detail: level 1 devices and traps, level 2 calls and returns, level 3
+retirement, and level 4 detailed state.
+.TP
 .B \-\-trace
 Write an aligned architectural trace to \fBtrace/trace.txt\fR.
 .TP
