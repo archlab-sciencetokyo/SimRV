@@ -9,6 +9,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
+#include <ctime>
 #include <filesystem>
 #include <format>
 #include <fstream>
@@ -44,6 +45,27 @@ namespace {
 constexpr auto D_TRACE_HEX_WIDTH = static_cast<int>(kXLenHexDigits);
 constexpr Counter D_TRACEPC_INTERVAL = 1000;
 
+auto trace_timestamp() -> std::string {
+    const auto now = std::chrono::system_clock::now();
+    const auto millis = std::chrono::duration_cast<std::chrono::milliseconds>(
+                            now.time_since_epoch()) % 1000;
+    const auto time = std::chrono::system_clock::to_time_t(now);
+    std::tm utc{};
+    gmtime_r(&time, &utc);
+    return std::format("{:04}-{:02}-{:02}T{:02}:{:02}:{:02}.{:03}Z", utc.tm_year + 1900,
+                       utc.tm_mon + 1, utc.tm_mday, utc.tm_hour, utc.tm_min, utc.tm_sec,
+                       millis.count());
+}
+
+auto privilege_mode(PrivilegeLevel privilege) noexcept -> std::string_view {
+    switch (privilege) {
+        case PrivilegeLevel::User: return "U";
+        case PrivilegeLevel::Supervisor: return "S";
+        case PrivilegeLevel::Machine: return "M";
+    }
+    return "unknown";
+}
+
 auto categorize_operation(isa::OperationId op) noexcept -> std::string_view {
     const auto op_info = pipeline::operation::info(op);
     if (op_info.control == pipeline::operation::ControlFlowKind::Branch) return "Branch";
@@ -69,7 +91,14 @@ auto categorize_operation(isa::OperationId op) noexcept -> std::string_view {
 
 Tracer::Tracer(Machine& machine) : machine_(machine) {}
 
-Tracer::~Tracer() { flush_all(); }
+Tracer::~Tracer() {
+    write_trace_metadata(true);
+    flush_all();
+}
+
+auto Tracer::trace_level_at_least(unsigned level) const noexcept -> bool {
+    return machine_.configuration().debug.trace_level >= level;
+}
 
 auto Tracer::artifact_path(std::string_view filename) const -> std::filesystem::path {
     return std::filesystem::path(machine_.configuration().debug.trace_dir) / filename;
@@ -91,13 +120,26 @@ void Tracer::init_trace(bool trace_enabled) {
 
 void Tracer::init_architecture_trace(const std::string& path) {
     fp_archtrace.close();
+    fp_calls.close();
+    fp_devices.close();
+    trace_metadata_path_.clear();
+    trace_started_at_.clear();
+    trace_vlen_ = 0;
+    trace_harts_ = 0;
     call_depth_.clear();
     if (path.empty()) return;
     std::error_code ec;
     const std::filesystem::path trace_path(path);
-    if (trace_path.has_parent_path()) {
-        std::filesystem::create_directories(trace_path.parent_path(), ec);
-    }
+    const auto trace_directory = trace_path.has_parent_path() ? trace_path.parent_path()
+                                                               : std::filesystem::path(".");
+    std::filesystem::create_directories(trace_directory, ec);
+    if (ec) return;
+    trace_metadata_path_ = trace_directory / "metadata.json";
+    trace_started_at_ = trace_timestamp();
+    trace_vlen_ = machine_.isa_config().vlen;
+    trace_harts_ = machine_.num_harts();
+    fp_calls.open(trace_directory / "calls.jsonl", std::ios::out | std::ios::trunc);
+    fp_devices.open(trace_directory / "devices.jsonl", std::ios::out | std::ios::trunc);
     fp_archtrace.clear();
     fp_archtrace.open(trace_path, std::ios::out | std::ios::trunc);
     if (fp_archtrace.is_open()) {
@@ -107,6 +149,21 @@ void Tracer::init_architecture_trace(const std::string& path) {
                      "\"vlen\":{},\"harts\":{}}}",
                      simrv::xlen::kXLenBits, machine_.isa_config().vlen, machine_.num_harts());
     }
+    if (fp_calls.is_open()) {
+        std::println(fp_calls,
+                     "{{\"schema_version\":2,\"event\":\"header\","
+                     "\"timestamp\":\"{}\",\"cycle\":0,\"hart\":0,"
+                     "\"mode\":\"machine\",\"payload\":{{\"stream\":\"calls\"}}}}",
+                     trace_timestamp());
+    }
+    if (fp_devices.is_open()) {
+        std::println(fp_devices,
+                     "{{\"schema_version\":2,\"event\":\"header\","
+                     "\"timestamp\":\"{}\",\"cycle\":0,\"hart\":0,"
+                     "\"mode\":\"machine\",\"payload\":{{\"stream\":\"devices\"}}}}",
+                     trace_timestamp());
+    }
+    write_trace_metadata(false);
 }
 
 void Tracer::init_trap_log(bool traplog_mode, const std::string& fn_traplog) {
@@ -145,23 +202,42 @@ void Tracer::flush_all() {
     if (fp_dlog.is_open()) fp_dlog.flush();
     if (fp_traplog.is_open()) fp_traplog.flush();
     if (fp_archtrace.is_open()) fp_archtrace.flush();
+    if (fp_calls.is_open()) fp_calls.flush();
+    if (fp_devices.is_open()) fp_devices.flush();
     if (fp_tracepc_.is_open()) fp_tracepc_.flush();
     if (fp_bpred_.is_open()) fp_bpred_.flush();
 }
 
 void Tracer::log_mmio(std::string_view dev_name, Address addr, uint32_t size, Word data,
                       bool is_write) {
-    if (!fp_dlog.is_open()) return;
-    const auto mtime = machine_.primary_hart().clint_mmio.mtime.load(std::memory_order_relaxed);
+    const auto& cpu = machine_.primary_hart();
+    if (!fp_dlog.is_open() && !(fp_devices.is_open() && trace_level_at_least(1))) return;
+    const auto mtime = cpu.clint_mmio.mtime.load(std::memory_order_relaxed);
     std::lock_guard lock(mutex_);
-    std::println(fp_dlog, "[mtime={:12}] [{:<16}] {:5} addr=0x{:0{}x} size={:2} data=0x{:0{}x}",
-                 mtime, dev_name, is_write ? "WRITE" : "READ", addr, kXLenHexDigits, size, data,
-                 size * 2);
+    if (fp_dlog.is_open()) {
+        std::println(fp_dlog,
+                     "[mtime={:12}] [{:<16}] {:5} addr=0x{:0{}x} size={:2} data=0x{:0{}x}",
+                     mtime, dev_name, is_write ? "WRITE" : "READ", addr, kXLenHexDigits, size,
+                     data, size * 2);
+    }
+    if (fp_devices.is_open() && trace_level_at_least(1)) {
+        std::println(fp_devices,
+                     "{{\"schema_version\":2,\"event\":\"mmio_{}\","
+                     "\"timestamp\":\"{}\",\"cycle\":{},\"hart\":{},"
+                     "\"pc\":\"0x{:x}\",\"mode\":\"{}\","
+                     "\"component\":\"{}\",\"payload\":{{"
+                     "\"address\":\"0x{:x}\",\"value\":\"0x{:x}\","
+                     "\"width\":{},\"access\":\"mmio\"}}}}",
+                     is_write ? "write" : "read", trace_timestamp(), mtime,
+                     static_cast<unsigned>(cpu.state().mhartid),
+                     static_cast<uint64_t>(cpu.state().pc), privilege_mode(cpu.state().priv),
+                     dev_name, static_cast<uint64_t>(addr), static_cast<uint64_t>(data), size);
+    }
 }
 
 void Tracer::log_trap(Counter mtime, TrapCause cause, Address trap_pc, PrivilegeLevel priv,
                       const ArchState& state, CSRValue tval) {
-    if (!fp_traplog.is_open() && !fp_archtrace.is_open()) return;
+    if (!fp_traplog.is_open() && !(fp_devices.is_open() && trace_level_at_least(1))) return;
     constexpr int kLogHexWidth = static_cast<int>(kXLenHexDigits);
     std::lock_guard lock(mutex_);
     if (fp_traplog.is_open()) {
@@ -182,20 +258,23 @@ void Tracer::log_trap(Counter mtime, TrapCause cause, Address trap_pc, Privilege
             static_cast<uint64_t>(state.sepc), kLogHexWidth, static_cast<uint64_t>(state.satp),
             kLogHexWidth, static_cast<uint64_t>(tval), kLogHexWidth);
     }
-    if (fp_archtrace.is_open()) {
-        std::println(fp_archtrace,
-                     "{{\"schema_version\":1,\"event\":\"trap\",\"hart\":{},"
-                     "\"cycle\":{},\"cause\":{},\"cause_name\":\"{}\","
-                     "\"pc\":\"0x{:x}\",\"tval\":\"0x{:x}\",\"privilege\":{}}}",
-                     static_cast<unsigned>(state.mhartid), mtime, static_cast<uint64_t>(cause),
-                     trap_cause_name(cause), static_cast<uint64_t>(trap_pc),
-                     static_cast<uint64_t>(tval), std::to_underlying(priv));
+    if (fp_devices.is_open() && trace_level_at_least(1)) {
+        std::println(fp_devices,
+                     "{{\"schema_version\":2,\"event\":\"trap\","
+                     "\"timestamp\":\"{}\",\"cycle\":{},\"hart\":{},"
+                     "\"mode\":\"{}\",\"payload\":{{\"cause\":{},"
+                     "\"cause_name\":\"{}\",\"pc\":\"0x{:x}\","
+                     "\"tval\":\"0x{:x}\",\"privilege\":{}}}}}",
+                     trace_timestamp(), mtime, static_cast<unsigned>(state.mhartid),
+                     privilege_mode(priv), static_cast<uint64_t>(cause), trap_cause_name(cause),
+                     static_cast<uint64_t>(trap_pc), static_cast<uint64_t>(tval),
+                     std::to_underlying(priv));
     }
 }
 
 void Tracer::log_sbi(Counter mtime, unsigned cause, Word ext_id, Word func_id, Word a0, Word a1,
                      Address pc) {
-    if (!fp_traplog.is_open() && !fp_archtrace.is_open()) return;
+    if (!fp_traplog.is_open() && !(fp_devices.is_open() && trace_level_at_least(1))) return;
     constexpr int kLogHexWidth = static_cast<int>(kXLenHexDigits);
     std::lock_guard lock(mutex_);
     if (fp_traplog.is_open()) {
@@ -207,39 +286,40 @@ void Tracer::log_sbi(Counter mtime, unsigned cause, Word ext_id, Word func_id, W
                      kLogHexWidth, static_cast<uint64_t>(a1), kLogHexWidth,
                      static_cast<uint64_t>(pc), kLogHexWidth);
     }
-    if (fp_archtrace.is_open()) {
-        std::println(fp_archtrace,
-                     "{{\"schema_version\":1,\"event\":\"sbi\",\"cycle\":{},"
-                     "\"cause\":{},\"extension\":\"0x{:x}\",\"function\":\"0x{:x}\","
-                     "\"a0\":\"0x{:x}\",\"a1\":\"0x{:x}\",\"pc\":\"0x{:x}\"}}",
-                     mtime, cause, static_cast<uint64_t>(ext_id), static_cast<uint64_t>(func_id),
-                     static_cast<uint64_t>(a0), static_cast<uint64_t>(a1),
-                     static_cast<uint64_t>(pc));
+    if (fp_devices.is_open() && trace_level_at_least(1)) {
+        std::println(fp_devices,
+                     "{{\"schema_version\":2,\"event\":\"sbi\","
+                     "\"timestamp\":\"{}\",\"cycle\":{},\"hart\":0,"
+                     "\"mode\":\"M\",\"payload\":{{\"cause\":{},"
+                     "\"extension\":\"0x{:x}\",\"function\":\"0x{:x}\","
+                     "\"a0\":\"0x{:x}\",\"a1\":\"0x{:x}\","
+                     "\"pc\":\"0x{:x}\"}}}}",
+                     trace_timestamp(), mtime, cause, static_cast<uint64_t>(ext_id),
+                     static_cast<uint64_t>(func_id), static_cast<uint64_t>(a0),
+                     static_cast<uint64_t>(a1), static_cast<uint64_t>(pc));
     }
 }
 
 void Tracer::log_architecture_retirement(const CPU& cpu,
                                          const pipeline::PipelineContext& retiring_context) {
     if (!fp_archtrace.is_open()) return;
+    const bool emit_retire = trace_level_at_least(3);
+    const bool emit_calls = fp_calls.is_open() && trace_level_at_least(2);
+    if (!emit_retire && !emit_calls) return;
     const auto& state = cpu.state();
     std::lock_guard lock(mutex_);
-    std::println(fp_archtrace,
+    if (emit_retire) std::println(fp_archtrace,
                  "{{\"schema_version\":1,\"event\":\"retire\",\"hart\":{},\"cycle\":{},"
                  "\"retired\":{},\"pc\":\"0x{:x}\",\"instruction\":\"0x{:x}\","
-                 "\"operation\":\"{}\",\"next_pc\":\"0x{:x}\","
-                 "\"privilege\":{},\"mstatus\":\"0x{:x}\",\"mepc\":\"0x{:x}\","
-                 "\"mcause\":\"0x{:x}\",\"satp\":\"0x{:x}\",\"vl\":\"0x{:x}\","
-                 "\"vtype\":\"0x{:x}\"}}",
+                 "\"operation\":\"{}\",\"next_pc\":\"0x{:x}\",\"privilege\":{}}}",
                  static_cast<unsigned>(state.mhartid), cpu.clint_mmio.mcycle, cpu.e_icount,
                  static_cast<uint64_t>(retiring_context.cpc.raw()),
                  static_cast<uint32_t>(retiring_context.ir),
                  pipeline::operation_name(retiring_context.op_id), static_cast<uint64_t>(state.pc),
-                 std::to_underlying(state.priv), static_cast<uint64_t>(state.mstatus),
-                 static_cast<uint64_t>(state.mepc), static_cast<uint64_t>(state.mcause),
-                 static_cast<uint64_t>(state.satp), static_cast<uint64_t>(state.vl),
-                 static_cast<uint64_t>(state.vtype));
+                 std::to_underlying(state.priv));
 
     const auto hart = static_cast<size_t>(state.mhartid);
+    if (!emit_calls) return;
     if (hart >= call_depth_.size()) call_depth_.resize(hart + 1);
     const auto source_pc = retiring_context.cpc.raw();
     const auto target_pc = retiring_context.jmp_pc.raw();
@@ -253,25 +333,46 @@ void Tracer::log_architecture_retirement(const CPU& cpu,
                          retiring_context.rd == RegId::Ra;
     if (is_call) {
         const auto depth = ++call_depth_[hart];
-        std::println(fp_archtrace,
-                     "{{\"schema_version\":1,\"event\":\"call\",\"hart\":{},"
-                     "\"cycle\":{},\"source_pc\":\"0x{:x}\","
-                     "\"target_pc\":\"0x{:x}\",\"return_pc\":\"0x{:x}\","
-                     "\"call_depth\":{}}}",
-                     static_cast<unsigned>(state.mhartid), cpu.clint_mmio.mcycle,
-                     static_cast<uint64_t>(source_pc), static_cast<uint64_t>(target_pc),
-                     static_cast<uint64_t>(return_pc), depth);
+        if (fp_calls.is_open()) {
+            std::println(fp_calls,
+                         "{{\"schema_version\":2,\"event\":\"call\","
+                         "\"timestamp\":\"{}\",\"cycle\":{},\"hart\":{},"
+                         "\"mode\":\"{}\",\"payload\":{{"
+                         "\"source_pc\":\"0x{:x}\",\"target_pc\":\"0x{:x}\","
+                         "\"return_pc\":\"0x{:x}\",\"call_depth\":{}}}}}",
+                         trace_timestamp(), cpu.clint_mmio.mcycle,
+                         static_cast<unsigned>(state.mhartid), privilege_mode(state.priv),
+                         static_cast<uint64_t>(source_pc),
+                         static_cast<uint64_t>(target_pc), static_cast<uint64_t>(return_pc), depth);
+        }
     } else if (is_return) {
         const auto depth = call_depth_[hart] == 0 ? 0 : --call_depth_[hart];
-        std::println(fp_archtrace,
-                     "{{\"schema_version\":1,\"event\":\"return\",\"hart\":{},"
-                     "\"cycle\":{},\"source_pc\":\"0x{:x}\","
-                     "\"target_pc\":\"0x{:x}\",\"return_pc\":\"0x{:x}\","
-                     "\"call_depth\":{}}}",
-                     static_cast<unsigned>(state.mhartid), cpu.clint_mmio.mcycle,
-                     static_cast<uint64_t>(source_pc), static_cast<uint64_t>(target_pc),
-                     static_cast<uint64_t>(target_pc), depth);
+        if (fp_calls.is_open()) {
+            std::println(fp_calls,
+                         "{{\"schema_version\":2,\"event\":\"return\","
+                         "\"timestamp\":\"{}\",\"cycle\":{},\"hart\":{},"
+                         "\"mode\":\"{}\",\"payload\":{{"
+                         "\"source_pc\":\"0x{:x}\",\"target_pc\":\"0x{:x}\","
+                         "\"return_pc\":\"0x{:x}\",\"call_depth\":{}}}}}",
+                         trace_timestamp(), cpu.clint_mmio.mcycle,
+                         static_cast<unsigned>(state.mhartid), privilege_mode(state.priv),
+                         static_cast<uint64_t>(source_pc),
+                         static_cast<uint64_t>(target_pc), static_cast<uint64_t>(target_pc), depth);
+        }
     }
+}
+
+void Tracer::write_trace_metadata(bool completed) {
+    if (trace_metadata_path_.empty()) return;
+    std::ofstream out(trace_metadata_path_, std::ios::out | std::ios::trunc);
+    if (!out) return;
+    std::println(out,
+                 "{{\"schema_version\":2,\"simulator_version\":\"{}\","
+                 "\"xlen\":{},\"vlen\":{},\"harts\":{},"
+                 "\"started_at\":\"{}\",\"completed_at\":{}}}",
+                 simrv::buildinfo::kVersion, simrv::xlen::kXLenBits, trace_vlen_, trace_harts_,
+                 trace_started_at_,
+                 completed ? std::format("\"{}\"", trace_timestamp()) : "null");
 }
 
 void Tracer::dump_init_artifacts() {

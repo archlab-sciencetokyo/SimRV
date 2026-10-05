@@ -35,6 +35,11 @@ auto trace_path(std::string_view suffix) -> std::filesystem::path {
            ("simrv-architectural-trace-" + std::string(suffix) + ".jsonl");
 }
 
+auto sibling_path(const std::filesystem::path& retire_path, std::string_view filename)
+    -> std::filesystem::path {
+    return retire_path.parent_path() / filename;
+}
+
 auto read_trace(const std::filesystem::path& path) -> std::vector<std::string> {
     std::ifstream input(path);
     std::vector<std::string> lines;
@@ -63,6 +68,7 @@ void test_retirement_context_and_call_trace() {
         }
         machine.trace().flush_all();
         const auto lines = read_trace(path);
+        const auto call_lines = read_trace(sibling_path(path, "calls.jsonl"));
         size_t retire_count = 0;
         size_t call_count = 0;
         size_t return_count = 0;
@@ -72,15 +78,23 @@ void test_retirement_context_and_call_trace() {
                 if (line.find("\"pc\":\"0x0\"") != std::string::npos) std::abort();
                 if (line.find("call_depth") != std::string::npos) std::abort();
             }
+        }
+        for (const auto& line : call_lines) {
             call_count += line.find("\"event\":\"call\"") != std::string::npos;
             return_count += line.find("\"event\":\"return\"") != std::string::npos;
         }
         if (retire_count < 6 || call_count != 2 || return_count != 2) std::abort();
-        if (std::none_of(lines.begin(), lines.end(), [](const auto& line) {
+        if (std::none_of(call_lines.begin(), call_lines.end(), [](const auto& line) {
                 return line.find("\"call_depth\":2") != std::string::npos;
             }))
             std::abort();
+        const auto metadata = read_trace(sibling_path(path, "metadata.json"));
+        if (metadata.size() != 1 || metadata.front().find("\"schema_version\":2") == std::string::npos)
+            std::abort();
         std::filesystem::remove(path);
+        std::filesystem::remove(sibling_path(path, "calls.jsonl"));
+        std::filesystem::remove(sibling_path(path, "devices.jsonl"));
+        std::filesystem::remove(sibling_path(path, "metadata.json"));
     }
 }
 
@@ -106,6 +120,41 @@ void test_branches_are_not_calls() {
         if (line.find("\"event\":\"call\"") != std::string::npos) std::abort();
     }
     std::filesystem::remove(path);
+    std::filesystem::remove(sibling_path(path, "calls.jsonl"));
+    std::filesystem::remove(sibling_path(path, "devices.jsonl"));
+    std::filesystem::remove(sibling_path(path, "metadata.json"));
+}
+
+void test_trace_level_filters_streams() {
+    simrv::core::MachineConfig config;
+    config.debug.trace_level = 2;
+    Machine machine(config);
+    std::vector<Byte> ram(1024 * 1024, Byte{0});
+    std::memcpy(ram.data(), kProgram.data(), sizeof(kProgram));
+    machine.set_ram_for_testing(ram.data(), ram.size());
+    machine.primary_hart().machine_ = &machine;
+    machine.primary_hart().reset();
+    machine.primary_hart().state().pc = kPc;
+    const auto path = trace_path("level");
+    machine.trace().init_architecture_trace(path.string());
+    while (machine.primary_hart().e_icount < 2) machine.primary_hart().run_cycle(machine);
+    machine.trace().flush_all();
+
+    const auto retire_lines = read_trace(path);
+    const auto call_lines = read_trace(sibling_path(path, "calls.jsonl"));
+    if (std::any_of(retire_lines.begin(), retire_lines.end(), [](const auto& line) {
+            return line.find("\"event\":\"retire\"") != std::string::npos;
+        }))
+        std::abort();
+    if (std::none_of(call_lines.begin(), call_lines.end(), [](const auto& line) {
+            return line.find("\"event\":\"call\"") != std::string::npos;
+        }))
+        std::abort();
+
+    std::filesystem::remove(path);
+    std::filesystem::remove(sibling_path(path, "calls.jsonl"));
+    std::filesystem::remove(sibling_path(path, "devices.jsonl"));
+    std::filesystem::remove(sibling_path(path, "metadata.json"));
 }
 
 void test_trace_hart_identity() {
@@ -129,7 +178,7 @@ void test_trace_hart_identity() {
         }
     }
     machine.trace().flush_all();
-    const auto lines = read_trace(path);
+    const auto lines = read_trace(sibling_path(path, "calls.jsonl"));
     bool saw_hart0 = false;
     bool saw_hart1 = false;
     for (const auto& line : lines) {
@@ -139,12 +188,16 @@ void test_trace_hart_identity() {
     }
     if (!saw_hart0 || !saw_hart1) std::abort();
     std::filesystem::remove(path);
+    std::filesystem::remove(sibling_path(path, "calls.jsonl"));
+    std::filesystem::remove(sibling_path(path, "devices.jsonl"));
+    std::filesystem::remove(sibling_path(path, "metadata.json"));
 }
 }  // namespace
 
 int main() {
     test_retirement_context_and_call_trace();
     test_branches_are_not_calls();
+    test_trace_level_filters_streams();
     test_trace_hart_identity();
     return 0;
 }

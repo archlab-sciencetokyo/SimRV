@@ -59,10 +59,14 @@ class Tracer {
     std::ofstream fp_dlog;
     std::ofstream fp_traplog;
     std::ofstream fp_archtrace;
+    std::ofstream fp_calls;
+    std::ofstream fp_devices;
 
    private:
     [[nodiscard]] auto artifact_path(std::string_view filename) const -> std::filesystem::path;
     void ensure_artifact_directory() const;
+    void write_trace_metadata(bool completed);
+    [[nodiscard]] auto trace_level_at_least(unsigned level) const noexcept -> bool;
 
     Machine& machine_;
     mutable std::mutex mutex_;
@@ -71,6 +75,10 @@ class Tracer {
     std::ofstream fp_bpred_;
     bool bpred_opened_ = false;
     std::vector<unsigned> call_depth_;
+    std::filesystem::path trace_metadata_path_;
+    unsigned trace_vlen_ = 0;
+    size_t trace_harts_ = 0;
+    std::string trace_started_at_;
 };
 
 }  // namespace simrv::core

@@ -808,6 +808,13 @@ auto parse_debug_cosrv_options(std::string_view arg, std::span<char* const> args
         options.fn_events = std::string(*value);
         return true;
     }
+    if (arg == "--trace-level") {
+        auto value = parse_u32_required(args, i, arg);
+        if (!value) return std::unexpected(value.error());
+        if (*value > 4) return std::unexpected("--trace-level must be between 0 and 4");
+        options.trace_level = static_cast<uint8_t>(*value);
+        return true;
+    }
     if (arg == "--save-checkpoint" || arg == "--checkpoint-out") {
         auto value = next_argument(args, i, arg);
         if (!value) return std::unexpected(value.error());
@@ -1112,6 +1119,7 @@ auto RuntimeOptions::to_machine_config() const -> simrv::core::MachineConfig {
     cfg.debug.use_mix = use_mix;
     cfg.debug.trace_dir = trace_dir;
     cfg.debug.architecture_trace_path = fn_archtrace;
+    cfg.debug.trace_level = trace_level;
 
     cfg.isa.isatest_tohost = isatest_tohost;
     cfg.isa.isa_preset = isa_preset_bits(effective_isa_preset(*this));
@@ -1475,6 +1483,9 @@ auto needs_memory_image(const ParseResult& result) -> bool {
         stdout,
         "  {}--arch-trace <FILE>{}                Write JSONL retirement trace (detailed mode)\n",
         style(kBrightGreen), style(kReset));
+    std::print(stdout,
+               "  {}--trace-level {}{}<0-4>{}             Limit architectural event detail\n",
+               style(kBrightGreen), style(kBrightBlack), style(kReset), style(kReset));
     std::print(stdout,
                "  {}--trace{}                          Record an aligned full architectural trace "
                "to <DIR>/trace.txt\n",

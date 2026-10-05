@@ -40,6 +40,7 @@ struct RuntimeOptions {
     std::string fn_events;
     std::string fn_archtrace;
     std::string trace_dir = "trace";
+    uint8_t trace_level = 3;
     std::string fn_save_checkpoint;
     std::string fn_load_checkpoint;
     std::string inspection_output;
