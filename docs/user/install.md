@@ -85,17 +85,26 @@ cmake --build --preset rv64-release -j"$(nproc)"
 ./build/rv64-release/simrv --version
 ```
 
-To install the runtime, tools, and documentation below `/usr/local`:
+By default, source installs keep SimRV's files separate from other applications under
+`/usr/local/simrv`. The executable is `/usr/local/simrv/bin/simrv`; add that `bin` directory to
+your `PATH` to invoke it as `simrv`:
 
 ```bash
-sudo cmake --install build/rv64-release --prefix /usr/local
+sudo cmake --install build/rv64-release --prefix /usr/local/simrv
+export PATH="/usr/local/simrv/bin:$PATH"
 simrv --version
 ```
 
-The install also includes `/usr/local/share/SimRV/SimRVBuildMetadata.json`. It records the SimRV
-version, source Git revision, target XLEN, compiler, generator, host platform, and optional
-`SOURCE_DATE_EPOCH` used for reproducible builds. Its schema is installed at
-`/usr/local/share/SimRV/schemas/simrv-build-metadata.schema.json`.
+Put the `export PATH=...` line in your shell's startup file if you want it in future sessions. To
+choose another prefix, configure with `-DCMAKE_INSTALL_PREFIX=/path/to/prefix` or override it for
+one install with `cmake --install build/rv64-release --prefix /path/to/prefix`. In either case,
+the executable is installed under `<prefix>/bin` and SimRV data under `<prefix>/share/SimRV`.
+
+The install also includes
+`/usr/local/simrv/share/SimRV/SimRVBuildMetadata.json`. It records the SimRV version, source Git
+revision, target XLEN, compiler, generator, host platform, and optional `SOURCE_DATE_EPOCH` used
+for reproducible builds. Its schema is installed at
+`/usr/local/simrv/share/SimRV/schemas/simrv-build-metadata.schema.json`.
 
 Build `rv32-release` only when a native RV32 strict-width implementation is required for
 verification. Normal users should use the RV64-capable build.

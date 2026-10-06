@@ -13,6 +13,14 @@ project(
   HOMEPAGE_URL "https://github.com/archlab-sciencetokyo/SimRV"
   LANGUAGES C CXX)
 
+# Keep source installs self-contained by default. Native distro packages set
+# CPACK_PACKAGING_INSTALL_PREFIX independently, and callers can still override
+# this with -DCMAKE_INSTALL_PREFIX or cmake --install --prefix.
+if(CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT)
+  set(CMAKE_INSTALL_PREFIX "/usr/local/simrv" CACHE PATH
+      "Install prefix for a source-built SimRV distribution" FORCE)
+endif()
+
 include(CTest)
 option(SIMRV_ENABLE_TOOLING
        "Enable release, documentation, and formatting helper targets" OFF)
