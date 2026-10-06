@@ -5,6 +5,8 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## Unreleased
 
+## [v3.0.0-rc.6] — 2026-10-06
+
 - Source builds now default to the isolated `/usr/local/simrv` install prefix (executable at
   `/usr/local/simrv/bin/simrv`); CPack distro packages retain their standard `/usr` layout.
 - `--isa` now accepts the standard `rv32g`/`rv64g` shorthand separately from `GC`, and canonical
@@ -789,6 +791,7 @@ on inspector polish, correctness fixes, and CLI normalization.
 - Initial public alpha: CMake preset infrastructure, Clang-20 CI, base RISC-V pipeline
 
 [v3.0.0-rc.5]: https://github.com/archlab-sciencetokyo/SimRV/releases/tag/v3.0.0-rc.5
+[v3.0.0-rc.6]: https://github.com/archlab-sciencetokyo/SimRV/releases/tag/v3.0.0-rc.6
 [v3.0.0-rc.4]: https://github.com/archlab-sciencetokyo/SimRV/releases/tag/v3.0.0-rc.4
 [v3.0.0-rc.3]: https://github.com/archlab-sciencetokyo/SimRV/releases/tag/v3.0.0-rc.3
 [v3.0.0-rc.2]: https://github.com/archlab-sciencetokyo/SimRV/releases/tag/v3.0.0-rc.2

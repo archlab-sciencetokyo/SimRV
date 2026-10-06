@@ -1,8 +1,8 @@
 {
   "$schema": "schemas/release-manifest.schema.json",
   "schema_version": 2,
-  "version": "3.0.0-rc.5",
-  "release_tag": "v3.0.0-rc.5",
+  "version": "3.0.0-rc.6",
+  "release_tag": "v3.0.0-rc.6",
   "host_support": {
     "os": "Linux",
     "architecture": "x86_64",
@@ -169,8 +169,8 @@
     ]
   },
   "artifacts": [
-    "SimRV-linux-x86_64-v3.0.0-rc.5.tar.gz",
-    "SimRV-rpm-packages-v3.0.0-rc.5.tar.gz",
-    "SimRV-deb-packages-v3.0.0-rc.5.tar.gz"
+    "SimRV-linux-x86_64-v3.0.0-rc.6.tar.gz",
+    "SimRV-rpm-packages-v3.0.0-rc.6.tar.gz",
+    "SimRV-deb-packages-v3.0.0-rc.6.tar.gz"
   ]
 }
