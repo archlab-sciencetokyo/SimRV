@@ -1,0 +1,36 @@
+#compdef simrv
+
+_arguments -s \
+  '(-h --help)'{-h,--help}'[Show help]' \
+  '(-m --image --memory)'{-m,--image,--memory}'[Load an ELF or raw image]:image:_files' \
+  '--disk[Attach a VirtIO disk image]:image:_files' \
+  '--rootfs[Attach a root filesystem image]:image:_files' \
+  '--fdt[Load a device tree]:file:_files' \
+  '--dtb[Load a device tree]:file:_files' \
+  '--steps[Stop after N retired instructions]:count:' \
+  '--harts[Set active hart count]:count:' \
+  '--smp[Set active hart count]:count:' \
+  '--isa[Select a RISC-V ISA]:ISA:(rv32i rv32imac rv32gc rv64i rv64imac rv64gc)' \
+  '--mode[Select execution mode]:mode:(fast detailed cycle-accurate)' \
+  '--pipeline[Select CA pipeline]:pipeline:(3stage 5stage)' \
+  '--bpred[Select branch predictor]:predictor:(none static bimodal gshare tournament)' \
+  '--net[Select network backend]:backend:(user tap socket none)' \
+  '--soc[Select SoC preset]:preset:(virt-pcie virt-mmio rvcomp)' \
+  '--platform[Select SoC preset]:preset:(virt-pcie virt-mmio rvcomp)' \
+  '--cpu-config[Load a CPU model]:file:_files' \
+  '--cpu-preset[Select CPU model]:preset:(tiny balanced performance)' \
+  '--trace-dir[Set trace output directory]:directory:_directories' \
+  '--arch-trace[Write architectural retire trace]:file:_files' \
+  '--log-file[Write diagnostics to a file]:file:_files' \
+  '--load-checkpoint[Restore an architectural checkpoint]:file:_files' \
+  '--save-checkpoint[Save an architectural checkpoint]:file:_files' \
+  '--checkpoint-dir[Set checkpoint output directory]:directory:_directories' \
+  '--summary[Write execution summary]:file:_files' \
+  '--events[Write lifecycle events]:file:_files' \
+  '--gdb[Start GDB remote debugging]' \
+  '--gdb-port[Set GDB server port]:port:' \
+  '--cli[Run headless]' \
+  '--tui[Run interactive TUI]' \
+  '--quiet[Suppress informational logs]' \
+  '--verbose[Enable debug diagnostics]' \
+  '*:file:_files'

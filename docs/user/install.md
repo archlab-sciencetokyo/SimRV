@@ -106,6 +106,22 @@ revision, target XLEN, compiler, generator, host platform, and optional `SOURCE_
 for reproducible builds. Its schema is installed at
 `/usr/local/simrv/share/SimRV/schemas/simrv-build-metadata.schema.json`.
 
+Runtime installs also include Bash, Zsh, and Fish command completions under
+`/usr/local/simrv/share`. Native packages place them in the standard system completion paths and
+are normally discovered automatically. With a custom source prefix, point the shell at its
+completion directory; for example:
+
+```bash
+# Bash, for the current shell (put this in ~/.bashrc to persist)
+source /usr/local/simrv/share/bash-completion/completions/simrv
+
+# Zsh, add to ~/.zshrc before compinit
+fpath=(/usr/local/simrv/share/zsh/site-functions $fpath)
+
+# Fish, for future shells
+set -Ua fish_complete_path /usr/local/simrv/share/fish/vendor_completions.d
+```
+
 Build `rv32-release` only when a native RV32 strict-width implementation is required for
 verification. Normal users should use the RV64-capable build.
 
