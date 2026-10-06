@@ -158,6 +158,16 @@ auto MmioRouter::route_request(const TlChannelA& req, TlChannelD& resp) -> bool 
     if (device == nullptr) {
         resp.denied = true;
         ++bus_error_count_;
+        const bool is_read = req.opcode == TlOpcodeA::Get;
+        const bool is_write =
+            req.opcode == TlOpcodeA::PutFullData || req.opcode == TlOpcodeA::PutPartialData;
+        if (tracer_ != nullptr && (is_read || is_write) &&
+            (tracer_->is_dlog_enabled() || tracer_->is_architecture_trace_enabled())) {
+            const auto width = static_cast<uint32_t>(1u << (req.size & 0x3u));
+            const Word data = is_write ? static_cast<Word>(req.data) : Word{0};
+            tracer_->log_mmio(req.hart, "unmapped", req.address.raw(), width, data, is_write, true,
+                              false);
+        }
         return false;
     }
 
@@ -165,23 +175,34 @@ auto MmioRouter::route_request(const TlChannelA& req, TlChannelD& resp) -> bool 
     const bool is_write =
         (req.opcode == TlOpcodeA::PutFullData || req.opcode == TlOpcodeA::PutPartialData);
 
+    const Address request_bytes = static_cast<Address>(1u << (req.size & 0x3u));
+    const auto trace_access = [&](bool faulted) {
+        if (tracer_ == nullptr ||
+            (!tracer_->is_dlog_enabled() && !tracer_->is_architecture_trace_enabled()))
+            return;
+        const Word data = is_write ? static_cast<Word>(req.data) : static_cast<Word>(resp.data);
+        tracer_->log_mmio(req.hart, device->name(), req.address.raw(),
+                          static_cast<uint32_t>(request_bytes), data, is_write, faulted);
+    };
+
     if (!is_read && !is_write) {
         resp.denied = true;
         ++bus_error_count_;
         return true;
     }
 
-    const Address request_bytes = static_cast<Address>(1u << (req.size & 0x3u));
     if (request_bytes - 1 > std::numeric_limits<Address>::max() - req.address.raw() ||
         !device->contains((req.address + request_bytes - 1).raw())) {
         resp.denied = true;
         ++bus_error_count_;
+        trace_access(true);
         return true;
     }
 
     if (is_write && device->is_read_only()) {
         resp.denied = true;
         ++bus_error_count_;
+        trace_access(true);
         return true;
     }
 
@@ -190,6 +211,7 @@ auto MmioRouter::route_request(const TlChannelA& req, TlChannelD& resp) -> bool 
     if (align > 1 && (req.address % align) != 0) {
         resp.denied = true;
         ++bus_error_count_;
+        trace_access(true);
         return true;
     }
 
@@ -202,14 +224,12 @@ auto MmioRouter::route_request(const TlChannelA& req, TlChannelD& resp) -> bool 
         }
         if (resp.failed()) {
             ++bus_error_count_;
-        } else if (tracer_ != nullptr && tracer_->is_dlog_enabled()) {
-            const Word data = is_write ? static_cast<Word>(req.data) : static_cast<Word>(resp.data);
-            tracer_->log_mmio(device->name(), req.address.raw(),
-                              static_cast<uint32_t>(request_bytes), data, is_write);
         }
+        trace_access(resp.failed());
     } else {
         resp.denied = true;
         ++bus_error_count_;
+        trace_access(true);
     }
 
     return true;

@@ -111,7 +111,7 @@ enum class Funct3 : uint8_t {
 
 /**
  * @enum IsaExtension
- * @brief Identifies standard RISC-V extensions mapped to their bit positions in the MISA CSR.
+ * @brief Identifies MISA extension bits, including X for non-standard extensions present.
  */
 enum class IsaExtension : uint8_t {
     E = 4,   ///< Reduced 32-bit integer register-set extension
@@ -125,6 +125,7 @@ enum class IsaExtension : uint8_t {
     S = 18,  ///< Supervisor Privilege Level support
     U = 20,  ///< User Privilege Level support
     V = 21,  ///< Vector Extension
+    X = 23,  ///< Non-standard extensions present (e.g. SimRV Xsimrvtrace)
 };
 
 /**
@@ -141,7 +142,8 @@ enum class IsaPreset : uint8_t {
     IM,    ///< Integer, Multiply/Divide
     IMA,   ///< Integer, Multiply/Divide, Atomic, Supervisor, User
     IMAC,  ///< Integer, Multiply/Divide, Atomic, and Compressed
-    GC,    ///< General Purpose (IMAFD) + Compressed (equivalent to RV32GC or RV64GC)
+    G,     ///< General-purpose IMAFD plus the implied Zicsr and Zifencei extensions
+    GC,    ///< G plus the separate C (Compressed) extension
     GCBV,  ///< SimRV target preset: GC plus ratified B and V extension bits
 };
 

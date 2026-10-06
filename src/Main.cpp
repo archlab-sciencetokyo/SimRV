@@ -9,14 +9,19 @@
 #include <chrono>
 #include <csignal>
 #include <cstdlib>
+#include <ctime>
+#include <filesystem>
 #include <fstream>
 #include <iostream>
 #include <memory>
 #include <optional>
 #include <print>
 #include <span>
+#include <string>
 #include <string_view>
 #include <thread>
+#include <utility>
+#include <vector>
 
 #include "simrv/Define.hpp"
 #include "simrv/core/BuildInfo.hpp"
@@ -38,10 +43,46 @@ namespace {
 
 auto lifecycle_event_name(simrv::core::LifecycleEventKind kind) -> std::string_view {
     switch (kind) {
-        case simrv::core::LifecycleEventKind::Started: return "started";
-        case simrv::core::LifecycleEventKind::Stopped: return "stopped";
-        case simrv::core::LifecycleEventKind::RebootRequested: return "reboot_requested";
-        case simrv::core::LifecycleEventKind::ExitRequested: return "exit_requested";
+        case simrv::core::LifecycleEventKind::Initialized:
+            return "initialized";
+        case simrv::core::LifecycleEventKind::Started:
+            return "started";
+        case simrv::core::LifecycleEventKind::Running:
+            return "running";
+        case simrv::core::LifecycleEventKind::Stopped:
+            return "stopped";
+        case simrv::core::LifecycleEventKind::Completed:
+            return "completed";
+        case simrv::core::LifecycleEventKind::Failed:
+            return "failed";
+        case simrv::core::LifecycleEventKind::RebootRequested:
+            return "reboot_requested";
+        case simrv::core::LifecycleEventKind::ExitRequested:
+            return "exit_requested";
+    }
+    return "unknown";
+}
+
+auto lifecycle_timestamp() -> std::string {
+    const auto now = std::chrono::system_clock::now();
+    const auto millis =
+        std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()) % 1000;
+    const auto time = std::chrono::system_clock::to_time_t(now);
+    std::tm utc{};
+    gmtime_r(&time, &utc);
+    return std::format("{:04}-{:02}-{:02}T{:02}:{:02}:{:02}.{:03}Z", utc.tm_year + 1900,
+                       utc.tm_mon + 1, utc.tm_mday, utc.tm_hour, utc.tm_min, utc.tm_sec,
+                       millis.count());
+}
+
+auto privilege_mode(simrv::PrivilegeLevel privilege) -> std::string_view {
+    switch (privilege) {
+        case simrv::PrivilegeLevel::User:
+            return "U";
+        case simrv::PrivilegeLevel::Supervisor:
+            return "S";
+        case simrv::PrivilegeLevel::Machine:
+            return "M";
     }
     return "unknown";
 }
@@ -49,19 +90,17 @@ auto lifecycle_event_name(simrv::core::LifecycleEventKind kind) -> std::string_v
 auto write_lifecycle_event(std::ofstream& out, const simrv::core::Machine& machine,
                            simrv::core::LifecycleEventKind kind, int status = 0) -> void {
     if (!out) return;
-    const auto timestamp = std::chrono::duration_cast<std::chrono::milliseconds>(
-                               std::chrono::system_clock::now().time_since_epoch())
-                               .count();
     const auto& hart = machine.primary_hart();
-    out << "{\"schema_version\":1,\"event\":\"" << lifecycle_event_name(kind)
-        << "\",\"timestamp_ms\":" << timestamp << ",\"status\":\""
-        << (status == 0 ? "ok" : "failed") << "\",\"stop_reason\":\""
-        << simrv::core::Machine::stop_reason_name(machine.stop_reason())
-        << "\",\"hart\":0,\"pc\":" << hart.state().pc
-        << ",\"retired_instructions\":" << hart.e_icount
+    out << "{\"schema_version\":2,\"event\":\"" << lifecycle_event_name(kind)
+        << "\",\"timestamp\":\"" << lifecycle_timestamp()
+        << "\",\"cycle\":" << hart.clint_mmio.mcycle << ",\"hart\":0,\"pc\":\"0x" << std::hex
+        << hart.state().pc << std::dec << "\",\"mode\":\"" << privilege_mode(hart.state().priv)
+        << "\",\"payload\":{\"status\":\"" << (status == 0 ? "ok" : "failed")
+        << "\",\"stop_reason\":\"" << simrv::core::Machine::stop_reason_name(machine.stop_reason())
+        << "\",\"retired_instructions\":" << hart.e_icount
         << ",\"cycles\":" << hart.clint_mmio.mcycle;
     if (status != 0) out << ",\"exit_status\":" << status;
-    out << "}\n";
+    out << "}}\n";
     out.flush();
 }
 
@@ -100,7 +139,8 @@ auto print_doctor() -> int {
     std::println("  mouse protocol   : SGR-pixel mode requested by interactive TUI");
     std::println("  attach transport : local framed Unix socket, bounded and versioned");
     std::println(
-        "  package runtime  : use the static musl archive outside the tested native package matrix");
+        "  package runtime  : use the static musl archive outside the tested native package "
+        "matrix");
     return 0;
 }
 
@@ -133,6 +173,9 @@ auto main(int argc, char* argv[]) -> int {  // NOLINT(bugprone-exception-escape)
                     skip_banner = true;
                 }
             }
+        } else if (arg == "--log-format" && i + 1 < argc) {
+            if (const auto format = simrv::log::parse_format(argv[i + 1]))
+                simrv::log::set_format(*format);
         }
     }
 
@@ -304,6 +347,7 @@ auto main(int argc, char* argv[]) -> int {  // NOLINT(bugprone-exception-escape)
         if (parsed->options.log_level.has_value()) {
             simrv::log::set_level(*parsed->options.log_level);
         }
+        simrv::log::set_format(parsed->options.log_format);
 
         if (!parsed->options.fn_log.empty() && !simrv::log::set_log_file(parsed->options.fn_log)) {
             option_error("cannot open log file: " + parsed->options.fn_log, 0);
@@ -319,6 +363,10 @@ auto main(int argc, char* argv[]) -> int {  // NOLINT(bugprone-exception-escape)
             option_error(valid.error(), 0);
         }
         auto sim_machine = std::make_unique<simrv::core::Machine>(std::move(machine_config));
+        std::vector<std::string> command_line;
+        command_line.reserve(static_cast<size_t>(argc));
+        for (int arg = 0; arg < argc; ++arg) command_line.emplace_back(argv[arg]);
+        sim_machine->trace().set_command_line(std::move(command_line));
 
         if (staged_runtime_profile.has_value()) {
             sim_machine->runtime_profile = *staged_runtime_profile;
@@ -330,38 +378,49 @@ auto main(int argc, char* argv[]) -> int {  // NOLINT(bugprone-exception-escape)
         }
 
         sim_machine->set_persistent_control(parsed->options.server_mode);
-        if (!parsed->options.fn_events.empty() && !event_stream_opened) {
-            event_stream.open(parsed->options.fn_events, std::ios::trunc);
+        std::string lifecycle_path = parsed->options.fn_events;
+        if (lifecycle_path.empty() && !parsed->options.fn_archtrace.empty()) {
+            const std::filesystem::path retire_path(parsed->options.fn_archtrace);
+            const auto directory = retire_path.has_parent_path() ? retire_path.parent_path()
+                                                                 : std::filesystem::path(".");
+            lifecycle_path = (directory / "events.jsonl").string();
+        }
+        if (!lifecycle_path.empty() && !event_stream_opened) {
+            event_stream.open(lifecycle_path, std::ios::trunc);
             event_stream_opened = true;
             if (!event_stream) {
-                simrv::log::error("Cannot open lifecycle event stream {}",
-                                  parsed->options.fn_events);
-                return 1;
-            }
-        }
-
-        const auto init_result = sim_machine->initialize();
-        if (!init_result) {
-            simrv::log::error("Machine initialization failed: {}", init_result.error());
-            if (event_stream) {
-                event_stream << "{\"schema_version\":1,\"event\":\"error\",\"status\":\"failed\",\"error\":\"initialization failed\"}\n";
-                event_stream.flush();
-            }
-            return 1;
-        }
-        if (!parsed->options.fn_load_checkpoint.empty()) {
-            const auto restored = sim_machine->load_checkpoint(parsed->options.fn_load_checkpoint);
-            if (!restored) {
-                simrv::log::error("Checkpoint restore failed: {}", restored.error());
+                simrv::log::error("Cannot open lifecycle event stream {}", lifecycle_path);
                 return 1;
             }
         }
 
         if (event_stream) {
             (void)sim_machine->add_lifecycle_observer(
-                [&event_stream, machine = sim_machine.get()](const simrv::core::LifecycleEvent& event) {
+                [&event_stream,
+                 machine = sim_machine.get()](const simrv::core::LifecycleEvent& event) {
                     write_lifecycle_event(event_stream, *machine, event.kind, event.exit_status);
                 });
+        }
+
+        const auto init_result = sim_machine->initialize();
+        if (!init_result) {
+            simrv::log::error("Machine initialization failed: {}", init_result.error());
+            if (event_stream) {
+                event_stream << "{\"schema_version\":2,\"event\":\"failed\",\"timestamp\":\""
+                             << lifecycle_timestamp()
+                             << "\",\"cycle\":0,\"payload\":{\"status\":\"failed\",\"error\":"
+                                "\"initialization failed\"}}\n";
+                event_stream.flush();
+            }
+            return 1;
+        }
+        sim_machine->trace().refresh_runtime_trace_metadata();
+        if (!parsed->options.fn_load_checkpoint.empty()) {
+            const auto restored = sim_machine->load_checkpoint(parsed->options.fn_load_checkpoint);
+            if (!restored) {
+                simrv::log::error("Checkpoint restore failed: {}", restored.error());
+                return 1;
+            }
         }
 
         sim_machine->set_start_time(std::chrono::steady_clock::now());

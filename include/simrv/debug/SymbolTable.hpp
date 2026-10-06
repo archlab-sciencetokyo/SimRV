@@ -25,6 +25,17 @@ struct SymbolLookupResult {
     [[nodiscard]] constexpr auto is_exact() const noexcept -> bool { return offset == 0; }
 };
 
+struct FunctionLookupResult {
+    std::string_view name;
+    Address base_addr = 0;
+    Address offset = 0;
+};
+
+struct ElfFunctionSymbol {
+    std::string name;
+    Address size = 0;
+};
+
 class SymbolTable {
    public:
     SymbolTable() = default;
@@ -46,6 +57,8 @@ class SymbolTable {
      * @return SymbolLookupResult if found within displacement threshold, std::nullopt otherwise.
      */
     [[nodiscard]] auto lookup_symbol(Address addr) const -> std::optional<SymbolLookupResult>;
+    /** Look up the containing ELF function without guessing from nearby data/label symbols. */
+    [[nodiscard]] auto lookup_function(Address addr) const -> std::optional<FunctionLookupResult>;
 
     /**
      * @brief Look up a symbol name for a given address.
@@ -59,6 +72,7 @@ class SymbolTable {
 
    private:
     std::map<Address, std::string> symbols_;
+    std::map<Address, ElfFunctionSymbol> functions_;
     std::optional<Address> entry_point_;
 };
 

@@ -13,6 +13,14 @@ project(
   HOMEPAGE_URL "https://github.com/archlab-sciencetokyo/SimRV"
   LANGUAGES C CXX)
 
+# Keep source installs self-contained by default. Native distro packages set
+# CPACK_PACKAGING_INSTALL_PREFIX independently, and callers can still override
+# this with -DCMAKE_INSTALL_PREFIX or cmake --install --prefix.
+if(CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT)
+  set(CMAKE_INSTALL_PREFIX "/usr/local/simrv" CACHE PATH
+      "Install prefix for a source-built SimRV distribution" FORCE)
+endif()
+
 include(CTest)
 option(SIMRV_ENABLE_TOOLING
        "Enable release, documentation, and formatting helper targets" OFF)
@@ -457,6 +465,10 @@ if(BUILD_TESTING)
     cli-events-reject-stdout
     PROPERTIES PASS_REGULAR_EXPRESSION "stdout is reserved for guest UART"
                LABELS "gate;regress;cli")
+  add_test(NAME trace-lifecycle
+           COMMAND ${PYTHON_BIN} ${CMAKE_SOURCE_DIR}/tests/TraceLifecycleTests.py
+                   $<TARGET_FILE:SimRV>)
+  set_tests_properties(trace-lifecycle PROPERTIES LABELS "gate;regress;trace")
 
   add_test(NAME cli-license COMMAND $<TARGET_FILE:SimRV> --license)
   set_tests_properties(
@@ -685,9 +697,13 @@ if(BUILD_TESTING)
     set(RISCV_TESTS_DIR "${DEFAULT_RISCV_TESTS_DIR}")
   endif()
 
+  cmake_path(ABSOLUTE_PATH RISCV_TESTS_DIR BASE_DIRECTORY "${CMAKE_SOURCE_DIR}" NORMALIZE)
+
   if(EXISTS "${RISCV_TESTS_DIR}/share/riscv-tests")
     set(RISCV_TESTS_DIR "${RISCV_TESTS_DIR}/share/riscv-tests")
   endif()
+
+  message(STATUS "RISC-V tests and benchmarks: ${RISCV_TESTS_DIR}")
 
   set(ISA_DIR "${RISCV_TESTS_DIR}/isa")
 
@@ -947,7 +963,8 @@ if(BUILD_TESTING)
 
   add_test(
     NAME benchmark
-    COMMAND ${CMAKE_COMMAND} -E env SIMRV_BIN=$<TARGET_FILE:SimRV>
+    COMMAND ${CMAKE_COMMAND} -E env RISCV_TESTS_DIR=${RISCV_TESTS_DIR}
+            SIMRV_BIN=$<TARGET_FILE:SimRV>
             SIMRV_BENCH_ITERS=5 bash ${CMAKE_SOURCE_DIR}/scripts/benchmark.sh)
   set_tests_properties(
     benchmark PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR} LABELS
@@ -1063,6 +1080,10 @@ install(
   COMPONENT Development
   FILES_MATCHING
   PATTERN "*.hpp")
+install(
+  FILES include/simrv/trace.h include/simrv/trace.S
+  DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/simrv
+  COMPONENT Development)
 install(
   DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/generated/"
   DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}

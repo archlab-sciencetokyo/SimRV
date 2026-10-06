@@ -116,7 +116,7 @@ constexpr auto misa_base_bits() -> CSRValue {
 
 /**
  * @brief Decodes the extension set mask matching a specified ISA preset.
- * @param preset The preset definition (I, IMAC, GC, or GCBV).
+ * @param preset The named ISA preset, including G/GC and the SimRV GCBV target preset.
  * @return CSRValue bitmask containing the preset's extensions.
  */
 constexpr auto isa_preset_bits(IsaPreset preset) -> CSRValue {
@@ -139,11 +139,13 @@ constexpr auto isa_preset_bits(IsaPreset preset) -> CSRValue {
         case IsaPreset::IMAC:
             return misa_extension_bit(IsaExtension::I) | misa_extension_bit(IsaExtension::M) |
                    misa_extension_bit(IsaExtension::A) | misa_extension_bit(IsaExtension::C);
-        case IsaPreset::GC:
+        case IsaPreset::G:
             return misa_extension_bit(IsaExtension::I) | misa_extension_bit(IsaExtension::M) |
                    misa_extension_bit(IsaExtension::A) | misa_extension_bit(IsaExtension::F) |
-                   misa_extension_bit(IsaExtension::D) | misa_extension_bit(IsaExtension::C) |
-                   misa_extension_bit(IsaExtension::S) | misa_extension_bit(IsaExtension::U);
+                   misa_extension_bit(IsaExtension::D) | misa_extension_bit(IsaExtension::S) |
+                   misa_extension_bit(IsaExtension::U);
+        case IsaPreset::GC:
+            return isa_preset_bits(IsaPreset::G) | misa_extension_bit(IsaExtension::C);
         case IsaPreset::GCBV:
             return misa_base_bits();
         default:
@@ -445,8 +447,8 @@ constexpr auto instruction_enabled_by_misa(CSRValue misa, OperationId op_id,
     // when the reduced-register base is active; E and I are mutually exclusive in MISA.
     if (misa_has_extension(misa, IsaExtension::E) &&
         (required & misa_extension_bit(IsaExtension::I)) != 0) {
-        required = (required & ~misa_extension_bit(IsaExtension::I)) |
-                   misa_extension_bit(IsaExtension::E);
+        required =
+            (required & ~misa_extension_bit(IsaExtension::I)) | misa_extension_bit(IsaExtension::E);
     }
     return required != 0 && (misa & required) == required;
 }
@@ -458,8 +460,8 @@ constexpr auto rv32e_register_is_valid(RegId reg) noexcept -> bool {
 
 /** Check only the integer register operands used by a decoded operation. */
 constexpr auto rv32e_register_operands_valid(bool writes_int, RegId rd, bool reads_rs1_int,
-                                             RegId rs1, bool reads_rs2_int,
-                                             RegId rs2) noexcept -> bool {
+                                             RegId rs1, bool reads_rs2_int, RegId rs2) noexcept
+    -> bool {
     return (!writes_int || rv32e_register_is_valid(rd)) &&
            (!reads_rs1_int || rv32e_register_is_valid(rs1)) &&
            (!reads_rs2_int || rv32e_register_is_valid(rs2));

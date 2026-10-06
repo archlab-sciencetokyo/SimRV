@@ -13,6 +13,7 @@
 #include "simrv/Define.hpp"
 #include "simrv/core/Logger.hpp"
 #include "simrv/core/Machine.hpp"
+#include "simrv/core/Tracer.hpp"
 #include "simrv/memory/MemoryUtil.hpp"
 #include "simrv/xlen/Types.hpp"
 
@@ -39,7 +40,8 @@ TileLinkBus::TileLinkBus(simrv::core::Machine& machine)
     : machine_(machine), coherence_hub_(machine) {}
 
 void TileLinkBus::record_transaction(TileLinkChannel ch, std::string_view opcode, TlSourceId source,
-                                     TlSinkId sink, Address address, std::string_view detail) {
+                                     TlSinkId sink, Address address, std::string_view detail,
+                                     const simrv::core::BusTraceContext* trace_context) {
     if (transaction_history_.size() >= kMaxTransactionHistory) {
         transaction_history_.pop_front();
     }
@@ -52,6 +54,11 @@ void TileLinkBus::record_transaction(TileLinkChannel ch, std::string_view opcode
         .address = address,
         .detail = detail,
     });
+    if (machine_.trace().is_architecture_trace_enabled()) {
+        machine_.trace().log_bus_transaction(
+            cycle_, to_char(ch), opcode, source, sink, address, detail,
+            trace_context != nullptr ? *trace_context : simrv::core::BusTraceContext{});
+    }
 }
 
 void TileLinkBus::add_node(TileLinkNode* node) { router_.register_device(node); }
@@ -74,9 +81,33 @@ auto TileLinkBus::send_request(const TlChannelA& req) -> bool {
         simrv::log::warn("TileLink-C request rejected: {}", valid.error());
         return false;
     }
-    record_transaction(TileLinkChannel::A, to_string(req.opcode), req.source, 0, req.address.raw(),
-                       to_string(req.grow));
     const bool data_port = (req.source & 1u) == static_cast<TlSourceId>(TlPort::Data);
+    simrv::core::BusTraceContext trace_context;
+    const bool capture_trace_context = machine_.trace().is_architecture_trace_enabled() &&
+                                       machine_.configuration().debug.trace_level >= 4;
+    if (capture_trace_context) {
+        const auto* target = router_.resolve_device(req.address.raw());
+        trace_context = {
+            .sequence = next_sequence_,
+            .request_cycle = cycle_,
+            .completion_cycle = std::nullopt,
+            .latency_cycles = std::nullopt,
+            .hart = req.hart.val,
+            .transfer_size = req.size,
+            .burst_length = static_cast<uint8_t>(
+                req.size > kTlBeatSize ? (1u << (req.size - kTlBeatSize)) : 1u),
+            .data = req.data,
+            .byte_enable = req.mask,
+            .denied = std::nullopt,
+            .corrupt = std::nullopt,
+            .master = std::format("hart-{}-{}", req.hart.val, data_port ? "data" : "instruction"),
+            .target = target != nullptr                                        ? target->name()
+                      : machine_.memory_geometry().contains(req.address.raw()) ? "ram"
+                                                                               : "unmapped",
+        };
+    }
+    record_transaction(TileLinkChannel::A, to_string(req.opcode), req.source, 0, req.address.raw(),
+                       to_string(req.grow), capture_trace_context ? &trace_context : nullptr);
     req_queue_.push_back(
         TimedRequest{.payload = req,
                      .submitted_cycle = cycle_,
@@ -249,8 +280,32 @@ void TileLinkBus::process_request(const TimedRequest& request) {
             .beat_count = beat_count,
         });
     }
+    simrv::core::BusTraceContext response_context;
+    const bool capture_trace_context = machine_.trace().is_architecture_trace_enabled() &&
+                                       machine_.configuration().debug.trace_level >= 4;
+    if (capture_trace_context) {
+        const auto* target = router_.resolve_device(req.address.raw());
+        response_context = {
+            .sequence = request.sequence,
+            .request_cycle = request.submitted_cycle,
+            .completion_cycle = cycle_ + response_latency - 1,
+            .latency_cycles = cycle_ + response_latency - 1 - request.submitted_cycle,
+            .hart = req.hart.val,
+            .transfer_size = req.size,
+            .burst_length = beat_count,
+            .data = resp.data,
+            .byte_enable = req.mask,
+            .denied = resp.denied,
+            .corrupt = resp.corrupt,
+            .master = std::format("hart-{}-{}", req.hart.val, data_port ? "data" : "instruction"),
+            .target = target != nullptr                                        ? target->name()
+                      : machine_.memory_geometry().contains(req.address.raw()) ? "ram"
+                                                                               : "unmapped",
+        };
+    }
     record_transaction(TileLinkChannel::D, to_string(resp.opcode), resp.source, resp.sink,
-                       req.address.raw(), resp.failed() ? "Denied" : to_string(resp.cap));
+                       req.address.raw(), resp.failed() ? "Denied" : to_string(resp.cap),
+                       capture_trace_context ? &response_context : nullptr);
 }
 
 auto TileLinkBus::try_get_timed_response(TlSourceId source_id, TimedResponse& resp) -> bool {

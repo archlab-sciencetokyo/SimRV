@@ -19,7 +19,8 @@
 
 namespace simrv::core {
 class Machine;
-}
+struct BusTraceContext;
+}  // namespace simrv::core
 
 namespace simrv::memory {
 
@@ -105,7 +106,8 @@ class TileLinkBus : public Bus {
     }
 
     void record_transaction(TileLinkChannel ch, std::string_view opcode, TlSourceId source,
-                            TlSinkId sink, Address address, std::string_view detail = {});
+                            TlSinkId sink, Address address, std::string_view detail = {},
+                            const simrv::core::BusTraceContext* trace_context = nullptr);
     [[nodiscard]] static constexpr auto ram_capabilities() -> TlManagerCapabilities {
         return kCoherentRamCapabilities;
     }

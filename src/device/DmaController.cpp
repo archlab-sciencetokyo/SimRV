@@ -116,7 +116,8 @@ void DmaController::start_transfer() {
         busy_ = true;
         const auto current_cycle = machine_->memory().system_bus().cycle();
         machine_->dma_engine().schedule_transfer(
-            count, current_cycle, [this, src, dst, count]() { execute_transfer(src, dst, count); });
+            count, current_cycle, [this, src, dst, count]() { execute_transfer(src, dst, count); },
+            "dma-controller");
     } else {
         execute_transfer(src, dst, count);
     }

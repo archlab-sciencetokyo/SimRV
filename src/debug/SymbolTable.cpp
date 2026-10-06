@@ -22,6 +22,7 @@ namespace {
 
 template <typename Ehdr, typename Shdr, typename Sym, typename StTypeFunc>
 auto parse_elf_symbols(std::ifstream& fs, std::map<Address, std::string>& out_symbols,
+                       std::map<Address, ElfFunctionSymbol>& out_functions,
                        std::optional<Address>& out_entry, StTypeFunc get_type, SymbolLoadMode mode)
     -> bool {
     Ehdr ehdr{};
@@ -70,6 +71,10 @@ auto parse_elf_symbols(std::ifstream& fs, std::map<Address, std::string>& out_sy
                 if (!name.empty() && name.find('$') == std::string::npos &&
                     (mode == SymbolLoadMode::FullDebug || runtime_essential)) {
                     out_symbols[sym.st_value] = name;
+                    if (type == STT_FUNC) {
+                        out_functions[sym.st_value] = ElfFunctionSymbol{
+                            .name = std::move(name), .size = static_cast<Address>(sym.st_size)};
+                    }
                 }
             }
         }
@@ -87,6 +92,7 @@ auto SymbolTable::load_from_elf(const std::string& elf_path, bool clear_existing
                                 SymbolLoadMode mode) -> bool {
     if (clear_existing) {
         symbols_.clear();
+        functions_.clear();
         entry_point_.reset();
     }
     std::string path_to_load = elf_path;
@@ -147,12 +153,14 @@ auto SymbolTable::load_from_elf(const std::string& elf_path, bool clear_existing
     std::optional<Address> ep;
     if (elf_class == ELFCLASS32) {
         if (!parse_elf_symbols<Elf32_Ehdr, Elf32_Shdr, Elf32_Sym>(
-                fs, symbols_, ep, [](auto info) { return ELF32_ST_TYPE(info); }, mode)) {
+                fs, symbols_, functions_, ep, [](auto info) { return ELF32_ST_TYPE(info); },
+                mode)) {
             return false;
         }
     } else {
         if (!parse_elf_symbols<Elf64_Ehdr, Elf64_Shdr, Elf64_Sym>(
-                fs, symbols_, ep, [](auto info) { return ELF64_ST_TYPE(info); }, mode)) {
+                fs, symbols_, functions_, ep, [](auto info) { return ELF64_ST_TYPE(info); },
+                mode)) {
             return false;
         }
     }
@@ -176,12 +184,12 @@ auto SymbolTable::load_from_elf(const std::string& elf_path, bool clear_existing
                         std::optional<Address> kep;
                         if (k_class == ELFCLASS32) {
                             (void)parse_elf_symbols<Elf32_Ehdr, Elf32_Shdr, Elf32_Sym>(
-                                kfs, symbols_, kep, [](auto info) { return ELF32_ST_TYPE(info); },
-                                mode);
+                                kfs, symbols_, functions_, kep,
+                                [](auto info) { return ELF32_ST_TYPE(info); }, mode);
                         } else if (k_class == ELFCLASS64) {
                             (void)parse_elf_symbols<Elf64_Ehdr, Elf64_Shdr, Elf64_Sym>(
-                                kfs, symbols_, kep, [](auto info) { return ELF64_ST_TYPE(info); },
-                                mode);
+                                kfs, symbols_, functions_, kep,
+                                [](auto info) { return ELF64_ST_TYPE(info); }, mode);
                         }
                     }
                 }
@@ -220,6 +228,22 @@ auto SymbolTable::lookup_symbol(Address addr) const -> std::optional<SymbolLooku
         .base_addr = sym_addr,
         .offset = offset,
     };
+}
+
+auto SymbolTable::lookup_function(Address addr) const -> std::optional<FunctionLookupResult> {
+    if (functions_.empty()) return std::nullopt;
+    auto it = functions_.upper_bound(addr);
+    if (it == functions_.begin()) return std::nullopt;
+    --it;
+    const Address offset = addr - it->first;
+    const auto next = std::next(it);
+    const Address next_function_start = next == functions_.end() ? 0 : next->first;
+    if (it->second.size != 0 && offset >= it->second.size) return std::nullopt;
+    if (it->second.size == 0 && (next == functions_.end() || addr >= next_function_start) &&
+        offset != 0)
+        return std::nullopt;
+    if (next != functions_.end() && addr >= next_function_start) return std::nullopt;
+    return FunctionLookupResult{.name = it->second.name, .base_addr = it->first, .offset = offset};
 }
 
 auto SymbolTable::lookup(Address addr) const -> std::string {

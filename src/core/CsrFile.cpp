@@ -4,9 +4,14 @@
  */
 #include "simrv/core/CsrFile.hpp"
 
+#include <array>
+#include <string_view>
+#include <utility>
+
 #include "simrv/Define.hpp"
 #include "simrv/core/Cpu.hpp"
 #include "simrv/core/Machine.hpp"
+#include "simrv/core/Tracer.hpp"
 #include "simrv/xlen/Constants.hpp"
 #include "simrv/xlen/Types.hpp"
 
@@ -120,6 +125,8 @@ auto CsrFile::read(CSRAddress addr) const -> std::expected<CSRValue, ExceptionCo
 
     CSRValue rcsr = 0;
     switch (addr) {
+        case 0x800:  // SimRV Xsimrvtrace marker CSR in the custom U-level CSR window.
+            return CSRValue{0};
         case csr_addr(Csr::Fflags):
             return require_fp().transform([this]() { return cpu_.state().fcsr & kFflagsMask; });
         case csr_addr(Csr::Frm):
@@ -307,6 +314,23 @@ auto CsrFile::write(CSRAddress addr, CSRValue wdata)
     -> std::expected<void, ExceptionCode> {  // NOLINT(bugprone-easily-swappable-parameters)
     const bool has_s = isa::misa_has_extension(cpu_.state().misa, isa::IsaExtension::S);
     const CSRValue interrupt_mask = interrupt_implemented_mask(has_s);
+    const auto log_pending_changes = [this](CSRValue before, std::string_view source) {
+        if (cpu_.machine_ == nullptr) return;
+        constexpr std::array interrupt_bits = {
+            std::pair{MipBit::Ssip, TrapCause{1}}, std::pair{MipBit::Msip, TrapCause{3}},
+            std::pair{MipBit::Stip, TrapCause{5}}, std::pair{MipBit::Mtip, TrapCause{7}},
+            std::pair{MipBit::Seip, TrapCause{9}}, std::pair{MipBit::Meip, TrapCause{11}},
+        };
+        for (const auto& [bit, code] : interrupt_bits) {
+            const auto mask = enum_mask(bit);
+            const bool was_pending = (before & mask) != 0;
+            const bool is_pending = (cpu_.state().mip & mask) != 0;
+            if (was_pending != is_pending) {
+                cpu_.machine_->trace().log_interrupt_signal(cpu_, kInterruptCauseBit | code,
+                                                            is_pending, source);
+            }
+        }
+    };
 
     auto require_fp = [this]() -> std::expected<void, ExceptionCode> {
         if (!fp_accessible(cpu_.state())) {
@@ -328,6 +352,11 @@ auto CsrFile::write(CSRAddress addr, CSRValue wdata)
     };
 
     switch (addr) {
+        case 0x800:  // Custom CSR is architecturally inert unless tracing is enabled.
+            if (cpu_.machine_ != nullptr) {
+                cpu_.machine_->trace().log_marker_csr_write(cpu_, wdata);
+            }
+            break;
         case csr_addr(Csr::Mvendorid):
         case csr_addr(Csr::Marchid):
         case csr_addr(Csr::Mimpid):
@@ -475,8 +504,10 @@ auto CsrFile::write(CSRAddress addr, CSRValue wdata)
                 (cpu_.state().mie & ~cpu_.state().mideleg) | (wdata & cpu_.state().mideleg);
             break;
         case csr_addr(Csr::Sip): {
+            const CSRValue pending_before = cpu_.state().mip;
             const CSRValue mask = enum_mask(MipBit::Ssip) & cpu_.state().mideleg;
             cpu_.state().mip = (cpu_.state().mip & ~mask) | (wdata & mask);
+            log_pending_changes(pending_before, "sip_csr");
             break;
         }
         case csr_addr(Csr::Medeleg):
@@ -489,6 +520,7 @@ auto CsrFile::write(CSRAddress addr, CSRValue wdata)
             cpu_.state().mie = wdata & interrupt_mask;
             break;
         case csr_addr(Csr::Mip): {
+            const CSRValue pending_before = cpu_.state().mip;
             const CSRValue writable = mip_writable_mask(has_s);
             const CSRValue sourced = enum_mask(MipBit::Seip) | enum_mask(MipBit::Stip);
             const CSRValue ordinary = writable & ~sourced;
@@ -496,6 +528,7 @@ auto CsrFile::write(CSRAddress addr, CSRValue wdata)
             cpu_.state().seip_software = (wdata & writable & enum_mask(MipBit::Seip)) != 0;
             cpu_.state().stip_software = (wdata & writable & enum_mask(MipBit::Stip)) != 0;
             cpu_.state().refresh_supervisor_pending();
+            log_pending_changes(pending_before, "mip_csr");
             break;
         }
 

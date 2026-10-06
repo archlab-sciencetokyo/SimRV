@@ -8,6 +8,7 @@
 #include <unistd.h>
 
 #include <atomic>
+#include <cctype>
 #include <chrono>
 #include <cstdio>
 #include <deque>
@@ -30,6 +31,7 @@ struct PendingLog {
 
 constexpr std::size_t kStartupLogLimit = 256;
 std::atomic<Level> g_log_level{Level::Info};
+std::atomic<Format> g_log_format{Format::Text};
 bool g_tui_mode = false;  // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 simrv::log::LogCallback
     g_tui_callback;  // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
@@ -39,6 +41,67 @@ std::mutex g_log_mutex;    // NOLINT(cppcoreguidelines-avoid-non-const-global-va
 std::ofstream g_log_file;  // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 std::string g_log_path;    // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 const auto g_log_epoch = std::chrono::steady_clock::now();
+
+auto json_escape(std::string_view value) -> std::string {
+    std::string escaped;
+    escaped.reserve(value.size() + 8);
+    for (const unsigned char ch : value) {
+        switch (ch) {
+            case '"':
+                escaped += "\\\"";
+                break;
+            case '\\':
+                escaped += "\\\\";
+                break;
+            case '\b':
+                escaped += "\\b";
+                break;
+            case '\f':
+                escaped += "\\f";
+                break;
+            case '\n':
+                escaped += "\\n";
+                break;
+            case '\r':
+                escaped += "\\r";
+                break;
+            case '\t':
+                escaped += "\\t";
+                break;
+            default:
+                if (ch < 0x20) {
+                    escaped += std::format("\\u{:04x}", static_cast<unsigned int>(ch));
+                } else {
+                    escaped += static_cast<char>(ch);
+                }
+        }
+    }
+    return escaped;
+}
+
+auto log_timestamp() -> std::string {
+    const auto now = std::chrono::system_clock::now();
+    const auto seconds = std::chrono::floor<std::chrono::seconds>(now);
+    const auto millis =
+        std::chrono::duration_cast<std::chrono::milliseconds>(now - seconds).count();
+    return std::format("{:%FT%T}.{:03}Z", seconds, millis);
+}
+
+auto json_record(Level level, const std::string& msg, bool pretty) -> std::string {
+    const auto timestamp = json_escape(log_timestamp());
+    const auto severity = json_escape(level_name(level));
+    const auto message = json_escape(msg);
+    if (pretty) {
+        return std::format(
+            "{{\n  \"schema_version\": 1,\n  \"timestamp\": \"{}\",\n"
+            "  \"level\": \"{}\",\n  \"message\": \"{}\"\n}}",
+            timestamp, severity, message);
+    }
+    return std::format(
+        "{{\"schema_version\":1,\"timestamp\":\"{}\",\"level\":\"{}\","
+        "\"message\":\"{}\"}}",
+        timestamp, severity, message);
+}
 
 auto tui_message(Level level, const std::string& message) -> std::string {
     switch (level) {
@@ -61,13 +124,19 @@ auto tui_message(Level level, const std::string& message) -> std::string {
 void emit_log(Level level, FILE* stream, std::string_view ansi_color, std::string_view plain_tag,
               const std::string& msg) {
     LogCallback callback;
+    const auto format = g_log_format.load(std::memory_order_relaxed);
     {
         std::scoped_lock lock(g_log_mutex);
         if (g_log_file.is_open()) {
-            const auto elapsed =
-                std::chrono::duration<double>(std::chrono::steady_clock::now() - g_log_epoch);
-            std::println(g_log_file, "[+{:012.6f}s] [{:5}] {}", elapsed.count(), level_name(level),
-                         msg);
+            if (format == Format::Text) {
+                const auto elapsed =
+                    std::chrono::duration<double>(std::chrono::steady_clock::now() - g_log_epoch);
+                std::println(g_log_file, "[+{:012.6f}s] [{:5}] {}", elapsed.count(),
+                             level_name(level), msg);
+            } else {
+                std::println(g_log_file, "{}",
+                             json_record(level, msg, format == Format::JsonPretty));
+            }
             g_log_file.flush();
         }
         if (g_tui_callback) {
@@ -78,7 +147,9 @@ void emit_log(Level level, FILE* stream, std::string_view ansi_color, std::strin
             return;
         } else {
             const int fd = (stream == stderr) ? STDERR_FILENO : STDOUT_FILENO;
-            if (simrv::util::is_terminal(fd)) {
+            if (format != Format::Text) {
+                std::println(stream, "{}", json_record(level, msg, format == Format::JsonPretty));
+            } else if (simrv::util::is_terminal(fd)) {
                 std::println(stream, "{}{}\033[0m", ansi_color, msg);
             } else {
                 std::println(stream, "[{}] {}", plain_tag, msg);
@@ -105,6 +176,19 @@ auto parse_level(std::string_view str) noexcept -> std::optional<Level> {
     if (str == "off" || str == "none" || str == "OFF" || str == "NONE") return Level::Off;
     return std::nullopt;
 }
+
+auto parse_format(std::string_view str) noexcept -> std::optional<Format> {
+    std::string value(str);
+    for (auto& ch : value) ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
+    if (value == "text") return Format::Text;
+    if (value == "json") return Format::Json;
+    if (value == "json-pretty") return Format::JsonPretty;
+    return std::nullopt;
+}
+
+void set_format(Format format) noexcept { g_log_format.store(format, std::memory_order_relaxed); }
+
+auto get_format() noexcept -> Format { return g_log_format.load(std::memory_order_relaxed); }
 
 auto level_name(Level level) noexcept -> std::string_view {
     switch (level) {

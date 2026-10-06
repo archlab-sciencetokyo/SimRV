@@ -2235,8 +2235,20 @@ void test_satp_modes() {
 void test_named_isa_presets() {
     const CSRValue im = simrv::isa::isa_preset_bits(simrv::isa::IsaPreset::IM);
     const CSRValue ima = simrv::isa::isa_preset_bits(simrv::isa::IsaPreset::IMA);
+    const CSRValue g = simrv::isa::isa_preset_bits(simrv::isa::IsaPreset::G);
     const CSRValue gc = simrv::isa::isa_preset_bits(simrv::isa::IsaPreset::GC);
     const CSRValue gcbv = simrv::isa::isa_preset_bits(simrv::isa::IsaPreset::GCBV);
+
+    expect(simrv::isa::misa_has_extension(g, simrv::isa::IsaExtension::I) &&
+               simrv::isa::misa_has_extension(g, simrv::isa::IsaExtension::M) &&
+               simrv::isa::misa_has_extension(g, simrv::isa::IsaExtension::A) &&
+               simrv::isa::misa_has_extension(g, simrv::isa::IsaExtension::F) &&
+               simrv::isa::misa_has_extension(g, simrv::isa::IsaExtension::D),
+           "the named G profile includes IMAFD");
+    expect(!simrv::isa::misa_has_extension(g, simrv::isa::IsaExtension::C),
+           "the named G profile does not imply the separate C extension");
+    expect((gc & ~simrv::isa::misa_extension_bit(simrv::isa::IsaExtension::C)) == g,
+           "the named GC profile is G plus only the C extension");
 
     expect(simrv::isa::misa_has_extension(im, simrv::isa::IsaExtension::I) &&
                simrv::isa::misa_has_extension(im, simrv::isa::IsaExtension::M),

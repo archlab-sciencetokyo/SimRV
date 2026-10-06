@@ -63,7 +63,7 @@ namespace simrv::debug {
         for (int i = 0; i < 26; ++i) {
             if ((misa & (static_cast<CSRValue>(1) << i)) == 0) continue;
             const char c = static_cast<char>('a' + i);
-            if (c == 'i' || c == 'm' || c == 'a' || c == 'f' || c == 'd') continue;
+            if (c == 'i' || c == 'm' || c == 'a' || c == 'f' || c == 'd' || c == 'x') continue;
             if (c == 's' || c == 'u') continue;
             s += c;
         }
@@ -71,7 +71,7 @@ namespace simrv::debug {
         for (int i = 0; i < 26; ++i) {
             if ((misa & (static_cast<CSRValue>(1) << i)) != 0) {
                 const char c = static_cast<char>('a' + i);
-                if (c == 's' || c == 'u') continue;
+                if (c == 's' || c == 'u' || c == 'x') continue;
                 s += c;
             }
         }

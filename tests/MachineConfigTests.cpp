@@ -1,9 +1,11 @@
+#include <chrono>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
 #include <vector>
 
+#include "simrv/core/Logger.hpp"
 #include "simrv/core/Machine.hpp"
 #include "simrv/core/MachineConfig.hpp"
 #include "simrv/core/Telemetry.hpp"
@@ -23,6 +25,53 @@ void expect(bool condition, const char* message) {
 }  // namespace
 
 auto main() -> int {
+    {
+        const auto check_isa = [](std::string isa) {
+            std::array<std::string, 5> args_str = {"SimRV", "--isa", std::move(isa), "-m",
+                                                   "guest.elf"};
+            std::array<char*, 5> args{};
+            for (size_t i = 0; i < args_str.size(); ++i) args[i] = args_str[i].data();
+            return simrv::util::parse_command_line(args);
+        };
+        const auto xlen = std::to_string(simrv::xlen::kXLenBits);
+        expect(check_isa("rv" + xlen + "g_zicntr").has_value(),
+               "CLI accepts a canonical G ISA string with Zicntr");
+        const auto g = check_isa("rv" + xlen + "g");
+        expect(g.has_value() && g->options.isa_preset == simrv::isa::IsaPreset::G,
+               "CLI accepts the standard G shorthand as distinct from GC");
+        expect(check_isa("rv" + xlen + "g_zicntr2p0").has_value(),
+               "CLI accepts standard multi-letter extensions after G");
+        expect(check_isa("rv" + xlen + "gc_zicntr2p0_zicsr2p0_zifencei2p0").has_value(),
+               "CLI accepts standard versioned multi-letter extensions");
+        expect(check_isa("rv" + xlen + "gcZicntr2p0").has_value(),
+               "CLI accepts the canonical glued first multi-letter extension spelling");
+        expect(check_isa("rv" + xlen + "gc_zicsr_zifencei_zicntr").has_value(),
+               "CLI accepts explicit extensions implied by G");
+        expect(!check_isa("rv" + xlen + "gc_zfoo").has_value(),
+               "CLI rejects unsupported multi-letter ISA extensions");
+        expect(!check_isa("rv" + xlen + "gc_zicntr2p1").has_value(),
+               "CLI rejects unsupported extension versions");
+        expect(!check_isa("rv" + xlen + "gc_zicntr_zicntr").has_value(),
+               "CLI rejects duplicate extension names");
+    }
+    expect(simrv::log::parse_format("text") == simrv::log::Format::Text,
+           "text diagnostic format is accepted");
+    expect(simrv::log::parse_format("JSON") == simrv::log::Format::Json,
+           "JSON diagnostic format is case-insensitive");
+    expect(simrv::log::parse_format("json-pretty") == simrv::log::Format::JsonPretty,
+           "pretty JSON diagnostic format is accepted");
+    expect(!simrv::log::parse_format("yaml").has_value(),
+           "unsupported diagnostic format is rejected");
+    {
+        std::array<std::string, 7> args_str = {"SimRV",   "--log-format", "json",     "--log-file",
+                                               "run.log", "-m",           "guest.elf"};
+        std::array<char*, 7> args{};
+        for (size_t i = 0; i < args_str.size(); ++i) args[i] = args_str[i].data();
+        const auto parsed = simrv::util::parse_command_line(args);
+        expect(parsed.has_value() && parsed->options.log_format == simrv::log::Format::Json &&
+                   parsed->options.fn_log == "run.log",
+               "CLI parses diagnostic log format and destination");
+    }
     const simrv::core::MachineConfig defaults{};
     expect(defaults.memory.contains(defaults.memory.dram_base), "DRAM base is contained");
     expect(defaults.memory.contains(defaults.memory.dram_base, 4), "DRAM range is contained");
@@ -208,8 +257,8 @@ auto main() -> int {
         }
     }
     {
-        std::array<std::string, 5> trace_args_str = {"SimRV", "--arch-trace", "trace.jsonl",
-                                                     "-m", "guest.bin"};
+        std::array<std::string, 5> trace_args_str = {"SimRV", "--arch-trace", "trace.jsonl", "-m",
+                                                     "guest.bin"};
         std::array<char*, 5> trace_args = {trace_args_str[0].data(), trace_args_str[1].data(),
                                            trace_args_str[2].data(), trace_args_str[3].data(),
                                            trace_args_str[4].data()};
@@ -224,6 +273,28 @@ auto main() -> int {
         }
     }
     {
+        const auto expect_cycle_trace_mode = [](std::vector<std::string> args,
+                                                const char* message) {
+            std::vector<char*> argv;
+            argv.reserve(args.size());
+            for (auto& arg : args) argv.push_back(arg.data());
+            const auto parsed =
+                simrv::util::parse_command_line(std::span<char* const>{argv.data(), argv.size()});
+            expect(parsed.has_value() &&
+                       parsed->options.execution_mode ==
+                           simrv::util::RequestedExecutionMode::CycleAccurate &&
+                       simrv::util::resolve_runtime_profile(parsed->options).engine ==
+                           simrv::core::ExecutionEngine::CycleFast,
+                   message);
+        };
+        expect_cycle_trace_mode({"SimRV", "--mode", "cycle-accurate", "--arch-trace",
+                                 "retire.jsonl", "-m", "guest.bin"},
+                                "--arch-trace preserves a cycle-accurate mode specified first");
+        expect_cycle_trace_mode({"SimRV", "--arch-trace", "retire.jsonl", "--mode",
+                                 "cycle-accurate", "-m", "guest.bin"},
+                                "--arch-trace preserves a cycle-accurate mode specified after it");
+    }
+    {
         std::array<std::string, 4> trace_flag_str = {"SimRV", "--trace", "-m", "guest.bin"};
         std::array<char*, 4> trace_flag = {trace_flag_str[0].data(), trace_flag_str[1].data(),
                                            trace_flag_str[2].data(), trace_flag_str[3].data()};
@@ -234,8 +305,8 @@ auto main() -> int {
                "--trace enables the complete aligned instruction trace");
     }
     {
-        std::array<std::string, 6> trace_dir_str = {"SimRV", "--trace-dir", "run-artifacts",
-                                                    "--instmix", "-m", "guest.bin"};
+        std::array<std::string, 6> trace_dir_str = {"SimRV",     "--trace-dir", "run-artifacts",
+                                                    "--instmix", "-m",          "guest.bin"};
         std::array<char*, 6> trace_dir_args = {trace_dir_str[0].data(), trace_dir_str[1].data(),
                                                trace_dir_str[2].data(), trace_dir_str[3].data(),
                                                trace_dir_str[4].data(), trace_dir_str[5].data()};
@@ -249,14 +320,124 @@ auto main() -> int {
                    "trace artifact root is projected into MachineConfig");
         }
     }
+    {
+        std::array<std::string, 21> trace_filter_str = {"SimRV",
+                                                        "--arch-trace",
+                                                        "retire.jsonl",
+                                                        "--trace-events",
+                                                        "call, return",
+                                                        "--trace-function",
+                                                        "main",
+                                                        "--trace-device",
+                                                        "uart0",
+                                                        "--trace-hart",
+                                                        "1",
+                                                        "--trace-pc",
+                                                        "0x80000000-0x80001000",
+                                                        "--trace-after-cycle",
+                                                        "100",
+                                                        "--trace-before-cycle",
+                                                        "200",
+                                                        "-j",
+                                                        "2",
+                                                        "-m",
+                                                        "guest.bin"};
+        std::array<char*, 21> trace_filter_args{};
+        for (size_t i = 0; i < trace_filter_str.size(); ++i)
+            trace_filter_args[i] = trace_filter_str[i].data();
+        const auto parsed = simrv::util::parse_command_line(trace_filter_args);
+        expect(parsed.has_value() && parsed->options.trace_events == "call, return" &&
+                   parsed->options.trace_function == "main" &&
+                   parsed->options.trace_device == "uart0" && parsed->options.trace_hart == 1 &&
+                   parsed->options.trace_after_cycle == 100 &&
+                   parsed->options.trace_before_cycle == 200 &&
+                   parsed->options.trace_pc_start == 0x80000000 &&
+                   parsed->options.trace_pc_end == 0x80001000,
+               "trace event, hart, PC, and inclusive cycle filters parse");
+        if (parsed) {
+            const auto cfg = parsed->options.to_machine_config();
+            expect(cfg.debug.trace_events == "call, return" && cfg.debug.trace_function == "main" &&
+                       cfg.debug.trace_device == "uart0" && cfg.debug.trace_hart == 1 &&
+                       cfg.debug.trace_pc_start == 0x80000000 &&
+                       cfg.debug.trace_pc_end == 0x80001000 && cfg.debug.trace_after_cycle == 100 &&
+                       cfg.debug.trace_before_cycle == 200,
+                   "trace filters project into machine configuration");
+        }
+    }
+    {
+        std::array<std::string, 5> legacy_pc_trace_str = {"SimRV", "--trace-pc", "8", "-m",
+                                                          "guest.bin"};
+        std::array<char*, 5> legacy_pc_trace_args{};
+        for (size_t i = 0; i < legacy_pc_trace_str.size(); ++i)
+            legacy_pc_trace_args[i] = legacy_pc_trace_str[i].data();
+        const auto parsed = simrv::util::parse_command_line(legacy_pc_trace_args);
+        expect(parsed.has_value() && parsed->options.strace == 8,
+               "legacy numeric --trace-pc sampling option remains available");
+    }
+    {
+        std::array<std::string, 8> args_str = {
+            "SimRV", "--checkpoint-every", "10k",  "--checkpoint-dir", "snapshots",
+            "-m",    "guest.bin",          "--cli"};
+        std::array<char*, 8> args{};
+        for (size_t i = 0; i < args_str.size(); ++i) args[i] = args_str[i].data();
+        const auto parsed = simrv::util::parse_command_line(args);
+        expect(parsed.has_value() && parsed->options.checkpoint_every == 10'000 &&
+                   parsed->options.checkpoint_dir == "snapshots",
+               "periodic checkpoint interval and directory parse");
+        if (parsed) {
+            const auto cfg = parsed->options.to_machine_config();
+            expect(cfg.debug.checkpoint_every == 10'000 && cfg.debug.checkpoint_dir == "snapshots",
+                   "periodic checkpoint settings project into MachineConfig");
+        }
+        auto invalid_config = simrv::core::MachineConfig{};
+        invalid_config.debug.checkpoint_every = 1;
+        expect(!invalid_config.validate(), "periodic checkpoints require an output directory");
+    }
+    {
+        const auto suffix = std::chrono::steady_clock::now().time_since_epoch().count();
+        const auto checkpoint_dir = std::filesystem::temp_directory_path() /
+                                    ("simrv-periodic-checkpoint-" + std::to_string(suffix));
+        simrv::core::MachineConfig periodic_config{};
+        periodic_config.memory.dram_base = 0x80000000;
+        periodic_config.memory.dram_size = 16ULL * 1024 * 1024;
+        periodic_config.execution.start_pc = periodic_config.memory.dram_base;
+        periodic_config.execution.fincnt = 4;
+        periodic_config.debug.checkpoint_every = 2;
+        periodic_config.debug.checkpoint_dir = checkpoint_dir.string();
+        std::vector<Byte> periodic_ram(periodic_config.memory.dram_size, Byte{0});
+        periodic_ram[0] = Byte{0x6f};  // jal x0, 0
+        simrv::core::Machine periodic_machine(periodic_config);
+        periodic_machine.set_ram_for_testing(periodic_ram.data(), periodic_ram.size());
+        periodic_machine.primary_hart().state().pc = periodic_config.memory.dram_base;
+        periodic_machine.run();
+
+        size_t sidecars = 0;
+        bool sidecar_is_explicit = false;
+        std::error_code cleanup_error;
+        for (const auto& entry : std::filesystem::directory_iterator(checkpoint_dir)) {
+            if (entry.path().extension() == ".json") {
+                ++sidecars;
+                std::ifstream metadata(entry.path());
+                std::string record;
+                std::getline(metadata, record);
+                sidecar_is_explicit |=
+                    record.find("\"device_state_included\":false") != std::string::npos &&
+                    record.find("\"replay_complete\":false") != std::string::npos;
+            }
+            std::filesystem::remove(entry.path(), cleanup_error);
+        }
+        std::filesystem::remove(checkpoint_dir, cleanup_error);
+        expect(sidecars >= 2, "periodic checkpoint schedule emits snapshots during execution");
+        expect(sidecar_is_explicit,
+               "periodic checkpoint metadata declares the snapshot replay limitations");
+    }
 
     // Architectural checkpoint round-trip and rejection coverage.  Keep the image small so this
     // remains a fast native gate while exercising vector/CSR state and RAM contents.
     {
         const auto checkpoint =
             std::filesystem::temp_directory_path() / "simrv-checkpoint-test.bin";
-        const auto malformed =
-            std::filesystem::temp_directory_path() / "simrv-checkpoint-bad.bin";
+        const auto malformed = std::filesystem::temp_directory_path() / "simrv-checkpoint-bad.bin";
         simrv::core::MachineConfig checkpoint_config{};
         checkpoint_config.memory.dram_base = 0x80000000;
         checkpoint_config.memory.dram_size = 4096;

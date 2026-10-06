@@ -98,7 +98,8 @@ void VirtioMmioNet::on_queue_notify(uint32_t q_idx) {
             if (defer_completion) {
                 const auto current_cycle = machine_->memory().system_bus().cycle();
                 machine_->dma_engine().schedule_transfer(
-                    written, current_cycle, [this, q_idx, head_desc_idx, written]() {
+                    written, current_cycle,
+                    [this, q_idx, head_desc_idx, written]() {
                         auto& q = queues_[q_idx];
                         uint16_t used_idx = 0;
                         dma_read_bytes(q.device_addr + 2, reinterpret_cast<std::byte*>(&used_idx),
@@ -110,7 +111,8 @@ void VirtioMmioNet::on_queue_notify(uint32_t q_idx) {
                         dma_write_bytes(q.device_addr + 2, reinterpret_cast<std::byte*>(&used_idx),
                                         2);
                         trigger_irq();
-                    });
+                    },
+                    "virtio-mmio-net");
             } else {
                 uint16_t used_idx = 0;
                 dma_read_bytes(q.device_addr + 2, reinterpret_cast<std::byte*>(&used_idx), 2);
@@ -148,7 +150,8 @@ void VirtioMmioNet::on_queue_notify(uint32_t q_idx) {
                 const auto current_cycle = machine_->memory().system_bus().cycle();
                 const auto len = desc.len;
                 machine_->dma_engine().schedule_transfer(
-                    len, current_cycle, [this, q_idx, head_desc_idx, len]() {
+                    len, current_cycle,
+                    [this, q_idx, head_desc_idx, len]() {
                         auto& q = queues_[q_idx];
                         uint16_t used_idx = 0;
                         dma_read_bytes(q.device_addr + 2, reinterpret_cast<std::byte*>(&used_idx),
@@ -160,7 +163,8 @@ void VirtioMmioNet::on_queue_notify(uint32_t q_idx) {
                         dma_write_bytes(q.device_addr + 2, reinterpret_cast<std::byte*>(&used_idx),
                                         2);
                         trigger_irq();
-                    });
+                    },
+                    "virtio-mmio-net");
             } else {
                 uint16_t used_idx = 0;
                 dma_read_bytes(q.device_addr + 2, reinterpret_cast<std::byte*>(&used_idx), 2);

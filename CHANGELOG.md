@@ -5,11 +5,75 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## Unreleased
 
+- Source builds now default to the isolated `/usr/local/simrv` install prefix (executable at
+  `/usr/local/simrv/bin/simrv`); CPack distro packages retain their standard `/usr` layout.
+- `--isa` now accepts the standard `rv32g`/`rv64g` shorthand separately from `GC`, and canonical
+  multi-letter `Zicsr`, `Zifencei`, and `Zicntr` extensions,
+  including supported ratified 2.0 version suffixes. The concise `rv64gc_zicntr2p0` spelling
+  reflects that `G` already implies `Zicsr` and `Zifencei`; the expanded spelling remains accepted
+  for compatibility.
+- Preserved the architectural MISA.X indication for SimRV's documented non-standard trace
+  extension in the TUI ISA editor, avoiding an unnecessary simulator reconfiguration when changing
+  execution precision.
+- Standardized MMIO event payloads with an explicit `latency_cycles` field (`null` when the
+  simulator does not model per-access device latency) and added a CLI regression for lifecycle
+  timestamps/order, lifecycle/retirement stream separation, and schema-1 retirement compatibility.
+- Added schema-2 lifecycle, call, and device event envelopes using architectural `U`/`S`/`M`
+  privilege names; lifecycle output now records initialization, running, and completion transitions.
+  Trace metadata includes the build commit, lowercase runtime MISA ISA string, trace level,
+  guest image path and SHA-256, configuration SHA-256, command-line argument vector, and host
+  platform identity, plus the effective registered MMIO devices and fixed VirtIO RNG seed.
+- Added a level-1 `interrupts.jsonl` stream for architectural interrupt entry and xRET return,
+  plus pending-state assertion/deassertion edges. Records include delegated CSR-bank names, cause
+  values, saved PCs, handler PCs, source components, and nesting depth.
+- Added level-4 TileLink-C transaction events in `bus.jsonl`, preserving protocol source/sink IDs
+  and labeling them as bus identifiers rather than hart IDs. Request/response records now include
+  sequence, hart/master, target, transfer width and byte enables, data, request/completion cycles,
+  modeled latency, and denial/corruption status when applicable.
+- Added level-4 `pipeline.jsonl` stall events directly from the cycle-accurate pipeline, independent
+  of TUI execution-detail capture, with per-stage PCs, remaining latency, and stall reason.
+- Added level-1 DMA scheduler start/completion events to `devices.jsonl`, correlating generic DMA and
+  VirtIO transfers by run-local transfer ID, source component, byte count, and modeled timing.
+- Added a deterministic guest execution fixture covering an ACLINT MSWI MMIO write, device-raised
+  interrupt assertion, handler entry/return, correlated TileLink request/response, and `tohost`
+  completion.
+- Added pre-serialization event-name, hart, and inclusive cycle-range filters for architectural
+  event streams; lifecycle records remain unfiltered and selected filters are recorded in metadata.
+- Added an inclusive architectural PC-range filter, retaining the legacy numeric `--trace-pc`
+  sampling behavior and accepting ranges through `--trace-pc` or `--trace-pc-range`.
+- Added exact ELF-symbol and component-name filters through `--trace-function` and
+  `--trace-device`; filters are applied before serialization and included in run metadata.
+- Added level-4 `memory.jsonl` events for successfully retired scalar loads, stores, and AMOs,
+  distinguishing RAM, MMIO, unmapped, and unresolved physical translations while keeping detailed
+  device accesses in `devices.jsonl`.
+- Added level-4 `memory_fault` events for precise synchronous scalar load/store/AMO faults, carrying
+  the effective address, attempted store value when relevant, architectural cause, and `tval`.
+- Added cycle-scheduled architectural checkpoints with non-overwriting names and JSON sidecars
+  describing cycle, hart PCs/privilege, RAM and checkpoint hashes, and replay limitations.
+- Added sparse retirement indexes with byte offsets every 256 records, enabling downstream tools
+  to seek approximately by cycle, hart, PC, or event type without loading the full JSONL trace.
+- Added opt-in gzip compression for retirement traces via a `.gz` `--arch-trace` path. The
+  decompressed schema-1 records remain unchanged; compressed traces omit the plain-byte-offset
+  index, and runtime zlib is required. Other trace streams remain JSONL.
+- Schema-2 MMIO, trap, and SBI events and their cycle filters now use architectural `mcycle`; legacy
+  text logs retain their existing `mtime` notation.
+- Architectural device tracing now records MMIO successes, mapped access faults, and unmapped
+  accesses without requiring the legacy detailed-log option, attributed to the requesting hart and
+  instruction PC.
+- Added guest annotations through SimRV's custom U-level CSR `0x800`, with C and assembly helpers
+  and per-hart `marker_begin`, `marker_end`, and `marker` events in `markers.jsonl`. The `misa.X`
+  bit advertises the non-standard extension; Spike's standard ISA string intentionally omits it.
+- Kept return destinations in the standard `target_pc` field without duplicating them as
+  `return_pc`; call events retain `return_pc` because it identifies the call's link address.
 - Fixed cycle-accurate architectural retirement traces to record the retiring pipeline slot's
   PC, instruction, operation, and next PC without depending on TUI execution-detail capture.
 - Added optional schema-versioned `call` and `return` JSONL events to `--arch-trace`, including
   hart, cycle, source/target/return PCs, and dynamic call depth. Existing `retire` events remain
   compatible.
+- Added optional ELF function attribution to schema-2 events that carry a source or fault PC; the
+  field is omitted when the loaded symbol table cannot resolve the address.
+- Added `--log-format text|json|json-pretty` for human-readable or machine-readable diagnostic
+  output. Architectural JSONL trace artifacts retain their own stable schemas and are unaffected.
 
 ## [v3.0.0-rc.5] — 2026-10-04
 

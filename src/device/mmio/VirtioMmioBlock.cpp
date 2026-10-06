@@ -95,7 +95,8 @@ void VirtioMmioBlock::on_queue_notify(uint32_t q_idx) {
         if (defer_completion) {
             const auto current_cycle = machine_->memory().system_bus().cycle();
             machine_->dma_engine().schedule_transfer(
-                transfer_bytes, current_cycle, [this, q_idx, head_desc_idx, total_written]() {
+                transfer_bytes, current_cycle,
+                [this, q_idx, head_desc_idx, total_written]() {
                     auto& q = queues_[q_idx];
                     uint16_t used_idx = 0;
                     dma_read_bytes(q.device_addr + 2, reinterpret_cast<std::byte*>(&used_idx), 2);
@@ -105,7 +106,8 @@ void VirtioMmioBlock::on_queue_notify(uint32_t q_idx) {
                     used_idx++;
                     dma_write_bytes(q.device_addr + 2, reinterpret_cast<std::byte*>(&used_idx), 2);
                     trigger_irq();
-                });
+                },
+                "virtio-mmio-block");
         } else {
             uint16_t used_idx = 0;
             dma_read_bytes(q.device_addr + 2, reinterpret_cast<std::byte*>(&used_idx), 2);

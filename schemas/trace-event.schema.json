@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://simrv.org/schemas/trace-event.schema.json",
+  "title": "SimRV trace event envelope",
+  "type": "object",
+  "required": ["schema_version", "event", "cycle", "payload"],
+  "properties": {
+    "schema_version": { "const": 2 },
+    "event": { "type": "string" },
+    "timestamp": { "type": "string", "format": "date-time" },
+    "cycle": { "type": "integer", "minimum": 0 },
+    "hart": { "type": "integer", "minimum": 0 },
+    "pc": { "type": "string", "pattern": "^0x[0-9a-f]+$" },
+    "function": { "type": "string" },
+    "component": { "type": "string" },
+    "mode": { "enum": ["U", "S", "M", "unknown"] },
+    "payload": { "type": "object" }
+  },
+  "additionalProperties": true
+}

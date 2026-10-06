@@ -111,11 +111,17 @@ simrv -m program.elf
 | `--ia` | Select fast instruction-accurate simulation mode. |
 | `-s, -e, --steps <N>` | Evaluate machine-wide instruction limit across all harts before stopping. |
 | `--cpu-preset <path.cfg>` | Load human-editable CPU microarchitecture preset. |
+| `--isa <string>` | Select a supported base ISA preset; recognized ratified Z extensions may be listed with optional supported versions. |
 | `-p, --pipeline <type>` | Pipeline microarchitecture target (`three-stage`, `five-stage`, `dual-issue`). |
 | `-H, --tohost <addr>` | Specify physical address of `tohost` communication symbol for tests. |
 | `--summary <file>` | Write a machine-readable JSON execution summary when the run ends. |
 | `--events <file>` | Write newline-delimited lifecycle events for automation. |
-| `--arch-trace <file>` | Write a versioned JSONL retirement trace for RTL/Spike comparison. |
+| `--arch-trace <file>` | Write a versioned JSONL retirement trace (defaults to detailed mode unless an execution mode is explicitly selected). |
+| `--trace-level <0-4>` | Limit architectural event detail: devices, calls, retirement, or detailed state. |
+| `--trace-function <name>` | Filter attributed events to an exact ELF function symbol. |
+| `--trace-device <name>` | Filter component-attributed events to an exact component name. |
+| `--log-format <text|json|json-pretty>` | Select diagnostic log rendering; default is `text`. |
+| `--log-file <file>` | Mirror diagnostic messages to a file in the selected log format. |
 | `--trace` | Write an aligned, labeled architectural instruction trace to `<trace-dir>/trace.txt`. |
 | `--tracepc` | Write PC stream trace to `<trace-dir>/tracepc.txt`. |
 | `--gdb` | Start GDB Remote Serial Protocol (RSP) server. |
@@ -124,6 +130,10 @@ simrv -m program.elf
 | `--doctor` | Diagnose terminal presentation and portable-runtime conditions. |
 | `-v, --version` | Display version and build information. |
 | `-h, --help` | Show full command-line help message. |
+
+`--log-format` controls simulator diagnostic messages only. JSON diagnostic output uses one record
+per line; `json-pretty` is intended for interactive inspection. It does not change the independent
+schemas or JSONL encoding of architectural trace artifacts.
 
 ### Automation summary
 
@@ -137,7 +147,8 @@ python3 -m json.tool results/run.json
 The JSON document has schema version `1` and includes the simulator version, XLEN, hart count,
 execution engine, stop reason, exit status, final PC, retired instructions, cycles, CPI, IPC,
 per-hart retirement counts, cache hit/miss counts, branch prediction outcomes, and bus traffic.
-The summary is written after execution; a failure to write it
+The summary is written after execution;
+a failure to write it
 causes a nonzero simulator exit status. `--summary -` is rejected so guest UART output remains
 unambiguous on stdout.
 
@@ -158,20 +169,196 @@ decoded operation, next PC, and privilege mode. The option selects detailed exec
 committed instruction is represented; it is intended for RTL/Spike parity work and is not a
 throughput mode.
 
-Architectural tracing also emits optional versioned `call` and `return` records. These preserve
-the `retire` record format and are emitted only when `--arch-trace` is enabled. Calls are direct
-or indirect `jal`/`jalr` instructions writing `ra`; returns are `jalr x0, ra, 0`. The simulator
-records PCs and dynamic depth, leaving symbol and source resolution to downstream ELF-aware
-tools:
+Architectural tracing keeps `retire.jsonl` compact and compatibility-oriented. It does not repeat
+the full CSR/vector snapshot on every line. Additional streams are written beside it:
+`calls.jsonl`, `devices.jsonl`, `interrupts.jsonl`, `metadata.json`, and `events.jsonl` when
+`--events` is not supplied.
+An explicit `--events` path takes precedence. Schema-2 event streams use a common envelope with
+`schema_version`, `event`, `cycle`, and `payload`; timestamps and attribution fields are present
+where applicable. The optional `function` field contains the ELF symbol covering an attributed PC;
+it is omitted when SimRV has no symbol for that PC. The optional `mode` field uses the architectural
+privilege names `U`, `S`, and `M`. PC and address values are lowercase hexadecimal strings with a
+`0x` prefix. The schema is
+published at `schemas/trace-event.schema.json`. Schema 2 is SimRV's tooling envelope: it does not
+claim conformance to RISC-V [E-Trace](https://docs.riscv.org/reference/e-trace/index.html),
+[N-Trace](https://docs.riscv.org/reference/debug-trace-ras/nexus-trace/index.html), or the ratified
+[Trace Control Interface](https://docs.riscv.org/reference/trace-control-interface/index.html),
+which specify hardware trace encoding, transport, and component control rather than SimRV's JSONL
+event protocol. Architectural fields and instruction conventions follow the RISC-V ISA and calling
+convention. Lifecycle records include
+`initialized`, `started`, `running`, `stopped`, `completed`, and `failed` where those transitions
+occur; reboot and guest-exit requests have their own lifecycle events. `cycle` is the ordering key,
+while ISO-8601 UTC timestamps correlate with host logs.
+
+The default trace level is 3. Level 1 enables trap, exception, and device events; level 2 adds calls
+and returns; level 3 adds instruction retirement; level 4 adds supported bus transactions and
+committed scalar memory events. New streams use the schema-2 envelope with RISC-V privilege names
+(`U`, `S`, and `M`).
+
+Use filters to keep selected architectural streams bounded:
+
+```sh
+simrv --cli -m program.elf --arch-trace results/retire.jsonl --trace-level 4 \
+  --trace-events call,return,mmio_write --trace-hart 0 --trace-function main \
+  --trace-device uart0 --trace-pc-range 0x80010000-0x80020000 \
+  --trace-after-cycle 10000 --trace-before-cycle 20000
+```
+
+`--trace-events` takes comma-separated event names. Hart and cycle bounds are inclusive; filters
+are conjunctive. `--trace-function` uses the loaded ELF symbol table and matches the exact symbol
+containing the event PC; events without a resolvable symbol are excluded. `--trace-device` matches
+the event envelope's `component` exactly and excludes events without a component attribution. The
+PC range is inclusive and accepts hexadecimal or decimal addresses. `--trace-pc START-END` is an
+alias for `--trace-pc-range`; the legacy numeric `--trace-pc <period>` behavior remains available.
+Events without an architectural PC (for example bus transactions and interrupt assertion edges) are
+excluded while a PC range is active. Filtering occurs before event serialization. Lifecycle records
+in `events.jsonl` are always retained, so filters cannot hide run completion or failure. Selected
+filter values are copied into `metadata.json`. A hart filter excludes bus events without hart
+attribution.
+
+Example device event:
 
 ```json
-{"schema_version":1,"event":"call","hart":0,"cycle":42,
- "source_pc":"0x80000000","target_pc":"0x80000120","return_pc":"0x80000004",
- "call_depth":1}
-{"schema_version":1,"event":"return","hart":0,"cycle":57,
- "source_pc":"0x80000124","target_pc":"0x80000004","return_pc":"0x80000004",
- "call_depth":0}
+{"schema_version":2,"event":"mmio_write","timestamp":"2026-10-05T12:34:56.123Z",
+ "cycle":18420,"hart":0,"pc":"0x800125bc","mode":"M","component":"uart0",
+ "payload":{"address":"0x40001000","value":"0x1","width":1,"access":"mmio",
+ "faulted":false,"latency_cycles":null}}
 ```
+
+Calls are `jal`/`jalr` instructions that write architectural link register `x1` (`ra`) or the
+alternate link register `x5`; returns are `jalr x0, 0(x1)` or `jalr x0, 0(x5)`, including
+compressed aliases. SimRV records PCs and dynamic depth; downstream ELF-aware tools resolve symbols
+and source locations:
+
+```json
+{"schema_version":2,"event":"call","timestamp":"2026-10-05T12:34:56.123Z",
+ "cycle":42,"hart":0,"mode":"M","payload":{"source_pc":"0x80000000",
+ "target_pc":"0x80000120","return_pc":"0x80000004","call_depth":1}}
+{"schema_version":2,"event":"return","timestamp":"2026-10-05T12:34:56.124Z",
+ "cycle":57,"hart":0,"mode":"M","payload":{"source_pc":"0x80000124",
+ "target_pc":"0x80000004","call_depth":0}}
+```
+
+`metadata.json` records the simulator version and commit, the lowercase single-letter ISA string
+derived from runtime `misa` for standard single-letter extensions, separately lists
+`Xsimrvtrace` as a non-standard extension, XLEN, VLEN, hart count, trace level, registered runtime
+MMIO devices and address ranges, the VirtIO RNG's fixed seed, guest ELF path and SHA-256, a SHA-256
+configuration fingerprint, exact argument vector, host OS/release/machine, and start/completion timestamps. The
+ISA string reflects `misa` and does not claim multi-letter `Z*` extension coverage. For `--isa`,
+SimRV accepts `rv32g`/`rv64g` as the standard G shorthand for IMAFD plus `Zicsr` and `Zifencei`;
+`rv32gc`/`rv64gc` add the separate C extension. SimRV also accepts `Zicsr`, `Zifencei`, and
+`Zicntr` with supported ratified 2.0 version spellings; `Zicntr` must be listed separately. The
+canonical `rv64g_zicntr2p0` spelling is accepted, as are case-insensitive extension names and
+supported explicit `2.0` suffix variants. The schema-1
+retirement header and records remain unchanged for existing trace consumers. ISA strings may attach
+the first multi-letter extension directly to the base and separate subsequent extensions with
+underscores, as specified by RISC-V naming conventions. Call events include
+`source_pc`, `target_pc`, `return_pc`, and
+post-transition `call_depth`;
+return events include `source_pc`, the architectural destination as
+`target_pc`, and post-transition `call_depth`.
+
+At trace level 1, `interrupts.jsonl` records pending-state assertion/deassertion edges, architectural
+interrupt delivery after trap state has been updated, and return when a matching `mret`, `sret`, or
+`uret` retires. `cause` contains
+the interrupt code; `cause_value` contains the XLEN-encoded cause value. Register-name fields
+identify the applicable `mcause`/`scause`, `mepc`/`sepc`, and `mtval`/`stval` bank for delegated
+traps. `pc` is the handler PC on entry, and `target_pc` is the resumed PC on return.
+
+Schema-2 event catalog:
+
+| Event | Stream | Event-specific fields |
+|---|---|---|
+| Lifecycle transitions | `events.jsonl` | `payload.status`, stop reason, retired instructions, cycles; failures may include an error and exits may include exit status |
+| `call`, `return` | `calls.jsonl` | source/target PCs, call `return_pc`, dynamic call depth |
+| MMIO and unmapped reads/writes | `devices.jsonl` | component; address, value, width, access, fault status, latency cycles (`null` when not modeled) |
+| `dma_start`, `dma_complete` | `devices.jsonl` | scheduler transfer ID, source component, byte count, request/start/completion cycles, modeled latency |
+| `trap`, `sbi` | `devices.jsonl` | cause and cause name, fault PC/tval/privilege or SBI extension/function/arguments |
+| Interrupt assertion/deassertion | `interrupts.jsonl` | component, cause, cause name, asserted state |
+| Interrupt entry/return | `interrupts.jsonl` | handler/resumed PC, cause, EPC, CSR bank/value, source mode, nesting depth |
+| `bus_transaction` | `bus.jsonl` | bus, TileLink channel/opcode, protocol source/sink IDs, sequence, hart/master, target, address, transfer width, byte enables, data, request/completion cycles, modeled latency, response/error flags |
+| `pipeline_stall` | `pipeline.jsonl` | cycle-accurate stages stalled that cycle, each stage's PC, remaining modeled latency, and stall reason |
+| `memory_read`, `memory_write`, `memory_atomic`, `memory_fault` | `memory.jsonl` | effective/optional physical address, region/component, operation, width, values, fault/cause/tval, latency when modeled |
+| `marker_begin`, `marker_end`, `marker` | `markers.jsonl` | PC, mode, label, marker depth |
+| `header` | event streams | stream name |
+
+Mapped MMIO failures and accesses to unmapped addresses are retained as device-stream records with
+`faulted: true`; unmapped events use `access: "unmapped"` and `component: "unmapped"`. DMA scheduler
+events use the component names `dma-controller`, `virtio-mmio-*`, or `virtio-pci-*`; each transfer's
+start and completion share a run-local `transfer_id`. The request cycle is when the scheduler was
+called, `start_cycle` accounts for queued transfers, and the completion event's envelope cycle is
+the modeled completion cycle. These scheduler-level records intentionally do not invent source or
+destination addresses, which are not supplied by all current DMA clients. The legacy
+`dlog.txt` continues to include successful accesses only.
+
+At level 4, `memory.jsonl` records successfully retired scalar loads, stores, and AMOs, plus precise
+synchronous faults on scalar data accesses. Successful-event cycles are architectural retirement
+cycles; `memory_fault` cycles are trap-detection cycles. `effective_address` is the guest effective address,
+    and `physical_address` is included when the active translation is available in the hart's TLB.
+`region` distinguishes `ram`, `mmio`, `unmapped`, and `unresolved`; MMIO records include the
+registered component when identifiable and are also detailed in `devices.jsonl`. `faulted` is
+false for retired accesses and true for faults; load-fault values are `null`, while a faulting store
+includes its attempted value. Precise cause and `tval` are recorded on fault events, with the
+corresponding trap also in `devices.jsonl`. `latency_cycles` is `null` until per-access architectural
+latency is modeled.
+
+`retire.jsonl` intentionally remains schema 1 for existing consumers. A companion
+`<trace-stem>.index.jsonl` stores byte offsets every 256 emitted retirement records, keyed by
+record ordinal, cycle, hart, PC, and event type. Consumers can binary-search the sparse anchors
+for an approximate cycle/PC/hart location, seek the uncompressed retirement file to that byte
+offset, then scan forward. Compression is opt-in: give `--arch-trace` a path ending in `.gz`
+(for example, `retire.jsonl.gz`) to gzip the unchanged JSONL stream using the host's shared zlib
+library. The stream is flushed at the same trace flush points; `.gz` traces do not get a byte-offset
+index because compressed offsets are not seekable as JSONL byte positions. For example, use
+`--arch-trace results/retire.jsonl.gz` to enable it. Without runtime zlib, compressed tracing is
+unavailable and SimRV reports an error. Other event streams remain plain JSONL. Header and
+index-entry records are defined by `schemas/trace-index.schema.json`. `bus.jsonl` and
+`pipeline.jsonl` are created beside the other architectural streams at trace level 4. The bus stream
+records TileLink-C channel observations. The pipeline stream is emitted only by the cycle-accurate
+engine and contains a compact per-cycle list of stalled stages, independent of TUI execution-detail
+capture. A representative event is:
+
+```json
+{"schema_version":2,"event":"pipeline_stall","cycle":18420,"hart":0,"mode":"M",
+ "payload":{"stages":[{"stage":"fetch","pc":"0x800125bc","remaining_cycles":3,
+ "reason":"instruction_fill"}]}}
+```
+
+Stall reasons distinguish stage latency, data hazards, instruction fills, page walks, data
+transfers, and downstream backpressure. Configured filters are applied before writing the record.
+`source_id` and `sink_id` are protocol identifiers, not hart IDs; response-channel records carry
+their own cycle and are correlated with requests by TileLink source ID.
+TileLink A-channel records include the request payload and `request_cycle`; corresponding D-channel
+records use the modeled completion as the envelope `cycle`, repeat the request context, and include
+`completion_cycle`, `latency_cycles`, `response_data`, and denied/corrupt flags. `master` names the
+issuing hart and instruction/data port; `target` is the
+registered device name or `ram`/`unmapped`. TileLink transfer `size_log2` is accompanied by the
+derived `width_bytes`; `burst_length` is measured in 8-byte TileLink beats. Synchronous paths may
+have zero modeled latency; cycle-accurate paths report the configured interconnect latency.
+
+#### Guest software annotations
+
+SimRV implements the write-command CSR `0x800` from the RISC-V custom U-level read/write range.
+This address allocation follows the [RISC-V Privileged Architecture CSR address mapping
+conventions](https://docs.riscv.org/reference/isa/priv/priv-csrs.html). It is accessed with
+standard Zicsr instructions and does not occupy a standard CSR address. This is a SimRV-specific,
+non-standard facility named `Xsimrvtrace`; it is not a ratified RISC-V extension.
+The CSR is inert when architectural tracing is disabled. Guest labels are sent as UTF-8 bytes,
+followed by one command write, so the simulator does not dereference guest pointers or translate
+guest virtual addresses:
+
+```c
+#include <simrv/trace.h>
+
+simrv_trace_begin("decode");
+simrv_marker("entered decoder");
+simrv_trace_end("decode");
+```
+
+The equivalent assembly macros are in `simrv/trace.S` and take a NUL-terminated string pointer in
+an integer register, for example `SIMRV_TRACE_BEGIN a0`. Labels are capped at 1024 bytes per event.
+Events include hart, cycle, source PC, privilege mode, label, and post-transition marker nesting
+depth. `marker_end` decrements depth only when nonzero.
 
 ### Checkpoint and resume
 
@@ -187,6 +374,14 @@ Snapshots contain guest DRAM, hart registers and CSRs, retirement counters, and 
 XLEN, VLEN, hart count, and DRAM geometry must match. Device queues, host sockets, and external
 time are intentionally not serialized; use this for deterministic bare-metal and architectural
 experiments, not transparent VM migration.
+
+Periodic snapshots can be requested with `--checkpoint-every <cycles> --checkpoint-dir <dir>`.
+SimRV writes `checkpoint-<cycle>.ckpt` and a JSON sidecar containing the cycle, per-hart PC,
+privilege and pending-interrupt bitmap, RAM/checkpoint SHA-256 hashes, and explicit completeness flags. If a generated name
+already exists, a numeric suffix is added rather than overwriting it. Snapshot points occur at
+the first safe simulator boundary at or after each requested interval. Device state is not
+included, and `trace_sequence` is currently `null`; these files are architectural snapshots, not
+replay-complete checkpoints.
 
 ---
 
@@ -322,7 +517,7 @@ For more details on registering new hardware RTL targets, refer to [RTL Parity V
 The `simrv-benchmark` suite measures simulation throughput (KIPS/MIPS), memory footprint (RSS), and compares results against Spike or previous SimRV versions.
 
 ```bash
-# Run standard realworld benchmarks
+# Run standard real-world benchmarks
 simrv-benchmark --suite realworld
 
 # Compare performance against Spike

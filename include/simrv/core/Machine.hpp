@@ -131,6 +131,7 @@ class Machine final : public core::IInterruptController {
     };
 
     std::unique_ptr<Runtime> runtime_;
+    Counter next_checkpoint_cycle_ = 0;
 
    public:
     enum class StopReason : uint8_t {
@@ -523,6 +524,7 @@ class Machine final : public core::IInterruptController {
     void start_runner();
     void stop_runner();
     void wait_for_runner_quiescence();
+    void maybe_save_periodic_checkpoint();
     void execute_runner_cycle();
     [[nodiscard]] auto execute_runner_fast_batch(uint32_t batch_size) -> bool;
     void prepare_runner_cycle();

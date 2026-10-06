@@ -8,6 +8,7 @@
 #include <cstdint>
 #include <expected>
 #include <limits>
+#include <optional>
 #include <string>
 #include <utility>
 
@@ -80,6 +81,18 @@ struct DebugConfig {
     /// Root directory for simulator-generated trace artifacts.
     std::string trace_dir = "trace";
     std::string architecture_trace_path;
+    /// Architectural trace detail level: 0=lifecycle, 1=devices, 2=calls, 3=retire, 4=detail.
+    uint8_t trace_level = 3;
+    std::string trace_events;
+    std::string trace_function;
+    std::string trace_device;
+    std::optional<uint32_t> trace_hart;
+    std::optional<Address> trace_pc_start;
+    std::optional<Address> trace_pc_end;
+    std::optional<Counter> trace_after_cycle;
+    std::optional<Counter> trace_before_cycle;
+    Counter checkpoint_every = 0;
+    std::string checkpoint_dir;
 };
 
 struct IsaConfig {
@@ -133,6 +146,9 @@ struct MachineConfig {
         }
         if (execution.smp_quantum == 0) {
             return std::unexpected("SMP quantum must be non-zero");
+        }
+        if (debug.checkpoint_every != 0 && debug.checkpoint_dir.empty()) {
+            return std::unexpected("a checkpoint directory is required with periodic checkpoints");
         }
         if (isa.misa_xlen != 0 && isa.misa_xlen != 32 && isa.misa_xlen != 64) {
             return std::unexpected("MISA XLEN must be 32, 64, or unspecified");

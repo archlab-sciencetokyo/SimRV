@@ -150,11 +150,14 @@ void TrapController::sret(ArchState& state) {
 void TrapController::raise_exception(CPU& cpu, TrapCause cause, CSRValue tval) {
     ArchState& state = cpu.state();
     const Address trap_pc = state.pc;
+    const PrivilegeLevel source_mode = state.priv;
 
     if (cpu.machine_ != nullptr &&
-        simrv::compiler::unlikely(cpu.machine_->trace().is_trap_log_enabled())) {
-        cpu.machine_->trace().log_trap(cpu.clint_mmio.mtime.load(std::memory_order_relaxed), cause,
-                                       trap_pc, state.priv, state, tval);
+        simrv::compiler::unlikely(cpu.machine_->trace().is_trap_log_enabled() ||
+                                  cpu.machine_->trace().is_architecture_trace_enabled())) {
+        cpu.machine_->trace().log_trap(cpu.clint_mmio.mtime.load(std::memory_order_relaxed),
+                                       cpu.clint_mmio.mcycle, cause, trap_pc, state.priv, state,
+                                       tval, cpu);
     }
 
     if (cpu.sbi.handle_ecall(cause)) {
@@ -205,6 +208,9 @@ void TrapController::raise_exception(CPU& cpu, TrapCause cause, CSRValue tval) {
     }
     if (state.regs.xlen == 32) {
         state.pc = static_cast<Register>(static_cast<int64_t>(static_cast<int32_t>(state.pc)));
+    }
+    if (cpu.machine_ != nullptr) {
+        cpu.machine_->trace().log_architectural_trap_entry(cpu, cause, trap_pc, source_mode, tval);
     }
     // A delivered trap resumes through its guest handler.  The simulator only stops when no
     // handler exists; debugger breakpoints and watchpoints pause independently in CPU::run_cycle.

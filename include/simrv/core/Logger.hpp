@@ -16,6 +16,7 @@
 namespace simrv::log {
 
 enum class Level : uint8_t { Trace = 0, Debug = 1, Info = 2, Warn = 3, Error = 4, Off = 5 };
+enum class Format : uint8_t { Text, Json, JsonPretty };
 
 using LogCallback = std::function<void(const std::string&)>;
 
@@ -24,6 +25,9 @@ using LogCallback = std::function<void(const std::string&)>;
 
 /// Human-readable textual representation of a log severity level.
 [[nodiscard]] auto level_name(Level level) noexcept -> std::string_view;
+[[nodiscard]] auto parse_format(std::string_view str) noexcept -> std::optional<Format>;
+void set_format(Format format) noexcept;
+[[nodiscard]] auto get_format() noexcept -> Format;
 
 /// Set the minimum severity level for active log emission.
 void set_level(Level level) noexcept;

@@ -9,13 +9,14 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
-#include <fstream>
 #include <filesystem>
+#include <fstream>
 #include <limits>
 #include <new>
 #include <print>
 #include <ranges>
 #include <span>
+#include <string_view>
 #include <thread>
 #include <type_traits>
 #include <variant>
@@ -31,6 +32,7 @@
 #include "simrv/memory/CoherenceHub.hpp"
 #include "simrv/memory/MemoryUtil.hpp"
 #include "simrv/util/BenchmarkEvent.hpp"
+#include "simrv/util/Sha256.hpp"
 #include "simrv/xlen/Types.hpp"
 
 namespace simrv::core {
@@ -307,6 +309,88 @@ auto Machine::load_checkpoint(const std::string& filepath) -> std::expected<void
     return {};
 }
 
+void Machine::maybe_save_periodic_checkpoint() {
+    const auto interval = config.debug.checkpoint_every;
+    if (interval == 0 || config.debug.checkpoint_dir.empty()) return;
+    const auto cycle = primary_hart().clint_mmio.mcycle;
+    if (cycle < next_checkpoint_cycle_) return;
+
+    // Stop worker harts at a cycle boundary while serializing shared machine state.
+    const auto prior_state = execution_state();
+    if (prior_state == ExecutionState::Running) {
+        execution_state_.store(ExecutionState::Paused, std::memory_order_release);
+        execution_state_.notify_all();
+        for (auto& secondary : runtime_->secondary_harts) secondary->hart_status.notify_all();
+        wait_for_runner_quiescence();
+    }
+
+    std::error_code fs_error;
+    const std::filesystem::path directory(config.debug.checkpoint_dir);
+    std::filesystem::create_directories(directory, fs_error);
+    if (fs_error) {
+        simrv::log::error("Cannot create checkpoint directory '{}': {}", directory.string(),
+                          fs_error.message());
+    } else {
+        const auto stem = std::format("checkpoint-{}", cycle);
+        auto checkpoint_path = directory / (stem + ".ckpt");
+        for (uint32_t suffix = 1; std::filesystem::exists(checkpoint_path, fs_error); ++suffix) {
+            checkpoint_path = directory / std::format("{}-{}.ckpt", stem, suffix);
+            if (suffix == std::numeric_limits<uint32_t>::max()) break;
+        }
+        const auto saved = save_checkpoint(checkpoint_path.string());
+        if (!saved) {
+            simrv::log::error("Periodic checkpoint failed: {}", saved.error());
+        } else {
+            const auto metadata_path = checkpoint_path.string() + ".json";
+            std::ofstream metadata(metadata_path, std::ios::trunc);
+            const auto digest = simrv::util::sha256_file(checkpoint_path);
+            const auto ram = ram_view();
+            const auto ram_digest = simrv::util::sha256(std::string_view(
+                reinterpret_cast<const char*>(ram.data()), static_cast<size_t>(ram.size())));
+            metadata << std::format(
+                "{{\"schema_version\":1,\"kind\":\"simrv_architectural_checkpoint\","
+                "\"cycle\":{},\"checkpoint_file\":\"{}\",\"checkpoint_sha256\":{},"
+                "\"ram_sha256\":\"{}\",\"xlen\":{},\"harts\":[",
+                cycle, checkpoint_path.filename().string(),
+                digest ? std::format("\"{}\"", *digest) : "null", ram_digest,
+                simrv::xlen::kXLenBits);
+            for (size_t h = 0; h < num_harts(); ++h) {
+                if (h != 0) metadata << ',';
+                metadata << std::format(
+                    "{{\"hart\":{},\"pc\":\"0x{:x}\","
+                    "\"privilege\":\"{}\",\"pending_interrupts\":\"0x{:x}\"}}",
+                    h, static_cast<uint64_t>(hart(h).state().pc),
+                    hart(h).state().priv == PrivilegeLevel::User         ? "U"
+                    : hart(h).state().priv == PrivilegeLevel::Supervisor ? "S"
+                                                                         : "M",
+                    static_cast<uint64_t>(hart(h).state().mip));
+            }
+            metadata << "],\"device_state_included\":false,\"trace_sequence\":null,"
+                        "\"replay_complete\":false}\n";
+            if (!metadata) {
+                simrv::log::error("Failed to write checkpoint metadata '{}': {}", metadata_path,
+                                  "stream write error");
+            } else {
+                simrv::log::info("Periodic checkpoint saved at cycle {}: {}", cycle,
+                                 checkpoint_path.string());
+            }
+        }
+    }
+
+    do {
+        if (next_checkpoint_cycle_ > std::numeric_limits<Counter>::max() - interval) {
+            next_checkpoint_cycle_ = std::numeric_limits<Counter>::max();
+            break;
+        }
+        next_checkpoint_cycle_ += interval;
+    } while (next_checkpoint_cycle_ <= cycle);
+    if (prior_state == ExecutionState::Running) {
+        execution_state_.store(ExecutionState::Running, std::memory_order_release);
+        execution_state_.notify_all();
+        notify_control_event();
+    }
+}
+
 void Machine::set_platform_irq(IrqNumber irq, bool asserted) {
     runtime_->primary_cpu.plic_set_irq(irq, asserted);
 }
@@ -316,6 +400,19 @@ void Machine::set_hart_irq(HartId hart_id, InterruptType type, PrivilegeLevel pr
         return;
     }
     auto& target_hart = hart(hart_id);
+    MipBit pending_bit = MipBit::Msip;
+    TrapCause cause_code = 3;
+    if (type == InterruptType::Software) {
+        pending_bit = priv == PrivilegeLevel::Supervisor ? MipBit::Ssip : MipBit::Msip;
+        cause_code = priv == PrivilegeLevel::Supervisor ? 1 : 3;
+    } else if (type == InterruptType::Timer) {
+        pending_bit = priv == PrivilegeLevel::Supervisor ? MipBit::Stip : MipBit::Mtip;
+        cause_code = priv == PrivilegeLevel::Supervisor ? 5 : 7;
+    } else if (type == InterruptType::External) {
+        pending_bit = priv == PrivilegeLevel::Supervisor ? MipBit::Seip : MipBit::Meip;
+        cause_code = priv == PrivilegeLevel::Supervisor ? 9 : 11;
+    }
+    const bool was_asserted = (target_hart.state().mip & enum_mask(pending_bit)) != 0;
     switch (type) {
         case InterruptType::Timer:
             if (priv == PrivilegeLevel::Machine) {
@@ -353,6 +450,15 @@ void Machine::set_hart_irq(HartId hart_id, InterruptType type, PrivilegeLevel pr
                 target_hart.state().refresh_supervisor_pending();
             }
             break;
+    }
+    const bool is_asserted = (target_hart.state().mip & enum_mask(pending_bit)) != 0;
+    if (was_asserted != is_asserted) {
+        const std::string_view source = type == InterruptType::Timer ? "aclint_mtimer"
+                                        : type == InterruptType::Software
+                                            ? "aclint_mswi"
+                                            : "external_interrupt_controller";
+        trace().log_interrupt_signal(target_hart, kInterruptCauseBit | cause_code, is_asserted,
+                                     source);
     }
 }
 
@@ -674,7 +780,13 @@ auto Machine::ca_batch_quantum() const noexcept -> uint32_t {
         (telemetry_sink_->is_trace_active() || telemetry_sink_->step_delay_us() != 0)) {
         return 1;
     }
-    return config.execution.smp_quantum;
+    auto quantum = config.execution.smp_quantum;
+    if (config.debug.checkpoint_every != 0 &&
+        primary_hart().clint_mmio.mcycle < next_checkpoint_cycle_) {
+        const auto cycles_remaining = next_checkpoint_cycle_ - primary_hart().clint_mmio.mcycle;
+        quantum = static_cast<uint32_t>(std::min<Counter>(quantum, cycles_remaining));
+    }
+    return quantum;
 }
 
 void RunnerBase::start_threads(Machine& machine, bool baremetal) {
@@ -1195,6 +1307,7 @@ void Machine::resume() {
     execution_state_.notify_all();
     for (auto& hart : runtime_->secondary_harts) hart->hart_status.notify_all();
     notify_control_event();
+    publish_lifecycle_event(LifecycleEventKind::Running);
     if (telemetry_sink_) {
         telemetry_sink_->unpause_loop();
     }
@@ -1370,6 +1483,13 @@ void Machine::request_exit(int status) {
 }
 
 void Machine::run() {
+    if (config.debug.checkpoint_every != 0) {
+        const auto cycle = primary_hart().clint_mmio.mcycle;
+        next_checkpoint_cycle_ =
+            cycle > std::numeric_limits<Counter>::max() - config.debug.checkpoint_every
+                ? std::numeric_limits<Counter>::max()
+                : cycle + config.debug.checkpoint_every;
+    }
     if (platform_time() == 0 && runtime_->rtc) {
         runtime_->rtc->sync_with_system_time();
     }
@@ -1378,6 +1498,9 @@ void Machine::run() {
 
     // Start the selected composed execution policy.
     start_runner();
+    if (execution_state() == ExecutionState::Running) {
+        publish_lifecycle_event(LifecycleEventKind::Running);
+    }
 
     if (tui_enabled() && execution_state() != ExecutionState::Stepping) {
         execution_state_.store(ExecutionState::Paused, std::memory_order_release);
@@ -1449,13 +1572,21 @@ void Machine::run() {
         service_network();
         service_pending_input();
 
-        if (execute_runner_fast_batch(runtime_profile.fast_batch_quantum())) {
+        auto batch_quantum = runtime_profile.fast_batch_quantum();
+        if (config.debug.checkpoint_every != 0 &&
+            primary_hart().clint_mmio.mcycle < next_checkpoint_cycle_) {
+            const auto cycles_remaining = next_checkpoint_cycle_ - primary_hart().clint_mmio.mcycle;
+            batch_quantum = static_cast<uint32_t>(
+                std::min<Counter>(batch_quantum, std::max<Counter>(1, cycles_remaining)));
+        }
+        if (execute_runner_fast_batch(batch_quantum)) {
             if (simrv::compiler::unlikely(trace().fp_trace.is_open())) {
                 trace().write_trace_snapshot();
             }
             if (simrv::compiler::unlikely(tohost != 0)) {
                 finalize_cycle_tohost();
             }
+            maybe_save_periodic_checkpoint();
             if (simrv::compiler::unlikely(config.execution.fincnt !=
                                               std::numeric_limits<Counter>::max() &&
                                           retired_instruction_count() >= config.execution.fincnt)) {
@@ -1484,6 +1615,7 @@ void Machine::run() {
         if (simrv::compiler::unlikely(tohost != 0)) {
             finalize_cycle_tohost();
         }
+        maybe_save_periodic_checkpoint();
         if (simrv::compiler::unlikely(config.execution.fincnt !=
                                           std::numeric_limits<Counter>::max() &&
                                       retired_instruction_count() >= config.execution.fincnt)) {
@@ -1562,6 +1694,7 @@ void Machine::run() {
         uart->stop_pty();
     }
     if (runtime_->gdb_stub) runtime_->gdb_stub->stop();
+    publish_lifecycle_event(LifecycleEventKind::Completed);
 }
 
 void Machine::reset_realtime_anchor() noexcept {

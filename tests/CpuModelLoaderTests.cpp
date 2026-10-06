@@ -153,6 +153,11 @@ void test_load_canonical_cfu_provingground_cfg() {
 
 void test_multi_letter_isa_extensions() {
     std::cout << "[Test] Parsing multi-letter ISA extensions and Zk shorthand...\n";
+    simrv::pipeline::CpuModelConfig g_profile{};
+    TEST_CHECK(simrv::core::parse_cpu_config_string(
+        "[cpu]\nname = \"g-profile\"\nisa_preset = \"rv64g\"\n", g_profile));
+    TEST_CHECK(g_profile.isa_preset == IsaPreset::G);
+
     simrv::pipeline::CpuModelConfig config{};
     TEST_CHECK(simrv::core::parse_cpu_config_string(
         "[cpu]\nname = \"crypto-test\"\nisa_preset = \"rv64im_zkn\"\n\n"
@@ -210,8 +215,8 @@ void test_rv32e_profile() {
     TEST_CHECK(simrv::isa::misa_has_extension(emac, simrv::isa::IsaExtension::C));
 
     simrv::pipeline::CpuModelConfig preset{};
-    TEST_CHECK(simrv::core::parse_cpu_config(*simrv::core::resolve_cpu_model_path("rv32e"),
-                                              preset));
+    TEST_CHECK(
+        simrv::core::parse_cpu_config(*simrv::core::resolve_cpu_model_path("rv32e"), preset));
     TEST_CHECK(preset.name == "rv32e");
     TEST_CHECK(preset.supported_xlen == 32);
     TEST_CHECK(preset.pipeline.pipeline_type == PipelineType::ThreeStage);
@@ -219,16 +224,16 @@ void test_rv32e_profile() {
     using simrv::RegId;
     TEST_CHECK(simrv::isa::rv32e_register_is_valid(RegId::A5));
     TEST_CHECK(!simrv::isa::rv32e_register_is_valid(RegId::A6));
-    TEST_CHECK(simrv::isa::rv32e_register_operands_valid(
-        true, RegId::A5, true, RegId::A4, true, RegId::A3));
-    TEST_CHECK(!simrv::isa::rv32e_register_operands_valid(
-        true, RegId::A6, true, RegId::A4, true, RegId::A3));
-    TEST_CHECK(!simrv::isa::rv32e_register_operands_valid(
-        true, RegId::A5, true, RegId::A6, true, RegId::A3));
-    TEST_CHECK(!simrv::isa::rv32e_register_operands_valid(
-        true, RegId::A5, true, RegId::A4, true, RegId::A6));
-    TEST_CHECK(simrv::isa::rv32e_register_operands_valid(
-        false, RegId::A6, false, RegId::A6, false, RegId::A6));
+    TEST_CHECK(simrv::isa::rv32e_register_operands_valid(true, RegId::A5, true, RegId::A4, true,
+                                                         RegId::A3));
+    TEST_CHECK(!simrv::isa::rv32e_register_operands_valid(true, RegId::A6, true, RegId::A4, true,
+                                                          RegId::A3));
+    TEST_CHECK(!simrv::isa::rv32e_register_operands_valid(true, RegId::A5, true, RegId::A6, true,
+                                                          RegId::A3));
+    TEST_CHECK(!simrv::isa::rv32e_register_operands_valid(true, RegId::A5, true, RegId::A4, true,
+                                                          RegId::A6));
+    TEST_CHECK(simrv::isa::rv32e_register_operands_valid(false, RegId::A6, false, RegId::A6, false,
+                                                         RegId::A6));
 }
 
 void test_serialize_and_roundtrip() {
