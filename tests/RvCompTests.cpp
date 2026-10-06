@@ -153,9 +153,9 @@ void test_rvcomp_machine_application() {
     TEST_CHECK(cpu.pipeline_sim.config.div_latency == 35);
     TEST_CHECK(cpu.state().regs.xlen == 32);
     if constexpr (!simrv::xlen::kIsXLen64) {
-        TEST_CHECK(cpu.state().misa == 0x40141101U);
+        TEST_CHECK(cpu.state().misa == (0x40141101U | (1U << 23)));
     } else {
-        TEST_CHECK(cpu.state().misa == ((1ull << 62) | 0x00141101ULL));
+        TEST_CHECK(cpu.state().misa == ((1ull << 62) | 0x00141101ULL | (1ull << 23)));
     }
 }
 

@@ -66,10 +66,15 @@ Set the round-robin SMP scheduling quantum in cycles.
 .B \-\-smp-multithreaded
 Run SMP simulation workers on multiple host threads.
 .TP
-.B \-\-isa=\fIpreset\fR
-Select the guest ISA preset: \fBrv32i\fR, \fBrv32imac\fR, \fBrv32gc\fR,
-\fBrv32gcbv\fR, \fBrv64i\fR, \fBrv64imac\fR, \fBrv64gc\fR, or \fBrv64gcbv\fR,
-subject to the host build's capabilities.
+.B \-\-isa=\fIstring\fR
+Select the guest ISA preset: \fBrv32i\fR, \fBrv32imac\fR, \fBrv32g\fR, \fBrv32gc\fR,
+\fBrv32gcbv\fR, \fBrv64i\fR, \fBrv64imac\fR, \fBrv64g\fR, \fBrv64gc\fR, or \fBrv64gcbv\fR,
+subject to the host build's capabilities. The supported ratified multi-letter extensions
+\fBZicsr\fR, \fBZifencei\fR, and \fBZicntr\fR may be appended with underscores and optional
+2.0 version suffixes. The first multi-letter extension may directly follow the base ISA;
+subsequent multi-letter extensions are separated by underscores. \fBG\fR implies IMAFD,
+\fBZicsr\fR, and \fBZifencei\fR; \fBGC\fR adds compressed instructions. For example,
+\fBrv64g_zicntr2p0\fR.
 .TP
 .B \-\-vlen=\fIbits\fR
 Set the vector register length from 128 through 1024 bits.
@@ -146,7 +151,8 @@ Write newline-delimited lifecycle events while the run progresses.
 Write an instruction-mix report to \fBtrace/instmix.txt\fR on exit.
 .TP
 .B \-\-arch-trace=\fIfile.jsonl\fR
-Write a JSONL architectural retirement trace in detailed mode.
+Write a JSONL architectural retirement trace. Defaults to detailed execution unless an execution
+mode was explicitly selected (for example, \fB--mode=cycle-accurate\fR).
 .TP
 .B \-\-trace-level=\fI0\-4\fR
 Limit architectural event detail: level 1 devices and traps, level 2 calls and returns, level 3

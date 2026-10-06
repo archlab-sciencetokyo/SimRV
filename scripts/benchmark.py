@@ -884,7 +884,8 @@ def run_benchmark_single(
     # The caller may be comparing compiler builds or an out-of-tree binary.  Do not replace an
     # explicit --simrv selection with the in-tree default based on the guest ELF's XLEN.
     xlen = detect_xlen(simrv_bin, elf_path)
-    isa = isa_override or f"rv{xlen}gc_zicsr_zifencei_zicntr"
+    # G implies Zicsr and Zifencei; counters are named explicitly in the ISA string.
+    isa = isa_override or f"rv{xlen}gc_zicntr"
 
     simrv_times = []
     simrv_sim_times = []

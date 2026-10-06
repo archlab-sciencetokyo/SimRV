@@ -13,7 +13,7 @@
     "pc": { "type": "string", "pattern": "^0x[0-9a-f]+$" },
     "function": { "type": "string" },
     "component": { "type": "string" },
-    "mode": { "enum": ["U", "S", "M", "unknown", "machine"] },
+    "mode": { "enum": ["U", "S", "M", "unknown"] },
     "payload": { "type": "object" }
   },
   "additionalProperties": true

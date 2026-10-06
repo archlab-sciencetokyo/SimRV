@@ -65,7 +65,7 @@ auto parse_scaled_u64(std::string_view num, uint64_t& out) -> bool {
     return true;
 }
 
-auto parse_u32_base0(std::string_view num, uint32_t& out) -> bool {
+auto parse_u64_base0(std::string_view num, uint64_t& out) -> bool {
     if (num.empty()) {
         return false;
     }
@@ -86,7 +86,28 @@ auto parse_u32_base0(std::string_view num, uint32_t& out) -> bool {
     if (result.ec != std::errc{} || result.ptr != end) {
         return false;
     }
+    out = value;
+    return true;
+}
+
+auto parse_u32_base0(std::string_view num, uint32_t& out) -> bool {
+    uint64_t value = 0;
+    if (!parse_u64_base0(num, value) || value > std::numeric_limits<uint32_t>::max()) return false;
     out = static_cast<uint32_t>(value);
+    return true;
+}
+
+auto parse_trace_pc_range(std::string_view range, RuntimeOptions& options) -> bool {
+    const auto separator = range.find('-');
+    if (separator == std::string_view::npos || separator == 0 || separator + 1 >= range.size())
+        return false;
+    uint64_t start = 0;
+    uint64_t end = 0;
+    if (!parse_u64_base0(range.substr(0, separator), start) ||
+        !parse_u64_base0(range.substr(separator + 1), end) || start > end)
+        return false;
+    options.trace_pc_start = start;
+    options.trace_pc_end = end;
     return true;
 }
 
@@ -164,6 +185,51 @@ struct ParsedIsaPreset {
 };
 
 auto parse_isa_preset(std::string_view value) -> std::expected<ParsedIsaPreset, std::string> {
+    // Standard ISA strings may attach their first multi-letter extension directly
+    // to the single-letter base (e.g. RV64GCZicntr2p0). Underscores separate later
+    // multi-letter extensions. The current MISA model represents single-letter bits.
+    const auto extension_start = value.find_first_of("zZ", 4);
+    if (extension_start != std::string_view::npos) {
+        auto base_end = extension_start;
+        if (base_end > 0 && value[base_end - 1] == '_') --base_end;
+        const auto base = value.substr(0, base_end);
+        auto parsed = parse_isa_preset(base);
+        if (!parsed) return parsed;
+        auto extensions = value.substr(extension_start);
+        if (extensions.empty() || extensions.back() == '_') {
+            return std::unexpected("ISA string contains an empty extension name");
+        }
+        unsigned seen_extensions = 0;
+        while (!extensions.empty()) {
+            const auto next = extensions.find('_');
+            const auto extension = extensions.substr(0, next);
+            const auto supported_extension = [extension](std::string_view name) -> bool {
+                if (iequals(extension, name)) return true;
+                if (extension.size() <= name.size() ||
+                    !iequals(extension.substr(0, name.size()), name))
+                    return false;
+                const auto version = extension.substr(name.size());
+                return iequals(version, "2") || iequals(version, "2p0");
+            };
+            const auto extension_id = [&]() -> unsigned {
+                if (supported_extension("zicntr")) return 1U;
+                if (supported_extension("zicsr")) return 2U;
+                if (supported_extension("zifencei")) return 4U;
+                return 0U;
+            }();
+            if (extension_id == 0) {
+                return std::unexpected(std::format("unsupported ISA extension '{}'", extension));
+            }
+            if ((seen_extensions & extension_id) != 0) {
+                return std::unexpected(std::format("duplicate ISA extension '{}'", extension));
+            }
+            seen_extensions |= extension_id;
+            if (next == std::string_view::npos) break;
+            extensions.remove_prefix(next + 1);
+        }
+        return parsed;
+    }
+
     if (iequals(value, "i")) {
         return ParsedIsaPreset{.preset = IsaPreset::I, .xlen = 0};
     }
@@ -184,6 +250,9 @@ auto parse_isa_preset(std::string_view value) -> std::expected<ParsedIsaPreset, 
     }
     if (iequals(value, "imac")) {
         return ParsedIsaPreset{.preset = IsaPreset::IMAC, .xlen = 0};
+    }
+    if (iequals(value, "g")) {
+        return ParsedIsaPreset{.preset = IsaPreset::G, .xlen = 0};
     }
     if (iequals(value, "gc")) {
         return ParsedIsaPreset{.preset = IsaPreset::GC, .xlen = 0};
@@ -240,6 +309,14 @@ auto parse_isa_preset(std::string_view value) -> std::expected<ParsedIsaPreset, 
         parsed_xlen = 64;
         preset = IsaPreset::IMAC;
         valid = true;
+    } else if (iequals(value, "rv32g")) {
+        parsed_xlen = 32;
+        preset = IsaPreset::G;
+        valid = true;
+    } else if (iequals(value, "rv64g")) {
+        parsed_xlen = 64;
+        preset = IsaPreset::G;
+        valid = true;
     } else if (iequals(value, "rv32gc")) {
         parsed_xlen = 32;
         preset = IsaPreset::GC;
@@ -268,11 +345,11 @@ auto parse_isa_preset(std::string_view value) -> std::expected<ParsedIsaPreset, 
 
     const auto xlen_suffix = simrv::xlen::kIsXLen64 ? "64" : "32";
     auto supported = std::format(
-        "e, em, emac, i, im, ima, imac, gc, gcbv, rv32e, rv32em, rv32emac, rv{}i, rv{}im, "
-        "rv{}ima, rv{}imac, rv{}gc, rv{}gcbv",
-        xlen_suffix, xlen_suffix, xlen_suffix, xlen_suffix, xlen_suffix, xlen_suffix);
+        "e, em, emac, i, im, ima, imac, g, gc, gcbv, rv32e, rv32em, rv32emac, rv{}i, rv{}im, "
+        "rv{}ima, rv{}imac, rv{}g, rv{}gc, rv{}gcbv",
+        xlen_suffix, xlen_suffix, xlen_suffix, xlen_suffix, xlen_suffix, xlen_suffix, xlen_suffix);
     if constexpr (simrv::xlen::kIsXLen64) {
-        supported += ", rv32i, rv32im, rv32ima, rv32imac, rv32gc, rv32gcbv";
+        supported += ", rv32i, rv32im, rv32ima, rv32imac, rv32g, rv32gc, rv32gcbv";
     }
     return std::unexpected(
         std::format("unsupported ISA preset '{}' (supported: {})", value, supported));
@@ -350,8 +427,10 @@ auto parse_file_options(std::string_view arg, std::span<char* const> args, std::
         auto value = next_argument(args, i, arg);
         if (!value) return std::unexpected(value.error());
         options.fn_archtrace = std::string(*value);
-        options.execution_mode = RequestedExecutionMode::Detailed;
-        options.execution_mode_explicit = true;
+        if (!options.execution_mode_explicit) {
+            options.execution_mode = RequestedExecutionMode::Detailed;
+            options.execution_mode_explicit = true;
+        }
         return true;
     }
     if (arg == "--log-file") {
@@ -410,10 +489,25 @@ auto parse_execution_options(std::string_view arg, std::span<char* const> args, 
         options.execution_mode_explicit = true;
         return true;
     }
-    if (arg == "--trace-pc-period" || arg == "--trace-pc") {
-        auto value = parse_scaled_required(args, i, arg);
+    if (arg == "--trace-pc-range") {
+        auto value = next_argument(args, i, arg);
         if (!value) return std::unexpected(value.error());
-        options.strace = *value;
+        if (!parse_trace_pc_range(*value, options))
+            return std::unexpected("--trace-pc-range expects START-END with START <= END");
+        return true;
+    }
+    if (arg == "--trace-pc-period" || arg == "--trace-pc") {
+        auto value = next_argument(args, i, arg);
+        if (!value) return std::unexpected(value.error());
+        if (arg == "--trace-pc" && value->find('-') != std::string_view::npos) {
+            if (!parse_trace_pc_range(*value, options))
+                return std::unexpected("--trace-pc expects a period or START-END range");
+            return true;
+        }
+        uint64_t period = 0;
+        if (!parse_scaled_u64(*value, period))
+            return std::unexpected(std::format("invalid numeric value for {}", arg));
+        options.strace = period;
         return true;
     }
     if (arg == "--dump-init" || arg == "-I") {
@@ -522,10 +616,10 @@ auto parse_mode_options(std::string_view arg, std::span<char* const> args, std::
         }
         auto parsed = simrv::pipeline::parse_cpu_model_preset(*value);
         if (!parsed) {
-            return std::unexpected(std::format(
-                "unsupported CPU model preset '{}' (supported presets: tiny, balanced, "
-                "performance, or path/name of model .cfg)",
-                *value));
+            return std::unexpected(
+                std::format("unsupported CPU model preset '{}' (supported presets: tiny, balanced, "
+                            "performance, or path/name of model .cfg)",
+                            *value));
         }
         result.options.cpu_model_preset = parsed;
         return true;
@@ -693,10 +787,10 @@ auto parse_tui_options(std::string_view arg, std::span<char* const> args, std::s
                 std::format("unknown SoC preset: {}. Allowed: virt-pcie, virt-mmio, rvcomp", p));
         }
         result.options.soc_preset = std::string(p);
-        result.options.platform_profile =
-            preset->enable_mmio ? simrv::core::PlatformProfile::Mmio
-            : preset->enable_pcie       ? simrv::core::PlatformProfile::Pcie
-                                         : simrv::core::PlatformProfile::None;
+        result.options.platform_profile = preset->enable_mmio ? simrv::core::PlatformProfile::Mmio
+                                          : preset->enable_pcie
+                                              ? simrv::core::PlatformProfile::Pcie
+                                              : simrv::core::PlatformProfile::None;
         return true;
     }
     if (arg == "--net") {
@@ -788,6 +882,17 @@ auto parse_debug_cosrv_options(std::string_view arg, std::span<char* const> args
         options.log_level = level;
         return true;
     }
+    if (arg == "--log-format") {
+        auto value = next_argument(args, i, "--log-format");
+        if (!value) return std::unexpected(value.error());
+        const auto format = simrv::log::parse_format(*value);
+        if (!format) {
+            return std::unexpected(std::format(
+                "unsupported log format '{}' (supported: text, json, json-pretty)", *value));
+        }
+        options.log_format = *format;
+        return true;
+    }
     if (arg == "--summary") {
         auto value = next_argument(args, i, "--summary");
         if (!value) return std::unexpected(value.error());
@@ -815,6 +920,54 @@ auto parse_debug_cosrv_options(std::string_view arg, std::span<char* const> args
         options.trace_level = static_cast<uint8_t>(*value);
         return true;
     }
+    if (arg == "--trace-events") {
+        auto value = next_argument(args, i, arg);
+        if (!value) return std::unexpected(value.error());
+        if (value->empty()) return std::unexpected("--trace-events requires a non-empty list");
+        std::string_view remaining = *value;
+        while (true) {
+            const auto comma = remaining.find(',');
+            auto event = remaining.substr(0, comma);
+            while (!event.empty() && (event.front() == ' ' || event.front() == '\t'))
+                event.remove_prefix(1);
+            while (!event.empty() && (event.back() == ' ' || event.back() == '\t'))
+                event.remove_suffix(1);
+            if (event.empty() || std::any_of(event.begin(), event.end(), [](char ch) {
+                    return !((ch >= 'a' && ch <= 'z') || (ch >= '0' && ch <= '9') || ch == '_');
+                })) {
+                return std::unexpected("--trace-events expects comma-separated event names");
+            }
+            if (comma == std::string_view::npos) break;
+            remaining.remove_prefix(comma + 1);
+        }
+        options.trace_events = std::string(*value);
+        return true;
+    }
+    if (arg == "--trace-function" || arg == "--trace-device") {
+        auto value = next_argument(args, i, arg);
+        if (!value) return std::unexpected(value.error());
+        if (value->empty()) return std::unexpected(std::format("{} requires a name", arg));
+        if (arg == "--trace-function")
+            options.trace_function = std::string(*value);
+        else
+            options.trace_device = std::string(*value);
+        return true;
+    }
+    if (arg == "--trace-hart") {
+        auto value = parse_u32_required(args, i, arg);
+        if (!value) return std::unexpected(value.error());
+        options.trace_hart = *value;
+        return true;
+    }
+    if (arg == "--trace-after-cycle" || arg == "--trace-before-cycle") {
+        auto value = parse_scaled_required(args, i, arg);
+        if (!value) return std::unexpected(value.error());
+        if (arg == "--trace-after-cycle")
+            options.trace_after_cycle = *value;
+        else
+            options.trace_before_cycle = *value;
+        return true;
+    }
     if (arg == "--save-checkpoint" || arg == "--checkpoint-out") {
         auto value = next_argument(args, i, arg);
         if (!value) return std::unexpected(value.error());
@@ -827,6 +980,20 @@ auto parse_debug_cosrv_options(std::string_view arg, std::span<char* const> args
         if (!value) return std::unexpected(value.error());
         if (value->empty()) return std::unexpected(std::format("{} requires a file path", arg));
         options.fn_load_checkpoint = std::string(*value);
+        return true;
+    }
+    if (arg == "--checkpoint-every") {
+        auto value = parse_scaled_required(args, i, arg);
+        if (!value) return std::unexpected(value.error());
+        if (*value == 0) return std::unexpected("--checkpoint-every must be greater than zero");
+        options.checkpoint_every = *value;
+        return true;
+    }
+    if (arg == "--checkpoint-dir") {
+        auto value = next_argument(args, i, arg);
+        if (!value) return std::unexpected(value.error());
+        if (value->empty()) return std::unexpected("--checkpoint-dir requires a directory path");
+        options.checkpoint_dir = std::string(*value);
         return true;
     }
     if (arg == "-q" || arg == "--quiet") {
@@ -1038,6 +1205,17 @@ auto parse_command_line(std::span<char* const> args) -> std::expected<ParseResul
         (!result.options.class_mode || !result.options.explicit_tui_mode)) {
         return std::unexpected("--mission requires --class and --tui");
     }
+    if (result.options.trace_after_cycle && result.options.trace_before_cycle &&
+        *result.options.trace_after_cycle > *result.options.trace_before_cycle) {
+        return std::unexpected("--trace-after-cycle must not exceed --trace-before-cycle");
+    }
+    if (result.options.trace_hart && *result.options.trace_hart >= result.options.num_harts) {
+        return std::unexpected("--trace-hart must identify a configured hart");
+    }
+    if (result.options.trace_pc_start && result.options.trace_pc_end &&
+        *result.options.trace_pc_start > *result.options.trace_pc_end) {
+        return std::unexpected("--trace-pc-range start must not exceed end");
+    }
 
     if (needs_memory_image(result)) {
         return std::unexpected("-m/--image <FILE> is required to load a memory image");
@@ -1120,6 +1298,16 @@ auto RuntimeOptions::to_machine_config() const -> simrv::core::MachineConfig {
     cfg.debug.trace_dir = trace_dir;
     cfg.debug.architecture_trace_path = fn_archtrace;
     cfg.debug.trace_level = trace_level;
+    cfg.debug.trace_events = trace_events;
+    cfg.debug.trace_function = trace_function;
+    cfg.debug.trace_device = trace_device;
+    cfg.debug.trace_hart = trace_hart;
+    cfg.debug.trace_pc_start = trace_pc_start;
+    cfg.debug.trace_pc_end = trace_pc_end;
+    cfg.debug.trace_after_cycle = trace_after_cycle;
+    cfg.debug.trace_before_cycle = trace_before_cycle;
+    cfg.debug.checkpoint_every = checkpoint_every;
+    cfg.debug.checkpoint_dir = checkpoint_dir;
 
     cfg.isa.isatest_tohost = isatest_tohost;
     cfg.isa.isa_preset = isa_preset_bits(effective_isa_preset(*this));
@@ -1202,11 +1390,10 @@ auto apply_runtime_options(simrv::core::Machine* machine, const RuntimeOptions& 
     const auto platform_name =
         options.platform_profile == simrv::core::PlatformProfile::Pcie   ? "pcie"
         : options.platform_profile == simrv::core::PlatformProfile::Mmio ? "mmio"
-                                                                          : "none";
+                                                                         : "none";
     simrv::log::info("Run configuration: RV{}, {}-mode, {} hart(s), {} platform, {} MiB RAM",
                      machine->primary_hart().state().regs.xlen,
-                     options.appmode ? "bare-metal" : "OS",
-                     options.num_harts, platform_name,
+                     options.appmode ? "bare-metal" : "OS", options.num_harts, platform_name,
                      machine->configuration().memory.dram_size / (1024ULL * 1024ULL));
     simrv::log::info("Guest image: {}", options.fn_memimg.empty() ? "<none>" : options.fn_memimg);
     if (machine->runtime_profile.is_cycle_mode()) {
@@ -1359,18 +1546,18 @@ auto needs_memory_image(const ParseResult& result) -> bool {
                "default: 1G for Linux, 256M otherwise)\n",
                style(kBrightGreen), style(kBrightBlack), style(kReset), style(kReset));
     std::print(stdout,
-               "  {}--isa {}{}<PRESET>{}                Select ISA preset: rv{}i | rv{}imac | "
-               "rv{}gc | rv{}gcbv\n",
+               "  {}--isa {}{}<ISA>{}                   Select ISA preset/string (e.g. rv{}gc or "
+               "rv{}gc_zicntr)\n",
                style(kBrightGreen), style(kBrightBlack), style(kReset), style(kReset), xlen_suffix,
-               xlen_suffix, xlen_suffix, xlen_suffix);
+               xlen_suffix);
     std::print(stdout,
                "  {}--vlen {}{}<BITS>{}                 Vector register length VLEN (128-1024; "
                "default: 256)\n",
                style(kBrightGreen), style(kBrightBlack), style(kReset), style(kReset));
-    std::print(
-        stdout,
-               "  {}--soc, --platform {}{}<PRESET>{}    Select the complete SoC: virt-pcie | virt-mmio | rvcomp\n",
-        style(kBrightGreen), style(kBrightBlack), style(kReset), style(kReset));
+    std::print(stdout,
+               "  {}--soc, --platform {}{}<PRESET>{}    Select the complete SoC: virt-pcie | "
+               "virt-mmio | rvcomp\n",
+               style(kBrightGreen), style(kBrightBlack), style(kReset), style(kReset));
     std::print(stdout,
                "  {}--dump-soc-manifest {}{}<PRESET> [FILE]{} Export the normalized SoC registry "
                "as JSON\n",
@@ -1455,6 +1642,10 @@ auto needs_memory_image(const ParseResult& result) -> bool {
                "  {}--log-level {}{}<LEVEL>{}           Console log level: trace, debug, info, "
                "warn, error, off\n",
                style(kBrightGreen), style(kBrightBlack), style(kReset), style(kReset));
+    std::print(
+        stdout,
+        "  {}--log-format {}{}<FORMAT>{}         Diagnostic output: text, json, json-pretty\n",
+        style(kBrightGreen), style(kBrightBlack), style(kReset), style(kReset));
     std::print(stdout,
                "  {}-q, --quiet{}                       Quiet mode; suppress startup logs "
                "(log-level warn)\n",
@@ -1467,10 +1658,11 @@ auto needs_memory_image(const ParseResult& result) -> bool {
         stdout,
         "  {}--log-file {}{}<FILE>{}             Mirror timestamped console log messages to file\n",
         style(kBrightGreen), style(kBrightBlack), style(kReset), style(kReset));
-    std::print(stdout,
-               "  {}--trace-dir {}{}<DIR>{}             Root directory for generated trace artifacts "
-               "(default: trace)\n",
-               style(kBrightGreen), style(kBrightBlack), style(kReset), style(kReset));
+    std::print(
+        stdout,
+        "  {}--trace-dir {}{}<DIR>{}             Root directory for generated trace artifacts "
+        "(default: trace)\n",
+        style(kBrightGreen), style(kBrightBlack), style(kReset), style(kReset));
     std::print(
         stdout,
         "  {}--log-mmio, --dlog{}                Record MMIO transactions to <DIR>/dlog.txt\n",
@@ -1487,6 +1679,19 @@ auto needs_memory_image(const ParseResult& result) -> bool {
                "  {}--trace-level {}{}<0-4>{}             Limit architectural event detail\n",
                style(kBrightGreen), style(kBrightBlack), style(kReset), style(kReset));
     std::print(stdout,
+               "  {}--trace-events {}{}<LIST>{}           Filter event names (comma-separated)\n",
+               style(kBrightGreen), style(kBrightBlack), style(kReset), style(kReset));
+    std::print(stdout,
+               "  {}--trace-function / --trace-device {}{}<NAME>{} Filter by symbol / component\n",
+               style(kBrightGreen), style(kBrightBlack), style(kReset), style(kReset));
+    std::print(stdout,
+               "  {}--trace-hart {}{}<ID>{}               Filter by architectural hart ID\n",
+               style(kBrightGreen), style(kBrightBlack), style(kReset), style(kReset));
+    std::print(
+        stdout,
+        "  {}--trace-after-cycle / --trace-before-cycle {}{}<N>{} Filter inclusive cycle range\n",
+        style(kBrightGreen), style(kBrightBlack), style(kReset), style(kReset));
+    std::print(stdout,
                "  {}--trace{}                          Record an aligned full architectural trace "
                "to <DIR>/trace.txt\n",
                style(kBrightGreen), style(kReset));
@@ -1495,8 +1700,12 @@ auto needs_memory_image(const ParseResult& result) -> bool {
                "<DIR>/trace.txt\n",
                style(kBrightGreen), style(kBrightBlack), style(kReset), style(kReset));
     std::print(stdout,
-               "  {}--trace-pc-period {}{}<N>{}         Sample periodic PC trace to "
+               "  {}--trace-pc-period / --trace-pc {}{}<N>{} Sample periodic PC trace to "
                "<DIR>/tracepc.txt every N steps\n",
+               style(kBrightGreen), style(kBrightBlack), style(kReset), style(kReset));
+    std::print(stdout,
+               "  {}--trace-pc-range {}{}<START-END>{}  Filter architectural events by inclusive "
+               "PC range\n",
                style(kBrightGreen), style(kBrightBlack), style(kReset), style(kReset));
     std::print(stdout,
                "  {}--trace-bpred{}                     Record branch prediction trace to "
@@ -1555,6 +1764,12 @@ auto needs_memory_image(const ParseResult& result) -> bool {
         stdout,
         "  {}--load-checkpoint {}{}<FILE>{}          Resume from an architectural snapshot\n\n",
         style(kBrightGreen), style(kBrightBlack), style(kReset), style(kReset));
+    std::print(stdout,
+               "  {}--checkpoint-every {}{}<CYCLES>{}      Save periodic architectural snapshots\n",
+               style(kBrightGreen), style(kBrightBlack), style(kReset), style(kReset));
+    std::print(stdout,
+               "  {}--checkpoint-dir {}{}<DIR>{}          Destination for periodic checkpoints\n\n",
+               style(kBrightGreen), style(kBrightBlack), style(kReset), style(kReset));
 
     // Debug & Verification
     std::print(stdout, "{}{}:{}{}\n", style(kBoldFgBrightBlue), "Debug and Verification",
@@ -1590,10 +1805,10 @@ auto needs_memory_image(const ParseResult& result) -> bool {
     std::print(
         stdout,
         "  {}--isa-info{}                        Show qualified ISA and frontend capabilities\n",
-               style(kBrightGreen), style(kReset));
-    std::print(
-        stdout,
-        "  {}--doctor{}                          Diagnose terminal and release runtime environment\n",
+        style(kBrightGreen), style(kReset));
+    std::print(stdout,
+               "  {}--doctor{}                          Diagnose terminal and release runtime "
+               "environment\n",
                style(kBrightGreen), style(kReset));
     std::print(
         stdout,

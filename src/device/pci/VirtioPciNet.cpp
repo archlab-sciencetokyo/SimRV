@@ -150,7 +150,8 @@ void VirtioPciNet::on_queue_notify(uint16_t queue_index) {
             if (defer_completion) {
                 const auto current_cycle = machine->memory().system_bus().cycle();
                 machine->dma_engine().schedule_transfer(
-                    written, current_cycle, [this, queue_index, head_desc_idx, written]() {
+                    written, current_cycle,
+                    [this, queue_index, head_desc_idx, written]() {
                         auto& q = queues_[queue_index];
                         uint16_t used_idx = 0;
                         dma_read(q.device_addr + 2, &used_idx, 2);
@@ -161,7 +162,8 @@ void VirtioPciNet::on_queue_notify(uint16_t queue_index) {
                         dma_write(q.device_addr + 2, &used_idx, 2);
                         isr_status_ |= 0x1;
                         trigger_irq();
-                    });
+                    },
+                    "virtio-pci-net");
             } else {
                 uint16_t used_idx = 0;
                 dma_read(q.device_addr + 2, &used_idx, 2);
@@ -196,7 +198,8 @@ void VirtioPciNet::on_queue_notify(uint16_t queue_index) {
                 const auto current_cycle = machine->memory().system_bus().cycle();
                 const auto len = desc.len;
                 machine->dma_engine().schedule_transfer(
-                    len, current_cycle, [this, queue_index, head_desc_idx, len]() {
+                    len, current_cycle,
+                    [this, queue_index, head_desc_idx, len]() {
                         auto& q = queues_[queue_index];
                         uint16_t used_idx = 0;
                         dma_read(q.device_addr + 2, &used_idx, 2);
@@ -207,7 +210,8 @@ void VirtioPciNet::on_queue_notify(uint16_t queue_index) {
                         dma_write(q.device_addr + 2, &used_idx, 2);
                         isr_status_ |= 0x1;
                         trigger_irq();
-                    });
+                    },
+                    "virtio-pci-net");
             } else {
                 uint16_t used_idx = 0;
                 dma_read(q.device_addr + 2, &used_idx, 2);

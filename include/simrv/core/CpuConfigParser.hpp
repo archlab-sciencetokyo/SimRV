@@ -60,8 +60,7 @@ inline auto parse_bool(std::string_view val) -> std::optional<bool> {
     return std::nullopt;
 }
 
-inline auto parse_isa_preset_string(std::string_view val)
-    -> std::optional<simrv::isa::IsaPreset> {
+inline auto parse_isa_preset_string(std::string_view val) -> std::optional<simrv::isa::IsaPreset> {
     val = unquote(val);
     if (iequals(val, "i") || iequals(val, "rv32i") || iequals(val, "rv64i")) {
         return simrv::isa::IsaPreset::I;
@@ -83,6 +82,9 @@ inline auto parse_isa_preset_string(std::string_view val)
     }
     if (iequals(val, "imac") || iequals(val, "rv32imac") || iequals(val, "rv64imac")) {
         return simrv::isa::IsaPreset::IMAC;
+    }
+    if (iequals(val, "g") || iequals(val, "rv32g") || iequals(val, "rv64g")) {
+        return simrv::isa::IsaPreset::G;
     }
     if (iequals(val, "gc") || iequals(val, "rv32gc") || iequals(val, "rv64gc")) {
         return simrv::isa::IsaPreset::GC;
@@ -157,6 +159,8 @@ inline auto isa_preset_name(simrv::isa::IsaPreset preset) -> std::string_view {
             return "ima";
         case simrv::isa::IsaPreset::IMAC:
             return "imac";
+        case simrv::isa::IsaPreset::G:
+            return "g";
         case simrv::isa::IsaPreset::GC:
             return "gc";
         case simrv::isa::IsaPreset::GCBV:
@@ -403,10 +407,9 @@ inline auto parse_cpu_config_stream(std::istream& stream, simrv::pipeline::CpuMo
                 }
                 const auto unquoted = detail::unquote(val_str);
                 if (unquoted.starts_with("rv32") || unquoted.starts_with("RV32") ||
-                    (base_preset.has_value() &&
-                     (*base_preset == simrv::isa::IsaPreset::E ||
-                      *base_preset == simrv::isa::IsaPreset::EM ||
-                      *base_preset == simrv::isa::IsaPreset::EMAC))) {
+                    (base_preset.has_value() && (*base_preset == simrv::isa::IsaPreset::E ||
+                                                 *base_preset == simrv::isa::IsaPreset::EM ||
+                                                 *base_preset == simrv::isa::IsaPreset::EMAC))) {
                     if (config.supported_xlen == 0) config.supported_xlen = 32;
                 } else if (unquoted.starts_with("rv64") || unquoted.starts_with("RV64")) {
                     if (config.supported_xlen == 0) config.supported_xlen = 64;

@@ -490,11 +490,13 @@ auto Sbi::handle_ecall(TrapCause cause) -> bool {
     const Word func_id = cpu_.state().regs.read(a6);
 
     if (cpu_.machine_ != nullptr &&
-        simrv::compiler::unlikely(cpu_.machine_->trace().is_trap_log_enabled())) {
-        cpu_.machine_->trace().log_sbi(cpu_.clint_mmio.mtime.load(std::memory_order_relaxed),
-                                       static_cast<unsigned>(cause), ext_id, func_id,
-                                       cpu_.state().regs.read(RegId::A0),
-                                       cpu_.state().regs.read(RegId::A1), cpu_.state().pc);
+        simrv::compiler::unlikely(cpu_.machine_->trace().is_trap_log_enabled() ||
+                                  cpu_.machine_->trace().is_architecture_trace_enabled())) {
+        cpu_.machine_->trace().log_sbi(
+            cpu_.clint_mmio.mtime.load(std::memory_order_relaxed), cpu_.clint_mmio.mcycle,
+            static_cast<unsigned>(cause), ext_id, func_id, cpu_.state().regs.read(RegId::A0),
+            cpu_.state().regs.read(RegId::A1), cpu_.pipeline_context.cpc.raw(),
+            static_cast<HartId>(cpu_.state().mhartid));
     }
 
     switch (static_cast<ExtId>(ext_id)) {

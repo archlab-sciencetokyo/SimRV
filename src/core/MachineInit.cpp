@@ -312,8 +312,7 @@ auto Machine::platform_status() const -> PlatformStatusSnapshot {
 auto Machine::initialize() -> std::expected<void, std::string> {
     if (config.cpu_model_preset.has_value()) {
         auto model = simrv::pipeline::make_cpu_model_preset(*config.cpu_model_preset);
-        const auto profile_name =
-            simrv::pipeline::cpu_model_preset_name(*config.cpu_model_preset);
+        const auto profile_name = simrv::pipeline::cpu_model_preset_name(*config.cpu_model_preset);
         if (const auto resolved = simrv::core::resolve_cpu_model_path(profile_name)) {
             (void)simrv::core::load_cpu_config(*resolved, model);
         }
@@ -493,10 +492,10 @@ auto Machine::initialize() -> std::expected<void, std::string> {
 
     const unsigned int model_xlen = primary_hart().cpu_model_config.supported_xlen;
     const unsigned int target_xlen = (model_xlen != 0) ? model_xlen : simrv::xlen::kXLenBits;
-    CSRValue initial_misa = isa::misa_with_mxl(
-        config.isa.misa_override ? config.isa.isa_preset
-                                 : isa::isa_preset_bits(effective_isa_preset()),
-        target_xlen);
+    CSRValue initial_misa =
+        isa::misa_with_mxl(config.isa.misa_override ? config.isa.isa_preset
+                                                    : isa::isa_preset_bits(effective_isa_preset()),
+                           target_xlen);
     config.isa.isa_preset = initial_misa;
     if constexpr (simrv::xlen::kIsXLen64) {
         bool is_32bit = (target_xlen == 32);
@@ -565,7 +564,8 @@ auto Machine::initialize() -> std::expected<void, std::string> {
     load_image_into_ram(config.files.binary_path, ram_view(), "memory", tui_enabled(), this);
     symbol_table().load_from_elf(
         config.debug.spike_elf.empty() ? config.files.binary_path : config.debug.spike_elf, true,
-        runtime_profile.interaction == InteractionMode::Tui
+        (runtime_profile.interaction == InteractionMode::Tui ||
+         !config.debug.architecture_trace_path.empty() || !config.debug.trace_function.empty())
             ? simrv::debug::SymbolLoadMode::FullDebug
             : simrv::debug::SymbolLoadMode::RuntimeEssentials);
 
@@ -710,6 +710,7 @@ auto Machine::initialize() -> std::expected<void, std::string> {
         execution_state_.store(ExecutionState::Paused, std::memory_order_release);
     }
 
+    publish_lifecycle_event(LifecycleEventKind::Initialized);
     return {};
 }
 

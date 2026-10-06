@@ -4,7 +4,9 @@
  */
 #include "simrv/core/Cpu.hpp"
 
+#include <array>
 #include <atomic>
+#include <string_view>
 
 #include "simrv/core/Machine.hpp"
 #include "simrv/core/PlatformTiming.hpp"
@@ -117,7 +119,9 @@ void CPU::apply_cpu_model_config(const simrv::pipeline::CpuModelConfig& config) 
     branch_predictor.reset();
     const unsigned int target_xlen =
         (config.supported_xlen != 0) ? config.supported_xlen : simrv::xlen::kXLenBits;
-    state_.misa = isa::misa_with_mxl(isa::isa_preset_bits(config.isa_preset), target_xlen);
+    state_.misa = isa::misa_with_mxl(
+        isa::isa_preset_bits(config.isa_preset) | isa::misa_extension_bit(isa::IsaExtension::X),
+        target_xlen);
     state_.initialize_lower_xlen_fields();
     if (machine_ != nullptr) {
         machine_->dma_engine().set_config(config.dma);
@@ -126,6 +130,7 @@ void CPU::apply_cpu_model_config(const simrv::pipeline::CpuModelConfig& config) 
 
 void CPU::reset() {
     state_ = ArchState{};
+    state_.misa |= isa::misa_extension_bit(isa::IsaExtension::X);
     prev_state_ = ArchState{};
     pipeline_context = simrv::pipeline::PipelineContext{};
     plic_mmio.reset();
@@ -269,6 +274,9 @@ void CPU::raise_exception(TrapCause cause, CSRValue tval) {
 }
 
 void CPU::evaluate_timer_interrupt() {
+    const bool trace_interrupts =
+        machine_ != nullptr && machine_->trace().is_architecture_trace_enabled();
+    const CSRValue pending_before = trace_interrupts ? state_.mip : 0;
     Counter cur_mtime = 0;
     Counter cur_mtimecmp = 0;
     bool is_supervisor_timer = false;
@@ -303,6 +311,18 @@ void CPU::evaluate_timer_interrupt() {
             state_.mip &= ~enum_mask(MipBit::Mtip);
     }
     state_.refresh_supervisor_pending();
+    if (machine_ != nullptr) {
+        const auto log_transition = [&](MipBit bit, TrapCause code, std::string_view source) {
+            const bool before = (pending_before & enum_mask(bit)) != 0;
+            const bool after = (state_.mip & enum_mask(bit)) != 0;
+            if (before != after) {
+                machine_->trace().log_interrupt_signal(*this, kInterruptCauseBit | code, after,
+                                                       source);
+            }
+        };
+        log_transition(MipBit::Mtip, 7, "aclint_mtimer");
+        log_transition(MipBit::Stip, 5, "aclint_mtimer");
+    }
 }
 
 void CPU::run_fast_cycle_miss(Machine& machine) {
@@ -399,6 +419,49 @@ void CPU::run_cycle(Machine& machine) {
         const bool writeback_stalled =
             ca_pipeline.writeback->remaining_latency != 0 ||
             (three_stage && (ca_state.data_transfer.active || data_walk));
+        if (machine.trace().is_architecture_trace_enabled()) {
+            std::array<simrv::core::PipelineStallRecord, 5> stall_storage{};
+            size_t stall_count = 0;
+            const auto add_stall = [&stall_storage, &stall_count](
+                                       std::string_view stage,
+                                       const pipeline::CycleInstructionSlot& slot, bool stalled,
+                                       std::string_view reason) {
+                if (!stalled) return;
+                stall_storage[stall_count++] = {.stage = stage,
+                                                .pc = slot.context.cpc.raw(),
+                                                .remaining_cycles = slot.remaining_latency,
+                                                .reason = reason};
+            };
+            add_stall("fetch", *ca_pipeline.fetch, fetch_stalled,
+                      ca_pipeline.fetch->remaining_latency != 0
+                          ? "latency"
+                          : (ca_state.instruction_fill.active ? "instruction_fill" : "page_walk"));
+            if (!three_stage) {
+                add_stall("decode", *ca_pipeline.decode, decode_stalled, "data_hazard");
+            }
+            add_stall("execute", three_stage ? *ca_pipeline.decode : *ca_pipeline.execute,
+                      execute_stalled,
+                      ca_pipeline.data_hazard_stall
+                          ? "data_hazard"
+                          : ((three_stage ? ca_pipeline.decode->remaining_latency
+                                          : ca_pipeline.execute->remaining_latency) != 0
+                                 ? "latency"
+                                 : "downstream_backpressure"));
+            if (!three_stage) {
+                add_stall("memory", *ca_pipeline.memory, memory_stalled,
+                          data_walk
+                              ? "page_walk"
+                              : (ca_state.data_transfer.active ? "data_transfer" : "latency"));
+            }
+            add_stall("writeback",
+                      ca_pipeline.writeback->valid ? *ca_pipeline.writeback : *ca_pipeline.retired,
+                      writeback_stalled,
+                      data_walk ? "page_walk"
+                                : (ca_state.data_transfer.active ? "data_transfer" : "latency"));
+            machine.trace().log_pipeline_stalls(
+                *this, std::span<const simrv::core::PipelineStallRecord>(stall_storage.data(),
+                                                                         stall_count));
+        }
         if (simrv::compiler::unlikely(record_snapshots)) {
             const bool icache_miss =
                 ca_state.instruction_fill.active || ca_pipeline.fetch->icache_miss;

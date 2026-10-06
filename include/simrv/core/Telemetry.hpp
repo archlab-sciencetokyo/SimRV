@@ -10,8 +10,12 @@
 namespace simrv::core {
 
 enum class LifecycleEventKind : uint8_t {
+    Initialized,
     Started,
+    Running,
     Stopped,
+    Completed,
+    Failed,
     RebootRequested,
     ExitRequested,
 };

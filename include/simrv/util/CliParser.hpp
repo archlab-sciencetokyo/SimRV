@@ -41,8 +41,18 @@ struct RuntimeOptions {
     std::string fn_archtrace;
     std::string trace_dir = "trace";
     uint8_t trace_level = 3;
+    std::string trace_events;
+    std::string trace_function;
+    std::string trace_device;
+    std::optional<uint32_t> trace_hart;
+    std::optional<Address> trace_pc_start;
+    std::optional<Address> trace_pc_end;
+    std::optional<Counter> trace_after_cycle;
+    std::optional<Counter> trace_before_cycle;
     std::string fn_save_checkpoint;
     std::string fn_load_checkpoint;
+    Counter checkpoint_every = 0;
+    std::string checkpoint_dir;
     std::string inspection_output;
 
     Address start_pc = simrv::boot::kStartPc;
@@ -66,6 +76,7 @@ struct RuntimeOptions {
     bool verbose = false;
     bool quiet = false;
     std::optional<simrv::log::Level> log_level;
+    simrv::log::Format log_format = simrv::log::Format::Text;
     bool dlog_mode = false;
     bool traplog_mode = false;
     bool use_disk = false;
