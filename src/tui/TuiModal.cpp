@@ -652,6 +652,20 @@ auto TuiModal::handle_click(int x, int y, int term_width, int term_height) -> Mo
     return ModalClickResult::Handled;
 }
 
+auto TuiModal::is_control_at(int x, int y) const -> bool {
+    if (active_modal_ == ModalType::None || rendered_box_width_ == 0 || rendered_box_height_ == 0)
+        return false;
+    const int relative_y = y - rendered_start_y_ - 1;
+    const int control_column = x - rendered_start_x_ - 3;
+    for (const auto& row : rendered_control_rows_) {
+        if (row.relative_y != relative_y) continue;
+        return std::ranges::any_of(row.spans, [control_column](const auto& span) {
+            return span.contains(control_column);
+        });
+    }
+    return false;
+}
+
 void TuiModal::render_overlay(std::vector<std::string>& lines, int term_width,
                               int term_height) const {
     if (active_modal_ == ModalType::None || lines.empty()) return;

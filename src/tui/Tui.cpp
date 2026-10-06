@@ -52,6 +52,8 @@ static struct termios
     g_saved_termios;                  // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 static bool g_termios_saved = false;  // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 static bool g_tui_active = false;     // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
+static volatile std::sig_atomic_t g_osc22_pointer_enabled =
+    0;  // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 
 namespace {
 
@@ -86,6 +88,11 @@ void write_all(int fd, std::string_view data) {
 extern "C" void emergency_terminal_restore() {
     std::fflush(stdout);
     if (g_tui_active) {
+        if (g_osc22_pointer_enabled != 0) {
+            constexpr std::string_view reset_pointer = "\033]22;default\033\\";
+            (void)::write(STDOUT_FILENO, reset_pointer.data(), reset_pointer.size());
+            g_osc22_pointer_enabled = 0;
+        }
         const char* shutdown_seq =
             "\033[0m\033[?1016l\033[?1006l\033[?1003l\033[?1000l\033[?25h\033[2J\033[H\033[?"
             "1049l\n";
@@ -100,6 +107,11 @@ extern "C" void emergency_terminal_restore() {
 static void handle_termination_signal(int sig) {
     if (g_tui_active) {
         using namespace std::string_view_literals;
+        if (g_osc22_pointer_enabled != 0) {
+            auto constexpr reset_pointer = "\033]22;default\033\\"sv;
+            (void)::write(STDOUT_FILENO, reset_pointer.data(), reset_pointer.size());
+            g_osc22_pointer_enabled = 0;
+        }
         auto constexpr shutdown_seq =
             "\033[0m\033[?1016l\033[?1006l\033[?1003l\033[?1000l\033[?25h\033[2J\033[H\033[?1049l\n"sv;
         (void)(::write(STDOUT_FILENO, shutdown_seq.data(), shutdown_seq.size()) == 0);
@@ -228,9 +240,10 @@ void Tui::initialize() {
     term.c_cc[VTIME] = 0;
     tcsetattr(STDIN_FILENO, TCSANOW, &term);
 
-    // Query character cell size in pixels (\033[16t) and primary device attributes for Sixel
-    // support (\033[c)
-    (void)(::write(STDOUT_FILENO, "\033[16t\033[c", 9) == 0);
+    // Query OSC 22 pointer-shape support, cell pixel size, and primary device attributes.
+    constexpr std::string_view terminal_queries =
+        "\033]22;?pointer\033\\\033]22;?__current__\033\\\033[16t\033[c";
+    write_all(STDOUT_FILENO, terminal_queries);
 
     // Read the response from stdin in raw mode with 100ms timeout
     std::string resp;
@@ -246,7 +259,12 @@ void Tui::initialize() {
         if (select(STDIN_FILENO + 1, &read_fds, nullptr, nullptr, &tv) > 0) {
             if (::read(STDIN_FILENO, &query_ch, 1) == 1) {
                 resp.push_back(query_ch);
-                if (resp.contains('t') && resp.contains('c')) {
+                const auto cell_reply = resp.find("\033[6;");
+                const auto da1_reply = resp.find("\033[?");
+                if (cell_reply != std::string::npos &&
+                    resp.find('t', cell_reply) != std::string::npos &&
+                    da1_reply != std::string::npos &&
+                    resp.find('c', da1_reply) != std::string::npos) {
                     break;
                 }
             }
@@ -254,7 +272,8 @@ void Tui::initialize() {
     }
 
     // 1. Cell size response \033[6;<H>;<W>t
-    size_t t_pos = resp.find('t');
+    size_t cell_start = resp.find("\033[6;");
+    size_t t_pos = cell_start == std::string::npos ? std::string::npos : resp.find('t', cell_start);
     if (t_pos != std::string::npos) {
         size_t seq_start = resp.rfind("\033[6;", t_pos);
         if (seq_start != std::string::npos) {
@@ -289,7 +308,9 @@ void Tui::initialize() {
     }
 
     bool da1_sixel = false;
-    size_t c_pos = resp.find('c');
+    size_t da_start_pos = resp.find("\033[?");
+    size_t c_pos =
+        da_start_pos == std::string::npos ? std::string::npos : resp.find('c', da_start_pos);
     if (c_pos != std::string::npos) {
         size_t da_start = resp.rfind("\033[?", c_pos);
         if (da_start != std::string::npos) {
@@ -311,6 +332,29 @@ void Tui::initialize() {
     }
 
     sixel_supported_ = env_sixel || da1_sixel;
+
+    // OSC 22 is optional. Only send shape changes after an explicit positive reply.
+    osc22_pointer_supported_ = resp.find("\033]22;1\033\\") != std::string::npos ||
+                               resp.find("\033]22;1\a") != std::string::npos;
+    const auto current_query = resp.find("?__current__");
+    const auto current = current_query == std::string::npos ? std::string::npos
+                                                            : resp.find("\033]22;", current_query);
+    for (std::string_view terminator : {std::string_view("\033\\"), std::string_view("\a")}) {
+        if (current == std::string::npos) break;
+        const auto value_start = current + 5;
+        const auto value_end = resp.find(terminator, value_start);
+        if (value_end == std::string::npos) continue;
+        const auto value = std::string_view(resp).substr(value_start, value_end - value_start);
+        if (value == "0" || value.empty()) {
+            prior_pointer_shape_ = "default";
+        } else if (std::ranges::all_of(value, [](unsigned char ch) {
+                       return std::isalnum(ch) != 0 || ch == '_' || ch == '-';
+                   })) {
+            prior_pointer_shape_ = value;
+        }
+        break;
+    }
+    g_osc22_pointer_enabled = osc22_pointer_supported_ ? 1 : 0;
 
     g_tui_active = true;
 
@@ -337,6 +381,14 @@ void Tui::shutdown() {
     stop_ui_thread();
     if (backend_) backend_->detach();
     simrv::log::set_tui_callback(nullptr);
+    if (osc22_pointer_supported_) {
+        std::string sequence = "\033]22;";
+        sequence += prior_pointer_shape_;
+        sequence += "\033\\";
+        write_all(STDOUT_FILENO, sequence);
+        g_osc22_pointer_enabled = 0;
+        pointer_is_clickable_ = false;
+    }
     emergency_terminal_restore();
 
     struct sigaction sa{};
@@ -1686,6 +1738,63 @@ void Tui::handle_mouse(int x, int y, int b) {
         const int col_width = col_widths.widths[clicked_col];
         handle_mouse_inspector(col_local_x + 2, y, b, is_multi, is_secondary, col_width);
     }
+}
+
+auto Tui::is_clickable_at(int x, int y, int term_width, int term_height) const -> bool {
+    if (is_modal_active()) return modal_.is_control_at(x, y);
+    if (y == 2 && status_bar_) {
+        return status_bar_->get_header_action_at_col(x, term_width).action != HeaderAction::None ||
+               status_bar_->is_pos_on_status_badge(x, term_width);
+    }
+    if (status_bar_ && (y == term_height - 2 || y == term_height - 1)) {
+        const int row = y == term_height - 2 ? 0 : 1;
+        if (status_bar_->get_footer_action_at_col(x - 2, row, term_width).has_value()) return true;
+    }
+
+    const auto columns = column_widths(term_width);
+    size_t column = 0;
+    int start_x = 1;
+    for (size_t i = 0; i < columns.count; ++i) {
+        if (x >= start_x && x < start_x + columns.widths[i] + 1) {
+            column = i;
+            break;
+        }
+        start_x += columns.widths[i] + 1;
+    }
+    if (column >= workbench_slots_.size()) return false;
+    if (columns.count > 1 && y == 4) return true;
+    if (columns.count == 1 && inspector_pane_ && (y == 4 || y == 5)) {
+        return inspector_pane_->get_tab_at(y == 4 ? 0 : 1, x - 2).has_value() || y == 4;
+    }
+    if (!inspector_pane_ || workbench_slots_[column].page == TuiRegPage::DISPLAY || !paused_)
+        return false;
+    const int content_start_y = columns.count > 1 ? 5 : 6;
+    if (y < content_start_y) return false;
+    const int logical_row = y - content_start_y + inspector_pane_->get_scroll_offset();
+    switch (workbench_slots_[column].page) {
+        case TuiRegPage::CACHE:
+            return logical_row == 0 || logical_row == 4;
+        case TuiRegPage::PIPELINE:
+            return inspector_pane_->get_pipeline_pc_at_row(logical_row) != 0;
+        case TuiRegPage::EXPLAIN:
+            return logical_row <= 1;
+        case TuiRegPage::GPR:
+        case TuiRegPage::FPR:
+            return inspector_pane_
+                ->get_register_value_at_row(logical_row, x, columns.widths[column])
+                .has_value();
+        case TuiRegPage::STACK:
+            return inspector_pane_->get_stack_addr_at_row(logical_row).has_value();
+        default:
+            return false;
+    }
+}
+
+void Tui::update_pointer_shape(bool clickable) {
+    if (!osc22_pointer_supported_ || pointer_is_clickable_ == clickable) return;
+    pointer_is_clickable_ = clickable;
+    std::string sequence = clickable ? "\033]22;pointer\033\\" : "\033]22;default\033\\";
+    write_all(STDOUT_FILENO, sequence);
 }
 
 void Tui::sync_workbench_slots() {
@@ -4171,6 +4280,15 @@ auto Tui::consume_control_sequence(uint8_t first_byte) -> bool {
         // Motion events (button | 32) are generated by ?1003h (all-motion mode) and
         // must be consumed here - never forwarded to the guest UART.
         if (esc_buf_.back() == 'M' && (button & 32) != 0) {
+            struct winsize pointer_w{};
+            ioctl(STDOUT_FILENO, TIOCGWINSZ, &pointer_w);
+            const int pointer_width = cached_term_width_ > 0
+                                          ? cached_term_width_
+                                          : (pointer_w.ws_col > 0 ? pointer_w.ws_col : 80);
+            const int pointer_height = cached_term_height_ > 0
+                                           ? cached_term_height_
+                                           : (pointer_w.ws_row > 0 ? pointer_w.ws_row : 24);
+            update_pointer_shape(is_clickable_at(x, y, pointer_width, pointer_height));
             if (selection_.is_selecting) {
                 int local_end_x = std::clamp(x - selection_.col_start_x, 0,
                                              std::max(0, selection_.pane_width - 1));

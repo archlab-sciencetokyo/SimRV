@@ -8,6 +8,8 @@
 #include <unistd.h>
 
 #include <cstdint>
+#include <cstdlib>
+#include <filesystem>
 #include <format>
 #include <string>
 #include <string_view>
@@ -53,6 +55,75 @@ inline auto format_scaled(uint64_t val) -> std::string {
  * @return True if fd is a TTY.
  */
 inline auto is_terminal(int fd) -> bool { return ::isatty(fd) != 0; }
+
+/** Decide whether CLI presentation should emit ANSI color under standard environment policy. */
+inline auto color_enabled(bool terminal, std::string_view term, bool no_color,
+                          bool force_color) noexcept -> bool {
+    if (force_color) return true;
+    if (no_color || term == "dumb") return false;
+    return terminal;
+}
+
+inline auto terminal_color_enabled(int fd) noexcept -> bool {
+    const char* term_value = std::getenv("TERM");
+    const char* no_color_value = std::getenv("NO_COLOR");
+    const char* force_color_value = std::getenv("FORCE_COLOR");
+    const auto has_value = [](const char* value) { return value != nullptr && value[0] != '\0'; };
+    const bool force_disabled =
+        force_color_value != nullptr && std::string_view(force_color_value) == "0";
+    return color_enabled(is_terminal(fd), term_value == nullptr ? "" : term_value,
+                         has_value(no_color_value) || force_disabled,
+                         has_value(force_color_value) && !force_disabled);
+}
+
+inline auto terminal_path_label(const std::filesystem::path& path, int fd) -> std::string {
+    auto label = path.string();
+    const char* term_value = std::getenv("TERM");
+    const bool links =
+        is_terminal(fd) && (term_value == nullptr || std::string_view(term_value) != "dumb");
+    if (!links) return label;
+
+    std::error_code error;
+    const auto absolute = std::filesystem::absolute(path, error);
+    if (error) return label;
+    constexpr char kHex[] = "0123456789ABCDEF";
+    std::string uri = "file://";
+    for (const unsigned char byte : absolute.string()) {
+        const bool unreserved = (byte >= 'a' && byte <= 'z') || (byte >= 'A' && byte <= 'Z') ||
+                                (byte >= '0' && byte <= '9') || byte == '-' || byte == '_' ||
+                                byte == '.' || byte == '~' || byte == '/';
+        if (unreserved) {
+            uri += static_cast<char>(byte);
+        } else {
+            uri += '%';
+            uri += kHex[byte >> 4];
+            uri += kHex[byte & 0x0f];
+        }
+    }
+    for (auto& ch : label) {
+        if (static_cast<unsigned char>(ch) < 0x20 || ch == 0x7f) ch = '?';
+    }
+    return std::format("\033]8;;{}\033\\{}\033]8;;\033\\", uri, label);
+}
+
+/**
+ * @brief Check whether this process owns the foreground interactive terminal.
+ *
+ * A descriptor may refer to a tty without this process being its foreground owner. Batch and
+ * redirected CLI runs must not try to change terminal attributes.
+ */
+inline auto owns_interactive_terminal(int input_fd = STDIN_FILENO, int output_fd = STDOUT_FILENO)
+    -> bool {
+    if (!is_terminal(input_fd) || !is_terminal(output_fd)) return false;
+    const auto foreground_group = ::tcgetpgrp(input_fd);
+    return foreground_group >= 0 && foreground_group == ::getpgrp();
+}
+
+inline auto interactive_tui_available() noexcept -> bool {
+    const char* term_value = std::getenv("TERM");
+    return owns_interactive_terminal() &&
+           (term_value == nullptr || std::string_view(term_value) != "dumb");
+}
 
 namespace ansi {
 constexpr std::string_view kReset = "\033[0m";

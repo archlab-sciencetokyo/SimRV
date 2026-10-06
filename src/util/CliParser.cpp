@@ -4,6 +4,7 @@
  */
 #include "simrv/util/CliParser.hpp"
 
+#include <sys/ioctl.h>
 #include <unistd.h>
 
 #include <algorithm>
@@ -13,6 +14,7 @@
 #include <print>
 #include <span>
 #include <string>
+#include <vector>
 
 #include "simrv/core/CpuConfigParser.hpp"
 #include "simrv/core/Logger.hpp"
@@ -920,6 +922,10 @@ auto parse_debug_cosrv_options(std::string_view arg, std::span<char* const> args
         options.trace_level = static_cast<uint8_t>(*value);
         return true;
     }
+    if (arg == "--trace-register-writes") {
+        options.trace_register_writes = true;
+        return true;
+    }
     if (arg == "--trace-events") {
         auto value = next_argument(args, i, arg);
         if (!value) return std::unexpected(value.error());
@@ -1180,11 +1186,11 @@ auto parse_command_line(std::span<char* const> args) -> std::expected<ParseResul
         if (!res_debug) return std::unexpected(res_debug.error());
         if (*res_debug) continue;
 
-        return std::unexpected(std::format("unknown option : {}", arg));
+        return std::unexpected(std::format("unknown option '{}'", arg));
     }
 
     if (!result.options.explicit_cli_mode && !result.options.explicit_tui_mode) {
-        result.options.tuimode = (::isatty(STDIN_FILENO) != 0);
+        result.options.tuimode = simrv::util::interactive_tui_available();
     }
 
     if (result.options.gdb_mode) {
@@ -1208,6 +1214,9 @@ auto parse_command_line(std::span<char* const> args) -> std::expected<ParseResul
     if (result.options.trace_after_cycle && result.options.trace_before_cycle &&
         *result.options.trace_after_cycle > *result.options.trace_before_cycle) {
         return std::unexpected("--trace-after-cycle must not exceed --trace-before-cycle");
+    }
+    if (result.options.trace_register_writes && result.options.fn_archtrace.empty()) {
+        return std::unexpected("--trace-register-writes requires --arch-trace");
     }
     if (result.options.trace_hart && *result.options.trace_hart >= result.options.num_harts) {
         return std::unexpected("--trace-hart must identify a configured hart");
@@ -1298,6 +1307,7 @@ auto RuntimeOptions::to_machine_config() const -> simrv::core::MachineConfig {
     cfg.debug.trace_dir = trace_dir;
     cfg.debug.architecture_trace_path = fn_archtrace;
     cfg.debug.trace_level = trace_level;
+    cfg.debug.trace_register_writes = trace_register_writes;
     cfg.debug.trace_events = trace_events;
     cfg.debug.trace_function = trace_function;
     cfg.debug.trace_device = trace_device;
@@ -1485,359 +1495,178 @@ auto needs_memory_image(const ParseResult& result) -> bool {
 }
 
 [[noreturn]] auto usage(std::string_view prog_name, int status) -> void {
-    const auto xlen_suffix = simrv::xlen::kIsXLen64 ? "64" : "32";
-    const bool use_color = simrv::util::is_terminal(STDOUT_FILENO);
-
+    const bool use_color = simrv::util::terminal_color_enabled(STDOUT_FILENO);
     auto style = [use_color](std::string_view ansi_code) -> std::string_view {
         return use_color ? ansi_code : "";
     };
-
     using namespace simrv::util::ansi;
+    struct HelpEntry {
+        std::string_view option;
+        std::string_view description;
+    };
+    struct HelpSection {
+        std::string_view title;
+        std::vector<HelpEntry> entries;
+    };
+    std::vector<HelpSection> sections{
+        {"Basic and image loading",
+         {{"-m, --image, --memory <FILE>", "Load an ELF or raw binary image."},
+          {"--pc, --start-pc <ADDR>", "Set the initial program counter (default: 0x80000000)."},
+          {"-b, --baremetal", "Run a bare-metal application (default)."},
+          {"--os", "Boot an operating system (Linux or RTOS)."},
+          {"-D, --disk, --rootfs <FILE>", "Attach a VirtIO block storage image."},
+          {"-f, --fdt, --dtb <FILE>", "Load a device tree blob."}}},
+        {"Architecture and hardware",
+         {{"-j, --harts, --smp <N>", "Set active harts (1–16; SMP uses 2–16)."},
+          {"--smp-quantum <N>", "Set the round-robin quantum in cycles (default: 100)."},
+          {"--smp-multithreaded", "Enable multi-threaded host SMP simulation."},
+          {"--dram-size, --ram-size <SIZE>", "Set DRAM size (for example, 128M or 2G)."},
+          {"--isa <ISA>", "Select a RISC-V ISA profile such as rv32gc or rv64gc."},
+          {"--vlen <BITS>", "Set vector register length (128–1024; default: 256)."},
+          {"--soc, --platform <PRESET>", "Select virt-pcie, virt-mmio, or rvcomp."},
+          {"--dump-soc-manifest <PRESET> [FILE]", "Export the normalized SoC registry as JSON."},
+          {"--net <BACKEND>", "Select the VirtIO network backend: user, tap, socket, or none."}}},
+        {"Execution and pipeline",
+         {{"-s, -e, --steps <N>", "Stop after N instructions retire across all harts."},
+          {"-t, -l, --timer <N>", "Raise a CLINT timer interrupt after N cycles."},
+          {"-R, --realtime", "Throttle execution to host real time (1:1)."},
+          {"--no-realtime", "Disable real-time pacing and run at maximum speed."},
+          {"--mode <MODE>", "Select fast, detailed, or cycle-accurate execution."},
+          {"--pipeline <TYPE>", "Select the CA pipeline: 3stage or 5stage (default)."},
+          {"--no-forwarding", "Disable operand forwarding."},
+          {"--bpred <TYPE>", "Select none, static, bimodal, gshare, or tournament prediction."},
+          {"--bht-size <N>", "Set branch history table entries."},
+          {"--btb-size <N>", "Set branch target buffer entries."},
+          {"--ras-size <N>", "Set return address stack entries."},
+          {"--cpu-config <FILE>", "Load a microarchitectural latency configuration."},
+          {"--cpu-preset <PRESET>", "Select tiny, balanced, performance, or a model file."},
+          {"--dump-cpu-model <MODEL> [FILE]", "Write a CPU model configuration."},
+          {"--scaffold-cpu-model [FILE]", "Generate a starter CPU model configuration."},
+          {"--validate-cpu-config <FILE>", "Validate and lint a CPU model configuration."},
+          {"--cfu-plugin <LIB.SO>", "Load a dynamic custom function unit plugin."},
+          {"--bram-prewarm / --no-bram-prewarm", "Control ELF cache prewarming for BRAM parity."}}},
+        {"Logging and tracing",
+         {{"--log-level <LEVEL>", "Set trace, debug, info, warn, error, or off."},
+          {"--log-format <FORMAT>", "Select text, json, or json-pretty diagnostics."},
+          {"-q, --quiet", "Suppress informational startup logs."},
+          {"-v, --verbose", "Enable debug diagnostics."},
+          {"--log-file <FILE>", "Mirror timestamped diagnostics to a file."},
+          {"--trace-dir <DIR>", "Set the root directory for trace artifacts (default: trace)."},
+          {"--log-mmio, --dlog", "Record MMIO transactions."},
+          {"--trap-log, --traplog <FILE>", "Write architectural trap and SBI events."},
+          {"--arch-trace <FILE>", "Write JSONL architectural retirement and profile events."},
+          {"--trace-level <0-4>", "Limit architectural event detail."},
+          {"--trace-register-writes", "Emit opt-in FP and vector register writes."},
+          {"--trace-events <LIST>", "Filter event names using a comma-separated list."},
+          {"--trace-function <NAME>", "Filter trace events by symbol name."},
+          {"--trace-device <NAME>", "Filter trace events by device or component."},
+          {"--trace-hart <ID>", "Filter by architectural hart ID."},
+          {"--trace-after-cycle <N>", "Set the inclusive start of the trace cycle window."},
+          {"--trace-before-cycle <N>", "Set the inclusive end of the trace cycle window."},
+          {"--trace-pc-range <START-END>", "Filter architectural events by inclusive PC range."},
+          {"--trace-pc-period, --trace-pc <N>", "Sample the PC trace every N instructions."},
+          {"--trace", "Record a full architectural text trace."},
+          {"-r, --trace-range <BG> <EN>", "Record an execution trace snapshot for a step range."},
+          {"--trace-bpred", "Record branch prediction events."},
+          {"-I, --dump-init <N>", "Dump architectural memory and TLB state at cycle N."},
+          {"--instmix", "Write an instruction mix report on exit."}}},
+        {"Interactive mode and reports",
+         {{"-u, --tui", "Enable the interactive TUI (default on a foreground terminal)."},
+          {"-c, --cli", "Force headless command-line execution."},
+          {"--class, --edu", "Enable classroom guidance."},
+          {"--mission <FILE>", "Load a lesson mission (requires --class and --tui)."},
+          {"--high-contrast", "Enable the high-contrast TUI palette."},
+          {"--mouse-sensitivity <F>", "Set TUI mouse sensitivity (default: 1.0)."},
+          {"--inspection-output <FILE>", "Write paused-state TUI inspection reports."},
+          {"--summary <FILE>", "Write a JSON execution summary on exit."},
+          {"--events <FILE>", "Write newline-delimited lifecycle events."},
+          {"--save-checkpoint <FILE>", "Save architectural state on exit."},
+          {"--load-checkpoint <FILE>", "Resume from an architectural checkpoint."},
+          {"--checkpoint-every <CYCLES>", "Write periodic architectural checkpoints."},
+          {"--checkpoint-dir <DIR>", "Set the periodic checkpoint output directory."}}},
+        {"Debugging and information",
+         {{"-H, --tohost-addr <ADDR>", "Set the tohost address used for test termination."},
+          {"--explain-inst <HEX>", "Disassemble and explain a 32-bit instruction."},
+          {"--gdb", "Start the GDB remote stub in CLI mode."},
+          {"--gdb-port <PORT>", "Set the GDB server port (default: 1234)."},
+          {"--lockstep", "Enable Spike lockstep verification."},
+          {"--spike-bin <PATH>", "Set the Spike executable path."},
+          {"--spike-elf <PATH>", "Set the ELF image used by Spike."},
+          {"--version", "Display the version and target architecture."},
+          {"--isa-info", "Show qualified ISA and frontend capabilities."},
+          {"--doctor", "Diagnose terminal and runtime environment."},
+          {"--license", "Display the license and copyright notice."},
+          {"-h, --help", "Show this help."}}}};
 
-    // Banner
-    std::print(stdout, "\n{}{}{} SimRV - High-Performance RISC-V Functional Simulator {}\n\n",
-               style(kBold), style(kBrightWhite), style(kReset), style(kReset));
+    auto executable = prog_name.substr(prog_name.find_last_of('/') == std::string_view::npos
+                                           ? 0
+                                           : prog_name.find_last_of('/') + 1);
+    winsize terminal_size{};
+    unsigned terminal_width = 80;
+    if (::ioctl(STDOUT_FILENO, TIOCGWINSZ, &terminal_size) == 0 && terminal_size.ws_col >= 60)
+        terminal_width = terminal_size.ws_col;
+    terminal_width = std::clamp(terminal_width, 60U, 120U);
+    std::size_t option_width = 0;
+    for (const auto& section : sections)
+        for (const auto& entry : section.entries)
+            option_width = std::max(option_width, entry.option.size());
+    const std::size_t description_width = std::max<std::size_t>(
+        20, terminal_width > option_width + 6 ? terminal_width - option_width - 6 : 20);
 
-    // Usage
-    std::print(stdout, "{}Usage:{} {}{} [options]{}\n\n", style(kBold), style(kReset),
-               style(kBrightGreen), prog_name, style(kReset));
-
-    // Basic & Image Loading
-    std::print(stdout, "{}{}:{}{}\n", style(kBoldFgBrightBlue), "Basic and Image Loading",
-               style(kReset), style(kReset));
+    std::print(stdout, "{}SimRV{} — RISC-V simulator\n", style(kBoldFgBrightBlue), style(kReset));
+    std::print(stdout, "{}Usage:{} {} [options]\n\n", style(kBold), style(kReset), executable);
+    for (const auto& section : sections) {
+        std::print(stdout, "{}{}{}\n", style(kBoldFgBrightBlue), section.title, style(kReset));
+        for (const auto& entry : section.entries) {
+            std::size_t position = 0;
+            bool first_line = true;
+            while (position < entry.description.size()) {
+                while (position < entry.description.size() && entry.description[position] == ' ')
+                    ++position;
+                const auto line_start = position;
+                std::size_t line_end = line_start;
+                std::size_t line_length = 0;
+                while (position < entry.description.size()) {
+                    const auto word_end = entry.description.find(' ', position);
+                    const auto end =
+                        word_end == std::string_view::npos ? entry.description.size() : word_end;
+                    const auto word_length = end - position;
+                    if (line_length != 0 && line_length + 1 + word_length > description_width)
+                        break;
+                    line_length += (line_length == 0 ? 0 : 1) + word_length;
+                    line_end = end;
+                    position = end;
+                    if (position < entry.description.size()) ++position;
+                }
+                std::string wrapped(entry.description.substr(line_start, line_end - line_start));
+                std::print(stdout, "  {}{:<{}}{}  {}\n", style(kBrightGreen),
+                           first_line ? entry.option : std::string_view{}, option_width,
+                           style(kReset), wrapped);
+                first_line = false;
+            }
+        }
+        std::println(stdout);
+    }
     std::print(stdout,
-               "  {}-m, --image, --memory {}{}<FILE>{}  Memory/kernel image file to load (ELF or "
-               "raw binary)\n",
-               style(kBrightGreen), style(kBrightBlack), style(kReset), style(kReset));
+               "{}Numeric values accept scaled suffixes:{} k/K (10³), m/M (10⁶), g/G (10⁹).\n\n",
+               style(kBold), style(kReset));
+    std::print(stdout, "{}Examples{}\n", style(kBoldFgBrightBlue), style(kReset));
+    std::print(stdout, "  {} -m img/hello.bin -b\n", executable);
     std::print(
         stdout,
-        "  {}--pc, --start-pc {}{}<ADDR>{}        Initial program counter (default: 0x80000000)\n",
-        style(kBrightGreen), style(kBrightBlack), style(kReset), style(kReset));
-    std::print(
-        stdout,
-        "  {}-b, --baremetal{}                  Baremetal application execution mode (default)\n",
-        style(kBrightGreen), style(kReset));
-    std::print(stdout,
-               "  {}--os{}                              Operating system boot mode (Linux/RTOS)\n",
-               style(kBrightGreen), style(kReset));
-    std::print(stdout, "  {}-D, --disk, --rootfs {}{}<FILE>{}   VirtIO block storage disk image\n",
-               style(kBrightGreen), style(kBrightBlack), style(kReset), style(kReset));
-    std::print(
-        stdout,
-        "  {}-f, --fdt, --dtb {}{}<FILE>{}       Device tree blob (FDT/DTB configuration)\n\n",
-        style(kBrightGreen), style(kBrightBlack), style(kReset), style(kReset));
-
-    // Architecture & Hardware
-    std::print(stdout, "{}{}:{}{}\n", style(kBoldFgBrightBlue), "Architecture and Hardware",
-               style(kReset), style(kReset));
-    std::print(stdout,
-               "  {}-j, --harts, --smp {}{}<N>{}        Active core count (1 to 16, default: 1; "
-               "SMP: 2 to 16)\n",
-               style(kBrightGreen), style(kBrightBlack), style(kReset), style(kReset));
-    std::print(
-        stdout,
-        "  {}--smp-quantum {}{}<N>{}             Round-robin quantum in cycles (default: 100)\n",
-        style(kBrightGreen), style(kBrightBlack), style(kReset), style(kReset));
-    std::print(stdout,
-               "  {}--smp-multithreaded{}             Enable multi-threaded host SMP simulation\n",
-               style(kBrightGreen), style(kReset));
-    std::print(stdout,
-               "  {}--dram-size, --ram-size {}{}<SIZE>{} DRAM size in bytes (e.g. 128M, 2G; "
-               "default: 1G for Linux, 256M otherwise)\n",
-               style(kBrightGreen), style(kBrightBlack), style(kReset), style(kReset));
-    std::print(stdout,
-               "  {}--isa {}{}<ISA>{}                   Select ISA preset/string (e.g. rv{}gc or "
-               "rv{}gc_zicntr)\n",
-               style(kBrightGreen), style(kBrightBlack), style(kReset), style(kReset), xlen_suffix,
-               xlen_suffix);
-    std::print(stdout,
-               "  {}--vlen {}{}<BITS>{}                 Vector register length VLEN (128-1024; "
-               "default: 256)\n",
-               style(kBrightGreen), style(kBrightBlack), style(kReset), style(kReset));
-    std::print(stdout,
-               "  {}--soc, --platform {}{}<PRESET>{}    Select the complete SoC: virt-pcie | "
-               "virt-mmio | rvcomp\n",
-               style(kBrightGreen), style(kBrightBlack), style(kReset), style(kReset));
-    std::print(stdout,
-               "  {}--dump-soc-manifest {}{}<PRESET> [FILE]{} Export the normalized SoC registry "
-               "as JSON\n",
-               style(kBrightGreen), style(kBrightBlack), style(kReset), style(kReset));
-    std::print(stdout,
-               "  {}--net {}{}<BACKEND>{}               VirtIO network backend: user | tap | "
-               "socket | none\n\n",
-               style(kBrightGreen), style(kBrightBlack), style(kReset), style(kReset));
-
-    // Execution & Pipeline Engine
-    std::print(stdout, "{}{}:{}{}\n", style(kBoldFgBrightBlue), "Execution Control and Pipeline",
-               style(kReset), style(kReset));
-    std::print(stdout,
-               "  {}-s, -e, --steps {}{}<N>{}           Stop after N instructions retired across "
-               "all harts\n",
-               style(kBrightGreen), style(kBrightBlack), style(kReset), style(kReset));
-    std::print(
-        stdout,
-        "  {}-t, -l, --timer {}{}<N>{}           Enable CLINT timer interrupt after N cycles\n",
-        style(kBrightGreen), style(kBrightBlack), style(kReset), style(kReset));
-    std::print(
-        stdout,
-        "  {}-R, --realtime{}                  Throttle simulation to match host real-time (1:1)\n",
-        style(kBrightGreen), style(kReset));
-    std::print(
-        stdout,
-        "  {}--no-realtime{}                   Disable real-time pacing (run at maximum speed)\n",
-        style(kBrightGreen), style(kReset));
-    std::print(
-        stdout,
-        "  {}--mode {}{}<MODE>{}                 Engine: fast, detailed, or cycle-accurate\n",
-        style(kBrightGreen), style(kBrightBlack), style(kReset), style(kReset));
-    std::print(stdout,
-               "  {}--pipeline {}{}<TYPE>{}             CA pipeline target: 3stage or 5stage "
-               "(default: 5stage)\n",
-               style(kBrightGreen), style(kBrightBlack), style(kReset), style(kReset));
-    std::print(
-        stdout,
-        "  {}--no-forwarding{}                 Disable operand forwarding in pipeline model\n",
-        style(kBrightGreen), style(kReset));
-    std::print(stdout,
-               "  {}--bpred {}{}<TYPE>{}                Branch predictor: none, static, bimodal, "
-               "gshare, tournament\n",
-               style(kBrightGreen), style(kBrightBlack), style(kReset), style(kReset));
-    std::print(stdout, "  {}--bht-size {}{}<N>{}                Branch history table entry count\n",
-               style(kBrightGreen), style(kBrightBlack), style(kReset), style(kReset));
-    std::print(stdout, "  {}--btb-size {}{}<N>{}                Branch target buffer entry count\n",
-               style(kBrightGreen), style(kBrightBlack), style(kReset), style(kReset));
-    std::print(stdout, "  {}--ras-size {}{}<N>{}                Return address stack entry count\n",
-               style(kBrightGreen), style(kBrightBlack), style(kReset), style(kReset));
-    std::print(
-        stdout,
-        "  {}--cpu-config {}{}<FILE>{}           Load microarchitectural latency configuration\n",
-        style(kBrightGreen), style(kBrightBlack), style(kReset), style(kReset));
-    std::print(stdout,
-               "  {}--cpu-preset {}{}<PRESET>{}       Microarchitectural preset (tiny, balanced, "
-               "performance) or model (.cfg)\n",
-               style(kBrightGreen), style(kBrightBlack), style(kReset), style(kReset));
-    std::print(stdout,
-               "  {}--dump-cpu-model {}{}<MODEL> [FILE]{} Dump CPU configuration to .cfg format\n",
-               style(kBrightGreen), style(kBrightBlack), style(kReset), style(kReset));
-    std::print(stdout,
-               "  {}--scaffold-cpu-model {}{}[FILE]{}   Generate starter CPU model template\n",
-               style(kBrightGreen), style(kBrightBlack), style(kReset), style(kReset));
-    std::print(
-        stdout,
-        "  {}--validate-cpu-config {}{}<FILE>{}  Validate and lint CPU model configuration\n",
-        style(kBrightGreen), style(kBrightBlack), style(kReset), style(kReset));
-    std::print(stdout,
-               "  {}--cfu-plugin {}{}<LIB.SO>{}         Load dynamic Custom Function Unit (CFU) "
-               "plugin\n",
-               style(kBrightGreen), style(kBrightBlack), style(kReset), style(kReset));
-    std::print(stdout,
-               "  {}--bram-prewarm / --no-bram-prewarm{} Pre-warm L1 caches from loaded ELF for "
-               "0-latency BRAM parity (default: auto for cfu-provingground and rvcomp)\n\n",
-               style(kBrightGreen), style(kReset));
-
-    // Logging & Tracing
-    std::print(stdout, "{}{}:{}{}\n", style(kBoldFgBrightBlue), "Logging and Tracing",
-               style(kReset), style(kReset));
-    std::print(stdout,
-               "  {}--log-level {}{}<LEVEL>{}           Console log level: trace, debug, info, "
-               "warn, error, off\n",
-               style(kBrightGreen), style(kBrightBlack), style(kReset), style(kReset));
-    std::print(
-        stdout,
-        "  {}--log-format {}{}<FORMAT>{}         Diagnostic output: text, json, json-pretty\n",
-        style(kBrightGreen), style(kBrightBlack), style(kReset), style(kReset));
-    std::print(stdout,
-               "  {}-q, --quiet{}                       Quiet mode; suppress startup logs "
-               "(log-level warn)\n",
-               style(kBrightGreen), style(kReset));
-    std::print(stdout,
-               "  {}-v, --verbose{}                     Verbose mode; emit debug diagnostics "
-               "(log-level debug)\n",
-               style(kBrightGreen), style(kReset));
-    std::print(
-        stdout,
-        "  {}--log-file {}{}<FILE>{}             Mirror timestamped console log messages to file\n",
-        style(kBrightGreen), style(kBrightBlack), style(kReset), style(kReset));
-    std::print(
-        stdout,
-        "  {}--trace-dir {}{}<DIR>{}             Root directory for generated trace artifacts "
-        "(default: trace)\n",
-        style(kBrightGreen), style(kBrightBlack), style(kReset), style(kReset));
-    std::print(
-        stdout,
-        "  {}--log-mmio, --dlog{}                Record MMIO transactions to <DIR>/dlog.txt\n",
-        style(kBrightGreen), style(kReset));
-    std::print(
-        stdout,
-        "  {}--trap-log, --traplog {}{}<FILE>{}  Write architectural trap and SBI trace log\n",
-        style(kBrightGreen), style(kBrightBlack), style(kReset), style(kReset));
-    std::print(
-        stdout,
-        "  {}--arch-trace <FILE>{}                Write JSONL retirement trace (detailed mode)\n",
-        style(kBrightGreen), style(kReset));
-    std::print(stdout,
-               "  {}--trace-level {}{}<0-4>{}             Limit architectural event detail\n",
-               style(kBrightGreen), style(kBrightBlack), style(kReset), style(kReset));
-    std::print(stdout,
-               "  {}--trace-events {}{}<LIST>{}           Filter event names (comma-separated)\n",
-               style(kBrightGreen), style(kBrightBlack), style(kReset), style(kReset));
-    std::print(stdout,
-               "  {}--trace-function / --trace-device {}{}<NAME>{} Filter by symbol / component\n",
-               style(kBrightGreen), style(kBrightBlack), style(kReset), style(kReset));
-    std::print(stdout,
-               "  {}--trace-hart {}{}<ID>{}               Filter by architectural hart ID\n",
-               style(kBrightGreen), style(kBrightBlack), style(kReset), style(kReset));
-    std::print(
-        stdout,
-        "  {}--trace-after-cycle / --trace-before-cycle {}{}<N>{} Filter inclusive cycle range\n",
-        style(kBrightGreen), style(kBrightBlack), style(kReset), style(kReset));
-    std::print(stdout,
-               "  {}--trace{}                          Record an aligned full architectural trace "
-               "to <DIR>/trace.txt\n",
-               style(kBrightGreen), style(kReset));
-    std::print(stdout,
-               "  {}-r, --trace-range {}{}<BG> <EN>{}   Record execution trace snapshot to "
-               "<DIR>/trace.txt\n",
-               style(kBrightGreen), style(kBrightBlack), style(kReset), style(kReset));
-    std::print(stdout,
-               "  {}--trace-pc-period / --trace-pc {}{}<N>{} Sample periodic PC trace to "
-               "<DIR>/tracepc.txt every N steps\n",
-               style(kBrightGreen), style(kBrightBlack), style(kReset), style(kReset));
-    std::print(stdout,
-               "  {}--trace-pc-range {}{}<START-END>{}  Filter architectural events by inclusive "
-               "PC range\n",
-               style(kBrightGreen), style(kBrightBlack), style(kReset), style(kReset));
-    std::print(stdout,
-               "  {}--trace-bpred{}                     Record branch prediction trace to "
-               "<DIR>/bpred.txt\n",
-               style(kBrightGreen), style(kReset));
-    std::print(stdout,
-               "  {}-I, --dump-init {}{}<N>{}           Dump architectural memory and TLB state at "
-               "cycle N\n",
-               style(kBrightGreen), style(kBrightBlack), style(kReset), style(kReset));
-    std::print(stdout,
-               "  {}--instmix{}                         Write instruction mix report to "
-               "<DIR>/instmix.txt on exit\n\n",
-               style(kBrightGreen), style(kReset));
-
-    // Interactive & TUI Mode
-    std::print(stdout, "{}{}:{}{}\n", style(kBoldFgBrightBlue), "Interactive and TUI Modes",
-               style(kReset), style(kReset));
-    std::print(
-        stdout,
-        "  {}-u, --tui{}                         Enable interactive TUI monitor (default in TTY)\n",
-        style(kBrightGreen), style(kReset));
-    std::print(stdout,
-               "  {}-c, --cli{}                         Force headless command-line execution\n",
-               style(kBrightGreen), style(kReset));
-    std::print(
-        stdout,
-        "  {}--class, --edu{}                    Enable classroom mode with interactive guidance\n",
-        style(kBrightGreen), style(kReset));
-    std::print(stdout,
-               "  {}--mission {}{}<FILE>{}              Load classroom lesson mission (requires "
-               "--class and --tui)\n",
-               style(kBrightGreen), style(kBrightBlack), style(kReset), style(kReset));
-    std::print(stdout,
-               "  {}--high-contrast{}                   Enable high-contrast TUI color palette\n",
-               style(kBrightGreen), style(kReset));
-    std::print(stdout,
-               "  {}--mouse-sensitivity {}{}<F>{}       Adjust TUI mouse speed scaling factor "
-               "(default: 1.0)\n",
-               style(kBrightGreen), style(kBrightBlack), style(kReset), style(kReset));
-    std::print(stdout,
-               "  {}--inspection-output {}{}<FILE>{}    Set paused-state TUI inspection report "
-               "destination\n\n",
-               style(kBrightGreen), style(kBrightBlack), style(kReset), style(kReset));
-    std::print(
-        stdout,
-        "  {}--summary {}{}<FILE>{}                  Write a JSON execution summary on exit\n\n",
-        style(kBrightGreen), style(kBrightBlack), style(kReset), style(kReset));
-    std::print(
-        stdout,
-        "  {}--events {}{}<FILE>{}                   Write newline-delimited lifecycle events\n\n",
-        style(kBrightGreen), style(kBrightBlack), style(kReset), style(kReset));
-    std::print(stdout,
-               "  {}--save-checkpoint {}{}<FILE>{}          Save architectural state on exit\n",
-               style(kBrightGreen), style(kBrightBlack), style(kReset), style(kReset));
-    std::print(
-        stdout,
-        "  {}--load-checkpoint {}{}<FILE>{}          Resume from an architectural snapshot\n\n",
-        style(kBrightGreen), style(kBrightBlack), style(kReset), style(kReset));
-    std::print(stdout,
-               "  {}--checkpoint-every {}{}<CYCLES>{}      Save periodic architectural snapshots\n",
-               style(kBrightGreen), style(kBrightBlack), style(kReset), style(kReset));
-    std::print(stdout,
-               "  {}--checkpoint-dir {}{}<DIR>{}          Destination for periodic checkpoints\n\n",
-               style(kBrightGreen), style(kBrightBlack), style(kReset), style(kReset));
-
-    // Debug & Verification
-    std::print(stdout, "{}{}:{}{}\n", style(kBoldFgBrightBlue), "Debug and Verification",
-               style(kReset), style(kReset));
-    std::print(
-        stdout,
-        "  {}-H, --tohost-addr {}{}<ADDR>{}      Custom tohost MMIO address for test termination\n",
-        style(kBrightGreen), style(kBrightBlack), style(kReset), style(kReset));
-    std::print(
-        stdout,
-        "  {}--explain-inst {}{}<HEX>{}          Disassemble and explain 32-bit hex instruction\n",
-        style(kBrightGreen), style(kBrightBlack), style(kReset), style(kReset));
-    std::print(
-        stdout,
-        "  {}--gdb{}                             Start GDB remote debugging stub in CLI mode\n",
-        style(kBrightGreen), style(kReset));
-    std::print(stdout,
-               "  {}--gdb-port {}{}<PORT>{}             GDB remote server listening port (default: "
-               "1234)\n",
-               style(kBrightGreen), style(kBrightBlack), style(kReset), style(kReset));
-    std::print(stdout,
-               "  {}--lockstep{}                        Enable Spike lockstep verification\n",
-               style(kBrightGreen), style(kReset));
-    std::print(stdout, "  {}--spike-bin {}{}<PATH>{}            Spike binary executable path\n",
-               style(kBrightGreen), style(kBrightBlack), style(kReset), style(kReset));
-    std::print(stdout,
-               "  {}--spike-elf {}{}<PATH>{}            Spike ELF image path for lockstep\n",
-               style(kBrightGreen), style(kBrightBlack), style(kReset), style(kReset));
-    std::print(stdout,
-               "  {}--version{}                         Display simulator version and target "
-               "architecture\n",
-               style(kBrightGreen), style(kReset));
-    std::print(
-        stdout,
-        "  {}--isa-info{}                        Show qualified ISA and frontend capabilities\n",
-        style(kBrightGreen), style(kReset));
-    std::print(stdout,
-               "  {}--doctor{}                          Diagnose terminal and release runtime "
-               "environment\n",
-               style(kBrightGreen), style(kReset));
-    std::print(
-        stdout,
-        "  {}--license{}                         Display MIT license and copyright notice\n\n",
-        style(kBrightGreen), style(kReset));
-
-    // Scaled suffixes
-    std::print(
-        stdout,
-        "{}Numeric values accept standard scaled suffixes:{} k/K (1e3), m/M (1e6), g/G (1e9)\n\n",
-        style(kBold), style(kReset));
-
-    // Examples
-    std::print(stdout, "{}{}:{}{}\n", style(kBoldFgBrightBlue), "Examples", style(kReset),
-               style(kReset));
-    std::print(stdout, "  {}{}{} -m img/hello.bin -b\n", style(kBrightBlack), prog_name,
-               style(kReset));
-    std::print(
-        stdout,
-        "  {}{}{} --image linux/fw_payload.bin --disk linux/root.img --dtb linux/devicetree.dtb\n",
-        style(kBrightBlack), prog_name, style(kReset));
-    std::print(stdout, "  {}{}{} -m linux/fw_payload.bin -u\n", style(kBrightBlack), prog_name,
-               style(kReset));
+        "  {} --os --image linux/fw_payload.bin --disk linux/root.img --dtb linux/devicetree.dtb\n",
+        executable);
+    std::print(stdout, "  {} -m linux/fw_payload.bin --tui\n", executable);
 
     std::exit(status);
 }
 
 auto option_error(std::string_view msg, int status) -> void {
-    std::println(stderr, "{}", msg);
+    if (simrv::util::terminal_color_enabled(STDERR_FILENO)) {
+        std::println(stderr, "\033[1;31msimrv: error:\033[0m {}", msg);
+    } else {
+        std::println(stderr, "simrv: error: {}", msg);
+    }
     std::exit(status);
 }
 
