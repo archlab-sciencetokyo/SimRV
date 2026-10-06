@@ -61,6 +61,8 @@ struct DecodedInstruction {
     isa::Funct3 funct3 = static_cast<isa::Funct3>(0);        ///< 3-bit function code
     isa::Funct5Amo funct5 = static_cast<isa::Funct5Amo>(0);  ///< 5-bit Atomic/Vector function code
     DependencyTraits traits{};
+    uint64_t trace_sequence = 0;        ///< Dynamic ID used only by optional register tracing.
+    FloatingRegister fp_old_value = 0;  ///< Destination value captured before architectural write.
 
     /**
      * @brief Copy decoded instruction content.

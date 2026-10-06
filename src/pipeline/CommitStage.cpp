@@ -31,6 +31,9 @@ void CPU::writeback_registers(Machine& machine) {
         e_instmix[static_cast<std::size_t>(active_context().op_id)]++;
     }
     if (effects.floating_write.enabled) {
+        if (machine.trace().is_register_write_trace_enabled()) {
+            active_context().fp_old_value = state_.regs.read_fp(effects.floating_write.destination);
+        }
         state_.regs.write_fp(effects.floating_write.destination, effects.floating_write.value);
     }
     if (effects.marks_floating_point_dirty) state_.mstatus |= enum_mask(MstatusBit::Fs);

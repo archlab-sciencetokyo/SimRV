@@ -13,6 +13,7 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <unordered_map>
 #include <vector>
 
 #include "simrv/Define.hpp"
@@ -97,6 +98,8 @@ class Tracer {
                  Word a1, Address pc, HartId hart);
     void log_architecture_retirement(const CPU& cpu,
                                      const pipeline::PipelineContext& retiring_context);
+    [[nodiscard]] auto is_register_write_trace_enabled() const noexcept -> bool;
+    void capture_register_write_before(CPU& cpu, pipeline::PipelineContext& context);
     void flush_all();
 
     std::ofstream fp_trace;
@@ -111,6 +114,7 @@ class Tracer {
     std::ofstream fp_pipeline_;
     std::ofstream fp_memory;
     std::ofstream fp_markers;
+    std::ofstream fp_registers_;
 
    private:
     [[nodiscard]] auto artifact_path(std::string_view filename) const -> std::filesystem::path;
@@ -128,6 +132,7 @@ class Tracer {
     std::ofstream fp_bpred_;
     bool bpred_opened_ = false;
     std::vector<unsigned> call_depth_;
+    std::vector<std::unordered_map<uint64_t, std::vector<uint8_t>>> vector_write_before_;
     struct TrapTraceFrame {
         TrapCause cause{};
         Address epc{};

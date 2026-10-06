@@ -83,6 +83,7 @@ struct DebugConfig {
     std::string architecture_trace_path;
     /// Architectural trace detail level: 0=lifecycle, 1=devices, 2=calls, 3=retire, 4=detail.
     uint8_t trace_level = 3;
+    bool trace_register_writes = false;
     std::string trace_events;
     std::string trace_function;
     std::string trace_device;

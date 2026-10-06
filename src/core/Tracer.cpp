@@ -410,6 +410,7 @@ void Tracer::init_architecture_trace(const std::string& path) {
     fp_pipeline_.close();
     fp_memory.close();
     fp_markers.close();
+    fp_registers_.close();
     trace_metadata_path_.clear();
     retire_index_path_.clear();
     retire_record_count_ = 0;
@@ -417,6 +418,7 @@ void Tracer::init_architecture_trace(const std::string& path) {
     trace_vlen_ = 0;
     trace_harts_ = 0;
     call_depth_.clear();
+    vector_write_before_.clear();
     trap_frames_.clear();
     marker_buffers_.clear();
     marker_depth_.clear();
@@ -514,6 +516,10 @@ void Tracer::init_architecture_trace(const std::string& path) {
         fp_pipeline_.open(trace_directory / "pipeline.jsonl", std::ios::out | std::ios::trunc);
     }
     fp_markers.open(trace_directory / "markers.jsonl", std::ios::out | std::ios::trunc);
+    if (config.debug.trace_register_writes) {
+        fp_registers_.open(trace_directory / "registers.jsonl", std::ios::out | std::ios::trunc);
+        vector_write_before_.resize(machine_.num_harts());
+    }
     if (gzip_retire) {
         gzip_retire_ = std::make_unique<GzipTraceWriter>();
         if (!gzip_retire_->open(trace_path)) {
@@ -634,6 +640,26 @@ auto Tracer::is_architecture_trace_enabled() const noexcept -> bool {
 auto Tracer::is_trap_log_enabled() const noexcept -> bool { return fp_traplog.is_open(); }
 auto Tracer::is_dlog_enabled() const noexcept -> bool { return fp_dlog.is_open(); }
 
+auto Tracer::is_register_write_trace_enabled() const noexcept -> bool {
+    return fp_registers_.is_open();
+}
+
+void Tracer::capture_register_write_before(CPU& cpu, pipeline::PipelineContext& context) {
+    if (!fp_registers_.is_open() || !context.traits.writes_vec) return;
+    std::lock_guard lock(mutex_);
+    const auto hart = static_cast<size_t>(cpu.state().mhartid);
+    if (hart >= vector_write_before_.size()) vector_write_before_.resize(hart + 1);
+    if (context.trace_sequence == 0) return;
+    auto& bytes = vector_write_before_[hart][context.trace_sequence];
+    bytes.clear();
+    bytes.reserve(32 * (trace_vlen_ / 8));
+    for (unsigned index = 0; index < 32; ++index) {
+        const auto& reg = cpu.state().regs.read_vector(static_cast<RegId>(index));
+        bytes.insert(bytes.end(), reg.u8.begin(),
+                     reg.u8.begin() + static_cast<std::ptrdiff_t>(trace_vlen_ / 8));
+    }
+}
+
 void Tracer::flush_all() {
     std::lock_guard lock(mutex_);
     if (fp_trace.is_open()) fp_trace.flush();
@@ -650,6 +676,7 @@ void Tracer::flush_all() {
     if (fp_pipeline_.is_open()) fp_pipeline_.flush();
     if (fp_memory.is_open()) fp_memory.flush();
     if (fp_markers.is_open()) fp_markers.flush();
+    if (fp_registers_.is_open()) fp_registers_.flush();
     if (fp_tracepc_.is_open()) fp_tracepc_.flush();
     if (fp_bpred_.is_open()) fp_bpred_.flush();
 }
@@ -1067,9 +1094,73 @@ void Tracer::log_architecture_retirement(const CPU& cpu,
         accepts_trace_event("retire", cycle, hart_id, retiring_context.cpc.raw());
     const bool emit_calls = fp_calls.is_open() && trace_level_at_least(2);
     const bool emit_interrupts = fp_interrupts.is_open() && trace_level_at_least(1);
-    if (!emit_retire && !emit_calls && !emit_interrupts && !emit_memory) return;
+    const bool emit_registers =
+        fp_registers_.is_open() &&
+        accepts_trace_event("register_write", cycle, hart_id, retiring_context.cpc.raw());
+    if (!emit_retire && !emit_calls && !emit_interrupts && !emit_memory && !emit_registers) return;
     const auto& state = cpu.state();
     std::lock_guard lock(mutex_);
+    if (emit_registers && retiring_context.traits.writes_fp) {
+        const auto index = static_cast<unsigned>(retiring_context.rd);
+        const auto after = state.regs.read_fp(retiring_context.rd);
+        std::println(fp_registers_,
+                     "{{\"schema_version\":1,\"event\":\"register_write\","
+                     "\"hart\":{},\"cycle\":{},\"pc\":\"0x{:x}\","
+                     "\"instruction\":\"0x{:x}\",\"operation\":{},"
+                     "\"register_file\":\"fpr\",\"index\":{},"
+                     "\"before_bits\":\"0x{:016x}\",\"after_bits\":\"0x{:016x}\","
+                     "\"flen\":64,\"fcsr\":\"0x{:x}\"}}",
+                     hart_id, cycle, static_cast<uint64_t>(retiring_context.cpc.raw()),
+                     static_cast<uint32_t>(retiring_context.ir),
+                     json_quote(pipeline::operation_name(retiring_context.op_id)), index,
+                     static_cast<uint64_t>(retiring_context.fp_old_value),
+                     static_cast<uint64_t>(after), static_cast<uint64_t>(state.fcsr));
+    }
+    if (emit_registers && retiring_context.traits.writes_vec) {
+        const auto hart = static_cast<size_t>(hart_id);
+        const auto sequence = retiring_context.trace_sequence;
+        auto before = std::vector<uint8_t>{};
+        if (hart < vector_write_before_.size()) {
+            auto found = vector_write_before_[hart].find(sequence);
+            if (found != vector_write_before_[hart].end()) {
+                before = std::move(found->second);
+                vector_write_before_[hart].erase(found);
+            }
+        }
+        auto to_hex = [](std::span<const uint8_t> bytes) {
+            std::string value;
+            value.reserve(bytes.size() * 2 + 2);
+            value += "0x";
+            for (auto it = bytes.rbegin(); it != bytes.rend(); ++it)
+                value += std::format("{:02x}", static_cast<unsigned>(*it));
+            return value;
+        };
+        const auto width = trace_vlen_ / 8;
+        for (unsigned index = 0; index < 32; ++index) {
+            const auto& after = state.regs.read_vector(static_cast<RegId>(index));
+            const auto after_bits = std::span<const uint8_t>(after.u8.data(), width);
+            const auto start = static_cast<size_t>(index) * width;
+            const auto before_bits = start + width <= before.size()
+                                         ? std::span<const uint8_t>(before.data() + start, width)
+                                         : std::span<const uint8_t>{};
+            if (index != static_cast<unsigned>(retiring_context.rd) &&
+                before_bits.size() == after_bits.size() &&
+                std::equal(before_bits.begin(), before_bits.end(), after_bits.begin()))
+                continue;
+            std::println(fp_registers_,
+                         "{{\"schema_version\":1,\"event\":\"register_write\","
+                         "\"hart\":{},\"cycle\":{},\"pc\":\"0x{:x}\","
+                         "\"instruction\":\"0x{:x}\",\"operation\":{},"
+                         "\"register_file\":\"vector\",\"index\":{},"
+                         "\"before_bits\":{},\"after_bits\":{},\"vlen\":{},"
+                         "\"vl\":{},\"vtype\":\"0x{:x}\"}}",
+                         hart_id, cycle, static_cast<uint64_t>(retiring_context.cpc.raw()),
+                         static_cast<uint32_t>(retiring_context.ir),
+                         json_quote(pipeline::operation_name(retiring_context.op_id)), index,
+                         to_hex(before_bits), to_hex(after_bits), trace_vlen_,
+                         static_cast<uint64_t>(state.vl), static_cast<uint64_t>(state.vtype));
+        }
+    }
     if (emit_memory) {
         const Address effective_address = cpu.effective_data_xlen() == 32
                                               ? (retiring_context.mem_addr & 0xffffffffULL)

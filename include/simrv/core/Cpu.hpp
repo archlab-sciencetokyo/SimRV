@@ -605,6 +605,7 @@ class CPU {
 
     ArchState state_;
     ArchState prev_state_;
+    uint64_t next_register_trace_sequence_ = 0;
 
    public:
     /// Zero-cost read-only access to architectural state for tracing/logging.
