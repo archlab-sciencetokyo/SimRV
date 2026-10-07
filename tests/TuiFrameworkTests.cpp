@@ -2164,6 +2164,13 @@ void test_multi_column_workbench_tools_and_swapping() {
     tui.open_tool_picker(0);
     std::vector<std::string> overlay_lines(30, std::string(120, ' '));
     modal.render_overlay(overlay_lines, 120, 30);
+    bool found_modal_control = false;
+    for (int y = 1; y <= 30; ++y) {
+        for (int x = 1; x <= 120; ++x) {
+            found_modal_control = found_modal_control || modal.is_control_at(x, y);
+        }
+    }
+    expect(found_modal_control, "modal control hitboxes are detectable for pointer styling");
     // TRACE (tool index 10) is at content row 16; terminal Y: start_y (3) + 1 (border) + 16
     // (content) + 1 (1-indexed) = 21
     auto click_res = modal.handle_click(60, 21, 120, 30);

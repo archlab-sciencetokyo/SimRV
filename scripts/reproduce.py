@@ -21,7 +21,12 @@ def run(command: list[str], cwd: pathlib.Path | None = None, env: dict[str, str]
     print("+", " ".join(command), flush=True)
     ccache_temp = ROOT / "build/repro/.ccache-tmp"
     ccache_temp.mkdir(parents=True, exist_ok=True)
-    environment = {**os.environ, "CCACHE_TEMPDIR": str(ccache_temp), **(env or {})}
+    environment = {
+        **os.environ,
+        "CCACHE_TEMPDIR": str(ccache_temp),
+        "SIMRV_CONFIG_DIR": str(ROOT / "configs"),
+        **(env or {}),
+    }
     subprocess.run(command, cwd=cwd or ROOT, env=environment, check=True)
 
 
@@ -187,6 +192,11 @@ def main() -> None:
             if args.vector_tests_dir and compiler == "gcc":
                 configure.append(f"-DSIMRV_VECTOR_TESTS_DIR={args.vector_tests_dir.resolve()}")
             images = args.linux_images_root / f"rv{arch}"
+            nested_images = images / "buildroot-fpga"
+            if not (images / "fw_payload.bin").is_file() and (
+                nested_images / "fw_payload.bin"
+            ).is_file():
+                images = nested_images
             configure.append(f"-DSIMRV_LINUX_IMAGES_DIR={images.resolve()}")
             run(configure)
             run(["cmake", "--build", str(build_dir)])

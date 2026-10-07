@@ -216,6 +216,7 @@ class TuiModal {
 
     [[nodiscard]] auto handle_click(int x, int y, int term_width, int term_height)
         -> ModalClickResult;
+    [[nodiscard]] auto is_control_at(int x, int y) const -> bool;
 
     void render_overlay(std::vector<std::string>& lines, int term_width, int term_height) const;
 

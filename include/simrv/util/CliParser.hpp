@@ -41,6 +41,7 @@ struct RuntimeOptions {
     std::string fn_archtrace;
     std::string trace_dir = "trace";
     uint8_t trace_level = 3;
+    bool trace_register_writes = false;
     std::string trace_events;
     std::string trace_function;
     std::string trace_device;

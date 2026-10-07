@@ -2107,7 +2107,7 @@ void explain_datapath_diagram(isa::OperationId op_id, isa::InstFormat fmt, isa::
 }
 
 void explain_instruction(uint32_t raw_inst) {
-    bool const use_color = simrv::util::is_terminal(STDOUT_FILENO);
+    bool const use_color = simrv::util::terminal_color_enabled(STDOUT_FILENO);
     auto c = [use_color](std::string_view ansi_code) -> std::string_view {
         return use_color ? ansi_code : "";
     };

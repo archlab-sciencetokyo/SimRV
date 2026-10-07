@@ -1,7 +1,7 @@
 cff-version: 1.2.0
 message: 'If you use SimRV in your research, please cite it as below.'
 title: 'SimRV: A Dual-Width Explainable RISC-V System Simulator'
-version: 3.0.0-rc.6
+version: 3.0.0-rc.7
 date-released: 2026-10-06
 url: 'https://github.com/archlab-sciencetokyo/SimRV'
 license: MIT

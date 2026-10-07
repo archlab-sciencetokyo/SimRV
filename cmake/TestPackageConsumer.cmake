@@ -38,6 +38,14 @@ endif()
 if(NOT EXISTS "${install_root}/share/SimRV/SimRVBuildMetadata.json")
   message(FATAL_ERROR "Expected installed SimRV build metadata manifest")
 endif()
+foreach(completion IN ITEMS
+    share/bash-completion/completions/simrv
+    share/zsh/site-functions/_simrv
+    share/fish/vendor_completions.d/simrv.fish)
+  if(NOT EXISTS "${install_root}/${completion}")
+    message(FATAL_ERROR "Expected installed shell completion ${completion}")
+  endif()
+endforeach()
 foreach(trace_helper IN ITEMS trace.h trace.S)
   if(NOT EXISTS "${install_root}/include/simrv/${trace_helper}")
     message(FATAL_ERROR "Expected installed guest trace helper ${trace_helper}")

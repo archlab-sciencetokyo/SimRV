@@ -135,6 +135,16 @@ simrv -m program.elf
 per line; `json-pretty` is intended for interactive inspection. It does not change the independent
 schemas or JSONL encoding of architectural trace artifacts.
 
+CLI color is automatic for a capable terminal and can be disabled with `NO_COLOR` or
+`TERM=dumb`; a nonzero `FORCE_COLOR` explicitly enables it. CPU-model validation paths are OSC 8
+clickable links in terminals (and plain paths when output is redirected). TUI mode is selected
+automatically only when SimRV owns an interactive foreground terminal; it has no separate startup
+or shutdown banner. Warnings and errors remain visible in its message panel.
+
+Runtime installs also provide Bash, Zsh, and Fish completions for common options, enum values, and
+file/directory arguments. They are installed with the simulator, including in the portable runtime
+archive.
+
 ### Automation summary
 
 Use `--summary` when a script needs architectural results without parsing human-readable logs:
@@ -215,6 +225,21 @@ excluded while a PC range is active. Filtering occurs before event serialization
 in `events.jsonl` are always retained, so filters cannot hide run completion or failure. Selected
 filter values are copied into `metadata.json`. A hart filter excludes bus events without hart
 attribution.
+
+FP/vector destination changes can be recorded separately with `--trace-register-writes` (requires
+`--arch-trace`). The opt-in `registers.jsonl` stream emits schema-version-1 `register_write` events;
+FPR records preserve exact 64-bit register contents plus `fcsr`, while vector records preserve the
+full destination register bits and include `VLEN`, `vl`, and `vtype`. Event filters also apply to
+these records. Example:
+
+```sh
+simrv --cli -m vector-program.elf --arch-trace trace/retire.jsonl \\
+  --trace-register-writes --trace-events register_write
+```
+
+Architectural names (`f0`–`f31`, `v0`–`v31`) are the canonical register identifiers. For example,
+an FPR write may contain `before_bits: "0x0000000000000000"` and
+`after_bits: "0x3ff0000000000000"`; vector bit strings cover the full VLEN-sized register.
 
 Example device event:
 
@@ -383,6 +408,11 @@ the first safe simulator boundary at or after each requested interval. Device st
 included, and `trace_sequence` is currently `null`; these files are architectural snapshots, not
 replay-complete checkpoints.
 
+GDB debugger sessions are not checkpointed: network connections, breakpoints, RSP negotiation state,
+and debugger-side register caches are not serialized. To debug a resumed snapshot, launch SimRV with
+`--load-checkpoint run.ckpt --gdb --cli`, reconnect GDB, and reapply breakpoints. The restored guest
+PC and architectural register state are visible on connection; debugger protocol state starts fresh.
+
 ---
 
 ## 4. Interactive TUI Workbench
@@ -411,6 +441,11 @@ The SimRV TUI provides an educational visual inspection environment for architec
 - **`[F5]` / `[c]` / `[Ctrl-P]`**: Run / Pause simulation execution.
 - **`[F6]` / `[s]`**: Step one cycle machine-wide across all harts.
 - **`[q]` / `[Ctrl-C]`**: Quit simulator.
+
+When the terminal advertises OSC 22 pointer-shape support, the TUI changes the pointer to a
+clickable-hand shape over interactive controls and restores the prior pointer shape when it exits.
+Terminals without OSC 22 support keep their normal pointer behavior; no notifications or terminal
+theme colors are changed.
 
 ### Visualizer Panes
 

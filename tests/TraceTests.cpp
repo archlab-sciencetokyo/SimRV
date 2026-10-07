@@ -187,6 +187,46 @@ void test_retirement_context_and_call_trace() {
     std::filesystem::remove(guest_path);
 }
 
+void test_optional_fp_register_write_trace() {
+    const auto path = trace_path("register-write");
+    simrv::core::MachineConfig config;
+    config.debug.trace_register_writes = true;
+    Machine machine(config);
+    auto& cpu = machine.primary_hart();
+    cpu.machine_ = &machine;
+    cpu.reset();
+    cpu.machine_ = &machine;
+    cpu.state().pc = kPc;
+    cpu.state().regs.write_fp(static_cast<RegId>(1), 0x40400000);
+    machine.trace().init_architecture_trace(path.string());
+    simrv::pipeline::PipelineContext retiring{};
+    retiring.cpc = kPc;
+    retiring.ir = 0x003100d3;
+    retiring.rd = static_cast<RegId>(1);
+    retiring.op_id = simrv::isa::FADD_S;
+    retiring.traits.writes_fp = true;
+    machine.trace().log_architecture_retirement(cpu, retiring);
+    machine.trace().flush_all();
+    const auto records = read_trace(sibling_path(path, "registers.jsonl"));
+    if (records.size() != 1 ||
+        records.front().find("\"register_file\":\"fpr\"") == std::string::npos ||
+        records.front().find("\"index\":1") == std::string::npos ||
+        records.front().find("\"before_bits\":\"0x0000000000000000\"") == std::string::npos ||
+        records.front().find("\"after_bits\":\"0x0000000040400000\"") == std::string::npos)
+        std::abort();
+    const auto retirement = read_trace(path);
+    const auto retire_record = std::find_if(
+        retirement.begin(), retirement.end(),
+        [](const auto& line) { return line.find("\"event\":\"retire\"") != std::string::npos; });
+    if (retire_record == retirement.end() ||
+        retire_record->find("register_file") != std::string::npos)
+        std::abort();
+    for (const auto* stream : {"registers.jsonl", "calls.jsonl", "devices.jsonl",
+                               "interrupts.jsonl", "bus.jsonl", "markers.jsonl", "metadata.json"})
+        std::filesystem::remove(sibling_path(path, stream));
+    std::filesystem::remove(path);
+}
+
 void test_retirement_index_offsets() {
     constexpr size_t kRetirements = 257;
     Machine machine;
@@ -1037,6 +1077,7 @@ int main(int argc, char** argv) {
     if (argc < 1) std::abort();
     test_function_symbol_lookup(argv[0]);
     test_retirement_context_and_call_trace();
+    test_optional_fp_register_write_trace();
     test_retirement_index_offsets();
     test_gzip_retirement_preserves_schema_one_records();
     test_branches_are_not_calls();

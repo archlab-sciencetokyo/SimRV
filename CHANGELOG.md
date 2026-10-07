@@ -5,6 +5,24 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## Unreleased
 
+## [v3.0.0-rc.7] — 2026-10-06
+
+- Added opt-in `registers.jsonl` FP/vector destination-write tracing with exact before/after bits,
+  architectural context, and schema documentation; existing retirement records are unchanged.
+- Clarified that architectural checkpoints restore guest register/PC state but do not persist GDB
+  sessions, breakpoints, or RSP negotiation state.
+- Avoided terminal raw-mode setup for CLI runs without foreground-terminal ownership, removing a
+  spurious warning in redirected and non-interactive execution.
+- Polished terminal presentation: honor `NO_COLOR`, `FORCE_COLOR`, and `TERM=dumb`, choose the TUI
+  only for a foreground interactive terminal, remove the misleading TUI quit hint from CLI startup,
+  add OSC 8 links to CPU-model paths where supported, align and wrap CLI help, and standardize
+  invalid-option diagnostics.
+- Added optional OSC 22 pointer-shape feedback over clickable TUI controls, gated on terminal
+  capability detection and restored on exit; unsupported terminals and terminal themes are left
+  unchanged.
+- Added Bash, Zsh, and Fish shell completions for common options, enum values, and path arguments;
+  completions ship with the runtime install component and do not alter CLI parsing.
+
 ## [v3.0.0-rc.6] — 2026-10-06
 
 - Source builds now default to the isolated `/usr/local/simrv` install prefix (executable at
@@ -792,6 +810,7 @@ on inspector polish, correctness fixes, and CLI normalization.
 
 [v3.0.0-rc.5]: https://github.com/archlab-sciencetokyo/SimRV/releases/tag/v3.0.0-rc.5
 [v3.0.0-rc.6]: https://github.com/archlab-sciencetokyo/SimRV/releases/tag/v3.0.0-rc.6
+[v3.0.0-rc.7]: https://github.com/archlab-sciencetokyo/SimRV/releases/tag/v3.0.0-rc.7
 [v3.0.0-rc.4]: https://github.com/archlab-sciencetokyo/SimRV/releases/tag/v3.0.0-rc.4
 [v3.0.0-rc.3]: https://github.com/archlab-sciencetokyo/SimRV/releases/tag/v3.0.0-rc.3
 [v3.0.0-rc.2]: https://github.com/archlab-sciencetokyo/SimRV/releases/tag/v3.0.0-rc.2

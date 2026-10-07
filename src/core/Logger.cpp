@@ -142,14 +142,25 @@ void emit_log(Level level, FILE* stream, std::string_view ansi_color, std::strin
         if (g_tui_callback) {
             callback = g_tui_callback;
         } else if (g_tui_mode) {
-            if (g_startup_logs.size() == kStartupLogLimit) g_startup_logs.pop_front();
-            g_startup_logs.push_back({level, msg});
+            if (level >= Level::Warn) {
+                // Before the TUI owns the terminal, make actionable diagnostics visible without
+                // printing routine startup/shutdown chatter or buffering an invisible error.
+                if (simrv::util::terminal_color_enabled(STDERR_FILENO)) {
+                    std::println(stderr, "{}{}\033[0m", ansi_color, msg);
+                } else {
+                    std::println(stderr, "[{}] {}", plain_tag, msg);
+                }
+                std::fflush(stderr);
+            } else {
+                if (g_startup_logs.size() == kStartupLogLimit) g_startup_logs.pop_front();
+                g_startup_logs.push_back({level, msg});
+            }
             return;
         } else {
             const int fd = (stream == stderr) ? STDERR_FILENO : STDOUT_FILENO;
             if (format != Format::Text) {
                 std::println(stream, "{}", json_record(level, msg, format == Format::JsonPretty));
-            } else if (simrv::util::is_terminal(fd)) {
+            } else if (simrv::util::terminal_color_enabled(fd)) {
                 std::println(stream, "{}{}\033[0m", ansi_color, msg);
             } else {
                 std::println(stream, "[{}] {}", plain_tag, msg);

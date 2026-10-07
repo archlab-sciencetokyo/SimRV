@@ -3,7 +3,7 @@ cmake_minimum_required(VERSION 3.31...4.3)
 # Keep the release version authoritative here. The project() version is derived
 # from it so CMake, BuildInfo, CPack, release tooling, and citation checks use
 # the same source value.
-set(SIMRV_VERSION "3.0.0-rc.6")
+set(SIMRV_VERSION "3.0.0-rc.7")
 string(REGEX REPLACE "-.*$" "" SIMRV_PROJECT_VERSION "${SIMRV_VERSION}")
 
 project(
@@ -1161,6 +1161,15 @@ install(
   PATTERN "build-*" EXCLUDE)
 
 install(FILES docs/man/simrv.1 DESTINATION ${CMAKE_INSTALL_MANDIR}/man1
+        COMPONENT Runtime)
+install(FILES completions/bash/simrv
+        DESTINATION ${CMAKE_INSTALL_DATADIR}/bash-completion/completions
+        COMPONENT Runtime)
+install(FILES completions/zsh/_simrv
+        DESTINATION ${CMAKE_INSTALL_DATADIR}/zsh/site-functions
+        COMPONENT Runtime)
+install(FILES completions/fish/simrv.fish
+        DESTINATION ${CMAKE_INSTALL_DATADIR}/fish/vendor_completions.d
         COMPONENT Runtime)
 
 configure_package_config_file(

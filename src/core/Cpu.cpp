@@ -1061,6 +1061,11 @@ auto CPU::decode_stage(Machine& machine) -> bool {
 }
 
 auto CPU::execute_stage(Machine& machine) -> bool {
+    if (machine.trace().is_register_write_trace_enabled() && pipeline_context.traits.writes_vec) {
+        if (pipeline_context.trace_sequence == 0)
+            pipeline_context.trace_sequence = ++next_register_trace_sequence_;
+        machine.trace().capture_register_write_before(*this, pipeline_context);
+    }
     run_execute_stage(machine);
     return !pipeline_context.pending_exception.has_value();
 }

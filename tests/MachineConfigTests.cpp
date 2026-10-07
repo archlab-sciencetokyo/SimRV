@@ -10,6 +10,7 @@
 #include "simrv/core/MachineConfig.hpp"
 #include "simrv/core/Telemetry.hpp"
 #include "simrv/util/CliParser.hpp"
+#include "simrv/util/FormatUtil.hpp"
 
 namespace {
 
@@ -25,6 +26,14 @@ void expect(bool condition, const char* message) {
 }  // namespace
 
 auto main() -> int {
+    expect(simrv::util::color_enabled(true, "xterm-256color", false, false),
+           "color is enabled on capable terminals by default");
+    expect(!simrv::util::color_enabled(true, "xterm-256color", true, false),
+           "NO_COLOR disables terminal color");
+    expect(!simrv::util::color_enabled(true, "dumb", false, false),
+           "TERM=dumb disables terminal color");
+    expect(simrv::util::color_enabled(false, "dumb", true, true),
+           "FORCE_COLOR explicitly overrides automatic color suppression");
     {
         const auto check_isa = [](std::string isa) {
             std::array<std::string, 5> args_str = {"SimRV", "--isa", std::move(isa), "-m",
@@ -273,6 +282,25 @@ auto main() -> int {
         }
     }
     {
+        std::array<std::string, 7> args_str = {
+            "SimRV", "--arch-trace", "trace.jsonl", "--trace-register-writes",
+            "-m",    "guest.bin",    "--cli"};
+        std::array<char*, 7> args{};
+        for (size_t i = 0; i < args.size(); ++i) args[i] = args_str[i].data();
+        const auto parsed = simrv::util::parse_command_line(args);
+        expect(parsed.has_value() && parsed->options.trace_register_writes,
+               "register-write tracing parses when architectural tracing is enabled");
+        if (parsed)
+            expect(parsed->options.to_machine_config().debug.trace_register_writes,
+                   "register-write trace option projects into MachineConfig");
+        std::array<std::string, 5> invalid_str = {"SimRV", "--trace-register-writes", "--cli", "-m",
+                                                  "guest.bin"};
+        std::array<char*, 5> invalid{};
+        for (size_t i = 0; i < invalid.size(); ++i) invalid[i] = invalid_str[i].data();
+        expect(!simrv::util::parse_command_line(invalid),
+               "register-write tracing requires an architectural trace output");
+    }
+    {
         const auto expect_cycle_trace_mode = [](std::vector<std::string> args,
                                                 const char* message) {
             std::vector<char*> argv;
@@ -450,6 +478,8 @@ auto main() -> int {
         source_state.pc = 0x80000100;
         source_state.regs.vlen = 256;
         source_state.regs.write(simrv::RegId::T2, 0x12345678);
+        source_state.regs.write_fp(static_cast<simrv::RegId>(5), 0x7ff8000000001234);
+        source_state.regs.read_vector(static_cast<simrv::RegId>(7)).u8[0] = 0xA5;
         source_state.vtype = 0x23;
         source_state.vl = 17;
         source_state.mstatus = 0x1800;
@@ -473,6 +503,9 @@ auto main() -> int {
         expect(restored_state.vtype == source_state.vtype && restored_state.vl == source_state.vl &&
                    restored_state.mepc == source_state.mepc && restored_state.pmpaddr[0] == 0x1234,
                "checkpoint restores vector, CSR, and PMP state");
+        expect(restored_state.regs.read_fp(static_cast<simrv::RegId>(5)) == 0x7ff8000000001234 &&
+                   restored_state.regs.read_vector(static_cast<simrv::RegId>(7)).u8[0] == 0xA5,
+               "checkpoint restores FP and vector register-file bits");
         expect(restored.primary_hart().e_icount == 77 && restored.primary_hart().e_ccount == 91 &&
                    restored.primary_hart().clint_mmio.mcycle == 105 &&
                    restored_ram[123] == Byte{0xA5},

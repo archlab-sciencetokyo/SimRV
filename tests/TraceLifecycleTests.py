@@ -2,6 +2,7 @@
 """Exercise the CLI lifecycle stream and legacy retirement stream together."""
 
 import json
+import os
 import pathlib
 import re
 import subprocess
@@ -17,6 +18,8 @@ def main() -> int:
         # Three RISC-V NOPs, executed under the bounded bare-metal CLI.
         guest.write_bytes(bytes.fromhex("130000001300000013000000"))
         retire = root / "retire.jsonl"
+        env = os.environ.copy()
+        env["NO_COLOR"] = "1"
         result = subprocess.run(
             [
                 str(simrv),
@@ -31,11 +34,47 @@ def main() -> int:
             ],
             capture_output=True,
             text=True,
+            env=env,
             timeout=15,
             check=False,
         )
         if result.returncode != 0:
             raise AssertionError(f"SimRV failed ({result.returncode}): {result.stderr}")
+        if "Terminal raw mode setup failed" in result.stderr:
+            raise AssertionError("non-interactive CLI execution attempted terminal raw mode")
+        if "Control+'q'" in result.stdout or "Control+'q'" in result.stderr:
+            raise AssertionError("headless CLI banner must not advertise the TUI quit key")
+        if "\x1b[" in result.stdout or "\x1b[" in result.stderr:
+            raise AssertionError("redirected CLI output must not contain terminal control colors")
+        if "Running in headless CLI mode" not in result.stdout:
+            raise AssertionError("CLI startup should clearly identify headless execution mode")
+
+        invalid = subprocess.run(
+            [str(simrv), "--cli", "--not-a-real-option"],
+            capture_output=True,
+            text=True,
+            env=env,
+            timeout=15,
+            check=False,
+        )
+        if invalid.returncode == 0:
+            raise AssertionError("an unknown CLI option must fail")
+        if "simrv: error: unknown option '--not-a-real-option'" not in invalid.stderr:
+            raise AssertionError(f"unknown-option diagnostic is unclear: {invalid.stderr!r}")
+        if "\x1b[" in invalid.stderr:
+            raise AssertionError("redirected CLI diagnostics must not contain ANSI controls")
+
+        help_result = subprocess.run(
+            [str(simrv), "--help"], capture_output=True, text=True, env=env, timeout=15, check=False
+        )
+        if help_result.returncode != 0:
+            raise AssertionError(f"CLI help failed: {help_result.stderr}")
+        if "\x1b[" in help_result.stdout:
+            raise AssertionError("redirected CLI help must not contain ANSI controls")
+        image_help = next(line for line in help_result.stdout.splitlines() if "Load an ELF or raw" in line)
+        pc_help = next(line for line in help_result.stdout.splitlines() if "Set the initial program" in line)
+        if image_help.index("Load an ELF or raw") != pc_help.index("Set the initial program"):
+            raise AssertionError("CLI help option descriptions are not aligned")
 
         lifecycle = [json.loads(line) for line in (root / "events.jsonl").read_text().splitlines()]
         if not lifecycle or any(event["event"] == "retire" for event in lifecycle):

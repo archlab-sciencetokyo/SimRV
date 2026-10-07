@@ -267,6 +267,8 @@ class Tui : public core::ITelemetrySink, public core::IConsoleSink {
     void select_next_hart();
 
     void handle_mouse(int x, int y, int b);
+    [[nodiscard]] auto is_clickable_at(int x, int y, int term_width, int term_height) const -> bool;
+    void update_pointer_shape(bool clickable);
 
    private:
     void sync_workbench_slots();
@@ -313,6 +315,9 @@ class Tui : public core::ITelemetrySink, public core::IConsoleSink {
     int cell_width_px_ = 8;
     int cell_height_px_ = 16;
     bool sixel_supported_{false};
+    bool osc22_pointer_supported_{false};
+    bool pointer_is_clickable_{false};
+    std::string prior_pointer_shape_{"default"};
     bool sixel_rendered_{false};
     size_t sixel_column_{std::numeric_limits<size_t>::max()};
     int sixel_panel_width_{0};

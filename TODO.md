@@ -1,35 +1,30 @@
 # SimRV 3.0.0 release-candidate handoff
 
-Branch: `release/3.0.0-rc.6`
+Branch: `release/3.0.0-rc.7`
 Target: `dev`
 
-This RC adds split architectural event streams and schemas, trace levels and filters, execution
-markers, call/return and interrupt tracing, richer device/bus/memory/pipeline events, sparse indexes,
-compression, deterministic metadata, standard G ISA spellings, and isolated source installs. The
-feature PR has merged into `dev`. Do not create the tag until the release metadata PR is merged,
-release CI is green, and package assets have been validated.
+## Candidate scope for v3.0.0-rc.7
 
-Release qualification:
+- Document architectural checkpoint completeness and GDB reconnect semantics. Checkpoints restore
+  guest architectural state and RAM, but do not preserve debugger sessions, breakpoints, or RSP
+  negotiation state.
+- Add opt-in retirement-time FP/vector register-write events to `registers.jsonl`, preserving
+  architectural register indices and raw bits with instruction and vector/FP context. Retirement
+  records remain compatible.
+- Rework terminal presentation: avoid raw mode unless CLI owns the foreground terminal; respect
+  standard color environment settings; keep TUI startup/shutdown quiet while surfacing errors; add
+  capability-gated OSC 22 pointer affordances over clickable TUI controls; align and wrap CLI help,
+  standardize parser diagnostics, and install Bash, Zsh, and Fish shell completions with the runtime
+  component.
 
-1. Validate `scripts/release_check.py`, schemas, package names, and the changelog/CITATION version.
-2. Merge this release metadata branch into `dev` only after required checks pass.
-3. Create and push the annotated `v3.0.0-rc.6` tag from the merged `dev` commit.
-4. Wait for release-binaries CI; validate the static portable TGZ, RPM, and DEB bundles, then
-   publish the GitHub prerelease with the changelog and generated release assets.
+The candidate feature changes are prepared on the release branch. Before publication:
+
+1. Run RV64 and RV32 builds and gate suites; run hosted-RV32 on the RV64 build.
+2. Validate JSON schemas, release metadata, packages, and generated artifact names against the
+   release workflow.
+3. Create the RC.7 PR targeting `dev`, and merge only after required CI is green.
+4. Tag the merged `dev` commit and publish the GitHub prerelease only after release-binaries CI
+   completes and package assets are validated.
 
 The public artifact is the RV64-capable `simrv` binary; native RV32 remains a strict-width CI
 oracle. Keep generated packages and qualification output under `/tmp` or `/scratch`.
-
-## Candidate for v3.0.0-rc.7
-
-- Define and implement GDB-aware checkpoint/restore semantics. Current checkpoints save hart
-  architectural state and RAM only; they do not preserve debugger protocol/session state,
-  breakpoints, or device state. Specify which debugger state should be restored and how an active
-  GDB connection behaves before extending the checkpoint format.
-- Add opt-in retirement-time FP/vector register-write events for downstream reports. Preserve
-  architectural `f0`–`f31` and `v0`–`v31` indices and exact before/after bits; include hart, cycle,
-  PC/instruction, and relevant `fcsr`/FLEN or `VLEN`/`vl`/`vtype` context. ABI aliases and decoded
-  FP/lane views should be supplemental, and event filters should keep trace volume bounded.
-- Diagnose and eliminate the occasional `[WARN] Terminal raw mode setup failed; continuing in
-  current mode` message during CLI execution; verify CLI operation does not attempt terminal
-  raw-mode setup unless it actually owns an interactive terminal.

@@ -41,6 +41,10 @@ using namespace simrv::util;
 
 namespace {
 
+auto terminal_style(int fd, std::string_view code) -> std::string_view {
+    return simrv::util::terminal_color_enabled(fd) ? code : std::string_view{};
+}
+
 auto lifecycle_event_name(simrv::core::LifecycleEventKind kind) -> std::string_view {
     switch (kind) {
         case simrv::core::LifecycleEventKind::Initialized:
@@ -147,7 +151,7 @@ auto print_doctor() -> int {
 }  // namespace
 
 auto main(int argc, char* argv[]) -> int {  // NOLINT(bugprone-exception-escape)
-    bool is_tui = (::isatty(STDIN_FILENO) != 0);
+    bool is_tui = simrv::util::interactive_tui_available();
     bool skip_banner = false;
     for (int i = 1; i < argc; ++i) {
         std::string_view const arg(argv[i]);
@@ -182,7 +186,7 @@ auto main(int argc, char* argv[]) -> int {  // NOLINT(bugprone-exception-escape)
     simrv::log::set_tui_mode(is_tui);
 
     if (!is_tui && !skip_banner) {
-        simrv::log::info("{} v{} ({}@{})\nPlease type Control+'q' to quit the simulation\n",
+        simrv::log::info("{} v{} ({}@{})\nRunning in headless CLI mode.\n",
                          simrv::buildinfo::kProjectDescription, simrv::buildinfo::kVersion,
                          simrv::buildinfo::kGitBranch, simrv::buildinfo::kGitSha);
     }
@@ -292,20 +296,23 @@ auto main(int argc, char* argv[]) -> int {  // NOLINT(bugprone-exception-escape)
                 auto resolved = simrv::core::resolve_cpu_model_path(target);
                 std::string path_str = resolved.value_or(target);
                 if (!std::filesystem::exists(path_str)) {
-                    std::println(std::cerr,
-                                 "\033[1;31m[ERROR]\033[0m CPU config file not found: '{}'",
-                                 target);
+                    std::println(std::cerr, "{}[ERROR]{} CPU config file not found: '{}'",
+                                 terminal_style(STDERR_FILENO, "\033[1;31m"),
+                                 terminal_style(STDERR_FILENO, "\033[0m"), target);
                     std::exit(1);
                 }
                 simrv::pipeline::CpuModelConfig cfg{};
                 if (!simrv::core::parse_cpu_config(path_str, cfg)) {
-                    std::println(std::cerr,
-                                 "\033[1;31m[INVALID]\033[0m Syntax or parse error reading '{}'",
-                                 path_str);
+                    std::println(std::cerr, "{}[INVALID]{} Syntax or parse error reading '{}'",
+                                 terminal_style(STDERR_FILENO, "\033[1;31m"),
+                                 terminal_style(STDERR_FILENO, "\033[0m"),
+                                 simrv::util::terminal_path_label(path_str, STDERR_FILENO));
                     std::exit(1);
                 }
-                std::println("\033[1;34m=== Validating CPU Model Configuration: {} ===\033[0m",
-                             path_str);
+                std::println("{}=== Validating CPU Model Configuration: {} ==={}",
+                             terminal_style(STDOUT_FILENO, "\033[1;34m"),
+                             simrv::util::terminal_path_label(path_str, STDOUT_FILENO),
+                             terminal_style(STDOUT_FILENO, "\033[0m"));
                 std::println("  Model Name      : {}", cfg.name.empty() ? "(unnamed)" : cfg.name);
                 std::println("  Description     : {}",
                              cfg.description.empty() ? "(none)" : cfg.description);
@@ -332,12 +339,16 @@ auto main(int argc, char* argv[]) -> int {  // NOLINT(bugprone-exception-escape)
 
                 auto res = cfg.validate();
                 if (!res.has_value()) {
-                    std::println(std::cerr, "\033[1;31m[INVALID]\033[0m {}", res.error());
+                    std::println(std::cerr, "{}[INVALID]{} {}",
+                                 terminal_style(STDERR_FILENO, "\033[1;31m"),
+                                 terminal_style(STDERR_FILENO, "\033[0m"), res.error());
                     std::exit(1);
                 }
                 std::println(
-                    "\033[1;32m[VALID]\033[0m CPU model configuration is fully valid and "
-                    "compatible with this simulator.");
+                    "{}[VALID]{} CPU model configuration is fully valid and compatible "
+                    "with this simulator.",
+                    terminal_style(STDOUT_FILENO, "\033[1;32m"),
+                    terminal_style(STDOUT_FILENO, "\033[0m"));
                 std::exit(0);
             }
             case CliAction::Run:
@@ -447,12 +458,14 @@ auto main(int argc, char* argv[]) -> int {  // NOLINT(bugprone-exception-escape)
             }
         }
 
-        // Initialize terminal in raw mode for simulator I/O.
+        // Change terminal attributes only when this process owns the foreground terminal.
+        // The TUI manages its own terminal lifecycle; batch/redirected CLI runs must not
+        // attempt raw mode at all.
         TerminalModeGuard terminal_mode;
-        if (!parsed->options.server_mode && !terminal_mode.enable_raw_mode()) {
-            if (!is_tui) {
-                simrv::log::warn("Terminal raw mode setup failed; continuing in current mode");
-            }
+        const bool owns_terminal = simrv::util::owns_interactive_terminal();
+        if (!parsed->options.server_mode && !sim_machine->tui_enabled() && owns_terminal &&
+            !terminal_mode.enable_raw_mode()) {
+            simrv::log::warn("Terminal raw mode setup failed; continuing in current mode");
         }
         if (sim_machine->tui_enabled()) {
             auto* machine_ptr = sim_machine.get();
