@@ -10,8 +10,8 @@
 
 namespace simrv::tui::framework {
 
-// Compatibility aliases keep existing SimRV consumers stable while new generic code uses the
-// framework namespace. These types have no simulator-domain dependencies.
+// Source-compatibility re-exports for consumers that used the old framework-facing names.
+// New framework code should import these types from simrv::tui::framework directly.
 using ::simrv::tui::LogBuffer;
 using ::simrv::tui::TuiWidget;
 using ::simrv::tui::VirtualTerminal;

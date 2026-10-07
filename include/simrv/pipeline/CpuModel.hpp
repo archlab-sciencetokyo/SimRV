@@ -82,7 +82,7 @@ struct CfuConfig {
     std::string plugin{};
     std::string rtl_module{};
     std::string interface{"rs1-rs2-rd"};
-    uint32_t default_latency{1};
+    uint32_t default_latency{1};  // CFU/plugin latency is total cycles, including issue.
 
     [[nodiscard]] auto validate() const -> std::expected<void, std::string> {
         if (default_latency == 0) {
@@ -109,8 +109,8 @@ struct CpuModelConfig {
     DmaTimingConfig dma{};
     AxiConfig axi{};
     CfuConfig cfu{};
-    // Multi-letter extensions do not have individual MISA bits.  Keep them alongside the
-    // legacy ISA preset so CPU presets can describe extensions such as Zkn/Zkr/Zkt losslessly.
+    // Multi-letter extensions do not have individual MISA bits. Keep them alongside the base
+    // ISA preset so CPU presets can describe extensions such as Zkn/Zkr/Zkt losslessly.
     std::vector<std::string> isa_extensions{};
     bool enable_idle_spans = true;
 
@@ -206,10 +206,6 @@ struct CpuModelConfig {
         if (interconnect.request_latency == 0 || interconnect.response_latency == 0) {
             return std::unexpected(
                 "interconnect request and response latency must be at least one cycle");
-        }
-        if (pipeline.mul_latency == 0 || pipeline.div_latency == 0 ||
-            pipeline.fp_alu_latency == 0 || pipeline.fp_div_latency == 0) {
-            return std::unexpected("execution-unit latency must be at least one cycle");
         }
         if (const auto cfu_result = cfu.validate(); !cfu_result) {
             return std::unexpected(cfu_result.error());

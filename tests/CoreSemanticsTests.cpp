@@ -251,7 +251,7 @@ void test_hosted_rv32_cached_shift_width() {
         shift.rs2 = RegId::A2;
         state.regs.write(RegId::A1, 0x80000000U);
         state.regs.write(RegId::A2, 33U);
-        cpu.execute_cached_op_fast<false, false>(machine, shift);
+        cpu.execute_cached_op_fast<false, false>(machine, shift, machine.ram_view());
         expect(state.regs.read(RegId::A0) == 0x40000000U,
                "hosted RV32 cached SRL truncates its operand and masks shift amounts to five bits");
     }

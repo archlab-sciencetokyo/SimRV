@@ -42,9 +42,10 @@ and an explicit device policy:
 simrv --soc rvcomp --ca -m program.elf
 ```
 
-`--platform` remains a compatibility alias for `--soc`. A preset with
-`device_policy = "explicit"` registers only the devices listed in its file; legacy presets retain
-their existing implicit platform devices.
+Use `--soc` to select a complete platform preset. Combined CPU/SoC model files use `[soc]` for
+platform metadata and `[device.<kind>]` for device entries, including `[device.uart]`. A preset
+with `device_policy = "explicit"` registers only the devices listed in its file; presets that omit
+that policy retain their existing implicit platform devices.
 
 Device-specific SoC entries use `[device.<kind>]` sections. Supported kinds include `uart`,
 `rtc`, `dma`, `virtio-block`, `virtio-console`, `virtio-rng`, `virtio-gpu`, `virtio-input`,
@@ -61,6 +62,44 @@ simrv --dump-soc-manifest rvcomp build/rvcomp-soc.json
 
 The output follows `schemas/soc-manifest.schema.json` and contains the effective platform, memory,
 boot, transport, address, and interrupt metadata after preset-file overrides are applied.
+
+### RVComp RTL address map
+
+The RVComp preset describes the devices SimRV can register at their RTL addresses: its UART at
+`0x10000000`, CLINT at `0x02000000`, and PLIC at `0x0c000000`. The UART descriptor uses its
+16-byte register window and PLIC source 1, matching the RTL interrupt wiring. Ethernet is wired to
+PLIC source 2, but no Ethernet MAC descriptor is added because SimRV does not emulate RVComp's
+custom MAC. The RTL's broader
+address decode also contains these board resources:
+
+| RTL region | Address range | Size / detail | SimRV model status |
+| :--- | :--- | :--- | :--- |
+| Boot ROM | `0x00010000–0x00011fff` | 8 KiB | Not registered; RVComp preset starts directly at DRAM. |
+| CLINT | `0x02000000–0x020bffff` | 768 KiB decode window | Modeled at the RTL base. |
+| PLIC | `0x0c000000–0x0cffffff` | 16 MiB decode window | Modeled at the RTL base. |
+| UART | `0x10000000–0x1000000f` | 16-byte register window; PLIC source 1 | Modeled at the RTL base. |
+| Software reset | `0x10000100–0x10000103` | One control word | RTL-only; no matching SimRV device. |
+| Ethernet CSRs | `0x14000000–0x14003fff` | 16 KiB | RTL-only Ethernet MAC; not a VirtIO network device. |
+| Ethernet RX buffer | `0x18000000–0x18003fff` | 16 KiB | RTL-only buffer. |
+| Ethernet TX buffer | `0x1c000000–0x1c001fff` | 8 KiB | RTL-only buffer. |
+| DDR | `0x80000000–0x87ffffff` | 128 MiB on the selected Nexys build | SimRV's backing DRAM is configured separately. |
+| SD-backed RAM | `0xa0000000–0xbfffffff` | RTL decode window; RTL macro declares a 1.5 GiB controller capacity | RTL-only; not an additional SimRV RAM region. |
+
+The RVComp RTL calls its memory-mapped channel fabric AXI and routes the CPU through
+`axi_interconnect`. This is a custom valid/ready interface rather than full AXI4: stores present
+address, data, and byte strobes together, reads use address and response handshakes, and the fabric
+has independent read and write state machines that each handle one request at a time. The CPU data
+path is 32 bits, while the instruction/cache/DDR path is 128 bits. Address decode and target
+responses are implemented per device in the RTL.
+
+SimRV's CA execution routes accesses through its TileLink-style timing fabric and applies the
+RVComp model's calibrated request/response delays. It does not reproduce the RTL's valid/ready
+handshakes, per-target backpressure, or independent read/write state machines cycle by cycle.
+SimRV's `Axi4Bridge` is a separate adapter API; enabling it does not reproduce this custom fabric or
+add an Ethernet MAC. The RVComp model therefore leaves `[axi].enabled` false and documents the
+RTL-only peripherals instead of assigning them incompatible VirtIO register layouts. A
+cycle-by-cycle fabric model must preserve the existing RTL parity gates while modeling those
+handshakes and the address decode above.
 
 ### Generating a New Model Configuration
 
@@ -128,9 +167,9 @@ isa_preset = "ima"
 type = "five-stage"
 enable_forwarding = true
 mul_latency = 2
-div_latency = 35
-fp_alu_latency = 4
-fp_div_latency = 16
+div_latency = 34
+fp_alu_latency = 3
+fp_div_latency = 15
 branch_mispredict_penalty = 4
 cycle_counter_start_delay = 0
 csr_flush_penalty = 3
@@ -189,10 +228,10 @@ response_latency = 1
 | :--- | :--- | :--- | :--- |
 | `type` | string | `"five-stage"` | Pipeline structure: `"five-stage"` or `"three-stage"`. |
 | `enable_forwarding` | bool | `true` | Enables EX-to-EX and MEM-to-EX operand bypass forwarding. |
-| `mul_latency` | uint | `3` | Execution latency of integer multiplication (`MUL`, `MULH`, etc.) in clock cycles. |
-| `div_latency` | uint | `18` | Execution latency of integer division and remainder (`DIV`, `REM`) in clock cycles. |
-| `fp_alu_latency` | uint | `4` | Latency of single/double-precision floating-point additions and multiplications. |
-| `fp_div_latency` | uint | `16` | Latency of floating-point division and square root operations. |
+| `mul_latency` | uint | `2` | Additional execution stall cycles after issue for integer multiplication (`MUL`, `MULH`, etc.). Zero adds no stall cycles. |
+| `div_latency` | uint | `17` | Additional execution stall cycles after issue for integer division and remainder (`DIV`, `REM`). Zero adds no stall cycles. |
+| `fp_alu_latency` | uint | `3` | Additional execution stall cycles after issue for single/double-precision floating-point additions and multiplications. |
+| `fp_div_latency` | uint | `15` | Additional execution stall cycles after issue for floating-point division and square root operations. |
 | `branch_mispredict_penalty` | uint | `3` | Recovery flush penalty in cycles when a branch is mispredicted. |
 | `cycle_counter_start_delay` | uint | `0` | Delay in clock cycles before the `mcycle` counter starts incrementing after reset deassertion. |
 | `host_interface_latency` | uint | `0` | Completion latency for cycle-mode writes to the HTIF/tohost interface. Zero publishes the write immediately. |
@@ -275,7 +314,7 @@ simrv --dump-cpu-model balanced my_balanced.cfg
 
 The `configs/models/` folder contains authoritative configurations calibrated to specific hardware/FPGA processor RTL:
 
-1. **`rvcomp.cfg`**: Calibrated to the Archlab RVComp 5-stage SystemVerilog processor (`xlen = 32`, `isa_preset = "ima"`). Features a 34-stall-cycle non-restoring divider (`div_latency = 35` because SimRV includes the issue cycle), 2-cycle multiplier, untagged 512-entry BTB, 8192-entry BHT with weak-not-taken reset state (`2'b01`), 4-cycle branch mispredict penalty, and 4-cycle L1 D-Cache hit latency.
+1. **`rvcomp.cfg`**: Calibrated to the Archlab RVComp 5-stage SystemVerilog processor (`xlen = 32`, `isa_preset = "ima"`). Features a 34-stall-cycle non-restoring divider (`div_latency = 34`), a multiplier with two stall cycles (`mul_latency = 2`), an untagged 512-entry BTB, an 8192-entry BHT with weak-not-taken reset state (`2'b01`), a 4-cycle branch mispredict penalty, and a 4-cycle L1 D-Cache hit latency.
 2. **`cfu-provingground.cfg`**: Calibrated to Tokyo Tech Archlab's CFU-ProvingGround FPGA core (RVProc, `xlen = 32`, `isa_preset = "im"`). Features registered BTB reads (1-cycle branch prediction bubble), reset counter delay of 2 cycles, and custom function unit (CFU) hardware interface.
 
 ---
@@ -286,7 +325,7 @@ To calibrate SimRV to an external RTL core:
 
 1. **Identify Hardware Latencies**:
    - Inspect RTL modules (`multiplier.v`, `divider.v`, `lsu.v`).
-   - For example, RVComp's non-restoring divider takes 34 clock cycles, and its multiplier takes 2 stall cycles.
+   - Pipeline `*_latency` settings count additional stall cycles after issue (they do not include the issue cycle). RVComp's non-restoring divider adds 34 stall cycles and its multiplier adds 2, so use `div_latency = 34` and `mul_latency = 2`.
 2. **Inspect Branch Predictor Microarchitecture**:
    - Check reset initialization in `bimodal.v`: RVComp initializes `pht[i] = 2'b01;` (`bht_initial_state = 1`).
    - Check BTB read timing: RVComp's `bpu_access_pc` is speculative lookahead (`r_pc + 4`), allowing 0-bubble predicted branch fetches (`registered_btb_read = false`).

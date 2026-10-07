@@ -1772,8 +1772,10 @@ void test_cycle_kernel_golden_multicycle_execute() {
         return cycles;
     };
 
-    check(run(simrv::pipeline::PipelineType::FiveStage) == 10);
-    check(run(simrv::pipeline::PipelineType::ThreeStage) == 8);
+    // mul_latency is a count of additional stalls after issue. The issue cycle itself is
+    // outside this delay, so three configured stalls add one cycle over the legacy encoding.
+    check(run(simrv::pipeline::PipelineType::FiveStage) == 11);
+    check(run(simrv::pipeline::PipelineType::ThreeStage) == 9);
     std::cout << "[PASS] test_cycle_kernel_golden_multicycle_execute\n";
 }
 
@@ -2767,7 +2769,7 @@ void test_load_after_amo_readonly_page() {
     machine.cpu.state().regs.write(RegId::A1, ro_page);
     machine.cpu.soft_tlb_epoch++;
 
-    machine.cpu.execute_cached_op_fast<false, false>(machine, load_op);
+    machine.cpu.execute_cached_op_fast<false, false>(machine, load_op, machine.ram_view());
 
     check(!machine.cpu.pipeline_context.pending_exception.has_value());
     check(machine.cpu.state().regs.read(RegId::A0) == kMagicVal);

@@ -10,7 +10,7 @@ complete -c simrv -l mode -r -a 'fast detailed cycle-accurate' -d 'Select execut
 complete -c simrv -l pipeline -r -a '3stage 5stage' -d 'Select CA pipeline'
 complete -c simrv -l bpred -r -a 'none static bimodal gshare tournament' -d 'Select branch predictor'
 complete -c simrv -l net -r -a 'user tap socket none' -d 'Select network backend'
-complete -c simrv -l soc -l platform -r -a 'virt-pcie virt-mmio rvcomp' -d 'Select SoC preset'
+complete -c simrv -l soc -r -a 'virt-pcie virt-mmio rvcomp' -d 'Select SoC preset'
 complete -c simrv -l cpu-config -l log-file -l arch-trace -l load-checkpoint -l save-checkpoint -l summary -l events -r -F -d 'File path'
 complete -c simrv -l trace-dir -l checkpoint-dir -r -a '(__fish_complete_directories)' -d 'Directory path'
 complete -c simrv -l cpu-preset -r -a 'tiny balanced performance' -d 'Select CPU model'

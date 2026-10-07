@@ -51,6 +51,12 @@ class CfuUnit {
     /// Query the execution latency in cycles for the specified funct7/funct3 operation.
     [[nodiscard]] auto query_latency(uint32_t funct7, uint32_t funct3) const -> uint32_t;
 
+    /// Query additional stall cycles after the CFU issue cycle.
+    [[nodiscard]] auto query_stall_cycles(uint32_t funct7, uint32_t funct3) const -> uint32_t {
+        const uint32_t total_cycles = query_latency(funct7, funct3);
+        return total_cycles > 0 ? total_cycles - 1 : 0;
+    }
+
     /// Set the latency used by the built-in CFU implementation.
     void set_default_latency(uint32_t latency) noexcept { default_latency_ = latency == 0 ? 1 : latency; }
 

@@ -67,8 +67,8 @@ void test_cfu_provingground_profile() {
     // 5-stage in-order core
     TEST_CHECK(profile.pipeline.pipeline_type == PipelineType::FiveStage);
     TEST_CHECK(profile.pipeline.enable_forwarding);
-    TEST_CHECK(profile.pipeline.mul_latency == 3);
-    TEST_CHECK(profile.pipeline.div_latency == 36);
+    TEST_CHECK(profile.pipeline.mul_latency == 2);
+    TEST_CHECK(profile.pipeline.div_latency == 35);
     TEST_CHECK(profile.pipeline.branch_mispredict_penalty == 3);
     TEST_CHECK(profile.pipeline.cycle_counter_start_delay == 2);
 
@@ -140,6 +140,7 @@ void test_cfu_unit_default_execution() {
     TEST_CHECK(res1 == 0x1234);
     TEST_CHECK(cfu.last_latency() == 1);
     TEST_CHECK(cfu.query_latency(0, 0) == 1);
+    TEST_CHECK(cfu.query_stall_cycles(0, 0) == 0);
 
     const uint32_t res2 = cfu.execute(0x7f, 0x07, 0xdead0000, 0x0000beef);
     TEST_CHECK(res2 == 0xdeadbeef);
@@ -169,6 +170,8 @@ void test_cfu_unit_plugin_loading() {
 
     TEST_CHECK(cfu.query_latency(0, 1) == 3);
     TEST_CHECK(cfu.query_latency(0, 0) == 1);
+    TEST_CHECK(cfu.query_stall_cycles(0, 1) == 2);
+    TEST_CHECK(cfu.query_stall_cycles(0, 0) == 0);
 
     // Reset should maintain plugin
     cfu.reset();

@@ -10,7 +10,6 @@
 #include <fstream>
 #include <mutex>
 #include <optional>
-#include <vector>
 
 #include "simrv/Define.hpp"
 #include "simrv/cache/DCache.hpp"
@@ -27,6 +26,7 @@
 #include "simrv/execute/CfuUnit.hpp"
 #include "simrv/execute/ExecuteUnit.hpp"
 #include "simrv/memory/Bus.hpp"
+#include "simrv/memory/RamView.hpp"
 #include "simrv/pipeline/CpuModel.hpp"
 #include "simrv/pipeline/CycleTransition.hpp"
 #include "simrv/pipeline/PipelineContext.hpp"
@@ -414,11 +414,12 @@ class CPU {
      * @param op Reference to the cached pre-decoded operation.
      */
     template <bool kCopyContext = false, bool kInstMix = false>
-    void execute_cached_op_fast(Machine& machine, CachedOp& op);
+    void execute_cached_op_fast(Machine& machine, CachedOp& op,
+                                const simrv::memory::RamView& ram);
 
     template <bool kCopyContext, bool kInstMix, bool kPollPause>
-    SIMRV_ALWAYS_INLINE auto run_fast_baremetal_kernel(Machine& machine, uint32_t batch_size)
-        -> uint32_t;
+    SIMRV_ALWAYS_INLINE auto run_fast_baremetal_kernel(Machine& machine, uint32_t batch_size,
+                                                       const simrv::memory::RamView& ram) -> uint32_t;
 
     /**
      * @brief Executes a batch of cached operations in a tight inlined loop for baremetal
@@ -430,7 +431,8 @@ class CPU {
                                   const FastBatchPolicy& policy);
 
     template <bool kCopyContext, bool kInstMix, bool kPollPause>
-    SIMRV_ALWAYS_INLINE auto run_fast_os_kernel(Machine& machine, uint32_t batch_size) -> uint32_t;
+    SIMRV_ALWAYS_INLINE auto run_fast_os_kernel(Machine& machine, uint32_t batch_size,
+                                                const simrv::memory::RamView& ram) -> uint32_t;
 
     /**
      * @brief Executes a batch of cached operations in a tight inlined loop for OS
@@ -562,13 +564,15 @@ class CPU {
     SIMRV_ALWAYS_INLINE auto execute_cached_branch(CachedOp& op, Register rrs1, Register rrs2)
         -> void;
     SIMRV_ALWAYS_INLINE auto try_fast_load(Machine& machine, Address mem_addr, isa::Funct3 funct3,
-                                           Register& out_val) -> bool;
+                                           Register& out_val,
+                                           const simrv::memory::RamView& ram) -> bool;
     SIMRV_ALWAYS_INLINE auto try_fast_store(Machine& machine, Address mem_addr, isa::Funct3 funct3,
-                                            Register rrs2) -> bool;
-    SIMRV_ALWAYS_INLINE auto execute_cached_load(Machine& machine, CachedOp& op, Register rrs1)
-        -> bool;
+                                            Register rrs2, const simrv::memory::RamView& ram) -> bool;
+    SIMRV_ALWAYS_INLINE auto execute_cached_load(Machine& machine, CachedOp& op, Register rrs1,
+                                                 const simrv::memory::RamView& ram) -> bool;
     SIMRV_ALWAYS_INLINE auto execute_cached_store(Machine& machine, CachedOp& op, Register rrs1,
-                                                  Register rrs2) -> bool;
+                                                  Register rrs2,
+                                                  const simrv::memory::RamView& ram) -> bool;
     auto execute_cached_fallback(Machine& machine) -> void;
     auto dispatch_pending_interrupts() -> void;
     SIMRV_ALWAYS_INLINE auto handle_cached_interrupts() -> void {
@@ -627,10 +631,6 @@ class CPU {
     std::array<TraceHistoryEntry, kTraceHistoryCapacity> trace_history_buf_{};
     std::size_t trace_history_head_ = 0;  ///< Next write position (wraps around)
     std::size_t trace_history_size_ = 0;  ///< Number of valid entries (<= capacity)
-
-    /// Provides a read-only view over trace history in chronological order.
-    /// Returned as a vector for backward compatibility with TUI consumers.
-    [[nodiscard]] auto trace_history_view() const -> std::vector<TraceHistoryEntry>;
 
     void push_trace_history(Address pc, Instruction inst, const std::string& symbol);
 

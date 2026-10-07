@@ -5,6 +5,18 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## Unreleased
 
+## [v3.0.0-rc.8] — 2026-10-07
+
+- Removed the deprecated `--platform` alias; use `--soc` to select a SoC preset.
+- Restricted `--trace-pc` to inclusive PC ranges and retained `--trace-pc-period` for sampling.
+  Removed deprecated `[platform]` and `[uart]` CPU/SoC config sections in favor of `[soc]` and
+  `[device.uart]`, with parser diagnostics that name the replacement.
+- Removed the unused pipeline-only CPU config loader and vector-copy trace-history compatibility
+  adapter, along with stale TUI action aliases.
+- Reused a cached RAM view across each instruction-fast execution batch, avoiding repeated view
+  construction in cached loads and stores. Performance evidence remains non-blocking and is
+  recorded separately.
+
 ## [v3.0.0-rc.7] — 2026-10-06
 
 - Added opt-in `registers.jsonl` FP/vector destination-write tracing with exact before/after bits,
@@ -811,6 +823,7 @@ on inspector polish, correctness fixes, and CLI normalization.
 [v3.0.0-rc.5]: https://github.com/archlab-sciencetokyo/SimRV/releases/tag/v3.0.0-rc.5
 [v3.0.0-rc.6]: https://github.com/archlab-sciencetokyo/SimRV/releases/tag/v3.0.0-rc.6
 [v3.0.0-rc.7]: https://github.com/archlab-sciencetokyo/SimRV/releases/tag/v3.0.0-rc.7
+[v3.0.0-rc.8]: https://github.com/archlab-sciencetokyo/SimRV/releases/tag/v3.0.0-rc.8
 [v3.0.0-rc.4]: https://github.com/archlab-sciencetokyo/SimRV/releases/tag/v3.0.0-rc.4
 [v3.0.0-rc.3]: https://github.com/archlab-sciencetokyo/SimRV/releases/tag/v3.0.0-rc.3
 [v3.0.0-rc.2]: https://github.com/archlab-sciencetokyo/SimRV/releases/tag/v3.0.0-rc.2

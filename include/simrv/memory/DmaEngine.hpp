@@ -5,6 +5,7 @@
 #pragma once
 
 #include <algorithm>
+#include <atomic>
 #include <cstddef>
 #include <cstdint>
 #include <functional>
@@ -113,6 +114,7 @@ class DmaEngine {
                                          .completion_cycle = trace.completion_cycle,
                                          .component = trace.component,
                                          .on_complete = std::move(on_complete)});
+                has_pending_tasks_.store(true, std::memory_order_relaxed);
             }
         }
         if (observer) observer(trace);
@@ -128,6 +130,10 @@ class DmaEngine {
 
     /// Advance cycle and trigger any completed tasks
     void advance_cycle(Cycle current_cycle) {
+        // This method runs once per CA cycle. Most cycles have no DMA work, so avoid
+        // contending on the task mutex until a transfer has actually been queued.
+        if (!has_pending_tasks_.load(std::memory_order_relaxed)) return;
+
         std::vector<DmaTask> ready_tasks;
         TraceObserver observer;
         {
@@ -142,6 +148,7 @@ class DmaEngine {
                     ++it;
                 }
             }
+            has_pending_tasks_.store(!tasks_.empty(), std::memory_order_relaxed);
         }
         for (auto& task : ready_tasks) {
             if (task.on_complete) task.on_complete();
@@ -175,12 +182,14 @@ class DmaEngine {
     void clear() {
         const std::lock_guard lock(mutex_);
         tasks_.clear();
+        has_pending_tasks_.store(false, std::memory_order_relaxed);
     }
 
    private:
     mutable std::mutex mutex_;
     pipeline::DmaTimingConfig config_{};
     std::vector<DmaTask> tasks_;
+    std::atomic<bool> has_pending_tasks_{false};
     TraceObserver trace_observer_;
     uint64_t next_transfer_id_ = 1;
 };

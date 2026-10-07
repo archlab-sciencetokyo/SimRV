@@ -94,10 +94,11 @@ struct PipelineCycleEvent {
 enum class PipelineType : uint8_t { FiveStage = 0, ThreeStage = 1 };
 
 struct CpuConfig {
-    LatencyCycles mul_latency = 3;
-    LatencyCycles div_latency = 18;
-    LatencyCycles fp_alu_latency = 4;
-    LatencyCycles fp_div_latency = 16;
+    // Additional execution stalls after an operation issues into EX.
+    LatencyCycles mul_latency = 2;
+    LatencyCycles div_latency = 17;
+    LatencyCycles fp_alu_latency = 3;
+    LatencyCycles fp_div_latency = 15;
     LatencyCycles csr_flush_penalty = 3;
     LatencyCycles fence_flush_penalty = 4;
     LatencyCycles branch_mispredict_penalty = 2;
@@ -219,7 +220,8 @@ class PipelineSim {
     [[nodiscard]] auto cycle_history() const noexcept -> PipelineHistoryView;
     [[nodiscard]] auto get_stats() const -> PipelineStats;
 
-    // Model state getters for TUI compatibility
+    // Compatibility query facade used by the TUI and existing model tests. Each getter delegates
+    // to stage_reg(); new code can query a stage by PipelineStage directly.
     [[nodiscard]] auto f_reg() const -> const PipelineReg&;
     [[nodiscard]] auto d_reg() const -> const PipelineReg&;
     [[nodiscard]] auto e_reg() const -> const PipelineReg&;

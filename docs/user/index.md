@@ -219,7 +219,8 @@ are conjunctive. `--trace-function` uses the loaded ELF symbol table and matches
 containing the event PC; events without a resolvable symbol are excluded. `--trace-device` matches
 the event envelope's `component` exactly and excludes events without a component attribution. The
 PC range is inclusive and accepts hexadecimal or decimal addresses. `--trace-pc START-END` is an
-alias for `--trace-pc-range`; the legacy numeric `--trace-pc <period>` behavior remains available.
+alias for `--trace-pc-range`. Use `--trace-pc-period N` to sample the PC trace; numeric values for
+`--trace-pc` are rejected with a migration hint.
 Events without an architectural PC (for example bus transactions and interrupt assertion edges) are
 excluded while a PC range is active. Filtering occurs before event serialization. Lifecycle records
 in `events.jsonl` are always retained, so filters cannot hide run completion or failure. Selected

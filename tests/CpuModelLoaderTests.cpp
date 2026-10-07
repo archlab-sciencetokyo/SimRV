@@ -78,7 +78,7 @@ void test_load_canonical_rvcomp_cfg() {
     TEST_CHECK(config.pipeline.pipeline_type == PipelineType::FiveStage);
     TEST_CHECK(config.pipeline.enable_forwarding == true);
     TEST_CHECK(config.pipeline.mul_latency == 2);
-    TEST_CHECK(config.pipeline.div_latency == 35);
+    TEST_CHECK(config.pipeline.div_latency == 34);
     TEST_CHECK(config.pipeline.branch_mispredict_penalty == 4);
     TEST_CHECK(config.pipeline.host_interface_latency == 21);
     TEST_CHECK(config.pipeline.host_interface_phase_period == 2);
@@ -135,8 +135,8 @@ void test_load_canonical_cfu_provingground_cfg() {
     TEST_CHECK(simrv::core::load_cpu_config(*path, loaded));
     TEST_CHECK(config.validate().has_value());
     TEST_CHECK(config.pipeline.pipeline_type == PipelineType::FiveStage);
-    TEST_CHECK(config.pipeline.mul_latency == 3);
-    TEST_CHECK(config.pipeline.div_latency == 36);
+    TEST_CHECK(config.pipeline.mul_latency == 2);
+    TEST_CHECK(config.pipeline.div_latency == 35);
     TEST_CHECK(config.pipeline.branch_mispredict_penalty == 3);
     TEST_CHECK(config.pipeline.cycle_counter_start_delay == 2);
 
@@ -183,6 +183,40 @@ void test_multi_letter_isa_extensions() {
     using simrv::isa::OperationId;
     TEST_CHECK(ExecuteUnit::aluInt(0x12, 0x34, OperationId::CLMUL, 32) == 0x328);
     TEST_CHECK(ExecuteUnit::aluInt(0x1122, 0x3344, OperationId::PACK, 32) == 0x33441122);
+}
+
+void test_zero_execution_stall_cycles_are_valid() {
+    std::cout << "[Test] Zero additional execution stall cycles are valid...\n";
+    auto config = simrv::pipeline::make_cpu_model_preset(CpuModelPreset::Balanced);
+    config.pipeline.mul_latency = 0;
+    config.pipeline.div_latency = 0;
+    config.pipeline.fp_alu_latency = 0;
+    config.pipeline.fp_div_latency = 0;
+    TEST_CHECK(config.validate().has_value());
+}
+
+void test_removed_soc_config_section_aliases() {
+    std::cout << "[Test] Rejecting removed SoC configuration section aliases...\n";
+
+    simrv::core::SoCConfig soc{};
+    std::istringstream canonical(
+        "[soc]\nname = rvcomp\n[device.uart]\nname = uart0\nbase = 0x10000000\n");
+    TEST_CHECK(simrv::core::parse_soc_config_stream(canonical, soc));
+    TEST_CHECK(soc.devices.size() == 1);
+    TEST_CHECK(soc.devices.front().name == "uart0");
+    TEST_CHECK(soc.devices.front().base == 0x10000000);
+
+    simrv::core::SoCConfig old_platform{};
+    std::istringstream platform_alias("[platform]\nname = old-name\n");
+    TEST_CHECK(!simrv::core::parse_soc_config_stream(platform_alias, old_platform));
+
+    simrv::core::SoCConfig old_uart{};
+    std::istringstream uart_alias("[uart]\nname = uart0\n");
+    TEST_CHECK(!simrv::core::parse_soc_config_stream(uart_alias, old_uart));
+
+    simrv::pipeline::CpuModelConfig cpu{};
+    TEST_CHECK(!simrv::core::parse_cpu_config_string("[platform]\nname = old-name\n", cpu));
+    TEST_CHECK(!simrv::core::parse_cpu_config_string("[uart]\nname = uart0\n", cpu));
 }
 
 void test_rv32e_profile() {
@@ -320,6 +354,8 @@ int main() {
     test_load_canonical_rvcomp_cfg();
     test_load_canonical_cfu_provingground_cfg();
     test_multi_letter_isa_extensions();
+    test_zero_execution_stall_cycles_are_valid();
+    test_removed_soc_config_section_aliases();
     test_rv32e_profile();
     test_serialize_and_roundtrip();
     test_save_cpu_config_file();

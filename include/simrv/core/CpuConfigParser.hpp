@@ -298,7 +298,13 @@ inline auto parse_cpu_config_stream(std::istream& stream, simrv::pipeline::CpuMo
         // Section headers: [section_name]
         if (trimmed.front() == '[' && trimmed.back() == ']') {
             const auto sec_name = detail::trim(trimmed.substr(1, trimmed.size() - 2));
-            if (detail::iequals(sec_name, "cpu") || detail::iequals(sec_name, "model")) {
+            if (detail::iequals(sec_name, "platform")) {
+                simrv::log::warn("Deprecated CPU model section [platform]; use [soc]");
+                return false;
+            } else if (detail::iequals(sec_name, "uart")) {
+                simrv::log::warn("Deprecated device section [uart]; use [device.uart]");
+                return false;
+            } else if (detail::iequals(sec_name, "cpu") || detail::iequals(sec_name, "model")) {
                 current_section = Section::Cpu;
             } else if (detail::iequals(sec_name, "pipeline") || detail::iequals(sec_name, "core")) {
                 current_section = Section::Pipeline;
@@ -330,14 +336,13 @@ inline auto parse_cpu_config_stream(std::istream& stream, simrv::pipeline::CpuMo
             } else if (detail::iequals(sec_name, "cfu") ||
                        detail::iequals(sec_name, "custom_unit")) {
                 current_section = Section::Cfu;
-            } else if (detail::iequals(sec_name, "soc") || detail::iequals(sec_name, "platform")) {
+            } else if (detail::iequals(sec_name, "soc")) {
                 current_section = Section::SocMetadata;
             } else if (detail::iequals(sec_name, "memory")) {
                 current_section = Section::MemoryMetadata;
             } else if (detail::iequals(sec_name, "boot")) {
                 current_section = Section::BootMetadata;
-            } else if (detail::iequals(sec_name, "uart") ||
-                       detail::iequals(sec_name, "device.uart")) {
+            } else if (detail::iequals(sec_name, "device.uart")) {
                 current_section = Section::UartMetadata;
             } else {
                 simrv::log::warn("Unknown CPU config section: [{}]", sec_name);
@@ -839,7 +844,13 @@ inline auto parse_soc_config_stream(std::istream& stream, simrv::core::SoCConfig
         if (trimmed.front() == '[' && trimmed.back() == ']') {
             const auto name = detail::trim(trimmed.substr(1, trimmed.size() - 2));
             device = nullptr;
-            if (detail::iequals(name, "soc") || detail::iequals(name, "platform")) {
+            if (detail::iequals(name, "platform")) {
+                simrv::log::warn("Deprecated SoC section [platform]; use [soc]");
+                return false;
+            } else if (detail::iequals(name, "uart")) {
+                simrv::log::warn("Deprecated device section [uart]; use [device.uart]");
+                return false;
+            } else if (detail::iequals(name, "soc")) {
                 section = Section::Soc;
             } else if (detail::iequals(name, "memory")) {
                 section = Section::Memory;
@@ -847,10 +858,9 @@ inline auto parse_soc_config_stream(std::istream& stream, simrv::core::SoCConfig
                 section = Section::Boot;
             } else {
                 auto device_name = name;
-                const bool legacy_uart = device_name == "uart";
                 const bool explicit_device = device_name.starts_with("device.");
                 if (explicit_device) device_name.remove_prefix(7);
-                if ((legacy_uart || explicit_device) && soc_device_kind(device_name)) {
+                if (explicit_device && soc_device_kind(device_name)) {
                     const auto kind = soc_device_kind(device_name);
                     section = Section::Device;
                     const auto existing = std::ranges::find_if(
@@ -1003,22 +1013,6 @@ inline auto load_cpu_config_string(std::string_view content,
                                    simrv::pipeline::CpuModelConfig& config) -> bool {
     std::istringstream stream{std::string(content)};
     return load_cpu_config_stream(stream, config);
-}
-
-/**
- * @brief Compatibility entry point for callers that only need pipeline timing.
- */
-inline auto load_cpu_config(const std::filesystem::path& path, simrv::pipeline::CpuConfig& config)
-    -> bool {
-    simrv::pipeline::CpuModelConfig model{};
-    model.pipeline = config;
-    if (!load_cpu_config(path, model)) return false;
-    config = model.pipeline;
-    return true;
-}
-
-inline auto load_cpu_config(const std::string& path, simrv::pipeline::CpuConfig& config) -> bool {
-    return load_cpu_config(std::filesystem::path(path), config);
 }
 
 /**

@@ -47,10 +47,10 @@ enum class ModalType : uint8_t {
 struct SysConfigDraft {
     uint8_t preset = 1;         // tiny, balanced, performance, custom
     uint8_t pipeline_type = 0;  // 0: 5-stage, 1: 3-stage
-    uint32_t mul_latency = 3;
-    uint32_t div_latency = 18;
-    uint32_t fp_alu_latency = 4;
-    uint32_t fp_div_latency = 16;
+    uint32_t mul_latency = 2;
+    uint32_t div_latency = 17;
+    uint32_t fp_alu_latency = 3;
+    uint32_t fp_div_latency = 15;
     uint32_t csr_flush_penalty = 3;
     uint32_t fence_flush_penalty = 4;
     bool enable_forwarding = true;

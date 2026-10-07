@@ -68,6 +68,7 @@ class Tracer {
 
     [[nodiscard]] auto is_trace_enabled() const noexcept -> bool;
     [[nodiscard]] auto is_architecture_trace_enabled() const noexcept -> bool;
+    [[nodiscard]] auto needs_retiring_context() const noexcept -> bool;
     [[nodiscard]] auto is_trap_log_enabled() const noexcept -> bool;
     [[nodiscard]] auto is_dlog_enabled() const noexcept -> bool;
 
@@ -121,6 +122,7 @@ class Tracer {
     void ensure_artifact_directory() const;
     void write_trace_metadata(bool completed);
     [[nodiscard]] auto trace_level_at_least(unsigned level) const noexcept -> bool;
+    [[nodiscard]] auto trace_event_selected(std::string_view event) const noexcept -> bool;
     [[nodiscard]] auto accepts_trace_event(std::string_view event, Counter cycle, uint32_t hart,
                                            std::optional<Address> pc = std::nullopt,
                                            std::string_view component = {}) const noexcept -> bool;
@@ -133,6 +135,9 @@ class Tracer {
     bool bpred_opened_ = false;
     std::vector<unsigned> call_depth_;
     std::vector<std::unordered_map<uint64_t, std::vector<uint8_t>>> vector_write_before_;
+    std::vector<std::string> trace_event_filter_;
+    bool architecture_trace_enabled_ = false;
+    bool retirement_context_needed_ = false;
     struct TrapTraceFrame {
         TrapCause cause{};
         Address epc{};

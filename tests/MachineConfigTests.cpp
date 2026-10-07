@@ -393,14 +393,43 @@ auto main() -> int {
         }
     }
     {
+        std::array<std::string, 5> trace_pc_period_str = {"SimRV", "--trace-pc-period", "8", "-m",
+                                                          "guest.bin"};
+        std::array<char*, 5> trace_pc_period_args{};
+        for (size_t i = 0; i < trace_pc_period_str.size(); ++i)
+            trace_pc_period_args[i] = trace_pc_period_str[i].data();
+        const auto parsed = simrv::util::parse_command_line(trace_pc_period_args);
+        expect(parsed.has_value() && parsed->options.strace == 8,
+               "--trace-pc-period retains numeric PC sampling");
+    }
+    {
         std::array<std::string, 5> legacy_pc_trace_str = {"SimRV", "--trace-pc", "8", "-m",
                                                           "guest.bin"};
         std::array<char*, 5> legacy_pc_trace_args{};
         for (size_t i = 0; i < legacy_pc_trace_str.size(); ++i)
             legacy_pc_trace_args[i] = legacy_pc_trace_str[i].data();
         const auto parsed = simrv::util::parse_command_line(legacy_pc_trace_args);
-        expect(parsed.has_value() && parsed->options.strace == 8,
-               "legacy numeric --trace-pc sampling option remains available");
+        expect(!parsed.has_value() &&
+                   parsed.error().find("--trace-pc-period") != std::string::npos,
+               "numeric --trace-pc is rejected with the sampling replacement");
+    }
+    {
+        std::array<std::string, 5> soc_str = {"SimRV", "--soc", "rvcomp", "-m", "guest.bin"};
+        std::array<char*, 5> soc_args{};
+        for (size_t i = 0; i < soc_str.size(); ++i) soc_args[i] = soc_str[i].data();
+        const auto parsed = simrv::util::parse_command_line(soc_args);
+        expect(parsed.has_value() && parsed->options.soc_preset == "rvcomp",
+               "canonical --soc option remains supported");
+    }
+    {
+        std::array<std::string, 4> legacy_platform_str = {"SimRV", "--platform", "rvcomp", "-m"};
+        std::array<char*, 4> legacy_platform_args{};
+        for (size_t i = 0; i < legacy_platform_str.size(); ++i)
+            legacy_platform_args[i] = legacy_platform_str[i].data();
+        const auto parsed = simrv::util::parse_command_line(legacy_platform_args);
+        expect(!parsed.has_value() && parsed.error().find("unknown option '--platform'") !=
+                                          std::string::npos,
+               "removed --platform alias is rejected");
     }
     {
         std::array<std::string, 8> args_str = {

@@ -20,7 +20,7 @@ void CPU::run_ca_pipeline_cycle(Machine& machine) {
     // instruction context. Avoid copying a complete PipelineContext on every retirement when
     // none of those consumers is active.
     const bool retain_retired_slot =
-        machine.trace().is_architecture_trace_enabled() ||
+        machine.trace().needs_retiring_context() ||
         (pipeline_sim.config.record_snapshots &&
          (!machine.tui_enabled() ||
           (machine.telemetry_sink() && machine.telemetry_sink()->captures_execution_detail())));
@@ -285,7 +285,6 @@ void CPU::run_ca_pipeline_cycle(Machine& machine) {
         const bool serial_wait =
             decode->serializing && (pipe.memory->valid || pipe.writeback->valid);
         if (!hazard && !serial_wait) {
-            auto latency_minus_one = [](uint32_t latency) { return latency > 0 ? latency - 1 : 0; };
             if (three_stage) {
                 if (!decode->executed && !decode->serializing) {
                     (void)run_with_context(*decode, [&] {
@@ -305,14 +304,12 @@ void CPU::run_ca_pipeline_cycle(Machine& machine) {
                         decode->wb_valid = true;
                     }
                     if (pipeline::operation::is_multiply(decode->context.op_id)) {
-                        decode->remaining_latency =
-                            latency_minus_one(pipeline_sim.config.mul_latency);
+                        decode->remaining_latency = pipeline_sim.config.mul_latency;
                     } else if (pipeline::operation::is_divide_or_remainder(decode->context.op_id)) {
-                        decode->remaining_latency =
-                            latency_minus_one(pipeline_sim.config.div_latency);
+                        decode->remaining_latency = pipeline_sim.config.div_latency;
                     } else if (pipeline::operation::is_cfu(decode->context.op_id)) {
-                        decode->remaining_latency = latency_minus_one(cfu_unit.query_latency(
-                            decode->context.funct7, std::to_underlying(decode->context.funct3)));
+                        decode->remaining_latency = cfu_unit.query_stall_cycles(
+                            decode->context.funct7, std::to_underlying(decode->context.funct3));
                     }
                     if (decode->context.traits.is_control ||
                         decode->prediction.false_control_alias) {
@@ -376,18 +373,16 @@ void CPU::run_ca_pipeline_cycle(Machine& machine) {
                 pipe.decode->invalidate();
 
                 if (pipeline::operation::is_multiply(ex_slot->context.op_id)) {
-                    ex_slot->remaining_latency = latency_minus_one(pipeline_sim.config.mul_latency);
+                    ex_slot->remaining_latency = pipeline_sim.config.mul_latency;
                 } else if (pipeline::operation::is_divide_or_remainder(ex_slot->context.op_id)) {
-                    ex_slot->remaining_latency = latency_minus_one(pipeline_sim.config.div_latency);
+                    ex_slot->remaining_latency = pipeline_sim.config.div_latency;
                 } else if (pipeline::operation::is_fp_divide_or_sqrt(ex_slot->context.op_id)) {
-                    ex_slot->remaining_latency =
-                        latency_minus_one(pipeline_sim.config.fp_div_latency);
+                    ex_slot->remaining_latency = pipeline_sim.config.fp_div_latency;
                 } else if (pipeline::operation::is_fp_alu(ex_slot->context.op_id)) {
-                    ex_slot->remaining_latency =
-                        latency_minus_one(pipeline_sim.config.fp_alu_latency);
+                    ex_slot->remaining_latency = pipeline_sim.config.fp_alu_latency;
                 } else if (pipeline::operation::is_cfu(ex_slot->context.op_id)) {
-                    ex_slot->remaining_latency = latency_minus_one(cfu_unit.query_latency(
-                        ex_slot->context.funct7, std::to_underlying(ex_slot->context.funct3)));
+                    ex_slot->remaining_latency = cfu_unit.query_stall_cycles(
+                        ex_slot->context.funct7, std::to_underlying(ex_slot->context.funct3));
                 } else if (ex_slot->context.opcode == isa::Opcode::System) {
                     ex_slot->remaining_latency = pipeline_sim.config.csr_flush_penalty;
                 } else if (ex_slot->context.opcode == isa::Opcode::MiscMem) {

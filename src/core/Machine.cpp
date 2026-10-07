@@ -1770,8 +1770,9 @@ void Machine::finalize_cycle_tohost() {
         return;
     }
 
-    // Compatibility for older 32-bit SimRV HTIF protocol:
-    // writes of ((CMD_PRINT_CHAR << 16) | c) or (CMD_POWER_OFF << 16)
+    // Retained guest compatibility: older 32-bit SimRV images use this custom HTIF command
+    // encoding for console output and shutdown. The syscall-block handling below belongs to the
+    // same protocol; standard 64-bit HTIF handling remains above.
     if (dev == 0 && cmd == 0) {
         const auto old_cmd = static_cast<uint16_t>(tohost >> 16);
         const auto old_payload = static_cast<uint16_t>(tohost & 0xffffULL);

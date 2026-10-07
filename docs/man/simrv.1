@@ -167,6 +167,10 @@ Capture a trace for an inclusive execution range.
 .B \-\-trace-pc-period=\fIn\fR
 Sample the program counter every \fIn\fR steps into \fBtrace/tracepc.txt\fR.
 .TP
+.B \-\-trace-pc-range=\fIstart-end\fR
+Filter architectural trace events by an inclusive program-counter range. The range form of
+\fB\-\-trace-pc\fR is an alias; use \fB\-\-trace-pc-period\fR for sampling.
+.TP
 .B \-\-trace-bpred
 Record branch-prediction decisions.
 .TP

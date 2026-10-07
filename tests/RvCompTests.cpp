@@ -69,7 +69,7 @@ void test_rvcomp_profile_validation() {
     TEST_CHECK(profile.pipeline.pipeline_type == PipelineType::FiveStage);
     TEST_CHECK(profile.pipeline.enable_forwarding == true);
     TEST_CHECK(profile.pipeline.mul_latency == 2);
-    TEST_CHECK(profile.pipeline.div_latency == 35);
+    TEST_CHECK(profile.pipeline.div_latency == 34);
     TEST_CHECK(profile.pipeline.branch_mispredict_penalty == 4);
     TEST_CHECK(profile.pipeline.cycle_counter_start_delay == 0);
     TEST_CHECK(profile.pipeline.host_interface_latency == 21);
@@ -150,7 +150,7 @@ void test_rvcomp_machine_application() {
     TEST_CHECK(cpu.cpu_model_config.name == "rvcomp");
     TEST_CHECK(cpu.pipeline_sim.config.branch_mispredict_penalty == 4);
     TEST_CHECK(cpu.pipeline_sim.config.mul_latency == 2);
-    TEST_CHECK(cpu.pipeline_sim.config.div_latency == 35);
+    TEST_CHECK(cpu.pipeline_sim.config.div_latency == 34);
     TEST_CHECK(cpu.state().regs.xlen == 32);
     if constexpr (!simrv::xlen::kIsXLen64) {
         TEST_CHECK(cpu.state().misa == (0x40141101U | (1U << 23)));
@@ -169,10 +169,18 @@ void test_soc_metadata_parser() {
     TEST_CHECK(soc.name == "rvcomp");
     TEST_CHECK(soc.disable_unlisted_devices);
     const auto* uart = soc.find(simrv::core::SoCDeviceKind::Uart);
-    TEST_CHECK(uart != nullptr && uart->base == 0x10000000 && uart->irq == 10);
+    TEST_CHECK(uart != nullptr && uart->base == 0x10000000 && uart->size == 0x10 &&
+               uart->irq == 1);
+    const auto* clint = soc.find(simrv::core::SoCDeviceKind::Clint);
+    TEST_CHECK(clint != nullptr && clint->base == 0x02000000 && clint->size == 0x000c0000);
+    const auto* plic = soc.find(simrv::core::SoCDeviceKind::Plic);
+    TEST_CHECK(plic != nullptr && plic->base == 0x0c000000 && plic->size == 0x01000000);
     TEST_CHECK(soc.find(simrv::core::SoCDeviceKind::DmaController) == nullptr);
     const auto resolved = simrv::core::SoCDeviceRegistry::resolve(soc);
-    TEST_CHECK(resolved.size() == 1 && resolved.front().kind == simrv::core::SoCDeviceKind::Uart);
+    TEST_CHECK(resolved.size() == 3);
+    TEST_CHECK(resolved[0].kind == simrv::core::SoCDeviceKind::Uart);
+    TEST_CHECK(resolved[1].kind == simrv::core::SoCDeviceKind::Plic);
+    TEST_CHECK(resolved[2].kind == simrv::core::SoCDeviceKind::Clint);
 
     std::istringstream custom(R"cfg(
 [soc]
@@ -205,6 +213,8 @@ void test_soc_manifest_export() {
     TEST_CHECK(text.find("\"generator\": \"simrv ") != std::string::npos);
     TEST_CHECK(text.find("\"device_policy\": \"explicit\"") != std::string::npos);
     TEST_CHECK(text.find("\"kind\": \"uart\"") != std::string::npos);
+    TEST_CHECK(text.find("\"kind\": \"plic\"") != std::string::npos);
+    TEST_CHECK(text.find("\"kind\": \"clint\"") != std::string::npos);
     TEST_CHECK(text.find("\"kind\": \"dma\"") == std::string::npos);
 }
 

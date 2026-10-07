@@ -8,6 +8,7 @@
 
 #include <algorithm>
 #include <array>
+#include <charconv>
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
@@ -191,9 +192,81 @@ class GzipTraceWriter {
 
 namespace {
 
+class ConditionalTracerLock {
+   public:
+    ConditionalTracerLock(std::mutex& mutex, bool enabled) : mutex_(mutex), locked_(enabled) {
+        if (simrv::compiler::unlikely(locked_)) mutex_.lock();
+    }
+
+    ConditionalTracerLock(const ConditionalTracerLock&) = delete;
+    auto operator=(const ConditionalTracerLock&) -> ConditionalTracerLock& = delete;
+
+    ~ConditionalTracerLock() {
+        if (simrv::compiler::unlikely(locked_)) mutex_.unlock();
+    }
+
+   private:
+    std::mutex& mutex_;
+    bool locked_;
+};
+
 constexpr auto D_TRACE_HEX_WIDTH = static_cast<int>(kXLenHexDigits);
 constexpr Counter D_TRACEPC_INTERVAL = 1000;
 constexpr uint64_t kRetireIndexStride = 256;
+
+class RetirementRecordBuilder {
+   public:
+    void clear() noexcept { size_ = 0; }
+    void append(std::string_view text) noexcept {
+        std::memcpy(buffer_.data() + size_, text.data(), text.size());
+        size_ += text.size();
+    }
+    void push_back(char ch) noexcept { buffer_[size_++] = ch; }
+
+    template <typename Integer>
+    void append_decimal(Integer value) noexcept {
+        const auto [end, error] =
+            std::to_chars(buffer_.data() + size_, buffer_.data() + buffer_.size(), value);
+        if (error == std::errc{}) size_ = static_cast<size_t>(end - buffer_.data());
+    }
+
+    template <typename Integer>
+    void append_hex(Integer value) noexcept {
+        const auto [end, error] =
+            std::to_chars(buffer_.data() + size_, buffer_.data() + buffer_.size(), value, 16);
+        if (error == std::errc{}) size_ = static_cast<size_t>(end - buffer_.data());
+    }
+
+    [[nodiscard]] auto data() const noexcept -> const char* { return buffer_.data(); }
+    [[nodiscard]] auto size() const noexcept -> size_t { return size_; }
+    [[nodiscard]] auto view() const noexcept -> std::string_view { return {data(), size_}; }
+
+   private:
+    std::array<char, 192> buffer_;
+    size_t size_ = 0;
+};
+
+void append_retirement_record(RetirementRecordBuilder& record, const CPU& cpu,
+                              const pipeline::PipelineContext& context, const ArchState& state) {
+    record.clear();
+    record.append("{\"schema_version\":1,\"event\":\"retire\",\"hart\":");
+    record.append_decimal(static_cast<unsigned>(state.mhartid));
+    record.append(",\"cycle\":");
+    record.append_decimal(cpu.clint_mmio.mcycle);
+    record.append(",\"retired\":");
+    record.append_decimal(cpu.e_icount);
+    record.append(",\"pc\":\"0x");
+    record.append_hex(static_cast<uint64_t>(context.cpc.raw()));
+    record.append("\",\"instruction\":\"0x");
+    record.append_hex(static_cast<uint32_t>(context.ir));
+    record.append("\",\"operation\":\"");
+    record.append(pipeline::operation_name(context.op_id));
+    record.append("\",\"next_pc\":\"0x");
+    record.append_hex(static_cast<uint64_t>(state.pc));
+    record.append("\",\"privilege\":");
+    record.append_decimal(std::to_underlying(state.priv));
+    record.push_back('}');
+}
 
 auto trace_timestamp() -> std::string {
     const auto now = std::chrono::system_clock::now();
@@ -342,6 +415,12 @@ auto Tracer::trace_level_at_least(unsigned level) const noexcept -> bool {
     return machine_.configuration().debug.trace_level >= level;
 }
 
+auto Tracer::trace_event_selected(std::string_view event) const noexcept -> bool {
+    if (machine_.configuration().debug.trace_events.empty()) return true;
+    return std::ranges::any_of(
+        trace_event_filter_, [event](const std::string& candidate) { return candidate == event; });
+}
+
 auto Tracer::accepts_trace_event(std::string_view event, Counter cycle, uint32_t hart,
                                  std::optional<Address> pc,
                                  std::string_view component) const noexcept -> bool {
@@ -362,21 +441,7 @@ auto Tracer::accepts_trace_event(std::string_view event, Counter cycle, uint32_t
     }
     if (config.trace_after_cycle && cycle < *config.trace_after_cycle) return false;
     if (config.trace_before_cycle && cycle > *config.trace_before_cycle) return false;
-    if (config.trace_events.empty()) return true;
-
-    std::string_view remaining = config.trace_events;
-    while (!remaining.empty()) {
-        const auto comma = remaining.find(',');
-        auto candidate = remaining.substr(0, comma);
-        while (!candidate.empty() && (candidate.front() == ' ' || candidate.front() == '\t'))
-            candidate.remove_prefix(1);
-        while (!candidate.empty() && (candidate.back() == ' ' || candidate.back() == '\t'))
-            candidate.remove_suffix(1);
-        if (candidate == event) return true;
-        if (comma == std::string_view::npos) break;
-        remaining.remove_prefix(comma + 1);
-    }
-    return false;
+    return trace_event_selected(event);
 }
 
 auto Tracer::artifact_path(std::string_view filename) const -> std::filesystem::path {
@@ -399,6 +464,8 @@ void Tracer::init_trace(bool trace_enabled) {
 
 void Tracer::init_architecture_trace(const std::string& path) {
     machine_.dma_engine().set_trace_observer({});
+    architecture_trace_enabled_ = false;
+    retirement_context_needed_ = false;
     if (gzip_retire_) gzip_retire_->close();
     gzip_retire_.reset();
     fp_archtrace.close();
@@ -422,6 +489,7 @@ void Tracer::init_architecture_trace(const std::string& path) {
     trap_frames_.clear();
     marker_buffers_.clear();
     marker_depth_.clear();
+    trace_event_filter_.clear();
     if (path.empty()) return;
     std::error_code ec;
     const std::filesystem::path trace_path(path);
@@ -447,6 +515,18 @@ void Tracer::init_architecture_trace(const std::string& path) {
         }
     }
     const auto& config = machine_.configuration();
+    std::string_view event_names = config.debug.trace_events;
+    while (!event_names.empty()) {
+        const auto comma = event_names.find(',');
+        auto event = event_names.substr(0, comma);
+        while (!event.empty() && (event.front() == ' ' || event.front() == '\t'))
+            event.remove_prefix(1);
+        while (!event.empty() && (event.back() == ' ' || event.back() == '\t'))
+            event.remove_suffix(1);
+        if (!event.empty()) trace_event_filter_.emplace_back(event);
+        if (comma == std::string_view::npos) break;
+        event_names.remove_prefix(comma + 1);
+    }
     auto configuration_material = std::format(
         "{{\"xlen\":{},\"isa\":{},\"misa\":\"0x{:x}\",\"vlen\":{},"
         "\"harts\":{},\"dram_base\":\"0x{:x}\",\"dram_size\":\"0x{:x}\","
@@ -531,6 +611,20 @@ void Tracer::init_architecture_trace(const std::string& path) {
         fp_archtrace.clear();
         fp_archtrace.open(trace_path, std::ios::out | std::ios::trunc);
     }
+    architecture_trace_enabled_ =
+        fp_archtrace.is_open() || (gzip_retire_ && gzip_retire_->is_open());
+    const bool emits_calls = trace_event_selected("call") || trace_event_selected("return");
+    const bool emits_memory = trace_event_selected("memory_read") ||
+                              trace_event_selected("memory_write") ||
+                              trace_event_selected("memory_atomic");
+    retirement_context_needed_ =
+        architecture_trace_enabled_ &&
+        ((trace_level_at_least(3) && trace_event_selected("retire")) ||
+         (trace_level_at_least(2) && fp_calls.is_open() && emits_calls) ||
+         (trace_level_at_least(1) && fp_interrupts.is_open() &&
+          trace_event_selected("interrupt_return")) ||
+         (trace_level_at_least(4) && fp_memory.is_open() && emits_memory) ||
+         (fp_registers_.is_open() && trace_event_selected("register_write")));
     if (is_architecture_trace_enabled()) {
         machine_.dma_engine().set_trace_observer(
             [this](const simrv::memory::DmaTransferTrace& transfer) {
@@ -635,8 +729,9 @@ void Tracer::init_dlog(bool dlog_mode) {
 
 auto Tracer::is_trace_enabled() const noexcept -> bool { return fp_trace.is_open(); }
 auto Tracer::is_architecture_trace_enabled() const noexcept -> bool {
-    return fp_archtrace.is_open() || (gzip_retire_ && gzip_retire_->is_open());
+    return architecture_trace_enabled_;
 }
+auto Tracer::needs_retiring_context() const noexcept -> bool { return retirement_context_needed_; }
 auto Tracer::is_trap_log_enabled() const noexcept -> bool { return fp_traplog.is_open(); }
 auto Tracer::is_dlog_enabled() const noexcept -> bool { return fp_dlog.is_open(); }
 
@@ -646,7 +741,7 @@ auto Tracer::is_register_write_trace_enabled() const noexcept -> bool {
 
 void Tracer::capture_register_write_before(CPU& cpu, pipeline::PipelineContext& context) {
     if (!fp_registers_.is_open() || !context.traits.writes_vec) return;
-    std::lock_guard lock(mutex_);
+    ConditionalTracerLock lock(mutex_, machine_.is_smp_enabled());
     const auto hart = static_cast<size_t>(cpu.state().mhartid);
     if (hart >= vector_write_before_.size()) vector_write_before_.resize(hart + 1);
     if (context.trace_sequence == 0) return;
@@ -661,7 +756,7 @@ void Tracer::capture_register_write_before(CPU& cpu, pipeline::PipelineContext& 
 }
 
 void Tracer::flush_all() {
-    std::lock_guard lock(mutex_);
+    ConditionalTracerLock lock(mutex_, machine_.is_smp_enabled());
     if (fp_trace.is_open()) fp_trace.flush();
     if (fp_dlog.is_open()) fp_dlog.flush();
     if (fp_traplog.is_open()) fp_traplog.flush();
@@ -687,7 +782,7 @@ void Tracer::log_architectural_trap_entry(const CPU& cpu, TrapCause cause, Addre
     const auto& state = cpu.state();
     const auto hart = static_cast<size_t>(state.mhartid);
     const auto cycle = cpu.clint_mmio.mcycle;
-    std::lock_guard lock(mutex_);
+    ConditionalTracerLock lock(mutex_, machine_.is_smp_enabled());
     if (hart >= trap_frames_.size()) trap_frames_.resize(hart + 1);
     auto& frames = trap_frames_[hart];
     const bool interrupt = trap_is_interrupt(cause);
@@ -726,7 +821,7 @@ void Tracer::log_interrupt_signal(const CPU& cpu, TrapCause cause, bool asserted
     if (!accepts_trace_event(event, cycle, static_cast<uint32_t>(state.mhartid), std::nullopt,
                              source))
         return;
-    std::lock_guard lock(mutex_);
+    ConditionalTracerLock lock(mutex_, machine_.is_smp_enabled());
     std::println(fp_interrupts,
                  "{{\"schema_version\":2,\"event\":\"interrupt_{}\","
                  "\"timestamp\":\"{}\",\"cycle\":{},\"hart\":{},"
@@ -746,7 +841,7 @@ void Tracer::log_mmio(HartId hart, std::string_view dev_name, Address addr, uint
     const auto cycle = cpu.clint_mmio.mcycle;
     const auto event =
         std::format("{}_{}", mapped ? "mmio" : "unmapped", is_write ? "write" : "read");
-    std::lock_guard lock(mutex_);
+    ConditionalTracerLock lock(mutex_, machine_.is_smp_enabled());
     if (fp_dlog.is_open() && !faulted) {
         std::println(fp_dlog, "[mtime={:12}] [{:<16}] {:5} addr=0x{:0{}x} size={:2} data=0x{:0{}x}",
                      mtime, dev_name, is_write ? "WRITE" : "READ", addr, kXLenHexDigits, size, data,
@@ -781,7 +876,7 @@ void Tracer::log_bus_transaction(Counter cycle, char channel, std::string_view o
         channel == 'D' && context.completion_cycle ? *context.completion_cycle : cycle;
     if (!accepts_trace_event("bus_transaction", event_cycle, hart, std::nullopt, context.target))
         return;
-    std::lock_guard lock(mutex_);
+    ConditionalTracerLock lock(mutex_, machine_.is_smp_enabled());
     std::string fields;
     const auto add_number = [&fields](std::string_view name, const auto& value) {
         if (value) fields += std::format(",\"{}\":{}", name, static_cast<uint64_t>(*value));
@@ -826,7 +921,7 @@ void Tracer::log_pipeline_stalls(const CPU& cpu, std::span<const PipelineStallRe
     if (!accepts_trace_event("pipeline_stall", cycle, static_cast<uint32_t>(state.mhartid),
                              stalls.front().pc))
         return;
-    std::lock_guard lock(mutex_);
+    ConditionalTracerLock lock(mutex_, machine_.is_smp_enabled());
     std::println(fp_pipeline_,
                  "{{\"schema_version\":2,\"event\":\"pipeline_stall\","
                  "\"cycle\":{},\"hart\":{},\"mode\":\"{}\",\"payload\":{{"
@@ -853,7 +948,7 @@ void Tracer::log_dma_transfer(const simrv::memory::DmaTransferTrace& transfer) {
     if (!accepts_trace_event(event, cycle, std::numeric_limits<uint32_t>::max(), std::nullopt,
                              transfer.component))
         return;
-    std::lock_guard lock(mutex_);
+    ConditionalTracerLock lock(mutex_, machine_.is_smp_enabled());
     std::println(fp_devices,
                  "{{\"schema_version\":2,\"event\":\"{}\",\"timestamp\":\"{}\","
                  "\"cycle\":{},\"component\":{},\"payload\":{{"
@@ -867,7 +962,7 @@ void Tracer::log_dma_transfer(const simrv::memory::DmaTransferTrace& transfer) {
 void Tracer::log_marker_csr_write(const CPU& cpu, CSRValue value) {
     if (!fp_markers.is_open() || !is_architecture_trace_enabled()) return;
     const auto hart = static_cast<size_t>(cpu.state().mhartid);
-    std::lock_guard lock(mutex_);
+    ConditionalTracerLock lock(mutex_, machine_.is_smp_enabled());
     if (hart >= marker_buffers_.size()) {
         marker_buffers_.resize(hart + 1);
         marker_depth_.resize(hart + 1);
@@ -916,7 +1011,7 @@ void Tracer::log_trap(Counter mtime, Counter cycle, TrapCause cause, Address tra
                       PrivilegeLevel priv, const ArchState& state, CSRValue tval, const CPU& cpu) {
     if (!fp_traplog.is_open() && !(fp_devices.is_open() && trace_level_at_least(1))) return;
     constexpr int kLogHexWidth = static_cast<int>(kXLenHexDigits);
-    std::lock_guard lock(mutex_);
+    ConditionalTracerLock lock(mutex_, machine_.is_smp_enabled());
     if (fp_traplog.is_open()) {
         std::println(
             fp_traplog,
@@ -1045,7 +1140,7 @@ void Tracer::log_sbi(Counter mtime, Counter cycle, unsigned cause, Word ext_id, 
                      Word a0, Word a1, Address pc, HartId hart) {
     if (!fp_traplog.is_open() && !(fp_devices.is_open() && trace_level_at_least(1))) return;
     constexpr int kLogHexWidth = static_cast<int>(kXLenHexDigits);
-    std::lock_guard lock(mutex_);
+    ConditionalTracerLock lock(mutex_, machine_.is_smp_enabled());
     if (fp_traplog.is_open()) {
         std::println(fp_traplog,
                      "__ SBI ecall mtime={} cause={} ext={:0{}x} fid={:0{}x} a0={:0{}x} a1={:0{}x} "
@@ -1073,7 +1168,7 @@ void Tracer::log_sbi(Counter mtime, Counter cycle, unsigned cause, Word ext_id, 
 
 void Tracer::log_architecture_retirement(const CPU& cpu,
                                          const pipeline::PipelineContext& retiring_context) {
-    if (!is_architecture_trace_enabled()) return;
+    if (!needs_retiring_context()) return;
     const auto hart_id = static_cast<uint32_t>(cpu.state().mhartid);
     const auto cycle = cpu.clint_mmio.mcycle;
     const auto memory_kind = pipeline::operation::info(retiring_context.op_id).memory;
@@ -1081,25 +1176,47 @@ void Tracer::log_architecture_retirement(const CPU& cpu,
     const bool scalar_memory_opcode = opcode == Opcode::Load || opcode == Opcode::Store ||
                                       opcode == Opcode::LoadFp || opcode == Opcode::StoreFp ||
                                       opcode == Opcode::Amo;
-    const bool emit_memory = fp_memory.is_open() && scalar_memory_opcode &&
-                             memory_kind != pipeline::operation::MemoryAccessKind::None &&
-                             trace_level_at_least(4);
     const auto memory_event =
         memory_kind == pipeline::operation::MemoryAccessKind::Load     ? "memory_read"
         : memory_kind == pipeline::operation::MemoryAccessKind::Store  ? "memory_write"
         : memory_kind == pipeline::operation::MemoryAccessKind::Atomic ? "memory_atomic"
                                                                        : "";
+    const bool emit_memory = fp_memory.is_open() && scalar_memory_opcode &&
+                             memory_kind != pipeline::operation::MemoryAccessKind::None &&
+                             trace_level_at_least(4) && trace_event_selected(memory_event);
+    const auto funct12 = static_cast<Funct12Priv>(retiring_context.funct12);
+    const bool interrupt_return_instruction = funct12 == Funct12Priv::Mret ||
+                                              funct12 == Funct12Priv::Sret ||
+                                              funct12 == Funct12Priv::Uret;
+    const auto source_pc = retiring_context.cpc.raw();
+    const auto target_pc = retiring_context.jmp_pc.raw();
+    const auto return_pc = source_pc + (retiring_context.cinsn != 0 ? 2 : 4);
+    const bool is_link_register =
+        retiring_context.rd == RegId::Ra || retiring_context.rd == RegId::T0;
+    const bool is_return_register =
+        retiring_context.rs1 == RegId::Ra || retiring_context.rs1 == RegId::T0;
+    const bool is_return = retiring_context.opcode == isa::Opcode::Jalr &&
+                           retiring_context.rd == RegId::Zero && is_return_register &&
+                           retiring_context.imm == 0;
+    const bool is_call = retiring_context.tkn &&
+                         (retiring_context.opcode == isa::Opcode::Jal ||
+                          retiring_context.opcode == isa::Opcode::Jalr) &&
+                         is_link_register;
     const bool emit_retire =
         trace_level_at_least(3) &&
         accepts_trace_event("retire", cycle, hart_id, retiring_context.cpc.raw());
-    const bool emit_calls = fp_calls.is_open() && trace_level_at_least(2);
-    const bool emit_interrupts = fp_interrupts.is_open() && trace_level_at_least(1);
+    const bool emit_calls = fp_calls.is_open() && trace_level_at_least(2) &&
+                            (is_call || is_return) &&
+                            (trace_event_selected("call") || trace_event_selected("return"));
+    const bool emit_interrupts = fp_interrupts.is_open() && trace_level_at_least(1) &&
+                                 interrupt_return_instruction &&
+                                 trace_event_selected("interrupt_return");
     const bool emit_registers =
         fp_registers_.is_open() &&
         accepts_trace_event("register_write", cycle, hart_id, retiring_context.cpc.raw());
     if (!emit_retire && !emit_calls && !emit_interrupts && !emit_memory && !emit_registers) return;
     const auto& state = cpu.state();
-    std::lock_guard lock(mutex_);
+    ConditionalTracerLock lock(mutex_, machine_.is_smp_enabled());
     if (emit_registers && retiring_context.traits.writes_fp) {
         const auto index = static_cast<unsigned>(retiring_context.rd);
         const auto after = state.regs.read_fp(retiring_context.rd);
@@ -1276,29 +1393,21 @@ void Tracer::log_architecture_retirement(const CPU& cpu,
                              hart_id, static_cast<uint64_t>(retiring_context.cpc.raw()));
             }
         }
-        const auto record = std::format(
-            "{{\"schema_version\":1,\"event\":\"retire\",\"hart\":{},\"cycle\":{},"
-            "\"retired\":{},\"pc\":\"0x{:x}\",\"instruction\":\"0x{:x}\","
-            "\"operation\":\"{}\",\"next_pc\":\"0x{:x}\",\"privilege\":{}}}",
-            static_cast<unsigned>(state.mhartid), cpu.clint_mmio.mcycle, cpu.e_icount,
-            static_cast<uint64_t>(retiring_context.cpc.raw()),
-            static_cast<uint32_t>(retiring_context.ir),
-            pipeline::operation_name(retiring_context.op_id), static_cast<uint64_t>(state.pc),
-            std::to_underlying(state.priv));
+        RetirementRecordBuilder record;
+        append_retirement_record(record, cpu, retiring_context, state);
+        record.push_back('\n');
         if (gzip_retire_ && gzip_retire_->is_open()) {
-            if (!gzip_retire_->write(record + "\n")) {
+            if (!gzip_retire_->write(record.view())) {
                 simrv::log::error("failed writing compressed retirement record");
                 gzip_retire_->close();
             }
         } else {
-            std::println(fp_archtrace, "{}", record);
+            fp_archtrace.write(record.data(), static_cast<std::streamsize>(record.size()));
         }
         ++retire_record_count_;
     }
 
-    const auto funct12 = static_cast<Funct12Priv>(retiring_context.funct12);
-    if (emit_interrupts && (funct12 == Funct12Priv::Mret || funct12 == Funct12Priv::Sret ||
-                            funct12 == Funct12Priv::Uret)) {
+    if (emit_interrupts) {
         const auto hart_id = static_cast<size_t>(state.mhartid);
         if (hart_id < trap_frames_.size() && !trap_frames_[hart_id].empty()) {
             const auto frame = trap_frames_[hart_id].back();
@@ -1329,20 +1438,6 @@ void Tracer::log_architecture_retirement(const CPU& cpu,
     const auto hart = static_cast<size_t>(state.mhartid);
     if (!emit_calls) return;
     if (hart >= call_depth_.size()) call_depth_.resize(hart + 1);
-    const auto source_pc = retiring_context.cpc.raw();
-    const auto target_pc = retiring_context.jmp_pc.raw();
-    const auto return_pc = source_pc + (retiring_context.cinsn != 0 ? 2 : 4);
-    const bool is_link_register =
-        retiring_context.rd == RegId::Ra || retiring_context.rd == RegId::T0;
-    const bool is_return_register =
-        retiring_context.rs1 == RegId::Ra || retiring_context.rs1 == RegId::T0;
-    const bool is_return = retiring_context.opcode == isa::Opcode::Jalr &&
-                           retiring_context.rd == RegId::Zero && is_return_register &&
-                           retiring_context.imm == 0;
-    const bool is_call = retiring_context.tkn &&
-                         (retiring_context.opcode == isa::Opcode::Jal ||
-                          retiring_context.opcode == isa::Opcode::Jalr) &&
-                         is_link_register;
     if (is_call) {
         const auto depth = ++call_depth_[hart];
         if (fp_calls.is_open() && accepts_trace_event("call", cycle, hart_id, source_pc)) {
@@ -1835,7 +1930,7 @@ auto Tracer::write_summary_json(const std::string& path) -> bool {
 
 void Tracer::emit_periodic_pc_trace(Counter mtime, Register cpc) {
     if ((mtime % D_TRACEPC_INTERVAL) == 0) {
-        std::lock_guard lock(mutex_);
+        ConditionalTracerLock lock(mutex_, machine_.is_smp_enabled());
         if (!tracepc_opened_) {
             tracepc_opened_ = true;
             ensure_artifact_directory();
@@ -1850,7 +1945,7 @@ void Tracer::emit_periodic_pc_trace(Counter mtime, Register cpc) {
 
 void Tracer::emit_branch_prediction_trace(Counter mtime, Register cpc, Register jmp_pc,
                                           Opcode r_opcode, bool r_tkn) {
-    std::lock_guard lock(mutex_);
+    ConditionalTracerLock lock(mutex_, machine_.is_smp_enabled());
     if (!bpred_opened_) {
         bpred_opened_ = true;
         ensure_artifact_directory();
@@ -1875,7 +1970,7 @@ void Tracer::write_trace_snapshot() {
     if (!fp_trace.is_open()) {
         return;
     }
-    std::lock_guard lock(mutex_);
+    ConditionalTracerLock lock(mutex_, machine_.is_smp_enabled());
     const auto& cpu = machine_.primary_hart();
     const auto& st = cpu.state();
     const auto& context = cpu.pipeline_context;
