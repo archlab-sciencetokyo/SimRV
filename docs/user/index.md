@@ -518,16 +518,22 @@ simrv --cli -m build/my_program.elf -H 0x80001000
 SimRV boots full Linux distributions with OpenSBI and dynamic device-tree generation.
 
 ```bash
-# Launch Linux with OpenSBI and root filesystem image
-simrv --kernel linux-images/Image \
-      --disk linux-images/root.img \
+# Launch the bundled OpenSBI + Linux image with its root filesystem
+simrv --os \
+      -m linux-images/rv64/alpine-gui/opensbi-linux-payload.elf \
+      -D linux-images/rv64/alpine-gui/rootfs.img \
+      -f linux-images/rv64/alpine-gui/devicetree.dtb \
       --smp 2
 ```
 
 ### Full-System CLI Options
 
-- `--kernel <Image>`: Linux kernel image.
-- `--disk <root.img>`: Ext4 root filesystem image (attached as `/dev/vda` via VirtIO Block).
+- `-m <opensbi-linux-payload.elf>`: OpenSBI firmware containing the Linux kernel.
+- `-D <rootfs.img>`: Ext4 root filesystem image (attached as `/dev/vda` via VirtIO Block). Guest
+  writes use a temporary overlay and are discarded when SimRV exits; the source image is unchanged.
+- `--virtiofs <DIR>`: Expose a selected host directory to Linux guests through VirtIO-FS. Guest
+  writes are immediately visible in that host directory; see
+  [Linux and Buildroot](linux.md#share-a-host-directory-with-virtio-fs).
 - `--smp <2..16>`: Number of active SMP harts (default is 1 for single-hart execution).
 - `--dtb <virt.dtb>`: Optional custom Device Tree Blob (SimRV automatically synthesizes a device tree if omitted).
 - `--dram-size <SIZE>`, `--ram-size <SIZE>`: Guest DRAM size with an optional

@@ -9,9 +9,6 @@ namespace simrv::device {
 VirtioPciGpu::VirtioPciGpu() : VirtioPciDevice(virtio::kDevIdGpu, 0x030000, 2) {}
 
 auto VirtioPciGpu::get_device_features(uint32_t select) -> uint32_t {
-    if (select == 0) {
-        return (1U << 1);  // VIRGL support
-    }
     if (select == 1) {
         return (1U << 0);  // VIRTIO_F_VERSION_1
     }

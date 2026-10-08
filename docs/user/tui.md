@@ -30,13 +30,17 @@ read stdin or render directly. This prevents concurrent consumers from dropping 
 splitting ANSI control sequences.
 
 When the guest is running, ordinary bytes—including carriage return and
-newline—are delivered directly to the platform UART (`ttyS0`). `Ctrl-P` pauses and `Ctrl-Q` quits.
-Keyboard input focus is automatically linked to simulation state: while running, input routes
-directly to the guest terminal; while paused, keys control TUI navigation and inspection. An active modal
-receives input before navigation, except global `Ctrl-R` reboot and `Ctrl-Q` quit. These controls
+newline—are delivered to the platform UART (`ttyS0`). Focus the Display pane to send keyboard
+events to a VGA guest instead; other panes keep UART input available. `Ctrl-P` pauses and `Ctrl-Q`
+quits. Keyboard input focus is linked to simulation state: while running, input routes to the guest;
+while paused, keys control TUI navigation and inspection. An active modal receives input before
+navigation, except global `Ctrl-R` reboot and `Ctrl-Q` quit. These controls
 remain available after guest shutdown and wake the stopped simulation loop for clean teardown or
 restart. The optional VirtIO console is a separate device and does not
 receive copies of UART keystrokes.
+
+For the Alpine desktop image, log in through the UART first; its profile starts JWM after login.
+Then focus the Display pane to send keyboard input to the graphical guest.
 
 ### Scrolling and panel focus
 
@@ -51,7 +55,7 @@ open at once. Use `Tab`/`Shift-Tab` (or `Ctrl-Right`/`Ctrl-Left`) to change the 
   through the resulting columns.
 - The mouse wheel always scrolls the panel under the pointer. In an inspector, the bottom Log
   region has its own bounded scroll position; `u`/`d` move it by a few lines when the inspector is
-  focused.
+  focused. Each simulator message shows its severity and elapsed time; severity remains color-coded.
 - The guest console retains its own scrollback position, independent of inspector panels.
 
 Each inspector page owns a reusable two-dimensional `ScrollView`, so changing focus or opening

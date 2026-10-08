@@ -33,6 +33,7 @@ enum class RequestedExecutionMode : uint8_t { Fast, Detailed, CycleAccurate };
 struct RuntimeOptions {
     std::string fn_memimg;
     std::string fn_dskimg;
+    std::string fn_virtiofs;
     std::string fn_dvtree;
     std::string fn_traplog;
     std::string fn_log;

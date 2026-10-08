@@ -1324,7 +1324,7 @@ void test_log_buffer_wrapping() {
     buffer.push("Short log line");
     buffer.push(
         "\033[36mLoaded 105604 symbols from ELF image: "
-        "linux-images/rv64/fw_payload.elf\033[0m");
+        "linux-images/rv64/alpine-gui/opensbi-linux-payload.elf\033[0m");
 
     auto lines_w30 = buffer.get_wrapped_lines(30, 20);
     expect(lines_w30.size() >= 3, "Log wrapped across multiple lines when width=30");

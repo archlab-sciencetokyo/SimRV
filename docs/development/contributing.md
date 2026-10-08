@@ -40,10 +40,14 @@ cmake --build --preset rv64-release -j$(nproc)
 cmake --preset rv32-release
 cmake --build --preset rv32-release -j$(nproc)
 
-# Debug targets with AddressSanitizer (ASan) & UB-Sanitizer
-cmake --preset rv64-debug
-cmake --build --preset rv64-debug -j$(nproc)
+# Optional host-specialized RV64 build for local profiling
+cmake --preset rv64-native-release
+cmake --build --preset rv64-native-release -j$(nproc)
 ```
+
+For sanitizer diagnosis, use the separate `rv64-asan`, `rv64-ubsan`, and `rv64-tsan` configure and
+build presets. These place outputs under `/tmp/simrv-build/`, leaving repository `build/` for the
+RV32/RV64 release binaries and the optional native RV64 release.
 
 Published documentation exposes `stable` (from `main`) and `dev` versions through the header
 selector. Keep branch-specific claims accurate: changes pushed to `dev` are visible before they

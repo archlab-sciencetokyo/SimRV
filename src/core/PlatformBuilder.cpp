@@ -5,11 +5,13 @@
 
 #include "MachineRuntime.hpp"
 #include "simrv/core/Machine.hpp"
+#include "simrv/core/Logger.hpp"
 #include "simrv/core/SoCDeviceRegistry.hpp"
 #include "simrv/device/RingBufferEthernetMmio.hpp"
 #include "simrv/device/mmio/VirtioMmioBlock.hpp"
 #include "simrv/device/mmio/VirtioMmioConsole.hpp"
 #include "simrv/device/mmio/VirtioMmioGpu.hpp"
+#include "simrv/device/mmio/VirtioMmioFs.hpp"
 #include "simrv/device/mmio/VirtioMmioInput.hpp"
 #include "simrv/device/mmio/VirtioMmioNet.hpp"
 #include "simrv/device/mmio/VirtioMmioRng.hpp"
@@ -18,6 +20,7 @@
 #include "simrv/device/pci/VirtioPciBlock.hpp"
 #include "simrv/device/pci/VirtioPciConsole.hpp"
 #include "simrv/device/pci/VirtioPciGpu.hpp"
+#include "simrv/device/pci/VirtioPciFs.hpp"
 #include "simrv/device/pci/VirtioPciInput.hpp"
 #include "simrv/device/pci/VirtioPciNet.hpp"
 #include "simrv/device/pci/VirtioPciRng.hpp"
@@ -72,10 +75,17 @@ void PlatformBuilder::compose(Machine& machine) {
         if (enabled(SoCDeviceKind::VirtioMmioNet)) {
             machine.runtime_->pci_net = std::make_shared<simrv::device::VirtioPciNet>(network_mode);
         }
-        const std::array<std::shared_ptr<simrv::device::PciDevice>, 7> pci_devices = {
+        if (!machine.config.files.virtiofs_path.empty() && enabled(SoCDeviceKind::VirtioMmioFs)) {
+            machine.runtime_->pci_fs = std::make_shared<simrv::device::VirtioPciFs>(
+                machine.config.files.virtiofs_path);
+            if (!machine.runtime_->pci_fs->is_ready())
+                simrv::log::error("cannot open VirtIO-FS share directory '{}'",
+                                  machine.config.files.virtiofs_path);
+        }
+        const std::array<std::shared_ptr<simrv::device::PciDevice>, 8> pci_devices = {
             machine.runtime_->pci_disk, machine.runtime_->pci_console, machine.runtime_->pci_rng,
             machine.runtime_->pci_gpu,  machine.runtime_->pci_input,   machine.runtime_->pci_sound,
-            machine.runtime_->pci_net,
+            machine.runtime_->pci_net,   machine.runtime_->pci_fs,
         };
         for (uint8_t slot = 1; slot <= pci_devices.size(); ++slot) {
             if (pci_devices[slot - 1]) {
@@ -114,6 +124,15 @@ void PlatformBuilder::compose(Machine& machine) {
         if (const auto device = descriptor(SoCDeviceKind::VirtioMmioNet)) {
             machine.runtime_->mmio_net = std::make_shared<simrv::device::VirtioMmioNet>(
                 device->base, device->irq, &machine, network_mode);
+        }
+        if (!machine.config.files.virtiofs_path.empty()) {
+            if (const auto device = descriptor(SoCDeviceKind::VirtioMmioFs)) {
+                machine.runtime_->mmio_fs = std::make_shared<simrv::device::VirtioMmioFs>(
+                    device->base, device->irq, &machine, machine.config.files.virtiofs_path);
+                if (!machine.runtime_->mmio_fs->is_ready())
+                    simrv::log::error("cannot open VirtIO-FS share directory '{}'",
+                                      machine.config.files.virtiofs_path);
+            }
         }
     }
 }

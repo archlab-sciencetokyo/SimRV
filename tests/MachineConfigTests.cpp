@@ -96,7 +96,7 @@ auto main() -> int {
             ("simrv-buildroot-output-" +
              std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
         fs::create_directories(output / "images");
-        std::ofstream(output / "images/fw_payload.bin").put('f');
+        std::ofstream(output / "images/opensbi-linux-payload.elf").put('f');
         std::ofstream(output / "images/devicetree.dtb").put('d');
         std::ofstream(output / "images/rootfs.ext4").put('r');
         std::ofstream(output / "images/simrv-manifest.json") << "{\"dram_size_mb\": 512}\n";
@@ -104,7 +104,8 @@ auto main() -> int {
         std::array<char*, 3> args{};
         for (size_t i = 0; i < args_str.size(); ++i) args[i] = args_str[i].data();
         const auto parsed = simrv::util::parse_command_line(args);
-        expect(parsed.has_value() && parsed->options.fn_memimg.ends_with("fw_payload.bin") &&
+        expect(parsed.has_value() &&
+                   parsed->options.fn_memimg.ends_with("opensbi-linux-payload.elf") &&
                    parsed->options.fn_dvtree.ends_with("devicetree.dtb") &&
                    parsed->options.fn_dskimg.ends_with("rootfs.ext4") && !parsed->options.appmode &&
                    parsed->options.use_disk && parsed->options.dram_size == 512ULL * 1024 * 1024,

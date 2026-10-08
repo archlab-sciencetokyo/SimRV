@@ -5,6 +5,19 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## Unreleased
 
+## [v3.0.0-rc.9] — 2026-10-08
+
+- Added VirtIO filesystem support on MMIO and PCI, backed by a host-shared directory, and
+  improved block-device flush handling so guest filesystem changes can be persisted safely.
+- Added runtime copy-on-write overlays for Linux disk images, keeping the published base image
+  unchanged across guest runs; simplified image paths and removed the obsolete disk-clone helper.
+- Improved the Linux boot and desktop workflow, including Linux 7.2.9 images, hostname/network
+  startup diagnostics, PTY availability, and clearer simulator log messages in the TUI.
+- Expanded TUI file loading and UART interaction, including Buildroot output directories,
+  navigation/search, and terminal transcript improvements.
+- Extended custom SoC configuration and documentation for reusable MMIO devices, presets, and
+  Buildroot-based images.
+
 ## [v3.0.0-rc.8] — 2026-10-07
 
 - Removed the deprecated `--platform` alias; use `--soc` to select a SoC preset.

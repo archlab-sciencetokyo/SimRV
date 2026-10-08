@@ -27,6 +27,7 @@ namespace {
 struct PendingLog {
     Level level;
     std::string message;
+    std::chrono::steady_clock::time_point timestamp;
 };
 
 constexpr std::size_t kStartupLogLimit = 256;
@@ -103,34 +104,44 @@ auto json_record(Level level, const std::string& msg, bool pretty) -> std::strin
         timestamp, severity, message);
 }
 
-auto tui_message(Level level, const std::string& message) -> std::string {
+auto tui_message(Level level, const std::string& message,
+                 std::chrono::steady_clock::time_point timestamp) -> std::string {
+    std::string_view severity_color;
     switch (level) {
         case Level::Trace:
-            return "\033[38;5;244m" + message + "\033[0m\n";
+            severity_color = "\033[38;5;244m";
+            break;
         case Level::Debug:
-            return "\033[38;5;141m" + message + "\033[0m\n";
+            severity_color = "\033[38;5;141m";
+            break;
         case Level::Info:
-            return "\033[36m" + message + "\033[0m\n";
+            severity_color = "\033[36m";
+            break;
         case Level::Warn:
-            return "\033[93m" + message + "\033[0m\n";
+            severity_color = "\033[93m";
+            break;
         case Level::Error:
-            return "\033[91m" + message + "\033[0m\n";
+            severity_color = "\033[91m";
+            break;
         case Level::Off:
             return "";
     }
-    return message;
+
+    const double elapsed = std::chrono::duration<double>(timestamp - g_log_epoch).count();
+    return std::format("\033[38;5;244m[+{:.1f}s]\033[0m {}[{}]\033[0m {}\n", elapsed,
+                       severity_color, level_name(level), message);
 }
 
 void emit_log(Level level, FILE* stream, std::string_view ansi_color, std::string_view plain_tag,
               const std::string& msg) {
     LogCallback callback;
     const auto format = g_log_format.load(std::memory_order_relaxed);
+    const auto timestamp = std::chrono::steady_clock::now();
     {
         std::scoped_lock lock(g_log_mutex);
         if (g_log_file.is_open()) {
             if (format == Format::Text) {
-                const auto elapsed =
-                    std::chrono::duration<double>(std::chrono::steady_clock::now() - g_log_epoch);
+                const auto elapsed = std::chrono::duration<double>(timestamp - g_log_epoch);
                 std::println(g_log_file, "[+{:012.6f}s] [{:5}] {}", elapsed.count(),
                              level_name(level), msg);
             } else {
@@ -153,7 +164,7 @@ void emit_log(Level level, FILE* stream, std::string_view ansi_color, std::strin
                 std::fflush(stderr);
             } else {
                 if (g_startup_logs.size() == kStartupLogLimit) g_startup_logs.pop_front();
-                g_startup_logs.push_back({level, msg});
+                g_startup_logs.push_back({level, msg, timestamp});
             }
             return;
         } else {
@@ -171,7 +182,7 @@ void emit_log(Level level, FILE* stream, std::string_view ansi_color, std::strin
         }
     }
     if (callback) {
-        callback(tui_message(level, msg));
+        callback(tui_message(level, msg, timestamp));
     }
 }
 
@@ -237,7 +248,9 @@ void set_tui_callback(LogCallback cb) {
         if (callback) pending.swap(g_startup_logs);
     }
     if (callback) {
-        for (const auto& entry : pending) callback(tui_message(entry.level, entry.message));
+        for (const auto& entry : pending) {
+            callback(tui_message(entry.level, entry.message, entry.timestamp));
+        }
     }
 }
 

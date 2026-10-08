@@ -46,14 +46,20 @@ struct BuildrootImageBundle {
             "Buildroot output '{}' is missing {}; expected artifacts in '{}'",
             directory.string(), label, images.string()));
     };
-    auto firmware = locate({images / "fw_payload.bin", directory / "fw_payload.bin"},
-                           "fw_payload.bin");
+    // Accept the canonical SimRV bundle name first, then Buildroot's and older
+    // SimRV bundles' standard OpenSBI filename for backwards compatibility.
+    auto firmware = locate({images / "opensbi-linux-payload.elf",
+                            directory / "opensbi-linux-payload.elf", images / "fw_payload.bin",
+                            directory / "fw_payload.bin"},
+                           "OpenSBI Linux payload");
     if (!firmware) return std::unexpected(firmware.error());
     auto dtb = locate({images / "devicetree.dtb", images / "virt.dtb",
                        directory / "devicetree.dtb"}, "devicetree.dtb");
     if (!dtb) return std::unexpected(dtb.error());
-    auto rootfs = locate({images / "rootfs.ext4", images / "root.img", directory / "root.img"},
-                         "rootfs.ext4");
+    // Buildroot emits rootfs.ext4; root.img is retained for old output folders.
+    auto rootfs = locate({images / "rootfs.img", images / "rootfs.ext4", images / "root.img",
+                          directory / "rootfs.img", directory / "root.img"},
+                         "root filesystem image");
     if (!rootfs) return std::unexpected(rootfs.error());
     std::optional<uint64_t> dram_size_bytes;
     for (const auto& manifest : {images / "simrv-manifest.json", images / "manifest.json",

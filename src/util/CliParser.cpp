@@ -401,6 +401,18 @@ auto parse_file_options(std::string_view arg, std::span<char* const> args, std::
         options.appmode = false;
         return true;
     }
+    if (arg == "--virtiofs" || arg.starts_with("--virtiofs=")) {
+        std::string_view path = arg.starts_with("--virtiofs=") ? arg.substr(11) : "";
+        if (path.empty()) {
+            auto value = next_argument(args, i, "--virtiofs");
+            if (!value) return std::unexpected(value.error());
+            path = *value;
+        }
+        if (path.empty()) return std::unexpected("--virtiofs requires a host directory");
+        options.fn_virtiofs = std::string(path);
+        options.appmode = false;
+        return true;
+    }
     if (arg == "-f" || arg == "--fdt" || arg == "--dtb") {
         auto value = next_argument(args, i, arg);
         if (!value) return std::unexpected(value.error());
@@ -1357,6 +1369,7 @@ auto RuntimeOptions::to_machine_config() const -> simrv::core::MachineConfig {
 
     cfg.files.binary_path = fn_memimg;
     cfg.files.disk_path = fn_dskimg;
+    cfg.files.virtiofs_path = fn_virtiofs;
     cfg.files.disk_enabled = use_disk;
     cfg.files.dvtree_path = fn_dvtree;
     cfg.files.traplog_path = fn_traplog;
@@ -1496,6 +1509,8 @@ auto apply_runtime_options(simrv::core::Machine* machine, const RuntimeOptions& 
         machine->primary_hart().trap_log_stream = &machine->trace().fp_traplog;
     }
 
+    // Filename detection preserves legacy FW_PAYLOAD bundles; current published
+    // payloads identify themselves with the opensbi-linux-payload name.
     const bool is_fw_payload = (options.fn_memimg.find("fw_payload") != std::string::npos ||
                                 options.fn_memimg.find("opensbi") != std::string::npos);
     const bool opensbi_active = options.use_opensbi || !options.fn_dvtree.empty() || is_fw_payload;
@@ -1544,6 +1559,7 @@ auto needs_memory_image(const ParseResult& result) -> bool {
           {"--buildroot-output <DIR>",
            "Load firmware, DTB, and rootfs together from a Buildroot output directory."},
           {"-D, --disk, --rootfs <FILE>", "Attach a VirtIO block storage image."},
+          {"--virtiofs <DIR>", "Share a host directory with the guest through VirtIO-FS."},
           {"-f, --fdt, --dtb <FILE>", "Load a device tree blob."}}},
         {"Architecture and hardware",
          {{"-j, --harts, --smp <N>", "Set active harts (1–16; SMP uses 2–16)."},
@@ -1685,9 +1701,9 @@ auto needs_memory_image(const ParseResult& result) -> bool {
     std::print(stdout, "  {} -m img/hello.bin -b\n", executable);
     std::print(
         stdout,
-        "  {} --os --image linux/fw_payload.bin --disk linux/root.img --dtb linux/devicetree.dtb\n",
+        "  {} --os --image linux/opensbi-linux-payload.elf --disk linux/rootfs.img --dtb linux/devicetree.dtb\n",
         executable);
-    std::print(stdout, "  {} -m linux/fw_payload.bin --tui\n", executable);
+    std::print(stdout, "  {} -m linux/opensbi-linux-payload.elf --tui\n", executable);
 
     std::exit(status);
 }

@@ -7,6 +7,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <expected>
+#include <filesystem>
 #include <limits>
 #include <optional>
 #include <string>
@@ -107,6 +108,7 @@ struct IsaConfig {
 struct FilesConfig {
     std::string binary_path;
     std::string disk_path;
+    std::string virtiofs_path;
     bool disk_enabled = false;
     std::string memimg_path;
     std::string dvtree_path;
@@ -160,6 +162,22 @@ struct MachineConfig {
         }
         if (files.disk_enabled && files.disk_path.empty()) {
             return std::unexpected("a disk path is required when disk support is enabled");
+        }
+        if (!files.virtiofs_path.empty()) {
+            std::error_code fs_error;
+            if (!std::filesystem::is_directory(files.virtiofs_path, fs_error) || fs_error) {
+                return std::unexpected("VirtIO-FS share path must be an existing directory");
+            }
+            if (platform_profile == PlatformProfile::None) {
+                return std::unexpected("VirtIO-FS requires a PCIe or VirtIO-MMIO platform");
+            }
+            if (soc.disable_unlisted_devices) {
+                const auto* fs = soc.find(SoCDeviceKind::VirtioMmioFs);
+                if (fs == nullptr || !fs->enabled) {
+                    return std::unexpected(
+                        "VirtIO-FS is not enabled by the selected SoC device configuration");
+                }
+            }
         }
         if (tui.enabled && debug.gdb_enabled) {
             return std::unexpected("GDB remote debugging and the TUI are mutually exclusive");

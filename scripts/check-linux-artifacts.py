@@ -27,7 +27,13 @@ def main() -> int:
         fail(f"missing {manifest_path}")
     manifest = json.loads(manifest_path.read_text())
 
-    required = {"fw_payload.bin", "fw_dynamic.bin", "Image", "devicetree.dtb", "root.img"}
+    required = {
+        "opensbi-linux-payload.elf",
+        "opensbi-dynamic.bin",
+        "Image",
+        "devicetree.dtb",
+        "rootfs.img",
+    }
     artifacts = manifest.get("artifacts", {})
     missing = [name for name in required if name not in artifacts or not (images / name).is_file()]
     if missing:
@@ -65,23 +71,23 @@ def main() -> int:
 
     tune2fs = shutil.which("tune2fs")
     if tune2fs:
-        result = subprocess.run([tune2fs, "-l", str(images / "root.img")], capture_output=True, text=True)
+        result = subprocess.run([tune2fs, "-l", str(images / "rootfs.img")], capture_output=True, text=True)
         if result.returncode != 0:
-            fail("root.img is not a readable ext filesystem")
+            fail("rootfs.img is not a readable ext filesystem")
         if "has_journal" not in result.stdout:
-            fail("root.img does not have an ext4 journal")
+            fail("rootfs.img does not have an ext4 journal")
         label = manifest.get("rootfs_label")
         if label and f"Filesystem volume name:   {label}" not in result.stdout:
-            fail(f"root.img label does not match {label!r}")
+            fail(f"rootfs.img label does not match {label!r}")
 
         uuid_match = re.search(r"Filesystem UUID:\s+([^\n]+)", result.stdout)
         if not uuid_match:
-            fail("root.img does not report a filesystem UUID")
+            fail("rootfs.img does not report a filesystem UUID")
 
         debugfs = shutil.which("debugfs")
         if debugfs and label:
             fstab = subprocess.run(
-                [debugfs, "-R", "cat /etc/fstab", str(images / "root.img")],
+                [debugfs, "-R", "cat /etc/fstab", str(images / "rootfs.img")],
                 capture_output=True,
                 text=True,
             ).stdout

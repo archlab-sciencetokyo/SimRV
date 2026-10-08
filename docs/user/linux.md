@@ -13,12 +13,12 @@ SimRV supports full Linux OS boot as part of its integration validation gate. Yo
 - **`SIMRV_LINUX_DISK_IMG`**: Root filesystem image
 - **`SIMRV_LINUX_DTB`** (optional): Device tree blob
 
-Every build also publishes standalone `Image`, `fw_dynamic.bin`, `devicetree.dtb`, and
+Every build also publishes standalone `Image`, `opensbi-dynamic.bin`, `devicetree.dtb`, and
 `manifest.json` artifacts. The payload is convenient for SimRV; FPGA bootloaders should use
 the standalone OpenSBI/Linux/DTB/rootfs set and supply the next-stage handoff.
 
-Pre-built images for both RV32 and RV64 should be placed under
-`linux-images/rv32/` and `linux-images/rv64/` respectively. The
+Pre-built images are grouped by architecture and profile under
+`linux-images/<arch>/<rootfs>-<profile>/` (for example, `linux-images/rv64/alpine-gui/`). The
 [`build-linux-image.sh`](https://github.com/archlab-sciencetokyo/SimRV/blob/dev/scripts/build-linux-image.sh) script automates
 building them from source.
 
@@ -52,7 +52,7 @@ This will:
 1. ✅ Check for a pre-installed RISC-V GNU toolchain (or build one from source)
 2. ✅ Download Linux kernel, OpenSBI, and the selected Alpine or Buildroot sources
 3. ✅ Build kernel and rootfs
-4. ✅ Create compatible images in `./linux-images/<arch>/` or the profile subdirectory
+4. ✅ Create compatible images in `./linux-images/<arch>/<rootfs>-<profile>/`
 
 Build output is concise by default: timestamped stage markers and warnings/errors remain visible,
 while repetitive compiler command lines are suppressed. Use `--verbose` or set
@@ -72,7 +72,7 @@ links for the published image directory and manifest; redirected output stays es
 After building, export the image paths:
 
 ```bash
-source ./linux-images/rv32/setup.sh
+source ./linux-images/rv32/alpine-gui/setup.sh
 ```
 
 This exports `SIMRV_LINUX_MEM_IMG`, `SIMRV_LINUX_DISK_IMG`, and `SIMRV_LINUX_DTB`.
@@ -119,6 +119,33 @@ When the matching SimRV manifest is present, SimRV also uses its recorded DRAM s
     SimRV resolves these three files as one image set. Mixing artifacts from different builds can
     produce a DTB with the wrong memory map or a root filesystem that does not match the guest's
     kernel and boot arguments.
+
+### Share a host directory with VirtIO-FS
+
+Pass `--virtiofs <DIR>` to expose an existing host directory to the guest. The directory is
+mounted by the guest on demand; writes go directly to the selected host directory and remain after
+SimRV exits. Use a dedicated output directory for logs and test artifacts.
+
+```bash
+mkdir -p /tmp/simrv-guest-output
+build/rv64-release/simrv --cli --os \
+  -m linux-images/rv64/alpine-gui/opensbi-linux-payload.elf \
+  -D linux-images/rv64/alpine-gui/rootfs.img \
+  -f linux-images/rv64/alpine-gui/devicetree.dtb \
+  --virtiofs /tmp/simrv-guest-output
+```
+
+Inside a Linux guest with the VirtIO-FS driver enabled, mount the default share tag:
+
+```bash
+mkdir -p /mnt/host-output
+mount -t virtiofs simrv /mnt/host-output
+printf 'guest log\n' > /mnt/host-output/guest.log
+```
+
+The guest can create, read, write, rename, and remove regular files and directories in the share.
+The implementation confines resolved paths to the selected directory. The guest kernel must include
+VirtIO-FS support (`CONFIG_VIRTIO_FS`).
 
 ### Expanded debug profile
 
@@ -177,25 +204,19 @@ avoids depending on a WSL-specific resolver address.
 The emulator process itself must also have permission to open `/dev/net/tun`; grant that device
 access to the launching user or run the TAP-backed emulator with the host's appropriate privilege.
 
-For repeated profiling or emulator smoke runs, keep the generated `root.img` as a golden image and
-clone it for each run instead of reusing the writable disk. The helper below uses a reflink when the
-host filesystem supports one, refuses to overwrite an existing run image, and validates the clone
-read-only before launch:
-
-```sh
-scripts/clone-linux-disk.sh linux-images/rv64/root.img /tmp/simrv-run/root.img
-```
-
-Discard a run image after a timeout or failed shutdown. A successful guest poweroff should still be
-followed by a read-only check such as `e2fsck -fn /tmp/simrv-run/root.img`; the helper intentionally
-does not repair or modify either image.
+SimRV opens the selected disk image read-only and stores guest writes in a sparse temporary overlay.
+The original `rootfs.img` therefore remains unchanged, and test runs can use it directly without
+cloning it first. Overlay data is discarded when SimRV exits, including after a clean guest poweroff;
+copy the image yourself before launch if you need to preserve guest filesystem changes. VirtIO Block
+supports flush, discard, and write-zeroes requests; discard attempts to reclaim temporary overlay
+space, while write-zeroes guarantees subsequent guest reads return zeroes.
 
 ### Run Linux Boot Test
 
 **Direct invocation:**
 
 ```bash
-source ./linux-images/rv32/setup.sh
+source ./linux-images/rv32/alpine-gui/setup.sh
 ./build/rv32-release/simrv \
     -m $SIMRV_LINUX_MEM_IMG \
     -D $SIMRV_LINUX_DISK_IMG \
@@ -218,7 +239,7 @@ cmake --build --preset rv32-release --target run-linux
 **Full integration gate (includes Linux boot test):**
 
 ```bash
-source ./linux-images/rv32/setup.sh
+source ./linux-images/rv32/alpine-gui/setup.sh
 cmake --build --preset rv32-release --target integration-gate
 ```
 
@@ -375,38 +396,35 @@ cmake --build --preset rv64-release --target linux-images-buildroot
 ```
 linux-build/
 ├── sources/
-│   ├── linux-7.2.3.tar.xz
+│   ├── linux-7.2.9.tar.xz
 │   ├── opensbi-1.9.tar.gz
 │   └── buildroot-2025.02.18.tar.xz  # Buildroot profile only
-├── linux-7.2.3/
+├── linux-7.2.9/               # shared extracted kernel source/build tree
 │   └── vmlinux
-└── buildroot-output-rv64/        # Buildroot profile only
+├── initramfs-rv64/             # generated per architecture
+├── rootfs-disk-rv64/            # recreated during each image build
+└── buildroot-output-rv64/       # Buildroot profile only
     └── images/rootfs.ext4
 
 linux-images/
 ├── rv32/
-│   ├── fw_payload.bin    # OpenSBI FW_PAYLOAD + Linux kernel
-│   ├── fw_dynamic.bin    # Standalone OpenSBI firmware for FPGA handoff
-│   ├── Image             # Standalone Linux kernel image
-│   ├── root.bin          # Root filesystem image
-│   ├── manifest.json     # Versions, bootargs, memory, and SHA-256 hashes
-│   ├── devicetree.dtb    # Device tree blob
-│   ├── virt.dts          # Device tree source
-│   └── setup.sh          # Environment variable export script
-└── rv64/                 # (when built with --arch rv64)
-    └── ...
+│   └── alpine-gui/             # Default Alpine profile
+└── rv64/
+    ├── alpine-gui/             # Default Alpine desktop profile
+    ├── alpine-debug/           # Expanded early-userspace debug profile
+    └── buildroot-fpga/          # Optional BusyBox FPGA baseline profile
 ```
 
 ### Output Components
 
-#### `fw_payload.bin` (OpenSBI Firmware Payload)
+#### `opensbi-linux-payload.elf` (OpenSBI Firmware Payload)
 
 OpenSBI generic-platform `FW_PAYLOAD` image containing the Linux kernel and generated device tree.
 Loaded by SimRV via `-m` and executed starting at `0x80000000`.
 
-#### `fw_dynamic.bin`, `Image`, and `manifest.json`
+#### `opensbi-dynamic.bin`, `Image`, and `manifest.json`
 
-These are the canonical separable artifacts for FPGA work. `fw_dynamic.bin` is OpenSBI firmware
+These are the canonical separable artifacts for FPGA work. `opensbi-dynamic.bin` is OpenSBI firmware
 for a bootloader that supplies the next-stage address and DTB; `Image` is the Linux kernel binary;
 `manifest.json` records exact versions, DTB memory size, kernel arguments, the rootfs label, and
 hashes. Validate a profile with `scripts/check-linux-artifacts.py` before handing it to FPGA tools.
@@ -414,7 +432,7 @@ For a board handoff, compare the DTB memory range with the board DRAM, preserve 
 rootfs UUID, and use the manifest boot arguments or provide equivalent console and root-device
 settings in the board firmware.
 
-#### `root.img` / `root.bin` (Root Filesystem)
+#### `rootfs.img` (Root Filesystem)
 
 Standard ext4 filesystem with journaling enabled, containing:
 
@@ -490,11 +508,9 @@ Install the device-tree compiler and retry:
 sudo apt-get install device-tree-compiler
 ```
 
-Or compile the device tree manually:
-
-```bash
-dtc -I dts -O dtb -o linux-images/rv32/devicetree.dtb linux-images/rv32/virt.dts
-```
+The builder compiles the device tree as part of the image build. Re-run
+`scripts/build-linux-image.sh` after installing `dtc` so the profile directory receives a
+matching `devicetree.dtb` and manifest.
 
 ---
 
@@ -532,7 +548,7 @@ Then rebuild:
 The generated images integrate with the comprehensive CMake validation gate:
 
 ```bash
-source linux-images/rv32/setup.sh
+source linux-images/rv32/alpine-gui/setup.sh
 cmake --build --preset rv32-release --target integration-gate
 ```
 
@@ -565,7 +581,7 @@ in `integration-gate`.
 
 After images are ready:
 
-1. ✅ Export environment: `source linux-images/rv32/setup.sh`
+1. ✅ Export environment: `source linux-images/rv32/alpine-gui/setup.sh`
 2. ✅ Manual boot test: `./build/rv32-release/simrv -m $SIMRV_LINUX_MEM_IMG -D $SIMRV_LINUX_DISK_IMG --fdt $SIMRV_LINUX_DTB --cli`
 3. ✅ TUI boot: `cmake --build --preset rv32-release --target run-tui`
 4. ✅ Full validation: `cmake --build --preset rv32-release --target integration-gate`

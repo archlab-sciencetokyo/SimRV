@@ -91,9 +91,9 @@ SimRV requires a modern C++23 compiler (**Clang 22+** or **GCC 16+**), **CMake 3
     ```bash
     # Boot Linux kernel across 2 SMP harts with dynamic device tree
     ./build/rv64-release/simrv --cli --smp 2 \
-      -m linux-images/rv64/fw_payload.bin \
+      -m linux-images/rv64/alpine-gui/opensbi-linux-payload.elf \
       --dtb dynamic \
-      -D linux-images/rv64/root.img \
+      -D linux-images/rv64/alpine-gui/rootfs.img \
       -s 20000000
     ```
 

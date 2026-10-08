@@ -44,7 +44,12 @@ Load an ELF or raw binary image into guest memory.
 Set the initial program counter.  The default is \fB0x80000000\fR.
 .TP
 .B \-D, \-\-disk, \-\-rootfs \fIfile\fR
-Attach a VirtIO block disk or root filesystem image.
+Attach a VirtIO block disk or root filesystem image. Guest writes are kept in a temporary overlay
+and discarded when SimRV exits; the source image is unchanged.
+.TP
+.B \-\-virtiofs \fIdirectory\fR
+Expose an existing host directory to Linux guests through VirtIO-FS. Guest writes go directly to
+the selected directory and persist after SimRV exits.
 .TP
 .B \-f, \-\-fdt, \-\-dtb \fIfile\fR
 Load a device-tree blob for operating-system boot.
@@ -271,7 +276,7 @@ riscv64-unknown-elf-gdb hello.elf -ex 'target remote :1234'
 .TP
 .B Linux boot
 .EX
-simrv --cli --os -m fw_payload.bin -D root.img -f devicetree.dtb
+simrv --cli --os -m opensbi-linux-payload.elf -D rootfs.img -f devicetree.dtb
 .EE
 .SH OUTPUT FILES
 .TP
