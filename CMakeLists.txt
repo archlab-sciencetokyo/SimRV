@@ -68,11 +68,19 @@ configure_file(
   ${CMAKE_CURRENT_BINARY_DIR}/CITATION.cff
   @ONLY
 )
-add_custom_target(update-citation
+configure_file(
+  ${CMAKE_SOURCE_DIR}/release/release-manifest.json.in
+  ${CMAKE_CURRENT_BINARY_DIR}/release/release-manifest.json
+  @ONLY
+)
+add_custom_target(update-release-metadata
   COMMAND ${CMAKE_COMMAND} -E copy_if_different
     ${CMAKE_CURRENT_BINARY_DIR}/CITATION.cff
     ${CMAKE_SOURCE_DIR}/CITATION.cff
-  COMMENT "Updating CITATION.cff from SIMRV_VERSION"
+  COMMAND ${CMAKE_COMMAND} -E copy_if_different
+    ${CMAKE_CURRENT_BINARY_DIR}/release/release-manifest.json
+    ${CMAKE_SOURCE_DIR}/release/release-manifest.json
+  COMMENT "Updating release metadata from SIMRV_VERSION"
   VERBATIM
 )
 

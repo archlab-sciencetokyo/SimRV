@@ -1,10 +1,11 @@
 site_name: SimRV
 site_description: An explainable, dual-width (RV32 / RV64) RISC-V architectural simulator with interactive TUI, cycle-accurate in-order modeling, and full-system Linux emulation.
 site_author: SimRV Contributors
-site_url: https://archlab-sciencetokyo.github.io/SimRV/
+site_url: !ENV [SIMRV_DOCS_SITE_URL, 'https://archlab-sciencetokyo.github.io/SimRV/stable/']
+site_dir: !ENV [SIMRV_DOCS_SITE_DIR, 'site']
 repo_name: archlab-sciencetokyo/SimRV
 repo_url: https://github.com/archlab-sciencetokyo/SimRV
-edit_uri: edit/dev/docs/
+edit_uri: !ENV [SIMRV_DOCS_EDIT_URI, 'edit/main/docs/']
 
 theme:
   name: material
@@ -91,7 +92,6 @@ nav:
       - Custom Extensions & Instructions: hardware/extensions.md
   - Development & Contributing:
       - Developer Guide & Standards: development/contributing.md
-      - Version Migration (2.x to 3.0): development/migration.md
 
 not_in_nav: |
   SUPPORT_MATRIX.md

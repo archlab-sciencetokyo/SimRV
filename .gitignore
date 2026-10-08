@@ -51,6 +51,7 @@ regression_logs/
 release-report.json
 Testing/
 repro/results/
+/repro/out_repro/
 Makefrag
 
 # Generated documentation & sites (source Markdown remains tracked)

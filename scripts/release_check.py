@@ -44,7 +44,13 @@ def verify_metadata(manifest: dict) -> None:
     expected_citation = citation_template.replace("@SIMRV_VERSION@", version)
     citation_text = (ROOT / "CITATION.cff").read_text(encoding="utf-8")
     if citation_text != expected_citation:
-        fail("CITATION.cff is stale; configure CMake and build the update-citation target")
+        fail("CITATION.cff is stale; configure CMake and build update-release-metadata")
+    manifest_template = (ROOT / "release" / "release-manifest.json.in").read_text(
+        encoding="utf-8"
+    )
+    expected_manifest = manifest_template.replace("@SIMRV_VERSION@", version)
+    if (ROOT / "release" / "release-manifest.json").read_text(encoding="utf-8") != expected_manifest:
+        fail("release manifest is stale; configure CMake and build update-release-metadata")
     expected_tag = f"v{version}"
     if manifest.get("version") != version:
         fail(f"manifest version {manifest.get('version')!r} != source version {version!r}")
