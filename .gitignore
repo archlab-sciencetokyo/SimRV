@@ -37,6 +37,7 @@ bpred.txt
 init_virtio.txt
 trace.txt
 tracepc.txt
+.simrv/
 
 # Benchmark and profiling outputs
 benchmark_logs/
@@ -50,7 +51,6 @@ isa_logs/
 regression_logs/
 release-report.json
 Testing/
-repro/results/
 Makefrag
 
 # Generated documentation & sites (source Markdown remains tracked)

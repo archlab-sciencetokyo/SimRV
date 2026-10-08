@@ -32,27 +32,28 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
-      - name: Checkout documentation source
+      - name: Checkout documentation toolchain
         uses: actions/checkout@v4
         with:
           ref: dev
-          path: docs-source
+          path: docs-toolchain
       - name: Set up uv
         uses: astral-sh/setup-uv@v7
         with:
           enable-cache: true
       - name: Install MkDocs dependencies
-        working-directory: docs-source
+        working-directory: docs-toolchain
         run: uv sync --group docs --frozen
       - name: Build documentation site
-        working-directory: docs-source
         env:
-          SIMRV_DOCS_CHANNEL: development
-        run: uv run --frozen mkdocs build --strict
+          SIMRV_DOCS_CHANNEL: ${{ github.base_ref == 'main' && 'stable' || github.ref == 'refs/heads/main' && 'stable' || 'development' }}
+          SIMRV_DOCS_SITE_URL: ${{ github.base_ref == 'main' && 'https://archlab-sciencetokyo.github.io/SimRV/stable/' || github.ref == 'refs/heads/main' && 'https://archlab-sciencetokyo.github.io/SimRV/stable/' || 'https://archlab-sciencetokyo.github.io/SimRV/dev/' }}
+          SIMRV_DOCS_EDIT_URI: ${{ github.base_ref == 'main' && 'edit/main/docs/' || github.ref == 'refs/heads/main' && 'edit/main/docs/' || 'edit/dev/docs/' }}
+        run: docs-toolchain/.venv/bin/mkdocs build --strict --config-file mkdocs.yml
       - name: Check documentation links
         uses: lycheeverse/lychee-action@v2
         with:
-          args: --offline --no-progress --root-dir "${{ github.workspace }}/docs-source/site" --exclude 'file:///.*\/site\/SimRV(/|$)' "docs-source/site/**/*.html"
+          args: --offline --no-progress --root-dir "${{ github.workspace }}/site" --exclude 'file:///.*\/site\/SimRV(/|$)' "site/**/*.html"
           fail: true
 
   deploy-docs:

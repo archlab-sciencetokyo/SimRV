@@ -246,16 +246,13 @@ riscv64-unknown-elf-gdb program.elf -ex "target remote :1234"
 
 ---
 
-## 8. Benchmarking & Reproducibility
+## 8. Benchmarking
 
-Evaluate local simulation performance and verify clean-checkout reproducibility:
+Measure local simulation performance with the release benchmark suite:
 
 ```bash
 # Run release benchmark suite
 python3 scripts/benchmark.py --binary build/rv64-release/SimRV
-
-# Run full reproducibility validation workflow
-python3 scripts/reproduce.py --mode quick
 ```
 
 ---

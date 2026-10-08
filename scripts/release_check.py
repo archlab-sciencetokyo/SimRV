@@ -36,10 +36,21 @@ def source_version() -> str:
 def verify_metadata(manifest: dict) -> None:
     if manifest.get("schema_version") != 2:
         fail("release manifest schema_version must be 2")
-    for schema in ("release-manifest.schema.json", "evidence.schema.json", "experiment.schema.json"):
+    for schema in ("release-manifest.schema.json", "evidence.schema.json"):
         if not (SCHEMA_DIR / schema).is_file():
             fail(f"missing schema: release/schemas/{schema}")
     version = source_version()
+    citation_template = (ROOT / "CITATION.cff.in").read_text(encoding="utf-8")
+    expected_citation = citation_template.replace("@SIMRV_VERSION@", version)
+    citation_text = (ROOT / "CITATION.cff").read_text(encoding="utf-8")
+    if citation_text != expected_citation:
+        fail("CITATION.cff is stale; configure CMake and build update-release-metadata")
+    manifest_template = (ROOT / "release" / "release-manifest.json.in").read_text(
+        encoding="utf-8"
+    )
+    expected_manifest = manifest_template.replace("@SIMRV_VERSION@", version)
+    if (ROOT / "release" / "release-manifest.json").read_text(encoding="utf-8") != expected_manifest:
+        fail("release manifest is stale; configure CMake and build update-release-metadata")
     expected_tag = f"v{version}"
     if manifest.get("version") != version:
         fail(f"manifest version {manifest.get('version')!r} != source version {version!r}")

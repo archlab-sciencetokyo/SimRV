@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Regression tests for release metadata, evidence, archives, and aggregation."""
+"""Regression tests for release metadata, evidence, and archives."""
 
 import importlib.util
 import io
@@ -23,7 +23,6 @@ def load(name: str, path: pathlib.Path):
 
 
 release_check = load("release_check", ROOT / "scripts/release_check.py")
-aggregate = load("aggregate_experiments", ROOT / "scripts/aggregate_experiments.py")
 
 
 class ReleaseToolTests(unittest.TestCase):
@@ -67,18 +66,6 @@ class ReleaseToolTests(unittest.TestCase):
             checksum.write_text("0" * 64 + "  asset\n")
             with self.assertRaises(SystemExit):
                 release_check.verify_checksum(checksum)
-
-    def test_aggregation_is_deterministic(self):
-        report = {"suite_results": [{"xlen": 64, "test_name": "demo",
-                  "simrv": {"runs_wall_speed_kips": [3.0, 1.0, 2.0]}}]}
-        with tempfile.TemporaryDirectory() as directory:
-            root = pathlib.Path(directory)
-            source = root / "raw.json"
-            source.write_text(json.dumps(report))
-            first = aggregate.load_rows([source])
-            second = aggregate.load_rows([source])
-            self.assertEqual(first, second)
-            self.assertEqual(first[0]["median_kips"], 2.0)
 
     def test_compare_is_evidence_only_by_default(self):
         def report(speed):

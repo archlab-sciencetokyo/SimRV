@@ -1,6 +1,9 @@
 cmake_minimum_required(VERSION 3.25)
 
-project(SimRV VERSION 2.0.4 LANGUAGES C CXX)
+set(SIMRV_VERSION "2.0.4")
+string(REGEX REPLACE "-.*$" "" SIMRV_PROJECT_VERSION "${SIMRV_VERSION}")
+
+project(SimRV VERSION ${SIMRV_PROJECT_VERSION} LANGUAGES C CXX)
 
 enable_testing()
 find_program(PYTHON_BIN NAMES "python3" "python" DOC "Path to Python interpreter")
@@ -8,7 +11,6 @@ if(NOT PYTHON_BIN)
   set(PYTHON_BIN "python3")
 endif()
 
-set(SIMRV_VERSION "2.0.4")
 set(SIMRV_GIT_BRANCH "unknown")
 set(SIMRV_GIT_SHA "unknown")
 
@@ -59,6 +61,27 @@ configure_file(
   ${CMAKE_SOURCE_DIR}/include/simrv/core/BuildInfo.hpp.in
   ${CMAKE_CURRENT_BINARY_DIR}/generated/simrv/core/BuildInfo.hpp
   @ONLY
+)
+
+configure_file(
+  ${CMAKE_SOURCE_DIR}/CITATION.cff.in
+  ${CMAKE_CURRENT_BINARY_DIR}/CITATION.cff
+  @ONLY
+)
+configure_file(
+  ${CMAKE_SOURCE_DIR}/release/release-manifest.json.in
+  ${CMAKE_CURRENT_BINARY_DIR}/release/release-manifest.json
+  @ONLY
+)
+add_custom_target(update-release-metadata
+  COMMAND ${CMAKE_COMMAND} -E copy_if_different
+    ${CMAKE_CURRENT_BINARY_DIR}/CITATION.cff
+    ${CMAKE_SOURCE_DIR}/CITATION.cff
+  COMMAND ${CMAKE_COMMAND} -E copy_if_different
+    ${CMAKE_CURRENT_BINARY_DIR}/release/release-manifest.json
+    ${CMAKE_SOURCE_DIR}/release/release-manifest.json
+  COMMENT "Updating release metadata from SIMRV_VERSION"
+  VERBATIM
 )
 
 set(CMAKE_CXX_STANDARD 23)
