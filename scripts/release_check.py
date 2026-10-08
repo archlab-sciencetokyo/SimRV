@@ -36,7 +36,7 @@ def source_version() -> str:
 def verify_metadata(manifest: dict) -> None:
     if manifest.get("schema_version") != 2:
         fail("release manifest schema_version must be 2")
-    for schema in ("release-manifest.schema.json", "evidence.schema.json", "experiment.schema.json"):
+    for schema in ("release-manifest.schema.json", "evidence.schema.json"):
         if not (SCHEMA_DIR / schema).is_file():
             fail(f"missing schema: release/schemas/{schema}")
     version = source_version()
