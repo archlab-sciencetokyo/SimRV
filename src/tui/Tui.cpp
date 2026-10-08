@@ -2638,13 +2638,15 @@ constexpr auto ascii_to_linux_keycode_and_shift(uint8_t byte) -> std::pair<uint1
 
 void Tui::write_guest_input(uint8_t byte) {
     const auto page = focused_page();
-    if (page == TuiRegPage::CONSOLE) {
+    // The display inspector is the explicit keyboard target for VGA guests. Every other focused
+    // panel keeps the running guest's UART attached, so selecting a debugger view does not
+    // silently discard terminal input.
+    if (page != TuiRegPage::DISPLAY) {
         if (machine_.uart_device()) {
             machine_.uart_device()->push_rx_byte(normalize_guest_terminal_byte(byte));
         }
         return;
     }
-    if (page != TuiRegPage::DISPLAY) return;
 
     if (byte >= 1 && byte <= 26) {
         const auto [keycode, unused_shift] =

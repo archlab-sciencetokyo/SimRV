@@ -539,7 +539,7 @@ void Tracer::init_architecture_trace(const std::string& path) {
         "\"trace_pc_start\":{},\"trace_pc_end\":{},"
         "\"trace_after_cycle\":{},\"trace_before_cycle\":{},"
         "\"checkpoint_every\":{},\"checkpoint_dir\":{},"
-        "\"binary\":{},\"disk\":{},\"disk_enabled\":{},"
+        "\"binary\":{},\"disk\":{},\"disk_enabled\":{},\"virtiofs\":{},"
         "\"cpuconfig\":{},\"dvtree\":{},\"command_line\":{},\"devices\":[",
         simrv::xlen::kXLenBits, json_quote(trace_isa_),
         static_cast<uint64_t>(machine_.primary_hart().state().misa), trace_vlen_, trace_harts_,
@@ -571,7 +571,8 @@ void Tracer::init_architecture_trace(const std::string& path) {
                                         : "null",
         config.debug.checkpoint_every, json_quote(config.debug.checkpoint_dir),
         json_quote(config.files.binary_path), json_quote(config.files.disk_path),
-        config.files.disk_enabled, json_quote(config.files.cpuconfig_path),
+        config.files.disk_enabled, json_quote(config.files.virtiofs_path),
+        json_quote(config.files.cpuconfig_path),
         json_quote(config.files.dvtree_path), json_string_array(trace_command_line_));
     bool first_device = true;
     for (const auto& device : config.soc.devices) {

@@ -231,7 +231,7 @@ class ReleaseToolTests(unittest.TestCase):
         self.assertEqual(command[-2:], ["-H", "0x80001000"])
 
     def test_benchmark_modes_os_command(self):
-        args = types.SimpleNamespace(simrv="simrv", harts=1, os=True, disk="root.img",
+        args = types.SimpleNamespace(simrv="simrv", harts=1, os=True, disk="rootfs.img",
                                      dtb="virt.dtb", image="firmware.bin", limit=5678,
                                      tohost=None, smp_multithreaded=False)
         command = benchmark_modes.command(args, "fast", None, True)

@@ -36,6 +36,7 @@ enum class SoCDeviceKind : uint8_t {
     VirtioMmioInput,
     VirtioMmioSound,
     VirtioMmioNet,
+    VirtioMmioFs,
     DmaController,
     ResetControl,
     RingBufferEthernet,
@@ -77,6 +78,8 @@ enum class SoCDeviceKind : uint8_t {
             return "virtio-sound";
         case SoCDeviceKind::VirtioMmioNet:
             return "virtio-net";
+        case SoCDeviceKind::VirtioMmioFs:
+            return "virtio-fs";
         case SoCDeviceKind::DmaController:
             return "dma";
         case SoCDeviceKind::ResetControl:
@@ -150,6 +153,7 @@ struct SoCDeviceConfig {
     if (name == "virtio-input" || name == "input") return SoCDeviceKind::VirtioMmioInput;
     if (name == "virtio-sound" || name == "sound") return SoCDeviceKind::VirtioMmioSound;
     if (name == "virtio-net" || name == "net") return SoCDeviceKind::VirtioMmioNet;
+    if (name == "virtio-fs" || name == "fs") return SoCDeviceKind::VirtioMmioFs;
     if (name == "dma" || name == "dma-controller") return SoCDeviceKind::DmaController;
     if (name == "reset-control") return SoCDeviceKind::ResetControl;
     if (name == "ring-buffer-ethernet") return SoCDeviceKind::RingBufferEthernet;
@@ -192,6 +196,8 @@ struct SoCDeviceConfig {
             return {kind, "sound0", 0x10006000, 0x1000, 7};
         case SoCDeviceKind::VirtioMmioNet:
             return {kind, "net0", 0x10007000, 0x1000, 8};
+        case SoCDeviceKind::VirtioMmioFs:
+            return {kind, "fs0", 0x1000A000, 0x1000, 9};
         case SoCDeviceKind::DmaController:
             return {kind, "dma0", 0x10009000, 0x1000, 12};
         case SoCDeviceKind::ResetControl:
@@ -259,6 +265,7 @@ struct SoCConfig {
                     {SoCDeviceKind::VirtioMmioInput, "input0", 0x10005000, 0x1000, 6},
                     {SoCDeviceKind::VirtioMmioSound, "sound0", 0x10006000, 0x1000, 7},
                     {SoCDeviceKind::VirtioMmioNet, "net0", 0x10007000, 0x1000, 8},
+                    {SoCDeviceKind::VirtioMmioFs, "fs0", 0x1000A000, 0x1000, 9},
                     {SoCDeviceKind::DmaController, "dma0", 0x10009000, 0x1000, 12},
                 }};
     }

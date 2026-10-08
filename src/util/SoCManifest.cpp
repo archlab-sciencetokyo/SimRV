@@ -60,6 +60,7 @@ auto transport_name(const simrv::core::SoCConfig& config, simrv::core::SoCDevice
         case simrv::core::SoCDeviceKind::VirtioMmioInput:
         case simrv::core::SoCDeviceKind::VirtioMmioSound:
         case simrv::core::SoCDeviceKind::VirtioMmioNet:
+        case simrv::core::SoCDeviceKind::VirtioMmioFs:
             return config.enable_pcie ? "pci" : "mmio";
         default:
             return "mmio";

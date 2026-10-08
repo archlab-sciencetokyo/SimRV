@@ -2,6 +2,11 @@
  * @file ModernPlatformTests.cpp
  * @brief Unit tests for RISC-V AIA, ACLINT, PCIe ECAM, and VirtIO-PCI subsystems.
  */
+#include <fcntl.h>
+#include <unistd.h>
+
+#include <algorithm>
+#include <array>
 #include <bit>
 #include <cassert>
 #include <chrono>
@@ -26,6 +31,7 @@
 #include "simrv/device/Uart.hpp"
 #include "simrv/device/mmio/VirtioMmioBlock.hpp"
 #include "simrv/device/mmio/VirtioMmioConsole.hpp"
+#include "simrv/device/mmio/VirtioMmioGpu.hpp"
 #include "simrv/device/mmio/VirtioMmioNet.hpp"
 #include "simrv/device/mmio/VirtioMmioRng.hpp"
 #include "simrv/device/mmio/VirtioMmioSound.hpp"
@@ -39,6 +45,7 @@
 #include "simrv/device/pci/VirtioPciRng.hpp"
 #include "simrv/device/pci/VirtioPciSound.hpp"
 #include "simrv/device/virtio/HostAudioSink.hpp"
+#include "simrv/device/virtio/VirtioCore.hpp"
 #include "simrv/device/virtio/VirtioSoundCore.hpp"
 #include "simrv/memory/Axi4.hpp"
 #include "simrv/memory/MemoryUtil.hpp"
@@ -2270,6 +2277,20 @@ void test_pcie_and_virtio_pci() {
 
     simrv::device::PcieRootComplex rc(&machine);
     auto blk = std::make_shared<simrv::device::VirtioPciBlock>();
+    blk->bar_write(0, 0x00, 0, 4);
+    const uint32_t block_features = blk->bar_read(0, 0x04, 4);
+    if ((block_features & ((1U << 9) | (1U << 13) | (1U << 14))) !=
+        ((1U << 9) | (1U << 13) | (1U << 14))) {
+        std::cerr << "VirtIO PCI block features missing\n";
+        std::abort();
+    }
+    if (blk->bar_read(0, 0x300 + 36, 4) != simrv::device::virtio::BlockBackend::kMaxRangeSectors ||
+        blk->bar_read(0, 0x300 + 40, 4) != 1 ||
+        blk->bar_read(0, 0x300 + 48, 4) != simrv::device::virtio::BlockBackend::kMaxRangeSectors ||
+        blk->bar_read(0, 0x300 + 52, 4) != 1 || blk->bar_read(0, 0x300 + 56, 1) != 1) {
+        std::cerr << "VirtIO PCI block range configuration mismatch\n";
+        std::abort();
+    }
     rc.attach_device(0, 1, 0, blk);
 
     // Test ECAM discovery of device at Bus 0, Dev 1, Func 0
@@ -2292,6 +2313,11 @@ void test_pcie_and_virtio_pci() {
     auto console = std::make_shared<simrv::device::VirtioPciConsole>();
     auto rng = std::make_shared<simrv::device::VirtioPciRng>();
     auto gpu = std::make_shared<simrv::device::VirtioPciGpu>();
+    gpu->bar_write(0, 0x00, 0, 4);
+    if ((gpu->bar_read(0, 0x04, 4) & (1U << 1)) != 0) {
+        std::cerr << "VirtIO GPU advertises unsupported VirGL\n";
+        std::abort();
+    }
     auto input = std::make_shared<simrv::device::VirtioPciInput>();
     auto sound = std::make_shared<simrv::device::VirtioPciSound>();
 
@@ -2342,6 +2368,62 @@ void test_pcie_and_virtio_pci() {
     std::cout << "[PASS] test_pcie_and_virtio_pci\n";
 }
 
+void test_virtio_block_overlay_preserves_base_image() {
+    const auto check = [](bool condition, const char* message) {
+        if (!condition) {
+            std::cerr << message << '\n';
+            std::abort();
+        }
+    };
+    char path[] = "/tmp/simrv-block-overlay-test-XXXXXX";
+    const int fd = ::mkstemp(path);
+    check(fd >= 0, "create overlay base image");
+    std::array<std::byte, 2048> original{};
+    original.fill(std::byte{0x2a});
+    check(::write(fd, original.data(), original.size()) == static_cast<ssize_t>(original.size()),
+          "initialize overlay base image");
+    ::close(fd);
+
+    {
+        simrv::device::virtio::BlockBackend backend(path);
+        check(backend.is_loaded(), "load overlay base image");
+        check(backend.capacity_sectors() == 4, "overlay preserves disk capacity");
+
+        std::array<std::byte, 512> replacement{};
+        replacement.fill(std::byte{0x7b});
+        check(backend.write_sectors(1, replacement), "write sector into overlay");
+        check(backend.write_zeroes(2, 1), "write zeroes into overlay");
+        check(backend.discard_sectors(1, 1), "discard overlay sector");
+        check(!backend.write_zeroes(3, 2), "reject write-zeroes past disk capacity");
+        check(!backend.write_sectors(0, std::span<const std::byte>(replacement).first(511)),
+              "reject partial-sector writes");
+        check(backend.flush(), "flush overlay contents");
+
+        std::array<std::byte, 2048> observed{};
+        check(backend.read_sectors(0, observed), "read sectors across base and overlay");
+        check(std::equal(observed.begin(), observed.begin() + 512, original.begin()),
+              "unmodified leading sector remains from base image");
+        check(std::equal(observed.begin() + 512, observed.begin() + 1024, original.begin() + 512),
+              "discarded sector reads through from base image");
+        check(std::all_of(observed.begin() + 1024, observed.begin() + 1536,
+                          [](std::byte byte) { return byte == std::byte{0}; }),
+              "write-zeroes reads as zero");
+        check(std::equal(observed.begin() + 1536, observed.end(), original.begin() + 1536),
+              "unmodified trailing sectors remain from base image");
+    }
+
+    const int verify_fd = ::open(path, O_RDONLY | O_CLOEXEC);
+    check(verify_fd >= 0, "reopen original disk image");
+    std::array<std::byte, 2048> persisted{};
+    check(::read(verify_fd, persisted.data(), persisted.size()) ==
+              static_cast<ssize_t>(persisted.size()),
+          "read original disk image after overlay writes");
+    ::close(verify_fd);
+    check(persisted == original, "overlay writes never modify original disk image");
+    ::unlink(path);
+    std::cout << "[PASS] test_virtio_block_overlay_preserves_base_image\n";
+}
+
 void test_virtio_mmio_v2() {
     ConcreteMachine machine;
     std::vector<Byte> ram(1024 * 1024, Byte{0});
@@ -2351,11 +2433,24 @@ void test_virtio_mmio_v2() {
     simrv::device::VirtioMmioConsole con(0x10002000, 1, &machine);
     simrv::device::VirtioMmioRng rng(0x10003000, 4, &machine);
     simrv::device::VirtioMmioNet net(0x10007000, 8, &machine);
+    simrv::device::VirtioMmioGpu gpu(0x10008000, 10, &machine);
 
     // Test Magic (0x74726976) and Version 2
     assert(blk.read32(0x00) == 0x74726976);
     assert(blk.read32(0x04) == 2);
     assert(blk.read32(0x08) == 2);  // Block Device ID
+    blk.write32(0x14, 0);           // device_features_sel = 0
+    const uint32_t block_features = blk.read32(0x10);
+    if ((block_features & ((1U << 9) | (1U << 13) | (1U << 14))) !=
+            ((1U << 9) | (1U << 13) | (1U << 14)) ||
+        (block_features & (1U << 1)) != 0 ||
+        blk.read32(0x100 + 36) != simrv::device::virtio::BlockBackend::kMaxRangeSectors ||
+        blk.read32(0x100 + 40) != 1 ||
+        blk.read32(0x100 + 48) != simrv::device::virtio::BlockBackend::kMaxRangeSectors ||
+        blk.read32(0x100 + 52) != 1 || blk.read32(0x100 + 56) != 1) {
+        std::cerr << "VirtIO block feature advertisement mismatch\n";
+        std::abort();
+    }
 
     assert(con.read32(0x00) == 0x74726976);
     assert(con.read32(0x04) == 2);
@@ -2368,6 +2463,11 @@ void test_virtio_mmio_v2() {
     assert(net.read32(0x00) == 0x74726976);
     assert(net.read32(0x04) == 2);
     assert(net.read32(0x08) == 1);  // Net Device ID
+    gpu.write32(0x14, 0);
+    if ((gpu.read32(0x10) & (1U << 1)) != 0) {
+        std::cerr << "VirtIO MMIO GPU advertises unsupported VirGL\n";
+        std::abort();
+    }
 
     // Test Queue config and status transitions
     blk.write32(0x30, 0);            // queue_sel = 0
@@ -2394,6 +2494,104 @@ void test_virtio_mmio_v2() {
     // Test Device Status
     blk.write32(0x70, 0x0F);  // DRIVER_OK
     assert(blk.device_status() == 0x0F);
+
+    const auto check_block = [](bool condition, const char* message) {
+        if (!condition) {
+            std::cerr << message << '\n';
+            std::abort();
+        }
+    };
+    char disk_path[] = "/tmp/simrv-mmio-block-test-XXXXXX";
+    const int disk_fd = ::mkstemp(disk_path);
+    check_block(disk_fd >= 0, "create MMIO block test image");
+    std::array<std::byte, 2048> base_disk{};
+    base_disk.fill(std::byte{0x2a});
+    check_block(::write(disk_fd, base_disk.data(), base_disk.size()) ==
+                    static_cast<ssize_t>(base_disk.size()),
+                "initialize MMIO block test image");
+    ::close(disk_fd);
+    check_block(blk.load_disk(disk_path), "attach MMIO block test image");
+
+    const Address ram_base = machine.memory_geometry().dram_base;
+    const auto guest_pointer = [&](Address address) {
+        return ram.data() + static_cast<size_t>(address - ram_base);
+    };
+    constexpr Address kDescTable = 0x80001000;
+    constexpr Address kAvailRing = 0x80002000;
+    constexpr Address kUsedRing = 0x80003000;
+    constexpr Address kHeaderAddr = 0x80004000;
+    constexpr Address kRangeAddr = 0x80004200;
+    constexpr Address kReadDataAddr = 0x80004400;
+    constexpr Address kStatusAddr = 0x80004600;
+    struct BlockHeader {
+        uint32_t type;
+        uint32_t ioprio;
+        uint64_t sector;
+    };
+    struct Range {
+        uint64_t sector;
+        uint32_t num_sectors;
+        uint32_t flags;
+    };
+    const auto submit_block = [&](uint16_t request_index, uint32_t type, uint64_t sector,
+                                  const Range* range, bool flush) {
+        BlockHeader header{type, 0, sector};
+        std::memcpy(guest_pointer(kHeaderAddr), &header, sizeof(header));
+        if (range != nullptr) std::memcpy(guest_pointer(kRangeAddr), range, sizeof(*range));
+
+        std::array<simrv::device::virtio::VirtqDesc, 3> descs{};
+        descs[0] = {kHeaderAddr, sizeof(header), simrv::device::virtio::kVirtqDescFNext, 1};
+        if (flush) {
+            descs[1] = {kStatusAddr, 1, simrv::device::virtio::kVirtqDescFWrite, 0};
+        } else {
+            const bool is_read = type == 0;
+            const Address data_addr = is_read ? kReadDataAddr : kRangeAddr;
+            const uint32_t data_len = is_read ? 512 : sizeof(Range);
+            descs[1] = {
+                data_addr, data_len,
+                static_cast<uint16_t>(simrv::device::virtio::kVirtqDescFNext |
+                                      (is_read ? simrv::device::virtio::kVirtqDescFWrite : 0)),
+                2};
+            descs[2] = {kStatusAddr, 1, simrv::device::virtio::kVirtqDescFWrite, 0};
+        }
+        std::memcpy(guest_pointer(kDescTable), descs.data(), sizeof(descs));
+        const uint16_t head = 0;
+        std::memcpy(guest_pointer(kAvailRing + 2), &request_index, sizeof(request_index));
+        std::memcpy(guest_pointer(kAvailRing + 4 + (request_index - 1) * 2), &head, sizeof(head));
+        blk.write32(0x50, 0);  // Notify queue 0
+
+        uint8_t status = 0xff;
+        std::memcpy(&status, guest_pointer(kStatusAddr), sizeof(status));
+        uint16_t used_idx = 0;
+        std::memcpy(&used_idx, guest_pointer(kUsedRing + 2), sizeof(used_idx));
+        simrv::device::virtio::VirtqUsedElem used{};
+        std::memcpy(&used, guest_pointer(kUsedRing + 4 + (used_idx - 1) % 32 * sizeof(used)),
+                    sizeof(used));
+        return std::pair{status, used.len};
+    };
+
+    const auto [flush_status, flush_used_len] = submit_block(1, 4, 0, nullptr, true);
+    check_block(flush_status == 0 && flush_used_len == 1,
+                "complete FLUSH with its status in the second descriptor");
+    const Range zero_range{1, 1, 1};
+    const auto [zero_status, zero_used_len] = submit_block(2, 13, 0, &zero_range, false);
+    check_block(zero_status == 0 && zero_used_len == 1, "complete WRITE_ZEROES request");
+    const auto [read_zero_status, read_zero_used_len] = submit_block(3, 0, 1, nullptr, false);
+    check_block(read_zero_status == 0 && read_zero_used_len == 513,
+                "read zeroed sector through the VirtIO queue");
+    check_block(std::all_of(guest_pointer(kReadDataAddr), guest_pointer(kReadDataAddr) + 512,
+                            [](std::byte byte) { return byte == std::byte{0}; }),
+                "VirtIO WRITE_ZEROES returns zeroes on later reads");
+    const Range discard_range{1, 1, 0};
+    const auto [discard_status, discard_used_len] = submit_block(4, 11, 0, &discard_range, false);
+    check_block(discard_status == 0 && discard_used_len == 1, "complete DISCARD request");
+    const auto [read_base_status, read_base_used_len] = submit_block(5, 0, 1, nullptr, false);
+    check_block(read_base_status == 0 && read_base_used_len == 513,
+                "read discarded sector from the base image");
+    check_block(std::all_of(guest_pointer(kReadDataAddr), guest_pointer(kReadDataAddr) + 512,
+                            [](std::byte byte) { return byte == std::byte{0x2a}; }),
+                "DISCARD reveals the unspecified base-image sector");
+    ::unlink(disk_path);
 
     std::cout << "[PASS] test_virtio_mmio_v2\n";
 }
@@ -3132,6 +3330,7 @@ int main(int argc, char** argv) {
     test_aclint();
     test_aia_aplic_and_imsic();
     test_pcie_and_virtio_pci();
+    test_virtio_block_overlay_preserves_base_image();
     test_virtio_mmio_v2();
     test_sbi_multihart_rfence();
     test_ia_multihart_lr_sc_coherence();

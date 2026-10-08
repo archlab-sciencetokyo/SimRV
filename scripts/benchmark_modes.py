@@ -259,7 +259,7 @@ def main():
             with tempfile.TemporaryDirectory(prefix="simrv-benchmark-") as directory:
                 isolated = list(cmd)
                 if args.os:
-                    disk = os.path.join(directory, "root.img")
+                    disk = os.path.join(directory, "rootfs.img")
                     subprocess.run(["cp", "--reflink=auto", "--sparse=always", args.disk, disk],
                                    check=True)
                     isolated[isolated.index("-D") + 1] = disk

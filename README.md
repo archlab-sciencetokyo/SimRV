@@ -106,25 +106,26 @@ distribution; native Windows builds are not currently supported.
 cmake --preset rv64-release
 cmake --build --preset rv64-release
 
-# Native RV32 strict-width verification build
+# RV32 strict-width release verification build
 cmake --preset rv32-release
 cmake --build --preset rv32-release
+
+# Optional host-specialized RV64 build for local profiling
+cmake --preset rv64-native-release
+cmake --build --preset rv64-native-release
 ```
 
-Native-host and compiler-specific presets are also available. The native-host preset pins Clang
-and enables host-specific code generation:
+The preset set stays focused on the two release architectures, one optional host-specialized
+RV64 build, and isolated RV64 sanitizer builds. Choose the installed C++23 compiler through `CC`
+and `CXX` when configuring; the native preset uses Clang and enables host-specific code generation.
 
-```bash
-cmake --preset rv64-native-release && cmake --build --preset rv64-native-release
-cmake --preset rv64-clang-release && cmake --build --preset rv64-clang-release
-cmake --preset rv64-gcc-release && cmake --build --preset rv64-gcc-release
-```
-
-Repeatable analysis presets are also available:
+Sanitizer configurations are available when investigating memory, undefined-behavior, or threading
+issues. They build under `/tmp/simrv-build/`, keeping `build/` limited to release configurations:
 
 ```bash
 cmake --preset rv64-asan && cmake --build --preset rv64-asan
-cmake --preset rv64-tidy && cmake --build --preset rv64-tidy
+cmake --preset rv64-ubsan && cmake --build --preset rv64-ubsan
+cmake --preset rv64-tsan && cmake --build --preset rv64-tsan
 ```
 
 The presets place ccache state under the writable project build tree (`build/.ccache`), so
@@ -177,7 +178,7 @@ python3 scripts/cpu_model_wizard.py --name my_core --template five-stage
 Run Linux OS image with disk & devicetree:
 
 ```bash
-./build/rv64-release/simrv --os -m linux-images/rv64/fw_payload.bin -D linux-images/rv64/root.img -f linux-images/rv64/devicetree.dtb --cli
+./build/rv64-release/simrv --os -m linux-images/rv64/alpine-gui/opensbi-linux-payload.elf -D linux-images/rv64/alpine-gui/rootfs.img -f linux-images/rv64/alpine-gui/devicetree.dtb --cli
 ```
 
 Override ISA preset or Vector register length (VLEN):

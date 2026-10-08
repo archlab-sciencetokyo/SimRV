@@ -109,8 +109,8 @@ auto VirtioMmioDevice::read32(Address offset) -> uint32_t {
             return 0x554D4551;  // Vendor "QEMU"
         case 0x10: {            // DeviceFeatures
             if (device_features_sel_ == 0) {
-                if (device_id_ == virtio::kDevIdBlock) return (1U << 1);  // SIZE_MAX
-                if (device_id_ == virtio::kDevIdGpu) return (1U << 1);    // VIRGL
+                if (device_id_ == virtio::kDevIdBlock)
+                    return (1U << 9) | (1U << 13) | (1U << 14);  // FLUSH, DISCARD, WRITE_ZEROES
                 return 0;
             }
             if (device_features_sel_ == 1) {

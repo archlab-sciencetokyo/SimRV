@@ -223,9 +223,20 @@ set_property(CACHE SIMRV_XLEN PROPERTY STRINGS "32" "64")
 if(NOT SIMRV_XLEN STREQUAL "32" AND NOT SIMRV_XLEN STREQUAL "64")
   message(FATAL_ERROR "SIMRV_XLEN must be 32 or 64 (got: ${SIMRV_XLEN})")
 endif()
-set(SIMRV_LINUX_IMAGES_DIR
-    "${PROJECT_SOURCE_DIR}/linux-images/rv${SIMRV_XLEN}"
-    CACHE PATH "Path to reproducible Linux test images")
+set(_SIMRV_LEGACY_LINUX_IMAGES_DIR
+    "${PROJECT_SOURCE_DIR}/linux-images/rv${SIMRV_XLEN}")
+set(_SIMRV_DEFAULT_LINUX_IMAGES_DIR
+    "${PROJECT_SOURCE_DIR}/linux-images/rv${SIMRV_XLEN}/alpine-gui")
+if(NOT DEFINED SIMRV_LINUX_IMAGES_DIR
+   OR "${SIMRV_LINUX_IMAGES_DIR}" STREQUAL "${_SIMRV_LEGACY_LINUX_IMAGES_DIR}")
+  set(SIMRV_LINUX_IMAGES_DIR
+      "${_SIMRV_DEFAULT_LINUX_IMAGES_DIR}"
+      CACHE PATH "Path to reproducible Linux test images" FORCE)
+else()
+  set(SIMRV_LINUX_IMAGES_DIR
+      "${SIMRV_LINUX_IMAGES_DIR}"
+      CACHE PATH "Path to reproducible Linux test images")
+endif()
 
 set(SIMRV_DRAM_SIZE_MB
     "256"
@@ -564,7 +575,7 @@ if(BUILD_TESTING)
   endif()
 
   set(TEST_IMAGES_DIR "${SIMRV_LINUX_IMAGES_DIR}")
-  if(EXISTS "${TEST_IMAGES_DIR}/fw_payload.bin")
+  if(EXISTS "${TEST_IMAGES_DIR}/opensbi-linux-payload.elf")
     set(LINUX_PTY_COMMON_ENV
         "SIMRV_BIN=$<TARGET_FILE:SimRV>;SIMRV_IMAGES_DIR=${TEST_IMAGES_DIR}")
     set(LINUX_PTY_PROFILE_ENV
@@ -1222,11 +1233,11 @@ if(SIMRV_ENABLE_LINUX_TOOLS)
     run-tui
     COMMAND
       ${CMAKE_COMMAND} -D SIMRV_BIN=$<TARGET_FILE:SimRV> -D
-      SIMRV_FW_PAYLOAD=${CMAKE_SOURCE_DIR}/linux-images/rv${SIMRV_XLEN}/fw_payload.bin
+      SIMRV_FW_PAYLOAD=${SIMRV_LINUX_IMAGES_DIR}/opensbi-linux-payload.elf
       -D
-      SIMRV_DISK_IMAGE=${CMAKE_SOURCE_DIR}/linux-images/rv${SIMRV_XLEN}/root.img
+      SIMRV_DISK_IMAGE=${SIMRV_LINUX_IMAGES_DIR}/rootfs.img
       -D
-      SIMRV_DTB=${CMAKE_SOURCE_DIR}/linux-images/rv${SIMRV_XLEN}/devicetree.dtb
+      SIMRV_DTB=${SIMRV_LINUX_IMAGES_DIR}/devicetree.dtb
       -D SIMRV_TUI=ON -P ${CMAKE_SOURCE_DIR}/cmake/SimRVRunLinux.cmake
     DEPENDS SimRV
     WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
@@ -1237,11 +1248,11 @@ if(SIMRV_ENABLE_LINUX_TOOLS)
     run-linux
     COMMAND
       ${CMAKE_COMMAND} -D SIMRV_BIN=$<TARGET_FILE:SimRV> -D
-      SIMRV_FW_PAYLOAD=${CMAKE_SOURCE_DIR}/linux-images/rv${SIMRV_XLEN}/fw_payload.bin
+      SIMRV_FW_PAYLOAD=${SIMRV_LINUX_IMAGES_DIR}/opensbi-linux-payload.elf
       -D
-      SIMRV_DISK_IMAGE=${CMAKE_SOURCE_DIR}/linux-images/rv${SIMRV_XLEN}/root.img
+      SIMRV_DISK_IMAGE=${SIMRV_LINUX_IMAGES_DIR}/rootfs.img
       -D
-      SIMRV_DTB=${CMAKE_SOURCE_DIR}/linux-images/rv${SIMRV_XLEN}/devicetree.dtb
+      SIMRV_DTB=${SIMRV_LINUX_IMAGES_DIR}/devicetree.dtb
       -P ${CMAKE_SOURCE_DIR}/cmake/SimRVRunLinux.cmake
     DEPENDS SimRV
     WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}

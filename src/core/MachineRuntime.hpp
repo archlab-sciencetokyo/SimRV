@@ -30,6 +30,7 @@
 #include "simrv/device/mmio/VirtioMmioBlock.hpp"
 #include "simrv/device/mmio/VirtioMmioConsole.hpp"
 #include "simrv/device/mmio/VirtioMmioGpu.hpp"
+#include "simrv/device/mmio/VirtioMmioFs.hpp"
 #include "simrv/device/mmio/VirtioMmioInput.hpp"
 #include "simrv/device/mmio/VirtioMmioNet.hpp"
 #include "simrv/device/mmio/VirtioMmioRng.hpp"
@@ -38,6 +39,7 @@
 #include "simrv/device/pci/VirtioPciBlock.hpp"
 #include "simrv/device/pci/VirtioPciConsole.hpp"
 #include "simrv/device/pci/VirtioPciGpu.hpp"
+#include "simrv/device/pci/VirtioPciFs.hpp"
 #include "simrv/device/pci/VirtioPciInput.hpp"
 #include "simrv/device/pci/VirtioPciNet.hpp"
 #include "simrv/device/pci/VirtioPciRng.hpp"
@@ -153,6 +155,7 @@ class Machine::Runtime {
     std::shared_ptr<simrv::device::VirtioPciInput> pci_input;
     std::shared_ptr<simrv::device::VirtioPciSound> pci_sound;
     std::shared_ptr<simrv::device::VirtioPciNet> pci_net;
+    std::shared_ptr<simrv::device::VirtioPciFs> pci_fs;
     std::shared_ptr<simrv::device::VirtioMmioBlock> mmio_disk;
     std::shared_ptr<simrv::device::VirtioMmioConsole> mmio_console;
     std::shared_ptr<simrv::device::VirtioMmioRng> mmio_rng;
@@ -160,6 +163,7 @@ class Machine::Runtime {
     std::shared_ptr<simrv::device::VirtioMmioInput> mmio_input;
     std::shared_ptr<simrv::device::VirtioMmioSound> mmio_sound;
     std::shared_ptr<simrv::device::VirtioMmioNet> mmio_net;
+    std::shared_ptr<simrv::device::VirtioMmioFs> mmio_fs;
     std::unique_ptr<simrv::debug::GdbStub> gdb_stub;
     std::unique_ptr<simrv::debug::SpikeLockstep> spike_lockstep;
     simrv::debug::BreakpointManager breakpoints;

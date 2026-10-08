@@ -478,9 +478,9 @@ auto Machine::initialize() -> std::expected<void, std::string> {
         memory().system_bus().add_node(&runtime_->pcie->mmio_node());
     }
 
-    const std::array<std::shared_ptr<simrv::device::VirtioMmioDevice>, 7> mmio_devs = {
+    const std::array<std::shared_ptr<simrv::device::VirtioMmioDevice>, 8> mmio_devs = {
         runtime_->mmio_disk,  runtime_->mmio_console, runtime_->mmio_rng, runtime_->mmio_gpu,
-        runtime_->mmio_input, runtime_->mmio_sound,   runtime_->mmio_net,
+        runtime_->mmio_input, runtime_->mmio_sound,   runtime_->mmio_net, runtime_->mmio_fs,
     };
     for (const auto& dev : mmio_devs) {
         if (dev) memory().system_bus().add_node(dev.get());
@@ -615,6 +615,7 @@ auto Machine::initialize() -> std::expected<void, std::string> {
             // loop so its IPI can release them into the Linux entry point. When direct-SBI is
             // active, secondary harts must start Stopped so Sbi::handle_hsm(HartStart) can claim
             // and launch them.
+            // Keep recognizing older FW_PAYLOAD bundles by their original filename.
             const bool is_fw_payload =
                 (config.files.binary_path.find("fw_payload") != std::string::npos ||
                  config.files.binary_path.find("opensbi") != std::string::npos);
@@ -686,6 +687,7 @@ auto Machine::initialize() -> std::expected<void, std::string> {
                 .xlen = simrv::xlen::kXLenBits,
                 .enable_pcie = composition.pcie,
                 .enable_mmio = composition.mmio,
+                .enable_virtiofs = !config.files.virtiofs_path.empty(),
                 .enable_framebuffer = true,
                 .soc = config.soc,
             };
