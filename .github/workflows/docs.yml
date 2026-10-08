@@ -34,17 +34,28 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
       - name: Set up uv
         uses: astral-sh/setup-uv@v7
         with:
           enable-cache: true
 
-      - name: Install MkDocs dependencies
+      - name: Install documentation dependencies
         run: uv sync --group docs --frozen
 
-      - name: Build documentation site
+      - name: Build documentation site with Zensical
         env:
           SIMRV_DOCS_CHANNEL: development
+        run: uv run --frozen zensical build --strict
+
+      - name: Verify MkDocs compatibility build
+        env:
+          SIMRV_DOCS_CHANNEL: development
+          SIMRV_DOCS_SITE_DIR: site-mkdocs
         run: uv run --frozen mkdocs build --strict
 
       - name: Check documentation links
@@ -77,6 +88,11 @@ jobs:
           ref: dev
           path: docs-dev
 
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
       - name: Set up uv
         uses: astral-sh/setup-uv@v7
         with:
@@ -86,19 +102,19 @@ jobs:
         working-directory: docs-dev
         run: uv sync --group docs --frozen
 
-      - name: Build stable and development sites
+      - name: Build stable and development sites with Zensical
         run: |
           mkdir -p site
           SIMRV_DOCS_SITE_URL="https://archlab-sciencetokyo.github.io/SimRV/stable/" \
+            SIMRV_DOCS_SITE_DIR="$GITHUB_WORKSPACE/site/stable" \
             SIMRV_DOCS_EDIT_URI="edit/main/docs/" \
             SIMRV_DOCS_CHANNEL="stable" \
-            docs-dev/.venv/bin/mkdocs build --strict --config-file docs-main/mkdocs.yml \
-              --site-dir "$GITHUB_WORKSPACE/site/stable"
+            docs-dev/.venv/bin/zensical build --strict --config-file docs-main/mkdocs.yml
           SIMRV_DOCS_SITE_URL="https://archlab-sciencetokyo.github.io/SimRV/dev/" \
+            SIMRV_DOCS_SITE_DIR="$GITHUB_WORKSPACE/site/dev" \
             SIMRV_DOCS_EDIT_URI="edit/dev/docs/" \
             SIMRV_DOCS_CHANNEL="development" \
-            docs-dev/.venv/bin/mkdocs build --strict --config-file docs-dev/mkdocs.yml \
-              --site-dir "$GITHUB_WORKSPACE/site/dev"
+            docs-dev/.venv/bin/zensical build --strict --config-file docs-dev/mkdocs.yml
           cp -a site/stable site/latest
           printf '%s\n' \
             '[' \

@@ -36,16 +36,16 @@ void assign_pipeline(SysConfigDraft& draft, const simrv::pipeline::CpuModelConfi
 void assign_numeric(SysConfigDraft& draft, int cursor, uint32_t value) {
     switch (cursor) {
         case 1:
-            draft.mul_latency = std::clamp(value, 1u, 20u);
+            draft.mul_latency = std::clamp(value, 0u, 20u);
             break;
         case 2:
-            draft.div_latency = std::clamp(value, 1u, 100u);
+            draft.div_latency = std::clamp(value, 0u, 100u);
             break;
         case 3:
-            draft.fp_alu_latency = std::clamp(value, 1u, 20u);
+            draft.fp_alu_latency = std::clamp(value, 0u, 20u);
             break;
         case 4:
-            draft.fp_div_latency = std::clamp(value, 1u, 100u);
+            draft.fp_div_latency = std::clamp(value, 0u, 100u);
             break;
         case 5:
             draft.csr_flush_penalty = std::clamp(value, 0u, 20u);
@@ -252,10 +252,10 @@ void SystemConfigModal::render(std::vector<std::string>& content_rows,
     const auto bp_type = static_cast<simrv::pipeline::BranchPredictorType>(draft.bpred_type);
     const auto settings = std::to_array<Item>({
         {"Pipeline", std::string(simrv::pipeline::pipeline_type_name(pipeline))},
-        {"Integer multiply latency", cycles(draft.mul_latency, 1)},
-        {"Integer divide latency", cycles(draft.div_latency, 2)},
-        {"FP ALU latency", cycles(draft.fp_alu_latency, 3)},
-        {"FP divide/sqrt latency", cycles(draft.fp_div_latency, 4)},
+        {"Integer multiply stall cycles", cycles(draft.mul_latency, 1)},
+        {"Integer divide stall cycles", cycles(draft.div_latency, 2)},
+        {"FP ALU stall cycles", cycles(draft.fp_alu_latency, 3)},
+        {"FP divide/sqrt stall cycles", cycles(draft.fp_div_latency, 4)},
         {"CSR serialization latency", cycles(draft.csr_flush_penalty, 5)},
         {"Fence serialization latency", cycles(draft.fence_flush_penalty, 6)},
         {"Integer forwarding", draft.enable_forwarding ? "Enabled" : "Disabled"},

@@ -9,29 +9,57 @@ claims and known gaps are maintained in [RISC-V compliance scope](compliance.md)
 
 `Machine` orchestrates the virtual platform: CPU harts, memory subsystem, TileLink-C
 interconnect, PCIe root complex, platform interrupt controllers, and device endpoints.
-Each `CPU` hart maintains its architectural register state (`ArchState`), translation/TLB
-structures, L1 I/D-caches, branch predictor, and execution pipeline model.
+The diagram shows how those main parts relate at runtime.
 
-| Area | Primary Components | Architectural Responsibility |
-| --- | --- | --- |
-| **Core** | `Machine`, `CPU`, `ArchState` | Hart lifecycle, architectural registers, CSRs, traps, performance counters |
-| **Execution** | `Decoder`, `ExecuteUnit`, `PipelineSim` | Decode caching, integer/FP/vector execution, pipeline hazards, retirement |
-| **Memory & Coherence** | `Mmu`, `DCache`, `ICache`, `TileLinkBus` | Address translation, L1 caches, TileLink-C directory coherence with MESI protocol |
-| **Platform Devices** | `PcieRootComplex`, `VirtioDevice`, `Uart`, `AIA`, `Aclint` | PCIe ECAM/BARs, VirtIO MMIO/PCI, 16550A UART, CLINT/PLIC, ACLINT, and AIA (APLIC/IMSIC) |
-| **Debug & Tracing** | `Tracer`, `GdbStub`, `BreakpointManager`, `SpikeLockstep` | Structured traces, logical break/watchpoints, GDB RSP, Spike co-simulation |
-| **Presentation** | `Tui`, `TuiFrameRenderer`, `VirtualTerminal` | Multi-hart state visualizer, terminal console PTY, educational glossary & inspector |
+```mermaid
+flowchart LR
+    M[Machine]
+    subgraph H[CPU harts]
+      C[CPU / ArchState]
+      X[Decoder, ExecuteUnit, PipelineSim]
+      TLB[MMU and TLB]
+      L1[L1 instruction and data caches]
+      C --> X
+      X --> TLB
+      X --> L1
+    end
+    M --> H
+    L1 <--> BUS[TileLink-C fabric]
+    BUS <--> DIR[Coherence directory / MESI]
+    DIR <--> RAM[Main memory]
+    BUS <--> DEV[MMIO and PCIe devices]
+    DEV --> IRQ[PLIC / AIA / ACLINT]
+    IRQ --> C
+    M --> DBG[Tracer, GDB, breakpoints, Spike]
+    M --> UI[TUI and terminal]
+```
+
+The `CPU` hart owns architectural state, translation structures, caches, branch prediction,
+and execution policy. The platform registry connects MMIO devices and interrupt controllers to
+the machine; tracing and presentation observe machine state without changing guest-visible
+architectural behavior.
 
 ## Execution Policies & Microarchitectures
 
 Execution is configured via `--mode <name>` and resolved into runtime profiles:
 
-| Mode Flag | Policy Class | Description |
-| --- | --- | --- |
-| `--mode fast` | `InstructionFast` | High-throughput functional execution with decode caching and quantum batching |
-| `--mode detailed` | `InstructionObservable` | Instruction-by-instruction execution retaining telemetry for TUI inspection |
-| `--mode cycle-accurate` | `CycleFast` / `CycleObservable` | Cycle-stepped pipeline with branch predictor and memory latency modeling |
-| `--mode cycle-accurate --pipeline 3stage` | `CycleFast` / `CycleObservable` | 3-stage Fetch / Decode+Execute / Memory+Writeback educational pipeline model |
-| `--mode cycle-accurate --pipeline 5stage` | `CycleFast` / `CycleObservable` | Classic 5-stage Fetch / Decode / Execute / Memory / Writeback pipeline |
+```mermaid
+flowchart TD
+    MODE{Execution mode}
+    MODE -->|fast| IF[InstructionFast<br/>batched functional execution]
+    MODE -->|detailed| IO[InstructionObservable<br/>instruction-level telemetry]
+    MODE -->|cycle-accurate| PIPE{Pipeline selection}
+    PIPE -->|three-stage| P3[Fetch → Decode/Execute → Memory/Writeback]
+    PIPE -->|five-stage| P5[Fetch → Decode → Execute → Memory → Writeback]
+    PIPE -->|dual-issue| P2[Dual-issue cycle model]
+    P3 --> CF[CycleFast or CycleObservable]
+    P5 --> CF
+    P2 --> CF
+```
+
+The `CycleFast` and `CycleObservable` policies share the selected pipeline timing model; observable
+execution retains telemetry for inspection. Fast instruction mode instead uses decode caching and
+quantum batching where the active debug and tracing features allow it.
 
 In cycle-accurate and pipeline modes, instruction slots traverse stages with explicit data forwarding,
 structural hazard stalls, and branch-prediction redirection. Architectural effects commit strictly
@@ -57,6 +85,11 @@ Counter interpretation depends on the execution policy:
 
 The TUI labels the instruction-accurate value as `virt` and the cycle-accurate value as `sim` to
 make this distinction explicit. Host elapsed time and execution speed are separate measurements.
+
+!!! info "Interpreting virtual time"
+    Treat cycle counts as a hardware timing model only in cycle-accurate mode, and only when the
+    configured pipeline and device latencies are calibrated to a reference implementation. Fast
+    and detailed modes keep guest timers deterministic; they do not estimate real execution time.
 
 ### Fast-Batch Execution Engine & Debug Fallbacks
 
@@ -138,6 +171,11 @@ barrier. Hart 0 owns advancement of the shared TileLink fabric and timer, while 
 are synchronized. This mode provides real host parallelism, but relative hart cycle counts and
 inter-hart timing are intentionally nondeterministic. Pause, reboot, reconfiguration, shutdown, and
 single-step first quiesce the workers; a single step then advances one deterministic all-hart cycle.
+
+!!! warning "Use deterministic CA for cycle parity"
+    `--smp-multithreaded` is useful for exploring parallel workloads, but inter-hart event timing is
+    nondeterministic. Use the default deterministic cycle scheduler when comparing cycle traces or
+    validating cycle-by-cycle behavior against RTL.
 
 The CPU model controls pipeline, cache, and interconnect timing. Cache hit/miss
 latencies and TileLink request/response latencies are positive whole-cycle

@@ -4,8 +4,8 @@
 #include <format>
 #include <fstream>
 
-#include "simrv/core/CpuConfigParser.hpp"
 #include "simrv/core/BuildInfo.hpp"
+#include "simrv/core/CpuConfigParser.hpp"
 #include "simrv/core/SoCDeviceRegistry.hpp"
 
 namespace simrv::util {
@@ -77,8 +77,7 @@ auto serialize_soc_manifest(const simrv::core::SoCConfig& config, std::ostream& 
     out << "{\n";
     out << "  \"schema_version\": 1,\n";
     out << "  \"manifest_version\": \"3.0\",\n";
-    out << "  \"generator\": \"simrv "
-        << json_escape(simrv::buildinfo::kVersion) << "\",\n";
+    out << "  \"generator\": \"simrv " << json_escape(simrv::buildinfo::kVersion) << "\",\n";
     out << "  \"name\": " << quoted(config.name) << ",\n";
     out << "  \"cpu_model\": " << quoted(config.cpu_model) << ",\n";
     out << "  \"cpu\": {\n";
@@ -122,6 +121,27 @@ auto serialize_soc_manifest(const simrv::core::SoCConfig& config, std::ostream& 
         out << "      \"base\": " << device.base << ",\n";
         out << "      \"size\": " << device.size << ",\n";
         out << "      \"irq\": " << device.irq << ",\n";
+        if (device.kind == simrv::core::SoCDeviceKind::DummyMmio ||
+            device.kind == simrv::core::SoCDeviceKind::CustomMmio) {
+            out << "      \"compatible\": " << quoted(device.compatible) << ",\n";
+            out << "      \"read_value\": " << device.read_value << ",\n";
+        }
+        if (device.kind == simrv::core::SoCDeviceKind::RingBufferEthernet) {
+            out << "      \"mac_address\": " << quoted(std::format(
+                "{:02x}:{:02x}:{:02x}:{:02x}:{:02x}:{:02x}", device.mac_address[0],
+                device.mac_address[1], device.mac_address[2], device.mac_address[3],
+                device.mac_address[4], device.mac_address[5])) << ",\n";
+        }
+        if (!device.regions.empty()) {
+            out << "      \"regions\": [";
+            for (size_t region_index = 0; region_index < device.regions.size(); ++region_index) {
+                const auto& region = device.regions[region_index];
+                if (region_index != 0) out << ", ";
+                out << "{\"name\": " << quoted(region.name) << ", \"base\": " << region.base
+                    << ", \"size\": " << region.size << "}";
+            }
+            out << "],\n";
+        }
         out << "      \"enabled\": " << (device.enabled ? "true" : "false") << "\n";
         out << "    }" << (i + 1 == devices.size() ? "\n" : ",\n");
     }

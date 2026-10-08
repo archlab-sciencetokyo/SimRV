@@ -37,6 +37,8 @@ the `seed` CSR are added incrementally.
 CFUs use the existing `custom-0` execution path. A simulator plugin can be supplied with
 `--cfu-plugin`; the preset's `default_latency` controls the built-in CFU model and
 `rtl_module`/`interface` provide the information needed by an HDL wrapper or hand-written RTL.
+CFU/plugin latency values count total cycles including the issue cycle; pipeline `*_latency`
+settings instead count additional stall cycles after issue.
 The current decoder intentionally reserves the complete `custom-0` opcode for the configured CFU.
 
 ---

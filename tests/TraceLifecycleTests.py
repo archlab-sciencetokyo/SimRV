@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Exercise the CLI lifecycle stream and legacy retirement stream together."""
+"""Exercise lifecycle events and the retained schema-1 retirement compatibility stream."""
 
 import json
 import os

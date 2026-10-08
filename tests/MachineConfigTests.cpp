@@ -89,6 +89,38 @@ auto main() -> int {
     expect(!defaults.memory.contains(defaults.memory.dram_base + defaults.memory.dram_size, 1),
            "address at DRAM end is rejected");
 
+    {
+        namespace fs = std::filesystem;
+        const auto output =
+            fs::temp_directory_path() /
+            ("simrv-buildroot-output-" +
+             std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+        fs::create_directories(output / "images");
+        std::ofstream(output / "images/fw_payload.bin").put('f');
+        std::ofstream(output / "images/devicetree.dtb").put('d');
+        std::ofstream(output / "images/rootfs.ext4").put('r');
+        std::ofstream(output / "images/simrv-manifest.json") << "{\"dram_size_mb\": 512}\n";
+        std::array<std::string, 3> args_str = {"SimRV", "--buildroot-output", output.string()};
+        std::array<char*, 3> args{};
+        for (size_t i = 0; i < args_str.size(); ++i) args[i] = args_str[i].data();
+        const auto parsed = simrv::util::parse_command_line(args);
+        expect(parsed.has_value() && parsed->options.fn_memimg.ends_with("fw_payload.bin") &&
+                   parsed->options.fn_dvtree.ends_with("devicetree.dtb") &&
+                   parsed->options.fn_dskimg.ends_with("rootfs.ext4") && !parsed->options.appmode &&
+                   parsed->options.use_disk && parsed->options.dram_size == 512ULL * 1024 * 1024,
+               "Buildroot output option resolves the matching SimRV firmware, DTB, and rootfs");
+        if (parsed) {
+            const auto config = parsed->options.to_machine_config();
+            expect(config.files.binary_path == parsed->options.fn_memimg &&
+                       config.files.dvtree_path == parsed->options.fn_dvtree &&
+                       config.files.disk_path == parsed->options.fn_dskimg &&
+                       config.files.disk_enabled && config.memory.dram_size == 512ULL * 1024 * 1024,
+                   "Buildroot output selection reaches the Linux machine configuration");
+        }
+        std::error_code ignored;
+        fs::remove_all(output, ignored);
+    }
+
     const simrv::core::MemoryGeometry custom{.dram_base = 0x40000000, .dram_size = 0x1000};
     expect(custom.contains(0x40000FFC, 4), "custom geometry contains final word");
     expect(!custom.contains(0x40000FFC, 8), "custom geometry rejects overflow");
@@ -188,6 +220,69 @@ auto main() -> int {
            "lifecycle telemetry preserves its event kind");
     expect(event.instruction_count == 42 && event.exit_status == 7,
            "lifecycle telemetry preserves value fields");
+
+    {
+        simrv::core::Machine observed_machine;
+        std::vector<simrv::core::MachineEvent> observations;
+        const auto observer_id = observed_machine.add_event_observer(
+            [&observations](const simrv::core::MachineEvent& observed) {
+                observations.push_back(observed);
+            });
+        auto& clint = observed_machine.primary_hart().clint_mmio;
+        clint.mtime.store(10, std::memory_order_relaxed);
+        clint.mtimecmp.store(20, std::memory_order_relaxed);
+        observed_machine.primary_hart().evaluate_timer_interrupt();
+        clint.mtimecmp.store(0, std::memory_order_relaxed);
+        observed_machine.primary_hart().evaluate_timer_interrupt();
+        clint.mtimecmp.store(20, std::memory_order_relaxed);
+        observed_machine.primary_hart().evaluate_timer_interrupt();
+        observed_machine.set_hart_irq(HartId{0}, simrv::core::InterruptType::Software,
+                                      simrv::PrivilegeLevel::Machine, true);
+        observed_machine.set_hart_irq(HartId{0}, simrv::core::InterruptType::Software,
+                                      simrv::PrivilegeLevel::Machine, false);
+        observed_machine.set_platform_irq(4, true);
+        observed_machine.set_platform_irq(4, false);
+        (void)observed_machine.dma_engine().schedule_transfer(64, 10, [] {}, "test-device");
+        auto dma_config = observed_machine.dma_engine().config();
+        dma_config.enabled = true;
+        observed_machine.dma_engine().set_config(dma_config);
+        const auto completion_cycle =
+            observed_machine.dma_engine().schedule_transfer(128, 20, [] {}, "test-device");
+        observed_machine.dma_engine().advance_cycle(completion_cycle - 1);
+        const auto event_count_before_completion = observations.size();
+        observed_machine.dma_engine().advance_cycle(completion_cycle);
+        const bool completed_at_scheduled_cycle =
+            observations.size() == event_count_before_completion + 1 &&
+            observations.back().kind == simrv::core::MachineEventKind::DmaCompleted &&
+            observations.back().cycle == completion_cycle;
+        (void)observed_machine.dma_engine().schedule_transfer(
+            64, completion_cycle + 1, [] {}, "test-device");
+        observed_machine.dma_engine().clear();
+        expect(observations.size() == 12,
+               "machine event observer receives interrupt and DMA lifecycle transitions");
+        expect(observations.size() >= 12 &&
+                   observations[0].kind == simrv::core::MachineEventKind::InterruptAsserted &&
+                   observations[0].component == "aclint_mtimer" &&
+                   observations[1].kind == simrv::core::MachineEventKind::InterruptDeasserted &&
+                   observations[1].component == "aclint_mtimer",
+               "machine event observer receives timer interrupt transitions");
+        expect(observations.size() >= 12 &&
+                   observations[2].kind == simrv::core::MachineEventKind::InterruptAsserted &&
+                   observations[3].kind == simrv::core::MachineEventKind::InterruptDeasserted &&
+                   observations[4].kind == simrv::core::MachineEventKind::InterruptAsserted &&
+                   observations[5].kind == simrv::core::MachineEventKind::InterruptDeasserted,
+               "machine event observer receives software and platform IRQ edges");
+        expect(observations.size() >= 12 &&
+                   observations[6].kind == simrv::core::MachineEventKind::DmaStarted &&
+                   observations[7].kind == simrv::core::MachineEventKind::DmaCompleted &&
+                   observations[8].kind == simrv::core::MachineEventKind::DmaStarted &&
+                   observations[9].kind == simrv::core::MachineEventKind::DmaCompleted &&
+                   observations[10].kind == simrv::core::MachineEventKind::DmaStarted &&
+                   observations[11].kind == simrv::core::MachineEventKind::DmaCancelled &&
+                   completed_at_scheduled_cycle,
+               "DMA observations report start, completion, and cancellation");
+        observed_machine.remove_event_observer(observer_id);
+    }
 
     // C++23 explicit object parameter (deducing this) builder chaining test
     auto fluent = simrv::core::MachineConfig{}
@@ -393,14 +488,42 @@ auto main() -> int {
         }
     }
     {
+        std::array<std::string, 5> trace_pc_period_str = {"SimRV", "--trace-pc-period", "8", "-m",
+                                                          "guest.bin"};
+        std::array<char*, 5> trace_pc_period_args{};
+        for (size_t i = 0; i < trace_pc_period_str.size(); ++i)
+            trace_pc_period_args[i] = trace_pc_period_str[i].data();
+        const auto parsed = simrv::util::parse_command_line(trace_pc_period_args);
+        expect(parsed.has_value() && parsed->options.strace == 8,
+               "--trace-pc-period retains numeric PC sampling");
+    }
+    {
         std::array<std::string, 5> legacy_pc_trace_str = {"SimRV", "--trace-pc", "8", "-m",
                                                           "guest.bin"};
         std::array<char*, 5> legacy_pc_trace_args{};
         for (size_t i = 0; i < legacy_pc_trace_str.size(); ++i)
             legacy_pc_trace_args[i] = legacy_pc_trace_str[i].data();
         const auto parsed = simrv::util::parse_command_line(legacy_pc_trace_args);
-        expect(parsed.has_value() && parsed->options.strace == 8,
-               "legacy numeric --trace-pc sampling option remains available");
+        expect(!parsed.has_value() && parsed.error().find("--trace-pc-period") != std::string::npos,
+               "numeric --trace-pc is rejected with the sampling replacement");
+    }
+    {
+        std::array<std::string, 5> soc_str = {"SimRV", "--soc", "rvcomp", "-m", "guest.bin"};
+        std::array<char*, 5> soc_args{};
+        for (size_t i = 0; i < soc_str.size(); ++i) soc_args[i] = soc_str[i].data();
+        const auto parsed = simrv::util::parse_command_line(soc_args);
+        expect(parsed.has_value() && parsed->options.soc_preset == "rvcomp",
+               "canonical --soc option remains supported");
+    }
+    {
+        std::array<std::string, 4> legacy_platform_str = {"SimRV", "--platform", "rvcomp", "-m"};
+        std::array<char*, 4> legacy_platform_args{};
+        for (size_t i = 0; i < legacy_platform_str.size(); ++i)
+            legacy_platform_args[i] = legacy_platform_str[i].data();
+        const auto parsed = simrv::util::parse_command_line(legacy_platform_args);
+        expect(!parsed.has_value() &&
+                   parsed.error().find("unknown option '--platform'") != std::string::npos,
+               "removed --platform alias is rejected");
     }
     {
         std::array<std::string, 8> args_str = {

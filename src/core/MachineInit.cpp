@@ -22,7 +22,9 @@
 #include "simrv/device/Aclint.hpp"
 #include "simrv/device/DmaController.hpp"
 #include "simrv/device/Power.hpp"
+#include "simrv/device/PlatformDeviceRegistry.hpp"
 #include "simrv/device/Rtc.hpp"
+#include "simrv/device/ResetControlMmio.hpp"
 #include "simrv/device/Uart.hpp"
 #include "simrv/device/mmio/VirtioMmioBlock.hpp"
 #include "simrv/device/mmio/VirtioMmioConsole.hpp"
@@ -426,6 +428,21 @@ auto Machine::initialize() -> std::expected<void, std::string> {
         this, simrv::device::Aplic::Privilege::Supervisor, simrv::mmio::kAplicSBaseAddress,
         simrv::mmio::kAplicSSize, runtime_->imsic_s.get());
     PlatformBuilder::compose(*this);
+    for (const auto& device : simrv::core::SoCDeviceRegistry::resolve(config.soc)) {
+        if (device.enabled && device.kind == SoCDeviceKind::DummyMmio) {
+            runtime_->dummy_mmios.push_back(std::make_unique<simrv::device::DummyMmio>(
+                device.name, device.base, device.size, device.read_value));
+        } else if (device.enabled && (device.kind == SoCDeviceKind::CustomMmio ||
+                                      device.kind == SoCDeviceKind::ResetControl)) {
+            auto extension = device_registry().create_mmio(*this, device);
+            if (extension) {
+                runtime_->extension_mmios.push_back(std::move(extension));
+            } else if (device.kind == SoCDeviceKind::CustomMmio) {
+                runtime_->dummy_mmios.push_back(std::make_unique<simrv::device::DummyMmio>(
+                    device.name, device.base, device.size, device.read_value));
+            }
+        }
+    }
 
     const auto device_enabled = [&](simrv::core::SoCDeviceKind kind) {
         return simrv::core::SoCDeviceRegistry::enabled(config.soc, kind);
@@ -444,6 +461,17 @@ auto Machine::initialize() -> std::expected<void, std::string> {
     add_base_node(SoCDeviceKind::Uart, runtime_->uart.get());
     add_base_node(SoCDeviceKind::Power, runtime_->power.get());
     add_base_node(SoCDeviceKind::DmaController, runtime_->dma_controller.get());
+    if (runtime_->ring_buffer_ethernet) {
+        memory().system_bus().add_node(runtime_->ring_buffer_ethernet->csr_node());
+        memory().system_bus().add_node(runtime_->ring_buffer_ethernet->rx_node());
+        memory().system_bus().add_node(runtime_->ring_buffer_ethernet->tx_node());
+    }
+    for (const auto& device : runtime_->dummy_mmios) {
+        memory().system_bus().add_node(device.get());
+    }
+    for (const auto& device : runtime_->extension_mmios) {
+        memory().system_bus().add_node(device.get());
+    }
 
     if (runtime_->pcie) {
         memory().system_bus().add_node(&runtime_->pcie->ecam_node());

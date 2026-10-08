@@ -1,4 +1,4 @@
-# SimRV 3.0 GA workflow
+# Release Validation
 
 SimRV 3.0 is intended to be useful as a portable architecture-debugging workbench, not only as
 an instruction runner. This page is the short acceptance workflow for a release installation.
@@ -54,4 +54,14 @@ The repository smoke check combines these steps:
 ```bash
 python3 scripts/ga_smoke.py --simrv build/rv64-release/simrv \
   --guest examples/hello/build-rv64/hello.elf
+```
+
+Before handing off release binaries or guest images, verify their manifests and keep reproducible
+evidence with the exact Git tag, architecture, guest profile, manifest, and host toolchain:
+
+```bash
+python3 scripts/release_check.py \
+  --binary build/rv64-release/simrv \
+  --binary build/rv32-release/simrv
+python3 scripts/check-linux-artifacts.py linux-images/rv64
 ```

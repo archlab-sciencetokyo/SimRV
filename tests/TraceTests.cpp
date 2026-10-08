@@ -389,6 +389,7 @@ void test_trace_level_filters_streams() {
     machine.primary_hart().state().pc = kPc;
     const auto path = trace_path("level");
     machine.trace().init_architecture_trace(path.string());
+    if (!machine.trace().needs_retiring_context()) std::abort();
     while (machine.primary_hart().e_icount < 2) machine.primary_hart().run_cycle(machine);
     machine.trace().flush_all();
 
@@ -408,6 +409,48 @@ void test_trace_level_filters_streams() {
     std::filesystem::remove(sibling_path(path, "devices.jsonl"));
     std::filesystem::remove(sibling_path(path, "interrupts.jsonl"));
     std::filesystem::remove(sibling_path(path, "bus.jsonl"));
+    std::filesystem::remove(sibling_path(path, "markers.jsonl"));
+    std::filesystem::remove(sibling_path(path, "metadata.json"));
+}
+
+void test_level_zero_trace_skips_retirement_context() {
+    simrv::core::MachineConfig config;
+    config.debug.trace_level = 0;
+    Machine machine(config);
+    const auto path = trace_path("level-zero");
+    machine.trace().init_architecture_trace(path.string());
+    if (!machine.trace().is_architecture_trace_enabled() ||
+        machine.trace().needs_retiring_context())
+        std::abort();
+    machine.trace().init_architecture_trace("");
+    if (machine.trace().is_architecture_trace_enabled() || machine.trace().needs_retiring_context())
+        std::abort();
+    std::filesystem::remove(path);
+    std::filesystem::remove(sibling_path(path, "calls.jsonl"));
+    std::filesystem::remove(sibling_path(path, "devices.jsonl"));
+    std::filesystem::remove(sibling_path(path, "interrupts.jsonl"));
+    std::filesystem::remove(sibling_path(path, "bus.jsonl"));
+    std::filesystem::remove(sibling_path(path, "markers.jsonl"));
+    std::filesystem::remove(sibling_path(path, "metadata.json"));
+}
+
+void test_filtered_trace_skips_unselected_retirement_context() {
+    simrv::core::MachineConfig config;
+    config.debug.trace_level = 4;
+    config.debug.trace_events = "pipeline_stall,bus_transaction";
+    Machine machine(config);
+    const auto path = trace_path("filtered-context");
+    machine.trace().init_architecture_trace(path.string());
+    if (!machine.trace().is_architecture_trace_enabled() ||
+        machine.trace().needs_retiring_context())
+        std::abort();
+    std::filesystem::remove(path);
+    std::filesystem::remove(sibling_path(path, "calls.jsonl"));
+    std::filesystem::remove(sibling_path(path, "devices.jsonl"));
+    std::filesystem::remove(sibling_path(path, "interrupts.jsonl"));
+    std::filesystem::remove(sibling_path(path, "bus.jsonl"));
+    std::filesystem::remove(sibling_path(path, "memory.jsonl"));
+    std::filesystem::remove(sibling_path(path, "pipeline.jsonl"));
     std::filesystem::remove(sibling_path(path, "markers.jsonl"));
     std::filesystem::remove(sibling_path(path, "metadata.json"));
 }
@@ -453,7 +496,7 @@ void test_trace_hart_identity() {
 
 void test_arch_trace_event_hart_and_cycle_filters() {
     simrv::core::MachineConfig config;
-    config.debug.trace_events = "call";
+    config.debug.trace_events = "ignored, call";
     config.debug.trace_hart = 1;
     config.debug.trace_pc_start = kPc;
     config.debug.trace_pc_end = kPc + 0x10;
@@ -1082,6 +1125,8 @@ int main(int argc, char** argv) {
     test_gzip_retirement_preserves_schema_one_records();
     test_branches_are_not_calls();
     test_trace_level_filters_streams();
+    test_level_zero_trace_skips_retirement_context();
+    test_filtered_trace_skips_unselected_retirement_context();
     test_trace_hart_identity();
     test_arch_trace_event_hart_and_cycle_filters();
     test_arch_trace_device_filter();

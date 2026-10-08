@@ -23,6 +23,7 @@
 #include "simrv/tui/Tui.hpp"
 #include "simrv/tui/TuiMission.hpp"
 #include "simrv/util/FormatUtil.hpp"
+#include "simrv/util/BuildrootImageBundle.hpp"
 #include "simrv/xlen/Types.hpp"
 
 namespace simrv::util {
@@ -369,6 +370,22 @@ auto effective_isa_preset(const RuntimeOptions& options) -> IsaPreset {
 
 auto parse_file_options(std::string_view arg, std::span<char* const> args, std::size_t& i,
                         RuntimeOptions& options) -> std::expected<bool, std::string> {
+    if (arg == "--buildroot-output") {
+        auto value = next_argument(args, i, arg);
+        if (!value) return std::unexpected(value.error());
+        auto bundle = resolve_buildroot_image_bundle(*value);
+        if (!bundle) return std::unexpected(bundle.error());
+        options.fn_memimg = bundle->firmware.string();
+        options.fn_dvtree = bundle->dtb.string();
+        options.fn_dskimg = bundle->rootfs.string();
+        if (bundle->dram_size_bytes.has_value()) {
+            options.dram_size = *bundle->dram_size_bytes;
+        }
+        options.use_disk = true;
+        options.appmode = false;
+        options.use_opensbi = true;
+        return true;
+    }
     if (arg == "-m" || arg == "--image" || arg == "--memory" || arg == "--kernel" ||
         arg == "--payload") {
         auto value = next_argument(args, i, arg);
@@ -498,14 +515,17 @@ auto parse_execution_options(std::string_view arg, std::span<char* const> args, 
             return std::unexpected("--trace-pc-range expects START-END with START <= END");
         return true;
     }
-    if (arg == "--trace-pc-period" || arg == "--trace-pc") {
+    if (arg == "--trace-pc") {
         auto value = next_argument(args, i, arg);
         if (!value) return std::unexpected(value.error());
-        if (arg == "--trace-pc" && value->find('-') != std::string_view::npos) {
-            if (!parse_trace_pc_range(*value, options))
-                return std::unexpected("--trace-pc expects a period or START-END range");
-            return true;
-        }
+        if (!parse_trace_pc_range(*value, options))
+            return std::unexpected(
+                "--trace-pc expects START-END; use --trace-pc-period for sampling");
+        return true;
+    }
+    if (arg == "--trace-pc-period") {
+        auto value = next_argument(args, i, arg);
+        if (!value) return std::unexpected(value.error());
         uint64_t period = 0;
         if (!parse_scaled_u64(*value, period))
             return std::unexpected(std::format("invalid numeric value for {}", arg));
@@ -772,11 +792,9 @@ auto parse_tui_options(std::string_view arg, std::span<char* const> args, std::s
         result.options.disable_forwarding = true;
         return true;
     }
-    if (arg == "--soc" || arg.starts_with("--soc=") || arg == "--platform" ||
-        arg.starts_with("--platform=")) {
-        const bool is_soc_option = arg == "--soc" || arg.starts_with("--soc=");
-        const std::string_view option_name = is_soc_option ? "--soc" : "--platform";
-        const std::string_view prefix = is_soc_option ? "--soc=" : "--platform=";
+    if (arg == "--soc" || arg.starts_with("--soc=")) {
+        constexpr std::string_view option_name = "--soc";
+        constexpr std::string_view prefix = "--soc=";
         std::string_view p = arg.starts_with(prefix) ? arg.substr(prefix.size()) : "";
         if (p.empty()) {
             auto value = next_argument(args, i, option_name);
@@ -913,6 +931,15 @@ auto parse_debug_cosrv_options(std::string_view arg, std::span<char* const> args
                 "--events requires a writable file path (stdout is reserved for guest UART)");
         }
         options.fn_events = std::string(*value);
+        return true;
+    }
+    if (arg == "--uart-transcript") {
+        auto value = next_argument(args, i, arg);
+        if (!value) return std::unexpected(value.error());
+        if (value->empty() || *value == "-") {
+            return std::unexpected("--uart-transcript requires a writable file path");
+        }
+        options.fn_uart_transcript = std::string(*value);
         return true;
     }
     if (arg == "--trace-level") {
@@ -1514,6 +1541,8 @@ auto needs_memory_image(const ParseResult& result) -> bool {
           {"--pc, --start-pc <ADDR>", "Set the initial program counter (default: 0x80000000)."},
           {"-b, --baremetal", "Run a bare-metal application (default)."},
           {"--os", "Boot an operating system (Linux or RTOS)."},
+          {"--buildroot-output <DIR>",
+           "Load firmware, DTB, and rootfs together from a Buildroot output directory."},
           {"-D, --disk, --rootfs <FILE>", "Attach a VirtIO block storage image."},
           {"-f, --fdt, --dtb <FILE>", "Load a device tree blob."}}},
         {"Architecture and hardware",
@@ -1523,7 +1552,7 @@ auto needs_memory_image(const ParseResult& result) -> bool {
           {"--dram-size, --ram-size <SIZE>", "Set DRAM size (for example, 128M or 2G)."},
           {"--isa <ISA>", "Select a RISC-V ISA profile such as rv32gc or rv64gc."},
           {"--vlen <BITS>", "Set vector register length (128–1024; default: 256)."},
-          {"--soc, --platform <PRESET>", "Select virt-pcie, virt-mmio, or rvcomp."},
+          {"--soc <PRESET>", "Select virt-pcie, virt-mmio, or rvcomp."},
           {"--dump-soc-manifest <PRESET> [FILE]", "Export the normalized SoC registry as JSON."},
           {"--net <BACKEND>", "Select the VirtIO network backend: user, tap, socket, or none."}}},
         {"Execution and pipeline",
@@ -1564,7 +1593,8 @@ auto needs_memory_image(const ParseResult& result) -> bool {
           {"--trace-after-cycle <N>", "Set the inclusive start of the trace cycle window."},
           {"--trace-before-cycle <N>", "Set the inclusive end of the trace cycle window."},
           {"--trace-pc-range <START-END>", "Filter architectural events by inclusive PC range."},
-          {"--trace-pc-period, --trace-pc <N>", "Sample the PC trace every N instructions."},
+          {"--trace-pc <START-END>", "Alias for --trace-pc-range."},
+          {"--trace-pc-period <N>", "Sample the PC trace every N instructions."},
           {"--trace", "Record a full architectural text trace."},
           {"-r, --trace-range <BG> <EN>", "Record an execution trace snapshot for a step range."},
           {"--trace-bpred", "Record branch prediction events."},
@@ -1579,7 +1609,8 @@ auto needs_memory_image(const ParseResult& result) -> bool {
           {"--mouse-sensitivity <F>", "Set TUI mouse sensitivity (default: 1.0)."},
           {"--inspection-output <FILE>", "Write paused-state TUI inspection reports."},
           {"--summary <FILE>", "Write a JSON execution summary on exit."},
-          {"--events <FILE>", "Write newline-delimited lifecycle events."},
+          {"--events <FILE>", "Write newline-delimited lifecycle, interrupt, and DMA events."},
+          {"--uart-transcript <FILE>", "Save guest UART output while keeping its normal destination."},
           {"--save-checkpoint <FILE>", "Save architectural state on exit."},
           {"--load-checkpoint <FILE>", "Resume from an architectural checkpoint."},
           {"--checkpoint-every <CYCLES>", "Write periodic architectural checkpoints."},

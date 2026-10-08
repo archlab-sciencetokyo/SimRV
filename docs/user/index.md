@@ -1,6 +1,6 @@
 # SimRV 3.0 User Guide
 
-SimRV is an explainable, dual-width (RV32 / RV64) RISC-V architectural simulator with an interactive terminal workbench (TUI), cycle-accurate microarchitectural modeling, hardware RTL parity verification, and full-system SMP Linux emulation.
+SimRV is an explainable, dual-width (RV32 / RV64) RISC-V architectural simulator with an interactive terminal workbench (TUI), cycle-accurate microarchitectural modeling, reference parity checks, and full-system SMP Linux emulation.
 
 ---
 
@@ -13,7 +13,7 @@ SimRV is an explainable, dual-width (RV32 / RV64) RISC-V architectural simulator
 5. [Bare-Metal & Embedded Simulation](#5-bare-metal-embedded-simulation)
 6. [Full-System Linux Emulation](#6-full-system-linux-emulation)
 7. [CPU Model Presets & Microarchitecture Tuning](#7-cpu-model-presets-microarchitecture-tuning)
-8. [RTL Parity Verification](#8-rtl-parity-verification)
+8. [Reference Parity Verification](#8-reference-parity-verification)
 9. [Benchmarking Suite](#9-benchmarking-suite)
 10. [Troubleshooting & Reference](#10-troubleshooting-reference)
 
@@ -27,7 +27,9 @@ SimRV simulates standard 32-bit and 64-bit RISC-V systems:
 - **Privilege & System Architecture**: Machine (M), Supervisor (S), and User (U) privilege modes with PMP (Physical Memory Protection), Sv32 / Sv39 MMU page translation, CLINT / ACLINT timer and software interrupts, and PLIC / AIA (APLIC/IMSIC) interrupt routing.
 - **Microarchitectural Modeling**: Per-cycle transition kernels for three-stage, five-stage, and dual-issue pipelines with configurable branch prediction (static, bimodal, 2-level adaptive, RAS, BTB) and multi-level L1/L2/L3 cache hierarchies.
 - **Multi-Hart Coherence**: TileLink-C directory-based coherence hubs modeling MESI protocols for SMP configurations (2 to 16 harts).
-- **RTL Parity Framework**: Cycle-accurate equivalence validation against physical Verilog / Verilator RTL designs.
+- **Reference Parity**: Compare architectural retirement and cycle-level behavior with external implementations and measured traces.
+- **Buildroot guests**: Load a Buildroot output directory or published bundle, with matching firmware, device tree, and root filesystem resolved together.
+- **Custom SoCs**: Configure CPU models and device maps, register reusable MMIO extensions, or describe unmapped ranges with traceable dummy devices.
 - **Interactive TUI**: Educational split-screen monitor displaying register banks, pipeline slots, cache lines, hazard graphs, disassembly explainers, and an interactive Linux PTY terminal.
 
 ---
@@ -63,6 +65,16 @@ cmake --build --preset rv32-release -j$(nproc)
 
 The normal executable is `build/rv64-release/simrv`. It runs RV64 guests and RV32 guests; the
 separate `build/rv32-release/simrv` target is primarily retained for strict-width validation.
+
+### Choose a workflow
+
+| Goal | Guide |
+| --- | --- |
+| Explore Linux with the Alpine/JWM desktop | [Full-System Linux](linux.md) |
+| Build or boot a serial Buildroot guest | [Buildroot image workflow](linux.md#fpga-baseline-profile) |
+| Build and validate SimRV from source | [Install and build](install.md#build-from-source) and [release validation workflow](ga-workflow.md) |
+| Create a CPU preset or custom SoC device | [Extending CPU presets and MMIO platforms](../hardware/extending-platforms.md) |
+| Compare architectural or cycle-level behavior | [Reference parity](../hardware/rtl_parity.md) |
 
 ### Installing System-Wide
 
@@ -115,7 +127,9 @@ simrv -m program.elf
 | `-p, --pipeline <type>` | Pipeline microarchitecture target (`three-stage`, `five-stage`, `dual-issue`). |
 | `-H, --tohost <addr>` | Specify physical address of `tohost` communication symbol for tests. |
 | `--summary <file>` | Write a machine-readable JSON execution summary when the run ends. |
-| `--events <file>` | Write newline-delimited lifecycle events for automation. |
+| `--events <file>` | Write newline-delimited lifecycle, interrupt, and DMA events for automation. |
+| `--buildroot-output <dir>` | Load firmware, DTB, and root filesystem from a Buildroot output directory or bundle. |
+| `--uart-transcript <file>` | Save guest UART output to a file while keeping the normal CLI, TUI, or server destination. |
 | `--arch-trace <file>` | Write a versioned JSONL retirement trace (defaults to detailed mode unless an execution mode is explicitly selected). |
 | `--trace-level <0-4>` | Limit architectural event detail: devices, calls, retirement, or detailed state. |
 | `--trace-function <name>` | Filter attributed events to an exact ELF function symbol. |
@@ -162,10 +176,11 @@ a failure to write it
 causes a nonzero simulator exit status. `--summary -` is rejected so guest UART output remains
 unambiguous on stdout.
 
-For streaming automation, `--events` writes one JSON object per lifecycle transition. Events
-include `started`, `stopped`, `reboot_requested`, and `exit_requested`, with schema version,
-timestamp, status, stop reason, hart, PC, retired instructions, and cycles. Like summaries,
-`--events -` is rejected because stdout belongs to guest UART output.
+For streaming automation, `--events` writes one JSON object per machine lifecycle transition,
+interrupt line edge, and DMA start, completion, or cancellation. Lifecycle records include status,
+stop reason, retired instructions, and cycles; device events include their source or component and
+event-specific fields. Like summaries, `--events -` is rejected because stdout belongs to guest UART
+output.
 
 For instruction-by-instruction architectural comparison, use the opt-in JSONL trace:
 
@@ -176,8 +191,13 @@ simrv --cli -m program.elf --arch-trace results/retire.jsonl --steps 10000
 The first record identifies the trace schema, XLEN, VLEN, and hart count. Each subsequent
 `retire` record contains the hart, cycle, cumulative retired count, instruction PC and encoding,
 decoded operation, next PC, and privilege mode. The option selects detailed execution so every
-committed instruction is represented; it is intended for RTL/Spike parity work and is not a
+committed instruction is represented; it is intended for reference-model parity work and is not a
 throughput mode.
+
+!!! warning "Tracing changes what a run measures"
+    Architectural traces add serialization and file I/O, and full retirement tracing selects
+    detailed execution. Use an untraced run for throughput measurements; use `--summary` when you
+    only need aggregate counters.
 
 Architectural tracing keeps `retire.jsonl` compact and compatibility-oriented. It does not repeat
 the full CSR/vector snapshot on every line. Additional streams are written beside it:
@@ -219,7 +239,8 @@ are conjunctive. `--trace-function` uses the loaded ELF symbol table and matches
 containing the event PC; events without a resolvable symbol are excluded. `--trace-device` matches
 the event envelope's `component` exactly and excludes events without a component attribution. The
 PC range is inclusive and accepts hexadecimal or decimal addresses. `--trace-pc START-END` is an
-alias for `--trace-pc-range`; the legacy numeric `--trace-pc <period>` behavior remains available.
+alias for `--trace-pc-range`. Use `--trace-pc-period N` to sample the PC trace; numeric values for
+`--trace-pc` are rejected with a migration hint.
 Events without an architectural PC (for example bus transactions and interrupt assertion edges) are
 excluded while a PC range is active. Filtering occurs before event serialization. Lifecycle records
 in `events.jsonl` are always retained, so filters cannot hide run completion or failure. Selected
@@ -295,9 +316,10 @@ Schema-2 event catalog:
 | Event | Stream | Event-specific fields |
 |---|---|---|
 | Lifecycle transitions | `events.jsonl` | `payload.status`, stop reason, retired instructions, cycles; failures may include an error and exits may include exit status |
+| Interrupt assertion/deassertion and DMA start/completion/cancellation | `events.jsonl` | interrupt source/cause or DMA component, transfer ID, byte count, and modeled cycle fields |
 | `call`, `return` | `calls.jsonl` | source/target PCs, call `return_pc`, dynamic call depth |
 | MMIO and unmapped reads/writes | `devices.jsonl` | component; address, value, width, access, fault status, latency cycles (`null` when not modeled) |
-| `dma_start`, `dma_complete` | `devices.jsonl` | scheduler transfer ID, source component, byte count, request/start/completion cycles, modeled latency |
+| `dma_start`, `dma_complete`, `dma_cancelled` | `devices.jsonl` | scheduler transfer ID, source component, byte count, request/start/completion cycles, modeled latency |
 | `trap`, `sbi` | `devices.jsonl` | cause and cause name, fault PC/tval/privilege or SBI extension/function/arguments |
 | Interrupt assertion/deassertion | `interrupts.jsonl` | component, cause, cause name, asserted state |
 | Interrupt entry/return | `interrupts.jsonl` | handler/resumed PC, cause, EPC, CSR bank/value, source mode, nesting depth |
@@ -437,10 +459,24 @@ The SimRV TUI provides an educational visual inspection environment for architec
 ### Focus & Input Navigation
 
 - **Input Focus**: Keyboard input is automatically linked to simulation state: when running, input routes directly to the guest terminal (PTY / UART); when paused, keystrokes control TUI navigation and inspector panels.
+- **Paste to UART**: Terminal bracketed paste is delivered to the running guest as UART input.
+- **Search UART scrollback**: Pause and focus the console pane, press `Ctrl-F` (or `/`), enter a query, then use `n` / `N` to move between matches. Press `Esc` to cancel search input.
+- **Load files**: In binary, disk, and CPU model path dialogs, use `Tab` to complete the shared path prefix, or `Ctrl-O` to browse and filter files. `Shift-Tab` in the binary dialog cycles bare-metal, OS, and Buildroot-folder modes.
 - **`[Tab]` / `[Shift-Tab]`**: Switch active sub-views within the left inspector pane.
 - **`[F5]` / `[c]` / `[Ctrl-P]`**: Run / Pause simulation execution.
 - **`[F6]` / `[s]`**: Step one cycle machine-wide across all harts.
 - **`[q]` / `[Ctrl-C]`**: Quit simulator.
+
+!!! info "Pause to use TUI navigation"
+    While the guest is running, regular keystrokes go to its UART. Pause with `Ctrl-P` before using
+    navigation keys or inspecting state; resume with the same key when ready.
+
+The TUI also saves the latest workbench layout and supported preferences across launches. The
+complete key map, file-browser controls, and preference path are in the [TUI guide](tui.md).
+
+For CPU preset authoring, custom MMIO devices, traceable dummy mappings, and the machine event
+observer API, see [Extending CPU Presets and MMIO Platforms](../hardware/extending-platforms.md).
+For building and loading Linux images from Buildroot, see [Linux and Buildroot](linux.md).
 
 When the terminal advertises OSC 22 pointer-shape support, the TUI changes the pointer to a
 clickable-hand shape over interactive controls and restores the prior pointer shape when it exits.
@@ -528,22 +564,31 @@ simrv-tune --base-config configs/models/rvcomp.cfg --apply
 
 ---
 
-## 8. RTL Parity Verification
+## 8. Reference Parity Verification
 
-The RTL parity framework (`simrv-parity`) validates that SimRV cycle-accurate pipeline models produce identical cycle counts and execution behavior compared to physical RTL designs.
+SimRV can compare architectural retirement against an ISA reference model and compare modeled
+cycles against cycle-producing implementations or measured hardware traces. These are separate
+checks: architectural references such as Spike establish instruction-level equivalence, while a
+cycle-accurate target or captured trace can establish timing parity for a configured CPU model.
+
+The `simrv-parity` runner currently supplies adapters for the RVComp and CFU Proving Ground RTL
+targets. Its trace comparison and adapter contract can also be reused when adding other
+cycle-producing references; architectural lockstep with Spike is available separately through
+`--spike` and the release gates.
 
 ```bash
-# List available RTL targets
+# List targets supported by the current cycle-parity runner
 simrv-parity --list-targets
 
-# Run parity checks against CFU Proving Ground RVProc
+# Compare cycle traces against CFU Proving Ground RVProc
 simrv-parity cfu-pg --benchmark all
 
-# Run parity checks against RVComp core
+# Compare cycle traces against RVComp
 simrv-parity rvcomp --quick
 ```
 
-For more details on registering new hardware RTL targets, refer to [RTL Parity Verification](../hardware/rtl_parity.md).
+For the adapter contract, parity levels, and guidance for adding another reference target, see
+[Reference Parity Verification](../hardware/rtl_parity.md).
 
 ---
 

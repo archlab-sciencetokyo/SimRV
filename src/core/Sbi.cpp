@@ -500,6 +500,7 @@ auto Sbi::handle_ecall(TrapCause cause) -> bool {
     }
 
     switch (static_cast<ExtId>(ext_id)) {
+        // Retained SBI legacy extension IDs for guest firmware that still uses the v0.1 calls.
         case ExtId::LegacySetTimer:
             return handle_time(0);
         case ExtId::LegacyConsolePutchar: {

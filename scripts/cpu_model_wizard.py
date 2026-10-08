@@ -16,10 +16,10 @@ TEMPLATES = {
         "isa_preset": "imac",
         "pipeline_type": "three-stage",
         "enable_forwarding": False,
-        "mul_latency": 3,
-        "div_latency": 18,
-        "fp_alu_latency": 4,
-        "fp_div_latency": 16,
+        "mul_latency": 2,
+        "div_latency": 17,
+        "fp_alu_latency": 3,
+        "fp_div_latency": 15,
         "branch_mispredict_penalty": 2,
         "cycle_counter_start_delay": 0,
         "csr_flush_penalty": 1,
@@ -54,10 +54,10 @@ TEMPLATES = {
         "isa_preset": "gcbv",
         "pipeline_type": "five-stage",
         "enable_forwarding": True,
-        "mul_latency": 3,
-        "div_latency": 18,
-        "fp_alu_latency": 4,
-        "fp_div_latency": 16,
+        "mul_latency": 2,
+        "div_latency": 17,
+        "fp_alu_latency": 3,
+        "fp_div_latency": 15,
         "branch_mispredict_penalty": 3,
         "cycle_counter_start_delay": 0,
         "csr_flush_penalty": 3,
@@ -92,10 +92,10 @@ TEMPLATES = {
         "isa_preset": "gcbv",
         "pipeline_type": "five-stage",
         "enable_forwarding": True,
-        "mul_latency": 1,
-        "div_latency": 8,
-        "fp_alu_latency": 2,
-        "fp_div_latency": 8,
+        "mul_latency": 0,
+        "div_latency": 7,
+        "fp_alu_latency": 1,
+        "fp_div_latency": 7,
         "branch_mispredict_penalty": 2,
         "cycle_counter_start_delay": 0,
         "csr_flush_penalty": 2,
@@ -132,8 +132,8 @@ TEMPLATES = {
         "enable_forwarding": True,
         "mul_latency": 2,
         "div_latency": 34,
-        "fp_alu_latency": 4,
-        "fp_div_latency": 16,
+        "fp_alu_latency": 3,
+        "fp_div_latency": 15,
         "branch_mispredict_penalty": 4,
         "cycle_counter_start_delay": 0,
         "csr_flush_penalty": 3,
@@ -168,10 +168,10 @@ TEMPLATES = {
         "isa_preset": "im",
         "pipeline_type": "five-stage",
         "enable_forwarding": True,
-        "mul_latency": 3,
-        "div_latency": 18,
-        "fp_alu_latency": 4,
-        "fp_div_latency": 16,
+        "mul_latency": 2,
+        "div_latency": 17,
+        "fp_alu_latency": 3,
+        "fp_div_latency": 15,
         "branch_mispredict_penalty": 3,
         "cycle_counter_start_delay": 2,
         "csr_flush_penalty": 3,
@@ -285,8 +285,8 @@ def run_interactive(base_template: str, name: str) -> tuple[str, dict]:
     print("\n--- Pipeline & Execution Latencies ---")
     cfg["pipeline_type"] = prompt_val("Pipeline type (five-stage, three-stage)", cfg["pipeline_type"])
     cfg["enable_forwarding"] = prompt_val("Enable operand forwarding (true/false)", cfg["enable_forwarding"])
-    cfg["mul_latency"] = prompt_val("Integer MUL latency (cycles)", cfg["mul_latency"])
-    cfg["div_latency"] = prompt_val("Integer DIV latency (cycles)", cfg["div_latency"])
+    cfg["mul_latency"] = prompt_val("Integer MUL additional stall cycles", cfg["mul_latency"])
+    cfg["div_latency"] = prompt_val("Integer DIV additional stall cycles", cfg["div_latency"])
     cfg["branch_mispredict_penalty"] = prompt_val("Branch mispredict penalty (cycles)", cfg["branch_mispredict_penalty"])
     cfg["cycle_counter_start_delay"] = prompt_val("Cycle counter reset startup delay (cycles)", cfg["cycle_counter_start_delay"])
 
@@ -365,8 +365,8 @@ def validate_cfg(path: Path) -> bool:
             if lat_key in cp["pipeline"]:
                 try:
                     val = int(cp["pipeline"][lat_key])
-                    if val < 1:
-                        errors.append(f"[pipeline] {lat_key} must be >= 1 (got {val})")
+                    if val < 0:
+                        errors.append(f"[pipeline] {lat_key} must be >= 0 (got {val})")
                 except ValueError:
                     errors.append(f"[pipeline] {lat_key} must be an integer")
 

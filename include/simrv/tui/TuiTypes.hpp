@@ -166,7 +166,6 @@ enum class TuiFooterAction : uint8_t {
     ManageBreakpoints,
     InspectMem,
     ToggleStudentGuide,
-    ToggleLearn = ToggleStudentGuide,  // Compatibility alias for the former name.
     LoadBinary,
     Quit,
     CycleRegs,

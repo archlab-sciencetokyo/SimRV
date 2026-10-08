@@ -1,21 +1,23 @@
-# SimRV: Dual-Width Explainable RISC-V System Simulator
+<section class="simrv-hero" markdown>
 
-<p align="center">
-  <strong>An explainable, dual-width (RV32 / RV64) RISC-V architectural simulator with an interactive terminal workbench (TUI), cycle-accurate microarchitectural modeling, hardware RTL parity verification, and full-system SMP Linux emulation.</strong>
-</p>
+<p class="simrv-eyebrow">RISC-V simulation, from instruction to system</p>
 
-<p align="center">
+# SimRV
+
+<p class="simrv-hero-copy">Explore RV32 and RV64 systems with fast architectural simulation, cycle-accurate pipelines, custom SoCs, and full-system Linux.</p>
+
+<div class="simrv-hero-actions">
+  <a class="md-button md-button--primary" href="user/install.md">Get started</a>
+  <a class="md-button" href="architecture/overview.md">Explore the architecture</a>
+</div>
+
+</section>
+
+<div class="simrv-badges" aria-label="Project status">
   <a href="https://github.com/archlab-sciencetokyo/SimRV/actions/workflows/c-cpp.yml"><img src="https://github.com/archlab-sciencetokyo/SimRV/actions/workflows/c-cpp.yml/badge.svg?branch=dev" alt="C/C++ CI"/></a>
   <a href="https://github.com/archlab-sciencetokyo/SimRV/actions/workflows/docs.yml"><img src="https://github.com/archlab-sciencetokyo/SimRV/actions/workflows/docs.yml/badge.svg?branch=dev" alt="Docs CI"/></a>
-  <a href="https://archlab-sciencetokyo.github.io/SimRV/stable/"><img src="https://img.shields.io/badge/docs-GitHub_Pages-blue.svg" alt="Documentation"/></a>
   <a href="https://github.com/archlab-sciencetokyo/SimRV/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-MIT-green.svg" alt="License"/></a>
-</p>
-
-!!! success "SimRV 3.0 release line"
-
-    The 3.0 workflow brings the simulator, Linux guest images, and FPGA bring-up artifacts under
-    one conventional boot contract. Start with the [3.0 release guide](user/release-3.0.md) for
-    the supported GUI and headless profiles, separable OpenSBI boot, and qualification commands.
+</div>
 
 ---
 
@@ -105,42 +107,25 @@ SimRV requires a modern C++23 compiler (**Clang 22+** or **GCC 16+**), **CMake 3
 
     ---
 
-    Portable archive, RPM, DEB, source-build, upgrade, and removal instructions.
+    Pick a package, install SimRV, and run your first program.
 
-- :material-book-open-page-variant:{ .lg .middle } **[User Guide](user/index.md)**
-
-    ---
-
-    CLI options, TUI navigation, keybindings, bare-metal programs, and Linux boot options.
-
-- :material-chip:{ .lg .middle } **[System Architecture](architecture/overview.md)**
+- :material-linux:{ .lg .middle } **[Boot a Linux guest](user/linux.md)**
 
     ---
 
-    Detailed design of the execution units, TileLink-C cache coherence, MMU, and scoreboard.
+    Buildroot and Alpine images, firmware handoff, root filesystems, and SMP boot.
 
-- :material-tune-vertical:{ .lg .middle } **[CPU Models & Tuning](hardware/models.md)**
-
-    ---
-
-    Human-editable `.cfg` processor presets, pipeline calibration, and tuning with `simrv-tune`.
-
-- :material-check-decagram:{ .lg .middle } **[RTL Parity Verification](hardware/rtl_parity.md)**
+- :material-memory:{ .lg .middle } **[Extend a CPU or SoC](hardware/extending-platforms.md)**
 
     ---
 
-    Framework for cycle-by-cycle retirement trace comparison against physical Verilog designs.
+    Configure CPU presets, add MMIO devices, or map custom hardware ranges.
 
-- :material-code-braces:{ .lg .middle } **[Developer & Contributing](development/contributing.md)**
+- :material-chart-timeline-variant:{ .lg .middle } **[Validate a model](hardware/rtl_parity.md)**
 
     ---
 
-    Subsystem organization, C++23 standards, branching model, and writing CTest suites.
-
-- :material-rocket-launch:{ .lg .middle } **[SimRV 3.0 Release Guide](user/release-3.0.md)**
-
-    Release-oriented workflows for desktop GUI use, FPGA handoff, reproducible CMake builds, and
-    Linux/OpenSBI artifact validation.
+    Compare architectural or cycle behavior, then tune latency and predictor settings.
 
 </div>
 

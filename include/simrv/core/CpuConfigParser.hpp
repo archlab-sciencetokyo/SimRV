@@ -5,6 +5,7 @@
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <limits>
 #include <optional>
 #include <sstream>
 #include <string>
@@ -298,7 +299,13 @@ inline auto parse_cpu_config_stream(std::istream& stream, simrv::pipeline::CpuMo
         // Section headers: [section_name]
         if (trimmed.front() == '[' && trimmed.back() == ']') {
             const auto sec_name = detail::trim(trimmed.substr(1, trimmed.size() - 2));
-            if (detail::iequals(sec_name, "cpu") || detail::iequals(sec_name, "model")) {
+            if (detail::iequals(sec_name, "platform")) {
+                simrv::log::warn("Deprecated CPU model section [platform]; use [soc]");
+                return false;
+            } else if (detail::iequals(sec_name, "uart")) {
+                simrv::log::warn("Deprecated device section [uart]; use [device.uart]");
+                return false;
+            } else if (detail::iequals(sec_name, "cpu") || detail::iequals(sec_name, "model")) {
                 current_section = Section::Cpu;
             } else if (detail::iequals(sec_name, "pipeline") || detail::iequals(sec_name, "core")) {
                 current_section = Section::Pipeline;
@@ -330,14 +337,13 @@ inline auto parse_cpu_config_stream(std::istream& stream, simrv::pipeline::CpuMo
             } else if (detail::iequals(sec_name, "cfu") ||
                        detail::iequals(sec_name, "custom_unit")) {
                 current_section = Section::Cfu;
-            } else if (detail::iequals(sec_name, "soc") || detail::iequals(sec_name, "platform")) {
+            } else if (detail::iequals(sec_name, "soc")) {
                 current_section = Section::SocMetadata;
             } else if (detail::iequals(sec_name, "memory")) {
                 current_section = Section::MemoryMetadata;
             } else if (detail::iequals(sec_name, "boot")) {
                 current_section = Section::BootMetadata;
-            } else if (detail::iequals(sec_name, "uart") ||
-                       detail::iequals(sec_name, "device.uart")) {
+            } else if (detail::iequals(sec_name, "device.uart")) {
                 current_section = Section::UartMetadata;
             } else {
                 simrv::log::warn("Unknown CPU config section: [{}]", sec_name);
@@ -839,7 +845,13 @@ inline auto parse_soc_config_stream(std::istream& stream, simrv::core::SoCConfig
         if (trimmed.front() == '[' && trimmed.back() == ']') {
             const auto name = detail::trim(trimmed.substr(1, trimmed.size() - 2));
             device = nullptr;
-            if (detail::iequals(name, "soc") || detail::iequals(name, "platform")) {
+            if (detail::iequals(name, "platform")) {
+                simrv::log::warn("Deprecated SoC section [platform]; use [soc]");
+                return false;
+            } else if (detail::iequals(name, "uart")) {
+                simrv::log::warn("Deprecated device section [uart]; use [device.uart]");
+                return false;
+            } else if (detail::iequals(name, "soc")) {
                 section = Section::Soc;
             } else if (detail::iequals(name, "memory")) {
                 section = Section::Memory;
@@ -847,10 +859,49 @@ inline auto parse_soc_config_stream(std::istream& stream, simrv::core::SoCConfig
                 section = Section::Boot;
             } else {
                 auto device_name = name;
-                const bool legacy_uart = device_name == "uart";
                 const bool explicit_device = device_name.starts_with("device.");
                 if (explicit_device) device_name.remove_prefix(7);
-                if ((legacy_uart || explicit_device) && soc_device_kind(device_name)) {
+                if (explicit_device && device_name.starts_with("dummy-mmio.")) {
+                    const auto instance_name = device_name.substr(11);
+                    if (instance_name.empty()) {
+                        section = Section::Global;
+                        continue;
+                    }
+                    section = Section::Device;
+                    const auto existing = std::ranges::find_if(
+                        config.devices, [instance_name](const auto& item) {
+                            return item.kind == SoCDeviceKind::DummyMmio &&
+                                   item.name == instance_name;
+                        });
+                    if (existing == config.devices.end()) {
+                        auto dummy = soc_device_default(SoCDeviceKind::DummyMmio);
+                        dummy.name = std::string(instance_name);
+                        config.devices.push_back(std::move(dummy));
+                        device = &config.devices.back();
+                    } else {
+                        device = &*existing;
+                    }
+                } else if (explicit_device && device_name.starts_with("custom-mmio.")) {
+                    const auto instance_name = device_name.substr(12);
+                    if (instance_name.empty()) {
+                        section = Section::Global;
+                        continue;
+                    }
+                    section = Section::Device;
+                    const auto existing = std::ranges::find_if(
+                        config.devices, [instance_name](const auto& item) {
+                            return item.kind == SoCDeviceKind::CustomMmio &&
+                                   item.name == instance_name;
+                        });
+                    if (existing == config.devices.end()) {
+                        auto custom = soc_device_default(SoCDeviceKind::CustomMmio);
+                        custom.name = std::string(instance_name);
+                        config.devices.push_back(std::move(custom));
+                        device = &config.devices.back();
+                    } else {
+                        device = &*existing;
+                    }
+                } else if (explicit_device && soc_device_kind(device_name)) {
                     const auto kind = soc_device_kind(device_name);
                     section = Section::Device;
                     const auto existing = std::ranges::find_if(
@@ -909,13 +960,41 @@ inline auto parse_soc_config_stream(std::istream& stream, simrv::core::SoCConfig
                     config.tohost = *parsed;
             }
         } else if (section == Section::Device && device != nullptr) {
-            if (const auto parsed = detail::parse_scaled_u64(value)) {
+            if (key.starts_with("region.")) {
+                const auto region_key = key.substr(7);
+                const auto separator = region_key.rfind('.');
+                if (separator == std::string_view::npos) continue;
+                const auto region_name = region_key.substr(0, separator);
+                const auto field = region_key.substr(separator + 1);
+                const auto parsed = detail::parse_scaled_u64(value);
+                if (!parsed || region_name.empty() || (field != "base" && field != "size")) continue;
+                auto region = std::ranges::find_if(
+                    device->regions, [region_name](const auto& item) {
+                        return item.name == region_name;
+                    });
+                if (region == device->regions.end()) {
+                    device->regions.push_back({std::string(region_name), 0, 0});
+                    region = std::prev(device->regions.end());
+                }
+                if (field == "base") region->base = *parsed;
+                if (field == "size") region->size = *parsed;
+            } else if (const auto parsed = detail::parse_scaled_u64(value)) {
                 if (key == "base")
                     device->base = *parsed;
                 else if (key == "size")
                     device->size = *parsed;
-                else if (key == "irq")
+                else if (key == "irq" && *parsed <= std::numeric_limits<uint32_t>::max())
                     device->irq = static_cast<uint32_t>(*parsed);
+                else if (key == "read_value" && *parsed <= std::numeric_limits<uint32_t>::max())
+                    device->read_value = static_cast<uint32_t>(*parsed);
+                else if (key == "mac_address" && *parsed <= 0xffffffffffffULL) {
+                    for (size_t i = 0; i < device->mac_address.size(); ++i) {
+                        const auto shift = static_cast<unsigned>((5 - i) * 8);
+                        device->mac_address[i] = static_cast<uint8_t>(*parsed >> shift);
+                    }
+                }
+            } else if (key == "compatible") {
+                device->compatible = std::string(value);
             } else if (key == "name") {
                 device->name = std::string(value);
             }
@@ -1003,22 +1082,6 @@ inline auto load_cpu_config_string(std::string_view content,
                                    simrv::pipeline::CpuModelConfig& config) -> bool {
     std::istringstream stream{std::string(content)};
     return load_cpu_config_stream(stream, config);
-}
-
-/**
- * @brief Compatibility entry point for callers that only need pipeline timing.
- */
-inline auto load_cpu_config(const std::filesystem::path& path, simrv::pipeline::CpuConfig& config)
-    -> bool {
-    simrv::pipeline::CpuModelConfig model{};
-    model.pipeline = config;
-    if (!load_cpu_config(path, model)) return false;
-    config = model.pipeline;
-    return true;
-}
-
-inline auto load_cpu_config(const std::string& path, simrv::pipeline::CpuConfig& config) -> bool {
-    return load_cpu_config(std::filesystem::path(path), config);
 }
 
 /**

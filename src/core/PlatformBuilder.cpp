@@ -6,6 +6,7 @@
 #include "MachineRuntime.hpp"
 #include "simrv/core/Machine.hpp"
 #include "simrv/core/SoCDeviceRegistry.hpp"
+#include "simrv/device/RingBufferEthernetMmio.hpp"
 #include "simrv/device/mmio/VirtioMmioBlock.hpp"
 #include "simrv/device/mmio/VirtioMmioConsole.hpp"
 #include "simrv/device/mmio/VirtioMmioGpu.hpp"
@@ -28,12 +29,21 @@ void PlatformBuilder::compose(Machine& machine) {
     const auto composition = platform_composition(machine.config.platform_profile);
     const auto& disk_path = machine.config.files.disk_path;
     const auto network_mode = [&]() {
-        using Mode = simrv::device::virtio::NetBackend::Mode;
+        using Mode = simrv::device::NetworkBackend::Mode;
         if (machine.config.network.mode == "tap") return Mode::Tap;
         if (machine.config.network.mode == "socket") return Mode::Socket;
         if (machine.config.network.mode == "none") return Mode::None;
         return Mode::User;
     }();
+
+    if (const auto device =
+            SoCDeviceRegistry::descriptor(machine.config.soc, SoCDeviceKind::RingBufferEthernet)) {
+        machine.runtime_->ring_buffer_ethernet = std::make_unique<simrv::device::RingBufferEthernetMmio>(
+            machine, device->name, device->base, device->size, device->irq,
+            device->find_region("rxbuf")->base, device->find_region("rxbuf")->size,
+            device->find_region("txbuf")->base, device->find_region("txbuf")->size,
+            device->mac_address, network_mode);
+    }
 
     if (composition.pcie) {
         machine.runtime_->pcie = std::make_unique<simrv::device::PcieRootComplex>(

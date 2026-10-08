@@ -25,7 +25,8 @@ inline constexpr unsigned kXLenBits = SIMRV_XLEN;
 inline constexpr unsigned kXLenHexDigits = kXLenBits / 4u;
 }  // namespace simrv::xlen
 
-// Expose fundamental constants for global compatibility
+// Source-compatibility exports for existing unqualified XLEN consumers. New code should use the
+// namespaced constants above when a qualified name is practical.
 using simrv::xlen::kIsXLen64;
 using simrv::xlen::kXLenBits;
 using simrv::xlen::kXLenHexDigits;

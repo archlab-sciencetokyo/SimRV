@@ -349,16 +349,9 @@ constexpr auto cause_write_value(CSRValue value, unsigned xlen) -> CSRValue {
 }
 
 enum class Csr : CSRAddress {
-    // Legacy draft user-interrupt (N) CSR addresses. SimRV does not implement
-    // N; accesses to these numeric addresses raise illegal-instruction traps.
-    Ustatus = 0x000,
-    Uie = 0x004,
-    Utvec = 0x005,
-    Uscratch = 0x040,
+    // Uepc remains named because URET decoding uses its address before the
+    // instruction is rejected when the unsupported N extension is disabled.
     Uepc = 0x041,
-    Ucause = 0x042,
-    Utval = 0x043,
-    Uip = 0x044,
     Fflags = 0x001,
     Frm = 0x002,
     Fcsr = 0x003,
@@ -375,9 +368,6 @@ enum class Csr : CSRAddress {
     Vtype = 0xC21,
     Vlenb = 0xC22,
     Sstatus = 0x100,
-    // Legacy draft N-extension delegation addresses; not implemented.
-    Sedeleg = 0x102,
-    Sideleg = 0x103,
     Sie = 0x104,
     Stvec = 0x105,
     Scounteren = 0x106,

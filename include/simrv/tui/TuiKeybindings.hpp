@@ -34,7 +34,6 @@ enum class KeyAction : uint8_t {
     CycleRegPage,
     CycleToolPage,
     ToggleStudentGuide,
-    ToggleLearn = ToggleStudentGuide,  // Compatibility alias for the former name.
     ActivateStudentGuide,
     ToggleExplain,
     ExportInspection,

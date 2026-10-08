@@ -406,6 +406,50 @@ auto FdtGenerator::generate(const FdtConfig& config) -> std::vector<uint8_t> {
         b.end_node();
     }
 
+    if (device_enabled(simrv::core::SoCDeviceKind::ResetControl)) {
+        const auto device = device_config(simrv::core::SoCDeviceKind::ResetControl);
+        b.begin_node(std::format("reset@{:x}", device.base));
+        b.add_prop_string("compatible", "isct,rvcomp-reset");
+        b.add_prop_u32_array("reg", reg_cells(device.base, device.size));
+        b.end_node();
+    }
+
+    if (device_enabled(simrv::core::SoCDeviceKind::RingBufferEthernet)) {
+        const auto device = device_config(simrv::core::SoCDeviceKind::RingBufferEthernet);
+        b.begin_node(std::format("ethernet@{:x}", device.base));
+        b.add_prop_string("compatible", "isct,rvcomp-ethernet");
+        std::vector<uint32_t> regs;
+        const auto append_region = [&](Address base, Address size) {
+            const auto cells = reg_cells(base, size);
+            regs.insert(regs.end(), cells.begin(), cells.end());
+        };
+        append_region(device.base, device.size);
+        if (const auto* rxbuf = device.find_region("rxbuf")) {
+            append_region(rxbuf->base, rxbuf->size);
+        }
+        if (const auto* txbuf = device.find_region("txbuf")) {
+            append_region(txbuf->base, txbuf->size);
+        }
+        b.add_prop_u32_array("reg", regs);
+        b.add_prop_string_list("reg-names", {"csr", "rxbuf", "txbuf"});
+        b.add_prop_u32("interrupt-parent", plic_phandle);
+        b.add_prop_u32("interrupts", device.irq);
+        b.add_prop_string_list("interrupt-names", {"ethernet"});
+        b.add_prop_bytes("local-mac-address",
+                         std::vector<uint8_t>(device.mac_address.begin(), device.mac_address.end()));
+        b.end_node();
+    }
+
+    for (const auto& device : config.soc.devices) {
+        if (!device.enabled ||
+            (device.kind != simrv::core::SoCDeviceKind::DummyMmio &&
+             device.kind != simrv::core::SoCDeviceKind::CustomMmio)) continue;
+        b.begin_node(std::format("{}@{:x}", device.name, device.base));
+        b.add_prop_string("compatible", device.compatible);
+        b.add_prop_u32_array("reg", reg_cells(device.base, device.size));
+        b.end_node();
+    }
+
     // VirtIO-MMIO v2 nodes
     if (config.enable_mmio) {
         const auto emit_virtio = [&](simrv::core::SoCDeviceKind kind, uint32_t fallback_irq,

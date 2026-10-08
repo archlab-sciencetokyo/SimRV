@@ -38,6 +38,7 @@ struct RuntimeOptions {
     std::string fn_log;
     std::string fn_summary;
     std::string fn_events;
+    std::string fn_uart_transcript;
     std::string fn_archtrace;
     std::string trace_dir = "trace";
     uint8_t trace_level = 3;

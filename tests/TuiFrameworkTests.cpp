@@ -1,7 +1,9 @@
+#include <chrono>
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
+#include <fstream>
 #include <iostream>
 #include <memory>
 #include <set>
@@ -27,6 +29,7 @@
 #include "simrv/tui/modals/AddressModal.hpp"
 #include "simrv/tui/modals/GlossaryModal.hpp"
 #include "simrv/tui/modals/HelpModal.hpp"
+#include "simrv/tui/modals/LoadModal.hpp"
 #include "simrv/tui/modals/ModalComponents.hpp"
 #include "simrv/tui/modals/SettingsModal.hpp"
 #include "simrv/tui/modals/SystemConfigModal.hpp"
@@ -76,9 +79,17 @@ struct TuiTestAccess {
         return tui.column_widths(width);
     }
     static auto layout(const Tui& tui) -> TuiLayout { return tui.layout_; }
+    static void set_layout(Tui& tui, TuiLayout layout) { tui.layout_ = layout; }
     static auto status_bar(const Tui& tui) -> StatusBar* { return tui.status_bar_.get(); }
     static auto handle_modal_key(Tui& tui, uint8_t byte, TuiKey key) -> bool {
         return tui.handle_modal_keyboard_input(byte, key);
+    }
+    static void handle_normal_key(Tui& tui, uint8_t byte, TuiKey key) {
+        tui.handle_normal_keyboard_input(byte, key);
+    }
+    static auto search_active(const Tui& tui) -> bool { return tui.terminal_search_active_; }
+    static auto search_query(const Tui& tui) -> const std::string& {
+        return tui.terminal_search_query_;
     }
     static void inject_input(Tui& tui, std::string_view input) {
         tui.input_size_ = std::min(input.size(), tui.input_bytes_.size());
@@ -116,6 +127,7 @@ struct TuiTestAccess {
         tui.workbench_slots_ = std::move(slots);
     }
 };
+
 }  // namespace simrv::tui
 
 namespace {
@@ -136,6 +148,24 @@ void expect(bool condition, const std::string& message) {
         std::cerr << "FAIL: " << message << '\n';
         ++failures;
     }
+}
+
+void test_uart_search_ctrl_f_and_escape_cancel() {
+    simrv::core::Machine machine;
+    simrv::tui::Tui tui(machine);
+    simrv::tui::TuiTestAccess::init_panes(tui, machine);
+    simrv::tui::TuiTestAccess::set_workbench_slots(tui, {{simrv::tui::TuiRegPage::CONSOLE, 0}});
+
+    simrv::tui::TuiTestAccess::handle_normal_key(tui, 0x06, simrv::tui::TuiKey::CtrlF);
+    expect(simrv::tui::TuiTestAccess::search_active(tui), "Ctrl-F starts UART scrollback search");
+    simrv::tui::TuiTestAccess::handle_normal_key(tui, 'b', simrv::tui::TuiKey::b);
+    expect(simrv::tui::TuiTestAccess::search_query(tui) == "b", "UART search records typed query");
+
+    // Exercise the same Escape parser path used by the terminal input loop.
+    simrv::tui::TuiTestAccess::consume_control_seq(tui, "\033");
+    expect(!simrv::tui::TuiTestAccess::search_active(tui), "Escape cancels active UART search");
+    expect(simrv::tui::TuiTestAccess::search_query(tui).empty(),
+           "cancelling UART search clears its query");
 }
 
 auto strip_ansi(const std::string& rendered) -> std::string {
@@ -189,6 +219,64 @@ void test_terminal_controls() {
     terminal.write_string("\033[c\033[18t");
     expect(response == "\033[?1;2c\033[8;3;8t",
            "terminal capability and window-size queries receive deterministic replies");
+}
+
+void test_tui_preferences_round_trip() {
+    using namespace simrv::tui;
+    const auto root = std::filesystem::temp_directory_path() / "simrv-tui-preferences-test";
+    const auto path = root / "tui.conf";
+    std::error_code ignored;
+    std::filesystem::remove_all(root, ignored);
+
+    TuiPreferences expected;
+    expected.layout = TuiLayout::ThreeColumn;
+    expected.slots = {{TuiRegPage::TRACE, 3}, {TuiRegPage::BUS, 1}, {TuiRegPage::CONSOLE, 0}};
+    expected.focused_slot = 1;
+    expected.inspector_width = 42;
+    expected.column_widths = {42, 35, 28, -1};
+    expected.theme = TuiThemeStyle::SakuraPastel;
+    expected.high_contrast = true;
+    expected.class_mode = true;
+    expected.student_guide = true;
+    expected.target_fps = 45;
+    expected.mouse_sensitivity = 1.75;
+    expect(expected.save(path), "TUI preferences save successfully");
+
+    TuiPreferences actual;
+    expect(actual.load(path), "TUI preferences load successfully");
+    expect(actual.layout == expected.layout && actual.slots.size() == expected.slots.size() &&
+               actual.slots[0].page == expected.slots[0].page &&
+               actual.slots[0].scroll_offset == expected.slots[0].scroll_offset &&
+               actual.focused_slot == expected.focused_slot &&
+               actual.column_widths == expected.column_widths && actual.theme == expected.theme &&
+               actual.high_contrast && actual.class_mode && actual.student_guide &&
+               actual.target_fps == expected.target_fps &&
+               actual.mouse_sensitivity == expected.mouse_sensitivity,
+           "TUI layout and presentation options survive a save and reload");
+    std::filesystem::remove_all(root, ignored);
+
+    const auto tui_path = root / "live-tui.conf";
+    (void)setenv("SIMRV_TUI_PREFERENCES", tui_path.c_str(), 1);
+    {
+        simrv::core::Machine machine;
+        Tui tui(machine);
+        TuiTestAccess::set_layout(tui, TuiLayout::ThreeColumn);
+        TuiTestAccess::set_workbench_slots(
+            tui, {{TuiRegPage::TRACE, 2}, {TuiRegPage::BUS, 1}, {TuiRegPage::CONSOLE, 0}});
+        TuiTestAccess::set_focused_slot(tui, 1);
+        tui.save_preferences();
+    }
+    {
+        simrv::core::Machine machine;
+        Tui tui(machine);
+        expect(TuiTestAccess::layout(tui) == TuiLayout::ThreeColumn &&
+                   tui.get_workbench_slots().size() == 3 && tui.focused_slot() == 1 &&
+                   tui.get_workbench_slots()[0].page == TuiRegPage::TRACE &&
+                   tui.get_workbench_slots()[0].scroll_offset == 2,
+               "a new TUI session restores its saved workbench layout");
+    }
+    (void)setenv("SIMRV_TUI_PREFERENCES", "off", 1);
+    std::filesystem::remove_all(root, ignored);
 }
 
 void test_terminal_scrollback_and_selection() {
@@ -675,6 +763,73 @@ void test_classroom_cli_defaults() {
     }
     expect(!simrv::util::parse_command_line(invalid_args).has_value(),
            "mission rejects a non-TUI classroom invocation");
+}
+
+void test_load_modal_path_completion() {
+    namespace fs = std::filesystem;
+    const auto root = fs::temp_directory_path() /
+                      ("simrv-path-completion-" +
+                       std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+    fs::create_directories(root / "subdir");
+    std::ofstream(root / "program.elf").put('x');
+
+    auto file_prefix = (root / "pro").string();
+    expect(simrv::tui::modals::LoadModal::complete_path(file_prefix),
+           "load modal completes a unique file prefix");
+    expect(file_prefix == (root / "program.elf").string(),
+           "load modal inserts the matching file path");
+
+    auto directory_prefix = (root / "sub").string();
+    expect(simrv::tui::modals::LoadModal::complete_path(directory_prefix),
+           "load modal completes a unique directory prefix");
+    expect(directory_prefix == (root / "subdir").string() + fs::path::preferred_separator,
+           "load modal appends a separator to completed directories");
+
+    simrv::core::Machine machine;
+    simrv::tui::TuiModal modal(machine);
+    modal.open(simrv::tui::ModalType::LoadBinary, nullptr, 0);
+    modal.set_input((root / "program").string());
+    modal.open_file_picker();
+    expect(modal.file_picker_active(), "file picker opens from a load modal");
+    modal.file_picker_input(13, simrv::tui::TuiKey::Enter);
+    expect(!modal.file_picker_active() && modal.get_input() == (root / "program.elf").string(),
+           "file picker selects a matching file into the load path");
+
+    simrv::core::Machine key_machine;
+    simrv::tui::Tui key_tui(key_machine);
+    simrv::tui::TuiTestAccess::modal(key_tui).open(simrv::tui::ModalType::LoadBinary, nullptr, 0);
+    simrv::tui::TuiTestAccess::handle_modal_key(key_tui, 15, simrv::tui::TuiKey::CtrlO);
+    expect(simrv::tui::TuiTestAccess::modal(key_tui).file_picker_active(),
+           "Ctrl-O opens the load modal file browser");
+    expect(simrv::tui::TuiTestAccess::consume_control_seq(key_tui, "\x1b") &&
+               simrv::tui::TuiTestAccess::modal(key_tui).get_type() ==
+                   simrv::tui::ModalType::LoadBinary,
+           "Escape returns from the file browser to its load dialog");
+
+    modal.open(simrv::tui::ModalType::LoadBinary, nullptr, 0);
+    modal.set_input((root / "subdir").string() + fs::path::preferred_separator);
+    modal.open_file_picker();
+    modal.file_picker_input(13, simrv::tui::TuiKey::Enter);  // Select the leading ".." entry.
+    modal.file_picker_input('p', simrv::tui::TuiKey::p);
+    modal.file_picker_input('r', simrv::tui::TuiKey::r);
+    modal.file_picker_input('o', simrv::tui::TuiKey::o);
+    modal.file_picker_input(13, simrv::tui::TuiKey::Enter);
+    expect(modal.get_input() == (root / "program.elf").string(),
+           "the leading .. entry navigates to the parent directory");
+
+    modal.open(simrv::tui::ModalType::LoadBinary, nullptr, 0);
+    modal.toggle_load_mode();
+    modal.toggle_load_mode();
+    modal.set_input(root.string());
+    modal.open_file_picker();
+    modal.move_file_picker_cursor(1);  // Skip the "use this directory" entry to enter root.
+    modal.file_picker_input(13, simrv::tui::TuiKey::Enter);
+    modal.file_picker_input(13, simrv::tui::TuiKey::Enter);  // Select the current folder.
+    expect(!modal.file_picker_active() && modal.get_input() == root.string(),
+           "Buildroot mode file picker can select a directory as the image bundle");
+
+    std::error_code ignored;
+    fs::remove_all(root, ignored);
 }
 
 void test_control_flow_calls_mission() {
@@ -2447,6 +2602,12 @@ void test_multi_column_panel_management_and_modal_usability() {
     for (const auto& l : overlay_lines) rendered_overlay += l + '\n';
     expect(rendered_overlay.find("▼") != std::string::npos,
            "bottom border displays overflow indicator when help exceeds viewport");
+    const auto below_badge = rendered_overlay.find("more below");
+    const auto below_row_end = rendered_overlay.find('\n', below_badge);
+    const auto below_bg = rendered_overlay.find(simrv::tui::g_theme_modal_bg, below_badge);
+    expect(below_badge != std::string::npos && below_bg != std::string::npos &&
+               below_bg < below_row_end,
+        "modal background is restored after the bottom overflow indicator");
 
     // Test wheel down on modal
     modal.handle_wheel(1);
@@ -2456,6 +2617,12 @@ void test_multi_column_panel_management_and_modal_usability() {
     for (const auto& l : scrolled_lines) scrolled_overlay += l + '\n';
     expect(scrolled_overlay.find("▲ more") != std::string::npos,
            "top border displays ▲ more indicator after scrolling down");
+    const auto above_badge = scrolled_overlay.find("▲ more");
+    const auto above_row_end = scrolled_overlay.find('\n', above_badge);
+    const auto above_bg = scrolled_overlay.find(simrv::tui::g_theme_modal_bg, above_badge);
+    expect(above_badge != std::string::npos && above_bg != std::string::npos &&
+               above_bg < above_row_end,
+        "modal background is restored after the top overflow indicator");
 
     // Test keyboard scrolling in help modal: j / k
     simrv::tui::TuiTestAccess::handle_modal_key(tui, 'j', simrv::tui::TuiKey::j);
@@ -2759,6 +2926,9 @@ void test_concurrent_terminal_and_sixel_display() {
 }  // namespace
 
 int main() {
+    (void)setenv("SIMRV_TUI_PREFERENCES", "off", 1);
+    test_uart_search_ctrl_f_and_escape_cancel();
+    test_tui_preferences_round_trip();
     test_terminal_controls();
     test_terminal_scrollback_and_selection();
     test_utf8_and_theme_helpers();
@@ -2767,6 +2937,7 @@ int main() {
     test_mirrored_modal_arrows();
     test_page_guidance();
     test_classroom_cli_defaults();
+    test_load_modal_path_completion();
     test_control_flow_calls_mission();
     test_tui_running_state_synchronization();
     test_inspection_report();

@@ -8,12 +8,14 @@
 
 #include <chrono>
 #include <csignal>
+#include <cstdio>
 #include <cstdlib>
 #include <ctime>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <print>
 #include <span>
@@ -40,6 +42,29 @@
 using namespace simrv::util;
 
 namespace {
+
+class UartTranscriptSink final : public simrv::core::IConsoleSink {
+   public:
+    UartTranscriptSink(const std::string& path,
+                       std::shared_ptr<simrv::core::IConsoleSink> downstream)
+        : stream_(path, std::ios::binary | std::ios::trunc), downstream_(std::move(downstream)) {}
+
+    [[nodiscard]] auto is_open() const -> bool { return stream_.is_open(); }
+
+    void handle_char_write(char ch) override {
+        if (downstream_) {
+            downstream_->handle_char_write(ch);
+        } else {
+            std::print("{}", ch);
+            std::fflush(stdout);
+        }
+        stream_.put(ch);
+    }
+
+   private:
+    std::ofstream stream_;
+    std::shared_ptr<simrv::core::IConsoleSink> downstream_;
+};
 
 auto terminal_style(int fd, std::string_view code) -> std::string_view {
     return simrv::util::terminal_color_enabled(fd) ? code : std::string_view{};
@@ -77,6 +102,61 @@ auto lifecycle_timestamp() -> std::string {
     return std::format("{:04}-{:02}-{:02}T{:02}:{:02}:{:02}.{:03}Z", utc.tm_year + 1900,
                        utc.tm_mon + 1, utc.tm_mday, utc.tm_hour, utc.tm_min, utc.tm_sec,
                        millis.count());
+}
+
+auto event_name(simrv::core::MachineEventKind kind) -> std::string_view {
+    switch (kind) {
+        case simrv::core::MachineEventKind::InterruptAsserted:
+            return "interrupt_asserted";
+        case simrv::core::MachineEventKind::InterruptDeasserted:
+            return "interrupt_deasserted";
+        case simrv::core::MachineEventKind::DmaStarted:
+            return "dma_started";
+        case simrv::core::MachineEventKind::DmaCompleted:
+            return "dma_completed";
+        case simrv::core::MachineEventKind::DmaCancelled:
+            return "dma_cancelled";
+    }
+    return "unknown";
+}
+
+auto json_escape(std::string_view value) -> std::string {
+    std::string escaped;
+    escaped.reserve(value.size());
+    for (const unsigned char ch : value) {
+        if (ch == '"' || ch == '\\') {
+            escaped.push_back('\\');
+            escaped.push_back(static_cast<char>(ch));
+        } else if (ch < 0x20) {
+            escaped += std::format("\\u{:04x}", static_cast<unsigned>(ch));
+        } else {
+            escaped.push_back(static_cast<char>(ch));
+        }
+    }
+    return escaped;
+}
+
+auto write_machine_event(std::ofstream& out, const simrv::core::MachineEvent& event) -> void {
+    if (!out) return;
+    out << "{\"schema_version\":2,\"event\":\"" << event_name(event.kind) << "\",\"timestamp\":\""
+        << lifecycle_timestamp() << "\",\"cycle\":" << event.cycle;
+    if (event.hart != UINT32_MAX) out << ",\"hart\":" << event.hart;
+    out << ",\"component\":\"" << json_escape(event.component) << "\",\"payload\":{";
+    if (event.kind == simrv::core::MachineEventKind::InterruptAsserted ||
+        event.kind == simrv::core::MachineEventKind::InterruptDeasserted) {
+        if (event.hart == UINT32_MAX) {
+            out << "\"source_id\":" << event.interrupt_source;
+        } else {
+            out << "\"cause\":" << event.interrupt_cause;
+        }
+    } else {
+        out << "\"transfer_id\":" << event.transfer_id << ",\"byte_count\":" << event.byte_count
+            << ",\"request_cycle\":" << event.request_cycle
+            << ",\"start_cycle\":" << event.start_cycle
+            << ",\"completion_cycle\":" << event.completion_cycle;
+    }
+    out << "}}\n";
+    out.flush();
 }
 
 auto privilege_mode(simrv::PrivilegeLevel privilege) -> std::string_view {
@@ -200,6 +280,7 @@ auto main(int argc, char* argv[]) -> int {  // NOLINT(bugprone-exception-escape)
     std::shared_ptr<simrv::net::SimRvServer> ipc_server;
     std::ofstream event_stream;
     bool event_stream_opened = false;
+    std::mutex event_stream_mutex;
     bool keep_running = true;
     int final_exit_code = 0;
     while (keep_running) {
@@ -407,9 +488,15 @@ auto main(int argc, char* argv[]) -> int {  // NOLINT(bugprone-exception-escape)
 
         if (event_stream) {
             (void)sim_machine->add_lifecycle_observer(
-                [&event_stream,
+                [&event_stream, &event_stream_mutex,
                  machine = sim_machine.get()](const simrv::core::LifecycleEvent& event) {
+                    const std::scoped_lock lock(event_stream_mutex);
                     write_lifecycle_event(event_stream, *machine, event.kind, event.exit_status);
+                });
+            (void)sim_machine->add_event_observer(
+                [&event_stream, &event_stream_mutex](const simrv::core::MachineEvent& event) {
+                    const std::scoped_lock lock(event_stream_mutex);
+                    write_machine_event(event_stream, event);
                 });
         }
 
@@ -456,6 +543,18 @@ auto main(int argc, char* argv[]) -> int {  // NOLINT(bugprone-exception-escape)
                 ipc_server->unbind();
                 return 1;
             }
+        }
+
+        std::shared_ptr<UartTranscriptSink> uart_transcript;
+        if (!parsed->options.fn_uart_transcript.empty()) {
+            uart_transcript = std::make_shared<UartTranscriptSink>(
+                parsed->options.fn_uart_transcript, sim_machine->console_sink());
+            if (!uart_transcript->is_open()) {
+                simrv::log::error("Cannot open UART transcript {}",
+                                  parsed->options.fn_uart_transcript);
+                return 1;
+            }
+            sim_machine->set_console_sink(uart_transcript);
         }
 
         // Change terminal attributes only when this process owns the foreground terminal.

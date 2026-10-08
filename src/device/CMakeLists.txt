@@ -6,6 +6,9 @@ simrv_add_component(simrv-platform
   Rtc.cpp
   Uart.cpp
   Power.cpp
+  ResetControlMmio.cpp
+  RingBufferEthernetMmio.cpp
+  DummyMmio.cpp
   DmaController.cpp
   pci/PciDevice.cpp
   pci/PcieRootComplex.cpp

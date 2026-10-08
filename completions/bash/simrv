@@ -2,7 +2,7 @@ _simrv() {
     local cur prev opts file_opts dir_opts
     cur="${COMP_WORDS[COMP_CWORD]}"
     prev="${COMP_WORDS[COMP_CWORD-1]}"
-    opts="-m --image --memory --pc --start-pc -b --baremetal --os -D --disk --rootfs -f --fdt --dtb -j --harts --smp --smp-quantum --smp-multithreaded --dram-size --ram-size --isa --vlen --soc --platform --dump-soc-manifest --net -s -e --steps --timer --mode --pipeline --no-forwarding --bpred --bht-size --btb-size --ras-size --cpu-config --cpu-preset --dump-cpu-model --scaffold-cpu-model --validate-cpu-config --cfu-plugin --log-level --log-format -q --quiet -v --verbose --log-file --trace-dir --trap-log --arch-trace --trace-level --trace-register-writes --trace-events --trace-function --trace-device --trace-hart --trace-after-cycle --trace-before-cycle --trace-pc-range --trace-pc-period --trace --trace-range --trace-bpred --instmix --tui --cli --class --mission --high-contrast --inspection-output --summary --events --save-checkpoint --load-checkpoint --checkpoint-every --checkpoint-dir --tohost-addr --explain-inst --gdb --gdb-port --lockstep --spike-bin --spike-elf --version --isa-info --doctor --license -h --help"
+    opts="-m --image --memory --pc --start-pc -b --baremetal --os -D --disk --rootfs -f --fdt --dtb -j --harts --smp --smp-quantum --smp-multithreaded --dram-size --ram-size --isa --vlen --soc --dump-soc-manifest --net -s -e --steps --timer --mode --pipeline --no-forwarding --bpred --bht-size --btb-size --ras-size --cpu-config --cpu-preset --dump-cpu-model --scaffold-cpu-model --validate-cpu-config --cfu-plugin --log-level --log-format -q --quiet -v --verbose --log-file --trace-dir --trap-log --arch-trace --trace-level --trace-register-writes --trace-events --trace-function --trace-device --trace-hart --trace-after-cycle --trace-before-cycle --trace-pc-range --trace-pc-period --trace --trace-range --trace-bpred --instmix --tui --cli --class --mission --high-contrast --inspection-output --summary --events --save-checkpoint --load-checkpoint --checkpoint-every --checkpoint-dir --tohost-addr --explain-inst --gdb --gdb-port --lockstep --spike-bin --spike-elf --version --isa-info --doctor --license -h --help"
     file_opts="-m --image --memory -D --disk --rootfs -f --fdt --dtb --cpu-config --dump-cpu-model --scaffold-cpu-model --validate-cpu-config --cfu-plugin --log-file --trap-log --arch-trace --mission --inspection-output --summary --events --save-checkpoint --load-checkpoint --spike-bin --spike-elf"
     dir_opts="--trace-dir --checkpoint-dir"
 
@@ -11,7 +11,7 @@ _simrv() {
         --pipeline) mapfile -t COMPREPLY < <(compgen -W "3stage 5stage" -- "$cur"); return ;;
         --bpred) mapfile -t COMPREPLY < <(compgen -W "none static bimodal gshare tournament" -- "$cur"); return ;;
         --net) mapfile -t COMPREPLY < <(compgen -W "user tap socket none" -- "$cur"); return ;;
-        --soc|--platform) mapfile -t COMPREPLY < <(compgen -W "virt-pcie virt-mmio rvcomp" -- "$cur"); return ;;
+        --soc) mapfile -t COMPREPLY < <(compgen -W "virt-pcie virt-mmio rvcomp" -- "$cur"); return ;;
         --isa) mapfile -t COMPREPLY < <(compgen -W "rv32i rv32imac rv32gc rv64i rv64imac rv64gc" -- "$cur"); return ;;
         *)
             if [[ " $file_opts " == *" $prev "* ]]; then

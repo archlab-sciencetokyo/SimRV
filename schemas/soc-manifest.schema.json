@@ -65,6 +65,22 @@
           "base": { "type": "integer", "minimum": 0 },
           "size": { "type": "integer", "minimum": 0 },
           "irq": { "type": "integer", "minimum": 0 },
+          "compatible": { "type": "string" },
+          "read_value": { "type": "integer", "minimum": 0, "maximum": 4294967295 },
+          "mac_address": { "type": "string", "pattern": "^[0-9a-fA-F]{2}(:[0-9a-fA-F]{2}){5}$" },
+          "regions": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["name", "base", "size"],
+              "properties": {
+                "name": { "type": "string" },
+                "base": { "type": "integer", "minimum": 0 },
+                "size": { "type": "integer", "minimum": 0 }
+              },
+              "additionalProperties": false
+            }
+          },
           "enabled": { "type": "boolean" }
         },
         "additionalProperties": false

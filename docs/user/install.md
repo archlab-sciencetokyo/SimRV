@@ -64,6 +64,11 @@ same command when needed. Upgrade from a newer bundle or remove the packages wit
 
 Native packages are qualified in release CI on the following x86-64 distributions:
 
+!!! info "Choose an install format"
+    Use the RPM or DEB bundle for OS-managed installation and removal. Choose the static TGZ for
+    older distributions, containers, or servers where you want to avoid host C++ runtime
+    dependencies.
+
 | Package | Tested distributions | Notes |
 | --- | --- | --- |
 | RPM | Fedora 44 (the release-build baseline) | Install with `dnf`; older RPM distributions should use the static TGZ unless their glibc/libstdc++ ABI is newer enough. |

@@ -16,7 +16,6 @@ _arguments -s \
   '--bpred[Select branch predictor]:predictor:(none static bimodal gshare tournament)' \
   '--net[Select network backend]:backend:(user tap socket none)' \
   '--soc[Select SoC preset]:preset:(virt-pcie virt-mmio rvcomp)' \
-  '--platform[Select SoC preset]:preset:(virt-pcie virt-mmio rvcomp)' \
   '--cpu-config[Load a CPU model]:file:_files' \
   '--cpu-preset[Select CPU model]:preset:(tiny balanced performance)' \
   '--trace-dir[Set trace output directory]:directory:_directories' \

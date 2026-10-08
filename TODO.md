@@ -1,28 +1,20 @@
 # SimRV 3.0.0 release-candidate handoff
 
-Branch: `release/3.0.0-rc.7`
+Branch: `release/3.0.0-rc.8`
 Target: `dev`
 
-## Candidate scope for v3.0.0-rc.7
+## Candidate scope for v3.0.0-rc.8
 
-- Document architectural checkpoint completeness and GDB reconnect semantics. Checkpoints restore
-  guest architectural state and RAM, but do not preserve debugger sessions, breakpoints, or RSP
-  negotiation state.
-- Add opt-in retirement-time FP/vector register-write events to `registers.jsonl`, preserving
-  architectural register indices and raw bits with instruction and vector/FP context. Retirement
-  records remain compatible.
-- Rework terminal presentation: avoid raw mode unless CLI owns the foreground terminal; respect
-  standard color environment settings; keep TUI startup/shutdown quiet while surfacing errors; add
-  capability-gated OSC 22 pointer affordances over clickable TUI controls; align and wrap CLI help,
-  standardize parser diagnostics, and install Bash, Zsh, and Fish shell completions with the runtime
-  component.
+- Remove deprecated CLI/config section aliases and unused compatibility wrappers.
+- Simplify internal code and improve instruction-fast performance based on measured profiles.
+- Keep performance evidence non-blocking; preserve guest-visible architectural behavior.
 
-The candidate feature changes are prepared on the release branch. Before publication:
+Before publication:
 
 1. Run RV64 and RV32 builds and gate suites; run hosted-RV32 on the RV64 build.
 2. Validate JSON schemas, release metadata, packages, and generated artifact names against the
    release workflow.
-3. Create the RC.7 PR targeting `dev`, and merge only after required CI is green.
+3. Create the RC.8 PR targeting `dev`, and merge only after required CI is green.
 4. Tag the merged `dev` commit and publish the GitHub prerelease only after release-binaries CI
    completes and package assets are validated.
 

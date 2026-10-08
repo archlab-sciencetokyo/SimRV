@@ -11,15 +11,9 @@
 
 namespace simrv::mmio {
 
-// Real-time clock address
-inline constexpr Address kRtcBaseAddress = static_cast<Address>(0x70000000u);
-inline constexpr Address kRtcSize = static_cast<Address>(0x00001000u);
-
-// Interrupt controller addresses (PLIC / CLINT legacy)
+// Historical interrupt-controller address map used by the standalone devices.
 inline constexpr Address kPlicBaseAddress = static_cast<Address>(0x50000000u);
 inline constexpr Address kPlicSize = static_cast<Address>(0x04000000u);
-inline constexpr Address kPlicHartBase = static_cast<Address>(0x00200000u);
-inline constexpr Address kPlicHartSize = static_cast<Address>(0x00001000u);
 inline constexpr Address kClintBaseAddress = static_cast<Address>(0x60000000u);
 inline constexpr Address kClintSize = static_cast<Address>(0x000c0000u);
 
@@ -54,7 +48,6 @@ inline constexpr Address kDmaControllerBaseAddress = static_cast<Address>(0x1000
 inline constexpr Address kDmaControllerSize = static_cast<Address>(0x00001000u);
 inline constexpr uint32_t kDmaControllerIrq = 12;
 
-inline constexpr Address kTohostAddress = static_cast<Address>(0x40008000u);
 inline constexpr Address kUartBaseAddress = static_cast<Address>(0x10000000u);
 inline constexpr Address kUartSize = static_cast<Address>(0x00000100u);
 

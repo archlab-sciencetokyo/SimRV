@@ -5,11 +5,14 @@
 #pragma once
 
 #include <algorithm>
+#include <array>
+#include <bit>
 #include <cstdint>
 #include <expected>
 #include <optional>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 #include "simrv/xlen/Types.hpp"
@@ -34,6 +37,10 @@ enum class SoCDeviceKind : uint8_t {
     VirtioMmioSound,
     VirtioMmioNet,
     DmaController,
+    ResetControl,
+    RingBufferEthernet,
+    DummyMmio,
+    CustomMmio,
 };
 
 [[nodiscard]] inline auto soc_device_kind_name(SoCDeviceKind kind) -> std::string_view {
@@ -72,9 +79,23 @@ enum class SoCDeviceKind : uint8_t {
             return "virtio-net";
         case SoCDeviceKind::DmaController:
             return "dma";
+        case SoCDeviceKind::ResetControl:
+            return "reset-control";
+        case SoCDeviceKind::RingBufferEthernet:
+            return "ring-buffer-ethernet";
+        case SoCDeviceKind::DummyMmio:
+            return "dummy-mmio";
+        case SoCDeviceKind::CustomMmio:
+            return "custom-mmio";
     }
     return "unknown";
 }
+
+struct SoCDeviceRegion {
+    std::string name;
+    Address base = 0;
+    Address size = 0;
+};
 
 struct SoCDeviceConfig {
     SoCDeviceKind kind{};
@@ -83,6 +104,33 @@ struct SoCDeviceConfig {
     Address size = 0x1000;
     uint32_t irq = 0;
     bool enabled = true;
+    std::vector<SoCDeviceRegion> regions;
+    std::string compatible;
+    uint32_t read_value = 0;
+    std::array<uint8_t, 6> mac_address{0x52, 0x54, 0x00, 0x12, 0x34, 0x56};
+
+    SoCDeviceConfig() = default;
+    SoCDeviceConfig(SoCDeviceKind device_kind, std::string device_name, Address device_base,
+                    Address device_size = 0x1000, uint32_t device_irq = 0,
+                    bool device_enabled = true, std::vector<SoCDeviceRegion> device_regions = {},
+                    std::string device_compatible = {}, uint32_t device_read_value = 0,
+                    std::array<uint8_t, 6> device_mac = {0x52, 0x54, 0x00, 0x12, 0x34, 0x56})
+        : kind(device_kind),
+          name(std::move(device_name)),
+          base(device_base),
+          size(device_size),
+          irq(device_irq),
+          enabled(device_enabled),
+          regions(std::move(device_regions)),
+          compatible(std::move(device_compatible)),
+          read_value(device_read_value),
+          mac_address(device_mac) {}
+
+    [[nodiscard]] auto find_region(std::string_view region_name) const -> const SoCDeviceRegion* {
+        const auto it = std::ranges::find_if(
+            regions, [region_name](const auto& region) { return region.name == region_name; });
+        return it == regions.end() ? nullptr : &*it;
+    }
 };
 
 [[nodiscard]] inline auto soc_device_kind(std::string_view name) -> std::optional<SoCDeviceKind> {
@@ -103,6 +151,10 @@ struct SoCDeviceConfig {
     if (name == "virtio-sound" || name == "sound") return SoCDeviceKind::VirtioMmioSound;
     if (name == "virtio-net" || name == "net") return SoCDeviceKind::VirtioMmioNet;
     if (name == "dma" || name == "dma-controller") return SoCDeviceKind::DmaController;
+    if (name == "reset-control") return SoCDeviceKind::ResetControl;
+    if (name == "ring-buffer-ethernet") return SoCDeviceKind::RingBufferEthernet;
+    if (name == "dummy-mmio") return SoCDeviceKind::DummyMmio;
+    if (name == "custom-mmio") return SoCDeviceKind::CustomMmio;
     return std::nullopt;
 }
 
@@ -142,6 +194,23 @@ struct SoCDeviceConfig {
             return {kind, "net0", 0x10007000, 0x1000, 8};
         case SoCDeviceKind::DmaController:
             return {kind, "dma0", 0x10009000, 0x1000, 12};
+        case SoCDeviceKind::ResetControl:
+            return {kind, "reset", 0x10000100, 4, 0};
+        case SoCDeviceKind::RingBufferEthernet:
+            return {kind,
+                    "ethernet",
+                    0x14000000,
+                    0x4000,
+                    2,
+                    true,
+                    {{"rxbuf", 0x18000000, 0x4000}, {"txbuf", 0x1c000000, 0x2000}},
+                    {},
+                    0,
+                    {0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff}};
+        case SoCDeviceKind::DummyMmio:
+            return {kind, "dummy", 0, 4, 0, true, {}, "simrv,dummy-mmio", 0};
+        case SoCDeviceKind::CustomMmio:
+            return {kind, "custom", 0, 0x1000, 0, true, {}, {}, 0};
     }
     return {};
 }
@@ -204,7 +273,8 @@ struct SoCConfig {
                 .dram_size = std::nullopt,
                 .reset_pc = std::nullopt,
                 .tohost = std::nullopt,
-                .devices = {}};
+                .devices = {soc_device_default(SoCDeviceKind::ResetControl),
+                            soc_device_default(SoCDeviceKind::RingBufferEthernet)}};
     }
 
     [[nodiscard]] static auto preset(std::string_view preset_name) -> std::optional<SoCConfig> {
@@ -221,21 +291,66 @@ struct SoCConfig {
     }
 
     [[nodiscard]] auto validate() const -> std::expected<void, std::string> {
+        struct Region {
+            Address base;
+            Address size;
+            std::string_view name;
+        };
+        std::vector<Region> regions;
+        std::vector<std::string_view> names;
         for (size_t i = 0; i < devices.size(); ++i) {
             const auto& device = devices[i];
             if (!device.enabled) continue;
+            if (device.name.empty() ||
+                std::ranges::find(names, std::string_view(device.name)) != names.end()) {
+                return std::unexpected("Enabled SoC devices must have unique, non-empty names");
+            }
+            names.push_back(device.name);
             if (device.size == 0 || device.base > ~Address{0} - device.size) {
                 return std::unexpected("SoC device has an invalid address range at index " +
                                        std::to_string(i));
             }
-            const Address end = device.base + device.size;
+            if ((device.kind == SoCDeviceKind::ResetControl && device.size != 4) ||
+                (device.kind == SoCDeviceKind::RingBufferEthernet && device.size < 28)) {
+                return std::unexpected("Platform extension has an unsupported MMIO window size");
+            }
+            regions.push_back({device.base, device.size, device.name});
+            if (device.kind == SoCDeviceKind::DummyMmio && device.compatible.empty()) {
+                return std::unexpected("Dummy MMIO device requires a compatible string");
+            }
+            if (device.kind == SoCDeviceKind::DummyMmio && device.irq != 0) {
+                return std::unexpected("Dummy MMIO devices do not generate interrupts");
+            }
+            if (device.kind == SoCDeviceKind::CustomMmio &&
+                (device.compatible.empty() || device.irq != 0)) {
+                return std::unexpected("Custom MMIO devices require a compatible string and irq=0");
+            }
+            if (device.kind == SoCDeviceKind::RingBufferEthernet) {
+                const auto* rx = device.find_region("rxbuf");
+                const auto* tx = device.find_region("txbuf");
+                if (rx == nullptr || tx == nullptr || rx->size < 2048 || tx->size < 2048 ||
+                    !std::has_single_bit(rx->size) || !std::has_single_bit(tx->size) ||
+                    rx->size > 64 * 1024 * 1024 || tx->size > 64 * 1024 * 1024) {
+                    return std::unexpected("Ring-buffer Ethernet requires power-of-two RX/TX regions");
+                }
+            }
+            for (const auto& extra : device.regions) {
+                if (extra.size == 0 || extra.base > ~Address{0} - extra.size) {
+                    return std::unexpected("SoC device has an invalid auxiliary region: '" +
+                                           extra.name + "'");
+                }
+                regions.push_back({extra.base, extra.size, extra.name});
+            }
+        }
+        for (size_t i = 0; i < regions.size(); ++i) {
             for (size_t j = 0; j < i; ++j) {
-                const auto& other = devices[j];
-                if (!other.enabled) continue;
-                const Address other_end = other.base + other.size;
-                if (device.base < other_end && other.base < end) {
-                    return std::unexpected("SoC MMIO device ranges overlap: '" + device.name +
-                                           "' and '" + other.name + "'");
+                const auto& region = regions[i];
+                const auto& other = regions[j];
+                if (region.base < other.base + other.size &&
+                    other.base < region.base + region.size) {
+                    return std::unexpected("SoC MMIO regions overlap: '" +
+                                           std::string(region.name) + "' and '" +
+                                           std::string(other.name) + "'");
                 }
             }
         }
