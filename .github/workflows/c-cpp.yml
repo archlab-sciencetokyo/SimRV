@@ -13,12 +13,44 @@ concurrency:
   group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
+jobs:
+  changes:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      cpp: ${{ steps.filter.outputs.cpp }}
+    steps:
+    - uses: actions/checkout@v6
+      with:
+        fetch-depth: 0
+    - name: Detect non-documentation changes
+      id: filter
+      env:
+        BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+        HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+      shell: bash
+      run: |
+        changed_files="$(git diff --name-only "$BASE_SHA" "$HEAD_SHA" -- \
+          . \
+          ':(exclude)docs/**' \
+          ':(exclude)mkdocs.yml' \
+          ':(exclude)pyproject.toml' \
+          ':(exclude)uv.lock' \
+          ':(exclude).github/workflows/docs.yml')"
+        if [[ -n "$changed_files" ]]; then
+          echo "cpp=true" >> "$GITHUB_OUTPUT"
+        else
+          echo "cpp=false" >> "$GITHUB_OUTPUT"
+        fi
+
 env:
   RISCV_TESTS_REVISION: 933a897d8631773f385d45938facc466dddc7514
   VECTOR_TESTS_REVISION: f76bff121dce91b6b23e1d37be77a5e44af914c3
 
-jobs:
   build:
+    needs: changes
+    if: needs.changes.outputs.cpp == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 120
     container:
@@ -137,6 +169,8 @@ jobs:
         retention-days: 14
 
   quality:
+    needs: changes
+    if: needs.changes.outputs.cpp == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 90
     container:
@@ -177,6 +211,8 @@ jobs:
       run: ctest --test-dir build/asan --output-on-failure -L regress
 
   thread-sanitizer:
+    needs: changes
+    if: needs.changes.outputs.cpp == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 120
     container:
