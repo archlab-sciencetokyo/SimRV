@@ -6,6 +6,7 @@
 #include "simrv/tui/TuiModal.hpp"
 
 #include <algorithm>
+#include <filesystem>
 #include <format>
 #include <numeric>
 #include <string_view>
@@ -70,6 +71,9 @@ void TuiModal::open(ModalType type, InspectorPane* inspector_pane, uint64_t step
             modals::AddressModal::open(input_, inspector_pane);
             break;
         case ModalType::LoadBinary:
+            load_buildroot_mode_ = false;
+            modals::LoadModal::open(type, input_, load_appmode_, machine_);
+            break;
         case ModalType::LoadDiskImage:
             modals::LoadModal::open(type, input_, load_appmode_, machine_);
             break;
@@ -101,6 +105,108 @@ void TuiModal::open_load_cpu_config() {
     rendered_box_width_ = 0;
     const auto& name = machine_.primary_hart().cpu_model_config.name;
     input_ = name.empty() ? "configs/models/rvcomp.cfg" : name;
+}
+
+void TuiModal::open_file_picker() {
+    if (active_modal_ != ModalType::LoadBinary && active_modal_ != ModalType::LoadDiskImage &&
+        active_modal_ != ModalType::LoadCpuConfig)
+        return;
+    file_picker_return_modal_ = active_modal_;
+    file_picker_return_input_ = input_;
+    const std::filesystem::path typed(input_);
+    file_picker_directory_ = typed.has_parent_path() ? typed.parent_path() : ".";
+    if (file_picker_directory_.empty()) file_picker_directory_ = ".";
+    file_picker_filter_ = typed.filename().string();
+    file_picker_select_directory_ = load_buildroot_mode_;
+    active_modal_ = ModalType::LoadFilePicker;
+    refresh_file_picker();
+}
+
+void TuiModal::refresh_file_picker() {
+    namespace fs = std::filesystem;
+    file_picker_entries_.clear();
+    std::error_code error;
+    for (fs::directory_iterator it(file_picker_directory_, error), end; !error && it != end;
+         it.increment(error)) {
+        const auto filename = it->path().filename().string();
+        if (!filename.starts_with(file_picker_filter_)) continue;
+        file_picker_entries_.push_back(it->path());
+    }
+    std::ranges::sort(file_picker_entries_, [](const fs::path& left, const fs::path& right) {
+        std::error_code le, re;
+        const bool ld = fs::is_directory(left, le), rd = fs::is_directory(right, re);
+        if (ld != rd) return ld;
+        return left.filename().string() < right.filename().string();
+    });
+    if (file_picker_select_directory_)
+        file_picker_entries_.insert(file_picker_entries_.begin(), ".");
+    file_picker_cursor_ = std::clamp(
+        file_picker_cursor_, 0, std::max(0, static_cast<int>(file_picker_entries_.size()) - 1));
+}
+
+void TuiModal::move_file_picker_cursor(int delta) {
+    if (file_picker_entries_.empty()) return;
+    const int count = static_cast<int>(file_picker_entries_.size());
+    file_picker_cursor_ = (file_picker_cursor_ + delta + count) % count;
+}
+
+void TuiModal::accept_file_picker_entry() {
+    namespace fs = std::filesystem;
+    if (file_picker_entries_.empty()) return;
+    const auto selected = file_picker_entries_[static_cast<size_t>(file_picker_cursor_)];
+    if (file_picker_select_directory_ && selected == fs::path(".")) {
+        input_ = file_picker_directory_.string();
+        active_modal_ = file_picker_return_modal_;
+        file_picker_entries_.clear();
+        return;
+    }
+    if (file_picker_select_directory_ && selected == file_picker_directory_) {
+        input_ = selected.string();
+        active_modal_ = file_picker_return_modal_;
+        file_picker_entries_.clear();
+        return;
+    }
+    std::error_code error;
+    if (fs::is_directory(selected, error) && !error) {
+        file_picker_directory_ = selected;
+        file_picker_filter_.clear();
+        file_picker_cursor_ = 0;
+        refresh_file_picker();
+        return;
+    }
+    input_ = selected.string();
+    active_modal_ = file_picker_return_modal_;
+    file_picker_entries_.clear();
+}
+
+void TuiModal::file_picker_input(uint8_t byte, TuiKey key) {
+    if (key == TuiKey::Esc || byte == 27 || byte == 'q' || byte == 'Q') {
+        input_ = file_picker_return_input_;
+        active_modal_ = file_picker_return_modal_;
+        file_picker_entries_.clear();
+        return;
+    }
+    if (key == TuiKey::Enter || key == TuiKey::Newline) {
+        accept_file_picker_entry();
+    } else if (key == TuiKey::BackTab || key == TuiKey::Tab) {
+        move_file_picker_cursor(key == TuiKey::Tab ? 1 : -1);
+    } else if (key == TuiKey::Backspace || byte == 8 || byte == 127) {
+        if (!file_picker_filter_.empty()) {
+            file_picker_filter_.pop_back();
+        } else if (file_picker_directory_.has_parent_path()) {
+            file_picker_directory_ = file_picker_directory_.parent_path();
+        }
+        file_picker_cursor_ = 0;
+        refresh_file_picker();
+    } else if (key == TuiKey::CtrlP || byte == 16) {
+        file_picker_cursor_ = std::max(0, file_picker_cursor_ - 1);
+    } else if (key == TuiKey::CtrlN || byte == 14) {
+        move_file_picker_cursor(1);
+    } else if (byte >= 32 && byte <= 126) {
+        file_picker_filter_.push_back(static_cast<char>(byte));
+        file_picker_cursor_ = 0;
+        refresh_file_picker();
+    }
 }
 
 void TuiModal::cycle_settings_tab(int delta) {
@@ -264,16 +370,19 @@ auto TuiModal::submit(InspectorPane* inspector_pane, std::atomic<uint64_t>& step
         } break;
         case ModalType::LoadBinary:
         case ModalType::LoadDiskImage:
-            result = modals::LoadModal::submit(current_modal, input_, load_appmode_, machine_,
-                                               staged_binary_path_, staged_mode_change_,
-                                               staged_target_appmode_, notice_cb);
+            result = modals::LoadModal::submit(
+                current_modal, input_, load_appmode_, load_buildroot_mode_, machine_,
+                staged_binary_path_, staged_mode_change_, staged_target_appmode_, notice_cb);
             if (current_modal == ModalType::LoadBinary && staged_mode_change_ && !load_appmode_) {
                 active_modal_ = ModalType::LoadDiskImage;
                 input_ = machine_.disk_path();
                 return false;
             }
             if (result) {
-                open_notice("PROGRAM LOADED", "Loaded program image. Resetting simulator system...",
+                open_notice(load_buildroot_mode_ ? "BUILDROOT IMAGE LOADED" : "PROGRAM LOADED",
+                            load_buildroot_mode_
+                                ? "Loaded Buildroot firmware, DTB, and root filesystem."
+                                : "Loaded program image. Resetting simulator system...",
                             false);
                 return true;
             }
@@ -336,7 +445,7 @@ auto TuiModal::submit(InspectorPane* inspector_pane, std::atomic<uint64_t>& step
         }
         case ModalType::LoadCpuConfig: {
             bool success = modals::LoadModal::submit(
-                ModalType::LoadCpuConfig, input_, false, machine_, staged_binary_path_,
+                ModalType::LoadCpuConfig, input_, false, false, machine_, staged_binary_path_,
                 staged_mode_change_, staged_target_appmode_, set_status_override_cb);
             if (success) {
                 open_notice("CPU MODEL LOADED", std::format("Loaded configuration from {}", input_),
@@ -537,6 +646,8 @@ auto TuiModal::handle_click(int x, int y, int term_width, int term_height) -> Mo
                 case ModalType::SaveCpuConfig:
                 case ModalType::LoadCpuConfig:
                     return action == 0 ? ModalClickResult::Submit : ModalClickResult::Closed;
+                case ModalType::LoadFilePicker:
+                    return ModalClickResult::Handled;
                 case ModalType::Help:
                 case ModalType::None:
                     return ModalClickResult::Handled;
@@ -711,11 +822,11 @@ void TuiModal::render_overlay(std::vector<std::string>& lines, int term_width,
             break;
         case ModalType::LoadBinary:
             modals::LoadModal::render(active_modal_, content_rows, input_, load_appmode_,
-                                      staged_binary_path_);
+                                      load_buildroot_mode_, staged_binary_path_);
             break;
         case ModalType::LoadDiskImage:
             modals::LoadModal::render(active_modal_, content_rows, input_, load_appmode_,
-                                      staged_binary_path_);
+                                      load_buildroot_mode_, staged_binary_path_);
             break;
         case ModalType::Glossary:
             modals::GlossaryModal::render(content_rows, add_row, glossary_topic_, glossary_scroll_,
@@ -802,8 +913,39 @@ void TuiModal::render_overlay(std::vector<std::string>& lines, int term_width,
                 modals::build_modal_footer({{"[Enter]", "Save"}, {"[Esc]", "Cancel"}}));
             break;
         case ModalType::LoadCpuConfig:
-            modals::LoadModal::render(ModalType::LoadCpuConfig, content_rows, input_, false, "");
+            modals::LoadModal::render(ModalType::LoadCpuConfig, content_rows, input_, false, false,
+                                      "");
             break;
+        case ModalType::LoadFilePicker: {
+            add_row(std::format("Directory: {}", file_picker_directory_.string()));
+            add_row(std::format("Filter: {}_", file_picker_filter_));
+            add_row("");
+            if (file_picker_entries_.empty()) {
+                add_row("No matching files or directories");
+            } else {
+                constexpr int kMaxEntries = 14;
+                const int count = static_cast<int>(file_picker_entries_.size());
+                int first = std::max(0, file_picker_cursor_ - kMaxEntries / 2);
+                first = std::min(first, std::max(0, count - kMaxEntries));
+                const int last = std::min(count, first + kMaxEntries);
+                for (int i = first; i < last; ++i) {
+                    const auto& entry = file_picker_entries_[static_cast<size_t>(i)];
+                    if (file_picker_select_directory_ && entry == std::filesystem::path(".")) {
+                        add_row(std::format("{} [Use this directory]",
+                                            i == file_picker_cursor_ ? ">" : " "));
+                        continue;
+                    }
+                    std::error_code error;
+                    const bool directory = std::filesystem::is_directory(entry, error) && !error;
+                    add_row(std::format("{} {}{}", i == file_picker_cursor_ ? ">" : " ",
+                                        entry.filename().string(), directory ? "/" : ""));
+                }
+            }
+            add_row("");
+            add_row(modals::build_modal_footer(
+                {{"[Enter]", "Select / Open Directory"}, {"[Type]", "Filter"}, {"[Esc]", "Back"}}));
+            break;
+        }
         default:
             break;
     }
@@ -881,10 +1023,10 @@ void TuiModal::render_overlay(std::vector<std::string>& lines, int term_width,
         bool const classic = std::string_view(glyphs.top_left) == "+";
         std::string_view const top_left = classic ? "+" : "┌";
         std::string_view const top_right = classic ? "+" : "┐";
-        std::string top_border = std::format(
-            "{}{}{}{}{}{}{}{}{}{}\033[0m", kThemeBorder, m_bg, top_left,
-            make_repeated_string(glyphs.horiz, left_dash), title_fmt, up_badge, kThemeBorder,
-            make_repeated_string(glyphs.horiz, right_dash), top_right, "\033[0m");
+        std::string top_border =
+            std::format("{}{}{}{}{}{}{}{}{}{}\033[0m", kThemeBorder, m_bg, top_left,
+                        make_repeated_string(glyphs.horiz, left_dash), title_fmt, up_badge, m_bg,
+                        kThemeBorder, make_repeated_string(glyphs.horiz, right_dash), top_right);
 
         lines.at(static_cast<std::size_t>(start_y)) =
             overlay_string(lines.at(static_cast<std::size_t>(start_y)), top_border, start_x, box_w);
@@ -945,10 +1087,10 @@ void TuiModal::render_overlay(std::vector<std::string>& lines, int term_width,
             if (rem_dash > 0) {
                 int left_d = rem_dash / 2;
                 int right_d = rem_dash - left_d;
-                bot_border = std::format("{}{}{}{}{}{}{}{}\033[0m", kThemeBorder, m_bg, bot_left,
+                bot_border = std::format("{}{}{}{}{}{}{}{}{}\033[0m", kThemeBorder, m_bg, bot_left,
                                          make_repeated_string(glyphs.horiz, left_d), down_badge,
-                                         kThemeBorder, make_repeated_string(glyphs.horiz, right_d),
-                                         bot_right);
+                                         m_bg, kThemeBorder,
+                                         make_repeated_string(glyphs.horiz, right_d), bot_right);
             } else {
                 bot_border =
                     std::format("{}{}{}{}{}{}\033[0m", kThemeBorder, m_bg, bot_left,

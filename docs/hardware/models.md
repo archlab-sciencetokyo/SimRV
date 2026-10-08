@@ -20,6 +20,9 @@ a retired-instruction count in all modes.
 
 ## 1. Quick Start
 
+For an end-to-end walkthrough of authoring a CPU model file or adding a new emulated MMIO device,
+see [Extending CPU Presets and MMIO Platforms](extending-platforms.md).
+
 ### Using a Built-In Preset or Model File
 
 SimRV automatically resolves CPU models by preset name or direct file path:
@@ -35,8 +38,10 @@ simrv --ca --cpu-model-file configs/models/my_core.cfg -m program.elf
 ```
 
 Hardware-backed presets can also describe the complete SoC in the same file. For example,
-`configs/models/rvcomp.cfg` contains the RVComp CPU timing model, DRAM/boot metadata, UART map,
-and an explicit device policy:
+[`configs/models/rvcomp.cfg`](https://github.com/archlab-sciencetokyo/SimRV/blob/dev/configs/models/rvcomp.cfg)
+is an example based on the [ArchLab RVComp repository](https://github.com/archlab-sciencetokyo/RVComp)
+and its paper, [“Design and implementation of a high-performance RISC-V SoC for FPGAs with Linux support”](https://www.ieice.org/publications/ken/summary.php?contribution_id=138850&expandable=0&ken_id=R&lang=en&presen_date=2025-09-19&schedule_id=8813&society_cd=ESSNLS&year=2025).
+It contains CPU timing, DRAM/boot metadata, a UART map, and an explicit device policy:
 
 ```bash
 simrv --soc rvcomp --ca -m program.elf
@@ -63,14 +68,23 @@ simrv --dump-soc-manifest rvcomp build/rvcomp-soc.json
 The output follows `schemas/soc-manifest.schema.json` and contains the effective platform, memory,
 boot, transport, address, and interrupt metadata after preset-file overrides are applied.
 
-### RVComp RTL address map
+### Example: RVComp RTL address map
 
-The RVComp preset describes the devices SimRV can register at their RTL addresses: its UART at
-`0x10000000`, CLINT at `0x02000000`, and PLIC at `0x0c000000`. The UART descriptor uses its
-16-byte register window and PLIC source 1, matching the RTL interrupt wiring. Ethernet is wired to
-PLIC source 2, but no Ethernet MAC descriptor is added because SimRV does not emulate RVComp's
-custom MAC. The RTL's broader
+This example uses the [RVComp RTL](https://github.com/archlab-sciencetokyo/RVComp), described in the
+[RVComp paper](https://www.ieice.org/publications/ken/summary.php?contribution_id=138850&expandable=0&ken_id=R&lang=en&presen_date=2025-09-19&schedule_id=8813&society_cd=ESSNLS&year=2025).
+Its preset describes the devices SimRV can register at their RTL addresses: UART at
+`0x10000000`, CLINT at `0x02000000`, PLIC at `0x0c000000`, software reset at `0x10000100`, and
+the custom Ethernet MAC at `0x14000000`. The UART descriptor uses its 16-byte register window and
+PLIC source 1. The Ethernet model uses PLIC source 2 and the RTL-compatible CSR/RX/TX windows; its
+packet transport reuses SimRV's user, TAP, or socket network backend. The model reproduces the
+guest-visible register and ring-buffer behavior, while external packet transport and PHY
+serialization are not cycle-by-cycle RTL emulation. The RTL's broader
 address decode also contains these board resources:
+
+!!! info "Decode map and modeled devices are different views"
+    The table includes the RTL's decoded address regions, including resources SimRV does not
+    allocate or emulate. In particular, the SD-backed RAM row is reference information only; it
+    does not add memory to the RVComp preset.
 
 | RTL region | Address range | Size / detail | SimRV model status |
 | :--- | :--- | :--- | :--- |
@@ -78,10 +92,10 @@ address decode also contains these board resources:
 | CLINT | `0x02000000–0x020bffff` | 768 KiB decode window | Modeled at the RTL base. |
 | PLIC | `0x0c000000–0x0cffffff` | 16 MiB decode window | Modeled at the RTL base. |
 | UART | `0x10000000–0x1000000f` | 16-byte register window; PLIC source 1 | Modeled at the RTL base. |
-| Software reset | `0x10000100–0x10000103` | One control word | RTL-only; no matching SimRV device. |
-| Ethernet CSRs | `0x14000000–0x14003fff` | 16 KiB | RTL-only Ethernet MAC; not a VirtIO network device. |
-| Ethernet RX buffer | `0x18000000–0x18003fff` | 16 KiB | RTL-only buffer. |
-| Ethernet TX buffer | `0x1c000000–0x1c001fff` | 8 KiB | RTL-only buffer. |
+| Software reset | `0x10000100–0x10000103` | One control word | Any write requests a managed SimRV reboot; reads return zero. |
+| Ethernet CSRs | `0x14000000–0x14003fff` | 16 KiB | RVComp-specific MAC register model. |
+| Ethernet RX buffer | `0x18000000–0x18003fff` | 16 KiB | RX ring window for the RVComp MAC. |
+| Ethernet TX buffer | `0x1c000000–0x1c001fff` | 8 KiB | TX ring window for the RVComp MAC. |
 | DDR | `0x80000000–0x87ffffff` | 128 MiB on the selected Nexys build | SimRV's backing DRAM is configured separately. |
 | SD-backed RAM | `0xa0000000–0xbfffffff` | RTL decode window; RTL macro declares a 1.5 GiB controller capacity | RTL-only; not an additional SimRV RAM region. |
 
@@ -95,11 +109,28 @@ responses are implemented per device in the RTL.
 SimRV's CA execution routes accesses through its TileLink-style timing fabric and applies the
 RVComp model's calibrated request/response delays. It does not reproduce the RTL's valid/ready
 handshakes, per-target backpressure, or independent read/write state machines cycle by cycle.
-SimRV's `Axi4Bridge` is a separate adapter API; enabling it does not reproduce this custom fabric or
-add an Ethernet MAC. The RVComp model therefore leaves `[axi].enabled` false and documents the
-RTL-only peripherals instead of assigning them incompatible VirtIO register layouts. A
-cycle-by-cycle fabric model must preserve the existing RTL parity gates while modeling those
-handshakes and the address decode above.
+SimRV's `Axi4Bridge` is a separate adapter API; enabling it does not reproduce this custom fabric.
+The RVComp MAC does not use VirtIO registers: its model adapts RVComp's ring-buffer interface to the
+shared network packet backend. The RVComp model therefore leaves `[axi].enabled` false. A
+cycle-by-cycle fabric model must preserve the existing RTL parity gates while modeling the custom
+handshakes and address decode above.
+
+```mermaid
+flowchart LR
+    CPU[RVComp CPU]
+    FAB["axi_interconnect<br/>custom valid/ready fabric"]
+    CPU --> FAB
+    FAB --> DDR[DDR]
+    FAB --> CLINT[CLINT]
+    FAB --> PLIC[PLIC]
+    FAB --> UART[UART and software reset]
+    FAB --> MAC[Ethernet MAC and ring buffers]
+    MAC <-->|Ethernet frames| NET[SimRV network backend]
+    PLIC -->|interrupt| CPU
+```
+
+The diagram shows device relationships, not address proportions; use the table above for the
+exact RTL ranges.
 
 ### Generating a New Model Configuration
 
@@ -153,7 +184,7 @@ SimRV looks for CPU model configuration files in the canonical `configs/models/`
 
 SimRV CPU model configurations follow a clean INI/TOML sectioned format with support for comments (`#` and `;`), unquoted numbers/booleans, and quoted strings.
 
-### Sample Configuration (`configs/models/rvcomp.cfg`)
+### Sample Configuration: RVComp example (`configs/models/rvcomp.cfg`)
 
 ```ini
 # SimRV CPU Model Configuration: Archlab RVComp
@@ -314,12 +345,14 @@ simrv --dump-cpu-model balanced my_balanced.cfg
 
 The `configs/models/` folder contains authoritative configurations calibrated to specific hardware/FPGA processor RTL:
 
-1. **`rvcomp.cfg`**: Calibrated to the Archlab RVComp 5-stage SystemVerilog processor (`xlen = 32`, `isa_preset = "ima"`). Features a 34-stall-cycle non-restoring divider (`div_latency = 34`), a multiplier with two stall cycles (`mul_latency = 2`), an untagged 512-entry BTB, an 8192-entry BHT with weak-not-taken reset state (`2'b01`), a 4-cycle branch mispredict penalty, and a 4-cycle L1 D-Cache hit latency.
-2. **`cfu-provingground.cfg`**: Calibrated to Tokyo Tech Archlab's CFU-ProvingGround FPGA core (RVProc, `xlen = 32`, `isa_preset = "im"`). Features registered BTB reads (1-cycle branch prediction bubble), reset counter delay of 2 cycles, and custom function unit (CFU) hardware interface.
+1. **`rvcomp.cfg` example**: Calibrated to the [ArchLab RVComp](https://github.com/archlab-sciencetokyo/RVComp) five-stage SystemVerilog processor (`xlen = 32`, `isa_preset = "ima"`); see its [paper](https://www.ieice.org/publications/ken/summary.php?contribution_id=138850&expandable=0&ken_id=R&lang=en&presen_date=2025-09-19&schedule_id=8813&society_cd=ESSNLS&year=2025). It features a 34-stall-cycle non-restoring divider (`div_latency = 34`), a multiplier with two stall cycles (`mul_latency = 2`), an untagged 512-entry BTB, an 8192-entry BHT with weak-not-taken reset state (`2'b01`), a 4-cycle branch mispredict penalty, and a 4-cycle L1 D-Cache hit latency.
+2. **`cfu-provingground.cfg` example**: Calibrated to the ArchLab [CFU Proving Ground repository](https://github.com/archlab-sciencetokyo/CFU-Proving-Ground) and its [paper](https://www.ieice.org/publications/ken/summary.php?contribution_id=137514&expandable=3&ken_id=DC&lang=en&presen_date=2025-06-10&schedule_id=8710&society_cd=ISS&year=2025), targeting its RVProc FPGA core (`xlen = 32`, `isa_preset = "im"`). It features registered BTB reads (a one-cycle branch prediction bubble), a two-cycle counter reset delay, and a custom function unit (CFU) hardware interface.
 
 ---
 
-## 6. Case Study: Calibrating SimRV to RTL (RVComp)
+## 6. Example Case Study: Calibrating SimRV to [RVComp](https://github.com/archlab-sciencetokyo/RVComp)
+
+This case study uses the RVComp RTL and its [published paper](https://www.ieice.org/publications/ken/summary.php?contribution_id=138850&expandable=0&ken_id=R&lang=en&presen_date=2025-09-19&schedule_id=8813&society_cd=ESSNLS&year=2025) as one calibration target. The model format, timing conventions, and calibration workflow described above are SimRV features and apply to other processors as well.
 
 To calibrate SimRV to an external RTL core:
 

@@ -7,10 +7,13 @@
 #include <atomic>
 #include <cstdint>
 #include <functional>
+#include <filesystem>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "simrv/tui/TuiTypes.hpp"
+#include "simrv/tui/TuiKey.hpp"
 #include "simrv/tui/framework/Types.hpp"
 #include "simrv/xlen/Helpers.hpp"
 #include "simrv/xlen/Types.hpp"
@@ -41,7 +44,8 @@ enum class ModalType : uint8_t {
     LayoutPresets,
     ToolPicker,
     SaveCpuConfig,
-    LoadCpuConfig
+    LoadCpuConfig,
+    LoadFilePicker
 };
 
 struct SysConfigDraft {
@@ -137,6 +141,7 @@ class TuiModal {
     [[nodiscard]] auto is_active() const -> bool { return active_modal_ != ModalType::None; }
     [[nodiscard]] auto get_type() const -> ModalType { return active_modal_; }
     [[nodiscard]] auto get_input() const -> const std::string& { return input_; }
+    void set_input(std::string input) { input_ = std::move(input); }
 
     void open(ModalType type, InspectorPane* left_pane, uint64_t step_delay_us);
     void close();
@@ -149,7 +154,16 @@ class TuiModal {
     void pop_char() {
         if (!input_.empty()) input_.pop_back();
     }
-    void toggle_load_mode() { load_appmode_ = !load_appmode_; }
+    void toggle_load_mode() {
+        if (load_buildroot_mode_) {
+            load_buildroot_mode_ = false;
+            load_appmode_ = true;
+        } else if (load_appmode_) {
+            load_appmode_ = false;
+        } else {
+            load_buildroot_mode_ = true;
+        }
+    }
     [[nodiscard]] auto get_load_appmode() const -> bool { return load_appmode_; }
 
     void move_settings_cursor(int delta);
@@ -197,6 +211,14 @@ class TuiModal {
     void open_platform_confirm(const SettingsDraft& draft);
     void open_save_cpu_config();
     void open_load_cpu_config();
+    void open_file_picker();
+    void refresh_file_picker();
+    void accept_file_picker_entry();
+    void move_file_picker_cursor(int delta);
+    void file_picker_input(uint8_t byte, TuiKey key);
+    [[nodiscard]] auto file_picker_active() const -> bool {
+        return active_modal_ == ModalType::LoadFilePicker;
+    }
     [[nodiscard]] auto get_settings_draft() const -> const SettingsDraft& {
         return settings_draft_;
     }
@@ -239,9 +261,17 @@ class TuiModal {
     int tool_picker_num_slots_ = 3;
     TuiRegPage tool_picker_current_page_ = TuiRegPage::GPR;
     bool load_appmode_ = true;  // Toggle for App (baremetal) vs OS (Linux) mode in LoadBinary modal
+    bool load_buildroot_mode_ = false;
     std::string staged_binary_path_;
     bool staged_mode_change_ = false;
     bool staged_target_appmode_ = false;
+    ModalType file_picker_return_modal_ = ModalType::None;
+    std::string file_picker_return_input_;
+    std::filesystem::path file_picker_directory_;
+    std::string file_picker_filter_;
+    std::vector<std::filesystem::path> file_picker_entries_;
+    int file_picker_cursor_ = 0;
+    bool file_picker_select_directory_ = false;
     // Rendering resolves content-dependent modal geometry; hit-testing reuses that exact box.
     mutable int rendered_term_width_ = 0;
     mutable int rendered_term_height_ = 0;

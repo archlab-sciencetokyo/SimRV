@@ -274,9 +274,7 @@ void CPU::raise_exception(TrapCause cause, CSRValue tval) {
 }
 
 void CPU::evaluate_timer_interrupt() {
-    const bool trace_interrupts =
-        machine_ != nullptr && machine_->trace().is_architecture_trace_enabled();
-    const CSRValue pending_before = trace_interrupts ? state_.mip : 0;
+    const CSRValue pending_before = state_.mip;
     Counter cur_mtime = 0;
     Counter cur_mtimecmp = 0;
     bool is_supervisor_timer = false;
@@ -318,6 +316,8 @@ void CPU::evaluate_timer_interrupt() {
             if (before != after) {
                 machine_->trace().log_interrupt_signal(*this, kInterruptCauseBit | code, after,
                                                        source);
+                machine_->notify_interrupt_transition(state_.mhartid, static_cast<uint32_t>(code),
+                                                      after, source, clint_mmio.mcycle);
             }
         };
         log_transition(MipBit::Mtip, 7, "aclint_mtimer");
@@ -1178,8 +1178,7 @@ auto CPU::try_fast_load(Machine& machine, Address mem_addr, Funct3 funct3, Regis
                                 (state_.mstatus & enum_mask(MstatusBit::Mprv)) == 0)) {
         const unsigned size_bytes = access_size_for_funct3(funct3);
         if (simrv::compiler::likely(machine.memory_geometry().contains(mem_addr, size_bytes))) {
-            out_val = simrv::memory::ram_read_fast(mem_addr, static_cast<Instruction>(funct3),
-                                                   ram);
+            out_val = simrv::memory::ram_read_fast(mem_addr, static_cast<Instruction>(funct3), ram);
             return true;
         }
         return false;
@@ -1204,8 +1203,8 @@ auto CPU::try_fast_load(Machine& machine, Address mem_addr, Funct3 funct3, Regis
             }
             PhysAddr const paddr = entry.paddr_base + (mem_addr & 0xFFF);
             if (simrv::compiler::likely(machine.memory_geometry().contains(paddr, size_bytes))) {
-                out_val = simrv::memory::ram_read_fast(paddr, static_cast<Instruction>(funct3),
-                                                       ram);
+                out_val =
+                    simrv::memory::ram_read_fast(paddr, static_cast<Instruction>(funct3), ram);
                 return true;
             }
             return false;
@@ -1218,8 +1217,7 @@ auto CPU::try_fast_load(Machine& machine, Address mem_addr, Funct3 funct3, Regis
                 return false;
             }
             Address const ppage = tlb_e->p_addr;
-            Byte* host_base = ram.contains(ppage, 4096) ? ram.unchecked_ptr(ppage)
-                                                      : nullptr;
+            Byte* host_base = ram.contains(ppage, 4096) ? ram.unchecked_ptr(ppage) : nullptr;
             if (host_base != nullptr) {
                 soft_tlb_read[tlb_idx].set(vpn, current_asid, eff_priv, soft_tlb_epoch, ppage,
                                            host_base);
@@ -1228,15 +1226,14 @@ auto CPU::try_fast_load(Machine& machine, Address mem_addr, Funct3 funct3, Regis
                 return true;
             }
             if (simrv::compiler::likely(machine.memory_geometry().contains(paddr, size_bytes))) {
-                out_val = simrv::memory::ram_read_fast(paddr, static_cast<Instruction>(funct3),
-                                                       ram);
+                out_val =
+                    simrv::memory::ram_read_fast(paddr, static_cast<Instruction>(funct3), ram);
                 return true;
             }
         }
     } else {
         if (simrv::compiler::likely(machine.memory_geometry().contains(mem_addr, size_bytes))) {
-            out_val = simrv::memory::ram_read_fast(mem_addr, static_cast<Instruction>(funct3),
-                                                   ram);
+            out_val = simrv::memory::ram_read_fast(mem_addr, static_cast<Instruction>(funct3), ram);
             return true;
         }
     }
@@ -1254,8 +1251,7 @@ auto CPU::try_fast_store(Machine& machine, Address mem_addr, Funct3 funct3, Regi
         const unsigned size_bytes = access_size_for_funct3(funct3);
         if (simrv::compiler::likely(machine.memory_geometry().contains(mem_addr, size_bytes) &&
                                     !is_tohost_addr(machine, mem_addr))) {
-            simrv::memory::ram_write_fast(mem_addr, rrs2, static_cast<Instruction>(funct3),
-                                          ram);
+            simrv::memory::ram_write_fast(mem_addr, rrs2, static_cast<Instruction>(funct3), ram);
             return true;
         }
         return false;
@@ -1283,8 +1279,7 @@ auto CPU::try_fast_store(Machine& machine, Address mem_addr, Funct3 funct3, Regi
                 return true;
             }
             if (simrv::compiler::likely(machine.memory_geometry().contains(paddr, size_bytes))) {
-                simrv::memory::ram_write_fast(paddr, rrs2, static_cast<Instruction>(funct3),
-                                              ram);
+                simrv::memory::ram_write_fast(paddr, rrs2, static_cast<Instruction>(funct3), ram);
                 return true;
             }
             return false;
@@ -1300,8 +1295,7 @@ auto CPU::try_fast_store(Machine& machine, Address mem_addr, Funct3 funct3, Regi
                 return false;
             }
             Address const ppage = tlb_e->p_addr;
-            Byte* host_base = ram.contains(ppage, 4096) ? ram.unchecked_ptr(ppage)
-                                                      : nullptr;
+            Byte* host_base = ram.contains(ppage, 4096) ? ram.unchecked_ptr(ppage) : nullptr;
             if (host_base != nullptr) {
                 soft_tlb_write[tlb_idx].set(vpn, current_asid, eff_priv, soft_tlb_epoch, ppage,
                                             host_base);
@@ -1310,16 +1304,14 @@ auto CPU::try_fast_store(Machine& machine, Address mem_addr, Funct3 funct3, Regi
                 return true;
             }
             if (simrv::compiler::likely(machine.memory_geometry().contains(paddr, size_bytes))) {
-                simrv::memory::ram_write_fast(paddr, rrs2, static_cast<Instruction>(funct3),
-                                              ram);
+                simrv::memory::ram_write_fast(paddr, rrs2, static_cast<Instruction>(funct3), ram);
                 return true;
             }
         }
     } else {
         if (simrv::compiler::likely(machine.memory_geometry().contains(mem_addr, size_bytes) &&
                                     !is_tohost_addr(machine, mem_addr))) {
-            simrv::memory::ram_write_fast(mem_addr, rrs2, static_cast<Instruction>(funct3),
-                                          ram);
+            simrv::memory::ram_write_fast(mem_addr, rrs2, static_cast<Instruction>(funct3), ram);
             return true;
         }
     }
@@ -1339,8 +1331,8 @@ SIMRV_ALWAYS_INLINE auto CPU::execute_cached_load(Machine& machine, CachedOp& op
                                 (state_.mstatus & enum_mask(MstatusBit::Mprv)) == 0)) {
         if (simrv::compiler::likely((mem_addr & align_mask) == 0 &&
                                     machine.memory_geometry().contains(mem_addr, size_bytes))) {
-            mem_rdata = simrv::memory::ram_read_fast(mem_addr, static_cast<Instruction>(op.funct3),
-                                                     ram);
+            mem_rdata =
+                simrv::memory::ram_read_fast(mem_addr, static_cast<Instruction>(op.funct3), ram);
             state_.regs.write_branchless(op.rd, mem_rdata);
             advance_cached_pc(op);
             return true;
@@ -1389,8 +1381,8 @@ SIMRV_ALWAYS_INLINE auto CPU::execute_cached_load(Machine& machine, CachedOp& op
 }
 
 SIMRV_ALWAYS_INLINE auto CPU::execute_cached_store(Machine& machine, CachedOp& op, Register rrs1,
-                                                   Register rrs2,
-                                                   const simrv::memory::RamView& ram) -> bool {
+                                                   Register rrs2, const simrv::memory::RamView& ram)
+    -> bool {
     Address const mem_addr = rrs1 + op.imm;
     if (simrv::compiler::unlikely(machine.tui_enabled() || machine.branch_trace_enabled())) {
         pipeline_context.mem_addr = mem_addr;
@@ -1809,8 +1801,8 @@ void CPU::execute_cached_op_fast(Machine& machine, CachedOp& op,
                 if (simrv::compiler::likely(
                         (mem_addr & align_mask) == 0 &&
                         machine.memory_geometry().contains(mem_addr, size_bytes))) {
-                    simrv::memory::ram_write_fast(
-                        mem_addr, fp_data, static_cast<Instruction>(op.funct3), ram);
+                    simrv::memory::ram_write_fast(mem_addr, fp_data,
+                                                  static_cast<Instruction>(op.funct3), ram);
                     stored = true;
                 }
             } else {
@@ -1996,7 +1988,7 @@ void CPU::run_fast_baremetal_batch(Machine& machine, uint32_t batch_size,
 
 template <bool kCopyContext, bool kInstMix, bool kPollPause>
 SIMRV_ALWAYS_INLINE auto CPU::run_fast_os_kernel(Machine& machine, uint32_t batch_size,
-                                                const simrv::memory::RamView& ram) -> uint32_t {
+                                                 const simrv::memory::RamView& ram) -> uint32_t {
     uint32_t cached_ops = 0;
     Counter accumulated_retired = 0;
     uint32_t chunk_cycles = 0;
@@ -2084,16 +2076,16 @@ template void CPU::execute_cached_op_fast<false, true>(Machine&, CachedOp&,
 template void CPU::execute_cached_op_fast<true, true>(Machine&, CachedOp&,
                                                       const simrv::memory::RamView&);
 template auto CPU::run_fast_baremetal_kernel<false, false, false>(Machine&, uint32_t,
-                                                                   const simrv::memory::RamView&)
+                                                                  const simrv::memory::RamView&)
     -> uint32_t;
 template auto CPU::run_fast_baremetal_kernel<false, false, true>(Machine&, uint32_t,
-                                                                  const simrv::memory::RamView&)
+                                                                 const simrv::memory::RamView&)
     -> uint32_t;
 template auto CPU::run_fast_baremetal_kernel<true, false, false>(Machine&, uint32_t,
-                                                                  const simrv::memory::RamView&)
+                                                                 const simrv::memory::RamView&)
     -> uint32_t;
 template auto CPU::run_fast_baremetal_kernel<true, false, true>(Machine&, uint32_t,
-                                                                 const simrv::memory::RamView&)
+                                                                const simrv::memory::RamView&)
     -> uint32_t;
 template auto CPU::run_fast_baremetal_kernel<false, true, false>(Machine&, uint32_t,
                                                                  const simrv::memory::RamView&)
@@ -2108,21 +2100,25 @@ template auto CPU::run_fast_baremetal_kernel<true, true, true>(Machine&, uint32_
                                                                const simrv::memory::RamView&)
     -> uint32_t;
 template auto CPU::run_fast_os_kernel<false, false, false>(Machine&, uint32_t,
-                                                           const simrv::memory::RamView&) -> uint32_t;
+                                                           const simrv::memory::RamView&)
+    -> uint32_t;
 template auto CPU::run_fast_os_kernel<false, false, true>(Machine&, uint32_t,
-                                                          const simrv::memory::RamView&) -> uint32_t;
+                                                          const simrv::memory::RamView&)
+    -> uint32_t;
 template auto CPU::run_fast_os_kernel<true, false, false>(Machine&, uint32_t,
-                                                          const simrv::memory::RamView&) -> uint32_t;
+                                                          const simrv::memory::RamView&)
+    -> uint32_t;
 template auto CPU::run_fast_os_kernel<true, false, true>(Machine&, uint32_t,
                                                          const simrv::memory::RamView&) -> uint32_t;
 template auto CPU::run_fast_os_kernel<false, true, false>(Machine&, uint32_t,
-                                                         const simrv::memory::RamView&) -> uint32_t;
+                                                          const simrv::memory::RamView&)
+    -> uint32_t;
 template auto CPU::run_fast_os_kernel<false, true, true>(Machine&, uint32_t,
-                                                        const simrv::memory::RamView&) -> uint32_t;
+                                                         const simrv::memory::RamView&) -> uint32_t;
 template auto CPU::run_fast_os_kernel<true, true, false>(Machine&, uint32_t,
-                                                        const simrv::memory::RamView&) -> uint32_t;
+                                                         const simrv::memory::RamView&) -> uint32_t;
 template auto CPU::run_fast_os_kernel<true, true, true>(Machine&, uint32_t,
-                                                       const simrv::memory::RamView&) -> uint32_t;
+                                                        const simrv::memory::RamView&) -> uint32_t;
 
 void CPU::push_trace_history(Address pc, Instruction inst, const std::string& symbol) {
     // O(1) ring buffer write - no heap allocation, no shifting

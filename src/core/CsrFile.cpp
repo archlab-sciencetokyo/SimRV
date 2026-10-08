@@ -328,6 +328,9 @@ auto CsrFile::write(CSRAddress addr, CSRValue wdata)
             if (was_pending != is_pending) {
                 cpu_.machine_->trace().log_interrupt_signal(cpu_, kInterruptCauseBit | code,
                                                             is_pending, source);
+                cpu_.machine_->notify_interrupt_transition(cpu_.state().mhartid,
+                                                           static_cast<uint32_t>(code), is_pending,
+                                                           source, cpu_.clint_mmio.mcycle);
             }
         }
     };

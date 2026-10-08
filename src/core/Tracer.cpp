@@ -943,7 +943,9 @@ void Tracer::log_pipeline_stalls(const CPU& cpu, std::span<const PipelineStallRe
 
 void Tracer::log_dma_transfer(const simrv::memory::DmaTransferTrace& transfer) {
     if (!fp_devices.is_open() || !trace_level_at_least(1)) return;
-    const auto event = transfer.complete ? "dma_complete" : "dma_start";
+    const auto event = transfer.cancelled  ? "dma_cancelled"
+                       : transfer.complete ? "dma_complete"
+                                           : "dma_start";
     const auto cycle = transfer.complete ? transfer.completion_cycle : transfer.request_cycle;
     if (!accepts_trace_event(event, cycle, std::numeric_limits<uint32_t>::max(), std::nullopt,
                              transfer.component))

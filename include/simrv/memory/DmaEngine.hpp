@@ -26,6 +26,7 @@ struct DmaTransferTrace {
     uint64_t completion_cycle = 0;
     std::string component;
     bool complete = false;
+    bool cancelled = false;
 };
 
 class DmaEngine {
@@ -56,6 +57,12 @@ class DmaEngine {
         trace_observer_ = std::move(observer);
     }
 
+    /// Install the machine-level observer without replacing the optional trace observer.
+    void set_event_observer(TraceObserver observer) {
+        const std::lock_guard lock(mutex_);
+        event_observer_ = std::move(observer);
+    }
+
     [[nodiscard]] auto config() const noexcept -> pipeline::DmaTimingConfig {
         const std::lock_guard lock(mutex_);
         return config_;
@@ -81,6 +88,7 @@ class DmaEngine {
                            std::function<void()> on_complete, std::string_view component = "dma")
         -> Cycle {
         TraceObserver observer;
+        TraceObserver event_observer;
         std::function<void()> immediate_callback;
         DmaTransferTrace trace;
         bool immediate = false;
@@ -91,6 +99,7 @@ class DmaEngine {
             trace.request_cycle = current_cycle;
             trace.component = component;
             observer = trace_observer_;
+            event_observer = event_observer_;
             if (!config_.enabled) {
                 trace.start_cycle = current_cycle;
                 trace.completion_cycle = current_cycle;
@@ -118,10 +127,12 @@ class DmaEngine {
             }
         }
         if (observer) observer(trace);
+        if (event_observer) event_observer(trace);
         if (immediate) {
             if (immediate_callback) immediate_callback();
+            trace.complete = true;
+            if (event_observer) event_observer(trace);
             if (observer) {
-                trace.complete = true;
                 observer(trace);
             }
         }
@@ -136,10 +147,12 @@ class DmaEngine {
 
         std::vector<DmaTask> ready_tasks;
         TraceObserver observer;
+        TraceObserver event_observer;
         {
             const std::lock_guard lock(mutex_);
             if (tasks_.empty()) return;
             observer = trace_observer_;
+            event_observer = event_observer_;
             for (auto it = tasks_.begin(); it != tasks_.end();) {
                 if (it->completion_cycle <= current_cycle) {
                     ready_tasks.push_back(std::move(*it));
@@ -152,14 +165,16 @@ class DmaEngine {
         }
         for (auto& task : ready_tasks) {
             if (task.on_complete) task.on_complete();
+            const DmaTransferTrace trace{.id = task.id,
+                                         .byte_count = task.byte_count,
+                                         .request_cycle = task.request_cycle,
+                                         .start_cycle = task.start_cycle,
+                                         .completion_cycle = task.completion_cycle,
+                                         .component = task.component,
+                                         .complete = true};
+            if (event_observer) event_observer(trace);
             if (observer) {
-                observer(DmaTransferTrace{.id = task.id,
-                                          .byte_count = task.byte_count,
-                                          .request_cycle = task.request_cycle,
-                                          .start_cycle = task.start_cycle,
-                                          .completion_cycle = task.completion_cycle,
-                                          .component = std::move(task.component),
-                                          .complete = true});
+                observer(trace);
             }
         }
     }
@@ -180,9 +195,28 @@ class DmaEngine {
     }
 
     void clear() {
-        const std::lock_guard lock(mutex_);
-        tasks_.clear();
-        has_pending_tasks_.store(false, std::memory_order_relaxed);
+        std::vector<DmaTask> cancelled;
+        TraceObserver observer;
+        TraceObserver event_observer;
+        {
+            const std::lock_guard lock(mutex_);
+            cancelled.swap(tasks_);
+            observer = trace_observer_;
+            event_observer = event_observer_;
+            has_pending_tasks_.store(false, std::memory_order_relaxed);
+        }
+        for (const auto& task : cancelled) {
+            const DmaTransferTrace trace{.id = task.id,
+                                         .byte_count = task.byte_count,
+                                         .request_cycle = task.request_cycle,
+                                         .start_cycle = task.start_cycle,
+                                         .completion_cycle = task.completion_cycle,
+                                         .component = task.component,
+                                         .complete = false,
+                                         .cancelled = true};
+            if (observer) observer(trace);
+            if (event_observer) event_observer(trace);
+        }
     }
 
    private:
@@ -191,6 +225,7 @@ class DmaEngine {
     std::vector<DmaTask> tasks_;
     std::atomic<bool> has_pending_tasks_{false};
     TraceObserver trace_observer_;
+    TraceObserver event_observer_;
     uint64_t next_transfer_id_ = 1;
 };
 

@@ -10,6 +10,7 @@
 #include <csignal>
 #include <cstddef>
 #include <cstdint>
+#include <filesystem>
 #include <memory>
 #include <mutex>
 #include <queue>
@@ -27,6 +28,7 @@
 #include "simrv/tui/TuiKey.hpp"
 #include "simrv/tui/TuiMission.hpp"
 #include "simrv/tui/TuiModal.hpp"
+#include "simrv/tui/TuiPreferences.hpp"
 #include "simrv/tui/TuiTypes.hpp"
 #include "simrv/tui/VirtualTerminal.hpp"
 #include "simrv/tui/framework/Subpanel.hpp"
@@ -205,6 +207,8 @@ class Tui : public core::ITelemetrySink, public core::IConsoleSink {
     }
 
     void apply_layout_preset(LayoutPreset preset);
+    void restore_preferences();
+    void save_preferences();
     void focus_next_slot();
     void focus_prev_slot();
     [[nodiscard]] auto is_terminal_focused() const noexcept -> bool { return !is_paused(); }
@@ -289,6 +293,7 @@ class Tui : public core::ITelemetrySink, public core::IConsoleSink {
     };
 
     simrv::core::Machine& machine_;
+    std::filesystem::path preferences_path_;
 
     /// Deliver one terminal byte to the configured guest console endpoint.
     void write_guest_input(uint8_t byte);
@@ -356,6 +361,9 @@ class Tui : public core::ITelemetrySink, public core::IConsoleSink {
     std::string status_override_;
     std::chrono::steady_clock::time_point status_override_expires_at_{};
     int scroll_offset_{0};
+    bool terminal_search_active_ = false;
+    std::string terminal_search_query_;
+    int terminal_search_cursor_ = -1;
     int last_cursor_x_{-1};
     int last_cursor_y_{-1};
     bool last_cursor_visible_{false};
@@ -429,6 +437,7 @@ class Tui : public core::ITelemetrySink, public core::IConsoleSink {
     bool handle_modal_settings(ModalType mtype, uint8_t byte, TuiKey key);
     bool handle_modal_breakpoint(ModalType mtype, uint8_t byte, TuiKey key);
     auto handle_normal_keyboard_input(uint8_t byte, TuiKey key) -> void;
+    auto search_terminal_scrollback(bool reverse) -> bool;
     auto handle_debug_keyboard_input(TuiKey key) -> bool;
     bool handle_speed_keyboard_input(TuiKey key);
     bool handle_navigation_keyboard_input(uint8_t byte, TuiKey key);

@@ -112,6 +112,9 @@ Follow the conventional commit format: `<type>(<scope>): <summary>`
 
 ## 5. Adding Regression Tests
 
+For the runtime and platform integration points involved in adding a CPU preset or MMIO device,
+see the [CPU preset and MMIO extension guide](../hardware/extending-platforms.md).
+
 Any architectural, pipeline, or device behavioral changes **must be validated against both 64-bit and 32-bit targets**.
 
 ### Adding a Test Suite in `CMakeLists.txt`

@@ -7,9 +7,11 @@ dependencies = []
 
 [dependency-groups]
 docs = [
+  "zensical==0.0.68; python_version >= '3.11'",
+  "mike @ git+https://github.com/squidfunk/mike.git ; python_version >= '3.11'",
   "mkdocs>=1.6,<2",
   "mkdocs-material>=9.7,<10",
-  "pymdown-extensions>=10.16,<11",
+  "pymdown-extensions>=11,<12",
 ]
 dev = [
   "jsonschema>=4.26,<5",

@@ -57,8 +57,22 @@ open at once. Use `Tab`/`Shift-Tab` (or `Ctrl-Right`/`Ctrl-Left`) to change the 
 Each inspector page owns a reusable two-dimensional `ScrollView`, so changing focus or opening
 another page does not lose the previous page's vertical or horizontal position.
 
+To search UART history, pause the simulation, focus the console pane, and press `Ctrl-F` (or `/`).
+Enter a query and press `Enter` to jump to a match; use `n` and `N` to move forward and backward.
+Press `Esc` to cancel an active search.
+
 The host terminal's carriage-return Enter byte is normalized to newline at the virtual-terminal
 boundary, matching PTY line input and shells that read the UART without enabling `ICRNL` themselves.
+
+The binary loader uses `Tab` for path completion and `Shift-Tab` to cycle between bare-metal,
+OS, and Buildroot-folder loading. In Buildroot-folder mode, enter a Buildroot output directory or
+the published `buildroot-fpga` bundle; SimRV resolves and loads the matching firmware, DTB, and
+root filesystem together. `Ctrl-O` opens the filtered file browser, which can select a directory
+for this mode.
+SimRV saves the current workbench layout, focused pane, column widths, theme, contrast, TUI frame
+rate, mouse sensitivity, and classroom options on exit, then restores them on the next launch. The
+preferences file is `$XDG_CONFIG_HOME/simrv/tui.conf`, or `~/.config/simrv/tui.conf` when
+`XDG_CONFIG_HOME` is unset. Remove that file to return to the default TUI settings.
 
 In classroom mode, the interactive **Student Guide** is visible when the simulator is paused. It
 explains the active inspector and proposes one safe, context-sensitive next action. Press `Enter`

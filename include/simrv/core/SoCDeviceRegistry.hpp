@@ -21,7 +21,7 @@ namespace simrv::core {
  */
 class SoCDeviceRegistry final {
    public:
-    [[nodiscard]] static auto kinds() -> std::array<SoCDeviceKind, 17> {
+    [[nodiscard]] static auto kinds() -> std::array<SoCDeviceKind, 21> {
         return {SoCDeviceKind::Uart,
                 SoCDeviceKind::Rtc,
                 SoCDeviceKind::Power,
@@ -38,10 +38,18 @@ class SoCDeviceRegistry final {
                 SoCDeviceKind::VirtioMmioInput,
                 SoCDeviceKind::VirtioMmioSound,
                 SoCDeviceKind::VirtioMmioNet,
-                SoCDeviceKind::DmaController};
+                SoCDeviceKind::DmaController,
+                SoCDeviceKind::ResetControl,
+                SoCDeviceKind::RingBufferEthernet,
+                SoCDeviceKind::DummyMmio,
+                SoCDeviceKind::CustomMmio};
     }
 
     [[nodiscard]] static auto enabled(const SoCConfig& config, SoCDeviceKind kind) -> bool {
+        if (kind == SoCDeviceKind::ResetControl || kind == SoCDeviceKind::RingBufferEthernet ||
+            kind == SoCDeviceKind::DummyMmio || kind == SoCDeviceKind::CustomMmio) {
+            return config.find(kind) != nullptr;
+        }
         return !config.disable_unlisted_devices || config.find(kind) != nullptr;
     }
 
@@ -55,7 +63,14 @@ class SoCDeviceRegistry final {
     [[nodiscard]] static auto resolve(const SoCConfig& config) -> std::vector<SoCDeviceConfig> {
         std::vector<SoCDeviceConfig> devices;
         for (const auto kind : kinds()) {
+            if (kind == SoCDeviceKind::DummyMmio || kind == SoCDeviceKind::CustomMmio) continue;
             if (const auto device = descriptor(config, kind)) devices.push_back(*device);
+        }
+        for (const auto& device : config.devices) {
+            if (device.enabled && (device.kind == SoCDeviceKind::DummyMmio ||
+                                   device.kind == SoCDeviceKind::CustomMmio)) {
+                devices.push_back(device);
+            }
         }
         return devices;
     }

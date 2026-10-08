@@ -227,6 +227,10 @@ class NetBackend {
     }
 
     [[nodiscard]] auto has_rx_packet() const -> bool { return !rx_queue_.empty(); }
+    void reset() {
+        rx_queue_.clear();
+        tx_history_.clear();
+    }
 
     auto pop_rx_packet() -> std::vector<uint8_t> {
         if (rx_queue_.empty()) return {};

@@ -2883,6 +2883,8 @@ void test_dynamic_fdt_generator() {
     config.soc.devices = {
         {simrv::core::SoCDeviceKind::Uart, "debug-uart", 0x20000000, 0x200, 17},
         {simrv::core::SoCDeviceKind::VirtioMmioNet, "net1", 0x20001000, 0x2000, 19},
+        {simrv::core::SoCDeviceKind::CustomMmio, "custom-timer", 0x20003000, 0x1000, 0,
+         true, {}, "acme,timer"},
     };
     auto custom_fdt = simrv::util::FdtGenerator::generate(config);
     const std::string custom_fdt_text(custom_fdt.begin(), custom_fdt.end());
@@ -2892,6 +2894,9 @@ void test_dynamic_fdt_generator() {
            "custom SoC VirtIO address is reflected in the generated FDT");
     expect(custom_fdt_text.find("virtio@10001000") == std::string::npos,
            "explicit SoC device policy omits unlisted VirtIO devices from the FDT");
+    expect(custom_fdt_text.find("custom-timer@20003000") != std::string::npos &&
+               custom_fdt_text.find("acme,timer") != std::string::npos,
+           "custom MMIO compatible and range are reflected in the generated FDT");
 }
 
 void test_pmp_semantics() {

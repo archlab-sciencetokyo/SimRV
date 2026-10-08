@@ -26,7 +26,9 @@
 #include "simrv/core/PlatformTiming.hpp"
 #include "simrv/device/AIA.hpp"
 #include "simrv/device/Aclint.hpp"
+#include "simrv/device/PlatformDeviceRegistry.hpp"
 #include "simrv/device/Power.hpp"
+#include "simrv/device/ResetControlMmio.hpp"
 #include "simrv/device/Uart.hpp"
 #include "simrv/device/pci/PcieRootComplex.hpp"
 #include "simrv/memory/CoherenceHub.hpp"
@@ -132,9 +134,33 @@ Machine::Runtime::Runtime(Machine& machine, bool appmode)
 
 Machine::Machine(MachineConfig machine_config)
     : runtime_(std::make_unique<Runtime>(*this, machine_config.execution.appmode)),
+      device_registry_(std::make_unique<simrv::device::PlatformDeviceRegistry>()),
       memory_(runtime_->memory) {
     runtime_->primary_cpu.machine_ = this;
+    dma_engine().set_event_observer([this](const simrv::memory::DmaTransferTrace& transfer) {
+        publish_machine_event(MachineEvent{
+            .kind = transfer.cancelled  ? MachineEventKind::DmaCancelled
+                    : transfer.complete ? MachineEventKind::DmaCompleted
+                                        : MachineEventKind::DmaStarted,
+            .cycle = transfer.complete ? transfer.completion_cycle : transfer.request_cycle,
+            .transfer_id = transfer.id,
+            .byte_count = transfer.byte_count,
+            .request_cycle = transfer.request_cycle,
+            .start_cycle = transfer.start_cycle,
+            .completion_cycle = transfer.completion_cycle,
+            .component = transfer.component,
+        });
+    });
+    device_registry().register_mmio_device(
+        SoCDeviceKind::ResetControl, [](Machine& machine, const SoCDeviceConfig& device) {
+            return std::make_unique<simrv::device::ResetControlMmio>(machine, device.base,
+                                                                     device.size, device.name);
+        });
     apply_configuration(std::move(machine_config));
+}
+
+auto Machine::device_registry() noexcept -> simrv::device::PlatformDeviceRegistry& {
+    return *device_registry_;
 }
 
 void Machine::apply_configuration(MachineConfig machine_config) {
@@ -393,6 +419,22 @@ void Machine::maybe_save_periodic_checkpoint() {
 
 void Machine::set_platform_irq(IrqNumber irq, bool asserted) {
     runtime_->primary_cpu.plic_set_irq(irq, asserted);
+    bool changed = false;
+    {
+        std::scoped_lock lock(platform_irq_state_mutex_);
+        auto& previous = platform_irq_state_[irq];
+        changed = previous != asserted;
+        previous = asserted;
+    }
+    if (changed) {
+        publish_machine_event(MachineEvent{
+            .kind = asserted ? MachineEventKind::InterruptAsserted
+                             : MachineEventKind::InterruptDeasserted,
+            .cycle = runtime_->primary_cpu.clint_mmio.mcycle,
+            .interrupt_source = irq,
+            .component = "platform_irq",
+        });
+    }
 }
 
 void Machine::set_hart_irq(HartId hart_id, InterruptType type, PrivilegeLevel priv, bool asserted) {
@@ -459,6 +501,8 @@ void Machine::set_hart_irq(HartId hart_id, InterruptType type, PrivilegeLevel pr
                                             : "external_interrupt_controller";
         trace().log_interrupt_signal(target_hart, kInterruptCauseBit | cause_code, is_asserted,
                                      source);
+        notify_interrupt_transition(hart_id, static_cast<uint32_t>(cause_code), is_asserted, source,
+                                    target_hart.clint_mmio.mcycle);
     }
 }
 
@@ -632,6 +676,7 @@ void Machine::service_pending_input() {
 void Machine::service_network() {
     if (runtime_->pci_net) runtime_->pci_net->poll_backend();
     if (runtime_->mmio_net) runtime_->mmio_net->poll_backend();
+    if (runtime_->ring_buffer_ethernet) runtime_->ring_buffer_ethernet->poll_backend();
 }
 
 void Machine::execute_runner_cycle() {
@@ -1094,6 +1139,23 @@ void OsRunner::finalize(Machine& machine) {
 }
 
 void Machine::reset_state() {
+    dma_engine_.clear();
+    std::vector<uint32_t> asserted_platform_irqs;
+    {
+        std::scoped_lock lock(platform_irq_state_mutex_);
+        for (const auto& [irq, asserted] : platform_irq_state_) {
+            if (asserted) asserted_platform_irqs.push_back(irq);
+        }
+        platform_irq_state_.clear();
+    }
+    for (const auto irq : asserted_platform_irqs) {
+        publish_machine_event(MachineEvent{
+            .kind = MachineEventKind::InterruptDeasserted,
+            .cycle = primary_hart().clint_mmio.mcycle,
+            .interrupt_source = irq,
+            .component = "platform_irq",
+        });
+    }
     tohost = 0;
     reboot_requested = false;
     exit_code = 0;
@@ -1109,6 +1171,7 @@ void Machine::reset_state() {
         std::memory_order_release);
     execution_state_.notify_all();
     primary_hart().reset();
+    if (runtime_->ring_buffer_ethernet) runtime_->ring_buffer_ethernet->reset();
     if (config.bram_prewarm) {
         prewarm_bram_caches();
     }
@@ -1259,6 +1322,41 @@ void Machine::publish_lifecycle_event(LifecycleEventKind kind, int exit_status) 
     for (const auto& observer : observers) {
         observer(event);
     }
+}
+
+auto Machine::add_event_observer(MachineEventObserver observer) -> MachineEventObserverId {
+    std::scoped_lock lock(event_observer_mutex_);
+    const auto id = next_event_observer_id_++;
+    event_observers_.emplace_back(id, std::move(observer));
+    return id;
+}
+
+void Machine::remove_event_observer(MachineEventObserverId observer_id) {
+    std::scoped_lock lock(event_observer_mutex_);
+    std::erase_if(event_observers_,
+                  [observer_id](const auto& entry) { return entry.first == observer_id; });
+}
+
+void Machine::publish_machine_event(const MachineEvent& event) {
+    std::vector<MachineEventObserver> observers;
+    {
+        std::scoped_lock lock(event_observer_mutex_);
+        observers.reserve(event_observers_.size());
+        for (const auto& [_, observer] : event_observers_) observers.push_back(observer);
+    }
+    for (const auto& observer : observers) observer(event);
+}
+
+void Machine::notify_interrupt_transition(HartId hart_id, uint32_t cause, bool asserted,
+                                          std::string_view source, uint64_t cycle) {
+    publish_machine_event(MachineEvent{
+        .kind =
+            asserted ? MachineEventKind::InterruptAsserted : MachineEventKind::InterruptDeasserted,
+        .cycle = cycle,
+        .hart = hart_id.val,
+        .interrupt_cause = cause,
+        .component = std::string(source),
+    });
 }
 
 auto Machine::is_paused() const -> bool {

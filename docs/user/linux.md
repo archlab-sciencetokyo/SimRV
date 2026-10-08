@@ -91,6 +91,35 @@ source linux-images/rv64/buildroot-fpga/setup.sh
 scripts/check-linux-artifacts.py linux-images/rv64/buildroot-fpga
 ```
 
+The builder also copies the matching SimRV firmware and DTB into Buildroot's `images/` directory.
+Pass the Buildroot output directory to SimRV to select firmware, DTB, and rootfs together:
+
+```mermaid
+flowchart LR
+    OUT[Buildroot output or published bundle]
+    OUT --> FW[Matching firmware]
+    OUT --> DTB[Matching device tree]
+    OUT --> ROOT[Root filesystem]
+    FW --> SIMRV[simrv --buildroot-output]
+    DTB --> SIMRV
+    ROOT --> SIMRV
+    SIMRV --> GUEST[Linux guest]
+```
+
+```bash
+build/rv64-release/simrv --cli --buildroot-output linux-build/buildroot-output-rv64
+```
+
+`--buildroot-output` accepts either the Buildroot output directory or its `images/` subdirectory.
+It also accepts the published `linux-images/<arch>/buildroot-fpga/` bundle directory. SimRV checks
+that all three files exist and reports the missing artifact by name before starting the machine.
+When the matching SimRV manifest is present, SimRV also uses its recorded DRAM size.
+
+!!! warning "Keep the firmware, DTB, and root filesystem together"
+    SimRV resolves these three files as one image set. Mixing artifacts from different builds can
+    produce a DTB with the wrong memory map or a root filesystem that does not match the guest's
+    kernel and boot arguments.
+
 ### Expanded debug profile
 
 The debug profile extends the Alpine GUI image with kernel diagnostics useful for boot and VirtIO
@@ -381,6 +410,9 @@ These are the canonical separable artifacts for FPGA work. `fw_dynamic.bin` is O
 for a bootloader that supplies the next-stage address and DTB; `Image` is the Linux kernel binary;
 `manifest.json` records exact versions, DTB memory size, kernel arguments, the rootfs label, and
 hashes. Validate a profile with `scripts/check-linux-artifacts.py` before handing it to FPGA tools.
+For a board handoff, compare the DTB memory range with the board DRAM, preserve the published
+rootfs UUID, and use the manifest boot arguments or provide equivalent console and root-device
+settings in the board firmware.
 
 #### `root.img` / `root.bin` (Root Filesystem)
 

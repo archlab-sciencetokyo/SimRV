@@ -39,6 +39,7 @@
 #include "simrv/tui/TuiKeybindings.hpp"
 #include "simrv/tui/TuiLayoutPolicy.hpp"
 #include "simrv/tui/TuiTheme.hpp"
+#include "simrv/tui/modals/LoadModal.hpp"
 #include "simrv/tui/modals/ToolPickerModal.hpp"
 #include "simrv/tui/panels/InspectorPane.hpp"
 #include "simrv/tui/panels/StatusBar.hpp"
@@ -94,7 +95,8 @@ extern "C" void emergency_terminal_restore() {
             g_osc22_pointer_enabled = 0;
         }
         const char* shutdown_seq =
-            "\033[0m\033[?1016l\033[?1006l\033[?1003l\033[?1000l\033[?25h\033[2J\033[H\033[?"
+            "\033[0m\033[?2004l\033[?1016l\033[?1006l\033[?1003l\033[?1000l\033[?25h\033[2J\033["
+            "H\033[?"
             "1049l\n";
         (void)(::write(STDOUT_FILENO, shutdown_seq, std::strlen(shutdown_seq)) == 0);
         g_tui_active = false;
@@ -113,7 +115,7 @@ static void handle_termination_signal(int sig) {
             g_osc22_pointer_enabled = 0;
         }
         auto constexpr shutdown_seq =
-            "\033[0m\033[?1016l\033[?1006l\033[?1003l\033[?1000l\033[?25h\033[2J\033[H\033[?1049l\n"sv;
+            "\033[0m\033[?2004l\033[?1016l\033[?1006l\033[?1003l\033[?1000l\033[?25h\033[2J\033[H\033[?1049l\n"sv;
         (void)(::write(STDOUT_FILENO, shutdown_seq.data(), shutdown_seq.size()) == 0);
         g_tui_active = false;
     }
@@ -137,9 +139,11 @@ void handle_sigwinch(int sig) {
 }  // namespace
 
 Tui::Tui(simrv::core::Machine& machine) : machine_(machine), modal_(machine) {
+    preferences_path_ = TuiPreferences::default_path();
+    student_guide_enabled_ = machine_.class_mode_enabled();
+    restore_preferences();
     main_thread_id_ = std::this_thread::get_id();
     last_speed_update_ = std::chrono::steady_clock::now();
-    student_guide_enabled_ = machine_.class_mode_enabled();
     mission_.configure(machine_.mission_id(), machine_.binary_path());
     update_trace_active_cache();
     vt_.set_scroll_offset_callback([this](int lines) -> void {
@@ -203,6 +207,10 @@ void Tui::initialize() {
     inspector_pane_->set_mission_progress(&mission_);
     terminal_pane_ = std::make_unique<TerminalPane>();
     status_bar_ = std::make_unique<StatusBar>(machine_, this);
+
+    if (workbench_slots_.empty()) workbench_slots_ = {{TuiRegPage::GPR, 0}};
+    if (focused_slot_index_ >= workbench_slots_.size()) focused_slot_index_ = 0;
+    inspector_pane_->set_page(workbench_slots_[focused_slot_index_].page);
 
     set_high_contrast(machine_.high_contrast_enabled());
     if (!machine_.is_paused()) {
@@ -359,7 +367,7 @@ void Tui::initialize() {
     g_tui_active = true;
 
     const char* init_seq =
-        "\033[?1049h\033[2J\033[H\033[?1000h\033[?1003h\033[?1006h\033[?1016h\033[?25l";
+        "\033[?1049h\033[2J\033[H\033[?1000h\033[?1003h\033[?1006h\033[?1016h\033[?2004h\033[?25l";
     (void)(::write(STDOUT_FILENO, init_seq, strlen(init_seq)) == 0);
 
     struct sigaction sa{};
@@ -378,6 +386,7 @@ void Tui::initialize() {
 }
 
 void Tui::shutdown() {
+    save_preferences();
     stop_ui_thread();
     if (backend_) backend_->detach();
     simrv::log::set_tui_callback(nullptr);
@@ -396,6 +405,43 @@ void Tui::shutdown() {
     sigemptyset(&sa.sa_mask);
     sa.sa_flags = SA_RESTART;
     sigaction(SIGWINCH, &sa, nullptr);
+}
+
+void Tui::restore_preferences() {
+    if (preferences_path_.empty()) return;
+    TuiPreferences preferences;
+    if (!preferences.load(preferences_path_)) return;
+    layout_ = preferences.layout;
+    workbench_slots_ = std::move(preferences.slots);
+    if (workbench_slots_.empty()) workbench_slots_ = {{TuiRegPage::GPR, 0}};
+    focused_slot_index_ = preferences.focused_slot;
+    user_inspector_width_ = preferences.inspector_width;
+    user_column_widths_ = preferences.column_widths;
+    set_theme_style(preferences.theme);
+    machine_.set_high_contrast_enabled(preferences.high_contrast);
+    machine_.set_class_mode_enabled(preferences.class_mode);
+    machine_.set_mouse_sensitivity(preferences.mouse_sensitivity);
+    student_guide_enabled_ = preferences.student_guide;
+    set_target_fps(preferences.target_fps);
+}
+
+void Tui::save_preferences() {
+    if (preferences_path_.empty()) return;
+    TuiPreferences preferences;
+    preferences.layout = layout_;
+    preferences.slots = workbench_slots_;
+    preferences.focused_slot = focused_slot_index_;
+    preferences.inspector_width = user_inspector_width_;
+    preferences.column_widths = user_column_widths_;
+    preferences.theme = get_active_theme_style();
+    preferences.high_contrast = machine_.high_contrast_enabled();
+    preferences.class_mode = machine_.class_mode_enabled();
+    preferences.student_guide = student_guide_enabled_;
+    preferences.target_fps = target_fps();
+    preferences.mouse_sensitivity = machine_.mouse_sensitivity();
+    if (!preferences.save(preferences_path_)) {
+        simrv::log::warn("Unable to save TUI preferences to {}", preferences_path_.string());
+    }
 }
 
 void Tui::start_ui_thread() {
@@ -3128,6 +3174,11 @@ auto Tui::handle_modal_keyboard_input(uint8_t byte, TuiKey key) -> bool {
     if (!is_modal_active()) return false;
 
     auto mtype = get_active_modal();
+    if (mtype == ModalType::LoadFilePicker) {
+        modal_.file_picker_input(byte, key);
+        render(true);
+        return true;
+    }
     if (handle_modal_settings(mtype, byte, key) || handle_modal_breakpoint(mtype, byte, key)) {
         return true;
     }
@@ -3309,12 +3360,31 @@ auto Tui::handle_modal_keyboard_input(uint8_t byte, TuiKey key) -> bool {
         return true;
     }
 
+    if ((mtype == ModalType::LoadBinary || mtype == ModalType::LoadDiskImage ||
+         mtype == ModalType::LoadCpuConfig) &&
+        (key == simrv::tui::TuiKey::CtrlO || byte == 15)) {
+        modal_.open_file_picker();
+        render(true);
+        return true;
+    }
+
     if (byte == 27 || key == simrv::tui::TuiKey::Esc) {
         close_modal();
     } else if (key == simrv::tui::TuiKey::Enter || key == simrv::tui::TuiKey::Newline)
         submit_modal();
-    else if (get_active_modal() == ModalType::LoadBinary &&
-             (byte == 9 || key == simrv::tui::TuiKey::Tab || key == simrv::tui::TuiKey::BackTab)) {
+    else if ((get_active_modal() == ModalType::LoadBinary ||
+              get_active_modal() == ModalType::LoadDiskImage ||
+              get_active_modal() == ModalType::LoadCpuConfig) &&
+             key == simrv::tui::TuiKey::Tab) {
+        auto input = modal_.get_input();
+        if (modals::LoadModal::complete_path(input)) {
+            modal_.set_input(std::move(input));
+            set_status_override("PATH COMPLETED");
+        } else {
+            set_status_override("NO PATH COMPLETION");
+        }
+        render(true);
+    } else if (get_active_modal() == ModalType::LoadBinary && key == simrv::tui::TuiKey::BackTab) {
         modal_.toggle_load_mode();
         render(true);
     } else if (byte == 8 || byte == 127 || key == simrv::tui::TuiKey::Backspace) {
@@ -3581,6 +3651,45 @@ auto Tui::handle_navigation_keyboard_input(uint8_t byte, TuiKey key) -> bool {
 }
 
 auto Tui::handle_normal_keyboard_input(uint8_t byte, TuiKey key) -> void {
+    if (terminal_search_active_) {
+        if (byte == 27 || key == TuiKey::Esc) {
+            terminal_search_active_ = false;
+            terminal_search_query_.clear();
+            clear_status_override();
+        } else if (key == TuiKey::Enter || key == TuiKey::Newline) {
+            terminal_search_active_ = false;
+            terminal_search_cursor_ = vt_.get_lines_count();
+            if (!search_terminal_scrollback(true)) {
+                set_status_override("NO MATCH IN UART SCROLLBACK");
+            }
+        } else if (byte == 8 || byte == 127 || key == TuiKey::Backspace) {
+            if (!terminal_search_query_.empty()) terminal_search_query_.pop_back();
+        } else if (byte >= 32 && byte <= 126) {
+            terminal_search_query_.push_back(static_cast<char>(byte));
+        }
+        if (terminal_search_active_) {
+            set_status_override(
+                std::format("SEARCH UART: {}  [Enter] Find [Esc] Cancel", terminal_search_query_));
+        }
+        render(true);
+        return;
+    }
+    if ((byte == 0x06 || key == TuiKey::CtrlF || byte == '/') &&
+        focused_page() == TuiRegPage::CONSOLE) {
+        terminal_search_active_ = true;
+        terminal_search_query_.clear();
+        set_status_override("SEARCH UART: type text, [Enter] Find, [Esc] Cancel");
+        render(true);
+        return;
+    }
+    if ((byte == 'n' || byte == 'N') && !terminal_search_query_.empty() &&
+        focused_page() == TuiRegPage::CONSOLE) {
+        if (!search_terminal_scrollback(byte == 'N')) {
+            set_status_override("NO MORE UART MATCHES");
+            render(true);
+        }
+        return;
+    }
     if (selection_.is_active && (byte == 3 || byte == 'y')) {
         copy_active_selection();
         clear_selection();
@@ -3677,6 +3786,33 @@ auto Tui::handle_normal_keyboard_input(uint8_t byte, TuiKey key) -> void {
             render(true);
         }
     }
+}
+
+auto Tui::search_terminal_scrollback(bool reverse) -> bool {
+    if (terminal_search_query_.empty()) return false;
+    const int line_count = vt_.get_lines_count();
+    if (line_count <= 0) return false;
+    int line = terminal_search_cursor_;
+    if (line < 0 || line >= line_count)
+        line = reverse ? line_count - 1 : 0;
+    else if (reverse)
+        --line;
+    else
+        ++line;
+    const int width = std::max(1, cached_term_width_);
+    while (reverse ? line >= 0 : line < line_count) {
+        const auto text = vt_.get_text_in_range(line, 0, line, width - 1);
+        if (text.find(terminal_search_query_) != std::string::npos) {
+            terminal_search_cursor_ = line;
+            scroll_offset_ = std::max(0, line_count - line - 1);
+            set_status_override(
+                std::format("UART MATCH at scrollback line {}  [n] Next [N] Previous", line + 1));
+            render(true);
+            return true;
+        }
+        line += reverse ? -1 : 1;
+    }
+    return false;
 }
 
 void Tui::pause_loop() {
@@ -4058,6 +4194,11 @@ auto Tui::handle_arrow_key_sequence() -> bool {
     const bool left = esc_buf_ == "\033[D" || esc_buf_ == "\033OD";
     if (up || down) {
         const int direction = up ? -1 : 1;
+        if (get_active_modal() == ModalType::LoadFilePicker) {
+            modal_.move_file_picker_cursor(direction);
+            render(true);
+            return true;
+        }
         if (get_active_modal() == ModalType::Help) {
             modal_.scroll_help(direction);
             render(true);
@@ -4243,6 +4384,34 @@ auto Tui::consume_control_sequence(uint8_t first_byte) -> bool {
             (byte >= 'A' && byte <= 'Z' && byte != 'O') || (byte >= 'a' && byte <= 'z')) {
             break;
         }
+    }
+
+    if (esc_buf_ == "\033[200~") {
+        constexpr std::string_view end_marker = "\033[201~";
+        std::string pasted;
+        pasted.reserve(4096);
+        uint8_t pasted_byte = 0;
+        while (pasted.size() < 8 * 1024 * 1024) {
+            if (poll_keyboard(pasted_byte)) {
+                pasted.push_back(static_cast<char>(pasted_byte));
+                if (pasted.ends_with(end_marker)) {
+                    pasted.resize(pasted.size() - end_marker.size());
+                    break;
+                }
+                continue;
+            }
+            pollfd fd{STDIN_FILENO, POLLIN, 0};
+            if (::poll(&fd, 1, 1000) <= 0) break;
+        }
+        if (!is_paused() && !is_modal_active()) {
+            for (const unsigned char pasted_char : pasted) {
+                write_guest_input(normalize_guest_terminal_byte(pasted_char));
+            }
+        } else {
+            set_status_override("RESUME THE GUEST TO PASTE UART INPUT");
+        }
+        render(true);
+        return true;
     }
 
     // 1. Mouse reporting
@@ -4516,6 +4685,10 @@ auto Tui::consume_control_sequence(uint8_t first_byte) -> bool {
     if (handle_arrow_key_sequence()) return true;
 
     if (esc_buf_.size() == 1) {
+        if (terminal_search_active_) {
+            handle_normal_keyboard_input(27, simrv::tui::TuiKey::Esc);
+            return true;
+        }
         if (is_modal_active()) {
             close_modal();
             return true;

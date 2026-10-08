@@ -12,6 +12,7 @@
 #include <optional>
 #include <span>
 #include <string>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -54,6 +55,7 @@ class VirtioMmioGpu;
 class VirtioMmioInput;
 class VirtioMmioSound;
 class VirtioMmioNet;
+class PlatformDeviceRegistry;
 }  // namespace simrv::device
 
 namespace simrv::memory {
@@ -131,6 +133,7 @@ class Machine final : public core::IInterruptController {
     };
 
     std::unique_ptr<Runtime> runtime_;
+    std::unique_ptr<simrv::device::PlatformDeviceRegistry> device_registry_;
     Counter next_checkpoint_cycle_ = 0;
 
    public:
@@ -157,9 +160,15 @@ class Machine final : public core::IInterruptController {
     Machine(Machine&&) = delete;
     auto operator=(Machine&&) -> Machine& = delete;
     [[nodiscard]] auto configuration() const noexcept -> const MachineConfig& { return config; }
+    /** Register platform device providers before initialize(); providers are scoped to this
+     * Machine. */
+    [[nodiscard]] auto device_registry() noexcept -> simrv::device::PlatformDeviceRegistry&;
     [[nodiscard]] auto tui_enabled() const noexcept -> bool { return config.tui.enabled; }
     [[nodiscard]] auto mouse_sensitivity() const noexcept -> double {
         return config.tui.mouse_sensitivity;
+    }
+    void set_mouse_sensitivity(double sensitivity) noexcept {
+        config.tui.mouse_sensitivity = sensitivity;
     }
     [[nodiscard]] auto high_contrast_enabled() const noexcept -> bool {
         return config.tui.high_contrast;
@@ -353,6 +362,11 @@ class Machine final : public core::IInterruptController {
     /// Subscribe to lifecycle observations at the machine boundary.
     [[nodiscard]] auto add_lifecycle_observer(LifecycleObserver observer) -> LifecycleObserverId;
     void remove_lifecycle_observer(LifecycleObserverId observer_id);
+    /// Subscribe to interrupt line and DMA transfer lifecycle observations.
+    [[nodiscard]] auto add_event_observer(MachineEventObserver observer) -> MachineEventObserverId;
+    void remove_event_observer(MachineEventObserverId observer_id);
+    void notify_interrupt_transition(HartId hart, uint32_t cause, bool asserted,
+                                     std::string_view source, uint64_t cycle);
     /// Reset runtime state flags and CPU state.
     void reset_state();
     /// Dynamically switch execution engine (e.g. IA <-> CA) without reloading/rebooting.
@@ -552,6 +566,12 @@ class Machine final : public core::IInterruptController {
     mutable std::mutex lifecycle_observer_mutex_;
     std::vector<std::pair<LifecycleObserverId, LifecycleObserver>> lifecycle_observers_;
     LifecycleObserverId next_lifecycle_observer_id_ = 1;
+    void publish_machine_event(const MachineEvent& event);
+    mutable std::mutex event_observer_mutex_;
+    std::vector<std::pair<MachineEventObserverId, MachineEventObserver>> event_observers_;
+    MachineEventObserverId next_event_observer_id_ = 1;
+    std::mutex platform_irq_state_mutex_;
+    std::unordered_map<uint32_t, bool> platform_irq_state_;
 
     uint64_t last_tui_check_cycles_ = 0;
     std::chrono::steady_clock::time_point last_tui_update_{};
