@@ -801,6 +801,21 @@ void test_load_modal_path_completion() {
     simrv::tui::TuiTestAccess::handle_modal_key(key_tui, 15, simrv::tui::TuiKey::CtrlO);
     expect(simrv::tui::TuiTestAccess::modal(key_tui).file_picker_active(),
            "Ctrl-O opens the load modal file browser");
+    expect(simrv::tui::TuiTestAccess::consume_control_seq(key_tui, "\x1b") &&
+               simrv::tui::TuiTestAccess::modal(key_tui).get_type() ==
+                   simrv::tui::ModalType::LoadBinary,
+           "Escape returns from the file browser to its load dialog");
+
+    modal.open(simrv::tui::ModalType::LoadBinary, nullptr, 0);
+    modal.set_input((root / "subdir").string() + fs::path::preferred_separator);
+    modal.open_file_picker();
+    modal.file_picker_input(13, simrv::tui::TuiKey::Enter);  // Select the leading ".." entry.
+    modal.file_picker_input('p', simrv::tui::TuiKey::p);
+    modal.file_picker_input('r', simrv::tui::TuiKey::r);
+    modal.file_picker_input('o', simrv::tui::TuiKey::o);
+    modal.file_picker_input(13, simrv::tui::TuiKey::Enter);
+    expect(modal.get_input() == (root / "program.elf").string(),
+           "the leading .. entry navigates to the parent directory");
 
     modal.open(simrv::tui::ModalType::LoadBinary, nullptr, 0);
     modal.toggle_load_mode();

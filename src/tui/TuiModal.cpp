@@ -138,6 +138,10 @@ void TuiModal::refresh_file_picker() {
         if (ld != rd) return ld;
         return left.filename().string() < right.filename().string();
     });
+    if (file_picker_filter_.empty()) {
+        file_picker_entries_.insert(file_picker_entries_.begin(),
+                                    (file_picker_directory_ / "..").lexically_normal());
+    }
     if (file_picker_select_directory_)
         file_picker_entries_.insert(file_picker_entries_.begin(), ".");
     file_picker_cursor_ = std::clamp(
@@ -154,6 +158,14 @@ void TuiModal::accept_file_picker_entry() {
     namespace fs = std::filesystem;
     if (file_picker_entries_.empty()) return;
     const auto selected = file_picker_entries_[static_cast<size_t>(file_picker_cursor_)];
+    const auto parent_entry = (file_picker_directory_ / "..").lexically_normal();
+    if (selected == parent_entry) {
+        file_picker_directory_ = selected;
+        file_picker_filter_.clear();
+        file_picker_cursor_ = 0;
+        refresh_file_picker();
+        return;
+    }
     if (file_picker_select_directory_ && selected == fs::path(".")) {
         input_ = file_picker_directory_.string();
         active_modal_ = file_picker_return_modal_;
@@ -928,8 +940,13 @@ void TuiModal::render_overlay(std::vector<std::string>& lines, int term_width,
                 int first = std::max(0, file_picker_cursor_ - kMaxEntries / 2);
                 first = std::min(first, std::max(0, count - kMaxEntries));
                 const int last = std::min(count, first + kMaxEntries);
+                const auto parent_entry = (file_picker_directory_ / "..").lexically_normal();
                 for (int i = first; i < last; ++i) {
                     const auto& entry = file_picker_entries_[static_cast<size_t>(i)];
+                    if (entry == parent_entry) {
+                        add_row(std::format("{} ..", i == file_picker_cursor_ ? ">" : " "));
+                        continue;
+                    }
                     if (file_picker_select_directory_ && entry == std::filesystem::path(".")) {
                         add_row(std::format("{} [Use this directory]",
                                             i == file_picker_cursor_ ? ">" : " "));

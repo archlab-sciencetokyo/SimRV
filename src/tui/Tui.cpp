@@ -4689,6 +4689,11 @@ auto Tui::consume_control_sequence(uint8_t first_byte) -> bool {
             handle_normal_keyboard_input(27, simrv::tui::TuiKey::Esc);
             return true;
         }
+        if (get_active_modal() == ModalType::LoadFilePicker) {
+            modal_.file_picker_input(27, simrv::tui::TuiKey::Esc);
+            render(true);
+            return true;
+        }
         if (is_modal_active()) {
             close_modal();
             return true;
