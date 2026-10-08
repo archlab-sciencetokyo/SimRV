@@ -106,15 +106,17 @@ jobs:
         run: |
           mkdir -p site
           SIMRV_DOCS_SITE_URL="https://archlab-sciencetokyo.github.io/SimRV/stable/" \
-            SIMRV_DOCS_SITE_DIR="$GITHUB_WORKSPACE/site/stable" \
+            SIMRV_DOCS_SITE_DIR="$GITHUB_WORKSPACE/docs-main/site" \
             SIMRV_DOCS_EDIT_URI="edit/main/docs/" \
             SIMRV_DOCS_CHANNEL="stable" \
             docs-dev/.venv/bin/zensical build --strict --config-file docs-main/mkdocs.yml
           SIMRV_DOCS_SITE_URL="https://archlab-sciencetokyo.github.io/SimRV/dev/" \
-            SIMRV_DOCS_SITE_DIR="$GITHUB_WORKSPACE/site/dev" \
+            SIMRV_DOCS_SITE_DIR="$GITHUB_WORKSPACE/docs-dev/site" \
             SIMRV_DOCS_EDIT_URI="edit/dev/docs/" \
             SIMRV_DOCS_CHANNEL="development" \
             docs-dev/.venv/bin/zensical build --strict --config-file docs-dev/mkdocs.yml
+          cp -a docs-main/site site/stable
+          cp -a docs-dev/site site/dev
           cp -a site/stable site/latest
           printf '%s\n' \
             '[' \
