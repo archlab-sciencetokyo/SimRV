@@ -41,6 +41,7 @@ jobs:
           ':(exclude)mkdocs.yml' \
           ':(exclude)pyproject.toml' \
           ':(exclude)uv.lock' \
+          ':(exclude).github/workflows/c-cpp.yml' \
           ':(exclude).github/workflows/docs.yml')"
         if [[ -n "$changed_files" ]]; then
           echo "cpp=true" >> "$GITHUB_OUTPUT"
