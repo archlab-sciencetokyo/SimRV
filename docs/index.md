@@ -7,8 +7,8 @@
 <p class="simrv-hero-copy">Explore RV32 and RV64 systems with fast architectural simulation, cycle-accurate pipelines, custom SoCs, and full-system Linux.</p>
 
 <div class="simrv-hero-actions">
-  <a class="md-button md-button--primary" href="user/install.md">Get started</a>
-  <a class="md-button" href="architecture/overview.md">Explore the architecture</a>
+  <a class="md-button md-button--primary" href="user/install/">Get started</a>
+  <a class="md-button" href="architecture/overview/">Explore the architecture</a>
 </div>
 
 </section>
