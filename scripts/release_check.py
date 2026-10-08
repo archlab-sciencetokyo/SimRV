@@ -40,6 +40,11 @@ def verify_metadata(manifest: dict) -> None:
         if not (SCHEMA_DIR / schema).is_file():
             fail(f"missing schema: release/schemas/{schema}")
     version = source_version()
+    citation_template = (ROOT / "CITATION.cff.in").read_text(encoding="utf-8")
+    expected_citation = citation_template.replace("@SIMRV_VERSION@", version)
+    citation_text = (ROOT / "CITATION.cff").read_text(encoding="utf-8")
+    if citation_text != expected_citation:
+        fail("CITATION.cff is stale; configure CMake and build the update-citation target")
     expected_tag = f"v{version}"
     if manifest.get("version") != version:
         fail(f"manifest version {manifest.get('version')!r} != source version {version!r}")
