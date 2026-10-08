@@ -13,6 +13,10 @@ concurrency:
   group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
+env:
+  RISCV_TESTS_REVISION: 933a897d8631773f385d45938facc466dddc7514
+  VECTOR_TESTS_REVISION: f76bff121dce91b6b23e1d37be77a5e44af914c3
+
 jobs:
   changes:
     runs-on: ubuntu-latest
@@ -43,10 +47,6 @@ jobs:
         else
           echo "cpp=false" >> "$GITHUB_OUTPUT"
         fi
-
-env:
-  RISCV_TESTS_REVISION: 933a897d8631773f385d45938facc466dddc7514
-  VECTOR_TESTS_REVISION: f76bff121dce91b6b23e1d37be77a5e44af914c3
 
   build:
     needs: changes
