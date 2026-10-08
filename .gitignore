@@ -57,7 +57,6 @@ benchmark-modes.json
 benchmark-*.json
 benchmark-*.md
 Testing/
-repro/results/
 Makefrag
 
 # Generated documentation & sites (source Markdown remains tracked)

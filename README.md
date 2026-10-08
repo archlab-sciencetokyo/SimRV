@@ -288,19 +288,6 @@ RISCV_TESTS_DIR=/path/to/riscv-tests ctest --test-dir build/rv64-release --outpu
 RISCV_TESTS_DIR=/path/to/riscv-tests ctest --test-dir build/rv32-release --output-on-failure -L rv32gc
 ```
 
-### Reproducing research evidence
-
-Quick local validation uses installed dependencies and takes minutes after a build:
-
-```bash
-python3 scripts/reproduce.py --mode quick --output repro/results
-```
-
-The full RV32/RV64 correctness, Linux, vector, sanitizer, and performance workflow can take hours
-and requires substantial build storage. It downloads pinned upstream sources into `.cache/repro`
-but does not redistribute them. Exact preparation commands, schemas, and output contents are in
-[the research companion guide](repro/README.md).
-
 ---
 
 ## Co-Simulation & Debugging
@@ -364,7 +351,6 @@ for portable archive, RPM, DEB, upgrade, and removal instructions.
 - `CHANGELOG.md`: Version release log
 - `docs/hardware/models.md`: CPU model configuration framework, parameters, wizard, and RTL calibration
 - `docs/user/tui.md`: TUI input focus, rendering layers, and test coverage
-- `repro/`: Research-companion scripts and reproducibility instructions
 - `release/`: Release metadata, evidence schemas, and publishing inputs
 
 ---

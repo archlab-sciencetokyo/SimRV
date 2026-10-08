@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Validate checked-in SimRV research manifests against their JSON schemas."""
+"""Validate the checked-in SimRV release manifest against its JSON schema."""
 
 import json
 import pathlib
@@ -9,7 +9,6 @@ from jsonschema import Draft202012Validator
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 DOCUMENTS = (
     (ROOT / "release/schemas/release-manifest.schema.json", ROOT / "release/release-manifest.json"),
-    (ROOT / "release/schemas/experiment.schema.json", ROOT / "repro/experiment-manifest.json"),
 )
 
 

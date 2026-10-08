@@ -17,16 +17,12 @@ This directory contains development, benchmarking, release verification, and Lin
 - **`benchmark_modes.py`**: Microarchitecture and simulation mode sweeps (`fast`, `detailed`, `cycle-accurate`, `three-stage`, `dual-issue`, `five-stage`).
 - **`evaluate_rtl_parity.py`**: Adapter-driven RTL/SimRV architectural and cycle-parity runner. Reusable target adapters and trace utilities live in `rtl_parity/`.
 
-### 2. Release Qualification & Reproducibility
+### 2. Release Qualification
 
 - **`release_gate.py`**: Complete local release qualification matrix running multi-compiler (GCC, Clang) and dual-architecture (RV32, RV64) clean gate builds.
 - **`release_check.py`**: Verifies release manifest constraints, binary ELF headers, MISA extensions, and version parity.
+- **`validate_schemas.py`**: Validates the checked-in release manifest against its JSON schema.
 - **`release_evidence.py`**: Captures machine-readable evidence metadata for CI gates and qualification manifests.
-- **`reproduce.py`**: Unified entry point for research reproduction workflows:
-  - `--prepare`: Clones and verifies pinned, non-redistributed dependencies (`riscv-tests`, `vector-tests`, `spike`).
-  - `--package`: Assembles deterministic `.tar.gz` and `.sha256` research reproducibility bundles.
-  - Default: Executes reproducible experiment sweeps and generates qualification reports.
-
 ### 3. Linux Kernel, Rootfs & Integration
 
 - **`build-linux-image.sh`**: Multi-stage compiler for OpenSBI, Linux kernel, and BusyBox/Alpine rootfs images. Includes storage management flags (`--clean-build`, `--clean-old-kernels`).

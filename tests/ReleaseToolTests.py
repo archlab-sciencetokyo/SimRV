@@ -155,13 +155,6 @@ class ReleaseToolTests(unittest.TestCase):
         self.assertEqual(first_id, second_id)
         self.assertEqual(len(first_id), 16)
 
-    def test_experiment_manifest_declares_stopping_policies(self):
-        manifest = json.loads((ROOT / "repro/experiment-manifest.json").read_text())
-        ids = [item["id"] for item in manifest["performance"]["workloads"]]
-        self.assertEqual(len(ids), len(set(ids)))
-        self.assertIn(0, [item["instruction_limit"]
-                          for item in manifest["performance"]["workloads"]])
-
     def test_benchmark_commands_share_isa_and_symmetric_limit(self):
         isa = "rv64gc_zicsr_zifencei_zicntr"
         simrv = benchmark.simrv_benchmark_command(
