@@ -65,11 +65,11 @@ suffixes; the default is 256 MiB for bare metal and 1 GiB for Linux.
 .B \-j, \-\-harts, \-\-smp \fIn\fR
 Configure one to sixteen simulated harts.
 .TP
-.B \-\-smp-quantum=\fIn\fR
-Set the round-robin SMP scheduling quantum in cycles.
+.B \-\-smp-mode \fImode\fR
+Select \fBcycle-accurate\fR deterministic global-cycle scheduling or \fBcycle-oriented\fR parallel scheduling.
 .TP
-.B \-\-smp-multithreaded
-Run SMP simulation workers on multiple host threads.
+.B \-\-smp-quantum=\fIn\fR
+Set the cycle-oriented synchronization quantum.
 .TP
 .B \-\-isa=\fIstring\fR
 Select the guest ISA preset: \fBrv32i\fR, \fBrv32imac\fR, \fBrv32g\fR, \fBrv32gc\fR,

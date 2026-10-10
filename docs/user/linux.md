@@ -163,7 +163,10 @@ python3 scripts/check-linux-artifacts.py linux-images/rv64/alpine-debug
 The same profile is available through CMake as `linux-images-debug` when
 `SIMRV_ENABLE_LINUX_TOOLS` is enabled. The manifest records the exact kernel
 configuration hash and enabled debug feature set for reproducibility. Because this is an explicit
-early-userspace debug profile, its DTB also includes `rdinit=/init`.
+early-userspace debug profile, its DTB also includes `rdinit=/init` and `loglevel=7`. Normal
+generated device trees use `loglevel=4` and omit printk timestamp/caller formatting to reduce boot
+console overhead. Pass the profile's DTB with `-f "$SIMRV_LINUX_DTB"` to use its image-specific
+boot arguments; otherwise SimRV generates a quiet default device tree.
 
 All profiles retain conventional built-in initramfs, serial console, VirtIO, ext4/JBD2, procfs,
 sysfs, and tmpfs support. Debug tracing is deliberately excluded from the normal GUI and FPGA

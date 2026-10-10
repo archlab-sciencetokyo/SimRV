@@ -94,6 +94,17 @@ def main() -> int:
             if not re.search(rf"^LABEL={re.escape(label)}\s+/\s+ext4\s", fstab, re.MULTILINE):
                 fail("/etc/fstab does not mount the published rootfs label")
 
+            if manifest.get("rootfs") == "alpine":
+                inittab = subprocess.run(
+                    [debugfs, "-R", "cat /etc/inittab", str(images / "rootfs.img")],
+                    capture_output=True,
+                    text=True,
+                ).stdout
+                if "::once:/usr/local/bin/simrv-network" not in inittab:
+                    fail("Alpine network setup must run asynchronously so serial getty can start")
+                if "::sysinit:/usr/local/bin/simrv-network" in inittab:
+                    fail("Alpine network setup must not block serial getty during sysinit")
+
     print(f"Linux artifact validation passed: {images}")
     return 0
 

@@ -154,7 +154,7 @@ confirming that socket activity stays on the server thread.
 
 ## CA timing and ordering
 
-Without `--smp-multithreaded`, CA uses deterministic global cycles. On each cycle SimRV:
+In `cycle-accurate` mode, CA uses deterministic global cycles. On each cycle SimRV:
 
 1. Advances hart 0, then started secondary harts in ascending order.
 2. Advances the shared TileLink/coherence fabric once.
@@ -166,16 +166,17 @@ presentation work. It does not give one hart a longer modeled time slice: all st
 advance exactly once per global cycle. Debugging, tracing, breakpoints, delayed execution, and
 single-step reduce the batch to one cycle.
 
-With `--smp-multithreaded`, secondary CA harts run on independent host workers without a per-cycle
-barrier. Hart 0 owns advancement of the shared TileLink fabric and timer, while coherent operations
-are synchronized. This mode provides real host parallelism, but relative hart cycle counts and
-inter-hart timing are intentionally nondeterministic. Pause, reboot, reconfiguration, shutdown, and
-single-step first quiesce the workers; a single step then advances one deterministic all-hart cycle.
+With `--smp-mode cycle-oriented`, harts execute each global cycle on separate worker threads and
+synchronize at the cycle boundary before the shared fabric and timers advance. Requests from that
+cycle are ordered by logical cycle, hart ID, and per-hart issue order. Interrupt lines and hart
+lifecycle changes are applied at hart boundaries. `--smp-quantum N` groups up to N complete global
+cycles into one host-side runner turn; cycle ordering remains synchronized within the batch. Pause,
+reboot, reconfiguration, shutdown, and single-step first quiesce the workers.
 
 !!! warning "Use deterministic CA for cycle parity"
-    `--smp-multithreaded` is useful for exploring parallel workloads, but inter-hart event timing is
-    nondeterministic. Use the default deterministic cycle scheduler when comparing cycle traces or
-    validating cycle-by-cycle behavior against RTL.
+    Use `cycle-accurate` mode for cycle traces and cycle-by-cycle RTL comparisons. `cycle-oriented`
+    mode keeps global cycle counts and shared-request ordering deterministic while executing hart
+    work in parallel; synchronization overhead can outweigh the parallel work on short workloads.
 
 The CPU model controls pipeline, cache, and interconnect timing. Cache hit/miss
 latencies and TileLink request/response latencies are positive whole-cycle

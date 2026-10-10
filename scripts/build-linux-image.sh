@@ -670,13 +670,10 @@ make ARCH=riscv CROSS_COMPILE="$CROSS_COMPILE" "$LINUX_DEFCONFIG"
 ./scripts/config --disable CONFIG_RISCV_EMULATED_UNALIGNED_ACCESS
 ./scripts/config --enable CONFIG_CC_OPTIMIZE_FOR_PERFORMANCE
 
-# Conventional low-overhead boot diagnostics. These are useful on both the
-# GUI and FPGA profiles and make serial boot timing unambiguous.
-./scripts/config --enable CONFIG_PRINTK_TIME
-./scripts/config --enable CONFIG_PRINTK_CALLER
-
 if [[ "$PROFILE" == "debug" ]]; then
     print_info "Enabling expanded kernel debug/profile instrumentation."
+    ./scripts/config --enable CONFIG_PRINTK_TIME
+    ./scripts/config --enable CONFIG_PRINTK_CALLER
     ./scripts/config --enable CONFIG_DEBUG_KERNEL
     ./scripts/config --enable CONFIG_DEBUG_FS
     ./scripts/config --enable CONFIG_KALLSYMS
@@ -690,6 +687,10 @@ if [[ "$PROFILE" == "debug" ]]; then
     ./scripts/config --enable CONFIG_DEBUG_INFO
     ./scripts/config --enable CONFIG_DEBUG_INFO_DWARF5
 else
+    # Keep normal guest boots lean; verbose kernel messages and their extra
+    # timestamp/caller formatting are reserved for the explicit debug profile.
+    ./scripts/config --disable CONFIG_PRINTK_TIME
+    ./scripts/config --disable CONFIG_PRINTK_CALLER
     ./scripts/config --disable CONFIG_DEBUG_FS
     ./scripts/config --disable CONFIG_KALLSYMS_ALL
     ./scripts/config --disable CONFIG_FUNCTION_GRAPH_TRACER
@@ -732,8 +733,9 @@ else
 fi
 sed -i -E "s#root=([^ ]+)#root=LABEL=${ROOTFS_LABEL}#; s# rdinit=/init##" "$GENERATED_DTS"
 if [[ "$PROFILE" == "debug" ]]; then
-    # The debug image is an explicit early-userspace/recovery profile.
-    sed -i 's# rw loglevel=7# rw rdinit=/init loglevel=7#' "$GENERATED_DTS"
+    # The debug image is an explicit early-userspace/recovery profile with
+    # verbose kernel messages retained.
+    sed -i 's# rw loglevel=4# rw rdinit=/init loglevel=7#' "$GENERATED_DTS"
 fi
 
 # Compile DTS to DTB
@@ -859,6 +861,7 @@ else
     printf '%s\n' "${ALPINE_MIRROR}/main" "${ALPINE_MIRROR}/community" > "$ROOTFS_DISK_DIR/etc/repositories"
     cat > "$ROOTFS_DISK_DIR/etc/inittab" <<'EOF'
 ::sysinit:/usr/local/bin/simrv-early-boot
+::once:/usr/local/bin/simrv-network
 ttyS0::respawn:/sbin/getty -L 115200 ttyS0 vt100
 EOF
     echo "SimRV" > "$ROOTFS_DISK_DIR/etc/hostname"
@@ -1032,12 +1035,7 @@ if ! /bin/hostname -F /etc/hostname; then
     exit 1
 fi
 
-log "Configuring available network interfaces"
-if ! /usr/local/bin/simrv-network; then
-    log "ERROR: network setup failed"
-    exit 1
-fi
-log "Early setup complete"
+log "Early setup complete; network setup will run in the background"
 EOF
     chmod 755 "$ROOTFS_DISK_DIR/usr/local/bin/simrv-early-boot"
     cat > "$ROOTFS_DISK_DIR/root/.profile" <<'EOF'

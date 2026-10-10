@@ -52,6 +52,52 @@ platform metadata and `[device.<kind>]` for device entries, including `[device.u
 with `device_policy = "explicit"` registers only the devices listed in its file; presets that omit
 that policy retain their existing implicit platform devices.
 
+### SMP and shared cache topology
+
+SoC profiles can describe homogeneous hart groups and their shared cache hierarchy. For example:
+
+```ini
+[smp]
+hart_count = 4
+mode = "cycle-accurate" # or "cycle-oriented"
+synchronization_quantum = 64
+
+[smp.cluster.0]
+harts = 0, 1
+l2_enabled = true
+l2_capacity_bytes = 65536
+l2_associativity = 4
+l2_line_bytes = 32
+l2_hit_latency = 8
+l2_miss_latency = 12
+
+[smp.cluster.1]
+harts = 2, 3
+l2_enabled = true
+l2_capacity_bytes = 65536
+l2_associativity = 4
+
+[smp.l3]
+enabled = true
+capacity_bytes = 524288
+associativity = 16
+line_bytes = 32
+hit_latency = 1
+miss_latency = 1
+```
+
+Each hart has a private instruction and data L1. L2 is optional and shared by harts in the same
+cluster; L3 is an optional global shared cache. Cache geometry uses 32-byte coherent lines and
+power-of-two set and way counts. The current model uses one CPU model across all harts.
+
+The `cycle-accurate` mode advances harts and shared devices in deterministic global-cycle order.
+`cycle-oriented` executes each global cycle on hart worker threads and synchronizes at the cycle
+boundary before advancing shared devices. Shared requests are resolved by logical cycle, hart ID,
+and per-hart issue order. The synchronization quantum groups global cycles into host-side runner
+turns; it does not let one hart advance simulated time ahead of another. Cross-hart interrupts and
+hart lifecycle changes take effect at the destination hart's next execution boundary. Command-line
+options `--harts`, `--smp-mode`, and `--smp-quantum` override the profile values.
+
 Device-specific SoC entries use `[device.<kind>]` sections. Supported kinds include `uart`,
 `rtc`, `dma`, `virtio-block`, `virtio-console`, `virtio-rng`, `virtio-gpu`, `virtio-input`,
 `virtio-sound`, and `virtio-net`; each can override `name`, `base`, `size`, and `irq`. The same
