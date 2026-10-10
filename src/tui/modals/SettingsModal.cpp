@@ -37,7 +37,9 @@ void SettingsModal::open(SettingsDraft& draft, const simrv::core::Machine& machi
     draft.lockstep_mode = machine.lockstep_enabled();
     draft.num_harts = machine.execution_config().num_harts;
     draft.smp_quantum = machine.execution_config().smp_quantum;
-    draft.smp_multithreaded = machine.execution_config().smp_multithreaded;
+    draft.smp_cycle_oriented =
+        machine.execution_config().smp_mode.value_or(machine.configuration().soc.smp.mode) ==
+        simrv::core::SmpMode::CycleOriented;
     draft.platform_profile = static_cast<uint8_t>(machine.platform_profile());
     draft.dram_size_mb = machine.memory_geometry().dram_size / (1024ULL * 1024ULL);
     draft.net_mode = machine.network_mode();
@@ -133,8 +135,8 @@ void SettingsModal::adjust_setting(SettingsDraft& draft, int dir,
                         v, 1, static_cast<int>(simrv::core::ExecutionConfig::kMaxHarts)));
                     break;
                 }
-                case 5:  // SMP Threading Model
-                    draft.smp_multithreaded = !draft.smp_multithreaded;
+                case 5:  // SMP Execution Mode
+                    draft.smp_cycle_oriented = !draft.smp_cycle_oriented;
                     break;
                 case 6: {  // SMP Scheduler Quantum (insns/slice)
                     static constexpr std::array<uint32_t, 12> kQuantumLevels = {
@@ -278,7 +280,11 @@ auto SettingsModal::submit(const SettingsDraft& draft, simrv::core::Machine& mac
     next.network.mode = draft.net_mode;
     next.execution.num_harts = draft.num_harts;
     next.execution.smp_quantum = draft.smp_quantum;
-    next.execution.smp_multithreaded = draft.smp_multithreaded;
+    next.execution.smp_mode = draft.smp_cycle_oriented ? simrv::core::SmpMode::CycleOriented
+                                                       : simrv::core::SmpMode::CycleAccurate;
+    next.soc.smp.resize_harts(draft.num_harts);
+    next.soc.smp.mode = *next.execution.smp_mode;
+    next.soc.smp.synchronization_quantum = draft.smp_quantum;
     next.debug.lockstep_enabled = draft.lockstep_mode;
 
     for (size_t hart = 0; hart < machine.num_harts(); ++hart) {
@@ -294,7 +300,8 @@ auto SettingsModal::submit(const SettingsDraft& draft, simrv::core::Machine& mac
         dram_size_changed || profile_changed ||
         next.execution.num_harts != machine.execution_config().num_harts ||
         next.execution.smp_quantum != machine.execution_config().smp_quantum ||
-        next.execution.smp_multithreaded != machine.execution_config().smp_multithreaded ||
+        next.execution.smp_mode.value_or(next.soc.smp.mode) !=
+            machine.execution_config().smp_mode.value_or(machine.configuration().soc.smp.mode) ||
         next.network.mode != machine.network_mode() ||
         next.debug.lockstep_enabled != machine.lockstep_enabled();
 
@@ -395,9 +402,9 @@ void SettingsModal::render(std::vector<std::string>& content_rows,
             {.name = "Active SMP Hart Count",
              .val = std::format("\033[1;32m[{} Core{}]\033[0m", draft.num_harts,
                                 draft.num_harts > 1 ? "s" : "")},
-            {.name = "SMP Threading Model",
-             .val = draft.smp_multithreaded ? "\033[1;36m[Multi-Threaded (MT-SMP)]\033[0m"
-                                            : "\033[1;33m[Single-Threaded Co-op]\033[0m"},
+            {.name = "SMP Execution Mode",
+             .val = draft.smp_cycle_oriented ? "\033[1;36m[Cycle-Oriented]\033[0m"
+                                             : "\033[1;33m[Cycle-Accurate]\033[0m"},
             {.name = "SMP Scheduler Quantum",
              .val = std::format("\033[1;36m[{} insns/slice]\033[0m", draft.smp_quantum)},
             {.name = "Platform Bus Topology", .val = profile_str},
@@ -418,9 +425,10 @@ void SettingsModal::render(std::vector<std::string>& content_rows,
              .val = draft.traplog_mode ? "\033[1;32m[ON (<trace-dir>/traplog.txt)]\033[0m"
                                        : "\033[90m[OFF]\033[0m"},
             {.name = "Device MMIO Access Log",
-             .val = dlog_disabled ? "\033[90m[OFF (Disabled in App Mode)]\033[0m"
-                                  : (draft.dlog_mode ? "\033[1;32m[ON (<trace-dir>/dlog.txt)]\033[0m"
-                                                     : "\033[90m[OFF]\033[0m")},
+             .val = dlog_disabled
+                        ? "\033[90m[OFF (Disabled in App Mode)]\033[0m"
+                        : (draft.dlog_mode ? "\033[1;32m[ON (<trace-dir>/dlog.txt)]\033[0m"
+                                           : "\033[90m[OFF]\033[0m")},
         });
 
         int const cursor = draft.tab_cursor[0];

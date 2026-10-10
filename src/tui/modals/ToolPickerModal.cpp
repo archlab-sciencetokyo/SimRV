@@ -49,6 +49,8 @@ auto tools_registry() -> const std::vector<ToolEntry>& {
          TuiCategoryGroup::Tools},
         {TuiRegPage::DISPLAY, 'y', "Sixel Display", "Linux framebuffer rendered through sixel",
          TuiCategoryGroup::Tools},
+        {TuiRegPage::LIVE, 'l', "Live Overview", "Live per-hart activity and performance totals",
+         TuiCategoryGroup::Tools},
     };
     return kTools;
 }
@@ -97,17 +99,19 @@ auto ToolPickerModal::tool_index_at_row(int content_row) -> std::optional<size_t
             return 12;  // CONSOLE
         case 19:
             return 13;  // DISPLAY
+        case 20:
+            return 14;  // LIVE
         default:
             return std::nullopt;
     }
 }
 
 auto ToolPickerModal::row_for_tool_index(size_t index) -> int {
-    static constexpr std::array<int, 14> kRows = {
-        3,  4,  5,       // GPR, FPR, VEC
-        7,  8,  9,  10,  // STACK, CACHE, TLB, BUS
-        12, 13, 14,      // PIPELINE, BPRED, HAZARD
-        16, 17, 18, 19   // TRACE, EXPLAIN, CONSOLE, DISPLAY
+    static constexpr std::array<int, 15> kRows = {
+        3,  4,  5,          // GPR, FPR, VEC
+        7,  8,  9,  10,     // STACK, CACHE, TLB, BUS
+        12, 13, 14,         // PIPELINE, BPRED, HAZARD
+        16, 17, 18, 19, 20  // TRACE, EXPLAIN, CONSOLE, DISPLAY, LIVE
     };
     if (index < kRows.size()) {
         return kRows[index];

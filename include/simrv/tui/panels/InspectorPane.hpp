@@ -171,6 +171,7 @@ class InspectorPane : public TuiWidget {
     [[nodiscard]] auto content_total_columns(int width) const -> int;
     [[nodiscard]] auto get_running_label_start_row() const -> int;
     [[nodiscard]] auto render_active_spinner(int logical_row, int width) -> std::string;
+    [[nodiscard]] auto render_live_overview_row(int logical_row, int width) -> std::string;
     [[nodiscard]] auto render_registers_single_column(const simrv::core::ArchState& st,
                                                       int logical_row, int width) -> std::string;
     [[nodiscard]] auto render_registers_double_column(const simrv::core::ArchState& st,
@@ -263,6 +264,15 @@ class InspectorPane : public TuiWidget {
     std::array<simrv::core::VectorRegister, 32> cached_vec_{};
     simrv::pipeline::Scoreboard projected_scoreboard_{};
     std::array<std::array<std::string, 80>, 16> cached_page_rows_{};
+    struct LiveHartSnapshot {
+        Register pc = 0;
+        std::string symbol;
+        uint64_t cycles = 0;
+        uint64_t instructions = 0;
+        uint64_t timer_ticks = 0;
+        simrv::xlen::PrivilegeLevel privilege = simrv::xlen::PrivilegeLevel::Machine;
+    };
+    std::vector<LiveHartSnapshot> live_harts_;
     std::array<std::string, 80> cached_left_rows_{};
     int last_width_ = 0;
 

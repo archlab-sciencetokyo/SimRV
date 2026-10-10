@@ -6,14 +6,14 @@
 
 #include <atomic>
 #include <cstdint>
-#include <functional>
 #include <filesystem>
+#include <functional>
 #include <string>
 #include <utility>
 #include <vector>
 
-#include "simrv/tui/TuiTypes.hpp"
 #include "simrv/tui/TuiKey.hpp"
+#include "simrv/tui/TuiTypes.hpp"
 #include "simrv/tui/framework/Types.hpp"
 #include "simrv/xlen/Helpers.hpp"
 #include "simrv/xlen/Types.hpp"
@@ -122,7 +122,7 @@ struct SettingsDraft {
     bool lockstep_mode = false;
     uint32_t num_harts = 1;
     uint32_t smp_quantum = 1000;
-    bool smp_multithreaded = false;
+    bool smp_cycle_oriented = false;
     uint8_t platform_profile = 0;  // 0: PCIe, 1: MMIO
     uint64_t dram_size_mb = 256;
     std::string net_mode = "user";

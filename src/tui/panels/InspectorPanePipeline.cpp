@@ -1152,11 +1152,10 @@ auto InspectorPane::render_system_state(const simrv::core::CPU& cpu, int logical
                            label_pad);
     }
     if (logical_row == 18) {
-        const bool global_enabled = st.priv == PrivilegeLevel::Machine
-                                        ? (st.mstatus & enum_mask(core::MstatusBit::Mie)) != 0
-                                    : st.priv == PrivilegeLevel::Supervisor
-                                        ? (st.mstatus & enum_mask(core::MstatusBit::Sie)) != 0
-                                        : true;
+        const bool global_enabled =
+            st.priv == PrivilegeLevel::Machine      ? (st.mstatus & core::MstatusBit::Mie) != 0
+            : st.priv == PrivilegeLevel::Supervisor ? (st.mstatus & core::MstatusBit::Sie) != 0
+                                                    : true;
         const CSRValue pending =
             st.mip & core::interrupt_implemented_mask(
                          simrv::isa::misa_has_extension(st.misa, simrv::isa::IsaExtension::S));

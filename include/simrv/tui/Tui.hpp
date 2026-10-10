@@ -276,6 +276,8 @@ class Tui : public core::ITelemetrySink, public core::IConsoleSink {
 
    private:
     void sync_workbench_slots();
+    void clear_transient_live_overview(bool restore_page);
+    [[nodiscard]] auto total_snapshot_instruction_count() const -> uint64_t;
     struct TraceRecord {
         Register pc = 0;
         simrv::isa::Opcode opcode{};
@@ -351,6 +353,7 @@ class Tui : public core::ITelemetrySink, public core::IConsoleSink {
     MissionProgress mission_;
     bool inspection_overwrite_armed_{false};
     std::vector<WorkbenchSlot> workbench_slots_{{TuiRegPage::GPR, 0}, {TuiRegPage::CONSOLE, 0}};
+    std::optional<std::pair<size_t, TuiRegPage>> transient_live_restore_;
     size_t focused_slot_index_ = 0;
     size_t selected_hart_ = 0;
     TuiLayout layout_ = TuiLayout::Split;

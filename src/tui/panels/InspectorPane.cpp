@@ -45,6 +45,7 @@ auto InspectorPane::is_single_column(int width) const -> bool {
 }
 
 auto InspectorPane::get_total_rows(int width) -> int {
+    if (page_ == TuiRegPage::LIVE) return static_cast<int>(machine_.num_harts()) + 8;
     if (page_ == TuiRegPage::EXPLAIN) {
         return static_cast<int>(get_explain_rows(width).size());
     }
@@ -187,7 +188,7 @@ void InspectorPane::set_selected_hart(size_t hart) {
         rows.fill("");
     }
     cached_left_rows_.fill("");
-    update_cache();
+    if (paused_ && page_ != TuiRegPage::LIVE) update_cache();
 }
 
 auto InspectorPane::current_cpu() const -> const simrv::core::CPU& {
@@ -283,6 +284,8 @@ auto InspectorPane::content_total_columns(int width) const -> int {
         }
         case TuiRegPage::TRACE:
             return trace_total_columns();
+        case TuiRegPage::LIVE:
+            return width;
         case TuiRegPage::TLB:
         case TuiRegPage::BUS:
         default:
@@ -485,6 +488,7 @@ auto InspectorPane::render_tab_bar_tier2(int width) const -> std::string {
             break;
         }
         case TuiCategoryGroup::Tools: {
+            tabs.push_back({.page = TuiRegPage::LIVE, .name = "Live"});
             tabs.push_back({.page = TuiRegPage::EXPLAIN, .name = "Explain"});
             tabs.push_back({.page = TuiRegPage::TRACE, .name = "Trace"});
             break;
@@ -554,8 +558,9 @@ auto InspectorPane::get_tab_at(int row, int col) const -> std::optional<TuiRegPa
                         return TuiRegPage::PIPELINE;
                     }
                     if (span.grp == TuiCategoryGroup::Tools) {
-                        return (page_ == TuiRegPage::EXPLAIN) ? TuiRegPage::TRACE
-                                                              : TuiRegPage::EXPLAIN;
+                        if (page_ == TuiRegPage::LIVE) return TuiRegPage::EXPLAIN;
+                        if (page_ == TuiRegPage::EXPLAIN) return TuiRegPage::TRACE;
+                        return TuiRegPage::LIVE;
                     }
                 }
                 return get_default_page_for_group(span.grp,
@@ -607,6 +612,7 @@ auto InspectorPane::get_tab_at(int row, int col) const -> std::optional<TuiRegPa
                 break;
             }
             case TuiCategoryGroup::Tools: {
+                tabs.push_back({.page = TuiRegPage::LIVE, .name = "Live"});
                 tabs.push_back({.page = TuiRegPage::EXPLAIN, .name = "Explain"});
                 tabs.push_back({.page = TuiRegPage::TRACE, .name = "Trace"});
                 break;
@@ -827,7 +833,9 @@ auto InspectorPane::next_page_for_slot(TuiRegPage current, bool cycle_accurate) 
             return TuiRegPage::PIPELINE;
         case TuiCategoryGroup::Tools:
         default:
-            return (current == TuiRegPage::EXPLAIN) ? TuiRegPage::TRACE : TuiRegPage::EXPLAIN;
+            if (current == TuiRegPage::LIVE) return TuiRegPage::EXPLAIN;
+            if (current == TuiRegPage::EXPLAIN) return TuiRegPage::TRACE;
+            return TuiRegPage::LIVE;
     }
 }
 
@@ -926,6 +934,10 @@ auto InspectorPane::render_row_internal(int row_idx, int width, int header_rows,
         return format_to_width(res, width);
     };
 
+    if (page_ == TuiRegPage::LIVE) {
+        return finish_row(render_live_overview_row(logical_row, render_width));
+    }
+
     if (show_spinner) {
         if (!is_secondary) {
             const int stats_start = performance_start_row(is_single_column(width));
@@ -995,7 +1007,18 @@ void InspectorPane::update_cache() {
 }
 
 void InspectorPane::refresh_execution_snapshot() {
-    projected_scoreboard_ = machine_.tui_execution_snapshot(selected_hart_).scoreboard;
+    live_harts_.clear();
+    live_harts_.reserve(machine_.num_harts());
+    for (size_t hart = 0; hart < machine_.num_harts(); ++hart) {
+        const auto snapshot = machine_.tui_execution_snapshot(hart);
+        live_harts_.push_back({.pc = snapshot.pc,
+                               .symbol = machine_.symbol_table().lookup(snapshot.pc),
+                               .cycles = snapshot.cycle_count,
+                               .instructions = snapshot.instruction_count,
+                               .timer_ticks = snapshot.timer_ticks,
+                               .privilege = snapshot.privilege});
+        if (hart == selected_hart_) projected_scoreboard_ = snapshot.scoreboard;
+    }
 }
 
 auto InspectorPane::get_visible_content_rows() const -> int {
@@ -1050,11 +1073,11 @@ void InspectorPane::scroll_horizontal(int columns, int width, bool secondary) {
 }
 
 auto InspectorPane::supports_horizontal_scroll(int width) const -> bool {
-    int const width_for_viewport =
-        width > 0 ? width : (last_width_ > 0 ? last_width_ : 60);
+    int const width_for_viewport = width > 0 ? width : (last_width_ > 0 ? last_width_ : 60);
     const int total_cols = content_total_columns(width_for_viewport);
-    const int viewport_width =
-        (total_cols > width_for_viewport) ? std::max(1, width_for_viewport - 2) : width_for_viewport;
+    const int viewport_width = (total_cols > width_for_viewport)
+                                   ? std::max(1, width_for_viewport - 2)
+                                   : width_for_viewport;
     return total_cols > viewport_width;
 }
 

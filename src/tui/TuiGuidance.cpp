@@ -131,6 +131,14 @@ auto guidance_for_context(const GuidanceContext& context) -> PageGuidance {
                         "Open a selected stack or register address.",
                         0};
             break;
+        case TuiRegPage::LIVE:
+            guidance = {"Live execution overview",
+                        "Hart rows show sampled PCs and architectural privilege modes.",
+                        "Totals combine all harts; rates describe recent simulator throughput.",
+                        KeyAction::RunPause,
+                        "Pause execution to inspect stable architectural state.",
+                        0};
+            break;
         case TuiRegPage::CONSOLE:
         case TuiRegPage::DISPLAY:
             guidance = {"Console",

@@ -126,6 +126,9 @@ struct TuiTestAccess {
     static void set_workbench_slots(Tui& tui, std::vector<WorkbenchSlot> slots) {
         tui.workbench_slots_ = std::move(slots);
     }
+    static void set_preferences_path(Tui& tui, std::filesystem::path path) {
+        tui.preferences_path_ = std::move(path);
+    }
 };
 
 }  // namespace simrv::tui
@@ -230,7 +233,7 @@ void test_tui_preferences_round_trip() {
 
     TuiPreferences expected;
     expected.layout = TuiLayout::ThreeColumn;
-    expected.slots = {{TuiRegPage::TRACE, 3}, {TuiRegPage::BUS, 1}, {TuiRegPage::CONSOLE, 0}};
+    expected.slots = {{TuiRegPage::TRACE, 3}, {TuiRegPage::BUS, 1}, {TuiRegPage::LIVE, 0}};
     expected.focused_slot = 1;
     expected.inspector_width = 42;
     expected.column_widths = {42, 35, 28, -1};
@@ -247,6 +250,7 @@ void test_tui_preferences_round_trip() {
     expect(actual.layout == expected.layout && actual.slots.size() == expected.slots.size() &&
                actual.slots[0].page == expected.slots[0].page &&
                actual.slots[0].scroll_offset == expected.slots[0].scroll_offset &&
+               actual.slots[2].page == TuiRegPage::LIVE &&
                actual.focused_slot == expected.focused_slot &&
                actual.column_widths == expected.column_widths && actual.theme == expected.theme &&
                actual.high_contrast && actual.class_mode && actual.student_guide &&
@@ -520,7 +524,7 @@ void test_sysconfig_modal_modes() {
     settings_draft.tui_fps = 30;
     settings_draft.num_harts = 1;
     settings_draft.smp_quantum = 1000;
-    settings_draft.smp_multithreaded = false;
+    settings_draft.smp_cycle_oriented = false;
     int s_cursor = 0;
 
     SettingsModal::move_cursor(s_cursor, 3);
@@ -533,7 +537,8 @@ void test_sysconfig_modal_modes() {
     expect(settings_draft.num_harts == 4, "Settings modal adjusts SMP active core count");
 
     SettingsModal::adjust_setting(settings_draft, 5, 1);
-    expect(settings_draft.smp_multithreaded == true, "Settings modal toggles SMP worker threads");
+    expect(settings_draft.smp_cycle_oriented == true,
+           "Settings modal toggles the SMP execution mode");
 
     SettingsModal::adjust_setting(settings_draft, 6, 1);
     expect(settings_draft.smp_quantum == 2500, "Settings modal advances SMP quantum level");
@@ -874,23 +879,148 @@ void test_tui_running_state_synchronization() {
     auto tui = std::make_shared<simrv::tui::Tui>(machine);
     machine.set_telemetry_sink(tui);
     machine.set_console_sink(tui);
+    simrv::tui::TuiTestAccess::set_workbench_slots(*tui, {{simrv::tui::TuiRegPage::GPR, 0},
+                                                          {simrv::tui::TuiRegPage::CONSOLE, 0},
+                                                          {simrv::tui::TuiRegPage::DISPLAY, 0}});
+    const auto preferences_path =
+        std::filesystem::temp_directory_path() / "simrv-live-overview-preferences.conf";
+    simrv::tui::TuiTestAccess::set_preferences_path(*tui, preferences_path);
+    simrv::tui::TuiTestAccess::set_focused_slot(*tui, 1);
     expect(machine.execution_state() == simrv::core::ExecutionState::Paused,
            "machine starts in Paused state when TUI is enabled");
     expect(machine.is_paused(), "machine.is_paused() returns true on startup with TUI");
     expect(tui->is_paused(), "tui.is_paused() is true on startup");
     tui->set_paused(false);
     expect(!tui->is_paused(), "tui.is_paused() is false after unpausing");
+    expect(tui->get_workbench_slots()[0].page == simrv::tui::TuiRegPage::LIVE,
+           "running while Console is focused shows Live in the first inspector column");
+    expect(tui->get_workbench_slots()[1].page == simrv::tui::TuiRegPage::CONSOLE,
+           "starting execution leaves the other workbench column unchanged");
+    tui->save_preferences();
+    simrv::tui::TuiPreferences saved_preferences;
+    expect(saved_preferences.load(preferences_path) && saved_preferences.slots.size() == 3 &&
+               saved_preferences.slots[0].page == simrv::tui::TuiRegPage::GPR &&
+               saved_preferences.slots[1].page == simrv::tui::TuiRegPage::CONSOLE &&
+               saved_preferences.slots[2].page == simrv::tui::TuiRegPage::DISPLAY,
+           "saving while running does not persist the temporary Live page");
     expect(machine.execution_state() == simrv::core::ExecutionState::Running,
            "machine execution state is Running after unpausing TUI");
     expect(!machine.is_paused(), "machine.is_paused() is false after unpausing");
 
     tui->set_paused(true);
     expect(tui->is_paused(), "tui.is_paused() is true after pausing");
+    expect(tui->get_workbench_slots()[0].page == simrv::tui::TuiRegPage::GPR,
+           "pausing restores the inspector that was visible before execution");
+    expect(tui->focused_slot() == 1,
+           "showing Live from a Console-focused state does not move keyboard focus");
     expect(machine.execution_state() == simrv::core::ExecutionState::Paused,
            "machine execution state is Paused after pausing TUI");
     expect(machine.is_paused(), "machine.is_paused() is true after pausing");
+
+    simrv::tui::TuiTestAccess::set_focused_slot(*tui, 2);
+    tui->set_paused(false);
+    expect(tui->get_workbench_slots()[0].page == simrv::tui::TuiRegPage::LIVE &&
+               tui->get_workbench_slots()[2].page == simrv::tui::TuiRegPage::DISPLAY,
+           "running while Display is focused shows Live without replacing the display");
+    tui->set_paused(true);
+    expect(tui->get_workbench_slots()[0].page == simrv::tui::TuiRegPage::GPR,
+           "pausing after a Display-focused run restores the inspector page");
+
+    simrv::tui::TuiTestAccess::set_focused_slot(*tui, 0);
+    tui->set_paused(false);
+    tui->set_workbench_slot_page(0, simrv::tui::TuiRegPage::STACK);
+    tui->set_paused(true);
+    expect(tui->get_workbench_slots()[0].page == simrv::tui::TuiRegPage::STACK,
+           "pausing preserves a manual inspector choice made while execution runs");
+
     machine.set_telemetry_sink(nullptr);
     machine.set_console_sink(nullptr);
+    tui.reset();
+    std::error_code ignored;
+    std::filesystem::remove(preferences_path, ignored);
+}
+
+void test_live_overview_snapshots_and_hart_rows() {
+    using namespace simrv::tui;
+    simrv::core::Machine machine(simrv::core::MachineConfig{
+        .execution = {.num_harts = 2}, .tui = {.enabled = true, .inspection_output = {}}});
+    machine.add_hart_for_testing(std::make_unique<simrv::core::CPU>());
+    auto& hart0 = machine.hart(0);
+    auto& hart1 = machine.hart(1);
+    hart0.state().pc = 0x80000100;
+    hart0.state().priv = simrv::xlen::PrivilegeLevel::Machine;
+    hart0.e_icount = 1200;
+    hart0.clint_mmio.mcycle = 3000;
+    hart1.state().pc = 0x8000abcd;
+    hart1.state().priv = simrv::xlen::PrivilegeLevel::Supervisor;
+    hart1.e_icount = 800;
+    hart1.clint_mmio.mcycle = 5000;
+    hart0.clint_mmio.mtime.store(15'000'000);
+    // Resolve a real executable symbol so the Live view exercises PC annotation as well as
+    // preserving the raw architectural address.
+    if (machine.symbol_table().load_from_elf("/proc/self/exe")) {
+        if (const auto main_address = machine.symbol_table().lookup_name("main")) {
+            hart0.state().pc = *main_address;
+        }
+    }
+    machine.publish_tui_execution_snapshot_for_testing();
+    hart0.state().pc = 0xdead;
+    hart1.state().pc = 0xbeef;
+    hart1.state().priv = simrv::xlen::PrivilegeLevel::User;
+
+    InspectorPane pane(machine);
+    pane.set_selected_hart(1);
+    pane.refresh_execution_snapshot();
+    pane.set_page(TuiRegPage::LIVE);
+    pane.set_paused(false);
+    pane.set_active_runtime(2.0);
+    pane.set_kips(1234);
+    pane.set_max_kips(2300);
+    pane.set_visible_rows(30);
+
+    const auto h0 = strip_ansi(pane.render_row(4, 80));
+    const auto h1 = strip_ansi(pane.render_row(5, 80));
+    expect(h0.contains("H0") && h0.contains("M") && h0.contains("main"),
+           "Live Overview renders hart 0 PC symbol and machine privilege from its snapshot");
+    expect(h1.contains(">H1") && h1.contains("S") && h1.contains("8000abcd"),
+           "Live Overview marks selected hart and renders supervisor privilege from its snapshot");
+    expect(strip_ansi(pane.render_row(7, 80)).contains("2,000"),
+           "Live Overview aggregates retired instructions across harts");
+    expect(strip_ansi(pane.render_row(7, 80)).contains("8,000"),
+           "Live Overview labels and aggregates hart cycles across harts");
+    expect(strip_ansi(pane.render_row(8, 80)).contains("1.23 MIPS") &&
+               strip_ansi(pane.render_row(8, 80)).contains("1.0 KIPS"),
+           "Live Overview shows recent and average throughput");
+    expect(strip_ansi(pane.render_row(9, 80)).contains("IPC") &&
+               strip_ansi(pane.render_row(9, 80)).contains("CPI"),
+           "Live Overview shows aggregate IPC and CPI");
+    expect(strip_ansi(pane.render_row(10, 80)).contains("2.00s") &&
+               strip_ansi(pane.render_row(10, 80)).contains("1.50s"),
+           "Live Overview shows host runtime and guest virtual time");
+    expect(strip_ansi(pane.render_row(11, 80)).contains("instruction-fast") &&
+               strip_ansi(pane.render_row(11, 80)).contains("2.30 MIPS"),
+           "Live Overview shows execution engine and peak throughput");
+    machine.runtime_profile.engine = simrv::core::ExecutionEngine::CycleFast;
+    expect(strip_ansi(pane.render_row(2, 80)).contains("CA"),
+           "Live Overview identifies cycle-accurate execution mode");
+
+    pane.set_visible_rows(8);
+    (void)pane.render_row(2, 32);
+    pane.scroll(1, 32);
+    const auto scrolled = strip_ansi(pane.render_row(4, 32));
+    expect(scrolled.contains("H1"),
+           "narrow Live Overview scrolls to hart rows beyond the viewport");
+
+    simrv::core::Machine empty_machine;
+    empty_machine.publish_tui_execution_snapshot_for_testing();
+    InspectorPane empty_pane(empty_machine);
+    empty_pane.refresh_execution_snapshot();
+    empty_pane.set_page(TuiRegPage::LIVE);
+    empty_pane.set_paused(true);
+    empty_pane.set_visible_rows(30);
+    expect(strip_ansi(empty_pane.render_row(7, 80)).contains("0.0 KIPS") &&
+               strip_ansi(empty_pane.render_row(8, 80)).contains("0.00"),
+           "zero-count startup renders finite throughput and aggregate ratios");
 }
 
 void test_inspection_report() {
@@ -2189,7 +2319,7 @@ void test_tui_differential_rendering_and_throttling() {
 void test_multi_column_workbench_tools_and_swapping() {
     // 1. ToolPickerModal catalog and accelerator lookup
     const auto& tools = simrv::tui::modals::ToolPickerModal::all_tools();
-    expect(tools.size() == 14, "tool picker provides 14 selectable workbench tools");
+    expect(tools.size() == 15, "tool picker provides 15 selectable workbench tools");
     expect(simrv::tui::modals::ToolPickerModal::find_by_accelerator('g') ==
                simrv::tui::TuiRegPage::GPR,
            "accelerator 'g' maps to GPR");
@@ -2232,6 +2362,9 @@ void test_multi_column_workbench_tools_and_swapping() {
     expect(simrv::tui::modals::ToolPickerModal::find_by_accelerator('y') ==
                simrv::tui::TuiRegPage::DISPLAY,
            "accelerator 'y' maps to DISPLAY");
+    expect(simrv::tui::modals::ToolPickerModal::find_by_accelerator('l') ==
+               simrv::tui::TuiRegPage::LIVE,
+           "accelerator 'l' maps to Live Overview");
     expect(!simrv::tui::modals::ToolPickerModal::find_by_accelerator('q').has_value(),
            "accelerator 'q' is not bound to a tool (reserved for exit/close)");
 
@@ -2306,6 +2439,8 @@ void test_multi_column_workbench_tools_and_swapping() {
            "row 18 maps to tool 12 (CONSOLE)");
     expect(simrv::tui::modals::ToolPickerModal::tool_index_at_row(19) == 13,
            "row 19 maps to tool 13 (DISPLAY)");
+    expect(simrv::tui::modals::ToolPickerModal::tool_index_at_row(20) == 14,
+           "row 20 maps to tool 14 (LIVE)");
     expect(!simrv::tui::modals::ToolPickerModal::tool_index_at_row(2).has_value(),
            "row 2 is category banner, maps to no tool");
     expect(simrv::tui::modals::ToolPickerModal::row_for_tool_index(0) == 3,
@@ -2327,8 +2462,8 @@ void test_multi_column_workbench_tools_and_swapping() {
     }
     expect(found_modal_control, "modal control hitboxes are detectable for pointer styling");
     // TRACE (tool index 10) is at content row 16; terminal Y: start_y (3) + 1 (border) + 16
-    // (content) + 1 (1-indexed) = 21
-    auto click_res = modal.handle_click(60, 21, 120, 30);
+    // (content) + 1 (1-indexed) = 20 after Live Overview adds one row to the modal.
+    auto click_res = modal.handle_click(60, 20, 120, 30);
     expect(click_res == simrv::tui::TuiModal::ModalClickResult::Submit,
            "clicking tool row submits selection");
     expect(modal.get_tool_picker_cursor() == 10, "cursor updated to TRACE (index 10)");
@@ -2607,7 +2742,7 @@ void test_multi_column_panel_management_and_modal_usability() {
     const auto below_bg = rendered_overlay.find(simrv::tui::g_theme_modal_bg, below_badge);
     expect(below_badge != std::string::npos && below_bg != std::string::npos &&
                below_bg < below_row_end,
-        "modal background is restored after the bottom overflow indicator");
+           "modal background is restored after the bottom overflow indicator");
 
     // Test wheel down on modal
     modal.handle_wheel(1);
@@ -2622,7 +2757,7 @@ void test_multi_column_panel_management_and_modal_usability() {
     const auto above_bg = scrolled_overlay.find(simrv::tui::g_theme_modal_bg, above_badge);
     expect(above_badge != std::string::npos && above_bg != std::string::npos &&
                above_bg < above_row_end,
-        "modal background is restored after the top overflow indicator");
+           "modal background is restored after the top overflow indicator");
 
     // Test keyboard scrolling in help modal: j / k
     simrv::tui::TuiTestAccess::handle_modal_key(tui, 'j', simrv::tui::TuiKey::j);
@@ -2940,6 +3075,7 @@ int main() {
     test_load_modal_path_completion();
     test_control_flow_calls_mission();
     test_tui_running_state_synchronization();
+    test_live_overview_snapshots_and_hart_rows();
     test_inspection_report();
     test_help_uses_canonical_registry();
     test_category_groups_and_glossary();

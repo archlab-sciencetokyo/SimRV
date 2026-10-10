@@ -183,10 +183,32 @@ void Tui::set_paused(bool p) {
     if (cur_paused != p || cur_machine_state != target_machine_state) {
         paused_.store(p, std::memory_order_release);
         if (!p) {
+            auto is_inspector_page = [](TuiRegPage page) {
+                return page != TuiRegPage::LIVE && page != TuiRegPage::CONSOLE &&
+                       page != TuiRegPage::DISPLAY;
+            };
+            size_t live_slot = workbench_slots_.size();
+            if (focused_slot_index_ < workbench_slots_.size() &&
+                is_inspector_page(workbench_slots_[focused_slot_index_].page)) {
+                live_slot = focused_slot_index_;
+            } else {
+                for (size_t slot = 0; slot < workbench_slots_.size(); ++slot) {
+                    if (is_inspector_page(workbench_slots_[slot].page)) {
+                        live_slot = slot;
+                        break;
+                    }
+                }
+            }
+            if (live_slot < workbench_slots_.size()) {
+                transient_live_restore_ = std::pair{live_slot, workbench_slots_[live_slot].page};
+                workbench_slots_[live_slot].page = TuiRegPage::LIVE;
+            } else {
+                transient_live_restore_.reset();
+            }
             clear_status_override();
             last_runtime_tick_ = std::chrono::steady_clock::now();
             last_speed_update_ = std::chrono::steady_clock::now();
-            last_icount_ = machine_.primary_hart().e_icount;
+            last_icount_ = total_snapshot_instruction_count();
             machine_.resume();
         } else {
             if (last_runtime_tick_ != std::chrono::steady_clock::time_point{}) {
@@ -195,6 +217,7 @@ void Tui::set_paused(bool p) {
                 last_runtime_tick_ = {};
             }
             machine_.pause();
+            clear_transient_live_overview(true);
         }
         update_trace_active_cache();
         trigger_immediate_render();
@@ -430,6 +453,10 @@ void Tui::save_preferences() {
     TuiPreferences preferences;
     preferences.layout = layout_;
     preferences.slots = workbench_slots_;
+    if (transient_live_restore_ && transient_live_restore_->first < preferences.slots.size() &&
+        preferences.slots[transient_live_restore_->first].page == TuiRegPage::LIVE) {
+        preferences.slots[transient_live_restore_->first].page = transient_live_restore_->second;
+    }
     preferences.focused_slot = focused_slot_index_;
     preferences.inspector_width = user_inspector_width_;
     preferences.column_widths = user_column_widths_;
@@ -442,6 +469,26 @@ void Tui::save_preferences() {
     if (!preferences.save(preferences_path_)) {
         simrv::log::warn("Unable to save TUI preferences to {}", preferences_path_.string());
     }
+}
+
+void Tui::clear_transient_live_overview(bool restore_page) {
+    if (!transient_live_restore_) return;
+    const auto [slot, page] = *transient_live_restore_;
+    if (restore_page && slot < workbench_slots_.size() &&
+        workbench_slots_[slot].page == TuiRegPage::LIVE) {
+        workbench_slots_[slot].page = page;
+        if (inspector_pane_ && slot == focused_slot_index_) inspector_pane_->set_page(page);
+    }
+    transient_live_restore_.reset();
+    update_trace_active_cache();
+}
+
+auto Tui::total_snapshot_instruction_count() const -> uint64_t {
+    uint64_t total = 0;
+    for (size_t hart = 0; hart < machine_.num_harts(); ++hart) {
+        total += machine_.tui_execution_snapshot(hart).instruction_count;
+    }
+    return total;
 }
 
 void Tui::start_ui_thread() {
@@ -537,7 +584,7 @@ void Tui::print_log(const std::string& msg) {
 }
 
 void Tui::render_update_speed(std::chrono::steady_clock::time_point now) {
-    const uint64_t current_icount = machine_.tui_execution_snapshot().instruction_count;
+    const uint64_t current_icount = total_snapshot_instruction_count();
     if (!is_paused()) {
         if (last_runtime_tick_ != std::chrono::steady_clock::time_point{}) {
             runtime_duration_ +=
@@ -547,7 +594,8 @@ void Tui::render_update_speed(std::chrono::steady_clock::time_point now) {
         auto diff =
             std::chrono::duration_cast<std::chrono::milliseconds>(now - last_speed_update_).count();
         if (diff >= 50) {
-            uint64_t insns_since_last = current_icount - last_icount_;
+            uint64_t insns_since_last =
+                current_icount >= last_icount_ ? current_icount - last_icount_ : 0;
             if (diff > 0) {
                 speed_ips_ = (insns_since_last * 1000ULL) / static_cast<uint64_t>(diff);
                 kips_ = speed_ips_ / 1000;
@@ -564,7 +612,7 @@ void Tui::render_update_speed(std::chrono::steady_clock::time_point now) {
                 std::chrono::duration_cast<std::chrono::microseconds>(now - last_runtime_tick_);
             last_runtime_tick_ = std::chrono::steady_clock::time_point{};
         }
-        if (current_icount > last_icount_) {
+        if (current_icount >= last_icount_ && current_icount > last_icount_) {
             auto diff =
                 std::chrono::duration_cast<std::chrono::milliseconds>(now - last_speed_update_)
                     .count();
@@ -587,6 +635,8 @@ void Tui::render_update_speed(std::chrono::steady_clock::time_point now) {
                 last_icount_ = current_icount;
                 last_speed_update_ = now;
             }
+        } else if (current_icount < last_icount_) {
+            last_icount_ = current_icount;
         }
     }
 }
@@ -681,11 +731,14 @@ void Tui::render_build_lines(int inspector_width, int terminal_width, int num_ro
         inspector_pane_->set_log_lines({});
     }
 
+    if (focused_slot_index_ < workbench_slots_.size()) {
+        inspector_pane_->set_page(workbench_slots_[focused_slot_index_].page);
+    }
+    inspector_pane_->set_paused(paused_);
     inspector_pane_->set_selected_hart(selected_hart_);
     inspector_pane_->set_kips(kips_);
     inspector_pane_->set_max_kips(max_kips_);
     inspector_pane_->set_kips_history(kips_history_);
-    inspector_pane_->set_paused(paused_);
     inspector_pane_->set_student_guide_enabled(student_guide_enabled_);
     inspector_pane_->set_visible_rows(num_rows);
     inspector_pane_->set_active_runtime(static_cast<double>(runtime_duration_.count()) / 1000000.0);
@@ -1920,6 +1973,9 @@ void Tui::sync_workbench_slots() {
 }
 
 void Tui::apply_layout_preset(LayoutPreset preset) {
+    // A preset is an explicit layout change. Do not let the execution pause path
+    // restore an old page into the newly selected layout later.
+    clear_transient_live_overview(false);
     winsize w{};
     ioctl(STDOUT_FILENO, TIOCGWINSZ, &w);
     int const term_width =
@@ -2075,6 +2131,9 @@ void Tui::focus_prev_slot() {
 
 void Tui::set_workbench_slot_page(size_t slot_idx, TuiRegPage page) {
     if (slot_idx < workbench_slots_.size()) {
+        if (transient_live_restore_ && transient_live_restore_->first == slot_idx) {
+            clear_transient_live_overview(false);
+        }
         workbench_slots_[slot_idx].page = page;
         if (slot_idx == 0 && inspector_pane_) {
             inspector_pane_->set_page(page);
@@ -2109,6 +2168,7 @@ void Tui::swap_workbench_slots(size_t slot_a, size_t slot_b) {
         slot_a == slot_b) {
         return;
     }
+    clear_transient_live_overview(true);
     std::swap(workbench_slots_[slot_a], workbench_slots_[slot_b]);
     if (inspector_pane_) {
         inspector_pane_->set_page(workbench_slots_[focused_slot_index_].page);
@@ -2121,6 +2181,7 @@ void Tui::swap_workbench_slots(size_t slot_a, size_t slot_b) {
 
 void Tui::move_focused_column_left() {
     if (workbench_slots_.size() <= 1 || focused_slot_index_ == 0) return;
+    clear_transient_live_overview(true);
     const size_t prev = focused_slot_index_ - 1;
     std::swap(workbench_slots_[focused_slot_index_], workbench_slots_[prev]);
     focused_slot_index_ = prev;
@@ -2135,6 +2196,7 @@ void Tui::move_focused_column_left() {
 
 void Tui::move_focused_column_right() {
     if (workbench_slots_.size() <= 1 || focused_slot_index_ + 1 >= workbench_slots_.size()) return;
+    clear_transient_live_overview(true);
     const size_t next = focused_slot_index_ + 1;
     std::swap(workbench_slots_[focused_slot_index_], workbench_slots_[next]);
     focused_slot_index_ = next;
@@ -2153,6 +2215,7 @@ auto Tui::add_workbench_column() -> bool {
         render(true);
         return false;
     }
+    clear_transient_live_overview(true);
 
     const size_t target_count = workbench_slots_.size() + 1;
     const int req_width = framework::min_width_for_columns(static_cast<uint8_t>(target_count));
@@ -2223,6 +2286,7 @@ auto Tui::close_column(size_t slot_idx) -> bool {
     if (slot_idx >= workbench_slots_.size()) {
         return false;
     }
+    clear_transient_live_overview(true);
 
     const auto closed_page = workbench_slots_[slot_idx].page;
     workbench_slots_.erase(workbench_slots_.begin() + slot_idx);
@@ -2448,6 +2512,10 @@ void Tui::cycle_tool_page(bool reverse) {
 }
 
 void Tui::set_reg_page(TuiRegPage page) {
+    if (focused_slot_index_ < workbench_slots_.size() && transient_live_restore_ &&
+        transient_live_restore_->first == focused_slot_index_) {
+        clear_transient_live_overview(false);
+    }
     if (!machine_.runtime_profile.is_cycle_mode() &&
         (page == TuiRegPage::CACHE || page == TuiRegPage::BPRED || page == TuiRegPage::HAZARD)) {
         set_status_override(
@@ -2677,6 +2745,7 @@ void Tui::write_guest_input(uint8_t byte) {
 }
 
 auto Tui::is_page_visible(TuiRegPage page) const noexcept -> bool {
+    if (transient_live_restore_ && transient_live_restore_->second == page) return true;
     if (!workbench_slots_.empty()) {
         for (const auto& slot : workbench_slots_) {
             if (slot.page == page) return true;
