@@ -300,6 +300,58 @@ void test_compressed_instruction_decode_and_flush() {
            "mstatus FS toggle flushes decode cache to invalidate cached execution legality");
 }
 
+void test_privilege_returns_flush_cached_instructions() {
+    simrv::core::Machine machine;
+    auto& cpu = machine.hart(HartId{0});
+    simrv::pipeline::DecodedInstruction decoded{};
+    decoded.cpc = VirtAddr{0x1800};
+    decoded.ir = 0x00000013;
+    decoded.op_id = simrv::isa::ADDI;
+    simrv::core::CachedOp cached{};
+    cached.copy_from(decoded);
+
+    cpu.state().priv = simrv::PrivilegeLevel::Machine;
+    cpu.state().mstatus = static_cast<CSRValue>(simrv::PrivilegeLevel::Supervisor) << 11;
+    cpu.decode_cache.insert(decoded.cpc, cached);
+    expect(cpu.decode_cache.lookup(decoded.cpc) != nullptr, "MRET regression cache setup");
+    cpu.mret();
+    expect(cpu.state().priv == simrv::PrivilegeLevel::Supervisor,
+           "MRET restores the previous privilege");
+    expect(cpu.decode_cache.lookup(decoded.cpc) == nullptr,
+           "MRET invalidates cached ops so fetch permissions are rechecked");
+
+    cpu.state().priv = simrv::PrivilegeLevel::Supervisor;
+    cpu.decode_cache.insert(decoded.cpc, cached);
+    expect(cpu.decode_cache.lookup(decoded.cpc) != nullptr, "SRET regression cache setup");
+    cpu.sret();
+    expect(cpu.state().priv == simrv::PrivilegeLevel::User, "SRET restores user privilege");
+    expect(cpu.decode_cache.lookup(decoded.cpc) == nullptr,
+           "SRET invalidates cached ops so fetch permissions are rechecked");
+
+    cpu.state().priv = simrv::PrivilegeLevel::User;
+    cpu.state().medeleg = static_cast<CSRValue>(1) <<
+                          static_cast<unsigned>(ExceptionCode::IllegalInstruction);
+    cpu.state().stvec = decoded.cpc.raw();
+    cpu.state().pc = 0x1000;
+    cpu.decode_cache.insert(decoded.cpc, cached);
+    cpu.raise_exception(static_cast<TrapCause>(ExceptionCode::IllegalInstruction), 0);
+    expect(cpu.state().priv == simrv::PrivilegeLevel::Supervisor,
+           "delegated trap enters supervisor privilege");
+    expect(cpu.decode_cache.lookup(decoded.cpc) == nullptr,
+           "trap entry invalidates cached ops so fetch permissions are rechecked");
+
+    cpu.state().priv = simrv::PrivilegeLevel::Machine;
+    cpu.state().mstatus = enum_mask(simrv::core::MstatusBit::Mprv);
+    cpu.state().mtvec = decoded.cpc.raw();
+    cpu.state().pc = 0x1000;
+    cpu.decode_cache.insert(decoded.cpc, cached);
+    cpu.raise_exception(static_cast<TrapCause>(ExceptionCode::IllegalInstruction), 0);
+    expect(cpu.state().priv == simrv::PrivilegeLevel::Machine,
+           "machine trap remains in machine privilege");
+    expect(cpu.decode_cache.lookup(decoded.cpc) == nullptr,
+           "machine trap invalidates caches when MPP changes under MPRV");
+}
+
 void test_selective_tlb_and_decode_cache_flush() {
     simrv::core::Machine machine;
     auto& cpu = machine.hart(HartId{0});
@@ -2929,6 +2981,17 @@ void test_pmp_semantics() {
     state.priv = PrivilegeLevel::Machine;
     expect(simrv::core::pmp::check_access(state, 0x80020000, 4, simrv::core::PmpAccessType::Read),
            "M-mode bypasses unlocked PMP entries");
+
+    simrv::core::Machine machine;
+    auto& cpu = machine.hart(HartId{0});
+    const auto pmpcfg0 = csr_addr(simrv::core::Csr::Pmpcfg0);
+    // Entry 0 writes reserved bits plus legal RWX; entry 1 writes NAPOT + W without R.
+    const CSRValue invalid_pmpcfg = static_cast<CSRValue>(0x1A7FU);
+    expect(cpu.csr_file.write(pmpcfg0, invalid_pmpcfg).has_value(),
+           "pmpcfg accepts writes containing WARL encodings");
+    const auto legalized_pmpcfg = cpu.csr_file.read(pmpcfg0);
+    expect(legalized_pmpcfg.has_value() && *legalized_pmpcfg == 0x181FU,
+           "pmpcfg reads back reserved bits as zero and clears W when R is zero");
 }
 
 void test_tilelink_c_coherence_semantics() {

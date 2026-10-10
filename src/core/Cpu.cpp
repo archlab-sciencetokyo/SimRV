@@ -251,9 +251,25 @@ auto CPU::write_csr(CsrNumber addr, CSRValue wdata) -> std::expected<void, Excep
     return csr_file.write(addr, wdata);
 }
 
-void CPU::mret() { TrapController::mret(state_); }
+void CPU::mret() {
+    const auto old_privilege = state_.priv;
+    const auto old_mstatus = state_.mstatus;
+    TrapController::mret(state_);
+    // Cached instruction execution skips fetch, so a privilege change must force the
+    // next instruction through fetch/PMP checks. MRET also updates MPP/MPRV state.
+    if (state_.priv != old_privilege || state_.mstatus != old_mstatus) {
+        TLB_flush();
+    }
+}
 
-void CPU::sret() { TrapController::sret(state_); }
+void CPU::sret() {
+    const auto old_privilege = state_.priv;
+    const auto old_mstatus = state_.mstatus;
+    TrapController::sret(state_);
+    if (state_.priv != old_privilege || state_.mstatus != old_mstatus) {
+        TLB_flush();
+    }
+}
 
 void CPU::plic_update_mip() { plic_mmio.update_mip(); }
 
@@ -270,7 +286,14 @@ void CPU::plic_set_irq(IrqNumber irq_num, int state) {
 }
 
 void CPU::raise_exception(TrapCause cause, CSRValue tval) {
+    const auto old_privilege = state_.priv;
+    const auto old_mstatus = state_.mstatus;
     TrapController::raise_exception(*this, cause, tval);
+    if (state_.priv != old_privilege || state_.mstatus != old_mstatus) {
+        // Trap entry can enter a privilege with different PMP execute permissions.
+        // It also rewrites MPP/SPP, which can change MPRV data permissions.
+        TLB_flush();
+    }
 }
 
 void CPU::evaluate_timer_interrupt() {
