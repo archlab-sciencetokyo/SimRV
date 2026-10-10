@@ -5,6 +5,7 @@
 #pragma once
 
 #include <array>
+#include <atomic>
 #include <deque>
 #include <expected>
 #include <fstream>
@@ -19,10 +20,10 @@
 #include "simrv/core/DecodeCache.hpp"
 #include "simrv/core/RegisterFile.hpp"
 #include "simrv/core/Sbi.hpp"
+#include "simrv/core/Tlb.hpp"
 #include "simrv/core/TrapController.hpp"
 #include "simrv/device/Clint.hpp"
 #include "simrv/device/Plic.hpp"
-#include "simrv/core/Tlb.hpp"
 #include "simrv/execute/CfuUnit.hpp"
 #include "simrv/execute/ExecuteUnit.hpp"
 #include "simrv/memory/Bus.hpp"
@@ -129,13 +130,13 @@ struct alignas(128) ArchState {
     /** Recompute supervisor pending bits that combine independent software/device sources. */
     constexpr void refresh_supervisor_pending() {
         if (seip_software || seip_external)
-            mip |= enum_mask(MipBit::Seip);
+            mip |= MipBit::Seip;
         else
-            mip &= ~enum_mask(MipBit::Seip);
+            mip &= ~MipBit::Seip;
         if (stip_software || stip_timer)
-            mip |= enum_mask(MipBit::Stip);
+            mip |= MipBit::Stip;
         else
-            mip &= ~enum_mask(MipBit::Stip);
+            mip &= ~MipBit::Stip;
     }
 
     /**
@@ -216,7 +217,8 @@ struct alignas(32) SoftTlbEntry {
     PhysAddr paddr_base{0};         ///< Physical page base (paddr & ~0xFFF) (8 bytes)
     Byte* host_ptr_base = nullptr;  ///< Direct host pointer base (nullptr = use paddr) (8 bytes)
     uint32_t epoch = 0;             ///< TLB generation epoch (4 bytes)
-    uint32_t reserved = 0;          ///< Padding to 32 bytes (4 bytes)
+    bool global = false;            ///< Global translation flag (1 byte)
+    std::array<uint8_t, 3> reserved{};  ///< Padding to 32 bytes (3 bytes)
 
     /// Build a lookup tag from the three key fields.
     [[nodiscard]] static constexpr auto make_tag(uint64_t vpn, uint64_t asid,
@@ -227,21 +229,24 @@ struct alignas(32) SoftTlbEntry {
 
     [[nodiscard]] constexpr auto matches(uint64_t vpn, uint64_t asid, PrivilegeLevel priv,
                                          uint32_t current_epoch) const noexcept -> bool {
-        return epoch == current_epoch && tag == make_tag(vpn, asid, priv);
+        if (epoch != current_epoch) return false;
+        return global ? (tag == make_tag(vpn, 0, priv)) : (tag == make_tag(vpn, asid, priv));
     }
 
     void set(uint64_t vpn, uint64_t asid, PrivilegeLevel priv, uint32_t current_epoch,
-             PhysAddr paddr_base_in, Byte* host_ptr_base_in) noexcept {
-        tag = make_tag(vpn, asid, priv);
+             PhysAddr paddr_base_in, Byte* host_ptr_base_in, bool is_global = false) noexcept {
+        tag = make_tag(vpn, is_global ? 0 : asid, priv);
         epoch = current_epoch;
         paddr_base = paddr_base_in;
         host_ptr_base = host_ptr_base_in;
+        global = is_global;
     }
 
     void invalidate() noexcept {
         tag = kInvalidTag;
         paddr_base = 0;
         host_ptr_base = nullptr;
+        global = false;
     }
     [[nodiscard]] bool valid(uint32_t current_epoch) const noexcept {
         return epoch == current_epoch && tag != kInvalidTag;
@@ -260,6 +265,10 @@ enum class HartStatus : uint8_t {
 
 class CPU {
    public:
+    inline static thread_local CPU* active_execution_cpu_ = nullptr;
+    [[nodiscard]] static auto current_execution_cpu() noexcept -> CPU* {
+        return active_execution_cpu_;
+    }
     /**
      * @brief Compute the soft TLB slot index using bit-mixed XOR hashing to prevent power-of-two
      * stride aliasing.
@@ -371,12 +380,23 @@ class CPU {
      * `mtval`/`stval`.
      */
     void raise_exception(TrapCause cause, CSRValue tval);
+    inline void raise_exception(ExceptionCode code, CSRValue tval) {
+        raise_exception(static_cast<TrapCause>(code), tval);
+    }
 
     /**
      * @brief Evaluates CLINT (Core Local Interruptor) timer interrupts against `mtimecmp`.
      * Asserts timer interrupt pending flags in `mip` if current `mtime` >= `mtimecmp`.
      */
     void evaluate_timer_interrupt();
+    /// Queue external interrupt wire changes for application by this hart at its next boundary.
+    void queue_interrupt_line(core::MipBit bit, bool asserted) noexcept;
+    void apply_pending_interrupt_lines(Machine& machine);
+    [[nodiscard]] auto next_logical_issue_sequence() noexcept -> uint64_t {
+        return next_logical_issue_sequence_++;
+    }
+    /// Apply HSM status transitions only from the hart's own execution thread.
+    void apply_hart_control_boundary() noexcept;
 
     /**
      * @brief Advances the selected execution engine by one scheduling step.
@@ -414,12 +434,12 @@ class CPU {
      * @param op Reference to the cached pre-decoded operation.
      */
     template <bool kCopyContext = false, bool kInstMix = false>
-    void execute_cached_op_fast(Machine& machine, CachedOp& op,
-                                const simrv::memory::RamView& ram);
+    void execute_cached_op_fast(Machine& machine, CachedOp& op, const simrv::memory::RamView& ram);
 
     template <bool kCopyContext, bool kInstMix, bool kPollPause>
     SIMRV_ALWAYS_INLINE auto run_fast_baremetal_kernel(Machine& machine, uint32_t batch_size,
-                                                       const simrv::memory::RamView& ram) -> uint32_t;
+                                                       const simrv::memory::RamView& ram)
+        -> uint32_t;
 
     /**
      * @brief Executes a batch of cached operations in a tight inlined loop for baremetal
@@ -526,7 +546,7 @@ class CPU {
                                  PrivilegeLevel privilege, unsigned active_xlen,
                                  simrv::memory::TlPort port,
                                  simrv::pipeline::TimedPageWalkState& timed_walk)
-        -> std::optional<std::expected<PhysAddr, TrapCause>>;
+        -> std::optional<std::expected<PageWalkResult, TrapCause>>;
 
    private:
     /// Translate fetch addresses and prime IF transient context.
@@ -564,15 +584,16 @@ class CPU {
     SIMRV_ALWAYS_INLINE auto execute_cached_branch(CachedOp& op, Register rrs1, Register rrs2)
         -> void;
     SIMRV_ALWAYS_INLINE auto try_fast_load(Machine& machine, Address mem_addr, isa::Funct3 funct3,
-                                           Register& out_val,
-                                           const simrv::memory::RamView& ram) -> bool;
+                                           Register& out_val, const simrv::memory::RamView& ram)
+        -> bool;
     SIMRV_ALWAYS_INLINE auto try_fast_store(Machine& machine, Address mem_addr, isa::Funct3 funct3,
-                                            Register rrs2, const simrv::memory::RamView& ram) -> bool;
+                                            Register rrs2, const simrv::memory::RamView& ram)
+        -> bool;
     SIMRV_ALWAYS_INLINE auto execute_cached_load(Machine& machine, CachedOp& op, Register rrs1,
                                                  const simrv::memory::RamView& ram) -> bool;
     SIMRV_ALWAYS_INLINE auto execute_cached_store(Machine& machine, CachedOp& op, Register rrs1,
-                                                  Register rrs2,
-                                                  const simrv::memory::RamView& ram) -> bool;
+                                                  Register rrs2, const simrv::memory::RamView& ram)
+        -> bool;
     auto execute_cached_fallback(Machine& machine) -> void;
     auto dispatch_pending_interrupts() -> void;
     SIMRV_ALWAYS_INLINE auto handle_cached_interrupts() -> void {
@@ -609,7 +630,10 @@ class CPU {
 
     ArchState state_;
     ArchState prev_state_;
+    // Six dirty bits followed by six value bits: MTIP, MSIP, MEIP, STIP, SSIP, SEIP.
+    std::atomic<uint16_t> pending_interrupt_lines_{0};
     uint64_t next_register_trace_sequence_ = 0;
+    uint64_t next_logical_issue_sequence_ = 0;
 
    public:
     /// Zero-cost read-only access to architectural state for tracing/logging.
@@ -634,11 +658,10 @@ class CPU {
 
     void push_trace_history(Address pc, Instruction inst, const std::string& symbol);
 
-    /// Get the effective privilege level for data accesses (considering MPRV).
     [[nodiscard]] constexpr auto effective_data_privilege() const -> PrivilegeLevel {
         if (simrv::compiler::unlikely(state_.priv == kPrivMachine &&
-                                      (state_.mstatus & enum_mask(MstatusBit::Mprv)) != 0)) {
-            return static_cast<PrivilegeLevel>((state_.mstatus & enum_mask(MstatusBit::Mpp)) >> 11);
+                                      (state_.mstatus & MstatusBit::Mprv) != 0)) {
+            return mstatus_mpp(state_.mstatus);
         }
         return state_.priv;
     }

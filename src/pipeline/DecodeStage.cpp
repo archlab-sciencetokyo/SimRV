@@ -57,17 +57,16 @@ void CPU::fetch_operands(Machine& /*machine*/) {
         return;
     }
 
-    CSRAddress const w_csr_addr =
-        (funct3 != Funct3::Priv) ? static_cast<CSRAddress>(funct12)
-        : (funct12 == static_cast<Instruction>(Funct12Priv::Ecall)) ? csr_addr(Csr::Mtvec)
-        : (funct12 == static_cast<Instruction>(Funct12Priv::Uret))  ? csr_addr(Csr::Uepc)
-        : (funct12 == static_cast<Instruction>(Funct12Priv::Sret))  ? csr_addr(Csr::Sepc)
-        : (funct12 == static_cast<Instruction>(Funct12Priv::Mret))  ? csr_addr(Csr::Mepc)
+    CSRAddress const w_csr_addr = (funct3 != Funct3::Priv) ? static_cast<CSRAddress>(funct12)
+                                  : (funct12 == Funct12Priv::Ecall) ? csr_addr(Csr::Mtvec)
+                                  : (funct12 == Funct12Priv::Uret)  ? csr_addr(Csr::Uepc)
+                                  : (funct12 == Funct12Priv::Sret)  ? csr_addr(Csr::Sepc)
+                                  : (funct12 == Funct12Priv::Mret)  ? csr_addr(Csr::Mepc)
                                                                     : 0;
 
     if (funct3 == Funct3::Priv) {
-        if (!TrapController::can_execute_privileged_instruction(state_.priv, state_.misa,
-                                                                state_.mstatus, funct12, ctx.funct7)) {
+        if (!TrapController::can_execute_privileged_instruction(
+                state_.priv, state_.misa, state_.mstatus, funct12, ctx.funct7)) {
             ctx.pending_exception = ExceptionCode::IllegalInstruction;
             ctx.pending_tval = ctx.ir_org;
             return;
@@ -81,13 +80,13 @@ void CPU::fetch_operands(Machine& /*machine*/) {
             return;
         }
         if (w_csr_addr == csr_addr(Csr::Satp) && state_.priv == kPrivSupervisor &&
-            (state_.mstatus & enum_mask(MstatusBit::Tvm)) != 0) {
+            (state_.mstatus & MstatusBit::Tvm) != 0) {
             ctx.pending_exception = ExceptionCode::IllegalInstruction;
             ctx.pending_tval = ctx.ir_org;
             return;
         }
 
-        if (static_cast<PrivilegeLevel>(std::to_underlying(state_.priv)) < kPrivMachine) {
+        if (state_.priv < kPrivMachine) {
             if ((w_csr_addr >= 0xC00 && w_csr_addr <= 0xC1F) ||
                 (w_csr_addr >= 0xC80 && w_csr_addr <= 0xC9F)) {
                 const Word counter_bit = 1u << (w_csr_addr & 0x1Fu);
@@ -107,7 +106,7 @@ void CPU::fetch_operands(Machine& /*machine*/) {
     if (simrv::compiler::unlikely(w_csr_addr == csr_addr(Csr::Fflags) ||
                                   w_csr_addr == csr_addr(Csr::Frm) ||
                                   w_csr_addr == csr_addr(Csr::Fcsr))) {
-        if ((state_.mstatus & enum_mask(MstatusBit::Fs)) == 0) {
+        if ((state_.mstatus & MstatusBit::Fs) == 0) {
             ctx.pending_exception = ExceptionCode::IllegalInstruction;
             ctx.pending_tval = ctx.ir_org;
             return;

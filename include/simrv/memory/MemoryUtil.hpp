@@ -79,6 +79,11 @@ constexpr auto store_width_bytes(Instruction funct3) -> size_t {
     return base_width;
 }
 
+/// Compute store byte count from typed funct3 field
+constexpr auto store_width_bytes(isa::Funct3 funct3) -> size_t {
+    return store_width_bytes(static_cast<Instruction>(funct3));
+}
+
 // ========== Loaded Value Sign/Zero Extension Helper ==========
 
 /// Extend raw memory read data according to RISC-V load funct3 rules (sign vs zero extension).
@@ -97,6 +102,12 @@ constexpr auto store_width_bytes(Instruction funct3) -> size_t {
         }
     }
     return static_cast<Word>(raw_data & simrv::xlen::kXLenMask);
+}
+
+/// Extend raw memory read data according to typed RISC-V load funct3 rules.
+[[nodiscard]] constexpr auto extend_loaded_value(Word raw_data, isa::Funct3 funct3) noexcept
+    -> Word {
+    return extend_loaded_value(raw_data, static_cast<uint8_t>(funct3));
 }
 
 // ========== Fast Host Memory Read/Write Operations (Direct Translation Fast Path) ==========
@@ -167,8 +178,6 @@ SIMRV_ALWAYS_INLINE void host_write_fast(Byte* host_ptr, Register val,
     }
 }
 
-/// ========== Fast RAM Read Operations ==========
-
 /// Fast inline RAM read. The caller validates the address against its RamView.
 inline auto ram_read_fast(Address addr, Instruction funct3, RamView ram) -> Word {
     return host_read_fast(ram.unchecked_ptr(addr), funct3);
@@ -176,6 +185,14 @@ inline auto ram_read_fast(Address addr, Instruction funct3, RamView ram) -> Word
 
 inline auto ram_read_fast(PhysAddr addr, Instruction funct3, RamView ram) -> Word {
     return host_read_fast(ram.unchecked_ptr(addr), funct3);
+}
+
+inline auto ram_read_fast(Address addr, isa::Funct3 funct3, RamView ram) -> Word {
+    return ram_read_fast(addr, static_cast<Instruction>(funct3), ram);
+}
+
+inline auto ram_read_fast(PhysAddr addr, isa::Funct3 funct3, RamView ram) -> Word {
+    return ram_read_fast(addr, static_cast<Instruction>(funct3), ram);
 }
 
 // ========== Fast RAM Write Operations ==========
@@ -188,6 +205,22 @@ inline void ram_write_fast(Address addr, Word wdata, Instruction funct3, RamView
 
 inline void ram_write_fast(PhysAddr addr, Word wdata, Instruction funct3, RamView ram) {
     host_write_fast(ram.unchecked_ptr(addr), wdata, funct3);
+}
+
+inline void ram_write_fast(Address addr, Word wdata, isa::Funct3 funct3, RamView ram) {
+    ram_write_fast(addr, wdata, static_cast<Instruction>(funct3), ram);
+}
+
+inline void ram_write_fast(PhysAddr addr, Word wdata, isa::Funct3 funct3, RamView ram) {
+    ram_write_fast(addr, wdata, static_cast<Instruction>(funct3), ram);
+}
+
+SIMRV_ALWAYS_INLINE auto host_read_fast(const Byte* host_ptr, isa::Funct3 funct3) noexcept -> Word {
+    return host_read_fast(host_ptr, static_cast<Instruction>(funct3));
+}
+
+SIMRV_ALWAYS_INLINE void host_write_fast(Byte* host_ptr, Word val, isa::Funct3 funct3) noexcept {
+    host_write_fast(host_ptr, val, static_cast<Instruction>(funct3));
 }
 
 }  // namespace simrv::memory

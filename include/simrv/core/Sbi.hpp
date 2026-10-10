@@ -17,7 +17,7 @@ namespace detail {
 
 /** Direct SBI handles only supervisor ECALLs; M-mode ECALL remains an architectural trap. */
 constexpr auto is_direct_sbi_ecall(TrapCause cause) -> bool {
-    return cause == enum_mask(ExceptionCode::SupervisorEcall);
+    return cause == ExceptionCode::SupervisorEcall;
 }
 
 /** Determine whether a target hart is selected by an SBI (hart_mask, hart_mask_base) pair. */
@@ -46,6 +46,7 @@ class Sbi {
     explicit Sbi(core::CPU& cpu);
 
     auto handle_ecall(TrapCause cause) -> bool;
+    auto handle_ecall(ExceptionCode code) -> bool { return handle_ecall(to_trap_cause(code)); }
 
    private:
     // Modular sub-handlers for extensions

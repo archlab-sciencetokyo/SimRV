@@ -4,7 +4,9 @@
  */
 #pragma once
 
+#include <concepts>
 #include <cstdint>
+#include <utility>
 
 namespace simrv::isa {
 
@@ -34,5 +36,22 @@ enum class Funct5Amo : uint8_t {
     Max = 0x14,   ///< Atomic Signed Maximum
     Maxu = 0x1c,  ///< Atomic Unsigned Maximum
 };
+
+template <std::integral I>
+constexpr auto operator==(I lhs, Funct5Amo rhs) noexcept -> bool {
+    return lhs == static_cast<I>(std::to_underlying(rhs));
+}
+template <std::integral I>
+constexpr auto operator==(Funct5Amo lhs, I rhs) noexcept -> bool {
+    return static_cast<I>(std::to_underlying(lhs)) == rhs;
+}
+template <std::integral I>
+constexpr auto operator!=(I lhs, Funct5Amo rhs) noexcept -> bool {
+    return !(lhs == rhs);
+}
+template <std::integral I>
+constexpr auto operator!=(Funct5Amo lhs, I rhs) noexcept -> bool {
+    return !(lhs == rhs);
+}
 
 }  // namespace simrv::isa

@@ -18,6 +18,14 @@ class DCache : public BaseCache<1024, 32, 8> {
     [[nodiscard]] auto write(Address addr, Word data, Instruction funct3,
                              bool* out_first_write = nullptr) -> bool;
 
+    [[nodiscard]] auto read(Address addr, Word& data, isa::Funct3 funct3) -> bool {
+        return read(addr, data, static_cast<Instruction>(funct3));
+    }
+    [[nodiscard]] auto write(Address addr, Word data, isa::Funct3 funct3,
+                             bool* out_first_write = nullptr) -> bool {
+        return write(addr, data, static_cast<Instruction>(funct3), out_first_write);
+    }
+
     auto handle_probe(const simrv::memory::TlChannelB& req, simrv::memory::TlChannelC& resp,
                       std::array<Byte, kLineBytes>& dirty_data) -> bool;
 };

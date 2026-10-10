@@ -532,7 +532,7 @@ void Tracer::init_architecture_trace(const std::string& path) {
         "\"harts\":{},\"dram_base\":\"0x{:x}\",\"dram_size\":\"0x{:x}\","
         "\"appmode\":{},\"engine\":{},\"pipeline\":{},\"platform_profile\":{},"
         "\"cpu_model_preset\":{},\"branch_predictor\":{},\"smp_quantum\":{},"
-        "\"smp_multithreaded\":{},\"soc\":{},\"soc_cpu_model\":{},"
+        "\"smp_mode\":{},\"soc\":{},\"soc_cpu_model\":{},"
         "\"soc_pcie\":{},\"soc_mmio\":{},\"soc_disable_unlisted\":{},"
         "\"trace_level\":{},\"trace_events\":{},\"trace_function\":{},"
         "\"trace_device\":{},\"trace_hart\":{},"
@@ -553,7 +553,10 @@ void Tracer::init_architecture_trace(const std::string& path) {
         config.branch_predictor_type
             ? std::format("{}", std::to_underlying(*config.branch_predictor_type))
             : "null",
-        config.execution.smp_quantum, config.execution.smp_multithreaded,
+        config.execution.smp_quantum,
+        json_quote(config.execution.smp_mode.value_or(config.soc.smp.mode) == SmpMode::CycleAccurate
+                       ? "cycle-accurate"
+                       : "cycle-oriented"),
         json_quote(config.soc.name), json_quote(config.soc.cpu_model), config.soc.enable_pcie,
         config.soc.enable_mmio, config.soc.disable_unlisted_devices, config.debug.trace_level,
         json_quote(config.debug.trace_events), json_quote(config.debug.trace_function),
@@ -572,8 +575,8 @@ void Tracer::init_architecture_trace(const std::string& path) {
         config.debug.checkpoint_every, json_quote(config.debug.checkpoint_dir),
         json_quote(config.files.binary_path), json_quote(config.files.disk_path),
         config.files.disk_enabled, json_quote(config.files.virtiofs_path),
-        json_quote(config.files.cpuconfig_path),
-        json_quote(config.files.dvtree_path), json_string_array(trace_command_line_));
+        json_quote(config.files.cpuconfig_path), json_quote(config.files.dvtree_path),
+        json_string_array(trace_command_line_));
     bool first_device = true;
     for (const auto& device : config.soc.devices) {
         if (!first_device) configuration_material.push_back(',');
@@ -1050,16 +1053,12 @@ void Tracer::log_trap(Counter mtime, Counter cycle, TrapCause cause, Address tra
     const auto& context = cpu.active_context();
     const bool memory_fault_cause =
         !trap_is_interrupt(cause) &&
-        (cause == static_cast<TrapCause>(ExceptionCode::MisalignedLoad) ||
-         cause == static_cast<TrapCause>(ExceptionCode::FaultLoad) ||
-         cause == static_cast<TrapCause>(ExceptionCode::MisalignedStore) ||
-         cause == static_cast<TrapCause>(ExceptionCode::FaultStore) ||
-         cause == static_cast<TrapCause>(ExceptionCode::LoadPageFault) ||
-         cause == static_cast<TrapCause>(ExceptionCode::StorePageFault));
-    const bool memory_write_fault =
-        cause == static_cast<TrapCause>(ExceptionCode::MisalignedStore) ||
-        cause == static_cast<TrapCause>(ExceptionCode::FaultStore) ||
-        cause == static_cast<TrapCause>(ExceptionCode::StorePageFault);
+        (cause == ExceptionCode::MisalignedLoad || cause == ExceptionCode::FaultLoad ||
+         cause == ExceptionCode::MisalignedStore || cause == ExceptionCode::FaultStore ||
+         cause == ExceptionCode::LoadPageFault || cause == ExceptionCode::StorePageFault);
+    const bool memory_write_fault = cause == ExceptionCode::MisalignedStore ||
+                                    cause == ExceptionCode::FaultStore ||
+                                    cause == ExceptionCode::StorePageFault;
     const auto memory_kind = pipeline::operation::info(context.op_id).memory;
     const auto opcode = static_cast<Opcode>(context.opcode);
     const bool scalar_memory_opcode = opcode == Opcode::Load || opcode == Opcode::Store ||
@@ -1187,7 +1186,7 @@ void Tracer::log_architecture_retirement(const CPU& cpu,
     const bool emit_memory = fp_memory.is_open() && scalar_memory_opcode &&
                              memory_kind != pipeline::operation::MemoryAccessKind::None &&
                              trace_level_at_least(4) && trace_event_selected(memory_event);
-    const auto funct12 = static_cast<Funct12Priv>(retiring_context.funct12);
+    const auto funct12 = retiring_context.funct12;
     const bool interrupt_return_instruction = funct12 == Funct12Priv::Mret ||
                                               funct12 == Funct12Priv::Sret ||
                                               funct12 == Funct12Priv::Uret;

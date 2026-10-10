@@ -6,6 +6,7 @@
 
 #include <cstdint>
 
+#include "simrv/isa/Base.hpp"
 #include "simrv/xlen/Types.hpp"
 
 namespace simrv::isa {
@@ -49,6 +50,15 @@ enum class Funct7Fp : Word {
     FmvDX = 0x79,     ///< Move Integer Register to Float Double (FMV.D.X)
 };
 
+constexpr auto operator==(Word raw, Funct7Fp f7) noexcept -> bool {
+    return raw == std::to_underlying(f7);
+}
+constexpr auto operator==(Funct7Fp f7, Word raw) noexcept -> bool {
+    return std::to_underlying(f7) == raw;
+}
+constexpr auto operator!=(Word raw, Funct7Fp f7) noexcept -> bool { return !(raw == f7); }
+constexpr auto operator!=(Funct7Fp f7, Word raw) noexcept -> bool { return !(f7 == raw); }
+
 /**
  * @enum Funct3Fp
  * @brief Represents standard floating-point funct3 sub-opcodes.
@@ -59,9 +69,21 @@ enum class Funct3Fp : Word {
     Leq = 0x0,     ///< Less than or Equal comparison (for Fcmp)
     Lt = 0x1,      ///< Less than comparison (for Fcmp)
     Eq = 0x2,      ///< Equal comparison (for Fcmp)
+    Sgnj = 0x0,    ///< Sign injection (for Fsgnj)
+    Sgnjn = 0x1,   ///< Negated sign injection (for Fsgnjn)
+    Sgnjx = 0x2,   ///< Xor sign injection (for Fsgnjx)
     FmvXW = 0x0,   ///< Move instruction indicator (for FmvXW/FmvXD)
     Fclass = 0x1,  ///< Classify instruction indicator (for FmvXW/FmvXD)
 };
+
+constexpr auto operator==(Funct3 f3, Funct3Fp fp) noexcept -> bool {
+    return std::to_underlying(f3) == std::to_underlying(fp);
+}
+constexpr auto operator==(Funct3Fp fp, Funct3 f3) noexcept -> bool {
+    return std::to_underlying(fp) == std::to_underlying(f3);
+}
+constexpr auto operator!=(Funct3 f3, Funct3Fp fp) noexcept -> bool { return !(f3 == fp); }
+constexpr auto operator!=(Funct3Fp fp, Funct3 f3) noexcept -> bool { return !(fp == f3); }
 
 /**
  * @enum FflagsBit
@@ -75,6 +97,40 @@ enum class FflagsBit : uint32_t {
     Nv = 0x10,  ///< Invalid Operation flag
 };
 
+constexpr auto operator|(FflagsBit lhs, FflagsBit rhs) noexcept -> uint32_t {
+    return std::to_underlying(lhs) | std::to_underlying(rhs);
+}
+constexpr auto operator&(FflagsBit lhs, FflagsBit rhs) noexcept -> uint32_t {
+    return std::to_underlying(lhs) & std::to_underlying(rhs);
+}
+constexpr auto operator~(FflagsBit bit) noexcept -> uint32_t { return ~std::to_underlying(bit); }
+template <std::integral I>
+constexpr auto operator|(I lhs, FflagsBit rhs) noexcept -> I {
+    return lhs | static_cast<I>(std::to_underlying(rhs));
+}
+template <std::integral I>
+constexpr auto operator|(FflagsBit lhs, I rhs) noexcept -> I {
+    return static_cast<I>(std::to_underlying(lhs)) | rhs;
+}
+template <std::integral I>
+constexpr auto operator&(I lhs, FflagsBit rhs) noexcept -> I {
+    return lhs & static_cast<I>(std::to_underlying(rhs));
+}
+template <std::integral I>
+constexpr auto operator&(FflagsBit lhs, I rhs) noexcept -> I {
+    return static_cast<I>(std::to_underlying(lhs)) & rhs;
+}
+template <std::integral I>
+constexpr auto operator|=(I& lhs, FflagsBit rhs) noexcept -> I& {
+    lhs |= static_cast<I>(std::to_underlying(rhs));
+    return lhs;
+}
+template <std::integral I>
+constexpr auto operator&=(I& lhs, FflagsBit rhs) noexcept -> I& {
+    lhs &= static_cast<I>(std::to_underlying(rhs));
+    return lhs;
+}
+
 /**
  * @enum RoundingMode
  * @brief RISC-V floating-point rounding modes.
@@ -87,5 +143,44 @@ enum class RoundingMode : Word {
     Rmm = 0x4,  ///< Round to Nearest, ties to Max Magnitude
     Dyn = 0x7,  ///< Dynamic Rounding Mode (defined in fcsr.frm field)
 };
+
+constexpr auto operator==(Word raw, RoundingMode rm) noexcept -> bool {
+    return raw == std::to_underlying(rm);
+}
+constexpr auto operator==(RoundingMode rm, Word raw) noexcept -> bool {
+    return std::to_underlying(rm) == raw;
+}
+constexpr auto operator!=(Word raw, RoundingMode rm) noexcept -> bool { return !(raw == rm); }
+constexpr auto operator!=(RoundingMode rm, Word raw) noexcept -> bool { return !(rm == raw); }
+
+constexpr auto operator==(Funct3 f3, RoundingMode rm) noexcept -> bool {
+    return std::to_underlying(f3) == std::to_underlying(rm);
+}
+constexpr auto operator==(RoundingMode rm, Funct3 f3) noexcept -> bool {
+    return std::to_underlying(rm) == std::to_underlying(f3);
+}
+constexpr auto operator!=(Funct3 f3, RoundingMode rm) noexcept -> bool { return !(f3 == rm); }
+constexpr auto operator!=(RoundingMode rm, Funct3 f3) noexcept -> bool { return !(rm == f3); }
+
+[[nodiscard]] constexpr auto frm_rounding_mode(CSRValue fcsr) noexcept -> RoundingMode {
+    return static_cast<RoundingMode>((fcsr >> 5U) & 0x7U);
+}
+
+[[nodiscard]] constexpr auto resolve_rounding_mode(Word rm_field, CSRValue fcsr) noexcept
+    -> RoundingMode {
+    if (rm_field == RoundingMode::Dyn) {
+        return frm_rounding_mode(fcsr);
+    }
+    return static_cast<RoundingMode>(rm_field);
+}
+
+[[nodiscard]] constexpr auto resolve_rounding_mode(Funct3 rm_field, CSRValue fcsr) noexcept
+    -> RoundingMode {
+    return resolve_rounding_mode(std::to_underlying(rm_field), fcsr);
+}
+
+[[nodiscard]] constexpr auto is_valid_rounding_mode(RoundingMode rm) noexcept -> bool {
+    return std::to_underlying(rm) <= 4;
+}
 
 }  // namespace simrv::isa

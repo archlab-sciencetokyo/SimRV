@@ -88,28 +88,27 @@ auto trap_cause_name(TrapCause cause) -> std::string {
 
 void TrapController::mret(ArchState& state) {
     CSRValue mstatus = state.mstatus;
-    const CSRValue mpp = (mstatus & enum_mask(MstatusBit::Mpp)) >> 11;
-    const CSRValue mpie = (mstatus & enum_mask(MstatusBit::Mpie)) >> 7;
+    const PrivilegeLevel target_priv = mstatus_mpp(mstatus);
 
     // Restore MIE (bit 3) from MPIE (bit 7)
-    if (mpie != 0) {
-        mstatus |= enum_mask(MstatusBit::Mie);
+    if ((mstatus & MstatusBit::Mpie) != 0) {
+        mstatus |= MstatusBit::Mie;
     } else {
-        mstatus &= ~enum_mask(MstatusBit::Mie);
+        mstatus &= ~MstatusBit::Mie;
     }
     // Set MPIE (bit 7) to 1
-    mstatus |= enum_mask(MstatusBit::Mpie);
+    mstatus |= MstatusBit::Mpie;
     // xRET resets xPP to the least-privileged supported mode.
     const bool has_s = isa::misa_has_extension(state.misa, isa::IsaExtension::S);
     const bool has_u = isa::misa_has_extension(state.misa, isa::IsaExtension::U);
-    mstatus = (mstatus & ~enum_mask(MstatusBit::Mpp)) | (least_supported_mpp(has_s, has_u) << 11U);
+    mstatus = mstatus_with_mpp(mstatus, least_supported_privilege(has_s, has_u));
 
-    if (static_cast<PrivilegeLevel>(mpp) < kPrivMachine) {
-        mstatus &= ~enum_mask(MstatusBit::Mprv);
+    if (target_priv < kPrivMachine) {
+        mstatus &= ~MstatusBit::Mprv;
     }
 
     state.mstatus = mstatus;
-    state.priv = static_cast<PrivilegeLevel>(mpp);
+    state.priv = target_priv;
     state.update_xlen();
     state.pc = isa::epc_read_value(state.mepc, state.misa);
     if (state.regs.xlen == 32) {
@@ -120,25 +119,30 @@ void TrapController::mret(ArchState& state) {
 
 void TrapController::sret(ArchState& state) {
     CSRValue mstatus = state.mstatus;
-    const CSRValue spp = (mstatus & enum_mask(MstatusBit::Spp)) >> 8;
-    const CSRValue spie = (mstatus & enum_mask(MstatusBit::Spie)) >> 5;
+    const PrivilegeLevel target_priv = mstatus_spp(mstatus);
 
     // Restore SIE (bit 1) from SPIE (bit 5)
-    if (spie != 0) {
-        mstatus |= enum_mask(MstatusBit::Sie);
+    if ((mstatus & MstatusBit::Spie) != 0) {
+        mstatus |= MstatusBit::Sie;
     } else {
-        mstatus &= ~enum_mask(MstatusBit::Sie);
+        mstatus &= ~MstatusBit::Sie;
     }
     // Set SPIE (bit 5) to 1
-    mstatus |= enum_mask(MstatusBit::Spie);
-    // Clear SPP (bit 8) to U-mode (0)
-    mstatus &= ~enum_mask(MstatusBit::Spp);
+    mstatus |= MstatusBit::Spie;
+    // An SRET instruction sets SPP to the least-privileged supported mode (U if U-mode is
+    // implemented, else S).
+    const bool has_u = isa::misa_has_extension(state.misa, isa::IsaExtension::U);
+    if (has_u) {
+        mstatus &= ~MstatusBit::Spp;
+    } else {
+        mstatus |= MstatusBit::Spp;
+    }
 
     // Returning to a less privileged mode than M-mode always clears MPRV
-    mstatus &= ~enum_mask(MstatusBit::Mprv);
+    mstatus &= ~MstatusBit::Mprv;
 
     state.mstatus = mstatus;
-    state.priv = static_cast<PrivilegeLevel>(spp);
+    state.priv = target_priv;
     state.update_xlen();
     state.pc = isa::epc_read_value(state.sepc, state.misa);
     if (state.regs.xlen == 32) {
@@ -185,11 +189,13 @@ void TrapController::raise_exception(CPU& cpu, TrapCause cause, CSRValue tval) {
         state.scause = cause;
         state.sepc = trap_pc;
         state.stval = tval;
-        state.mstatus = (state.mstatus & ~enum_mask(MstatusBit::Spie)) |
-                        (((state.mstatus & enum_mask(MstatusBit::Sie)) >> 1) << 5);
-        state.mstatus = (state.mstatus & ~enum_mask(MstatusBit::Spp)) |
-                        (static_cast<CSRValue>(std::to_underlying(state.priv)) << 8);
-        state.mstatus &= ~enum_mask(MstatusBit::Sie);
+        if ((state.mstatus & MstatusBit::Sie) != 0) {
+            state.mstatus |= MstatusBit::Spie;
+        } else {
+            state.mstatus &= ~MstatusBit::Spie;
+        }
+        state.mstatus = mstatus_with_spp(state.mstatus, state.priv);
+        state.mstatus &= ~MstatusBit::Sie;
         state.priv = kPrivSupervisor;
         state.update_xlen();
         state.pc = calculate_trap_target(state.stvec, cause);
@@ -197,11 +203,13 @@ void TrapController::raise_exception(CPU& cpu, TrapCause cause, CSRValue tval) {
         state.mcause = cause;
         state.mepc = trap_pc;
         state.mtval = tval;
-        state.mstatus = (state.mstatus & ~enum_mask(MstatusBit::Mpie)) |
-                        (((state.mstatus & enum_mask(MstatusBit::Mie)) >> 3) << 7);
-        state.mstatus = (state.mstatus & ~enum_mask(MstatusBit::Mpp)) |
-                        (static_cast<CSRValue>(std::to_underlying(state.priv)) << 11);
-        state.mstatus &= ~enum_mask(MstatusBit::Mie);
+        if ((state.mstatus & MstatusBit::Mie) != 0) {
+            state.mstatus |= MstatusBit::Mpie;
+        } else {
+            state.mstatus &= ~MstatusBit::Mpie;
+        }
+        state.mstatus = mstatus_with_mpp(state.mstatus, state.priv);
+        state.mstatus &= ~MstatusBit::Mie;
         state.priv = kPrivMachine;
         state.update_xlen();
         state.pc = calculate_trap_target(state.mtvec, cause);
@@ -235,23 +243,23 @@ void TrapController::raise_exception(CPU& cpu, TrapCause cause, CSRValue tval) {
 auto TrapController::can_execute_privileged_instruction(PrivilegeLevel current_priv, CSRValue misa,
                                                         CSRValue mstatus, Instruction funct12,
                                                         Word funct7) -> bool {
-    if (funct12 == static_cast<Instruction>(isa::Funct12Priv::Mret)) {
+    if (funct12 == isa::Funct12Priv::Mret) {
         return current_priv >= kPrivMachine;
     }
-    if (funct12 == static_cast<Instruction>(isa::Funct12Priv::Sret)) {
+    if (funct12 == isa::Funct12Priv::Sret) {
         return misa_has_extension(misa, isa::IsaExtension::S) && current_priv >= kPrivSupervisor &&
-               !(current_priv == kPrivSupervisor && (mstatus & enum_mask(MstatusBit::Tsr)) != 0);
+               !(current_priv == kPrivSupervisor && (mstatus & MstatusBit::Tsr) != 0);
     }
-    if (funct12 == static_cast<Instruction>(isa::Funct12Priv::Uret)) {
+    if (funct12 == isa::Funct12Priv::Uret) {
         return false;
     }
-    if (funct12 == static_cast<Instruction>(isa::Funct12Priv::Wfi)) {
+    if (funct12 == isa::Funct12Priv::Wfi) {
         return current_priv >= kPrivSupervisor &&
-               !(current_priv == kPrivSupervisor && (mstatus & enum_mask(MstatusBit::Tw)) != 0);
+               !(current_priv == kPrivSupervisor && (mstatus & MstatusBit::Tw) != 0);
     }
-    if (funct7 == static_cast<Instruction>(isa::Funct7Priv::SfenceVma)) {
+    if (funct7 == isa::Funct7Priv::SfenceVma) {
         return misa_has_extension(misa, isa::IsaExtension::S) && current_priv >= kPrivSupervisor &&
-               !(current_priv == kPrivSupervisor && (mstatus & enum_mask(MstatusBit::Tvm)) != 0);
+               !(current_priv == kPrivSupervisor && (mstatus & MstatusBit::Tvm) != 0);
     }
     return true;
 }

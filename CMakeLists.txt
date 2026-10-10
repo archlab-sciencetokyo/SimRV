@@ -399,6 +399,9 @@ if(BUILD_TESTING)
     "gate;regress;memory;mmio")
   simrv_add_runtime_test(simrv-pmp-tests tests/PmpTests.cpp pmp
                          "gate;regress;core;memory;pmp")
+  simrv_add_runtime_test(simrv-privilege-audit-tests
+                         tests/PrivilegeMemoryAuditTests.cpp privilege-audit
+                         "gate;regress;core;memory;pmp")
   simrv_add_runtime_test(
     simrv-machine-config-tests tests/MachineConfigTests.cpp machine-config
     "gate;regress;core;config")
@@ -658,7 +661,7 @@ if(BUILD_TESTING)
       linux-ca-mt-smp-pty
       PROPERTIES
         ENVIRONMENT
-        "${LINUX_PTY_DYNAMIC_ENV};SIMRV_TEST_EXTRA_ARGS=--mode cycle-accurate --smp 2 --smp-quantum 100 --smp-multithreaded;SIMRV_TEST_EXPECT_CPUS=2;SIMRV_TEST_INSTRUCTIONS=12000000000;SIMRV_TEST_TIMEOUT=480"
+        "${LINUX_PTY_DYNAMIC_ENV};SIMRV_TEST_EXTRA_ARGS=--mode cycle-accurate --smp 2 --smp-mode cycle-oriented --smp-quantum 100;SIMRV_TEST_EXPECT_CPUS=2;SIMRV_TEST_INSTRUCTIONS=12000000000;SIMRV_TEST_TIMEOUT=480"
         TIMEOUT
         500
         RUN_SERIAL

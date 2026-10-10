@@ -27,12 +27,12 @@ constexpr CSRValue kCounterEnableMask = static_cast<CSRValue>(0x7u);
 
 [[nodiscard]] constexpr auto fp_accessible(const ArchState& state) noexcept -> bool {
     return isa::misa_has_extension(state.misa, isa::IsaExtension::F) &&
-           (state.mstatus & enum_mask(MstatusBit::Fs)) != 0;
+           (state.mstatus & MstatusBit::Fs) != 0;
 }
 
 [[nodiscard]] constexpr auto vector_accessible(const ArchState& state) noexcept -> bool {
     return isa::misa_has_extension(state.misa, isa::IsaExtension::V) &&
-           (state.mstatus & enum_mask(MstatusBit::Vs)) != 0;
+           (state.mstatus & MstatusBit::Vs) != 0;
 }
 
 }  // namespace
@@ -86,13 +86,11 @@ void CsrFile::setMstatus(CSRValue wdata) {
     // - Mprv/Sum/Mxr: address translation mode changes
     // - Fs/Vs: FP/Vector state enable changes invalidate cached illegal-instruction checks
     // - Sxl/Uxl (bits 35:34 and 33:32): XLEN changes alter RVC decompression (C.JAL vs C.ADDIW)
-    const CSRValue tlb_sensitive = enum_mask(MstatusBit::Mprv) | enum_mask(MstatusBit::Sum) |
-                                   enum_mask(MstatusBit::Mxr) | enum_mask(MstatusBit::Fs) |
-                                   enum_mask(MstatusBit::Vs);
+    const CSRValue tlb_sensitive =
+        MstatusBit::Mprv | MstatusBit::Sum | MstatusBit::Mxr | MstatusBit::Fs | MstatusBit::Vs;
     const CSRValue xlen_bits = static_cast<CSRValue>(uint64_t{0xFULL} << 32U);
     if ((mod & (tlb_sensitive | xlen_bits)) != 0 ||
-        (((cpu_.state().mstatus & enum_mask(MstatusBit::Mprv)) != 0u) &&
-         (mod & enum_mask(MstatusBit::Mpp)) != 0)) {
+        (((cpu_.state().mstatus & MstatusBit::Mprv) != 0u) && (mod & MstatusBit::Mpp) != 0)) {
         cpu_.TLB_flush();
     }
     const CSRValue mask = mstatus_writable_mask(has_s, has_u, has_f, has_v);
@@ -322,9 +320,8 @@ auto CsrFile::write(CSRAddress addr, CSRValue wdata)
             std::pair{MipBit::Seip, TrapCause{9}}, std::pair{MipBit::Meip, TrapCause{11}},
         };
         for (const auto& [bit, code] : interrupt_bits) {
-            const auto mask = enum_mask(bit);
-            const bool was_pending = (before & mask) != 0;
-            const bool is_pending = (cpu_.state().mip & mask) != 0;
+            const bool was_pending = (before & bit) != 0;
+            const bool is_pending = (cpu_.state().mip & bit) != 0;
             if (was_pending != is_pending) {
                 cpu_.machine_->trace().log_interrupt_signal(cpu_, kInterruptCauseBit | code,
                                                             is_pending, source);
@@ -404,7 +401,7 @@ auto CsrFile::write(CSRAddress addr, CSRValue wdata)
         case csr_addr(Csr::Fflags):
             return require_fp().and_then([this, wdata]() -> std::expected<void, ExceptionCode> {
                 cpu_.state().fcsr = (cpu_.state().fcsr & ~kFflagsMask) | (wdata & kFflagsMask);
-                cpu_.state().mstatus |= enum_mask(MstatusBit::Fs);
+                cpu_.state().mstatus |= MstatusBit::Fs;
 #if defined(__x86_64__) || defined(_M_X64)
                 _mm_setcsr(_mm_getcsr() & ~0x3fu);
 #endif
@@ -414,13 +411,13 @@ auto CsrFile::write(CSRAddress addr, CSRValue wdata)
             return require_fp().and_then([this, wdata]() -> std::expected<void, ExceptionCode> {
                 cpu_.state().fcsr = (cpu_.state().fcsr & ~(kFrmMask << kFrmShift)) |
                                     ((wdata & kFrmMask) << kFrmShift);
-                cpu_.state().mstatus |= enum_mask(MstatusBit::Fs);
+                cpu_.state().mstatus |= MstatusBit::Fs;
                 return {};
             });
         case csr_addr(Csr::Fcsr):
             return require_fp().and_then([this, wdata]() -> std::expected<void, ExceptionCode> {
                 cpu_.state().fcsr = wdata & kFcsrMask;
-                cpu_.state().mstatus |= enum_mask(MstatusBit::Fs);
+                cpu_.state().mstatus |= MstatusBit::Fs;
 #if defined(__x86_64__) || defined(_M_X64)
                 _mm_setcsr(_mm_getcsr() & ~0x3fu);
 #endif
@@ -429,38 +426,38 @@ auto CsrFile::write(CSRAddress addr, CSRValue wdata)
         case csr_addr(Csr::Vstart):
             return require_vector().and_then([this, wdata]() -> std::expected<void, ExceptionCode> {
                 cpu_.state().vstart = wdata & cpu_.state().regs.vstart_mask();
-                cpu_.state().mstatus |= enum_mask(MstatusBit::Vs);
+                cpu_.state().mstatus |= MstatusBit::Vs;
                 return {};
             });
         case csr_addr(Csr::Vxsat):
             return require_vector().and_then([this, wdata]() -> std::expected<void, ExceptionCode> {
                 cpu_.state().vxsat = wdata & 1;
-                cpu_.state().mstatus |= enum_mask(MstatusBit::Vs);
+                cpu_.state().mstatus |= MstatusBit::Vs;
                 return {};
             });
         case csr_addr(Csr::Vxrm):
             return require_vector().and_then([this, wdata]() -> std::expected<void, ExceptionCode> {
                 cpu_.state().vxrm = wdata & 3;
-                cpu_.state().mstatus |= enum_mask(MstatusBit::Vs);
+                cpu_.state().mstatus |= MstatusBit::Vs;
                 return {};
             });
         case csr_addr(Csr::Vcsr):
             return require_vector().and_then([this, wdata]() -> std::expected<void, ExceptionCode> {
                 cpu_.state().vxrm = (wdata >> 1) & 3;
                 cpu_.state().vxsat = wdata & 1;
-                cpu_.state().mstatus |= enum_mask(MstatusBit::Vs);
+                cpu_.state().mstatus |= MstatusBit::Vs;
                 return {};
             });
         case csr_addr(Csr::Vl):
             return require_vector().and_then([this, wdata]() -> std::expected<void, ExceptionCode> {
                 cpu_.state().vl = wdata;
-                cpu_.state().mstatus |= enum_mask(MstatusBit::Vs);
+                cpu_.state().mstatus |= MstatusBit::Vs;
                 return {};
             });
         case csr_addr(Csr::Vtype):
             return require_vector().and_then([this, wdata]() -> std::expected<void, ExceptionCode> {
                 cpu_.state().vtype = wdata;
-                cpu_.state().mstatus |= enum_mask(MstatusBit::Vs);
+                cpu_.state().mstatus |= MstatusBit::Vs;
                 return {};
             });
 
@@ -508,7 +505,7 @@ auto CsrFile::write(CSRAddress addr, CSRValue wdata)
             break;
         case csr_addr(Csr::Sip): {
             const CSRValue pending_before = cpu_.state().mip;
-            const CSRValue mask = enum_mask(MipBit::Ssip) & cpu_.state().mideleg;
+            const CSRValue mask = MipBit::Ssip & cpu_.state().mideleg;
             cpu_.state().mip = (cpu_.state().mip & ~mask) | (wdata & mask);
             log_pending_changes(pending_before, "sip_csr");
             break;
@@ -525,11 +522,11 @@ auto CsrFile::write(CSRAddress addr, CSRValue wdata)
         case csr_addr(Csr::Mip): {
             const CSRValue pending_before = cpu_.state().mip;
             const CSRValue writable = mip_writable_mask(has_s);
-            const CSRValue sourced = enum_mask(MipBit::Seip) | enum_mask(MipBit::Stip);
+            const CSRValue sourced = MipBit::Seip | MipBit::Stip;
             const CSRValue ordinary = writable & ~sourced;
             cpu_.state().mip = (cpu_.state().mip & ~ordinary) | (wdata & ordinary);
-            cpu_.state().seip_software = (wdata & writable & enum_mask(MipBit::Seip)) != 0;
-            cpu_.state().stip_software = (wdata & writable & enum_mask(MipBit::Stip)) != 0;
+            cpu_.state().seip_software = (wdata & writable & MipBit::Seip) != 0;
+            cpu_.state().stip_software = (wdata & writable & MipBit::Stip) != 0;
             cpu_.state().refresh_supervisor_pending();
             log_pending_changes(pending_before, "mip_csr");
             break;
@@ -568,8 +565,8 @@ auto CsrFile::write(CSRAddress addr, CSRValue wdata)
                                 const size_t entry = cfg_idx * 4 + b;
                                 if (entry < ArchState::kNumPmpEntries) {
                                     if ((cpu_.state().pmpcfg[entry] & 0x80) == 0) {
-                                        cpu_.state().pmpcfg[entry] =
-                                            static_cast<uint8_t>((wdata >> (8 * b)) & 0xFF);
+                                        cpu_.state().pmpcfg[entry] = pmpcfg_legalize(
+                                            static_cast<uint8_t>((wdata >> (8 * b)) & 0xFF));
                                     }
                                 }
                             }
@@ -581,8 +578,8 @@ auto CsrFile::write(CSRAddress addr, CSRValue wdata)
                                 const size_t entry = base_pmp + b;
                                 if (entry < ArchState::kNumPmpEntries) {
                                     if ((cpu_.state().pmpcfg[entry] & 0x80) == 0) {
-                                        cpu_.state().pmpcfg[entry] =
-                                            static_cast<uint8_t>((wdata >> (8 * b)) & 0xFF);
+                                        cpu_.state().pmpcfg[entry] = pmpcfg_legalize(
+                                            static_cast<uint8_t>((wdata >> (8 * b)) & 0xFF));
                                     }
                                 }
                             }

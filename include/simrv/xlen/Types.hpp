@@ -115,6 +115,41 @@ enum class PmpMode : uint8_t { Off = 0x00, Tor = 0x08, Na4 = 0x10, Napot = 0x18 
 enum class PmpPermission : uint8_t { None = 0, Read = 1, Write = 2, Execute = 4, Lock = 0x80 };
 using PmpIndex = uint8_t;
 
+constexpr auto operator|(PmpPermission lhs, PmpPermission rhs) noexcept -> PmpPermission {
+    return static_cast<PmpPermission>(std::to_underlying(lhs) | std::to_underlying(rhs));
+}
+constexpr auto operator&(PmpPermission lhs, PmpPermission rhs) noexcept -> PmpPermission {
+    return static_cast<PmpPermission>(std::to_underlying(lhs) & std::to_underlying(rhs));
+}
+constexpr auto operator~(PmpPermission p) noexcept -> PmpPermission {
+    return static_cast<PmpPermission>(~std::to_underlying(p) & 0x87u);
+}
+constexpr auto operator|=(PmpPermission& lhs, PmpPermission rhs) noexcept -> PmpPermission& {
+    lhs = lhs | rhs;
+    return lhs;
+}
+
+template <std::integral I>
+constexpr auto operator&(I lhs, PmpPermission rhs) noexcept -> I {
+    return lhs & static_cast<I>(std::to_underlying(rhs));
+}
+template <std::integral I>
+constexpr auto operator&(PmpPermission lhs, I rhs) noexcept -> I {
+    return rhs & lhs;
+}
+template <std::integral I>
+constexpr auto operator|(I lhs, PmpPermission rhs) noexcept -> I {
+    return lhs | static_cast<I>(std::to_underlying(rhs));
+}
+template <std::integral I>
+constexpr auto operator|(PmpPermission lhs, I rhs) noexcept -> I {
+    return rhs | lhs;
+}
+constexpr auto operator&=(PmpPermission& lhs, PmpPermission rhs) noexcept -> PmpPermission& {
+    lhs = lhs & rhs;
+    return lhs;
+}
+
 // TileLink-C channel identification
 enum class TileLinkChannel : uint8_t { A = 0, B = 1, C = 2, D = 3, E = 4 };
 
@@ -174,6 +209,19 @@ enum class SbiExtId : uint32_t {
     Cppc = 0x43505043,          // CPPC
 };
 
+constexpr auto operator==(Word raw, SbiExtId ext) noexcept -> bool {
+    return raw == std::to_underlying(ext);
+}
+constexpr auto operator==(SbiExtId ext, Word raw) noexcept -> bool {
+    return std::to_underlying(ext) == raw;
+}
+constexpr auto operator!=(Word raw, SbiExtId ext) noexcept -> bool {
+    return !(raw == ext);
+}
+constexpr auto operator!=(SbiExtId ext, Word raw) noexcept -> bool {
+    return !(ext == raw);
+}
+
 // AIA domain types
 enum class ImsicPrivilege : uint8_t { Machine = 0, Supervisor = 1 };
 enum class AplicPrivilege : uint8_t { Machine = 0, Supervisor = 1 };
@@ -197,6 +245,24 @@ enum class VirtioDeviceStatus : uint8_t {
 };
 enum class VirtqDescFlag : uint16_t { Next = 1, Write = 2, Indirect = 4 };
 
+constexpr auto operator|(VirtqDescFlag lhs, VirtqDescFlag rhs) noexcept -> VirtqDescFlag {
+    return static_cast<VirtqDescFlag>(std::to_underlying(lhs) | std::to_underlying(rhs));
+}
+constexpr auto operator&(VirtqDescFlag lhs, VirtqDescFlag rhs) noexcept -> VirtqDescFlag {
+    return static_cast<VirtqDescFlag>(std::to_underlying(lhs) & std::to_underlying(rhs));
+}
+constexpr auto operator~(VirtqDescFlag f) noexcept -> VirtqDescFlag {
+    return static_cast<VirtqDescFlag>(~std::to_underlying(f));
+}
+constexpr auto operator|=(VirtqDescFlag& lhs, VirtqDescFlag rhs) noexcept -> VirtqDescFlag& {
+    lhs = lhs | rhs;
+    return lhs;
+}
+constexpr auto operator&=(VirtqDescFlag& lhs, VirtqDescFlag rhs) noexcept -> VirtqDescFlag& {
+    lhs = lhs & rhs;
+    return lhs;
+}
+
 // PCIe domain types
 enum class PciCommandBit : uint16_t {
     IoSpace = 0x0001,
@@ -211,6 +277,24 @@ enum class PciCommandBit : uint16_t {
     InterruptDisable = 0x0400
 };
 
+constexpr auto operator|(PciCommandBit lhs, PciCommandBit rhs) noexcept -> PciCommandBit {
+    return static_cast<PciCommandBit>(std::to_underlying(lhs) | std::to_underlying(rhs));
+}
+constexpr auto operator&(PciCommandBit lhs, PciCommandBit rhs) noexcept -> PciCommandBit {
+    return static_cast<PciCommandBit>(std::to_underlying(lhs) & std::to_underlying(rhs));
+}
+constexpr auto operator~(PciCommandBit b) noexcept -> PciCommandBit {
+    return static_cast<PciCommandBit>(~std::to_underlying(b));
+}
+constexpr auto operator|=(PciCommandBit& lhs, PciCommandBit rhs) noexcept -> PciCommandBit& {
+    lhs = lhs | rhs;
+    return lhs;
+}
+constexpr auto operator&=(PciCommandBit& lhs, PciCommandBit rhs) noexcept -> PciCommandBit& {
+    lhs = lhs & rhs;
+    return lhs;
+}
+
 enum class PciStatusBit : uint16_t {
     InterruptStatus = 0x0008,
     CapabilitiesList = 0x0010,
@@ -224,6 +308,24 @@ enum class PciStatusBit : uint16_t {
     SignaledSystemError = 0x4000,
     DetectedParityError = 0x8000
 };
+
+constexpr auto operator|(PciStatusBit lhs, PciStatusBit rhs) noexcept -> PciStatusBit {
+    return static_cast<PciStatusBit>(std::to_underlying(lhs) | std::to_underlying(rhs));
+}
+constexpr auto operator&(PciStatusBit lhs, PciStatusBit rhs) noexcept -> PciStatusBit {
+    return static_cast<PciStatusBit>(std::to_underlying(lhs) & std::to_underlying(rhs));
+}
+constexpr auto operator~(PciStatusBit b) noexcept -> PciStatusBit {
+    return static_cast<PciStatusBit>(~std::to_underlying(b));
+}
+constexpr auto operator|=(PciStatusBit& lhs, PciStatusBit rhs) noexcept -> PciStatusBit& {
+    lhs = lhs | rhs;
+    return lhs;
+}
+constexpr auto operator&=(PciStatusBit& lhs, PciStatusBit rhs) noexcept -> PciStatusBit& {
+    lhs = lhs & rhs;
+    return lhs;
+}
 
 enum class PciCapabilityId : uint8_t {
     Null = 0,

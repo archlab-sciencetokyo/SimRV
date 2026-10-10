@@ -25,24 +25,24 @@ auto PageTableWalker::pte_access_valid(PhysAddr address, unsigned size) const no
 auto PageTableWalker::page_fault_for(PteAccess access) noexcept -> TrapCause {
     switch (access) {
         case PteAccess::Code:
-            return enum_mask(ExceptionCode::FetchPageFault);
+            return to_trap_cause(ExceptionCode::FetchPageFault);
         case PteAccess::Write:
-            return enum_mask(ExceptionCode::StorePageFault);
+            return to_trap_cause(ExceptionCode::StorePageFault);
         case PteAccess::Read:
         default:
-            return enum_mask(ExceptionCode::LoadPageFault);
+            return to_trap_cause(ExceptionCode::LoadPageFault);
     }
 }
 
 auto PageTableWalker::access_fault_for(PteAccess access) noexcept -> TrapCause {
     switch (access) {
         case PteAccess::Code:
-            return enum_mask(ExceptionCode::FaultFetch);
+            return to_trap_cause(ExceptionCode::FaultFetch);
         case PteAccess::Write:
-            return enum_mask(ExceptionCode::FaultStore);
+            return to_trap_cause(ExceptionCode::FaultStore);
         case PteAccess::Read:
         default:
-            return enum_mask(ExceptionCode::FaultLoad);
+            return to_trap_cause(ExceptionCode::FaultLoad);
     }
 }
 
@@ -63,10 +63,11 @@ void PageTableWalker::select_next_pte(PageWalkState& state, PhysAddr table_addre
                       (12 + state.level * static_cast<int>(state.vpn_bits_per_level))) &
                      vpn_mask;
     state.pte_address = table_address + vpn * state.pte_size;
+    // Implicit page table accesses evaluate under Supervisor privilege per RISC-V Privileged spec
     if (!pte_access_valid(state.pte_address, state.pte_size) ||
         (state.arch_state != nullptr &&
          !core::pmp::check_access(*state.arch_state, state.pte_address, state.pte_size,
-                                  core::PmpAccessType::Read))) {
+                                  core::PmpAccessType::Read, PrivilegeLevel::Supervisor))) {
         fail_access(state);
         return;
     }
@@ -122,14 +123,14 @@ void PageTableWalker::accept_pte(PageWalkState& state, Word pte) const {
     }
     state.pte = pte;
     const PteView view{.raw = pte};
-    if (!view.valid() || view.has_reserved_bits(state.pte_size)) {
+    if (!view.valid() || view.has_reserved_bits(state.pte_size) || view.is_reserved_encoding()) {
         state.fault = page_fault_for(state.access);
         state.status = PageWalkStatus::Fault;
         return;
     }
 
-    if (view.is_table()) {
-        if (view.dirty() || state.level == 0) {
+    if (view.is_table_pointer()) {
+        if (view.table_pointer_has_reserved_bits() || state.level == 0) {
             state.fault = page_fault_for(state.access);
             state.status = PageWalkStatus::Fault;
             return;
@@ -139,7 +140,7 @@ void PageTableWalker::accept_pte(PageWalkState& state, Word pte) const {
         return;
     }
 
-    const bool mxr = (state.mstatus & enum_mask(MstatusBit::Mxr)) != 0u;
+    const bool mxr = (state.mstatus & MstatusBit::Mxr) != 0u;
     const bool pte_r = view.readable();
     const bool pte_w = view.writable();
     const bool pte_x = view.executable();
@@ -170,21 +171,22 @@ void PageTableWalker::accept_pte(PageWalkState& state, Word pte) const {
                                                                 : (state.access == PteAccess::Write
                                                                        ? core::PmpAccessType::Write
                                                                        : core::PmpAccessType::Read);
-        if (!core::pmp::check_access(*state.arch_state, state.physical_address, 1, pmp_access)) {
+        if (!core::pmp::check_access(*state.arch_state, state.physical_address, 1, pmp_access,
+                                     state.privilege)) {
             state.fault = access_fault_for(state.access);
             state.status = PageWalkStatus::Fault;
             return;
         }
     }
 
-    Word updated = pte | enum_mask(PteFlag::A);
+    Word updated = pte | PteFlag::A;
     if (state.access == PteAccess::Write) {
-        updated |= enum_mask(PteFlag::D);
+        updated |= PteFlag::D;
     }
     if (state.update_access_bits && updated != pte) {
         if (state.arch_state != nullptr &&
             !core::pmp::check_access(*state.arch_state, state.pte_address, state.pte_size,
-                                     core::PmpAccessType::Write)) {
+                                     core::PmpAccessType::Write, PrivilegeLevel::Supervisor)) {
             fail_access(state);
             return;
         }
@@ -216,7 +218,7 @@ auto PageTableWalker::validate_pte_permissions(Word pte, Word permission_bits, P
             // SUM
             return false;
         }
-        if ((mstatus & enum_mask(MstatusBit::Sum)) == 0u) {
+        if ((mstatus & MstatusBit::Sum) == 0u) {
             return false;
         }
     }
@@ -237,7 +239,7 @@ auto PageTableWalker::validate_pte_permissions(Word pte, Word permission_bits, P
 auto PageTableWalker::walk(VirtAddr v_addr, PteAccess access, PrivilegeLevel priv, CSRValue mstatus,
                            Word satp, unsigned xlen, bool update_access_bits,
                            const core::ArchState* arch_state) const
-    -> std::expected<PhysAddr, TrapCause> {
+    -> std::expected<PageWalkResult, TrapCause> {
     auto state =
         begin_walk(v_addr, access, priv, mstatus, satp, xlen, update_access_bits, arch_state);
     while (state.status == PageWalkStatus::ReadPte || state.status == PageWalkStatus::WritePte) {
@@ -262,7 +264,7 @@ auto PageTableWalker::walk(VirtAddr v_addr, PteAccess access, PrivilegeLevel pri
     if (state.status == PageWalkStatus::Fault) {
         return std::unexpected(state.fault);
     }
-    return state.physical_address;
+    return PageWalkResult{.physical_address = state.physical_address, .pte = state.pte};
 }
 
 }  // namespace simrv::memory

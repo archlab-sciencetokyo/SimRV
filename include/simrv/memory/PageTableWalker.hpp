@@ -24,9 +24,43 @@ enum class PteFlag : PteFlags {
     W = (1 << 2),
     X = (1 << 3),
     U = (1 << 4),
+    G = (1 << 5),
     A = (1 << 6),
     D = (1 << 7),
 };
+
+constexpr auto operator|(PteFlag lhs, PteFlag rhs) noexcept -> PteFlag {
+    return static_cast<PteFlag>(std::to_underlying(lhs) | std::to_underlying(rhs));
+}
+
+constexpr auto operator&(PteFlag lhs, PteFlag rhs) noexcept -> PteFlag {
+    return static_cast<PteFlag>(std::to_underlying(lhs) & std::to_underlying(rhs));
+}
+
+constexpr auto operator~(PteFlag flag) noexcept -> PteFlag {
+    return static_cast<PteFlag>(~std::to_underlying(flag));
+}
+
+constexpr auto operator|(Word lhs, PteFlag rhs) noexcept -> Word {
+    return lhs | std::to_underlying(rhs);
+}
+constexpr auto operator|(PteFlag lhs, Word rhs) noexcept -> Word {
+    return std::to_underlying(lhs) | rhs;
+}
+constexpr auto operator|=(Word& lhs, PteFlag rhs) noexcept -> Word& {
+    lhs |= std::to_underlying(rhs);
+    return lhs;
+}
+constexpr auto operator&(Word lhs, PteFlag rhs) noexcept -> Word {
+    return lhs & std::to_underlying(rhs);
+}
+constexpr auto operator&(PteFlag lhs, Word rhs) noexcept -> Word {
+    return std::to_underlying(lhs) & rhs;
+}
+constexpr auto operator&=(Word& lhs, PteFlag rhs) noexcept -> Word& {
+    lhs &= std::to_underlying(rhs);
+    return lhs;
+}
 
 /**
  * @struct PteView
@@ -35,35 +69,38 @@ enum class PteFlag : PteFlags {
 struct PteView {
     Word raw{0};
 
-    [[nodiscard]] constexpr auto valid() const noexcept -> bool {
-        return (raw & enum_mask(PteFlag::V)) != 0;
-    }
+    [[nodiscard]] constexpr auto valid() const noexcept -> bool { return (raw & PteFlag::V) != 0; }
     [[nodiscard]] constexpr auto readable() const noexcept -> bool {
-        return (raw & enum_mask(PteFlag::R)) != 0;
+        return (raw & PteFlag::R) != 0;
     }
     [[nodiscard]] constexpr auto writable() const noexcept -> bool {
-        return (raw & enum_mask(PteFlag::W)) != 0;
+        return (raw & PteFlag::W) != 0;
     }
     [[nodiscard]] constexpr auto executable() const noexcept -> bool {
-        return (raw & enum_mask(PteFlag::X)) != 0;
+        return (raw & PteFlag::X) != 0;
     }
-    [[nodiscard]] constexpr auto user() const noexcept -> bool {
-        return (raw & enum_mask(PteFlag::U)) != 0;
-    }
-    [[nodiscard]] constexpr auto global() const noexcept -> bool { return (raw & (1 << 5)) != 0; }
+    [[nodiscard]] constexpr auto user() const noexcept -> bool { return (raw & PteFlag::U) != 0; }
+    [[nodiscard]] constexpr auto global() const noexcept -> bool { return (raw & PteFlag::G) != 0; }
     [[nodiscard]] constexpr auto accessed() const noexcept -> bool {
-        return (raw & enum_mask(PteFlag::A)) != 0;
+        return (raw & PteFlag::A) != 0;
     }
-    [[nodiscard]] constexpr auto dirty() const noexcept -> bool {
-        return (raw & enum_mask(PteFlag::D)) != 0;
-    }
+    [[nodiscard]] constexpr auto dirty() const noexcept -> bool { return (raw & PteFlag::D) != 0; }
     [[nodiscard]] constexpr auto rsw() const noexcept -> uint8_t {
         return static_cast<uint8_t>((raw >> 8) & 0x3);
     }
     [[nodiscard]] constexpr auto is_leaf() const noexcept -> bool {
-        return readable() || executable();
+        return valid() && (readable() || executable());
     }
-    [[nodiscard]] constexpr auto is_table() const noexcept -> bool { return valid() && !is_leaf(); }
+    [[nodiscard]] constexpr auto is_table_pointer() const noexcept -> bool {
+        return valid() && !readable() && !writable() && !executable();
+    }
+    [[nodiscard]] constexpr auto is_table() const noexcept -> bool { return is_table_pointer(); }
+    [[nodiscard]] constexpr auto is_reserved_encoding() const noexcept -> bool {
+        return valid() && !readable() && writable();
+    }
+    [[nodiscard]] constexpr auto table_pointer_has_reserved_bits() const noexcept -> bool {
+        return (raw & (PteFlag::U | PteFlag::A | PteFlag::D)) != 0;
+    }
     [[nodiscard]] constexpr auto ppn() const noexcept -> uint64_t {
         return static_cast<uint64_t>(raw >> 10);
     }
@@ -98,6 +135,26 @@ struct PageWalkState {
     PageWalkStatus status = PageWalkStatus::Fault;
     const core::ArchState* arch_state = nullptr;
 };
+
+struct PageWalkResult {
+    PhysAddr physical_address{0};
+    Word pte{0};
+
+    [[nodiscard]] constexpr auto raw() const noexcept -> Address { return physical_address.raw(); }
+    [[nodiscard]] constexpr auto global() const noexcept -> bool {
+        return PteView{.raw = pte}.global();
+    }
+    constexpr operator PhysAddr() const noexcept { return physical_address; }
+    constexpr auto operator<=>(const PageWalkResult&) const noexcept = default;
+    constexpr bool operator==(const PhysAddr& other) const noexcept {
+        return physical_address == other;
+    }
+    constexpr bool operator==(Address other) const noexcept {
+        return physical_address.raw() == other;
+    }
+};
+
+using TranslationResult = PageWalkResult;
 
 namespace memory {
 
@@ -151,7 +208,7 @@ class PageTableWalker {
                             CSRValue mstatus, Word satp, unsigned xlen,
                             bool update_access_bits = true,
                             const core::ArchState* arch_state = nullptr) const
-        -> std::expected<PhysAddr, TrapCause>;
+        -> std::expected<PageWalkResult, TrapCause>;
 
    private:
     RamView ram_{};

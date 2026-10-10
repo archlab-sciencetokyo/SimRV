@@ -4,7 +4,9 @@
  */
 #pragma once
 
+#include <concepts>
 #include <cstdint>
+#include <utility>
 
 namespace simrv::isa {
 
@@ -31,5 +33,39 @@ enum class Funct7Priv : uint8_t {
     SfenceVma = 0x09,  ///< Supervisor Memory-Management Fence (SFENCE.VMA, invalidates page table
                        ///< TLB entries)
 };
+
+template <std::integral I>
+constexpr auto operator==(I lhs, Funct12Priv rhs) noexcept -> bool {
+    return lhs == static_cast<I>(std::to_underlying(rhs));
+}
+template <std::integral I>
+constexpr auto operator==(Funct12Priv lhs, I rhs) noexcept -> bool {
+    return static_cast<I>(std::to_underlying(lhs)) == rhs;
+}
+template <std::integral I>
+constexpr auto operator!=(I lhs, Funct12Priv rhs) noexcept -> bool {
+    return !(lhs == rhs);
+}
+template <std::integral I>
+constexpr auto operator!=(Funct12Priv lhs, I rhs) noexcept -> bool {
+    return !(lhs == rhs);
+}
+
+template <std::integral I>
+constexpr auto operator==(I lhs, Funct7Priv rhs) noexcept -> bool {
+    return lhs == static_cast<I>(std::to_underlying(rhs));
+}
+template <std::integral I>
+constexpr auto operator==(Funct7Priv lhs, I rhs) noexcept -> bool {
+    return static_cast<I>(std::to_underlying(lhs)) == rhs;
+}
+template <std::integral I>
+constexpr auto operator!=(I lhs, Funct7Priv rhs) noexcept -> bool {
+    return !(lhs == rhs);
+}
+template <std::integral I>
+constexpr auto operator!=(Funct7Priv lhs, I rhs) noexcept -> bool {
+    return !(lhs == rhs);
+}
 
 }  // namespace simrv::isa

@@ -345,37 +345,37 @@ auto ExecuteUnit::branchTaken(Register in1, Register in2, Funct3 funct3, unsigne
         const auto u2 = static_cast<uint32_t>(in2);
         const auto s1 = static_cast<int32_t>(in1);
         const auto s2 = static_cast<int32_t>(in2);
-        switch (enum_mask(funct3)) {
-            case 0:
-                return u1 == u2;  // BEQ
-            case 1:
-                return u1 != u2;  // BNE
-            case 4:
-                return s1 < s2;  // BLT
-            case 5:
-                return s1 >= s2;  // BGE
-            case 6:
-                return u1 < u2;  // BLTU
-            case 7:
-                return u1 >= u2;  // BGEU
+        switch (funct3) {
+            case Funct3::Beq:
+                return u1 == u2;
+            case Funct3::Bne:
+                return u1 != u2;
+            case Funct3::Blt:
+                return s1 < s2;
+            case Funct3::Bge:
+                return s1 >= s2;
+            case Funct3::Bltu:
+                return u1 < u2;
+            case Funct3::Bgeu:
+                return u1 >= u2;
             default:
                 return false;
         }
     }
 
-    switch (enum_mask(funct3)) {
-        case 0:
-            return in1 == in2;  // BEQ
-        case 1:
-            return in1 != in2;  // BNE
-        case 4:
-            return static_cast<SignedWord>(in1) < static_cast<SignedWord>(in2);  // BLT
-        case 5:
-            return static_cast<SignedWord>(in1) >= static_cast<SignedWord>(in2);  // BGE
-        case 6:
-            return in1 < in2;  // BLTU
-        case 7:
-            return in1 >= in2;  // BGEU
+    switch (funct3) {
+        case Funct3::Beq:
+            return in1 == in2;
+        case Funct3::Bne:
+            return in1 != in2;
+        case Funct3::Blt:
+            return static_cast<SignedWord>(in1) < static_cast<SignedWord>(in2);
+        case Funct3::Bge:
+            return static_cast<SignedWord>(in1) >= static_cast<SignedWord>(in2);
+        case Funct3::Bltu:
+            return in1 < in2;
+        case Funct3::Bgeu:
+            return in1 >= in2;
         default:
             return false;
     }
@@ -396,21 +396,21 @@ auto ExecuteUnit::aluAmo(Register in1, Register in2, Funct5Amo funct5, Funct3 fu
 auto ExecuteUnit::csrWriteValue(CSRValue rcsr, Register rrs1, ImmValue imm, Funct3 funct3)
     -> std::expected<CSRValue, TrapCause> {
     const Word zimm = static_cast<Word>(imm);
-    switch (enum_mask(funct3)) {
-        case 1:
-            return static_cast<CSRValue>(rrs1);  // CSRRW
-        case 2:
-            return rcsr | static_cast<CSRValue>(rrs1);  // CSRRS
-        case 3:
-            return rcsr & ~static_cast<CSRValue>(rrs1);  // CSRRC
-        case 5:
-            return static_cast<CSRValue>(zimm);  // CSRRWI
-        case 6:
-            return rcsr | static_cast<CSRValue>(zimm);  // CSRRSI
-        case 7:
-            return rcsr & ~static_cast<CSRValue>(zimm);  // CSRRCI
+    switch (funct3) {
+        case Funct3::Csrrw:
+            return static_cast<CSRValue>(rrs1);
+        case Funct3::Csrrs:
+            return rcsr | static_cast<CSRValue>(rrs1);
+        case Funct3::Csrrc:
+            return rcsr & ~static_cast<CSRValue>(rrs1);
+        case Funct3::Csrrwi:
+            return static_cast<CSRValue>(zimm);
+        case Funct3::Csrrsi:
+            return rcsr | static_cast<CSRValue>(zimm);
+        case Funct3::Csrrci:
+            return rcsr & ~static_cast<CSRValue>(zimm);
         default:
-            return std::unexpected(enum_mask(ExceptionCode::IllegalInstruction));
+            return std::unexpected(to_trap_cause(ExceptionCode::IllegalInstruction));
     }
 }
 
