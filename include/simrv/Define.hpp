@@ -79,14 +79,39 @@ enum class ExceptionCode : uint8_t {
     StorePageFault = 0xf,
 };
 
+constexpr auto to_trap_cause(ExceptionCode code) noexcept -> TrapCause {
+    return static_cast<TrapCause>(code);
+}
+
+constexpr auto operator==(TrapCause cause, ExceptionCode code) noexcept -> bool {
+    return cause == static_cast<TrapCause>(code);
+}
+
+constexpr auto operator==(ExceptionCode code, TrapCause cause) noexcept -> bool {
+    return static_cast<TrapCause>(code) == cause;
+}
+
+constexpr auto operator!=(TrapCause cause, ExceptionCode code) noexcept -> bool {
+    return !(cause == code);
+}
+
+constexpr auto operator!=(ExceptionCode code, TrapCause cause) noexcept -> bool {
+    return !(code == cause);
+}
+
 /// High bit mask used to check if a trap cause represents an interrupt.
-constexpr TrapCause kInterruptCauseBit = enum_mask(TrapFlag::Interrupt);
+constexpr TrapCause kInterruptCauseBit = std::to_underlying(TrapFlag::Interrupt);
 /// Bitmask extracting the exception code from a trap cause word.
 constexpr TrapCause kExceptionCodeMask = static_cast<TrapCause>(kInterruptCauseBit - 1u);
 
 /// Extract the exception code component from a trap cause value.
 constexpr auto trap_exception_code(TrapCause cause) -> TrapCause {
     return cause & kExceptionCodeMask;
+}
+
+/// Extract the typed exception code from a trap cause value.
+constexpr auto trap_exception(TrapCause cause) noexcept -> ExceptionCode {
+    return static_cast<ExceptionCode>(cause & kExceptionCodeMask);
 }
 
 /// Query whether a trap cause represents an asynchronous interrupt.
@@ -111,6 +136,18 @@ constexpr auto select_highest_priority_interrupt(Word mask) -> Word {
 constexpr PrivilegeLevel kPrivUser = PrivilegeLevel::User;
 constexpr PrivilegeLevel kPrivSupervisor = PrivilegeLevel::Supervisor;
 constexpr PrivilegeLevel kPrivMachine = PrivilegeLevel::Machine;
+
+[[nodiscard]] constexpr auto ecall_for_privilege(PrivilegeLevel priv) noexcept -> ExceptionCode {
+    switch (priv) {
+        case PrivilegeLevel::User:
+            return ExceptionCode::UserEcall;
+        case PrivilegeLevel::Supervisor:
+            return ExceptionCode::SupervisorEcall;
+        case PrivilegeLevel::Machine:
+        default:
+            return ExceptionCode::MachineEcall;
+    }
+}
 
 // Include split domain headers
 #include "simrv/core/CsrTypes.hpp"  // IWYU pragma: export

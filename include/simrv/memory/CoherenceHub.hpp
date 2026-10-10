@@ -7,6 +7,7 @@
 #include <array>
 #include <cstdint>
 #include <expected>
+#include <memory>
 #include <optional>
 #include <string>
 #include <unordered_map>
@@ -15,7 +16,9 @@
 
 #include "simrv/Define.hpp"
 #include "simrv/cache/BaseCache.hpp"
+#include "simrv/cache/L2Cache.hpp"
 #include "simrv/cache/L3Cache.hpp"
+#include "simrv/core/SoCConfig.hpp"
 #include "simrv/memory/Bus.hpp"
 #include "simrv/xlen/Types.hpp"
 
@@ -47,8 +50,12 @@ class CoherenceHub {
 
     explicit CoherenceHub(simrv::core::Machine& machine);
 
+    auto configure_topology(const simrv::core::SmpTopologyConfig& topology)
+        -> std::expected<void, std::string>;
+
     auto handle_acquire(const TlChannelA& req, TlChannelD& resp,
-                        std::array<Byte, kLineBytes>& line_buffer) -> bool;
+                        std::array<Byte, kLineBytes>& line_buffer, uint32_t& service_latency)
+        -> bool;
 
     auto handle_intent(const TlChannelA& req, TlChannelD& resp) -> bool;
 
@@ -72,6 +79,8 @@ class CoherenceHub {
     [[nodiscard]] auto l3_cache() const noexcept -> const simrv::cache::L3Cache& {
         return l3_cache_;
     }
+    [[nodiscard]] auto shared_l2_for_hart(uint32_t hart) noexcept -> simrv::cache::L2Cache*;
+    [[nodiscard]] auto shared_l3_enabled() const noexcept -> bool { return l3_enabled_; }
 
     [[nodiscard]] auto get_directory_state(LineAddress line_base) const -> DirectoryEntry;
     [[nodiscard]] auto validate_directory() const -> std::expected<void, std::string>;
@@ -88,6 +97,15 @@ class CoherenceHub {
 
     simrv::core::Machine& machine_;
     simrv::cache::L3Cache l3_cache_{};
+    struct ClusterCache {
+        uint32_t id = 0;
+        std::vector<uint32_t> harts;
+        simrv::cache::L2Cache cache{};
+        simrv::core::SharedCacheConfig config{};
+    };
+    std::vector<std::unique_ptr<ClusterCache>> l2_caches_;
+    simrv::core::SmpTopologyConfig topology_{};
+    bool l3_enabled_ = true;
     std::unordered_map<LineAddress, DirectoryEntry> directory_;
     std::array<FastCacheEntry, kFastCacheEntries> fast_cache_{};
     CoherenceStats stats_{};
@@ -102,6 +120,8 @@ class CoherenceHub {
                            std::array<Byte, kLineBytes>& dirty_data);
 
     void probe_hart_icache(HartId hart_id, const TlChannelB& probe_req);
+    [[nodiscard]] auto l2_cache_for_hart(uint32_t hart) -> ClusterCache*;
+    void invalidate_shared_caches(LineAddress line_base);
     [[nodiscard]] auto allocate_sink() -> TlSinkId;
 };
 

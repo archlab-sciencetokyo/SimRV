@@ -47,7 +47,7 @@ struct ExecutionConfig {
     bool ui_worker_threaded = false;
     uint32_t num_harts = 1;
     uint32_t smp_quantum = 100;
-    bool smp_multithreaded = false;
+    std::optional<SmpMode> smp_mode{};
     simrv::pipeline::PipelineType pipeline_type = simrv::pipeline::PipelineType::FiveStage;
     Address start_pc = 0;
     Counter strace = 0;
@@ -188,6 +188,9 @@ struct MachineConfig {
         }
         if (auto soc_result = soc.validate(); !soc_result.has_value()) {
             return std::unexpected(soc_result.error());
+        }
+        if (!soc.smp.clusters.empty() && soc.smp.hart_count != execution.num_harts) {
+            return std::unexpected("SoC SMP hart count must match the resolved machine hart count");
         }
         return {};
     }

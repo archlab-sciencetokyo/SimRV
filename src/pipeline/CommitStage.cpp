@@ -36,7 +36,7 @@ void CPU::writeback_registers(Machine& machine) {
         }
         state_.regs.write_fp(effects.floating_write.destination, effects.floating_write.value);
     }
-    if (effects.marks_floating_point_dirty) state_.mstatus |= enum_mask(MstatusBit::Fs);
+    if (effects.marks_floating_point_dirty) state_.mstatus |= MstatusBit::Fs;
     if (effects.integer_write.enabled) {
         state_.regs.write_branchless(effects.integer_write.destination,
                                      effects.integer_write.value);
@@ -46,6 +46,15 @@ void CPU::writeback_registers(Machine& machine) {
 // ==========================================
 // COMMIT (Commit) Stage
 // ==========================================
+
+namespace {
+[[nodiscard]] inline auto xret_target_aligned(const ArchState& state, VirtAddr jmp_pc) noexcept
+    -> bool {
+    const bool has_c = misa_has_extension(state.misa, isa::IsaExtension::C);
+    const Word alignment_mask = has_c ? 1u : 3u;
+    return (jmp_pc & alignment_mask) == 0;
+}
+}  // namespace
 
 void CPU::run_commit_stage(Machine& machine) { commit_control_flow_and_traps(machine); }
 
@@ -65,10 +74,20 @@ void CPU::commit_control_flow_and_traps([[maybe_unused]] Machine& machine) {
                     break;
                 }
                 case Funct12Priv::Sret: {
+                    if (!xret_target_aligned(state_, ctx.jmp_pc)) {
+                        ctx.pending_exception = ExceptionCode::MisalignedFetch;
+                        ctx.pending_tval = ctx.jmp_pc.raw();
+                        break;
+                    }
                     sret();
                     break;
                 }
                 case Funct12Priv::Mret: {
+                    if (!xret_target_aligned(state_, ctx.jmp_pc)) {
+                        ctx.pending_exception = ExceptionCode::MisalignedFetch;
+                        ctx.pending_tval = ctx.jmp_pc.raw();
+                        break;
+                    }
                     mret();
                     break;
                 }
@@ -100,14 +119,14 @@ void CPU::commit_control_flow_and_traps([[maybe_unused]] Machine& machine) {
     if (simrv::compiler::unlikely(pending_interrupts != 0u)) {
         switch (state_.priv) {
             case kPrivMachine: {
-                if ((state_.mstatus & enum_mask(MstatusBit::Mie)) != 0u) {
+                if ((state_.mstatus & MstatusBit::Mie) != 0u) {
                     enable_interrupts = ~state_.mideleg;
                 }
                 break;
             }
             case kPrivSupervisor: {
                 enable_interrupts = ~state_.mideleg;
-                if ((state_.mstatus & enum_mask(MstatusBit::Sie)) != 0u) {
+                if ((state_.mstatus & MstatusBit::Sie) != 0u) {
                     enable_interrupts |= state_.mideleg;
                 }
                 break;
@@ -167,10 +186,20 @@ void CPU::run_commit_stage_baremetal([[maybe_unused]] Machine& machine) {
                     break;
                 }
                 case Funct12Priv::Sret: {
+                    if (!xret_target_aligned(state_, ctx.jmp_pc)) {
+                        ctx.pending_exception = ExceptionCode::MisalignedFetch;
+                        ctx.pending_tval = ctx.jmp_pc.raw();
+                        break;
+                    }
                     sret();
                     break;
                 }
                 case Funct12Priv::Mret: {
+                    if (!xret_target_aligned(state_, ctx.jmp_pc)) {
+                        ctx.pending_exception = ExceptionCode::MisalignedFetch;
+                        ctx.pending_tval = ctx.jmp_pc.raw();
+                        break;
+                    }
                     mret();
                     break;
                 }
@@ -202,14 +231,14 @@ void CPU::run_commit_stage_baremetal([[maybe_unused]] Machine& machine) {
     if (simrv::compiler::unlikely(pending_interrupts != 0u)) {
         switch (state_.priv) {
             case kPrivMachine: {
-                if ((state_.mstatus & enum_mask(MstatusBit::Mie)) != 0u) {
+                if ((state_.mstatus & MstatusBit::Mie) != 0u) {
                     enable_interrupts = ~state_.mideleg;
                 }
                 break;
             }
             case kPrivSupervisor: {
                 enable_interrupts = ~state_.mideleg;
-                if ((state_.mstatus & enum_mask(MstatusBit::Sie)) != 0u) {
+                if ((state_.mstatus & MstatusBit::Sie) != 0u) {
                     enable_interrupts |= state_.mideleg;
                 }
                 break;

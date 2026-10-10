@@ -129,6 +129,8 @@ void CPU::apply_cpu_model_config(const simrv::pipeline::CpuModelConfig& config) 
 }
 
 void CPU::reset() {
+    pending_interrupt_lines_.store(0, std::memory_order_relaxed);
+    next_logical_issue_sequence_ = 0;
     state_ = ArchState{};
     state_.misa |= isa::misa_extension_bit(isa::IsaExtension::X);
     prev_state_ = ArchState{};
@@ -201,10 +203,14 @@ void CPU::soft_tlb_flush_selective(const core::TlbFlushFilter& filter) {
         auto invalidate_if_match = [&](SoftTlbEntry& entry) {
             if (entry.valid(soft_tlb_epoch)) {
                 const uint64_t entry_vpn = (entry.tag >> 18) & 0xFFFFFFFFFFULL;
-                const uint64_t entry_asid = (entry.tag >> 2) & 0xFFFFu;
-                if (entry_vpn == (vpn & 0xFFFFFFFFFFULL) &&
-                    (!filter.asid || entry_asid == *filter.asid)) {
-                    entry.invalidate();
+                if (entry_vpn == (vpn & 0xFFFFFFFFFFULL)) {
+                    if (filter.asid) {
+                        if (!entry.global && ((entry.tag >> 2) & 0xFFFFu) == *filter.asid) {
+                            entry.invalidate();
+                        }
+                    } else {
+                        entry.invalidate();
+                    }
                 }
             }
         };
@@ -215,7 +221,7 @@ void CPU::soft_tlb_flush_selective(const core::TlbFlushFilter& filter) {
     }
     if (filter.asid) {
         auto invalidate_asid = [&](SoftTlbEntry& entry) {
-            if (entry.valid(soft_tlb_epoch)) {
+            if (entry.valid(soft_tlb_epoch) && !entry.global) {
                 const uint64_t entry_asid = (entry.tag >> 2) & 0xFFFFu;
                 if (entry_asid == *filter.asid) {
                     entry.invalidate();
@@ -322,20 +328,20 @@ void CPU::evaluate_timer_interrupt() {
 
     const bool pending = (cur_mtime >= cur_mtimecmp);
     if (is_supervisor_timer) {
-        state_.mip &= ~enum_mask(MipBit::Mtip);
+        state_.mip &= ~MipBit::Mtip;
         state_.stip_timer = pending;
     } else {
         state_.stip_timer = false;
         if (pending)
-            state_.mip |= enum_mask(MipBit::Mtip);
+            state_.mip |= MipBit::Mtip;
         else
-            state_.mip &= ~enum_mask(MipBit::Mtip);
+            state_.mip &= ~MipBit::Mtip;
     }
     state_.refresh_supervisor_pending();
     if (machine_ != nullptr) {
         const auto log_transition = [&](MipBit bit, TrapCause code, std::string_view source) {
-            const bool before = (pending_before & enum_mask(bit)) != 0;
-            const bool after = (state_.mip & enum_mask(bit)) != 0;
+            const bool before = (pending_before & bit) != 0;
+            const bool after = (state_.mip & bit) != 0;
             if (before != after) {
                 machine_->trace().log_interrupt_signal(*this, kInterruptCauseBit | code, after,
                                                        source);
@@ -345,6 +351,77 @@ void CPU::evaluate_timer_interrupt() {
         };
         log_transition(MipBit::Mtip, 7, "aclint_mtimer");
         log_transition(MipBit::Stip, 5, "aclint_mtimer");
+    }
+}
+
+void CPU::queue_interrupt_line(core::MipBit bit, bool asserted) noexcept {
+    constexpr std::array<core::MipBit, 6> lines{core::MipBit::Mtip, core::MipBit::Msip,
+                                                core::MipBit::Meip, core::MipBit::Stip,
+                                                core::MipBit::Ssip, core::MipBit::Seip};
+    const auto it = std::ranges::find(lines, bit);
+    if (it == lines.end()) return;
+    const auto index = static_cast<unsigned>(std::distance(lines.begin(), it));
+    const uint16_t dirty = static_cast<uint16_t>(1U << index);
+    const uint16_t value = static_cast<uint16_t>(1U << (index + lines.size()));
+    uint16_t current = pending_interrupt_lines_.load(std::memory_order_relaxed);
+    uint16_t desired = 0;
+    do {
+        desired = static_cast<uint16_t>((current | dirty) & ~value);
+        if (asserted) desired |= value;
+    } while (!pending_interrupt_lines_.compare_exchange_weak(
+        current, desired, std::memory_order_release, std::memory_order_relaxed));
+}
+
+void CPU::apply_pending_interrupt_lines(Machine& machine) {
+    const uint16_t pending = pending_interrupt_lines_.exchange(0, std::memory_order_acquire);
+    if (pending == 0) return;
+    constexpr std::array<core::MipBit, 6> lines{core::MipBit::Mtip, core::MipBit::Msip,
+                                                core::MipBit::Meip, core::MipBit::Stip,
+                                                core::MipBit::Ssip, core::MipBit::Seip};
+    constexpr std::array<TrapCause, 6> causes{7, 3, 11, 5, 1, 9};
+    constexpr std::array<std::string_view, 6> sources{
+        "aclint_mtimer", "aclint_mswi", "external_interrupt_controller",
+        "aclint_mtimer", "aclint_mswi", "external_interrupt_controller"};
+    for (size_t i = 0; i < lines.size(); ++i) {
+        if ((pending & (1U << i)) == 0) continue;
+        const auto line = lines[i];
+        const bool before = (state_.mip & line) != 0;
+        const bool asserted = (pending & (1U << (i + lines.size()))) != 0;
+        if (i == 3)
+            state_.stip_timer = asserted;
+        else if (i == 4)
+            state_.stip_software = asserted;
+        else if (i == 5)
+            state_.seip_external = asserted;
+        else if (asserted)
+            state_.mip |= line;
+        else
+            state_.mip &= ~line;
+        if (i >= 3) state_.refresh_supervisor_pending();
+        const bool after = (state_.mip & line) != 0;
+        if (before != after) {
+            machine.trace().log_interrupt_signal(*this, kInterruptCauseBit | causes[i], after,
+                                                 sources[i]);
+            machine.notify_interrupt_transition(state_.mhartid, static_cast<uint32_t>(causes[i]),
+                                                after, sources[i], clint_mmio.mcycle);
+        }
+    }
+}
+
+void CPU::apply_hart_control_boundary() noexcept {
+    switch (hart_status.load(std::memory_order_acquire)) {
+        case HartStatus::StartPending:
+        case HartStatus::ResumePending:
+            hart_status.store(HartStatus::Started, std::memory_order_release);
+            break;
+        case HartStatus::StopPending:
+            hart_status.store(HartStatus::Stopped, std::memory_order_release);
+            break;
+        case HartStatus::SuspendPending:
+            hart_status.store(HartStatus::Suspended, std::memory_order_release);
+            break;
+        default:
+            break;
     }
 }
 
@@ -360,7 +437,7 @@ void CPU::run_fast_cycle_miss(Machine& machine) {
 
     if (success) {
         if (simrv::compiler::likely(machine.appmode_enabled() && state_.priv == kPrivMachine &&
-                                    (state_.mstatus & enum_mask(MstatusBit::Mprv)) == 0)) {
+                                    (state_.mstatus & MstatusBit::Mprv) == 0)) {
             success = execute_stage(machine);
             if (success) {
                 run_memory_stage_baremetal(machine);
@@ -402,6 +479,18 @@ void CPU::run_fast_cycle_miss(Machine& machine) {
 }
 
 void CPU::run_cycle(Machine& machine) {
+    apply_hart_control_boundary();
+    apply_pending_interrupt_lines(machine);
+    CPU* previous_active_cpu = active_execution_cpu_;
+    active_execution_cpu_ = this;
+    struct BoundaryCommit {
+        CPU& cpu;
+        CPU* previous;
+        ~BoundaryCommit() {
+            cpu.apply_hart_control_boundary();
+            active_execution_cpu_ = previous;
+        }
+    } boundary_commit{*this, previous_active_cpu};
     const Counter retired_before = e_icount;
     if (simrv::compiler::unlikely(machine.breakpoint_manager().has_any())) {
         prev_state_ = state_;
@@ -604,7 +693,7 @@ void CPU::run_cycle(Machine& machine) {
         bool success = fetch_stage(machine, state_.pc) && decode_stage(machine);
         if (success) {
             if (simrv::compiler::likely(machine.appmode_enabled() && state_.priv == kPrivMachine &&
-                                        (state_.mstatus & enum_mask(MstatusBit::Mprv)) == 0)) {
+                                        (state_.mstatus & MstatusBit::Mprv) == 0)) {
                 success = execute_stage(machine);
                 if (success) {
                     run_memory_stage_baremetal(machine);
@@ -672,8 +761,7 @@ SIMRV_ALWAYS_INLINE void CPU::tick_cycle_clock(Machine& machine, bool interrupt_
             clint_mmio.rtc_divider = 0;
             evaluate_timer_interrupt();
             // Parallel harts evaluate their own interrupt state; hart 0 only publishes time.
-            if (simrv::compiler::unlikely(!machine.config.execution.smp_multithreaded &&
-                                          machine.num_harts() > 1)) {
+            if (simrv::compiler::unlikely(!machine.is_smp_enabled() && machine.num_harts() > 1)) {
                 for (size_t i = 1; i < machine.num_harts(); ++i) {
                     auto& sec = machine.hart(i);
                     if (sec.hart_status.load(std::memory_order_relaxed) == HartStatus::Started) {
@@ -792,6 +880,18 @@ void CPU::run_cycle_baremetal_miss(Machine& machine) {
 }
 
 void CPU::run_cycle_baremetal(Machine& machine) {
+    apply_hart_control_boundary();
+    apply_pending_interrupt_lines(machine);
+    CPU* previous_active_cpu = active_execution_cpu_;
+    active_execution_cpu_ = this;
+    struct BoundaryCommit {
+        CPU& cpu;
+        CPU* previous;
+        ~BoundaryCommit() {
+            cpu.apply_hart_control_boundary();
+            active_execution_cpu_ = previous;
+        }
+    } boundary_commit{*this, previous_active_cpu};
     const Counter retired_before = e_icount;
     if (simrv::compiler::unlikely(machine.breakpoint_manager().has_any())) {
         prev_state_ = state_;
@@ -875,6 +975,12 @@ void CPU::run_memory_stage_baremetal(Machine& machine) {
         run_memory_stage(machine);
         return;
     }
+    // The specialized direct-RAM stage does not implement PMP checks. Preserve the full
+    // memory-stage path whenever locked PMP entries make machine-mode accesses restrictive.
+    if (simrv::compiler::unlikely(state_.has_locked_pmp)) {
+        run_memory_stage(machine);
+        return;
+    }
     auto& ctx = pipeline_context;
     if (ctx.pending_exception.has_value()) {
         return;
@@ -888,6 +994,12 @@ void CPU::run_memory_stage_baremetal(Machine& machine) {
     const auto funct5 = static_cast<Funct5Amo>(ctx.funct5);
     const auto addr = ctx.mem_addr;
     const size_t access_size = size_t{1} << (static_cast<unsigned>(ctx.funct3) & 0x3u);
+    ctx.mem_paddr = addr;
+
+    if (opcode == Opcode::Amo && (funct5 == Funct5Amo::Lr || funct5 == Funct5Amo::Sc)) {
+        run_memory_stage(machine);
+        return;
+    }
 
     // Load Phase
     if (opcode == Opcode::Load || (opcode == Opcode::Amo && funct5 == Funct5Amo::Lr)) {
@@ -899,6 +1011,11 @@ void CPU::run_memory_stage_baremetal(Machine& machine) {
                 simrv::memory::MemoryAccess::loadInt(machine.memory_, *this, addr, ctx.funct3);
         }
     } else if (opcode == Opcode::Amo && funct5 != Funct5Amo::Sc) {
+        if (simrv::compiler::unlikely(!isa::amo_address_aligned(addr, ctx.funct3))) {
+            ctx.pending_exception = ExceptionCode::MisalignedStore;
+            ctx.pending_tval = addr;
+            return;
+        }
         // Atomic DRAM AMO Execution (non-LR, non-SC)
         if (simrv::compiler::likely(machine.memory_geometry().contains(addr, access_size))) {
             if (ctx.funct3 == Funct3::Sw || ctx.funct3 == Funct3::Lw) {
@@ -1021,7 +1138,8 @@ void CPU::run_memory_stage_baremetal(Machine& machine) {
     }
 
     if (opcode == Opcode::StoreFp) {
-        if (simrv::compiler::likely(machine.memory_geometry().contains(addr, access_size))) {
+        if (simrv::compiler::likely(machine.memory_geometry().contains(addr, access_size) &&
+                                    !is_tohost_addr(machine, addr))) {
             const auto f3 = ctx.funct3;
             switch (f3) {
                 case Funct3::Fsw:
@@ -1062,16 +1180,26 @@ void CPU::run_memory_stage_baremetal(Machine& machine) {
         (opcode == Opcode::Amo && funct5 != Funct5Amo::Lr)) {
         if (!ctx.pending_exception.has_value()) {
             state_.reserved = 0;
-            machine.memory_.reservation_table().invalidate_matching(
-                addr, static_cast<HartId>(state_.mhartid));
+            machine.memory_.reservation_table().invalidate_range(
+                ctx.mem_paddr, access_size, static_cast<HartId>(state_.mhartid));
         }
     }
 }
 
 auto CPU::fetch_stage(Machine& machine, Address pc) -> bool {
     state_.pc = pc;
-    pipeline_context.pending_exception = std::nullopt;
-    pipeline_context.pending_tval = 0;
+    auto& context = active_context();
+    context.pending_exception = std::nullopt;
+    context.pending_tval = 0;
+    context.mem_paddr = PhysAddr{0};
+    context.sc_reservation_checked = false;
+    context.sc_reservation_succeeded = false;
+    // Instruction mode reuses one context across whole instructions. A previous
+    // memory operation may have marked its load phase complete; clear that latch
+    // before decoding the next instruction so cache misses still perform loads.
+    if (!machine.runtime_profile.is_cycle_mode()) {
+        context.memory_load_complete = false;
+    }
 
     run_fetch_stage(machine);
 
@@ -1127,15 +1255,14 @@ SIMRV_ALWAYS_INLINE void CPU::execute_cached_jal(CachedOp& op) {
     Register const next_pc = state_.pc + op.len();
     pipeline_context.tkn = true;
     pipeline_context.jmp_pc = VirtAddr{state_.pc + op.imm};
-    if (op.rd != RegId::Zero) {
-        state_.regs.write(op.rd, next_pc);
-    }
     const bool has_c = misa_has_extension(state_.misa, isa::IsaExtension::C);
     const Word alignment_mask = has_c ? 1u : 3u;
     if ((pipeline_context.jmp_pc & alignment_mask) != 0) {
-        raise_exception(static_cast<TrapCause>(ExceptionCode::MisalignedFetch),
-                        pipeline_context.jmp_pc.raw());
+        raise_exception(ExceptionCode::MisalignedFetch, pipeline_context.jmp_pc.raw());
         return;
+    }
+    if (op.rd != RegId::Zero) {
+        state_.regs.write(op.rd, next_pc);
     }
     commit_cached_branch_target(op, pipeline_context.jmp_pc);
 }
@@ -1148,15 +1275,14 @@ SIMRV_ALWAYS_INLINE void CPU::execute_cached_jalr(CachedOp& op, Register rrs1) {
         pipeline_context.jmp_pc = VirtAddr{static_cast<Register>(
             static_cast<int64_t>(static_cast<int32_t>(pipeline_context.jmp_pc.raw())))};
     }
-    if (op.rd != RegId::Zero) {
-        state_.regs.write(op.rd, next_pc);
-    }
     const bool has_c = misa_has_extension(state_.misa, isa::IsaExtension::C);
     const Word alignment_mask = has_c ? 1u : 3u;
     if ((pipeline_context.jmp_pc & alignment_mask) != 0) {
-        raise_exception(static_cast<TrapCause>(ExceptionCode::MisalignedFetch),
-                        pipeline_context.jmp_pc.raw());
+        raise_exception(ExceptionCode::MisalignedFetch, pipeline_context.jmp_pc.raw());
         return;
+    }
+    if (op.rd != RegId::Zero) {
+        state_.regs.write(op.rd, next_pc);
     }
     commit_cached_branch_target(op, pipeline_context.jmp_pc);
 }
@@ -1188,6 +1314,13 @@ SIMRV_ALWAYS_INLINE void CPU::execute_cached_branch(CachedOp& op, Register rrs1,
     }
     pipeline_context.tkn = tkn;
     VirtAddr const target_pc = tkn ? VirtAddr{state_.pc + op.imm} : VirtAddr{state_.pc + op.len()};
+    pipeline_context.jmp_pc = target_pc;
+    const bool has_c = misa_has_extension(state_.misa, isa::IsaExtension::C);
+    const Word alignment_mask = has_c ? 1u : 3u;
+    if (simrv::compiler::unlikely(tkn && (target_pc & alignment_mask) != 0)) {
+        raise_exception(ExceptionCode::MisalignedFetch, target_pc.raw());
+        return;
+    }
     commit_cached_branch_target(op, target_pc);
 }
 
@@ -1198,7 +1331,8 @@ auto CPU::try_fast_load(Machine& machine, Address mem_addr, Funct3 funct3, Regis
     }
 
     if (simrv::compiler::likely(state_.priv == kPrivMachine &&
-                                (state_.mstatus & enum_mask(MstatusBit::Mprv)) == 0)) {
+                                (state_.mstatus & MstatusBit::Mprv) == 0)) {
+        if (simrv::compiler::unlikely(state_.has_locked_pmp)) return false;
         const unsigned size_bytes = access_size_for_funct3(funct3);
         if (simrv::compiler::likely(machine.memory_geometry().contains(mem_addr, size_bytes))) {
             out_val = simrv::memory::ram_read_fast(mem_addr, static_cast<Instruction>(funct3), ram);
@@ -1219,12 +1353,16 @@ auto CPU::try_fast_load(Machine& machine, Address mem_addr, Funct3 funct3, Regis
         const size_t tlb_idx = soft_tlb_index(vpn);
         const auto& entry = soft_tlb_read[tlb_idx];
         if (simrv::compiler::likely(entry.matches(vpn, current_asid, eff_priv, soft_tlb_epoch))) {
+            const Address paddr = (entry.paddr_base + (mem_addr & 0xFFF)).raw();
+            if (simrv::compiler::unlikely(!core::pmp::check_access(
+                    state_, paddr, size_bytes, core::PmpAccessType::Read, eff_priv))) {
+                return false;
+            }
             if (simrv::compiler::likely(entry.host_ptr_base != nullptr)) {
                 out_val = simrv::memory::host_read_fast(entry.host_ptr_base + (mem_addr & 0xFFF),
                                                         static_cast<Instruction>(funct3));
                 return true;
             }
-            PhysAddr const paddr = entry.paddr_base + (mem_addr & 0xFFF);
             if (simrv::compiler::likely(machine.memory_geometry().contains(paddr, size_bytes))) {
                 out_val =
                     simrv::memory::ram_read_fast(paddr, static_cast<Instruction>(funct3), ram);
@@ -1255,7 +1393,9 @@ auto CPU::try_fast_load(Machine& machine, Address mem_addr, Funct3 funct3, Regis
             }
         }
     } else {
-        if (simrv::compiler::likely(machine.memory_geometry().contains(mem_addr, size_bytes))) {
+        if (simrv::compiler::likely(machine.memory_geometry().contains(mem_addr, size_bytes) &&
+                                    core::pmp::check_access(state_, mem_addr, size_bytes,
+                                                            core::PmpAccessType::Read, eff_priv))) {
             out_val = simrv::memory::ram_read_fast(mem_addr, static_cast<Instruction>(funct3), ram);
             return true;
         }
@@ -1270,11 +1410,13 @@ auto CPU::try_fast_store(Machine& machine, Address mem_addr, Funct3 funct3, Regi
     }
 
     if (simrv::compiler::likely(state_.priv == kPrivMachine &&
-                                (state_.mstatus & enum_mask(MstatusBit::Mprv)) == 0)) {
+                                (state_.mstatus & MstatusBit::Mprv) == 0)) {
+        if (simrv::compiler::unlikely(state_.has_locked_pmp)) return false;
         const unsigned size_bytes = access_size_for_funct3(funct3);
         if (simrv::compiler::likely(machine.memory_geometry().contains(mem_addr, size_bytes) &&
                                     !is_tohost_addr(machine, mem_addr))) {
             simrv::memory::ram_write_fast(mem_addr, rrs2, static_cast<Instruction>(funct3), ram);
+            pipeline_context.mem_paddr = mem_addr;
             return true;
         }
         return false;
@@ -1293,16 +1435,22 @@ auto CPU::try_fast_store(Machine& machine, Address mem_addr, Funct3 funct3, Regi
         const auto& entry = soft_tlb_write[tlb_idx];
         if (simrv::compiler::likely(entry.matches(vpn, current_asid, eff_priv, soft_tlb_epoch))) {
             PhysAddr const paddr = entry.paddr_base + (mem_addr & 0xFFF);
+            if (simrv::compiler::unlikely(!core::pmp::check_access(
+                    state_, paddr, size_bytes, core::PmpAccessType::Write, eff_priv))) {
+                return false;
+            }
             if (simrv::compiler::unlikely(is_tohost_addr(machine, paddr))) {
                 return false;
             }
             if (simrv::compiler::likely(entry.host_ptr_base != nullptr)) {
                 simrv::memory::host_write_fast(entry.host_ptr_base + (mem_addr & 0xFFF), rrs2,
                                                static_cast<Instruction>(funct3));
+                pipeline_context.mem_paddr = paddr;
                 return true;
             }
             if (simrv::compiler::likely(machine.memory_geometry().contains(paddr, size_bytes))) {
                 simrv::memory::ram_write_fast(paddr, rrs2, static_cast<Instruction>(funct3), ram);
+                pipeline_context.mem_paddr = paddr;
                 return true;
             }
             return false;
@@ -1321,20 +1469,26 @@ auto CPU::try_fast_store(Machine& machine, Address mem_addr, Funct3 funct3, Regi
             Byte* host_base = ram.contains(ppage, 4096) ? ram.unchecked_ptr(ppage) : nullptr;
             if (host_base != nullptr) {
                 soft_tlb_write[tlb_idx].set(vpn, current_asid, eff_priv, soft_tlb_epoch, ppage,
-                                            host_base);
+                                            host_base, tlb_e->global);
                 simrv::memory::host_write_fast(host_base + (mem_addr & 0xFFF), rrs2,
                                                static_cast<Instruction>(funct3));
+                pipeline_context.mem_paddr = paddr;
                 return true;
             }
             if (simrv::compiler::likely(machine.memory_geometry().contains(paddr, size_bytes))) {
                 simrv::memory::ram_write_fast(paddr, rrs2, static_cast<Instruction>(funct3), ram);
+                pipeline_context.mem_paddr = paddr;
                 return true;
             }
         }
     } else {
         if (simrv::compiler::likely(machine.memory_geometry().contains(mem_addr, size_bytes) &&
-                                    !is_tohost_addr(machine, mem_addr))) {
+                                    !is_tohost_addr(machine, mem_addr) &&
+                                    core::pmp::check_access(state_, mem_addr, size_bytes,
+                                                            core::PmpAccessType::Write,
+                                                            eff_priv))) {
             simrv::memory::ram_write_fast(mem_addr, rrs2, static_cast<Instruction>(funct3), ram);
+            pipeline_context.mem_paddr = mem_addr;
             return true;
         }
     }
@@ -1351,7 +1505,8 @@ SIMRV_ALWAYS_INLINE auto CPU::execute_cached_load(Machine& machine, CachedOp& op
     const unsigned size_bytes = op.mem_size;
     const Address align_mask = op.align_mask();
     if (simrv::compiler::likely(state_.priv == kPrivMachine &&
-                                (state_.mstatus & enum_mask(MstatusBit::Mprv)) == 0)) {
+                                (state_.mstatus & MstatusBit::Mprv) == 0 &&
+                                !state_.has_locked_pmp)) {
         if (simrv::compiler::likely((mem_addr & align_mask) == 0 &&
                                     machine.memory_geometry().contains(mem_addr, size_bytes))) {
             mem_rdata =
@@ -1375,12 +1530,18 @@ SIMRV_ALWAYS_INLINE auto CPU::execute_cached_load(Machine& machine, CachedOp& op
             const auto& entry = soft_tlb_read[tlb_idx];
             if (simrv::compiler::likely(
                     entry.matches(vpn, current_asid, eff_priv, soft_tlb_epoch))) {
-                if (simrv::compiler::likely(entry.host_ptr_base != nullptr)) {
-                    mem_rdata = simrv::memory::host_read_fast(entry.host_ptr_base + page_offset,
-                                                              static_cast<Instruction>(op.funct3));
-                    state_.regs.write_branchless(op.rd, mem_rdata);
-                    advance_cached_pc(op);
-                    return true;
+                const Address paddr = (entry.paddr_base + page_offset).raw();
+                if (simrv::compiler::unlikely(!core::pmp::check_access(
+                        state_, paddr, size_bytes, core::PmpAccessType::Read, eff_priv))) {
+                    // Let MemoryAccess raise the architectural access fault.
+                } else {
+                    if (simrv::compiler::likely(entry.host_ptr_base != nullptr)) {
+                        mem_rdata = simrv::memory::host_read_fast(
+                            entry.host_ptr_base + page_offset, static_cast<Instruction>(op.funct3));
+                        state_.regs.write_branchless(op.rd, mem_rdata);
+                        advance_cached_pc(op);
+                        return true;
+                    }
                 }
             }
         }
@@ -1413,7 +1574,8 @@ SIMRV_ALWAYS_INLINE auto CPU::execute_cached_store(Machine& machine, CachedOp& o
     const unsigned size_bytes = op.mem_size;
     const Address align_mask = op.align_mask();
     if (simrv::compiler::likely(state_.priv == kPrivMachine &&
-                                (state_.mstatus & enum_mask(MstatusBit::Mprv)) == 0)) {
+                                (state_.mstatus & MstatusBit::Mprv) == 0 &&
+                                !state_.has_locked_pmp)) {
         if (simrv::compiler::likely((mem_addr & align_mask) == 0 &&
                                     machine.memory_geometry().contains(mem_addr, size_bytes) &&
                                     !is_tohost_addr(machine, mem_addr))) {
@@ -1422,8 +1584,8 @@ SIMRV_ALWAYS_INLINE auto CPU::execute_cached_store(Machine& machine, CachedOp& o
             if (simrv::compiler::unlikely(
                     machine.num_harts() > 1 &&
                     machine.memory_.reservation_table().may_have_reservations())) {
-                machine.memory_.reservation_table().invalidate_matching(
-                    mem_addr, static_cast<HartId>(state_.mhartid));
+                machine.memory_.reservation_table().invalidate_range(
+                    mem_addr, size_bytes, static_cast<HartId>(state_.mhartid));
             }
             advance_cached_pc(op);
             return true;
@@ -1443,20 +1605,25 @@ SIMRV_ALWAYS_INLINE auto CPU::execute_cached_store(Machine& machine, CachedOp& o
             const auto& entry = soft_tlb_write[tlb_idx];
             if (simrv::compiler::likely(
                     entry.matches(vpn, current_asid, eff_priv, soft_tlb_epoch))) {
-                if (simrv::compiler::likely(
-                        entry.host_ptr_base != nullptr &&
-                        !is_tohost_addr(machine, entry.paddr_base + page_offset))) {
-                    simrv::memory::host_write_fast(entry.host_ptr_base + page_offset, rrs2,
-                                                   static_cast<Instruction>(op.funct3));
-                    state_.reserved = 0;
-                    if (simrv::compiler::unlikely(
-                            machine.num_harts() > 1 &&
-                            machine.memory_.reservation_table().may_have_reservations())) {
-                        machine.memory_.reservation_table().invalidate_matching(
-                            entry.paddr_base + page_offset, static_cast<HartId>(state_.mhartid));
+                const Address paddr = (entry.paddr_base + page_offset).raw();
+                if (simrv::compiler::unlikely(!core::pmp::check_access(
+                        state_, paddr, size_bytes, core::PmpAccessType::Write, eff_priv))) {
+                    // Let MemoryAccess raise the architectural access fault.
+                } else {
+                    if (simrv::compiler::likely(entry.host_ptr_base != nullptr &&
+                                                !is_tohost_addr(machine, paddr))) {
+                        simrv::memory::host_write_fast(entry.host_ptr_base + page_offset, rrs2,
+                                                       static_cast<Instruction>(op.funct3));
+                        state_.reserved = 0;
+                        if (simrv::compiler::unlikely(
+                                machine.num_harts() > 1 &&
+                                machine.memory_.reservation_table().may_have_reservations())) {
+                            machine.memory_.reservation_table().invalidate_range(
+                                paddr, size_bytes, static_cast<HartId>(state_.mhartid));
+                        }
+                        advance_cached_pc(op);
+                        return true;
                     }
-                    advance_cached_pc(op);
-                    return true;
                 }
             }
         }
@@ -1476,18 +1643,24 @@ SIMRV_ALWAYS_INLINE auto CPU::execute_cached_store(Machine& machine, CachedOp& o
     state_.reserved = 0;
     if (simrv::compiler::unlikely(machine.num_harts() > 1 &&
                                   machine.memory_.reservation_table().may_have_reservations())) {
-        machine.memory_.reservation_table().invalidate_matching(
-            mem_addr, static_cast<HartId>(state_.mhartid));
+        machine.memory_.reservation_table().invalidate_range(pipeline_context.mem_paddr, size_bytes,
+                                                             static_cast<HartId>(state_.mhartid));
     }
     advance_cached_pc(op);
     return true;
 }
 
 auto CPU::execute_cached_fallback(Machine& machine) -> void {
+    // Cached operations can fall back to the staged executor without passing
+    // through fetch_stage. Start with a fresh memory-stage latch in that path too.
+    pipeline_context.memory_load_complete = false;
+    pipeline_context.sc_reservation_checked = false;
+    pipeline_context.sc_reservation_succeeded = false;
+    pipeline_context.mem_paddr = PhysAddr{0};
     fetch_operands(machine);
     bool success = false;
     if (simrv::compiler::likely(state_.priv == kPrivMachine &&
-                                (state_.mstatus & enum_mask(MstatusBit::Mprv)) == 0)) {
+                                (state_.mstatus & MstatusBit::Mprv) == 0)) {
         success = execute_stage(machine);
         if (success) {
             run_memory_stage_baremetal(machine);
@@ -1511,14 +1684,14 @@ void CPU::dispatch_pending_interrupts() {
         Word enable_interrupts = 0;
         switch (state_.priv) {
             case kPrivMachine: {
-                if ((state_.mstatus & enum_mask(MstatusBit::Mie)) != 0u) {
+                if ((state_.mstatus & MstatusBit::Mie) != 0u) {
                     enable_interrupts = ~state_.mideleg;
                 }
                 break;
             }
             case kPrivSupervisor: {
                 enable_interrupts = ~state_.mideleg;
-                if ((state_.mstatus & enum_mask(MstatusBit::Sie)) != 0u) {
+                if ((state_.mstatus & MstatusBit::Sie) != 0u) {
                     enable_interrupts |= state_.mideleg;
                 }
                 break;
@@ -1753,9 +1926,13 @@ void CPU::execute_cached_op_fast(Machine& machine, CachedOp& op,
             FloatingRegister mem_rdata = 0;
             const unsigned size_bytes = op.mem_size;
             const Address align_mask = op.align_mask();
+            const bool fast_width_supported =
+                simrv::xlen::kIsXLen64 || op.funct3 == isa::Funct3::Flw;
             bool loaded = false;
-            if (simrv::compiler::likely(state_.priv == kPrivMachine &&
-                                        (state_.mstatus & enum_mask(MstatusBit::Mprv)) == 0)) {
+            if (fast_width_supported &&
+                simrv::compiler::likely(state_.priv == kPrivMachine &&
+                                        (state_.mstatus & MstatusBit::Mprv) == 0 &&
+                                        !state_.has_locked_pmp)) {
                 if (simrv::compiler::likely(
                         (mem_addr & align_mask) == 0 &&
                         machine.memory_geometry().contains(mem_addr, size_bytes))) {
@@ -1763,7 +1940,7 @@ void CPU::execute_cached_op_fast(Machine& machine, CachedOp& op,
                         mem_addr, static_cast<Instruction>(op.funct3), ram);
                     loaded = true;
                 }
-            } else {
+            } else if (fast_width_supported) {
                 const unsigned active_xlen = effective_data_xlen();
                 Address lookup_addr = mem_addr;
                 if (active_xlen == 32) lookup_addr &= 0xFFFFFFFFULL;
@@ -1778,7 +1955,11 @@ void CPU::execute_cached_op_fast(Machine& machine, CachedOp& op,
                     const auto& entry = soft_tlb_read[tlb_idx];
                     if (simrv::compiler::likely(
                             entry.matches(vpn, current_asid, eff_priv, soft_tlb_epoch))) {
-                        if (simrv::compiler::likely(entry.host_ptr_base != nullptr)) {
+                        const Address paddr = (entry.paddr_base + page_offset).raw();
+                        if (simrv::compiler::likely(
+                                core::pmp::check_access(state_, paddr, size_bytes,
+                                                        core::PmpAccessType::Read, eff_priv) &&
+                                entry.host_ptr_base != nullptr)) {
                             mem_rdata =
                                 simrv::memory::host_read_fast(entry.host_ptr_base + page_offset,
                                                               static_cast<Instruction>(op.funct3));
@@ -1789,7 +1970,8 @@ void CPU::execute_cached_op_fast(Machine& machine, CachedOp& op,
             }
             if (!loaded) {
                 Word raw_val = 0;
-                if (try_fast_load(machine, mem_addr, op.funct3, raw_val, ram)) {
+                if (fast_width_supported &&
+                    try_fast_load(machine, mem_addr, op.funct3, raw_val, ram)) {
                     mem_rdata = raw_val;
                 } else {
                     op.copy_to(pipeline_context);
@@ -1808,6 +1990,7 @@ void CPU::execute_cached_op_fast(Machine& machine, CachedOp& op,
                                      ? (static_cast<FloatingRegister>(simrv::xlen::kF32BoxerBits) |
                                         (mem_rdata & 0xFFFFFFFFULL))
                                      : mem_rdata);
+            state_.mstatus |= MstatusBit::Fs;
             advance_cached_pc(op);
             return;
         }
@@ -1818,17 +2001,23 @@ void CPU::execute_cached_op_fast(Machine& machine, CachedOp& op,
             FloatingRegister const fp_data = state_.regs.read_fp(op.rs2);
             const unsigned size_bytes = op.mem_size;
             const Address align_mask = op.align_mask();
+            const bool fast_width_supported =
+                simrv::xlen::kIsXLen64 || op.funct3 == isa::Funct3::Fsw;
             bool stored = false;
-            if (simrv::compiler::likely(state_.priv == kPrivMachine &&
-                                        (state_.mstatus & enum_mask(MstatusBit::Mprv)) == 0)) {
+            if (fast_width_supported &&
+                simrv::compiler::likely(state_.priv == kPrivMachine &&
+                                        (state_.mstatus & MstatusBit::Mprv) == 0 &&
+                                        !state_.has_locked_pmp)) {
                 if (simrv::compiler::likely(
                         (mem_addr & align_mask) == 0 &&
-                        machine.memory_geometry().contains(mem_addr, size_bytes))) {
+                        machine.memory_geometry().contains(mem_addr, size_bytes) &&
+                        !is_tohost_addr(machine, mem_addr))) {
                     simrv::memory::ram_write_fast(mem_addr, fp_data,
                                                   static_cast<Instruction>(op.funct3), ram);
+                    pipeline_context.mem_paddr = mem_addr;
                     stored = true;
                 }
-            } else {
+            } else if (fast_width_supported) {
                 const unsigned active_xlen = effective_data_xlen();
                 Address lookup_addr = mem_addr;
                 if (active_xlen == 32) lookup_addr &= 0xFFFFFFFFULL;
@@ -1844,18 +2033,23 @@ void CPU::execute_cached_op_fast(Machine& machine, CachedOp& op,
                     if (simrv::compiler::likely(
                             entry.matches(vpn, current_asid, eff_priv, soft_tlb_epoch))) {
                         if (simrv::compiler::likely(
+                                core::pmp::check_access(state_, entry.paddr_base + page_offset,
+                                                        size_bytes, core::PmpAccessType::Write,
+                                                        eff_priv) &&
                                 entry.host_ptr_base != nullptr &&
                                 !is_tohost_addr(machine, entry.paddr_base + page_offset))) {
                             simrv::memory::host_write_fast(entry.host_ptr_base + page_offset,
                                                            fp_data,
                                                            static_cast<Instruction>(op.funct3));
+                            pipeline_context.mem_paddr = entry.paddr_base + page_offset;
                             stored = true;
                         }
                     }
                 }
             }
             if (!stored) {
-                if (!try_fast_store(machine, mem_addr, op.funct3, fp_data, ram)) {
+                if (!fast_width_supported ||
+                    !try_fast_store(machine, mem_addr, op.funct3, fp_data, ram)) {
                     op.copy_to(pipeline_context);
                     pipeline_context.mem_addr = mem_addr;
                     simrv::memory::MemoryAccess::storeFp(machine.memory_, *this, mem_addr, fp_data,
@@ -1866,6 +2060,13 @@ void CPU::execute_cached_op_fast(Machine& machine, CachedOp& op,
                         return;
                     }
                 }
+            }
+            state_.reserved = 0;
+            if (simrv::compiler::unlikely(
+                    machine.num_harts() > 1 &&
+                    machine.memory_.reservation_table().may_have_reservations())) {
+                machine.memory_.reservation_table().invalidate_range(
+                    pipeline_context.mem_paddr, size_bytes, static_cast<HartId>(state_.mhartid));
             }
             advance_cached_pc(op);
             return;
@@ -1879,14 +2080,22 @@ void CPU::execute_cached_op_fast(Machine& machine, CachedOp& op,
         case isa::FNMSUB_S:
         case isa::FNMADD_D:
         case isa::FNMADD_S: {
+            const isa::RoundingMode rm = isa::resolve_rounding_mode(op.funct3, state_.fcsr);
+            if (simrv::compiler::unlikely(!isa::is_valid_rounding_mode(rm))) {
+                raise_exception(ExceptionCode::IllegalInstruction, op.ir);
+                return;
+            }
             const Word rs3 = (op.ir >> 27) & 0x1F;
             const Word fmt = (op.ir >> 25) & 0x3;
+            const CSRValue old_fcsr = state_.fcsr;
             auto res = execute::ExecuteUnit::fusedFp(
                 op.opcode(), fmt, std::to_underlying(op.rs1), std::to_underlying(op.rs2), rs3,
-                enum_mask(op.funct3), state_.regs.fp_data_ptr(), state_.fcsr);
+                std::to_underlying(op.funct3), state_.regs.fp_data_ptr(), state_.fcsr);
             if (res.fp_wb_enable) {
                 state_.regs.write_fp(op.rd, res.fp_wb_data);
+                state_.mstatus |= MstatusBit::Fs;
             }
+            if (state_.fcsr != old_fcsr) state_.mstatus |= MstatusBit::Fs;
             advance_cached_pc(op);
             return;
         }
@@ -1899,12 +2108,20 @@ void CPU::execute_cached_op_fast(Machine& machine, CachedOp& op,
         case isa::FMUL_S:
         case isa::FDIV_D:
         case isa::FDIV_S: {
+            const isa::RoundingMode rm = isa::resolve_rounding_mode(op.funct3, state_.fcsr);
+            if (simrv::compiler::unlikely(!isa::is_valid_rounding_mode(rm))) {
+                raise_exception(ExceptionCode::IllegalInstruction, op.ir);
+                return;
+            }
+            const CSRValue old_fcsr = state_.fcsr;
             auto res = execute::ExecuteUnit::opFp(
                 op.funct7(), op.funct3, std::to_underlying(op.rs1), std::to_underlying(op.rs2),
                 rrs1, state_.regs.fp_data_ptr(), state_.fcsr);
             if (res.fp_wb_enable) {
                 state_.regs.write_fp(op.rd, res.fp_wb_data);
+                state_.mstatus |= MstatusBit::Fs;
             }
+            if (state_.fcsr != old_fcsr) state_.mstatus |= MstatusBit::Fs;
             advance_cached_pc(op);
             return;
         }
@@ -1919,7 +2136,7 @@ void CPU::execute_cached_op_fast(Machine& machine, CachedOp& op,
                     pipeline_context.pending_tval = 0;
                 }
                 execute::ExecuteUnit::execute_vector(*this, machine, op.op_id, op.ir);
-                state_.mstatus |= enum_mask(MstatusBit::Vs);
+                state_.mstatus |= MstatusBit::Vs;
                 if (pipeline_context.pending_exception.has_value()) {
                     raise_exception(static_cast<TrapCause>(*pipeline_context.pending_exception),
                                     pipeline_context.pending_tval);
@@ -1978,6 +2195,18 @@ SIMRV_ALWAYS_INLINE auto CPU::run_fast_baremetal_kernel(Machine& machine, uint32
 
 void CPU::run_fast_baremetal_batch(Machine& machine, uint32_t batch_size,
                                    const FastBatchPolicy& policy) {
+    apply_hart_control_boundary();
+    apply_pending_interrupt_lines(machine);
+    CPU* previous_active_cpu = active_execution_cpu_;
+    active_execution_cpu_ = this;
+    struct BoundaryCommit {
+        CPU& cpu;
+        CPU* previous;
+        ~BoundaryCommit() {
+            cpu.apply_hart_control_boundary();
+            active_execution_cpu_ = previous;
+        }
+    } boundary_commit{*this, previous_active_cpu};
     const auto ram = machine.ram_view();
     uint32_t cached_ops = 0;
     if (simrv::compiler::likely(!policy.copy_pipeline_context && !policy.collect_instruction_mix)) {
@@ -2062,6 +2291,19 @@ SIMRV_ALWAYS_INLINE auto CPU::run_fast_os_kernel(Machine& machine, uint32_t batc
 }
 
 void CPU::run_fast_os_batch(Machine& machine, uint32_t batch_size, const FastBatchPolicy& policy) {
+    apply_hart_control_boundary();
+    apply_pending_interrupt_lines(machine);
+    CPU* previous_active_cpu = active_execution_cpu_;
+    active_execution_cpu_ = this;
+    struct BoundaryCommit {
+        CPU& cpu;
+        CPU* previous;
+        ~BoundaryCommit() {
+            cpu.apply_hart_control_boundary();
+            active_execution_cpu_ = previous;
+        }
+    } boundary_commit{*this, previous_active_cpu};
+
     const auto ram = machine.ram_view();
     if (simrv::compiler::likely(!policy.copy_pipeline_context && !policy.collect_instruction_mix)) {
         if (policy.poll_pause) {

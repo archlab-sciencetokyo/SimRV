@@ -55,6 +55,29 @@ class RegisterFile {
         constexpr operator Register() const { return rf->read(idx); }
     };
 
+    struct FpRegisterProxy {
+        RegisterFile* rf;
+        FpRegId idx;
+        constexpr auto operator=(FloatingRegister val) -> FpRegisterProxy& {
+            rf->write_fp(idx, val);
+            return *this;
+        }
+        constexpr operator FloatingRegister() const { return rf->read_fp(idx); }
+    };
+
+    struct VecRegisterProxy {
+        RegisterFile* rf;
+        VecRegId idx;
+        constexpr auto operator=(const VectorRegister& val) -> VecRegisterProxy& {
+            rf->write_vector(idx, val);
+            return *this;
+        }
+        constexpr operator const VectorRegister&() const { return rf->read_vector(idx); }
+        constexpr operator VectorRegister&() { return rf->read_vector(idx); }
+        constexpr auto operator->() -> VectorRegister* { return &rf->read_vector(idx); }
+        constexpr auto operator->() const -> const VectorRegister* { return &rf->read_vector(idx); }
+    };
+
     unsigned xlen = 64;
     /// Architectural VLEN in bits; configured to a power of two in the supported 128-1024 range.
     unsigned vlen = 256;
@@ -74,6 +97,16 @@ class RegisterFile {
 
     [[nodiscard]] constexpr auto operator[](RegId idx) -> RegisterProxy { return {this, idx}; }
     [[nodiscard]] constexpr auto operator[](RegId idx) const -> Register { return read(idx); }
+    [[nodiscard]] constexpr auto operator[](FpRegId idx) -> FpRegisterProxy { return {this, idx}; }
+    [[nodiscard]] constexpr auto operator[](FpRegId idx) const -> FloatingRegister {
+        return read_fp(idx);
+    }
+    [[nodiscard]] constexpr auto operator[](VecRegId idx) -> VecRegisterProxy {
+        return {this, idx};
+    }
+    [[nodiscard]] constexpr auto operator[](VecRegId idx) const -> const VectorRegister& {
+        return read_vector(idx);
+    }
 
     [[nodiscard]] constexpr auto read(RegId idx) const -> Register {
         return reg_[std::to_underlying(idx)];

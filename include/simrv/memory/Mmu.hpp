@@ -53,10 +53,11 @@ class Mmu {
      * @param arch_state Optional CPU architectural state for PMP enforcement
      * @return Translated physical address or TrapCause on fault
      */
-    std::expected<PhysAddr, TrapCause> page_walk(VirtAddr v_addr, PteAccess access,
-                                                 PrivilegeLevel priv, CSRValue mstatus, Word satp,
-                                                 unsigned xlen, bool update_access_bits = true,
-                                                 const core::ArchState* arch_state = nullptr);
+    std::expected<PageWalkResult, TrapCause> page_walk(VirtAddr v_addr, PteAccess access,
+                                                       PrivilegeLevel priv, CSRValue mstatus,
+                                                       Word satp, unsigned xlen,
+                                                       bool update_access_bits = true,
+                                                       const core::ArchState* arch_state = nullptr);
 
     /**
      * @brief Translate address without performing page walk.
@@ -74,10 +75,11 @@ class Mmu {
      * @param arch_state Optional CPU architectural state for PMP enforcement
      * @return Translated physical address or TrapCause on fault
      */
-    std::expected<PhysAddr, TrapCause> translate(VirtAddr v_addr, PteAccess access,
-                                                 PrivilegeLevel priv, CSRValue mstatus, Word satp,
-                                                 unsigned xlen, bool update_access_bits = true,
-                                                 const core::ArchState* arch_state = nullptr);
+    std::expected<PageWalkResult, TrapCause> translate(VirtAddr v_addr, PteAccess access,
+                                                       PrivilegeLevel priv, CSRValue mstatus,
+                                                       Word satp, unsigned xlen,
+                                                       bool update_access_bits = true,
+                                                       const core::ArchState* arch_state = nullptr);
 
     /// Start a walk without performing any implicit physical-memory access.
     [[nodiscard]] PageWalkState begin_page_walk(VirtAddr v_addr, PteAccess access,

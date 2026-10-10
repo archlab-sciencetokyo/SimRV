@@ -21,10 +21,10 @@
 #include "simrv/device/AIA.hpp"
 #include "simrv/device/Aclint.hpp"
 #include "simrv/device/DmaController.hpp"
-#include "simrv/device/Power.hpp"
 #include "simrv/device/PlatformDeviceRegistry.hpp"
-#include "simrv/device/Rtc.hpp"
+#include "simrv/device/Power.hpp"
 #include "simrv/device/ResetControlMmio.hpp"
+#include "simrv/device/Rtc.hpp"
 #include "simrv/device/Uart.hpp"
 #include "simrv/device/mmio/VirtioMmioBlock.hpp"
 #include "simrv/device/mmio/VirtioMmioConsole.hpp"
@@ -312,6 +312,13 @@ auto Machine::platform_status() const -> PlatformStatusSnapshot {
 }
 
 auto Machine::initialize() -> std::expected<void, std::string> {
+    auto smp_topology = config.soc.smp;
+    if (smp_topology.clusters.empty()) smp_topology.hart_count = config.execution.num_harts;
+    if (auto topology_result =
+            memory().system_bus().coherence_hub().configure_topology(smp_topology);
+        !topology_result) {
+        return std::unexpected(topology_result.error());
+    }
     if (config.cpu_model_preset.has_value()) {
         auto model = simrv::pipeline::make_cpu_model_preset(*config.cpu_model_preset);
         const auto profile_name = simrv::pipeline::cpu_model_preset_name(*config.cpu_model_preset);

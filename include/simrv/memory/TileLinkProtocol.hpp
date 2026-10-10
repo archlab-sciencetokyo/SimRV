@@ -5,6 +5,7 @@
 #pragma once
 
 #include <cstdint>
+#include <limits>
 #include <string_view>
 
 #include "simrv/xlen/Types.hpp"
@@ -290,10 +291,14 @@ struct TlChannelA {
     uint8_t size{0};
     TlSourceId source{0};
     HartId hart{0};
+    uint64_t logical_cycle{std::numeric_limits<uint64_t>::max()};
+    uint64_t logical_issue_sequence{std::numeric_limits<uint64_t>::max()};
     PhysicalAddress address{0};
     TlMask mask{0};
     TlData data{0};
     bool corrupt{false};
+
+    [[nodiscard]] constexpr auto operator==(const TlChannelA&) const noexcept -> bool = default;
 
     [[nodiscard]] static constexpr auto compute_mask(uint8_t transfer_size, PhysicalAddress address)
         -> TlMask {
@@ -316,6 +321,8 @@ struct TlChannelB {
     uint8_t size{kTlBlockSize};
     TlSourceId source{0};
     PhysicalAddress address{0};
+
+    [[nodiscard]] constexpr auto operator==(const TlChannelB&) const noexcept -> bool = default;
 };
 
 struct TlChannelC {
@@ -327,6 +334,8 @@ struct TlChannelC {
     PhysicalAddress address{0};
     TlData data{0};
     bool corrupt{false};
+
+    [[nodiscard]] constexpr auto operator==(const TlChannelC&) const noexcept -> bool = default;
 
     [[nodiscard]] constexpr auto is_valid() const noexcept -> bool { return size <= kTlBlockSize; }
 };
@@ -341,12 +350,16 @@ struct TlChannelD {
     bool denied{false};
     bool corrupt{false};
 
+    [[nodiscard]] constexpr auto operator==(const TlChannelD&) const noexcept -> bool = default;
+
     [[nodiscard]] constexpr auto failed() const noexcept -> bool { return denied || corrupt; }
 };
 
 struct TlChannelE {
     TlOpcodeE opcode{TlOpcodeE::GrantAck};
     TlSinkId sink{0};
+
+    [[nodiscard]] constexpr auto operator==(const TlChannelE&) const noexcept -> bool = default;
 };
 
 }  // namespace simrv::memory

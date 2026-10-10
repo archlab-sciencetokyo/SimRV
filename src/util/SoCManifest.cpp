@@ -50,6 +50,18 @@ auto platform_name(const simrv::core::SoCConfig& config) -> std::string_view {
     return "none";
 }
 
+auto mode_name(simrv::core::SmpMode mode) -> std::string_view {
+    return mode == simrv::core::SmpMode::CycleAccurate ? "cycle-accurate" : "cycle-oriented";
+}
+
+void write_cache(std::ostream& out, const simrv::core::SharedCacheConfig& cache) {
+    out << "{\"enabled\": " << (cache.enabled ? "true" : "false")
+        << ", \"capacity_bytes\": " << cache.capacity_bytes
+        << ", \"associativity\": " << cache.associativity
+        << ", \"line_bytes\": " << cache.line_bytes << ", \"hit_latency\": " << cache.hit_latency
+        << ", \"miss_latency\": " << cache.miss_latency << "}";
+}
+
 auto transport_name(const simrv::core::SoCConfig& config, simrv::core::SoCDeviceKind kind)
     -> std::string_view {
     switch (kind) {
@@ -81,6 +93,26 @@ auto serialize_soc_manifest(const simrv::core::SoCConfig& config, std::ostream& 
     out << "  \"generator\": \"simrv " << json_escape(simrv::buildinfo::kVersion) << "\",\n";
     out << "  \"name\": " << quoted(config.name) << ",\n";
     out << "  \"cpu_model\": " << quoted(config.cpu_model) << ",\n";
+    out << "  \"smp\": {\n";
+    out << "    \"hart_count\": " << config.smp.hart_count << ",\n";
+    out << "    \"mode\": " << quoted(mode_name(config.smp.mode)) << ",\n";
+    out << "    \"synchronization_quantum\": " << config.smp.synchronization_quantum << ",\n";
+    out << "    \"l3\": ";
+    write_cache(out, config.smp.l3);
+    out << ",\n    \"clusters\": [";
+    for (size_t i = 0; i < config.smp.clusters.size(); ++i) {
+        const auto& cluster = config.smp.clusters[i];
+        if (i != 0) out << ", ";
+        out << "{\"id\": " << cluster.id << ", \"harts\": [";
+        for (size_t h = 0; h < cluster.harts.size(); ++h) {
+            if (h != 0) out << ", ";
+            out << cluster.harts[h];
+        }
+        out << "], \"l2\": ";
+        write_cache(out, cluster.l2);
+        out << "}";
+    }
+    out << "]\n  },\n";
     out << "  \"cpu\": {\n";
     out << "    \"name\": " << quoted(cpu.name) << ",\n";
     out << "    \"xlen\": " << static_cast<unsigned int>(cpu.supported_xlen) << ",\n";
@@ -128,10 +160,12 @@ auto serialize_soc_manifest(const simrv::core::SoCConfig& config, std::ostream& 
             out << "      \"read_value\": " << device.read_value << ",\n";
         }
         if (device.kind == simrv::core::SoCDeviceKind::RingBufferEthernet) {
-            out << "      \"mac_address\": " << quoted(std::format(
-                "{:02x}:{:02x}:{:02x}:{:02x}:{:02x}:{:02x}", device.mac_address[0],
-                device.mac_address[1], device.mac_address[2], device.mac_address[3],
-                device.mac_address[4], device.mac_address[5])) << ",\n";
+            out << "      \"mac_address\": "
+                << quoted(std::format("{:02x}:{:02x}:{:02x}:{:02x}:{:02x}:{:02x}",
+                                      device.mac_address[0], device.mac_address[1],
+                                      device.mac_address[2], device.mac_address[3],
+                                      device.mac_address[4], device.mac_address[5]))
+                << ",\n";
         }
         if (!device.regions.empty()) {
             out << "      \"regions\": [";

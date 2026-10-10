@@ -101,12 +101,11 @@ auto Sbi::handle_base(Word func_id) -> bool {
             return true;
         case BaseFid::ProbeExtension: {
             const Word probed = cpu_.state().regs.read(RegId::A0);
-            const bool supported =
-                (probed == enum_mask(ExtId::Base)) || (probed == enum_mask(ExtId::Time)) ||
-                (probed == enum_mask(ExtId::Rfence)) || (probed == enum_mask(ExtId::Ipi)) ||
-                (probed == enum_mask(ExtId::Hsm)) || (probed == enum_mask(ExtId::SystemReset)) ||
-                (probed == enum_mask(ExtId::Pmu)) || (probed == enum_mask(ExtId::DebugConsole)) ||
-                (probed == enum_mask(ExtId::Susp)) || (probed == enum_mask(ExtId::Cppc));
+            const bool supported = (probed == ExtId::Base) || (probed == ExtId::Time) ||
+                                   (probed == ExtId::Rfence) || (probed == ExtId::Ipi) ||
+                                   (probed == ExtId::Hsm) || (probed == ExtId::SystemReset) ||
+                                   (probed == ExtId::Pmu) || (probed == ExtId::DebugConsole) ||
+                                   (probed == ExtId::Susp) || (probed == ExtId::Cppc);
             sbi_return(static_cast<SignedWord>(SbiError::Success), supported ? 1U : 0U);
             return true;
         }
@@ -125,7 +124,7 @@ auto Sbi::handle_time(Word func_id) -> bool {
     if (static_cast<TimeFid>(func_id) == TimeFid::SetTimer) {
         cpu_.clint_mmio.supervisor_timer.store(true, std::memory_order_release);
         cpu_.clint_mmio.mtimecmp = timer_value();
-        cpu_.state().mip &= ~enum_mask(MipBit::Mtip);
+        cpu_.state().mip &= ~MipBit::Mtip;
         cpu_.state().stip_timer = false;
         cpu_.state().refresh_supervisor_pending();
         cpu_.evaluate_timer_interrupt();
@@ -190,13 +189,13 @@ auto Sbi::handle_ipi(Word func_id) -> bool {
             for (size_t h = 0; h < n_harts; ++h) {
                 if (detail::is_hart_selected(hart_mask, hart_mask_base, h)) {
                     auto& target_cpu = cpu_.machine_->hart(h);
-                    target_cpu.state().mip |= enum_mask(MipBit::Ssip);
+                    target_cpu.state().mip |= MipBit::Ssip;
                     target_cpu.hart_status.notify_all();
                 }
             }
         } else {
             if (detail::is_hart_selected(hart_mask, hart_mask_base, cpu_.state().mhartid)) {
-                cpu_.state().mip |= enum_mask(MipBit::Ssip);
+                cpu_.state().mip |= MipBit::Ssip;
                 cpu_.hart_status.notify_all();
             }
         }
@@ -245,8 +244,7 @@ auto Sbi::handle_hsm(Word func_id) -> bool {
             return true;
         }
         case HsmFid::HartStop: {
-            cpu_.hart_status.store(HartStatus::Stopped, std::memory_order_release);
-            cpu_.hart_status.notify_all();
+            cpu_.hart_status.store(HartStatus::StopPending, std::memory_order_release);
             cpu_.machine_->notify_control_event();
             sbi_return(static_cast<SignedWord>(SbiError::Success), 0);
             return true;
@@ -263,7 +261,7 @@ auto Sbi::handle_hsm(Word func_id) -> bool {
             return true;
         }
         case HsmFid::HartSuspend: {
-            cpu_.hart_status.store(HartStatus::Suspended, std::memory_order_release);
+            cpu_.hart_status.store(HartStatus::SuspendPending, std::memory_order_release);
             cpu_.machine_->notify_control_event();
             sbi_return(static_cast<SignedWord>(SbiError::Success), 0);
             return true;

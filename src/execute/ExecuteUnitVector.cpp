@@ -1136,10 +1136,10 @@ void ExecuteUnit::execute_vector(core::CPU& cpu, memory::MemorySubsystem& mem,
         const bool scalar_fp_enabled =
             (sew == 32 && has_f && (!uses_wide_fp_element(op_id) || has_d)) ||
             (sew == 64 && has_f && has_d);
-        const bool fs_enabled =
-            (cpu.state().mstatus & enum_mask(core::MstatusBit::Fs)) != static_cast<CSRValue>(0);
-        const Word frm = (cpu.state().fcsr >> 5U) & 0x7U;
-        if (!scalar_fp_enabled || !fs_enabled || (is_vector_fp_arithmetic(op_id) && frm >= 5U)) {
+        const bool fs_enabled = (cpu.state().mstatus & core::MstatusBit::Fs) != 0;
+        const isa::RoundingMode frm = isa::frm_rounding_mode(cpu.state().fcsr);
+        if (!scalar_fp_enabled || !fs_enabled ||
+            (is_vector_fp_arithmetic(op_id) && !isa::is_valid_rounding_mode(frm))) {
             // SEW=16 vector FP belongs to Zvfh, which SimRV does not advertise.
             cpu.active_context().pending_exception = ExceptionCode::IllegalInstruction;
             cpu.active_context().pending_tval = ir;
@@ -1401,11 +1401,11 @@ void ExecuteUnit::execute_vector(core::CPU& cpu, memory::MemorySubsystem& mem,
     // Vector 1.0 requires every successfully completed vector instruction, including vset*vl*, to
     // reset vstart. Faulting vector memory operations leave the faulting element index for resume.
     if (!cpu.active_context().pending_exception.has_value()) {
-        cpu.state().mstatus |= enum_mask(core::MstatusBit::Vs);
+        cpu.state().mstatus |= core::MstatusBit::Vs;
         if (is_vector_fp(op_id)) {
             // Vector FP may update scalar FP registers or fflags. Setting FS Dirty
             // conservatively is permitted even when a particular result is exact.
-            cpu.state().mstatus |= enum_mask(core::MstatusBit::Fs);
+            cpu.state().mstatus |= core::MstatusBit::Fs;
         }
         cpu.state().vstart = 0;
     }

@@ -30,9 +30,14 @@ void Tlb::flush_selective(const TlbFlushFilter& filter) {
         const auto set = calc_set(*filter.vaddr);
         const Address vpage = calc_vpage(*filter.vaddr);
         auto clear_match = [&](TLBEntry& entry) {
-            if (entry.valid && entry.v_addr == vpage &&
-                (!filter.asid || entry.asid == *filter.asid)) {
-                entry = TLBEntry{};
+            if (entry.valid && entry.v_addr == vpage) {
+                if (filter.asid) {
+                    if (!entry.global && entry.asid == *filter.asid) {
+                        entry = TLBEntry{};
+                    }
+                } else {
+                    entry = TLBEntry{};
+                }
             }
         };
         for (int i = 0; i < 2; ++i) {
@@ -46,11 +51,11 @@ void Tlb::flush_selective(const TlbFlushFilter& filter) {
     if (filter.asid) {
         for (size_t s = 0; s < kNumSets; ++s) {
             for (int i = 0; i < 2; ++i) {
-                if (inst_r[s][i].valid && inst_r[s][i].asid == *filter.asid)
+                if (inst_r[s][i].valid && !inst_r[s][i].global && inst_r[s][i].asid == *filter.asid)
                     inst_r[s][i] = TLBEntry{};
-                if (data_r[s][i].valid && data_r[s][i].asid == *filter.asid)
+                if (data_r[s][i].valid && !data_r[s][i].global && data_r[s][i].asid == *filter.asid)
                     data_r[s][i] = TLBEntry{};
-                if (data_w[s][i].valid && data_w[s][i].asid == *filter.asid)
+                if (data_w[s][i].valid && !data_w[s][i].global && data_w[s][i].asid == *filter.asid)
                     data_w[s][i] = TLBEntry{};
             }
         }

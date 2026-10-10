@@ -9,6 +9,7 @@
 #include <bit>
 #include <cstdint>
 #include <expected>
+#include <format>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -136,6 +137,119 @@ struct SoCDeviceConfig {
     }
 };
 
+enum class SmpMode : uint8_t { CycleAccurate, CycleOriented };
+
+struct SharedCacheConfig {
+    bool enabled = false;
+    uint32_t capacity_bytes = 0;
+    uint32_t associativity = 1;
+    uint32_t line_bytes = 32;
+    uint32_t hit_latency = 1;
+    uint32_t miss_latency = 1;
+};
+
+struct SmpClusterConfig {
+    uint32_t id = 0;
+    std::vector<uint32_t> harts;
+    SharedCacheConfig l2{};
+};
+
+struct SmpTopologyConfig {
+    uint32_t hart_count = 1;
+    SmpMode mode = SmpMode::CycleAccurate;
+    uint32_t synchronization_quantum = 64;
+    std::vector<SmpClusterConfig> clusters;
+    SharedCacheConfig l3{.enabled = true,
+                         .capacity_bytes = 512 * 1024,
+                         .associativity = 16,
+                         .line_bytes = 32,
+                         .hit_latency = 1,
+                         .miss_latency = 1};
+
+    void resize_harts(uint32_t count) {
+        hart_count = count;
+        for (auto& cluster : clusters) {
+            std::erase_if(cluster.harts, [count](uint32_t hart) { return hart >= count; });
+        }
+        std::erase_if(clusters, [](const auto& cluster) { return cluster.harts.empty(); });
+        if (clusters.empty()) return;
+        for (uint32_t hart = 0; hart < count; ++hart) {
+            if (std::ranges::any_of(clusters, [hart](const auto& cluster) {
+                    return std::ranges::find(cluster.harts, hart) != cluster.harts.end();
+                }))
+                continue;
+            clusters.front().harts.push_back(hart);
+        }
+    }
+
+    [[nodiscard]] auto cluster_for_hart(uint32_t hart) const -> uint32_t {
+        for (const auto& cluster : clusters) {
+            if (std::ranges::find(cluster.harts, hart) != cluster.harts.end()) return cluster.id;
+        }
+        return 0;
+    }
+
+    [[nodiscard]] auto validate() const -> std::expected<void, std::string> {
+        if (hart_count == 0 || hart_count > 16) {
+            return std::unexpected("SMP hart count must be between 1 and 16");
+        }
+        if (synchronization_quantum == 0) {
+            return std::unexpected("SMP synchronization quantum must be non-zero");
+        }
+        const auto validate_cache = [](const SharedCacheConfig& cache, std::string_view name,
+                                       uint32_t max_capacity,
+                                       uint32_t max_ways) -> std::expected<void, std::string> {
+            if (!cache.enabled) return {};
+            if (cache.capacity_bytes < cache.line_bytes * cache.associativity ||
+                !std::has_single_bit(cache.capacity_bytes) ||
+                !std::has_single_bit(cache.associativity) || cache.line_bytes != 32 ||
+                cache.associativity > max_ways || cache.capacity_bytes > max_capacity ||
+                !std::has_single_bit(cache.capacity_bytes /
+                                     (cache.line_bytes * cache.associativity)) ||
+                cache.capacity_bytes % (cache.line_bytes * cache.associativity) != 0) {
+                return std::unexpected(std::format(
+                    "{} cache geometry must use 32-byte lines, power-of-two sets/ways, and fit "
+                    "within {} bytes",
+                    name, max_capacity));
+            }
+            if (cache.hit_latency == 0 || cache.miss_latency == 0) {
+                return std::unexpected(std::format(
+                    "{} cache hit and miss latencies must be at least one cycle", name));
+            }
+            return {};
+        };
+        if (auto result = validate_cache(l3, "shared L3", 512 * 1024, 16); !result) {
+            return result;
+        }
+        std::vector<uint32_t> assigned_harts;
+        std::vector<uint32_t> cluster_ids;
+        for (const auto& cluster : clusters) {
+            if (std::ranges::find(cluster_ids, cluster.id) != cluster_ids.end()) {
+                return std::unexpected("SMP cluster IDs must be unique");
+            }
+            cluster_ids.push_back(cluster.id);
+            if (cluster.harts.empty()) {
+                return std::unexpected("SMP clusters must contain at least one hart");
+            }
+            if (auto result = validate_cache(cluster.l2, "cluster L2", 64 * 1024, 8); !result) {
+                return result;
+            }
+            for (const auto hart : cluster.harts) {
+                if (hart >= hart_count ||
+                    std::ranges::find(assigned_harts, hart) != assigned_harts.end()) {
+                    return std::unexpected(
+                        "each SMP hart must belong to exactly one valid cluster");
+                }
+                assigned_harts.push_back(hart);
+            }
+        }
+        if (!clusters.empty() && assigned_harts.size() != hart_count) {
+            return std::unexpected("SMP cluster mapping must assign every configured hart");
+        }
+        return {};
+    }
+};
+
 [[nodiscard]] inline auto soc_device_kind(std::string_view name) -> std::optional<SoCDeviceKind> {
     if (name == "uart") return SoCDeviceKind::Uart;
     if (name == "rtc") return SoCDeviceKind::Rtc;
@@ -232,6 +346,7 @@ struct SoCConfig {
     std::optional<Address> dram_size;
     std::optional<Address> reset_pc;
     std::optional<Address> tohost;
+    SmpTopologyConfig smp{};
     std::vector<SoCDeviceConfig> devices;
 
     [[nodiscard]] static auto virt_pcie() -> SoCConfig {
@@ -298,6 +413,7 @@ struct SoCConfig {
     }
 
     [[nodiscard]] auto validate() const -> std::expected<void, std::string> {
+        if (auto smp_result = smp.validate(); !smp_result) return smp_result;
         struct Region {
             Address base;
             Address size;
@@ -338,7 +454,8 @@ struct SoCConfig {
                 if (rx == nullptr || tx == nullptr || rx->size < 2048 || tx->size < 2048 ||
                     !std::has_single_bit(rx->size) || !std::has_single_bit(tx->size) ||
                     rx->size > 64 * 1024 * 1024 || tx->size > 64 * 1024 * 1024) {
-                    return std::unexpected("Ring-buffer Ethernet requires power-of-two RX/TX regions");
+                    return std::unexpected(
+                        "Ring-buffer Ethernet requires power-of-two RX/TX regions");
                 }
             }
             for (const auto& extra : device.regions) {

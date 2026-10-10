@@ -29,27 +29,31 @@ auto canonicalize_nan(T value) -> T {
 
 auto host_exceptions_to_fflags(int exceptions) -> CSRValue {
     CSRValue flags = 0;
-    if ((exceptions & FE_INEXACT) != 0) flags |= enum_mask(isa::FflagsBit::Nx);
-    if ((exceptions & FE_UNDERFLOW) != 0) flags |= enum_mask(isa::FflagsBit::Uf);
-    if ((exceptions & FE_OVERFLOW) != 0) flags |= enum_mask(isa::FflagsBit::Of);
-    if ((exceptions & FE_DIVBYZERO) != 0) flags |= enum_mask(isa::FflagsBit::Dz);
-    if ((exceptions & FE_INVALID) != 0) flags |= enum_mask(isa::FflagsBit::Nv);
+    if ((exceptions & FE_INEXACT) != 0) flags |= isa::FflagsBit::Nx;
+    if ((exceptions & FE_UNDERFLOW) != 0) flags |= isa::FflagsBit::Uf;
+    if ((exceptions & FE_OVERFLOW) != 0) flags |= isa::FflagsBit::Of;
+    if ((exceptions & FE_DIVBYZERO) != 0) flags |= isa::FflagsBit::Dz;
+    if ((exceptions & FE_INVALID) != 0) flags |= isa::FflagsBit::Nv;
     return flags;
 }
 
 auto frm_to_host_round(CSRValue fcsr) -> int {
-    switch ((fcsr >> 5U) & 0x7U) {
-        case enum_mask(isa::RoundingMode::Rtz):
+    switch (isa::frm_rounding_mode(fcsr)) {
+        case isa::RoundingMode::Rtz:
             return FE_TOWARDZERO;
-        case enum_mask(isa::RoundingMode::Rdn):
+        case isa::RoundingMode::Rdn:
             return FE_DOWNWARD;
-        case enum_mask(isa::RoundingMode::Rup):
+        case isa::RoundingMode::Rup:
             return FE_UPWARD;
         default:
             // FE_TONEAREST implements RNE. RMM still requires a software
             // tie-breaking path and is recorded in the compliance document.
             return FE_TONEAREST;
     }
+}
+
+auto is_rmm_mode(const core::CPU& cpu) -> bool {
+    return isa::frm_rounding_mode(cpu.state().fcsr) == isa::RoundingMode::Rmm;
 }
 
 auto round_rmm_f32(double exact) -> float {
@@ -371,13 +375,11 @@ void execute_vfadd_vv(core::CPU& cpu, RegId rd, RegId rs1, RegId rs2, bool vm, u
             T val2 = vector::get_group_element<T>(cpu.state().regs, rs2, i);
             T res;
             if constexpr (std::is_same_v<T, float>) {
-                res = ((cpu.state().fcsr >> 5U) & 0x7U) == enum_mask(isa::RoundingMode::Rmm)
+                res = is_rmm_mode(cpu)
                           ? round_rmm_f32(static_cast<double>(val2) + static_cast<double>(val1))
                           : val2 + val1;
             } else if constexpr (std::is_same_v<T, double>) {
-                res = ((cpu.state().fcsr >> 5U) & 0x7U) == enum_mask(isa::RoundingMode::Rmm)
-                          ? round_rmm_f64_sum(val2, val1)
-                          : val2 + val1;
+                res = is_rmm_mode(cpu) ? round_rmm_f64_sum(val2, val1) : val2 + val1;
             } else {
                 res = val2 + val1;
             }
@@ -411,17 +413,15 @@ void execute_vfadd_vf(core::CPU& cpu, RegId rd, FloatingRegister rs1_val, RegId 
             }
             auto val2 = vector::get_group_element<float>(cpu.state().regs, rs2, i);
             float res = canonicalize_nan(
-                ((cpu.state().fcsr >> 5U) & 0x7U) == enum_mask(isa::RoundingMode::Rmm)
+                is_rmm_mode(cpu)
                     ? round_rmm_f32(static_cast<double>(val2) + static_cast<double>(val1))
                     : val2 + val1);
             vector::set_group_element<float>(cpu.state().regs, rd, i, res);
         } else {
             double val1 = std::bit_cast<double>(rs1_val);
             auto val2 = vector::get_group_element<double>(cpu.state().regs, rs2, i);
-            double res = canonicalize_nan(((cpu.state().fcsr >> 5U) & 0x7U) ==
-                                                  enum_mask(isa::RoundingMode::Rmm)
-                                              ? round_rmm_f64_sum(val2, val1)
-                                              : val2 + val1);
+            double res =
+                canonicalize_nan(is_rmm_mode(cpu) ? round_rmm_f64_sum(val2, val1) : val2 + val1);
             vector::set_group_element<double>(cpu.state().regs, rd, i, res);
         }
     }
@@ -447,23 +447,19 @@ void execute_vf_binary_vv(core::CPU& cpu, RegId rd, RegId rs1, RegId rs2, bool v
             const T lhs = vector::get_group_element<T>(cpu.state().regs, rs2, i);
             T result;
             if constexpr (std::is_same_v<T, float>) {
-                if (division &&
-                    ((cpu.state().fcsr >> 5U) & 0x7U) == enum_mask(isa::RoundingMode::Rmm))
+                if (division && is_rmm_mode(cpu))
                     result = round_rmm_f32_quotient(lhs, rhs);
                 else
                     result =
-                        ((cpu.state().fcsr >> 5U) & 0x7U) == enum_mask(isa::RoundingMode::Rmm)
+                        is_rmm_mode(cpu)
                             ? round_rmm_f32(op(static_cast<double>(lhs), static_cast<double>(rhs)))
                             : op(lhs, rhs);
             } else if constexpr (std::is_same_v<T, double>) {
-                if (((cpu.state().fcsr >> 5U) & 0x7U) == enum_mask(isa::RoundingMode::Rmm) &&
-                    subtraction)
+                if (is_rmm_mode(cpu) && subtraction)
                     result = round_rmm_f64_sum(lhs, -rhs);
-                else if (((cpu.state().fcsr >> 5U) & 0x7U) == enum_mask(isa::RoundingMode::Rmm) &&
-                         multiplication)
+                else if (is_rmm_mode(cpu) && multiplication)
                     result = round_rmm_f64_product(lhs, rhs);
-                else if (((cpu.state().fcsr >> 5U) & 0x7U) == enum_mask(isa::RoundingMode::Rmm) &&
-                         division)
+                else if (is_rmm_mode(cpu) && division)
                     result = round_rmm_f64_quotient(lhs, rhs);
                 else
                     result = op(lhs, rhs);
@@ -504,24 +500,20 @@ void execute_vf_binary_vf(core::CPU& cpu, RegId rd, FloatingRegister rs1_val, Re
             const T lhs = vector::get_group_element<T>(cpu.state().regs, rs2, i);
             T result;
             if constexpr (std::is_same_v<T, float>) {
-                if (division &&
-                    ((cpu.state().fcsr >> 5U) & 0x7U) == enum_mask(isa::RoundingMode::Rmm))
+                if (division && is_rmm_mode(cpu))
                     result = reverse ? round_rmm_f32_quotient(rhs, lhs)
                                      : round_rmm_f32_quotient(lhs, rhs);
                 else
                     result =
-                        ((cpu.state().fcsr >> 5U) & 0x7U) == enum_mask(isa::RoundingMode::Rmm)
+                        is_rmm_mode(cpu)
                             ? round_rmm_f32(op(static_cast<double>(lhs), static_cast<double>(rhs)))
                             : op(lhs, rhs);
             } else if constexpr (std::is_same_v<T, double>) {
-                if (((cpu.state().fcsr >> 5U) & 0x7U) == enum_mask(isa::RoundingMode::Rmm) &&
-                    subtraction)
+                if (is_rmm_mode(cpu) && subtraction)
                     result = reverse ? round_rmm_f64_sum(rhs, -lhs) : round_rmm_f64_sum(lhs, -rhs);
-                else if (((cpu.state().fcsr >> 5U) & 0x7U) == enum_mask(isa::RoundingMode::Rmm) &&
-                         multiplication)
+                else if (is_rmm_mode(cpu) && multiplication)
                     result = round_rmm_f64_product(lhs, rhs);
-                else if (((cpu.state().fcsr >> 5U) & 0x7U) == enum_mask(isa::RoundingMode::Rmm) &&
-                         division)
+                else if (is_rmm_mode(cpu) && division)
                     result = reverse ? round_rmm_f64_quotient(rhs, lhs)
                                      : round_rmm_f64_quotient(lhs, rhs);
                 else
@@ -546,9 +538,7 @@ void execute_vfsqrt(core::CPU& cpu, RegId rd, RegId rs2, bool vm, uint32_t vl) {
                 cpu.state().regs, rd, i, vector::fp32_to_fp16(canonicalize_nan(std::sqrt(value))));
         } else {
             const T value = vector::get_group_element<T>(cpu.state().regs, rs2, i);
-            const T result = ((cpu.state().fcsr >> 5U) & 0x7U) == enum_mask(isa::RoundingMode::Rmm)
-                                 ? round_rmm_sqrt(value)
-                                 : std::sqrt(value);
+            const T result = is_rmm_mode(cpu) ? round_rmm_sqrt(value) : std::sqrt(value);
             vector::set_group_element<T>(cpu.state().regs, rd, i, canonicalize_nan(result));
         }
     }
@@ -660,8 +650,8 @@ constexpr auto bit_mask(unsigned pos, unsigned length) -> uint64_t {
 }
 
 template <typename T>
-auto fp_estimate7_raw(typename VectorFpElement<T>::Raw input, bool reciprocal_sqrt, Word rm,
-                      CSRValue& flags) -> typename VectorFpElement<T>::Raw {
+auto fp_estimate7_raw(typename VectorFpElement<T>::Raw input, bool reciprocal_sqrt,
+                      isa::RoundingMode rm, CSRValue& flags) -> typename VectorFpElement<T>::Raw {
     using E = VectorFpElement<T>;
     using Raw = typename E::Raw;
     constexpr unsigned kBits = sizeof(Raw) * 8U;
@@ -693,25 +683,25 @@ auto fp_estimate7_raw(typename VectorFpElement<T>::Raw input, bool reciprocal_sq
     if (reciprocal_sqrt) {
         if ((classification &
              ((Raw{1} << 0U) | (Raw{1} << 1U) | (Raw{1} << 2U) | (Raw{1} << 8U))) != 0) {
-            flags |= enum_mask(isa::FflagsBit::Nv);
+            flags |= isa::FflagsBit::Nv;
             return E::kCanonicalNan;
         }
         if ((classification & (Raw{1} << 9U)) != 0) return E::kCanonicalNan;
         if ((classification & ((Raw{1} << 3U) | (Raw{1} << 4U))) != 0) {
-            flags |= enum_mask(isa::FflagsBit::Dz);
+            flags |= isa::FflagsBit::Dz;
             return static_cast<Raw>((sign << (kSigBits + kExpBits)) | kInfinity);
         }
         if ((classification & (Raw{1} << 7U)) != 0) return Raw{0};
     } else {
         if ((classification & (Raw{1} << 8U)) != 0) {
-            flags |= enum_mask(isa::FflagsBit::Nv);
+            flags |= isa::FflagsBit::Nv;
             return E::kCanonicalNan;
         }
         if ((classification & (Raw{1} << 9U)) != 0) return E::kCanonicalNan;
         if ((classification & ((Raw{1} << 0U) | (Raw{1} << 7U))) != 0)
             return static_cast<Raw>(sign << (kSigBits + kExpBits));
         if ((classification & ((Raw{1} << 3U) | (Raw{1} << 4U))) != 0) {
-            flags |= enum_mask(isa::FflagsBit::Dz);
+            flags |= isa::FflagsBit::Dz;
             return static_cast<Raw>((sign << (kSigBits + kExpBits)) | kInfinity);
         }
     }
@@ -726,10 +716,10 @@ auto fp_estimate7_raw(typename VectorFpElement<T>::Raw input, bool reciprocal_sq
         }
         significand = (significand << 1U) & bit_mask<Raw>(0, kSigBits);
         if (!reciprocal_sqrt && exponent != 0 && exponent != UINT64_MAX) {
-            flags |= enum_mask(isa::FflagsBit::Nx) | enum_mask(isa::FflagsBit::Of);
-            const bool maximum = rm == enum_mask(isa::RoundingMode::Rtz) ||
-                                 (rm == enum_mask(isa::RoundingMode::Rdn) && !sign) ||
-                                 (rm == enum_mask(isa::RoundingMode::Rup) && sign);
+            flags |= isa::FflagsBit::Nx | isa::FflagsBit::Of;
+            const bool maximum = rm == isa::RoundingMode::Rtz ||
+                                 (rm == isa::RoundingMode::Rdn && !sign) ||
+                                 (rm == isa::RoundingMode::Rup && sign);
             return static_cast<Raw>(maximum ? ((sign << (kSigBits + kExpBits)) | kInfinity) - 1U
                                             : (sign << (kSigBits + kExpBits)) | kInfinity);
         }
@@ -765,8 +755,8 @@ void execute_vf_estimate7(core::CPU& cpu, RegId rd, RegId rs2, bool vm, uint32_t
     for (uint32_t i = static_cast<uint32_t>(cpu.state().vstart); i < vl; ++i) {
         if (!vector::is_element_active(mask_reg, i, vm)) continue;
         const Raw input = vector::get_group_element<Raw>(cpu.state().regs, rs2, i);
-        const Raw output =
-            fp_estimate7_raw<T>(input, reciprocal_sqrt, (cpu.state().fcsr >> 5U) & 0x7U, flags);
+        const Raw output = fp_estimate7_raw<T>(input, reciprocal_sqrt,
+                                               isa::frm_rounding_mode(cpu.state().fcsr), flags);
         vector::set_group_element<Raw>(cpu.state().regs, rd, i, output);
     }
 }
@@ -885,13 +875,11 @@ void execute_vfred(core::CPU& cpu, isa::OperationId op_id, RegId rd, RegId rs1, 
         if (sum) {
             Value result;
             if constexpr (std::is_same_v<T, float>) {
-                result = ((cpu.state().fcsr >> 5U) & 0x7U) == enum_mask(isa::RoundingMode::Rmm)
+                result = is_rmm_mode(cpu)
                              ? round_rmm_f32(static_cast<double>(lhs) + static_cast<double>(rhs))
                              : lhs + rhs;
             } else if constexpr (std::is_same_v<T, double>) {
-                result = ((cpu.state().fcsr >> 5U) & 0x7U) == enum_mask(isa::RoundingMode::Rmm)
-                             ? round_rmm_f64_sum(lhs, rhs)
-                             : lhs + rhs;
+                result = is_rmm_mode(cpu) ? round_rmm_f64_sum(lhs, rhs) : lhs + rhs;
             } else {
                 result = lhs + rhs;
             }
@@ -943,15 +931,12 @@ void execute_vfwred(core::CPU& cpu, RegId rd, RegId rs1, RegId rs2, bool vm, uin
         if (!active[i]) continue;
         const WideValue rhs = static_cast<WideValue>(NarrowE::value(source[i]));
         if constexpr (std::is_same_v<WideT, float>) {
-            value = canonicalize_nan(
-                ((cpu.state().fcsr >> 5U) & 0x7U) == enum_mask(isa::RoundingMode::Rmm)
-                    ? round_rmm_f32(static_cast<double>(value) + static_cast<double>(rhs))
-                    : value + rhs);
+            value = canonicalize_nan(is_rmm_mode(cpu) ? round_rmm_f32(static_cast<double>(value) +
+                                                                      static_cast<double>(rhs))
+                                                      : value + rhs);
         } else if constexpr (std::is_same_v<WideT, double>) {
-            value = canonicalize_nan(((cpu.state().fcsr >> 5U) & 0x7U) ==
-                                             enum_mask(isa::RoundingMode::Rmm)
-                                         ? round_rmm_f64_sum(value, rhs)
-                                         : value + rhs);
+            value =
+                canonicalize_nan(is_rmm_mode(cpu) ? round_rmm_f64_sum(value, rhs) : value + rhs);
         }
         accumulator = fp_result_raw<WideT>(value);
         value = WideE::value(accumulator);
@@ -996,14 +981,13 @@ void execute_vfw_binary(core::CPU& cpu, isa::OperationId op_id, RegId rd, RegId 
         WideValue result;
         if (multiply) {
             if constexpr (std::is_same_v<WideT, double>) {
-                result = ((cpu.state().fcsr >> 5U) & 0x7U) == enum_mask(isa::RoundingMode::Rmm)
-                             ? round_rmm_f64_product(lhs_values[i], rhs_values[i])
-                             : lhs_values[i] * rhs_values[i];
+                result = is_rmm_mode(cpu) ? round_rmm_f64_product(lhs_values[i], rhs_values[i])
+                                          : lhs_values[i] * rhs_values[i];
             } else {
                 result = lhs_values[i] * rhs_values[i];
             }
         } else if constexpr (std::is_same_v<WideT, double>) {
-            if (((cpu.state().fcsr >> 5U) & 0x7U) == enum_mask(isa::RoundingMode::Rmm))
+            if (is_rmm_mode(cpu))
                 result =
                     round_rmm_f64_sum(lhs_values[i], subtract ? -rhs_values[i] : rhs_values[i]);
             else
@@ -1170,8 +1154,7 @@ void execute_vf_fma(core::CPU& cpu, isa::OperationId op_id, RegId rd, RegId rs1,
         vd_values[i] = E::value(vector::get_group_element<Raw>(cpu.state().regs, rd, i));
     }
     const auto kind = fma_kind(op_id);
-    const bool rmm = !std::is_same_v<T, uint16_t> &&
-                     ((cpu.state().fcsr >> 5U) & 0x7U) == enum_mask(isa::RoundingMode::Rmm);
+    const bool rmm = !std::is_same_v<T, uint16_t> && is_rmm_mode(cpu);
     for (uint32_t i = static_cast<uint32_t>(cpu.state().vstart); i < vl; ++i) {
         if (!active[i]) continue;
         const Value result = canonicalize_nan(
@@ -1218,7 +1201,7 @@ void execute_vfw_fma(core::CPU& cpu, isa::OperationId op_id, RegId rd, RegId rs1
         kind = FpFmaKind::MSac;
     else if (op_id == isa::OperationId::VFWNMSAC_VV || op_id == isa::OperationId::VFWNMSAC_VF)
         kind = FpFmaKind::NMSac;
-    const bool rmm = ((cpu.state().fcsr >> 5U) & 0x7U) == enum_mask(isa::RoundingMode::Rmm);
+    const bool rmm = is_rmm_mode(cpu);
     for (uint32_t i = static_cast<uint32_t>(cpu.state().vstart); i < vl; ++i) {
         if (!active[i]) continue;
         const WideValue result =
@@ -1231,7 +1214,7 @@ template <typename Int, typename Float>
 auto saturating_fp_to_int(Float value, bool force_rtz, CSRValue fcsr, CSRValue& flags) -> Int {
     const bool invalid_positive = std::isnan(value) || value > 0;
     if (!std::isfinite(value)) {
-        flags |= enum_mask(isa::FflagsBit::Nv);
+        flags |= isa::FflagsBit::Nv;
         if constexpr (std::is_unsigned_v<Int>)
             return invalid_positive ? std::numeric_limits<Int>::max() : Int{0};
         else
@@ -1240,15 +1223,15 @@ auto saturating_fp_to_int(Float value, bool force_rtz, CSRValue fcsr, CSRValue& 
     }
 
     const long double input = static_cast<long double>(value);
-    const Word rm = force_rtz ? enum_mask(isa::RoundingMode::Rtz) : ((fcsr >> 5U) & 0x7U);
+    const isa::RoundingMode rm = force_rtz ? isa::RoundingMode::Rtz : isa::frm_rounding_mode(fcsr);
     long double rounded{};
-    if (rm == enum_mask(isa::RoundingMode::Rtz))
+    if (rm == isa::RoundingMode::Rtz)
         rounded = std::trunc(input);
-    else if (rm == enum_mask(isa::RoundingMode::Rdn))
+    else if (rm == isa::RoundingMode::Rdn)
         rounded = std::floor(input);
-    else if (rm == enum_mask(isa::RoundingMode::Rup))
+    else if (rm == isa::RoundingMode::Rup)
         rounded = std::ceil(input);
-    else if (rm == enum_mask(isa::RoundingMode::Rmm))
+    else if (rm == isa::RoundingMode::Rmm)
         rounded = std::round(input);
     else
         rounded = std::nearbyint(input);
@@ -1256,11 +1239,11 @@ auto saturating_fp_to_int(Float value, bool force_rtz, CSRValue fcsr, CSRValue& 
     const long double minimum = static_cast<long double>(std::numeric_limits<Int>::min());
     const long double maximum = static_cast<long double>(std::numeric_limits<Int>::max());
     if (rounded < minimum || rounded > maximum) {
-        flags |= enum_mask(isa::FflagsBit::Nv);
+        flags |= isa::FflagsBit::Nv;
         return rounded < minimum ? std::numeric_limits<Int>::min()
                                  : std::numeric_limits<Int>::max();
     }
-    if (rounded != input) flags |= enum_mask(isa::FflagsBit::Nx);
+    if (rounded != input) flags |= isa::FflagsBit::Nx;
     return static_cast<Int>(rounded);
 }
 
@@ -1286,7 +1269,7 @@ void execute_vfcvt(core::CPU& cpu, isa::OperationId op_id, RegId rd, RegId rs2, 
                                             : static_cast<long double>(static_cast<Signed>(source));
             typename VectorFpElement<T>::Value result;
             if constexpr (std::is_same_v<T, float> || std::is_same_v<T, double>) {
-                if (((cpu.state().fcsr >> 5U) & 0x7U) == enum_mask(isa::RoundingMode::Rmm)) {
+                if (is_rmm_mode(cpu)) {
                     result = unsigned_int ? round_rmm_integer<T>(source)
                                           : round_rmm_integer<T>(static_cast<Signed>(source));
                 } else {
@@ -1398,7 +1381,7 @@ void execute_vfncvt(core::CPU& cpu, isa::OperationId op_id, RegId rd, RegId rs2,
         typename NarrowE::Value result{};
         if (int_to_float) {
             if constexpr (std::is_same_v<NarrowT, float> && std::is_same_v<WideT, double>) {
-                if (((cpu.state().fcsr >> 5U) & 0x7U) == enum_mask(isa::RoundingMode::Rmm)) {
+                if (is_rmm_mode(cpu)) {
                     result = unsigned_int
                                  ? round_rmm_integer<float>(sources[i])
                                  : round_rmm_integer<float>(static_cast<WideSigned>(sources[i]));
@@ -1425,10 +1408,8 @@ void execute_vfncvt(core::CPU& cpu, isa::OperationId op_id, RegId rd, RegId rs2,
                 continue;
             }
             if constexpr (std::is_same_v<NarrowT, float> && std::is_same_v<WideT, double>) {
-                result = canonicalize_nan(((cpu.state().fcsr >> 5U) & 0x7U) ==
-                                                  enum_mask(isa::RoundingMode::Rmm)
-                                              ? round_rmm_f32(value)
-                                              : static_cast<float>(value));
+                result = canonicalize_nan(is_rmm_mode(cpu) ? round_rmm_f32(value)
+                                                           : static_cast<float>(value));
             } else {
                 result = canonicalize_nan(static_cast<typename NarrowE::Value>(value));
             }

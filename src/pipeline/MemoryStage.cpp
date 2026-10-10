@@ -30,7 +30,12 @@ void CPU::run_memory_stage(Machine& machine) {
         active_context().op_id <= isa::OperationId::VWSLL_VI) {
         return;
     }
-    memory_load_phase(machine);
+    auto& ctx = active_context();
+    if (!ctx.memory_load_complete) {
+        memory_load_phase(machine);
+        if (ca_state.waiting_for_interconnect || ctx.pending_exception.has_value()) return;
+        ctx.memory_load_complete = true;
+    }
     memory_prepare_store_data(machine);
     memory_store_phase(machine);
     if (ca_state.waiting_for_interconnect) return;
@@ -56,10 +61,12 @@ void CPU::memory_load_phase(Machine& machine) {
     }
 
     if (opcode == Opcode::Amo && funct5 == Funct5Amo::Lr) {
-        state_.load_res = ctx.mem_addr;
-        state_.reserved = 1;
-        machine.memory_.reservation_table().set_reservation(static_cast<HartId>(state_.mhartid),
-                                                            ctx.mem_addr);
+        if (!ctx.pending_exception.has_value() && !ca_state.waiting_for_interconnect) {
+            state_.load_res = ctx.mem_paddr.raw();
+            state_.reserved = 1;
+            machine.memory_.reservation_table().set_reservation(static_cast<HartId>(state_.mhartid),
+                                                                ctx.mem_paddr.raw());
+        }
     }
 }
 
@@ -86,9 +93,7 @@ void CPU::memory_store_phase(Machine& machine) {
     const auto opcode = static_cast<Opcode>(ctx.opcode);
     const auto funct5 = static_cast<Funct5Amo>(ctx.funct5);
 
-    if ((opcode == Opcode::Store) ||
-        (opcode == Opcode::Amo &&
-         (funct5 == Funct5Amo::Sc && (ctx.wb_data == 0u) && (state_.reserved != 0u))) ||
+    if ((opcode == Opcode::Store) || (opcode == Opcode::Amo && funct5 == Funct5Amo::Sc) ||
         (opcode == Opcode::Amo && funct5 != Funct5Amo::Lr && funct5 != Funct5Amo::Sc)) {
         simrv::memory::MemoryAccess::storeInt(machine.memory_, *this, ctx.mem_addr, ctx.mem_wdata,
                                               ctx.funct3);
@@ -100,15 +105,6 @@ void CPU::memory_store_phase(Machine& machine) {
     }
 
     if (ca_state.waiting_for_interconnect) return;
-
-    if ((opcode == Opcode::Store) || (opcode == Opcode::StoreFp) ||
-        (opcode == Opcode::Amo && funct5 != Funct5Amo::Lr)) {
-        if (!ctx.pending_exception.has_value()) {
-            state_.reserved = 0;
-            machine.memory_.reservation_table().invalidate_matching(
-                ctx.mem_addr, static_cast<HartId>(state_.mhartid));
-        }
-    }
 }
 
 }  // namespace simrv::core

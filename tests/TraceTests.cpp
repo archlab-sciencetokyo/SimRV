@@ -913,6 +913,7 @@ void test_interrupt_entry_and_return_events() {
     machine.trace().init_architecture_trace(path.string());
     machine.set_hart_irq(HartId{0}, simrv::core::InterruptType::Timer,
                          simrv::PrivilegeLevel::Machine, true);
+    cpu.apply_pending_interrupt_lines(machine);
     simrv::core::TrapController::raise_exception(cpu, kInterruptCauseBit | 7, 0);
 
     simrv::pipeline::PipelineContext return_context{};

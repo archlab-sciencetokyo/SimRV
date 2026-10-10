@@ -121,7 +121,10 @@ struct RuntimeOptions {
     unsigned int vlen = 0;
     uint32_t num_harts = 1;
     uint32_t smp_quantum = 100;
-    bool smp_multithreaded = false;
+    std::optional<simrv::core::SmpMode> smp_mode;
+    bool explicit_num_harts = false;
+    bool explicit_smp_quantum = false;
+    bool explicit_smp_mode = false;
     uint64_t dram_size = 0;
     simrv::core::PlatformProfile platform_profile = simrv::core::PlatformProfile::Pcie;
     std::string soc_preset = "virt-pcie";

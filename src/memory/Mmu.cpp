@@ -14,10 +14,10 @@ namespace simrv {
 
 auto Mmu::translate(VirtAddr v_addr, PteAccess access, PrivilegeLevel priv, CSRValue mstatus,
                     Word satp, unsigned xlen, bool update_access_bits,
-                    const core::ArchState* arch_state) -> std::expected<PhysAddr, TrapCause> {
+                    const core::ArchState* arch_state) -> std::expected<PageWalkResult, TrapCause> {
     // Machine mode or MMU disabled: use physical addressing directly
     if (priv == kPrivMachine || !simrv::xlen::satp_translation_enabled(satp, xlen)) {
-        return PhysAddr{v_addr.raw()};
+        return PageWalkResult{.physical_address = PhysAddr{v_addr.raw()}, .pte = 0};
     }
 
     auto check_canonical = [v_addr, satp, xlen, access]() -> std::expected<VirtAddr, TrapCause> {
@@ -34,7 +34,7 @@ auto Mmu::translate(VirtAddr v_addr, PteAccess access, PrivilegeLevel priv, CSRV
 
 auto Mmu::page_walk(VirtAddr v_addr, PteAccess access, PrivilegeLevel priv, CSRValue mstatus,
                     Word satp, unsigned xlen, bool update_access_bits,
-                    const core::ArchState* arch_state) -> std::expected<PhysAddr, TrapCause> {
+                    const core::ArchState* arch_state) -> std::expected<PageWalkResult, TrapCause> {
     return walker_.walk(v_addr, access, priv, mstatus, satp, xlen, update_access_bits, arch_state);
 }
 

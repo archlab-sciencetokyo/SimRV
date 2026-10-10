@@ -20,7 +20,8 @@ namespace {
 }
 
 [[nodiscard]] auto get_direct_host_memory_for_range(core::CPU& cpu, Address base_addr,
-                                                    uint32_t total_bytes, bool is_write) -> Byte* {
+                                                    uint32_t total_bytes, bool is_write,
+                                                    Address* physical_address = nullptr) -> Byte* {
     if (total_bytes == 0 || cpu.machine_ == nullptr) return nullptr;
     auto& machine = *cpu.machine_;
     if (simrv::compiler::unlikely(machine.breakpoint_manager().has_any())) {
@@ -29,8 +30,8 @@ namespace {
     const bool single_page = ((base_addr >> 12) == ((base_addr + total_bytes - 1) >> 12));
     if (!single_page) return nullptr;
 
-    const bool m_mode_flat = (cpu.state().priv == kPrivMachine &&
-                              (cpu.state().mstatus & enum_mask(core::MstatusBit::Mprv)) == 0);
+    const bool m_mode_flat =
+        (cpu.state().priv == kPrivMachine && (cpu.state().mstatus & core::MstatusBit::Mprv) == 0);
     if (m_mode_flat) {
         if (simrv::compiler::likely(machine.memory_geometry().contains(base_addr, total_bytes) &&
                                     machine.ram_view().contains(base_addr, total_bytes))) {
@@ -41,6 +42,7 @@ namespace {
                     simrv::compiler::unlikely(is_tohost_addr_range(cpu, base_addr, total_bytes))) {
                     return nullptr;
                 }
+                if (physical_address != nullptr) *physical_address = base_addr;
                 return machine.ram_view().unchecked_ptr(base_addr);
             }
         }
@@ -63,11 +65,16 @@ namespace {
             const auto& entry = cpu.soft_tlb_write[tlb_idx];
             if (simrv::compiler::likely(
                     entry.matches(vpn, current_asid, eff_priv, cpu.soft_tlb_epoch))) {
+                const Address paddr = (entry.paddr_base + page_offset).raw();
+                if (simrv::compiler::unlikely(!core::pmp::check_access(
+                        cpu.state(), paddr, total_bytes, core::PmpAccessType::Write, eff_priv))) {
+                    return nullptr;
+                }
                 if (simrv::compiler::likely(entry.host_ptr_base != nullptr)) {
-                    Address paddr = (entry.paddr_base + page_offset).raw();
                     if (simrv::compiler::unlikely(is_tohost_addr_range(cpu, paddr, total_bytes))) {
                         return nullptr;
                     }
+                    if (physical_address != nullptr) *physical_address = paddr;
                     return entry.host_ptr_base + page_offset;
                 }
             }
@@ -75,6 +82,11 @@ namespace {
             const auto& entry = cpu.soft_tlb_read[tlb_idx];
             if (simrv::compiler::likely(
                     entry.matches(vpn, current_asid, eff_priv, cpu.soft_tlb_epoch))) {
+                const Address paddr = (entry.paddr_base + page_offset).raw();
+                if (simrv::compiler::unlikely(!core::pmp::check_access(
+                        cpu.state(), paddr, total_bytes, core::PmpAccessType::Read, eff_priv))) {
+                    return nullptr;
+                }
                 if (simrv::compiler::likely(entry.host_ptr_base != nullptr)) {
                     return entry.host_ptr_base + page_offset;
                 }
@@ -91,6 +103,7 @@ namespace {
                                     is_tohost_addr_range(cpu, lookup_addr, total_bytes))) {
                     return nullptr;
                 }
+                if (physical_address != nullptr) *physical_address = lookup_addr;
                 return machine.ram_view().unchecked_ptr(lookup_addr);
             }
         }
@@ -170,7 +183,9 @@ void execute_vs_whole(core::CPU& cpu, simrv::memory::MemorySubsystem& mem, RegId
     const uint32_t vlen_bytes = cpu.state().regs.vlen_bytes();
     const uint32_t total_bytes = nr * vlen_bytes;
     if (cpu.state().vstart == 0 && total_bytes > 0) {
-        Byte* host_dst = get_direct_host_memory_for_range(cpu, base_addr, total_bytes, true);
+        Address physical_address = 0;
+        Byte* host_dst =
+            get_direct_host_memory_for_range(cpu, base_addr, total_bytes, true, &physical_address);
         if (host_dst != nullptr) {
             for (uint32_t r = 0; r < nr; ++r) {
                 const auto reg_idx = static_cast<RegId>((static_cast<uint32_t>(vs3) + r) % 32);
@@ -180,8 +195,8 @@ void execute_vs_whole(core::CPU& cpu, simrv::memory::MemorySubsystem& mem, RegId
             if (simrv::compiler::unlikely(cpu.machine_ != nullptr &&
                                           cpu.machine_->num_harts() > 1 &&
                                           mem.reservation_table().may_have_reservations())) {
-                mem.reservation_table().invalidate_matching(
-                    base_addr, static_cast<HartId>(cpu.state().mhartid));
+                mem.reservation_table().invalidate_range(physical_address, total_bytes,
+                                                         static_cast<HartId>(cpu.state().mhartid));
             }
             return;
         }
@@ -316,14 +331,16 @@ void execute_vsm(core::CPU& cpu, simrv::memory::MemorySubsystem& mem, RegId vs3,
                  uint32_t vl) {
     const uint32_t evl = (vl + 7) / 8;
     if (cpu.state().vstart == 0 && evl > 0) {
-        Byte* host_dst = get_direct_host_memory_for_range(cpu, base_addr, evl, true);
+        Address physical_address = 0;
+        Byte* host_dst =
+            get_direct_host_memory_for_range(cpu, base_addr, evl, true, &physical_address);
         if (host_dst != nullptr) {
             std::memcpy(host_dst, cpu.state().regs.read_vector(vs3).u8.data(), evl);
             if (simrv::compiler::unlikely(cpu.machine_ != nullptr &&
                                           cpu.machine_->num_harts() > 1 &&
                                           mem.reservation_table().may_have_reservations())) {
-                mem.reservation_table().invalidate_matching(
-                    base_addr, static_cast<HartId>(cpu.state().mhartid));
+                mem.reservation_table().invalidate_range(physical_address, evl,
+                                                         static_cast<HartId>(cpu.state().mhartid));
             }
             return;
         }
@@ -353,7 +370,9 @@ void execute_vse(core::CPU& cpu, simrv::memory::MemorySubsystem& mem, RegId vs3,
             }
         }
         const uint32_t total_bytes = vl * sizeof(T);
-        Byte* host_dst = get_direct_host_memory_for_range(cpu, base_addr, total_bytes, true);
+        Address physical_address = 0;
+        Byte* host_dst =
+            get_direct_host_memory_for_range(cpu, base_addr, total_bytes, true, &physical_address);
         if (host_dst != nullptr) {
             uint32_t remaining = vl;
             uint32_t elem_idx = 0;
@@ -375,8 +394,8 @@ void execute_vse(core::CPU& cpu, simrv::memory::MemorySubsystem& mem, RegId vs3,
             if (simrv::compiler::unlikely(cpu.machine_ != nullptr &&
                                           cpu.machine_->num_harts() > 1 &&
                                           mem.reservation_table().may_have_reservations())) {
-                mem.reservation_table().invalidate_matching(
-                    base_addr, static_cast<HartId>(cpu.state().mhartid));
+                mem.reservation_table().invalidate_range(physical_address, total_bytes,
+                                                         static_cast<HartId>(cpu.state().mhartid));
             }
             return;
         }

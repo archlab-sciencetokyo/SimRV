@@ -4,6 +4,8 @@
  */
 #pragma once
 #include <atomic>
+#include <cstddef>
+#include <limits>
 #include <mutex>
 #include <optional>
 #include <unordered_map>
@@ -123,6 +125,43 @@ class ReservationTable {
 
     void invalidate_matching(PhysAddr addr, std::optional<HartId> store_origin = std::nullopt) {
         invalidate_matching(addr.raw(), store_origin);
+    }
+
+    /**
+     * @brief Invalidate reservations overlapping a physical byte range.
+     * @param addr First physical byte written.
+     * @param size Number of bytes written.
+     * @param store_origin Optional Hart ID whose reservation remains valid.
+     */
+    void invalidate_range(Address addr, size_t size,
+                          std::optional<HartId> store_origin = std::nullopt) {
+        if (size == 0 || !may_have_reservations_.load(std::memory_order_acquire)) return;
+        const Address first_granule = addr & kReservationGranuleMask;
+        const Address extent = static_cast<Address>(size - 1);
+        const Address last_byte = extent > std::numeric_limits<Address>::max() - addr
+                                      ? std::numeric_limits<Address>::max()
+                                      : addr + extent;
+        const Address last_granule = last_byte & kReservationGranuleMask;
+        const std::scoped_lock lock(mutex_);
+        bool any_valid = false;
+        for (auto& [hart, entry] : reservations_) {
+            if (!entry.valid) continue;
+            if (store_origin.has_value() && hart == *store_origin) {
+                any_valid = true;
+                continue;
+            }
+            if (entry.address >= first_granule && entry.address <= last_granule) {
+                entry.valid = false;
+            } else {
+                any_valid = true;
+            }
+        }
+        if (!any_valid) may_have_reservations_.store(false, std::memory_order_release);
+    }
+
+    void invalidate_range(PhysAddr addr, size_t size,
+                          std::optional<HartId> store_origin = std::nullopt) {
+        invalidate_range(addr.raw(), size, store_origin);
     }
 
     /**

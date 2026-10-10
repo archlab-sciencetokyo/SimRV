@@ -54,9 +54,9 @@ void Plic::update_mip() {
     // Standalone CPU without Machine container (e.g. focused unit tests)
     auto& target_state = cpu_.state();
     if (find_highest_pending_plic_source(*this, 0) != 0) {
-        target_state.mip |= enum_mask(core::MipBit::Meip);
+        target_state.mip |= core::MipBit::Meip;
     } else {
-        target_state.mip &= ~enum_mask(core::MipBit::Meip);
+        target_state.mip &= ~core::MipBit::Meip;
     }
     target_state.seip_external = (find_highest_pending_plic_source(*this, 1) != 0);
     target_state.refresh_supervisor_pending();

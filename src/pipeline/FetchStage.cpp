@@ -11,6 +11,7 @@
 #include "simrv/core/Cpu.hpp"
 #include "simrv/core/Logger.hpp"
 #include "simrv/core/Machine.hpp"
+#include "simrv/core/Pmp.hpp"
 #include "simrv/debug/GdbStub.hpp"
 #include "simrv/debug/SpikeLockstep.hpp"
 #include "simrv/device/Uart.hpp"
@@ -213,27 +214,26 @@ void CPU::fetch_resolve_page_walk(Machine& machine, int state) {
             machine, VirtAddr{w_vadr}, PteAccess::Code, state_.priv, state_.regs.xlen,
             simrv::memory::TlPort::Instruction, ca_state.instruction_walk);
         if (!translate_res.has_value()) return;
-        static_cast<void>((*translate_res)
-                              .and_then([&](PhysAddr phys) -> std::expected<void, TrapCause> {
-                                  w_padr = phys;
-                                  const Word asid =
-                                      simrv::xlen::satp_asid(state_.satp, state_.regs.xlen);
-                                  tlb.insert_inst_r(w_vadr, w_padr.raw(), asid, state_.priv);
-                                  const Address vpn = w_vadr >> 12;
-                                  const PhysAddr page_base = w_padr & ~simrv::memory::kPageMask;
-                                  Byte* const host_base =
-                                      machine.ram_view().contains(page_base, 4096)
-                                          ? machine.ram_view().unchecked_ptr(page_base)
-                                          : nullptr;
-                                  soft_tlb_inst[core::CPU::soft_tlb_index(vpn)].set(
-                                      vpn, asid, state_.priv, soft_tlb_epoch, page_base, host_base);
-                                  return {};
-                              })
-                              .or_else([&](TrapCause error) -> std::expected<void, TrapCause> {
-                                  ctx.pending_exception = static_cast<ExceptionCode>(error);
-                                  ctx.pending_tval = w_vadr;
-                                  return {};
-                              }));
+        static_cast<void>(
+            (*translate_res)
+                .and_then([&](PageWalkResult res) -> std::expected<void, TrapCause> {
+                    w_padr = res.physical_address;
+                    const Word asid = simrv::xlen::satp_asid(state_.satp, state_.regs.xlen);
+                    tlb.insert_inst_r(w_vadr, w_padr.raw(), asid, state_.priv, res.global());
+                    const Address vpn = w_vadr >> 12;
+                    const PhysAddr page_base = w_padr & ~simrv::memory::kPageMask;
+                    Byte* const host_base = machine.ram_view().contains(page_base, 4096)
+                                                ? machine.ram_view().unchecked_ptr(page_base)
+                                                : nullptr;
+                    soft_tlb_inst[core::CPU::soft_tlb_index(vpn)].set(
+                        vpn, asid, state_.priv, soft_tlb_epoch, page_base, host_base, res.global());
+                    return {};
+                })
+                .or_else([&](TrapCause error) -> std::expected<void, TrapCause> {
+                    ctx.pending_exception = static_cast<ExceptionCode>(error);
+                    ctx.pending_tval = w_vadr;
+                    return {};
+                }));
     }
     *r_padr = w_padr;
 }
@@ -242,7 +242,7 @@ auto CPU::translate_stage_address(Machine& machine, VirtAddr virtual_address, Pt
                                   PrivilegeLevel privilege, unsigned active_xlen,
                                   simrv::memory::TlPort port,
                                   simrv::pipeline::TimedPageWalkState& timed_walk)
-    -> std::optional<std::expected<PhysAddr, TrapCause>> {
+    -> std::optional<std::expected<PageWalkResult, TrapCause>> {
     auto* mmu = machine.memory_.mmu();
     if (machine.runtime_profile.is_instruction_mode()) {
         return mmu->translate(virtual_address, access, privilege, state_.mstatus, state_.satp,
@@ -280,14 +280,14 @@ auto CPU::translate_stage_address(Machine& machine, VirtAddr virtual_address, Pt
     }
 
     if (walk.status == PageWalkStatus::Complete) {
-        const PhysAddr result = walk.physical_address;
+        const PageWalkResult result{.physical_address = walk.physical_address, .pte = walk.pte};
         timed_walk.reset();
-        return std::expected<PhysAddr, TrapCause>{result};
+        return std::expected<PageWalkResult, TrapCause>{result};
     }
     if (walk.status == PageWalkStatus::Fault) {
         const TrapCause fault = walk.fault;
         timed_walk.reset();
-        return std::expected<PhysAddr, TrapCause>{std::unexpected(fault)};
+        return std::expected<PageWalkResult, TrapCause>{std::unexpected(fault)};
     }
 
     simrv::memory::TlChannelA request{};
@@ -628,6 +628,27 @@ void CPU::decode_and_normalize_instruction(Machine& machine) {
         return;
     }
 
+    // Instruction fetch shortcuts can read DRAM without going through MemoryAccess. Apply
+    // execute permissions here for both the physical and translated fetch paths before the
+    // instruction is decoded or admitted to the decode cache.
+    if (simrv::compiler::unlikely(
+            !core::pmp::check_access(state_, ctx.padr1.raw(), sizeof(uint16_t),
+                                     core::PmpAccessType::Execute, state_.priv))) {
+        ctx.pending_exception = ExceptionCode::FaultFetch;
+        ctx.pending_tval = state_.pc;
+        ctx.ir = isa::kNop32;
+        return;
+    }
+    if (simrv::compiler::unlikely(
+            (ctx.ir_org & 0x3u) == 0x3u &&
+            !core::pmp::check_access(state_, ctx.padr2.raw(), sizeof(uint16_t),
+                                     core::PmpAccessType::Execute, state_.priv))) {
+        ctx.pending_exception = ExceptionCode::FaultFetch;
+        ctx.pending_tval = state_.pc;
+        ctx.ir = isa::kNop32;
+        return;
+    }
+
     simrv::pipeline::Decoder dec_org(ctx.ir_org);
     bool const w_compressed = dec_org.is_compressed();
     Instruction const w_ir_tmp = w_compressed ? simrv::pipeline::decompressInstruction(
@@ -701,15 +722,15 @@ void CPU::decode_and_normalize_instruction(Machine& machine) {
                            (op == Opcode::OpFp) || (op == Opcode::MAdd) || (op == Opcode::MSub) ||
                            (op == Opcode::NMAdd) || (op == Opcode::NMSub));
         if (is_vector) {
-            if (simrv::compiler::unlikely((state_.mstatus & enum_mask(MstatusBit::Vs)) == 0)) {
+            if (simrv::compiler::unlikely((state_.mstatus & MstatusBit::Vs) == 0)) {
                 if (!machine.tui_enabled()) {
                     simrv::log::warn("[VS CHECK] VS is 0! mstatus=0x{:x}, Vs mask=0x{:x}",
-                                     state_.mstatus, enum_mask(MstatusBit::Vs));
+                                     state_.mstatus, std::to_underlying(MstatusBit::Vs));
                 }
                 is_valid = false;
             }
         } else if (is_fp_op) {
-            if (simrv::compiler::unlikely((state_.mstatus & enum_mask(MstatusBit::Fs)) == 0)) {
+            if (simrv::compiler::unlikely((state_.mstatus & MstatusBit::Fs) == 0)) {
                 is_valid = false;
             }
         }
@@ -737,6 +758,13 @@ void CPU::decode_and_normalize_instruction(Machine& machine) {
 
 void CPU::run_fetch_stage_baremetal(Machine& machine) {
     auto& ctx = active_context();
+    // The bare-metal cycle path enters fetch directly instead of going through
+    // CPU::fetch_stage.  Start each instruction with fresh memory-operation
+    // latches, while leaving them intact across memory-stage retries.
+    ctx.sc_reservation_checked = false;
+    ctx.sc_reservation_succeeded = false;
+    ctx.mem_paddr = PhysAddr{0};
+    ctx.memory_load_complete = false;
     if (!check_fetch_alignment(state_, ctx)) return;
     ctx.cpc = state_.pc;
 

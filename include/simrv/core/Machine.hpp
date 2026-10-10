@@ -103,6 +103,7 @@ struct TuiExecutionSnapshot {
     Counter cycle_count = 0;
     Counter instruction_count = 0;
     Counter timer_ticks = 0;
+    simrv::xlen::PrivilegeLevel privilege = simrv::xlen::PrivilegeLevel::Machine;
     pipeline::PipelineStats ca_stats{};
     uint64_t icache_hits = 0;
     uint64_t icache_misses = 0;
@@ -336,13 +337,13 @@ class Machine final : public core::IInterruptController {
         return retired_instruction_count_.load(std::memory_order_relaxed);
     }
     [[nodiscard]] auto is_smp_enabled() const noexcept -> bool {
-        return config.execution.smp_multithreaded;
+        return config.execution.smp_mode.value_or(config.soc.smp.mode) == SmpMode::CycleOriented;
     }
 
     /// Publish retired instructions from a hart; used by execution engines and safe for MT-SMP.
     void record_retired_instructions(Counter count) noexcept {
         if (simrv::compiler::likely(count != 0)) {
-            if (simrv::compiler::likely(!config.execution.smp_multithreaded)) {
+            if (simrv::compiler::likely(!is_smp_enabled())) {
                 retired_instruction_count_.store(
                     retired_instruction_count_.load(std::memory_order_relaxed) + count,
                     std::memory_order_relaxed);
@@ -487,7 +488,7 @@ class Machine final : public core::IInterruptController {
     }
     void set_tui_enabled_for_testing(bool enabled) noexcept { config.tui.enabled = enabled; }
     void set_smp_parallel_for_testing(bool enabled) noexcept {
-        config.execution.smp_multithreaded = enabled;
+        config.execution.smp_mode = enabled ? SmpMode::CycleOriented : SmpMode::CycleAccurate;
     }
     void set_instruction_limit_for_testing(Counter limit) noexcept {
         config.execution.fincnt = limit;

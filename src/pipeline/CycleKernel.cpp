@@ -11,6 +11,13 @@ namespace simrv::core {
 
 using pipeline::CycleInstructionSlot;
 
+namespace {
+[[nodiscard]] auto is_store_conditional(const pipeline::PipelineContext& context) noexcept -> bool {
+    return context.opcode == isa::Opcode::Amo &&
+           static_cast<isa::Funct5Amo>(context.funct5) == isa::Funct5Amo::Sc;
+}
+}  // namespace
+
 void CPU::run_ca_pipeline_cycle(Machine& machine) {
     auto& pipe = ca_pipeline;
     const bool three_stage =
@@ -114,7 +121,8 @@ void CPU::run_ca_pipeline_cycle(Machine& machine) {
                     if (active_context().pending_exception.has_value()) return false;
                     if (!execute_stage(machine)) return false;
                     writeback->executed = true;
-                    if (writeback->context.traits.is_mem_load || writeback->context.traits.is_cfu) {
+                    if (writeback->context.traits.is_mem_load || writeback->context.traits.is_cfu ||
+                        is_store_conditional(writeback->context)) {
                         writeback->wb_valid = false;
                     } else if (writeback->writes_int && writeback->wb_dest != RegId::Zero) {
                         writeback->wb_val = (writeback->context.opcode == isa::Opcode::System &&
@@ -137,6 +145,10 @@ void CPU::run_ca_pipeline_cycle(Machine& machine) {
                         writeback->wb_valid =
                             (writeback->writes_int && writeback->wb_dest != RegId::Zero);
                     } else if (writeback->context.traits.is_cfu) {
+                        writeback->wb_val = writeback->context.wb_data;
+                        writeback->wb_valid =
+                            (writeback->writes_int && writeback->wb_dest != RegId::Zero);
+                    } else if (is_store_conditional(writeback->context)) {
                         writeback->wb_val = writeback->context.wb_data;
                         writeback->wb_valid =
                             (writeback->writes_int && writeback->wb_dest != RegId::Zero);
@@ -200,6 +212,9 @@ void CPU::run_ca_pipeline_cycle(Machine& machine) {
                 } else if (memory->context.traits.is_cfu) {
                     memory->wb_val = memory->context.wb_data;
                     memory->wb_valid = (memory->writes_int && memory->wb_dest != RegId::Zero);
+                } else if (is_store_conditional(memory->context)) {
+                    memory->wb_val = memory->context.wb_data;
+                    memory->wb_valid = (memory->writes_int && memory->wb_dest != RegId::Zero);
                 }
                 if (!success && !memory->context.pending_exception.has_value()) {
                     memory->context.pending_exception = ExceptionCode::FaultLoad;
@@ -224,7 +239,8 @@ void CPU::run_ca_pipeline_cycle(Machine& machine) {
                 (void)run_with_context(*execute, [&] { return execute_stage(machine); });
                 state_.pc = saved_pc;
                 execute->executed = true;
-                if (execute->context.traits.is_mem_load || execute->context.traits.is_cfu) {
+                if (execute->context.traits.is_mem_load || execute->context.traits.is_cfu ||
+                    is_store_conditional(execute->context)) {
                     execute->wb_valid = false;
                 } else if (execute->writes_int && execute->wb_dest != RegId::Zero) {
                     execute->wb_val = (execute->context.opcode == isa::Opcode::System &&
@@ -294,7 +310,8 @@ void CPU::run_ca_pipeline_cycle(Machine& machine) {
                         return execute_stage(machine);
                     });
                     decode->executed = true;
-                    if (decode->context.traits.is_mem_load) {
+                    if (decode->context.traits.is_mem_load ||
+                        is_store_conditional(decode->context)) {
                         decode->wb_valid = false;
                     } else if (decode->writes_int && decode->wb_dest != RegId::Zero) {
                         decode->wb_val = (decode->context.opcode == isa::Opcode::System &&

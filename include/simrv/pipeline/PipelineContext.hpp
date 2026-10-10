@@ -38,12 +38,16 @@ struct PipelineContext : public DecodedInstruction {
     bool tkn = false;
     VirtAddr jmp_pc{0};
     Address mem_addr = 0;
+    PhysAddr mem_paddr{0};
     Register wb_data = 0;
     CSRValue wb_data_csr = 0;
 
     // LD/EX2 stage memory data
     Register mem_rdata = 0;
     Register mem_wdata = 0;
+    bool memory_load_complete = false;
+    bool sc_reservation_checked = false;
+    bool sc_reservation_succeeded = false;
 
     // FP datapath temporaries
     FloatingRegister fp_mem_rdata = 0;

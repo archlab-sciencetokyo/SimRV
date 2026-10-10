@@ -126,6 +126,10 @@ struct CycleInstructionSlot {
         wb_dest = static_cast<RegId>(0);
         wb_val = 0;
         context.pending_exception.reset();
+        context.memory_load_complete = false;
+        context.mem_paddr = PhysAddr{0};
+        context.sc_reservation_checked = false;
+        context.sc_reservation_succeeded = false;
         context.ir = 0;
         context.ir_org = 0;
         context.cpc = VirtAddr{0};
@@ -137,6 +141,7 @@ struct CycleInstructionSlot {
         executed = false;
         memory_complete = false;
         wb_valid = false;
+        context.memory_load_complete = false;
     }
 };
 

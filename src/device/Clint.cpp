@@ -116,12 +116,10 @@ auto Clint::mmio_read(Address offset) const -> Word {
     if (offset < 0x4000 || (offset >= 0x80000 && offset < 0x84000)) {
         const size_t hart_id = (offset >= 0x80000) ? ((offset - 0x80000) / 4) : (offset / 4);
         if (cpu_.machine_ && hart_id < cpu_.machine_->num_harts()) {
-            return (cpu_.machine_->hart(hart_id).state().mip & enum_mask(core::MipBit::Msip)) != 0
-                       ? 1
-                       : 0;
+            return (cpu_.machine_->hart(hart_id).state().mip & core::MipBit::Msip) != 0 ? 1 : 0;
         }
         if (hart_id == 0) {
-            return (cpu_.state().mip & enum_mask(core::MipBit::Msip)) != 0 ? 1 : 0;
+            return (cpu_.state().mip & core::MipBit::Msip) != 0 ? 1 : 0;
         }
         return 0;
     }
@@ -151,9 +149,9 @@ void Clint::mmio_write(Address offset, Word wdata) {
                                         PrivilegeLevel::Machine, (wdata & 1) != 0);
         } else if (hart_id == 0) {
             if ((wdata & 1) != 0) {
-                cpu_.state().mip |= enum_mask(core::MipBit::Msip);
+                cpu_.state().mip |= core::MipBit::Msip;
             } else {
-                cpu_.state().mip &= ~enum_mask(core::MipBit::Msip);
+                cpu_.state().mip &= ~core::MipBit::Msip;
             }
         }
         return;

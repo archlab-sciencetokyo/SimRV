@@ -43,6 +43,10 @@ class L2Cache : public BaseCache<2048, 32, 8> {
                     simrv::memory::MesiState state = simrv::memory::MesiState::Exclusive) {
         insert(line_base, in_data.data(), state);
     }
+
+    void invalidate_line(Address line_base) {
+        (void)probe_line(line_base, simrv::memory::MesiState::Invalid);
+    }
 };
 
 }  // namespace simrv::cache

@@ -942,7 +942,7 @@ constexpr auto kAmoTable = generate_amo_table();
     }
     const uint32_t funct5 = funct7 >> 2;
     // LR.W/LR.D reserve rs2=0; nonzero rs2 is a reserved instruction encoding.
-    if (funct5 == enum_mask(isa::Funct5Amo::Lr) && rs2 != 0) {
+    if (funct5 == isa::Funct5Amo::Lr && rs2 != 0) {
         return OperationId::UNKNOWN;
     }
     if (funct5 < 32) {

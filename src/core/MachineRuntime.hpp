@@ -24,13 +24,13 @@
 #include "simrv/device/DmaController.hpp"
 #include "simrv/device/DummyMmio.hpp"
 #include "simrv/device/Power.hpp"
-#include "simrv/device/Rtc.hpp"
 #include "simrv/device/RingBufferEthernetMmio.hpp"
+#include "simrv/device/Rtc.hpp"
 #include "simrv/device/Uart.hpp"
 #include "simrv/device/mmio/VirtioMmioBlock.hpp"
 #include "simrv/device/mmio/VirtioMmioConsole.hpp"
-#include "simrv/device/mmio/VirtioMmioGpu.hpp"
 #include "simrv/device/mmio/VirtioMmioFs.hpp"
+#include "simrv/device/mmio/VirtioMmioGpu.hpp"
 #include "simrv/device/mmio/VirtioMmioInput.hpp"
 #include "simrv/device/mmio/VirtioMmioNet.hpp"
 #include "simrv/device/mmio/VirtioMmioRng.hpp"
@@ -38,8 +38,8 @@
 #include "simrv/device/pci/PcieRootComplex.hpp"
 #include "simrv/device/pci/VirtioPciBlock.hpp"
 #include "simrv/device/pci/VirtioPciConsole.hpp"
-#include "simrv/device/pci/VirtioPciGpu.hpp"
 #include "simrv/device/pci/VirtioPciFs.hpp"
+#include "simrv/device/pci/VirtioPciGpu.hpp"
 #include "simrv/device/pci/VirtioPciInput.hpp"
 #include "simrv/device/pci/VirtioPciNet.hpp"
 #include "simrv/device/pci/VirtioPciRng.hpp"
@@ -55,6 +55,7 @@ class RunnerBase {
     virtual ~RunnerBase();
     void wait_for_quiescence();
     void stop(Machine& machine);
+    void synchronize_cycle_oriented_workers(Machine& machine);
 
    protected:
     void start_threads(Machine& machine, bool baremetal);
@@ -66,6 +67,8 @@ class RunnerBase {
     std::vector<std::jthread> worker_threads_;
     std::atomic<bool> workers_running_{false};
     std::atomic<uint32_t> workers_in_cycle_{0};
+    std::atomic<uint64_t> cycle_oriented_generation_{0};
+    std::atomic<size_t> cycle_oriented_completed_{0};
     Machine* machine_ = nullptr;
 };
 

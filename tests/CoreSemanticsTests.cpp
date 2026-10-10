@@ -329,8 +329,8 @@ void test_privilege_returns_flush_cached_instructions() {
            "SRET invalidates cached ops so fetch permissions are rechecked");
 
     cpu.state().priv = simrv::PrivilegeLevel::User;
-    cpu.state().medeleg = static_cast<CSRValue>(1) <<
-                          static_cast<unsigned>(ExceptionCode::IllegalInstruction);
+    cpu.state().medeleg = static_cast<CSRValue>(1)
+                          << static_cast<unsigned>(ExceptionCode::IllegalInstruction);
     cpu.state().stvec = decoded.cpc.raw();
     cpu.state().pc = 0x1000;
     cpu.decode_cache.insert(decoded.cpc, cached);
@@ -2894,6 +2894,14 @@ void test_smp_reservation_table() {
     expect(!table.may_have_reservations(), "clear_all restores the lock-free empty state");
     expect(!table.check_reservation(1, 0x80003000),
            "clear_all invalidates all active reservations");
+
+    table.set_reservation(0, 0x80004000);
+    table.set_reservation(1, 0x80004040);
+    table.set_reservation(2, 0x80004000);
+    table.invalidate_range(0x8000403C, 8, 2);
+    expect(!table.check_reservation(0, 0x80004000) && !table.check_reservation(1, 0x80004040) &&
+               table.check_reservation(2, 0x80004000),
+           "A physical write spanning two reservation granules invalidates other harts only");
 }
 
 void test_dynamic_fdt_generator() {
@@ -2909,6 +2917,8 @@ void test_dynamic_fdt_generator() {
     expect(fdt[0] == 0xd0 && fdt[1] == 0x0d && fdt[2] == 0xfe && fdt[3] == 0xed,
            "FDT magic matches 0xd00dfeed in big-endian");
     const std::string fdt_text(fdt.begin(), fdt.end());
+    expect(fdt_text.find("loglevel=4") != std::string::npos,
+           "generated FDT defaults to low-noise kernel logging for normal boots");
     expect(fdt_text.find("earlycon=uart8250,mmio,0x10000000,115200n8") != std::string::npos,
            "Linux defaults to the standard 16550 MMIO early console, not legacy SBI console");
     expect(fdt_text.find("earlycon=sbi") == std::string::npos,
@@ -2935,8 +2945,14 @@ void test_dynamic_fdt_generator() {
     config.soc.devices = {
         {simrv::core::SoCDeviceKind::Uart, "debug-uart", 0x20000000, 0x200, 17},
         {simrv::core::SoCDeviceKind::VirtioMmioNet, "net1", 0x20001000, 0x2000, 19},
-        {simrv::core::SoCDeviceKind::CustomMmio, "custom-timer", 0x20003000, 0x1000, 0,
-         true, {}, "acme,timer"},
+        {simrv::core::SoCDeviceKind::CustomMmio,
+         "custom-timer",
+         0x20003000,
+         0x1000,
+         0,
+         true,
+         {},
+         "acme,timer"},
     };
     auto custom_fdt = simrv::util::FdtGenerator::generate(config);
     const std::string custom_fdt_text(custom_fdt.begin(), custom_fdt.end());
@@ -3258,6 +3274,7 @@ int main() {
     test_decode_cache_compact_round_robin();
     test_hosted_rv32_cached_shift_width();
     test_compressed_instruction_decode_and_flush();
+    test_privilege_returns_flush_cached_instructions();
     test_selective_tlb_and_decode_cache_flush();
     test_tlb_and_decode_cache_deduplication();
     test_runtime_ram_view();

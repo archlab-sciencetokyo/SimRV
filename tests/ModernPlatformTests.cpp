@@ -452,9 +452,22 @@ void test_os_sampled_fast_batch_eligibility() {
     machine.runtime_profile.engine = simrv::core::ExecutionEngine::InstructionObservable;
     machine.runtime_profile.interaction = simrv::core::InteractionMode::Tui;
 
-    // A zero-length batch exercises runner eligibility without requiring a guest image. The
-    // production TUI supplies the same observable profile, then publishes after real batches.
+    // A zero-length batch exercises runner eligibility and the OS fast path's interrupt
+    // boundary without requiring a guest image. The production TUI supplies the same observable
+    // profile, then publishes after real batches.
+    const auto msip_mask = enum_mask(simrv::core::MipBit::Msip);
+    machine.set_hart_irq(HartId{0}, simrv::core::InterruptType::Software,
+                         simrv::PrivilegeLevel::Machine, true);
+    check((machine.primary_hart().state().mip & msip_mask) == 0);
     check(machine.execute_fast_batch_for_testing(0));
+    check((machine.primary_hart().state().mip & msip_mask) != 0);
+    check(simrv::core::CPU::current_execution_cpu() == nullptr);
+
+    machine.set_hart_irq(HartId{0}, simrv::core::InterruptType::Software,
+                         simrv::PrivilegeLevel::Machine, false);
+    check(machine.execute_fast_batch_for_testing(0));
+    check((machine.primary_hart().state().mip & msip_mask) == 0);
+    check(simrv::core::CPU::current_execution_cpu() == nullptr);
 
     auto secondary = std::make_unique<simrv::core::CPU>();
     secondary->reset();
@@ -891,6 +904,53 @@ void test_modified_line_does_not_refill_stale_shared_data() {
     std::cout << "[PASS] test_modified_line_does_not_refill_stale_shared_data\n";
 }
 
+void test_profiled_shared_cache_clusters() {
+    size_t check_index = 0;
+    const auto check = [&check_index](bool condition) {
+        ++check_index;
+        if (!condition) {
+            std::cerr << "shared-cache cluster check failed: " << check_index << '\n';
+            std::abort();
+        }
+    };
+    simrv::core::MachineConfig config{};
+    config.execution.num_harts = 3;
+    config.soc.smp.hart_count = 3;
+    config.soc.smp.l3.enabled = false;
+    const simrv::core::SharedCacheConfig l2_config{.enabled = true,
+                                                   .capacity_bytes = 32 * 1024,
+                                                   .associativity = 4,
+                                                   .line_bytes = 32,
+                                                   .hit_latency = 3,
+                                                   .miss_latency = 7};
+    config.soc.smp.clusters = {{.id = 0, .harts = {0, 1}, .l2 = l2_config},
+                               {.id = 2, .harts = {2}, .l2 = l2_config}};
+    ConcreteMachine machine(config);
+    auto& hub = machine.memory().system_bus().coherence_hub();
+    const auto configured = hub.configure_topology(config.soc.smp);
+    if (!configured) {
+        std::cerr << "shared-cache cluster configuration failed: " << configured.error() << '\n';
+        std::abort();
+    }
+    auto* hart0_l2 = hub.shared_l2_for_hart(0);
+    auto* hart1_l2 = hub.shared_l2_for_hart(1);
+    auto* hart2_l2 = hub.shared_l2_for_hart(2);
+    check(hart0_l2 != nullptr && hart0_l2 == hart1_l2 && hart2_l2 != nullptr &&
+          hart2_l2 != hart0_l2);
+    check(hart0_l2->capacity_bytes() == 32 * 1024 && hart0_l2->associativity() == 4);
+    check(!hub.shared_l3_enabled());
+
+    constexpr Address line = simrv::memory::kDramBaseAddress + 0x280;
+    std::array<Byte, simrv::memory::CoherenceHub::kLineBytes> source{};
+    std::array<Byte, simrv::memory::CoherenceHub::kLineBytes> result{};
+    source[0] = Byte{0x5a};
+    hart0_l2->write_line(line, source);
+    check(hart1_l2->read_line(line, result) && result[0] == Byte{0x5a});
+    hub.invalidate_line_external(line);
+    check(!hart0_l2->read_line(line, result) && !hart2_l2->read_line(line, result));
+    std::cout << "[PASS] test_profiled_shared_cache_clusters\n";
+}
+
 void test_tilelink_c_acquire_perm_upgrade() {
     const auto check = [](bool condition) {
         if (!condition) std::abort();
@@ -1074,6 +1134,105 @@ void test_global_cycle_smp_pipeline_ordering() {
     std::cout << "[PASS] test_global_cycle_smp_pipeline_ordering\n";
 }
 
+void test_global_cycle_smp_amo_retry() {
+    const auto check = [](bool condition) {
+        if (!condition) std::abort();
+    };
+    simrv::core::Machine machine(simrv::core::MachineConfig{
+        .execution = {.appmode = false, .num_harts = 2, .smp_quantum = 1}});
+    std::vector<Byte> ram(1024 * 1024, Byte{0});
+    machine.set_ram_for_testing(ram.data(), ram.size());
+    machine.runtime_profile.engine = simrv::core::ExecutionEngine::CycleFast;
+    machine.primary_hart().machine_ = &machine;
+    machine.primary_hart().reset();
+    auto secondary = std::make_unique<simrv::core::CPU>();
+    secondary->machine_ = &machine;
+    secondary->reset();
+    secondary->state().mhartid = 1;
+    secondary->hart_status.store(simrv::core::HartStatus::Started, std::memory_order_relaxed);
+    machine.test_secondary_harts().push_back(std::move(secondary));
+
+    constexpr Address pc = simrv::memory::kDramBaseAddress;
+    constexpr std::array<Instruction, 5> program = {
+        0x00150093,  // addi x1, a0, 1 (unique value per hart)
+        0x00000117,  // auipc x2, 0
+        0x0fc10113,  // addi x2, x2, 252 -> shared word at pc + 0x100
+        0x081121af,  // amoswap.w x3, x1, (x2)
+        0x0000006f,  // jal x0, 0
+    };
+    std::memcpy(ram.data(), program.data(), sizeof(program));
+    const uint32_t initial = 0;
+    std::memcpy(ram.data() + 0x100, &initial, sizeof(initial));
+    for (size_t hart = 0; hart < 2; ++hart) {
+        machine.hart(hart).state().pc = pc;
+        machine.hart(hart).state().regs.write(RegId::A0, hart);
+    }
+
+    for (uint32_t cycle = 0;
+         cycle < 160 && (machine.hart(0).e_icount < 4 || machine.hart(1).e_icount < 4); ++cycle) {
+        machine.execute_cycle_for_testing();
+    }
+    uint32_t result = 0;
+    std::memcpy(&result, ram.data() + 0x100, sizeof(result));
+    check(machine.hart(0).e_icount >= 4 && machine.hart(1).e_icount >= 4);
+    check(result == 2);
+    check(machine.hart(0).state().mcause == 0 && machine.hart(1).state().mcause == 0);
+    std::cout << "[PASS] test_global_cycle_smp_amo_retry\n";
+}
+
+void test_cycle_oriented_parallel_matches_global_cycle() {
+    const auto run = [](simrv::core::SmpMode mode) {
+        simrv::core::Machine machine(simrv::core::MachineConfig{
+            .execution = {.appmode = true, .smp_quantum = 7, .smp_mode = mode}});
+        std::vector<Byte> ram(1024 * 1024, Byte{0});
+        machine.set_ram_for_testing(ram.data(), ram.size());
+        machine.runtime_profile.engine = simrv::core::ExecutionEngine::CycleObservable;
+        machine.primary_hart().machine_ = &machine;
+        machine.primary_hart().reset();
+        auto secondary = std::make_unique<simrv::core::CPU>();
+        secondary->machine_ = &machine;
+        secondary->reset();
+        secondary->state().mhartid = 1;
+        secondary->hart_status.store(simrv::core::HartStatus::Started, std::memory_order_relaxed);
+        machine.test_secondary_harts().push_back(std::move(secondary));
+
+        constexpr Address pc = simrv::memory::kDramBaseAddress;
+        constexpr std::array<Instruction, 2> program = {
+            0x00108093,  // addi x1, x1, 1
+            0x0000006f,  // jal x0, 0
+        };
+        std::memcpy(ram.data(), program.data(), sizeof(program));
+        machine.hart(0).state().pc = pc;
+        machine.hart(1).state().pc = pc;
+        if (mode == simrv::core::SmpMode::CycleOriented) {
+            machine.start_runner_for_testing();
+        }
+        for (uint32_t cycle = 0; cycle < 40; ++cycle) {
+            machine.execute_cycle_for_testing();
+        }
+        if (mode == simrv::core::SmpMode::CycleOriented) {
+            machine.stop_runner_for_testing();
+        }
+        return std::array<std::array<uint64_t, 5>, 2>{
+            std::array<uint64_t, 5>{machine.hart(0).state().pc,
+                                    machine.hart(0).state().regs.read(RegId::Ra),
+                                    machine.hart(0).e_icount, machine.hart(0).clint_mmio.mcycle,
+                                    machine.memory().system_bus().cycle()},
+            std::array<uint64_t, 5>{machine.hart(1).state().pc,
+                                    machine.hart(1).state().regs.read(RegId::Ra),
+                                    machine.hart(1).e_icount, machine.hart(1).clint_mmio.mcycle,
+                                    machine.memory().system_bus().cycle()},
+        };
+    };
+    const auto deterministic = run(simrv::core::SmpMode::CycleAccurate);
+    const auto parallel = run(simrv::core::SmpMode::CycleOriented);
+    if (parallel != deterministic) {
+        std::cerr << "cycle-oriented SMP diverged from global-cycle execution\n";
+        std::abort();
+    }
+    std::cout << "[PASS] test_cycle_oriented_parallel_matches_global_cycle\n";
+}
+
 void test_global_cycle_timer_phase_ordering() {
     const auto check = [](bool condition) {
         if (!condition) std::abort();
@@ -1201,7 +1360,7 @@ void test_ca_mt_smp_pause_and_snapshots() {
         simrv::core::MachineConfig{.execution = {.appmode = false,
                                                  .num_harts = kNumHarts,
                                                  .smp_quantum = 32,
-                                                 .smp_multithreaded = true},
+                                                 .smp_mode = simrv::core::SmpMode::CycleOriented},
                                    .tui = {.enabled = true, .inspection_output = {}}});
     std::vector<Byte> ram(1024 * 1024, Byte{0});
     machine.set_ram_for_testing(ram.data(), ram.size());
@@ -1335,9 +1494,11 @@ void test_tui_mode_sim_thread_multiple_step_sync() {
     const auto check = [](bool condition) {
         if (!condition) std::abort();
     };
-    ConcreteMachine machine(simrv::core::MachineConfig{
-        .execution = {.appmode = true, .num_harts = 2, .smp_multithreaded = true},
-        .tui = {.enabled = true, .inspection_output = {}}});
+    ConcreteMachine machine(
+        simrv::core::MachineConfig{.execution = {.appmode = true,
+                                                 .num_harts = 2,
+                                                 .smp_mode = simrv::core::SmpMode::CycleOriented},
+                                   .tui = {.enabled = true, .inspection_output = {}}});
     std::vector<Byte> ram(1024 * 1024, Byte{0});
     machine.set_ram_for_testing(ram.data(), ram.size());
     machine.runtime_profile.engine = simrv::core::ExecutionEngine::CycleFast;
@@ -2676,35 +2837,78 @@ void test_ia_multihart_lr_sc_coherence() {
     machine.secondary_harts_.push_back(std::move(secondary));
 
     constexpr Address target_addr = simrv::memory::kDramBaseAddress + 0x200;
+    constexpr Address physical_page = simrv::memory::kDramBaseAddress;
+    constexpr Address lr_alias = 0x400200;
+    constexpr Address store_alias = 0x500200;
     constexpr uint32_t initial_val = 42;
     std::memcpy(&ram[0x200], &initial_val, sizeof(initial_val));
 
-    // 1. Hart 0 executes LR.W
     auto& h0 = machine.hart(0);
-    h0.state().regs.write(RegId::A0, target_addr);
+    h0.state().priv = kPrivMachine;
+    h0.state().satp = 0;
     h0.pipeline_context = {};
     h0.pipeline_context.opcode = simrv::isa::Opcode::Amo;
     h0.pipeline_context.funct5 = simrv::isa::Funct5Amo::Lr;
     h0.pipeline_context.funct3 = simrv::isa::Funct3::Lw;
     h0.pipeline_context.mem_addr = target_addr;
     h0.pipeline_context.rrs1 = target_addr;
+    h0.run_memory_stage(machine);
+    check(h0.pipeline_context.mem_paddr.raw() == target_addr);
+    check(machine.memory().reservation_table().check_reservation(0, target_addr));
+
+    h0.pipeline_context = {};
+    h0.pipeline_context.opcode = simrv::isa::Opcode::Amo;
+    h0.pipeline_context.funct5 = simrv::isa::Funct5Amo::Sc;
+    h0.pipeline_context.funct3 = simrv::isa::Funct3::Sw;
+    h0.pipeline_context.mem_addr = target_addr;
+    h0.pipeline_context.rrs1 = target_addr;
+    h0.pipeline_context.rrs2 = 43;
+    h0.run_memory_stage(machine);
+    check(h0.pipeline_context.wb_data == 0);
+    uint32_t direct_sc_value = 0;
+    std::memcpy(&direct_sc_value, &ram[0x200], sizeof(direct_sc_value));
+    check(direct_sc_value == 43);
+
+    const Word satp = simrv::xlen::kIsXLen64 ? (Word{8} << 60) : (Word{1} << 31);
+    const auto map_alias = [&](simrv::core::CPU& hart_ref, Address vaddr) {
+        hart_ref.state().priv = kPrivSupervisor;
+        hart_ref.state().satp = satp;
+        const Address vpn = vaddr >> 12;
+        const auto tlb_index = simrv::core::CPU::soft_tlb_index(vpn);
+        Byte* host_page = machine.ram_view().unchecked_ptr(physical_page);
+        hart_ref.soft_tlb_read[tlb_index].set(vpn, 0, kPrivSupervisor, hart_ref.soft_tlb_epoch,
+                                              physical_page, host_page);
+        hart_ref.soft_tlb_write[tlb_index].set(vpn, 0, kPrivSupervisor, hart_ref.soft_tlb_epoch,
+                                               physical_page, host_page);
+        hart_ref.tlb.insert_data_r(vaddr, physical_page, 0, kPrivSupervisor);
+        hart_ref.tlb.insert_data_w(vaddr, physical_page, 0, kPrivSupervisor);
+    };
+
+    // 1. Hart 0 executes LR.W
+    map_alias(h0, lr_alias);
+    map_alias(h0, store_alias);
+    h0.pipeline_context = {};
+    h0.pipeline_context.opcode = simrv::isa::Opcode::Amo;
+    h0.pipeline_context.funct5 = simrv::isa::Funct5Amo::Lr;
+    h0.pipeline_context.funct3 = simrv::isa::Funct3::Lw;
+    h0.pipeline_context.mem_addr = lr_alias;
+    h0.pipeline_context.rrs1 = lr_alias;
     h0.pipeline_context.rd = RegId::A1;
-    h0.run_memory_stage_baremetal(machine);
+    h0.run_memory_stage(machine);
     check(h0.state().load_res == target_addr);
     check(h0.state().reserved == 1);
     check(machine.memory().reservation_table().check_reservation(0, target_addr));
 
     // 2. Hart 1 performs a store to the same address in IA mode
     auto& h1 = machine.hart(1);
-    h1.state().regs.write(RegId::A0, target_addr);
-    h1.state().regs.write(RegId::A1, 99);
+    map_alias(h1, store_alias);
     h1.pipeline_context = {};
     h1.pipeline_context.opcode = simrv::isa::Opcode::Store;
     h1.pipeline_context.funct3 = simrv::isa::Funct3::Sw;
-    h1.pipeline_context.mem_addr = target_addr;
-    h1.pipeline_context.rrs1 = target_addr;
+    h1.pipeline_context.mem_addr = store_alias;
+    h1.pipeline_context.rrs1 = store_alias;
     h1.pipeline_context.rrs2 = 99;
-    h1.run_memory_stage_baremetal(machine);
+    h1.run_memory_stage(machine);
 
     // 3. Hart 0's reservation must now be invalidated
     check(!machine.memory().reservation_table().check_reservation(0, target_addr));
@@ -2714,17 +2918,37 @@ void test_ia_multihart_lr_sc_coherence() {
     h0.pipeline_context.opcode = simrv::isa::Opcode::Amo;
     h0.pipeline_context.funct5 = simrv::isa::Funct5Amo::Sc;
     h0.pipeline_context.funct3 = simrv::isa::Funct3::Sw;
-    h0.pipeline_context.mem_addr = target_addr;
-    h0.pipeline_context.rrs1 = target_addr;
+    h0.pipeline_context.mem_addr = lr_alias;
+    h0.pipeline_context.rrs1 = lr_alias;
     h0.pipeline_context.rrs2 = 100;
     h0.pipeline_context.rd = RegId::A2;
-    (void)h0.execute_stage(machine);
+    h0.run_memory_stage(machine);
     check(h0.pipeline_context.wb_data == 1);  // 1 = SC failure
 
     // Verify memory was not overwritten with 100
     uint32_t val_in_ram = 0;
     std::memcpy(&val_in_ram, &ram[0x200], sizeof(val_in_ram));
     check(val_in_ram == 99);
+
+    // A reservation made through one virtual mapping also succeeds through an alias.
+    h0.pipeline_context = {};
+    h0.pipeline_context.opcode = simrv::isa::Opcode::Amo;
+    h0.pipeline_context.funct5 = simrv::isa::Funct5Amo::Lr;
+    h0.pipeline_context.funct3 = simrv::isa::Funct3::Lw;
+    h0.pipeline_context.mem_addr = lr_alias;
+    h0.pipeline_context.rrs1 = lr_alias;
+    h0.run_memory_stage(machine);
+    h0.pipeline_context = {};
+    h0.pipeline_context.opcode = simrv::isa::Opcode::Amo;
+    h0.pipeline_context.funct5 = simrv::isa::Funct5Amo::Sc;
+    h0.pipeline_context.funct3 = simrv::isa::Funct3::Sw;
+    h0.pipeline_context.mem_addr = store_alias;
+    h0.pipeline_context.rrs1 = store_alias;
+    h0.pipeline_context.rrs2 = 101;
+    h0.run_memory_stage(machine);
+    check(h0.pipeline_context.wb_data == 0);
+    std::memcpy(&val_in_ram, &ram[0x200], sizeof(val_in_ram));
+    check(val_in_ram == 101);
 
     std::cout << "[PASS] test_ia_multihart_lr_sc_coherence\n";
 }
@@ -2733,8 +2957,8 @@ void test_ia_multithreaded_smp_execution() {
     const auto check = [](bool condition) {
         if (!condition) std::abort();
     };
-    simrv::core::Machine machine(
-        simrv::core::MachineConfig{.execution = {.appmode = true, .smp_multithreaded = true}});
+    simrv::core::Machine machine(simrv::core::MachineConfig{
+        .execution = {.appmode = true, .smp_mode = simrv::core::SmpMode::CycleOriented}});
     std::vector<Byte> ram(1024 * 1024, Byte{0});
     machine.set_ram_for_testing(ram.data(), ram.size());
     machine.runtime_profile.engine = simrv::core::ExecutionEngine::InstructionFast;
@@ -2812,8 +3036,8 @@ void test_quantum_smp_baremetal_execution() {
     const auto check = [](bool condition) {
         if (!condition) std::abort();
     };
-    simrv::core::Machine machine(simrv::core::MachineConfig{
-        .execution = {.appmode = true, .smp_quantum = 100, .smp_multithreaded = false}});
+    simrv::core::Machine machine(
+        simrv::core::MachineConfig{.execution = {.appmode = true, .smp_quantum = 100}});
     std::vector<Byte> ram(1024 * 1024, Byte{0});
     machine.set_ram_for_testing(ram.data(), ram.size());
     machine.runtime_profile.engine = simrv::core::ExecutionEngine::InstructionFast;
@@ -3302,9 +3526,12 @@ int main(int argc, char** argv) {
     test_timed_page_walk_transitions();
     test_timed_smp_coherence_ordering();
     test_modified_line_does_not_refill_stale_shared_data();
+    test_profiled_shared_cache_clusters();
     test_tilelink_c_acquire_perm_upgrade();
     test_tilelink_c_prefetch_intent();
     test_global_cycle_smp_pipeline_ordering();
+    test_global_cycle_smp_amo_retry();
+    test_cycle_oriented_parallel_matches_global_cycle();
     test_global_cycle_timer_phase_ordering();
     test_ca_quantum_smp_batching();
     test_ca_quantum_single_hart_batching();

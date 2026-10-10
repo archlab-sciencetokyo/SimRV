@@ -40,7 +40,7 @@ void CPU::execute_core(Machine& machine) {
         // VS dirty tracking may be imprecise. Conservatively mark it Dirty
         // after dispatch because vector instructions can update registers,
         // vl/vtype/vstart/vxsat, or partial state before a restartable fault.
-        state_.mstatus |= enum_mask(MstatusBit::Vs);
+        state_.mstatus |= MstatusBit::Vs;
         return;
     }
 
@@ -121,28 +121,12 @@ void CPU::execute_core(Machine& machine) {
         case Opcode::Amo:
             ctx.tkn = false;
             ctx.mem_addr = ctx.rrs1;
-            if (ctx.funct5 == Funct5Amo::Sc) {
-                // Zalrsc requires natural alignment even when the reservation will make SC fail.
-                // A failed reservation must not bypass the architecturally required exception.
-                if (!amo_address_aligned(ctx.mem_addr, ctx.funct3)) {
-                    ctx.pending_exception = ExceptionCode::MisalignedStore;
-                    ctx.pending_tval = ctx.mem_addr;
-                    break;
-                }
-                const bool native_success =
-                    machine.memory_.reservation_table().check_and_clear_reservation(
-                        static_cast<HartId>(state_.mhartid), ctx.rrs1);
-                state_.reserved = native_success ? 1 : 0;
-                state_.load_res = ctx.rrs1;
-                ctx.wb_data = native_success ? 0 : 1;
-                if (machine.lockstep() && machine.lockstep()->is_running()) {
-                    if (native_success) {
-                        auto sc_success_opt = machine.lockstep()->determine_sc_success();
-                        if (sc_success_opt.has_value() && !sc_success_opt.value()) {
-                            ctx.wb_data = 1;
-                        }
-                    }
-                }
+            if (!amo_address_aligned(ctx.mem_addr, ctx.funct3)) {
+                ctx.pending_exception = (ctx.funct5 == Funct5Amo::Lr)
+                                            ? ExceptionCode::MisalignedLoad
+                                            : ExceptionCode::MisalignedStore;
+                ctx.pending_tval = ctx.mem_addr;
+                break;
             }
             break;
         case Opcode::System:
@@ -174,10 +158,8 @@ void CPU::execute_system(Machine& machine) {
     if (ctx.funct3 == Funct3::Priv) {
         switch (static_cast<Funct12Priv>(ctx.funct12)) {
             case Funct12Priv::Ecall:
-                ctx.wb_data_csr =
-                    enum_mask(ExceptionCode::UserEcall) + std::to_underlying(state_.priv);
-                ctx.pending_exception = static_cast<ExceptionCode>(
-                    enum_mask(ExceptionCode::UserEcall) + std::to_underlying(state_.priv));
+                ctx.pending_exception = ecall_for_privilege(state_.priv);
+                ctx.wb_data_csr = std::to_underlying(*ctx.pending_exception);
                 break;
             case Funct12Priv::Ebreak: {
                 bool semihost_handled = false;
@@ -264,13 +246,13 @@ void CPU::execute_system(Machine& machine) {
                     if (machine.debugger() && machine.debugger()->is_connected()) {
                         // Native guest EBREAK remains an architectural trap, but GDB receives the
                         // all-stop notification before execution resumes.
-                        ctx.wb_data_csr = enum_mask(ExceptionCode::Breakpoint);
+                        ctx.wb_data_csr = to_trap_cause(ExceptionCode::Breakpoint);
                         ctx.pending_exception = ExceptionCode::Breakpoint;
                         ctx.tkn = false;
                         machine.debug_halt(static_cast<HartId>(state_.mhartid), GdbSignal::SigTrap,
                                            "swbreak:;");
                     } else {
-                        ctx.wb_data_csr = enum_mask(ExceptionCode::Breakpoint);
+                        ctx.wb_data_csr = to_trap_cause(ExceptionCode::Breakpoint);
                         ctx.pending_exception = ExceptionCode::Breakpoint;
                         ctx.tkn = false;
                     }
@@ -325,9 +307,8 @@ void CPU::execute_fp(Machine& /*machine*/) {
         case Opcode::NMAdd:
         case Opcode::NMSub: {
             ctx.tkn = false;
-            const Word rm =
-                (enum_mask(ctx.funct3) == 7) ? ((state_.fcsr >> 5) & 0x7) : enum_mask(ctx.funct3);
-            if (simrv::compiler::unlikely(rm >= 5)) {
+            const isa::RoundingMode rm = isa::resolve_rounding_mode(ctx.funct3, state_.fcsr);
+            if (simrv::compiler::unlikely(!isa::is_valid_rounding_mode(rm))) {
                 ctx.pending_exception = ExceptionCode::IllegalInstruction;
                 ctx.pending_tval = ctx.ir;
                 break;
@@ -337,9 +318,9 @@ void CPU::execute_fp(Machine& /*machine*/) {
             const CSRValue old_fcsr = state_.fcsr;
             const auto fp = execute::ExecuteUnit::fusedFp(
                 ctx.opcode, fmt, std::to_underlying(ctx.rs1), std::to_underlying(ctx.rs2), rs3,
-                enum_mask(ctx.funct3), state_.regs.fp_data_ptr(), state_.fcsr);
+                std::to_underlying(ctx.funct3), state_.regs.fp_data_ptr(), state_.fcsr);
             if (state_.fcsr != old_fcsr) {
-                state_.mstatus |= enum_mask(MstatusBit::Fs);
+                state_.mstatus |= MstatusBit::Fs;
             }
             ctx.fp_wb_data = fp.fp_wb_data;
             ctx.fp_wb_enable = fp.fp_wb_enable;
@@ -347,9 +328,8 @@ void CPU::execute_fp(Machine& /*machine*/) {
         }
         case Opcode::OpFp: {
             ctx.tkn = false;
-            const Word rm =
-                (enum_mask(ctx.funct3) == 7) ? ((state_.fcsr >> 5) & 0x7) : enum_mask(ctx.funct3);
-            if (simrv::compiler::unlikely(rm >= 5)) {
+            const isa::RoundingMode rm = isa::resolve_rounding_mode(ctx.funct3, state_.fcsr);
+            if (simrv::compiler::unlikely(!isa::is_valid_rounding_mode(rm))) {
                 ctx.pending_exception = ExceptionCode::IllegalInstruction;
                 ctx.pending_tval = ctx.ir;
                 break;
@@ -359,7 +339,7 @@ void CPU::execute_fp(Machine& /*machine*/) {
                 ctx.funct7, ctx.funct3, std::to_underlying(ctx.rs1), std::to_underlying(ctx.rs2),
                 ctx.rrs1, state_.regs.fp_data_ptr(), state_.fcsr);
             if (state_.fcsr != old_fcsr) {
-                state_.mstatus |= enum_mask(MstatusBit::Fs);
+                state_.mstatus |= MstatusBit::Fs;
             }
             ctx.wb_data = fp.int_wb_data;
             ctx.int_wb_from_fp = fp.int_wb_enable;

@@ -3,8 +3,10 @@
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <sstream>
 #include <vector>
 
+#include "simrv/core/CpuConfigParser.hpp"
 #include "simrv/core/Logger.hpp"
 #include "simrv/core/Machine.hpp"
 #include "simrv/core/MachineConfig.hpp"
@@ -82,6 +84,55 @@ auto main() -> int {
                "CLI parses diagnostic log format and destination");
     }
     const simrv::core::MachineConfig defaults{};
+    {
+        simrv::core::SoCConfig soc{};
+        std::istringstream profile{
+            "[smp]\n"
+            "hart_count = 4\n"
+            "mode = cycle-oriented\n"
+            "synchronization_quantum = 23\n"
+            "[smp.cluster.0]\n"
+            "harts = 0, 1\n"
+            "l2_enabled = true\n"
+            "l2_capacity_bytes = 65536\n"
+            "l2_associativity = 4\n"
+            "[smp.cluster.1]\n"
+            "harts = 2, 3\n"
+            "[smp.l3]\n"
+            "enabled = false\n"};
+        expect(simrv::core::parse_soc_config_stream(profile, soc) && soc.smp.hart_count == 4 &&
+                   soc.smp.mode == simrv::core::SmpMode::CycleOriented &&
+                   soc.smp.synchronization_quantum == 23 && soc.smp.clusters.size() == 2 &&
+                   soc.smp.clusters[0].l2.enabled && !soc.smp.l3.enabled &&
+                   soc.smp.validate().has_value(),
+               "SoC profile parses and validates SMP clusters and shared cache topology");
+        soc.smp.clusters[1].harts.pop_back();
+        expect(!soc.smp.validate(), "SMP profile rejects incomplete cluster membership");
+    }
+    {
+        std::vector<std::string> args_str = {
+            "SimRV",          "--soc",         "virt-mmio", "--harts", "4",        "--smp-mode",
+            "cycle-oriented", "--smp-quantum", "11",        "-m",      "guest.bin"};
+        std::vector<char*> args;
+        for (auto& arg : args_str) args.push_back(arg.data());
+        const auto parsed =
+            simrv::util::parse_command_line(std::span<char* const>{args.data(), args.size()});
+        if (parsed) {
+            const auto cfg = parsed->options.to_machine_config();
+            expect(cfg.execution.num_harts == 4 &&
+                       cfg.execution.smp_mode == simrv::core::SmpMode::CycleOriented &&
+                       cfg.execution.smp_quantum == 11 && cfg.soc.smp.hart_count == 4,
+                   "explicit SMP CLI settings override profile defaults");
+        } else {
+            expect(false, "SMP CLI overrides parse");
+        }
+        args_str = {"SimRV", "--smp-multithreaded", "-m", "guest.bin"};
+        args.clear();
+        for (auto& arg : args_str) args.push_back(arg.data());
+        const auto legacy =
+            simrv::util::parse_command_line(std::span<char* const>{args.data(), args.size()});
+        expect(!legacy, "removed multithreaded compatibility spelling is rejected");
+    }
     expect(defaults.memory.contains(defaults.memory.dram_base), "DRAM base is contained");
     expect(defaults.memory.contains(defaults.memory.dram_base, 4), "DRAM range is contained");
     expect(!defaults.memory.contains(defaults.memory.dram_base - 1),
@@ -175,6 +226,16 @@ auto main() -> int {
     applied.platform_profile = simrv::core::PlatformProfile::Mmio;
 
     simrv::core::Machine machine(applied);
+    auto secondary_for_irq = std::make_unique<simrv::core::CPU>();
+    secondary_for_irq->state().mhartid = 1;
+    machine.add_hart_for_testing(std::move(secondary_for_irq));
+    machine.set_hart_irq(HartId{1}, simrv::core::InterruptType::Software,
+                         simrv::PrivilegeLevel::Machine, true);
+    expect((machine.hart(1).state().mip & enum_mask(simrv::core::MipBit::Msip)) == 0,
+           "cross-hart interrupt remains queued until the target hart boundary");
+    machine.hart(1).apply_pending_interrupt_lines(machine);
+    expect((machine.hart(1).state().mip & enum_mask(simrv::core::MipBit::Msip)) != 0,
+           "target hart applies queued interrupt on its execution boundary");
     expect(machine.memory_geometry().dram_base == custom.dram_base &&
                machine.memory_geometry().dram_size == custom.dram_size,
            "applied configuration controls machine memory geometry");
@@ -239,8 +300,10 @@ auto main() -> int {
         observed_machine.primary_hart().evaluate_timer_interrupt();
         observed_machine.set_hart_irq(HartId{0}, simrv::core::InterruptType::Software,
                                       simrv::PrivilegeLevel::Machine, true);
+        observed_machine.primary_hart().apply_pending_interrupt_lines(observed_machine);
         observed_machine.set_hart_irq(HartId{0}, simrv::core::InterruptType::Software,
                                       simrv::PrivilegeLevel::Machine, false);
+        observed_machine.primary_hart().apply_pending_interrupt_lines(observed_machine);
         observed_machine.set_platform_irq(4, true);
         observed_machine.set_platform_irq(4, false);
         (void)observed_machine.dma_engine().schedule_transfer(64, 10, [] {}, "test-device");

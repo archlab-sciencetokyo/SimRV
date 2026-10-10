@@ -19,8 +19,8 @@
 #include "simrv/core/SoCDeviceRegistry.hpp"
 #include "simrv/device/DummyMmio.hpp"
 #include "simrv/device/PlatformDeviceRegistry.hpp"
-#include "simrv/device/RingBufferEthernetMmio.hpp"
 #include "simrv/device/ResetControlMmio.hpp"
+#include "simrv/device/RingBufferEthernetMmio.hpp"
 #include "simrv/isa/Base.hpp"
 #include "simrv/isa/Common.hpp"
 #include "simrv/memory/MmioDevice.hpp"
@@ -242,10 +242,9 @@ compatible = "acme,timer"
     const auto* net = parsed.find(simrv::core::SoCDeviceKind::VirtioMmioNet);
     TEST_CHECK(net != nullptr && net->name == "net1" && net->base == 0x20000000 &&
                net->size == 8192 && net->irq == 19);
-    TEST_CHECK(parsed.devices.size() == 11);
+    TEST_CHECK(parsed.devices.size() == 12);
     const auto watchdog = std::ranges::find_if(parsed.devices, [](const auto& device) {
-        return device.kind == simrv::core::SoCDeviceKind::DummyMmio &&
-               device.name == "watchdog";
+        return device.kind == simrv::core::SoCDeviceKind::DummyMmio && device.name == "watchdog";
     });
     const auto control = std::ranges::find_if(parsed.devices, [](const auto& device) {
         return device.kind == simrv::core::SoCDeviceKind::DummyMmio && device.name == "control";
@@ -274,6 +273,9 @@ void test_soc_manifest_export() {
     TEST_CHECK(text.find("\"name\": \"rvcomp\"") != std::string::npos);
     TEST_CHECK(text.find("\"manifest_version\": \"3.0\"") != std::string::npos);
     TEST_CHECK(text.find("\"generator\": \"simrv ") != std::string::npos);
+    TEST_CHECK(text.find("\"smp\": {") != std::string::npos);
+    TEST_CHECK(text.find("\"mode\": \"cycle-accurate\"") != std::string::npos);
+    TEST_CHECK(text.find("\"l3\": {\"enabled\": true") != std::string::npos);
     TEST_CHECK(text.find("\"device_policy\": \"explicit\"") != std::string::npos);
     TEST_CHECK(text.find("\"kind\": \"uart\"") != std::string::npos);
     TEST_CHECK(text.find("\"kind\": \"plic\"") != std::string::npos);
@@ -285,15 +287,20 @@ void test_soc_manifest_export() {
 
     auto custom_soc = simrv::core::SoCConfig::virt_mmio();
     custom_soc.disable_unlisted_devices = true;
-    custom_soc.devices = {{simrv::core::SoCDeviceKind::CustomMmio, "custom-timer",
-                           0x20003000, 0x1000, 0, true, {}, "acme,timer"}};
+    custom_soc.devices = {{simrv::core::SoCDeviceKind::CustomMmio,
+                           "custom-timer",
+                           0x20003000,
+                           0x1000,
+                           0,
+                           true,
+                           {},
+                           "acme,timer"}};
     custom_soc.devices.push_back(
         simrv::core::soc_device_default(simrv::core::SoCDeviceKind::ResetControl));
     std::ostringstream custom_manifest;
     TEST_CHECK(simrv::util::serialize_soc_manifest(custom_soc, custom_manifest));
     TEST_CHECK(custom_manifest.str().find("\"kind\": \"custom-mmio\"") != std::string::npos);
-    TEST_CHECK(custom_manifest.str().find("\"compatible\": \"acme,timer\"") !=
-               std::string::npos);
+    TEST_CHECK(custom_manifest.str().find("\"compatible\": \"acme,timer\"") != std::string::npos);
 
     simrv::core::MachineConfig machine_config{};
     machine_config.soc = custom_soc;
@@ -312,8 +319,8 @@ void test_soc_manifest_export() {
             return std::make_unique<TestCustomMmio>(config);
         }));
     TEST_CHECK(custom_machine.initialize().has_value());
-    auto* runtime_timer = custom_machine.memory().system_bus().router().find_by_name(
-        "custom-timer");
+    auto* runtime_timer =
+        custom_machine.memory().system_bus().router().find_by_name("custom-timer");
     TEST_CHECK(runtime_timer != nullptr && runtime_timer->base_address() == 0x20003000 &&
                runtime_timer->size() == 0x1000);
     auto* runtime_mmio = dynamic_cast<simrv::memory::MmioDevice*>(runtime_timer);
@@ -323,8 +330,8 @@ void test_soc_manifest_export() {
 
     simrv::core::Machine isolated_machine(machine_config);
     TEST_CHECK(isolated_machine.initialize().has_value());
-    auto* isolated_timer = isolated_machine.memory().system_bus().router().find_by_name(
-        "custom-timer");
+    auto* isolated_timer =
+        isolated_machine.memory().system_bus().router().find_by_name("custom-timer");
     auto* isolated_mmio = dynamic_cast<simrv::memory::MmioDevice*>(isolated_timer);
     TEST_CHECK(isolated_mmio != nullptr && isolated_mmio->read32(0) == 0);
     std::error_code ignored;
@@ -340,9 +347,8 @@ void test_rvcomp_reset_and_ethernet_extensions() {
     TEST_CHECK(machine.reboot_requested);
 
     simrv::device::RingBufferEthernetMmio ethernet(
-        machine, "ethernet", 0x14000000, 0x4000, 2, 0x18000000, 0x4000, 0x1c000000,
-        0x2000, {0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff},
-        simrv::device::NetworkBackend::Mode::User);
+        machine, "ethernet", 0x14000000, 0x4000, 2, 0x18000000, 0x4000, 0x1c000000, 0x2000,
+        {0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff}, simrv::device::NetworkBackend::Mode::User);
     auto* tx = static_cast<simrv::memory::MmioDevice*>(ethernet.tx_node());
     auto* csr = static_cast<simrv::memory::MmioDevice*>(ethernet.csr_node());
     auto* rx = static_cast<simrv::memory::MmioDevice*>(ethernet.rx_node());

@@ -22,8 +22,8 @@
 #include "simrv/pipeline/PipelineConfig.hpp"
 #include "simrv/tui/Tui.hpp"
 #include "simrv/tui/TuiMission.hpp"
-#include "simrv/util/FormatUtil.hpp"
 #include "simrv/util/BuildrootImageBundle.hpp"
+#include "simrv/util/FormatUtil.hpp"
 #include "simrv/xlen/Types.hpp"
 
 namespace simrv::util {
@@ -699,6 +699,7 @@ auto parse_mode_options(std::string_view arg, std::span<char* const> args, std::
                                                simrv::core::ExecutionConfig::kMaxHarts, *value));
         }
         result.options.num_harts = val;
+        result.options.explicit_num_harts = true;
         return true;
     }
     if (arg == "--smp-quantum") {
@@ -709,10 +710,21 @@ auto parse_mode_options(std::string_view arg, std::span<char* const> args, std::
             return std::unexpected(std::format("invalid quantum value for {}", arg));
         }
         result.options.smp_quantum = val;
+        result.options.explicit_smp_quantum = true;
         return true;
     }
-    if (arg == "--smp-multithreaded") {
-        result.options.smp_multithreaded = true;
+    if (arg == "--smp-mode") {
+        auto value = next_argument(args, i, arg);
+        if (!value) return std::unexpected(value.error());
+        if (*value == "cycle-accurate") {
+            result.options.smp_mode = simrv::core::SmpMode::CycleAccurate;
+        } else if (*value == "cycle-oriented") {
+            result.options.smp_mode = simrv::core::SmpMode::CycleOriented;
+        } else {
+            return std::unexpected(std::format(
+                "unsupported SMP mode '{}' (supported: cycle-accurate, cycle-oriented)", *value));
+        }
+        result.options.explicit_smp_mode = true;
         return true;
     }
     if (arg == "--ram-size" || arg == "--memory-size" || arg == "--dram-size" ||
@@ -1257,8 +1269,9 @@ auto parse_command_line(std::span<char* const> args) -> std::expected<ParseResul
     if (result.options.trace_register_writes && result.options.fn_archtrace.empty()) {
         return std::unexpected("--trace-register-writes requires --arch-trace");
     }
-    if (result.options.trace_hart && *result.options.trace_hart >= result.options.num_harts) {
-        return std::unexpected("--trace-hart must identify a configured hart");
+    if (result.options.trace_hart &&
+        *result.options.trace_hart >= simrv::core::ExecutionConfig::kMaxHarts) {
+        return std::unexpected("--trace-hart must identify a supported hart (0-15)");
     }
     if (result.options.trace_pc_start && result.options.trace_pc_end &&
         *result.options.trace_pc_start > *result.options.trace_pc_end) {
@@ -1317,7 +1330,6 @@ auto RuntimeOptions::to_machine_config() const -> simrv::core::MachineConfig {
     cfg.execution.memimg_cycle = memimg;
     cfg.execution.num_harts = num_harts;
     cfg.execution.smp_quantum = smp_quantum;
-    cfg.execution.smp_multithreaded = smp_multithreaded;
     if (explicit_realtime_mode) {
         cfg.execution.realtime_pacing = realtime_pacing;
     } else {
@@ -1419,6 +1431,14 @@ auto RuntimeOptions::to_machine_config() const -> simrv::core::MachineConfig {
             cfg.isa.isatest_tohost = *cfg.soc.tohost;
         }
     }
+    if (explicit_num_harts) cfg.soc.smp.resize_harts(num_harts);
+    cfg.execution.num_harts = cfg.soc.smp.hart_count;
+    cfg.execution.smp_mode =
+        explicit_smp_mode && smp_mode.has_value() ? smp_mode : cfg.soc.smp.mode;
+    if (explicit_smp_mode && smp_mode.has_value()) cfg.soc.smp.mode = *smp_mode;
+    cfg.execution.smp_quantum =
+        explicit_smp_quantum ? smp_quantum : cfg.soc.smp.synchronization_quantum;
+    if (explicit_smp_quantum) cfg.soc.smp.synchronization_quantum = smp_quantum;
     return cfg;
 }
 
@@ -1441,10 +1461,18 @@ auto apply_runtime_options(simrv::core::Machine* machine, const RuntimeOptions& 
         options.platform_profile == simrv::core::PlatformProfile::Pcie   ? "pcie"
         : options.platform_profile == simrv::core::PlatformProfile::Mmio ? "mmio"
                                                                          : "none";
-    simrv::log::info("Run configuration: RV{}, {}-mode, {} hart(s), {} platform, {} MiB RAM",
-                     machine->primary_hart().state().regs.xlen,
-                     options.appmode ? "bare-metal" : "OS", options.num_harts, platform_name,
-                     machine->configuration().memory.dram_size / (1024ULL * 1024ULL));
+    const auto& smp = machine->configuration().soc.smp;
+    const auto smp_mode =
+        smp.mode == simrv::core::SmpMode::CycleAccurate ? "cycle-accurate" : "cycle-oriented";
+    simrv::log::info(
+        "Run configuration: RV{}, {}-mode, {} hart(s), SMP {}, quantum {}, {} platform, {} MiB RAM",
+        machine->primary_hart().state().regs.xlen, options.appmode ? "bare-metal" : "OS",
+        smp.hart_count, smp_mode, smp.synchronization_quantum, platform_name,
+        machine->configuration().memory.dram_size / (1024ULL * 1024ULL));
+    simrv::log::info(
+        "Shared caches: L1 private per hart, L2 {} cluster(s), L3 {} ({} KiB)",
+        std::ranges::count_if(smp.clusters, [](const auto& cluster) { return cluster.l2.enabled; }),
+        smp.l3.enabled ? "enabled" : "disabled", smp.l3.capacity_bytes / 1024);
     simrv::log::info("Guest image: {}", options.fn_memimg.empty() ? "<none>" : options.fn_memimg);
     if (machine->runtime_profile.is_cycle_mode()) {
         simrv::log::info("CA policy: {} pipeline, forwarding {}",
@@ -1453,9 +1481,9 @@ auto apply_runtime_options(simrv::core::Machine* machine, const RuntimeOptions& 
     }
     if (!options.fn_log.empty()) simrv::log::info("Developer log: {}", options.fn_log);
     if (options.verbose) {
-        simrv::log::info("Runtime settings: harts={}, SMP threads={}, quantum={}, GDB={}, port={}",
-                         options.num_harts, options.smp_multithreaded, options.smp_quantum,
-                         options.gdb_mode, options.gdb_port);
+        simrv::log::info("Runtime settings: harts={}, SMP mode={}, quantum={}, GDB={}, port={}",
+                         machine->configuration().execution.num_harts, smp_mode,
+                         smp.synchronization_quantum, options.gdb_mode, options.gdb_port);
     }
     if (options.traplog_mode) simrv::log::info("Trap/SBI log: {}", options.fn_traplog);
 
@@ -1562,9 +1590,9 @@ auto needs_memory_image(const ParseResult& result) -> bool {
           {"--virtiofs <DIR>", "Share a host directory with the guest through VirtIO-FS."},
           {"-f, --fdt, --dtb <FILE>", "Load a device tree blob."}}},
         {"Architecture and hardware",
-         {{"-j, --harts, --smp <N>", "Set active harts (1–16; SMP uses 2–16)."},
-          {"--smp-quantum <N>", "Set the round-robin quantum in cycles (default: 100)."},
-          {"--smp-multithreaded", "Enable multi-threaded host SMP simulation."},
+         {{"-j, --harts, --smp <N>", "Override the SoC profile hart count (1–16)."},
+          {"--smp-mode <MODE>", "Override SoC mode: cycle-accurate or cycle-oriented."},
+          {"--smp-quantum <N>", "Override cycle-oriented synchronization quantum."},
           {"--dram-size, --ram-size <SIZE>", "Set DRAM size (for example, 128M or 2G)."},
           {"--isa <ISA>", "Select a RISC-V ISA profile such as rv32gc or rv64gc."},
           {"--vlen <BITS>", "Set vector register length (128–1024; default: 256)."},
@@ -1626,7 +1654,8 @@ auto needs_memory_image(const ParseResult& result) -> bool {
           {"--inspection-output <FILE>", "Write paused-state TUI inspection reports."},
           {"--summary <FILE>", "Write a JSON execution summary on exit."},
           {"--events <FILE>", "Write newline-delimited lifecycle, interrupt, and DMA events."},
-          {"--uart-transcript <FILE>", "Save guest UART output while keeping its normal destination."},
+          {"--uart-transcript <FILE>",
+           "Save guest UART output while keeping its normal destination."},
           {"--save-checkpoint <FILE>", "Save architectural state on exit."},
           {"--load-checkpoint <FILE>", "Resume from an architectural checkpoint."},
           {"--checkpoint-every <CYCLES>", "Write periodic architectural checkpoints."},
@@ -1699,10 +1728,10 @@ auto needs_memory_image(const ParseResult& result) -> bool {
                style(kBold), style(kReset));
     std::print(stdout, "{}Examples{}\n", style(kBoldFgBrightBlue), style(kReset));
     std::print(stdout, "  {} -m img/hello.bin -b\n", executable);
-    std::print(
-        stdout,
-        "  {} --os --image linux/opensbi-linux-payload.elf --disk linux/rootfs.img --dtb linux/devicetree.dtb\n",
-        executable);
+    std::print(stdout,
+               "  {} --os --image linux/opensbi-linux-payload.elf --disk linux/rootfs.img --dtb "
+               "linux/devicetree.dtb\n",
+               executable);
     std::print(stdout, "  {} -m linux/opensbi-linux-payload.elf --tui\n", executable);
 
     std::exit(status);

@@ -25,9 +25,10 @@ struct alignas(32) TLBEntry {
     Asid asid{};                                 ///< Address Space Identifier (2 bytes)
     PrivilegeLevel priv = PrivilegeLevel::User;  ///< Architectural privilege level (1 byte)
     bool valid{false};                           ///< Entry validity flag (1 byte)
+    bool global{false};                          ///< Global page mapping flag (1 byte)
     // Padding to reach 32-byte alignment. Size depends on Word width.
     static constexpr size_t kPadding =
-        32 - 2 * sizeof(Address) - sizeof(Asid) - sizeof(PrivilegeLevel) - sizeof(bool);
+        32 - 2 * sizeof(Address) - sizeof(Asid) - sizeof(PrivilegeLevel) - 2 * sizeof(bool);
     std::array<uint8_t, kPadding> padding{};
 };
 
@@ -113,12 +114,13 @@ class Tlb {
         const Address vpage = calc_vpage(vaddr);
         auto& set_entries = table[set];
         if (simrv::compiler::likely(set_entries[0].valid && set_entries[0].v_addr == vpage &&
-                                    set_entries[0].asid == asid && set_entries[0].priv == priv)) {
+                                    (set_entries[0].global || set_entries[0].asid == asid) &&
+                                    set_entries[0].priv == priv)) {
             lru[set] = 1;
             return &set_entries[0];
         }
-        if (set_entries[1].valid && set_entries[1].v_addr == vpage && set_entries[1].asid == asid &&
-            set_entries[1].priv == priv) {
+        if (set_entries[1].valid && set_entries[1].v_addr == vpage &&
+            (set_entries[1].global || set_entries[1].asid == asid) && set_entries[1].priv == priv) {
             lru[set] = 0;
             return &set_entries[1];
         }
@@ -153,10 +155,12 @@ class Tlb {
      * @param paddr Physical address.
      * @param asid Address Space Identifier.
      * @param priv Privilege level.
+     * @param global Global page flag.
      * @return Pointer to newly inserted TLBEntry.
      */
     template <TlbAccessKind Kind>
-    inline auto insert(Address vaddr, Address paddr, Asid asid, PrivilegeLevel priv) -> TLBEntry* {
+    inline auto insert(Address vaddr, Address paddr, Asid asid, PrivilegeLevel priv,
+                       bool global = false) -> TLBEntry* {
         auto& table = select_table_static<Kind>();
         auto& lru = select_lru_static<Kind>();
         const auto set = calc_set(vaddr);
@@ -164,15 +168,21 @@ class Tlb {
         const Address ppage = paddr & ~simrv::memory::kPageMask;
         auto& set_entries = table[set];
 
-        if (set_entries[0].valid && set_entries[0].v_addr == vpage && set_entries[0].asid == asid &&
+        if (set_entries[0].valid && set_entries[0].v_addr == vpage &&
+            (global ? set_entries[0].global
+                    : (!set_entries[0].global && set_entries[0].asid == asid)) &&
             set_entries[0].priv == priv) {
             set_entries[0].p_addr = ppage;
+            set_entries[0].global = global;
             lru[set] = 1;
             return &set_entries[0];
         }
-        if (set_entries[1].valid && set_entries[1].v_addr == vpage && set_entries[1].asid == asid &&
+        if (set_entries[1].valid && set_entries[1].v_addr == vpage &&
+            (global ? set_entries[1].global
+                    : (!set_entries[1].global && set_entries[1].asid == asid)) &&
             set_entries[1].priv == priv) {
             set_entries[1].p_addr = ppage;
+            set_entries[1].global = global;
             lru[set] = 0;
             return &set_entries[1];
         }
@@ -183,6 +193,7 @@ class Tlb {
         entry.p_addr = ppage;
         entry.asid = asid;
         entry.priv = priv;
+        entry.global = global;
         entry.valid = true;
         lru[set] = 1 - way;
         return &entry;
@@ -195,17 +206,18 @@ class Tlb {
      * @param paddr Physical address.
      * @param asid Address Space Identifier.
      * @param priv Privilege level.
+     * @param global Global page flag.
      * @return Pointer to newly inserted TLBEntry.
      */
     inline auto insert(TlbAccessKind kind, Address vaddr, Address paddr, Asid asid,
-                       PrivilegeLevel priv) -> TLBEntry* {
+                       PrivilegeLevel priv, bool global = false) -> TLBEntry* {
         switch (kind) {
             case TlbAccessKind::Instruction:
-                return insert<TlbAccessKind::Instruction>(vaddr, paddr, asid, priv);
+                return insert<TlbAccessKind::Instruction>(vaddr, paddr, asid, priv, global);
             case TlbAccessKind::DataRead:
-                return insert<TlbAccessKind::DataRead>(vaddr, paddr, asid, priv);
+                return insert<TlbAccessKind::DataRead>(vaddr, paddr, asid, priv, global);
             case TlbAccessKind::DataWrite:
-                return insert<TlbAccessKind::DataWrite>(vaddr, paddr, asid, priv);
+                return insert<TlbAccessKind::DataWrite>(vaddr, paddr, asid, priv, global);
         }
         std::unreachable();
     }
@@ -218,7 +230,8 @@ class Tlb {
         const auto set = calc_set(vaddr);
         const Address vpage = calc_vpage(vaddr);
         for (const auto& entry : table[set]) {
-            if (entry.valid && entry.asid == asid && entry.v_addr == vpage && entry.priv == priv) {
+            if (entry.valid && (entry.global || entry.asid == asid) && entry.v_addr == vpage &&
+                entry.priv == priv) {
                 return &entry;
             }
         }
@@ -253,9 +266,9 @@ class Tlb {
         return lookup<TlbAccessKind::Instruction>(vaddr, asid, priv);
     }
 
-    inline auto insert_inst_r(Address vaddr, Address paddr, Asid asid, PrivilegeLevel priv)
-        -> TLBEntry* {
-        return insert<TlbAccessKind::Instruction>(vaddr, paddr, asid, priv);
+    inline auto insert_inst_r(Address vaddr, Address paddr, Asid asid, PrivilegeLevel priv,
+                              bool global = false) -> TLBEntry* {
+        return insert<TlbAccessKind::Instruction>(vaddr, paddr, asid, priv, global);
     }
 
     [[nodiscard]] inline auto lookup_data_r(Address vaddr, Asid asid, PrivilegeLevel priv)
@@ -263,9 +276,9 @@ class Tlb {
         return lookup<TlbAccessKind::DataRead>(vaddr, asid, priv);
     }
 
-    inline auto insert_data_r(Address vaddr, Address paddr, Asid asid, PrivilegeLevel priv)
-        -> TLBEntry* {
-        return insert<TlbAccessKind::DataRead>(vaddr, paddr, asid, priv);
+    inline auto insert_data_r(Address vaddr, Address paddr, Asid asid, PrivilegeLevel priv,
+                              bool global = false) -> TLBEntry* {
+        return insert<TlbAccessKind::DataRead>(vaddr, paddr, asid, priv, global);
     }
 
     [[nodiscard]] inline auto lookup_data_w(Address vaddr, Asid asid, PrivilegeLevel priv)
@@ -273,9 +286,9 @@ class Tlb {
         return lookup<TlbAccessKind::DataWrite>(vaddr, asid, priv);
     }
 
-    inline auto insert_data_w(Address vaddr, Address paddr, Asid asid, PrivilegeLevel priv)
-        -> TLBEntry* {
-        return insert<TlbAccessKind::DataWrite>(vaddr, paddr, asid, priv);
+    inline auto insert_data_w(Address vaddr, Address paddr, Asid asid, PrivilegeLevel priv,
+                              bool global = false) -> TLBEntry* {
+        return insert<TlbAccessKind::DataWrite>(vaddr, paddr, asid, priv, global);
     }
 
    private:
