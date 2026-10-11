@@ -9,6 +9,7 @@
 
 #include "simrv/isa/VectorTypes.hpp"
 #include "simrv/xlen/RegisterTypes.hpp"
+#include "simrv/xlen/ScalarTypes.hpp"
 
 namespace simrv::core {
 

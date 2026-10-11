@@ -7,8 +7,6 @@
 #include <concepts>
 #include <cstdint>
 
-#include "simrv/xlen/ScalarTypes.hpp"
-
 namespace simrv::xlen {
 
 enum class RegId : uint8_t {
