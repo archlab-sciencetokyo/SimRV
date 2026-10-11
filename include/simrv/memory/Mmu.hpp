@@ -11,7 +11,6 @@
 
 #include "simrv/memory/PageTableWalker.hpp"
 #include "simrv/memory/RamView.hpp"
-#include "simrv/xlen/Constants.hpp"
 #include "simrv/xlen/Types.hpp"
 
 namespace simrv::core {

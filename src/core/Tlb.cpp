@@ -7,7 +7,6 @@
 #include <algorithm>
 
 #include "simrv/memory/MemoryUtil.hpp"
-#include "simrv/xlen/Constants.hpp"
 
 namespace simrv::core {
 

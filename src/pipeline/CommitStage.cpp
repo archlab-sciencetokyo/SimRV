@@ -11,7 +11,6 @@
 #include "simrv/core/Tracer.hpp"
 #include "simrv/isa/Priv.hpp"
 #include "simrv/pipeline/RetirementEffects.hpp"
-#include "simrv/xlen/Constants.hpp"
 #include "simrv/xlen/Helpers.hpp"
 #include "simrv/xlen/Types.hpp"
 

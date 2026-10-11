@@ -11,7 +11,6 @@
 #include "simrv/isa/Priv.hpp"
 #include "simrv/pipeline/Decoder.hpp"
 #include "simrv/pipeline/OperationTraits.hpp"
-#include "simrv/xlen/Constants.hpp"
 #include "simrv/xlen/Helpers.hpp"
 #include "simrv/xlen/Types.hpp"
 

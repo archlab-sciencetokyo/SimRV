@@ -12,7 +12,6 @@
 #include "simrv/CompilerHints.hpp"
 #include "simrv/core/Machine.hpp"
 #include "simrv/core/Tracer.hpp"
-#include "simrv/xlen/Constants.hpp"
 
 namespace simrv::core {
 CPU::CPU() : plic_mmio(*this), clint_mmio(*this), csr_file(*this), sbi(*this) { reset(); }

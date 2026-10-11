@@ -4,6 +4,7 @@
 #include "simrv/CompilerHints.hpp"
 #include "simrv/execute/ExecuteUnit.hpp"
 #include "simrv/isa/TrapTypes.hpp"
+#include "simrv/xlen/Constants.hpp"
 #include "simrv/xlen/Math.hpp"
 
 namespace simrv::execute {

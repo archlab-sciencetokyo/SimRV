@@ -16,7 +16,6 @@
 #include "simrv/core/TelemetrySink.hpp"
 #include "simrv/core/Tracer.hpp"
 #include "simrv/isa/Priv.hpp"
-#include "simrv/xlen/Constants.hpp"
 #include "simrv/xlen/Helpers.hpp"
 #include "simrv/xlen/Types.hpp"
 

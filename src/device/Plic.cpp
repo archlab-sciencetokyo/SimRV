@@ -10,7 +10,6 @@
 #include "simrv/core/Cpu.hpp"
 #include "simrv/core/Machine.hpp"
 #include "simrv/device/Uart.hpp"
-#include "simrv/xlen/Constants.hpp"
 #include "simrv/xlen/Types.hpp"
 
 namespace simrv::device {

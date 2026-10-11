@@ -8,7 +8,6 @@
 #include <span>
 
 #include "simrv/core/BuildConfig.hpp"
-#include "simrv/xlen/Constants.hpp"
 #include "simrv/xlen/Types.hpp"
 
 namespace simrv::memory {

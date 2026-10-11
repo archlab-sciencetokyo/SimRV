@@ -4,7 +4,6 @@
  */
 #pragma once
 
-#include "simrv/xlen/Constants.hpp"
 #include "simrv/xlen/Types.hpp"
 
 namespace simrv::core {
@@ -229,7 +228,7 @@ constexpr simrv::xlen::CSRValue kMstatusSd =
 /** sstatus fields implemented without the obsolete N-extension UIE/UPIE aliases. */
 constexpr simrv::xlen::CSRValue kMstatusSstatusReadMask = kSstatusMask | kMstatusSd;
 constexpr simrv::xlen::CSRValue kMstatusReadMask =
-    static_cast<simrv::xlen::CSRValue>(simrv::xlen::kXLenMask);
+    ~simrv::xlen::CSRValue{0};
 /**
  * Exception-delegation bits implemented by SimRV: causes 0-8, 12, 13, and 15.
  * S/M ECALL, reserved, hypervisor, and double-trap causes are read-only zero;

@@ -16,7 +16,6 @@
 #include "simrv/CompilerHints.hpp"
 #include "simrv/isa/Base.hpp"
 #include "simrv/memory/RamView.hpp"
-#include "simrv/xlen/Constants.hpp"
 #include "simrv/xlen/Types.hpp"
 
 namespace simrv::memory {
@@ -104,7 +103,7 @@ constexpr auto store_width_bytes(isa::Funct3 funct3) -> size_t {
             }
         }
     }
-    return static_cast<simrv::xlen::Word>(raw_data & simrv::xlen::kXLenMask);
+    return raw_data;
 }
 
 /// Extend raw memory read data according to typed RISC-V load funct3 rules.

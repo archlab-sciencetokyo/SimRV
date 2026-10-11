@@ -8,7 +8,6 @@
 #include <string>
 
 #include "simrv/isa/TrapTypes.hpp"
-#include "simrv/xlen/Constants.hpp"
 #include "simrv/xlen/Types.hpp"
 
 namespace simrv::core {

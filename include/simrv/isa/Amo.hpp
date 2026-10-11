@@ -9,7 +9,6 @@
 #include <utility>
 
 #include "simrv/isa/Base.hpp"
-#include "simrv/xlen/Constants.hpp"
 #include "simrv/xlen/Types.hpp"
 
 namespace simrv::isa {
