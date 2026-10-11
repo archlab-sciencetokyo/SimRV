@@ -26,6 +26,7 @@
 #include "simrv/pipeline/Decoder.hpp"
 #include "simrv/util/FdtGenerator.hpp"
 #include "simrv/xlen/Format.hpp"
+#include "simrv/xlen/Hash.hpp"
 
 namespace {
 

@@ -8,7 +8,6 @@
 #include <concepts>
 #include <cstddef>
 #include <cstdint>
-#include <functional>
 #include <type_traits>
 #include <utility>
 
@@ -537,32 +536,3 @@ concept RegisterIdentifier =
     std::same_as<T, RegId> || std::same_as<T, FpRegId> || std::same_as<T, VecRegId>;
 
 }  // namespace simrv::xlen
-
-// Specializations for std::hash
-template <>
-struct std::hash<simrv::xlen::PhysAddr> {
-    constexpr auto operator()(simrv::xlen::PhysAddr addr) const noexcept -> size_t {
-        return std::hash<simrv::xlen::Word>{}(addr.val);
-    }
-};
-
-template <>
-struct std::hash<simrv::xlen::VirtAddr> {
-    constexpr auto operator()(simrv::xlen::VirtAddr addr) const noexcept -> size_t {
-        return std::hash<simrv::xlen::Word>{}(addr.val);
-    }
-};
-
-template <>
-struct std::hash<simrv::xlen::HartId> {
-    constexpr auto operator()(simrv::xlen::HartId id) const noexcept -> size_t {
-        return std::hash<uint32_t>{}(id.val);
-    }
-};
-
-template <>
-struct std::hash<simrv::xlen::CsrNumber> {
-    constexpr auto operator()(simrv::xlen::CsrNumber csr) const noexcept -> size_t {
-        return std::hash<uint16_t>{}(csr.val);
-    }
-};
