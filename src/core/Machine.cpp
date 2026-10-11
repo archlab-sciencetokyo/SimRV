@@ -65,9 +65,9 @@ static_assert(std::is_trivially_copyable_v<ArchState>);
 
 struct CheckpointHart {
     ArchState state{};
-    Counter instruction_count{};
-    Counter cycle_count{};
-    Counter mcycle{};
+    simrv::xlen::Counter instruction_count{};
+    simrv::xlen::Counter cycle_count{};
+    simrv::xlen::Counter mcycle{};
 };
 
 static_assert(std::is_trivially_copyable_v<CheckpointHart>);
@@ -201,8 +201,8 @@ void Machine::apply_configuration(MachineConfig machine_config) {
     }
 }
 
-void Machine::set_resolved_boot_state(Address start_pc,
-                                      std::optional<Address> tohost_address) noexcept {
+void Machine::set_resolved_boot_state(simrv::xlen::Address start_pc,
+                                      std::optional<simrv::xlen::Address> tohost_address) noexcept {
     resolved_start_pc_ = start_pc;
     if (tohost_address.has_value()) resolved_isatest_tohost_ = *tohost_address;
 }
@@ -227,13 +227,13 @@ auto Machine::allocate_ram(size_t bytes) -> bool { return runtime_->ram.allocate
 
 void Machine::release_ram() noexcept { runtime_->ram.reset(); }
 
-void Machine::set_ram_for_testing(Byte* ram, size_t size) noexcept {
+void Machine::set_ram_for_testing(simrv::xlen::Byte* ram, size_t size) noexcept {
     runtime_->ram.reset();
     runtime_->ram.mutable_data_ref() = ram;
-    config.memory.dram_size = static_cast<Address>(size);
+    config.memory.dram_size = static_cast<simrv::xlen::Address>(size);
 }
 
-auto Machine::mutable_ram_data_for_testing() noexcept -> Byte*& {
+auto Machine::mutable_ram_data_for_testing() noexcept -> simrv::xlen::Byte*& {
     return runtime_->ram.mutable_data_ref();
 }
 
@@ -268,17 +268,17 @@ auto Machine::primary_hart() noexcept -> CPU& { return runtime_->primary_cpu; }
 
 auto Machine::primary_hart() const noexcept -> const CPU& { return runtime_->primary_cpu; }
 
-auto Machine::ram_data() noexcept -> Byte* { return runtime_->ram.data(); }
+auto Machine::ram_data() noexcept -> simrv::xlen::Byte* { return runtime_->ram.data(); }
 
-auto Machine::ram_data() const noexcept -> const Byte* { return runtime_->ram.data(); }
+auto Machine::ram_data() const noexcept -> const simrv::xlen::Byte* { return runtime_->ram.data(); }
 
 auto Machine::ram_view() const noexcept -> simrv::memory::RamView {
     return {runtime_->ram.data(), config.memory.dram_base, config.memory.dram_size};
 }
 
 auto Machine::framebuffer_view() const noexcept -> simrv::memory::RamView {
-    constexpr Address base = 0x84000000ULL;
-    constexpr Address size = 640ULL * 480ULL * 4ULL;
+    constexpr simrv::xlen::Address base = 0x84000000ULL;
+    constexpr simrv::xlen::Address size = 640ULL * 480ULL * 4ULL;
     const auto ram = ram_view();
     if (!ram.contains(base, static_cast<std::size_t>(size))) return {};
     return {ram.unchecked_ptr(base), base, size};
@@ -295,7 +295,7 @@ auto Machine::save_checkpoint(const std::string& filepath) const
 
     const CheckpointHeader header{.header_size = sizeof(CheckpointHeader),
                                   .arch_state_size = sizeof(ArchState),
-                                  .counter_size = sizeof(Counter),
+                                  .counter_size = sizeof(simrv::xlen::Counter),
                                   .xlen = simrv::xlen::kXLenBits,
                                   .vlen = config.isa.vlen,
                                   .harts = static_cast<uint32_t>(num_harts()),
@@ -325,7 +325,8 @@ auto Machine::load_checkpoint(const std::string& filepath) -> std::expected<void
     if (!in || std::memcmp(header.magic, expected.magic, sizeof(header.magic)) != 0 ||
         header.version != 2 || header.endian_marker != 0x01020304 ||
         header.header_size != sizeof(CheckpointHeader) ||
-        header.arch_state_size != sizeof(ArchState) || header.counter_size != sizeof(Counter)) {
+        header.arch_state_size != sizeof(ArchState) ||
+        header.counter_size != sizeof(simrv::xlen::Counter)) {
         return std::unexpected("unsupported or corrupt checkpoint header");
     }
     if (header.xlen != simrv::xlen::kXLenBits || header.vlen != config.isa.vlen ||
@@ -342,7 +343,7 @@ auto Machine::load_checkpoint(const std::string& filepath) -> std::expected<void
     if (ram.data() == nullptr || ram.size() == 0) {
         return std::unexpected("cannot load checkpoint without allocated RAM");
     }
-    std::vector<Byte> ram_image(ram.size());
+    std::vector<simrv::xlen::Byte> ram_image(ram.size());
     in.read(reinterpret_cast<char*>(ram_image.data()),
             static_cast<std::streamsize>(ram_image.size()));
     if (!in) return std::unexpected("truncated checkpoint RAM image");
@@ -410,9 +411,9 @@ void Machine::maybe_save_periodic_checkpoint() {
                     "{{\"hart\":{},\"pc\":\"0x{:x}\","
                     "\"privilege\":\"{}\",\"pending_interrupts\":\"0x{:x}\"}}",
                     h, static_cast<uint64_t>(hart(h).state().pc),
-                    hart(h).state().priv == PrivilegeLevel::User         ? "U"
-                    : hart(h).state().priv == PrivilegeLevel::Supervisor ? "S"
-                                                                         : "M",
+                    hart(h).state().priv == simrv::xlen::PrivilegeLevel::User         ? "U"
+                    : hart(h).state().priv == simrv::xlen::PrivilegeLevel::Supervisor ? "S"
+                                                                                      : "M",
                     static_cast<uint64_t>(hart(h).state().mip));
             }
             metadata << "],\"device_state_included\":false,\"trace_sequence\":null,"
@@ -428,8 +429,8 @@ void Machine::maybe_save_periodic_checkpoint() {
     }
 
     do {
-        if (next_checkpoint_cycle_ > std::numeric_limits<Counter>::max() - interval) {
-            next_checkpoint_cycle_ = std::numeric_limits<Counter>::max();
+        if (next_checkpoint_cycle_ > std::numeric_limits<simrv::xlen::Counter>::max() - interval) {
+            next_checkpoint_cycle_ = std::numeric_limits<simrv::xlen::Counter>::max();
             break;
         }
         next_checkpoint_cycle_ += interval;
@@ -441,7 +442,7 @@ void Machine::maybe_save_periodic_checkpoint() {
     }
 }
 
-void Machine::set_platform_irq(IrqNumber irq, bool asserted) {
+void Machine::set_platform_irq(simrv::xlen::IrqNumber irq, bool asserted) {
     runtime_->primary_cpu.plic_set_irq(irq, asserted);
     bool changed = false;
     {
@@ -461,17 +462,18 @@ void Machine::set_platform_irq(IrqNumber irq, bool asserted) {
     }
 }
 
-void Machine::set_hart_irq(HartId hart_id, InterruptType type, PrivilegeLevel priv, bool asserted) {
+void Machine::set_hart_irq(simrv::xlen::HartId hart_id, InterruptType type,
+                           simrv::xlen::PrivilegeLevel priv, bool asserted) {
     if (hart_id.val >= num_harts()) {
         return;
     }
     MipBit pending_bit = MipBit::Msip;
     if (type == InterruptType::Software) {
-        pending_bit = priv == PrivilegeLevel::Supervisor ? MipBit::Ssip : MipBit::Msip;
+        pending_bit = priv == simrv::xlen::PrivilegeLevel::Supervisor ? MipBit::Ssip : MipBit::Msip;
     } else if (type == InterruptType::Timer) {
-        pending_bit = priv == PrivilegeLevel::Supervisor ? MipBit::Stip : MipBit::Mtip;
+        pending_bit = priv == simrv::xlen::PrivilegeLevel::Supervisor ? MipBit::Stip : MipBit::Mtip;
     } else if (type == InterruptType::External) {
-        pending_bit = priv == PrivilegeLevel::Supervisor ? MipBit::Seip : MipBit::Meip;
+        pending_bit = priv == simrv::xlen::PrivilegeLevel::Supervisor ? MipBit::Seip : MipBit::Meip;
     }
     auto& target_hart = hart(hart_id);
     target_hart.queue_interrupt_line(pending_bit, asserted);
@@ -758,7 +760,7 @@ void Machine::service_control_commands() {
 bool Machine::sampled_instruction_execution() const {
     return runtime_profile.allows_fast_batch() && !is_stepping() && !lockstep_enabled() &&
            !debugger_enabled() && !branch_trace_enabled() && config.execution.strace == 0 &&
-           config.execution.trace_begin == std::numeric_limits<Counter>::max() &&
+           config.execution.trace_begin == std::numeric_limits<simrv::xlen::Counter>::max() &&
            !breakpoint_manager().has_any() &&
            (!telemetry_sink_ || (!telemetry_sink_->captures_execution_detail() &&
                                  telemetry_sink_->step_delay_us() == 0));
@@ -784,7 +786,8 @@ auto Machine::fast_batch_policy() const -> std::optional<FastBatchPolicy> {
         .copy_pipeline_context = captures_execution_detail,
         .collect_instruction_mix = instruction_mix_enabled() || captures_execution_detail,
         .poll_pause = true,
-        .has_instruction_limit = config.execution.fincnt != std::numeric_limits<Counter>::max(),
+        .has_instruction_limit =
+            config.execution.fincnt != std::numeric_limits<simrv::xlen::Counter>::max(),
     };
 }
 
@@ -792,7 +795,7 @@ auto Machine::ca_batch_quantum() const noexcept -> uint32_t {
     if (!runtime_profile.is_cycle_mode() || is_smp_enabled() || is_stepping() ||
         debugger_enabled() || lockstep_enabled() || branch_trace_enabled() ||
         config.execution.strace != 0 ||
-        config.execution.trace_begin != std::numeric_limits<Counter>::max() ||
+        config.execution.trace_begin != std::numeric_limits<simrv::xlen::Counter>::max() ||
         breakpoint_manager().has_any()) {
         return 1;
     }
@@ -804,7 +807,7 @@ auto Machine::ca_batch_quantum() const noexcept -> uint32_t {
     if (config.debug.checkpoint_every != 0 &&
         primary_hart().clint_mmio.mcycle < next_checkpoint_cycle_) {
         const auto cycles_remaining = next_checkpoint_cycle_ - primary_hart().clint_mmio.mcycle;
-        quantum = static_cast<uint32_t>(std::min<Counter>(quantum, cycles_remaining));
+        quantum = static_cast<uint32_t>(std::min<simrv::xlen::Counter>(quantum, cycles_remaining));
     }
     return quantum;
 }
@@ -939,7 +942,8 @@ void RunnerBase::execute_ca_batch(Machine& machine) {
         auto quantum = std::max(1U, machine.config.execution.smp_quantum);
         if (machine.debugger_enabled() || machine.lockstep_enabled() ||
             machine.branch_trace_enabled() || machine.config.execution.strace != 0 ||
-            machine.config.execution.trace_begin != std::numeric_limits<Counter>::max() ||
+            machine.config.execution.trace_begin !=
+                std::numeric_limits<simrv::xlen::Counter>::max() ||
             (machine.tui_enabled() && machine.telemetry_sink_ &&
              (machine.telemetry_sink_->is_trace_active() ||
               machine.telemetry_sink_->step_delay_us() != 0))) {
@@ -949,14 +953,14 @@ void RunnerBase::execute_ca_batch(Machine& machine) {
             machine.primary_hart().clint_mmio.mcycle < machine.next_checkpoint_cycle_) {
             const auto cycles_remaining =
                 machine.next_checkpoint_cycle_ - machine.primary_hart().clint_mmio.mcycle;
-            quantum = static_cast<uint32_t>(
-                std::min<Counter>(quantum, std::max<Counter>(1, cycles_remaining)));
+            quantum = static_cast<uint32_t>(std::min<simrv::xlen::Counter>(
+                quantum, std::max<simrv::xlen::Counter>(1, cycles_remaining)));
         }
         const auto fincnt = machine.config.execution.fincnt;
         for (uint32_t cycle = 0; cycle < quantum && machine.is_running(); ++cycle) {
             machine.advance_ca_primary_cycle();
             if (machine.execution_state() != ExecutionState::Running || machine.tohost != 0 ||
-                (fincnt != std::numeric_limits<Counter>::max() &&
+                (fincnt != std::numeric_limits<simrv::xlen::Counter>::max() &&
                  machine.retired_instruction_count() >= fincnt)) {
                 break;
             }
@@ -972,7 +976,7 @@ void RunnerBase::execute_ca_batch(Machine& machine) {
         }
         machine.advance_ca_global_cycle();
         if (simrv::compiler::unlikely(machine.tohost != 0 ||
-                                      (fincnt != std::numeric_limits<Counter>::max() &&
+                                      (fincnt != std::numeric_limits<simrv::xlen::Counter>::max() &&
                                        machine.retired_instruction_count() >= fincnt))) {
             break;
         }
@@ -1035,7 +1039,7 @@ auto BaremetalRunner::execute_fast_batch(Machine& machine, uint32_t batch_size) 
             machine.stop(Machine::StopReason::InstructionLimit);
             return true;
         }
-        batch_size = static_cast<uint32_t>(std::min<Counter>(
+        batch_size = static_cast<uint32_t>(std::min<simrv::xlen::Counter>(
             batch_size, machine.config.execution.fincnt - machine.retired_instruction_count()));
     }
     const uint32_t quantum =
@@ -1052,7 +1056,7 @@ auto BaremetalRunner::execute_fast_batch(Machine& machine, uint32_t batch_size) 
                     machine.stop(Machine::StopReason::InstructionLimit);
                     break;
                 }
-                sec_batch = static_cast<uint32_t>(std::min<Counter>(
+                sec_batch = static_cast<uint32_t>(std::min<simrv::xlen::Counter>(
                     sec_batch,
                     machine.config.execution.fincnt - machine.retired_instruction_count()));
             }
@@ -1068,7 +1072,7 @@ void BaremetalRunner::finalize(Machine& machine) {
     }
     if (simrv::compiler::unlikely(machine.tohost != 0)) machine.finalize_cycle_tohost();
     if (simrv::compiler::unlikely(
-            machine.config.execution.fincnt != std::numeric_limits<Counter>::max() &&
+            machine.config.execution.fincnt != std::numeric_limits<simrv::xlen::Counter>::max() &&
             machine.retired_instruction_count() >= machine.config.execution.fincnt)) {
         simrv::log::info("finished by -e option");
         machine.stop(Machine::StopReason::InstructionLimit);
@@ -1122,7 +1126,7 @@ auto OsRunner::execute_fast_batch(Machine& machine, uint32_t batch_size) -> bool
             machine.stop(Machine::StopReason::InstructionLimit);
             return true;
         }
-        batch_size = static_cast<uint32_t>(std::min<Counter>(
+        batch_size = static_cast<uint32_t>(std::min<simrv::xlen::Counter>(
             batch_size, machine.config.execution.fincnt - machine.retired_instruction_count()));
     }
     const uint32_t quantum =
@@ -1162,7 +1166,7 @@ void OsRunner::finalize(Machine& machine) {
         machine.finalize_cycle_tohost();
     }
     if (simrv::compiler::unlikely(
-            machine.config.execution.fincnt != std::numeric_limits<Counter>::max() &&
+            machine.config.execution.fincnt != std::numeric_limits<simrv::xlen::Counter>::max() &&
             machine.retired_instruction_count() >= machine.config.execution.fincnt)) {
         simrv::log::info("finished by -e option");
         machine.stop(Machine::StopReason::InstructionLimit);
@@ -1229,7 +1233,7 @@ void Machine::switch_execution_engine_sync(ExecutionEngine engine) {
     const bool to_cycle = is_cycle_engine(engine);
     for (size_t i = 0; i < num_harts(); ++i) {
         auto& cpu = hart(i);
-        const auto hart_id = static_cast<HartId>(cpu.state().mhartid);
+        const auto hart_id = static_cast<simrv::xlen::HartId>(cpu.state().mhartid);
         memory().system_bus().cancel_source(
             simrv::memory::make_tl_source(hart_id, simrv::memory::TlPort::Instruction));
         memory().system_bus().cancel_source(
@@ -1273,28 +1277,30 @@ void Machine::prewarm_bram_caches() {
         if (!loaded_segments_.empty()) {
             for (const auto& seg : loaded_segments_) {
                 if (seg.is_executable) {
-                    constexpr Address kLineBytes = simrv::cache::ICache::kLineBytes;
-                    const Address start = seg.paddr & ~(kLineBytes - 1u);
-                    Address end = (seg.paddr + seg.size + kLineBytes - 1u) & ~(kLineBytes - 1u);
+                    constexpr simrv::xlen::Address kLineBytes = simrv::cache::ICache::kLineBytes;
+                    const simrv::xlen::Address start = seg.paddr & ~(kLineBytes - 1u);
+                    simrv::xlen::Address end =
+                        (seg.paddr + seg.size + kLineBytes - 1u) & ~(kLineBytes - 1u);
                     const size_t max_bytes = cpu.icache.capacity_bytes();
                     if (end > start + max_bytes) {
                         end = start + max_bytes;
                     }
-                    for (Address addr = start; addr < end; addr += kLineBytes) {
+                    for (simrv::xlen::Address addr = start; addr < end; addr += kLineBytes) {
                         if (ram.contains(addr, kLineBytes)) {
                             cpu.icache.insert(addr, ram.unchecked_ptr(addr),
                                               simrv::memory::MesiState::Exclusive);
                         }
                     }
                 } else {
-                    constexpr Address kLineBytes = simrv::cache::DCache::kLineBytes;
-                    const Address start = seg.paddr & ~(kLineBytes - 1u);
-                    Address end = (seg.paddr + seg.size + kLineBytes - 1u) & ~(kLineBytes - 1u);
+                    constexpr simrv::xlen::Address kLineBytes = simrv::cache::DCache::kLineBytes;
+                    const simrv::xlen::Address start = seg.paddr & ~(kLineBytes - 1u);
+                    simrv::xlen::Address end =
+                        (seg.paddr + seg.size + kLineBytes - 1u) & ~(kLineBytes - 1u);
                     const size_t max_bytes = cpu.dcache.capacity_bytes();
                     if (end > start + max_bytes) {
                         end = start + max_bytes;
                     }
-                    for (Address addr = start; addr < end; addr += kLineBytes) {
+                    for (simrv::xlen::Address addr = start; addr < end; addr += kLineBytes) {
                         if (ram.contains(addr, kLineBytes)) {
                             cpu.dcache.insert(addr, ram.unchecked_ptr(addr),
                                               simrv::memory::MesiState::Exclusive);
@@ -1304,21 +1310,21 @@ void Machine::prewarm_bram_caches() {
             }
         } else {
             // Fallback: pre-warm IMEM range into ICache and DMEM range into DCache
-            const Address dram_base = ram.base();
-            constexpr Address kILineBytes = simrv::cache::ICache::kLineBytes;
-            const Address i_end = dram_base + cpu.icache.capacity_bytes();
-            for (Address addr = dram_base; addr < i_end; addr += kILineBytes) {
+            const simrv::xlen::Address dram_base = ram.base();
+            constexpr simrv::xlen::Address kILineBytes = simrv::cache::ICache::kLineBytes;
+            const simrv::xlen::Address i_end = dram_base + cpu.icache.capacity_bytes();
+            for (simrv::xlen::Address addr = dram_base; addr < i_end; addr += kILineBytes) {
                 if (ram.contains(addr, kILineBytes)) {
                     cpu.icache.insert(addr, ram.unchecked_ptr(addr),
                                       simrv::memory::MesiState::Exclusive);
                 }
             }
 
-            constexpr Address kDLineBytes = simrv::cache::DCache::kLineBytes;
-            const Address dmem_base =
+            constexpr simrv::xlen::Address kDLineBytes = simrv::cache::DCache::kLineBytes;
+            const simrv::xlen::Address dmem_base =
                 ram.contains(0x10000000ULL, kDLineBytes) ? 0x10000000ULL : dram_base;
-            const Address d_end = dmem_base + cpu.dcache.capacity_bytes();
-            for (Address addr = dmem_base; addr < d_end; addr += kDLineBytes) {
+            const simrv::xlen::Address d_end = dmem_base + cpu.dcache.capacity_bytes();
+            for (simrv::xlen::Address addr = dmem_base; addr < d_end; addr += kDLineBytes) {
                 if (ram.contains(addr, kDLineBytes)) {
                     cpu.dcache.insert(addr, ram.unchecked_ptr(addr),
                                       simrv::memory::MesiState::Exclusive);
@@ -1384,8 +1390,8 @@ void Machine::publish_machine_event(const MachineEvent& event) {
     for (const auto& observer : observers) observer(event);
 }
 
-void Machine::notify_interrupt_transition(HartId hart_id, uint32_t cause, bool asserted,
-                                          std::string_view source, uint64_t cycle) {
+void Machine::notify_interrupt_transition(simrv::xlen::HartId hart_id, uint32_t cause,
+                                          bool asserted, std::string_view source, uint64_t cycle) {
     publish_machine_event(MachineEvent{
         .kind =
             asserted ? MachineEventKind::InterruptAsserted : MachineEventKind::InterruptDeasserted,
@@ -1459,7 +1465,7 @@ void Machine::step() {
     notify_control_event();
 }
 
-auto Machine::begin_debug_step(HartId hart) -> bool {
+auto Machine::begin_debug_step(simrv::xlen::HartId hart) -> bool {
     if (is_shutdown_ || hart.raw() >= num_harts()) return false;
     if (this->hart(hart).hart_status.load(std::memory_order_acquire) != HartStatus::Started) {
         return false;
@@ -1481,13 +1487,13 @@ void Machine::enqueue_debug_halt(PendingDebugHalt halt) {
     notify_control_event();
 }
 
-void Machine::debug_halt(HartId hart, GdbSignal signal, std::string reason) {
+void Machine::debug_halt(simrv::xlen::HartId hart, GdbSignal signal, std::string reason) {
     if ((!runtime_->gdb_stub || !runtime_->gdb_stub->is_connected()) && !tui_enabled()) return;
     enqueue_debug_halt(
         {.hart = hart, .signal = signal, .reason = std::move(reason), .description = {}});
 }
 
-void Machine::debug_watch_hit(HartId hart, GdbSignal signal, std::string reason,
+void Machine::debug_watch_hit(simrv::xlen::HartId hart, GdbSignal signal, std::string reason,
                               std::string description) {
     enqueue_debug_halt({.hart = hart,
                         .signal = signal,
@@ -1621,8 +1627,8 @@ void Machine::run() {
     if (config.debug.checkpoint_every != 0) {
         const auto cycle = primary_hart().clint_mmio.mcycle;
         next_checkpoint_cycle_ =
-            cycle > std::numeric_limits<Counter>::max() - config.debug.checkpoint_every
-                ? std::numeric_limits<Counter>::max()
+            cycle > std::numeric_limits<simrv::xlen::Counter>::max() - config.debug.checkpoint_every
+                ? std::numeric_limits<simrv::xlen::Counter>::max()
                 : cycle + config.debug.checkpoint_every;
     }
     if (platform_time() == 0 && runtime_->rtc) {
@@ -1711,8 +1717,8 @@ void Machine::run() {
         if (config.debug.checkpoint_every != 0 &&
             primary_hart().clint_mmio.mcycle < next_checkpoint_cycle_) {
             const auto cycles_remaining = next_checkpoint_cycle_ - primary_hart().clint_mmio.mcycle;
-            batch_quantum = static_cast<uint32_t>(
-                std::min<Counter>(batch_quantum, std::max<Counter>(1, cycles_remaining)));
+            batch_quantum = static_cast<uint32_t>(std::min<simrv::xlen::Counter>(
+                batch_quantum, std::max<simrv::xlen::Counter>(1, cycles_remaining)));
         }
         if (execute_runner_fast_batch(batch_quantum)) {
             if (simrv::compiler::unlikely(trace().fp_trace.is_open())) {
@@ -1723,7 +1729,7 @@ void Machine::run() {
             }
             maybe_save_periodic_checkpoint();
             if (simrv::compiler::unlikely(config.execution.fincnt !=
-                                              std::numeric_limits<Counter>::max() &&
+                                              std::numeric_limits<simrv::xlen::Counter>::max() &&
                                           retired_instruction_count() >= config.execution.fincnt)) {
                 simrv::log::info("finished by -e option");
                 if (persistent_control_) {
@@ -1752,7 +1758,7 @@ void Machine::run() {
         }
         maybe_save_periodic_checkpoint();
         if (simrv::compiler::unlikely(config.execution.fincnt !=
-                                          std::numeric_limits<Counter>::max() &&
+                                          std::numeric_limits<simrv::xlen::Counter>::max() &&
                                       retired_instruction_count() >= config.execution.fincnt)) {
             simrv::log::info("finished by -e option");
             if (persistent_control_) {
@@ -1771,7 +1777,7 @@ void Machine::run() {
         service_debug_halt();
 
         bool step_complete = is_stepping();
-        HartId completed_hart{0};
+        simrv::xlen::HartId completed_hart{0};
         if (step_complete && debug_step_hart_.has_value()) {
             completed_hart = *debug_step_hart_;
             step_complete = hart(completed_hart).e_icount >= debug_step_target_;
@@ -1939,7 +1945,7 @@ void Machine::finalize_cycle_tohost() {
                 std::memcpy(&arg2, syscall_block + 24, sizeof(arg2));
 
                 if (syscall_num == 64) {  // SYS_write
-                    const Address fromhost_addr =
+                    const simrv::xlen::Address fromhost_addr =
                         (isa_test_tohost() != 0 ? isa_test_tohost() : 0x80001000) + 8;
                     if (!ram.contains(arg1, static_cast<size_t>(arg2)) ||
                         !ram.contains(fromhost_addr, sizeof(uint64_t))) {
@@ -1948,9 +1954,9 @@ void Machine::finalize_cycle_tohost() {
                         tohost = 0;
                         return;
                     }
-                    const std::span<const Byte> bytes(ram.unchecked_ptr(arg1),
-                                                      static_cast<size_t>(arg2));
-                    for (const Byte byte : bytes) {
+                    const std::span<const simrv::xlen::Byte> bytes(ram.unchecked_ptr(arg1),
+                                                                   static_cast<size_t>(arg2));
+                    for (const simrv::xlen::Byte byte : bytes) {
                         console_write(static_cast<char>(byte));
                     }
 

@@ -37,9 +37,9 @@ enum class BranchPredictorType : uint8_t {
  */
 struct BranchPredictorConfig {
     BranchPredictorType type = BranchPredictorType::GShare;
-    BhtIndex bht_entries = 1024;
-    BtbIndex btb_entries = 256;
-    RasIndex ras_entries = 16;
+    simrv::xlen::BhtIndex bht_entries = 1024;
+    simrv::xlen::BtbIndex btb_entries = 256;
+    simrv::xlen::RasIndex ras_entries = 16;
     uint32_t ghr_bits = 10;
     bool enable_btb = true;
     bool enable_ras = true;
@@ -65,9 +65,9 @@ struct BranchPredictorConfig {
  * @brief Result of a branch prediction lookup at Fetch stage.
  */
 struct BranchPrediction {
-    Address predicted_target = 0;
-    BhtIndex bht_index = 0;
-    GlobalHistory ghr_snapshot = 0;
+    simrv::xlen::Address predicted_target = 0;
+    simrv::xlen::BhtIndex bht_index = 0;
+    simrv::xlen::GlobalHistory ghr_snapshot = 0;
     bool is_control = false;
     bool is_branch = false;
     bool is_jump = false;
@@ -93,8 +93,9 @@ struct BranchPrediction {
         false_control_alias = false;
     }
 
-    [[nodiscard]] constexpr auto direction() const noexcept -> BranchDirection {
-        return predicted_taken ? BranchDirection::Taken : BranchDirection::NotTaken;
+    [[nodiscard]] constexpr auto direction() const noexcept -> simrv::xlen::BranchDirection {
+        return predicted_taken ? simrv::xlen::BranchDirection::Taken
+                               : simrv::xlen::BranchDirection::NotTaken;
     }
 };
 
@@ -105,17 +106,18 @@ inline constexpr BranchPrediction kDefaultBranchPrediction{};
  * @brief Resolution outcome sent from Execute/Decode stage to train the predictor.
  */
 struct BranchFeedback {
-    Address pc = 0;
+    simrv::xlen::Address pc = 0;
     bool actual_taken = false;
-    Address actual_target = 0;
+    simrv::xlen::Address actual_target = 0;
     isa::Opcode opcode = static_cast<isa::Opcode>(0);
     isa::OperationId op_id = isa::OperationId::UNKNOWN;
-    RegId rd = static_cast<RegId>(0);
-    RegId rs1 = static_cast<RegId>(0);
+    simrv::xlen::RegId rd = static_cast<simrv::xlen::RegId>(0);
+    simrv::xlen::RegId rs1 = static_cast<simrv::xlen::RegId>(0);
     const BranchPrediction& prediction = kDefaultBranchPrediction;
 
-    [[nodiscard]] constexpr auto direction() const noexcept -> BranchDirection {
-        return actual_taken ? BranchDirection::Taken : BranchDirection::NotTaken;
+    [[nodiscard]] constexpr auto direction() const noexcept -> simrv::xlen::BranchDirection {
+        return actual_taken ? simrv::xlen::BranchDirection::Taken
+                            : simrv::xlen::BranchDirection::NotTaken;
     }
 };
 
@@ -140,32 +142,32 @@ inline constexpr std::array<uint8_t, 8> kSaturateFlat = {0, 0, 1, 2, 1, 2, 3, 3}
  * @brief Comprehensive branch prediction telemetry.
  */
 struct BranchPredictorStats {
-    Counter total_branches = 0;
-    Counter conditional_branches = 0;
-    Counter direct_jumps = 0;
-    Counter indirect_jumps = 0;
-    Counter function_calls = 0;
-    Counter function_returns = 0;
+    simrv::xlen::Counter total_branches = 0;
+    simrv::xlen::Counter conditional_branches = 0;
+    simrv::xlen::Counter direct_jumps = 0;
+    simrv::xlen::Counter indirect_jumps = 0;
+    simrv::xlen::Counter function_calls = 0;
+    simrv::xlen::Counter function_returns = 0;
 
-    Counter direction_predictions = 0;
-    Counter direction_hits = 0;
-    Counter direction_misses = 0;
+    simrv::xlen::Counter direction_predictions = 0;
+    simrv::xlen::Counter direction_hits = 0;
+    simrv::xlen::Counter direction_misses = 0;
 
-    Counter target_predictions = 0;
-    Counter target_hits = 0;
-    Counter target_misses = 0;
+    simrv::xlen::Counter target_predictions = 0;
+    simrv::xlen::Counter target_hits = 0;
+    simrv::xlen::Counter target_misses = 0;
 
-    Counter btb_lookups = 0;
-    Counter btb_hits = 0;
-    Counter btb_misses = 0;
+    simrv::xlen::Counter btb_lookups = 0;
+    simrv::xlen::Counter btb_hits = 0;
+    simrv::xlen::Counter btb_misses = 0;
 
-    Counter ras_pushes = 0;
-    Counter ras_pops = 0;
-    Counter ras_hits = 0;
-    Counter ras_misses = 0;
+    simrv::xlen::Counter ras_pushes = 0;
+    simrv::xlen::Counter ras_pops = 0;
+    simrv::xlen::Counter ras_hits = 0;
+    simrv::xlen::Counter ras_misses = 0;
 
-    Counter misprediction_flushes = 0;
-    Counter misprediction_penalty_cycles = 0;
+    simrv::xlen::Counter misprediction_flushes = 0;
+    simrv::xlen::Counter misprediction_penalty_cycles = 0;
 
     [[nodiscard]] auto overall_accuracy() const noexcept -> double {
         if (total_branches == 0) return 100.0;
@@ -201,8 +203,8 @@ struct BranchPredictorStats {
 class BranchPredictor {
    public:
     struct BtbEntry {
-        Address tag = 0;
-        Address target = 0;
+        simrv::xlen::Address tag = 0;
+        simrv::xlen::Address target = 0;
         bool valid = false;
     };
 
@@ -212,32 +214,37 @@ class BranchPredictor {
     void configure(const BranchPredictorConfig& config);
     void reset();
 
-    [[nodiscard]] auto predict(Address pc, const DecodedInstruction& inst) -> BranchPrediction;
-    [[nodiscard]] auto predict(VirtAddr pc, const DecodedInstruction& inst) -> BranchPrediction {
+    [[nodiscard]] auto predict(simrv::xlen::Address pc, const DecodedInstruction& inst)
+        -> BranchPrediction;
+    [[nodiscard]] auto predict(simrv::xlen::VirtAddr pc, const DecodedInstruction& inst)
+        -> BranchPrediction {
         return predict(pc.raw(), inst);
     }
-    void predict(Address pc, const DecodedInstruction& inst, BranchPrediction& pred) noexcept;
-    void predict(VirtAddr pc, const DecodedInstruction& inst, BranchPrediction& pred) noexcept {
+    void predict(simrv::xlen::Address pc, const DecodedInstruction& inst,
+                 BranchPrediction& pred) noexcept;
+    void predict(simrv::xlen::VirtAddr pc, const DecodedInstruction& inst,
+                 BranchPrediction& pred) noexcept {
         predict(pc.raw(), inst, pred);
     }
-    void latch_btb_read(Address pc);
+    void latch_btb_read(simrv::xlen::Address pc);
     void restore_speculation(const BranchPrediction& prediction);
 
     [[nodiscard]] auto stats() const noexcept -> const BranchPredictorStats& { return stats_; }
     [[nodiscard]] auto config() const noexcept -> const BranchPredictorConfig& { return config_; }
     [[nodiscard]] auto ghr() const noexcept -> uint32_t { return ghr_; }
     [[nodiscard]] auto ras_depth() const noexcept -> size_t { return ras_count_; }
-    [[nodiscard]] auto ras_peek() const noexcept -> std::optional<Address>;
+    [[nodiscard]] auto ras_peek() const noexcept -> std::optional<simrv::xlen::Address>;
     [[nodiscard]] auto bht_distribution() const noexcept -> std::array<size_t, 4>;
 
-    SIMRV_ALWAYS_INLINE void update_btb(Address pc, Address target) noexcept {
+    SIMRV_ALWAYS_INLINE void update_btb(simrv::xlen::Address pc,
+                                        simrv::xlen::Address target) noexcept {
         if (config_.enable_btb && !btb_.empty()) {
             const uint32_t btb_idx = static_cast<uint32_t>(pc >> config_.pc_shift) & btb_mask_;
             btb_[btb_idx] = BtbEntry{.tag = pc, .target = target, .valid = true};
         }
     }
 
-    [[nodiscard]] SIMRV_ALWAYS_INLINE auto get_bht_index(Address pc,
+    [[nodiscard]] SIMRV_ALWAYS_INLINE auto get_bht_index(simrv::xlen::Address pc,
                                                          uint32_t ghr_val) const noexcept
         -> uint32_t {
         const uint32_t pc_idx = static_cast<uint32_t>(pc >> config_.pc_shift);
@@ -253,7 +260,7 @@ class BranchPredictor {
             return;
         }
 
-        const Address pc = feedback.pc;
+        const simrv::xlen::Address pc = feedback.pc;
         const bool actual_taken = feedback.actual_taken;
 
         if (simrv::compiler::unlikely(config_.type == BranchPredictorType::Tournament)) {
@@ -333,12 +340,12 @@ class BranchPredictor {
     }
 
    private:
-    [[nodiscard]] SIMRV_ALWAYS_INLINE auto predict_direction(Address pc,
+    [[nodiscard]] SIMRV_ALWAYS_INLINE auto predict_direction(simrv::xlen::Address pc,
                                                              const DecodedInstruction& inst,
                                                              uint32_t& bht_idx) -> bool;
 
-    void ras_push(Address return_addr);
-    auto ras_pop() -> std::optional<Address>;
+    void ras_push(simrv::xlen::Address return_addr);
+    auto ras_pop() -> std::optional<simrv::xlen::Address>;
 
     BranchPredictorConfig config_{};
     BranchPredictorStats stats_{};
@@ -359,7 +366,7 @@ class BranchPredictor {
     uint8_t registered_bht_counter_ = 0;
 
     // RAS
-    std::vector<Address> ras_{};
+    std::vector<simrv::xlen::Address> ras_{};
     size_t ras_head_ = 0;
     size_t ras_count_ = 0;
 };

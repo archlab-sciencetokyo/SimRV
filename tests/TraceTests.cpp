@@ -34,8 +34,8 @@ namespace {
 using simrv::core::ExecutionEngine;
 using simrv::core::Machine;
 
-constexpr Address kPc = simrv::memory::kDramBaseAddress;
-constexpr std::array<Instruction, 10> kProgram = {
+constexpr simrv::xlen::Address kPc = simrv::memory::kDramBaseAddress;
+constexpr std::array<simrv::xlen::Instruction, 10> kProgram = {
     0x010000ef,  // jal  ra, 0x10 (direct call)
     0x0000006f,  // jal  x0, 0 (ordinary jump, not a call)
     0x00000013, 0x00000013,
@@ -70,8 +70,8 @@ auto read_trace(const std::filesystem::path& path) -> std::vector<std::string> {
 class TraceTestNode final : public simrv::memory::TileLinkNode {
    public:
     [[nodiscard]] auto name() const -> const char* override { return "trace-test-device"; }
-    [[nodiscard]] auto base_address() const -> Address override { return 0x50000000; }
-    [[nodiscard]] auto size() const -> Address override { return 0x1000; }
+    [[nodiscard]] auto base_address() const -> simrv::xlen::Address override { return 0x50000000; }
+    [[nodiscard]] auto size() const -> simrv::xlen::Address override { return 0x1000; }
     auto handle_request(const simrv::memory::TlChannelA&, simrv::memory::TlChannelD& response)
         -> bool override {
         if (fail_) {
@@ -100,7 +100,7 @@ void test_retirement_context_and_call_trace() {
         config.files.binary_path = guest_path.string();
         if (engines[i] == ExecutionEngine::CycleFast) config.debug.trace_level = 4;
         Machine machine(config);
-        std::vector<Byte> ram(1024 * 1024, Byte{0});
+        std::vector<simrv::xlen::Byte> ram(1024 * 1024, simrv::xlen::Byte{0});
         std::memcpy(ram.data(), kProgram.data(), sizeof(kProgram));
         machine.set_ram_for_testing(ram.data(), ram.size());
         machine.primary_hart().machine_ = &machine;
@@ -201,12 +201,12 @@ void test_optional_fp_register_write_trace() {
     cpu.reset();
     cpu.machine_ = &machine;
     cpu.state().pc = kPc;
-    cpu.state().regs.write_fp(static_cast<RegId>(1), 0x40400000);
+    cpu.state().regs.write_fp(static_cast<simrv::xlen::RegId>(1), 0x40400000);
     machine.trace().init_architecture_trace(path.string());
     simrv::pipeline::PipelineContext retiring{};
     retiring.cpc = kPc;
     retiring.ir = 0x003100d3;
-    retiring.rd = static_cast<RegId>(1);
+    retiring.rd = static_cast<simrv::xlen::RegId>(1);
     retiring.op_id = simrv::isa::FADD_S;
     retiring.traits.writes_fp = true;
     machine.trace().log_architecture_retirement(cpu, retiring);
@@ -234,9 +234,9 @@ void test_optional_fp_register_write_trace() {
 void test_retirement_index_offsets() {
     constexpr size_t kRetirements = 257;
     Machine machine;
-    std::vector<Instruction> program(kRetirements, 0x00000013);  // addi x0, x0, 0
-    std::vector<Byte> ram(1024 * 1024, Byte{0});
-    std::memcpy(ram.data(), program.data(), program.size() * sizeof(Instruction));
+    std::vector<simrv::xlen::Instruction> program(kRetirements, 0x00000013);  // addi x0, x0, 0
+    std::vector<simrv::xlen::Byte> ram(1024 * 1024, simrv::xlen::Byte{0});
+    std::memcpy(ram.data(), program.data(), program.size() * sizeof(simrv::xlen::Instruction));
     machine.set_ram_for_testing(ram.data(), ram.size());
     auto& cpu = machine.primary_hart();
     cpu.machine_ = &machine;
@@ -306,8 +306,8 @@ void test_gzip_retirement_preserves_schema_one_records() {
     const auto path = trace_path("gzip").replace_extension(".jsonl.gz");
     {
         Machine machine;
-        std::array<Instruction, 2> program = {0x00000013, 0x00000013};
-        std::vector<Byte> ram(1024 * 1024, Byte{0});
+        std::array<simrv::xlen::Instruction, 2> program = {0x00000013, 0x00000013};
+        std::vector<simrv::xlen::Byte> ram(1024 * 1024, simrv::xlen::Byte{0});
         std::memcpy(ram.data(), program.data(), sizeof(program));
         machine.set_ram_for_testing(ram.data(), ram.size());
         auto& cpu = machine.primary_hart();
@@ -346,8 +346,8 @@ void test_gzip_retirement_preserves_schema_one_records() {
 
 void test_branches_are_not_calls() {
     Machine machine;
-    std::vector<Byte> ram(1024 * 1024, Byte{0});
-    constexpr std::array<Instruction, 10> program = {
+    std::vector<simrv::xlen::Byte> ram(1024 * 1024, simrv::xlen::Byte{0});
+    constexpr std::array<simrv::xlen::Instruction, 10> program = {
         0x00000463,  // beq x0, x0, +8
         0x0000006f,  // jal x0, 0 (skipped ordinary jump)
         0x0040006f,  // jal x0, +4 (ordinary direct jump)
@@ -360,8 +360,8 @@ void test_branches_are_not_calls() {
     machine.primary_hart().reset();
     machine.primary_hart().machine_ = &machine;
     machine.primary_hart().state().pc = kPc;
-    machine.primary_hart().state().regs.write(RegId::T1, kPc + 16);
-    machine.primary_hart().state().regs.write(RegId::Ra, kPc + 24);
+    machine.primary_hart().state().regs.write(simrv::xlen::RegId::T1, kPc + 16);
+    machine.primary_hart().state().regs.write(simrv::xlen::RegId::Ra, kPc + 24);
     const auto path = trace_path("branch");
     machine.trace().init_architecture_trace(path.string());
     while (machine.primary_hart().e_icount < 4) machine.primary_hart().run_cycle(machine);
@@ -385,7 +385,7 @@ void test_trace_level_filters_streams() {
     simrv::core::MachineConfig config;
     config.debug.trace_level = 2;
     Machine machine(config);
-    std::vector<Byte> ram(1024 * 1024, Byte{0});
+    std::vector<simrv::xlen::Byte> ram(1024 * 1024, simrv::xlen::Byte{0});
     std::memcpy(ram.data(), kProgram.data(), sizeof(kProgram));
     machine.set_ram_for_testing(ram.data(), ram.size());
     machine.primary_hart().machine_ = &machine;
@@ -463,7 +463,7 @@ void test_trace_hart_identity() {
     simrv::core::MachineConfig config;
     Machine machine(config);
     machine.add_hart_for_testing(std::make_unique<simrv::core::CPU>());
-    std::vector<Byte> ram(1024 * 1024, Byte{0});
+    std::vector<simrv::xlen::Byte> ram(1024 * 1024, simrv::xlen::Byte{0});
     std::memcpy(ram.data(), kProgram.data(), sizeof(kProgram));
     machine.set_ram_for_testing(ram.data(), ram.size());
     for (size_t hart = 0; hart < machine.num_harts(); ++hart) {
@@ -508,7 +508,7 @@ void test_arch_trace_event_hart_and_cycle_filters() {
     config.debug.trace_before_cycle = 100;
     Machine machine(config);
     machine.add_hart_for_testing(std::make_unique<simrv::core::CPU>());
-    std::vector<Byte> ram(1024 * 1024, Byte{0});
+    std::vector<simrv::xlen::Byte> ram(1024 * 1024, simrv::xlen::Byte{0});
     std::memcpy(ram.data(), kProgram.data(), sizeof(kProgram));
     machine.set_ram_for_testing(ram.data(), ram.size());
     for (size_t hart = 0; hart < machine.num_harts(); ++hart) {
@@ -521,10 +521,10 @@ void test_arch_trace_event_hart_and_cycle_filters() {
     const auto path = trace_path("event-filters");
     machine.trace().init_architecture_trace(path.string());
     simrv::pipeline::PipelineContext call_context;
-    call_context.cpc = VirtAddr{kPc};
+    call_context.cpc = simrv::xlen::VirtAddr{kPc};
     call_context.opcode = simrv::isa::Opcode::Jal;
-    call_context.rd = RegId::Ra;
-    call_context.jmp_pc = VirtAddr{kPc + 8};
+    call_context.rd = simrv::xlen::RegId::Ra;
+    call_context.jmp_pc = simrv::xlen::VirtAddr{kPc + 8};
     call_context.tkn = true;
     for (size_t hart = 0; hart < machine.num_harts(); ++hart) {
         machine.hart(hart).clint_mmio.mcycle = 50;
@@ -535,11 +535,11 @@ void test_arch_trace_event_hart_and_cycle_filters() {
     machine.hart(1).clint_mmio.mcycle = 101;
     machine.trace().log_architecture_retirement(machine.hart(1), call_context);
     auto end_pc_context = call_context;
-    end_pc_context.cpc = VirtAddr{kPc + 0x10};
+    end_pc_context.cpc = simrv::xlen::VirtAddr{kPc + 0x10};
     machine.hart(1).clint_mmio.mcycle = 75;
     machine.trace().log_architecture_retirement(machine.hart(1), end_pc_context);
     auto outside_pc_context = call_context;
-    outside_pc_context.cpc = VirtAddr{kPc + 0x11};
+    outside_pc_context.cpc = simrv::xlen::VirtAddr{kPc + 0x11};
     machine.hart(1).clint_mmio.mcycle = 75;
     machine.trace().log_architecture_retirement(machine.hart(1), outside_pc_context);
     machine.trace().flush_all();
@@ -571,7 +571,7 @@ void test_arch_trace_device_filter() {
     simrv::core::MachineConfig config;
     config.debug.trace_device = "trace-test-device";
     Machine machine(config);
-    std::vector<Byte> ram(1024 * 1024, Byte{0});
+    std::vector<simrv::xlen::Byte> ram(1024 * 1024, simrv::xlen::Byte{0});
     machine.set_ram_for_testing(ram.data(), ram.size());
     machine.primary_hart().machine_ = &machine;
     machine.primary_hart().reset();
@@ -608,16 +608,16 @@ void test_arch_trace_function_filter(std::string_view executable_path) {
     const auto path = trace_path("function-filter");
     machine.trace().init_architecture_trace(path.string());
     simrv::pipeline::PipelineContext call_context;
-    call_context.cpc = VirtAddr{*main_pc};
+    call_context.cpc = simrv::xlen::VirtAddr{*main_pc};
     call_context.opcode = simrv::isa::Opcode::Jal;
-    call_context.rd = RegId::Ra;
-    call_context.jmp_pc = VirtAddr{*main_pc + 0x40};
+    call_context.rd = simrv::xlen::RegId::Ra;
+    call_context.jmp_pc = simrv::xlen::VirtAddr{*main_pc + 0x40};
     call_context.tkn = true;
     machine.primary_hart().state().mhartid = 0;
     machine.primary_hart().clint_mmio.mcycle = 10;
     machine.trace().log_architecture_retirement(machine.primary_hart(), call_context);
 
-    call_context.cpc = VirtAddr{std::numeric_limits<Address>::max()};
+    call_context.cpc = simrv::xlen::VirtAddr{std::numeric_limits<simrv::xlen::Address>::max()};
     machine.primary_hart().clint_mmio.mcycle = 11;
     machine.trace().log_architecture_retirement(machine.primary_hart(), call_context);
     machine.trace().flush_all();
@@ -640,7 +640,7 @@ void test_retired_memory_events_and_address_classification() {
     config.debug.trace_level = 4;
     TraceTestNode device;
     Machine machine(config);
-    std::vector<Byte> ram(1024 * 1024, Byte{0});
+    std::vector<simrv::xlen::Byte> ram(1024 * 1024, simrv::xlen::Byte{0});
     machine.set_ram_for_testing(ram.data(), ram.size());
     machine.primary_hart().machine_ = &machine;
     machine.primary_hart().reset();
@@ -649,7 +649,7 @@ void test_retired_memory_events_and_address_classification() {
     const auto path = trace_path("memory-events");
     machine.trace().init_architecture_trace(path.string());
     simrv::pipeline::PipelineContext load{};
-    load.cpc = VirtAddr{kPc + 0x40};
+    load.cpc = simrv::xlen::VirtAddr{kPc + 0x40};
     load.opcode = simrv::isa::Opcode::Load;
     load.op_id = simrv::isa::LW;
     load.funct3 = simrv::isa::Funct3::Lw;
@@ -659,7 +659,7 @@ void test_retired_memory_events_and_address_classification() {
     machine.trace().log_architecture_retirement(machine.primary_hart(), load);
 
     simrv::pipeline::PipelineContext store{};
-    store.cpc = VirtAddr{kPc + 0x44};
+    store.cpc = simrv::xlen::VirtAddr{kPc + 0x44};
     store.opcode = simrv::isa::Opcode::Store;
     store.op_id = simrv::isa::SW;
     store.funct3 = simrv::isa::Funct3::Sw;
@@ -691,7 +691,7 @@ void test_precise_memory_fault_event() {
     config.debug.trace_level = 4;
     TraceTestNode device;
     Machine machine(config);
-    std::vector<Byte> ram(1024 * 1024, Byte{0});
+    std::vector<simrv::xlen::Byte> ram(1024 * 1024, simrv::xlen::Byte{0});
     machine.set_ram_for_testing(ram.data(), ram.size());
     auto& cpu = machine.primary_hart();
     cpu.machine_ = &machine;
@@ -700,7 +700,7 @@ void test_precise_memory_fault_event() {
     cpu.state().pc = kPc + 0x80;
     cpu.state().mtvec = kPc + 0x200;
     auto& context = cpu.pipeline_context;
-    context.cpc = VirtAddr{kPc + 0x80};
+    context.cpc = simrv::xlen::VirtAddr{kPc + 0x80};
     context.opcode = simrv::isa::Opcode::Store;
     context.op_id = simrv::isa::SW;
     context.funct3 = simrv::isa::Funct3::Sw;
@@ -710,7 +710,8 @@ void test_precise_memory_fault_event() {
 
     const auto path = trace_path("memory-fault");
     machine.trace().init_architecture_trace(path.string());
-    cpu.raise_exception(static_cast<TrapCause>(ExceptionCode::FaultStore), device.base_address());
+    cpu.raise_exception(static_cast<simrv::xlen::TrapCause>(ExceptionCode::FaultStore),
+                        device.base_address());
     machine.trace().flush_all();
 
     const auto events = read_trace(sibling_path(path, "memory.jsonl"));
@@ -769,7 +770,7 @@ void test_mmio_arch_trace_uses_requesting_hart_without_dlog() {
     auto& issuing_hart = machine.hart(1);
     issuing_hart.machine_ = &machine;
     issuing_hart.state().mhartid = 1;
-    issuing_hart.active_context().cpc = VirtAddr{kPc + 0x24};
+    issuing_hart.active_context().cpc = simrv::xlen::VirtAddr{kPc + 0x24};
     issuing_hart.clint_mmio.mcycle = 42;
     issuing_hart.clint_mmio.mtime = 7;
     auto& router = machine.memory().system_bus().router();
@@ -780,7 +781,7 @@ void test_mmio_arch_trace_uses_requesting_hart_without_dlog() {
     simrv::memory::TlChannelA request{};
     request.opcode = simrv::memory::TlOpcodeA::Get;
     request.size = 2;
-    request.hart = HartId{1};
+    request.hart = simrv::xlen::HartId{1};
     request.address = 0x50000000;
     simrv::memory::TlChannelD response{};
     if (!router.route_request(request, response) || response.failed()) std::abort();
@@ -866,15 +867,16 @@ void test_guest_marker_csr_events() {
 void test_user_mode_marker_csr_instruction() {
     Machine machine;
     auto& cpu = machine.primary_hart();
-    std::vector<Byte> ram(1024 * 1024, Byte{0});
-    constexpr Instruction kCsrwUtraceRa = (0x800u << 20) | (1u << 15) | (1u << 12) | 0x73u;
+    std::vector<simrv::xlen::Byte> ram(1024 * 1024, simrv::xlen::Byte{0});
+    constexpr simrv::xlen::Instruction kCsrwUtraceRa =
+        (0x800u << 20) | (1u << 15) | (1u << 12) | 0x73u;
     const std::array program = {kCsrwUtraceRa, kCsrwUtraceRa};
     std::memcpy(ram.data(), program.data(), sizeof(program));
     machine.set_ram_for_testing(ram.data(), ram.size());
     cpu.machine_ = &machine;
     cpu.reset();
     cpu.machine_ = &machine;
-    cpu.state().priv = PrivilegeLevel::User;
+    cpu.state().priv = simrv::xlen::PrivilegeLevel::User;
     cpu.state().pc = kPc;
     if (cpu.read_csr(0x0C0)) std::abort();  // Reserved standard U-level space is not our ABI.
     if (!simrv::isa::misa_has_extension(cpu.state().misa, simrv::isa::IsaExtension::X))
@@ -882,9 +884,9 @@ void test_user_mode_marker_csr_instruction() {
 
     const auto path = trace_path("markers-user-csr");
     machine.trace().init_architecture_trace(path.string());
-    cpu.state().regs.write(RegId::Ra, 'u');
+    cpu.state().regs.write(simrv::xlen::RegId::Ra, 'u');
     while (cpu.e_icount < 1) cpu.run_cycle(machine);
-    cpu.state().regs.write(RegId::Ra, 0x40000000u);
+    cpu.state().regs.write(simrv::xlen::RegId::Ra, 0x40000000u);
     while (cpu.e_icount < 2) cpu.run_cycle(machine);
     machine.trace().flush_all();
 
@@ -915,14 +917,14 @@ void test_interrupt_entry_and_return_events() {
 
     const auto path = trace_path("interrupt");
     machine.trace().init_architecture_trace(path.string());
-    machine.set_hart_irq(HartId{0}, simrv::core::InterruptType::Timer,
-                         simrv::PrivilegeLevel::Machine, true);
+    machine.set_hart_irq(simrv::xlen::HartId{0}, simrv::core::InterruptType::Timer,
+                         simrv::xlen::PrivilegeLevel::Machine, true);
     cpu.apply_pending_interrupt_lines(machine);
     simrv::core::TrapController::raise_exception(cpu, kInterruptCauseBit | 7, 0);
 
     simrv::pipeline::PipelineContext return_context{};
     return_context.funct12 = 0x302;
-    return_context.cpc = simrv::VirtAddr{cpu.state().pc};
+    return_context.cpc = simrv::xlen::VirtAddr{cpu.state().pc};
     cpu.state().pc = cpu.state().mepc;
     machine.trace().log_architecture_retirement(cpu, return_context);
     machine.trace().flush_all();
@@ -961,13 +963,13 @@ void test_software_mmio_interrupt_bus_completion_fixture() {
     Machine machine(config);
     simrv::device::AclintMswi mswi(&machine);
     machine.memory().system_bus().add_node(&mswi);
-    std::vector<Byte> ram(1024 * 1024, Byte{0});
+    std::vector<simrv::xlen::Byte> ram(1024 * 1024, simrv::xlen::Byte{0});
 
     // sw x6, 0(x5): software writes ACLINT MSWI; sw x8, 0(x7): signal tohost completion.
-    constexpr Instruction kWriteMsip = 0x0062A023;
-    constexpr Instruction kSignalCompletion = 0x0083A023;
-    constexpr Instruction kClearMsip = 0x0002A023;
-    constexpr Instruction kMret = 0x30200073;
+    constexpr simrv::xlen::Instruction kWriteMsip = 0x0062A023;
+    constexpr simrv::xlen::Instruction kSignalCompletion = 0x0083A023;
+    constexpr simrv::xlen::Instruction kClearMsip = 0x0002A023;
+    constexpr simrv::xlen::Instruction kMret = 0x30200073;
     std::memcpy(ram.data(), &kWriteMsip, sizeof(kWriteMsip));
     std::memcpy(ram.data() + 4, &kSignalCompletion, sizeof(kSignalCompletion));
     std::memcpy(ram.data() + 0x100, &kClearMsip, sizeof(kClearMsip));
@@ -982,10 +984,10 @@ void test_software_mmio_interrupt_bus_completion_fixture() {
     cpu.state().mtvec = kPc + 0x100;
     cpu.state().mie = std::to_underlying(simrv::core::MipBit::Msip);
     cpu.state().mstatus |= simrv::core::MstatusBit::Mie;
-    cpu.state().regs.write(RegId::T0, simrv::mmio::kAclintMswiBaseAddress);
-    cpu.state().regs.write(RegId::T1, 1);
-    cpu.state().regs.write(RegId::T2, machine.isa_test_tohost());
-    cpu.state().regs.write(RegId::S0, 1);
+    cpu.state().regs.write(simrv::xlen::RegId::T0, simrv::mmio::kAclintMswiBaseAddress);
+    cpu.state().regs.write(simrv::xlen::RegId::T1, 1);
+    cpu.state().regs.write(simrv::xlen::RegId::T2, machine.isa_test_tohost());
+    cpu.state().regs.write(simrv::xlen::RegId::S0, 1);
 
     const auto base_path = trace_path("hardware-software-trace-fixture");
     const auto fixture_dir = base_path.parent_path() / base_path.stem();
@@ -1117,7 +1119,8 @@ void test_function_symbol_lookup(std::string_view executable_path) {
     if (!main_pc) std::abort();
     const auto main_function = symbols.lookup_function(*main_pc);
     if (!main_function || main_function->name != "main" || main_function->offset != 0) std::abort();
-    if (symbols.lookup_function(std::numeric_limits<Address>::max()).has_value()) std::abort();
+    if (symbols.lookup_function(std::numeric_limits<simrv::xlen::Address>::max()).has_value())
+        std::abort();
 }
 }  // namespace
 

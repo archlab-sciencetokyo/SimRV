@@ -34,7 +34,7 @@ auto AddressModal::submit(const std::string& input, simrv::core::Machine& machin
         return true;
     }
 
-    Address addr = 0;
+    simrv::xlen::Address addr = 0;
     bool ok = false;
     if (input.starts_with("0x") || input.starts_with("0X")) {
         auto result = std::from_chars(input.data() + 2, input.data() + input.size(), addr, 16);

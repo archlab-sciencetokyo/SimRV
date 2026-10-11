@@ -9,7 +9,7 @@ enum class RegisterBank : uint8_t { Integer, FloatingPoint };
 
 struct RegisterWriteEffect {
     RegisterBank bank = RegisterBank::Integer;
-    RegId destination = RegId::Zero;
+    simrv::xlen::RegId destination = simrv::xlen::RegId::Zero;
     uint64_t value = 0;
     bool enabled = false;
 };

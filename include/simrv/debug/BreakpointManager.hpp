@@ -33,7 +33,7 @@ enum class BreakpointOwner : uint8_t { Tui = 1, Gdb = 2 };
 struct PcBreakpoint {
     BreakpointId id = 0;
     BreakpointOwner owner = BreakpointOwner::Tui;
-    Address addr = 0;
+    simrv::xlen::Address addr = 0;
 };
 
 /// Target resource monitored by a watchpoint.
@@ -47,9 +47,9 @@ struct Watchpoint {
     WatchpointId id = 0;
     BreakpointOwner owner = BreakpointOwner::Tui;
     WatchTarget target = WatchTarget::Memory;
-    Address addr = 0;
+    simrv::xlen::Address addr = 0;
     RegType reg_type = RegType::GPR;
-    RegId reg_index = RegId::Zero;
+    simrv::xlen::RegId reg_index = simrv::xlen::RegId::Zero;
     std::string reg_name;
     size_t size = 4;
     WatchType type = WatchType::Write;
@@ -60,7 +60,7 @@ struct Watchpoint {
 struct BreakpointHit {
     enum class Reason : uint8_t { Breakpoint, Watchpoint } reason;
     BreakpointId breakpoint_id = 0;
-    Address addr = 0;
+    simrv::xlen::Address addr = 0;
     std::string description;
     WatchType watch_type = WatchType::Write;
 };
@@ -68,7 +68,7 @@ struct BreakpointHit {
 /// Parsed register specification resulting from string lookup.
 struct ParsedReg {
     RegType type;
-    RegId index;
+    simrv::xlen::RegId index;
     std::string canonical_name;
 };
 
@@ -81,18 +81,20 @@ class BreakpointManager {
     BreakpointManager() = default;
 
     /// Add a PC breakpoint at the given virtual address
-    void add_pc_breakpoint(Address addr, BreakpointOwner owner = BreakpointOwner::Tui);
+    void add_pc_breakpoint(simrv::xlen::Address addr, BreakpointOwner owner = BreakpointOwner::Tui);
     /// Remove a PC breakpoint at the given virtual address
-    void remove_pc_breakpoint(Address addr, BreakpointOwner owner = BreakpointOwner::Tui);
+    void remove_pc_breakpoint(simrv::xlen::Address addr,
+                              BreakpointOwner owner = BreakpointOwner::Tui);
     /// Clear all configured PC breakpoints
     void clear_pc_breakpoints();
     /// Check whether any PC breakpoint or watchpoint is active
     [[nodiscard]] auto has_any() const -> bool { return active_.load(std::memory_order_acquire); }
     /// Check if a PC breakpoint is set at the given address
-    [[nodiscard]] auto has_pc_breakpoint(Address addr) const -> bool;
+    [[nodiscard]] auto has_pc_breakpoint(simrv::xlen::Address addr) const -> bool;
     /// Get the contiguous span of all active PC breakpoint addresses
-    [[nodiscard]] auto get_pc_breakpoints() const -> std::span<const Address> {
-        return std::span<const Address>(pc_breakpoints_.begin(), pc_breakpoints_.end());
+    [[nodiscard]] auto get_pc_breakpoints() const -> std::span<const simrv::xlen::Address> {
+        return std::span<const simrv::xlen::Address>(pc_breakpoints_.begin(),
+                                                     pc_breakpoints_.end());
     }
     /// Get stable-ID logical breakpoint records, including frontend ownership.
     [[nodiscard]] auto get_pc_breakpoint_records() const -> const std::vector<PcBreakpoint>& {
@@ -100,20 +102,22 @@ class BreakpointManager {
     }
 
     /// Add a memory watchpoint at physical address with specified byte size and access type
-    void add_watchpoint(Address addr, size_t size = 4, WatchType type = WatchType::Write,
-                        const std::string& label = "",
+    void add_watchpoint(simrv::xlen::Address addr, size_t size = 4,
+                        WatchType type = WatchType::Write, const std::string& label = "",
                         BreakpointOwner owner = BreakpointOwner::Tui);
     /// Add a register watchpoint monitoring changes to a specific register
-    void add_reg_watchpoint(RegType reg_type, RegId reg_index, const std::string& reg_name);
+    void add_reg_watchpoint(RegType reg_type, simrv::xlen::RegId reg_index,
+                            const std::string& reg_name);
     /// Remove a memory watchpoint at physical address
-    void remove_watchpoint(Address addr);
+    void remove_watchpoint(simrv::xlen::Address addr);
     /// Remove memory watchpoints at an address owned by one frontend.
-    void remove_watchpoint(Address addr, BreakpointOwner owner);
-    void remove_watchpoint(Address addr, size_t size, WatchType type, BreakpointOwner owner);
+    void remove_watchpoint(simrv::xlen::Address addr, BreakpointOwner owner);
+    void remove_watchpoint(simrv::xlen::Address addr, size_t size, WatchType type,
+                           BreakpointOwner owner);
     /// Remove a watchpoint by index in the watchpoints list
     void remove_watchpoint_by_index(size_t index);
     /// Remove a register watchpoint for the given register type and index
-    void remove_reg_watchpoint(RegType reg_type, RegId reg_index);
+    void remove_reg_watchpoint(RegType reg_type, simrv::xlen::RegId reg_index);
     /// Clear all active memory and register watchpoints
     void clear_watchpoints();
     /// Clear all breakpoint and watchpoint state owned by one frontend.
@@ -124,13 +128,15 @@ class BreakpointManager {
     }
 
     /// Test if PC matches an active breakpoint (respecting skip-once setting)
-    [[nodiscard]] auto check_pc(Address pc, HartId hart = HartId{0}, Counter retired = 0) const
+    [[nodiscard]] auto check_pc(simrv::xlen::Address pc,
+                                simrv::xlen::HartId hart = simrv::xlen::HartId{0},
+                                simrv::xlen::Counter retired = 0) const
         -> std::optional<BreakpointHit>;
     /// Check if a memory write access overlaps any active write/access watchpoints
-    [[nodiscard]] auto check_mem_write(Address paddr, size_t size) const
+    [[nodiscard]] auto check_mem_write(simrv::xlen::Address paddr, size_t size) const
         -> std::optional<BreakpointHit>;
     /// Check if a memory read access overlaps any active read/access watchpoints
-    [[nodiscard]] auto check_mem_read(Address paddr, size_t size) const
+    [[nodiscard]] auto check_mem_read(simrv::xlen::Address paddr, size_t size) const
         -> std::optional<BreakpointHit>;
     /// Compare current and previous architectural states to check for register watchpoint hits
     [[nodiscard]] auto check_reg_changes(const simrv::core::ArchState& state,
@@ -138,7 +144,8 @@ class BreakpointManager {
         -> std::optional<BreakpointHit>;
 
     /// Set single-step skip address to ignore breakpoint once
-    void set_skip_once_pc(Address pc, HartId hart, Counter retired) const {
+    void set_skip_once_pc(simrv::xlen::Address pc, simrv::xlen::HartId hart,
+                          simrv::xlen::Counter retired) const {
         skipped_instructions_[hart.raw()] = std::pair{pc, retired};
     }
 
@@ -147,8 +154,9 @@ class BreakpointManager {
         active_.store(!pc_breakpoints_.empty() || !watchpoints_.empty(), std::memory_order_release);
     }
     std::atomic<bool> active_{false};
-    mutable std::flat_map<uint32_t, std::pair<Address, Counter>> skipped_instructions_;
-    std::flat_set<Address> pc_breakpoints_;
+    mutable std::flat_map<uint32_t, std::pair<simrv::xlen::Address, simrv::xlen::Counter>>
+        skipped_instructions_;
+    std::flat_set<simrv::xlen::Address> pc_breakpoints_;
     std::vector<PcBreakpoint> pc_breakpoint_records_;
     std::vector<Watchpoint> watchpoints_;
     BreakpointId next_breakpoint_id_ = 1;

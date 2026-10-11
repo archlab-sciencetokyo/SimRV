@@ -21,7 +21,7 @@ enum class SbiError : int64_t {
 
 struct SbiRet {
     SbiError error{SbiError::Success};
-    Word value{0};
+    simrv::xlen::Word value{0};
 };
 
 enum class SbiExtId : uint32_t {
@@ -41,11 +41,15 @@ enum class SbiExtId : uint32_t {
     Cppc = 0x43505043,          // CPPC
 };
 
-constexpr auto operator==(Word raw, SbiExtId ext) noexcept -> bool {
+constexpr auto operator==(simrv::xlen::Word raw, SbiExtId ext) noexcept -> bool {
     return raw == std::to_underlying(ext);
 }
-constexpr auto operator==(SbiExtId ext, Word raw) noexcept -> bool {
+constexpr auto operator==(SbiExtId ext, simrv::xlen::Word raw) noexcept -> bool {
     return std::to_underlying(ext) == raw;
 }
-constexpr auto operator!=(Word raw, SbiExtId ext) noexcept -> bool { return !(raw == ext); }
-constexpr auto operator!=(SbiExtId ext, Word raw) noexcept -> bool { return !(ext == raw); }
+constexpr auto operator!=(simrv::xlen::Word raw, SbiExtId ext) noexcept -> bool {
+    return !(raw == ext);
+}
+constexpr auto operator!=(SbiExtId ext, simrv::xlen::Word raw) noexcept -> bool {
+    return !(ext == raw);
+}

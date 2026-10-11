@@ -16,25 +16,29 @@ class DCache : public BaseCache<1024, 32, 8> {
    public:
     DCache() = default;
 
-    [[nodiscard]] auto read(Address addr, Word& data, Instruction funct3) -> bool;
-    [[nodiscard]] auto write(Address addr, Word data, Instruction funct3,
-                             bool* out_first_write = nullptr) -> bool;
+    [[nodiscard]] auto read(simrv::xlen::Address addr, simrv::xlen::Word& data,
+                            simrv::xlen::Instruction funct3) -> bool;
+    [[nodiscard]] auto write(simrv::xlen::Address addr, simrv::xlen::Word data,
+                             simrv::xlen::Instruction funct3, bool* out_first_write = nullptr)
+        -> bool;
 
-    [[nodiscard]] auto read(Address addr, Word& data, isa::Funct3 funct3) -> bool {
-        return read(addr, data, static_cast<Instruction>(funct3));
+    [[nodiscard]] auto read(simrv::xlen::Address addr, simrv::xlen::Word& data, isa::Funct3 funct3)
+        -> bool {
+        return read(addr, data, static_cast<simrv::xlen::Instruction>(funct3));
     }
-    [[nodiscard]] auto write(Address addr, Word data, isa::Funct3 funct3,
+    [[nodiscard]] auto write(simrv::xlen::Address addr, simrv::xlen::Word data, isa::Funct3 funct3,
                              bool* out_first_write = nullptr) -> bool {
-        return write(addr, data, static_cast<Instruction>(funct3), out_first_write);
+        return write(addr, data, static_cast<simrv::xlen::Instruction>(funct3), out_first_write);
     }
 
     auto handle_probe(const simrv::memory::TlChannelB& req, simrv::memory::TlChannelC& resp,
-                      std::array<Byte, kLineBytes>& dirty_data) -> bool;
+                      std::array<simrv::xlen::Byte, kLineBytes>& dirty_data) -> bool;
 };
 
-inline auto DCache::read(Address addr, Word& data, Instruction funct3) -> bool {
+inline auto DCache::read(simrv::xlen::Address addr, simrv::xlen::Word& data,
+                         simrv::xlen::Instruction funct3) -> bool {
     const uint32_t set_idx = get_set_index(addr);
-    const Address tag = get_tag(addr);
+    const simrv::xlen::Address tag = get_tag(addr);
     const unsigned size_bytes = 1u << (funct3 & 0x3u);
     last_accessed_set_ = set_idx;
 
@@ -48,7 +52,7 @@ inline auto DCache::read(Address addr, Word& data, Instruction funct3) -> bool {
             return false;
         }
 
-        Word raw = 0;
+        simrv::xlen::Word raw = 0;
         std::memcpy(&raw, cache_line->data.data() + byte_offset, size_bytes);
         data = simrv::memory::extend_loaded_value(raw, static_cast<uint8_t>(funct3));
 
@@ -64,14 +68,14 @@ inline auto DCache::read(Address addr, Word& data, Instruction funct3) -> bool {
     return false;
 }
 
-inline auto DCache::write(Address addr, Word data, Instruction funct3, bool* out_first_write)
-    -> bool {
+inline auto DCache::write(simrv::xlen::Address addr, simrv::xlen::Word data,
+                          simrv::xlen::Instruction funct3, bool* out_first_write) -> bool {
     const unsigned size_bytes = 1u << (funct3 & 0x3u);
     const uint32_t byte_offset = addr & (kLineBytes - 1u);
 
     if (simrv::compiler::likely(byte_offset + size_bytes <= kLineBytes)) {
         const uint32_t set_idx = get_set_index(addr);
-        const Address tag = get_tag(addr);
+        const simrv::xlen::Address tag = get_tag(addr);
         last_accessed_set_ = set_idx;
         const auto [w, cache_line] = find_matching_line(set_idx, tag);
         if (cache_line != nullptr) {

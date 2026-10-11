@@ -30,22 +30,22 @@ class MmioDevice : public TileLinkNode {
     ~MmioDevice() override = default;
 
     // Fast-path typed read/write interfaces (offset is relative to base_address)
-    [[nodiscard]] virtual auto read8(Address offset) -> uint8_t;
-    [[nodiscard]] virtual auto read16(Address offset) -> uint16_t;
-    [[nodiscard]] virtual auto read32(Address offset) -> uint32_t;
-    [[nodiscard]] virtual auto read64(Address offset) -> uint64_t;
+    [[nodiscard]] virtual auto read8(simrv::xlen::Address offset) -> uint8_t;
+    [[nodiscard]] virtual auto read16(simrv::xlen::Address offset) -> uint16_t;
+    [[nodiscard]] virtual auto read32(simrv::xlen::Address offset) -> uint32_t;
+    [[nodiscard]] virtual auto read64(simrv::xlen::Address offset) -> uint64_t;
 
-    virtual void write8(Address offset, uint8_t val);
-    virtual void write16(Address offset, uint16_t val);
-    virtual void write32(Address offset, uint32_t val);
-    virtual void write64(Address offset, uint64_t val);
+    virtual void write8(simrv::xlen::Address offset, uint8_t val);
+    virtual void write16(simrv::xlen::Address offset, uint16_t val);
+    virtual void write32(simrv::xlen::Address offset, uint32_t val);
+    virtual void write64(simrv::xlen::Address offset, uint64_t val);
 
     // TileLink channel adaptation
     auto handle_request(const TlChannelA& req, TlChannelD& resp) -> bool override;
 
     // Guest physical memory DMA mastering
-    auto dma_read(Address paddr, std::span<uint8_t> dst) -> bool;
-    auto dma_write(Address paddr, std::span<const uint8_t> src) -> bool;
+    auto dma_read(simrv::xlen::Address paddr, std::span<uint8_t> dst) -> bool;
+    auto dma_write(simrv::xlen::Address paddr, std::span<const uint8_t> src) -> bool;
 
     void set_machine(simrv::core::Machine* machine) { machine_ = machine; }
     [[nodiscard]] auto machine() const -> simrv::core::Machine* { return machine_; }

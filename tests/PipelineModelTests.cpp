@@ -51,12 +51,12 @@ void test_operation_traits() {
 void test_writeback_effects() {
     simrv::pipeline::PipelineContext context{};
     context.opcode = Opcode::Load;
-    context.rd = RegId::A0;
+    context.rd = simrv::xlen::RegId::A0;
     context.mem_rdata = 0x1234;
     auto effects = simrv::pipeline::build_writeback_effects(context);
     TEST_CHECK(effects.increments_instruction_count);
     TEST_CHECK(effects.integer_write.enabled);
-    TEST_CHECK(effects.integer_write.destination == RegId::A0);
+    TEST_CHECK(effects.integer_write.destination == simrv::xlen::RegId::A0);
     TEST_CHECK(effects.integer_write.value == 0x1234);
 
     context.pending_exception = ExceptionCode::FaultLoad;
@@ -66,7 +66,7 @@ void test_writeback_effects() {
 
     context = {};
     context.opcode = Opcode::LoadFp;
-    context.rd = static_cast<RegId>(FpRegId::Fa0);
+    context.rd = static_cast<simrv::xlen::RegId>(simrv::xlen::FpRegId::Fa0);
     context.fp_mem_rdata = 0x3ff0000000000000ULL;
     effects = simrv::pipeline::build_writeback_effects(context);
     TEST_CHECK(effects.floating_write.enabled);

@@ -25,7 +25,7 @@ auto VirtioPciBlock::get_device_features(uint32_t select) -> uint32_t {
     return 0;
 }
 
-auto VirtioPciBlock::read_device_config(Address offset, uint8_t size) -> uint32_t {
+auto VirtioPciBlock::read_device_config(simrv::xlen::Address offset, uint8_t size) -> uint32_t {
     (void)size;
     const uint64_t capacity = backend_.capacity_sectors();
     if (offset == 0) return static_cast<uint32_t>(capacity & 0xFFFFFFFFULL);

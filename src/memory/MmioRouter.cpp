@@ -18,26 +18,28 @@ auto MmioRouter::register_device(TileLinkNode* node) -> bool {
         return false;
     }
 
-    const Address base = node->base_address();
-    if (node->size() == 0 || node->size() > std::numeric_limits<Address>::max() - base) {
+    const simrv::xlen::Address base = node->base_address();
+    if (node->size() == 0 ||
+        node->size() > std::numeric_limits<simrv::xlen::Address>::max() - base) {
         simrv::log::warn("Rejecting invalid MMIO range for '{}'", node->name());
         return false;
     }
-    const Address end = base + node->size();
+    const simrv::xlen::Address end = base + node->size();
 
     // Check for range overlaps with existing registered devices
     for (const auto* existing : nodes_) {
         if (existing == node) {
             return true;  // Already registered
         }
-        const Address ex_base = existing->base_address();
-        if (existing->size() > std::numeric_limits<Address>::max() - ex_base) return false;
-        const Address ex_end = ex_base + existing->size();
-        const Address overlap_begin = std::max(base, ex_base);
-        const Address overlap_end = std::min(end, ex_end);
+        const simrv::xlen::Address ex_base = existing->base_address();
+        if (existing->size() > std::numeric_limits<simrv::xlen::Address>::max() - ex_base)
+            return false;
+        const simrv::xlen::Address ex_end = ex_base + existing->size();
+        const simrv::xlen::Address overlap_begin = std::max(base, ex_base);
+        const simrv::xlen::Address overlap_end = std::min(end, ex_end);
         if (overlap_begin < overlap_end) {
             bool collision = false;
-            for (Address address = overlap_begin; address < overlap_end; ++address) {
+            for (simrv::xlen::Address address = overlap_begin; address < overlap_end; ++address) {
                 if (node->contains(address) && existing->contains(address)) {
                     collision = true;
                     break;
@@ -85,13 +87,13 @@ void MmioRouter::clear() {
 void MmioRouter::rebuild_entries() {
     entries_.clear();
     entries_.reserve(nodes_.size());
-    min_base_ = std::numeric_limits<Address>::max();
+    min_base_ = std::numeric_limits<simrv::xlen::Address>::max();
     max_end_ = 0;
     mru_count_ = 0;
     for (auto* node : nodes_) {
         if (node == nullptr) continue;
-        const Address base = node->base_address();
-        const Address end = base + node->size();
+        const simrv::xlen::Address base = node->base_address();
+        const simrv::xlen::Address end = base + node->size();
         entries_.push_back(DeviceEntry{.base = base, .end = end, .node = node});
         min_base_ = std::min(min_base_, base);
         max_end_ = std::max(max_end_, end);
@@ -99,7 +101,7 @@ void MmioRouter::rebuild_entries() {
     std::ranges::sort(entries_, [](const auto& a, const auto& b) { return a.base < b.base; });
 }
 
-auto MmioRouter::resolve_device(Address addr) const -> TileLinkNode* {
+auto MmioRouter::resolve_device(simrv::xlen::Address addr) const -> TileLinkNode* {
     if (entries_.empty() || addr < min_base_ || addr >= max_end_) {
         return nullptr;
     }
@@ -164,7 +166,8 @@ auto MmioRouter::route_request(const TlChannelA& req, TlChannelD& resp) -> bool 
         if (tracer_ != nullptr && (is_read || is_write) &&
             (tracer_->is_dlog_enabled() || tracer_->is_architecture_trace_enabled())) {
             const auto width = static_cast<uint32_t>(1u << (req.size & 0x3u));
-            const Word data = is_write ? static_cast<Word>(req.data) : Word{0};
+            const simrv::xlen::Word data =
+                is_write ? static_cast<simrv::xlen::Word>(req.data) : simrv::xlen::Word{0};
             tracer_->log_mmio(req.hart, "unmapped", req.address.raw(), width, data, is_write, true,
                               false);
         }
@@ -175,12 +178,14 @@ auto MmioRouter::route_request(const TlChannelA& req, TlChannelD& resp) -> bool 
     const bool is_write =
         (req.opcode == TlOpcodeA::PutFullData || req.opcode == TlOpcodeA::PutPartialData);
 
-    const Address request_bytes = static_cast<Address>(1u << (req.size & 0x3u));
+    const simrv::xlen::Address request_bytes =
+        static_cast<simrv::xlen::Address>(1u << (req.size & 0x3u));
     const auto trace_access = [&](bool faulted) {
         if (tracer_ == nullptr ||
             (!tracer_->is_dlog_enabled() && !tracer_->is_architecture_trace_enabled()))
             return;
-        const Word data = is_write ? static_cast<Word>(req.data) : static_cast<Word>(resp.data);
+        const simrv::xlen::Word data = is_write ? static_cast<simrv::xlen::Word>(req.data)
+                                                : static_cast<simrv::xlen::Word>(resp.data);
         tracer_->log_mmio(req.hart, device->name(), req.address.raw(),
                           static_cast<uint32_t>(request_bytes), data, is_write, faulted);
     };
@@ -191,7 +196,7 @@ auto MmioRouter::route_request(const TlChannelA& req, TlChannelD& resp) -> bool 
         return true;
     }
 
-    if (request_bytes - 1 > std::numeric_limits<Address>::max() - req.address.raw() ||
+    if (request_bytes - 1 > std::numeric_limits<simrv::xlen::Address>::max() - req.address.raw() ||
         !device->contains((req.address + request_bytes - 1).raw())) {
         resp.denied = true;
         ++bus_error_count_;
@@ -207,7 +212,7 @@ auto MmioRouter::route_request(const TlChannelA& req, TlChannelD& resp) -> bool 
     }
 
     // Alignment validation against device requirements
-    const Address align = device->alignment();
+    const simrv::xlen::Address align = device->alignment();
     if (align > 1 && (req.address % align) != 0) {
         resp.denied = true;
         ++bus_error_count_;

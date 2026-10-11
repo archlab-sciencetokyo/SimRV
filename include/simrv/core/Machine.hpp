@@ -114,10 +114,10 @@ enum class ExecutionState : uint32_t {
 /// Stable, inexpensive execution state consumed by the asynchronous TUI renderer.
 struct TuiExecutionSnapshot {
     size_t hart = 0;
-    Register pc = 0;
-    Counter cycle_count = 0;
-    Counter instruction_count = 0;
-    Counter timer_ticks = 0;
+    simrv::xlen::Register pc = 0;
+    simrv::xlen::Counter cycle_count = 0;
+    simrv::xlen::Counter instruction_count = 0;
+    simrv::xlen::Counter timer_ticks = 0;
     simrv::xlen::PrivilegeLevel privilege = simrv::xlen::PrivilegeLevel::Machine;
     pipeline::PipelineStats ca_stats{};
     uint64_t icache_hits = 0;
@@ -150,7 +150,7 @@ class Machine final : public core::IInterruptController {
 
     std::unique_ptr<Runtime> runtime_;
     std::unique_ptr<simrv::device::PlatformDeviceRegistry> device_registry_;
-    Counter next_checkpoint_cycle_ = 0;
+    simrv::xlen::Counter next_checkpoint_cycle_ = 0;
 
    public:
     enum class StopReason : uint8_t {
@@ -235,7 +235,7 @@ class Machine final : public core::IInterruptController {
     [[nodiscard]] auto spike_elf() const noexcept -> const std::string& {
         return config.debug.spike_elf;
     }
-    [[nodiscard]] auto isa_test_tohost() const noexcept -> Address {
+    [[nodiscard]] auto isa_test_tohost() const noexcept -> simrv::xlen::Address {
         return config.isa.isatest_tohost;
     }
     [[nodiscard]] auto memory_geometry() const noexcept -> MemoryGeometry { return config.memory; }
@@ -262,9 +262,12 @@ class Machine final : public core::IInterruptController {
         return start_time_;
     }
     /// Initialization-only derived boot state; image symbols never rewrite the input config.
-    void set_resolved_boot_state(Address start_pc, std::optional<Address> tohost_address) noexcept;
-    [[nodiscard]] auto resolved_start_pc() const noexcept -> Address { return resolved_start_pc_; }
-    [[nodiscard]] auto resolved_isatest_tohost() const noexcept -> Address {
+    void set_resolved_boot_state(simrv::xlen::Address start_pc,
+                                 std::optional<simrv::xlen::Address> tohost_address) noexcept;
+    [[nodiscard]] auto resolved_start_pc() const noexcept -> simrv::xlen::Address {
+        return resolved_start_pc_;
+    }
+    [[nodiscard]] auto resolved_isatest_tohost() const noexcept -> simrv::xlen::Address {
         return resolved_isatest_tohost_;
     }
     [[nodiscard]] auto platform_status() const -> PlatformStatusSnapshot;
@@ -280,11 +283,11 @@ class Machine final : public core::IInterruptController {
     [[nodiscard]] auto load_checkpoint(const std::string& filepath)
         -> std::expected<void, std::string>;
     struct LoadedMemorySegment {
-        Address paddr = 0;
+        simrv::xlen::Address paddr = 0;
         size_t size = 0;
         bool is_executable = false;
     };
-    void record_loaded_segment(Address paddr, size_t size, bool is_executable) {
+    void record_loaded_segment(simrv::xlen::Address paddr, size_t size, bool is_executable) {
         loaded_segments_.push_back({paddr, size, is_executable});
     }
     void clear_loaded_segments() noexcept { loaded_segments_.clear(); }
@@ -334,11 +337,12 @@ class Machine final : public core::IInterruptController {
     /// Request execution of a single instruction cycle and synchronously wait for completion.
     void step_sync(std::chrono::milliseconds timeout = std::chrono::milliseconds(500));
     /// Begin an all-stop GDB step that completes when the selected hart retires once.
-    [[nodiscard]] auto begin_debug_step(HartId hart) -> bool;
+    [[nodiscard]] auto begin_debug_step(simrv::xlen::HartId hart) -> bool;
     /// Stop execution for a debugger event and publish an RSP stop reply.
-    void debug_halt(HartId hart, GdbSignal signal = GdbSignal::SigTrap, std::string reason = {});
+    void debug_halt(simrv::xlen::HartId hart, GdbSignal signal = GdbSignal::SigTrap,
+                    std::string reason = {});
     /// Record a memory watchpoint and stop after the modeled access completes.
-    void debug_watch_hit(HartId hart, GdbSignal signal, std::string reason,
+    void debug_watch_hit(simrv::xlen::HartId hart, GdbSignal signal, std::string reason,
                          std::string description);
     /// Wake simulation and SMP workers after an external control-plane event.
     void notify_control_event() noexcept;
@@ -348,7 +352,7 @@ class Machine final : public core::IInterruptController {
         return is_running_.load(std::memory_order_relaxed);
     }
     /// Total instructions retired by every hart during the current machine run.
-    [[nodiscard]] auto retired_instruction_count() const noexcept -> Counter {
+    [[nodiscard]] auto retired_instruction_count() const noexcept -> simrv::xlen::Counter {
         return retired_instruction_count_.load(std::memory_order_relaxed);
     }
     [[nodiscard]] auto is_smp_enabled() const noexcept -> bool {
@@ -356,7 +360,7 @@ class Machine final : public core::IInterruptController {
     }
 
     /// Publish retired instructions from a hart; used by execution engines and safe for MT-SMP.
-    void record_retired_instructions(Counter count) noexcept {
+    void record_retired_instructions(simrv::xlen::Counter count) noexcept {
         if (simrv::compiler::likely(count != 0)) {
             if (simrv::compiler::likely(!is_smp_enabled())) {
                 retired_instruction_count_.store(
@@ -381,7 +385,7 @@ class Machine final : public core::IInterruptController {
     /// Subscribe to interrupt line and DMA transfer lifecycle observations.
     [[nodiscard]] auto add_event_observer(MachineEventObserver observer) -> MachineEventObserverId;
     void remove_event_observer(MachineEventObserverId observer_id);
-    void notify_interrupt_transition(HartId hart, uint32_t cause, bool asserted,
+    void notify_interrupt_transition(simrv::xlen::HartId hart, uint32_t cause, bool asserted,
                                      std::string_view source, uint64_t cycle);
     /// Reset runtime state flags and CPU state.
     void reset_state();
@@ -394,7 +398,7 @@ class Machine final : public core::IInterruptController {
     std::atomic<int> exit_code{0};               // Exit/status code of the simulation.
     std::atomic<bool> is_shutdown_ = false;      // System shutdown flag.
     std::atomic<StopReason> stop_reason_{StopReason::Running};
-    std::atomic<Counter> retired_instruction_count_{0};
+    std::atomic<simrv::xlen::Counter> retired_instruction_count_{0};
 
     RuntimeProfile runtime_profile{};  // Resolved command-line runtime policy.
     std::atomic<bool> s_mmu_ever_used{
@@ -404,28 +408,29 @@ class Machine final : public core::IInterruptController {
     void apply_configuration(MachineConfig machine_config);
     MachineConfig config{};
     std::chrono::steady_clock::time_point start_time_{};
-    Address resolved_start_pc_ = 0;
-    Address resolved_isatest_tohost_ = 0;
+    simrv::xlen::Address resolved_start_pc_ = 0;
+    simrv::xlen::Address resolved_isatest_tohost_ = 0;
 
    public:
     /// Inspect a simulated hart by index (0 is the primary/boot hart).
     [[nodiscard]] auto hart(size_t index = 0) -> CPU&;
     [[nodiscard]] auto hart(size_t index = 0) const -> const CPU&;
-    [[nodiscard]] auto hart(HartId id) -> CPU& { return hart(id.val); }
-    [[nodiscard]] auto hart(HartId id) const -> const CPU& { return hart(id.val); }
+    [[nodiscard]] auto hart(simrv::xlen::HartId id) -> CPU& { return hart(id.val); }
+    [[nodiscard]] auto hart(simrv::xlen::HartId id) const -> const CPU& { return hart(id.val); }
     [[nodiscard]] auto num_harts() const -> size_t;
     [[nodiscard]] auto primary_hart() noexcept -> CPU&;
     [[nodiscard]] auto primary_hart() const noexcept -> const CPU&;
-    [[nodiscard]] auto ram_data() noexcept -> Byte*;
-    [[nodiscard]] auto ram_data() const noexcept -> const Byte*;
+    [[nodiscard]] auto ram_data() noexcept -> simrv::xlen::Byte*;
+    [[nodiscard]] auto ram_data() const noexcept -> const simrv::xlen::Byte*;
     [[nodiscard]] auto ram_view() const noexcept -> simrv::memory::RamView;
     [[nodiscard]] auto framebuffer_view() const noexcept -> simrv::memory::RamView;
     [[nodiscard]] auto tui_execution_snapshot(size_t hart = 0) const noexcept
         -> TuiExecutionSnapshot;
     /// Platform capability used by built-in devices to publish an external interrupt level.
-    void set_platform_irq(IrqNumber irq, bool asserted = true) override;
+    void set_platform_irq(simrv::xlen::IrqNumber irq, bool asserted = true) override;
     /// Architectural interrupt signal dispatched to a specific hart.
-    void set_hart_irq(HartId hart, InterruptType type, PrivilegeLevel priv, bool asserted) override;
+    void set_hart_irq(simrv::xlen::HartId hart, InterruptType type,
+                      simrv::xlen::PrivilegeLevel priv, bool asserted) override;
     [[nodiscard]] auto interrupt_controller() noexcept -> core::IInterruptController& {
         return *this;
     }
@@ -497,18 +502,18 @@ class Machine final : public core::IInterruptController {
     simrv::memory::DmaEngine dma_engine_{};
 
     /// Internal test support for deterministic component fixtures. Not part of the SDK contract.
-    void set_ram_for_testing(Byte* ram, size_t size) noexcept;
-    void set_ram_for_testing(std::span<Byte> ram) noexcept {
+    void set_ram_for_testing(simrv::xlen::Byte* ram, size_t size) noexcept;
+    void set_ram_for_testing(std::span<simrv::xlen::Byte> ram) noexcept {
         set_ram_for_testing(ram.data(), ram.size());
     }
     void set_tui_enabled_for_testing(bool enabled) noexcept { config.tui.enabled = enabled; }
     void set_smp_parallel_for_testing(bool enabled) noexcept {
         config.execution.smp_mode = enabled ? SmpMode::CycleOriented : SmpMode::CycleAccurate;
     }
-    void set_instruction_limit_for_testing(Counter limit) noexcept {
+    void set_instruction_limit_for_testing(simrv::xlen::Counter limit) noexcept {
         config.execution.fincnt = limit;
     }
-    [[nodiscard]] auto mutable_ram_data_for_testing() noexcept -> Byte*&;
+    [[nodiscard]] auto mutable_ram_data_for_testing() noexcept -> simrv::xlen::Byte*&;
     [[nodiscard]] auto allocate_ram_for_testing(size_t bytes) -> bool {
         return allocate_ram(bytes);
     }
@@ -606,15 +611,15 @@ class Machine final : public core::IInterruptController {
     uint64_t step_ack_count_ = 0;
     std::atomic<uint64_t> control_event_generation_{0};
     std::atomic<uint32_t> runner_in_cycle_{0};
-    std::optional<HartId> debug_step_hart_;
-    Counter debug_step_target_ = 0;
+    std::optional<simrv::xlen::HartId> debug_step_hart_;
+    simrv::xlen::Counter debug_step_target_ = 0;
     struct PendingDebugHalt {
-        HartId hart{0};
+        simrv::xlen::HartId hart{0};
         GdbSignal signal = GdbSignal::SigTrap;
         std::string reason;
         std::string description;
         bool waits_for_memory = false;
-        Counter retirement_target = 0;
+        simrv::xlen::Counter retirement_target = 0;
     };
     void enqueue_debug_halt(PendingDebugHalt halt);
     std::atomic<bool> debug_halt_pending_{false};

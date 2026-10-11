@@ -245,10 +245,10 @@ auto InspectorPane::content_total_columns(int width) const -> int {
         case TuiRegPage::FPR: {
             bool const single = is_single_column(width);
             if (single) {
-                int const min_single = (sizeof(Register) > 4) ? 32 : 24;
+                int const min_single = (sizeof(simrv::xlen::Register) > 4) ? 32 : 24;
                 return std::max(width, min_single);
             }
-            int const min_double = (sizeof(Register) > 4) ? 60 : 44;
+            int const min_double = (sizeof(simrv::xlen::Register) > 4) ? 60 : 44;
             return std::max(width, min_double);
         }
         case TuiRegPage::VEC: {
@@ -257,10 +257,10 @@ auto InspectorPane::content_total_columns(int width) const -> int {
         }
         case TuiRegPage::PIPELINE: {
             if (column_header_mode_ || secondary_column_mode_) {
-                int const min_pipe = (sizeof(Register) > 4) ? 46 : 44;
+                int const min_pipe = (sizeof(simrv::xlen::Register) > 4) ? 46 : 44;
                 return std::max(width, min_pipe);
             }
-            int const min_pipe = (sizeof(Register) > 4) ? 68 : 60;
+            int const min_pipe = (sizeof(simrv::xlen::Register) > 4) ? 68 : 60;
             return std::max(width, min_pipe);
         }
         case TuiRegPage::BPRED: {
@@ -276,7 +276,7 @@ auto InspectorPane::content_total_columns(int width) const -> int {
             return std::max(width, min_cache);
         }
         case TuiRegPage::STACK: {
-            int const min_stack = (sizeof(Register) > 4) ? 50 : 44;
+            int const min_stack = (sizeof(simrv::xlen::Register) > 4) ? 50 : 44;
             return std::max(width, min_stack);
         }
         case TuiRegPage::EXPLAIN: {
@@ -1001,9 +1001,12 @@ auto InspectorPane::render_column_row(int row_idx, int width, int col_idx, size_
 void InspectorPane::update_cache() {
     auto& st = current_cpu().state();
     for (int i = 0; i < 32; ++i) {
-        cached_gpr_.at(static_cast<std::size_t>(i)) = st.regs.read(static_cast<RegId>(i));
-        cached_fpr_.at(static_cast<std::size_t>(i)) = st.regs.read_fp(static_cast<RegId>(i));
-        cached_vec_.at(static_cast<std::size_t>(i)) = st.regs.read_vector(static_cast<RegId>(i));
+        cached_gpr_.at(static_cast<std::size_t>(i)) =
+            st.regs.read(static_cast<simrv::xlen::RegId>(i));
+        cached_fpr_.at(static_cast<std::size_t>(i)) =
+            st.regs.read_fp(static_cast<simrv::xlen::RegId>(i));
+        cached_vec_.at(static_cast<std::size_t>(i)) =
+            st.regs.read_vector(static_cast<simrv::xlen::RegId>(i));
     }
 }
 

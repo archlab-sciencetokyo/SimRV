@@ -192,11 +192,11 @@ namespace simrv::pipeline::operation {
 }
 
 [[nodiscard]] constexpr auto make_dependency_traits(isa::OperationId op_id, isa::Opcode opcode,
-                                                    RegId rd, uint32_t funct5) noexcept
+                                                    simrv::xlen::RegId rd, uint32_t funct5) noexcept
     -> DependencyTraits {
     DependencyTraits dt{};
     if (op_id != isa::UNKNOWN) {
-        dt.writes_int = writes_integer(op_id) && (rd != RegId::Zero);
+        dt.writes_int = writes_integer(op_id) && (rd != simrv::xlen::RegId::Zero);
         dt.writes_fp = writes_float(op_id);
         dt.writes_vec = writes_vector(op_id);
         dt.reads_rs1_int = is_rs1_int(op_id);
@@ -225,7 +225,7 @@ namespace simrv::pipeline::operation {
                              opcode == isa::Opcode::MAdd || opcode == isa::Opcode::MSub ||
                              opcode == isa::Opcode::NMSub || opcode == isa::Opcode::NMAdd);
         const bool writes_int_calc = [&]() {
-            if (rd == RegId::Zero) return false;
+            if (rd == simrv::xlen::RegId::Zero) return false;
             switch (opcode) {
                 case isa::Opcode::Branch:
                 case isa::Opcode::Store:

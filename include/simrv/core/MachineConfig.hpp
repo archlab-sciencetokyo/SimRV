@@ -29,13 +29,15 @@ enum class PlatformProfile : uint8_t {
 };
 
 struct MemoryGeometry {
-    Address dram_base = memory::kDramBaseAddress;
-    Address dram_size = memory::kDramSize;
+    simrv::xlen::Address dram_base = memory::kDramBaseAddress;
+    simrv::xlen::Address dram_size = memory::kDramSize;
 
-    [[nodiscard]] constexpr auto contains(Address address, size_t size = 1) const -> bool {
+    [[nodiscard]] constexpr auto contains(simrv::xlen::Address address, size_t size = 1) const
+        -> bool {
         return memory::address_range_contains(dram_base, dram_size, address, size);
     }
-    [[nodiscard]] constexpr auto contains(PhysAddr address, size_t size = 1) const -> bool {
+    [[nodiscard]] constexpr auto contains(simrv::xlen::PhysAddr address, size_t size = 1) const
+        -> bool {
         return memory::address_range_contains(dram_base, dram_size, address.raw(), size);
     }
 };
@@ -50,13 +52,13 @@ struct ExecutionConfig {
     uint32_t smp_quantum = 100;
     std::optional<SmpMode> smp_mode{};
     simrv::pipeline::PipelineType pipeline_type = simrv::pipeline::PipelineType::FiveStage;
-    Address start_pc = 0;
-    Counter strace = 0;
-    Counter fincnt = std::numeric_limits<Counter>::max();
-    Counter trace_begin = std::numeric_limits<Counter>::max();
-    Counter trace_end = std::numeric_limits<Counter>::max();
-    Counter enabletimer = std::numeric_limits<Counter>::max();
-    Counter memimg_cycle = std::numeric_limits<Counter>::max();
+    simrv::xlen::Address start_pc = 0;
+    simrv::xlen::Counter strace = 0;
+    simrv::xlen::Counter fincnt = std::numeric_limits<simrv::xlen::Counter>::max();
+    simrv::xlen::Counter trace_begin = std::numeric_limits<simrv::xlen::Counter>::max();
+    simrv::xlen::Counter trace_end = std::numeric_limits<simrv::xlen::Counter>::max();
+    simrv::xlen::Counter enabletimer = std::numeric_limits<simrv::xlen::Counter>::max();
+    simrv::xlen::Counter memimg_cycle = std::numeric_limits<simrv::xlen::Counter>::max();
     bool realtime_pacing = false;
 };
 
@@ -90,17 +92,17 @@ struct DebugConfig {
     std::string trace_function;
     std::string trace_device;
     std::optional<uint32_t> trace_hart;
-    std::optional<Address> trace_pc_start;
-    std::optional<Address> trace_pc_end;
-    std::optional<Counter> trace_after_cycle;
-    std::optional<Counter> trace_before_cycle;
-    Counter checkpoint_every = 0;
+    std::optional<simrv::xlen::Address> trace_pc_start;
+    std::optional<simrv::xlen::Address> trace_pc_end;
+    std::optional<simrv::xlen::Counter> trace_after_cycle;
+    std::optional<simrv::xlen::Counter> trace_before_cycle;
+    simrv::xlen::Counter checkpoint_every = 0;
     std::string checkpoint_dir;
 };
 
 struct IsaConfig {
-    Address isatest_tohost = 0x80001000;
-    CSRValue isa_preset = isa::kMisaDefault;
+    simrv::xlen::Address isatest_tohost = 0x80001000;
+    simrv::xlen::CSRValue isa_preset = isa::kMisaDefault;
     bool misa_override = false;
     unsigned int misa_xlen = 0;
     unsigned int vlen = 0;
@@ -197,13 +199,13 @@ struct MachineConfig {
     }
 
     template <typename Self>
-    constexpr auto&& with_dram_base(this Self&& self, Address base) noexcept {
+    constexpr auto&& with_dram_base(this Self&& self, simrv::xlen::Address base) noexcept {
         self.memory.dram_base = base;
         return std::forward<Self>(self);
     }
 
     template <typename Self>
-    constexpr auto&& with_dram_size(this Self&& self, Address size) noexcept {
+    constexpr auto&& with_dram_size(this Self&& self, simrv::xlen::Address size) noexcept {
         self.memory.dram_size = size;
         return std::forward<Self>(self);
     }
@@ -233,7 +235,7 @@ struct MachineConfig {
     }
 
     template <typename Self>
-    constexpr auto&& with_start_pc(this Self&& self, Address pc) noexcept {
+    constexpr auto&& with_start_pc(this Self&& self, simrv::xlen::Address pc) noexcept {
         self.execution.start_pc = pc;
         return std::forward<Self>(self);
     }

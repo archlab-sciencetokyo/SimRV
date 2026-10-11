@@ -48,27 +48,27 @@ class RegisterFile {
 
     struct RegisterProxy {
         RegisterFile* rf;
-        RegId idx;
-        constexpr auto operator=(Register val) -> RegisterProxy& {
+        simrv::xlen::RegId idx;
+        constexpr auto operator=(simrv::xlen::Register val) -> RegisterProxy& {
             rf->write(idx, val);
             return *this;
         }
-        constexpr operator Register() const { return rf->read(idx); }
+        constexpr operator simrv::xlen::Register() const { return rf->read(idx); }
     };
 
     struct FpRegisterProxy {
         RegisterFile* rf;
-        FpRegId idx;
-        constexpr auto operator=(FloatingRegister val) -> FpRegisterProxy& {
+        simrv::xlen::FpRegId idx;
+        constexpr auto operator=(simrv::xlen::FloatingRegister val) -> FpRegisterProxy& {
             rf->write_fp(idx, val);
             return *this;
         }
-        constexpr operator FloatingRegister() const { return rf->read_fp(idx); }
+        constexpr operator simrv::xlen::FloatingRegister() const { return rf->read_fp(idx); }
     };
 
     struct VecRegisterProxy {
         RegisterFile* rf;
-        VecRegId idx;
+        simrv::xlen::VecRegId idx;
         constexpr auto operator=(const VectorRegister& val) -> VecRegisterProxy& {
             rf->write_vector(idx, val);
             return *this;
@@ -92,32 +92,41 @@ class RegisterFile {
      * Vector 1.0 defines maximum VLMAX as VLEN, so a power-of-two VLEN requires writable bits
      * capable of representing element indices 0 through VLEN-1.
      */
-    [[nodiscard]] constexpr auto vstart_mask() const -> CSRValue {
-        return static_cast<CSRValue>(vlen - 1U);
+    [[nodiscard]] constexpr auto vstart_mask() const -> simrv::xlen::CSRValue {
+        return static_cast<simrv::xlen::CSRValue>(vlen - 1U);
     }
 
-    [[nodiscard]] constexpr auto operator[](RegId idx) -> RegisterProxy { return {this, idx}; }
-    [[nodiscard]] constexpr auto operator[](RegId idx) const -> Register { return read(idx); }
-    [[nodiscard]] constexpr auto operator[](FpRegId idx) -> FpRegisterProxy { return {this, idx}; }
-    [[nodiscard]] constexpr auto operator[](FpRegId idx) const -> FloatingRegister {
-        return read_fp(idx);
-    }
-    [[nodiscard]] constexpr auto operator[](VecRegId idx) -> VecRegisterProxy {
+    [[nodiscard]] constexpr auto operator[](simrv::xlen::RegId idx) -> RegisterProxy {
         return {this, idx};
     }
-    [[nodiscard]] constexpr auto operator[](VecRegId idx) const -> const VectorRegister& {
+    [[nodiscard]] constexpr auto operator[](simrv::xlen::RegId idx) const -> simrv::xlen::Register {
+        return read(idx);
+    }
+    [[nodiscard]] constexpr auto operator[](simrv::xlen::FpRegId idx) -> FpRegisterProxy {
+        return {this, idx};
+    }
+    [[nodiscard]] constexpr auto operator[](simrv::xlen::FpRegId idx) const
+        -> simrv::xlen::FloatingRegister {
+        return read_fp(idx);
+    }
+    [[nodiscard]] constexpr auto operator[](simrv::xlen::VecRegId idx) -> VecRegisterProxy {
+        return {this, idx};
+    }
+    [[nodiscard]] constexpr auto operator[](simrv::xlen::VecRegId idx) const
+        -> const VectorRegister& {
         return read_vector(idx);
     }
 
-    [[nodiscard]] constexpr auto read(RegId idx) const -> Register {
+    [[nodiscard]] constexpr auto read(simrv::xlen::RegId idx) const -> simrv::xlen::Register {
         return reg_[std::to_underlying(idx)];
     }
 
-    constexpr void write(RegId idx, Register val) {
-        if (simrv::compiler::likely(idx != RegId::Zero)) {
+    constexpr void write(simrv::xlen::RegId idx, simrv::xlen::Register val) {
+        if (simrv::compiler::likely(idx != simrv::xlen::RegId::Zero)) {
             if constexpr (simrv::xlen::kIsXLen64) {
                 if (simrv::compiler::unlikely(xlen == 32)) {
-                    val = static_cast<Register>(static_cast<int64_t>(static_cast<int32_t>(val)));
+                    val = static_cast<simrv::xlen::Register>(
+                        static_cast<int64_t>(static_cast<int32_t>(val)));
                 }
             }
             reg_[std::to_underlying(idx)] = val;
@@ -126,72 +135,78 @@ class RegisterFile {
 
     /// Branchless GPR write: always writes to rd, then re-zeros x0.
     /// In RV64-mode, sign-extends to 64-bit for 32-bit execution mode.
-    SIMRV_ALWAYS_INLINE constexpr void write_branchless(RegId idx, Register val) {
+    SIMRV_ALWAYS_INLINE constexpr void write_branchless(simrv::xlen::RegId idx,
+                                                        simrv::xlen::Register val) {
         if constexpr (simrv::xlen::kIsXLen64) {
             if (simrv::compiler::unlikely(xlen == 32)) {
-                val = static_cast<Register>(static_cast<int64_t>(static_cast<int32_t>(val)));
+                val = static_cast<simrv::xlen::Register>(
+                    static_cast<int64_t>(static_cast<int32_t>(val)));
             }
         }
         reg_[std::to_underlying(idx)] = val;
         reg_[0] = 0;
     }
 
-    [[nodiscard]] constexpr auto read_fp(RegId idx) const -> FloatingRegister {
+    [[nodiscard]] constexpr auto read_fp(simrv::xlen::RegId idx) const
+        -> simrv::xlen::FloatingRegister {
         return freg_[std::to_underlying(idx)];
     }
 
-    [[nodiscard]] constexpr auto read_fp(FpRegId idx) const -> FloatingRegister {
+    [[nodiscard]] constexpr auto read_fp(simrv::xlen::FpRegId idx) const
+        -> simrv::xlen::FloatingRegister {
         return freg_[std::to_underlying(idx)];
     }
 
-    constexpr void write_fp(RegId idx, FloatingRegister val) {
+    constexpr void write_fp(simrv::xlen::RegId idx, simrv::xlen::FloatingRegister val) {
         freg_[std::to_underlying(idx)] = val;
     }
 
-    constexpr void write_fp(FpRegId idx, FloatingRegister val) {
+    constexpr void write_fp(simrv::xlen::FpRegId idx, simrv::xlen::FloatingRegister val) {
         freg_[std::to_underlying(idx)] = val;
     }
 
-    [[nodiscard]] constexpr auto read_vector(RegId idx) const -> const VectorRegister& {
+    [[nodiscard]] constexpr auto read_vector(simrv::xlen::RegId idx) const
+        -> const VectorRegister& {
         return vreg_[std::to_underlying(idx)];
     }
 
-    [[nodiscard]] constexpr auto read_vector(VecRegId idx) const -> const VectorRegister& {
+    [[nodiscard]] constexpr auto read_vector(simrv::xlen::VecRegId idx) const
+        -> const VectorRegister& {
         return vreg_[std::to_underlying(idx)];
     }
 
-    [[nodiscard]] constexpr auto read_vector(RegId idx) -> VectorRegister& {
+    [[nodiscard]] constexpr auto read_vector(simrv::xlen::RegId idx) -> VectorRegister& {
         return vreg_[std::to_underlying(idx)];
     }
 
-    [[nodiscard]] constexpr auto read_vector(VecRegId idx) -> VectorRegister& {
+    [[nodiscard]] constexpr auto read_vector(simrv::xlen::VecRegId idx) -> VectorRegister& {
         return vreg_[std::to_underlying(idx)];
     }
 
-    constexpr void write_vector(RegId idx, const VectorRegister& val) {
+    constexpr void write_vector(simrv::xlen::RegId idx, const VectorRegister& val) {
         vreg_[std::to_underlying(idx)] = val;
     }
 
-    constexpr void write_vector(VecRegId idx, const VectorRegister& val) {
+    constexpr void write_vector(simrv::xlen::VecRegId idx, const VectorRegister& val) {
         vreg_[std::to_underlying(idx)] = val;
     }
 
-    constexpr void fill(Register val) {
+    constexpr void fill(simrv::xlen::Register val) {
         reg_.fill(val);
         reg_[0] = 0;
     }
 
-    constexpr void fill_fp(FloatingRegister val) { freg_.fill(val); }
+    constexpr void fill_fp(simrv::xlen::FloatingRegister val) { freg_.fill(val); }
 
     constexpr void fill_vector(const VectorRegister& val) { vreg_.fill(val); }
 
-    [[nodiscard]] constexpr auto fp_data_ptr() const -> const FloatingRegister* {
+    [[nodiscard]] constexpr auto fp_data_ptr() const -> const simrv::xlen::FloatingRegister* {
         return freg_.data();
     }
 
    private:
-    alignas(64) std::array<Register, kNumRegisters> reg_{};
-    alignas(64) std::array<FloatingRegister, kNumRegisters> freg_{};
+    alignas(64) std::array<simrv::xlen::Register, kNumRegisters> reg_{};
+    alignas(64) std::array<simrv::xlen::FloatingRegister, kNumRegisters> freg_{};
     alignas(kVlenMaxBytes) std::array<VectorRegister, kNumRegisters> vreg_{};
 };
 

@@ -30,13 +30,16 @@ namespace simrv {
 class Mmu {
    public:
     explicit Mmu(memory::RamView ram = {}) noexcept : walker_(ram) {}
-    explicit Mmu(Byte* mmem, Address dram_base, Address dram_size) noexcept
+    explicit Mmu(simrv::xlen::Byte* mmem, simrv::xlen::Address dram_base,
+                 simrv::xlen::Address dram_size) noexcept
         : walker_(mmem, dram_base, dram_size) {}
 
     [[nodiscard]] auto walker() const noexcept -> const memory::PageTableWalker& { return walker_; }
     [[nodiscard]] auto walker() noexcept -> memory::PageTableWalker& { return walker_; }
 
-    [[nodiscard]] auto mmem() const noexcept -> Byte* { return walker_.ram_view().data(); }
+    [[nodiscard]] auto mmem() const noexcept -> simrv::xlen::Byte* {
+        return walker_.ram_view().data();
+    }
     [[nodiscard]] auto ram_view() const noexcept -> memory::RamView { return walker_.ram_view(); }
     void set_ram_view(memory::RamView ram) noexcept { walker_.set_ram_view(ram); }
 
@@ -53,11 +56,10 @@ class Mmu {
      * @param arch_state Optional CPU architectural state for PMP enforcement
      * @return Translated physical address or TrapCause on fault
      */
-    std::expected<PageWalkResult, TrapCause> page_walk(VirtAddr v_addr, PteAccess access,
-                                                       PrivilegeLevel priv, CSRValue mstatus,
-                                                       Word satp, unsigned xlen,
-                                                       bool update_access_bits = true,
-                                                       const core::ArchState* arch_state = nullptr);
+    std::expected<PageWalkResult, simrv::xlen::TrapCause> page_walk(
+        simrv::xlen::VirtAddr v_addr, PteAccess access, simrv::xlen::PrivilegeLevel priv,
+        simrv::xlen::CSRValue mstatus, simrv::xlen::Word satp, unsigned xlen,
+        bool update_access_bits = true, const core::ArchState* arch_state = nullptr);
 
     /**
      * @brief Translate address without performing page walk.
@@ -75,20 +77,21 @@ class Mmu {
      * @param arch_state Optional CPU architectural state for PMP enforcement
      * @return Translated physical address or TrapCause on fault
      */
-    std::expected<PageWalkResult, TrapCause> translate(VirtAddr v_addr, PteAccess access,
-                                                       PrivilegeLevel priv, CSRValue mstatus,
-                                                       Word satp, unsigned xlen,
-                                                       bool update_access_bits = true,
-                                                       const core::ArchState* arch_state = nullptr);
+    std::expected<PageWalkResult, simrv::xlen::TrapCause> translate(
+        simrv::xlen::VirtAddr v_addr, PteAccess access, simrv::xlen::PrivilegeLevel priv,
+        simrv::xlen::CSRValue mstatus, simrv::xlen::Word satp, unsigned xlen,
+        bool update_access_bits = true, const core::ArchState* arch_state = nullptr);
 
     /// Start a walk without performing any implicit physical-memory access.
-    [[nodiscard]] PageWalkState begin_page_walk(VirtAddr v_addr, PteAccess access,
-                                                PrivilegeLevel priv, CSRValue mstatus, Word satp,
-                                                unsigned xlen, bool update_access_bits = true,
+    [[nodiscard]] PageWalkState begin_page_walk(simrv::xlen::VirtAddr v_addr, PteAccess access,
+                                                simrv::xlen::PrivilegeLevel priv,
+                                                simrv::xlen::CSRValue mstatus,
+                                                simrv::xlen::Word satp, unsigned xlen,
+                                                bool update_access_bits = true,
                                                 const core::ArchState* arch_state = nullptr) const;
 
     /// Consume the PTE returned by the current ReadPte request.
-    void accept_page_walk_pte(PageWalkState& state, Word pte) const;
+    void accept_page_walk_pte(PageWalkState& state, simrv::xlen::Word pte) const;
 
     /// Complete the current accessed/dirty-bit WritePte request.
     static void accept_page_walk_write(PageWalkState& state) noexcept;
@@ -104,7 +107,8 @@ class Mmu {
      * @param xlen Current execution XLEN
      * @return true if the address is canonical, false otherwise
      */
-    [[nodiscard]] static constexpr auto is_canonical(VirtAddr v_addr, Word satp, unsigned xlen)
+    [[nodiscard]] static constexpr auto is_canonical(simrv::xlen::VirtAddr v_addr,
+                                                     simrv::xlen::Word satp, unsigned xlen)
         -> bool {
         return memory::PageTableWalker::is_canonical(v_addr, satp, xlen);
     }

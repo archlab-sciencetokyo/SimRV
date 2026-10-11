@@ -8,14 +8,15 @@
 
 namespace simrv::device {
 
-VirtioMmioGpu::VirtioMmioGpu(Address base_address, uint32_t irq_num, core::Machine* machine)
+VirtioMmioGpu::VirtioMmioGpu(simrv::xlen::Address base_address, uint32_t irq_num,
+                             core::Machine* machine)
     : VirtioMmioDevice("virtio-gpu-mmio", base_address, 0x1000, virtio::kDevIdGpu, irq_num,
                        machine) {
     add_queue(64);  // controlq
     add_queue(64);  // cursorq
 }
 
-auto VirtioMmioGpu::read_device_config(Address offset, std::size_t size) -> uint64_t {
+auto VirtioMmioGpu::read_device_config(simrv::xlen::Address offset, std::size_t size) -> uint64_t {
     (void)size;
     if (offset == 0) return 0;  // events_read
     if (offset == 4) return 0;  // events_clear

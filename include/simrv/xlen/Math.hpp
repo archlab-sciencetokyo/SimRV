@@ -8,10 +8,10 @@
 
 #include "simrv/xlen/Types.hpp"
 
+namespace simrv::xlen {
+
 template <typename T>
 concept IntegralWord = std::integral<T> && (sizeof(T) == sizeof(Word));
-
-namespace simrv::xlen {
 
 // =========================================================================
 // Mathematics & Multiplications

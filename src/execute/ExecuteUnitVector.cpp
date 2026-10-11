@@ -524,8 +524,8 @@ constexpr auto lmul_ratio(Vlmul lmul) -> std::pair<uint32_t, uint32_t> {
     }
 }
 
-constexpr auto valid_group(RegId base, uint32_t numerator, uint32_t denominator, uint32_t fields,
-                           uint32_t& field_registers) -> bool {
+constexpr auto valid_group(simrv::xlen::RegId base, uint32_t numerator, uint32_t denominator,
+                           uint32_t fields, uint32_t& field_registers) -> bool {
     if (numerator == 0 || numerator > denominator * 8 || numerator * 8 < denominator) return false;
     field_registers = numerator > denominator ? numerator / denominator : 1;
     const uint32_t first = std::to_underlying(base);
@@ -533,9 +533,9 @@ constexpr auto valid_group(RegId base, uint32_t numerator, uint32_t denominator,
            first + field_registers * fields <= 32;
 }
 
-constexpr auto make_operand_group(RegId base, uint32_t lmul_numerator, uint32_t lmul_denominator,
-                                  uint32_t width_numerator, uint32_t width_denominator,
-                                  VectorOperandGroup& group) -> bool {
+constexpr auto make_operand_group(simrv::xlen::RegId base, uint32_t lmul_numerator,
+                                  uint32_t lmul_denominator, uint32_t width_numerator,
+                                  uint32_t width_denominator, VectorOperandGroup& group) -> bool {
     uint32_t registers = 1;
     const uint32_t emul_numerator = lmul_numerator * width_numerator;
     const uint32_t emul_denominator = lmul_denominator * width_denominator;
@@ -573,9 +573,9 @@ constexpr auto legal_destination_overlap(const VectorOperandGroup& destination,
            destination.first + destination.registers == source.first + source.registers;
 }
 
-constexpr auto vector_compute_layout(isa::OperationId op_id, RegId destination, RegId source1,
-                                     RegId source2, uint32_t sew, Vlmul lmul)
-    -> VectorComputeLayout {
+constexpr auto vector_compute_layout(isa::OperationId op_id, simrv::xlen::RegId destination,
+                                     simrv::xlen::RegId source1, simrv::xlen::RegId source2,
+                                     uint32_t sew, Vlmul lmul) -> VectorComputeLayout {
     enum class Layout : uint8_t {
         None,
         WidenVv,
@@ -715,7 +715,7 @@ constexpr auto vector_compute_layout(isa::OperationId op_id, RegId destination, 
 
     std::array<VectorOperandGroup, 4> groups{};
     uint32_t group_count = 0;
-    const auto add_group = [&](RegId reg, uint32_t width_numerator,
+    const auto add_group = [&](simrv::xlen::RegId reg, uint32_t width_numerator,
                                uint32_t width_denominator) -> bool {
         return make_operand_group(reg, lmul_numerator, lmul_denominator, width_numerator,
                                   width_denominator, groups[group_count++]);
@@ -783,9 +783,10 @@ constexpr auto vector_compute_layout(isa::OperationId op_id, RegId destination, 
     return {.recognized = true, .valid = true};
 }
 
-constexpr auto vector_permute_layout(isa::OperationId op_id, RegId destination, RegId source1,
-                                     RegId source2, uint32_t sew, Vlmul lmul, uint32_t vlen,
-                                     CSRValue vstart) -> VectorComputeLayout {
+constexpr auto vector_permute_layout(isa::OperationId op_id, simrv::xlen::RegId destination,
+                                     simrv::xlen::RegId source1, simrv::xlen::RegId source2,
+                                     uint32_t sew, Vlmul lmul, uint32_t vlen,
+                                     simrv::xlen::CSRValue vstart) -> VectorComputeLayout {
     enum class Layout : uint8_t {
         None,
         SlideUp,
@@ -883,9 +884,9 @@ constexpr auto vector_permute_layout(isa::OperationId op_id, RegId destination, 
     return {.recognized = true, .valid = true};
 }
 
-constexpr auto ordinary_vector_groups_valid(isa::OperationId op_id, RegId destination,
-                                            RegId source1, RegId source2, Vlmul lmul,
-                                            bool special_layout) -> bool {
+constexpr auto ordinary_vector_groups_valid(isa::OperationId op_id, simrv::xlen::RegId destination,
+                                            simrv::xlen::RegId source1, simrv::xlen::RegId source2,
+                                            Vlmul lmul, bool special_layout) -> bool {
     if (special_layout || is_vector_reduction(op_id) || has_mask_destination(op_id) ||
         has_scalar_destination(op_id) || op_id == isa::OperationId::VIOTA_M ||
         op_id == isa::OperationId::VID_V || op_id == isa::OperationId::VMV_S_X ||
@@ -910,8 +911,9 @@ constexpr auto ordinary_vector_groups_valid(isa::OperationId op_id, RegId destin
            valid_group(source2, numerator, denominator, 1, registers);
 }
 
-constexpr auto reduction_groups_valid(isa::OperationId op_id, RegId scalar_source,
-                                      RegId vector_source, uint32_t sew, Vlmul lmul) -> bool {
+constexpr auto reduction_groups_valid(isa::OperationId op_id, simrv::xlen::RegId scalar_source,
+                                      simrv::xlen::RegId vector_source, uint32_t sew, Vlmul lmul)
+    -> bool {
     if (!is_vector_reduction(op_id)) return true;
     const auto [numerator, denominator] = lmul_ratio(lmul);
     uint32_t vector_registers = 1;
@@ -925,12 +927,14 @@ constexpr auto reduction_groups_valid(isa::OperationId op_id, RegId scalar_sourc
                                     std::to_underlying(vector_source), vector_registers);
 }
 
-constexpr auto mask_operand_groups_valid(isa::OperationId op_id, RegId destination, RegId source1,
-                                         RegId source2, bool vm, Vlmul lmul) -> bool {
+constexpr auto mask_operand_groups_valid(isa::OperationId op_id, simrv::xlen::RegId destination,
+                                         simrv::xlen::RegId source1, simrv::xlen::RegId source2,
+                                         bool vm, Vlmul lmul) -> bool {
     const bool mask_prefix = op_id == isa::OperationId::VMSBF_M ||
                              op_id == isa::OperationId::VMSIF_M ||
                              op_id == isa::OperationId::VMSOF_M;
-    if (mask_prefix) return destination != source2 && (vm || destination != RegId::Zero);
+    if (mask_prefix)
+        return destination != source2 && (vm || destination != simrv::xlen::RegId::Zero);
 
     if (op_id == isa::OperationId::VIOTA_M) {
         const auto [numerator, denominator] = lmul_ratio(lmul);
@@ -938,7 +942,7 @@ constexpr auto mask_operand_groups_valid(isa::OperationId op_id, RegId destinati
         return valid_group(destination, numerator, denominator, 1, registers) &&
                !register_ranges_overlap(std::to_underlying(destination), registers,
                                         std::to_underlying(source2), 1) &&
-               (vm || destination != RegId::Zero);
+               (vm || destination != simrv::xlen::RegId::Zero);
     }
 
     if (!has_mask_destination(op_id)) return true;
@@ -976,9 +980,10 @@ constexpr auto mask_operand_groups_valid(isa::OperationId op_id, RegId destinati
     return true;
 }
 
-constexpr auto vector_memory_layout(isa::OperationId op_id, RegId data_reg, RegId index_reg,
-                                    uint32_t sew, uint32_t nfields, Vlmul lmul, uint32_t vlen,
-                                    CSRValue vstart) -> VectorMemoryLayout {
+constexpr auto vector_memory_layout(isa::OperationId op_id, simrv::xlen::RegId data_reg,
+                                    simrv::xlen::RegId index_reg, uint32_t sew, uint32_t nfields,
+                                    Vlmul lmul, uint32_t vlen, simrv::xlen::CSRValue vstart)
+    -> VectorMemoryLayout {
     if (op_id == isa::OperationId::VLM_V || op_id == isa::OperationId::VSM_V) {
         return {.recognized = true, .valid = nfields == 1, .field_registers = 1};
     }
@@ -1030,7 +1035,7 @@ constexpr auto vector_memory_layout(isa::OperationId op_id, RegId data_reg, RegI
 }  // namespace
 
 void ExecuteUnit::execute_vector(core::CPU& cpu, memory::MemorySubsystem& mem,
-                                 isa::OperationId op_id, Instruction ir) {
+                                 isa::OperationId op_id, simrv::xlen::Instruction ir) {
     if (cpu.state().regs.xlen == 32 && isa::requires_rv64(op_id)) {
         cpu.active_context().pending_exception = ExceptionCode::IllegalInstruction;
         cpu.active_context().pending_tval = ir;
@@ -1042,13 +1047,13 @@ void ExecuteUnit::execute_vector(core::CPU& cpu, memory::MemorySubsystem& mem,
         return;
     }
 
-    const auto rd = static_cast<RegId>((ir >> 7) & 0x1F);
-    const auto rs1 = static_cast<RegId>((ir >> 15) & 0x1F);
-    const auto rs2 = static_cast<RegId>((ir >> 20) & 0x1F);
+    const auto rd = static_cast<simrv::xlen::RegId>((ir >> 7) & 0x1F);
+    const auto rs1 = static_cast<simrv::xlen::RegId>((ir >> 15) & 0x1F);
+    const auto rs2 = static_cast<simrv::xlen::RegId>((ir >> 20) & 0x1F);
     const bool vm = ((ir >> 25) & 1) != 0;
     if ((op_id == isa::OperationId::VMV_V_V || op_id == isa::OperationId::VMV_V_X ||
          op_id == isa::OperationId::VMV_V_I || op_id == isa::OperationId::VFMV_V_F) &&
-        (rs2 != RegId::Zero || !vm)) {
+        (rs2 != simrv::xlen::RegId::Zero || !vm)) {
         cpu.active_context().pending_exception = ExceptionCode::IllegalInstruction;
         cpu.active_context().pending_tval = ir;
         return;
@@ -1097,7 +1102,7 @@ void ExecuteUnit::execute_vector(core::CPU& cpu, memory::MemorySubsystem& mem,
         cpu.active_context().pending_tval = ir;
         return;
     }
-    if (!vm && rd == RegId::Zero && has_vector_destination(op_id, memory_layout) &&
+    if (!vm && rd == simrv::xlen::RegId::Zero && has_vector_destination(op_id, memory_layout) &&
         !has_mask_destination(op_id) && !is_vector_reduction(op_id)) {
         cpu.active_context().pending_exception = ExceptionCode::IllegalInstruction;
         cpu.active_context().pending_tval = ir;
@@ -1416,7 +1421,7 @@ void ExecuteUnit::execute_vector(core::CPU& cpu, memory::MemorySubsystem& mem,
 }
 
 void ExecuteUnit::execute_vector(core::CPU& cpu, core::Machine& machine, isa::OperationId op_id,
-                                 Instruction ir) {
+                                 simrv::xlen::Instruction ir) {
     execute_vector(cpu, machine.memory(), op_id, ir);
 }
 

@@ -95,11 +95,11 @@ void VirtioPciInput::push_mouse_wheel(int32_t delta) {
     push_event(0x00 /* EV_SYN */, 0 /* SYN_REPORT */, 0);
 }
 
-auto VirtioPciInput::read_device_config(Address offset, uint8_t size) -> uint32_t {
+auto VirtioPciInput::read_device_config(simrv::xlen::Address offset, uint8_t size) -> uint32_t {
     return backend_.read_config(offset, size);
 }
 
-void VirtioPciInput::write_device_config(Address offset, uint32_t val, uint8_t size) {
+void VirtioPciInput::write_device_config(simrv::xlen::Address offset, uint32_t val, uint8_t size) {
     backend_.write_config(offset, val, size);
 }
 

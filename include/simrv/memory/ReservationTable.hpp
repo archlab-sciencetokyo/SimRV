@@ -24,8 +24,8 @@ namespace simrv::memory {
 class ReservationTable {
    public:
     /// Default reservation granule: 64-byte aligned block (covers standard cache lines).
-    static constexpr Address kReservationGranule = 64;
-    static constexpr Address kReservationGranuleMask = ~(kReservationGranule - 1);
+    static constexpr simrv::xlen::Address kReservationGranule = 64;
+    static constexpr simrv::xlen::Address kReservationGranuleMask = ~(kReservationGranule - 1);
 
     ReservationTable() = default;
     ~ReservationTable() = default;
@@ -40,7 +40,7 @@ class ReservationTable {
      * @param hart Hart ID making the reservation.
      * @param addr Physical address loaded via LR.
      */
-    void set_reservation(HartId hart, Address addr) {
+    void set_reservation(simrv::xlen::HartId hart, simrv::xlen::Address addr) {
         const std::scoped_lock lock(mutex_);
         reservations_[hart] = ReservationEntry{
             .address = addr & kReservationGranuleMask,
@@ -55,7 +55,8 @@ class ReservationTable {
      * @param addr Physical address targeted by SC.
      * @return True if valid and matching, false otherwise.
      */
-    [[nodiscard]] auto check_reservation(HartId hart, Address addr) const -> bool {
+    [[nodiscard]] auto check_reservation(simrv::xlen::HartId hart, simrv::xlen::Address addr) const
+        -> bool {
         const std::scoped_lock lock(mutex_);
         auto it = reservations_.find(hart);
         if (it == reservations_.end() || !it->second.valid) {
@@ -70,7 +71,7 @@ class ReservationTable {
      * @param addr Target physical address of SC.
      * @return True if reservation was valid and cleared successfully, false otherwise.
      */
-    auto check_and_clear_reservation(HartId hart, Address addr) -> bool {
+    auto check_and_clear_reservation(simrv::xlen::HartId hart, simrv::xlen::Address addr) -> bool {
         const std::scoped_lock lock(mutex_);
         auto it = reservations_.find(hart);
         if (it == reservations_.end() || !it->second.valid) {
@@ -99,10 +100,11 @@ class ReservationTable {
      * @param store_origin Optional Hart ID initiating the store. If provided,
      *                     reservations belonging to other Harts are invalidated.
      */
-    void invalidate_matching(Address addr, std::optional<HartId> store_origin = std::nullopt) {
+    void invalidate_matching(simrv::xlen::Address addr,
+                             std::optional<simrv::xlen::HartId> store_origin = std::nullopt) {
         if (!may_have_reservations_.load(std::memory_order_acquire)) return;
         const std::scoped_lock lock(mutex_);
-        const Address granule_addr = addr & kReservationGranuleMask;
+        const simrv::xlen::Address granule_addr = addr & kReservationGranuleMask;
         bool any_valid = false;
         for (auto& [hart, entry] : reservations_) {
             if (store_origin.has_value() && hart == *store_origin) {
@@ -122,7 +124,8 @@ class ReservationTable {
         }
     }
 
-    void invalidate_matching(PhysAddr addr, std::optional<HartId> store_origin = std::nullopt) {
+    void invalidate_matching(simrv::xlen::PhysAddr addr,
+                             std::optional<simrv::xlen::HartId> store_origin = std::nullopt) {
         invalidate_matching(addr.raw(), store_origin);
     }
 
@@ -132,15 +135,16 @@ class ReservationTable {
      * @param size Number of bytes written.
      * @param store_origin Optional Hart ID whose reservation remains valid.
      */
-    void invalidate_range(Address addr, size_t size,
-                          std::optional<HartId> store_origin = std::nullopt) {
+    void invalidate_range(simrv::xlen::Address addr, size_t size,
+                          std::optional<simrv::xlen::HartId> store_origin = std::nullopt) {
         if (size == 0 || !may_have_reservations_.load(std::memory_order_acquire)) return;
-        const Address first_granule = addr & kReservationGranuleMask;
-        const Address extent = static_cast<Address>(size - 1);
-        const Address last_byte = extent > std::numeric_limits<Address>::max() - addr
-                                      ? std::numeric_limits<Address>::max()
-                                      : addr + extent;
-        const Address last_granule = last_byte & kReservationGranuleMask;
+        const simrv::xlen::Address first_granule = addr & kReservationGranuleMask;
+        const simrv::xlen::Address extent = static_cast<simrv::xlen::Address>(size - 1);
+        const simrv::xlen::Address last_byte =
+            extent > std::numeric_limits<simrv::xlen::Address>::max() - addr
+                ? std::numeric_limits<simrv::xlen::Address>::max()
+                : addr + extent;
+        const simrv::xlen::Address last_granule = last_byte & kReservationGranuleMask;
         const std::scoped_lock lock(mutex_);
         bool any_valid = false;
         for (auto& [hart, entry] : reservations_) {
@@ -158,8 +162,8 @@ class ReservationTable {
         if (!any_valid) may_have_reservations_.store(false, std::memory_order_release);
     }
 
-    void invalidate_range(PhysAddr addr, size_t size,
-                          std::optional<HartId> store_origin = std::nullopt) {
+    void invalidate_range(simrv::xlen::PhysAddr addr, size_t size,
+                          std::optional<simrv::xlen::HartId> store_origin = std::nullopt) {
         invalidate_range(addr.raw(), size, store_origin);
     }
 
@@ -167,7 +171,7 @@ class ReservationTable {
      * @brief Clear active reservation for a specific Hart.
      * @param hart Hart ID whose reservation to invalidate.
      */
-    void clear_reservation(HartId hart) {
+    void clear_reservation(simrv::xlen::HartId hart) {
         const std::scoped_lock lock(mutex_);
         auto it = reservations_.find(hart);
         if (it != reservations_.end()) {
@@ -202,12 +206,12 @@ class ReservationTable {
 
    private:
     struct ReservationEntry {
-        Address address{};
+        simrv::xlen::Address address{};
         bool valid{false};
     };
 
     mutable std::mutex mutex_;
-    std::unordered_map<HartId, ReservationEntry> reservations_;
+    std::unordered_map<simrv::xlen::HartId, ReservationEntry> reservations_;
     std::atomic<bool> may_have_reservations_{false};
 };
 

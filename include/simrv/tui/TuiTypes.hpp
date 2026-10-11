@@ -12,7 +12,7 @@
 namespace simrv::tui {
 
 using TuiLayout = framework::Layout;
-using HartSelection = HartId;
+using HartSelection = simrv::xlen::HartId;
 
 enum class TuiCategoryGroup : uint8_t { Regs, Memory, Pipeline, Tools };
 

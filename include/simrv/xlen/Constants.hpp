@@ -137,10 +137,3 @@ template <unsigned XLen = kXLenBits>
 }
 
 }  // namespace simrv::xlen
-
-using simrv::xlen::kF32BoxerBits;
-using simrv::xlen::kLower32Mask;
-using simrv::xlen::kWordAllOnes;
-using simrv::xlen::kXLenMask;
-using simrv::xlen::make_mask;
-using simrv::xlen::xlen_shift_mask;

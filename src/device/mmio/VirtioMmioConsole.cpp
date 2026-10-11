@@ -8,14 +8,16 @@
 
 namespace simrv::device {
 
-VirtioMmioConsole::VirtioMmioConsole(Address base_address, uint32_t irq_num, core::Machine* machine)
+VirtioMmioConsole::VirtioMmioConsole(simrv::xlen::Address base_address, uint32_t irq_num,
+                                     core::Machine* machine)
     : VirtioMmioDevice("virtio-console-mmio", base_address, 0x1000, virtio::kDevIdConsole, irq_num,
                        machine) {
     add_queue(64);  // rx
     add_queue(64);  // tx
 }
 
-auto VirtioMmioConsole::read_device_config(Address offset, std::size_t size) -> uint64_t {
+auto VirtioMmioConsole::read_device_config(simrv::xlen::Address offset, std::size_t size)
+    -> uint64_t {
     (void)size;
     if (offset == 0) return 80 | (24 << 16);  // cols=80, rows=24
     return 0;

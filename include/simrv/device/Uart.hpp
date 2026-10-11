@@ -30,10 +30,12 @@ class Uart : public memory::TileLinkNode {
     explicit Uart(simrv::core::Machine& machine);
     ~Uart() override;
     [[nodiscard]] auto name() const -> const char* override { return "uart"; }
-    [[nodiscard]] auto base_address() const -> Address override {
+    [[nodiscard]] auto base_address() const -> simrv::xlen::Address override {
         return simrv::mmio::kUartBaseAddress;
     }
-    [[nodiscard]] auto size() const -> Address override { return simrv::mmio::kUartSize; }
+    [[nodiscard]] auto size() const -> simrv::xlen::Address override {
+        return simrv::mmio::kUartSize;
+    }
     auto handle_request(const memory::TlChannelA& req, memory::TlChannelD& resp) -> bool override;
 
     /// Consume a pending RX-state transition and publish it to the guest PLIC. Reader threads

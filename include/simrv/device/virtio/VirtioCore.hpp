@@ -439,11 +439,11 @@ class InputBackend {
     std::deque<VirtioInputEvent> event_queue;
     std::mutex event_mutex;
 
-    [[nodiscard]] auto read_config(Address offset, uint8_t size) const -> uint64_t {
+    [[nodiscard]] auto read_config(simrv::xlen::Address offset, uint8_t size) const -> uint64_t {
         uint64_t res = 0;
         const uint8_t bytes_to_read = std::min<uint8_t>(size, 8);
         for (uint8_t b = 0; b < bytes_to_read; ++b) {
-            const Address off = offset + b;
+            const simrv::xlen::Address off = offset + b;
             uint8_t val = 0;
             if (off == 0) {
                 val = select;
@@ -459,9 +459,9 @@ class InputBackend {
         return res;
     }
 
-    void write_config(Address offset, uint64_t val, uint8_t size) {
+    void write_config(simrv::xlen::Address offset, uint64_t val, uint8_t size) {
         for (uint8_t b = 0; b < size; ++b) {
-            const Address off = offset + b;
+            const simrv::xlen::Address off = offset + b;
             const uint8_t byte_val = static_cast<uint8_t>((val >> (b * 8)) & 0xFF);
             if (off == 0) select = byte_val;
             if (off == 1) subsel = byte_val;
@@ -495,7 +495,7 @@ class InputBackend {
         }
     }
 
-    [[nodiscard]] auto get_config_u_byte(Address off) const -> uint8_t {
+    [[nodiscard]] auto get_config_u_byte(simrv::xlen::Address off) const -> uint8_t {
         if (select == 0x01) {
             static constexpr std::string_view kName = "SimRV Combined Input";
             if (off < kName.size()) return static_cast<uint8_t>(kName[off]);

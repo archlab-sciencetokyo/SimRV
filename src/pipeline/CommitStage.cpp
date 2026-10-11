@@ -50,10 +50,10 @@ void CPU::writeback_registers(Machine& machine) {
 // ==========================================
 
 namespace {
-[[nodiscard]] inline auto xret_target_aligned(const ArchState& state, VirtAddr jmp_pc) noexcept
-    -> bool {
+[[nodiscard]] inline auto xret_target_aligned(const ArchState& state,
+                                              simrv::xlen::VirtAddr jmp_pc) noexcept -> bool {
     const bool has_c = misa_has_extension(state.misa, isa::IsaExtension::C);
-    const Word alignment_mask = has_c ? 1u : 3u;
+    const simrv::xlen::Word alignment_mask = has_c ? 1u : 3u;
     return (jmp_pc & alignment_mask) == 0;
 }
 }  // namespace
@@ -94,11 +94,12 @@ void CPU::commit_control_flow_and_traps([[maybe_unused]] Machine& machine) {
                     break;
                 }
                 default:
-                    if (ctx.funct7 == static_cast<Instruction>(Funct7Priv::SfenceVma)) {
+                    if (ctx.funct7 ==
+                        static_cast<simrv::xlen::Instruction>(Funct7Priv::SfenceVma)) {
                         const bool match_all_vaddr = (std::to_underlying(ctx.rs1) == 0);
                         const bool match_all_asid = (std::to_underlying(ctx.rs2) == 0);
                         TLB_flush(match_all_vaddr, ctx.rrs1, match_all_asid,
-                                  static_cast<Word>(ctx.rrs2));
+                                  static_cast<simrv::xlen::Word>(ctx.rrs2));
                     }
                     break;
             }
@@ -106,7 +107,8 @@ void CPU::commit_control_flow_and_traps([[maybe_unused]] Machine& machine) {
             const bool is_write = (funct3 == Funct3::Csrrw || funct3 == Funct3::Csrrwi) ||
                                   (std::to_underlying(ctx.rs1) != 0);
             if (is_write) {
-                auto res = write_csr(static_cast<CSRAddress>(ctx.funct12), ctx.wb_data_csr);
+                auto res =
+                    write_csr(static_cast<simrv::xlen::CSRAddress>(ctx.funct12), ctx.wb_data_csr);
                 if (!res) {
                     ctx.pending_exception = res.error();
                 }
@@ -114,10 +116,10 @@ void CPU::commit_control_flow_and_traps([[maybe_unused]] Machine& machine) {
         }
     }
 
-    Word const pending_interrupts = state_.mip & state_.mie;
-    Word enable_interrupts = 0;
-    Word mask = 0;
-    Word irq_num = 32;
+    simrv::xlen::Word const pending_interrupts = state_.mip & state_.mie;
+    simrv::xlen::Word enable_interrupts = 0;
+    simrv::xlen::Word mask = 0;
+    simrv::xlen::Word irq_num = 32;
     if (simrv::compiler::unlikely(pending_interrupts != 0u)) {
         switch (state_.priv) {
             case kPrivMachine: {
@@ -151,7 +153,7 @@ void CPU::commit_control_flow_and_traps([[maybe_unused]] Machine& machine) {
     } else {
         if (ctx.tkn != 0u) {
             const bool has_c = misa_has_extension(state_.misa, isa::IsaExtension::C);
-            const Word alignment_mask = has_c ? 1u : 3u;
+            const simrv::xlen::Word alignment_mask = has_c ? 1u : 3u;
             if ((ctx.jmp_pc & alignment_mask) != 0) {
                 ctx.pending_exception = ExceptionCode::MisalignedFetch;
                 ctx.pending_tval = ctx.jmp_pc.raw();
@@ -163,8 +165,8 @@ void CPU::commit_control_flow_and_traps([[maybe_unused]] Machine& machine) {
             state_.pc = (ctx.cpc + ((ctx.cinsn != 0u) ? 2 : 4)).raw();
         }
         if (state_.regs.xlen == 32) {
-            state_.pc =
-                static_cast<Register>(static_cast<int64_t>(static_cast<int32_t>(state_.pc)));
+            state_.pc = static_cast<simrv::xlen::Register>(
+                static_cast<int64_t>(static_cast<int32_t>(state_.pc)));
         }
         if (mask != 0) {
             raise_exception(kInterruptCauseBit | irq_num, 0);

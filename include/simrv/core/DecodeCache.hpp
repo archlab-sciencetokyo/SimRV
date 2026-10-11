@@ -30,15 +30,15 @@ enum class FastMemClass : uint8_t {
  * @brief Compact decoded instruction payload used by the fast execution path.
  */
 struct CachedOp {
-    VirtAddr cpc{0};
-    ImmValue imm = 0;
-    Instruction ir = 0;
+    simrv::xlen::VirtAddr cpc{0};
+    simrv::xlen::ImmValue imm = 0;
+    simrv::xlen::Instruction ir = 0;
     uint16_t cinsn = 0;
     isa::OperationId op_id = isa::UNKNOWN;
     simrv::pipeline::DependencyTraits traits{};
-    RegId rd = RegId::Zero;
-    RegId rs1 = RegId::Zero;
-    RegId rs2 = RegId::Zero;
+    simrv::xlen::RegId rd = simrv::xlen::RegId::Zero;
+    simrv::xlen::RegId rs1 = simrv::xlen::RegId::Zero;
+    simrv::xlen::RegId rs2 = simrv::xlen::RegId::Zero;
     isa::Funct3 funct3 = static_cast<isa::Funct3>(0);
     FastMemClass mem_class : 4 = FastMemClass::None;
     uint8_t mem_size : 4 = 0;
@@ -53,17 +53,17 @@ struct CachedOp {
     [[nodiscard]] constexpr auto opcode() const noexcept -> isa::Opcode {
         return static_cast<isa::Opcode>(ir & 0x7Fu);
     }
-    [[nodiscard]] constexpr auto funct7() const noexcept -> Funct7 {
-        return static_cast<Funct7>((ir >> 25u) & 0x7Fu);
+    [[nodiscard]] constexpr auto funct7() const noexcept -> simrv::xlen::Funct7 {
+        return static_cast<simrv::xlen::Funct7>((ir >> 25u) & 0x7Fu);
     }
     [[nodiscard]] constexpr auto funct5() const noexcept -> isa::Funct5Amo {
         return static_cast<isa::Funct5Amo>((ir >> 27u) & 0x1Fu);
     }
-    [[nodiscard]] constexpr auto funct12() const noexcept -> Funct12 {
-        return static_cast<Funct12>(ir >> 20u);
+    [[nodiscard]] constexpr auto funct12() const noexcept -> simrv::xlen::Funct12 {
+        return static_cast<simrv::xlen::Funct12>(ir >> 20u);
     }
-    [[nodiscard]] constexpr auto ir_org() const noexcept -> Instruction {
-        return cinsn ? static_cast<Instruction>(cinsn) : ir;
+    [[nodiscard]] constexpr auto ir_org() const noexcept -> simrv::xlen::Instruction {
+        return cinsn ? static_cast<simrv::xlen::Instruction>(cinsn) : ir;
     }
 
     constexpr void copy_from(const simrv::pipeline::DecodedInstruction& decoded) noexcept {
@@ -152,9 +152,9 @@ class DecodeCache {
     void flush() {
         for (auto& set : sets_) {
             set.ways[0].valid = false;
-            set.ways[0].cpc = VirtAddr{~Register{0}};
+            set.ways[0].cpc = simrv::xlen::VirtAddr{~simrv::xlen::Register{0}};
             set.ways[1].valid = false;
-            set.ways[1].cpc = VirtAddr{~Register{0}};
+            set.ways[1].cpc = simrv::xlen::VirtAddr{~simrv::xlen::Register{0}};
             set.set_next_victim(0);
         }
     }
@@ -163,16 +163,18 @@ class DecodeCache {
      * @brief Invalidate all entries in the decode cache residing in a specific 4KB virtual page.
      * @param vpage 4KB-aligned virtual page address.
      */
-    void flush_page(Address vpage) {
-        const Address page_base = vpage & ~Address{0xFFF};
+    void flush_page(simrv::xlen::Address vpage) {
+        const simrv::xlen::Address page_base = vpage & ~simrv::xlen::Address{0xFFF};
         for (auto& set : sets_) {
-            if (set.ways[0].valid && ((set.ways[0].cpc.raw() & ~Address{0xFFF}) == page_base)) {
+            if (set.ways[0].valid &&
+                ((set.ways[0].cpc.raw() & ~simrv::xlen::Address{0xFFF}) == page_base)) {
                 set.ways[0].valid = false;
-                set.ways[0].cpc = VirtAddr{~Register{0}};
+                set.ways[0].cpc = simrv::xlen::VirtAddr{~simrv::xlen::Register{0}};
             }
-            if (set.ways[1].valid && ((set.ways[1].cpc.raw() & ~Address{0xFFF}) == page_base)) {
+            if (set.ways[1].valid &&
+                ((set.ways[1].cpc.raw() & ~simrv::xlen::Address{0xFFF}) == page_base)) {
                 set.ways[1].valid = false;
-                set.ways[1].cpc = VirtAddr{~Register{0}};
+                set.ways[1].cpc = simrv::xlen::VirtAddr{~simrv::xlen::Register{0}};
             }
         }
     }
@@ -182,10 +184,12 @@ class DecodeCache {
      * @param pc Program counter address.
      * @return Cache set index in range [0, kNumSets - 1].
      */
-    [[nodiscard]] static constexpr inline auto calc_set(Register pc) noexcept -> size_t {
+    [[nodiscard]] static constexpr inline auto calc_set(simrv::xlen::Register pc) noexcept
+        -> size_t {
         return ((pc >> 1) ^ (pc >> 13)) & kSetMask;
     }
-    [[nodiscard]] static constexpr inline auto calc_set(VirtAddr pc) noexcept -> size_t {
+    [[nodiscard]] static constexpr inline auto calc_set(simrv::xlen::VirtAddr pc) noexcept
+        -> size_t {
         return ((pc.raw() >> 1) ^ (pc.raw() >> 13)) & kSetMask;
     }
 
@@ -194,7 +198,7 @@ class DecodeCache {
      * @param pc Program counter address.
      * @return Pointer to CachedOp if hit, or nullptr on miss.
      */
-    [[nodiscard]] inline auto lookup(Register pc) noexcept -> CachedOp* {
+    [[nodiscard]] inline auto lookup(simrv::xlen::Register pc) noexcept -> CachedOp* {
         const size_t set_idx = calc_set(pc);
         auto& set = sets_[set_idx];
         if (simrv::compiler::likely(set.ways[0].valid && set.ways[0].cpc == pc)) {
@@ -205,14 +209,16 @@ class DecodeCache {
         }
         return nullptr;
     }
-    [[nodiscard]] inline auto lookup(VirtAddr pc) noexcept -> CachedOp* { return lookup(pc.raw()); }
+    [[nodiscard]] inline auto lookup(simrv::xlen::VirtAddr pc) noexcept -> CachedOp* {
+        return lookup(pc.raw());
+    }
 
     /**
      * @brief Insert pre-decoded operation into the decode cache using LRU replacement.
      * @param pc Program counter address.
      * @param op Decoded instruction payload.
      */
-    inline void insert(Register pc, const CachedOp& op) {
+    inline void insert(simrv::xlen::Register pc, const CachedOp& op) {
         const size_t set_idx = calc_set(pc);
         auto& set = sets_[set_idx];
         uint8_t way = 0;
@@ -229,17 +235,17 @@ class DecodeCache {
         }
         auto& entry = set.ways[way];
         entry = op;
-        entry.cpc = VirtAddr{pc};
+        entry.cpc = simrv::xlen::VirtAddr{pc};
         entry.valid = true;
         set.set_next_victim(static_cast<uint8_t>(1U - way));
     }
-    inline void insert(VirtAddr pc, const CachedOp& op) { insert(pc.raw(), op); }
+    inline void insert(simrv::xlen::VirtAddr pc, const CachedOp& op) { insert(pc.raw(), op); }
 
    private:
     std::array<CacheSet, kNumSets> sets_{};
 };
 
-static_assert(sizeof(CachedOp) == (sizeof(Address) == 8 ? 32 : 24));
+static_assert(sizeof(CachedOp) == (sizeof(simrv::xlen::Address) == 8 ? 32 : 24));
 static_assert(sizeof(DecodeCache::CacheSet) == 64);
 static_assert(sizeof(DecodeCache) == 128 * 1024);
 

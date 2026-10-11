@@ -127,17 +127,18 @@ constexpr auto alu_int_b_eval(T in1, T in2, isa::OperationId op_id, int xlen) ->
 
 }  // namespace
 
-auto ExecuteUnit::aluIntZb(Register in1, Register in2, isa::OperationId op_id, unsigned xlen_param)
-    -> Register {
+auto ExecuteUnit::aluIntZb(simrv::xlen::Register in1, simrv::xlen::Register in2,
+                           isa::OperationId op_id, unsigned xlen_param) -> simrv::xlen::Register {
     if (xlen_param == 32) {
         const auto res = alu_int_b_eval<uint32_t>(static_cast<uint32_t>(in1),
                                                   static_cast<uint32_t>(in2), op_id, 32);
-        return static_cast<Register>(static_cast<int64_t>(static_cast<int32_t>(res)));
+        return static_cast<simrv::xlen::Register>(static_cast<int64_t>(static_cast<int32_t>(res)));
     }
-    return alu_int_b_eval<Register>(in1, in2, op_id, static_cast<int>(xlen_param));
+    return alu_int_b_eval<simrv::xlen::Register>(in1, in2, op_id, static_cast<int>(xlen_param));
 }
 
-auto ExecuteUnit::aluIntZbW(Register in1, Register in2, isa::OperationId op_id) -> Register {
+auto ExecuteUnit::aluIntZbW(simrv::xlen::Register in1, simrv::xlen::Register in2,
+                            isa::OperationId op_id) -> simrv::xlen::Register {
     if constexpr (!simrv::xlen::kIsXLen64) {
         return 0;
     } else {
@@ -149,15 +150,19 @@ auto ExecuteUnit::aluIntZbW(Register in1, Register in2, isa::OperationId op_id) 
         switch (op_id) {
             // B-Extension W: Zba
             case ADD_UW:
-                return static_cast<Register>(static_cast<uint64_t>(lhs32) + in2);
+                return static_cast<simrv::xlen::Register>(static_cast<uint64_t>(lhs32) + in2);
             case SLLI_UW:
-                return static_cast<Register>(static_cast<uint64_t>(lhs32) << (in2 & 0x3F));
+                return static_cast<simrv::xlen::Register>(static_cast<uint64_t>(lhs32)
+                                                          << (in2 & 0x3F));
             case SH1ADD_UW:
-                return static_cast<Register>(in2 + (static_cast<uint64_t>(lhs32) << 1));
+                return static_cast<simrv::xlen::Register>(in2 +
+                                                          (static_cast<uint64_t>(lhs32) << 1));
             case SH2ADD_UW:
-                return static_cast<Register>(in2 + (static_cast<uint64_t>(lhs32) << 2));
+                return static_cast<simrv::xlen::Register>(in2 +
+                                                          (static_cast<uint64_t>(lhs32) << 2));
             case SH3ADD_UW:
-                return static_cast<Register>(in2 + (static_cast<uint64_t>(lhs32) << 3));
+                return static_cast<simrv::xlen::Register>(in2 +
+                                                          (static_cast<uint64_t>(lhs32) << 3));
 
             // B-Extension W: Zbb
             case CLZW:
@@ -184,7 +189,7 @@ auto ExecuteUnit::aluIntZbW(Register in1, Register in2, isa::OperationId op_id) 
                 break;
         }
 
-        return static_cast<Register>(static_cast<SignedWord>(res32));
+        return static_cast<simrv::xlen::Register>(static_cast<simrv::xlen::SignedWord>(res32));
     }
 }
 

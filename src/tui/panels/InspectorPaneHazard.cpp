@@ -255,7 +255,7 @@ auto InspectorPane::render_hazard_stats(const simrv::core::CPU& cpu, int logical
         const char* bank_name;
         std::string reg_name;
         const char* stage_name;
-        LatencyCycles latency;
+        simrv::xlen::LatencyCycles latency;
         bool can_forward;
     };
     std::vector<ActiveReservation> active_entries;
@@ -281,7 +281,7 @@ auto InspectorPane::render_hazard_stats(const simrv::core::CPU& cpu, int logical
 
     // Check Integer bank
     for (size_t r = 1; r < 32; ++r) {
-        auto reg = static_cast<RegId>(r);
+        auto reg = static_cast<simrv::xlen::RegId>(r);
         if (auto entry = sb.get_entry_data(simrv::pipeline::operation::RegBank::Integer, reg)) {
             active_entries.push_back({
                 .bank_name = "INT",
@@ -294,7 +294,7 @@ auto InspectorPane::render_hazard_stats(const simrv::core::CPU& cpu, int logical
     }
     // Check Float bank
     for (size_t r = 0; r < 32; ++r) {
-        auto reg = static_cast<RegId>(r);
+        auto reg = static_cast<simrv::xlen::RegId>(r);
         if (auto entry = sb.get_entry_data(simrv::pipeline::operation::RegBank::Float, reg)) {
             active_entries.push_back({
                 .bank_name = "FP ",

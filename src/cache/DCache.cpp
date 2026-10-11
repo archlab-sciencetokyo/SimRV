@@ -12,11 +12,12 @@
 namespace simrv::cache {
 
 auto DCache::handle_probe(const simrv::memory::TlChannelB& req, simrv::memory::TlChannelC& resp,
-                          std::array<Byte, kLineBytes>& dirty_data) -> bool {
+                          std::array<simrv::xlen::Byte, kLineBytes>& dirty_data) -> bool {
     const auto target_state = simrv::memory::mesi_for(req.cap);
-    const Address line_base = (req.address & ~(static_cast<Address>(kLineBytes - 1u))).raw();
+    const simrv::xlen::Address line_base =
+        (req.address & ~(static_cast<simrv::xlen::Address>(kLineBytes - 1u))).raw();
     const uint32_t set_idx = get_set_index(line_base);
-    const Address tag = get_tag(line_base);
+    const simrv::xlen::Address tag = get_tag(line_base);
 
     for (uint32_t w = 0; w < associativity(); ++w) {
         auto& cache_line = line(set_idx, w);

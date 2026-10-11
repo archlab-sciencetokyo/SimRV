@@ -16,7 +16,7 @@ auto VirtioPciFs::get_device_features(uint32_t select) -> uint32_t {
     return select == 1 ? 1U : 0U;  // VIRTIO_F_VERSION_1
 }
 
-auto VirtioPciFs::read_device_config(Address offset, uint8_t size) -> uint32_t {
+auto VirtioPciFs::read_device_config(simrv::xlen::Address offset, uint8_t size) -> uint32_t {
     uint32_t value = 0;
     for (uint8_t i = 0; i < size && i < 4; ++i) {
         const auto index = static_cast<size_t>(offset + i);

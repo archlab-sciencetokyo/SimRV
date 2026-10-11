@@ -24,23 +24,25 @@ namespace simrv::device {
  */
 class VirtioMmioDevice : public memory::MmioDevice {
    public:
-    VirtioMmioDevice(const char* name, Address base_address, Address size, uint32_t device_id,
-                     uint32_t irq_num, core::Machine* machine);
+    VirtioMmioDevice(const char* name, simrv::xlen::Address base_address, simrv::xlen::Address size,
+                     uint32_t device_id, uint32_t irq_num, core::Machine* machine);
     ~VirtioMmioDevice() override = default;
 
     [[nodiscard]] auto name() const -> const char* override { return name_; }
-    [[nodiscard]] auto base_address() const -> Address override { return base_address_; }
-    [[nodiscard]] auto size() const -> Address override { return size_; }
+    [[nodiscard]] auto base_address() const -> simrv::xlen::Address override {
+        return base_address_;
+    }
+    [[nodiscard]] auto size() const -> simrv::xlen::Address override { return size_; }
 
-    [[nodiscard]] auto read8(Address offset) -> uint8_t override;
-    [[nodiscard]] auto read16(Address offset) -> uint16_t override;
-    [[nodiscard]] auto read32(Address offset) -> uint32_t override;
-    [[nodiscard]] auto read64(Address offset) -> uint64_t override;
+    [[nodiscard]] auto read8(simrv::xlen::Address offset) -> uint8_t override;
+    [[nodiscard]] auto read16(simrv::xlen::Address offset) -> uint16_t override;
+    [[nodiscard]] auto read32(simrv::xlen::Address offset) -> uint32_t override;
+    [[nodiscard]] auto read64(simrv::xlen::Address offset) -> uint64_t override;
 
-    void write8(Address offset, uint8_t val) override;
-    void write16(Address offset, uint16_t val) override;
-    void write32(Address offset, uint32_t val) override;
-    void write64(Address offset, uint64_t val) override;
+    void write8(simrv::xlen::Address offset, uint8_t val) override;
+    void write16(simrv::xlen::Address offset, uint16_t val) override;
+    void write32(simrv::xlen::Address offset, uint32_t val) override;
+    void write64(simrv::xlen::Address offset, uint64_t val) override;
 
     [[nodiscard]] auto device_id() const -> uint32_t { return device_id_; }
     [[nodiscard]] auto device_status() const -> uint32_t { return status_; }
@@ -56,12 +58,13 @@ class VirtioMmioDevice : public memory::MmioDevice {
 
    protected:
     virtual void on_queue_notify(uint32_t q_idx) = 0;
-    virtual auto read_device_config(Address offset, std::size_t size) -> uint64_t {
+    virtual auto read_device_config(simrv::xlen::Address offset, std::size_t size) -> uint64_t {
         (void)offset;
         (void)size;
         return 0;
     }
-    virtual void write_device_config(Address offset, uint64_t value, std::size_t size) {
+    virtual void write_device_config(simrv::xlen::Address offset, uint64_t value,
+                                     std::size_t size) {
         (void)offset;
         (void)value;
         (void)size;
@@ -73,8 +76,8 @@ class VirtioMmioDevice : public memory::MmioDevice {
     void add_queue(uint16_t max_size);
 
     const char* name_;
-    Address base_address_;
-    Address size_;
+    simrv::xlen::Address base_address_;
+    simrv::xlen::Address size_;
     uint32_t device_id_;
     uint32_t irq_num_;
 

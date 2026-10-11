@@ -6,7 +6,8 @@
 
 namespace simrv::device {
 
-VirtioMmioSound::VirtioMmioSound(Address base_address, uint32_t irq_num, core::Machine* machine)
+VirtioMmioSound::VirtioMmioSound(simrv::xlen::Address base_address, uint32_t irq_num,
+                                 core::Machine* machine)
     : VirtioMmioDevice("virtio-sound-mmio", base_address, 0x1000, virtio::kDevIdSound, irq_num,
                        machine) {
     add_queue(64);  // controlq
@@ -15,7 +16,8 @@ VirtioMmioSound::VirtioMmioSound(Address base_address, uint32_t irq_num, core::M
     add_queue(64);  // rxq
 }
 
-auto VirtioMmioSound::read_device_config(Address offset, std::size_t size) -> uint64_t {
+auto VirtioMmioSound::read_device_config(simrv::xlen::Address offset, std::size_t size)
+    -> uint64_t {
     return backend_.read_config(offset, size);
 }
 

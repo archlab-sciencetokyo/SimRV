@@ -380,7 +380,7 @@ void SettingsModal::render(std::vector<std::string>& content_rows,
         else
             fps_str = "\033[1;32m[30 FPS (Standard)]\033[0m";
 
-        constexpr Address dram_base = 0x80000000ULL;
+        constexpr simrv::xlen::Address dram_base = 0x80000000ULL;
         std::string ram_str =
             std::format("\033[1;36m[{} MB (0x{:08x}–0x{:08x})]\033[0m", draft.dram_size_mb,
                         dram_base, dram_base + (draft.dram_size_mb * 1024ULL * 1024ULL) - 1);

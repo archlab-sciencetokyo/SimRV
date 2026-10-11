@@ -80,7 +80,7 @@ auto CpuModelConfig::validate() const -> std::expected<void, std::string> {
             return std::unexpected("instruction front-cache latencies must be at least one cycle");
         }
         if (std::ranges::any_of(cache.startup_refill_latencies,
-                                [](LatencyCycles latency) { return latency == 0; })) {
+                                [](simrv::xlen::LatencyCycles latency) { return latency == 0; })) {
             return std::unexpected(
                 "instruction front-cache startup refill latencies must be at least one cycle");
         }

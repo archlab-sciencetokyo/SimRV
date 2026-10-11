@@ -17,7 +17,7 @@ constexpr size_t FLEN = 64;
  * @enum Funct7Fp
  * @brief Represents the 7-bit function selector for floating-point instructions (bits [31:25]).
  */
-enum class Funct7Fp : Word {
+enum class Funct7Fp : simrv::xlen::Word {
     FaddS = 0x00,     ///< Single-precision floating-point Add
     FaddD = 0x01,     ///< Double-precision floating-point Add
     FsubS = 0x04,     ///< Single-precision floating-point Subtract
@@ -50,20 +50,24 @@ enum class Funct7Fp : Word {
     FmvDX = 0x79,     ///< Move Integer Register to Float Double (FMV.D.X)
 };
 
-constexpr auto operator==(Word raw, Funct7Fp f7) noexcept -> bool {
+constexpr auto operator==(simrv::xlen::Word raw, Funct7Fp f7) noexcept -> bool {
     return raw == std::to_underlying(f7);
 }
-constexpr auto operator==(Funct7Fp f7, Word raw) noexcept -> bool {
+constexpr auto operator==(Funct7Fp f7, simrv::xlen::Word raw) noexcept -> bool {
     return std::to_underlying(f7) == raw;
 }
-constexpr auto operator!=(Word raw, Funct7Fp f7) noexcept -> bool { return !(raw == f7); }
-constexpr auto operator!=(Funct7Fp f7, Word raw) noexcept -> bool { return !(f7 == raw); }
+constexpr auto operator!=(simrv::xlen::Word raw, Funct7Fp f7) noexcept -> bool {
+    return !(raw == f7);
+}
+constexpr auto operator!=(Funct7Fp f7, simrv::xlen::Word raw) noexcept -> bool {
+    return !(f7 == raw);
+}
 
 /**
  * @enum Funct3Fp
  * @brief Represents standard floating-point funct3 sub-opcodes.
  */
-enum class Funct3Fp : Word {
+enum class Funct3Fp : simrv::xlen::Word {
     Min = 0x0,     ///< Select Minimum (for Fminmax)
     Max = 0x1,     ///< Select Maximum (for Fminmax)
     Leq = 0x0,     ///< Less than or Equal comparison (for Fcmp)
@@ -135,7 +139,7 @@ constexpr auto operator&=(I& lhs, FflagsBit rhs) noexcept -> I& {
  * @enum RoundingMode
  * @brief RISC-V floating-point rounding modes.
  */
-enum class RoundingMode : Word {
+enum class RoundingMode : simrv::xlen::Word {
     Rne = 0x0,  ///< Round to Nearest, ties to Even
     Rtz = 0x1,  ///< Round towards Zero
     Rdn = 0x2,  ///< Round down (towards negative infinity)
@@ -144,14 +148,18 @@ enum class RoundingMode : Word {
     Dyn = 0x7,  ///< Dynamic Rounding Mode (defined in fcsr.frm field)
 };
 
-constexpr auto operator==(Word raw, RoundingMode rm) noexcept -> bool {
+constexpr auto operator==(simrv::xlen::Word raw, RoundingMode rm) noexcept -> bool {
     return raw == std::to_underlying(rm);
 }
-constexpr auto operator==(RoundingMode rm, Word raw) noexcept -> bool {
+constexpr auto operator==(RoundingMode rm, simrv::xlen::Word raw) noexcept -> bool {
     return std::to_underlying(rm) == raw;
 }
-constexpr auto operator!=(Word raw, RoundingMode rm) noexcept -> bool { return !(raw == rm); }
-constexpr auto operator!=(RoundingMode rm, Word raw) noexcept -> bool { return !(rm == raw); }
+constexpr auto operator!=(simrv::xlen::Word raw, RoundingMode rm) noexcept -> bool {
+    return !(raw == rm);
+}
+constexpr auto operator!=(RoundingMode rm, simrv::xlen::Word raw) noexcept -> bool {
+    return !(rm == raw);
+}
 
 constexpr auto operator==(Funct3 f3, RoundingMode rm) noexcept -> bool {
     return std::to_underlying(f3) == std::to_underlying(rm);
@@ -163,20 +171,23 @@ constexpr auto operator!=(Funct3 f3, RoundingMode rm) noexcept -> bool { return 
 constexpr auto operator!=(RoundingMode rm, Funct3 f3) noexcept -> bool { return !(rm == f3); }
 
 /// Left-shift operator for RoundingMode (e.g. RoundingMode::Rmm << 5U) to format FCSR bits.
-constexpr auto operator<<(RoundingMode rm, unsigned shift) noexcept -> CSRValue {
-    return static_cast<CSRValue>(std::to_underlying(rm)) << shift;
+constexpr auto operator<<(RoundingMode rm, unsigned shift) noexcept -> simrv::xlen::CSRValue {
+    return static_cast<simrv::xlen::CSRValue>(std::to_underlying(rm)) << shift;
 }
 
-[[nodiscard]] constexpr auto fcsr_with_rounding_mode(CSRValue fcsr, RoundingMode rm) noexcept
-    -> CSRValue {
-    return (fcsr & ~static_cast<CSRValue>(0x7U << 5U)) | (rm << 5U);
+[[nodiscard]] constexpr auto fcsr_with_rounding_mode(simrv::xlen::CSRValue fcsr,
+                                                     RoundingMode rm) noexcept
+    -> simrv::xlen::CSRValue {
+    return (fcsr & ~static_cast<simrv::xlen::CSRValue>(0x7U << 5U)) | (rm << 5U);
 }
 
-[[nodiscard]] constexpr auto frm_rounding_mode(CSRValue fcsr) noexcept -> RoundingMode {
+[[nodiscard]] constexpr auto frm_rounding_mode(simrv::xlen::CSRValue fcsr) noexcept
+    -> RoundingMode {
     return static_cast<RoundingMode>((fcsr >> 5U) & 0x7U);
 }
 
-[[nodiscard]] constexpr auto resolve_rounding_mode(Word rm_field, CSRValue fcsr) noexcept
+[[nodiscard]] constexpr auto resolve_rounding_mode(simrv::xlen::Word rm_field,
+                                                   simrv::xlen::CSRValue fcsr) noexcept
     -> RoundingMode {
     if (rm_field == RoundingMode::Dyn) {
         return frm_rounding_mode(fcsr);
@@ -184,7 +195,8 @@ constexpr auto operator<<(RoundingMode rm, unsigned shift) noexcept -> CSRValue 
     return static_cast<RoundingMode>(rm_field);
 }
 
-[[nodiscard]] constexpr auto resolve_rounding_mode(Funct3 rm_field, CSRValue fcsr) noexcept
+[[nodiscard]] constexpr auto resolve_rounding_mode(Funct3 rm_field,
+                                                   simrv::xlen::CSRValue fcsr) noexcept
     -> RoundingMode {
     return resolve_rounding_mode(std::to_underlying(rm_field), fcsr);
 }

@@ -35,7 +35,7 @@ class TimingCache {
 
     [[nodiscard]] auto enabled() const -> bool { return enabled_; }
 
-    [[nodiscard]] auto access(Address address) -> Access {
+    [[nodiscard]] auto access(simrv::xlen::Address address) -> Access {
         if (!enabled_) return {};
         const uint64_t raw = static_cast<uint64_t>(address);
         const uint64_t line = raw / line_bytes_;
@@ -118,7 +118,7 @@ class TimingCacheHierarchy {
 
     [[nodiscard]] auto enabled() const -> bool { return !levels_.empty(); }
 
-    [[nodiscard]] auto access(Address address, bool backing_miss) -> Access {
+    [[nodiscard]] auto access(simrv::xlen::Address address, bool backing_miss) -> Access {
         for (size_t index = 0; index < levels_.size(); ++index) {
             if (levels_[index].access(address).hit) {
                 return {.hit_level = index, .latency = configs_[index].hit_latency, .hit = true};

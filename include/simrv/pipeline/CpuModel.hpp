@@ -32,27 +32,27 @@ struct L1CacheConfig {
     uint32_t capacity_bytes = 4096;
     uint32_t associativity = 2;
     uint32_t line_bytes = 32;
-    LatencyCycles hit_latency = 1;
-    LatencyCycles miss_latency = 12;
+    simrv::xlen::LatencyCycles hit_latency = 1;
+    simrv::xlen::LatencyCycles miss_latency = 12;
 };
 
 struct FrontCacheConfig {
     uint32_t capacity_bytes = 0;
     uint32_t associativity = 1;
     uint32_t line_bytes = 16;
-    LatencyCycles hit_latency = 1;
-    LatencyCycles refill_latency = 1;
-    LatencyCycles backing_refill_latency = 1;
-    std::vector<LatencyCycles> startup_refill_latencies{};
+    simrv::xlen::LatencyCycles hit_latency = 1;
+    simrv::xlen::LatencyCycles refill_latency = 1;
+    simrv::xlen::LatencyCycles backing_refill_latency = 1;
+    std::vector<simrv::xlen::LatencyCycles> startup_refill_latencies{};
     bool freeze_pipeline_on_refill = false;
 };
 
 struct InterconnectTiming {
-    LatencyCycles request_latency = 1;
-    LatencyCycles response_latency = 1;
-    LatencyCycles data_request_latency = 0;
-    LatencyCycles data_response_latency = 0;
-    LatencyCycles startup_data_response_latency = 0;
+    simrv::xlen::LatencyCycles request_latency = 1;
+    simrv::xlen::LatencyCycles response_latency = 1;
+    simrv::xlen::LatencyCycles data_request_latency = 0;
+    simrv::xlen::LatencyCycles data_response_latency = 0;
+    simrv::xlen::LatencyCycles startup_data_response_latency = 0;
 };
 
 struct DmaTimingConfig {

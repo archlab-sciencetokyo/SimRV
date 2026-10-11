@@ -7,6 +7,7 @@
 #include "simrv/xlen/Types.hpp"
 
 namespace simrv::boot {
-inline constexpr Address kStartPc = static_cast<Address>(0x80000000u);
-inline constexpr Address kInitDataAddress = static_cast<Address>(0x01000000u);
+inline constexpr simrv::xlen::Address kStartPc = static_cast<simrv::xlen::Address>(0x80000000u);
+inline constexpr simrv::xlen::Address kInitDataAddress =
+    static_cast<simrv::xlen::Address>(0x01000000u);
 }  // namespace simrv::boot

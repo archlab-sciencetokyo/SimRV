@@ -21,14 +21,18 @@ class CsrFile {
    public:
     explicit CsrFile(CPU& cpu) : cpu_(cpu) {}
 
-    [[nodiscard]] auto getMstatus(CSRValue mask) const -> CSRValue;
-    void setMstatus(CSRValue wdata);
-    [[nodiscard]] auto read(CSRAddress addr) const -> std::expected<CSRValue, ExceptionCode>;
-    [[nodiscard]] auto read(CsrNumber csr) const -> std::expected<CSRValue, ExceptionCode> {
+    [[nodiscard]] auto getMstatus(simrv::xlen::CSRValue mask) const -> simrv::xlen::CSRValue;
+    void setMstatus(simrv::xlen::CSRValue wdata);
+    [[nodiscard]] auto read(simrv::xlen::CSRAddress addr) const
+        -> std::expected<simrv::xlen::CSRValue, ExceptionCode>;
+    [[nodiscard]] auto read(simrv::xlen::CsrNumber csr) const
+        -> std::expected<simrv::xlen::CSRValue, ExceptionCode> {
         return read(csr.raw());
     }
-    auto write(CSRAddress addr, CSRValue wdata) -> std::expected<void, ExceptionCode>;
-    auto write(CsrNumber csr, CSRValue wdata) -> std::expected<void, ExceptionCode> {
+    auto write(simrv::xlen::CSRAddress addr, simrv::xlen::CSRValue wdata)
+        -> std::expected<void, ExceptionCode>;
+    auto write(simrv::xlen::CsrNumber csr, simrv::xlen::CSRValue wdata)
+        -> std::expected<void, ExceptionCode> {
         return write(csr.raw(), wdata);
     }
 

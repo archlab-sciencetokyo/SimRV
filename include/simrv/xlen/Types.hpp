@@ -22,13 +22,6 @@ namespace simrv::xlen {
 inline constexpr bool kIsXLen64 = (SIMRV_XLEN == 64);
 inline constexpr unsigned kXLenBits = SIMRV_XLEN;
 inline constexpr unsigned kXLenHexDigits = kXLenBits / 4u;
-}  // namespace simrv::xlen
-
-// Source-compatibility exports for existing unqualified XLEN consumers. New code should use the
-// namespaced constants above when a qualified name is practical.
-using simrv::xlen::kIsXLen64;
-using simrv::xlen::kXLenBits;
-using simrv::xlen::kXLenHexDigits;
 
 // C++23 Conditional Type Selection
 using Word = std::conditional_t<kIsXLen64, uint64_t, uint32_t>;
@@ -543,57 +536,33 @@ template <typename T>
 concept RegisterIdentifier =
     std::same_as<T, RegId> || std::same_as<T, FpRegId> || std::same_as<T, VecRegId>;
 
-namespace simrv {
-using ::CsrNumber;
-using ::FpRegId;
-using ::HartId;
-using ::PhysAddr;
-using ::PrivilegeLevel;
-using ::RegId;
-using ::RegisterIdentifier;
-using ::StrongAddress;
-using ::VecRegId;
-using ::VirtAddr;
-
-namespace xlen {
-using ::CsrNumber;
-using ::FpRegId;
-using ::HartId;
-using ::PhysAddr;
-using ::PrivilegeLevel;
-using ::RegId;
-using ::RegisterIdentifier;
-using ::StrongAddress;
-using ::VecRegId;
-using ::VirtAddr;
-}  // namespace xlen
-}  // namespace simrv
+}  // namespace simrv::xlen
 
 // Specializations for std::hash
 template <>
-struct std::hash<PhysAddr> {
-    constexpr auto operator()(PhysAddr addr) const noexcept -> size_t {
-        return std::hash<Word>{}(addr.val);
+struct std::hash<simrv::xlen::PhysAddr> {
+    constexpr auto operator()(simrv::xlen::PhysAddr addr) const noexcept -> size_t {
+        return std::hash<simrv::xlen::Word>{}(addr.val);
     }
 };
 
 template <>
-struct std::hash<VirtAddr> {
-    constexpr auto operator()(VirtAddr addr) const noexcept -> size_t {
-        return std::hash<Word>{}(addr.val);
+struct std::hash<simrv::xlen::VirtAddr> {
+    constexpr auto operator()(simrv::xlen::VirtAddr addr) const noexcept -> size_t {
+        return std::hash<simrv::xlen::Word>{}(addr.val);
     }
 };
 
 template <>
-struct std::hash<HartId> {
-    constexpr auto operator()(HartId id) const noexcept -> size_t {
+struct std::hash<simrv::xlen::HartId> {
+    constexpr auto operator()(simrv::xlen::HartId id) const noexcept -> size_t {
         return std::hash<uint32_t>{}(id.val);
     }
 };
 
 template <>
-struct std::hash<CsrNumber> {
-    constexpr auto operator()(CsrNumber csr) const noexcept -> size_t {
+struct std::hash<simrv::xlen::CsrNumber> {
+    constexpr auto operator()(simrv::xlen::CsrNumber csr) const noexcept -> size_t {
         return std::hash<uint16_t>{}(csr.val);
     }
 };

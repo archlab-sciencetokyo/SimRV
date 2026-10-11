@@ -16,8 +16,8 @@ using TlData = uint64_t;
 using TlMask = uint8_t;
 using TlSourceId = uint16_t;
 using TlSinkId = uint16_t;
-using LineAddress = Address;
-using CacheTag = Address;
+using LineAddress = simrv::xlen::Address;
+using CacheTag = simrv::xlen::Address;
 using CacheSetIndex = uint32_t;
 using CacheOffset = uint32_t;
 using CoherenceSharersMask = uint64_t;
@@ -277,7 +277,7 @@ inline constexpr TlManagerCapabilities kMmioCapabilities{
     return TlReport::NtoN;
 }
 
-[[nodiscard]] constexpr auto make_tl_source(HartId hart, TlPort port) -> TlSourceId {
+[[nodiscard]] constexpr auto make_tl_source(simrv::xlen::HartId hart, TlPort port) -> TlSourceId {
     return static_cast<TlSourceId>((static_cast<TlSourceId>(hart.val) << 1u) |
                                    static_cast<TlSourceId>(port));
 }
@@ -290,18 +290,18 @@ struct TlChannelA {
     TlIntent intent{TlIntent::PrefetchRead};
     uint8_t size{0};
     TlSourceId source{0};
-    HartId hart{0};
+    simrv::xlen::HartId hart{0};
     uint64_t logical_cycle{std::numeric_limits<uint64_t>::max()};
     uint64_t logical_issue_sequence{std::numeric_limits<uint64_t>::max()};
-    PhysAddr address{0};
+    simrv::xlen::PhysAddr address{0};
     TlMask mask{0};
     TlData data{0};
     bool corrupt{false};
 
     [[nodiscard]] constexpr auto operator==(const TlChannelA&) const noexcept -> bool = default;
 
-    [[nodiscard]] static constexpr auto compute_mask(uint8_t transfer_size, PhysAddr address)
-        -> TlMask {
+    [[nodiscard]] static constexpr auto compute_mask(uint8_t transfer_size,
+                                                     simrv::xlen::PhysAddr address) -> TlMask {
         if (transfer_size > kTlBeatSize) return 0;
         const auto bytes = static_cast<unsigned>(1u << transfer_size);
         const auto lane = static_cast<unsigned>(address.raw() & (kTlBeatBytes - 1u));
@@ -320,7 +320,7 @@ struct TlChannelB {
     TlCap cap{TlCap::ToN};
     uint8_t size{kTlBlockSize};
     TlSourceId source{0};
-    PhysAddr address{0};
+    simrv::xlen::PhysAddr address{0};
 
     [[nodiscard]] constexpr auto operator==(const TlChannelB&) const noexcept -> bool = default;
 };
@@ -330,8 +330,8 @@ struct TlChannelC {
     TlReport report{TlReport::NtoN};
     uint8_t size{kTlBlockSize};
     TlSourceId source{0};
-    HartId hart{0};
-    PhysAddr address{0};
+    simrv::xlen::HartId hart{0};
+    simrv::xlen::PhysAddr address{0};
     TlData data{0};
     bool corrupt{false};
 

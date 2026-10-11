@@ -35,7 +35,7 @@ auto BreakpointModal::submit(ModalType type, const std::string& input,
     if (input.empty()) return false;
 
     if (type == ModalType::SetBreakpoint) {
-        Address addr = 0;
+        simrv::xlen::Address addr = 0;
         bool ok = false;
         if (input.starts_with("0x") || input.starts_with("0X")) {
             auto result = std::from_chars(input.data() + 2, input.data() + input.size(), addr, 16);
@@ -70,7 +70,7 @@ auto BreakpointModal::submit(ModalType type, const std::string& input,
             return true;
         }
 
-        Address addr = 0;
+        simrv::xlen::Address addr = 0;
         bool ok = false;
         if (input.starts_with("0x") || input.starts_with("0X")) {
             auto result = std::from_chars(input.data() + 2, input.data() + input.size(), addr, 16);
@@ -119,7 +119,7 @@ auto BreakpointModal::remove_at_cursor(
 
     if (cursor < static_cast<int>(pc_bps.size())) {
         auto it = std::next(pc_bps.begin(), cursor);
-        Address pc = *it;
+        simrv::xlen::Address pc = *it;
         machine.breakpoint_manager().remove_pc_breakpoint(pc);
         if (set_status_override_cb) {
             set_status_override_cb(std::format("Removed breakpoint at 0x{:08x}", pc));

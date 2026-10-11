@@ -68,10 +68,11 @@ class GdbStub {
     void service_pending(simrv::core::Machine& machine);
 
     /// Publish an asynchronous all-stop notification from the simulation thread.
-    void notify_stop(HartId hart, GdbSignal signal = GdbSignal::SigTrap, std::string reason = {});
+    void notify_stop(simrv::xlen::HartId hart, GdbSignal signal = GdbSignal::SigTrap,
+                     std::string reason = {});
 
-    static auto reg_to_hex(Register val) -> std::string;
-    static auto hex_to_reg(const std::string& text, std::size_t offset) -> Register;
+    static auto reg_to_hex(simrv::xlen::Register val) -> std::string;
+    static auto hex_to_reg(const std::string& text, std::size_t offset) -> simrv::xlen::Register;
     static auto checksum(const std::string& data) -> uint8_t;
 
    private:
@@ -108,7 +109,7 @@ class GdbStub {
     std::mutex outbound_mutex_;
     std::deque<std::string> outbound_packets_;
 
-    HartId current_hart_{HartId{0}};
+    simrv::xlen::HartId current_hart_{simrv::xlen::HartId{0}};
     std::string last_stop_reply_ = "T05thread:1;";
 
     void worker_loop(const std::stop_token& stop_token);

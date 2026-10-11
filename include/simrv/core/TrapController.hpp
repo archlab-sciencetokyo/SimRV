@@ -19,7 +19,7 @@ struct ArchState;
 /**
  * @brief Return human-readable name of a RISC-V trap cause (interrupt or exception).
  */
-[[nodiscard]] auto trap_cause_name(TrapCause cause) -> std::string;
+[[nodiscard]] auto trap_cause_name(simrv::xlen::TrapCause cause) -> std::string;
 
 /**
  * @class TrapController
@@ -59,7 +59,7 @@ class TrapController {
      * @param cause Hardware trap cause code (interrupt or exception).
      * @param tval Auxiliary trap value (e.g. faulting virtual address or instruction encoding).
      */
-    static void raise_exception(CPU& cpu, TrapCause cause, CSRValue tval);
+    static void raise_exception(CPU& cpu, simrv::xlen::TrapCause cause, simrv::xlen::CSRValue tval);
 
     /**
      * @brief Validates if the current privilege level is sufficient to execute a given privileged
@@ -75,9 +75,11 @@ class TrapController {
      * @param funct7 The 7-bit function field (used for SFENCE.VMA).
      * @return true if the instruction is allowed under current privilege, false otherwise.
      */
-    static auto can_execute_privileged_instruction(PrivilegeLevel current_priv, CSRValue misa,
-                                                   CSRValue mstatus, Instruction funct12,
-                                                   Word funct7) -> bool;
+    static auto can_execute_privileged_instruction(simrv::xlen::PrivilegeLevel current_priv,
+                                                   simrv::xlen::CSRValue misa,
+                                                   simrv::xlen::CSRValue mstatus,
+                                                   simrv::xlen::Instruction funct12,
+                                                   simrv::xlen::Word funct7) -> bool;
 
     /**
      * @brief Validates if the current privilege level has access to a specific CSR.
@@ -91,8 +93,8 @@ class TrapController {
      * @param is_write True if this is a write or read-write access to the CSR.
      * @return true if access is permitted, false if it triggers an illegal instruction exception.
      */
-    static auto can_access_csr(PrivilegeLevel current_priv, CSRValue misa, CSRAddress csr_addr,
-                               bool is_write) -> bool;
+    static auto can_access_csr(simrv::xlen::PrivilegeLevel current_priv, simrv::xlen::CSRValue misa,
+                               simrv::xlen::CSRAddress csr_addr, bool is_write) -> bool;
 };
 
 }  // namespace simrv::core

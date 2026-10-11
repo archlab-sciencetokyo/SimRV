@@ -1008,10 +1008,12 @@ auto Tui::render_framebuffer_row(int row, int width, int rows) const -> std::str
         const int source_top = std::min(source_height - 1, top * source_height / pixel_height);
         const int source_bottom =
             std::min(source_height - 1, bottom * source_height / pixel_height);
-        const auto* p_top = fb.unchecked_ptr(
-            fb.base() + static_cast<Address>((source_top * source_width + source_x) * 4));
-        const auto* p_bottom = fb.unchecked_ptr(
-            fb.base() + static_cast<Address>((source_bottom * source_width + source_x) * 4));
+        const auto* p_top =
+            fb.unchecked_ptr(fb.base() + static_cast<simrv::xlen::Address>(
+                                             (source_top * source_width + source_x) * 4));
+        const auto* p_bottom =
+            fb.unchecked_ptr(fb.base() + static_cast<simrv::xlen::Address>(
+                                             (source_bottom * source_width + source_x) * 4));
         result += std::format(
             "\033[38;2;{};{};{}m\033[48;2;{};{};{}m▀", std::to_integer<uint8_t>(p_top[2]),
             std::to_integer<uint8_t>(p_top[1]), std::to_integer<uint8_t>(p_top[0]),
@@ -1580,7 +1582,8 @@ void Tui::handle_mouse_inspector(int x, int y, int b, bool multi_column, bool is
                     render(true);
                 }
             } else if (page == TuiRegPage::PIPELINE) {
-                Register clicked_pc = inspector_pane_->get_pipeline_pc_at_row(logical_row);
+                simrv::xlen::Register clicked_pc =
+                    inspector_pane_->get_pipeline_pc_at_row(logical_row);
                 if (clicked_pc != 0) {
                     inspector_pane_->set_previous_page(TuiRegPage::PIPELINE);
                     inspector_pane_->set_explain_pc(clicked_pc);
@@ -2769,9 +2772,11 @@ void Tui::update_trace_active_cache() {
     pipeline_or_detail_visible_.store(detail_visible, std::memory_order_release);
 }
 
-void Tui::record_instruction(Register pc, simrv::isa::Opcode opcode, simrv::isa::OperationId op_id,
-                             uint8_t rd, Register rd_val, uint8_t rs1, Register rs1_val,
-                             uint8_t rs2, Register rs2_val, int64_t imm, uint8_t hart) {
+void Tui::record_instruction(simrv::xlen::Register pc, simrv::isa::Opcode opcode,
+                             simrv::isa::OperationId op_id, uint8_t rd,
+                             simrv::xlen::Register rd_val, uint8_t rs1,
+                             simrv::xlen::Register rs1_val, uint8_t rs2,
+                             simrv::xlen::Register rs2_val, int64_t imm, uint8_t hart) {
     if (mission_.enabled()) {
         if (const auto symbol = machine_.symbol_table().lookup_symbol(pc);
             symbol && symbol->is_exact()) {
@@ -2800,7 +2805,7 @@ void Tui::record_instruction(Register pc, simrv::isa::Opcode opcode, simrv::isa:
     ring.write_sequence.store(slot + 1, std::memory_order_release);
 }
 
-void Tui::record_flight_instruction(Register pc, simrv::isa::Opcode opcode,
+void Tui::record_flight_instruction(simrv::xlen::Register pc, simrv::isa::Opcode opcode,
                                     simrv::isa::OperationId op_id, uint8_t hart) {
     auto& ring = flight_rings_.at(hart % kFlightRecorderHarts);
     const uint64_t slot = ring.write_sequence.load(std::memory_order_relaxed);
@@ -3490,7 +3495,7 @@ auto Tui::handle_debug_keyboard_input(TuiKey key) -> bool {
             break;
         case simrv::tui::TuiKey::k:
         case simrv::tui::TuiKey::K: {
-            Address pc = machine_.primary_hart().state().pc;
+            simrv::xlen::Address pc = machine_.primary_hart().state().pc;
             if (machine_.breakpoint_manager().has_pc_breakpoint(pc)) {
                 machine_.breakpoint_manager().remove_pc_breakpoint(pc);
                 modal_.open_notice("BREAKPOINT REMOVED",
@@ -4071,7 +4076,7 @@ void Tui::execute_footer_action(TuiFooterAction action) {
             open_modal(ModalType::SetWatchpoint);
             break;
         case TuiFooterAction::TogglePcBreakpoint: {
-            Address pc = machine_.primary_hart().state().pc;
+            simrv::xlen::Address pc = machine_.primary_hart().state().pc;
             if (machine_.breakpoint_manager().has_pc_breakpoint(pc)) {
                 machine_.breakpoint_manager().remove_pc_breakpoint(pc);
                 modal_.open_notice("BREAKPOINT REMOVED",

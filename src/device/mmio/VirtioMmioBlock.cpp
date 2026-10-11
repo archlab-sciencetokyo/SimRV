@@ -11,15 +11,16 @@
 
 namespace simrv::device {
 
-VirtioMmioBlock::VirtioMmioBlock(Address base_address, uint32_t irq_num, core::Machine* machine,
-                                 const std::string& disk_path)
+VirtioMmioBlock::VirtioMmioBlock(simrv::xlen::Address base_address, uint32_t irq_num,
+                                 core::Machine* machine, const std::string& disk_path)
     : VirtioMmioDevice("virtio-block-mmio", base_address, 0x1000, virtio::kDevIdBlock, irq_num,
                        machine),
       backend_(disk_path) {
     add_queue(64);
 }
 
-auto VirtioMmioBlock::read_device_config(Address offset, std::size_t size) -> uint64_t {
+auto VirtioMmioBlock::read_device_config(simrv::xlen::Address offset, std::size_t size)
+    -> uint64_t {
     (void)size;
     const uint64_t capacity = backend_.capacity_sectors();
     if (offset == 0) return capacity & 0xFFFFFFFFULL;

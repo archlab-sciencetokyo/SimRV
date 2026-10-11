@@ -23,7 +23,7 @@ void expect(bool condition, const std::string& message) {
 
 void test_pmp_matching_modes() {
     simrv::core::ArchState state{};
-    state.priv = PrivilegeLevel::Supervisor;
+    state.priv = simrv::xlen::PrivilegeLevel::Supervisor;
 
     // Default: No PMP entries active -> All S-mode accesses allowed
     expect(simrv::core::pmp::check_access(state, 0x80000000, 4, simrv::core::PmpAccessType::Read),
@@ -33,7 +33,7 @@ void test_pmp_matching_modes() {
         "Default: Empty PMP allows S-mode execute");
 
     // 1. NA4 mode at 0x80001000 (4-byte range [0x80001000, 0x80001004))
-    state.pmpaddr[0] = static_cast<Address>(0x80001000 >> 2);
+    state.pmpaddr[0] = static_cast<simrv::xlen::Address>(0x80001000 >> 2);
     state.pmpcfg[0] =
         simrv::core::pmp::kPmpModeNa4 | simrv::core::pmp::kPmpR | simrv::core::pmp::kPmpX;
     state.refresh_pmp_status();
@@ -50,7 +50,7 @@ void test_pmp_matching_modes() {
 
     // 2. TOR mode: Entry 1 with TOR mode spanning [0x80001000, 0x80002000)
     // Entry 0 pmpaddr was 0x80001000 >> 2. Entry 1 pmpaddr is 0x80002000 >> 2.
-    state.pmpaddr[1] = static_cast<Address>(0x80002000 >> 2);
+    state.pmpaddr[1] = static_cast<simrv::xlen::Address>(0x80002000 >> 2);
     state.pmpcfg[1] =
         simrv::core::pmp::kPmpModeTor | simrv::core::pmp::kPmpR | simrv::core::pmp::kPmpW;
     state.refresh_pmp_status();
@@ -68,7 +68,7 @@ void test_pmp_matching_modes() {
     // 3. NAPOT mode: Entry 2 64KB region at 0x80010000
     // 64KB = 2^16 bytes. NAPOT: t = 13 trailing ones in pmpaddr
     const uint64_t napot_64k = (0x80010000ULL >> 2) | ((1ULL << 13) - 1);
-    state.pmpaddr[2] = static_cast<Address>(napot_64k);
+    state.pmpaddr[2] = static_cast<simrv::xlen::Address>(napot_64k);
     state.pmpcfg[2] = simrv::core::pmp::kPmpModeNapot | simrv::core::pmp::kPmpR |
                       simrv::core::pmp::kPmpW | simrv::core::pmp::kPmpX;
     state.refresh_pmp_status();
@@ -86,10 +86,10 @@ void test_pmp_matching_modes() {
 
 void test_pmp_partial_overlap() {
     simrv::core::ArchState state{};
-    state.priv = PrivilegeLevel::Supervisor;
+    state.priv = simrv::xlen::PrivilegeLevel::Supervisor;
 
     // PMP entry 0: NA4 at 0x80001000 ([0x80001000, 0x80001004)) with RWX
-    state.pmpaddr[0] = static_cast<Address>(0x80001000 >> 2);
+    state.pmpaddr[0] = static_cast<simrv::xlen::Address>(0x80001000 >> 2);
     state.pmpcfg[0] = simrv::core::pmp::kPmpModeNa4 | simrv::core::pmp::kPmpR |
                       simrv::core::pmp::kPmpW | simrv::core::pmp::kPmpX;
     state.refresh_pmp_status();
@@ -104,10 +104,10 @@ void test_pmp_partial_overlap() {
 
 void test_pmp_machine_mode_and_locks() {
     simrv::core::ArchState state{};
-    state.priv = PrivilegeLevel::Machine;
+    state.priv = simrv::xlen::PrivilegeLevel::Machine;
 
     // Entry 0: NA4 at 0x80001000 with NO permissions, unlocked (L = 0)
-    state.pmpaddr[0] = static_cast<Address>(0x80001000 >> 2);
+    state.pmpaddr[0] = static_cast<simrv::xlen::Address>(0x80001000 >> 2);
     state.pmpcfg[0] = simrv::core::pmp::kPmpModeNa4;  // No R, W, X
     state.refresh_pmp_status();
 
@@ -139,12 +139,12 @@ void test_pmp_csr_locking_and_updates() {
     cpu.reset();
 
     // Write pmpcfg0 and pmpaddr0
-    const Address test_addr = 0x80001000 >> 2;
-    auto res_addr = cpu.write_csr(0x3B0, static_cast<CSRValue>(test_addr));
+    const simrv::xlen::Address test_addr = 0x80001000 >> 2;
+    auto res_addr = cpu.write_csr(0x3B0, static_cast<simrv::xlen::CSRValue>(test_addr));
     expect(res_addr.has_value(), "Write to pmpaddr0 succeeded");
 
     // Write pmpcfg0 with L = 1, NA4, R
-    const CSRValue cfg_val =
+    const simrv::xlen::CSRValue cfg_val =
         simrv::core::pmp::kPmpL | simrv::core::pmp::kPmpModeNa4 | simrv::core::pmp::kPmpR;
     auto res_cfg = cpu.write_csr(0x3A0, cfg_val);
     expect(res_cfg.has_value(), "Write to pmpcfg0 succeeded");
@@ -157,7 +157,7 @@ void test_pmp_csr_locking_and_updates() {
            "Read pmpcfg0 matches written value with L=1");
 
     // Attempt to write locked pmpaddr0 - should be ignored
-    (void)cpu.write_csr(0x3B0, static_cast<CSRValue>(0x90000000 >> 2));
+    (void)cpu.write_csr(0x3B0, static_cast<simrv::xlen::CSRValue>(0x90000000 >> 2));
     read_addr = cpu.read_csr(0x3B0);
     expect(read_addr.has_value() && *read_addr == test_addr,
            "Locked pmpaddr0 ignored subsequent write");
@@ -170,16 +170,16 @@ void test_pmp_csr_locking_and_updates() {
 }
 
 void test_pmp_mmu_page_walk() {
-    std::array<Byte, 64 * 1024> memory{};
-    const Address dram_base = 0x80000000;
-    const Address dram_size = memory.size();
+    std::array<simrv::xlen::Byte, 64 * 1024> memory{};
+    const simrv::xlen::Address dram_base = 0x80000000;
+    const simrv::xlen::Address dram_size = memory.size();
     simrv::Mmu mmu(memory.data(), dram_base, dram_size);
 
     simrv::core::ArchState state{};
-    state.priv = PrivilegeLevel::Supervisor;
+    state.priv = simrv::xlen::PrivilegeLevel::Supervisor;
 
-    const Word root_ppn = dram_base >> 12;
-    Word satp = 0;
+    const simrv::xlen::Word root_ppn = dram_base >> 12;
+    simrv::xlen::Word satp = 0;
     if constexpr (simrv::xlen::kIsXLen64) {
         satp = (8ULL << 60) | root_ppn;  // Sv39
     } else {
@@ -188,17 +188,18 @@ void test_pmp_mmu_page_walk() {
 
     // Configure PMP to DENY read on page table memory at 0x80000000 (TOR [0x80000000, 0x80001000)
     // no R)
-    state.pmpaddr[0] = static_cast<Address>(dram_base >> 2);
+    state.pmpaddr[0] = static_cast<simrv::xlen::Address>(dram_base >> 2);
     state.pmpcfg[0] = simrv::core::pmp::kPmpModeTor;  // [0, dram_base) no perms
 
-    state.pmpaddr[1] = static_cast<Address>((dram_base + 0x1000) >> 2);
+    state.pmpaddr[1] = static_cast<simrv::xlen::Address>((dram_base + 0x1000) >> 2);
     state.pmpcfg[1] = simrv::core::pmp::kPmpModeTor;  // [dram_base, dram_base + 0x1000) no R/W/X
     state.refresh_pmp_status();
 
     // Attempt page walk: Reading PTE at 0x80000000 should fail PMP check and return Access Fault
     // (FaultLoad)
-    auto result = mmu.translate(0x10000, simrv::PteAccess::Read, PrivilegeLevel::Supervisor, 0,
-                                satp, simrv::xlen::kXLenBits, true, &state);
+    auto result =
+        mmu.translate(0x10000, simrv::PteAccess::Read, simrv::xlen::PrivilegeLevel::Supervisor, 0,
+                      satp, simrv::xlen::kXLenBits, true, &state);
     expect(!result.has_value(), "Page walk across PMP-prohibited PTE fails");
     if (!result.has_value()) {
         expect(result.error() == ExceptionCode::FaultLoad,

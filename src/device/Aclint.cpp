@@ -24,7 +24,7 @@ void AclintMtimer::reset() {
     }
 }
 
-auto AclintMtimer::read32(Address offset) -> uint32_t {
+auto AclintMtimer::read32(simrv::xlen::Address offset) -> uint32_t {
     if (offset >= 0x4000U && offset < 0x4000U + (kMaxHarts * 8U)) {
         const size_t hart_idx = (offset - 0x4000U) / 8U;
         const uint64_t cmp = mtimecmp_[hart_idx].load(std::memory_order_relaxed);
@@ -40,7 +40,7 @@ auto AclintMtimer::read32(Address offset) -> uint32_t {
     return 0;
 }
 
-auto AclintMtimer::read64(Address offset) -> uint64_t {
+auto AclintMtimer::read64(simrv::xlen::Address offset) -> uint64_t {
     if (offset >= 0x4000U && offset <= 0x4000U + ((kMaxHarts - 1U) * 8U)) {
         const size_t hart_idx = (offset - 0x4000U) / 8U;
         return mtimecmp_[hart_idx].load(std::memory_order_relaxed);
@@ -53,7 +53,7 @@ auto AclintMtimer::read64(Address offset) -> uint64_t {
     return lo | (hi << 32);
 }
 
-void AclintMtimer::write32(Address offset, uint32_t val) {
+void AclintMtimer::write32(simrv::xlen::Address offset, uint32_t val) {
     if (offset >= 0x4000U && offset < 0x4000U + (kMaxHarts * 8U)) {
         const size_t hart_idx = (offset - 0x4000U) / 8U;
         uint64_t cur = mtimecmp_[hart_idx].load(std::memory_order_relaxed);
@@ -73,7 +73,7 @@ void AclintMtimer::write32(Address offset, uint32_t val) {
     }
 }
 
-void AclintMtimer::write64(Address offset, uint64_t val) {
+void AclintMtimer::write64(simrv::xlen::Address offset, uint64_t val) {
     if (offset >= 0x4000U && offset <= 0x4000U + ((kMaxHarts - 1U) * 8U)) {
         const size_t hart_idx = (offset - 0x4000U) / 8U;
         mtimecmp_[hart_idx].store(val, std::memory_order_relaxed);
@@ -94,8 +94,9 @@ void AclintMtimer::tick() {
     const size_t total_harts = machine_->num_harts();
     for (size_t i = 0; i < total_harts && i < kMaxHarts; ++i) {
         const uint64_t cmp = mtimecmp_[i].load(std::memory_order_relaxed);
-        machine_->set_hart_irq(HartId{static_cast<uint32_t>(i)}, core::InterruptType::Timer,
-                               PrivilegeLevel::Machine, mtime_ >= cmp);
+        machine_->set_hart_irq(simrv::xlen::HartId{static_cast<uint32_t>(i)},
+                               core::InterruptType::Timer, simrv::xlen::PrivilegeLevel::Machine,
+                               mtime_ >= cmp);
     }
 }
 
@@ -111,7 +112,7 @@ void AclintMswi::reset() {
     }
 }
 
-auto AclintMswi::read32(Address offset) -> uint32_t {
+auto AclintMswi::read32(simrv::xlen::Address offset) -> uint32_t {
     if (offset < (kMaxHarts * 4U)) {
         const size_t hart_idx = offset / 4U;
         return msip_[hart_idx].load(std::memory_order_relaxed);
@@ -119,15 +120,15 @@ auto AclintMswi::read32(Address offset) -> uint32_t {
     return 0;
 }
 
-void AclintMswi::write32(Address offset, uint32_t val) {
+void AclintMswi::write32(simrv::xlen::Address offset, uint32_t val) {
     if (offset < (kMaxHarts * 4U)) {
         const size_t hart_idx = offset / 4U;
         const uint32_t bit = val & 1U;
         msip_[hart_idx].store(bit, std::memory_order_relaxed);
         if (machine_ != nullptr && hart_idx < machine_->num_harts()) {
-            machine_->set_hart_irq(HartId{static_cast<uint32_t>(hart_idx)},
-                                   core::InterruptType::Software, PrivilegeLevel::Machine,
-                                   bit != 0);
+            machine_->set_hart_irq(simrv::xlen::HartId{static_cast<uint32_t>(hart_idx)},
+                                   core::InterruptType::Software,
+                                   simrv::xlen::PrivilegeLevel::Machine, bit != 0);
         }
     }
 }

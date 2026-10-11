@@ -16,17 +16,18 @@ namespace simrv::device {
 
 namespace {
 
-constexpr Counter kWord32Mask = static_cast<Counter>(kLower32Mask);
-constexpr Counter kWord32Shift = 32;
+constexpr simrv::xlen::Counter kWord32Mask =
+    static_cast<simrv::xlen::Counter>(simrv::xlen::kLower32Mask);
+constexpr simrv::xlen::Counter kWord32Shift = 32;
 
-constexpr Address kClintMtimecmpOffset = 0x4000;
-constexpr Address kClintMtimeOffset = 0xbff8;
+constexpr simrv::xlen::Address kClintMtimecmpOffset = 0x4000;
+constexpr simrv::xlen::Address kClintMtimeOffset = 0xbff8;
 
 }  // namespace
 
 Clint::Clint(core::CPU& cpu) : cpu_(cpu) {
     for (auto& cmp : hart_mtimecmp) {
-        cmp.store(std::numeric_limits<Counter>::max(), std::memory_order_relaxed);
+        cmp.store(std::numeric_limits<simrv::xlen::Counter>::max(), std::memory_order_relaxed);
     }
     for (auto& timer : hart_supervisor_timer) {
         timer.store(false, std::memory_order_relaxed);
@@ -35,10 +36,10 @@ Clint::Clint(core::CPU& cpu) : cpu_(cpu) {
 
 void Clint::reset() {
     mtime.store(1, std::memory_order_release);
-    mtimecmp.store(std::numeric_limits<Counter>::max(), std::memory_order_release);
+    mtimecmp.store(std::numeric_limits<simrv::xlen::Counter>::max(), std::memory_order_release);
     supervisor_timer.store(false, std::memory_order_release);
     for (auto& cmp : hart_mtimecmp) {
-        cmp.store(std::numeric_limits<Counter>::max(), std::memory_order_release);
+        cmp.store(std::numeric_limits<simrv::xlen::Counter>::max(), std::memory_order_release);
     }
     for (auto& timer : hart_supervisor_timer) {
         timer.store(false, std::memory_order_release);
@@ -48,28 +49,29 @@ void Clint::reset() {
 }
 
 auto Clint::handle_request(const memory::TlChannelA& req, memory::TlChannelD& resp) -> bool {
-    const Address off = offset(req.address.raw());
+    const simrv::xlen::Address off = offset(req.address.raw());
     const int req_bytes = 1 << (req.size & 3);
 
     if (req.opcode == memory::TlOpcodeA::Get) {
         if (req_bytes == 8) {
             if (off == kClintMtimeOffset || off == 0x7ff8) {
-                resp.data = static_cast<Word>(mtime.load(std::memory_order_relaxed));
+                resp.data = static_cast<simrv::xlen::Word>(mtime.load(std::memory_order_relaxed));
             } else if (off >= kClintMtimecmpOffset &&
                        off < kClintMtimecmpOffset + (kMaxClintHarts * 8)) {
                 const size_t hid = (off - kClintMtimecmpOffset) / 8;
                 if (hid == 0) {
-                    resp.data = static_cast<Word>(mtimecmp.load(std::memory_order_relaxed));
-                } else {
                     resp.data =
-                        static_cast<Word>(hart_mtimecmp.at(hid).load(std::memory_order_relaxed));
+                        static_cast<simrv::xlen::Word>(mtimecmp.load(std::memory_order_relaxed));
+                } else {
+                    resp.data = static_cast<simrv::xlen::Word>(
+                        hart_mtimecmp.at(hid).load(std::memory_order_relaxed));
                 }
             } else {
-                const Word lo = mmio_read(off);
-                const Word hi = mmio_read(off + 4);
+                const simrv::xlen::Word lo = mmio_read(off);
+                const simrv::xlen::Word hi = mmio_read(off + 4);
                 const uint64_t combined =
                     static_cast<uint64_t>(lo) | (static_cast<uint64_t>(hi) << 32U);
-                resp.data = static_cast<Word>(combined);
+                resp.data = static_cast<simrv::xlen::Word>(combined);
             }
         } else {
             resp.data = mmio_read(off);
@@ -78,7 +80,7 @@ auto Clint::handle_request(const memory::TlChannelA& req, memory::TlChannelD& re
         if (req_bytes == 8) {
             if (off == kClintMtimeOffset || off == 0x7ff8) {
                 supervisor_timer.store(false, std::memory_order_release);
-                mtime.store(static_cast<Counter>(req.data), std::memory_order_release);
+                mtime.store(static_cast<simrv::xlen::Counter>(req.data), std::memory_order_release);
                 cpu_.evaluate_timer_interrupt();
                 if (cpu_.machine_) {
                     for (size_t hart = 1; hart < cpu_.machine_->num_harts(); ++hart) {
@@ -90,20 +92,22 @@ auto Clint::handle_request(const memory::TlChannelA& req, memory::TlChannelD& re
                 const size_t hid = (off - kClintMtimecmpOffset) / 8;
                 if (hid == 0) {
                     supervisor_timer.store(false, std::memory_order_release);
-                    mtimecmp.store(static_cast<Counter>(req.data), std::memory_order_release);
+                    mtimecmp.store(static_cast<simrv::xlen::Counter>(req.data),
+                                   std::memory_order_release);
                     cpu_.evaluate_timer_interrupt();
                 } else {
                     hart_supervisor_timer.at(hid).store(false, std::memory_order_release);
-                    hart_mtimecmp.at(hid).store(static_cast<Counter>(req.data),
+                    hart_mtimecmp.at(hid).store(static_cast<simrv::xlen::Counter>(req.data),
                                                 std::memory_order_release);
                     if (cpu_.machine_ && hid < cpu_.machine_->num_harts()) {
                         cpu_.machine_->hart(hid).evaluate_timer_interrupt();
                     }
                 }
             } else {
-                mmio_write(off, static_cast<Word>(req.data & kWord32Mask));
+                mmio_write(off, static_cast<simrv::xlen::Word>(req.data & kWord32Mask));
                 const uint64_t wide_data = static_cast<uint64_t>(req.data);
-                mmio_write(off + 4, static_cast<Word>((wide_data >> 32U) & kWord32Mask));
+                mmio_write(off + 4,
+                           static_cast<simrv::xlen::Word>((wide_data >> 32U) & kWord32Mask));
             }
         } else {
             mmio_write(off, req.data);
@@ -112,7 +116,7 @@ auto Clint::handle_request(const memory::TlChannelA& req, memory::TlChannelD& re
     return true;
 }
 
-auto Clint::mmio_read(Address offset) const -> Word {
+auto Clint::mmio_read(simrv::xlen::Address offset) const -> simrv::xlen::Word {
     if (offset < 0x4000 || (offset >= 0x80000 && offset < 0x84000)) {
         const size_t hart_id = (offset >= 0x80000) ? ((offset - 0x80000) / 4) : (offset / 4);
         if (cpu_.machine_ && hart_id < cpu_.machine_->num_harts()) {
@@ -126,27 +130,30 @@ auto Clint::mmio_read(Address offset) const -> Word {
     if (offset >= kClintMtimecmpOffset && offset < kClintMtimecmpOffset + (kMaxClintHarts * 8)) {
         const size_t hart_id = (offset - kClintMtimecmpOffset) / 8;
         const bool is_hi = ((offset - kClintMtimecmpOffset) % 8) == 4;
-        Counter const cmp = (hart_id == 0)
-                                ? mtimecmp.load(std::memory_order_relaxed)
-                                : hart_mtimecmp.at(hart_id).load(std::memory_order_relaxed);
-        return static_cast<Word>(is_hi ? ((cmp >> 32) & kWord32Mask) : (cmp & kWord32Mask));
+        simrv::xlen::Counter const cmp =
+            (hart_id == 0) ? mtimecmp.load(std::memory_order_relaxed)
+                           : hart_mtimecmp.at(hart_id).load(std::memory_order_relaxed);
+        return static_cast<simrv::xlen::Word>(is_hi ? ((cmp >> 32) & kWord32Mask)
+                                                    : (cmp & kWord32Mask));
     }
     if (offset == kClintMtimeOffset || offset == 0x7ff8) {
-        return static_cast<Word>(mtime.load(std::memory_order_relaxed) & kWord32Mask);
+        return static_cast<simrv::xlen::Word>(mtime.load(std::memory_order_relaxed) & kWord32Mask);
     }
     if (offset == kClintMtimeOffset + 4 || offset == 0x7ff8 + 4) {
-        return static_cast<Word>((mtime.load(std::memory_order_relaxed) >> 32) & kWord32Mask);
+        return static_cast<simrv::xlen::Word>((mtime.load(std::memory_order_relaxed) >> 32) &
+                                              kWord32Mask);
     }
     return 0;
 }
 
-void Clint::mmio_write(Address offset, Word wdata) {
-    const Counter wdata_64 = static_cast<Counter>(wdata) & kWord32Mask;
+void Clint::mmio_write(simrv::xlen::Address offset, simrv::xlen::Word wdata) {
+    const simrv::xlen::Counter wdata_64 = static_cast<simrv::xlen::Counter>(wdata) & kWord32Mask;
     if (offset < 0x4000 || (offset >= 0x80000 && offset < 0x84000)) {
         const size_t hart_id = (offset >= 0x80000) ? ((offset - 0x80000) / 4) : (offset / 4);
         if (cpu_.machine_ && hart_id < cpu_.machine_->num_harts()) {
-            cpu_.machine_->set_hart_irq(static_cast<HartId>(hart_id), core::InterruptType::Software,
-                                        PrivilegeLevel::Machine, (wdata & 1) != 0);
+            cpu_.machine_->set_hart_irq(static_cast<simrv::xlen::HartId>(hart_id),
+                                        core::InterruptType::Software,
+                                        simrv::xlen::PrivilegeLevel::Machine, (wdata & 1) != 0);
         } else if (hart_id == 0) {
             if ((wdata & 1) != 0) {
                 cpu_.state().mip |= core::MipBit::Msip;
@@ -161,14 +168,15 @@ void Clint::mmio_write(Address offset, Word wdata) {
         const bool is_hi = ((offset - kClintMtimecmpOffset) % 8) == 4;
         if (hart_id == 0) {
             supervisor_timer.store(false, std::memory_order_release);
-            const Counter cur = mtimecmp.load(std::memory_order_relaxed);
+            const simrv::xlen::Counter cur = mtimecmp.load(std::memory_order_relaxed);
             mtimecmp.store(is_hi ? ((cur & kWord32Mask) | (wdata_64 << kWord32Shift))
                                  : ((cur & ~kWord32Mask) | wdata_64),
                            std::memory_order_release);
             cpu_.evaluate_timer_interrupt();
         } else {
             hart_supervisor_timer.at(hart_id).store(false, std::memory_order_release);
-            const Counter cur = hart_mtimecmp.at(hart_id).load(std::memory_order_relaxed);
+            const simrv::xlen::Counter cur =
+                hart_mtimecmp.at(hart_id).load(std::memory_order_relaxed);
             hart_mtimecmp.at(hart_id).store(is_hi
                                                 ? ((cur & kWord32Mask) | (wdata_64 << kWord32Shift))
                                                 : ((cur & ~kWord32Mask) | wdata_64),
@@ -181,14 +189,14 @@ void Clint::mmio_write(Address offset, Word wdata) {
     }
     if (offset == kClintMtimeOffset) {
         supervisor_timer.store(false, std::memory_order_release);
-        const Counter cur = mtime.load(std::memory_order_relaxed);
+        const simrv::xlen::Counter cur = mtime.load(std::memory_order_relaxed);
         mtime.store((cur & ~kWord32Mask) | wdata_64, std::memory_order_release);
         cpu_.evaluate_timer_interrupt();
         return;
     }
     if (offset == kClintMtimeOffset + 4) {
         supervisor_timer.store(false, std::memory_order_release);
-        const Counter cur = mtime.load(std::memory_order_relaxed);
+        const simrv::xlen::Counter cur = mtime.load(std::memory_order_relaxed);
         mtime.store((cur & kWord32Mask) | (wdata_64 << kWord32Shift), std::memory_order_release);
         cpu_.evaluate_timer_interrupt();
         return;

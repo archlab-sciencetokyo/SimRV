@@ -57,7 +57,7 @@ class MmioRouter {
      * @param addr Target byte address.
      * @return Pointer to target TileLinkNode if found, nullptr otherwise.
      */
-    [[nodiscard]] auto resolve_device(Address addr) const -> TileLinkNode*;
+    [[nodiscard]] auto resolve_device(simrv::xlen::Address addr) const -> TileLinkNode*;
 
     /**
      * @brief Search for a device node by string name.
@@ -91,8 +91,8 @@ class MmioRouter {
 
    private:
     struct DeviceEntry {
-        Address base = 0;
-        Address end = 0;
+        simrv::xlen::Address base = 0;
+        simrv::xlen::Address end = 0;
         TileLinkNode* node = nullptr;
     };
 
@@ -100,8 +100,8 @@ class MmioRouter {
 
     std::vector<TileLinkNode*> nodes_;
     std::vector<DeviceEntry> entries_;
-    Address min_base_ = std::numeric_limits<Address>::max();
-    Address max_end_ = 0;
+    simrv::xlen::Address min_base_ = std::numeric_limits<simrv::xlen::Address>::max();
+    simrv::xlen::Address max_end_ = 0;
     mutable std::array<DeviceEntry, kMruCapacity> mru_entries_{};
     mutable size_t mru_count_ = 0;
     uint64_t mmio_read_count_ = 0;

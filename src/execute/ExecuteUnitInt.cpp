@@ -46,7 +46,8 @@ constexpr auto perform_amo_op(T reg_val, T mem_val, Funct5Amo funct5) -> T {
 }
 }  // namespace
 
-auto ExecuteUnit::aluInt32(Register in1, Register in2, isa::OperationId op_id) -> Register {
+auto ExecuteUnit::aluInt32(simrv::xlen::Register in1, simrv::xlen::Register in2,
+                           isa::OperationId op_id) -> simrv::xlen::Register {
     using enum isa::OperationId;
     const auto u1 = static_cast<uint32_t>(in1);
     const auto u2 = static_cast<uint32_t>(in2);
@@ -144,11 +145,11 @@ auto ExecuteUnit::aluInt32(Register in1, Register in2, isa::OperationId op_id) -
         default:
             return ExecuteUnit::aluIntZb(in1, in2, op_id, 32);
     }
-    return static_cast<Register>(static_cast<int64_t>(res32));
+    return static_cast<simrv::xlen::Register>(static_cast<int64_t>(res32));
 }
 
-auto ExecuteUnit::aluInt(Register in1, Register in2, isa::OperationId op_id, unsigned xlen)
-    -> Register {
+auto ExecuteUnit::aluInt(simrv::xlen::Register in1, simrv::xlen::Register in2,
+                         isa::OperationId op_id, unsigned xlen) -> simrv::xlen::Register {
     using enum isa::OperationId;
 
     if constexpr (!simrv::xlen::kIsXLen64) {
@@ -170,11 +171,11 @@ auto ExecuteUnit::aluInt(Register in1, Register in2, isa::OperationId op_id, uns
             return in1 << (in2 & simrv::xlen::xlen_shift_mask());
         case SLT:
         case SLTI:
-            return static_cast<Register>(static_cast<SignedWord>(in1) <
-                                         static_cast<SignedWord>(in2));
+            return static_cast<simrv::xlen::Register>(static_cast<simrv::xlen::SignedWord>(in1) <
+                                                      static_cast<simrv::xlen::SignedWord>(in2));
         case SLTU:
         case SLTIU:
-            return static_cast<Register>(in1 < in2);
+            return static_cast<simrv::xlen::Register>(in1 < in2);
         case XOR:
         case XORI:
             return in1 ^ in2;
@@ -183,8 +184,8 @@ auto ExecuteUnit::aluInt(Register in1, Register in2, isa::OperationId op_id, uns
             return in1 >> (in2 & simrv::xlen::xlen_shift_mask());
         case SRA:
         case SRAI:
-            return static_cast<Register>(static_cast<SignedWord>(in1) >>
-                                         (in2 & simrv::xlen::xlen_shift_mask()));
+            return static_cast<simrv::xlen::Register>(static_cast<simrv::xlen::SignedWord>(in1) >>
+                                                      (in2 & simrv::xlen::xlen_shift_mask()));
         case OR:
         case ORI:
             return in1 | in2;
@@ -202,23 +203,23 @@ auto ExecuteUnit::aluInt(Register in1, Register in2, isa::OperationId op_id, uns
         case MULHU:
             return simrv::xlen::mul_high_unsigned(in1, in2);
         case DIV: {
-            const auto lhs = static_cast<SignedWord>(in1);
-            const auto rhs = static_cast<SignedWord>(in2);
+            const auto lhs = static_cast<simrv::xlen::SignedWord>(in1);
+            const auto rhs = static_cast<simrv::xlen::SignedWord>(in2);
             if (rhs == 0) return simrv::xlen::kWordAllOnes;
-            if (lhs == std::numeric_limits<SignedWord>::min() && rhs == -1)
-                return static_cast<Register>(lhs);
-            return static_cast<Register>(lhs / rhs);
+            if (lhs == std::numeric_limits<simrv::xlen::SignedWord>::min() && rhs == -1)
+                return static_cast<simrv::xlen::Register>(lhs);
+            return static_cast<simrv::xlen::Register>(lhs / rhs);
         }
         case DIVU: {
             if (in2 == 0) return simrv::xlen::kWordAllOnes;
             return in1 / in2;
         }
         case REM: {
-            const auto lhs = static_cast<SignedWord>(in1);
-            const auto rhs = static_cast<SignedWord>(in2);
+            const auto lhs = static_cast<simrv::xlen::SignedWord>(in1);
+            const auto rhs = static_cast<simrv::xlen::SignedWord>(in2);
             if (rhs == 0) return in1;
-            if (lhs == std::numeric_limits<SignedWord>::min() && rhs == -1) return 0;
-            return static_cast<Register>(lhs % rhs);
+            if (lhs == std::numeric_limits<simrv::xlen::SignedWord>::min() && rhs == -1) return 0;
+            return static_cast<simrv::xlen::Register>(lhs % rhs);
         }
         case REMU: {
             if (in2 == 0) return in1;
@@ -266,7 +267,8 @@ auto ExecuteUnit::aluInt(Register in1, Register in2, isa::OperationId op_id, uns
     }
 }
 
-auto ExecuteUnit::aluIntW(Register in1, Register in2, isa::OperationId op_id) -> Register {
+auto ExecuteUnit::aluIntW(simrv::xlen::Register in1, simrv::xlen::Register in2,
+                          isa::OperationId op_id) -> simrv::xlen::Register {
     if constexpr (!simrv::xlen::kIsXLen64) {
         return 0;  // W instructions are invalid on RV32
     } else {
@@ -278,22 +280,22 @@ auto ExecuteUnit::aluIntW(Register in1, Register in2, isa::OperationId op_id) ->
             // Base W Arithmetic
             case ADDW:
             case ADDIW:
-                return static_cast<Register>(
+                return static_cast<simrv::xlen::Register>(
                     static_cast<int64_t>(static_cast<int32_t>(lhs32 + rhs32)));
             case SUBW:
-                return static_cast<Register>(
+                return static_cast<simrv::xlen::Register>(
                     static_cast<int64_t>(static_cast<int32_t>(lhs32 - rhs32)));
             case SLLW:
             case SLLIW:
-                return static_cast<Register>(
+                return static_cast<simrv::xlen::Register>(
                     static_cast<int64_t>(static_cast<int32_t>(lhs32 << (rhs32 & 0x1F))));
             case SRLW:
             case SRLIW:
-                return static_cast<Register>(
+                return static_cast<simrv::xlen::Register>(
                     static_cast<int64_t>(static_cast<int32_t>(lhs32 >> (rhs32 & 0x1F))));
             case SRAW:
             case SRAIW:
-                return static_cast<Register>(
+                return static_cast<simrv::xlen::Register>(
                     static_cast<int64_t>(static_cast<int32_t>(lhs32) >> (rhs32 & 0x1F)));
 
             // M-Extension W
@@ -337,7 +339,8 @@ auto ExecuteUnit::aluIntW(Register in1, Register in2, isa::OperationId op_id) ->
     }
 }
 
-auto ExecuteUnit::branchTaken(Register in1, Register in2, Funct3 funct3, unsigned xlen) -> bool {
+auto ExecuteUnit::branchTaken(simrv::xlen::Register in1, simrv::xlen::Register in2, Funct3 funct3,
+                              unsigned xlen) -> bool {
     if constexpr (!simrv::xlen::kIsXLen64) {
         xlen = 32;
     }
@@ -370,9 +373,11 @@ auto ExecuteUnit::branchTaken(Register in1, Register in2, Funct3 funct3, unsigne
         case Funct3::Bne:
             return in1 != in2;
         case Funct3::Blt:
-            return static_cast<SignedWord>(in1) < static_cast<SignedWord>(in2);
+            return static_cast<simrv::xlen::SignedWord>(in1) <
+                   static_cast<simrv::xlen::SignedWord>(in2);
         case Funct3::Bge:
-            return static_cast<SignedWord>(in1) >= static_cast<SignedWord>(in2);
+            return static_cast<simrv::xlen::SignedWord>(in1) >=
+                   static_cast<simrv::xlen::SignedWord>(in2);
         case Funct3::Bltu:
             return in1 < in2;
         case Funct3::Bgeu:
@@ -382,34 +387,37 @@ auto ExecuteUnit::branchTaken(Register in1, Register in2, Funct3 funct3, unsigne
     }
 }
 
-auto ExecuteUnit::aluAmo(Register in1, Register in2, Funct5Amo funct5, Funct3 funct3) -> Register {
-    if constexpr (kIsXLen64) {
+auto ExecuteUnit::aluAmo(simrv::xlen::Register in1, simrv::xlen::Register in2, Funct5Amo funct5,
+                         Funct3 funct3) -> simrv::xlen::Register {
+    if constexpr (simrv::xlen::kIsXLen64) {
         if (funct3 == static_cast<Funct3>(2)) {  // AMO*W (32-bit)
             const auto res32 = perform_amo_op<int32_t>(static_cast<int32_t>(in1),
                                                        static_cast<int32_t>(in2), funct5);
-            return static_cast<Register>(static_cast<int64_t>(res32));  // sign-extend to 64-bit
+            return static_cast<simrv::xlen::Register>(
+                static_cast<int64_t>(res32));  // sign-extend to 64-bit
         }
     }
 
-    return perform_amo_op<Word>(in1, in2, funct5);
+    return perform_amo_op<simrv::xlen::Word>(in1, in2, funct5);
 }
 
-auto ExecuteUnit::csrWriteValue(CSRValue rcsr, Register rrs1, ImmValue imm, Funct3 funct3)
-    -> std::expected<CSRValue, TrapCause> {
-    const Word zimm = static_cast<Word>(imm);
+auto ExecuteUnit::csrWriteValue(simrv::xlen::CSRValue rcsr, simrv::xlen::Register rrs1,
+                                simrv::xlen::ImmValue imm, Funct3 funct3)
+    -> std::expected<simrv::xlen::CSRValue, simrv::xlen::TrapCause> {
+    const simrv::xlen::Word zimm = static_cast<simrv::xlen::Word>(imm);
     switch (funct3) {
         case Funct3::Csrrw:
-            return static_cast<CSRValue>(rrs1);
+            return static_cast<simrv::xlen::CSRValue>(rrs1);
         case Funct3::Csrrs:
-            return rcsr | static_cast<CSRValue>(rrs1);
+            return rcsr | static_cast<simrv::xlen::CSRValue>(rrs1);
         case Funct3::Csrrc:
-            return rcsr & ~static_cast<CSRValue>(rrs1);
+            return rcsr & ~static_cast<simrv::xlen::CSRValue>(rrs1);
         case Funct3::Csrrwi:
-            return static_cast<CSRValue>(zimm);
+            return static_cast<simrv::xlen::CSRValue>(zimm);
         case Funct3::Csrrsi:
-            return rcsr | static_cast<CSRValue>(zimm);
+            return rcsr | static_cast<simrv::xlen::CSRValue>(zimm);
         case Funct3::Csrrci:
-            return rcsr & ~static_cast<CSRValue>(zimm);
+            return rcsr & ~static_cast<simrv::xlen::CSRValue>(zimm);
         default:
             return std::unexpected(to_trap_cause(ExceptionCode::IllegalInstruction));
     }

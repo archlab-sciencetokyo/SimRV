@@ -22,7 +22,7 @@ auto InspectorPane::render_tlb_stats(const simrv::core::CPU& cpu, int logical_ro
     const auto& tlb = cpu.tlb;
 
     // Parse satp details
-    Register satp_val = st.satp;
+    simrv::xlen::Register satp_val = st.satp;
     std::string mode_str = "Bare (Off)";
     uint64_t asid = 0;
     uint64_t ppn = 0;
@@ -49,8 +49,8 @@ auto InspectorPane::render_tlb_stats(const simrv::core::CPU& cpu, int logical_ro
         const char* type;
         size_t set;
         int way;
-        Address vaddr;
-        Address paddr;
+        simrv::xlen::Address vaddr;
+        simrv::xlen::Address paddr;
         Asid asid;
         const char* priv_str;
     };
@@ -58,11 +58,11 @@ auto InspectorPane::render_tlb_stats(const simrv::core::CPU& cpu, int logical_ro
 
     auto priv_to_str = [](auto priv) -> const char* {
         switch (priv) {
-            case PrivilegeLevel::User:
+            case simrv::xlen::PrivilegeLevel::User:
                 return "User";
-            case PrivilegeLevel::Supervisor:
+            case simrv::xlen::PrivilegeLevel::Supervisor:
                 return "Super";
-            case PrivilegeLevel::Machine:
+            case simrv::xlen::PrivilegeLevel::Machine:
                 return "Mach";
             default:
                 return "?";

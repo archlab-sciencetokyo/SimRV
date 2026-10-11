@@ -48,7 +48,7 @@ void CPU::fetch_operands(Machine& /*machine*/) {
 
     const auto opcode = ctx.opcode;
     const auto funct3 = ctx.funct3;
-    const Instruction funct12 = ctx.funct12;
+    const simrv::xlen::Instruction funct12 = ctx.funct12;
 
     ctx.rrs1 = state_.regs.read(ctx.rs1);
     ctx.rrs2 = state_.regs.read(ctx.rs2);
@@ -58,12 +58,13 @@ void CPU::fetch_operands(Machine& /*machine*/) {
         return;
     }
 
-    CSRAddress const w_csr_addr = (funct3 != Funct3::Priv) ? static_cast<CSRAddress>(funct12)
-                                  : (funct12 == Funct12Priv::Ecall) ? csr_addr(Csr::Mtvec)
-                                  : (funct12 == Funct12Priv::Uret)  ? csr_addr(Csr::Uepc)
-                                  : (funct12 == Funct12Priv::Sret)  ? csr_addr(Csr::Sepc)
-                                  : (funct12 == Funct12Priv::Mret)  ? csr_addr(Csr::Mepc)
-                                                                    : 0;
+    simrv::xlen::CSRAddress const w_csr_addr =
+        (funct3 != Funct3::Priv)          ? static_cast<simrv::xlen::CSRAddress>(funct12)
+        : (funct12 == Funct12Priv::Ecall) ? csr_addr(Csr::Mtvec)
+        : (funct12 == Funct12Priv::Uret)  ? csr_addr(Csr::Uepc)
+        : (funct12 == Funct12Priv::Sret)  ? csr_addr(Csr::Sepc)
+        : (funct12 == Funct12Priv::Mret)  ? csr_addr(Csr::Mepc)
+                                          : 0;
 
     if (funct3 == Funct3::Priv) {
         if (!TrapController::can_execute_privileged_instruction(
@@ -90,7 +91,7 @@ void CPU::fetch_operands(Machine& /*machine*/) {
         if (state_.priv < kPrivMachine) {
             if ((w_csr_addr >= 0xC00 && w_csr_addr <= 0xC1F) ||
                 (w_csr_addr >= 0xC80 && w_csr_addr <= 0xC9F)) {
-                const Word counter_bit = 1u << (w_csr_addr & 0x1Fu);
+                const simrv::xlen::Word counter_bit = 1u << (w_csr_addr & 0x1Fu);
                 bool access_denied = (state_.mcounteren & counter_bit) == 0;
                 if (state_.priv == kPrivUser) {
                     access_denied = access_denied || ((state_.scounteren & counter_bit) == 0);

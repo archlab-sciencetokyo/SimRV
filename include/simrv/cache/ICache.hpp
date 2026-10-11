@@ -27,16 +27,16 @@ class ICache : public BaseCache<1024, 32, 8> {
      * @param[out] data Output parameter filled with instruction word on cache hit.
      * @return true on cache hit, false on cache miss.
      */
-    [[nodiscard]] auto read(Address addr, uint32_t& data) -> bool;
-    [[nodiscard]] auto read16(Address addr, uint16_t& data) -> bool;
+    [[nodiscard]] auto read(simrv::xlen::Address addr, uint32_t& data) -> bool;
+    [[nodiscard]] auto read16(simrv::xlen::Address addr, uint16_t& data) -> bool;
 
     auto handle_probe(const simrv::memory::TlChannelB& req, simrv::memory::TlChannelC& resp)
         -> bool;
 };
 
-inline auto ICache::read(Address addr, uint32_t& data) -> bool {
+inline auto ICache::read(simrv::xlen::Address addr, uint32_t& data) -> bool {
     const uint32_t set_idx = get_set_index(addr);
-    const Address tag = get_tag(addr);
+    const simrv::xlen::Address tag = get_tag(addr);
     last_accessed_set_ = set_idx;
 
     const auto [w, cache_line] = find_matching_line(set_idx, tag);
@@ -62,9 +62,9 @@ inline auto ICache::read(Address addr, uint32_t& data) -> bool {
     return false;
 }
 
-inline auto ICache::read16(Address addr, uint16_t& data) -> bool {
+inline auto ICache::read16(simrv::xlen::Address addr, uint16_t& data) -> bool {
     const uint32_t set_idx = get_set_index(addr);
-    const Address tag = get_tag(addr);
+    const simrv::xlen::Address tag = get_tag(addr);
     last_accessed_set_ = set_idx;
 
     const auto [w, cache_line] = find_matching_line(set_idx, tag);

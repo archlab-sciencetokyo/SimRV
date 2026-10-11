@@ -27,32 +27,32 @@ class Clint : public memory::TileLinkNode {
    public:
     explicit Clint(core::CPU& cpu);
 
-    static constexpr Address kBaseAddress = simrv::mmio::kClintBaseAddress;
-    static constexpr Address kSize = simrv::mmio::kClintSize;
+    static constexpr simrv::xlen::Address kBaseAddress = simrv::mmio::kClintBaseAddress;
+    static constexpr simrv::xlen::Address kSize = simrv::mmio::kClintSize;
     static constexpr size_t kMaxClintHarts = 16;
 
     [[nodiscard]] auto name() const -> const char* final { return "clint"; }
-    [[nodiscard]] auto base_address() const -> Address final { return kBaseAddress; }
-    [[nodiscard]] auto size() const -> Address final { return kSize; }
+    [[nodiscard]] auto base_address() const -> simrv::xlen::Address final { return kBaseAddress; }
+    [[nodiscard]] auto size() const -> simrv::xlen::Address final { return kSize; }
     void reset() final;
     auto handle_request(const memory::TlChannelA& req, memory::TlChannelD& resp) -> bool final;
 
-    [[nodiscard]] constexpr auto contains(Address addr) const -> bool {
+    [[nodiscard]] constexpr auto contains(simrv::xlen::Address addr) const -> bool {
         return addr >= kBaseAddress && addr < (kBaseAddress + kSize);
     }
-    [[nodiscard]] constexpr auto offset(Address addr) const -> Address {
+    [[nodiscard]] constexpr auto offset(simrv::xlen::Address addr) const -> simrv::xlen::Address {
         return addr - kBaseAddress;
     }
 
-    [[nodiscard]] auto mmio_read(Address offset) const -> Word;
-    void mmio_write(Address offset, Word wdata);
+    [[nodiscard]] auto mmio_read(simrv::xlen::Address offset) const -> simrv::xlen::Word;
+    void mmio_write(simrv::xlen::Address offset, simrv::xlen::Word wdata);
 
-    std::atomic<Counter> mtime{1};
-    std::atomic<Counter> mtimecmp{0};
+    std::atomic<simrv::xlen::Counter> mtime{1};
+    std::atomic<simrv::xlen::Counter> mtimecmp{0};
     std::atomic<bool> supervisor_timer{false};
-    std::array<std::atomic<Counter>, kMaxClintHarts> hart_mtimecmp{};
+    std::array<std::atomic<simrv::xlen::Counter>, kMaxClintHarts> hart_mtimecmp{};
     std::array<std::atomic<bool>, kMaxClintHarts> hart_supervisor_timer{};
-    Counter mcycle{1};
+    simrv::xlen::Counter mcycle{1};
     uint32_t rtc_divider{0};
 
    private:

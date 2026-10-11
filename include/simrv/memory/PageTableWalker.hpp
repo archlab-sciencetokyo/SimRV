@@ -41,23 +41,23 @@ constexpr auto operator~(PteFlag flag) noexcept -> PteFlag {
     return static_cast<PteFlag>(~std::to_underlying(flag));
 }
 
-constexpr auto operator|(Word lhs, PteFlag rhs) noexcept -> Word {
+constexpr auto operator|(simrv::xlen::Word lhs, PteFlag rhs) noexcept -> simrv::xlen::Word {
     return lhs | std::to_underlying(rhs);
 }
-constexpr auto operator|(PteFlag lhs, Word rhs) noexcept -> Word {
+constexpr auto operator|(PteFlag lhs, simrv::xlen::Word rhs) noexcept -> simrv::xlen::Word {
     return std::to_underlying(lhs) | rhs;
 }
-constexpr auto operator|=(Word& lhs, PteFlag rhs) noexcept -> Word& {
+constexpr auto operator|=(simrv::xlen::Word& lhs, PteFlag rhs) noexcept -> simrv::xlen::Word& {
     lhs |= std::to_underlying(rhs);
     return lhs;
 }
-constexpr auto operator&(Word lhs, PteFlag rhs) noexcept -> Word {
+constexpr auto operator&(simrv::xlen::Word lhs, PteFlag rhs) noexcept -> simrv::xlen::Word {
     return lhs & std::to_underlying(rhs);
 }
-constexpr auto operator&(PteFlag lhs, Word rhs) noexcept -> Word {
+constexpr auto operator&(PteFlag lhs, simrv::xlen::Word rhs) noexcept -> simrv::xlen::Word {
     return std::to_underlying(lhs) & rhs;
 }
-constexpr auto operator&=(Word& lhs, PteFlag rhs) noexcept -> Word& {
+constexpr auto operator&=(simrv::xlen::Word& lhs, PteFlag rhs) noexcept -> simrv::xlen::Word& {
     lhs &= std::to_underlying(rhs);
     return lhs;
 }
@@ -67,7 +67,7 @@ constexpr auto operator&=(Word& lhs, PteFlag rhs) noexcept -> Word& {
  * @brief Strongly typed architectural view of a Page Table Entry (PTE) for Sv32/Sv39/Sv48/Sv57.
  */
 struct PteView {
-    Word raw{0};
+    simrv::xlen::Word raw{0};
 
     [[nodiscard]] constexpr auto valid() const noexcept -> bool { return (raw & PteFlag::V) != 0; }
     [[nodiscard]] constexpr auto readable() const noexcept -> bool {
@@ -118,38 +118,40 @@ enum class PageWalkStatus : uint8_t { ReadPte, WritePte, Complete, Fault };
 
 /** Architectural state of one resumable hardware page-table walk. */
 struct PageWalkState {
-    VirtAddr virtual_address{0};
-    PhysAddr pte_address{0};
-    PhysAddr physical_address{0};
-    Word pte{0};
-    Word pte_update_mask{0};
-    CSRValue mstatus{0};
+    simrv::xlen::VirtAddr virtual_address{0};
+    simrv::xlen::PhysAddr pte_address{0};
+    simrv::xlen::PhysAddr physical_address{0};
+    simrv::xlen::Word pte{0};
+    simrv::xlen::Word pte_update_mask{0};
+    simrv::xlen::CSRValue mstatus{0};
     PteAccess access = PteAccess::Read;
-    PrivilegeLevel privilege{};
-    TrapCause fault = 0;
+    simrv::xlen::PrivilegeLevel privilege{};
+    simrv::xlen::TrapCause fault = 0;
     unsigned xlen = 0;
     unsigned pte_size = 0;
     unsigned vpn_bits_per_level = 0;
-    PageTableLevel level = -1;
+    simrv::xlen::PageTableLevel level = -1;
     bool update_access_bits = true;
     PageWalkStatus status = PageWalkStatus::Fault;
     const core::ArchState* arch_state = nullptr;
 };
 
 struct PageWalkResult {
-    PhysAddr physical_address{0};
-    Word pte{0};
+    simrv::xlen::PhysAddr physical_address{0};
+    simrv::xlen::Word pte{0};
 
-    [[nodiscard]] constexpr auto raw() const noexcept -> Address { return physical_address.raw(); }
+    [[nodiscard]] constexpr auto raw() const noexcept -> simrv::xlen::Address {
+        return physical_address.raw();
+    }
     [[nodiscard]] constexpr auto global() const noexcept -> bool {
         return PteView{.raw = pte}.global();
     }
-    constexpr operator PhysAddr() const noexcept { return physical_address; }
+    constexpr operator simrv::xlen::PhysAddr() const noexcept { return physical_address; }
     constexpr auto operator<=>(const PageWalkResult&) const noexcept = default;
-    constexpr bool operator==(const PhysAddr& other) const noexcept {
+    constexpr bool operator==(const simrv::xlen::PhysAddr& other) const noexcept {
         return physical_address == other;
     }
-    constexpr bool operator==(Address other) const noexcept {
+    constexpr bool operator==(simrv::xlen::Address other) const noexcept {
         return physical_address.raw() == other;
     }
 };
@@ -166,60 +168,66 @@ class PageTableWalker {
    public:
     constexpr PageTableWalker() noexcept = default;
     explicit constexpr PageTableWalker(RamView ram) noexcept : ram_(ram) {}
-    explicit constexpr PageTableWalker(Byte* mmem, Address dram_base, Address dram_size) noexcept
+    explicit constexpr PageTableWalker(simrv::xlen::Byte* mmem, simrv::xlen::Address dram_base,
+                                       simrv::xlen::Address dram_size) noexcept
         : ram_(mmem, dram_base, dram_size) {}
 
     [[nodiscard]] constexpr auto ram_view() const noexcept -> RamView { return ram_; }
     constexpr void set_ram_view(RamView ram) noexcept { ram_ = ram; }
 
-    [[nodiscard]] static constexpr auto is_canonical(VirtAddr v_addr, Word satp, unsigned xlen)
+    [[nodiscard]] static constexpr auto is_canonical(simrv::xlen::VirtAddr v_addr,
+                                                     simrv::xlen::Word satp, unsigned xlen)
         -> bool {
         if (xlen == 32) {
             return true;
         }
-        const Word mode = simrv::xlen::satp_mode(satp, 64);
+        const simrv::xlen::Word mode = simrv::xlen::satp_mode(satp, 64);
         if (mode == 8) {  // Sv39
-            constexpr Word shift = 64 - 39;
-            return (static_cast<SignedWord>(v_addr.raw() << shift) >> shift) ==
-                   static_cast<SignedWord>(v_addr.raw());
+            constexpr simrv::xlen::Word shift = 64 - 39;
+            return (static_cast<simrv::xlen::SignedWord>(v_addr.raw() << shift) >> shift) ==
+                   static_cast<simrv::xlen::SignedWord>(v_addr.raw());
         }
         if (mode == 9) {  // Sv48
-            constexpr Word shift = 64 - 48;
-            return (static_cast<SignedWord>(v_addr.raw() << shift) >> shift) ==
-                   static_cast<SignedWord>(v_addr.raw());
+            constexpr simrv::xlen::Word shift = 64 - 48;
+            return (static_cast<simrv::xlen::SignedWord>(v_addr.raw() << shift) >> shift) ==
+                   static_cast<simrv::xlen::SignedWord>(v_addr.raw());
         }
         return true;
     }
 
-    [[nodiscard]] static auto page_fault_for(PteAccess access) noexcept -> TrapCause;
-    [[nodiscard]] static auto access_fault_for(PteAccess access) noexcept -> TrapCause;
+    [[nodiscard]] static auto page_fault_for(PteAccess access) noexcept -> simrv::xlen::TrapCause;
+    [[nodiscard]] static auto access_fault_for(PteAccess access) noexcept -> simrv::xlen::TrapCause;
 
-    [[nodiscard]] auto begin_walk(VirtAddr v_addr, PteAccess access, PrivilegeLevel priv,
-                                  CSRValue mstatus, Word satp, unsigned xlen,
+    [[nodiscard]] auto begin_walk(simrv::xlen::VirtAddr v_addr, PteAccess access,
+                                  simrv::xlen::PrivilegeLevel priv, simrv::xlen::CSRValue mstatus,
+                                  simrv::xlen::Word satp, unsigned xlen,
                                   bool update_access_bits = true,
                                   const core::ArchState* arch_state = nullptr) const
         -> PageWalkState;
 
-    void accept_pte(PageWalkState& state, Word pte) const;
+    void accept_pte(PageWalkState& state, simrv::xlen::Word pte) const;
     static void accept_write(PageWalkState& state) noexcept;
     static void fail_access(PageWalkState& state) noexcept;
 
-    [[nodiscard]] auto walk(VirtAddr v_addr, PteAccess access, PrivilegeLevel priv,
-                            CSRValue mstatus, Word satp, unsigned xlen,
-                            bool update_access_bits = true,
+    [[nodiscard]] auto walk(simrv::xlen::VirtAddr v_addr, PteAccess access,
+                            simrv::xlen::PrivilegeLevel priv, simrv::xlen::CSRValue mstatus,
+                            simrv::xlen::Word satp, unsigned xlen, bool update_access_bits = true,
                             const core::ArchState* arch_state = nullptr) const
-        -> std::expected<PageWalkResult, TrapCause>;
+        -> std::expected<PageWalkResult, simrv::xlen::TrapCause>;
 
    private:
     RamView ram_{};
 
-    [[nodiscard]] auto pte_access_valid(PhysAddr address, unsigned size) const noexcept -> bool;
-    [[nodiscard]] auto validate_pte_permissions(Word pte, Word permission_bits, PteAccess access,
-                                                PrivilegeLevel priv,
-                                                CSRValue mstatus) const noexcept -> bool;
-    void select_next_pte(PageWalkState& state, PhysAddr table_address) const;
+    [[nodiscard]] auto pte_access_valid(simrv::xlen::PhysAddr address, unsigned size) const noexcept
+        -> bool;
+    [[nodiscard]] auto validate_pte_permissions(simrv::xlen::Word pte,
+                                                simrv::xlen::Word permission_bits, PteAccess access,
+                                                simrv::xlen::PrivilegeLevel priv,
+                                                simrv::xlen::CSRValue mstatus) const noexcept
+        -> bool;
+    void select_next_pte(PageWalkState& state, simrv::xlen::PhysAddr table_address) const;
 
-    static constexpr Word kPteShift = 10;
+    static constexpr simrv::xlen::Word kPteShift = 10;
 };
 
 }  // namespace memory

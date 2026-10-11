@@ -17,11 +17,11 @@ int main() {
     if (!machine.allocate_ram_for_testing(kRamBytes)) return 4;
     if (machine.ram_data() == nullptr) return 5;
     if (!std::all_of(machine.ram_data(), machine.ram_data() + kRamBytes,
-                     [](Byte byte) { return byte == Byte{0}; }))
+                     [](simrv::xlen::Byte byte) { return byte == simrv::xlen::Byte{0}; }))
         return 6;
 
-    machine.ram_data()[0] = Byte{0x5a};
-    if (machine.ram_data()[0] != Byte{0x5a}) return 7;
+    machine.ram_data()[0] = simrv::xlen::Byte{0x5a};
+    if (machine.ram_data()[0] != simrv::xlen::Byte{0x5a}) return 7;
     machine.release_ram_for_testing();
     if (machine.ram_data() != nullptr) return 8;
 

@@ -20,29 +20,29 @@ class MemorySubsystem;
  */
 class MemoryAccess {
    public:
-    static auto target_read(MemorySubsystem& mem, core::CPU& cpu, VirtAddr v_addr,
-                            isa::Funct3 funct3) -> Word;
-    static void target_write(MemorySubsystem& mem, core::CPU& cpu, VirtAddr v_addr, Word wdata,
-                             isa::Funct3 funct3);
+    static auto target_read(MemorySubsystem& mem, core::CPU& cpu, simrv::xlen::VirtAddr v_addr,
+                            isa::Funct3 funct3) -> simrv::xlen::Word;
+    static void target_write(MemorySubsystem& mem, core::CPU& cpu, simrv::xlen::VirtAddr v_addr,
+                             simrv::xlen::Word wdata, isa::Funct3 funct3);
 
-    static auto target_read(MemorySubsystem& mem, core::CPU& cpu, VirtAddr v_addr,
-                            Instruction funct3) -> Word {
+    static auto target_read(MemorySubsystem& mem, core::CPU& cpu, simrv::xlen::VirtAddr v_addr,
+                            simrv::xlen::Instruction funct3) -> simrv::xlen::Word {
         return target_read(mem, cpu, v_addr, static_cast<isa::Funct3>(funct3));
     }
-    static void target_write(MemorySubsystem& mem, core::CPU& cpu, VirtAddr v_addr, Word wdata,
-                             Instruction funct3) {
+    static void target_write(MemorySubsystem& mem, core::CPU& cpu, simrv::xlen::VirtAddr v_addr,
+                             simrv::xlen::Word wdata, simrv::xlen::Instruction funct3) {
         target_write(mem, cpu, v_addr, wdata, static_cast<isa::Funct3>(funct3));
     }
 
-    static auto loadInt(MemorySubsystem& mem, core::CPU& cpu, VirtAddr addr, isa::Funct3 funct3)
-        -> Word;
-    static auto loadFp(MemorySubsystem& mem, core::CPU& cpu, VirtAddr addr, isa::Funct3 funct3)
-        -> FloatingRegister;
+    static auto loadInt(MemorySubsystem& mem, core::CPU& cpu, simrv::xlen::VirtAddr addr,
+                        isa::Funct3 funct3) -> simrv::xlen::Word;
+    static auto loadFp(MemorySubsystem& mem, core::CPU& cpu, simrv::xlen::VirtAddr addr,
+                       isa::Funct3 funct3) -> simrv::xlen::FloatingRegister;
 
-    static void storeInt(MemorySubsystem& mem, core::CPU& cpu, VirtAddr addr, Word data,
-                         isa::Funct3 funct3);
-    static void storeFp(MemorySubsystem& mem, core::CPU& cpu, VirtAddr addr, FloatingRegister data,
-                        isa::Funct3 funct3);
+    static void storeInt(MemorySubsystem& mem, core::CPU& cpu, simrv::xlen::VirtAddr addr,
+                         simrv::xlen::Word data, isa::Funct3 funct3);
+    static void storeFp(MemorySubsystem& mem, core::CPU& cpu, simrv::xlen::VirtAddr addr,
+                        simrv::xlen::FloatingRegister data, isa::Funct3 funct3);
 };
 
 }  // namespace simrv::memory

@@ -32,7 +32,8 @@ auto render_cache_way_row(const simrv::core::CPU& cpu, int way_idx, int inspect_
         is_icache ? ic.is_line_valid(set_idx, way_u32) : dc.is_line_valid(set_idx, way_u32);
     simrv::memory::MesiState coh =
         is_icache ? ic.get_line_state(set_idx, way_u32) : dc.get_line_state(set_idx, way_u32);
-    Address tag = is_icache ? ic.get_line_tag(set_idx, way_u32) : dc.get_line_tag(set_idx, way_u32);
+    simrv::xlen::Address tag =
+        is_icache ? ic.get_line_tag(set_idx, way_u32) : dc.get_line_tag(set_idx, way_u32);
     uint64_t lru = is_icache ? ic.get_line_last_used(set_idx, way_u32)
                              : dc.get_line_last_used(set_idx, way_u32);
 
@@ -328,9 +329,9 @@ auto InspectorPane::render_cache_stats(const simrv::core::CPU& cpu, int logical_
             const auto& cache = is_ic
                                     ? static_cast<const simrv::cache::BaseCache<1024, 32, 8>&>(ic)
                                     : static_cast<const simrv::cache::BaseCache<1024, 32, 8>&>(dc);
-            Address ev_tag = cache.last_evicted_tag();
+            simrv::xlen::Address ev_tag = cache.last_evicted_tag();
             std::string ev_str =
-                (ev_tag == ~Address{0}) ? "None" : std::format("0x{:016x}", ev_tag);
+                (ev_tag == ~simrv::xlen::Address{0}) ? "None" : std::format("0x{:016x}", ev_tag);
             uint32_t r_set = cache.last_replaced_set();
             uint32_t r_way = cache.last_replaced_way();
             std::string r_loc =

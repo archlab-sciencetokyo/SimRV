@@ -66,9 +66,9 @@ void CPU::run_ca_pipeline_cycle(Machine& machine) {
     };
     auto cancel_port = [&](simrv::memory::TlPort port) {
         machine.memory_.system_bus().cancel_source(
-            simrv::memory::make_tl_source(static_cast<HartId>(state_.mhartid), port));
+            simrv::memory::make_tl_source(static_cast<simrv::xlen::HartId>(state_.mhartid), port));
     };
-    auto flush_to = [&](Address pc) {
+    auto flush_to = [&](simrv::xlen::Address pc) {
         pipe.flush_younger();
         pipe.control_flush = true;
         pipe.fetch_pc = pc;
@@ -92,18 +92,18 @@ void CPU::run_ca_pipeline_cycle(Machine& machine) {
         cancel_port(simrv::memory::TlPort::Data);
         pipe.reset();
         ca_state.reset_instruction();
-        raise_exception(static_cast<TrapCause>(cause), tval);
+        raise_exception(static_cast<simrv::xlen::TrapCause>(cause), tval);
         pipe.fetch_pc = state_.pc;
         pipe.initialized = true;
     };
     auto apply_forwarding = [&](pipeline::PipelineContext& consumer) {
         if (!pipeline_sim.config.enable_forwarding) return;
-        if (consumer.traits.reads_rs1_int && consumer.rs1 != RegId::Zero &&
+        if (consumer.traits.reads_rs1_int && consumer.rs1 != simrv::xlen::RegId::Zero &&
             pipe.scoreboard.can_forward(pipeline::operation::RegBank::Integer, consumer.rs1)) {
             consumer.rrs1 = pipe.scoreboard.get_forwarded_value(
                 pipeline::operation::RegBank::Integer, consumer.rs1);
         }
-        if (consumer.traits.reads_rs2_int && consumer.rs2 != RegId::Zero &&
+        if (consumer.traits.reads_rs2_int && consumer.rs2 != simrv::xlen::RegId::Zero &&
             pipe.scoreboard.can_forward(pipeline::operation::RegBank::Integer, consumer.rs2)) {
             consumer.rrs2 = pipe.scoreboard.get_forwarded_value(
                 pipeline::operation::RegBank::Integer, consumer.rs2);
@@ -126,7 +126,8 @@ void CPU::run_ca_pipeline_cycle(Machine& machine) {
                     if (writeback->context.traits.is_mem_load || writeback->context.traits.is_cfu ||
                         is_store_conditional(writeback->context)) {
                         writeback->wb_valid = false;
-                    } else if (writeback->writes_int && writeback->wb_dest != RegId::Zero) {
+                    } else if (writeback->writes_int &&
+                               writeback->wb_dest != simrv::xlen::RegId::Zero) {
                         writeback->wb_val = (writeback->context.opcode == isa::Opcode::System &&
                                              writeback->context.funct3 != isa::Funct3::Priv)
                                                 ? writeback->context.rcsr
@@ -144,16 +145,16 @@ void CPU::run_ca_pipeline_cycle(Machine& machine) {
                     writeback->memory_complete = true;
                     if (writeback->context.traits.is_mem_load) {
                         writeback->wb_val = writeback->context.mem_rdata;
-                        writeback->wb_valid =
-                            (writeback->writes_int && writeback->wb_dest != RegId::Zero);
+                        writeback->wb_valid = (writeback->writes_int &&
+                                               writeback->wb_dest != simrv::xlen::RegId::Zero);
                     } else if (writeback->context.traits.is_cfu) {
                         writeback->wb_val = writeback->context.wb_data;
-                        writeback->wb_valid =
-                            (writeback->writes_int && writeback->wb_dest != RegId::Zero);
+                        writeback->wb_valid = (writeback->writes_int &&
+                                               writeback->wb_dest != simrv::xlen::RegId::Zero);
                     } else if (is_store_conditional(writeback->context)) {
                         writeback->wb_val = writeback->context.wb_data;
-                        writeback->wb_valid =
-                            (writeback->writes_int && writeback->wb_dest != RegId::Zero);
+                        writeback->wb_valid = (writeback->writes_int &&
+                                               writeback->wb_dest != simrv::xlen::RegId::Zero);
                     }
                     return true;
                 });
@@ -210,13 +211,16 @@ void CPU::run_ca_pipeline_cycle(Machine& machine) {
                 memory->memory_complete = true;
                 if (memory->context.traits.is_mem_load) {
                     memory->wb_val = memory->context.mem_rdata;
-                    memory->wb_valid = (memory->writes_int && memory->wb_dest != RegId::Zero);
+                    memory->wb_valid =
+                        (memory->writes_int && memory->wb_dest != simrv::xlen::RegId::Zero);
                 } else if (memory->context.traits.is_cfu) {
                     memory->wb_val = memory->context.wb_data;
-                    memory->wb_valid = (memory->writes_int && memory->wb_dest != RegId::Zero);
+                    memory->wb_valid =
+                        (memory->writes_int && memory->wb_dest != simrv::xlen::RegId::Zero);
                 } else if (is_store_conditional(memory->context)) {
                     memory->wb_val = memory->context.wb_data;
-                    memory->wb_valid = (memory->writes_int && memory->wb_dest != RegId::Zero);
+                    memory->wb_valid =
+                        (memory->writes_int && memory->wb_dest != simrv::xlen::RegId::Zero);
                 }
                 if (!success && !memory->context.pending_exception.has_value()) {
                     memory->context.pending_exception = ExceptionCode::FaultLoad;
@@ -236,7 +240,7 @@ void CPU::run_ca_pipeline_cycle(Machine& machine) {
             --execute->remaining_latency;
         } else {
             if (!execute->serializing && !execute->executed) {
-                const Register saved_pc = state_.pc;
+                const simrv::xlen::Register saved_pc = state_.pc;
                 state_.pc = execute->context.cpc.raw();
                 (void)run_with_context(*execute, [&] { return execute_stage(machine); });
                 state_.pc = saved_pc;
@@ -244,7 +248,7 @@ void CPU::run_ca_pipeline_cycle(Machine& machine) {
                 if (execute->context.traits.is_mem_load || execute->context.traits.is_cfu ||
                     is_store_conditional(execute->context)) {
                     execute->wb_valid = false;
-                } else if (execute->writes_int && execute->wb_dest != RegId::Zero) {
+                } else if (execute->writes_int && execute->wb_dest != simrv::xlen::RegId::Zero) {
                     execute->wb_val = (execute->context.opcode == isa::Opcode::System &&
                                        execute->context.funct3 != isa::Funct3::Priv)
                                           ? execute->context.rcsr
@@ -253,9 +257,9 @@ void CPU::run_ca_pipeline_cycle(Machine& machine) {
                 }
 
                 if (execute->context.traits.is_control || execute->prediction.false_control_alias) {
-                    const Address sequential =
+                    const simrv::xlen::Address sequential =
                         (execute->context.cpc + (execute->context.cinsn != 0u ? 2 : 4)).raw();
-                    const Address target =
+                    const simrv::xlen::Address target =
                         execute->context.tkn ? execute->context.jmp_pc.raw() : sequential;
 
                     const simrv::pipeline::BranchFeedback feedback{
@@ -315,7 +319,7 @@ void CPU::run_ca_pipeline_cycle(Machine& machine) {
                     if (decode->context.traits.is_mem_load ||
                         is_store_conditional(decode->context)) {
                         decode->wb_valid = false;
-                    } else if (decode->writes_int && decode->wb_dest != RegId::Zero) {
+                    } else if (decode->writes_int && decode->wb_dest != simrv::xlen::RegId::Zero) {
                         decode->wb_val = (decode->context.opcode == isa::Opcode::System &&
                                           decode->context.funct3 != isa::Funct3::Priv)
                                              ? decode->context.rcsr
@@ -332,9 +336,9 @@ void CPU::run_ca_pipeline_cycle(Machine& machine) {
                     }
                     if (decode->context.traits.is_control ||
                         decode->prediction.false_control_alias) {
-                        const Address sequential =
+                        const simrv::xlen::Address sequential =
                             (decode->context.cpc + (decode->context.cinsn != 0u ? 2 : 4)).raw();
-                        const Address target =
+                        const simrv::xlen::Address target =
                             decode->context.tkn ? decode->context.jmp_pc.raw() : sequential;
 
                         const simrv::pipeline::BranchFeedback feedback{
@@ -424,7 +428,7 @@ void CPU::run_ca_pipeline_cycle(Machine& machine) {
     if (pipe.control_recovery_bubbles > 0) {
         --pipe.control_recovery_bubbles;
     } else if (!fetch->valid && !pipe.frontend_blocked) {
-        const Register committed_pc = state_.pc;
+        const simrv::xlen::Register committed_pc = state_.pc;
         state_.pc = pipe.fetch_pc;
         active_context_ = &fetch->context;
         const auto misses_before = icache.miss_count();
@@ -473,8 +477,8 @@ void CPU::run_ca_pipeline_cycle(Machine& machine) {
             } else if (cpu_model_config.instruction_cache.hit_latency > 1) {
                 fetch->remaining_latency = cpu_model_config.instruction_cache.hit_latency - 1;
             }
-            const Address width = fetch->context.cinsn != 0u ? 2 : 4;
-            const Address sequential = (fetch->context.cpc + width).raw();
+            const simrv::xlen::Address width = fetch->context.cinsn != 0u ? 2 : 4;
+            const simrv::xlen::Address sequential = (fetch->context.cpc + width).raw();
 
             if (fetch->context.traits.is_control || branch_predictor.config().predict_non_control) {
                 branch_predictor.predict(fetch->context.cpc.raw(), fetch->context,

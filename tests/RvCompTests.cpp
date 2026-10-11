@@ -49,14 +49,14 @@ class TestCustomMmio final : public simrv::memory::MmioDevice {
     explicit TestCustomMmio(const simrv::core::SoCDeviceConfig& config)
         : name_(config.name), base_(config.base), size_(config.size) {}
     [[nodiscard]] auto name() const -> const char* override { return name_.c_str(); }
-    [[nodiscard]] auto base_address() const -> Address override { return base_; }
-    [[nodiscard]] auto size() const -> Address override { return size_; }
-    [[nodiscard]] auto read32(Address) -> uint32_t override { return 0x51a7; }
+    [[nodiscard]] auto base_address() const -> simrv::xlen::Address override { return base_; }
+    [[nodiscard]] auto size() const -> simrv::xlen::Address override { return size_; }
+    [[nodiscard]] auto read32(simrv::xlen::Address) -> uint32_t override { return 0x51a7; }
 
    private:
     std::string name_;
-    Address base_;
-    Address size_;
+    simrv::xlen::Address base_;
+    simrv::xlen::Address size_;
 };
 }  // namespace
 
@@ -121,7 +121,7 @@ void test_rvcomp_profile_validation() {
     TEST_CHECK(profile.instruction_front_cache.refill_latency == 27);
     TEST_CHECK(profile.instruction_front_cache.backing_refill_latency == 27);
     TEST_CHECK(profile.instruction_front_cache.startup_refill_latencies ==
-               std::vector<LatencyCycles>{40});
+               std::vector<simrv::xlen::LatencyCycles>{40});
     TEST_CHECK(profile.instruction_front_cache.freeze_pipeline_on_refill);
     TEST_CHECK(profile.interconnect.request_latency == 1);
     TEST_CHECK(profile.interconnect.response_latency == 1);
@@ -137,8 +137,8 @@ void test_rvcomp_profile_validation() {
     simrv::pipeline::CpuModelConfig loaded{};
     TEST_CHECK(simrv::core::load_cpu_config(*path, loaded));
     TEST_CHECK(profile.validate().has_value());
-    const CSRValue ima_bits = simrv::isa::isa_preset_bits(IsaPreset::IMA);
-    const CSRValue ima_misa = simrv::isa::misa_with_mxl(ima_bits, 32);
+    const simrv::xlen::CSRValue ima_bits = simrv::isa::isa_preset_bits(IsaPreset::IMA);
+    const simrv::xlen::CSRValue ima_misa = simrv::isa::misa_with_mxl(ima_bits, 32);
     // In RVComp Verilog (RVComp/src/rvcom.vh): `define ISA_CODE 32'h40141101
     if constexpr (!simrv::xlen::kIsXLen64) {
         TEST_CHECK(ima_misa == 0x40141101U);

@@ -85,8 +85,8 @@ auto LoadModal::submit(ModalType type, const std::string& input, bool load_appmo
             next.files.disk_path = bundle->rootfs.string();
             next.files.disk_enabled = true;
             next.execution.appmode = false;
-            next.memory.dram_size = static_cast<Address>(bundle->dram_size_bytes.value_or(
-                uint64_t{512} * 1024 * 1024));
+            next.memory.dram_size = static_cast<simrv::xlen::Address>(
+                bundle->dram_size_bytes.value_or(uint64_t{512} * 1024 * 1024));
             (void)machine.stage_reconfiguration(std::move(next));
             staged_binary_path.clear();
             staged_mode_change = false;
@@ -136,8 +136,8 @@ auto LoadModal::submit(ModalType type, const std::string& input, bool load_appmo
         next.execution.appmode = target_appmode;
         next.files.disk_path = input;
         next.files.disk_enabled = !input.empty();
-        if (!target_appmode && next.memory.dram_size < Address{512} * 1024 * 1024) {
-            next.memory.dram_size = Address{512} * 1024 * 1024;
+        if (!target_appmode && next.memory.dram_size < simrv::xlen::Address{512} * 1024 * 1024) {
+            next.memory.dram_size = simrv::xlen::Address{512} * 1024 * 1024;
         }
         (void)machine.stage_reconfiguration(std::move(next));
 

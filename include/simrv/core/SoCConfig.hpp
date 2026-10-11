@@ -96,15 +96,15 @@ enum class SoCDeviceKind : uint8_t {
 
 struct SoCDeviceRegion {
     std::string name;
-    Address base = 0;
-    Address size = 0;
+    simrv::xlen::Address base = 0;
+    simrv::xlen::Address size = 0;
 };
 
 struct SoCDeviceConfig {
     SoCDeviceKind kind{};
     std::string name;
-    Address base = 0;
-    Address size = 0x1000;
+    simrv::xlen::Address base = 0;
+    simrv::xlen::Address size = 0x1000;
     uint32_t irq = 0;
     bool enabled = true;
     std::vector<SoCDeviceRegion> regions;
@@ -113,9 +113,10 @@ struct SoCDeviceConfig {
     std::array<uint8_t, 6> mac_address{0x52, 0x54, 0x00, 0x12, 0x34, 0x56};
 
     SoCDeviceConfig() = default;
-    SoCDeviceConfig(SoCDeviceKind device_kind, std::string device_name, Address device_base,
-                    Address device_size = 0x1000, uint32_t device_irq = 0,
-                    bool device_enabled = true, std::vector<SoCDeviceRegion> device_regions = {},
+    SoCDeviceConfig(SoCDeviceKind device_kind, std::string device_name,
+                    simrv::xlen::Address device_base, simrv::xlen::Address device_size = 0x1000,
+                    uint32_t device_irq = 0, bool device_enabled = true,
+                    std::vector<SoCDeviceRegion> device_regions = {},
                     std::string device_compatible = {}, uint32_t device_read_value = 0,
                     std::array<uint8_t, 6> device_mac = {0x52, 0x54, 0x00, 0x12, 0x34, 0x56})
         : kind(device_kind),
@@ -283,10 +284,10 @@ struct SoCConfig {
     bool enable_pcie = true;
     bool enable_mmio = false;
     bool disable_unlisted_devices = false;
-    std::optional<Address> dram_base;
-    std::optional<Address> dram_size;
-    std::optional<Address> reset_pc;
-    std::optional<Address> tohost;
+    std::optional<simrv::xlen::Address> dram_base;
+    std::optional<simrv::xlen::Address> dram_size;
+    std::optional<simrv::xlen::Address> reset_pc;
+    std::optional<simrv::xlen::Address> tohost;
     SmpTopologyConfig smp{};
     std::vector<SoCDeviceConfig> devices;
 
@@ -356,8 +357,8 @@ struct SoCConfig {
     [[nodiscard]] auto validate() const -> std::expected<void, std::string> {
         if (auto smp_result = smp.validate(); !smp_result) return smp_result;
         struct Region {
-            Address base;
-            Address size;
+            simrv::xlen::Address base;
+            simrv::xlen::Address size;
             std::string_view name;
         };
         std::vector<Region> regions;
@@ -370,7 +371,7 @@ struct SoCConfig {
                 return std::unexpected("Enabled SoC devices must have unique, non-empty names");
             }
             names.push_back(device.name);
-            if (device.size == 0 || device.base > ~Address{0} - device.size) {
+            if (device.size == 0 || device.base > ~simrv::xlen::Address{0} - device.size) {
                 return std::unexpected("SoC device has an invalid address range at index " +
                                        std::to_string(i));
             }
@@ -400,7 +401,7 @@ struct SoCConfig {
                 }
             }
             for (const auto& extra : device.regions) {
-                if (extra.size == 0 || extra.base > ~Address{0} - extra.size) {
+                if (extra.size == 0 || extra.base > ~simrv::xlen::Address{0} - extra.size) {
                     return std::unexpected("SoC device has an invalid auxiliary region: '" +
                                            extra.name + "'");
                 }

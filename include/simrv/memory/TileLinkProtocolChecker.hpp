@@ -30,7 +30,7 @@ class TileLinkProtocolChecker {
    private:
     simrv::util::SmallFlatMap<TlSourceId, TlChannelA, 64> sources_;
     simrv::util::SmallFlatMap<TlSourceId, TlChannelC, 64> releases_;
-    simrv::util::SmallFlatSet<Address, 64> active_probes_;
+    simrv::util::SmallFlatSet<simrv::xlen::Address, 64> active_probes_;
     simrv::util::SmallFlatMap<TlSinkId, TlSourceId, 64> sinks_;
 };
 

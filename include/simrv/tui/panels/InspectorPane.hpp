@@ -111,14 +111,14 @@ class InspectorPane : public TuiWidget {
     void scroll_log(int lines);
     void reset_log_scroll();
     [[nodiscard]] auto get_log_scroll_offset() const -> int;
-    void set_inspect_addr(Register addr) { inspect_addr_ = addr; }
-    [[nodiscard]] auto get_inspect_addr() const -> Register { return inspect_addr_; }
+    void set_inspect_addr(simrv::xlen::Register addr) { inspect_addr_ = addr; }
+    [[nodiscard]] auto get_inspect_addr() const -> simrv::xlen::Register { return inspect_addr_; }
     void reset_inspect_addr() noexcept { inspect_addr_ = 0; }
     [[nodiscard]] auto is_custom_memory_inspect() const noexcept -> bool {
         return inspect_addr_ != 0;
     }
-    void set_explain_pc(Register pc) { explain_pc_ = pc; }
-    [[nodiscard]] auto get_explain_pc() const -> Register { return explain_pc_; }
+    void set_explain_pc(simrv::xlen::Register pc) { explain_pc_ = pc; }
+    [[nodiscard]] auto get_explain_pc() const -> simrv::xlen::Register { return explain_pc_; }
     void set_trace_buffer(const std::vector<std::string>* trace_buf) { trace_buffer_ = trace_buf; }
     void set_log_lines(std::vector<std::string> log_lines) {
         log_lines_ = std::move(log_lines);
@@ -129,10 +129,11 @@ class InspectorPane : public TuiWidget {
     [[nodiscard]] auto get_previous_page() const -> std::optional<TuiRegPage> {
         return previous_page_;
     }
-    [[nodiscard]] auto get_pipeline_pc_at_row(int logical_row) const -> Register;
+    [[nodiscard]] auto get_pipeline_pc_at_row(int logical_row) const -> simrv::xlen::Register;
     [[nodiscard]] auto get_register_value_at_row(int logical_row, int col_x, int pane_width) const
-        -> std::optional<Register>;
-    [[nodiscard]] auto get_stack_addr_at_row(int logical_row) const -> std::optional<Register>;
+        -> std::optional<simrv::xlen::Register>;
+    [[nodiscard]] auto get_stack_addr_at_row(int logical_row) const
+        -> std::optional<simrv::xlen::Register>;
     [[nodiscard]] auto is_running_label_click(int logical_row, int col, int width) const -> bool;
     [[nodiscard]] auto get_text_in_range(int start_row, int start_col, int end_row, int end_col,
                                          int width) -> std::string;
@@ -201,8 +202,9 @@ class InspectorPane : public TuiWidget {
                                        int right_width) -> std::string;
     [[nodiscard]] auto render_stack_frame(const simrv::core::CPU& cpu, int logical_row,
                                           int col_width, int right_width) -> std::string;
-    [[nodiscard]] auto translate_safe(const simrv::core::CPU& cpu, Register vaddr) const
-        -> std::optional<Register>;
+    [[nodiscard]] auto translate_safe(const simrv::core::CPU& cpu,
+                                      simrv::xlen::Register vaddr) const
+        -> std::optional<simrv::xlen::Register>;
     [[nodiscard]] auto render_pipeline_timeline(const simrv::core::CPU& cpu, int logical_row,
                                                 int width) -> std::string;
     [[nodiscard]] auto render_pipeline_stages_cycle_accurate(const simrv::core::CPU& cpu,
@@ -259,13 +261,13 @@ class InspectorPane : public TuiWidget {
     bool paused_ = true;
     bool student_guide_enabled_ = false;
 
-    std::array<Register, 32> cached_gpr_{};
+    std::array<simrv::xlen::Register, 32> cached_gpr_{};
     std::array<uint64_t, 32> cached_fpr_{};
     std::array<simrv::core::VectorRegister, 32> cached_vec_{};
     simrv::pipeline::Scoreboard projected_scoreboard_{};
     std::array<std::array<std::string, 80>, 16> cached_page_rows_{};
     struct LiveHartSnapshot {
-        Register pc = 0;
+        simrv::xlen::Register pc = 0;
         std::string symbol;
         uint64_t cycles = 0;
         uint64_t instructions = 0;
@@ -291,8 +293,8 @@ class InspectorPane : public TuiWidget {
     }
 
     double active_runtime_ = 0.0;
-    Register inspect_addr_ = 0;
-    Register explain_pc_ = 0;
+    simrv::xlen::Register inspect_addr_ = 0;
+    simrv::xlen::Register explain_pc_ = 0;
     const std::vector<std::string>* trace_buffer_ = nullptr;
     std::vector<std::string> log_lines_;
     int cache_inspect_type_ = 0;  // 0: ICache, 1: DCache

@@ -128,8 +128,9 @@ struct PmpConfigEntry {
 
 using PmpConfigView = PmpConfigEntry;
 
-[[nodiscard]] inline auto calculate_pmp_range(PmpConfigEntry cfg, Address pmpaddr_curr,
-                                              Address pmpaddr_prev) noexcept -> PmpRange {
+[[nodiscard]] inline auto calculate_pmp_range(PmpConfigEntry cfg, simrv::xlen::Address pmpaddr_curr,
+                                              simrv::xlen::Address pmpaddr_prev) noexcept
+    -> PmpRange {
     const PmpMode mode = cfg.mode();
     PmpRange range{};
     if (mode == PmpMode::Tor) {
@@ -141,7 +142,7 @@ using PmpConfigView = PmpConfigEntry;
     } else if (mode == PmpMode::Napot) {
         const auto raw = static_cast<uint64_t>(pmpaddr_curr);
         const int t = std::countr_one(raw);
-        constexpr unsigned kAddrBits = sizeof(Address) * 8;
+        constexpr unsigned kAddrBits = sizeof(simrv::xlen::Address) * 8;
         if (t + 3 >= static_cast<int>(kAddrBits)) {
             range.base = 0;
             range.full_range = true;
@@ -154,19 +155,22 @@ using PmpConfigView = PmpConfigEntry;
     return range;
 }
 
-inline auto check_access(const ArchState& state, Address paddr, size_t size, PmpAccessType access,
-                         std::optional<PrivilegeLevel> priv_override = std::nullopt) -> bool {
-    PrivilegeLevel effective_priv = priv_override.value_or(state.priv);
+inline auto check_access(const ArchState& state, simrv::xlen::Address paddr, size_t size,
+                         PmpAccessType access,
+                         std::optional<simrv::xlen::PrivilegeLevel> priv_override = std::nullopt)
+    -> bool {
+    simrv::xlen::PrivilegeLevel effective_priv = priv_override.value_or(state.priv);
     // MPRV is effective only when executing in Machine mode per RISC-V Privileged Architecture
     if (!priv_override.has_value() && access != PmpAccessType::Execute &&
-        state.priv == PrivilegeLevel::Machine && (state.mstatus & MstatusBit::Mprv) != 0) {
+        state.priv == simrv::xlen::PrivilegeLevel::Machine &&
+        (state.mstatus & MstatusBit::Mprv) != 0) {
         effective_priv = mstatus_mpp(state.mstatus);
     }
 
     if (simrv::compiler::likely(state.num_active_pmp == 0)) {
         return true;
     }
-    if (effective_priv == PrivilegeLevel::Machine && !state.has_locked_pmp) {
+    if (effective_priv == simrv::xlen::PrivilegeLevel::Machine && !state.has_locked_pmp) {
         return true;
     }
 
@@ -179,7 +183,7 @@ inline auto check_access(const ArchState& state, Address paddr, size_t size, Pmp
             continue;
         }
 
-        const Address prev_addr = (i == 0) ? 0 : state.pmpaddr[i - 1];
+        const simrv::xlen::Address prev_addr = (i == 0) ? 0 : state.pmpaddr[i - 1];
         const PmpRange range = calculate_pmp_range(cfg, state.pmpaddr[i], prev_addr);
 
         if (mode == PmpMode::Tor && range.limit <= range.base) {
@@ -192,18 +196,20 @@ inline auto check_access(const ArchState& state, Address paddr, size_t size, Pmp
         }
 
         if (range.contains(req_start, size)) {
-            if (effective_priv == PrivilegeLevel::Machine && !cfg.is_locked()) {
+            if (effective_priv == simrv::xlen::PrivilegeLevel::Machine && !cfg.is_locked()) {
                 return true;
             }
             return cfg.allows(access);
         }
     }
 
-    return effective_priv == PrivilegeLevel::Machine;
+    return effective_priv == simrv::xlen::PrivilegeLevel::Machine;
 }
 
-inline auto check_access(const ArchState& state, PhysAddr paddr, size_t size, PmpAccessType access,
-                         std::optional<PrivilegeLevel> priv_override = std::nullopt) -> bool {
+inline auto check_access(const ArchState& state, simrv::xlen::PhysAddr paddr, size_t size,
+                         PmpAccessType access,
+                         std::optional<simrv::xlen::PrivilegeLevel> priv_override = std::nullopt)
+    -> bool {
     return check_access(state, paddr.raw(), size, access, priv_override);
 }
 

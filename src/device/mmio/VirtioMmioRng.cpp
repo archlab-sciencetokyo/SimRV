@@ -8,7 +8,8 @@
 
 namespace simrv::device {
 
-VirtioMmioRng::VirtioMmioRng(Address base_address, uint32_t irq_num, core::Machine* machine)
+VirtioMmioRng::VirtioMmioRng(simrv::xlen::Address base_address, uint32_t irq_num,
+                             core::Machine* machine)
     : VirtioMmioDevice("virtio-rng-mmio", base_address, 0x1000, virtio::kDevIdRng, irq_num,
                        machine) {
     add_queue(64);

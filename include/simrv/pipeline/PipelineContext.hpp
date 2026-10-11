@@ -13,7 +13,7 @@ namespace simrv::pipeline {
  */
 struct StageError {
     ExceptionCode code;
-    CSRValue tval = 0;
+    simrv::xlen::CSRValue tval = 0;
 };
 
 /**
@@ -25,34 +25,35 @@ struct StageError {
  */
 struct PipelineContext : public DecodedInstruction {
     // IF stage transient values
-    PhysAddr padr1{0};
-    PhysAddr padr2{0};
+    simrv::xlen::PhysAddr padr1{0};
+    simrv::xlen::PhysAddr padr2{0};
 
     // OF stage operands
-    Register rrs1 = 0;
-    Register rrs2 = 0;
-    CSRValue rcsr = 0;
-    CSRValue rcsr_write = 0;  ///< RMW base, excluding hardware-only mip.SEIP contribution.
+    simrv::xlen::Register rrs1 = 0;
+    simrv::xlen::Register rrs2 = 0;
+    simrv::xlen::CSRValue rcsr = 0;
+    simrv::xlen::CSRValue rcsr_write =
+        0;  ///< RMW base, excluding hardware-only mip.SEIP contribution.
 
     // EX1 stage results and controls
     bool tkn = false;
-    VirtAddr jmp_pc{0};
-    Address mem_addr = 0;
-    PhysAddr mem_paddr{0};
-    Register wb_data = 0;
-    CSRValue wb_data_csr = 0;
+    simrv::xlen::VirtAddr jmp_pc{0};
+    simrv::xlen::Address mem_addr = 0;
+    simrv::xlen::PhysAddr mem_paddr{0};
+    simrv::xlen::Register wb_data = 0;
+    simrv::xlen::CSRValue wb_data_csr = 0;
 
     // LD/EX2 stage memory data
-    Register mem_rdata = 0;
-    Register mem_wdata = 0;
+    simrv::xlen::Register mem_rdata = 0;
+    simrv::xlen::Register mem_wdata = 0;
     bool memory_load_complete = false;
     bool sc_reservation_checked = false;
     bool sc_reservation_succeeded = false;
 
     // FP datapath temporaries
-    FloatingRegister fp_mem_rdata = 0;
-    FloatingRegister fp_mem_wdata = 0;
-    FloatingRegister fp_wb_data = 0;
+    simrv::xlen::FloatingRegister fp_mem_rdata = 0;
+    simrv::xlen::FloatingRegister fp_mem_wdata = 0;
+    simrv::xlen::FloatingRegister fp_wb_data = 0;
     bool fp_wb_enable = false;
     bool int_wb_from_fp = false;
 

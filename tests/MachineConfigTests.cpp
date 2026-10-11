@@ -230,8 +230,8 @@ auto main() -> int {
     auto secondary_for_irq = std::make_unique<simrv::core::CPU>();
     secondary_for_irq->state().mhartid = 1;
     machine.add_hart_for_testing(std::move(secondary_for_irq));
-    machine.set_hart_irq(HartId{1}, simrv::core::InterruptType::Software,
-                         simrv::PrivilegeLevel::Machine, true);
+    machine.set_hart_irq(simrv::xlen::HartId{1}, simrv::core::InterruptType::Software,
+                         simrv::xlen::PrivilegeLevel::Machine, true);
     expect((machine.hart(1).state().mip & simrv::core::MipBit::Msip) == 0,
            "cross-hart interrupt remains queued until the target hart boundary");
     machine.hart(1).apply_pending_interrupt_lines(machine);
@@ -299,11 +299,11 @@ auto main() -> int {
         observed_machine.primary_hart().evaluate_timer_interrupt();
         clint.mtimecmp.store(20, std::memory_order_relaxed);
         observed_machine.primary_hart().evaluate_timer_interrupt();
-        observed_machine.set_hart_irq(HartId{0}, simrv::core::InterruptType::Software,
-                                      simrv::PrivilegeLevel::Machine, true);
+        observed_machine.set_hart_irq(simrv::xlen::HartId{0}, simrv::core::InterruptType::Software,
+                                      simrv::xlen::PrivilegeLevel::Machine, true);
         observed_machine.primary_hart().apply_pending_interrupt_lines(observed_machine);
-        observed_machine.set_hart_irq(HartId{0}, simrv::core::InterruptType::Software,
-                                      simrv::PrivilegeLevel::Machine, false);
+        observed_machine.set_hart_irq(simrv::xlen::HartId{0}, simrv::core::InterruptType::Software,
+                                      simrv::xlen::PrivilegeLevel::Machine, false);
         observed_machine.primary_hart().apply_pending_interrupt_lines(observed_machine);
         observed_machine.set_platform_irq(4, true);
         observed_machine.set_platform_irq(4, false);
@@ -489,7 +489,7 @@ auto main() -> int {
         auto parsed = simrv::util::parse_command_line(trace_flag);
         expect(parsed.has_value() && parsed->options.trace_enabled &&
                    parsed->options.trace_begin == 0 &&
-                   parsed->options.trace_end == std::numeric_limits<Counter>::max(),
+                   parsed->options.trace_end == std::numeric_limits<simrv::xlen::Counter>::max(),
                "--trace enables the complete aligned instruction trace");
     }
     {
@@ -620,8 +620,9 @@ auto main() -> int {
         periodic_config.execution.fincnt = 4;
         periodic_config.debug.checkpoint_every = 2;
         periodic_config.debug.checkpoint_dir = checkpoint_dir.string();
-        std::vector<Byte> periodic_ram(periodic_config.memory.dram_size, Byte{0});
-        periodic_ram[0] = Byte{0x6f};  // jal x0, 0
+        std::vector<simrv::xlen::Byte> periodic_ram(periodic_config.memory.dram_size,
+                                                    simrv::xlen::Byte{0});
+        periodic_ram[0] = simrv::xlen::Byte{0x6f};  // jal x0, 0
         simrv::core::Machine periodic_machine(periodic_config);
         periodic_machine.set_ram_for_testing(periodic_ram.data(), periodic_ram.size());
         periodic_machine.primary_hart().state().pc = periodic_config.memory.dram_base;
@@ -658,16 +659,16 @@ auto main() -> int {
         checkpoint_config.memory.dram_base = 0x80000000;
         checkpoint_config.memory.dram_size = 4096;
         checkpoint_config.isa.vlen = 256;
-        std::vector<Byte> source_ram(4096, Byte{0});
-        std::vector<Byte> restored_ram(4096, Byte{0});
+        std::vector<simrv::xlen::Byte> source_ram(4096, simrv::xlen::Byte{0});
+        std::vector<simrv::xlen::Byte> restored_ram(4096, simrv::xlen::Byte{0});
         simrv::core::Machine source(checkpoint_config);
         source.set_ram_for_testing(source_ram.data(), source_ram.size());
         auto& source_state = source.primary_hart().state();
         source_state.pc = 0x80000100;
         source_state.regs.vlen = 256;
-        source_state.regs.write(simrv::RegId::T2, 0x12345678);
-        source_state.regs.write_fp(static_cast<simrv::RegId>(5), 0x7ff8000000001234);
-        source_state.regs.read_vector(static_cast<simrv::RegId>(7)).u8[0] = 0xA5;
+        source_state.regs.write(simrv::xlen::RegId::T2, 0x12345678);
+        source_state.regs.write_fp(static_cast<simrv::xlen::RegId>(5), 0x7ff8000000001234);
+        source_state.regs.read_vector(static_cast<simrv::xlen::RegId>(7)).u8[0] = 0xA5;
         source_state.vtype = 0x23;
         source_state.vl = 17;
         source_state.mstatus = 0x1800;
@@ -676,7 +677,7 @@ auto main() -> int {
         source.primary_hart().e_icount = 77;
         source.primary_hart().e_ccount = 91;
         source.primary_hart().clint_mmio.mcycle = 105;
-        source_ram[123] = Byte{0xA5};
+        source_ram[123] = simrv::xlen::Byte{0xA5};
         expect(source.save_checkpoint(checkpoint.string()).has_value(),
                "checkpoint saves architectural state");
 
@@ -686,17 +687,18 @@ auto main() -> int {
                "checkpoint restores architectural state");
         const auto& restored_state = restored.primary_hart().state();
         expect(restored_state.pc == source_state.pc &&
-                   restored_state.regs.read(simrv::RegId::T2) == 0x12345678,
+                   restored_state.regs.read(simrv::xlen::RegId::T2) == 0x12345678,
                "checkpoint restores PC and integer registers");
         expect(restored_state.vtype == source_state.vtype && restored_state.vl == source_state.vl &&
                    restored_state.mepc == source_state.mepc && restored_state.pmpaddr[0] == 0x1234,
                "checkpoint restores vector, CSR, and PMP state");
-        expect(restored_state.regs.read_fp(static_cast<simrv::RegId>(5)) == 0x7ff8000000001234 &&
-                   restored_state.regs.read_vector(static_cast<simrv::RegId>(7)).u8[0] == 0xA5,
-               "checkpoint restores FP and vector register-file bits");
+        expect(
+            restored_state.regs.read_fp(static_cast<simrv::xlen::RegId>(5)) == 0x7ff8000000001234 &&
+                restored_state.regs.read_vector(static_cast<simrv::xlen::RegId>(7)).u8[0] == 0xA5,
+            "checkpoint restores FP and vector register-file bits");
         expect(restored.primary_hart().e_icount == 77 && restored.primary_hart().e_ccount == 91 &&
                    restored.primary_hart().clint_mmio.mcycle == 105 &&
-                   restored_ram[123] == Byte{0xA5},
+                   restored_ram[123] == simrv::xlen::Byte{0xA5},
                "checkpoint restores counters and physical RAM");
 
         {

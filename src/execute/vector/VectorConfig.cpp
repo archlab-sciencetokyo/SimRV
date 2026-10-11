@@ -6,8 +6,9 @@
 
 namespace simrv::execute {
 
-void ExecuteUnit::execute_vector_config(core::CPU& cpu, isa::OperationId op_id, Instruction ir,
-                                        RegId rd, RegId rs1, RegId rs2) {
+void ExecuteUnit::execute_vector_config(core::CPU& cpu, isa::OperationId op_id,
+                                        simrv::xlen::Instruction ir, simrv::xlen::RegId rd,
+                                        simrv::xlen::RegId rs1, simrv::xlen::RegId rs2) {
     uint64_t raw_vtype = 0;
     if (op_id == isa::OperationId::VSETVLI) {
         raw_vtype = (ir >> 20) & 0x7FF;
@@ -72,7 +73,8 @@ void ExecuteUnit::execute_vector_config(core::CPU& cpu, isa::OperationId op_id, 
         final_vtype = raw_vtype & 0xFFu;
         auto const vlmax = (cpu.state().regs.vlen * lmul_num) / (req_sew * lmul_den);
 
-        if (op_id != isa::OperationId::VSETIVLI && rs1 == RegId::Zero && rd == RegId::Zero) {
+        if (op_id != isa::OperationId::VSETIVLI && rs1 == simrv::xlen::RegId::Zero &&
+            rd == simrv::xlen::RegId::Zero) {
             const VtypeView old_view{.raw = cpu.state().vtype,
                                      .xlen = static_cast<uint8_t>(cpu.state().regs.xlen)};
             const uint32_t old_lmul = old_view.lmul_field();
@@ -95,8 +97,8 @@ void ExecuteUnit::execute_vector_config(core::CPU& cpu, isa::OperationId op_id, 
             uint32_t const uimm = (ir >> 15) & 0x1F;
             new_vl = std::min(uimm, vlmax);
         } else {
-            if (rs1 == RegId::Zero) {
-                if (rd == RegId::Zero) {
+            if (rs1 == simrv::xlen::RegId::Zero) {
+                if (rd == simrv::xlen::RegId::Zero) {
                     new_vl = std::min(static_cast<uint32_t>(cpu.state().vl), vlmax);
                 } else {
                     new_vl = vlmax;

@@ -162,13 +162,13 @@ auto write_machine_event(std::ofstream& out, const simrv::core::MachineEvent& ev
     out.flush();
 }
 
-auto privilege_mode(simrv::PrivilegeLevel privilege) -> std::string_view {
+auto privilege_mode(simrv::xlen::PrivilegeLevel privilege) -> std::string_view {
     switch (privilege) {
-        case simrv::PrivilegeLevel::User:
+        case simrv::xlen::PrivilegeLevel::User:
             return "U";
-        case simrv::PrivilegeLevel::Supervisor:
+        case simrv::xlen::PrivilegeLevel::Supervisor:
             return "S";
-        case simrv::PrivilegeLevel::Machine:
+        case simrv::xlen::PrivilegeLevel::Machine:
             return "M";
     }
     return "unknown";
@@ -616,9 +616,9 @@ auto main(int argc, char* argv[]) -> int {  // NOLINT(bugprone-exception-escape)
                 std::ofstream out(sim_machine->configuration().files.dump_dmem_path);
                 if (out) {
                     const auto ram = sim_machine->ram_view();
-                    constexpr ::Address kDmemBase = 0x10000000;
+                    constexpr simrv::xlen::Address kDmemBase = 0x10000000;
                     for (size_t i = 0; i < 512; ++i) {
-                        const ::Address a = kDmemBase + i * 4;
+                        const simrv::xlen::Address a = kDmemBase + i * 4;
                         if (ram.contains(a, 4)) {
                             const uint32_t val =
                                 static_cast<uint32_t>(

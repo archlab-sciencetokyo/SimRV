@@ -103,7 +103,8 @@ class RamStorage {
 
     [[nodiscard]] auto allocate(size_t bytes) -> bool {
         if (bytes == 0) return false;
-        auto* replacement = static_cast<Byte*>(std::calloc(bytes, sizeof(Byte)));
+        auto* replacement =
+            static_cast<simrv::xlen::Byte*>(std::calloc(bytes, sizeof(simrv::xlen::Byte)));
         if (replacement == nullptr) return false;
         reset();
         data_ = replacement;
@@ -119,11 +120,11 @@ class RamStorage {
         data_ = nullptr;
     }
 
-    [[nodiscard]] auto data() const noexcept -> Byte* { return data_; }
-    [[nodiscard]] auto mutable_data_ref() noexcept -> Byte*& { return data_; }
+    [[nodiscard]] auto data() const noexcept -> simrv::xlen::Byte* { return data_; }
+    [[nodiscard]] auto mutable_data_ref() noexcept -> simrv::xlen::Byte*& { return data_; }
 
    private:
-    Byte* data_ = nullptr;
+    simrv::xlen::Byte* data_ = nullptr;
     bool owned_ = false;
 };
 

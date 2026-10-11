@@ -30,22 +30,22 @@ auto PcieRootComplex::get_device(PciBdf bdf) -> std::shared_ptr<PciDevice> {
     return nullptr;
 }
 
-auto PcieRootComplex::ecam_read(Address offset, uint8_t size) -> uint32_t {
+auto PcieRootComplex::ecam_read(simrv::xlen::Address offset, uint8_t size) -> uint32_t {
     const uint8_t bus = static_cast<uint8_t>((offset >> 20) & 0xFF);
     const uint8_t dev = static_cast<uint8_t>((offset >> 15) & 0x1F);
     const uint8_t func = static_cast<uint8_t>((offset >> 12) & 0x07);
-    const Address reg_offset = offset & 0xFFF;
+    const simrv::xlen::Address reg_offset = offset & 0xFFF;
 
     auto d = get_device(bus, dev, func);
     if (!d) return 0xFFFFFFFFU;
     return d->config_read(reg_offset, size);
 }
 
-void PcieRootComplex::ecam_write(Address offset, uint32_t val, uint8_t size) {
+void PcieRootComplex::ecam_write(simrv::xlen::Address offset, uint32_t val, uint8_t size) {
     const uint8_t bus = static_cast<uint8_t>((offset >> 20) & 0xFF);
     const uint8_t dev = static_cast<uint8_t>((offset >> 15) & 0x1F);
     const uint8_t func = static_cast<uint8_t>((offset >> 12) & 0x07);
-    const Address reg_offset = offset & 0xFFF;
+    const simrv::xlen::Address reg_offset = offset & 0xFFF;
 
     auto d = get_device(bus, dev, func);
     if (d) {
@@ -53,10 +53,10 @@ void PcieRootComplex::ecam_write(Address offset, uint32_t val, uint8_t size) {
     }
 }
 
-auto PcieRootComplex::mmio_read(Address addr, uint8_t size) -> uint32_t {
+auto PcieRootComplex::mmio_read(simrv::xlen::Address addr, uint8_t size) -> uint32_t {
     for (auto& entry : attached_devices_) {
         BarIndex bar_idx = 0;
-        Address offset = 0;
+        simrv::xlen::Address offset = 0;
         if (entry.device && entry.device->contains_mmio(addr, bar_idx, offset)) {
             return entry.device->bar_read(bar_idx, offset, size);
         }
@@ -64,10 +64,10 @@ auto PcieRootComplex::mmio_read(Address addr, uint8_t size) -> uint32_t {
     return 0;
 }
 
-void PcieRootComplex::mmio_write(Address addr, uint32_t val, uint8_t size) {
+void PcieRootComplex::mmio_write(simrv::xlen::Address addr, uint32_t val, uint8_t size) {
     for (auto& entry : attached_devices_) {
         BarIndex bar_idx = 0;
-        Address offset = 0;
+        simrv::xlen::Address offset = 0;
         if (entry.device && entry.device->contains_mmio(addr, bar_idx, offset)) {
             entry.device->bar_write(bar_idx, offset, val, size);
             return;
@@ -76,7 +76,7 @@ void PcieRootComplex::mmio_write(Address addr, uint32_t val, uint8_t size) {
 }
 
 void PcieRootComplex::assert_device_irq(PciBdf bdf) {
-    const InterruptSourceId irq_source = 16 + (bdf.dev % 8);
+    const simrv::xlen::InterruptSourceId irq_source = 16 + (bdf.dev % 8);
 
     if (aplic_s_ != nullptr) {
         aplic_s_->set_irq(irq_source, true);
@@ -88,7 +88,7 @@ void PcieRootComplex::assert_device_irq(PciBdf bdf) {
 
 auto PcieRootComplex::EcamNode::handle_request(const memory::TlChannelA& req,
                                                memory::TlChannelD& resp) -> bool {
-    const Address offset = (req.address - kEcamBaseAddress).raw();
+    const simrv::xlen::Address offset = (req.address - kEcamBaseAddress).raw();
     const bool is_write = (req.opcode == memory::TlOpcodeA::PutFullData ||
                            req.opcode == memory::TlOpcodeA::PutPartialData);
 
@@ -109,7 +109,7 @@ auto PcieRootComplex::EcamNode::handle_request(const memory::TlChannelA& req,
 
 auto PcieRootComplex::MmioNode::handle_request(const memory::TlChannelA& req,
                                                memory::TlChannelD& resp) -> bool {
-    const Address addr = req.address.raw();
+    const simrv::xlen::Address addr = req.address.raw();
     const bool is_write = (req.opcode == memory::TlOpcodeA::PutFullData ||
                            req.opcode == memory::TlOpcodeA::PutPartialData);
 

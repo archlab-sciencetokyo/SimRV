@@ -30,17 +30,17 @@ namespace simrv::memory {
 struct DirectoryEntry {
     MesiState state = MesiState::Invalid;
     CoherenceSharersMask sharers_mask = 0;
-    std::optional<HartId> owner_hart;
+    std::optional<simrv::xlen::HartId> owner_hart;
 };
 
 struct CoherenceStats {
-    Counter acquire_count = 0;
-    Counter probe_count = 0;
-    Counter release_count = 0;
-    Counter grant_count = 0;
-    Counter invalidation_count = 0;
-    Counter writeback_count = 0;
-    Counter prefetch_count = 0;
+    simrv::xlen::Counter acquire_count = 0;
+    simrv::xlen::Counter probe_count = 0;
+    simrv::xlen::Counter release_count = 0;
+    simrv::xlen::Counter grant_count = 0;
+    simrv::xlen::Counter invalidation_count = 0;
+    simrv::xlen::Counter writeback_count = 0;
+    simrv::xlen::Counter prefetch_count = 0;
 };
 
 class CoherenceHub {
@@ -53,20 +53,21 @@ class CoherenceHub {
         -> std::expected<void, std::string>;
 
     auto handle_acquire(const TlChannelA& req, TlChannelD& resp,
-                        std::array<Byte, kLineBytes>& line_buffer, uint32_t& service_latency)
-        -> bool;
+                        std::array<simrv::xlen::Byte, kLineBytes>& line_buffer,
+                        uint32_t& service_latency) -> bool;
 
     auto handle_intent(const TlChannelA& req, TlChannelD& resp) -> bool;
 
     auto handle_release(const TlChannelC& req, TlChannelD& resp,
-                        const std::array<Byte, kLineBytes>* release_data = nullptr) -> bool;
+                        const std::array<simrv::xlen::Byte, kLineBytes>* release_data = nullptr)
+        -> bool;
 
     void process_grant_ack(const TlChannelE& ack);
 
     /// Notify the directory when a Trunk holder performs its first write (E -> M).
-    void mark_modified(LineAddress line_base, HartId hart);
+    void mark_modified(LineAddress line_base, simrv::xlen::HartId hart);
 
-    void invalidate_line_broadcast(LineAddress line_base, HartId initiator_hart);
+    void invalidate_line_broadcast(LineAddress line_base, simrv::xlen::HartId initiator_hart);
 
     /// Invalidate every cached copy before a coherent implicit/DMA memory write.
     void invalidate_line_external(LineAddress line_base);
@@ -115,10 +116,11 @@ class CoherenceHub {
     void erase_dir_entry(LineAddress line_base);
     auto lookup_dir_entry(LineAddress line_base, DirectoryEntry& out_entry) -> bool;
 
-    void probe_hart_dcache(HartId hart_id, const TlChannelB& probe_req, TlChannelC& probe_resp,
-                           std::array<Byte, kLineBytes>& dirty_data);
+    void probe_hart_dcache(simrv::xlen::HartId hart_id, const TlChannelB& probe_req,
+                           TlChannelC& probe_resp,
+                           std::array<simrv::xlen::Byte, kLineBytes>& dirty_data);
 
-    void probe_hart_icache(HartId hart_id, const TlChannelB& probe_req);
+    void probe_hart_icache(simrv::xlen::HartId hart_id, const TlChannelB& probe_req);
     [[nodiscard]] auto l2_cache_for_hart(uint32_t hart) -> ClusterCache*;
     void invalidate_shared_caches(LineAddress line_base);
     [[nodiscard]] auto allocate_sink() -> TlSinkId;

@@ -1034,7 +1034,7 @@ void test_inspection_report() {
     simrv::core::Machine machine(config);
     machine.add_hart_for_testing(std::make_unique<simrv::core::CPU>());
     machine.hart(1).state().pc = 0x80000100;
-    machine.hart(1).state().regs.write(RegId::A0, 42);
+    machine.hart(1).state().regs.write(simrv::xlen::RegId::A0, 42);
     machine.hart(1).pipeline_context.op_id = simrv::isa::OperationId::ADDI;
     machine.hart(1).pipeline_context.ir_org = 0x02A00513;
 
@@ -1537,18 +1537,18 @@ void test_modal_components() {
 
 void test_instruction_explainer_is_side_effect_free() {
     simrv::core::Machine machine;
-    std::vector<Byte> ram(1024 * 1024, Byte{0});
+    std::vector<simrv::xlen::Byte> ram(1024 * 1024, simrv::xlen::Byte{0});
     machine.set_ram_for_testing(ram);
     expect(machine.ram_view().span().size() == ram.size(), "RamView span matches backing size");
     auto& cpu = machine.primary_hart();
     cpu.machine_ = &machine;
     cpu.reset();
-    constexpr Address pc = simrv::memory::kDramBaseAddress;
-    constexpr Instruction addi = 0x00100093U;
+    constexpr simrv::xlen::Address pc = simrv::memory::kDramBaseAddress;
+    constexpr simrv::xlen::Instruction addi = 0x00100093U;
     std::memcpy(ram.data(), &addi, sizeof(addi));
     cpu.state().pc = pc;
     cpu.pipeline_context.ir = 0xDEADBEEFU;
-    cpu.pipeline_context.cpc = VirtAddr{pc + 0x40};
+    cpu.pipeline_context.cpc = simrv::xlen::VirtAddr{pc + 0x40};
 
     const auto before_pc = cpu.state().pc;
     const auto before_context_ir = cpu.pipeline_context.ir;
@@ -1591,7 +1591,7 @@ void test_instruction_explainer_is_side_effect_free() {
 
 void test_inspector_panels_traits_and_scoreboard() {
     simrv::core::Machine machine;
-    std::vector<Byte> ram(1024 * 1024, Byte{0});
+    std::vector<simrv::xlen::Byte> ram(1024 * 1024, simrv::xlen::Byte{0});
     machine.set_ram_for_testing(ram.data(), ram.size());
     auto& cpu = machine.primary_hart();
     cpu.machine_ = &machine;
@@ -1601,11 +1601,11 @@ void test_inspector_panels_traits_and_scoreboard() {
     machine.runtime_profile.engine = simrv::core::ExecutionEngine::CycleFast;
     cpu.ca_pipeline.execute->valid = true;
     cpu.ca_pipeline.execute->writes_int = true;
-    cpu.ca_pipeline.execute->wb_dest = static_cast<RegId>(1);
+    cpu.ca_pipeline.execute->wb_dest = static_cast<simrv::xlen::RegId>(1);
     cpu.ca_pipeline.execute->remaining_latency = 2;
     cpu.ca_pipeline.memory->valid = true;
     cpu.ca_pipeline.memory->writes_int = true;
-    cpu.ca_pipeline.memory->wb_dest = static_cast<RegId>(2);
+    cpu.ca_pipeline.memory->wb_dest = static_cast<simrv::xlen::RegId>(2);
     cpu.ca_pipeline.memory->wb_valid = true;
     machine.publish_tui_execution_snapshot_for_testing();
 
@@ -1642,13 +1642,13 @@ void test_inspector_panels_traits_and_scoreboard() {
     simrv::core::Machine smp_machine(simrv::core::MachineConfig{
         .execution = {.num_harts = 2}, .tui = {.enabled = true, .inspection_output = {}}});
     smp_machine.add_hart_for_testing(std::make_unique<simrv::core::CPU>());
-    std::vector<Byte> smp_ram(1024 * 1024, Byte{0});
+    std::vector<simrv::xlen::Byte> smp_ram(1024 * 1024, simrv::xlen::Byte{0});
     smp_machine.set_ram_for_testing(smp_ram.data(), smp_ram.size());
     smp_machine.runtime_profile.engine = simrv::core::ExecutionEngine::CycleFast;
     auto& secondary = smp_machine.hart(1);
     secondary.ca_pipeline.writeback->valid = true;
     secondary.ca_pipeline.writeback->writes_fp = true;
-    secondary.ca_pipeline.writeback->wb_dest = static_cast<RegId>(3);
+    secondary.ca_pipeline.writeback->wb_dest = static_cast<simrv::xlen::RegId>(3);
     secondary.ca_pipeline.writeback->wb_valid = true;
     for (const auto pipeline_type :
          {simrv::pipeline::PipelineType::ThreeStage, simrv::pipeline::PipelineType::FiveStage}) {
@@ -1657,10 +1657,10 @@ void test_inspector_panels_traits_and_scoreboard() {
         const auto primary_snapshot = smp_machine.tui_execution_snapshot(0);
         const auto secondary_snapshot = smp_machine.tui_execution_snapshot(1);
         expect(!primary_snapshot.scoreboard.is_busy(simrv::pipeline::operation::RegBank::Float,
-                                                    static_cast<RegId>(3)),
+                                                    static_cast<simrv::xlen::RegId>(3)),
                "scoreboard projection remains isolated by hart");
         expect(secondary_snapshot.scoreboard.can_forward(simrv::pipeline::operation::RegBank::Float,
-                                                         static_cast<RegId>(3)),
+                                                         static_cast<simrv::xlen::RegId>(3)),
                "three- and five-stage snapshots project FP forwarding state");
     }
 
@@ -1956,12 +1956,12 @@ void test_horizontal_scrolling() {
 
 void test_stack_vertical_scrolling() {
     simrv::core::Machine machine;
-    std::array<Byte, 4096> backing{};
+    std::array<simrv::xlen::Byte, 4096> backing{};
     machine.set_ram_for_testing(backing.data(), backing.size());
     machine.memory().initialize_mmu();
 
     auto& cpu = machine.primary_hart();
-    cpu.state().regs.write(simrv::RegId::Sp, 0x80000400);
+    cpu.state().regs.write(simrv::xlen::RegId::Sp, 0x80000400);
 
     simrv::tui::InspectorPane pane(machine);
     pane.set_page(simrv::tui::TuiRegPage::STACK);
@@ -2080,7 +2080,7 @@ void test_inspector_vector_csr_rows() {
 
 void test_memory_inspector_and_custom_address() {
     simrv::core::Machine machine;
-    std::array<Byte, 4096> backing{};
+    std::array<simrv::xlen::Byte, 4096> backing{};
     machine.set_ram_for_testing(backing.data(), backing.size());
     machine.memory().initialize_mmu();
 
@@ -2099,7 +2099,7 @@ void test_memory_inspector_and_custom_address() {
     expect(stack_title.find("Stack") != std::string::npos, "default title contains Stack");
 
     // 2. Set custom address
-    const Address target_addr = 0x80000000;
+    const simrv::xlen::Address target_addr = 0x80000000;
     pane.set_inspect_addr(target_addr);
     expect(pane.is_custom_memory_inspect(), "custom memory inspect is active");
     const std::string mem_title = strip_ansi(pane.render_row(2, width));
@@ -2200,8 +2200,8 @@ void test_responsive_labels_and_header() {
     auto& ctx = machine.primary_hart().pipeline_context;
     ctx.opcode = simrv::isa::Opcode::Store;
     ctx.op_id = simrv::isa::OperationId::SD;
-    ctx.rs1 = static_cast<RegId>(5);  // t0
-    if constexpr (sizeof(Register) > 4) {
+    ctx.rs1 = static_cast<simrv::xlen::RegId>(5);  // t0
+    if constexpr (sizeof(simrv::xlen::Register) > 4) {
         ctx.rrs1 = 0xffffffffd60ef000ULL;
         ctx.rrs2 = 0xffffffd60ff00000ULL;
         ctx.mem_addr = 0xffffffffd60ef000ULL;
@@ -2239,11 +2239,11 @@ void test_tui_differential_rendering_and_throttling() {
     using namespace simrv::core;
 
     Machine machine(MachineConfig{.execution = {.appmode = true}, .tui = {.enabled = true}});
-    std::vector<Byte> ram(1024 * 1024, Byte{0});
+    std::vector<simrv::xlen::Byte> ram(1024 * 1024, simrv::xlen::Byte{0});
     machine.set_ram_for_testing(ram.data(), ram.size());
     machine.primary_hart().reset();
 
-    constexpr Instruction addi_inst = 0x00100093;  // addi x1, x0, 1
+    constexpr simrv::xlen::Instruction addi_inst = 0x00100093;  // addi x1, x0, 1
     std::memcpy(ram.data(), &addi_inst, sizeof(addi_inst));
     machine.primary_hart().state().pc = simrv::memory::kDramBaseAddress;
 
@@ -2844,7 +2844,7 @@ void test_sixel_display_modal_clearing() {
     using namespace simrv::core;
 
     Machine machine(MachineConfig{.execution = {.appmode = true}, .tui = {.enabled = true}});
-    std::vector<Byte> ram(1024 * 1024, Byte{0});
+    std::vector<simrv::xlen::Byte> ram(1024 * 1024, simrv::xlen::Byte{0});
     machine.set_ram_for_testing(ram.data(), ram.size());
     machine.primary_hart().reset();
 
@@ -2944,7 +2944,7 @@ void test_sixel_fluid_framebuffer_updates() {
     Machine machine(MachineConfig{.memory = {.dram_size = test_dram_size},
                                   .execution = {.appmode = true},
                                   .tui = {.enabled = true}});
-    std::vector<Byte> ram(test_dram_size, Byte{0});
+    std::vector<simrv::xlen::Byte> ram(test_dram_size, simrv::xlen::Byte{0});
     machine.set_ram_for_testing(ram.data(), ram.size());
     machine.primary_hart().reset();
 
@@ -2969,8 +2969,8 @@ void test_sixel_fluid_framebuffer_updates() {
     expect(sig0 != 0, "initial sixel framebuffer signature is non-zero");
 
     // Modify a single pixel at an unaligned byte offset (offset 13, was skipped by 64-byte stride)
-    auto* fb_bytes = const_cast<Byte*>(fb.data());
-    fb_bytes[13] = Byte{0x42};
+    auto* fb_bytes = const_cast<simrv::xlen::Byte*>(fb.data());
+    fb_bytes[13] = simrv::xlen::Byte{0x42};
     tui.render(true);
 
     const auto sig1 = TuiTestAccess::sixel_framebuffer_signature(tui);

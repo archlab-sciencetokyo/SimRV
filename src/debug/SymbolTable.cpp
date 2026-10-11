@@ -21,14 +21,14 @@ namespace simrv::debug {
 namespace {
 
 template <typename Ehdr, typename Shdr, typename Sym, typename StTypeFunc>
-auto parse_elf_symbols(std::ifstream& fs, std::map<Address, std::string>& out_symbols,
-                       std::map<Address, ElfFunctionSymbol>& out_functions,
-                       std::optional<Address>& out_entry, StTypeFunc get_type, SymbolLoadMode mode)
-    -> bool {
+auto parse_elf_symbols(std::ifstream& fs, std::map<simrv::xlen::Address, std::string>& out_symbols,
+                       std::map<simrv::xlen::Address, ElfFunctionSymbol>& out_functions,
+                       std::optional<simrv::xlen::Address>& out_entry, StTypeFunc get_type,
+                       SymbolLoadMode mode) -> bool {
     Ehdr ehdr{};
     if (!fs.read(reinterpret_cast<char*>(&ehdr), sizeof(ehdr)))
         return false;  // NOLINT(cppcoreguidelines-pro-type-reinterpret-cast)
-    out_entry = static_cast<Address>(ehdr.e_entry);
+    out_entry = static_cast<simrv::xlen::Address>(ehdr.e_entry);
 
     std::vector<Shdr> shdrs(ehdr.e_shnum);
     fs.seekg(static_cast<std::streamoff>(ehdr.e_shoff), std::ios::beg);
@@ -73,7 +73,8 @@ auto parse_elf_symbols(std::ifstream& fs, std::map<Address, std::string>& out_sy
                     out_symbols[sym.st_value] = name;
                     if (type == STT_FUNC) {
                         out_functions[sym.st_value] = ElfFunctionSymbol{
-                            .name = std::move(name), .size = static_cast<Address>(sym.st_size)};
+                            .name = std::move(name),
+                            .size = static_cast<simrv::xlen::Address>(sym.st_size)};
                     }
                 }
             }
@@ -150,7 +151,7 @@ auto SymbolTable::load_from_elf(const std::string& elf_path, bool clear_existing
 
     fs.seekg(0, std::ios::beg);
 
-    std::optional<Address> ep;
+    std::optional<simrv::xlen::Address> ep;
     if (elf_class == ELFCLASS32) {
         if (!parse_elf_symbols<Elf32_Ehdr, Elf32_Shdr, Elf32_Sym>(
                 fs, symbols_, functions_, ep, [](auto info) { return ELF32_ST_TYPE(info); },
@@ -181,7 +182,7 @@ auto SymbolTable::load_from_elf(const std::string& elf_path, bool clear_existing
                     if (kfs.read(kident.data(), EI_NIDENT)) {
                         const auto k_class = static_cast<uint8_t>(kident[EI_CLASS]);
                         kfs.seekg(0, std::ios::beg);
-                        std::optional<Address> kep;
+                        std::optional<simrv::xlen::Address> kep;
                         if (k_class == ELFCLASS32) {
                             (void)parse_elf_symbols<Elf32_Ehdr, Elf32_Shdr, Elf32_Sym>(
                                 kfs, symbols_, functions_, kep,
@@ -206,7 +207,8 @@ auto SymbolTable::load_from_elf(const std::string& elf_path, bool clear_existing
     return false;
 }
 
-auto SymbolTable::lookup_symbol(Address addr) const -> std::optional<SymbolLookupResult> {
+auto SymbolTable::lookup_symbol(simrv::xlen::Address addr) const
+    -> std::optional<SymbolLookupResult> {
     if (symbols_.empty()) {
         return std::nullopt;
     }
@@ -217,8 +219,8 @@ auto SymbolTable::lookup_symbol(Address addr) const -> std::optional<SymbolLooku
     }
     --it;
 
-    const Address sym_addr = it->first;
-    const Address offset = addr - sym_addr;
+    const simrv::xlen::Address sym_addr = it->first;
+    const simrv::xlen::Address offset = addr - sym_addr;
     if (offset >= 0x2000) {  // Limit offset to prevent matching distant symbols
         return std::nullopt;
     }
@@ -230,14 +232,15 @@ auto SymbolTable::lookup_symbol(Address addr) const -> std::optional<SymbolLooku
     };
 }
 
-auto SymbolTable::lookup_function(Address addr) const -> std::optional<FunctionLookupResult> {
+auto SymbolTable::lookup_function(simrv::xlen::Address addr) const
+    -> std::optional<FunctionLookupResult> {
     if (functions_.empty()) return std::nullopt;
     auto it = functions_.upper_bound(addr);
     if (it == functions_.begin()) return std::nullopt;
     --it;
-    const Address offset = addr - it->first;
+    const simrv::xlen::Address offset = addr - it->first;
     const auto next = std::next(it);
-    const Address next_function_start = next == functions_.end() ? 0 : next->first;
+    const simrv::xlen::Address next_function_start = next == functions_.end() ? 0 : next->first;
     if (it->second.size != 0 && offset >= it->second.size) return std::nullopt;
     if (it->second.size == 0 && (next == functions_.end() || addr >= next_function_start) &&
         offset != 0)
@@ -246,7 +249,7 @@ auto SymbolTable::lookup_function(Address addr) const -> std::optional<FunctionL
     return FunctionLookupResult{.name = it->second.name, .base_addr = it->first, .offset = offset};
 }
 
-auto SymbolTable::lookup(Address addr) const -> std::string {
+auto SymbolTable::lookup(simrv::xlen::Address addr) const -> std::string {
     const auto res = lookup_symbol(addr);
     if (!res) {
         return "";
@@ -257,7 +260,8 @@ auto SymbolTable::lookup(Address addr) const -> std::string {
     return std::format("{} + 0x{:x}", res->name, res->offset);
 }
 
-auto SymbolTable::lookup_name(const std::string& name) const -> std::optional<Address> {
+auto SymbolTable::lookup_name(const std::string& name) const
+    -> std::optional<simrv::xlen::Address> {
     for (const auto& [addr, sym_name] : symbols_) {
         if (sym_name == name) {
             return addr;

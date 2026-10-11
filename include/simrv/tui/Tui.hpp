@@ -232,10 +232,11 @@ class Tui : public core::ITelemetrySink, public core::IConsoleSink {
     void cycle_tool_page(bool reverse = false);
     void set_reg_page(TuiRegPage page);
     void toggle_explain();
-    void record_instruction(Register pc, simrv::isa::Opcode opcode, simrv::isa::OperationId op_id,
-                            uint8_t rd, Register rd_val, uint8_t rs1, Register rs1_val, uint8_t rs2,
-                            Register rs2_val, int64_t imm, uint8_t hart) override;
-    void record_flight_instruction(Register pc, simrv::isa::Opcode opcode,
+    void record_instruction(simrv::xlen::Register pc, simrv::isa::Opcode opcode,
+                            simrv::isa::OperationId op_id, uint8_t rd, simrv::xlen::Register rd_val,
+                            uint8_t rs1, simrv::xlen::Register rs1_val, uint8_t rs2,
+                            simrv::xlen::Register rs2_val, int64_t imm, uint8_t hart) override;
+    void record_flight_instruction(simrv::xlen::Register pc, simrv::isa::Opcode opcode,
                                    simrv::isa::OperationId op_id, uint8_t hart) override;
     /// Export the selected hart's paused architectural state and recent trace as JSON.
     void export_inspection_report();
@@ -279,15 +280,15 @@ class Tui : public core::ITelemetrySink, public core::IConsoleSink {
     void clear_transient_live_overview(bool restore_page);
     [[nodiscard]] auto total_snapshot_instruction_count() const -> uint64_t;
     struct TraceRecord {
-        Register pc = 0;
+        simrv::xlen::Register pc = 0;
         simrv::isa::Opcode opcode{};
         simrv::isa::OperationId op_id{};
         uint8_t rd = 0;
-        Register rd_val = 0;
+        simrv::xlen::Register rd_val = 0;
         uint8_t rs1 = 0;
-        Register rs1_val = 0;
+        simrv::xlen::Register rs1_val = 0;
         uint8_t rs2 = 0;
-        Register rs2_val = 0;
+        simrv::xlen::Register rs2_val = 0;
         int64_t imm = 0;
         uint64_t sequence = 0;
         uint8_t hart = 0;

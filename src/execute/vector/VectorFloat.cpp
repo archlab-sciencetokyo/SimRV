@@ -9,8 +9,9 @@ namespace simrv::execute {
 
 namespace {
 
-auto read_vector_scalar_fp(core::CPU& cpu, RegId rs1) -> FloatingRegister {
-    FloatingRegister bits = cpu.state().regs.read_fp(rs1);
+auto read_vector_scalar_fp(core::CPU& cpu, simrv::xlen::RegId rs1)
+    -> simrv::xlen::FloatingRegister {
+    simrv::xlen::FloatingRegister bits = cpu.state().regs.read_fp(rs1);
     if (!isa::misa_has_extension(cpu.state().misa, isa::IsaExtension::D)) {
         bits |= simrv::xlen::kF32BoxerBits;
     }
@@ -27,8 +28,8 @@ auto canonicalize_nan(T value) -> T {
     }
 }
 
-auto host_exceptions_to_fflags(int exceptions) -> CSRValue {
-    CSRValue flags = 0;
+auto host_exceptions_to_fflags(int exceptions) -> simrv::xlen::CSRValue {
+    simrv::xlen::CSRValue flags = 0;
     if ((exceptions & FE_INEXACT) != 0) flags |= isa::FflagsBit::Nx;
     if ((exceptions & FE_UNDERFLOW) != 0) flags |= isa::FflagsBit::Uf;
     if ((exceptions & FE_OVERFLOW) != 0) flags |= isa::FflagsBit::Of;
@@ -37,7 +38,7 @@ auto host_exceptions_to_fflags(int exceptions) -> CSRValue {
     return flags;
 }
 
-auto frm_to_host_round(CSRValue fcsr) -> int {
+auto frm_to_host_round(simrv::xlen::CSRValue fcsr) -> int {
     switch (isa::frm_rounding_mode(fcsr)) {
         case isa::RoundingMode::Rtz:
             return FE_TOWARDZERO;
@@ -358,8 +359,9 @@ auto round_rmm_integer(Integer input) -> Float {
 
 // Vector-Vector Floating-Point Addition
 template <typename T>
-void execute_vfadd_vv(core::CPU& cpu, RegId rd, RegId rs1, RegId rs2, bool vm, uint32_t vl) {
-    const auto& mask_reg = cpu.state().regs.read_vector(RegId::Zero);
+void execute_vfadd_vv(core::CPU& cpu, simrv::xlen::RegId rd, simrv::xlen::RegId rs1,
+                      simrv::xlen::RegId rs2, bool vm, uint32_t vl) {
+    const auto& mask_reg = cpu.state().regs.read_vector(simrv::xlen::RegId::Zero);
     for (uint32_t i = static_cast<uint32_t>(cpu.state().vstart); i < vl; i++) {
         if (!vector::is_element_active(mask_reg, i, vm)) continue;
 
@@ -391,9 +393,9 @@ void execute_vfadd_vv(core::CPU& cpu, RegId rd, RegId rs1, RegId rs2, bool vm, u
 
 // Vector-Scalar Floating-Point Addition
 template <typename T>
-void execute_vfadd_vf(core::CPU& cpu, RegId rd, FloatingRegister rs1_val, RegId rs2, bool vm,
-                      uint32_t vl) {
-    const auto& mask_reg = cpu.state().regs.read_vector(RegId::Zero);
+void execute_vfadd_vf(core::CPU& cpu, simrv::xlen::RegId rd, simrv::xlen::FloatingRegister rs1_val,
+                      simrv::xlen::RegId rs2, bool vm, uint32_t vl) {
+    const auto& mask_reg = cpu.state().regs.read_vector(simrv::xlen::RegId::Zero);
     for (uint32_t i = static_cast<uint32_t>(cpu.state().vstart); i < vl; i++) {
         if (!vector::is_element_active(mask_reg, i, vm)) continue;
 
@@ -428,10 +430,11 @@ void execute_vfadd_vf(core::CPU& cpu, RegId rd, FloatingRegister rs1_val, RegId 
 }
 
 template <typename T, typename Op>
-void execute_vf_binary_vv(core::CPU& cpu, RegId rd, RegId rs1, RegId rs2, bool vm, uint32_t vl,
-                          Op op, bool subtraction = false, bool multiplication = false,
+void execute_vf_binary_vv(core::CPU& cpu, simrv::xlen::RegId rd, simrv::xlen::RegId rs1,
+                          simrv::xlen::RegId rs2, bool vm, uint32_t vl, Op op,
+                          bool subtraction = false, bool multiplication = false,
                           bool division = false) {
-    const auto& mask_reg = cpu.state().regs.read_vector(RegId::Zero);
+    const auto& mask_reg = cpu.state().regs.read_vector(simrv::xlen::RegId::Zero);
     for (uint32_t i = static_cast<uint32_t>(cpu.state().vstart); i < vl; ++i) {
         if (!vector::is_element_active(mask_reg, i, vm)) continue;
         if constexpr (std::is_same_v<T, uint16_t>) {
@@ -472,10 +475,11 @@ void execute_vf_binary_vv(core::CPU& cpu, RegId rd, RegId rs1, RegId rs2, bool v
 }
 
 template <typename T, typename Op>
-void execute_vf_binary_vf(core::CPU& cpu, RegId rd, FloatingRegister rs1_val, RegId rs2, bool vm,
+void execute_vf_binary_vf(core::CPU& cpu, simrv::xlen::RegId rd,
+                          simrv::xlen::FloatingRegister rs1_val, simrv::xlen::RegId rs2, bool vm,
                           uint32_t vl, Op op, bool subtraction = false, bool reverse = false,
                           bool multiplication = false, bool division = false) {
-    const auto& mask_reg = cpu.state().regs.read_vector(RegId::Zero);
+    const auto& mask_reg = cpu.state().regs.read_vector(simrv::xlen::RegId::Zero);
     if constexpr (std::is_same_v<T, uint16_t>) {
         const float rhs = vector::fp16_to_fp32(static_cast<uint16_t>(rs1_val));
         for (uint32_t i = static_cast<uint32_t>(cpu.state().vstart); i < vl; ++i) {
@@ -527,8 +531,9 @@ void execute_vf_binary_vf(core::CPU& cpu, RegId rd, FloatingRegister rs1_val, Re
 }
 
 template <typename T>
-void execute_vfsqrt(core::CPU& cpu, RegId rd, RegId rs2, bool vm, uint32_t vl) {
-    const auto& mask_reg = cpu.state().regs.read_vector(RegId::Zero);
+void execute_vfsqrt(core::CPU& cpu, simrv::xlen::RegId rd, simrv::xlen::RegId rs2, bool vm,
+                    uint32_t vl) {
+    const auto& mask_reg = cpu.state().regs.read_vector(simrv::xlen::RegId::Zero);
     for (uint32_t i = static_cast<uint32_t>(cpu.state().vstart); i < vl; ++i) {
         if (!vector::is_element_active(mask_reg, i, vm)) continue;
         if constexpr (std::is_same_v<T, uint16_t>) {
@@ -566,7 +571,7 @@ struct VectorFpElement<uint16_t> {
     static constexpr Raw kSign = UINT16_C(0x8000);
     static constexpr Raw kCanonicalNan = UINT16_C(0x7E00);
     static auto value(Raw raw) -> Value { return vector::fp16_to_fp32(raw); }
-    static auto scalar(FloatingRegister raw) -> Raw { return static_cast<Raw>(raw); }
+    static auto scalar(simrv::xlen::FloatingRegister raw) -> Raw { return static_cast<Raw>(raw); }
     static auto signaling_nan(Raw raw) -> bool {
         return (raw & UINT16_C(0x7C00)) == UINT16_C(0x7C00) && (raw & UINT16_C(0x03FF)) != 0 &&
                (raw & UINT16_C(0x0200)) == 0;
@@ -580,7 +585,7 @@ struct VectorFpElement<float> {
     static constexpr Raw kSign = UINT32_C(0x80000000);
     static constexpr Raw kCanonicalNan = UINT32_C(0x7FC00000);
     static auto value(Raw raw) -> Value { return std::bit_cast<float>(raw); }
-    static auto scalar(FloatingRegister raw) -> Raw {
+    static auto scalar(simrv::xlen::FloatingRegister raw) -> Raw {
         return (raw & simrv::xlen::kF32BoxerBits) == simrv::xlen::kF32BoxerBits
                    ? static_cast<Raw>(raw)
                    : simrv::xlen::kF32Qnan;
@@ -598,7 +603,7 @@ struct VectorFpElement<double> {
     static constexpr Raw kSign = UINT64_C(0x8000000000000000);
     static constexpr Raw kCanonicalNan = UINT64_C(0x7FF8000000000000);
     static auto value(Raw raw) -> Value { return std::bit_cast<double>(raw); }
-    static auto scalar(FloatingRegister raw) -> Raw { return raw; }
+    static auto scalar(simrv::xlen::FloatingRegister raw) -> Raw { return raw; }
     static auto signaling_nan(Raw raw) -> bool {
         return (raw & UINT64_C(0x7FF0000000000000)) == UINT64_C(0x7FF0000000000000) &&
                (raw & UINT64_C(0x000FFFFFFFFFFFFF)) != 0 &&
@@ -629,9 +634,10 @@ constexpr auto fp_classify_raw(Raw raw) -> Raw {
 }
 
 template <typename T>
-void execute_vfclass(core::CPU& cpu, RegId rd, RegId rs2, bool vm, uint32_t vl) {
+void execute_vfclass(core::CPU& cpu, simrv::xlen::RegId rd, simrv::xlen::RegId rs2, bool vm,
+                     uint32_t vl) {
     using Raw = typename VectorFpElement<T>::Raw;
-    const auto& mask_reg = cpu.state().regs.read_vector(RegId::Zero);
+    const auto& mask_reg = cpu.state().regs.read_vector(simrv::xlen::RegId::Zero);
     std::vector<bool> active(vl);
     for (uint32_t i = 0; i < vl; ++i) active[i] = vector::is_element_active(mask_reg, i, vm);
     std::vector<Raw> source(vl);
@@ -651,7 +657,8 @@ constexpr auto bit_mask(unsigned pos, unsigned length) -> uint64_t {
 
 template <typename T>
 auto fp_estimate7_raw(typename VectorFpElement<T>::Raw input, bool reciprocal_sqrt,
-                      isa::RoundingMode rm, CSRValue& flags) -> typename VectorFpElement<T>::Raw {
+                      isa::RoundingMode rm, simrv::xlen::CSRValue& flags) ->
+    typename VectorFpElement<T>::Raw {
     using E = VectorFpElement<T>;
     using Raw = typename E::Raw;
     constexpr unsigned kBits = sizeof(Raw) * 8U;
@@ -748,10 +755,10 @@ auto fp_estimate7_raw(typename VectorFpElement<T>::Raw input, bool reciprocal_sq
 }
 
 template <typename T>
-void execute_vf_estimate7(core::CPU& cpu, RegId rd, RegId rs2, bool vm, uint32_t vl,
-                          bool reciprocal_sqrt, CSRValue& flags) {
+void execute_vf_estimate7(core::CPU& cpu, simrv::xlen::RegId rd, simrv::xlen::RegId rs2, bool vm,
+                          uint32_t vl, bool reciprocal_sqrt, simrv::xlen::CSRValue& flags) {
     using Raw = typename VectorFpElement<T>::Raw;
-    const auto& mask_reg = cpu.state().regs.read_vector(RegId::Zero);
+    const auto& mask_reg = cpu.state().regs.read_vector(simrv::xlen::RegId::Zero);
     for (uint32_t i = static_cast<uint32_t>(cpu.state().vstart); i < vl; ++i) {
         if (!vector::is_element_active(mask_reg, i, vm)) continue;
         const Raw input = vector::get_group_element<Raw>(cpu.state().regs, rs2, i);
@@ -762,11 +769,12 @@ void execute_vf_estimate7(core::CPU& cpu, RegId rd, RegId rs2, bool vm, uint32_t
 }
 
 template <typename T>
-void execute_vfsgnj(core::CPU& cpu, isa::OperationId op_id, RegId rd, RegId rs1, RegId rs2,
-                    bool scalar, bool vm, uint32_t vl) {
+void execute_vfsgnj(core::CPU& cpu, isa::OperationId op_id, simrv::xlen::RegId rd,
+                    simrv::xlen::RegId rs1, simrv::xlen::RegId rs2, bool scalar, bool vm,
+                    uint32_t vl) {
     using E = VectorFpElement<T>;
     using Raw = typename E::Raw;
-    const auto& mask_reg = cpu.state().regs.read_vector(RegId::Zero);
+    const auto& mask_reg = cpu.state().regs.read_vector(simrv::xlen::RegId::Zero);
     std::vector<bool> active(vl);
     for (uint32_t i = 0; i < vl; ++i) active[i] = vector::is_element_active(mask_reg, i, vm);
     const Raw scalar_raw = scalar ? E::scalar(read_vector_scalar_fp(cpu, rs1)) : Raw{0};
@@ -792,11 +800,11 @@ void execute_vfsgnj(core::CPU& cpu, isa::OperationId op_id, RegId rd, RegId rs1,
 }
 
 template <typename T>
-void execute_vfminmax(core::CPU& cpu, RegId rd, RegId rs1, RegId rs2, bool scalar, bool vm,
-                      uint32_t vl, bool maximum) {
+void execute_vfminmax(core::CPU& cpu, simrv::xlen::RegId rd, simrv::xlen::RegId rs1,
+                      simrv::xlen::RegId rs2, bool scalar, bool vm, uint32_t vl, bool maximum) {
     using E = VectorFpElement<T>;
     using Raw = typename E::Raw;
-    const auto& mask_reg = cpu.state().regs.read_vector(RegId::Zero);
+    const auto& mask_reg = cpu.state().regs.read_vector(simrv::xlen::RegId::Zero);
     std::vector<bool> active(vl);
     for (uint32_t i = 0; i < vl; ++i) active[i] = vector::is_element_active(mask_reg, i, vm);
     const Raw scalar_raw = scalar ? E::scalar(read_vector_scalar_fp(cpu, rs1)) : Raw{0};
@@ -842,13 +850,13 @@ auto fp_result_raw(typename VectorFpElement<T>::Value value) -> typename VectorF
 }
 
 template <typename T>
-void execute_vfred(core::CPU& cpu, isa::OperationId op_id, RegId rd, RegId rs1, RegId rs2, bool vm,
-                   uint32_t vl) {
+void execute_vfred(core::CPU& cpu, isa::OperationId op_id, simrv::xlen::RegId rd,
+                   simrv::xlen::RegId rs1, simrv::xlen::RegId rs2, bool vm, uint32_t vl) {
     if (vl == 0) return;
     using E = VectorFpElement<T>;
     using Raw = typename E::Raw;
     using Value = typename E::Value;
-    const auto& mask_reg = cpu.state().regs.read_vector(RegId::Zero);
+    const auto& mask_reg = cpu.state().regs.read_vector(simrv::xlen::RegId::Zero);
     std::vector<bool> active(vl);
     std::vector<Raw> source(vl);
     bool any_active = false;
@@ -904,14 +912,15 @@ void execute_vfred(core::CPU& cpu, isa::OperationId op_id, RegId rd, RegId rs1, 
 }
 
 template <typename NarrowT, typename WideT>
-void execute_vfwred(core::CPU& cpu, RegId rd, RegId rs1, RegId rs2, bool vm, uint32_t vl) {
+void execute_vfwred(core::CPU& cpu, simrv::xlen::RegId rd, simrv::xlen::RegId rs1,
+                    simrv::xlen::RegId rs2, bool vm, uint32_t vl) {
     if (vl == 0) return;
     using NarrowE = VectorFpElement<NarrowT>;
     using WideE = VectorFpElement<WideT>;
     using NarrowRaw = typename NarrowE::Raw;
     using WideRaw = typename WideE::Raw;
     using WideValue = typename WideE::Value;
-    const auto& mask_reg = cpu.state().regs.read_vector(RegId::Zero);
+    const auto& mask_reg = cpu.state().regs.read_vector(simrv::xlen::RegId::Zero);
     std::vector<bool> active(vl);
     std::vector<NarrowRaw> source(vl);
     bool any_active = false;
@@ -945,14 +954,15 @@ void execute_vfwred(core::CPU& cpu, RegId rd, RegId rs1, RegId rs2, bool vm, uin
 }
 
 template <typename NarrowT, typename WideT>
-void execute_vfw_binary(core::CPU& cpu, isa::OperationId op_id, RegId rd, RegId rs1, RegId rs2,
-                        bool scalar, bool wide_lhs, bool vm, uint32_t vl) {
+void execute_vfw_binary(core::CPU& cpu, isa::OperationId op_id, simrv::xlen::RegId rd,
+                        simrv::xlen::RegId rs1, simrv::xlen::RegId rs2, bool scalar, bool wide_lhs,
+                        bool vm, uint32_t vl) {
     using NarrowE = VectorFpElement<NarrowT>;
     using WideE = VectorFpElement<WideT>;
     using NarrowRaw = typename NarrowE::Raw;
     using WideRaw = typename WideE::Raw;
     using WideValue = typename WideE::Value;
-    const auto& mask_reg = cpu.state().regs.read_vector(RegId::Zero);
+    const auto& mask_reg = cpu.state().regs.read_vector(simrv::xlen::RegId::Zero);
     std::vector<bool> active(vl);
     for (uint32_t i = 0; i < vl; ++i) active[i] = vector::is_element_active(mask_reg, i, vm);
     const WideValue scalar_value = scalar ? static_cast<WideValue>(NarrowE::value(
@@ -1020,11 +1030,12 @@ auto fp_compare(Value lhs, Value rhs, FpCompareKind kind) -> bool {
 }
 
 template <typename T>
-void execute_vmf_compare(core::CPU& cpu, RegId rd, RegId rs1, RegId rs2, bool scalar, bool vm,
-                         uint32_t vl, FpCompareKind kind) {
+void execute_vmf_compare(core::CPU& cpu, simrv::xlen::RegId rd, simrv::xlen::RegId rs1,
+                         simrv::xlen::RegId rs2, bool scalar, bool vm, uint32_t vl,
+                         FpCompareKind kind) {
     using E = VectorFpElement<T>;
     using Raw = typename E::Raw;
-    const auto& mask_reg = cpu.state().regs.read_vector(RegId::Zero);
+    const auto& mask_reg = cpu.state().regs.read_vector(simrv::xlen::RegId::Zero);
     std::vector<bool> active(vl);
     for (uint32_t i = 0; i < vl; ++i) active[i] = vector::is_element_active(mask_reg, i, vm);
     const Raw scalar_raw = scalar ? E::scalar(read_vector_scalar_fp(cpu, rs1)) : Raw{0};
@@ -1132,12 +1143,13 @@ auto fused_result(Value multiplicand, Value vd, Value vs2, FpFmaKind kind, bool 
 }
 
 template <typename T>
-void execute_vf_fma(core::CPU& cpu, isa::OperationId op_id, RegId rd, RegId rs1, RegId rs2,
-                    bool scalar, bool vm, uint32_t vl) {
+void execute_vf_fma(core::CPU& cpu, isa::OperationId op_id, simrv::xlen::RegId rd,
+                    simrv::xlen::RegId rs1, simrv::xlen::RegId rs2, bool scalar, bool vm,
+                    uint32_t vl) {
     using E = VectorFpElement<T>;
     using Raw = typename E::Raw;
     using Value = typename E::Value;
-    const auto& mask_reg = cpu.state().regs.read_vector(RegId::Zero);
+    const auto& mask_reg = cpu.state().regs.read_vector(simrv::xlen::RegId::Zero);
     std::vector<bool> active(vl);
     for (uint32_t i = 0; i < vl; ++i) active[i] = vector::is_element_active(mask_reg, i, vm);
     const Value scalar_value =
@@ -1168,14 +1180,15 @@ void execute_vf_fma(core::CPU& cpu, isa::OperationId op_id, RegId rd, RegId rs1,
 }
 
 template <typename NarrowT, typename WideT>
-void execute_vfw_fma(core::CPU& cpu, isa::OperationId op_id, RegId rd, RegId rs1, RegId rs2,
-                     bool scalar, bool vm, uint32_t vl) {
+void execute_vfw_fma(core::CPU& cpu, isa::OperationId op_id, simrv::xlen::RegId rd,
+                     simrv::xlen::RegId rs1, simrv::xlen::RegId rs2, bool scalar, bool vm,
+                     uint32_t vl) {
     using NarrowE = VectorFpElement<NarrowT>;
     using WideE = VectorFpElement<WideT>;
     using NarrowRaw = typename NarrowE::Raw;
     using WideRaw = typename WideE::Raw;
     using WideValue = typename WideE::Value;
-    const auto& mask_reg = cpu.state().regs.read_vector(RegId::Zero);
+    const auto& mask_reg = cpu.state().regs.read_vector(simrv::xlen::RegId::Zero);
     std::vector<bool> active(vl);
     for (uint32_t i = 0; i < vl; ++i) active[i] = vector::is_element_active(mask_reg, i, vm);
     const WideValue scalar_value = scalar ? static_cast<WideValue>(NarrowE::value(
@@ -1211,7 +1224,8 @@ void execute_vfw_fma(core::CPU& cpu, isa::OperationId op_id, RegId rd, RegId rs1
 }
 
 template <typename Int, typename Float>
-auto saturating_fp_to_int(Float value, bool force_rtz, CSRValue fcsr, CSRValue& flags) -> Int {
+auto saturating_fp_to_int(Float value, bool force_rtz, simrv::xlen::CSRValue fcsr,
+                          simrv::xlen::CSRValue& flags) -> Int {
     const bool invalid_positive = std::isnan(value) || value > 0;
     if (!std::isfinite(value)) {
         flags |= isa::FflagsBit::Nv;
@@ -1248,8 +1262,8 @@ auto saturating_fp_to_int(Float value, bool force_rtz, CSRValue fcsr, CSRValue& 
 }
 
 template <typename T>
-void execute_vfcvt(core::CPU& cpu, isa::OperationId op_id, RegId rd, RegId rs2, bool vm,
-                   uint32_t vl, CSRValue& flags) {
+void execute_vfcvt(core::CPU& cpu, isa::OperationId op_id, simrv::xlen::RegId rd,
+                   simrv::xlen::RegId rs2, bool vm, uint32_t vl, simrv::xlen::CSRValue& flags) {
     using Raw = typename VectorFpElement<T>::Raw;
     using Signed = std::make_signed_t<Raw>;
     const bool to_float =
@@ -1259,7 +1273,7 @@ void execute_vfcvt(core::CPU& cpu, isa::OperationId op_id, RegId rd, RegId rs2, 
                               op_id == isa::OperationId::VFCVT_F_XU_V;
     const bool force_rtz =
         op_id == isa::OperationId::VFCVT_RTZ_XU_F_V || op_id == isa::OperationId::VFCVT_RTZ_X_F_V;
-    const auto& mask_reg = cpu.state().regs.read_vector(RegId::Zero);
+    const auto& mask_reg = cpu.state().regs.read_vector(simrv::xlen::RegId::Zero);
     for (uint32_t i = static_cast<uint32_t>(cpu.state().vstart); i < vl; ++i) {
         if (!vector::is_element_active(mask_reg, i, vm)) continue;
         const Raw source = vector::get_group_element<Raw>(cpu.state().regs, rs2, i);
@@ -1291,8 +1305,8 @@ void execute_vfcvt(core::CPU& cpu, isa::OperationId op_id, RegId rd, RegId rs2, 
 }
 
 template <typename NarrowT, typename WideT>
-void execute_vfwcvt(core::CPU& cpu, isa::OperationId op_id, RegId rd, RegId rs2, bool vm,
-                    uint32_t vl, CSRValue& flags) {
+void execute_vfwcvt(core::CPU& cpu, isa::OperationId op_id, simrv::xlen::RegId rd,
+                    simrv::xlen::RegId rs2, bool vm, uint32_t vl, simrv::xlen::CSRValue& flags) {
     using NarrowE = VectorFpElement<NarrowT>;
     using WideE = VectorFpElement<WideT>;
     using NarrowRaw = typename NarrowE::Raw;
@@ -1309,7 +1323,7 @@ void execute_vfwcvt(core::CPU& cpu, isa::OperationId op_id, RegId rd, RegId rs2,
                               op_id == isa::OperationId::VFWCVT_F_XU_V;
     const bool force_rtz =
         op_id == isa::OperationId::VFWCVT_RTZ_XU_F_V || op_id == isa::OperationId::VFWCVT_RTZ_X_F_V;
-    const auto& mask_reg = cpu.state().regs.read_vector(RegId::Zero);
+    const auto& mask_reg = cpu.state().regs.read_vector(simrv::xlen::RegId::Zero);
     std::vector<NarrowRaw> sources(vl);
     std::vector<bool> active(vl);
     for (uint32_t i = static_cast<uint32_t>(cpu.state().vstart); i < vl; ++i) {
@@ -1339,8 +1353,8 @@ void execute_vfwcvt(core::CPU& cpu, isa::OperationId op_id, RegId rd, RegId rs2,
 }
 
 template <typename NarrowT, typename WideT>
-void execute_vfncvt(core::CPU& cpu, isa::OperationId op_id, RegId rd, RegId rs2, bool vm,
-                    uint32_t vl, CSRValue& flags) {
+void execute_vfncvt(core::CPU& cpu, isa::OperationId op_id, simrv::xlen::RegId rd,
+                    simrv::xlen::RegId rs2, bool vm, uint32_t vl, simrv::xlen::CSRValue& flags) {
     using NarrowE = VectorFpElement<NarrowT>;
     using WideE = VectorFpElement<WideT>;
     using NarrowRaw = typename NarrowE::Raw;
@@ -1358,7 +1372,7 @@ void execute_vfncvt(core::CPU& cpu, isa::OperationId op_id, RegId rd, RegId rs2,
     const bool force_rtz =
         op_id == isa::OperationId::VFNCVT_RTZ_XU_F_W || op_id == isa::OperationId::VFNCVT_RTZ_X_F_W;
     const bool round_odd = op_id == isa::OperationId::VFNCVT_ROD_F_F_W;
-    const auto& mask_reg = cpu.state().regs.read_vector(RegId::Zero);
+    const auto& mask_reg = cpu.state().regs.read_vector(simrv::xlen::RegId::Zero);
     std::vector<WideRaw> sources(vl);
     std::vector<bool> active(vl);
     for (uint32_t i = static_cast<uint32_t>(cpu.state().vstart); i < vl; ++i) {
@@ -1421,12 +1435,13 @@ void execute_vfncvt(core::CPU& cpu, isa::OperationId op_id, RegId rd, RegId rs2,
 
 }  // namespace
 
-void ExecuteUnit::execute_vector_float(core::CPU& cpu, isa::OperationId op_id, RegId rd, RegId rs1,
-                                       RegId rs2, bool vm, uint32_t vl, uint32_t sew) {
+void ExecuteUnit::execute_vector_float(core::CPU& cpu, isa::OperationId op_id,
+                                       simrv::xlen::RegId rd, simrv::xlen::RegId rs1,
+                                       simrv::xlen::RegId rs2, bool vm, uint32_t vl, uint32_t sew) {
     const int old_round = std::fegetround();
     std::fesetround(frm_to_host_round(cpu.state().fcsr));
     std::feclearexcept(FE_ALL_EXCEPT);
-    CSRValue software_flags = 0;
+    simrv::xlen::CSRValue software_flags = 0;
 
     switch (op_id) {
         case isa::OperationId::VFMADD_VV:
@@ -1464,7 +1479,7 @@ void ExecuteUnit::execute_vector_float(core::CPU& cpu, isa::OperationId op_id, R
                 execute_vfadd_vv<double>(cpu, rd, rs1, rs2, vm, vl);
             break;
         case isa::OperationId::VFADD_VF: {
-            FloatingRegister rs1_fp_val = read_vector_scalar_fp(cpu, rs1);
+            simrv::xlen::FloatingRegister rs1_fp_val = read_vector_scalar_fp(cpu, rs1);
             if (sew == 16)
                 execute_vfadd_vf<uint16_t>(cpu, rd, rs1_fp_val, rs2, vm, vl);
             else if (sew == 32)
@@ -1481,7 +1496,7 @@ void ExecuteUnit::execute_vector_float(core::CPU& cpu, isa::OperationId op_id, R
             break;
         case isa::OperationId::VFSUB_VF:
         case isa::OperationId::VFRSUB_VF: {
-            const FloatingRegister scalar = read_vector_scalar_fp(cpu, rs1);
+            const simrv::xlen::FloatingRegister scalar = read_vector_scalar_fp(cpu, rs1);
             const bool reverse = op_id == isa::OperationId::VFRSUB_VF;
             dispatch_vector_fp_sew(sew, [&]<typename T>() {
                 execute_vf_binary_vf<T>(
@@ -1499,7 +1514,7 @@ void ExecuteUnit::execute_vector_float(core::CPU& cpu, isa::OperationId op_id, R
             });
             break;
         case isa::OperationId::VFMUL_VF: {
-            const FloatingRegister scalar = read_vector_scalar_fp(cpu, rs1);
+            const simrv::xlen::FloatingRegister scalar = read_vector_scalar_fp(cpu, rs1);
             dispatch_vector_fp_sew(sew, [&]<typename T>() {
                 execute_vf_binary_vf<T>(
                     cpu, rd, scalar, rs2, vm, vl, [](auto lhs, auto rhs) { return lhs * rhs; },
@@ -1516,7 +1531,7 @@ void ExecuteUnit::execute_vector_float(core::CPU& cpu, isa::OperationId op_id, R
             break;
         case isa::OperationId::VFDIV_VF:
         case isa::OperationId::VFRDIV_VF: {
-            const FloatingRegister scalar = read_vector_scalar_fp(cpu, rs1);
+            const simrv::xlen::FloatingRegister scalar = read_vector_scalar_fp(cpu, rs1);
             const bool reverse = op_id == isa::OperationId::VFRDIV_VF;
             dispatch_vector_fp_sew(sew, [&]<typename T>() {
                 execute_vf_binary_vf<T>(

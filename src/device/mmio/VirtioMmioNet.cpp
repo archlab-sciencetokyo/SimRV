@@ -25,8 +25,8 @@ struct VirtioNetHdr {
 };
 #pragma pack(pop)
 
-VirtioMmioNet::VirtioMmioNet(Address base_address, uint32_t irq_num, core::Machine* machine,
-                             virtio::NetBackend::Mode mode)
+VirtioMmioNet::VirtioMmioNet(simrv::xlen::Address base_address, uint32_t irq_num,
+                             core::Machine* machine, virtio::NetBackend::Mode mode)
     : VirtioMmioDevice("virtio-net-mmio", base_address, 0x1000, virtio::kDevIdNet, irq_num,
                        machine),
       backend_(mode) {
@@ -38,7 +38,7 @@ void VirtioMmioNet::poll_backend() {
     if (backend_.poll_host_rx() != 0) on_queue_notify(0);
 }
 
-auto VirtioMmioNet::read_device_config(Address offset, std::size_t size) -> uint64_t {
+auto VirtioMmioNet::read_device_config(simrv::xlen::Address offset, std::size_t size) -> uint64_t {
     const auto& mac = backend_.get_mac();
     uint64_t value = 0;
     for (std::size_t byte = 0; byte < size && byte < sizeof(value); ++byte) {

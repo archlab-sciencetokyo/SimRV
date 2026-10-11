@@ -43,26 +43,26 @@ namespace {
 // Shared helpers
 // -----------------------------------------------------------------------
 
-auto reg_name(RegId r) -> std::string {
+auto reg_name(simrv::xlen::RegId r) -> std::string {
     uint32_t idx = std::to_underlying(r);
     if (idx >= 32) return std::format("x{}", idx);
     return {kRegNames.at(idx)};
 }
 
-auto fp_reg_name(RegId r) -> std::string {
+auto fp_reg_name(simrv::xlen::RegId r) -> std::string {
     uint32_t idx = std::to_underlying(r);
     if (idx >= 32) return std::format("f{}", idx);
     return {kFpRegNames.at(idx)};
 }
 
-auto reg_with_x(RegId r) -> std::string {
+auto reg_with_x(simrv::xlen::RegId r) -> std::string {
     uint32_t idx = std::to_underlying(r);
     if (idx >= 32) return std::format("x{}", idx);
     return std::format("{} (x{})", kRegNames.at(idx), idx);
 }
 
-auto hex_val(Register v) -> std::string {
-    if constexpr (sizeof(Register) <= 4) {
+auto hex_val(simrv::xlen::Register v) -> std::string {
+    if constexpr (sizeof(simrv::xlen::Register) <= 4) {
         return std::format("0x{:08x}", v);
     } else {
         auto val = static_cast<uint64_t>(v);
@@ -73,30 +73,30 @@ auto hex_val(Register v) -> std::string {
     }
 }
 
-auto hex_val(VirtAddr v) -> std::string { return hex_val(v.raw()); }
-auto hex_val(PhysAddr p) -> std::string { return hex_val(p.raw()); }
+auto hex_val(simrv::xlen::VirtAddr v) -> std::string { return hex_val(v.raw()); }
+auto hex_val(simrv::xlen::PhysAddr p) -> std::string { return hex_val(p.raw()); }
 
-auto privilege_name(PrivilegeLevel privilege) -> const char* {
+auto privilege_name(simrv::xlen::PrivilegeLevel privilege) -> const char* {
     switch (privilege) {
-        case PrivilegeLevel::Machine:
+        case simrv::xlen::PrivilegeLevel::Machine:
             return "Machine";
-        case PrivilegeLevel::Supervisor:
+        case simrv::xlen::PrivilegeLevel::Supervisor:
             return "Supervisor";
-        case PrivilegeLevel::User:
+        case simrv::xlen::PrivilegeLevel::User:
             return "User";
         default:
             return "Unknown";
     }
 }
 
-auto translation_name(Word mode, unsigned xlen) -> std::string {
+auto translation_name(simrv::xlen::Word mode, unsigned xlen) -> std::string {
     if (mode == 0) return "Bare";
     if (xlen == 32 && mode == 1) return "Sv32";
     if (xlen == 64 && mode == 8) return "Sv39";
     return std::format("mode {}", mode);
 }
 
-auto trap_summary(TrapCause cause) -> std::string {
+auto trap_summary(simrv::xlen::TrapCause cause) -> std::string {
     if (trap_is_interrupt(cause)) return std::format("interrupt {}", trap_exception_code(cause));
     switch (trap_exception_code(cause)) {
         case 2:
@@ -196,7 +196,8 @@ auto get_computation_desc(const simrv::pipeline::PipelineContext& ctx, int width
         }
         return std::format(" {}Computation : {}PC + (imm << 12) = {} + {} = {}\033[0m", kThemeText,
                            kThemeMint, hex_val(ctx.cpc.raw()),
-                           hex_val(static_cast<Register>(ctx.imm) << 12), hex_val(ctx.wb_data));
+                           hex_val(static_cast<simrv::xlen::Register>(ctx.imm) << 12),
+                           hex_val(ctx.wb_data));
     }
     // System / CSR
     if (opc == Opcode::System) {
@@ -280,7 +281,8 @@ auto get_src2_desc(const simrv::pipeline::PipelineContext& ctx, InstFormat fmt) 
 auto has_stage_raw_hazard(const simrv::pipeline::PipelineSim& ps,
                           const simrv::pipeline::PipelineReg& d_reg,
                           const simrv::pipeline::PipelineReg& stage_reg) -> bool {
-    if (!stage_reg.valid || !stage_reg.writes_reg || stage_reg.rd == static_cast<RegId>(0)) {
+    if (!stage_reg.valid || !stage_reg.writes_reg ||
+        stage_reg.rd == static_cast<simrv::xlen::RegId>(0)) {
         return false;
     }
     if (ps.config.enable_forwarding) {
@@ -288,8 +290,8 @@ auto has_stage_raw_hazard(const simrv::pipeline::PipelineSim& ps,
             return false;
         }
     }
-    bool reads_rs1 = (d_reg.rs1 != static_cast<RegId>(0));
-    bool reads_rs2 = (d_reg.rs2 != static_cast<RegId>(0));
+    bool reads_rs1 = (d_reg.rs1 != static_cast<simrv::xlen::RegId>(0));
+    bool reads_rs2 = (d_reg.rs2 != static_cast<simrv::xlen::RegId>(0));
     return (reads_rs1 && d_reg.rs1 == stage_reg.rd) || (reads_rs2 && d_reg.rs2 == stage_reg.rd);
 }
 
@@ -301,7 +303,7 @@ auto is_raw_hazard_stalled(const simrv::pipeline::PipelineSim& ps) -> bool {
            has_stage_raw_hazard(ps, ps.d_reg(), ps.m_reg());
 }
 
-auto compact_hex(Register v) -> std::string { return hex_val(v); }
+auto compact_hex(simrv::xlen::Register v) -> std::string { return hex_val(v); }
 
 auto get_stage_desc(const simrv::pipeline::PipelineReg& reg, uint32_t stall_rem,
                     const std::string& stall_type, bool raw_stall = false) -> std::string {
@@ -311,16 +313,17 @@ auto get_stage_desc(const simrv::pipeline::PipelineReg& reg, uint32_t stall_rem,
     const std::string_view op_name = simrv::pipeline::operation_name(reg.op_id);
 
     std::string ops_info;
-    if (reg.rs1 != static_cast<RegId>(0) || reg.rs2 != static_cast<RegId>(0) ||
-        (reg.writes_reg && reg.rd != static_cast<RegId>(0))) {
+    if (reg.rs1 != static_cast<simrv::xlen::RegId>(0) ||
+        reg.rs2 != static_cast<simrv::xlen::RegId>(0) ||
+        (reg.writes_reg && reg.rd != static_cast<simrv::xlen::RegId>(0))) {
         std::vector<std::string> srcs;
-        if (reg.rs1 != static_cast<RegId>(0)) srcs.push_back(reg_name(reg.rs1));
-        if (reg.rs2 != static_cast<RegId>(0)) srcs.push_back(reg_name(reg.rs2));
+        if (reg.rs1 != static_cast<simrv::xlen::RegId>(0)) srcs.push_back(reg_name(reg.rs1));
+        if (reg.rs2 != static_cast<simrv::xlen::RegId>(0)) srcs.push_back(reg_name(reg.rs2));
 
         std::string src_str =
             srcs.empty() ? ""
                          : (srcs.size() == 1 ? srcs[0] : std::format("{}, {}", srcs[0], srcs[1]));
-        if (reg.writes_reg && reg.rd != static_cast<RegId>(0)) {
+        if (reg.writes_reg && reg.rd != static_cast<simrv::xlen::RegId>(0)) {
             if (!src_str.empty()) {
                 ops_info = std::format(" \033[90m[{} → {}]\033[0m", src_str, reg_name(reg.rd));
             } else {
@@ -352,7 +355,7 @@ auto get_stage_desc(const simrv::pipeline::PipelineReg& reg, uint32_t stall_rem,
     return desc;
 }
 
-auto get_active_branch_pc(const simrv::pipeline::PipelineSim& ps) -> Register {
+auto get_active_branch_pc(const simrv::pipeline::PipelineSim& ps) -> simrv::xlen::Register {
     if (ps.e_reg().valid && (ps.e_reg().is_branch || ps.e_reg().is_jump)) {
         return ps.e_reg().pc;
     }
@@ -362,14 +365,16 @@ auto get_active_branch_pc(const simrv::pipeline::PipelineSim& ps) -> Register {
     return 0;
 }
 
-auto get_bht_string(const simrv::pipeline::PipelineSim& /*ps*/, Register pc) -> std::string {
+auto get_bht_string(const simrv::pipeline::PipelineSim& /*ps*/, simrv::xlen::Register pc)
+    -> std::string {
     if (pc == 0) {
         return "No active branch";
     }
     return "No prediction (resolved in execute)";
 }
 
-auto get_btb_string(const simrv::pipeline::PipelineSim& /*ps*/, Register pc) -> std::string {
+auto get_btb_string(const simrv::pipeline::PipelineSim& /*ps*/, simrv::xlen::Register pc)
+    -> std::string {
     if (pc == 0) {
         return "No active branch";
     }
@@ -388,8 +393,8 @@ auto get_active_forwarding_paths(const simrv::pipeline::PipelineSim& ps)
     const auto& m = ps.m_reg();
     const auto& w = ps.w_reg();
 
-    auto check_src = [&](RegId rs, const std::string& rs_label) -> void {
-        if (rs == static_cast<RegId>(0)) return;
+    auto check_src = [&](simrv::xlen::RegId rs, const std::string& rs_label) -> void {
+        if (rs == static_cast<simrv::xlen::RegId>(0)) return;
 
         if (e.valid && e.writes_reg && e.rd == rs) {
             if (e.remaining_latency == 0) {
@@ -616,14 +621,14 @@ auto InspectorPane::render_pipeline_stages_ca_pred(const simrv::core::CPU& cpu, 
         case 13:
             return section_line("Branch Prediction", width);
         case 14: {
-            Register pc = get_active_branch_pc(ps);
+            simrv::xlen::Register pc = get_active_branch_pc(ps);
             std::string bht_str = get_bht_string(ps, pc);
             return format_to_width(std::format(" {}Branch History\033[0m : {}{}\033[0m", kThemeText,
                                                kThemeVal, bht_str),
                                    width);
         }
         case 15: {
-            Register pc = get_active_branch_pc(ps);
+            simrv::xlen::Register pc = get_active_branch_pc(ps);
             std::string btb_str = get_btb_string(ps, pc);
             return format_to_width(std::format(" {}Target Buffer\033[0m  : {}{}\033[0m", kThemeText,
                                                kThemeVal, btb_str),
@@ -922,7 +927,7 @@ auto InspectorPane::render_pipeline_timeline(const simrv::core::CPU& cpu, int lo
     // Collect unique instruction instances in this window chronologically.
     struct InstRef {
         uint64_t inst_id = 0;
-        Register pc = 0;
+        simrv::xlen::Register pc = 0;
         isa::OperationId op_id = isa::OperationId::UNKNOWN;
 
         auto operator==(const InstRef& o) const -> bool {
@@ -1057,7 +1062,7 @@ auto InspectorPane::render_pipeline_timeline(const simrv::core::CPU& cpu, int lo
     return format_to_width("", width);
 }
 
-auto InspectorPane::get_pipeline_pc_at_row(int logical_row) const -> Register {
+auto InspectorPane::get_pipeline_pc_at_row(int logical_row) const -> simrv::xlen::Register {
     auto const& cpu = current_cpu();
     auto const& ps = cpu.pipeline_sim;
 
@@ -1069,7 +1074,7 @@ auto InspectorPane::get_pipeline_pc_at_row(int logical_row) const -> Register {
 
         struct InstRef {
             uint64_t inst_id = 0;
-            Register pc = 0;
+            simrv::xlen::Register pc = 0;
             isa::OperationId op_id = isa::OperationId::UNKNOWN;
             auto operator==(const InstRef& o) const -> bool {
                 return (inst_id != 0 && o.inst_id != 0) ? (inst_id == o.inst_id) : (pc == o.pc);
@@ -1153,14 +1158,15 @@ auto InspectorPane::render_system_state(const simrv::core::CPU& cpu, int logical
                            label_pad);
     }
     if (logical_row == 18) {
-        const bool global_enabled =
-            st.priv == PrivilegeLevel::Machine      ? (st.mstatus & core::MstatusBit::Mie) != 0
-            : st.priv == PrivilegeLevel::Supervisor ? (st.mstatus & core::MstatusBit::Sie) != 0
-                                                    : true;
-        const CSRValue pending =
+        const bool global_enabled = st.priv == simrv::xlen::PrivilegeLevel::Machine
+                                        ? (st.mstatus & core::MstatusBit::Mie) != 0
+                                    : st.priv == simrv::xlen::PrivilegeLevel::Supervisor
+                                        ? (st.mstatus & core::MstatusBit::Sie) != 0
+                                        : true;
+        const simrv::xlen::CSRValue pending =
             st.mip & core::interrupt_implemented_mask(
                          simrv::isa::misa_has_extension(st.misa, simrv::isa::IsaExtension::S));
-        const CSRValue eligible = pending & st.mie;
+        const simrv::xlen::CSRValue eligible = pending & st.mie;
         const std::string state = eligible != 0 ? (global_enabled ? "ready" : "masked")
                                                 : (global_enabled ? "enabled" : "disabled");
         return render_pair(
@@ -1170,7 +1176,7 @@ auto InspectorPane::render_system_state(const simrv::core::CPU& cpu, int logical
     }
     if (logical_row == 19) {
         const unsigned active_xlen = st.current_xlen();
-        const Word mode = simrv::xlen::satp_mode(st.satp, active_xlen);
+        const simrv::xlen::Word mode = simrv::xlen::satp_mode(st.satp, active_xlen);
         const bool translated = simrv::xlen::satp_translation_enabled(st.satp, active_xlen);
         return render_pair(
             "translation", translation_name(mode, active_xlen),
@@ -1180,9 +1186,9 @@ auto InspectorPane::render_system_state(const simrv::core::CPU& cpu, int logical
     }
     if (logical_row == 20) {
         const bool supervisor_trap = st.scause != 0 || st.stval != 0 || st.sepc != 0;
-        const TrapCause cause = supervisor_trap ? st.scause : st.mcause;
-        const CSRValue tval = supervisor_trap ? st.stval : st.mtval;
-        const CSRValue epc = supervisor_trap ? st.sepc : st.mepc;
+        const simrv::xlen::TrapCause cause = supervisor_trap ? st.scause : st.mcause;
+        const simrv::xlen::CSRValue tval = supervisor_trap ? st.stval : st.mtval;
+        const simrv::xlen::CSRValue epc = supervisor_trap ? st.sepc : st.mepc;
         // Timer and device interrupts are routine and their sticky trap CSRs
         // would permanently consume a summary row.  Surface exception context
         // only, where it is actionable while debugging guest execution.

@@ -94,8 +94,8 @@ auto Axi4Bridge::send_ar(const Axi4Ar& ar) -> bool {
     const uint32_t total_beats = static_cast<uint32_t>(ar.len) + 1U;
 
     for (uint32_t i = 0; i < total_beats; ++i) {
-        Address beat_addr = ar.addr + i * beat_bytes;
-        Word val{0};
+        simrv::xlen::Address beat_addr = ar.addr + i * beat_bytes;
+        simrv::xlen::Word val{0};
         AxiResp resp = AxiResp::Okay;
 
         if (machine_ != nullptr && machine_->ram_data() != nullptr) {
@@ -180,7 +180,7 @@ auto Axi4Bridge::send_w(const Axi4W& w) -> bool {
         const uint32_t beat_bytes = 1U << aw.size;
 
         for (std::size_t i = 0; i < pending_w_.size(); ++i) {
-            Address beat_addr = aw.addr + i * beat_bytes;
+            simrv::xlen::Address beat_addr = aw.addr + i * beat_bytes;
             const auto& beat = pending_w_[i];
 
             if (machine_ != nullptr && machine_->ram_data() != nullptr) {
@@ -226,8 +226,8 @@ auto Axi4Bridge::recv_b(Axi4B& b) -> bool {
     return true;
 }
 
-auto Axi4Bridge::axi_read(Address addr, uint8_t size_bytes, uint8_t len)
-    -> std::pair<AxiResp, std::vector<Word>> {
+auto Axi4Bridge::axi_read(simrv::xlen::Address addr, uint8_t size_bytes, uint8_t len)
+    -> std::pair<AxiResp, std::vector<simrv::xlen::Word>> {
     uint8_t size_enc = 0;
     if (size_bytes >= 8) {
         size_enc = 3;
@@ -249,7 +249,7 @@ auto Axi4Bridge::axi_read(Address addr, uint8_t size_bytes, uint8_t len)
         return {AxiResp::Slverr, {}};
     }
 
-    std::vector<Word> words;
+    std::vector<simrv::xlen::Word> words;
     AxiResp overall_resp = AxiResp::Okay;
     Axi4R r{};
     while (recv_r(r)) {
@@ -261,8 +261,8 @@ auto Axi4Bridge::axi_read(Address addr, uint8_t size_bytes, uint8_t len)
     return {overall_resp, words};
 }
 
-auto Axi4Bridge::axi_write(Address addr, std::span<const Word> data, uint8_t size_bytes,
-                           uint32_t strb) -> AxiResp {
+auto Axi4Bridge::axi_write(simrv::xlen::Address addr, std::span<const simrv::xlen::Word> data,
+                           uint8_t size_bytes, uint32_t strb) -> AxiResp {
     if (data.empty()) return AxiResp::Okay;
 
     uint8_t size_enc = 0;

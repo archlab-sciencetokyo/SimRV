@@ -419,7 +419,7 @@ auto FdtGenerator::generate(const FdtConfig& config) -> std::vector<uint8_t> {
         b.begin_node(std::format("ethernet@{:x}", device.base));
         b.add_prop_string("compatible", "isct,rvcomp-ethernet");
         std::vector<uint32_t> regs;
-        const auto append_region = [&](Address base, Address size) {
+        const auto append_region = [&](simrv::xlen::Address base, simrv::xlen::Address size) {
             const auto cells = reg_cells(base, size);
             regs.insert(regs.end(), cells.begin(), cells.end());
         };

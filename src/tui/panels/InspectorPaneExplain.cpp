@@ -34,7 +34,7 @@ using simrv::isa::InstFormat;
 
 namespace {
 
-auto get_reg_name(RegId reg, bool is_fp) -> std::string {
+auto get_reg_name(simrv::xlen::RegId reg, bool is_fp) -> std::string {
     uint32_t r = std::to_underlying(reg);
     if (r >= 32) return std::format("r{}", r);
     return is_fp ? kFpRegNames.at(r) : kRegNames.at(r);
@@ -290,10 +290,11 @@ auto render_visual_bitfields(InstFormat fmt, uint32_t ir_org, int width)
     return rows;
 }
 
-auto read_reg_str(const simrv::core::ArchState& st, RegId reg, bool is_fp) -> std::string {
+auto read_reg_str(const simrv::core::ArchState& st, simrv::xlen::RegId reg, bool is_fp)
+    -> std::string {
     uint32_t r = std::to_underlying(reg);
     if (r == 0 && !is_fp) return std::format("0x{:0{}x}", 0, simrv::xlen::kXLenHexDigits);
-    Register val = is_fp ? st.regs.read_fp(reg) : st.regs.read(reg);
+    simrv::xlen::Register val = is_fp ? st.regs.read_fp(reg) : st.regs.read(reg);
     return std::format("0x{:0{}x}", val, simrv::xlen::kXLenHexDigits);
 }
 
@@ -442,9 +443,15 @@ auto format_assembly_vector(const simrv::pipeline::PipelineContext& ctx, std::st
     -> std::string {
     auto const op_id = ctx.op_id;
 
-    auto vr_name = [](RegId r) -> std::string { return std::format("v{}", std::to_underlying(r)); };
-    auto gpr_name = [](RegId r) -> std::string { return {kRegNames.at(std::to_underlying(r))}; };
-    auto fpr_name = [](RegId r) -> std::string { return {kFpRegNames.at(std::to_underlying(r))}; };
+    auto vr_name = [](simrv::xlen::RegId r) -> std::string {
+        return std::format("v{}", std::to_underlying(r));
+    };
+    auto gpr_name = [](simrv::xlen::RegId r) -> std::string {
+        return {kRegNames.at(std::to_underlying(r))};
+    };
+    auto fpr_name = [](simrv::xlen::RegId r) -> std::string {
+        return {kFpRegNames.at(std::to_underlying(r))};
+    };
 
     std::string rd = vr_name(ctx.rd);
     std::string rs1 = gpr_name(ctx.rs1);
@@ -602,10 +609,10 @@ auto render_field_decoded_values(const simrv::core::ArchState& st,
         if (fmt == InstFormat::R4) {
             uint32_t rs3_val = (ctx.ir_org >> 27) & 0x1F;
             std::string rs3_name = kFpRegNames.at(rs3_val);
-            rows.push_back(
-                format_to_width(std::format("  rs3    : {} = {}", rs3_name,
-                                            read_reg_str(st, static_cast<RegId>(rs3_val), true)),
-                                width));
+            rows.push_back(format_to_width(
+                std::format("  rs3    : {} = {}", rs3_name,
+                            read_reg_str(st, static_cast<simrv::xlen::RegId>(rs3_val), true)),
+                width));
         }
     }
     if (has_funct3(fmt)) {
@@ -669,16 +676,16 @@ auto render_dataflow_breakdown(const simrv::core::ArchState& st,
         std::format("  {}Destination : {}{}\033[0m", kThemeText, kThemeMint, dst_str), width));
 
     if (is_memory(ctx.op_id)) {
-        const Register base = st.regs.read(ctx.rs1);
+        const simrv::xlen::Register base = st.regs.read(ctx.rs1);
         rows.push_back(format_to_width(
             std::format("  {}Effective Addr: {}0x{:0{}x}\033[0m = {} + {}", kThemeText, kThemeSky,
                         base + ctx.imm, simrv::xlen::kXLenHexDigits, rs1_name, ctx.imm),
             width));
     }
     if (is_control(ctx.op_id)) {
-        const Register target =
+        const simrv::xlen::Register target =
             is_jump(ctx.op_id) && info(ctx.op_id).control == ControlFlowKind::Jalr
-                ? (st.regs.read(ctx.rs1) + ctx.imm) & ~Register{1}
+                ? (st.regs.read(ctx.rs1) + ctx.imm) & ~simrv::xlen::Register{1}
                 : ctx.cpc.raw() + ctx.imm;
         rows.push_back(
             format_to_width(std::format("  {}Control Target: {}0x{:0{}x}\033[0m", kThemeText,
@@ -846,10 +853,10 @@ auto InspectorPane::get_explain_rows(int width) -> std::vector<std::string> {
     auto& cpu = current_cpu();
     auto& st = cpu.state();
 
-    Register const target_pc = (explain_pc_ != 0) ? explain_pc_ : st.pc;
+    simrv::xlen::Register const target_pc = (explain_pc_ != 0) ? explain_pc_ : st.pc;
 
-    auto hex_addr = [](Register v) -> std::string {
-        if constexpr (sizeof(Register) <= 4) {
+    auto hex_addr = [](simrv::xlen::Register v) -> std::string {
+        if constexpr (sizeof(simrv::xlen::Register) <= 4) {
             return std::format("0x{:08x}", v);
         } else {
             auto val = static_cast<uint64_t>(v);
@@ -881,18 +888,19 @@ auto InspectorPane::get_explain_rows(int width) -> std::vector<std::string> {
     }
 
     simrv::pipeline::PipelineContext local_ctx{};
-    const auto translate_for_inspection = [&](Address vaddr) -> std::optional<Address> {
+    const auto translate_for_inspection =
+        [&](simrv::xlen::Address vaddr) -> std::optional<simrv::xlen::Address> {
         const auto active_xlen = st.current_xlen();
         if (st.priv == kPrivMachine ||
             !simrv::xlen::satp_translation_enabled(st.satp, active_xlen)) {
             return active_xlen == 32 ? vaddr & 0xFFFFFFFFULL : vaddr;
         }
-        const Word asid = simrv::xlen::satp_asid(st.satp, active_xlen);
+        const simrv::xlen::Word asid = simrv::xlen::satp_asid(st.satp, active_xlen);
         const auto* entry = cpu.tlb.peek_inst_r(vaddr, asid, st.priv);
         if (entry == nullptr) return std::nullopt;
         return entry->p_addr | (vaddr & simrv::memory::kPageMask);
     };
-    const auto read_halfword = [&](Address vaddr) -> std::optional<uint16_t> {
+    const auto read_halfword = [&](simrv::xlen::Address vaddr) -> std::optional<uint16_t> {
         const auto paddr = translate_for_inspection(vaddr);
         if (!paddr.has_value() || !machine_.ram_view().contains(*paddr, sizeof(uint16_t))) {
             return std::nullopt;
@@ -909,7 +917,7 @@ auto InspectorPane::get_explain_rows(int width) -> std::vector<std::string> {
         if ((*first & 0x3U) != 0x3U) {
             fetch_success = true;
         } else if (const auto second = read_halfword(target_pc + 2)) {
-            local_ctx.ir_org |= static_cast<Instruction>(*second) << 16U;
+            local_ctx.ir_org |= static_cast<simrv::xlen::Instruction>(*second) << 16U;
             fetch_success = true;
         }
     }
@@ -1117,9 +1125,10 @@ auto InspectorPane::get_explain_rows(int width) -> std::vector<std::string> {
                                         kThemeVal, tval, simrv::xlen::kXLenHexDigits),
                             width));
         std::string priv_str =
-            (st.priv == PrivilegeLevel::Machine)
+            (st.priv == simrv::xlen::PrivilegeLevel::Machine)
                 ? "Machine (M)"
-                : ((st.priv == PrivilegeLevel::Supervisor) ? "Supervisor (S)" : "User (U)");
+                : ((st.priv == simrv::xlen::PrivilegeLevel::Supervisor) ? "Supervisor (S)"
+                                                                        : "User (U)");
         explain_rows.push_back(format_to_width(
             std::format("  {}Privilege  : {}{}\033[0m", kThemeText, kThemeMint, priv_str), width));
     }

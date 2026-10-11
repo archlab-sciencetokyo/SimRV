@@ -63,8 +63,8 @@ void CPU::memory_load_phase(Machine& machine) {
         if (!ctx.pending_exception.has_value() && !ca_state.waiting_for_interconnect) {
             state_.load_res = ctx.mem_paddr.raw();
             state_.reserved = 1;
-            machine.memory_.reservation_table().set_reservation(static_cast<HartId>(state_.mhartid),
-                                                                ctx.mem_paddr.raw());
+            machine.memory_.reservation_table().set_reservation(
+                static_cast<simrv::xlen::HartId>(state_.mhartid), ctx.mem_paddr.raw());
         }
     }
 }
@@ -78,8 +78,9 @@ void CPU::memory_prepare_store_data(Machine& /*machine*/) {
                         : execute::ExecuteUnit::aluAmo(ctx.rrs2, ctx.mem_rdata, funct5, ctx.funct3);
 
     if (opcode == Opcode::StoreFp) {
-        ctx.mem_wdata =
-            static_cast<Register>(ctx.fp_mem_wdata & static_cast<FloatingRegister>(kLower32Mask));
+        ctx.mem_wdata = static_cast<simrv::xlen::Register>(
+            ctx.fp_mem_wdata &
+            static_cast<simrv::xlen::FloatingRegister>(simrv::xlen::kLower32Mask));
     }
 }
 

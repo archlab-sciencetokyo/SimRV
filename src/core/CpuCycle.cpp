@@ -44,7 +44,7 @@ auto atomic_update(std::atomic_ref<T>& atomic_mem, const Op& op) -> T {
 }
 
 template <typename T>
-auto execute_dram_amo(T* mem_ptr, Word rs2_val, Funct5Amo funct5) -> T {
+auto execute_dram_amo(T* mem_ptr, simrv::xlen::Word rs2_val, Funct5Amo funct5) -> T {
     std::atomic_ref<T> atomic_mem(*mem_ptr);
     const auto op_val = static_cast<T>(rs2_val);
     switch (funct5) {
@@ -83,7 +83,7 @@ auto execute_dram_amo(T* mem_ptr, Word rs2_val, Funct5Amo funct5) -> T {
 }  // namespace
 
 void CPU::run_fast_cycle_miss(Machine& machine) {
-    const Counter retired_before = e_icount;
+    const simrv::xlen::Counter retired_before = e_icount;
     bool success = fetch_stage(machine, state_.pc) && decode_stage(machine);
 
     if (success && !pipeline_context.pending_exception.has_value()) {
@@ -110,7 +110,7 @@ void CPU::run_fast_cycle_miss(Machine& machine) {
     if (!success) {
         const auto cause =
             pipeline_context.pending_exception.value_or(ExceptionCode::MisalignedFetch);
-        raise_exception(static_cast<TrapCause>(cause), pipeline_context.pending_tval);
+        raise_exception(static_cast<simrv::xlen::TrapCause>(cause), pipeline_context.pending_tval);
     }
 
     tick_cycle_clock(machine);
@@ -122,7 +122,8 @@ void CPU::run_fast_cycle_miss(Machine& machine) {
     if (simrv::compiler::unlikely(machine.breakpoint_manager().has_any())) {
         if (auto hit = machine.breakpoint_manager().check_reg_changes(state_, prev_state_)) {
             if (auto* stub = machine.debugger(); stub && stub->is_connected()) {
-                machine.debug_halt(static_cast<HartId>(state_.mhartid), GdbSignal::SigTrap);
+                machine.debug_halt(static_cast<simrv::xlen::HartId>(state_.mhartid),
+                                   GdbSignal::SigTrap);
             } else if (auto sink = machine.telemetry_sink_raw()) {
                 sink->set_status_override(hit->description);
                 sink->pause_loop();
@@ -148,20 +149,22 @@ void CPU::run_cycle(Machine& machine) {
             active_execution_cpu_ = previous;
         }
     } boundary_commit{*this, previous_active_cpu};
-    const Counter retired_before = e_icount;
+    const simrv::xlen::Counter retired_before = e_icount;
     if (simrv::compiler::unlikely(machine.breakpoint_manager().has_any())) {
         prev_state_ = state_;
         if (auto hit = machine.breakpoint_manager().check_pc(
-                state_.pc, HartId{static_cast<uint32_t>(state_.mhartid)}, e_icount)) {
+                state_.pc, simrv::xlen::HartId{static_cast<uint32_t>(state_.mhartid)}, e_icount)) {
             if (auto* stub = machine.debugger(); stub && stub->is_connected()) {
                 machine.breakpoint_manager().set_skip_once_pc(
-                    state_.pc, HartId{static_cast<uint32_t>(state_.mhartid)}, e_icount);
-                machine.debug_halt(static_cast<HartId>(state_.mhartid), GdbSignal::SigTrap,
-                                   "swbreak:;");
+                    state_.pc, simrv::xlen::HartId{static_cast<uint32_t>(state_.mhartid)},
+                    e_icount);
+                machine.debug_halt(static_cast<simrv::xlen::HartId>(state_.mhartid),
+                                   GdbSignal::SigTrap, "swbreak:;");
                 return;
             } else if (auto sink = machine.telemetry_sink_raw()) {
                 machine.breakpoint_manager().set_skip_once_pc(
-                    state_.pc, HartId{static_cast<uint32_t>(state_.mhartid)}, e_icount);
+                    state_.pc, simrv::xlen::HartId{static_cast<uint32_t>(state_.mhartid)},
+                    e_icount);
                 sink->set_status_override(hit->description);
                 sink->pause_loop();
                 return;
@@ -303,8 +306,9 @@ void CPU::run_cycle(Machine& machine) {
             }
         }
         if (ca_pipeline.retired_this_cycle && state_.pc != retired_pc) {
-            machine.memory().system_bus().cancel_source(simrv::memory::make_tl_source(
-                static_cast<HartId>(state_.mhartid), simrv::memory::TlPort::Instruction));
+            machine.memory().system_bus().cancel_source(
+                simrv::memory::make_tl_source(static_cast<simrv::xlen::HartId>(state_.mhartid),
+                                              simrv::memory::TlPort::Instruction));
             ca_pipeline.reset();
             ca_pipeline.initialized = true;
             ca_pipeline.fetch_pc = state_.pc;
@@ -365,7 +369,8 @@ void CPU::run_cycle(Machine& machine) {
         if (!success) {
             const auto cause =
                 pipeline_context.pending_exception.value_or(ExceptionCode::MisalignedFetch);
-            raise_exception(static_cast<TrapCause>(cause), pipeline_context.pending_tval);
+            raise_exception(static_cast<simrv::xlen::TrapCause>(cause),
+                            pipeline_context.pending_tval);
         }
     }
 
@@ -379,7 +384,8 @@ void CPU::run_cycle(Machine& machine) {
     if (simrv::compiler::unlikely(machine.breakpoint_manager().has_any())) {
         if (auto hit = machine.breakpoint_manager().check_reg_changes(state_, prev_state_)) {
             if (auto* stub = machine.debugger(); stub && stub->is_connected()) {
-                machine.debug_halt(static_cast<HartId>(state_.mhartid), GdbSignal::SigTrap);
+                machine.debug_halt(static_cast<simrv::xlen::HartId>(state_.mhartid),
+                                   GdbSignal::SigTrap);
             } else if (auto sink = machine.telemetry_sink_raw()) {
                 sink->set_status_override(hit->description);
                 sink->pause_loop();
@@ -449,9 +455,9 @@ void CPU::record_trace_for_tui(Machine& machine) {
         return;
     }
 
-    Register rd_val = 0;
-    Register rs1_val = 0;
-    Register rs2_val = 0;
+    simrv::xlen::Register rd_val = 0;
+    simrv::xlen::Register rs1_val = 0;
+    simrv::xlen::Register rs2_val = 0;
 
     const bool rd_fp = isa::is_destination_fp(opcode, op_id);
     const bool rs1_fp = isa::is_rs1_fp(opcode, op_id);
@@ -481,7 +487,7 @@ void CPU::record_trace_for_tui(Machine& machine) {
 }
 
 void CPU::run_cycle_baremetal_miss(Machine& machine) {
-    const Counter retired_before = e_icount;
+    const simrv::xlen::Counter retired_before = e_icount;
     run_fetch_stage_baremetal(machine);
     const bool success = !pipeline_context.pending_exception.has_value() && decode_stage(machine);
 
@@ -501,12 +507,13 @@ void CPU::run_cycle_baremetal_miss(Machine& machine) {
         if (simrv::compiler::unlikely(!rest_success)) {
             const auto cause =
                 pipeline_context.pending_exception.value_or(ExceptionCode::MisalignedFetch);
-            raise_exception(static_cast<TrapCause>(cause), pipeline_context.pending_tval);
+            raise_exception(static_cast<simrv::xlen::TrapCause>(cause),
+                            pipeline_context.pending_tval);
         }
     } else {
         const auto cause =
             pipeline_context.pending_exception.value_or(ExceptionCode::MisalignedFetch);
-        raise_exception(static_cast<TrapCause>(cause), pipeline_context.pending_tval);
+        raise_exception(static_cast<simrv::xlen::TrapCause>(cause), pipeline_context.pending_tval);
     }
 
     clint_mmio.mcycle++;
@@ -523,7 +530,8 @@ void CPU::run_cycle_baremetal_miss(Machine& machine) {
     if (simrv::compiler::unlikely(machine.breakpoint_manager().has_any())) {
         if (auto hit = machine.breakpoint_manager().check_reg_changes(state_, prev_state_)) {
             if (auto* stub = machine.debugger(); stub && stub->is_connected()) {
-                machine.debug_halt(static_cast<HartId>(state_.mhartid), GdbSignal::SigTrap);
+                machine.debug_halt(static_cast<simrv::xlen::HartId>(state_.mhartid),
+                                   GdbSignal::SigTrap);
             } else if (auto sink = machine.telemetry_sink_raw()) {
                 sink->set_status_override(hit->description);
                 sink->pause_loop();
@@ -549,21 +557,23 @@ void CPU::run_cycle_baremetal(Machine& machine) {
             active_execution_cpu_ = previous;
         }
     } boundary_commit{*this, previous_active_cpu};
-    const Counter retired_before = e_icount;
+    const simrv::xlen::Counter retired_before = e_icount;
     if (simrv::compiler::unlikely(machine.breakpoint_manager().has_any())) {
         prev_state_ = state_;
         if (auto hit = machine.breakpoint_manager().check_pc(
-                state_.pc, HartId{static_cast<uint32_t>(state_.mhartid)}, e_icount)) {
+                state_.pc, simrv::xlen::HartId{static_cast<uint32_t>(state_.mhartid)}, e_icount)) {
             if (auto* stub = machine.debugger(); stub && stub->is_connected()) {
                 machine.breakpoint_manager().set_skip_once_pc(
-                    state_.pc, HartId{static_cast<uint32_t>(state_.mhartid)}, e_icount);
-                machine.debug_halt(static_cast<HartId>(state_.mhartid), GdbSignal::SigTrap,
-                                   "swbreak:;");
+                    state_.pc, simrv::xlen::HartId{static_cast<uint32_t>(state_.mhartid)},
+                    e_icount);
+                machine.debug_halt(static_cast<simrv::xlen::HartId>(state_.mhartid),
+                                   GdbSignal::SigTrap, "swbreak:;");
                 return;
             }
             if (auto sink = machine.telemetry_sink_raw()) {
                 machine.breakpoint_manager().set_skip_once_pc(
-                    state_.pc, HartId{static_cast<uint32_t>(state_.mhartid)}, e_icount);
+                    state_.pc, simrv::xlen::HartId{static_cast<uint32_t>(state_.mhartid)},
+                    e_icount);
                 sink->set_status_override(hit->description);
                 sink->pause_loop();
                 return;
@@ -606,7 +616,8 @@ void CPU::run_cycle_baremetal(Machine& machine) {
                 if (auto hit =
                         machine.breakpoint_manager().check_reg_changes(state_, prev_state_)) {
                     if (auto* stub = machine.debugger(); stub && stub->is_connected()) {
-                        machine.debug_halt(static_cast<HartId>(state_.mhartid), GdbSignal::SigTrap);
+                        machine.debug_halt(static_cast<simrv::xlen::HartId>(state_.mhartid),
+                                           GdbSignal::SigTrap);
                     } else if (auto sink = machine.telemetry_sink_raw()) {
                         sink->set_status_override(hit->description);
                         sink->pause_loop();
@@ -661,8 +672,8 @@ void CPU::run_memory_stage_baremetal(Machine& machine) {
     // Load Phase
     if (opcode == Opcode::Load || (opcode == Opcode::Amo && funct5 == Funct5Amo::Lr)) {
         if (simrv::compiler::likely(machine.memory_geometry().contains(addr, access_size))) {
-            ctx.mem_rdata = simrv::memory::ram_read_fast(addr, static_cast<Instruction>(ctx.funct3),
-                                                         machine.ram_view());
+            ctx.mem_rdata = simrv::memory::ram_read_fast(
+                addr, static_cast<simrv::xlen::Instruction>(ctx.funct3), machine.ram_view());
         } else {
             ctx.mem_rdata =
                 simrv::memory::MemoryAccess::loadInt(machine.memory_, *this, addr, ctx.funct3);
@@ -678,7 +689,7 @@ void CPU::run_memory_stage_baremetal(Machine& machine) {
             if (ctx.funct3 == Funct3::Sw || ctx.funct3 == Funct3::Lw) {
                 auto* ptr = reinterpret_cast<uint32_t*>(machine.ram_view().unchecked_ptr(addr));
                 const auto prev = execute_dram_amo<uint32_t>(ptr, ctx.rrs2, funct5);
-                ctx.mem_rdata = static_cast<Word>(static_cast<int32_t>(prev));
+                ctx.mem_rdata = static_cast<simrv::xlen::Word>(static_cast<int32_t>(prev));
                 ctx.wb_data = ctx.mem_rdata;
             } else if constexpr (simrv::xlen::kIsXLen64) {
                 if (ctx.funct3 == Funct3::Sd || ctx.funct3 == Funct3::Ld) {
@@ -700,22 +711,26 @@ void CPU::run_memory_stage_baremetal(Machine& machine) {
             const auto f3 = ctx.funct3;
             switch (f3) {
                 case Funct3::Flw: {
-                    const Word lo = simrv::memory::ram_read_fast(
-                        addr, static_cast<Instruction>(Funct3::Lw), machine.ram_view());
-                    ctx.fp_mem_rdata = static_cast<uint64_t>(kF32BoxerBits) |
-                                       static_cast<uint64_t>(lo & kLower32Mask);
+                    const simrv::xlen::Word lo = simrv::memory::ram_read_fast(
+                        addr, static_cast<simrv::xlen::Instruction>(Funct3::Lw),
+                        machine.ram_view());
+                    ctx.fp_mem_rdata = static_cast<uint64_t>(simrv::xlen::kF32BoxerBits) |
+                                       static_cast<uint64_t>(lo & simrv::xlen::kLower32Mask);
                     break;
                 }
                 case Funct3::Fld: {
                     if constexpr (simrv::xlen::kIsXLen64) {
                         ctx.fp_mem_rdata =
-                            static_cast<FloatingRegister>(simrv::memory::ram_read_fast(
-                                addr, static_cast<Instruction>(Funct3::Ld), machine.ram_view()));
+                            static_cast<simrv::xlen::FloatingRegister>(simrv::memory::ram_read_fast(
+                                addr, static_cast<simrv::xlen::Instruction>(Funct3::Ld),
+                                machine.ram_view()));
                     } else {
-                        const Word lo = simrv::memory::ram_read_fast(
-                            addr, static_cast<Instruction>(Funct3::Lw), machine.ram_view());
-                        const Word hi = simrv::memory::ram_read_fast(
-                            addr + 4, static_cast<Instruction>(Funct3::Lw), machine.ram_view());
+                        const simrv::xlen::Word lo = simrv::memory::ram_read_fast(
+                            addr, static_cast<simrv::xlen::Instruction>(Funct3::Lw),
+                            machine.ram_view());
+                        const simrv::xlen::Word hi = simrv::memory::ram_read_fast(
+                            addr + 4, static_cast<simrv::xlen::Instruction>(Funct3::Lw),
+                            machine.ram_view());
                         ctx.fp_mem_rdata =
                             static_cast<uint64_t>(lo) | (static_cast<uint64_t>(hi) << 32);
                     }
@@ -733,8 +748,8 @@ void CPU::run_memory_stage_baremetal(Machine& machine) {
     if (opcode == Opcode::Amo && funct5 == Funct5Amo::Lr) {
         state_.load_res = addr;
         state_.reserved = 1;
-        machine.memory_.reservation_table().set_reservation(static_cast<HartId>(state_.mhartid),
-                                                            addr);
+        machine.memory_.reservation_table().set_reservation(
+            static_cast<simrv::xlen::HartId>(state_.mhartid), addr);
     }
 
     // Prepare Store Data
@@ -743,8 +758,9 @@ void CPU::run_memory_stage_baremetal(Machine& machine) {
                         : execute::ExecuteUnit::aluAmo(ctx.rrs2, ctx.mem_rdata, funct5, ctx.funct3);
 
     if (opcode == Opcode::StoreFp) {
-        ctx.mem_wdata =
-            static_cast<Register>(ctx.fp_mem_wdata & static_cast<FloatingRegister>(kLower32Mask));
+        ctx.mem_wdata = static_cast<simrv::xlen::Register>(
+            ctx.fp_mem_wdata &
+            static_cast<simrv::xlen::FloatingRegister>(simrv::xlen::kLower32Mask));
     }
 
     // Store Phase
@@ -782,7 +798,8 @@ void CPU::run_memory_stage_baremetal(Machine& machine) {
                     }
                 }
             }
-            simrv::memory::ram_write_fast(addr, ctx.mem_wdata, static_cast<Instruction>(ctx.funct3),
+            simrv::memory::ram_write_fast(addr, ctx.mem_wdata,
+                                          static_cast<simrv::xlen::Instruction>(ctx.funct3),
                                           machine.ram_view());
         } else {
             simrv::memory::MemoryAccess::storeInt(machine.memory_, *this, addr, ctx.mem_wdata,
@@ -802,26 +819,30 @@ void CPU::run_memory_stage_baremetal(Machine& machine) {
                 case Funct3::Fsw:
                     simrv::memory::ram_write_fast(
                         addr,
-                        static_cast<Word>(ctx.fp_mem_wdata &
-                                          static_cast<FloatingRegister>(kLower32Mask)),
-                        static_cast<Instruction>(Funct3::Sw), machine.ram_view());
+                        static_cast<simrv::xlen::Word>(
+                            ctx.fp_mem_wdata &
+                            static_cast<simrv::xlen::FloatingRegister>(simrv::xlen::kLower32Mask)),
+                        static_cast<simrv::xlen::Instruction>(Funct3::Sw), machine.ram_view());
                     break;
                 case Funct3::Fsd:
                     if constexpr (simrv::xlen::kIsXLen64) {
-                        simrv::memory::ram_write_fast(addr, static_cast<Word>(ctx.fp_mem_wdata),
-                                                      static_cast<Instruction>(Funct3::Sd),
-                                                      machine.ram_view());
+                        simrv::memory::ram_write_fast(
+                            addr, static_cast<simrv::xlen::Word>(ctx.fp_mem_wdata),
+                            static_cast<simrv::xlen::Instruction>(Funct3::Sd), machine.ram_view());
                     } else {
                         simrv::memory::ram_write_fast(
                             addr,
-                            static_cast<Word>(ctx.fp_mem_wdata &
-                                              static_cast<FloatingRegister>(kLower32Mask)),
-                            static_cast<Instruction>(Funct3::Sw), machine.ram_view());
+                            static_cast<simrv::xlen::Word>(
+                                ctx.fp_mem_wdata & static_cast<simrv::xlen::FloatingRegister>(
+                                                       simrv::xlen::kLower32Mask)),
+                            static_cast<simrv::xlen::Instruction>(Funct3::Sw), machine.ram_view());
                         simrv::memory::ram_write_fast(
                             addr + 4,
-                            static_cast<Word>((ctx.fp_mem_wdata >> 32) &
-                                              static_cast<FloatingRegister>(kLower32Mask)),
-                            static_cast<Instruction>(Funct3::Sw), machine.ram_view());
+                            static_cast<simrv::xlen::Word>(
+                                (ctx.fp_mem_wdata >> 32) &
+                                static_cast<simrv::xlen::FloatingRegister>(
+                                    simrv::xlen::kLower32Mask)),
+                            static_cast<simrv::xlen::Instruction>(Funct3::Sw), machine.ram_view());
                     }
                     break;
                 default:
@@ -838,17 +859,17 @@ void CPU::run_memory_stage_baremetal(Machine& machine) {
         if (!ctx.pending_exception.has_value()) {
             state_.reserved = 0;
             machine.memory_.reservation_table().invalidate_range(
-                ctx.mem_paddr, access_size, static_cast<HartId>(state_.mhartid));
+                ctx.mem_paddr, access_size, static_cast<simrv::xlen::HartId>(state_.mhartid));
         }
     }
 }
 
-auto CPU::fetch_stage(Machine& machine, Address pc) -> bool {
+auto CPU::fetch_stage(Machine& machine, simrv::xlen::Address pc) -> bool {
     state_.pc = pc;
     auto& context = active_context();
     context.pending_exception = std::nullopt;
     context.pending_tval = 0;
-    context.mem_paddr = PhysAddr{0};
+    context.mem_paddr = simrv::xlen::PhysAddr{0};
     context.sc_reservation_checked = false;
     context.sc_reservation_succeeded = false;
     // Instruction mode reuses one context across whole instructions. A previous

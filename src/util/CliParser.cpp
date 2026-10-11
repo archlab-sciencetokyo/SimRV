@@ -517,7 +517,7 @@ auto parse_execution_options(std::string_view arg, std::span<char* const> args, 
     if (arg == "--trace") {
         options.trace_enabled = true;
         options.trace_begin = 0;
-        options.trace_end = std::numeric_limits<Counter>::max();
+        options.trace_end = std::numeric_limits<simrv::xlen::Counter>::max();
         options.execution_mode = RequestedExecutionMode::Detailed;
         options.execution_mode_explicit = true;
         return true;
@@ -1310,7 +1310,7 @@ auto resolve_runtime_profile(const RuntimeOptions& options) -> simrv::core::Runt
         }
     }
     profile.tracing = options.bp_trace || options.trace_enabled || options.strace != 0 ||
-                      options.trace_begin != std::numeric_limits<Counter>::max();
+                      options.trace_begin != std::numeric_limits<simrv::xlen::Counter>::max();
     profile.lockstep = options.lockstep_mode;
     profile.gdb = options.gdb_mode;
     return profile;
@@ -1335,7 +1335,8 @@ auto RuntimeOptions::to_machine_config() const -> simrv::core::MachineConfig {
     if (explicit_realtime_mode) {
         cfg.execution.realtime_pacing = realtime_pacing;
     } else {
-        cfg.execution.realtime_pacing = tuimode && (fincnt == std::numeric_limits<Counter>::max());
+        cfg.execution.realtime_pacing =
+            tuimode && (fincnt == std::numeric_limits<simrv::xlen::Counter>::max());
     }
     if (auto parsed = pipeline::parse_pipeline_type(pipeline_type)) {
         cfg.execution.pipeline_type = *parsed;

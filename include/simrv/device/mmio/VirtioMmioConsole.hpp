@@ -15,14 +15,14 @@ namespace simrv::device {
  */
 class VirtioMmioConsole : public VirtioMmioDevice {
    public:
-    VirtioMmioConsole(Address base_address, uint32_t irq_num, core::Machine* machine);
+    VirtioMmioConsole(simrv::xlen::Address base_address, uint32_t irq_num, core::Machine* machine);
 
     void send_input(uint8_t ch);
     [[nodiscard]] auto has_input() const -> bool { return backend_.has_rx(); }
 
    protected:
     void on_queue_notify(uint32_t q_idx) override;
-    auto read_device_config(Address offset, std::size_t size) -> uint64_t override;
+    auto read_device_config(simrv::xlen::Address offset, std::size_t size) -> uint64_t override;
 
    private:
     virtio::ConsoleBackend backend_;

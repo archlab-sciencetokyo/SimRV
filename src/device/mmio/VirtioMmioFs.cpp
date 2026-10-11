@@ -3,7 +3,7 @@
 
 namespace simrv::device {
 
-VirtioMmioFs::VirtioMmioFs(Address base, uint32_t irq, core::Machine* machine,
+VirtioMmioFs::VirtioMmioFs(simrv::xlen::Address base, uint32_t irq, core::Machine* machine,
                            const std::string& shared_directory, std::string tag)
     : VirtioMmioDevice("virtio-fs-mmio", base, 0x1000, virtio::kDevIdFs, irq, machine),
       backend_(std::move(tag)) {
@@ -12,7 +12,7 @@ VirtioMmioFs::VirtioMmioFs(Address base, uint32_t irq, core::Machine* machine,
     add_queue(128);  // REQUEST
 }
 
-auto VirtioMmioFs::read_device_config(Address offset, std::size_t size) -> uint64_t {
+auto VirtioMmioFs::read_device_config(simrv::xlen::Address offset, std::size_t size) -> uint64_t {
     uint64_t value = 0;
     for (std::size_t i = 0; i < size && i < 8; ++i) {
         const auto index = static_cast<size_t>(offset + i);

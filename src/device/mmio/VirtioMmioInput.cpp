@@ -6,7 +6,8 @@
 
 namespace simrv::device {
 
-VirtioMmioInput::VirtioMmioInput(Address base_address, uint32_t irq_num, core::Machine* machine)
+VirtioMmioInput::VirtioMmioInput(simrv::xlen::Address base_address, uint32_t irq_num,
+                                 core::Machine* machine)
     : VirtioMmioDevice("virtio-input-mmio", base_address, 0x1000, virtio::kDevIdInput, irq_num,
                        machine) {
     add_queue(64);  // eventq
@@ -96,11 +97,13 @@ void VirtioMmioInput::push_mouse_wheel(int32_t delta) {
     push_event(0x00 /* EV_SYN */, 0 /* SYN_REPORT */, 0);
 }
 
-auto VirtioMmioInput::read_device_config(Address offset, std::size_t size) -> uint64_t {
+auto VirtioMmioInput::read_device_config(simrv::xlen::Address offset, std::size_t size)
+    -> uint64_t {
     return backend_.read_config(offset, static_cast<uint8_t>(size));
 }
 
-void VirtioMmioInput::write_device_config(Address offset, uint64_t val, std::size_t size) {
+void VirtioMmioInput::write_device_config(simrv::xlen::Address offset, uint64_t val,
+                                          std::size_t size) {
     backend_.write_config(offset, static_cast<uint32_t>(val), static_cast<uint8_t>(size));
 }
 

@@ -15,7 +15,7 @@ auto VirtioPciGpu::get_device_features(uint32_t select) -> uint32_t {
     return 0;
 }
 
-auto VirtioPciGpu::read_device_config(Address offset, uint8_t size) -> uint32_t {
+auto VirtioPciGpu::read_device_config(simrv::xlen::Address offset, uint8_t size) -> uint32_t {
     (void)size;
     if (offset == 0) return 0;  // events_read
     if (offset == 4) return 0;  // events_clear

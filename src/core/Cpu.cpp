@@ -68,9 +68,10 @@ void CPU::reset() {
     state_.regs.fill_fp(0);
     state_.regs.fill_vector(VectorRegister{});
     // Set mstatus.VS to Clean (2 << 9)
-    state_.mstatus = static_cast<CSRValue>(2) << 9;
+    state_.mstatus = static_cast<simrv::xlen::CSRValue>(2) << 9;
     if constexpr (simrv::xlen::kIsXLen64) {
-        state_.mstatus |= (static_cast<CSRValue>(2) << 34) | (static_cast<CSRValue>(2) << 32);
+        state_.mstatus |= (static_cast<simrv::xlen::CSRValue>(2) << 34) |
+                          (static_cast<simrv::xlen::CSRValue>(2) << 32);
     }
     state_.initialize_lower_xlen_fields();
     TLB_flush();
@@ -97,7 +98,7 @@ void CPU::TLB_flush() {
 void CPU::TLB_flush(const core::TlbFlushFilter& filter) {
     tlb.flush_selective(filter);
     if (filter.vaddr) {
-        decode_cache.flush_page(*filter.vaddr & ~Address{0xFFF});
+        decode_cache.flush_page(*filter.vaddr & ~simrv::xlen::Address{0xFFF});
     } else {
         decode_cache.flush();
     }
@@ -125,7 +126,7 @@ void CPU::soft_tlb_flush_selective(const core::TlbFlushFilter& filter) {
         return;
     }
     if (filter.vaddr) {
-        const Address vpn = *filter.vaddr >> 12;
+        const simrv::xlen::Address vpn = *filter.vaddr >> 12;
         const size_t tlb_idx = soft_tlb_index(vpn);
         auto invalidate_if_match = [&](SoftTlbEntry& entry) {
             if (entry.valid(soft_tlb_epoch)) {
@@ -164,23 +165,29 @@ void CPU::soft_tlb_flush_selective(const core::TlbFlushFilter& filter) {
     }
 }
 
-auto CPU::get_mstatus(CSRValue mask) const -> CSRValue { return csr_file.getMstatus(mask); }
+auto CPU::get_mstatus(simrv::xlen::CSRValue mask) const -> simrv::xlen::CSRValue {
+    return csr_file.getMstatus(mask);
+}
 
-void CPU::set_mstatus(CSRValue wdata) { csr_file.setMstatus(wdata); }
+void CPU::set_mstatus(simrv::xlen::CSRValue wdata) { csr_file.setMstatus(wdata); }
 
-auto CPU::read_csr(CSRAddress addr) const -> std::expected<CSRValue, ExceptionCode> {
+auto CPU::read_csr(simrv::xlen::CSRAddress addr) const
+    -> std::expected<simrv::xlen::CSRValue, ExceptionCode> {
     return csr_file.read(addr);
 }
 
-auto CPU::read_csr(CsrNumber addr) const -> std::expected<CSRValue, ExceptionCode> {
+auto CPU::read_csr(simrv::xlen::CsrNumber addr) const
+    -> std::expected<simrv::xlen::CSRValue, ExceptionCode> {
     return csr_file.read(addr);
 }
 
-auto CPU::write_csr(CSRAddress addr, CSRValue wdata) -> std::expected<void, ExceptionCode> {
+auto CPU::write_csr(simrv::xlen::CSRAddress addr, simrv::xlen::CSRValue wdata)
+    -> std::expected<void, ExceptionCode> {
     return csr_file.write(addr, wdata);
 }
 
-auto CPU::write_csr(CsrNumber addr, CSRValue wdata) -> std::expected<void, ExceptionCode> {
+auto CPU::write_csr(simrv::xlen::CsrNumber addr, simrv::xlen::CSRValue wdata)
+    -> std::expected<void, ExceptionCode> {
     return csr_file.write(addr, wdata);
 }
 
@@ -206,19 +213,19 @@ void CPU::sret() {
 
 void CPU::plic_update_mip() { plic_mmio.update_mip(); }
 
-void CPU::plic_set_irq(IrqNumber irq_num, IrqLevel state) {
-    plic_mmio.set_irq(irq_num, state == IrqLevel::Asserted ? 1 : 0);
+void CPU::plic_set_irq(simrv::xlen::IrqNumber irq_num, simrv::xlen::IrqLevel state) {
+    plic_mmio.set_irq(irq_num, state == simrv::xlen::IrqLevel::Asserted ? 1 : 0);
 }
 
-void CPU::plic_set_irq(IrqNumber irq_num, bool asserted) {
+void CPU::plic_set_irq(simrv::xlen::IrqNumber irq_num, bool asserted) {
     plic_mmio.set_irq(irq_num, asserted ? 1 : 0);
 }
 
-void CPU::plic_set_irq(IrqNumber irq_num, int state) {
+void CPU::plic_set_irq(simrv::xlen::IrqNumber irq_num, int state) {
     plic_mmio.set_irq(irq_num, state != 0 ? 1 : 0);
 }
 
-void CPU::raise_exception(TrapCause cause, CSRValue tval) {
+void CPU::raise_exception(simrv::xlen::TrapCause cause, simrv::xlen::CSRValue tval) {
     const auto old_privilege = state_.priv;
     const auto old_mstatus = state_.mstatus;
     TrapController::raise_exception(*this, cause, tval);
@@ -230,9 +237,9 @@ void CPU::raise_exception(TrapCause cause, CSRValue tval) {
 }
 
 void CPU::evaluate_timer_interrupt() {
-    const CSRValue pending_before = state_.mip;
-    Counter cur_mtime = 0;
-    Counter cur_mtimecmp = 0;
+    const simrv::xlen::CSRValue pending_before = state_.mip;
+    simrv::xlen::Counter cur_mtime = 0;
+    simrv::xlen::Counter cur_mtimecmp = 0;
     bool is_supervisor_timer = false;
 
     if (machine_ != nullptr) {
@@ -266,7 +273,8 @@ void CPU::evaluate_timer_interrupt() {
     }
     state_.refresh_supervisor_pending();
     if (machine_ != nullptr) {
-        const auto log_transition = [&](MipBit bit, TrapCause code, std::string_view source) {
+        const auto log_transition = [&](MipBit bit, simrv::xlen::TrapCause code,
+                                        std::string_view source) {
             const bool before = (pending_before & bit) != 0;
             const bool after = (state_.mip & bit) != 0;
             if (before != after) {
@@ -305,7 +313,7 @@ void CPU::apply_pending_interrupt_lines(Machine& machine) {
     constexpr std::array<core::MipBit, 6> lines{core::MipBit::Mtip, core::MipBit::Msip,
                                                 core::MipBit::Meip, core::MipBit::Stip,
                                                 core::MipBit::Ssip, core::MipBit::Seip};
-    constexpr std::array<TrapCause, 6> causes{7, 3, 11, 5, 1, 9};
+    constexpr std::array<simrv::xlen::TrapCause, 6> causes{7, 3, 11, 5, 1, 9};
     constexpr std::array<std::string_view, 6> sources{
         "aclint_mtimer", "aclint_mswi", "external_interrupt_controller",
         "aclint_mtimer", "aclint_mswi", "external_interrupt_controller"};
@@ -352,7 +360,8 @@ void CPU::apply_hart_control_boundary() noexcept {
     }
 }
 
-void CPU::push_trace_history(Address pc, Instruction inst, const std::string& symbol) {
+void CPU::push_trace_history(simrv::xlen::Address pc, simrv::xlen::Instruction inst,
+                             const std::string& symbol) {
     // O(1) ring buffer write - no heap allocation, no shifting
     trace_history_buf_[trace_history_head_] =
         TraceHistoryEntry{.pc = pc, .inst = inst, .symbol = symbol};

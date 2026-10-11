@@ -10,8 +10,8 @@ class RingBufferEthernetMmio::Window final : public memory::MmioDevice {
    public:
     enum class Kind : uint8_t { Csr, Rx, Tx };
 
-    Window(RingBufferEthernetMmio& owner, core::Machine& machine, Kind kind, Address base, Address size,
-          std::string label)
+    Window(RingBufferEthernetMmio& owner, core::Machine& machine, Kind kind,
+           simrv::xlen::Address base, simrv::xlen::Address size, std::string label)
         : memory::MmioDevice(&machine),
           owner_(owner),
           kind_(kind),
@@ -20,13 +20,13 @@ class RingBufferEthernetMmio::Window final : public memory::MmioDevice {
           label_(std::move(label)) {}
 
     [[nodiscard]] auto name() const -> const char* override { return label_.c_str(); }
-    [[nodiscard]] auto base_address() const -> Address override { return base_; }
-    [[nodiscard]] auto size() const -> Address override { return size_; }
-    [[nodiscard]] auto read32(Address offset) -> uint32_t override {
+    [[nodiscard]] auto base_address() const -> simrv::xlen::Address override { return base_; }
+    [[nodiscard]] auto size() const -> simrv::xlen::Address override { return size_; }
+    [[nodiscard]] auto read32(simrv::xlen::Address offset) -> uint32_t override {
         if (kind_ == Kind::Csr) return owner_.read_csr(offset);
         return owner_.read_buffer(kind_ == Kind::Tx, offset);
     }
-    void write32(Address offset, uint32_t value) override {
+    void write32(simrv::xlen::Address offset, uint32_t value) override {
         if (kind_ == Kind::Csr) {
             owner_.write_csr(offset, value);
         } else {
@@ -37,17 +37,16 @@ class RingBufferEthernetMmio::Window final : public memory::MmioDevice {
    private:
     RingBufferEthernetMmio& owner_;
     Kind kind_;
-    Address base_;
-    Address size_;
+    simrv::xlen::Address base_;
+    simrv::xlen::Address size_;
     std::string label_;
 };
 
-RingBufferEthernetMmio::RingBufferEthernetMmio(core::Machine& machine, std::string name,
-                                               Address csr_base, Address csr_size, uint32_t irq,
-                                               Address rx_base, Address rx_size, Address tx_base,
-                                               Address tx_size,
-                                               std::array<uint8_t, 6> mac_address,
-                                               NetworkBackend::Mode mode)
+RingBufferEthernetMmio::RingBufferEthernetMmio(
+    core::Machine& machine, std::string name, simrv::xlen::Address csr_base,
+    simrv::xlen::Address csr_size, uint32_t irq, simrv::xlen::Address rx_base,
+    simrv::xlen::Address rx_size, simrv::xlen::Address tx_base, simrv::xlen::Address tx_size,
+    std::array<uint8_t, 6> mac_address, NetworkBackend::Mode mode)
     : machine_(machine),
       name_(std::move(name)),
       csr_base_(csr_base),
@@ -73,7 +72,7 @@ auto RingBufferEthernetMmio::csr_node() -> memory::TileLinkNode* { return csr_wi
 auto RingBufferEthernetMmio::rx_node() -> memory::TileLinkNode* { return rx_window_.get(); }
 auto RingBufferEthernetMmio::tx_node() -> memory::TileLinkNode* { return tx_window_.get(); }
 
-auto RingBufferEthernetMmio::read_csr(Address offset) -> uint32_t {
+auto RingBufferEthernetMmio::read_csr(simrv::xlen::Address offset) -> uint32_t {
     const auto index = static_cast<size_t>(offset / 4);
     if (index >= csr_.size()) return 0;
     if (index == 4) {
@@ -84,7 +83,7 @@ auto RingBufferEthernetMmio::read_csr(Address offset) -> uint32_t {
     return csr_[index];
 }
 
-void RingBufferEthernetMmio::write_csr(Address offset, uint32_t value) {
+void RingBufferEthernetMmio::write_csr(simrv::xlen::Address offset, uint32_t value) {
     if ((offset & 3U) != 0) return;
     switch (offset / 4) {
         case 0:
@@ -103,7 +102,7 @@ void RingBufferEthernetMmio::write_csr(Address offset, uint32_t value) {
     }
 }
 
-auto RingBufferEthernetMmio::read_buffer(bool tx, Address offset) -> uint32_t {
+auto RingBufferEthernetMmio::read_buffer(bool tx, simrv::xlen::Address offset) -> uint32_t {
     const auto& buffer = tx ? tx_buffer_ : rx_buffer_;
     if (offset >= buffer.size() || (offset + 4) > buffer.size()) return 0;
     return static_cast<uint32_t>(buffer[static_cast<size_t>(offset)]) |
@@ -112,7 +111,7 @@ auto RingBufferEthernetMmio::read_buffer(bool tx, Address offset) -> uint32_t {
            (static_cast<uint32_t>(buffer[static_cast<size_t>(offset + 3)]) << 24);
 }
 
-void RingBufferEthernetMmio::write_buffer(bool tx, Address offset, uint32_t value) {
+void RingBufferEthernetMmio::write_buffer(bool tx, simrv::xlen::Address offset, uint32_t value) {
     auto& buffer = tx ? tx_buffer_ : rx_buffer_;
     if (offset >= buffer.size() || (offset + 4) > buffer.size()) return;
     for (size_t byte = 0; byte < 4; ++byte) {

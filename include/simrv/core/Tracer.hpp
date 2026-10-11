@@ -52,7 +52,7 @@ struct BusTraceContext {
 
 struct PipelineStallRecord {
     std::string_view stage;
-    Address pc = 0;
+    simrv::xlen::Address pc = 0;
     uint32_t remaining_cycles = 0;
     std::string_view reason;
 };
@@ -80,26 +80,33 @@ class Tracer {
     void print_summary();
     /** Write a stable machine-readable execution summary for automation. */
     [[nodiscard]] auto write_summary_json(const std::string& path) -> bool;
-    void emit_periodic_pc_trace(Counter mtime, Register cpc);
-    void emit_branch_prediction_trace(Counter mtime, Register cpc, Register jmp_pc,
-                                      isa::Opcode r_opcode, bool r_tkn);
+    void emit_periodic_pc_trace(simrv::xlen::Counter mtime, simrv::xlen::Register cpc);
+    void emit_branch_prediction_trace(simrv::xlen::Counter mtime, simrv::xlen::Register cpc,
+                                      simrv::xlen::Register jmp_pc, isa::Opcode r_opcode,
+                                      bool r_tkn);
     void write_trace_snapshot();
-    void log_mmio(HartId hart, std::string_view dev_name, Address addr, uint32_t size, Word data,
-                  bool is_write, bool faulted = false, bool mapped = true);
-    void log_bus_transaction(Counter cycle, char channel, std::string_view opcode,
-                             std::uint16_t source, std::uint16_t sink, Address address,
+    void log_mmio(simrv::xlen::HartId hart, std::string_view dev_name, simrv::xlen::Address addr,
+                  uint32_t size, simrv::xlen::Word data, bool is_write, bool faulted = false,
+                  bool mapped = true);
+    void log_bus_transaction(simrv::xlen::Counter cycle, char channel, std::string_view opcode,
+                             std::uint16_t source, std::uint16_t sink, simrv::xlen::Address address,
                              std::string_view detail, const BusTraceContext& context = {});
     void log_pipeline_stalls(const CPU& cpu, std::span<const PipelineStallRecord> stalls);
     void log_dma_transfer(const simrv::memory::DmaTransferTrace& transfer);
-    void log_marker_csr_write(const CPU& cpu, CSRValue value);
-    void log_trap(Counter mtime, Counter cycle, TrapCause cause, Address trap_pc,
-                  PrivilegeLevel priv, const ArchState& state, CSRValue tval, const CPU& cpu);
-    void log_architectural_trap_entry(const CPU& cpu, TrapCause cause, Address epc,
-                                      PrivilegeLevel source_mode, CSRValue tval);
-    void log_interrupt_signal(const CPU& cpu, TrapCause cause, bool asserted,
+    void log_marker_csr_write(const CPU& cpu, simrv::xlen::CSRValue value);
+    void log_trap(simrv::xlen::Counter mtime, simrv::xlen::Counter cycle,
+                  simrv::xlen::TrapCause cause, simrv::xlen::Address trap_pc,
+                  simrv::xlen::PrivilegeLevel priv, const ArchState& state,
+                  simrv::xlen::CSRValue tval, const CPU& cpu);
+    void log_architectural_trap_entry(const CPU& cpu, simrv::xlen::TrapCause cause,
+                                      simrv::xlen::Address epc,
+                                      simrv::xlen::PrivilegeLevel source_mode,
+                                      simrv::xlen::CSRValue tval);
+    void log_interrupt_signal(const CPU& cpu, simrv::xlen::TrapCause cause, bool asserted,
                               std::string_view source);
-    void log_sbi(Counter mtime, Counter cycle, unsigned cause, Word ext_id, Word func_id, Word a0,
-                 Word a1, Address pc, HartId hart);
+    void log_sbi(simrv::xlen::Counter mtime, simrv::xlen::Counter cycle, unsigned cause,
+                 simrv::xlen::Word ext_id, simrv::xlen::Word func_id, simrv::xlen::Word a0,
+                 simrv::xlen::Word a1, simrv::xlen::Address pc, simrv::xlen::HartId hart);
     void log_architecture_retirement(const CPU& cpu,
                                      const pipeline::PipelineContext& retiring_context);
     [[nodiscard]] auto is_register_write_trace_enabled() const noexcept -> bool;
@@ -126,8 +133,9 @@ class Tracer {
     void write_trace_metadata(bool completed);
     [[nodiscard]] auto trace_level_at_least(unsigned level) const noexcept -> bool;
     [[nodiscard]] auto trace_event_selected(std::string_view event) const noexcept -> bool;
-    [[nodiscard]] auto accepts_trace_event(std::string_view event, Counter cycle, uint32_t hart,
-                                           std::optional<Address> pc = std::nullopt,
+    [[nodiscard]] auto accepts_trace_event(std::string_view event, simrv::xlen::Counter cycle,
+                                           uint32_t hart,
+                                           std::optional<simrv::xlen::Address> pc = std::nullopt,
                                            std::string_view component = {}) const noexcept -> bool;
 
     Machine& machine_;
@@ -142,8 +150,8 @@ class Tracer {
     bool architecture_trace_enabled_ = false;
     bool retirement_context_needed_ = false;
     struct TrapTraceFrame {
-        TrapCause cause{};
-        Address epc{};
+        simrv::xlen::TrapCause cause{};
+        simrv::xlen::Address epc{};
         bool interrupt = false;
     };
     std::vector<std::vector<TrapTraceFrame>> trap_frames_;

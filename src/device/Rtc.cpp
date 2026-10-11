@@ -40,18 +40,18 @@ auto Rtc::handle_request(const memory::TlChannelA& req, memory::TlChannelD& resp
 
     const bool is_write = (req.opcode == memory::TlOpcodeA::PutFullData ||
                            req.opcode == memory::TlOpcodeA::PutPartialData);
-    const Address offset = (req.address - kBaseAddress).raw();
+    const simrv::xlen::Address offset = (req.address - kBaseAddress).raw();
 
     if (!is_write) {
         switch (offset) {
             case kRtcOffset: {  // TIME_LOW (0x00)
                 const uint64_t rtc_ns = current_time_ns();
                 latched_time_high_ = static_cast<uint32_t>(rtc_ns >> 32);
-                resp.data = static_cast<Word>(rtc_ns & 0xffffffffULL);
+                resp.data = static_cast<simrv::xlen::Word>(rtc_ns & 0xffffffffULL);
                 break;
             }
             case kRtcOffset + 4:  // TIME_HIGH (0x04)
-                resp.data = static_cast<Word>(latched_time_high_);
+                resp.data = static_cast<simrv::xlen::Word>(latched_time_high_);
                 break;
             case 0x10:  // IRQ_ENABLED
                 resp.data = alarm_enabled_ ? 1 : 0;

@@ -75,7 +75,7 @@ auto encode_hex(std::string_view text) -> std::string {
 }
 
 void invalidate_debug_state(simrv::core::Machine& machine, simrv::core::CPU& cpu) {
-    const auto hart = HartId{static_cast<uint32_t>(cpu.state().mhartid)};
+    const auto hart = simrv::xlen::HartId{static_cast<uint32_t>(cpu.state().mhartid)};
     machine.memory().system_bus().cancel_source(
         simrv::memory::make_tl_source(hart, simrv::memory::TlPort::Instruction));
     machine.memory().system_bus().cancel_source(
@@ -365,7 +365,7 @@ template <typename T>
     return s;
 }
 
-auto GdbStub::reg_to_hex(Register val) -> std::string { return to_le_hex(val); }
+auto GdbStub::reg_to_hex(simrv::xlen::Register val) -> std::string { return to_le_hex(val); }
 
 static auto fp_to_hex(uint64_t val) -> std::string { return to_le_hex(val); }
 
@@ -389,18 +389,18 @@ static constexpr std::array<GdbCsr, 11> kGdbCsrs = {{
 }};
 static constexpr std::size_t kFirstCsrReg = 65;
 
-auto GdbStub::hex_to_reg(const std::string& s, std::size_t offset) -> Register {
-    auto hd = [&](std::size_t i) -> Register {
+auto GdbStub::hex_to_reg(const std::string& s, std::size_t offset) -> simrv::xlen::Register {
+    auto hd = [&](std::size_t i) -> simrv::xlen::Register {
         if (offset + i >= s.size()) return 0;
         const char c = s.at(offset + i);
-        if (c >= '0' && c <= '9') return static_cast<Register>(c - '0');
-        if (c >= 'a' && c <= 'f') return static_cast<Register>(c - 'a' + 10);
-        if (c >= 'A' && c <= 'F') return static_cast<Register>(c - 'A' + 10);
+        if (c >= '0' && c <= '9') return static_cast<simrv::xlen::Register>(c - '0');
+        if (c >= 'a' && c <= 'f') return static_cast<simrv::xlen::Register>(c - 'a' + 10);
+        if (c >= 'A' && c <= 'F') return static_cast<simrv::xlen::Register>(c - 'A' + 10);
         return 0;
     };
-    Register val = 0;
-    for (size_t b = 0; b < sizeof(Register); ++b) {
-        const Register byte_val = (hd(b * 2) << 4) | hd(b * 2 + 1);
+    simrv::xlen::Register val = 0;
+    for (size_t b = 0; b < sizeof(simrv::xlen::Register); ++b) {
+        const simrv::xlen::Register byte_val = (hd(b * 2) << 4) | hd(b * 2 + 1);
         val |= (byte_val << (b * 8));
     }
     return val;
@@ -432,18 +432,18 @@ static auto read_gdb_reg(std::size_t idx, const simrv::core::CPU& cpu)
     -> std::optional<std::string> {
     const auto& state = cpu.state();
     if (idx < 32) {
-        return GdbStub::reg_to_hex(state.regs.read(static_cast<RegId>(idx)));
+        return GdbStub::reg_to_hex(state.regs.read(static_cast<simrv::xlen::RegId>(idx)));
     }
     if (idx == 32) {
         return GdbStub::reg_to_hex(state.pc);
     }
     if (idx >= 33 && idx < 65) {
         // FP registers: 64-bit, little-endian
-        return fp_to_hex(state.regs.read_fp(static_cast<RegId>(idx - 33)));
+        return fp_to_hex(state.regs.read_fp(static_cast<simrv::xlen::RegId>(idx - 33)));
     }
     if (idx >= kFirstCsrReg && idx < kFirstCsrReg + kGdbCsrs.size()) {
         const auto value = cpu.read_csr(simrv::core::csr_num(kGdbCsrs[idx - kFirstCsrReg].csr));
-        if (value) return GdbStub::reg_to_hex(static_cast<Register>(*value));
+        if (value) return GdbStub::reg_to_hex(static_cast<simrv::xlen::Register>(*value));
     }
     return std::nullopt;
 }
@@ -451,13 +451,13 @@ static auto read_gdb_reg(std::size_t idx, const simrv::core::CPU& cpu)
 static void write_gdb_reg(std::size_t idx, const std::string& hex, std::size_t hex_off,
                           simrv::core::ArchState& state) {
     if (idx < 32) {
-        const Register val = GdbStub::hex_to_reg(hex, hex_off);
-        state.regs.write(static_cast<RegId>(idx), val);
+        const simrv::xlen::Register val = GdbStub::hex_to_reg(hex, hex_off);
+        state.regs.write(static_cast<simrv::xlen::RegId>(idx), val);
     } else if (idx == 32) {
-        state.pc = static_cast<Address>(GdbStub::hex_to_reg(hex, hex_off));
+        state.pc = static_cast<simrv::xlen::Address>(GdbStub::hex_to_reg(hex, hex_off));
     } else if (idx >= 33 && idx < 65) {
         const uint64_t val = hex_to_fp(hex, hex_off);
-        state.regs.write_fp(static_cast<RegId>(idx - 33), val);
+        state.regs.write_fp(static_cast<simrv::xlen::RegId>(idx - 33), val);
     }
 }
 
@@ -472,25 +472,25 @@ auto GdbStub::cmd_read_registers(simrv::core::Machine& machine) -> std::string {
     std::string resp;
     // x0-x31 (XLEN bytes each, little-endian)
     for (std::size_t i = 0; i < 32; ++i) {
-        resp += reg_to_hex(state.regs.read(static_cast<RegId>(i)));
+        resp += reg_to_hex(state.regs.read(static_cast<simrv::xlen::RegId>(i)));
     }
     // pc (XLEN bytes, little-endian)
     resp += reg_to_hex(state.pc);
     // f0-f31 (8 bytes each, little-endian)
     for (std::size_t i = 0; i < 32; ++i) {
-        resp += fp_to_hex(state.regs.read_fp(static_cast<RegId>(i)));
+        resp += fp_to_hex(state.regs.read_fp(static_cast<simrv::xlen::RegId>(i)));
     }
     for (const auto& csr : kGdbCsrs) {
         const auto value = target_cpu.read_csr(simrv::core::csr_num(csr.csr));
-        resp += value ? reg_to_hex(static_cast<Register>(*value))
-                      : std::string(sizeof(Register) * 2, 'x');
+        resp += value ? reg_to_hex(static_cast<simrv::xlen::Register>(*value))
+                      : std::string(sizeof(simrv::xlen::Register) * 2, 'x');
     }
     return resp;
 }
 
 auto GdbStub::cmd_write_registers(const std::string& pkt, simrv::core::Machine& machine)
     -> std::string {
-    if (pkt.size() != 1 + (33 + kGdbCsrs.size()) * sizeof(Register) * 2 + 32 * 16 ||
+    if (pkt.size() != 1 + (33 + kGdbCsrs.size()) * sizeof(simrv::xlen::Register) * 2 + 32 * 16 ||
         !valid_hex(std::string_view(pkt).substr(1))) {
         return "E01";
     }
@@ -498,7 +498,7 @@ auto GdbStub::cmd_write_registers(const std::string& pkt, simrv::core::Machine& 
     auto& target_cpu = (current_hart_.raw() < machine.num_harts()) ? machine.hart(current_hart_)
                                                                    : machine.primary_hart();
     auto& state = target_cpu.state();
-    const size_t hex_per_int = sizeof(Register) * 2;
+    const size_t hex_per_int = sizeof(simrv::xlen::Register) * 2;
     std::size_t off = 1;
     // x0..x31 + pc
     for (std::size_t i = 0; i < 33 && off + hex_per_int <= pkt.size(); ++i, off += hex_per_int) {
@@ -540,7 +540,7 @@ auto GdbStub::cmd_write_register(const std::string& pkt, simrv::core::Machine& m
     }
     const auto parsed = parse_hex(std::string_view(pkt).substr(1, eq - 1));
     if (!parsed || *parsed >= kFirstCsrReg ||
-        pkt.size() - eq - 1 != (*parsed < 33 ? sizeof(Register) * 2 : 16) ||
+        pkt.size() - eq - 1 != (*parsed < 33 ? sizeof(simrv::xlen::Register) * 2 : 16) ||
         !valid_hex(std::string_view(pkt).substr(eq + 1))) {
         return "E01";
     }
@@ -561,11 +561,11 @@ auto GdbStub::cmd_read_memory(const std::string& pkt, simrv::core::Machine& mach
     }
     const auto address = parse_hex(std::string_view(pkt).substr(1, comma - 1));
     const auto length = parse_hex(std::string_view(pkt).substr(comma + 1));
-    if (!address || !length || *address > std::numeric_limits<Address>::max() || *length > 4096 ||
-        !machine.ram_view().contains(*address, *length)) {
+    if (!address || !length || *address > std::numeric_limits<simrv::xlen::Address>::max() ||
+        *length > 4096 || !machine.ram_view().contains(*address, *length)) {
         return "E01";
     }
-    const auto addr = static_cast<Address>(*address);
+    const auto addr = static_cast<simrv::xlen::Address>(*address);
     const auto len = static_cast<size_t>(*length);
 
     // Clamp to a safe maximum
@@ -598,13 +598,13 @@ auto GdbStub::cmd_write_memory(const std::string& pkt, simrv::core::Machine& mac
     }
     const auto address = parse_hex(std::string_view(pkt).substr(1, comma - 1));
     const auto length = parse_hex(std::string_view(pkt).substr(comma + 1, colon - comma - 1));
-    if (!address || !length || *address > std::numeric_limits<Address>::max() || *length > 4096 ||
-        pkt.size() - colon - 1 != *length * 2 ||
+    if (!address || !length || *address > std::numeric_limits<simrv::xlen::Address>::max() ||
+        *length > 4096 || pkt.size() - colon - 1 != *length * 2 ||
         (*length != 0 && !valid_hex(std::string_view(pkt).substr(colon + 1))) ||
         !machine.ram_view().contains(*address, *length)) {
         return "E01";
     }
-    const auto addr = static_cast<Address>(*address);
+    const auto addr = static_cast<simrv::xlen::Address>(*address);
     const auto len = static_cast<size_t>(*length);
 
     const auto ram = machine.ram_view();
@@ -623,7 +623,7 @@ auto GdbStub::cmd_write_memory(const std::string& pkt, simrv::core::Machine& mac
             static_cast<uint8_t>((hd(pkt.at(hex_off)) << 4) | hd(pkt.at(hex_off + 1)));
         const auto phys = static_cast<uint64_t>(addr) + i;
         if (ram.contains(phys)) {
-            *ram.unchecked_ptr(phys) = static_cast<Byte>(byte_val);
+            *ram.unchecked_ptr(phys) = static_cast<simrv::xlen::Byte>(byte_val);
         }
     }
     for (size_t hart = 0; hart < machine.num_harts(); ++hart) {
@@ -642,12 +642,12 @@ auto GdbStub::cmd_breakpoint(const std::string& pkt, simrv::core::Machine& machi
     const auto address = parse_hex(std::string_view(pkt).substr(c1 + 1, c2 - c1 - 1));
     const auto length = parse_hex(std::string_view(pkt).substr(c2 + 1));
     if (!type || !address || !length || *length == 0 ||
-        *address > std::numeric_limits<Address>::max() ||
-        (insert && *length - 1 > std::numeric_limits<Address>::max() - *address))
+        *address > std::numeric_limits<simrv::xlen::Address>::max() ||
+        (insert && *length - 1 > std::numeric_limits<simrv::xlen::Address>::max() - *address))
         return "E01";
 
     auto& breakpoints = machine.breakpoint_manager();
-    const auto addr = static_cast<Address>(*address);
+    const auto addr = static_cast<simrv::xlen::Address>(*address);
     if (*type == std::to_underlying(GdbBreakpointType::Software) ||
         *type == std::to_underlying(GdbBreakpointType::Hardware)) {
         if (insert)
@@ -858,7 +858,8 @@ auto GdbStub::cmd_monitor(std::string_view command, simrv::core::Machine& machin
         if (!machine.runtime_profile.is_cycle_mode()) {
             return "pipeline: unavailable (cycle-accurate mode is disabled)\n";
         }
-        const auto hart_id = current_hart_.raw() < machine.num_harts() ? current_hart_ : HartId{0};
+        const auto hart_id =
+            current_hart_.raw() < machine.num_harts() ? current_hart_ : simrv::xlen::HartId{0};
         const auto& hart = machine.hart(hart_id.raw());
         const std::array<std::pair<std::string_view, const simrv::pipeline::CycleInstructionSlot*>,
                          5>
@@ -988,7 +989,7 @@ auto GdbStub::handle_packet(const std::string& pkt, simrv::core::Machine& machin
             if (!tid || *tid > machine.num_harts()) {
                 return {.response = "E01"};
             }
-            current_hart_ = HartId{static_cast<uint32_t>(*tid == 0 ? 0 : *tid - 1)};
+            current_hart_ = simrv::xlen::HartId{static_cast<uint32_t>(*tid == 0 ? 0 : *tid - 1)};
             return {.response = "OK"};
         }
 
@@ -1007,7 +1008,7 @@ auto GdbStub::handle_packet(const std::string& pkt, simrv::core::Machine& machin
             }
             if (pkt.starts_with("vCont;")) {
                 std::string_view actions = std::string_view(pkt).substr(6);
-                std::optional<HartId> stepping;
+                std::optional<simrv::xlen::HartId> stepping;
                 bool seen = false;
                 while (!actions.empty()) {
                     const auto end = actions.find(';');
@@ -1016,13 +1017,13 @@ auto GdbStub::handle_packet(const std::string& pkt, simrv::core::Machine& machin
                         (action.size() > 1 && action[1] != ':')) {
                         return {.response = "E01"};
                     }
-                    HartId target = current_hart_;
+                    simrv::xlen::HartId target = current_hart_;
                     if (action.size() > 1) {
                         const auto tid = parse_hex(action.substr(2));
                         if (!tid || *tid == 0 || *tid > machine.num_harts()) {
                             return {.response = "E01"};
                         }
-                        target = HartId{static_cast<uint32_t>(*tid - 1)};
+                        target = simrv::xlen::HartId{static_cast<uint32_t>(*tid - 1)};
                     }
                     if (action[0] == 's') {
                         if (stepping) {
@@ -1101,7 +1102,7 @@ void GdbStub::service_pending(simrv::core::Machine& machine) {
                 case CommandKind::Disconnect:
                     machine.pause();
                     machine.breakpoint_manager().clear_owner(BreakpointOwner::Gdb);
-                    current_hart_ = HartId{0};
+                    current_hart_ = simrv::xlen::HartId{0};
                     pause_requested_.store(false, std::memory_order_release);
                     break;
                 case CommandKind::Packet:
@@ -1128,7 +1129,7 @@ void GdbStub::service_pending(simrv::core::Machine& machine) {
     }
 }
 
-void GdbStub::notify_stop(HartId hart, GdbSignal signal, std::string reason) {
+void GdbStub::notify_stop(simrv::xlen::HartId hart, GdbSignal signal, std::string reason) {
     if (!is_connected()) return;
     current_hart_ = hart;
     std::string reply =

@@ -93,7 +93,7 @@ auto VirtioPciNet::get_device_features(uint32_t select) -> uint32_t {
     return 0;
 }
 
-auto VirtioPciNet::read_device_config(Address offset, uint8_t size) -> uint32_t {
+auto VirtioPciNet::read_device_config(simrv::xlen::Address offset, uint8_t size) -> uint32_t {
     const auto& mac = backend_.get_mac();
     uint32_t value = 0;
     for (uint8_t byte = 0; byte < size && byte < sizeof(value); ++byte) {

@@ -42,9 +42,9 @@ namespace simrv::debug {
  *              extension bits 0-25 are used).
  * @return      Lowercase ISA string suitable for Spike's --isa= flag.
  */
-[[nodiscard]] inline auto spike_isa_string(CSRValue misa) -> std::string {
+[[nodiscard]] inline auto spike_isa_string(simrv::xlen::CSRValue misa) -> std::string {
     unsigned xlen = 32;
-    if constexpr (kIsXLen64) {
+    if constexpr (simrv::xlen::kIsXLen64) {
         const unsigned mxl = (misa >> 62) & 3;
         xlen = (mxl == 1) ? 32 : 64;
     }
@@ -52,7 +52,7 @@ namespace simrv::debug {
 
     // Check IMAFD bits for the 'G' shorthand
     const auto bit = [&](char c) -> bool {
-        return (misa & (static_cast<CSRValue>(1) << (c - 'a'))) != 0;
+        return (misa & (static_cast<simrv::xlen::CSRValue>(1) << (c - 'a'))) != 0;
     };
     const bool is_g = bit('i') && bit('m') && bit('a') && bit('f') && bit('d');
 
@@ -60,7 +60,7 @@ namespace simrv::debug {
         s += 'g';
         // Append any extension beyond IMAFD
         for (int i = 0; i < 26; ++i) {
-            if ((misa & (static_cast<CSRValue>(1) << i)) == 0) continue;
+            if ((misa & (static_cast<simrv::xlen::CSRValue>(1) << i)) == 0) continue;
             const char c = static_cast<char>('a' + i);
             if (c == 'i' || c == 'm' || c == 'a' || c == 'f' || c == 'd' || c == 'x') continue;
             if (c == 's' || c == 'u') continue;
@@ -68,7 +68,7 @@ namespace simrv::debug {
         }
     } else {
         for (int i = 0; i < 26; ++i) {
-            if ((misa & (static_cast<CSRValue>(1) << i)) != 0) {
+            if ((misa & (static_cast<simrv::xlen::CSRValue>(1) << i)) != 0) {
                 const char c = static_cast<char>('a' + i);
                 if (c == 's' || c == 'u' || c == 'x') continue;
                 s += c;
@@ -83,9 +83,9 @@ namespace simrv::debug {
  * @brief One instruction's committed effect as reported by Spike --log-commits.
  */
 struct SpikeCommitRecord {
-    Address pc{};                      ///< PC of retired instruction
-    std::array<Register, 32> gpr{};    ///< Full GPR snapshot after retire
-    std::array<bool, 32> gpr_valid{};  ///< True for registers written this insn
+    simrv::xlen::Address pc{};                    ///< PC of retired instruction
+    std::array<simrv::xlen::Register, 32> gpr{};  ///< Full GPR snapshot after retire
+    std::array<bool, 32> gpr_valid{};             ///< True for registers written this insn
 };
 
 /**
@@ -147,7 +147,7 @@ class SpikeLockstep {
      * @param icount     Instruction count (for diagnostics).
      * @return true if states match, false on divergence.
      */
-    auto compare_and_report(const simrv::core::ArchState& state, Address current_pc,
+    auto compare_and_report(const simrv::core::ArchState& state, simrv::xlen::Address current_pc,
                             uint64_t icount) -> bool;
 
     /** @return True if a divergence has been detected and simulation should halt. */
@@ -185,8 +185,8 @@ class SpikeLockstep {
         -> std::optional<SpikeCommitRecord>;
 
     /** Print a coloured divergence report. */
-    void print_divergence(uint64_t icount, Address simrv_pc, Address spike_pc,
-                          const simrv::core::ArchState& simrv_state,
+    void print_divergence(uint64_t icount, simrv::xlen::Address simrv_pc,
+                          simrv::xlen::Address spike_pc, const simrv::core::ArchState& simrv_state,
                           const SpikeCommitRecord& spike_rec);
 };
 

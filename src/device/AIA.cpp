@@ -16,7 +16,8 @@ namespace simrv::device {
 // Imsic Implementation
 // =========================================================================
 
-Imsic::Imsic(simrv::core::Machine* machine, Privilege priv, Address base_addr, Address size)
+Imsic::Imsic(simrv::core::Machine* machine, Privilege priv, simrv::xlen::Address base_addr,
+             simrv::xlen::Address size)
     : memory::MmioDevice(machine), priv_(priv), base_addr_(base_addr), size_(size) {
     reset();
 }
@@ -30,24 +31,24 @@ void Imsic::reset() {
     }
 }
 
-auto Imsic::read32(Address /*offset*/) -> uint32_t { return 0; }
+auto Imsic::read32(simrv::xlen::Address /*offset*/) -> uint32_t { return 0; }
 
-void Imsic::write32(Address offset, uint32_t val) {
+void Imsic::write32(simrv::xlen::Address offset, uint32_t val) {
     const size_t hart_idx = static_cast<size_t>(offset / 0x4000U);
     if (hart_idx >= kMaxHarts) {
         return;
     }
-    const Address reg_offset = offset % 0x4000U;
+    const simrv::xlen::Address reg_offset = offset % 0x4000U;
     if (reg_offset == 0x000U) {  // seteipnum_le
         const uint32_t id = val & 0x7ffU;
         if (id > 0 && id < kNumInterrupts) {
             files_[hart_idx].eip |= (1ULL << id);
-            update_hart(HartId{static_cast<uint32_t>(hart_idx)});
+            update_hart(simrv::xlen::HartId{static_cast<uint32_t>(hart_idx)});
         }
     }
 }
 
-auto Imsic::csr_read(HartId hart_idx, uint32_t reg_idx) -> Word {
+auto Imsic::csr_read(simrv::xlen::HartId hart_idx, uint32_t reg_idx) -> simrv::xlen::Word {
     const size_t h = hart_idx.value();
     if (h >= kMaxHarts) {
         return 0;
@@ -59,13 +60,13 @@ auto Imsic::csr_read(HartId hart_idx, uint32_t reg_idx) -> Word {
         case 0x72:  // eithreshold
             return file.eithreshold;
         case 0x80:  // eip0
-            return static_cast<Word>(file.eip & 0xffffffffULL);
+            return static_cast<simrv::xlen::Word>(file.eip & 0xffffffffULL);
         case 0x81:  // eip1
-            return static_cast<Word>(file.eip >> 32);
+            return static_cast<simrv::xlen::Word>(file.eip >> 32);
         case 0xC0:  // eie0
-            return static_cast<Word>(file.eie & 0xffffffffULL);
+            return static_cast<simrv::xlen::Word>(file.eie & 0xffffffffULL);
         case 0xC1:  // eie1
-            return static_cast<Word>(file.eie >> 32);
+            return static_cast<simrv::xlen::Word>(file.eie >> 32);
         case 0x44: {  // topei
             if (file.eidelivery == 0) {
                 return 0;
@@ -77,7 +78,8 @@ auto Imsic::csr_read(HartId hart_idx, uint32_t reg_idx) -> Word {
             const unsigned id = static_cast<unsigned>(std::countr_zero(active));
             if (id > 0 && id < kNumInterrupts) {
                 if (file.eithreshold == 0 || id < file.eithreshold) {
-                    return (static_cast<Word>(id) << 16) | static_cast<Word>(id);
+                    return (static_cast<simrv::xlen::Word>(id) << 16) |
+                           static_cast<simrv::xlen::Word>(id);
                 }
             }
             return 0;
@@ -87,7 +89,7 @@ auto Imsic::csr_read(HartId hart_idx, uint32_t reg_idx) -> Word {
     }
 }
 
-void Imsic::csr_write(HartId hart_idx, uint32_t reg_idx, Word val) {
+void Imsic::csr_write(simrv::xlen::HartId hart_idx, uint32_t reg_idx, simrv::xlen::Word val) {
     const size_t h = hart_idx.value();
     if (h >= kMaxHarts) {
         return;
@@ -125,7 +127,7 @@ void Imsic::csr_write(HartId hart_idx, uint32_t reg_idx, Word val) {
     }
 }
 
-void Imsic::trigger_msi(HartId hart_idx, InterruptSourceId interrupt_id) {
+void Imsic::trigger_msi(simrv::xlen::HartId hart_idx, simrv::xlen::InterruptSourceId interrupt_id) {
     const size_t h = hart_idx.value();
     if (h < kMaxHarts && interrupt_id > 0 && interrupt_id < kNumInterrupts) {
         files_[h].eip |= (1ULL << interrupt_id);
@@ -133,7 +135,7 @@ void Imsic::trigger_msi(HartId hart_idx, InterruptSourceId interrupt_id) {
     }
 }
 
-void Imsic::update_hart(HartId hart_idx) {
+void Imsic::update_hart(simrv::xlen::HartId hart_idx) {
     const size_t h = hart_idx.value();
     if (machine_ == nullptr || h >= machine_->num_harts() || h >= kMaxHarts) {
         return;
@@ -150,8 +152,8 @@ void Imsic::update_hart(HartId hart_idx) {
         }
     }
 
-    const auto priv_level =
-        (priv_ == Privilege::Machine) ? PrivilegeLevel::Machine : PrivilegeLevel::Supervisor;
+    const auto priv_level = (priv_ == Privilege::Machine) ? simrv::xlen::PrivilegeLevel::Machine
+                                                          : simrv::xlen::PrivilegeLevel::Supervisor;
     machine_->set_hart_irq(h, core::InterruptType::External, priv_level, has_pending);
 }
 
@@ -159,8 +161,8 @@ void Imsic::update_hart(HartId hart_idx) {
 // Aplic Implementation
 // =========================================================================
 
-Aplic::Aplic(simrv::core::Machine* machine, Privilege priv, Address base_addr, Address size,
-             Imsic* imsic)
+Aplic::Aplic(simrv::core::Machine* machine, Privilege priv, simrv::xlen::Address base_addr,
+             simrv::xlen::Address size, Imsic* imsic)
     : memory::MmioDevice(machine), priv_(priv), base_addr_(base_addr), size_(size), imsic_(imsic) {
     reset();
 }
@@ -176,7 +178,7 @@ void Aplic::reset() {
     enabled_ = 0;
 }
 
-auto Aplic::read32(Address offset) -> uint32_t {
+auto Aplic::read32(simrv::xlen::Address offset) -> uint32_t {
     if (offset == 0x0000U) {
         return domaincfg_;
     }
@@ -229,7 +231,7 @@ auto Aplic::read32(Address offset) -> uint32_t {
     return 0;
 }
 
-void Aplic::write32(Address offset, uint32_t val) {
+void Aplic::write32(simrv::xlen::Address offset, uint32_t val) {
     if (offset == 0x0000U) {
         domaincfg_ = val;
         update();
@@ -294,7 +296,7 @@ void Aplic::write32(Address offset, uint32_t val) {
     }
 }
 
-void Aplic::set_irq(InterruptSourceId irq_source, bool active) {
+void Aplic::set_irq(simrv::xlen::InterruptSourceId irq_source, bool active) {
     if (irq_source > 0 && irq_source < kMaxSources) {
         input_wires_[irq_source] = active;
         if (active) {
@@ -317,17 +319,18 @@ void Aplic::update() {
                 const size_t hart_idx = (tgt >> 18) & 0x3fffU;
                 const uint32_t eiid = tgt & 0x7ffU;
                 imsic_->trigger_msi(
-                    HartId{static_cast<uint32_t>(hart_idx)},
-                    eiid ? InterruptSourceId{eiid} : InterruptSourceId{static_cast<uint32_t>(src)});
+                    simrv::xlen::HartId{static_cast<uint32_t>(hart_idx)},
+                    eiid ? simrv::xlen::InterruptSourceId{eiid}
+                         : simrv::xlen::InterruptSourceId{static_cast<uint32_t>(src)});
                 pending_ &= ~(1ULL << src);  // In MSI mode, message has been dispatched
             } else if (!msi_mode && machine_ != nullptr) {
                 const uint32_t tgt = target_[src];
                 const size_t hart_idx = (tgt >> 18) & 0x3fffU;
                 if (hart_idx < machine_->num_harts()) {
                     const auto priv_level = (priv_ == Privilege::Machine)
-                                                ? PrivilegeLevel::Machine
-                                                : PrivilegeLevel::Supervisor;
-                    machine_->set_hart_irq(HartId{static_cast<uint32_t>(hart_idx)},
+                                                ? simrv::xlen::PrivilegeLevel::Machine
+                                                : simrv::xlen::PrivilegeLevel::Supervisor;
+                    machine_->set_hart_irq(simrv::xlen::HartId{static_cast<uint32_t>(hart_idx)},
                                            core::InterruptType::External, priv_level, true);
                 }
             }

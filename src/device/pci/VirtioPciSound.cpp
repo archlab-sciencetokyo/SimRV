@@ -17,7 +17,7 @@ auto VirtioPciSound::get_device_features(uint32_t select) -> uint32_t {
     return 0;
 }
 
-auto VirtioPciSound::read_device_config(Address offset, uint8_t size) -> uint32_t {
+auto VirtioPciSound::read_device_config(simrv::xlen::Address offset, uint8_t size) -> uint32_t {
     return backend_.read_config(offset, size);
 }
 
