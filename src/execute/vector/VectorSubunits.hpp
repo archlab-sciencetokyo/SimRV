@@ -1,6 +1,5 @@
 #pragma once
 
-#include "simrv/Define.hpp"
 
 namespace simrv::memory {
 class MemorySubsystem;

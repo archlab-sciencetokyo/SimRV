@@ -7,7 +7,6 @@
 #include <string>
 #include <string_view>
 
-#include "simrv/Define.hpp"
 #include "simrv/core/Boot.hpp"
 #include "simrv/core/Logger.hpp"
 #include "simrv/core/Machine.hpp"

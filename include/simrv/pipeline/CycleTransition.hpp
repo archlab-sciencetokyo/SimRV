@@ -3,7 +3,6 @@
 #include <array>
 #include <cstdint>
 
-#include "simrv/Define.hpp"
 #include "simrv/memory/Mmu.hpp"
 #include "simrv/memory/TileLinkProtocol.hpp"
 #include "simrv/pipeline/BranchPredictor.hpp"

@@ -8,7 +8,6 @@
 #include <string>
 
 #include "MachineRuntime.hpp"
-#include "simrv/Define.hpp"
 #include "simrv/core/Boot.hpp"
 #include "simrv/core/Cpu.hpp"
 #include "simrv/core/CpuConfigParser.hpp"

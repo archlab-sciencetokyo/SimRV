@@ -6,7 +6,6 @@
 
 #include <utility>
 
-#include "simrv/Define.hpp"
 #include "simrv/core/Cpu.hpp"
 #include "simrv/core/Pmp.hpp"
 #include "simrv/memory/MemoryUtil.hpp"

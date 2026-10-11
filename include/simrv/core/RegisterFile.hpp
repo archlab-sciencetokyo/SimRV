@@ -5,8 +5,9 @@
 #pragma once
 
 #include <array>
-#include <simrv/Define.hpp>
+#include <simrv/CompilerHints.hpp>
 
+#include "simrv/isa/VectorTypes.hpp"
 #include "simrv/xlen/Types.hpp"
 
 namespace simrv::core {

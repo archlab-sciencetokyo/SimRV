@@ -2,7 +2,7 @@
 
 #include <expected>
 #include <optional>
-#include <simrv/Define.hpp>
+#include <simrv/CompilerHints.hpp>
 #include <simrv/pipeline/DecodedInstruction.hpp>
 
 namespace simrv::pipeline {

@@ -5,7 +5,6 @@
 #include <limits>
 #include <type_traits>
 
-#include "simrv/Define.hpp"
 #include "simrv/core/Cpu.hpp"
 
 namespace simrv::execute::vector {

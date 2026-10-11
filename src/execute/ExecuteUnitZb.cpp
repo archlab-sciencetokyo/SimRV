@@ -1,7 +1,6 @@
 #include <algorithm>
 #include <bit>
 
-#include "simrv/Define.hpp"
 #include "simrv/execute/ExecuteUnit.hpp"
 
 namespace simrv::execute {
@@ -128,8 +127,7 @@ constexpr auto alu_int_b_eval(T in1, T in2, isa::OperationId op_id, int xlen) ->
 
 }  // namespace
 
-auto ExecuteUnit::aluIntZb(Register in1, Register in2, isa::OperationId op_id,
-                           unsigned xlen_param)
+auto ExecuteUnit::aluIntZb(Register in1, Register in2, isa::OperationId op_id, unsigned xlen_param)
     -> Register {
     if (xlen_param == 32) {
         const auto res = alu_int_b_eval<uint32_t>(static_cast<uint32_t>(in1),

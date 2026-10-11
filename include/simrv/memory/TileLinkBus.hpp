@@ -10,6 +10,7 @@
 #include <unordered_map>
 #include <vector>
 
+#include "simrv/CompilerHints.hpp"
 #include "simrv/memory/Bus.hpp"
 #include "simrv/memory/CoherenceHub.hpp"
 #include "simrv/memory/MmioRouter.hpp"

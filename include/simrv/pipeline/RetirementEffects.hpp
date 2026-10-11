@@ -1,6 +1,6 @@
 #pragma once
 
-#include "simrv/Define.hpp"
+#include "simrv/CompilerHints.hpp"
 #include "simrv/pipeline/PipelineContext.hpp"
 
 namespace simrv::pipeline {

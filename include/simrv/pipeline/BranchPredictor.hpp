@@ -8,7 +8,7 @@
 #include <string_view>
 #include <vector>
 
-#include "simrv/Define.hpp"
+#include "simrv/CompilerHints.hpp"
 #include "simrv/isa/Base.hpp"
 #include "simrv/pipeline/DecodedInstruction.hpp"
 #include "simrv/xlen/Types.hpp"

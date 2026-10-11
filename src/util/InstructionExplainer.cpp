@@ -14,7 +14,6 @@
 #include <unordered_map>
 #include <utility>
 
-#include "simrv/Define.hpp"
 #include "simrv/core/CsrTypes.hpp"
 #include "simrv/isa/Common.hpp"
 #include "simrv/pipeline/Decoder.hpp"

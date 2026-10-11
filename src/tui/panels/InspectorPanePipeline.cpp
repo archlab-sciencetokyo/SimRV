@@ -15,7 +15,6 @@
 #include <string>
 #include <vector>
 
-#include "simrv/Define.hpp"
 #include "simrv/core/Cpu.hpp"
 #include "simrv/core/Machine.hpp"
 #include "simrv/debug/SymbolTable.hpp"

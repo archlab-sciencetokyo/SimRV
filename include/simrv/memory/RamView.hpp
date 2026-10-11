@@ -7,14 +7,11 @@
 #include <cstddef>
 #include <span>
 
+#include "simrv/core/BuildConfig.hpp"
 #include "simrv/xlen/Constants.hpp"
 #include "simrv/xlen/Types.hpp"
 
 namespace simrv::memory {
-
-#ifndef SIMRV_DRAM_SIZE_MB
-#define SIMRV_DRAM_SIZE_MB 256
-#endif
 
 inline constexpr Address kDramBaseAddress = static_cast<Address>(0x80000000u);
 inline constexpr Address kDramSize = static_cast<Address>(SIMRV_DRAM_SIZE_MB * 1024u * 1024u);

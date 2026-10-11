@@ -23,7 +23,6 @@
 #include <string>
 #include <vector>
 
-#include "simrv/Define.hpp"
 #include "simrv/xlen/Types.hpp"
 
 namespace simrv::core {

@@ -16,7 +16,7 @@
 #include <utility>
 #include <vector>
 
-#include "simrv/Define.hpp"
+#include "simrv/CompilerHints.hpp"
 #include "simrv/core/FastBatchPolicy.hpp"
 #include "simrv/core/InterruptController.hpp"
 #include "simrv/core/MachineConfig.hpp"

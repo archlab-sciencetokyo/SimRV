@@ -1,6 +1,7 @@
 #include <cstring>
 
 #include "VectorHelpers.hpp"
+#include "simrv/CompilerHints.hpp"
 #include "simrv/core/Machine.hpp"
 #include "simrv/core/Pmp.hpp"
 #include "simrv/debug/BreakpointManager.hpp"

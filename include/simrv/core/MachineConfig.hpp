@@ -13,7 +13,7 @@
 #include <string>
 #include <utility>
 
-#include "simrv/Define.hpp"
+#include "simrv/core/BuildConfig.hpp"
 #include "simrv/core/SoCConfig.hpp"
 #include "simrv/isa/IsaConfig.hpp"
 #include "simrv/memory/MemoryUtil.hpp"

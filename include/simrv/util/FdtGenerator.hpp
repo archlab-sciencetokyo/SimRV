@@ -9,7 +9,6 @@
 #include <string_view>
 #include <vector>
 
-#include "simrv/Define.hpp"
 #include "simrv/core/SoCConfig.hpp"
 #include "simrv/xlen/Types.hpp"
 

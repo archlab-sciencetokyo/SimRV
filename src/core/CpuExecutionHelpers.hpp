@@ -4,6 +4,7 @@
  */
 #pragma once
 
+#include "simrv/CompilerHints.hpp"
 #include "simrv/core/Machine.hpp"
 #include "simrv/isa/Amo.hpp"
 #include "simrv/isa/Base.hpp"

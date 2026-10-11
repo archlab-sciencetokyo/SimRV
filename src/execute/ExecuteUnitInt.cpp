@@ -1,8 +1,9 @@
 #include <algorithm>
 #include <limits>
 
-#include "simrv/Define.hpp"
+#include "simrv/CompilerHints.hpp"
 #include "simrv/execute/ExecuteUnit.hpp"
+#include "simrv/isa/TrapTypes.hpp"
 #include "simrv/xlen/Math.hpp"
 
 namespace simrv::execute {

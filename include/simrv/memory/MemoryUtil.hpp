@@ -13,7 +13,7 @@
 #include <cstring>
 #include <ranges>
 
-#include "simrv/Define.hpp"
+#include "simrv/CompilerHints.hpp"
 #include "simrv/isa/Base.hpp"
 #include "simrv/memory/RamView.hpp"
 #include "simrv/xlen/Constants.hpp"

@@ -6,7 +6,7 @@
 
 #include <expected>
 
-#include "simrv/Define.hpp"
+#include "simrv/isa/TrapTypes.hpp"
 #include "simrv/xlen/Types.hpp"
 
 namespace simrv::core {

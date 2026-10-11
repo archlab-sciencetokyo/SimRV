@@ -2,7 +2,7 @@
 
 #include <array>
 #include <cstdint>
-#include <simrv/Define.hpp>
+#include <simrv/CompilerHints.hpp>
 #include <simrv/isa/Base.hpp>
 #include <simrv/pipeline/CycleTransition.hpp>
 #include <simrv/xlen/Types.hpp>

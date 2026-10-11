@@ -11,7 +11,7 @@
 #include <optional>
 #include <string>
 
-#include "simrv/Define.hpp"
+#include "simrv/CompilerHints.hpp"
 #include "simrv/cache/DCache.hpp"
 #include "simrv/cache/ICache.hpp"
 #include "simrv/cache/TimingCache.hpp"

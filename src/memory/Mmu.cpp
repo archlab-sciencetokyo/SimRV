@@ -6,7 +6,8 @@
 
 #include <utility>
 
-#include "simrv/Define.hpp"
+#include "simrv/CompilerHints.hpp"
+#include "simrv/isa/TrapTypes.hpp"
 #include "simrv/xlen/Constants.hpp"
 #include "simrv/xlen/Helpers.hpp"
 

@@ -8,7 +8,7 @@
 #include <cstdint>
 #include <limits>
 
-#include "simrv/Define.hpp"
+#include "simrv/CompilerHints.hpp"
 #include "simrv/core/CsrTypes.hpp"
 #include "simrv/execute/ExecuteUnit.hpp"
 #include "simrv/xlen/Constants.hpp"

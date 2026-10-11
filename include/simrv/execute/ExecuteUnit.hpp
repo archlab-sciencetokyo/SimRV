@@ -1,7 +1,6 @@
 #pragma once
 #include <expected>
 
-#include "simrv/Define.hpp"
 #include "simrv/isa/Amo.hpp"
 #include "simrv/isa/Base.hpp"
 #include "simrv/isa/Fp.hpp"

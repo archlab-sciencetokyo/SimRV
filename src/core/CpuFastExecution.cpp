@@ -7,6 +7,7 @@
 #include <string_view>
 
 #include "CpuExecutionHelpers.hpp"
+#include "simrv/CompilerHints.hpp"
 #include "simrv/core/Cpu.hpp"
 #include "simrv/core/Machine.hpp"
 #include "simrv/core/PlatformTiming.hpp"

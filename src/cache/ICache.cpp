@@ -7,7 +7,6 @@
 #include <cstring>
 #include <utility>
 
-#include "simrv/Define.hpp"
 
 namespace simrv::cache {
 

@@ -9,7 +9,6 @@
 #include <span>
 #include <vector>
 
-#include "simrv/Define.hpp"
 #include "simrv/device/virtio/VirtioCore.hpp"
 #include "simrv/memory/MmioDevice.hpp"
 

@@ -6,7 +6,6 @@
 
 #include <cstring>
 
-#include "simrv/Define.hpp"
 #include "simrv/memory/MemoryUtil.hpp"
 #include "simrv/xlen/Math.hpp"
 

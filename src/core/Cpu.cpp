@@ -9,6 +9,7 @@
 #include <atomic>
 #include <string_view>
 
+#include "simrv/CompilerHints.hpp"
 #include "simrv/core/Machine.hpp"
 #include "simrv/core/Tracer.hpp"
 #include "simrv/xlen/Constants.hpp"

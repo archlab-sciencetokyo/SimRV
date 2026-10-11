@@ -20,7 +20,6 @@
 #define SIMRV_HAS_STD_MDSPAN 0
 #endif
 
-#include "simrv/Define.hpp"
 #include "simrv/memory/Bus.hpp"
 #include "simrv/xlen/Types.hpp"
 

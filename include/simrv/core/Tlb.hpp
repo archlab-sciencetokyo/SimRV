@@ -7,6 +7,7 @@
 #include <optional>
 #include <utility>
 
+#include "simrv/CompilerHints.hpp"
 #include "simrv/core/TlbTypes.hpp"
 #include "simrv/memory/MemoryUtil.hpp"
 #include "simrv/xlen/Types.hpp"

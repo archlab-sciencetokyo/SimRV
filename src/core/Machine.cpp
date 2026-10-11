@@ -23,6 +23,7 @@
 #include <variant>
 
 #include "MachineRuntime.hpp"
+#include "simrv/CompilerHints.hpp"
 #include "simrv/core/Logger.hpp"
 #include "simrv/core/PlatformTiming.hpp"
 #include "simrv/core/TelemetrySink.hpp"

@@ -7,7 +7,7 @@
 #include <bit>
 #include <cstdint>
 
-#include "simrv/Define.hpp"
+#include "simrv/CompilerHints.hpp"
 #include "simrv/core/Cpu.hpp"
 #include "simrv/core/PmpTypes.hpp"
 #include "simrv/xlen/Types.hpp"

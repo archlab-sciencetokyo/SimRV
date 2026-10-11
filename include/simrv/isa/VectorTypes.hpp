@@ -2,6 +2,9 @@
 
 #include <cstdint>
 
+inline constexpr unsigned kVlenMaxBits = 1024;
+inline constexpr unsigned kVlenMaxBytes = kVlenMaxBits / 8;
+
 enum class Vsew : uint8_t {
     SEW_8 = 0,
     SEW_16 = 1,

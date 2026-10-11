@@ -6,7 +6,6 @@
 #include <cstdint>
 #include <optional>
 
-#include "simrv/Define.hpp"
 #include "simrv/pipeline/OperationInfo.hpp"
 #include "simrv/pipeline/OperationTraits.hpp"
 

@@ -9,7 +9,6 @@
 #include <memory>
 #include <vector>
 
-#include "simrv/Define.hpp"
 #include "simrv/device/AIA.hpp"
 #include "simrv/device/pci/PciDevice.hpp"
 #include "simrv/memory/TileLinkNode.hpp"

@@ -10,7 +10,6 @@
 #include <optional>
 #include <unordered_map>
 
-#include "simrv/Define.hpp"
 #include "simrv/xlen/Types.hpp"
 
 namespace simrv::memory {

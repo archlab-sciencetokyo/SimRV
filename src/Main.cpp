@@ -26,7 +26,6 @@
 #include <utility>
 #include <vector>
 
-#include "simrv/Define.hpp"
 #include "simrv/core/BuildInfo.hpp"
 #include "simrv/core/Cpu.hpp"
 #include "simrv/core/CpuConfigParser.hpp"

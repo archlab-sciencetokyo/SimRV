@@ -6,7 +6,7 @@
 
 #include <array>
 
-#include "simrv/Define.hpp"
+#include "simrv/CompilerHints.hpp"
 #include "simrv/pipeline/DecodedInstruction.hpp"
 #include "simrv/xlen/Types.hpp"
 

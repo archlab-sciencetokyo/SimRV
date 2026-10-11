@@ -14,7 +14,6 @@
 #include <unordered_set>
 #include <vector>
 
-#include "simrv/Define.hpp"
 #include "simrv/cache/BaseCache.hpp"
 #include "simrv/cache/L2Cache.hpp"
 #include "simrv/cache/L3Cache.hpp"
