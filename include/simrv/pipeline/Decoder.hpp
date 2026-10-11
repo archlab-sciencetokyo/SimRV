@@ -10,7 +10,8 @@
 #include "simrv/isa/OperationId.hpp"
 #include "simrv/pipeline/DecodedInstruction.hpp"
 #include "simrv/pipeline/OperationTraits.hpp"
-#include "simrv/xlen/Types.hpp"
+#include "simrv/xlen/IdentifierTypes.hpp"
+#include "simrv/xlen/RegisterTypes.hpp"
 
 namespace simrv::pipeline {
 

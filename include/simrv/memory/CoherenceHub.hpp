@@ -19,7 +19,7 @@
 #include "simrv/cache/L3Cache.hpp"
 #include "simrv/core/SoCConfig.hpp"
 #include "simrv/memory/Bus.hpp"
-#include "simrv/xlen/Types.hpp"
+#include "simrv/xlen/IdentifierTypes.hpp"
 
 namespace simrv::core {
 class Machine;

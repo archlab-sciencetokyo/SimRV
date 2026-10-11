@@ -19,7 +19,7 @@
 #include "simrv/tui/TuiMission.hpp"
 #include "simrv/tui/TuiTheme.hpp"
 #include "simrv/tui/framework/Text.hpp"
-#include "simrv/xlen/Types.hpp"
+#include "simrv/xlen/RegisterTypes.hpp"
 
 namespace simrv::tui {
 

@@ -8,6 +8,8 @@
 #include "simrv/pipeline/BranchPredictor.hpp"
 #include "simrv/pipeline/PipelineContext.hpp"
 #include "simrv/pipeline/Scoreboard.hpp"
+#include "simrv/xlen/AddressTypes.hpp"
+#include "simrv/xlen/RegisterTypes.hpp"
 
 namespace simrv::pipeline {
 

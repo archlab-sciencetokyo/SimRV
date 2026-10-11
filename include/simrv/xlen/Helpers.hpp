@@ -6,7 +6,7 @@
 
 #include <string>
 
-#include "simrv/xlen/Types.hpp"
+#include "simrv/xlen/ScalarTypes.hpp"
 
 namespace simrv::xlen {
 

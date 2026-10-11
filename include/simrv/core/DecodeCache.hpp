@@ -8,7 +8,8 @@
 
 #include "simrv/CompilerHints.hpp"
 #include "simrv/pipeline/DecodedInstruction.hpp"
-#include "simrv/xlen/Types.hpp"
+#include "simrv/xlen/AddressTypes.hpp"
+#include "simrv/xlen/RegisterTypes.hpp"
 
 namespace simrv::core {
 

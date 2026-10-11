@@ -5,7 +5,7 @@
 #include <simrv/CompilerHints.hpp>
 #include <simrv/isa/Base.hpp>
 #include <simrv/pipeline/CycleTransition.hpp>
-#include <simrv/xlen/Types.hpp>
+#include <simrv/xlen/RegisterTypes.hpp>
 #include <vector>
 
 namespace simrv::pipeline {

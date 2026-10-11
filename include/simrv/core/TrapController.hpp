@@ -8,7 +8,7 @@
 #include <string>
 
 #include "simrv/isa/TrapTypes.hpp"
-#include "simrv/xlen/Types.hpp"
+#include "simrv/xlen/ScalarTypes.hpp"
 
 namespace simrv::core {
 

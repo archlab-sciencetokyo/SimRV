@@ -8,7 +8,7 @@
 
 #include "simrv/memory/RamView.hpp"
 #include "simrv/xlen/Constants.hpp"
-#include "simrv/xlen/Types.hpp"
+#include "simrv/xlen/AddressTypes.hpp"
 
 namespace simrv::core {
 struct ArchState;

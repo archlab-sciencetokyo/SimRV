@@ -28,7 +28,9 @@
 #include "simrv/tui/Tui.hpp"
 #include "simrv/xlen/Constants.hpp"
 #include "simrv/xlen/Helpers.hpp"
-#include "simrv/xlen/Types.hpp"
+#include "simrv/xlen/AddressTypes.hpp"
+#include "simrv/xlen/RegisterTypes.hpp"
+#include "simrv/xlen/IdentifierTypes.hpp"
 
 namespace simrv::core {
 

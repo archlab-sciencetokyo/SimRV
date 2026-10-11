@@ -23,7 +23,7 @@
 #include "simrv/tui/panels/InspectorPane.hpp"
 #include "simrv/util/InstructionExplainer.hpp"
 #include "simrv/xlen/Helpers.hpp"
-#include "simrv/xlen/Types.hpp"
+#include "simrv/xlen/RegisterTypes.hpp"
 
 namespace simrv::tui {
 

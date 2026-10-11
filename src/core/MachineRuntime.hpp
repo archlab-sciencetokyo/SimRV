@@ -46,7 +46,7 @@
 #include "simrv/device/pci/VirtioPciSound.hpp"
 #include "simrv/memory/Axi4.hpp"
 #include "simrv/memory/MemorySubsystem.hpp"
-#include "simrv/xlen/Types.hpp"
+#include "simrv/xlen/ScalarTypes.hpp"
 
 namespace simrv::core {
 

@@ -10,7 +10,7 @@
 
 #include "simrv/isa/Base.hpp"
 #include "simrv/isa/OperationId.hpp"
-#include "simrv/xlen/Types.hpp"
+#include "simrv/xlen/ScalarTypes.hpp"
 
 namespace simrv::core {
 

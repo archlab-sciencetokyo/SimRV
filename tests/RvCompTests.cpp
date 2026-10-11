@@ -27,7 +27,7 @@
 #include "simrv/memory/MmioDevice.hpp"
 #include "simrv/pipeline/CpuModel.hpp"
 #include "simrv/util/SoCManifest.hpp"
-#include "simrv/xlen/Types.hpp"
+#include "simrv/xlen/ScalarTypes.hpp"
 
 #define TEST_CHECK(cond)                                                                  \
     do {                                                                                  \

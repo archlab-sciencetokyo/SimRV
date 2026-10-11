@@ -10,7 +10,7 @@
 #include "simrv/CompilerHints.hpp"
 #include "simrv/core/TlbTypes.hpp"
 #include "simrv/memory/MemoryUtil.hpp"
-#include "simrv/xlen/Types.hpp"
+#include "simrv/xlen/ScalarTypes.hpp"
 
 namespace simrv::core {
 

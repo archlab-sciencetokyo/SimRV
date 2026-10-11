@@ -18,7 +18,7 @@
 
 #include "simrv/debug/DebugTypes.hpp"
 #include "simrv/util/UniqueFd.hpp"
-#include "simrv/xlen/Types.hpp"
+#include "simrv/xlen/IdentifierTypes.hpp"
 
 namespace simrv::core {
 class Machine;

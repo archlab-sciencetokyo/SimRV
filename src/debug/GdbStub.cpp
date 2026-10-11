@@ -34,7 +34,8 @@
 #include "simrv/debug/BreakpointManager.hpp"
 #include "simrv/memory/MemorySubsystem.hpp"
 #include "simrv/pipeline/Decoder.hpp"
-#include "simrv/xlen/Types.hpp"
+#include "simrv/xlen/IdentifierTypes.hpp"
+#include "simrv/xlen/RegisterTypes.hpp"
 
 namespace simrv::debug {
 

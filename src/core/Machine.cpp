@@ -40,7 +40,7 @@
 #include "simrv/memory/MemoryUtil.hpp"
 #include "simrv/util/BenchmarkEvent.hpp"
 #include "simrv/util/Sha256.hpp"
-#include "simrv/xlen/Types.hpp"
+#include "simrv/xlen/IdentifierTypes.hpp"
 
 namespace simrv::core {
 

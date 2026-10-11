@@ -48,7 +48,7 @@
 #include "simrv/tui/panels/StatusBar.hpp"
 #include "simrv/tui/panels/TerminalPane.hpp"
 #include "simrv/util/FormatUtil.hpp"
-#include "simrv/xlen/Types.hpp"
+#include "simrv/xlen/ScalarTypes.hpp"
 
 namespace simrv::tui {
 

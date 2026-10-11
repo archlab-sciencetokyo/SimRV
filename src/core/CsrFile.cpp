@@ -12,7 +12,7 @@
 #include "simrv/core/Machine.hpp"
 #include "simrv/core/Tracer.hpp"
 #include "simrv/xlen/Constants.hpp"
-#include "simrv/xlen/Types.hpp"
+#include "simrv/xlen/ScalarTypes.hpp"
 
 #if defined(__x86_64__) || defined(_M_X64)
 #include <immintrin.h>

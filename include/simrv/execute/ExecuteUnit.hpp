@@ -6,6 +6,7 @@
 #include "simrv/isa/Fp.hpp"
 #include "simrv/isa/FpTypes.hpp"
 #include "simrv/isa/OperationId.hpp"
+#include "simrv/xlen/RegisterTypes.hpp"
 
 namespace simrv::core {
 class CPU;

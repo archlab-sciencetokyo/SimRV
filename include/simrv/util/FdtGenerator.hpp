@@ -10,7 +10,7 @@
 #include <vector>
 
 #include "simrv/core/SoCConfig.hpp"
-#include "simrv/xlen/Types.hpp"
+#include "simrv/xlen/ScalarTypes.hpp"
 
 namespace simrv::util {
 

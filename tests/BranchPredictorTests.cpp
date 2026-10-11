@@ -7,7 +7,7 @@
 
 #include "simrv/isa/Base.hpp"
 #include "simrv/pipeline/BranchPredictor.hpp"
-#include "simrv/xlen/Types.hpp"
+#include "simrv/xlen/RegisterTypes.hpp"
 
 #define TEST_CHECK(expr)                                                                     \
     do {                                                                                     \

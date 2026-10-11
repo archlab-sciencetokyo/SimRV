@@ -9,7 +9,7 @@
 #include <string>
 
 #include "simrv/device/pci/PciTypes.hpp"
-#include "simrv/xlen/Types.hpp"
+#include "simrv/xlen/ScalarTypes.hpp"
 
 namespace simrv::device {
 

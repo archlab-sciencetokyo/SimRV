@@ -10,7 +10,7 @@
 #include "simrv/pipeline/OperationInfo.hpp"
 #include "simrv/pipeline/OperationTraits.hpp"
 #include "simrv/pipeline/Scoreboard.hpp"
-#include "simrv/xlen/Types.hpp"
+#include "simrv/xlen/RegisterTypes.hpp"
 
 #define TEST_CHECK(expr)                                                                     \
     do {                                                                                     \

@@ -9,7 +9,7 @@
 
 #include "simrv/device/pci/PciDevice.hpp"
 #include "simrv/device/virtio/VirtioCore.hpp"
-#include "simrv/xlen/Types.hpp"
+#include "simrv/xlen/ScalarTypes.hpp"
 
 namespace simrv::device {
 

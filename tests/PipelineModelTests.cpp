@@ -14,7 +14,7 @@
 #include "simrv/pipeline/PipelineConfig.hpp"
 #include "simrv/pipeline/PipelineSim.hpp"
 #include "simrv/pipeline/RetirementEffects.hpp"
-#include "simrv/xlen/Types.hpp"
+#include "simrv/xlen/RegisterTypes.hpp"
 
 #define TEST_CHECK(expr)                                                                     \
     do {                                                                                     \

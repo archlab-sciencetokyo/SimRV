@@ -53,7 +53,8 @@
 #include "simrv/memory/MmioDevice.hpp"
 #include "simrv/tui/modals/SystemConfigModal.hpp"
 #include "simrv/tui/panels/InspectorPane.hpp"
-#include "simrv/xlen/Types.hpp"
+#include "simrv/xlen/IdentifierTypes.hpp"
+#include "simrv/xlen/RegisterTypes.hpp"
 
 namespace {
 

@@ -43,7 +43,7 @@
 #include "simrv/device/pci/VirtioPciSound.hpp"
 #include "simrv/memory/MemoryUtil.hpp"
 #include "simrv/util/FdtGenerator.hpp"
-#include "simrv/xlen/Types.hpp"
+#include "simrv/xlen/RegisterTypes.hpp"
 
 namespace simrv::core {
 

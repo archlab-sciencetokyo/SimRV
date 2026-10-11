@@ -26,7 +26,7 @@
 #include "simrv/tui/TuiMission.hpp"
 #include "simrv/util/BuildrootImageBundle.hpp"
 #include "simrv/util/FormatUtil.hpp"
-#include "simrv/xlen/Types.hpp"
+#include "simrv/xlen/ScalarTypes.hpp"
 
 namespace simrv::util {
 

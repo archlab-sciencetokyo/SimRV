@@ -8,6 +8,7 @@
 
 #include "simrv/pipeline/OperationInfo.hpp"
 #include "simrv/pipeline/OperationTraits.hpp"
+#include "simrv/xlen/RegisterTypes.hpp"
 
 namespace simrv::pipeline {
 

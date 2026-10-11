@@ -51,7 +51,8 @@
 #include "simrv/util/FormatUtil.hpp"
 #include "simrv/util/Sha256.hpp"
 #include "simrv/xlen/Constants.hpp"
-#include "simrv/xlen/Types.hpp"
+#include "simrv/xlen/IdentifierTypes.hpp"
+#include "simrv/xlen/RegisterTypes.hpp"
 
 namespace simrv::core {
 

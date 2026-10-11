@@ -28,7 +28,8 @@
 #include "simrv/util/FormatUtil.hpp"
 #include "simrv/util/InstructionExplainer.hpp"
 #include "simrv/xlen/Helpers.hpp"
-#include "simrv/xlen/Types.hpp"
+#include "simrv/xlen/AddressTypes.hpp"
+#include "simrv/xlen/RegisterTypes.hpp"
 
 namespace simrv::tui {
 

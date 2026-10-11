@@ -4,6 +4,7 @@
 #include "simrv/isa/OperationId.hpp"
 #include "simrv/pipeline/DecodedInstruction.hpp"
 #include "simrv/pipeline/OperationInfo.hpp"
+#include "simrv/xlen/RegisterTypes.hpp"
 
 namespace simrv::pipeline::operation {
 

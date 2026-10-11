@@ -39,7 +39,7 @@
 
 #include "simrv/core/Cpu.hpp"
 #include "simrv/core/Logger.hpp"
-#include "simrv/xlen/Types.hpp"
+#include "simrv/xlen/RegisterTypes.hpp"
 
 namespace simrv::debug {
 

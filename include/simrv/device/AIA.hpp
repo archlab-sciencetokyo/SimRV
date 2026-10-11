@@ -8,7 +8,7 @@
 #include <cstdint>
 
 #include "simrv/memory/MmioDevice.hpp"
-#include "simrv/xlen/Types.hpp"
+#include "simrv/xlen/IdentifierTypes.hpp"
 
 namespace simrv::core {
 class Machine;

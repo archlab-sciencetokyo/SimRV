@@ -28,7 +28,7 @@
 
 #include "simrv/device/virtio/VirtioTypes.hpp"
 #include "simrv/util/UniqueFd.hpp"
-#include "simrv/xlen/Types.hpp"
+#include "simrv/xlen/ScalarTypes.hpp"
 
 namespace simrv::device::virtio {
 

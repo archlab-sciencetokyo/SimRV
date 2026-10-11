@@ -5,7 +5,7 @@
 #pragma once
 
 #include "simrv/isa/Base.hpp"
-#include "simrv/xlen/Types.hpp"
+#include "simrv/xlen/AddressTypes.hpp"
 
 namespace simrv::core {
 class CPU;

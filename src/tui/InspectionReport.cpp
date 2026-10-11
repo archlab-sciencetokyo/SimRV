@@ -15,7 +15,7 @@
 #include "simrv/core/Machine.hpp"
 #include "simrv/pipeline/Decoder.hpp"
 #include "simrv/pipeline/PipelineConfig.hpp"
-#include "simrv/xlen/Types.hpp"
+#include "simrv/xlen/RegisterTypes.hpp"
 
 namespace simrv::tui {
 namespace {

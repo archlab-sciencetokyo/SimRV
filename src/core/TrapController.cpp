@@ -17,7 +17,7 @@
 #include "simrv/core/Tracer.hpp"
 #include "simrv/isa/Priv.hpp"
 #include "simrv/xlen/Helpers.hpp"
-#include "simrv/xlen/Types.hpp"
+#include "simrv/xlen/ScalarTypes.hpp"
 
 namespace simrv::core {
 

@@ -16,7 +16,7 @@
 #include "simrv/CompilerHints.hpp"
 #include "simrv/isa/Base.hpp"
 #include "simrv/memory/RamView.hpp"
-#include "simrv/xlen/Types.hpp"
+#include "simrv/xlen/AddressTypes.hpp"
 
 namespace simrv::memory {
 

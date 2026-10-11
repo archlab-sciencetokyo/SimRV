@@ -10,7 +10,7 @@
 #include "simrv/CompilerHints.hpp"
 #include "simrv/core/Cpu.hpp"
 #include "simrv/core/PmpTypes.hpp"
-#include "simrv/xlen/Types.hpp"
+#include "simrv/xlen/AddressTypes.hpp"
 
 namespace simrv::core {
 

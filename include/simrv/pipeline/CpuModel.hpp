@@ -17,7 +17,7 @@
 
 #include "simrv/isa/Base.hpp"
 #include "simrv/pipeline/PipelineSim.hpp"
-#include "simrv/xlen/Types.hpp"
+#include "simrv/xlen/ScalarTypes.hpp"
 
 namespace simrv::pipeline {
 

@@ -8,7 +8,7 @@
 #include <simrv/CompilerHints.hpp>
 
 #include "simrv/isa/VectorTypes.hpp"
-#include "simrv/xlen/Types.hpp"
+#include "simrv/xlen/RegisterTypes.hpp"
 
 namespace simrv::core {
 

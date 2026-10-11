@@ -7,7 +7,7 @@
 #include <cstdint>
 
 #include "simrv/tui/framework/Layout.hpp"
-#include "simrv/xlen/Types.hpp"
+#include "simrv/xlen/IdentifierTypes.hpp"
 
 namespace simrv::tui {
 

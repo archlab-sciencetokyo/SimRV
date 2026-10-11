@@ -12,7 +12,7 @@
 #include "simrv/device/AIA.hpp"
 #include "simrv/device/pci/PciDevice.hpp"
 #include "simrv/memory/TileLinkNode.hpp"
-#include "simrv/xlen/Types.hpp"
+#include "simrv/xlen/ScalarTypes.hpp"
 
 namespace simrv::core {
 class Machine;

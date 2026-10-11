@@ -17,7 +17,7 @@
 #include "simrv/core/Machine.hpp"
 #include "simrv/core/Tracer.hpp"
 #include "simrv/memory/MemoryUtil.hpp"
-#include "simrv/xlen/Types.hpp"
+#include "simrv/xlen/IdentifierTypes.hpp"
 
 namespace simrv::memory {
 

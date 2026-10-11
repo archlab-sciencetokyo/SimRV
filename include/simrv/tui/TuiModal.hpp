@@ -16,7 +16,7 @@
 #include "simrv/tui/TuiTypes.hpp"
 #include "simrv/tui/framework/Types.hpp"
 #include "simrv/xlen/Helpers.hpp"
-#include "simrv/xlen/Types.hpp"
+#include "simrv/xlen/ScalarTypes.hpp"
 
 namespace simrv::core {
 class Machine;

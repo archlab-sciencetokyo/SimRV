@@ -4,7 +4,7 @@
  */
 #pragma once
 
-#include "simrv/xlen/Types.hpp"
+#include "simrv/xlen/IdentifierTypes.hpp"
 
 namespace simrv::core {
 

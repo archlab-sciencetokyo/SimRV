@@ -8,7 +8,8 @@
 #include <string_view>
 
 #include "simrv/memory/TileLinkTypes.hpp"
-#include "simrv/xlen/Types.hpp"
+#include "simrv/xlen/AddressTypes.hpp"
+#include "simrv/xlen/IdentifierTypes.hpp"
 
 namespace simrv::memory {
 

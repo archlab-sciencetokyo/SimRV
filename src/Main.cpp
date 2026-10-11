@@ -40,7 +40,7 @@
 #include "simrv/util/FormatUtil.hpp"
 #include "simrv/util/InstructionExplainer.hpp"
 #include "simrv/util/SoCManifest.hpp"
-#include "simrv/xlen/Types.hpp"
+#include "simrv/xlen/ScalarTypes.hpp"
 
 using namespace simrv::util;
 

@@ -20,7 +20,7 @@
 #include "simrv/tui/panels/InspectorPane.hpp"
 #include "simrv/util/FormatUtil.hpp"
 #include "simrv/xlen/Helpers.hpp"
-#include "simrv/xlen/Types.hpp"
+#include "simrv/xlen/ScalarTypes.hpp"
 
 namespace simrv::tui {
 

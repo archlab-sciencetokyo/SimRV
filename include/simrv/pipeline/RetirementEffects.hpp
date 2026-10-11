@@ -2,6 +2,7 @@
 
 #include "simrv/CompilerHints.hpp"
 #include "simrv/pipeline/PipelineContext.hpp"
+#include "simrv/xlen/RegisterTypes.hpp"
 
 namespace simrv::pipeline {
 

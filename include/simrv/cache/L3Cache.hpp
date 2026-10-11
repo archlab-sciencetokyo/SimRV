@@ -5,7 +5,7 @@
 #pragma once
 
 #include "simrv/cache/BaseCache.hpp"
-#include "simrv/xlen/Types.hpp"
+#include "simrv/xlen/ScalarTypes.hpp"
 
 namespace simrv::cache {
 

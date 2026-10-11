@@ -15,7 +15,8 @@
 #include <vector>
 
 #include "simrv/debug/DebugTypes.hpp"
-#include "simrv/xlen/Types.hpp"
+#include "simrv/xlen/IdentifierTypes.hpp"
+#include "simrv/xlen/RegisterTypes.hpp"
 
 namespace simrv::core {
 struct ArchState;

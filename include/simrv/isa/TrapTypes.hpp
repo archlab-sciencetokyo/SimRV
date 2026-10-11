@@ -5,7 +5,7 @@
 #include <cstdint>
 #include <utility>
 
-#include "simrv/xlen/Types.hpp"
+#include "simrv/xlen/ScalarTypes.hpp"
 
 /// Flag bit distinguishing interrupts from synchronous exceptions.
 enum class TrapFlag : simrv::xlen::TrapCause {

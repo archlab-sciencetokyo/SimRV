@@ -23,7 +23,7 @@
 #include <string>
 #include <vector>
 
-#include "simrv/xlen/Types.hpp"
+#include "simrv/xlen/ScalarTypes.hpp"
 
 namespace simrv::core {
 struct ArchState;

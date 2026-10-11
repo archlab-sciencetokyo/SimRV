@@ -33,7 +33,7 @@
 #include "simrv/tui/VirtualTerminal.hpp"
 #include "simrv/tui/framework/Subpanel.hpp"
 #include "simrv/util/UniqueFd.hpp"
-#include "simrv/xlen/Types.hpp"
+#include "simrv/xlen/ScalarTypes.hpp"
 
 namespace simrv::core {
 class Machine;

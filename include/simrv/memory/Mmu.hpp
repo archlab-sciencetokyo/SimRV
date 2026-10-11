@@ -11,7 +11,7 @@
 
 #include "simrv/memory/PageTableWalker.hpp"
 #include "simrv/memory/RamView.hpp"
-#include "simrv/xlen/Types.hpp"
+#include "simrv/xlen/AddressTypes.hpp"
 
 namespace simrv::core {
 struct ArchState;

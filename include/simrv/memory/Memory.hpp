@@ -4,7 +4,9 @@
  */
 #pragma once
 
-#include "simrv/XLen.hpp"
+#include <cstddef>
+
+#include "simrv/xlen/ScalarTypes.hpp"
 #include "simrv/memory/MemoryUtil.hpp"
 
 namespace simrv::memory {

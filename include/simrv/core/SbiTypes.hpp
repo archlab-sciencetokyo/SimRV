@@ -3,7 +3,7 @@
 #include <cstdint>
 #include <utility>
 
-#include "simrv/xlen/Types.hpp"
+#include "simrv/xlen/ScalarTypes.hpp"
 
 // SBI domain types
 enum class SbiError : int64_t {

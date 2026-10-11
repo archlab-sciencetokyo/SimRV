@@ -24,7 +24,8 @@
 #include "simrv/memory/MemoryUtil.hpp"
 #include "simrv/pipeline/OperationTraits.hpp"
 #include "simrv/xlen/Constants.hpp"
-#include "simrv/xlen/Types.hpp"
+#include "simrv/xlen/AddressTypes.hpp"
+#include "simrv/xlen/IdentifierTypes.hpp"
 
 namespace simrv::core {
 using isa::OperationId;

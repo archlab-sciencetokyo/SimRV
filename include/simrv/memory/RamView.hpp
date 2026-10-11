@@ -8,7 +8,7 @@
 #include <span>
 
 #include "simrv/core/BuildConfig.hpp"
-#include "simrv/xlen/Types.hpp"
+#include "simrv/xlen/AddressTypes.hpp"
 
 namespace simrv::memory {
 

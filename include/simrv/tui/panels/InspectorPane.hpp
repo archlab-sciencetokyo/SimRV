@@ -18,7 +18,7 @@
 #include "simrv/tui/TuiTypes.hpp"
 #include "simrv/tui/TuiWidget.hpp"
 #include "simrv/tui/framework/ScrollView.hpp"
-#include "simrv/xlen/Types.hpp"
+#include "simrv/xlen/ScalarTypes.hpp"
 
 namespace simrv::core {
 class Machine;
