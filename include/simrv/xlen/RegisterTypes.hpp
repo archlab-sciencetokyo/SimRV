@@ -6,6 +6,7 @@
 
 #include <concepts>
 #include <cstdint>
+#include <utility>
 
 namespace simrv::xlen {
 
@@ -114,6 +115,29 @@ enum class VecRegId : uint8_t {
     V30 = 30,
     V31 = 31
 };
+
+/// Explicitly reinterpret an instruction's five-bit register index as an FPR index.
+constexpr auto to_fp_reg_id(RegId id) noexcept -> FpRegId {
+    return static_cast<FpRegId>(std::to_underlying(id));
+}
+
+/// Explicitly reinterpret an instruction's five-bit register index as a vector register index.
+constexpr auto to_vec_reg_id(RegId id) noexcept -> VecRegId {
+    return static_cast<VecRegId>(std::to_underlying(id));
+}
+
+constexpr auto to_fp_reg_id(FpRegId id) noexcept -> FpRegId { return id; }
+constexpr auto to_vec_reg_id(VecRegId id) noexcept -> VecRegId { return id; }
+
+template <std::integral Index>
+constexpr auto to_fp_reg_id(Index index) noexcept -> FpRegId {
+    return static_cast<FpRegId>(index);
+}
+
+template <std::integral Index>
+constexpr auto to_vec_reg_id(Index index) noexcept -> VecRegId {
+    return static_cast<VecRegId>(index);
+}
 
 template <typename T>
 concept RegisterIdentifier =

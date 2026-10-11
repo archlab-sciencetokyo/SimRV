@@ -791,8 +791,8 @@ void CPU::execute_cached_op_fast(Machine& machine, CachedOp& op,
                     }
                 }
             }
-            state_.regs.write_fp(
-                op.rd,
+            state_.regs.write_fp(simrv::xlen::to_fp_reg_id(
+                op.rd),
                 (op.funct3 == isa::Funct3::Flw)
                     ? (static_cast<simrv::xlen::FloatingRegister>(simrv::xlen::kF32BoxerBits) |
                        (mem_rdata & 0xFFFFFFFFULL))
@@ -805,7 +805,7 @@ void CPU::execute_cached_op_fast(Machine& machine, CachedOp& op,
         case isa::FSW:
         case isa::FSD: {
             simrv::xlen::Address const mem_addr = rrs1 + op.imm;
-            simrv::xlen::FloatingRegister const fp_data = state_.regs.read_fp(op.rs2);
+            simrv::xlen::FloatingRegister const fp_data = state_.regs.read_fp(simrv::xlen::to_fp_reg_id(op.rs2));
             const unsigned size_bytes = op.mem_size;
             const simrv::xlen::Address align_mask = op.align_mask();
             const bool fast_width_supported =
@@ -902,7 +902,7 @@ void CPU::execute_cached_op_fast(Machine& machine, CachedOp& op,
                 op.opcode(), fmt, std::to_underlying(op.rs1), std::to_underlying(op.rs2), rs3,
                 std::to_underlying(op.funct3), state_.regs.fp_data_ptr(), state_.fcsr);
             if (res.fp_wb_enable) {
-                state_.regs.write_fp(op.rd, res.fp_wb_data);
+                state_.regs.write_fp(simrv::xlen::to_fp_reg_id(op.rd), res.fp_wb_data);
                 state_.mstatus |= MstatusBit::Fs;
             }
             if (state_.fcsr != old_fcsr) state_.mstatus |= MstatusBit::Fs;
@@ -928,7 +928,7 @@ void CPU::execute_cached_op_fast(Machine& machine, CachedOp& op,
                 op.funct7(), op.funct3, std::to_underlying(op.rs1), std::to_underlying(op.rs2),
                 rrs1, state_.regs.fp_data_ptr(), state_.fcsr);
             if (res.fp_wb_enable) {
-                state_.regs.write_fp(op.rd, res.fp_wb_data);
+                state_.regs.write_fp(simrv::xlen::to_fp_reg_id(op.rd), res.fp_wb_data);
                 state_.mstatus |= MstatusBit::Fs;
             }
             if (state_.fcsr != old_fcsr) state_.mstatus |= MstatusBit::Fs;

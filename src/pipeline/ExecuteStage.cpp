@@ -102,7 +102,7 @@ void CPU::execute_core(Machine& machine) {
         case Opcode::StoreFp:
             ctx.tkn = false;
             ctx.mem_addr = ctx.rrs1 + ctx.imm;
-            ctx.fp_mem_wdata = state_.regs.read_fp(ctx.rs2);
+            ctx.fp_mem_wdata = state_.regs.read_fp(simrv::xlen::to_fp_reg_id(ctx.rs2));
             break;
         case Opcode::MiscMem:
             ctx.tkn = false;

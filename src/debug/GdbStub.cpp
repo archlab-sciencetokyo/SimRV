@@ -440,7 +440,7 @@ static auto read_gdb_reg(std::size_t idx, const simrv::core::CPU& cpu)
     }
     if (idx >= 33 && idx < 65) {
         // FP registers: 64-bit, little-endian
-        return fp_to_hex(state.regs.read_fp(static_cast<simrv::xlen::RegId>(idx - 33)));
+        return fp_to_hex(state.regs.read_fp(simrv::xlen::to_fp_reg_id(static_cast<simrv::xlen::RegId>(idx - 33))));
     }
     if (idx >= kFirstCsrReg && idx < kFirstCsrReg + kGdbCsrs.size()) {
         const auto value = cpu.read_csr(simrv::core::csr_num(kGdbCsrs[idx - kFirstCsrReg].csr));
@@ -458,7 +458,7 @@ static void write_gdb_reg(std::size_t idx, const std::string& hex, std::size_t h
         state.pc = static_cast<simrv::xlen::Address>(GdbStub::hex_to_reg(hex, hex_off));
     } else if (idx >= 33 && idx < 65) {
         const uint64_t val = hex_to_fp(hex, hex_off);
-        state.regs.write_fp(static_cast<simrv::xlen::RegId>(idx - 33), val);
+        state.regs.write_fp(simrv::xlen::to_fp_reg_id(static_cast<simrv::xlen::RegId>(idx - 33)), val);
     }
 }
 
@@ -479,7 +479,7 @@ auto GdbStub::cmd_read_registers(simrv::core::Machine& machine) -> std::string {
     resp += reg_to_hex(state.pc);
     // f0-f31 (8 bytes each, little-endian)
     for (std::size_t i = 0; i < 32; ++i) {
-        resp += fp_to_hex(state.regs.read_fp(static_cast<simrv::xlen::RegId>(i)));
+        resp += fp_to_hex(state.regs.read_fp(simrv::xlen::to_fp_reg_id(static_cast<simrv::xlen::RegId>(i))));
     }
     for (const auto& csr : kGdbCsrs) {
         const auto value = target_cpu.read_csr(simrv::core::csr_num(csr.csr));

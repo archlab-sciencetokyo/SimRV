@@ -75,9 +75,10 @@ constexpr auto trap_is_interrupt(simrv::xlen::TrapCause cause) -> bool {
 
 /// Select the highest-priority pending standard interrupt per Privileged ISA 1.13 section 2.1.1.9.
 constexpr auto select_highest_priority_interrupt(simrv::xlen::Word mask) -> simrv::xlen::Word {
-    // Fixed priority: MEI -> MSI -> MTI -> SEI -> SSI -> STI. Platform interrupt
+    // Fixed priority: MEI -> MSI -> MTI -> SEI -> SSI -> STI -> LCOFI. Platform interrupt
     // bits (16+) fall back to descending cause number, SimRV's documented custom ordering.
-    constexpr std::array<simrv::xlen::Word, 6> kPriorityOrder = {11u, 3u, 7u, 9u, 1u, 5u};
+    constexpr std::array<simrv::xlen::Word, 7> kPriorityOrder = {11u, 3u, 7u, 9u, 1u, 5u,
+                                                                 13u};
     for (simrv::xlen::Word const irq : kPriorityOrder) {
         if ((mask & (1u << irq)) != 0u) {
             return irq;

@@ -757,7 +757,7 @@ void Tracer::capture_register_write_before(CPU& cpu, pipeline::PipelineContext& 
     bytes.clear();
     bytes.reserve(32 * (trace_vlen_ / 8));
     for (unsigned index = 0; index < 32; ++index) {
-        const auto& reg = cpu.state().regs.read_vector(static_cast<simrv::xlen::RegId>(index));
+        const auto& reg = cpu.state().regs.read_vector(simrv::xlen::to_vec_reg_id(static_cast<simrv::xlen::RegId>(index)));
         bytes.insert(bytes.end(), reg.u8.begin(),
                      reg.u8.begin() + static_cast<std::ptrdiff_t>(trace_vlen_ / 8));
     }
@@ -1232,7 +1232,7 @@ void Tracer::log_architecture_retirement(const CPU& cpu,
     ConditionalTracerLock lock(mutex_, machine_.is_smp_enabled());
     if (emit_registers && retiring_context.traits.writes_fp) {
         const auto index = static_cast<unsigned>(retiring_context.rd);
-        const auto after = state.regs.read_fp(retiring_context.rd);
+        const auto after = state.regs.read_fp(simrv::xlen::to_fp_reg_id(retiring_context.rd));
         std::println(fp_registers_,
                      "{{\"schema_version\":1,\"event\":\"register_write\","
                      "\"hart\":{},\"cycle\":{},\"pc\":\"0x{:x}\","
@@ -1267,7 +1267,7 @@ void Tracer::log_architecture_retirement(const CPU& cpu,
         };
         const auto width = trace_vlen_ / 8;
         for (unsigned index = 0; index < 32; ++index) {
-            const auto& after = state.regs.read_vector(static_cast<simrv::xlen::RegId>(index));
+            const auto& after = state.regs.read_vector(simrv::xlen::to_vec_reg_id(static_cast<simrv::xlen::RegId>(index)));
             const auto after_bits = std::span<const uint8_t>(after.u8.data(), width);
             const auto start = static_cast<size_t>(index) * width;
             const auto before_bits = start + width <= before.size()
@@ -1611,7 +1611,7 @@ void Tracer::dump_init_artifacts() {
     }
     for (uint8_t i = 0; i < 32; ++i) {
         std::println(out, "p.fregs.mem[{}]={}'h{:016x};", i, 64,
-                     cpu->state().regs.read_fp(static_cast<simrv::xlen::RegId>(i)));
+                     cpu->state().regs.read_fp(simrv::xlen::to_fp_reg_id(static_cast<simrv::xlen::RegId>(i))));
     }
     write_xlen("p.fcsr        ", cpu->state().fcsr);
     write_xlen("p.mstatus     ", cpu->state().mstatus);

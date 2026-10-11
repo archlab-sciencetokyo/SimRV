@@ -905,7 +905,7 @@ void test_vector_mask_and_fault_only_first_memory() {
     ram.data()[1] = simrv::xlen::Byte{0x03};
     simrv::execute::ExecuteUnit::execute_vector(
         cpu, machine.memory(), simrv::isa::OperationId::VLM_V, memory_ir(vd, base_reg));
-    expect(regs.read_vector(vd).u8[0] == 0xA5 && regs.read_vector(vd).u8[1] == 0x03,
+    expect(regs.read_vector(simrv::xlen::to_vec_reg_id(vd)).u8[0] == 0xA5 && regs.read_vector(simrv::xlen::to_vec_reg_id(vd)).u8[1] == 0x03,
            "vlm.v transfers ceil(vl/8) packed mask bytes");
 
     regs.write(base_reg, ram.base() + 2);
@@ -932,13 +932,13 @@ void test_vector_mask_and_fault_only_first_memory() {
     simrv::execute::ExecuteUnit::execute_vector(cpu, machine.memory(),
                                                 simrv::isa::OperationId::VLSE8_V,
                                                 segment_ir(vd, base_reg, stride_reg));
-    expect(regs.read_vector(vd).u8[0] == 0x10 && regs.read_vector(vd).u8[1] == 0x20 &&
-               regs.read_vector(static_cast<simrv::xlen::RegId>(5)).u8[0] == 0x11 &&
-               regs.read_vector(static_cast<simrv::xlen::RegId>(5)).u8[1] == 0x21,
+    expect(regs.read_vector(simrv::xlen::to_vec_reg_id(vd)).u8[0] == 0x10 && regs.read_vector(simrv::xlen::to_vec_reg_id(vd)).u8[1] == 0x20 &&
+               regs.read_vector(simrv::xlen::to_vec_reg_id(static_cast<simrv::xlen::RegId>(5))).u8[0] == 0x11 &&
+               regs.read_vector(simrv::xlen::to_vec_reg_id(static_cast<simrv::xlen::RegId>(5))).u8[1] == 0x21,
            "two-field strided segment loads populate consecutive vector registers");
 
-    regs.read_vector(index_reg).u8[0] = 0;
-    regs.read_vector(index_reg).u8[1] = 4;
+    regs.read_vector(simrv::xlen::to_vec_reg_id(index_reg)).u8[0] = 0;
+    regs.read_vector(simrv::xlen::to_vec_reg_id(index_reg)).u8[1] = 4;
     backing[16] = simrv::xlen::Byte{0x30};
     backing[17] = simrv::xlen::Byte{0x31};
     backing[20] = simrv::xlen::Byte{0x40};
@@ -946,9 +946,9 @@ void test_vector_mask_and_fault_only_first_memory() {
     simrv::execute::ExecuteUnit::execute_vector(cpu, machine.memory(),
                                                 simrv::isa::OperationId::VLUXEI8_V,
                                                 segment_ir(vd, base_reg, index_reg));
-    expect(regs.read_vector(vd).u8[0] == 0x30 && regs.read_vector(vd).u8[1] == 0x40 &&
-               regs.read_vector(static_cast<simrv::xlen::RegId>(5)).u8[0] == 0x31 &&
-               regs.read_vector(static_cast<simrv::xlen::RegId>(5)).u8[1] == 0x41,
+    expect(regs.read_vector(simrv::xlen::to_vec_reg_id(vd)).u8[0] == 0x30 && regs.read_vector(simrv::xlen::to_vec_reg_id(vd)).u8[1] == 0x40 &&
+               regs.read_vector(simrv::xlen::to_vec_reg_id(static_cast<simrv::xlen::RegId>(5))).u8[0] == 0x31 &&
+               regs.read_vector(simrv::xlen::to_vec_reg_id(static_cast<simrv::xlen::RegId>(5))).u8[1] == 0x41,
            "two-field indexed segment loads populate consecutive vector registers");
 
     cpu.state().vtype = 1;  // SEW=8, LMUL=2: each segment field occupies two registers.
@@ -959,9 +959,9 @@ void test_vector_mask_and_fault_only_first_memory() {
     simrv::execute::ExecuteUnit::execute_vector(cpu, machine.memory(),
                                                 simrv::isa::OperationId::VLSE8_V,
                                                 segment_ir(vd, base_reg, stride_reg));
-    expect(regs.read_vector(vd).u8[0] == 0x50 && regs.read_vector(vd).u8[1] == 0x60 &&
-               regs.read_vector(static_cast<simrv::xlen::RegId>(6)).u8[0] == 0x51 &&
-               regs.read_vector(static_cast<simrv::xlen::RegId>(6)).u8[1] == 0x61,
+    expect(regs.read_vector(simrv::xlen::to_vec_reg_id(vd)).u8[0] == 0x50 && regs.read_vector(simrv::xlen::to_vec_reg_id(vd)).u8[1] == 0x60 &&
+               regs.read_vector(simrv::xlen::to_vec_reg_id(static_cast<simrv::xlen::RegId>(6))).u8[0] == 0x51 &&
+               regs.read_vector(simrv::xlen::to_vec_reg_id(static_cast<simrv::xlen::RegId>(6))).u8[1] == 0x61,
            "segment fields advance by EMUL registers when LMUL is greater than one");
 
     const auto expect_illegal_memory = [&](simrv::isa::OperationId operation,
@@ -1001,25 +1001,25 @@ void test_vector_mask_and_fault_only_first_memory() {
                           "whole-register stores reject vstart at their byte effective length");
     cpu.active_context().pending_exception.reset();
     cpu.state().vstart = cpu.state().regs.vlen / 64U - 1U;
-    regs.read_vector(vd).u8[0] = 0xD5;
-    regs.read_vector(vd).u8[24] = 0;
+    regs.read_vector(simrv::xlen::to_vec_reg_id(vd)).u8[0] = 0xD5;
+    regs.read_vector(simrv::xlen::to_vec_reg_id(vd)).u8[24] = 0;
     backing[40] = simrv::xlen::Byte{0xA7};
     simrv::execute::ExecuteUnit::execute_vector(
         cpu, machine.memory(), simrv::isa::OperationId::VL1RE64_V, memory_ir(vd, base_reg));
     expect(!cpu.active_context().pending_exception.has_value() && cpu.state().vstart == 0 &&
-               regs.read_vector(vd).u8[0] == 0xD5 && regs.read_vector(vd).u8[24] == 0xA7,
+               regs.read_vector(simrv::xlen::to_vec_reg_id(vd)).u8[0] == 0xD5 && regs.read_vector(simrv::xlen::to_vec_reg_id(vd)).u8[24] == 0xA7,
            "whole-register loads resume at the final EEW element without changing prestart bytes");
     cpu.state().vstart = 1;
     regs.write(base_reg, ram.base());
-    regs.read_vector(vd).u8[0] = 0xD5;
-    regs.read_vector(vd).u8[1] = 0xD6;
+    regs.read_vector(simrv::xlen::to_vec_reg_id(vd)).u8[0] = 0xD5;
+    regs.read_vector(simrv::xlen::to_vec_reg_id(vd)).u8[1] = 0xD6;
     ram.data()[2] = simrv::xlen::Byte{0x31};
     ram.data()[3] = simrv::xlen::Byte{0x42};
     simrv::execute::ExecuteUnit::execute_vector(
         cpu, machine.memory(), simrv::isa::OperationId::VL1RE16_V, memory_ir(vd, base_reg));
     expect(!cpu.active_context().pending_exception.has_value() && cpu.state().vstart == 0 &&
-               regs.read_vector(vd).u8[0] == 0xD5 && regs.read_vector(vd).u8[1] == 0xD6 &&
-               regs.read_vector(vd).u8[2] == 0x31 && regs.read_vector(vd).u8[3] == 0x42,
+               regs.read_vector(simrv::xlen::to_vec_reg_id(vd)).u8[0] == 0xD5 && regs.read_vector(simrv::xlen::to_vec_reg_id(vd)).u8[1] == 0xD6 &&
+               regs.read_vector(simrv::xlen::to_vec_reg_id(vd)).u8[2] == 0x31 && regs.read_vector(simrv::xlen::to_vec_reg_id(vd)).u8[3] == 0x42,
            "whole-register EEW=16 loads resume at a halfword boundary");
     cpu.state().vtype = 3U << 3U;  // e64, m1: whole EEW=8 load has a larger effective length.
     cpu.state().vstart = cpu.state().regs.vlen / 64U;
@@ -1035,7 +1035,7 @@ void test_vector_mask_and_fault_only_first_memory() {
     simrv::execute::ExecuteUnit::execute_vector(
         cpu, machine.memory(), simrv::isa::OperationId::VL1RE8_V, memory_ir(vd, base_reg));
     expect(
-        !cpu.active_context().pending_exception.has_value() && regs.read_vector(vd).u8[0] == 0xC7,
+        !cpu.active_context().pending_exception.has_value() && regs.read_vector(simrv::xlen::to_vec_reg_id(vd)).u8[0] == 0xC7,
         "whole-register loads work with vill set and vl zero");
     regs.write(base_reg, ram.base() + 64);
     simrv::execute::ExecuteUnit::execute_vector(
@@ -1065,7 +1065,7 @@ void test_vector_mask_and_fault_only_first_memory() {
     simrv::execute::ExecuteUnit::execute_vector(
         cpu, machine.memory(), simrv::isa::OperationId::VLE8FF_V, memory_ir(vd, base_reg));
     expect(!cpu.active_context().pending_exception.has_value() && cpu.state().vl == 2 &&
-               regs.read_vector(vd).u8[0] == 0x11 && regs.read_vector(vd).u8[1] == 0x22,
+               regs.read_vector(simrv::xlen::to_vec_reg_id(vd)).u8[0] == 0x11 && regs.read_vector(simrv::xlen::to_vec_reg_id(vd)).u8[1] == 0x22,
            "vle8ff.v suppresses a noninitial fault and trims vl to the loaded prefix");
 
     if constexpr (!simrv::xlen::kIsXLen64) {
@@ -1119,13 +1119,13 @@ void test_vector_bulk_memory_operations() {
     simrv::execute::ExecuteUnit::execute_vector(
         cpu, machine.memory(), simrv::isa::OperationId::VLE8_V, memory_ir(vd, base_reg));
     for (uint32_t i = 0; i < 16; ++i) {
-        expect(regs.read_vector(vd).u8[i] == static_cast<uint8_t>(0xA0 + i),
+        expect(regs.read_vector(simrv::xlen::to_vec_reg_id(vd)).u8[i] == static_cast<uint8_t>(0xA0 + i),
                "bulk vle8 transfers elements accurately");
     }
 
     // Modify vector register vd and write back via bulk vse8
     for (uint32_t i = 0; i < 16; ++i) {
-        regs.read_vector(vd).u8[i] = static_cast<uint8_t>(0x50 + i);
+        regs.read_vector(simrv::xlen::to_vec_reg_id(vd)).u8[i] = static_cast<uint8_t>(0x50 + i);
     }
     regs.write(base_reg, ram.base() + 0x200);
     simrv::execute::ExecuteUnit::execute_vector(
@@ -1143,7 +1143,7 @@ void test_vector_bulk_memory_operations() {
     simrv::execute::ExecuteUnit::execute_vector(
         cpu, machine.memory(), simrv::isa::OperationId::VLE8_V, memory_ir(vs, base_reg));
     for (uint32_t i = 0; i < 16; ++i) {
-        expect(regs.read_vector(vs).u8[i] == static_cast<uint8_t>(0x70 + i),
+        expect(regs.read_vector(simrv::xlen::to_vec_reg_id(vs)).u8[i] == static_cast<uint8_t>(0x70 + i),
                "page-crossing vle8 falls back seamlessly and transfers correctly");
     }
 
@@ -1155,7 +1155,7 @@ void test_vector_bulk_memory_operations() {
     simrv::execute::ExecuteUnit::execute_vector(
         cpu, machine.memory(), simrv::isa::OperationId::VL1RE8_V, memory_ir(vd, base_reg));
     for (uint32_t i = 0; i < regs.vlen_bytes(); ++i) {
-        expect(regs.read_vector(vd).u8[i] == static_cast<uint8_t>(0x10 + (i & 0x7F)),
+        expect(regs.read_vector(simrv::xlen::to_vec_reg_id(vd)).u8[i] == static_cast<uint8_t>(0x10 + (i & 0x7F)),
                "bulk vl1re8 accurately transfers whole register");
     }
 }
@@ -1178,95 +1178,95 @@ void test_vector_integer_remainder_and_reverse_subtract() {
     cpu.state().vl = 2;
     cpu.state().vtype = 0;
     regs.write(vs1, 10);
-    regs.read_vector(vs2).u8[0] = 3;
-    regs.read_vector(vs2).u8[1] = 12;
+    regs.read_vector(simrv::xlen::to_vec_reg_id(vs2)).u8[0] = 3;
+    regs.read_vector(simrv::xlen::to_vec_reg_id(vs2)).u8[1] = 12;
     simrv::execute::ExecuteUnit::execute_vector(
         cpu, machine.memory(), simrv::isa::OperationId::VRSUB_VX, vector_ir(vd, vs1, vs2));
-    expect(regs.read_vector(vd).u8[0] == 7 && regs.read_vector(vd).u8[1] == 254,
+    expect(regs.read_vector(simrv::xlen::to_vec_reg_id(vd)).u8[0] == 7 && regs.read_vector(simrv::xlen::to_vec_reg_id(vd)).u8[1] == 254,
            "vrsub.vx computes scalar minus vector elements with SEW wrapping");
 
-    regs.read_vector(vs2).u8[0] = 0xF9;  // -7
-    regs.read_vector(vs2).u8[1] = 0x80;  // signed minimum
-    regs.read_vector(vs2).u8[2] = 9;
-    regs.read_vector(vs1).u8[0] = 3;
-    regs.read_vector(vs1).u8[1] = 0xFF;  // -1
-    regs.read_vector(vs1).u8[2] = 0;
+    regs.read_vector(simrv::xlen::to_vec_reg_id(vs2)).u8[0] = 0xF9;  // -7
+    regs.read_vector(simrv::xlen::to_vec_reg_id(vs2)).u8[1] = 0x80;  // signed minimum
+    regs.read_vector(simrv::xlen::to_vec_reg_id(vs2)).u8[2] = 9;
+    regs.read_vector(simrv::xlen::to_vec_reg_id(vs1)).u8[0] = 3;
+    regs.read_vector(simrv::xlen::to_vec_reg_id(vs1)).u8[1] = 0xFF;  // -1
+    regs.read_vector(simrv::xlen::to_vec_reg_id(vs1)).u8[2] = 0;
     cpu.state().vl = 3;
     simrv::execute::ExecuteUnit::execute_vector(
         cpu, machine.memory(), simrv::isa::OperationId::VREM_VV, vector_ir(vd, vs1, vs2));
-    expect(regs.read_vector(vd).u8[0] == 0xFF,
+    expect(regs.read_vector(simrv::xlen::to_vec_reg_id(vd)).u8[0] == 0xFF,
            "vrem preserves the dividend sign for a negative remainder");
-    expect(regs.read_vector(vd).u8[1] == 0,
+    expect(regs.read_vector(simrv::xlen::to_vec_reg_id(vd)).u8[1] == 0,
            "vrem returns zero for signed minimum divided by negative one");
-    expect(regs.read_vector(vd).u8[2] == 9, "vrem returns the dividend on division by zero");
+    expect(regs.read_vector(simrv::xlen::to_vec_reg_id(vd)).u8[2] == 9, "vrem returns the dividend on division by zero");
 
-    regs.read_vector(vs2).u8[0] = 250;
-    regs.read_vector(vs2).u8[1] = 128;
-    regs.read_vector(vs2).u8[2] = 9;
-    regs.read_vector(vs1).u8[0] = 7;
-    regs.read_vector(vs1).u8[1] = 255;
-    regs.read_vector(vs1).u8[2] = 0;
+    regs.read_vector(simrv::xlen::to_vec_reg_id(vs2)).u8[0] = 250;
+    regs.read_vector(simrv::xlen::to_vec_reg_id(vs2)).u8[1] = 128;
+    regs.read_vector(simrv::xlen::to_vec_reg_id(vs2)).u8[2] = 9;
+    regs.read_vector(simrv::xlen::to_vec_reg_id(vs1)).u8[0] = 7;
+    regs.read_vector(simrv::xlen::to_vec_reg_id(vs1)).u8[1] = 255;
+    regs.read_vector(simrv::xlen::to_vec_reg_id(vs1)).u8[2] = 0;
     simrv::execute::ExecuteUnit::execute_vector(
         cpu, machine.memory(), simrv::isa::OperationId::VREMU_VV, vector_ir(vd, vs1, vs2));
-    expect(regs.read_vector(vd).u8[0] == 5 && regs.read_vector(vd).u8[1] == 128,
+    expect(regs.read_vector(simrv::xlen::to_vec_reg_id(vd)).u8[0] == 5 && regs.read_vector(simrv::xlen::to_vec_reg_id(vd)).u8[1] == 128,
            "vremu computes unsigned element remainders");
-    expect(regs.read_vector(vd).u8[2] == 9, "vremu returns the dividend on division by zero");
+    expect(regs.read_vector(simrv::xlen::to_vec_reg_id(vd)).u8[2] == 9, "vremu returns the dividend on division by zero");
 
     cpu.state().vl = 1;
     cpu.state().vtype = 3U << 3U;  // SEW=64
-    regs.read_vector(vs2).u64[0] = std::numeric_limits<uint64_t>::max();
-    regs.read_vector(vs1).u64[0] = 2;
+    regs.read_vector(simrv::xlen::to_vec_reg_id(vs2)).u64[0] = std::numeric_limits<uint64_t>::max();
+    regs.read_vector(simrv::xlen::to_vec_reg_id(vs1)).u64[0] = 2;
     simrv::execute::ExecuteUnit::execute_vector(
         cpu, machine.memory(), simrv::isa::OperationId::VMULHU_VV, vector_ir(vd, vs1, vs2));
-    expect(regs.read_vector(vd).u64[0] == 1,
+    expect(regs.read_vector(simrv::xlen::to_vec_reg_id(vd)).u64[0] == 1,
            "vmulhu returns the high half of a 64-bit unsigned product");
 
-    regs.read_vector(vs2).u64[0] = static_cast<uint64_t>(-2);
-    regs.read_vector(vs1).u64[0] = 3;
+    regs.read_vector(simrv::xlen::to_vec_reg_id(vs2)).u64[0] = static_cast<uint64_t>(-2);
+    regs.read_vector(simrv::xlen::to_vec_reg_id(vs1)).u64[0] = 3;
     simrv::execute::ExecuteUnit::execute_vector(
         cpu, machine.memory(), simrv::isa::OperationId::VMULH_VV, vector_ir(vd, vs1, vs2));
-    expect(regs.read_vector(vd).u64[0] == std::numeric_limits<uint64_t>::max(),
+    expect(regs.read_vector(simrv::xlen::to_vec_reg_id(vd)).u64[0] == std::numeric_limits<uint64_t>::max(),
            "vmulh returns the sign-extended high half of a signed product");
 
-    regs.read_vector(vs2).u64[0] = static_cast<uint64_t>(-2);
-    regs.read_vector(vs1).u64[0] = std::numeric_limits<uint64_t>::max();
+    regs.read_vector(simrv::xlen::to_vec_reg_id(vs2)).u64[0] = static_cast<uint64_t>(-2);
+    regs.read_vector(simrv::xlen::to_vec_reg_id(vs1)).u64[0] = std::numeric_limits<uint64_t>::max();
     simrv::execute::ExecuteUnit::execute_vector(
         cpu, machine.memory(), simrv::isa::OperationId::VMULHSU_VV, vector_ir(vd, vs1, vs2));
-    expect(regs.read_vector(vd).u64[0] == std::numeric_limits<uint64_t>::max() - 1,
+    expect(regs.read_vector(simrv::xlen::to_vec_reg_id(vd)).u64[0] == std::numeric_limits<uint64_t>::max() - 1,
            "vmulhsu returns the high half of a signed-by-unsigned 64-bit product");
 
     cpu.state().vtype = 0;  // SEW=8
-    regs.read_vector(vd).u8[0] = 5;
-    regs.read_vector(vs1).u8[0] = 3;
-    regs.read_vector(vs2).u8[0] = 20;
+    regs.read_vector(simrv::xlen::to_vec_reg_id(vd)).u8[0] = 5;
+    regs.read_vector(simrv::xlen::to_vec_reg_id(vs1)).u8[0] = 3;
+    regs.read_vector(simrv::xlen::to_vec_reg_id(vs2)).u8[0] = 20;
     simrv::execute::ExecuteUnit::execute_vector(
         cpu, machine.memory(), simrv::isa::OperationId::VNMSUB_VV, vector_ir(vd, vs1, vs2));
-    expect(regs.read_vector(vd).u8[0] == 5,
+    expect(regs.read_vector(simrv::xlen::to_vec_reg_id(vd)).u8[0] == 5,
            "vnmsub.vv computes vs2 minus the product of vs1 and the old destination");
 
     cpu.state().vl = 2;
-    regs.read_vector(vs1).u8[0] = 0xF0;
-    regs.read_vector(vs2).u8[0] = 0x0F;
-    regs.read_vector(vs2).u8[1] = 0xAA;
+    regs.read_vector(simrv::xlen::to_vec_reg_id(vs1)).u8[0] = 0xF0;
+    regs.read_vector(simrv::xlen::to_vec_reg_id(vs2)).u8[0] = 0x0F;
+    regs.read_vector(simrv::xlen::to_vec_reg_id(vs2)).u8[1] = 0xAA;
     simrv::execute::ExecuteUnit::execute_vector(
         cpu, machine.memory(), simrv::isa::OperationId::VREDXOR_VS, vector_ir(vd, vs1, vs2));
-    expect(regs.read_vector(vd).u8[0] == 0x55,
+    expect(regs.read_vector(simrv::xlen::to_vec_reg_id(vd)).u8[0] == 0x55,
            "vredxor folds active elements into the scalar seed");
 
-    regs.read_vector(vs1).u8[0] = 10;
-    regs.read_vector(vs2).u8[0] = static_cast<uint8_t>(-5);
-    regs.read_vector(vs2).u8[1] = 20;
+    regs.read_vector(simrv::xlen::to_vec_reg_id(vs1)).u8[0] = 10;
+    regs.read_vector(simrv::xlen::to_vec_reg_id(vs2)).u8[0] = static_cast<uint8_t>(-5);
+    regs.read_vector(simrv::xlen::to_vec_reg_id(vs2)).u8[1] = 20;
     simrv::execute::ExecuteUnit::execute_vector(
         cpu, machine.memory(), simrv::isa::OperationId::VREDMIN_VS, vector_ir(vd, vs1, vs2));
-    expect(regs.read_vector(vd).u8[0] == static_cast<uint8_t>(-5),
+    expect(regs.read_vector(simrv::xlen::to_vec_reg_id(vd)).u8[0] == static_cast<uint8_t>(-5),
            "vredmin compares reduction elements as signed SEW values");
 
-    regs.read_vector(vs1).u8[0] = 1;
-    regs.read_vector(vs2).u8[0] = 250;
-    regs.read_vector(vs2).u8[1] = 20;
+    regs.read_vector(simrv::xlen::to_vec_reg_id(vs1)).u8[0] = 1;
+    regs.read_vector(simrv::xlen::to_vec_reg_id(vs2)).u8[0] = 250;
+    regs.read_vector(simrv::xlen::to_vec_reg_id(vs2)).u8[1] = 20;
     simrv::execute::ExecuteUnit::execute_vector(
         cpu, machine.memory(), simrv::isa::OperationId::VREDMAXU_VS, vector_ir(vd, vs1, vs2));
-    expect(regs.read_vector(vd).u8[0] == 250,
+    expect(regs.read_vector(simrv::xlen::to_vec_reg_id(vd)).u8[0] == 250,
            "vredmaxu compares reduction elements as unsigned SEW values");
 }
 
@@ -1289,29 +1289,29 @@ void test_vector_gather() {
     cpu.state().vl = 4;
     cpu.state().vtype = 0;  // SEW=8, LMUL=1, VLMAX=VLEN/8.
     for (uint32_t i = 0; i < regs.vlen_bytes(); ++i) {
-        regs.read_vector(vs2).u8[i] = static_cast<uint8_t>(0x40U + i);
+        regs.read_vector(simrv::xlen::to_vec_reg_id(vs2)).u8[i] = static_cast<uint8_t>(0x40U + i);
     }
-    regs.read_vector(index).u8[0] = 3;
-    regs.read_vector(index).u8[1] = 2;
-    regs.read_vector(index).u8[2] = 1;
-    regs.read_vector(index).u8[3] = 0;
+    regs.read_vector(simrv::xlen::to_vec_reg_id(index)).u8[0] = 3;
+    regs.read_vector(simrv::xlen::to_vec_reg_id(index)).u8[1] = 2;
+    regs.read_vector(simrv::xlen::to_vec_reg_id(index)).u8[2] = 1;
+    regs.read_vector(simrv::xlen::to_vec_reg_id(index)).u8[3] = 0;
     simrv::execute::ExecuteUnit::execute_vector(
         cpu, machine.memory(), simrv::isa::OperationId::VRGATHER_VV, vector_ir(vd, index, vs2));
-    expect(regs.read_vector(vd).u8[0] == 0x43 && regs.read_vector(vd).u8[1] == 0x42 &&
-               regs.read_vector(vd).u8[2] == 0x41 && regs.read_vector(vd).u8[3] == 0x40,
+    expect(regs.read_vector(simrv::xlen::to_vec_reg_id(vd)).u8[0] == 0x43 && regs.read_vector(simrv::xlen::to_vec_reg_id(vd)).u8[1] == 0x42 &&
+               regs.read_vector(simrv::xlen::to_vec_reg_id(vd)).u8[2] == 0x41 && regs.read_vector(simrv::xlen::to_vec_reg_id(vd)).u8[3] == 0x40,
            "vrgather.vv reads an independent index group");
 
     constexpr auto vd_e16 = static_cast<simrv::xlen::RegId>(4);
     constexpr auto indices_e16 = static_cast<simrv::xlen::RegId>(6);
-    regs.read_vector(indices_e16).u16[0] = 1;
-    regs.read_vector(indices_e16).u16[1] = 15;
-    regs.read_vector(indices_e16).u16[2] = 16;
-    regs.read_vector(indices_e16).u16[3] = 0;
+    regs.read_vector(simrv::xlen::to_vec_reg_id(indices_e16)).u16[0] = 1;
+    regs.read_vector(simrv::xlen::to_vec_reg_id(indices_e16)).u16[1] = 15;
+    regs.read_vector(simrv::xlen::to_vec_reg_id(indices_e16)).u16[2] = 16;
+    regs.read_vector(simrv::xlen::to_vec_reg_id(indices_e16)).u16[3] = 0;
     simrv::execute::ExecuteUnit::execute_vector(cpu, machine.memory(),
                                                 simrv::isa::OperationId::VRGATHEREI16_VV,
                                                 vector_ir(vd_e16, indices_e16, vs2));
-    expect(regs.read_vector(vd_e16).u8[0] == 0x41 && regs.read_vector(vd_e16).u8[1] == 0x4F &&
-               regs.read_vector(vd_e16).u8[2] == 0 && regs.read_vector(vd_e16).u8[3] == 0x40,
+    expect(regs.read_vector(simrv::xlen::to_vec_reg_id(vd_e16)).u8[0] == 0x41 && regs.read_vector(simrv::xlen::to_vec_reg_id(vd_e16)).u8[1] == 0x4F &&
+               regs.read_vector(simrv::xlen::to_vec_reg_id(vd_e16)).u8[2] == 0 && regs.read_vector(simrv::xlen::to_vec_reg_id(vd_e16)).u8[3] == 0x40,
            "vrgatherei16.vv uses 16-bit indices and zeros indices outside VLMAX");
 
     constexpr auto vd_imm = static_cast<simrv::xlen::RegId>(6);
@@ -1319,7 +1319,7 @@ void test_vector_gather() {
     simrv::execute::ExecuteUnit::execute_vector(cpu, machine.memory(),
                                                 simrv::isa::OperationId::VRGATHER_VI,
                                                 vector_ir(vd_imm, uimm31, vs2));
-    expect(regs.read_vector(vd_imm).u8[0] == 0 && regs.read_vector(vd_imm).u8[3] == 0,
+    expect(regs.read_vector(simrv::xlen::to_vec_reg_id(vd_imm)).u8[0] == 0 && regs.read_vector(simrv::xlen::to_vec_reg_id(vd_imm)).u8[3] == 0,
            "vrgather.vi treats its five-bit immediate as unsigned and applies the VLMAX bound");
 
     constexpr auto slide_offset = static_cast<simrv::xlen::RegId>(5);
@@ -1327,29 +1327,29 @@ void test_vector_gather() {
     simrv::execute::ExecuteUnit::execute_vector(cpu, machine.memory(),
                                                 simrv::isa::OperationId::VSLIDEDOWN_VX,
                                                 vector_ir(vd, slide_offset, vs2));
-    expect(regs.read_vector(vd).u8[0] == 0x46 && regs.read_vector(vd).u8[3] == 0x49,
+    expect(regs.read_vector(simrv::xlen::to_vec_reg_id(vd)).u8[0] == 0x46 && regs.read_vector(simrv::xlen::to_vec_reg_id(vd)).u8[3] == 0x49,
            "vslidedown.vx reads source elements beyond vl but below VLMAX");
 
     simrv::execute::ExecuteUnit::execute_vector(
         cpu, machine.memory(), simrv::isa::OperationId::VSLIDEDOWN_VI,
         vector_ir(vd, static_cast<simrv::xlen::RegId>(15), vs2));
-    expect(regs.read_vector(vd).u8[0] == 0x4F && regs.read_vector(vd).u8[1] == 0 &&
-               regs.read_vector(vd).u8[3] == 0,
+    expect(regs.read_vector(simrv::xlen::to_vec_reg_id(vd)).u8[0] == 0x4F && regs.read_vector(simrv::xlen::to_vec_reg_id(vd)).u8[1] == 0 &&
+               regs.read_vector(simrv::xlen::to_vec_reg_id(vd)).u8[3] == 0,
            "vslidedown.vi zeros source indices at or beyond VLMAX");
 
     if (sizeof(simrv::xlen::Register) > 4) {
         regs.write(slide_offset, static_cast<simrv::xlen::Register>(uint64_t{1} << 32U));
-        regs.read_vector(vd).u8[0] = 0xA5;
+        regs.read_vector(simrv::xlen::to_vec_reg_id(vd)).u8[0] = 0xA5;
         simrv::execute::ExecuteUnit::execute_vector(cpu, machine.memory(),
                                                     simrv::isa::OperationId::VSLIDEDOWN_VX,
                                                     vector_ir(vd, slide_offset, vs2));
-        expect(regs.read_vector(vd).u8[0] == 0,
+        expect(regs.read_vector(simrv::xlen::to_vec_reg_id(vd)).u8[0] == 0,
                "vslidedown.vx does not truncate an RV64 offset to 32 bits");
-        regs.read_vector(vd).u8[0] = 0xA5;
+        regs.read_vector(simrv::xlen::to_vec_reg_id(vd)).u8[0] = 0xA5;
         simrv::execute::ExecuteUnit::execute_vector(cpu, machine.memory(),
                                                     simrv::isa::OperationId::VSLIDEUP_VX,
                                                     vector_ir(vd, slide_offset, vs2));
-        expect(regs.read_vector(vd).u8[0] == 0xA5,
+        expect(regs.read_vector(simrv::xlen::to_vec_reg_id(vd)).u8[0] == 0xA5,
                "vslideup.vx does not truncate an RV64 offset to 32 bits");
     }
 }
@@ -1415,52 +1415,52 @@ void test_vector_scalar_move_element_zero() {
 
     cpu.state().vtype = 3U << 3U;  // SEW=64
     regs.write(scalar, std::numeric_limits<simrv::xlen::Register>::max());
-    regs.read_vector(vd).u64[0] = 0x123456789ABCDEF0ULL;
+    regs.read_vector(simrv::xlen::to_vec_reg_id(vd)).u64[0] = 0x123456789ABCDEF0ULL;
     cpu.state().vl = 0;
     simrv::execute::ExecuteUnit::execute_vector(cpu, machine.memory(),
                                                 simrv::isa::OperationId::VMV_S_X, ir);
-    expect(regs.read_vector(vd).u64[0] == 0x123456789ABCDEF0ULL,
+    expect(regs.read_vector(simrv::xlen::to_vec_reg_id(vd)).u64[0] == 0x123456789ABCDEF0ULL,
            "vmv.s.x leaves element zero unchanged when vl is zero");
 
     cpu.state().vl = 2;
     cpu.state().vstart = 1;
     simrv::execute::ExecuteUnit::execute_vector(cpu, machine.memory(),
                                                 simrv::isa::OperationId::VMV_S_X, ir);
-    expect(regs.read_vector(vd).u64[0] == 0x123456789ABCDEF0ULL,
+    expect(regs.read_vector(simrv::xlen::to_vec_reg_id(vd)).u64[0] == 0x123456789ABCDEF0ULL,
            "vmv.s.x leaves prestart element zero unchanged");
 
     cpu.state().vstart = 0;
     simrv::execute::ExecuteUnit::execute_vector(cpu, machine.memory(),
                                                 simrv::isa::OperationId::VMV_S_X, ir);
-    expect(regs.read_vector(vd).u64[0] == std::numeric_limits<uint64_t>::max(),
+    expect(regs.read_vector(simrv::xlen::to_vec_reg_id(vd)).u64[0] == std::numeric_limits<uint64_t>::max(),
            "vmv.s.x sign-extends an RV32 scalar to SEW=64");
 
     cpu.state().misa = simrv::isa::kMisaDefault;
     cpu.state().mstatus |= simrv::core::MstatusBit::Fs;
-    regs.write_fp(scalar, 0x1122334455667788ULL);
-    regs.read_vector(vd).u64[0] = 0x123456789ABCDEF0ULL;
+    regs.write_fp(simrv::xlen::to_fp_reg_id(scalar), 0x1122334455667788ULL);
+    regs.read_vector(simrv::xlen::to_vec_reg_id(vd)).u64[0] = 0x123456789ABCDEF0ULL;
     cpu.state().vl = 0;
     simrv::execute::ExecuteUnit::execute_vector(cpu, machine.memory(),
                                                 simrv::isa::OperationId::VFMV_S_F, ir);
-    expect(regs.read_vector(vd).u64[0] == 0x123456789ABCDEF0ULL,
+    expect(regs.read_vector(simrv::xlen::to_vec_reg_id(vd)).u64[0] == 0x123456789ABCDEF0ULL,
            "vfmv.s.f leaves element zero unchanged when vl is zero");
     cpu.state().vl = 1;
     simrv::execute::ExecuteUnit::execute_vector(cpu, machine.memory(),
                                                 simrv::isa::OperationId::VFMV_S_F, ir);
-    expect(regs.read_vector(vd).u64[0] == 0x1122334455667788ULL,
+    expect(regs.read_vector(simrv::xlen::to_vec_reg_id(vd)).u64[0] == 0x1122334455667788ULL,
            "vfmv.s.f transfers the scalar when element zero is active");
 
     cpu.state().vtype = 2U << 3U;                  // SEW=32
-    regs.write_fp(scalar, 0x000000003F800000ULL);  // Unboxed 1.0f.
+    regs.write_fp(simrv::xlen::to_fp_reg_id(scalar), 0x000000003F800000ULL);  // Unboxed 1.0f.
     simrv::execute::ExecuteUnit::execute_vector(cpu, machine.memory(),
                                                 simrv::isa::OperationId::VFMV_S_F, ir);
-    expect(regs.read_vector(vd).u32[0] == simrv::xlen::kF32Qnan,
+    expect(regs.read_vector(simrv::xlen::to_vec_reg_id(vd)).u32[0] == simrv::xlen::kF32Qnan,
            "vfmv.s.f substitutes canonical NaN for an unboxed scalar");
 
     cpu.state().misa &= ~simrv::isa::misa_extension_bit(simrv::isa::IsaExtension::D);
     simrv::execute::ExecuteUnit::execute_vector(cpu, machine.memory(),
                                                 simrv::isa::OperationId::VFMV_S_F, ir);
-    expect(regs.read_vector(vd).u32[0] == 0x3F800000U,
+    expect(regs.read_vector(simrv::xlen::to_vec_reg_id(vd)).u32[0] == 0x3F800000U,
            "vfmv.s.f does not require NaN boxing when FLEN is 32");
 }
 
@@ -1481,49 +1481,49 @@ void test_vector_scalar_extension() {
     cpu.state().vtype = 3U << 3U;  // SEW=64
     cpu.state().vl = 2;
     regs.write(scalar, std::numeric_limits<simrv::xlen::Register>::max());
-    regs.read_vector(vs2).u64[0] = 1;
+    regs.read_vector(simrv::xlen::to_vec_reg_id(vs2)).u64[0] = 1;
     simrv::execute::ExecuteUnit::execute_vector(
         cpu, machine.memory(), simrv::isa::OperationId::VADD_VX, vector_ir(vd, scalar, vs2));
-    expect(regs.read_vector(vd).u64[0] == 0,
+    expect(regs.read_vector(simrv::xlen::to_vec_reg_id(vd)).u64[0] == 0,
            "vadd.vx sign-extends the scalar when SEW exceeds XLEN");
 
-    regs.read_vector(vs2).u64[0] = std::numeric_limits<uint64_t>::max();
+    regs.read_vector(simrv::xlen::to_vec_reg_id(vs2)).u64[0] = std::numeric_limits<uint64_t>::max();
     simrv::execute::ExecuteUnit::execute_vector(
         cpu, machine.memory(), simrv::isa::OperationId::VMSEQ_VX,
         vector_ir(static_cast<simrv::xlen::RegId>(8), scalar, vs2));
-    expect((regs.read_vector(static_cast<simrv::xlen::RegId>(8)).u8[0] & 1U) != 0,
+    expect((regs.read_vector(simrv::xlen::to_vec_reg_id(static_cast<simrv::xlen::RegId>(8))).u8[0] & 1U) != 0,
            "vmseq.vx compares against the sign-extended scalar");
 
     simrv::execute::ExecuteUnit::execute_vector(cpu, machine.memory(),
                                                 simrv::isa::OperationId::VMV_V_X,
                                                 vector_ir(vd, scalar, simrv::xlen::RegId::Zero));
-    expect(regs.read_vector(vd).u64[0] == std::numeric_limits<uint64_t>::max(),
+    expect(regs.read_vector(simrv::xlen::to_vec_reg_id(vd)).u64[0] == std::numeric_limits<uint64_t>::max(),
            "vmv.v.x sign-extends the scalar when SEW exceeds XLEN");
 
-    regs.read_vector(vs2).u64[0] = 0;
-    regs.read_vector(simrv::xlen::RegId::Zero).u8[0] = 1;
+    regs.read_vector(simrv::xlen::to_vec_reg_id(vs2)).u64[0] = 0;
+    regs.read_vector(simrv::xlen::to_vec_reg_id(simrv::xlen::RegId::Zero)).u8[0] = 1;
     simrv::execute::ExecuteUnit::execute_vector(cpu, machine.memory(),
                                                 simrv::isa::OperationId::VMERGE_VXM,
                                                 vector_ir(vd, scalar, vs2, false));
-    expect(regs.read_vector(vd).u64[0] == std::numeric_limits<uint64_t>::max(),
+    expect(regs.read_vector(simrv::xlen::to_vec_reg_id(vd)).u64[0] == std::numeric_limits<uint64_t>::max(),
            "vmerge.vxm sign-extends the selected scalar");
 
     cpu.state().misa = simrv::isa::kMisaDefault;
     cpu.state().mstatus |= simrv::core::MstatusBit::Fs;
-    regs.write_fp(scalar, 0x1122334455667788ULL);
+    regs.write_fp(simrv::xlen::to_fp_reg_id(scalar), 0x1122334455667788ULL);
     simrv::execute::ExecuteUnit::execute_vector(cpu, machine.memory(),
                                                 simrv::isa::OperationId::VFMV_V_F,
                                                 vector_ir(vd, scalar, simrv::xlen::RegId::Zero));
-    expect(regs.read_vector(vd).u64[0] == 0x1122334455667788ULL &&
-               regs.read_vector(vd).u64[1] == 0x1122334455667788ULL,
+    expect(regs.read_vector(simrv::xlen::to_vec_reg_id(vd)).u64[0] == 0x1122334455667788ULL &&
+               regs.read_vector(simrv::xlen::to_vec_reg_id(vd)).u64[1] == 0x1122334455667788ULL,
            "vfmv.v.f retains the full 64-bit floating-point scalar on RV32");
 
-    regs.read_vector(simrv::xlen::RegId::Zero).u8[0] = 1;
-    regs.read_vector(vs2).u64[0] = 0;
+    regs.read_vector(simrv::xlen::to_vec_reg_id(simrv::xlen::RegId::Zero)).u8[0] = 1;
+    regs.read_vector(simrv::xlen::to_vec_reg_id(vs2)).u64[0] = 0;
     simrv::execute::ExecuteUnit::execute_vector(cpu, machine.memory(),
                                                 simrv::isa::OperationId::VFMERGE_VFM,
                                                 vector_ir(vd, scalar, vs2, false));
-    expect(regs.read_vector(vd).u64[0] == 0x1122334455667788ULL,
+    expect(regs.read_vector(simrv::xlen::to_vec_reg_id(vd)).u64[0] == 0x1122334455667788ULL,
            "vfmerge.vfm retains the full 64-bit floating-point scalar on RV32");
 }
 
@@ -1543,29 +1543,29 @@ void test_vector_f_only_scalar_fp() {
     cpu.state().vtype = 2U << 3U;  // SEW=32
     cpu.state().vl = 1;
     cpu.state().fcsr = 0;
-    regs.read_vector(vs2).f32[0] = 2.0F;
-    regs.write_fp(scalar, std::bit_cast<uint32_t>(1.5F));
+    regs.read_vector(simrv::xlen::to_vec_reg_id(vs2)).f32[0] = 2.0F;
+    regs.write_fp(simrv::xlen::to_fp_reg_id(scalar), std::bit_cast<uint32_t>(1.5F));
 
     simrv::execute::ExecuteUnit::execute_vector(cpu, machine.memory(),
                                                 simrv::isa::OperationId::VFADD_VF, ir);
-    expect(std::isnan(regs.read_vector(vd).f32[0]),
+    expect(std::isnan(regs.read_vector(simrv::xlen::to_vec_reg_id(vd)).f32[0]),
            "vfadd.vf treats an unboxed scalar as NaN when D is present");
 
     cpu.state().misa &= ~simrv::isa::misa_extension_bit(simrv::isa::IsaExtension::D);
     simrv::execute::ExecuteUnit::execute_vector(cpu, machine.memory(),
                                                 simrv::isa::OperationId::VFADD_VF, ir);
-    expect(regs.read_vector(vd).f32[0] == 3.5F,
+    expect(regs.read_vector(simrv::xlen::to_vec_reg_id(vd)).f32[0] == 3.5F,
            "vfadd.vf accepts an unboxed scalar when FLEN is 32");
 
     simrv::execute::ExecuteUnit::execute_vector(cpu, machine.memory(),
                                                 simrv::isa::OperationId::VFMUL_VF, ir);
-    expect(regs.read_vector(vd).f32[0] == 3.0F,
+    expect(regs.read_vector(simrv::xlen::to_vec_reg_id(vd)).f32[0] == 3.0F,
            "vfmul.vf uses the F-only scalar across the shared FP path");
 
-    regs.read_vector(vs2).f32[0] = 1.5F;
+    regs.read_vector(simrv::xlen::to_vec_reg_id(vs2)).f32[0] = 1.5F;
     simrv::execute::ExecuteUnit::execute_vector(cpu, machine.memory(),
                                                 simrv::isa::OperationId::VMFEQ_VF, ir);
-    expect((regs.read_vector(vd).u8[0] & 1U) != 0,
+    expect((regs.read_vector(simrv::xlen::to_vec_reg_id(vd)).u8[0] & 1U) != 0,
            "vmfeq.vf compares against the F-only scalar without NaN-boxing");
 }
 
@@ -1586,35 +1586,35 @@ void test_vector_fixed_point_average() {
     cpu.state().vl = 1;
     cpu.state().vtype = 0;
     cpu.state().vstart = 0;
-    regs.read_vector(vs2).u8[0] = 2;
-    regs.read_vector(vs1).u8[0] = 3;
+    regs.read_vector(simrv::xlen::to_vec_reg_id(vs2)).u8[0] = 2;
+    regs.read_vector(simrv::xlen::to_vec_reg_id(vs1)).u8[0] = 3;
     cpu.state().vxrm = 1;  // rne
     simrv::execute::ExecuteUnit::execute_vector(
         cpu, machine.memory(), simrv::isa::OperationId::VAADDU_VV, vector_ir(vd, vs1, vs2));
-    expect(regs.read_vector(vd).u8[0] == 2,
+    expect(regs.read_vector(simrv::xlen::to_vec_reg_id(vd)).u8[0] == 2,
            "vaaddu.vv rounds an exact half-way result to even under rne");
 
     regs.write(vs1, 3);
     cpu.state().vxrm = 0;  // rnu
     simrv::execute::ExecuteUnit::execute_vector(
         cpu, machine.memory(), simrv::isa::OperationId::VAADDU_VX, vector_ir(vd, vs1, vs2));
-    expect(regs.read_vector(vd).u8[0] == 3,
+    expect(regs.read_vector(simrv::xlen::to_vec_reg_id(vd)).u8[0] == 3,
            "vaaddu.vx rounds an exact half-way result upward under rnu");
 
-    regs.read_vector(vs2).u8[0] = 0;
-    regs.read_vector(vs1).u8[0] = 255;
+    regs.read_vector(simrv::xlen::to_vec_reg_id(vs2)).u8[0] = 0;
+    regs.read_vector(simrv::xlen::to_vec_reg_id(vs1)).u8[0] = 255;
     cpu.state().vxrm = 1;  // rne: -127.5 -> -128, then wrap to unsigned SEW.
     simrv::execute::ExecuteUnit::execute_vector(
         cpu, machine.memory(), simrv::isa::OperationId::VASUBU_VV, vector_ir(vd, vs1, vs2));
-    expect(regs.read_vector(vd).u8[0] == 128,
+    expect(regs.read_vector(simrv::xlen::to_vec_reg_id(vd)).u8[0] == 128,
            "vasubu.vv computes in infinite precision before rounding and wrapping");
 
-    regs.read_vector(vs2).u8[0] = 127;
-    regs.read_vector(vs1).u8[0] = 128;  // signed -128
+    regs.read_vector(simrv::xlen::to_vec_reg_id(vs2)).u8[0] = 127;
+    regs.read_vector(simrv::xlen::to_vec_reg_id(vs1)).u8[0] = 128;  // signed -128
     cpu.state().vxrm = 0;
     simrv::execute::ExecuteUnit::execute_vector(
         cpu, machine.memory(), simrv::isa::OperationId::VASUB_VV, vector_ir(vd, vs1, vs2));
-    expect(regs.read_vector(vd).u8[0] == 128,
+    expect(regs.read_vector(simrv::xlen::to_vec_reg_id(vd)).u8[0] == 128,
            "vasub.vv ignores rounded-result overflow and wraps at SEW");
 }
 
@@ -1633,24 +1633,24 @@ void test_vector_fixed_point_rounding_extremes() {
     cpu.state().vtype = 3U << 3U;  // SEW=64
     cpu.state().vxrm = 0;          // rnu
     regs.write(shift_reg, 1);
-    regs.read_vector(vs2).u64[0] = std::numeric_limits<uint64_t>::max();
+    regs.read_vector(simrv::xlen::to_vec_reg_id(vs2)).u64[0] = std::numeric_limits<uint64_t>::max();
     simrv::execute::ExecuteUnit::execute_vector(cpu, machine.memory(),
                                                 simrv::isa::OperationId::VSSRL_VX, ir);
-    expect(regs.read_vector(vd).u64[0] == (uint64_t{1} << 63U),
+    expect(regs.read_vector(simrv::xlen::to_vec_reg_id(vd)).u64[0] == (uint64_t{1} << 63U),
            "vssrl.vx rounds a maximum 64-bit value without overflow");
 
-    regs.read_vector(vs2).u64[0] = static_cast<uint64_t>(std::numeric_limits<int64_t>::max());
+    regs.read_vector(simrv::xlen::to_vec_reg_id(vs2)).u64[0] = static_cast<uint64_t>(std::numeric_limits<int64_t>::max());
     simrv::execute::ExecuteUnit::execute_vector(cpu, machine.memory(),
                                                 simrv::isa::OperationId::VSSRA_VX, ir);
-    expect(regs.read_vector(vd).u64[0] == (uint64_t{1} << 62U),
+    expect(regs.read_vector(simrv::xlen::to_vec_reg_id(vd)).u64[0] == (uint64_t{1} << 62U),
            "vssra.vx rounds a maximum signed 64-bit value without overflow");
 
     cpu.state().vtype = 2U << 3U;  // SEW=32, source EEW=64
     cpu.state().vxsat = 0;
-    regs.read_vector(vs2).u64[0] = std::numeric_limits<uint64_t>::max();
+    regs.read_vector(simrv::xlen::to_vec_reg_id(vs2)).u64[0] = std::numeric_limits<uint64_t>::max();
     simrv::execute::ExecuteUnit::execute_vector(cpu, machine.memory(),
                                                 simrv::isa::OperationId::VNCLIPU_WX, ir);
-    expect(regs.read_vector(vd).u32[0] == std::numeric_limits<uint32_t>::max() &&
+    expect(regs.read_vector(simrv::xlen::to_vec_reg_id(vd)).u32[0] == std::numeric_limits<uint32_t>::max() &&
                cpu.state().vxsat == 1,
            "vnclipu.wx rounds before saturating a maximum source value");
 }
@@ -1675,213 +1675,213 @@ void test_vector_floating_arithmetic() {
     cpu.state().vl = 1;
     cpu.state().vstart = 0;
     cpu.state().fcsr = 0;
-    regs.read_vector(vs2).f32[0] = 7.0F;
-    regs.read_vector(vs1).f32[0] = 2.0F;
+    regs.read_vector(simrv::xlen::to_vec_reg_id(vs2)).f32[0] = 7.0F;
+    regs.read_vector(simrv::xlen::to_vec_reg_id(vs1)).f32[0] = 2.0F;
     simrv::execute::ExecuteUnit::execute_vector(
         cpu, machine.memory(), simrv::isa::OperationId::VFSUB_VV, vector_ir(vd, vs1, vs2));
-    expect(regs.read_vector(vd).f32[0] == 5.0F, "vfsub.vv subtracts vector operands in order");
+    expect(regs.read_vector(simrv::xlen::to_vec_reg_id(vd)).f32[0] == 5.0F, "vfsub.vv subtracts vector operands in order");
 
-    regs.write_fp(vs1, UINT64_C(0xFFFFFFFF00000000) | std::bit_cast<uint32_t>(10.0F));
+    regs.write_fp(simrv::xlen::to_fp_reg_id(vs1), UINT64_C(0xFFFFFFFF00000000) | std::bit_cast<uint32_t>(10.0F));
     simrv::execute::ExecuteUnit::execute_vector(
         cpu, machine.memory(), simrv::isa::OperationId::VFRSUB_VF, vector_ir(vd, vs1, vs2));
-    expect(regs.read_vector(vd).f32[0] == 3.0F,
+    expect(regs.read_vector(simrv::xlen::to_vec_reg_id(vd)).f32[0] == 3.0F,
            "vfrsub.vf subtracts each vector element from the scalar");
 
-    regs.read_vector(vs2).f32[0] = 9.0F;
+    regs.read_vector(simrv::xlen::to_vec_reg_id(vs2)).f32[0] = 9.0F;
     simrv::execute::ExecuteUnit::execute_vector(cpu, machine.memory(),
                                                 simrv::isa::OperationId::VFSQRT_V,
                                                 vector_ir(vd, simrv::xlen::RegId::Zero, vs2));
-    expect(regs.read_vector(vd).f32[0] == 3.0F, "vfsqrt.v computes an element-wise square root");
+    expect(regs.read_vector(simrv::xlen::to_vec_reg_id(vd)).f32[0] == 3.0F, "vfsqrt.v computes an element-wise square root");
 
-    regs.read_vector(vs2).f32[0] = 2.0F;
+    regs.read_vector(simrv::xlen::to_vec_reg_id(vs2)).f32[0] = 2.0F;
     cpu.state().fcsr = simrv::isa::RoundingMode::Rmm << 5U;
     simrv::execute::ExecuteUnit::execute_vector(cpu, machine.memory(),
                                                 simrv::isa::OperationId::VFSQRT_V,
                                                 vector_ir(vd, simrv::xlen::RegId::Zero, vs2));
-    expect(regs.read_vector(vd).u32[0] == UINT32_C(0x3FB504F3) &&
+    expect(regs.read_vector(simrv::xlen::to_vec_reg_id(vd)).u32[0] == UINT32_C(0x3FB504F3) &&
                (cpu.state().fcsr & simrv::isa::FflagsBit::Nx) != 0,
            "vfsqrt.v RMM rounds binary32 directly and accrues inexact");
     cpu.state().vtype = 3U << 3U;  // SEW=64
-    regs.read_vector(vs2).f64[0] = 2.0;
+    regs.read_vector(simrv::xlen::to_vec_reg_id(vs2)).f64[0] = 2.0;
     cpu.state().fcsr = simrv::isa::RoundingMode::Rmm << 5U;
     simrv::execute::ExecuteUnit::execute_vector(cpu, machine.memory(),
                                                 simrv::isa::OperationId::VFSQRT_V,
                                                 vector_ir(vd, simrv::xlen::RegId::Zero, vs2));
-    expect(regs.read_vector(vd).u64[0] == UINT64_C(0x3FF6A09E667F3BCD) &&
+    expect(regs.read_vector(simrv::xlen::to_vec_reg_id(vd)).u64[0] == UINT64_C(0x3FF6A09E667F3BCD) &&
                (cpu.state().fcsr & simrv::isa::FflagsBit::Nx) != 0,
            "vfsqrt.v RMM checks a binary64 square-root midpoint exactly");
     cpu.state().vtype = 2U << 3U;  // SEW=32
     cpu.state().fcsr = 0;
 
-    regs.read_vector(vs2).f32[0] = 1.0F;
+    regs.read_vector(simrv::xlen::to_vec_reg_id(vs2)).f32[0] = 1.0F;
     cpu.state().fcsr = 0;
     simrv::execute::ExecuteUnit::execute_vector(cpu, machine.memory(),
                                                 simrv::isa::OperationId::VFREC7_V,
                                                 vector_ir(vd, simrv::xlen::RegId::Zero, vs2));
-    expect(regs.read_vector(vd).u32[0] == UINT32_C(0x3F7F0000),
+    expect(regs.read_vector(simrv::xlen::to_vec_reg_id(vd)).u32[0] == UINT32_C(0x3F7F0000),
            "vfrec7.v produces the specified seven-bit reciprocal estimate");
 
-    regs.read_vector(vs2).u32[0] = UINT32_C(0x00718ABC);
+    regs.read_vector(simrv::xlen::to_vec_reg_id(vs2)).u32[0] = UINT32_C(0x00718ABC);
     simrv::execute::ExecuteUnit::execute_vector(cpu, machine.memory(),
                                                 simrv::isa::OperationId::VFREC7_V,
                                                 vector_ir(vd, simrv::xlen::RegId::Zero, vs2));
-    expect(regs.read_vector(vd).u32[0] == UINT32_C(0x7E900000),
+    expect(regs.read_vector(simrv::xlen::to_vec_reg_id(vd)).u32[0] == UINT32_C(0x7E900000),
            "vfrec7.v normalizes subnormal inputs according to the architectural lookup");
 
-    regs.read_vector(vs2).f32[0] = 4.0F;
+    regs.read_vector(simrv::xlen::to_vec_reg_id(vs2)).f32[0] = 4.0F;
     simrv::execute::ExecuteUnit::execute_vector(cpu, machine.memory(),
                                                 simrv::isa::OperationId::VFRSQRT7_V,
                                                 vector_ir(vd, simrv::xlen::RegId::Zero, vs2));
-    expect(regs.read_vector(vd).u32[0] == UINT32_C(0x3EFF0000),
+    expect(regs.read_vector(simrv::xlen::to_vec_reg_id(vd)).u32[0] == UINT32_C(0x3EFF0000),
            "vfrsqrt7.v produces the specified seven-bit reciprocal-square-root estimate");
 
-    regs.read_vector(vs2).f32[0] = -1.0F;
+    regs.read_vector(simrv::xlen::to_vec_reg_id(vs2)).f32[0] = -1.0F;
     cpu.state().fcsr = 0;
     simrv::execute::ExecuteUnit::execute_vector(cpu, machine.memory(),
                                                 simrv::isa::OperationId::VFRSQRT7_V,
                                                 vector_ir(vd, simrv::xlen::RegId::Zero, vs2));
-    expect(regs.read_vector(vd).u32[0] == UINT32_C(0x7FC00000) &&
+    expect(regs.read_vector(simrv::xlen::to_vec_reg_id(vd)).u32[0] == UINT32_C(0x7FC00000) &&
                (cpu.state().fcsr & simrv::isa::FflagsBit::Nv) != 0,
            "vfrsqrt7.v returns canonical NaN and raises invalid for a negative operand");
 
-    regs.read_vector(vs2).f32[0] = 0.0F;
+    regs.read_vector(simrv::xlen::to_vec_reg_id(vs2)).f32[0] = 0.0F;
     cpu.state().fcsr = 0;
     simrv::execute::ExecuteUnit::execute_vector(cpu, machine.memory(),
                                                 simrv::isa::OperationId::VFREC7_V,
                                                 vector_ir(vd, simrv::xlen::RegId::Zero, vs2));
-    expect(regs.read_vector(vd).u32[0] == UINT32_C(0x7F800000) &&
+    expect(regs.read_vector(simrv::xlen::to_vec_reg_id(vd)).u32[0] == UINT32_C(0x7F800000) &&
                (cpu.state().fcsr & simrv::isa::FflagsBit::Dz) != 0,
            "vfrec7.v returns infinity and raises divide-by-zero for positive zero");
 
-    regs.read_vector(vs2).u32[0] = UINT32_C(0x80000000);
-    regs.read_vector(vs2).u32[1] = UINT32_C(0x7F800001);
+    regs.read_vector(simrv::xlen::to_vec_reg_id(vs2)).u32[0] = UINT32_C(0x80000000);
+    regs.read_vector(simrv::xlen::to_vec_reg_id(vs2)).u32[1] = UINT32_C(0x7F800001);
     cpu.state().vl = 2;
     cpu.state().fcsr = 0;
     simrv::execute::ExecuteUnit::execute_vector(cpu, machine.memory(),
                                                 simrv::isa::OperationId::VFCLASS_V,
                                                 vector_ir(vd, simrv::xlen::RegId::Zero, vs2));
-    expect(regs.read_vector(vd).u32[0] == (1U << 3U) && regs.read_vector(vd).u32[1] == (1U << 8U),
+    expect(regs.read_vector(simrv::xlen::to_vec_reg_id(vd)).u32[0] == (1U << 3U) && regs.read_vector(simrv::xlen::to_vec_reg_id(vd)).u32[1] == (1U << 8U),
            "vfclass.v distinguishes negative zero and signaling NaN");
     expect((cpu.state().fcsr & simrv::isa::FflagsBit::Nv) == 0,
            "vfclass.v does not raise invalid for a signaling NaN");
     cpu.state().vl = 1;
 
-    regs.read_vector(vs2).f32[0] = 2.5F;
+    regs.read_vector(simrv::xlen::to_vec_reg_id(vs2)).f32[0] = 2.5F;
     cpu.state().fcsr = 0;  // RNE
     simrv::execute::ExecuteUnit::execute_vector(cpu, machine.memory(),
                                                 simrv::isa::OperationId::VFCVT_X_F_V,
                                                 vector_ir(vd, simrv::xlen::RegId::Zero, vs2));
-    expect(regs.read_vector(vd).i32[0] == 2 && (cpu.state().fcsr & simrv::isa::FflagsBit::Nx) != 0,
+    expect(regs.read_vector(simrv::xlen::to_vec_reg_id(vd)).i32[0] == 2 && (cpu.state().fcsr & simrv::isa::FflagsBit::Nx) != 0,
            "vfcvt.x.f.v rounds ties to even and accrues inexact");
 
-    regs.read_vector(vs2).f32[0] = -1.75F;
+    regs.read_vector(simrv::xlen::to_vec_reg_id(vs2)).f32[0] = -1.75F;
     cpu.state().fcsr = 0;
     simrv::execute::ExecuteUnit::execute_vector(cpu, machine.memory(),
                                                 simrv::isa::OperationId::VFCVT_RTZ_X_F_V,
                                                 vector_ir(vd, simrv::xlen::RegId::Zero, vs2));
-    expect(!cpu.active_context().pending_exception.has_value() && regs.read_vector(vd).i32[0] == -1,
+    expect(!cpu.active_context().pending_exception.has_value() && regs.read_vector(simrv::xlen::to_vec_reg_id(vd)).i32[0] == -1,
            "vfcvt.rtz.x.f.v truncates toward zero");
 
-    regs.read_vector(vs2).u32[0] = UINT32_C(0x7FC00000);
+    regs.read_vector(simrv::xlen::to_vec_reg_id(vs2)).u32[0] = UINT32_C(0x7FC00000);
     cpu.state().fcsr = 0;
     simrv::execute::ExecuteUnit::execute_vector(cpu, machine.memory(),
                                                 simrv::isa::OperationId::VFCVT_XU_F_V,
                                                 vector_ir(vd, simrv::xlen::RegId::Zero, vs2));
-    expect(regs.read_vector(vd).u32[0] == UINT32_MAX &&
+    expect(regs.read_vector(simrv::xlen::to_vec_reg_id(vd)).u32[0] == UINT32_MAX &&
                (cpu.state().fcsr & simrv::isa::FflagsBit::Nv) != 0 &&
                (cpu.state().fcsr & simrv::isa::FflagsBit::Nx) == 0,
            "vfcvt.xu.f.v saturates NaN and raises invalid without inexact");
 
-    regs.read_vector(vs2).i32[0] = -7;
+    regs.read_vector(simrv::xlen::to_vec_reg_id(vs2)).i32[0] = -7;
     cpu.state().fcsr = 0;
     simrv::execute::ExecuteUnit::execute_vector(cpu, machine.memory(),
                                                 simrv::isa::OperationId::VFCVT_F_X_V,
                                                 vector_ir(vd, simrv::xlen::RegId::Zero, vs2));
-    expect(regs.read_vector(vd).f32[0] == -7.0F,
+    expect(regs.read_vector(simrv::xlen::to_vec_reg_id(vd)).f32[0] == -7.0F,
            "vfcvt.f.x.v converts signed integer vector elements");
 
-    regs.read_vector(vs2).i32[0] = 16'777'217;
+    regs.read_vector(simrv::xlen::to_vec_reg_id(vs2)).i32[0] = 16'777'217;
     cpu.state().fcsr = simrv::isa::RoundingMode::Rmm << 5U;
     simrv::execute::ExecuteUnit::execute_vector(cpu, machine.memory(),
                                                 simrv::isa::OperationId::VFCVT_F_X_V,
                                                 vector_ir(vd, simrv::xlen::RegId::Zero, vs2));
-    expect(regs.read_vector(vd).u32[0] == UINT32_C(0x4B800001) &&
+    expect(regs.read_vector(simrv::xlen::to_vec_reg_id(vd)).u32[0] == UINT32_C(0x4B800001) &&
                (cpu.state().fcsr & simrv::isa::FflagsBit::Nx) != 0,
            "vfcvt.f.x.v RMM rounds an integer halfway between FP32 values away from zero");
-    regs.read_vector(vs2).i32[0] = 16'777'219;
+    regs.read_vector(simrv::xlen::to_vec_reg_id(vs2)).i32[0] = 16'777'219;
     cpu.state().fcsr = simrv::isa::RoundingMode::Rmm << 5U;
     simrv::execute::ExecuteUnit::execute_vector(cpu, machine.memory(),
                                                 simrv::isa::OperationId::VFCVT_F_X_V,
                                                 vector_ir(vd, simrv::xlen::RegId::Zero, vs2));
-    expect(regs.read_vector(vd).u32[0] == UINT32_C(0x4B800002),
+    expect(regs.read_vector(simrv::xlen::to_vec_reg_id(vd)).u32[0] == UINT32_C(0x4B800002),
            "vfcvt.f.x.v RMM preserves a tie already rounded away by RNE");
 
     cpu.state().vtype = 3U << 3U;                              // SEW=64
-    regs.read_vector(vs2).i64[0] = INT64_C(9007199254740993);  // 2^53 + 1
+    regs.read_vector(simrv::xlen::to_vec_reg_id(vs2)).i64[0] = INT64_C(9007199254740993);  // 2^53 + 1
     cpu.state().fcsr = simrv::isa::RoundingMode::Rmm << 5U;
     simrv::execute::ExecuteUnit::execute_vector(cpu, machine.memory(),
                                                 simrv::isa::OperationId::VFCVT_F_X_V,
                                                 vector_ir(vd, simrv::xlen::RegId::Zero, vs2));
-    expect(regs.read_vector(vd).u64[0] == UINT64_C(0x4340000000000001) &&
+    expect(regs.read_vector(simrv::xlen::to_vec_reg_id(vd)).u64[0] == UINT64_C(0x4340000000000001) &&
                (cpu.state().fcsr & simrv::isa::FflagsBit::Nx) != 0,
            "vfcvt.f.x.v RMM rounds a 64-bit integer tie to FP64 away from zero");
     cpu.state().vtype = 2U << 3U;  // SEW=32, source EEW=64 for narrowing
-    regs.read_vector(vs2).i64[0] = (INT64_C(1) << 53U) + (INT64_C(1) << 29U);
+    regs.read_vector(simrv::xlen::to_vec_reg_id(vs2)).i64[0] = (INT64_C(1) << 53U) + (INT64_C(1) << 29U);
     cpu.state().fcsr = simrv::isa::RoundingMode::Rmm << 5U;
     simrv::execute::ExecuteUnit::execute_vector(cpu, machine.memory(),
                                                 simrv::isa::OperationId::VFNCVT_F_X_W,
                                                 vector_ir(vd, simrv::xlen::RegId::Zero, vs2));
-    expect(regs.read_vector(vd).u32[0] == UINT32_C(0x5A000001) &&
+    expect(regs.read_vector(simrv::xlen::to_vec_reg_id(vd)).u32[0] == UINT32_C(0x5A000001) &&
                (cpu.state().fcsr & simrv::isa::FflagsBit::Nx) != 0,
            "vfncvt.f.x.w RMM rounds a 64-bit integer tie to FP32 away from zero");
-    regs.read_vector(vs2).i64[0] = (INT64_C(1) << 53U) + (INT64_C(1) << 29U) - 1;
+    regs.read_vector(simrv::xlen::to_vec_reg_id(vs2)).i64[0] = (INT64_C(1) << 53U) + (INT64_C(1) << 29U) - 1;
     cpu.state().fcsr = simrv::isa::RoundingMode::Rmm << 5U;
     simrv::execute::ExecuteUnit::execute_vector(cpu, machine.memory(),
                                                 simrv::isa::OperationId::VFNCVT_F_X_W,
                                                 vector_ir(vd, simrv::xlen::RegId::Zero, vs2));
-    expect(regs.read_vector(vd).u32[0] == UINT32_C(0x5A000000),
+    expect(regs.read_vector(simrv::xlen::to_vec_reg_id(vd)).u32[0] == UINT32_C(0x5A000000),
            "vfncvt.f.x.w retains low integer bits when testing an FP32 midpoint");
     cpu.state().fcsr = 0;
 
-    regs.read_vector(vs2).i32[0] = -9;
+    regs.read_vector(simrv::xlen::to_vec_reg_id(vs2)).i32[0] = -9;
     simrv::execute::ExecuteUnit::execute_vector(cpu, machine.memory(),
                                                 simrv::isa::OperationId::VFWCVT_F_X_V,
                                                 vector_ir(vd, simrv::xlen::RegId::Zero, vs2));
     expect(!cpu.active_context().pending_exception.has_value(),
            "legal widening conversion does not raise an exception");
-    expect(regs.read_vector(vd).f64[0] == -9.0,
+    expect(regs.read_vector(simrv::xlen::to_vec_reg_id(vd)).f64[0] == -9.0,
            "vfwcvt.f.x.v widens signed integer elements to floating point");
 
-    regs.read_vector(vs2).f32[0] = -3.5F;
+    regs.read_vector(simrv::xlen::to_vec_reg_id(vs2)).f32[0] = -3.5F;
     cpu.state().fcsr = 0;
     simrv::execute::ExecuteUnit::execute_vector(cpu, machine.memory(),
                                                 simrv::isa::OperationId::VFWCVT_X_F_V,
                                                 vector_ir(vd, simrv::xlen::RegId::Zero, vs2));
-    expect(regs.read_vector(vd).i64[0] == -4,
+    expect(regs.read_vector(simrv::xlen::to_vec_reg_id(vd)).i64[0] == -4,
            "vfwcvt.x.f.v widens a rounded floating-point value to a signed integer");
 
-    regs.read_vector(vs2).f64[0] = 1.5;
+    regs.read_vector(simrv::xlen::to_vec_reg_id(vs2)).f64[0] = 1.5;
     simrv::execute::ExecuteUnit::execute_vector(cpu, machine.memory(),
                                                 simrv::isa::OperationId::VFNCVT_F_F_W,
                                                 vector_ir(vd, simrv::xlen::RegId::Zero, vs2));
-    expect(regs.read_vector(vd).f32[0] == 1.5F,
+    expect(regs.read_vector(simrv::xlen::to_vec_reg_id(vd)).f32[0] == 1.5F,
            "vfncvt.f.f.w narrows a double-width floating-point element");
 
-    regs.read_vector(vs2).f64[0] = 1.0 + std::ldexp(1.0, -24);
+    regs.read_vector(simrv::xlen::to_vec_reg_id(vs2)).f64[0] = 1.0 + std::ldexp(1.0, -24);
     cpu.state().fcsr = simrv::isa::RoundingMode::Rmm << 5U;
     simrv::execute::ExecuteUnit::execute_vector(cpu, machine.memory(),
                                                 simrv::isa::OperationId::VFNCVT_F_F_W,
                                                 vector_ir(vd, simrv::xlen::RegId::Zero, vs2));
-    expect(regs.read_vector(vd).u32[0] == UINT32_C(0x3F800001) &&
+    expect(regs.read_vector(simrv::xlen::to_vec_reg_id(vd)).u32[0] == UINT32_C(0x3F800001) &&
                (cpu.state().fcsr & simrv::isa::FflagsBit::Nx) != 0,
            "vfncvt.f.f.w RMM rounds a binary64-to-binary32 tie away from zero");
 
-    regs.read_vector(vs2).f64[0] = 1.0 + std::ldexp(1.0, -24);
+    regs.read_vector(simrv::xlen::to_vec_reg_id(vs2)).f64[0] = 1.0 + std::ldexp(1.0, -24);
     cpu.state().fcsr = 0;
     simrv::execute::ExecuteUnit::execute_vector(cpu, machine.memory(),
                                                 simrv::isa::OperationId::VFNCVT_ROD_F_F_W,
                                                 vector_ir(vd, simrv::xlen::RegId::Zero, vs2));
-    expect(regs.read_vector(vd).u32[0] == UINT32_C(0x3F800001),
+    expect(regs.read_vector(simrv::xlen::to_vec_reg_id(vd)).u32[0] == UINT32_C(0x3F800001),
            "vfncvt.rod.f.f.w forces an inexact result's low bit odd");
 
     cpu.state().fcsr = 7U << 5U;
@@ -1904,28 +1904,28 @@ void test_vector_floating_arithmetic() {
 
     cpu.state().vl = 2;
     cpu.state().fcsr = 0;
-    regs.write_fp(vs1, simrv::xlen::kF32BoxerBits | std::bit_cast<uint32_t>(4.25F));
+    regs.write_fp(simrv::xlen::to_fp_reg_id(vs1), simrv::xlen::kF32BoxerBits | std::bit_cast<uint32_t>(4.25F));
     simrv::execute::ExecuteUnit::execute_vector(cpu, machine.memory(),
                                                 simrv::isa::OperationId::VFMV_V_F,
                                                 vector_ir(vd, vs1, simrv::xlen::RegId::Zero));
-    expect(regs.read_vector(vd).f32[0] == 4.25F && regs.read_vector(vd).f32[1] == 4.25F,
+    expect(regs.read_vector(simrv::xlen::to_vec_reg_id(vd)).f32[0] == 4.25F && regs.read_vector(simrv::xlen::to_vec_reg_id(vd)).f32[1] == 4.25F,
            "vfmv.v.f splats a scalar floating-point value across active elements");
 
     cpu.state().vl = 3;
-    regs.read_vector(vs2).f32[0] = 1.0F;
-    regs.read_vector(vs2).f32[1] = 2.0F;
-    regs.read_vector(vs2).f32[2] = 3.0F;
-    regs.write_fp(vs1, simrv::xlen::kF32BoxerBits | std::bit_cast<uint32_t>(9.0F));
+    regs.read_vector(simrv::xlen::to_vec_reg_id(vs2)).f32[0] = 1.0F;
+    regs.read_vector(simrv::xlen::to_vec_reg_id(vs2)).f32[1] = 2.0F;
+    regs.read_vector(simrv::xlen::to_vec_reg_id(vs2)).f32[2] = 3.0F;
+    regs.write_fp(simrv::xlen::to_fp_reg_id(vs1), simrv::xlen::kF32BoxerBits | std::bit_cast<uint32_t>(9.0F));
     simrv::execute::ExecuteUnit::execute_vector(
         cpu, machine.memory(), simrv::isa::OperationId::VFSLIDE1UP_VF, vector_ir(vd, vs1, vs2));
-    expect(regs.read_vector(vd).f32[0] == 9.0F && regs.read_vector(vd).f32[1] == 1.0F &&
-               regs.read_vector(vd).f32[2] == 2.0F,
+    expect(regs.read_vector(simrv::xlen::to_vec_reg_id(vd)).f32[0] == 9.0F && regs.read_vector(simrv::xlen::to_vec_reg_id(vd)).f32[1] == 1.0F &&
+               regs.read_vector(simrv::xlen::to_vec_reg_id(vd)).f32[2] == 2.0F,
            "vfslide1up.vf inserts the scalar and shifts lower source elements upward");
 
     simrv::execute::ExecuteUnit::execute_vector(
         cpu, machine.memory(), simrv::isa::OperationId::VFSLIDE1DOWN_VF, vector_ir(vd, vs1, vs2));
-    expect(regs.read_vector(vd).f32[0] == 2.0F && regs.read_vector(vd).f32[1] == 3.0F &&
-               regs.read_vector(vd).f32[2] == 9.0F,
+    expect(regs.read_vector(simrv::xlen::to_vec_reg_id(vd)).f32[0] == 2.0F && regs.read_vector(simrv::xlen::to_vec_reg_id(vd)).f32[1] == 3.0F &&
+               regs.read_vector(simrv::xlen::to_vec_reg_id(vd)).f32[2] == 9.0F,
            "vfslide1down.vf shifts higher source elements down and appends the scalar");
 
     simrv::execute::ExecuteUnit::execute_vector(
@@ -1935,163 +1935,163 @@ void test_vector_floating_arithmetic() {
     cpu.active_context().pending_exception.reset();
     cpu.state().vl = 1;
 
-    regs.read_vector(vs2).f32[0] = 1.0F;
-    regs.read_vector(vs1).f32[0] = 0.0F;
+    regs.read_vector(simrv::xlen::to_vec_reg_id(vs2)).f32[0] = 1.0F;
+    regs.read_vector(simrv::xlen::to_vec_reg_id(vs1)).f32[0] = 0.0F;
     cpu.state().fcsr = 0;
     simrv::execute::ExecuteUnit::execute_vector(
         cpu, machine.memory(), simrv::isa::OperationId::VFDIV_VV, vector_ir(vd, vs1, vs2));
-    expect(std::isinf(regs.read_vector(vd).f32[0]) &&
+    expect(std::isinf(regs.read_vector(simrv::xlen::to_vec_reg_id(vd)).f32[0]) &&
                (cpu.state().fcsr & simrv::isa::FflagsBit::Dz) != 0,
            "vfdiv.vv produces infinity and accrues divide-by-zero in fflags");
 
-    regs.read_vector(vs2).u32[0] = UINT32_C(0x7FC12345);
-    regs.write_fp(vs1, simrv::xlen::kF32BoxerBits | std::bit_cast<uint32_t>(1.0F));
+    regs.read_vector(simrv::xlen::to_vec_reg_id(vs2)).u32[0] = UINT32_C(0x7FC12345);
+    regs.write_fp(simrv::xlen::to_fp_reg_id(vs1), simrv::xlen::kF32BoxerBits | std::bit_cast<uint32_t>(1.0F));
     simrv::execute::ExecuteUnit::execute_vector(
         cpu, machine.memory(), simrv::isa::OperationId::VFADD_VF, vector_ir(vd, vs1, vs2));
-    expect(regs.read_vector(vd).u32[0] == simrv::xlen::kF32Qnan,
+    expect(regs.read_vector(simrv::xlen::to_vec_reg_id(vd)).u32[0] == simrv::xlen::kF32Qnan,
            "vfadd.vf canonicalizes a NaN payload from a vector operand");
 
     cpu.state().fcsr = simrv::isa::RoundingMode::Rmm << 5U;
-    regs.read_vector(vs2).f32[0] = 1.0F;
-    regs.read_vector(vs1).f32[0] = 0x1p-24F;
+    regs.read_vector(simrv::xlen::to_vec_reg_id(vs2)).f32[0] = 1.0F;
+    regs.read_vector(simrv::xlen::to_vec_reg_id(vs1)).f32[0] = 0x1p-24F;
     simrv::execute::ExecuteUnit::execute_vector(
         cpu, machine.memory(), simrv::isa::OperationId::VFADD_VV, vector_ir(vd, vs1, vs2));
-    expect(regs.read_vector(vd).u32[0] == UINT32_C(0x3F800001) &&
+    expect(regs.read_vector(simrv::xlen::to_vec_reg_id(vd)).u32[0] == UINT32_C(0x3F800001) &&
                (cpu.state().fcsr & simrv::isa::FflagsBit::Nx) != 0,
            "vfadd.vv RMM rounds a binary32 tie away from zero and raises inexact");
 
     cpu.state().fcsr = simrv::isa::RoundingMode::Rmm << 5U;
-    regs.write_fp(vs1, simrv::xlen::kF32BoxerBits | std::bit_cast<uint32_t>(-0x1p-24F));
-    regs.read_vector(vs2).f32[0] = -1.0F;
+    regs.write_fp(simrv::xlen::to_fp_reg_id(vs1), simrv::xlen::kF32BoxerBits | std::bit_cast<uint32_t>(-0x1p-24F));
+    regs.read_vector(simrv::xlen::to_vec_reg_id(vs2)).f32[0] = -1.0F;
     simrv::execute::ExecuteUnit::execute_vector(
         cpu, machine.memory(), simrv::isa::OperationId::VFADD_VF, vector_ir(vd, vs1, vs2));
-    expect(regs.read_vector(vd).u32[0] == UINT32_C(0xBF800001),
+    expect(regs.read_vector(simrv::xlen::to_vec_reg_id(vd)).u32[0] == UINT32_C(0xBF800001),
            "vfadd.vf RMM rounds a negative binary32 tie away from zero");
 
-    regs.read_vector(vs2).f32[0] = 1.0F;
-    regs.read_vector(vs1).f32[0] = 0x1.8p-24F;
+    regs.read_vector(simrv::xlen::to_vec_reg_id(vs2)).f32[0] = 1.0F;
+    regs.read_vector(simrv::xlen::to_vec_reg_id(vs1)).f32[0] = 0x1.8p-24F;
     simrv::execute::ExecuteUnit::execute_vector(
         cpu, machine.memory(), simrv::isa::OperationId::VFSUB_VV, vector_ir(vd, vs1, vs2));
-    expect(regs.read_vector(vd).u32[0] == UINT32_C(0x3F7FFFFF),
+    expect(regs.read_vector(simrv::xlen::to_vec_reg_id(vd)).u32[0] == UINT32_C(0x3F7FFFFF),
            "vfsub.vv RMM rounds a positive tie away from zero");
 
-    regs.read_vector(vs2).f32[0] = 1.5F;
-    regs.read_vector(vs1).u32[0] = UINT32_C(0x3F800003);
+    regs.read_vector(simrv::xlen::to_vec_reg_id(vs2)).f32[0] = 1.5F;
+    regs.read_vector(simrv::xlen::to_vec_reg_id(vs1)).u32[0] = UINT32_C(0x3F800003);
     simrv::execute::ExecuteUnit::execute_vector(
         cpu, machine.memory(), simrv::isa::OperationId::VFMUL_VV, vector_ir(vd, vs1, vs2));
-    expect(regs.read_vector(vd).u32[0] == UINT32_C(0x3FC00005),
+    expect(regs.read_vector(simrv::xlen::to_vec_reg_id(vd)).u32[0] == UINT32_C(0x3FC00005),
            "vfmul.vv RMM rounds a binary32 product tie away from zero");
 
     cpu.state().fcsr = simrv::isa::RoundingMode::Rmm << 5U;
-    regs.read_vector(vs2).u32[0] = UINT32_C(0x7F7FFFFF);
-    regs.read_vector(vs1).f32[0] = 0.0F;
+    regs.read_vector(simrv::xlen::to_vec_reg_id(vs2)).u32[0] = UINT32_C(0x7F7FFFFF);
+    regs.read_vector(simrv::xlen::to_vec_reg_id(vs1)).f32[0] = 0.0F;
     simrv::execute::ExecuteUnit::execute_vector(
         cpu, machine.memory(), simrv::isa::OperationId::VFADD_VV, vector_ir(vd, vs1, vs2));
-    expect(regs.read_vector(vd).u32[0] == UINT32_C(0x7F7FFFFF) &&
+    expect(regs.read_vector(simrv::xlen::to_vec_reg_id(vd)).u32[0] == UINT32_C(0x7F7FFFFF) &&
                (cpu.state().fcsr & UINT32_C(0x1F)) == 0,
            "an exact RMM result at the binary32 maximum does not raise flags");
 
-    regs.read_vector(vs2).u32[0] = UINT32_C(0x00000001);
-    regs.read_vector(vs1).f32[0] = 2.0F;
+    regs.read_vector(simrv::xlen::to_vec_reg_id(vs2)).u32[0] = UINT32_C(0x00000001);
+    regs.read_vector(simrv::xlen::to_vec_reg_id(vs1)).f32[0] = 2.0F;
     cpu.state().fcsr = simrv::isa::RoundingMode::Rmm << 5U;
     simrv::execute::ExecuteUnit::execute_vector(
         cpu, machine.memory(), simrv::isa::OperationId::VFDIV_VV, vector_ir(vd, vs1, vs2));
-    expect(regs.read_vector(vd).u32[0] == UINT32_C(0x00000001) &&
+    expect(regs.read_vector(simrv::xlen::to_vec_reg_id(vd)).u32[0] == UINT32_C(0x00000001) &&
                (cpu.state().fcsr & simrv::isa::FflagsBit::Uf) != 0 &&
                (cpu.state().fcsr & simrv::isa::FflagsBit::Nx) != 0,
            "vfdiv.vv RMM rounds a half-subnormal binary32 quotient away from zero");
-    regs.read_vector(vs2).f32[0] = 2.0F;
-    regs.write_fp(vs1, simrv::xlen::kF32BoxerBits | UINT32_C(0x00000001));
+    regs.read_vector(simrv::xlen::to_vec_reg_id(vs2)).f32[0] = 2.0F;
+    regs.write_fp(simrv::xlen::to_fp_reg_id(vs1), simrv::xlen::kF32BoxerBits | UINT32_C(0x00000001));
     cpu.state().fcsr = simrv::isa::RoundingMode::Rmm << 5U;
     simrv::execute::ExecuteUnit::execute_vector(
         cpu, machine.memory(), simrv::isa::OperationId::VFRDIV_VF, vector_ir(vd, vs1, vs2));
-    expect(regs.read_vector(vd).u32[0] == UINT32_C(0x00000001),
+    expect(regs.read_vector(simrv::xlen::to_vec_reg_id(vd)).u32[0] == UINT32_C(0x00000001),
            "vfrdiv.vf RMM applies the same half-subnormal rule to reverse division");
 
     cpu.state().vtype = 3U << 3U;  // SEW=64
-    regs.read_vector(vs2).f64[0] = 1.0;
-    regs.read_vector(vs1).f64[0] = 0x1p-53;
+    regs.read_vector(simrv::xlen::to_vec_reg_id(vs2)).f64[0] = 1.0;
+    regs.read_vector(simrv::xlen::to_vec_reg_id(vs1)).f64[0] = 0x1p-53;
     cpu.state().fcsr = simrv::isa::RoundingMode::Rmm << 5U;
     simrv::execute::ExecuteUnit::execute_vector(
         cpu, machine.memory(), simrv::isa::OperationId::VFADD_VV, vector_ir(vd, vs1, vs2));
-    expect(regs.read_vector(vd).u64[0] == UINT64_C(0x3FF0000000000001) &&
+    expect(regs.read_vector(simrv::xlen::to_vec_reg_id(vd)).u64[0] == UINT64_C(0x3FF0000000000001) &&
                (cpu.state().fcsr & simrv::isa::FflagsBit::Nx) != 0,
            "vfadd.vv RMM rounds a binary64 tie away from zero");
-    regs.write_fp(vs1, std::bit_cast<uint64_t>(0x1p-53));
+    regs.write_fp(simrv::xlen::to_fp_reg_id(vs1), std::bit_cast<uint64_t>(0x1p-53));
     cpu.state().fcsr = simrv::isa::RoundingMode::Rmm << 5U;
     simrv::execute::ExecuteUnit::execute_vector(
         cpu, machine.memory(), simrv::isa::OperationId::VFADD_VF, vector_ir(vd, vs1, vs2));
-    expect(regs.read_vector(vd).u64[0] == UINT64_C(0x3FF0000000000001),
+    expect(regs.read_vector(simrv::xlen::to_vec_reg_id(vd)).u64[0] == UINT64_C(0x3FF0000000000001),
            "vfadd.vf RMM applies the binary64 tie rule to scalar operands");
-    regs.read_vector(vs1).f64[0] = 0x1.fffffffffffffp-54;  // Just below the tie.
+    regs.read_vector(simrv::xlen::to_vec_reg_id(vs1)).f64[0] = 0x1.fffffffffffffp-54;  // Just below the tie.
     cpu.state().fcsr = simrv::isa::RoundingMode::Rmm << 5U;
     simrv::execute::ExecuteUnit::execute_vector(
         cpu, machine.memory(), simrv::isa::OperationId::VFADD_VV, vector_ir(vd, vs1, vs2));
-    expect(regs.read_vector(vd).u64[0] == UINT64_C(0x3FF0000000000000),
+    expect(regs.read_vector(simrv::xlen::to_vec_reg_id(vd)).u64[0] == UINT64_C(0x3FF0000000000000),
            "vfadd.vv RMM distinguishes a binary64 near-tie from an exact tie");
-    regs.read_vector(vs2).f64[0] = -1.0;
-    regs.read_vector(vs1).f64[0] = 0x1p-53;
+    regs.read_vector(simrv::xlen::to_vec_reg_id(vs2)).f64[0] = -1.0;
+    regs.read_vector(simrv::xlen::to_vec_reg_id(vs1)).f64[0] = 0x1p-53;
     cpu.state().fcsr = simrv::isa::RoundingMode::Rmm << 5U;
     simrv::execute::ExecuteUnit::execute_vector(
         cpu, machine.memory(), simrv::isa::OperationId::VFSUB_VV, vector_ir(vd, vs1, vs2));
-    expect(regs.read_vector(vd).u64[0] == UINT64_C(0xBFF0000000000001),
+    expect(regs.read_vector(simrv::xlen::to_vec_reg_id(vd)).u64[0] == UINT64_C(0xBFF0000000000001),
            "vfsub.vv RMM rounds a negative binary64 tie away from zero");
-    regs.read_vector(vs2).f64[0] = 1.5;
-    regs.read_vector(vs1).u64[0] = UINT64_C(0x3FF0000000000003);
+    regs.read_vector(simrv::xlen::to_vec_reg_id(vs2)).f64[0] = 1.5;
+    regs.read_vector(simrv::xlen::to_vec_reg_id(vs1)).u64[0] = UINT64_C(0x3FF0000000000003);
     cpu.state().fcsr = simrv::isa::RoundingMode::Rmm << 5U;
     simrv::execute::ExecuteUnit::execute_vector(
         cpu, machine.memory(), simrv::isa::OperationId::VFMUL_VV, vector_ir(vd, vs1, vs2));
-    expect(regs.read_vector(vd).u64[0] == UINT64_C(0x3FF8000000000005) &&
+    expect(regs.read_vector(simrv::xlen::to_vec_reg_id(vd)).u64[0] == UINT64_C(0x3FF8000000000005) &&
                (cpu.state().fcsr & simrv::isa::FflagsBit::Nx) != 0,
            "vfmul.vv RMM rounds an exact binary64 product tie away from zero");
-    regs.read_vector(vs2).f64[0] = 0x1p-1022;
-    regs.read_vector(vs1).f64[0] = 0x1p-53;
+    regs.read_vector(simrv::xlen::to_vec_reg_id(vs2)).f64[0] = 0x1p-1022;
+    regs.read_vector(simrv::xlen::to_vec_reg_id(vs1)).f64[0] = 0x1p-53;
     cpu.state().fcsr = simrv::isa::RoundingMode::Rmm << 5U;
     simrv::execute::ExecuteUnit::execute_vector(
         cpu, machine.memory(), simrv::isa::OperationId::VFMUL_VV, vector_ir(vd, vs1, vs2));
-    expect(regs.read_vector(vd).u64[0] == UINT64_C(0x0000000000000001) &&
+    expect(regs.read_vector(simrv::xlen::to_vec_reg_id(vd)).u64[0] == UINT64_C(0x0000000000000001) &&
                (cpu.state().fcsr & simrv::isa::FflagsBit::Uf) != 0 &&
                (cpu.state().fcsr & simrv::isa::FflagsBit::Nx) != 0,
            "vfmul.vv RMM rounds a half-subnormal product away from zero");
-    regs.read_vector(vs2).u64[0] = UINT64_C(0x0000000000000001);
-    regs.read_vector(vs1).f64[0] = 2.0;
+    regs.read_vector(simrv::xlen::to_vec_reg_id(vs2)).u64[0] = UINT64_C(0x0000000000000001);
+    regs.read_vector(simrv::xlen::to_vec_reg_id(vs1)).f64[0] = 2.0;
     cpu.state().fcsr = simrv::isa::RoundingMode::Rmm << 5U;
     simrv::execute::ExecuteUnit::execute_vector(
         cpu, machine.memory(), simrv::isa::OperationId::VFDIV_VV, vector_ir(vd, vs1, vs2));
-    expect(regs.read_vector(vd).u64[0] == UINT64_C(0x0000000000000001) &&
+    expect(regs.read_vector(simrv::xlen::to_vec_reg_id(vd)).u64[0] == UINT64_C(0x0000000000000001) &&
                (cpu.state().fcsr & simrv::isa::FflagsBit::Uf) != 0 &&
                (cpu.state().fcsr & simrv::isa::FflagsBit::Nx) != 0,
            "vfdiv.vv RMM rounds a half-subnormal quotient away from zero");
-    regs.read_vector(vs1).f64[0] = 1.0 + 0x1p-52;
-    regs.read_vector(vs2).f64[0] = 1.0 - 0x1p-52;
-    regs.read_vector(vd).f64[0] = 0x1p-53 + 0x1p-104;
+    regs.read_vector(simrv::xlen::to_vec_reg_id(vs1)).f64[0] = 1.0 + 0x1p-52;
+    regs.read_vector(simrv::xlen::to_vec_reg_id(vs2)).f64[0] = 1.0 - 0x1p-52;
+    regs.read_vector(simrv::xlen::to_vec_reg_id(vd)).f64[0] = 0x1p-53 + 0x1p-104;
     cpu.state().fcsr = simrv::isa::RoundingMode::Rmm << 5U;
     simrv::execute::ExecuteUnit::execute_vector(
         cpu, machine.memory(), simrv::isa::OperationId::VFMACC_VV, vector_ir(vd, vs1, vs2));
-    expect(regs.read_vector(vd).u64[0] == UINT64_C(0x3FF0000000000001) &&
+    expect(regs.read_vector(simrv::xlen::to_vec_reg_id(vd)).u64[0] == UINT64_C(0x3FF0000000000001) &&
                (cpu.state().fcsr & simrv::isa::FflagsBit::Nx) != 0,
            "vfmacc.vv RMM rounds an exact fused binary64 tie away from zero");
-    regs.read_vector(vd).f64[0] = 0x1p-53 + 0x1p-105;
+    regs.read_vector(simrv::xlen::to_vec_reg_id(vd)).f64[0] = 0x1p-53 + 0x1p-105;
     cpu.state().fcsr = simrv::isa::RoundingMode::Rmm << 5U;
     simrv::execute::ExecuteUnit::execute_vector(
         cpu, machine.memory(), simrv::isa::OperationId::VFMACC_VV, vector_ir(vd, vs1, vs2));
-    expect(regs.read_vector(vd).u64[0] == UINT64_C(0x3FF0000000000000),
+    expect(regs.read_vector(simrv::xlen::to_vec_reg_id(vd)).u64[0] == UINT64_C(0x3FF0000000000000),
            "vfmacc.vv RMM preserves the low fused bit below a binary64 midpoint");
     cpu.state().vtype = 2U << 3U;  // SEW=32
 
-    regs.read_vector(vs1).f32[0] = 1.0F + 0x1p-23F;
-    regs.read_vector(vs2).f32[0] = 1.0F - 0x1p-23F;
-    regs.read_vector(vd).f32[0] = 0x1p-24F + 0x1p-46F;
+    regs.read_vector(simrv::xlen::to_vec_reg_id(vs1)).f32[0] = 1.0F + 0x1p-23F;
+    regs.read_vector(simrv::xlen::to_vec_reg_id(vs2)).f32[0] = 1.0F - 0x1p-23F;
+    regs.read_vector(simrv::xlen::to_vec_reg_id(vd)).f32[0] = 0x1p-24F + 0x1p-46F;
     cpu.state().fcsr = simrv::isa::RoundingMode::Rmm << 5U;
     simrv::execute::ExecuteUnit::execute_vector(
         cpu, machine.memory(), simrv::isa::OperationId::VFMACC_VV, vector_ir(vd, vs1, vs2));
-    expect(regs.read_vector(vd).u32[0] == UINT32_C(0x3F800001),
+    expect(regs.read_vector(simrv::xlen::to_vec_reg_id(vd)).u32[0] == UINT32_C(0x3F800001),
            "vfmacc.vv RMM rounds an exact fused binary32 tie away from zero");
-    regs.read_vector(vd).f32[0] = 0x1p-24F + 0x1p-47F;
+    regs.read_vector(simrv::xlen::to_vec_reg_id(vd)).f32[0] = 0x1p-24F + 0x1p-47F;
     cpu.state().fcsr = simrv::isa::RoundingMode::Rmm << 5U;
     simrv::execute::ExecuteUnit::execute_vector(
         cpu, machine.memory(), simrv::isa::OperationId::VFMACC_VV, vector_ir(vd, vs1, vs2));
-    expect(regs.read_vector(vd).u32[0] == UINT32_C(0x3F800000),
+    expect(regs.read_vector(simrv::xlen::to_vec_reg_id(vd)).u32[0] == UINT32_C(0x3F800000),
            "vfmacc.vv RMM distinguishes a fused binary32 near-tie");
     cpu.state().fcsr = 0;
 
@@ -2106,137 +2106,137 @@ void test_vector_floating_arithmetic() {
         std::pair{simrv::isa::OperationId::VFNMSAC_VV, 4.0F},
     };
     for (const auto& [operation, expected] : kFusedCases) {
-        regs.read_vector(vd).f32[0] = 10.0F;
-        regs.read_vector(vs1).f32[0] = 2.0F;
-        regs.read_vector(vs2).f32[0] = 3.0F;
+        regs.read_vector(simrv::xlen::to_vec_reg_id(vd)).f32[0] = 10.0F;
+        regs.read_vector(simrv::xlen::to_vec_reg_id(vs1)).f32[0] = 2.0F;
+        regs.read_vector(simrv::xlen::to_vec_reg_id(vs2)).f32[0] = 3.0F;
         simrv::execute::ExecuteUnit::execute_vector(cpu, machine.memory(), operation,
                                                     vector_ir(vd, vs1, vs2));
-        expect(regs.read_vector(vd).f32[0] == expected,
+        expect(regs.read_vector(simrv::xlen::to_vec_reg_id(vd)).f32[0] == expected,
                "vector fused floating-point variants use their specified operand signs/order");
     }
 
-    regs.read_vector(vs2).f32[0] = 3.0F;
-    regs.write_fp(vs1, UINT64_C(0xFFFFFFFF00000000) | std::bit_cast<uint32_t>(2.0F));
+    regs.read_vector(simrv::xlen::to_vec_reg_id(vs2)).f32[0] = 3.0F;
+    regs.write_fp(simrv::xlen::to_fp_reg_id(vs1), UINT64_C(0xFFFFFFFF00000000) | std::bit_cast<uint32_t>(2.0F));
     simrv::execute::ExecuteUnit::execute_vector(
         cpu, machine.memory(), simrv::isa::OperationId::VFMADD_VF, vector_ir(vs2, vs1, vs2));
-    expect(regs.read_vector(vs2).f32[0] == 9.0F,
+    expect(regs.read_vector(simrv::xlen::to_vec_reg_id(vs2)).f32[0] == 9.0F,
            "vfmadd.vf snapshots an overlapping destination multiplicand");
 
     cpu.state().vl = 3;
-    regs.read_vector(vs1).f32[0] = 10.0F;
-    regs.read_vector(vs2).f32[0] = 1.0F;
-    regs.read_vector(vs2).f32[1] = 2.0F;
-    regs.read_vector(vs2).f32[2] = 3.0F;
+    regs.read_vector(simrv::xlen::to_vec_reg_id(vs1)).f32[0] = 10.0F;
+    regs.read_vector(simrv::xlen::to_vec_reg_id(vs2)).f32[0] = 1.0F;
+    regs.read_vector(simrv::xlen::to_vec_reg_id(vs2)).f32[1] = 2.0F;
+    regs.read_vector(simrv::xlen::to_vec_reg_id(vs2)).f32[2] = 3.0F;
     simrv::execute::ExecuteUnit::execute_vector(
         cpu, machine.memory(), simrv::isa::OperationId::VFREDOSUM_VS, vector_ir(vd, vs1, vs2));
-    expect(regs.read_vector(vd).f32[0] == 16.0F,
+    expect(regs.read_vector(simrv::xlen::to_vec_reg_id(vd)).f32[0] == 16.0F,
            "vfredosum.vs accumulates active elements in order from vs1[0]");
 
     cpu.state().vl = 1;
     cpu.state().fcsr = simrv::isa::RoundingMode::Rmm << 5U;
-    regs.read_vector(vs1).f32[0] = 1.0F;
-    regs.read_vector(vs2).f32[0] = 0x1p-24F;
+    regs.read_vector(simrv::xlen::to_vec_reg_id(vs1)).f32[0] = 1.0F;
+    regs.read_vector(simrv::xlen::to_vec_reg_id(vs2)).f32[0] = 0x1p-24F;
     simrv::execute::ExecuteUnit::execute_vector(
         cpu, machine.memory(), simrv::isa::OperationId::VFREDOSUM_VS, vector_ir(vd, vs1, vs2));
-    expect(regs.read_vector(vd).u32[0] == UINT32_C(0x3F800001) &&
+    expect(regs.read_vector(simrv::xlen::to_vec_reg_id(vd)).u32[0] == UINT32_C(0x3F800001) &&
                (cpu.state().fcsr & simrv::isa::FflagsBit::Nx) != 0,
            "vfredosum.vs applies RMM to a binary32 halfway sum");
-    regs.read_vector(vs1).f32[0] = -1.0F;
-    regs.read_vector(vs2).f32[0] = -0x1p-24F;
+    regs.read_vector(simrv::xlen::to_vec_reg_id(vs1)).f32[0] = -1.0F;
+    regs.read_vector(simrv::xlen::to_vec_reg_id(vs2)).f32[0] = -0x1p-24F;
     cpu.state().fcsr = simrv::isa::RoundingMode::Rmm << 5U;
     simrv::execute::ExecuteUnit::execute_vector(
         cpu, machine.memory(), simrv::isa::OperationId::VFREDUSUM_VS, vector_ir(vd, vs1, vs2));
-    expect(regs.read_vector(vd).u32[0] == UINT32_C(0xBF800001),
+    expect(regs.read_vector(simrv::xlen::to_vec_reg_id(vd)).u32[0] == UINT32_C(0xBF800001),
            "vfredusum.vs applies RMM to a negative binary32 halfway sum");
     cpu.state().vtype = 3U << 3U;  // SEW=64
-    regs.read_vector(vs1).f64[0] = 1.0;
-    regs.read_vector(vs2).f64[0] = 0x1p-53;
+    regs.read_vector(simrv::xlen::to_vec_reg_id(vs1)).f64[0] = 1.0;
+    regs.read_vector(simrv::xlen::to_vec_reg_id(vs2)).f64[0] = 0x1p-53;
     cpu.state().fcsr = simrv::isa::RoundingMode::Rmm << 5U;
     simrv::execute::ExecuteUnit::execute_vector(
         cpu, machine.memory(), simrv::isa::OperationId::VFREDOSUM_VS, vector_ir(vd, vs1, vs2));
-    expect(regs.read_vector(vd).u64[0] == UINT64_C(0x3FF0000000000001),
+    expect(regs.read_vector(simrv::xlen::to_vec_reg_id(vd)).u64[0] == UINT64_C(0x3FF0000000000001),
            "vfredosum.vs applies RMM to a binary64 halfway sum");
     cpu.state().vtype = 2U << 3U;  // SEW=32
     cpu.state().fcsr = 0;
 
-    regs.read_vector(vs1).u32[0] = UINT32_C(0x00000000);
-    regs.read_vector(vs2).u32[0] = UINT32_C(0x80000000);
+    regs.read_vector(simrv::xlen::to_vec_reg_id(vs1)).u32[0] = UINT32_C(0x00000000);
+    regs.read_vector(simrv::xlen::to_vec_reg_id(vs2)).u32[0] = UINT32_C(0x80000000);
     simrv::execute::ExecuteUnit::execute_vector(
         cpu, machine.memory(), simrv::isa::OperationId::VFREDMIN_VS, vector_ir(vd, vs1, vs2));
-    expect(regs.read_vector(vd).u32[0] == UINT32_C(0x80000000),
+    expect(regs.read_vector(simrv::xlen::to_vec_reg_id(vd)).u32[0] == UINT32_C(0x80000000),
            "vfredmin.vs selects negative zero");
 
-    regs.read_vector(vs1).u32[0] = UINT32_C(0x7F800001);
-    regs.read_vector(simrv::xlen::RegId::Zero).u8[0] = 0;
+    regs.read_vector(simrv::xlen::to_vec_reg_id(vs1)).u32[0] = UINT32_C(0x7F800001);
+    regs.read_vector(simrv::xlen::to_vec_reg_id(simrv::xlen::RegId::Zero)).u8[0] = 0;
     cpu.state().fcsr = 0;
     const simrv::xlen::Instruction masked_ir =
         vector_ir(vd, vs1, vs2) & ~(simrv::xlen::Instruction{1} << 25U);
     simrv::execute::ExecuteUnit::execute_vector(cpu, machine.memory(),
                                                 simrv::isa::OperationId::VFREDMAX_VS, masked_ir);
-    expect(regs.read_vector(vd).u32[0] == UINT32_C(0x7F800001) &&
+    expect(regs.read_vector(simrv::xlen::to_vec_reg_id(vd)).u32[0] == UINT32_C(0x7F800001) &&
                (cpu.state().fcsr & simrv::isa::FflagsBit::Nv) == 0,
            "an empty FP reduction copies vs1[0] without canonicalizing or raising exceptions");
 
     cpu.state().vl = 0;
-    regs.read_vector(vd).u32[0] = UINT32_C(0x12345678);
+    regs.read_vector(simrv::xlen::to_vec_reg_id(vd)).u32[0] = UINT32_C(0x12345678);
     simrv::execute::ExecuteUnit::execute_vector(
         cpu, machine.memory(), simrv::isa::OperationId::VFREDMAX_VS, vector_ir(vd, vs1, vs2));
-    expect(regs.read_vector(vd).u32[0] == UINT32_C(0x12345678),
+    expect(regs.read_vector(simrv::xlen::to_vec_reg_id(vd)).u32[0] == UINT32_C(0x12345678),
            "a zero-length floating-point reduction leaves its destination unchanged");
     simrv::execute::ExecuteUnit::execute_vector(
         cpu, machine.memory(), simrv::isa::OperationId::VREDSUM_VS, vector_ir(vd, vs1, vs2));
-    expect(regs.read_vector(vd).u32[0] == UINT32_C(0x12345678),
+    expect(regs.read_vector(simrv::xlen::to_vec_reg_id(vd)).u32[0] == UINT32_C(0x12345678),
            "a zero-length integer reduction leaves its destination unchanged");
     simrv::execute::ExecuteUnit::execute_vector(
         cpu, machine.memory(), simrv::isa::OperationId::VFWREDOSUM_VS, vector_ir(vd, vs1, vs2));
-    expect(regs.read_vector(vd).u32[0] == UINT32_C(0x12345678),
+    expect(regs.read_vector(simrv::xlen::to_vec_reg_id(vd)).u32[0] == UINT32_C(0x12345678),
            "a zero-length widening FP reduction leaves its destination unchanged");
     simrv::execute::ExecuteUnit::execute_vector(
         cpu, machine.memory(), simrv::isa::OperationId::VWREDSUM_VS, vector_ir(vd, vs1, vs2));
-    expect(regs.read_vector(vd).u32[0] == UINT32_C(0x12345678),
+    expect(regs.read_vector(simrv::xlen::to_vec_reg_id(vd)).u32[0] == UINT32_C(0x12345678),
            "a zero-length widening integer reduction leaves its destination unchanged");
 
     cpu.state().vl = 3;
-    regs.read_vector(vs1).f64[0] = 10.0;
-    regs.read_vector(vs2).f32[0] = 1.0F;
-    regs.read_vector(vs2).f32[1] = 2.0F;
-    regs.read_vector(vs2).f32[2] = 3.0F;
+    regs.read_vector(simrv::xlen::to_vec_reg_id(vs1)).f64[0] = 10.0;
+    regs.read_vector(simrv::xlen::to_vec_reg_id(vs2)).f32[0] = 1.0F;
+    regs.read_vector(simrv::xlen::to_vec_reg_id(vs2)).f32[1] = 2.0F;
+    regs.read_vector(simrv::xlen::to_vec_reg_id(vs2)).f32[2] = 3.0F;
     simrv::execute::ExecuteUnit::execute_vector(
         cpu, machine.memory(), simrv::isa::OperationId::VFWREDOSUM_VS, vector_ir(vs2, vs1, vs2));
-    expect(regs.read_vector(vs2).f64[0] == 16.0,
+    expect(regs.read_vector(simrv::xlen::to_vec_reg_id(vs2)).f64[0] == 16.0,
            "vfwredosum.vs widens each source and tolerates destination/source overlap");
 
     cpu.state().vl = 1;
-    regs.read_vector(vs1).f64[0] = 1.0;
-    regs.read_vector(vs2).f32[0] = 0x1p-53F;
+    regs.read_vector(simrv::xlen::to_vec_reg_id(vs1)).f64[0] = 1.0;
+    regs.read_vector(simrv::xlen::to_vec_reg_id(vs2)).f32[0] = 0x1p-53F;
     cpu.state().fcsr = simrv::isa::RoundingMode::Rmm << 5U;
     simrv::execute::ExecuteUnit::execute_vector(
         cpu, machine.memory(), simrv::isa::OperationId::VFWREDOSUM_VS, vector_ir(vd, vs1, vs2));
-    expect(regs.read_vector(vd).u64[0] == UINT64_C(0x3FF0000000000001),
+    expect(regs.read_vector(simrv::xlen::to_vec_reg_id(vd)).u64[0] == UINT64_C(0x3FF0000000000001),
            "vfwredosum.vs applies RMM to a widened binary64 halfway sum");
     cpu.state().vl = 3;
     cpu.state().fcsr = 0;
 
-    regs.read_vector(vs2).f32[0] = 1.5F;
-    regs.read_vector(vs1).f32[0] = 2.25F;
+    regs.read_vector(simrv::xlen::to_vec_reg_id(vs2)).f32[0] = 1.5F;
+    regs.read_vector(simrv::xlen::to_vec_reg_id(vs1)).f32[0] = 2.25F;
     simrv::execute::ExecuteUnit::execute_vector(
         cpu, machine.memory(), simrv::isa::OperationId::VFWADD_VV, vector_ir(vd, vs1, vs2));
-    expect(regs.read_vector(vd).f64[0] == 3.75, "vfwadd.vv widens both inputs before addition");
+    expect(regs.read_vector(simrv::xlen::to_vec_reg_id(vd)).f64[0] == 3.75, "vfwadd.vv widens both inputs before addition");
 
-    regs.read_vector(vs2).f64[0] = 10.0;
-    regs.read_vector(vs1).f32[0] = 2.0F;
+    regs.read_vector(simrv::xlen::to_vec_reg_id(vs2)).f64[0] = 10.0;
+    regs.read_vector(simrv::xlen::to_vec_reg_id(vs1)).f32[0] = 2.0F;
     simrv::execute::ExecuteUnit::execute_vector(
         cpu, machine.memory(), simrv::isa::OperationId::VFWSUB_WV, vector_ir(vd, vs1, vs2));
-    expect(regs.read_vector(vd).f64[0] == 8.0,
+    expect(regs.read_vector(simrv::xlen::to_vec_reg_id(vd)).f64[0] == 8.0,
            "vfwsub.wv subtracts a widened narrow operand from a wide operand");
 
     constexpr auto overlapping_source = static_cast<simrv::xlen::RegId>(3);
-    regs.read_vector(overlapping_source).f32[0] = 3.0F;
-    regs.write_fp(vs1, UINT64_C(0xFFFFFFFF00000000) | std::bit_cast<uint32_t>(2.0F));
+    regs.read_vector(simrv::xlen::to_vec_reg_id(overlapping_source)).f32[0] = 3.0F;
+    regs.write_fp(simrv::xlen::to_fp_reg_id(vs1), UINT64_C(0xFFFFFFFF00000000) | std::bit_cast<uint32_t>(2.0F));
     simrv::execute::ExecuteUnit::execute_vector(cpu, machine.memory(),
                                                 simrv::isa::OperationId::VFWMUL_VF,
                                                 vector_ir(vs2, vs1, overlapping_source));
-    expect(regs.read_vector(vs2).f64[0] == 6.0,
+    expect(regs.read_vector(simrv::xlen::to_vec_reg_id(vs2)).f64[0] == 6.0,
            "vfwmul.vf accepts the permitted high-end destination/source overlap");
 
     constexpr std::array kWideningFusedCases = {
@@ -2246,60 +2246,60 @@ void test_vector_floating_arithmetic() {
         std::pair{simrv::isa::OperationId::VFWNMSAC_VV, 4.0},
     };
     for (const auto& [operation, expected] : kWideningFusedCases) {
-        regs.read_vector(vd).f64[0] = 10.0;
-        regs.read_vector(vs1).f32[0] = 2.0F;
-        regs.read_vector(vs2).f32[0] = 3.0F;
+        regs.read_vector(simrv::xlen::to_vec_reg_id(vd)).f64[0] = 10.0;
+        regs.read_vector(simrv::xlen::to_vec_reg_id(vs1)).f32[0] = 2.0F;
+        regs.read_vector(simrv::xlen::to_vec_reg_id(vs2)).f32[0] = 3.0F;
         simrv::execute::ExecuteUnit::execute_vector(cpu, machine.memory(), operation,
                                                     vector_ir(vd, vs1, vs2));
-        expect(regs.read_vector(vd).f64[0] == expected,
+        expect(regs.read_vector(simrv::xlen::to_vec_reg_id(vd)).f64[0] == expected,
                "widening fused accumulates use their specified product and accumulator signs");
     }
     cpu.state().vl = 1;
 
-    regs.read_vector(vd).f64[0] = 0x1p-53;
-    regs.read_vector(vs1).f32[0] = 1.0F;
-    regs.read_vector(vs2).f32[0] = 1.0F;
+    regs.read_vector(simrv::xlen::to_vec_reg_id(vd)).f64[0] = 0x1p-53;
+    regs.read_vector(simrv::xlen::to_vec_reg_id(vs1)).f32[0] = 1.0F;
+    regs.read_vector(simrv::xlen::to_vec_reg_id(vs2)).f32[0] = 1.0F;
     cpu.state().fcsr = simrv::isa::RoundingMode::Rmm << 5U;
     simrv::execute::ExecuteUnit::execute_vector(
         cpu, machine.memory(), simrv::isa::OperationId::VFWMACC_VV, vector_ir(vd, vs1, vs2));
-    expect(regs.read_vector(vd).u64[0] == UINT64_C(0x3FF0000000000001),
+    expect(regs.read_vector(simrv::xlen::to_vec_reg_id(vd)).u64[0] == UINT64_C(0x3FF0000000000001),
            "vfwmacc.vv applies RMM to the fused binary64 accumulator");
     cpu.state().fcsr = 0;
 
-    regs.read_vector(vs2).f32[0] = 3.0F;
-    regs.read_vector(vs1).f32[0] = 2.0F;
+    regs.read_vector(simrv::xlen::to_vec_reg_id(vs2)).f32[0] = 3.0F;
+    regs.read_vector(simrv::xlen::to_vec_reg_id(vs1)).f32[0] = 2.0F;
     simrv::execute::ExecuteUnit::execute_vector(
         cpu, machine.memory(), simrv::isa::OperationId::VFSGNJN_VV, vector_ir(vd, vs1, vs2));
-    expect(regs.read_vector(vd).f32[0] == -3.0F,
+    expect(regs.read_vector(simrv::xlen::to_vec_reg_id(vd)).f32[0] == -3.0F,
            "vfsgnjn.vv copies magnitude and negates the second operand sign");
 
-    regs.read_vector(vs2).u32[0] = UINT32_C(0x00000000);
-    regs.read_vector(vs1).u32[0] = UINT32_C(0x80000000);
+    regs.read_vector(simrv::xlen::to_vec_reg_id(vs2)).u32[0] = UINT32_C(0x00000000);
+    regs.read_vector(simrv::xlen::to_vec_reg_id(vs1)).u32[0] = UINT32_C(0x80000000);
     simrv::execute::ExecuteUnit::execute_vector(
         cpu, machine.memory(), simrv::isa::OperationId::VFMIN_VV, vector_ir(vd, vs1, vs2));
-    expect(regs.read_vector(vd).u32[0] == UINT32_C(0x80000000),
+    expect(regs.read_vector(simrv::xlen::to_vec_reg_id(vd)).u32[0] == UINT32_C(0x80000000),
            "vfmin.vv selects negative zero when its operands compare equal");
     simrv::execute::ExecuteUnit::execute_vector(
         cpu, machine.memory(), simrv::isa::OperationId::VFMAX_VV, vector_ir(vd, vs1, vs2));
-    expect(regs.read_vector(vd).u32[0] == UINT32_C(0x00000000),
+    expect(regs.read_vector(simrv::xlen::to_vec_reg_id(vd)).u32[0] == UINT32_C(0x00000000),
            "vfmax.vv selects positive zero when its operands compare equal");
 
-    regs.read_vector(vs2).u32[0] = UINT32_C(0x7F800001);  // signaling NaN
-    regs.read_vector(vs1).f32[0] = 4.0F;
+    regs.read_vector(simrv::xlen::to_vec_reg_id(vs2)).u32[0] = UINT32_C(0x7F800001);  // signaling NaN
+    regs.read_vector(simrv::xlen::to_vec_reg_id(vs1)).f32[0] = 4.0F;
     cpu.state().fcsr = 0;
     simrv::execute::ExecuteUnit::execute_vector(
         cpu, machine.memory(), simrv::isa::OperationId::VFMIN_VV, vector_ir(vd, vs1, vs2));
     expect(
-        regs.read_vector(vd).f32[0] == 4.0F && (cpu.state().fcsr & simrv::isa::FflagsBit::Nv) != 0,
+        regs.read_vector(simrv::xlen::to_vec_reg_id(vd)).f32[0] == 4.0F && (cpu.state().fcsr & simrv::isa::FflagsBit::Nv) != 0,
         "vfmin.vv returns the numeric operand and raises invalid for a signaling NaN");
 
-    regs.read_vector(vs2).u32[0] = simrv::xlen::kF32Qnan;
-    regs.read_vector(vs1).f32[0] = 2.0F;
+    regs.read_vector(simrv::xlen::to_vec_reg_id(vs2)).u32[0] = simrv::xlen::kF32Qnan;
+    regs.read_vector(simrv::xlen::to_vec_reg_id(vs1)).f32[0] = 2.0F;
     cpu.state().fcsr = 0;
     simrv::execute::ExecuteUnit::execute_vector(cpu, machine.memory(),
                                                 simrv::isa::OperationId::VMFEQ_VV,
                                                 vector_ir(simrv::xlen::RegId::Zero, vs1, vs2));
-    expect((regs.read_vector(simrv::xlen::RegId::Zero).u8[0] & 1U) == 0 &&
+    expect((regs.read_vector(simrv::xlen::to_vec_reg_id(simrv::xlen::RegId::Zero)).u8[0] & 1U) == 0 &&
                (cpu.state().fcsr & simrv::isa::FflagsBit::Nv) == 0,
            "vmfeq.vv is quiet for a quiet NaN and writes a false mask bit");
 
@@ -2307,7 +2307,7 @@ void test_vector_floating_arithmetic() {
     simrv::execute::ExecuteUnit::execute_vector(cpu, machine.memory(),
                                                 simrv::isa::OperationId::VMFLT_VV,
                                                 vector_ir(simrv::xlen::RegId::Zero, vs1, vs2));
-    expect((regs.read_vector(simrv::xlen::RegId::Zero).u8[0] & 1U) == 0 &&
+    expect((regs.read_vector(simrv::xlen::to_vec_reg_id(simrv::xlen::RegId::Zero)).u8[0] & 1U) == 0 &&
                (cpu.state().fcsr & simrv::isa::FflagsBit::Nv) != 0,
            "vmflt.vv raises invalid for an unordered comparison");
 }

@@ -79,12 +79,14 @@ struct PmpRange {
     bool full_range = false;
 
     [[nodiscard]] constexpr auto contains(uint64_t req_start, size_t size) const noexcept -> bool {
+        if (size == 0 || size > UINT64_MAX - req_start) return false;
         if (full_range) return true;
         const uint64_t req_end = req_start + size;
         return req_start >= base && req_end <= limit && limit > base;
     }
 
     [[nodiscard]] constexpr auto overlaps(uint64_t req_start, size_t size) const noexcept -> bool {
+        if (size == 0 || size > UINT64_MAX - req_start) return false;
         if (full_range) return true;
         const uint64_t req_end = req_start + size;
         return req_start < limit && req_end > base && limit > base;
@@ -175,6 +177,9 @@ inline auto check_access(const ArchState& state, simrv::xlen::Address paddr, siz
     }
 
     const uint64_t req_start = static_cast<uint64_t>(paddr);
+    if (size == 0 || size > UINT64_MAX - req_start) {
+        return false;
+    }
 
     for (size_t i = 0; i < state.num_active_pmp; ++i) {
         const PmpConfigEntry cfg{state.pmpcfg[i]};

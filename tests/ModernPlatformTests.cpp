@@ -3504,7 +3504,118 @@ void test_axi4_bridge_and_tracer() {
     std::memcpy(&read_back, ram.data() + (kWriteAddr - 0x80000000), sizeof(simrv::xlen::Word));
     check(read_back == write_val);
 
-    // 5. Test decode error (DECERR) for unmapped address via AXI bridge
+    // 5. FIXED bursts repeatedly access the same address.
+    constexpr simrv::xlen::Address kFixedAddr = 0x80006000;
+    const simrv::xlen::Word fixed_value = static_cast<simrv::xlen::Word>(0x1020304050607080ULL);
+    const simrv::xlen::Word ignored_value = static_cast<simrv::xlen::Word>(0xFFEEDDCCBBAA9988ULL);
+    std::memcpy(ram.data() + (kFixedAddr - 0x80000000), &fixed_value, sizeof(fixed_value));
+    std::memcpy(ram.data() + (kFixedAddr + sizeof(fixed_value) - 0x80000000), &ignored_value,
+                sizeof(ignored_value));
+    simrv::memory::Axi4Ar fixed_ar{
+        .id = 3,
+        .addr = kFixedAddr,
+        .len = 1,
+        .size = kBeatSize,
+        .burst = simrv::memory::AxiBurst::Fixed,
+    };
+    check(machine.axi_bridge()->send_ar(fixed_ar));
+    simrv::memory::Axi4R fixed_r{};
+    check(machine.axi_bridge()->recv_r(fixed_r) && fixed_r.data == fixed_value && !fixed_r.last);
+    check(machine.axi_bridge()->recv_r(fixed_r) && fixed_r.data == fixed_value && fixed_r.last);
+
+    // 6. WRAP bursts wrap at the total burst byte boundary.
+    constexpr simrv::xlen::Address kWrapBase = 0x80006100;
+    std::array<simrv::xlen::Word, 4> wrap_values{
+        static_cast<simrv::xlen::Word>(0x1111111111111111ULL),
+        static_cast<simrv::xlen::Word>(0x2222222222222222ULL),
+        static_cast<simrv::xlen::Word>(0x3333333333333333ULL),
+        static_cast<simrv::xlen::Word>(0x4444444444444444ULL),
+    };
+    for (std::size_t i = 0; i < wrap_values.size(); ++i) {
+        std::memcpy(ram.data() + (kWrapBase + i * sizeof(simrv::xlen::Word) - 0x80000000),
+                    &wrap_values[i], sizeof(wrap_values[i]));
+    }
+    simrv::memory::Axi4Ar wrap_ar{
+        .id = 4,
+        .addr = kWrapBase + 3 * sizeof(simrv::xlen::Word),
+        .len = 3,
+        .size = kBeatSize,
+        .burst = simrv::memory::AxiBurst::Wrap,
+    };
+    check(machine.axi_bridge()->send_ar(wrap_ar));
+    constexpr std::array<std::size_t, 4> kWrapOrder{3, 0, 1, 2};
+    for (std::size_t i = 0; i < kWrapOrder.size(); ++i) {
+        simrv::memory::Axi4R wrap_r{};
+        check(machine.axi_bridge()->recv_r(wrap_r));
+        check(wrap_r.data == wrap_values[kWrapOrder[i]]);
+        check(wrap_r.last == (i + 1 == kWrapOrder.size()));
+    }
+
+    // 7. WSTRB updates only selected byte lanes; an all-zero strobe writes nothing.
+    constexpr simrv::xlen::Address kStrobeAddr = 0x80007000;
+    const simrv::xlen::Word original_word = static_cast<simrv::xlen::Word>(0x1122334455667788ULL);
+    const simrv::xlen::Word strobe_data = static_cast<simrv::xlen::Word>(0xAABBCCDDEEFF0011ULL);
+    std::memcpy(ram.data() + (kStrobeAddr - 0x80000000), &original_word, sizeof(original_word));
+    std::array<simrv::xlen::Byte, sizeof(simrv::xlen::Word)> expected_bytes{};
+    std::memcpy(expected_bytes.data(), &original_word, sizeof(original_word));
+    const auto* strobe_bytes = reinterpret_cast<const simrv::xlen::Byte*>(&strobe_data);
+    for (std::size_t lane = 0; lane < expected_bytes.size(); ++lane) {
+        if ((0x05U & (1U << lane)) != 0) expected_bytes[lane] = strobe_bytes[lane];
+    }
+    simrv::memory::Axi4Aw strobe_aw{
+        .id = 5,
+        .addr = kStrobeAddr,
+        .len = 0,
+        .size = kBeatSize,
+        .burst = simrv::memory::AxiBurst::Incr,
+    };
+    check(machine.axi_bridge()->send_aw(strobe_aw));
+    check(machine.axi_bridge()->send_w({.data = strobe_data, .strb = 0x05, .last = true}));
+    check(machine.axi_bridge()->recv_b(b) && b.resp == simrv::memory::AxiResp::Okay);
+    check(std::memcmp(ram.data() + (kStrobeAddr - 0x80000000), expected_bytes.data(),
+                      expected_bytes.size()) == 0);
+
+    strobe_aw.id = 6;
+    check(machine.axi_bridge()->send_aw(strobe_aw));
+    check(machine.axi_bridge()->send_w({.data = 0, .strb = 0, .last = true}));
+    check(machine.axi_bridge()->recv_b(b) && b.resp == simrv::memory::AxiResp::Okay);
+    check(std::memcmp(ram.data() + (kStrobeAddr - 0x80000000), expected_bytes.data(),
+                      expected_bytes.size()) == 0);
+
+    // 8. Reject invalid transfer sizes, IDs, reserved bursts, disabled bridges, and overlong
+    // bursts.
+    simrv::memory::Axi4Ar invalid_ar{
+        .id = 7,
+        .addr = kFixedAddr,
+        .len = 0,
+        .size = 0xFF,
+        .burst = simrv::memory::AxiBurst::Incr,
+    };
+    check(!machine.axi_bridge()->send_ar(invalid_ar));
+    invalid_ar.size = kBeatSize;
+    invalid_ar.id = 16;
+    check(!machine.axi_bridge()->send_ar(invalid_ar));
+    invalid_ar.id = 7;
+    invalid_ar.burst = simrv::memory::AxiBurst::Reserved;
+    check(!machine.axi_bridge()->send_ar(invalid_ar));
+    invalid_ar.burst = simrv::memory::AxiBurst::Incr;
+    invalid_ar.len = 16;  // Configured maximum is 16 beats.
+    check(!machine.axi_bridge()->send_ar(invalid_ar));
+    invalid_ar.len = 0;
+    invalid_ar.size = static_cast<uint8_t>(kBeatSize + 1);
+    check(!machine.axi_bridge()->send_ar(invalid_ar));
+    invalid_ar.size = kBeatSize;
+    cfg.data_width_bytes = 3;  // The bridge accepts power-of-two widths only.
+    machine.axi_bridge()->set_config(cfg);
+    check(!machine.axi_bridge()->send_ar(invalid_ar));
+    cfg.data_width_bytes = static_cast<uint32_t>(sizeof(simrv::xlen::Word));
+    cfg.enabled = false;
+    machine.axi_bridge()->set_config(cfg);
+    check(!machine.axi_bridge()->send_ar(invalid_ar));
+    cfg.enabled = true;
+    machine.axi_bridge()->set_config(cfg);
+
+    // 9. Test decode error (DECERR) for unmapped address via AXI bridge
     simrv::memory::Axi4Ar mmio_ar{
         .id = 9,
         .addr = 0x10000000,

@@ -116,7 +116,7 @@ void LocalTuiBackend::execute(core::Machine& machine, BackendRequest request,
                         reply.text +=
                             std::format("x{:<2} {:016x}   f{:<2} {:016x}\n", r,
                                         state.regs.read(static_cast<simrv::xlen::RegId>(r)), r,
-                                        state.regs.read_fp(static_cast<simrv::xlen::RegId>(r)));
+                                        state.regs.read_fp(simrv::xlen::to_fp_reg_id(static_cast<simrv::xlen::RegId>(r))));
                     break;
                 }
                 case BackendCommand::Memory:

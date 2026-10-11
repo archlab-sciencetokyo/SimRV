@@ -294,7 +294,7 @@ auto read_reg_str(const simrv::core::ArchState& st, simrv::xlen::RegId reg, bool
     -> std::string {
     uint32_t r = std::to_underlying(reg);
     if (r == 0 && !is_fp) return std::format("0x{:0{}x}", 0, simrv::xlen::kXLenHexDigits);
-    simrv::xlen::Register val = is_fp ? st.regs.read_fp(reg) : st.regs.read(reg);
+    simrv::xlen::Register val = is_fp ? st.regs.read_fp(simrv::xlen::to_fp_reg_id(reg)) : st.regs.read(reg);
     return std::format("0x{:0{}x}", val, simrv::xlen::kXLenHexDigits);
 }
 

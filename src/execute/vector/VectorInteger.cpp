@@ -168,7 +168,7 @@ T clmul_high(T val2, T val1) {
 template <typename T_dest, typename T_src>
 void execute_vsext(core::CPU& cpu, simrv::xlen::RegId rd, simrv::xlen::RegId rs2, bool vm,
                    uint32_t vl) {
-    const auto& mask_reg = cpu.state().regs.read_vector(simrv::xlen::RegId::Zero);
+    const auto& mask_reg = cpu.state().regs.read_vector(simrv::xlen::to_vec_reg_id(simrv::xlen::RegId::Zero));
 
     // Copy source elements first to handle potential register overlap
     std::vector<T_src> src_vals(vl);
@@ -187,7 +187,7 @@ void execute_vsext(core::CPU& cpu, simrv::xlen::RegId rd, simrv::xlen::RegId rs2
 template <typename T>
 void execute_vsbc_vv(core::CPU& cpu, simrv::xlen::RegId rd, simrv::xlen::RegId rs1,
                      simrv::xlen::RegId rs2, uint32_t vl) {
-    const auto& v0 = cpu.state().regs.read_vector(simrv::xlen::RegId::Zero);
+    const auto& v0 = cpu.state().regs.read_vector(simrv::xlen::to_vec_reg_id(simrv::xlen::RegId::Zero));
     for (uint32_t i = static_cast<uint32_t>(cpu.state().vstart); i < vl; i++) {
         T val2 = vector::get_group_element<T>(cpu.state().regs, rs2, i);
         T val1 = vector::get_group_element<T>(cpu.state().regs, rs1, i);
@@ -200,7 +200,7 @@ void execute_vsbc_vv(core::CPU& cpu, simrv::xlen::RegId rd, simrv::xlen::RegId r
 template <typename T>
 void execute_vsbc_vx(core::CPU& cpu, simrv::xlen::RegId rd, simrv::xlen::Register rs1_val,
                      simrv::xlen::RegId rs2, uint32_t vl) {
-    const auto& v0 = cpu.state().regs.read_vector(simrv::xlen::RegId::Zero);
+    const auto& v0 = cpu.state().regs.read_vector(simrv::xlen::to_vec_reg_id(simrv::xlen::RegId::Zero));
     T val1 = vector::integer_scalar<T>(rs1_val);
     for (uint32_t i = static_cast<uint32_t>(cpu.state().vstart); i < vl; i++) {
         T val2 = vector::get_group_element<T>(cpu.state().regs, rs2, i);
@@ -214,7 +214,7 @@ void execute_vsbc_vx(core::CPU& cpu, simrv::xlen::RegId rd, simrv::xlen::Registe
 template <typename T_dest, typename T_src>
 void execute_vwadd_vv(core::CPU& cpu, simrv::xlen::RegId rd, simrv::xlen::RegId rs1,
                       simrv::xlen::RegId rs2, bool vm, uint32_t vl) {
-    const auto& mask_reg = cpu.state().regs.read_vector(simrv::xlen::RegId::Zero);
+    const auto& mask_reg = cpu.state().regs.read_vector(simrv::xlen::to_vec_reg_id(simrv::xlen::RegId::Zero));
     for (uint32_t i = static_cast<uint32_t>(cpu.state().vstart); i < vl; i++) {
         if (!vector::is_element_active(mask_reg, i, vm)) continue;
         T_src val2 = vector::get_group_element<T_src>(cpu.state().regs, rs2, i);
@@ -227,7 +227,7 @@ void execute_vwadd_vv(core::CPU& cpu, simrv::xlen::RegId rd, simrv::xlen::RegId 
 template <typename T_dest, typename T_src>
 void execute_vwadd_vx(core::CPU& cpu, simrv::xlen::RegId rd, simrv::xlen::Register rs1_val,
                       simrv::xlen::RegId rs2, bool vm, uint32_t vl) {
-    const auto& mask_reg = cpu.state().regs.read_vector(simrv::xlen::RegId::Zero);
+    const auto& mask_reg = cpu.state().regs.read_vector(simrv::xlen::to_vec_reg_id(simrv::xlen::RegId::Zero));
     T_src val1 = vector::integer_scalar<T_src>(rs1_val);
     for (uint32_t i = static_cast<uint32_t>(cpu.state().vstart); i < vl; i++) {
         if (!vector::is_element_active(mask_reg, i, vm)) continue;
@@ -240,7 +240,7 @@ void execute_vwadd_vx(core::CPU& cpu, simrv::xlen::RegId rd, simrv::xlen::Regist
 template <typename T_dest, typename T_src>
 void execute_vwadd_wv(core::CPU& cpu, simrv::xlen::RegId rd, simrv::xlen::RegId rs1,
                       simrv::xlen::RegId rs2, bool vm, uint32_t vl) {
-    const auto& mask_reg = cpu.state().regs.read_vector(simrv::xlen::RegId::Zero);
+    const auto& mask_reg = cpu.state().regs.read_vector(simrv::xlen::to_vec_reg_id(simrv::xlen::RegId::Zero));
     for (uint32_t i = static_cast<uint32_t>(cpu.state().vstart); i < vl; i++) {
         if (!vector::is_element_active(mask_reg, i, vm)) continue;
         T_dest val2 = vector::get_group_element<T_dest>(cpu.state().regs, rs2, i);
@@ -253,7 +253,7 @@ void execute_vwadd_wv(core::CPU& cpu, simrv::xlen::RegId rd, simrv::xlen::RegId 
 template <typename T_dest, typename T_src>
 void execute_vwadd_wx(core::CPU& cpu, simrv::xlen::RegId rd, simrv::xlen::Register rs1_val,
                       simrv::xlen::RegId rs2, bool vm, uint32_t vl) {
-    const auto& mask_reg = cpu.state().regs.read_vector(simrv::xlen::RegId::Zero);
+    const auto& mask_reg = cpu.state().regs.read_vector(simrv::xlen::to_vec_reg_id(simrv::xlen::RegId::Zero));
     T_src val1 = vector::integer_scalar<T_src>(rs1_val);
     for (uint32_t i = static_cast<uint32_t>(cpu.state().vstart); i < vl; i++) {
         if (!vector::is_element_active(mask_reg, i, vm)) continue;
@@ -267,7 +267,7 @@ void execute_vwadd_wx(core::CPU& cpu, simrv::xlen::RegId rd, simrv::xlen::Regist
 template <typename T_dest, typename T_src>
 void execute_vwsub_vv(core::CPU& cpu, simrv::xlen::RegId rd, simrv::xlen::RegId rs1,
                       simrv::xlen::RegId rs2, bool vm, uint32_t vl) {
-    const auto& mask_reg = cpu.state().regs.read_vector(simrv::xlen::RegId::Zero);
+    const auto& mask_reg = cpu.state().regs.read_vector(simrv::xlen::to_vec_reg_id(simrv::xlen::RegId::Zero));
     for (uint32_t i = static_cast<uint32_t>(cpu.state().vstart); i < vl; i++) {
         if (!vector::is_element_active(mask_reg, i, vm)) continue;
         T_src val2 = vector::get_group_element<T_src>(cpu.state().regs, rs2, i);
@@ -280,7 +280,7 @@ void execute_vwsub_vv(core::CPU& cpu, simrv::xlen::RegId rd, simrv::xlen::RegId 
 template <typename T_dest, typename T_src>
 void execute_vwsub_vx(core::CPU& cpu, simrv::xlen::RegId rd, simrv::xlen::Register rs1_val,
                       simrv::xlen::RegId rs2, bool vm, uint32_t vl) {
-    const auto& mask_reg = cpu.state().regs.read_vector(simrv::xlen::RegId::Zero);
+    const auto& mask_reg = cpu.state().regs.read_vector(simrv::xlen::to_vec_reg_id(simrv::xlen::RegId::Zero));
     T_src val1 = vector::integer_scalar<T_src>(rs1_val);
     for (uint32_t i = static_cast<uint32_t>(cpu.state().vstart); i < vl; i++) {
         if (!vector::is_element_active(mask_reg, i, vm)) continue;
@@ -293,7 +293,7 @@ void execute_vwsub_vx(core::CPU& cpu, simrv::xlen::RegId rd, simrv::xlen::Regist
 template <typename T_dest, typename T_src>
 void execute_vwsub_wv(core::CPU& cpu, simrv::xlen::RegId rd, simrv::xlen::RegId rs1,
                       simrv::xlen::RegId rs2, bool vm, uint32_t vl) {
-    const auto& mask_reg = cpu.state().regs.read_vector(simrv::xlen::RegId::Zero);
+    const auto& mask_reg = cpu.state().regs.read_vector(simrv::xlen::to_vec_reg_id(simrv::xlen::RegId::Zero));
     for (uint32_t i = static_cast<uint32_t>(cpu.state().vstart); i < vl; i++) {
         if (!vector::is_element_active(mask_reg, i, vm)) continue;
         T_dest val2 = vector::get_group_element<T_dest>(cpu.state().regs, rs2, i);
@@ -307,7 +307,7 @@ void execute_vwsub_wv(core::CPU& cpu, simrv::xlen::RegId rd, simrv::xlen::RegId 
 template <typename T_dest, typename T_src>
 void execute_vnsrl_wv(core::CPU& cpu, simrv::xlen::RegId rd, simrv::xlen::RegId rs1,
                       simrv::xlen::RegId rs2, bool vm, uint32_t vl) {
-    const auto& mask_reg = cpu.state().regs.read_vector(simrv::xlen::RegId::Zero);
+    const auto& mask_reg = cpu.state().regs.read_vector(simrv::xlen::to_vec_reg_id(simrv::xlen::RegId::Zero));
     constexpr uint32_t shift_mask = (sizeof(T_src) * 8) - 1;
     for (uint32_t i = static_cast<uint32_t>(cpu.state().vstart); i < vl; i++) {
         if (!vector::is_element_active(mask_reg, i, vm)) continue;
@@ -321,7 +321,7 @@ void execute_vnsrl_wv(core::CPU& cpu, simrv::xlen::RegId rd, simrv::xlen::RegId 
 template <typename T_dest, typename T_src>
 void execute_vnsrl_wx(core::CPU& cpu, simrv::xlen::RegId rd, simrv::xlen::Register rs1_val,
                       simrv::xlen::RegId rs2, bool vm, uint32_t vl) {
-    const auto& mask_reg = cpu.state().regs.read_vector(simrv::xlen::RegId::Zero);
+    const auto& mask_reg = cpu.state().regs.read_vector(simrv::xlen::to_vec_reg_id(simrv::xlen::RegId::Zero));
     constexpr uint32_t shift_mask = (sizeof(T_src) * 8) - 1;
     uint32_t shift_amt = static_cast<uint32_t>(rs1_val) & shift_mask;
     for (uint32_t i = static_cast<uint32_t>(cpu.state().vstart); i < vl; i++) {
@@ -335,7 +335,7 @@ void execute_vnsrl_wx(core::CPU& cpu, simrv::xlen::RegId rd, simrv::xlen::Regist
 template <typename T_dest, typename T_src>
 void execute_vnsrl_wi(core::CPU& cpu, simrv::xlen::RegId rd, uint32_t uimm5, simrv::xlen::RegId rs2,
                       bool vm, uint32_t vl) {
-    const auto& mask_reg = cpu.state().regs.read_vector(simrv::xlen::RegId::Zero);
+    const auto& mask_reg = cpu.state().regs.read_vector(simrv::xlen::to_vec_reg_id(simrv::xlen::RegId::Zero));
     constexpr uint32_t shift_mask = (sizeof(T_src) * 8) - 1;
     uint32_t shift_amt = uimm5 & shift_mask;
     for (uint32_t i = static_cast<uint32_t>(cpu.state().vstart); i < vl; i++) {
@@ -350,7 +350,7 @@ void execute_vnsrl_wi(core::CPU& cpu, simrv::xlen::RegId rd, uint32_t uimm5, sim
 template <typename T_dest, typename T_src_signed>
 void execute_vnsra_wv(core::CPU& cpu, simrv::xlen::RegId rd, simrv::xlen::RegId rs1,
                       simrv::xlen::RegId rs2, bool vm, uint32_t vl) {
-    const auto& mask_reg = cpu.state().regs.read_vector(simrv::xlen::RegId::Zero);
+    const auto& mask_reg = cpu.state().regs.read_vector(simrv::xlen::to_vec_reg_id(simrv::xlen::RegId::Zero));
     constexpr uint32_t shift_mask = (sizeof(T_src_signed) * 8) - 1;
     for (uint32_t i = static_cast<uint32_t>(cpu.state().vstart); i < vl; i++) {
         if (!vector::is_element_active(mask_reg, i, vm)) continue;
@@ -364,7 +364,7 @@ void execute_vnsra_wv(core::CPU& cpu, simrv::xlen::RegId rd, simrv::xlen::RegId 
 template <typename T_dest, typename T_src_signed>
 void execute_vnsra_wx(core::CPU& cpu, simrv::xlen::RegId rd, simrv::xlen::Register rs1_val,
                       simrv::xlen::RegId rs2, bool vm, uint32_t vl) {
-    const auto& mask_reg = cpu.state().regs.read_vector(simrv::xlen::RegId::Zero);
+    const auto& mask_reg = cpu.state().regs.read_vector(simrv::xlen::to_vec_reg_id(simrv::xlen::RegId::Zero));
     constexpr uint32_t shift_mask = (sizeof(T_src_signed) * 8) - 1;
     uint32_t shift_amt = static_cast<uint32_t>(rs1_val) & shift_mask;
     for (uint32_t i = static_cast<uint32_t>(cpu.state().vstart); i < vl; i++) {
@@ -378,7 +378,7 @@ void execute_vnsra_wx(core::CPU& cpu, simrv::xlen::RegId rd, simrv::xlen::Regist
 template <typename T_dest, typename T_src_signed>
 void execute_vnsra_wi(core::CPU& cpu, simrv::xlen::RegId rd, uint32_t uimm5, simrv::xlen::RegId rs2,
                       bool vm, uint32_t vl) {
-    const auto& mask_reg = cpu.state().regs.read_vector(simrv::xlen::RegId::Zero);
+    const auto& mask_reg = cpu.state().regs.read_vector(simrv::xlen::to_vec_reg_id(simrv::xlen::RegId::Zero));
     constexpr uint32_t shift_mask = (sizeof(T_src_signed) * 8) - 1;
     uint32_t shift_amt = uimm5 & shift_mask;
     for (uint32_t i = static_cast<uint32_t>(cpu.state().vstart); i < vl; i++) {
@@ -392,7 +392,7 @@ void execute_vnsra_wi(core::CPU& cpu, simrv::xlen::RegId rd, uint32_t uimm5, sim
 template <typename T_dest, typename T_src>
 void execute_vwsub_wx(core::CPU& cpu, simrv::xlen::RegId rd, simrv::xlen::Register rs1_val,
                       simrv::xlen::RegId rs2, bool vm, uint32_t vl) {
-    const auto& mask_reg = cpu.state().regs.read_vector(simrv::xlen::RegId::Zero);
+    const auto& mask_reg = cpu.state().regs.read_vector(simrv::xlen::to_vec_reg_id(simrv::xlen::RegId::Zero));
     T_src val1 = vector::integer_scalar<T_src>(rs1_val);
     for (uint32_t i = static_cast<uint32_t>(cpu.state().vstart); i < vl; i++) {
         if (!vector::is_element_active(mask_reg, i, vm)) continue;
@@ -406,7 +406,7 @@ void execute_vwsub_wx(core::CPU& cpu, simrv::xlen::RegId rd, simrv::xlen::Regist
 template <typename T_dest, typename T_src_signed, typename T_src_unsigned>
 void execute_vwmulsu_vv(core::CPU& cpu, simrv::xlen::RegId rd, simrv::xlen::RegId rs1,
                         simrv::xlen::RegId rs2, bool vm, uint32_t vl) {
-    const auto& mask_reg = cpu.state().regs.read_vector(simrv::xlen::RegId::Zero);
+    const auto& mask_reg = cpu.state().regs.read_vector(simrv::xlen::to_vec_reg_id(simrv::xlen::RegId::Zero));
     for (uint32_t i = static_cast<uint32_t>(cpu.state().vstart); i < vl; i++) {
         if (!vector::is_element_active(mask_reg, i, vm)) continue;
         T_src_signed val2 = vector::get_group_element<T_src_signed>(cpu.state().regs, rs2, i);
@@ -419,7 +419,7 @@ void execute_vwmulsu_vv(core::CPU& cpu, simrv::xlen::RegId rd, simrv::xlen::RegI
 template <typename T_dest, typename T_src_signed, typename T_src_unsigned>
 void execute_vwmulsu_vx(core::CPU& cpu, simrv::xlen::RegId rd, simrv::xlen::Register rs1_val,
                         simrv::xlen::RegId rs2, bool vm, uint32_t vl) {
-    const auto& mask_reg = cpu.state().regs.read_vector(simrv::xlen::RegId::Zero);
+    const auto& mask_reg = cpu.state().regs.read_vector(simrv::xlen::to_vec_reg_id(simrv::xlen::RegId::Zero));
     T_src_unsigned val1 = vector::integer_scalar<T_src_unsigned>(rs1_val);
     for (uint32_t i = static_cast<uint32_t>(cpu.state().vstart); i < vl; i++) {
         if (!vector::is_element_active(mask_reg, i, vm)) continue;
@@ -434,7 +434,7 @@ template <typename T_dest, typename T_src>
 void execute_vwredsum_vs(core::CPU& cpu, simrv::xlen::RegId rd, simrv::xlen::RegId rs1,
                          simrv::xlen::RegId rs2, bool vm, uint32_t vl) {
     if (vl == 0) return;
-    const auto& mask_reg = cpu.state().regs.read_vector(simrv::xlen::RegId::Zero);
+    const auto& mask_reg = cpu.state().regs.read_vector(simrv::xlen::to_vec_reg_id(simrv::xlen::RegId::Zero));
     T_dest sum = vector::get_group_element<T_dest>(cpu.state().regs, rs1, 0);
     for (uint32_t i = static_cast<uint32_t>(cpu.state().vstart); i < vl; i++) {
         if (!vector::is_element_active(mask_reg, i, vm)) continue;
@@ -450,7 +450,7 @@ void execute_vred_vs(core::CPU& cpu, simrv::xlen::RegId rd, simrv::xlen::RegId r
                      simrv::xlen::RegId rs2, bool vm, uint32_t vl, Op op) {
     if (vl == 0) return;
     T result = vector::get_group_element<T>(cpu.state().regs, rs1, 0);
-    const auto& mask_reg = cpu.state().regs.read_vector(simrv::xlen::RegId::Zero);
+    const auto& mask_reg = cpu.state().regs.read_vector(simrv::xlen::to_vec_reg_id(simrv::xlen::RegId::Zero));
     for (uint32_t i = static_cast<uint32_t>(cpu.state().vstart); i < vl; i++) {
         if (!vector::is_element_active(mask_reg, i, vm)) continue;
         T val = vector::get_group_element<T>(cpu.state().regs, rs2, i);
@@ -463,7 +463,7 @@ void execute_vred_vs(core::CPU& cpu, simrv::xlen::RegId rd, simrv::xlen::RegId r
 template <typename T_dest, typename T_src>
 void execute_vwmul_vv(core::CPU& cpu, simrv::xlen::RegId rd, simrv::xlen::RegId rs1,
                       simrv::xlen::RegId rs2, bool vm, uint32_t vl) {
-    const auto& mask_reg = cpu.state().regs.read_vector(simrv::xlen::RegId::Zero);
+    const auto& mask_reg = cpu.state().regs.read_vector(simrv::xlen::to_vec_reg_id(simrv::xlen::RegId::Zero));
     for (uint32_t i = static_cast<uint32_t>(cpu.state().vstart); i < vl; i++) {
         if (!vector::is_element_active(mask_reg, i, vm)) continue;
         auto val1 = static_cast<T_dest>(vector::get_group_element<T_src>(cpu.state().regs, rs1, i));
@@ -477,7 +477,7 @@ void execute_vwmul_vv(core::CPU& cpu, simrv::xlen::RegId rd, simrv::xlen::RegId 
 template <typename T_dest, typename T_src>
 void execute_vwmul_vx(core::CPU& cpu, simrv::xlen::RegId rd, simrv::xlen::Register rs1_val,
                       simrv::xlen::RegId rs2, bool vm, uint32_t vl) {
-    const auto& mask_reg = cpu.state().regs.read_vector(simrv::xlen::RegId::Zero);
+    const auto& mask_reg = cpu.state().regs.read_vector(simrv::xlen::to_vec_reg_id(simrv::xlen::RegId::Zero));
     auto val1 = static_cast<T_dest>(vector::integer_scalar<T_src>(rs1_val));
     for (uint32_t i = static_cast<uint32_t>(cpu.state().vstart); i < vl; i++) {
         if (!vector::is_element_active(mask_reg, i, vm)) continue;
@@ -491,7 +491,7 @@ template <typename T>
 void perform_mac_vv(core::CPU& cpu, simrv::xlen::RegId rd, simrv::xlen::RegId rs1,
                     simrv::xlen::RegId rs2, bool vm, uint32_t vl, bool overwrite_acc,
                     bool subtract) {
-    const auto& mask_reg = cpu.state().regs.read_vector(simrv::xlen::RegId::Zero);
+    const auto& mask_reg = cpu.state().regs.read_vector(simrv::xlen::to_vec_reg_id(simrv::xlen::RegId::Zero));
 
     for (uint32_t i = static_cast<uint32_t>(cpu.state().vstart); i < vl; i++) {
         if (!vector::is_element_active(mask_reg, i, vm)) continue;
@@ -515,7 +515,7 @@ template <typename T>
 void perform_mac_vx(core::CPU& cpu, simrv::xlen::RegId rd, simrv::xlen::Register rs1_val,
                     simrv::xlen::RegId rs2, bool vm, uint32_t vl, bool overwrite_acc,
                     bool subtract) {
-    const auto& mask_reg = cpu.state().regs.read_vector(simrv::xlen::RegId::Zero);
+    const auto& mask_reg = cpu.state().regs.read_vector(simrv::xlen::to_vec_reg_id(simrv::xlen::RegId::Zero));
     T val1 = vector::integer_scalar<T>(rs1_val);
 
     for (uint32_t i = static_cast<uint32_t>(cpu.state().vstart); i < vl; i++) {
@@ -538,7 +538,7 @@ void perform_mac_vx(core::CPU& cpu, simrv::xlen::RegId rd, simrv::xlen::Register
 template <typename T_dest, typename T_src1, typename T_src2>
 void perform_widening_mac_vv(core::CPU& cpu, simrv::xlen::RegId rd, simrv::xlen::RegId rs1,
                              simrv::xlen::RegId rs2, bool vm, uint32_t vl, bool subtract = false) {
-    const auto& mask_reg = cpu.state().regs.read_vector(simrv::xlen::RegId::Zero);
+    const auto& mask_reg = cpu.state().regs.read_vector(simrv::xlen::to_vec_reg_id(simrv::xlen::RegId::Zero));
 
     for (uint32_t i = static_cast<uint32_t>(cpu.state().vstart); i < vl; i++) {
         if (!vector::is_element_active(mask_reg, i, vm)) continue;
@@ -555,7 +555,7 @@ void perform_widening_mac_vv(core::CPU& cpu, simrv::xlen::RegId rd, simrv::xlen:
 template <typename T_dest, typename T_src1, typename T_src2>
 void perform_widening_mac_vx(core::CPU& cpu, simrv::xlen::RegId rd, simrv::xlen::Register rs1_val,
                              simrv::xlen::RegId rs2, bool vm, uint32_t vl, bool subtract = false) {
-    const auto& mask_reg = cpu.state().regs.read_vector(simrv::xlen::RegId::Zero);
+    const auto& mask_reg = cpu.state().regs.read_vector(simrv::xlen::to_vec_reg_id(simrv::xlen::RegId::Zero));
     auto val1 = vector::integer_scalar<T_src1>(rs1_val);
 
     for (uint32_t i = static_cast<uint32_t>(cpu.state().vstart); i < vl; i++) {
@@ -572,9 +572,9 @@ void perform_widening_mac_vx(core::CPU& cpu, simrv::xlen::RegId rd, simrv::xlen:
 // Mask instruction helper implementations
 void execute_vmsbf_m(core::CPU& cpu, simrv::xlen::RegId rd, simrv::xlen::RegId rs2, bool vm,
                      uint32_t vl) {
-    const auto& mask_reg = cpu.state().regs.read_vector(simrv::xlen::RegId::Zero);
-    const auto& src_reg = cpu.state().regs.read_vector(rs2);
-    auto& dest_reg = cpu.state().regs.read_vector(rd);
+    const auto& mask_reg = cpu.state().regs.read_vector(simrv::xlen::to_vec_reg_id(simrv::xlen::RegId::Zero));
+    const auto& src_reg = cpu.state().regs.read_vector(simrv::xlen::to_vec_reg_id(rs2));
+    auto& dest_reg = cpu.state().regs.read_vector(simrv::xlen::to_vec_reg_id(rd));
     bool found_first = false;
     for (uint32_t i = static_cast<uint32_t>(cpu.state().vstart); i < vl; i++) {
         if (!vector::is_element_active(mask_reg, i, vm)) continue;
@@ -594,9 +594,9 @@ void execute_vmsbf_m(core::CPU& cpu, simrv::xlen::RegId rd, simrv::xlen::RegId r
 
 void execute_vmsif_m(core::CPU& cpu, simrv::xlen::RegId rd, simrv::xlen::RegId rs2, bool vm,
                      uint32_t vl) {
-    const auto& mask_reg = cpu.state().regs.read_vector(simrv::xlen::RegId::Zero);
-    const auto& src_reg = cpu.state().regs.read_vector(rs2);
-    auto& dest_reg = cpu.state().regs.read_vector(rd);
+    const auto& mask_reg = cpu.state().regs.read_vector(simrv::xlen::to_vec_reg_id(simrv::xlen::RegId::Zero));
+    const auto& src_reg = cpu.state().regs.read_vector(simrv::xlen::to_vec_reg_id(rs2));
+    auto& dest_reg = cpu.state().regs.read_vector(simrv::xlen::to_vec_reg_id(rd));
     bool found_first = false;
     for (uint32_t i = static_cast<uint32_t>(cpu.state().vstart); i < vl; i++) {
         if (!vector::is_element_active(mask_reg, i, vm)) continue;
@@ -614,9 +614,9 @@ void execute_vmsif_m(core::CPU& cpu, simrv::xlen::RegId rd, simrv::xlen::RegId r
 
 void execute_vmsof_m(core::CPU& cpu, simrv::xlen::RegId rd, simrv::xlen::RegId rs2, bool vm,
                      uint32_t vl) {
-    const auto& mask_reg = cpu.state().regs.read_vector(simrv::xlen::RegId::Zero);
-    const auto& src_reg = cpu.state().regs.read_vector(rs2);
-    auto& dest_reg = cpu.state().regs.read_vector(rd);
+    const auto& mask_reg = cpu.state().regs.read_vector(simrv::xlen::to_vec_reg_id(simrv::xlen::RegId::Zero));
+    const auto& src_reg = cpu.state().regs.read_vector(simrv::xlen::to_vec_reg_id(rs2));
+    auto& dest_reg = cpu.state().regs.read_vector(simrv::xlen::to_vec_reg_id(rd));
     bool found_first = false;
     for (uint32_t i = static_cast<uint32_t>(cpu.state().vstart); i < vl; i++) {
         if (!vector::is_element_active(mask_reg, i, vm)) continue;
@@ -632,8 +632,8 @@ void execute_vmsof_m(core::CPU& cpu, simrv::xlen::RegId rd, simrv::xlen::RegId r
 
 void execute_vfirst_m(core::CPU& cpu, simrv::xlen::RegId rd, simrv::xlen::RegId rs2, bool vm,
                       uint32_t vl) {
-    const auto& mask_reg = cpu.state().regs.read_vector(simrv::xlen::RegId::Zero);
-    const auto& src_reg = cpu.state().regs.read_vector(rs2);
+    const auto& mask_reg = cpu.state().regs.read_vector(simrv::xlen::to_vec_reg_id(simrv::xlen::RegId::Zero));
+    const auto& src_reg = cpu.state().regs.read_vector(simrv::xlen::to_vec_reg_id(rs2));
     int32_t first_idx = -1;
     for (uint32_t i = static_cast<uint32_t>(cpu.state().vstart); i < vl; i++) {
         if (!vector::is_element_active(mask_reg, i, vm)) continue;
@@ -647,8 +647,8 @@ void execute_vfirst_m(core::CPU& cpu, simrv::xlen::RegId rd, simrv::xlen::RegId 
 
 void execute_vcpop_m(core::CPU& cpu, simrv::xlen::RegId rd, simrv::xlen::RegId rs2, bool vm,
                      uint32_t vl) {
-    const auto& mask_reg = cpu.state().regs.read_vector(simrv::xlen::RegId::Zero);
-    const auto& src_reg = cpu.state().regs.read_vector(rs2);
+    const auto& mask_reg = cpu.state().regs.read_vector(simrv::xlen::to_vec_reg_id(simrv::xlen::RegId::Zero));
+    const auto& src_reg = cpu.state().regs.read_vector(simrv::xlen::to_vec_reg_id(rs2));
     uint32_t count = 0;
     for (uint32_t i = static_cast<uint32_t>(cpu.state().vstart); i < vl; i++) {
         if (!vector::is_element_active(mask_reg, i, vm)) continue;
@@ -662,8 +662,8 @@ void execute_vcpop_m(core::CPU& cpu, simrv::xlen::RegId rd, simrv::xlen::RegId r
 template <typename T>
 void execute_viota_m(core::CPU& cpu, simrv::xlen::RegId rd, simrv::xlen::RegId rs2, bool vm,
                      uint32_t vl) {
-    const auto& mask_reg = cpu.state().regs.read_vector(simrv::xlen::RegId::Zero);
-    const auto& src_reg = cpu.state().regs.read_vector(rs2);
+    const auto& mask_reg = cpu.state().regs.read_vector(simrv::xlen::to_vec_reg_id(simrv::xlen::RegId::Zero));
+    const auto& src_reg = cpu.state().regs.read_vector(simrv::xlen::to_vec_reg_id(rs2));
     T count = 0;
     for (uint32_t i = static_cast<uint32_t>(cpu.state().vstart); i < vl; i++) {
         if (!vector::is_element_active(mask_reg, i, vm)) continue;
@@ -676,9 +676,9 @@ void execute_viota_m(core::CPU& cpu, simrv::xlen::RegId rd, simrv::xlen::RegId r
 
 void execute_mask_logical(core::CPU& cpu, simrv::xlen::RegId rd, simrv::xlen::RegId rs1,
                           simrv::xlen::RegId rs2, uint32_t vl, isa::OperationId op_id) {
-    const auto& src1_reg = cpu.state().regs.read_vector(rs1);
-    const auto& src2_reg = cpu.state().regs.read_vector(rs2);
-    auto& dest_reg = cpu.state().regs.read_vector(rd);
+    const auto& src1_reg = cpu.state().regs.read_vector(simrv::xlen::to_vec_reg_id(rs1));
+    const auto& src2_reg = cpu.state().regs.read_vector(simrv::xlen::to_vec_reg_id(rs2));
+    auto& dest_reg = cpu.state().regs.read_vector(simrv::xlen::to_vec_reg_id(rd));
     for (uint32_t i = static_cast<uint32_t>(cpu.state().vstart); i < vl; i++) {
         bool bit1 = vector::get_mask_bit(src1_reg, i);
         bool bit2 = vector::get_mask_bit(src2_reg, i);
@@ -719,7 +719,7 @@ void execute_mask_logical(core::CPU& cpu, simrv::xlen::RegId rd, simrv::xlen::Re
 template <typename T>
 void execute_vclz(core::CPU& cpu, simrv::xlen::RegId rd, simrv::xlen::RegId rs2, bool vm,
                   uint32_t vl) {
-    const auto& mask_reg = cpu.state().regs.read_vector(simrv::xlen::RegId::Zero);
+    const auto& mask_reg = cpu.state().regs.read_vector(simrv::xlen::to_vec_reg_id(simrv::xlen::RegId::Zero));
     for (uint32_t i = static_cast<uint32_t>(cpu.state().vstart); i < vl; i++) {
         if (!vector::is_element_active(mask_reg, i, vm)) continue;
         T val = vector::get_group_element<T>(cpu.state().regs, rs2, i);
@@ -738,7 +738,7 @@ void execute_vclz(core::CPU& cpu, simrv::xlen::RegId rd, simrv::xlen::RegId rs2,
 template <typename T>
 void execute_vctz(core::CPU& cpu, simrv::xlen::RegId rd, simrv::xlen::RegId rs2, bool vm,
                   uint32_t vl) {
-    const auto& mask_reg = cpu.state().regs.read_vector(simrv::xlen::RegId::Zero);
+    const auto& mask_reg = cpu.state().regs.read_vector(simrv::xlen::to_vec_reg_id(simrv::xlen::RegId::Zero));
     for (uint32_t i = static_cast<uint32_t>(cpu.state().vstart); i < vl; i++) {
         if (!vector::is_element_active(mask_reg, i, vm)) continue;
         T val = vector::get_group_element<T>(cpu.state().regs, rs2, i);
@@ -757,7 +757,7 @@ void execute_vctz(core::CPU& cpu, simrv::xlen::RegId rd, simrv::xlen::RegId rs2,
 template <typename T>
 void execute_vcpop_v(core::CPU& cpu, simrv::xlen::RegId rd, simrv::xlen::RegId rs2, bool vm,
                      uint32_t vl) {
-    const auto& mask_reg = cpu.state().regs.read_vector(simrv::xlen::RegId::Zero);
+    const auto& mask_reg = cpu.state().regs.read_vector(simrv::xlen::to_vec_reg_id(simrv::xlen::RegId::Zero));
     for (uint32_t i = static_cast<uint32_t>(cpu.state().vstart); i < vl; i++) {
         if (!vector::is_element_active(mask_reg, i, vm)) continue;
         T val = vector::get_group_element<T>(cpu.state().regs, rs2, i);
@@ -772,8 +772,8 @@ void execute_vcpop_v(core::CPU& cpu, simrv::xlen::RegId rd, simrv::xlen::RegId r
 template <typename T>
 void execute_vmadc_vv(core::CPU& cpu, simrv::xlen::RegId rd, simrv::xlen::RegId rs1,
                       simrv::xlen::RegId rs2, bool vm, uint32_t vl) {
-    const auto& v0 = cpu.state().regs.read_vector(simrv::xlen::RegId::Zero);
-    auto& dest_reg = cpu.state().regs.read_vector(rd);
+    const auto& v0 = cpu.state().regs.read_vector(simrv::xlen::to_vec_reg_id(simrv::xlen::RegId::Zero));
+    auto& dest_reg = cpu.state().regs.read_vector(simrv::xlen::to_vec_reg_id(rd));
     for (uint32_t i = static_cast<uint32_t>(cpu.state().vstart); i < vl; i++) {
         T val2 = vector::get_group_element<T>(cpu.state().regs, rs2, i);
         T val1 = vector::get_group_element<T>(cpu.state().regs, rs1, i);
@@ -786,8 +786,8 @@ void execute_vmadc_vv(core::CPU& cpu, simrv::xlen::RegId rd, simrv::xlen::RegId 
 template <typename T>
 void execute_vmadc_vx(core::CPU& cpu, simrv::xlen::RegId rd, simrv::xlen::Register rs1_val,
                       simrv::xlen::RegId rs2, bool vm, uint32_t vl) {
-    const auto& v0 = cpu.state().regs.read_vector(simrv::xlen::RegId::Zero);
-    auto& dest_reg = cpu.state().regs.read_vector(rd);
+    const auto& v0 = cpu.state().regs.read_vector(simrv::xlen::to_vec_reg_id(simrv::xlen::RegId::Zero));
+    auto& dest_reg = cpu.state().regs.read_vector(simrv::xlen::to_vec_reg_id(rd));
     T val1 = vector::integer_scalar<T>(rs1_val);
     for (uint32_t i = static_cast<uint32_t>(cpu.state().vstart); i < vl; i++) {
         T val2 = vector::get_group_element<T>(cpu.state().regs, rs2, i);
@@ -800,8 +800,8 @@ void execute_vmadc_vx(core::CPU& cpu, simrv::xlen::RegId rd, simrv::xlen::Regist
 template <typename T>
 void execute_vmadc_vi(core::CPU& cpu, simrv::xlen::RegId rd, int32_t simm5, simrv::xlen::RegId rs2,
                       bool vm, uint32_t vl) {
-    const auto& v0 = cpu.state().regs.read_vector(simrv::xlen::RegId::Zero);
-    auto& dest_reg = cpu.state().regs.read_vector(rd);
+    const auto& v0 = cpu.state().regs.read_vector(simrv::xlen::to_vec_reg_id(simrv::xlen::RegId::Zero));
+    auto& dest_reg = cpu.state().regs.read_vector(simrv::xlen::to_vec_reg_id(rd));
     T val1 = static_cast<T>(simm5);
     for (uint32_t i = static_cast<uint32_t>(cpu.state().vstart); i < vl; i++) {
         T val2 = vector::get_group_element<T>(cpu.state().regs, rs2, i);
@@ -814,8 +814,8 @@ void execute_vmadc_vi(core::CPU& cpu, simrv::xlen::RegId rd, int32_t simm5, simr
 template <typename T>
 void execute_vmsbc_vv(core::CPU& cpu, simrv::xlen::RegId rd, simrv::xlen::RegId rs1,
                       simrv::xlen::RegId rs2, bool vm, uint32_t vl) {
-    const auto& v0 = cpu.state().regs.read_vector(simrv::xlen::RegId::Zero);
-    auto& dest_reg = cpu.state().regs.read_vector(rd);
+    const auto& v0 = cpu.state().regs.read_vector(simrv::xlen::to_vec_reg_id(simrv::xlen::RegId::Zero));
+    auto& dest_reg = cpu.state().regs.read_vector(simrv::xlen::to_vec_reg_id(rd));
     for (uint32_t i = static_cast<uint32_t>(cpu.state().vstart); i < vl; i++) {
         T val2 = vector::get_group_element<T>(cpu.state().regs, rs2, i);
         T val1 = vector::get_group_element<T>(cpu.state().regs, rs1, i);
@@ -828,8 +828,8 @@ void execute_vmsbc_vv(core::CPU& cpu, simrv::xlen::RegId rd, simrv::xlen::RegId 
 template <typename T>
 void execute_vmsbc_vx(core::CPU& cpu, simrv::xlen::RegId rd, simrv::xlen::Register rs1_val,
                       simrv::xlen::RegId rs2, bool vm, uint32_t vl) {
-    const auto& v0 = cpu.state().regs.read_vector(simrv::xlen::RegId::Zero);
-    auto& dest_reg = cpu.state().regs.read_vector(rd);
+    const auto& v0 = cpu.state().regs.read_vector(simrv::xlen::to_vec_reg_id(simrv::xlen::RegId::Zero));
+    auto& dest_reg = cpu.state().regs.read_vector(simrv::xlen::to_vec_reg_id(rd));
     T val1 = vector::integer_scalar<T>(rs1_val);
     for (uint32_t i = static_cast<uint32_t>(cpu.state().vstart); i < vl; i++) {
         T val2 = vector::get_group_element<T>(cpu.state().regs, rs2, i);
@@ -843,7 +843,7 @@ void execute_vmsbc_vx(core::CPU& cpu, simrv::xlen::RegId rd, simrv::xlen::Regist
 template <typename T>
 void execute_vadc_vv(core::CPU& cpu, simrv::xlen::RegId rd, simrv::xlen::RegId rs1,
                      simrv::xlen::RegId rs2, uint32_t vl) {
-    const auto& v0 = cpu.state().regs.read_vector(simrv::xlen::RegId::Zero);
+    const auto& v0 = cpu.state().regs.read_vector(simrv::xlen::to_vec_reg_id(simrv::xlen::RegId::Zero));
     for (uint32_t i = static_cast<uint32_t>(cpu.state().vstart); i < vl; i++) {
         T val2 = vector::get_group_element<T>(cpu.state().regs, rs2, i);
         T val1 = vector::get_group_element<T>(cpu.state().regs, rs1, i);
@@ -856,7 +856,7 @@ void execute_vadc_vv(core::CPU& cpu, simrv::xlen::RegId rd, simrv::xlen::RegId r
 template <typename T>
 void execute_vadc_vx(core::CPU& cpu, simrv::xlen::RegId rd, simrv::xlen::Register rs1_val,
                      simrv::xlen::RegId rs2, uint32_t vl) {
-    const auto& v0 = cpu.state().regs.read_vector(simrv::xlen::RegId::Zero);
+    const auto& v0 = cpu.state().regs.read_vector(simrv::xlen::to_vec_reg_id(simrv::xlen::RegId::Zero));
     T val1 = vector::integer_scalar<T>(rs1_val);
     for (uint32_t i = static_cast<uint32_t>(cpu.state().vstart); i < vl; i++) {
         T val2 = vector::get_group_element<T>(cpu.state().regs, rs2, i);
@@ -869,7 +869,7 @@ void execute_vadc_vx(core::CPU& cpu, simrv::xlen::RegId rd, simrv::xlen::Registe
 template <typename T>
 void execute_vadc_vi(core::CPU& cpu, simrv::xlen::RegId rd, int32_t simm5, simrv::xlen::RegId rs2,
                      uint32_t vl) {
-    const auto& v0 = cpu.state().regs.read_vector(simrv::xlen::RegId::Zero);
+    const auto& v0 = cpu.state().regs.read_vector(simrv::xlen::to_vec_reg_id(simrv::xlen::RegId::Zero));
     T val1 = static_cast<T>(simm5);
     for (uint32_t i = static_cast<uint32_t>(cpu.state().vstart); i < vl; i++) {
         T val2 = vector::get_group_element<T>(cpu.state().regs, rs2, i);
@@ -883,7 +883,7 @@ void execute_vadc_vi(core::CPU& cpu, simrv::xlen::RegId rd, int32_t simm5, simrv
 template <typename T_dest, typename T_src>
 void execute_vwsll_vv(core::CPU& cpu, simrv::xlen::RegId rd, simrv::xlen::RegId rs1,
                       simrv::xlen::RegId rs2, bool vm, uint32_t vl) {
-    const auto& mask_reg = cpu.state().regs.read_vector(simrv::xlen::RegId::Zero);
+    const auto& mask_reg = cpu.state().regs.read_vector(simrv::xlen::to_vec_reg_id(simrv::xlen::RegId::Zero));
     constexpr uint32_t shift_mask = (sizeof(T_dest) * 8) - 1;
     std::vector<T_src> src2_vals(vl);
     std::vector<T_src> src1_vals(vl);
@@ -904,7 +904,7 @@ void execute_vwsll_vv(core::CPU& cpu, simrv::xlen::RegId rd, simrv::xlen::RegId 
 template <typename T_dest, typename T_src>
 void execute_vwsll_vx(core::CPU& cpu, simrv::xlen::RegId rd, simrv::xlen::Register rs1_val,
                       simrv::xlen::RegId rs2, bool vm, uint32_t vl) {
-    const auto& mask_reg = cpu.state().regs.read_vector(simrv::xlen::RegId::Zero);
+    const auto& mask_reg = cpu.state().regs.read_vector(simrv::xlen::to_vec_reg_id(simrv::xlen::RegId::Zero));
     constexpr uint32_t shift_mask = (sizeof(T_dest) * 8) - 1;
     std::vector<T_src> src2_vals(vl);
     for (uint32_t i = static_cast<uint32_t>(cpu.state().vstart); i < vl; i++) {
@@ -923,7 +923,7 @@ void execute_vwsll_vx(core::CPU& cpu, simrv::xlen::RegId rd, simrv::xlen::Regist
 template <typename T_dest, typename T_src>
 void execute_vwsll_vi(core::CPU& cpu, simrv::xlen::RegId rd, int32_t simm5, simrv::xlen::RegId rs2,
                       bool vm, uint32_t vl) {
-    const auto& mask_reg = cpu.state().regs.read_vector(simrv::xlen::RegId::Zero);
+    const auto& mask_reg = cpu.state().regs.read_vector(simrv::xlen::to_vec_reg_id(simrv::xlen::RegId::Zero));
     constexpr uint32_t shift_mask = (sizeof(T_dest) * 8) - 1;
     std::vector<T_src> src2_vals(vl);
     for (uint32_t i = static_cast<uint32_t>(cpu.state().vstart); i < vl; i++) {

@@ -667,8 +667,8 @@ auto main() -> int {
         source_state.pc = 0x80000100;
         source_state.regs.vlen = 256;
         source_state.regs.write(simrv::xlen::RegId::T2, 0x12345678);
-        source_state.regs.write_fp(static_cast<simrv::xlen::RegId>(5), 0x7ff8000000001234);
-        source_state.regs.read_vector(static_cast<simrv::xlen::RegId>(7)).u8[0] = 0xA5;
+        source_state.regs.write_fp(simrv::xlen::to_fp_reg_id(static_cast<simrv::xlen::RegId>(5)), 0x7ff8000000001234);
+        source_state.regs.read_vector(simrv::xlen::to_vec_reg_id(static_cast<simrv::xlen::RegId>(7))).u8[0] = 0xA5;
         source_state.vtype = 0x23;
         source_state.vl = 17;
         source_state.mstatus = 0x1800;
@@ -693,8 +693,8 @@ auto main() -> int {
                    restored_state.mepc == source_state.mepc && restored_state.pmpaddr[0] == 0x1234,
                "checkpoint restores vector, CSR, and PMP state");
         expect(
-            restored_state.regs.read_fp(static_cast<simrv::xlen::RegId>(5)) == 0x7ff8000000001234 &&
-                restored_state.regs.read_vector(static_cast<simrv::xlen::RegId>(7)).u8[0] == 0xA5,
+            restored_state.regs.read_fp(simrv::xlen::to_fp_reg_id(static_cast<simrv::xlen::RegId>(5))) == 0x7ff8000000001234 &&
+                restored_state.regs.read_vector(simrv::xlen::to_vec_reg_id(static_cast<simrv::xlen::RegId>(7))).u8[0] == 0xA5,
             "checkpoint restores FP and vector register-file bits");
         expect(restored.primary_hart().e_icount == 77 && restored.primary_hart().e_ccount == 91 &&
                    restored.primary_hart().clint_mmio.mcycle == 105 &&

@@ -6,19 +6,17 @@
 
 namespace simrv::pipeline {
 
-enum class RegisterBank : uint8_t { Integer, FloatingPoint };
-
+template <simrv::xlen::RegisterIdentifier RegisterId>
 struct RegisterWriteEffect {
-    RegisterBank bank = RegisterBank::Integer;
-    simrv::xlen::RegId destination = simrv::xlen::RegId::Zero;
+    RegisterId destination = static_cast<RegisterId>(0);
     uint64_t value = 0;
     bool enabled = false;
 };
 
 /// Architectural changes produced by the writeback stage, before they are applied.
 struct WritebackEffects {
-    RegisterWriteEffect integer_write{};
-    RegisterWriteEffect floating_write{.bank = RegisterBank::FloatingPoint};
+    RegisterWriteEffect<simrv::xlen::RegId> integer_write{};
+    RegisterWriteEffect<simrv::xlen::FpRegId> floating_write{};
     bool increments_instruction_count = false;
     bool marks_floating_point_dirty = false;
 };
@@ -60,7 +58,7 @@ struct WritebackEffects {
     }
 
     auto& floating = effects.floating_write;
-    floating.destination = context.rd;
+    floating.destination = simrv::xlen::to_fp_reg_id(context.rd);
     if (opcode == isa::Opcode::LoadFp) {
         floating.value = context.fp_mem_rdata;
         floating.enabled = true;

@@ -135,7 +135,7 @@ void execute_vl_whole(core::CPU& cpu, simrv::memory::MemorySubsystem& mem, simrv
             for (uint32_t r = 0; r < nr; ++r) {
                 const auto reg_idx =
                     static_cast<simrv::xlen::RegId>((static_cast<uint32_t>(rd) + r) % 32);
-                auto& vreg = cpu.state().regs.read_vector(reg_idx);
+                auto& vreg = cpu.state().regs.read_vector(simrv::xlen::to_vec_reg_id(reg_idx));
                 std::memcpy(vreg.u8.data(), host_src + r * vlen_bytes, vlen_bytes);
             }
             return;
@@ -177,7 +177,7 @@ void execute_vl_whole(core::CPU& cpu, simrv::memory::MemorySubsystem& mem, simrv
             const uint32_t offset = i * element_bytes + byte;
             const auto reg_idx =
                 static_cast<simrv::xlen::RegId>(static_cast<uint32_t>(rd) + offset / vlen_bytes);
-            cpu.state().regs.read_vector(reg_idx).u8[offset % vlen_bytes] =
+            cpu.state().regs.read_vector(simrv::xlen::to_vec_reg_id(reg_idx)).u8[offset % vlen_bytes] =
                 static_cast<uint8_t>(val >> (byte * 8));
         }
     }
@@ -196,7 +196,7 @@ void execute_vs_whole(core::CPU& cpu, simrv::memory::MemorySubsystem& mem, simrv
             for (uint32_t r = 0; r < nr; ++r) {
                 const auto reg_idx =
                     static_cast<simrv::xlen::RegId>((static_cast<uint32_t>(vs3) + r) % 32);
-                const auto& vreg = cpu.state().regs.read_vector(reg_idx);
+                const auto& vreg = cpu.state().regs.read_vector(simrv::xlen::to_vec_reg_id(reg_idx));
                 std::memcpy(host_dst + r * vlen_bytes, vreg.u8.data(), vlen_bytes);
             }
             if (simrv::compiler::unlikely(cpu.machine_ != nullptr &&
@@ -214,7 +214,7 @@ void execute_vs_whole(core::CPU& cpu, simrv::memory::MemorySubsystem& mem, simrv
         simrv::xlen::Address addr = base_addr + i;
         uint32_t reg_idx = (static_cast<uint32_t>(vs3) + (i / cpu.state().regs.vlen_bytes())) % 32;
         uint8_t val = cpu.state()
-                          .regs.read_vector(static_cast<simrv::xlen::RegId>(reg_idx))
+                          .regs.read_vector(simrv::xlen::to_vec_reg_id(static_cast<simrv::xlen::RegId>(reg_idx)))
                           .u8[i % cpu.state().regs.vlen_bytes()];
         simrv::memory::MemoryAccess::storeInt(mem, cpu, addr, static_cast<simrv::xlen::Word>(val),
                                               isa::Funct3::Sb);
@@ -253,7 +253,7 @@ void execute_vle(core::CPU& cpu, simrv::memory::MemorySubsystem& mem, simrv::xle
                 const uint32_t chunk = std::min(remaining, elems_per_reg - in_reg);
                 const auto actual_reg =
                     static_cast<simrv::xlen::RegId>((std::to_underlying(rd) + reg_offset) & 0x1F);
-                auto& vreg = cpu.state().regs.read_vector(actual_reg);
+                auto& vreg = cpu.state().regs.read_vector(simrv::xlen::to_vec_reg_id(actual_reg));
                 std::memcpy(&vreg.u8[in_reg * sizeof(T)], host_src + byte_offset,
                             chunk * sizeof(T));
                 elem_idx += chunk;
@@ -264,7 +264,7 @@ void execute_vle(core::CPU& cpu, simrv::memory::MemorySubsystem& mem, simrv::xle
         }
     }
 
-    const auto& mask_reg = cpu.state().regs.read_vector(simrv::xlen::RegId::Zero);
+    const auto& mask_reg = cpu.state().regs.read_vector(simrv::xlen::to_vec_reg_id(simrv::xlen::RegId::Zero));
 
     for (uint32_t i = static_cast<uint32_t>(cpu.state().vstart); i < vl; i++) {
         if (!vector::is_element_active(mask_reg, i, vm)) continue;
@@ -323,7 +323,7 @@ void execute_vlm(core::CPU& cpu, simrv::memory::MemorySubsystem& mem, simrv::xle
     if (cpu.state().vstart == 0 && evl > 0) {
         simrv::xlen::Byte* host_src = get_direct_host_memory_for_range(cpu, base_addr, evl, false);
         if (host_src != nullptr) {
-            std::memcpy(cpu.state().regs.read_vector(rd).u8.data(), host_src, evl);
+            std::memcpy(cpu.state().regs.read_vector(simrv::xlen::to_vec_reg_id(rd)).u8.data(), host_src, evl);
             return;
         }
     }
@@ -346,7 +346,7 @@ void execute_vsm(core::CPU& cpu, simrv::memory::MemorySubsystem& mem, simrv::xle
         simrv::xlen::Byte* host_dst =
             get_direct_host_memory_for_range(cpu, base_addr, evl, true, &physical_address);
         if (host_dst != nullptr) {
-            std::memcpy(host_dst, cpu.state().regs.read_vector(vs3).u8.data(), evl);
+            std::memcpy(host_dst, cpu.state().regs.read_vector(simrv::xlen::to_vec_reg_id(vs3)).u8.data(), evl);
             if (simrv::compiler::unlikely(cpu.machine_ != nullptr &&
                                           cpu.machine_->num_harts() > 1 &&
                                           mem.reservation_table().may_have_reservations())) {
@@ -395,7 +395,7 @@ void execute_vse(core::CPU& cpu, simrv::memory::MemorySubsystem& mem, simrv::xle
                 const uint32_t chunk = std::min(remaining, elems_per_reg - in_reg);
                 const auto source_reg =
                     static_cast<simrv::xlen::RegId>((std::to_underlying(vs3) + reg_offset) & 0x1F);
-                const auto& vreg = cpu.state().regs.read_vector(source_reg);
+                const auto& vreg = cpu.state().regs.read_vector(simrv::xlen::to_vec_reg_id(source_reg));
                 std::memcpy(host_dst + byte_offset, &vreg.u8[in_reg * sizeof(T)],
                             chunk * sizeof(T));
                 elem_idx += chunk;
@@ -413,7 +413,7 @@ void execute_vse(core::CPU& cpu, simrv::memory::MemorySubsystem& mem, simrv::xle
         }
     }
 
-    const auto& mask_reg = cpu.state().regs.read_vector(simrv::xlen::RegId::Zero);
+    const auto& mask_reg = cpu.state().regs.read_vector(simrv::xlen::to_vec_reg_id(simrv::xlen::RegId::Zero));
 
     for (uint32_t i = static_cast<uint32_t>(cpu.state().vstart); i < vl; i++) {
         if (!vector::is_element_active(mask_reg, i, vm)) continue;
@@ -462,7 +462,7 @@ template <typename T>
 void execute_vlse(core::CPU& cpu, simrv::memory::MemorySubsystem& mem, simrv::xlen::RegId rd,
                   simrv::xlen::Register base_addr, simrv::xlen::Register stride_reg_val, bool vm,
                   uint32_t vl, uint32_t nfields, uint32_t field_registers, isa::Funct3 mem_f3) {
-    const auto& mask_reg = cpu.state().regs.read_vector(simrv::xlen::RegId::Zero);
+    const auto& mask_reg = cpu.state().regs.read_vector(simrv::xlen::to_vec_reg_id(simrv::xlen::RegId::Zero));
     auto stride = static_cast<int64_t>(
         static_cast<std::make_signed_t<simrv::xlen::Register>>(stride_reg_val));
 
@@ -510,7 +510,7 @@ template <typename T>
 void execute_vsse(core::CPU& cpu, simrv::memory::MemorySubsystem& mem, simrv::xlen::RegId vs3,
                   simrv::xlen::Register base_addr, simrv::xlen::Register stride_reg_val, bool vm,
                   uint32_t vl, uint32_t nfields, uint32_t field_registers, isa::Funct3 mem_f3) {
-    const auto& mask_reg = cpu.state().regs.read_vector(simrv::xlen::RegId::Zero);
+    const auto& mask_reg = cpu.state().regs.read_vector(simrv::xlen::to_vec_reg_id(simrv::xlen::RegId::Zero));
     auto stride = static_cast<int64_t>(
         static_cast<std::make_signed_t<simrv::xlen::Register>>(stride_reg_val));
 
@@ -561,7 +561,7 @@ template <typename T_data, typename T_idx>
 void execute_vluxei(core::CPU& cpu, simrv::memory::MemorySubsystem& mem, simrv::xlen::RegId rd,
                     simrv::xlen::Register base_addr, simrv::xlen::RegId vs2, bool vm, uint32_t vl,
                     uint32_t nfields, uint32_t field_registers, isa::Funct3 mem_f3) {
-    const auto& mask_reg = cpu.state().regs.read_vector(simrv::xlen::RegId::Zero);
+    const auto& mask_reg = cpu.state().regs.read_vector(simrv::xlen::to_vec_reg_id(simrv::xlen::RegId::Zero));
 
     for (uint32_t i = static_cast<uint32_t>(cpu.state().vstart); i < vl; i++) {
         if (!vector::is_element_active(mask_reg, i, vm)) continue;
@@ -630,7 +630,7 @@ template <typename T_data, typename T_idx>
 void execute_vsuxei(core::CPU& cpu, simrv::memory::MemorySubsystem& mem, simrv::xlen::RegId vs3,
                     simrv::xlen::Register base_addr, simrv::xlen::RegId vs2, bool vm, uint32_t vl,
                     uint32_t nfields, uint32_t field_registers, isa::Funct3 mem_f3) {
-    const auto& mask_reg = cpu.state().regs.read_vector(simrv::xlen::RegId::Zero);
+    const auto& mask_reg = cpu.state().regs.read_vector(simrv::xlen::to_vec_reg_id(simrv::xlen::RegId::Zero));
 
     for (uint32_t i = static_cast<uint32_t>(cpu.state().vstart); i < vl; i++) {
         if (!vector::is_element_active(mask_reg, i, vm)) continue;

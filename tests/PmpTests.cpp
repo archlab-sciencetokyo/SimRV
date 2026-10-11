@@ -1,6 +1,7 @@
 #include <array>
 #include <cstdlib>
 #include <iostream>
+#include <limits>
 #include <string>
 
 #include "simrv/core/Cpu.hpp"
@@ -100,6 +101,31 @@ void test_pmp_partial_overlap() {
            "Partial overlap: 8-byte read across 4-byte PMP boundary fails");
     expect(!simrv::core::pmp::check_access(state, 0x80000FFE, 4, simrv::core::PmpAccessType::Read),
            "Partial overlap: Read crossing into start of PMP region fails");
+}
+
+void test_pmp_overflowing_request() {
+    simrv::core::pmp::PmpRange range{.base = 0x8000, .limit = 0x10000};
+    const auto max_address = std::numeric_limits<uint64_t>::max();
+    expect(!range.contains(max_address - 1, 4),
+           "PmpRange rejects a request whose end wraps past the address limit");
+    expect(!range.overlaps(max_address - 1, 4),
+           "PmpRange does not treat an overflowing request as a low-address overlap");
+
+    simrv::core::pmp::PmpRange full_range{.full_range = true};
+    expect(!full_range.contains(max_address, 2),
+           "Full PmpRange rejects a request that overflows the address limit");
+
+    if constexpr (simrv::xlen::kIsXLen64) {
+        simrv::core::ArchState state{};
+        state.priv = simrv::xlen::PrivilegeLevel::Supervisor;
+        state.pmpaddr[0] = 0x8000 >> 2;
+        state.pmpcfg[0] = simrv::core::pmp::kPmpModeNa4 | simrv::core::pmp::kPmpR;
+        state.refresh_pmp_status();
+        expect(!simrv::core::pmp::check_access(state,
+                                               static_cast<simrv::xlen::Address>(max_address - 1),
+                                               4, simrv::core::PmpAccessType::Read),
+               "PMP denies an RV64 access whose address range wraps");
+    }
 }
 
 void test_pmp_machine_mode_and_locks() {
@@ -213,6 +239,7 @@ auto main() -> int {
     std::cout << "Running PmpTests...\n";
     test_pmp_matching_modes();
     test_pmp_partial_overlap();
+    test_pmp_overflowing_request();
     test_pmp_machine_mode_and_locks();
     test_pmp_csr_locking_and_updates();
     test_pmp_mmu_page_walk();

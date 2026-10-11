@@ -1004,9 +1004,9 @@ void InspectorPane::update_cache() {
         cached_gpr_.at(static_cast<std::size_t>(i)) =
             st.regs.read(static_cast<simrv::xlen::RegId>(i));
         cached_fpr_.at(static_cast<std::size_t>(i)) =
-            st.regs.read_fp(static_cast<simrv::xlen::RegId>(i));
+            st.regs.read_fp(simrv::xlen::to_fp_reg_id(static_cast<simrv::xlen::RegId>(i)));
         cached_vec_.at(static_cast<std::size_t>(i)) =
-            st.regs.read_vector(static_cast<simrv::xlen::RegId>(i));
+            st.regs.read_vector(simrv::xlen::to_vec_reg_id(static_cast<simrv::xlen::RegId>(i)));
     }
 }
 

@@ -148,27 +148,13 @@ class RegisterFile {
         reg_[0] = 0;
     }
 
-    [[nodiscard]] constexpr auto read_fp(simrv::xlen::RegId idx) const
-        -> simrv::xlen::FloatingRegister {
-        return freg_[std::to_underlying(idx)];
-    }
-
     [[nodiscard]] constexpr auto read_fp(simrv::xlen::FpRegId idx) const
         -> simrv::xlen::FloatingRegister {
         return freg_[std::to_underlying(idx)];
     }
 
-    constexpr void write_fp(simrv::xlen::RegId idx, simrv::xlen::FloatingRegister val) {
-        freg_[std::to_underlying(idx)] = val;
-    }
-
     constexpr void write_fp(simrv::xlen::FpRegId idx, simrv::xlen::FloatingRegister val) {
         freg_[std::to_underlying(idx)] = val;
-    }
-
-    [[nodiscard]] constexpr auto read_vector(simrv::xlen::RegId idx) const
-        -> const VectorRegister& {
-        return vreg_[std::to_underlying(idx)];
     }
 
     [[nodiscard]] constexpr auto read_vector(simrv::xlen::VecRegId idx) const
@@ -176,16 +162,8 @@ class RegisterFile {
         return vreg_[std::to_underlying(idx)];
     }
 
-    [[nodiscard]] constexpr auto read_vector(simrv::xlen::RegId idx) -> VectorRegister& {
-        return vreg_[std::to_underlying(idx)];
-    }
-
     [[nodiscard]] constexpr auto read_vector(simrv::xlen::VecRegId idx) -> VectorRegister& {
         return vreg_[std::to_underlying(idx)];
-    }
-
-    constexpr void write_vector(simrv::xlen::RegId idx, const VectorRegister& val) {
-        vreg_[std::to_underlying(idx)] = val;
     }
 
     constexpr void write_vector(simrv::xlen::VecRegId idx, const VectorRegister& val) {

@@ -465,19 +465,19 @@ void CPU::record_trace_for_tui(Machine& machine) {
     const bool rs2_fp = isa::is_rs2_fp(opcode, op_id);
 
     if (rd_fp) {
-        rd_val = state_.regs.read_fp(rd);
+        rd_val = state_.regs.read_fp(simrv::xlen::to_fp_reg_id(rd));
     } else {
         rd_val = state_.regs.read(rd);
     }
 
     if (rs1_fp) {
-        rs1_val = state_.regs.read_fp(rs1);
+        rs1_val = state_.regs.read_fp(simrv::xlen::to_fp_reg_id(rs1));
     } else {
         rs1_val = state_.regs.read(rs1);
     }
 
     if (rs2_fp) {
-        rs2_val = state_.regs.read_fp(rs2);
+        rs2_val = state_.regs.read_fp(simrv::xlen::to_fp_reg_id(rs2));
     } else {
         rs2_val = state_.regs.read(rs2);
     }

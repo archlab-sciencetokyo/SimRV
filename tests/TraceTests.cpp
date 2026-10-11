@@ -201,7 +201,7 @@ void test_optional_fp_register_write_trace() {
     cpu.reset();
     cpu.machine_ = &machine;
     cpu.state().pc = kPc;
-    cpu.state().regs.write_fp(static_cast<simrv::xlen::RegId>(1), 0x40400000);
+    cpu.state().regs.write_fp(simrv::xlen::to_fp_reg_id(static_cast<simrv::xlen::RegId>(1)), 0x40400000);
     machine.trace().init_architecture_trace(path.string());
     simrv::pipeline::PipelineContext retiring{};
     retiring.cpc = kPc;

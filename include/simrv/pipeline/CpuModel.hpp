@@ -64,7 +64,7 @@ struct DmaTimingConfig {
 
 struct AxiConfig {
     bool enabled{false};
-    uint32_t data_width_bytes{8};
+    uint32_t data_width_bytes{sizeof(simrv::xlen::Word)};
     uint32_t id_width_bits{4};
     uint32_t max_outstanding_reads{8};
     uint32_t max_outstanding_writes{8};
