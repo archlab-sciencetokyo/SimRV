@@ -15,7 +15,7 @@
 #include <string_view>
 #include <vector>
 
-#include "simrv/isa/Base.hpp"
+#include "simrv/isa/IsaTypes.hpp"
 #include "simrv/pipeline/PipelineSim.hpp"
 #include "simrv/xlen/ScalarTypes.hpp"
 

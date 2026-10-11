@@ -22,7 +22,7 @@
 
 #include "simrv/CompilerHints.hpp"
 #include "simrv/core/TelemetrySink.hpp"
-#include "simrv/isa/Base.hpp"
+#include "simrv/isa/InstructionFields.hpp"
 #include "simrv/isa/OperationId.hpp"
 #include "simrv/tui/LogBuffer.hpp"
 #include "simrv/tui/TuiKey.hpp"

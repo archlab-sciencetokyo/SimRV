@@ -9,7 +9,7 @@
 #include <vector>
 
 #include "simrv/CompilerHints.hpp"
-#include "simrv/isa/Base.hpp"
+#include "simrv/isa/InstructionFields.hpp"
 #include "simrv/pipeline/DecodedInstruction.hpp"
 #include "simrv/xlen/AddressTypes.hpp"
 #include "simrv/xlen/RegisterTypes.hpp"

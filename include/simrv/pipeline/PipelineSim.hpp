@@ -3,7 +3,7 @@
 #include <array>
 #include <cstdint>
 #include <simrv/CompilerHints.hpp>
-#include <simrv/isa/Base.hpp>
+#include <simrv/isa/InstructionFields.hpp>
 #include <simrv/pipeline/CycleTransition.hpp>
 #include <simrv/xlen/RegisterTypes.hpp>
 #include <vector>

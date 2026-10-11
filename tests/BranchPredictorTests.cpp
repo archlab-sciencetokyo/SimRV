@@ -5,7 +5,7 @@
 #include <cstdlib>
 #include <iostream>
 
-#include "simrv/isa/Base.hpp"
+#include "simrv/isa/InstructionFields.hpp"
 #include "simrv/pipeline/BranchPredictor.hpp"
 #include "simrv/xlen/RegisterTypes.hpp"
 

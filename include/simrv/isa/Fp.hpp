@@ -6,7 +6,7 @@
 
 #include <cstdint>
 
-#include "simrv/isa/Base.hpp"
+#include "simrv/isa/InstructionFields.hpp"
 #include "simrv/xlen/ScalarTypes.hpp"
 
 namespace simrv::isa {

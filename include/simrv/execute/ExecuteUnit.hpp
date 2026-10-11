@@ -2,7 +2,7 @@
 #include <expected>
 
 #include "simrv/isa/Amo.hpp"
-#include "simrv/isa/Base.hpp"
+#include "simrv/isa/InstructionFields.hpp"
 #include "simrv/isa/Fp.hpp"
 #include "simrv/isa/FpTypes.hpp"
 #include "simrv/isa/OperationId.hpp"

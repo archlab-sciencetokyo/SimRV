@@ -15,7 +15,7 @@
 
 #include "simrv/core/Logger.hpp"
 #include "simrv/core/SoCConfig.hpp"
-#include "simrv/isa/Base.hpp"
+#include "simrv/isa/IsaTypes.hpp"
 #include "simrv/isa/Zk.hpp"
 #include "simrv/pipeline/CpuModel.hpp"
 #include "simrv/pipeline/PipelineConfig.hpp"

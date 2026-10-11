@@ -7,7 +7,7 @@
 #include "simrv/CompilerHints.hpp"
 #include "simrv/core/Machine.hpp"
 #include "simrv/isa/Amo.hpp"
-#include "simrv/isa/Base.hpp"
+#include "simrv/isa/InstructionFields.hpp"
 
 namespace simrv::core {
 namespace {

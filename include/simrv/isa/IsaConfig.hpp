@@ -1,6 +1,6 @@
 #pragma once
 
-#include "simrv/isa/Base.hpp"
+#include "simrv/isa/IsaTypes.hpp"
 #include "simrv/xlen/ScalarTypes.hpp"
 
 namespace simrv::isa {

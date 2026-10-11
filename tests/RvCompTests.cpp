@@ -21,7 +21,7 @@
 #include "simrv/device/PlatformDeviceRegistry.hpp"
 #include "simrv/device/ResetControlMmio.hpp"
 #include "simrv/device/RingBufferEthernetMmio.hpp"
-#include "simrv/isa/Base.hpp"
+#include "simrv/isa/IsaTypes.hpp"
 #include "simrv/isa/Common.hpp"
 #include "simrv/memory/MemorySubsystem.hpp"
 #include "simrv/memory/MmioDevice.hpp"

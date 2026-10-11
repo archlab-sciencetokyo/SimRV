@@ -16,7 +16,7 @@
 #include <unordered_map>
 #include <vector>
 
-#include "simrv/isa/Base.hpp"
+#include "simrv/isa/InstructionFields.hpp"
 #include "simrv/isa/TrapTypes.hpp"
 #include "simrv/xlen/IdentifierTypes.hpp"
 

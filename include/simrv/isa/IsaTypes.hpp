@@ -1,0 +1,50 @@
+/**
+ * @file IsaTypes.hpp
+ * @brief ISA extension and preset identifiers.
+ */
+#pragma once
+
+#include <cstdint>
+
+namespace simrv::isa {
+
+/**
+ * @enum IsaExtension
+ * @brief Identifies MISA extension bits, including X for non-standard extensions present.
+ */
+enum class IsaExtension : uint8_t {
+    E = 4,   ///< Reduced 32-bit integer register-set extension
+    A = 0,   ///< Atomic Instructions extension
+    B = 1,   ///< Bitmanip Instructions extension
+    C = 2,   ///< Compressed Instructions extension
+    D = 3,   ///< Double-Precision Floating-Point extension
+    F = 5,   ///< Single-Precision Floating-Point extension
+    I = 8,   ///< Base Integer Instruction Set extension
+    M = 12,  ///< Integer Multiply/Divide extension
+    S = 18,  ///< Supervisor Privilege Level support
+    U = 20,  ///< User Privilege Level support
+    V = 21,  ///< Vector Extension
+    X = 23,  ///< Non-standard extensions present (e.g. SimRV Xsimrvtrace)
+};
+
+/**
+ * @enum IsaPreset
+ * @brief SimRV ISA presets matching common RISC-V extension sets.
+ *
+ * These are implementation presets, not ratified RISC-V architecture profiles.
+ */
+enum class IsaPreset : uint8_t {
+    E,     ///< RV32E reduced-register integer base
+    EM,    ///< RV32E plus Multiply/Divide
+    EMAC,  ///< RV32E plus Multiply/Divide, Atomic, and Compressed
+    I,     ///< RV32I / RV64I base integer only
+    IM,    ///< Integer, Multiply/Divide
+    IMA,   ///< Integer, Multiply/Divide, Atomic, Supervisor, User
+    IMAC,  ///< Integer, Multiply/Divide, Atomic, and Compressed
+    G,     ///< General-purpose IMAFD plus the implied Zicsr and Zifencei extensions
+    GC,    ///< G plus the separate C (Compressed) extension
+    GCBV,  ///< SimRV target preset: GC plus ratified B and V extension bits
+};
+
+
+}  // namespace simrv::isa

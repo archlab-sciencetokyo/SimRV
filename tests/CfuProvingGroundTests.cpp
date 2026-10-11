@@ -15,7 +15,7 @@
 #include "simrv/core/Machine.hpp"
 #include "simrv/core/RuntimeProfile.hpp"
 #include "simrv/execute/CfuUnit.hpp"
-#include "simrv/isa/Base.hpp"
+#include "simrv/isa/InstructionFields.hpp"
 #include "simrv/isa/OperationId.hpp"
 #include "simrv/memory/MemorySubsystem.hpp"
 #include "simrv/pipeline/CpuModel.hpp"

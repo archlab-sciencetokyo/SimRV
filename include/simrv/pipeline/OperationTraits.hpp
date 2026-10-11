@@ -1,6 +1,6 @@
 #pragma once
 
-#include "simrv/isa/Base.hpp"
+#include "simrv/isa/InstructionFields.hpp"
 #include "simrv/isa/OperationId.hpp"
 #include "simrv/pipeline/DecodedInstruction.hpp"
 #include "simrv/pipeline/OperationInfo.hpp"

@@ -11,7 +11,7 @@
 
 #include "simrv/core/CpuConfigParser.hpp"
 #include "simrv/execute/ExecuteUnit.hpp"
-#include "simrv/isa/Base.hpp"
+#include "simrv/isa/IsaTypes.hpp"
 #include "simrv/isa/Common.hpp"
 #include "simrv/isa/Zb.hpp"
 #include "simrv/isa/Zk.hpp"

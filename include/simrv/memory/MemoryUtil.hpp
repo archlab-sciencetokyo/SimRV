@@ -14,7 +14,7 @@
 #include <ranges>
 
 #include "simrv/CompilerHints.hpp"
-#include "simrv/isa/Base.hpp"
+#include "simrv/isa/InstructionFields.hpp"
 #include "simrv/memory/RamView.hpp"
 #include "simrv/xlen/AddressTypes.hpp"
 

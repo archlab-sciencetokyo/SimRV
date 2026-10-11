@@ -4,7 +4,7 @@
  */
 #pragma once
 
-#include "simrv/isa/Base.hpp"
+#include "simrv/isa/InstructionFields.hpp"
 #include "simrv/xlen/AddressTypes.hpp"
 
 namespace simrv::core {

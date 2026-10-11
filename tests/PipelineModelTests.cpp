@@ -7,7 +7,7 @@
 
 #include "simrv/cache/BaseCache.hpp"
 #include "simrv/core/RuntimeProfile.hpp"
-#include "simrv/isa/Base.hpp"
+#include "simrv/isa/InstructionFields.hpp"
 #include "simrv/pipeline/CpuModel.hpp"
 #include "simrv/pipeline/Decoder.hpp"
 #include "simrv/pipeline/OperationTraits.hpp"

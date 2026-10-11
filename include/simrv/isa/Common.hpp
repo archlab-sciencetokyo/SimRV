@@ -7,7 +7,9 @@
 #include <string_view>
 
 #include "simrv/isa/Amo.hpp"         // IWYU pragma: export
-#include "simrv/isa/Base.hpp"        // IWYU pragma: export
+#include "simrv/isa/InstructionFields.hpp"  // IWYU pragma: export
+#include "simrv/isa/InstructionFormat.hpp"  // IWYU pragma: export
+#include "simrv/isa/IsaTypes.hpp"  // IWYU pragma: export
 #include "simrv/isa/Compressed.hpp"  // IWYU pragma: export
 #include "simrv/isa/Fp.hpp"          // IWYU pragma: export
 #include "simrv/isa/IsaConfig.hpp"
