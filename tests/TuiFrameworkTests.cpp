@@ -11,7 +11,11 @@
 #include <string>
 #include <string_view>
 
+#include "simrv/core/Cpu.hpp"
 #include "simrv/core/Machine.hpp"
+#include "simrv/debug/BreakpointManager.hpp"
+#include "simrv/debug/SymbolTable.hpp"
+#include "simrv/memory/MemorySubsystem.hpp"
 #include "simrv/memory/MemoryUtil.hpp"
 #include "simrv/pipeline/OperationInfo.hpp"
 #include "simrv/pipeline/Scoreboard.hpp"

@@ -2,6 +2,7 @@
 
 #include "simrv/core/Cpu.hpp"
 #include "simrv/execute/ExecuteUnit.hpp"
+#include "simrv/isa/VectorTypes.hpp"
 
 namespace simrv::execute {
 

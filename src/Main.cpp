@@ -12,6 +12,7 @@
 #include <cstdlib>
 #include <ctime>
 #include <filesystem>
+#include <format>
 #include <fstream>
 #include <iostream>
 #include <memory>
@@ -27,9 +28,12 @@
 
 #include "simrv/Define.hpp"
 #include "simrv/core/BuildInfo.hpp"
+#include "simrv/core/Cpu.hpp"
 #include "simrv/core/CpuConfigParser.hpp"
 #include "simrv/core/Logger.hpp"
 #include "simrv/core/Machine.hpp"
+#include "simrv/core/TelemetrySink.hpp"
+#include "simrv/core/Tracer.hpp"
 #include "simrv/net/Client.hpp"
 #include "simrv/net/Server.hpp"
 #include "simrv/tui/Tui.hpp"

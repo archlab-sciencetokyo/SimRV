@@ -9,6 +9,7 @@
 #include <format>
 
 #include "simrv/core/Machine.hpp"
+#include "simrv/debug/SymbolTable.hpp"
 #include "simrv/tui/TuiTheme.hpp"
 #include "simrv/tui/modals/ModalComponents.hpp"
 #include "simrv/tui/panels/InspectorPane.hpp"

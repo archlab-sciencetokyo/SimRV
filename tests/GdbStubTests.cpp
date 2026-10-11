@@ -20,7 +20,9 @@
 #include <string>
 #include <thread>
 
+#include "simrv/core/Cpu.hpp"
 #include "simrv/core/Machine.hpp"
+#include "simrv/debug/BreakpointManager.hpp"
 #include "simrv/debug/GdbStub.hpp"
 
 // ---------------------------------------------------------------------------

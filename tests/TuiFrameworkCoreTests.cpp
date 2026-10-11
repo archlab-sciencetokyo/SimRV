@@ -1,3 +1,4 @@
+#include <format>
 #include <iostream>
 #include <string>
 #include <string_view>
@@ -79,8 +80,8 @@ int main() {
     expect(sv.offset_x() == 10 && sv.can_scroll_left(), "horizontal scrolling advances offset");
 
     SubpanelBounds subpanel{.x = 4, .y = 6, .width = 20, .height = 8};
-    expect(subpanel.contains(4, 6) && subpanel.contains(23, 13) &&
-               !subpanel.contains(24, 13) && !subpanel.contains(23, 14),
+    expect(subpanel.contains(4, 6) && subpanel.contains(23, 13) && !subpanel.contains(24, 13) &&
+               !subpanel.contains(23, 14),
            "subpanel bounds use terminal-cell half-open hit testing");
     expect(subpanel.clamp_x(99) == 23 && subpanel.clamp_y(0) == 6,
            "subpanel bounds clamp pointer coordinates safely");

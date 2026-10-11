@@ -9,6 +9,7 @@
 #include "simrv/core/Cpu.hpp"
 #include "simrv/core/Machine.hpp"
 #include "simrv/memory/CoherenceHub.hpp"
+#include "simrv/memory/MemorySubsystem.hpp"
 #include "simrv/memory/TileLinkBus.hpp"
 #include "simrv/tui/TuiTheme.hpp"
 #include "simrv/tui/panels/InspectorPane.hpp"

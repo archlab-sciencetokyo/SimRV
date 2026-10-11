@@ -13,6 +13,7 @@
 #include "simrv/core/Cpu.hpp"
 #include "simrv/core/Logger.hpp"
 #include "simrv/core/Machine.hpp"
+#include "simrv/core/SbiTypes.hpp"
 #include "simrv/core/Tracer.hpp"
 #include "simrv/device/Uart.hpp"
 #include "simrv/tui/Tui.hpp"

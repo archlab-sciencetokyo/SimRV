@@ -9,7 +9,7 @@
 #include <string_view>
 #include <utility>
 
-#include "simrv/Define.hpp"
+#include "simrv/isa/OperationId.hpp"
 
 namespace simrv::util {
 

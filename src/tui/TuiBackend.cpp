@@ -5,6 +5,7 @@
 #include <limits>
 
 #include "simrv/core/Cpu.hpp"
+#include "simrv/debug/BreakpointManager.hpp"
 #include "simrv/pipeline/Decoder.hpp"
 
 namespace simrv::tui {

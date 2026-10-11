@@ -10,6 +10,7 @@
 #include "simrv/core/Cpu.hpp"
 #include "simrv/core/Machine.hpp"
 #include "simrv/core/RegisterFile.hpp"
+#include "simrv/isa/VectorTypes.hpp"
 #include "simrv/pipeline/OperationInfo.hpp"
 #include "simrv/pipeline/Scoreboard.hpp"
 #include "simrv/tui/TuiTheme.hpp"

@@ -18,6 +18,8 @@
 #include "simrv/Define.hpp"
 #include "simrv/core/Cpu.hpp"
 #include "simrv/core/Machine.hpp"
+#include "simrv/debug/SymbolTable.hpp"
+#include "simrv/isa/Common.hpp"
 #include "simrv/pipeline/Decoder.hpp"
 #include "simrv/pipeline/OperationInfo.hpp"
 #include "simrv/pipeline/OperationTraits.hpp"

@@ -3,11 +3,11 @@
  * @brief Translation Lookaside Buffer (TLB) encapsulation.
  */
 #pragma once
-
 #include <array>
 #include <optional>
 #include <utility>
 
+#include "simrv/core/TlbTypes.hpp"
 #include "simrv/memory/MemoryUtil.hpp"
 #include "simrv/xlen/Types.hpp"
 

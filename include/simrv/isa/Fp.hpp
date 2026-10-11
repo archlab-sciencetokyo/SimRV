@@ -162,6 +162,16 @@ constexpr auto operator==(RoundingMode rm, Funct3 f3) noexcept -> bool {
 constexpr auto operator!=(Funct3 f3, RoundingMode rm) noexcept -> bool { return !(f3 == rm); }
 constexpr auto operator!=(RoundingMode rm, Funct3 f3) noexcept -> bool { return !(rm == f3); }
 
+/// Left-shift operator for RoundingMode (e.g. RoundingMode::Rmm << 5U) to format FCSR bits.
+constexpr auto operator<<(RoundingMode rm, unsigned shift) noexcept -> CSRValue {
+    return static_cast<CSRValue>(std::to_underlying(rm)) << shift;
+}
+
+[[nodiscard]] constexpr auto fcsr_with_rounding_mode(CSRValue fcsr, RoundingMode rm) noexcept
+    -> CSRValue {
+    return (fcsr & ~static_cast<CSRValue>(0x7U << 5U)) | (rm << 5U);
+}
+
 [[nodiscard]] constexpr auto frm_rounding_mode(CSRValue fcsr) noexcept -> RoundingMode {
     return static_cast<RoundingMode>((fcsr >> 5U) & 0x7U);
 }

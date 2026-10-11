@@ -8,7 +8,6 @@
 #include <concepts>
 #include <cstddef>
 #include <cstdint>
-#include <format>
 #include <functional>
 #include <type_traits>
 #include <utility>
@@ -83,337 +82,6 @@ using Funct2 = uint8_t;
 using CsrImm = uint8_t;
 enum class AccessWidth : uint8_t { Byte = 1, HalfWord = 2, Word = 4, DoubleWord = 8 };
 
-// Symbol table & debugger domain types
-enum class SymbolType : uint8_t {
-    NoType = 0,
-    Object = 1,
-    Function = 2,
-    Section = 3,
-    File = 4,
-    Common = 5,
-    Tls = 6
-};
-enum class SymbolBinding : uint8_t { Local = 0, Global = 1, Weak = 2 };
-using BreakpointId = uint32_t;
-using WatchpointId = uint32_t;
-
-// UART 16550A domain types
-enum class UartRegister : uint8_t {
-    RbrThrDll = 0,
-    IerDlm = 1,
-    IirFcr = 2,
-    Lcr = 3,
-    Mcr = 4,
-    Lsr = 5,
-    Msr = 6,
-    Scr = 7
-};
-enum class UartRegStride : int8_t { Auto = -1, Byte = 0, Word = 2 };
-
-// PMP domain types
-enum class PmpMode : uint8_t { Off = 0x00, Tor = 0x08, Na4 = 0x10, Napot = 0x18 };
-enum class PmpPermission : uint8_t { None = 0, Read = 1, Write = 2, Execute = 4, Lock = 0x80 };
-using PmpIndex = uint8_t;
-
-constexpr auto operator|(PmpPermission lhs, PmpPermission rhs) noexcept -> PmpPermission {
-    return static_cast<PmpPermission>(std::to_underlying(lhs) | std::to_underlying(rhs));
-}
-constexpr auto operator&(PmpPermission lhs, PmpPermission rhs) noexcept -> PmpPermission {
-    return static_cast<PmpPermission>(std::to_underlying(lhs) & std::to_underlying(rhs));
-}
-constexpr auto operator~(PmpPermission p) noexcept -> PmpPermission {
-    return static_cast<PmpPermission>(~std::to_underlying(p) & 0x87u);
-}
-constexpr auto operator|=(PmpPermission& lhs, PmpPermission rhs) noexcept -> PmpPermission& {
-    lhs = lhs | rhs;
-    return lhs;
-}
-
-template <std::integral I>
-constexpr auto operator&(I lhs, PmpPermission rhs) noexcept -> I {
-    return lhs & static_cast<I>(std::to_underlying(rhs));
-}
-template <std::integral I>
-constexpr auto operator&(PmpPermission lhs, I rhs) noexcept -> I {
-    return rhs & lhs;
-}
-template <std::integral I>
-constexpr auto operator|(I lhs, PmpPermission rhs) noexcept -> I {
-    return lhs | static_cast<I>(std::to_underlying(rhs));
-}
-template <std::integral I>
-constexpr auto operator|(PmpPermission lhs, I rhs) noexcept -> I {
-    return rhs | lhs;
-}
-constexpr auto operator&=(PmpPermission& lhs, PmpPermission rhs) noexcept -> PmpPermission& {
-    lhs = lhs & rhs;
-    return lhs;
-}
-
-// TileLink-C channel identification
-enum class TileLinkChannel : uint8_t { A = 0, B = 1, C = 2, D = 3, E = 4 };
-
-// TLB domain types
-using Asid = uint16_t;
-using TlbSetIndex = uint32_t;
-using TlbWay = uint8_t;
-enum class TlbAccessKind : uint8_t { Instruction, DataRead, DataWrite };
-
-// Floating-point execution domain types
-enum class FpFmt : uint8_t { Single = 0, Double = 1, Half = 2, Quad = 3 };
-enum class VectorMaskMode : bool { Masked = false, Unmasked = true };
-
-// GDB RSP domain types
-enum class GdbBreakpointType : uint8_t {
-    Software = 0,
-    Hardware,
-    WriteWatch,
-    ReadWatch,
-    AccessWatch
-};
-enum class GdbSignal : uint8_t { SigInt = 2, SigTrap = 5, SigSegv = 11 };
-
-// SBI domain types
-enum class SbiError : int64_t {
-    Success = 0,
-    Failed = -1,
-    NotSupported = -2,
-    InvalidParam = -3,
-    Denied = -4,
-    InvalidAddress = -5,
-    AlreadyAvailable = -6,
-    AlreadyStarted = -7,
-    AlreadyStopped = -8,
-    NoShmem = -9
-};
-
-struct SbiRet {
-    SbiError error{SbiError::Success};
-    Word value{0};
-};
-
-enum class SbiExtId : uint32_t {
-    LegacySetTimer = 0x00,
-    LegacyConsolePutchar = 0x01,
-    LegacyConsoleGetchar = 0x02,
-    LegacyShutdown = 0x08,
-    Base = 0x10,
-    Time = 0x54494D45,          // TIME
-    Rfence = 0x52464E43,        // RFNC
-    Ipi = 0x735049,             // sPI
-    Hsm = 0x48534D,             // HSM
-    SystemReset = 0x53525354,   // SRST
-    Pmu = 0x504D55,             // PMU
-    DebugConsole = 0x4442434E,  // DBCN
-    Susp = 0x53555350,          // SUSP
-    Cppc = 0x43505043,          // CPPC
-};
-
-constexpr auto operator==(Word raw, SbiExtId ext) noexcept -> bool {
-    return raw == std::to_underlying(ext);
-}
-constexpr auto operator==(SbiExtId ext, Word raw) noexcept -> bool {
-    return std::to_underlying(ext) == raw;
-}
-constexpr auto operator!=(Word raw, SbiExtId ext) noexcept -> bool {
-    return !(raw == ext);
-}
-constexpr auto operator!=(SbiExtId ext, Word raw) noexcept -> bool {
-    return !(ext == raw);
-}
-
-// AIA domain types
-enum class ImsicPrivilege : uint8_t { Machine = 0, Supervisor = 1 };
-enum class AplicPrivilege : uint8_t { Machine = 0, Supervisor = 1 };
-enum class AplicSourceMode : uint8_t {
-    Inactive = 0,
-    Detached = 1,
-    Edge1 = 4,
-    Edge0 = 5,
-    Level1 = 6,
-    Level0 = 7
-};
-
-// VirtIO domain types
-enum class VirtioDeviceStatus : uint8_t {
-    Acknowledge = 1,
-    Driver = 2,
-    DriverOk = 4,
-    FeaturesOk = 8,
-    DeviceNeedsReset = 64,
-    Failed = 128
-};
-enum class VirtqDescFlag : uint16_t { Next = 1, Write = 2, Indirect = 4 };
-
-constexpr auto operator|(VirtqDescFlag lhs, VirtqDescFlag rhs) noexcept -> VirtqDescFlag {
-    return static_cast<VirtqDescFlag>(std::to_underlying(lhs) | std::to_underlying(rhs));
-}
-constexpr auto operator&(VirtqDescFlag lhs, VirtqDescFlag rhs) noexcept -> VirtqDescFlag {
-    return static_cast<VirtqDescFlag>(std::to_underlying(lhs) & std::to_underlying(rhs));
-}
-constexpr auto operator~(VirtqDescFlag f) noexcept -> VirtqDescFlag {
-    return static_cast<VirtqDescFlag>(~std::to_underlying(f));
-}
-constexpr auto operator|=(VirtqDescFlag& lhs, VirtqDescFlag rhs) noexcept -> VirtqDescFlag& {
-    lhs = lhs | rhs;
-    return lhs;
-}
-constexpr auto operator&=(VirtqDescFlag& lhs, VirtqDescFlag rhs) noexcept -> VirtqDescFlag& {
-    lhs = lhs & rhs;
-    return lhs;
-}
-
-// PCIe domain types
-enum class PciCommandBit : uint16_t {
-    IoSpace = 0x0001,
-    MemorySpace = 0x0002,
-    BusMaster = 0x0004,
-    SpecialCycles = 0x0008,
-    MemWriteInvalidate = 0x0010,
-    VgaPaletteSnoop = 0x0020,
-    ParityErrorResponse = 0x0040,
-    SserrEnable = 0x0100,
-    FastBackToBack = 0x0200,
-    InterruptDisable = 0x0400
-};
-
-constexpr auto operator|(PciCommandBit lhs, PciCommandBit rhs) noexcept -> PciCommandBit {
-    return static_cast<PciCommandBit>(std::to_underlying(lhs) | std::to_underlying(rhs));
-}
-constexpr auto operator&(PciCommandBit lhs, PciCommandBit rhs) noexcept -> PciCommandBit {
-    return static_cast<PciCommandBit>(std::to_underlying(lhs) & std::to_underlying(rhs));
-}
-constexpr auto operator~(PciCommandBit b) noexcept -> PciCommandBit {
-    return static_cast<PciCommandBit>(~std::to_underlying(b));
-}
-constexpr auto operator|=(PciCommandBit& lhs, PciCommandBit rhs) noexcept -> PciCommandBit& {
-    lhs = lhs | rhs;
-    return lhs;
-}
-constexpr auto operator&=(PciCommandBit& lhs, PciCommandBit rhs) noexcept -> PciCommandBit& {
-    lhs = lhs & rhs;
-    return lhs;
-}
-
-enum class PciStatusBit : uint16_t {
-    InterruptStatus = 0x0008,
-    CapabilitiesList = 0x0010,
-    Pci66MHz = 0x0020,
-    FastBackToBack = 0x0080,
-    MasterDataParityError = 0x0100,
-    DevselTiming = 0x0600,
-    SignaledTargetAbort = 0x0800,
-    ReceivedTargetAbort = 0x1000,
-    ReceivedMasterAbort = 0x2000,
-    SignaledSystemError = 0x4000,
-    DetectedParityError = 0x8000
-};
-
-constexpr auto operator|(PciStatusBit lhs, PciStatusBit rhs) noexcept -> PciStatusBit {
-    return static_cast<PciStatusBit>(std::to_underlying(lhs) | std::to_underlying(rhs));
-}
-constexpr auto operator&(PciStatusBit lhs, PciStatusBit rhs) noexcept -> PciStatusBit {
-    return static_cast<PciStatusBit>(std::to_underlying(lhs) & std::to_underlying(rhs));
-}
-constexpr auto operator~(PciStatusBit b) noexcept -> PciStatusBit {
-    return static_cast<PciStatusBit>(~std::to_underlying(b));
-}
-constexpr auto operator|=(PciStatusBit& lhs, PciStatusBit rhs) noexcept -> PciStatusBit& {
-    lhs = lhs | rhs;
-    return lhs;
-}
-constexpr auto operator&=(PciStatusBit& lhs, PciStatusBit rhs) noexcept -> PciStatusBit& {
-    lhs = lhs & rhs;
-    return lhs;
-}
-
-enum class PciCapabilityId : uint8_t {
-    Null = 0,
-    Pmd = 1,
-    Agp = 2,
-    Vpd = 3,
-    SlotId = 4,
-    Msi = 5,
-    CompactPci = 6,
-    PciX = 7,
-    HyperTransport = 8,
-    VendorSpecific = 9,
-    DebugPort = 10,
-    CompactPciCentralResource = 11,
-    HotPlug = 12,
-    SubsystemId = 13,
-    Agp8x = 14,
-    SecureDevice = 15,
-    PciExpress = 16,
-    MsiX = 17,
-    Sata = 18,
-    AdvancedFeatures = 19,
-    EnhancedAllocation = 20,
-    FlatteningPortal = 21
-};
-
-enum class FpPrecision : uint8_t { Single = 32, Double = 64, Quad = 128 };
-
-enum class Vsew : uint8_t {
-    SEW_8 = 0,
-    SEW_16 = 1,
-    SEW_32 = 2,
-    SEW_64 = 3,
-};
-
-enum class Vlmul : uint8_t {
-    LMUL_1 = 0,
-    LMUL_2 = 1,
-    LMUL_4 = 2,
-    LMUL_8 = 3,
-    LMUL_RESERVED = 4,
-    LMUL_F8 = 5,
-    LMUL_F4 = 6,
-    LMUL_F2 = 7,
-};
-
-enum class Vta : uint8_t { Undisturbed = 0, Agnostic = 1 };
-enum class Vma : uint8_t { Undisturbed = 0, Agnostic = 1 };
-
-struct VtypeView {
-    uint64_t raw{0};
-    uint8_t xlen{64};
-
-    [[nodiscard]] constexpr auto vill() const noexcept -> bool {
-        uint64_t const vill_mask = 1ULL << (xlen - 1);
-        if ((raw & vill_mask) != 0) return true;
-        uint64_t const reserved_mask =
-            (xlen == 32) ? ~(0xFFULL | vill_mask) & 0xFFFFFFFFULL : ~(0xFFULL | vill_mask);
-        if ((raw & reserved_mask) != 0) return true;
-        if (sew_field() > 3 || lmul_field() == 4) return true;
-        return false;
-    }
-
-    [[nodiscard]] constexpr auto sew_field() const noexcept -> uint8_t {
-        return static_cast<uint8_t>((raw >> 3) & 0x7);
-    }
-    [[nodiscard]] constexpr auto lmul_field() const noexcept -> uint8_t {
-        return static_cast<uint8_t>(raw & 0x7);
-    }
-    [[nodiscard]] constexpr auto vsew() const noexcept -> Vsew {
-        return static_cast<Vsew>(sew_field());
-    }
-    [[nodiscard]] constexpr auto vlmul() const noexcept -> Vlmul {
-        return static_cast<Vlmul>(lmul_field());
-    }
-    [[nodiscard]] constexpr auto vta() const noexcept -> Vta {
-        return static_cast<Vta>((raw >> 6) & 0x1);
-    }
-    [[nodiscard]] constexpr auto vma() const noexcept -> Vma {
-        return static_cast<Vma>((raw >> 7) & 0x1);
-    }
-
-    [[nodiscard]] constexpr auto sew_bits() const noexcept -> uint32_t { return 8u << sew_field(); }
-    [[nodiscard]] constexpr auto sew_bytes() const noexcept -> uint32_t {
-        return 1u << sew_field();
-    }
-};
-
 enum class PrivilegeLevel : uint8_t { User = 0, Supervisor = 1, Machine = 3 };
 
 constexpr auto operator<(PrivilegeLevel lhs, PrivilegeLevel rhs) -> bool {
@@ -431,9 +99,6 @@ constexpr auto operator>(PrivilegeLevel lhs, PrivilegeLevel rhs) -> bool {
 constexpr auto operator>=(PrivilegeLevel lhs, PrivilegeLevel rhs) -> bool {
     return std::to_underlying(lhs) >= std::to_underlying(rhs);
 }
-
-/// Domain alias representing RISC-V architectural privilege modes.
-using PrivilegeMode = PrivilegeLevel;
 
 /**
  * @struct PhysAddr
@@ -665,9 +330,6 @@ struct VirtAddr {
     }
 };
 
-using PhysicalAddress = PhysAddr;
-using VirtualAddress = VirtAddr;
-
 /**
  * @struct HartId
  * @brief Strong zero-overhead semantic wrapper representing hardware thread (Hart) identifiers.
@@ -842,8 +504,6 @@ enum class FpRegId : uint8_t {
     Ft11 = 31
 };
 
-using FRegId = FpRegId;
-
 enum class VecRegId : uint8_t {
     V0 = 0,
     V1 = 1,
@@ -879,8 +539,6 @@ enum class VecRegId : uint8_t {
     V31 = 31
 };
 
-using VRegId = VecRegId;
-
 template <typename T>
 concept RegisterIdentifier =
     std::same_as<T, RegId> || std::same_as<T, FpRegId> || std::same_as<T, VecRegId>;
@@ -888,44 +546,28 @@ concept RegisterIdentifier =
 namespace simrv {
 using ::CsrNumber;
 using ::FpRegId;
-using ::FRegId;
 using ::HartId;
 using ::PhysAddr;
 using ::PrivilegeLevel;
-using ::PrivilegeMode;
 using ::RegId;
 using ::RegisterIdentifier;
 using ::StrongAddress;
 using ::VecRegId;
 using ::VirtAddr;
-using ::VRegId;
 
 namespace xlen {
 using ::CsrNumber;
 using ::FpRegId;
-using ::FRegId;
 using ::HartId;
 using ::PhysAddr;
 using ::PrivilegeLevel;
-using ::PrivilegeMode;
 using ::RegId;
 using ::RegisterIdentifier;
 using ::StrongAddress;
 using ::VecRegId;
 using ::VirtAddr;
-using ::VRegId;
 }  // namespace xlen
 }  // namespace simrv
-
-template <typename EnumType>
-constexpr auto enum_mask(EnumType bit) {
-    return std::to_underlying(bit);
-}
-
-template <typename EnumType>
-constexpr bool has_enum_mask(std::underlying_type_t<EnumType> value, EnumType bit) {
-    return (value & enum_mask(bit)) != 0;
-}
 
 // Specializations for std::hash
 template <>
@@ -953,34 +595,5 @@ template <>
 struct std::hash<CsrNumber> {
     constexpr auto operator()(CsrNumber csr) const noexcept -> size_t {
         return std::hash<uint16_t>{}(csr.val);
-    }
-};
-
-// Specializations for std::formatter
-template <>
-struct std::formatter<PhysAddr> : std::formatter<Word> {
-    auto format(PhysAddr addr, std::format_context& ctx) const {
-        return std::formatter<Word>::format(addr.val, ctx);
-    }
-};
-
-template <>
-struct std::formatter<VirtAddr> : std::formatter<Word> {
-    auto format(VirtAddr addr, std::format_context& ctx) const {
-        return std::formatter<Word>::format(addr.val, ctx);
-    }
-};
-
-template <>
-struct std::formatter<HartId> : std::formatter<uint32_t> {
-    auto format(HartId id, std::format_context& ctx) const {
-        return std::formatter<uint32_t>::format(id.val, ctx);
-    }
-};
-
-template <>
-struct std::formatter<CsrNumber> : std::formatter<uint16_t> {
-    auto format(CsrNumber csr, std::format_context& ctx) const {
-        return std::formatter<uint16_t>::format(csr.val, ctx);
     }
 };

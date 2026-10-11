@@ -4,6 +4,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
+#include <format>
 #include <fstream>
 #include <iterator>
 #include <limits>
@@ -16,11 +17,14 @@
 #include <dlfcn.h>
 #endif
 
+#include "simrv/core/Cpu.hpp"
 #include "simrv/core/Machine.hpp"
 #include "simrv/core/RuntimeProfile.hpp"
+#include "simrv/core/Tracer.hpp"
 #include "simrv/core/TrapController.hpp"
 #include "simrv/debug/SymbolTable.hpp"
 #include "simrv/device/Aclint.hpp"
+#include "simrv/memory/MemorySubsystem.hpp"
 #include "simrv/memory/MemoryUtil.hpp"
 #include "simrv/memory/TileLinkNode.hpp"
 #include "simrv/pipeline/PipelineContext.hpp"
@@ -976,8 +980,8 @@ void test_software_mmio_interrupt_bus_completion_fixture() {
     cpu.machine_ = &machine;
     cpu.state().pc = kPc;
     cpu.state().mtvec = kPc + 0x100;
-    cpu.state().mie = enum_mask(simrv::core::MipBit::Msip);
-    cpu.state().mstatus |= enum_mask(simrv::core::MstatusBit::Mie);
+    cpu.state().mie = std::to_underlying(simrv::core::MipBit::Msip);
+    cpu.state().mstatus |= simrv::core::MstatusBit::Mie;
     cpu.state().regs.write(RegId::T0, simrv::mmio::kAclintMswiBaseAddress);
     cpu.state().regs.write(RegId::T1, 1);
     cpu.state().regs.write(RegId::T2, machine.isa_test_tohost());

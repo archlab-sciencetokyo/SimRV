@@ -13,6 +13,8 @@
 #include "simrv/Define.hpp"
 #include "simrv/core/Cpu.hpp"
 #include "simrv/core/Machine.hpp"
+#include "simrv/core/TelemetrySink.hpp"
+#include "simrv/debug/SymbolTable.hpp"
 #include "simrv/tui/Tui.hpp"
 #include "simrv/tui/TuiGuidance.hpp"
 #include "simrv/tui/TuiMission.hpp"

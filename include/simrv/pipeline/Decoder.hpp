@@ -5,7 +5,11 @@
 #include <string_view>
 #include <utility>
 
-#include "simrv/Define.hpp"
+#include "simrv/isa/Amo.hpp"
+#include "simrv/isa/Base.hpp"
+#include "simrv/isa/OperationId.hpp"
+#include "simrv/pipeline/DecodedInstruction.hpp"
+#include "simrv/pipeline/OperationTraits.hpp"
 #include "simrv/xlen/Types.hpp"
 
 namespace simrv::pipeline {

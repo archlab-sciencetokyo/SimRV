@@ -17,23 +17,32 @@
 #include <vector>
 
 #include "simrv/Define.hpp"
-#include "simrv/core/Cpu.hpp"
+#include "simrv/core/FastBatchPolicy.hpp"
 #include "simrv/core/InterruptController.hpp"
 #include "simrv/core/MachineConfig.hpp"
 #include "simrv/core/RuntimeProfile.hpp"
 #include "simrv/core/Telemetry.hpp"
-#include "simrv/core/TelemetrySink.hpp"
-#include "simrv/core/Tracer.hpp"
-#include "simrv/debug/BreakpointManager.hpp"
-#include "simrv/debug/GdbStub.hpp"
-#include "simrv/debug/SpikeLockstep.hpp"
-#include "simrv/debug/SymbolTable.hpp"
-#include "simrv/device/Rtc.hpp"
-#include "simrv/device/Uart.hpp"
+#include "simrv/debug/DebugTypes.hpp"
 #include "simrv/memory/DmaEngine.hpp"
-#include "simrv/memory/MemorySubsystem.hpp"
+#include "simrv/pipeline/Scoreboard.hpp"
+
+namespace simrv {
+class Rtc;
+}
+
+namespace simrv::debug {
+class BreakpointManager;
+class GdbStub;
+class SpikeLockstep;
+class SymbolTable;
+}  // namespace simrv::debug
+
+namespace simrv::execute {
+class ExecuteUnit;
+}
 
 namespace simrv::device {
+class Uart;
 class PowerMmio;
 class DmaController;
 class AclintMtimer;
@@ -60,10 +69,16 @@ class PlatformDeviceRegistry;
 
 namespace simrv::memory {
 class Axi4Bridge;
-}
+class CoherenceHub;
+class MemorySubsystem;
+}  // namespace simrv::memory
 
 namespace simrv::core {
 
+class CPU;
+class IConsoleSink;
+class ITelemetrySink;
+class Tracer;
 class BaremetalRunner;
 class OsRunner;
 class PlatformBuilder;

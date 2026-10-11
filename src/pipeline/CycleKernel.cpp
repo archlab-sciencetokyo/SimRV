@@ -3,7 +3,9 @@
 
 #include "simrv/core/Cpu.hpp"
 #include "simrv/core/Machine.hpp"
+#include "simrv/core/TelemetrySink.hpp"
 #include "simrv/core/Tracer.hpp"
+#include "simrv/memory/MemorySubsystem.hpp"
 #include "simrv/pipeline/OperationTraits.hpp"
 #include "simrv/tui/Tui.hpp"
 

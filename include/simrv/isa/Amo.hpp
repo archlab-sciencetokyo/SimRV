@@ -8,7 +8,34 @@
 #include <cstdint>
 #include <utility>
 
+#include "simrv/isa/Base.hpp"
+#include "simrv/xlen/Constants.hpp"
+#include "simrv/xlen/Types.hpp"
+
 namespace simrv::isa {
+
+/**
+ * @brief Return the natural access size encoded by an A-extension instruction.
+ *
+ * The standard encodes AMO.W with funct3=010 and AMO.D with funct3=011. Other encodings are
+ * reserved and return zero so callers can reject them.
+ */
+constexpr auto amo_operand_bytes(Funct3 funct3) -> unsigned {
+    if (funct3 == Funct3::Lw) return 4;
+    if (funct3 == Funct3::Ld) return 8;
+    return 0;
+}
+
+/** Return whether the AMO width exists for the build's architectural XLEN. */
+constexpr auto amo_width_supported(Funct3 funct3) -> bool {
+    return funct3 == Funct3::Lw || (simrv::xlen::kIsXLen64 && funct3 == Funct3::Ld);
+}
+
+/** Return whether an LR/SC/AMO effective address meets the A-extension alignment rule. */
+constexpr auto amo_address_aligned(Address address, Funct3 funct3) -> bool {
+    const unsigned bytes = amo_operand_bytes(funct3);
+    return bytes != 0 && (address & static_cast<Address>(bytes - 1U)) == 0;
+}
 
 /**
  * @enum AmoStatus
@@ -52,6 +79,12 @@ constexpr auto operator!=(I lhs, Funct5Amo rhs) noexcept -> bool {
 template <std::integral I>
 constexpr auto operator!=(Funct5Amo lhs, I rhs) noexcept -> bool {
     return !(lhs == rhs);
+}
+
+/// Left-shift operator for Funct5Amo (e.g. funct5 << 27U) to construct instruction words.
+template <std::integral I>
+constexpr auto operator<<(Funct5Amo lhs, I shift) noexcept -> uint32_t {
+    return static_cast<uint32_t>(std::to_underlying(lhs)) << shift;
 }
 
 }  // namespace simrv::isa

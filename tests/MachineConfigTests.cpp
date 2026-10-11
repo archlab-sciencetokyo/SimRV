@@ -6,6 +6,7 @@
 #include <sstream>
 #include <vector>
 
+#include "simrv/core/Cpu.hpp"
 #include "simrv/core/CpuConfigParser.hpp"
 #include "simrv/core/Logger.hpp"
 #include "simrv/core/Machine.hpp"
@@ -231,10 +232,10 @@ auto main() -> int {
     machine.add_hart_for_testing(std::move(secondary_for_irq));
     machine.set_hart_irq(HartId{1}, simrv::core::InterruptType::Software,
                          simrv::PrivilegeLevel::Machine, true);
-    expect((machine.hart(1).state().mip & enum_mask(simrv::core::MipBit::Msip)) == 0,
+    expect((machine.hart(1).state().mip & simrv::core::MipBit::Msip) == 0,
            "cross-hart interrupt remains queued until the target hart boundary");
     machine.hart(1).apply_pending_interrupt_lines(machine);
-    expect((machine.hart(1).state().mip & enum_mask(simrv::core::MipBit::Msip)) != 0,
+    expect((machine.hart(1).state().mip & simrv::core::MipBit::Msip) != 0,
            "target hart applies queued interrupt on its execution boundary");
     expect(machine.memory_geometry().dram_base == custom.dram_base &&
                machine.memory_geometry().dram_size == custom.dram_size,

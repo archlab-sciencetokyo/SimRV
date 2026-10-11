@@ -5,6 +5,7 @@
 #pragma once
 
 #include "simrv/Define.hpp"
+#include "simrv/isa/Base.hpp"
 #include "simrv/xlen/Types.hpp"
 
 namespace simrv::core {

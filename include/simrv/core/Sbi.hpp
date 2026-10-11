@@ -4,7 +4,7 @@
  */
 #pragma once
 
-#include "simrv/Define.hpp"
+#include "simrv/isa/TrapTypes.hpp"
 #include "simrv/xlen/Types.hpp"
 
 namespace simrv::core {
@@ -18,6 +18,9 @@ namespace detail {
 /** Direct SBI handles only supervisor ECALLs; M-mode ECALL remains an architectural trap. */
 constexpr auto is_direct_sbi_ecall(TrapCause cause) -> bool {
     return cause == ExceptionCode::SupervisorEcall;
+}
+constexpr auto is_direct_sbi_ecall(ExceptionCode code) -> bool {
+    return code == ExceptionCode::SupervisorEcall;
 }
 
 /** Determine whether a target hart is selected by an SBI (hart_mask, hart_mask_base) pair. */

@@ -30,7 +30,10 @@ struct DependencyTraits {
 
 }  // namespace simrv::pipeline
 
-#include "simrv/Define.hpp"
+#include "simrv/isa/Amo.hpp"
+#include "simrv/isa/Base.hpp"
+#include "simrv/isa/OperationId.hpp"
+#include "simrv/isa/TrapTypes.hpp"
 #include "simrv/xlen/Types.hpp"
 
 namespace simrv::pipeline {

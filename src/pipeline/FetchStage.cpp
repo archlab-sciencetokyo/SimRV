@@ -16,6 +16,7 @@
 #include "simrv/debug/SpikeLockstep.hpp"
 #include "simrv/device/Uart.hpp"
 #include "simrv/execute/ExecuteUnit.hpp"
+#include "simrv/isa/Common.hpp"
 #include "simrv/isa/Zk.hpp"
 #include "simrv/memory/MemoryAccess.hpp"
 #include "simrv/memory/MemorySubsystem.hpp"
@@ -230,7 +231,7 @@ void CPU::fetch_resolve_page_walk(Machine& machine, int state) {
                     return {};
                 })
                 .or_else([&](TrapCause error) -> std::expected<void, TrapCause> {
-                    ctx.pending_exception = static_cast<ExceptionCode>(error);
+                    ctx.pending_exception = to_exception_code(error);
                     ctx.pending_tval = w_vadr;
                     return {};
                 }));

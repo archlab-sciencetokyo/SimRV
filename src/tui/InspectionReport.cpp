@@ -11,6 +11,7 @@
 #include <sstream>
 
 #include "simrv/core/BuildInfo.hpp"
+#include "simrv/core/Cpu.hpp"
 #include "simrv/core/Machine.hpp"
 #include "simrv/pipeline/Decoder.hpp"
 #include "simrv/pipeline/PipelineConfig.hpp"

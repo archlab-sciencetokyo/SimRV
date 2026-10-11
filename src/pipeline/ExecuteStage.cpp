@@ -10,8 +10,11 @@
 #include "simrv/core/Cpu.hpp"
 #include "simrv/core/Logger.hpp"
 #include "simrv/core/Machine.hpp"
+#include "simrv/debug/GdbStub.hpp"
 #include "simrv/debug/SpikeLockstep.hpp"
 #include "simrv/execute/ExecuteUnit.hpp"
+#include "simrv/isa/Amo.hpp"
+#include "simrv/isa/Priv.hpp"
 #include "simrv/pipeline/OperationTraits.hpp"
 #include "simrv/tui/Tui.hpp"
 #include "simrv/xlen/Constants.hpp"
@@ -293,7 +296,7 @@ void CPU::execute_system(Machine& machine) {
             ctx.tkn = false;
             ctx.wb_data_csr = csr_result.value();
         } else {
-            ctx.pending_exception = static_cast<ExceptionCode>(csr_result.error());
+            ctx.pending_exception = to_exception_code(csr_result.error());
             ctx.pending_tval = ctx.ir;
         }
     }

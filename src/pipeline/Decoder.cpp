@@ -3,6 +3,7 @@
 #include <cstdio>
 #include <utility>
 
+#include "simrv/isa/Common.hpp"
 #include "simrv/isa/Compressed.hpp"
 #include "simrv/pipeline/DecodeTable.hpp"
 

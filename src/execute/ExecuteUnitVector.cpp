@@ -4,7 +4,11 @@
 #include "simrv/core/Cpu.hpp"
 #include "simrv/core/Machine.hpp"
 #include "simrv/execute/ExecuteUnit.hpp"
+#include "simrv/isa/Common.hpp"
+#include "simrv/isa/VectorTypes.hpp"
+#include "simrv/memory/MemorySubsystem.hpp"
 #include "simrv/pipeline/OperationInfo.hpp"
+#include "simrv/pipeline/OperationTraits.hpp"
 
 namespace simrv::execute {
 

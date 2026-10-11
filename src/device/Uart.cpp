@@ -12,6 +12,7 @@
 #include <thread>
 
 #include "simrv/core/Machine.hpp"
+#include "simrv/core/TelemetrySink.hpp"
 #include "simrv/tui/Tui.hpp"
 
 namespace simrv::device {

@@ -201,7 +201,7 @@ void test_pmp_mmu_page_walk() {
                                 satp, simrv::xlen::kXLenBits, true, &state);
     expect(!result.has_value(), "Page walk across PMP-prohibited PTE fails");
     if (!result.has_value()) {
-        expect(result.error() == enum_mask(ExceptionCode::FaultLoad),
+        expect(result.error() == ExceptionCode::FaultLoad,
                "PMP failure during page walk raises Load Access Fault (FaultLoad)");
     }
 }

@@ -11,6 +11,7 @@
 #include "simrv/core/Cpu.hpp"
 #include "simrv/core/Machine.hpp"
 #include "simrv/core/Pmp.hpp"
+#include "simrv/debug/BreakpointManager.hpp"
 #include "simrv/debug/GdbStub.hpp"
 #include "simrv/debug/SpikeLockstep.hpp"
 #include "simrv/memory/MemorySubsystem.hpp"
@@ -369,7 +370,7 @@ auto MemoryAccess::target_read(MemorySubsystem& mem, core::CPU& cpu, VirtAddr v_
                     return {};
                 })
                 .or_else([&](TrapCause error) -> std::expected<void, TrapCause> {
-                    cpu.active_context().pending_exception = static_cast<ExceptionCode>(error);
+                    cpu.active_context().pending_exception = to_exception_code(error);
                     cpu.active_context().pending_tval = v_addr.raw();
                     return {};
                 });
@@ -798,7 +799,7 @@ void MemoryAccess::target_write(MemorySubsystem& mem, core::CPU& cpu, VirtAddr v
                     return {};
                 })
                 .or_else([&](TrapCause error) -> std::expected<void, TrapCause> {
-                    cpu.active_context().pending_exception = static_cast<ExceptionCode>(error);
+                    cpu.active_context().pending_exception = to_exception_code(error);
                     cpu.active_context().pending_tval = v_addr.raw();
                     return {};
                 });

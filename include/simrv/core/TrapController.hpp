@@ -5,7 +5,9 @@
  */
 #pragma once
 
-#include "simrv/Define.hpp"
+#include <string>
+
+#include "simrv/isa/TrapTypes.hpp"
 #include "simrv/xlen/Constants.hpp"
 #include "simrv/xlen/Types.hpp"
 
@@ -29,7 +31,8 @@ class TrapController {
      * @brief Executes Machine-mode trap return (MRET).
      *
      * Restores privilege level from MPP, re-enables interrupt enabling bit MIE from MPIE,
-     * resets MPIE to 1, sets MPP to U-mode, and updates program counter from MEPC.
+     * resets MPIE to 1, sets MPP to U-mode when implemented or M-mode otherwise, and updates
+     * program counter from MEPC.
      *
      * @param state Reference to architectural state.
      */
@@ -39,7 +42,7 @@ class TrapController {
      * @brief Executes Supervisor-mode trap return (SRET).
      *
      * Restores privilege level from SPP, re-enables SIE from SPIE, resets SPIE to 1,
-     * sets SPP to U-mode, clears MPRV, and updates program counter from SEPC.
+     * clears SPP, clears MPRV, and updates program counter from SEPC.
      *
      * @param state Reference to architectural state.
      */
@@ -90,7 +93,6 @@ class TrapController {
      */
     static auto can_access_csr(PrivilegeLevel current_priv, CSRValue misa, CSRAddress csr_addr,
                                bool is_write) -> bool;
-
 };
 
 }  // namespace simrv::core

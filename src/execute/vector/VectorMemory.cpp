@@ -3,6 +3,7 @@
 #include "VectorHelpers.hpp"
 #include "simrv/core/Machine.hpp"
 #include "simrv/core/Pmp.hpp"
+#include "simrv/debug/BreakpointManager.hpp"
 #include "simrv/execute/ExecuteUnit.hpp"
 #include "simrv/memory/MemoryAccess.hpp"
 #include "simrv/memory/MemorySubsystem.hpp"

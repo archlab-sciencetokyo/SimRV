@@ -55,9 +55,11 @@ Invalid dynamic rounding modes and scalar FP widths/extensions cause illegal-ins
   IALIGN from 16 to 32. RV64-hosted RV32 cause values translate the architectural interrupt bit
   without changing native RV32 cause storage.
 - SXL and UXL accept only the implemented RV32/RV64 WARL encodings and are initialized consistently
-  with the selected machine XLEN. When an ISA preset omits S or U, its lower-mode status fields are
-  read-only zero; MPP accepts only implemented privilege modes and xRET resets it to the least
-  implemented mode. TVM, TW, TSR, MPRV, SUM, MXR, FS, and VS follow their privilege/extension
+  with the selected machine XLEN. Without S-mode, supervisor status fields are read-only zero;
+  without U-mode, MPRV and UXL are read-only zero. MPP accepts only implemented privilege modes and
+  xRET resets it to U when U-mode
+  is implemented, otherwise M. SRET clears SPP to zero. TVM, TW, TSR, MPRV, SUM, MXR, FS, and VS
+  follow their privilege/extension
   presence rules. Obsolete draft-N user interrupt bits, delegation CSRs, and URET are not
   implemented and remain reserved/illegal. Supervisor CSR encodings are inaccessible when the
   selected ISA preset omits S, including from M-mode.

@@ -2,6 +2,7 @@
 #include <bit>
 #include <cmath>
 #include <cstdlib>
+#include <format>
 #include <iostream>
 #include <limits>
 #include <string>
@@ -16,6 +17,7 @@
 #include "simrv/core/Sbi.hpp"
 #include "simrv/execute/ExecuteUnit.hpp"
 #include "simrv/isa/Common.hpp"
+#include "simrv/memory/MemorySubsystem.hpp"
 #include "simrv/memory/MemoryUtil.hpp"
 #include "simrv/memory/MmioRouter.hpp"
 #include "simrv/memory/Mmu.hpp"
@@ -23,6 +25,7 @@
 #include "simrv/memory/TileLinkProtocolChecker.hpp"
 #include "simrv/pipeline/Decoder.hpp"
 #include "simrv/util/FdtGenerator.hpp"
+#include "simrv/xlen/Format.hpp"
 
 namespace {
 
@@ -293,7 +296,7 @@ void test_compressed_instruction_decode_and_flush() {
 
     // Write to mstatus altering FS field: must trigger TLB_flush which clears decode_cache
     const CSRValue curr_mstatus = cpu.state().mstatus;
-    const CSRValue new_mstatus = curr_mstatus ^ enum_mask(simrv::core::MstatusBit::Fs);
+    const CSRValue new_mstatus = curr_mstatus ^ simrv::core::MstatusBit::Fs;
     auto res = csr.write(csr_addr(simrv::core::Csr::Mstatus), new_mstatus);
     (void)res;
     expect(cpu.decode_cache.lookup(test_op.cpc) == nullptr,
@@ -320,6 +323,15 @@ void test_privilege_returns_flush_cached_instructions() {
     expect(cpu.decode_cache.lookup(decoded.cpc) == nullptr,
            "MRET invalidates cached ops so fetch permissions are rechecked");
 
+    const CSRValue misa_with_u = cpu.state().misa;
+    cpu.state().misa &= ~simrv::isa::misa_extension_bit(simrv::isa::IsaExtension::U);
+    cpu.state().mstatus = static_cast<CSRValue>(simrv::PrivilegeLevel::Supervisor) << 11U;
+    cpu.mret();
+    expect(cpu.state().priv == simrv::PrivilegeLevel::Supervisor &&
+               simrv::core::mstatus_mpp(cpu.state().mstatus) == simrv::PrivilegeLevel::Machine,
+           "MRET to S-mode resets MPP to M when U-mode is absent");
+    cpu.state().misa = misa_with_u;
+
     cpu.state().priv = simrv::PrivilegeLevel::Supervisor;
     cpu.decode_cache.insert(decoded.cpc, cached);
     expect(cpu.decode_cache.lookup(decoded.cpc) != nullptr, "SRET regression cache setup");
@@ -341,7 +353,7 @@ void test_privilege_returns_flush_cached_instructions() {
            "trap entry invalidates cached ops so fetch permissions are rechecked");
 
     cpu.state().priv = simrv::PrivilegeLevel::Machine;
-    cpu.state().mstatus = enum_mask(simrv::core::MstatusBit::Mprv);
+    cpu.state().mstatus = std::to_underlying(simrv::core::MstatusBit::Mprv);
     cpu.state().mtvec = decoded.cpc.raw();
     cpu.state().pc = 0x1000;
     cpu.decode_cache.insert(decoded.cpc, cached);
@@ -553,14 +565,14 @@ void test_csr_summary_and_presence_rules() {
     using simrv::core::MstatusBit;
     using simrv::core::pmp_csr_exists;
 
-    expect((mstatus_with_sd(enum_mask(MstatusBit::Vs)) & kMstatusSd) != 0,
+    expect((mstatus_with_sd(std::to_underlying(MstatusBit::Vs)) & kMstatusSd) != 0,
            "mstatus.SD summarizes Dirty vector state");
     expect((mstatus_with_sd(static_cast<CSRValue>(2) << 9U) & kMstatusSd) == 0,
            "mstatus.SD remains clear for Clean vector state");
 #if SIMRV_XLEN == 64
     {
-        const CSRValue rv32_status =
-            mstatus_read_value(enum_mask(MstatusBit::Vs), simrv::core::kMstatusReadMask, 32);
+        const CSRValue rv32_status = mstatus_read_value(std::to_underlying(MstatusBit::Vs),
+                                                        simrv::core::kMstatusReadMask, 32);
         expect(
             (rv32_status & (CSRValue{1} << 31U)) != 0 && (rv32_status & (CSRValue{1} << 63U)) == 0,
             "an RV64-hosted RV32 status exposes SD at architectural bit 31");
@@ -578,52 +590,47 @@ void test_csr_summary_and_presence_rules() {
            "debug-only CSR encodings are identified independently of M-mode privilege");
 
     const CSRValue m_only = simrv::core::mstatus_writable_mask(false, false, false, false);
-    expect((m_only &
-            (enum_mask(MstatusBit::Sie) | enum_mask(MstatusBit::Spie) | enum_mask(MstatusBit::Spp) |
-             enum_mask(MstatusBit::Mprv) | enum_mask(MstatusBit::Sum) | enum_mask(MstatusBit::Mxr) |
-             enum_mask(MstatusBit::Tvm) | enum_mask(MstatusBit::Tw) | enum_mask(MstatusBit::Tsr) |
-             enum_mask(MstatusBit::Fs) | enum_mask(MstatusBit::Vs))) == 0,
+    expect((m_only & (MstatusBit::Sie | MstatusBit::Spie | MstatusBit::Spp | MstatusBit::Mprv |
+                      MstatusBit::Sum | MstatusBit::Mxr | MstatusBit::Tvm | MstatusBit::Tw |
+                      MstatusBit::Tsr | MstatusBit::Fs | MstatusBit::Vs)) == 0,
            "M-only profiles expose lower-mode and absent extension status as read-only zero");
     expect((simrv::core::mstatus_writable_mask(true, true, true, true) &
-            (enum_mask(MstatusBit::Tvm) | enum_mask(MstatusBit::Tw) | enum_mask(MstatusBit::Tsr) |
-             enum_mask(MstatusBit::Fs) | enum_mask(MstatusBit::Vs))) != 0,
+            (MstatusBit::Tvm | MstatusBit::Tw | MstatusBit::Tsr | MstatusBit::Fs |
+             MstatusBit::Vs)) != 0,
            "S/U/F/V profiles retain their applicable status controls");
     expect(
         ((simrv::core::mstatus_legalize_mpp(CSRValue{1U} << 11U, false, true) >> 11U) & 0x3U) == 3U,
         "MPP cannot select an unimplemented supervisor mode");
     expect(((simrv::core::mstatus_legalize_mpp(0, false, false) >> 11U) & 0x3U) == 3U,
            "MPP cannot select unimplemented user mode");
-    expect(simrv::core::least_supported_mpp(true, true) == 0U &&
-               simrv::core::least_supported_mpp(true, false) == 1U &&
-               simrv::core::least_supported_mpp(false, false) == 3U,
-           "xRET resets MPP to the least implemented privilege mode");
-    expect((simrv::core::mip_writable_mask(true) & enum_mask(MipBit::Msip)) == 0 &&
-               (simrv::core::mip_writable_mask(true) & enum_mask(MipBit::Mtip)) == 0 &&
-               (simrv::core::mip_writable_mask(true) & enum_mask(MipBit::Meip)) == 0,
+    expect(simrv::core::mstatus_mpp_after_xret(true) == PrivilegeLevel::User &&
+               simrv::core::mstatus_mpp_after_xret(false) == PrivilegeLevel::Machine,
+           "xRET resets MPP to U when implemented, otherwise M");
+    expect(simrv::core::mstatus_spp_after_sret() == PrivilegeLevel::User,
+           "SRET always clears SPP to zero");
+    expect((simrv::core::mip_writable_mask(true) & MipBit::Msip) == 0 &&
+               (simrv::core::mip_writable_mask(true) & MipBit::Mtip) == 0 &&
+               (simrv::core::mip_writable_mask(true) & MipBit::Meip) == 0,
            "CLINT/PLIC machine pending bits are read-only in mip");
-    expect(simrv::core::mip_writable_mask(true) ==
-               (enum_mask(MipBit::Ssip) | enum_mask(MipBit::Stip) | enum_mask(MipBit::Seip)),
+    expect(simrv::core::mip_writable_mask(true) == (MipBit::Ssip | MipBit::Stip | MipBit::Seip),
            "M-mode can post the standard supervisor pending interrupts without Sstc");
     expect(simrv::core::interrupt_implemented_mask(false) ==
-               (enum_mask(MipBit::Msip) | enum_mask(MipBit::Mtip) | enum_mask(MipBit::Meip)),
+               (MipBit::Msip | MipBit::Mtip | MipBit::Meip),
            "M-only profiles hardwire supervisor interrupt bits to zero");
-    expect(
-        (simrv::core::mip_rmw_base(enum_mask(MipBit::Seip), false) & enum_mask(MipBit::Seip)) == 0,
-        "an external SEIP signal is excluded from the mip CSR RMW write base");
-    expect((simrv::core::mip_rmw_base(0, true) & enum_mask(MipBit::Seip)) != 0,
+    expect((simrv::core::mip_rmw_base(std::to_underlying(MipBit::Seip), false) & MipBit::Seip) == 0,
+           "an external SEIP signal is excluded from the mip CSR RMW write base");
+    expect((simrv::core::mip_rmw_base(0, true) & MipBit::Seip) != 0,
            "the software SEIP latch participates in the mip CSR RMW write base");
     simrv::core::ArchState pending_state;
     pending_state.seip_external = true;
     pending_state.stip_software = true;
     pending_state.refresh_supervisor_pending();
-    expect((pending_state.mip & enum_mask(MipBit::Seip)) != 0 &&
-               (pending_state.mip & enum_mask(MipBit::Stip)) != 0,
+    expect((pending_state.mip & MipBit::Seip) != 0 && (pending_state.mip & MipBit::Stip) != 0,
            "independent external SEIP and software STIP sources become visible in mip");
     pending_state.seip_external = false;
     pending_state.stip_timer = true;
     pending_state.refresh_supervisor_pending();
-    expect((pending_state.mip & enum_mask(MipBit::Seip)) == 0 &&
-               (pending_state.mip & enum_mask(MipBit::Stip)) != 0,
+    expect((pending_state.mip & MipBit::Seip) == 0 && (pending_state.mip & MipBit::Stip) != 0,
            "clearing one interrupt source preserves independently asserted pending state");
 }
 
@@ -642,9 +649,9 @@ void test_sbi_hart_masks() {
            "a mask with multiple bits selects both harts");
     expect(is_hart_selected(1, 4, 4), "base 4 with bit 0 selects hart 4");
     expect(!is_hart_selected(1, 4, 3), "hart below base is not selected");
-    expect(simrv::sbi::detail::is_direct_sbi_ecall(enum_mask(ExceptionCode::SupervisorEcall)),
+    expect(simrv::sbi::detail::is_direct_sbi_ecall(ExceptionCode::SupervisorEcall),
            "direct SBI accepts supervisor ECALLs");
-    expect(!simrv::sbi::detail::is_direct_sbi_ecall(enum_mask(ExceptionCode::MachineEcall)),
+    expect(!simrv::sbi::detail::is_direct_sbi_ecall(ExceptionCode::MachineEcall),
            "direct SBI leaves machine ECALLs to the architectural trap handler");
 }
 
@@ -680,7 +687,7 @@ void test_vector_exception_propagation_and_status() {
     constexpr Instruction kLegalVadd = (1U << 25U) | (1U << 7U) | 0x57U;
     simrv::execute::ExecuteUnit::execute_vector(cpu, machine.memory(),
                                                 simrv::isa::OperationId::VADD_VV, kLegalVadd);
-    expect((cpu.state().mstatus & enum_mask(simrv::core::MstatusBit::Vs)) != 0,
+    expect((cpu.state().mstatus & simrv::core::MstatusBit::Vs) != 0,
            "successful vector instruction sets mstatus.VS Dirty");
 
     constexpr Instruction kUnhandledVector = 0x02000057;
@@ -1394,7 +1401,7 @@ void test_vector_scalar_move_element_zero() {
            "vmv.s.x sign-extends an RV32 scalar to SEW=64");
 
     cpu.state().misa = simrv::isa::kMisaDefault;
-    cpu.state().mstatus |= enum_mask(simrv::core::MstatusBit::Fs);
+    cpu.state().mstatus |= simrv::core::MstatusBit::Fs;
     regs.write_fp(scalar, 0x1122334455667788ULL);
     regs.read_vector(vd).u64[0] = 0x123456789ABCDEF0ULL;
     cpu.state().vl = 0;
@@ -1466,7 +1473,7 @@ void test_vector_scalar_extension() {
            "vmerge.vxm sign-extends the selected scalar");
 
     cpu.state().misa = simrv::isa::kMisaDefault;
-    cpu.state().mstatus |= enum_mask(simrv::core::MstatusBit::Fs);
+    cpu.state().mstatus |= simrv::core::MstatusBit::Fs;
     regs.write_fp(scalar, 0x1122334455667788ULL);
     simrv::execute::ExecuteUnit::execute_vector(cpu, machine.memory(),
                                                 simrv::isa::OperationId::VFMV_V_F,
@@ -1495,7 +1502,7 @@ void test_vector_f_only_scalar_fp() {
                            (std::to_underlying(vs2) << 20U) | (1U << 25U);
 
     cpu.state().misa = simrv::isa::kMisaDefault;
-    cpu.state().mstatus |= enum_mask(simrv::core::MstatusBit::Fs);
+    cpu.state().mstatus |= simrv::core::MstatusBit::Fs;
     cpu.state().vtype = 2U << 3U;  // SEW=32
     cpu.state().vl = 1;
     cpu.state().fcsr = 0;
@@ -1623,7 +1630,7 @@ void test_vector_floating_arithmetic() {
     };
 
     cpu.state().misa = simrv::isa::kMisaDefault;
-    cpu.state().mstatus |= enum_mask(simrv::core::MstatusBit::Fs);
+    cpu.state().mstatus |= simrv::core::MstatusBit::Fs;
     cpu.state().vtype = 2U << 3U;  // SEW=32
     cpu.state().vl = 1;
     cpu.state().vstart = 0;
@@ -1646,19 +1653,19 @@ void test_vector_floating_arithmetic() {
     expect(regs.read_vector(vd).f32[0] == 3.0F, "vfsqrt.v computes an element-wise square root");
 
     regs.read_vector(vs2).f32[0] = 2.0F;
-    cpu.state().fcsr = enum_mask(simrv::isa::RoundingMode::Rmm) << 5U;
+    cpu.state().fcsr = simrv::isa::RoundingMode::Rmm << 5U;
     simrv::execute::ExecuteUnit::execute_vector(
         cpu, machine.memory(), simrv::isa::OperationId::VFSQRT_V, vector_ir(vd, RegId::Zero, vs2));
     expect(regs.read_vector(vd).u32[0] == UINT32_C(0x3FB504F3) &&
-               (cpu.state().fcsr & enum_mask(simrv::isa::FflagsBit::Nx)) != 0,
+               (cpu.state().fcsr & simrv::isa::FflagsBit::Nx) != 0,
            "vfsqrt.v RMM rounds binary32 directly and accrues inexact");
     cpu.state().vtype = 3U << 3U;  // SEW=64
     regs.read_vector(vs2).f64[0] = 2.0;
-    cpu.state().fcsr = enum_mask(simrv::isa::RoundingMode::Rmm) << 5U;
+    cpu.state().fcsr = simrv::isa::RoundingMode::Rmm << 5U;
     simrv::execute::ExecuteUnit::execute_vector(
         cpu, machine.memory(), simrv::isa::OperationId::VFSQRT_V, vector_ir(vd, RegId::Zero, vs2));
     expect(regs.read_vector(vd).u64[0] == UINT64_C(0x3FF6A09E667F3BCD) &&
-               (cpu.state().fcsr & enum_mask(simrv::isa::FflagsBit::Nx)) != 0,
+               (cpu.state().fcsr & simrv::isa::FflagsBit::Nx) != 0,
            "vfsqrt.v RMM checks a binary64 square-root midpoint exactly");
     cpu.state().vtype = 2U << 3U;  // SEW=32
     cpu.state().fcsr = 0;
@@ -1689,7 +1696,7 @@ void test_vector_floating_arithmetic() {
                                                 simrv::isa::OperationId::VFRSQRT7_V,
                                                 vector_ir(vd, RegId::Zero, vs2));
     expect(regs.read_vector(vd).u32[0] == UINT32_C(0x7FC00000) &&
-               (cpu.state().fcsr & enum_mask(simrv::isa::FflagsBit::Nv)) != 0,
+               (cpu.state().fcsr & simrv::isa::FflagsBit::Nv) != 0,
            "vfrsqrt7.v returns canonical NaN and raises invalid for a negative operand");
 
     regs.read_vector(vs2).f32[0] = 0.0F;
@@ -1697,7 +1704,7 @@ void test_vector_floating_arithmetic() {
     simrv::execute::ExecuteUnit::execute_vector(
         cpu, machine.memory(), simrv::isa::OperationId::VFREC7_V, vector_ir(vd, RegId::Zero, vs2));
     expect(regs.read_vector(vd).u32[0] == UINT32_C(0x7F800000) &&
-               (cpu.state().fcsr & enum_mask(simrv::isa::FflagsBit::Dz)) != 0,
+               (cpu.state().fcsr & simrv::isa::FflagsBit::Dz) != 0,
            "vfrec7.v returns infinity and raises divide-by-zero for positive zero");
 
     regs.read_vector(vs2).u32[0] = UINT32_C(0x80000000);
@@ -1708,7 +1715,7 @@ void test_vector_floating_arithmetic() {
         cpu, machine.memory(), simrv::isa::OperationId::VFCLASS_V, vector_ir(vd, RegId::Zero, vs2));
     expect(regs.read_vector(vd).u32[0] == (1U << 3U) && regs.read_vector(vd).u32[1] == (1U << 8U),
            "vfclass.v distinguishes negative zero and signaling NaN");
-    expect((cpu.state().fcsr & enum_mask(simrv::isa::FflagsBit::Nv)) == 0,
+    expect((cpu.state().fcsr & simrv::isa::FflagsBit::Nv) == 0,
            "vfclass.v does not raise invalid for a signaling NaN");
     cpu.state().vl = 1;
 
@@ -1717,8 +1724,7 @@ void test_vector_floating_arithmetic() {
     simrv::execute::ExecuteUnit::execute_vector(cpu, machine.memory(),
                                                 simrv::isa::OperationId::VFCVT_X_F_V,
                                                 vector_ir(vd, RegId::Zero, vs2));
-    expect(regs.read_vector(vd).i32[0] == 2 &&
-               (cpu.state().fcsr & enum_mask(simrv::isa::FflagsBit::Nx)) != 0,
+    expect(regs.read_vector(vd).i32[0] == 2 && (cpu.state().fcsr & simrv::isa::FflagsBit::Nx) != 0,
            "vfcvt.x.f.v rounds ties to even and accrues inexact");
 
     regs.read_vector(vs2).f32[0] = -1.75F;
@@ -1735,8 +1741,8 @@ void test_vector_floating_arithmetic() {
                                                 simrv::isa::OperationId::VFCVT_XU_F_V,
                                                 vector_ir(vd, RegId::Zero, vs2));
     expect(regs.read_vector(vd).u32[0] == UINT32_MAX &&
-               (cpu.state().fcsr & enum_mask(simrv::isa::FflagsBit::Nv)) != 0 &&
-               (cpu.state().fcsr & enum_mask(simrv::isa::FflagsBit::Nx)) == 0,
+               (cpu.state().fcsr & simrv::isa::FflagsBit::Nv) != 0 &&
+               (cpu.state().fcsr & simrv::isa::FflagsBit::Nx) == 0,
            "vfcvt.xu.f.v saturates NaN and raises invalid without inexact");
 
     regs.read_vector(vs2).i32[0] = -7;
@@ -1748,15 +1754,15 @@ void test_vector_floating_arithmetic() {
            "vfcvt.f.x.v converts signed integer vector elements");
 
     regs.read_vector(vs2).i32[0] = 16'777'217;
-    cpu.state().fcsr = enum_mask(simrv::isa::RoundingMode::Rmm) << 5U;
+    cpu.state().fcsr = simrv::isa::RoundingMode::Rmm << 5U;
     simrv::execute::ExecuteUnit::execute_vector(cpu, machine.memory(),
                                                 simrv::isa::OperationId::VFCVT_F_X_V,
                                                 vector_ir(vd, RegId::Zero, vs2));
     expect(regs.read_vector(vd).u32[0] == UINT32_C(0x4B800001) &&
-               (cpu.state().fcsr & enum_mask(simrv::isa::FflagsBit::Nx)) != 0,
+               (cpu.state().fcsr & simrv::isa::FflagsBit::Nx) != 0,
            "vfcvt.f.x.v RMM rounds an integer halfway between FP32 values away from zero");
     regs.read_vector(vs2).i32[0] = 16'777'219;
-    cpu.state().fcsr = enum_mask(simrv::isa::RoundingMode::Rmm) << 5U;
+    cpu.state().fcsr = simrv::isa::RoundingMode::Rmm << 5U;
     simrv::execute::ExecuteUnit::execute_vector(cpu, machine.memory(),
                                                 simrv::isa::OperationId::VFCVT_F_X_V,
                                                 vector_ir(vd, RegId::Zero, vs2));
@@ -1765,24 +1771,24 @@ void test_vector_floating_arithmetic() {
 
     cpu.state().vtype = 3U << 3U;                              // SEW=64
     regs.read_vector(vs2).i64[0] = INT64_C(9007199254740993);  // 2^53 + 1
-    cpu.state().fcsr = enum_mask(simrv::isa::RoundingMode::Rmm) << 5U;
+    cpu.state().fcsr = simrv::isa::RoundingMode::Rmm << 5U;
     simrv::execute::ExecuteUnit::execute_vector(cpu, machine.memory(),
                                                 simrv::isa::OperationId::VFCVT_F_X_V,
                                                 vector_ir(vd, RegId::Zero, vs2));
     expect(regs.read_vector(vd).u64[0] == UINT64_C(0x4340000000000001) &&
-               (cpu.state().fcsr & enum_mask(simrv::isa::FflagsBit::Nx)) != 0,
+               (cpu.state().fcsr & simrv::isa::FflagsBit::Nx) != 0,
            "vfcvt.f.x.v RMM rounds a 64-bit integer tie to FP64 away from zero");
     cpu.state().vtype = 2U << 3U;  // SEW=32, source EEW=64 for narrowing
     regs.read_vector(vs2).i64[0] = (INT64_C(1) << 53U) + (INT64_C(1) << 29U);
-    cpu.state().fcsr = enum_mask(simrv::isa::RoundingMode::Rmm) << 5U;
+    cpu.state().fcsr = simrv::isa::RoundingMode::Rmm << 5U;
     simrv::execute::ExecuteUnit::execute_vector(cpu, machine.memory(),
                                                 simrv::isa::OperationId::VFNCVT_F_X_W,
                                                 vector_ir(vd, RegId::Zero, vs2));
     expect(regs.read_vector(vd).u32[0] == UINT32_C(0x5A000001) &&
-               (cpu.state().fcsr & enum_mask(simrv::isa::FflagsBit::Nx)) != 0,
+               (cpu.state().fcsr & simrv::isa::FflagsBit::Nx) != 0,
            "vfncvt.f.x.w RMM rounds a 64-bit integer tie to FP32 away from zero");
     regs.read_vector(vs2).i64[0] = (INT64_C(1) << 53U) + (INT64_C(1) << 29U) - 1;
-    cpu.state().fcsr = enum_mask(simrv::isa::RoundingMode::Rmm) << 5U;
+    cpu.state().fcsr = simrv::isa::RoundingMode::Rmm << 5U;
     simrv::execute::ExecuteUnit::execute_vector(cpu, machine.memory(),
                                                 simrv::isa::OperationId::VFNCVT_F_X_W,
                                                 vector_ir(vd, RegId::Zero, vs2));
@@ -1815,12 +1821,12 @@ void test_vector_floating_arithmetic() {
            "vfncvt.f.f.w narrows a double-width floating-point element");
 
     regs.read_vector(vs2).f64[0] = 1.0 + std::ldexp(1.0, -24);
-    cpu.state().fcsr = enum_mask(simrv::isa::RoundingMode::Rmm) << 5U;
+    cpu.state().fcsr = simrv::isa::RoundingMode::Rmm << 5U;
     simrv::execute::ExecuteUnit::execute_vector(cpu, machine.memory(),
                                                 simrv::isa::OperationId::VFNCVT_F_F_W,
                                                 vector_ir(vd, RegId::Zero, vs2));
     expect(regs.read_vector(vd).u32[0] == UINT32_C(0x3F800001) &&
-               (cpu.state().fcsr & enum_mask(simrv::isa::FflagsBit::Nx)) != 0,
+               (cpu.state().fcsr & simrv::isa::FflagsBit::Nx) != 0,
            "vfncvt.f.f.w RMM rounds a binary64-to-binary32 tie away from zero");
 
     regs.read_vector(vs2).f64[0] = 1.0 + std::ldexp(1.0, -24);
@@ -1886,7 +1892,7 @@ void test_vector_floating_arithmetic() {
     simrv::execute::ExecuteUnit::execute_vector(
         cpu, machine.memory(), simrv::isa::OperationId::VFDIV_VV, vector_ir(vd, vs1, vs2));
     expect(std::isinf(regs.read_vector(vd).f32[0]) &&
-               (cpu.state().fcsr & enum_mask(simrv::isa::FflagsBit::Dz)) != 0,
+               (cpu.state().fcsr & simrv::isa::FflagsBit::Dz) != 0,
            "vfdiv.vv produces infinity and accrues divide-by-zero in fflags");
 
     regs.read_vector(vs2).u32[0] = UINT32_C(0x7FC12345);
@@ -1896,16 +1902,16 @@ void test_vector_floating_arithmetic() {
     expect(regs.read_vector(vd).u32[0] == simrv::xlen::kF32Qnan,
            "vfadd.vf canonicalizes a NaN payload from a vector operand");
 
-    cpu.state().fcsr = enum_mask(simrv::isa::RoundingMode::Rmm) << 5U;
+    cpu.state().fcsr = simrv::isa::RoundingMode::Rmm << 5U;
     regs.read_vector(vs2).f32[0] = 1.0F;
     regs.read_vector(vs1).f32[0] = 0x1p-24F;
     simrv::execute::ExecuteUnit::execute_vector(
         cpu, machine.memory(), simrv::isa::OperationId::VFADD_VV, vector_ir(vd, vs1, vs2));
     expect(regs.read_vector(vd).u32[0] == UINT32_C(0x3F800001) &&
-               (cpu.state().fcsr & enum_mask(simrv::isa::FflagsBit::Nx)) != 0,
+               (cpu.state().fcsr & simrv::isa::FflagsBit::Nx) != 0,
            "vfadd.vv RMM rounds a binary32 tie away from zero and raises inexact");
 
-    cpu.state().fcsr = enum_mask(simrv::isa::RoundingMode::Rmm) << 5U;
+    cpu.state().fcsr = simrv::isa::RoundingMode::Rmm << 5U;
     regs.write_fp(vs1, simrv::xlen::kF32BoxerBits | std::bit_cast<uint32_t>(-0x1p-24F));
     regs.read_vector(vs2).f32[0] = -1.0F;
     simrv::execute::ExecuteUnit::execute_vector(
@@ -1927,7 +1933,7 @@ void test_vector_floating_arithmetic() {
     expect(regs.read_vector(vd).u32[0] == UINT32_C(0x3FC00005),
            "vfmul.vv RMM rounds a binary32 product tie away from zero");
 
-    cpu.state().fcsr = enum_mask(simrv::isa::RoundingMode::Rmm) << 5U;
+    cpu.state().fcsr = simrv::isa::RoundingMode::Rmm << 5U;
     regs.read_vector(vs2).u32[0] = UINT32_C(0x7F7FFFFF);
     regs.read_vector(vs1).f32[0] = 0.0F;
     simrv::execute::ExecuteUnit::execute_vector(
@@ -1938,16 +1944,16 @@ void test_vector_floating_arithmetic() {
 
     regs.read_vector(vs2).u32[0] = UINT32_C(0x00000001);
     regs.read_vector(vs1).f32[0] = 2.0F;
-    cpu.state().fcsr = enum_mask(simrv::isa::RoundingMode::Rmm) << 5U;
+    cpu.state().fcsr = simrv::isa::RoundingMode::Rmm << 5U;
     simrv::execute::ExecuteUnit::execute_vector(
         cpu, machine.memory(), simrv::isa::OperationId::VFDIV_VV, vector_ir(vd, vs1, vs2));
     expect(regs.read_vector(vd).u32[0] == UINT32_C(0x00000001) &&
-               (cpu.state().fcsr & enum_mask(simrv::isa::FflagsBit::Uf)) != 0 &&
-               (cpu.state().fcsr & enum_mask(simrv::isa::FflagsBit::Nx)) != 0,
+               (cpu.state().fcsr & simrv::isa::FflagsBit::Uf) != 0 &&
+               (cpu.state().fcsr & simrv::isa::FflagsBit::Nx) != 0,
            "vfdiv.vv RMM rounds a half-subnormal binary32 quotient away from zero");
     regs.read_vector(vs2).f32[0] = 2.0F;
     regs.write_fp(vs1, simrv::xlen::kF32BoxerBits | UINT32_C(0x00000001));
-    cpu.state().fcsr = enum_mask(simrv::isa::RoundingMode::Rmm) << 5U;
+    cpu.state().fcsr = simrv::isa::RoundingMode::Rmm << 5U;
     simrv::execute::ExecuteUnit::execute_vector(
         cpu, machine.memory(), simrv::isa::OperationId::VFRDIV_VF, vector_ir(vd, vs1, vs2));
     expect(regs.read_vector(vd).u32[0] == UINT32_C(0x00000001),
@@ -1956,68 +1962,68 @@ void test_vector_floating_arithmetic() {
     cpu.state().vtype = 3U << 3U;  // SEW=64
     regs.read_vector(vs2).f64[0] = 1.0;
     regs.read_vector(vs1).f64[0] = 0x1p-53;
-    cpu.state().fcsr = enum_mask(simrv::isa::RoundingMode::Rmm) << 5U;
+    cpu.state().fcsr = simrv::isa::RoundingMode::Rmm << 5U;
     simrv::execute::ExecuteUnit::execute_vector(
         cpu, machine.memory(), simrv::isa::OperationId::VFADD_VV, vector_ir(vd, vs1, vs2));
     expect(regs.read_vector(vd).u64[0] == UINT64_C(0x3FF0000000000001) &&
-               (cpu.state().fcsr & enum_mask(simrv::isa::FflagsBit::Nx)) != 0,
+               (cpu.state().fcsr & simrv::isa::FflagsBit::Nx) != 0,
            "vfadd.vv RMM rounds a binary64 tie away from zero");
     regs.write_fp(vs1, std::bit_cast<uint64_t>(0x1p-53));
-    cpu.state().fcsr = enum_mask(simrv::isa::RoundingMode::Rmm) << 5U;
+    cpu.state().fcsr = simrv::isa::RoundingMode::Rmm << 5U;
     simrv::execute::ExecuteUnit::execute_vector(
         cpu, machine.memory(), simrv::isa::OperationId::VFADD_VF, vector_ir(vd, vs1, vs2));
     expect(regs.read_vector(vd).u64[0] == UINT64_C(0x3FF0000000000001),
            "vfadd.vf RMM applies the binary64 tie rule to scalar operands");
     regs.read_vector(vs1).f64[0] = 0x1.fffffffffffffp-54;  // Just below the tie.
-    cpu.state().fcsr = enum_mask(simrv::isa::RoundingMode::Rmm) << 5U;
+    cpu.state().fcsr = simrv::isa::RoundingMode::Rmm << 5U;
     simrv::execute::ExecuteUnit::execute_vector(
         cpu, machine.memory(), simrv::isa::OperationId::VFADD_VV, vector_ir(vd, vs1, vs2));
     expect(regs.read_vector(vd).u64[0] == UINT64_C(0x3FF0000000000000),
            "vfadd.vv RMM distinguishes a binary64 near-tie from an exact tie");
     regs.read_vector(vs2).f64[0] = -1.0;
     regs.read_vector(vs1).f64[0] = 0x1p-53;
-    cpu.state().fcsr = enum_mask(simrv::isa::RoundingMode::Rmm) << 5U;
+    cpu.state().fcsr = simrv::isa::RoundingMode::Rmm << 5U;
     simrv::execute::ExecuteUnit::execute_vector(
         cpu, machine.memory(), simrv::isa::OperationId::VFSUB_VV, vector_ir(vd, vs1, vs2));
     expect(regs.read_vector(vd).u64[0] == UINT64_C(0xBFF0000000000001),
            "vfsub.vv RMM rounds a negative binary64 tie away from zero");
     regs.read_vector(vs2).f64[0] = 1.5;
     regs.read_vector(vs1).u64[0] = UINT64_C(0x3FF0000000000003);
-    cpu.state().fcsr = enum_mask(simrv::isa::RoundingMode::Rmm) << 5U;
+    cpu.state().fcsr = simrv::isa::RoundingMode::Rmm << 5U;
     simrv::execute::ExecuteUnit::execute_vector(
         cpu, machine.memory(), simrv::isa::OperationId::VFMUL_VV, vector_ir(vd, vs1, vs2));
     expect(regs.read_vector(vd).u64[0] == UINT64_C(0x3FF8000000000005) &&
-               (cpu.state().fcsr & enum_mask(simrv::isa::FflagsBit::Nx)) != 0,
+               (cpu.state().fcsr & simrv::isa::FflagsBit::Nx) != 0,
            "vfmul.vv RMM rounds an exact binary64 product tie away from zero");
     regs.read_vector(vs2).f64[0] = 0x1p-1022;
     regs.read_vector(vs1).f64[0] = 0x1p-53;
-    cpu.state().fcsr = enum_mask(simrv::isa::RoundingMode::Rmm) << 5U;
+    cpu.state().fcsr = simrv::isa::RoundingMode::Rmm << 5U;
     simrv::execute::ExecuteUnit::execute_vector(
         cpu, machine.memory(), simrv::isa::OperationId::VFMUL_VV, vector_ir(vd, vs1, vs2));
     expect(regs.read_vector(vd).u64[0] == UINT64_C(0x0000000000000001) &&
-               (cpu.state().fcsr & enum_mask(simrv::isa::FflagsBit::Uf)) != 0 &&
-               (cpu.state().fcsr & enum_mask(simrv::isa::FflagsBit::Nx)) != 0,
+               (cpu.state().fcsr & simrv::isa::FflagsBit::Uf) != 0 &&
+               (cpu.state().fcsr & simrv::isa::FflagsBit::Nx) != 0,
            "vfmul.vv RMM rounds a half-subnormal product away from zero");
     regs.read_vector(vs2).u64[0] = UINT64_C(0x0000000000000001);
     regs.read_vector(vs1).f64[0] = 2.0;
-    cpu.state().fcsr = enum_mask(simrv::isa::RoundingMode::Rmm) << 5U;
+    cpu.state().fcsr = simrv::isa::RoundingMode::Rmm << 5U;
     simrv::execute::ExecuteUnit::execute_vector(
         cpu, machine.memory(), simrv::isa::OperationId::VFDIV_VV, vector_ir(vd, vs1, vs2));
     expect(regs.read_vector(vd).u64[0] == UINT64_C(0x0000000000000001) &&
-               (cpu.state().fcsr & enum_mask(simrv::isa::FflagsBit::Uf)) != 0 &&
-               (cpu.state().fcsr & enum_mask(simrv::isa::FflagsBit::Nx)) != 0,
+               (cpu.state().fcsr & simrv::isa::FflagsBit::Uf) != 0 &&
+               (cpu.state().fcsr & simrv::isa::FflagsBit::Nx) != 0,
            "vfdiv.vv RMM rounds a half-subnormal quotient away from zero");
     regs.read_vector(vs1).f64[0] = 1.0 + 0x1p-52;
     regs.read_vector(vs2).f64[0] = 1.0 - 0x1p-52;
     regs.read_vector(vd).f64[0] = 0x1p-53 + 0x1p-104;
-    cpu.state().fcsr = enum_mask(simrv::isa::RoundingMode::Rmm) << 5U;
+    cpu.state().fcsr = simrv::isa::RoundingMode::Rmm << 5U;
     simrv::execute::ExecuteUnit::execute_vector(
         cpu, machine.memory(), simrv::isa::OperationId::VFMACC_VV, vector_ir(vd, vs1, vs2));
     expect(regs.read_vector(vd).u64[0] == UINT64_C(0x3FF0000000000001) &&
-               (cpu.state().fcsr & enum_mask(simrv::isa::FflagsBit::Nx)) != 0,
+               (cpu.state().fcsr & simrv::isa::FflagsBit::Nx) != 0,
            "vfmacc.vv RMM rounds an exact fused binary64 tie away from zero");
     regs.read_vector(vd).f64[0] = 0x1p-53 + 0x1p-105;
-    cpu.state().fcsr = enum_mask(simrv::isa::RoundingMode::Rmm) << 5U;
+    cpu.state().fcsr = simrv::isa::RoundingMode::Rmm << 5U;
     simrv::execute::ExecuteUnit::execute_vector(
         cpu, machine.memory(), simrv::isa::OperationId::VFMACC_VV, vector_ir(vd, vs1, vs2));
     expect(regs.read_vector(vd).u64[0] == UINT64_C(0x3FF0000000000000),
@@ -2027,13 +2033,13 @@ void test_vector_floating_arithmetic() {
     regs.read_vector(vs1).f32[0] = 1.0F + 0x1p-23F;
     regs.read_vector(vs2).f32[0] = 1.0F - 0x1p-23F;
     regs.read_vector(vd).f32[0] = 0x1p-24F + 0x1p-46F;
-    cpu.state().fcsr = enum_mask(simrv::isa::RoundingMode::Rmm) << 5U;
+    cpu.state().fcsr = simrv::isa::RoundingMode::Rmm << 5U;
     simrv::execute::ExecuteUnit::execute_vector(
         cpu, machine.memory(), simrv::isa::OperationId::VFMACC_VV, vector_ir(vd, vs1, vs2));
     expect(regs.read_vector(vd).u32[0] == UINT32_C(0x3F800001),
            "vfmacc.vv RMM rounds an exact fused binary32 tie away from zero");
     regs.read_vector(vd).f32[0] = 0x1p-24F + 0x1p-47F;
-    cpu.state().fcsr = enum_mask(simrv::isa::RoundingMode::Rmm) << 5U;
+    cpu.state().fcsr = simrv::isa::RoundingMode::Rmm << 5U;
     simrv::execute::ExecuteUnit::execute_vector(
         cpu, machine.memory(), simrv::isa::OperationId::VFMACC_VV, vector_ir(vd, vs1, vs2));
     expect(regs.read_vector(vd).u32[0] == UINT32_C(0x3F800000),
@@ -2078,17 +2084,17 @@ void test_vector_floating_arithmetic() {
            "vfredosum.vs accumulates active elements in order from vs1[0]");
 
     cpu.state().vl = 1;
-    cpu.state().fcsr = enum_mask(simrv::isa::RoundingMode::Rmm) << 5U;
+    cpu.state().fcsr = simrv::isa::RoundingMode::Rmm << 5U;
     regs.read_vector(vs1).f32[0] = 1.0F;
     regs.read_vector(vs2).f32[0] = 0x1p-24F;
     simrv::execute::ExecuteUnit::execute_vector(
         cpu, machine.memory(), simrv::isa::OperationId::VFREDOSUM_VS, vector_ir(vd, vs1, vs2));
     expect(regs.read_vector(vd).u32[0] == UINT32_C(0x3F800001) &&
-               (cpu.state().fcsr & enum_mask(simrv::isa::FflagsBit::Nx)) != 0,
+               (cpu.state().fcsr & simrv::isa::FflagsBit::Nx) != 0,
            "vfredosum.vs applies RMM to a binary32 halfway sum");
     regs.read_vector(vs1).f32[0] = -1.0F;
     regs.read_vector(vs2).f32[0] = -0x1p-24F;
-    cpu.state().fcsr = enum_mask(simrv::isa::RoundingMode::Rmm) << 5U;
+    cpu.state().fcsr = simrv::isa::RoundingMode::Rmm << 5U;
     simrv::execute::ExecuteUnit::execute_vector(
         cpu, machine.memory(), simrv::isa::OperationId::VFREDUSUM_VS, vector_ir(vd, vs1, vs2));
     expect(regs.read_vector(vd).u32[0] == UINT32_C(0xBF800001),
@@ -2096,7 +2102,7 @@ void test_vector_floating_arithmetic() {
     cpu.state().vtype = 3U << 3U;  // SEW=64
     regs.read_vector(vs1).f64[0] = 1.0;
     regs.read_vector(vs2).f64[0] = 0x1p-53;
-    cpu.state().fcsr = enum_mask(simrv::isa::RoundingMode::Rmm) << 5U;
+    cpu.state().fcsr = simrv::isa::RoundingMode::Rmm << 5U;
     simrv::execute::ExecuteUnit::execute_vector(
         cpu, machine.memory(), simrv::isa::OperationId::VFREDOSUM_VS, vector_ir(vd, vs1, vs2));
     expect(regs.read_vector(vd).u64[0] == UINT64_C(0x3FF0000000000001),
@@ -2118,7 +2124,7 @@ void test_vector_floating_arithmetic() {
     simrv::execute::ExecuteUnit::execute_vector(cpu, machine.memory(),
                                                 simrv::isa::OperationId::VFREDMAX_VS, masked_ir);
     expect(regs.read_vector(vd).u32[0] == UINT32_C(0x7F800001) &&
-               (cpu.state().fcsr & enum_mask(simrv::isa::FflagsBit::Nv)) == 0,
+               (cpu.state().fcsr & simrv::isa::FflagsBit::Nv) == 0,
            "an empty FP reduction copies vs1[0] without canonicalizing or raising exceptions");
 
     cpu.state().vl = 0;
@@ -2153,7 +2159,7 @@ void test_vector_floating_arithmetic() {
     cpu.state().vl = 1;
     regs.read_vector(vs1).f64[0] = 1.0;
     regs.read_vector(vs2).f32[0] = 0x1p-53F;
-    cpu.state().fcsr = enum_mask(simrv::isa::RoundingMode::Rmm) << 5U;
+    cpu.state().fcsr = simrv::isa::RoundingMode::Rmm << 5U;
     simrv::execute::ExecuteUnit::execute_vector(
         cpu, machine.memory(), simrv::isa::OperationId::VFWREDOSUM_VS, vector_ir(vd, vs1, vs2));
     expect(regs.read_vector(vd).u64[0] == UINT64_C(0x3FF0000000000001),
@@ -2203,7 +2209,7 @@ void test_vector_floating_arithmetic() {
     regs.read_vector(vd).f64[0] = 0x1p-53;
     regs.read_vector(vs1).f32[0] = 1.0F;
     regs.read_vector(vs2).f32[0] = 1.0F;
-    cpu.state().fcsr = enum_mask(simrv::isa::RoundingMode::Rmm) << 5U;
+    cpu.state().fcsr = simrv::isa::RoundingMode::Rmm << 5U;
     simrv::execute::ExecuteUnit::execute_vector(
         cpu, machine.memory(), simrv::isa::OperationId::VFWMACC_VV, vector_ir(vd, vs1, vs2));
     expect(regs.read_vector(vd).u64[0] == UINT64_C(0x3FF0000000000001),
@@ -2233,9 +2239,9 @@ void test_vector_floating_arithmetic() {
     cpu.state().fcsr = 0;
     simrv::execute::ExecuteUnit::execute_vector(
         cpu, machine.memory(), simrv::isa::OperationId::VFMIN_VV, vector_ir(vd, vs1, vs2));
-    expect(regs.read_vector(vd).f32[0] == 4.0F &&
-               (cpu.state().fcsr & enum_mask(simrv::isa::FflagsBit::Nv)) != 0,
-           "vfmin.vv returns the numeric operand and raises invalid for a signaling NaN");
+    expect(
+        regs.read_vector(vd).f32[0] == 4.0F && (cpu.state().fcsr & simrv::isa::FflagsBit::Nv) != 0,
+        "vfmin.vv returns the numeric operand and raises invalid for a signaling NaN");
 
     regs.read_vector(vs2).u32[0] = simrv::xlen::kF32Qnan;
     regs.read_vector(vs1).f32[0] = 2.0F;
@@ -2243,26 +2249,26 @@ void test_vector_floating_arithmetic() {
     simrv::execute::ExecuteUnit::execute_vector(
         cpu, machine.memory(), simrv::isa::OperationId::VMFEQ_VV, vector_ir(RegId::Zero, vs1, vs2));
     expect((regs.read_vector(RegId::Zero).u8[0] & 1U) == 0 &&
-               (cpu.state().fcsr & enum_mask(simrv::isa::FflagsBit::Nv)) == 0,
+               (cpu.state().fcsr & simrv::isa::FflagsBit::Nv) == 0,
            "vmfeq.vv is quiet for a quiet NaN and writes a false mask bit");
 
     cpu.state().fcsr = 0;
     simrv::execute::ExecuteUnit::execute_vector(
         cpu, machine.memory(), simrv::isa::OperationId::VMFLT_VV, vector_ir(RegId::Zero, vs1, vs2));
     expect((regs.read_vector(RegId::Zero).u8[0] & 1U) == 0 &&
-               (cpu.state().fcsr & enum_mask(simrv::isa::FflagsBit::Nv)) != 0,
+               (cpu.state().fcsr & simrv::isa::FflagsBit::Nv) != 0,
            "vmflt.vv raises invalid for an unordered comparison");
 }
 
 void test_exception_delegation_mask() {
     const CSRValue mask = simrv::core::kMedelegWritableMask;
-    expect((mask & (static_cast<CSRValue>(1) << enum_mask(ExceptionCode::UserEcall))) != 0,
+    expect((mask & (CSRValue{1} << std::to_underlying(ExceptionCode::UserEcall))) != 0,
            "U-mode ECALL is delegatable to S-mode");
-    expect((mask & (static_cast<CSRValue>(1) << enum_mask(ExceptionCode::SupervisorEcall))) == 0,
+    expect((mask & (CSRValue{1} << std::to_underlying(ExceptionCode::SupervisorEcall))) == 0,
            "S-mode ECALL is not exposed as delegatable because it cannot originate below S-mode");
-    expect((mask & (static_cast<CSRValue>(1) << enum_mask(ExceptionCode::MachineEcall))) == 0,
+    expect((mask & (CSRValue{1} << std::to_underlying(ExceptionCode::MachineEcall))) == 0,
            "M-mode ECALL is never delegatable");
-    expect((mask & (static_cast<CSRValue>(1) << enum_mask(ExceptionCode::HypervisorEcall))) == 0,
+    expect((mask & (CSRValue{1} << std::to_underlying(ExceptionCode::HypervisorEcall))) == 0,
            "hypervisor ECALL is not exposed without H support");
     expect((mask & (static_cast<CSRValue>(1) << 14U)) == 0,
            "reserved exception cause 14 is not delegatable");
@@ -2337,10 +2343,10 @@ void test_sv32_page_walk() {
     constexpr Address kPhysical = 0x3000;
     constexpr Address kVirtual = 0x1234;
     constexpr Word kSatp = (static_cast<Word>(1) << 31U) | (kRoot >> 12U);
-    constexpr Word kValid = enum_mask(simrv::PteFlag::V);
-    constexpr Word kLeafFlags = kValid | enum_mask(simrv::PteFlag::R) |
-                                enum_mask(simrv::PteFlag::W) | enum_mask(simrv::PteFlag::A) |
-                                enum_mask(simrv::PteFlag::D);
+    constexpr Word kValid = std::to_underlying(simrv::PteFlag::V);
+    constexpr Word kLeafFlags =
+        kValid | std::to_underlying(simrv::PteFlag::R) | std::to_underlying(simrv::PteFlag::W) |
+        std::to_underlying(simrv::PteFlag::A) | std::to_underlying(simrv::PteFlag::D);
 
     simrv::memory::ram_write_fast(kRoot, ((kNext >> 12U) << 10U) | kValid,
                                   static_cast<Instruction>(simrv::isa::Funct3::Sw), ram_view);
@@ -2352,12 +2358,13 @@ void test_sv32_page_walk() {
     expect(translated.has_value() && *translated == 0x3234,
            "Sv32 walks a two-level page table and preserves the page offset");
 
-    constexpr Word kReservedNonLeaf = enum_mask(simrv::PteFlag::D);
+    constexpr Word kReservedNonLeaf = std::to_underlying(simrv::PteFlag::D);
     simrv::memory::ram_write_fast(kRoot, ((kNext >> 12U) << 10U) | kValid | kReservedNonLeaf,
                                   static_cast<Instruction>(simrv::isa::Funct3::Sw), ram_view);
     const auto malformed =
         mmu.translate(kVirtual, simrv::PteAccess::Read, kPrivSupervisor, 0, kSatp, 32, false);
-    expect(!malformed.has_value() && malformed.error() == enum_mask(ExceptionCode::LoadPageFault),
+    expect(!malformed.has_value() &&
+               malformed.error() == std::to_underlying(ExceptionCode::LoadPageFault),
            "Sv32 faults when a non-leaf PTE sets a reserved D bit");
 
     constexpr Word kOutsideRamSatp =
@@ -2365,12 +2372,12 @@ void test_sv32_page_walk() {
     const auto load_access_fault = mmu.translate(kVirtual, simrv::PteAccess::Read, kPrivSupervisor,
                                                  0, kOutsideRamSatp, 32, false);
     expect(!load_access_fault.has_value() &&
-               load_access_fault.error() == enum_mask(ExceptionCode::FaultLoad),
+               load_access_fault.error() == std::to_underlying(ExceptionCode::FaultLoad),
            "Sv32 reports a load access fault when the implicit root-PTE read is outside RAM");
     const auto fetch_access_fault = mmu.translate(kVirtual, simrv::PteAccess::Code, kPrivSupervisor,
                                                   0, kOutsideRamSatp, 32, false);
     expect(!fetch_access_fault.has_value() &&
-               fetch_access_fault.error() == enum_mask(ExceptionCode::FaultFetch),
+               fetch_access_fault.error() == std::to_underlying(ExceptionCode::FaultFetch),
            "Sv32 reports an instruction access fault for a failed fetch page-table walk");
 }
 
@@ -2384,9 +2391,9 @@ void test_sv39_reserved_pte_bits() {
         constexpr Address kPhysical = 0x4000;
         constexpr Address kVirtual = 0x1234;
         constexpr Word kSatp = static_cast<Word>((uint64_t{8} << 60U) | (kRoot >> 12U));
-        constexpr Word kValid = enum_mask(simrv::PteFlag::V);
+        constexpr Word kValid = std::to_underlying(simrv::PteFlag::V);
         constexpr Word kLeafFlags =
-            kValid | enum_mask(simrv::PteFlag::R) | enum_mask(simrv::PteFlag::A);
+            kValid | std::to_underlying(simrv::PteFlag::R) | std::to_underlying(simrv::PteFlag::A);
         const auto write_pte = [ram_view](Address address, Word pte) {
             simrv::memory::ram_write_fast(
                 address, pte, static_cast<Instruction>(simrv::isa::Funct3::Sd), ram_view);
@@ -2405,7 +2412,8 @@ void test_sv39_reserved_pte_bits() {
                   ((kPhysical >> 12U) << 10U) | kLeafFlags | static_cast<Word>(uint64_t{1} << 54U));
         const auto reserved =
             mmu.translate(kVirtual, simrv::PteAccess::Read, kPrivSupervisor, 0, kSatp, 64, false);
-        expect(!reserved.has_value() && reserved.error() == enum_mask(ExceptionCode::LoadPageFault),
+        expect(!reserved.has_value() &&
+                   reserved.error() == std::to_underlying(ExceptionCode::LoadPageFault),
                "Sv39 faults on reserved PTE bits when Svnapot/Svpbmt are absent");
     }
 }
@@ -2430,8 +2438,8 @@ void test_atomic_alignment() {
 void test_atomic_decode_legality() {
     constexpr Instruction kAmoOpcode = 0x2FU;
     const auto encode_amo = [](simrv::isa::Funct5Amo funct5, unsigned width, unsigned rs2) {
-        return (enum_mask(funct5) << 27U) | (rs2 << 20U) | (1U << 15U) | (width << 12U) |
-               (2U << 7U) | kAmoOpcode;
+        return (funct5 << 27U) | (rs2 << 20U) | (1U << 15U) | (width << 12U) | (2U << 7U) |
+               kAmoOpcode;
     };
 
     expect(simrv::pipeline::decoder(encode_amo(simrv::isa::Funct5Amo::Lr, 2, 0)) ==
@@ -2786,15 +2794,17 @@ void test_csr_privilege_presence() {
 
 void test_interrupt_priority() {
     using simrv::core::MipBit;
-    const Word all_standard = enum_mask(MipBit::Meip) | enum_mask(MipBit::Msip) |
-                              enum_mask(MipBit::Mtip) | enum_mask(MipBit::Seip) |
-                              enum_mask(MipBit::Ssip) | enum_mask(MipBit::Stip);
+    const Word all_standard = std::to_underlying(MipBit::Meip) | std::to_underlying(MipBit::Msip) |
+                              std::to_underlying(MipBit::Mtip) | std::to_underlying(MipBit::Seip) |
+                              std::to_underlying(MipBit::Ssip) | std::to_underlying(MipBit::Stip);
     expect(select_highest_priority_interrupt(all_standard) == 11U,
            "MEI has highest standard interrupt priority");
-    expect(select_highest_priority_interrupt(all_standard & ~enum_mask(MipBit::Meip)) == 3U,
-           "MSI precedes MTI and supervisor interrupts");
-    expect(select_highest_priority_interrupt(enum_mask(MipBit::Seip) | enum_mask(MipBit::Ssip) |
-                                             enum_mask(MipBit::Stip)) == 9U,
+    expect(
+        select_highest_priority_interrupt(all_standard & ~std::to_underlying(MipBit::Meip)) == 3U,
+        "MSI precedes MTI and supervisor interrupts");
+    expect(select_highest_priority_interrupt(std::to_underlying(MipBit::Seip) |
+                                             std::to_underlying(MipBit::Ssip) |
+                                             std::to_underlying(MipBit::Stip)) == 9U,
            "SEI precedes SSI and STI");
 }
 
@@ -2856,7 +2866,7 @@ void test_lower_privilege_xlen_initialization() {
         state.initialize_lower_xlen_fields();
         expect(((static_cast<uint64_t>(state.mstatus) >> 32U) & 0xFU) == 0U,
                "M-only RV64 profiles expose absent UXL and SXL fields as read-only zero");
-        expect(((state.mstatus & enum_mask(simrv::core::MstatusBit::Mpp)) >> 11U) == 3U,
+        expect(((state.mstatus & std::to_underlying(simrv::core::MstatusBit::Mpp)) >> 11U) == 3U,
                "M-only profiles retain a legal MPP value");
     }
 }

@@ -11,8 +11,10 @@
 #include <numeric>
 #include <string_view>
 
+#include "simrv/core/Cpu.hpp"
 #include "simrv/core/CpuConfigParser.hpp"
 #include "simrv/core/Machine.hpp"
+#include "simrv/debug/BreakpointManager.hpp"
 #include "simrv/tui/TuiLayoutPolicy.hpp"
 #include "simrv/tui/TuiTheme.hpp"
 #include "simrv/tui/framework/Modal.hpp"

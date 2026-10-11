@@ -31,6 +31,8 @@
 #include "simrv/core/Cpu.hpp"
 #include "simrv/core/Logger.hpp"
 #include "simrv/core/Machine.hpp"
+#include "simrv/debug/BreakpointManager.hpp"
+#include "simrv/memory/MemorySubsystem.hpp"
 #include "simrv/pipeline/Decoder.hpp"
 #include "simrv/xlen/Types.hpp"
 

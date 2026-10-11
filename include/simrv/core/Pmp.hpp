@@ -9,6 +9,7 @@
 
 #include "simrv/Define.hpp"
 #include "simrv/core/Cpu.hpp"
+#include "simrv/core/PmpTypes.hpp"
 #include "simrv/xlen/Types.hpp"
 
 namespace simrv::core {

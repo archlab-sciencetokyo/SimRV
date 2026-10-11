@@ -8,7 +8,9 @@
 #include <array>
 #include <format>
 
+#include "simrv/core/Cpu.hpp"
 #include "simrv/core/Machine.hpp"
+#include "simrv/core/TelemetrySink.hpp"
 #include "simrv/isa/Common.hpp"
 #include "simrv/memory/MemoryUtil.hpp"
 #include "simrv/tui/Tui.hpp"

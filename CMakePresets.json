@@ -61,6 +61,30 @@
             "cacheVariables": {}
         },
         {
+            "name": "rv32-dev",
+            "displayName": "RV32 Development (Ninja, no LTO)",
+            "inherits": [
+                "simrv-release",
+                "simrv-rv32"
+            ],
+            "binaryDir": "${sourceDir}/build/rv32-dev",
+            "cacheVariables": {
+                "SIMRV_ENABLE_LTO": "OFF"
+            }
+        },
+        {
+            "name": "rv64-dev",
+            "displayName": "RV64 Development (Ninja, no LTO)",
+            "inherits": [
+                "simrv-release",
+                "simrv-rv64"
+            ],
+            "binaryDir": "${sourceDir}/build/rv64-dev",
+            "cacheVariables": {
+                "SIMRV_ENABLE_LTO": "OFF"
+            }
+        },
+        {
             "name": "rv64-native-release",
             "displayName": "RV64 Native-Host Release (Ninja)",
             "generator": "Ninja",
@@ -144,6 +168,16 @@
         {
             "name": "rv64-release",
             "configurePreset": "rv64-release",
+            "inherits": "simrv-build-base"
+        },
+        {
+            "name": "rv32-dev",
+            "configurePreset": "rv32-dev",
+            "inherits": "simrv-build-base"
+        },
+        {
+            "name": "rv64-dev",
+            "configurePreset": "rv64-dev",
             "inherits": "simrv-build-base"
         },
         {

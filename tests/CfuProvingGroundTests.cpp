@@ -17,6 +17,7 @@
 #include "simrv/execute/CfuUnit.hpp"
 #include "simrv/isa/Base.hpp"
 #include "simrv/isa/OperationId.hpp"
+#include "simrv/memory/MemorySubsystem.hpp"
 #include "simrv/pipeline/CpuModel.hpp"
 #include "simrv/pipeline/Decoder.hpp"
 #include "simrv/pipeline/OperationTraits.hpp"
@@ -303,9 +304,9 @@ void test_bram_prewarm_and_cli() {
     // Explicit predictor overrides survive machine initialization/profile application.
     {
         std::array<char*, 6> argv = {
-            const_cast<char*>("SimRV"),         const_cast<char*>("--tui"),
+            const_cast<char*>("SimRV"),        const_cast<char*>("--tui"),
             const_cast<char*>("--cpu-preset"), const_cast<char*>("cfu-provingground"),
-            const_cast<char*>("--bpred"),       const_cast<char*>("none")};
+            const_cast<char*>("--bpred"),      const_cast<char*>("none")};
         const auto res = simrv::util::parse_command_line(argv);
         TEST_CHECK(res.has_value());
         const auto cfg = res->options.to_machine_config();

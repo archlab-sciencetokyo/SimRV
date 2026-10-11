@@ -2,6 +2,7 @@
 #include <algorithm>
 #include <memory>
 
+#include "simrv/core/Cpu.hpp"
 #include "simrv/core/Machine.hpp"
 
 int main() {

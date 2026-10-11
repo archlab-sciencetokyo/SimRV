@@ -10,6 +10,7 @@
 #include "simrv/core/Cpu.hpp"
 #include "simrv/core/Machine.hpp"
 #include "simrv/core/Pmp.hpp"
+#include "simrv/isa/Priv.hpp"
 #include "simrv/memory/MemoryAccess.hpp"
 #include "simrv/memory/MemorySubsystem.hpp"
 #include "simrv/memory/Mmu.hpp"
@@ -58,7 +59,7 @@ void test_pmp_mprv_only_in_m_mode() {
     simrv::core::ArchState state{};
     state.priv = PrivilegeLevel::Supervisor;
     // Set MPRV = 1, but MPP = User (0)
-    state.mstatus = enum_mask(simrv::core::MstatusBit::Mprv);
+    state.mstatus = std::to_underlying(simrv::core::MstatusBit::Mprv);
 
     // Entry 0: NA4 at 0x80001000 with Read permission for Supervisor, but NO permissions for User
     state.pmpaddr[0] = static_cast<Address>(0x80001000 >> 2);
@@ -99,9 +100,8 @@ void test_mmu_page_walk_uses_supervisor_pmp() {
     // Set up a valid identity leaf PTE in page table at dram_base
     // In Sv32: PTE = (PPN << 10) | V | R | W | U
     // In Sv64: PTE = (PPN << 10) | V | R | W | U
-    const Word leaf_pte = (root_ppn << 10) | enum_mask(simrv::PteFlag::V) |
-                          enum_mask(simrv::PteFlag::R) | enum_mask(simrv::PteFlag::W) |
-                          enum_mask(simrv::PteFlag::U);
+    const Word leaf_pte = (root_ppn << 10) | simrv::PteFlag::V | simrv::PteFlag::R |
+                          simrv::PteFlag::W | simrv::PteFlag::U;
     if constexpr (simrv::xlen::kIsXLen64) {
         // Sv39 root table level 2 -> setup pointing to leaf
         auto* table = reinterpret_cast<uint64_t*>(memory.data());
@@ -131,20 +131,18 @@ void test_mmu_page_walk_uses_supervisor_pmp() {
 
 // 4. Reserved PTE encodings in translation Step 4
 void test_mmu_reserved_pte_rejection() {
-    simrv::PteView reserved_leaf{.raw =
-                                     enum_mask(simrv::PteFlag::V) | enum_mask(simrv::PteFlag::W)};
+    simrv::PteView reserved_leaf{.raw = std::to_underlying(simrv::PteFlag::V | simrv::PteFlag::W)};
     expect(reserved_leaf.is_reserved_encoding(), "PTE with R=0, W=1 is identified as reserved");
     expect(!reserved_leaf.is_leaf(), "PTE with R=0, W=1 is not a valid leaf");
     expect(!reserved_leaf.is_table_pointer(), "PTE with R=0, W=1 is not a valid table pointer");
 
     // Non-leaf pointer with U bit or A bit set
-    simrv::PteView table_ptr_user{.raw =
-                                      enum_mask(simrv::PteFlag::V) | enum_mask(simrv::PteFlag::U)};
+    simrv::PteView table_ptr_user{.raw = std::to_underlying(simrv::PteFlag::V | simrv::PteFlag::U)};
     expect(table_ptr_user.is_table_pointer(), "Table pointer has R=0, W=0, X=0");
     expect(table_ptr_user.table_pointer_has_reserved_bits(),
            "Table pointer with U=1 is flagged as having reserved bits");
 
-    simrv::PteView table_ptr_clean{.raw = enum_mask(simrv::PteFlag::V)};
+    simrv::PteView table_ptr_clean{.raw = std::to_underlying(simrv::PteFlag::V)};
     expect(table_ptr_clean.is_table_pointer(), "Clean table pointer has V=1, R=W=X=0");
     expect(!table_ptr_clean.table_pointer_has_reserved_bits(),
            "Clean table pointer has no reserved bits");
@@ -302,8 +300,8 @@ void test_strong_typing_and_operators() {
            "TrapCause compares not equal to different ExceptionCode");
     expect(ExceptionCode::IllegalInstruction == cause_illegal,
            "Symmetric comparison between ExceptionCode and TrapCause works");
-    expect(trap_exception(cause_illegal) == ExceptionCode::IllegalInstruction,
-           "trap_exception converts TrapCause to ExceptionCode");
+    expect(to_exception_code(cause_illegal) == ExceptionCode::IllegalInstruction,
+           "to_exception_code converts TrapCause to ExceptionCode");
 
     // C. FflagsBit bitwise operators
     auto fflags = FflagsBit::Nv | FflagsBit::Dz;
@@ -385,8 +383,7 @@ void test_sret_spp_reset_semantics() {
             "SRET resets SPP to least-privileged supported mode (User) when U-mode is implemented");
     }
 
-    // Case 2: Hart does NOT implement U-mode (MISA.U = 0) -> SRET retains SPP as Supervisor mode
-    // (1)
+    // Case 2: SRET also clears SPP when U-mode is not implemented.
     {
         ArchState state{};
         state.misa = (Word{1} << 18);                         // S extension only, no U extension
@@ -394,9 +391,8 @@ void test_sret_spp_reset_semantics() {
         state.sepc = 0x80001000;
         TrapController::sret(state);
         expect(state.priv == PrivilegeLevel::Supervisor, "SRET returns to Supervisor mode");
-        expect((state.mstatus & MstatusBit::Spp) != 0,
-               "SRET resets SPP to least-privileged supported mode (Supervisor) when U-mode is "
-               "absent");
+        expect((state.mstatus & MstatusBit::Spp) == 0,
+               "SRET clears SPP to zero even when U-mode is absent");
     }
 }
 

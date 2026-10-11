@@ -22,6 +22,7 @@
 #include "simrv/device/pci/VirtioPciInput.hpp"
 #include "simrv/device/pci/VirtioPciNet.hpp"
 #include "simrv/device/pci/VirtioPciRng.hpp"
+#include "simrv/memory/MemorySubsystem.hpp"
 #include "simrv/memory/TileLinkBus.hpp"
 #include "simrv/memory/TileLinkProtocol.hpp"
 #include "simrv/tui/TuiTheme.hpp"

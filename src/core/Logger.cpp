@@ -13,6 +13,7 @@
 #include <cstdio>
 #include <deque>
 #include <filesystem>
+#include <format>
 #include <fstream>
 #include <mutex>
 #include <print>

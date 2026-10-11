@@ -10,6 +10,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
+#include <format>
 #include <fstream>
 #include <limits>
 #include <new>
@@ -24,6 +25,9 @@
 #include "MachineRuntime.hpp"
 #include "simrv/core/Logger.hpp"
 #include "simrv/core/PlatformTiming.hpp"
+#include "simrv/core/TelemetrySink.hpp"
+#include "simrv/debug/BreakpointManager.hpp"
+#include "simrv/debug/SymbolTable.hpp"
 #include "simrv/device/AIA.hpp"
 #include "simrv/device/Aclint.hpp"
 #include "simrv/device/PlatformDeviceRegistry.hpp"

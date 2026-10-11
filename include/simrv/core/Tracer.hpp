@@ -17,6 +17,7 @@
 #include <vector>
 
 #include "simrv/Define.hpp"
+#include "simrv/isa/Base.hpp"
 
 namespace simrv::pipeline {
 struct PipelineContext;
@@ -29,6 +30,7 @@ namespace simrv::core {
 
 class Machine;
 class CPU;
+struct ArchState;
 class GzipTraceWriter;
 
 struct BusTraceContext {

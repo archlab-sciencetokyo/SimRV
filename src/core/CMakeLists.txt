@@ -1,5 +1,7 @@
 simrv_add_component(simrv-foundation
   Logger.cpp
+  SoCConfig.cpp
+  XlenHelpers.cpp
   ../util/FdtGenerator.cpp
   ../util/SoCManifest.cpp
 )
@@ -15,6 +17,8 @@ simrv_add_component(simrv-core
   Sbi.cpp
   Tlb.cpp
   Cpu.cpp
+  CpuCycle.cpp
+  CpuFastExecution.cpp
   ../util/CliParser.cpp
   ../util/InstructionExplainer.cpp
 )

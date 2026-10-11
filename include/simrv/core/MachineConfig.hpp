@@ -15,6 +15,7 @@
 
 #include "simrv/Define.hpp"
 #include "simrv/core/SoCConfig.hpp"
+#include "simrv/isa/IsaConfig.hpp"
 #include "simrv/memory/MemoryUtil.hpp"
 #include "simrv/pipeline/CpuModel.hpp"
 #include "simrv/pipeline/PipelineSim.hpp"

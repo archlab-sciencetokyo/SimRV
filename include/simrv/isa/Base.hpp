@@ -8,6 +8,8 @@
 
 namespace simrv::isa {
 
+constexpr uint32_t kNop32 = 0x00000013;
+
 /**
  * @enum Opcode
  * @brief Represents standard RISC-V 7-bit base opcodes (bits [6:0] of the instruction).

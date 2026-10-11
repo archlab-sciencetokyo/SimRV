@@ -11,6 +11,7 @@
 #include "simrv/core/Machine.hpp"
 #include "simrv/core/RuntimeProfile.hpp"
 #include "simrv/isa/OperationId.hpp"
+#include "simrv/memory/MemorySubsystem.hpp"
 #include "simrv/memory/MemoryUtil.hpp"
 #include "simrv/pipeline/OperationTraits.hpp"
 #include "simrv/pipeline/PipelineConfig.hpp"

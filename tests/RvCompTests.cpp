@@ -23,6 +23,7 @@
 #include "simrv/device/RingBufferEthernetMmio.hpp"
 #include "simrv/isa/Base.hpp"
 #include "simrv/isa/Common.hpp"
+#include "simrv/memory/MemorySubsystem.hpp"
 #include "simrv/memory/MmioDevice.hpp"
 #include "simrv/pipeline/CpuModel.hpp"
 #include "simrv/util/SoCManifest.hpp"

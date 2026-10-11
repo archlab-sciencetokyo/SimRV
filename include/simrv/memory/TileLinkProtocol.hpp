@@ -3,11 +3,11 @@
  * @brief Typed TileLink-C 1.8.1 message and permission definitions.
  */
 #pragma once
-
 #include <cstdint>
 #include <limits>
 #include <string_view>
 
+#include "simrv/memory/TileLinkTypes.hpp"
 #include "simrv/xlen/Types.hpp"
 
 namespace simrv::memory {
@@ -293,14 +293,14 @@ struct TlChannelA {
     HartId hart{0};
     uint64_t logical_cycle{std::numeric_limits<uint64_t>::max()};
     uint64_t logical_issue_sequence{std::numeric_limits<uint64_t>::max()};
-    PhysicalAddress address{0};
+    PhysAddr address{0};
     TlMask mask{0};
     TlData data{0};
     bool corrupt{false};
 
     [[nodiscard]] constexpr auto operator==(const TlChannelA&) const noexcept -> bool = default;
 
-    [[nodiscard]] static constexpr auto compute_mask(uint8_t transfer_size, PhysicalAddress address)
+    [[nodiscard]] static constexpr auto compute_mask(uint8_t transfer_size, PhysAddr address)
         -> TlMask {
         if (transfer_size > kTlBeatSize) return 0;
         const auto bytes = static_cast<unsigned>(1u << transfer_size);
@@ -320,7 +320,7 @@ struct TlChannelB {
     TlCap cap{TlCap::ToN};
     uint8_t size{kTlBlockSize};
     TlSourceId source{0};
-    PhysicalAddress address{0};
+    PhysAddr address{0};
 
     [[nodiscard]] constexpr auto operator==(const TlChannelB&) const noexcept -> bool = default;
 };
@@ -331,7 +331,7 @@ struct TlChannelC {
     uint8_t size{kTlBlockSize};
     TlSourceId source{0};
     HartId hart{0};
-    PhysicalAddress address{0};
+    PhysAddr address{0};
     TlData data{0};
     bool corrupt{false};
 

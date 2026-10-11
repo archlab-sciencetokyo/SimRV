@@ -14,6 +14,7 @@
 #include <string_view>
 #include <vector>
 
+#include "simrv/debug/DebugTypes.hpp"
 #include "simrv/xlen/Types.hpp"
 
 namespace simrv::core {

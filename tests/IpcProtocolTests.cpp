@@ -18,6 +18,7 @@
 #include <thread>
 #include <vector>
 
+#include "simrv/core/Cpu.hpp"
 #include "simrv/core/Machine.hpp"
 #include "simrv/core/MachineConfig.hpp"
 #include "simrv/net/Client.hpp"

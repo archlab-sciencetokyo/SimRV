@@ -16,6 +16,7 @@
 #include <string_view>
 #include <thread>
 
+#include "simrv/debug/DebugTypes.hpp"
 #include "simrv/util/UniqueFd.hpp"
 #include "simrv/xlen/Types.hpp"
 

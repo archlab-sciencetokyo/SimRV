@@ -6,27 +6,33 @@
 
 #include <array>
 #include <atomic>
-#include <deque>
 #include <expected>
-#include <fstream>
-#include <mutex>
+#include <iosfwd>
 #include <optional>
+#include <string>
 
 #include "simrv/Define.hpp"
 #include "simrv/cache/DCache.hpp"
 #include "simrv/cache/ICache.hpp"
 #include "simrv/cache/TimingCache.hpp"
 #include "simrv/core/CsrFile.hpp"
+#include "simrv/core/CsrTypes.hpp"
 #include "simrv/core/DecodeCache.hpp"
+#include "simrv/core/FastBatchPolicy.hpp"
 #include "simrv/core/RegisterFile.hpp"
 #include "simrv/core/Sbi.hpp"
 #include "simrv/core/Tlb.hpp"
+#include "simrv/core/TlbTypes.hpp"
 #include "simrv/core/TrapController.hpp"
 #include "simrv/device/Clint.hpp"
 #include "simrv/device/Plic.hpp"
 #include "simrv/execute/CfuUnit.hpp"
 #include "simrv/execute/ExecuteUnit.hpp"
+#include "simrv/isa/Base.hpp"
+#include "simrv/isa/IsaConfig.hpp"
+#include "simrv/isa/OperationId.hpp"
 #include "simrv/memory/Bus.hpp"
+#include "simrv/memory/Mmu.hpp"
 #include "simrv/memory/RamView.hpp"
 #include "simrv/pipeline/CpuModel.hpp"
 #include "simrv/pipeline/CycleTransition.hpp"
@@ -36,15 +42,6 @@
 
 namespace simrv::core {
 class Machine;
-
-/// Immutable fast-path decisions captured by a runner at a batch boundary.
-struct FastBatchPolicy {
-    bool copy_pipeline_context = false;
-    bool collect_instruction_mix = false;
-    bool poll_pause = true;
-    bool has_instruction_limit = false;
-    uint32_t pause_poll_mask = 0xFFu;
-};
 
 /**
  * @struct ArchState
@@ -196,8 +193,6 @@ struct alignas(128) ArchState {
         update_xlen();
     }
 };
-
-#include <deque>
 
 /**
  * @struct SoftTlbEntry

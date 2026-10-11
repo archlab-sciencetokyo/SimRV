@@ -16,8 +16,10 @@
 #include <string>
 #include <vector>
 
+#include "simrv/core/Cpu.hpp"
 #include "simrv/core/CpuConfigParser.hpp"
 #include "simrv/core/Logger.hpp"
+#include "simrv/core/Tracer.hpp"
 #include "simrv/memory/MemoryUtil.hpp"
 #include "simrv/pipeline/PipelineConfig.hpp"
 #include "simrv/tui/Tui.hpp"

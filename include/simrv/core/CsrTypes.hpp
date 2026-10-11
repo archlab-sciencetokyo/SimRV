@@ -50,6 +50,19 @@ constexpr auto operator&(CSRValue lhs, MstatusBit rhs) noexcept -> CSRValue {
 constexpr auto operator&(MstatusBit lhs, CSRValue rhs) noexcept -> CSRValue {
     return std::to_underlying(lhs) & rhs;
 }
+constexpr auto operator^(MstatusBit lhs, MstatusBit rhs) noexcept -> CSRValue {
+    return std::to_underlying(lhs) ^ std::to_underlying(rhs);
+}
+constexpr auto operator^(CSRValue lhs, MstatusBit rhs) noexcept -> CSRValue {
+    return lhs ^ std::to_underlying(rhs);
+}
+constexpr auto operator^(MstatusBit lhs, CSRValue rhs) noexcept -> CSRValue {
+    return std::to_underlying(lhs) ^ rhs;
+}
+constexpr auto operator^=(CSRValue& lhs, MstatusBit rhs) noexcept -> CSRValue& {
+    lhs ^= std::to_underlying(rhs);
+    return lhs;
+}
 constexpr auto operator|=(CSRValue& lhs, MstatusBit rhs) noexcept -> CSRValue& {
     lhs |= std::to_underlying(rhs);
     return lhs;
@@ -108,6 +121,19 @@ constexpr auto operator&(CSRValue lhs, MipBit rhs) noexcept -> CSRValue {
 }
 constexpr auto operator&(MipBit lhs, CSRValue rhs) noexcept -> CSRValue {
     return std::to_underlying(lhs) & rhs;
+}
+constexpr auto operator^(MipBit lhs, MipBit rhs) noexcept -> CSRValue {
+    return std::to_underlying(lhs) ^ std::to_underlying(rhs);
+}
+constexpr auto operator^(CSRValue lhs, MipBit rhs) noexcept -> CSRValue {
+    return lhs ^ std::to_underlying(rhs);
+}
+constexpr auto operator^(MipBit lhs, CSRValue rhs) noexcept -> CSRValue {
+    return std::to_underlying(lhs) ^ rhs;
+}
+constexpr auto operator^=(CSRValue& lhs, MipBit rhs) noexcept -> CSRValue& {
+    lhs ^= std::to_underlying(rhs);
+    return lhs;
 }
 constexpr auto operator|=(CSRValue& lhs, MipBit rhs) noexcept -> CSRValue& {
     lhs |= std::to_underlying(rhs);
@@ -258,17 +284,13 @@ constexpr auto mstatus_with_spp(CSRValue mstatus, PrivilegeLevel priv) noexcept 
     return (mstatus & ~MstatusBit::Spp) | (static_cast<CSRValue>(std::to_underlying(priv)) << 8U);
 }
 
-/** Lowest privilege supported by an M-mode hart. */
-constexpr auto least_supported_privilege(bool has_s, bool has_u) -> PrivilegeLevel {
-    if (has_u) return PrivilegeLevel::User;
-    if (has_s) return PrivilegeLevel::Supervisor;
-    return PrivilegeLevel::Machine;
+/** MPP value mandated after xRET: U when present, otherwise M. */
+constexpr auto mstatus_mpp_after_xret(bool has_u) -> PrivilegeLevel {
+    return has_u ? PrivilegeLevel::User : PrivilegeLevel::Machine;
 }
 
-/** Lowest privilege supported by an M-mode hart, encoded as an MPP value. */
-constexpr auto least_supported_mpp(bool has_s, bool has_u) -> CSRValue {
-    return std::to_underlying(least_supported_privilege(has_s, has_u));
-}
+/** SRET always clears SPP, encoding User mode. */
+constexpr auto mstatus_spp_after_sret() -> PrivilegeLevel { return PrivilegeLevel::User; }
 
 /** Legalize MPP to a privilege mode implemented by this hart. */
 constexpr auto mstatus_legalize_mpp(CSRValue value, bool has_s, bool has_u) -> CSRValue {

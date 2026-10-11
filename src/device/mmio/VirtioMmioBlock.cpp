@@ -7,6 +7,7 @@
 #include <vector>
 
 #include "simrv/core/Machine.hpp"
+#include "simrv/memory/MemorySubsystem.hpp"
 
 namespace simrv::device {
 

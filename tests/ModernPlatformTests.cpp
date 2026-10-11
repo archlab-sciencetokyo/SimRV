@@ -48,6 +48,7 @@
 #include "simrv/device/virtio/VirtioCore.hpp"
 #include "simrv/device/virtio/VirtioSoundCore.hpp"
 #include "simrv/memory/Axi4.hpp"
+#include "simrv/memory/MemorySubsystem.hpp"
 #include "simrv/memory/MemoryUtil.hpp"
 #include "simrv/memory/MmioDevice.hpp"
 #include "simrv/tui/modals/SystemConfigModal.hpp"
@@ -455,7 +456,7 @@ void test_os_sampled_fast_batch_eligibility() {
     // A zero-length batch exercises runner eligibility and the OS fast path's interrupt
     // boundary without requiring a guest image. The production TUI supplies the same observable
     // profile, then publishes after real batches.
-    const auto msip_mask = enum_mask(simrv::core::MipBit::Msip);
+    const auto msip_mask = simrv::core::MipBit::Msip;
     machine.set_hart_irq(HartId{0}, simrv::core::InterruptType::Software,
                          simrv::PrivilegeLevel::Machine, true);
     check((machine.primary_hart().state().mip & msip_mask) == 0);
@@ -591,8 +592,7 @@ void test_timed_page_walk_transitions() {
     const Word vpn =
         (physical >> (12 + top_level * top_vpn_bits)) & ((Word{1} << top_vpn_bits) - 1);
     const Address pte_address = root + vpn * sizeof(Word);
-    Word pte = ((physical >> 12) << 10) | enum_mask(simrv::PteFlag::V) |
-               enum_mask(simrv::PteFlag::R) | enum_mask(simrv::PteFlag::X);
+    Word pte = ((physical >> 12) << 10) | simrv::PteFlag::V | simrv::PteFlag::R | simrv::PteFlag::X;
     std::memcpy(ram.data() + (pte_address - physical), &pte, sizeof(pte));
 
     auto& walk = machine.cpu.ca_state.instruction_walk;
@@ -618,7 +618,7 @@ void test_timed_page_walk_transitions() {
     check(result.has_value() && result->has_value() && **result == physical);
     check(!walk.active);
     std::memcpy(&pte, ram.data() + (pte_address - physical), sizeof(pte));
-    check((pte & enum_mask(simrv::PteFlag::A)) != 0);
+    check((pte & simrv::PteFlag::A) != 0);
 
     // A different, unmapped top-level entry faults after exactly one physical read.
     constexpr Address unmapped = physical + (Address{1} << (12 + top_level * top_vpn_bits));
@@ -651,17 +651,17 @@ void test_timed_page_walk_transitions() {
     accessed.size = sizeof(Word) == 8 ? 3 : 2;
     accessed.source = 6;
     accessed.address = pte_address;
-    accessed.data = enum_mask(simrv::PteFlag::A);
+    accessed.data = std::to_underlying(simrv::PteFlag::A);
     auto dirty = accessed;
     dirty.source = 7;
-    dirty.data = enum_mask(simrv::PteFlag::D);
+    dirty.data = std::to_underlying(simrv::PteFlag::D);
     machine.memory().system_bus().send_request(accessed);
     machine.memory().system_bus().send_request(dirty);
     machine.memory().system_bus().advance_cycle();
     machine.memory().system_bus().advance_cycle();
     std::memcpy(&clear_pte, ram.data() + (pte_address - physical), sizeof(clear_pte));
-    check((clear_pte & (enum_mask(simrv::PteFlag::A) | enum_mask(simrv::PteFlag::D))) ==
-          (enum_mask(simrv::PteFlag::A) | enum_mask(simrv::PteFlag::D)));
+    check((clear_pte & (simrv::PteFlag::A | simrv::PteFlag::D)) ==
+          std::to_underlying(simrv::PteFlag::A | simrv::PteFlag::D));
     std::cout << "[PASS] test_timed_page_walk_transitions\n";
 }
 
@@ -697,9 +697,8 @@ void test_cycle_kernel_golden_translated_fetch() {
         constexpr unsigned level = simrv::xlen::kIsXLen64 ? 2 : 1;
         const Word vpn = (pc >> (12 + level * vpn_bits)) & ((Word{1} << vpn_bits) - 1);
         const Address pte_address = root + vpn * sizeof(Word);
-        const Word pte = ((pc >> 12) << 10) | enum_mask(simrv::PteFlag::V) |
-                         enum_mask(simrv::PteFlag::R) | enum_mask(simrv::PteFlag::X) |
-                         enum_mask(simrv::PteFlag::A);
+        const Word pte = ((pc >> 12) << 10) | simrv::PteFlag::V | simrv::PteFlag::R |
+                         simrv::PteFlag::X | simrv::PteFlag::A;
         std::memcpy(ram.data() + (pte_address - pc), &pte, sizeof(pte));
         machine.cpu.state().priv = kPrivSupervisor;
         machine.cpu.state().pc = pc;
@@ -764,10 +763,9 @@ void test_cycle_kernel_golden_translated_load() {
         constexpr unsigned level = simrv::xlen::kIsXLen64 ? 2 : 1;
         const Word vpn = (pc >> (12 + level * vpn_bits)) & ((Word{1} << vpn_bits) - 1);
         const Address pte_address = root + vpn * sizeof(Word);
-        const Word pte = ((pc >> 12) << 10) | enum_mask(simrv::PteFlag::V) |
-                         enum_mask(simrv::PteFlag::R) | enum_mask(simrv::PteFlag::W) |
-                         enum_mask(simrv::PteFlag::X) | enum_mask(simrv::PteFlag::A) |
-                         enum_mask(simrv::PteFlag::D);
+        const Word pte = ((pc >> 12) << 10) | simrv::PteFlag::V | simrv::PteFlag::R |
+                         simrv::PteFlag::W | simrv::PteFlag::X | simrv::PteFlag::A |
+                         simrv::PteFlag::D;
         std::memcpy(ram.data() + (pte_address - pc), &pte, sizeof(pte));
         machine.cpu.state().priv = kPrivSupervisor;
         machine.cpu.state().pc = pc;
@@ -1270,8 +1268,8 @@ void test_global_cycle_timer_phase_ordering() {
     check(machine.hart(1).clint_mmio.mcycle == hart1_cycles + 1);
     check(machine.hart(0).clint_mmio.mtime == 5);
     check(machine.hart(1).clint_mmio.mtime == 5);
-    check((machine.hart(0).state().mip & enum_mask(simrv::core::MipBit::Mtip)) != 0);
-    check((machine.hart(1).state().mip & enum_mask(simrv::core::MipBit::Mtip)) != 0);
+    check((machine.hart(0).state().mip & simrv::core::MipBit::Mtip) != 0);
+    check((machine.hart(1).state().mip & simrv::core::MipBit::Mtip) != 0);
     std::cout << "[PASS] test_global_cycle_timer_phase_ordering\n";
 }
 
@@ -1648,7 +1646,7 @@ void test_cycle_kernel_golden_fp_dependencies() {
         machine.cpu.reset();
         machine.runtime_profile.engine = simrv::core::ExecutionEngine::CycleFast;
         machine.cpu.pipeline_sim.config.pipeline_type = type;
-        machine.cpu.state().mstatus |= enum_mask(simrv::core::MstatusBit::Fs);
+        machine.cpu.state().mstatus |= simrv::core::MstatusBit::Fs;
 
         constexpr Address pc = simrv::memory::kDramBaseAddress;
         constexpr Address data_address = pc + 0x100;
@@ -2117,9 +2115,9 @@ void test_cycle_kernel_golden_interrupt_boundary() {
         machine.cpu.icache.insert(pc, line.data(), simrv::memory::MesiState::Exclusive);
         machine.cpu.state().pc = pc;
         machine.cpu.state().mtvec = handler;
-        machine.cpu.state().mstatus |= enum_mask(simrv::core::MstatusBit::Mie);
-        machine.cpu.state().mie |= enum_mask(simrv::core::MipBit::Mtip);
-        machine.cpu.state().mip |= enum_mask(simrv::core::MipBit::Mtip);
+        machine.cpu.state().mstatus |= simrv::core::MstatusBit::Mie;
+        machine.cpu.state().mie |= simrv::core::MipBit::Mtip;
+        machine.cpu.state().mip |= simrv::core::MipBit::Mtip;
 
         uint32_t cycles = 0;
         while (!trap_is_interrupt(machine.cpu.state().mcause) && cycles < 32) {
@@ -2383,24 +2381,24 @@ void test_aclint() {
     simrv::device::AclintMswi mswi(&machine);
 
     // Initial state: no timer / software interrupts
-    assert((machine.cpu.state().mip & enum_mask(simrv::core::MipBit::Mtip)) == 0);
-    assert((machine.cpu.state().mip & enum_mask(simrv::core::MipBit::Msip)) == 0);
+    assert((machine.cpu.state().mip & simrv::core::MipBit::Mtip) == 0);
+    assert((machine.cpu.state().mip & simrv::core::MipBit::Msip) == 0);
 
     // MSWI test
     mswi.write32(0x00, 1);
-    assert((machine.cpu.state().mip & enum_mask(simrv::core::MipBit::Msip)) != 0);
+    assert((machine.cpu.state().mip & simrv::core::MipBit::Msip) != 0);
     assert(mswi.read32(0x00) == 1);
     mswi.write32(0x00, 0);
-    assert((machine.cpu.state().mip & enum_mask(simrv::core::MipBit::Msip)) == 0);
+    assert((machine.cpu.state().mip & simrv::core::MipBit::Msip) == 0);
 
     // MTIMER test: set mtimecmp = 100, mtime = 150
     mtimer.write64(0x4000, 100);
     mtimer.write64(0x7ff8, 150);
-    assert((machine.cpu.state().mip & enum_mask(simrv::core::MipBit::Mtip)) != 0);
+    assert((machine.cpu.state().mip & simrv::core::MipBit::Mtip) != 0);
 
     // Clear by setting mtimecmp higher
     mtimer.write64(0x4000, 200);
-    assert((machine.cpu.state().mip & enum_mask(simrv::core::MipBit::Mtip)) == 0);
+    assert((machine.cpu.state().mip & simrv::core::MipBit::Mtip) == 0);
     std::cout << "[PASS] test_aclint\n";
 }
 
@@ -2419,14 +2417,14 @@ void test_aia_aplic_and_imsic() {
     aplic_s.write32(0x1e00, 1U << 1);  // Enable source 1
     aplic_s.set_irq(1, true);
 
-    assert((machine.cpu.state().mip & enum_mask(simrv::core::MipBit::Seip)) != 0);
+    assert((machine.cpu.state().mip & simrv::core::MipBit::Seip) != 0);
 
     // MSI delivery via IMSIC testing
     imsic_s.csr_write(0, 0x70, 1);        // eidelivery = 1
     imsic_s.csr_write(0, 0xC0, 1U << 5);  // enable interrupt ID 5
     imsic_s.trigger_msi(0, 5);
 
-    assert((machine.cpu.state().mip & enum_mask(simrv::core::MipBit::Seip)) != 0);
+    assert((machine.cpu.state().mip & simrv::core::MipBit::Seip) != 0);
     assert((imsic_s.csr_read(0, 0x44) & 0xffff) == 5);  // topei returns ID 5
     std::cout << "[PASS] test_aia_aplic_and_imsic\n";
 }
@@ -2790,7 +2788,7 @@ void test_sbi_multihart_rfence() {
     machine.cpu.state().regs.write(RegId::A1, 0);           // hart_mask_base
     machine.cpu.state().regs.write(RegId::A7, 0x52464E43);  // ExtId::Rfence
     machine.cpu.state().regs.write(RegId::A6, 1);           // RfenceFid::RemoteSfenceVma
-    check(machine.cpu.sbi.handle_ecall(enum_mask(ExceptionCode::SupervisorEcall)));
+    check(machine.cpu.sbi.handle_ecall(ExceptionCode::SupervisorEcall));
     check(machine.cpu.state().regs.read(RegId::A0) == 0);  // SbiError::Success
 
     // Verify secondary harts had TLB flushed
@@ -2802,7 +2800,7 @@ void test_sbi_multihart_rfence() {
     machine.cpu.state().regs.write(RegId::A1, static_cast<Word>(-1));  // all harts
     machine.cpu.state().regs.write(RegId::A7, 0x52464E43);             // ExtId::Rfence
     machine.cpu.state().regs.write(RegId::A6, 0);                      // RfenceFid::RemoteFenceI
-    check(machine.cpu.sbi.handle_ecall(enum_mask(ExceptionCode::SupervisorEcall)));
+    check(machine.cpu.sbi.handle_ecall(ExceptionCode::SupervisorEcall));
     check(machine.cpu.state().regs.read(RegId::A0) == 0);
 
     // Test send_ipi broadcast
@@ -2810,10 +2808,10 @@ void test_sbi_multihart_rfence() {
     machine.cpu.state().regs.write(RegId::A1, 0);         // base 0
     machine.cpu.state().regs.write(RegId::A7, 0x735049);  // ExtId::Ipi
     machine.cpu.state().regs.write(RegId::A6, 0);         // send_ipi
-    check(machine.cpu.sbi.handle_ecall(enum_mask(ExceptionCode::SupervisorEcall)));
+    check(machine.cpu.sbi.handle_ecall(ExceptionCode::SupervisorEcall));
     check(machine.cpu.state().regs.read(RegId::A0) == 0);
-    check((machine.hart(1).state().mip & enum_mask(simrv::core::MipBit::Ssip)) != 0);
-    check((machine.hart(2).state().mip & enum_mask(simrv::core::MipBit::Ssip)) == 0);
+    check((machine.hart(1).state().mip & simrv::core::MipBit::Ssip) != 0);
+    check((machine.hart(2).state().mip & simrv::core::MipBit::Ssip) == 0);
 
     std::cout << "[PASS] test_sbi_multihart_rfence\n";
 }
@@ -3167,9 +3165,8 @@ void test_load_after_amo_readonly_page() {
     constexpr unsigned level = simrv::xlen::kIsXLen64 ? 2 : 1;
     const Word vpn = (ro_page >> (12 + level * vpn_bits)) & ((Word{1} << vpn_bits) - 1);
     const Address pte_address = root + vpn * sizeof(Word);
-    const Word pte = ((pc >> 12) << 10) | enum_mask(simrv::PteFlag::V) |
-                     enum_mask(simrv::PteFlag::R) | enum_mask(simrv::PteFlag::A) |
-                     enum_mask(simrv::PteFlag::D);
+    const Word pte = ((pc >> 12) << 10) | simrv::PteFlag::V | simrv::PteFlag::R |
+                     simrv::PteFlag::A | simrv::PteFlag::D;
     std::memcpy(ram.data() + (pte_address - pc), &pte, sizeof(pte));
 
     machine.cpu.state().priv = kPrivSupervisor;

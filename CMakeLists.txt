@@ -84,6 +84,8 @@ configure_file(${PROJECT_SOURCE_DIR}/include/simrv/core/BuildInfo.hpp.in
 
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
+# The project has no C++ module sources. Avoid a dependency-scan action for every translation unit.
+set(CMAKE_CXX_SCAN_FOR_MODULES OFF)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
 option(SIMRV_ENABLE_CLANG_TIDY "Enable clang-tidy static analysis" OFF)
@@ -151,6 +153,7 @@ endif()
 
 option(SIMRV_PREFER_MOLD "Prefer mold linker for fast links when available" ON)
 option(SIMRV_PREFER_LLD "Prefer lld for Clang links when available" ON)
+option(SIMRV_ENABLE_LTO "Enable link-time optimization for Release builds" ON)
 
 set(SIMRV_LINKER_NAME "system")
 if(SIMRV_PREFER_MOLD)
@@ -173,7 +176,7 @@ if(SIMRV_LINKER_NAME STREQUAL "system"
   endif()
 endif()
 
-if(CMAKE_BUILD_TYPE STREQUAL "Release")
+if(CMAKE_BUILD_TYPE STREQUAL "Release" AND SIMRV_ENABLE_LTO)
   if(SIMRV_LINKER_NAME MATCHES "lld|mold" AND CMAKE_CXX_COMPILER_ID STREQUAL
                                               "Clang")
     set(CMAKE_INTERPROCEDURAL_OPTIMIZATION ON)

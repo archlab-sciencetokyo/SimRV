@@ -25,8 +25,11 @@
 #include <string>
 #include <thread>
 
+#include "simrv/core/Cpu.hpp"
 #include "simrv/core/Logger.hpp"
 #include "simrv/core/Machine.hpp"
+#include "simrv/debug/BreakpointManager.hpp"
+#include "simrv/debug/SymbolTable.hpp"
 #include "simrv/device/Uart.hpp"
 #include "simrv/isa/Common.hpp"
 #include "simrv/pipeline/Decoder.hpp"

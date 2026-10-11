@@ -18,6 +18,7 @@
 #include "simrv/core/SoCDeviceRegistry.hpp"
 #include "simrv/debug/GdbStub.hpp"
 #include "simrv/debug/SpikeLockstep.hpp"
+#include "simrv/debug/SymbolTable.hpp"
 #include "simrv/device/AIA.hpp"
 #include "simrv/device/Aclint.hpp"
 #include "simrv/device/DmaController.hpp"

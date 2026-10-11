@@ -9,6 +9,7 @@
 #include <limits>
 
 #include "simrv/Define.hpp"
+#include "simrv/core/CsrTypes.hpp"
 #include "simrv/execute/ExecuteUnit.hpp"
 #include "simrv/xlen/Constants.hpp"
 #include "simrv/xlen/Types.hpp"

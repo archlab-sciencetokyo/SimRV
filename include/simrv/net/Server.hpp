@@ -5,6 +5,7 @@
 #include <mutex>
 #include <thread>
 
+#include "simrv/core/TelemetrySink.hpp"
 #include "simrv/net/Protocol.hpp"
 #include "simrv/tui/TuiBackend.hpp"
 #include "simrv/tui/VirtualTerminal.hpp"
