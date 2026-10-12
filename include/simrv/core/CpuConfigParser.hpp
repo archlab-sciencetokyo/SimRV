@@ -90,8 +90,15 @@ inline auto parse_isa_preset_string(std::string_view val) -> std::optional<simrv
     if (iequals(val, "gc") || iequals(val, "rv32gc") || iequals(val, "rv64gc")) {
         return simrv::isa::IsaPreset::GC;
     }
-    if (iequals(val, "gcbv") || iequals(val, "rv32gcbv") || iequals(val, "rv64gcbv")) {
-        return simrv::isa::IsaPreset::GCBV;
+    if (iequals(val, "gcv") || iequals(val, "rv32gcv") || iequals(val, "rv64gcv")) {
+        return simrv::isa::IsaPreset::GCV;
+    }
+    if (iequals(val, "gczb") || iequals(val, "rv32gczb") || iequals(val, "rv64gczb")) {
+        return simrv::isa::IsaPreset::GCZB;
+    }
+    if (iequals(val, "gczbv") || iequals(val, "rv32gczbv") || iequals(val, "rv64gczbv") ||
+        iequals(val, "gcbv") || iequals(val, "rv32gcbv") || iequals(val, "rv64gcbv")) {
+        return simrv::isa::IsaPreset::GCZBV;
     }
     return std::nullopt;
 }
@@ -103,6 +110,10 @@ inline void add_isa_extension(std::vector<std::string>& extensions, std::string_
         normalized.push_back(static_cast<char>(std::tolower(static_cast<unsigned char>(ch))));
     }
     if (normalized.empty()) return;
+    if (simrv::isa::is_zb_extension(normalized)) {
+        simrv::isa::add_zb_extension(extensions, normalized);
+        return;
+    }
     if (simrv::isa::is_zk_extension(normalized)) {
         simrv::isa::add_zk_extension(extensions, normalized);
         return;
@@ -164,10 +175,14 @@ inline auto isa_preset_name(simrv::isa::IsaPreset preset) -> std::string_view {
             return "g";
         case simrv::isa::IsaPreset::GC:
             return "gc";
-        case simrv::isa::IsaPreset::GCBV:
-            return "gcbv";
+        case simrv::isa::IsaPreset::GCV:
+            return "gcv";
+        case simrv::isa::IsaPreset::GCZB:
+            return "gczb";
+        case simrv::isa::IsaPreset::GCZBV:
+            return "gczbv";
     }
-    return "gcbv";
+    return "gczbv";
 }
 
 }  // namespace detail

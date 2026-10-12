@@ -46,7 +46,7 @@ The current decoder intentionally reserves the complete `custom-0` opcode for th
 ## 1. Register the Extension and Opcodes
 
 All core ISA definitions and shared constants live in
-[`include/simrv/Define.hpp`](https://github.com/archlab-sciencetokyo/SimRV/blob/dev/include/simrv/Define.hpp).
+[`include/simrv/isa/IsaTypes.hpp`](https://github.com/archlab-sciencetokyo/SimRV/blob/dev/include/simrv/isa/IsaTypes.hpp) and [`include/simrv/isa/IsaConfig.hpp`](https://github.com/archlab-sciencetokyo/SimRV/blob/dev/include/simrv/isa/IsaConfig.hpp).
 
 1. **Extension Bit:** Add your extension to the `IsaExtension` enum
    (e.g., `V = 21` for Vector).
@@ -96,9 +96,12 @@ Steps:
 
 Execution routing happens in the Execute stage:
 
-- [`src/execute/ExecuteUnit.cpp`](https://github.com/archlab-sciencetokyo/SimRV/blob/dev/src/execute/ExecuteUnit.cpp) — routing hub
-- [`src/execute/ExecuteUnitInt.cpp`](https://github.com/archlab-sciencetokyo/SimRV/blob/dev/src/execute/ExecuteUnitInt.cpp) — integer ops
-- [`src/execute/ExecuteUnitFloat.cpp`](https://github.com/archlab-sciencetokyo/SimRV/blob/dev/src/execute/ExecuteUnitFloat.cpp) — FP ops
+- [`src/execute/ExecuteUnit.cpp`](https://github.com/archlab-sciencetokyo/SimRV/blob/dev/src/execute/ExecuteUnit.cpp) — routing hub facade
+- [`src/execute/ExecuteUnitInt.cpp`](https://github.com/archlab-sciencetokyo/SimRV/blob/dev/src/execute/ExecuteUnitInt.cpp) — integer, M, and A ops
+- [`src/execute/ExecuteUnitFp.cpp`](https://github.com/archlab-sciencetokyo/SimRV/blob/dev/src/execute/ExecuteUnitFp.cpp) — FP ops (F, D)
+- [`src/execute/ExecuteUnitZb.cpp`](https://github.com/archlab-sciencetokyo/SimRV/blob/dev/src/execute/ExecuteUnitZb.cpp) — bit manipulation ops (Zb)
+- [`src/execute/ExecuteUnitVector.cpp`](https://github.com/archlab-sciencetokyo/SimRV/blob/dev/src/execute/ExecuteUnitVector.cpp) — vector ops (V)
+- [`src/execute/ExecuteUnitZk.cpp`](https://github.com/archlab-sciencetokyo/SimRV/blob/dev/src/execute/ExecuteUnitZk.cpp) — scalar cryptography ops (Zk)
 
 Steps:
 
@@ -128,7 +131,7 @@ variable length):
    via `state_`).
 
 3. **Control and Status Registers (CSRs):**
-   - Add new CSR addresses to the `Csr` enum in `Define.hpp`.
+   - Add new CSR addresses to the `Csr` enum in [`include/simrv/core/Csr.hpp`](https://github.com/archlab-sciencetokyo/SimRV/blob/dev/include/simrv/core/Csr.hpp).
    - Implement read/write behavior, access control, and illegal-instruction guards in
      [`src/core/CsrFile.cpp`](https://github.com/archlab-sciencetokyo/SimRV/blob/dev/src/core/CsrFile.cpp).
 

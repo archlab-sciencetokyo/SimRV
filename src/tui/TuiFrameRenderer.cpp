@@ -134,7 +134,7 @@ auto compose_multi_frame_lines(const FrameGeometry& frame, int terminal_width,
     return lines;
 }
 
-auto compose_frame_lines(const FrameGeometry& frame, int terminal_width, TuiLayout layout,
+auto compose_frame_lines(const FrameGeometry& frame, int terminal_width, framework::Layout layout,
                          std::string_view header_block, std::string_view footer_block,
                          const PaneRowRenderer& render_left, const PaneRowRenderer& render_right)
     -> std::vector<std::string> {
@@ -144,7 +144,7 @@ auto compose_frame_lines(const FrameGeometry& frame, int terminal_width, TuiLayo
     return compose_multi_frame_lines(frame, terminal_width, col_widths, header_block, footer_block,
                                      [&](size_t col_idx, int row, int width) -> std::string {
                                          if (col_widths.count == 1) {
-                                             if (layout == TuiLayout::FullRight) {
+                                             if (layout == framework::Layout::FullRight) {
                                                  return render_right(row, width);
                                              }
                                              return render_left(row, width);

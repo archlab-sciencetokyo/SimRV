@@ -106,6 +106,10 @@ distribution; native Windows builds are not currently supported.
 cmake --preset rv64-release
 cmake --build --preset rv64-release
 
+# RV64 Debug build
+cmake --preset rv64-debug
+cmake --build --preset rv64-debug
+
 # RV32 strict-width release verification build
 cmake --preset rv32-release
 cmake --build --preset rv32-release
@@ -115,9 +119,10 @@ cmake --preset rv64-native-release
 cmake --build --preset rv64-native-release
 ```
 
-The preset set stays focused on the two release architectures, one optional host-specialized
-RV64 build, and isolated RV64 sanitizer builds. Choose the installed C++23 compiler through `CC`
-and `CXX` when configuring; the native preset uses Clang and enables host-specific code generation.
+The preset set includes RV64 Debug for local diagnosis, the two release architectures, one optional
+host-specialized RV64 build, and isolated RV64 sanitizer builds. Choose the installed C++23 compiler
+through `CC` and `CXX` when configuring; the native preset uses Clang and enables host-specific
+code generation.
 
 Sanitizer configurations are available when investigating memory, undefined-behavior, or threading
 issues. They build under `/tmp/simrv-build/`, keeping `build/` limited to release configurations:

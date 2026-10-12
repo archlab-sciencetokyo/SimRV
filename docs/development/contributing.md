@@ -36,6 +36,11 @@ Always configure and build using CMake presets:
 cmake --preset rv64-release
 cmake --build --preset rv64-release -j$(nproc)
 
+# RV64 Debug build (the build preset uses four jobs)
+cmake --preset rv64-debug
+cmake --build --preset rv64-debug
+ctest --preset rv64-debug-gate
+
 # RV32 targets
 cmake --preset rv32-release
 cmake --build --preset rv32-release -j$(nproc)

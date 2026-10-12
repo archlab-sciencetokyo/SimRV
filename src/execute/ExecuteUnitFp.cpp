@@ -1,7 +1,9 @@
 /**
- * @file ExecuteUnitFloat.cpp
+ * @file ExecuteUnitFp.cpp
  * @brief High-performance RISC-V floating-point execution unit implementation.
  */
+#include "simrv/execute/ExecuteUnitFp.hpp"
+
 #include <bit>
 #include <cfenv>
 #include <cmath>
@@ -10,7 +12,6 @@
 
 #include "simrv/CompilerHints.hpp"
 #include "simrv/core/CsrTypes.hpp"
-#include "simrv/execute/ExecuteUnit.hpp"
 #include "simrv/xlen/Constants.hpp"
 #include "simrv/xlen/RegisterTypes.hpp"
 
@@ -404,9 +405,9 @@ static auto fcvt_to_int(double value, simrv::xlen::Word op_mode, RoundingMode ef
 
 using namespace fp;
 
-auto ExecuteUnit::fusedFp(Opcode opcode, FpFmt fmt, simrv::xlen::FpRegId rs1,
-                          simrv::xlen::FpRegId rs2, simrv::xlen::FpRegId rs3, RoundingMode rm,
-                          const simrv::xlen::FloatingRegister* freg, simrv::xlen::CSRValue& fcsr)
+auto ExecuteUnitFp::fusedFp(Opcode opcode, FpFmt fmt, simrv::xlen::FpRegId rs1,
+                            simrv::xlen::FpRegId rs2, simrv::xlen::FpRegId rs3, RoundingMode rm,
+                            const simrv::xlen::FloatingRegister* freg, simrv::xlen::CSRValue& fcsr)
     -> FpExecResult {
     FpExecResult out;
     FpEnvironment::set_rounding_mode(std::to_underlying(rm), fcsr);
@@ -725,9 +726,9 @@ bool fp_exec_mv_class(FpExecResult& out, simrv::xlen::Word funct7, Funct3 funct3
 
 }  // namespace fp
 
-auto ExecuteUnit::opFp(simrv::xlen::Funct7 funct7, Funct3 funct3, simrv::xlen::FpRegId rs1,
-                       simrv::xlen::FpRegId rs2, simrv::xlen::Register rrs1,
-                       const simrv::xlen::FloatingRegister* freg, simrv::xlen::CSRValue& fcsr)
+auto ExecuteUnitFp::opFp(simrv::xlen::Funct7 funct7, Funct3 funct3, simrv::xlen::FpRegId rs1,
+                         simrv::xlen::FpRegId rs2, simrv::xlen::Register rrs1,
+                         const simrv::xlen::FloatingRegister* freg, simrv::xlen::CSRValue& fcsr)
     -> FpExecResult {
     FpExecResult out;
     const simrv::xlen::Word rm = std::to_underlying(funct3);

@@ -3,6 +3,7 @@ if(NOT DEFINED SIMRV_SOURCE_DIR)
 endif()
 
 file(READ "${SIMRV_SOURCE_DIR}/CMakeLists.txt" top_level_cmake)
+file(READ "${SIMRV_SOURCE_DIR}/cmake/SimRVPackaging.cmake" packaging_cmake)
 foreach(forbidden IN ITEMS "LINK_GROUP" "SIMRV_SOURCES"
                            "SIMRV_LEGACY_TARGET_GRAPH")
   if(top_level_cmake MATCHES "${forbidden}")
@@ -46,6 +47,6 @@ if(machine_header
       "Legacy Machine configuration mirror reintroduced; use MachineConfig")
 endif()
 
-if(NOT top_level_cmake MATCHES "install\\([ \t\r\n]*DIRECTORY include/simrv")
+if(NOT packaging_cmake MATCHES "install\\([ \t\r\n]*DIRECTORY include/simrv")
   message(FATAL_ERROR "The install surface must be rooted at include/simrv")
 endif()

@@ -4,16 +4,11 @@
  */
 #include "simrv/device/pci/VirtioPciInput.hpp"
 
+#include "simrv/device/virtio/VirtioInputQueue.hpp"
+
 namespace simrv::device {
 
 VirtioPciInput::VirtioPciInput() : VirtioPciDevice(virtio::kDevIdInput, 0x090000, 2) {}
-
-auto VirtioPciInput::get_device_features(uint32_t select) -> uint32_t {
-    if (select == 1) {
-        return (1U << 0);  // VIRTIO_F_VERSION_1
-    }
-    return 0;
-}
 
 void VirtioPciInput::on_queue_notify(uint16_t queue_index) {
     if (queue_index == 0) {
@@ -23,47 +18,18 @@ void VirtioPciInput::on_queue_notify(uint16_t queue_index) {
 
 void VirtioPciInput::process_eventq() {
     if (queues_.empty()) return;
-    auto& q = queues_[0];
-    if (!q.ready || !q.driver_addr || !q.device_addr || !q.desc_addr) return;
-
-    std::scoped_lock lock(backend_.event_mutex);
-    if (backend_.event_queue.empty()) return;
-
-    uint16_t avail_idx = 0;
-    if (!dma_read(q.driver_addr + 2, &avail_idx, 2)) return;
-
-    bool processed_any = false;
-    while (q.last_avail_idx != avail_idx && !backend_.event_queue.empty()) {
-        const uint16_t ring_idx = q.last_avail_idx % q.num;
-        uint16_t head_desc_idx = 0;
-        if (!dma_read(q.driver_addr + 4 + ring_idx * 2, &head_desc_idx, 2)) break;
-
-        virtio::VirtqDesc desc{};
-        if (!dma_read(q.desc_addr + head_desc_idx * sizeof(virtio::VirtqDesc), &desc, sizeof(desc)))
-            break;
-
-        if (desc.len < sizeof(virtio::VirtioInputEvent)) break;
-
-        const auto event = backend_.event_queue.front();
-        backend_.event_queue.pop_front();
-
-        dma_write(desc.addr, &event, sizeof(event));
-
-        uint16_t used_idx = 0;
-        dma_read(q.device_addr + 2, &used_idx, 2);
-        virtio::VirtqUsedElem elem{head_desc_idx, sizeof(event)};
-        dma_write(q.device_addr + 4 + (used_idx % q.num) * sizeof(elem), &elem, sizeof(elem));
-        used_idx++;
-        dma_write(q.device_addr + 2, &used_idx, 2);
-
-        q.last_avail_idx++;
-        processed_any = true;
-    }
-
-    if (processed_any) {
-        isr_status_ |= 0x1;
-        trigger_irq();
-    }
+    virtio::process_input_event_queue(
+        queues_[0], backend_,
+        [this](uint64_t address, void* data, std::size_t size) {
+            return dma_read(address, data, size);
+        },
+        [this](uint64_t address, const void* data, std::size_t size) {
+            return dma_write(address, data, size);
+        },
+        [this]() {
+            isr_status_ |= 0x1;
+            trigger_irq();
+        });
 }
 
 void VirtioPciInput::push_event(uint16_t type, uint16_t code, uint32_t value) {

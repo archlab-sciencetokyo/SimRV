@@ -10,13 +10,6 @@ VirtioPciSound::VirtioPciSound() : VirtioPciDevice(virtio::kDevIdSound, 0x040100
     init_bar(4, sizeof(virtio::VirtioSndConfig), false, false);
 }
 
-auto VirtioPciSound::get_device_features(uint32_t select) -> uint32_t {
-    if (select == 1) {
-        return (1U << 0);  // VIRTIO_F_VERSION_1
-    }
-    return 0;
-}
-
 auto VirtioPciSound::read_device_config(simrv::xlen::Address offset, uint8_t size) -> uint32_t {
     return backend_.read_config(offset, size);
 }

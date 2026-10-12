@@ -35,7 +35,7 @@ metadata = load("experiment_metadata", ROOT / "scripts/experiment_metadata.py")
 class ReleaseToolTests(unittest.TestCase):
     def test_release_workflow_publishes_curated_assets(self):
         workflow = (ROOT / ".github/workflows/release-binaries.yml").read_text()
-        cmake = (ROOT / "CMakeLists.txt").read_text()
+        cmake = (ROOT / "cmake/SimRVPackaging.cmake").read_text()
         manifest = json.loads((ROOT / "release/release-manifest.json").read_text())
         self.assertIn("publish-release:", workflow)
         self.assertIn("SimRV-rpm-packages-v${VERSION}.tar.gz", workflow)

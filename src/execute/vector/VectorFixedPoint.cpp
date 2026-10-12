@@ -1,7 +1,7 @@
 #include "VectorHelpers.hpp"
-#include "simrv/execute/ExecuteUnit.hpp"
+#include "VectorSubunits.hpp"
 
-namespace simrv::execute {
+namespace simrv::execute::vector {
 
 namespace {
 
@@ -43,7 +43,8 @@ auto average_element(T lhs, T rhs, uint32_t vxrm) -> T {
 template <typename T, bool Subtract>
 void execute_average_vv(core::CPU& cpu, simrv::xlen::RegId rd, simrv::xlen::RegId rs1,
                         simrv::xlen::RegId rs2, bool vm, uint32_t vl) {
-    const auto& mask_reg = cpu.state().regs.read_vector(simrv::xlen::to_vec_reg_id(simrv::xlen::RegId::Zero));
+    const auto& mask_reg =
+        cpu.state().regs.read_vector(simrv::xlen::to_vec_reg_id(simrv::xlen::RegId::Zero));
     for (uint32_t i = static_cast<uint32_t>(cpu.state().vstart); i < vl; ++i) {
         if (!vector::is_element_active(mask_reg, i, vm)) continue;
         const T lhs = vector::get_group_element<T>(cpu.state().regs, rs2, i);
@@ -56,7 +57,8 @@ void execute_average_vv(core::CPU& cpu, simrv::xlen::RegId rd, simrv::xlen::RegI
 template <typename T, bool Subtract>
 void execute_average_vx(core::CPU& cpu, simrv::xlen::RegId rd, simrv::xlen::Register rs1_val,
                         simrv::xlen::RegId rs2, bool vm, uint32_t vl) {
-    const auto& mask_reg = cpu.state().regs.read_vector(simrv::xlen::to_vec_reg_id(simrv::xlen::RegId::Zero));
+    const auto& mask_reg =
+        cpu.state().regs.read_vector(simrv::xlen::to_vec_reg_id(simrv::xlen::RegId::Zero));
     const T rhs = vector::integer_scalar<T>(rs1_val);
     for (uint32_t i = static_cast<uint32_t>(cpu.state().vstart); i < vl; ++i) {
         if (!vector::is_element_active(mask_reg, i, vm)) continue;
@@ -70,7 +72,8 @@ void execute_average_vx(core::CPU& cpu, simrv::xlen::RegId rd, simrv::xlen::Regi
 template <typename T, typename Op>
 void execute_vsadd_vv(core::CPU& cpu, simrv::xlen::RegId rd, simrv::xlen::RegId rs1,
                       simrv::xlen::RegId rs2, bool vm, uint32_t vl, Op op) {
-    const auto& mask_reg = cpu.state().regs.read_vector(simrv::xlen::to_vec_reg_id(simrv::xlen::RegId::Zero));
+    const auto& mask_reg =
+        cpu.state().regs.read_vector(simrv::xlen::to_vec_reg_id(simrv::xlen::RegId::Zero));
     bool saturated = false;
     for (uint32_t i = static_cast<uint32_t>(cpu.state().vstart); i < vl; i++) {
         if (!vector::is_element_active(mask_reg, i, vm)) continue;
@@ -87,7 +90,8 @@ void execute_vsadd_vv(core::CPU& cpu, simrv::xlen::RegId rd, simrv::xlen::RegId 
 template <typename T, typename Op>
 void execute_vsadd_vx(core::CPU& cpu, simrv::xlen::RegId rd, simrv::xlen::Register rs1_val,
                       simrv::xlen::RegId rs2, bool vm, uint32_t vl, Op op) {
-    const auto& mask_reg = cpu.state().regs.read_vector(simrv::xlen::to_vec_reg_id(simrv::xlen::RegId::Zero));
+    const auto& mask_reg =
+        cpu.state().regs.read_vector(simrv::xlen::to_vec_reg_id(simrv::xlen::RegId::Zero));
     T val1 = vector::integer_scalar<T>(rs1_val);
     bool saturated = false;
     for (uint32_t i = static_cast<uint32_t>(cpu.state().vstart); i < vl; i++) {
@@ -104,7 +108,8 @@ void execute_vsadd_vx(core::CPU& cpu, simrv::xlen::RegId rd, simrv::xlen::Regist
 template <typename T, typename Op>
 void execute_vsadd_vi(core::CPU& cpu, simrv::xlen::RegId rd, int32_t imm, simrv::xlen::RegId rs2,
                       bool vm, uint32_t vl, Op op) {
-    const auto& mask_reg = cpu.state().regs.read_vector(simrv::xlen::to_vec_reg_id(simrv::xlen::RegId::Zero));
+    const auto& mask_reg =
+        cpu.state().regs.read_vector(simrv::xlen::to_vec_reg_id(simrv::xlen::RegId::Zero));
     T val1 = static_cast<T>(imm);
     bool saturated = false;
     for (uint32_t i = static_cast<uint32_t>(cpu.state().vstart); i < vl; i++) {
@@ -122,7 +127,8 @@ void execute_vsadd_vi(core::CPU& cpu, simrv::xlen::RegId rd, int32_t imm, simrv:
 template <typename T>
 void execute_vsmul_vv(core::CPU& cpu, simrv::xlen::RegId rd, simrv::xlen::RegId rs1,
                       simrv::xlen::RegId rs2, bool vm, uint32_t vl, uint32_t vxrm) {
-    const auto& mask_reg = cpu.state().regs.read_vector(simrv::xlen::to_vec_reg_id(simrv::xlen::RegId::Zero));
+    const auto& mask_reg =
+        cpu.state().regs.read_vector(simrv::xlen::to_vec_reg_id(simrv::xlen::RegId::Zero));
     bool saturated = false;
     for (uint32_t i = static_cast<uint32_t>(cpu.state().vstart); i < vl; i++) {
         if (!vector::is_element_active(mask_reg, i, vm)) continue;
@@ -139,7 +145,8 @@ void execute_vsmul_vv(core::CPU& cpu, simrv::xlen::RegId rd, simrv::xlen::RegId 
 template <typename T>
 void execute_vsmul_vx(core::CPU& cpu, simrv::xlen::RegId rd, simrv::xlen::Register rs1_val,
                       simrv::xlen::RegId rs2, bool vm, uint32_t vl, uint32_t vxrm) {
-    const auto& mask_reg = cpu.state().regs.read_vector(simrv::xlen::to_vec_reg_id(simrv::xlen::RegId::Zero));
+    const auto& mask_reg =
+        cpu.state().regs.read_vector(simrv::xlen::to_vec_reg_id(simrv::xlen::RegId::Zero));
     T val1 = vector::integer_scalar<T>(rs1_val);
     bool saturated = false;
     for (uint32_t i = static_cast<uint32_t>(cpu.state().vstart); i < vl; i++) {
@@ -157,7 +164,8 @@ void execute_vsmul_vx(core::CPU& cpu, simrv::xlen::RegId rd, simrv::xlen::Regist
 template <typename T>
 void execute_vsshr_vv(core::CPU& cpu, simrv::xlen::RegId rd, simrv::xlen::RegId rs1,
                       simrv::xlen::RegId rs2, bool vm, uint32_t vl, uint32_t vxrm) {
-    const auto& mask_reg = cpu.state().regs.read_vector(simrv::xlen::to_vec_reg_id(simrv::xlen::RegId::Zero));
+    const auto& mask_reg =
+        cpu.state().regs.read_vector(simrv::xlen::to_vec_reg_id(simrv::xlen::RegId::Zero));
     for (uint32_t i = static_cast<uint32_t>(cpu.state().vstart); i < vl; i++) {
         if (!vector::is_element_active(mask_reg, i, vm)) continue;
         T val2 = vector::get_group_element<T>(cpu.state().regs, rs2, i);
@@ -171,7 +179,8 @@ void execute_vsshr_vv(core::CPU& cpu, simrv::xlen::RegId rd, simrv::xlen::RegId 
 template <typename T>
 void execute_vsshr_vx(core::CPU& cpu, simrv::xlen::RegId rd, simrv::xlen::Register rs1_val,
                       simrv::xlen::RegId rs2, bool vm, uint32_t vl, uint32_t vxrm) {
-    const auto& mask_reg = cpu.state().regs.read_vector(simrv::xlen::to_vec_reg_id(simrv::xlen::RegId::Zero));
+    const auto& mask_reg =
+        cpu.state().regs.read_vector(simrv::xlen::to_vec_reg_id(simrv::xlen::RegId::Zero));
     uint32_t shift = static_cast<uint32_t>(rs1_val) & (sizeof(T) * 8 - 1);
     for (uint32_t i = static_cast<uint32_t>(cpu.state().vstart); i < vl; i++) {
         if (!vector::is_element_active(mask_reg, i, vm)) continue;
@@ -184,7 +193,8 @@ void execute_vsshr_vx(core::CPU& cpu, simrv::xlen::RegId rd, simrv::xlen::Regist
 template <typename T>
 void execute_vsshr_vi(core::CPU& cpu, simrv::xlen::RegId rd, int32_t imm, simrv::xlen::RegId rs2,
                       bool vm, uint32_t vl, uint32_t vxrm) {
-    const auto& mask_reg = cpu.state().regs.read_vector(simrv::xlen::to_vec_reg_id(simrv::xlen::RegId::Zero));
+    const auto& mask_reg =
+        cpu.state().regs.read_vector(simrv::xlen::to_vec_reg_id(simrv::xlen::RegId::Zero));
     uint32_t shift = static_cast<uint32_t>(imm) & (sizeof(T) * 8 - 1);
     for (uint32_t i = static_cast<uint32_t>(cpu.state().vstart); i < vl; i++) {
         if (!vector::is_element_active(mask_reg, i, vm)) continue;
@@ -199,7 +209,8 @@ template <typename T_dest, typename T_src>
 void execute_vnclip(core::CPU& cpu, simrv::xlen::RegId rd, simrv::xlen::RegId rs1,
                     simrv::xlen::RegId rs2, bool vm, uint32_t vl, bool is_vx, bool is_vi,
                     simrv::xlen::Register rs1_val, int32_t imm) {
-    const auto& mask_reg = cpu.state().regs.read_vector(simrv::xlen::to_vec_reg_id(simrv::xlen::RegId::Zero));
+    const auto& mask_reg =
+        cpu.state().regs.read_vector(simrv::xlen::to_vec_reg_id(simrv::xlen::RegId::Zero));
     uint32_t vxrm = cpu.state().vxrm;
     bool saturated = false;
 
@@ -519,11 +530,10 @@ void execute_vnclip_family(core::CPU& cpu, isa::OperationId op_id, simrv::xlen::
 
 }  // namespace
 
-void ExecuteUnit::execute_vector_fixed_point(core::CPU& cpu, isa::OperationId op_id,
-                                             simrv::xlen::RegId rd, simrv::xlen::RegId rs1,
-                                             simrv::xlen::RegId rs2, bool vm, uint32_t vl,
-                                             uint32_t sew, simrv::xlen::Register rs1_val,
-                                             int32_t simm5) {
+void execute_vector_fixed_point(core::CPU& cpu, isa::OperationId op_id, simrv::xlen::RegId rd,
+                                simrv::xlen::RegId rs1, simrv::xlen::RegId rs2, bool vm,
+                                uint32_t vl, uint32_t sew, simrv::xlen::Register rs1_val,
+                                int32_t simm5) {
     // Execute Vector Narrowing Fixed-Point Clip (Signed / Unsigned)
     if (op_id >= isa::OperationId::VNCLIP_WV && op_id <= isa::OperationId::VNCLIPU_WI) {
         execute_vnclip_family(cpu, op_id, rd, rs1, rs2, vm, vl, sew, rs1_val, simm5);
@@ -557,4 +567,4 @@ void ExecuteUnit::execute_vector_fixed_point(core::CPU& cpu, isa::OperationId op
     }
 }
 
-}  // namespace simrv::execute
+}  // namespace simrv::execute::vector

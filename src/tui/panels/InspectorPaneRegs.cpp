@@ -107,7 +107,7 @@ auto InspectorPane::render_registers_single_column(const simrv::core::ArchState&
         switch (page_) {
             case TuiRegPage::GPR: {
                 auto val = st.regs.read(static_cast<simrv::xlen::RegId>(reg));
-                std::string name = kRegNames.at(static_cast<std::size_t>(reg));
+                std::string name(kRegNames.at(static_cast<std::size_t>(reg)));
                 bool changed = paused_ && (cached_gpr_.at(static_cast<std::size_t>(reg)) != val);
                 std::string c = changed ? kThemePeach : kThemeMint;
                 std::string badge =
@@ -120,7 +120,7 @@ auto InspectorPane::render_registers_single_column(const simrv::core::ArchState&
             }
             case TuiRegPage::FPR: {
                 auto val = st.regs.read_fp(simrv::xlen::to_fp_reg_id(static_cast<simrv::xlen::RegId>(reg)));
-                std::string name = kFpRegNames.at(static_cast<std::size_t>(reg));
+                std::string name(kFpRegNames.at(static_cast<std::size_t>(reg)));
                 bool changed = paused_ && (cached_fpr_.at(static_cast<std::size_t>(reg)) != val);
                 std::string c = changed ? kThemePeach : kThemeMint;
                 std::string badge =
@@ -161,8 +161,8 @@ auto InspectorPane::render_registers_double_column(const simrv::core::ArchState&
                 auto val1 = st.regs.read(static_cast<simrv::xlen::RegId>(reg1));
                 auto val2 = st.regs.read(static_cast<simrv::xlen::RegId>(reg2));
 
-                std::string name1 = kRegNames.at(static_cast<std::size_t>(reg1));
-                std::string name2 = kRegNames.at(static_cast<std::size_t>(reg2));
+                std::string name1(kRegNames.at(static_cast<std::size_t>(reg1)));
+                std::string name2(kRegNames.at(static_cast<std::size_t>(reg2)));
 
                 bool changed = paused_ && (cached_gpr_.at(static_cast<std::size_t>(reg1)) != val1);
                 std::string c1 = changed ? kThemePeach : kThemeMint;
@@ -194,8 +194,8 @@ auto InspectorPane::render_registers_double_column(const simrv::core::ArchState&
                 auto val1 = st.regs.read_fp(simrv::xlen::to_fp_reg_id(static_cast<simrv::xlen::RegId>(reg1)));
                 auto val2 = st.regs.read_fp(simrv::xlen::to_fp_reg_id(static_cast<simrv::xlen::RegId>(reg2)));
 
-                std::string name1 = kFpRegNames.at(static_cast<std::size_t>(reg1));
-                std::string name2 = kFpRegNames.at(static_cast<std::size_t>(reg2));
+                std::string name1(kFpRegNames.at(static_cast<std::size_t>(reg1)));
+                std::string name2(kFpRegNames.at(static_cast<std::size_t>(reg2)));
 
                 bool changed = paused_ && (cached_fpr_.at(static_cast<std::size_t>(reg1)) != val1);
                 std::string c1 = changed ? kThemePeach : kThemeMint;

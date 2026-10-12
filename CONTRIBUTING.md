@@ -58,12 +58,12 @@ Before opening a PR, run at least:
 # RV64 Build and validation
 cmake --preset rv64-release
 cmake --build --preset rv64-release
-cmake --build --preset rv64-release --target isa-gate
+cmake --build --preset rv64-release --target integration-gate
 
 # RV32 Build and validation
 cmake --preset rv32-release
 cmake --build --preset rv32-release
-cmake --build --preset rv32-release --target isa-gate
+cmake --build --preset rv32-release --target integration-gate
 ```
 
 During the final 3.0 candidate window, CLI names, automation output, schemas, and asset names are

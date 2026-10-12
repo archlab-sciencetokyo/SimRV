@@ -16,8 +16,8 @@
 
 #include "simrv/core/CsrTypes.hpp"
 #include "simrv/isa/Common.hpp"
+#include "simrv/isa/RegisterNames.hpp"
 #include "simrv/pipeline/Decoder.hpp"
-#include "simrv/tui/panels/InspectorPane.hpp"
 #include "simrv/util/FormatUtil.hpp"
 
 namespace simrv::util {
@@ -32,6 +32,67 @@ using simrv::isa::Opcode;
 using enum simrv::core::Csr;
 
 auto csr_name(uint32_t csr_addr) -> std::string {
+    // Vector CSRs (RVV 1.0)
+    switch (csr_addr) {
+        case 0x008:
+            return "vstart";
+        case 0x009:
+            return "vxsat";
+        case 0x00A:
+            return "vxrm";
+        case 0x00F:
+            return "vcsr";
+        case 0xC20:
+            return "vl";
+        case 0xC21:
+            return "vtype";
+        case 0xC22:
+            return "vlenb";
+        // Sstc (Privileged ISA 1.13)
+        case 0x14D:
+            return "stimecmp";
+        case 0x15D:
+            return "stimecmph";
+        // Environment & Security Configuration
+        case 0x30A:
+            return "menvcfg";
+        case 0x31A:
+            return "menvcfgh";
+        case 0x10A:
+            return "senvcfg";
+        case 0x747:
+            return "mseccfg";
+        case 0x757:
+            return "mseccfgh";
+        case 0x320:
+            return "mcountinhibit";
+    }
+
+    // PMP configuration & address registers
+    if (csr_addr >= 0x3A0 && csr_addr <= 0x3A3) {
+        return std::format("pmpcfg{}", csr_addr - 0x3A0);
+    }
+    if (csr_addr >= 0x3B0 && csr_addr <= 0x3BF) {
+        return std::format("pmpaddr{}", csr_addr - 0x3B0);
+    }
+
+    // Performance monitoring & event selectors
+    if (csr_addr >= 0x323 && csr_addr <= 0x33F) {
+        return std::format("mhpmevent{}", csr_addr - 0x320);
+    }
+    if (csr_addr >= 0xB03 && csr_addr <= 0xB1F) {
+        return std::format("mhpmcounter{}", csr_addr - 0xB00);
+    }
+    if (csr_addr >= 0xB83 && csr_addr <= 0xB9F) {
+        return std::format("mhpmcounter{}h", csr_addr - 0xB80);
+    }
+    if (csr_addr >= 0xC03 && csr_addr <= 0xC1F) {
+        return std::format("hpmcounter{}", csr_addr - 0xC00);
+    }
+    if (csr_addr >= 0xC83 && csr_addr <= 0xC9F) {
+        return std::format("hpmcounter{}h", csr_addr - 0xC80);
+    }
+
     static constexpr std::array<std::pair<Csr, std::string_view>, 43> kCsrNames = {{
         {Csr::Fflags, "fflags"},
         {Csr::Frm, "frm"},
@@ -85,8 +146,8 @@ auto csr_name(uint32_t csr_addr) -> std::string {
 
 namespace {
 
-constexpr auto& ABI_NAMES = simrv::tui::kRegNames;
-constexpr auto& FP_ABI_NAMES = simrv::tui::kFpRegNames;
+constexpr auto& ABI_NAMES = simrv::isa::kGprPedagogicalNames;
+constexpr auto& FP_ABI_NAMES = simrv::isa::kFprAbiNames;
 
 auto reg_name(uint32_t r, bool is_fp = false) -> std::string {
     if (r >= 32) return std::format("r{}", r);
@@ -2268,6 +2329,15 @@ auto get_operation_details(OperationId op_id) -> std::pair<std::string_view, std
 }
 
 auto get_isa_extension_name(OperationId op_id) -> std::string_view {
+    if (op_id >= CSRRW && op_id <= CSRRCI) {
+        return "Zicsr";
+    }
+    if (op_id == FENCE_I) {
+        return "Zifencei";
+    }
+    if (op_id == ECALL || op_id == EBREAK) {
+        return "Privileged";
+    }
     if (op_id >= LUI && op_id <= CSRRCI) {
         switch (op_id) {
             case LWU:
@@ -2342,8 +2412,8 @@ auto get_isa_extension_name(OperationId op_id) -> std::string_view {
                 return "Zbb";
         }
     }
-    if (op_id >= VSETVLI && op_id <= VWSLL_VI) {
-        return "RV32V";
+    if (isa::is_vector_op(op_id)) {
+        return "Vector";
     }
     return "Unknown";
 }

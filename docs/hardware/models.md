@@ -297,7 +297,7 @@ response_latency = 1
 | `name` | string | `"custom"` | Identifier for the CPU model or custom configuration. |
 | `description` | string | `""` | Human-readable documentation of the core architecture. |
 | `xlen` | integer | `0` | Supported machine XLEN: `32` (RV32-only), `64` (RV64-only), or `0` (supports both RV32 and RV64 targets). Verified on startup against simulator build. |
-| `isa_preset` | string | `"gcbv"` | Target ISA extension preset: `gcbv`, `imac`, `ima`, `gc`, `im`, `i`. Setting extension names without `rv32`/`rv64` prefix allows the model to support both 32-bit and 64-bit simulator targets. Explicit `rv32*` and `rv64*` targets are also accepted. |
+| `isa_preset` | string | `"gczbv"` | Target ISA extension preset: `gczbv`, `gczb`, `gcv`, `gc`, `imac`, `ima`, `im`, `i`. Setting extension names without `rv32`/`rv64` prefix allows the model to support both 32-bit and 64-bit simulator targets. Explicit `rv32*` and `rv64*` targets are also accepted. |
 
 ### `[pipeline]` Section
 

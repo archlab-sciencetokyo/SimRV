@@ -17,10 +17,10 @@
 #include "simrv/isa/Priv.hpp"
 #include "simrv/pipeline/OperationTraits.hpp"
 #include "simrv/tui/Tui.hpp"
-#include "simrv/xlen/Helpers.hpp"
 #include "simrv/xlen/AddressTypes.hpp"
-#include "simrv/xlen/RegisterTypes.hpp"
+#include "simrv/xlen/Helpers.hpp"
 #include "simrv/xlen/IdentifierTypes.hpp"
+#include "simrv/xlen/RegisterTypes.hpp"
 
 namespace simrv::core {
 
@@ -38,7 +38,7 @@ void CPU::execute_core(Machine& machine) {
         return;
     }
 
-    if (ctx.op_id >= isa::OperationId::VSETVLI && ctx.op_id <= isa::OperationId::VWSLL_VI) {
+    if (isa::is_vector_op(ctx.op_id)) {
         ctx.tkn = false;
         execute::ExecuteUnit::execute_vector(*this, machine, ctx.op_id, ctx.ir);
         // VS dirty tracking may be imprecise. Conservatively mark it Dirty
@@ -265,8 +265,7 @@ void CPU::execute_system(Machine& machine) {
                         ctx.wb_data_csr = to_trap_cause(ExceptionCode::Breakpoint);
                         ctx.pending_exception = ExceptionCode::Breakpoint;
                         ctx.tkn = false;
-                        machine.debug_halt(static_cast<simrv::xlen::HartId>(state_.mhartid),
-                                           GdbSignal::SigTrap, "swbreak:;");
+                        machine.debug_halt(hart_id(), GdbSignal::SigTrap, "swbreak:;");
                     } else {
                         ctx.wb_data_csr = to_trap_cause(ExceptionCode::Breakpoint);
                         ctx.pending_exception = ExceptionCode::Breakpoint;
@@ -331,12 +330,13 @@ void CPU::execute_fp(Machine& /*machine*/) {
                 ctx.pending_tval = ctx.ir;
                 break;
             }
-            const simrv::xlen::Word fmt = ctx.funct7 & 0x3;
-            const simrv::xlen::Word rs3 = (ctx.ir >> 27) & 0x1F;
+            const auto fmt = static_cast<FpFmt>(ctx.funct7 & 0x3);
+            const auto rs3 = static_cast<simrv::xlen::FpRegId>((ctx.ir >> 27) & 0x1F);
             const simrv::xlen::CSRValue old_fcsr = state_.fcsr;
             const auto fp = execute::ExecuteUnit::fusedFp(
-                ctx.opcode, fmt, std::to_underlying(ctx.rs1), std::to_underlying(ctx.rs2), rs3,
-                std::to_underlying(ctx.funct3), state_.regs.fp_data_ptr(), state_.fcsr);
+                ctx.opcode, fmt, simrv::xlen::to_fp_reg_id(ctx.rs1),
+                simrv::xlen::to_fp_reg_id(ctx.rs2), rs3, static_cast<isa::RoundingMode>(ctx.funct3),
+                state_.regs.fp_data_ptr(), state_.fcsr);
             if (state_.fcsr != old_fcsr) {
                 state_.mstatus |= MstatusBit::Fs;
             }
@@ -353,9 +353,10 @@ void CPU::execute_fp(Machine& /*machine*/) {
                 break;
             }
             const simrv::xlen::CSRValue old_fcsr = state_.fcsr;
-            const auto fp = execute::ExecuteUnit::opFp(
-                ctx.funct7, ctx.funct3, std::to_underlying(ctx.rs1), std::to_underlying(ctx.rs2),
-                ctx.rrs1, state_.regs.fp_data_ptr(), state_.fcsr);
+            const auto fp = execute::ExecuteUnit::opFp(ctx.funct7, ctx.funct3,
+                                                       simrv::xlen::to_fp_reg_id(ctx.rs1),
+                                                       simrv::xlen::to_fp_reg_id(ctx.rs2), ctx.rrs1,
+                                                       state_.regs.fp_data_ptr(), state_.fcsr);
             if (state_.fcsr != old_fcsr) {
                 state_.mstatus |= MstatusBit::Fs;
             }

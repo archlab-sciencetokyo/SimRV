@@ -37,7 +37,7 @@ namespace {
 auto get_reg_name(simrv::xlen::RegId reg, bool is_fp) -> std::string {
     uint32_t r = std::to_underlying(reg);
     if (r >= 32) return std::format("r{}", r);
-    return is_fp ? kFpRegNames.at(r) : kRegNames.at(r);
+    return std::string(is_fp ? kFpRegNames.at(r) : kRegNames.at(r));
 }
 
 auto wrap_text(const std::string& text, int max_len) -> std::vector<std::string> {
@@ -430,7 +430,7 @@ auto format_assembly_s_b_u_j_r4(const simrv::pipeline::PipelineContext& ctx, Ins
             return std::format("jal {}, {}", rd_name, ctx.imm);
         case InstFormat::R4: {
             uint32_t rs3_val = (ctx.ir_org >> 27) & 0x1F;
-            std::string rs3_name = kFpRegNames.at(rs3_val);
+            std::string rs3_name(kFpRegNames.at(rs3_val));
             return std::format("{} {}, {}, {}, {}", mnemonic, rd_name, rs1_name, rs2_name,
                                rs3_name);
         }
@@ -447,10 +447,10 @@ auto format_assembly_vector(const simrv::pipeline::PipelineContext& ctx, std::st
         return std::format("v{}", std::to_underlying(r));
     };
     auto gpr_name = [](simrv::xlen::RegId r) -> std::string {
-        return {kRegNames.at(std::to_underlying(r))};
+        return std::string(kRegNames.at(std::to_underlying(r)));
     };
     auto fpr_name = [](simrv::xlen::RegId r) -> std::string {
-        return {kFpRegNames.at(std::to_underlying(r))};
+        return std::string(kFpRegNames.at(std::to_underlying(r)));
     };
 
     std::string rd = vr_name(ctx.rd);
@@ -608,7 +608,7 @@ auto render_field_decoded_values(const simrv::core::ArchState& st,
         }
         if (fmt == InstFormat::R4) {
             uint32_t rs3_val = (ctx.ir_org >> 27) & 0x1F;
-            std::string rs3_name = kFpRegNames.at(rs3_val);
+            std::string rs3_name(kFpRegNames.at(rs3_val));
             rows.push_back(format_to_width(
                 std::format("  rs3    : {} = {}", rs3_name,
                             read_reg_str(st, static_cast<simrv::xlen::RegId>(rs3_val), true)),
@@ -731,7 +731,7 @@ auto render_microarchitectural_profile(const simrv::pipeline::PipelineContext& c
 
     if (rdb != RegBank::None) {
         uint32_t rd_idx = std::to_underlying(ctx_in.rd) & 0x1FU;
-        std::string name = (rdb == RegBank::Float) ? kFpRegNames.at(rd_idx) : kRegNames.at(rd_idx);
+        std::string name((rdb == RegBank::Float) ? kFpRegNames.at(rd_idx) : kRegNames.at(rd_idx));
         rows.push_back(
             format_to_width(std::format("  {}rd (dest) : {}{:<5}\033[0m  [{}{}\033[0m]", kThemeText,
                                         kThemeMint, name, kThemeVal, bank_str(rdb)),
@@ -740,7 +740,7 @@ auto render_microarchitectural_profile(const simrv::pipeline::PipelineContext& c
     if (rs1b != RegBank::None) {
         uint32_t rs1_idx = std::to_underlying(ctx_in.rs1) & 0x1FU;
         std::string name =
-            (rs1b == RegBank::Float) ? kFpRegNames.at(rs1_idx) : kRegNames.at(rs1_idx);
+            std::string((rs1b == RegBank::Float) ? kFpRegNames.at(rs1_idx) : kRegNames.at(rs1_idx));
         rows.push_back(
             format_to_width(std::format("  {}rs1 (src1): {}{:<5}\033[0m  [{}{}\033[0m]", kThemeText,
                                         kThemePeach, name, kThemeVal, bank_str(rs1b)),
@@ -749,7 +749,7 @@ auto render_microarchitectural_profile(const simrv::pipeline::PipelineContext& c
     if (rs2b != RegBank::None) {
         uint32_t rs2_idx = std::to_underlying(ctx_in.rs2) & 0x1FU;
         std::string name =
-            (rs2b == RegBank::Float) ? kFpRegNames.at(rs2_idx) : kRegNames.at(rs2_idx);
+            std::string((rs2b == RegBank::Float) ? kFpRegNames.at(rs2_idx) : kRegNames.at(rs2_idx));
         rows.push_back(
             format_to_width(std::format("  {}rs2 (src2): {}{:<5}\033[0m  [{}{}\033[0m]", kThemeText,
                                         kThemePeach, name, kThemeVal, bank_str(rs2b)),
@@ -758,7 +758,7 @@ auto render_microarchitectural_profile(const simrv::pipeline::PipelineContext& c
     if (rs3b != RegBank::None) {
         uint32_t rs3_num = (ctx_in.ir_org >> 27U) & 0x1FU;
         std::string name =
-            (rs3b == RegBank::Float) ? kFpRegNames.at(rs3_num) : kRegNames.at(rs3_num);
+            std::string((rs3b == RegBank::Float) ? kFpRegNames.at(rs3_num) : kRegNames.at(rs3_num));
         rows.push_back(
             format_to_width(std::format("  {}rs3 (src3): {}{:<5}\033[0m  [{}{}\033[0m] (Addend)",
                                         kThemeText, kThemeSky, name, kThemeVal, bank_str(rs3b)),

@@ -274,7 +274,7 @@ void test_strong_typing_and_operators() {
     using ::PmpPermission;
     using simrv::core::MipBit;
     using simrv::core::MstatusBit;
-    using simrv::core::pmp::PmpConfigView;
+    using simrv::core::pmp::PmpConfigEntry;
     using simrv::isa::FflagsBit;
 
     // A. MstatusBit and MipBit bitwise operators
@@ -314,16 +314,16 @@ void test_strong_typing_and_operators() {
     fflags &= ~FflagsBit::Nv;
     expect((fflags & FflagsBit::Nv) == 0, "FflagsBit &= ~works");
 
-    // D. PmpPermission and PmpConfigView
+    // D. PMP permission and configuration entry
     const auto perm = PmpPermission::Read | PmpPermission::Write;
     expect((perm & PmpPermission::Read) == PmpPermission::Read,
            "PmpPermission bitwise operators work");
 
-    PmpConfigView cfg{.raw = 0x9Fu};  // Lock (0x80) + NAPOT (0x18) + R (1) + W (2) + X (4)
-    expect(cfg.is_locked(), "PmpConfigView detects locked entry");
-    expect(cfg.mode() == PmpMode::Napot, "PmpConfigView detects NAPOT mode");
+    PmpConfigEntry cfg{.raw = 0x9Fu};  // Lock (0x80) + NAPOT (0x18) + R (1) + W (2) + X (4)
+    expect(cfg.is_locked(), "PMP entry detects locked state");
+    expect(cfg.mode() == PmpMode::Napot, "PMP entry detects NAPOT mode");
     expect(cfg.readable() && cfg.writable() && cfg.executable(),
-           "PmpConfigView detects all permissions");
+           "PMP entry detects all permissions");
 
     // E. RegisterFile FP and Vector Proxies
     simrv::core::RegisterFile rf{};

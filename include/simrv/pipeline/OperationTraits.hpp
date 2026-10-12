@@ -193,7 +193,8 @@ namespace simrv::pipeline::operation {
 }
 
 [[nodiscard]] constexpr auto make_dependency_traits(isa::OperationId op_id, isa::Opcode opcode,
-                                                    simrv::xlen::RegId rd, uint32_t funct5) noexcept
+                                                    simrv::xlen::RegId rd,
+                                                    isa::Funct5Amo funct5) noexcept
     -> DependencyTraits {
     DependencyTraits dt{};
     if (op_id != isa::UNKNOWN) {
@@ -245,14 +246,20 @@ namespace simrv::pipeline::operation {
         dt.reads_rs2_fp = reads_rs2(opcode) && fp_rs2;
         dt.reads_rs3_fp = reads_rs3(opcode);
         dt.is_mem_load = (opcode == isa::Opcode::Load) ||
-                         (opcode == isa::Opcode::Amo &&
-                          static_cast<isa::Funct5Amo>(funct5) != isa::Funct5Amo::Sc);
+                         (opcode == isa::Opcode::Amo && funct5 != isa::Funct5Amo::Sc);
         dt.is_mem_store = (opcode == isa::Opcode::Store || opcode == isa::Opcode::StoreFp);
         dt.is_control = (opcode == isa::Opcode::Branch || opcode == isa::Opcode::Jal ||
                          opcode == isa::Opcode::Jalr);
         dt.is_serializing = (opcode == isa::Opcode::System || opcode == isa::Opcode::MiscMem);
     }
     return dt;
+}
+
+[[nodiscard]] constexpr auto make_dependency_traits(isa::OperationId op_id, isa::Opcode opcode,
+                                                    simrv::xlen::RegId rd,
+                                                    uint32_t funct5) noexcept
+    -> DependencyTraits {
+    return make_dependency_traits(op_id, opcode, rd, static_cast<isa::Funct5Amo>(funct5));
 }
 
 }  // namespace simrv::pipeline::operation

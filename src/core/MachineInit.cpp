@@ -49,6 +49,33 @@ namespace simrv::core {
 
 namespace {
 
+void apply_cpu_model_dram_defaults(MachineConfig& config, const std::string& model_name) {
+    const bool low_dram_model = model_name == "cfu-provingground" || model_name == "rvproc";
+    const bool rvcomp_model = model_name == "rvcomp";
+    if (!low_dram_model && !rvcomp_model) return;
+
+    if (low_dram_model) {
+        config.memory.dram_base = 0;
+    } else if (!config.soc.dram_base.has_value()) {
+        config.memory.dram_base = simrv::memory::kDramBaseAddress;
+    }
+
+    constexpr auto kMinimumDramSize = simrv::xlen::Address{512} * 1024 * 1024;
+    if (!config.soc.dram_size.has_value() && config.memory.dram_size < kMinimumDramSize) {
+        config.memory.dram_size = kMinimumDramSize;
+    }
+}
+
+void apply_cpu_model_runtime_config(Machine& machine, MachineConfig& config,
+                                    const simrv::pipeline::CpuModelConfig& model) {
+    machine.primary_hart().apply_cpu_model_config(model);
+    const auto& timing = model.interconnect;
+    machine.memory().system_bus().configure_timing(
+        timing.request_latency, timing.response_latency, timing.data_request_latency,
+        timing.data_response_latency, timing.startup_data_response_latency);
+    apply_cpu_model_dram_defaults(config, model.name);
+}
+
 void resolve_start_pc_and_dram_base(simrv::core::Machine& machine,
                                     const simrv::debug::SymbolTable& symbols) {
     simrv::xlen::Address start_pc = machine.execution_config().start_pc;
@@ -123,6 +150,37 @@ void load_image_into_ram(std::string& file_path, simrv::memory::RamView ram_view
             in.seekg(0, std::ios::beg);
 
             const char class_byte = ident[4];
+            auto load_segment = [&](const auto& phdr) {
+                if (phdr.p_type != PT_LOAD || phdr.p_filesz == 0) return;
+                const simrv::xlen::Address paddr = phdr.p_paddr != 0 ? phdr.p_paddr : phdr.p_vaddr;
+                const simrv::xlen::Address dram_base = ram_view.base();
+                simrv::xlen::Address dest_offset = 0;
+                if (paddr >= dram_base && (paddr - dram_base) < capacity) {
+                    dest_offset = paddr - dram_base;
+                } else if (paddr < capacity) {
+                    dest_offset = paddr;
+                } else {
+                    return;
+                }
+                const size_t copy_bytes = std::min<size_t>(phdr.p_filesz, capacity - dest_offset);
+                in.seekg(static_cast<std::streamoff>(phdr.p_offset), std::ios::beg);
+                if (in.read(
+                        reinterpret_cast<char*>(ram + dest_offset),
+                        static_cast<std::streamsize>(
+                            copy_bytes))) {  // NOLINT(cppcoreguidelines-pro-type-reinterpret-cast)
+                    loaded_segment = true;
+                    if (machine != nullptr) {
+                        const bool is_exec = (phdr.p_flags & 0x1) != 0;
+                        machine->record_loaded_segment(paddr, phdr.p_memsz, is_exec);
+                    }
+                    if (phdr.p_memsz > phdr.p_filesz && (dest_offset + phdr.p_filesz) < capacity) {
+                        const size_t bss_bytes = std::min<size_t>(
+                            phdr.p_memsz - phdr.p_filesz, capacity - (dest_offset + phdr.p_filesz));
+                        std::memset(ram + dest_offset + phdr.p_filesz, 0, bss_bytes);
+                    }
+                }
+            };
+
             if (class_byte == 1) {  // 32-bit ELF
                 Elf32_Ehdr ehdr{};
                 if (in.read(reinterpret_cast<char*>(&ehdr),
@@ -136,41 +194,7 @@ void load_image_into_ram(std::string& file_path, simrv::memory::RamView ram_view
                                 sizeof(
                                     Elf32_Phdr)))) {  // NOLINT(cppcoreguidelines-pro-type-reinterpret-cast)
                         for (const auto& phdr : phdrs) {
-                            if (phdr.p_type == PT_LOAD && phdr.p_filesz > 0) {
-                                const simrv::xlen::Address paddr =
-                                    phdr.p_paddr != 0 ? phdr.p_paddr : phdr.p_vaddr;
-                                const simrv::xlen::Address dram_base = ram_view.base();
-                                simrv::xlen::Address dest_offset = 0;
-                                if (paddr >= dram_base && (paddr - dram_base) < capacity) {
-                                    dest_offset = paddr - dram_base;
-                                } else if (paddr < capacity) {
-                                    dest_offset = paddr;
-                                } else {
-                                    continue;
-                                }
-                                const size_t copy_bytes =
-                                    std::min<size_t>(phdr.p_filesz, capacity - dest_offset);
-                                in.seekg(phdr.p_offset, std::ios::beg);
-                                if (in.read(
-                                        reinterpret_cast<char*>(ram + dest_offset),
-                                        static_cast<std::streamsize>(
-                                            copy_bytes))) {  // NOLINT(cppcoreguidelines-pro-type-reinterpret-cast)
-                                    loaded_segment = true;
-                                    if (machine != nullptr) {
-                                        const bool is_exec = (phdr.p_flags & 0x1) != 0;
-                                        machine->record_loaded_segment(paddr, phdr.p_memsz,
-                                                                       is_exec);
-                                    }
-                                    if (phdr.p_memsz > phdr.p_filesz &&
-                                        (dest_offset + phdr.p_filesz) < capacity) {
-                                        const size_t bss_bytes = std::min<size_t>(
-                                            phdr.p_memsz - phdr.p_filesz,
-                                            capacity - (dest_offset + phdr.p_filesz));
-                                        std::memset(ram + dest_offset + phdr.p_filesz, 0,
-                                                    bss_bytes);
-                                    }
-                                }
-                            }
+                            load_segment(phdr);
                         }
                     }
                 }
@@ -187,41 +211,7 @@ void load_image_into_ram(std::string& file_path, simrv::memory::RamView ram_view
                                 sizeof(
                                     Elf64_Phdr)))) {  // NOLINT(cppcoreguidelines-pro-type-reinterpret-cast)
                         for (const auto& phdr : phdrs) {
-                            if (phdr.p_type == PT_LOAD && phdr.p_filesz > 0) {
-                                const simrv::xlen::Address paddr =
-                                    phdr.p_paddr != 0 ? phdr.p_paddr : phdr.p_vaddr;
-                                const simrv::xlen::Address dram_base = ram_view.base();
-                                simrv::xlen::Address dest_offset = 0;
-                                if (paddr >= dram_base && (paddr - dram_base) < capacity) {
-                                    dest_offset = paddr - dram_base;
-                                } else if (paddr < capacity) {
-                                    dest_offset = paddr;
-                                } else {
-                                    continue;
-                                }
-                                const size_t copy_bytes =
-                                    std::min<size_t>(phdr.p_filesz, capacity - dest_offset);
-                                in.seekg(static_cast<std::streamoff>(phdr.p_offset), std::ios::beg);
-                                if (in.read(
-                                        reinterpret_cast<char*>(ram + dest_offset),
-                                        static_cast<std::streamsize>(
-                                            copy_bytes))) {  // NOLINT(cppcoreguidelines-pro-type-reinterpret-cast)
-                                    loaded_segment = true;
-                                    if (machine != nullptr) {
-                                        const bool is_exec = (phdr.p_flags & 0x1) != 0;
-                                        machine->record_loaded_segment(paddr, phdr.p_memsz,
-                                                                       is_exec);
-                                    }
-                                    if (phdr.p_memsz > phdr.p_filesz &&
-                                        (dest_offset + phdr.p_filesz) < capacity) {
-                                        const size_t bss_bytes = std::min<size_t>(
-                                            phdr.p_memsz - phdr.p_filesz,
-                                            capacity - (dest_offset + phdr.p_filesz));
-                                        std::memset(ram + dest_offset + phdr.p_filesz, 0,
-                                                    bss_bytes);
-                                    }
-                                }
-                            }
+                            load_segment(phdr);
                         }
                     }
                 }
@@ -337,24 +327,7 @@ auto Machine::initialize() -> std::expected<void, std::string> {
         if (config.ras_entries != 0) {
             model.pipeline.branch_predictor.ras_entries = config.ras_entries;
         }
-        primary_hart().apply_cpu_model_config(model);
-        memory().system_bus().configure_timing(
-            model.interconnect.request_latency, model.interconnect.response_latency,
-            model.interconnect.data_request_latency, model.interconnect.data_response_latency,
-            model.interconnect.startup_data_response_latency);
-        if (model.name == "cfu-provingground" || model.name == "rvproc") {
-            config.memory.dram_base = 0x00000000;
-            if (!config.soc.dram_size.has_value() &&
-                config.memory.dram_size < simrv::xlen::Address{512} * 1024 * 1024) {
-                config.memory.dram_size = simrv::xlen::Address{512} * 1024 * 1024;
-            }
-        } else if (model.name == "rvcomp") {
-            if (!config.soc.dram_base.has_value()) config.memory.dram_base = 0x80000000;
-            if (!config.soc.dram_size.has_value() &&
-                config.memory.dram_size < simrv::xlen::Address{512} * 1024 * 1024) {
-                config.memory.dram_size = simrv::xlen::Address{512} * 1024 * 1024;
-            }
-        }
+        apply_cpu_model_runtime_config(*this, config, model);
     }
     if (!config.files.cpuconfig_path.empty()) {
         auto model = primary_hart().cpu_model_config;
@@ -364,24 +337,7 @@ auto Machine::initialize() -> std::expected<void, std::string> {
             simrv::log::error("{}", err);
             return std::unexpected(err);
         }
-        primary_hart().apply_cpu_model_config(model);
-        memory().system_bus().configure_timing(
-            model.interconnect.request_latency, model.interconnect.response_latency,
-            model.interconnect.data_request_latency, model.interconnect.data_response_latency,
-            model.interconnect.startup_data_response_latency);
-        if (model.name == "cfu-provingground" || model.name == "rvproc") {
-            config.memory.dram_base = 0x00000000;
-            if (!config.soc.dram_size.has_value() &&
-                config.memory.dram_size < simrv::xlen::Address{512} * 1024 * 1024) {
-                config.memory.dram_size = simrv::xlen::Address{512} * 1024 * 1024;
-            }
-        } else if (model.name == "rvcomp") {
-            if (!config.soc.dram_base.has_value()) config.memory.dram_base = 0x80000000;
-            if (!config.soc.dram_size.has_value() &&
-                config.memory.dram_size < simrv::xlen::Address{512} * 1024 * 1024) {
-                config.memory.dram_size = simrv::xlen::Address{512} * 1024 * 1024;
-            }
-        }
+        apply_cpu_model_runtime_config(*this, config, model);
     }
     std::string cfu_plugin_path = config.files.cfu_plugin_path;
     if (cfu_plugin_path.empty()) cfu_plugin_path = primary_hart().cpu_model_config.cfu.plugin;
@@ -579,7 +535,7 @@ auto Machine::initialize() -> std::expected<void, std::string> {
             }
         }
         if (is_32bit) {
-            initial_misa = (initial_misa & ~(3ull << 62)) | (1ull << 62);
+            initial_misa = isa::misa_with_mxl(initial_misa, 32);
         }
     }
     primary_hart().state().pc = resolved_start_pc_;

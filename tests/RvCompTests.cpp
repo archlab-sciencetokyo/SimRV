@@ -21,8 +21,8 @@
 #include "simrv/device/PlatformDeviceRegistry.hpp"
 #include "simrv/device/ResetControlMmio.hpp"
 #include "simrv/device/RingBufferEthernetMmio.hpp"
-#include "simrv/isa/IsaTypes.hpp"
 #include "simrv/isa/Common.hpp"
+#include "simrv/isa/IsaTypes.hpp"
 #include "simrv/memory/MemorySubsystem.hpp"
 #include "simrv/memory/MmioDevice.hpp"
 #include "simrv/pipeline/CpuModel.hpp"
@@ -349,7 +349,7 @@ void test_rvcomp_reset_and_ethernet_extensions() {
 
     simrv::device::RingBufferEthernetMmio ethernet(
         machine, "ethernet", 0x14000000, 0x4000, 2, 0x18000000, 0x4000, 0x1c000000, 0x2000,
-        {0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff}, simrv::device::NetworkBackend::Mode::User);
+        {0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff}, simrv::device::virtio::NetBackend::Mode::User);
     auto* tx = static_cast<simrv::memory::MmioDevice*>(ethernet.tx_node());
     auto* csr = static_cast<simrv::memory::MmioDevice*>(ethernet.csr_node());
     auto* rx = static_cast<simrv::memory::MmioDevice*>(ethernet.rx_node());

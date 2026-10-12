@@ -13,9 +13,6 @@
 
 namespace simrv::pipeline {
 
-/// Authoritative progress of one instruction through the semantic CA kernel.
-using CycleStage = PipelineStage;
-
 struct InstructionFillState {
     static constexpr size_t kLineBytes = 32;
     simrv::xlen::Address line_base = 0;
@@ -58,7 +55,7 @@ struct TimedPageWalkState {
 };
 
 struct HartCycleState {
-    CycleStage stage = CycleStage::Fetch;
+    PipelineStage stage = PipelineStage::Fetch;
     bool instruction_active = false;
     bool retired_this_cycle = false;
     bool icache_miss = false;
@@ -76,7 +73,7 @@ struct HartCycleState {
     bool host_write_pending = false;
 
     constexpr void reset_instruction() noexcept {
-        stage = CycleStage::Fetch;
+        stage = PipelineStage::Fetch;
         instruction_active = false;
         retired_this_cycle = false;
         icache_miss = false;

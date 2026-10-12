@@ -19,6 +19,7 @@
 #include "simrv/core/Machine.hpp"
 #include "simrv/debug/SymbolTable.hpp"
 #include "simrv/isa/Common.hpp"
+#include "simrv/isa/TrapTypes.hpp"
 #include "simrv/pipeline/Decoder.hpp"
 #include "simrv/pipeline/OperationInfo.hpp"
 #include "simrv/pipeline/OperationTraits.hpp"
@@ -27,14 +28,15 @@
 #include "simrv/tui/panels/InspectorPane.hpp"
 #include "simrv/util/FormatUtil.hpp"
 #include "simrv/util/InstructionExplainer.hpp"
-#include "simrv/xlen/Helpers.hpp"
 #include "simrv/xlen/AddressTypes.hpp"
+#include "simrv/xlen/Helpers.hpp"
 #include "simrv/xlen/RegisterTypes.hpp"
 
 namespace simrv::tui {
 
 using simrv::isa::Opcode;
 using simrv::isa::OperationId;
+using simrv::pipeline::PipelineStage;
 using enum simrv::isa::OperationId;
 using simrv::isa::InstFormat;
 
@@ -45,15 +47,15 @@ namespace {
 // -----------------------------------------------------------------------
 
 auto reg_name(simrv::xlen::RegId r) -> std::string {
-    uint32_t idx = std::to_underlying(r);
-    if (idx >= 32) return std::format("x{}", idx);
-    return {kRegNames.at(idx)};
+    const auto name = simrv::isa::gpr_abi_name(r);
+    if (name != "unknown") return std::string(name);
+    return std::format("x{}", std::to_underlying(r));
 }
 
 auto fp_reg_name(simrv::xlen::RegId r) -> std::string {
-    uint32_t idx = std::to_underlying(r);
-    if (idx >= 32) return std::format("f{}", idx);
-    return {kFpRegNames.at(idx)};
+    const auto name = simrv::isa::fpr_abi_name(simrv::xlen::to_fp_reg_id(r));
+    if (name != "unknown") return std::string(name);
+    return std::format("f{}", std::to_underlying(r));
 }
 
 auto reg_with_x(simrv::xlen::RegId r) -> std::string {
@@ -94,25 +96,27 @@ auto translation_name(simrv::xlen::Word mode, unsigned xlen) -> std::string {
     if (mode == 0) return "Bare";
     if (xlen == 32 && mode == 1) return "Sv32";
     if (xlen == 64 && mode == 8) return "Sv39";
+    if (xlen == 64 && mode == 9) return "Sv48";
+    if (xlen == 64 && mode == 10) return "Sv57";
     return std::format("mode {}", mode);
 }
 
 auto trap_summary(simrv::xlen::TrapCause cause) -> std::string {
     if (trap_is_interrupt(cause)) return std::format("interrupt {}", trap_exception_code(cause));
-    switch (trap_exception_code(cause)) {
-        case 2:
+    switch (to_exception_code(cause)) {
+        case ExceptionCode::IllegalInstruction:
             return "illegal insn";
-        case 3:
+        case ExceptionCode::Breakpoint:
             return "breakpoint";
-        case 5:
+        case ExceptionCode::FaultLoad:
             return "load fault";
-        case 7:
+        case ExceptionCode::FaultStore:
             return "store fault";
-        case 12:
+        case ExceptionCode::FetchPageFault:
             return "I-page fault";
-        case 13:
+        case ExceptionCode::LoadPageFault:
             return "load page";
-        case 15:
+        case ExceptionCode::StorePageFault:
             return "store page";
         default:
             return std::format("exception {}", trap_exception_code(cause));
@@ -297,11 +301,10 @@ auto has_stage_raw_hazard(const simrv::pipeline::PipelineSim& ps,
 }
 
 auto is_raw_hazard_stalled(const simrv::pipeline::PipelineSim& ps) -> bool {
-    if (!ps.d_reg().valid) {
-        return false;
-    }
-    return has_stage_raw_hazard(ps, ps.d_reg(), ps.e_reg()) ||
-           has_stage_raw_hazard(ps, ps.d_reg(), ps.m_reg());
+    const auto& decode = ps.stage_reg(PipelineStage::Decode);
+    if (!decode.valid) return false;
+    return has_stage_raw_hazard(ps, decode, ps.stage_reg(PipelineStage::Execute)) ||
+           has_stage_raw_hazard(ps, decode, ps.stage_reg(PipelineStage::Memory));
 }
 
 auto compact_hex(simrv::xlen::Register v) -> std::string { return hex_val(v); }
@@ -357,11 +360,13 @@ auto get_stage_desc(const simrv::pipeline::PipelineReg& reg, uint32_t stall_rem,
 }
 
 auto get_active_branch_pc(const simrv::pipeline::PipelineSim& ps) -> simrv::xlen::Register {
-    if (ps.e_reg().valid && (ps.e_reg().is_branch || ps.e_reg().is_jump)) {
-        return ps.e_reg().pc;
+    const auto& execute = ps.stage_reg(PipelineStage::Execute);
+    if (execute.valid && (execute.is_branch || execute.is_jump)) {
+        return execute.pc;
     }
-    if (ps.d_reg().valid && (ps.d_reg().is_branch || ps.d_reg().is_jump)) {
-        return ps.d_reg().pc;
+    const auto& decode = ps.stage_reg(PipelineStage::Decode);
+    if (decode.valid && (decode.is_branch || decode.is_jump)) {
+        return decode.pc;
     }
     return 0;
 }
@@ -387,12 +392,12 @@ auto get_active_forwarding_paths(const simrv::pipeline::PipelineSim& ps)
     std::vector<std::string> paths;
     if (!ps.config.enable_forwarding) return paths;
 
-    const auto& d = ps.d_reg();
+    const auto& d = ps.stage_reg(PipelineStage::Decode);
     if (!d.valid) return paths;
 
-    const auto& e = ps.e_reg();
-    const auto& m = ps.m_reg();
-    const auto& w = ps.w_reg();
+    const auto& e = ps.stage_reg(PipelineStage::Execute);
+    const auto& m = ps.stage_reg(PipelineStage::Memory);
+    const auto& w = ps.stage_reg(PipelineStage::Writeback);
 
     auto check_src = [&](simrv::xlen::RegId rs, const std::string& rs_label) -> void {
         if (rs == static_cast<simrv::xlen::RegId>(0)) return;
@@ -462,6 +467,11 @@ auto InspectorPane::render_pipeline_stages_cycle_accurate(const simrv::core::CPU
 auto InspectorPane::render_pipeline_stages_ca_core(const simrv::core::CPU& cpu, int stage_idx,
                                                    int width) -> std::string {
     auto& ps = cpu.pipeline_sim;
+    const auto& fetch = ps.stage_reg(PipelineStage::Fetch);
+    const auto& decode = ps.stage_reg(PipelineStage::Decode);
+    const auto& execute = ps.stage_reg(PipelineStage::Execute);
+    const auto& memory = ps.stage_reg(PipelineStage::Memory);
+    const auto& writeback = ps.stage_reg(PipelineStage::Writeback);
     bool is_raw_stalled = is_raw_hazard_stalled(ps);
 
     const auto ptype = ps.config.pipeline_type;
@@ -474,30 +484,28 @@ auto InspectorPane::render_pipeline_stages_ca_core(const simrv::core::CPU& cpu, 
                 std::string diagram = std::format(
                     " [1;36mIF:{}\033[0m → \033[1;32mID/EX:{}\033[0m → "
                     "\033[1;34mMEM/WB:{}\033[0m",
-                    short_op_name(ps.f_reg()), short_op_name(ps.e_reg()),
-                    short_op_name(ps.w_reg()));
+                    short_op_name(fetch), short_op_name(execute), short_op_name(writeback));
                 return format_to_width(diagram, width);
             }
             case 2: {
                 std::string stall_type = ps.tlb_stall_remaining() > 0 ? "TLB Miss" : "I-Cache Miss";
                 uint32_t stall_rem = ps.tlb_stall_remaining() > 0 ? ps.tlb_stall_remaining()
                                                                   : ps.icache_stall_remaining();
-                return format_to_width(
-                    std::format(" [1m{}IF   (Fetch)\033[0m     : {}", kThemeSky,
-                                get_stage_desc(ps.f_reg(), stall_rem, stall_type)),
-                    width);
+                return format_to_width(std::format(" [1m{}IF   (Fetch)\033[0m     : {}", kThemeSky,
+                                                   get_stage_desc(fetch, stall_rem, stall_type)),
+                                       width);
             }
             case 3:
                 return format_to_width(
                     std::format(" [1m{}ID/EX(Execute)\033[0m   : {}", kThemeSky,
-                                get_stage_desc(ps.e_reg(), ps.div_busy_cycles_remaining(),
+                                get_stage_desc(execute, ps.div_busy_cycles_remaining(),
                                                "Divider Busy", is_raw_stalled)),
                     width);
             case 4:
                 return format_to_width(
                     std::format(
                         " [1m{}MEM/WB(Write)\033[0m   : {}", kThemeSky,
-                        get_stage_desc(ps.w_reg(), ps.dcache_stall_remaining(), "D-Cache Miss")),
+                        get_stage_desc(writeback, ps.dcache_stall_remaining(), "D-Cache Miss")),
                     width);
             case 5:
                 return format_to_width(
@@ -520,8 +528,8 @@ auto InspectorPane::render_pipeline_stages_ca_core(const simrv::core::CPU& cpu, 
                 "\033[1;32mEX:{}\033[0m "
                 "→ "
                 "\033[1;35mMEM:{}\033[0m → \033[1;34mWB:{}\033[0m",
-                short_op_name(ps.f_reg()), short_op_name(ps.d_reg()), short_op_name(ps.e_reg()),
-                short_op_name(ps.m_reg()), short_op_name(ps.w_reg()));
+                short_op_name(fetch), short_op_name(decode), short_op_name(execute),
+                short_op_name(memory), short_op_name(writeback));
             return format_to_width(diagram, width);
         }
         case 2: {
@@ -529,28 +537,27 @@ auto InspectorPane::render_pipeline_stages_ca_core(const simrv::core::CPU& cpu, 
             uint32_t stall_rem = ps.tlb_stall_remaining() > 0 ? ps.tlb_stall_remaining()
                                                               : ps.icache_stall_remaining();
             return format_to_width(std::format(" [1m{}IF  (Fetch)\033[0m     : {}", kThemeSky,
-                                               get_stage_desc(ps.f_reg(), stall_rem, stall_type)),
+                                               get_stage_desc(fetch, stall_rem, stall_type)),
                                    width);
         }
         case 3:
             return format_to_width(std::format(" [1m{}ID  (Decode)\033[0m    : {}", kThemeSky,
-                                               get_stage_desc(ps.d_reg(), 0, "", is_raw_stalled)),
+                                               get_stage_desc(decode, 0, "", is_raw_stalled)),
                                    width);
         case 4:
             return format_to_width(
                 std::format(
                     " [1m{}EX  (Execute)\033[0m   : {}", kThemeSky,
-                    get_stage_desc(ps.e_reg(), ps.div_busy_cycles_remaining(), "Divider Busy")),
+                    get_stage_desc(execute, ps.div_busy_cycles_remaining(), "Divider Busy")),
                 width);
         case 5:
             return format_to_width(
-                std::format(
-                    " [1m{}MEM (Memory)\033[0m    : {}", kThemeSky,
-                    get_stage_desc(ps.m_reg(), ps.dcache_stall_remaining(), "D-Cache Miss")),
+                std::format(" [1m{}MEM (Memory)\033[0m    : {}", kThemeSky,
+                            get_stage_desc(memory, ps.dcache_stall_remaining(), "D-Cache Miss")),
                 width);
         case 6:
             return format_to_width(std::format(" [1m{}WB  (Write-Back)\033[0m: {}", kThemeSky,
-                                               get_stage_desc(ps.w_reg(), 0, "")),
+                                               get_stage_desc(writeback, 0, "")),
                                    width);
         default:
             return format_to_width("", width);
@@ -1111,17 +1118,21 @@ auto InspectorPane::get_pipeline_pc_at_row(int logical_row) const -> simrv::xlen
 
     // CA Stage Detail rows (logical rows 11..15 in CA mode)
     if (machine_.runtime_profile.is_cycle_mode()) {
+        const auto stage_pc = [&ps](PipelineStage stage) {
+            const auto& reg = ps.stage_reg(stage);
+            return reg.valid ? reg.pc : simrv::xlen::Register{0};
+        };
         switch (logical_row) {
             case 11:
-                return ps.f_reg().valid ? ps.f_reg().pc : 0;
+                return stage_pc(PipelineStage::Fetch);
             case 12:
-                return ps.d_reg().valid ? ps.d_reg().pc : 0;
+                return stage_pc(PipelineStage::Decode);
             case 13:
-                return ps.e_reg().valid ? ps.e_reg().pc : 0;
+                return stage_pc(PipelineStage::Execute);
             case 14:
-                return ps.m_reg().valid ? ps.m_reg().pc : 0;
+                return stage_pc(PipelineStage::Memory);
             case 15:
-                return ps.w_reg().valid ? ps.w_reg().pc : 0;
+                return stage_pc(PipelineStage::Writeback);
             default:
                 break;
         }

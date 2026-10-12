@@ -220,13 +220,6 @@ class PipelineSim {
     [[nodiscard]] auto cycle_history() const noexcept -> PipelineHistoryView;
     [[nodiscard]] auto get_stats() const -> PipelineStats;
 
-    // Compatibility query facade used by the TUI and existing model tests. Each getter delegates
-    // to stage_reg(); new code can query a stage by PipelineStage directly.
-    [[nodiscard]] auto f_reg() const -> const PipelineReg&;
-    [[nodiscard]] auto d_reg() const -> const PipelineReg&;
-    [[nodiscard]] auto e_reg() const -> const PipelineReg&;
-    [[nodiscard]] auto m_reg() const -> const PipelineReg&;
-    [[nodiscard]] auto w_reg() const -> const PipelineReg&;
     [[nodiscard]] auto stage_reg(PipelineStage stage) const -> const PipelineReg&;
 
     [[nodiscard]] auto div_busy_cycles_remaining() const -> simrv::xlen::LatencyCycles;

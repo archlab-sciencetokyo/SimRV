@@ -1,14 +1,13 @@
 #include <algorithm>
 
+#include "VectorSubunits.hpp"
 #include "simrv/core/Cpu.hpp"
-#include "simrv/execute/ExecuteUnit.hpp"
 #include "simrv/isa/VectorTypes.hpp"
 
-namespace simrv::execute {
+namespace simrv::execute::vector {
 
-void ExecuteUnit::execute_vector_config(core::CPU& cpu, isa::OperationId op_id,
-                                        simrv::xlen::Instruction ir, simrv::xlen::RegId rd,
-                                        simrv::xlen::RegId rs1, simrv::xlen::RegId rs2) {
+void execute_vector_config(core::CPU& cpu, isa::OperationId op_id, simrv::xlen::Instruction ir,
+                           simrv::xlen::RegId rd, simrv::xlen::RegId rs1, simrv::xlen::RegId rs2) {
     uint64_t raw_vtype = 0;
     if (op_id == isa::OperationId::VSETVLI) {
         raw_vtype = (ir >> 20) & 0x7FF;
@@ -118,4 +117,4 @@ void ExecuteUnit::execute_vector_config(core::CPU& cpu, isa::OperationId op_id,
     cpu.state().mstatus |= core::MstatusBit::Vs;
 }
 
-}  // namespace simrv::execute
+}  // namespace simrv::execute::vector

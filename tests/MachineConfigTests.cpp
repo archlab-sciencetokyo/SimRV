@@ -59,6 +59,34 @@ auto main() -> int {
                "CLI accepts the canonical glued first multi-letter extension spelling");
         expect(check_isa("rv" + xlen + "gc_zicsr_zifencei_zicntr").has_value(),
                "CLI accepts explicit extensions implied by G");
+        expect(
+            check_isa("rv" + xlen + "gczb").has_value() &&
+                check_isa("rv" + xlen + "gczb")->options.isa_preset == simrv::isa::IsaPreset::GCZB,
+            "CLI accepts ratified GCZB preset");
+        expect(check_isa("rv" + xlen + "gcv").has_value() &&
+                   check_isa("rv" + xlen + "gcv")->options.isa_preset == simrv::isa::IsaPreset::GCV,
+               "CLI accepts ratified GCV preset");
+        expect(check_isa("rv" + xlen + "gczbv").has_value() &&
+                   check_isa("rv" + xlen + "gczbv")->options.isa_preset ==
+                       simrv::isa::IsaPreset::GCZBV,
+               "CLI accepts ratified GCZBV preset");
+        expect(check_isa("rv" + xlen + "gc_zba_zbb_zbc_zbs").has_value() &&
+                   check_isa("rv" + xlen + "gc_zba_zbb_zbc_zbs")->options.isa_preset ==
+                       simrv::isa::IsaPreset::GCZB,
+               "CLI accepts ratified bitmanip sub-extensions and enables GCZB");
+        expect(
+            check_isa("rv" + xlen + "gc_zb").has_value() &&
+                check_isa("rv" + xlen + "gc_zb")->options.isa_preset == simrv::isa::IsaPreset::GCZB,
+            "CLI accepts ratified zb shorthand and enables GCZB");
+        expect(check_isa("rv" + xlen + "gcv_zba_zbb_zbc_zbs").has_value() &&
+                   check_isa("rv" + xlen + "gcv_zba_zbb_zbc_zbs")->options.isa_preset ==
+                       simrv::isa::IsaPreset::GCZBV,
+               "CLI accepts ratified bitmanip with vector base and enables GCZBV");
+        expect(check_isa("rv" + xlen + "gc_zk").has_value(),
+               "CLI accepts ratified scalar crypto zk shorthand");
+        expect(!check_isa("rv" + xlen + "gcbv").has_value(),
+               "CLI rejects legacy draft shorthand rv{}gcbv");
+        expect(!check_isa("gcbv").has_value(), "CLI rejects legacy draft shorthand gcbv");
         expect(!check_isa("rv" + xlen + "gc_zfoo").has_value(),
                "CLI rejects unsupported multi-letter ISA extensions");
         expect(!check_isa("rv" + xlen + "gc_zicntr2p1").has_value(),
@@ -667,8 +695,11 @@ auto main() -> int {
         source_state.pc = 0x80000100;
         source_state.regs.vlen = 256;
         source_state.regs.write(simrv::xlen::RegId::T2, 0x12345678);
-        source_state.regs.write_fp(simrv::xlen::to_fp_reg_id(static_cast<simrv::xlen::RegId>(5)), 0x7ff8000000001234);
-        source_state.regs.read_vector(simrv::xlen::to_vec_reg_id(static_cast<simrv::xlen::RegId>(7))).u8[0] = 0xA5;
+        source_state.regs.write_fp(simrv::xlen::to_fp_reg_id(static_cast<simrv::xlen::RegId>(5)),
+                                   0x7ff8000000001234);
+        source_state.regs
+            .read_vector(simrv::xlen::to_vec_reg_id(static_cast<simrv::xlen::RegId>(7)))
+            .u8[0] = 0xA5;
         source_state.vtype = 0x23;
         source_state.vl = 17;
         source_state.mstatus = 0x1800;
@@ -693,8 +724,11 @@ auto main() -> int {
                    restored_state.mepc == source_state.mepc && restored_state.pmpaddr[0] == 0x1234,
                "checkpoint restores vector, CSR, and PMP state");
         expect(
-            restored_state.regs.read_fp(simrv::xlen::to_fp_reg_id(static_cast<simrv::xlen::RegId>(5))) == 0x7ff8000000001234 &&
-                restored_state.regs.read_vector(simrv::xlen::to_vec_reg_id(static_cast<simrv::xlen::RegId>(7))).u8[0] == 0xA5,
+            restored_state.regs.read_fp(simrv::xlen::to_fp_reg_id(
+                static_cast<simrv::xlen::RegId>(5))) == 0x7ff8000000001234 &&
+                restored_state.regs
+                        .read_vector(simrv::xlen::to_vec_reg_id(static_cast<simrv::xlen::RegId>(7)))
+                        .u8[0] == 0xA5,
             "checkpoint restores FP and vector register-file bits");
         expect(restored.primary_hart().e_icount == 77 && restored.primary_hart().e_ccount == 91 &&
                    restored.primary_hart().clint_mmio.mcycle == 105 &&

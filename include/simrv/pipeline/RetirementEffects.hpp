@@ -33,9 +33,9 @@ struct WritebackEffects {
         return effects;
     }
 
-    const auto opcode = static_cast<isa::Opcode>(context.opcode);
-    const auto funct5 = static_cast<isa::Funct5Amo>(context.funct5);
-    const auto funct3 = static_cast<isa::Funct3>(context.funct3);
+    const auto opcode = context.opcode;
+    const auto funct5 = context.funct5;
+    const auto funct3 = context.funct3;
 
     auto& integer = effects.integer_write;
     integer.destination = context.rd;

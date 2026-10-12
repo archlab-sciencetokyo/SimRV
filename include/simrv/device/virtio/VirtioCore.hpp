@@ -49,6 +49,8 @@ inline constexpr VirtioDeviceId kDevIdFs = 26;
 
 // VirtIO 1.2 Common Feature Bits
 inline constexpr uint64_t kVirtioFVersion1 = (1ULL << 32);
+inline constexpr uint32_t kVirtioFVersion1FeatureWord =
+    static_cast<uint32_t>(kVirtioFVersion1 >> 32);
 inline constexpr uint64_t kVirtioFAccessPlatform = (1ULL << 33);
 inline constexpr uint64_t kVirtioFRingPacked = (1ULL << 34);
 
@@ -311,7 +313,7 @@ class ConsoleBackend {
     auto pop_rx() -> uint8_t {
         if (rx_fifo_.empty()) return 0;
         uint8_t val = rx_fifo_.front();
-        rx_fifo_.erase(rx_fifo_.begin());
+        rx_fifo_.pop_front();
         return val;
     }
 
@@ -320,7 +322,7 @@ class ConsoleBackend {
     [[nodiscard]] auto get_tx_data() const -> const std::vector<uint8_t>& { return tx_buffer_; }
 
    private:
-    std::vector<uint8_t> rx_fifo_;
+    std::deque<uint8_t> rx_fifo_;
     std::vector<uint8_t> tx_buffer_;
 };
 
@@ -385,8 +387,8 @@ class NetBackend {
 
     auto pop_rx_packet() -> std::vector<uint8_t> {
         if (rx_queue_.empty()) return {};
-        auto pkt = rx_queue_.front();
-        rx_queue_.erase(rx_queue_.begin());
+        auto pkt = std::move(rx_queue_.front());
+        rx_queue_.pop_front();
         return pkt;
     }
 
@@ -413,7 +415,7 @@ class NetBackend {
    private:
     Mode mode_{Mode::User};
     std::array<uint8_t, 6> mac_{0x52, 0x54, 0x00, 0x12, 0x34, 0x56};
-    std::vector<std::vector<uint8_t>> rx_queue_;
+    std::deque<std::vector<uint8_t>> rx_queue_;
     std::vector<std::vector<uint8_t>> tx_history_;
     util::UniqueFd host_fd_;
 };

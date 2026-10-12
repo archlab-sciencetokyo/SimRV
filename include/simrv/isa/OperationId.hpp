@@ -663,10 +663,41 @@ constexpr OperationId kOpRangeRv32dBegin = FLD;
 /// @brief End of RV32D double-precision float instruction IDs
 constexpr OperationId kOpRangeRv32dEnd = FCVT_D_LU;
 
+/// @brief Start of Bitmanip (Zb: Zba, Zbb, Zbc, Zbs) instruction IDs
+constexpr OperationId kOpRangeZbBegin = SH1ADD;
+/// @brief End of Bitmanip (Zb: Zba, Zbb, Zbc, Zbs) instruction IDs
+constexpr OperationId kOpRangeZbEnd = PACKW;
+
 /// @brief Start of RVV 1.0 vector instruction IDs
 constexpr OperationId kOpRangeVectorBegin = VSETVLI;
 /// @brief End of RVV 1.0 vector instruction IDs
 constexpr OperationId kOpRangeVectorEnd = VWSLL_VI;
+
+[[nodiscard]] constexpr auto is_privileged_op(OperationId op_id) noexcept -> bool {
+    return op_id >= kOpRangePrivBegin && op_id <= kOpRangePrivEnd;
+}
+
+[[nodiscard]] constexpr auto is_m_op(OperationId op_id) noexcept -> bool {
+    return op_id >= kOpRangeRv32mBegin && op_id <= kOpRangeRv32mEnd;
+}
+
+[[nodiscard]] constexpr auto is_a_op(OperationId op_id) noexcept -> bool {
+    return op_id >= kOpRangeRv32aBegin && op_id <= kOpRangeRv32aEnd;
+}
+
+[[nodiscard]] constexpr auto is_f_op(OperationId op_id) noexcept -> bool {
+    return op_id >= kOpRangeRv32fBegin && op_id <= kOpRangeRv32fEnd;
+}
+
+[[nodiscard]] constexpr auto is_d_op(OperationId op_id) noexcept -> bool {
+    return op_id >= kOpRangeRv32dBegin && op_id <= kOpRangeRv32dEnd;
+}
+
+[[nodiscard]] constexpr auto is_zb_op(OperationId op_id) noexcept -> bool {
+    return op_id >= kOpRangeZbBegin && op_id <= kOpRangeZbEnd;
+}
+
+[[nodiscard]] constexpr auto is_b_op(OperationId op_id) noexcept -> bool { return is_zb_op(op_id); }
 
 [[nodiscard]] constexpr auto is_vector_op(OperationId op_id) noexcept -> bool {
     return op_id >= kOpRangeVectorBegin && op_id <= kOpRangeVectorEnd;

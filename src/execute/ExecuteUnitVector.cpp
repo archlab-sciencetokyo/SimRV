@@ -1,14 +1,16 @@
+#include "simrv/execute/ExecuteUnitVector.hpp"
+
 #include <array>
 #include <utility>
 
 #include "simrv/core/Cpu.hpp"
 #include "simrv/core/Machine.hpp"
-#include "simrv/execute/ExecuteUnit.hpp"
 #include "simrv/isa/Common.hpp"
 #include "simrv/isa/VectorTypes.hpp"
 #include "simrv/memory/MemorySubsystem.hpp"
 #include "simrv/pipeline/OperationInfo.hpp"
 #include "simrv/pipeline/OperationTraits.hpp"
+#include "vector/VectorSubunits.hpp"
 
 namespace simrv::execute {
 
@@ -45,114 +47,72 @@ constexpr auto requires_zero_vstart(isa::OperationId op_id) -> bool {
     }
 }
 
+consteval auto make_vector_fp_table() {
+    std::array<bool, isa::kOperationIdCount> table{};
+    for (const auto op : {
+             isa::OperationId::VFADD_VV,         isa::OperationId::VFSLIDE1UP_VF,
+             isa::OperationId::VFSLIDE1DOWN_VF,  isa::OperationId::VFADD_VF,
+             isa::OperationId::VFSUB_VV,         isa::OperationId::VFSUB_VF,
+             isa::OperationId::VFRSUB_VF,        isa::OperationId::VFMUL_VV,
+             isa::OperationId::VFMUL_VF,         isa::OperationId::VFDIV_VV,
+             isa::OperationId::VFDIV_VF,         isa::OperationId::VFRDIV_VF,
+             isa::OperationId::VFSQRT_V,         isa::OperationId::VFRSQRT7_V,
+             isa::OperationId::VFREC7_V,         isa::OperationId::VFCLASS_V,
+             isa::OperationId::VFCVT_XU_F_V,     isa::OperationId::VFCVT_X_F_V,
+             isa::OperationId::VFCVT_F_XU_V,     isa::OperationId::VFCVT_F_X_V,
+             isa::OperationId::VFCVT_RTZ_XU_F_V, isa::OperationId::VFCVT_RTZ_X_F_V,
+             isa::OperationId::VFWCVT_XU_F_V,    isa::OperationId::VFWCVT_X_F_V,
+             isa::OperationId::VFWCVT_F_XU_V,    isa::OperationId::VFWCVT_F_X_V,
+             isa::OperationId::VFWCVT_F_F_V,     isa::OperationId::VFWCVT_RTZ_XU_F_V,
+             isa::OperationId::VFWCVT_RTZ_X_F_V, isa::OperationId::VFNCVT_XU_F_W,
+             isa::OperationId::VFNCVT_X_F_W,     isa::OperationId::VFNCVT_F_XU_W,
+             isa::OperationId::VFNCVT_F_X_W,     isa::OperationId::VFNCVT_F_F_W,
+             isa::OperationId::VFNCVT_ROD_F_F_W, isa::OperationId::VFNCVT_RTZ_XU_F_W,
+             isa::OperationId::VFNCVT_RTZ_X_F_W, isa::OperationId::VFSGNJ_VV,
+             isa::OperationId::VFSGNJ_VF,        isa::OperationId::VFSGNJN_VV,
+             isa::OperationId::VFSGNJN_VF,       isa::OperationId::VFSGNJX_VV,
+             isa::OperationId::VFSGNJX_VF,       isa::OperationId::VFMIN_VV,
+             isa::OperationId::VFMIN_VF,         isa::OperationId::VFMAX_VV,
+             isa::OperationId::VFMAX_VF,         isa::OperationId::VMFEQ_VV,
+             isa::OperationId::VMFEQ_VF,         isa::OperationId::VMFNE_VV,
+             isa::OperationId::VMFNE_VF,         isa::OperationId::VMFLT_VV,
+             isa::OperationId::VMFLT_VF,         isa::OperationId::VMFLE_VV,
+             isa::OperationId::VMFLE_VF,         isa::OperationId::VMFGT_VF,
+             isa::OperationId::VMFGE_VF,         isa::OperationId::VFMADD_VV,
+             isa::OperationId::VFMADD_VF,        isa::OperationId::VFNMADD_VV,
+             isa::OperationId::VFNMADD_VF,       isa::OperationId::VFMSUB_VV,
+             isa::OperationId::VFMSUB_VF,        isa::OperationId::VFNMSUB_VV,
+             isa::OperationId::VFNMSUB_VF,       isa::OperationId::VFMACC_VV,
+             isa::OperationId::VFMACC_VF,        isa::OperationId::VFNMACC_VV,
+             isa::OperationId::VFNMACC_VF,       isa::OperationId::VFMSAC_VV,
+             isa::OperationId::VFMSAC_VF,        isa::OperationId::VFNMSAC_VV,
+             isa::OperationId::VFNMSAC_VF,       isa::OperationId::VFMV_F_S,
+             isa::OperationId::VFMV_S_F,         isa::OperationId::VFMERGE_VFM,
+             isa::OperationId::VFMV_V_F,         isa::OperationId::VFREDUSUM_VS,
+             isa::OperationId::VFREDOSUM_VS,     isa::OperationId::VFREDMIN_VS,
+             isa::OperationId::VFREDMAX_VS,      isa::OperationId::VFWREDUSUM_VS,
+             isa::OperationId::VFWREDOSUM_VS,    isa::OperationId::VFWADD_VV,
+             isa::OperationId::VFWADD_VF,        isa::OperationId::VFWSUB_VV,
+             isa::OperationId::VFWSUB_VF,        isa::OperationId::VFWADD_WV,
+             isa::OperationId::VFWADD_WF,        isa::OperationId::VFWSUB_WV,
+             isa::OperationId::VFWSUB_WF,        isa::OperationId::VFWMUL_VV,
+             isa::OperationId::VFWMUL_VF,        isa::OperationId::VFWMACC_VV,
+             isa::OperationId::VFWMACC_VF,       isa::OperationId::VFWNMACC_VV,
+             isa::OperationId::VFWNMACC_VF,      isa::OperationId::VFWMSAC_VV,
+             isa::OperationId::VFWMSAC_VF,       isa::OperationId::VFWNMSAC_VV,
+             isa::OperationId::VFWNMSAC_VF,
+         }) {
+        table[static_cast<size_t>(op)] = true;
+    }
+    return table;
+}
+
+constexpr auto kVectorFpTable = make_vector_fp_table();
+
 /** Vector operations that consume or produce scalar/vector floating-point state. */
 constexpr auto is_vector_fp(isa::OperationId op_id) -> bool {
-    switch (op_id) {
-        case isa::OperationId::VFADD_VV:
-        case isa::OperationId::VFSLIDE1UP_VF:
-        case isa::OperationId::VFSLIDE1DOWN_VF:
-        case isa::OperationId::VFADD_VF:
-        case isa::OperationId::VFSUB_VV:
-        case isa::OperationId::VFSUB_VF:
-        case isa::OperationId::VFRSUB_VF:
-        case isa::OperationId::VFMUL_VV:
-        case isa::OperationId::VFMUL_VF:
-        case isa::OperationId::VFDIV_VV:
-        case isa::OperationId::VFDIV_VF:
-        case isa::OperationId::VFRDIV_VF:
-        case isa::OperationId::VFSQRT_V:
-        case isa::OperationId::VFRSQRT7_V:
-        case isa::OperationId::VFREC7_V:
-        case isa::OperationId::VFCLASS_V:
-        case isa::OperationId::VFCVT_XU_F_V:
-        case isa::OperationId::VFCVT_X_F_V:
-        case isa::OperationId::VFCVT_F_XU_V:
-        case isa::OperationId::VFCVT_F_X_V:
-        case isa::OperationId::VFCVT_RTZ_XU_F_V:
-        case isa::OperationId::VFCVT_RTZ_X_F_V:
-        case isa::OperationId::VFWCVT_XU_F_V:
-        case isa::OperationId::VFWCVT_X_F_V:
-        case isa::OperationId::VFWCVT_F_XU_V:
-        case isa::OperationId::VFWCVT_F_X_V:
-        case isa::OperationId::VFWCVT_F_F_V:
-        case isa::OperationId::VFWCVT_RTZ_XU_F_V:
-        case isa::OperationId::VFWCVT_RTZ_X_F_V:
-        case isa::OperationId::VFNCVT_XU_F_W:
-        case isa::OperationId::VFNCVT_X_F_W:
-        case isa::OperationId::VFNCVT_F_XU_W:
-        case isa::OperationId::VFNCVT_F_X_W:
-        case isa::OperationId::VFNCVT_F_F_W:
-        case isa::OperationId::VFNCVT_ROD_F_F_W:
-        case isa::OperationId::VFNCVT_RTZ_XU_F_W:
-        case isa::OperationId::VFNCVT_RTZ_X_F_W:
-        case isa::OperationId::VFSGNJ_VV:
-        case isa::OperationId::VFSGNJ_VF:
-        case isa::OperationId::VFSGNJN_VV:
-        case isa::OperationId::VFSGNJN_VF:
-        case isa::OperationId::VFSGNJX_VV:
-        case isa::OperationId::VFSGNJX_VF:
-        case isa::OperationId::VFMIN_VV:
-        case isa::OperationId::VFMIN_VF:
-        case isa::OperationId::VFMAX_VV:
-        case isa::OperationId::VFMAX_VF:
-        case isa::OperationId::VMFEQ_VV:
-        case isa::OperationId::VMFEQ_VF:
-        case isa::OperationId::VMFNE_VV:
-        case isa::OperationId::VMFNE_VF:
-        case isa::OperationId::VMFLT_VV:
-        case isa::OperationId::VMFLT_VF:
-        case isa::OperationId::VMFLE_VV:
-        case isa::OperationId::VMFLE_VF:
-        case isa::OperationId::VMFGT_VF:
-        case isa::OperationId::VMFGE_VF:
-        case isa::OperationId::VFMADD_VV:
-        case isa::OperationId::VFMADD_VF:
-        case isa::OperationId::VFNMADD_VV:
-        case isa::OperationId::VFNMADD_VF:
-        case isa::OperationId::VFMSUB_VV:
-        case isa::OperationId::VFMSUB_VF:
-        case isa::OperationId::VFNMSUB_VV:
-        case isa::OperationId::VFNMSUB_VF:
-        case isa::OperationId::VFMACC_VV:
-        case isa::OperationId::VFMACC_VF:
-        case isa::OperationId::VFNMACC_VV:
-        case isa::OperationId::VFNMACC_VF:
-        case isa::OperationId::VFMSAC_VV:
-        case isa::OperationId::VFMSAC_VF:
-        case isa::OperationId::VFNMSAC_VV:
-        case isa::OperationId::VFNMSAC_VF:
-        case isa::OperationId::VFMV_F_S:
-        case isa::OperationId::VFMV_S_F:
-        case isa::OperationId::VFMERGE_VFM:
-        case isa::OperationId::VFMV_V_F:
-        case isa::OperationId::VFREDUSUM_VS:
-        case isa::OperationId::VFREDOSUM_VS:
-        case isa::OperationId::VFREDMIN_VS:
-        case isa::OperationId::VFREDMAX_VS:
-        case isa::OperationId::VFWREDUSUM_VS:
-        case isa::OperationId::VFWREDOSUM_VS:
-        case isa::OperationId::VFWADD_VV:
-        case isa::OperationId::VFWADD_VF:
-        case isa::OperationId::VFWSUB_VV:
-        case isa::OperationId::VFWSUB_VF:
-        case isa::OperationId::VFWADD_WV:
-        case isa::OperationId::VFWADD_WF:
-        case isa::OperationId::VFWSUB_WV:
-        case isa::OperationId::VFWSUB_WF:
-        case isa::OperationId::VFWMUL_VV:
-        case isa::OperationId::VFWMUL_VF:
-        case isa::OperationId::VFWMACC_VV:
-        case isa::OperationId::VFWMACC_VF:
-        case isa::OperationId::VFWNMACC_VV:
-        case isa::OperationId::VFWNMACC_VF:
-        case isa::OperationId::VFWMSAC_VV:
-        case isa::OperationId::VFWMSAC_VF:
-        case isa::OperationId::VFWNMSAC_VV:
-        case isa::OperationId::VFWNMSAC_VF:
-            return true;
-        default:
-            return false;
-    }
+    const auto idx = static_cast<size_t>(op_id);
+    return idx < kVectorFpTable.size() && kVectorFpTable[idx];
 }
 
 /** RVV 1.0 reserves every vector FP instruction when frm contains an invalid value. */
@@ -1034,8 +994,9 @@ constexpr auto vector_memory_layout(isa::OperationId op_id, simrv::xlen::RegId d
 }
 }  // namespace
 
-void ExecuteUnit::execute_vector(core::CPU& cpu, memory::MemorySubsystem& mem,
-                                 isa::OperationId op_id, simrv::xlen::Instruction ir) {
+void ExecuteUnitVector::execute_vector(core::CPU& cpu, memory::MemorySubsystem& mem,
+                                       isa::OperationId op_id, simrv::xlen::Instruction ir) {
+    using namespace vector;
     if (cpu.state().regs.xlen == 32 && isa::requires_rv64(op_id)) {
         cpu.active_context().pending_exception = ExceptionCode::IllegalInstruction;
         cpu.active_context().pending_tval = ir;
@@ -1420,8 +1381,8 @@ void ExecuteUnit::execute_vector(core::CPU& cpu, memory::MemorySubsystem& mem,
     }
 }
 
-void ExecuteUnit::execute_vector(core::CPU& cpu, core::Machine& machine, isa::OperationId op_id,
-                                 simrv::xlen::Instruction ir) {
+void ExecuteUnitVector::execute_vector(core::CPU& cpu, core::Machine& machine,
+                                       isa::OperationId op_id, simrv::xlen::Instruction ir) {
     execute_vector(cpu, machine.memory(), op_id, ir);
 }
 

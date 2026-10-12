@@ -1,5 +1,8 @@
 #pragma once
 
+#include "simrv/core/Cpu.hpp"
+#include "simrv/isa/OperationId.hpp"
+#include "simrv/xlen/ScalarTypes.hpp"
 
 namespace simrv::memory {
 class MemorySubsystem;

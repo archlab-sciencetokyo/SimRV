@@ -1,14 +1,14 @@
+#include "simrv/execute/ExecuteUnitZb.hpp"
+
 #include <algorithm>
 #include <bit>
-
-#include "simrv/execute/ExecuteUnit.hpp"
 
 namespace simrv::execute {
 
 namespace {
 
 template <typename T>
-constexpr auto alu_int_b_eval(T in1, T in2, isa::OperationId op_id, int xlen) -> T {
+constexpr auto alu_int_zb_eval(T in1, T in2, isa::OperationId op_id, int xlen) -> T {
     using enum isa::OperationId;
     using SignedT = std::make_signed_t<T>;
     const auto s1 = static_cast<SignedT>(in1);
@@ -127,18 +127,18 @@ constexpr auto alu_int_b_eval(T in1, T in2, isa::OperationId op_id, int xlen) ->
 
 }  // namespace
 
-auto ExecuteUnit::aluIntZb(simrv::xlen::Register in1, simrv::xlen::Register in2,
-                           isa::OperationId op_id, unsigned xlen_param) -> simrv::xlen::Register {
+auto ExecuteUnitZb::aluIntZb(simrv::xlen::Register in1, simrv::xlen::Register in2,
+                             isa::OperationId op_id, unsigned xlen_param) -> simrv::xlen::Register {
     if (xlen_param == 32) {
-        const auto res = alu_int_b_eval<uint32_t>(static_cast<uint32_t>(in1),
-                                                  static_cast<uint32_t>(in2), op_id, 32);
+        const auto res = alu_int_zb_eval<uint32_t>(static_cast<uint32_t>(in1),
+                                                   static_cast<uint32_t>(in2), op_id, 32);
         return static_cast<simrv::xlen::Register>(static_cast<int64_t>(static_cast<int32_t>(res)));
     }
-    return alu_int_b_eval<simrv::xlen::Register>(in1, in2, op_id, static_cast<int>(xlen_param));
+    return alu_int_zb_eval<simrv::xlen::Register>(in1, in2, op_id, static_cast<int>(xlen_param));
 }
 
-auto ExecuteUnit::aluIntZbW(simrv::xlen::Register in1, simrv::xlen::Register in2,
-                            isa::OperationId op_id) -> simrv::xlen::Register {
+auto ExecuteUnitZb::aluIntZbW(simrv::xlen::Register in1, simrv::xlen::Register in2,
+                              isa::OperationId op_id) -> simrv::xlen::Register {
     if constexpr (!simrv::xlen::kIsXLen64) {
         return 0;
     } else {

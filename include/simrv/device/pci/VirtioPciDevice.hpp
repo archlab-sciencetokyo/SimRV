@@ -44,7 +44,9 @@ class VirtioPciDevice : public PciDevice {
     }
 
    protected:
-    virtual auto get_device_features(uint32_t select) -> uint32_t = 0;
+    virtual auto get_device_features(uint32_t select) -> uint32_t {
+        return select == 1 ? virtio::kVirtioFVersion1FeatureWord : 0;
+    }
     virtual void on_driver_features(uint32_t select, uint32_t val) {
         (void)select;
         (void)val;

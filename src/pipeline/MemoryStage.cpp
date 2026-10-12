@@ -25,8 +25,7 @@ using namespace simrv::isa;
 // ==========================================
 
 void CPU::run_memory_stage(Machine& machine) {
-    if (active_context().op_id >= isa::OperationId::VSETVLI &&
-        active_context().op_id <= isa::OperationId::VWSLL_VI) {
+    if (isa::is_vector_op(active_context().op_id)) {
         return;
     }
     auto& ctx = active_context();
@@ -47,7 +46,7 @@ void CPU::memory_load_phase(Machine& machine) {
     }
 
     const auto opcode = static_cast<Opcode>(ctx.opcode);
-    const auto funct5 = static_cast<Funct5Amo>(ctx.funct5);
+    const auto funct5 = ctx.funct5;
 
     if (opcode == Opcode::Load || (opcode == Opcode::Amo && funct5 != Funct5Amo::Sc)) {
         ctx.mem_rdata =
@@ -63,8 +62,7 @@ void CPU::memory_load_phase(Machine& machine) {
         if (!ctx.pending_exception.has_value() && !ca_state.waiting_for_interconnect) {
             state_.load_res = ctx.mem_paddr.raw();
             state_.reserved = 1;
-            machine.memory_.reservation_table().set_reservation(
-                static_cast<simrv::xlen::HartId>(state_.mhartid), ctx.mem_paddr.raw());
+            machine.memory_.reservation_table().set_reservation(hart_id(), ctx.mem_paddr.raw());
         }
     }
 }
@@ -72,7 +70,7 @@ void CPU::memory_load_phase(Machine& machine) {
 void CPU::memory_prepare_store_data(Machine& /*machine*/) {
     auto& ctx = active_context();
     const auto opcode = static_cast<Opcode>(ctx.opcode);
-    const auto funct5 = static_cast<Funct5Amo>(ctx.funct5);
+    const auto funct5 = ctx.funct5;
     ctx.mem_wdata = (opcode != Opcode::Amo || funct5 == Funct5Amo::Sc)
                         ? ctx.rrs2
                         : execute::ExecuteUnit::aluAmo(ctx.rrs2, ctx.mem_rdata, funct5, ctx.funct3);
@@ -91,7 +89,7 @@ void CPU::memory_store_phase(Machine& machine) {
     }
 
     const auto opcode = static_cast<Opcode>(ctx.opcode);
-    const auto funct5 = static_cast<Funct5Amo>(ctx.funct5);
+    const auto funct5 = ctx.funct5;
 
     if ((opcode == Opcode::Store) || (opcode == Opcode::Amo && funct5 == Funct5Amo::Sc) ||
         (opcode == Opcode::Amo && funct5 != Funct5Amo::Lr && funct5 != Funct5Amo::Sc)) {

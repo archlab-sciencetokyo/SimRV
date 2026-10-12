@@ -5,7 +5,7 @@
 #include <span>
 #include <vector>
 
-#include "simrv/device/NetworkBackend.hpp"
+#include "simrv/device/virtio/VirtioCore.hpp"
 #include "simrv/memory/MmioDevice.hpp"
 
 namespace simrv::core {
@@ -21,7 +21,7 @@ class RingBufferEthernetMmio final {
                            simrv::xlen::Address csr_size, uint32_t irq,
                            simrv::xlen::Address rx_base, simrv::xlen::Address rx_size,
                            simrv::xlen::Address tx_base, simrv::xlen::Address tx_size,
-                           std::array<uint8_t, 6> mac_address, NetworkBackend::Mode mode);
+                           std::array<uint8_t, 6> mac_address, virtio::NetBackend::Mode mode);
     ~RingBufferEthernetMmio();
     RingBufferEthernetMmio(const RingBufferEthernetMmio&) = delete;
     auto operator=(const RingBufferEthernetMmio&) -> RingBufferEthernetMmio& = delete;
@@ -31,7 +31,7 @@ class RingBufferEthernetMmio final {
     [[nodiscard]] auto tx_node() -> memory::TileLinkNode*;
     void poll_backend();
     void reset();
-    [[nodiscard]] auto backend() -> NetworkBackend& { return backend_; }
+    [[nodiscard]] auto backend() -> virtio::NetBackend& { return backend_; }
 
    private:
     class Window;
@@ -52,7 +52,7 @@ class RingBufferEthernetMmio final {
     simrv::xlen::Address rx_size_;
     simrv::xlen::Address tx_size_;
     uint32_t irq_;
-    NetworkBackend backend_;
+    virtio::NetBackend backend_;
     std::array<uint32_t, 7> csr_{};
     std::vector<uint8_t> rx_buffer_;
     std::vector<uint8_t> tx_buffer_;

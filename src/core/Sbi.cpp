@@ -503,7 +503,7 @@ auto Sbi::handle_ecall(simrv::xlen::TrapCause cause) -> bool {
                                        func_id, cpu_.state().regs.read(simrv::xlen::RegId::A0),
                                        cpu_.state().regs.read(simrv::xlen::RegId::A1),
                                        cpu_.pipeline_context.cpc.raw(),
-                                       static_cast<simrv::xlen::HartId>(cpu_.state().mhartid));
+                                       cpu_.hart_id());
     }
 
     switch (static_cast<ExtId>(ext_id)) {

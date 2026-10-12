@@ -56,7 +56,7 @@ using GlobalHistory = uint32_t;
 
 enum class BranchDirection : uint8_t { NotTaken = 0, Taken = 1 };
 using PageTableLevel = int;
-using VpnIndex = uint32_t;
+using VpnIndex = uint64_t;
 using PpnIndex = uint64_t;
 using IrqNumber = uint32_t;
 using InterruptSourceId = uint32_t;

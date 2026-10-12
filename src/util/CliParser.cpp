@@ -20,6 +20,8 @@
 #include "simrv/core/CpuConfigParser.hpp"
 #include "simrv/core/Logger.hpp"
 #include "simrv/core/Tracer.hpp"
+#include "simrv/isa/Zb.hpp"
+#include "simrv/isa/Zk.hpp"
 #include "simrv/memory/MemoryUtil.hpp"
 #include "simrv/pipeline/PipelineConfig.hpp"
 #include "simrv/tui/Tui.hpp"
@@ -189,50 +191,15 @@ struct ParsedIsaPreset {
     unsigned int xlen;
 };
 
-auto parse_isa_preset(std::string_view value) -> std::expected<ParsedIsaPreset, std::string> {
-    // Standard ISA strings may attach their first multi-letter extension directly
-    // to the single-letter base (e.g. RV64GCZicntr2p0). Underscores separate later
-    // multi-letter extensions. The current MISA model represents single-letter bits.
-    const auto extension_start = value.find_first_of("zZ", 4);
-    if (extension_start != std::string_view::npos) {
-        auto base_end = extension_start;
-        if (base_end > 0 && value[base_end - 1] == '_') --base_end;
-        const auto base = value.substr(0, base_end);
-        auto parsed = parse_isa_preset(base);
-        if (!parsed) return parsed;
-        auto extensions = value.substr(extension_start);
-        if (extensions.empty() || extensions.back() == '_') {
-            return std::unexpected("ISA string contains an empty extension name");
-        }
-        unsigned seen_extensions = 0;
-        while (!extensions.empty()) {
-            const auto next = extensions.find('_');
-            const auto extension = extensions.substr(0, next);
-            const auto supported_extension = [extension](std::string_view name) -> bool {
-                if (iequals(extension, name)) return true;
-                if (extension.size() <= name.size() ||
-                    !iequals(extension.substr(0, name.size()), name))
-                    return false;
-                const auto version = extension.substr(name.size());
-                return iequals(version, "2") || iequals(version, "2p0");
-            };
-            const auto extension_id = [&]() -> unsigned {
-                if (supported_extension("zicntr")) return 1U;
-                if (supported_extension("zicsr")) return 2U;
-                if (supported_extension("zifencei")) return 4U;
-                return 0U;
-            }();
-            if (extension_id == 0) {
-                return std::unexpected(std::format("unsupported ISA extension '{}'", extension));
-            }
-            if ((seen_extensions & extension_id) != 0) {
-                return std::unexpected(std::format("duplicate ISA extension '{}'", extension));
-            }
-            seen_extensions |= extension_id;
-            if (next == std::string_view::npos) break;
-            extensions.remove_prefix(next + 1);
-        }
-        return parsed;
+auto parse_isa_base_preset(std::string_view value)
+    -> std::expected<std::optional<ParsedIsaPreset>, std::string> {
+    // Reject legacy draft single-letter 'b' shorthands with a clear explanation
+    if (iequals(value, "gcbv") || iequals(value, "rv32gcbv") || iequals(value, "rv64gcbv") ||
+        iequals(value, "gcb") || iequals(value, "rv32gcb") || iequals(value, "rv64gcb")) {
+        return std::unexpected(std::format(
+            "legacy shorthand '{}' is not a ratified RISC-V ISA string; use ratified 'gczbv', "
+            "'gczb', 'gcv', or multi-letter extensions like '_zba_zbb_zbc_zbs'",
+            value));
     }
 
     if (iequals(value, "i")) {
@@ -262,12 +229,18 @@ auto parse_isa_preset(std::string_view value) -> std::expected<ParsedIsaPreset, 
     if (iequals(value, "gc")) {
         return ParsedIsaPreset{.preset = IsaPreset::GC, .xlen = 0};
     }
-    if (iequals(value, "gcbv")) {
-        return ParsedIsaPreset{.preset = IsaPreset::GCBV, .xlen = 0};
+    if (iequals(value, "gcv")) {
+        return ParsedIsaPreset{.preset = IsaPreset::GCV, .xlen = 0};
+    }
+    if (iequals(value, "gczb")) {
+        return ParsedIsaPreset{.preset = IsaPreset::GCZB, .xlen = 0};
+    }
+    if (iequals(value, "gczbv")) {
+        return ParsedIsaPreset{.preset = IsaPreset::GCZBV, .xlen = 0};
     }
 
     unsigned int parsed_xlen = 0;
-    IsaPreset preset = IsaPreset::GCBV;
+    IsaPreset preset = IsaPreset::GCZBV;
     bool valid = false;
 
     if (iequals(value, "rv32e")) {
@@ -330,13 +303,29 @@ auto parse_isa_preset(std::string_view value) -> std::expected<ParsedIsaPreset, 
         parsed_xlen = 64;
         preset = IsaPreset::GC;
         valid = true;
-    } else if (iequals(value, "rv32gcbv")) {
+    } else if (iequals(value, "rv32gcv")) {
         parsed_xlen = 32;
-        preset = IsaPreset::GCBV;
+        preset = IsaPreset::GCV;
         valid = true;
-    } else if (iequals(value, "rv64gcbv")) {
+    } else if (iequals(value, "rv64gcv")) {
         parsed_xlen = 64;
-        preset = IsaPreset::GCBV;
+        preset = IsaPreset::GCV;
+        valid = true;
+    } else if (iequals(value, "rv32gczb")) {
+        parsed_xlen = 32;
+        preset = IsaPreset::GCZB;
+        valid = true;
+    } else if (iequals(value, "rv64gczb")) {
+        parsed_xlen = 64;
+        preset = IsaPreset::GCZB;
+        valid = true;
+    } else if (iequals(value, "rv32gczbv")) {
+        parsed_xlen = 32;
+        preset = IsaPreset::GCZBV;
+        valid = true;
+    } else if (iequals(value, "rv64gczbv")) {
+        parsed_xlen = 64;
+        preset = IsaPreset::GCZBV;
         valid = true;
     }
 
@@ -348,13 +337,151 @@ auto parse_isa_preset(std::string_view value) -> std::expected<ParsedIsaPreset, 
         return ParsedIsaPreset{.preset = preset, .xlen = parsed_xlen};
     }
 
+    return std::nullopt;
+}
+
+auto parse_isa_preset(std::string_view value) -> std::expected<ParsedIsaPreset, std::string> {
+    auto base_match = parse_isa_base_preset(value);
+    if (!base_match) return std::unexpected(base_match.error());
+    if (*base_match) return **base_match;
+
+    // Standard ISA strings may attach their first multi-letter extension directly
+    // to the single-letter base (e.g. RV64GCZicntr2p0 or RV64GCZba). Underscores separate later
+    // multi-letter extensions.
+    const auto extension_start = value.find_first_of("zZxX", 4);
+    if (extension_start != std::string_view::npos) {
+        auto base_end = extension_start;
+        if (base_end > 0 && value[base_end - 1] == '_') --base_end;
+        const auto base = value.substr(0, base_end);
+        auto parsed = parse_isa_preset(base);
+        if (!parsed) return parsed;
+        auto extensions = value.substr(extension_start);
+        if (extensions.empty() || extensions.back() == '_') {
+            return std::unexpected("ISA string contains an empty extension name");
+        }
+        uint64_t seen_extensions = 0;
+        bool has_zb = false;
+        bool has_v = false;
+        while (!extensions.empty()) {
+            const auto next = extensions.find('_');
+            const auto extension = extensions.substr(0, next);
+            const auto supported_extension = [extension](std::string_view name) -> bool {
+                if (iequals(extension, name)) return true;
+                if (extension.size() <= name.size() ||
+                    !iequals(extension.substr(0, name.size()), name))
+                    return false;
+                const auto version = extension.substr(name.size());
+                return iequals(version, "1") || iequals(version, "1p0") || iequals(version, "2") ||
+                       iequals(version, "2p0");
+            };
+            const auto extension_id = [&]() -> uint64_t {
+                // CSR, Fence, Counters, Performance Monitoring
+                if (supported_extension("zicntr")) return 1ULL << 0;
+                if (supported_extension("zicsr")) return 1ULL << 1;
+                if (supported_extension("zifencei")) return 1ULL << 2;
+                if (supported_extension("zihpm")) return 1ULL << 3;
+
+                // Ratified Bitmanip (Zb)
+                if (supported_extension("zba")) return 1ULL << 4;
+                if (supported_extension("zbb")) return 1ULL << 5;
+                if (supported_extension("zbc")) return 1ULL << 6;
+                if (supported_extension("zbs")) return 1ULL << 7;
+                if (supported_extension("zb")) return 1ULL << 8;
+
+                // Cryptography Bitmanip & Scalar Crypto
+                if (supported_extension("zbkb")) return 1ULL << 9;
+                if (supported_extension("zbkc")) return 1ULL << 10;
+                if (supported_extension("zbkx")) return 1ULL << 11;
+                if (supported_extension("zknd")) return 1ULL << 12;
+                if (supported_extension("zkne")) return 1ULL << 13;
+                if (supported_extension("zknh")) return 1ULL << 14;
+                if (supported_extension("zksed")) return 1ULL << 15;
+                if (supported_extension("zksh")) return 1ULL << 16;
+                if (supported_extension("zkr")) return 1ULL << 17;
+                if (supported_extension("zkt")) return 1ULL << 18;
+                if (supported_extension("zkn")) return 1ULL << 19;
+                if (supported_extension("zks")) return 1ULL << 20;
+                if (supported_extension("zk")) return 1ULL << 21;
+
+                // Vector Sub-extensions
+                if (supported_extension("zve32x")) return 1ULL << 22;
+                if (supported_extension("zve32f")) return 1ULL << 23;
+                if (supported_extension("zve64x")) return 1ULL << 24;
+                if (supported_extension("zve64f")) return 1ULL << 25;
+                if (supported_extension("zve64d")) return 1ULL << 26;
+                if (supported_extension("zvl32b")) return 1ULL << 27;
+                if (supported_extension("zvl64b")) return 1ULL << 28;
+                if (supported_extension("zvl128b")) return 1ULL << 29;
+                if (supported_extension("zvl256b")) return 1ULL << 30;
+                if (supported_extension("zvl512b")) return 1ULL << 31;
+                if (supported_extension("zvl1024b")) return 1ULL << 32;
+
+                // Custom / Trace
+                if (supported_extension("xsimrvtrace")) return 1ULL << 33;
+
+                // Ratified Hints, Timers & Cache Management
+                if (supported_extension("zihintpause")) return 1ULL << 34;
+                if (supported_extension("sstc")) return 1ULL << 35;
+                if (supported_extension("zicbom")) return 1ULL << 36;
+                if (supported_extension("zicboz")) return 1ULL << 37;
+                if (supported_extension("zicbop")) return 1ULL << 38;
+
+                // Ratified Virtual Memory Extensions
+                if (supported_extension("svinval")) return 1ULL << 39;
+                if (supported_extension("svnapot")) return 1ULL << 40;
+                if (supported_extension("svpbmt")) return 1ULL << 41;
+
+                return 0ULL;
+            }();
+            if (extension_id == 0) {
+                return std::unexpected(std::format("unsupported ISA extension '{}'", extension));
+            }
+            if ((seen_extensions & extension_id) != 0) {
+                return std::unexpected(std::format("duplicate ISA extension '{}'", extension));
+            }
+            seen_extensions |= extension_id;
+
+            if (extension_id >= (1ULL << 4) && extension_id <= (1ULL << 21)) {
+                has_zb = true;
+            }
+            if (extension_id >= (1ULL << 22) && extension_id <= (1ULL << 32)) {
+                has_v = true;
+            }
+
+            if (next == std::string_view::npos) break;
+            extensions.remove_prefix(next + 1);
+        }
+
+        const bool base_has_v =
+            (parsed->preset == IsaPreset::GCV || parsed->preset == IsaPreset::GCZBV);
+        const bool base_has_zb =
+            (parsed->preset == IsaPreset::GCZB || parsed->preset == IsaPreset::GCZBV);
+        const bool final_has_v = has_v || base_has_v;
+        const bool final_has_zb = has_zb || base_has_zb;
+
+        if (parsed->preset == IsaPreset::GC || parsed->preset == IsaPreset::G || base_has_v ||
+            base_has_zb) {
+            if (final_has_v && final_has_zb) {
+                parsed->preset = IsaPreset::GCZBV;
+            } else if (final_has_zb) {
+                parsed->preset = IsaPreset::GCZB;
+            } else if (final_has_v) {
+                parsed->preset = IsaPreset::GCV;
+            }
+        }
+        return parsed;
+    }
+
     const auto xlen_suffix = simrv::xlen::kIsXLen64 ? "64" : "32";
     auto supported = std::format(
-        "e, em, emac, i, im, ima, imac, g, gc, gcbv, rv32e, rv32em, rv32emac, rv{}i, rv{}im, "
-        "rv{}ima, rv{}imac, rv{}g, rv{}gc, rv{}gcbv",
-        xlen_suffix, xlen_suffix, xlen_suffix, xlen_suffix, xlen_suffix, xlen_suffix, xlen_suffix);
+        "e, em, emac, i, im, ima, imac, g, gc, gcv, gczb, gczbv, rv32e, rv32em, rv32emac, rv{}i, "
+        "rv{}im, "
+        "rv{}ima, rv{}imac, rv{}g, rv{}gc, rv{}gcv, rv{}gczb, rv{}gczbv",
+        xlen_suffix, xlen_suffix, xlen_suffix, xlen_suffix, xlen_suffix, xlen_suffix, xlen_suffix,
+        xlen_suffix, xlen_suffix, xlen_suffix);
     if constexpr (simrv::xlen::kIsXLen64) {
-        supported += ", rv32i, rv32im, rv32ima, rv32imac, rv32g, rv32gc, rv32gcbv";
+        supported +=
+            ", rv32i, rv32im, rv32ima, rv32imac, rv32g, rv32gc, rv32gcv, rv32gczb, rv32gczbv";
     }
     return std::unexpected(
         std::format("unsupported ISA preset '{}' (supported: {})", value, supported));
@@ -367,7 +494,7 @@ auto effective_isa_preset(const RuntimeOptions& options) -> IsaPreset {
     if (options.cpu_model_preset.has_value()) {
         return pipeline::make_cpu_model_preset(*options.cpu_model_preset).isa_preset;
     }
-    return IsaPreset::GCBV;
+    return IsaPreset::GCZBV;
 }
 
 auto parse_file_options(std::string_view arg, std::span<char* const> args, std::size_t& i,

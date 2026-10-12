@@ -34,6 +34,46 @@ constexpr simrv::xlen::CSRValue kCounterEnableMask = static_cast<simrv::xlen::CS
            (state.mstatus & MstatusBit::Vs) != 0;
 }
 
+[[nodiscard]] constexpr auto pack_pmpcfg(
+    const std::array<uint8_t, ArchState::kNumPmpEntries>& pmpcfg, size_t cfg_idx,
+    unsigned xlen) noexcept -> simrv::xlen::CSRValue {
+    if (xlen == 32) {
+        if (cfg_idx >= 4) return 0;
+        simrv::xlen::CSRValue val = 0;
+        for (size_t b = 0; b < 4; ++b) {
+            const size_t entry = cfg_idx * 4 + b;
+            if (entry < ArchState::kNumPmpEntries) {
+                val |= static_cast<simrv::xlen::CSRValue>(pmpcfg[entry]) << (8 * b);
+            }
+        }
+        return val;
+    }
+    if (cfg_idx >= 4 || (cfg_idx & 1) != 0) return 0;
+    const size_t base_pmp = (cfg_idx / 2) * 8;
+    simrv::xlen::CSRValue val = 0;
+    for (size_t b = 0; b < 8; ++b) {
+        const size_t entry = base_pmp + b;
+        if (entry < ArchState::kNumPmpEntries) {
+            val |= static_cast<simrv::xlen::CSRValue>(pmpcfg[entry]) << (8 * b);
+        }
+    }
+    return val;
+}
+
+void unpack_pmpcfg(std::array<uint8_t, ArchState::kNumPmpEntries>& pmpcfg, size_t cfg_idx,
+                   simrv::xlen::CSRValue wdata, unsigned xlen) noexcept {
+    const size_t bytes_per_csr = (xlen == 32) ? 4 : 8;
+    if (xlen != 32 && (cfg_idx >= 4 || (cfg_idx & 1) != 0)) return;
+    if (xlen == 32 && cfg_idx >= 4) return;
+    const size_t base_entry = (xlen == 32) ? (cfg_idx * 4) : ((cfg_idx / 2) * 8);
+    for (size_t b = 0; b < bytes_per_csr; ++b) {
+        const size_t entry = base_entry + b;
+        if (entry < ArchState::kNumPmpEntries && (pmpcfg[entry] & 0x80) == 0) {
+            pmpcfg[entry] = pmpcfg_legalize(static_cast<uint8_t>((wdata >> (8 * b)) & 0xFF));
+        }
+    }
+}
+
 }  // namespace
 
 auto CsrFile::getMstatus(simrv::xlen::CSRValue mask) const -> simrv::xlen::CSRValue {
@@ -265,37 +305,7 @@ auto CsrFile::read(simrv::xlen::CSRAddress addr) const
             if (pmp_csr_exists(addr, cpu_.state().regs.xlen)) {
                 if (addr >= 0x3A0 && addr <= 0x3AF) {
                     const size_t cfg_idx = addr - 0x3A0;
-                    if (cpu_.state().regs.xlen == 32) {
-                        if (cfg_idx < 4) {
-                            rcsr = static_cast<simrv::xlen::CSRValue>(
-                                       cpu_.state().pmpcfg[cfg_idx * 4]) |
-                                   (static_cast<simrv::xlen::CSRValue>(
-                                        cpu_.state().pmpcfg[cfg_idx * 4 + 1])
-                                    << 8) |
-                                   (static_cast<simrv::xlen::CSRValue>(
-                                        cpu_.state().pmpcfg[cfg_idx * 4 + 2])
-                                    << 16) |
-                                   (static_cast<simrv::xlen::CSRValue>(
-                                        cpu_.state().pmpcfg[cfg_idx * 4 + 3])
-                                    << 24);
-                        } else {
-                            rcsr = 0;
-                        }
-                    } else {
-                        if (cfg_idx < 4 && (cfg_idx & 1) == 0) {
-                            const size_t base_pmp = (cfg_idx / 2) * 8;
-                            rcsr = 0;
-                            for (size_t b = 0; b < 8; ++b) {
-                                if (base_pmp + b < ArchState::kNumPmpEntries) {
-                                    rcsr |= static_cast<simrv::xlen::CSRValue>(
-                                                cpu_.state().pmpcfg[base_pmp + b])
-                                            << (8 * b);
-                                }
-                            }
-                        } else {
-                            rcsr = 0;
-                        }
-                    }
+                    rcsr = pack_pmpcfg(cpu_.state().pmpcfg, cfg_idx, cpu_.state().regs.xlen);
                 } else if (addr >= 0x3B0 && addr <= 0x3EF) {
                     const size_t pmp_idx = addr - 0x3B0;
                     if (pmp_idx < ArchState::kNumPmpEntries) {
@@ -571,32 +581,7 @@ auto CsrFile::write(simrv::xlen::CSRAddress addr, simrv::xlen::CSRValue wdata)
             if (pmp_csr_exists(addr, cpu_.state().regs.xlen)) {
                 if (addr >= 0x3A0 && addr <= 0x3AF) {
                     const size_t cfg_idx = addr - 0x3A0;
-                    if (cpu_.state().regs.xlen == 32) {
-                        if (cfg_idx < 4) {
-                            for (size_t b = 0; b < 4; ++b) {
-                                const size_t entry = cfg_idx * 4 + b;
-                                if (entry < ArchState::kNumPmpEntries) {
-                                    if ((cpu_.state().pmpcfg[entry] & 0x80) == 0) {
-                                        cpu_.state().pmpcfg[entry] = pmpcfg_legalize(
-                                            static_cast<uint8_t>((wdata >> (8 * b)) & 0xFF));
-                                    }
-                                }
-                            }
-                        }
-                    } else {
-                        if (cfg_idx < 4 && (cfg_idx & 1) == 0) {
-                            const size_t base_pmp = (cfg_idx / 2) * 8;
-                            for (size_t b = 0; b < 8; ++b) {
-                                const size_t entry = base_pmp + b;
-                                if (entry < ArchState::kNumPmpEntries) {
-                                    if ((cpu_.state().pmpcfg[entry] & 0x80) == 0) {
-                                        cpu_.state().pmpcfg[entry] = pmpcfg_legalize(
-                                            static_cast<uint8_t>((wdata >> (8 * b)) & 0xFF));
-                                    }
-                                }
-                            }
-                        }
-                    }
+                    unpack_pmpcfg(cpu_.state().pmpcfg, cfg_idx, wdata, cpu_.state().regs.xlen);
                 } else if (addr >= 0x3B0 && addr <= 0x3EF) {
                     const size_t pmp_idx = addr - 0x3B0;
                     if (pmp_idx < ArchState::kNumPmpEntries) {

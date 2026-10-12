@@ -46,7 +46,7 @@ RingBufferEthernetMmio::RingBufferEthernetMmio(
     core::Machine& machine, std::string name, simrv::xlen::Address csr_base,
     simrv::xlen::Address csr_size, uint32_t irq, simrv::xlen::Address rx_base,
     simrv::xlen::Address rx_size, simrv::xlen::Address tx_base, simrv::xlen::Address tx_size,
-    std::array<uint8_t, 6> mac_address, NetworkBackend::Mode mode)
+    std::array<uint8_t, 6> mac_address, virtio::NetBackend::Mode mode)
     : machine_(machine),
       name_(std::move(name)),
       csr_base_(csr_base),
@@ -58,12 +58,12 @@ RingBufferEthernetMmio::RingBufferEthernetMmio(
       rx_buffer_(static_cast<size_t>(rx_size)),
       tx_buffer_(static_cast<size_t>(tx_size)) {
     backend_.set_mac(mac_address);
-    csr_window_ = std::make_unique<Window>(*this, machine_, Window::Kind::Csr, csr_base_, csr_size_,
-                                           name_);
-    rx_window_ = std::make_unique<Window>(*this, machine_, Window::Kind::Rx, rx_base, rx_size_,
-                                          name_);
-    tx_window_ = std::make_unique<Window>(*this, machine_, Window::Kind::Tx, tx_base, tx_size_,
-                                          name_);
+    csr_window_ =
+        std::make_unique<Window>(*this, machine_, Window::Kind::Csr, csr_base_, csr_size_, name_);
+    rx_window_ =
+        std::make_unique<Window>(*this, machine_, Window::Kind::Rx, rx_base, rx_size_, name_);
+    tx_window_ =
+        std::make_unique<Window>(*this, machine_, Window::Kind::Tx, tx_base, tx_size_, name_);
 }
 
 RingBufferEthernetMmio::~RingBufferEthernetMmio() { machine_.set_platform_irq(irq_, false); }

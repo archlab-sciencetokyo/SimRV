@@ -26,11 +26,11 @@
 #include "simrv/pipeline/OperationTraits.hpp"
 #include "simrv/pipeline/RetirementEffects.hpp"
 #include "simrv/tui/Tui.hpp"
+#include "simrv/xlen/AddressTypes.hpp"
 #include "simrv/xlen/Constants.hpp"
 #include "simrv/xlen/Helpers.hpp"
-#include "simrv/xlen/AddressTypes.hpp"
-#include "simrv/xlen/RegisterTypes.hpp"
 #include "simrv/xlen/IdentifierTypes.hpp"
+#include "simrv/xlen/RegisterTypes.hpp"
 
 namespace simrv::core {
 
@@ -44,9 +44,9 @@ void release_instruction_eviction(Machine& machine, CPU& cpu) {
     release.opcode = simrv::memory::TlOpcodeC::Release;
     release.report = simrv::memory::report_for(evicted->state, simrv::memory::TlCap::ToN);
     release.size = simrv::memory::kTlBlockSize;
-    release.source = simrv::memory::make_tl_source(
-        static_cast<simrv::xlen::HartId>(cpu.state().mhartid), simrv::memory::TlPort::Instruction);
-    release.hart = static_cast<simrv::xlen::HartId>(cpu.state().mhartid);
+    release.source =
+        simrv::memory::make_tl_source(cpu.hart_id(), simrv::memory::TlPort::Instruction);
+    release.hart = cpu.hart_id();
     release.address = evicted->address;
     simrv::memory::TlChannelD acknowledgement{};
     (void)machine.memory().system_bus().release_line(release, acknowledgement);
@@ -55,10 +55,7 @@ void release_instruction_eviction(Machine& machine, CPU& cpu) {
 [[nodiscard]] inline auto check_fetch_alignment(ArchState& state,
                                                 simrv::pipeline::PipelineContext& ctx) noexcept
     -> bool {
-    if (state.regs.xlen == 32) {
-        state.pc = static_cast<simrv::xlen::Register>(
-            static_cast<int64_t>(static_cast<int32_t>(state.pc)));
-    }
+    state.canonicalize_pc();
     ctx.tlb_miss = false;
     const bool has_c = misa_has_extension(state.misa, isa::IsaExtension::C);
     const simrv::xlen::Word alignment_mask = has_c ? 1u : 3u;
@@ -266,8 +263,7 @@ auto CPU::translate_stage_address(Machine& machine, simrv::xlen::VirtAddr virtua
         }
         timed_walk.walk = mmu->begin_page_walk(virtual_address, access, privilege, state_.mstatus,
                                                state_.satp, active_xlen, true, &state_);
-        timed_walk.source =
-            simrv::memory::make_tl_source(static_cast<simrv::xlen::HartId>(state_.mhartid), port);
+        timed_walk.source = simrv::memory::make_tl_source(hart_id(), port);
         timed_walk.active = true;
         timed_walk.request_pending = false;
     }
@@ -305,7 +301,7 @@ auto CPU::translate_stage_address(Machine& machine, simrv::xlen::VirtAddr virtua
                                                             : simrv::memory::TlOpcodeA::LogicalData;
     request.size = walk.pte_size == 4 ? 2 : 3;
     request.source = timed_walk.source;
-    request.hart = static_cast<simrv::xlen::HartId>(state_.mhartid);
+    request.hart = hart_id();
     request.address = walk.pte_address;
     request.data = walk.status == PageWalkStatus::WritePte ? walk.pte_update_mask : walk.pte;
     machine.memory_.system_bus().send_request(request);
@@ -365,7 +361,7 @@ void CPU::fetch_read_instruction_word(Machine& machine) {
                     pf_req.opcode = simrv::memory::TlOpcodeA::Intent;
                     pf_req.intent = simrv::memory::TlIntent::PrefetchRead;
                     pf_req.size = simrv::memory::kTlBeatSize;
-                    pf_req.hart = static_cast<simrv::xlen::HartId>(state_.mhartid);
+                    pf_req.hart = hart_id();
                     pf_req.source = simrv::memory::make_tl_source(
                         pf_req.hart, simrv::memory::TlPort::Instruction);
                     pf_req.address = next_line;
@@ -402,9 +398,8 @@ void CPU::fetch_read_instruction_word(Machine& machine) {
                 if (!fill.active) {
                     fill.active = true;
                     fill.line_base = line_base;
-                    fill.source = simrv::memory::make_tl_source(
-                        static_cast<simrv::xlen::HartId>(state_.mhartid),
-                        simrv::memory::TlPort::Instruction);
+                    fill.source = simrv::memory::make_tl_source(hart_id(),
+                                                                simrv::memory::TlPort::Instruction);
                 }
 
                 if (fill.request_pending) {
@@ -442,7 +437,7 @@ void CPU::fetch_read_instruction_word(Machine& machine) {
                 req.opcode = simrv::memory::TlOpcodeA::AcquireBlock;
                 req.grow = simrv::memory::TlGrow::NtoB;
                 req.size = simrv::memory::kTlBlockSize;
-                req.hart = static_cast<simrv::xlen::HartId>(state_.mhartid);
+                req.hart = hart_id();
                 req.source = fill.source;
                 req.address = line_base;
                 machine.memory_.system_bus().send_request(req);
@@ -456,7 +451,7 @@ void CPU::fetch_read_instruction_word(Machine& machine) {
             req.opcode = simrv::memory::TlOpcodeA::AcquireBlock;
             req.grow = simrv::memory::TlGrow::NtoB;
             req.size = simrv::memory::kTlBlockSize;
-            req.hart = static_cast<simrv::xlen::HartId>(state_.mhartid);
+            req.hart = hart_id();
             req.source =
                 simrv::memory::make_tl_source(req.hart, simrv::memory::TlPort::Instruction);
             req.address = line_base;
@@ -505,9 +500,8 @@ void CPU::fetch_read_instruction_word(Machine& machine) {
                 if (!fill.active) {
                     fill.active = true;
                     fill.line_base = h_line_base;
-                    fill.source = simrv::memory::make_tl_source(
-                        static_cast<simrv::xlen::HartId>(state_.mhartid),
-                        simrv::memory::TlPort::Instruction);
+                    fill.source = simrv::memory::make_tl_source(hart_id(),
+                                                                simrv::memory::TlPort::Instruction);
                 }
 
                 if (fill.request_pending) {
@@ -540,7 +534,7 @@ void CPU::fetch_read_instruction_word(Machine& machine) {
                 req.opcode = simrv::memory::TlOpcodeA::AcquireBlock;
                 req.grow = simrv::memory::TlGrow::NtoB;
                 req.size = simrv::memory::kTlBlockSize;
-                req.hart = static_cast<simrv::xlen::HartId>(state_.mhartid);
+                req.hart = hart_id();
                 req.source = fill.source;
                 req.address = h_line_base;
                 machine.memory_.system_bus().send_request(req);
@@ -553,7 +547,7 @@ void CPU::fetch_read_instruction_word(Machine& machine) {
             req.opcode = simrv::memory::TlOpcodeA::AcquireBlock;
             req.grow = simrv::memory::TlGrow::NtoB;
             req.size = simrv::memory::kTlBlockSize;
-            req.hart = static_cast<simrv::xlen::HartId>(state_.mhartid);
+            req.hart = hart_id();
             req.source =
                 simrv::memory::make_tl_source(req.hart, simrv::memory::TlPort::Instruction);
             req.address = h_line_base;
@@ -592,7 +586,7 @@ void CPU::fetch_read_instruction_word(Machine& machine) {
         simrv::memory::TlChannelA req_l{};
         req_l.opcode = simrv::memory::TlOpcodeA::Get;
         req_l.size = static_cast<uint8_t>(Funct3::Lhu) & 0x3;
-        req_l.hart = static_cast<simrv::xlen::HartId>(state_.mhartid);
+        req_l.hart = hart_id();
         req_l.source =
             simrv::memory::make_tl_source(req_l.hart, simrv::memory::TlPort::Instruction);
         req_l.address = ctx.padr1.raw();
@@ -618,7 +612,7 @@ void CPU::fetch_read_instruction_word(Machine& machine) {
                 simrv::memory::TlChannelA req_h{};
                 req_h.opcode = simrv::memory::TlOpcodeA::Get;
                 req_h.size = static_cast<uint8_t>(Funct3::Lhu) & 0x3;
-                req_h.hart = static_cast<simrv::xlen::HartId>(state_.mhartid);
+                req_h.hart = hart_id();
                 req_h.source =
                     simrv::memory::make_tl_source(req_h.hart, simrv::memory::TlPort::Instruction);
                 req_h.address = ctx.padr2.raw();

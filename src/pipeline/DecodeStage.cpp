@@ -18,6 +18,13 @@ namespace simrv::core {
 
 using namespace simrv::isa;
 
+namespace {
+inline void raise_decode_exception(pipeline::PipelineContext& ctx, ExceptionCode code) noexcept {
+    ctx.pending_exception = code;
+    ctx.pending_tval = ctx.ir_org;
+}
+}  // namespace
+
 // ==========================================
 // ID (Instruction Decode) Stage
 // ==========================================
@@ -68,22 +75,19 @@ void CPU::fetch_operands(Machine& /*machine*/) {
     if (funct3 == Funct3::Priv) {
         if (!TrapController::can_execute_privileged_instruction(
                 state_.priv, state_.misa, state_.mstatus, funct12, ctx.funct7)) {
-            ctx.pending_exception = ExceptionCode::IllegalInstruction;
-            ctx.pending_tval = ctx.ir_org;
+            raise_decode_exception(ctx, ExceptionCode::IllegalInstruction);
             return;
         }
     } else {
         const bool is_write =
             ((static_cast<uint8_t>(funct3) & 0x3u) == 0x1u) || (std::to_underlying(ctx.rs1) != 0);
         if (!TrapController::can_access_csr(state_.priv, state_.misa, w_csr_addr, is_write)) {
-            ctx.pending_exception = ExceptionCode::IllegalInstruction;
-            ctx.pending_tval = ctx.ir_org;
+            raise_decode_exception(ctx, ExceptionCode::IllegalInstruction);
             return;
         }
         if (w_csr_addr == csr_addr(Csr::Satp) && state_.priv == kPrivSupervisor &&
             (state_.mstatus & MstatusBit::Tvm) != 0) {
-            ctx.pending_exception = ExceptionCode::IllegalInstruction;
-            ctx.pending_tval = ctx.ir_org;
+            raise_decode_exception(ctx, ExceptionCode::IllegalInstruction);
             return;
         }
 
@@ -96,8 +100,7 @@ void CPU::fetch_operands(Machine& /*machine*/) {
                     access_denied = access_denied || ((state_.scounteren & counter_bit) == 0);
                 }
                 if (access_denied) {
-                    ctx.pending_exception = ExceptionCode::IllegalInstruction;
-                    ctx.pending_tval = ctx.ir_org;
+                    raise_decode_exception(ctx, ExceptionCode::IllegalInstruction);
                     return;
                 }
             }
@@ -108,8 +111,7 @@ void CPU::fetch_operands(Machine& /*machine*/) {
                                   w_csr_addr == csr_addr(Csr::Frm) ||
                                   w_csr_addr == csr_addr(Csr::Fcsr))) {
         if ((state_.mstatus & MstatusBit::Fs) == 0) {
-            ctx.pending_exception = ExceptionCode::IllegalInstruction;
-            ctx.pending_tval = ctx.ir_org;
+            raise_decode_exception(ctx, ExceptionCode::IllegalInstruction);
             return;
         }
     }
@@ -117,8 +119,7 @@ void CPU::fetch_operands(Machine& /*machine*/) {
     if (funct3 != Funct3::Priv) {
         auto res = read_csr(w_csr_addr);
         if (!res) {
-            ctx.pending_exception = res.error();
-            ctx.pending_tval = ctx.ir_org;
+            raise_decode_exception(ctx, res.error());
             return;
         }
         ctx.rcsr = *res;

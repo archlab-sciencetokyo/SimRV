@@ -105,8 +105,8 @@ auto PageTableWalker::begin_walk(simrv::xlen::VirtAddr v_addr, PteAccess access,
         levels = 2;
         state.pte_size = 4;
         state.vpn_bits_per_level = 10;
-    } else if (xlen == 64 && (mode == 8 || mode == 9)) {
-        levels = mode == 8 ? 3 : 4;
+    } else if (xlen == 64 && (mode == 8 || mode == 9 || mode == 10)) {
+        levels = mode == 8 ? 3 : (mode == 9 ? 4 : 5);
         state.pte_size = 8;
         state.vpn_bits_per_level = 9;
     } else {

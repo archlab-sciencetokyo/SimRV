@@ -4,8 +4,10 @@
  */
 #pragma once
 
+#include <algorithm>
 #include <concepts>
 #include <cstdint>
+#include <type_traits>
 #include <utility>
 
 #include "simrv/isa/InstructionFields.hpp"
@@ -62,6 +64,41 @@ enum class Funct5Amo : uint8_t {
     Max = 0x14,   ///< Atomic Signed Maximum
     Maxu = 0x1c,  ///< Atomic Unsigned Maximum
 };
+
+/**
+ * @brief Evaluates an AMO arithmetic/logic operation between register operand and memory value.
+ */
+template <typename T>
+constexpr auto perform_amo_op(T reg_val, T mem_val, Funct5Amo funct5) -> T {
+    using SignedT = std::make_signed_t<T>;
+    using UnsignedT = std::make_unsigned_t<T>;
+    switch (funct5) {
+        case Funct5Amo::Swap:
+            return reg_val;
+        case Funct5Amo::Add:
+            return mem_val + reg_val;
+        case Funct5Amo::And:
+            return mem_val & reg_val;
+        case Funct5Amo::Or:
+            return mem_val | reg_val;
+        case Funct5Amo::Xor:
+            return mem_val ^ reg_val;
+        case Funct5Amo::Min:
+            return static_cast<T>(
+                std::min(static_cast<SignedT>(reg_val), static_cast<SignedT>(mem_val)));
+        case Funct5Amo::Max:
+            return static_cast<T>(
+                std::max(static_cast<SignedT>(reg_val), static_cast<SignedT>(mem_val)));
+        case Funct5Amo::Minu:
+            return static_cast<T>(
+                std::min(static_cast<UnsignedT>(reg_val), static_cast<UnsignedT>(mem_val)));
+        case Funct5Amo::Maxu:
+            return static_cast<T>(
+                std::max(static_cast<UnsignedT>(reg_val), static_cast<UnsignedT>(mem_val)));
+        default:
+            return mem_val;
+    }
+}
 
 template <std::integral I>
 constexpr auto operator==(I lhs, Funct5Amo rhs) noexcept -> bool {

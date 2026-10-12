@@ -13,9 +13,6 @@
             "environment": {
                 "CCACHE_DIR": "${sourceDir}/build/.ccache",
                 "CCACHE_TEMPDIR": "${sourceDir}/build/.ccache-tmp"
-            },
-            "cacheVariables": {
-                "CMAKE_EXPORT_COMPILE_COMMANDS": "ON"
             }
         },
         {
@@ -41,6 +38,18 @@
             }
         },
         {
+            "name": "simrv-rv64-sanitizer",
+            "hidden": true,
+            "inherits": [
+                "simrv-release",
+                "simrv-rv64"
+            ],
+            "environment": {
+                "CCACHE_DIR": "/tmp/simrv-build/.ccache",
+                "CCACHE_TEMPDIR": "/tmp/simrv-build/.ccache-tmp"
+            }
+        },
+        {
             "name": "rv32-release",
             "displayName": "RV32 Release (Ninja)",
             "inherits": [
@@ -61,41 +70,24 @@
             "cacheVariables": {}
         },
         {
-            "name": "rv32-dev",
-            "displayName": "RV32 Development (Ninja, no LTO)",
+            "name": "rv64-debug",
+            "displayName": "RV64 Debug (Ninja)",
             "inherits": [
-                "simrv-release",
-                "simrv-rv32"
-            ],
-            "binaryDir": "${sourceDir}/build/rv32-dev",
-            "cacheVariables": {
-                "SIMRV_ENABLE_LTO": "OFF"
-            }
-        },
-        {
-            "name": "rv64-dev",
-            "displayName": "RV64 Development (Ninja, no LTO)",
-            "inherits": [
-                "simrv-release",
+                "simrv-base",
                 "simrv-rv64"
             ],
-            "binaryDir": "${sourceDir}/build/rv64-dev",
+            "binaryDir": "${sourceDir}/build/rv64-debug",
             "cacheVariables": {
-                "SIMRV_ENABLE_LTO": "OFF"
+                "CMAKE_BUILD_TYPE": "Debug"
             }
         },
         {
             "name": "rv64-native-release",
             "displayName": "RV64 Native-Host Release (Ninja)",
-            "generator": "Ninja",
-            "environment": {
-                "CCACHE_DIR": "${sourceDir}/build/.ccache",
-                "CCACHE_TEMPDIR": "${sourceDir}/build/.ccache-tmp"
-            },
+            "inherits": "simrv-base",
             "binaryDir": "${sourceDir}/build/rv64-native-release",
             "cacheVariables": {
                 "CMAKE_BUILD_TYPE": "Release",
-                "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
                 "CMAKE_C_COMPILER": "clang",
                 "CMAKE_CXX_COMPILER": "clang++",
                 "SIMRV_XLEN": "64",
@@ -105,49 +97,28 @@
         {
             "name": "rv64-asan",
             "displayName": "RV64 ASAN (Ninja)",
-            "inherits": [
-                "simrv-release",
-                "simrv-rv64"
-            ],
+            "inherits": "simrv-rv64-sanitizer",
             "binaryDir": "/tmp/simrv-build/rv64-asan",
             "cacheVariables": {
                 "SIMRV_ENABLE_ASAN": "ON"
-            },
-            "environment": {
-                "CCACHE_DIR": "/tmp/simrv-build/.ccache",
-                "CCACHE_TEMPDIR": "/tmp/simrv-build/.ccache-tmp"
             }
         },
         {
             "name": "rv64-ubsan",
             "displayName": "RV64 UBSAN (Ninja)",
-            "inherits": [
-                "simrv-release",
-                "simrv-rv64"
-            ],
+            "inherits": "simrv-rv64-sanitizer",
             "binaryDir": "/tmp/simrv-build/rv64-ubsan",
             "cacheVariables": {
                 "SIMRV_ENABLE_UBSAN": "ON"
-            },
-            "environment": {
-                "CCACHE_DIR": "/tmp/simrv-build/.ccache",
-                "CCACHE_TEMPDIR": "/tmp/simrv-build/.ccache-tmp"
             }
         },
         {
             "name": "rv64-tsan",
             "displayName": "RV64 TSAN (Ninja)",
-            "inherits": [
-                "simrv-release",
-                "simrv-rv64"
-            ],
+            "inherits": "simrv-rv64-sanitizer",
             "binaryDir": "/tmp/simrv-build/rv64-tsan",
             "cacheVariables": {
                 "SIMRV_ENABLE_TSAN": "ON"
-            },
-            "environment": {
-                "CCACHE_DIR": "/tmp/simrv-build/.ccache",
-                "CCACHE_TEMPDIR": "/tmp/simrv-build/.ccache-tmp"
             }
         }
     ],
@@ -161,6 +132,15 @@
             }
         },
         {
+            "name": "simrv-sanitizer-build",
+            "hidden": true,
+            "inherits": "simrv-build-base",
+            "environment": {
+                "CCACHE_DIR": "/tmp/simrv-build/.ccache",
+                "CCACHE_TEMPDIR": "/tmp/simrv-build/.ccache-tmp"
+            }
+        },
+        {
             "name": "rv32-release",
             "configurePreset": "rv32-release",
             "inherits": "simrv-build-base"
@@ -171,14 +151,10 @@
             "inherits": "simrv-build-base"
         },
         {
-            "name": "rv32-dev",
-            "configurePreset": "rv32-dev",
-            "inherits": "simrv-build-base"
-        },
-        {
-            "name": "rv64-dev",
-            "configurePreset": "rv64-dev",
-            "inherits": "simrv-build-base"
+            "name": "rv64-debug",
+            "configurePreset": "rv64-debug",
+            "inherits": "simrv-build-base",
+            "jobs": 4
         },
         {
             "name": "rv64-native-release",
@@ -188,35 +164,35 @@
         {
             "name": "rv64-asan",
             "configurePreset": "rv64-asan",
-            "inherits": "simrv-build-base",
-            "environment": {
-                "CCACHE_DIR": "/tmp/simrv-build/.ccache",
-                "CCACHE_TEMPDIR": "/tmp/simrv-build/.ccache-tmp"
-            }
+            "inherits": "simrv-sanitizer-build"
         },
         {
             "name": "rv64-ubsan",
             "configurePreset": "rv64-ubsan",
-            "inherits": "simrv-build-base",
-            "environment": {
-                "CCACHE_DIR": "/tmp/simrv-build/.ccache",
-                "CCACHE_TEMPDIR": "/tmp/simrv-build/.ccache-tmp"
-            }
+            "inherits": "simrv-sanitizer-build"
         },
         {
             "name": "rv64-tsan",
             "configurePreset": "rv64-tsan",
-            "inherits": "simrv-build-base",
-            "environment": {
-                "CCACHE_DIR": "/tmp/simrv-build/.ccache",
-                "CCACHE_TEMPDIR": "/tmp/simrv-build/.ccache-tmp"
-            }
+            "inherits": "simrv-sanitizer-build"
         }
     ],
     "testPresets": [
         {
             "name": "rv64-gate",
             "configurePreset": "rv64-release",
+            "output": {
+                "outputOnFailure": true
+            },
+            "filter": {
+                "include": {
+                    "label": "gate"
+                }
+            }
+        },
+        {
+            "name": "rv64-debug-gate",
+            "configurePreset": "rv64-debug",
             "output": {
                 "outputOnFailure": true
             },

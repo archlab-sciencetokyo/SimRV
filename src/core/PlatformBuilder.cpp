@@ -4,14 +4,14 @@
 #include <memory>
 
 #include "MachineRuntime.hpp"
-#include "simrv/core/Machine.hpp"
 #include "simrv/core/Logger.hpp"
+#include "simrv/core/Machine.hpp"
 #include "simrv/core/SoCDeviceRegistry.hpp"
 #include "simrv/device/RingBufferEthernetMmio.hpp"
 #include "simrv/device/mmio/VirtioMmioBlock.hpp"
 #include "simrv/device/mmio/VirtioMmioConsole.hpp"
-#include "simrv/device/mmio/VirtioMmioGpu.hpp"
 #include "simrv/device/mmio/VirtioMmioFs.hpp"
+#include "simrv/device/mmio/VirtioMmioGpu.hpp"
 #include "simrv/device/mmio/VirtioMmioInput.hpp"
 #include "simrv/device/mmio/VirtioMmioNet.hpp"
 #include "simrv/device/mmio/VirtioMmioRng.hpp"
@@ -19,8 +19,8 @@
 #include "simrv/device/pci/PcieRootComplex.hpp"
 #include "simrv/device/pci/VirtioPciBlock.hpp"
 #include "simrv/device/pci/VirtioPciConsole.hpp"
-#include "simrv/device/pci/VirtioPciGpu.hpp"
 #include "simrv/device/pci/VirtioPciFs.hpp"
+#include "simrv/device/pci/VirtioPciGpu.hpp"
 #include "simrv/device/pci/VirtioPciInput.hpp"
 #include "simrv/device/pci/VirtioPciNet.hpp"
 #include "simrv/device/pci/VirtioPciRng.hpp"
@@ -32,7 +32,7 @@ void PlatformBuilder::compose(Machine& machine) {
     const auto composition = platform_composition(machine.config.platform_profile);
     const auto& disk_path = machine.config.files.disk_path;
     const auto network_mode = [&]() {
-        using Mode = simrv::device::NetworkBackend::Mode;
+        using Mode = simrv::device::virtio::NetBackend::Mode;
         if (machine.config.network.mode == "tap") return Mode::Tap;
         if (machine.config.network.mode == "socket") return Mode::Socket;
         if (machine.config.network.mode == "none") return Mode::None;
@@ -41,11 +41,12 @@ void PlatformBuilder::compose(Machine& machine) {
 
     if (const auto device =
             SoCDeviceRegistry::descriptor(machine.config.soc, SoCDeviceKind::RingBufferEthernet)) {
-        machine.runtime_->ring_buffer_ethernet = std::make_unique<simrv::device::RingBufferEthernetMmio>(
-            machine, device->name, device->base, device->size, device->irq,
-            device->find_region("rxbuf")->base, device->find_region("rxbuf")->size,
-            device->find_region("txbuf")->base, device->find_region("txbuf")->size,
-            device->mac_address, network_mode);
+        machine.runtime_->ring_buffer_ethernet =
+            std::make_unique<simrv::device::RingBufferEthernetMmio>(
+                machine, device->name, device->base, device->size, device->irq,
+                device->find_region("rxbuf")->base, device->find_region("rxbuf")->size,
+                device->find_region("txbuf")->base, device->find_region("txbuf")->size,
+                device->mac_address, network_mode);
     }
 
     if (composition.pcie) {
@@ -76,8 +77,8 @@ void PlatformBuilder::compose(Machine& machine) {
             machine.runtime_->pci_net = std::make_shared<simrv::device::VirtioPciNet>(network_mode);
         }
         if (!machine.config.files.virtiofs_path.empty() && enabled(SoCDeviceKind::VirtioMmioFs)) {
-            machine.runtime_->pci_fs = std::make_shared<simrv::device::VirtioPciFs>(
-                machine.config.files.virtiofs_path);
+            machine.runtime_->pci_fs =
+                std::make_shared<simrv::device::VirtioPciFs>(machine.config.files.virtiofs_path);
             if (!machine.runtime_->pci_fs->is_ready())
                 simrv::log::error("cannot open VirtIO-FS share directory '{}'",
                                   machine.config.files.virtiofs_path);
@@ -85,7 +86,7 @@ void PlatformBuilder::compose(Machine& machine) {
         const std::array<std::shared_ptr<simrv::device::PciDevice>, 8> pci_devices = {
             machine.runtime_->pci_disk, machine.runtime_->pci_console, machine.runtime_->pci_rng,
             machine.runtime_->pci_gpu,  machine.runtime_->pci_input,   machine.runtime_->pci_sound,
-            machine.runtime_->pci_net,   machine.runtime_->pci_fs,
+            machine.runtime_->pci_net,  machine.runtime_->pci_fs,
         };
         for (uint8_t slot = 1; slot <= pci_devices.size(); ++slot) {
             if (pci_devices[slot - 1]) {

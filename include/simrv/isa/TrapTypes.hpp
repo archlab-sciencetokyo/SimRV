@@ -30,6 +30,8 @@ enum class ExceptionCode : uint8_t {
     FetchPageFault = 0xc,
     LoadPageFault = 0xd,
     StorePageFault = 0xf,
+    SoftwareCheck = 0x12,  ///< Software check / pointer checking (cause 18, Privileged ISA 1.13)
+    HardwareError = 0x13,  ///< Hardware error (cause 19, Privileged ISA 1.13)
 };
 
 constexpr auto to_trap_cause(ExceptionCode code) noexcept -> simrv::xlen::TrapCause {
@@ -77,8 +79,7 @@ constexpr auto trap_is_interrupt(simrv::xlen::TrapCause cause) -> bool {
 constexpr auto select_highest_priority_interrupt(simrv::xlen::Word mask) -> simrv::xlen::Word {
     // Fixed priority: MEI -> MSI -> MTI -> SEI -> SSI -> STI -> LCOFI. Platform interrupt
     // bits (16+) fall back to descending cause number, SimRV's documented custom ordering.
-    constexpr std::array<simrv::xlen::Word, 7> kPriorityOrder = {11u, 3u, 7u, 9u, 1u, 5u,
-                                                                 13u};
+    constexpr std::array<simrv::xlen::Word, 7> kPriorityOrder = {11u, 3u, 7u, 9u, 1u, 5u, 13u};
     for (simrv::xlen::Word const irq : kPriorityOrder) {
         if ((mask & (1u << irq)) != 0u) {
             return irq;

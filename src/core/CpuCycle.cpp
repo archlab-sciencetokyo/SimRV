@@ -23,8 +23,8 @@
 #include "simrv/memory/MemorySubsystem.hpp"
 #include "simrv/memory/MemoryUtil.hpp"
 #include "simrv/pipeline/OperationTraits.hpp"
-#include "simrv/xlen/Constants.hpp"
 #include "simrv/xlen/AddressTypes.hpp"
+#include "simrv/xlen/Constants.hpp"
 #include "simrv/xlen/IdentifierTypes.hpp"
 
 namespace simrv::core {
@@ -59,24 +59,13 @@ auto execute_dram_amo(T* mem_ptr, simrv::xlen::Word rs2_val, Funct5Amo funct5) -
             return atomic_mem.fetch_and(op_val, std::memory_order_acq_rel);
         case Funct5Amo::Or:
             return atomic_mem.fetch_or(op_val, std::memory_order_acq_rel);
-        case Funct5Amo::Min: {
-            using SignedT = std::make_signed_t<T>;
-            return atomic_update(atomic_mem, [op_val](T old) {
-                return static_cast<T>(
-                    std::min<SignedT>(static_cast<SignedT>(old), static_cast<SignedT>(op_val)));
-            });
-        }
-        case Funct5Amo::Max: {
-            using SignedT = std::make_signed_t<T>;
-            return atomic_update(atomic_mem, [op_val](T old) {
-                return static_cast<T>(
-                    std::max<SignedT>(static_cast<SignedT>(old), static_cast<SignedT>(op_val)));
-            });
-        }
+        case Funct5Amo::Min:
+        case Funct5Amo::Max:
         case Funct5Amo::Minu:
-            return atomic_update(atomic_mem, [op_val](T old) { return std::min<T>(old, op_val); });
         case Funct5Amo::Maxu:
-            return atomic_update(atomic_mem, [op_val](T old) { return std::max<T>(old, op_val); });
+            return atomic_update(atomic_mem, [op_val, funct5](T old) {
+                return isa::perform_amo_op(op_val, old, funct5);
+            });
         default:
             return atomic_mem.load(std::memory_order_relaxed);
     }
@@ -123,8 +112,7 @@ void CPU::run_fast_cycle_miss(Machine& machine) {
     if (simrv::compiler::unlikely(machine.breakpoint_manager().has_any())) {
         if (auto hit = machine.breakpoint_manager().check_reg_changes(state_, prev_state_)) {
             if (auto* stub = machine.debugger(); stub && stub->is_connected()) {
-                machine.debug_halt(static_cast<simrv::xlen::HartId>(state_.mhartid),
-                                   GdbSignal::SigTrap);
+                machine.debug_halt(hart_id(), GdbSignal::SigTrap);
             } else if (auto sink = machine.telemetry_sink_raw()) {
                 sink->set_status_override(hit->description);
                 sink->pause_loop();
@@ -153,19 +141,13 @@ void CPU::run_cycle(Machine& machine) {
     const simrv::xlen::Counter retired_before = e_icount;
     if (simrv::compiler::unlikely(machine.breakpoint_manager().has_any())) {
         prev_state_ = state_;
-        if (auto hit = machine.breakpoint_manager().check_pc(
-                state_.pc, simrv::xlen::HartId{static_cast<uint32_t>(state_.mhartid)}, e_icount)) {
+        if (auto hit = machine.breakpoint_manager().check_pc(state_.pc, hart_id(), e_icount)) {
             if (auto* stub = machine.debugger(); stub && stub->is_connected()) {
-                machine.breakpoint_manager().set_skip_once_pc(
-                    state_.pc, simrv::xlen::HartId{static_cast<uint32_t>(state_.mhartid)},
-                    e_icount);
-                machine.debug_halt(static_cast<simrv::xlen::HartId>(state_.mhartid),
-                                   GdbSignal::SigTrap, "swbreak:;");
+                machine.breakpoint_manager().set_skip_once_pc(state_.pc, hart_id(), e_icount);
+                machine.debug_halt(hart_id(), GdbSignal::SigTrap, "swbreak:;");
                 return;
             } else if (auto sink = machine.telemetry_sink_raw()) {
-                machine.breakpoint_manager().set_skip_once_pc(
-                    state_.pc, simrv::xlen::HartId{static_cast<uint32_t>(state_.mhartid)},
-                    e_icount);
+                machine.breakpoint_manager().set_skip_once_pc(state_.pc, hart_id(), e_icount);
                 sink->set_status_override(hit->description);
                 sink->pause_loop();
                 return;
@@ -308,8 +290,7 @@ void CPU::run_cycle(Machine& machine) {
         }
         if (ca_pipeline.retired_this_cycle && state_.pc != retired_pc) {
             machine.memory().system_bus().cancel_source(
-                simrv::memory::make_tl_source(static_cast<simrv::xlen::HartId>(state_.mhartid),
-                                              simrv::memory::TlPort::Instruction));
+                simrv::memory::make_tl_source(hart_id(), simrv::memory::TlPort::Instruction));
             ca_pipeline.reset();
             ca_pipeline.initialized = true;
             ca_pipeline.fetch_pc = state_.pc;
@@ -385,8 +366,7 @@ void CPU::run_cycle(Machine& machine) {
     if (simrv::compiler::unlikely(machine.breakpoint_manager().has_any())) {
         if (auto hit = machine.breakpoint_manager().check_reg_changes(state_, prev_state_)) {
             if (auto* stub = machine.debugger(); stub && stub->is_connected()) {
-                machine.debug_halt(static_cast<simrv::xlen::HartId>(state_.mhartid),
-                                   GdbSignal::SigTrap);
+                machine.debug_halt(hart_id(), GdbSignal::SigTrap);
             } else if (auto sink = machine.telemetry_sink_raw()) {
                 sink->set_status_override(hit->description);
                 sink->pause_loop();
@@ -531,8 +511,7 @@ void CPU::run_cycle_baremetal_miss(Machine& machine) {
     if (simrv::compiler::unlikely(machine.breakpoint_manager().has_any())) {
         if (auto hit = machine.breakpoint_manager().check_reg_changes(state_, prev_state_)) {
             if (auto* stub = machine.debugger(); stub && stub->is_connected()) {
-                machine.debug_halt(static_cast<simrv::xlen::HartId>(state_.mhartid),
-                                   GdbSignal::SigTrap);
+                machine.debug_halt(hart_id(), GdbSignal::SigTrap);
             } else if (auto sink = machine.telemetry_sink_raw()) {
                 sink->set_status_override(hit->description);
                 sink->pause_loop();
@@ -561,14 +540,10 @@ void CPU::run_cycle_baremetal(Machine& machine) {
     const simrv::xlen::Counter retired_before = e_icount;
     if (simrv::compiler::unlikely(machine.breakpoint_manager().has_any())) {
         prev_state_ = state_;
-        if (auto hit = machine.breakpoint_manager().check_pc(
-                state_.pc, simrv::xlen::HartId{static_cast<uint32_t>(state_.mhartid)}, e_icount)) {
+        if (auto hit = machine.breakpoint_manager().check_pc(state_.pc, hart_id(), e_icount)) {
             if (auto* stub = machine.debugger(); stub && stub->is_connected()) {
-                machine.breakpoint_manager().set_skip_once_pc(
-                    state_.pc, simrv::xlen::HartId{static_cast<uint32_t>(state_.mhartid)},
-                    e_icount);
-                machine.debug_halt(static_cast<simrv::xlen::HartId>(state_.mhartid),
-                                   GdbSignal::SigTrap, "swbreak:;");
+                machine.breakpoint_manager().set_skip_once_pc(state_.pc, hart_id(), e_icount);
+                machine.debug_halt(hart_id(), GdbSignal::SigTrap, "swbreak:;");
                 return;
             }
             if (auto sink = machine.telemetry_sink_raw()) {
@@ -617,8 +592,7 @@ void CPU::run_cycle_baremetal(Machine& machine) {
                 if (auto hit =
                         machine.breakpoint_manager().check_reg_changes(state_, prev_state_)) {
                     if (auto* stub = machine.debugger(); stub && stub->is_connected()) {
-                        machine.debug_halt(static_cast<simrv::xlen::HartId>(state_.mhartid),
-                                           GdbSignal::SigTrap);
+                        machine.debug_halt(hart_id(), GdbSignal::SigTrap);
                     } else if (auto sink = machine.telemetry_sink_raw()) {
                         sink->set_status_override(hit->description);
                         sink->pause_loop();
@@ -655,12 +629,12 @@ void CPU::run_memory_stage_baremetal(Machine& machine) {
         return;
     }
 
-    if (ctx.op_id >= OperationId::VSETVLI && ctx.op_id <= OperationId::VWSLL_VI) {
+    if (is_vector_op(ctx.op_id)) {
         return;
     }
 
     const auto opcode = static_cast<Opcode>(ctx.opcode);
-    const auto funct5 = static_cast<Funct5Amo>(ctx.funct5);
+    const auto funct5 = ctx.funct5;
     const auto addr = ctx.mem_addr;
     const size_t access_size = size_t{1} << (static_cast<unsigned>(ctx.funct3) & 0x3u);
     ctx.mem_paddr = addr;
@@ -749,8 +723,7 @@ void CPU::run_memory_stage_baremetal(Machine& machine) {
     if (opcode == Opcode::Amo && funct5 == Funct5Amo::Lr) {
         state_.load_res = addr;
         state_.reserved = 1;
-        machine.memory_.reservation_table().set_reservation(
-            static_cast<simrv::xlen::HartId>(state_.mhartid), addr);
+        machine.memory_.reservation_table().set_reservation(hart_id(), addr);
     }
 
     // Prepare Store Data
@@ -859,8 +832,8 @@ void CPU::run_memory_stage_baremetal(Machine& machine) {
         (opcode == Opcode::Amo && funct5 != Funct5Amo::Lr)) {
         if (!ctx.pending_exception.has_value()) {
             state_.reserved = 0;
-            machine.memory_.reservation_table().invalidate_range(
-                ctx.mem_paddr, access_size, static_cast<simrv::xlen::HartId>(state_.mhartid));
+            machine.memory_.reservation_table().invalidate_range(ctx.mem_paddr, access_size,
+                                                                 hart_id());
         }
     }
 }

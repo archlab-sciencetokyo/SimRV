@@ -2401,18 +2401,22 @@ void test_aclint() {
 
     // MSWI test
     mswi.write32(0x00, 1);
+    machine.cpu.apply_pending_interrupt_lines(machine);
     assert((machine.cpu.state().mip & simrv::core::MipBit::Msip) != 0);
     assert(mswi.read32(0x00) == 1);
     mswi.write32(0x00, 0);
+    machine.cpu.apply_pending_interrupt_lines(machine);
     assert((machine.cpu.state().mip & simrv::core::MipBit::Msip) == 0);
 
     // MTIMER test: set mtimecmp = 100, mtime = 150
     mtimer.write64(0x4000, 100);
     mtimer.write64(0x7ff8, 150);
+    machine.cpu.apply_pending_interrupt_lines(machine);
     assert((machine.cpu.state().mip & simrv::core::MipBit::Mtip) != 0);
 
     // Clear by setting mtimecmp higher
     mtimer.write64(0x4000, 200);
+    machine.cpu.apply_pending_interrupt_lines(machine);
     assert((machine.cpu.state().mip & simrv::core::MipBit::Mtip) == 0);
     std::cout << "[PASS] test_aclint\n";
 }
@@ -2431,6 +2435,7 @@ void test_aia_aplic_and_imsic() {
     aplic_s.write32(0x0000, 0x100);    // IE=1, DM=0 (Direct mode)
     aplic_s.write32(0x1e00, 1U << 1);  // Enable source 1
     aplic_s.set_irq(1, true);
+    machine.cpu.apply_pending_interrupt_lines(machine);
 
     assert((machine.cpu.state().mip & simrv::core::MipBit::Seip) != 0);
 
@@ -2438,6 +2443,7 @@ void test_aia_aplic_and_imsic() {
     imsic_s.csr_write(0, 0x70, 1);        // eidelivery = 1
     imsic_s.csr_write(0, 0xC0, 1U << 5);  // enable interrupt ID 5
     imsic_s.trigger_msi(0, 5);
+    machine.cpu.apply_pending_interrupt_lines(machine);
 
     assert((machine.cpu.state().mip & simrv::core::MipBit::Seip) != 0);
     assert((imsic_s.csr_read(0, 0x44) & 0xffff) == 5);  // topei returns ID 5
@@ -2494,6 +2500,19 @@ void test_pcie_and_virtio_pci() {
     }
     auto input = std::make_shared<simrv::device::VirtioPciInput>();
     auto sound = std::make_shared<simrv::device::VirtioPciSound>();
+    const auto advertises_version_1 = [](simrv::device::VirtioPciDevice& device) {
+        device.bar_write(0, 0x00, 1, 4);
+        const bool supported =
+            device.bar_read(0, 0x04, 4) == simrv::device::virtio::kVirtioFVersion1FeatureWord;
+        device.bar_write(0, 0x00, 0, 4);
+        return supported;
+    };
+    if (!advertises_version_1(*blk) || !advertises_version_1(*console) ||
+        !advertises_version_1(*rng) || !advertises_version_1(*gpu) ||
+        !advertises_version_1(*input) || !advertises_version_1(*sound)) {
+        std::cerr << "VirtIO PCI devices must advertise the shared VERSION_1 feature word\n";
+        std::abort();
+    }
 
     rc.attach_device(0, 2, 0, console);
     rc.attach_device(0, 3, 0, rng);
@@ -2533,6 +2552,10 @@ void test_pcie_and_virtio_pci() {
 
     // Attach & Verify Net at 00:07.0 (ECAM offset 0x38000)
     auto net = std::make_shared<simrv::device::VirtioPciNet>();
+    if (!advertises_version_1(*net)) {
+        std::cerr << "VirtIO PCI net must advertise the shared VERSION_1 feature word\n";
+        std::abort();
+    }
     rc.attach_device(0, 7, 0, net);
     const uint32_t net_id = rc.ecam_read((7 << 15) + 0x00, 4);
     assert((net_id & 0xffff) == 0x1AF4);
@@ -2625,6 +2648,12 @@ void test_virtio_mmio_v2() {
         std::cerr << "VirtIO block feature advertisement mismatch\n";
         std::abort();
     }
+    blk.write32(0x14, 1);
+    if (blk.read32(0x10) != simrv::device::virtio::kVirtioFVersion1FeatureWord) {
+        std::cerr << "VirtIO MMIO block VERSION_1 feature word mismatch\n";
+        std::abort();
+    }
+    blk.write32(0x14, 0);
 
     assert(con.read32(0x00) == 0x74726976);
     assert(con.read32(0x04) == 2);

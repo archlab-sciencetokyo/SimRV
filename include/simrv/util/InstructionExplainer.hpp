@@ -9,7 +9,9 @@
 #include <string_view>
 #include <utility>
 
+#include "simrv/core/CsrTypes.hpp"
 #include "simrv/isa/OperationId.hpp"
+#include "simrv/xlen/IdentifierTypes.hpp"
 
 namespace simrv::util {
 
@@ -28,7 +30,21 @@ auto get_operation_details(isa::OperationId op_id) -> std::pair<std::string_view
 /**
  * @brief Get the symbolic name of a CSR from its address.
  */
-std::string csr_name(uint32_t csr_addr);
+[[nodiscard]] auto csr_name(uint32_t csr_addr) -> std::string;
+
+/**
+ * @brief Get the symbolic name of a CSR from its strongly typed number.
+ */
+[[nodiscard]] inline auto csr_name(simrv::xlen::CsrNumber csr) -> std::string {
+    return csr_name(csr.value());
+}
+
+/**
+ * @brief Get the symbolic name of a CSR from its strongly typed enum.
+ */
+[[nodiscard]] inline auto csr_name(simrv::core::Csr csr) -> std::string {
+    return csr_name(static_cast<uint32_t>(csr));
+}
 
 /**
  * @brief Get the ISA extension name (e.g., RV32I, RV32M, Privileged) that an instruction belongs

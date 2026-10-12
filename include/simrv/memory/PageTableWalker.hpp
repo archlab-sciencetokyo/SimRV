@@ -7,8 +7,8 @@
 #include <expected>
 
 #include "simrv/memory/RamView.hpp"
-#include "simrv/xlen/Constants.hpp"
 #include "simrv/xlen/AddressTypes.hpp"
+#include "simrv/xlen/Constants.hpp"
 
 namespace simrv::core {
 struct ArchState;
@@ -101,8 +101,8 @@ struct PteView {
     [[nodiscard]] constexpr auto table_pointer_has_reserved_bits() const noexcept -> bool {
         return (raw & (PteFlag::U | PteFlag::A | PteFlag::D)) != 0;
     }
-    [[nodiscard]] constexpr auto ppn() const noexcept -> uint64_t {
-        return static_cast<uint64_t>(raw >> 10);
+    [[nodiscard]] constexpr auto ppn() const noexcept -> simrv::xlen::PpnIndex {
+        return static_cast<simrv::xlen::PpnIndex>(raw >> 10);
     }
     [[nodiscard]] constexpr auto flags() const noexcept -> PteFlags {
         return static_cast<PteFlags>(raw & 0xFF);
@@ -156,8 +156,6 @@ struct PageWalkResult {
     }
 };
 
-using TranslationResult = PageWalkResult;
-
 namespace memory {
 
 /**
@@ -189,6 +187,11 @@ class PageTableWalker {
         }
         if (mode == 9) {  // Sv48
             constexpr simrv::xlen::Word shift = 64 - 48;
+            return (static_cast<simrv::xlen::SignedWord>(v_addr.raw() << shift) >> shift) ==
+                   static_cast<simrv::xlen::SignedWord>(v_addr.raw());
+        }
+        if (mode == 10) {  // Sv57
+            constexpr simrv::xlen::Word shift = 64 - 57;
             return (static_cast<simrv::xlen::SignedWord>(v_addr.raw() << shift) >> shift) ==
                    static_cast<simrv::xlen::SignedWord>(v_addr.raw());
         }
@@ -231,7 +234,5 @@ class PageTableWalker {
 };
 
 }  // namespace memory
-
-using memory::PageTableWalker;
 
 }  // namespace simrv

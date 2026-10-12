@@ -210,7 +210,7 @@ inline void unpack_instruction(DecodedInstruction& ctx, simrv::xlen::Instruction
             break;
     }
 
-    ctx.traits = make_dependency_traits(op_id, ctx.opcode, ctx.rd, std::to_underlying(ctx.funct5));
+    ctx.traits = make_dependency_traits(op_id, ctx.opcode, ctx.rd, ctx.funct5);
 }
 
 }  // namespace operation

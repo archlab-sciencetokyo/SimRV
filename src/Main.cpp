@@ -194,8 +194,9 @@ auto write_lifecycle_event(std::ofstream& out, const simrv::core::Machine& machi
 auto print_isa_info() -> void {
     std::println("SimRV {} capabilities", simrv::buildinfo::kVersion);
     std::println("  host build       : RV{}", simrv::xlen::kXLenBits);
-    std::println("  public profiles  : RV32GCBV, RV64GCBV");
-    std::println("  selectable       : rv{}i, rv{}imac, rv{}gc, rv{}gcbv", simrv::xlen::kXLenBits,
+    std::println("  public profiles  : RV32GCBV, RV64GCBV (ratified RV32GCZBV, RV64GCZBV)");
+    std::println("  selectable       : rv{}i, rv{}imac, rv{}gc, rv{}gcv, rv{}gczb, rv{}gczbv",
+                 simrv::xlen::kXLenBits, simrv::xlen::kXLenBits, simrv::xlen::kXLenBits,
                  simrv::xlen::kXLenBits, simrv::xlen::kXLenBits, simrv::xlen::kXLenBits);
     std::println("  vector           : RVV 1.0 implemented subset; VLEN 128..1024 bits");
     std::println("  privilege         : M/S/U, Sv32 (RV32), Sv39/Sv48 (RV64)");

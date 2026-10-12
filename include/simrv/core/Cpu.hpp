@@ -29,8 +29,8 @@
 #include "simrv/execute/CfuUnit.hpp"
 #include "simrv/execute/ExecuteUnit.hpp"
 #include "simrv/isa/InstructionFields.hpp"
-#include "simrv/isa/IsaTypes.hpp"
 #include "simrv/isa/IsaConfig.hpp"
+#include "simrv/isa/IsaTypes.hpp"
 #include "simrv/isa/OperationId.hpp"
 #include "simrv/memory/Bus.hpp"
 #include "simrv/memory/Mmu.hpp"
@@ -40,6 +40,7 @@
 #include "simrv/pipeline/PipelineContext.hpp"
 #include "simrv/pipeline/PipelineSim.hpp"
 #include "simrv/pipeline/Scoreboard.hpp"
+#include "simrv/xlen/IdentifierTypes.hpp"
 
 namespace simrv::core {
 class Machine;
@@ -85,10 +86,10 @@ struct alignas(128) ArchState {
     simrv::xlen::CSRValue sscratch{};  ///< Supervisor Scratch register
     simrv::xlen::CSRValue
         sepc{};  ///< Supervisor Exception Program Counter (returns address on SRET)
-    simrv::xlen::TrapCause scause{};  ///< Supervisor Trap Cause
-    simrv::xlen::CSRValue stval{};    ///< Supervisor Trap Value
-    simrv::xlen::CSRValue satp{};     ///< Supervisor Address Translation and Protection (virtual
-                                   ///< memory mode and page table base physical address)
+    simrv::xlen::TrapCause scause{};     ///< Supervisor Trap Cause
+    simrv::xlen::CSRValue stval{};       ///< Supervisor Trap Value
+    simrv::xlen::CSRValue satp{};        ///< Supervisor Address Translation and Protection (virtual
+                                         ///< memory mode and page table base physical address)
     simrv::xlen::CSRValue scounteren{};  ///< Supervisor Counter Enable
 
     /* Floating-Point CSRs */
@@ -98,8 +99,8 @@ struct alignas(128) ArchState {
     /* Vector Extension CSRs */
     simrv::xlen::CSRValue vstart{};  ///< Vector Start Index (specifies the register element index
                                      ///< to start vector execution)
-    simrv::xlen::CSRValue vxsat{};  ///< Vector Fixed-Point Saturation flag
-    simrv::xlen::CSRValue vxrm{};   ///< Vector Fixed-Point Rounding Mode selector
+    simrv::xlen::CSRValue vxsat{};   ///< Vector Fixed-Point Saturation flag
+    simrv::xlen::CSRValue vxrm{};    ///< Vector Fixed-Point Rounding Mode selector
     simrv::xlen::CSRValue
         vl{};  ///< Vector Length (active number of elements to process in a vector instruction)
     simrv::xlen::CSRValue
@@ -171,6 +172,19 @@ struct alignas(128) ArchState {
 
     [[nodiscard]] constexpr auto current_xlen() const -> unsigned {
         return xlen_for_privilege(priv);
+    }
+
+    [[nodiscard]] constexpr auto hart_id() const noexcept -> simrv::xlen::HartId {
+        return simrv::xlen::HartId{static_cast<uint32_t>(mhartid)};
+    }
+
+    constexpr void canonicalize_pc() noexcept {
+        if constexpr (simrv::xlen::kIsXLen64) {
+            if (simrv::compiler::unlikely(regs.xlen == 32)) {
+                pc = static_cast<simrv::xlen::Register>(
+                    static_cast<int64_t>(static_cast<int32_t>(pc)));
+            }
+        }
     }
 
     /**
@@ -618,14 +632,7 @@ class CPU {
             dispatch_pending_interrupts();
         }
     }
-    inline void pc_sign_extend() {
-        if constexpr (simrv::xlen::kIsXLen64) {
-            if (simrv::compiler::unlikely(state_.regs.xlen == 32)) {
-                state_.pc = static_cast<simrv::xlen::Register>(
-                    static_cast<int64_t>(static_cast<int32_t>(state_.pc)));
-            }
-        }
-    }
+    inline void pc_sign_extend() { state_.canonicalize_pc(); }
 
     /// Advance PC by op.len(), update instruction counters, sign-extend PC, and process interrupts.
     SIMRV_ALWAYS_INLINE void advance_cached_pc(const CachedOp& op) {
@@ -660,6 +667,10 @@ class CPU {
     [[nodiscard]] constexpr auto state() -> ArchState& { return state_; }
     /// Access to architectural state prior to current step for diff rendering.
     [[nodiscard]] constexpr auto prev_state() const -> const ArchState& { return prev_state_; }
+    /// Strongly typed Hart identifier for SMP topology and interrupt routing.
+    [[nodiscard]] constexpr auto hart_id() const noexcept -> simrv::xlen::HartId {
+        return state_.hart_id();
+    }
 
     struct TraceHistoryEntry {
         simrv::xlen::Address pc = 0;

@@ -135,7 +135,6 @@ jobs:
           -DCMAKE_C_COMPILER="$CC" \
           -DCMAKE_CXX_COMPILER="$CXX" \
           -DSIMRV_WARNINGS_AS_ERRORS=ON \
-          -DSIMRV_ENABLE_SDL=OFF \
           "${VECTOR_ARGS[@]}"
 
     - name: Build
@@ -201,7 +200,7 @@ jobs:
     - name: Configure ASan and UBSan
       run: >-
         cmake -S . -B build/asan -G Ninja
-        -DCMAKE_BUILD_TYPE=Debug -DSIMRV_XLEN=64 -DSIMRV_ENABLE_SDL=OFF
+        -DCMAKE_BUILD_TYPE=Debug -DSIMRV_XLEN=64
         -DSIMRV_WARNINGS_AS_ERRORS=ON -DSIMRV_ENABLE_ASAN=ON -DSIMRV_ENABLE_UBSAN=ON
     - name: Build ASan and UBSan
       run: cmake --build build/asan
@@ -225,7 +224,7 @@ jobs:
     - name: Configure TSan
       run: >-
         cmake -S . -B build/tsan -G Ninja
-        -DCMAKE_BUILD_TYPE=Debug -DSIMRV_XLEN=64 -DSIMRV_ENABLE_SDL=OFF
+        -DCMAKE_BUILD_TYPE=Debug -DSIMRV_XLEN=64
         -DSIMRV_ENABLE_TSAN=ON
     - name: Build TSan
       run: cmake --build build/tsan

@@ -63,8 +63,7 @@ auto MemoryAccess::target_read(MemorySubsystem& mem, core::CPU& cpu, simrv::xlen
 
     const unsigned size_bytes = 1u << (std::to_underlying(funct3) & 0x3u);  // unchanged
     const bool is_amo = (static_cast<Opcode>(cpu.active_context().opcode) == Opcode::Amo);
-    const bool is_lr =
-        is_amo && (static_cast<Funct5Amo>(cpu.active_context().funct5) == Funct5Amo::Lr);
+    const bool is_lr = is_amo && (cpu.active_context().funct5 == Funct5Amo::Lr);
 
     const bool crosses_page =
         ((v_addr & simrv::memory::kPageMask) + size_bytes) > (1u << simrv::memory::kPageShift);
@@ -83,13 +82,13 @@ auto MemoryAccess::target_read(MemorySubsystem& mem, core::CPU& cpu, simrv::xlen
                 cpu.machine_->breakpoint_manager().check_mem_read(v_addr.raw(), size_bytes)) {
             if (cpu.machine_->debugger() && cpu.machine_->debugger()->is_connected()) {
                 cpu.machine_->debug_watch_hit(
-                    static_cast<simrv::xlen::HartId>(cpu.state().mhartid), GdbSignal::SigTrap,
+                    cpu.hart_id(), GdbSignal::SigTrap,
                     std::format("{}:{:x};",
                                 hit->watch_type == debug::WatchType::Access ? "awatch" : "rwatch",
                                 v_addr.raw()),
                     hit->description);
             } else if (cpu.machine_->tui_enabled()) {
-                cpu.machine_->debug_watch_hit(static_cast<simrv::xlen::HartId>(cpu.state().mhartid),
+                cpu.machine_->debug_watch_hit(cpu.hart_id(),
                                               GdbSignal::SigTrap, {}, hit->description);
             }
         }
@@ -207,7 +206,7 @@ auto MemoryAccess::target_read(MemorySubsystem& mem, core::CPU& cpu, simrv::xlen
             const unsigned req_size_bytes = 1u << req_size;
             const bool is_aligned = (addr & (req_size_bytes - 1u)) == 0;
 
-            req.hart = static_cast<simrv::xlen::HartId>(cpu.state().mhartid);
+            req.hart = cpu.hart_id();
             req.logical_cycle = cpu.clint_mmio.mcycle > 0 ? cpu.clint_mmio.mcycle - 1 : 0;
             req.logical_issue_sequence = cpu.next_logical_issue_sequence();
             req.source = make_tl_source(req.hart, TlPort::Data);
@@ -273,7 +272,7 @@ auto MemoryAccess::target_read(MemorySubsystem& mem, core::CPU& cpu, simrv::xlen
             }
             cpu.dcache.insert(completed_line, timed.line_data.data(), mesi_for(timed.payload.cap));
             release_evicted_line(mem.system_bus(), cpu.dcache,
-                                 static_cast<simrv::xlen::HartId>(cpu.state().mhartid),
+                                 cpu.hart_id(),
                                  TlPort::Data);
             TlChannelE ack{};
             ack.sink = timed.payload.sink;
@@ -299,7 +298,7 @@ auto MemoryAccess::target_read(MemorySubsystem& mem, core::CPU& cpu, simrv::xlen
         req.opcode = TlOpcodeA::AcquireBlock;
         req.grow = TlGrow::NtoB;
         req.size = simrv::cache::DCache::kLineShift;
-        req.hart = static_cast<simrv::xlen::HartId>(cpu.state().mhartid);
+        req.hart = cpu.hart_id();
         req.logical_cycle = cpu.clint_mmio.mcycle > 0 ? cpu.clint_mmio.mcycle - 1 : 0;
         req.logical_issue_sequence = cpu.next_logical_issue_sequence();
         req.source = make_tl_source(req.hart, TlPort::Data);
@@ -320,7 +319,7 @@ auto MemoryAccess::target_read(MemorySubsystem& mem, core::CPU& cpu, simrv::xlen
         if (mem.system_bus().acquire_block(req, resp, line_data)) {
             cpu.dcache.insert(line_base, line_data.data(), mesi_for(resp.cap));
             release_evicted_line(mem.system_bus(), cpu.dcache,
-                                 static_cast<simrv::xlen::HartId>(cpu.state().mhartid),
+                                 cpu.hart_id(),
                                  TlPort::Data);
             TlChannelE ack{};
             ack.sink = resp.sink;
@@ -426,7 +425,7 @@ void MemoryAccess::target_write(MemorySubsystem& mem, core::CPU& cpu, simrv::xle
         cpu.state().reserved = 0;
         if (cpu.machine_->num_harts() > 1 && mem.reservation_table().may_have_reservations()) {
             mem.reservation_table().invalidate_range(
-                paddr, bytes, static_cast<simrv::xlen::HartId>(cpu.state().mhartid));
+                paddr, bytes, cpu.hart_id());
         }
     };
 
@@ -435,8 +434,7 @@ void MemoryAccess::target_write(MemorySubsystem& mem, core::CPU& cpu, simrv::xle
     const bool crosses_cache_line = ((v_addr & (simrv::cache::DCache::kLineBytes - 1u)) +
                                      size_bytes) > simrv::cache::DCache::kLineBytes;
     const bool is_amo = (static_cast<Opcode>(cpu.active_context().opcode) == Opcode::Amo);
-    const bool is_sc =
-        is_amo && static_cast<Funct5Amo>(cpu.active_context().funct5) == Funct5Amo::Sc;
+    const bool is_sc = is_amo && (cpu.active_context().funct5 == Funct5Amo::Sc);
     if (simrv::compiler::unlikely((v_addr & (size_bytes - 1u)) != 0)) {
         if (is_amo) {
             cpu.active_context().pending_exception = ExceptionCode::MisalignedStore;
@@ -449,13 +447,13 @@ void MemoryAccess::target_write(MemorySubsystem& mem, core::CPU& cpu, simrv::xle
                 cpu.machine_->breakpoint_manager().check_mem_write(v_addr.raw(), size_bytes)) {
             if (cpu.machine_->debugger() && cpu.machine_->debugger()->is_connected()) {
                 cpu.machine_->debug_watch_hit(
-                    static_cast<simrv::xlen::HartId>(cpu.state().mhartid), GdbSignal::SigTrap,
+                    cpu.hart_id(), GdbSignal::SigTrap,
                     std::format("{}:{:x};",
                                 hit->watch_type == debug::WatchType::Access ? "awatch" : "watch",
                                 v_addr.raw()),
                     hit->description);
             } else if (cpu.machine_->tui_enabled()) {
-                cpu.machine_->debug_watch_hit(static_cast<simrv::xlen::HartId>(cpu.state().mhartid),
+                cpu.machine_->debug_watch_hit(cpu.hart_id(),
                                               GdbSignal::SigTrap, {}, hit->description);
             }
         }
@@ -497,7 +495,7 @@ void MemoryAccess::target_write(MemorySubsystem& mem, core::CPU& cpu, simrv::xle
         if (is_sc && !ctx.sc_reservation_checked) {
             ctx.sc_reservation_checked = true;
             bool success = mem.reservation_table().check_and_clear_reservation(
-                static_cast<simrv::xlen::HartId>(cpu.state().mhartid), addr);
+                cpu.hart_id(), addr);
             if (success && cpu.machine_->lockstep() && cpu.machine_->lockstep()->is_running()) {
                 const auto lockstep_success = cpu.machine_->lockstep()->determine_sc_success();
                 if (lockstep_success.has_value() && !lockstep_success.value()) success = false;
@@ -531,7 +529,7 @@ void MemoryAccess::target_write(MemorySubsystem& mem, core::CPU& cpu, simrv::xle
                 cpu.dcache.insert(completed_line, timed.line_data.data(),
                                   mesi_for(timed.payload.cap));
                 release_evicted_line(mem.system_bus(), cpu.dcache,
-                                     static_cast<simrv::xlen::HartId>(cpu.state().mhartid),
+                                     cpu.hart_id(),
                                      TlPort::Data);
             }
             TlChannelE ack{};
@@ -600,7 +598,7 @@ void MemoryAccess::target_write(MemorySubsystem& mem, core::CPU& cpu, simrv::xle
                 req.opcode = is_upgrade ? TlOpcodeA::AcquirePerm : TlOpcodeA::AcquireBlock;
                 req.grow = is_upgrade ? TlGrow::BtoT : TlGrow::NtoT;
                 req.size = simrv::cache::DCache::kLineShift;
-                req.hart = static_cast<simrv::xlen::HartId>(cpu.state().mhartid);
+                req.hart = cpu.hart_id();
                 req.logical_cycle = cpu.clint_mmio.mcycle > 0 ? cpu.clint_mmio.mcycle - 1 : 0;
                 req.logical_issue_sequence = cpu.next_logical_issue_sequence();
                 req.source = make_tl_source(req.hart, TlPort::Data);
@@ -631,7 +629,7 @@ void MemoryAccess::target_write(MemorySubsystem& mem, core::CPU& cpu, simrv::xle
                     if (mem.system_bus().acquire_block(req, resp, line_data)) {
                         cpu.dcache.insert(line_base, line_data.data(), mesi_for(resp.cap));
                         release_evicted_line(mem.system_bus(), cpu.dcache,
-                                             static_cast<simrv::xlen::HartId>(cpu.state().mhartid),
+                                             cpu.hart_id(),
                                              TlPort::Data);
                         TlChannelE ack{};
                         ack.sink = resp.sink;
@@ -642,7 +640,7 @@ void MemoryAccess::target_write(MemorySubsystem& mem, core::CPU& cpu, simrv::xle
             }
             if (cache_write_completed && first_write) {
                 mem.system_bus().mark_modified(
-                    addr, static_cast<simrv::xlen::HartId>(cpu.state().mhartid));
+                    addr, cpu.hart_id());
             }
             simrv::memory::ram_write_fast(addr, data, funct3, cpu.machine_->ram_view());
             commit_write();
@@ -654,7 +652,7 @@ void MemoryAccess::target_write(MemorySubsystem& mem, core::CPU& cpu, simrv::xle
         const unsigned req_size_bytes = 1u << req_size;
         const bool is_aligned = (addr & (req_size_bytes - 1u)) == 0;
 
-        req.hart = static_cast<simrv::xlen::HartId>(cpu.state().mhartid);
+        req.hart = cpu.hart_id();
         req.logical_cycle = cpu.clint_mmio.mcycle > 0 ? cpu.clint_mmio.mcycle - 1 : 0;
         req.logical_issue_sequence = cpu.next_logical_issue_sequence();
         req.source = make_tl_source(req.hart, TlPort::Data);

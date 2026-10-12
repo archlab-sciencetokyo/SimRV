@@ -58,7 +58,9 @@ class CfuUnit {
     }
 
     /// Set the latency used by the built-in CFU implementation.
-    void set_default_latency(uint32_t latency) noexcept { default_latency_ = latency == 0 ? 1 : latency; }
+    void set_default_latency(uint32_t latency) noexcept {
+        default_latency_ = latency == 0 ? 1 : latency;
+    }
 
     /// Returns the latency in cycles produced by the most recent execute() invocation.
     [[nodiscard]] auto last_latency() const noexcept -> uint32_t { return last_latency_; }

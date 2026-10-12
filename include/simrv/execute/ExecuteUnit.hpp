@@ -1,129 +1,91 @@
+/**
+ * @file ExecuteUnit.hpp
+ * @brief Unified execution unit facade aggregating modular extension subunits.
+ */
 #pragma once
-#include <expected>
 
-#include "simrv/isa/Amo.hpp"
-#include "simrv/isa/InstructionFields.hpp"
-#include "simrv/isa/Fp.hpp"
-#include "simrv/isa/FpTypes.hpp"
-#include "simrv/isa/OperationId.hpp"
-#include "simrv/xlen/RegisterTypes.hpp"
-
-namespace simrv::core {
-class CPU;
-class Machine;
-}  // namespace simrv::core
-
-namespace simrv::memory {
-class MemorySubsystem;
-}  // namespace simrv::memory
+#include "simrv/execute/CfuUnit.hpp"
+#include "simrv/execute/ExecuteUnitFp.hpp"
+#include "simrv/execute/ExecuteUnitInt.hpp"
+#include "simrv/execute/ExecuteUnitVector.hpp"
+#include "simrv/execute/ExecuteUnitZb.hpp"
+#include "simrv/execute/ExecuteUnitZk.hpp"
 
 namespace simrv::execute {
 
 /**
- * @struct FpExecResult
- * @brief Aggregated writeback signals produced by FP execution helpers.
- */
-struct FpExecResult {
-    simrv::xlen::Register int_wb_data = 0;
-    simrv::xlen::FloatingRegister fp_wb_data = 0;
-    bool int_wb_enable = false;
-    bool fp_wb_enable = false;
-};
-
-/**
  * @class ExecuteUnit
- * @brief Stateless arithmetic and control helper routines used by EX stage.
+ * @brief Backward-compatible facade coordinating execution across all RISC-V extension subunits.
  */
 class ExecuteUnit {
    public:
-    /// Execute integer ALU or M-extension or B-extension operation.
-    static auto aluInt(simrv::xlen::Register in1, simrv::xlen::Register in2, isa::OperationId op_id,
-                       unsigned xlen = simrv::xlen::kXLenBits) -> simrv::xlen::Register;
-    /// Execute RV64 W-class integer operations with 32-bit result semantics.
-    static auto aluIntW(simrv::xlen::Register in1, simrv::xlen::Register in2,
-                        isa::OperationId op_id) -> simrv::xlen::Register;
-    /// Evaluate branch condition and return taken flag.
-    static auto branchTaken(simrv::xlen::Register in1, simrv::xlen::Register in2,
-                            isa::Funct3 funct3, unsigned xlen = simrv::xlen::kXLenBits) -> bool;
-    /// Execute AMO arithmetic/logic result function.
-    static auto aluAmo(simrv::xlen::Register in1, simrv::xlen::Register in2, isa::Funct5Amo funct5,
-                       isa::Funct3 funct3) -> simrv::xlen::Register;
-    /// Compute CSR write value for CSR instruction variants.
-    static auto csrWriteValue(simrv::xlen::CSRValue rcsr, simrv::xlen::Register rrs1,
-                              simrv::xlen::ImmValue imm, isa::Funct3 funct3)
-        -> std::expected<simrv::xlen::CSRValue, simrv::xlen::TrapCause>;
-    /// Execute fused floating-point multiply-add family.
-    static auto fusedFp(isa::Opcode opcode, FpFmt fmt, simrv::xlen::FpRegId rs1,
-                        simrv::xlen::FpRegId rs2, simrv::xlen::FpRegId rs3, isa::RoundingMode rm,
-                        const simrv::xlen::FloatingRegister* freg, simrv::xlen::CSRValue& fcsr)
-        -> FpExecResult;
-    static auto fusedFp(isa::Opcode opcode, simrv::xlen::Word fmt, simrv::xlen::Word rs1,
-                        simrv::xlen::Word rs2, simrv::xlen::Word rs3, simrv::xlen::Word rm,
-                        const simrv::xlen::FloatingRegister* freg, simrv::xlen::CSRValue& fcsr)
-        -> FpExecResult {
-        return fusedFp(opcode, static_cast<FpFmt>(fmt), static_cast<simrv::xlen::FpRegId>(rs1),
-                       static_cast<simrv::xlen::FpRegId>(rs2),
-                       static_cast<simrv::xlen::FpRegId>(rs3), static_cast<isa::RoundingMode>(rm),
-                       freg, fcsr);
+    static inline auto aluInt(simrv::xlen::Register in1, simrv::xlen::Register in2,
+                              isa::OperationId op_id, unsigned xlen = simrv::xlen::kXLenBits)
+        -> simrv::xlen::Register {
+        return ExecuteUnitInt::aluInt(in1, in2, op_id, xlen);
     }
-    /// Execute non-fused floating-point operations and conversions.
-    static auto opFp(simrv::xlen::Funct7 funct7, isa::Funct3 funct3, simrv::xlen::FpRegId rs1,
-                     simrv::xlen::FpRegId rs2, simrv::xlen::Register rrs1,
-                     const simrv::xlen::FloatingRegister* freg, simrv::xlen::CSRValue& fcsr)
-        -> FpExecResult;
-    static auto opFp(simrv::xlen::Word funct7, isa::Funct3 funct3, simrv::xlen::Word rs1,
-                     simrv::xlen::Word rs2, simrv::xlen::Register rrs1,
-                     const simrv::xlen::FloatingRegister* freg, simrv::xlen::CSRValue& fcsr)
-        -> FpExecResult {
-        return opFp(static_cast<simrv::xlen::Funct7>(funct7), funct3,
-                    static_cast<simrv::xlen::FpRegId>(rs1), static_cast<simrv::xlen::FpRegId>(rs2),
-                    rrs1, freg, fcsr);
+
+    static inline auto aluIntW(simrv::xlen::Register in1, simrv::xlen::Register in2,
+                               isa::OperationId op_id) -> simrv::xlen::Register {
+        return ExecuteUnitInt::aluIntW(in1, in2, op_id);
     }
-    /// Execute vector instructions.
-    static void execute_vector(core::CPU& cpu, memory::MemorySubsystem& mem, isa::OperationId op_id,
-                               simrv::xlen::Instruction ir);
-    static void execute_vector(core::CPU& cpu, core::Machine& machine, isa::OperationId op_id,
-                               simrv::xlen::Instruction ir);
 
-   private:
-    static auto aluInt32(simrv::xlen::Register in1, simrv::xlen::Register in2,
-                         isa::OperationId op_id) -> simrv::xlen::Register;
-    static auto aluIntZb(simrv::xlen::Register in1, simrv::xlen::Register in2,
-                         isa::OperationId op_id, unsigned xlen = simrv::xlen::kXLenBits)
-        -> simrv::xlen::Register;
-    static auto aluIntZbW(simrv::xlen::Register in1, simrv::xlen::Register in2,
-                          isa::OperationId op_id) -> simrv::xlen::Register;
+    static inline auto aluInt32(simrv::xlen::Register in1, simrv::xlen::Register in2,
+                                isa::OperationId op_id) -> simrv::xlen::Register {
+        return ExecuteUnitInt::aluInt32(in1, in2, op_id);
+    }
 
-    static void execute_vector_config(core::CPU& cpu, isa::OperationId op_id,
-                                      simrv::xlen::Instruction ir, simrv::xlen::RegId rd,
-                                      simrv::xlen::RegId rs1, simrv::xlen::RegId rs2);
+    static inline auto branchTaken(simrv::xlen::Register in1, simrv::xlen::Register in2,
+                                   isa::Funct3 funct3, unsigned xlen = simrv::xlen::kXLenBits)
+        -> bool {
+        return ExecuteUnitInt::branchTaken(in1, in2, funct3, xlen);
+    }
 
-    static void execute_vector_memory(core::CPU& cpu, memory::MemorySubsystem& mem,
-                                      isa::OperationId op_id, simrv::xlen::RegId rd,
-                                      simrv::xlen::RegId rs1, simrv::xlen::RegId rs2, bool vm,
-                                      uint32_t vl, uint32_t sew, uint32_t nfields,
-                                      uint32_t field_registers);
+    static inline auto aluAmo(simrv::xlen::Register in1, simrv::xlen::Register in2,
+                              isa::Funct5Amo funct5, isa::Funct3 funct3) -> simrv::xlen::Register {
+        return ExecuteUnitInt::aluAmo(in1, in2, funct5, funct3);
+    }
 
-    [[nodiscard]] static auto execute_vector_integer(core::CPU& cpu, isa::OperationId op_id,
-                                                     simrv::xlen::RegId rd, simrv::xlen::RegId rs1,
-                                                     simrv::xlen::RegId rs2, bool vm, uint32_t vl,
-                                                     uint32_t sew, simrv::xlen::Register rs1_val,
-                                                     int32_t simm5) -> bool;
+    static inline auto csrWriteValue(simrv::xlen::CSRValue rcsr, simrv::xlen::Register rrs1,
+                                     simrv::xlen::ImmValue imm, isa::Funct3 funct3)
+        -> std::expected<simrv::xlen::CSRValue, simrv::xlen::TrapCause> {
+        return ExecuteUnitInt::csrWriteValue(rcsr, rrs1, imm, funct3);
+    }
 
-    static void execute_vector_fixed_point(core::CPU& cpu, isa::OperationId op_id,
-                                           simrv::xlen::RegId rd, simrv::xlen::RegId rs1,
-                                           simrv::xlen::RegId rs2, bool vm, uint32_t vl,
-                                           uint32_t sew, simrv::xlen::Register rs1_val,
-                                           int32_t simm5);
+    static inline auto fusedFp(isa::Opcode opcode, FpFmt fmt, simrv::xlen::FpRegId rs1,
+                               simrv::xlen::FpRegId rs2, simrv::xlen::FpRegId rs3,
+                               isa::RoundingMode rm, const simrv::xlen::FloatingRegister* freg,
+                               simrv::xlen::CSRValue& fcsr) -> FpExecResult {
+        return ExecuteUnitFp::fusedFp(opcode, fmt, rs1, rs2, rs3, rm, freg, fcsr);
+    }
 
-    static void execute_vector_float(core::CPU& cpu, isa::OperationId op_id, simrv::xlen::RegId rd,
-                                     simrv::xlen::RegId rs1, simrv::xlen::RegId rs2, bool vm,
-                                     uint32_t vl, uint32_t sew);
+    static inline auto opFp(simrv::xlen::Funct7 funct7, isa::Funct3 funct3,
+                            simrv::xlen::FpRegId rs1, simrv::xlen::FpRegId rs2,
+                            simrv::xlen::Register rrs1, const simrv::xlen::FloatingRegister* freg,
+                            simrv::xlen::CSRValue& fcsr) -> FpExecResult {
+        return ExecuteUnitFp::opFp(funct7, funct3, rs1, rs2, rrs1, freg, fcsr);
+    }
 
-    static void execute_vector_permute(core::CPU& cpu, isa::OperationId op_id,
-                                       simrv::xlen::RegId rd, simrv::xlen::RegId rs1,
-                                       simrv::xlen::RegId rs2, bool vm, uint32_t vl, uint32_t sew,
-                                       simrv::xlen::Register rs1_val, int32_t simm5);
+    static inline auto aluIntZb(simrv::xlen::Register in1, simrv::xlen::Register in2,
+                                isa::OperationId op_id, unsigned xlen = simrv::xlen::kXLenBits)
+        -> simrv::xlen::Register {
+        return ExecuteUnitZb::aluIntZb(in1, in2, op_id, xlen);
+    }
+
+    static inline auto aluIntZbW(simrv::xlen::Register in1, simrv::xlen::Register in2,
+                                 isa::OperationId op_id) -> simrv::xlen::Register {
+        return ExecuteUnitZb::aluIntZbW(in1, in2, op_id);
+    }
+
+    static inline void execute_vector(core::CPU& cpu, memory::MemorySubsystem& mem,
+                                      isa::OperationId op_id, simrv::xlen::Instruction ir) {
+        ExecuteUnitVector::execute_vector(cpu, mem, op_id, ir);
+    }
+
+    static inline void execute_vector(core::CPU& cpu, core::Machine& machine,
+                                      isa::OperationId op_id, simrv::xlen::Instruction ir) {
+        ExecuteUnitVector::execute_vector(cpu, machine, op_id, ir);
+    }
 };
 
 }  // namespace simrv::execute

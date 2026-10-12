@@ -5,6 +5,7 @@
 #include <format>
 #include <string>
 
+#include "InspectorPaneCycleMode.hpp"
 #include "simrv/core/Cpu.hpp"
 #include "simrv/core/Machine.hpp"
 #include "simrv/pipeline/PipelineSim.hpp"
@@ -23,22 +24,7 @@ auto InspectorPane::render_hazard_stats(const simrv::core::CPU& cpu, int logical
         if (logical_row == 0) {
             return section_line("Pipeline Hazard & Forwarding Unit Inspector", width);
         }
-        if (logical_row == 4) {
-            std::string text = "\033[1;31m[!] CYCLE-ACCURATE MODE INACTIVE\033[0m";
-            int text_w = get_display_width(text);
-            int spaces = std::max(1, (width - text_w) / 2);
-            return format_to_width(std::string(static_cast<std::size_t>(spaces), ' ') + text,
-                                   width);
-        }
-        if (logical_row == 6) {
-            std::string text = (width < 45) ? "Enable Cycle-Accurate mode [,]"
-                                            : "Enable cycle mode [,] or --mode cycle-accurate";
-            int text_w = get_display_width(text);
-            int spaces = std::max(1, (width - text_w) / 2);
-            return format_to_width(
-                std::string(static_cast<std::size_t>(spaces), ' ') + kThemeMuted + text + "\033[0m",
-                width);
-        }
+        if (auto row = detail::inactive_cycle_mode_row(logical_row, width)) return *row;
         if (logical_row == 14) {
             return section_line("Status: Hazard Detection Disabled (Functional)", width);
         }

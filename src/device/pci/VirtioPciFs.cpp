@@ -12,10 +12,6 @@ VirtioPciFs::VirtioPciFs(const std::string& shared_directory, std::string tag)
     queues_[1].num_max = queues_[1].num = 128;  // REQUEST
 }
 
-auto VirtioPciFs::get_device_features(uint32_t select) -> uint32_t {
-    return select == 1 ? 1U : 0U;  // VIRTIO_F_VERSION_1
-}
-
 auto VirtioPciFs::read_device_config(simrv::xlen::Address offset, uint8_t size) -> uint32_t {
     uint32_t value = 0;
     for (uint8_t i = 0; i < size && i < 4; ++i) {

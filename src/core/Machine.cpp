@@ -1233,7 +1233,7 @@ void Machine::switch_execution_engine_sync(ExecutionEngine engine) {
     const bool to_cycle = is_cycle_engine(engine);
     for (size_t i = 0; i < num_harts(); ++i) {
         auto& cpu = hart(i);
-        const auto hart_id = static_cast<simrv::xlen::HartId>(cpu.state().mhartid);
+        const auto hart_id = cpu.hart_id();
         memory().system_bus().cancel_source(
             simrv::memory::make_tl_source(hart_id, simrv::memory::TlPort::Instruction));
         memory().system_bus().cancel_source(

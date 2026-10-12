@@ -115,7 +115,7 @@ auto VirtioMmioDevice::read32(simrv::xlen::Address offset) -> uint32_t {
                 return 0;
             }
             if (device_features_sel_ == 1) {
-                return (1U << 0);  // VIRTIO_F_VERSION_1 (bit 32)
+                return virtio::kVirtioFVersion1FeatureWord;
             }
             return 0;
         }

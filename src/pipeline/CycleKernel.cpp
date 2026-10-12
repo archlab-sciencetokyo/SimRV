@@ -15,8 +15,7 @@ using pipeline::CycleInstructionSlot;
 
 namespace {
 [[nodiscard]] auto is_store_conditional(const pipeline::PipelineContext& context) noexcept -> bool {
-    return context.opcode == isa::Opcode::Amo &&
-           static_cast<isa::Funct5Amo>(context.funct5) == isa::Funct5Amo::Sc;
+    return context.opcode == isa::Opcode::Amo && context.funct5 == isa::Funct5Amo::Sc;
 }
 }  // namespace
 
@@ -66,7 +65,7 @@ void CPU::run_ca_pipeline_cycle(Machine& machine) {
     };
     auto cancel_port = [&](simrv::memory::TlPort port) {
         machine.memory_.system_bus().cancel_source(
-            simrv::memory::make_tl_source(static_cast<simrv::xlen::HartId>(state_.mhartid), port));
+            simrv::memory::make_tl_source(hart_id(), port));
     };
     auto flush_to = [&](simrv::xlen::Address pc) {
         pipe.flush_younger();

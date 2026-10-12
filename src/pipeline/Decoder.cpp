@@ -937,18 +937,19 @@ consteval auto generate_amo_table() {
 
 constexpr auto kAmoTable = generate_amo_table();
 
-[[nodiscard]] constexpr auto decode_ext_a(uint32_t funct7, uint32_t funct3, uint32_t rs2) noexcept
-    -> OperationId {
-    if (!isa::amo_width_supported(static_cast<isa::Funct3>(funct3))) {
+[[nodiscard]] constexpr auto decode_ext_a(simrv::xlen::Funct7 funct7, isa::Funct3 funct3,
+                                          simrv::xlen::RegId rs2) noexcept -> OperationId {
+    if (!isa::amo_width_supported(funct3)) {
         return OperationId::UNKNOWN;
     }
-    const uint32_t funct5 = funct7 >> 2;
+    const auto funct5 = static_cast<isa::Funct5Amo>(funct7 >> 2);
     // LR.W/LR.D reserve rs2=0; nonzero rs2 is a reserved instruction encoding.
-    if (funct5 == isa::Funct5Amo::Lr && rs2 != 0) {
+    if (funct5 == isa::Funct5Amo::Lr && rs2 != simrv::xlen::RegId::Zero) {
         return OperationId::UNKNOWN;
     }
-    if (funct5 < 32) {
-        return kAmoTable.lookup(funct3 - 2, funct5);
+    const auto funct5_idx = std::to_underlying(funct5);
+    if (funct5_idx < 32) {
+        return kAmoTable.lookup(std::to_underlying(funct3) - 2, funct5_idx);
     }
     return OperationId::UNKNOWN;
 }
@@ -1919,7 +1920,7 @@ auto decoder(simrv::xlen::Instruction ir) -> OperationId {
     const auto funct7 = dec.funct7();
 
     if (op == Opcode::Amo) {
-        return decode_ext_a(funct7, funct3, std::to_underlying(dec.rs2()));
+        return decode_ext_a(funct7, dec.funct3(), dec.rs2());
     }
     if (op == Opcode::LoadFp || op == Opcode::StoreFp || op == Opcode::OpFp || op == Opcode::MAdd ||
         op == Opcode::MSub || op == Opcode::NMSub || op == Opcode::NMAdd) {

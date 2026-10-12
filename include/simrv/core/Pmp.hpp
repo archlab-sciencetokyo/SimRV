@@ -54,8 +54,6 @@ constexpr auto operator&=(PmpAccessType& lhs, PmpAccessType rhs) noexcept -> Pmp
 
 namespace pmp {
 
-using PmpAccessType = core::PmpAccessType;
-
 constexpr uint8_t kPmpR = 0x01;
 constexpr uint8_t kPmpW = 0x02;
 constexpr uint8_t kPmpX = 0x04;
@@ -127,8 +125,6 @@ struct PmpConfigEntry {
         return has_access(permissions(), access);
     }
 };
-
-using PmpConfigView = PmpConfigEntry;
 
 [[nodiscard]] inline auto calculate_pmp_range(PmpConfigEntry cfg, simrv::xlen::Address pmpaddr_curr,
                                               simrv::xlen::Address pmpaddr_prev) noexcept
