@@ -282,8 +282,8 @@ void CPU::queue_interrupt_line(core::MipBit bit, bool asserted) noexcept {
     const auto it = std::ranges::find(lines, bit);
     if (it == lines.end()) return;
     const auto index = static_cast<unsigned>(std::distance(lines.begin(), it));
-    const uint16_t dirty = static_cast<uint16_t>(1U << index);
-    const uint16_t value = static_cast<uint16_t>(1U << (index + lines.size()));
+    const auto dirty = static_cast<uint16_t>(1U << index);
+    const auto value = static_cast<uint16_t>(1U << (index + lines.size()));
     uint16_t current = pending_interrupt_lines_.load(std::memory_order_relaxed);
     uint16_t desired = 0;
     do {

@@ -4,12 +4,8 @@
  */
 #include "simrv/memory/MemorySubsystem.hpp"
 
-#include <cstdint>
-#include <cstdio>
-
 #include "simrv/core/Cpu.hpp"
 #include "simrv/core/Machine.hpp"
-#include "simrv/memory/MemoryUtil.hpp"
 
 namespace simrv::memory {
 

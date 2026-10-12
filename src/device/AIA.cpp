@@ -7,7 +7,6 @@
 #include <bit>
 
 #include "simrv/core/Cpu.hpp"
-#include "simrv/core/CsrTypes.hpp"
 #include "simrv/core/Machine.hpp"
 
 namespace simrv::device {
@@ -34,7 +33,7 @@ void Imsic::reset() {
 auto Imsic::read32(simrv::xlen::Address /*offset*/) -> uint32_t { return 0; }
 
 void Imsic::write32(simrv::xlen::Address offset, uint32_t val) {
-    const size_t hart_idx = static_cast<size_t>(offset / 0x4000U);
+    const auto hart_idx = static_cast<size_t>(offset / 0x4000U);
     if (hart_idx >= kMaxHarts) {
         return;
     }
@@ -75,7 +74,7 @@ auto Imsic::csr_read(simrv::xlen::HartId hart_idx, uint32_t reg_idx) -> simrv::x
             if (active == 0) {
                 return 0;
             }
-            const unsigned id = static_cast<unsigned>(std::countr_zero(active));
+            const auto id = static_cast<unsigned>(std::countr_zero(active));
             if (id > 0 && id < kNumInterrupts) {
                 if (file.eithreshold == 0 || id < file.eithreshold) {
                     return (static_cast<simrv::xlen::Word>(id) << 16) |
@@ -146,7 +145,7 @@ void Imsic::update_hart(simrv::xlen::HartId hart_idx) {
     bool has_pending = false;
 
     if (delivery && active != 0) {
-        const unsigned id = static_cast<unsigned>(std::countr_zero(active));
+        const auto id = static_cast<unsigned>(std::countr_zero(active));
         if (id > 0 && id < kNumInterrupts && (file.eithreshold == 0 || id < file.eithreshold)) {
             has_pending = true;
         }

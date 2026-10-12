@@ -5,14 +5,12 @@
 #include "simrv/device/Uart.hpp"
 
 #include <sys/select.h>
-#include <sys/time.h>
 #include <unistd.h>
 
 #include <cerrno>
 #include <thread>
 
 #include "simrv/core/Machine.hpp"
-#include "simrv/core/TelemetrySink.hpp"
 #include "simrv/tui/Tui.hpp"
 
 namespace simrv::device {
@@ -93,7 +91,7 @@ auto Uart::start_pty() -> bool {
             int const master_fd = pty_.master_fd();
             if (master_fd < 0) break;
             FD_SET(master_fd, &fds);
-            struct timeval tv{0, 20000};
+            struct timeval tv{.tv_sec = 0, .tv_usec = 20000};
             int const ret = ::select(master_fd + 1, &fds, nullptr, nullptr, &tv);
             if (ret <= 0) continue;
             ssize_t const n = pty_.read_from_master(buf, sizeof(buf));

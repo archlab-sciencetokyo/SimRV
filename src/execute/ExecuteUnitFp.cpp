@@ -5,7 +5,6 @@
 #include "simrv/execute/ExecuteUnitFp.hpp"
 
 #include <bit>
-#include <cfenv>
 #include <cmath>
 #include <cstdint>
 #include <limits>

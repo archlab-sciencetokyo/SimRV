@@ -11,7 +11,6 @@
 #include "simrv/core/Cpu.hpp"
 #include "simrv/core/Machine.hpp"
 #include "simrv/core/PlatformTiming.hpp"
-#include "simrv/core/Pmp.hpp"
 #include "simrv/core/TelemetrySink.hpp"
 #include "simrv/core/Tracer.hpp"
 #include "simrv/debug/BreakpointManager.hpp"
@@ -22,7 +21,6 @@
 #include "simrv/memory/MemoryAccess.hpp"
 #include "simrv/memory/MemorySubsystem.hpp"
 #include "simrv/memory/MemoryUtil.hpp"
-#include "simrv/pipeline/OperationTraits.hpp"
 #include "simrv/xlen/AddressTypes.hpp"
 #include "simrv/xlen/Constants.hpp"
 #include "simrv/xlen/IdentifierTypes.hpp"
@@ -137,7 +135,7 @@ void CPU::run_cycle(Machine& machine) {
             cpu.apply_hart_control_boundary();
             active_execution_cpu_ = previous;
         }
-    } boundary_commit{*this, previous_active_cpu};
+    } boundary_commit{.cpu = *this, .previous = previous_active_cpu};
     const simrv::xlen::Counter retired_before = e_icount;
     if (simrv::compiler::unlikely(machine.breakpoint_manager().has_any())) {
         prev_state_ = state_;
@@ -536,7 +534,7 @@ void CPU::run_cycle_baremetal(Machine& machine) {
             cpu.apply_hart_control_boundary();
             active_execution_cpu_ = previous;
         }
-    } boundary_commit{*this, previous_active_cpu};
+    } boundary_commit{.cpu = *this, .previous = previous_active_cpu};
     const simrv::xlen::Counter retired_before = e_icount;
     if (simrv::compiler::unlikely(machine.breakpoint_manager().has_any())) {
         prev_state_ = state_;

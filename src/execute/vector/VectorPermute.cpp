@@ -39,7 +39,7 @@ void execute_vrgather_vector(core::CPU& cpu, simrv::xlen::RegId rd, simrv::xlen:
     for (uint32_t i = 0; i < vl; ++i) {
         indices[i] = vector::get_group_element<Index>(cpu.state().regs, index_reg, i);
     }
-    for (uint32_t i = static_cast<uint32_t>(cpu.state().vstart); i < vl; ++i) {
+    for (auto i = static_cast<uint32_t>(cpu.state().vstart); i < vl; ++i) {
         if (!vector::is_element_active(mask_reg, i, vm)) continue;
         const uint64_t index = indices[i];
         vector::set_group_element<T>(cpu.state().regs, rd, i, index < vlmax ? source[index] : T{0});
@@ -54,7 +54,7 @@ void execute_vrgather_scalar(core::CPU& cpu, simrv::xlen::RegId rd, uint64_t ind
     const T value = index < vlmax ? vector::get_group_element<T>(cpu.state().regs, rs2,
                                                                  static_cast<uint32_t>(index))
                                   : T{0};
-    for (uint32_t i = static_cast<uint32_t>(cpu.state().vstart); i < vl; ++i) {
+    for (auto i = static_cast<uint32_t>(cpu.state().vstart); i < vl; ++i) {
         if (!vector::is_element_active(mask_reg, i, vm)) continue;
         vector::set_group_element<T>(cpu.state().regs, rd, i, value);
     }
@@ -86,7 +86,7 @@ void execute_vcompress(core::CPU& cpu, simrv::xlen::RegId rd, simrv::xlen::RegId
     const auto& mask_reg = cpu.state().regs.read_vector(simrv::xlen::to_vec_reg_id(rs1));
     std::vector<T> src_vals;
     src_vals.reserve(vl);
-    for (uint32_t i = static_cast<uint32_t>(cpu.state().vstart); i < vl; i++) {
+    for (auto i = static_cast<uint32_t>(cpu.state().vstart); i < vl; i++) {
         if (vector::is_element_active(mask_reg, i, false)) {
             src_vals.push_back(vector::get_group_element<T>(cpu.state().regs, rs2, i));
         }
@@ -128,7 +128,7 @@ void execute_vslidedown(core::CPU& cpu, simrv::xlen::RegId rd, uint64_t offset,
         src_vals[i] = vector::get_group_element<T>(cpu.state().regs, rs2, i);
     }
 
-    for (uint32_t i = static_cast<uint32_t>(cpu.state().vstart); i < vl; i++) {
+    for (auto i = static_cast<uint32_t>(cpu.state().vstart); i < vl; i++) {
         if (!vector::is_element_active(mask_reg, i, vm)) continue;
         T val =
             offset < vlmax && i < vlmax - offset ? src_vals[static_cast<size_t>(i + offset)] : T{0};
@@ -154,7 +154,7 @@ void execute_vslide1down(core::CPU& cpu, simrv::xlen::RegId rd,
         }
     }
 
-    for (uint32_t i = static_cast<uint32_t>(cpu.state().vstart); i < vl; i++) {
+    for (auto i = static_cast<uint32_t>(cpu.state().vstart); i < vl; i++) {
         if (!vector::is_element_active(mask_reg, i, vm)) continue;
         vector::set_group_element<T>(cpu.state().regs, rd, i, temp[i]);
     }
@@ -177,7 +177,7 @@ void execute_vslide1up(core::CPU& cpu, simrv::xlen::RegId rd, simrv::xlen::Float
         }
     }
 
-    for (uint32_t i = static_cast<uint32_t>(cpu.state().vstart); i < vl; i++) {
+    for (auto i = static_cast<uint32_t>(cpu.state().vstart); i < vl; i++) {
         if (!vector::is_element_active(mask_reg, i, vm)) continue;
         vector::set_group_element<T>(cpu.state().regs, rd, i, temp[i]);
     }
@@ -189,7 +189,7 @@ void execute_vmerge_vv(core::CPU& cpu, simrv::xlen::RegId rd, simrv::xlen::RegId
     const auto& mask_reg =
         cpu.state().regs.read_vector(simrv::xlen::to_vec_reg_id(simrv::xlen::RegId::Zero));
 
-    for (uint32_t i = static_cast<uint32_t>(cpu.state().vstart); i < vl; i++) {
+    for (auto i = static_cast<uint32_t>(cpu.state().vstart); i < vl; i++) {
         bool mask_bit = vector::is_element_active(mask_reg, i, false);
         T val = mask_bit ? vector::get_group_element<T>(cpu.state().regs, rs1, i)
                          : vector::get_group_element<T>(cpu.state().regs, rs2, i);
@@ -203,7 +203,7 @@ void execute_vmerge_scalar(core::CPU& cpu, simrv::xlen::RegId rd, T val1, simrv:
     const auto& mask_reg =
         cpu.state().regs.read_vector(simrv::xlen::to_vec_reg_id(simrv::xlen::RegId::Zero));
 
-    for (uint32_t i = static_cast<uint32_t>(cpu.state().vstart); i < vl; i++) {
+    for (auto i = static_cast<uint32_t>(cpu.state().vstart); i < vl; i++) {
         bool mask_bit = vector::is_element_active(mask_reg, i, false);
         T val = mask_bit ? val1 : vector::get_group_element<T>(cpu.state().regs, rs2, i);
         vector::set_group_element<T>(cpu.state().regs, rd, i, val);
@@ -212,7 +212,7 @@ void execute_vmerge_scalar(core::CPU& cpu, simrv::xlen::RegId rd, T val1, simrv:
 
 template <typename T>
 void execute_vfmv_v_f(core::CPU& cpu, simrv::xlen::RegId rd, uint64_t bits, uint32_t vl) {
-    for (uint32_t i = static_cast<uint32_t>(cpu.state().vstart); i < vl; ++i) {
+    for (auto i = static_cast<uint32_t>(cpu.state().vstart); i < vl; ++i) {
         vector::set_group_element<T>(cpu.state().regs, rd, i, static_cast<T>(bits));
     }
 }
@@ -224,7 +224,7 @@ void execute_vmerge_vi(core::CPU& cpu, simrv::xlen::RegId rd, int32_t imm, simrv
         cpu.state().regs.read_vector(simrv::xlen::to_vec_reg_id(simrv::xlen::RegId::Zero));
     T val1 = static_cast<T>(imm);
 
-    for (uint32_t i = static_cast<uint32_t>(cpu.state().vstart); i < vl; i++) {
+    for (auto i = static_cast<uint32_t>(cpu.state().vstart); i < vl; i++) {
         bool mask_bit = vector::is_element_active(mask_reg, i, false);
         T val = mask_bit ? val1 : vector::get_group_element<T>(cpu.state().regs, rs2, i);
         vector::set_group_element<T>(cpu.state().regs, rd, i, val);
@@ -235,7 +235,7 @@ template <typename T>
 void execute_vid(core::CPU& cpu, simrv::xlen::RegId rd, bool vm, uint32_t vl) {
     const auto& mask_reg =
         cpu.state().regs.read_vector(simrv::xlen::to_vec_reg_id(simrv::xlen::RegId::Zero));
-    for (uint32_t i = static_cast<uint32_t>(cpu.state().vstart); i < vl; i++) {
+    for (auto i = static_cast<uint32_t>(cpu.state().vstart); i < vl; i++) {
         if (!vector::is_element_active(mask_reg, i, vm)) continue;
         vector::set_group_element<T>(cpu.state().regs, rd, i, static_cast<T>(i));
     }
@@ -466,7 +466,7 @@ bool execute_vector_permute_slide1(core::CPU& cpu, isa::OperationId op_id, simrv
                                    uint32_t vl, uint32_t sew, simrv::xlen::Register rs1_val) {
     const bool fp =
         op_id == isa::OperationId::VFSLIDE1UP_VF || op_id == isa::OperationId::VFSLIDE1DOWN_VF;
-    simrv::xlen::FloatingRegister scalar_val = vector::integer_scalar<uint64_t>(rs1_val);
+    auto scalar_val = vector::integer_scalar<uint64_t>(rs1_val);
     if (fp) {
         scalar_val =
             scalar_fp_bits(cpu, cpu.state().regs.read_fp(simrv::xlen::to_fp_reg_id(rs1)), sew);

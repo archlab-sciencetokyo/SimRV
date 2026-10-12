@@ -123,7 +123,7 @@ void process_block_queue(QueueState& q, BlockBackend& backend, std::vector<std::
         } else {
             uint16_t used_idx = 0;
             dma_read(q.device_addr + 2, &used_idx, sizeof(used_idx));
-            const VirtqUsedElem elem{head_desc_idx, total_written};
+            const VirtqUsedElem elem{.id = head_desc_idx, .len = total_written};
             dma_write(q.device_addr + 4 + (used_idx % q.num) * sizeof(elem), &elem, sizeof(elem));
             ++used_idx;
             dma_write(q.device_addr + 2, &used_idx, sizeof(used_idx));

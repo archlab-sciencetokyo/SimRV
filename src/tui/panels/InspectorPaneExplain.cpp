@@ -11,7 +11,6 @@
 
 #include "simrv/core/Cpu.hpp"
 #include "simrv/core/Machine.hpp"
-#include "simrv/core/TelemetrySink.hpp"
 #include "simrv/debug/SymbolTable.hpp"
 #include "simrv/isa/Common.hpp"
 #include "simrv/memory/MemoryUtil.hpp"
@@ -22,7 +21,6 @@
 #include "simrv/tui/TuiTheme.hpp"
 #include "simrv/tui/panels/InspectorPane.hpp"
 #include "simrv/util/InstructionExplainer.hpp"
-#include "simrv/xlen/Helpers.hpp"
 #include "simrv/xlen/RegisterTypes.hpp"
 
 namespace simrv::tui {
@@ -227,60 +225,192 @@ auto render_visual_bitfields(InstFormat fmt, uint32_t ir_org, int width)
     switch (fmt) {
         case InstFormat::R:
             build_box({
-                {"funct7", "31..25", 7, (ir_org >> 25) & 0x7F, 0},
-                {"rs2", "24..20", 5, (ir_org >> 20) & 0x1F, 0},
-                {"rs1", "19..15", 5, (ir_org >> 15) & 0x1F, 0},
-                {"f3", "14..12", 3, (ir_org >> 12) & 0x07, 0},
-                {"rd", "11..7", 5, (ir_org >> 7) & 0x1F, 0},
-                {"opcode", "6..0", 7, ir_org & 0x7F, 0},
+                {.label = "funct7",
+                 .bits = "31..25",
+                 .bit_count = 7,
+                 .value = (ir_org >> 25) & 0x7F,
+                 .cell_w = 0},
+                {.label = "rs2",
+                 .bits = "24..20",
+                 .bit_count = 5,
+                 .value = (ir_org >> 20) & 0x1F,
+                 .cell_w = 0},
+                {.label = "rs1",
+                 .bits = "19..15",
+                 .bit_count = 5,
+                 .value = (ir_org >> 15) & 0x1F,
+                 .cell_w = 0},
+                {.label = "f3",
+                 .bits = "14..12",
+                 .bit_count = 3,
+                 .value = (ir_org >> 12) & 0x07,
+                 .cell_w = 0},
+                {.label = "rd",
+                 .bits = "11..7",
+                 .bit_count = 5,
+                 .value = (ir_org >> 7) & 0x1F,
+                 .cell_w = 0},
+                {.label = "opcode",
+                 .bits = "6..0",
+                 .bit_count = 7,
+                 .value = ir_org & 0x7F,
+                 .cell_w = 0},
             });
             break;
         case InstFormat::I:
             build_box({
-                {"imm[11:0]", "31..20", 12, (ir_org >> 20) & 0xFFF, 0},
-                {"rs1", "19..15", 5, (ir_org >> 15) & 0x1F, 0},
-                {"f3", "14..12", 3, (ir_org >> 12) & 0x07, 0},
-                {"rd", "11..7", 5, (ir_org >> 7) & 0x1F, 0},
-                {"opcode", "6..0", 7, ir_org & 0x7F, 0},
+                {.label = "imm[11:0]",
+                 .bits = "31..20",
+                 .bit_count = 12,
+                 .value = (ir_org >> 20) & 0xFFF,
+                 .cell_w = 0},
+                {.label = "rs1",
+                 .bits = "19..15",
+                 .bit_count = 5,
+                 .value = (ir_org >> 15) & 0x1F,
+                 .cell_w = 0},
+                {.label = "f3",
+                 .bits = "14..12",
+                 .bit_count = 3,
+                 .value = (ir_org >> 12) & 0x07,
+                 .cell_w = 0},
+                {.label = "rd",
+                 .bits = "11..7",
+                 .bit_count = 5,
+                 .value = (ir_org >> 7) & 0x1F,
+                 .cell_w = 0},
+                {.label = "opcode",
+                 .bits = "6..0",
+                 .bit_count = 7,
+                 .value = ir_org & 0x7F,
+                 .cell_w = 0},
             });
             break;
         case InstFormat::S:
             build_box({
-                {"imm[11:5]", "31..25", 7, (ir_org >> 25) & 0x7F, 0},
-                {"rs2", "24..20", 5, (ir_org >> 20) & 0x1F, 0},
-                {"rs1", "19..15", 5, (ir_org >> 15) & 0x1F, 0},
-                {"f3", "14..12", 3, (ir_org >> 12) & 0x07, 0},
-                {"imm[4:0]", "11..7", 5, (ir_org >> 7) & 0x1F, 0},
-                {"opcode", "6..0", 7, ir_org & 0x7F, 0},
+                {.label = "imm[11:5]",
+                 .bits = "31..25",
+                 .bit_count = 7,
+                 .value = (ir_org >> 25) & 0x7F,
+                 .cell_w = 0},
+                {.label = "rs2",
+                 .bits = "24..20",
+                 .bit_count = 5,
+                 .value = (ir_org >> 20) & 0x1F,
+                 .cell_w = 0},
+                {.label = "rs1",
+                 .bits = "19..15",
+                 .bit_count = 5,
+                 .value = (ir_org >> 15) & 0x1F,
+                 .cell_w = 0},
+                {.label = "f3",
+                 .bits = "14..12",
+                 .bit_count = 3,
+                 .value = (ir_org >> 12) & 0x07,
+                 .cell_w = 0},
+                {.label = "imm[4:0]",
+                 .bits = "11..7",
+                 .bit_count = 5,
+                 .value = (ir_org >> 7) & 0x1F,
+                 .cell_w = 0},
+                {.label = "opcode",
+                 .bits = "6..0",
+                 .bit_count = 7,
+                 .value = ir_org & 0x7F,
+                 .cell_w = 0},
             });
             break;
         case InstFormat::B:
             build_box({
-                {"imm[12:5]", "31..25", 7, (ir_org >> 25) & 0x7F, 0},
-                {"rs2", "24..20", 5, (ir_org >> 20) & 0x1F, 0},
-                {"rs1", "19..15", 5, (ir_org >> 15) & 0x1F, 0},
-                {"f3", "14..12", 3, (ir_org >> 12) & 0x07, 0},
-                {"imm[4:1|11]", "11..7", 5, (ir_org >> 7) & 0x1F, 0},
-                {"opcode", "6..0", 7, ir_org & 0x7F, 0},
+                {.label = "imm[12:5]",
+                 .bits = "31..25",
+                 .bit_count = 7,
+                 .value = (ir_org >> 25) & 0x7F,
+                 .cell_w = 0},
+                {.label = "rs2",
+                 .bits = "24..20",
+                 .bit_count = 5,
+                 .value = (ir_org >> 20) & 0x1F,
+                 .cell_w = 0},
+                {.label = "rs1",
+                 .bits = "19..15",
+                 .bit_count = 5,
+                 .value = (ir_org >> 15) & 0x1F,
+                 .cell_w = 0},
+                {.label = "f3",
+                 .bits = "14..12",
+                 .bit_count = 3,
+                 .value = (ir_org >> 12) & 0x07,
+                 .cell_w = 0},
+                {.label = "imm[4:1|11]",
+                 .bits = "11..7",
+                 .bit_count = 5,
+                 .value = (ir_org >> 7) & 0x1F,
+                 .cell_w = 0},
+                {.label = "opcode",
+                 .bits = "6..0",
+                 .bit_count = 7,
+                 .value = ir_org & 0x7F,
+                 .cell_w = 0},
             });
             break;
         case InstFormat::U:
         case InstFormat::J:
             build_box({
-                {"imm[31:12]", "31..12", 20, (ir_org >> 12) & 0xFFFFF, 0},
-                {"rd", "11..7", 5, (ir_org >> 7) & 0x1F, 0},
-                {"opcode", "6..0", 7, ir_org & 0x7F, 0},
+                {.label = "imm[31:12]",
+                 .bits = "31..12",
+                 .bit_count = 20,
+                 .value = (ir_org >> 12) & 0xFFFFF,
+                 .cell_w = 0},
+                {.label = "rd",
+                 .bits = "11..7",
+                 .bit_count = 5,
+                 .value = (ir_org >> 7) & 0x1F,
+                 .cell_w = 0},
+                {.label = "opcode",
+                 .bits = "6..0",
+                 .bit_count = 7,
+                 .value = ir_org & 0x7F,
+                 .cell_w = 0},
             });
             break;
         case InstFormat::R4:
             build_box({
-                {"rs3", "31..27", 5, (ir_org >> 27) & 0x1F, 0},
-                {"fmt", "26..25", 2, (ir_org >> 25) & 0x03, 0},
-                {"rs2", "24..20", 5, (ir_org >> 20) & 0x1F, 0},
-                {"rs1", "19..15", 5, (ir_org >> 15) & 0x1F, 0},
-                {"f3", "14..12", 3, (ir_org >> 12) & 0x07, 0},
-                {"rd", "11..7", 5, (ir_org >> 7) & 0x1F, 0},
-                {"opcode", "6..0", 7, ir_org & 0x7F, 0},
+                {.label = "rs3",
+                 .bits = "31..27",
+                 .bit_count = 5,
+                 .value = (ir_org >> 27) & 0x1F,
+                 .cell_w = 0},
+                {.label = "fmt",
+                 .bits = "26..25",
+                 .bit_count = 2,
+                 .value = (ir_org >> 25) & 0x03,
+                 .cell_w = 0},
+                {.label = "rs2",
+                 .bits = "24..20",
+                 .bit_count = 5,
+                 .value = (ir_org >> 20) & 0x1F,
+                 .cell_w = 0},
+                {.label = "rs1",
+                 .bits = "19..15",
+                 .bit_count = 5,
+                 .value = (ir_org >> 15) & 0x1F,
+                 .cell_w = 0},
+                {.label = "f3",
+                 .bits = "14..12",
+                 .bit_count = 3,
+                 .value = (ir_org >> 12) & 0x07,
+                 .cell_w = 0},
+                {.label = "rd",
+                 .bits = "11..7",
+                 .bit_count = 5,
+                 .value = (ir_org >> 7) & 0x1F,
+                 .cell_w = 0},
+                {.label = "opcode",
+                 .bits = "6..0",
+                 .bit_count = 7,
+                 .value = ir_org & 0x7F,
+                 .cell_w = 0},
             });
             break;
         default:
@@ -294,7 +424,8 @@ auto read_reg_str(const simrv::core::ArchState& st, simrv::xlen::RegId reg, bool
     -> std::string {
     uint32_t r = std::to_underlying(reg);
     if (r == 0 && !is_fp) return std::format("0x{:0{}x}", 0, simrv::xlen::kXLenHexDigits);
-    simrv::xlen::Register val = is_fp ? st.regs.read_fp(simrv::xlen::to_fp_reg_id(reg)) : st.regs.read(reg);
+    simrv::xlen::Register val =
+        is_fp ? st.regs.read_fp(simrv::xlen::to_fp_reg_id(reg)) : st.regs.read(reg);
     return std::format("0x{:0{}x}", val, simrv::xlen::kXLenHexDigits);
 }
 

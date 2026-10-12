@@ -2,7 +2,6 @@
  * @file ExecuteStage.cpp
  * @brief Execution (EX) stage implementation.
  */
-#include <bit>
 #include <cstdint>
 #include <utility>
 
@@ -15,11 +14,8 @@
 #include "simrv/execute/ExecuteUnit.hpp"
 #include "simrv/isa/Amo.hpp"
 #include "simrv/isa/Priv.hpp"
-#include "simrv/pipeline/OperationTraits.hpp"
 #include "simrv/tui/Tui.hpp"
 #include "simrv/xlen/AddressTypes.hpp"
-#include "simrv/xlen/Helpers.hpp"
-#include "simrv/xlen/IdentifierTypes.hpp"
 #include "simrv/xlen/RegisterTypes.hpp"
 
 namespace simrv::core {

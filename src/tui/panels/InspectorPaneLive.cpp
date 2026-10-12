@@ -2,7 +2,6 @@
  * @file InspectorPaneLive.cpp
  * @brief Live, snapshot-backed activity and performance summary.
  */
-#include <algorithm>
 #include <cstdint>
 #include <format>
 #include <string>
@@ -56,7 +55,7 @@ auto InspectorPane::render_live_overview_row(int logical_row, int width) -> std:
     const int first_hart_row = 2;
     const int totals_title_row = first_hart_row + hart_count;
     if (logical_row >= first_hart_row && logical_row < totals_title_row) {
-        const size_t hart = static_cast<size_t>(logical_row - first_hart_row);
+        const auto hart = static_cast<size_t>(logical_row - first_hart_row);
         if (hart >= live_harts_.size()) return format_to_width("", width);
         const auto& snapshot = live_harts_[hart];
         const bool selected = hart == selected_hart_;

@@ -58,11 +58,11 @@ struct ShortcutGroup {
 }
 
 [[nodiscard]] auto help_shortcuts() -> std::array<ShortcutGroup, 5> {
-    std::array<ShortcutGroup, 5> groups = {{{"Execution", {}},
-                                            {"Inspect & Debug", {}},
-                                            {"Navigation & Views", {}},
-                                            {"Configuration", {}},
-                                            {"Help & Learning", {}}}};
+    std::array<ShortcutGroup, 5> groups = {{{.title = "Execution", .shortcuts = {}},
+                                            {.title = "Inspect & Debug", .shortcuts = {}},
+                                            {.title = "Navigation & Views", .shortcuts = {}},
+                                            {.title = "Configuration", .shortcuts = {}},
+                                            {.title = "Help & Learning", .shortcuts = {}}}};
     const auto bindings = Keybindings::all();
     for (const auto& binding : bindings) {
         groups[group_index(binding.action)].shortcuts.emplace_back(binding.key_display,

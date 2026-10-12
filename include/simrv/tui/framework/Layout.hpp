@@ -95,8 +95,8 @@ inline constexpr int kFrameChromeRows = 7;
 
     if ((layout == Layout::ThreeColumn || layout == Layout::FourColumn) && terminal_width >= 144) {
         int const usable = std::max(0, terminal_width - 4);  // 2 inner dividers + 2 borders
-        int const requested_total = requested_columns[0] + requested_columns[1] +
-                                    requested_columns[2];
+        int const requested_total =
+            requested_columns[0] + requested_columns[1] + requested_columns[2];
         if (requested_columns[0] >= kMultiColumnUnitWidth &&
             requested_columns[1] >= kMultiColumnUnitWidth &&
             requested_columns[2] >= kMultiColumnUnitWidth && requested_total == usable) {

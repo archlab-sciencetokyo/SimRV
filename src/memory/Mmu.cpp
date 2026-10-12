@@ -4,12 +4,9 @@
  */
 #include "simrv/memory/Mmu.hpp"
 
-#include <utility>
-
 #include "simrv/CompilerHints.hpp"
 #include "simrv/isa/TrapTypes.hpp"
 #include "simrv/xlen/Constants.hpp"
-#include "simrv/xlen/Helpers.hpp"
 
 namespace simrv {
 

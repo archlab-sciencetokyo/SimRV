@@ -256,8 +256,7 @@ namespace simrv::pipeline::operation {
 }
 
 [[nodiscard]] constexpr auto make_dependency_traits(isa::OperationId op_id, isa::Opcode opcode,
-                                                    simrv::xlen::RegId rd,
-                                                    uint32_t funct5) noexcept
+                                                    simrv::xlen::RegId rd, uint32_t funct5) noexcept
     -> DependencyTraits {
     return make_dependency_traits(op_id, opcode, rd, static_cast<isa::Funct5Amo>(funct5));
 }

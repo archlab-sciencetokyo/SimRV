@@ -9,7 +9,6 @@
 #include "simrv/isa/VectorTypes.hpp"
 #include "simrv/memory/MemorySubsystem.hpp"
 #include "simrv/pipeline/OperationInfo.hpp"
-#include "simrv/pipeline/OperationTraits.hpp"
 #include "vector/VectorSubunits.hpp"
 
 namespace simrv::execute {

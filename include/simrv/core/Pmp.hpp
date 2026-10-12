@@ -172,7 +172,7 @@ inline auto check_access(const ArchState& state, simrv::xlen::Address paddr, siz
         return true;
     }
 
-    const uint64_t req_start = static_cast<uint64_t>(paddr);
+    const auto req_start = static_cast<uint64_t>(paddr);
     if (size == 0 || size > UINT64_MAX - req_start) {
         return false;
     }

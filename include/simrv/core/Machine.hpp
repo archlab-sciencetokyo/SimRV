@@ -288,7 +288,7 @@ class Machine final : public core::IInterruptController {
         bool is_executable = false;
     };
     void record_loaded_segment(simrv::xlen::Address paddr, size_t size, bool is_executable) {
-        loaded_segments_.push_back({paddr, size, is_executable});
+        loaded_segments_.push_back({.paddr = paddr, .size = size, .is_executable = is_executable});
     }
     void clear_loaded_segments() noexcept { loaded_segments_.clear(); }
     [[nodiscard]] auto loaded_segments() const noexcept -> const std::vector<LoadedMemorySegment>& {

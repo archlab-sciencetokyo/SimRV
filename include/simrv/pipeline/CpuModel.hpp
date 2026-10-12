@@ -153,7 +153,11 @@ struct CpuModelConfig {
             result.pipeline.enable_forwarding = false;
             result.pipeline.branch_predictor.type = BranchPredictorType::Static;
             result.pipeline.branch_predictor.enable_btb = false;
-            result.instruction_cache = {2048, 1, 32, 1, 12};
+            result.instruction_cache = {.capacity_bytes = 2048,
+                                        .associativity = 1,
+                                        .line_bytes = 32,
+                                        .hit_latency = 1,
+                                        .miss_latency = 12};
             result.data_cache = result.instruction_cache;
             break;
         case CpuModelPreset::Balanced:
@@ -163,7 +167,11 @@ struct CpuModelConfig {
             result.pipeline.pipeline_type = PipelineType::FiveStage;
             result.pipeline.enable_forwarding = true;
             result.pipeline.branch_predictor.type = BranchPredictorType::Bimodal;
-            result.instruction_cache = {4096, 2, 32, 1, 10};
+            result.instruction_cache = {.capacity_bytes = 4096,
+                                        .associativity = 2,
+                                        .line_bytes = 32,
+                                        .hit_latency = 1,
+                                        .miss_latency = 10};
             result.data_cache = result.instruction_cache;
             break;
         case CpuModelPreset::Performance:
@@ -174,7 +182,11 @@ struct CpuModelConfig {
             result.pipeline.enable_forwarding = true;
             result.pipeline.enable_instruction_prefetch = true;
             result.pipeline.branch_predictor.type = BranchPredictorType::Tournament;
-            result.instruction_cache = {16384, 4, 32, 1, 8};
+            result.instruction_cache = {.capacity_bytes = 16384,
+                                        .associativity = 4,
+                                        .line_bytes = 32,
+                                        .hit_latency = 1,
+                                        .miss_latency = 8};
             result.data_cache = result.instruction_cache;
             break;
         case CpuModelPreset::Custom:

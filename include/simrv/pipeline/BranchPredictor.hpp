@@ -248,7 +248,7 @@ class BranchPredictor {
     [[nodiscard]] SIMRV_ALWAYS_INLINE auto get_bht_index(simrv::xlen::Address pc,
                                                          uint32_t ghr_val) const noexcept
         -> uint32_t {
-        const uint32_t pc_idx = static_cast<uint32_t>(pc >> config_.pc_shift);
+        const auto pc_idx = static_cast<uint32_t>(pc >> config_.pc_shift);
         if (config_.type == BranchPredictorType::GShare) {
             return (pc_idx ^ ghr_val) & bht_mask_;
         }

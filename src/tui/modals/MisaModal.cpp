@@ -240,7 +240,8 @@ void MisaModal::render(std::vector<std::string>& content_rows,
     }
     if (show_footer) {
         add_row_cb("");
-        add_row_cb(build_modal_footer({{"[Enter]", "Apply MISA CSR"}, {"[Esc / q]", "Cancel"}}));
+        add_row_cb(build_modal_footer({{.key = "[Enter]", .action = "Apply MISA CSR"},
+                                       {.key = "[Esc / q]", .action = "Cancel"}}));
     }
 }
 

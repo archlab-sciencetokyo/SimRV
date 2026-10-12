@@ -23,8 +23,8 @@ auto render_cache_way_row(const simrv::core::CPU& cpu, int way_idx, int inspect_
                           int inspect_way, int inspect_type, int width) -> std::string {
     auto const& ic = cpu.icache;
     auto const& dc = cpu.dcache;
-    uint32_t set_idx = static_cast<uint32_t>(inspect_set);
-    uint32_t way_u32 = static_cast<uint32_t>(way_idx);
+    auto set_idx = static_cast<uint32_t>(inspect_set);
+    auto way_u32 = static_cast<uint32_t>(way_idx);
     bool is_selected_way = (way_idx == inspect_way);
     bool is_icache = (inspect_type == 0);
 
@@ -270,7 +270,7 @@ auto InspectorPane::render_cache_stats(const simrv::core::CPU& cpu, int logical_
             std::string hex_str;
             if (line_data != nullptr && valid) {
                 for (size_t b = 0; b < 16 && b < line_data->size(); ++b) {
-                    uint8_t byte_val = std::to_integer<uint8_t>(line_data->at(b));
+                    auto byte_val = std::to_integer<uint8_t>(line_data->at(b));
                     hex_str += std::format("{}{:02x} ", kThemeVal, byte_val);
                 }
                 return format_to_width(

@@ -39,8 +39,6 @@
 #include "simrv/core/Machine.hpp"
 #include "simrv/debug/SpikeLockstep.hpp"
 #include "simrv/debug/SymbolTable.hpp"
-#include "simrv/device/pci/VirtioPciBlock.hpp"
-#include "simrv/device/pci/VirtioPciConsole.hpp"
 #include "simrv/isa/Priv.hpp"
 #include "simrv/memory/MemorySubsystem.hpp"
 #include "simrv/memory/MemoryUtil.hpp"
@@ -1064,7 +1062,7 @@ void Tracer::log_trap(simrv::xlen::Counter mtime, simrv::xlen::Counter cycle,
     if (!accepts_trace_event("memory_fault", cycle, static_cast<uint32_t>(state.mhartid), trap_pc,
                              component))
         return;
-    const uint64_t store_value =
+    const auto store_value =
         static_cast<uint64_t>(opcode == Opcode::StoreFp ? context.fp_mem_wdata : context.mem_wdata);
     const std::string value_json =
         memory_write_fault ? json_quote(std::format("0x{:x}", store_value)) : "null";
@@ -1283,9 +1281,9 @@ void Tracer::log_architecture_retirement(const CPU& cpu,
         }
         const bool is_load = memory_kind == pipeline::operation::MemoryAccessKind::Load;
         const bool is_store = memory_kind == pipeline::operation::MemoryAccessKind::Store;
-        const uint64_t read_value = static_cast<uint64_t>(
+        const auto read_value = static_cast<uint64_t>(
             opcode == Opcode::LoadFp ? retiring_context.fp_mem_rdata : retiring_context.mem_rdata);
-        const uint64_t write_value = static_cast<uint64_t>(
+        const auto write_value = static_cast<uint64_t>(
             opcode == Opcode::StoreFp ? retiring_context.fp_mem_wdata : retiring_context.mem_wdata);
         if (accepts_trace_event(memory_event, cycle, hart_id, retiring_context.cpc.raw(),
                                 component)) {
@@ -1511,7 +1509,7 @@ void Tracer::dump_init_artifacts() {
 
             std::print(out, "{:08x}: ", offset);
             for (uint64_t b = 0; b < current_len; ++b) {
-                const uint8_t val =
+                const auto val =
                     std::to_integer<uint8_t>(*ram.unchecked_ptr(dram_base + offset + b));
                 std::print(out, "{:02x}{}", val, (b == 7 ? "  " : " "));
             }
@@ -1644,7 +1642,7 @@ void Tracer::write_instruction_mix_report() {
         const auto op = static_cast<simrv::isa::OperationId>(i);
         const auto name = simrv::pipeline::operation_name(op);
         const auto category = categorize_operation(op);
-        entries.push_back({name, category, count});
+        entries.push_back({.name = name, .category = category, .count = count});
         category_totals[category] += count;
         total += count;
     }

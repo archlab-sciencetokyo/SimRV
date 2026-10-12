@@ -4,10 +4,6 @@
  */
 #include "simrv/cache/ICache.hpp"
 
-#include <cstring>
-#include <utility>
-
-
 namespace simrv::cache {
 
 auto ICache::handle_probe(const simrv::memory::TlChannelB& req, simrv::memory::TlChannelC& resp)

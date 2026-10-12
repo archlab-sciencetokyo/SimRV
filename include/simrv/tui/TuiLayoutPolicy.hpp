@@ -16,19 +16,17 @@ inline constexpr int kMinimumTerminalWidth = framework::kMinimumTerminalWidth;
 inline constexpr int kMinimumTerminalHeight = framework::kMinimumTerminalHeight;
 inline constexpr int kFrameChromeRows = framework::kFrameChromeRows;
 
-[[nodiscard]] constexpr auto calculate_pane_widths(int terminal_width, TuiLayout layout,
-                                                   int requested_left = -1,
-                                                   framework::ColumnWidthOverrides requested_columns =
-                                                       framework::kNoColumnWidthOverrides)
+[[nodiscard]] constexpr auto calculate_pane_widths(
+    int terminal_width, TuiLayout layout, int requested_left = -1,
+    framework::ColumnWidthOverrides requested_columns = framework::kNoColumnWidthOverrides)
     -> PaneWidths {
     return framework::pane_widths(terminal_width, layout, requested_left, requested_columns);
 }
 
 /// Compute the complete frame geometry once so renderers and hit-testing share the same policy.
-[[nodiscard]] constexpr auto calculate_frame_geometry(int terminal_width, int terminal_height,
-                                                      TuiLayout layout, int requested_left = -1,
-                                                      framework::ColumnWidthOverrides requested_columns =
-                                                          framework::kNoColumnWidthOverrides)
+[[nodiscard]] constexpr auto calculate_frame_geometry(
+    int terminal_width, int terminal_height, TuiLayout layout, int requested_left = -1,
+    framework::ColumnWidthOverrides requested_columns = framework::kNoColumnWidthOverrides)
     -> FrameGeometry {
     return framework::frame_geometry(terminal_width, terminal_height, layout, requested_left,
                                      requested_columns);

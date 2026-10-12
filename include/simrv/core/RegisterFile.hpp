@@ -98,20 +98,20 @@ class RegisterFile {
     }
 
     [[nodiscard]] constexpr auto operator[](simrv::xlen::RegId idx) -> RegisterProxy {
-        return {this, idx};
+        return {.rf = this, .idx = idx};
     }
     [[nodiscard]] constexpr auto operator[](simrv::xlen::RegId idx) const -> simrv::xlen::Register {
         return read(idx);
     }
     [[nodiscard]] constexpr auto operator[](simrv::xlen::FpRegId idx) -> FpRegisterProxy {
-        return {this, idx};
+        return {.rf = this, .idx = idx};
     }
     [[nodiscard]] constexpr auto operator[](simrv::xlen::FpRegId idx) const
         -> simrv::xlen::FloatingRegister {
         return read_fp(idx);
     }
     [[nodiscard]] constexpr auto operator[](simrv::xlen::VecRegId idx) -> VecRegisterProxy {
-        return {this, idx};
+        return {.rf = this, .idx = idx};
     }
     [[nodiscard]] constexpr auto operator[](simrv::xlen::VecRegId idx) const
         -> const VectorRegister& {

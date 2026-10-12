@@ -105,7 +105,7 @@ auto Clint::handle_request(const memory::TlChannelA& req, memory::TlChannelD& re
                 }
             } else {
                 mmio_write(off, static_cast<simrv::xlen::Word>(req.data & kWord32Mask));
-                const uint64_t wide_data = static_cast<uint64_t>(req.data);
+                const auto wide_data = static_cast<uint64_t>(req.data);
                 mmio_write(off + 4,
                            static_cast<simrv::xlen::Word>((wide_data >> 32U) & kWord32Mask));
             }

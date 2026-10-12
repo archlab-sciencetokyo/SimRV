@@ -4,8 +4,6 @@
  */
 #include "simrv/device/pci/PcieRootComplex.hpp"
 
-#include <cstring>
-
 #include "simrv/core/Cpu.hpp"
 #include "simrv/core/Machine.hpp"
 
@@ -17,7 +15,7 @@ PcieRootComplex::PcieRootComplex(simrv::core::Machine* machine, Aplic* aplic_s, 
 auto PcieRootComplex::attach_device(PciBdf bdf, std::shared_ptr<PciDevice> device) -> bool {
     if (!device) return false;
     device->set_root_complex(this, bdf);
-    attached_devices_.push_back({bdf, device});
+    attached_devices_.push_back({.bdf = bdf, .device = device});
     return true;
 }
 
@@ -31,9 +29,9 @@ auto PcieRootComplex::get_device(PciBdf bdf) -> std::shared_ptr<PciDevice> {
 }
 
 auto PcieRootComplex::ecam_read(simrv::xlen::Address offset, uint8_t size) -> uint32_t {
-    const uint8_t bus = static_cast<uint8_t>((offset >> 20) & 0xFF);
-    const uint8_t dev = static_cast<uint8_t>((offset >> 15) & 0x1F);
-    const uint8_t func = static_cast<uint8_t>((offset >> 12) & 0x07);
+    const auto bus = static_cast<uint8_t>((offset >> 20) & 0xFF);
+    const auto dev = static_cast<uint8_t>((offset >> 15) & 0x1F);
+    const auto func = static_cast<uint8_t>((offset >> 12) & 0x07);
     const simrv::xlen::Address reg_offset = offset & 0xFFF;
 
     auto d = get_device(bus, dev, func);
@@ -42,9 +40,9 @@ auto PcieRootComplex::ecam_read(simrv::xlen::Address offset, uint8_t size) -> ui
 }
 
 void PcieRootComplex::ecam_write(simrv::xlen::Address offset, uint32_t val, uint8_t size) {
-    const uint8_t bus = static_cast<uint8_t>((offset >> 20) & 0xFF);
-    const uint8_t dev = static_cast<uint8_t>((offset >> 15) & 0x1F);
-    const uint8_t func = static_cast<uint8_t>((offset >> 12) & 0x07);
+    const auto bus = static_cast<uint8_t>((offset >> 20) & 0xFF);
+    const auto dev = static_cast<uint8_t>((offset >> 15) & 0x1F);
+    const auto func = static_cast<uint8_t>((offset >> 12) & 0x07);
     const simrv::xlen::Address reg_offset = offset & 0xFFF;
 
     auto d = get_device(bus, dev, func);

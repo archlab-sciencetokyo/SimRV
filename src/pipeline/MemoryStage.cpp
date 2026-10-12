@@ -2,19 +2,13 @@
  * @file MemoryStage.cpp
  * @brief Memory (MEM) stage implementation.
  */
-#include <cstdint>
-#include <utility>
 
 #include "simrv/core/Cpu.hpp"
 #include "simrv/core/Machine.hpp"
 #include "simrv/memory/MemoryAccess.hpp"
 #include "simrv/memory/MemorySubsystem.hpp"
-#include "simrv/memory/MemoryUtil.hpp"
 #include "simrv/memory/ReservationTable.hpp"
-#include "simrv/pipeline/OperationTraits.hpp"
 #include "simrv/xlen/Constants.hpp"
-#include "simrv/xlen/Helpers.hpp"
-#include "simrv/xlen/IdentifierTypes.hpp"
 
 namespace simrv::core {
 

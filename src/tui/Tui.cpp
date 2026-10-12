@@ -47,7 +47,6 @@
 #include "simrv/tui/panels/InspectorPane.hpp"
 #include "simrv/tui/panels/StatusBar.hpp"
 #include "simrv/tui/panels/TerminalPane.hpp"
-#include "simrv/util/FormatUtil.hpp"
 #include "simrv/xlen/ScalarTypes.hpp"
 
 namespace simrv::tui {
@@ -234,7 +233,8 @@ void Tui::initialize() {
     terminal_pane_ = std::make_unique<TerminalPane>();
     status_bar_ = std::make_unique<StatusBar>(machine_, this);
 
-    if (workbench_slots_.empty()) workbench_slots_ = {{TuiRegPage::GPR, 0}};
+    if (workbench_slots_.empty())
+        workbench_slots_ = {{.page = TuiRegPage::GPR, .scroll_offset = 0}};
     if (focused_slot_index_ >= workbench_slots_.size()) focused_slot_index_ = 0;
     inspector_pane_->set_page(workbench_slots_[focused_slot_index_].page);
 
@@ -439,7 +439,8 @@ void Tui::restore_preferences() {
     if (!preferences.load(preferences_path_)) return;
     layout_ = preferences.layout;
     workbench_slots_ = std::move(preferences.slots);
-    if (workbench_slots_.empty()) workbench_slots_ = {{TuiRegPage::GPR, 0}};
+    if (workbench_slots_.empty())
+        workbench_slots_ = {{.page = TuiRegPage::GPR, .scroll_offset = 0}};
     focused_slot_index_ = preferences.focused_slot;
     user_inspector_width_ = preferences.inspector_width;
     user_column_widths_ = preferences.column_widths;
@@ -554,7 +555,8 @@ void Tui::ui_render_loop(const std::stop_token& stop_token) {
                 std::max<int64_t>(0, std::chrono::duration_cast<std::chrono::milliseconds>(
                                          deadline - std::chrono::steady_clock::now())
                                          .count()));
-            pollfd fds[] = {{STDIN_FILENO, POLLIN, 0}, {ui_wake_.get(), POLLIN, 0}};
+            pollfd fds[] = {{.fd = STDIN_FILENO, .events = POLLIN, .revents = 0},
+                            {.fd = ui_wake_.get(), .events = POLLIN, .revents = 0}};
             (void)::poll(fds, 2, timeout);
             if (fds[1].revents & POLLIN) {
                 uint64_t pending;
@@ -850,7 +852,7 @@ void Tui::render_draw_sixel(int panel_x, int display_width, int display_rows,
         }
     }
 
-    const size_t total_strips = static_cast<size_t>((height + 5) / 6);
+    const auto total_strips = static_cast<size_t>((height + 5) / 6);
     if (sixel_cached_width_ != width || sixel_cached_height_ != height) {
         sixel_cached_width_ = width;
         sixel_cached_height_ = height;
@@ -875,7 +877,7 @@ void Tui::render_draw_sixel(int panel_x, int display_width, int display_rows,
     };
 
     for (int y = 0; y < height; y += 6) {
-        const size_t strip_idx = static_cast<size_t>(y / 6);
+        const auto strip_idx = static_cast<size_t>(y / 6);
         const int max_bits = std::min(6, height - y);
 
         uint64_t strip_hash = 1469598103934665603ULL;
@@ -915,8 +917,8 @@ void Tui::render_draw_sixel(int panel_x, int display_width, int display_rows,
                 const int x4 = x * 4;
                 for (int bit = 0; bit < max_bits; ++bit) {
                     const auto* p = row_ptrs[bit] + x4;
-                    const uint8_t c = static_cast<uint8_t>((kColorLut[p[2]] * 36) +
-                                                           (kColorLut[p[1]] * 6) + kColorLut[p[0]]);
+                    const auto c = static_cast<uint8_t>((kColorLut[p[2]] * 36) +
+                                                        (kColorLut[p[1]] * 6) + kColorLut[p[0]]);
                     if (last_x_for_color[c] < 0) {
                         present_colors.push_back(c);
                     }
@@ -933,8 +935,8 @@ void Tui::render_draw_sixel(int panel_x, int display_width, int display_rows,
                 const int x_off = src_x_offset[x];
                 for (int bit = 0; bit < max_bits; ++bit) {
                     const auto* p = row_ptrs[bit] + x_off;
-                    const uint8_t c = static_cast<uint8_t>((kColorLut[p[2]] * 36) +
-                                                           (kColorLut[p[1]] * 6) + kColorLut[p[0]]);
+                    const auto c = static_cast<uint8_t>((kColorLut[p[2]] * 36) +
+                                                        (kColorLut[p[1]] * 6) + kColorLut[p[0]]);
                     if (last_x_for_color[c] < 0) {
                         present_colors.push_back(c);
                     }
@@ -1915,48 +1917,49 @@ void Tui::sync_workbench_slots() {
     }
 
     if (workbench_slots_.empty()) {
-        workbench_slots_.push_back({TuiRegPage::GPR, 0});
+        workbench_slots_.push_back({.page = TuiRegPage::GPR, .scroll_offset = 0});
     }
 
     if (desired == 1) {
         if (layout_ == TuiLayout::FullRight) {
-            workbench_slots_ = {{TuiRegPage::CONSOLE, 0}};
+            workbench_slots_ = {{.page = TuiRegPage::CONSOLE, .scroll_offset = 0}};
         } else {
-            workbench_slots_ = {{TuiRegPage::GPR, 0}};
+            workbench_slots_ = {{.page = TuiRegPage::GPR, .scroll_offset = 0}};
         }
     } else if (desired == 2) {
         if (workbench_slots_.size() < 2) {
-            workbench_slots_.push_back({TuiRegPage::CONSOLE, 0});
+            workbench_slots_.push_back({.page = TuiRegPage::CONSOLE, .scroll_offset = 0});
         } else if (workbench_slots_.size() > 2) {
             workbench_slots_.resize(2);
         }
     } else if (desired == 3) {
         if (workbench_slots_.size() < 3) {
             if (workbench_slots_.size() == 1) {
-                workbench_slots_.push_back({TuiRegPage::STACK, 0});
-                workbench_slots_.push_back({TuiRegPage::CONSOLE, 0});
+                workbench_slots_.push_back({.page = TuiRegPage::STACK, .scroll_offset = 0});
+                workbench_slots_.push_back({.page = TuiRegPage::CONSOLE, .scroll_offset = 0});
             } else {
-                workbench_slots_.insert(workbench_slots_.begin() + 1, {TuiRegPage::STACK, 0});
+                workbench_slots_.insert(workbench_slots_.begin() + 1,
+                                        {.page = TuiRegPage::STACK, .scroll_offset = 0});
             }
         } else if (workbench_slots_.size() > 3) {
             workbench_slots_.resize(3);
         }
     } else if (desired == 4) {
         if (workbench_slots_.size() == 1) {
-            workbench_slots_ = {{TuiRegPage::GPR, 0},
-                                {TuiRegPage::STACK, 0},
-                                {TuiRegPage::TRACE, 0},
-                                {TuiRegPage::CONSOLE, 0}};
+            workbench_slots_ = {{.page = TuiRegPage::GPR, .scroll_offset = 0},
+                                {.page = TuiRegPage::STACK, .scroll_offset = 0},
+                                {.page = TuiRegPage::TRACE, .scroll_offset = 0},
+                                {.page = TuiRegPage::CONSOLE, .scroll_offset = 0}};
         } else if (workbench_slots_.size() == 2) {
             auto last = workbench_slots_.back();
             workbench_slots_.pop_back();
-            workbench_slots_.push_back({TuiRegPage::STACK, 0});
-            workbench_slots_.push_back({TuiRegPage::TRACE, 0});
+            workbench_slots_.push_back({.page = TuiRegPage::STACK, .scroll_offset = 0});
+            workbench_slots_.push_back({.page = TuiRegPage::TRACE, .scroll_offset = 0});
             workbench_slots_.push_back(last);
         } else if (workbench_slots_.size() == 3) {
             auto last = workbench_slots_.back();
             workbench_slots_.pop_back();
-            workbench_slots_.push_back({TuiRegPage::TRACE, 0});
+            workbench_slots_.push_back({.page = TuiRegPage::TRACE, .scroll_offset = 0});
             workbench_slots_.push_back(last);
         } else if (workbench_slots_.size() > 4) {
             workbench_slots_.resize(4);
@@ -1996,20 +1999,22 @@ void Tui::apply_layout_preset(LayoutPreset preset) {
         case LayoutPreset::GeneralDebug:
             if (max_cols >= 4) {
                 layout_ = TuiLayout::FourColumn;
-                workbench_slots_ = {{TuiRegPage::GPR, 0},
-                                    {TuiRegPage::STACK, 0},
-                                    {TuiRegPage::TRACE, 0},
-                                    {TuiRegPage::CONSOLE, 0}};
+                workbench_slots_ = {{.page = TuiRegPage::GPR, .scroll_offset = 0},
+                                    {.page = TuiRegPage::STACK, .scroll_offset = 0},
+                                    {.page = TuiRegPage::TRACE, .scroll_offset = 0},
+                                    {.page = TuiRegPage::CONSOLE, .scroll_offset = 0}};
             } else if (max_cols >= 3) {
                 layout_ = TuiLayout::ThreeColumn;
-                workbench_slots_ = {
-                    {TuiRegPage::GPR, 0}, {TuiRegPage::STACK, 0}, {TuiRegPage::CONSOLE, 0}};
+                workbench_slots_ = {{.page = TuiRegPage::GPR, .scroll_offset = 0},
+                                    {.page = TuiRegPage::STACK, .scroll_offset = 0},
+                                    {.page = TuiRegPage::CONSOLE, .scroll_offset = 0}};
             } else if (max_cols >= 2) {
                 layout_ = TuiLayout::Split;
-                workbench_slots_ = {{TuiRegPage::GPR, 0}, {TuiRegPage::CONSOLE, 0}};
+                workbench_slots_ = {{.page = TuiRegPage::GPR, .scroll_offset = 0},
+                                    {.page = TuiRegPage::CONSOLE, .scroll_offset = 0}};
             } else {
                 layout_ = TuiLayout::FullLeft;
-                workbench_slots_ = {{TuiRegPage::GPR, 0}};
+                workbench_slots_ = {{.page = TuiRegPage::GPR, .scroll_offset = 0}};
             }
             set_status_override("Layout Preset: General Debug [Alt-1]");
             break;
@@ -2018,33 +2023,34 @@ void Tui::apply_layout_preset(LayoutPreset preset) {
             if (max_cols >= 4) {
                 layout_ = TuiLayout::FourColumn;
                 if (is_cycle) {
-                    workbench_slots_ = {{TuiRegPage::PIPELINE, 0},
-                                        {TuiRegPage::CACHE, 0},
-                                        {TuiRegPage::HAZARD, 0},
-                                        {TuiRegPage::CONSOLE, 0}};
+                    workbench_slots_ = {{.page = TuiRegPage::PIPELINE, .scroll_offset = 0},
+                                        {.page = TuiRegPage::CACHE, .scroll_offset = 0},
+                                        {.page = TuiRegPage::HAZARD, .scroll_offset = 0},
+                                        {.page = TuiRegPage::CONSOLE, .scroll_offset = 0}};
                 } else {
-                    workbench_slots_ = {{TuiRegPage::PIPELINE, 0},
-                                        {TuiRegPage::STACK, 0},
-                                        {TuiRegPage::TRACE, 0},
-                                        {TuiRegPage::CONSOLE, 0}};
+                    workbench_slots_ = {{.page = TuiRegPage::PIPELINE, .scroll_offset = 0},
+                                        {.page = TuiRegPage::STACK, .scroll_offset = 0},
+                                        {.page = TuiRegPage::TRACE, .scroll_offset = 0},
+                                        {.page = TuiRegPage::CONSOLE, .scroll_offset = 0}};
                 }
             } else if (max_cols >= 3) {
                 layout_ = TuiLayout::ThreeColumn;
                 if (is_cycle) {
-                    workbench_slots_ = {{TuiRegPage::PIPELINE, 0},
-                                        {TuiRegPage::CACHE, 0},
-                                        {TuiRegPage::CONSOLE, 0}};
+                    workbench_slots_ = {{.page = TuiRegPage::PIPELINE, .scroll_offset = 0},
+                                        {.page = TuiRegPage::CACHE, .scroll_offset = 0},
+                                        {.page = TuiRegPage::CONSOLE, .scroll_offset = 0}};
                 } else {
-                    workbench_slots_ = {{TuiRegPage::PIPELINE, 0},
-                                        {TuiRegPage::STACK, 0},
-                                        {TuiRegPage::CONSOLE, 0}};
+                    workbench_slots_ = {{.page = TuiRegPage::PIPELINE, .scroll_offset = 0},
+                                        {.page = TuiRegPage::STACK, .scroll_offset = 0},
+                                        {.page = TuiRegPage::CONSOLE, .scroll_offset = 0}};
                 }
             } else if (max_cols >= 2) {
                 layout_ = TuiLayout::Split;
-                workbench_slots_ = {{TuiRegPage::PIPELINE, 0}, {TuiRegPage::CONSOLE, 0}};
+                workbench_slots_ = {{.page = TuiRegPage::PIPELINE, .scroll_offset = 0},
+                                    {.page = TuiRegPage::CONSOLE, .scroll_offset = 0}};
             } else {
                 layout_ = TuiLayout::FullLeft;
-                workbench_slots_ = {{TuiRegPage::PIPELINE, 0}};
+                workbench_slots_ = {{.page = TuiRegPage::PIPELINE, .scroll_offset = 0}};
             }
             set_status_override("Layout Preset: Microarchitecture [Alt-2]");
             break;
@@ -2052,20 +2058,22 @@ void Tui::apply_layout_preset(LayoutPreset preset) {
         case LayoutPreset::TraceExecution:
             if (max_cols >= 4) {
                 layout_ = TuiLayout::FourColumn;
-                workbench_slots_ = {{TuiRegPage::GPR, 0},
-                                    {TuiRegPage::TRACE, 0},
-                                    {TuiRegPage::EXPLAIN, 0},
-                                    {TuiRegPage::CONSOLE, 0}};
+                workbench_slots_ = {{.page = TuiRegPage::GPR, .scroll_offset = 0},
+                                    {.page = TuiRegPage::TRACE, .scroll_offset = 0},
+                                    {.page = TuiRegPage::EXPLAIN, .scroll_offset = 0},
+                                    {.page = TuiRegPage::CONSOLE, .scroll_offset = 0}};
             } else if (max_cols >= 3) {
                 layout_ = TuiLayout::ThreeColumn;
-                workbench_slots_ = {
-                    {TuiRegPage::GPR, 0}, {TuiRegPage::TRACE, 0}, {TuiRegPage::CONSOLE, 0}};
+                workbench_slots_ = {{.page = TuiRegPage::GPR, .scroll_offset = 0},
+                                    {.page = TuiRegPage::TRACE, .scroll_offset = 0},
+                                    {.page = TuiRegPage::CONSOLE, .scroll_offset = 0}};
             } else if (max_cols >= 2) {
                 layout_ = TuiLayout::Split;
-                workbench_slots_ = {{TuiRegPage::TRACE, 0}, {TuiRegPage::CONSOLE, 0}};
+                workbench_slots_ = {{.page = TuiRegPage::TRACE, .scroll_offset = 0},
+                                    {.page = TuiRegPage::CONSOLE, .scroll_offset = 0}};
             } else {
                 layout_ = TuiLayout::FullLeft;
-                workbench_slots_ = {{TuiRegPage::TRACE, 0}};
+                workbench_slots_ = {{.page = TuiRegPage::TRACE, .scroll_offset = 0}};
             }
             set_status_override("Layout Preset: Trace & Execution [Alt-3]");
             break;
@@ -2074,31 +2082,34 @@ void Tui::apply_layout_preset(LayoutPreset preset) {
             if (max_cols >= 4) {
                 layout_ = TuiLayout::FourColumn;
                 if (is_cycle) {
-                    workbench_slots_ = {{TuiRegPage::STACK, 0},
-                                        {TuiRegPage::CACHE, 0},
-                                        {TuiRegPage::TLB, 0},
-                                        {TuiRegPage::BUS, 0}};
+                    workbench_slots_ = {{.page = TuiRegPage::STACK, .scroll_offset = 0},
+                                        {.page = TuiRegPage::CACHE, .scroll_offset = 0},
+                                        {.page = TuiRegPage::TLB, .scroll_offset = 0},
+                                        {.page = TuiRegPage::BUS, .scroll_offset = 0}};
                 } else {
-                    workbench_slots_ = {{TuiRegPage::STACK, 0},
-                                        {TuiRegPage::TLB, 0},
-                                        {TuiRegPage::BUS, 0},
-                                        {TuiRegPage::CONSOLE, 0}};
+                    workbench_slots_ = {{.page = TuiRegPage::STACK, .scroll_offset = 0},
+                                        {.page = TuiRegPage::TLB, .scroll_offset = 0},
+                                        {.page = TuiRegPage::BUS, .scroll_offset = 0},
+                                        {.page = TuiRegPage::CONSOLE, .scroll_offset = 0}};
                 }
             } else if (max_cols >= 3) {
                 layout_ = TuiLayout::ThreeColumn;
                 if (is_cycle) {
-                    workbench_slots_ = {
-                        {TuiRegPage::STACK, 0}, {TuiRegPage::CACHE, 0}, {TuiRegPage::BUS, 0}};
+                    workbench_slots_ = {{.page = TuiRegPage::STACK, .scroll_offset = 0},
+                                        {.page = TuiRegPage::CACHE, .scroll_offset = 0},
+                                        {.page = TuiRegPage::BUS, .scroll_offset = 0}};
                 } else {
-                    workbench_slots_ = {
-                        {TuiRegPage::STACK, 0}, {TuiRegPage::TLB, 0}, {TuiRegPage::BUS, 0}};
+                    workbench_slots_ = {{.page = TuiRegPage::STACK, .scroll_offset = 0},
+                                        {.page = TuiRegPage::TLB, .scroll_offset = 0},
+                                        {.page = TuiRegPage::BUS, .scroll_offset = 0}};
                 }
             } else if (max_cols >= 2) {
                 layout_ = TuiLayout::Split;
-                workbench_slots_ = {{TuiRegPage::STACK, 0}, {TuiRegPage::BUS, 0}};
+                workbench_slots_ = {{.page = TuiRegPage::STACK, .scroll_offset = 0},
+                                    {.page = TuiRegPage::BUS, .scroll_offset = 0}};
             } else {
                 layout_ = TuiLayout::FullLeft;
-                workbench_slots_ = {{TuiRegPage::STACK, 0}};
+                workbench_slots_ = {{.page = TuiRegPage::STACK, .scroll_offset = 0}};
             }
             set_status_override("Layout Preset: Memory & Interconnect [Alt-4]");
             break;
@@ -2259,7 +2270,7 @@ auto Tui::add_workbench_column() -> bool {
 
     size_t const insert_at = std::min(focused_slot_index_ + 1, workbench_slots_.size());
     workbench_slots_.insert(workbench_slots_.begin() + static_cast<std::ptrdiff_t>(insert_at),
-                            {new_page, 0});
+                            {.page = new_page, .scroll_offset = 0});
     if (target_count == 2) {
         layout_ = TuiLayout::Split;
     } else if (target_count == 3) {
@@ -3090,7 +3101,7 @@ void Tui::adjust_inspector_width(int delta) {
 
 auto Tui::poll_keyboard(uint8_t& byte_out) -> bool {
     if (input_pos_ == input_size_) {
-        pollfd fd{STDIN_FILENO, POLLIN, 0};
+        pollfd fd{.fd = STDIN_FILENO, .events = POLLIN, .revents = 0};
         if (::poll(&fd, 1, 0) <= 0 || !(fd.revents & POLLIN)) return false;
         const auto count = ::read(STDIN_FILENO, input_bytes_.data(), input_bytes_.size());
         if (count <= 0) return false;
@@ -4479,7 +4490,7 @@ auto Tui::consume_control_sequence(uint8_t first_byte) -> bool {
                 }
                 continue;
             }
-            pollfd fd{STDIN_FILENO, POLLIN, 0};
+            pollfd fd{.fd = STDIN_FILENO, .events = POLLIN, .revents = 0};
             if (::poll(&fd, 1, 1000) <= 0) break;
         }
         if (!is_paused() && !is_modal_active()) {

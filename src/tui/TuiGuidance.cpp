@@ -13,140 +13,155 @@ namespace simrv::tui {
 
 auto guidance_for_context(const GuidanceContext& context) -> PageGuidance {
     if (!context.image_loaded) {
-        return {"Start exploring",
-                "No program is loaded, so there is no architectural state to explain yet.",
-                "An ELF preserves symbols that teachers can use as named pause points.",
-                KeyAction::LoadBinary,
-                "Open the program loader.",
-                0};
+        return {
+            .title = "Start exploring",
+            .meaning = "No program is loaded, so there is no architectural state to explain yet.",
+            .relationship = "An ELF preserves symbols that teachers can use as named pause points.",
+            .next_action = KeyAction::LoadBinary,
+            .next_hint = "Open the program loader.",
+            .glossary_topic = 0};
     }
     if (context.shutdown) {
-        return {"Program completed",
-                "The guest has stopped and its final architectural state remains visible.",
+        return {
+            .title = "Program completed",
+            .meaning = "The guest has stopped and its final architectural state remains visible.",
+            .relationship =
                 "Compare the final registers and trace before restarting the same experiment.",
-                KeyAction::Reset,
-                "Reboot the program from its entry point.",
-                0};
+            .next_action = KeyAction::Reset,
+            .next_hint = "Reboot the program from its entry point.",
+            .glossary_topic = 0};
     }
 
     PageGuidance guidance;
     switch (context.page) {
         case TuiRegPage::GPR:
-            guidance = {"Integer registers",
-                        "GPRs hold addresses, operands, and integer results.",
-                        "ABI names connect x-registers to calls, arguments, and stack frames.",
-                        KeyAction::ToggleExplain,
-                        "Explain the current instruction.",
-                        0};
+            guidance = {.title = "Integer registers",
+                        .meaning = "GPRs hold addresses, operands, and integer results.",
+                        .relationship =
+                            "ABI names connect x-registers to calls, arguments, and stack frames.",
+                        .next_action = KeyAction::ToggleExplain,
+                        .next_hint = "Explain the current instruction.",
+                        .glossary_topic = 0};
             break;
         case TuiRegPage::FPR:
-            guidance = {"Floating-point registers",
-                        "FPRs hold IEEE-754 operands and results.",
-                        "fflags and frm explain rounding and floating-point exceptions.",
-                        KeyAction::CycleRegPage,
-                        "Compare the integer or vector register view.",
-                        0};
+            guidance = {
+                .title = "Floating-point registers",
+                .meaning = "FPRs hold IEEE-754 operands and results.",
+                .relationship = "fflags and frm explain rounding and floating-point exceptions.",
+                .next_action = KeyAction::CycleRegPage,
+                .next_hint = "Compare the integer or vector register view.",
+                .glossary_topic = 0};
             break;
         case TuiRegPage::VEC:
-            guidance = {"Vector registers",
-                        "Vector lanes use the active vl, vtype, and VLEN.",
-                        "Mask and tail policy determines which inactive lanes remain meaningful.",
-                        KeyAction::ToggleExplain,
-                        "Explain the current vector instruction.",
-                        0};
+            guidance = {
+                .title = "Vector registers",
+                .meaning = "Vector lanes use the active vl, vtype, and VLEN.",
+                .relationship =
+                    "Mask and tail policy determines which inactive lanes remain meaningful.",
+                .next_action = KeyAction::ToggleExplain,
+                .next_hint = "Explain the current vector instruction.",
+                .glossary_topic = 0};
             break;
         case TuiRegPage::PIPELINE:
-            guidance = {context.cycle_accurate ? "Pipeline flow" : "Instruction flow",
-                        context.cycle_accurate
-                            ? "Stages show in-flight instructions, stalls, and bubbles."
-                            : "Functional mode shows the current decoded instruction.",
-                        context.cycle_accurate
-                            ? "Stalls preserve dependencies; flushes discard wrong-path work."
-                            : "Select cycle-accurate mode to observe timing and hazards.",
-                        KeyAction::ToggleExplain,
-                        "Inspect the selected instruction's semantics.",
-                        1};
+            guidance = {.title = context.cycle_accurate ? "Pipeline flow" : "Instruction flow",
+                        .meaning = context.cycle_accurate
+                                       ? "Stages show in-flight instructions, stalls, and bubbles."
+                                       : "Functional mode shows the current decoded instruction.",
+                        .relationship =
+                            context.cycle_accurate
+                                ? "Stalls preserve dependencies; flushes discard wrong-path work."
+                                : "Select cycle-accurate mode to observe timing and hazards.",
+                        .next_action = KeyAction::ToggleExplain,
+                        .next_hint = "Inspect the selected instruction's semantics.",
+                        .glossary_topic = 1};
             break;
         case TuiRegPage::CACHE:
-            guidance = {"Cache hierarchy",
-                        "Sets and ways show recently accessed cache lines.",
-                        "A miss adds memory latency and may stall the pipeline.",
-                        KeyAction::CycleToolPage,
-                        "Compare cache state with hazards and bus traffic.",
-                        2};
+            guidance = {.title = "Cache hierarchy",
+                        .meaning = "Sets and ways show recently accessed cache lines.",
+                        .relationship = "A miss adds memory latency and may stall the pipeline.",
+                        .next_action = KeyAction::CycleToolPage,
+                        .next_hint = "Compare cache state with hazards and bus traffic.",
+                        .glossary_topic = 2};
             break;
         case TuiRegPage::TLB:
-            guidance = {"Address translation",
-                        "TLB entries cache virtual-to-physical translations.",
-                        "Privilege and page permissions decide whether an access can complete.",
-                        KeyAction::InspectAddress,
-                        "Inspect an address from the current context.",
-                        3};
+            guidance = {.title = "Address translation",
+                        .meaning = "TLB entries cache virtual-to-physical translations.",
+                        .relationship =
+                            "Privilege and page permissions decide whether an access can complete.",
+                        .next_action = KeyAction::InspectAddress,
+                        .next_hint = "Inspect an address from the current context.",
+                        .glossary_topic = 3};
             break;
         case TuiRegPage::BPRED:
-            guidance = {"Branch prediction",
-                        "The predictor guesses control flow before resolution.",
-                        "A wrong guess flushes younger work and adds control bubbles.",
-                        KeyAction::CycleToolPage,
-                        "Compare prediction accuracy with pipeline flow.",
-                        4};
+            guidance = {
+                .title = "Branch prediction",
+                .meaning = "The predictor guesses control flow before resolution.",
+                .relationship = "A wrong guess flushes younger work and adds control bubbles.",
+                .next_action = KeyAction::CycleToolPage,
+                .next_hint = "Compare prediction accuracy with pipeline flow.",
+                .glossary_topic = 4};
             break;
         case TuiRegPage::HAZARD:
-            guidance = {"Pipeline hazards",
-                        "RAW dependencies and structural conflicts can stall.",
-                        "Forwarding helps only when a producer's result is available in time.",
-                        KeyAction::Settings,
-                        "Review forwarding and latency configuration in Settings.",
-                        1};
+            guidance = {.title = "Pipeline hazards",
+                        .meaning = "RAW dependencies and structural conflicts can stall.",
+                        .relationship =
+                            "Forwarding helps only when a producer's result is available in time.",
+                        .next_action = KeyAction::Settings,
+                        .next_hint = "Review forwarding and latency configuration in Settings.",
+                        .glossary_topic = 1};
             break;
         case TuiRegPage::BUS:
-            guidance = {"Memory and MMIO",
-                        "The bus routes DRAM and device requests by address.",
-                        "Device and IRQ state connect software requests to peripherals.",
-                        KeyAction::InspectAddress,
-                        "Inspect a mapped address or descriptor.",
-                        5};
+            guidance = {
+                .title = "Memory and MMIO",
+                .meaning = "The bus routes DRAM and device requests by address.",
+                .relationship = "Device and IRQ state connect software requests to peripherals.",
+                .next_action = KeyAction::InspectAddress,
+                .next_hint = "Inspect a mapped address or descriptor.",
+                .glossary_topic = 5};
             break;
         case TuiRegPage::TRACE:
-            guidance = {"Execution trace",
-                        "Trace records committed instruction history.",
-                        "It connects control flow to visible architectural state changes.",
-                        KeyAction::CycleToolPage,
-                        "Focus Trace while stepping or running briefly.",
-                        0};
+            guidance = {
+                .title = "Execution trace",
+                .meaning = "Trace records committed instruction history.",
+                .relationship = "It connects control flow to visible architectural state changes.",
+                .next_action = KeyAction::CycleToolPage,
+                .next_hint = "Focus Trace while stepping or running briefly.",
+                .glossary_topic = 0};
             break;
         case TuiRegPage::EXPLAIN:
-            guidance = {"Instruction semantics",
-                        "Fields determine operands, operation, and encoding.",
-                        "Decoded dataflow predicts the next architectural state.",
-                        KeyAction::Step,
-                        "Step once and compare the resulting state.",
-                        0};
+            guidance = {.title = "Instruction semantics",
+                        .meaning = "Fields determine operands, operation, and encoding.",
+                        .relationship = "Decoded dataflow predicts the next architectural state.",
+                        .next_action = KeyAction::Step,
+                        .next_hint = "Step once and compare the resulting state.",
+                        .glossary_topic = 0};
             break;
         case TuiRegPage::STACK:
-            guidance = {"Stack and memory",
-                        "Stack slots hold frames, saved registers, and locals.",
-                        "sp and frame pointers connect ABI conventions to memory.",
-                        KeyAction::InspectAddress,
-                        "Open a selected stack or register address.",
-                        0};
+            guidance = {.title = "Stack and memory",
+                        .meaning = "Stack slots hold frames, saved registers, and locals.",
+                        .relationship = "sp and frame pointers connect ABI conventions to memory.",
+                        .next_action = KeyAction::InspectAddress,
+                        .next_hint = "Open a selected stack or register address.",
+                        .glossary_topic = 0};
             break;
         case TuiRegPage::LIVE:
-            guidance = {"Live execution overview",
-                        "Hart rows show sampled PCs and architectural privilege modes.",
-                        "Totals combine all harts; rates describe recent simulator throughput.",
-                        KeyAction::RunPause,
-                        "Pause execution to inspect stable architectural state.",
-                        0};
+            guidance = {.title = "Live execution overview",
+                        .meaning = "Hart rows show sampled PCs and architectural privilege modes.",
+                        .relationship =
+                            "Totals combine all harts; rates describe recent simulator throughput.",
+                        .next_action = KeyAction::RunPause,
+                        .next_hint = "Pause execution to inspect stable architectural state.",
+                        .glossary_topic = 0};
             break;
         case TuiRegPage::CONSOLE:
         case TuiRegPage::DISPLAY:
-            guidance = {"Console",
-                        "Terminal or display output from the simulated system.",
-                        "Direct guest UART terminal and framebuffer display output.",
-                        KeyAction::RunPause,
-                        "Run or pause guest execution.",
-                        0};
+            guidance = {
+                .title = "Console",
+                .meaning = "Terminal or display output from the simulated system.",
+                .relationship = "Direct guest UART terminal and framebuffer display output.",
+                .next_action = KeyAction::RunPause,
+                .next_hint = "Run or pause guest execution.",
+                .glossary_topic = 0};
             break;
     }
 

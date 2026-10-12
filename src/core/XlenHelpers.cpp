@@ -2,15 +2,15 @@
 #include <string>
 
 #include "simrv/core/CsrTypes.hpp"
-#include "simrv/memory/Mmu.hpp"
+#include "simrv/xlen/Constants.hpp"
 #include "simrv/xlen/Helpers.hpp"
 
 namespace simrv::xlen {
 
 auto resolve_misa_string(CsrValue misa) -> std::string {
-    uint64_t misa64 = static_cast<uint64_t>(misa);
-    uint8_t mxl64 = static_cast<uint8_t>(misa64 >> 62);
-    uint8_t mxl32 = static_cast<uint8_t>((misa64 >> 30) & 3);
+    auto misa64 = static_cast<uint64_t>(misa);
+    auto mxl64 = static_cast<uint8_t>(misa64 >> 62);
+    auto mxl32 = static_cast<uint8_t>((misa64 >> 30) & 3);
     bool is_rv32 = (mxl32 == 1 && mxl64 == 0);
     bool is_rv64 = (mxl64 == 2);
     std::string s = is_rv32 ? "RV32" : (is_rv64 ? "RV64" : (kIsXLen64 ? "RV64" : "RV32"));

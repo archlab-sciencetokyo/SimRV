@@ -15,7 +15,8 @@ namespace simrv::tui {
 /** Per-user presentation state. It deliberately excludes machine and guest configuration. */
 struct TuiPreferences {
     TuiLayout layout = TuiLayout::Split;
-    std::vector<WorkbenchSlot> slots{{TuiRegPage::GPR, 0}, {TuiRegPage::CONSOLE, 0}};
+    std::vector<WorkbenchSlot> slots{{.page = TuiRegPage::GPR, .scroll_offset = 0},
+                                     {.page = TuiRegPage::CONSOLE, .scroll_offset = 0}};
     size_t focused_slot = 0;
     int inspector_width = -1;
     framework::ColumnWidthOverrides column_widths = framework::kNoColumnWidthOverrides;

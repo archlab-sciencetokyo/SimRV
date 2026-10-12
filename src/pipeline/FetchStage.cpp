@@ -2,7 +2,6 @@
  * @file FetchStage.cpp
  * @brief Instruction Fetch (IF) stage implementation.
  */
-#include <bit>
 #include <cstdint>
 #include <optional>
 #include <utility>
@@ -15,7 +14,6 @@
 #include "simrv/debug/GdbStub.hpp"
 #include "simrv/debug/SpikeLockstep.hpp"
 #include "simrv/device/Uart.hpp"
-#include "simrv/execute/ExecuteUnit.hpp"
 #include "simrv/isa/Common.hpp"
 #include "simrv/isa/Zk.hpp"
 #include "simrv/memory/MemoryAccess.hpp"
@@ -24,11 +22,9 @@
 #include "simrv/memory/Mmu.hpp"
 #include "simrv/pipeline/Decoder.hpp"
 #include "simrv/pipeline/OperationTraits.hpp"
-#include "simrv/pipeline/RetirementEffects.hpp"
 #include "simrv/tui/Tui.hpp"
 #include "simrv/xlen/AddressTypes.hpp"
 #include "simrv/xlen/Constants.hpp"
-#include "simrv/xlen/Helpers.hpp"
 #include "simrv/xlen/IdentifierTypes.hpp"
 #include "simrv/xlen/RegisterTypes.hpp"
 

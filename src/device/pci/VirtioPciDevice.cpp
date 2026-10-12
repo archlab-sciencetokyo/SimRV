@@ -302,7 +302,7 @@ void VirtioPciDevice::bar_write(BarIndex bar_idx, simrv::xlen::Address offset, u
 
     // Notify Config
     if (offset >= 0x100 && offset < 0x200) {
-        virtio::VirtioQueueIndex queue_idx = static_cast<virtio::VirtioQueueIndex>(val);
+        auto queue_idx = static_cast<virtio::VirtioQueueIndex>(val);
         on_queue_notify(queue_idx);
         return;
     }

@@ -3,8 +3,6 @@
  * @brief Cached instruction execution and optimized memory access paths.
  */
 #include <array>
-#include <atomic>
-#include <string_view>
 
 #include "CpuExecutionHelpers.hpp"
 #include "simrv/CompilerHints.hpp"
@@ -18,10 +16,8 @@
 #include "simrv/memory/MemoryAccess.hpp"
 #include "simrv/memory/MemorySubsystem.hpp"
 #include "simrv/memory/MemoryUtil.hpp"
-#include "simrv/pipeline/OperationTraits.hpp"
 #include "simrv/xlen/AddressTypes.hpp"
 #include "simrv/xlen/Constants.hpp"
-#include "simrv/xlen/IdentifierTypes.hpp"
 #include "simrv/xlen/RegisterTypes.hpp"
 
 namespace simrv::core {
@@ -1016,7 +1012,7 @@ void CPU::run_fast_baremetal_batch(Machine& machine, uint32_t batch_size,
             cpu.apply_hart_control_boundary();
             active_execution_cpu_ = previous;
         }
-    } boundary_commit{*this, previous_active_cpu};
+    } boundary_commit{.cpu = *this, .previous = previous_active_cpu};
     const auto ram = machine.ram_view();
     uint32_t cached_ops = 0;
     if (simrv::compiler::likely(!policy.copy_pipeline_context && !policy.collect_instruction_mix)) {
@@ -1112,7 +1108,7 @@ void CPU::run_fast_os_batch(Machine& machine, uint32_t batch_size, const FastBat
             cpu.apply_hart_control_boundary();
             active_execution_cpu_ = previous;
         }
-    } boundary_commit{*this, previous_active_cpu};
+    } boundary_commit{.cpu = *this, .previous = previous_active_cpu};
 
     const auto ram = machine.ram_view();
     if (simrv::compiler::likely(!policy.copy_pipeline_context && !policy.collect_instruction_mix)) {

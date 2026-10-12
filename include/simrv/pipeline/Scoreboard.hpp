@@ -204,8 +204,7 @@ class Scoreboard {
             }
         }
         if (traits.reads_rs3_fp) {
-            const simrv::xlen::RegId rs3 =
-                static_cast<simrv::xlen::RegId>((consumer.ir >> 27U) & 0x1FU);
+            const auto rs3 = static_cast<simrv::xlen::RegId>((consumer.ir >> 27U) & 0x1FU);
             if (is_busy(operation::RegBank::Float, rs3)) {
                 return true;
             }

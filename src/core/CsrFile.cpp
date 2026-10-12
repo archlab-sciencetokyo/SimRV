@@ -98,12 +98,12 @@ void CsrFile::setMstatus(simrv::xlen::CsrValue wdata) {
         // SXL and UXL are WARL. SimRV supports 32 and 64 only; reserved
         // encodings retain their prior legal value. An RV32 machine
         // personality fixes both lower modes to RV32.
-        const unsigned mxl =
+        const auto mxl =
             static_cast<unsigned>((static_cast<uint64_t>(cpu_.state().misa) >> 62U) & 0x3U);
         for (const unsigned shift : {32U, 34U}) {
             const uint64_t field_mask = uint64_t{0x3U} << shift;
             const uint64_t requested = (static_cast<uint64_t>(wdata) >> shift) & 0x3U;
-            uint64_t legalized = static_cast<uint64_t>(wdata);
+            auto legalized = static_cast<uint64_t>(wdata);
             if (mxl == 1U) {
                 legalized = (legalized & ~field_mask) | (uint64_t{1U} << shift);
             } else if (requested != 1U && requested != 2U) {
@@ -127,8 +127,7 @@ void CsrFile::setMstatus(simrv::xlen::CsrValue wdata) {
     // - Sxl/Uxl (bits 35:34 and 33:32): XLEN changes alter RVC decompression (C.JAL vs C.ADDIW)
     const simrv::xlen::CsrValue tlb_sensitive =
         MstatusBit::Mprv | MstatusBit::Sum | MstatusBit::Mxr | MstatusBit::Fs | MstatusBit::Vs;
-    const simrv::xlen::CsrValue xlen_bits =
-        static_cast<simrv::xlen::CsrValue>(uint64_t{0xFULL} << 32U);
+    const auto xlen_bits = static_cast<simrv::xlen::CsrValue>(uint64_t{0xFULL} << 32U);
     if ((mod & (tlb_sensitive | xlen_bits)) != 0 ||
         (((cpu_.state().mstatus & MstatusBit::Mprv) != 0u) && (mod & MstatusBit::Mpp) != 0)) {
         cpu_.TLB_flush();

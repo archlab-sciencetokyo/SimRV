@@ -1,6 +1,5 @@
 #include "simrv/execute/ExecuteUnitInt.hpp"
 
-#include <algorithm>
 #include <limits>
 
 #include "simrv/CompilerHints.hpp"
@@ -330,7 +329,7 @@ auto ExecuteUnitInt::aluAmo(simrv::xlen::Register in1, simrv::xlen::Register in2
 auto ExecuteUnitInt::csrWriteValue(simrv::xlen::CsrValue rcsr, simrv::xlen::Register rrs1,
                                    simrv::xlen::ImmValue imm, Funct3 funct3)
     -> std::expected<simrv::xlen::CsrValue, simrv::xlen::TrapCause> {
-    const simrv::xlen::Word zimm = static_cast<simrv::xlen::Word>(imm);
+    const auto zimm = static_cast<simrv::xlen::Word>(imm);
     switch (funct3) {
         case Funct3::Csrrw:
             return static_cast<simrv::xlen::CsrValue>(rrs1);

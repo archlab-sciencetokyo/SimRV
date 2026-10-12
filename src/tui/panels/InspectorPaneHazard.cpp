@@ -98,14 +98,14 @@ auto InspectorPane::render_hazard_stats(const simrv::core::CPU& cpu, int logical
         auto e_reg = state.e_reg;
         auto w_reg = state.w_reg;
 
-        uint32_t f_pc = static_cast<uint32_t>(f_reg.pc & 0xFFFFFFFFULL);
-        uint32_t e_pc = static_cast<uint32_t>(e_reg.pc & 0xFFFFFFFFULL);
-        uint32_t w_pc = static_cast<uint32_t>(w_reg.pc & 0xFFFFFFFFULL);
+        auto f_pc = static_cast<uint32_t>(f_reg.pc & 0xFFFFFFFFULL);
+        auto e_pc = static_cast<uint32_t>(e_reg.pc & 0xFFFFFFFFULL);
+        auto w_pc = static_cast<uint32_t>(w_reg.pc & 0xFFFFFFFFULL);
 
-        uint8_t e_rs1 = static_cast<uint8_t>(e_reg.rs1);
-        uint8_t e_rs2 = static_cast<uint8_t>(e_reg.rs2);
-        uint8_t e_rd = static_cast<uint8_t>(e_reg.rd);
-        uint8_t w_rd = static_cast<uint8_t>(w_reg.rd);
+        auto e_rs1 = static_cast<uint8_t>(e_reg.rs1);
+        auto e_rs2 = static_cast<uint8_t>(e_reg.rs2);
+        auto e_rd = static_cast<uint8_t>(e_reg.rd);
+        auto w_rd = static_cast<uint8_t>(w_reg.rd);
 
         if (logical_row == 4) {
             return format_to_width(
@@ -169,19 +169,19 @@ auto InspectorPane::render_hazard_stats(const simrv::core::CPU& cpu, int logical
     auto m_reg = state.m_reg;
     auto w_reg = state.w_reg;
 
-    uint32_t f_pc = static_cast<uint32_t>(f_reg.pc & 0xFFFFFFFFULL);
-    uint32_t d_pc = static_cast<uint32_t>(d_reg.pc & 0xFFFFFFFFULL);
-    uint32_t e_pc = static_cast<uint32_t>(e_reg.pc & 0xFFFFFFFFULL);
-    uint32_t m_pc = static_cast<uint32_t>(m_reg.pc & 0xFFFFFFFFULL);
-    uint32_t w_pc = static_cast<uint32_t>(w_reg.pc & 0xFFFFFFFFULL);
+    auto f_pc = static_cast<uint32_t>(f_reg.pc & 0xFFFFFFFFULL);
+    auto d_pc = static_cast<uint32_t>(d_reg.pc & 0xFFFFFFFFULL);
+    auto e_pc = static_cast<uint32_t>(e_reg.pc & 0xFFFFFFFFULL);
+    auto m_pc = static_cast<uint32_t>(m_reg.pc & 0xFFFFFFFFULL);
+    auto w_pc = static_cast<uint32_t>(w_reg.pc & 0xFFFFFFFFULL);
 
-    uint8_t d_rs1 = static_cast<uint8_t>(d_reg.rs1);
-    uint8_t d_rs2 = static_cast<uint8_t>(d_reg.rs2);
-    uint8_t d_rd = static_cast<uint8_t>(d_reg.rd);
-    uint8_t e_rs1 = static_cast<uint8_t>(e_reg.rs1);
-    uint8_t e_rs2 = static_cast<uint8_t>(e_reg.rs2);
-    uint8_t m_rd = static_cast<uint8_t>(m_reg.rd);
-    uint8_t w_rd = static_cast<uint8_t>(w_reg.rd);
+    auto d_rs1 = static_cast<uint8_t>(d_reg.rs1);
+    auto d_rs2 = static_cast<uint8_t>(d_reg.rs2);
+    auto d_rd = static_cast<uint8_t>(d_reg.rd);
+    auto e_rs1 = static_cast<uint8_t>(e_reg.rs1);
+    auto e_rs2 = static_cast<uint8_t>(e_reg.rs2);
+    auto m_rd = static_cast<uint8_t>(m_reg.rd);
+    auto w_rd = static_cast<uint8_t>(w_reg.rd);
 
     if (logical_row == 4) {
         return format_to_width(
@@ -300,7 +300,7 @@ auto InspectorPane::render_hazard_stats(const simrv::core::CPU& cpu, int logical
                 width);
         }
     } else {
-        size_t entry_idx = static_cast<size_t>(logical_row - 11);
+        auto entry_idx = static_cast<size_t>(logical_row - 11);
         if (entry_idx < active_entries.size() && entry_idx < 6) {
             const auto& item = active_entries[entry_idx];
             std::string fwd_str = item.can_forward ? "\033[38;5;120m[CAN FWD]\033[0m"

@@ -25,5 +25,4 @@ enum class InstFormat : uint8_t {
     Unknown  ///< Unidentified or invalid instruction format
 };
 
-
 }  // namespace simrv::isa

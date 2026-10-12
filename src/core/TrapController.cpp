@@ -5,7 +5,6 @@
 #include "simrv/core/TrapController.hpp"
 
 #include <cstdint>
-#include <print>
 #include <string>
 
 #include "simrv/CompilerHints.hpp"
@@ -16,7 +15,6 @@
 #include "simrv/core/TelemetrySink.hpp"
 #include "simrv/core/Tracer.hpp"
 #include "simrv/isa/Priv.hpp"
-#include "simrv/xlen/Helpers.hpp"
 #include "simrv/xlen/ScalarTypes.hpp"
 
 namespace simrv::core {

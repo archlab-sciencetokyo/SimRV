@@ -1,8 +1,6 @@
 /** @file VirtioPciFs.cpp */
 #include "simrv/device/pci/VirtioPciFs.hpp"
 
-#include <algorithm>
-
 namespace simrv::device {
 
 VirtioPciFs::VirtioPciFs(const std::string& shared_directory, std::string tag)

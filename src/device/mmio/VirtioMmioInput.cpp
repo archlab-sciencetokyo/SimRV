@@ -38,7 +38,7 @@ void VirtioMmioInput::process_eventq() {
 void VirtioMmioInput::push_event(uint16_t type, uint16_t code, uint32_t value) {
     {
         std::scoped_lock lock(backend_.event_mutex);
-        backend_.event_queue.push_back({type, code, value});
+        backend_.event_queue.push_back({.type = type, .code = code, .value = value});
     }
     process_eventq();
 }

@@ -3,7 +3,6 @@
  * @brief Implements Branch Predictor Inspector and Telemetry for TUI Left Pane.
  */
 #include <algorithm>
-#include <bitset>
 #include <format>
 #include <string>
 

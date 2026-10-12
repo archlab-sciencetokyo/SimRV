@@ -477,7 +477,7 @@ struct MisaView {
     [[nodiscard]] constexpr auto has_extension(char ext) const noexcept -> bool {
         if (ext >= 'a' && ext <= 'z') ext = static_cast<char>(ext - 'a' + 'A');
         if (ext >= 'A' && ext <= 'Z') {
-            const unsigned bit = static_cast<unsigned>(ext - 'A');
+            const auto bit = static_cast<unsigned>(ext - 'A');
             return (value & (simrv::xlen::CsrValue{1} << bit)) != 0;
         }
         return false;
@@ -552,8 +552,7 @@ constexpr auto is_zero_hpm_csr(simrv::xlen::CsrNumber address, unsigned xlen) ->
 constexpr auto cause_read_value(simrv::xlen::CsrValue value, unsigned xlen)
     -> simrv::xlen::CsrValue {
     if constexpr (simrv::xlen::kIsXLen64) {
-        constexpr simrv::xlen::CsrValue kInternalInterrupt =
-            static_cast<simrv::xlen::CsrValue>(uint64_t{1} << 63U);
+        constexpr auto kInternalInterrupt = static_cast<simrv::xlen::CsrValue>(uint64_t{1} << 63U);
         if (xlen == 32) {
             const bool interrupt = (value & kInternalInterrupt) != 0;
             value = static_cast<simrv::xlen::CsrValue>(static_cast<uint32_t>(value));
@@ -569,8 +568,7 @@ constexpr auto cause_write_value(simrv::xlen::CsrValue value, unsigned xlen)
     if constexpr (simrv::xlen::kIsXLen64) {
         constexpr simrv::xlen::CsrValue kArchitecturalRv32Interrupt = simrv::xlen::CsrValue{1}
                                                                       << 31U;
-        constexpr simrv::xlen::CsrValue kInternalInterrupt =
-            static_cast<simrv::xlen::CsrValue>(uint64_t{1} << 63U);
+        constexpr auto kInternalInterrupt = static_cast<simrv::xlen::CsrValue>(uint64_t{1} << 63U);
         if (xlen == 32) {
             value = static_cast<simrv::xlen::CsrValue>(static_cast<uint32_t>(value));
             if ((value & kArchitecturalRv32Interrupt) != 0) {

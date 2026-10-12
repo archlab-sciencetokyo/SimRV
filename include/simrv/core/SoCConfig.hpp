@@ -265,7 +265,8 @@ struct SmpTopologyConfig {
                     0x4000,
                     2,
                     true,
-                    {{"rxbuf", 0x18000000, 0x4000}, {"txbuf", 0x1c000000, 0x2000}},
+                    {{.name = "rxbuf", .base = 0x18000000, .size = 0x4000},
+                     {.name = "txbuf", .base = 0x1c000000, .size = 0x2000}},
                     {},
                     0,
                     {0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff}};
@@ -379,7 +380,7 @@ struct SoCConfig {
                 (device.kind == SoCDeviceKind::RingBufferEthernet && device.size < 28)) {
                 return std::unexpected("Platform extension has an unsupported MMIO window size");
             }
-            regions.push_back({device.base, device.size, device.name});
+            regions.push_back({.base = device.base, .size = device.size, .name = device.name});
             if (device.kind == SoCDeviceKind::DummyMmio && device.compatible.empty()) {
                 return std::unexpected("Dummy MMIO device requires a compatible string");
             }
@@ -405,7 +406,7 @@ struct SoCConfig {
                     return std::unexpected("SoC device has an invalid auxiliary region: '" +
                                            extra.name + "'");
                 }
-                regions.push_back({extra.base, extra.size, extra.name});
+                regions.push_back({.base = extra.base, .size = extra.size, .name = extra.name});
             }
         }
         for (size_t i = 0; i < regions.size(); ++i) {

@@ -37,9 +37,9 @@ class TimingCache {
 
     [[nodiscard]] auto access(simrv::xlen::Address address) -> Access {
         if (!enabled_) return {};
-        const uint64_t raw = static_cast<uint64_t>(address);
+        const auto raw = static_cast<uint64_t>(address);
         const uint64_t line = raw / line_bytes_;
-        const uint32_t set = static_cast<uint32_t>(line & (sets_ - 1));
+        const auto set = static_cast<uint32_t>(line & (sets_ - 1));
         const uint64_t tag = line / sets_;
         Entry* victim = nullptr;
         uint32_t victim_way = 0;

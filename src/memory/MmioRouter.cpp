@@ -178,8 +178,7 @@ auto MmioRouter::route_request(const TlChannelA& req, TlChannelD& resp) -> bool 
     const bool is_write =
         (req.opcode == TlOpcodeA::PutFullData || req.opcode == TlOpcodeA::PutPartialData);
 
-    const simrv::xlen::Address request_bytes =
-        static_cast<simrv::xlen::Address>(1u << (req.size & 0x3u));
+    const auto request_bytes = static_cast<simrv::xlen::Address>(1u << (req.size & 0x3u));
     const auto trace_access = [&](bool faulted) {
         if (tracer_ == nullptr ||
             (!tracer_->is_dlog_enabled() && !tracer_->is_architecture_trace_enabled()))

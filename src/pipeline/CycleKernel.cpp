@@ -3,7 +3,6 @@
 
 #include "simrv/core/Cpu.hpp"
 #include "simrv/core/Machine.hpp"
-#include "simrv/core/TelemetrySink.hpp"
 #include "simrv/core/Tracer.hpp"
 #include "simrv/memory/MemorySubsystem.hpp"
 #include "simrv/pipeline/OperationTraits.hpp"
@@ -64,8 +63,7 @@ void CPU::run_ca_pipeline_cycle(Machine& machine) {
         return result;
     };
     auto cancel_port = [&](simrv::memory::TlPort port) {
-        machine.memory_.system_bus().cancel_source(
-            simrv::memory::make_tl_source(hart_id(), port));
+        machine.memory_.system_bus().cancel_source(simrv::memory::make_tl_source(hart_id(), port));
     };
     auto flush_to = [&](simrv::xlen::Address pc) {
         pipe.flush_younger();

@@ -165,7 +165,7 @@ void emit_log(Level level, FILE* stream, std::string_view ansi_color, std::strin
                 std::fflush(stderr);
             } else {
                 if (g_startup_logs.size() == kStartupLogLimit) g_startup_logs.pop_front();
-                g_startup_logs.push_back({level, msg, timestamp});
+                g_startup_logs.push_back({.level = level, .message = msg, .timestamp = timestamp});
             }
             return;
         } else {

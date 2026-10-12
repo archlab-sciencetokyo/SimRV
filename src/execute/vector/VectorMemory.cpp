@@ -143,7 +143,7 @@ void execute_vl_whole(core::CPU& cpu, simrv::memory::MemorySubsystem& mem, simrv
     }
 
     const uint32_t elements = nr * vlen_bytes / element_bytes;
-    for (uint32_t i = static_cast<uint32_t>(cpu.state().vstart); i < elements; ++i) {
+    for (auto i = static_cast<uint32_t>(cpu.state().vstart); i < elements; ++i) {
         const simrv::xlen::Address addr = base_addr + i * element_bytes;
         uint64_t val = 0;
         if (element_bytes == 8 && !simrv::xlen::kIsXLen64) {
@@ -211,7 +211,7 @@ void execute_vs_whole(core::CPU& cpu, simrv::memory::MemorySubsystem& mem, simrv
         }
     }
 
-    for (uint32_t i = static_cast<uint32_t>(cpu.state().vstart); i < total_bytes; i++) {
+    for (auto i = static_cast<uint32_t>(cpu.state().vstart); i < total_bytes; i++) {
         simrv::xlen::Address addr = base_addr + i;
         uint32_t reg_idx = (static_cast<uint32_t>(vs3) + (i / cpu.state().regs.vlen_bytes())) % 32;
         uint8_t val =
@@ -270,7 +270,7 @@ void execute_vle(core::CPU& cpu, simrv::memory::MemorySubsystem& mem, simrv::xle
     const auto& mask_reg =
         cpu.state().regs.read_vector(simrv::xlen::to_vec_reg_id(simrv::xlen::RegId::Zero));
 
-    for (uint32_t i = static_cast<uint32_t>(cpu.state().vstart); i < vl; i++) {
+    for (auto i = static_cast<uint32_t>(cpu.state().vstart); i < vl; i++) {
         if (!vector::is_element_active(mask_reg, i, vm)) continue;
         for (uint32_t f = 0; f < nfields; f++) {
             simrv::xlen::Address addr = base_addr + (i * nfields + f) * sizeof(T);
@@ -332,7 +332,7 @@ void execute_vlm(core::CPU& cpu, simrv::memory::MemorySubsystem& mem, simrv::xle
             return;
         }
     }
-    for (uint32_t i = static_cast<uint32_t>(cpu.state().vstart); i < evl; ++i) {
+    for (auto i = static_cast<uint32_t>(cpu.state().vstart); i < evl; ++i) {
         const auto value =
             simrv::memory::MemoryAccess::loadInt(mem, cpu, base_addr + i, isa::Funct3::Lbu);
         if (cpu.active_context().pending_exception.has_value()) {
@@ -362,7 +362,7 @@ void execute_vsm(core::CPU& cpu, simrv::memory::MemorySubsystem& mem, simrv::xle
             return;
         }
     }
-    for (uint32_t i = static_cast<uint32_t>(cpu.state().vstart); i < evl; ++i) {
+    for (auto i = static_cast<uint32_t>(cpu.state().vstart); i < evl; ++i) {
         const auto value = vector::get_group_element<uint8_t>(cpu.state().regs, vs3, i);
         simrv::memory::MemoryAccess::storeInt(mem, cpu, base_addr + i, value, isa::Funct3::Sb);
         if (cpu.active_context().pending_exception.has_value()) {
@@ -422,7 +422,7 @@ void execute_vse(core::CPU& cpu, simrv::memory::MemorySubsystem& mem, simrv::xle
     const auto& mask_reg =
         cpu.state().regs.read_vector(simrv::xlen::to_vec_reg_id(simrv::xlen::RegId::Zero));
 
-    for (uint32_t i = static_cast<uint32_t>(cpu.state().vstart); i < vl; i++) {
+    for (auto i = static_cast<uint32_t>(cpu.state().vstart); i < vl; i++) {
         if (!vector::is_element_active(mask_reg, i, vm)) continue;
         for (uint32_t f = 0; f < nfields; f++) {
             simrv::xlen::Address addr = base_addr + (i * nfields + f) * sizeof(T);
@@ -474,7 +474,7 @@ void execute_vlse(core::CPU& cpu, simrv::memory::MemorySubsystem& mem, simrv::xl
     auto stride = static_cast<int64_t>(
         static_cast<std::make_signed_t<simrv::xlen::Register>>(stride_reg_val));
 
-    for (uint32_t i = static_cast<uint32_t>(cpu.state().vstart); i < vl; i++) {
+    for (auto i = static_cast<uint32_t>(cpu.state().vstart); i < vl; i++) {
         if (!vector::is_element_active(mask_reg, i, vm)) continue;
         for (uint32_t f = 0; f < nfields; ++f) {
             simrv::xlen::Address addr = base_addr + i * stride + f * sizeof(T);
@@ -523,7 +523,7 @@ void execute_vsse(core::CPU& cpu, simrv::memory::MemorySubsystem& mem, simrv::xl
     auto stride = static_cast<int64_t>(
         static_cast<std::make_signed_t<simrv::xlen::Register>>(stride_reg_val));
 
-    for (uint32_t i = static_cast<uint32_t>(cpu.state().vstart); i < vl; i++) {
+    for (auto i = static_cast<uint32_t>(cpu.state().vstart); i < vl; i++) {
         if (!vector::is_element_active(mask_reg, i, vm)) continue;
         for (uint32_t f = 0; f < nfields; ++f) {
             simrv::xlen::Address addr = base_addr + i * stride + f * sizeof(T);
@@ -573,7 +573,7 @@ void execute_vluxei(core::CPU& cpu, simrv::memory::MemorySubsystem& mem, simrv::
     const auto& mask_reg =
         cpu.state().regs.read_vector(simrv::xlen::to_vec_reg_id(simrv::xlen::RegId::Zero));
 
-    for (uint32_t i = static_cast<uint32_t>(cpu.state().vstart); i < vl; i++) {
+    for (auto i = static_cast<uint32_t>(cpu.state().vstart); i < vl; i++) {
         if (!vector::is_element_active(mask_reg, i, vm)) continue;
         auto offset = vector::get_group_element<T_idx>(cpu.state().regs, vs2, i);
         for (uint32_t f = 0; f < nfields; ++f) {
@@ -643,7 +643,7 @@ void execute_vsuxei(core::CPU& cpu, simrv::memory::MemorySubsystem& mem, simrv::
     const auto& mask_reg =
         cpu.state().regs.read_vector(simrv::xlen::to_vec_reg_id(simrv::xlen::RegId::Zero));
 
-    for (uint32_t i = static_cast<uint32_t>(cpu.state().vstart); i < vl; i++) {
+    for (auto i = static_cast<uint32_t>(cpu.state().vstart); i < vl; i++) {
         if (!vector::is_element_active(mask_reg, i, vm)) continue;
         auto offset = vector::get_group_element<T_idx>(cpu.state().regs, vs2, i);
         for (uint32_t f = 0; f < nfields; ++f) {

@@ -30,7 +30,7 @@ auto parse_slots(std::string_view text, std::vector<WorkbenchSlot>& slots) -> bo
             page > static_cast<unsigned>(TuiRegPage::LIVE) || scroll < 0 || parsed.size() >= 4) {
             return false;
         }
-        parsed.push_back({static_cast<TuiRegPage>(page), scroll});
+        parsed.push_back({.page = static_cast<TuiRegPage>(page), .scroll_offset = scroll});
         if (separator == std::string_view::npos) break;
         text.remove_prefix(separator + 1);
     }

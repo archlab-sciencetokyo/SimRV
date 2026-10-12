@@ -8,7 +8,6 @@
 
 #include "simrv/core/Cpu.hpp"
 #include "simrv/core/Machine.hpp"
-#include "simrv/core/TelemetrySink.hpp"
 #include "simrv/tui/Tui.hpp"
 #include "simrv/tui/TuiKeybindings.hpp"
 #include "simrv/tui/TuiTheme.hpp"

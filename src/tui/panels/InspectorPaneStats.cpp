@@ -15,11 +15,9 @@
 #include "simrv/debug/GdbStub.hpp"
 #include "simrv/debug/SpikeLockstep.hpp"
 #include "simrv/debug/SymbolTable.hpp"
-#include "simrv/pipeline/PipelineConfig.hpp"
 #include "simrv/tui/TuiTheme.hpp"
 #include "simrv/tui/panels/InspectorPane.hpp"
 #include "simrv/util/FormatUtil.hpp"
-#include "simrv/xlen/Helpers.hpp"
 #include "simrv/xlen/ScalarTypes.hpp"
 
 namespace simrv::tui {

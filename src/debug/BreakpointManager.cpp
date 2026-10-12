@@ -335,8 +335,10 @@ auto BreakpointManager::check_reg_changes(const simrv::core::ArchState& state,
                 break;
             }
             case RegType::VEC: {
-                const auto& old_v = prev_state.regs.read_vector(simrv::xlen::to_vec_reg_id(wp.reg_index));
-                const auto& new_v = state.regs.read_vector(simrv::xlen::to_vec_reg_id(wp.reg_index));
+                const auto& old_v =
+                    prev_state.regs.read_vector(simrv::xlen::to_vec_reg_id(wp.reg_index));
+                const auto& new_v =
+                    state.regs.read_vector(simrv::xlen::to_vec_reg_id(wp.reg_index));
                 const bool vec_changed = std::ranges::any_of(
                     std::views::zip(old_v.u64, new_v.u64), [](const auto& pair) {
                         const auto& [old_val, new_val] = pair;

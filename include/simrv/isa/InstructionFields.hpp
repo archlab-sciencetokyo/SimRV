@@ -111,5 +111,4 @@ enum class Funct3 : uint8_t {
     Csrrci = 0x7,  ///< CSR Read and Clear Bits Immediate
 };
 
-
 }  // namespace simrv::isa

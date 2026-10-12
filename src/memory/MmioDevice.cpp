@@ -4,11 +4,14 @@
  */
 #include "simrv/memory/MmioDevice.hpp"
 
+#include <cstdint>
 #include <cstring>
+#include <span>
 
 #include "simrv/core/Machine.hpp"
 #include "simrv/memory/MemorySubsystem.hpp"
-#include "simrv/memory/MemoryUtil.hpp"
+#include "simrv/memory/TileLinkProtocol.hpp"
+#include "simrv/xlen/ScalarTypes.hpp"
 
 namespace simrv::memory {
 
@@ -17,14 +20,14 @@ MmioDevice::MmioDevice(simrv::core::Machine* machine) : machine_(machine) {}
 auto MmioDevice::read8(simrv::xlen::Address offset) -> uint8_t {
     const simrv::xlen::Address aligned = offset & ~simrv::xlen::Address{3};
     const uint32_t val32 = read32(aligned);
-    const unsigned shift = static_cast<unsigned>((offset & simrv::xlen::Address{3}) * 8);
+    const auto shift = static_cast<unsigned>((offset & simrv::xlen::Address{3}) * 8);
     return static_cast<uint8_t>((val32 >> shift) & 0xffU);
 }
 
 auto MmioDevice::read16(simrv::xlen::Address offset) -> uint16_t {
     const simrv::xlen::Address aligned = offset & ~simrv::xlen::Address{3};
     const uint32_t val32 = read32(aligned);
-    const unsigned shift = static_cast<unsigned>((offset & simrv::xlen::Address{2}) * 8);
+    const auto shift = static_cast<unsigned>((offset & simrv::xlen::Address{2}) * 8);
     return static_cast<uint16_t>((val32 >> shift) & 0xffffU);
 }
 
@@ -39,7 +42,7 @@ auto MmioDevice::read64(simrv::xlen::Address offset) -> uint64_t {
 void MmioDevice::write8(simrv::xlen::Address offset, uint8_t val) {
     const simrv::xlen::Address aligned = offset & ~simrv::xlen::Address{3};
     uint32_t val32 = read32(aligned);
-    const unsigned shift = static_cast<unsigned>((offset & simrv::xlen::Address{3}) * 8);
+    const auto shift = static_cast<unsigned>((offset & simrv::xlen::Address{3}) * 8);
     const uint32_t mask = ~(0xffU << shift);
     val32 = (val32 & mask) | (static_cast<uint32_t>(val) << shift);
     write32(aligned, val32);
@@ -48,7 +51,7 @@ void MmioDevice::write8(simrv::xlen::Address offset, uint8_t val) {
 void MmioDevice::write16(simrv::xlen::Address offset, uint16_t val) {
     const simrv::xlen::Address aligned = offset & ~simrv::xlen::Address{3};
     uint32_t val32 = read32(aligned);
-    const unsigned shift = static_cast<unsigned>((offset & simrv::xlen::Address{2}) * 8);
+    const auto shift = static_cast<unsigned>((offset & simrv::xlen::Address{2}) * 8);
     const uint32_t mask = ~(0xffffU << shift);
     val32 = (val32 & mask) | (static_cast<uint32_t>(val) << shift);
     write32(aligned, val32);

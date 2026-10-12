@@ -212,7 +212,7 @@ struct alignas(128) ArchState {
         const bool has_v = isa::misa_has_extension(misa, isa::IsaExtension::V);
         if constexpr (simrv::xlen::kIsXLen64) {
             constexpr uint64_t kLowerXlenMask = uint64_t{0xFU} << 32U;
-            const unsigned mxl = static_cast<unsigned>((static_cast<uint64_t>(misa) >> 62U) & 0x3U);
+            const auto mxl = static_cast<unsigned>((static_cast<uint64_t>(misa) >> 62U) & 0x3U);
             const uint64_t lower_xlen = (mxl == 1U) ? 1U : 2U;
             const uint64_t updated = (static_cast<uint64_t>(mstatus) & ~kLowerXlenMask) |
                                      (has_u ? (lower_xlen << 32U) : 0U) |

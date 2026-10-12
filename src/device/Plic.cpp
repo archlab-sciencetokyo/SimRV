@@ -4,7 +4,6 @@
  */
 #include "simrv/device/Plic.hpp"
 
-#include <cstdint>
 #include <ranges>
 
 #include "simrv/core/Cpu.hpp"

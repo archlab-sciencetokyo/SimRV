@@ -80,10 +80,10 @@ class Sha256 {
                        static_cast<uint32_t>(block[offset + 3]);
         }
         for (size_t i = 16; i < words.size(); ++i) {
-            const uint32_t s0 = rotate_right(words[i - 15], 7) ^
-                                rotate_right(words[i - 15], 18) ^ (words[i - 15] >> 3);
-            const uint32_t s1 = rotate_right(words[i - 2], 17) ^
-                                rotate_right(words[i - 2], 19) ^ (words[i - 2] >> 10);
+            const uint32_t s0 = rotate_right(words[i - 15], 7) ^ rotate_right(words[i - 15], 18) ^
+                                (words[i - 15] >> 3);
+            const uint32_t s1 = rotate_right(words[i - 2], 17) ^ rotate_right(words[i - 2], 19) ^
+                                (words[i - 2] >> 10);
             words[i] = words[i - 16] + s0 + words[i - 7] + s1;
         }
 

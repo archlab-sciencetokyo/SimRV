@@ -54,7 +54,7 @@ void VirtioMmioBlock::on_queue_notify(uint32_t q_idx) {
                 auto& q = queues_[q_idx];
                 uint16_t used_idx = 0;
                 dma_read_bytes(q.device_addr + 2, reinterpret_cast<std::byte*>(&used_idx), 2);
-                virtio::VirtqUsedElem elem{head_desc_idx, total_written};
+                virtio::VirtqUsedElem elem{.id = head_desc_idx, .len = total_written};
                 dma_write_bytes(q.device_addr + 4 + (used_idx % q.num) * sizeof(elem),
                                 reinterpret_cast<std::byte*>(&elem), sizeof(elem));
                 used_idx++;

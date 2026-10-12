@@ -294,23 +294,25 @@ void GlossaryModal::render(std::vector<std::string>& content_rows,
     emit_row("");
     bool const scrollable = static_cast<int>(body_rows.size()) > viewport_rows;
     if (scrollable) {
-        const std::array ansi_actions{ModalActionHint{"<", "Previous"},
-                                      ModalActionHint{">", "Next"}, ModalActionHint{"^", "Up"},
-                                      ModalActionHint{"v", "Down"},
-                                      ModalActionHint{"Esc/?/q", "Close"}};
-        const std::array unicode_actions{ModalActionHint{"←", "Previous"},
-                                         ModalActionHint{"→", "Next"}, ModalActionHint{"↑", "Up"},
-                                         ModalActionHint{"↓", "Down"},
-                                         ModalActionHint{"Esc/?/q", "Close"}};
+        const std::array ansi_actions{ModalActionHint{.key = "<", .action = "Previous"},
+                                      ModalActionHint{.key = ">", .action = "Next"},
+                                      ModalActionHint{.key = "^", .action = "Up"},
+                                      ModalActionHint{.key = "v", .action = "Down"},
+                                      ModalActionHint{.key = "Esc/?/q", .action = "Close"}};
+        const std::array unicode_actions{ModalActionHint{.key = "←", .action = "Previous"},
+                                         ModalActionHint{.key = "→", .action = "Next"},
+                                         ModalActionHint{.key = "↑", .action = "Up"},
+                                         ModalActionHint{.key = "↓", .action = "Down"},
+                                         ModalActionHint{.key = "Esc/?/q", .action = "Close"}};
         emit_row(
             build_modal_footer(is_ansi ? std::span{ansi_actions} : std::span{unicode_actions}));
     } else {
-        const std::array ansi_actions{ModalActionHint{"<", "Previous"},
-                                      ModalActionHint{">", "Next"},
-                                      ModalActionHint{"Esc/?/q", "Close"}};
-        const std::array unicode_actions{ModalActionHint{"←", "Previous"},
-                                         ModalActionHint{"→", "Next"},
-                                         ModalActionHint{"Esc/?/q", "Close"}};
+        const std::array ansi_actions{ModalActionHint{.key = "<", .action = "Previous"},
+                                      ModalActionHint{.key = ">", .action = "Next"},
+                                      ModalActionHint{.key = "Esc/?/q", .action = "Close"}};
+        const std::array unicode_actions{ModalActionHint{.key = "←", .action = "Previous"},
+                                         ModalActionHint{.key = "→", .action = "Next"},
+                                         ModalActionHint{.key = "Esc/?/q", .action = "Close"}};
         emit_row(
             build_modal_footer(is_ansi ? std::span{ansi_actions} : std::span{unicode_actions}));
     }

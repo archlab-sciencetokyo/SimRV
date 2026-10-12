@@ -377,17 +377,17 @@ struct GdbCsr {
 };
 
 static constexpr std::array<GdbCsr, 11> kGdbCsrs = {{
-    {"mstatus", simrv::core::Csr::Mstatus},
-    {"mtvec", simrv::core::Csr::Mtvec},
-    {"mcause", simrv::core::Csr::Mcause},
-    {"mepc", simrv::core::Csr::Mepc},
-    {"mtval", simrv::core::Csr::Mtval},
-    {"mie", simrv::core::Csr::Mie},
-    {"mip", simrv::core::Csr::Mip},
-    {"mcycle", simrv::core::Csr::Mcycle},
-    {"minstret", simrv::core::Csr::Minstret},
-    {"cycle", simrv::core::Csr::Cycle},
-    {"instret", simrv::core::Csr::Instret},
+    {.name = "mstatus", .csr = simrv::core::Csr::Mstatus},
+    {.name = "mtvec", .csr = simrv::core::Csr::Mtvec},
+    {.name = "mcause", .csr = simrv::core::Csr::Mcause},
+    {.name = "mepc", .csr = simrv::core::Csr::Mepc},
+    {.name = "mtval", .csr = simrv::core::Csr::Mtval},
+    {.name = "mie", .csr = simrv::core::Csr::Mie},
+    {.name = "mip", .csr = simrv::core::Csr::Mip},
+    {.name = "mcycle", .csr = simrv::core::Csr::Mcycle},
+    {.name = "minstret", .csr = simrv::core::Csr::Minstret},
+    {.name = "cycle", .csr = simrv::core::Csr::Cycle},
+    {.name = "instret", .csr = simrv::core::Csr::Instret},
 }};
 static constexpr std::size_t kFirstCsrReg = 65;
 

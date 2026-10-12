@@ -26,7 +26,7 @@ bool send_all(int fd, const uint8_t* data, size_t size) {
         } else if (written < 0 && errno == EINTR) {
             continue;
         } else if (written < 0 && errno == EAGAIN) {
-            pollfd ready{fd, POLLOUT, 0};
+            pollfd ready{.fd = fd, .events = POLLOUT, .revents = 0};
             if (::poll(&ready, 1, 1000) <= 0) return false;
         } else {
             return false;
@@ -34,7 +34,7 @@ bool send_all(int fd, const uint8_t* data, size_t size) {
     }
     return true;
 }
-}
+}  // namespace
 auto parse_endpoint(std::string_view value) -> Endpoint {
     Endpoint endpoint;
     if (value.empty()) return endpoint;
@@ -90,16 +90,15 @@ bool SimRvServer::start() {
     sockaddr_un address{};
     address.sun_family = AF_UNIX;
     std::memcpy(address.sun_path, endpoint_.path.c_str(), endpoint_.path.size() + 1);
-    struct stat metadata {};
+    struct stat metadata{};
     if (::lstat(endpoint_.path.c_str(), &metadata) == 0) {
         if (!S_ISSOCK(metadata.st_mode)) {
             log::error("TUI endpoint is not a socket: {}", endpoint_.path);
             return false;
         }
         util::UniqueFd probe(::socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0));
-        const bool active = probe &&
-                            ::connect(probe.get(), reinterpret_cast<sockaddr*>(&address),
-                                      sizeof(address)) == 0;
+        const bool active = probe && ::connect(probe.get(), reinterpret_cast<sockaddr*>(&address),
+                                               sizeof(address)) == 0;
         if (active) {
             log::error("TUI endpoint is already in use: {}", endpoint_.path);
             return false;
@@ -168,7 +167,7 @@ void SimRvServer::reply(uint64_t connection, tui::BackendReply response) {
             overflow_ = true;
         else {
             reply_bytes_ += frame.size();
-            replies_.push_back({connection, std::move(frame)});
+            replies_.push_back({.connection = connection, .frame = std::move(frame)});
         }
     }
     wake();
@@ -260,15 +259,14 @@ void SimRvServer::loop() {
         for (const auto& frame : reliable) queued += frame.size();
         if (client && !handshake && now >= hello_deadline) {
             static constexpr std::string_view timeout = "handshake timeout";
-            const auto frame = make_frame(
-                ChannelId::Reply,
-                {reinterpret_cast<const uint8_t*>(timeout.data()), timeout.size()});
+            const auto frame =
+                make_frame(ChannelId::Reply,
+                           {reinterpret_cast<const uint8_t*>(timeout.data()), timeout.size()});
             (void)send_all(client.get(), frame.data(), frame.size());
             disconnect();
             continue;
         }
-        if (overflow_.exchange(false) || queued > kMaxPayload)
-            disconnect();
+        if (overflow_.exchange(false) || queued > kMaxPayload) disconnect();
         if (sending.empty()) {
             if (!reliable.empty()) {
                 sending = std::move(reliable.front());
@@ -278,10 +276,11 @@ void SimRvServer::loop() {
             else if (!screen.empty())
                 sending.swap(screen);
         }
-        pollfd fds[] = {
-            {listener_.get(), POLLIN, 0},
-            {wake_.get(), POLLIN, 0},
-            {client.get(), static_cast<short>(POLLIN | (sending.empty() ? 0 : POLLOUT)), 0}};
+        pollfd fds[] = {{.fd = listener_.get(), .events = POLLIN, .revents = 0},
+                        {.fd = wake_.get(), .events = POLLIN, .revents = 0},
+                        {.fd = client.get(),
+                         .events = static_cast<short>(POLLIN | (sending.empty() ? 0 : POLLOUT)),
+                         .revents = 0}};
         const auto remaining = std::chrono::duration_cast<std::chrono::milliseconds>(
                                    next_frame - std::chrono::steady_clock::now())
                                    .count();
@@ -379,13 +378,19 @@ void SimRvServer::loop() {
                         }
                     }
                     if (request.command == tui::BackendCommand::Resize)
-                        reply(connection, {request.id, 0, true, "resized"});
+                        reply(connection, {.id = request.id,
+                                           .generation = 0,
+                                           .success = true,
+                                           .text = "resized"});
                     else if (backend)
                         backend->submit(request, [this, connection](tui::BackendReply response) {
                             reply(connection, std::move(response));
                         });
                     else
-                        reply(connection, {request.id, 0, false, "session restarting"});
+                        reply(connection, {.id = request.id,
+                                           .generation = 0,
+                                           .success = false,
+                                           .text = "session restarting"});
                 } else
                     throw std::runtime_error("unexpected channel");
             }

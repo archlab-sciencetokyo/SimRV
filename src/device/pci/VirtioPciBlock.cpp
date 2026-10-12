@@ -60,7 +60,7 @@ void VirtioPciBlock::on_queue_notify(uint16_t queue_index) {
                 auto& q = queues_[queue_index];
                 uint16_t used_idx = 0;
                 dma_read(q.device_addr + 2, &used_idx, 2);
-                virtio::VirtqUsedElem elem{head_desc_idx, total_written};
+                virtio::VirtqUsedElem elem{.id = head_desc_idx, .len = total_written};
                 dma_write(q.device_addr + 4 + (used_idx % q.num) * sizeof(elem), &elem,
                           sizeof(elem));
                 used_idx++;

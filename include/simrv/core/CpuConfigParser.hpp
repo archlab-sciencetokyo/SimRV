@@ -1061,7 +1061,8 @@ inline auto parse_soc_config_stream(std::istream& stream, simrv::core::SoCConfig
                     device->regions,
                     [region_name](const auto& item) { return item.name == region_name; });
                 if (region == device->regions.end()) {
-                    device->regions.push_back({std::string(region_name), 0, 0});
+                    device->regions.push_back(
+                        {.name = std::string(region_name), .base = 0, .size = 0});
                     region = std::prev(device->regions.end());
                 }
                 if (field == "base") region->base = *parsed;

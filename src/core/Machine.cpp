@@ -13,7 +13,6 @@
 #include <format>
 #include <fstream>
 #include <limits>
-#include <new>
 #include <print>
 #include <ranges>
 #include <span>
@@ -37,7 +36,6 @@
 #include "simrv/device/Uart.hpp"
 #include "simrv/device/pci/PcieRootComplex.hpp"
 #include "simrv/memory/CoherenceHub.hpp"
-#include "simrv/memory/MemoryUtil.hpp"
 #include "simrv/util/BenchmarkEvent.hpp"
 #include "simrv/util/Sha256.hpp"
 #include "simrv/xlen/IdentifierTypes.hpp"

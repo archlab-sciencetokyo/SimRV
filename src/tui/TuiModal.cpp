@@ -872,9 +872,9 @@ void TuiModal::render_overlay(std::vector<std::string>& lines, int term_width,
                 add_row(line);
             }
             add_row("");
-            add_row(modals::build_modal_footer({{"[Enter / 1-4]", "Apply Preset"},
-                                                {"[Up/Down]", "Navigate"},
-                                                {"[Esc / q / F4]", "Cancel"}}));
+            add_row(modals::build_modal_footer({{.key = "[Enter / 1-4]", .action = "Apply Preset"},
+                                                {.key = "[Up/Down]", .action = "Navigate"},
+                                                {.key = "[Esc / q / F4]", .action = "Cancel"}}));
             break;
         }
         case ModalType::ToolPicker: {
@@ -897,7 +897,8 @@ void TuiModal::render_overlay(std::vector<std::string>& lines, int term_width,
                 }
             }
             add_row("");
-            add_row(modals::build_modal_footer({{"[Enter / Space / Esc]", "Dismiss"}}));
+            add_row(modals::build_modal_footer(
+                {{.key = "[Enter / Space / Esc]", .action = "Dismiss"}}));
             break;
         case ModalType::PlatformChangeConfirm: {
             add_row("");
@@ -915,16 +916,17 @@ void TuiModal::render_overlay(std::vector<std::string>& lines, int term_width,
             add_row("  Changing the platform bus topology requires regenerating the");
             add_row("  Device Tree (FDT) and restarting CPU execution state.");
             add_row("");
-            add_row(modals::build_modal_footer({{"[R / Enter]", "Reload Simulator"},
-                                                {"[D / Space]", "Discard Change"},
-                                                {"[Esc / q]", "Cancel"}}));
+            add_row(
+                modals::build_modal_footer({{.key = "[R / Enter]", .action = "Reload Simulator"},
+                                            {.key = "[D / Space]", .action = "Discard Change"},
+                                            {.key = "[Esc / q]", .action = "Cancel"}}));
         } break;
         case ModalType::SaveCpuConfig:
             modals::build_text_input_rows(content_rows,
                                           "Enter Configuration Path or Name:", input_);
             content_rows.push_back("");
-            content_rows.push_back(
-                modals::build_modal_footer({{"[Enter]", "Save"}, {"[Esc]", "Cancel"}}));
+            content_rows.push_back(modals::build_modal_footer(
+                {{.key = "[Enter]", .action = "Save"}, {.key = "[Esc]", .action = "Cancel"}}));
             break;
         case ModalType::LoadCpuConfig:
             modals::LoadModal::render(ModalType::LoadCpuConfig, content_rows, input_, false, false,
@@ -961,8 +963,10 @@ void TuiModal::render_overlay(std::vector<std::string>& lines, int term_width,
                 }
             }
             add_row("");
-            add_row(modals::build_modal_footer(
-                {{"[Enter]", "Select / Open Directory"}, {"[Type]", "Filter"}, {"[Esc]", "Back"}}));
+            add_row(
+                modals::build_modal_footer({{.key = "[Enter]", .action = "Select / Open Directory"},
+                                            {.key = "[Type]", .action = "Filter"},
+                                            {.key = "[Esc]", .action = "Back"}}));
             break;
         }
         default:

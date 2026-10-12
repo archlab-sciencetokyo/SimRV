@@ -211,7 +211,7 @@ void VirtioFsBackend::process_queue(QueueState& queue, const DmaRead& dma_read,
 
         uint16_t used_idx = 0;
         if (!dma_read(queue.device_addr + 2, &used_idx, sizeof(used_idx))) break;
-        const virtio::VirtqUsedElem elem{head, static_cast<uint32_t>(written)};
+        const virtio::VirtqUsedElem elem{.id = head, .len = static_cast<uint32_t>(written)};
         const auto used_slot = static_cast<uint64_t>(used_idx % queue.num);
         if (!dma_write(queue.device_addr + 4 + used_slot * sizeof(elem), &elem, sizeof(elem)))
             break;
@@ -232,7 +232,7 @@ auto VirtioFsBackend::process(std::span<const std::byte> request) -> std::vector
     if (in.len < sizeof(in) || in.len > request.size()) return {};
 
     std::vector<std::byte> reply(sizeof(fuse_out_header));
-    fuse_out_header out{static_cast<uint32_t>(sizeof(out)), 0, in.unique};
+    fuse_out_header out{.len = static_cast<uint32_t>(sizeof(out)), .error = 0, .unique = in.unique};
     auto set_error = [&](int error) { out.error = -error; };
     auto emit = [&](const auto& value) {
         append(reply, value);
@@ -335,7 +335,7 @@ auto VirtioFsBackend::process(std::span<const std::byte> request) -> std::vector
                     set_error(errno);
                     break;
                 }
-                const uint64_t handle = static_cast<uint64_t>(fd.get());
+                const auto handle = static_cast<uint64_t>(fd.get());
                 handles_.insert_or_assign(handle, std::move(fd));
                 fuse_open_out result{};
                 result.fh = handle;
@@ -384,7 +384,7 @@ auto VirtioFsBackend::process(std::span<const std::byte> request) -> std::vector
                     set_error(errno);
                     break;
                 }
-                fuse_write_out result{static_cast<uint32_t>(n), 0};
+                fuse_write_out result{.size = static_cast<uint32_t>(n), .padding = 0};
                 emit(result);
                 break;
             }
@@ -601,7 +601,7 @@ auto VirtioFsBackend::process(std::span<const std::byte> request) -> std::vector
                     set_error(errno);
                     break;
                 }
-                const uint64_t handle = static_cast<uint64_t>(fd.get());
+                const auto handle = static_cast<uint64_t>(fd.get());
                 handles_.insert_or_assign(handle, std::move(fd));
                 fuse_open_out open_result{};
                 open_result.fh = handle;
@@ -748,9 +748,9 @@ auto VirtioFsBackend::process(std::span<const std::byte> request) -> std::vector
                     const auto new_relative = *new_parent / *new_name;
                     for (auto& [nodeid, node_path] : nodes_) {
                         (void)nodeid;
-                        const auto mismatch = std::mismatch(
-                            old_relative.begin(), old_relative.end(), node_path.begin(),
-                            node_path.end());
+                        const auto mismatch =
+                            std::mismatch(old_relative.begin(), old_relative.end(),
+                                          node_path.begin(), node_path.end());
                         if (mismatch.first == old_relative.end()) {
                             std::filesystem::path suffix;
                             for (auto it = mismatch.second; it != node_path.end(); ++it)

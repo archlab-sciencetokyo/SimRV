@@ -117,7 +117,7 @@ void VirtioSoundBackend::process_controlq(QueueState& q, const DmaReadFn& dma_re
 
         uint16_t used_idx = 0;
         dma_read(q.device_addr + 2, &used_idx, 2);
-        VirtqUsedElem elem{head_desc_idx, written_len};
+        VirtqUsedElem elem{.id = head_desc_idx, .len = written_len};
         dma_write(q.device_addr + 4 + (used_idx % q.num) * sizeof(elem), &elem, sizeof(elem));
         used_idx++;
         dma_write(q.device_addr + 2, &used_idx, 2);
@@ -195,7 +195,7 @@ void VirtioSoundBackend::process_txq(QueueState& q, const DmaReadFn& dma_read,
 
         uint16_t used_idx = 0;
         dma_read(q.device_addr + 2, &used_idx, 2);
-        VirtqUsedElem elem{head_desc_idx, status_len};
+        VirtqUsedElem elem{.id = head_desc_idx, .len = status_len};
         dma_write(q.device_addr + 4 + (used_idx % q.num) * sizeof(elem), &elem, sizeof(elem));
         used_idx++;
         dma_write(q.device_addr + 2, &used_idx, 2);

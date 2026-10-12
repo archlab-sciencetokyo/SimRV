@@ -17,11 +17,8 @@
 #include "simrv/debug/SpikeLockstep.hpp"
 #include "simrv/memory/MemorySubsystem.hpp"
 #include "simrv/memory/MemoryUtil.hpp"
-#include "simrv/memory/Mmio.hpp"
 #include "simrv/memory/Mmu.hpp"
 #include "simrv/xlen/Constants.hpp"
-#include "simrv/xlen/Helpers.hpp"
-#include "simrv/xlen/Math.hpp"
 
 namespace simrv::memory {
 
@@ -88,8 +85,8 @@ auto MemoryAccess::target_read(MemorySubsystem& mem, core::CPU& cpu, simrv::xlen
                                 v_addr.raw()),
                     hit->description);
             } else if (cpu.machine_->tui_enabled()) {
-                cpu.machine_->debug_watch_hit(cpu.hart_id(),
-                                              GdbSignal::SigTrap, {}, hit->description);
+                cpu.machine_->debug_watch_hit(cpu.hart_id(), GdbSignal::SigTrap, {},
+                                              hit->description);
             }
         }
     }
@@ -234,7 +231,7 @@ auto MemoryAccess::target_read(MemorySubsystem& mem, core::CPU& cpu, simrv::xlen
                 }
                 simrv::xlen::Word rdata = resp.data;
                 if (!is_aligned) {
-                    const unsigned lane_offset = static_cast<unsigned>(addr & (kTlBeatBytes - 1u));
+                    const auto lane_offset = static_cast<unsigned>(addr & (kTlBeatBytes - 1u));
                     rdata >>= (lane_offset * 8u);
                 }
                 return simrv::memory::extend_loaded_value(rdata, static_cast<uint8_t>(funct3));
@@ -271,9 +268,7 @@ auto MemoryAccess::target_read(MemorySubsystem& mem, core::CPU& cpu, simrv::xlen
                 return 0;
             }
             cpu.dcache.insert(completed_line, timed.line_data.data(), mesi_for(timed.payload.cap));
-            release_evicted_line(mem.system_bus(), cpu.dcache,
-                                 cpu.hart_id(),
-                                 TlPort::Data);
+            release_evicted_line(mem.system_bus(), cpu.dcache, cpu.hart_id(), TlPort::Data);
             TlChannelE ack{};
             ack.sink = timed.payload.sink;
             mem.system_bus().grant_ack(ack);
@@ -318,9 +313,7 @@ auto MemoryAccess::target_read(MemorySubsystem& mem, core::CPU& cpu, simrv::xlen
         TlChannelD resp{};
         if (mem.system_bus().acquire_block(req, resp, line_data)) {
             cpu.dcache.insert(line_base, line_data.data(), mesi_for(resp.cap));
-            release_evicted_line(mem.system_bus(), cpu.dcache,
-                                 cpu.hart_id(),
-                                 TlPort::Data);
+            release_evicted_line(mem.system_bus(), cpu.dcache, cpu.hart_id(), TlPort::Data);
             TlChannelE ack{};
             ack.sink = resp.sink;
             mem.system_bus().grant_ack(ack);
@@ -424,8 +417,7 @@ void MemoryAccess::target_write(MemorySubsystem& mem, core::CPU& cpu, simrv::xle
         cpu.active_context().mem_paddr = paddr;
         cpu.state().reserved = 0;
         if (cpu.machine_->num_harts() > 1 && mem.reservation_table().may_have_reservations()) {
-            mem.reservation_table().invalidate_range(
-                paddr, bytes, cpu.hart_id());
+            mem.reservation_table().invalidate_range(paddr, bytes, cpu.hart_id());
         }
     };
 
@@ -453,8 +445,8 @@ void MemoryAccess::target_write(MemorySubsystem& mem, core::CPU& cpu, simrv::xle
                                 v_addr.raw()),
                     hit->description);
             } else if (cpu.machine_->tui_enabled()) {
-                cpu.machine_->debug_watch_hit(cpu.hart_id(),
-                                              GdbSignal::SigTrap, {}, hit->description);
+                cpu.machine_->debug_watch_hit(cpu.hart_id(), GdbSignal::SigTrap, {},
+                                              hit->description);
             }
         }
     }
@@ -494,8 +486,7 @@ void MemoryAccess::target_write(MemorySubsystem& mem, core::CPU& cpu, simrv::xle
         ctx.mem_paddr = addr;
         if (is_sc && !ctx.sc_reservation_checked) {
             ctx.sc_reservation_checked = true;
-            bool success = mem.reservation_table().check_and_clear_reservation(
-                cpu.hart_id(), addr);
+            bool success = mem.reservation_table().check_and_clear_reservation(cpu.hart_id(), addr);
             if (success && cpu.machine_->lockstep() && cpu.machine_->lockstep()->is_running()) {
                 const auto lockstep_success = cpu.machine_->lockstep()->determine_sc_success();
                 if (lockstep_success.has_value() && !lockstep_success.value()) success = false;
@@ -528,9 +519,7 @@ void MemoryAccess::target_write(MemorySubsystem& mem, core::CPU& cpu, simrv::xle
             } else {
                 cpu.dcache.insert(completed_line, timed.line_data.data(),
                                   mesi_for(timed.payload.cap));
-                release_evicted_line(mem.system_bus(), cpu.dcache,
-                                     cpu.hart_id(),
-                                     TlPort::Data);
+                release_evicted_line(mem.system_bus(), cpu.dcache, cpu.hart_id(), TlPort::Data);
             }
             TlChannelE ack{};
             ack.sink = timed.payload.sink;
@@ -628,8 +617,7 @@ void MemoryAccess::target_write(MemorySubsystem& mem, core::CPU& cpu, simrv::xle
                     std::array<simrv::xlen::Byte, simrv::cache::DCache::kLineBytes> line_data{};
                     if (mem.system_bus().acquire_block(req, resp, line_data)) {
                         cpu.dcache.insert(line_base, line_data.data(), mesi_for(resp.cap));
-                        release_evicted_line(mem.system_bus(), cpu.dcache,
-                                             cpu.hart_id(),
+                        release_evicted_line(mem.system_bus(), cpu.dcache, cpu.hart_id(),
                                              TlPort::Data);
                         TlChannelE ack{};
                         ack.sink = resp.sink;
@@ -639,8 +627,7 @@ void MemoryAccess::target_write(MemorySubsystem& mem, core::CPU& cpu, simrv::xle
                 }
             }
             if (cache_write_completed && first_write) {
-                mem.system_bus().mark_modified(
-                    addr, cpu.hart_id());
+                mem.system_bus().mark_modified(addr, cpu.hart_id());
             }
             simrv::memory::ram_write_fast(addr, data, funct3, cpu.machine_->ram_view());
             commit_write();
@@ -665,7 +652,7 @@ void MemoryAccess::target_write(MemorySubsystem& mem, core::CPU& cpu, simrv::xle
             req.opcode = TlOpcodeA::PutPartialData;
             req.size = kTlBeatSize;
             req.address = addr & ~(static_cast<simrv::xlen::Address>(kTlBeatBytes - 1u));
-            const unsigned lane_offset = static_cast<unsigned>(addr & (kTlBeatBytes - 1u));
+            const auto lane_offset = static_cast<unsigned>(addr & (kTlBeatBytes - 1u));
             req.mask = ((TlMask{1} << req_size_bytes) - 1u) << lane_offset;
         }
         const unsigned bits = 8 * req_size_bytes;
@@ -673,7 +660,7 @@ void MemoryAccess::target_write(MemorySubsystem& mem, core::CPU& cpu, simrv::xle
                        ? (data & ((static_cast<simrv::xlen::Word>(1) << bits) - 1))
                        : data;
         if (!is_aligned) {
-            const unsigned lane_offset = static_cast<unsigned>(addr & (kTlBeatBytes - 1u));
+            const auto lane_offset = static_cast<unsigned>(addr & (kTlBeatBytes - 1u));
             req.data <<= (lane_offset * 8u);
         }
         if (cpu.machine_->runtime_profile.is_cycle_mode() && transfer.active) {

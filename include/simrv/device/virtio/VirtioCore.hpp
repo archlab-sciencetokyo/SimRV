@@ -464,7 +464,7 @@ class InputBackend {
     void write_config(simrv::xlen::Address offset, uint64_t val, uint8_t size) {
         for (uint8_t b = 0; b < size; ++b) {
             const simrv::xlen::Address off = offset + b;
-            const uint8_t byte_val = static_cast<uint8_t>((val >> (b * 8)) & 0xFF);
+            const auto byte_val = static_cast<uint8_t>((val >> (b * 8)) & 0xFF);
             if (off == 0) select = byte_val;
             if (off == 1) subsel = byte_val;
         }

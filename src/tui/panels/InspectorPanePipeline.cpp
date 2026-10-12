@@ -21,15 +21,12 @@
 #include "simrv/isa/Common.hpp"
 #include "simrv/isa/TrapTypes.hpp"
 #include "simrv/pipeline/Decoder.hpp"
-#include "simrv/pipeline/OperationInfo.hpp"
 #include "simrv/pipeline/OperationTraits.hpp"
 #include "simrv/pipeline/PipelineSim.hpp"
 #include "simrv/tui/TuiTheme.hpp"
 #include "simrv/tui/panels/InspectorPane.hpp"
-#include "simrv/util/FormatUtil.hpp"
 #include "simrv/util/InstructionExplainer.hpp"
 #include "simrv/xlen/AddressTypes.hpp"
-#include "simrv/xlen/Helpers.hpp"
 #include "simrv/xlen/RegisterTypes.hpp"
 
 namespace simrv::tui {

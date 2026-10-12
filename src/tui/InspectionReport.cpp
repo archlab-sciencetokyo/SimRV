@@ -4,8 +4,6 @@
  */
 #include "simrv/tui/InspectionReport.hpp"
 
-#include <algorithm>
-#include <cctype>
 #include <format>
 #include <fstream>
 #include <sstream>

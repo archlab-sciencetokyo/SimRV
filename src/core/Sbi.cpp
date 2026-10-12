@@ -17,7 +17,6 @@
 #include "simrv/core/Tracer.hpp"
 #include "simrv/device/Uart.hpp"
 #include "simrv/tui/Tui.hpp"
-#include "simrv/xlen/IdentifierTypes.hpp"
 #include "simrv/xlen/RegisterTypes.hpp"
 
 namespace simrv::sbi {
@@ -463,9 +462,6 @@ auto Sbi::handle_cppc(simrv::xlen::Word func_id) -> bool {
         case 2:  // sbi_cppc_write
             sbi_return(static_cast<simrv::xlen::SignedWord>(SbiError::Success), 0);
             return true;
-        case 3:  // sbi_cppc_get_fast_channel
-            sbi_return(static_cast<simrv::xlen::SignedWord>(SbiError::NotSupported), 0);
-            return true;
         default:
             sbi_return(static_cast<simrv::xlen::SignedWord>(SbiError::NotSupported), 0);
             return true;
@@ -502,8 +498,7 @@ auto Sbi::handle_ecall(simrv::xlen::TrapCause cause) -> bool {
                                        cpu_.clint_mmio.mcycle, static_cast<unsigned>(cause), ext_id,
                                        func_id, cpu_.state().regs.read(simrv::xlen::RegId::A0),
                                        cpu_.state().regs.read(simrv::xlen::RegId::A1),
-                                       cpu_.pipeline_context.cpc.raw(),
-                                       cpu_.hart_id());
+                                       cpu_.pipeline_context.cpc.raw(), cpu_.hart_id());
     }
 
     switch (static_cast<ExtId>(ext_id)) {

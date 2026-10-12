@@ -11,4 +11,3 @@ namespace simrv::execute {
 // and SM3/SM4 (zksed, zksh) can be linked here.
 
 }  // namespace simrv::execute
-

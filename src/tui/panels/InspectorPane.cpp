@@ -12,7 +12,6 @@
 
 #include "simrv/core/Cpu.hpp"
 #include "simrv/core/Machine.hpp"
-#include "simrv/core/TelemetrySink.hpp"
 #include "simrv/debug/SymbolTable.hpp"
 #include "simrv/tui/Tui.hpp"
 #include "simrv/tui/TuiGuidance.hpp"
@@ -287,8 +286,6 @@ auto InspectorPane::content_total_columns(int width) const -> int {
             return trace_total_columns();
         case TuiRegPage::LIVE:
             return width;
-        case TuiRegPage::TLB:
-        case TuiRegPage::BUS:
         default:
             return width;
     }
@@ -695,9 +692,12 @@ auto InspectorPane::render_log_bottom_row(int row_idx, int num_rows, int width) 
 auto InspectorPane::current_student_guidance() const -> PageGuidance {
     if (mission_ != nullptr) {
         if (const auto mission_guidance = mission_->guidance()) {
-            return {std::string(mission_guidance->title), std::string(mission_guidance->prompt),
-                    std::string(mission_guidance->why),   KeyAction::CycleToolPage,
-                    "Open the mission observation view.", mission_guidance->glossary_topic};
+            return {.title = std::string(mission_guidance->title),
+                    .meaning = std::string(mission_guidance->prompt),
+                    .relationship = std::string(mission_guidance->why),
+                    .next_action = KeyAction::CycleToolPage,
+                    .next_hint = "Open the mission observation view.",
+                    .glossary_topic = mission_guidance->glossary_topic};
         }
     }
     auto const& context = current_cpu().pipeline_context;

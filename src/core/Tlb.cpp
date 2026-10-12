@@ -4,10 +4,6 @@
  */
 #include "simrv/core/Tlb.hpp"
 
-#include <algorithm>
-
-#include "simrv/memory/MemoryUtil.hpp"
-
 namespace simrv::core {
 
 void Tlb::flush() {

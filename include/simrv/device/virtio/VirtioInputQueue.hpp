@@ -42,7 +42,7 @@ void process_input_event_queue(QueueState& queue, InputBackend& backend, DmaRead
 
         uint16_t used_idx = 0;
         (void)dma_read(queue.device_addr + 2, &used_idx, sizeof(used_idx));
-        const VirtqUsedElem elem{head_desc_idx, sizeof(event)};
+        const VirtqUsedElem elem{.id = head_desc_idx, .len = sizeof(event)};
         (void)dma_write(queue.device_addr + 4 + (used_idx % queue.num) * sizeof(elem), &elem,
                         sizeof(elem));
         ++used_idx;

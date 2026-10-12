@@ -139,7 +139,7 @@ class ReservationTable {
                           std::optional<simrv::xlen::HartId> store_origin = std::nullopt) {
         if (size == 0 || !may_have_reservations_.load(std::memory_order_acquire)) return;
         const simrv::xlen::Address first_granule = addr & kReservationGranuleMask;
-        const simrv::xlen::Address extent = static_cast<simrv::xlen::Address>(size - 1);
+        const auto extent = static_cast<simrv::xlen::Address>(size - 1);
         const simrv::xlen::Address last_byte =
             extent > std::numeric_limits<simrv::xlen::Address>::max() - addr
                 ? std::numeric_limits<simrv::xlen::Address>::max()

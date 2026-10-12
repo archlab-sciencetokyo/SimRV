@@ -1,6 +1,5 @@
 #include "simrv/pipeline/PipelineSim.hpp"
 
-#include <algorithm>
 #include <stdexcept>
 
 #include "simrv/pipeline/OperationTraits.hpp"

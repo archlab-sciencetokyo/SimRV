@@ -243,7 +243,7 @@ void TileLinkBus::process_request(const TimedRequest& request) {
             coherence_hub_.invalidate_line_external(req.address.raw());
             if (req.opcode == TlOpcodeA::PutPartialData) {
                 auto* destination = machine_.ram_view().unchecked_ptr(req.address.raw());
-                const unsigned lane_base =
+                const auto lane_base =
                     static_cast<unsigned>(req.address.raw() & (kTlBeatBytes - 1u));
                 for (size_t byte = 0; byte < transfer_bytes; ++byte) {
                     const auto lane = static_cast<unsigned>(lane_base + byte);

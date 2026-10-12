@@ -53,7 +53,7 @@ namespace {
 [[nodiscard]] auto beat_address(simrv::xlen::Address start, uint32_t beat_bytes,
                                 uint32_t beat_count, AxiBurst burst, uint32_t index) noexcept
     -> simrv::xlen::Address {
-    const uint64_t address = static_cast<uint64_t>(start);
+    const auto address = static_cast<uint64_t>(start);
     if (burst == AxiBurst::Fixed || index == 0) return start;
 
     const uint64_t aligned_start = address & ~static_cast<uint64_t>(beat_bytes - 1);
@@ -352,7 +352,7 @@ auto Axi4Bridge::axi_write(simrv::xlen::Address addr, std::span<const simrv::xle
         return AxiResp::Slverr;
     }
 
-    const uint8_t len = static_cast<uint8_t>(data.size() - 1);
+    const auto len = static_cast<uint8_t>(data.size() - 1);
     Axi4Aw aw{
         .id = 0,
         .addr = addr,

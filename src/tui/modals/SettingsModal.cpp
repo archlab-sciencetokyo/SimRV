@@ -10,9 +10,6 @@
 
 #include "simrv/core/Cpu.hpp"
 #include "simrv/core/Machine.hpp"
-#include "simrv/core/TelemetrySink.hpp"
-#include "simrv/isa/Common.hpp"
-#include "simrv/memory/MemoryUtil.hpp"
 #include "simrv/tui/Tui.hpp"
 #include "simrv/tui/TuiTheme.hpp"
 #include "simrv/tui/modals/MisaModal.hpp"
@@ -467,7 +464,8 @@ void SettingsModal::render(std::vector<std::string>& content_rows,
     }
 
     add_row_cb("");
-    add_row_cb(build_modal_footer({{"[Enter]", "Apply Settings"}, {"[Esc / q]", "Cancel"}}));
+    add_row_cb(build_modal_footer({{.key = "[Enter]", .action = "Apply Settings"},
+                                   {.key = "[Esc / q]", .action = "Cancel"}}));
 }
 
 }  // namespace simrv::tui::modals

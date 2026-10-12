@@ -68,7 +68,7 @@ void process_net_queue(uint32_t q_idx, QueueState& q, NetBackend& backend, bool 
             } else {
                 uint16_t used_idx = 0;
                 (void)dma_read(q.device_addr + 2, &used_idx, sizeof(used_idx));
-                const VirtqUsedElem elem{head_desc_idx, written};
+                const VirtqUsedElem elem{.id = head_desc_idx, .len = written};
                 (void)dma_write(q.device_addr + 4 + (used_idx % q.num) * sizeof(elem), &elem,
                                 sizeof(elem));
                 ++used_idx;
@@ -100,7 +100,7 @@ void process_net_queue(uint32_t q_idx, QueueState& q, NetBackend& backend, bool 
             } else {
                 uint16_t used_idx = 0;
                 (void)dma_read(q.device_addr + 2, &used_idx, sizeof(used_idx));
-                const VirtqUsedElem elem{head_desc_idx, desc.len};
+                const VirtqUsedElem elem{.id = head_desc_idx, .len = desc.len};
                 (void)dma_write(q.device_addr + 4 + (used_idx % q.num) * sizeof(elem), &elem,
                                 sizeof(elem));
                 ++used_idx;

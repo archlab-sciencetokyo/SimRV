@@ -6,9 +6,6 @@
 
 #include <cstring>
 
-#include "simrv/memory/MemoryUtil.hpp"
-#include "simrv/xlen/Math.hpp"
-
 namespace simrv::cache {
 
 auto DCache::handle_probe(const simrv::memory::TlChannelB& req, simrv::memory::TlChannelC& resp,

@@ -353,7 +353,8 @@ class Tui : public core::ITelemetrySink, public core::IConsoleSink {
     bool student_guide_enabled_{false};
     MissionProgress mission_;
     bool inspection_overwrite_armed_{false};
-    std::vector<WorkbenchSlot> workbench_slots_{{TuiRegPage::GPR, 0}, {TuiRegPage::CONSOLE, 0}};
+    std::vector<WorkbenchSlot> workbench_slots_{{.page = TuiRegPage::GPR, .scroll_offset = 0},
+                                                {.page = TuiRegPage::CONSOLE, .scroll_offset = 0}};
     std::optional<std::pair<size_t, TuiRegPage>> transient_live_restore_;
     size_t focused_slot_index_ = 0;
     size_t selected_hart_ = 0;

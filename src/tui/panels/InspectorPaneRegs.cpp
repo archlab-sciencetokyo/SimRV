@@ -119,7 +119,8 @@ auto InspectorPane::render_registers_single_column(const simrv::core::ArchState&
                 return format_to_width(col_color, width);
             }
             case TuiRegPage::FPR: {
-                auto val = st.regs.read_fp(simrv::xlen::to_fp_reg_id(static_cast<simrv::xlen::RegId>(reg)));
+                auto val = st.regs.read_fp(
+                    simrv::xlen::to_fp_reg_id(static_cast<simrv::xlen::RegId>(reg)));
                 std::string name(kFpRegNames.at(static_cast<std::size_t>(reg)));
                 bool changed = paused_ && (cached_fpr_.at(static_cast<std::size_t>(reg)) != val);
                 std::string c = changed ? kThemePeach : kThemeMint;
@@ -132,7 +133,8 @@ auto InspectorPane::render_registers_single_column(const simrv::core::ArchState&
                 return format_to_width(col_color, width);
             }
             case TuiRegPage::VEC: {
-                auto val = st.regs.read_vector(simrv::xlen::to_vec_reg_id(static_cast<simrv::xlen::RegId>(reg)));
+                auto val = st.regs.read_vector(
+                    simrv::xlen::to_vec_reg_id(static_cast<simrv::xlen::RegId>(reg)));
                 bool changed = vec_reg_changed(
                     paused_, cached_vec_.at(static_cast<std::size_t>(reg)), val, st.regs.vlen);
                 std::string c = changed ? kThemePeach : kThemeMint;
@@ -191,8 +193,10 @@ auto InspectorPane::render_registers_double_column(const simrv::core::ArchState&
                        format_to_width(col2_color, right_width);
             }
             case TuiRegPage::FPR: {
-                auto val1 = st.regs.read_fp(simrv::xlen::to_fp_reg_id(static_cast<simrv::xlen::RegId>(reg1)));
-                auto val2 = st.regs.read_fp(simrv::xlen::to_fp_reg_id(static_cast<simrv::xlen::RegId>(reg2)));
+                auto val1 = st.regs.read_fp(
+                    simrv::xlen::to_fp_reg_id(static_cast<simrv::xlen::RegId>(reg1)));
+                auto val2 = st.regs.read_fp(
+                    simrv::xlen::to_fp_reg_id(static_cast<simrv::xlen::RegId>(reg2)));
 
                 std::string name1(kFpRegNames.at(static_cast<std::size_t>(reg1)));
                 std::string name2(kFpRegNames.at(static_cast<std::size_t>(reg2)));
@@ -224,8 +228,10 @@ auto InspectorPane::render_registers_double_column(const simrv::core::ArchState&
                        format_to_width(col2_color, right_width);
             }
             case TuiRegPage::VEC: {
-                auto val1 = st.regs.read_vector(simrv::xlen::to_vec_reg_id(static_cast<simrv::xlen::RegId>(reg1)));
-                auto val2 = st.regs.read_vector(simrv::xlen::to_vec_reg_id(static_cast<simrv::xlen::RegId>(reg2)));
+                auto val1 = st.regs.read_vector(
+                    simrv::xlen::to_vec_reg_id(static_cast<simrv::xlen::RegId>(reg1)));
+                auto val2 = st.regs.read_vector(
+                    simrv::xlen::to_vec_reg_id(static_cast<simrv::xlen::RegId>(reg2)));
 
                 bool changed1 = vec_reg_changed(
                     paused_, cached_vec_.at(static_cast<std::size_t>(reg1)), val1, st.regs.vlen);
@@ -291,7 +297,7 @@ auto InspectorPane::render_registers_or_pipeline(const simrv::core::CPU& cpu,
             if (logical_row == 16) {
                 return section_line("Vector Control & Status", width);
             }
-            ::VtypeView const vt{st.vtype, static_cast<uint8_t>(st.regs.xlen)};
+            ::VtypeView const vt{.raw = st.vtype, .xlen = static_cast<uint8_t>(st.regs.xlen)};
             if (logical_row == 17) {
                 std::string const sew_str = vt.vill() ? "ill" : std::format("e{}", vt.sew_bits());
                 std::string const lmul_str = vt.vill() ? "ill" : [&]() {
@@ -388,7 +394,9 @@ auto InspectorPane::get_register_value_at_row(int logical_row, int col_x, int pa
         }
         if (page_ == TuiRegPage::VEC) {
             return static_cast<simrv::xlen::Register>(
-                st.regs.read_vector(simrv::xlen::to_vec_reg_id(static_cast<simrv::xlen::RegId>(reg))).u64[0]);
+                st.regs
+                    .read_vector(simrv::xlen::to_vec_reg_id(static_cast<simrv::xlen::RegId>(reg)))
+                    .u64[0]);
         }
     }
     return std::nullopt;

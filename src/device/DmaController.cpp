@@ -32,9 +32,8 @@ auto DmaController::read32(simrv::xlen::Address offset) -> uint32_t {
             return dst_addr_hi_;
         case kRegByteCount:
             return byte_count_;
-        case kRegInterruptAck:
-            return 0U;
         default:
+            // Interrupt acknowledgement and unmapped registers read as zero.
             return 0U;
     }
 }

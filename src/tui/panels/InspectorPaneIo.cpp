@@ -2,26 +2,12 @@
  * @file InspectorPaneIo.cpp
  * @brief Implements Comprehensive I/O Bus & Modern Device Inspector for TUI Left Pane.
  */
-#include <algorithm>
 #include <format>
 #include <string>
 
 #include "simrv/core/Cpu.hpp"
 #include "simrv/core/Machine.hpp"
 #include "simrv/device/Uart.hpp"
-#include "simrv/device/mmio/VirtioMmioBlock.hpp"
-#include "simrv/device/mmio/VirtioMmioConsole.hpp"
-#include "simrv/device/mmio/VirtioMmioGpu.hpp"
-#include "simrv/device/mmio/VirtioMmioInput.hpp"
-#include "simrv/device/mmio/VirtioMmioNet.hpp"
-#include "simrv/device/mmio/VirtioMmioRng.hpp"
-#include "simrv/device/mmio/VirtioMmioSound.hpp"
-#include "simrv/device/pci/VirtioPciBlock.hpp"
-#include "simrv/device/pci/VirtioPciConsole.hpp"
-#include "simrv/device/pci/VirtioPciGpu.hpp"
-#include "simrv/device/pci/VirtioPciInput.hpp"
-#include "simrv/device/pci/VirtioPciNet.hpp"
-#include "simrv/device/pci/VirtioPciRng.hpp"
 #include "simrv/memory/MemorySubsystem.hpp"
 #include "simrv/memory/TileLinkBus.hpp"
 #include "simrv/memory/TileLinkProtocol.hpp"

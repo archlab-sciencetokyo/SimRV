@@ -45,7 +45,7 @@ void execute_average_vv(core::CPU& cpu, simrv::xlen::RegId rd, simrv::xlen::RegI
                         simrv::xlen::RegId rs2, bool vm, uint32_t vl) {
     const auto& mask_reg =
         cpu.state().regs.read_vector(simrv::xlen::to_vec_reg_id(simrv::xlen::RegId::Zero));
-    for (uint32_t i = static_cast<uint32_t>(cpu.state().vstart); i < vl; ++i) {
+    for (auto i = static_cast<uint32_t>(cpu.state().vstart); i < vl; ++i) {
         if (!vector::is_element_active(mask_reg, i, vm)) continue;
         const T lhs = vector::get_group_element<T>(cpu.state().regs, rs2, i);
         const T rhs = vector::get_group_element<T>(cpu.state().regs, rs1, i);
@@ -60,7 +60,7 @@ void execute_average_vx(core::CPU& cpu, simrv::xlen::RegId rd, simrv::xlen::Regi
     const auto& mask_reg =
         cpu.state().regs.read_vector(simrv::xlen::to_vec_reg_id(simrv::xlen::RegId::Zero));
     const T rhs = vector::integer_scalar<T>(rs1_val);
-    for (uint32_t i = static_cast<uint32_t>(cpu.state().vstart); i < vl; ++i) {
+    for (auto i = static_cast<uint32_t>(cpu.state().vstart); i < vl; ++i) {
         if (!vector::is_element_active(mask_reg, i, vm)) continue;
         const T lhs = vector::get_group_element<T>(cpu.state().regs, rs2, i);
         vector::set_group_element<T>(cpu.state().regs, rd, i,
@@ -75,7 +75,7 @@ void execute_vsadd_vv(core::CPU& cpu, simrv::xlen::RegId rd, simrv::xlen::RegId 
     const auto& mask_reg =
         cpu.state().regs.read_vector(simrv::xlen::to_vec_reg_id(simrv::xlen::RegId::Zero));
     bool saturated = false;
-    for (uint32_t i = static_cast<uint32_t>(cpu.state().vstart); i < vl; i++) {
+    for (auto i = static_cast<uint32_t>(cpu.state().vstart); i < vl; i++) {
         if (!vector::is_element_active(mask_reg, i, vm)) continue;
         T val2 = vector::get_group_element<T>(cpu.state().regs, rs2, i);
         T val1 = vector::get_group_element<T>(cpu.state().regs, rs1, i);
@@ -94,7 +94,7 @@ void execute_vsadd_vx(core::CPU& cpu, simrv::xlen::RegId rd, simrv::xlen::Regist
         cpu.state().regs.read_vector(simrv::xlen::to_vec_reg_id(simrv::xlen::RegId::Zero));
     T val1 = vector::integer_scalar<T>(rs1_val);
     bool saturated = false;
-    for (uint32_t i = static_cast<uint32_t>(cpu.state().vstart); i < vl; i++) {
+    for (auto i = static_cast<uint32_t>(cpu.state().vstart); i < vl; i++) {
         if (!vector::is_element_active(mask_reg, i, vm)) continue;
         T val2 = vector::get_group_element<T>(cpu.state().regs, rs2, i);
         T res = op(val2, val1, saturated);
@@ -112,7 +112,7 @@ void execute_vsadd_vi(core::CPU& cpu, simrv::xlen::RegId rd, int32_t imm, simrv:
         cpu.state().regs.read_vector(simrv::xlen::to_vec_reg_id(simrv::xlen::RegId::Zero));
     T val1 = static_cast<T>(imm);
     bool saturated = false;
-    for (uint32_t i = static_cast<uint32_t>(cpu.state().vstart); i < vl; i++) {
+    for (auto i = static_cast<uint32_t>(cpu.state().vstart); i < vl; i++) {
         if (!vector::is_element_active(mask_reg, i, vm)) continue;
         T val2 = vector::get_group_element<T>(cpu.state().regs, rs2, i);
         T res = op(val2, val1, saturated);
@@ -130,7 +130,7 @@ void execute_vsmul_vv(core::CPU& cpu, simrv::xlen::RegId rd, simrv::xlen::RegId 
     const auto& mask_reg =
         cpu.state().regs.read_vector(simrv::xlen::to_vec_reg_id(simrv::xlen::RegId::Zero));
     bool saturated = false;
-    for (uint32_t i = static_cast<uint32_t>(cpu.state().vstart); i < vl; i++) {
+    for (auto i = static_cast<uint32_t>(cpu.state().vstart); i < vl; i++) {
         if (!vector::is_element_active(mask_reg, i, vm)) continue;
         T val2 = vector::get_group_element<T>(cpu.state().regs, rs2, i);
         T val1 = vector::get_group_element<T>(cpu.state().regs, rs1, i);
@@ -149,7 +149,7 @@ void execute_vsmul_vx(core::CPU& cpu, simrv::xlen::RegId rd, simrv::xlen::Regist
         cpu.state().regs.read_vector(simrv::xlen::to_vec_reg_id(simrv::xlen::RegId::Zero));
     T val1 = vector::integer_scalar<T>(rs1_val);
     bool saturated = false;
-    for (uint32_t i = static_cast<uint32_t>(cpu.state().vstart); i < vl; i++) {
+    for (auto i = static_cast<uint32_t>(cpu.state().vstart); i < vl; i++) {
         if (!vector::is_element_active(mask_reg, i, vm)) continue;
         T val2 = vector::get_group_element<T>(cpu.state().regs, rs2, i);
         T res = vector::execute_vsmul_element<T>(val2, val1, vxrm, saturated);
@@ -166,7 +166,7 @@ void execute_vsshr_vv(core::CPU& cpu, simrv::xlen::RegId rd, simrv::xlen::RegId 
                       simrv::xlen::RegId rs2, bool vm, uint32_t vl, uint32_t vxrm) {
     const auto& mask_reg =
         cpu.state().regs.read_vector(simrv::xlen::to_vec_reg_id(simrv::xlen::RegId::Zero));
-    for (uint32_t i = static_cast<uint32_t>(cpu.state().vstart); i < vl; i++) {
+    for (auto i = static_cast<uint32_t>(cpu.state().vstart); i < vl; i++) {
         if (!vector::is_element_active(mask_reg, i, vm)) continue;
         T val2 = vector::get_group_element<T>(cpu.state().regs, rs2, i);
         T val1 = vector::get_group_element<T>(cpu.state().regs, rs1, i);
@@ -182,7 +182,7 @@ void execute_vsshr_vx(core::CPU& cpu, simrv::xlen::RegId rd, simrv::xlen::Regist
     const auto& mask_reg =
         cpu.state().regs.read_vector(simrv::xlen::to_vec_reg_id(simrv::xlen::RegId::Zero));
     uint32_t shift = static_cast<uint32_t>(rs1_val) & (sizeof(T) * 8 - 1);
-    for (uint32_t i = static_cast<uint32_t>(cpu.state().vstart); i < vl; i++) {
+    for (auto i = static_cast<uint32_t>(cpu.state().vstart); i < vl; i++) {
         if (!vector::is_element_active(mask_reg, i, vm)) continue;
         T val2 = vector::get_group_element<T>(cpu.state().regs, rs2, i);
         T res = vector::round_shift<T, T>(val2, shift, vxrm);
@@ -196,7 +196,7 @@ void execute_vsshr_vi(core::CPU& cpu, simrv::xlen::RegId rd, int32_t imm, simrv:
     const auto& mask_reg =
         cpu.state().regs.read_vector(simrv::xlen::to_vec_reg_id(simrv::xlen::RegId::Zero));
     uint32_t shift = static_cast<uint32_t>(imm) & (sizeof(T) * 8 - 1);
-    for (uint32_t i = static_cast<uint32_t>(cpu.state().vstart); i < vl; i++) {
+    for (auto i = static_cast<uint32_t>(cpu.state().vstart); i < vl; i++) {
         if (!vector::is_element_active(mask_reg, i, vm)) continue;
         T val2 = vector::get_group_element<T>(cpu.state().regs, rs2, i);
         T res = vector::round_shift<T, T>(val2, shift, vxrm);
@@ -217,7 +217,7 @@ void execute_vnclip(core::CPU& cpu, simrv::xlen::RegId rd, simrv::xlen::RegId rs
     uint32_t sew_width = sizeof(T_dest) * 8;
     uint32_t shift_mask = 2 * sew_width - 1;
 
-    for (uint32_t i = static_cast<uint32_t>(cpu.state().vstart); i < vl; i++) {
+    for (auto i = static_cast<uint32_t>(cpu.state().vstart); i < vl; i++) {
         if (!vector::is_element_active(mask_reg, i, vm)) continue;
 
         uint32_t shift = 0;

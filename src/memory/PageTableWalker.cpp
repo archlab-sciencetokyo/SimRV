@@ -10,7 +10,6 @@
 #include "simrv/core/Pmp.hpp"
 #include "simrv/memory/MemoryUtil.hpp"
 #include "simrv/xlen/Constants.hpp"
-#include "simrv/xlen/Helpers.hpp"
 
 namespace simrv::memory {
 

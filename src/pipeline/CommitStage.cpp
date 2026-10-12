@@ -12,7 +12,6 @@
 #include "simrv/isa/Priv.hpp"
 #include "simrv/pipeline/RetirementEffects.hpp"
 #include "simrv/xlen/AddressTypes.hpp"
-#include "simrv/xlen/Helpers.hpp"
 
 namespace simrv::core {
 
