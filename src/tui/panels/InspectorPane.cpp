@@ -13,11 +13,13 @@
 #include "simrv/core/Cpu.hpp"
 #include "simrv/core/Machine.hpp"
 #include "simrv/debug/SymbolTable.hpp"
+#include "simrv/pipeline/OperationInfo.hpp"
 #include "simrv/tui/Tui.hpp"
 #include "simrv/tui/TuiGuidance.hpp"
 #include "simrv/tui/TuiMission.hpp"
 #include "simrv/tui/TuiTheme.hpp"
 #include "simrv/tui/framework/Text.hpp"
+#include "simrv/xlen/Constants.hpp"
 #include "simrv/xlen/RegisterTypes.hpp"
 
 namespace simrv::tui {
@@ -700,8 +702,20 @@ auto InspectorPane::current_student_guidance() const -> PageGuidance {
                     .glossary_topic = mission_guidance->glossary_topic};
         }
     }
-    auto const& context = current_cpu().pipeline_context;
+    auto const& cpu = current_cpu();
+    auto const& context = cpu.pipeline_context;
+    auto const& st = cpu.state();
     auto const snapshot = machine_.tui_execution_snapshot(selected_hart_);
+
+    bool const has_pending_trap =
+        context.pending_exception.has_value() || st.mcause != 0 || st.scause != 0;
+    uint64_t const trap_cause = context.pending_exception.has_value()
+                                    ? static_cast<uint64_t>(*context.pending_exception)
+                                    : (st.mcause != 0 ? st.mcause : st.scause);
+
+    bool const is_csr = (simrv::pipeline::operation::info(context.op_id).side_effects &
+                         simrv::pipeline::operation::SideEffectFlags::Csr) != 0;
+
     return guidance_for_context(
         {.page = page_,
          .cycle_accurate = machine_.runtime_profile.is_cycle_mode(),
@@ -712,7 +726,15 @@ auto InspectorPane::current_student_guidance() const -> PageGuidance {
          .data_hazard_stalls = snapshot.ca_stats.data_hazard_stalls,
          .control_hazard_bubbles = snapshot.ca_stats.control_hazard_bubbles,
          .image_loaded = !machine_.binary_path().empty(),
-         .shutdown = machine_.is_shutdown_});
+         .shutdown = machine_.is_shutdown_,
+         .privilege = st.priv,
+         .has_pending_trap = has_pending_trap,
+         .trap_cause = trap_cause,
+         .translation_enabled =
+             simrv::xlen::satp_translation_enabled(st.satp, cpu.effective_data_xlen()),
+         .is_vector_op = simrv::isa::is_vector_op(context.op_id),
+         .is_csr_op = is_csr,
+         .csr_address = static_cast<uint32_t>(context.imm & 0xFFF)});
 }
 
 auto InspectorPane::render_guidance_row(int row_idx, int width) -> std::string {

@@ -247,3 +247,33 @@ ACLINT/APLIC/IMSIC tests apply queued interrupt-line changes at the CPU boundary
   - Expanded `tests/PrivilegeMemoryAuditTests.cpp` with assertions for STCE access rejection/permission, timer interrupt generation, `mcountinhibit` bit 1 masking, and `mseccfg` sticky bits.
   - Passed 49/49 gate tests across both `rv64-release` (100%) and `rv32-release` (100%).
 
+### Pass 10: Instruction Explainer, CSR Metadata & Student Guidance Modernization
+- **Educational Instruction Explainer Enhancements (`InstructionExplainer.hpp`, `InstructionExplainer.cpp`)**:
+  - Structured CSR educational metadata: Introduced `CsrDetails` struct capturing symbolic name, human-readable description, minimum architectural privilege level (`PrivilegeLevel`), read-only permission flag, and ISA extension provenance.
+  - Implemented `get_csr_details(uint32_t csr_addr)` with rich metadata for 56+ standard CSRs (F/D, Vector 1.0, Zicntr counters/timers, Supervisor/Machine trap registers, Sstc `stimecmp`, Smepmp `mseccfg`, and PMP configuration/address ranges `pmpcfg0..3` and `pmpaddr0..15`).
+  - Streamlined `csr_name()` to leverage `get_csr_details()` and dynamic range formatters (`mhpmevent3..31`, `mhpmcounter3..31`, `hpmcounter3..31`).
+  - Added comprehensive educational behavior descriptions for previously unmapped vector and custom instructions in `kOpDescriptions`:
+    - Whole register moves: `VMV1R_V`, `VMV2R_V`, `VMV4R_V`, `VMV8R_V`.
+    - Whole register loads: `VL1RE8_V`..`VL8RE64_V` (all 16 EEW variants).
+    - Whole register stores: `VS1R_V`, `VS2R_V`, `VS4R_V`, `VS8R_V`.
+    - Carry/borrow operations: `VADC_VVM`, `VADC_VXM`, `VADC_VIM`, `VMADC_VV`..`VMADC_VIM`, `VMSBC_VV`..`VMSBC_VXM`.
+    - Mask manipulations: `VMSBF_M`, `VMSIF_M`, `VMSOF_M`, `VIOTA_M`, `VCOMPRESS_VM`.
+    - Vector bitmanip: `VANDN_VV`, `VANDN_VX`, `VROL_VV`, `VROL_VX`, `VROR_VV`, `VROR_VX`, `VROR_VI`, `VCLZ_V`, `VCTZ_V`, `VCPOP_V`, `VBREV_V`, `VBREV8_V`, `VREV8_V`, `VCLMUL_VV`..`VCLMULH_VX`.
+    - Widening shifts and scalar moves: `VFMV_V_F`, `VWSLL_VV`, `VWSLL_VX`, `VWSLL_VI`, `CFU`.
+  - Updated `get_isa_extension_name()` to canonically classify `Zvbc`, `Zvbb`, and `Custom` CFU opcodes.
+- **TUI Architectural Diagnostics & CSR Profiling (`InspectorPaneExplain.cpp`)**:
+  - Replaced legacy hardcoded 16-element cause names array with canonical `TrapController::trap_cause_name()`, automatically supporting Privileged 1.13 exceptions (`SoftwareCheck` (18), `HardwareError` (19)) and interrupt 13 (`Counter overflow interrupt`).
+  - Added interactive "Target CSR Architectural Profile" rendering when inspecting CSR instructions: displays symbolic name, numeric address, minimum privilege requirement, access type (RO vs RW), ISA extension, and pedagogical description.
+- **Contextual Student Guidance Modernization (`TuiGuidance.hpp`, `TuiGuidance.cpp`, `InspectorPane.cpp`)**:
+  - Expanded `GuidanceContext` to include architectural runtime fields: `privilege`, `has_pending_trap`, `trap_cause`, `translation_enabled` (via `satp_translation_enabled`), `is_vector_op`, `is_csr_op`, and `csr_address`.
+  - Implemented real-time educational advice in `guidance_for_context()`:
+    - Pending traps: Identifies trap cause and vectors student to step into handler (linked to Glossary topic 5: Priv).
+    - CSR instructions: Explains register function and privilege restrictions (linked to Glossary topic 5: Priv).
+    - Virtual memory: Differentiates Bare mode vs active page-table translation (linked to Glossary topic 3: VM/TLB).
+    - Vector operations: Explains active element lanes, `vtype` (SEW, LMUL), and `vl` execution (linked to Glossary topic 0: Regs).
+  - Populated all context fields authoritative from `current_cpu()` in `InspectorPane::current_student_guidance()`.
+- **Verification & Testing (`TuiFrameworkTests.cpp`)**:
+  - Added unit test coverage for CSR metadata queries, vector operation details, ISA classification, Privileged 1.13 trap naming, and contextual guidance scenarios.
+  - Re-verified dual-architecture validation gates: `rv64-release` (49/49 passed, 100%) and `rv32-release` (49/49 passed, 100%).
+
+

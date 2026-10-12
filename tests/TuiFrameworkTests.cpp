@@ -13,6 +13,7 @@
 
 #include "simrv/core/Cpu.hpp"
 #include "simrv/core/Machine.hpp"
+#include "simrv/core/TrapController.hpp"
 #include "simrv/debug/BreakpointManager.hpp"
 #include "simrv/debug/SymbolTable.hpp"
 #include "simrv/memory/MemorySubsystem.hpp"
@@ -42,6 +43,7 @@
 #include "simrv/tui/panels/StatusBar.hpp"
 #include "simrv/tui/panels/TerminalPane.hpp"
 #include "simrv/util/CliParser.hpp"
+#include "simrv/util/InstructionExplainer.hpp"
 
 namespace simrv::tui {
 struct TuiTestAccess {
@@ -640,6 +642,35 @@ void test_page_guidance() {
     expect(empty_guidance.next_action == simrv::tui::KeyAction::LoadBinary &&
                empty_guidance.meaning.contains("No program"),
            "an empty classroom session guides the student into the program loader");
+
+    auto trap_guidance = simrv::tui::guidance_for_context(
+        {.page = TuiRegPage::GPR, .has_pending_trap = true, .trap_cause = 2});
+    expect(trap_guidance.title.contains("Trap") &&
+               trap_guidance.meaning.contains("Illegal instruction"),
+           "pending traps receive diagnostic guidance with trap cause name");
+    expect(trap_guidance.glossary_topic == 5, "trap guidance references Privilege glossary topic");
+
+    auto csr_guidance = simrv::tui::guidance_for_context(
+        {.page = TuiRegPage::GPR, .is_csr_op = true, .csr_address = 0x180});
+    expect(
+        csr_guidance.title.contains("satp") && csr_guidance.meaning.contains("Address Translation"),
+        "CSR operations receive educational metadata guidance");
+    expect(csr_guidance.glossary_topic == 5, "CSR guidance references Privilege glossary topic");
+
+    auto tlb_guidance_bare =
+        simrv::tui::guidance_for_context({.page = TuiRegPage::TLB, .translation_enabled = false});
+    expect(tlb_guidance_bare.meaning.contains("Bare mode"),
+           "bare mode TLB explains disabled translation");
+    auto tlb_guidance_paged =
+        simrv::tui::guidance_for_context({.page = TuiRegPage::TLB, .translation_enabled = true});
+    expect(tlb_guidance_paged.meaning.contains("active"), "paged TLB explains active translation");
+
+    auto vec_guidance =
+        simrv::tui::guidance_for_context({.page = TuiRegPage::VEC,
+                                          .operation = simrv::isa::OperationId::VADD_VV,
+                                          .is_vector_op = true});
+    expect(vec_guidance.title.contains("Vector") && vec_guidance.meaning.contains("element lanes"),
+           "vector instructions receive vector lane guidance");
 }
 
 void test_cleanup_input_boundaries() {
@@ -1589,6 +1620,62 @@ void test_instruction_explainer_is_side_effect_free() {
     expect(found_rd_bank, "explainer renders destination register bank classification");
 }
 
+void test_instruction_explainer_and_csr_metadata() {
+    // 1. CSR metadata queries
+    auto satp_details = simrv::util::get_csr_details(0x180);
+    expect(satp_details.has_value() && satp_details->name == "satp", "satp metadata is resolved");
+    expect(satp_details->min_privilege == simrv::xlen::PrivilegeLevel::Supervisor,
+           "satp requires Supervisor privilege");
+    expect(!satp_details->read_only, "satp is read-write");
+
+    auto vstart_details = simrv::util::get_csr_details(0x008);
+    expect(vstart_details.has_value() && vstart_details->name == "vstart",
+           "vstart metadata is resolved");
+    expect(vstart_details->extension == "Vector", "vstart belongs to Vector extension");
+
+    auto stimecmp_details = simrv::util::get_csr_details(0x14D);
+    expect(stimecmp_details.has_value() && stimecmp_details->name == "stimecmp",
+           "stimecmp metadata is resolved");
+    expect(stimecmp_details->extension == "Sstc", "stimecmp belongs to Sstc extension");
+
+    auto mseccfg_details = simrv::util::get_csr_details(0x747);
+    expect(mseccfg_details.has_value() && mseccfg_details->name == "mseccfg",
+           "mseccfg metadata is resolved");
+    expect(mseccfg_details->extension == "Smepmp", "mseccfg belongs to Smepmp extension");
+
+    auto pmpcfg0_details = simrv::util::get_csr_details(0x3A0);
+    expect(pmpcfg0_details.has_value() && pmpcfg0_details->name == "pmpcfg0",
+           "pmpcfg0 metadata is resolved");
+
+    // 2. Vector and CFU operation details
+    auto vmv_desc = simrv::util::get_operation_details(simrv::isa::OperationId::VMV1R_V);
+    expect(vmv_desc.first == "VMV1R.V" && !vmv_desc.second.contains("UNKNOWN"),
+           "VMV1R.V has dedicated pedagogical description");
+
+    auto vadc_desc = simrv::util::get_operation_details(simrv::isa::OperationId::VADC_VVM);
+    expect(vadc_desc.first == "VADC.VVM" && !vadc_desc.second.contains("UNKNOWN"),
+           "VADC.VVM has dedicated pedagogical description");
+
+    auto cfu_desc = simrv::util::get_operation_details(simrv::isa::OperationId::CFU);
+    expect(cfu_desc.first == "CFU", "CFU mnemonic is resolved");
+
+    // 3. Extension classifications
+    expect(simrv::util::get_isa_extension_name(simrv::isa::OperationId::VCLMUL_VV) == "Zvbc",
+           "VCLMUL.VV classifies as Zvbc");
+    expect(simrv::util::get_isa_extension_name(simrv::isa::OperationId::VANDN_VV) == "Zvbb",
+           "VANDN.VV classifies as Zvbb");
+    expect(simrv::util::get_isa_extension_name(simrv::isa::OperationId::CFU) == "Custom",
+           "CFU classifies as Custom");
+
+    // 4. Trap cause naming updates (Privileged 1.13)
+    expect(simrv::core::trap_cause_name(to_trap_cause(ExceptionCode::SoftwareCheck)) ==
+               "Software check / pointer checking",
+           "SoftwareCheck trap cause is named canonically");
+    expect(simrv::core::trap_cause_name(to_trap_cause(ExceptionCode::HardwareError)) ==
+               "Hardware error",
+           "HardwareError trap cause is named canonically");
+}
+
 void test_inspector_panels_traits_and_scoreboard() {
     simrv::core::Machine machine;
     std::vector<simrv::xlen::Byte> ram(1024 * 1024, simrv::xlen::Byte{0});
@@ -1818,6 +1905,7 @@ void test_multicolumn_refinement() {
     simrv::tui::Tui cascade_tui(cascade_machine);
     simrv::tui::TuiTestAccess::init_panes(cascade_tui, cascade_machine);
     simrv::tui::TuiTestAccess::set_cached_term_width(cascade_tui, 220);
+    simrv::tui::TuiTestAccess::set_cached_term_height(cascade_tui, 50);
     cascade_tui.apply_layout_preset(simrv::tui::LayoutPreset::GeneralDebug);
     auto const cascade_before = simrv::tui::TuiTestAccess::column_widths(cascade_tui, 220);
     cascade_tui.adjust_inspector_width(6);
@@ -3091,6 +3179,7 @@ int main() {
     test_log_buffer_wrapping();
     test_modal_components();
     test_instruction_explainer_is_side_effect_free();
+    test_instruction_explainer_and_csr_metadata();
     test_inspector_panels_traits_and_scoreboard();
     test_multicolumn_refinement();
     test_horizontal_scrolling();

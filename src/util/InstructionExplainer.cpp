@@ -30,51 +30,171 @@ using simrv::isa::kOperationIdCount;
 using simrv::isa::Opcode;
 using enum simrv::core::Csr;
 
-auto csr_name(uint32_t csr_addr) -> std::string {
-    // Vector CSRs (RVV 1.0)
-    switch (csr_addr) {
-        case 0x008:
-            return "vstart";
-        case 0x009:
-            return "vxsat";
-        case 0x00A:
-            return "vxrm";
-        case 0x00F:
-            return "vcsr";
-        case 0xC20:
-            return "vl";
-        case 0xC21:
-            return "vtype";
-        case 0xC22:
-            return "vlenb";
-        // Sstc (Privileged ISA 1.13)
-        case 0x14D:
-            return "stimecmp";
-        case 0x15D:
-            return "stimecmph";
-        // Environment & Security Configuration
-        case 0x30A:
-            return "menvcfg";
-        case 0x31A:
-            return "menvcfgh";
-        case 0x10A:
-            return "senvcfg";
-        case 0x747:
-            return "mseccfg";
-        case 0x757:
-            return "mseccfgh";
-        case 0x320:
-            return "mcountinhibit";
+struct CsrDetailsEntry {
+    uint32_t addr;
+    std::string_view name;
+    std::string_view description;
+    simrv::xlen::PrivilegeLevel min_privilege;
+    bool read_only;
+    std::string_view extension;
+};
+
+auto get_csr_details(uint32_t csr_addr) -> std::optional<CsrDetails> {
+    using simrv::xlen::PrivilegeLevel;
+    static constexpr std::array<CsrDetailsEntry, 56> kCsrEntries = {
+        {// User Floating-Point (F/D)
+         {0x001, "fflags", "Floating-Point Accrued Exceptions", PrivilegeLevel::User, false, "F/D"},
+         {0x002, "frm", "Floating-Point Dynamic Rounding Mode", PrivilegeLevel::User, false, "F/D"},
+         {0x003, "fcsr", "Floating-Point Control and Status Register (frm + fflags)",
+          PrivilegeLevel::User, false, "F/D"},
+         // User Vector (RVV 1.0)
+         {0x008, "vstart", "Vector start position for resuming interrupted operations",
+          PrivilegeLevel::User, false, "Vector"},
+         {0x009, "vxsat", "Vector fixed-point saturate flag", PrivilegeLevel::User, false,
+          "Vector"},
+         {0x00A, "vxrm", "Vector fixed-point rounding mode", PrivilegeLevel::User, false, "Vector"},
+         {0x00F, "vcsr", "Vector control and status composite register", PrivilegeLevel::User,
+          false, "Vector"},
+         {0xC20, "vl", "Vector length: active element count", PrivilegeLevel::User, true, "Vector"},
+         {0xC21, "vtype", "Vector data type register (vsew, vlmul, vta, vma)", PrivilegeLevel::User,
+          true, "Vector"},
+         {0xC22, "vlenb", "Vector register length in bytes (VLEN/8)", PrivilegeLevel::User, true,
+          "Vector"},
+         // User Counters & Timers (Zicntr)
+         {0xC00, "cycle", "Cycle counter for RDCYCLE instruction", PrivilegeLevel::User, true,
+          "Zicntr"},
+         {0xC01, "time", "Timer for RDTIME instruction", PrivilegeLevel::User, true, "Zicntr"},
+         {0xC02, "instret", "Instructions-retired counter for RDINSTRET", PrivilegeLevel::User,
+          true, "Zicntr"},
+         {0xC80, "cycleh", "Upper 32 bits of cycle counter (RV32)", PrivilegeLevel::User, true,
+          "Zicntr"},
+         {0xC81, "timeh", "Upper 32 bits of timer (RV32)", PrivilegeLevel::User, true, "Zicntr"},
+         {0xC82, "instreth", "Upper 32 bits of instructions-retired counter (RV32)",
+          PrivilegeLevel::User, true, "Zicntr"},
+         // Supervisor Trap Setup & Protection
+         {0x100, "sstatus", "Supervisor Status Register", PrivilegeLevel::Supervisor, false,
+          "Privileged"},
+         {0x104, "sie", "Supervisor Interrupt-Enable Register", PrivilegeLevel::Supervisor, false,
+          "Privileged"},
+         {0x105, "stvec", "Supervisor Trap-Vector Base-Address Register",
+          PrivilegeLevel::Supervisor, false, "Privileged"},
+         {0x106, "scounteren", "Supervisor Counter Enable Register", PrivilegeLevel::Supervisor,
+          false, "Privileged"},
+         {0x10A, "senvcfg", "Supervisor Environment Configuration Register",
+          PrivilegeLevel::Supervisor, false, "Privileged"},
+         {0x140, "sscratch", "Supervisor Scratch Register", PrivilegeLevel::Supervisor, false,
+          "Privileged"},
+         {0x141, "sepc", "Supervisor Exception Program Counter", PrivilegeLevel::Supervisor, false,
+          "Privileged"},
+         {0x142, "scause", "Supervisor Trap Cause Register", PrivilegeLevel::Supervisor, false,
+          "Privileged"},
+         {0x143, "stval", "Supervisor Trap Value Register", PrivilegeLevel::Supervisor, false,
+          "Privileged"},
+         {0x144, "sip", "Supervisor Interrupt-Pending Register", PrivilegeLevel::Supervisor, false,
+          "Privileged"},
+         {0x14D, "stimecmp", "Supervisor Timer Compare Register (Sstc)", PrivilegeLevel::Supervisor,
+          false, "Sstc"},
+         {0x15D, "stimecmph", "Supervisor Timer Compare Register High (Sstc RV32)",
+          PrivilegeLevel::Supervisor, false, "Sstc"},
+         {0x180, "satp", "Supervisor Address Translation and Protection",
+          PrivilegeLevel::Supervisor, false, "Privileged"},
+         // Machine Trap Setup & Handling
+         {0x300, "mstatus", "Machine Status Register", PrivilegeLevel::Machine, false,
+          "Privileged"},
+         {0x301, "misa", "Machine ISA and Extensions Register", PrivilegeLevel::Machine, false,
+          "Privileged"},
+         {0x302, "medeleg", "Machine Exception Delegation Register", PrivilegeLevel::Machine, false,
+          "Privileged"},
+         {0x303, "mideleg", "Machine Interrupt Delegation Register", PrivilegeLevel::Machine, false,
+          "Privileged"},
+         {0x304, "mie", "Machine Interrupt-Enable Register", PrivilegeLevel::Machine, false,
+          "Privileged"},
+         {0x305, "mtvec", "Machine Trap-Vector Base-Address Register", PrivilegeLevel::Machine,
+          false, "Privileged"},
+         {0x306, "mcounteren", "Machine Counter Enable Register", PrivilegeLevel::Machine, false,
+          "Privileged"},
+         {0x30A, "menvcfg", "Machine Environment Configuration Register", PrivilegeLevel::Machine,
+          false, "Privileged"},
+         {0x310, "mstatush", "Machine Status Register High (RV32)", PrivilegeLevel::Machine, false,
+          "Privileged"},
+         {0x31A, "menvcfgh", "Machine Environment Configuration High (RV32)",
+          PrivilegeLevel::Machine, false, "Privileged"},
+         {0x320, "mcountinhibit", "Machine Counter-Inhibit Register", PrivilegeLevel::Machine,
+          false, "Privileged"},
+         {0x340, "mscratch", "Machine Scratch Register", PrivilegeLevel::Machine, false,
+          "Privileged"},
+         {0x341, "mepc", "Machine Exception Program Counter", PrivilegeLevel::Machine, false,
+          "Privileged"},
+         {0x342, "mcause", "Machine Trap Cause Register", PrivilegeLevel::Machine, false,
+          "Privileged"},
+         {0x343, "mtval", "Machine Trap Value Register", PrivilegeLevel::Machine, false,
+          "Privileged"},
+         {0x344, "mip", "Machine Interrupt-Pending Register", PrivilegeLevel::Machine, false,
+          "Privileged"},
+         {0x747, "mseccfg", "Machine Security Configuration (Smepmp)", PrivilegeLevel::Machine,
+          false, "Smepmp"},
+         {0x757, "mseccfgh", "Machine Security Configuration High (Smepmp RV32)",
+          PrivilegeLevel::Machine, false, "Smepmp"},
+         // Machine Identification
+         {0xF11, "mvendorid", "Machine Vendor ID Register", PrivilegeLevel::Machine, true,
+          "Privileged"},
+         {0xF12, "marchid", "Machine Architecture ID Register", PrivilegeLevel::Machine, true,
+          "Privileged"},
+         {0xF13, "mimpid", "Machine Implementation ID Register", PrivilegeLevel::Machine, true,
+          "Privileged"},
+         {0xF14, "mhartid", "Hardware Thread ID Register", PrivilegeLevel::Machine, true,
+          "Privileged"},
+         {0xF15, "mconfigptr", "Machine Configuration Pointer Register", PrivilegeLevel::Machine,
+          true, "Privileged"},
+         // Machine Counters
+         {0xB00, "mcycle", "Machine Cycle Counter", PrivilegeLevel::Machine, false, "Zicntr"},
+         {0xB02, "minstret", "Machine Instructions-Retired Counter", PrivilegeLevel::Machine, false,
+          "Zicntr"},
+         {0xB80, "mcycleh", "Machine Cycle Counter High (RV32)", PrivilegeLevel::Machine, false,
+          "Zicntr"},
+         {0xB82, "minstreth", "Machine Instructions-Retired Counter High (RV32)",
+          PrivilegeLevel::Machine, false, "Zicntr"}}};
+
+    for (const auto& entry : kCsrEntries) {
+        if (entry.addr == csr_addr) {
+            return CsrDetails{.name = entry.name,
+                              .description = entry.description,
+                              .min_privilege = entry.min_privilege,
+                              .read_only = entry.read_only,
+                              .extension = entry.extension};
+        }
     }
 
-    // PMP configuration & address registers
+    // PMP configuration registers
     if (csr_addr >= 0x3A0 && csr_addr <= 0x3A3) {
-        return std::format("pmpcfg{}", csr_addr - 0x3A0);
+        static constexpr std::array<std::string_view, 4> kPmpcfg = {"pmpcfg0", "pmpcfg1", "pmpcfg2",
+                                                                    "pmpcfg3"};
+        return CsrDetails{.name = kPmpcfg[csr_addr - 0x3A0],
+                          .description = "Physical Memory Protection configuration register",
+                          .min_privilege = PrivilegeLevel::Machine,
+                          .read_only = false,
+                          .extension = "Smepmp / PMP"};
     }
+    // PMP address registers
     if (csr_addr >= 0x3B0 && csr_addr <= 0x3BF) {
-        return std::format("pmpaddr{}", csr_addr - 0x3B0);
+        static constexpr std::array<std::string_view, 16> kPmpaddr = {
+            "pmpaddr0",  "pmpaddr1",  "pmpaddr2",  "pmpaddr3", "pmpaddr4",  "pmpaddr5",
+            "pmpaddr6",  "pmpaddr7",  "pmpaddr8",  "pmpaddr9", "pmpaddr10", "pmpaddr11",
+            "pmpaddr12", "pmpaddr13", "pmpaddr14", "pmpaddr15"};
+        return CsrDetails{.name = kPmpaddr[csr_addr - 0x3B0],
+                          .description = "Physical Memory Protection address register",
+                          .min_privilege = PrivilegeLevel::Machine,
+                          .read_only = false,
+                          .extension = "Smepmp / PMP"};
     }
 
+    return std::nullopt;
+}
+
+auto csr_name(uint32_t csr_addr) -> std::string {
+    if (auto details = get_csr_details(csr_addr)) {
+        return std::string(details->name);
+    }
     // Performance monitoring & event selectors
     if (csr_addr >= 0x323 && csr_addr <= 0x33F) {
         return std::format("mhpmevent{}", csr_addr - 0x320);
@@ -90,55 +210,6 @@ auto csr_name(uint32_t csr_addr) -> std::string {
     }
     if (csr_addr >= 0xC83 && csr_addr <= 0xC9F) {
         return std::format("hpmcounter{}h", csr_addr - 0xC80);
-    }
-
-    static constexpr std::array<std::pair<Csr, std::string_view>, 43> kCsrNames = {{
-        {Csr::Fflags, "fflags"},
-        {Csr::Frm, "frm"},
-        {Csr::Fcsr, "fcsr"},
-        {Csr::Pmpcfg0, "pmpcfg0"},
-        {Csr::Pmpaddr0, "pmpaddr0"},
-        {Csr::Cycle, "cycle"},
-        {Csr::Time, "time"},
-        {Csr::Instret, "instret"},
-        {Csr::Sstatus, "sstatus"},
-        {Csr::Sie, "sie"},
-        {Csr::Stvec, "stvec"},
-        {Csr::Scounteren, "scounteren"},
-        {Csr::Sscratch, "sscratch"},
-        {Csr::Sepc, "sepc"},
-        {Csr::Scause, "scause"},
-        {Csr::Stval, "stval"},
-        {Csr::Sip, "sip"},
-        {Csr::Satp, "satp"},
-        {Csr::Mvendorid, "mvendorid"},
-        {Csr::Marchid, "marchid"},
-        {Csr::Mimpid, "mimpid"},
-        {Csr::Mhartid, "mhartid"},
-        {Csr::Mconfigptr, "mconfigptr"},
-        {Csr::Mstatus, "mstatus"},
-        {Csr::Misa, "misa"},
-        {Csr::Medeleg, "medeleg"},
-        {Csr::Mideleg, "mideleg"},
-        {Csr::Mie, "mie"},
-        {Csr::Mtvec, "mtvec"},
-        {Csr::Mcounteren, "mcounteren"},
-        {Csr::Mscratch, "mscratch"},
-        {Csr::Mepc, "mepc"},
-        {Csr::Mcause, "mcause"},
-        {Csr::Mtval, "mtval"},
-        {Csr::Mip, "mip"},
-        {Csr::Mcycle, "mcycle"},
-        {Csr::Minstret, "minstret"},
-        {Csr::Mcycleh, "mcycleh"},
-        {Csr::Minstreth, "minstreth"},
-        {Csr::Cycleh, "cycleh"},
-        {Csr::Timeh, "timeh"},
-        {Csr::Instreth, "instreth"},
-    }};
-    const auto target = static_cast<Csr>(csr_addr);
-    for (const auto& [csr, name] : kCsrNames) {
-        if (csr == target) return std::string(name);
     }
     return std::format("0x{:03X}", csr_addr);
 }
@@ -1255,6 +1326,252 @@ auto get_description(OperationId op_id) -> std::pair<std::string_view, std::stri
         arr[CFU] = {"CFU",
                     "Custom Function Unit instruction. Dispatches an application-specific "
                     "accelerator operation on the CUSTOM_0 opcode space."};
+
+        // Whole register moves
+        arr[VMV1R_V] = {
+            "VMV1R.V",
+            "Vector Move Whole Register (1 register). Copies 1 vector register vs2 to vd "
+            "without mask or length constraints."};
+        arr[VMV2R_V] = {
+            "VMV2R.V",
+            "Vector Move Whole Register (2 registers). Copies 2 vector registers vs2 to "
+            "vd."};
+        arr[VMV4R_V] = {
+            "VMV4R.V",
+            "Vector Move Whole Register (4 registers). Copies 4 vector registers vs2 to "
+            "vd."};
+        arr[VMV8R_V] = {
+            "VMV8R.V",
+            "Vector Move Whole Register (8 registers). Copies 8 vector registers vs2 to "
+            "vd."};
+
+        // Whole register loads
+        arr[VL1RE8_V] = {"VL1RE8.V",
+                         "Vector Load Whole Register (1 register, EEW=8). Loads 1 vector register "
+                         "from memory address rs1."};
+        arr[VL1RE16_V] = {
+            "VL1RE16.V",
+            "Vector Load Whole Register (1 register, EEW=16). Loads 1 vector register "
+            "from memory address rs1."};
+        arr[VL1RE32_V] = {
+            "VL1RE32.V",
+            "Vector Load Whole Register (1 register, EEW=32). Loads 1 vector register "
+            "from memory address rs1."};
+        arr[VL1RE64_V] = {
+            "VL1RE64.V",
+            "Vector Load Whole Register (1 register, EEW=64). Loads 1 vector register "
+            "from memory address rs1."};
+        arr[VL2RE8_V] = {
+            "VL2RE8.V",
+            "Vector Load Whole Register (2 registers, EEW=8). Loads 2 vector registers "
+            "from memory address rs1."};
+        arr[VL2RE16_V] = {
+            "VL2RE16.V",
+            "Vector Load Whole Register (2 registers, EEW=16). Loads 2 vector registers "
+            "from memory address rs1."};
+        arr[VL2RE32_V] = {
+            "VL2RE32.V",
+            "Vector Load Whole Register (2 registers, EEW=32). Loads 2 vector registers "
+            "from memory address rs1."};
+        arr[VL2RE64_V] = {
+            "VL2RE64.V",
+            "Vector Load Whole Register (2 registers, EEW=64). Loads 2 vector registers "
+            "from memory address rs1."};
+        arr[VL4RE8_V] = {
+            "VL4RE8.V",
+            "Vector Load Whole Register (4 registers, EEW=8). Loads 4 vector registers "
+            "from memory address rs1."};
+        arr[VL4RE16_V] = {
+            "VL4RE16.V",
+            "Vector Load Whole Register (4 registers, EEW=16). Loads 4 vector registers "
+            "from memory address rs1."};
+        arr[VL4RE32_V] = {
+            "VL4RE32.V",
+            "Vector Load Whole Register (4 registers, EEW=32). Loads 4 vector registers "
+            "from memory address rs1."};
+        arr[VL4RE64_V] = {
+            "VL4RE64.V",
+            "Vector Load Whole Register (4 registers, EEW=64). Loads 4 vector registers "
+            "from memory address rs1."};
+        arr[VL8RE8_V] = {
+            "VL8RE8.V",
+            "Vector Load Whole Register (8 registers, EEW=8). Loads 8 vector registers "
+            "from memory address rs1."};
+        arr[VL8RE16_V] = {
+            "VL8RE16.V",
+            "Vector Load Whole Register (8 registers, EEW=16). Loads 8 vector registers "
+            "from memory address rs1."};
+        arr[VL8RE32_V] = {
+            "VL8RE32.V",
+            "Vector Load Whole Register (8 registers, EEW=32). Loads 8 vector registers "
+            "from memory address rs1."};
+        arr[VL8RE64_V] = {
+            "VL8RE64.V",
+            "Vector Load Whole Register (8 registers, EEW=64). Loads 8 vector registers "
+            "from memory address rs1."};
+
+        // Whole register stores
+        arr[VS1R_V] = {"VS1R.V",
+                       "Vector Store Whole Register (1 register). Stores 1 vector register vs3 to "
+                       "memory address rs1."};
+        arr[VS2R_V] = {
+            "VS2R.V",
+            "Vector Store Whole Register (2 registers). Stores 2 vector registers vs3 to "
+            "memory address rs1."};
+        arr[VS4R_V] = {
+            "VS4R.V",
+            "Vector Store Whole Register (4 registers). Stores 4 vector registers vs3 to "
+            "memory address rs1."};
+        arr[VS8R_V] = {
+            "VS8R.V",
+            "Vector Store Whole Register (8 registers). Stores 8 vector registers vs3 to "
+            "memory address rs1."};
+
+        // Add with carry / subtract with borrow
+        arr[VADC_VVM] = {"VADC.VVM",
+                         "Vector Add with Carry (Vector-Vector-Mask). Adds vs2 + vs1 + v0.mask, "
+                         "writes to vd."};
+        arr[VADC_VXM] = {"VADC.VXM",
+                         "Vector Add with Carry (Vector-Scalar-Mask). Adds vs2 + rs1 + v0.mask, "
+                         "writes to vd."};
+        arr[VADC_VIM] = {"VADC.VIM",
+                         "Vector Add with Carry (Vector-Immediate-Mask). Adds vs2 + imm + v0.mask, "
+                         "writes to vd."};
+        arr[VMADC_VV] = {
+            "VMADC.VV",
+            "Vector Mask Carry-Out from Add (Vector-Vector). Computes carry-out of vs2 + "
+            "vs1, writes to mask vd."};
+        arr[VMADC_VX] = {
+            "VMADC.VX",
+            "Vector Mask Carry-Out from Add (Vector-Scalar). Computes carry-out of vs2 + "
+            "rs1, writes to mask vd."};
+        arr[VMADC_VI] = {"VMADC.VI",
+                         "Vector Mask Carry-Out from Add (Vector-Immediate). Computes carry-out of "
+                         "vs2 + imm, writes to mask vd."};
+        arr[VMADC_VVM] = {"VMADC.VVM",
+                          "Vector Mask Carry-Out from Add with Carry (Vector-Vector). Computes "
+                          "carry-out of vs2 + vs1 + v0.mask, writes to mask vd."};
+        arr[VMADC_VXM] = {"VMADC.VXM",
+                          "Vector Mask Carry-Out from Add with Carry (Vector-Scalar). Computes "
+                          "carry-out of vs2 + rs1 + v0.mask, writes to mask vd."};
+        arr[VMADC_VIM] = {"VMADC.VIM",
+                          "Vector Mask Carry-Out from Add with Carry (Vector-Immediate). Computes "
+                          "carry-out of vs2 + imm + v0.mask, writes to mask vd."};
+        arr[VMSBC_VV] = {
+            "VMSBC.VV",
+            "Vector Mask Borrow-Out from Subtract (Vector-Vector). Computes borrow-out "
+            "of vs2 - vs1, writes to mask vd."};
+        arr[VMSBC_VX] = {
+            "VMSBC.VX",
+            "Vector Mask Borrow-Out from Subtract (Vector-Scalar). Computes borrow-out "
+            "of vs2 - rs1, writes to mask vd."};
+        arr[VMSBC_VVM] = {"VMSBC.VVM",
+                          "Vector Mask Borrow-Out from Subtract with Borrow (Vector-Vector). "
+                          "Computes borrow-out of vs2 - vs1 - v0.mask, writes to mask vd."};
+        arr[VMSBC_VXM] = {"VMSBC.VXM",
+                          "Vector Mask Borrow-Out from Subtract with Borrow (Vector-Scalar). "
+                          "Computes borrow-out of vs2 - rs1 - v0.mask, writes to mask vd."};
+
+        // Mask instructions
+        arr[VMSBF_M] = {"VMSBF.M",
+                        "Vector Mask Set-Before-First. Sets all mask bits before first active 1 in "
+                        "vs2."};
+        arr[VMSIF_M] = {
+            "VMSIF.M",
+            "Vector Mask Set-Including-First. Sets all mask bits up to and including first "
+            "active 1 in vs2."};
+        arr[VMSOF_M] = {
+            "VMSOF.M",
+            "Vector Mask Set-Only-First. Sets only the first active 1 bit in vs2, clearing "
+            "all others."};
+        arr[VIOTA_M] = {
+            "VIOTA.M",
+            "Vector Iota. Reads mask vs2 and writes cumulative sum of preceding 1 bits to "
+            "vector vd."};
+        arr[VCOMPRESS_VM] = {"VCOMPRESS.VM",
+                             "Vector Compress. Compresses elements from vs2 where mask vs1 is 1 "
+                             "contiguously into vd."};
+
+        // Vector bitmanip Zvbb/Zvbc
+        arr[VANDN_VV] = {
+            "VANDN.VV",
+            "Vector Bitwise AND-NOT (Vector-Vector). Computes vs2 AND NOT vs1, writes to "
+            "vd."};
+        arr[VANDN_VX] = {
+            "VANDN.VX",
+            "Vector Bitwise AND-NOT (Vector-Scalar). Computes vs2 AND NOT rs1, writes to "
+            "vd."};
+        arr[VROL_VV] = {
+            "VROL.VV",
+            "Vector Rotate Left (Vector-Vector). Rotates elements of vs2 left by vs1 bits, "
+            "writes to vd."};
+        arr[VROL_VX] = {
+            "VROL.VX",
+            "Vector Rotate Left (Vector-Scalar). Rotates elements of vs2 left by rs1 bits, "
+            "writes to vd."};
+        arr[VROR_VV] = {"VROR.VV",
+                        "Vector Rotate Right (Vector-Vector). Rotates elements of vs2 right by vs1 "
+                        "bits, writes to vd."};
+        arr[VROR_VX] = {"VROR.VX",
+                        "Vector Rotate Right (Vector-Scalar). Rotates elements of vs2 right by rs1 "
+                        "bits, writes to vd."};
+        arr[VROR_VI] = {
+            "VROR.VI",
+            "Vector Rotate Right (Vector-Immediate). Rotates elements of vs2 right by imm "
+            "bits, writes to vd."};
+        arr[VCLZ_V] = {"VCLZ.V",
+                       "Vector Count Leading Zeros. Counts leading zeros in each element of vs2, "
+                       "writes to vd."};
+        arr[VCTZ_V] = {"VCTZ.V",
+                       "Vector Count Trailing Zeros. Counts trailing zeros in each element of vs2, "
+                       "writes to vd."};
+        arr[VCPOP_V] = {
+            "VCPOP.V",
+            "Vector Population Count. Counts number of set bits in each element of vs2, "
+            "writes to vd."};
+        arr[VBREV_V] = {"VBREV.V",
+                        "Vector Bit Reverse. Reverses bit order of each element in vs2, writes to "
+                        "vd."};
+        arr[VBREV8_V] = {
+            "VBREV8.V",
+            "Vector Byte Reverse within 8-bit slices. Reverses bits within each byte of "
+            "vs2, writes to vd."};
+        arr[VREV8_V] = {
+            "VREV8.V",
+            "Vector Byte Reverse (Endian Swap). Reverses byte order within each element "
+            "of vs2, writes to vd."};
+        arr[VCLMUL_VV] = {
+            "VCLMUL.VV",
+            "Vector Carryless Multiply Low (Vector-Vector). Computes carryless product "
+            "low half, writes to vd."};
+        arr[VCLMUL_VX] = {
+            "VCLMUL.VX",
+            "Vector Carryless Multiply Low (Vector-Scalar). Computes carryless product "
+            "low half, writes to vd."};
+        arr[VCLMULH_VV] = {"VCLMULH.VV",
+                           "Vector Carryless Multiply High (Vector-Vector). Computes carryless "
+                           "product high half, writes to vd."};
+        arr[VCLMULH_VX] = {"VCLMULH.VX",
+                           "Vector Carryless Multiply High (Vector-Scalar). Computes carryless "
+                           "product high half, writes to vd."};
+
+        // Widening shifts & float moves
+        arr[VFMV_V_F] = {
+            "VFMV.V.F",
+            "Vector Floating-Point Move Scalar to Vector. Splats scalar float rs1 across "
+            "active elements of vd."};
+        arr[VWSLL_VV] = {
+            "VWSLL.VV",
+            "Vector Widening Shift Left Logical (Vector-Vector). Widens elements of vs2 "
+            "and shifts left by vs1 bits, writes to 2*SEW vd."};
+        arr[VWSLL_VX] = {
+            "VWSLL.VX",
+            "Vector Widening Shift Left Logical (Vector-Scalar). Widens elements of vs2 "
+            "and shifts left by rs1 bits, writes to 2*SEW vd."};
+        arr[VWSLL_VI] = {
+            "VWSLL.VI",
+            "Vector Widening Shift Left Logical (Vector-Immediate). Widens elements of "
+            "vs2 and shifts left by imm bits, writes to 2*SEW vd."};
 
         return arr;
     }();
@@ -2412,7 +2729,17 @@ auto get_isa_extension_name(OperationId op_id) -> std::string_view {
         }
     }
     if (isa::is_vector_op(op_id)) {
+        if (op_id == VCLMUL_VV || op_id == VCLMUL_VX || op_id == VCLMULH_VV ||
+            op_id == VCLMULH_VX) {
+            return "Zvbc";
+        }
+        if ((op_id >= VANDN_VV && op_id <= VREV8_V) || (op_id >= VWSLL_VV && op_id <= VWSLL_VI)) {
+            return "Zvbb";
+        }
         return "Vector";
+    }
+    if (op_id == CFU) {
+        return "Custom";
     }
     return "Unknown";
 }

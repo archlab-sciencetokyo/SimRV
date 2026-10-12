@@ -4,7 +4,7 @@
  */
 #pragma once
 
-#include <cstdint>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -12,8 +12,20 @@
 #include "simrv/core/CsrTypes.hpp"
 #include "simrv/isa/OperationId.hpp"
 #include "simrv/xlen/IdentifierTypes.hpp"
+#include "simrv/xlen/ScalarTypes.hpp"
 
 namespace simrv::util {
+
+/**
+ * @brief Structured educational metadata for a Control and Status Register (CSR).
+ */
+struct CsrDetails {
+    std::string_view name;
+    std::string_view description;
+    simrv::xlen::PrivilegeLevel min_privilege = simrv::xlen::PrivilegeLevel::User;
+    bool read_only = false;
+    std::string_view extension = "Base";
+};
 
 /**
  * @brief Print a detailed educational breakdown of a 32-bit (or 16-bit compressed) instruction.
@@ -44,6 +56,19 @@ auto get_operation_details(isa::OperationId op_id) -> std::pair<std::string_view
  */
 [[nodiscard]] inline auto csr_name(simrv::core::Csr csr) -> std::string {
     return csr_name(static_cast<uint32_t>(csr));
+}
+
+/**
+ * @brief Retrieve educational details for a CSR.
+ */
+[[nodiscard]] auto get_csr_details(uint32_t csr_addr) -> std::optional<CsrDetails>;
+
+[[nodiscard]] inline auto get_csr_details(simrv::xlen::CsrNumber csr) -> std::optional<CsrDetails> {
+    return get_csr_details(csr.value());
+}
+
+[[nodiscard]] inline auto get_csr_details(simrv::core::Csr csr) -> std::optional<CsrDetails> {
+    return get_csr_details(static_cast<uint32_t>(csr));
 }
 
 /**

@@ -10,6 +10,7 @@
 #include "simrv/isa/OperationId.hpp"
 #include "simrv/tui/TuiKeybindings.hpp"
 #include "simrv/tui/TuiTypes.hpp"
+#include "simrv/xlen/IdentifierTypes.hpp"
 
 namespace simrv::tui {
 
@@ -33,6 +34,15 @@ struct GuidanceContext {
     uint64_t control_hazard_bubbles = 0;
     bool image_loaded = true;
     bool shutdown = false;
+
+    // Architectural execution context
+    simrv::xlen::PrivilegeLevel privilege = simrv::xlen::PrivilegeLevel::Machine;
+    bool has_pending_trap = false;
+    uint64_t trap_cause = 0;
+    bool translation_enabled = false;
+    bool is_vector_op = false;
+    bool is_csr_op = false;
+    uint32_t csr_address = 0;
 };
 
 [[nodiscard]] auto guidance_for_page(TuiRegPage page, bool cycle_accurate) -> PageGuidance;

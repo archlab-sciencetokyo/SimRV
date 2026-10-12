@@ -11,6 +11,7 @@
 
 #include "simrv/core/Cpu.hpp"
 #include "simrv/core/Machine.hpp"
+#include "simrv/core/TrapController.hpp"
 #include "simrv/debug/SymbolTable.hpp"
 #include "simrv/isa/Common.hpp"
 #include "simrv/memory/MemoryUtil.hpp"
@@ -1198,8 +1199,36 @@ auto InspectorPane::get_explain_rows(int width) -> std::vector<std::string> {
     if (is_csr) {
         uint32_t csr_addr = ctx.imm & 0xFFF;
         std::string csr_nm = simrv::util::csr_name(csr_addr);
+        explain_rows.push_back(section_line("Target CSR Architectural Profile", width));
         explain_rows.push_back(
-            format_to_width(std::format("  CSR    : {} (addr 0x{:03X})", csr_nm, csr_addr), width));
+            format_to_width(std::format("  {}CSR Name    : {}{} (0x{:03X})\033[0m", kThemeText,
+                                        kThemePeach, csr_nm, csr_addr),
+                            width));
+        if (auto details = simrv::util::get_csr_details(csr_addr)) {
+            std::string priv_req =
+                (details->min_privilege == simrv::xlen::PrivilegeLevel::Machine)
+                    ? "Machine (M)"
+                    : ((details->min_privilege == simrv::xlen::PrivilegeLevel::Supervisor)
+                           ? "Supervisor (S)"
+                           : "User (U)");
+            explain_rows.push_back(format_to_width(
+                std::format("  {}Privilege   : {}{}\033[0m", kThemeText, kThemeMint, priv_req),
+                width));
+            explain_rows.push_back(format_to_width(
+                std::format("  {}Access Type : {}{}\033[0m", kThemeText, kThemeVal,
+                            details->read_only ? "Read-Only (RO)" : "Read/Write (RW)"),
+                width));
+            explain_rows.push_back(
+                format_to_width(std::format("  {}Extension   : {}{}\033[0m", kThemeText, kThemeMint,
+                                            details->extension),
+                                width));
+            if (!details->description.empty()) {
+                auto csr_desc_wrapped = wrap_text(std::string(details->description), width - 4);
+                for (const auto& line : csr_desc_wrapped) {
+                    explain_rows.push_back(format_to_width("  " + line, width));
+                }
+            }
+        }
         explain_rows.push_back(format_to_width("", width));
     }
 
@@ -1227,26 +1256,8 @@ auto InspectorPane::get_explain_rows(int width) -> std::vector<std::string> {
         uint64_t tval = ctx.pending_exception.has_value() ? ctx.pending_tval
                                                           : (st.mcause != 0 ? st.mtval : st.stval);
 
-        static constexpr std::array<const char*, 16> kCauseNames = {
-            "Instruction Address Misaligned",
-            "Instruction Access Fault",
-            "Illegal Instruction",
-            "Breakpoint",
-            "Load Address Misaligned",
-            "Load Access Fault",
-            "Store Address Misaligned",
-            "Store Access Fault",
-            "Environment Call (U-Mode)",
-            "Environment Call (S-Mode)",
-            "Reserved (10)",
-            "Environment Call (M-Mode)",
-            "Instruction Page Fault",
-            "Load Page Fault",
-            "Reserved (14)",
-            "Store Page Fault"};
-        std::string cause_name = (cause < kCauseNames.size())
-                                     ? kCauseNames.at(cause)
-                                     : std::format("Exception ({})", cause);
+        std::string cause_name =
+            simrv::core::trap_cause_name(static_cast<simrv::xlen::TrapCause>(cause));
         explain_rows.push_back(
             format_to_width(std::format("  {}Cause      : {}{} (0x{:X})\033[0m", kThemeText,
                                         kThemePeach, cause_name, cause),

@@ -6,8 +6,10 @@
 
 #include <format>
 
+#include "simrv/core/TrapController.hpp"
 #include "simrv/pipeline/Decoder.hpp"
 #include "simrv/pipeline/OperationTraits.hpp"
+#include "simrv/util/InstructionExplainer.hpp"
 
 namespace simrv::tui {
 
@@ -193,6 +195,57 @@ auto guidance_for_context(const GuidanceContext& context) -> PageGuidance {
         guidance.meaning = std::format("Telemetry records {} data stalls and {} control bubbles.",
                                        context.data_hazard_stalls, context.control_hazard_bubbles);
     }
+
+    if (context.has_pending_trap) {
+        auto trap_name =
+            simrv::core::trap_cause_name(static_cast<simrv::xlen::TrapCause>(context.trap_cause));
+        guidance.title = "Trap / Exception diagnostic";
+        guidance.meaning = std::format("A trap ({}) is active or pending on this hart.", trap_name);
+        guidance.relationship =
+            "Traps redirect execution to mtvec/stvec and update mepc/sepc and mcause/scause.";
+        guidance.next_action = KeyAction::Step;
+        guidance.next_hint = "Step into the trap handler.";
+        guidance.glossary_topic = 5;
+    } else if (context.is_csr_op) {
+        auto details = simrv::util::get_csr_details(context.csr_address);
+        std::string csr_nm =
+            details ? std::string(details->name) : simrv::util::csr_name(context.csr_address);
+        guidance.title = std::format("CSR Access: {}", csr_nm);
+        guidance.meaning =
+            details ? std::format("Accessing {} ({}).", csr_nm, details->description)
+                    : std::format("Accessing CSR {} at 0x{:03X}.", csr_nm, context.csr_address);
+        guidance.relationship =
+            "CSR instructions read/modify control state subject to current privilege checks.";
+        guidance.next_action = KeyAction::ToggleExplain;
+        guidance.next_hint = "Inspect CSR architectural details.";
+        guidance.glossary_topic = 5;
+    } else if (context.page == TuiRegPage::TLB) {
+        if (context.translation_enabled) {
+            guidance.meaning =
+                "Address translation is active (satp mode > 0). Virtual addresses map via page "
+                "tables.";
+            guidance.relationship =
+                "Page table walks translate VPN to PPN; TLB caches recent translations.";
+        } else {
+            guidance.meaning =
+                "Address translation is disabled (Bare mode). Virtual addresses match physical "
+                "addresses.";
+            guidance.relationship =
+                "Operating systems enable paging (satp) when initializing virtual memory.";
+        }
+        guidance.glossary_topic = 3;
+    } else if (context.is_vector_op) {
+        guidance.title = "Vector instruction execution";
+        guidance.meaning =
+            "Vector operations execute across element lanes configured by vtype (SEW, LMUL) and "
+            "vl.";
+        guidance.relationship =
+            "Vector registers v0-v31 operate under masking and tail/mask policies.";
+        guidance.next_action = KeyAction::ToggleExplain;
+        guidance.next_hint = "Explain the vector instruction bitfields.";
+        guidance.glossary_topic = 0;
+    }
+
     return guidance;
 }
 

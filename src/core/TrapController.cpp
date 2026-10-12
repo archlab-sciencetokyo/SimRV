@@ -91,6 +91,8 @@ auto trap_cause_name(simrv::xlen::TrapCause cause) -> std::string {
                 return "Supervisor external interrupt";
             case 11:
                 return "Machine external interrupt";
+            case 13:
+                return "Counter overflow interrupt";
             default:
                 return "Unknown interrupt " + std::to_string(numeric_code);
         }
@@ -124,6 +126,10 @@ auto trap_cause_name(simrv::xlen::TrapCause cause) -> std::string {
                 return "Load page fault";
             case ExceptionCode::StorePageFault:
                 return "Store/AMO page fault";
+            case ExceptionCode::SoftwareCheck:
+                return "Software check / pointer checking";
+            case ExceptionCode::HardwareError:
+                return "Hardware error";
             default:
                 return "Unknown exception " + std::to_string(numeric_code);
         }
