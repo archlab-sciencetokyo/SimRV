@@ -219,9 +219,12 @@ ACLINT/APLIC/IMSIC tests apply queued interrupt-line changes at the CPU boundary
   - Validated 100% pass across dual-architecture gate suites (`rv64-release` and `rv32-release`, 49/49 tests each).
 
 ### Pass 8: Final Comprehensive Audit, Target Validation & Release Polish
-- **Canonical `IsaPreset` Harmonization (`IsaTypes.hpp`, `CpuModel.hpp`, `CliParser.hpp`, `MachineInit.cpp`, `CpuModelLoaderTests.cpp`)**:
-  - Retired the legacy draft alias `GCBV = GCZBV` from `simrv::isa::IsaPreset`.
-  - Standardized all default CPU model presets, CLI defaults, and test assertions on canonical `IsaPreset::GCZBV`.
+- **Canonical `IsaPreset` Standardization (`IsaTypes.hpp`, `IsaConfig.hpp`, `CpuModel.hpp`, `CliParser.hpp`, `MachineInit.cpp`)**:
+  - Retired non-standard pseudo-presets `GCZB` and `GCZBV` completely from `enum class IsaPreset`.
+  - Conformed `IsaPreset` strictly to canonical RISC-V ratified presets: `E`, `EM`, `EMAC`, `I`, `IM`, `IMA`, `IMAC`, `G`, `GC`, `GCV`.
+  - Represented Bitmanip (`zba`, `zbb`, `zbc`, `zbs`) canonically as standard multi-letter extensions attached to canonical `GC` or `GCV`.
+  - Standardized simulator default execution preset to `IsaPreset::GCV` with Bitmanip enabled (`has_zb_extensions = true`) and default `kMisaDefault = misa_base_bits()`.
+  - Maintained seamless backwards-compatible CLI string parsing for legacy/shorthand strings (`gczb`, `gczbv`) by mapping them to canonical `GC`/`GCV` with `has_zb = true`.
 - **Dual-Architecture Debug & Release Multi-Preset Verification**:
   - Verified `rv64-release` (49/49 tests passed, 100%).
   - Verified `rv32-release` (49/49 tests passed, 100%).
@@ -229,5 +232,5 @@ ACLINT/APLIC/IMSIC tests apply queued interrupt-line changes at the CPU boundary
   - Clean compilation with zero compiler warnings across all verified targets.
 - **Release Qualification**:
   - `python3 scripts/release_check.py` passed with valid v3.0.0-rc.9 metadata and schemas.
-  - Formatted and validated clean git state across all 8 passes.
+  - Formatted and validated clean git state across all passes.
 

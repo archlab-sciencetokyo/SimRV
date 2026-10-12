@@ -61,27 +61,32 @@ auto main() -> int {
                "CLI accepts explicit extensions implied by G");
         expect(
             check_isa("rv" + xlen + "gczb").has_value() &&
-                check_isa("rv" + xlen + "gczb")->options.isa_preset == simrv::isa::IsaPreset::GCZB,
-            "CLI accepts ratified GCZB preset");
+                check_isa("rv" + xlen + "gczb")->options.isa_preset == simrv::isa::IsaPreset::GC &&
+                check_isa("rv" + xlen + "gczb")->options.has_zb_extensions,
+            "CLI accepts GC with bitmanip");
         expect(check_isa("rv" + xlen + "gcv").has_value() &&
                    check_isa("rv" + xlen + "gcv")->options.isa_preset == simrv::isa::IsaPreset::GCV,
-               "CLI accepts ratified GCV preset");
+               "CLI accepts canonical GCV preset");
         expect(check_isa("rv" + xlen + "gczbv").has_value() &&
                    check_isa("rv" + xlen + "gczbv")->options.isa_preset ==
-                       simrv::isa::IsaPreset::GCZBV,
-               "CLI accepts ratified GCZBV preset");
+                       simrv::isa::IsaPreset::GCV &&
+                   check_isa("rv" + xlen + "gczbv")->options.has_zb_extensions,
+               "CLI accepts GCV with bitmanip");
         expect(check_isa("rv" + xlen + "gc_zba_zbb_zbc_zbs").has_value() &&
                    check_isa("rv" + xlen + "gc_zba_zbb_zbc_zbs")->options.isa_preset ==
-                       simrv::isa::IsaPreset::GCZB,
-               "CLI accepts ratified bitmanip sub-extensions and enables GCZB");
+                       simrv::isa::IsaPreset::GC &&
+                   check_isa("rv" + xlen + "gc_zba_zbb_zbc_zbs")->options.has_zb_extensions,
+               "CLI accepts ratified bitmanip sub-extensions and enables GC with bitmanip");
         expect(
             check_isa("rv" + xlen + "gc_zb").has_value() &&
-                check_isa("rv" + xlen + "gc_zb")->options.isa_preset == simrv::isa::IsaPreset::GCZB,
-            "CLI accepts ratified zb shorthand and enables GCZB");
+                check_isa("rv" + xlen + "gc_zb")->options.isa_preset == simrv::isa::IsaPreset::GC &&
+                check_isa("rv" + xlen + "gc_zb")->options.has_zb_extensions,
+            "CLI accepts ratified zb shorthand and enables GC with bitmanip");
         expect(check_isa("rv" + xlen + "gcv_zba_zbb_zbc_zbs").has_value() &&
                    check_isa("rv" + xlen + "gcv_zba_zbb_zbc_zbs")->options.isa_preset ==
-                       simrv::isa::IsaPreset::GCZBV,
-               "CLI accepts ratified bitmanip with vector base and enables GCZBV");
+                       simrv::isa::IsaPreset::GCV &&
+                   check_isa("rv" + xlen + "gcv_zba_zbb_zbc_zbs")->options.has_zb_extensions,
+               "CLI accepts ratified bitmanip with vector base and enables GCV with bitmanip");
         expect(check_isa("rv" + xlen + "gc_zk").has_value(),
                "CLI accepts ratified scalar crypto zk shorthand");
         expect(!check_isa("rv" + xlen + "gcbv").has_value(),

@@ -87,18 +87,14 @@ inline auto parse_isa_preset_string(std::string_view val) -> std::optional<simrv
     if (iequals(val, "g") || iequals(val, "rv32g") || iequals(val, "rv64g")) {
         return simrv::isa::IsaPreset::G;
     }
-    if (iequals(val, "gc") || iequals(val, "rv32gc") || iequals(val, "rv64gc")) {
+    if (iequals(val, "gc") || iequals(val, "rv32gc") || iequals(val, "rv64gc") ||
+        iequals(val, "gczb") || iequals(val, "rv32gczb") || iequals(val, "rv64gczb")) {
         return simrv::isa::IsaPreset::GC;
     }
-    if (iequals(val, "gcv") || iequals(val, "rv32gcv") || iequals(val, "rv64gcv")) {
-        return simrv::isa::IsaPreset::GCV;
-    }
-    if (iequals(val, "gczb") || iequals(val, "rv32gczb") || iequals(val, "rv64gczb")) {
-        return simrv::isa::IsaPreset::GCZB;
-    }
-    if (iequals(val, "gczbv") || iequals(val, "rv32gczbv") || iequals(val, "rv64gczbv") ||
+    if (iequals(val, "gcv") || iequals(val, "rv32gcv") || iequals(val, "rv64gcv") ||
+        iequals(val, "gczbv") || iequals(val, "rv32gczbv") || iequals(val, "rv64gczbv") ||
         iequals(val, "gcbv") || iequals(val, "rv32gcbv") || iequals(val, "rv64gcbv")) {
-        return simrv::isa::IsaPreset::GCZBV;
+        return simrv::isa::IsaPreset::GCV;
     }
     return std::nullopt;
 }
@@ -177,12 +173,8 @@ inline auto isa_preset_name(simrv::isa::IsaPreset preset) -> std::string_view {
             return "gc";
         case simrv::isa::IsaPreset::GCV:
             return "gcv";
-        case simrv::isa::IsaPreset::GCZB:
-            return "gczb";
-        case simrv::isa::IsaPreset::GCZBV:
-            return "gczbv";
     }
-    return "gczbv";
+    return "gcv";
 }
 
 }  // namespace detail

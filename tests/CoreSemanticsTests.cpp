@@ -2418,9 +2418,7 @@ void test_named_isa_presets() {
     const simrv::xlen::CsrValue ima = simrv::isa::isa_preset_bits(simrv::isa::IsaPreset::IMA);
     const simrv::xlen::CsrValue g = simrv::isa::isa_preset_bits(simrv::isa::IsaPreset::G);
     const simrv::xlen::CsrValue gc = simrv::isa::isa_preset_bits(simrv::isa::IsaPreset::GC);
-    const simrv::xlen::CsrValue gczb = simrv::isa::isa_preset_bits(simrv::isa::IsaPreset::GCZB);
     const simrv::xlen::CsrValue gcv = simrv::isa::isa_preset_bits(simrv::isa::IsaPreset::GCV);
-    const simrv::xlen::CsrValue gczbv = simrv::isa::isa_preset_bits(simrv::isa::IsaPreset::GCZBV);
 
     expect(simrv::isa::misa_has_extension(g, simrv::isa::IsaExtension::I) &&
                simrv::isa::misa_has_extension(g, simrv::isa::IsaExtension::M) &&
@@ -2455,15 +2453,13 @@ void test_named_isa_presets() {
     expect(!simrv::isa::misa_has_extension(gc, simrv::isa::IsaExtension::B) &&
                !simrv::isa::misa_has_extension(gc, simrv::isa::IsaExtension::V),
            "the named GC profile does not silently enable B or V");
-    expect(simrv::isa::misa_has_extension(gczb, simrv::isa::IsaExtension::B) &&
-               !simrv::isa::misa_has_extension(gczb, simrv::isa::IsaExtension::V),
-           "the ratified GCZB profile enables B without V");
     expect(!simrv::isa::misa_has_extension(gcv, simrv::isa::IsaExtension::B) &&
                simrv::isa::misa_has_extension(gcv, simrv::isa::IsaExtension::V),
-           "the ratified GCV profile enables V without B");
-    expect(simrv::isa::misa_has_extension(gczbv, simrv::isa::IsaExtension::B) &&
-               simrv::isa::misa_has_extension(gczbv, simrv::isa::IsaExtension::V),
-           "the ratified GCZBV target preset enables both B and V");
+           "the canonical GCV profile enables V without B");
+    expect(
+        simrv::isa::misa_has_extension(simrv::isa::kMisaDefault, simrv::isa::IsaExtension::B) &&
+            simrv::isa::misa_has_extension(simrv::isa::kMisaDefault, simrv::isa::IsaExtension::V),
+        "kMisaDefault enables both B and V");
 }
 
 void test_sv32_page_walk() {

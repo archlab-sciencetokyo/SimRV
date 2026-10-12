@@ -479,7 +479,7 @@ auto Machine::initialize() -> std::expected<void, std::string> {
             }
             return pipeline::make_cpu_model_preset(*config.cpu_model_preset).isa_preset;
         }
-        return isa::IsaPreset::GCZBV;
+        return isa::IsaPreset::GCV;
     };
 
     const unsigned int model_xlen = primary_hart().cpu_model_config.supported_xlen;

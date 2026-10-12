@@ -189,6 +189,7 @@ inline auto iequals(std::string_view a, std::string_view b) -> bool {
 struct ParsedIsaPreset {
     IsaPreset preset;
     unsigned int xlen;
+    bool has_zb = false;
 };
 
 auto parse_isa_base_preset(std::string_view value)
@@ -197,8 +198,8 @@ auto parse_isa_base_preset(std::string_view value)
     if (iequals(value, "gcbv") || iequals(value, "rv32gcbv") || iequals(value, "rv64gcbv") ||
         iequals(value, "gcb") || iequals(value, "rv32gcb") || iequals(value, "rv64gcb")) {
         return std::unexpected(std::format(
-            "legacy shorthand '{}' is not a ratified RISC-V ISA string; use ratified 'gczbv', "
-            "'gczb', 'gcv', or multi-letter extensions like '_zba_zbb_zbc_zbs'",
+            "legacy shorthand '{}' is not a ratified RISC-V ISA string; use ratified 'gcv', "
+            "'gc', or multi-letter extensions like 'rv64gcv_zba_zbb_zbs'",
             value));
     }
 
@@ -233,14 +234,15 @@ auto parse_isa_base_preset(std::string_view value)
         return ParsedIsaPreset{.preset = IsaPreset::GCV, .xlen = 0};
     }
     if (iequals(value, "gczb")) {
-        return ParsedIsaPreset{.preset = IsaPreset::GCZB, .xlen = 0};
+        return ParsedIsaPreset{.preset = IsaPreset::GC, .xlen = 0, .has_zb = true};
     }
     if (iequals(value, "gczbv")) {
-        return ParsedIsaPreset{.preset = IsaPreset::GCZBV, .xlen = 0};
+        return ParsedIsaPreset{.preset = IsaPreset::GCV, .xlen = 0, .has_zb = true};
     }
 
     unsigned int parsed_xlen = 0;
-    IsaPreset preset = IsaPreset::GCZBV;
+    IsaPreset preset = IsaPreset::GCV;
+    bool has_zb = false;
     bool valid = false;
 
     if (iequals(value, "rv32e")) {
@@ -313,19 +315,23 @@ auto parse_isa_base_preset(std::string_view value)
         valid = true;
     } else if (iequals(value, "rv32gczb")) {
         parsed_xlen = 32;
-        preset = IsaPreset::GCZB;
+        preset = IsaPreset::GC;
+        has_zb = true;
         valid = true;
     } else if (iequals(value, "rv64gczb")) {
         parsed_xlen = 64;
-        preset = IsaPreset::GCZB;
+        preset = IsaPreset::GC;
+        has_zb = true;
         valid = true;
     } else if (iequals(value, "rv32gczbv")) {
         parsed_xlen = 32;
-        preset = IsaPreset::GCZBV;
+        preset = IsaPreset::GCV;
+        has_zb = true;
         valid = true;
     } else if (iequals(value, "rv64gczbv")) {
         parsed_xlen = 64;
-        preset = IsaPreset::GCZBV;
+        preset = IsaPreset::GCV;
+        has_zb = true;
         valid = true;
     }
 
@@ -334,7 +340,7 @@ auto parse_isa_base_preset(std::string_view value)
             return std::unexpected(std::format(
                 "cannot run a 64-bit ISA preset ({}) on a 32-bit simulator build", value));
         }
-        return ParsedIsaPreset{.preset = preset, .xlen = parsed_xlen};
+        return ParsedIsaPreset{.preset = preset, .xlen = parsed_xlen, .has_zb = has_zb};
     }
 
     return std::nullopt;
@@ -449,22 +455,12 @@ auto parse_isa_preset(std::string_view value) -> std::expected<ParsedIsaPreset, 
             extensions.remove_prefix(next + 1);
         }
 
-        const bool base_has_v =
-            (parsed->preset == IsaPreset::GCV || parsed->preset == IsaPreset::GCZBV);
-        const bool base_has_zb =
-            (parsed->preset == IsaPreset::GCZB || parsed->preset == IsaPreset::GCZBV);
-        const bool final_has_v = has_v || base_has_v;
-        const bool final_has_zb = has_zb || base_has_zb;
+        const bool final_has_v = has_v || (parsed->preset == IsaPreset::GCV);
+        const bool final_has_zb = has_zb || parsed->has_zb;
+        parsed->has_zb = final_has_zb;
 
-        if (parsed->preset == IsaPreset::GC || parsed->preset == IsaPreset::G || base_has_v ||
-            base_has_zb) {
-            if (final_has_v && final_has_zb) {
-                parsed->preset = IsaPreset::GCZBV;
-            } else if (final_has_zb) {
-                parsed->preset = IsaPreset::GCZB;
-            } else if (final_has_v) {
-                parsed->preset = IsaPreset::GCV;
-            }
+        if (final_has_v && (parsed->preset == IsaPreset::GC || parsed->preset == IsaPreset::G)) {
+            parsed->preset = IsaPreset::GCV;
         }
         return parsed;
     }
@@ -491,7 +487,7 @@ auto effective_isa_preset(const RuntimeOptions& options) -> IsaPreset {
     if (options.cpu_model_preset.has_value()) {
         return pipeline::make_cpu_model_preset(*options.cpu_model_preset).isa_preset;
     }
-    return IsaPreset::GCZBV;
+    return IsaPreset::GCV;
 }
 
 auto parse_file_options(std::string_view arg, std::span<char* const> args, std::size_t& i,
@@ -698,6 +694,7 @@ auto parse_mode_options(std::string_view arg, std::span<char* const> args, std::
         if (!parsed_misa) return std::unexpected(parsed_misa.error());
         result.options.isa_preset = parsed_misa->preset;
         result.options.misa_xlen = parsed_misa->xlen;
+        result.options.has_zb_extensions = parsed_misa->has_zb;
         result.options.misa_override = true;
         return true;
     }
@@ -1499,10 +1496,13 @@ auto RuntimeOptions::to_machine_config() const -> simrv::core::MachineConfig {
 
     cfg.isa.isatest_tohost = isatest_tohost;
     cfg.isa.isa_preset = isa_preset_bits(effective_isa_preset(*this));
+    if (has_zb_extensions || (!misa_override && !cpu_model_preset.has_value())) {
+        cfg.isa.isa_preset |= simrv::isa::misa_extension_bit(simrv::isa::IsaExtension::B);
+    }
     cfg.isa.misa_override =
         misa_override ||
         (cpu_model_preset.has_value() &&
-         pipeline::make_cpu_model_preset(*cpu_model_preset).isa_preset != IsaPreset::GCZBV);
+         pipeline::make_cpu_model_preset(*cpu_model_preset).isa_preset != IsaPreset::GCV);
     cfg.isa.misa_xlen = misa_xlen;
     cfg.isa.vlen = vlen;
 

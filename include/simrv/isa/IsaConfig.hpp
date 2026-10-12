@@ -29,7 +29,7 @@ constexpr auto misa_base_bits() -> simrv::xlen::CsrValue {
 
 /**
  * @brief Decodes the extension set mask matching a specified ISA preset.
- * @param preset The named ISA preset, including G/GC and the SimRV GCZBV target preset.
+ * @param preset The named ISA preset, including G, GC, and GCV.
  * @return CsrValue bitmask containing the preset's extensions.
  */
 constexpr auto isa_preset_bits(IsaPreset preset) -> simrv::xlen::CsrValue {
@@ -61,10 +61,6 @@ constexpr auto isa_preset_bits(IsaPreset preset) -> simrv::xlen::CsrValue {
             return isa_preset_bits(IsaPreset::G) | misa_extension_bit(IsaExtension::C);
         case IsaPreset::GCV:
             return isa_preset_bits(IsaPreset::GC) | misa_extension_bit(IsaExtension::V);
-        case IsaPreset::GCZB:
-            return isa_preset_bits(IsaPreset::GC) | misa_extension_bit(IsaExtension::B);
-        case IsaPreset::GCZBV:
-            return misa_base_bits();
         default:
             return misa_extension_bit(IsaExtension::I);
     }
@@ -114,7 +110,7 @@ constexpr auto misa_with_mxl(simrv::xlen::CsrValue misa_extensions,
 
 /** Default advertised target; V remains subject to the qualification limits documented separately.
  */
-constexpr simrv::xlen::CsrValue kMisaDefault = isa_preset_bits(IsaPreset::GCZBV);
+constexpr simrv::xlen::CsrValue kMisaDefault = misa_base_bits();
 
 /**
  * @brief Checks if a specific extension bit is set in a MISA CSR value.

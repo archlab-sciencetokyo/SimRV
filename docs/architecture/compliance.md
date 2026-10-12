@@ -20,9 +20,10 @@ Spike lockstep workloads run by the release gates.
 extensions; they are not implied by `G`. MISA contains the single-letter extension bits only and
 therefore cannot describe individual `Zb*` subsets.
 
-The `--isa gc` preset selects G plus C and does not implicitly enable B or V. SimRV's target
-preset is named explicitly as `gczbv` (or `gczb` for profiles without vector); XLEN-qualified forms
-such as `rv64gczbv` and `rv64gczb` are standard. Legacy draft shorthands such as `gcbv` and `rv64gcbv`
+The `--isa gc` preset selects G plus C and does not implicitly enable B or V. SimRV's canonical target
+preset is `gcv` (or `gc` for profiles without vector); XLEN-qualified forms
+such as `rv64gcv` and `rv64gc` are standard. Ratified Bitmanip sub-extensions (`zba`, `zbb`, `zbc`, `zbs`)
+are appended canonically (e.g. `rv64gcv_zba_zbb_zbc_zbs` or `rv64gc_zba_zbb_zbc_zbs`). Legacy draft shorthands such as `gcbv` and `rv64gcbv`
 are rejected with diagnostic guidance. Naming the preset explicitly does not override the vector qualification limits below.
 
 For Vector 1.0, `vlenb` reflects the configured VLEN, `vstart` has enough writable bits for the

@@ -94,7 +94,7 @@ struct CfuConfig {
 
 struct CpuModelConfig {
     CpuModelPreset preset = CpuModelPreset::Balanced;
-    isa::IsaPreset isa_preset = isa::IsaPreset::GCZBV;
+    isa::IsaPreset isa_preset = isa::IsaPreset::GCV;
     std::string name = "balanced";
     std::string description{};
     uint8_t supported_xlen = 0;  // 0 = any/both 32 and 64, 32 = RV32 only, 64 = RV64 only
@@ -158,7 +158,8 @@ struct CpuModelConfig {
             break;
         case CpuModelPreset::Balanced:
             result.description = "Default balanced 5-stage general-purpose core";
-            result.isa_preset = isa::IsaPreset::GCZBV;
+            result.isa_preset = isa::IsaPreset::GCV;
+            result.isa_extensions = {"zba", "zbb", "zbc", "zbs"};
             result.pipeline.pipeline_type = PipelineType::FiveStage;
             result.pipeline.enable_forwarding = true;
             result.pipeline.branch_predictor.type = BranchPredictorType::Bimodal;
@@ -167,7 +168,8 @@ struct CpuModelConfig {
             break;
         case CpuModelPreset::Performance:
             result.description = "High-throughput 5-stage core with aggressive prediction";
-            result.isa_preset = isa::IsaPreset::GCZBV;
+            result.isa_preset = isa::IsaPreset::GCV;
+            result.isa_extensions = {"zba", "zbb", "zbc", "zbs"};
             result.pipeline.pipeline_type = PipelineType::FiveStage;
             result.pipeline.enable_forwarding = true;
             result.pipeline.enable_instruction_prefetch = true;

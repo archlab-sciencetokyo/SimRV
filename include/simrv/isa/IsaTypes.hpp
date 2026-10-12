@@ -34,18 +34,16 @@ enum class IsaExtension : uint8_t {
  * These are implementation presets, not ratified RISC-V architecture profiles.
  */
 enum class IsaPreset : uint8_t {
-    E,      ///< RV32E reduced-register integer base
-    EM,     ///< RV32E plus Multiply/Divide
-    EMAC,   ///< RV32E plus Multiply/Divide, Atomic, and Compressed
-    I,      ///< RV32I / RV64I base integer only
-    IM,     ///< Integer, Multiply/Divide
-    IMA,    ///< Integer, Multiply/Divide, Atomic, Supervisor, User
-    IMAC,   ///< Integer, Multiply/Divide, Atomic, and Compressed
-    G,      ///< General-purpose IMAFD plus the implied Zicsr and Zifencei extensions
-    GC,     ///< G plus the separate C (Compressed) extension
-    GCV,    ///< G plus Compressed and Vector 1.0 (V)
-    GCZB,   ///< G plus Compressed and ratified Bitmanip (Zb)
-    GCZBV,  ///< SimRV target preset: GC plus ratified Zb and V
+    E,     ///< RV32E reduced-register integer base
+    EM,    ///< RV32E plus Multiply/Divide
+    EMAC,  ///< RV32E plus Multiply/Divide, Atomic, and Compressed
+    I,     ///< RV32I / RV64I base integer only
+    IM,    ///< Integer, Multiply/Divide
+    IMA,   ///< Integer, Multiply/Divide, Atomic, Supervisor, User
+    IMAC,  ///< Integer, Multiply/Divide, Atomic, and Compressed
+    G,     ///< General-purpose IMAFD plus the implied Zicsr and Zifencei extensions
+    GC,    ///< G plus the separate C (Compressed) extension
+    GCV,   ///< G plus Compressed and Vector 1.0 (V)
 };
 
 }  // namespace simrv::isa
