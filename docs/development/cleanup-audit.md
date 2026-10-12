@@ -234,3 +234,16 @@ ACLINT/APLIC/IMSIC tests apply queued interrupt-line changes at the CPU boundary
   - `python3 scripts/release_check.py` passed with valid v3.0.0-rc.9 metadata and schemas.
   - Formatted and validated clean git state across all passes.
 
+### Pass 9: Ratified Privileged 1.13, Sstc Timer Mechanics & Smepmp Sticky Enforcement
+- **Sstc Architectural Timer & STCE Privilege Gating (`Cpu.hpp`, `Cpu.cpp`, `CsrFile.cpp`)**:
+  - Added architectural `stip_sstc` signal component to `ArchState` and unified it into `refresh_supervisor_pending()`.
+  - Implemented Sstc hardware timer evaluation in `CPU::evaluate_timer_interrupt`: asserts `mip.STIP` when `mtime >= stimecmp` with `STCE=1` (`menvcfg` bit 63 in RV64, `menvcfgh` bit 31 in RV32).
+  - Enforced architectural privilege gating: Supervisor/User-mode access to `stimecmp` and `stimecmph` raises `IllegalInstruction` when `STCE=0`.
+  - Wired real-time interrupt evaluation on CSR writes to `stimecmp`, `stimecmph`, `menvcfg`, and `menvcfgh`.
+- **Privileged 1.13 Masking & Smepmp Sticky Security Bits (`CsrFile.cpp`)**:
+  - `mcountinhibit`: Enforced architectural WPRI bit 1 masking (hardwired to 0).
+  - `mseccfg`: Enforced sticky locking bits for MML (bit 0), MMWP (bit 1), and RLB (bit 2), preventing software from clearing security locks once asserted.
+- **Verification & Dual-Architecture Gates**:
+  - Expanded `tests/PrivilegeMemoryAuditTests.cpp` with assertions for STCE access rejection/permission, timer interrupt generation, `mcountinhibit` bit 1 masking, and `mseccfg` sticky bits.
+  - Passed 49/49 gate tests across both `rv64-release` (100%) and `rv32-release` (100%).
+

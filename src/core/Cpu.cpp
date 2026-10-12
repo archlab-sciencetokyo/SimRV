@@ -257,6 +257,13 @@ void CPU::evaluate_timer_interrupt() {
         else
             state_.mip &= ~MipBit::Mtip;
     }
+    bool stce = false;
+    if constexpr (simrv::xlen::kIsXLen64) {
+        stce = (state_.menvcfg & (1ULL << 63U)) != 0;
+    } else {
+        stce = (state_.menvcfgh & (1UL << 31U)) != 0;
+    }
+    state_.stip_sstc = stce && (cur_mtime >= state_.stimecmp);
     state_.refresh_supervisor_pending();
     if (machine_ != nullptr) {
         const auto log_transition = [&](MipBit bit, simrv::xlen::TrapCause code,

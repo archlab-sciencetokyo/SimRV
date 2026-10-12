@@ -73,6 +73,7 @@ struct alignas(128) ArchState {
     bool seip_external{};  ///< PLIC-driven component of mip.SEIP.
     bool stip_software{};  ///< M-mode software-posted component of writable mip.STIP.
     bool stip_timer{};     ///< Direct-SBI timer signal component of mip.STIP.
+    bool stip_sstc{};      ///< Ratified Sstc stimecmp timer component of mip.STIP.
     simrv::xlen::CsrValue
         medeleg{};  ///< Machine Exception Delegation (delegates trap handling to supervisor mode)
     simrv::xlen::CsrValue
@@ -147,7 +148,7 @@ struct alignas(128) ArchState {
             mip |= MipBit::Seip;
         else
             mip &= ~MipBit::Seip;
-        if (stip_software || stip_timer)
+        if (stip_software || stip_timer || stip_sstc)
             mip |= MipBit::Stip;
         else
             mip &= ~MipBit::Stip;

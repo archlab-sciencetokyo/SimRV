@@ -447,12 +447,18 @@ void test_ratified_privilege_csrs() {
         !TrapController::can_access_csr(PrivilegeLevel::User, misa, csr_num(Csr::Stimecmp), false),
         "stimecmp read rejected in User mode");
 
-    // B. Verify CSR read/write state preservation
+    // B. Verify CSR read/write state preservation and architectural masking
     expect(cpu.csr_file.write(Csr::Mcountinhibit, 0x7).has_value(),
            "Write to mcountinhibit succeeds");
     auto countinhibit_val = cpu.csr_file.read(Csr::Mcountinhibit);
-    expect(countinhibit_val.has_value() && *countinhibit_val == 0x7,
-           "Read from mcountinhibit returns written value");
+    expect(countinhibit_val.has_value() && *countinhibit_val == 0x5,
+           "Read from mcountinhibit returns 0x5 with reserved bit 1 masked to 0");
+
+    expect(cpu.csr_file.write(Csr::Mseccfg, 0x7).has_value(), "Write to mseccfg succeeds");
+    expect(cpu.csr_file.write(Csr::Mseccfg, 0x0).has_value(), "Second write to mseccfg succeeds");
+    auto mseccfg_val = cpu.csr_file.read(Csr::Mseccfg);
+    expect(mseccfg_val.has_value() && *mseccfg_val == 0x7,
+           "Sticky bits MML/MMWP/RLB in mseccfg remain set after writing 0");
 
     expect(cpu.csr_file.write(Csr::Menvcfg, 0x123).has_value(), "Write to menvcfg succeeds");
     auto menvcfg_val = cpu.csr_file.read(Csr::Menvcfg);
@@ -489,6 +495,36 @@ void test_ratified_privilege_csrs() {
     expect(cpu.state().stimecmp == 0x1122334455667788ULL,
            "Underlying 64-bit stimecmp reflects both RV32 halves");
 #endif
+
+    // D. Verify Sstc STCE privilege gating and timer interrupt generation
+    cpu.state().priv = PrivilegeLevel::Supervisor;
+    // Without STCE enabled, Supervisor access to stimecmp must be rejected
+    expect(!cpu.csr_file.read(Csr::Stimecmp).has_value(),
+           "stimecmp access in Supervisor mode rejected when STCE=0");
+
+    // Enable STCE
+    cpu.state().priv = PrivilegeLevel::Machine;
+#if SIMRV_XLEN == 64
+    cpu.state().menvcfg |= (1ULL << 63U);
+#else
+    cpu.state().menvcfgh |= (1UL << 31U);
+#endif
+    cpu.state().priv = PrivilegeLevel::Supervisor;
+    expect(cpu.csr_file.read(Csr::Stimecmp).has_value(),
+           "stimecmp access in Supervisor mode succeeds when STCE=1");
+
+    // Program stimecmp and verify timer interrupt generation
+    cpu.state().priv = PrivilegeLevel::Machine;
+    cpu.clint_mmio.mtime.store(1000ULL, std::memory_order_relaxed);
+    cpu.state().stimecmp = 500ULL;
+    cpu.evaluate_timer_interrupt();
+    expect((cpu.state().mip & simrv::core::MipBit::Stip) != 0,
+           "Sstc asserts mip.STIP when mtime >= stimecmp with STCE=1");
+
+    cpu.state().stimecmp = 2000ULL;
+    cpu.evaluate_timer_interrupt();
+    expect((cpu.state().mip & simrv::core::MipBit::Stip) == 0,
+           "Sstc deasserts mip.STIP when mtime < stimecmp");
 }
 
 }  // namespace

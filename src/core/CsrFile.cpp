@@ -220,6 +220,17 @@ auto CsrFile::read(simrv::xlen::CsrNumber addr) const
             rcsr = cpu_.state().senvcfg;
             break;
         case csr_addr(Csr::Stimecmp):
+            if (cpu_.state().priv < simrv::xlen::PrivilegeLevel::Machine) {
+                bool stce = false;
+                if constexpr (simrv::xlen::kIsXLen64) {
+                    stce = (cpu_.state().menvcfg & (1ULL << 63U)) != 0;
+                } else {
+                    stce = (cpu_.state().menvcfgh & (1UL << 31U)) != 0;
+                }
+                if (!stce) {
+                    return std::unexpected(ExceptionCode::IllegalInstruction);
+                }
+            }
             if constexpr (simrv::xlen::kIsXLen64) {
                 rcsr = static_cast<simrv::xlen::CsrValue>(cpu_.state().stimecmp);
             } else {
@@ -227,6 +238,12 @@ auto CsrFile::read(simrv::xlen::CsrNumber addr) const
             }
             break;
         case csr_addr(Csr::Stimecmph):
+            if (cpu_.state().priv < simrv::xlen::PrivilegeLevel::Machine) {
+                const bool stce = (cpu_.state().menvcfgh & (1UL << 31U)) != 0;
+                if (!stce) {
+                    return std::unexpected(ExceptionCode::IllegalInstruction);
+                }
+            }
             return require_rv32_counter().transform([this]() {
                 return static_cast<simrv::xlen::CsrValue>(cpu_.state().stimecmp >> 32);
             });
@@ -524,18 +541,37 @@ auto CsrFile::write(simrv::xlen::CsrNumber addr, simrv::xlen::CsrValue wdata)
             cpu_.state().senvcfg = wdata;
             break;
         case csr_addr(Csr::Stimecmp):
+            if (cpu_.state().priv < simrv::xlen::PrivilegeLevel::Machine) {
+                bool stce = false;
+                if constexpr (simrv::xlen::kIsXLen64) {
+                    stce = (cpu_.state().menvcfg & (1ULL << 63U)) != 0;
+                } else {
+                    stce = (cpu_.state().menvcfgh & (1UL << 31U)) != 0;
+                }
+                if (!stce) {
+                    return std::unexpected(ExceptionCode::IllegalInstruction);
+                }
+            }
             if (cpu_.state().regs.xlen == 32) {
                 cpu_.state().stimecmp =
                     (cpu_.state().stimecmp & 0xFFFFFFFF00000000ULL) | static_cast<uint32_t>(wdata);
             } else {
                 cpu_.state().stimecmp = wdata;
             }
+            cpu_.evaluate_timer_interrupt();
             break;
         case csr_addr(Csr::Stimecmph):
+            if (cpu_.state().priv < simrv::xlen::PrivilegeLevel::Machine) {
+                const bool stce = (cpu_.state().menvcfgh & (1UL << 31U)) != 0;
+                if (!stce) {
+                    return std::unexpected(ExceptionCode::IllegalInstruction);
+                }
+            }
             return require_rv32_counter().and_then(
                 [this, wdata]() -> std::expected<void, ExceptionCode> {
                     cpu_.state().stimecmp = (cpu_.state().stimecmp & 0x00000000FFFFFFFFULL) |
                                             (static_cast<uint64_t>(wdata) << 32);
+                    cpu_.evaluate_timer_interrupt();
                     return {};
                 });
 
@@ -546,20 +582,24 @@ auto CsrFile::write(simrv::xlen::CsrNumber addr, simrv::xlen::CsrValue wdata)
             cpu_.state().mcounteren = wdata & kCounterEnableMask;
             break;
         case csr_addr(Csr::Mcountinhibit):
-            cpu_.state().mcountinhibit = wdata;
+            cpu_.state().mcountinhibit = wdata & ~static_cast<simrv::xlen::CsrValue>(2);
             break;
         case csr_addr(Csr::Menvcfg):
             cpu_.state().menvcfg = wdata;
+            cpu_.evaluate_timer_interrupt();
             break;
         case csr_addr(Csr::Menvcfgh):
             return require_rv32_counter().and_then(
                 [this, wdata]() -> std::expected<void, ExceptionCode> {
                     cpu_.state().menvcfgh = wdata;
+                    cpu_.evaluate_timer_interrupt();
                     return {};
                 });
-        case csr_addr(Csr::Mseccfg):
-            cpu_.state().mseccfg = wdata;
+        case csr_addr(Csr::Mseccfg): {
+            const auto sticky = cpu_.state().mseccfg & static_cast<simrv::xlen::CsrValue>(0x7u);
+            cpu_.state().mseccfg = wdata | sticky;
             break;
+        }
         case csr_addr(Csr::Mseccfgh):
             return require_rv32_counter().and_then(
                 [this, wdata]() -> std::expected<void, ExceptionCode> {
