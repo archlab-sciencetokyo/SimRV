@@ -292,7 +292,7 @@ void test_serialize_and_roundtrip() {
     simrv::pipeline::CpuModelConfig reloaded{};
     const bool ok = simrv::core::load_cpu_config_string(text, reloaded);
     TEST_CHECK(ok);
-    TEST_CHECK(reloaded.isa_preset == IsaPreset::GCBV);
+    TEST_CHECK(reloaded.isa_preset == IsaPreset::GCZBV);
     TEST_CHECK(reloaded.pipeline.mul_latency == 5);
     TEST_CHECK(reloaded.pipeline.div_latency == 22);
     TEST_CHECK(reloaded.pipeline.branch_mispredict_penalty == 6);

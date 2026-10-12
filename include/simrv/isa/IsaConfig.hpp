@@ -29,7 +29,7 @@ constexpr auto misa_base_bits() -> simrv::xlen::CsrValue {
 
 /**
  * @brief Decodes the extension set mask matching a specified ISA preset.
- * @param preset The named ISA preset, including G/GC and the SimRV GCBV target preset.
+ * @param preset The named ISA preset, including G/GC and the SimRV GCZBV target preset.
  * @return CsrValue bitmask containing the preset's extensions.
  */
 constexpr auto isa_preset_bits(IsaPreset preset) -> simrv::xlen::CsrValue {

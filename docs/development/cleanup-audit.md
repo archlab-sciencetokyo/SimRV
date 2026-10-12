@@ -218,3 +218,16 @@ ACLINT/APLIC/IMSIC tests apply queued interrupt-line changes at the CPU boundary
   - Streamlined `CPU::read_csr`, `CPU::write_csr`, `CsrFile::read`, `CsrFile::write`, and `TrapController::can_access_csr` to a single canonical signature taking `CsrNumber`.
   - Validated 100% pass across dual-architecture gate suites (`rv64-release` and `rv32-release`, 49/49 tests each).
 
+### Pass 8: Final Comprehensive Audit, Target Validation & Release Polish
+- **Canonical `IsaPreset` Harmonization (`IsaTypes.hpp`, `CpuModel.hpp`, `CliParser.hpp`, `MachineInit.cpp`, `CpuModelLoaderTests.cpp`)**:
+  - Retired the legacy draft alias `GCBV = GCZBV` from `simrv::isa::IsaPreset`.
+  - Standardized all default CPU model presets, CLI defaults, and test assertions on canonical `IsaPreset::GCZBV`.
+- **Dual-Architecture Debug & Release Multi-Preset Verification**:
+  - Verified `rv64-release` (49/49 tests passed, 100%).
+  - Verified `rv32-release` (49/49 tests passed, 100%).
+  - Verified `rv64-debug` (49/49 tests passed, 100%).
+  - Clean compilation with zero compiler warnings across all verified targets.
+- **Release Qualification**:
+  - `python3 scripts/release_check.py` passed with valid v3.0.0-rc.9 metadata and schemas.
+  - Formatted and validated clean git state across all 8 passes.
+

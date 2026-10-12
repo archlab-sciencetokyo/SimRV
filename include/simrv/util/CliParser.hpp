@@ -65,7 +65,7 @@ struct RuntimeOptions {
     simrv::xlen::Counter trace_end = std::numeric_limits<simrv::xlen::Counter>::max();
     simrv::xlen::Counter enabletimer = 0UL;
     simrv::xlen::Address isatest_tohost = 0x80001000;
-    isa::IsaPreset isa_preset = isa::IsaPreset::GCBV;
+    isa::IsaPreset isa_preset = isa::IsaPreset::GCZBV;
     bool misa_override = false;
     unsigned int misa_xlen = 0;
 

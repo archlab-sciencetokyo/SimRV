@@ -1502,7 +1502,7 @@ auto RuntimeOptions::to_machine_config() const -> simrv::core::MachineConfig {
     cfg.isa.misa_override =
         misa_override ||
         (cpu_model_preset.has_value() &&
-         pipeline::make_cpu_model_preset(*cpu_model_preset).isa_preset != IsaPreset::GCBV);
+         pipeline::make_cpu_model_preset(*cpu_model_preset).isa_preset != IsaPreset::GCZBV);
     cfg.isa.misa_xlen = misa_xlen;
     cfg.isa.vlen = vlen;
 
