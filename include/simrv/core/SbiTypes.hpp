@@ -16,7 +16,11 @@ enum class SbiError : int64_t {
     AlreadyAvailable = -6,
     AlreadyStarted = -7,
     AlreadyStopped = -8,
-    NoShmem = -9
+    NoShmem = -9,
+    InvalidState = -10,
+    BadRange = -11,
+    Timeout = -12,
+    Io = -13,
 };
 
 struct SbiRet {
@@ -39,6 +43,7 @@ enum class SbiExtId : uint32_t {
     DebugConsole = 0x4442434E,  // DBCN
     Susp = 0x53555350,          // SUSP
     Cppc = 0x43505043,          // CPPC
+    Fwft = 0x46574654,          // FWFT
 };
 
 constexpr auto operator==(simrv::xlen::Word raw, SbiExtId ext) noexcept -> bool {

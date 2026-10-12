@@ -79,7 +79,7 @@ void PageTableWalker::select_next_pte(PageWalkState& state,
 }
 
 auto PageTableWalker::begin_walk(simrv::xlen::VirtAddr v_addr, PteAccess access,
-                                 simrv::xlen::PrivilegeLevel priv, simrv::xlen::CSRValue mstatus,
+                                 simrv::xlen::PrivilegeLevel priv, simrv::xlen::CsrValue mstatus,
                                  simrv::xlen::Word satp, unsigned xlen, bool update_access_bits,
                                  const core::ArchState* arch_state) const -> PageWalkState {
     PageWalkState state{.virtual_address = v_addr,
@@ -210,7 +210,7 @@ void PageTableWalker::accept_pte(PageWalkState& state, simrv::xlen::Word pte) co
 auto PageTableWalker::validate_pte_permissions(simrv::xlen::Word pte,
                                                simrv::xlen::Word permission_bits, PteAccess access,
                                                simrv::xlen::PrivilegeLevel priv,
-                                               simrv::xlen::CSRValue mstatus) const noexcept
+                                               simrv::xlen::CsrValue mstatus) const noexcept
     -> bool {
     // XWR field must not be reserved values: Write-Only (2) or Write-Execute (6)
     constexpr simrv::xlen::Word kPermWriteOnly = 2;
@@ -248,7 +248,7 @@ auto PageTableWalker::validate_pte_permissions(simrv::xlen::Word pte,
 }
 
 auto PageTableWalker::walk(simrv::xlen::VirtAddr v_addr, PteAccess access,
-                           simrv::xlen::PrivilegeLevel priv, simrv::xlen::CSRValue mstatus,
+                           simrv::xlen::PrivilegeLevel priv, simrv::xlen::CsrValue mstatus,
                            simrv::xlen::Word satp, unsigned xlen, bool update_access_bits,
                            const core::ArchState* arch_state) const
     -> std::expected<PageWalkResult, simrv::xlen::TrapCause> {

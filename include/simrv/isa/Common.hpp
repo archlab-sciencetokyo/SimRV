@@ -6,13 +6,13 @@
 
 #include <string_view>
 
-#include "simrv/isa/Amo.hpp"         // IWYU pragma: export
+#include "simrv/isa/Amo.hpp"                // IWYU pragma: export
+#include "simrv/isa/Compressed.hpp"         // IWYU pragma: export
+#include "simrv/isa/Fp.hpp"                 // IWYU pragma: export
 #include "simrv/isa/InstructionFields.hpp"  // IWYU pragma: export
 #include "simrv/isa/InstructionFormat.hpp"  // IWYU pragma: export
-#include "simrv/isa/IsaTypes.hpp"  // IWYU pragma: export
-#include "simrv/isa/Compressed.hpp"  // IWYU pragma: export
-#include "simrv/isa/Fp.hpp"          // IWYU pragma: export
 #include "simrv/isa/IsaConfig.hpp"
+#include "simrv/isa/IsaTypes.hpp"              // IWYU pragma: export
 #include "simrv/isa/OperationId.hpp"           // IWYU pragma: export
 #include "simrv/isa/Priv.hpp"                  // IWYU pragma: export
 #include "simrv/pipeline/OperationTraits.hpp"  // IWYU pragma: export
@@ -125,7 +125,7 @@ constexpr auto required_extension_for_instruction(simrv::xlen::Instruction ir, b
  * @param compressed True if the instruction is compressed.
  * @return True if the instruction is supported and enabled, false otherwise.
  */
-constexpr auto instruction_enabled_by_misa(simrv::xlen::CSRValue misa, simrv::xlen::Instruction ir,
+constexpr auto instruction_enabled_by_misa(simrv::xlen::CsrValue misa, simrv::xlen::Instruction ir,
                                            bool compressed) -> bool {
     return misa_has_extension(misa, required_extension_for_instruction(ir, compressed));
 }
@@ -137,9 +137,9 @@ constexpr auto instruction_enabled_by_misa(simrv::xlen::CSRValue misa, simrv::xl
  * the decode boundary so extension-disabled instructions never reach execution.
  */
 constexpr auto required_misa_extensions(OperationId op_id, bool compressed = false)
-    -> simrv::xlen::CSRValue {
-    const simrv::xlen::CSRValue compressed_requirement =
-        compressed ? misa_extension_bit(IsaExtension::C) : simrv::xlen::CSRValue{0};
+    -> simrv::xlen::CsrValue {
+    const simrv::xlen::CsrValue compressed_requirement =
+        compressed ? misa_extension_bit(IsaExtension::C) : simrv::xlen::CsrValue{0};
 
     const auto op = std::to_underlying(op_id);
     const auto in_range = [op](OperationId first, OperationId last) {
@@ -163,7 +163,7 @@ constexpr auto required_misa_extensions(OperationId op_id, bool compressed = fal
         return compressed_requirement | misa_extension_bit(IsaExtension::B);
     }
     if (in_range(OperationId::VSETVLI, OperationId::VWSLL_VI)) {
-        simrv::xlen::CSRValue required =
+        simrv::xlen::CsrValue required =
             compressed_requirement | misa_extension_bit(IsaExtension::V);
         switch (op_id) {
             case OperationId::VFADD_VV:
@@ -300,9 +300,9 @@ constexpr auto required_misa_extensions(OperationId op_id, bool compressed = fal
 }
 
 /** Verify the complete extension requirement of an already decoded instruction. */
-constexpr auto instruction_enabled_by_misa(simrv::xlen::CSRValue misa, OperationId op_id,
+constexpr auto instruction_enabled_by_misa(simrv::xlen::CsrValue misa, OperationId op_id,
                                            bool compressed = false) -> bool {
-    simrv::xlen::CSRValue required = required_misa_extensions(op_id, compressed);
+    simrv::xlen::CsrValue required = required_misa_extensions(op_id, compressed);
     // The base integer operation tables are shared by RV32I and RV32E.  Substitute E for I
     // when the reduced-register base is active; E and I are mutually exclusive in MISA.
     if (misa_has_extension(misa, IsaExtension::E) &&

@@ -89,6 +89,8 @@ auto main() -> int {
         expect(!check_isa("gcbv").has_value(), "CLI rejects legacy draft shorthand gcbv");
         expect(!check_isa("rv" + xlen + "gc_zfoo").has_value(),
                "CLI rejects unsupported multi-letter ISA extensions");
+        expect(!check_isa("rv" + xlen + "gc_xsimrvtrace").has_value(),
+               "CLI rejects the retired experimental Xsimrvtrace extension");
         expect(!check_isa("rv" + xlen + "gc_zicntr2p1").has_value(),
                "CLI rejects unsupported extension versions");
         expect(!check_isa("rv" + xlen + "gc_zicntr_zicntr").has_value(),

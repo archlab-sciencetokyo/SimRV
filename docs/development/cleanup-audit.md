@@ -113,7 +113,8 @@ ACLINT/APLIC/IMSIC tests apply queued interrupt-line changes at the CPU boundary
   with diagnostic errors guiding users to ratified equivalents.
 - Added full multi-letter extension parsing and composition: `zba`, `zbb`, `zbc`, `zbs`, `zb`,
   `zbkb`, `zbkc`, `zbkx`, `zknd`, `zkne`, `zknh`, `zksed`, `zksh`, `zkr`, `zkt`, `zkn`, `zks`, `zk`,
-  `zicsr`, `zifencei`, `zicntr`, `zihpm`, `zve*`, `zvl*`, `xsimrvtrace`.
+  `zicsr`, `zifencei`, `zicntr`, `zihpm`, `zve*`, and `zvl*`. The experimental `Xsimrvtrace`
+  CSR annotation interface and its MISA.X advertisement were later removed pending a better design.
 - Expanded `tests/CoreSemanticsTests.cpp` to explicitly verify `GCZB` (B without V), `GCV` (V without B),
   and `GCZBV` (both B and V) MISA bits.
 - Synchronized man pages (`docs/man/simrv.1`), CPU model docs (`docs/hardware/models.md`), compliance
@@ -192,4 +193,28 @@ ACLINT/APLIC/IMSIC tests apply queued interrupt-line changes at the CPU boundary
 - Replaced linear `std::vector` FIFO queues with `std::deque`:
   - `ConsoleBackend::rx_fifo_`: replaced `erase(begin())` with $O(1)$ `pop_front()`.
   - `NetBackend::rx_queue_`: replaced `erase(begin())` with $O(1)$ `pop_front()` and move-semantics vector transfer (`std::move(rx_queue_.front())`), eliminating whole-packet buffer copying and memory shifting.
+
+## Ratified Privileged 1.13, Sstc, SBI v3.0, and CSR Harmonization (Pass 6)
+
+### RISC-V ratified specifications conformance
+- **Ratified Privileged 1.13 & Extension CSRs (`CsrFile.cpp`, `CsrTypes.hpp`, `Cpu.hpp`)**:
+  - Full architectural state and read/write execution support for:
+    - Sstc Extension: `stimecmp` (0x14D) and `stimecmph` (0x15D, RV32).
+    - Privileged 1.13 Environment Config: `menvcfg` (0x30A), `menvcfgh` (0x31A, RV32), `senvcfg` (0x10A).
+    - Performance Counter Inhibit: `mcountinhibit` (0x320).
+    - Smepmp Enhanced PMP Security Config: `mseccfg` (0x747), `mseccfgh` (0x757, RV32).
+  - Architectural privilege enforcement: M-mode CSRs (`menvcfg`, `mcountinhibit`, `mseccfg`) strictly reject S/U-mode accesses; S-mode CSRs (`senvcfg`, `stimecmp`) reject U-mode accesses.
+  - Architectural XLEN legality: High-word CSRs (`stimecmph`, `menvcfgh`, `mseccfgh`) strictly reject execution on RV64.
+- **SBI v2.0 / v3.0 Specification Alignment (`SbiTypes.hpp`)**:
+  - Added standard ratified error codes: `InvalidState = -10`, `BadRange = -11`, `Timeout = -12`, `Io = -13`.
+  - Added standard ratified extension ID: `FWFT = 0x46574654` (Firmware Features).
+
+### CSR type harmonization & semantic unification
+- **Unified CSR Identification & Retired Legacy Aliases (`ScalarTypes.hpp`, `IdentifierTypes.hpp`, `CsrTypes.hpp`)**:
+  - Replaced legacy 64-bit DRAM `Address` alias with the strongly typed 12-bit semantic type `CsrNumber`.
+  - Fully retired legacy compatibility aliases `CSRAddress`, `CsrAddress`, and uppercase `CSRValue` across all headers, implementation files, tests, and documentation.
+  - Standardized all CSR value operations on canonical PascalCase `using CsrValue = Word;` in `simrv::xlen`.
+  - Added templated implicit construction in `CsrNumber` from `Csr` enum and integral types, eliminating verbose `csr_num(...)` / `csr_addr(...)` boilerplate.
+  - Streamlined `CPU::read_csr`, `CPU::write_csr`, `CsrFile::read`, `CsrFile::write`, and `TrapController::can_access_csr` to a single canonical signature taking `CsrNumber`.
+  - Validated 100% pass across dual-architecture gate suites (`rv64-release` and `rv32-release`, 49/49 tests each).
 

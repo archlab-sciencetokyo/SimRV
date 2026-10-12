@@ -77,8 +77,6 @@ struct MisaDraft {
     bool ext_s = true;
     bool ext_u = true;
     bool ext_v = false;
-    // MISA.X marks the presence of non-standard extensions such as Xsimrvtrace.
-    bool ext_x = false;
     unsigned vlen = 256;  // VLEN for V extension (128-1024, power of 2)
     [[nodiscard]] auto to_misa_val() const -> uint64_t {
         uint64_t val = 0;
@@ -97,7 +95,6 @@ struct MisaDraft {
         if (ext_v) val |= (1ULL << ('v' - 'a'));
         if (ext_s) val |= (1ULL << ('s' - 'a'));
         if (ext_u) val |= (1ULL << ('u' - 'a'));
-        if (ext_x) val |= (1ULL << ('x' - 'a'));
         return val;
     }
 

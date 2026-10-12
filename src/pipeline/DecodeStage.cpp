@@ -64,13 +64,13 @@ void CPU::fetch_operands(Machine& /*machine*/) {
         return;
     }
 
-    simrv::xlen::CSRAddress const w_csr_addr =
-        (funct3 != Funct3::Priv)          ? static_cast<simrv::xlen::CSRAddress>(funct12)
-        : (funct12 == Funct12Priv::Ecall) ? csr_addr(Csr::Mtvec)
-        : (funct12 == Funct12Priv::Uret)  ? csr_addr(Csr::Uepc)
-        : (funct12 == Funct12Priv::Sret)  ? csr_addr(Csr::Sepc)
-        : (funct12 == Funct12Priv::Mret)  ? csr_addr(Csr::Mepc)
-                                          : 0;
+    simrv::xlen::CsrNumber const w_csr_addr =
+        (funct3 != Funct3::Priv)          ? simrv::xlen::CsrNumber{funct12}
+        : (funct12 == Funct12Priv::Ecall) ? csr_num(Csr::Mtvec)
+        : (funct12 == Funct12Priv::Uret)  ? csr_num(Csr::Uepc)
+        : (funct12 == Funct12Priv::Sret)  ? csr_num(Csr::Sepc)
+        : (funct12 == Funct12Priv::Mret)  ? csr_num(Csr::Mepc)
+                                          : simrv::xlen::CsrNumber{0};
 
     if (funct3 == Funct3::Priv) {
         if (!TrapController::can_execute_privileged_instruction(

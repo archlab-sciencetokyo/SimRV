@@ -166,8 +166,7 @@ void test_retirement_context_and_call_trace() {
             std::abort();
         if (metadata.front().find("\"git_commit\"") == std::string::npos ||
             metadata.front().find("\"trace_level\"") == std::string::npos ||
-            metadata.front().find("\"nonstandard_extensions\":[\"Xsimrvtrace\"]") ==
-                std::string::npos ||
+            metadata.front().find("nonstandard_extensions") != std::string::npos ||
             metadata.front().find("\"isa\":\"rv") == std::string::npos ||
             metadata.front().find("\"command_line\":[\"simrv\"") == std::string::npos ||
             metadata.front().find("guest\\\"image.elf") == std::string::npos ||
@@ -185,7 +184,6 @@ void test_retirement_context_and_call_trace() {
         std::filesystem::remove(sibling_path(path, "interrupts.jsonl"));
         std::filesystem::remove(sibling_path(path, "bus.jsonl"));
         std::filesystem::remove(sibling_path(path, "pipeline.jsonl"));
-        std::filesystem::remove(sibling_path(path, "markers.jsonl"));
         std::filesystem::remove(sibling_path(path, "metadata.json"));
     }
     std::filesystem::remove(guest_path);
@@ -201,7 +199,8 @@ void test_optional_fp_register_write_trace() {
     cpu.reset();
     cpu.machine_ = &machine;
     cpu.state().pc = kPc;
-    cpu.state().regs.write_fp(simrv::xlen::to_fp_reg_id(static_cast<simrv::xlen::RegId>(1)), 0x40400000);
+    cpu.state().regs.write_fp(simrv::xlen::to_fp_reg_id(static_cast<simrv::xlen::RegId>(1)),
+                              0x40400000);
     machine.trace().init_architecture_trace(path.string());
     simrv::pipeline::PipelineContext retiring{};
     retiring.cpc = kPc;
@@ -226,7 +225,7 @@ void test_optional_fp_register_write_trace() {
         retire_record->find("register_file") != std::string::npos)
         std::abort();
     for (const auto* stream : {"registers.jsonl", "calls.jsonl", "devices.jsonl",
-                               "interrupts.jsonl", "bus.jsonl", "markers.jsonl", "metadata.json"})
+                               "interrupts.jsonl", "bus.jsonl", "metadata.json"})
         std::filesystem::remove(sibling_path(path, stream));
     std::filesystem::remove(path);
 }
@@ -272,9 +271,8 @@ void test_retirement_index_offsets() {
 
     std::filesystem::remove(path);
     std::filesystem::remove(index_path);
-    for (const auto* stream :
-         {"calls.jsonl", "devices.jsonl", "interrupts.jsonl", "bus.jsonl", "memory.jsonl",
-          "pipeline.jsonl", "markers.jsonl", "metadata.json"}) {
+    for (const auto* stream : {"calls.jsonl", "devices.jsonl", "interrupts.jsonl", "bus.jsonl",
+                               "memory.jsonl", "pipeline.jsonl", "metadata.json"}) {
         std::filesystem::remove(sibling_path(path, stream));
     }
 }
@@ -338,8 +336,8 @@ void test_gzip_retirement_preserves_schema_one_records() {
         std::abort();
     dlclose(library);
     std::filesystem::remove(path);
-    for (const auto name : {"calls.jsonl", "devices.jsonl", "interrupts.jsonl", "bus.jsonl",
-                            "markers.jsonl", "metadata.json"})
+    for (const auto name :
+         {"calls.jsonl", "devices.jsonl", "interrupts.jsonl", "bus.jsonl", "metadata.json"})
         std::filesystem::remove(sibling_path(path, name));
 #endif
 }
@@ -377,7 +375,6 @@ void test_branches_are_not_calls() {
     std::filesystem::remove(sibling_path(path, "devices.jsonl"));
     std::filesystem::remove(sibling_path(path, "interrupts.jsonl"));
     std::filesystem::remove(sibling_path(path, "bus.jsonl"));
-    std::filesystem::remove(sibling_path(path, "markers.jsonl"));
     std::filesystem::remove(sibling_path(path, "metadata.json"));
 }
 
@@ -413,7 +410,6 @@ void test_trace_level_filters_streams() {
     std::filesystem::remove(sibling_path(path, "devices.jsonl"));
     std::filesystem::remove(sibling_path(path, "interrupts.jsonl"));
     std::filesystem::remove(sibling_path(path, "bus.jsonl"));
-    std::filesystem::remove(sibling_path(path, "markers.jsonl"));
     std::filesystem::remove(sibling_path(path, "metadata.json"));
 }
 
@@ -434,7 +430,6 @@ void test_level_zero_trace_skips_retirement_context() {
     std::filesystem::remove(sibling_path(path, "devices.jsonl"));
     std::filesystem::remove(sibling_path(path, "interrupts.jsonl"));
     std::filesystem::remove(sibling_path(path, "bus.jsonl"));
-    std::filesystem::remove(sibling_path(path, "markers.jsonl"));
     std::filesystem::remove(sibling_path(path, "metadata.json"));
 }
 
@@ -455,7 +450,6 @@ void test_filtered_trace_skips_unselected_retirement_context() {
     std::filesystem::remove(sibling_path(path, "bus.jsonl"));
     std::filesystem::remove(sibling_path(path, "memory.jsonl"));
     std::filesystem::remove(sibling_path(path, "pipeline.jsonl"));
-    std::filesystem::remove(sibling_path(path, "markers.jsonl"));
     std::filesystem::remove(sibling_path(path, "metadata.json"));
 }
 
@@ -494,7 +488,6 @@ void test_trace_hart_identity() {
     std::filesystem::remove(sibling_path(path, "devices.jsonl"));
     std::filesystem::remove(sibling_path(path, "interrupts.jsonl"));
     std::filesystem::remove(sibling_path(path, "bus.jsonl"));
-    std::filesystem::remove(sibling_path(path, "markers.jsonl"));
     std::filesystem::remove(sibling_path(path, "metadata.json"));
 }
 
@@ -562,8 +555,8 @@ void test_arch_trace_event_hart_and_cycle_filters() {
         std::abort();
 
     std::filesystem::remove(path);
-    for (const auto name : {"calls.jsonl", "devices.jsonl", "interrupts.jsonl", "bus.jsonl",
-                            "markers.jsonl", "metadata.json"})
+    for (const auto name :
+         {"calls.jsonl", "devices.jsonl", "interrupts.jsonl", "bus.jsonl", "metadata.json"})
         std::filesystem::remove(sibling_path(path, name));
 }
 
@@ -592,7 +585,7 @@ void test_arch_trace_device_filter() {
         }))
         std::abort();
     for (const auto name : {"retire.jsonl", "calls.jsonl", "devices.jsonl", "interrupts.jsonl",
-                            "bus.jsonl", "markers.jsonl", "metadata.json"})
+                            "bus.jsonl", "metadata.json"})
         std::filesystem::remove(sibling_path(path, name));
 }
 
@@ -629,8 +622,8 @@ void test_arch_trace_function_filter(std::string_view executable_path) {
             std::string::npos)
         std::abort();
 
-    for (const auto name : {"calls.jsonl", "devices.jsonl", "interrupts.jsonl", "bus.jsonl",
-                            "markers.jsonl", "metadata.json"})
+    for (const auto name :
+         {"calls.jsonl", "devices.jsonl", "interrupts.jsonl", "bus.jsonl", "metadata.json"})
         std::filesystem::remove(sibling_path(path, name));
     std::filesystem::remove(path);
 }
@@ -680,9 +673,8 @@ void test_retired_memory_events_and_address_classification() {
         events[2].find("\"component\":\"trace-test-device\"") == std::string::npos ||
         events[2].find("\"value\":\"0x89abcdef\"") == std::string::npos)
         std::abort();
-    for (const auto name :
-         {"retire.jsonl", "calls.jsonl", "devices.jsonl", "interrupts.jsonl", "bus.jsonl",
-          "memory.jsonl", "pipeline.jsonl", "markers.jsonl", "metadata.json"})
+    for (const auto name : {"retire.jsonl", "calls.jsonl", "devices.jsonl", "interrupts.jsonl",
+                            "bus.jsonl", "memory.jsonl", "pipeline.jsonl", "metadata.json"})
         std::filesystem::remove(sibling_path(path, name));
 }
 
@@ -726,9 +718,8 @@ void test_precise_memory_fault_event() {
         events.back().find("\"tval\":\"0x50000000\"") == std::string::npos ||
         events.back().find("\"faulted\":true") == std::string::npos)
         std::abort();
-    for (const auto name :
-         {"retire.jsonl", "calls.jsonl", "devices.jsonl", "interrupts.jsonl", "bus.jsonl",
-          "memory.jsonl", "pipeline.jsonl", "markers.jsonl", "metadata.json"})
+    for (const auto name : {"retire.jsonl", "calls.jsonl", "devices.jsonl", "interrupts.jsonl",
+                            "bus.jsonl", "memory.jsonl", "pipeline.jsonl", "metadata.json"})
         std::filesystem::remove(sibling_path(path, name));
 }
 
@@ -757,7 +748,6 @@ void test_bus_trace_level_four() {
     std::filesystem::remove(sibling_path(path, "devices.jsonl"));
     std::filesystem::remove(sibling_path(path, "interrupts.jsonl"));
     std::filesystem::remove(sibling_path(path, "bus.jsonl"));
-    std::filesystem::remove(sibling_path(path, "markers.jsonl"));
     std::filesystem::remove(sibling_path(path, "metadata.json"));
 }
 
@@ -814,97 +804,23 @@ void test_mmio_arch_trace_uses_requesting_hart_without_dlog() {
     std::filesystem::remove(sibling_path(path, "devices.jsonl"));
     std::filesystem::remove(sibling_path(path, "interrupts.jsonl"));
     std::filesystem::remove(sibling_path(path, "bus.jsonl"));
-    std::filesystem::remove(sibling_path(path, "markers.jsonl"));
     std::filesystem::remove(sibling_path(path, "metadata.json"));
 }
 
-void test_guest_marker_csr_events() {
-    {
-        Machine tracing_disabled;
-        if (!tracing_disabled.primary_hart().write_csr(0x800, 0x40000000u)) std::abort();
-    }
-    simrv::core::MachineConfig config;
-    Machine machine(config);
-    auto& cpu = machine.primary_hart();
-    cpu.machine_ = &machine;
-    cpu.pipeline_context.cpc = kPc + 0x24;
-    const auto path = trace_path("markers");
-    machine.trace().init_architecture_trace(path.string());
-
-    const auto emit_text = [&cpu](std::string_view text) {
-        for (const unsigned char byte : text) {
-            if (!cpu.write_csr(0x800, byte)) std::abort();
-        }
-    };
-    emit_text("outer");
-    if (!cpu.write_csr(0x800, 0x40000000u)) std::abort();
-    emit_text("note");
-    if (!cpu.write_csr(0x800, 0xC0000000u)) std::abort();
-    emit_text("outer");
-    if (!cpu.write_csr(0x800, 0x80000000u)) std::abort();
-    machine.trace().flush_all();
-
-    const auto lines = read_trace(sibling_path(path, "markers.jsonl"));
-    if (lines.size() != 4 || lines[1].find("\"event\":\"marker_begin\"") == std::string::npos ||
-        lines[1].find("\"label\":\"outer\"") == std::string::npos ||
-        lines[1].find("\"marker_depth\":1") == std::string::npos ||
-        lines[1].find("\"pc\":\"0x80000024\"") == std::string::npos ||
-        lines[2].find("\"event\":\"marker\"") == std::string::npos ||
-        lines[2].find("\"label\":\"note\"") == std::string::npos ||
-        lines[3].find("\"event\":\"marker_end\"") == std::string::npos ||
-        lines[3].find("\"marker_depth\":0") == std::string::npos)
-        std::abort();
-
-    std::filesystem::remove(path);
-    std::filesystem::remove(sibling_path(path, "calls.jsonl"));
-    std::filesystem::remove(sibling_path(path, "devices.jsonl"));
-    std::filesystem::remove(sibling_path(path, "interrupts.jsonl"));
-    std::filesystem::remove(sibling_path(path, "bus.jsonl"));
-    std::filesystem::remove(sibling_path(path, "markers.jsonl"));
-    std::filesystem::remove(sibling_path(path, "metadata.json"));
-}
-
-void test_user_mode_marker_csr_instruction() {
+void test_custom_extension_is_not_advertised() {
     Machine machine;
     auto& cpu = machine.primary_hart();
-    std::vector<simrv::xlen::Byte> ram(1024 * 1024, simrv::xlen::Byte{0});
-    constexpr simrv::xlen::Instruction kCsrwUtraceRa =
-        (0x800u << 20) | (1u << 15) | (1u << 12) | 0x73u;
-    const std::array program = {kCsrwUtraceRa, kCsrwUtraceRa};
-    std::memcpy(ram.data(), program.data(), sizeof(program));
-    machine.set_ram_for_testing(ram.data(), ram.size());
-    cpu.machine_ = &machine;
-    cpu.reset();
-    cpu.machine_ = &machine;
-    cpu.state().priv = simrv::xlen::PrivilegeLevel::User;
-    cpu.state().pc = kPc;
-    if (cpu.read_csr(0x0C0)) std::abort();  // Reserved standard U-level space is not our ABI.
-    if (!simrv::isa::misa_has_extension(cpu.state().misa, simrv::isa::IsaExtension::X))
+    if (simrv::isa::misa_has_extension(cpu.state().misa, simrv::isa::IsaExtension::X)) std::abort();
+    if (cpu.read_csr(0x800)) std::abort();
+
+    simrv::core::MachineConfig config;
+    config.isa.misa_override = true;
+    config.isa.isa_preset =
+        simrv::isa::kMisaDefault | simrv::isa::misa_extension_bit(simrv::isa::IsaExtension::X);
+    Machine configured_machine(config);
+    if (simrv::isa::misa_has_extension(configured_machine.primary_hart().state().misa,
+                                       simrv::isa::IsaExtension::X))
         std::abort();
-
-    const auto path = trace_path("markers-user-csr");
-    machine.trace().init_architecture_trace(path.string());
-    cpu.state().regs.write(simrv::xlen::RegId::Ra, 'u');
-    while (cpu.e_icount < 1) cpu.run_cycle(machine);
-    cpu.state().regs.write(simrv::xlen::RegId::Ra, 0x40000000u);
-    while (cpu.e_icount < 2) cpu.run_cycle(machine);
-    machine.trace().flush_all();
-
-    const auto lines = read_trace(sibling_path(path, "markers.jsonl"));
-    if (lines.size() != 2 || lines.back().find("\"event\":\"marker_begin\"") == std::string::npos ||
-        lines.back().find("\"hart\":0") == std::string::npos ||
-        lines.back().find("\"mode\":\"U\"") == std::string::npos ||
-        lines.back().find("\"label\":\"u\"") == std::string::npos ||
-        lines.back().find("\"pc\":\"0x80000004\"") == std::string::npos)
-        std::abort();
-
-    std::filesystem::remove(path);
-    std::filesystem::remove(sibling_path(path, "calls.jsonl"));
-    std::filesystem::remove(sibling_path(path, "devices.jsonl"));
-    std::filesystem::remove(sibling_path(path, "interrupts.jsonl"));
-    std::filesystem::remove(sibling_path(path, "bus.jsonl"));
-    std::filesystem::remove(sibling_path(path, "markers.jsonl"));
-    std::filesystem::remove(sibling_path(path, "metadata.json"));
 }
 
 void test_interrupt_entry_and_return_events() {
@@ -1037,7 +953,7 @@ void test_software_mmio_interrupt_bus_completion_fixture() {
 
     std::filesystem::remove(path);
     for (const auto name : {"calls.jsonl", "devices.jsonl", "interrupts.jsonl", "bus.jsonl",
-                            "memory.jsonl", "pipeline.jsonl", "markers.jsonl", "metadata.json"})
+                            "memory.jsonl", "pipeline.jsonl", "metadata.json"})
         std::filesystem::remove(sibling_path(path, name));
     std::filesystem::remove(path);
     std::filesystem::remove(sibling_path(path, "retire.index.jsonl"));
@@ -1074,7 +990,7 @@ void test_cycle_accurate_pipeline_stall_events() {
         events.front().find("\"reason\":\"data_hazard\"") == std::string::npos)
         std::abort();
     for (const auto name : {"pipeline.jsonl", "calls.jsonl", "devices.jsonl", "interrupts.jsonl",
-                            "bus.jsonl", "memory.jsonl", "markers.jsonl", "metadata.json"})
+                            "bus.jsonl", "memory.jsonl", "metadata.json"})
         std::filesystem::remove(sibling_path(path, name));
     std::filesystem::remove(path);
 }
@@ -1106,7 +1022,7 @@ void test_dma_schedule_and_completion_events() {
         events[2].find("\"latency_cycles\":5") == std::string::npos)
         std::abort();
     for (const auto name : {"pipeline.jsonl", "calls.jsonl", "devices.jsonl", "interrupts.jsonl",
-                            "bus.jsonl", "memory.jsonl", "markers.jsonl", "metadata.json"})
+                            "bus.jsonl", "memory.jsonl", "metadata.json"})
         std::filesystem::remove(sibling_path(path, name));
     std::filesystem::remove(path);
 }
@@ -1143,8 +1059,7 @@ int main(int argc, char** argv) {
     test_precise_memory_fault_event();
     test_bus_trace_level_four();
     test_mmio_arch_trace_uses_requesting_hart_without_dlog();
-    test_guest_marker_csr_events();
-    test_user_mode_marker_csr_instruction();
+    test_custom_extension_is_not_advertised();
     test_interrupt_entry_and_return_events();
     test_software_mmio_interrupt_bus_completion_fixture();
     test_cycle_accurate_pipeline_stall_events();

@@ -286,10 +286,10 @@ and source locations:
 ```
 
 `metadata.json` records the simulator version and commit, the lowercase single-letter ISA string
-derived from runtime `misa` for standard single-letter extensions, separately lists
-`Xsimrvtrace` as a non-standard extension, XLEN, VLEN, hart count, trace level, registered runtime
-MMIO devices and address ranges, the VirtIO RNG's fixed seed, guest ELF path and SHA-256, a SHA-256
-configuration fingerprint, exact argument vector, host OS/release/machine, and start/completion timestamps. The
+derived from runtime `misa` for standard single-letter extensions, XLEN, VLEN, hart count, trace
+level, registered runtime MMIO devices and address ranges, the VirtIO RNG's fixed seed, guest ELF
+path and SHA-256, a SHA-256 configuration fingerprint, exact argument vector, host
+OS/release/machine, and start/completion timestamps. The
 ISA string reflects `misa` and does not claim multi-letter `Z*` extension coverage. For `--isa`,
 SimRV accepts `rv32g`/`rv64g` as the standard G shorthand for IMAFD plus `Zicsr` and `Zifencei`;
 `rv32gc`/`rv64gc` add the separate C extension. SimRV also accepts `Zicsr`, `Zifencei`, and
@@ -326,7 +326,6 @@ Schema-2 event catalog:
 | `bus_transaction` | `bus.jsonl` | bus, TileLink channel/opcode, protocol source/sink IDs, sequence, hart/master, target, address, transfer width, byte enables, data, request/completion cycles, modeled latency, response/error flags |
 | `pipeline_stall` | `pipeline.jsonl` | cycle-accurate stages stalled that cycle, each stage's PC, remaining modeled latency, and stall reason |
 | `memory_read`, `memory_write`, `memory_atomic`, `memory_fault` | `memory.jsonl` | effective/optional physical address, region/component, operation, width, values, fault/cause/tval, latency when modeled |
-| `marker_begin`, `marker_end`, `marker` | `markers.jsonl` | PC, mode, label, marker depth |
 | `header` | event streams | stream name |
 
 Mapped MMIO failures and accesses to unmapped addresses are retained as device-stream records with
@@ -382,30 +381,6 @@ issuing hart and instruction/data port; `target` is the
 registered device name or `ram`/`unmapped`. TileLink transfer `size_log2` is accompanied by the
 derived `width_bytes`; `burst_length` is measured in 8-byte TileLink beats. Synchronous paths may
 have zero modeled latency; cycle-accurate paths report the configured interconnect latency.
-
-#### Guest software annotations
-
-SimRV implements the write-command CSR `0x800` from the RISC-V custom U-level read/write range.
-This address allocation follows the [RISC-V Privileged Architecture CSR address mapping
-conventions](https://docs.riscv.org/reference/isa/priv/priv-csrs.html). It is accessed with
-standard Zicsr instructions and does not occupy a standard CSR address. This is a SimRV-specific,
-non-standard facility named `Xsimrvtrace`; it is not a ratified RISC-V extension.
-The CSR is inert when architectural tracing is disabled. Guest labels are sent as UTF-8 bytes,
-followed by one command write, so the simulator does not dereference guest pointers or translate
-guest virtual addresses:
-
-```c
-#include <simrv/trace.h>
-
-simrv_trace_begin("decode");
-simrv_marker("entered decoder");
-simrv_trace_end("decode");
-```
-
-The equivalent assembly macros are in `simrv/trace.S` and take a NUL-terminated string pointer in
-an integer register, for example `SIMRV_TRACE_BEGIN a0`. Labels are capped at 1024 bytes per event.
-Events include hart, cycle, source PC, privilege mode, label, and post-transition marker nesting
-depth. `marker_end` decrements depth only when nonzero.
 
 ### Checkpoint and resume
 

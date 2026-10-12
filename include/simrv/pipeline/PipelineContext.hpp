@@ -13,7 +13,7 @@ namespace simrv::pipeline {
  */
 struct StageError {
     ExceptionCode code;
-    simrv::xlen::CSRValue tval = 0;
+    simrv::xlen::CsrValue tval = 0;
 };
 
 /**
@@ -31,8 +31,8 @@ struct PipelineContext : public DecodedInstruction {
     // OF stage operands
     simrv::xlen::Register rrs1 = 0;
     simrv::xlen::Register rrs2 = 0;
-    simrv::xlen::CSRValue rcsr = 0;
-    simrv::xlen::CSRValue rcsr_write =
+    simrv::xlen::CsrValue rcsr = 0;
+    simrv::xlen::CsrValue rcsr_write =
         0;  ///< RMW base, excluding hardware-only mip.SEIP contribution.
 
     // EX1 stage results and controls
@@ -41,7 +41,7 @@ struct PipelineContext : public DecodedInstruction {
     simrv::xlen::Address mem_addr = 0;
     simrv::xlen::PhysAddr mem_paddr{0};
     simrv::xlen::Register wb_data = 0;
-    simrv::xlen::CSRValue wb_data_csr = 0;
+    simrv::xlen::CsrValue wb_data_csr = 0;
 
     // LD/EX2 stage memory data
     simrv::xlen::Register mem_rdata = 0;

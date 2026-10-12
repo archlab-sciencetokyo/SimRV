@@ -42,7 +42,7 @@ namespace simrv::debug {
  *              extension bits 0-25 are used).
  * @return      Lowercase ISA string suitable for Spike's --isa= flag.
  */
-[[nodiscard]] inline auto spike_isa_string(simrv::xlen::CSRValue misa) -> std::string {
+[[nodiscard]] inline auto spike_isa_string(simrv::xlen::CsrValue misa) -> std::string {
     unsigned xlen = 32;
     if constexpr (simrv::xlen::kIsXLen64) {
         const unsigned mxl = (misa >> 62) & 3;
@@ -52,7 +52,7 @@ namespace simrv::debug {
 
     // Check IMAFD bits for the 'G' shorthand
     const auto bit = [&](char c) -> bool {
-        return (misa & (static_cast<simrv::xlen::CSRValue>(1) << (c - 'a'))) != 0;
+        return (misa & (static_cast<simrv::xlen::CsrValue>(1) << (c - 'a'))) != 0;
     };
     const bool is_g = bit('i') && bit('m') && bit('a') && bit('f') && bit('d');
 
@@ -60,7 +60,7 @@ namespace simrv::debug {
         s += 'g';
         // Append any extension beyond IMAFD
         for (int i = 0; i < 26; ++i) {
-            if ((misa & (static_cast<simrv::xlen::CSRValue>(1) << i)) == 0) continue;
+            if ((misa & (static_cast<simrv::xlen::CsrValue>(1) << i)) == 0) continue;
             const char c = static_cast<char>('a' + i);
             if (c == 'i' || c == 'm' || c == 'a' || c == 'f' || c == 'd' || c == 'x') continue;
             if (c == 's' || c == 'u') continue;
@@ -68,7 +68,7 @@ namespace simrv::debug {
         }
     } else {
         for (int i = 0; i < 26; ++i) {
-            if ((misa & (static_cast<simrv::xlen::CSRValue>(1) << i)) != 0) {
+            if ((misa & (static_cast<simrv::xlen::CsrValue>(1) << i)) != 0) {
                 const char c = static_cast<char>('a' + i);
                 if (c == 's' || c == 'u' || c == 'x') continue;
                 s += c;

@@ -171,23 +171,23 @@ constexpr auto operator!=(Funct3 f3, RoundingMode rm) noexcept -> bool { return 
 constexpr auto operator!=(RoundingMode rm, Funct3 f3) noexcept -> bool { return !(rm == f3); }
 
 /// Left-shift operator for RoundingMode (e.g. RoundingMode::Rmm << 5U) to format FCSR bits.
-constexpr auto operator<<(RoundingMode rm, unsigned shift) noexcept -> simrv::xlen::CSRValue {
-    return static_cast<simrv::xlen::CSRValue>(std::to_underlying(rm)) << shift;
+constexpr auto operator<<(RoundingMode rm, unsigned shift) noexcept -> simrv::xlen::CsrValue {
+    return static_cast<simrv::xlen::CsrValue>(std::to_underlying(rm)) << shift;
 }
 
-[[nodiscard]] constexpr auto fcsr_with_rounding_mode(simrv::xlen::CSRValue fcsr,
+[[nodiscard]] constexpr auto fcsr_with_rounding_mode(simrv::xlen::CsrValue fcsr,
                                                      RoundingMode rm) noexcept
-    -> simrv::xlen::CSRValue {
-    return (fcsr & ~static_cast<simrv::xlen::CSRValue>(0x7U << 5U)) | (rm << 5U);
+    -> simrv::xlen::CsrValue {
+    return (fcsr & ~static_cast<simrv::xlen::CsrValue>(0x7U << 5U)) | (rm << 5U);
 }
 
-[[nodiscard]] constexpr auto frm_rounding_mode(simrv::xlen::CSRValue fcsr) noexcept
+[[nodiscard]] constexpr auto frm_rounding_mode(simrv::xlen::CsrValue fcsr) noexcept
     -> RoundingMode {
     return static_cast<RoundingMode>((fcsr >> 5U) & 0x7U);
 }
 
 [[nodiscard]] constexpr auto resolve_rounding_mode(simrv::xlen::Word rm_field,
-                                                   simrv::xlen::CSRValue fcsr) noexcept
+                                                   simrv::xlen::CsrValue fcsr) noexcept
     -> RoundingMode {
     if (rm_field == RoundingMode::Dyn) {
         return frm_rounding_mode(fcsr);
@@ -196,7 +196,7 @@ constexpr auto operator<<(RoundingMode rm, unsigned shift) noexcept -> simrv::xl
 }
 
 [[nodiscard]] constexpr auto resolve_rounding_mode(Funct3 rm_field,
-                                                   simrv::xlen::CSRValue fcsr) noexcept
+                                                   simrv::xlen::CsrValue fcsr) noexcept
     -> RoundingMode {
     return resolve_rounding_mode(std::to_underlying(rm_field), fcsr);
 }

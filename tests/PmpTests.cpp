@@ -166,11 +166,11 @@ void test_pmp_csr_locking_and_updates() {
 
     // Write pmpcfg0 and pmpaddr0
     const simrv::xlen::Address test_addr = 0x80001000 >> 2;
-    auto res_addr = cpu.write_csr(0x3B0, static_cast<simrv::xlen::CSRValue>(test_addr));
+    auto res_addr = cpu.write_csr(0x3B0, static_cast<simrv::xlen::CsrValue>(test_addr));
     expect(res_addr.has_value(), "Write to pmpaddr0 succeeded");
 
     // Write pmpcfg0 with L = 1, NA4, R
-    const simrv::xlen::CSRValue cfg_val =
+    const simrv::xlen::CsrValue cfg_val =
         simrv::core::pmp::kPmpL | simrv::core::pmp::kPmpModeNa4 | simrv::core::pmp::kPmpR;
     auto res_cfg = cpu.write_csr(0x3A0, cfg_val);
     expect(res_cfg.has_value(), "Write to pmpcfg0 succeeded");
@@ -183,7 +183,7 @@ void test_pmp_csr_locking_and_updates() {
            "Read pmpcfg0 matches written value with L=1");
 
     // Attempt to write locked pmpaddr0 - should be ignored
-    (void)cpu.write_csr(0x3B0, static_cast<simrv::xlen::CSRValue>(0x90000000 >> 2));
+    (void)cpu.write_csr(0x3B0, static_cast<simrv::xlen::CsrValue>(0x90000000 >> 2));
     read_addr = cpu.read_csr(0x3B0);
     expect(read_addr.has_value() && *read_addr == test_addr,
            "Locked pmpaddr0 ignored subsequent write");

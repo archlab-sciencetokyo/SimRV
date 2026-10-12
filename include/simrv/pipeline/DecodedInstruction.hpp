@@ -47,7 +47,7 @@ namespace simrv::pipeline {
 struct DecodedInstruction {
     simrv::xlen::VirtAddr cpc{0};   ///< Current Program Counter of this instruction
     simrv::xlen::ImmValue imm = 0;  ///< Sign-extended immediate value
-    simrv::xlen::CSRValue pending_tval =
+    simrv::xlen::CsrValue pending_tval =
         0;  ///< Trap value / faulting address for pending exception
     std::optional<ExceptionCode>
         pending_exception;  ///< Pending exception code (if decode/fetch raised exception)

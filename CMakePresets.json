@@ -153,8 +153,7 @@
         {
             "name": "rv64-debug",
             "configurePreset": "rv64-debug",
-            "inherits": "simrv-build-base",
-            "jobs": 4
+            "inherits": "simrv-build-base"
         },
         {
             "name": "rv64-native-release",

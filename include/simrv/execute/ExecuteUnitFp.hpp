@@ -32,13 +32,13 @@ class ExecuteUnitFp {
     /// Execute fused floating-point multiply-add family.
     static auto fusedFp(isa::Opcode opcode, FpFmt fmt, simrv::xlen::FpRegId rs1,
                         simrv::xlen::FpRegId rs2, simrv::xlen::FpRegId rs3, isa::RoundingMode rm,
-                        const simrv::xlen::FloatingRegister* freg, simrv::xlen::CSRValue& fcsr)
+                        const simrv::xlen::FloatingRegister* freg, simrv::xlen::CsrValue& fcsr)
         -> FpExecResult;
 
     /// Execute non-fused floating-point operations and conversions.
     static auto opFp(simrv::xlen::Funct7 funct7, isa::Funct3 funct3, simrv::xlen::FpRegId rs1,
                      simrv::xlen::FpRegId rs2, simrv::xlen::Register rrs1,
-                     const simrv::xlen::FloatingRegister* freg, simrv::xlen::CSRValue& fcsr)
+                     const simrv::xlen::FloatingRegister* freg, simrv::xlen::CsrValue& fcsr)
         -> FpExecResult;
 };
 

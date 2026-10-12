@@ -45,9 +45,7 @@ void CPU::apply_cpu_model_config(const simrv::pipeline::CpuModelConfig& config) 
     branch_predictor.reset();
     const unsigned int target_xlen =
         (config.supported_xlen != 0) ? config.supported_xlen : simrv::xlen::kXLenBits;
-    state_.misa = isa::misa_with_mxl(
-        isa::isa_preset_bits(config.isa_preset) | isa::misa_extension_bit(isa::IsaExtension::X),
-        target_xlen);
+    state_.misa = isa::misa_with_mxl(isa::isa_preset_bits(config.isa_preset), target_xlen);
     state_.initialize_lower_xlen_fields();
     if (machine_ != nullptr) {
         machine_->dma_engine().set_config(config.dma);
@@ -58,7 +56,6 @@ void CPU::reset() {
     pending_interrupt_lines_.store(0, std::memory_order_relaxed);
     next_logical_issue_sequence_ = 0;
     state_ = ArchState{};
-    state_.misa |= isa::misa_extension_bit(isa::IsaExtension::X);
     prev_state_ = ArchState{};
     pipeline_context = simrv::pipeline::PipelineContext{};
     plic_mmio.reset();
@@ -67,10 +64,10 @@ void CPU::reset() {
     state_.regs.fill_fp(0);
     state_.regs.fill_vector(VectorRegister{});
     // Set mstatus.VS to Clean (2 << 9)
-    state_.mstatus = static_cast<simrv::xlen::CSRValue>(2) << 9;
+    state_.mstatus = static_cast<simrv::xlen::CsrValue>(2) << 9;
     if constexpr (simrv::xlen::kIsXLen64) {
-        state_.mstatus |= (static_cast<simrv::xlen::CSRValue>(2) << 34) |
-                          (static_cast<simrv::xlen::CSRValue>(2) << 32);
+        state_.mstatus |= (static_cast<simrv::xlen::CsrValue>(2) << 34) |
+                          (static_cast<simrv::xlen::CsrValue>(2) << 32);
     }
     state_.initialize_lower_xlen_fields();
     TLB_flush();
@@ -164,28 +161,18 @@ void CPU::soft_tlb_flush_selective(const core::TlbFlushFilter& filter) {
     }
 }
 
-auto CPU::get_mstatus(simrv::xlen::CSRValue mask) const -> simrv::xlen::CSRValue {
+auto CPU::get_mstatus(simrv::xlen::CsrValue mask) const -> simrv::xlen::CsrValue {
     return csr_file.getMstatus(mask);
 }
 
-void CPU::set_mstatus(simrv::xlen::CSRValue wdata) { csr_file.setMstatus(wdata); }
-
-auto CPU::read_csr(simrv::xlen::CSRAddress addr) const
-    -> std::expected<simrv::xlen::CSRValue, ExceptionCode> {
-    return csr_file.read(addr);
-}
+void CPU::set_mstatus(simrv::xlen::CsrValue wdata) { csr_file.setMstatus(wdata); }
 
 auto CPU::read_csr(simrv::xlen::CsrNumber addr) const
-    -> std::expected<simrv::xlen::CSRValue, ExceptionCode> {
+    -> std::expected<simrv::xlen::CsrValue, ExceptionCode> {
     return csr_file.read(addr);
 }
 
-auto CPU::write_csr(simrv::xlen::CSRAddress addr, simrv::xlen::CSRValue wdata)
-    -> std::expected<void, ExceptionCode> {
-    return csr_file.write(addr, wdata);
-}
-
-auto CPU::write_csr(simrv::xlen::CsrNumber addr, simrv::xlen::CSRValue wdata)
+auto CPU::write_csr(simrv::xlen::CsrNumber addr, simrv::xlen::CsrValue wdata)
     -> std::expected<void, ExceptionCode> {
     return csr_file.write(addr, wdata);
 }
@@ -224,7 +211,7 @@ void CPU::plic_set_irq(simrv::xlen::IrqNumber irq_num, int state) {
     plic_mmio.set_irq(irq_num, state != 0 ? 1 : 0);
 }
 
-void CPU::raise_exception(simrv::xlen::TrapCause cause, simrv::xlen::CSRValue tval) {
+void CPU::raise_exception(simrv::xlen::TrapCause cause, simrv::xlen::CsrValue tval) {
     const auto old_privilege = state_.priv;
     const auto old_mstatus = state_.mstatus;
     TrapController::raise_exception(*this, cause, tval);
@@ -236,7 +223,7 @@ void CPU::raise_exception(simrv::xlen::TrapCause cause, simrv::xlen::CSRValue tv
 }
 
 void CPU::evaluate_timer_interrupt() {
-    const simrv::xlen::CSRValue pending_before = state_.mip;
+    const simrv::xlen::CsrValue pending_before = state_.mip;
     simrv::xlen::Counter cur_mtime = 0;
     simrv::xlen::Counter cur_mtimecmp = 0;
     bool is_supervisor_timer = false;

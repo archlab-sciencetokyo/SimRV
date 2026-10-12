@@ -14,7 +14,7 @@
 namespace simrv {
 
 auto Mmu::translate(simrv::xlen::VirtAddr v_addr, PteAccess access,
-                    simrv::xlen::PrivilegeLevel priv, simrv::xlen::CSRValue mstatus,
+                    simrv::xlen::PrivilegeLevel priv, simrv::xlen::CsrValue mstatus,
                     simrv::xlen::Word satp, unsigned xlen, bool update_access_bits,
                     const core::ArchState* arch_state)
     -> std::expected<PageWalkResult, simrv::xlen::TrapCause> {
@@ -38,7 +38,7 @@ auto Mmu::translate(simrv::xlen::VirtAddr v_addr, PteAccess access,
 }
 
 auto Mmu::page_walk(simrv::xlen::VirtAddr v_addr, PteAccess access,
-                    simrv::xlen::PrivilegeLevel priv, simrv::xlen::CSRValue mstatus,
+                    simrv::xlen::PrivilegeLevel priv, simrv::xlen::CsrValue mstatus,
                     simrv::xlen::Word satp, unsigned xlen, bool update_access_bits,
                     const core::ArchState* arch_state)
     -> std::expected<PageWalkResult, simrv::xlen::TrapCause> {
@@ -46,7 +46,7 @@ auto Mmu::page_walk(simrv::xlen::VirtAddr v_addr, PteAccess access,
 }
 
 auto Mmu::begin_page_walk(simrv::xlen::VirtAddr v_addr, PteAccess access,
-                          simrv::xlen::PrivilegeLevel priv, simrv::xlen::CSRValue mstatus,
+                          simrv::xlen::PrivilegeLevel priv, simrv::xlen::CsrValue mstatus,
                           simrv::xlen::Word satp, unsigned xlen, bool update_access_bits,
                           const core::ArchState* arch_state) const -> PageWalkState {
     return walker_.begin_walk(v_addr, access, priv, mstatus, satp, xlen, update_access_bits,

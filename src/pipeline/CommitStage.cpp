@@ -11,8 +11,8 @@
 #include "simrv/core/Tracer.hpp"
 #include "simrv/isa/Priv.hpp"
 #include "simrv/pipeline/RetirementEffects.hpp"
-#include "simrv/xlen/Helpers.hpp"
 #include "simrv/xlen/AddressTypes.hpp"
+#include "simrv/xlen/Helpers.hpp"
 
 namespace simrv::core {
 
@@ -106,8 +106,7 @@ void CPU::commit_control_flow_and_traps([[maybe_unused]] Machine& machine) {
             const bool is_write = (funct3 == Funct3::Csrrw || funct3 == Funct3::Csrrwi) ||
                                   (std::to_underlying(ctx.rs1) != 0);
             if (is_write) {
-                auto res =
-                    write_csr(static_cast<simrv::xlen::CSRAddress>(ctx.funct12), ctx.wb_data_csr);
+                auto res = write_csr(simrv::xlen::CsrNumber{ctx.funct12}, ctx.wb_data_csr);
                 if (!res) {
                     ctx.pending_exception = res.error();
                 }

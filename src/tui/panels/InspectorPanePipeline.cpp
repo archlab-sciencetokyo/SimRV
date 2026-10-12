@@ -1175,10 +1175,10 @@ auto InspectorPane::render_system_state(const simrv::core::CPU& cpu, int logical
                                     : st.priv == simrv::xlen::PrivilegeLevel::Supervisor
                                         ? (st.mstatus & core::MstatusBit::Sie) != 0
                                         : true;
-        const simrv::xlen::CSRValue pending =
+        const simrv::xlen::CsrValue pending =
             st.mip & core::interrupt_implemented_mask(
                          simrv::isa::misa_has_extension(st.misa, simrv::isa::IsaExtension::S));
-        const simrv::xlen::CSRValue eligible = pending & st.mie;
+        const simrv::xlen::CsrValue eligible = pending & st.mie;
         const std::string state = eligible != 0 ? (global_enabled ? "ready" : "masked")
                                                 : (global_enabled ? "enabled" : "disabled");
         return render_pair(
@@ -1199,8 +1199,8 @@ auto InspectorPane::render_system_state(const simrv::core::CPU& cpu, int logical
     if (logical_row == 20) {
         const bool supervisor_trap = st.scause != 0 || st.stval != 0 || st.sepc != 0;
         const simrv::xlen::TrapCause cause = supervisor_trap ? st.scause : st.mcause;
-        const simrv::xlen::CSRValue tval = supervisor_trap ? st.stval : st.mtval;
-        const simrv::xlen::CSRValue epc = supervisor_trap ? st.sepc : st.mepc;
+        const simrv::xlen::CsrValue tval = supervisor_trap ? st.stval : st.mtval;
+        const simrv::xlen::CsrValue epc = supervisor_trap ? st.sepc : st.mepc;
         // Timer and device interrupts are routine and their sticky trap CSRs
         // would permanently consume a summary row.  Surface exception context
         // only, where it is actionable while debugging guest execution.

@@ -93,8 +93,8 @@ class RegisterFile {
      * Vector 1.0 defines maximum VLMAX as VLEN, so a power-of-two VLEN requires writable bits
      * capable of representing element indices 0 through VLEN-1.
      */
-    [[nodiscard]] constexpr auto vstart_mask() const -> simrv::xlen::CSRValue {
-        return static_cast<simrv::xlen::CSRValue>(vlen - 1U);
+    [[nodiscard]] constexpr auto vstart_mask() const -> simrv::xlen::CsrValue {
+        return static_cast<simrv::xlen::CsrValue>(vlen - 1U);
     }
 
     [[nodiscard]] constexpr auto operator[](simrv::xlen::RegId idx) -> RegisterProxy {

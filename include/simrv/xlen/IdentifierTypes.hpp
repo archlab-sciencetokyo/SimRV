@@ -82,6 +82,9 @@ struct CsrNumber {
 
     constexpr CsrNumber() noexcept = default;
     constexpr CsrNumber(uint16_t v) noexcept : val(v) {}
+    template <typename T>
+        requires(std::is_enum_v<T> || (std::is_integral_v<T> && !std::is_same_v<T, uint16_t>))
+    constexpr CsrNumber(T v) noexcept : val(static_cast<uint16_t>(v)) {}
 
     [[nodiscard]] constexpr auto value() const noexcept -> uint16_t { return val; }
     [[nodiscard]] constexpr auto raw() const noexcept -> uint16_t { return val; }
@@ -101,6 +104,10 @@ struct CsrNumber {
     template <std::integral I>
     constexpr auto operator<=>(I rhs) const noexcept {
         return val <=> static_cast<uint16_t>(rhs);
+    }
+    template <std::integral I>
+    constexpr auto operator&(I rhs) const noexcept -> uint16_t {
+        return static_cast<uint16_t>(val & static_cast<uint16_t>(rhs));
     }
 
     [[nodiscard]] constexpr auto is_read_only() const noexcept -> bool {

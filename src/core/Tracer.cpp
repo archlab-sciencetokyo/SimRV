@@ -480,7 +480,6 @@ void Tracer::init_architecture_trace(const std::string& path) {
     fp_bus.close();
     fp_pipeline_.close();
     fp_memory.close();
-    fp_markers.close();
     fp_registers_.close();
     trace_metadata_path_.clear();
     retire_index_path_.clear();
@@ -491,8 +490,6 @@ void Tracer::init_architecture_trace(const std::string& path) {
     call_depth_.clear();
     vector_write_before_.clear();
     trap_frames_.clear();
-    marker_buffers_.clear();
-    marker_depth_.clear();
     trace_event_filter_.clear();
     if (path.empty()) return;
     std::error_code ec;
@@ -603,7 +600,6 @@ void Tracer::init_architecture_trace(const std::string& path) {
         fp_memory.open(trace_directory / "memory.jsonl", std::ios::out | std::ios::trunc);
         fp_pipeline_.open(trace_directory / "pipeline.jsonl", std::ios::out | std::ios::trunc);
     }
-    fp_markers.open(trace_directory / "markers.jsonl", std::ios::out | std::ios::trunc);
     if (config.debug.trace_register_writes) {
         fp_registers_.open(trace_directory / "registers.jsonl", std::ios::out | std::ios::trunc);
         vector_write_before_.resize(machine_.num_harts());
@@ -701,14 +697,6 @@ void Tracer::init_architecture_trace(const std::string& path) {
             "\"semantics\":\"retired scalar data accesses and precise synchronous faults\"}}}}",
             trace_timestamp());
     }
-    if (fp_markers.is_open()) {
-        std::println(fp_markers,
-                     "{{\"schema_version\":2,\"event\":\"header\","
-                     "\"timestamp\":\"{}\",\"cycle\":0,\"hart\":0,"
-                     "\"mode\":\"M\",\"payload\":{{\"stream\":\"markers\","
-                     "\"abi\":\"Xsimrvtrace-0.1\",\"csr\":\"0x800\"}}}}",
-                     trace_timestamp());
-    }
     write_trace_metadata(false);
 }
 
@@ -757,7 +745,8 @@ void Tracer::capture_register_write_before(CPU& cpu, pipeline::PipelineContext& 
     bytes.clear();
     bytes.reserve(32 * (trace_vlen_ / 8));
     for (unsigned index = 0; index < 32; ++index) {
-        const auto& reg = cpu.state().regs.read_vector(simrv::xlen::to_vec_reg_id(static_cast<simrv::xlen::RegId>(index)));
+        const auto& reg = cpu.state().regs.read_vector(
+            simrv::xlen::to_vec_reg_id(static_cast<simrv::xlen::RegId>(index)));
         bytes.insert(bytes.end(), reg.u8.begin(),
                      reg.u8.begin() + static_cast<std::ptrdiff_t>(trace_vlen_ / 8));
     }
@@ -778,7 +767,6 @@ void Tracer::flush_all() {
     if (fp_bus.is_open()) fp_bus.flush();
     if (fp_pipeline_.is_open()) fp_pipeline_.flush();
     if (fp_memory.is_open()) fp_memory.flush();
-    if (fp_markers.is_open()) fp_markers.flush();
     if (fp_registers_.is_open()) fp_registers_.flush();
     if (fp_tracepc_.is_open()) fp_tracepc_.flush();
     if (fp_bpred_.is_open()) fp_bpred_.flush();
@@ -787,7 +775,7 @@ void Tracer::flush_all() {
 void Tracer::log_architectural_trap_entry(const CPU& cpu, simrv::xlen::TrapCause cause,
                                           simrv::xlen::Address epc,
                                           simrv::xlen::PrivilegeLevel source_mode,
-                                          simrv::xlen::CSRValue tval) {
+                                          simrv::xlen::CsrValue tval) {
     if (!fp_interrupts.is_open() || !trace_level_at_least(1)) return;
     const auto& state = cpu.state();
     const auto hart = static_cast<size_t>(state.mhartid);
@@ -973,58 +961,10 @@ void Tracer::log_dma_transfer(const simrv::memory::DmaTransferTrace& transfer) {
                  transfer.completion_cycle, transfer.completion_cycle - transfer.start_cycle);
 }
 
-void Tracer::log_marker_csr_write(const CPU& cpu, simrv::xlen::CSRValue value) {
-    if (!fp_markers.is_open() || !is_architecture_trace_enabled()) return;
-    const auto hart = static_cast<size_t>(cpu.state().mhartid);
-    ConditionalTracerLock lock(mutex_, machine_.is_smp_enabled());
-    if (hart >= marker_buffers_.size()) {
-        marker_buffers_.resize(hart + 1);
-        marker_depth_.resize(hart + 1);
-    }
-    constexpr simrv::xlen::CSRValue kCommandMask = static_cast<simrv::xlen::CSRValue>(0xC0000000u);
-    constexpr simrv::xlen::CSRValue kBegin = static_cast<simrv::xlen::CSRValue>(0x40000000u);
-    constexpr simrv::xlen::CSRValue kEnd = static_cast<simrv::xlen::CSRValue>(0x80000000u);
-    constexpr simrv::xlen::CSRValue kMarker = static_cast<simrv::xlen::CSRValue>(0xC0000000u);
-    auto& label = marker_buffers_[hart];
-    if ((value & kCommandMask) == 0) {
-        if (value <= 0xFFu && label.size() < 1024) label.push_back(static_cast<char>(value));
-        return;
-    }
-
-    std::string_view event;
-    if (value == kBegin) {
-        event = "marker_begin";
-        ++marker_depth_[hart];
-    } else if (value == kEnd) {
-        event = "marker_end";
-        if (marker_depth_[hart] != 0) --marker_depth_[hart];
-    } else if (value == kMarker) {
-        event = "marker";
-    } else {
-        label.clear();
-        return;
-    }
-    const auto source_pc = static_cast<uint64_t>(cpu.pipeline_context.cpc.raw());
-    if (!accepts_trace_event(event, cpu.clint_mmio.mcycle,
-                             static_cast<uint32_t>(cpu.state().mhartid), source_pc)) {
-        label.clear();
-        return;
-    }
-    std::println(
-        fp_markers,
-        "{{\"schema_version\":2,\"event\":{},\"cycle\":{},"
-        "\"hart\":{},\"pc\":\"0x{:x}\"{},\"mode\":{},"
-        "\"payload\":{{\"label\":{},\"marker_depth\":{}}}}}",
-        json_quote(event), cpu.clint_mmio.mcycle, static_cast<unsigned>(cpu.state().mhartid),
-        source_pc, event_function_field(machine_, source_pc),
-        json_quote(privilege_mode(cpu.state().priv)), json_quote(label), marker_depth_[hart]);
-    label.clear();
-}
-
 void Tracer::log_trap(simrv::xlen::Counter mtime, simrv::xlen::Counter cycle,
                       simrv::xlen::TrapCause cause, simrv::xlen::Address trap_pc,
                       simrv::xlen::PrivilegeLevel priv, const ArchState& state,
-                      simrv::xlen::CSRValue tval, const CPU& cpu) {
+                      simrv::xlen::CsrValue tval, const CPU& cpu) {
     if (!fp_traplog.is_open() && !(fp_devices.is_open() && trace_level_at_least(1))) return;
     constexpr int kLogHexWidth = static_cast<int>(simrv::xlen::kXLenHexDigits);
     ConditionalTracerLock lock(mutex_, machine_.is_smp_enabled());
@@ -1267,7 +1207,8 @@ void Tracer::log_architecture_retirement(const CPU& cpu,
         };
         const auto width = trace_vlen_ / 8;
         for (unsigned index = 0; index < 32; ++index) {
-            const auto& after = state.regs.read_vector(simrv::xlen::to_vec_reg_id(static_cast<simrv::xlen::RegId>(index)));
+            const auto& after = state.regs.read_vector(
+                simrv::xlen::to_vec_reg_id(static_cast<simrv::xlen::RegId>(index)));
             const auto after_bits = std::span<const uint8_t>(after.u8.data(), width);
             const auto start = static_cast<size_t>(index) * width;
             const auto before_bits = start + width <= before.size()
@@ -1498,7 +1439,6 @@ void Tracer::write_trace_metadata(bool completed) {
         out,
         "{{\"schema_version\":2,\"simulator_version\":{},"
         "\"git_commit\":{},\"isa\":{},"
-        "\"nonstandard_extensions\":[\"Xsimrvtrace\"],"
         "\"xlen\":{},\"vlen\":{},"
         "\"harts\":{},\"trace_level\":{},\"trace_filters\":{{"
         "\"events\":{},\"function\":{},\"device\":{},"
@@ -1611,7 +1551,8 @@ void Tracer::dump_init_artifacts() {
     }
     for (uint8_t i = 0; i < 32; ++i) {
         std::println(out, "p.fregs.mem[{}]={}'h{:016x};", i, 64,
-                     cpu->state().regs.read_fp(simrv::xlen::to_fp_reg_id(static_cast<simrv::xlen::RegId>(i))));
+                     cpu->state().regs.read_fp(
+                         simrv::xlen::to_fp_reg_id(static_cast<simrv::xlen::RegId>(i))));
     }
     write_xlen("p.fcsr        ", cpu->state().fcsr);
     write_xlen("p.mstatus     ", cpu->state().mstatus);

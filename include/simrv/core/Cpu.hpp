@@ -54,63 +54,70 @@ struct alignas(128) ArchState {
     RegisterFile regs{};         ///< General-purpose integer, FP, and vector registers
 
     /* Machine Mode CSRs */
-    simrv::xlen::CSRValue
+    simrv::xlen::CsrValue
         mstatus{};  ///< Machine Status (tracks processor mode, interrupt states, extension states)
-    simrv::xlen::CSRValue
+    simrv::xlen::CsrValue
         mtvec{};  ///< Machine Trap-Vector Base-Address (address of machine mode trap handler)
-    simrv::xlen::CSRValue
+    simrv::xlen::CsrValue
         mscratch{};  ///< Machine Scratch register (used for temporary context swapping)
-    simrv::xlen::CSRValue mepc{};  ///< Machine Exception Program Counter (returns address on MRET)
+    simrv::xlen::CsrValue mepc{};  ///< Machine Exception Program Counter (returns address on MRET)
     simrv::xlen::TrapCause
         mcause{};  ///< Machine Trap Cause (interrupt vs exception and exact code)
-    simrv::xlen::CSRValue
+    simrv::xlen::CsrValue
         mtval{};  ///< Machine Trap Value (holds faulting addresses or instruction bytes)
-    simrv::xlen::CSRValue mhartid{};  ///< Machine Hardware Thread ID (processor core identifier)
-    simrv::xlen::CSRValue misa = isa::kMisaDefault;  ///< Machine ISA and extensions descriptor
-    simrv::xlen::CSRValue mie{};                     ///< Machine Interrupt Enable
-    simrv::xlen::CSRValue mip{};                     ///< Machine Interrupt Pending
+    simrv::xlen::CsrValue mhartid{};  ///< Machine Hardware Thread ID (processor core identifier)
+    simrv::xlen::CsrValue misa = isa::kMisaDefault;  ///< Machine ISA and extensions descriptor
+    simrv::xlen::CsrValue mie{};                     ///< Machine Interrupt Enable
+    simrv::xlen::CsrValue mip{};                     ///< Machine Interrupt Pending
     bool seip_software{};  ///< Software-writable component of mip.SEIP (ORed with PLIC signal).
     bool seip_external{};  ///< PLIC-driven component of mip.SEIP.
     bool stip_software{};  ///< M-mode software-posted component of writable mip.STIP.
     bool stip_timer{};     ///< Direct-SBI timer signal component of mip.STIP.
-    simrv::xlen::CSRValue
+    simrv::xlen::CsrValue
         medeleg{};  ///< Machine Exception Delegation (delegates trap handling to supervisor mode)
-    simrv::xlen::CSRValue
+    simrv::xlen::CsrValue
         mideleg{};  ///< Machine Interrupt Delegation (delegates interrupts to supervisor mode)
-    simrv::xlen::CSRValue mcounteren{};  ///< Machine Counter Enable (controls user/supervisor
-                                         ///< access to performance counters)
+    simrv::xlen::CsrValue mcounteren{};     ///< Machine Counter Enable (controls user/supervisor
+                                            ///< access to performance counters)
+    simrv::xlen::CsrValue mcountinhibit{};  ///< Machine Counter Inhibit (mcountinhibit, 0x320)
+    simrv::xlen::CsrValue menvcfg{};        ///< Machine Environment Configuration (menvcfg, 0x30A)
+    simrv::xlen::CsrValue menvcfgh{};  ///< Machine Environment Configuration High (RV32, 0x31A)
+    simrv::xlen::CsrValue mseccfg{};   ///< Machine Security Configuration (Smepmp, 0x747)
+    simrv::xlen::CsrValue mseccfgh{};  ///< Machine Security Configuration High (RV32, 0x757)
 
     /* Supervisor Mode CSRs */
-    simrv::xlen::CSRValue
+    simrv::xlen::CsrValue
         stvec{};  ///< Supervisor Trap-Vector Base-Address (address of supervisor trap handler)
-    simrv::xlen::CSRValue sscratch{};  ///< Supervisor Scratch register
-    simrv::xlen::CSRValue
+    simrv::xlen::CsrValue sscratch{};  ///< Supervisor Scratch register
+    simrv::xlen::CsrValue senvcfg{};   ///< Supervisor Environment Configuration (0x10A)
+    uint64_t stimecmp{UINT64_MAX};     ///< Supervisor Timer Compare (Sstc, 0x14D / 0x15D)
+    simrv::xlen::CsrValue
         sepc{};  ///< Supervisor Exception Program Counter (returns address on SRET)
     simrv::xlen::TrapCause scause{};     ///< Supervisor Trap Cause
-    simrv::xlen::CSRValue stval{};       ///< Supervisor Trap Value
-    simrv::xlen::CSRValue satp{};        ///< Supervisor Address Translation and Protection (virtual
+    simrv::xlen::CsrValue stval{};       ///< Supervisor Trap Value
+    simrv::xlen::CsrValue satp{};        ///< Supervisor Address Translation and Protection (virtual
                                          ///< memory mode and page table base physical address)
-    simrv::xlen::CSRValue scounteren{};  ///< Supervisor Counter Enable
+    simrv::xlen::CsrValue scounteren{};  ///< Supervisor Counter Enable
 
     /* Floating-Point CSRs */
-    simrv::xlen::CSRValue fcsr{};  ///< Floating-Point Control and Status register (rounding mode
+    simrv::xlen::CsrValue fcsr{};  ///< Floating-Point Control and Status register (rounding mode
                                    ///< and cumulative exception flags)
 
     /* Vector Extension CSRs */
-    simrv::xlen::CSRValue vstart{};  ///< Vector Start Index (specifies the register element index
+    simrv::xlen::CsrValue vstart{};  ///< Vector Start Index (specifies the register element index
                                      ///< to start vector execution)
-    simrv::xlen::CSRValue vxsat{};   ///< Vector Fixed-Point Saturation flag
-    simrv::xlen::CSRValue vxrm{};    ///< Vector Fixed-Point Rounding Mode selector
-    simrv::xlen::CSRValue
+    simrv::xlen::CsrValue vxsat{};   ///< Vector Fixed-Point Saturation flag
+    simrv::xlen::CsrValue vxrm{};    ///< Vector Fixed-Point Rounding Mode selector
+    simrv::xlen::CsrValue
         vl{};  ///< Vector Length (active number of elements to process in a vector instruction)
-    simrv::xlen::CSRValue
+    simrv::xlen::CsrValue
         vtype{};  ///< Vector Type (contains element width VSEW, vector group multiplier LMUL, etc.)
 
     simrv::xlen::PrivilegeLevel priv = kPrivMachine;  ///< Current processor privilege level
 
     simrv::xlen::Address load_res{};  ///< Active memory physical address reservation for
                                       ///< Load-Reserved / Store-Conditional (LR/SC)
-    simrv::xlen::CSRValue
+    simrv::xlen::CsrValue
         reserved{};  ///< Reserved for internal architectural extensions or tracking
 
     /* Physical Memory Protection (PMP) */
@@ -210,7 +217,7 @@ struct alignas(128) ArchState {
             const uint64_t updated = (static_cast<uint64_t>(mstatus) & ~kLowerXlenMask) |
                                      (has_u ? (lower_xlen << 32U) : 0U) |
                                      (has_s ? (lower_xlen << 34U) : 0U);
-            mstatus = static_cast<simrv::xlen::CSRValue>(updated);
+            mstatus = static_cast<simrv::xlen::CsrValue>(updated);
         }
         mstatus = mstatus_legalize_mpp(mstatus, has_s, has_u);
         mstatus &= mstatus_writable_mask(has_s, has_u, has_f, has_v);
@@ -343,14 +350,14 @@ class CPU {
      * the TLB if configuration changes).
      * @param val The new value to write to `mstatus`.
      */
-    void set_mstatus(simrv::xlen::CSRValue val);
+    void set_mstatus(simrv::xlen::CsrValue val);
 
     /**
      * @brief Reads a masked `mstatus` value with active architectural projections.
      * @param mask The bitmask of the status fields to retrieve.
      * @return The masked `mstatus` register value.
      */
-    [[nodiscard]] auto get_mstatus(simrv::xlen::CSRValue mask) const -> simrv::xlen::CSRValue;
+    [[nodiscard]] auto get_mstatus(simrv::xlen::CsrValue mask) const -> simrv::xlen::CsrValue;
 
     /**
      * @brief Reads a value from a specified Control and Status Register (CSR).
@@ -358,10 +365,8 @@ class CPU {
      * @return The CSR's value if successful, or an ExceptionCode if the access is unauthorized or
      * invalid.
      */
-    [[nodiscard]] auto read_csr(simrv::xlen::CSRAddress addr) const
-        -> std::expected<simrv::xlen::CSRValue, ExceptionCode>;
     [[nodiscard]] auto read_csr(simrv::xlen::CsrNumber addr) const
-        -> std::expected<simrv::xlen::CSRValue, ExceptionCode>;
+        -> std::expected<simrv::xlen::CsrValue, ExceptionCode>;
 
     /**
      * @brief Writes a value to a specified Control and Status Register (CSR).
@@ -369,9 +374,7 @@ class CPU {
      * @param val The new value to write.
      * @return A void result if successful, or an ExceptionCode on failure.
      */
-    auto write_csr(simrv::xlen::CSRAddress addr, simrv::xlen::CSRValue val)
-        -> std::expected<void, ExceptionCode>;
-    auto write_csr(simrv::xlen::CsrNumber addr, simrv::xlen::CSRValue val)
+    auto write_csr(simrv::xlen::CsrNumber addr, simrv::xlen::CsrValue val)
         -> std::expected<void, ExceptionCode>;
 
     /**
@@ -408,8 +411,8 @@ class CPU {
      * @param tval The trap-specific value (bad address, illegal instruction word, etc.) to save in
      * `mtval`/`stval`.
      */
-    void raise_exception(simrv::xlen::TrapCause cause, simrv::xlen::CSRValue tval);
-    inline void raise_exception(ExceptionCode code, simrv::xlen::CSRValue tval) {
+    void raise_exception(simrv::xlen::TrapCause cause, simrv::xlen::CsrValue tval);
+    inline void raise_exception(ExceptionCode code, simrv::xlen::CsrValue tval) {
         raise_exception(static_cast<simrv::xlen::TrapCause>(code), tval);
     }
 

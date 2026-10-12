@@ -416,9 +416,6 @@ auto parse_isa_preset(std::string_view value) -> std::expected<ParsedIsaPreset, 
                 if (supported_extension("zvl512b")) return 1ULL << 31;
                 if (supported_extension("zvl1024b")) return 1ULL << 32;
 
-                // Custom / Trace
-                if (supported_extension("xsimrvtrace")) return 1ULL << 33;
-
                 // Ratified Hints, Timers & Cache Management
                 if (supported_extension("zihintpause")) return 1ULL << 34;
                 if (supported_extension("sstc")) return 1ULL << 35;

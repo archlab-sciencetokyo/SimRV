@@ -10,7 +10,7 @@ namespace simrv::isa {
 
 /**
  * @enum IsaExtension
- * @brief Identifies MISA extension bits, including X for non-standard extensions present.
+ * @brief Identifies standard MISA extension bits and the reserved non-standard X bit.
  */
 enum class IsaExtension : uint8_t {
     E = 4,   ///< Reduced 32-bit integer register-set extension
@@ -24,7 +24,7 @@ enum class IsaExtension : uint8_t {
     S = 18,  ///< Supervisor Privilege Level support
     U = 20,  ///< User Privilege Level support
     V = 21,  ///< Vector Extension
-    X = 23,  ///< Non-standard extensions present (e.g. SimRV Xsimrvtrace)
+    X = 23,  ///< Non-standard extensions present
 };
 
 /**

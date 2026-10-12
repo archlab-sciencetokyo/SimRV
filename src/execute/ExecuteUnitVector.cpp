@@ -746,7 +746,7 @@ constexpr auto vector_compute_layout(isa::OperationId op_id, simrv::xlen::RegId 
 constexpr auto vector_permute_layout(isa::OperationId op_id, simrv::xlen::RegId destination,
                                      simrv::xlen::RegId source1, simrv::xlen::RegId source2,
                                      uint32_t sew, Vlmul lmul, uint32_t vlen,
-                                     simrv::xlen::CSRValue vstart) -> VectorComputeLayout {
+                                     simrv::xlen::CsrValue vstart) -> VectorComputeLayout {
     enum class Layout : uint8_t {
         None,
         SlideUp,
@@ -942,7 +942,7 @@ constexpr auto mask_operand_groups_valid(isa::OperationId op_id, simrv::xlen::Re
 
 constexpr auto vector_memory_layout(isa::OperationId op_id, simrv::xlen::RegId data_reg,
                                     simrv::xlen::RegId index_reg, uint32_t sew, uint32_t nfields,
-                                    Vlmul lmul, uint32_t vlen, simrv::xlen::CSRValue vstart)
+                                    Vlmul lmul, uint32_t vlen, simrv::xlen::CsrValue vstart)
     -> VectorMemoryLayout {
     if (op_id == isa::OperationId::VLM_V || op_id == isa::OperationId::VSM_V) {
         return {.recognized = true, .valid = nfields == 1, .field_registers = 1};

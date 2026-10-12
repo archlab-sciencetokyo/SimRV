@@ -40,9 +40,9 @@ class ExecuteUnitInt {
                        isa::Funct3 funct3) -> simrv::xlen::Register;
 
     /// Compute CSR write value for CSR instruction variants.
-    static auto csrWriteValue(simrv::xlen::CSRValue rcsr, simrv::xlen::Register rrs1,
+    static auto csrWriteValue(simrv::xlen::CsrValue rcsr, simrv::xlen::Register rrs1,
                               simrv::xlen::ImmValue imm, isa::Funct3 funct3)
-        -> std::expected<simrv::xlen::CSRValue, simrv::xlen::TrapCause>;
+        -> std::expected<simrv::xlen::CsrValue, simrv::xlen::TrapCause>;
 };
 
 }  // namespace simrv::execute

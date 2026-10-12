@@ -255,7 +255,7 @@ void test_hosted_rv32_cached_shift_width() {
         auto& cpu = machine.hart(simrv::xlen::HartId{0});
         auto& state = cpu.state();
         state.misa =
-            (state.misa & ~(simrv::xlen::CSRValue{3} << 62U)) | (simrv::xlen::CSRValue{1} << 62U);
+            (state.misa & ~(simrv::xlen::CsrValue{3} << 62U)) | (simrv::xlen::CsrValue{1} << 62U);
         state.initialize_lower_xlen_fields();
         expect(state.regs.xlen == 32, "RV64 build enters the RV32 guest personality");
 
@@ -307,8 +307,8 @@ void test_compressed_instruction_decode_and_flush() {
     expect(cpu.decode_cache.lookup(test_op.cpc) != nullptr, "cached op present before CSR write");
 
     // Write to mstatus altering FS field: must trigger TLB_flush which clears decode_cache
-    const simrv::xlen::CSRValue curr_mstatus = cpu.state().mstatus;
-    const simrv::xlen::CSRValue new_mstatus = curr_mstatus ^ simrv::core::MstatusBit::Fs;
+    const simrv::xlen::CsrValue curr_mstatus = cpu.state().mstatus;
+    const simrv::xlen::CsrValue new_mstatus = curr_mstatus ^ simrv::core::MstatusBit::Fs;
     auto res = csr.write(csr_addr(simrv::core::Csr::Mstatus), new_mstatus);
     (void)res;
     expect(cpu.decode_cache.lookup(test_op.cpc) == nullptr,
@@ -327,7 +327,7 @@ void test_privilege_returns_flush_cached_instructions() {
 
     cpu.state().priv = simrv::xlen::PrivilegeLevel::Machine;
     cpu.state().mstatus =
-        static_cast<simrv::xlen::CSRValue>(simrv::xlen::PrivilegeLevel::Supervisor) << 11;
+        static_cast<simrv::xlen::CsrValue>(simrv::xlen::PrivilegeLevel::Supervisor) << 11;
     cpu.decode_cache.insert(decoded.cpc, cached);
     expect(cpu.decode_cache.lookup(decoded.cpc) != nullptr, "MRET regression cache setup");
     cpu.mret();
@@ -336,10 +336,10 @@ void test_privilege_returns_flush_cached_instructions() {
     expect(cpu.decode_cache.lookup(decoded.cpc) == nullptr,
            "MRET invalidates cached ops so fetch permissions are rechecked");
 
-    const simrv::xlen::CSRValue misa_with_u = cpu.state().misa;
+    const simrv::xlen::CsrValue misa_with_u = cpu.state().misa;
     cpu.state().misa &= ~simrv::isa::misa_extension_bit(simrv::isa::IsaExtension::U);
     cpu.state().mstatus =
-        static_cast<simrv::xlen::CSRValue>(simrv::xlen::PrivilegeLevel::Supervisor) << 11U;
+        static_cast<simrv::xlen::CsrValue>(simrv::xlen::PrivilegeLevel::Supervisor) << 11U;
     cpu.mret();
     expect(
         cpu.state().priv == simrv::xlen::PrivilegeLevel::Supervisor &&
@@ -356,7 +356,7 @@ void test_privilege_returns_flush_cached_instructions() {
            "SRET invalidates cached ops so fetch permissions are rechecked");
 
     cpu.state().priv = simrv::xlen::PrivilegeLevel::User;
-    cpu.state().medeleg = static_cast<simrv::xlen::CSRValue>(1)
+    cpu.state().medeleg = static_cast<simrv::xlen::CsrValue>(1)
                           << static_cast<unsigned>(ExceptionCode::IllegalInstruction);
     cpu.state().stvec = decoded.cpc.raw();
     cpu.state().pc = 0x1000;
@@ -586,19 +586,19 @@ void test_csr_summary_and_presence_rules() {
 
     expect((mstatus_with_sd(std::to_underlying(MstatusBit::Vs)) & kMstatusSd) != 0,
            "mstatus.SD summarizes Dirty vector state");
-    expect((mstatus_with_sd(static_cast<simrv::xlen::CSRValue>(2) << 9U) & kMstatusSd) == 0,
+    expect((mstatus_with_sd(static_cast<simrv::xlen::CsrValue>(2) << 9U) & kMstatusSd) == 0,
            "mstatus.SD remains clear for Clean vector state");
 #if SIMRV_XLEN == 64
     {
-        const simrv::xlen::CSRValue rv32_status = mstatus_read_value(
+        const simrv::xlen::CsrValue rv32_status = mstatus_read_value(
             std::to_underlying(MstatusBit::Vs), simrv::core::kMstatusReadMask, 32);
-        expect((rv32_status & (simrv::xlen::CSRValue{1} << 31U)) != 0 &&
-                   (rv32_status & (simrv::xlen::CSRValue{1} << 63U)) == 0,
+        expect((rv32_status & (simrv::xlen::CsrValue{1} << 31U)) != 0 &&
+                   (rv32_status & (simrv::xlen::CsrValue{1} << 63U)) == 0,
                "an RV64-hosted RV32 status exposes SD at architectural bit 31");
-        const simrv::xlen::CSRValue sign_extended_rv32_cause = ~simrv::xlen::CSRValue{0} << 31U;
-        const simrv::xlen::CSRValue internal_cause =
+        const simrv::xlen::CsrValue sign_extended_rv32_cause = ~simrv::xlen::CsrValue{0} << 31U;
+        const simrv::xlen::CsrValue internal_cause =
             simrv::core::cause_write_value(sign_extended_rv32_cause, 32);
-        expect(internal_cause == (simrv::xlen::CSRValue{1} << 63U),
+        expect(internal_cause == (simrv::xlen::CsrValue{1} << 63U),
                "RV32 cause writes discard sign-extension bits before translating interrupt");
     }
 #endif
@@ -608,7 +608,7 @@ void test_csr_summary_and_presence_rules() {
     expect(simrv::core::is_debug_csr(0x7A0),
            "debug-only CSR encodings are identified independently of M-mode privilege");
 
-    const simrv::xlen::CSRValue m_only =
+    const simrv::xlen::CsrValue m_only =
         simrv::core::mstatus_writable_mask(false, false, false, false);
     expect((m_only & (MstatusBit::Sie | MstatusBit::Spie | MstatusBit::Spp | MstatusBit::Mprv |
                       MstatusBit::Sum | MstatusBit::Mxr | MstatusBit::Tvm | MstatusBit::Tw |
@@ -619,7 +619,7 @@ void test_csr_summary_and_presence_rules() {
              MstatusBit::Vs)) != 0,
            "S/U/F/V profiles retain their applicable status controls");
     expect(
-        ((simrv::core::mstatus_legalize_mpp(simrv::xlen::CSRValue{1U} << 11U, false, true) >> 11U) &
+        ((simrv::core::mstatus_legalize_mpp(simrv::xlen::CsrValue{1U} << 11U, false, true) >> 11U) &
          0x3U) == 3U,
         "MPP cannot select an unimplemented supervisor mode");
     expect(((simrv::core::mstatus_legalize_mpp(0, false, false) >> 11U) & 0x3U) == 3U,
@@ -684,7 +684,7 @@ void test_vector_length_bytes() {
         regs.vlen = vlen;
         expect(regs.vlen_bytes() == vlen / 8,
                "vlenb reflects the configured architectural vector length");
-        expect(regs.vstart_mask() == static_cast<simrv::xlen::CSRValue>(vlen - 1),
+        expect(regs.vstart_mask() == static_cast<simrv::xlen::CsrValue>(vlen - 1),
                "vstart represents every index below maximum VLMAX");
     }
 }
@@ -722,7 +722,7 @@ void test_vector_exception_propagation_and_status() {
            "an unhandled vector operation reports the faulting instruction");
 
     cpu.active_context().pending_exception.reset();
-    cpu.state().vtype = static_cast<simrv::xlen::CSRValue>(1) << (cpu.state().regs.xlen - 1U);
+    cpu.state().vtype = static_cast<simrv::xlen::CsrValue>(1) << (cpu.state().regs.xlen - 1U);
     simrv::execute::ExecuteUnit::execute_vector(cpu, machine.memory(),
                                                 simrv::isa::OperationId::VADD_VV, ir);
     expect(cpu.active_context().pending_exception == ExceptionCode::IllegalInstruction,
@@ -975,7 +975,7 @@ void test_vector_mask_and_fault_only_first_memory() {
            "segment fields advance by EMUL registers when LMUL is greater than one");
 
     const auto expect_illegal_memory = [&](simrv::isa::OperationId operation,
-                                           simrv::xlen::Instruction ir, simrv::xlen::CSRValue vtype,
+                                           simrv::xlen::Instruction ir, simrv::xlen::CsrValue vtype,
                                            const char* message) {
         cpu.active_context().pending_exception.reset();
         cpu.state().vtype = vtype;
@@ -1040,7 +1040,7 @@ void test_vector_mask_and_fault_only_first_memory() {
         cpu, machine.memory(), simrv::isa::OperationId::VL1RE8_V, memory_ir(vd, base_reg));
     expect(!cpu.active_context().pending_exception.has_value() && cpu.state().vstart == 0,
            "whole-register loads can start beyond current VLMAX when below their own EVL");
-    cpu.state().vtype = static_cast<simrv::xlen::CSRValue>(1) << (cpu.state().regs.xlen - 1U);
+    cpu.state().vtype = static_cast<simrv::xlen::CsrValue>(1) << (cpu.state().regs.xlen - 1U);
     cpu.state().vl = 0;
     cpu.state().vstart = 0;
     regs.write(base_reg, ram.base());
@@ -2380,19 +2380,19 @@ void test_vector_floating_arithmetic() {
 }
 
 void test_exception_delegation_mask() {
-    const simrv::xlen::CSRValue mask = simrv::core::kMedelegWritableMask;
-    expect((mask & (simrv::xlen::CSRValue{1} << std::to_underlying(ExceptionCode::UserEcall))) != 0,
+    const simrv::xlen::CsrValue mask = simrv::core::kMedelegWritableMask;
+    expect((mask & (simrv::xlen::CsrValue{1} << std::to_underlying(ExceptionCode::UserEcall))) != 0,
            "U-mode ECALL is delegatable to S-mode");
     expect((mask &
-            (simrv::xlen::CSRValue{1} << std::to_underlying(ExceptionCode::SupervisorEcall))) == 0,
+            (simrv::xlen::CsrValue{1} << std::to_underlying(ExceptionCode::SupervisorEcall))) == 0,
            "S-mode ECALL is not exposed as delegatable because it cannot originate below S-mode");
     expect(
-        (mask & (simrv::xlen::CSRValue{1} << std::to_underlying(ExceptionCode::MachineEcall))) == 0,
+        (mask & (simrv::xlen::CsrValue{1} << std::to_underlying(ExceptionCode::MachineEcall))) == 0,
         "M-mode ECALL is never delegatable");
     expect((mask &
-            (simrv::xlen::CSRValue{1} << std::to_underlying(ExceptionCode::HypervisorEcall))) == 0,
+            (simrv::xlen::CsrValue{1} << std::to_underlying(ExceptionCode::HypervisorEcall))) == 0,
            "hypervisor ECALL is not exposed without H support");
-    expect((mask & (static_cast<simrv::xlen::CSRValue>(1) << 14U)) == 0,
+    expect((mask & (static_cast<simrv::xlen::CsrValue>(1) << 14U)) == 0,
            "reserved exception cause 14 is not delegatable");
 }
 
@@ -2414,13 +2414,13 @@ void test_satp_modes() {
 }
 
 void test_named_isa_presets() {
-    const simrv::xlen::CSRValue im = simrv::isa::isa_preset_bits(simrv::isa::IsaPreset::IM);
-    const simrv::xlen::CSRValue ima = simrv::isa::isa_preset_bits(simrv::isa::IsaPreset::IMA);
-    const simrv::xlen::CSRValue g = simrv::isa::isa_preset_bits(simrv::isa::IsaPreset::G);
-    const simrv::xlen::CSRValue gc = simrv::isa::isa_preset_bits(simrv::isa::IsaPreset::GC);
-    const simrv::xlen::CSRValue gczb = simrv::isa::isa_preset_bits(simrv::isa::IsaPreset::GCZB);
-    const simrv::xlen::CSRValue gcv = simrv::isa::isa_preset_bits(simrv::isa::IsaPreset::GCV);
-    const simrv::xlen::CSRValue gczbv = simrv::isa::isa_preset_bits(simrv::isa::IsaPreset::GCZBV);
+    const simrv::xlen::CsrValue im = simrv::isa::isa_preset_bits(simrv::isa::IsaPreset::IM);
+    const simrv::xlen::CsrValue ima = simrv::isa::isa_preset_bits(simrv::isa::IsaPreset::IMA);
+    const simrv::xlen::CsrValue g = simrv::isa::isa_preset_bits(simrv::isa::IsaPreset::G);
+    const simrv::xlen::CsrValue gc = simrv::isa::isa_preset_bits(simrv::isa::IsaPreset::GC);
+    const simrv::xlen::CsrValue gczb = simrv::isa::isa_preset_bits(simrv::isa::IsaPreset::GCZB);
+    const simrv::xlen::CsrValue gcv = simrv::isa::isa_preset_bits(simrv::isa::IsaPreset::GCV);
+    const simrv::xlen::CsrValue gczbv = simrv::isa::isa_preset_bits(simrv::isa::IsaPreset::GCZBV);
 
     expect(simrv::isa::misa_has_extension(g, simrv::isa::IsaExtension::I) &&
                simrv::isa::misa_has_extension(g, simrv::isa::IsaExtension::M) &&
@@ -2837,17 +2837,17 @@ void test_vector_decode_tables() {
         simrv::pipeline::decoder(encode_op_v(0x1B, 1, true)) == simrv::isa::OperationId::VMFLT_VV,
         "vector table decodes ordered floating-point mask comparison");
 
-    constexpr simrv::xlen::CSRValue kV =
+    constexpr simrv::xlen::CsrValue kV =
         simrv::isa::misa_extension_bit(simrv::isa::IsaExtension::V);
-    constexpr simrv::xlen::CSRValue kB =
+    constexpr simrv::xlen::CsrValue kB =
         simrv::isa::misa_extension_bit(simrv::isa::IsaExtension::B);
-    constexpr simrv::xlen::CSRValue kC =
+    constexpr simrv::xlen::CsrValue kC =
         simrv::isa::misa_extension_bit(simrv::isa::IsaExtension::C);
-    constexpr simrv::xlen::CSRValue kF =
+    constexpr simrv::xlen::CsrValue kF =
         simrv::isa::misa_extension_bit(simrv::isa::IsaExtension::F);
-    constexpr simrv::xlen::CSRValue kD =
+    constexpr simrv::xlen::CsrValue kD =
         simrv::isa::misa_extension_bit(simrv::isa::IsaExtension::D);
-    constexpr simrv::xlen::CSRValue kI =
+    constexpr simrv::xlen::CsrValue kI =
         simrv::isa::misa_extension_bit(simrv::isa::IsaExtension::I);
     expect(simrv::isa::instruction_enabled_by_misa(kV, simrv::isa::OperationId::VADD_VV),
            "base vector arithmetic requires the V MISA bit");
@@ -2954,7 +2954,7 @@ void test_interrupt_priority() {
 }
 
 void test_epc_ialign_mask() {
-    const simrv::xlen::CSRValue with_c =
+    const simrv::xlen::CsrValue with_c =
         simrv::isa::misa_extension_bit(simrv::isa::IsaExtension::C);
     expect(simrv::isa::epc_read_value(0x103, with_c) == 0x102,
            "xepc masks bit zero when compressed instructions set IALIGN=16");
@@ -2963,11 +2963,11 @@ void test_epc_ialign_mask() {
 }
 
 void test_rv32_cause_translation() {
-    constexpr simrv::xlen::CSRValue visible_interrupt = simrv::xlen::CSRValue{1} << 31U;
-    const simrv::xlen::CSRValue internal =
+    constexpr simrv::xlen::CsrValue visible_interrupt = simrv::xlen::CsrValue{1} << 31U;
+    const simrv::xlen::CsrValue internal =
         simrv::core::cause_write_value(visible_interrupt | 7U, 32);
     if constexpr (simrv::xlen::kIsXLen64) {
-        expect((internal & static_cast<simrv::xlen::CSRValue>(uint64_t{1} << 63U)) != 0,
+        expect((internal & static_cast<simrv::xlen::CsrValue>(uint64_t{1} << 63U)) != 0,
                "RV64 internal state relocates an RV32 architectural interrupt flag");
     } else {
         expect((internal & visible_interrupt) != 0,
@@ -2980,7 +2980,7 @@ void test_rv32_cause_translation() {
 void test_lower_privilege_xlen_initialization() {
     if constexpr (simrv::xlen::kIsXLen64) {
         simrv::core::ArchState state;
-        state.misa = static_cast<simrv::xlen::CSRValue>(uint64_t{1U} << 62U) |
+        state.misa = static_cast<simrv::xlen::CsrValue>(uint64_t{1U} << 62U) |
                      simrv::isa::misa_extension_bit(simrv::isa::IsaExtension::I) |
                      simrv::isa::misa_extension_bit(simrv::isa::IsaExtension::S) |
                      simrv::isa::misa_extension_bit(simrv::isa::IsaExtension::U);
@@ -2993,7 +2993,7 @@ void test_lower_privilege_xlen_initialization() {
         expect(state.regs.xlen == 32,
                "entering supervisor mode does not widen an RV32 machine personality");
 
-        state.misa = static_cast<simrv::xlen::CSRValue>(uint64_t{2U} << 62U) |
+        state.misa = static_cast<simrv::xlen::CsrValue>(uint64_t{2U} << 62U) |
                      simrv::isa::misa_extension_bit(simrv::isa::IsaExtension::I) |
                      simrv::isa::misa_extension_bit(simrv::isa::IsaExtension::S) |
                      simrv::isa::misa_extension_bit(simrv::isa::IsaExtension::U);
@@ -3003,13 +3003,13 @@ void test_lower_privilege_xlen_initialization() {
                "an RV64 machine personality initializes UXL and SXL to RV64");
 
         state.mstatus =
-            (state.mstatus & ~static_cast<simrv::xlen::CSRValue>(uint64_t{0x3U} << 34U)) |
-            static_cast<simrv::xlen::CSRValue>(uint64_t{1U} << 34U);
+            (state.mstatus & ~static_cast<simrv::xlen::CsrValue>(uint64_t{0x3U} << 34U)) |
+            static_cast<simrv::xlen::CsrValue>(uint64_t{1U} << 34U);
         expect(state.xlen_for_privilege(kPrivMachine) == 64 &&
                    state.xlen_for_privilege(kPrivSupervisor) == 32,
                "effective privilege can select an XLEN narrower than M-mode");
 
-        state.misa = static_cast<simrv::xlen::CSRValue>(uint64_t{2U} << 62U) |
+        state.misa = static_cast<simrv::xlen::CsrValue>(uint64_t{2U} << 62U) |
                      simrv::isa::misa_extension_bit(simrv::isa::IsaExtension::I);
         state.initialize_lower_xlen_fields();
         expect(((static_cast<uint64_t>(state.mstatus) >> 32U) & 0xFU) == 0U,
@@ -3160,7 +3160,7 @@ void test_pmp_semantics() {
     auto& cpu = machine.hart(simrv::xlen::HartId{0});
     const auto pmpcfg0 = csr_addr(simrv::core::Csr::Pmpcfg0);
     // Entry 0 writes reserved bits plus legal RWX; entry 1 writes NAPOT + W without R.
-    const simrv::xlen::CSRValue invalid_pmpcfg = static_cast<simrv::xlen::CSRValue>(0x1A7FU);
+    const simrv::xlen::CsrValue invalid_pmpcfg = static_cast<simrv::xlen::CsrValue>(0x1A7FU);
     expect(cpu.csr_file.write(pmpcfg0, invalid_pmpcfg).has_value(),
            "pmpcfg accepts writes containing WARL encodings");
     const auto legalized_pmpcfg = cpu.csr_file.read(pmpcfg0);

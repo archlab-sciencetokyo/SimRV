@@ -163,7 +163,7 @@ constexpr auto is_snan64(double v) -> bool { return is_snan(v); }
 class FpEnvironment {
    public:
     static inline void set_rounding_mode(simrv::xlen::Word rm,
-                                         simrv::xlen::CSRValue fcsr) noexcept {
+                                         simrv::xlen::CsrValue fcsr) noexcept {
         const RoundingMode effective_rm = resolve_rounding_mode(rm, fcsr);
 
         uint32_t mxcsr_rm = 0;
@@ -193,9 +193,9 @@ class FpEnvironment {
 
     static inline void clear_exceptions() noexcept { _mm_setcsr(_mm_getcsr() & ~0x3fu); }
 
-    static inline void accumulate_exceptions(simrv::xlen::CSRValue& fcsr) noexcept {
+    static inline void accumulate_exceptions(simrv::xlen::CsrValue& fcsr) noexcept {
         const uint32_t mxcsr = _mm_getcsr();
-        simrv::xlen::CSRValue flags = 0;
+        simrv::xlen::CsrValue flags = 0;
         if ((mxcsr & 0x01u) != 0) flags |= FflagsBit::Nv;
         if ((mxcsr & 0x04u) != 0) flags |= FflagsBit::Dz;
         if ((mxcsr & 0x08u) != 0) flags |= FflagsBit::Of;
@@ -210,7 +210,7 @@ class FpEnvironment {
 class FpEnvironment {
    public:
     static inline void set_rounding_mode(simrv::xlen::Word rm,
-                                         simrv::xlen::CSRValue fcsr) noexcept {
+                                         simrv::xlen::CsrValue fcsr) noexcept {
         const RoundingMode effective_rm = resolve_rounding_mode(rm, fcsr);
         int fe_round = FE_TONEAREST;
         switch (effective_rm) {
@@ -235,9 +235,9 @@ class FpEnvironment {
 
     static inline void clear_exceptions() noexcept { std::feclearexcept(FE_ALL_EXCEPT); }
 
-    static inline void accumulate_exceptions(simrv::xlen::CSRValue& fcsr) noexcept {
+    static inline void accumulate_exceptions(simrv::xlen::CsrValue& fcsr) noexcept {
         const int ex = std::fetestexcept(FE_ALL_EXCEPT);
-        simrv::xlen::CSRValue flags = 0;
+        simrv::xlen::CsrValue flags = 0;
         if ((ex & FE_INVALID) != 0) flags |= FflagsBit::Nv;
         if ((ex & FE_DIVBYZERO) != 0) flags |= FflagsBit::Dz;
         if ((ex & FE_OVERFLOW) != 0) flags |= FflagsBit::Of;
@@ -297,7 +297,7 @@ static auto fmax64_riscv(double a, double b) -> simrv::xlen::FloatingRegister {
 // ============================================================================
 
 static auto fcvt_to_int(double value, simrv::xlen::Word op_mode, RoundingMode effective_rm,
-                        simrv::xlen::CSRValue& fcsr) -> simrv::xlen::Register {
+                        simrv::xlen::CsrValue& fcsr) -> simrv::xlen::Register {
     const bool is_unsigned = (op_mode & 1) != 0;
     const bool is_64 = (op_mode >= 2);
 
@@ -407,7 +407,7 @@ using namespace fp;
 
 auto ExecuteUnitFp::fusedFp(Opcode opcode, FpFmt fmt, simrv::xlen::FpRegId rs1,
                             simrv::xlen::FpRegId rs2, simrv::xlen::FpRegId rs3, RoundingMode rm,
-                            const simrv::xlen::FloatingRegister* freg, simrv::xlen::CSRValue& fcsr)
+                            const simrv::xlen::FloatingRegister* freg, simrv::xlen::CsrValue& fcsr)
     -> FpExecResult {
     FpExecResult out;
     FpEnvironment::set_rounding_mode(std::to_underlying(rm), fcsr);
@@ -477,7 +477,7 @@ namespace fp {
 template <typename FloatT, typename Op>
 inline auto fp_exec_binary(FpExecResult& out, simrv::xlen::Word rm, simrv::xlen::Word rs1,
                            simrv::xlen::Word rs2, const simrv::xlen::FloatingRegister* freg,
-                           simrv::xlen::CSRValue& fcsr, Op&& op) -> bool {
+                           simrv::xlen::CsrValue& fcsr, Op&& op) -> bool {
     using T = FpTraits<FloatT>;
     FpEnvironment::set_rounding_mode(rm, fcsr);
     FpEnvironment::clear_exceptions();
@@ -493,7 +493,7 @@ inline auto fp_exec_binary(FpExecResult& out, simrv::xlen::Word rm, simrv::xlen:
 
 template <typename FloatT, typename Op>
 inline auto fp_exec_unary(FpExecResult& out, simrv::xlen::Word rm, simrv::xlen::Word rs1,
-                          const simrv::xlen::FloatingRegister* freg, simrv::xlen::CSRValue& fcsr,
+                          const simrv::xlen::FloatingRegister* freg, simrv::xlen::CsrValue& fcsr,
                           Op&& op) -> bool {
     using T = FpTraits<FloatT>;
     FpEnvironment::set_rounding_mode(rm, fcsr);
@@ -510,7 +510,7 @@ inline auto fp_exec_unary(FpExecResult& out, simrv::xlen::Word rm, simrv::xlen::
 
 bool fp_exec_add_sub(FpExecResult& out, simrv::xlen::Word funct7, simrv::xlen::Word rm,
                      simrv::xlen::Word rs1, simrv::xlen::Word rs2,
-                     const simrv::xlen::FloatingRegister* freg, simrv::xlen::CSRValue& fcsr) {
+                     const simrv::xlen::FloatingRegister* freg, simrv::xlen::CsrValue& fcsr) {
     if (funct7 == Funct7Fp::FaddS)
         return fp_exec_binary<float>(out, rm, rs1, rs2, freg, fcsr, std::plus<float>{});
     if (funct7 == Funct7Fp::FaddD)
@@ -524,7 +524,7 @@ bool fp_exec_add_sub(FpExecResult& out, simrv::xlen::Word funct7, simrv::xlen::W
 
 bool fp_exec_mul_div_sqrt(FpExecResult& out, simrv::xlen::Word funct7, simrv::xlen::Word rm,
                           simrv::xlen::Word rs1, simrv::xlen::Word rs2,
-                          const simrv::xlen::FloatingRegister* freg, simrv::xlen::CSRValue& fcsr) {
+                          const simrv::xlen::FloatingRegister* freg, simrv::xlen::CsrValue& fcsr) {
     if (funct7 == Funct7Fp::FmulS)
         return fp_exec_binary<float>(out, rm, rs1, rs2, freg, fcsr, std::multiplies<float>{});
     if (funct7 == Funct7Fp::FmulD)
@@ -543,7 +543,7 @@ bool fp_exec_mul_div_sqrt(FpExecResult& out, simrv::xlen::Word funct7, simrv::xl
 
 bool fp_exec_sgnj_minmax(FpExecResult& out, simrv::xlen::Word funct7, Funct3 funct3,
                          simrv::xlen::Word rs1, simrv::xlen::Word rs2,
-                         const simrv::xlen::FloatingRegister* freg, simrv::xlen::CSRValue& fcsr) {
+                         const simrv::xlen::FloatingRegister* freg, simrv::xlen::CsrValue& fcsr) {
     if (funct7 == Funct7Fp::FsgnjS || funct7 == Funct7Fp::FsgnjD) {
         const bool is_d = (funct7 == Funct7Fp::FsgnjD);
         simrv::xlen::FloatingRegister a = freg[rs1];
@@ -594,7 +594,7 @@ bool fp_exec_sgnj_minmax(FpExecResult& out, simrv::xlen::Word funct7, Funct3 fun
 
 bool fp_exec_cvt(FpExecResult& out, simrv::xlen::Word funct7, simrv::xlen::Word rm,
                  simrv::xlen::Word rs1, simrv::xlen::Word rs2, simrv::xlen::Register rrs1,
-                 const simrv::xlen::FloatingRegister* freg, simrv::xlen::CSRValue& fcsr) {
+                 const simrv::xlen::FloatingRegister* freg, simrv::xlen::CsrValue& fcsr) {
     if (funct7 == Funct7Fp::FcvtSD) {
         FpEnvironment::set_rounding_mode(rm, fcsr);
         FpEnvironment::clear_exceptions();
@@ -650,7 +650,7 @@ bool fp_exec_cvt(FpExecResult& out, simrv::xlen::Word funct7, simrv::xlen::Word 
 
 bool fp_exec_cmp(FpExecResult& out, simrv::xlen::Word funct7, Funct3 funct3, simrv::xlen::Word rs1,
                  simrv::xlen::Word rs2, const simrv::xlen::FloatingRegister* freg,
-                 simrv::xlen::CSRValue& fcsr) {
+                 simrv::xlen::CsrValue& fcsr) {
     if (funct7 == Funct7Fp::FcmpS || funct7 == Funct7Fp::FcmpD) {
         const bool is_d = (funct7 == Funct7Fp::FcmpD);
         FpEnvironment::clear_exceptions();
@@ -728,7 +728,7 @@ bool fp_exec_mv_class(FpExecResult& out, simrv::xlen::Word funct7, Funct3 funct3
 
 auto ExecuteUnitFp::opFp(simrv::xlen::Funct7 funct7, Funct3 funct3, simrv::xlen::FpRegId rs1,
                          simrv::xlen::FpRegId rs2, simrv::xlen::Register rrs1,
-                         const simrv::xlen::FloatingRegister* freg, simrv::xlen::CSRValue& fcsr)
+                         const simrv::xlen::FloatingRegister* freg, simrv::xlen::CsrValue& fcsr)
     -> FpExecResult {
     FpExecResult out;
     const simrv::xlen::Word rm = std::to_underlying(funct3);

@@ -76,7 +76,7 @@ clang-format --dry-run --Werror $(find include src tests -name "*.cpp" -o -name 
      or with `--isa rv32...`; it remains internally distinct from the native RV32 build.
 2. **Domain-Specific Type Aliases**:
    - Avoid generic primitive types (`uint64_t`, `uint32_t`, `int`) when domain aliases exist:
-     - `Word`, `Address`, `PhysAddr`, `VirtAddr`, `RegId`, `CSRValue`, `TrapCause`.
+     - `Word`, `Address`, `PhysAddr`, `VirtAddr`, `RegId`, `CsrValue`, `CsrNumber`, `TrapCause`.
    - Proactively declare strongly typed aliases for new architectural concepts.
 3. **Logging & Tracing Standards**:
    - Use `simrv::log::info`, `simrv::log::warn`, and `simrv::log::error` from `simrv/core/Logger.hpp` for console and TUI messages.

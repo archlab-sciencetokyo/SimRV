@@ -19,10 +19,10 @@
 #include "simrv/memory/MemorySubsystem.hpp"
 #include "simrv/memory/MemoryUtil.hpp"
 #include "simrv/pipeline/OperationTraits.hpp"
-#include "simrv/xlen/Constants.hpp"
 #include "simrv/xlen/AddressTypes.hpp"
-#include "simrv/xlen/RegisterTypes.hpp"
+#include "simrv/xlen/Constants.hpp"
 #include "simrv/xlen/IdentifierTypes.hpp"
+#include "simrv/xlen/RegisterTypes.hpp"
 
 namespace simrv::core {
 using isa::Funct3;
@@ -379,8 +379,8 @@ SIMRV_ALWAYS_INLINE auto CPU::execute_cached_store(Machine& machine, CachedOp& o
             if (simrv::compiler::unlikely(
                     machine.num_harts() > 1 &&
                     machine.memory_.reservation_table().may_have_reservations())) {
-                machine.memory_.reservation_table().invalidate_range(
-                    mem_addr, size_bytes, hart_id());
+                machine.memory_.reservation_table().invalidate_range(mem_addr, size_bytes,
+                                                                     hart_id());
             }
             advance_cached_pc(op);
             return true;
@@ -414,9 +414,8 @@ SIMRV_ALWAYS_INLINE auto CPU::execute_cached_store(Machine& machine, CachedOp& o
                         if (simrv::compiler::unlikely(
                                 machine.num_harts() > 1 &&
                                 machine.memory_.reservation_table().may_have_reservations())) {
-                            machine.memory_.reservation_table().invalidate_range(
-                                paddr, size_bytes,
-                                hart_id());
+                            machine.memory_.reservation_table().invalidate_range(paddr, size_bytes,
+                                                                                 hart_id());
                         }
                         advance_cached_pc(op);
                         return true;
@@ -441,9 +440,8 @@ SIMRV_ALWAYS_INLINE auto CPU::execute_cached_store(Machine& machine, CachedOp& o
     state_.reserved = 0;
     if (simrv::compiler::unlikely(machine.num_harts() > 1 &&
                                   machine.memory_.reservation_table().may_have_reservations())) {
-        machine.memory_.reservation_table().invalidate_range(
-            pipeline_context.mem_paddr, size_bytes,
-            hart_id());
+        machine.memory_.reservation_table().invalidate_range(pipeline_context.mem_paddr, size_bytes,
+                                                             hart_id());
     }
     advance_cached_pc(op);
     return true;
@@ -791,8 +789,8 @@ void CPU::execute_cached_op_fast(Machine& machine, CachedOp& op,
                     }
                 }
             }
-            state_.regs.write_fp(simrv::xlen::to_fp_reg_id(
-                op.rd),
+            state_.regs.write_fp(
+                simrv::xlen::to_fp_reg_id(op.rd),
                 (op.funct3 == isa::Funct3::Flw)
                     ? (static_cast<simrv::xlen::FloatingRegister>(simrv::xlen::kF32BoxerBits) |
                        (mem_rdata & 0xFFFFFFFFULL))
@@ -805,7 +803,8 @@ void CPU::execute_cached_op_fast(Machine& machine, CachedOp& op,
         case isa::FSW:
         case isa::FSD: {
             simrv::xlen::Address const mem_addr = rrs1 + op.imm;
-            simrv::xlen::FloatingRegister const fp_data = state_.regs.read_fp(simrv::xlen::to_fp_reg_id(op.rs2));
+            simrv::xlen::FloatingRegister const fp_data =
+                state_.regs.read_fp(simrv::xlen::to_fp_reg_id(op.rs2));
             const unsigned size_bytes = op.mem_size;
             const simrv::xlen::Address align_mask = op.align_mask();
             const bool fast_width_supported =
@@ -874,9 +873,8 @@ void CPU::execute_cached_op_fast(Machine& machine, CachedOp& op,
             if (simrv::compiler::unlikely(
                     machine.num_harts() > 1 &&
                     machine.memory_.reservation_table().may_have_reservations())) {
-                machine.memory_.reservation_table().invalidate_range(
-                    pipeline_context.mem_paddr, size_bytes,
-                    hart_id());
+                machine.memory_.reservation_table().invalidate_range(pipeline_context.mem_paddr,
+                                                                     size_bytes, hart_id());
             }
             advance_cached_pc(op);
             return;
@@ -897,11 +895,11 @@ void CPU::execute_cached_op_fast(Machine& machine, CachedOp& op,
             }
             const auto rs3 = static_cast<simrv::xlen::FpRegId>((op.ir >> 27) & 0x1F);
             const auto fmt = static_cast<FpFmt>((op.ir >> 25) & 0x3);
-            const simrv::xlen::CSRValue old_fcsr = state_.fcsr;
+            const simrv::xlen::CsrValue old_fcsr = state_.fcsr;
             auto res = execute::ExecuteUnit::fusedFp(
                 op.opcode(), fmt, simrv::xlen::to_fp_reg_id(op.rs1),
-                simrv::xlen::to_fp_reg_id(op.rs2), rs3,
-                static_cast<isa::RoundingMode>(op.funct3), state_.regs.fp_data_ptr(), state_.fcsr);
+                simrv::xlen::to_fp_reg_id(op.rs2), rs3, static_cast<isa::RoundingMode>(op.funct3),
+                state_.regs.fp_data_ptr(), state_.fcsr);
             if (res.fp_wb_enable) {
                 state_.regs.write_fp(simrv::xlen::to_fp_reg_id(op.rd), res.fp_wb_data);
                 state_.mstatus |= MstatusBit::Fs;
@@ -924,7 +922,7 @@ void CPU::execute_cached_op_fast(Machine& machine, CachedOp& op,
                 raise_exception(ExceptionCode::IllegalInstruction, op.ir);
                 return;
             }
-            const simrv::xlen::CSRValue old_fcsr = state_.fcsr;
+            const simrv::xlen::CsrValue old_fcsr = state_.fcsr;
             auto res = execute::ExecuteUnit::opFp(
                 op.funct7(), op.funct3, simrv::xlen::to_fp_reg_id(op.rs1),
                 simrv::xlen::to_fp_reg_id(op.rs2), rrs1, state_.regs.fp_data_ptr(), state_.fcsr);

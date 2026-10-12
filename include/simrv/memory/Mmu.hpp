@@ -57,7 +57,7 @@ class Mmu {
      */
     std::expected<PageWalkResult, simrv::xlen::TrapCause> page_walk(
         simrv::xlen::VirtAddr v_addr, PteAccess access, simrv::xlen::PrivilegeLevel priv,
-        simrv::xlen::CSRValue mstatus, simrv::xlen::Word satp, unsigned xlen,
+        simrv::xlen::CsrValue mstatus, simrv::xlen::Word satp, unsigned xlen,
         bool update_access_bits = true, const core::ArchState* arch_state = nullptr);
 
     /**
@@ -78,13 +78,13 @@ class Mmu {
      */
     std::expected<PageWalkResult, simrv::xlen::TrapCause> translate(
         simrv::xlen::VirtAddr v_addr, PteAccess access, simrv::xlen::PrivilegeLevel priv,
-        simrv::xlen::CSRValue mstatus, simrv::xlen::Word satp, unsigned xlen,
+        simrv::xlen::CsrValue mstatus, simrv::xlen::Word satp, unsigned xlen,
         bool update_access_bits = true, const core::ArchState* arch_state = nullptr);
 
     /// Start a walk without performing any implicit physical-memory access.
     [[nodiscard]] PageWalkState begin_page_walk(simrv::xlen::VirtAddr v_addr, PteAccess access,
                                                 simrv::xlen::PrivilegeLevel priv,
-                                                simrv::xlen::CSRValue mstatus,
+                                                simrv::xlen::CsrValue mstatus,
                                                 simrv::xlen::Word satp, unsigned xlen,
                                                 bool update_access_bits = true,
                                                 const core::ArchState* arch_state = nullptr) const;

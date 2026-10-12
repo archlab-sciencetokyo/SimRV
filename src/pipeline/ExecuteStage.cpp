@@ -332,7 +332,7 @@ void CPU::execute_fp(Machine& /*machine*/) {
             }
             const auto fmt = static_cast<FpFmt>(ctx.funct7 & 0x3);
             const auto rs3 = static_cast<simrv::xlen::FpRegId>((ctx.ir >> 27) & 0x1F);
-            const simrv::xlen::CSRValue old_fcsr = state_.fcsr;
+            const simrv::xlen::CsrValue old_fcsr = state_.fcsr;
             const auto fp = execute::ExecuteUnit::fusedFp(
                 ctx.opcode, fmt, simrv::xlen::to_fp_reg_id(ctx.rs1),
                 simrv::xlen::to_fp_reg_id(ctx.rs2), rs3, static_cast<isa::RoundingMode>(ctx.funct3),
@@ -352,7 +352,7 @@ void CPU::execute_fp(Machine& /*machine*/) {
                 ctx.pending_tval = ctx.ir;
                 break;
             }
-            const simrv::xlen::CSRValue old_fcsr = state_.fcsr;
+            const simrv::xlen::CsrValue old_fcsr = state_.fcsr;
             const auto fp = execute::ExecuteUnit::opFp(ctx.funct7, ctx.funct3,
                                                        simrv::xlen::to_fp_reg_id(ctx.rs1),
                                                        simrv::xlen::to_fp_reg_id(ctx.rs2), ctx.rrs1,

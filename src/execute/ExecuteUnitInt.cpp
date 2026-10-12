@@ -327,23 +327,23 @@ auto ExecuteUnitInt::aluAmo(simrv::xlen::Register in1, simrv::xlen::Register in2
     return perform_amo_op<simrv::xlen::Word>(in1, in2, funct5);
 }
 
-auto ExecuteUnitInt::csrWriteValue(simrv::xlen::CSRValue rcsr, simrv::xlen::Register rrs1,
+auto ExecuteUnitInt::csrWriteValue(simrv::xlen::CsrValue rcsr, simrv::xlen::Register rrs1,
                                    simrv::xlen::ImmValue imm, Funct3 funct3)
-    -> std::expected<simrv::xlen::CSRValue, simrv::xlen::TrapCause> {
+    -> std::expected<simrv::xlen::CsrValue, simrv::xlen::TrapCause> {
     const simrv::xlen::Word zimm = static_cast<simrv::xlen::Word>(imm);
     switch (funct3) {
         case Funct3::Csrrw:
-            return static_cast<simrv::xlen::CSRValue>(rrs1);
+            return static_cast<simrv::xlen::CsrValue>(rrs1);
         case Funct3::Csrrs:
-            return rcsr | static_cast<simrv::xlen::CSRValue>(rrs1);
+            return rcsr | static_cast<simrv::xlen::CsrValue>(rrs1);
         case Funct3::Csrrc:
-            return rcsr & ~static_cast<simrv::xlen::CSRValue>(rrs1);
+            return rcsr & ~static_cast<simrv::xlen::CsrValue>(rrs1);
         case Funct3::Csrrwi:
-            return static_cast<simrv::xlen::CSRValue>(zimm);
+            return static_cast<simrv::xlen::CsrValue>(zimm);
         case Funct3::Csrrsi:
-            return rcsr | static_cast<simrv::xlen::CSRValue>(zimm);
+            return rcsr | static_cast<simrv::xlen::CsrValue>(zimm);
         case Funct3::Csrrci:
-            return rcsr & ~static_cast<simrv::xlen::CSRValue>(zimm);
+            return rcsr & ~static_cast<simrv::xlen::CsrValue>(zimm);
         default:
             return std::unexpected(to_trap_cause(ExceptionCode::IllegalInstruction));
     }

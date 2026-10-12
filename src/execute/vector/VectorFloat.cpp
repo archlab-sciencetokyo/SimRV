@@ -28,8 +28,8 @@ auto canonicalize_nan(T value) -> T {
     }
 }
 
-auto host_exceptions_to_fflags(int exceptions) -> simrv::xlen::CSRValue {
-    simrv::xlen::CSRValue flags = 0;
+auto host_exceptions_to_fflags(int exceptions) -> simrv::xlen::CsrValue {
+    simrv::xlen::CsrValue flags = 0;
     if ((exceptions & FE_INEXACT) != 0) flags |= isa::FflagsBit::Nx;
     if ((exceptions & FE_UNDERFLOW) != 0) flags |= isa::FflagsBit::Uf;
     if ((exceptions & FE_OVERFLOW) != 0) flags |= isa::FflagsBit::Of;
@@ -38,7 +38,7 @@ auto host_exceptions_to_fflags(int exceptions) -> simrv::xlen::CSRValue {
     return flags;
 }
 
-auto frm_to_host_round(simrv::xlen::CSRValue fcsr) -> int {
+auto frm_to_host_round(simrv::xlen::CsrValue fcsr) -> int {
     switch (isa::frm_rounding_mode(fcsr)) {
         case isa::RoundingMode::Rtz:
             return FE_TOWARDZERO;
@@ -663,7 +663,7 @@ constexpr auto bit_mask(unsigned pos, unsigned length) -> uint64_t {
 
 template <typename T>
 auto fp_estimate7_raw(typename VectorFpElement<T>::Raw input, bool reciprocal_sqrt,
-                      isa::RoundingMode rm, simrv::xlen::CSRValue& flags) ->
+                      isa::RoundingMode rm, simrv::xlen::CsrValue& flags) ->
     typename VectorFpElement<T>::Raw {
     using E = VectorFpElement<T>;
     using Raw = typename E::Raw;
@@ -762,7 +762,7 @@ auto fp_estimate7_raw(typename VectorFpElement<T>::Raw input, bool reciprocal_sq
 
 template <typename T>
 void execute_vf_estimate7(core::CPU& cpu, simrv::xlen::RegId rd, simrv::xlen::RegId rs2, bool vm,
-                          uint32_t vl, bool reciprocal_sqrt, simrv::xlen::CSRValue& flags) {
+                          uint32_t vl, bool reciprocal_sqrt, simrv::xlen::CsrValue& flags) {
     using Raw = typename VectorFpElement<T>::Raw;
     const auto& mask_reg =
         cpu.state().regs.read_vector(simrv::xlen::to_vec_reg_id(simrv::xlen::RegId::Zero));
@@ -1239,8 +1239,8 @@ void execute_vfw_fma(core::CPU& cpu, isa::OperationId op_id, simrv::xlen::RegId 
 }
 
 template <typename Int, typename Float>
-auto saturating_fp_to_int(Float value, bool force_rtz, simrv::xlen::CSRValue fcsr,
-                          simrv::xlen::CSRValue& flags) -> Int {
+auto saturating_fp_to_int(Float value, bool force_rtz, simrv::xlen::CsrValue fcsr,
+                          simrv::xlen::CsrValue& flags) -> Int {
     const bool invalid_positive = std::isnan(value) || value > 0;
     if (!std::isfinite(value)) {
         flags |= isa::FflagsBit::Nv;
@@ -1278,7 +1278,7 @@ auto saturating_fp_to_int(Float value, bool force_rtz, simrv::xlen::CSRValue fcs
 
 template <typename T>
 void execute_vfcvt(core::CPU& cpu, isa::OperationId op_id, simrv::xlen::RegId rd,
-                   simrv::xlen::RegId rs2, bool vm, uint32_t vl, simrv::xlen::CSRValue& flags) {
+                   simrv::xlen::RegId rs2, bool vm, uint32_t vl, simrv::xlen::CsrValue& flags) {
     using Raw = typename VectorFpElement<T>::Raw;
     using Signed = std::make_signed_t<Raw>;
     const bool to_float =
@@ -1322,7 +1322,7 @@ void execute_vfcvt(core::CPU& cpu, isa::OperationId op_id, simrv::xlen::RegId rd
 
 template <typename NarrowT, typename WideT>
 void execute_vfwcvt(core::CPU& cpu, isa::OperationId op_id, simrv::xlen::RegId rd,
-                    simrv::xlen::RegId rs2, bool vm, uint32_t vl, simrv::xlen::CSRValue& flags) {
+                    simrv::xlen::RegId rs2, bool vm, uint32_t vl, simrv::xlen::CsrValue& flags) {
     using NarrowE = VectorFpElement<NarrowT>;
     using WideE = VectorFpElement<WideT>;
     using NarrowRaw = typename NarrowE::Raw;
@@ -1371,7 +1371,7 @@ void execute_vfwcvt(core::CPU& cpu, isa::OperationId op_id, simrv::xlen::RegId r
 
 template <typename NarrowT, typename WideT>
 void execute_vfncvt(core::CPU& cpu, isa::OperationId op_id, simrv::xlen::RegId rd,
-                    simrv::xlen::RegId rs2, bool vm, uint32_t vl, simrv::xlen::CSRValue& flags) {
+                    simrv::xlen::RegId rs2, bool vm, uint32_t vl, simrv::xlen::CsrValue& flags) {
     using NarrowE = VectorFpElement<NarrowT>;
     using WideE = VectorFpElement<WideT>;
     using NarrowRaw = typename NarrowE::Raw;
@@ -1459,7 +1459,7 @@ void execute_vector_float(core::CPU& cpu, isa::OperationId op_id, simrv::xlen::R
     const int old_round = std::fegetround();
     std::fesetround(frm_to_host_round(cpu.state().fcsr));
     std::feclearexcept(FE_ALL_EXCEPT);
-    simrv::xlen::CSRValue software_flags = 0;
+    simrv::xlen::CsrValue software_flags = 0;
 
     switch (op_id) {
         case isa::OperationId::VFMADD_VV:

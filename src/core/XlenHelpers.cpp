@@ -7,7 +7,7 @@
 
 namespace simrv::xlen {
 
-auto resolve_misa_string(CSRValue misa) -> std::string {
+auto resolve_misa_string(CsrValue misa) -> std::string {
     uint64_t misa64 = static_cast<uint64_t>(misa);
     uint8_t mxl64 = static_cast<uint8_t>(misa64 >> 62);
     uint8_t mxl32 = static_cast<uint8_t>((misa64 >> 30) & 3);
@@ -15,16 +15,16 @@ auto resolve_misa_string(CSRValue misa) -> std::string {
     bool is_rv64 = (mxl64 == 2);
     std::string s = is_rv32 ? "RV32" : (is_rv64 ? "RV64" : (kIsXLen64 ? "RV64" : "RV32"));
 
-    bool has_i = (misa & (static_cast<CSRValue>(1) << ('i' - 'a'))) != 0;
-    bool has_m = (misa & (static_cast<CSRValue>(1) << ('m' - 'a'))) != 0;
-    bool has_a = (misa & (static_cast<CSRValue>(1) << ('a' - 'a'))) != 0;
-    bool has_f = (misa & (static_cast<CSRValue>(1) << ('f' - 'a'))) != 0;
-    bool has_d = (misa & (static_cast<CSRValue>(1) << ('d' - 'a'))) != 0;
-    bool has_c = (misa & (static_cast<CSRValue>(1) << ('c' - 'a'))) != 0;
-    bool has_b = (misa & (static_cast<CSRValue>(1) << ('b' - 'a'))) != 0;
-    bool has_v = (misa & (static_cast<CSRValue>(1) << ('v' - 'a'))) != 0;
-    bool has_s = (misa & (static_cast<CSRValue>(1) << ('s' - 'a'))) != 0;
-    bool has_u = (misa & (static_cast<CSRValue>(1) << ('u' - 'a'))) != 0;
+    bool has_i = (misa & (static_cast<CsrValue>(1) << ('i' - 'a'))) != 0;
+    bool has_m = (misa & (static_cast<CsrValue>(1) << ('m' - 'a'))) != 0;
+    bool has_a = (misa & (static_cast<CsrValue>(1) << ('a' - 'a'))) != 0;
+    bool has_f = (misa & (static_cast<CsrValue>(1) << ('f' - 'a'))) != 0;
+    bool has_d = (misa & (static_cast<CsrValue>(1) << ('d' - 'a'))) != 0;
+    bool has_c = (misa & (static_cast<CsrValue>(1) << ('c' - 'a'))) != 0;
+    bool has_b = (misa & (static_cast<CsrValue>(1) << ('b' - 'a'))) != 0;
+    bool has_v = (misa & (static_cast<CsrValue>(1) << ('v' - 'a'))) != 0;
+    bool has_s = (misa & (static_cast<CsrValue>(1) << ('s' - 'a'))) != 0;
+    bool has_u = (misa & (static_cast<CsrValue>(1) << ('u' - 'a'))) != 0;
 
     bool is_g = has_i && has_m && has_a && has_f && has_d;
 
@@ -50,7 +50,7 @@ auto resolve_misa_string(CSRValue misa) -> std::string {
             ch == 'b' || ch == 'v' || ch == 's' || ch == 'u') {
             continue;
         }
-        if ((misa & (static_cast<CSRValue>(1) << i)) != 0) {
+        if ((misa & (static_cast<CsrValue>(1) << i)) != 0) {
             s += static_cast<char>(ch - 'a' + 'A');
         }
     }
@@ -116,9 +116,9 @@ auto resolve_cause_string(uint64_t cause) -> std::string {
     }
 }
 
-auto resolve_mstatus_short_string(CSRValue mstatus) -> std::string {
+auto resolve_mstatus_short_string(CsrValue mstatus) -> std::string {
     std::string s;
-    CSRValue mpp = (mstatus & core::MstatusBit::Mpp) >> 11;
+    CsrValue mpp = (mstatus & core::MstatusBit::Mpp) >> 11;
     s += (mpp == 3 ? "M" : mpp == 1 ? "S" : "U");
 
     if ((mstatus & core::MstatusBit::Mie) != 0) s += "|MIE";
@@ -132,7 +132,7 @@ auto resolve_mstatus_short_string(CSRValue mstatus) -> std::string {
     return std::format("[{}]", s);
 }
 
-auto resolve_satp_string(CSRValue satp, unsigned xlen) -> std::string {
+auto resolve_satp_string(CsrValue satp, unsigned xlen) -> std::string {
     Word mode = satp_mode(satp, xlen);
     if (mode == 0) return "BARE";
     if (xlen == 64) {

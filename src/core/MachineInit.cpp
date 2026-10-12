@@ -484,10 +484,11 @@ auto Machine::initialize() -> std::expected<void, std::string> {
 
     const unsigned int model_xlen = primary_hart().cpu_model_config.supported_xlen;
     const unsigned int target_xlen = (model_xlen != 0) ? model_xlen : simrv::xlen::kXLenBits;
-    simrv::xlen::CSRValue initial_misa =
+    simrv::xlen::CsrValue initial_misa =
         isa::misa_with_mxl(config.isa.misa_override ? config.isa.isa_preset
                                                     : isa::isa_preset_bits(effective_isa_preset()),
                            target_xlen);
+    initial_misa &= ~isa::misa_extension_bit(isa::IsaExtension::X);
     config.isa.isa_preset = initial_misa;
     if constexpr (simrv::xlen::kIsXLen64) {
         bool is_32bit = (target_xlen == 32);

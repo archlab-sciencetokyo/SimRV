@@ -561,8 +561,8 @@ void test_sysconfig_modal_modes() {
     simrv::core::Machine live_mode_machine;
     SettingsDraft mode_draft;
     SettingsModal::open(mode_draft, live_mode_machine);
-    expect(mode_draft.misa.ext_x && (mode_draft.misa.to_misa_val() & (1ULL << ('x' - 'a'))) != 0,
-           "Settings modal preserves MISA.X for SimRV non-standard extensions");
+    expect((mode_draft.misa.to_misa_val() & (1ULL << ('x' - 'a'))) == 0,
+           "Settings modal does not advertise unsupported non-standard extensions");
     mode_draft.cycle_accurate = true;
     mode_draft.sys_config.cycle_accurate = true;
     expect(SettingsModal::submit(mode_draft, live_mode_machine, [](simrv::tui::TuiRegPage) {}),

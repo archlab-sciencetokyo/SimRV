@@ -19,10 +19,6 @@ install(
   FILES_MATCHING
   PATTERN "*.hpp")
 install(
-  FILES include/simrv/trace.h include/simrv/trace.S
-  DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/simrv
-  COMPONENT Development)
-install(
   DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/generated/"
   DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
   COMPONENT Development

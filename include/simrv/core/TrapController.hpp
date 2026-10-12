@@ -58,7 +58,7 @@ class TrapController {
      * @param cause Hardware trap cause code (interrupt or exception).
      * @param tval Auxiliary trap value (e.g. faulting virtual address or instruction encoding).
      */
-    static void raise_exception(CPU& cpu, simrv::xlen::TrapCause cause, simrv::xlen::CSRValue tval);
+    static void raise_exception(CPU& cpu, simrv::xlen::TrapCause cause, simrv::xlen::CsrValue tval);
 
     /**
      * @brief Validates if the current privilege level is sufficient to execute a given privileged
@@ -75,8 +75,8 @@ class TrapController {
      * @return true if the instruction is allowed under current privilege, false otherwise.
      */
     static auto can_execute_privileged_instruction(simrv::xlen::PrivilegeLevel current_priv,
-                                                   simrv::xlen::CSRValue misa,
-                                                   simrv::xlen::CSRValue mstatus,
+                                                   simrv::xlen::CsrValue misa,
+                                                   simrv::xlen::CsrValue mstatus,
                                                    simrv::xlen::Instruction funct12,
                                                    simrv::xlen::Word funct7) -> bool;
 
@@ -92,8 +92,8 @@ class TrapController {
      * @param is_write True if this is a write or read-write access to the CSR.
      * @return true if access is permitted, false if it triggers an illegal instruction exception.
      */
-    static auto can_access_csr(simrv::xlen::PrivilegeLevel current_priv, simrv::xlen::CSRValue misa,
-                               simrv::xlen::CSRAddress csr_addr, bool is_write) -> bool;
+    static auto can_access_csr(simrv::xlen::PrivilegeLevel current_priv, simrv::xlen::CsrValue misa,
+                               simrv::xlen::CsrNumber csr_addr, bool is_write) -> bool;
 };
 
 }  // namespace simrv::core

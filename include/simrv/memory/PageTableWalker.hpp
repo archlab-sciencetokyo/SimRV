@@ -123,7 +123,7 @@ struct PageWalkState {
     simrv::xlen::PhysAddr physical_address{0};
     simrv::xlen::Word pte{0};
     simrv::xlen::Word pte_update_mask{0};
-    simrv::xlen::CSRValue mstatus{0};
+    simrv::xlen::CsrValue mstatus{0};
     PteAccess access = PteAccess::Read;
     simrv::xlen::PrivilegeLevel privilege{};
     simrv::xlen::TrapCause fault = 0;
@@ -202,7 +202,7 @@ class PageTableWalker {
     [[nodiscard]] static auto access_fault_for(PteAccess access) noexcept -> simrv::xlen::TrapCause;
 
     [[nodiscard]] auto begin_walk(simrv::xlen::VirtAddr v_addr, PteAccess access,
-                                  simrv::xlen::PrivilegeLevel priv, simrv::xlen::CSRValue mstatus,
+                                  simrv::xlen::PrivilegeLevel priv, simrv::xlen::CsrValue mstatus,
                                   simrv::xlen::Word satp, unsigned xlen,
                                   bool update_access_bits = true,
                                   const core::ArchState* arch_state = nullptr) const
@@ -213,7 +213,7 @@ class PageTableWalker {
     static void fail_access(PageWalkState& state) noexcept;
 
     [[nodiscard]] auto walk(simrv::xlen::VirtAddr v_addr, PteAccess access,
-                            simrv::xlen::PrivilegeLevel priv, simrv::xlen::CSRValue mstatus,
+                            simrv::xlen::PrivilegeLevel priv, simrv::xlen::CsrValue mstatus,
                             simrv::xlen::Word satp, unsigned xlen, bool update_access_bits = true,
                             const core::ArchState* arch_state = nullptr) const
         -> std::expected<PageWalkResult, simrv::xlen::TrapCause>;
@@ -226,7 +226,7 @@ class PageTableWalker {
     [[nodiscard]] auto validate_pte_permissions(simrv::xlen::Word pte,
                                                 simrv::xlen::Word permission_bits, PteAccess access,
                                                 simrv::xlen::PrivilegeLevel priv,
-                                                simrv::xlen::CSRValue mstatus) const noexcept
+                                                simrv::xlen::CsrValue mstatus) const noexcept
         -> bool;
     void select_next_pte(PageWalkState& state, simrv::xlen::PhysAddr table_address) const;
 

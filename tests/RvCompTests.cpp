@@ -137,8 +137,8 @@ void test_rvcomp_profile_validation() {
     simrv::pipeline::CpuModelConfig loaded{};
     TEST_CHECK(simrv::core::load_cpu_config(*path, loaded));
     TEST_CHECK(profile.validate().has_value());
-    const simrv::xlen::CSRValue ima_bits = simrv::isa::isa_preset_bits(IsaPreset::IMA);
-    const simrv::xlen::CSRValue ima_misa = simrv::isa::misa_with_mxl(ima_bits, 32);
+    const simrv::xlen::CsrValue ima_bits = simrv::isa::isa_preset_bits(IsaPreset::IMA);
+    const simrv::xlen::CsrValue ima_misa = simrv::isa::misa_with_mxl(ima_bits, 32);
     // In RVComp Verilog (RVComp/src/rvcom.vh): `define ISA_CODE 32'h40141101
     if constexpr (!simrv::xlen::kIsXLen64) {
         TEST_CHECK(ima_misa == 0x40141101U);
@@ -180,9 +180,9 @@ void test_rvcomp_machine_application() {
     TEST_CHECK(cpu.pipeline_sim.config.div_latency == 34);
     TEST_CHECK(cpu.state().regs.xlen == 32);
     if constexpr (!simrv::xlen::kIsXLen64) {
-        TEST_CHECK(cpu.state().misa == (0x40141101U | (1U << 23)));
+        TEST_CHECK(cpu.state().misa == 0x40141101U);
     } else {
-        TEST_CHECK(cpu.state().misa == ((1ull << 62) | 0x00141101ULL | (1ull << 23)));
+        TEST_CHECK(cpu.state().misa == ((1ull << 62) | 0x00141101ULL));
     }
 }
 

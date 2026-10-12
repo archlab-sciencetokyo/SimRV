@@ -93,15 +93,14 @@ class Tracer {
                              std::string_view detail, const BusTraceContext& context = {});
     void log_pipeline_stalls(const CPU& cpu, std::span<const PipelineStallRecord> stalls);
     void log_dma_transfer(const simrv::memory::DmaTransferTrace& transfer);
-    void log_marker_csr_write(const CPU& cpu, simrv::xlen::CSRValue value);
     void log_trap(simrv::xlen::Counter mtime, simrv::xlen::Counter cycle,
                   simrv::xlen::TrapCause cause, simrv::xlen::Address trap_pc,
                   simrv::xlen::PrivilegeLevel priv, const ArchState& state,
-                  simrv::xlen::CSRValue tval, const CPU& cpu);
+                  simrv::xlen::CsrValue tval, const CPU& cpu);
     void log_architectural_trap_entry(const CPU& cpu, simrv::xlen::TrapCause cause,
                                       simrv::xlen::Address epc,
                                       simrv::xlen::PrivilegeLevel source_mode,
-                                      simrv::xlen::CSRValue tval);
+                                      simrv::xlen::CsrValue tval);
     void log_interrupt_signal(const CPU& cpu, simrv::xlen::TrapCause cause, bool asserted,
                               std::string_view source);
     void log_sbi(simrv::xlen::Counter mtime, simrv::xlen::Counter cycle, unsigned cause,
@@ -124,7 +123,6 @@ class Tracer {
     std::ofstream fp_bus;
     std::ofstream fp_pipeline_;
     std::ofstream fp_memory;
-    std::ofstream fp_markers;
     std::ofstream fp_registers_;
 
    private:
@@ -155,8 +153,6 @@ class Tracer {
         bool interrupt = false;
     };
     std::vector<std::vector<TrapTraceFrame>> trap_frames_;
-    std::vector<std::string> marker_buffers_;
-    std::vector<unsigned> marker_depth_;
     std::filesystem::path trace_metadata_path_;
     std::filesystem::path retire_index_path_;
     std::unique_ptr<GzipTraceWriter> gzip_retire_;

@@ -46,23 +46,23 @@ class ExecuteUnit {
         return ExecuteUnitInt::aluAmo(in1, in2, funct5, funct3);
     }
 
-    static inline auto csrWriteValue(simrv::xlen::CSRValue rcsr, simrv::xlen::Register rrs1,
+    static inline auto csrWriteValue(simrv::xlen::CsrValue rcsr, simrv::xlen::Register rrs1,
                                      simrv::xlen::ImmValue imm, isa::Funct3 funct3)
-        -> std::expected<simrv::xlen::CSRValue, simrv::xlen::TrapCause> {
+        -> std::expected<simrv::xlen::CsrValue, simrv::xlen::TrapCause> {
         return ExecuteUnitInt::csrWriteValue(rcsr, rrs1, imm, funct3);
     }
 
     static inline auto fusedFp(isa::Opcode opcode, FpFmt fmt, simrv::xlen::FpRegId rs1,
                                simrv::xlen::FpRegId rs2, simrv::xlen::FpRegId rs3,
                                isa::RoundingMode rm, const simrv::xlen::FloatingRegister* freg,
-                               simrv::xlen::CSRValue& fcsr) -> FpExecResult {
+                               simrv::xlen::CsrValue& fcsr) -> FpExecResult {
         return ExecuteUnitFp::fusedFp(opcode, fmt, rs1, rs2, rs3, rm, freg, fcsr);
     }
 
     static inline auto opFp(simrv::xlen::Funct7 funct7, isa::Funct3 funct3,
                             simrv::xlen::FpRegId rs1, simrv::xlen::FpRegId rs2,
                             simrv::xlen::Register rrs1, const simrv::xlen::FloatingRegister* freg,
-                            simrv::xlen::CSRValue& fcsr) -> FpExecResult {
+                            simrv::xlen::CsrValue& fcsr) -> FpExecResult {
         return ExecuteUnitFp::opFp(funct7, funct3, rs1, rs2, rrs1, freg, fcsr);
     }
 

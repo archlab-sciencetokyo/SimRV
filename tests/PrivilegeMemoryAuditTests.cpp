@@ -282,13 +282,13 @@ void test_strong_typing_and_operators() {
     expect((mstatus_bits & MstatusBit::Mie) != 0, "MstatusBit bitwise OR and AND work");
     expect((mstatus_bits & MstatusBit::Mprv) == 0, "MstatusBit bitwise filtering works");
 
-    simrv::xlen::CSRValue mstatus = 0;
+    simrv::xlen::CsrValue mstatus = 0;
     mstatus |= MstatusBit::Mie;
     mstatus |= MstatusBit::Mprv;
-    expect((mstatus & MstatusBit::Mie) != 0, "CSRValue |= MstatusBit works");
-    expect((mstatus & MstatusBit::Mprv) != 0, "CSRValue & MstatusBit works");
+    expect((mstatus & MstatusBit::Mie) != 0, "CsrValue |= MstatusBit works");
+    expect((mstatus & MstatusBit::Mprv) != 0, "CsrValue & MstatusBit works");
     mstatus &= ~MstatusBit::Mie;
-    expect((mstatus & MstatusBit::Mie) == 0, "CSRValue &= ~MstatusBit works");
+    expect((mstatus & MstatusBit::Mie) == 0, "CsrValue &= ~MstatusBit works");
     expect((mstatus & MstatusBit::Mprv) != 0, "Mprv is preserved after clearing Mie");
 
     const auto mip_bits = MipBit::Mtip | MipBit::Msip;
@@ -355,7 +355,7 @@ void test_strong_typing_and_operators() {
     expect(view.spie(), "MstatusView::with_spie works");
     expect(!view.sie(), "MstatusView::sie remains false");
 
-    simrv::xlen::CSRValue mstatus_raw = view;
+    simrv::xlen::CsrValue mstatus_raw = view;
     expect(simrv::core::mstatus_mpp(mstatus_raw) == simrv::xlen::PrivilegeLevel::Supervisor,
            "mstatus_mpp extracts Supervisor mode");
     mstatus_raw =
@@ -402,6 +402,95 @@ void test_sret_spp_reset_semantics() {
     }
 }
 
+// 12. Ratified Privileged 1.13, Sstc, and Smepmp CSRs access permissions and width legality
+void test_ratified_privilege_csrs() {
+    using simrv::core::Csr;
+    using simrv::core::csr_num;
+    using simrv::core::TrapController;
+    using simrv::xlen::PrivilegeLevel;
+
+    simrv::core::CPU cpu{};
+    const auto misa = cpu.state().misa;
+
+    // A. Verify architectural privilege checking via TrapController / csr_access_permitted
+    expect(
+        TrapController::can_access_csr(PrivilegeLevel::Machine, misa, csr_num(Csr::Menvcfg), false),
+        "menvcfg read permitted in Machine mode");
+    expect(!TrapController::can_access_csr(PrivilegeLevel::Supervisor, misa, csr_num(Csr::Menvcfg),
+                                           false),
+           "menvcfg read rejected in Supervisor mode");
+    expect(
+        !TrapController::can_access_csr(PrivilegeLevel::User, misa, csr_num(Csr::Menvcfg), false),
+        "menvcfg read rejected in User mode");
+
+    expect(TrapController::can_access_csr(PrivilegeLevel::Machine, misa,
+                                          csr_num(Csr::Mcountinhibit), false),
+           "mcountinhibit read permitted in Machine mode");
+    expect(!TrapController::can_access_csr(PrivilegeLevel::Supervisor, misa,
+                                           csr_num(Csr::Mcountinhibit), false),
+           "mcountinhibit read rejected in Supervisor mode");
+
+    expect(
+        TrapController::can_access_csr(PrivilegeLevel::Machine, misa, csr_num(Csr::Senvcfg), false),
+        "senvcfg read permitted in Machine mode");
+    expect(TrapController::can_access_csr(PrivilegeLevel::Supervisor, misa, csr_num(Csr::Senvcfg),
+                                          false),
+           "senvcfg read permitted in Supervisor mode");
+    expect(
+        !TrapController::can_access_csr(PrivilegeLevel::User, misa, csr_num(Csr::Senvcfg), false),
+        "senvcfg read rejected in User mode");
+
+    expect(TrapController::can_access_csr(PrivilegeLevel::Supervisor, misa, csr_num(Csr::Stimecmp),
+                                          false),
+           "stimecmp read permitted in Supervisor mode");
+    expect(
+        !TrapController::can_access_csr(PrivilegeLevel::User, misa, csr_num(Csr::Stimecmp), false),
+        "stimecmp read rejected in User mode");
+
+    // B. Verify CSR read/write state preservation
+    expect(cpu.csr_file.write(Csr::Mcountinhibit, 0x7).has_value(),
+           "Write to mcountinhibit succeeds");
+    auto countinhibit_val = cpu.csr_file.read(Csr::Mcountinhibit);
+    expect(countinhibit_val.has_value() && *countinhibit_val == 0x7,
+           "Read from mcountinhibit returns written value");
+
+    expect(cpu.csr_file.write(Csr::Menvcfg, 0x123).has_value(), "Write to menvcfg succeeds");
+    auto menvcfg_val = cpu.csr_file.read(Csr::Menvcfg);
+    expect(menvcfg_val.has_value() && *menvcfg_val == 0x123,
+           "Read from menvcfg returns written value");
+
+    expect(cpu.csr_file.write(Csr::Senvcfg, 0x456).has_value(), "Write to senvcfg succeeds");
+    auto senvcfg_val = cpu.csr_file.read(Csr::Senvcfg);
+    expect(senvcfg_val.has_value() && *senvcfg_val == 0x456,
+           "Read from senvcfg returns written value");
+
+    // C. Verify Sstc stimecmp 64-bit value handling and XLEN legality
+#if SIMRV_XLEN == 64
+    expect(cpu.csr_file.write(Csr::Stimecmp, 0x1122334455667788ULL).has_value(),
+           "Write to stimecmp in RV64 succeeds");
+    auto stimecmp_val = cpu.csr_file.read(Csr::Stimecmp);
+    expect(stimecmp_val.has_value() && *stimecmp_val == 0x1122334455667788ULL,
+           "Read from stimecmp in RV64 returns 64-bit value");
+    // High-word CSRs must be rejected in RV64
+    expect(!cpu.csr_file.read(Csr::Stimecmph).has_value(), "stimecmph rejected in RV64");
+    expect(!cpu.csr_file.read(Csr::Menvcfgh).has_value(), "menvcfgh rejected in RV64");
+    expect(!cpu.csr_file.read(Csr::Mseccfgh).has_value(), "mseccfgh rejected in RV64");
+#else
+    expect(cpu.csr_file.write(Csr::Stimecmp, 0x55667788U).has_value(),
+           "Write to stimecmp in RV32 succeeds");
+    expect(cpu.csr_file.write(Csr::Stimecmph, 0x11223344U).has_value(),
+           "Write to stimecmph in RV32 succeeds");
+    auto lo_val = cpu.csr_file.read(Csr::Stimecmp);
+    auto hi_val = cpu.csr_file.read(Csr::Stimecmph);
+    expect(lo_val.has_value() && *lo_val == 0x55667788U,
+           "Read from stimecmp in RV32 returns low 32 bits");
+    expect(hi_val.has_value() && *hi_val == 0x11223344U,
+           "Read from stimecmph in RV32 returns high 32 bits");
+    expect(cpu.state().stimecmp == 0x1122334455667788ULL,
+           "Underlying 64-bit stimecmp reflects both RV32 halves");
+#endif
+}
+
 }  // namespace
 
 auto main() -> int {
@@ -417,6 +506,7 @@ auto main() -> int {
     test_soft_tlb_global_mappings();
     test_strong_typing_and_operators();
     test_sret_spp_reset_semantics();
+    test_ratified_privilege_csrs();
 
     if (failures != 0) {
         std::cerr << failures << " test(s) failed.\n";

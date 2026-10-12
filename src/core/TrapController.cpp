@@ -23,7 +23,7 @@ namespace simrv::core {
 
 namespace {
 
-[[nodiscard]] constexpr auto calculate_trap_target(simrv::xlen::CSRValue tvec,
+[[nodiscard]] constexpr auto calculate_trap_target(simrv::xlen::CsrValue tvec,
                                                    simrv::xlen::TrapCause cause) noexcept
     -> simrv::xlen::Address {
     const simrv::xlen::Address tvec_base = tvec & ~simrv::xlen::Address{3};
@@ -38,9 +38,9 @@ auto trap_delegated_to_supervisor(const ArchState& state, simrv::xlen::TrapCause
     if (state.priv > kPrivSupervisor || !misa_has_extension(state.misa, isa::IsaExtension::S)) {
         return false;
     }
-    const auto cause_code = static_cast<simrv::xlen::CSRValue>(trap_exception_code(cause));
+    const auto cause_code = static_cast<simrv::xlen::CsrValue>(trap_exception_code(cause));
     if (cause_code >= xlen::kXLenBits) return false;
-    const simrv::xlen::CSRValue delegation =
+    const simrv::xlen::CsrValue delegation =
         trap_is_interrupt(cause) ? state.mideleg : state.medeleg;
     return ((delegation >> cause_code) & 1U) != 0;
 }
@@ -50,17 +50,17 @@ void stack_trap_interrupt_state(ArchState& state, MstatusBit interrupt_enable,
     if ((state.mstatus & interrupt_enable) != 0) {
         state.mstatus |= previous_interrupt_enable;
     } else {
-        state.mstatus &= ~static_cast<simrv::xlen::CSRValue>(previous_interrupt_enable);
+        state.mstatus &= ~static_cast<simrv::xlen::CsrValue>(previous_interrupt_enable);
     }
-    state.mstatus &= ~static_cast<simrv::xlen::CSRValue>(interrupt_enable);
+    state.mstatus &= ~static_cast<simrv::xlen::CsrValue>(interrupt_enable);
 }
 
-void restore_trap_interrupt_state(simrv::xlen::CSRValue& mstatus, MstatusBit interrupt_enable,
+void restore_trap_interrupt_state(simrv::xlen::CsrValue& mstatus, MstatusBit interrupt_enable,
                                   MstatusBit previous_interrupt_enable) {
     if ((mstatus & previous_interrupt_enable) != 0) {
         mstatus |= interrupt_enable;
     } else {
-        mstatus &= ~static_cast<simrv::xlen::CSRValue>(interrupt_enable);
+        mstatus &= ~static_cast<simrv::xlen::CsrValue>(interrupt_enable);
     }
     mstatus |= previous_interrupt_enable;
 }
@@ -133,7 +133,7 @@ auto trap_cause_name(simrv::xlen::TrapCause cause) -> std::string {
 }
 
 void TrapController::mret(ArchState& state) {
-    simrv::xlen::CSRValue mstatus = state.mstatus;
+    simrv::xlen::CsrValue mstatus = state.mstatus;
     const simrv::xlen::PrivilegeLevel target_priv = mstatus_mpp(mstatus);
 
     restore_trap_interrupt_state(mstatus, MstatusBit::Mie, MstatusBit::Mpie);
@@ -153,7 +153,7 @@ void TrapController::mret(ArchState& state) {
 }
 
 void TrapController::sret(ArchState& state) {
-    simrv::xlen::CSRValue mstatus = state.mstatus;
+    simrv::xlen::CsrValue mstatus = state.mstatus;
     const simrv::xlen::PrivilegeLevel target_priv = mstatus_spp(mstatus);
 
     restore_trap_interrupt_state(mstatus, MstatusBit::Sie, MstatusBit::Spie);
@@ -170,7 +170,7 @@ void TrapController::sret(ArchState& state) {
 }
 
 void TrapController::raise_exception(CPU& cpu, simrv::xlen::TrapCause cause,
-                                     simrv::xlen::CSRValue tval) {
+                                     simrv::xlen::CsrValue tval) {
     ArchState& state = cpu.state();
     const simrv::xlen::Address trap_pc = state.pc;
     const simrv::xlen::PrivilegeLevel source_mode = state.priv;
@@ -194,7 +194,7 @@ void TrapController::raise_exception(CPU& cpu, simrv::xlen::TrapCause cause,
     const simrv::xlen::PrivilegeLevel target_mode = delegated ? kPrivSupervisor : kPrivMachine;
     const MstatusBit interrupt_enable = delegated ? MstatusBit::Sie : MstatusBit::Mie;
     const MstatusBit previous_interrupt_enable = delegated ? MstatusBit::Spie : MstatusBit::Mpie;
-    const simrv::xlen::CSRValue trap_vector = delegated ? state.stvec : state.mtvec;
+    const simrv::xlen::CsrValue trap_vector = delegated ? state.stvec : state.mtvec;
     stack_trap_interrupt_state(state, interrupt_enable, previous_interrupt_enable);
     if (delegated) {
         state.scause = cause;
@@ -238,8 +238,8 @@ void TrapController::raise_exception(CPU& cpu, simrv::xlen::TrapCause cause,
 }
 
 auto TrapController::can_execute_privileged_instruction(simrv::xlen::PrivilegeLevel current_priv,
-                                                        simrv::xlen::CSRValue misa,
-                                                        simrv::xlen::CSRValue mstatus,
+                                                        simrv::xlen::CsrValue misa,
+                                                        simrv::xlen::CsrValue mstatus,
                                                         simrv::xlen::Instruction funct12,
                                                         simrv::xlen::Word funct7) -> bool {
     if (funct12 == isa::Funct12Priv::Mret) {
@@ -264,7 +264,7 @@ auto TrapController::can_execute_privileged_instruction(simrv::xlen::PrivilegeLe
 }
 
 auto TrapController::can_access_csr(simrv::xlen::PrivilegeLevel current_priv,
-                                    simrv::xlen::CSRValue misa, simrv::xlen::CSRAddress csr_addr,
+                                    simrv::xlen::CsrValue misa, simrv::xlen::CsrNumber csr_addr,
                                     bool is_write) -> bool {
     // Debug CSRs require architectural Debug Mode, which the guest execution
     // engine does not implement. M-mode also cannot override CSR nonexistence.
