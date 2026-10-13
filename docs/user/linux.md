@@ -396,7 +396,7 @@ cmake --build --preset rv64-release --target linux-images-buildroot
 
 ### Directory Structure
 
-```
+```text
 linux-build/
 ├── sources/
 │   ├── linux-7.2.9.tar.xz

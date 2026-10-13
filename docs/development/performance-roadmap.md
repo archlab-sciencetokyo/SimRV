@@ -1,20 +1,14 @@
-# Instruction-Fast Performance Roadmap
+# Performance Methodology & Optimization Roadmap
 
-## Handover baseline
+This document outlines SimRV's simulation performance evaluation methodology and forward-looking optimization roadmap.
 
-The comparison baseline is Spike `7ab2efd6785e` and the CoreMark ELF with SHA-256
-`882bb1ed8fecba092d649f4b7a4cc66df5a989f27b0732f42477989ae47ce240`. Both simulators must use
-the canonical contract `rv64gc_zicsr_zifencei_zicntr`. CoreMark retires 1,682,311,351 instructions
-before its successful `tohost` exit.
+## Benchmarking Methodology
 
-On the current development host, the matched full-workload smoke test measured approximately
-9.15 seconds for the portable SimRV RV64 release and 3.46 seconds for Spike. A lower-noise,
-fixed-work comparison over 20 million instructions measured 100.9 ms and 42.1 ms respectively,
-or a 2.40x gap. Clang, LTO, and native-host tuning did not improve SimRV, so compiler selection is
-not the next optimization lever.
+To ensure fair, reproducible performance comparisons against reference simulators (such as Spike), all evaluations must enforce identical architectural parameters:
 
-The earlier saved `build/coremark-simrv-30runs.json` report is not comparative evidence: its Spike
-sample arrays are empty. Do not use the historical "within 10%" estimate as a baseline.
+1. **Target ISA Contract**: Both engines evaluate the identical canonical ISA string (such as `rv64gc_zicsr_zifencei_zicntr`).
+2. **Fixed-Work Boundaries**: Comparative tests should evaluate identical instruction retirement limits (such as 20 million instructions for lower-noise benchmarking) or complete benchmark suites with matching termination states.
+3. **Environment Standardization**: Host evaluations should standardize CPU governors, thread affinity, and capture environment metadata (CPU model, compiler version, and kernel version) alongside raw samples.
 
 ## Reproduce the comparison
 

@@ -141,18 +141,19 @@ jobs:
       run: cmake --build --preset ${{ matrix.arch }}-release
 
     - name: Run CTest gate suite
-      env:
-        RISCV_TESTS_DIR: ${{ runner.temp }}/riscv-tests
-      run: ctest --test-dir build/${{ matrix.arch }}-release --output-on-failure -L gate
+      run: |
+        export RISCV_TESTS_DIR="${RUNNER_TEMP}/riscv-tests"
+        ctest --test-dir build/${{ matrix.arch }}-release --output-on-failure -L gate
 
     - name: Record required-suite evidence
       shell: bash
       run: |
+        export RISCV_TESTS_DIR="${RUNNER_TEMP}/riscv-tests"
         SUITES=(--suite native --suite isa)
-        DEPENDENCIES=(--dependency riscv_tests=${{ runner.temp }}/riscv-tests)
+        DEPENDENCIES=(--dependency riscv_tests="${RUNNER_TEMP}/riscv-tests")
         if [[ "${{ matrix.compiler }}" == "gcc" ]]; then
           SUITES+=(--suite vector --suite package)
-          DEPENDENCIES+=(--dependency vector_tests=${{ runner.temp }}/riscv-vector-tests)
+          DEPENDENCIES+=(--dependency vector_tests="${RUNNER_TEMP}/riscv-vector-tests")
         fi
         python3 scripts/release_evidence.py \
           --build-dir build/${{ matrix.arch }}-release \

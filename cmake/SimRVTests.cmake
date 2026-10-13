@@ -502,7 +502,7 @@ if(BUILD_TESTING)
     set_tests_properties(
       "isa-lockstep-${test_name}"
       PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR} LABELS
-                 "external;isa;lockstep;rv${SIMRV_XLEN}gc" SKIP_RETURN_CODE 2)
+                 "external;lockstep;rv${SIMRV_XLEN}gc" SKIP_RETURN_CODE 2)
   endfunction()
 
   if(SIMRV_XLEN STREQUAL "64")

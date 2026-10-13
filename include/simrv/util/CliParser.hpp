@@ -8,6 +8,7 @@
 #include <string_view>
 
 #include "simrv/core/Boot.hpp"
+#include "simrv/core/ExitCode.hpp"
 #include "simrv/core/Logger.hpp"
 #include "simrv/core/Machine.hpp"
 #include "simrv/core/RuntimeProfile.hpp"
@@ -150,7 +151,13 @@ auto parse_command_line(std::span<char* const> args) -> std::expected<ParseResul
 auto apply_runtime_options(simrv::core::Machine* machine, const RuntimeOptions& options)
     -> std::expected<void, std::string>;
 [[noreturn]] auto usage(std::string_view prog_name, int status) -> void;
-[[noreturn]] auto option_error(std::string_view msg, int status = 1) -> void;
+[[noreturn]] auto usage(std::string_view prog_name,
+                        simrv::core::HostExitCode status = simrv::core::HostExitCode::Success)
+    -> void;
+[[noreturn]] auto option_error(std::string_view msg, int status) -> void;
+[[noreturn]] auto option_error(
+    std::string_view msg, simrv::core::HostExitCode status = simrv::core::HostExitCode::UsageError)
+    -> void;
 auto needs_memory_image(const ParseResult& result) -> bool;
 
 }  // namespace simrv::util

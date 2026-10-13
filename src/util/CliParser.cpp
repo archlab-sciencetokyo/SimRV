@@ -1925,6 +1925,10 @@ auto needs_memory_image(const ParseResult& result) -> bool {
     std::exit(status);
 }
 
+auto usage(std::string_view prog_name, simrv::core::HostExitCode status) -> void {
+    usage(prog_name, simrv::core::to_exit_code(status));
+}
+
 auto option_error(std::string_view msg, int status) -> void {
     if (simrv::util::terminal_color_enabled(STDERR_FILENO)) {
         std::println(stderr, "\033[1;31msimrv: error:\033[0m {}", msg);
@@ -1932,6 +1936,10 @@ auto option_error(std::string_view msg, int status) -> void {
         std::println(stderr, "simrv: error: {}", msg);
     }
     std::exit(status);
+}
+
+auto option_error(std::string_view msg, simrv::core::HostExitCode status) -> void {
+    option_error(msg, simrv::core::to_exit_code(status));
 }
 
 }  // namespace simrv::util

@@ -6,16 +6,16 @@ SimRV is an explainable, dual-width (RV32 / RV64) RISC-V architectural simulator
 
 ## Table of Contents
 
-1. [Architecture & Features Overview](#1-architecture-features-overview)
-2. [Installation & Quickstart](#2-installation-quickstart)
+1. [Architecture & Features Overview](#1-architecture--features-overview)
+2. [Installation & Quickstart](#2-installation--quickstart)
 3. [Command-Line Interface (CLI)](#3-command-line-interface-cli)
 4. [Interactive TUI Workbench](#4-interactive-tui-workbench)
-5. [Bare-Metal & Embedded Simulation](#5-bare-metal-embedded-simulation)
+5. [Bare-Metal & Embedded Simulation](#5-bare-metal--embedded-simulation)
 6. [Full-System Linux Emulation](#6-full-system-linux-emulation)
-7. [CPU Model Presets & Microarchitecture Tuning](#7-cpu-model-presets-microarchitecture-tuning)
+7. [CPU Model Presets & Microarchitecture Tuning](#7-cpu-model-presets--microarchitecture-tuning)
 8. [Reference Parity Verification](#8-reference-parity-verification)
 9. [Benchmarking Suite](#9-benchmarking-suite)
-10. [Troubleshooting & Reference](#10-troubleshooting-reference)
+10. [Troubleshooting & Reference](#10-troubleshooting--reference)
 
 ---
 
@@ -134,7 +134,7 @@ simrv -m program.elf
 | `--trace-level <0-4>` | Limit architectural event detail: devices, calls, retirement, or detailed state. |
 | `--trace-function <name>` | Filter attributed events to an exact ELF function symbol. |
 | `--trace-device <name>` | Filter component-attributed events to an exact component name. |
-| `--log-format <text|json|json-pretty>` | Select diagnostic log rendering; default is `text`. |
+| `--log-format <text \| json \| json-pretty>` | Select diagnostic log rendering; default is `text`. |
 | `--log-file <file>` | Mirror diagnostic messages to a file in the selected log format. |
 | `--trace` | Write an aligned, labeled architectural instruction trace to `<trace-dir>/trace.txt`. |
 | `--tracepc` | Write PC stream trace to `<trace-dir>/tracepc.txt`. |
@@ -314,7 +314,7 @@ traps. `pc` is the handler PC on entry, and `target_pc` is the resumed PC on ret
 Schema-2 event catalog:
 
 | Event | Stream | Event-specific fields |
-|---|---|---|
+| --- | --- | --- |
 | Lifecycle transitions | `events.jsonl` | `payload.status`, stop reason, retired instructions, cycles; failures may include an error and exits may include exit status |
 | Interrupt assertion/deassertion and DMA start/completion/cancellation | `events.jsonl` | interrupt source/cause or DMA component, transfer ID, byte count, and modeled cycle fields |
 | `call`, `return` | `calls.jsonl` | source/target PCs, call `return_pc`, dynamic call depth |
@@ -416,7 +416,7 @@ PC and architectural register state are visible on connection; debugger protocol
 
 The SimRV TUI provides an educational visual inspection environment for architecture students and hardware engineers.
 
-```
+```text
 ┌─ SimRV 3.0 ─────────────────────────────────────────── [Hart 0: RUNNING] ─┐
 │ [Regs] [Cache] [TLB] [Pipeline] [Hazards] [Explainer] │ Guest Terminal PTY │
 │                                                      │                    │
@@ -440,7 +440,7 @@ The SimRV TUI provides an educational visual inspection environment for architec
 - **`[Tab]` / `[Shift-Tab]`**: Switch active sub-views within the left inspector pane.
 - **`[F5]` / `[c]` / `[Ctrl-P]`**: Run / Pause simulation execution.
 - **`[F6]` / `[s]`**: Step one cycle machine-wide across all harts.
-- **`[q]` / `[Ctrl-C]`**: Quit simulator.
+- **`[Ctrl-Q]` / `[F10]` / `[q]` (when paused)**: Quit simulator.
 
 !!! info "Pause to use TUI navigation"
     While the guest is running, regular keystrokes go to its UART. Pause with `Ctrl-P` before using

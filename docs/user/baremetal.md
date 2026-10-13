@@ -9,7 +9,7 @@ This guide details the physical memory map, MMIO device registers, and compilati
 SimRV uses a physical memory map where memory-mapped I/O (MMIO) and PCIe devices are allocated in lower address ranges, and RAM is mapped starting at `0x80000000`.
 
 | Device / Region | Base Address | Size | Description |
-|:---|:---|:---|:---|
+| :--- | :--- | :--- | :--- |
 | **Power Controller** | `0x00100000` | `0x00001000` (4 KB) | SiFive test-finisher poweroff / reboot port |
 | **UART 16550A** | `0x10000000` | `0x00000100` (256 B) | Serial console input/output port |
 | **VirtIO MMIO Slots** | `0x10001000` | `0x00008000` (32 KB) | VirtIO MMIO transport slots (Disk, Net, Console, GPU, Input, Sound, RNG) |
@@ -26,6 +26,7 @@ SimRV uses a physical memory map where memory-mapped I/O (MMIO) and PCIe devices
 ## Writing Baremetal Programs
 
 To develop a baremetal program, you need:
+
 1. An assembly startup file (`startup.S`) to initialize the stack pointer and invoke your main entry point.
 2. A linker script (`link.ld`) to map the sections starting at the physical RAM base (`0x80000000`).
 3. An exit routine using the `tohost` termination register or Power MMIO device to signal simulation shutdown.
@@ -48,6 +49,7 @@ SECTIONS
   .bss : { *(.bss .bss.*) }
 }
 ```
+
 ### 2. Startup Assembly (`startup.S`)
 
 Initialize the stack pointer `sp` to a safe region in RAM (e.g., `0x8E000000`) and call `main`:
@@ -109,7 +111,8 @@ default:
 ## Device Driver API Examples
 
 ### UART 16550A Serial I/O
-The UART registers are aligned to 4-byte boundaries (word-addressed) or 1-byte boundaries. 
+
+The UART registers are aligned to 4-byte boundaries (word-addressed) or 1-byte boundaries.
 
 ```c
 #define UART_BASE 0x10000000
@@ -132,6 +135,7 @@ void uart_puts(const char* s) {
 ```
 
 ### Real-Time Clock / Timer Delay
+
 Use the RTC `mtime` register at `0x70000000` to measure virtual-platform delays. `mtime`
 runs at 10 MHz (10,000 ticks = 1 ms). In cycle-accurate mode this is derived from the
 advertised 160 MHz CPU clock at one timer tick per 16 modeled CPU cycles. In instruction-accurate
@@ -152,6 +156,7 @@ void delay_ms(uint32_t ms) {
 ```
 
 ### Power Controller (Shutdown & Reboot)
+
 Write SiFive test-finisher commands to `0x00100000` to cleanly terminate or reboot the machine:
 
 ```c
@@ -167,6 +172,7 @@ void power_reboot() {
 ```
 
 ### Generic DMA Controller (0x10009000, IRQ 12)
+
 SimRV provides a hardware DMA controller accessible via standard 32-bit MMIO registers. Any baremetal firmware, RTOS, or operating system driver can perform zero-copy bulk transfers.
 
 Include `<simrv/device/simrv_dma.h>` or define the registers directly:

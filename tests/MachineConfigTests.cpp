@@ -759,5 +759,22 @@ auto main() -> int {
         std::filesystem::remove(malformed, cleanup_error);
     }
 
+    {
+        using simrv::core::HostExitCode;
+        using simrv::core::to_exit_code;
+        expect(to_exit_code(HostExitCode::Success) == 0, "HostExitCode::Success is 0");
+        expect(to_exit_code(HostExitCode::GeneralError) == 1, "HostExitCode::GeneralError is 1");
+        expect(to_exit_code(HostExitCode::UsageError) == 2, "HostExitCode::UsageError is 2");
+        expect(to_exit_code(HostExitCode::ConfigurationError) == 3,
+               "HostExitCode::ConfigurationError is 3");
+        expect(to_exit_code(HostExitCode::InitializationError) == 4,
+               "HostExitCode::InitializationError is 4");
+        expect(to_exit_code(HostExitCode::ExecutionError) == 5,
+               "HostExitCode::ExecutionError is 5");
+        expect(to_exit_code(HostExitCode::CheckpointError) == 6,
+               "HostExitCode::CheckpointError is 6");
+        expect(to_exit_code(HostExitCode::IpcError) == 7, "HostExitCode::IpcError is 7");
+    }
+
     return failures == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
 }

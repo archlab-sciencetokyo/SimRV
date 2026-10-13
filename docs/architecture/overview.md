@@ -140,17 +140,10 @@ Step requests use a release/acquire handoff. Completion is acknowledged after wo
 snapshot publication; synchronous callers use a predicate-based condition-variable wait with a real
 deadline. Parallel harts evaluate their own timer interrupt state instead of hart 0 mutating it.
 
-Breakpoint records have stable IDs and frontend ownership. Thus cleanup removes only GDB-owned
+Breakpoint records have stable IDs and frontend ownership. Debugger disconnect removes only GDB-owned
 logical breakpoints and watchpoints without rewriting guest instructions or disturbing TUI state.
-Detach resumes and retains the listener; an unexpected disconnect cleans GDB-owned state, leaves
-the target paused, and relistens.
-
-The native `gdb-stub` suite is labelled `gate;regress;debug;thread` and uses ephemeral ports with
-command/reply synchronization. Compare CLI throughput to a connected, running debugger with
-`python3 scripts/benchmark.py gdb --simrv build/rv64-release/simrv --runs 5 --json build/gdb-benchmark.json`.
-It interleaves five runs of each mode on one CPU and checks the median throughput against a 5%
-regression limit. `--trace-prefix build/gdb-syscalls` records a separate short syscall trace for
-confirming that socket activity stays on the server thread.
+Detaching resumes guest execution and retains the listener socket; an unexpected client disconnect
+cleans GDB-owned state, leaves the target paused, and re-listens for new connections.
 
 ## CA timing and ordering
 

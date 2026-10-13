@@ -66,7 +66,7 @@ decode logic. There are 6 base instruction formats (R, I, S, B, U, J) plus
 the R4 format used by fused floating-point operations, and a family of
 compressed (16-bit) formats under the C extension.
 
-```
+```text
 R-Type:  | funct7 (7b) | rs2 (5b) | rs1 (5b) | funct3 (3b) | rd (5b) | opcode (7b) |
 I-Type:  |         immediate [11:0] (12b)      | rs1 | funct3 | rd | opcode |
 S-Type:  | imm[11:5]   | rs2      | rs1      | funct3 | imm[4:0]    | opcode |
@@ -151,7 +151,7 @@ reconstruction of any instruction hex value.
 
 **Output:**
 
-```
+```text
 === SimRV Educational Instruction Explainer ===
 
 Standard 32-bit Instruction Word:
