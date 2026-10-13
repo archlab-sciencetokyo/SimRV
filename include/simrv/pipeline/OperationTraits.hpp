@@ -1,9 +1,10 @@
 #pragma once
 
-#include "simrv/isa/Base.hpp"
+#include "simrv/isa/InstructionFields.hpp"
 #include "simrv/isa/OperationId.hpp"
 #include "simrv/pipeline/DecodedInstruction.hpp"
 #include "simrv/pipeline/OperationInfo.hpp"
+#include "simrv/xlen/RegisterTypes.hpp"
 
 namespace simrv::pipeline::operation {
 
@@ -192,11 +193,12 @@ namespace simrv::pipeline::operation {
 }
 
 [[nodiscard]] constexpr auto make_dependency_traits(isa::OperationId op_id, isa::Opcode opcode,
-                                                    RegId rd, uint32_t funct5) noexcept
+                                                    simrv::xlen::RegId rd,
+                                                    isa::Funct5Amo funct5) noexcept
     -> DependencyTraits {
     DependencyTraits dt{};
     if (op_id != isa::UNKNOWN) {
-        dt.writes_int = writes_integer(op_id) && (rd != RegId::Zero);
+        dt.writes_int = writes_integer(op_id) && (rd != simrv::xlen::RegId::Zero);
         dt.writes_fp = writes_float(op_id);
         dt.writes_vec = writes_vector(op_id);
         dt.reads_rs1_int = is_rs1_int(op_id);
@@ -225,7 +227,7 @@ namespace simrv::pipeline::operation {
                              opcode == isa::Opcode::MAdd || opcode == isa::Opcode::MSub ||
                              opcode == isa::Opcode::NMSub || opcode == isa::Opcode::NMAdd);
         const bool writes_int_calc = [&]() {
-            if (rd == RegId::Zero) return false;
+            if (rd == simrv::xlen::RegId::Zero) return false;
             switch (opcode) {
                 case isa::Opcode::Branch:
                 case isa::Opcode::Store:
@@ -244,14 +246,19 @@ namespace simrv::pipeline::operation {
         dt.reads_rs2_fp = reads_rs2(opcode) && fp_rs2;
         dt.reads_rs3_fp = reads_rs3(opcode);
         dt.is_mem_load = (opcode == isa::Opcode::Load) ||
-                         (opcode == isa::Opcode::Amo &&
-                          static_cast<isa::Funct5Amo>(funct5) != isa::Funct5Amo::Sc);
+                         (opcode == isa::Opcode::Amo && funct5 != isa::Funct5Amo::Sc);
         dt.is_mem_store = (opcode == isa::Opcode::Store || opcode == isa::Opcode::StoreFp);
         dt.is_control = (opcode == isa::Opcode::Branch || opcode == isa::Opcode::Jal ||
                          opcode == isa::Opcode::Jalr);
         dt.is_serializing = (opcode == isa::Opcode::System || opcode == isa::Opcode::MiscMem);
     }
     return dt;
+}
+
+[[nodiscard]] constexpr auto make_dependency_traits(isa::OperationId op_id, isa::Opcode opcode,
+                                                    simrv::xlen::RegId rd, uint32_t funct5) noexcept
+    -> DependencyTraits {
+    return make_dependency_traits(op_id, opcode, rd, static_cast<isa::Funct5Amo>(funct5));
 }
 
 }  // namespace simrv::pipeline::operation

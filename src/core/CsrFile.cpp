@@ -8,12 +8,11 @@
 #include <string_view>
 #include <utility>
 
-#include "simrv/Define.hpp"
 #include "simrv/core/Cpu.hpp"
 #include "simrv/core/Machine.hpp"
 #include "simrv/core/Tracer.hpp"
 #include "simrv/xlen/Constants.hpp"
-#include "simrv/xlen/Types.hpp"
+#include "simrv/xlen/ScalarTypes.hpp"
 
 #if defined(__x86_64__) || defined(_M_X64)
 #include <immintrin.h>
@@ -23,23 +22,63 @@ namespace simrv::core {
 
 namespace {
 constexpr unsigned kHighWordShift = 32;
-constexpr CSRValue kCounterEnableMask = static_cast<CSRValue>(0x7u);
+constexpr simrv::xlen::CsrValue kCounterEnableMask = static_cast<simrv::xlen::CsrValue>(0x7u);
 
 [[nodiscard]] constexpr auto fp_accessible(const ArchState& state) noexcept -> bool {
     return isa::misa_has_extension(state.misa, isa::IsaExtension::F) &&
-           (state.mstatus & enum_mask(MstatusBit::Fs)) != 0;
+           (state.mstatus & MstatusBit::Fs) != 0;
 }
 
 [[nodiscard]] constexpr auto vector_accessible(const ArchState& state) noexcept -> bool {
     return isa::misa_has_extension(state.misa, isa::IsaExtension::V) &&
-           (state.mstatus & enum_mask(MstatusBit::Vs)) != 0;
+           (state.mstatus & MstatusBit::Vs) != 0;
+}
+
+[[nodiscard]] constexpr auto pack_pmpcfg(
+    const std::array<uint8_t, ArchState::kNumPmpEntries>& pmpcfg, size_t cfg_idx,
+    unsigned xlen) noexcept -> simrv::xlen::CsrValue {
+    if (xlen == 32) {
+        if (cfg_idx >= 4) return 0;
+        simrv::xlen::CsrValue val = 0;
+        for (size_t b = 0; b < 4; ++b) {
+            const size_t entry = cfg_idx * 4 + b;
+            if (entry < ArchState::kNumPmpEntries) {
+                val |= static_cast<simrv::xlen::CsrValue>(pmpcfg[entry]) << (8 * b);
+            }
+        }
+        return val;
+    }
+    if (cfg_idx >= 4 || (cfg_idx & 1) != 0) return 0;
+    const size_t base_pmp = (cfg_idx / 2) * 8;
+    simrv::xlen::CsrValue val = 0;
+    for (size_t b = 0; b < 8; ++b) {
+        const size_t entry = base_pmp + b;
+        if (entry < ArchState::kNumPmpEntries) {
+            val |= static_cast<simrv::xlen::CsrValue>(pmpcfg[entry]) << (8 * b);
+        }
+    }
+    return val;
+}
+
+void unpack_pmpcfg(std::array<uint8_t, ArchState::kNumPmpEntries>& pmpcfg, size_t cfg_idx,
+                   simrv::xlen::CsrValue wdata, unsigned xlen) noexcept {
+    const size_t bytes_per_csr = (xlen == 32) ? 4 : 8;
+    if (xlen != 32 && (cfg_idx >= 4 || (cfg_idx & 1) != 0)) return;
+    if (xlen == 32 && cfg_idx >= 4) return;
+    const size_t base_entry = (xlen == 32) ? (cfg_idx * 4) : ((cfg_idx / 2) * 8);
+    for (size_t b = 0; b < bytes_per_csr; ++b) {
+        const size_t entry = base_entry + b;
+        if (entry < ArchState::kNumPmpEntries && (pmpcfg[entry] & 0x80) == 0) {
+            pmpcfg[entry] = pmpcfg_legalize(static_cast<uint8_t>((wdata >> (8 * b)) & 0xFF));
+        }
+    }
 }
 
 }  // namespace
 
-auto CsrFile::getMstatus(CSRValue mask) const -> CSRValue {
-    const CSRValue misa = cpu_.state().misa;
-    const CSRValue implemented =
+auto CsrFile::getMstatus(simrv::xlen::CsrValue mask) const -> simrv::xlen::CsrValue {
+    const simrv::xlen::CsrValue misa = cpu_.state().misa;
+    const simrv::xlen::CsrValue implemented =
         mstatus_writable_mask(isa::misa_has_extension(misa, isa::IsaExtension::S),
                               isa::misa_has_extension(misa, isa::IsaExtension::U),
                               isa::misa_has_extension(misa, isa::IsaExtension::F),
@@ -48,8 +87,8 @@ auto CsrFile::getMstatus(CSRValue mask) const -> CSRValue {
                               cpu_.state().regs.xlen);
 }
 
-void CsrFile::setMstatus(CSRValue wdata) {
-    const CSRValue misa = cpu_.state().misa;
+void CsrFile::setMstatus(simrv::xlen::CsrValue wdata) {
+    const simrv::xlen::CsrValue misa = cpu_.state().misa;
     const bool has_s = isa::misa_has_extension(misa, isa::IsaExtension::S);
     const bool has_u = isa::misa_has_extension(misa, isa::IsaExtension::U);
     const bool has_f = isa::misa_has_extension(misa, isa::IsaExtension::F);
@@ -59,43 +98,41 @@ void CsrFile::setMstatus(CSRValue wdata) {
         // SXL and UXL are WARL. SimRV supports 32 and 64 only; reserved
         // encodings retain their prior legal value. An RV32 machine
         // personality fixes both lower modes to RV32.
-        const unsigned mxl =
+        const auto mxl =
             static_cast<unsigned>((static_cast<uint64_t>(cpu_.state().misa) >> 62U) & 0x3U);
         for (const unsigned shift : {32U, 34U}) {
             const uint64_t field_mask = uint64_t{0x3U} << shift;
             const uint64_t requested = (static_cast<uint64_t>(wdata) >> shift) & 0x3U;
-            uint64_t legalized = static_cast<uint64_t>(wdata);
+            auto legalized = static_cast<uint64_t>(wdata);
             if (mxl == 1U) {
                 legalized = (legalized & ~field_mask) | (uint64_t{1U} << shift);
             } else if (requested != 1U && requested != 2U) {
                 legalized = (legalized & ~field_mask) |
                             (static_cast<uint64_t>(cpu_.state().mstatus) & field_mask);
             }
-            wdata = static_cast<CSRValue>(legalized);
+            wdata = static_cast<simrv::xlen::CsrValue>(legalized);
         }
         const uint64_t sxl = (static_cast<uint64_t>(wdata) >> 34U) & 0x3U;
         const uint64_t uxl = (static_cast<uint64_t>(wdata) >> 32U) & 0x3U;
         if (uxl > sxl) {
             constexpr uint64_t kUxlMask = uint64_t{0x3U} << 32U;
-            wdata =
-                static_cast<CSRValue>((static_cast<uint64_t>(wdata) & ~kUxlMask) | (sxl << 32U));
+            wdata = static_cast<simrv::xlen::CsrValue>((static_cast<uint64_t>(wdata) & ~kUxlMask) |
+                                                       (sxl << 32U));
         }
     }
-    CSRValue const mod = cpu_.state().mstatus ^ wdata;
+    simrv::xlen::CsrValue const mod = cpu_.state().mstatus ^ wdata;
     // Bits whose change must flush the TLB and decode cache:
     // - Mprv/Sum/Mxr: address translation mode changes
     // - Fs/Vs: FP/Vector state enable changes invalidate cached illegal-instruction checks
     // - Sxl/Uxl (bits 35:34 and 33:32): XLEN changes alter RVC decompression (C.JAL vs C.ADDIW)
-    const CSRValue tlb_sensitive = enum_mask(MstatusBit::Mprv) | enum_mask(MstatusBit::Sum) |
-                                   enum_mask(MstatusBit::Mxr) | enum_mask(MstatusBit::Fs) |
-                                   enum_mask(MstatusBit::Vs);
-    const CSRValue xlen_bits = static_cast<CSRValue>(uint64_t{0xFULL} << 32U);
+    const simrv::xlen::CsrValue tlb_sensitive =
+        MstatusBit::Mprv | MstatusBit::Sum | MstatusBit::Mxr | MstatusBit::Fs | MstatusBit::Vs;
+    const auto xlen_bits = static_cast<simrv::xlen::CsrValue>(uint64_t{0xFULL} << 32U);
     if ((mod & (tlb_sensitive | xlen_bits)) != 0 ||
-        (((cpu_.state().mstatus & enum_mask(MstatusBit::Mprv)) != 0u) &&
-         (mod & enum_mask(MstatusBit::Mpp)) != 0)) {
+        (((cpu_.state().mstatus & MstatusBit::Mprv) != 0u) && (mod & MstatusBit::Mpp) != 0)) {
         cpu_.TLB_flush();
     }
-    const CSRValue mask = mstatus_writable_mask(has_s, has_u, has_f, has_v);
+    const simrv::xlen::CsrValue mask = mstatus_writable_mask(has_s, has_u, has_f, has_v);
     cpu_.state().mstatus = (cpu_.state().mstatus & ~mask) | (wdata & mask);
     // Read-only-zero fields must not retain reset/profile state internally,
     // otherwise SD and effective-XLEN calculations could observe absent state.
@@ -103,7 +140,8 @@ void CsrFile::setMstatus(CSRValue wdata) {
     cpu_.state().update_xlen();
 }
 
-auto CsrFile::read(CSRAddress addr) const -> std::expected<CSRValue, ExceptionCode> {
+auto CsrFile::read(simrv::xlen::CsrNumber addr) const
+    -> std::expected<simrv::xlen::CsrValue, ExceptionCode> {
     auto require_fp = [this]() -> std::expected<void, ExceptionCode> {
         if (!fp_accessible(cpu_.state())) {
             return std::unexpected(ExceptionCode::IllegalInstruction);
@@ -123,10 +161,8 @@ auto CsrFile::read(CSRAddress addr) const -> std::expected<CSRValue, ExceptionCo
         return {};
     };
 
-    CSRValue rcsr = 0;
-    switch (addr) {
-        case 0x800:  // SimRV Xsimrvtrace marker CSR in the custom U-level CSR window.
-            return CSRValue{0};
+    simrv::xlen::CsrValue rcsr = 0;
+    switch (addr.value()) {
         case csr_addr(Csr::Fflags):
             return require_fp().transform([this]() { return cpu_.state().fcsr & kFflagsMask; });
         case csr_addr(Csr::Frm):
@@ -149,8 +185,9 @@ auto CsrFile::read(CSRAddress addr) const -> std::expected<CSRValue, ExceptionCo
             return require_vector().transform([this]() { return cpu_.state().vtype; });
         case csr_addr(Csr::Vlenb):
             // vlenb is the read-only architectural VLEN/8 constant for the current hart.
-            return require_vector().transform(
-                [this]() { return static_cast<CSRValue>(cpu_.state().regs.vlen_bytes()); });
+            return require_vector().transform([this]() {
+                return static_cast<simrv::xlen::CsrValue>(cpu_.state().regs.vlen_bytes());
+            });
 
         case csr_addr(Csr::Sie):
             rcsr = cpu_.state().mie & cpu_.state().mideleg & interrupt_implemented_mask(true);
@@ -179,6 +216,37 @@ auto CsrFile::read(CSRAddress addr) const -> std::expected<CSRValue, ExceptionCo
         case csr_addr(Csr::Satp):
             rcsr = cpu_.state().satp;
             break;
+        case csr_addr(Csr::Senvcfg):
+            rcsr = cpu_.state().senvcfg;
+            break;
+        case csr_addr(Csr::Stimecmp):
+            if (cpu_.state().priv < simrv::xlen::PrivilegeLevel::Machine) {
+                bool stce = false;
+                if constexpr (simrv::xlen::kIsXLen64) {
+                    stce = (cpu_.state().menvcfg & (1ULL << 63U)) != 0;
+                } else {
+                    stce = (cpu_.state().menvcfgh & (1UL << 31U)) != 0;
+                }
+                if (!stce) {
+                    return std::unexpected(ExceptionCode::IllegalInstruction);
+                }
+            }
+            if constexpr (simrv::xlen::kIsXLen64) {
+                rcsr = static_cast<simrv::xlen::CsrValue>(cpu_.state().stimecmp);
+            } else {
+                rcsr = static_cast<simrv::xlen::CsrValue>(cpu_.state().stimecmp & 0xFFFFFFFFULL);
+            }
+            break;
+        case csr_addr(Csr::Stimecmph):
+            if (cpu_.state().priv < simrv::xlen::PrivilegeLevel::Machine) {
+                const bool stce = (cpu_.state().menvcfgh & (1UL << 31U)) != 0;
+                if (!stce) {
+                    return std::unexpected(ExceptionCode::IllegalInstruction);
+                }
+            }
+            return require_rv32_counter().transform([this]() {
+                return static_cast<simrv::xlen::CsrValue>(cpu_.state().stimecmp >> 32);
+            });
 
         case csr_addr(Csr::Medeleg):
             rcsr = cpu_.state().medeleg;
@@ -196,6 +264,19 @@ auto CsrFile::read(CSRAddress addr) const -> std::expected<CSRValue, ExceptionCo
         case csr_addr(Csr::Mcounteren):
             rcsr = cpu_.state().mcounteren;
             break;
+        case csr_addr(Csr::Mcountinhibit):
+            rcsr = cpu_.state().mcountinhibit;
+            break;
+        case csr_addr(Csr::Menvcfg):
+            rcsr = cpu_.state().menvcfg;
+            break;
+        case csr_addr(Csr::Menvcfgh):
+            return require_rv32_counter().transform([this]() { return cpu_.state().menvcfgh; });
+        case csr_addr(Csr::Mseccfg):
+            rcsr = cpu_.state().mseccfg;
+            break;
+        case csr_addr(Csr::Mseccfgh):
+            return require_rv32_counter().transform([this]() { return cpu_.state().mseccfgh; });
         case csr_addr(Csr::Mscratch):
             rcsr = cpu_.state().mscratch;
             break;
@@ -218,28 +299,29 @@ auto CsrFile::read(CSRAddress addr) const -> std::expected<CSRValue, ExceptionCo
 
         case csr_addr(Csr::Mcycle):
         case csr_addr(Csr::Cycle):
-            rcsr = static_cast<CSRValue>(cpu_.clint_mmio.mcycle);
+            rcsr = static_cast<simrv::xlen::CsrValue>(cpu_.clint_mmio.mcycle);
             break;
         case csr_addr(Csr::Minstret):
         case csr_addr(Csr::Instret):
-            rcsr = static_cast<CSRValue>(cpu_.e_icount);
+            rcsr = static_cast<simrv::xlen::CsrValue>(cpu_.e_icount);
             break;
         case csr_addr(Csr::Time):
-            rcsr = static_cast<CSRValue>(cpu_.clint_mmio.mtime);
+            rcsr = static_cast<simrv::xlen::CsrValue>(cpu_.clint_mmio.mtime);
             break;
 
         case csr_addr(Csr::Mcycleh):
         case csr_addr(Csr::Cycleh):
             return require_rv32_counter().transform([this]() {
-                return static_cast<CSRValue>(cpu_.clint_mmio.mcycle >> kHighWordShift);
+                return static_cast<simrv::xlen::CsrValue>(cpu_.clint_mmio.mcycle >> kHighWordShift);
             });
         case csr_addr(Csr::Minstreth):
         case csr_addr(Csr::Instreth):
-            return require_rv32_counter().transform(
-                [this]() { return static_cast<CSRValue>(cpu_.e_icount >> kHighWordShift); });
+            return require_rv32_counter().transform([this]() {
+                return static_cast<simrv::xlen::CsrValue>(cpu_.e_icount >> kHighWordShift);
+            });
         case csr_addr(Csr::Timeh):
             return require_rv32_counter().transform([this]() {
-                return static_cast<CSRValue>(cpu_.clint_mmio.mtime >> kHighWordShift);
+                return static_cast<simrv::xlen::CsrValue>(cpu_.clint_mmio.mtime >> kHighWordShift);
             });
 
         case csr_addr(Csr::Sstatus):
@@ -262,37 +344,13 @@ auto CsrFile::read(CSRAddress addr) const -> std::expected<CSRValue, ExceptionCo
 
         default:
             if (pmp_csr_exists(addr, cpu_.state().regs.xlen)) {
-                if (addr >= 0x3A0 && addr <= 0x3AF) {
-                    const size_t cfg_idx = addr - 0x3A0;
-                    if (cpu_.state().regs.xlen == 32) {
-                        if (cfg_idx < 4) {
-                            rcsr =
-                                static_cast<CSRValue>(cpu_.state().pmpcfg[cfg_idx * 4]) |
-                                (static_cast<CSRValue>(cpu_.state().pmpcfg[cfg_idx * 4 + 1]) << 8) |
-                                (static_cast<CSRValue>(cpu_.state().pmpcfg[cfg_idx * 4 + 2])
-                                 << 16) |
-                                (static_cast<CSRValue>(cpu_.state().pmpcfg[cfg_idx * 4 + 3]) << 24);
-                        } else {
-                            rcsr = 0;
-                        }
-                    } else {
-                        if (cfg_idx < 4 && (cfg_idx & 1) == 0) {
-                            const size_t base_pmp = (cfg_idx / 2) * 8;
-                            rcsr = 0;
-                            for (size_t b = 0; b < 8; ++b) {
-                                if (base_pmp + b < ArchState::kNumPmpEntries) {
-                                    rcsr |= static_cast<CSRValue>(cpu_.state().pmpcfg[base_pmp + b])
-                                            << (8 * b);
-                                }
-                            }
-                        } else {
-                            rcsr = 0;
-                        }
-                    }
-                } else if (addr >= 0x3B0 && addr <= 0x3EF) {
-                    const size_t pmp_idx = addr - 0x3B0;
+                if (addr.value() >= 0x3A0 && addr.value() <= 0x3AF) {
+                    const size_t cfg_idx = addr.value() - 0x3A0;
+                    rcsr = pack_pmpcfg(cpu_.state().pmpcfg, cfg_idx, cpu_.state().regs.xlen);
+                } else if (addr.value() >= 0x3B0 && addr.value() <= 0x3EF) {
+                    const size_t pmp_idx = addr.value() - 0x3B0;
                     if (pmp_idx < ArchState::kNumPmpEntries) {
-                        rcsr = static_cast<CSRValue>(cpu_.state().pmpaddr[pmp_idx]);
+                        rcsr = static_cast<simrv::xlen::CsrValue>(cpu_.state().pmpaddr[pmp_idx]);
                     } else {
                         rcsr = 0;
                     }
@@ -301,7 +359,7 @@ auto CsrFile::read(CSRAddress addr) const -> std::expected<CSRValue, ExceptionCo
                 }
                 break;
             }
-            if (is_zero_hpm_csr(addr, cpu_.state().regs.xlen) || addr == 0x320) {
+            if (is_zero_hpm_csr(addr, cpu_.state().regs.xlen)) {
                 rcsr = 0;
                 break;
             }
@@ -310,21 +368,23 @@ auto CsrFile::read(CSRAddress addr) const -> std::expected<CSRValue, ExceptionCo
     return rcsr;
 }
 
-auto CsrFile::write(CSRAddress addr, CSRValue wdata)
+auto CsrFile::write(simrv::xlen::CsrNumber addr, simrv::xlen::CsrValue wdata)
     -> std::expected<void, ExceptionCode> {  // NOLINT(bugprone-easily-swappable-parameters)
     const bool has_s = isa::misa_has_extension(cpu_.state().misa, isa::IsaExtension::S);
-    const CSRValue interrupt_mask = interrupt_implemented_mask(has_s);
-    const auto log_pending_changes = [this](CSRValue before, std::string_view source) {
+    const simrv::xlen::CsrValue interrupt_mask = interrupt_implemented_mask(has_s);
+    const auto log_pending_changes = [this](simrv::xlen::CsrValue before, std::string_view source) {
         if (cpu_.machine_ == nullptr) return;
         constexpr std::array interrupt_bits = {
-            std::pair{MipBit::Ssip, TrapCause{1}}, std::pair{MipBit::Msip, TrapCause{3}},
-            std::pair{MipBit::Stip, TrapCause{5}}, std::pair{MipBit::Mtip, TrapCause{7}},
-            std::pair{MipBit::Seip, TrapCause{9}}, std::pair{MipBit::Meip, TrapCause{11}},
+            std::pair{MipBit::Ssip, simrv::xlen::TrapCause{1}},
+            std::pair{MipBit::Msip, simrv::xlen::TrapCause{3}},
+            std::pair{MipBit::Stip, simrv::xlen::TrapCause{5}},
+            std::pair{MipBit::Mtip, simrv::xlen::TrapCause{7}},
+            std::pair{MipBit::Seip, simrv::xlen::TrapCause{9}},
+            std::pair{MipBit::Meip, simrv::xlen::TrapCause{11}},
         };
         for (const auto& [bit, code] : interrupt_bits) {
-            const auto mask = enum_mask(bit);
-            const bool was_pending = (before & mask) != 0;
-            const bool is_pending = (cpu_.state().mip & mask) != 0;
+            const bool was_pending = (before & bit) != 0;
+            const bool is_pending = (cpu_.state().mip & bit) != 0;
             if (was_pending != is_pending) {
                 cpu_.machine_->trace().log_interrupt_signal(cpu_, kInterruptCauseBit | code,
                                                             is_pending, source);
@@ -354,12 +414,7 @@ auto CsrFile::write(CSRAddress addr, CSRValue wdata)
         return {};
     };
 
-    switch (addr) {
-        case 0x800:  // Custom CSR is architecturally inert unless tracing is enabled.
-            if (cpu_.machine_ != nullptr) {
-                cpu_.machine_->trace().log_marker_csr_write(cpu_, wdata);
-            }
-            break;
+    switch (addr.value()) {
         case csr_addr(Csr::Mvendorid):
         case csr_addr(Csr::Marchid):
         case csr_addr(Csr::Mimpid):
@@ -404,7 +459,7 @@ auto CsrFile::write(CSRAddress addr, CSRValue wdata)
         case csr_addr(Csr::Fflags):
             return require_fp().and_then([this, wdata]() -> std::expected<void, ExceptionCode> {
                 cpu_.state().fcsr = (cpu_.state().fcsr & ~kFflagsMask) | (wdata & kFflagsMask);
-                cpu_.state().mstatus |= enum_mask(MstatusBit::Fs);
+                cpu_.state().mstatus |= MstatusBit::Fs;
 #if defined(__x86_64__) || defined(_M_X64)
                 _mm_setcsr(_mm_getcsr() & ~0x3fu);
 #endif
@@ -414,13 +469,13 @@ auto CsrFile::write(CSRAddress addr, CSRValue wdata)
             return require_fp().and_then([this, wdata]() -> std::expected<void, ExceptionCode> {
                 cpu_.state().fcsr = (cpu_.state().fcsr & ~(kFrmMask << kFrmShift)) |
                                     ((wdata & kFrmMask) << kFrmShift);
-                cpu_.state().mstatus |= enum_mask(MstatusBit::Fs);
+                cpu_.state().mstatus |= MstatusBit::Fs;
                 return {};
             });
         case csr_addr(Csr::Fcsr):
             return require_fp().and_then([this, wdata]() -> std::expected<void, ExceptionCode> {
                 cpu_.state().fcsr = wdata & kFcsrMask;
-                cpu_.state().mstatus |= enum_mask(MstatusBit::Fs);
+                cpu_.state().mstatus |= MstatusBit::Fs;
 #if defined(__x86_64__) || defined(_M_X64)
                 _mm_setcsr(_mm_getcsr() & ~0x3fu);
 #endif
@@ -429,43 +484,43 @@ auto CsrFile::write(CSRAddress addr, CSRValue wdata)
         case csr_addr(Csr::Vstart):
             return require_vector().and_then([this, wdata]() -> std::expected<void, ExceptionCode> {
                 cpu_.state().vstart = wdata & cpu_.state().regs.vstart_mask();
-                cpu_.state().mstatus |= enum_mask(MstatusBit::Vs);
+                cpu_.state().mstatus |= MstatusBit::Vs;
                 return {};
             });
         case csr_addr(Csr::Vxsat):
             return require_vector().and_then([this, wdata]() -> std::expected<void, ExceptionCode> {
                 cpu_.state().vxsat = wdata & 1;
-                cpu_.state().mstatus |= enum_mask(MstatusBit::Vs);
+                cpu_.state().mstatus |= MstatusBit::Vs;
                 return {};
             });
         case csr_addr(Csr::Vxrm):
             return require_vector().and_then([this, wdata]() -> std::expected<void, ExceptionCode> {
                 cpu_.state().vxrm = wdata & 3;
-                cpu_.state().mstatus |= enum_mask(MstatusBit::Vs);
+                cpu_.state().mstatus |= MstatusBit::Vs;
                 return {};
             });
         case csr_addr(Csr::Vcsr):
             return require_vector().and_then([this, wdata]() -> std::expected<void, ExceptionCode> {
                 cpu_.state().vxrm = (wdata >> 1) & 3;
                 cpu_.state().vxsat = wdata & 1;
-                cpu_.state().mstatus |= enum_mask(MstatusBit::Vs);
+                cpu_.state().mstatus |= MstatusBit::Vs;
                 return {};
             });
         case csr_addr(Csr::Vl):
             return require_vector().and_then([this, wdata]() -> std::expected<void, ExceptionCode> {
                 cpu_.state().vl = wdata;
-                cpu_.state().mstatus |= enum_mask(MstatusBit::Vs);
+                cpu_.state().mstatus |= MstatusBit::Vs;
                 return {};
             });
         case csr_addr(Csr::Vtype):
             return require_vector().and_then([this, wdata]() -> std::expected<void, ExceptionCode> {
                 cpu_.state().vtype = wdata;
-                cpu_.state().mstatus |= enum_mask(MstatusBit::Vs);
+                cpu_.state().mstatus |= MstatusBit::Vs;
                 return {};
             });
 
         case csr_addr(Csr::Stvec):
-            cpu_.state().stvec = wdata & ~static_cast<CSRValue>(2);
+            cpu_.state().stvec = wdata & ~static_cast<simrv::xlen::CsrValue>(2);
             break;
         case csr_addr(Csr::Scounteren):
             cpu_.state().scounteren = wdata & kCounterEnableMask;
@@ -482,13 +537,75 @@ auto CsrFile::write(CSRAddress addr, CSRValue wdata)
         case csr_addr(Csr::Stval):
             cpu_.state().stval = wdata;
             break;
+        case csr_addr(Csr::Senvcfg):
+            cpu_.state().senvcfg = wdata;
+            break;
+        case csr_addr(Csr::Stimecmp):
+            if (cpu_.state().priv < simrv::xlen::PrivilegeLevel::Machine) {
+                bool stce = false;
+                if constexpr (simrv::xlen::kIsXLen64) {
+                    stce = (cpu_.state().menvcfg & (1ULL << 63U)) != 0;
+                } else {
+                    stce = (cpu_.state().menvcfgh & (1UL << 31U)) != 0;
+                }
+                if (!stce) {
+                    return std::unexpected(ExceptionCode::IllegalInstruction);
+                }
+            }
+            if (cpu_.state().regs.xlen == 32) {
+                cpu_.state().stimecmp =
+                    (cpu_.state().stimecmp & 0xFFFFFFFF00000000ULL) | static_cast<uint32_t>(wdata);
+            } else {
+                cpu_.state().stimecmp = wdata;
+            }
+            cpu_.evaluate_timer_interrupt();
+            break;
+        case csr_addr(Csr::Stimecmph):
+            if (cpu_.state().priv < simrv::xlen::PrivilegeLevel::Machine) {
+                const bool stce = (cpu_.state().menvcfgh & (1UL << 31U)) != 0;
+                if (!stce) {
+                    return std::unexpected(ExceptionCode::IllegalInstruction);
+                }
+            }
+            return require_rv32_counter().and_then(
+                [this, wdata]() -> std::expected<void, ExceptionCode> {
+                    cpu_.state().stimecmp = (cpu_.state().stimecmp & 0x00000000FFFFFFFFULL) |
+                                            (static_cast<uint64_t>(wdata) << 32);
+                    cpu_.evaluate_timer_interrupt();
+                    return {};
+                });
 
         case csr_addr(Csr::Mtvec):
-            cpu_.state().mtvec = wdata & ~static_cast<CSRValue>(2);
+            cpu_.state().mtvec = wdata & ~static_cast<simrv::xlen::CsrValue>(2);
             break;
         case csr_addr(Csr::Mcounteren):
             cpu_.state().mcounteren = wdata & kCounterEnableMask;
             break;
+        case csr_addr(Csr::Mcountinhibit):
+            cpu_.state().mcountinhibit = wdata & ~static_cast<simrv::xlen::CsrValue>(2);
+            break;
+        case csr_addr(Csr::Menvcfg):
+            cpu_.state().menvcfg = wdata;
+            cpu_.evaluate_timer_interrupt();
+            break;
+        case csr_addr(Csr::Menvcfgh):
+            return require_rv32_counter().and_then(
+                [this, wdata]() -> std::expected<void, ExceptionCode> {
+                    cpu_.state().menvcfgh = wdata;
+                    cpu_.evaluate_timer_interrupt();
+                    return {};
+                });
+        case csr_addr(Csr::Mseccfg): {
+            const auto sticky = cpu_.state().mseccfg & static_cast<simrv::xlen::CsrValue>(0x7u);
+            cpu_.state().mseccfg = wdata | sticky;
+            break;
+        }
+        case csr_addr(Csr::Mseccfgh):
+            return require_rv32_counter().and_then(
+                [this, wdata]() -> std::expected<void, ExceptionCode> {
+                    cpu_.state().mseccfgh = wdata;
+                    return {};
+                });
         case csr_addr(Csr::Mscratch):
             cpu_.state().mscratch = wdata;
             break;
@@ -507,8 +624,8 @@ auto CsrFile::write(CSRAddress addr, CSRValue wdata)
                 (cpu_.state().mie & ~cpu_.state().mideleg) | (wdata & cpu_.state().mideleg);
             break;
         case csr_addr(Csr::Sip): {
-            const CSRValue pending_before = cpu_.state().mip;
-            const CSRValue mask = enum_mask(MipBit::Ssip) & cpu_.state().mideleg;
+            const simrv::xlen::CsrValue pending_before = cpu_.state().mip;
+            const simrv::xlen::CsrValue mask = MipBit::Ssip & cpu_.state().mideleg;
             cpu_.state().mip = (cpu_.state().mip & ~mask) | (wdata & mask);
             log_pending_changes(pending_before, "sip_csr");
             break;
@@ -523,13 +640,13 @@ auto CsrFile::write(CSRAddress addr, CSRValue wdata)
             cpu_.state().mie = wdata & interrupt_mask;
             break;
         case csr_addr(Csr::Mip): {
-            const CSRValue pending_before = cpu_.state().mip;
-            const CSRValue writable = mip_writable_mask(has_s);
-            const CSRValue sourced = enum_mask(MipBit::Seip) | enum_mask(MipBit::Stip);
-            const CSRValue ordinary = writable & ~sourced;
+            const simrv::xlen::CsrValue pending_before = cpu_.state().mip;
+            const simrv::xlen::CsrValue writable = mip_writable_mask(has_s);
+            const simrv::xlen::CsrValue sourced = MipBit::Seip | MipBit::Stip;
+            const simrv::xlen::CsrValue ordinary = writable & ~sourced;
             cpu_.state().mip = (cpu_.state().mip & ~ordinary) | (wdata & ordinary);
-            cpu_.state().seip_software = (wdata & writable & enum_mask(MipBit::Seip)) != 0;
-            cpu_.state().stip_software = (wdata & writable & enum_mask(MipBit::Stip)) != 0;
+            cpu_.state().seip_software = (wdata & writable & MipBit::Seip) != 0;
+            cpu_.state().stip_software = (wdata & writable & MipBit::Stip) != 0;
             cpu_.state().refresh_supervisor_pending();
             log_pending_changes(pending_before, "mip_csr");
             break;
@@ -537,7 +654,7 @@ auto CsrFile::write(CSRAddress addr, CSRValue wdata)
 
         case csr_addr(Csr::Satp): {
             const unsigned xlen = cpu_.state().regs.xlen;
-            const Word mode = simrv::xlen::satp_mode(wdata, xlen);
+            const simrv::xlen::Word mode = simrv::xlen::satp_mode(wdata, xlen);
             if (simrv::xlen::satp_mode_supported(mode, xlen)) {
                 if (cpu_.state().satp != wdata) {
                     cpu_.state().satp = wdata;
@@ -560,36 +677,11 @@ auto CsrFile::write(CSRAddress addr, CSRValue wdata)
             break;
         default:
             if (pmp_csr_exists(addr, cpu_.state().regs.xlen)) {
-                if (addr >= 0x3A0 && addr <= 0x3AF) {
-                    const size_t cfg_idx = addr - 0x3A0;
-                    if (cpu_.state().regs.xlen == 32) {
-                        if (cfg_idx < 4) {
-                            for (size_t b = 0; b < 4; ++b) {
-                                const size_t entry = cfg_idx * 4 + b;
-                                if (entry < ArchState::kNumPmpEntries) {
-                                    if ((cpu_.state().pmpcfg[entry] & 0x80) == 0) {
-                                        cpu_.state().pmpcfg[entry] =
-                                            static_cast<uint8_t>((wdata >> (8 * b)) & 0xFF);
-                                    }
-                                }
-                            }
-                        }
-                    } else {
-                        if (cfg_idx < 4 && (cfg_idx & 1) == 0) {
-                            const size_t base_pmp = (cfg_idx / 2) * 8;
-                            for (size_t b = 0; b < 8; ++b) {
-                                const size_t entry = base_pmp + b;
-                                if (entry < ArchState::kNumPmpEntries) {
-                                    if ((cpu_.state().pmpcfg[entry] & 0x80) == 0) {
-                                        cpu_.state().pmpcfg[entry] =
-                                            static_cast<uint8_t>((wdata >> (8 * b)) & 0xFF);
-                                    }
-                                }
-                            }
-                        }
-                    }
-                } else if (addr >= 0x3B0 && addr <= 0x3EF) {
-                    const size_t pmp_idx = addr - 0x3B0;
+                if (addr.value() >= 0x3A0 && addr.value() <= 0x3AF) {
+                    const size_t cfg_idx = addr.value() - 0x3A0;
+                    unpack_pmpcfg(cpu_.state().pmpcfg, cfg_idx, wdata, cpu_.state().regs.xlen);
+                } else if (addr.value() >= 0x3B0 && addr.value() <= 0x3EF) {
+                    const size_t pmp_idx = addr.value() - 0x3B0;
                     if (pmp_idx < ArchState::kNumPmpEntries) {
                         const bool self_locked = (cpu_.state().pmpcfg[pmp_idx] & 0x80) != 0;
                         const bool next_locked_tor =
@@ -597,7 +689,8 @@ auto CsrFile::write(CSRAddress addr, CSRValue wdata)
                             ((cpu_.state().pmpcfg[pmp_idx + 1] & 0x80) != 0) &&
                             ((cpu_.state().pmpcfg[pmp_idx + 1] & 0x18) == 0x08);
                         if (!self_locked && !next_locked_tor) {
-                            cpu_.state().pmpaddr[pmp_idx] = static_cast<Address>(wdata);
+                            cpu_.state().pmpaddr[pmp_idx] =
+                                static_cast<simrv::xlen::Address>(wdata);
                         }
                     }
                 }
@@ -605,7 +698,7 @@ auto CsrFile::write(CSRAddress addr, CSRValue wdata)
                 cpu_.TLB_flush();
                 break;
             }
-            if (is_zero_hpm_csr(addr, cpu_.state().regs.xlen) || addr == 0x320) {
+            if (is_zero_hpm_csr(addr, cpu_.state().regs.xlen)) {
                 break;
             }
             return std::unexpected(ExceptionCode::IllegalInstruction);

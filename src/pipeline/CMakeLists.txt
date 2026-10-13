@@ -6,6 +6,7 @@ simrv_add_component(simrv-isa
 add_library(simrv::isa ALIAS simrv-isa)
 
 simrv_add_component(simrv-pipeline
+  CpuModel.cpp
   PipelineSim.cpp
   PipelineConfig.cpp
   BranchPredictor.cpp

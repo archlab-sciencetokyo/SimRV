@@ -4,7 +4,7 @@
  */
 #pragma once
 
-#include "simrv/xlen/Types.hpp"
+#include "simrv/xlen/IdentifierTypes.hpp"
 
 namespace simrv::core {
 
@@ -23,11 +23,11 @@ class IInterruptController {
     virtual ~IInterruptController() = default;
 
     /// Signal a platform-level interrupt source (e.g. from UART, VirtIO, RTC)
-    virtual void set_platform_irq(IrqNumber irq, bool asserted) = 0;
+    virtual void set_platform_irq(simrv::xlen::IrqNumber irq, bool asserted) = 0;
 
     /// Signal a hart-specific architectural interrupt (MSIP, MTIP, MEIP, SEIP)
-    virtual void set_hart_irq(HartId hart, InterruptType type, PrivilegeLevel priv,
-                              bool asserted) = 0;
+    virtual void set_hart_irq(simrv::xlen::HartId hart, InterruptType type,
+                              simrv::xlen::PrivilegeLevel priv, bool asserted) = 0;
 };
 
 }  // namespace simrv::core

@@ -11,7 +11,7 @@
 #include "simrv/core/Tlb.hpp"
 #include "simrv/tui/TuiTheme.hpp"
 #include "simrv/tui/panels/InspectorPane.hpp"
-#include "simrv/xlen/Types.hpp"
+#include "simrv/xlen/ScalarTypes.hpp"
 
 namespace simrv::tui {
 
@@ -22,7 +22,7 @@ auto InspectorPane::render_tlb_stats(const simrv::core::CPU& cpu, int logical_ro
     const auto& tlb = cpu.tlb;
 
     // Parse satp details
-    Register satp_val = st.satp;
+    simrv::xlen::Register satp_val = st.satp;
     std::string mode_str = "Bare (Off)";
     uint64_t asid = 0;
     uint64_t ppn = 0;
@@ -49,8 +49,8 @@ auto InspectorPane::render_tlb_stats(const simrv::core::CPU& cpu, int logical_ro
         const char* type;
         size_t set;
         int way;
-        Address vaddr;
-        Address paddr;
+        simrv::xlen::Address vaddr;
+        simrv::xlen::Address paddr;
         Asid asid;
         const char* priv_str;
     };
@@ -58,11 +58,11 @@ auto InspectorPane::render_tlb_stats(const simrv::core::CPU& cpu, int logical_ro
 
     auto priv_to_str = [](auto priv) -> const char* {
         switch (priv) {
-            case PrivilegeLevel::User:
+            case simrv::xlen::PrivilegeLevel::User:
                 return "User";
-            case PrivilegeLevel::Supervisor:
+            case simrv::xlen::PrivilegeLevel::Supervisor:
                 return "Super";
-            case PrivilegeLevel::Machine:
+            case simrv::xlen::PrivilegeLevel::Machine:
                 return "Mach";
             default:
                 return "?";
@@ -73,18 +73,33 @@ auto InspectorPane::render_tlb_stats(const simrv::core::CPU& cpu, int logical_ro
         for (int way = 0; way < 2; ++way) {
             const auto& ie = tlb.inst_r[set][way];
             if (ie.valid) {
-                active_entries.push_back(RenderTlbEntry{"ITLB", set, way, ie.v_addr, ie.p_addr,
-                                                        ie.asid, priv_to_str(ie.priv)});
+                active_entries.push_back(RenderTlbEntry{.type = "ITLB",
+                                                        .set = set,
+                                                        .way = way,
+                                                        .vaddr = ie.v_addr,
+                                                        .paddr = ie.p_addr,
+                                                        .asid = ie.asid,
+                                                        .priv_str = priv_to_str(ie.priv)});
             }
             const auto& dr = tlb.data_r[set][way];
             if (dr.valid) {
-                active_entries.push_back(RenderTlbEntry{"DTLB-R", set, way, dr.v_addr, dr.p_addr,
-                                                        dr.asid, priv_to_str(dr.priv)});
+                active_entries.push_back(RenderTlbEntry{.type = "DTLB-R",
+                                                        .set = set,
+                                                        .way = way,
+                                                        .vaddr = dr.v_addr,
+                                                        .paddr = dr.p_addr,
+                                                        .asid = dr.asid,
+                                                        .priv_str = priv_to_str(dr.priv)});
             }
             const auto& dw = tlb.data_w[set][way];
             if (dw.valid) {
-                active_entries.push_back(RenderTlbEntry{"DTLB-W", set, way, dw.v_addr, dw.p_addr,
-                                                        dw.asid, priv_to_str(dw.priv)});
+                active_entries.push_back(RenderTlbEntry{.type = "DTLB-W",
+                                                        .set = set,
+                                                        .way = way,
+                                                        .vaddr = dw.v_addr,
+                                                        .paddr = dw.p_addr,
+                                                        .asid = dw.asid,
+                                                        .priv_str = priv_to_str(dw.priv)});
             }
         }
     }
@@ -136,8 +151,8 @@ auto InspectorPane::render_tlb_stats(const simrv::core::CPU& cpu, int logical_ro
     int entry_idx = logical_row - 3;
     if (entry_idx >= 0 && entry_idx < static_cast<int>(active_entries.size())) {
         const auto& e = active_entries[static_cast<size_t>(entry_idx)];
-        uint32_t v_trunc = static_cast<uint32_t>(e.vaddr & 0xFFFFFFFFULL);
-        uint32_t p_trunc = static_cast<uint32_t>(e.paddr & 0xFFFFFFFFULL);
+        auto v_trunc = static_cast<uint32_t>(e.vaddr & 0xFFFFFFFFULL);
+        auto p_trunc = static_cast<uint32_t>(e.paddr & 0xFFFFFFFFULL);
         if (width < 50) {
             return format_to_width(std::format("  \033[1m{:<6}\033[0m{:08x}➔{:08x} {}[{}]\033[0m",
                                                e.type, v_trunc, p_trunc, kThemePink, e.priv_str),

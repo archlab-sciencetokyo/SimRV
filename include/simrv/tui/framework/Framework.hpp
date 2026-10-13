@@ -5,7 +5,6 @@
 #include "simrv/tui/framework/Layout.hpp"
 #include "simrv/tui/framework/Modal.hpp"
 #include "simrv/tui/framework/ScrollView.hpp"
-#include "simrv/tui/framework/Terminal.hpp"
 #include "simrv/tui/framework/Text.hpp"
 #include "simrv/tui/framework/Theme.hpp"
 #include "simrv/tui/framework/Types.hpp"

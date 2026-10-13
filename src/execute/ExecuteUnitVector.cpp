@@ -1,10 +1,15 @@
+#include "simrv/execute/ExecuteUnitVector.hpp"
+
 #include <array>
 #include <utility>
 
 #include "simrv/core/Cpu.hpp"
 #include "simrv/core/Machine.hpp"
-#include "simrv/execute/ExecuteUnit.hpp"
+#include "simrv/isa/Common.hpp"
+#include "simrv/isa/VectorTypes.hpp"
+#include "simrv/memory/MemorySubsystem.hpp"
 #include "simrv/pipeline/OperationInfo.hpp"
+#include "vector/VectorSubunits.hpp"
 
 namespace simrv::execute {
 
@@ -41,114 +46,72 @@ constexpr auto requires_zero_vstart(isa::OperationId op_id) -> bool {
     }
 }
 
+consteval auto make_vector_fp_table() {
+    std::array<bool, isa::kOperationIdCount> table{};
+    for (const auto op : {
+             isa::OperationId::VFADD_VV,         isa::OperationId::VFSLIDE1UP_VF,
+             isa::OperationId::VFSLIDE1DOWN_VF,  isa::OperationId::VFADD_VF,
+             isa::OperationId::VFSUB_VV,         isa::OperationId::VFSUB_VF,
+             isa::OperationId::VFRSUB_VF,        isa::OperationId::VFMUL_VV,
+             isa::OperationId::VFMUL_VF,         isa::OperationId::VFDIV_VV,
+             isa::OperationId::VFDIV_VF,         isa::OperationId::VFRDIV_VF,
+             isa::OperationId::VFSQRT_V,         isa::OperationId::VFRSQRT7_V,
+             isa::OperationId::VFREC7_V,         isa::OperationId::VFCLASS_V,
+             isa::OperationId::VFCVT_XU_F_V,     isa::OperationId::VFCVT_X_F_V,
+             isa::OperationId::VFCVT_F_XU_V,     isa::OperationId::VFCVT_F_X_V,
+             isa::OperationId::VFCVT_RTZ_XU_F_V, isa::OperationId::VFCVT_RTZ_X_F_V,
+             isa::OperationId::VFWCVT_XU_F_V,    isa::OperationId::VFWCVT_X_F_V,
+             isa::OperationId::VFWCVT_F_XU_V,    isa::OperationId::VFWCVT_F_X_V,
+             isa::OperationId::VFWCVT_F_F_V,     isa::OperationId::VFWCVT_RTZ_XU_F_V,
+             isa::OperationId::VFWCVT_RTZ_X_F_V, isa::OperationId::VFNCVT_XU_F_W,
+             isa::OperationId::VFNCVT_X_F_W,     isa::OperationId::VFNCVT_F_XU_W,
+             isa::OperationId::VFNCVT_F_X_W,     isa::OperationId::VFNCVT_F_F_W,
+             isa::OperationId::VFNCVT_ROD_F_F_W, isa::OperationId::VFNCVT_RTZ_XU_F_W,
+             isa::OperationId::VFNCVT_RTZ_X_F_W, isa::OperationId::VFSGNJ_VV,
+             isa::OperationId::VFSGNJ_VF,        isa::OperationId::VFSGNJN_VV,
+             isa::OperationId::VFSGNJN_VF,       isa::OperationId::VFSGNJX_VV,
+             isa::OperationId::VFSGNJX_VF,       isa::OperationId::VFMIN_VV,
+             isa::OperationId::VFMIN_VF,         isa::OperationId::VFMAX_VV,
+             isa::OperationId::VFMAX_VF,         isa::OperationId::VMFEQ_VV,
+             isa::OperationId::VMFEQ_VF,         isa::OperationId::VMFNE_VV,
+             isa::OperationId::VMFNE_VF,         isa::OperationId::VMFLT_VV,
+             isa::OperationId::VMFLT_VF,         isa::OperationId::VMFLE_VV,
+             isa::OperationId::VMFLE_VF,         isa::OperationId::VMFGT_VF,
+             isa::OperationId::VMFGE_VF,         isa::OperationId::VFMADD_VV,
+             isa::OperationId::VFMADD_VF,        isa::OperationId::VFNMADD_VV,
+             isa::OperationId::VFNMADD_VF,       isa::OperationId::VFMSUB_VV,
+             isa::OperationId::VFMSUB_VF,        isa::OperationId::VFNMSUB_VV,
+             isa::OperationId::VFNMSUB_VF,       isa::OperationId::VFMACC_VV,
+             isa::OperationId::VFMACC_VF,        isa::OperationId::VFNMACC_VV,
+             isa::OperationId::VFNMACC_VF,       isa::OperationId::VFMSAC_VV,
+             isa::OperationId::VFMSAC_VF,        isa::OperationId::VFNMSAC_VV,
+             isa::OperationId::VFNMSAC_VF,       isa::OperationId::VFMV_F_S,
+             isa::OperationId::VFMV_S_F,         isa::OperationId::VFMERGE_VFM,
+             isa::OperationId::VFMV_V_F,         isa::OperationId::VFREDUSUM_VS,
+             isa::OperationId::VFREDOSUM_VS,     isa::OperationId::VFREDMIN_VS,
+             isa::OperationId::VFREDMAX_VS,      isa::OperationId::VFWREDUSUM_VS,
+             isa::OperationId::VFWREDOSUM_VS,    isa::OperationId::VFWADD_VV,
+             isa::OperationId::VFWADD_VF,        isa::OperationId::VFWSUB_VV,
+             isa::OperationId::VFWSUB_VF,        isa::OperationId::VFWADD_WV,
+             isa::OperationId::VFWADD_WF,        isa::OperationId::VFWSUB_WV,
+             isa::OperationId::VFWSUB_WF,        isa::OperationId::VFWMUL_VV,
+             isa::OperationId::VFWMUL_VF,        isa::OperationId::VFWMACC_VV,
+             isa::OperationId::VFWMACC_VF,       isa::OperationId::VFWNMACC_VV,
+             isa::OperationId::VFWNMACC_VF,      isa::OperationId::VFWMSAC_VV,
+             isa::OperationId::VFWMSAC_VF,       isa::OperationId::VFWNMSAC_VV,
+             isa::OperationId::VFWNMSAC_VF,
+         }) {
+        table[static_cast<size_t>(op)] = true;
+    }
+    return table;
+}
+
+constexpr auto kVectorFpTable = make_vector_fp_table();
+
 /** Vector operations that consume or produce scalar/vector floating-point state. */
 constexpr auto is_vector_fp(isa::OperationId op_id) -> bool {
-    switch (op_id) {
-        case isa::OperationId::VFADD_VV:
-        case isa::OperationId::VFSLIDE1UP_VF:
-        case isa::OperationId::VFSLIDE1DOWN_VF:
-        case isa::OperationId::VFADD_VF:
-        case isa::OperationId::VFSUB_VV:
-        case isa::OperationId::VFSUB_VF:
-        case isa::OperationId::VFRSUB_VF:
-        case isa::OperationId::VFMUL_VV:
-        case isa::OperationId::VFMUL_VF:
-        case isa::OperationId::VFDIV_VV:
-        case isa::OperationId::VFDIV_VF:
-        case isa::OperationId::VFRDIV_VF:
-        case isa::OperationId::VFSQRT_V:
-        case isa::OperationId::VFRSQRT7_V:
-        case isa::OperationId::VFREC7_V:
-        case isa::OperationId::VFCLASS_V:
-        case isa::OperationId::VFCVT_XU_F_V:
-        case isa::OperationId::VFCVT_X_F_V:
-        case isa::OperationId::VFCVT_F_XU_V:
-        case isa::OperationId::VFCVT_F_X_V:
-        case isa::OperationId::VFCVT_RTZ_XU_F_V:
-        case isa::OperationId::VFCVT_RTZ_X_F_V:
-        case isa::OperationId::VFWCVT_XU_F_V:
-        case isa::OperationId::VFWCVT_X_F_V:
-        case isa::OperationId::VFWCVT_F_XU_V:
-        case isa::OperationId::VFWCVT_F_X_V:
-        case isa::OperationId::VFWCVT_F_F_V:
-        case isa::OperationId::VFWCVT_RTZ_XU_F_V:
-        case isa::OperationId::VFWCVT_RTZ_X_F_V:
-        case isa::OperationId::VFNCVT_XU_F_W:
-        case isa::OperationId::VFNCVT_X_F_W:
-        case isa::OperationId::VFNCVT_F_XU_W:
-        case isa::OperationId::VFNCVT_F_X_W:
-        case isa::OperationId::VFNCVT_F_F_W:
-        case isa::OperationId::VFNCVT_ROD_F_F_W:
-        case isa::OperationId::VFNCVT_RTZ_XU_F_W:
-        case isa::OperationId::VFNCVT_RTZ_X_F_W:
-        case isa::OperationId::VFSGNJ_VV:
-        case isa::OperationId::VFSGNJ_VF:
-        case isa::OperationId::VFSGNJN_VV:
-        case isa::OperationId::VFSGNJN_VF:
-        case isa::OperationId::VFSGNJX_VV:
-        case isa::OperationId::VFSGNJX_VF:
-        case isa::OperationId::VFMIN_VV:
-        case isa::OperationId::VFMIN_VF:
-        case isa::OperationId::VFMAX_VV:
-        case isa::OperationId::VFMAX_VF:
-        case isa::OperationId::VMFEQ_VV:
-        case isa::OperationId::VMFEQ_VF:
-        case isa::OperationId::VMFNE_VV:
-        case isa::OperationId::VMFNE_VF:
-        case isa::OperationId::VMFLT_VV:
-        case isa::OperationId::VMFLT_VF:
-        case isa::OperationId::VMFLE_VV:
-        case isa::OperationId::VMFLE_VF:
-        case isa::OperationId::VMFGT_VF:
-        case isa::OperationId::VMFGE_VF:
-        case isa::OperationId::VFMADD_VV:
-        case isa::OperationId::VFMADD_VF:
-        case isa::OperationId::VFNMADD_VV:
-        case isa::OperationId::VFNMADD_VF:
-        case isa::OperationId::VFMSUB_VV:
-        case isa::OperationId::VFMSUB_VF:
-        case isa::OperationId::VFNMSUB_VV:
-        case isa::OperationId::VFNMSUB_VF:
-        case isa::OperationId::VFMACC_VV:
-        case isa::OperationId::VFMACC_VF:
-        case isa::OperationId::VFNMACC_VV:
-        case isa::OperationId::VFNMACC_VF:
-        case isa::OperationId::VFMSAC_VV:
-        case isa::OperationId::VFMSAC_VF:
-        case isa::OperationId::VFNMSAC_VV:
-        case isa::OperationId::VFNMSAC_VF:
-        case isa::OperationId::VFMV_F_S:
-        case isa::OperationId::VFMV_S_F:
-        case isa::OperationId::VFMERGE_VFM:
-        case isa::OperationId::VFMV_V_F:
-        case isa::OperationId::VFREDUSUM_VS:
-        case isa::OperationId::VFREDOSUM_VS:
-        case isa::OperationId::VFREDMIN_VS:
-        case isa::OperationId::VFREDMAX_VS:
-        case isa::OperationId::VFWREDUSUM_VS:
-        case isa::OperationId::VFWREDOSUM_VS:
-        case isa::OperationId::VFWADD_VV:
-        case isa::OperationId::VFWADD_VF:
-        case isa::OperationId::VFWSUB_VV:
-        case isa::OperationId::VFWSUB_VF:
-        case isa::OperationId::VFWADD_WV:
-        case isa::OperationId::VFWADD_WF:
-        case isa::OperationId::VFWSUB_WV:
-        case isa::OperationId::VFWSUB_WF:
-        case isa::OperationId::VFWMUL_VV:
-        case isa::OperationId::VFWMUL_VF:
-        case isa::OperationId::VFWMACC_VV:
-        case isa::OperationId::VFWMACC_VF:
-        case isa::OperationId::VFWNMACC_VV:
-        case isa::OperationId::VFWNMACC_VF:
-        case isa::OperationId::VFWMSAC_VV:
-        case isa::OperationId::VFWMSAC_VF:
-        case isa::OperationId::VFWNMSAC_VV:
-        case isa::OperationId::VFWNMSAC_VF:
-            return true;
-        default:
-            return false;
-    }
+    const auto idx = static_cast<size_t>(op_id);
+    return idx < kVectorFpTable.size() && kVectorFpTable[idx];
 }
 
 /** RVV 1.0 reserves every vector FP instruction when frm contains an invalid value. */
@@ -520,8 +483,8 @@ constexpr auto lmul_ratio(Vlmul lmul) -> std::pair<uint32_t, uint32_t> {
     }
 }
 
-constexpr auto valid_group(RegId base, uint32_t numerator, uint32_t denominator, uint32_t fields,
-                           uint32_t& field_registers) -> bool {
+constexpr auto valid_group(simrv::xlen::RegId base, uint32_t numerator, uint32_t denominator,
+                           uint32_t fields, uint32_t& field_registers) -> bool {
     if (numerator == 0 || numerator > denominator * 8 || numerator * 8 < denominator) return false;
     field_registers = numerator > denominator ? numerator / denominator : 1;
     const uint32_t first = std::to_underlying(base);
@@ -529,9 +492,9 @@ constexpr auto valid_group(RegId base, uint32_t numerator, uint32_t denominator,
            first + field_registers * fields <= 32;
 }
 
-constexpr auto make_operand_group(RegId base, uint32_t lmul_numerator, uint32_t lmul_denominator,
-                                  uint32_t width_numerator, uint32_t width_denominator,
-                                  VectorOperandGroup& group) -> bool {
+constexpr auto make_operand_group(simrv::xlen::RegId base, uint32_t lmul_numerator,
+                                  uint32_t lmul_denominator, uint32_t width_numerator,
+                                  uint32_t width_denominator, VectorOperandGroup& group) -> bool {
     uint32_t registers = 1;
     const uint32_t emul_numerator = lmul_numerator * width_numerator;
     const uint32_t emul_denominator = lmul_denominator * width_denominator;
@@ -569,9 +532,9 @@ constexpr auto legal_destination_overlap(const VectorOperandGroup& destination,
            destination.first + destination.registers == source.first + source.registers;
 }
 
-constexpr auto vector_compute_layout(isa::OperationId op_id, RegId destination, RegId source1,
-                                     RegId source2, uint32_t sew, Vlmul lmul)
-    -> VectorComputeLayout {
+constexpr auto vector_compute_layout(isa::OperationId op_id, simrv::xlen::RegId destination,
+                                     simrv::xlen::RegId source1, simrv::xlen::RegId source2,
+                                     uint32_t sew, Vlmul lmul) -> VectorComputeLayout {
     enum class Layout : uint8_t {
         None,
         WidenVv,
@@ -711,7 +674,7 @@ constexpr auto vector_compute_layout(isa::OperationId op_id, RegId destination, 
 
     std::array<VectorOperandGroup, 4> groups{};
     uint32_t group_count = 0;
-    const auto add_group = [&](RegId reg, uint32_t width_numerator,
+    const auto add_group = [&](simrv::xlen::RegId reg, uint32_t width_numerator,
                                uint32_t width_denominator) -> bool {
         return make_operand_group(reg, lmul_numerator, lmul_denominator, width_numerator,
                                   width_denominator, groups[group_count++]);
@@ -779,9 +742,10 @@ constexpr auto vector_compute_layout(isa::OperationId op_id, RegId destination, 
     return {.recognized = true, .valid = true};
 }
 
-constexpr auto vector_permute_layout(isa::OperationId op_id, RegId destination, RegId source1,
-                                     RegId source2, uint32_t sew, Vlmul lmul, uint32_t vlen,
-                                     CSRValue vstart) -> VectorComputeLayout {
+constexpr auto vector_permute_layout(isa::OperationId op_id, simrv::xlen::RegId destination,
+                                     simrv::xlen::RegId source1, simrv::xlen::RegId source2,
+                                     uint32_t sew, Vlmul lmul, uint32_t vlen,
+                                     simrv::xlen::CsrValue vstart) -> VectorComputeLayout {
     enum class Layout : uint8_t {
         None,
         SlideUp,
@@ -879,9 +843,9 @@ constexpr auto vector_permute_layout(isa::OperationId op_id, RegId destination, 
     return {.recognized = true, .valid = true};
 }
 
-constexpr auto ordinary_vector_groups_valid(isa::OperationId op_id, RegId destination,
-                                            RegId source1, RegId source2, Vlmul lmul,
-                                            bool special_layout) -> bool {
+constexpr auto ordinary_vector_groups_valid(isa::OperationId op_id, simrv::xlen::RegId destination,
+                                            simrv::xlen::RegId source1, simrv::xlen::RegId source2,
+                                            Vlmul lmul, bool special_layout) -> bool {
     if (special_layout || is_vector_reduction(op_id) || has_mask_destination(op_id) ||
         has_scalar_destination(op_id) || op_id == isa::OperationId::VIOTA_M ||
         op_id == isa::OperationId::VID_V || op_id == isa::OperationId::VMV_S_X ||
@@ -906,8 +870,9 @@ constexpr auto ordinary_vector_groups_valid(isa::OperationId op_id, RegId destin
            valid_group(source2, numerator, denominator, 1, registers);
 }
 
-constexpr auto reduction_groups_valid(isa::OperationId op_id, RegId scalar_source,
-                                      RegId vector_source, uint32_t sew, Vlmul lmul) -> bool {
+constexpr auto reduction_groups_valid(isa::OperationId op_id, simrv::xlen::RegId scalar_source,
+                                      simrv::xlen::RegId vector_source, uint32_t sew, Vlmul lmul)
+    -> bool {
     if (!is_vector_reduction(op_id)) return true;
     const auto [numerator, denominator] = lmul_ratio(lmul);
     uint32_t vector_registers = 1;
@@ -921,12 +886,14 @@ constexpr auto reduction_groups_valid(isa::OperationId op_id, RegId scalar_sourc
                                     std::to_underlying(vector_source), vector_registers);
 }
 
-constexpr auto mask_operand_groups_valid(isa::OperationId op_id, RegId destination, RegId source1,
-                                         RegId source2, bool vm, Vlmul lmul) -> bool {
+constexpr auto mask_operand_groups_valid(isa::OperationId op_id, simrv::xlen::RegId destination,
+                                         simrv::xlen::RegId source1, simrv::xlen::RegId source2,
+                                         bool vm, Vlmul lmul) -> bool {
     const bool mask_prefix = op_id == isa::OperationId::VMSBF_M ||
                              op_id == isa::OperationId::VMSIF_M ||
                              op_id == isa::OperationId::VMSOF_M;
-    if (mask_prefix) return destination != source2 && (vm || destination != RegId::Zero);
+    if (mask_prefix)
+        return destination != source2 && (vm || destination != simrv::xlen::RegId::Zero);
 
     if (op_id == isa::OperationId::VIOTA_M) {
         const auto [numerator, denominator] = lmul_ratio(lmul);
@@ -934,7 +901,7 @@ constexpr auto mask_operand_groups_valid(isa::OperationId op_id, RegId destinati
         return valid_group(destination, numerator, denominator, 1, registers) &&
                !register_ranges_overlap(std::to_underlying(destination), registers,
                                         std::to_underlying(source2), 1) &&
-               (vm || destination != RegId::Zero);
+               (vm || destination != simrv::xlen::RegId::Zero);
     }
 
     if (!has_mask_destination(op_id)) return true;
@@ -972,9 +939,10 @@ constexpr auto mask_operand_groups_valid(isa::OperationId op_id, RegId destinati
     return true;
 }
 
-constexpr auto vector_memory_layout(isa::OperationId op_id, RegId data_reg, RegId index_reg,
-                                    uint32_t sew, uint32_t nfields, Vlmul lmul, uint32_t vlen,
-                                    CSRValue vstart) -> VectorMemoryLayout {
+constexpr auto vector_memory_layout(isa::OperationId op_id, simrv::xlen::RegId data_reg,
+                                    simrv::xlen::RegId index_reg, uint32_t sew, uint32_t nfields,
+                                    Vlmul lmul, uint32_t vlen, simrv::xlen::CsrValue vstart)
+    -> VectorMemoryLayout {
     if (op_id == isa::OperationId::VLM_V || op_id == isa::OperationId::VSM_V) {
         return {.recognized = true, .valid = nfields == 1, .field_registers = 1};
     }
@@ -1025,8 +993,9 @@ constexpr auto vector_memory_layout(isa::OperationId op_id, RegId data_reg, RegI
 }
 }  // namespace
 
-void ExecuteUnit::execute_vector(core::CPU& cpu, memory::MemorySubsystem& mem,
-                                 isa::OperationId op_id, Instruction ir) {
+void ExecuteUnitVector::execute_vector(core::CPU& cpu, memory::MemorySubsystem& mem,
+                                       isa::OperationId op_id, simrv::xlen::Instruction ir) {
+    using namespace vector;
     if (cpu.state().regs.xlen == 32 && isa::requires_rv64(op_id)) {
         cpu.active_context().pending_exception = ExceptionCode::IllegalInstruction;
         cpu.active_context().pending_tval = ir;
@@ -1038,13 +1007,13 @@ void ExecuteUnit::execute_vector(core::CPU& cpu, memory::MemorySubsystem& mem,
         return;
     }
 
-    const auto rd = static_cast<RegId>((ir >> 7) & 0x1F);
-    const auto rs1 = static_cast<RegId>((ir >> 15) & 0x1F);
-    const auto rs2 = static_cast<RegId>((ir >> 20) & 0x1F);
+    const auto rd = static_cast<simrv::xlen::RegId>((ir >> 7) & 0x1F);
+    const auto rs1 = static_cast<simrv::xlen::RegId>((ir >> 15) & 0x1F);
+    const auto rs2 = static_cast<simrv::xlen::RegId>((ir >> 20) & 0x1F);
     const bool vm = ((ir >> 25) & 1) != 0;
     if ((op_id == isa::OperationId::VMV_V_V || op_id == isa::OperationId::VMV_V_X ||
          op_id == isa::OperationId::VMV_V_I || op_id == isa::OperationId::VFMV_V_F) &&
-        (rs2 != RegId::Zero || !vm)) {
+        (rs2 != simrv::xlen::RegId::Zero || !vm)) {
         cpu.active_context().pending_exception = ExceptionCode::IllegalInstruction;
         cpu.active_context().pending_tval = ir;
         return;
@@ -1093,7 +1062,7 @@ void ExecuteUnit::execute_vector(core::CPU& cpu, memory::MemorySubsystem& mem,
         cpu.active_context().pending_tval = ir;
         return;
     }
-    if (!vm && rd == RegId::Zero && has_vector_destination(op_id, memory_layout) &&
+    if (!vm && rd == simrv::xlen::RegId::Zero && has_vector_destination(op_id, memory_layout) &&
         !has_mask_destination(op_id) && !is_vector_reduction(op_id)) {
         cpu.active_context().pending_exception = ExceptionCode::IllegalInstruction;
         cpu.active_context().pending_tval = ir;
@@ -1136,10 +1105,10 @@ void ExecuteUnit::execute_vector(core::CPU& cpu, memory::MemorySubsystem& mem,
         const bool scalar_fp_enabled =
             (sew == 32 && has_f && (!uses_wide_fp_element(op_id) || has_d)) ||
             (sew == 64 && has_f && has_d);
-        const bool fs_enabled =
-            (cpu.state().mstatus & enum_mask(core::MstatusBit::Fs)) != static_cast<CSRValue>(0);
-        const Word frm = (cpu.state().fcsr >> 5U) & 0x7U;
-        if (!scalar_fp_enabled || !fs_enabled || (is_vector_fp_arithmetic(op_id) && frm >= 5U)) {
+        const bool fs_enabled = (cpu.state().mstatus & core::MstatusBit::Fs) != 0;
+        const isa::RoundingMode frm = isa::frm_rounding_mode(cpu.state().fcsr);
+        if (!scalar_fp_enabled || !fs_enabled ||
+            (is_vector_fp_arithmetic(op_id) && !isa::is_valid_rounding_mode(frm))) {
             // SEW=16 vector FP belongs to Zvfh, which SimRV does not advertise.
             cpu.active_context().pending_exception = ExceptionCode::IllegalInstruction;
             cpu.active_context().pending_tval = ir;
@@ -1401,18 +1370,18 @@ void ExecuteUnit::execute_vector(core::CPU& cpu, memory::MemorySubsystem& mem,
     // Vector 1.0 requires every successfully completed vector instruction, including vset*vl*, to
     // reset vstart. Faulting vector memory operations leave the faulting element index for resume.
     if (!cpu.active_context().pending_exception.has_value()) {
-        cpu.state().mstatus |= enum_mask(core::MstatusBit::Vs);
+        cpu.state().mstatus |= core::MstatusBit::Vs;
         if (is_vector_fp(op_id)) {
             // Vector FP may update scalar FP registers or fflags. Setting FS Dirty
             // conservatively is permitted even when a particular result is exact.
-            cpu.state().mstatus |= enum_mask(core::MstatusBit::Fs);
+            cpu.state().mstatus |= core::MstatusBit::Fs;
         }
         cpu.state().vstart = 0;
     }
 }
 
-void ExecuteUnit::execute_vector(core::CPU& cpu, core::Machine& machine, isa::OperationId op_id,
-                                 Instruction ir) {
+void ExecuteUnitVector::execute_vector(core::CPU& cpu, core::Machine& machine,
+                                       isa::OperationId op_id, simrv::xlen::Instruction ir) {
     execute_vector(cpu, machine.memory(), op_id, ir);
 }
 

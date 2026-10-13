@@ -5,6 +5,39 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## Unreleased
 
+- **Ratified RISC-V Specification Alignment**:
+  - Aligned with Privileged Architecture 1.13: added standard exception causes `SoftwareCheck` (cause 18) and `HardwareError` (cause 19).
+  - Implemented standard ratified CSRs with full M/S/U privilege enforcement and RV32/RV64 legality checks:
+    - Sstc Extension: `stimecmp` (0x14D) and `stimecmph` (0x15D, RV32).
+    - Privileged 1.13 Environment Config: `menvcfg` (0x30A), `menvcfgh` (0x31A, RV32), and `senvcfg` (0x10A).
+    - Counter Inhibit: `mcountinhibit` (0x320).
+    - Smepmp Enhanced PMP Security Config: `mseccfg` (0x747) and `mseccfgh` (0x757, RV32).
+  - Aligned with SBI v2.0 / v3.0: added standard ratified error codes (`InvalidState`, `BadRange`, `Timeout`, `Io`) and `FWFT` (Firmware Features) extension ID.
+- **Ratified ISA Naming & Deprecation**:
+  - Replaced legacy draft single-letter `b` presets with standard ratified multi-letter presets (`gczb`, `gczbv`, `gcv`, `rv32gczb`, `rv64gczb`, `rv32gczbv`, `rv64gczbv`, `rv32gcv`, `rv64gcv`).
+  - Explicitly reject legacy draft shorthands (`gcbv`, `rv32gcbv`, `rv64gcbv`, `gcb`, `rv32gcb`, `rv64gcb`) with helpful actionable error diagnostics directing users to ratified equivalents.
+- **Subsystem Queue & Component Deduplication**:
+  - Unified split-ring queue processing across MMIO and PCI transports for the entire VirtIO family (Block, Net, GPU, Console, RNG, Input), eliminating over 500 lines of redundant DMA and queue code.
+  - Centralized atomic operations in `isa/Amo.hpp` (`perform_amo_op`) and unified 32-bit and 64-bit ELF segment loading.
+- **Type Harmonization & Legacy Alias Retirement**:
+  - Fully retired legacy compatibility aliases `CSRValue`, `CSRAddress`, `CsrAddress`, and `GCBV`.
+  - Harmonized the entire codebase onto canonical PascalCase domain types `simrv::xlen::CsrValue`, `simrv::xlen::CsrNumber`, and `simrv::isa::IsaPreset::GCZBV`.
+  - Added templated implicit construction to `CsrNumber` from `Csr` enum and integral types, eliminating verbose boilerplate.
+
+
+## [v3.0.0-rc.9] — 2026-10-08
+
+- Added VirtIO filesystem support on MMIO and PCI, backed by a host-shared directory, and
+  improved block-device flush handling so guest filesystem changes can be persisted safely.
+- Added runtime copy-on-write overlays for Linux disk images, keeping the published base image
+  unchanged across guest runs; simplified image paths and removed the obsolete disk-clone helper.
+- Improved the Linux boot and desktop workflow, including Linux 7.2.9 images, hostname/network
+  startup diagnostics, PTY availability, and clearer simulator log messages in the TUI.
+- Expanded TUI file loading and UART interaction, including Buildroot output directories,
+  navigation/search, and terminal transcript improvements.
+- Extended custom SoC configuration and documentation for reusable MMIO devices, presets, and
+  Buildroot-based images.
+
 ## [v3.0.0-rc.8] — 2026-10-07
 
 - Removed the deprecated `--platform` alias; use `--soc` to select a SoC preset.

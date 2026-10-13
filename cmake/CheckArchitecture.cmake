@@ -3,6 +3,7 @@ if(NOT DEFINED SIMRV_SOURCE_DIR)
 endif()
 
 file(READ "${SIMRV_SOURCE_DIR}/CMakeLists.txt" top_level_cmake)
+file(READ "${SIMRV_SOURCE_DIR}/cmake/SimRVPackaging.cmake" packaging_cmake)
 foreach(forbidden IN ITEMS "LINK_GROUP" "SIMRV_SOURCES"
                            "SIMRV_LEGACY_TARGET_GRAPH")
   if(top_level_cmake MATCHES "${forbidden}")
@@ -39,13 +40,13 @@ endforeach()
 file(READ "${SIMRV_SOURCE_DIR}/include/simrv/core/Machine.hpp" machine_header)
 if(machine_header
    MATCHES
-   "s_(appmode|tuimode|high_contrast|class_mode|debugmode|debug_mode|dlog_mode|traplog_mode|use_disk|use_mix|bp_trace|misa_override|multithreaded|num_harts|smp_quantum|smp_multithreaded|dram_size|mouse_sensitivity|gdb_mode|gdb_port|lockstep_mode|spike_bin|spike_elf|start_pc|strace|fincnt|trace_begin|trace_end|enabletimer|memimg|isatest_tohost|isa_preset|misa_xlen|vlen|fn_memimg|fn_dskimg|fn_dvtree|fn_traplog|fn_cpuconfig|pipeline_type)"
+   "s_(appmode|tuimode|high_contrast|class_mode|debugmode|debug_mode|dlog_mode|traplog_mode|use_disk|use_mix|bp_trace|misa_override|multithreaded|num_harts|smp_quantum|dram_size|mouse_sensitivity|gdb_mode|gdb_port|lockstep_mode|spike_bin|spike_elf|start_pc|strace|fincnt|trace_begin|trace_end|enabletimer|memimg|isatest_tohost|isa_preset|misa_xlen|vlen|fn_memimg|fn_dskimg|fn_dvtree|fn_traplog|fn_cpuconfig|pipeline_type)"
 )
   message(
     FATAL_ERROR
       "Legacy Machine configuration mirror reintroduced; use MachineConfig")
 endif()
 
-if(NOT top_level_cmake MATCHES "install\\([ \t\r\n]*DIRECTORY include/simrv")
+if(NOT packaging_cmake MATCHES "install\\([ \t\r\n]*DIRECTORY include/simrv")
   message(FATAL_ERROR "The install surface must be rooted at include/simrv")
 endif()

@@ -9,7 +9,7 @@
 
 #include "simrv/device/pci/PciDevice.hpp"
 #include "simrv/device/virtio/VirtioCore.hpp"
-#include "simrv/xlen/Types.hpp"
+#include "simrv/xlen/ScalarTypes.hpp"
 
 namespace simrv::device {
 
@@ -27,9 +27,10 @@ class VirtioPciDevice : public PciDevice {
 
     void reset() override;
 
-    [[nodiscard]] auto bar_read(BarIndex bar_idx, Address offset, uint8_t size)
+    [[nodiscard]] auto bar_read(BarIndex bar_idx, simrv::xlen::Address offset, uint8_t size)
         -> uint32_t override;
-    void bar_write(BarIndex bar_idx, Address offset, uint32_t val, uint8_t size) override;
+    void bar_write(BarIndex bar_idx, simrv::xlen::Address offset, uint32_t val,
+                   uint8_t size) override;
 
     [[nodiscard]] auto device_status() const -> uint8_t { return device_status_; }
     [[nodiscard]] auto isr_status() const -> uint8_t { return isr_status_; }
@@ -43,25 +44,27 @@ class VirtioPciDevice : public PciDevice {
     }
 
    protected:
-    virtual auto get_device_features(uint32_t select) -> uint32_t = 0;
+    virtual auto get_device_features(uint32_t select) -> uint32_t {
+        return select == 1 ? virtio::kVirtioFVersion1FeatureWord : 0;
+    }
     virtual void on_driver_features(uint32_t select, uint32_t val) {
         (void)select;
         (void)val;
     }
     virtual void on_queue_notify(virtio::VirtioQueueIndex queue_index) = 0;
-    virtual auto read_device_config(Address offset, uint8_t size) -> uint32_t {
+    virtual auto read_device_config(simrv::xlen::Address offset, uint8_t size) -> uint32_t {
         (void)offset;
         (void)size;
         return 0;
     }
-    virtual void write_device_config(Address offset, uint32_t val, uint8_t size) {
+    virtual void write_device_config(simrv::xlen::Address offset, uint32_t val, uint8_t size) {
         (void)offset;
         (void)val;
         (void)size;
     }
 
-    auto dma_read(Address paddr, void* dst, size_t len) -> bool;
-    auto dma_write(Address paddr, const void* src, size_t len) -> bool;
+    auto dma_read(simrv::xlen::Address paddr, void* dst, size_t len) -> bool;
+    auto dma_write(simrv::xlen::Address paddr, const void* src, size_t len) -> bool;
 
     void add_pci_cap(uint8_t cap_type, uint8_t bar, uint32_t offset, uint32_t length,
                      uint32_t notify_mult = 0);

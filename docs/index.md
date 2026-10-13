@@ -24,7 +24,7 @@
 ## Key Highlights
 
 === "Full-System Linux SMP"
-    SimRV boots un-modified RISC-V Linux kernels and OpenSBI across **2 to 16 SMP cores** using dynamic Flattened Device Tree (FDT) synthesis. It features VirtIO block storage, 16550A UART, CLINT/ACLINT timers, PLIC/AIA interrupt controllers, and an Alpine/JWM graphical path with an idempotent Games menu.
+    SimRV boots unmodified RISC-V Linux kernels and OpenSBI across **2 to 16 SMP cores** using dynamic Flattened Device Tree (FDT) synthesis. It features VirtIO block storage, 16550A UART, CLINT/ACLINT timers, PLIC/AIA interrupt controllers, and an Alpine/JWM graphical path with an idempotent Games menu.
 
 === "Cycle-Accurate Modeling"
     Features inlined per-cycle transition kernels for **3-stage** and **5-stage** pipelines with an authoritative hardware register scoreboard (tracking INT, FP, and Vector dependencies), configurable branch predictors (Bimodal, GShare, Tournament), and multi-level L1/L2/L3 MESI directory cache coherence.
@@ -91,9 +91,9 @@ SimRV requires a modern C++23 compiler (**Clang 22+** or **GCC 16+**), **CMake 3
     ```bash
     # Boot Linux kernel across 2 SMP harts with dynamic device tree
     ./build/rv64-release/simrv --cli --smp 2 \
-      -m linux-images/rv64/fw_payload.bin \
+      -m linux-images/rv64/alpine-gui/opensbi-linux-payload.elf \
       --dtb dynamic \
-      -D linux-images/rv64/root.img \
+      -D linux-images/rv64/alpine-gui/rootfs.img \
       -s 20000000
     ```
 

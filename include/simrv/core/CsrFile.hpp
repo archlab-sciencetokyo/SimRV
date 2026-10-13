@@ -6,8 +6,8 @@
 
 #include <expected>
 
-#include "simrv/Define.hpp"
-#include "simrv/xlen/Types.hpp"
+#include "simrv/isa/TrapTypes.hpp"
+#include "simrv/xlen/IdentifierTypes.hpp"
 
 namespace simrv::core {
 
@@ -21,16 +21,12 @@ class CsrFile {
    public:
     explicit CsrFile(CPU& cpu) : cpu_(cpu) {}
 
-    [[nodiscard]] auto getMstatus(CSRValue mask) const -> CSRValue;
-    void setMstatus(CSRValue wdata);
-    [[nodiscard]] auto read(CSRAddress addr) const -> std::expected<CSRValue, ExceptionCode>;
-    [[nodiscard]] auto read(CsrNumber csr) const -> std::expected<CSRValue, ExceptionCode> {
-        return read(csr.raw());
-    }
-    auto write(CSRAddress addr, CSRValue wdata) -> std::expected<void, ExceptionCode>;
-    auto write(CsrNumber csr, CSRValue wdata) -> std::expected<void, ExceptionCode> {
-        return write(csr.raw(), wdata);
-    }
+    [[nodiscard]] auto getMstatus(simrv::xlen::CsrValue mask) const -> simrv::xlen::CsrValue;
+    void setMstatus(simrv::xlen::CsrValue wdata);
+    [[nodiscard]] auto read(simrv::xlen::CsrNumber csr) const
+        -> std::expected<simrv::xlen::CsrValue, ExceptionCode>;
+    auto write(simrv::xlen::CsrNumber csr, simrv::xlen::CsrValue wdata)
+        -> std::expected<void, ExceptionCode>;
 
    private:
     CPU& cpu_;

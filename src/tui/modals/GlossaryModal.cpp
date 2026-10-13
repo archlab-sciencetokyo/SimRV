@@ -71,35 +71,47 @@ auto get_topic_data(int index) -> TopicData {
                     "selected by \033[1;32mLMUL\033[0m through vector-configuration "
                     "instructions."}};
         case 1:  // Pipeline & Hazards
-            return {.title = "2. Pipeline Stages & Hazards",
-                    .subtitle = "Instruction Pipelining, Dataflow, Forwarding, and Stalls",
-                    .lines = {
-                        "## Classic five-stage pipeline",
-                        "• \033[1;32mIF \033[0m · Fetch the instruction at PC from the "
-                        "instruction cache or memory.",
-                        "• \033[1;32mID \033[0m · Decode opcode and operands; read rs1 "
-                        "and rs2 from the register file.",
-                        "• \033[1;32mEX \033[0m · Execute arithmetic or logic; calculate "
-                        "addresses and resolve branches.",
-                        "• \033[1;32mMEM\033[0m · Access the data cache or memory for "
-                        "loads and stores.",
-                        "• \033[1;32mWB \033[0m · Write an instruction result to rd when "
-                        "the instruction produces one.",
-                        "", "## Hazards and mitigations",
-                        "• \033[1;31mRAW\033[0m · A consumer needs a value before its "
-                        "producer reaches write-back.",
-                        "  ◦ \033[1;32mForwarding\033[0m · Bypass a result from a later stage "
-                        "directly to the dependent instruction.",
-                        "  ◦ \033[1;33mLoad-use interlock\033[0m · A dependent instruction "
-                        "typically waits one bubble because load data arrives after MEM.",
-                        "• \033[1;31mControl\033[0m · The correct next PC is not yet known "
-                        "after a branch or jump enters the pipeline.",
-                        "  ◦ \033[1;32mPrediction\033[0m · Fetch speculatively; redirect and flush "
-                        "younger work when the prediction is wrong.",
-                        "• \033[1;31mStructural\033[0m · Concurrent instructions require the "
-                        "same unavailable hardware resource.",
-                        "  ◦ \033[1;32mArbitration or stalling\033[0m · Serialize access until "
-                        "the resource becomes available."}};
+            return {
+                .title = "2. Pipeline Stages & Hazards",
+                .subtitle = "Instruction Pipelining, Dataflow, Forwarding, and Stalls",
+                .lines = {
+                    "## Classic five-stage pipeline",
+                    "• \033[1;32mIF \033[0m · Fetch the instruction at PC from the "
+                    "instruction cache or memory.",
+                    "• \033[1;32mID \033[0m · Decode opcode and operands; read rs1 "
+                    "and rs2 from the register file.",
+                    "• \033[1;32mEX \033[0m · Execute arithmetic or logic; calculate "
+                    "addresses and resolve branches.",
+                    "• \033[1;32mMEM\033[0m · Access the data cache or memory for "
+                    "loads and stores.",
+                    "• \033[1;32mWB \033[0m · Write an instruction result to rd when "
+                    "the instruction produces one.",
+                    "",
+                    "## Hazards and mitigations",
+                    "• \033[1;31mRAW\033[0m · A consumer needs a value before its "
+                    "producer reaches write-back.",
+                    "  ◦ \033[1;32mForwarding\033[0m · Bypass a result from a later stage "
+                    "directly to the dependent instruction.",
+                    "  ◦ \033[1;33mLoad-use interlock\033[0m · A dependent instruction "
+                    "typically waits one bubble because load data arrives after MEM.",
+                    "• \033[1;31mControl\033[0m · The correct next PC is not yet known "
+                    "after a branch or jump enters the pipeline.",
+                    "  ◦ \033[1;32mPrediction\033[0m · Fetch speculatively; redirect and flush "
+                    "younger work when the prediction is wrong.",
+                    "• \033[1;31mStructural\033[0m · Concurrent instructions require the "
+                    "same unavailable hardware resource.",
+                    "  ◦ \033[1;32mArbitration or stalling\033[0m · Serialize access until "
+                    "the resource becomes available.",
+                    "",
+                    "## Custom function units (CFU) & accelerators",
+                    "• \033[1;33mCUSTOM_0 (0x0B)\033[0m · Reserved opcode space for application-"
+                    "specific coprocessors.",
+                    "• \033[1;32mfunct3 / funct7\033[0m · Select custom function and sub-operation "
+                    "within the accelerator.",
+                    "• \033[1;32mDatapath timing\033[0m · CFU operations query cycle latency and "
+                    "can introduce pipeline stalls.",
+                    "• \033[1;32mDynamic plugins\033[0m · Compile C/C++ accelerators to .so using "
+                    "SimRvCfuPlugin ABI and load via --cfu-plugin."}};
         case 2:  // Memory Hierarchy & Caches
             return {.title = "3. Memory Hierarchy & Caches",
                     .subtitle = "L1 Caches, Multi-Way Set Associativity, Line Replacement",
@@ -294,23 +306,25 @@ void GlossaryModal::render(std::vector<std::string>& content_rows,
     emit_row("");
     bool const scrollable = static_cast<int>(body_rows.size()) > viewport_rows;
     if (scrollable) {
-        const std::array ansi_actions{ModalActionHint{"<", "Previous"},
-                                      ModalActionHint{">", "Next"}, ModalActionHint{"^", "Up"},
-                                      ModalActionHint{"v", "Down"},
-                                      ModalActionHint{"Esc/?/q", "Close"}};
-        const std::array unicode_actions{ModalActionHint{"←", "Previous"},
-                                         ModalActionHint{"→", "Next"}, ModalActionHint{"↑", "Up"},
-                                         ModalActionHint{"↓", "Down"},
-                                         ModalActionHint{"Esc/?/q", "Close"}};
+        const std::array ansi_actions{ModalActionHint{.key = "<", .action = "Previous"},
+                                      ModalActionHint{.key = ">", .action = "Next"},
+                                      ModalActionHint{.key = "^", .action = "Up"},
+                                      ModalActionHint{.key = "v", .action = "Down"},
+                                      ModalActionHint{.key = "Esc/?/q", .action = "Close"}};
+        const std::array unicode_actions{ModalActionHint{.key = "←", .action = "Previous"},
+                                         ModalActionHint{.key = "→", .action = "Next"},
+                                         ModalActionHint{.key = "↑", .action = "Up"},
+                                         ModalActionHint{.key = "↓", .action = "Down"},
+                                         ModalActionHint{.key = "Esc/?/q", .action = "Close"}};
         emit_row(
             build_modal_footer(is_ansi ? std::span{ansi_actions} : std::span{unicode_actions}));
     } else {
-        const std::array ansi_actions{ModalActionHint{"<", "Previous"},
-                                      ModalActionHint{">", "Next"},
-                                      ModalActionHint{"Esc/?/q", "Close"}};
-        const std::array unicode_actions{ModalActionHint{"←", "Previous"},
-                                         ModalActionHint{"→", "Next"},
-                                         ModalActionHint{"Esc/?/q", "Close"}};
+        const std::array ansi_actions{ModalActionHint{.key = "<", .action = "Previous"},
+                                      ModalActionHint{.key = ">", .action = "Next"},
+                                      ModalActionHint{.key = "Esc/?/q", .action = "Close"}};
+        const std::array unicode_actions{ModalActionHint{.key = "←", .action = "Previous"},
+                                         ModalActionHint{.key = "→", .action = "Next"},
+                                         ModalActionHint{.key = "Esc/?/q", .action = "Close"}};
         emit_row(
             build_modal_footer(is_ansi ? std::span{ansi_actions} : std::span{unicode_actions}));
     }

@@ -1,9 +1,7 @@
 {% extends "base.html" %}
 
 {% block announce %}
-  {% if config.extra.docs_channel == "stable" %}
-    You are reading the stable SimRV documentation.
-  {% else %}
+  {% if config.extra.docs_channel != "stable" %}
     You are reading development documentation. Features and commands may differ from the latest release.
   {% endif %}
 {% endblock %}

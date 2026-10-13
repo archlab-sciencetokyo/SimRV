@@ -8,8 +8,8 @@
 #include <cstdint>
 #include <expected>
 #include <filesystem>
-#include <fstream>
 #include <format>
+#include <fstream>
 #include <initializer_list>
 #include <iterator>
 #include <limits>
@@ -32,8 +32,8 @@ struct BuildrootImageBundle {
     namespace fs = std::filesystem;
     std::error_code error;
     if (!fs::is_directory(directory, error) || error) {
-        return std::unexpected(std::format("Buildroot output directory not found: {}",
-                                           directory.string()));
+        return std::unexpected(
+            std::format("Buildroot output directory not found: {}", directory.string()));
     }
     const fs::path images = directory.filename() == "images" ? directory : directory / "images";
     const auto locate = [&](std::initializer_list<fs::path> candidates,
@@ -42,22 +42,29 @@ struct BuildrootImageBundle {
             error.clear();
             if (fs::is_regular_file(candidate, error) && !error) return candidate;
         }
-        return std::unexpected(std::format(
-            "Buildroot output '{}' is missing {}; expected artifacts in '{}'",
-            directory.string(), label, images.string()));
+        return std::unexpected(
+            std::format("Buildroot output '{}' is missing {}; expected artifacts in '{}'",
+                        directory.string(), label, images.string()));
     };
-    auto firmware = locate({images / "fw_payload.bin", directory / "fw_payload.bin"},
-                           "fw_payload.bin");
+    // Accept the canonical SimRV bundle name first, then Buildroot's and older
+    // SimRV bundles' standard OpenSBI filename for backwards compatibility.
+    auto firmware =
+        locate({images / "opensbi-linux-payload.elf", directory / "opensbi-linux-payload.elf",
+                images / "fw_payload.bin", directory / "fw_payload.bin"},
+               "OpenSBI Linux payload");
     if (!firmware) return std::unexpected(firmware.error());
-    auto dtb = locate({images / "devicetree.dtb", images / "virt.dtb",
-                       directory / "devicetree.dtb"}, "devicetree.dtb");
+    auto dtb =
+        locate({images / "devicetree.dtb", images / "virt.dtb", directory / "devicetree.dtb"},
+               "devicetree.dtb");
     if (!dtb) return std::unexpected(dtb.error());
-    auto rootfs = locate({images / "rootfs.ext4", images / "root.img", directory / "root.img"},
-                         "rootfs.ext4");
+    // Buildroot emits rootfs.ext4; root.img is retained for old output folders.
+    auto rootfs = locate({images / "rootfs.img", images / "rootfs.ext4", images / "root.img",
+                          directory / "rootfs.img", directory / "root.img"},
+                         "root filesystem image");
     if (!rootfs) return std::unexpected(rootfs.error());
     std::optional<uint64_t> dram_size_bytes;
-    for (const auto& manifest : {images / "simrv-manifest.json", images / "manifest.json",
-                                 directory / "manifest.json"}) {
+    for (const auto& manifest :
+         {images / "simrv-manifest.json", images / "manifest.json", directory / "manifest.json"}) {
         std::ifstream input(manifest);
         if (!input) continue;
         const std::string contents{std::istreambuf_iterator<char>(input),
@@ -77,8 +84,10 @@ struct BuildrootImageBundle {
             break;
         }
     }
-    return BuildrootImageBundle{std::move(*firmware), std::move(*dtb), std::move(*rootfs),
-                                dram_size_bytes};
+    return BuildrootImageBundle{.firmware = std::move(*firmware),
+                                .dtb = std::move(*dtb),
+                                .rootfs = std::move(*rootfs),
+                                .dram_size_bytes = dram_size_bytes};
 }
 
 }  // namespace simrv::util

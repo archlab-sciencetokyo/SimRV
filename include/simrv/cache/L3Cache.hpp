@@ -5,7 +5,7 @@
 #pragma once
 
 #include "simrv/cache/BaseCache.hpp"
-#include "simrv/xlen/Types.hpp"
+#include "simrv/xlen/ScalarTypes.hpp"
 
 namespace simrv::cache {
 
@@ -17,10 +17,11 @@ class L3Cache : public BaseCache<16384, 32, 16> {
    public:
     L3Cache() = default;
 
-    [[nodiscard]] auto lookup_line(Address line_base, std::array<Byte, kLineBytes>& out_data,
+    [[nodiscard]] auto lookup_line(simrv::xlen::Address line_base,
+                                   std::array<simrv::xlen::Byte, kLineBytes>& out_data,
                                    simrv::memory::MesiState& out_state) -> bool {
         const uint32_t set_idx = get_set_index(line_base);
-        const Address tag = get_tag(line_base);
+        const simrv::xlen::Address tag = get_tag(line_base);
         last_accessed_set_ = set_idx;
 
         const auto way_opt = find_way(set_idx, tag);
@@ -42,12 +43,13 @@ class L3Cache : public BaseCache<16384, 32, 16> {
         return false;
     }
 
-    void write_line(Address line_base, const std::array<Byte, kLineBytes>& in_data,
+    void write_line(simrv::xlen::Address line_base,
+                    const std::array<simrv::xlen::Byte, kLineBytes>& in_data,
                     simrv::memory::MesiState state = simrv::memory::MesiState::Exclusive) {
         insert(line_base, in_data.data(), state);
     }
 
-    void invalidate_line(Address line_base) {
+    void invalidate_line(simrv::xlen::Address line_base) {
         (void)probe_line(line_base, simrv::memory::MesiState::Invalid);
     }
 };

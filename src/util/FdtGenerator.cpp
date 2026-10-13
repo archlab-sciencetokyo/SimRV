@@ -4,7 +4,6 @@
  */
 #include "simrv/util/FdtGenerator.hpp"
 
-#include <algorithm>
 #include <bit>
 #include <cstring>
 #include <format>
@@ -126,9 +125,9 @@ class FdtBuilder {
 
         const uint32_t off_rsvmap = kHeaderSize;
         const uint32_t off_struct = off_rsvmap + kRsvmapSize;
-        const uint32_t size_struct = static_cast<uint32_t>(struct_data_.size());
+        const auto size_struct = static_cast<uint32_t>(struct_data_.size());
         const uint32_t off_strings = off_struct + size_struct;
-        const uint32_t size_strings = static_cast<uint32_t>(strings_data_.size());
+        const auto size_strings = static_cast<uint32_t>(strings_data_.size());
         const uint32_t totalsize = off_strings + size_strings;
 
         std::vector<uint8_t> fdt(totalsize, 0);
@@ -419,7 +418,7 @@ auto FdtGenerator::generate(const FdtConfig& config) -> std::vector<uint8_t> {
         b.begin_node(std::format("ethernet@{:x}", device.base));
         b.add_prop_string("compatible", "isct,rvcomp-ethernet");
         std::vector<uint32_t> regs;
-        const auto append_region = [&](Address base, Address size) {
+        const auto append_region = [&](simrv::xlen::Address base, simrv::xlen::Address size) {
             const auto cells = reg_cells(base, size);
             regs.insert(regs.end(), cells.begin(), cells.end());
         };
@@ -435,15 +434,15 @@ auto FdtGenerator::generate(const FdtConfig& config) -> std::vector<uint8_t> {
         b.add_prop_u32("interrupt-parent", plic_phandle);
         b.add_prop_u32("interrupts", device.irq);
         b.add_prop_string_list("interrupt-names", {"ethernet"});
-        b.add_prop_bytes("local-mac-address",
-                         std::vector<uint8_t>(device.mac_address.begin(), device.mac_address.end()));
+        b.add_prop_bytes("local-mac-address", std::vector<uint8_t>(device.mac_address.begin(),
+                                                                   device.mac_address.end()));
         b.end_node();
     }
 
     for (const auto& device : config.soc.devices) {
-        if (!device.enabled ||
-            (device.kind != simrv::core::SoCDeviceKind::DummyMmio &&
-             device.kind != simrv::core::SoCDeviceKind::CustomMmio)) continue;
+        if (!device.enabled || (device.kind != simrv::core::SoCDeviceKind::DummyMmio &&
+                                device.kind != simrv::core::SoCDeviceKind::CustomMmio))
+            continue;
         b.begin_node(std::format("{}@{:x}", device.name, device.base));
         b.add_prop_string("compatible", device.compatible);
         b.add_prop_u32_array("reg", reg_cells(device.base, device.size));
@@ -471,6 +470,7 @@ auto FdtGenerator::generate(const FdtConfig& config) -> std::vector<uint8_t> {
         emit_virtio(simrv::core::SoCDeviceKind::VirtioMmioInput, 6);
         emit_virtio(simrv::core::SoCDeviceKind::VirtioMmioSound, 7);
         emit_virtio(simrv::core::SoCDeviceKind::VirtioMmioNet, 8, true);
+        if (config.enable_virtiofs) emit_virtio(simrv::core::SoCDeviceKind::VirtioMmioFs, 9);
     }
 
     if (config.enable_pcie) {
@@ -487,11 +487,12 @@ auto FdtGenerator::generate(const FdtConfig& config) -> std::vector<uint8_t> {
         b.add_prop_u32("phandle", pcie_phandle);
         b.add_prop_u32("interrupt-parent", plic_phandle);
         b.add_prop_u32_array("interrupt-map-mask", {0xf800, 0, 0, 7});
-        b.add_prop_u32_array("interrupt-map",
-                             {0x0800, 0, 0, 1, plic_phandle, 17, 0x1000, 0, 0, 1, plic_phandle, 18,
-                              0x1800, 0, 0, 1, plic_phandle, 19, 0x2000, 0, 0, 1, plic_phandle, 20,
-                              0x2800, 0, 0, 1, plic_phandle, 21, 0x3000, 0, 0, 1, plic_phandle, 22,
-                              0x3800, 0, 0, 1, plic_phandle, 23});
+        b.add_prop_u32_array(
+            "interrupt-map",
+            {0x0800, 0, 0, 1, plic_phandle, 17, 0x1000, 0, 0, 1, plic_phandle, 18,
+             0x1800, 0, 0, 1, plic_phandle, 19, 0x2000, 0, 0, 1, plic_phandle, 20,
+             0x2800, 0, 0, 1, plic_phandle, 21, 0x3000, 0, 0, 1, plic_phandle, 22,
+             0x3800, 0, 0, 1, plic_phandle, 23, 0x4000, 0, 0, 1, plic_phandle, 16});
         b.end_node();
     }
 

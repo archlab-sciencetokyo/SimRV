@@ -7,12 +7,12 @@
 #include <cstdint>
 
 #include "simrv/tui/framework/Layout.hpp"
-#include "simrv/xlen/Types.hpp"
+#include "simrv/xlen/IdentifierTypes.hpp"
 
 namespace simrv::tui {
 
 using TuiLayout = framework::Layout;
-using HartSelection = HartId;
+using HartSelection = simrv::xlen::HartId;
 
 enum class TuiCategoryGroup : uint8_t { Regs, Memory, Pipeline, Tools };
 
@@ -31,6 +31,7 @@ enum class TuiRegPage : uint8_t {
     STACK,
     CONSOLE,
     DISPLAY,
+    LIVE,
     DISASM = CONSOLE
 };
 
@@ -100,6 +101,8 @@ struct WorkbenchSlot {
             return "Console";
         case TuiRegPage::DISPLAY:
             return "Display";
+        case TuiRegPage::LIVE:
+            return "Live Overview";
     }
     return "Tool View";
 }

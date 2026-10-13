@@ -3,33 +3,31 @@
 #include <array>
 #include <cstdint>
 
-#include "simrv/Define.hpp"
 #include "simrv/memory/Mmu.hpp"
 #include "simrv/memory/TileLinkProtocol.hpp"
 #include "simrv/pipeline/BranchPredictor.hpp"
 #include "simrv/pipeline/PipelineContext.hpp"
 #include "simrv/pipeline/Scoreboard.hpp"
+#include "simrv/xlen/AddressTypes.hpp"
+#include "simrv/xlen/RegisterTypes.hpp"
 
 namespace simrv::pipeline {
 
-/// Authoritative progress of one instruction through the semantic CA kernel.
-using CycleStage = PipelineStage;
-
 struct InstructionFillState {
     static constexpr size_t kLineBytes = 32;
-    Address line_base = 0;
+    simrv::xlen::Address line_base = 0;
     uint32_t next_offset = 0;
     simrv::memory::TlSourceId source = 0;
     bool active = false;
     bool request_pending = false;
-    std::array<Byte, kLineBytes> line_data{};
+    std::array<simrv::xlen::Byte, kLineBytes> line_data{};
 
     constexpr void reset() noexcept { *this = {}; }
 };
 
 struct InstructionPrefetchState {
     static constexpr size_t kLineBytes = 32;
-    Address line_base = 0;
+    simrv::xlen::Address line_base = 0;
     simrv::memory::TlSourceId source = 0;
     bool active = false;
     bool request_pending = false;
@@ -38,7 +36,7 @@ struct InstructionPrefetchState {
 };
 
 struct DataTransferState {
-    Address address = 0;
+    simrv::xlen::Address address = 0;
     simrv::memory::TlSourceId source = 0;
     bool active = false;
     bool is_write = false;
@@ -57,7 +55,7 @@ struct TimedPageWalkState {
 };
 
 struct HartCycleState {
-    CycleStage stage = CycleStage::Fetch;
+    PipelineStage stage = PipelineStage::Fetch;
     bool instruction_active = false;
     bool retired_this_cycle = false;
     bool icache_miss = false;
@@ -71,11 +69,11 @@ struct HartCycleState {
     TimedPageWalkState instruction_walk{};
     TimedPageWalkState data_walk{};
     uint64_t pending_host_value = 0;
-    LatencyCycles host_write_remaining = 0;
+    simrv::xlen::LatencyCycles host_write_remaining = 0;
     bool host_write_pending = false;
 
     constexpr void reset_instruction() noexcept {
-        stage = CycleStage::Fetch;
+        stage = PipelineStage::Fetch;
         instruction_active = false;
         retired_this_cycle = false;
         icache_miss = false;
@@ -96,7 +94,7 @@ struct HartCycleState {
 
 struct CycleInstructionSlot {
     PipelineContext context{};
-    LatencyCycles remaining_latency = 0;
+    simrv::xlen::LatencyCycles remaining_latency = 0;
     bool valid = false;
     bool serializing = false;
     bool executed = false;
@@ -107,8 +105,8 @@ struct CycleInstructionSlot {
     bool writes_int = false;
     bool writes_fp = false;
     bool wb_valid = false;
-    RegId wb_dest = static_cast<RegId>(0);
-    Register wb_val = 0;
+    simrv::xlen::RegId wb_dest = static_cast<simrv::xlen::RegId>(0);
+    simrv::xlen::Register wb_val = 0;
     BranchPrediction prediction{};
 
     constexpr void clear() noexcept {
@@ -123,12 +121,16 @@ struct CycleInstructionSlot {
         writes_int = false;
         writes_fp = false;
         wb_valid = false;
-        wb_dest = static_cast<RegId>(0);
+        wb_dest = static_cast<simrv::xlen::RegId>(0);
         wb_val = 0;
         context.pending_exception.reset();
+        context.memory_load_complete = false;
+        context.mem_paddr = simrv::xlen::PhysAddr{0};
+        context.sc_reservation_checked = false;
+        context.sc_reservation_succeeded = false;
         context.ir = 0;
         context.ir_org = 0;
-        context.cpc = VirtAddr{0};
+        context.cpc = simrv::xlen::VirtAddr{0};
         prediction = {};
     }
     constexpr void invalidate() noexcept {
@@ -137,6 +139,7 @@ struct CycleInstructionSlot {
         executed = false;
         memory_complete = false;
         wb_valid = false;
+        context.memory_load_complete = false;
     }
 };
 
@@ -148,14 +151,14 @@ struct HartPipelineState {
     CycleInstructionSlot* memory = &storage_[3];
     CycleInstructionSlot* writeback = &storage_[4];
     CycleInstructionSlot* retired = &storage_[5];
-    Address fetch_pc = 0;
+    simrv::xlen::Address fetch_pc = 0;
     bool initialized = false;
     bool frontend_blocked = false;
     bool retired_this_cycle = false;
     bool data_hazard_stall = false;
     bool control_flush = false;
     uint8_t control_recovery_bubbles = 0;
-    LatencyCycles frontend_refill_stall = 0;
+    simrv::xlen::LatencyCycles frontend_refill_stall = 0;
     Scoreboard scoreboard{};
 
     [[nodiscard]] constexpr auto slot(PipelineStage s) noexcept -> CycleInstructionSlot& {

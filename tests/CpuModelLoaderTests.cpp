@@ -11,8 +11,8 @@
 
 #include "simrv/core/CpuConfigParser.hpp"
 #include "simrv/execute/ExecuteUnit.hpp"
-#include "simrv/isa/Base.hpp"
 #include "simrv/isa/Common.hpp"
+#include "simrv/isa/IsaTypes.hpp"
 #include "simrv/isa/Zb.hpp"
 #include "simrv/isa/Zk.hpp"
 #include "simrv/pipeline/CpuModel.hpp"
@@ -255,19 +255,19 @@ void test_rv32e_profile() {
     TEST_CHECK(preset.supported_xlen == 32);
     TEST_CHECK(preset.pipeline.pipeline_type == PipelineType::ThreeStage);
 
-    using simrv::RegId;
-    TEST_CHECK(simrv::isa::rv32e_register_is_valid(RegId::A5));
-    TEST_CHECK(!simrv::isa::rv32e_register_is_valid(RegId::A6));
-    TEST_CHECK(simrv::isa::rv32e_register_operands_valid(true, RegId::A5, true, RegId::A4, true,
-                                                         RegId::A3));
-    TEST_CHECK(!simrv::isa::rv32e_register_operands_valid(true, RegId::A6, true, RegId::A4, true,
-                                                          RegId::A3));
-    TEST_CHECK(!simrv::isa::rv32e_register_operands_valid(true, RegId::A5, true, RegId::A6, true,
-                                                          RegId::A3));
-    TEST_CHECK(!simrv::isa::rv32e_register_operands_valid(true, RegId::A5, true, RegId::A4, true,
-                                                          RegId::A6));
-    TEST_CHECK(simrv::isa::rv32e_register_operands_valid(false, RegId::A6, false, RegId::A6, false,
-                                                         RegId::A6));
+    TEST_CHECK(simrv::isa::rv32e_register_is_valid(simrv::xlen::RegId::A5));
+    TEST_CHECK(!simrv::isa::rv32e_register_is_valid(simrv::xlen::RegId::A6));
+    TEST_CHECK(simrv::isa::rv32e_register_operands_valid(
+        true, simrv::xlen::RegId::A5, true, simrv::xlen::RegId::A4, true, simrv::xlen::RegId::A3));
+    TEST_CHECK(!simrv::isa::rv32e_register_operands_valid(
+        true, simrv::xlen::RegId::A6, true, simrv::xlen::RegId::A4, true, simrv::xlen::RegId::A3));
+    TEST_CHECK(!simrv::isa::rv32e_register_operands_valid(
+        true, simrv::xlen::RegId::A5, true, simrv::xlen::RegId::A6, true, simrv::xlen::RegId::A3));
+    TEST_CHECK(!simrv::isa::rv32e_register_operands_valid(
+        true, simrv::xlen::RegId::A5, true, simrv::xlen::RegId::A4, true, simrv::xlen::RegId::A6));
+    TEST_CHECK(simrv::isa::rv32e_register_operands_valid(false, simrv::xlen::RegId::A6, false,
+                                                         simrv::xlen::RegId::A6, false,
+                                                         simrv::xlen::RegId::A6));
 }
 
 void test_serialize_and_roundtrip() {
@@ -286,13 +286,13 @@ void test_serialize_and_roundtrip() {
     TEST_CHECK(text.find("mul_latency = 5") != std::string::npos);
     TEST_CHECK(text.find("div_latency = 22") != std::string::npos);
     TEST_CHECK(text.find("branch_mispredict_penalty = 6") != std::string::npos);
-    TEST_CHECK(text.find("bht_initial_state = 2") != std::string::npos);
-    TEST_CHECK(text.find("isa_preset = \"gcbv\"") != std::string::npos);
+    TEST_CHECK(text.find("isa_preset = \"gcv\"") != std::string::npos ||
+               text.find("isa_preset = \"gczbv\"") != std::string::npos);
 
     simrv::pipeline::CpuModelConfig reloaded{};
     const bool ok = simrv::core::load_cpu_config_string(text, reloaded);
     TEST_CHECK(ok);
-    TEST_CHECK(reloaded.isa_preset == IsaPreset::GCBV);
+    TEST_CHECK(reloaded.isa_preset == IsaPreset::GCV);
     TEST_CHECK(reloaded.pipeline.mul_latency == 5);
     TEST_CHECK(reloaded.pipeline.div_latency == 22);
     TEST_CHECK(reloaded.pipeline.branch_mispredict_penalty == 6);

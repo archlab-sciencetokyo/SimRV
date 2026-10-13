@@ -4,9 +4,9 @@
  */
 #include "simrv/tui/modals/LoadModal.hpp"
 
+#include <algorithm>
 #include <filesystem>
 #include <format>
-#include <algorithm>
 #include <iterator>
 
 #include "simrv/core/Cpu.hpp"
@@ -43,8 +43,8 @@ auto LoadModal::complete_path(std::string& input) -> bool {
     std::string common = matches.front();
     for (auto it = std::next(matches.begin()); it != matches.end(); ++it) {
         const auto& candidate = *it;
-        const auto mismatch = std::mismatch(common.begin(), common.end(), candidate.begin(),
-                                            candidate.end());
+        const auto mismatch =
+            std::mismatch(common.begin(), common.end(), candidate.begin(), candidate.end());
         common.resize(static_cast<size_t>(std::distance(common.begin(), mismatch.first)));
     }
     if (common.size() <= input.size()) return false;
@@ -67,9 +67,9 @@ void LoadModal::open(ModalType type, std::string& input, bool& load_appmode,
 }
 
 auto LoadModal::submit(ModalType type, const std::string& input, bool load_appmode,
-                       bool load_buildroot_mode,
-                       simrv::core::Machine& machine, std::string& staged_binary_path,
-                       bool& staged_mode_change, bool& staged_target_appmode,
+                       bool load_buildroot_mode, simrv::core::Machine& machine,
+                       std::string& staged_binary_path, bool& staged_mode_change,
+                       bool& staged_target_appmode,
                        const std::function<void(const std::string&)>& set_status_override_cb)
     -> bool {
     if (type == ModalType::LoadBinary) {
@@ -85,8 +85,8 @@ auto LoadModal::submit(ModalType type, const std::string& input, bool load_appmo
             next.files.disk_path = bundle->rootfs.string();
             next.files.disk_enabled = true;
             next.execution.appmode = false;
-            next.memory.dram_size = static_cast<Address>(bundle->dram_size_bytes.value_or(
-                uint64_t{512} * 1024 * 1024));
+            next.memory.dram_size = static_cast<simrv::xlen::Address>(
+                bundle->dram_size_bytes.value_or(uint64_t{512} * 1024 * 1024));
             (void)machine.stage_reconfiguration(std::move(next));
             staged_binary_path.clear();
             staged_mode_change = false;
@@ -136,8 +136,8 @@ auto LoadModal::submit(ModalType type, const std::string& input, bool load_appmo
         next.execution.appmode = target_appmode;
         next.files.disk_path = input;
         next.files.disk_enabled = !input.empty();
-        if (!target_appmode && next.memory.dram_size < Address{512} * 1024 * 1024) {
-            next.memory.dram_size = Address{512} * 1024 * 1024;
+        if (!target_appmode && next.memory.dram_size < simrv::xlen::Address{512} * 1024 * 1024) {
+            next.memory.dram_size = simrv::xlen::Address{512} * 1024 * 1024;
         }
         (void)machine.stage_reconfiguration(std::move(next));
 
@@ -183,27 +183,29 @@ void LoadModal::render(ModalType type, std::vector<std::string>& content_rows,
         build_text_input_rows(
             content_rows,
             load_buildroot_mode ? "Enter Buildroot output folder:" : "Enter binary image filepath:",
-            input, load_buildroot_mode
-                       ? "e.g. linux-build/buildroot-output-rv64 or linux-images/rv64/buildroot-fpga"
-                       : "e.g. img/hello.bin, linux-images/rv64/fw_payload.bin");
+            input,
+            load_buildroot_mode
+                ? "e.g. linux-build/buildroot-output-rv64 or linux-images/rv64/buildroot-fpga"
+                : "e.g. img/hello.bin, linux-images/rv64/alpine-gui/opensbi-linux-payload.elf");
         content_rows.push_back("");
-        content_rows.push_back(std::format("  {}[Tab] Complete path{}", kThemeMuted,
-                                           "\033[0m"));
+        content_rows.push_back(std::format("  {}[Tab] Complete path{}", kThemeMuted, "\033[0m"));
         content_rows.push_back(std::format("  {}[Ctrl-O] Browse files\033[0m", kThemeMuted));
         content_rows.push_back("");
         const auto mode_label = load_buildroot_mode ? "Buildroot folder"
-                                : load_appmode ? "App (Baremetal)" : "OS (Linux/RTOS)";
+                                : load_appmode      ? "App (Baremetal)"
+                                                    : "OS (Linux/RTOS)";
         const auto mode_color = load_buildroot_mode ? kThemeSky
-                                : load_appmode ? kThemePeach : kThemeMint;
-        content_rows.push_back(std::format(
-            "  {}[Shift-Tab]\033[0m {}Mode: {}{}\033[0m  {}← change mode\033[0m", kThemeSky,
-            kThemeMuted, mode_color, mode_label, kThemeMuted));
-        content_rows.push_back("");
+                                : load_appmode      ? kThemePeach
+                                                    : kThemeMint;
         content_rows.push_back(
-            build_modal_footer({{"[Enter]", "Load Image"}, {"[Esc]", "Cancel"}}));
+            std::format("  {}[Shift-Tab]\033[0m {}Mode: {}{}\033[0m  {}← change mode\033[0m",
+                        kThemeSky, kThemeMuted, mode_color, mode_label, kThemeMuted));
+        content_rows.push_back("");
+        content_rows.push_back(build_modal_footer(
+            {{.key = "[Enter]", .action = "Load Image"}, {.key = "[Esc]", .action = "Cancel"}}));
     } else if (type == ModalType::LoadDiskImage) {
         build_text_input_rows(content_rows, "Enter disk image filepath:", input,
-                              "e.g. linux-images/rv64/root.img, root.ext4, root.bin");
+                              "e.g. linux-images/rv64/alpine-gui/rootfs.img or rootfs.ext4");
         content_rows.push_back(std::format("  {}[Tab] Complete path\033[0m", kThemeMuted));
         content_rows.push_back(std::format("  {}[Ctrl-O] Browse files\033[0m", kThemeMuted));
         if (!staged_binary_path.empty()) {
@@ -213,7 +215,8 @@ void LoadModal::render(ModalType type, std::vector<std::string>& content_rows,
         }
         content_rows.push_back("");
         content_rows.push_back(
-            build_modal_footer({{"[Enter]", "Load (empty to skip)"}, {"[Esc]", "Skip Disk"}}));
+            build_modal_footer({{.key = "[Enter]", .action = "Load (empty to skip)"},
+                                {.key = "[Esc]", .action = "Skip Disk"}}));
     } else if (type == ModalType::LoadCpuConfig) {
         build_text_input_rows(content_rows,
                               "Enter CPU model filepath (.cfg) or preset name:", input,
@@ -226,8 +229,8 @@ void LoadModal::render(ModalType type, std::vector<std::string>& content_rows,
         content_rows.push_back(
             std::format("  {}Built-in presets: tiny, balanced, performance\033[0m", kThemeMuted));
         content_rows.push_back("");
-        content_rows.push_back(
-            build_modal_footer({{"[Enter]", "Load Model"}, {"[Esc]", "Cancel"}}));
+        content_rows.push_back(build_modal_footer(
+            {{.key = "[Enter]", .action = "Load Model"}, {.key = "[Esc]", .action = "Cancel"}}));
     }
 }
 

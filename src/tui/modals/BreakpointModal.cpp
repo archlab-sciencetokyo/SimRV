@@ -8,7 +8,10 @@
 #include <charconv>
 #include <format>
 
+#include "simrv/core/Cpu.hpp"
 #include "simrv/core/Machine.hpp"
+#include "simrv/debug/BreakpointManager.hpp"
+#include "simrv/debug/SymbolTable.hpp"
 #include "simrv/tui/TuiTheme.hpp"
 #include "simrv/tui/modals/ModalComponents.hpp"
 #include "simrv/tui/panels/InspectorPane.hpp"
@@ -32,7 +35,7 @@ auto BreakpointModal::submit(ModalType type, const std::string& input,
     if (input.empty()) return false;
 
     if (type == ModalType::SetBreakpoint) {
-        Address addr = 0;
+        simrv::xlen::Address addr = 0;
         bool ok = false;
         if (input.starts_with("0x") || input.starts_with("0X")) {
             auto result = std::from_chars(input.data() + 2, input.data() + input.size(), addr, 16);
@@ -67,7 +70,7 @@ auto BreakpointModal::submit(ModalType type, const std::string& input,
             return true;
         }
 
-        Address addr = 0;
+        simrv::xlen::Address addr = 0;
         bool ok = false;
         if (input.starts_with("0x") || input.starts_with("0X")) {
             auto result = std::from_chars(input.data() + 2, input.data() + input.size(), addr, 16);
@@ -116,13 +119,13 @@ auto BreakpointModal::remove_at_cursor(
 
     if (cursor < static_cast<int>(pc_bps.size())) {
         auto it = std::next(pc_bps.begin(), cursor);
-        Address pc = *it;
+        simrv::xlen::Address pc = *it;
         machine.breakpoint_manager().remove_pc_breakpoint(pc);
         if (set_status_override_cb) {
             set_status_override_cb(std::format("Removed breakpoint at 0x{:08x}", pc));
         }
     } else {
-        std::size_t wp_idx = static_cast<std::size_t>(cursor - static_cast<int>(pc_bps.size()));
+        auto wp_idx = static_cast<std::size_t>(cursor - static_cast<int>(pc_bps.size()));
         const auto& wp = wps[wp_idx];
         std::string name = (wp.target == simrv::debug::WatchTarget::Memory)
                                ? std::format("0x{:08x}", wp.addr)
@@ -151,15 +154,15 @@ void BreakpointModal::render(ModalType type, std::vector<std::string>& content_r
             content_rows, "Target PC Address (hex) or Symbol:", input,
             "Enforces exact single-instruction step evaluation for 100% trap precision.");
         content_rows.push_back("");
-        content_rows.push_back(
-            build_modal_footer({{"[Enter]", "Set Breakpoint"}, {"[Esc]", "Cancel"}}));
+        content_rows.push_back(build_modal_footer({{.key = "[Enter]", .action = "Set Breakpoint"},
+                                                   {.key = "[Esc]", .action = "Cancel"}}));
     } else if (type == ModalType::SetWatchpoint) {
         build_text_input_rows(
             content_rows, "Target Register, Address, or Symbol:", input,
             "Pauses on memory write or register delta (disengages fast-batching).");
         content_rows.push_back("");
-        content_rows.push_back(
-            build_modal_footer({{"[Enter]", "Set Watchpoint"}, {"[Esc]", "Cancel"}}));
+        content_rows.push_back(build_modal_footer({{.key = "[Enter]", .action = "Set Watchpoint"},
+                                                   {.key = "[Esc]", .action = "Cancel"}}));
     } else if (type == ModalType::ManageBreakpoints) {
         content_rows.push_back(
             std::format("{}Active Breakpoints & Watchpoints:\033[0m", kThemeText));
@@ -203,13 +206,13 @@ void BreakpointModal::render(ModalType type, std::vector<std::string>& content_r
         }
 
         content_rows.push_back("");
-        content_rows.push_back(build_modal_footer({{"[↑]", "Up"},
-                                                   {"[↓]", "Down"},
-                                                   {"[Backspace/d]", "Delete"},
-                                                   {"[c]", "Clear"},
-                                                   {"[Esc]", "Close"}}));
-        content_rows.push_back(
-            build_modal_footer({{":", "Add Breakpoint"}, {"[w]", "Add Watchpoint"}}));
+        content_rows.push_back(build_modal_footer({{.key = "[↑]", .action = "Up"},
+                                                   {.key = "[↓]", .action = "Down"},
+                                                   {.key = "[Backspace/d]", .action = "Delete"},
+                                                   {.key = "[c]", .action = "Clear"},
+                                                   {.key = "[Esc]", .action = "Close"}}));
+        content_rows.push_back(build_modal_footer({{.key = ":", .action = "Add Breakpoint"},
+                                                   {.key = "[w]", .action = "Add Watchpoint"}}));
     }
 }
 

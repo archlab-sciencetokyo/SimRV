@@ -8,8 +8,8 @@
 #include <cstdint>
 #include <string>
 
-#include "simrv/Define.hpp"
-#include "simrv/xlen/Types.hpp"
+#include "simrv/device/pci/PciTypes.hpp"
+#include "simrv/xlen/ScalarTypes.hpp"
 
 namespace simrv::device {
 
@@ -45,16 +45,18 @@ class PciDevice {
 
     virtual void reset();
 
-    [[nodiscard]] virtual auto config_read(Address offset, uint8_t size) -> uint32_t;
-    virtual void config_write(Address offset, uint32_t val, uint8_t size);
+    [[nodiscard]] virtual auto config_read(simrv::xlen::Address offset, uint8_t size) -> uint32_t;
+    virtual void config_write(simrv::xlen::Address offset, uint32_t val, uint8_t size);
 
-    [[nodiscard]] virtual auto bar_read(BarIndex bar_idx, Address offset, uint8_t size) -> uint32_t;
-    virtual void bar_write(BarIndex bar_idx, Address offset, uint32_t val, uint8_t size);
+    [[nodiscard]] virtual auto bar_read(BarIndex bar_idx, simrv::xlen::Address offset, uint8_t size)
+        -> uint32_t;
+    virtual void bar_write(BarIndex bar_idx, simrv::xlen::Address offset, uint32_t val,
+                           uint8_t size);
 
-    [[nodiscard]] auto bar_base(BarIndex bar_idx) const -> Address;
-    [[nodiscard]] auto bar_size(BarIndex bar_idx) const -> Address;
-    [[nodiscard]] auto contains_mmio(Address addr, BarIndex& out_bar, Address& out_offset) const
-        -> bool;
+    [[nodiscard]] auto bar_base(BarIndex bar_idx) const -> simrv::xlen::Address;
+    [[nodiscard]] auto bar_size(BarIndex bar_idx) const -> simrv::xlen::Address;
+    [[nodiscard]] auto contains_mmio(simrv::xlen::Address addr, BarIndex& out_bar,
+                                     simrv::xlen::Address& out_offset) const -> bool;
 
     void set_root_complex(PcieRootComplex* rc, PciBdf bdf);
     void set_root_complex(PcieRootComplex* rc, uint8_t bus, uint8_t dev, uint8_t func) {
@@ -70,12 +72,12 @@ class PciDevice {
     }
 
    protected:
-    void init_bar(BarIndex bar_idx, Address size, bool is_64bit = false,
+    void init_bar(BarIndex bar_idx, simrv::xlen::Address size, bool is_64bit = false,
                   bool is_prefetchable = false);
 
     std::array<uint8_t, 256> config_space_{{0}};
-    std::array<Address, 6> bar_sizes_{{0}};
-    std::array<Address, 6> bar_masks_{{0}};
+    std::array<simrv::xlen::Address, 6> bar_sizes_{{0}};
+    std::array<simrv::xlen::Address, 6> bar_masks_{{0}};
     std::array<bool, 6> bar_is_64bit_{{false}};
 
     PcieRootComplex* root_complex_{nullptr};

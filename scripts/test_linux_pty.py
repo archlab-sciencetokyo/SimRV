@@ -52,10 +52,10 @@ def main():
     if not images_dir:
         script_dir = os.path.dirname(os.path.abspath(__file__))
         repo_root = os.path.dirname(script_dir)
-        images_dir = os.path.join(repo_root, "linux-images", "rv64")
+        images_dir = os.path.join(repo_root, "linux-images", "rv64", "alpine-gui")
 
-    mem_img = os.environ.get("SIMRV_LINUX_MEM_IMG", os.path.join(images_dir, "fw_payload.bin"))
-    disk_img_default = os.path.join(images_dir, "root.img") if os.path.exists(os.path.join(images_dir, "root.img")) else os.path.join(images_dir, "root.bin")
+    mem_img = os.environ.get("SIMRV_LINUX_MEM_IMG", os.path.join(images_dir, "opensbi-linux-payload.elf"))
+    disk_img_default = os.path.join(images_dir, "rootfs.img")
     disk_img = os.environ.get("SIMRV_LINUX_DISK_IMG", disk_img_default)
     dtb_img = os.environ.get("SIMRV_LINUX_DTB", "dynamic")
     timeout_secs = int(os.environ.get("SIMRV_TEST_TIMEOUT", "300"))

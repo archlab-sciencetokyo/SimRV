@@ -194,7 +194,7 @@ class VirtualTerminal {
         }
 
         // Handle UTF-8 assembly
-        unsigned char uc = static_cast<unsigned char>(ch);
+        auto uc = static_cast<unsigned char>(ch);
         if (!utf8_buf_.empty()) {
             if ((uc & 0xC0) == 0xC0) {
                 // New lead byte while already building: flush old malformed buffer

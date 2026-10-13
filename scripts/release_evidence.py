@@ -113,6 +113,17 @@ def main() -> None:
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     print(f"release evidence: {report['summary']['status']}: {args.output}")
+    if report["summary"]["status"] != "passed":
+        for suite_res in results:
+            if suite_res.get("status") != "passed":
+                print(
+                    f"FAILED SUITE: {suite_res['id']} (status={suite_res['status']}, "
+                    f"passed={suite_res.get('passed')}, failed={suite_res.get('failed')}, "
+                    f"skipped={suite_res.get('skipped')})",
+                    file=sys.stderr,
+                )
+                if suite_res.get("output"):
+                    print(suite_res["output"], file=sys.stderr)
     raise SystemExit(0 if report["summary"]["status"] == "passed" else 1)
 
 

@@ -15,7 +15,7 @@
 
 #include "simrv/core/Logger.hpp"
 #include "simrv/core/SoCConfig.hpp"
-#include "simrv/isa/Base.hpp"
+#include "simrv/isa/IsaTypes.hpp"
 #include "simrv/isa/Zk.hpp"
 #include "simrv/pipeline/CpuModel.hpp"
 #include "simrv/pipeline/PipelineConfig.hpp"
@@ -87,11 +87,14 @@ inline auto parse_isa_preset_string(std::string_view val) -> std::optional<simrv
     if (iequals(val, "g") || iequals(val, "rv32g") || iequals(val, "rv64g")) {
         return simrv::isa::IsaPreset::G;
     }
-    if (iequals(val, "gc") || iequals(val, "rv32gc") || iequals(val, "rv64gc")) {
+    if (iequals(val, "gc") || iequals(val, "rv32gc") || iequals(val, "rv64gc") ||
+        iequals(val, "gczb") || iequals(val, "rv32gczb") || iequals(val, "rv64gczb")) {
         return simrv::isa::IsaPreset::GC;
     }
-    if (iequals(val, "gcbv") || iequals(val, "rv32gcbv") || iequals(val, "rv64gcbv")) {
-        return simrv::isa::IsaPreset::GCBV;
+    if (iequals(val, "gcv") || iequals(val, "rv32gcv") || iequals(val, "rv64gcv") ||
+        iequals(val, "gczbv") || iequals(val, "rv32gczbv") || iequals(val, "rv64gczbv") ||
+        iequals(val, "gcbv") || iequals(val, "rv32gcbv") || iequals(val, "rv64gcbv")) {
+        return simrv::isa::IsaPreset::GCV;
     }
     return std::nullopt;
 }
@@ -103,6 +106,10 @@ inline void add_isa_extension(std::vector<std::string>& extensions, std::string_
         normalized.push_back(static_cast<char>(std::tolower(static_cast<unsigned char>(ch))));
     }
     if (normalized.empty()) return;
+    if (simrv::isa::is_zb_extension(normalized)) {
+        simrv::isa::add_zb_extension(extensions, normalized);
+        return;
+    }
     if (simrv::isa::is_zk_extension(normalized)) {
         simrv::isa::add_zk_extension(extensions, normalized);
         return;
@@ -164,10 +171,10 @@ inline auto isa_preset_name(simrv::isa::IsaPreset preset) -> std::string_view {
             return "g";
         case simrv::isa::IsaPreset::GC:
             return "gc";
-        case simrv::isa::IsaPreset::GCBV:
-            return "gcbv";
+        case simrv::isa::IsaPreset::GCV:
+            return "gcv";
     }
-    return "gcbv";
+    return "gcv";
 }
 
 }  // namespace detail
@@ -830,9 +837,10 @@ inline auto parse_cpu_config_stream(std::istream& stream, simrv::pipeline::CpuMo
 
 /** Parse the platform portion of a combined CPU/SoC preset file. */
 inline auto parse_soc_config_stream(std::istream& stream, simrv::core::SoCConfig& config) -> bool {
-    enum class Section { Global, Soc, Memory, Boot, Device };
+    enum class Section { Global, Soc, Memory, Boot, Device, Smp, SmpCluster, SmpL3 };
     Section section = Section::Global;
     simrv::core::SoCDeviceConfig* device = nullptr;
+    simrv::core::SmpClusterConfig* cluster = nullptr;
     std::string line;
     while (std::getline(stream, line)) {
         const auto comment_hash = line.find('#');
@@ -845,6 +853,7 @@ inline auto parse_soc_config_stream(std::istream& stream, simrv::core::SoCConfig
         if (trimmed.front() == '[' && trimmed.back() == ']') {
             const auto name = detail::trim(trimmed.substr(1, trimmed.size() - 2));
             device = nullptr;
+            cluster = nullptr;
             if (detail::iequals(name, "platform")) {
                 simrv::log::warn("Deprecated SoC section [platform]; use [soc]");
                 return false;
@@ -857,6 +866,27 @@ inline auto parse_soc_config_stream(std::istream& stream, simrv::core::SoCConfig
                 section = Section::Memory;
             } else if (detail::iequals(name, "boot")) {
                 section = Section::Boot;
+            } else if (detail::iequals(name, "smp")) {
+                section = Section::Smp;
+            } else if (detail::iequals(name, "smp.l3")) {
+                section = Section::SmpL3;
+            } else if (name.starts_with("smp.cluster.")) {
+                const auto id_text = detail::trim(name.substr(12));
+                const auto parsed_id = detail::parse_scaled_u64(id_text);
+                if (!parsed_id || *parsed_id > std::numeric_limits<uint32_t>::max()) {
+                    section = Section::Global;
+                    continue;
+                }
+                const auto id = static_cast<uint32_t>(*parsed_id);
+                auto found = std::ranges::find_if(config.smp.clusters,
+                                                  [id](const auto& item) { return item.id == id; });
+                if (found == config.smp.clusters.end()) {
+                    config.smp.clusters.push_back({.id = id, .harts = {}});
+                    cluster = &config.smp.clusters.back();
+                } else {
+                    cluster = &*found;
+                }
+                section = Section::SmpCluster;
             } else {
                 auto device_name = name;
                 const bool explicit_device = device_name.starts_with("device.");
@@ -868,8 +898,8 @@ inline auto parse_soc_config_stream(std::istream& stream, simrv::core::SoCConfig
                         continue;
                     }
                     section = Section::Device;
-                    const auto existing = std::ranges::find_if(
-                        config.devices, [instance_name](const auto& item) {
+                    const auto existing =
+                        std::ranges::find_if(config.devices, [instance_name](const auto& item) {
                             return item.kind == SoCDeviceKind::DummyMmio &&
                                    item.name == instance_name;
                         });
@@ -888,8 +918,8 @@ inline auto parse_soc_config_stream(std::istream& stream, simrv::core::SoCConfig
                         continue;
                     }
                     section = Section::Device;
-                    const auto existing = std::ranges::find_if(
-                        config.devices, [instance_name](const auto& item) {
+                    const auto existing =
+                        std::ranges::find_if(config.devices, [instance_name](const auto& item) {
                             return item.kind == SoCDeviceKind::CustomMmio &&
                                    item.name == instance_name;
                         });
@@ -925,7 +955,65 @@ inline auto parse_soc_config_stream(std::istream& stream, simrv::core::SoCConfig
         const auto value = detail::unquote(detail::trim(trimmed.substr(eq_pos + 1)));
         if (key.empty() || value.empty()) continue;
 
-        if (section == Section::Soc) {
+        if (section == Section::Smp) {
+            if (const auto parsed = detail::parse_scaled_u64(value);
+                parsed && *parsed <= std::numeric_limits<uint32_t>::max()) {
+                if (key == "hart_count" || key == "harts")
+                    config.smp.hart_count = static_cast<uint32_t>(*parsed);
+                else if (key == "synchronization_quantum" || key == "sync_quantum")
+                    config.smp.synchronization_quantum = static_cast<uint32_t>(*parsed);
+            } else if (key == "mode") {
+                if (detail::iequals(value, "cycle-accurate"))
+                    config.smp.mode = simrv::core::SmpMode::CycleAccurate;
+                else if (detail::iequals(value, "cycle-oriented"))
+                    config.smp.mode = simrv::core::SmpMode::CycleOriented;
+                else
+                    return false;
+            }
+        } else if (section == Section::SmpCluster && cluster != nullptr) {
+            if (key == "harts") {
+                cluster->harts.clear();
+                std::istringstream hart_stream{std::string(value)};
+                std::string hart_text;
+                while (std::getline(hart_stream, hart_text, ',')) {
+                    const auto parsed = detail::parse_scaled_u64(detail::trim(hart_text));
+                    if (!parsed || *parsed > std::numeric_limits<uint32_t>::max()) return false;
+                    cluster->harts.push_back(static_cast<uint32_t>(*parsed));
+                }
+            } else if (key == "l2_enabled") {
+                if (const auto parsed = detail::parse_bool(value)) cluster->l2.enabled = *parsed;
+            } else if (const auto parsed = detail::parse_scaled_u64(value);
+                       parsed && *parsed <= std::numeric_limits<uint32_t>::max()) {
+                const auto number = static_cast<uint32_t>(*parsed);
+                if (key == "l2_capacity_bytes")
+                    cluster->l2.capacity_bytes = number;
+                else if (key == "l2_associativity")
+                    cluster->l2.associativity = number;
+                else if (key == "l2_line_bytes")
+                    cluster->l2.line_bytes = number;
+                else if (key == "l2_hit_latency")
+                    cluster->l2.hit_latency = number;
+                else if (key == "l2_miss_latency")
+                    cluster->l2.miss_latency = number;
+            }
+        } else if (section == Section::SmpL3) {
+            if (key == "enabled") {
+                if (const auto parsed = detail::parse_bool(value)) config.smp.l3.enabled = *parsed;
+            } else if (const auto parsed = detail::parse_scaled_u64(value);
+                       parsed && *parsed <= std::numeric_limits<uint32_t>::max()) {
+                const auto number = static_cast<uint32_t>(*parsed);
+                if (key == "capacity_bytes")
+                    config.smp.l3.capacity_bytes = number;
+                else if (key == "associativity")
+                    config.smp.l3.associativity = number;
+                else if (key == "line_bytes")
+                    config.smp.l3.line_bytes = number;
+                else if (key == "hit_latency")
+                    config.smp.l3.hit_latency = number;
+                else if (key == "miss_latency")
+                    config.smp.l3.miss_latency = number;
+            }
+        } else if (section == Section::Soc) {
             if (key == "name")
                 config.name = std::string(value);
             else if (key == "cpu_model" || key == "cpu_preset")
@@ -967,13 +1055,14 @@ inline auto parse_soc_config_stream(std::istream& stream, simrv::core::SoCConfig
                 const auto region_name = region_key.substr(0, separator);
                 const auto field = region_key.substr(separator + 1);
                 const auto parsed = detail::parse_scaled_u64(value);
-                if (!parsed || region_name.empty() || (field != "base" && field != "size")) continue;
+                if (!parsed || region_name.empty() || (field != "base" && field != "size"))
+                    continue;
                 auto region = std::ranges::find_if(
-                    device->regions, [region_name](const auto& item) {
-                        return item.name == region_name;
-                    });
+                    device->regions,
+                    [region_name](const auto& item) { return item.name == region_name; });
                 if (region == device->regions.end()) {
-                    device->regions.push_back({std::string(region_name), 0, 0});
+                    device->regions.push_back(
+                        {.name = std::string(region_name), .base = 0, .size = 0});
                     region = std::prev(device->regions.end());
                 }
                 if (field == "base") region->base = *parsed;

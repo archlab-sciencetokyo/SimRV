@@ -5,9 +5,9 @@
 #include <cstdlib>
 #include <iostream>
 
-#include "simrv/isa/Base.hpp"
+#include "simrv/isa/InstructionFields.hpp"
 #include "simrv/pipeline/BranchPredictor.hpp"
-#include "simrv/xlen/Types.hpp"
+#include "simrv/xlen/RegisterTypes.hpp"
 
 #define TEST_CHECK(expr)                                                                     \
     do {                                                                                     \
@@ -79,7 +79,7 @@ void test_registered_btb_read_latency() {
     DecodedInstruction branch{};
     branch.opcode = Opcode::Branch;
     branch.imm = 12;
-    constexpr Address pc = 0x1000;
+    constexpr simrv::xlen::Address pc = 0x1000;
 
     bp.latch_btb_read(pc);
     const auto initial = bp.predict(pc, branch);
@@ -137,7 +137,7 @@ void test_bimodal_transitions() {
     branch.opcode = Opcode::Branch;
     branch.imm = 12;
 
-    const Address pc = 0x2000;
+    const simrv::xlen::Address pc = 0x2000;
 
     // Initial state is Weakly Not-Taken (1) -> predicts not-taken
     auto pred1 = bp.predict(pc, branch);
@@ -211,7 +211,7 @@ void test_gshare_and_history_restoration() {
     branch.opcode = Opcode::Branch;
     branch.imm = 8;
 
-    const Address pc = 0x3000;
+    const simrv::xlen::Address pc = 0x3000;
 
     // First prediction with GHR=0
     auto pred1 = bp.predict(pc, branch);
@@ -253,7 +253,7 @@ void test_ras_call_and_return() {
     // Direct function call: JAL RA, 0x100
     DecodedInstruction call1{};
     call1.opcode = Opcode::Jal;
-    call1.rd = RegId::Ra;
+    call1.rd = simrv::xlen::RegId::Ra;
     call1.imm = 0x100;
 
     auto pred_call1 = bp.predict(0x80000000, call1);
@@ -265,7 +265,7 @@ void test_ras_call_and_return() {
     // Nested call: JAL RA, 0x50
     DecodedInstruction call2{};
     call2.opcode = Opcode::Jal;
-    call2.rd = RegId::Ra;
+    call2.rd = simrv::xlen::RegId::Ra;
     call2.imm = 0x50;
 
     auto pred_call2 = bp.predict(0x80000120, call2);
@@ -276,8 +276,8 @@ void test_ras_call_and_return() {
     // Return from nested call: JALR x0, RA, 0
     DecodedInstruction ret1{};
     ret1.opcode = Opcode::Jalr;
-    ret1.rd = RegId::Zero;
-    ret1.rs1 = RegId::Ra;
+    ret1.rd = simrv::xlen::RegId::Zero;
+    ret1.rs1 = simrv::xlen::RegId::Ra;
     ret1.imm = 0;
 
     auto pred_ret1 = bp.predict(0x80000170, ret1);
@@ -308,11 +308,11 @@ void test_btb_indirect_jump_caching() {
     // Non-return JALR: JALR x0, a0, 0
     DecodedInstruction jalr{};
     jalr.opcode = Opcode::Jalr;
-    jalr.rd = RegId::Zero;
-    jalr.rs1 = RegId::A0;
+    jalr.rd = simrv::xlen::RegId::Zero;
+    jalr.rs1 = simrv::xlen::RegId::A0;
     jalr.imm = 0;
 
-    const Address pc = 0x4000;
+    const simrv::xlen::Address pc = 0x4000;
 
     // First lookup: BTB miss
     auto pred1 = bp.predict(pc, jalr);
@@ -383,7 +383,7 @@ void test_untagged_btb_false_control_alias() {
     DecodedInstruction branch{};
     branch.opcode = Opcode::Branch;
     branch.imm = 12;
-    constexpr Address branch_pc = 0x1000;
+    constexpr simrv::xlen::Address branch_pc = 0x1000;
     auto cold = bp.predict(branch_pc, branch);
     bp.update({.pc = branch_pc,
                .actual_taken = true,
@@ -393,7 +393,7 @@ void test_untagged_btb_false_control_alias() {
 
     DecodedInstruction add{};
     add.opcode = Opcode::Op;
-    constexpr Address alias_pc = branch_pc + (16 << 2);
+    constexpr simrv::xlen::Address alias_pc = branch_pc + (16 << 2);
     const auto alias = bp.predict(alias_pc, add);
     TEST_CHECK(alias.is_control);
     TEST_CHECK(alias.false_control_alias);

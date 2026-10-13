@@ -20,9 +20,9 @@
 #include <thread>
 #include <vector>
 
-#include "simrv/Define.hpp"
+#include "simrv/CompilerHints.hpp"
 #include "simrv/core/TelemetrySink.hpp"
-#include "simrv/isa/Base.hpp"
+#include "simrv/isa/InstructionFields.hpp"
 #include "simrv/isa/OperationId.hpp"
 #include "simrv/tui/LogBuffer.hpp"
 #include "simrv/tui/TuiKey.hpp"
@@ -33,7 +33,7 @@
 #include "simrv/tui/VirtualTerminal.hpp"
 #include "simrv/tui/framework/Subpanel.hpp"
 #include "simrv/util/UniqueFd.hpp"
-#include "simrv/xlen/Types.hpp"
+#include "simrv/xlen/ScalarTypes.hpp"
 
 namespace simrv::core {
 class Machine;
@@ -232,10 +232,11 @@ class Tui : public core::ITelemetrySink, public core::IConsoleSink {
     void cycle_tool_page(bool reverse = false);
     void set_reg_page(TuiRegPage page);
     void toggle_explain();
-    void record_instruction(Register pc, simrv::isa::Opcode opcode, simrv::isa::OperationId op_id,
-                            uint8_t rd, Register rd_val, uint8_t rs1, Register rs1_val, uint8_t rs2,
-                            Register rs2_val, int64_t imm, uint8_t hart) override;
-    void record_flight_instruction(Register pc, simrv::isa::Opcode opcode,
+    void record_instruction(simrv::xlen::Register pc, simrv::isa::Opcode opcode,
+                            simrv::isa::OperationId op_id, uint8_t rd, simrv::xlen::Register rd_val,
+                            uint8_t rs1, simrv::xlen::Register rs1_val, uint8_t rs2,
+                            simrv::xlen::Register rs2_val, int64_t imm, uint8_t hart) override;
+    void record_flight_instruction(simrv::xlen::Register pc, simrv::isa::Opcode opcode,
                                    simrv::isa::OperationId op_id, uint8_t hart) override;
     /// Export the selected hart's paused architectural state and recent trace as JSON.
     void export_inspection_report();
@@ -276,16 +277,18 @@ class Tui : public core::ITelemetrySink, public core::IConsoleSink {
 
    private:
     void sync_workbench_slots();
+    void clear_transient_live_overview(bool restore_page);
+    [[nodiscard]] auto total_snapshot_instruction_count() const -> uint64_t;
     struct TraceRecord {
-        Register pc = 0;
+        simrv::xlen::Register pc = 0;
         simrv::isa::Opcode opcode{};
         simrv::isa::OperationId op_id{};
         uint8_t rd = 0;
-        Register rd_val = 0;
+        simrv::xlen::Register rd_val = 0;
         uint8_t rs1 = 0;
-        Register rs1_val = 0;
+        simrv::xlen::Register rs1_val = 0;
         uint8_t rs2 = 0;
-        Register rs2_val = 0;
+        simrv::xlen::Register rs2_val = 0;
         int64_t imm = 0;
         uint64_t sequence = 0;
         uint8_t hart = 0;
@@ -350,7 +353,9 @@ class Tui : public core::ITelemetrySink, public core::IConsoleSink {
     bool student_guide_enabled_{false};
     MissionProgress mission_;
     bool inspection_overwrite_armed_{false};
-    std::vector<WorkbenchSlot> workbench_slots_{{TuiRegPage::GPR, 0}, {TuiRegPage::CONSOLE, 0}};
+    std::vector<WorkbenchSlot> workbench_slots_{{.page = TuiRegPage::GPR, .scroll_offset = 0},
+                                                {.page = TuiRegPage::CONSOLE, .scroll_offset = 0}};
+    std::optional<std::pair<size_t, TuiRegPage>> transient_live_restore_;
     size_t focused_slot_index_ = 0;
     size_t selected_hart_ = 0;
     TuiLayout layout_ = TuiLayout::Split;

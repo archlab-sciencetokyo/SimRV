@@ -6,17 +6,17 @@
 
 #include <atomic>
 #include <cstdint>
-#include <functional>
 #include <filesystem>
+#include <functional>
 #include <string>
 #include <utility>
 #include <vector>
 
-#include "simrv/tui/TuiTypes.hpp"
 #include "simrv/tui/TuiKey.hpp"
+#include "simrv/tui/TuiTypes.hpp"
 #include "simrv/tui/framework/Types.hpp"
 #include "simrv/xlen/Helpers.hpp"
-#include "simrv/xlen/Types.hpp"
+#include "simrv/xlen/ScalarTypes.hpp"
 
 namespace simrv::core {
 class Machine;
@@ -77,8 +77,6 @@ struct MisaDraft {
     bool ext_s = true;
     bool ext_u = true;
     bool ext_v = false;
-    // MISA.X marks the presence of non-standard extensions such as Xsimrvtrace.
-    bool ext_x = false;
     unsigned vlen = 256;  // VLEN for V extension (128-1024, power of 2)
     [[nodiscard]] auto to_misa_val() const -> uint64_t {
         uint64_t val = 0;
@@ -97,7 +95,6 @@ struct MisaDraft {
         if (ext_v) val |= (1ULL << ('v' - 'a'));
         if (ext_s) val |= (1ULL << ('s' - 'a'));
         if (ext_u) val |= (1ULL << ('u' - 'a'));
-        if (ext_x) val |= (1ULL << ('x' - 'a'));
         return val;
     }
 
@@ -122,7 +119,7 @@ struct SettingsDraft {
     bool lockstep_mode = false;
     uint32_t num_harts = 1;
     uint32_t smp_quantum = 1000;
-    bool smp_multithreaded = false;
+    bool smp_cycle_oriented = false;
     uint8_t platform_profile = 0;  // 0: PCIe, 1: MMIO
     uint64_t dram_size_mb = 256;
     std::string net_mode = "user";

@@ -32,14 +32,15 @@
 #include <dlfcn.h>
 #endif
 
-#include "simrv/Define.hpp"
+#include "simrv/CompilerHints.hpp"
 #include "simrv/core/BuildInfo.hpp"
 #include "simrv/core/Cpu.hpp"
 #include "simrv/core/Logger.hpp"
 #include "simrv/core/Machine.hpp"
 #include "simrv/debug/SpikeLockstep.hpp"
-#include "simrv/device/pci/VirtioPciBlock.hpp"
-#include "simrv/device/pci/VirtioPciConsole.hpp"
+#include "simrv/debug/SymbolTable.hpp"
+#include "simrv/isa/Priv.hpp"
+#include "simrv/memory/MemorySubsystem.hpp"
 #include "simrv/memory/MemoryUtil.hpp"
 #include "simrv/memory/TileLinkNode.hpp"
 #include "simrv/pipeline/Decoder.hpp"
@@ -48,7 +49,8 @@
 #include "simrv/util/FormatUtil.hpp"
 #include "simrv/util/Sha256.hpp"
 #include "simrv/xlen/Constants.hpp"
-#include "simrv/xlen/Types.hpp"
+#include "simrv/xlen/IdentifierTypes.hpp"
+#include "simrv/xlen/RegisterTypes.hpp"
 
 namespace simrv::core {
 
@@ -210,8 +212,8 @@ class ConditionalTracerLock {
     bool locked_;
 };
 
-constexpr auto D_TRACE_HEX_WIDTH = static_cast<int>(kXLenHexDigits);
-constexpr Counter D_TRACEPC_INTERVAL = 1000;
+constexpr auto D_TRACE_HEX_WIDTH = static_cast<int>(simrv::xlen::kXLenHexDigits);
+constexpr simrv::xlen::Counter D_TRACEPC_INTERVAL = 1000;
 constexpr uint64_t kRetireIndexStride = 256;
 
 class RetirementRecordBuilder {
@@ -280,13 +282,13 @@ auto trace_timestamp() -> std::string {
                        millis.count());
 }
 
-auto privilege_mode(PrivilegeLevel privilege) noexcept -> std::string_view {
+auto privilege_mode(simrv::xlen::PrivilegeLevel privilege) noexcept -> std::string_view {
     switch (privilege) {
-        case PrivilegeLevel::User:
+        case simrv::xlen::PrivilegeLevel::User:
             return "U";
-        case PrivilegeLevel::Supervisor:
+        case simrv::xlen::PrivilegeLevel::Supervisor:
             return "S";
-        case PrivilegeLevel::Machine:
+        case simrv::xlen::PrivilegeLevel::Machine:
             return "M";
     }
     return "unknown";
@@ -344,7 +346,7 @@ auto json_string_array(const std::vector<std::string>& values) -> std::string {
     return json;
 }
 
-auto event_function_field(const Machine& machine, Address pc) -> std::string {
+auto event_function_field(const Machine& machine, simrv::xlen::Address pc) -> std::string {
     const auto symbol = machine.symbol_table().lookup_function(pc);
     return symbol ? std::format(",\"function\":{}", json_quote(symbol->name)) : "";
 }
@@ -421,8 +423,8 @@ auto Tracer::trace_event_selected(std::string_view event) const noexcept -> bool
         trace_event_filter_, [event](const std::string& candidate) { return candidate == event; });
 }
 
-auto Tracer::accepts_trace_event(std::string_view event, Counter cycle, uint32_t hart,
-                                 std::optional<Address> pc,
+auto Tracer::accepts_trace_event(std::string_view event, simrv::xlen::Counter cycle, uint32_t hart,
+                                 std::optional<simrv::xlen::Address> pc,
                                  std::string_view component) const noexcept -> bool {
     const auto& config = machine_.configuration().debug;
     if (!config.trace_device.empty() && component != config.trace_device) return false;
@@ -476,7 +478,6 @@ void Tracer::init_architecture_trace(const std::string& path) {
     fp_bus.close();
     fp_pipeline_.close();
     fp_memory.close();
-    fp_markers.close();
     fp_registers_.close();
     trace_metadata_path_.clear();
     retire_index_path_.clear();
@@ -487,8 +488,6 @@ void Tracer::init_architecture_trace(const std::string& path) {
     call_depth_.clear();
     vector_write_before_.clear();
     trap_frames_.clear();
-    marker_buffers_.clear();
-    marker_depth_.clear();
     trace_event_filter_.clear();
     if (path.empty()) return;
     std::error_code ec;
@@ -532,14 +531,14 @@ void Tracer::init_architecture_trace(const std::string& path) {
         "\"harts\":{},\"dram_base\":\"0x{:x}\",\"dram_size\":\"0x{:x}\","
         "\"appmode\":{},\"engine\":{},\"pipeline\":{},\"platform_profile\":{},"
         "\"cpu_model_preset\":{},\"branch_predictor\":{},\"smp_quantum\":{},"
-        "\"smp_multithreaded\":{},\"soc\":{},\"soc_cpu_model\":{},"
+        "\"smp_mode\":{},\"soc\":{},\"soc_cpu_model\":{},"
         "\"soc_pcie\":{},\"soc_mmio\":{},\"soc_disable_unlisted\":{},"
         "\"trace_level\":{},\"trace_events\":{},\"trace_function\":{},"
         "\"trace_device\":{},\"trace_hart\":{},"
         "\"trace_pc_start\":{},\"trace_pc_end\":{},"
         "\"trace_after_cycle\":{},\"trace_before_cycle\":{},"
         "\"checkpoint_every\":{},\"checkpoint_dir\":{},"
-        "\"binary\":{},\"disk\":{},\"disk_enabled\":{},"
+        "\"binary\":{},\"disk\":{},\"disk_enabled\":{},\"virtiofs\":{},"
         "\"cpuconfig\":{},\"dvtree\":{},\"command_line\":{},\"devices\":[",
         simrv::xlen::kXLenBits, json_quote(trace_isa_),
         static_cast<uint64_t>(machine_.primary_hart().state().misa), trace_vlen_, trace_harts_,
@@ -553,7 +552,10 @@ void Tracer::init_architecture_trace(const std::string& path) {
         config.branch_predictor_type
             ? std::format("{}", std::to_underlying(*config.branch_predictor_type))
             : "null",
-        config.execution.smp_quantum, config.execution.smp_multithreaded,
+        config.execution.smp_quantum,
+        json_quote(config.execution.smp_mode.value_or(config.soc.smp.mode) == SmpMode::CycleAccurate
+                       ? "cycle-accurate"
+                       : "cycle-oriented"),
         json_quote(config.soc.name), json_quote(config.soc.cpu_model), config.soc.enable_pcie,
         config.soc.enable_mmio, config.soc.disable_unlisted_devices, config.debug.trace_level,
         json_quote(config.debug.trace_events), json_quote(config.debug.trace_function),
@@ -571,8 +573,9 @@ void Tracer::init_architecture_trace(const std::string& path) {
                                         : "null",
         config.debug.checkpoint_every, json_quote(config.debug.checkpoint_dir),
         json_quote(config.files.binary_path), json_quote(config.files.disk_path),
-        config.files.disk_enabled, json_quote(config.files.cpuconfig_path),
-        json_quote(config.files.dvtree_path), json_string_array(trace_command_line_));
+        config.files.disk_enabled, json_quote(config.files.virtiofs_path),
+        json_quote(config.files.cpuconfig_path), json_quote(config.files.dvtree_path),
+        json_string_array(trace_command_line_));
     bool first_device = true;
     for (const auto& device : config.soc.devices) {
         if (!first_device) configuration_material.push_back(',');
@@ -595,7 +598,6 @@ void Tracer::init_architecture_trace(const std::string& path) {
         fp_memory.open(trace_directory / "memory.jsonl", std::ios::out | std::ios::trunc);
         fp_pipeline_.open(trace_directory / "pipeline.jsonl", std::ios::out | std::ios::trunc);
     }
-    fp_markers.open(trace_directory / "markers.jsonl", std::ios::out | std::ios::trunc);
     if (config.debug.trace_register_writes) {
         fp_registers_.open(trace_directory / "registers.jsonl", std::ios::out | std::ios::trunc);
         vector_write_before_.resize(machine_.num_harts());
@@ -693,14 +695,6 @@ void Tracer::init_architecture_trace(const std::string& path) {
             "\"semantics\":\"retired scalar data accesses and precise synchronous faults\"}}}}",
             trace_timestamp());
     }
-    if (fp_markers.is_open()) {
-        std::println(fp_markers,
-                     "{{\"schema_version\":2,\"event\":\"header\","
-                     "\"timestamp\":\"{}\",\"cycle\":0,\"hart\":0,"
-                     "\"mode\":\"M\",\"payload\":{{\"stream\":\"markers\","
-                     "\"abi\":\"Xsimrvtrace-0.1\",\"csr\":\"0x800\"}}}}",
-                     trace_timestamp());
-    }
     write_trace_metadata(false);
 }
 
@@ -749,7 +743,8 @@ void Tracer::capture_register_write_before(CPU& cpu, pipeline::PipelineContext& 
     bytes.clear();
     bytes.reserve(32 * (trace_vlen_ / 8));
     for (unsigned index = 0; index < 32; ++index) {
-        const auto& reg = cpu.state().regs.read_vector(static_cast<RegId>(index));
+        const auto& reg = cpu.state().regs.read_vector(
+            simrv::xlen::to_vec_reg_id(static_cast<simrv::xlen::RegId>(index)));
         bytes.insert(bytes.end(), reg.u8.begin(),
                      reg.u8.begin() + static_cast<std::ptrdiff_t>(trace_vlen_ / 8));
     }
@@ -770,14 +765,15 @@ void Tracer::flush_all() {
     if (fp_bus.is_open()) fp_bus.flush();
     if (fp_pipeline_.is_open()) fp_pipeline_.flush();
     if (fp_memory.is_open()) fp_memory.flush();
-    if (fp_markers.is_open()) fp_markers.flush();
     if (fp_registers_.is_open()) fp_registers_.flush();
     if (fp_tracepc_.is_open()) fp_tracepc_.flush();
     if (fp_bpred_.is_open()) fp_bpred_.flush();
 }
 
-void Tracer::log_architectural_trap_entry(const CPU& cpu, TrapCause cause, Address epc,
-                                          PrivilegeLevel source_mode, CSRValue tval) {
+void Tracer::log_architectural_trap_entry(const CPU& cpu, simrv::xlen::TrapCause cause,
+                                          simrv::xlen::Address epc,
+                                          simrv::xlen::PrivilegeLevel source_mode,
+                                          simrv::xlen::CsrValue tval) {
     if (!fp_interrupts.is_open() || !trace_level_at_least(1)) return;
     const auto& state = cpu.state();
     const auto hart = static_cast<size_t>(state.mhartid);
@@ -805,14 +801,14 @@ void Tracer::log_architectural_trap_entry(const CPU& cpu, TrapCause cause, Addre
                  static_cast<uint64_t>(state.pc), event_function_field(machine_, state.pc),
                  privilege_mode(state.priv), static_cast<uint64_t>(trap_exception_code(cause)),
                  static_cast<uint64_t>(cause), trap_cause_name(cause),
-                 state.priv == PrivilegeLevel::Supervisor ? "scause" : "mcause",
-                 state.priv == PrivilegeLevel::Supervisor ? "sepc" : "mepc",
+                 state.priv == simrv::xlen::PrivilegeLevel::Supervisor ? "scause" : "mcause",
+                 state.priv == simrv::xlen::PrivilegeLevel::Supervisor ? "sepc" : "mepc",
                  static_cast<uint64_t>(epc),
-                 state.priv == PrivilegeLevel::Supervisor ? "stval" : "mtval",
+                 state.priv == simrv::xlen::PrivilegeLevel::Supervisor ? "stval" : "mtval",
                  static_cast<uint64_t>(tval), privilege_mode(source_mode), depth);
 }
 
-void Tracer::log_interrupt_signal(const CPU& cpu, TrapCause cause, bool asserted,
+void Tracer::log_interrupt_signal(const CPU& cpu, simrv::xlen::TrapCause cause, bool asserted,
                                   std::string_view source) {
     if (!fp_interrupts.is_open() || !trace_level_at_least(1)) return;
     const auto& state = cpu.state();
@@ -833,8 +829,9 @@ void Tracer::log_interrupt_signal(const CPU& cpu, TrapCause cause, bool asserted
                  asserted ? "true" : "false");
 }
 
-void Tracer::log_mmio(HartId hart, std::string_view dev_name, Address addr, uint32_t size,
-                      Word data, bool is_write, bool faulted, bool mapped) {
+void Tracer::log_mmio(simrv::xlen::HartId hart, std::string_view dev_name,
+                      simrv::xlen::Address addr, uint32_t size, simrv::xlen::Word data,
+                      bool is_write, bool faulted, bool mapped) {
     if (!fp_dlog.is_open() && !(fp_devices.is_open() && trace_level_at_least(1))) return;
     const auto& cpu = machine_.hart(hart);
     const auto mtime = cpu.clint_mmio.mtime.load(std::memory_order_relaxed);
@@ -844,8 +841,8 @@ void Tracer::log_mmio(HartId hart, std::string_view dev_name, Address addr, uint
     ConditionalTracerLock lock(mutex_, machine_.is_smp_enabled());
     if (fp_dlog.is_open() && !faulted) {
         std::println(fp_dlog, "[mtime={:12}] [{:<16}] {:5} addr=0x{:0{}x} size={:2} data=0x{:0{}x}",
-                     mtime, dev_name, is_write ? "WRITE" : "READ", addr, kXLenHexDigits, size, data,
-                     size * 2);
+                     mtime, dev_name, is_write ? "WRITE" : "READ", addr,
+                     simrv::xlen::kXLenHexDigits, size, data, size * 2);
     }
     if (fp_devices.is_open() && trace_level_at_least(1) &&
         accepts_trace_event(event, cycle, hart.val, cpu.active_context().cpc.raw(), dev_name)) {
@@ -867,9 +864,10 @@ void Tracer::log_mmio(HartId hart, std::string_view dev_name, Address addr, uint
     }
 }
 
-void Tracer::log_bus_transaction(Counter cycle, char channel, std::string_view opcode,
-                                 std::uint16_t source, std::uint16_t sink, Address address,
-                                 std::string_view detail, const BusTraceContext& context) {
+void Tracer::log_bus_transaction(simrv::xlen::Counter cycle, char channel, std::string_view opcode,
+                                 std::uint16_t source, std::uint16_t sink,
+                                 simrv::xlen::Address address, std::string_view detail,
+                                 const BusTraceContext& context) {
     if (!fp_bus.is_open() || !trace_level_at_least(4)) return;
     const auto hart = context.hart.value_or(std::numeric_limits<uint32_t>::max());
     const auto event_cycle =
@@ -961,58 +959,12 @@ void Tracer::log_dma_transfer(const simrv::memory::DmaTransferTrace& transfer) {
                  transfer.completion_cycle, transfer.completion_cycle - transfer.start_cycle);
 }
 
-void Tracer::log_marker_csr_write(const CPU& cpu, CSRValue value) {
-    if (!fp_markers.is_open() || !is_architecture_trace_enabled()) return;
-    const auto hart = static_cast<size_t>(cpu.state().mhartid);
-    ConditionalTracerLock lock(mutex_, machine_.is_smp_enabled());
-    if (hart >= marker_buffers_.size()) {
-        marker_buffers_.resize(hart + 1);
-        marker_depth_.resize(hart + 1);
-    }
-    constexpr CSRValue kCommandMask = static_cast<CSRValue>(0xC0000000u);
-    constexpr CSRValue kBegin = static_cast<CSRValue>(0x40000000u);
-    constexpr CSRValue kEnd = static_cast<CSRValue>(0x80000000u);
-    constexpr CSRValue kMarker = static_cast<CSRValue>(0xC0000000u);
-    auto& label = marker_buffers_[hart];
-    if ((value & kCommandMask) == 0) {
-        if (value <= 0xFFu && label.size() < 1024) label.push_back(static_cast<char>(value));
-        return;
-    }
-
-    std::string_view event;
-    if (value == kBegin) {
-        event = "marker_begin";
-        ++marker_depth_[hart];
-    } else if (value == kEnd) {
-        event = "marker_end";
-        if (marker_depth_[hart] != 0) --marker_depth_[hart];
-    } else if (value == kMarker) {
-        event = "marker";
-    } else {
-        label.clear();
-        return;
-    }
-    const auto source_pc = static_cast<uint64_t>(cpu.pipeline_context.cpc.raw());
-    if (!accepts_trace_event(event, cpu.clint_mmio.mcycle,
-                             static_cast<uint32_t>(cpu.state().mhartid), source_pc)) {
-        label.clear();
-        return;
-    }
-    std::println(
-        fp_markers,
-        "{{\"schema_version\":2,\"event\":{},\"cycle\":{},"
-        "\"hart\":{},\"pc\":\"0x{:x}\"{},\"mode\":{},"
-        "\"payload\":{{\"label\":{},\"marker_depth\":{}}}}}",
-        json_quote(event), cpu.clint_mmio.mcycle, static_cast<unsigned>(cpu.state().mhartid),
-        source_pc, event_function_field(machine_, source_pc),
-        json_quote(privilege_mode(cpu.state().priv)), json_quote(label), marker_depth_[hart]);
-    label.clear();
-}
-
-void Tracer::log_trap(Counter mtime, Counter cycle, TrapCause cause, Address trap_pc,
-                      PrivilegeLevel priv, const ArchState& state, CSRValue tval, const CPU& cpu) {
+void Tracer::log_trap(simrv::xlen::Counter mtime, simrv::xlen::Counter cycle,
+                      simrv::xlen::TrapCause cause, simrv::xlen::Address trap_pc,
+                      simrv::xlen::PrivilegeLevel priv, const ArchState& state,
+                      simrv::xlen::CsrValue tval, const CPU& cpu) {
     if (!fp_traplog.is_open() && !(fp_devices.is_open() && trace_level_at_least(1))) return;
-    constexpr int kLogHexWidth = static_cast<int>(kXLenHexDigits);
+    constexpr int kLogHexWidth = static_cast<int>(simrv::xlen::kXLenHexDigits);
     ConditionalTracerLock lock(mutex_, machine_.is_smp_enabled());
     if (fp_traplog.is_open()) {
         std::println(
@@ -1022,11 +974,11 @@ void Tracer::log_trap(Counter mtime, Counter cycle, TrapCause cause, Address tra
             "sepc={:0{}x} satp={:0{}x} tval={:0{}x}",
             mtime, static_cast<uint64_t>(cause), kLogHexWidth, trap_cause_name(cause),
             static_cast<uint64_t>(trap_pc), kLogHexWidth, static_cast<unsigned>(priv),
-            static_cast<uint64_t>(state.regs.read(RegId::Ra)), kLogHexWidth,
-            static_cast<uint64_t>(state.regs.read(RegId::Sp)), kLogHexWidth,
-            static_cast<uint64_t>(state.regs.read(RegId::Tp)), kLogHexWidth,
-            static_cast<uint64_t>(state.regs.read(RegId::A0)), kLogHexWidth,
-            static_cast<uint64_t>(state.regs.read(RegId::A1)), kLogHexWidth,
+            static_cast<uint64_t>(state.regs.read(simrv::xlen::RegId::Ra)), kLogHexWidth,
+            static_cast<uint64_t>(state.regs.read(simrv::xlen::RegId::Sp)), kLogHexWidth,
+            static_cast<uint64_t>(state.regs.read(simrv::xlen::RegId::Tp)), kLogHexWidth,
+            static_cast<uint64_t>(state.regs.read(simrv::xlen::RegId::A0)), kLogHexWidth,
+            static_cast<uint64_t>(state.regs.read(simrv::xlen::RegId::A1)), kLogHexWidth,
             static_cast<uint64_t>(state.mtvec), kLogHexWidth, static_cast<uint64_t>(state.stvec),
             kLogHexWidth, static_cast<uint64_t>(state.mepc), kLogHexWidth,
             static_cast<uint64_t>(state.sepc), kLogHexWidth, static_cast<uint64_t>(state.satp),
@@ -1049,16 +1001,12 @@ void Tracer::log_trap(Counter mtime, Counter cycle, TrapCause cause, Address tra
     const auto& context = cpu.active_context();
     const bool memory_fault_cause =
         !trap_is_interrupt(cause) &&
-        (cause == static_cast<TrapCause>(ExceptionCode::MisalignedLoad) ||
-         cause == static_cast<TrapCause>(ExceptionCode::FaultLoad) ||
-         cause == static_cast<TrapCause>(ExceptionCode::MisalignedStore) ||
-         cause == static_cast<TrapCause>(ExceptionCode::FaultStore) ||
-         cause == static_cast<TrapCause>(ExceptionCode::LoadPageFault) ||
-         cause == static_cast<TrapCause>(ExceptionCode::StorePageFault));
-    const bool memory_write_fault =
-        cause == static_cast<TrapCause>(ExceptionCode::MisalignedStore) ||
-        cause == static_cast<TrapCause>(ExceptionCode::FaultStore) ||
-        cause == static_cast<TrapCause>(ExceptionCode::StorePageFault);
+        (cause == ExceptionCode::MisalignedLoad || cause == ExceptionCode::FaultLoad ||
+         cause == ExceptionCode::MisalignedStore || cause == ExceptionCode::FaultStore ||
+         cause == ExceptionCode::LoadPageFault || cause == ExceptionCode::StorePageFault);
+    const bool memory_write_fault = cause == ExceptionCode::MisalignedStore ||
+                                    cause == ExceptionCode::FaultStore ||
+                                    cause == ExceptionCode::StorePageFault;
     const auto memory_kind = pipeline::operation::info(context.op_id).memory;
     const auto opcode = static_cast<Opcode>(context.opcode);
     const bool scalar_memory_opcode = opcode == Opcode::Load || opcode == Opcode::Store ||
@@ -1068,10 +1016,10 @@ void Tracer::log_trap(Counter mtime, Counter cycle, TrapCause cause, Address tra
         !scalar_memory_opcode || memory_kind == pipeline::operation::MemoryAccessKind::None)
         return;
 
-    const Address effective_address =
+    const simrv::xlen::Address effective_address =
         cpu.effective_data_xlen() == 32 ? (context.mem_addr & 0xffffffffULL) : context.mem_addr;
     const auto access_privilege = cpu.effective_data_privilege();
-    std::optional<Address> physical_address;
+    std::optional<simrv::xlen::Address> physical_address;
     const bool translation_enabled =
         access_privilege != kPrivMachine &&
         simrv::xlen::satp_translation_enabled(state.satp, cpu.effective_data_xlen());
@@ -1080,7 +1028,7 @@ void Tracer::log_trap(Counter mtime, Counter cycle, TrapCause cause, Address tra
     } else {
         const auto asid =
             static_cast<Asid>(simrv::xlen::satp_asid(state.satp, cpu.effective_data_xlen()));
-        const Address vpn = effective_address >> simrv::memory::kPageShift;
+        const simrv::xlen::Address vpn = effective_address >> simrv::memory::kPageShift;
         const auto tlb_index = CPU::soft_tlb_index(vpn);
         const auto& soft_tlb =
             memory_write_fault ? cpu.soft_tlb_write[tlb_index] : cpu.soft_tlb_read[tlb_index];
@@ -1114,7 +1062,7 @@ void Tracer::log_trap(Counter mtime, Counter cycle, TrapCause cause, Address tra
     if (!accepts_trace_event("memory_fault", cycle, static_cast<uint32_t>(state.mhartid), trap_pc,
                              component))
         return;
-    const uint64_t store_value =
+    const auto store_value =
         static_cast<uint64_t>(opcode == Opcode::StoreFp ? context.fp_mem_wdata : context.mem_wdata);
     const std::string value_json =
         memory_write_fault ? json_quote(std::format("0x{:x}", store_value)) : "null";
@@ -1138,10 +1086,11 @@ void Tracer::log_trap(Counter mtime, Counter cycle, TrapCause cause, Address tra
                  json_quote(trap_cause_name(cause)), static_cast<uint64_t>(tval));
 }
 
-void Tracer::log_sbi(Counter mtime, Counter cycle, unsigned cause, Word ext_id, Word func_id,
-                     Word a0, Word a1, Address pc, HartId hart) {
+void Tracer::log_sbi(simrv::xlen::Counter mtime, simrv::xlen::Counter cycle, unsigned cause,
+                     simrv::xlen::Word ext_id, simrv::xlen::Word func_id, simrv::xlen::Word a0,
+                     simrv::xlen::Word a1, simrv::xlen::Address pc, simrv::xlen::HartId hart) {
     if (!fp_traplog.is_open() && !(fp_devices.is_open() && trace_level_at_least(1))) return;
-    constexpr int kLogHexWidth = static_cast<int>(kXLenHexDigits);
+    constexpr int kLogHexWidth = static_cast<int>(simrv::xlen::kXLenHexDigits);
     ConditionalTracerLock lock(mutex_, machine_.is_smp_enabled());
     if (fp_traplog.is_open()) {
         std::println(fp_traplog,
@@ -1186,19 +1135,19 @@ void Tracer::log_architecture_retirement(const CPU& cpu,
     const bool emit_memory = fp_memory.is_open() && scalar_memory_opcode &&
                              memory_kind != pipeline::operation::MemoryAccessKind::None &&
                              trace_level_at_least(4) && trace_event_selected(memory_event);
-    const auto funct12 = static_cast<Funct12Priv>(retiring_context.funct12);
+    const auto funct12 = retiring_context.funct12;
     const bool interrupt_return_instruction = funct12 == Funct12Priv::Mret ||
                                               funct12 == Funct12Priv::Sret ||
                                               funct12 == Funct12Priv::Uret;
     const auto source_pc = retiring_context.cpc.raw();
     const auto target_pc = retiring_context.jmp_pc.raw();
     const auto return_pc = source_pc + (retiring_context.cinsn != 0 ? 2 : 4);
-    const bool is_link_register =
-        retiring_context.rd == RegId::Ra || retiring_context.rd == RegId::T0;
-    const bool is_return_register =
-        retiring_context.rs1 == RegId::Ra || retiring_context.rs1 == RegId::T0;
+    const bool is_link_register = retiring_context.rd == simrv::xlen::RegId::Ra ||
+                                  retiring_context.rd == simrv::xlen::RegId::T0;
+    const bool is_return_register = retiring_context.rs1 == simrv::xlen::RegId::Ra ||
+                                    retiring_context.rs1 == simrv::xlen::RegId::T0;
     const bool is_return = retiring_context.opcode == isa::Opcode::Jalr &&
-                           retiring_context.rd == RegId::Zero && is_return_register &&
+                           retiring_context.rd == simrv::xlen::RegId::Zero && is_return_register &&
                            retiring_context.imm == 0;
     const bool is_call = retiring_context.tkn &&
                          (retiring_context.opcode == isa::Opcode::Jal ||
@@ -1221,7 +1170,7 @@ void Tracer::log_architecture_retirement(const CPU& cpu,
     ConditionalTracerLock lock(mutex_, machine_.is_smp_enabled());
     if (emit_registers && retiring_context.traits.writes_fp) {
         const auto index = static_cast<unsigned>(retiring_context.rd);
-        const auto after = state.regs.read_fp(retiring_context.rd);
+        const auto after = state.regs.read_fp(simrv::xlen::to_fp_reg_id(retiring_context.rd));
         std::println(fp_registers_,
                      "{{\"schema_version\":1,\"event\":\"register_write\","
                      "\"hart\":{},\"cycle\":{},\"pc\":\"0x{:x}\","
@@ -1256,7 +1205,8 @@ void Tracer::log_architecture_retirement(const CPU& cpu,
         };
         const auto width = trace_vlen_ / 8;
         for (unsigned index = 0; index < 32; ++index) {
-            const auto& after = state.regs.read_vector(static_cast<RegId>(index));
+            const auto& after = state.regs.read_vector(
+                simrv::xlen::to_vec_reg_id(static_cast<simrv::xlen::RegId>(index)));
             const auto after_bits = std::span<const uint8_t>(after.u8.data(), width);
             const auto start = static_cast<size_t>(index) * width;
             const auto before_bits = start + width <= before.size()
@@ -1281,11 +1231,11 @@ void Tracer::log_architecture_retirement(const CPU& cpu,
         }
     }
     if (emit_memory) {
-        const Address effective_address = cpu.effective_data_xlen() == 32
-                                              ? (retiring_context.mem_addr & 0xffffffffULL)
-                                              : retiring_context.mem_addr;
+        const simrv::xlen::Address effective_address =
+            cpu.effective_data_xlen() == 32 ? (retiring_context.mem_addr & 0xffffffffULL)
+                                            : retiring_context.mem_addr;
         const auto access_privilege = cpu.effective_data_privilege();
-        std::optional<Address> physical_address;
+        std::optional<simrv::xlen::Address> physical_address;
         const bool translation_enabled =
             access_privilege != kPrivMachine &&
             simrv::xlen::satp_translation_enabled(state.satp, cpu.effective_data_xlen());
@@ -1294,7 +1244,7 @@ void Tracer::log_architecture_retirement(const CPU& cpu,
         } else {
             const auto asid =
                 static_cast<Asid>(simrv::xlen::satp_asid(state.satp, cpu.effective_data_xlen()));
-            const Address vpn = effective_address >> simrv::memory::kPageShift;
+            const simrv::xlen::Address vpn = effective_address >> simrv::memory::kPageShift;
             const auto tlb_index = CPU::soft_tlb_index(vpn);
             const auto& soft_tlb = memory_kind == pipeline::operation::MemoryAccessKind::Store
                                        ? cpu.soft_tlb_write[tlb_index]
@@ -1331,9 +1281,9 @@ void Tracer::log_architecture_retirement(const CPU& cpu,
         }
         const bool is_load = memory_kind == pipeline::operation::MemoryAccessKind::Load;
         const bool is_store = memory_kind == pipeline::operation::MemoryAccessKind::Store;
-        const uint64_t read_value = static_cast<uint64_t>(
+        const auto read_value = static_cast<uint64_t>(
             opcode == Opcode::LoadFp ? retiring_context.fp_mem_rdata : retiring_context.mem_rdata);
-        const uint64_t write_value = static_cast<uint64_t>(
+        const auto write_value = static_cast<uint64_t>(
             opcode == Opcode::StoreFp ? retiring_context.fp_mem_wdata : retiring_context.mem_wdata);
         if (accepts_trace_event(memory_event, cycle, hart_id, retiring_context.cpc.raw(),
                                 component)) {
@@ -1487,7 +1437,6 @@ void Tracer::write_trace_metadata(bool completed) {
         out,
         "{{\"schema_version\":2,\"simulator_version\":{},"
         "\"git_commit\":{},\"isa\":{},"
-        "\"nonstandard_extensions\":[\"Xsimrvtrace\"],"
         "\"xlen\":{},\"vlen\":{},"
         "\"harts\":{},\"trace_level\":{},\"trace_filters\":{{"
         "\"events\":{},\"function\":{},\"device\":{},"
@@ -1560,7 +1509,7 @@ void Tracer::dump_init_artifacts() {
 
             std::print(out, "{:08x}: ", offset);
             for (uint64_t b = 0; b < current_len; ++b) {
-                const uint8_t val =
+                const auto val =
                     std::to_integer<uint8_t>(*ram.unchecked_ptr(dram_base + offset + b));
                 std::print(out, "{:02x}{}", val, (b == 7 ? "  " : " "));
             }
@@ -1577,28 +1526,31 @@ void Tracer::dump_init_artifacts() {
         }
         simrv::log::info("file {} was generated after {} cycle(s)",
                          artifact_path("init_mem.txt").string(),
-                         static_cast<Counter>(cpu->clint_mmio.mtime.load()));
+                         static_cast<simrv::xlen::Counter>(cpu->clint_mmio.mtime.load()));
     }
 
     std::ofstream out(artifact_path("init_reg.txt"));
-    auto write_xlen = [&out](std::string_view lhs, Word value) -> void {
-        std::println(out, "{}={}'h{:0{}x};", lhs, simrv::xlen::kXLenBits, value, kXLenHexDigits);
+    auto write_xlen = [&out](std::string_view lhs, simrv::xlen::Word value) -> void {
+        std::println(out, "{}={}'h{:0{}x};", lhs, simrv::xlen::kXLenBits, value,
+                     simrv::xlen::kXLenHexDigits);
     };
-    auto write_32 = [&out](std::string_view lhs, Word value) -> void {
+    auto write_32 = [&out](std::string_view lhs, simrv::xlen::Word value) -> void {
         std::println(out, "{}=32'h{:08x};", lhs, value);
     };
-    auto write_64 = [&out](std::string_view lhs, Counter value) -> void {
+    auto write_64 = [&out](std::string_view lhs, simrv::xlen::Counter value) -> void {
         std::println(out, "{}=64'h{:016x};", lhs, value);
     };
 
     write_xlen("p.pc", cpu->state().pc);
     for (uint8_t i = 1; i < 32; ++i) {
         std::println(out, "p.regs.mem[{}]={}'h{:0{}x};", i, simrv::xlen::kXLenBits,
-                     cpu->state().regs.read(static_cast<RegId>(i)), kXLenHexDigits);
+                     cpu->state().regs.read(static_cast<simrv::xlen::RegId>(i)),
+                     simrv::xlen::kXLenHexDigits);
     }
     for (uint8_t i = 0; i < 32; ++i) {
         std::println(out, "p.fregs.mem[{}]={}'h{:016x};", i, 64,
-                     cpu->state().regs.read_fp(static_cast<RegId>(i)));
+                     cpu->state().regs.read_fp(
+                         simrv::xlen::to_fp_reg_id(static_cast<simrv::xlen::RegId>(i))));
     }
     write_xlen("p.fcsr        ", cpu->state().fcsr);
     write_xlen("p.mstatus     ", cpu->state().mstatus);
@@ -1635,19 +1587,19 @@ void Tracer::dump_init_artifacts() {
     write_xlen("p.pending_tval", cpu->pipeline_context.pending_tval);
 
     const size_t kNumSets = simrv::core::Tlb::kNumSets;
-    for (Word i = 0; i < simrv::memory::kTlbSize; ++i) {
+    for (simrv::xlen::Word i = 0; i < simrv::memory::kTlbSize; ++i) {
         const auto& entry = cpu->tlb.inst_r.at(i % kNumSets).at(i / kNumSets);
         std::println(out, "mmu.TLB_inst_r.r_valid[{}] ={};", i, static_cast<int>(entry.valid));
         std::println(out, "mmu.TLB_inst_r.mem[{}][39:22] =18'h{:05x};", i, entry.v_addr >> 14);
         std::println(out, "mmu.TLB_inst_r.mem[{}][21:0] =22'h{:06x};", i, entry.p_addr >> 10);
     }
-    for (Word i = 0; i < simrv::memory::kTlbSize; ++i) {
+    for (simrv::xlen::Word i = 0; i < simrv::memory::kTlbSize; ++i) {
         const auto& entry = cpu->tlb.data_r.at(i % kNumSets).at(i / kNumSets);
         std::println(out, "mmu.TLB_data_r.r_valid[{}] ={};", i, static_cast<int>(entry.valid));
         std::println(out, "mmu.TLB_data_r.mem[{}][39:22] =18'h{:05x};", i, entry.v_addr >> 14);
         std::println(out, "mmu.TLB_data_r.mem[{}][21:0] =22'h{:06x};", i, entry.p_addr >> 10);
     }
-    for (Word i = 0; i < simrv::memory::kTlbSize; ++i) {
+    for (simrv::xlen::Word i = 0; i < simrv::memory::kTlbSize; ++i) {
         const auto& entry = cpu->tlb.data_w.at(i % kNumSets).at(i / kNumSets);
         std::println(out, "mmu.TLB_data_w.r_valid[{}] ={};", i, static_cast<int>(entry.valid));
         std::println(out, "mmu.TLB_data_w.mem[{}][39:22] =18'h{:05x};", i, entry.v_addr >> 14);
@@ -1662,7 +1614,7 @@ void Tracer::dump_init_artifacts() {
 
     simrv::log::info("file {} was generated after {} cycle(s)",
                      artifact_path("init_reg.txt").string(),
-                     static_cast<Counter>(cpu->clint_mmio.mtime.load()));
+                     static_cast<simrv::xlen::Counter>(cpu->clint_mmio.mtime.load()));
 }
 
 void Tracer::write_instruction_mix_report() {
@@ -1690,7 +1642,7 @@ void Tracer::write_instruction_mix_report() {
         const auto op = static_cast<simrv::isa::OperationId>(i);
         const auto name = simrv::pipeline::operation_name(op);
         const auto category = categorize_operation(op);
-        entries.push_back({name, category, count});
+        entries.push_back({.name = name, .category = category, .count = count});
         category_totals[category] += count;
         total += count;
     }
@@ -1747,8 +1699,9 @@ void Tracer::write_instruction_mix_report() {
                      simrv::util::format_with_commas(cat_cnt), cat_share);
     }
 
-    simrv::log::info("file {} was generated after {} cycle(s)", path.string(),
-                     static_cast<Counter>(machine_.primary_hart().clint_mmio.mtime.load()));
+    simrv::log::info(
+        "file {} was generated after {} cycle(s)", path.string(),
+        static_cast<simrv::xlen::Counter>(machine_.primary_hart().clint_mmio.mtime.load()));
 }
 
 void Tracer::print_summary() {
@@ -1757,11 +1710,11 @@ void Tracer::print_summary() {
     const auto now = std::chrono::steady_clock::now();
     const auto elapsed =
         std::chrono::duration_cast<std::chrono::microseconds>(now - machine_.start_time()).count();
-    const auto etime = static_cast<Counter>(elapsed == 0 ? 1 : elapsed);
+    const auto etime = static_cast<simrv::xlen::Counter>(elapsed == 0 ? 1 : elapsed);
 
     const auto mcycle = machine_.primary_hart().clint_mmio.mcycle;
-    Counter icount = 0;
-    Counter ccount = 0;
+    simrv::xlen::Counter icount = 0;
+    simrv::xlen::Counter ccount = 0;
     for (size_t hart = 0; hart < machine_.num_harts(); ++hart) {
         icount += machine_.hart(hart).e_icount;
         ccount += machine_.hart(hart).e_ccount;
@@ -1802,9 +1755,10 @@ void Tracer::print_summary() {
     if (machine_.num_harts() > 1) {
         for (size_t i = 0; i < machine_.num_harts(); ++i) {
             const auto& h = machine_.hart(i);
-            const char* priv_str = (h.state().priv == PrivilegeLevel::Machine)      ? "M"
-                                   : (h.state().priv == PrivilegeLevel::Supervisor) ? "S"
-                                                                                    : "U";
+            const char* priv_str = (h.state().priv == simrv::xlen::PrivilegeLevel::Machine) ? "M"
+                                   : (h.state().priv == simrv::xlen::PrivilegeLevel::Supervisor)
+                                       ? "S"
+                                       : "U";
             simrv::log::info("Hart {:<2} [mode {:>1}, PC 0x{:016x}] Executed Insns : {:>12}  ({})",
                              i, priv_str, h.state().pc, format_scaled(h.e_icount),
                              format_with_commas(h.e_icount));
@@ -1870,8 +1824,8 @@ auto Tracer::write_summary_json(const std::string& path) -> bool {
     std::ofstream out(path, std::ios::trunc);
     if (!out) return false;
 
-    Counter retired = 0;
-    Counter compressed = 0;
+    simrv::xlen::Counter retired = 0;
+    simrv::xlen::Counter compressed = 0;
     for (size_t hart = 0; hart < machine_.num_harts(); ++hart) {
         retired += machine_.hart(hart).e_icount;
         compressed += machine_.hart(hart).e_ccount;
@@ -1930,7 +1884,7 @@ auto Tracer::write_summary_json(const std::string& path) -> bool {
     return static_cast<bool>(out);
 }
 
-void Tracer::emit_periodic_pc_trace(Counter mtime, Register cpc) {
+void Tracer::emit_periodic_pc_trace(simrv::xlen::Counter mtime, simrv::xlen::Register cpc) {
     if ((mtime % D_TRACEPC_INTERVAL) == 0) {
         ConditionalTracerLock lock(mutex_, machine_.is_smp_enabled());
         if (!tracepc_opened_) {
@@ -1945,8 +1899,9 @@ void Tracer::emit_periodic_pc_trace(Counter mtime, Register cpc) {
     }
 }
 
-void Tracer::emit_branch_prediction_trace(Counter mtime, Register cpc, Register jmp_pc,
-                                          Opcode r_opcode, bool r_tkn) {
+void Tracer::emit_branch_prediction_trace(simrv::xlen::Counter mtime, simrv::xlen::Register cpc,
+                                          simrv::xlen::Register jmp_pc, Opcode r_opcode,
+                                          bool r_tkn) {
     ConditionalTracerLock lock(mutex_, machine_.is_smp_enabled());
     if (!bpred_opened_) {
         bpred_opened_ = true;
@@ -1962,7 +1917,7 @@ void Tracer::emit_branch_prediction_trace(Counter mtime, Register cpc, Register 
     const int ir_jump = (opcode == Opcode::Jal) ? 2 : (opcode == Opcode::Jalr) ? 3 : 0;
     const int ir_branch = static_cast<int>(opcode == Opcode::Branch);
 
-    const Word targ = ((ir_jump | ir_branch) != 0) ? jmp_pc : 0;
+    const simrv::xlen::Word targ = ((ir_jump | ir_branch) != 0) ? jmp_pc : 0;
     std::println(fp_bpred_, "{:08} {:0{}x} {:0{}x} {} {} {} {}", static_cast<int>(mtime), cpc,
                  D_TRACE_HEX_WIDTH, targ, D_TRACE_HEX_WIDTH, ir_jb, static_cast<int>(r_tkn),
                  ir_jump, ir_branch);
@@ -1979,16 +1934,16 @@ void Tracer::write_trace_snapshot() {
     const auto operation = pipeline::operation_name(context.op_id);
     std::println(fp_trace,
                  "cycle {:>10} | hart {:>2} | pc 0x{:0{}x} | ir 0x{:08x} | {:<12} | next 0x{:0{}x}",
-                 static_cast<Counter>(cpu.clint_mmio.mtime), static_cast<unsigned>(st.mhartid),
-                 static_cast<uint64_t>(context.cpc.raw()), D_TRACE_HEX_WIDTH,
-                 static_cast<uint32_t>(context.ir), operation, static_cast<uint64_t>(st.pc),
-                 D_TRACE_HEX_WIDTH);
+                 static_cast<simrv::xlen::Counter>(cpu.clint_mmio.mtime),
+                 static_cast<unsigned>(st.mhartid), static_cast<uint64_t>(context.cpc.raw()),
+                 D_TRACE_HEX_WIDTH, static_cast<uint32_t>(context.ir), operation,
+                 static_cast<uint64_t>(st.pc), D_TRACE_HEX_WIDTH);
     for (unsigned row = 0; row < 8; ++row) {
         std::print(fp_trace, "  ");
         for (unsigned column = 0; column < 4; ++column) {
             const unsigned index = row * 4 + column;
             std::print(fp_trace, "x{:>2}=0x{:0{}x}{}", index,
-                       static_cast<uint64_t>(st.regs.read(static_cast<RegId>(index))),
+                       static_cast<uint64_t>(st.regs.read(static_cast<simrv::xlen::RegId>(index))),
                        D_TRACE_HEX_WIDTH, column == 3 ? "\n" : "  ");
         }
     }

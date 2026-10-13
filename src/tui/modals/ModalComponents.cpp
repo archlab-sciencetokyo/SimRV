@@ -174,7 +174,7 @@ auto layout_modal_control_row(std::string row, int inner_width) -> framework::Re
     constexpr std::string_view separator = " · ";
     while (!plain.empty() && plain.back() == ' ') plain.pop_back();
     int start = left;
-    std::size_t byte_start = static_cast<std::size_t>(left);
+    auto byte_start = static_cast<std::size_t>(left);
     std::size_t index = 0;
     while (byte_start < plain.size()) {
         auto const end = plain.find(separator, byte_start);

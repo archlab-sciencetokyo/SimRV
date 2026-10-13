@@ -4,8 +4,8 @@
  */
 #pragma once
 
-#include "simrv/Define.hpp"
-#include "simrv/xlen/Types.hpp"
+#include "simrv/isa/TrapTypes.hpp"
+#include "simrv/xlen/ScalarTypes.hpp"
 
 namespace simrv::core {
 class CPU;
@@ -16,13 +16,17 @@ namespace simrv::sbi {
 namespace detail {
 
 /** Direct SBI handles only supervisor ECALLs; M-mode ECALL remains an architectural trap. */
-constexpr auto is_direct_sbi_ecall(TrapCause cause) -> bool {
-    return cause == enum_mask(ExceptionCode::SupervisorEcall);
+constexpr auto is_direct_sbi_ecall(simrv::xlen::TrapCause cause) -> bool {
+    return cause == ExceptionCode::SupervisorEcall;
+}
+constexpr auto is_direct_sbi_ecall(ExceptionCode code) -> bool {
+    return code == ExceptionCode::SupervisorEcall;
 }
 
 /** Determine whether a target hart is selected by an SBI (hart_mask, hart_mask_base) pair. */
-constexpr auto is_hart_selected(Word hart_mask, Word hart_mask_base, size_t hart_id) -> bool {
-    if (hart_mask_base == static_cast<Word>(-1)) {
+constexpr auto is_hart_selected(simrv::xlen::Word hart_mask, simrv::xlen::Word hart_mask_base,
+                                size_t hart_id) -> bool {
+    if (hart_mask_base == static_cast<simrv::xlen::Word>(-1)) {
         return true;
     }
     if (hart_id < static_cast<size_t>(hart_mask_base) ||
@@ -30,7 +34,7 @@ constexpr auto is_hart_selected(Word hart_mask, Word hart_mask_base, size_t hart
         return false;
     }
     const auto shift = hart_id - static_cast<size_t>(hart_mask_base);
-    return ((hart_mask >> shift) & Word{1}) != 0;
+    return ((hart_mask >> shift) & simrv::xlen::Word{1}) != 0;
 }
 
 }  // namespace detail
@@ -45,23 +49,24 @@ class Sbi {
    public:
     explicit Sbi(core::CPU& cpu);
 
-    auto handle_ecall(TrapCause cause) -> bool;
+    auto handle_ecall(simrv::xlen::TrapCause cause) -> bool;
+    auto handle_ecall(ExceptionCode code) -> bool { return handle_ecall(to_trap_cause(code)); }
 
    private:
     // Modular sub-handlers for extensions
-    auto handle_base(Word func_id) -> bool;
-    auto handle_time(Word func_id) -> bool;
-    auto handle_rfence(Word func_id) -> bool;
-    auto handle_ipi(Word func_id) -> bool;
-    auto handle_hsm(Word func_id) -> bool;
-    auto handle_system_reset(Word func_id) -> bool;
-    auto handle_dbcn(Word func_id) -> bool;
-    auto handle_pmu(Word func_id) -> bool;
-    auto handle_cppc(Word func_id) -> bool;
-    auto handle_susp(Word func_id) -> bool;
+    auto handle_base(simrv::xlen::Word func_id) -> bool;
+    auto handle_time(simrv::xlen::Word func_id) -> bool;
+    auto handle_rfence(simrv::xlen::Word func_id) -> bool;
+    auto handle_ipi(simrv::xlen::Word func_id) -> bool;
+    auto handle_hsm(simrv::xlen::Word func_id) -> bool;
+    auto handle_system_reset(simrv::xlen::Word func_id) -> bool;
+    auto handle_dbcn(simrv::xlen::Word func_id) -> bool;
+    auto handle_pmu(simrv::xlen::Word func_id) -> bool;
+    auto handle_cppc(simrv::xlen::Word func_id) -> bool;
+    auto handle_susp(simrv::xlen::Word func_id) -> bool;
 
-    [[nodiscard]] auto timer_value() const -> Counter;
-    void sbi_return(SignedWord error, Word value);
+    [[nodiscard]] auto timer_value() const -> simrv::xlen::Counter;
+    void sbi_return(simrv::xlen::SignedWord error, simrv::xlen::Word value);
 
    private:
     core::CPU& cpu_;

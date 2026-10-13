@@ -22,7 +22,6 @@ Useful additional targets:
 
 ```bash
 ctest --test-dir build/rv64-release --output-on-failure -L regress
-cmake --build build/rv64-release --target isa-gate
 cmake --build build/rv64-release --target integration-gate
 ```
 

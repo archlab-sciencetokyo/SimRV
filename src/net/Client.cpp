@@ -45,7 +45,7 @@ bool send_all(int fd, const uint8_t* data, size_t size) {
         } else if (written < 0 && errno == EINTR) {
             continue;
         } else if (written < 0 && errno == EAGAIN) {
-            pollfd ready{fd, POLLOUT, 0};
+            pollfd ready{.fd = fd, .events = POLLOUT, .revents = 0};
             if (::poll(&ready, 1, 1000) <= 0) return false;
         } else {
             return false;
@@ -70,13 +70,12 @@ bool SimRvClient::connect() {
     std::vector<uint8_t> hello;
     put_u64(hello, kProtocolVersion);
     const auto frame = make_frame(ChannelId::Hello, hello);
-    if (!send_all(socket_.get(), frame.data(), frame.size()))
-        return false;
+    if (!send_all(socket_.get(), frame.data(), frame.size())) return false;
     std::vector<uint8_t> incoming, payload;
     const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
     try {
         while (std::chrono::steady_clock::now() < deadline) {
-            pollfd fd{socket_.get(), POLLIN, 0};
+            pollfd fd{.fd = socket_.get(), .events = POLLIN, .revents = 0};
             if (::poll(&fd, 1, 20) <= 0) continue;
             uint8_t bytes[8];  // Read exactly the handshake without consuming subsequent frames.
             const auto count = ::recv(socket_.get(), bytes, sizeof(bytes), 0);
@@ -152,7 +151,11 @@ void SimRvClient::submit(tui::BackendRequest request, tui::BackendCompletion com
             std::scoped_lock lock(mutex_);
             completions_.erase(request.id);
         }
-        if (complete) complete({request.id, 0, false, "disconnected or send queue full"});
+        if (complete)
+            complete({.id = request.id,
+                      .generation = 0,
+                      .success = false,
+                      .text = "disconnected or send queue full"});
     }
 }
 bool SimRvClient::send_pause() {
@@ -274,9 +277,10 @@ void SimRvClient::receive_worker() {
                     outgoing_bytes_ -= sending.size();
                 }
             }
-            pollfd fds[] = {
-                {socket_.get(), static_cast<short>(POLLIN | (sending.empty() ? 0 : POLLOUT)), 0},
-                {wake_.get(), POLLIN, 0}};
+            pollfd fds[] = {{.fd = socket_.get(),
+                             .events = static_cast<short>(POLLIN | (sending.empty() ? 0 : POLLOUT)),
+                             .revents = 0},
+                            {.fd = wake_.get(), .events = POLLIN, .revents = 0}};
             (void)::poll(fds, 2, 250);
             if (fds[1].revents & POLLIN) {
                 uint64_t n;
@@ -338,7 +342,7 @@ auto run_client(std::string_view endpoint, bool cli_mode) -> int {
             if (visual) write_terminal("\033[0m\033[?25h\033[?1049l");
             if (terminal) tcsetattr(STDIN_FILENO, TCSANOW, &saved);
         }
-    } restore{terminal, visual_tui, saved};
+    } restore{.terminal = terminal, .visual = visual_tui, .saved = saved};
     if (visual_tui) write_terminal("\033[?1049h\033[2J");
     bool done = false, editing = false;
     std::string command, escape;
@@ -350,8 +354,13 @@ auto run_client(std::string_view endpoint, bool cli_mode) -> int {
         const auto view = client.view();
         const bool inspection = operation >= tui::BackendCommand::Registers &&
                                 operation <= tui::BackendCommand::RemoveBreakpoint;
-        client.submit(
-            {operation, 0, inspection ? view.generation : 0, address, selected_hart, count}, {});
+        client.submit({.command = operation,
+                       .id = 0,
+                       .generation = inspection ? view.generation : 0,
+                       .address = address,
+                       .hart = selected_hart,
+                       .count = count},
+                      {});
     };
     while (client.is_connected() && !done) {
         winsize size{};
@@ -360,10 +369,13 @@ auto run_client(std::string_view endpoint, bool cli_mode) -> int {
         const int height = std::clamp<int>(size.ws_row ? size.ws_row : 30, 10, 200);
         const int left_width = cli_mode ? 0 : std::min(50, width / 2);
         if (visual_tui && (width != last_width || height != last_height)) {
-            client.submit(
-                {tui::BackendCommand::Resize, 0, 0, static_cast<uint64_t>(width - left_width), 0,
-                 static_cast<uint32_t>(height - (cli_mode ? 0 : 3))},
-                {});
+            client.submit({.command = tui::BackendCommand::Resize,
+                           .id = 0,
+                           .generation = 0,
+                           .address = static_cast<uint64_t>(width - left_width),
+                           .hart = 0,
+                           .count = static_cast<uint32_t>(height - (cli_mode ? 0 : 3))},
+                          {});
             last_width = width;
             last_height = height;
             previous.clear();
@@ -373,8 +385,8 @@ auto run_client(std::string_view endpoint, bool cli_mode) -> int {
                             view.harts.front().execution_state != core::ExecutionState::Running;
         const bool focus_guest = !paused;
         bool input_changed = false;
-        pollfd fds[] = {{terminal ? STDIN_FILENO : -1, POLLIN, 0},
-                        {client.notification_fd(), POLLIN, 0}};
+        pollfd fds[] = {{.fd = terminal ? STDIN_FILENO : -1, .events = POLLIN, .revents = 0},
+                        {.fd = client.notification_fd(), .events = POLLIN, .revents = 0}};
         (void)::poll(fds, 2, 10);
         if (fds[1].revents & POLLIN) {
             uint64_t n;

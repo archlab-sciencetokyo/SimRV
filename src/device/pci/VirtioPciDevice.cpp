@@ -76,7 +76,7 @@ void VirtioPciDevice::add_pci_cap(uint8_t cap_type, uint8_t bar, uint32_t offset
     next_cap_offset_ += cap_len;
 }
 
-auto VirtioPciDevice::dma_read(Address paddr, void* dst, size_t len) -> bool {
+auto VirtioPciDevice::dma_read(simrv::xlen::Address paddr, void* dst, size_t len) -> bool {
     if (!root_complex_ || !root_complex_->machine() || !root_complex_->machine()->ram_data())
         return false;
     auto& machine = *root_complex_->machine();
@@ -84,20 +84,23 @@ auto VirtioPciDevice::dma_read(Address paddr, void* dst, size_t len) -> bool {
     const auto geometry = machine.memory_geometry();
     if (!geometry.contains(paddr, len) || len == 0) return false;
     if (!machine.runtime_profile.is_instruction_mode()) {
-        const Address first_line = paddr & ~(Address{simrv::memory::CoherenceHub::kLineBytes - 1u});
-        const Address last_line =
-            (paddr + len - 1u) & ~(Address{simrv::memory::CoherenceHub::kLineBytes - 1u});
-        for (Address line = first_line;; line += simrv::memory::CoherenceHub::kLineBytes) {
+        const simrv::xlen::Address first_line =
+            paddr & ~(simrv::xlen::Address{simrv::memory::CoherenceHub::kLineBytes - 1u});
+        const simrv::xlen::Address last_line =
+            (paddr + len - 1u) &
+            ~(simrv::xlen::Address{simrv::memory::CoherenceHub::kLineBytes - 1u});
+        for (simrv::xlen::Address line = first_line;;
+             line += simrv::memory::CoherenceHub::kLineBytes) {
             machine.memory().system_bus().coherence_hub().invalidate_line_external(line);
             if (line == last_line) break;
         }
     }
-    Address offset = paddr - geometry.dram_base;
+    simrv::xlen::Address offset = paddr - geometry.dram_base;
     std::memcpy(dst, mem + offset, len);
     return true;
 }
 
-auto VirtioPciDevice::dma_write(Address paddr, const void* src, size_t len) -> bool {
+auto VirtioPciDevice::dma_write(simrv::xlen::Address paddr, const void* src, size_t len) -> bool {
     if (!root_complex_ || !root_complex_->machine() || !root_complex_->machine()->ram_data())
         return false;
     auto& machine = *root_complex_->machine();
@@ -105,20 +108,24 @@ auto VirtioPciDevice::dma_write(Address paddr, const void* src, size_t len) -> b
     const auto geometry = machine.memory_geometry();
     if (!geometry.contains(paddr, len) || len == 0) return false;
     if (!machine.runtime_profile.is_instruction_mode()) {
-        const Address first_line = paddr & ~(Address{simrv::memory::CoherenceHub::kLineBytes - 1u});
-        const Address last_line =
-            (paddr + len - 1u) & ~(Address{simrv::memory::CoherenceHub::kLineBytes - 1u});
-        for (Address line = first_line;; line += simrv::memory::CoherenceHub::kLineBytes) {
+        const simrv::xlen::Address first_line =
+            paddr & ~(simrv::xlen::Address{simrv::memory::CoherenceHub::kLineBytes - 1u});
+        const simrv::xlen::Address last_line =
+            (paddr + len - 1u) &
+            ~(simrv::xlen::Address{simrv::memory::CoherenceHub::kLineBytes - 1u});
+        for (simrv::xlen::Address line = first_line;;
+             line += simrv::memory::CoherenceHub::kLineBytes) {
             machine.memory().system_bus().coherence_hub().invalidate_line_external(line);
             if (line == last_line) break;
         }
     }
-    Address offset = paddr - geometry.dram_base;
+    simrv::xlen::Address offset = paddr - geometry.dram_base;
     std::memcpy(mem + offset, src, len);
     return true;
 }
 
-auto VirtioPciDevice::bar_read(BarIndex bar_idx, Address offset, uint8_t size) -> uint32_t {
+auto VirtioPciDevice::bar_read(BarIndex bar_idx, simrv::xlen::Address offset, uint8_t size)
+    -> uint32_t {
     if (bar_idx != 0) return 0;
 
     // Common Config (0x000 - 0x0FF)
@@ -211,7 +218,8 @@ auto VirtioPciDevice::bar_read(BarIndex bar_idx, Address offset, uint8_t size) -
     return 0;
 }
 
-void VirtioPciDevice::bar_write(BarIndex bar_idx, Address offset, uint32_t val, uint8_t size) {
+void VirtioPciDevice::bar_write(BarIndex bar_idx, simrv::xlen::Address offset, uint32_t val,
+                                uint8_t size) {
     if (bar_idx != 0) return;
 
     // Common Config
@@ -294,7 +302,7 @@ void VirtioPciDevice::bar_write(BarIndex bar_idx, Address offset, uint32_t val, 
 
     // Notify Config
     if (offset >= 0x100 && offset < 0x200) {
-        virtio::VirtioQueueIndex queue_idx = static_cast<virtio::VirtioQueueIndex>(val);
+        auto queue_idx = static_cast<virtio::VirtioQueueIndex>(val);
         on_queue_notify(queue_idx);
         return;
     }

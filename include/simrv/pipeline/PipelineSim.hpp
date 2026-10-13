@@ -2,10 +2,10 @@
 
 #include <array>
 #include <cstdint>
-#include <simrv/Define.hpp>
-#include <simrv/isa/Base.hpp>
+#include <simrv/CompilerHints.hpp>
+#include <simrv/isa/InstructionFields.hpp>
 #include <simrv/pipeline/CycleTransition.hpp>
-#include <simrv/xlen/Types.hpp>
+#include <simrv/xlen/RegisterTypes.hpp>
 #include <vector>
 
 namespace simrv::pipeline {
@@ -13,12 +13,12 @@ namespace simrv::pipeline {
 enum class ForwardSource : uint8_t { None = 0, Execute = 1, Memory = 2, Writeback = 3 };
 
 struct PipelineReg {
-    InstructionId inst_id = 0;
-    Register pc = 0;
+    simrv::xlen::InstructionId inst_id = 0;
+    simrv::xlen::Register pc = 0;
     isa::Opcode opcode = static_cast<isa::Opcode>(0);
-    RegId rd = static_cast<RegId>(0);
-    RegId rs1 = static_cast<RegId>(0);
-    RegId rs2 = static_cast<RegId>(0);
+    simrv::xlen::RegId rd = static_cast<simrv::xlen::RegId>(0);
+    simrv::xlen::RegId rs1 = static_cast<simrv::xlen::RegId>(0);
+    simrv::xlen::RegId rs2 = static_cast<simrv::xlen::RegId>(0);
     isa::OperationId op_id = isa::OperationId::UNKNOWN;
     bool writes_reg = false;
     uint32_t rd_mask = 0;
@@ -26,7 +26,7 @@ struct PipelineReg {
     uint32_t rd_fp_mask = 0;
     bool is_fp_op = false;
     bool is_load = false;
-    LatencyCycles remaining_latency = 0;  // Cycles until value is ready for forwarding
+    simrv::xlen::LatencyCycles remaining_latency = 0;  // Cycles until value is ready for forwarding
     bool valid = false;
     bool tlb_miss = false;
     bool icache_miss = false;
@@ -34,17 +34,17 @@ struct PipelineReg {
     bool is_branch = false;
     bool is_jump = false;
     bool branched = false;
-    Register target_pc = 0;
+    simrv::xlen::Register target_pc = 0;
     bool control_resolved = false;
 };
 
 /// Immutable event submitted by the architectural engine to the cycle model.
 struct PipelineInstruction {
-    Register pc = 0;
+    simrv::xlen::Register pc = 0;
     isa::Opcode opcode = static_cast<isa::Opcode>(0);
-    RegId rd = static_cast<RegId>(0);
-    RegId rs1 = static_cast<RegId>(0);
-    RegId rs2 = static_cast<RegId>(0);
+    simrv::xlen::RegId rd = static_cast<simrv::xlen::RegId>(0);
+    simrv::xlen::RegId rs1 = static_cast<simrv::xlen::RegId>(0);
+    simrv::xlen::RegId rs2 = static_cast<simrv::xlen::RegId>(0);
     isa::OperationId op_id = isa::OperationId::UNKNOWN;
     bool branched = false;
     bool is_branch = false;
@@ -52,12 +52,12 @@ struct PipelineInstruction {
     bool icache_miss = false;
     bool dcache_miss = false;
     bool tlb_miss = false;
-    Register target_pc = 0;
+    simrv::xlen::Register target_pc = 0;
 };
 
 struct PipelineStageEvent {
     PipelineInstruction instruction{};
-    LatencyCycles remaining_latency = 0;
+    simrv::xlen::LatencyCycles remaining_latency = 0;
     bool valid = false;
     bool stalled = false;
 };
@@ -95,16 +95,16 @@ enum class PipelineType : uint8_t { FiveStage = 0, ThreeStage = 1 };
 
 struct CpuConfig {
     // Additional execution stalls after an operation issues into EX.
-    LatencyCycles mul_latency = 2;
-    LatencyCycles div_latency = 17;
-    LatencyCycles fp_alu_latency = 3;
-    LatencyCycles fp_div_latency = 15;
-    LatencyCycles csr_flush_penalty = 3;
-    LatencyCycles fence_flush_penalty = 4;
-    LatencyCycles branch_mispredict_penalty = 2;
-    LatencyCycles cycle_counter_start_delay = 0;
-    LatencyCycles host_interface_latency = 0;
-    LatencyCycles host_interface_phase_period = 0;
+    simrv::xlen::LatencyCycles mul_latency = 2;
+    simrv::xlen::LatencyCycles div_latency = 17;
+    simrv::xlen::LatencyCycles fp_alu_latency = 3;
+    simrv::xlen::LatencyCycles fp_div_latency = 15;
+    simrv::xlen::LatencyCycles csr_flush_penalty = 3;
+    simrv::xlen::LatencyCycles fence_flush_penalty = 4;
+    simrv::xlen::LatencyCycles branch_mispredict_penalty = 2;
+    simrv::xlen::LatencyCycles cycle_counter_start_delay = 0;
+    simrv::xlen::LatencyCycles host_interface_latency = 0;
+    simrv::xlen::LatencyCycles host_interface_phase_period = 0;
     bool enable_forwarding = true;
     bool enable_instruction_prefetch = false;
     bool record_snapshots = false;
@@ -113,10 +113,10 @@ struct CpuConfig {
 };
 
 struct PipelineCycleSnapshot {
-    CycleCount cycle = 0;
+    simrv::xlen::CycleCount cycle = 0;
     struct StageInfo {
-        InstructionId inst_id = 0;
-        Register pc = 0;
+        simrv::xlen::InstructionId inst_id = 0;
+        simrv::xlen::Register pc = 0;
         isa::OperationId op_id = isa::OperationId::UNKNOWN;
         bool valid = false;
         bool stalled = false;
@@ -129,15 +129,15 @@ struct PipelineCycleSnapshot {
 };
 
 struct PipelineStats {
-    Counter cycle_count = 0;
-    Counter stall_cycles = 0;
-    Counter bubble_cycles = 0;
-    Counter icache_stalls = 0;
-    Counter dcache_stalls = 0;
-    Counter tlb_stalls = 0;
-    Counter structural_stalls = 0;
-    Counter data_hazard_stalls = 0;
-    Counter control_hazard_bubbles = 0;
+    simrv::xlen::Counter cycle_count = 0;
+    simrv::xlen::Counter stall_cycles = 0;
+    simrv::xlen::Counter bubble_cycles = 0;
+    simrv::xlen::Counter icache_stalls = 0;
+    simrv::xlen::Counter dcache_stalls = 0;
+    simrv::xlen::Counter tlb_stalls = 0;
+    simrv::xlen::Counter structural_stalls = 0;
+    simrv::xlen::Counter data_hazard_stalls = 0;
+    simrv::xlen::Counter control_hazard_bubbles = 0;
 };
 
 class PipelineHistoryView {
@@ -208,32 +208,25 @@ class PipelineSim {
     }
 
     // Getters for statistics
-    [[nodiscard]] auto cycle_count() const -> Counter;
-    [[nodiscard]] auto stall_cycles() const -> Counter;
-    [[nodiscard]] auto bubble_cycles() const -> Counter;
-    [[nodiscard]] auto icache_stalls() const -> Counter;
-    [[nodiscard]] auto dcache_stalls() const -> Counter;
-    [[nodiscard]] auto tlb_stalls() const -> Counter;
-    [[nodiscard]] auto structural_stalls() const -> Counter;
-    [[nodiscard]] auto data_hazard_stalls() const -> Counter;
-    [[nodiscard]] auto control_hazard_bubbles() const -> Counter;
+    [[nodiscard]] auto cycle_count() const -> simrv::xlen::Counter;
+    [[nodiscard]] auto stall_cycles() const -> simrv::xlen::Counter;
+    [[nodiscard]] auto bubble_cycles() const -> simrv::xlen::Counter;
+    [[nodiscard]] auto icache_stalls() const -> simrv::xlen::Counter;
+    [[nodiscard]] auto dcache_stalls() const -> simrv::xlen::Counter;
+    [[nodiscard]] auto tlb_stalls() const -> simrv::xlen::Counter;
+    [[nodiscard]] auto structural_stalls() const -> simrv::xlen::Counter;
+    [[nodiscard]] auto data_hazard_stalls() const -> simrv::xlen::Counter;
+    [[nodiscard]] auto control_hazard_bubbles() const -> simrv::xlen::Counter;
     [[nodiscard]] auto cycle_history() const noexcept -> PipelineHistoryView;
     [[nodiscard]] auto get_stats() const -> PipelineStats;
 
-    // Compatibility query facade used by the TUI and existing model tests. Each getter delegates
-    // to stage_reg(); new code can query a stage by PipelineStage directly.
-    [[nodiscard]] auto f_reg() const -> const PipelineReg&;
-    [[nodiscard]] auto d_reg() const -> const PipelineReg&;
-    [[nodiscard]] auto e_reg() const -> const PipelineReg&;
-    [[nodiscard]] auto m_reg() const -> const PipelineReg&;
-    [[nodiscard]] auto w_reg() const -> const PipelineReg&;
     [[nodiscard]] auto stage_reg(PipelineStage stage) const -> const PipelineReg&;
 
-    [[nodiscard]] auto div_busy_cycles_remaining() const -> LatencyCycles;
-    [[nodiscard]] auto icache_stall_remaining() const -> LatencyCycles;
-    [[nodiscard]] auto dcache_stall_remaining() const -> LatencyCycles;
-    [[nodiscard]] auto tlb_stall_remaining() const -> LatencyCycles;
-    [[nodiscard]] auto control_bubble_remaining() const -> LatencyCycles;
+    [[nodiscard]] auto div_busy_cycles_remaining() const -> simrv::xlen::LatencyCycles;
+    [[nodiscard]] auto icache_stall_remaining() const -> simrv::xlen::LatencyCycles;
+    [[nodiscard]] auto dcache_stall_remaining() const -> simrv::xlen::LatencyCycles;
+    [[nodiscard]] auto tlb_stall_remaining() const -> simrv::xlen::LatencyCycles;
+    [[nodiscard]] auto control_bubble_remaining() const -> simrv::xlen::LatencyCycles;
 
     [[nodiscard]] auto save_state() const -> PipelineSimState;
     void restore_state(const PipelineSimState& state);

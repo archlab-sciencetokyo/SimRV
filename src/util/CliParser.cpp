@@ -16,15 +16,15 @@
 #include <string>
 #include <vector>
 
+#include "simrv/core/Cpu.hpp"
 #include "simrv/core/CpuConfigParser.hpp"
 #include "simrv/core/Logger.hpp"
-#include "simrv/memory/MemoryUtil.hpp"
+#include "simrv/core/Tracer.hpp"
 #include "simrv/pipeline/PipelineConfig.hpp"
 #include "simrv/tui/Tui.hpp"
-#include "simrv/tui/TuiMission.hpp"
-#include "simrv/util/FormatUtil.hpp"
 #include "simrv/util/BuildrootImageBundle.hpp"
-#include "simrv/xlen/Types.hpp"
+#include "simrv/util/FormatUtil.hpp"
+#include "simrv/xlen/ScalarTypes.hpp"
 
 namespace simrv::util {
 
@@ -185,52 +185,18 @@ inline auto iequals(std::string_view a, std::string_view b) -> bool {
 struct ParsedIsaPreset {
     IsaPreset preset;
     unsigned int xlen;
+    bool has_zb = false;
 };
 
-auto parse_isa_preset(std::string_view value) -> std::expected<ParsedIsaPreset, std::string> {
-    // Standard ISA strings may attach their first multi-letter extension directly
-    // to the single-letter base (e.g. RV64GCZicntr2p0). Underscores separate later
-    // multi-letter extensions. The current MISA model represents single-letter bits.
-    const auto extension_start = value.find_first_of("zZ", 4);
-    if (extension_start != std::string_view::npos) {
-        auto base_end = extension_start;
-        if (base_end > 0 && value[base_end - 1] == '_') --base_end;
-        const auto base = value.substr(0, base_end);
-        auto parsed = parse_isa_preset(base);
-        if (!parsed) return parsed;
-        auto extensions = value.substr(extension_start);
-        if (extensions.empty() || extensions.back() == '_') {
-            return std::unexpected("ISA string contains an empty extension name");
-        }
-        unsigned seen_extensions = 0;
-        while (!extensions.empty()) {
-            const auto next = extensions.find('_');
-            const auto extension = extensions.substr(0, next);
-            const auto supported_extension = [extension](std::string_view name) -> bool {
-                if (iequals(extension, name)) return true;
-                if (extension.size() <= name.size() ||
-                    !iequals(extension.substr(0, name.size()), name))
-                    return false;
-                const auto version = extension.substr(name.size());
-                return iequals(version, "2") || iequals(version, "2p0");
-            };
-            const auto extension_id = [&]() -> unsigned {
-                if (supported_extension("zicntr")) return 1U;
-                if (supported_extension("zicsr")) return 2U;
-                if (supported_extension("zifencei")) return 4U;
-                return 0U;
-            }();
-            if (extension_id == 0) {
-                return std::unexpected(std::format("unsupported ISA extension '{}'", extension));
-            }
-            if ((seen_extensions & extension_id) != 0) {
-                return std::unexpected(std::format("duplicate ISA extension '{}'", extension));
-            }
-            seen_extensions |= extension_id;
-            if (next == std::string_view::npos) break;
-            extensions.remove_prefix(next + 1);
-        }
-        return parsed;
+auto parse_isa_base_preset(std::string_view value)
+    -> std::expected<std::optional<ParsedIsaPreset>, std::string> {
+    // Reject legacy draft single-letter 'b' shorthands with a clear explanation
+    if (iequals(value, "gcbv") || iequals(value, "rv32gcbv") || iequals(value, "rv64gcbv") ||
+        iequals(value, "gcb") || iequals(value, "rv32gcb") || iequals(value, "rv64gcb")) {
+        return std::unexpected(std::format(
+            "legacy shorthand '{}' is not a ratified RISC-V ISA string; use ratified 'gcv', "
+            "'gc', or multi-letter extensions like 'rv64gcv_zba_zbb_zbs'",
+            value));
     }
 
     if (iequals(value, "i")) {
@@ -260,12 +226,19 @@ auto parse_isa_preset(std::string_view value) -> std::expected<ParsedIsaPreset, 
     if (iequals(value, "gc")) {
         return ParsedIsaPreset{.preset = IsaPreset::GC, .xlen = 0};
     }
-    if (iequals(value, "gcbv")) {
-        return ParsedIsaPreset{.preset = IsaPreset::GCBV, .xlen = 0};
+    if (iequals(value, "gcv")) {
+        return ParsedIsaPreset{.preset = IsaPreset::GCV, .xlen = 0};
+    }
+    if (iequals(value, "gczb")) {
+        return ParsedIsaPreset{.preset = IsaPreset::GC, .xlen = 0, .has_zb = true};
+    }
+    if (iequals(value, "gczbv")) {
+        return ParsedIsaPreset{.preset = IsaPreset::GCV, .xlen = 0, .has_zb = true};
     }
 
     unsigned int parsed_xlen = 0;
-    IsaPreset preset = IsaPreset::GCBV;
+    IsaPreset preset = IsaPreset::GCV;
+    bool has_zb = false;
     bool valid = false;
 
     if (iequals(value, "rv32e")) {
@@ -328,13 +301,33 @@ auto parse_isa_preset(std::string_view value) -> std::expected<ParsedIsaPreset, 
         parsed_xlen = 64;
         preset = IsaPreset::GC;
         valid = true;
-    } else if (iequals(value, "rv32gcbv")) {
+    } else if (iequals(value, "rv32gcv")) {
         parsed_xlen = 32;
-        preset = IsaPreset::GCBV;
+        preset = IsaPreset::GCV;
         valid = true;
-    } else if (iequals(value, "rv64gcbv")) {
+    } else if (iequals(value, "rv64gcv")) {
         parsed_xlen = 64;
-        preset = IsaPreset::GCBV;
+        preset = IsaPreset::GCV;
+        valid = true;
+    } else if (iequals(value, "rv32gczb")) {
+        parsed_xlen = 32;
+        preset = IsaPreset::GC;
+        has_zb = true;
+        valid = true;
+    } else if (iequals(value, "rv64gczb")) {
+        parsed_xlen = 64;
+        preset = IsaPreset::GC;
+        has_zb = true;
+        valid = true;
+    } else if (iequals(value, "rv32gczbv")) {
+        parsed_xlen = 32;
+        preset = IsaPreset::GCV;
+        has_zb = true;
+        valid = true;
+    } else if (iequals(value, "rv64gczbv")) {
+        parsed_xlen = 64;
+        preset = IsaPreset::GCV;
+        has_zb = true;
         valid = true;
     }
 
@@ -343,16 +336,141 @@ auto parse_isa_preset(std::string_view value) -> std::expected<ParsedIsaPreset, 
             return std::unexpected(std::format(
                 "cannot run a 64-bit ISA preset ({}) on a 32-bit simulator build", value));
         }
-        return ParsedIsaPreset{.preset = preset, .xlen = parsed_xlen};
+        return ParsedIsaPreset{.preset = preset, .xlen = parsed_xlen, .has_zb = has_zb};
+    }
+
+    return std::nullopt;
+}
+
+auto parse_isa_preset(std::string_view value) -> std::expected<ParsedIsaPreset, std::string> {
+    auto base_match = parse_isa_base_preset(value);
+    if (!base_match) return std::unexpected(base_match.error());
+    if (*base_match) return **base_match;
+
+    // Standard ISA strings may attach their first multi-letter extension directly
+    // to the single-letter base (e.g. RV64GCZicntr2p0 or RV64GCZba). Underscores separate later
+    // multi-letter extensions.
+    const auto extension_start = value.find_first_of("zZxX", 4);
+    if (extension_start != std::string_view::npos) {
+        auto base_end = extension_start;
+        if (base_end > 0 && value[base_end - 1] == '_') --base_end;
+        const auto base = value.substr(0, base_end);
+        auto parsed = parse_isa_preset(base);
+        if (!parsed) return parsed;
+        auto extensions = value.substr(extension_start);
+        if (extensions.empty() || extensions.back() == '_') {
+            return std::unexpected("ISA string contains an empty extension name");
+        }
+        uint64_t seen_extensions = 0;
+        bool has_zb = false;
+        bool has_v = false;
+        while (!extensions.empty()) {
+            const auto next = extensions.find('_');
+            const auto extension = extensions.substr(0, next);
+            const auto supported_extension = [extension](std::string_view name) -> bool {
+                if (iequals(extension, name)) return true;
+                if (extension.size() <= name.size() ||
+                    !iequals(extension.substr(0, name.size()), name))
+                    return false;
+                const auto version = extension.substr(name.size());
+                return iequals(version, "1") || iequals(version, "1p0") || iequals(version, "2") ||
+                       iequals(version, "2p0");
+            };
+            const auto extension_id = [&]() -> uint64_t {
+                // CSR, Fence, Counters, Performance Monitoring
+                if (supported_extension("zicntr")) return 1ULL << 0;
+                if (supported_extension("zicsr")) return 1ULL << 1;
+                if (supported_extension("zifencei")) return 1ULL << 2;
+                if (supported_extension("zihpm")) return 1ULL << 3;
+
+                // Ratified Bitmanip (Zb)
+                if (supported_extension("zba")) return 1ULL << 4;
+                if (supported_extension("zbb")) return 1ULL << 5;
+                if (supported_extension("zbc")) return 1ULL << 6;
+                if (supported_extension("zbs")) return 1ULL << 7;
+                if (supported_extension("zb")) return 1ULL << 8;
+
+                // Cryptography Bitmanip & Scalar Crypto
+                if (supported_extension("zbkb")) return 1ULL << 9;
+                if (supported_extension("zbkc")) return 1ULL << 10;
+                if (supported_extension("zbkx")) return 1ULL << 11;
+                if (supported_extension("zknd")) return 1ULL << 12;
+                if (supported_extension("zkne")) return 1ULL << 13;
+                if (supported_extension("zknh")) return 1ULL << 14;
+                if (supported_extension("zksed")) return 1ULL << 15;
+                if (supported_extension("zksh")) return 1ULL << 16;
+                if (supported_extension("zkr")) return 1ULL << 17;
+                if (supported_extension("zkt")) return 1ULL << 18;
+                if (supported_extension("zkn")) return 1ULL << 19;
+                if (supported_extension("zks")) return 1ULL << 20;
+                if (supported_extension("zk")) return 1ULL << 21;
+
+                // Vector Sub-extensions
+                if (supported_extension("zve32x")) return 1ULL << 22;
+                if (supported_extension("zve32f")) return 1ULL << 23;
+                if (supported_extension("zve64x")) return 1ULL << 24;
+                if (supported_extension("zve64f")) return 1ULL << 25;
+                if (supported_extension("zve64d")) return 1ULL << 26;
+                if (supported_extension("zvl32b")) return 1ULL << 27;
+                if (supported_extension("zvl64b")) return 1ULL << 28;
+                if (supported_extension("zvl128b")) return 1ULL << 29;
+                if (supported_extension("zvl256b")) return 1ULL << 30;
+                if (supported_extension("zvl512b")) return 1ULL << 31;
+                if (supported_extension("zvl1024b")) return 1ULL << 32;
+
+                // Ratified Hints, Timers & Cache Management
+                if (supported_extension("zihintpause")) return 1ULL << 34;
+                if (supported_extension("sstc")) return 1ULL << 35;
+                if (supported_extension("zicbom")) return 1ULL << 36;
+                if (supported_extension("zicboz")) return 1ULL << 37;
+                if (supported_extension("zicbop")) return 1ULL << 38;
+
+                // Ratified Virtual Memory Extensions
+                if (supported_extension("svinval")) return 1ULL << 39;
+                if (supported_extension("svnapot")) return 1ULL << 40;
+                if (supported_extension("svpbmt")) return 1ULL << 41;
+
+                return 0ULL;
+            }();
+            if (extension_id == 0) {
+                return std::unexpected(std::format("unsupported ISA extension '{}'", extension));
+            }
+            if ((seen_extensions & extension_id) != 0) {
+                return std::unexpected(std::format("duplicate ISA extension '{}'", extension));
+            }
+            seen_extensions |= extension_id;
+
+            if (extension_id >= (1ULL << 4) && extension_id <= (1ULL << 21)) {
+                has_zb = true;
+            }
+            if (extension_id >= (1ULL << 22) && extension_id <= (1ULL << 32)) {
+                has_v = true;
+            }
+
+            if (next == std::string_view::npos) break;
+            extensions.remove_prefix(next + 1);
+        }
+
+        const bool final_has_v = has_v || (parsed->preset == IsaPreset::GCV);
+        const bool final_has_zb = has_zb || parsed->has_zb;
+        parsed->has_zb = final_has_zb;
+
+        if (final_has_v && (parsed->preset == IsaPreset::GC || parsed->preset == IsaPreset::G)) {
+            parsed->preset = IsaPreset::GCV;
+        }
+        return parsed;
     }
 
     const auto xlen_suffix = simrv::xlen::kIsXLen64 ? "64" : "32";
     auto supported = std::format(
-        "e, em, emac, i, im, ima, imac, g, gc, gcbv, rv32e, rv32em, rv32emac, rv{}i, rv{}im, "
-        "rv{}ima, rv{}imac, rv{}g, rv{}gc, rv{}gcbv",
-        xlen_suffix, xlen_suffix, xlen_suffix, xlen_suffix, xlen_suffix, xlen_suffix, xlen_suffix);
+        "e, em, emac, i, im, ima, imac, g, gc, gcv, gczb, gczbv, rv32e, rv32em, rv32emac, rv{}i, "
+        "rv{}im, "
+        "rv{}ima, rv{}imac, rv{}g, rv{}gc, rv{}gcv, rv{}gczb, rv{}gczbv",
+        xlen_suffix, xlen_suffix, xlen_suffix, xlen_suffix, xlen_suffix, xlen_suffix, xlen_suffix,
+        xlen_suffix, xlen_suffix, xlen_suffix);
     if constexpr (simrv::xlen::kIsXLen64) {
-        supported += ", rv32i, rv32im, rv32ima, rv32imac, rv32g, rv32gc, rv32gcbv";
+        supported +=
+            ", rv32i, rv32im, rv32ima, rv32imac, rv32g, rv32gc, rv32gcv, rv32gczb, rv32gczbv";
     }
     return std::unexpected(
         std::format("unsupported ISA preset '{}' (supported: {})", value, supported));
@@ -365,7 +483,7 @@ auto effective_isa_preset(const RuntimeOptions& options) -> IsaPreset {
     if (options.cpu_model_preset.has_value()) {
         return pipeline::make_cpu_model_preset(*options.cpu_model_preset).isa_preset;
     }
-    return IsaPreset::GCBV;
+    return IsaPreset::GCV;
 }
 
 auto parse_file_options(std::string_view arg, std::span<char* const> args, std::size_t& i,
@@ -398,6 +516,18 @@ auto parse_file_options(std::string_view arg, std::span<char* const> args, std::
         if (!value) return std::unexpected(value.error());
         options.fn_dskimg = std::string(*value);
         options.use_disk = true;
+        options.appmode = false;
+        return true;
+    }
+    if (arg == "--virtiofs" || arg.starts_with("--virtiofs=")) {
+        std::string_view path = arg.starts_with("--virtiofs=") ? arg.substr(11) : "";
+        if (path.empty()) {
+            auto value = next_argument(args, i, "--virtiofs");
+            if (!value) return std::unexpected(value.error());
+            path = *value;
+        }
+        if (path.empty()) return std::unexpected("--virtiofs requires a host directory");
+        options.fn_virtiofs = std::string(path);
         options.appmode = false;
         return true;
     }
@@ -503,7 +633,7 @@ auto parse_execution_options(std::string_view arg, std::span<char* const> args, 
     if (arg == "--trace") {
         options.trace_enabled = true;
         options.trace_begin = 0;
-        options.trace_end = std::numeric_limits<Counter>::max();
+        options.trace_end = std::numeric_limits<simrv::xlen::Counter>::max();
         options.execution_mode = RequestedExecutionMode::Detailed;
         options.execution_mode_explicit = true;
         return true;
@@ -560,6 +690,7 @@ auto parse_mode_options(std::string_view arg, std::span<char* const> args, std::
         if (!parsed_misa) return std::unexpected(parsed_misa.error());
         result.options.isa_preset = parsed_misa->preset;
         result.options.misa_xlen = parsed_misa->xlen;
+        result.options.has_zb_extensions = parsed_misa->has_zb;
         result.options.misa_override = true;
         return true;
     }
@@ -687,6 +818,7 @@ auto parse_mode_options(std::string_view arg, std::span<char* const> args, std::
                                                simrv::core::ExecutionConfig::kMaxHarts, *value));
         }
         result.options.num_harts = val;
+        result.options.explicit_num_harts = true;
         return true;
     }
     if (arg == "--smp-quantum") {
@@ -697,10 +829,21 @@ auto parse_mode_options(std::string_view arg, std::span<char* const> args, std::
             return std::unexpected(std::format("invalid quantum value for {}", arg));
         }
         result.options.smp_quantum = val;
+        result.options.explicit_smp_quantum = true;
         return true;
     }
-    if (arg == "--smp-multithreaded") {
-        result.options.smp_multithreaded = true;
+    if (arg == "--smp-mode") {
+        auto value = next_argument(args, i, arg);
+        if (!value) return std::unexpected(value.error());
+        if (*value == "cycle-accurate") {
+            result.options.smp_mode = simrv::core::SmpMode::CycleAccurate;
+        } else if (*value == "cycle-oriented") {
+            result.options.smp_mode = simrv::core::SmpMode::CycleOriented;
+        } else {
+            return std::unexpected(std::format(
+                "unsupported SMP mode '{}' (supported: cycle-accurate, cycle-oriented)", *value));
+        }
+        result.options.explicit_smp_mode = true;
         return true;
     }
     if (arg == "--ram-size" || arg == "--memory-size" || arg == "--dram-size" ||
@@ -1245,8 +1388,9 @@ auto parse_command_line(std::span<char* const> args) -> std::expected<ParseResul
     if (result.options.trace_register_writes && result.options.fn_archtrace.empty()) {
         return std::unexpected("--trace-register-writes requires --arch-trace");
     }
-    if (result.options.trace_hart && *result.options.trace_hart >= result.options.num_harts) {
-        return std::unexpected("--trace-hart must identify a configured hart");
+    if (result.options.trace_hart &&
+        *result.options.trace_hart >= simrv::core::ExecutionConfig::kMaxHarts) {
+        return std::unexpected("--trace-hart must identify a supported hart (0-15)");
     }
     if (result.options.trace_pc_start && result.options.trace_pc_end &&
         *result.options.trace_pc_start > *result.options.trace_pc_end) {
@@ -1283,7 +1427,7 @@ auto resolve_runtime_profile(const RuntimeOptions& options) -> simrv::core::Runt
         }
     }
     profile.tracing = options.bp_trace || options.trace_enabled || options.strace != 0 ||
-                      options.trace_begin != std::numeric_limits<Counter>::max();
+                      options.trace_begin != std::numeric_limits<simrv::xlen::Counter>::max();
     profile.lockstep = options.lockstep_mode;
     profile.gdb = options.gdb_mode;
     return profile;
@@ -1305,11 +1449,11 @@ auto RuntimeOptions::to_machine_config() const -> simrv::core::MachineConfig {
     cfg.execution.memimg_cycle = memimg;
     cfg.execution.num_harts = num_harts;
     cfg.execution.smp_quantum = smp_quantum;
-    cfg.execution.smp_multithreaded = smp_multithreaded;
     if (explicit_realtime_mode) {
         cfg.execution.realtime_pacing = realtime_pacing;
     } else {
-        cfg.execution.realtime_pacing = tuimode && (fincnt == std::numeric_limits<Counter>::max());
+        cfg.execution.realtime_pacing =
+            tuimode && (fincnt == std::numeric_limits<simrv::xlen::Counter>::max());
     }
     if (auto parsed = pipeline::parse_pipeline_type(pipeline_type)) {
         cfg.execution.pipeline_type = *parsed;
@@ -1348,15 +1492,19 @@ auto RuntimeOptions::to_machine_config() const -> simrv::core::MachineConfig {
 
     cfg.isa.isatest_tohost = isatest_tohost;
     cfg.isa.isa_preset = isa_preset_bits(effective_isa_preset(*this));
+    if (has_zb_extensions || (!misa_override && !cpu_model_preset.has_value())) {
+        cfg.isa.isa_preset |= simrv::isa::misa_extension_bit(simrv::isa::IsaExtension::B);
+    }
     cfg.isa.misa_override =
         misa_override ||
         (cpu_model_preset.has_value() &&
-         pipeline::make_cpu_model_preset(*cpu_model_preset).isa_preset != IsaPreset::GCBV);
+         pipeline::make_cpu_model_preset(*cpu_model_preset).isa_preset != IsaPreset::GCV);
     cfg.isa.misa_xlen = misa_xlen;
     cfg.isa.vlen = vlen;
 
     cfg.files.binary_path = fn_memimg;
     cfg.files.disk_path = fn_dskimg;
+    cfg.files.virtiofs_path = fn_virtiofs;
     cfg.files.disk_enabled = use_disk;
     cfg.files.dvtree_path = fn_dvtree;
     cfg.files.traplog_path = fn_traplog;
@@ -1406,6 +1554,14 @@ auto RuntimeOptions::to_machine_config() const -> simrv::core::MachineConfig {
             cfg.isa.isatest_tohost = *cfg.soc.tohost;
         }
     }
+    if (explicit_num_harts) cfg.soc.smp.resize_harts(num_harts);
+    cfg.execution.num_harts = cfg.soc.smp.hart_count;
+    cfg.execution.smp_mode =
+        explicit_smp_mode && smp_mode.has_value() ? smp_mode : cfg.soc.smp.mode;
+    if (explicit_smp_mode && smp_mode.has_value()) cfg.soc.smp.mode = *smp_mode;
+    cfg.execution.smp_quantum =
+        explicit_smp_quantum ? smp_quantum : cfg.soc.smp.synchronization_quantum;
+    if (explicit_smp_quantum) cfg.soc.smp.synchronization_quantum = smp_quantum;
     return cfg;
 }
 
@@ -1428,10 +1584,18 @@ auto apply_runtime_options(simrv::core::Machine* machine, const RuntimeOptions& 
         options.platform_profile == simrv::core::PlatformProfile::Pcie   ? "pcie"
         : options.platform_profile == simrv::core::PlatformProfile::Mmio ? "mmio"
                                                                          : "none";
-    simrv::log::info("Run configuration: RV{}, {}-mode, {} hart(s), {} platform, {} MiB RAM",
-                     machine->primary_hart().state().regs.xlen,
-                     options.appmode ? "bare-metal" : "OS", options.num_harts, platform_name,
-                     machine->configuration().memory.dram_size / (1024ULL * 1024ULL));
+    const auto& smp = machine->configuration().soc.smp;
+    const auto smp_mode =
+        smp.mode == simrv::core::SmpMode::CycleAccurate ? "cycle-accurate" : "cycle-oriented";
+    simrv::log::info(
+        "Run configuration: RV{}, {}-mode, {} hart(s), SMP {}, quantum {}, {} platform, {} MiB RAM",
+        machine->primary_hart().state().regs.xlen, options.appmode ? "bare-metal" : "OS",
+        smp.hart_count, smp_mode, smp.synchronization_quantum, platform_name,
+        machine->configuration().memory.dram_size / (1024ULL * 1024ULL));
+    simrv::log::info(
+        "Shared caches: L1 private per hart, L2 {} cluster(s), L3 {} ({} KiB)",
+        std::ranges::count_if(smp.clusters, [](const auto& cluster) { return cluster.l2.enabled; }),
+        smp.l3.enabled ? "enabled" : "disabled", smp.l3.capacity_bytes / 1024);
     simrv::log::info("Guest image: {}", options.fn_memimg.empty() ? "<none>" : options.fn_memimg);
     if (machine->runtime_profile.is_cycle_mode()) {
         simrv::log::info("CA policy: {} pipeline, forwarding {}",
@@ -1440,9 +1604,9 @@ auto apply_runtime_options(simrv::core::Machine* machine, const RuntimeOptions& 
     }
     if (!options.fn_log.empty()) simrv::log::info("Developer log: {}", options.fn_log);
     if (options.verbose) {
-        simrv::log::info("Runtime settings: harts={}, SMP threads={}, quantum={}, GDB={}, port={}",
-                         options.num_harts, options.smp_multithreaded, options.smp_quantum,
-                         options.gdb_mode, options.gdb_port);
+        simrv::log::info("Runtime settings: harts={}, SMP mode={}, quantum={}, GDB={}, port={}",
+                         machine->configuration().execution.num_harts, smp_mode,
+                         smp.synchronization_quantum, options.gdb_mode, options.gdb_port);
     }
     if (options.traplog_mode) simrv::log::info("Trap/SBI log: {}", options.fn_traplog);
 
@@ -1496,6 +1660,8 @@ auto apply_runtime_options(simrv::core::Machine* machine, const RuntimeOptions& 
         machine->primary_hart().trap_log_stream = &machine->trace().fp_traplog;
     }
 
+    // Filename detection preserves legacy FW_PAYLOAD bundles; current published
+    // payloads identify themselves with the opensbi-linux-payload name.
     const bool is_fw_payload = (options.fn_memimg.find("fw_payload") != std::string::npos ||
                                 options.fn_memimg.find("opensbi") != std::string::npos);
     const bool opensbi_active = options.use_opensbi || !options.fn_dvtree.empty() || is_fw_payload;
@@ -1536,98 +1702,165 @@ auto needs_memory_image(const ParseResult& result) -> bool {
         std::vector<HelpEntry> entries;
     };
     std::vector<HelpSection> sections{
-        {"Basic and image loading",
-         {{"-m, --image, --memory <FILE>", "Load an ELF or raw binary image."},
-          {"--pc, --start-pc <ADDR>", "Set the initial program counter (default: 0x80000000)."},
-          {"-b, --baremetal", "Run a bare-metal application (default)."},
-          {"--os", "Boot an operating system (Linux or RTOS)."},
-          {"--buildroot-output <DIR>",
-           "Load firmware, DTB, and rootfs together from a Buildroot output directory."},
-          {"-D, --disk, --rootfs <FILE>", "Attach a VirtIO block storage image."},
-          {"-f, --fdt, --dtb <FILE>", "Load a device tree blob."}}},
-        {"Architecture and hardware",
-         {{"-j, --harts, --smp <N>", "Set active harts (1–16; SMP uses 2–16)."},
-          {"--smp-quantum <N>", "Set the round-robin quantum in cycles (default: 100)."},
-          {"--smp-multithreaded", "Enable multi-threaded host SMP simulation."},
-          {"--dram-size, --ram-size <SIZE>", "Set DRAM size (for example, 128M or 2G)."},
-          {"--isa <ISA>", "Select a RISC-V ISA profile such as rv32gc or rv64gc."},
-          {"--vlen <BITS>", "Set vector register length (128–1024; default: 256)."},
-          {"--soc <PRESET>", "Select virt-pcie, virt-mmio, or rvcomp."},
-          {"--dump-soc-manifest <PRESET> [FILE]", "Export the normalized SoC registry as JSON."},
-          {"--net <BACKEND>", "Select the VirtIO network backend: user, tap, socket, or none."}}},
-        {"Execution and pipeline",
-         {{"-s, -e, --steps <N>", "Stop after N instructions retire across all harts."},
-          {"-t, -l, --timer <N>", "Raise a CLINT timer interrupt after N cycles."},
-          {"-R, --realtime", "Throttle execution to host real time (1:1)."},
-          {"--no-realtime", "Disable real-time pacing and run at maximum speed."},
-          {"--mode <MODE>", "Select fast, detailed, or cycle-accurate execution."},
-          {"--pipeline <TYPE>", "Select the CA pipeline: 3stage or 5stage (default)."},
-          {"--no-forwarding", "Disable operand forwarding."},
-          {"--bpred <TYPE>", "Select none, static, bimodal, gshare, or tournament prediction."},
-          {"--bht-size <N>", "Set branch history table entries."},
-          {"--btb-size <N>", "Set branch target buffer entries."},
-          {"--ras-size <N>", "Set return address stack entries."},
-          {"--cpu-config <FILE>", "Load a microarchitectural latency configuration."},
-          {"--cpu-preset <PRESET>", "Select tiny, balanced, performance, or a model file."},
-          {"--dump-cpu-model <MODEL> [FILE]", "Write a CPU model configuration."},
-          {"--scaffold-cpu-model [FILE]", "Generate a starter CPU model configuration."},
-          {"--validate-cpu-config <FILE>", "Validate and lint a CPU model configuration."},
-          {"--cfu-plugin <LIB.SO>", "Load a dynamic custom function unit plugin."},
-          {"--bram-prewarm / --no-bram-prewarm", "Control ELF cache prewarming for BRAM parity."}}},
-        {"Logging and tracing",
-         {{"--log-level <LEVEL>", "Set trace, debug, info, warn, error, or off."},
-          {"--log-format <FORMAT>", "Select text, json, or json-pretty diagnostics."},
-          {"-q, --quiet", "Suppress informational startup logs."},
-          {"-v, --verbose", "Enable debug diagnostics."},
-          {"--log-file <FILE>", "Mirror timestamped diagnostics to a file."},
-          {"--trace-dir <DIR>", "Set the root directory for trace artifacts (default: trace)."},
-          {"--log-mmio, --dlog", "Record MMIO transactions."},
-          {"--trap-log, --traplog <FILE>", "Write architectural trap and SBI events."},
-          {"--arch-trace <FILE>", "Write JSONL architectural retirement and profile events."},
-          {"--trace-level <0-4>", "Limit architectural event detail."},
-          {"--trace-register-writes", "Emit opt-in FP and vector register writes."},
-          {"--trace-events <LIST>", "Filter event names using a comma-separated list."},
-          {"--trace-function <NAME>", "Filter trace events by symbol name."},
-          {"--trace-device <NAME>", "Filter trace events by device or component."},
-          {"--trace-hart <ID>", "Filter by architectural hart ID."},
-          {"--trace-after-cycle <N>", "Set the inclusive start of the trace cycle window."},
-          {"--trace-before-cycle <N>", "Set the inclusive end of the trace cycle window."},
-          {"--trace-pc-range <START-END>", "Filter architectural events by inclusive PC range."},
-          {"--trace-pc <START-END>", "Alias for --trace-pc-range."},
-          {"--trace-pc-period <N>", "Sample the PC trace every N instructions."},
-          {"--trace", "Record a full architectural text trace."},
-          {"-r, --trace-range <BG> <EN>", "Record an execution trace snapshot for a step range."},
-          {"--trace-bpred", "Record branch prediction events."},
-          {"-I, --dump-init <N>", "Dump architectural memory and TLB state at cycle N."},
-          {"--instmix", "Write an instruction mix report on exit."}}},
-        {"Interactive mode and reports",
-         {{"-u, --tui", "Enable the interactive TUI (default on a foreground terminal)."},
-          {"-c, --cli", "Force headless command-line execution."},
-          {"--class, --edu", "Enable classroom guidance."},
-          {"--mission <FILE>", "Load a lesson mission (requires --class and --tui)."},
-          {"--high-contrast", "Enable the high-contrast TUI palette."},
-          {"--mouse-sensitivity <F>", "Set TUI mouse sensitivity (default: 1.0)."},
-          {"--inspection-output <FILE>", "Write paused-state TUI inspection reports."},
-          {"--summary <FILE>", "Write a JSON execution summary on exit."},
-          {"--events <FILE>", "Write newline-delimited lifecycle, interrupt, and DMA events."},
-          {"--uart-transcript <FILE>", "Save guest UART output while keeping its normal destination."},
-          {"--save-checkpoint <FILE>", "Save architectural state on exit."},
-          {"--load-checkpoint <FILE>", "Resume from an architectural checkpoint."},
-          {"--checkpoint-every <CYCLES>", "Write periodic architectural checkpoints."},
-          {"--checkpoint-dir <DIR>", "Set the periodic checkpoint output directory."}}},
-        {"Debugging and information",
-         {{"-H, --tohost-addr <ADDR>", "Set the tohost address used for test termination."},
-          {"--explain-inst <HEX>", "Disassemble and explain a 32-bit instruction."},
-          {"--gdb", "Start the GDB remote stub in CLI mode."},
-          {"--gdb-port <PORT>", "Set the GDB server port (default: 1234)."},
-          {"--lockstep", "Enable Spike lockstep verification."},
-          {"--spike-bin <PATH>", "Set the Spike executable path."},
-          {"--spike-elf <PATH>", "Set the ELF image used by Spike."},
-          {"--version", "Display the version and target architecture."},
-          {"--isa-info", "Show qualified ISA and frontend capabilities."},
-          {"--doctor", "Diagnose terminal and runtime environment."},
-          {"--license", "Display the license and copyright notice."},
-          {"-h, --help", "Show this help."}}}};
+        {.title = "Basic and image loading",
+         .entries =
+             {{.option = "-m, --image, --memory <FILE>",
+               .description = "Load an ELF or raw binary image."},
+              {.option = "--pc, --start-pc <ADDR>",
+               .description = "Set the initial program counter (default: 0x80000000)."},
+              {.option = "-b, --baremetal",
+               .description = "Run a bare-metal application (default)."},
+              {.option = "--os", .description = "Boot an operating system (Linux or RTOS)."},
+              {.option = "--buildroot-output <DIR>",
+               .description =
+                   "Load firmware, DTB, and rootfs together from a Buildroot output directory."},
+              {.option = "-D, --disk, --rootfs <FILE>",
+               .description = "Attach a VirtIO block storage image."},
+              {.option = "--virtiofs <DIR>",
+               .description = "Share a host directory with the guest through VirtIO-FS."},
+              {.option = "-f, --fdt, --dtb <FILE>", .description = "Load a device tree blob."}}},
+        {.title = "Architecture and hardware",
+         .entries = {{.option = "-j, --harts, --smp <N>",
+                      .description = "Override the SoC profile hart count (1–16)."},
+                     {.option = "--smp-mode <MODE>",
+                      .description = "Override SoC mode: cycle-accurate or cycle-oriented."},
+                     {.option = "--smp-quantum <N>",
+                      .description = "Override cycle-oriented synchronization quantum."},
+                     {.option = "--dram-size, --ram-size <SIZE>",
+                      .description = "Set DRAM size (for example, 128M or 2G)."},
+                     {.option = "--isa <ISA>",
+                      .description = "Select a RISC-V ISA profile such as rv32gc or rv64gc."},
+                     {.option = "--vlen <BITS>",
+                      .description = "Set vector register length (128–1024; default: 256)."},
+                     {.option = "--soc <PRESET>",
+                      .description = "Select virt-pcie, virt-mmio, or rvcomp."},
+                     {.option = "--dump-soc-manifest <PRESET> [FILE]",
+                      .description = "Export the normalized SoC registry as JSON."},
+                     {.option = "--net <BACKEND>",
+                      .description =
+                          "Select the VirtIO network backend: user, tap, socket, or none."}}},
+        {.title = "Execution and pipeline",
+         .entries =
+             {{.option = "-s, -e, --steps <N>",
+               .description = "Stop after N instructions retire across all harts."},
+              {.option = "-t, -l, --timer <N>",
+               .description = "Raise a CLINT timer interrupt after N cycles."},
+              {.option = "-R, --realtime",
+               .description = "Throttle execution to host real time (1:1)."},
+              {.option = "--no-realtime",
+               .description = "Disable real-time pacing and run at maximum speed."},
+              {.option = "--mode <MODE>",
+               .description = "Select fast, detailed, or cycle-accurate execution."},
+              {.option = "--pipeline <TYPE>",
+               .description = "Select the CA pipeline: 3stage or 5stage (default)."},
+              {.option = "--no-forwarding", .description = "Disable operand forwarding."},
+              {.option = "--bpred <TYPE>",
+               .description = "Select none, static, bimodal, gshare, or tournament prediction."},
+              {.option = "--bht-size <N>", .description = "Set branch history table entries."},
+              {.option = "--btb-size <N>", .description = "Set branch target buffer entries."},
+              {.option = "--ras-size <N>", .description = "Set return address stack entries."},
+              {.option = "--cpu-config <FILE>",
+               .description = "Load a microarchitectural latency configuration."},
+              {.option = "--cpu-preset <PRESET>",
+               .description = "Select tiny, balanced, performance, or a model file."},
+              {.option = "--dump-cpu-model <MODEL> [FILE]",
+               .description = "Write a CPU model configuration."},
+              {.option = "--scaffold-cpu-model [FILE]",
+               .description = "Generate a starter CPU model configuration."},
+              {.option = "--validate-cpu-config <FILE>",
+               .description = "Validate and lint a CPU model configuration."},
+              {.option = "--cfu-plugin <LIB.SO>",
+               .description = "Load a dynamic custom function unit plugin."},
+              {.option = "--bram-prewarm / --no-bram-prewarm",
+               .description = "Control ELF cache prewarming for BRAM parity."}}},
+        {.title = "Logging and tracing",
+         .entries =
+             {{.option = "--log-level <LEVEL>",
+               .description = "Set trace, debug, info, warn, error, or off."},
+              {.option = "--log-format <FORMAT>",
+               .description = "Select text, json, or json-pretty diagnostics."},
+              {.option = "-q, --quiet", .description = "Suppress informational startup logs."},
+              {.option = "-v, --verbose", .description = "Enable debug diagnostics."},
+              {.option = "--log-file <FILE>",
+               .description = "Mirror timestamped diagnostics to a file."},
+              {.option = "--trace-dir <DIR>",
+               .description = "Set the root directory for trace artifacts (default: trace)."},
+              {.option = "--log-mmio, --dlog", .description = "Record MMIO transactions."},
+              {.option = "--trap-log, --traplog <FILE>",
+               .description = "Write architectural trap and SBI events."},
+              {.option = "--arch-trace <FILE>",
+               .description = "Write JSONL architectural retirement and profile events."},
+              {.option = "--trace-level <0-4>", .description = "Limit architectural event detail."},
+              {.option = "--trace-register-writes",
+               .description = "Emit opt-in FP and vector register writes."},
+              {.option = "--trace-events <LIST>",
+               .description = "Filter event names using a comma-separated list."},
+              {.option = "--trace-function <NAME>",
+               .description = "Filter trace events by symbol name."},
+              {.option = "--trace-device <NAME>",
+               .description = "Filter trace events by device or component."},
+              {.option = "--trace-hart <ID>", .description = "Filter by architectural hart ID."},
+              {.option = "--trace-after-cycle <N>",
+               .description = "Set the inclusive start of the trace cycle window."},
+              {.option = "--trace-before-cycle <N>",
+               .description = "Set the inclusive end of the trace cycle window."},
+              {.option = "--trace-pc-range <START-END>",
+               .description = "Filter architectural events by inclusive PC range."},
+              {.option = "--trace-pc <START-END>", .description = "Alias for --trace-pc-range."},
+              {.option = "--trace-pc-period <N>",
+               .description = "Sample the PC trace every N instructions."},
+              {.option = "--trace", .description = "Record a full architectural text trace."},
+              {.option = "-r, --trace-range <BG> <EN>",
+               .description = "Record an execution trace snapshot for a step range."},
+              {.option = "--trace-bpred", .description = "Record branch prediction events."},
+              {.option = "-I, --dump-init <N>",
+               .description = "Dump architectural memory and TLB state at cycle N."},
+              {.option = "--instmix", .description = "Write an instruction mix report on exit."}}},
+        {.title = "Interactive mode and reports",
+         .entries =
+             {{.option = "-u, --tui",
+               .description = "Enable the interactive TUI (default on a foreground terminal)."},
+              {.option = "-c, --cli", .description = "Force headless command-line execution."},
+              {.option = "--class, --edu", .description = "Enable classroom guidance."},
+              {.option = "--mission <FILE>",
+               .description = "Load a lesson mission (requires --class and --tui)."},
+              {.option = "--high-contrast", .description = "Enable the high-contrast TUI palette."},
+              {.option = "--mouse-sensitivity <F>",
+               .description = "Set TUI mouse sensitivity (default: 1.0)."},
+              {.option = "--inspection-output <FILE>",
+               .description = "Write paused-state TUI inspection reports."},
+              {.option = "--summary <FILE>",
+               .description = "Write a JSON execution summary on exit."},
+              {.option = "--events <FILE>",
+               .description = "Write newline-delimited lifecycle, interrupt, and DMA events."},
+              {.option = "--uart-transcript <FILE>",
+               .description = "Save guest UART output while keeping its normal destination."},
+              {.option = "--save-checkpoint <FILE>",
+               .description = "Save architectural state on exit."},
+              {.option = "--load-checkpoint <FILE>",
+               .description = "Resume from an architectural checkpoint."},
+              {.option = "--checkpoint-every <CYCLES>",
+               .description = "Write periodic architectural checkpoints."},
+              {.option = "--checkpoint-dir <DIR>",
+               .description = "Set the periodic checkpoint output directory."}}},
+        {.title = "Debugging and information",
+         .entries = {
+             {.option = "-H, --tohost-addr <ADDR>",
+              .description = "Set the tohost address used for test termination."},
+             {.option = "--explain-inst <HEX>",
+              .description = "Disassemble and explain a 32-bit instruction."},
+             {.option = "--gdb", .description = "Start the GDB remote stub in CLI mode."},
+             {.option = "--gdb-port <PORT>",
+              .description = "Set the GDB server port (default: 1234)."},
+             {.option = "--lockstep", .description = "Enable Spike lockstep verification."},
+             {.option = "--spike-bin <PATH>", .description = "Set the Spike executable path."},
+             {.option = "--spike-elf <PATH>", .description = "Set the ELF image used by Spike."},
+             {.option = "--version", .description = "Display the version and target architecture."},
+             {.option = "--isa-info",
+              .description = "Show qualified ISA and frontend capabilities."},
+             {.option = "--doctor", .description = "Diagnose terminal and runtime environment."},
+             {.option = "--license", .description = "Display the license and copyright notice."},
+             {.option = "-h, --help", .description = "Show this help."}}}};
 
     auto executable = prog_name.substr(prog_name.find_last_of('/') == std::string_view::npos
                                            ? 0
@@ -1683,13 +1916,17 @@ auto needs_memory_image(const ParseResult& result) -> bool {
                style(kBold), style(kReset));
     std::print(stdout, "{}Examples{}\n", style(kBoldFgBrightBlue), style(kReset));
     std::print(stdout, "  {} -m img/hello.bin -b\n", executable);
-    std::print(
-        stdout,
-        "  {} --os --image linux/fw_payload.bin --disk linux/root.img --dtb linux/devicetree.dtb\n",
-        executable);
-    std::print(stdout, "  {} -m linux/fw_payload.bin --tui\n", executable);
+    std::print(stdout,
+               "  {} --os --image linux/opensbi-linux-payload.elf --disk linux/rootfs.img --dtb "
+               "linux/devicetree.dtb\n",
+               executable);
+    std::print(stdout, "  {} -m linux/opensbi-linux-payload.elf --tui\n", executable);
 
     std::exit(status);
+}
+
+auto usage(std::string_view prog_name, simrv::core::HostExitCode status) -> void {
+    usage(prog_name, simrv::core::to_exit_code(status));
 }
 
 auto option_error(std::string_view msg, int status) -> void {
@@ -1699,6 +1936,10 @@ auto option_error(std::string_view msg, int status) -> void {
         std::println(stderr, "simrv: error: {}", msg);
     }
     std::exit(status);
+}
+
+auto option_error(std::string_view msg, simrv::core::HostExitCode status) -> void {
+    option_error(msg, simrv::core::to_exit_code(status));
 }
 
 }  // namespace simrv::util

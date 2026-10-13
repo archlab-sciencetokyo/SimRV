@@ -102,7 +102,7 @@ struct LeftHeaderLayout {
                                   type == simrv::pipeline::PipelineType::ThreeStage ? 3 : 5);
     }
     if (machine.num_harts() > 1) {
-        const std::string smp_mode = machine.execution_config().smp_multithreaded ? "MT" : "Q";
+        const std::string smp_mode = machine.is_smp_enabled() ? "CO" : "CA";
         result.mode += std::format(" · SMP:{} ({})", machine.num_harts(), smp_mode);
     }
     return result;
@@ -765,8 +765,8 @@ auto StatusBar::render_row(int row_idx, int width) -> std::string {
                 static_cast<std::size_t>(inner_w - get_display_width(header_line)), ' ');
         }
 
-        auto col_widths = framework::multi_column_widths(width, layout_, left_width_,
-                                                         column_width_overrides_);
+        auto col_widths =
+            framework::multi_column_widths(width, layout_, left_width_, column_width_overrides_);
 
         std::string screen;
         const auto style = get_active_theme_style();

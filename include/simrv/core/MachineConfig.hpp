@@ -7,13 +7,15 @@
 #include <cstddef>
 #include <cstdint>
 #include <expected>
+#include <filesystem>
 #include <limits>
 #include <optional>
 #include <string>
 #include <utility>
 
-#include "simrv/Define.hpp"
+#include "simrv/core/BuildConfig.hpp"
 #include "simrv/core/SoCConfig.hpp"
+#include "simrv/isa/IsaConfig.hpp"
 #include "simrv/memory/MemoryUtil.hpp"
 #include "simrv/pipeline/CpuModel.hpp"
 #include "simrv/pipeline/PipelineSim.hpp"
@@ -27,13 +29,15 @@ enum class PlatformProfile : uint8_t {
 };
 
 struct MemoryGeometry {
-    Address dram_base = memory::kDramBaseAddress;
-    Address dram_size = memory::kDramSize;
+    simrv::xlen::Address dram_base = memory::kDramBaseAddress;
+    simrv::xlen::Address dram_size = memory::kDramSize;
 
-    [[nodiscard]] constexpr auto contains(Address address, size_t size = 1) const -> bool {
+    [[nodiscard]] constexpr auto contains(simrv::xlen::Address address, size_t size = 1) const
+        -> bool {
         return memory::address_range_contains(dram_base, dram_size, address, size);
     }
-    [[nodiscard]] constexpr auto contains(PhysAddr address, size_t size = 1) const -> bool {
+    [[nodiscard]] constexpr auto contains(simrv::xlen::PhysAddr address, size_t size = 1) const
+        -> bool {
         return memory::address_range_contains(dram_base, dram_size, address.raw(), size);
     }
 };
@@ -46,15 +50,15 @@ struct ExecutionConfig {
     bool ui_worker_threaded = false;
     uint32_t num_harts = 1;
     uint32_t smp_quantum = 100;
-    bool smp_multithreaded = false;
+    std::optional<SmpMode> smp_mode{};
     simrv::pipeline::PipelineType pipeline_type = simrv::pipeline::PipelineType::FiveStage;
-    Address start_pc = 0;
-    Counter strace = 0;
-    Counter fincnt = std::numeric_limits<Counter>::max();
-    Counter trace_begin = std::numeric_limits<Counter>::max();
-    Counter trace_end = std::numeric_limits<Counter>::max();
-    Counter enabletimer = std::numeric_limits<Counter>::max();
-    Counter memimg_cycle = std::numeric_limits<Counter>::max();
+    simrv::xlen::Address start_pc = 0;
+    simrv::xlen::Counter strace = 0;
+    simrv::xlen::Counter fincnt = std::numeric_limits<simrv::xlen::Counter>::max();
+    simrv::xlen::Counter trace_begin = std::numeric_limits<simrv::xlen::Counter>::max();
+    simrv::xlen::Counter trace_end = std::numeric_limits<simrv::xlen::Counter>::max();
+    simrv::xlen::Counter enabletimer = std::numeric_limits<simrv::xlen::Counter>::max();
+    simrv::xlen::Counter memimg_cycle = std::numeric_limits<simrv::xlen::Counter>::max();
     bool realtime_pacing = false;
 };
 
@@ -88,17 +92,17 @@ struct DebugConfig {
     std::string trace_function;
     std::string trace_device;
     std::optional<uint32_t> trace_hart;
-    std::optional<Address> trace_pc_start;
-    std::optional<Address> trace_pc_end;
-    std::optional<Counter> trace_after_cycle;
-    std::optional<Counter> trace_before_cycle;
-    Counter checkpoint_every = 0;
+    std::optional<simrv::xlen::Address> trace_pc_start;
+    std::optional<simrv::xlen::Address> trace_pc_end;
+    std::optional<simrv::xlen::Counter> trace_after_cycle;
+    std::optional<simrv::xlen::Counter> trace_before_cycle;
+    simrv::xlen::Counter checkpoint_every = 0;
     std::string checkpoint_dir;
 };
 
 struct IsaConfig {
-    Address isatest_tohost = 0x80001000;
-    CSRValue isa_preset = isa::kMisaDefault;
+    simrv::xlen::Address isatest_tohost = 0x80001000;
+    simrv::xlen::CsrValue isa_preset = isa::kMisaDefault;
     bool misa_override = false;
     unsigned int misa_xlen = 0;
     unsigned int vlen = 0;
@@ -107,6 +111,7 @@ struct IsaConfig {
 struct FilesConfig {
     std::string binary_path;
     std::string disk_path;
+    std::string virtiofs_path;
     bool disk_enabled = false;
     std::string memimg_path;
     std::string dvtree_path;
@@ -161,6 +166,22 @@ struct MachineConfig {
         if (files.disk_enabled && files.disk_path.empty()) {
             return std::unexpected("a disk path is required when disk support is enabled");
         }
+        if (!files.virtiofs_path.empty()) {
+            std::error_code fs_error;
+            if (!std::filesystem::is_directory(files.virtiofs_path, fs_error) || fs_error) {
+                return std::unexpected("VirtIO-FS share path must be an existing directory");
+            }
+            if (platform_profile == PlatformProfile::None) {
+                return std::unexpected("VirtIO-FS requires a PCIe or VirtIO-MMIO platform");
+            }
+            if (soc.disable_unlisted_devices) {
+                const auto* fs = soc.find(SoCDeviceKind::VirtioMmioFs);
+                if (fs == nullptr || !fs->enabled) {
+                    return std::unexpected(
+                        "VirtIO-FS is not enabled by the selected SoC device configuration");
+                }
+            }
+        }
         if (tui.enabled && debug.gdb_enabled) {
             return std::unexpected("GDB remote debugging and the TUI are mutually exclusive");
         }
@@ -171,17 +192,20 @@ struct MachineConfig {
         if (auto soc_result = soc.validate(); !soc_result.has_value()) {
             return std::unexpected(soc_result.error());
         }
+        if (!soc.smp.clusters.empty() && soc.smp.hart_count != execution.num_harts) {
+            return std::unexpected("SoC SMP hart count must match the resolved machine hart count");
+        }
         return {};
     }
 
     template <typename Self>
-    constexpr auto&& with_dram_base(this Self&& self, Address base) noexcept {
+    constexpr auto&& with_dram_base(this Self&& self, simrv::xlen::Address base) noexcept {
         self.memory.dram_base = base;
         return std::forward<Self>(self);
     }
 
     template <typename Self>
-    constexpr auto&& with_dram_size(this Self&& self, Address size) noexcept {
+    constexpr auto&& with_dram_size(this Self&& self, simrv::xlen::Address size) noexcept {
         self.memory.dram_size = size;
         return std::forward<Self>(self);
     }
@@ -211,7 +235,7 @@ struct MachineConfig {
     }
 
     template <typename Self>
-    constexpr auto&& with_start_pc(this Self&& self, Address pc) noexcept {
+    constexpr auto&& with_start_pc(this Self&& self, simrv::xlen::Address pc) noexcept {
         self.execution.start_pc = pc;
         return std::forward<Self>(self);
     }

@@ -4,14 +4,12 @@
  */
 #include "simrv/device/Plic.hpp"
 
-#include <cstdint>
 #include <ranges>
 
 #include "simrv/core/Cpu.hpp"
 #include "simrv/core/Machine.hpp"
 #include "simrv/device/Uart.hpp"
-#include "simrv/xlen/Constants.hpp"
-#include "simrv/xlen/Types.hpp"
+#include "simrv/xlen/IdentifierTypes.hpp"
 
 namespace simrv::device {
 
@@ -20,7 +18,7 @@ namespace {
 [[nodiscard]] inline auto find_highest_pending_plic_source(const Plic& plic,
                                                            std::size_t ctx) noexcept -> int {
     if (ctx >= Plic::kMaxPlicContexts) return 0;
-    Word max_prio = 0;
+    simrv::xlen::Word max_prio = 0;
     int claim_id = 0;
     for (int i : std::views::iota(1, 32)) {
         const auto idx = static_cast<std::size_t>(i);
@@ -43,10 +41,12 @@ void Plic::update_mip() {
         for (size_t h = 0; h < n_harts; ++h) {
             const bool m_asserted = (find_highest_pending_plic_source(*this, 2 * h) != 0);
             const bool s_asserted = (find_highest_pending_plic_source(*this, 2 * h + 1) != 0);
-            cpu_.machine_->set_hart_irq(static_cast<HartId>(h), core::InterruptType::External,
-                                        PrivilegeLevel::Machine, m_asserted);
-            cpu_.machine_->set_hart_irq(static_cast<HartId>(h), core::InterruptType::External,
-                                        PrivilegeLevel::Supervisor, s_asserted);
+            cpu_.machine_->set_hart_irq(static_cast<simrv::xlen::HartId>(h),
+                                        core::InterruptType::External,
+                                        simrv::xlen::PrivilegeLevel::Machine, m_asserted);
+            cpu_.machine_->set_hart_irq(static_cast<simrv::xlen::HartId>(h),
+                                        core::InterruptType::External,
+                                        simrv::xlen::PrivilegeLevel::Supervisor, s_asserted);
         }
         return;
     }
@@ -54,17 +54,17 @@ void Plic::update_mip() {
     // Standalone CPU without Machine container (e.g. focused unit tests)
     auto& target_state = cpu_.state();
     if (find_highest_pending_plic_source(*this, 0) != 0) {
-        target_state.mip |= enum_mask(core::MipBit::Meip);
+        target_state.mip |= core::MipBit::Meip;
     } else {
-        target_state.mip &= ~enum_mask(core::MipBit::Meip);
+        target_state.mip &= ~core::MipBit::Meip;
     }
     target_state.seip_external = (find_highest_pending_plic_source(*this, 1) != 0);
     target_state.refresh_supervisor_pending();
 }
 
-void Plic::set_irq(IrqNumber irq_num, int state_val) {
+void Plic::set_irq(simrv::xlen::IrqNumber irq_num, int state_val) {
     if (irq_num == 0 || irq_num >= 32) return;
-    const Word mask = static_cast<Word>(1) << irq_num;
+    const simrv::xlen::Word mask = static_cast<simrv::xlen::Word>(1) << irq_num;
     if (state_val != 0) {
         plic_pending[0] |= mask;
     } else {
@@ -90,14 +90,15 @@ auto Plic::handle_request(const memory::TlChannelA& req, memory::TlChannelD& res
     return true;
 }
 
-auto Plic::get_context_for_offset(Address offset) const -> std::optional<PlicContextId> {
+auto Plic::get_context_for_offset(simrv::xlen::Address offset) const
+    -> std::optional<simrv::xlen::PlicContextId> {
     if (offset >= 0x200000 && offset < 0x200000 + (kMaxPlicContexts * 0x1000)) {
-        return static_cast<PlicContextId>((offset - 0x200000) / 0x1000);
+        return static_cast<simrv::xlen::PlicContextId>((offset - 0x200000) / 0x1000);
     }
     return std::nullopt;
 }
 
-auto Plic::mmio_read(Address offset) -> Word {
+auto Plic::mmio_read(simrv::xlen::Address offset) -> simrv::xlen::Word {
     if (offset < 0x1000) {
         // PLIC interrupt source zero is reserved and its priority is hardwired to zero.
         if (offset == 0) return 0;
@@ -109,13 +110,13 @@ auto Plic::mmio_read(Address offset) -> Word {
     if (offset >= 0x2000 && offset < 0x2000 + (kMaxPlicContexts * 0x80)) {
         const auto ctx = (offset - 0x2000) / 0x80;
         const auto word = ((offset - 0x2000) % 0x80) / 4;
-        const Word value = plic_enables[ctx][word];
-        return (word == 0) ? (value & ~Word{1}) : value;
+        const simrv::xlen::Word value = plic_enables[ctx][word];
+        return (word == 0) ? (value & ~simrv::xlen::Word{1}) : value;
     }
 
     if (const auto context = get_context_for_offset(offset)) {
         const auto ctx_idx = static_cast<std::size_t>(*context);
-        Address ctx_base = 0x200000 + (*context * 0x1000);
+        simrv::xlen::Address ctx_base = 0x200000 + (*context * 0x1000);
         if (offset == ctx_base) {
             return plic_threshold[ctx_idx];
         }
@@ -123,36 +124,38 @@ auto Plic::mmio_read(Address offset) -> Word {
             const int claim_id = find_highest_pending_plic_source(*this, ctx_idx);
             if (claim_id > 0) {
                 plic_pending[0] &= ~(1u << claim_id);
-                plic_claim[ctx_idx] = static_cast<InterruptSourceId>(claim_id);
+                plic_claim[ctx_idx] = static_cast<simrv::xlen::InterruptSourceId>(claim_id);
                 update_mip();
             }
-            return static_cast<Word>(claim_id);
+            return static_cast<simrv::xlen::Word>(claim_id);
         }
     }
     return 0;
 }
 
-void Plic::mmio_write(Address offset, Word wdata) {
+void Plic::mmio_write(simrv::xlen::Address offset, simrv::xlen::Word wdata) {
     if (offset < 0x1000) {
         // Source zero means "no interrupt" and is not configurable.
-        if (offset != 0) plic_priorities[offset / 4] = static_cast<InterruptPriority>(wdata);
+        if (offset != 0)
+            plic_priorities[offset / 4] = static_cast<simrv::xlen::InterruptPriority>(wdata);
     } else if (offset >= 0x2000 && offset < 0x2000 + (kMaxPlicContexts * 0x80)) {
         const auto ctx = (offset - 0x2000) / 0x80;
         const auto word = ((offset - 0x2000) % 0x80) / 4;
-        plic_enables[ctx][word] = (word == 0) ? (wdata & ~Word{1}) : wdata;
+        plic_enables[ctx][word] = (word == 0) ? (wdata & ~simrv::xlen::Word{1}) : wdata;
     } else {
         if (const auto context = get_context_for_offset(offset)) {
             const auto ctx_idx = static_cast<std::size_t>(*context);
-            Address ctx_base = 0x200000 + (*context * 0x1000);
+            simrv::xlen::Address ctx_base = 0x200000 + (*context * 0x1000);
             if (offset == ctx_base) {
-                plic_threshold[ctx_idx] = static_cast<InterruptPriority>(wdata);
+                plic_threshold[ctx_idx] = static_cast<simrv::xlen::InterruptPriority>(wdata);
             } else if (offset == ctx_base + 4) {
                 // Complete: indicates the handler has finished with the IRQ
-                if (plic_claim[ctx_idx] == static_cast<InterruptSourceId>(wdata) && wdata != 0) {
+                if (plic_claim[ctx_idx] == static_cast<simrv::xlen::InterruptSourceId>(wdata) &&
+                    wdata != 0) {
                     plic_claim[ctx_idx] = 0;
                     if (cpu_.machine_ && wdata == 3 && cpu_.machine_->uart_device() &&
                         cpu_.machine_->uart_device()->is_interrupt_pending()) {
-                        set_irq(static_cast<IrqNumber>(wdata), 1);
+                        set_irq(static_cast<simrv::xlen::IrqNumber>(wdata), 1);
                     }
                 }
             }

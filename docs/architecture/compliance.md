@@ -1,6 +1,6 @@
 # RISC-V Compliance Scope
 
-SimRV targets the `RV32GCBV` and `RV64GCBV` ISA strings. This is an implementation target, not a
+SimRV targets the ratified `rv32gczbv` and `rv64gczbv` ISA strings. This is an implementation target, not a
 claim of RISC-V architectural certification. A release is considered verified only for behavior
 covered by the checked-in semantic tests, the configured `riscv-tests` suites, vector tests, and
 Spike lockstep workloads run by the release gates.
@@ -11,18 +11,20 @@ Spike lockstep workloads run by the release gates.
 | --- | --- | --- |
 | Base ISA | RV32I and RV64I | RV32/RV64 ISA gates and Spike lockstep |
 | General-purpose extensions | M, A, F, D, C; see FP qualification note below | ISA gates, focused semantic tests, lockstep |
-| Bit manipulation | Zba, Zbb, Zbc, Zbs (`B`) | Bitmanip ISA tests and lockstep |
+| Bit manipulation | Zba, Zbb, Zbc, Zbs (`Zb*`) | Bitmanip ISA tests and lockstep |
 | Vector | Implemented subset of RISC-V Vector 1.0 (`V`), configurable VLEN | Vector regression suite and lockstep |
-| Privilege | M/S/U execution, traps, interrupts, and CSR access | Core semantic and Linux boot gates |
-| Address translation | Sv32 for RV32; Sv39 and Sv48 for RV64 | MMU tests and Linux boot gates |
+| Privilege | M/S/U execution, traps, interrupts, and CSR access (Privileged ISA 1.13) | Core semantic and Linux boot gates |
+| Address translation | Sv32 for RV32; Sv39 for RV64 | MMU tests and Linux boot gates |
 
-`G` includes I, M, A, F, D, Zicsr, and Zifencei. The `B` and `V` letters above are additional
+`G` includes I, M, A, F, D, Zicsr, and Zifencei. The `Zb` and `V` extensions above are additional
 extensions; they are not implied by `G`. MISA contains the single-letter extension bits only and
 therefore cannot describe individual `Zb*` subsets.
 
-The `--isa gc` preset selects G plus C and does not implicitly enable B or V. SimRV's historical
-default target is now named explicitly as `gcbv`; XLEN-qualified forms such as `rv64gcbv` are also
-accepted. Naming the preset explicitly does not override the vector qualification limits below.
+The `--isa gc` preset selects G plus C and does not implicitly enable B or V. SimRV's canonical target
+preset is `gcv` (or `gc` for profiles without vector); XLEN-qualified forms
+such as `rv64gcv` and `rv64gc` are standard. Ratified Bitmanip sub-extensions (`zba`, `zbb`, `zbc`, `zbs`)
+are appended canonically (e.g. `rv64gcv_zba_zbb_zbc_zbs` or `rv64gc_zba_zbb_zbc_zbs`). Legacy draft shorthands such as `gcbv` and `rv64gcbv`
+are rejected with diagnostic guidance. Naming the preset explicitly does not override the vector qualification limits below.
 
 For Vector 1.0, `vlenb` reflects the configured VLEN, `vstart` has enough writable bits for the
 maximum VLMAX, prestart elements remain undisturbed, and successful vector instructions clear
@@ -55,9 +57,11 @@ Invalid dynamic rounding modes and scalar FP widths/extensions cause illegal-ins
   IALIGN from 16 to 32. RV64-hosted RV32 cause values translate the architectural interrupt bit
   without changing native RV32 cause storage.
 - SXL and UXL accept only the implemented RV32/RV64 WARL encodings and are initialized consistently
-  with the selected machine XLEN. When an ISA preset omits S or U, its lower-mode status fields are
-  read-only zero; MPP accepts only implemented privilege modes and xRET resets it to the least
-  implemented mode. TVM, TW, TSR, MPRV, SUM, MXR, FS, and VS follow their privilege/extension
+  with the selected machine XLEN. Without S-mode, supervisor status fields are read-only zero;
+  without U-mode, MPRV and UXL are read-only zero. MPP accepts only implemented privilege modes and
+  xRET resets it to U when U-mode
+  is implemented, otherwise M. SRET clears SPP to zero. TVM, TW, TSR, MPRV, SUM, MXR, FS, and VS
+  follow their privilege/extension
   presence rules. Obsolete draft-N user interrupt bits, delegation CSRs, and URET are not
   implemented and remain reserved/illegal. Supervisor CSR encodings are inaccessible when the
   selected ISA preset omits S, including from M-mode.
@@ -94,11 +98,11 @@ SimRV has two distinct supervisor-environment paths:
 - In single-hart direct-boot mode without external M-mode firmware, SimRV provides a built-in direct SBI environment. It advertises Base,
   TIME, RFENCE, IPI, and SRST.
 
-The direct SBI environment follows the standard two-register return convention for SBI v0.2 and
-later and intercepts only supervisor ECALLs; machine ECALLs remain ordinary architectural traps.
-RFENCE and IPI hart-mask arguments are validated against the active hart set. A
-successful SRST request is terminal: shutdown stops the machine and cold/warm reboot requests a
-machine restart.
+The direct SBI environment follows the standard two-register return convention for ratified SBI
+(v2.0 / v3.0, returning specification version 2.0) and intercepts only supervisor ECALLs; machine
+ECALLs remain ordinary architectural traps. RFENCE and IPI hart-mask arguments are validated against
+the active hart set. A successful SRST request is terminal: shutdown stops the machine and cold/warm
+reboot requests a machine restart.
 
 The device tree describes the platform independently of Linux so other supervisor software and
 RTOSes can use the same UART, interrupt controller, timer, PCIe/VirtIO, and syscon power devices.

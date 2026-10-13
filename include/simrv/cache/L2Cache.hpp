@@ -5,7 +5,7 @@
 #pragma once
 
 #include "simrv/cache/BaseCache.hpp"
-#include "simrv/xlen/Types.hpp"
+#include "simrv/xlen/ScalarTypes.hpp"
 
 namespace simrv::cache {
 
@@ -17,10 +17,10 @@ class L2Cache : public BaseCache<2048, 32, 8> {
    public:
     L2Cache() = default;
 
-    [[nodiscard]] auto read_line(Address line_base, std::array<Byte, kLineBytes>& out_data)
-        -> bool {
+    [[nodiscard]] auto read_line(simrv::xlen::Address line_base,
+                                 std::array<simrv::xlen::Byte, kLineBytes>& out_data) -> bool {
         const uint32_t set_idx = get_set_index(line_base);
-        const Address tag = get_tag(line_base);
+        const simrv::xlen::Address tag = get_tag(line_base);
         last_accessed_set_ = set_idx;
 
         const auto [w, cache_line] = find_matching_line(set_idx, tag);
@@ -39,9 +39,14 @@ class L2Cache : public BaseCache<2048, 32, 8> {
         return false;
     }
 
-    void write_line(Address line_base, const std::array<Byte, kLineBytes>& in_data,
+    void write_line(simrv::xlen::Address line_base,
+                    const std::array<simrv::xlen::Byte, kLineBytes>& in_data,
                     simrv::memory::MesiState state = simrv::memory::MesiState::Exclusive) {
         insert(line_base, in_data.data(), state);
+    }
+
+    void invalidate_line(simrv::xlen::Address line_base) {
+        (void)probe_line(line_base, simrv::memory::MesiState::Invalid);
     }
 };
 

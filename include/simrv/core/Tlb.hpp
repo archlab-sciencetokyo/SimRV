@@ -3,13 +3,14 @@
  * @brief Translation Lookaside Buffer (TLB) encapsulation.
  */
 #pragma once
-
 #include <array>
 #include <optional>
 #include <utility>
 
+#include "simrv/CompilerHints.hpp"
+#include "simrv/core/TlbTypes.hpp"
 #include "simrv/memory/MemoryUtil.hpp"
-#include "simrv/xlen/Types.hpp"
+#include "simrv/xlen/ScalarTypes.hpp"
 
 namespace simrv::core {
 
@@ -20,14 +21,16 @@ namespace simrv::core {
  * Cache-line aligned to 32 bytes with explicit padding for zero-cost offset calculations.
  */
 struct alignas(32) TLBEntry {
-    Address v_addr{};                            ///< Virtual page address
-    Address p_addr{};                            ///< Physical page address
-    Asid asid{};                                 ///< Address Space Identifier (2 bytes)
-    PrivilegeLevel priv = PrivilegeLevel::User;  ///< Architectural privilege level (1 byte)
-    bool valid{false};                           ///< Entry validity flag (1 byte)
+    simrv::xlen::Address v_addr{};  ///< Virtual page address
+    simrv::xlen::Address p_addr{};  ///< Physical page address
+    Asid asid{};                    ///< Address Space Identifier (2 bytes)
+    simrv::xlen::PrivilegeLevel priv =
+        simrv::xlen::PrivilegeLevel::User;  ///< Architectural privilege level (1 byte)
+    bool valid{false};                      ///< Entry validity flag (1 byte)
+    bool global{false};                     ///< Global page mapping flag (1 byte)
     // Padding to reach 32-byte alignment. Size depends on Word width.
-    static constexpr size_t kPadding =
-        32 - 2 * sizeof(Address) - sizeof(Asid) - sizeof(PrivilegeLevel) - sizeof(bool);
+    static constexpr size_t kPadding = 32 - 2 * sizeof(simrv::xlen::Address) - sizeof(Asid) -
+                                       sizeof(simrv::xlen::PrivilegeLevel) - 2 * sizeof(bool);
     std::array<uint8_t, kPadding> padding{};
 };
 
@@ -39,7 +42,7 @@ struct alignas(32) TLBEntry {
  * If asid is nullopt, all ASIDs match.
  */
 struct TlbFlushFilter {
-    std::optional<Address> vaddr;
+    std::optional<simrv::xlen::Address> vaddr;
     std::optional<Asid> asid;
 };
 
@@ -72,8 +75,9 @@ class Tlb {
      * @param vaddr Virtual address.
      * @return Set index in range [0, kNumSets - 1].
      */
-    [[nodiscard]] static constexpr inline auto calc_set(Address vaddr) noexcept -> TlbSetIndex {
-        const Address vpn = vaddr >> 12;
+    [[nodiscard]] static constexpr inline auto calc_set(simrv::xlen::Address vaddr) noexcept
+        -> TlbSetIndex {
+        const simrv::xlen::Address vpn = vaddr >> 12;
         return static_cast<TlbSetIndex>((vpn ^ (vpn >> 8)) & (kNumSets - 1));
     }
 
@@ -82,7 +86,8 @@ class Tlb {
      * @param vaddr Virtual address.
      * @return Aligned page base address.
      */
-    [[nodiscard]] static constexpr inline auto calc_vpage(Address vaddr) noexcept -> Address {
+    [[nodiscard]] static constexpr inline auto calc_vpage(simrv::xlen::Address vaddr) noexcept
+        -> simrv::xlen::Address {
         return vaddr & ~simrv::memory::kPageMask;
     }
 
@@ -106,19 +111,21 @@ class Tlb {
      * @return Pointer to matching TLBEntry if hit, or nullptr on miss.
      */
     template <TlbAccessKind Kind>
-    [[nodiscard]] inline auto lookup(Address vaddr, Asid asid, PrivilegeLevel priv) -> TLBEntry* {
+    [[nodiscard]] inline auto lookup(simrv::xlen::Address vaddr, Asid asid,
+                                     simrv::xlen::PrivilegeLevel priv) -> TLBEntry* {
         auto& table = select_table_static<Kind>();
         auto& lru = select_lru_static<Kind>();
         const auto set = calc_set(vaddr);
-        const Address vpage = calc_vpage(vaddr);
+        const simrv::xlen::Address vpage = calc_vpage(vaddr);
         auto& set_entries = table[set];
         if (simrv::compiler::likely(set_entries[0].valid && set_entries[0].v_addr == vpage &&
-                                    set_entries[0].asid == asid && set_entries[0].priv == priv)) {
+                                    (set_entries[0].global || set_entries[0].asid == asid) &&
+                                    set_entries[0].priv == priv)) {
             lru[set] = 1;
             return &set_entries[0];
         }
-        if (set_entries[1].valid && set_entries[1].v_addr == vpage && set_entries[1].asid == asid &&
-            set_entries[1].priv == priv) {
+        if (set_entries[1].valid && set_entries[1].v_addr == vpage &&
+            (set_entries[1].global || set_entries[1].asid == asid) && set_entries[1].priv == priv) {
             lru[set] = 0;
             return &set_entries[1];
         }
@@ -133,8 +140,8 @@ class Tlb {
      * @param priv Privilege level.
      * @return Pointer to matching TLBEntry if hit, or nullptr on miss.
      */
-    [[nodiscard]] inline auto lookup(TlbAccessKind kind, Address vaddr, Asid asid,
-                                     PrivilegeLevel priv) -> TLBEntry* {
+    [[nodiscard]] inline auto lookup(TlbAccessKind kind, simrv::xlen::Address vaddr, Asid asid,
+                                     simrv::xlen::PrivilegeLevel priv) -> TLBEntry* {
         switch (kind) {
             case TlbAccessKind::Instruction:
                 return lookup<TlbAccessKind::Instruction>(vaddr, asid, priv);
@@ -153,26 +160,34 @@ class Tlb {
      * @param paddr Physical address.
      * @param asid Address Space Identifier.
      * @param priv Privilege level.
+     * @param global Global page flag.
      * @return Pointer to newly inserted TLBEntry.
      */
     template <TlbAccessKind Kind>
-    inline auto insert(Address vaddr, Address paddr, Asid asid, PrivilegeLevel priv) -> TLBEntry* {
+    inline auto insert(simrv::xlen::Address vaddr, simrv::xlen::Address paddr, Asid asid,
+                       simrv::xlen::PrivilegeLevel priv, bool global = false) -> TLBEntry* {
         auto& table = select_table_static<Kind>();
         auto& lru = select_lru_static<Kind>();
         const auto set = calc_set(vaddr);
-        const Address vpage = calc_vpage(vaddr);
-        const Address ppage = paddr & ~simrv::memory::kPageMask;
+        const simrv::xlen::Address vpage = calc_vpage(vaddr);
+        const simrv::xlen::Address ppage = paddr & ~simrv::memory::kPageMask;
         auto& set_entries = table[set];
 
-        if (set_entries[0].valid && set_entries[0].v_addr == vpage && set_entries[0].asid == asid &&
+        if (set_entries[0].valid && set_entries[0].v_addr == vpage &&
+            (global ? set_entries[0].global
+                    : (!set_entries[0].global && set_entries[0].asid == asid)) &&
             set_entries[0].priv == priv) {
             set_entries[0].p_addr = ppage;
+            set_entries[0].global = global;
             lru[set] = 1;
             return &set_entries[0];
         }
-        if (set_entries[1].valid && set_entries[1].v_addr == vpage && set_entries[1].asid == asid &&
+        if (set_entries[1].valid && set_entries[1].v_addr == vpage &&
+            (global ? set_entries[1].global
+                    : (!set_entries[1].global && set_entries[1].asid == asid)) &&
             set_entries[1].priv == priv) {
             set_entries[1].p_addr = ppage;
+            set_entries[1].global = global;
             lru[set] = 0;
             return &set_entries[1];
         }
@@ -183,6 +198,7 @@ class Tlb {
         entry.p_addr = ppage;
         entry.asid = asid;
         entry.priv = priv;
+        entry.global = global;
         entry.valid = true;
         lru[set] = 1 - way;
         return &entry;
@@ -195,30 +211,34 @@ class Tlb {
      * @param paddr Physical address.
      * @param asid Address Space Identifier.
      * @param priv Privilege level.
+     * @param global Global page flag.
      * @return Pointer to newly inserted TLBEntry.
      */
-    inline auto insert(TlbAccessKind kind, Address vaddr, Address paddr, Asid asid,
-                       PrivilegeLevel priv) -> TLBEntry* {
+    inline auto insert(TlbAccessKind kind, simrv::xlen::Address vaddr, simrv::xlen::Address paddr,
+                       Asid asid, simrv::xlen::PrivilegeLevel priv, bool global = false)
+        -> TLBEntry* {
         switch (kind) {
             case TlbAccessKind::Instruction:
-                return insert<TlbAccessKind::Instruction>(vaddr, paddr, asid, priv);
+                return insert<TlbAccessKind::Instruction>(vaddr, paddr, asid, priv, global);
             case TlbAccessKind::DataRead:
-                return insert<TlbAccessKind::DataRead>(vaddr, paddr, asid, priv);
+                return insert<TlbAccessKind::DataRead>(vaddr, paddr, asid, priv, global);
             case TlbAccessKind::DataWrite:
-                return insert<TlbAccessKind::DataWrite>(vaddr, paddr, asid, priv);
+                return insert<TlbAccessKind::DataWrite>(vaddr, paddr, asid, priv, global);
         }
         std::unreachable();
     }
 
     /// Inspect a translation without updating replacement state or hit counters.
     template <TlbAccessKind Kind>
-    [[nodiscard]] constexpr auto peek(Address vaddr, Asid asid, PrivilegeLevel priv) const noexcept
+    [[nodiscard]] constexpr auto peek(simrv::xlen::Address vaddr, Asid asid,
+                                      simrv::xlen::PrivilegeLevel priv) const noexcept
         -> const TLBEntry* {
         const auto& table = select_table_static<Kind>();
         const auto set = calc_set(vaddr);
-        const Address vpage = calc_vpage(vaddr);
+        const simrv::xlen::Address vpage = calc_vpage(vaddr);
         for (const auto& entry : table[set]) {
-            if (entry.valid && entry.asid == asid && entry.v_addr == vpage && entry.priv == priv) {
+            if (entry.valid && (entry.global || entry.asid == asid) && entry.v_addr == vpage &&
+                entry.priv == priv) {
                 return &entry;
             }
         }
@@ -226,56 +246,56 @@ class Tlb {
     }
 
     /// Inspect an instruction translation without updating replacement state or hit counters.
-    [[nodiscard]] constexpr auto peek_inst_r(Address vaddr, Asid asid,
-                                             PrivilegeLevel priv) const noexcept
+    [[nodiscard]] constexpr auto peek_inst_r(simrv::xlen::Address vaddr, Asid asid,
+                                             simrv::xlen::PrivilegeLevel priv) const noexcept
         -> const TLBEntry* {
         return peek<TlbAccessKind::Instruction>(vaddr, asid, priv);
     }
 
     /// Inspect a data read translation without updating replacement state or hit counters.
-    [[nodiscard]] constexpr auto peek_data_r(Address vaddr, Asid asid,
-                                             PrivilegeLevel priv) const noexcept
+    [[nodiscard]] constexpr auto peek_data_r(simrv::xlen::Address vaddr, Asid asid,
+                                             simrv::xlen::PrivilegeLevel priv) const noexcept
         -> const TLBEntry* {
         return peek<TlbAccessKind::DataRead>(vaddr, asid, priv);
     }
 
     /// Inspect a data write translation without updating replacement state or hit counters.
-    [[nodiscard]] constexpr auto peek_data_w(Address vaddr, Asid asid,
-                                             PrivilegeLevel priv) const noexcept
+    [[nodiscard]] constexpr auto peek_data_w(simrv::xlen::Address vaddr, Asid asid,
+                                             simrv::xlen::PrivilegeLevel priv) const noexcept
         -> const TLBEntry* {
         return peek<TlbAccessKind::DataWrite>(vaddr, asid, priv);
     }
 
     // --- Direct forwarding wrappers (templated, zero-cost) ---
 
-    [[nodiscard]] inline auto lookup_inst_r(Address vaddr, Asid asid, PrivilegeLevel priv)
-        -> TLBEntry* {
+    [[nodiscard]] inline auto lookup_inst_r(simrv::xlen::Address vaddr, Asid asid,
+                                            simrv::xlen::PrivilegeLevel priv) -> TLBEntry* {
         return lookup<TlbAccessKind::Instruction>(vaddr, asid, priv);
     }
 
-    inline auto insert_inst_r(Address vaddr, Address paddr, Asid asid, PrivilegeLevel priv)
-        -> TLBEntry* {
-        return insert<TlbAccessKind::Instruction>(vaddr, paddr, asid, priv);
+    inline auto insert_inst_r(simrv::xlen::Address vaddr, simrv::xlen::Address paddr, Asid asid,
+                              simrv::xlen::PrivilegeLevel priv, bool global = false) -> TLBEntry* {
+        return insert<TlbAccessKind::Instruction>(vaddr, paddr, asid, priv, global);
     }
 
-    [[nodiscard]] inline auto lookup_data_r(Address vaddr, Asid asid, PrivilegeLevel priv)
-        -> TLBEntry* {
+    [[nodiscard]] inline auto lookup_data_r(simrv::xlen::Address vaddr, Asid asid,
+                                            simrv::xlen::PrivilegeLevel priv) -> TLBEntry* {
         return lookup<TlbAccessKind::DataRead>(vaddr, asid, priv);
     }
 
-    inline auto insert_data_r(Address vaddr, Address paddr, Asid asid, PrivilegeLevel priv)
-        -> TLBEntry* {
-        return insert<TlbAccessKind::DataRead>(vaddr, paddr, asid, priv);
+    inline auto insert_data_r(simrv::xlen::Address vaddr, simrv::xlen::Address paddr, Asid asid,
+                              simrv::xlen::PrivilegeLevel priv, bool global = false) -> TLBEntry* {
+        return insert<TlbAccessKind::DataRead>(vaddr, paddr, asid, priv, global);
     }
 
-    [[nodiscard]] inline auto lookup_data_w(Address vaddr, Asid asid, PrivilegeLevel priv)
-        -> TLBEntry* {
+    [[nodiscard]] inline auto lookup_data_w(simrv::xlen::Address vaddr, Asid asid,
+                                            simrv::xlen::PrivilegeLevel priv) -> TLBEntry* {
         return lookup<TlbAccessKind::DataWrite>(vaddr, asid, priv);
     }
 
-    inline auto insert_data_w(Address vaddr, Address paddr, Asid asid, PrivilegeLevel priv)
-        -> TLBEntry* {
-        return insert<TlbAccessKind::DataWrite>(vaddr, paddr, asid, priv);
+    inline auto insert_data_w(simrv::xlen::Address vaddr, simrv::xlen::Address paddr, Asid asid,
+                              simrv::xlen::PrivilegeLevel priv, bool global = false) -> TLBEntry* {
+        return insert<TlbAccessKind::DataWrite>(vaddr, paddr, asid, priv, global);
     }
 
    private:

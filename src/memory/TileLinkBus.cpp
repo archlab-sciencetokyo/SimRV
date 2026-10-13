@@ -8,14 +8,16 @@
 #include <cstdint>
 #include <cstring>
 #include <format>
+#include <limits>
+#include <tuple>
 #include <unordered_set>
 
-#include "simrv/Define.hpp"
+#include "simrv/CompilerHints.hpp"
 #include "simrv/core/Logger.hpp"
 #include "simrv/core/Machine.hpp"
 #include "simrv/core/Tracer.hpp"
 #include "simrv/memory/MemoryUtil.hpp"
-#include "simrv/xlen/Types.hpp"
+#include "simrv/xlen/IdentifierTypes.hpp"
 
 namespace simrv::memory {
 
@@ -40,7 +42,8 @@ TileLinkBus::TileLinkBus(simrv::core::Machine& machine)
     : machine_(machine), coherence_hub_(machine) {}
 
 void TileLinkBus::record_transaction(TileLinkChannel ch, std::string_view opcode, TlSourceId source,
-                                     TlSinkId sink, Address address, std::string_view detail,
+                                     TlSinkId sink, simrv::xlen::Address address,
+                                     std::string_view detail,
                                      const simrv::core::BusTraceContext* trace_context) {
     if (transaction_history_.size() >= kMaxTransactionHistory) {
         transaction_history_.pop_front();
@@ -108,11 +111,27 @@ auto TileLinkBus::send_request(const TlChannelA& req) -> bool {
     }
     record_transaction(TileLinkChannel::A, to_string(req.opcode), req.source, 0, req.address.raw(),
                        to_string(req.grow), capture_trace_context ? &trace_context : nullptr);
-    req_queue_.push_back(
-        TimedRequest{.payload = req,
-                     .submitted_cycle = cycle_,
-                     .request_latency = data_port ? data_request_latency_ : request_latency_,
-                     .sequence = next_sequence_++});
+    const auto logical_cycle =
+        req.logical_cycle == std::numeric_limits<Cycle>::max() ? cycle_ : req.logical_cycle;
+    TimedRequest timed_request{
+        .payload = req,
+        .submitted_cycle = logical_cycle,
+        .request_latency = data_port ? data_request_latency_ : request_latency_,
+        .sequence = next_sequence_++};
+    const auto position = std::ranges::upper_bound(
+        req_queue_, timed_request, [](const TimedRequest& lhs, const TimedRequest& rhs) {
+            const auto lhs_issue =
+                lhs.payload.logical_issue_sequence == std::numeric_limits<uint64_t>::max()
+                    ? lhs.sequence
+                    : lhs.payload.logical_issue_sequence;
+            const auto rhs_issue =
+                rhs.payload.logical_issue_sequence == std::numeric_limits<uint64_t>::max()
+                    ? rhs.sequence
+                    : rhs.payload.logical_issue_sequence;
+            return std::tuple{lhs.submitted_cycle, lhs.payload.hart.val, lhs_issue, lhs.sequence} <
+                   std::tuple{rhs.submitted_cycle, rhs.payload.hart.val, rhs_issue, rhs.sequence};
+        });
+    req_queue_.insert(position, std::move(timed_request));
     has_pending_requests_ = true;
     return true;
 }
@@ -143,15 +162,16 @@ void TileLinkBus::process_request(const TimedRequest& request) {
     resp.corrupt = false;
     resp.data = 0;
 
-    const Instruction funct3 = req.size;
+    const simrv::xlen::Instruction funct3 = req.size;
     const bool valid_size = req.size <= 3;
     const size_t transfer_bytes = valid_size ? (size_t{1} << req.size) : 0;
     bool handled = false;
-    std::array<Byte, CoherenceHub::kLineBytes> response_line{};
+    uint32_t cache_service_latency = 1;
+    std::array<simrv::xlen::Byte, CoherenceHub::kLineBytes> response_line{};
     bool has_line_data = false;
 
     if (req.opcode == TlOpcodeA::AcquireBlock || req.opcode == TlOpcodeA::AcquirePerm) {
-        handled = coherence_hub_.handle_acquire(req, resp, response_line);
+        handled = coherence_hub_.handle_acquire(req, resp, response_line, cache_service_latency);
         has_line_data = req.opcode == TlOpcodeA::AcquireBlock && handled && !resp.failed();
     } else if (req.opcode == TlOpcodeA::Intent) {
         const size_t block_bytes = (size_t{1} << std::min<uint8_t>(req.size, kTlBlockSize));
@@ -188,7 +208,7 @@ void TileLinkBus::process_request(const TimedRequest& request) {
         if (machine_.memory_geometry().contains(req.address.raw(), transfer_bytes) &&
             machine_.ram_data() != nullptr) {
             coherence_hub_.invalidate_line_external(req.address.raw());
-            const Word previous =
+            const simrv::xlen::Word previous =
                 simrv::memory::ram_read_fast(req.address.raw(), funct3, machine_.ram_view());
             resp.data = previous;
             simrv::memory::ram_write_fast(req.address.raw(), previous | req.data, funct3,
@@ -200,10 +220,10 @@ void TileLinkBus::process_request(const TimedRequest& request) {
     } else if ((req.opcode == TlOpcodeA::PutFullData || req.opcode == TlOpcodeA::PutPartialData) &&
                !req.corrupt) {
         resp.opcode = TlOpcodeD::AccessAck;
-        const bool is_tohost_write = simrv::xlen::kIsXLen64
-                                         ? (funct3 == static_cast<Instruction>(Funct3::Sw) ||
-                                            funct3 == static_cast<Instruction>(Funct3::Sd))
-                                         : (funct3 == static_cast<Instruction>(Funct3::Sw));
+        const bool is_tohost_write =
+            simrv::xlen::kIsXLen64 ? (funct3 == static_cast<simrv::xlen::Instruction>(Funct3::Sw) ||
+                                      funct3 == static_cast<simrv::xlen::Instruction>(Funct3::Sd))
+                                   : (funct3 == static_cast<simrv::xlen::Instruction>(Funct3::Sw));
         if (is_tohost_write) {
             if (req.address == machine_.configuration().isa.isatest_tohost ||
                 req.address == 0x80001000 || req.address == 0x40008000) {
@@ -223,12 +243,13 @@ void TileLinkBus::process_request(const TimedRequest& request) {
             coherence_hub_.invalidate_line_external(req.address.raw());
             if (req.opcode == TlOpcodeA::PutPartialData) {
                 auto* destination = machine_.ram_view().unchecked_ptr(req.address.raw());
-                const unsigned lane_base =
+                const auto lane_base =
                     static_cast<unsigned>(req.address.raw() & (kTlBeatBytes - 1u));
                 for (size_t byte = 0; byte < transfer_bytes; ++byte) {
                     const auto lane = static_cast<unsigned>(lane_base + byte);
                     if ((req.mask & (TlMask{1} << lane)) != 0) {
-                        destination[byte] = static_cast<Byte>((req.data >> (byte * 8u)) & 0xffu);
+                        destination[byte] =
+                            static_cast<simrv::xlen::Byte>((req.data >> (byte * 8u)) & 0xffu);
                     }
                 }
             } else {
@@ -261,6 +282,7 @@ void TileLinkBus::process_request(const TimedRequest& request) {
         data_port && data_response_count_ == 0 && startup_data_response_latency_ != 0
             ? startup_data_response_latency_
             : (data_port ? data_response_latency_ : response_latency_);
+    response_latency += cache_service_latency - 1;
     if (machine_.dma_engine().is_transfer_active(cycle_)) {
         response_latency += machine_.dma_engine().config().memory_contention_penalty;
     }
@@ -422,12 +444,14 @@ auto TileLinkBus::pending_responses() const noexcept -> size_t {
 }
 
 auto TileLinkBus::acquire_block(const TlChannelA& req, TlChannelD& resp,
-                                std::array<Byte, CoherenceHub::kLineBytes>& line_data) -> bool {
+                                std::array<simrv::xlen::Byte, CoherenceHub::kLineBytes>& line_data)
+    -> bool {
     SmpLockGuard lock(bus_mutex_, is_smp_enabled());
     if (const auto valid = protocol_checker_.accept_a(req); !valid) return false;
     record_transaction(TileLinkChannel::A, to_string(req.opcode), req.source, 0, req.address.raw(),
                        to_string(req.grow));
-    const bool handled = coherence_hub_.handle_acquire(req, resp, line_data);
+    uint32_t cache_service_latency = 1;
+    const bool handled = coherence_hub_.handle_acquire(req, resp, line_data, cache_service_latency);
     if (!handled) {
         protocol_checker_.cancel(req.source);
         return false;
@@ -438,12 +462,13 @@ auto TileLinkBus::acquire_block(const TlChannelA& req, TlChannelD& resp,
 }
 
 auto TileLinkBus::acquire_perm(const TlChannelA& req, TlChannelD& resp) -> bool {
-    std::array<Byte, CoherenceHub::kLineBytes> unused{};
+    std::array<simrv::xlen::Byte, CoherenceHub::kLineBytes> unused{};
     return acquire_block(req, resp, unused);
 }
 
 auto TileLinkBus::release_line(const TlChannelC& req, TlChannelD& resp,
-                               const std::array<Byte, CoherenceHub::kLineBytes>* data) -> bool {
+                               const std::array<simrv::xlen::Byte, CoherenceHub::kLineBytes>* data)
+    -> bool {
     SmpLockGuard lock(bus_mutex_, is_smp_enabled());
     (void)protocol_checker_.accept_c(req);
     record_transaction(TileLinkChannel::C, to_string(req.opcode), req.source, 0, req.address.raw(),
@@ -457,7 +482,7 @@ auto TileLinkBus::release_line(const TlChannelC& req, TlChannelD& resp,
     return handled;
 }
 
-void TileLinkBus::mark_modified(Address line_base, HartId hart) {
+void TileLinkBus::mark_modified(simrv::xlen::Address line_base, simrv::xlen::HartId hart) {
     SmpLockGuard lock(bus_mutex_, is_smp_enabled());
     coherence_hub_.mark_modified(line_base, hart);
 }

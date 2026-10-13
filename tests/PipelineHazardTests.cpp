@@ -11,12 +11,13 @@
 #include "simrv/core/Machine.hpp"
 #include "simrv/core/RuntimeProfile.hpp"
 #include "simrv/isa/OperationId.hpp"
+#include "simrv/memory/MemorySubsystem.hpp"
 #include "simrv/memory/MemoryUtil.hpp"
 #include "simrv/pipeline/OperationTraits.hpp"
 #include "simrv/pipeline/PipelineConfig.hpp"
 #include "simrv/pipeline/PipelineSim.hpp"
 #include "simrv/pipeline/Scoreboard.hpp"
-#include "simrv/xlen/Types.hpp"
+#include "simrv/xlen/RegisterTypes.hpp"
 
 #define TEST_CHECK(expr)                                                                     \
     do {                                                                                     \
@@ -36,41 +37,41 @@ using namespace simrv::pipeline::operation;
 void test_integer_forwarding_hazards() {
     Scoreboard sb{};
     // Producer: ADD x1, x2, x3 in Execute stage with forwarding enabled
-    sb.reserve(RegBank::Integer, RegId::Ra, PipelineStage::Execute, 0, true);
-    TEST_CHECK(sb.is_busy(RegBank::Integer, RegId::Ra));
-    TEST_CHECK(sb.can_forward(RegBank::Integer, RegId::Ra));
+    sb.reserve(RegBank::Integer, simrv::xlen::RegId::Ra, PipelineStage::Execute, 0, true);
+    TEST_CHECK(sb.is_busy(RegBank::Integer, simrv::xlen::RegId::Ra));
+    TEST_CHECK(sb.can_forward(RegBank::Integer, simrv::xlen::RegId::Ra));
 
     // Consumer: ADD x4, x1, x5 reads x1 as rs1
     TEST_CHECK(is_rs1_int(OperationId::ADD));
-    TEST_CHECK(sb.is_busy(RegBank::Integer, RegId::Ra));
+    TEST_CHECK(sb.is_busy(RegBank::Integer, simrv::xlen::RegId::Ra));
     // Since can_forward is true, forwarding resolves the hazard without stall
-    TEST_CHECK(sb.can_forward(RegBank::Integer, RegId::Ra));
+    TEST_CHECK(sb.can_forward(RegBank::Integer, simrv::xlen::RegId::Ra));
 
     // After Writeback, release
-    sb.release(RegBank::Integer, RegId::Ra);
-    TEST_CHECK(!sb.is_busy(RegBank::Integer, RegId::Ra));
+    sb.release(RegBank::Integer, simrv::xlen::RegId::Ra);
+    TEST_CHECK(!sb.is_busy(RegBank::Integer, simrv::xlen::RegId::Ra));
 }
 
 void test_load_use_hazard() {
     Scoreboard sb{};
     // Producer: LW x1, 0(x2) in Execute stage, latency = 1 (cannot forward yet)
-    sb.reserve(RegBank::Integer, RegId::Ra, PipelineStage::Execute, 1, false);
-    TEST_CHECK(sb.is_busy(RegBank::Integer, RegId::Ra));
-    TEST_CHECK(!sb.can_forward(RegBank::Integer, RegId::Ra));
+    sb.reserve(RegBank::Integer, simrv::xlen::RegId::Ra, PipelineStage::Execute, 1, false);
+    TEST_CHECK(sb.is_busy(RegBank::Integer, simrv::xlen::RegId::Ra));
+    TEST_CHECK(!sb.can_forward(RegBank::Integer, simrv::xlen::RegId::Ra));
 
     // Consumer: ADD x3, x1, x4 in Decode stage
     TEST_CHECK(is_rs1_int(OperationId::ADD));
     // Hazard stall required!
-    TEST_CHECK(!sb.can_forward(RegBank::Integer, RegId::Ra));
+    TEST_CHECK(!sb.can_forward(RegBank::Integer, simrv::xlen::RegId::Ra));
 
     // Next cycle: LW advances to Memory stage, result becomes forwardable
-    sb.reserve(RegBank::Integer, RegId::Ra, PipelineStage::Memory, 0, true);
-    TEST_CHECK(sb.can_forward(RegBank::Integer, RegId::Ra));
+    sb.reserve(RegBank::Integer, simrv::xlen::RegId::Ra, PipelineStage::Memory, 0, true);
+    TEST_CHECK(sb.can_forward(RegBank::Integer, simrv::xlen::RegId::Ra));
 }
 
 void test_fp_conservative_stall() {
     Scoreboard sb{};
-    const auto fa0 = static_cast<RegId>(simrv::xlen::FpRegId::Fa0);
+    const auto fa0 = static_cast<simrv::xlen::RegId>(simrv::xlen::FpRegId::Fa0);
     // Producer: FADD.S f1, f2, f3
     TEST_CHECK(writes_float(OperationId::FADD_S));
     sb.reserve(RegBank::Float, fa0, PipelineStage::Execute, 3, false);
@@ -90,7 +91,7 @@ void test_fp_conservative_stall() {
 
 void test_fma_rs3_hazard() {
     Scoreboard sb{};
-    const auto fa2 = static_cast<RegId>(simrv::xlen::FpRegId::Fa2);
+    const auto fa2 = static_cast<simrv::xlen::RegId>(simrv::xlen::FpRegId::Fa2);
     // Producer: FADD.D f3, f4, f5
     sb.reserve(RegBank::Float, fa2, PipelineStage::Execute, 2, false);
 
@@ -106,7 +107,7 @@ void test_fma_rs3_hazard() {
 
 void test_cross_bank_conversion_hazards() {
     Scoreboard sb{};
-    const auto fa0 = static_cast<RegId>(simrv::xlen::FpRegId::Fa0);
+    const auto fa0 = static_cast<simrv::xlen::RegId>(simrv::xlen::FpRegId::Fa0);
 
     // 1. FP to Integer conversion: FCVT.W.S x1, f1
     TEST_CHECK(is_rs1_fp(OperationId::FCVT_W_S));
@@ -119,10 +120,10 @@ void test_cross_bank_conversion_hazards() {
     sb.release(RegBank::Float, fa0);
 
     // FCVT now reserves integer destination x1
-    sb.reserve(RegBank::Integer, RegId::Ra, PipelineStage::Execute, 1, false);
-    TEST_CHECK(sb.is_busy(RegBank::Integer, RegId::Ra));
+    sb.reserve(RegBank::Integer, simrv::xlen::RegId::Ra, PipelineStage::Execute, 1, false);
+    TEST_CHECK(sb.is_busy(RegBank::Integer, simrv::xlen::RegId::Ra));
     TEST_CHECK(!sb.is_busy(RegBank::Float, fa0));
-    sb.release(RegBank::Integer, RegId::Ra);
+    sb.release(RegBank::Integer, simrv::xlen::RegId::Ra);
 
     // 2. Integer to FP conversion: FCVT.S.W f1, x1
     TEST_CHECK(is_rs1_int(OperationId::FCVT_S_W));
@@ -165,7 +166,7 @@ void test_cycle_kernel_bit_for_bit_hazard_stall_counters() {
     // 2: addi x2, x1, 5   (depends on x1)
     // 3: add  x3, x2, x1  (depends on x2 and x1)
     // 4: jal  x0, 0
-    constexpr std::array<Instruction, 4> program = {
+    constexpr std::array<simrv::xlen::Instruction, 4> program = {
         0x00a00093,  // addi x1, x0, 10
         0x00508113,  // addi x2, x1, 5
         0x001101b3,  // add  x3, x2, x1
@@ -174,8 +175,8 @@ void test_cycle_kernel_bit_for_bit_hazard_stall_counters() {
 
     const auto run_model = [&](simrv::pipeline::PipelineType type, bool forwarding) {
         simrv::core::Machine machine;
-        const Address pc = machine.memory_geometry().dram_base;
-        std::vector<Byte> ram(1024 * 1024, Byte{0});
+        const simrv::xlen::Address pc = machine.memory_geometry().dram_base;
+        std::vector<simrv::xlen::Byte> ram(1024 * 1024, simrv::xlen::Byte{0});
         machine.set_ram_for_testing(ram.data(), ram.size());
         auto& cpu = machine.primary_hart();
         cpu.machine_ = &machine;
@@ -184,7 +185,7 @@ void test_cycle_kernel_bit_for_bit_hazard_stall_counters() {
         cpu.pipeline_sim.config.pipeline_type = type;
         cpu.pipeline_sim.config.enable_forwarding = forwarding;
 
-        std::array<Byte, simrv::cache::ICache::kLineBytes> line{};
+        std::array<simrv::xlen::Byte, simrv::cache::ICache::kLineBytes> line{};
         std::memcpy(line.data(), program.data(), sizeof(program));
         std::memcpy(ram.data(), program.data(), sizeof(program));
         cpu.icache.insert(pc, line.data(), simrv::memory::MesiState::Exclusive);
@@ -197,9 +198,9 @@ void test_cycle_kernel_bit_for_bit_hazard_stall_counters() {
             ++cycles;
         }
         TEST_CHECK(cpu.e_icount == 3);
-        TEST_CHECK(cpu.state().regs.read(RegId::Ra) == 10);
-        TEST_CHECK(cpu.state().regs.read(RegId::Sp) == 15);
-        TEST_CHECK(cpu.state().regs.read(RegId::Gp) == 25);
+        TEST_CHECK(cpu.state().regs.read(simrv::xlen::RegId::Ra) == 10);
+        TEST_CHECK(cpu.state().regs.read(simrv::xlen::RegId::Sp) == 15);
+        TEST_CHECK(cpu.state().regs.read(simrv::xlen::RegId::Gp) == 25);
         return std::make_pair(cycles, cpu.pipeline_sim.data_hazard_stalls());
     };
 
@@ -237,7 +238,7 @@ void test_cycle_kernel_fp_hazard_stall_counters() {
     // 3: fadd.s   f2, f1, f1    (RAW on f1 - stalls until fcvt.s.w retires)
     // 4: fadd.s   f3, f1, f2    (RAW on f2 and f1 - stalls until fadd.s retires)
     // 5: jal      x0, 0
-    constexpr std::array<Instruction, 5> program = {
+    constexpr std::array<simrv::xlen::Instruction, 5> program = {
         0x00200093,  // addi    x1, x0, 2
         0xd20080d3,  // fcvt.s.w f1, x1
         0x00108153,  // fadd.s  f2, f1, f1
@@ -247,8 +248,8 @@ void test_cycle_kernel_fp_hazard_stall_counters() {
 
     const auto run_model = [&](simrv::pipeline::PipelineType type, bool forwarding) {
         simrv::core::Machine machine;
-        const Address pc = machine.memory_geometry().dram_base;
-        std::vector<Byte> ram(1024 * 1024, Byte{0});
+        const simrv::xlen::Address pc = machine.memory_geometry().dram_base;
+        std::vector<simrv::xlen::Byte> ram(1024 * 1024, simrv::xlen::Byte{0});
         machine.set_ram_for_testing(ram.data(), ram.size());
         auto& cpu = machine.primary_hart();
         cpu.machine_ = &machine;
@@ -258,7 +259,7 @@ void test_cycle_kernel_fp_hazard_stall_counters() {
         cpu.pipeline_sim.config.pipeline_type = type;
         cpu.pipeline_sim.config.enable_forwarding = forwarding;
 
-        std::array<Byte, simrv::cache::ICache::kLineBytes> line{};
+        std::array<simrv::xlen::Byte, simrv::cache::ICache::kLineBytes> line{};
         std::memcpy(line.data(), program.data(), sizeof(program));
         std::memcpy(ram.data(), program.data(), sizeof(program));
         cpu.icache.insert(pc, line.data(), simrv::memory::MesiState::Exclusive);

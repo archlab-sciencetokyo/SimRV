@@ -3,8 +3,11 @@
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <sstream>
 #include <vector>
 
+#include "simrv/core/Cpu.hpp"
+#include "simrv/core/CpuConfigParser.hpp"
 #include "simrv/core/Logger.hpp"
 #include "simrv/core/Machine.hpp"
 #include "simrv/core/MachineConfig.hpp"
@@ -56,8 +59,43 @@ auto main() -> int {
                "CLI accepts the canonical glued first multi-letter extension spelling");
         expect(check_isa("rv" + xlen + "gc_zicsr_zifencei_zicntr").has_value(),
                "CLI accepts explicit extensions implied by G");
+        expect(
+            check_isa("rv" + xlen + "gczb").has_value() &&
+                check_isa("rv" + xlen + "gczb")->options.isa_preset == simrv::isa::IsaPreset::GC &&
+                check_isa("rv" + xlen + "gczb")->options.has_zb_extensions,
+            "CLI accepts GC with bitmanip");
+        expect(check_isa("rv" + xlen + "gcv").has_value() &&
+                   check_isa("rv" + xlen + "gcv")->options.isa_preset == simrv::isa::IsaPreset::GCV,
+               "CLI accepts canonical GCV preset");
+        expect(check_isa("rv" + xlen + "gczbv").has_value() &&
+                   check_isa("rv" + xlen + "gczbv")->options.isa_preset ==
+                       simrv::isa::IsaPreset::GCV &&
+                   check_isa("rv" + xlen + "gczbv")->options.has_zb_extensions,
+               "CLI accepts GCV with bitmanip");
+        expect(check_isa("rv" + xlen + "gc_zba_zbb_zbc_zbs").has_value() &&
+                   check_isa("rv" + xlen + "gc_zba_zbb_zbc_zbs")->options.isa_preset ==
+                       simrv::isa::IsaPreset::GC &&
+                   check_isa("rv" + xlen + "gc_zba_zbb_zbc_zbs")->options.has_zb_extensions,
+               "CLI accepts ratified bitmanip sub-extensions and enables GC with bitmanip");
+        expect(
+            check_isa("rv" + xlen + "gc_zb").has_value() &&
+                check_isa("rv" + xlen + "gc_zb")->options.isa_preset == simrv::isa::IsaPreset::GC &&
+                check_isa("rv" + xlen + "gc_zb")->options.has_zb_extensions,
+            "CLI accepts ratified zb shorthand and enables GC with bitmanip");
+        expect(check_isa("rv" + xlen + "gcv_zba_zbb_zbc_zbs").has_value() &&
+                   check_isa("rv" + xlen + "gcv_zba_zbb_zbc_zbs")->options.isa_preset ==
+                       simrv::isa::IsaPreset::GCV &&
+                   check_isa("rv" + xlen + "gcv_zba_zbb_zbc_zbs")->options.has_zb_extensions,
+               "CLI accepts ratified bitmanip with vector base and enables GCV with bitmanip");
+        expect(check_isa("rv" + xlen + "gc_zk").has_value(),
+               "CLI accepts ratified scalar crypto zk shorthand");
+        expect(!check_isa("rv" + xlen + "gcbv").has_value(),
+               "CLI rejects legacy draft shorthand rv{}gcbv");
+        expect(!check_isa("gcbv").has_value(), "CLI rejects legacy draft shorthand gcbv");
         expect(!check_isa("rv" + xlen + "gc_zfoo").has_value(),
                "CLI rejects unsupported multi-letter ISA extensions");
+        expect(!check_isa("rv" + xlen + "gc_xsimrvtrace").has_value(),
+               "CLI rejects the retired experimental Xsimrvtrace extension");
         expect(!check_isa("rv" + xlen + "gc_zicntr2p1").has_value(),
                "CLI rejects unsupported extension versions");
         expect(!check_isa("rv" + xlen + "gc_zicntr_zicntr").has_value(),
@@ -82,6 +120,55 @@ auto main() -> int {
                "CLI parses diagnostic log format and destination");
     }
     const simrv::core::MachineConfig defaults{};
+    {
+        simrv::core::SoCConfig soc{};
+        std::istringstream profile{
+            "[smp]\n"
+            "hart_count = 4\n"
+            "mode = cycle-oriented\n"
+            "synchronization_quantum = 23\n"
+            "[smp.cluster.0]\n"
+            "harts = 0, 1\n"
+            "l2_enabled = true\n"
+            "l2_capacity_bytes = 65536\n"
+            "l2_associativity = 4\n"
+            "[smp.cluster.1]\n"
+            "harts = 2, 3\n"
+            "[smp.l3]\n"
+            "enabled = false\n"};
+        expect(simrv::core::parse_soc_config_stream(profile, soc) && soc.smp.hart_count == 4 &&
+                   soc.smp.mode == simrv::core::SmpMode::CycleOriented &&
+                   soc.smp.synchronization_quantum == 23 && soc.smp.clusters.size() == 2 &&
+                   soc.smp.clusters[0].l2.enabled && !soc.smp.l3.enabled &&
+                   soc.smp.validate().has_value(),
+               "SoC profile parses and validates SMP clusters and shared cache topology");
+        soc.smp.clusters[1].harts.pop_back();
+        expect(!soc.smp.validate(), "SMP profile rejects incomplete cluster membership");
+    }
+    {
+        std::vector<std::string> args_str = {
+            "SimRV",          "--soc",         "virt-mmio", "--harts", "4",        "--smp-mode",
+            "cycle-oriented", "--smp-quantum", "11",        "-m",      "guest.bin"};
+        std::vector<char*> args;
+        for (auto& arg : args_str) args.push_back(arg.data());
+        const auto parsed =
+            simrv::util::parse_command_line(std::span<char* const>{args.data(), args.size()});
+        if (parsed) {
+            const auto cfg = parsed->options.to_machine_config();
+            expect(cfg.execution.num_harts == 4 &&
+                       cfg.execution.smp_mode == simrv::core::SmpMode::CycleOriented &&
+                       cfg.execution.smp_quantum == 11 && cfg.soc.smp.hart_count == 4,
+                   "explicit SMP CLI settings override profile defaults");
+        } else {
+            expect(false, "SMP CLI overrides parse");
+        }
+        args_str = {"SimRV", "--smp-multithreaded", "-m", "guest.bin"};
+        args.clear();
+        for (auto& arg : args_str) args.push_back(arg.data());
+        const auto legacy =
+            simrv::util::parse_command_line(std::span<char* const>{args.data(), args.size()});
+        expect(!legacy, "removed multithreaded compatibility spelling is rejected");
+    }
     expect(defaults.memory.contains(defaults.memory.dram_base), "DRAM base is contained");
     expect(defaults.memory.contains(defaults.memory.dram_base, 4), "DRAM range is contained");
     expect(!defaults.memory.contains(defaults.memory.dram_base - 1),
@@ -96,7 +183,7 @@ auto main() -> int {
             ("simrv-buildroot-output-" +
              std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
         fs::create_directories(output / "images");
-        std::ofstream(output / "images/fw_payload.bin").put('f');
+        std::ofstream(output / "images/opensbi-linux-payload.elf").put('f');
         std::ofstream(output / "images/devicetree.dtb").put('d');
         std::ofstream(output / "images/rootfs.ext4").put('r');
         std::ofstream(output / "images/simrv-manifest.json") << "{\"dram_size_mb\": 512}\n";
@@ -104,7 +191,8 @@ auto main() -> int {
         std::array<char*, 3> args{};
         for (size_t i = 0; i < args_str.size(); ++i) args[i] = args_str[i].data();
         const auto parsed = simrv::util::parse_command_line(args);
-        expect(parsed.has_value() && parsed->options.fn_memimg.ends_with("fw_payload.bin") &&
+        expect(parsed.has_value() &&
+                   parsed->options.fn_memimg.ends_with("opensbi-linux-payload.elf") &&
                    parsed->options.fn_dvtree.ends_with("devicetree.dtb") &&
                    parsed->options.fn_dskimg.ends_with("rootfs.ext4") && !parsed->options.appmode &&
                    parsed->options.use_disk && parsed->options.dram_size == 512ULL * 1024 * 1024,
@@ -174,6 +262,16 @@ auto main() -> int {
     applied.platform_profile = simrv::core::PlatformProfile::Mmio;
 
     simrv::core::Machine machine(applied);
+    auto secondary_for_irq = std::make_unique<simrv::core::CPU>();
+    secondary_for_irq->state().mhartid = 1;
+    machine.add_hart_for_testing(std::move(secondary_for_irq));
+    machine.set_hart_irq(simrv::xlen::HartId{1}, simrv::core::InterruptType::Software,
+                         simrv::xlen::PrivilegeLevel::Machine, true);
+    expect((machine.hart(1).state().mip & simrv::core::MipBit::Msip) == 0,
+           "cross-hart interrupt remains queued until the target hart boundary");
+    machine.hart(1).apply_pending_interrupt_lines(machine);
+    expect((machine.hart(1).state().mip & simrv::core::MipBit::Msip) != 0,
+           "target hart applies queued interrupt on its execution boundary");
     expect(machine.memory_geometry().dram_base == custom.dram_base &&
                machine.memory_geometry().dram_size == custom.dram_size,
            "applied configuration controls machine memory geometry");
@@ -236,10 +334,12 @@ auto main() -> int {
         observed_machine.primary_hart().evaluate_timer_interrupt();
         clint.mtimecmp.store(20, std::memory_order_relaxed);
         observed_machine.primary_hart().evaluate_timer_interrupt();
-        observed_machine.set_hart_irq(HartId{0}, simrv::core::InterruptType::Software,
-                                      simrv::PrivilegeLevel::Machine, true);
-        observed_machine.set_hart_irq(HartId{0}, simrv::core::InterruptType::Software,
-                                      simrv::PrivilegeLevel::Machine, false);
+        observed_machine.set_hart_irq(simrv::xlen::HartId{0}, simrv::core::InterruptType::Software,
+                                      simrv::xlen::PrivilegeLevel::Machine, true);
+        observed_machine.primary_hart().apply_pending_interrupt_lines(observed_machine);
+        observed_machine.set_hart_irq(simrv::xlen::HartId{0}, simrv::core::InterruptType::Software,
+                                      simrv::xlen::PrivilegeLevel::Machine, false);
+        observed_machine.primary_hart().apply_pending_interrupt_lines(observed_machine);
         observed_machine.set_platform_irq(4, true);
         observed_machine.set_platform_irq(4, false);
         (void)observed_machine.dma_engine().schedule_transfer(64, 10, [] {}, "test-device");
@@ -424,7 +524,7 @@ auto main() -> int {
         auto parsed = simrv::util::parse_command_line(trace_flag);
         expect(parsed.has_value() && parsed->options.trace_enabled &&
                    parsed->options.trace_begin == 0 &&
-                   parsed->options.trace_end == std::numeric_limits<Counter>::max(),
+                   parsed->options.trace_end == std::numeric_limits<simrv::xlen::Counter>::max(),
                "--trace enables the complete aligned instruction trace");
     }
     {
@@ -555,8 +655,9 @@ auto main() -> int {
         periodic_config.execution.fincnt = 4;
         periodic_config.debug.checkpoint_every = 2;
         periodic_config.debug.checkpoint_dir = checkpoint_dir.string();
-        std::vector<Byte> periodic_ram(periodic_config.memory.dram_size, Byte{0});
-        periodic_ram[0] = Byte{0x6f};  // jal x0, 0
+        std::vector<simrv::xlen::Byte> periodic_ram(periodic_config.memory.dram_size,
+                                                    simrv::xlen::Byte{0});
+        periodic_ram[0] = simrv::xlen::Byte{0x6f};  // jal x0, 0
         simrv::core::Machine periodic_machine(periodic_config);
         periodic_machine.set_ram_for_testing(periodic_ram.data(), periodic_ram.size());
         periodic_machine.primary_hart().state().pc = periodic_config.memory.dram_base;
@@ -593,16 +694,19 @@ auto main() -> int {
         checkpoint_config.memory.dram_base = 0x80000000;
         checkpoint_config.memory.dram_size = 4096;
         checkpoint_config.isa.vlen = 256;
-        std::vector<Byte> source_ram(4096, Byte{0});
-        std::vector<Byte> restored_ram(4096, Byte{0});
+        std::vector<simrv::xlen::Byte> source_ram(4096, simrv::xlen::Byte{0});
+        std::vector<simrv::xlen::Byte> restored_ram(4096, simrv::xlen::Byte{0});
         simrv::core::Machine source(checkpoint_config);
         source.set_ram_for_testing(source_ram.data(), source_ram.size());
         auto& source_state = source.primary_hart().state();
         source_state.pc = 0x80000100;
         source_state.regs.vlen = 256;
-        source_state.regs.write(simrv::RegId::T2, 0x12345678);
-        source_state.regs.write_fp(static_cast<simrv::RegId>(5), 0x7ff8000000001234);
-        source_state.regs.read_vector(static_cast<simrv::RegId>(7)).u8[0] = 0xA5;
+        source_state.regs.write(simrv::xlen::RegId::T2, 0x12345678);
+        source_state.regs.write_fp(simrv::xlen::to_fp_reg_id(static_cast<simrv::xlen::RegId>(5)),
+                                   0x7ff8000000001234);
+        source_state.regs
+            .read_vector(simrv::xlen::to_vec_reg_id(static_cast<simrv::xlen::RegId>(7)))
+            .u8[0] = 0xA5;
         source_state.vtype = 0x23;
         source_state.vl = 17;
         source_state.mstatus = 0x1800;
@@ -611,7 +715,7 @@ auto main() -> int {
         source.primary_hart().e_icount = 77;
         source.primary_hart().e_ccount = 91;
         source.primary_hart().clint_mmio.mcycle = 105;
-        source_ram[123] = Byte{0xA5};
+        source_ram[123] = simrv::xlen::Byte{0xA5};
         expect(source.save_checkpoint(checkpoint.string()).has_value(),
                "checkpoint saves architectural state");
 
@@ -621,17 +725,21 @@ auto main() -> int {
                "checkpoint restores architectural state");
         const auto& restored_state = restored.primary_hart().state();
         expect(restored_state.pc == source_state.pc &&
-                   restored_state.regs.read(simrv::RegId::T2) == 0x12345678,
+                   restored_state.regs.read(simrv::xlen::RegId::T2) == 0x12345678,
                "checkpoint restores PC and integer registers");
         expect(restored_state.vtype == source_state.vtype && restored_state.vl == source_state.vl &&
                    restored_state.mepc == source_state.mepc && restored_state.pmpaddr[0] == 0x1234,
                "checkpoint restores vector, CSR, and PMP state");
-        expect(restored_state.regs.read_fp(static_cast<simrv::RegId>(5)) == 0x7ff8000000001234 &&
-                   restored_state.regs.read_vector(static_cast<simrv::RegId>(7)).u8[0] == 0xA5,
-               "checkpoint restores FP and vector register-file bits");
+        expect(
+            restored_state.regs.read_fp(simrv::xlen::to_fp_reg_id(
+                static_cast<simrv::xlen::RegId>(5))) == 0x7ff8000000001234 &&
+                restored_state.regs
+                        .read_vector(simrv::xlen::to_vec_reg_id(static_cast<simrv::xlen::RegId>(7)))
+                        .u8[0] == 0xA5,
+            "checkpoint restores FP and vector register-file bits");
         expect(restored.primary_hart().e_icount == 77 && restored.primary_hart().e_ccount == 91 &&
                    restored.primary_hart().clint_mmio.mcycle == 105 &&
-                   restored_ram[123] == Byte{0xA5},
+                   restored_ram[123] == simrv::xlen::Byte{0xA5},
                "checkpoint restores counters and physical RAM");
 
         {
@@ -649,6 +757,53 @@ auto main() -> int {
         std::error_code cleanup_error;
         std::filesystem::remove(checkpoint, cleanup_error);
         std::filesystem::remove(malformed, cleanup_error);
+    }
+
+    {
+        using simrv::core::HostExitCode;
+        using simrv::core::to_exit_code;
+        expect(to_exit_code(HostExitCode::Success) == 0, "HostExitCode::Success is 0");
+        expect(to_exit_code(HostExitCode::GeneralError) == 1, "HostExitCode::GeneralError is 1");
+        expect(to_exit_code(HostExitCode::UsageError) == 2, "HostExitCode::UsageError is 2");
+        expect(to_exit_code(HostExitCode::ConfigurationError) == 3,
+               "HostExitCode::ConfigurationError is 3");
+        expect(to_exit_code(HostExitCode::InitializationError) == 4,
+               "HostExitCode::InitializationError is 4");
+        expect(to_exit_code(HostExitCode::ExecutionError) == 5,
+               "HostExitCode::ExecutionError is 5");
+        expect(to_exit_code(HostExitCode::CheckpointError) == 6,
+               "HostExitCode::CheckpointError is 6");
+        expect(to_exit_code(HostExitCode::IpcError) == 7, "HostExitCode::IpcError is 7");
+    }
+
+    {
+        simrv::core::MachineConfig cfg{};
+        cfg.tui.enabled = true;
+        simrv::core::Machine machine(cfg);
+        expect(machine.initialize().has_value(), "default Machine initializes successfully");
+        expect(simrv::isa::misa_has_extension(machine.primary_hart().state().misa,
+                                              simrv::isa::IsaExtension::B),
+               "default Machine initial misa enables bitmanip extension (B)");
+    }
+
+    {
+        std::array<std::string, 3> args_str = {"SimRV", "-m", "guest.elf"};
+        std::array<char*, 3> args{};
+        for (size_t i = 0; i < args_str.size(); ++i) args[i] = args_str[i].data();
+        auto parsed = simrv::util::parse_command_line(args);
+        expect(parsed.has_value(), "default CLI args parse");
+        if (parsed) {
+            auto cfg = parsed->options.to_machine_config();
+            expect(simrv::isa::misa_has_extension(cfg.isa.isa_preset, simrv::isa::IsaExtension::B),
+                   "default CLI MachineConfig enables bitmanip extension (B)");
+            cfg.tui.enabled = true;
+            simrv::core::Machine machine(cfg);
+            expect(machine.initialize().has_value(),
+                   "CLI-configured Machine initializes successfully");
+            expect(simrv::isa::misa_has_extension(machine.primary_hart().state().misa,
+                                                  simrv::isa::IsaExtension::B),
+                   "CLI-configured Machine initial misa enables bitmanip extension (B)");
+        }
     }
 
     return failures == 0 ? EXIT_SUCCESS : EXIT_FAILURE;

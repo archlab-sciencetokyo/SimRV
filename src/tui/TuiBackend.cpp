@@ -5,6 +5,7 @@
 #include <limits>
 
 #include "simrv/core/Cpu.hpp"
+#include "simrv/debug/BreakpointManager.hpp"
 #include "simrv/pipeline/Decoder.hpp"
 
 namespace simrv::tui {
@@ -30,7 +31,10 @@ void LocalTuiBackend::submit(BackendRequest request, BackendCompletion complete)
     if (!machine_) {
         const auto generation = generation_;
         lock.unlock();
-        complete({request.id, generation, false, "session unavailable"});
+        complete({.id = request.id,
+                  .generation = generation,
+                  .success = false,
+                  .text = "session unavailable"});
         return;
     }
     const auto weak = weak_from_this();
@@ -38,13 +42,14 @@ void LocalTuiBackend::submit(BackendRequest request, BackendCompletion complete)
         if (auto backend = weak.lock())
             backend->execute(machine, request, complete);
         else
-            complete({request.id, 0, false, "session ended"});
+            complete(
+                {.id = request.id, .generation = 0, .success = false, .text = "session ended"});
     });
 }
 void LocalTuiBackend::execute(core::Machine& machine, BackendRequest request,
                               BackendCompletion complete) {
     std::unique_lock lock(mutex_);
-    BackendReply reply{request.id, generation_, true, {}};
+    BackendReply reply{.id = request.id, .generation = generation_, .success = true, .text = {}};
     const auto error = [&](std::string text) {
         reply.success = false;
         reply.text = std::move(text);
@@ -88,7 +93,7 @@ void LocalTuiBackend::execute(core::Machine& machine, BackendRequest request,
                         error("step requires pause and count=1");
                     else {
                         ++generation_;
-                        if (!machine.begin_debug_step(HartId{request.hart}))
+                        if (!machine.begin_debug_step(simrv::xlen::HartId{request.hart}))
                             error("hart cannot step");
                         else {
                             const auto weak = weak_from_this();
@@ -100,9 +105,15 @@ void LocalTuiBackend::execute(core::Machine& machine, BackendRequest request,
                                             std::scoped_lock guard(backend->mutex_);
                                             generation = ++backend->generation_;
                                         }
-                                        complete({id, generation, true, "stepped"});
+                                        complete({.id = id,
+                                                  .generation = generation,
+                                                  .success = true,
+                                                  .text = "stepped"});
                                     } else
-                                        complete({id, 0, false, "session ended"});
+                                        complete({.id = id,
+                                                  .generation = 0,
+                                                  .success = false,
+                                                  .text = "session ended"});
                                 });
                             return;
                         }
@@ -112,22 +123,25 @@ void LocalTuiBackend::execute(core::Machine& machine, BackendRequest request,
                     const auto& state = machine.hart(request.hart).state();
                     reply.text = std::format("hart {} PC {:016x}\n", request.hart, state.pc);
                     for (int r = 0; r < 32; ++r)
-                        reply.text += std::format("x{:<2} {:016x}   f{:<2} {:016x}\n", r,
-                                                  state.regs.read(static_cast<RegId>(r)), r,
-                                                  state.regs.read_fp(static_cast<RegId>(r)));
+                        reply.text += std::format(
+                            "x{:<2} {:016x}   f{:<2} {:016x}\n", r,
+                            state.regs.read(static_cast<simrv::xlen::RegId>(r)), r,
+                            state.regs.read_fp(
+                                simrv::xlen::to_fp_reg_id(static_cast<simrv::xlen::RegId>(r))));
                     break;
                 }
                 case BackendCommand::Memory:
                 case BackendCommand::Disassemble: {
                     const auto ram = machine.ram_view();
-                    if (request.address > std::numeric_limits<Address>::max() ||
+                    if (request.address > std::numeric_limits<simrv::xlen::Address>::max() ||
                         request.count == 0 || request.count > 4096 ||
-                        !ram.contains(static_cast<Address>(request.address), request.count)) {
+                        !ram.contains(static_cast<simrv::xlen::Address>(request.address),
+                                      request.count)) {
                         error("physical RAM range must contain 1..4096 bytes");
                         break;
                     }
                     for (uint32_t i = 0; i < request.count;) {
-                        const auto address = static_cast<Address>(request.address + i);
+                        const auto address = static_cast<simrv::xlen::Address>(request.address + i);
                         if (request.command == BackendCommand::Disassemble) {
                             if (request.count - i < 2) break;
                             uint32_t instruction = 0;
@@ -151,16 +165,16 @@ void LocalTuiBackend::execute(core::Machine& machine, BackendRequest request,
                 case BackendCommand::Breakpoints:
                 case BackendCommand::AddBreakpoint:
                 case BackendCommand::RemoveBreakpoint:
-                    if (request.address > std::numeric_limits<Address>::max()) {
+                    if (request.address > std::numeric_limits<simrv::xlen::Address>::max()) {
                         error("invalid address");
                         break;
                     }
                     if (request.command == BackendCommand::AddBreakpoint)
                         machine.breakpoint_manager().add_pc_breakpoint(
-                            static_cast<Address>(request.address));
+                            static_cast<simrv::xlen::Address>(request.address));
                     if (request.command == BackendCommand::RemoveBreakpoint)
                         machine.breakpoint_manager().remove_pc_breakpoint(
-                            static_cast<Address>(request.address));
+                            static_cast<simrv::xlen::Address>(request.address));
                     for (auto address : machine.breakpoint_manager().get_pc_breakpoints())
                         reply.text += std::format("{:016x}\n", address);
                     if (reply.text.empty()) reply.text = "No breakpoints";

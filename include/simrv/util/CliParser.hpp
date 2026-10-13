@@ -7,8 +7,8 @@
 #include <string>
 #include <string_view>
 
-#include "simrv/Define.hpp"
 #include "simrv/core/Boot.hpp"
+#include "simrv/core/ExitCode.hpp"
 #include "simrv/core/Logger.hpp"
 #include "simrv/core/Machine.hpp"
 #include "simrv/core/RuntimeProfile.hpp"
@@ -33,6 +33,7 @@ enum class RequestedExecutionMode : uint8_t { Fast, Detailed, CycleAccurate };
 struct RuntimeOptions {
     std::string fn_memimg;
     std::string fn_dskimg;
+    std::string fn_virtiofs;
     std::string fn_dvtree;
     std::string fn_traplog;
     std::string fn_log;
@@ -47,25 +48,27 @@ struct RuntimeOptions {
     std::string trace_function;
     std::string trace_device;
     std::optional<uint32_t> trace_hart;
-    std::optional<Address> trace_pc_start;
-    std::optional<Address> trace_pc_end;
-    std::optional<Counter> trace_after_cycle;
-    std::optional<Counter> trace_before_cycle;
+    std::optional<simrv::xlen::Address> trace_pc_start;
+    std::optional<simrv::xlen::Address> trace_pc_end;
+    std::optional<simrv::xlen::Counter> trace_after_cycle;
+    std::optional<simrv::xlen::Counter> trace_before_cycle;
     std::string fn_save_checkpoint;
     std::string fn_load_checkpoint;
-    Counter checkpoint_every = 0;
+    simrv::xlen::Counter checkpoint_every = 0;
     std::string checkpoint_dir;
     std::string inspection_output;
 
-    Address start_pc = simrv::boot::kStartPc;
-    Counter fincnt = std::numeric_limits<Counter>::max();
-    Counter memimg = std::numeric_limits<Counter>::max();
-    Counter strace = 0;
-    Counter trace_begin = std::numeric_limits<Counter>::max();
-    Counter trace_end = std::numeric_limits<Counter>::max();
-    Counter enabletimer = 0UL;
-    Address isatest_tohost = 0x80001000;
-    isa::IsaPreset isa_preset = isa::IsaPreset::GCBV;
+    simrv::xlen::Address start_pc = simrv::boot::kStartPc;
+    simrv::xlen::Counter fincnt = std::numeric_limits<simrv::xlen::Counter>::max();
+    simrv::xlen::Counter memimg = std::numeric_limits<simrv::xlen::Counter>::max();
+    simrv::xlen::Counter strace = 0;
+    simrv::xlen::Counter trace_begin = std::numeric_limits<simrv::xlen::Counter>::max();
+    simrv::xlen::Counter trace_end = std::numeric_limits<simrv::xlen::Counter>::max();
+    simrv::xlen::Counter enabletimer = 0UL;
+    simrv::xlen::Address isatest_tohost = 0x80001000;
+    isa::IsaPreset isa_preset = isa::IsaPreset::GCV;
+    bool has_zb_extensions = false;
+    std::vector<std::string> isa_extensions{};
     bool misa_override = false;
     unsigned int misa_xlen = 0;
 
@@ -120,7 +123,10 @@ struct RuntimeOptions {
     unsigned int vlen = 0;
     uint32_t num_harts = 1;
     uint32_t smp_quantum = 100;
-    bool smp_multithreaded = false;
+    std::optional<simrv::core::SmpMode> smp_mode;
+    bool explicit_num_harts = false;
+    bool explicit_smp_quantum = false;
+    bool explicit_smp_mode = false;
     uint64_t dram_size = 0;
     simrv::core::PlatformProfile platform_profile = simrv::core::PlatformProfile::Pcie;
     std::string soc_preset = "virt-pcie";
@@ -145,7 +151,13 @@ auto parse_command_line(std::span<char* const> args) -> std::expected<ParseResul
 auto apply_runtime_options(simrv::core::Machine* machine, const RuntimeOptions& options)
     -> std::expected<void, std::string>;
 [[noreturn]] auto usage(std::string_view prog_name, int status) -> void;
-[[noreturn]] auto option_error(std::string_view msg, int status = 1) -> void;
+[[noreturn]] auto usage(std::string_view prog_name,
+                        simrv::core::HostExitCode status = simrv::core::HostExitCode::Success)
+    -> void;
+[[noreturn]] auto option_error(std::string_view msg, int status) -> void;
+[[noreturn]] auto option_error(
+    std::string_view msg, simrv::core::HostExitCode status = simrv::core::HostExitCode::UsageError)
+    -> void;
 auto needs_memory_image(const ParseResult& result) -> bool;
 
 }  // namespace simrv::util

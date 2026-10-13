@@ -11,7 +11,13 @@
 #include <string>
 #include <string_view>
 
+#include "simrv/core/Cpu.hpp"
 #include "simrv/core/Machine.hpp"
+#include "simrv/core/TrapController.hpp"
+#include "simrv/debug/BreakpointManager.hpp"
+#include "simrv/debug/SymbolTable.hpp"
+#include "simrv/isa/Common.hpp"
+#include "simrv/memory/MemorySubsystem.hpp"
 #include "simrv/memory/MemoryUtil.hpp"
 #include "simrv/pipeline/OperationInfo.hpp"
 #include "simrv/pipeline/Scoreboard.hpp"
@@ -38,6 +44,7 @@
 #include "simrv/tui/panels/StatusBar.hpp"
 #include "simrv/tui/panels/TerminalPane.hpp"
 #include "simrv/util/CliParser.hpp"
+#include "simrv/util/InstructionExplainer.hpp"
 
 namespace simrv::tui {
 struct TuiTestAccess {
@@ -125,6 +132,9 @@ struct TuiTestAccess {
     }
     static void set_workbench_slots(Tui& tui, std::vector<WorkbenchSlot> slots) {
         tui.workbench_slots_ = std::move(slots);
+    }
+    static void set_preferences_path(Tui& tui, std::filesystem::path path) {
+        tui.preferences_path_ = std::move(path);
     }
 };
 
@@ -230,7 +240,7 @@ void test_tui_preferences_round_trip() {
 
     TuiPreferences expected;
     expected.layout = TuiLayout::ThreeColumn;
-    expected.slots = {{TuiRegPage::TRACE, 3}, {TuiRegPage::BUS, 1}, {TuiRegPage::CONSOLE, 0}};
+    expected.slots = {{TuiRegPage::TRACE, 3}, {TuiRegPage::BUS, 1}, {TuiRegPage::LIVE, 0}};
     expected.focused_slot = 1;
     expected.inspector_width = 42;
     expected.column_widths = {42, 35, 28, -1};
@@ -247,6 +257,7 @@ void test_tui_preferences_round_trip() {
     expect(actual.layout == expected.layout && actual.slots.size() == expected.slots.size() &&
                actual.slots[0].page == expected.slots[0].page &&
                actual.slots[0].scroll_offset == expected.slots[0].scroll_offset &&
+               actual.slots[2].page == TuiRegPage::LIVE &&
                actual.focused_slot == expected.focused_slot &&
                actual.column_widths == expected.column_widths && actual.theme == expected.theme &&
                actual.high_contrast && actual.class_mode && actual.student_guide &&
@@ -520,7 +531,7 @@ void test_sysconfig_modal_modes() {
     settings_draft.tui_fps = 30;
     settings_draft.num_harts = 1;
     settings_draft.smp_quantum = 1000;
-    settings_draft.smp_multithreaded = false;
+    settings_draft.smp_cycle_oriented = false;
     int s_cursor = 0;
 
     SettingsModal::move_cursor(s_cursor, 3);
@@ -533,7 +544,8 @@ void test_sysconfig_modal_modes() {
     expect(settings_draft.num_harts == 4, "Settings modal adjusts SMP active core count");
 
     SettingsModal::adjust_setting(settings_draft, 5, 1);
-    expect(settings_draft.smp_multithreaded == true, "Settings modal toggles SMP worker threads");
+    expect(settings_draft.smp_cycle_oriented == true,
+           "Settings modal toggles the SMP execution mode");
 
     SettingsModal::adjust_setting(settings_draft, 6, 1);
     expect(settings_draft.smp_quantum == 2500, "Settings modal advances SMP quantum level");
@@ -552,8 +564,8 @@ void test_sysconfig_modal_modes() {
     simrv::core::Machine live_mode_machine;
     SettingsDraft mode_draft;
     SettingsModal::open(mode_draft, live_mode_machine);
-    expect(mode_draft.misa.ext_x && (mode_draft.misa.to_misa_val() & (1ULL << ('x' - 'a'))) != 0,
-           "Settings modal preserves MISA.X for SimRV non-standard extensions");
+    expect((mode_draft.misa.to_misa_val() & (1ULL << ('x' - 'a'))) == 0,
+           "Settings modal does not advertise unsupported non-standard extensions");
     mode_draft.cycle_accurate = true;
     mode_draft.sys_config.cycle_accurate = true;
     expect(SettingsModal::submit(mode_draft, live_mode_machine, [](simrv::tui::TuiRegPage) {}),
@@ -631,6 +643,63 @@ void test_page_guidance() {
     expect(empty_guidance.next_action == simrv::tui::KeyAction::LoadBinary &&
                empty_guidance.meaning.contains("No program"),
            "an empty classroom session guides the student into the program loader");
+
+    auto trap_guidance = simrv::tui::guidance_for_context(
+        {.page = TuiRegPage::GPR, .has_pending_trap = true, .trap_cause = 2});
+    expect(trap_guidance.title.contains("Trap") &&
+               trap_guidance.meaning.contains("Illegal instruction"),
+           "pending traps receive diagnostic guidance with trap cause name");
+    expect(trap_guidance.glossary_topic == 5, "trap guidance references Privilege glossary topic");
+
+    auto csr_guidance = simrv::tui::guidance_for_context(
+        {.page = TuiRegPage::GPR, .is_csr_op = true, .csr_address = 0x180});
+    expect(
+        csr_guidance.title.contains("satp") && csr_guidance.meaning.contains("Address Translation"),
+        "CSR operations receive educational metadata guidance");
+    expect(csr_guidance.glossary_topic == 5, "CSR guidance references Privilege glossary topic");
+
+    auto tlb_guidance_bare =
+        simrv::tui::guidance_for_context({.page = TuiRegPage::TLB, .translation_enabled = false});
+    expect(tlb_guidance_bare.meaning.contains("Bare mode"),
+           "bare mode TLB explains disabled translation");
+    auto tlb_guidance_paged =
+        simrv::tui::guidance_for_context({.page = TuiRegPage::TLB, .translation_enabled = true});
+    expect(tlb_guidance_paged.meaning.contains("active"), "paged TLB explains active translation");
+
+    auto vec_guidance =
+        simrv::tui::guidance_for_context({.page = TuiRegPage::VEC,
+                                          .operation = simrv::isa::OperationId::VADD_VV,
+                                          .is_vector_op = true});
+    expect(vec_guidance.title.contains("Vector") && vec_guidance.meaning.contains("element lanes"),
+           "vector instructions receive vector lane guidance");
+
+    auto cfu_guidance = simrv::tui::guidance_for_context({.operation = simrv::isa::OperationId::CFU,
+                                                          .image_loaded = true,
+                                                          .is_cfu_op = true,
+                                                          .cfu_funct7 = 0x05,
+                                                          .cfu_funct3 = 4,
+                                                          .cfu_has_plugin = false,
+                                                          .cfu_latency = 1,
+                                                          .cfu_stall_cycles = 0});
+    expect(
+        cfu_guidance.title.contains("Custom Function Unit") && cfu_guidance.title.contains("func4"),
+        "CFU instruction receives dedicated student guidance with func index");
+    expect(cfu_guidance.meaning.contains("rvproc_cfu") && cfu_guidance.glossary_topic == 1,
+           "CFU student guidance references built-in hardware model and pipeline glossary");
+
+    auto cfu_plugin_guidance =
+        simrv::tui::guidance_for_context({.operation = simrv::isa::OperationId::CFU,
+                                          .image_loaded = true,
+                                          .is_cfu_op = true,
+                                          .cfu_funct7 = 0x10,
+                                          .cfu_funct3 = 1,
+                                          .cfu_has_plugin = true,
+                                          .cfu_plugin_path = "/path/libcfu.so",
+                                          .cfu_latency = 3,
+                                          .cfu_stall_cycles = 2});
+    expect(cfu_plugin_guidance.meaning.contains("external accelerator plugin") &&
+               cfu_plugin_guidance.meaning.contains("3 cycle latency"),
+           "CFU plugin guidance reports external plugin and multi-cycle stall latency");
 }
 
 void test_cleanup_input_boundaries() {
@@ -874,23 +943,148 @@ void test_tui_running_state_synchronization() {
     auto tui = std::make_shared<simrv::tui::Tui>(machine);
     machine.set_telemetry_sink(tui);
     machine.set_console_sink(tui);
+    simrv::tui::TuiTestAccess::set_workbench_slots(*tui, {{simrv::tui::TuiRegPage::GPR, 0},
+                                                          {simrv::tui::TuiRegPage::CONSOLE, 0},
+                                                          {simrv::tui::TuiRegPage::DISPLAY, 0}});
+    const auto preferences_path =
+        std::filesystem::temp_directory_path() / "simrv-live-overview-preferences.conf";
+    simrv::tui::TuiTestAccess::set_preferences_path(*tui, preferences_path);
+    simrv::tui::TuiTestAccess::set_focused_slot(*tui, 1);
     expect(machine.execution_state() == simrv::core::ExecutionState::Paused,
            "machine starts in Paused state when TUI is enabled");
     expect(machine.is_paused(), "machine.is_paused() returns true on startup with TUI");
     expect(tui->is_paused(), "tui.is_paused() is true on startup");
     tui->set_paused(false);
     expect(!tui->is_paused(), "tui.is_paused() is false after unpausing");
+    expect(tui->get_workbench_slots()[0].page == simrv::tui::TuiRegPage::LIVE,
+           "running while Console is focused shows Live in the first inspector column");
+    expect(tui->get_workbench_slots()[1].page == simrv::tui::TuiRegPage::CONSOLE,
+           "starting execution leaves the other workbench column unchanged");
+    tui->save_preferences();
+    simrv::tui::TuiPreferences saved_preferences;
+    expect(saved_preferences.load(preferences_path) && saved_preferences.slots.size() == 3 &&
+               saved_preferences.slots[0].page == simrv::tui::TuiRegPage::GPR &&
+               saved_preferences.slots[1].page == simrv::tui::TuiRegPage::CONSOLE &&
+               saved_preferences.slots[2].page == simrv::tui::TuiRegPage::DISPLAY,
+           "saving while running does not persist the temporary Live page");
     expect(machine.execution_state() == simrv::core::ExecutionState::Running,
            "machine execution state is Running after unpausing TUI");
     expect(!machine.is_paused(), "machine.is_paused() is false after unpausing");
 
     tui->set_paused(true);
     expect(tui->is_paused(), "tui.is_paused() is true after pausing");
+    expect(tui->get_workbench_slots()[0].page == simrv::tui::TuiRegPage::GPR,
+           "pausing restores the inspector that was visible before execution");
+    expect(tui->focused_slot() == 1,
+           "showing Live from a Console-focused state does not move keyboard focus");
     expect(machine.execution_state() == simrv::core::ExecutionState::Paused,
            "machine execution state is Paused after pausing TUI");
     expect(machine.is_paused(), "machine.is_paused() is true after pausing");
+
+    simrv::tui::TuiTestAccess::set_focused_slot(*tui, 2);
+    tui->set_paused(false);
+    expect(tui->get_workbench_slots()[0].page == simrv::tui::TuiRegPage::LIVE &&
+               tui->get_workbench_slots()[2].page == simrv::tui::TuiRegPage::DISPLAY,
+           "running while Display is focused shows Live without replacing the display");
+    tui->set_paused(true);
+    expect(tui->get_workbench_slots()[0].page == simrv::tui::TuiRegPage::GPR,
+           "pausing after a Display-focused run restores the inspector page");
+
+    simrv::tui::TuiTestAccess::set_focused_slot(*tui, 0);
+    tui->set_paused(false);
+    tui->set_workbench_slot_page(0, simrv::tui::TuiRegPage::STACK);
+    tui->set_paused(true);
+    expect(tui->get_workbench_slots()[0].page == simrv::tui::TuiRegPage::STACK,
+           "pausing preserves a manual inspector choice made while execution runs");
+
     machine.set_telemetry_sink(nullptr);
     machine.set_console_sink(nullptr);
+    tui.reset();
+    std::error_code ignored;
+    std::filesystem::remove(preferences_path, ignored);
+}
+
+void test_live_overview_snapshots_and_hart_rows() {
+    using namespace simrv::tui;
+    simrv::core::Machine machine(simrv::core::MachineConfig{
+        .execution = {.num_harts = 2}, .tui = {.enabled = true, .inspection_output = {}}});
+    machine.add_hart_for_testing(std::make_unique<simrv::core::CPU>());
+    auto& hart0 = machine.hart(0);
+    auto& hart1 = machine.hart(1);
+    hart0.state().pc = 0x80000100;
+    hart0.state().priv = simrv::xlen::PrivilegeLevel::Machine;
+    hart0.e_icount = 1200;
+    hart0.clint_mmio.mcycle = 3000;
+    hart1.state().pc = 0x8000abcd;
+    hart1.state().priv = simrv::xlen::PrivilegeLevel::Supervisor;
+    hart1.e_icount = 800;
+    hart1.clint_mmio.mcycle = 5000;
+    hart0.clint_mmio.mtime.store(15'000'000);
+    // Resolve a real executable symbol so the Live view exercises PC annotation as well as
+    // preserving the raw architectural address.
+    if (machine.symbol_table().load_from_elf("/proc/self/exe")) {
+        if (const auto main_address = machine.symbol_table().lookup_name("main")) {
+            hart0.state().pc = *main_address;
+        }
+    }
+    machine.publish_tui_execution_snapshot_for_testing();
+    hart0.state().pc = 0xdead;
+    hart1.state().pc = 0xbeef;
+    hart1.state().priv = simrv::xlen::PrivilegeLevel::User;
+
+    InspectorPane pane(machine);
+    pane.set_selected_hart(1);
+    pane.refresh_execution_snapshot();
+    pane.set_page(TuiRegPage::LIVE);
+    pane.set_paused(false);
+    pane.set_active_runtime(2.0);
+    pane.set_kips(1234);
+    pane.set_max_kips(2300);
+    pane.set_visible_rows(30);
+
+    const auto h0 = strip_ansi(pane.render_row(4, 80));
+    const auto h1 = strip_ansi(pane.render_row(5, 80));
+    expect(h0.contains("H0") && h0.contains("M") && h0.contains("main"),
+           "Live Overview renders hart 0 PC symbol and machine privilege from its snapshot");
+    expect(h1.contains(">H1") && h1.contains("S") && h1.contains("8000abcd"),
+           "Live Overview marks selected hart and renders supervisor privilege from its snapshot");
+    expect(strip_ansi(pane.render_row(7, 80)).contains("2,000"),
+           "Live Overview aggregates retired instructions across harts");
+    expect(strip_ansi(pane.render_row(7, 80)).contains("8,000"),
+           "Live Overview labels and aggregates hart cycles across harts");
+    expect(strip_ansi(pane.render_row(8, 80)).contains("1.23 MIPS") &&
+               strip_ansi(pane.render_row(8, 80)).contains("1.0 KIPS"),
+           "Live Overview shows recent and average throughput");
+    expect(strip_ansi(pane.render_row(9, 80)).contains("IPC") &&
+               strip_ansi(pane.render_row(9, 80)).contains("CPI"),
+           "Live Overview shows aggregate IPC and CPI");
+    expect(strip_ansi(pane.render_row(10, 80)).contains("2.00s") &&
+               strip_ansi(pane.render_row(10, 80)).contains("1.50s"),
+           "Live Overview shows host runtime and guest virtual time");
+    expect(strip_ansi(pane.render_row(11, 80)).contains("instruction-fast") &&
+               strip_ansi(pane.render_row(11, 80)).contains("2.30 MIPS"),
+           "Live Overview shows execution engine and peak throughput");
+    machine.runtime_profile.engine = simrv::core::ExecutionEngine::CycleFast;
+    expect(strip_ansi(pane.render_row(2, 80)).contains("CA"),
+           "Live Overview identifies cycle-accurate execution mode");
+
+    pane.set_visible_rows(8);
+    (void)pane.render_row(2, 32);
+    pane.scroll(1, 32);
+    const auto scrolled = strip_ansi(pane.render_row(4, 32));
+    expect(scrolled.contains("H1"),
+           "narrow Live Overview scrolls to hart rows beyond the viewport");
+
+    simrv::core::Machine empty_machine;
+    empty_machine.publish_tui_execution_snapshot_for_testing();
+    InspectorPane empty_pane(empty_machine);
+    empty_pane.refresh_execution_snapshot();
+    empty_pane.set_page(TuiRegPage::LIVE);
+    empty_pane.set_paused(true);
+    empty_pane.set_visible_rows(30);
+    expect(strip_ansi(empty_pane.render_row(7, 80)).contains("0.0 KIPS") &&
+               strip_ansi(empty_pane.render_row(8, 80)).contains("0.00"),
+           "zero-count startup renders finite throughput and aggregate ratios");
 }
 
 void test_inspection_report() {
@@ -900,7 +1094,7 @@ void test_inspection_report() {
     simrv::core::Machine machine(config);
     machine.add_hart_for_testing(std::make_unique<simrv::core::CPU>());
     machine.hart(1).state().pc = 0x80000100;
-    machine.hart(1).state().regs.write(RegId::A0, 42);
+    machine.hart(1).state().regs.write(simrv::xlen::RegId::A0, 42);
     machine.hart(1).pipeline_context.op_id = simrv::isa::OperationId::ADDI;
     machine.hart(1).pipeline_context.ir_org = 0x02A00513;
 
@@ -1033,6 +1227,17 @@ void test_category_groups_and_glossary() {
     expect(pipeline_text.contains("◦") && pipeline_text.contains("Forwarding") &&
                pipeline_text.contains("Load-use interlock"),
            "pipeline glossary uses nested bullets for hazard mitigations");
+
+    std::vector<std::string> cfu_pipeline_rows;
+    simrv::tui::modals::GlossaryModal::render(
+        cfu_pipeline_rows,
+        [&cfu_pipeline_rows](const std::string& row) { cfu_pipeline_rows.push_back(row); }, 1, 15,
+        30, 78);
+    std::string cfu_pipeline_text;
+    for (auto const& row : cfu_pipeline_rows) cfu_pipeline_text += row + '\n';
+    expect(cfu_pipeline_text.contains("Custom function units") &&
+               cfu_pipeline_text.contains("CUSTOM_0"),
+           "pipeline glossary includes CFU accelerator concepts");
 
     std::vector<std::string> scrolled_pipeline_rows;
     simrv::tui::modals::GlossaryModal::render(
@@ -1324,7 +1529,7 @@ void test_log_buffer_wrapping() {
     buffer.push("Short log line");
     buffer.push(
         "\033[36mLoaded 105604 symbols from ELF image: "
-        "linux-images/rv64/fw_payload.elf\033[0m");
+        "linux-images/rv64/alpine-gui/opensbi-linux-payload.elf\033[0m");
 
     auto lines_w30 = buffer.get_wrapped_lines(30, 20);
     expect(lines_w30.size() >= 3, "Log wrapped across multiple lines when width=30");
@@ -1403,18 +1608,18 @@ void test_modal_components() {
 
 void test_instruction_explainer_is_side_effect_free() {
     simrv::core::Machine machine;
-    std::vector<Byte> ram(1024 * 1024, Byte{0});
+    std::vector<simrv::xlen::Byte> ram(1024 * 1024, simrv::xlen::Byte{0});
     machine.set_ram_for_testing(ram);
     expect(machine.ram_view().span().size() == ram.size(), "RamView span matches backing size");
     auto& cpu = machine.primary_hart();
     cpu.machine_ = &machine;
     cpu.reset();
-    constexpr Address pc = simrv::memory::kDramBaseAddress;
-    constexpr Instruction addi = 0x00100093U;
+    constexpr simrv::xlen::Address pc = simrv::memory::kDramBaseAddress;
+    constexpr simrv::xlen::Instruction addi = 0x00100093U;
     std::memcpy(ram.data(), &addi, sizeof(addi));
     cpu.state().pc = pc;
     cpu.pipeline_context.ir = 0xDEADBEEFU;
-    cpu.pipeline_context.cpc = VirtAddr{pc + 0x40};
+    cpu.pipeline_context.cpc = simrv::xlen::VirtAddr{pc + 0x40};
 
     const auto before_pc = cpu.state().pc;
     const auto before_context_ir = cpu.pipeline_context.ir;
@@ -1455,9 +1660,78 @@ void test_instruction_explainer_is_side_effect_free() {
     expect(found_rd_bank, "explainer renders destination register bank classification");
 }
 
+void test_instruction_explainer_and_csr_metadata() {
+    // 1. CSR metadata queries
+    auto satp_details = simrv::util::get_csr_details(0x180);
+    expect(satp_details.has_value() && satp_details->name == "satp", "satp metadata is resolved");
+    expect(satp_details->min_privilege == simrv::xlen::PrivilegeLevel::Supervisor,
+           "satp requires Supervisor privilege");
+    expect(!satp_details->read_only, "satp is read-write");
+
+    auto vstart_details = simrv::util::get_csr_details(0x008);
+    expect(vstart_details.has_value() && vstart_details->name == "vstart",
+           "vstart metadata is resolved");
+    expect(vstart_details->extension == "Vector", "vstart belongs to Vector extension");
+
+    auto stimecmp_details = simrv::util::get_csr_details(0x14D);
+    expect(stimecmp_details.has_value() && stimecmp_details->name == "stimecmp",
+           "stimecmp metadata is resolved");
+    expect(stimecmp_details->extension == "Sstc", "stimecmp belongs to Sstc extension");
+
+    auto mseccfg_details = simrv::util::get_csr_details(0x747);
+    expect(mseccfg_details.has_value() && mseccfg_details->name == "mseccfg",
+           "mseccfg metadata is resolved");
+    expect(mseccfg_details->extension == "Smepmp", "mseccfg belongs to Smepmp extension");
+
+    auto pmpcfg0_details = simrv::util::get_csr_details(0x3A0);
+    expect(pmpcfg0_details.has_value() && pmpcfg0_details->name == "pmpcfg0",
+           "pmpcfg0 metadata is resolved");
+
+    // 2. Vector and CFU operation details
+    auto vmv_desc = simrv::util::get_operation_details(simrv::isa::OperationId::VMV1R_V);
+    expect(vmv_desc.first == "VMV1R.V" && !vmv_desc.second.contains("UNKNOWN"),
+           "VMV1R.V has dedicated pedagogical description");
+
+    auto vadc_desc = simrv::util::get_operation_details(simrv::isa::OperationId::VADC_VVM);
+    expect(vadc_desc.first == "VADC.VVM" && !vadc_desc.second.contains("UNKNOWN"),
+           "VADC.VVM has dedicated pedagogical description");
+
+    auto cfu_desc = simrv::util::get_operation_details(simrv::isa::OperationId::CFU);
+    expect(cfu_desc.first == "CFU", "CFU mnemonic is resolved");
+
+    // 3. Extension classifications
+    expect(simrv::util::get_isa_extension_name(simrv::isa::OperationId::VCLMUL_VV) == "Zvbc",
+           "VCLMUL.VV classifies as Zvbc");
+    expect(simrv::util::get_isa_extension_name(simrv::isa::OperationId::VANDN_VV) == "Zvbb",
+           "VANDN.VV classifies as Zvbb");
+    expect(simrv::util::get_isa_extension_name(simrv::isa::OperationId::CFU) == "Custom",
+           "CFU classifies as Custom");
+
+    // 4. Trap cause naming updates (Privileged 1.13)
+    expect(simrv::core::trap_cause_name(to_trap_cause(ExceptionCode::SoftwareCheck)) ==
+               "Software check / pointer checking",
+           "SoftwareCheck trap cause is named canonically");
+    expect(simrv::core::trap_cause_name(to_trap_cause(ExceptionCode::HardwareError)) ==
+               "Hardware error",
+           "HardwareError trap cause is named canonically");
+
+    // 5. CFU format, traits, and details
+    expect(simrv::isa::get_instruction_format(simrv::isa::Opcode::Custom0) ==
+               simrv::isa::InstFormat::R,
+           "Custom0 opcode classifies as R-Type format");
+    expect(simrv::isa::is_cfu_op(simrv::isa::OperationId::CFU),
+           "CFU operation identifies as CFU op");
+
+    auto cfu_details = simrv::util::get_cfu_details(0x05, 4);
+    expect(cfu_details.name == "CFU" && cfu_details.funct3 == 4 && cfu_details.funct7 == 0x05,
+           "CFU details structure carries correct metadata");
+    expect(cfu_details.description.contains("custom function 4"),
+           "CFU description includes function selector");
+}
+
 void test_inspector_panels_traits_and_scoreboard() {
     simrv::core::Machine machine;
-    std::vector<Byte> ram(1024 * 1024, Byte{0});
+    std::vector<simrv::xlen::Byte> ram(1024 * 1024, simrv::xlen::Byte{0});
     machine.set_ram_for_testing(ram.data(), ram.size());
     auto& cpu = machine.primary_hart();
     cpu.machine_ = &machine;
@@ -1467,11 +1741,11 @@ void test_inspector_panels_traits_and_scoreboard() {
     machine.runtime_profile.engine = simrv::core::ExecutionEngine::CycleFast;
     cpu.ca_pipeline.execute->valid = true;
     cpu.ca_pipeline.execute->writes_int = true;
-    cpu.ca_pipeline.execute->wb_dest = static_cast<RegId>(1);
+    cpu.ca_pipeline.execute->wb_dest = static_cast<simrv::xlen::RegId>(1);
     cpu.ca_pipeline.execute->remaining_latency = 2;
     cpu.ca_pipeline.memory->valid = true;
     cpu.ca_pipeline.memory->writes_int = true;
-    cpu.ca_pipeline.memory->wb_dest = static_cast<RegId>(2);
+    cpu.ca_pipeline.memory->wb_dest = static_cast<simrv::xlen::RegId>(2);
     cpu.ca_pipeline.memory->wb_valid = true;
     machine.publish_tui_execution_snapshot_for_testing();
 
@@ -1508,13 +1782,13 @@ void test_inspector_panels_traits_and_scoreboard() {
     simrv::core::Machine smp_machine(simrv::core::MachineConfig{
         .execution = {.num_harts = 2}, .tui = {.enabled = true, .inspection_output = {}}});
     smp_machine.add_hart_for_testing(std::make_unique<simrv::core::CPU>());
-    std::vector<Byte> smp_ram(1024 * 1024, Byte{0});
+    std::vector<simrv::xlen::Byte> smp_ram(1024 * 1024, simrv::xlen::Byte{0});
     smp_machine.set_ram_for_testing(smp_ram.data(), smp_ram.size());
     smp_machine.runtime_profile.engine = simrv::core::ExecutionEngine::CycleFast;
     auto& secondary = smp_machine.hart(1);
     secondary.ca_pipeline.writeback->valid = true;
     secondary.ca_pipeline.writeback->writes_fp = true;
-    secondary.ca_pipeline.writeback->wb_dest = static_cast<RegId>(3);
+    secondary.ca_pipeline.writeback->wb_dest = static_cast<simrv::xlen::RegId>(3);
     secondary.ca_pipeline.writeback->wb_valid = true;
     for (const auto pipeline_type :
          {simrv::pipeline::PipelineType::ThreeStage, simrv::pipeline::PipelineType::FiveStage}) {
@@ -1523,10 +1797,10 @@ void test_inspector_panels_traits_and_scoreboard() {
         const auto primary_snapshot = smp_machine.tui_execution_snapshot(0);
         const auto secondary_snapshot = smp_machine.tui_execution_snapshot(1);
         expect(!primary_snapshot.scoreboard.is_busy(simrv::pipeline::operation::RegBank::Float,
-                                                    static_cast<RegId>(3)),
+                                                    static_cast<simrv::xlen::RegId>(3)),
                "scoreboard projection remains isolated by hart");
         expect(secondary_snapshot.scoreboard.can_forward(simrv::pipeline::operation::RegBank::Float,
-                                                         static_cast<RegId>(3)),
+                                                         static_cast<simrv::xlen::RegId>(3)),
                "three- and five-stage snapshots project FP forwarding state");
     }
 
@@ -1684,6 +1958,7 @@ void test_multicolumn_refinement() {
     simrv::tui::Tui cascade_tui(cascade_machine);
     simrv::tui::TuiTestAccess::init_panes(cascade_tui, cascade_machine);
     simrv::tui::TuiTestAccess::set_cached_term_width(cascade_tui, 220);
+    simrv::tui::TuiTestAccess::set_cached_term_height(cascade_tui, 50);
     cascade_tui.apply_layout_preset(simrv::tui::LayoutPreset::GeneralDebug);
     auto const cascade_before = simrv::tui::TuiTestAccess::column_widths(cascade_tui, 220);
     cascade_tui.adjust_inspector_width(6);
@@ -1822,12 +2097,12 @@ void test_horizontal_scrolling() {
 
 void test_stack_vertical_scrolling() {
     simrv::core::Machine machine;
-    std::array<Byte, 4096> backing{};
+    std::array<simrv::xlen::Byte, 4096> backing{};
     machine.set_ram_for_testing(backing.data(), backing.size());
     machine.memory().initialize_mmu();
 
     auto& cpu = machine.primary_hart();
-    cpu.state().regs.write(simrv::RegId::Sp, 0x80000400);
+    cpu.state().regs.write(simrv::xlen::RegId::Sp, 0x80000400);
 
     simrv::tui::InspectorPane pane(machine);
     pane.set_page(simrv::tui::TuiRegPage::STACK);
@@ -1946,7 +2221,7 @@ void test_inspector_vector_csr_rows() {
 
 void test_memory_inspector_and_custom_address() {
     simrv::core::Machine machine;
-    std::array<Byte, 4096> backing{};
+    std::array<simrv::xlen::Byte, 4096> backing{};
     machine.set_ram_for_testing(backing.data(), backing.size());
     machine.memory().initialize_mmu();
 
@@ -1965,7 +2240,7 @@ void test_memory_inspector_and_custom_address() {
     expect(stack_title.find("Stack") != std::string::npos, "default title contains Stack");
 
     // 2. Set custom address
-    const Address target_addr = 0x80000000;
+    const simrv::xlen::Address target_addr = 0x80000000;
     pane.set_inspect_addr(target_addr);
     expect(pane.is_custom_memory_inspect(), "custom memory inspect is active");
     const std::string mem_title = strip_ansi(pane.render_row(2, width));
@@ -2066,8 +2341,8 @@ void test_responsive_labels_and_header() {
     auto& ctx = machine.primary_hart().pipeline_context;
     ctx.opcode = simrv::isa::Opcode::Store;
     ctx.op_id = simrv::isa::OperationId::SD;
-    ctx.rs1 = static_cast<RegId>(5);  // t0
-    if constexpr (sizeof(Register) > 4) {
+    ctx.rs1 = static_cast<simrv::xlen::RegId>(5);  // t0
+    if constexpr (sizeof(simrv::xlen::Register) > 4) {
         ctx.rrs1 = 0xffffffffd60ef000ULL;
         ctx.rrs2 = 0xffffffd60ff00000ULL;
         ctx.mem_addr = 0xffffffffd60ef000ULL;
@@ -2105,11 +2380,11 @@ void test_tui_differential_rendering_and_throttling() {
     using namespace simrv::core;
 
     Machine machine(MachineConfig{.execution = {.appmode = true}, .tui = {.enabled = true}});
-    std::vector<Byte> ram(1024 * 1024, Byte{0});
+    std::vector<simrv::xlen::Byte> ram(1024 * 1024, simrv::xlen::Byte{0});
     machine.set_ram_for_testing(ram.data(), ram.size());
     machine.primary_hart().reset();
 
-    constexpr Instruction addi_inst = 0x00100093;  // addi x1, x0, 1
+    constexpr simrv::xlen::Instruction addi_inst = 0x00100093;  // addi x1, x0, 1
     std::memcpy(ram.data(), &addi_inst, sizeof(addi_inst));
     machine.primary_hart().state().pc = simrv::memory::kDramBaseAddress;
 
@@ -2189,7 +2464,7 @@ void test_tui_differential_rendering_and_throttling() {
 void test_multi_column_workbench_tools_and_swapping() {
     // 1. ToolPickerModal catalog and accelerator lookup
     const auto& tools = simrv::tui::modals::ToolPickerModal::all_tools();
-    expect(tools.size() == 14, "tool picker provides 14 selectable workbench tools");
+    expect(tools.size() == 15, "tool picker provides 15 selectable workbench tools");
     expect(simrv::tui::modals::ToolPickerModal::find_by_accelerator('g') ==
                simrv::tui::TuiRegPage::GPR,
            "accelerator 'g' maps to GPR");
@@ -2232,6 +2507,9 @@ void test_multi_column_workbench_tools_and_swapping() {
     expect(simrv::tui::modals::ToolPickerModal::find_by_accelerator('y') ==
                simrv::tui::TuiRegPage::DISPLAY,
            "accelerator 'y' maps to DISPLAY");
+    expect(simrv::tui::modals::ToolPickerModal::find_by_accelerator('l') ==
+               simrv::tui::TuiRegPage::LIVE,
+           "accelerator 'l' maps to Live Overview");
     expect(!simrv::tui::modals::ToolPickerModal::find_by_accelerator('q').has_value(),
            "accelerator 'q' is not bound to a tool (reserved for exit/close)");
 
@@ -2306,6 +2584,8 @@ void test_multi_column_workbench_tools_and_swapping() {
            "row 18 maps to tool 12 (CONSOLE)");
     expect(simrv::tui::modals::ToolPickerModal::tool_index_at_row(19) == 13,
            "row 19 maps to tool 13 (DISPLAY)");
+    expect(simrv::tui::modals::ToolPickerModal::tool_index_at_row(20) == 14,
+           "row 20 maps to tool 14 (LIVE)");
     expect(!simrv::tui::modals::ToolPickerModal::tool_index_at_row(2).has_value(),
            "row 2 is category banner, maps to no tool");
     expect(simrv::tui::modals::ToolPickerModal::row_for_tool_index(0) == 3,
@@ -2327,8 +2607,8 @@ void test_multi_column_workbench_tools_and_swapping() {
     }
     expect(found_modal_control, "modal control hitboxes are detectable for pointer styling");
     // TRACE (tool index 10) is at content row 16; terminal Y: start_y (3) + 1 (border) + 16
-    // (content) + 1 (1-indexed) = 21
-    auto click_res = modal.handle_click(60, 21, 120, 30);
+    // (content) + 1 (1-indexed) = 20 after Live Overview adds one row to the modal.
+    auto click_res = modal.handle_click(60, 20, 120, 30);
     expect(click_res == simrv::tui::TuiModal::ModalClickResult::Submit,
            "clicking tool row submits selection");
     expect(modal.get_tool_picker_cursor() == 10, "cursor updated to TRACE (index 10)");
@@ -2607,7 +2887,7 @@ void test_multi_column_panel_management_and_modal_usability() {
     const auto below_bg = rendered_overlay.find(simrv::tui::g_theme_modal_bg, below_badge);
     expect(below_badge != std::string::npos && below_bg != std::string::npos &&
                below_bg < below_row_end,
-        "modal background is restored after the bottom overflow indicator");
+           "modal background is restored after the bottom overflow indicator");
 
     // Test wheel down on modal
     modal.handle_wheel(1);
@@ -2622,7 +2902,7 @@ void test_multi_column_panel_management_and_modal_usability() {
     const auto above_bg = scrolled_overlay.find(simrv::tui::g_theme_modal_bg, above_badge);
     expect(above_badge != std::string::npos && above_bg != std::string::npos &&
                above_bg < above_row_end,
-        "modal background is restored after the top overflow indicator");
+           "modal background is restored after the top overflow indicator");
 
     // Test keyboard scrolling in help modal: j / k
     simrv::tui::TuiTestAccess::handle_modal_key(tui, 'j', simrv::tui::TuiKey::j);
@@ -2705,7 +2985,7 @@ void test_sixel_display_modal_clearing() {
     using namespace simrv::core;
 
     Machine machine(MachineConfig{.execution = {.appmode = true}, .tui = {.enabled = true}});
-    std::vector<Byte> ram(1024 * 1024, Byte{0});
+    std::vector<simrv::xlen::Byte> ram(1024 * 1024, simrv::xlen::Byte{0});
     machine.set_ram_for_testing(ram.data(), ram.size());
     machine.primary_hart().reset();
 
@@ -2805,7 +3085,7 @@ void test_sixel_fluid_framebuffer_updates() {
     Machine machine(MachineConfig{.memory = {.dram_size = test_dram_size},
                                   .execution = {.appmode = true},
                                   .tui = {.enabled = true}});
-    std::vector<Byte> ram(test_dram_size, Byte{0});
+    std::vector<simrv::xlen::Byte> ram(test_dram_size, simrv::xlen::Byte{0});
     machine.set_ram_for_testing(ram.data(), ram.size());
     machine.primary_hart().reset();
 
@@ -2830,8 +3110,8 @@ void test_sixel_fluid_framebuffer_updates() {
     expect(sig0 != 0, "initial sixel framebuffer signature is non-zero");
 
     // Modify a single pixel at an unaligned byte offset (offset 13, was skipped by 64-byte stride)
-    auto* fb_bytes = const_cast<Byte*>(fb.data());
-    fb_bytes[13] = Byte{0x42};
+    auto* fb_bytes = const_cast<simrv::xlen::Byte*>(fb.data());
+    fb_bytes[13] = simrv::xlen::Byte{0x42};
     tui.render(true);
 
     const auto sig1 = TuiTestAccess::sixel_framebuffer_signature(tui);
@@ -2940,6 +3220,7 @@ int main() {
     test_load_modal_path_completion();
     test_control_flow_calls_mission();
     test_tui_running_state_synchronization();
+    test_live_overview_snapshots_and_hart_rows();
     test_inspection_report();
     test_help_uses_canonical_registry();
     test_category_groups_and_glossary();
@@ -2951,6 +3232,7 @@ int main() {
     test_log_buffer_wrapping();
     test_modal_components();
     test_instruction_explainer_is_side_effect_free();
+    test_instruction_explainer_and_csr_metadata();
     test_inspector_panels_traits_and_scoreboard();
     test_multicolumn_refinement();
     test_horizontal_scrolling();

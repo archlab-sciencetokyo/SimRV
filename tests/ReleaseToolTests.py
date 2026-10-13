@@ -35,7 +35,7 @@ metadata = load("experiment_metadata", ROOT / "scripts/experiment_metadata.py")
 class ReleaseToolTests(unittest.TestCase):
     def test_release_workflow_publishes_curated_assets(self):
         workflow = (ROOT / ".github/workflows/release-binaries.yml").read_text()
-        cmake = (ROOT / "CMakeLists.txt").read_text()
+        cmake = (ROOT / "cmake/SimRVPackaging.cmake").read_text()
         manifest = json.loads((ROOT / "release/release-manifest.json").read_text())
         self.assertIn("publish-release:", workflow)
         self.assertIn("SimRV-rpm-packages-v${VERSION}.tar.gz", workflow)
@@ -222,7 +222,7 @@ class ReleaseToolTests(unittest.TestCase):
     def test_benchmark_modes_baremetal_command(self):
         args = types.SimpleNamespace(simrv="simrv", harts=4, os=False, disk=None, dtb=None,
                                      image="guest.elf", limit=1234, tohost="0x80001000",
-                                     smp_multithreaded=False)
+                                     smp_mode=None)
         command = benchmark_modes.command(args, "cycle-accurate", "5stage", False)
         self.assertEqual(command.count("--baremetal"), 1)
         self.assertNotIn("--os", command)
@@ -231,9 +231,9 @@ class ReleaseToolTests(unittest.TestCase):
         self.assertEqual(command[-2:], ["-H", "0x80001000"])
 
     def test_benchmark_modes_os_command(self):
-        args = types.SimpleNamespace(simrv="simrv", harts=1, os=True, disk="root.img",
+        args = types.SimpleNamespace(simrv="simrv", harts=1, os=True, disk="rootfs.img",
                                      dtb="virt.dtb", image="firmware.bin", limit=5678,
-                                     tohost=None, smp_multithreaded=False)
+                                     tohost=None, smp_mode=None)
         command = benchmark_modes.command(args, "fast", None, True)
         self.assertEqual(command.count("--os"), 1)
         self.assertNotIn("--baremetal", command)

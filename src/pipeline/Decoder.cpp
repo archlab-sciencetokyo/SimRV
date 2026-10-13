@@ -3,6 +3,7 @@
 #include <cstdio>
 #include <utility>
 
+#include "simrv/isa/Common.hpp"
 #include "simrv/isa/Compressed.hpp"
 #include "simrv/pipeline/DecodeTable.hpp"
 
@@ -651,7 +652,7 @@ constexpr std::array<OperationId, 8> kOpImmBaseTable = {
 };
 
 [[nodiscard]] constexpr auto decode_op_imm(uint32_t funct3, uint32_t funct7,
-                                           Instruction ir) noexcept -> OperationId {
+                                           simrv::xlen::Instruction ir) noexcept -> OperationId {
     if (funct3 < kOpImmBaseTable.size() && kOpImmBaseTable[funct3] != OperationId::UNKNOWN) {
         return kOpImmBaseTable[funct3];
     }
@@ -742,7 +743,7 @@ constexpr auto kOpStandardTable = generate_op_standard_table();
     return OperationId::UNKNOWN;
 }
 
-auto decode_op_imm32(uint32_t funct3, uint32_t funct7, Instruction ir) -> OperationId {
+auto decode_op_imm32(uint32_t funct3, uint32_t funct7, simrv::xlen::Instruction ir) -> OperationId {
     const uint32_t imm12 = ir >> 20;
     const uint32_t imm6 = imm12 >> 6;
     switch (funct3) {
@@ -804,7 +805,7 @@ constexpr auto kOp32StandardTable = generate_op32_standard_table();
     return OperationId::UNKNOWN;
 }
 
-auto decode_system_priv(uint32_t funct7, Instruction ir) -> OperationId {
+auto decode_system_priv(uint32_t funct7, simrv::xlen::Instruction ir) -> OperationId {
     const uint32_t f12 = ir >> 20;
     const bool rd_is_zero = ((ir >> 7U) & 0x1FU) == 0;
     const bool rs1_is_zero = ((ir >> 15U) & 0x1FU) == 0;
@@ -837,7 +838,7 @@ constexpr std::array<OperationId, 8> kSystemCsrTable = {
 
 constexpr auto decode_system_csr = decode_table<kSystemCsrTable>;
 
-auto decode_system(uint32_t funct3, uint32_t funct7, Instruction ir) -> OperationId {
+auto decode_system(uint32_t funct3, uint32_t funct7, simrv::xlen::Instruction ir) -> OperationId {
     if (funct3 == 0) {
         return decode_system_priv(funct7, ir);
     }
@@ -851,7 +852,8 @@ constexpr std::array<OperationId, 8> kMiscMemTable = {
 
 constexpr auto decode_misc_mem = decode_table<kMiscMemTable>;
 
-auto decode_ext_i(Opcode op, uint32_t funct3, uint32_t funct7, Instruction ir) -> OperationId {
+auto decode_ext_i(Opcode op, uint32_t funct3, uint32_t funct7, simrv::xlen::Instruction ir)
+    -> OperationId {
     switch (op) {
         case Opcode::Lui:
             return OperationId::LUI;
@@ -935,18 +937,19 @@ consteval auto generate_amo_table() {
 
 constexpr auto kAmoTable = generate_amo_table();
 
-[[nodiscard]] constexpr auto decode_ext_a(uint32_t funct7, uint32_t funct3, uint32_t rs2) noexcept
-    -> OperationId {
-    if (!isa::amo_width_supported(static_cast<isa::Funct3>(funct3))) {
+[[nodiscard]] constexpr auto decode_ext_a(simrv::xlen::Funct7 funct7, isa::Funct3 funct3,
+                                          simrv::xlen::RegId rs2) noexcept -> OperationId {
+    if (!isa::amo_width_supported(funct3)) {
         return OperationId::UNKNOWN;
     }
-    const uint32_t funct5 = funct7 >> 2;
+    const auto funct5 = static_cast<isa::Funct5Amo>(funct7 >> 2);
     // LR.W/LR.D reserve rs2=0; nonzero rs2 is a reserved instruction encoding.
-    if (funct5 == enum_mask(isa::Funct5Amo::Lr) && rs2 != 0) {
+    if (funct5 == isa::Funct5Amo::Lr && rs2 != simrv::xlen::RegId::Zero) {
         return OperationId::UNKNOWN;
     }
-    if (funct5 < 32) {
-        return kAmoTable.lookup(funct3 - 2, funct5);
+    const auto funct5_idx = std::to_underlying(funct5);
+    if (funct5_idx < 32) {
+        return kAmoTable.lookup(std::to_underlying(funct3) - 2, funct5_idx);
     }
     return OperationId::UNKNOWN;
 }
@@ -1388,7 +1391,8 @@ constexpr auto kVectorCommonTable = generate_vector_common_table();
 constexpr auto kVectorMaskedTable = generate_vector_mask_table(false);
 constexpr auto kVectorUnmaskedTable = generate_vector_mask_table(true);
 
-auto decode_ext_v_special(uint32_t f6, uint32_t funct3, Instruction ir) -> OperationId {
+auto decode_ext_v_special(uint32_t f6, uint32_t funct3, simrv::xlen::Instruction ir)
+    -> OperationId {
     switch (f6) {
         case 0x10:
             if (funct3 == 2) {
@@ -1472,7 +1476,7 @@ auto decode_ext_v_special(uint32_t f6, uint32_t funct3, Instruction ir) -> Opera
     return OperationId::UNKNOWN;
 }
 
-auto decode_vector_whole_register_move(Instruction ir) -> OperationId {
+auto decode_vector_whole_register_move(simrv::xlen::Instruction ir) -> OperationId {
     switch ((ir >> 15) & 0x1F) {
         case 0:
             return OperationId::VMV1R_V;
@@ -1489,7 +1493,7 @@ auto decode_vector_whole_register_move(Instruction ir) -> OperationId {
 
 }  // namespace
 
-auto decode_ext_v(uint32_t funct3, uint32_t funct7, Instruction ir) -> OperationId {
+auto decode_ext_v(uint32_t funct3, uint32_t funct7, simrv::xlen::Instruction ir) -> OperationId {
     if (funct3 == 7) {
         if ((ir & (1u << 31)) == 0) {
             return OperationId::VSETVLI;
@@ -1526,8 +1530,8 @@ auto decode_ext_v(uint32_t funct3, uint32_t funct7, Instruction ir) -> Operation
                                                   : kVectorCommonTable.lookup(f6, funct3);
 }
 
-auto decode_ext_f_d(Opcode op, uint32_t funct3, uint32_t funct7, uint32_t rs2, Instruction ir)
-    -> OperationId {
+auto decode_ext_f_d(Opcode op, uint32_t funct3, uint32_t funct7, uint32_t rs2,
+                    simrv::xlen::Instruction ir) -> OperationId {
     switch (op) {
         case Opcode::LoadFp: {
             if (funct3 == 2) return OperationId::FLW;
@@ -1649,38 +1653,38 @@ auto decode_ext_f_d(Opcode op, uint32_t funct3, uint32_t funct7, uint32_t rs2, I
 }
 
 auto make_r_type(uint32_t opcode, uint32_t funct3, uint32_t funct7, uint32_t rd, uint32_t rs1,
-                 uint32_t rs2) -> Instruction {
+                 uint32_t rs2) -> simrv::xlen::Instruction {
     return opcode | (rd << 7) | (funct3 << 12) | (rs1 << 15) | (rs2 << 20) | (funct7 << 25);
 }
 
 auto make_i_type(uint32_t opcode, uint32_t funct3, uint32_t rd, uint32_t rs1, uint32_t imm)
-    -> Instruction {
+    -> simrv::xlen::Instruction {
     return opcode | (rd << 7) | (funct3 << 12) | (rs1 << 15) | ((imm & 0xFFF) << 20);
 }
 
 auto make_s_type(uint32_t opcode, uint32_t funct3, uint32_t rs1, uint32_t rs2, uint32_t imm)
-    -> Instruction {
+    -> simrv::xlen::Instruction {
     return opcode | ((imm & 0x1F) << 7) | (funct3 << 12) | (rs1 << 15) | (rs2 << 20) |
            (((imm >> 5) & 0x7F) << 25);
 }
 
 auto make_b_type(uint32_t opcode, uint32_t funct3, uint32_t rs1, uint32_t rs2, uint32_t imm)
-    -> Instruction {
+    -> simrv::xlen::Instruction {
     return opcode | (((imm >> 11) & 0x1) << 7) | (((imm >> 1) & 0xF) << 8) | (funct3 << 12) |
            (rs1 << 15) | (rs2 << 20) | (((imm >> 5) & 0x3F) << 25) | (((imm >> 12) & 0x1) << 31);
 }
 
-auto make_u_type(uint32_t opcode, uint32_t rd, uint32_t imm) -> Instruction {
+auto make_u_type(uint32_t opcode, uint32_t rd, uint32_t imm) -> simrv::xlen::Instruction {
     return opcode | (rd << 7) | (imm & 0xFFFFF000);
 }
 
-auto make_j_type(uint32_t opcode, uint32_t rd, uint32_t imm) -> Instruction {
+auto make_j_type(uint32_t opcode, uint32_t rd, uint32_t imm) -> simrv::xlen::Instruction {
     return opcode | (rd << 7) | (((imm >> 12) & 0xFF) << 12) | (((imm >> 11) & 0x1) << 20) |
            (((imm >> 1) & 0x3FF) << 21) | (((imm >> 20) & 0x1) << 31);
 }
 
-auto decompress_q0(Instruction ir, bool is_rv64, uint32_t op, uint32_t rs1_p, uint32_t rs2_p)
-    -> Instruction {
+auto decompress_q0(simrv::xlen::Instruction ir, bool is_rv64, uint32_t op, uint32_t rs1_p,
+                   uint32_t rs2_p) -> simrv::xlen::Instruction {
     switch (static_cast<isa::Q0Op>(op)) {
         case isa::Q0Op::ADDI4SPN: {
             const uint32_t imm = ((ir >> 7) & 0xF) << 6 | ((ir >> 11) & 0x3) << 4 |
@@ -1731,7 +1735,8 @@ auto decompress_q0(Instruction ir, bool is_rv64, uint32_t op, uint32_t rs1_p, ui
     }
 }
 
-auto decompress_q1_op4(Instruction ir, uint32_t rs1_p, uint32_t rs2_p) -> Instruction {
+auto decompress_q1_op4(simrv::xlen::Instruction ir, uint32_t rs1_p, uint32_t rs2_p)
+    -> simrv::xlen::Instruction {
     const uint32_t sub_op = (ir >> 10) & 0x3;
     if (sub_op == 0 || sub_op == 1) {
         const uint32_t shamt = ((ir >> 2) & 0x1F) | (((ir >> 12) & 0x1) << 5);
@@ -1770,7 +1775,8 @@ auto decompress_q1_op4(Instruction ir, uint32_t rs1_p, uint32_t rs2_p) -> Instru
     return 0;
 }
 
-auto decompress_q1_op1(Instruction ir, bool is_rv64, uint32_t rs1_rd) -> Instruction {
+auto decompress_q1_op1(simrv::xlen::Instruction ir, bool is_rv64, uint32_t rs1_rd)
+    -> simrv::xlen::Instruction {
     if (is_rv64) {
         const uint32_t imm = ((ir >> 2) & 0x1F) | (((ir >> 12) & 0x1) ? 0xFFFFFFE0 : 0);
         return make_i_type(0x1B, 0x0, rs1_rd, rs1_rd, imm);
@@ -1783,7 +1789,7 @@ auto decompress_q1_op1(Instruction ir, bool is_rv64, uint32_t rs1_rd) -> Instruc
     }
 }
 
-auto decompress_q1_op3(Instruction ir, uint32_t rs1_rd) -> Instruction {
+auto decompress_q1_op3(simrv::xlen::Instruction ir, uint32_t rs1_rd) -> simrv::xlen::Instruction {
     if (rs1_rd == 2) {
         const uint32_t imm = ((ir >> 2) & 0x1) << 5 | ((ir >> 3) & 0x3) << 7 |
                              ((ir >> 5) & 0x1) << 6 | ((ir >> 6) & 0x1) << 4 |
@@ -1795,8 +1801,8 @@ auto decompress_q1_op3(Instruction ir, uint32_t rs1_rd) -> Instruction {
     }
 }
 
-auto decompress_q1(Instruction ir, bool is_rv64, uint32_t op, uint32_t rs1_rd, uint32_t rs1_p,
-                   uint32_t rs2_p) -> Instruction {
+auto decompress_q1(simrv::xlen::Instruction ir, bool is_rv64, uint32_t op, uint32_t rs1_rd,
+                   uint32_t rs1_p, uint32_t rs2_p) -> simrv::xlen::Instruction {
     switch (static_cast<isa::Q1Op>(op)) {
         case isa::Q1Op::ADDI: {
             const uint32_t imm = ((ir >> 2) & 0x1F) | (((ir >> 12) & 0x1) ? 0xFFFFFFE0 : 0);
@@ -1833,7 +1839,8 @@ auto decompress_q1(Instruction ir, bool is_rv64, uint32_t op, uint32_t rs1_rd, u
     return 0;
 }
 
-auto decompress_q2_op4(Instruction ir, uint32_t rs1_rd, uint32_t rs2) -> Instruction {
+auto decompress_q2_op4(simrv::xlen::Instruction ir, uint32_t rs1_rd, uint32_t rs2)
+    -> simrv::xlen::Instruction {
     const uint32_t bit12 = (ir >> 12) & 0x1;
     if (bit12 == 0) {
         if (rs2 == 0) {
@@ -1851,8 +1858,8 @@ auto decompress_q2_op4(Instruction ir, uint32_t rs1_rd, uint32_t rs2) -> Instruc
     }
 }
 
-auto decompress_q2(Instruction ir, bool is_rv64, uint32_t op, uint32_t rs1_rd, uint32_t rs2)
-    -> Instruction {
+auto decompress_q2(simrv::xlen::Instruction ir, bool is_rv64, uint32_t op, uint32_t rs1_rd,
+                   uint32_t rs2) -> simrv::xlen::Instruction {
     switch (static_cast<isa::Q2Op>(op)) {
         case isa::Q2Op::SLLI: {
             const uint32_t shamt = ((ir >> 2) & 0x1F) | (((ir >> 12) & 0x1) << 5);
@@ -1906,14 +1913,14 @@ auto decompress_q2(Instruction ir, bool is_rv64, uint32_t op, uint32_t rs1_rd, u
 
 }  // namespace
 
-auto decoder(Instruction ir) -> OperationId {
+auto decoder(simrv::xlen::Instruction ir) -> OperationId {
     simrv::pipeline::Decoder dec(ir);
     const auto op = dec.opcode();
     const auto funct3 = std::to_underlying(dec.funct3());
     const auto funct7 = dec.funct7();
 
     if (op == Opcode::Amo) {
-        return decode_ext_a(funct7, funct3, std::to_underlying(dec.rs2()));
+        return decode_ext_a(funct7, dec.funct3(), dec.rs2());
     }
     if (op == Opcode::LoadFp || op == Opcode::StoreFp || op == Opcode::OpFp || op == Opcode::MAdd ||
         op == Opcode::MSub || op == Opcode::NMSub || op == Opcode::NMAdd) {
@@ -1939,7 +1946,7 @@ auto decoder(Instruction ir) -> OperationId {
     return res;
 }
 
-auto decompressInstruction(Instruction ir, bool is_rv64) -> Instruction {
+auto decompressInstruction(simrv::xlen::Instruction ir, bool is_rv64) -> simrv::xlen::Instruction {
     simrv::pipeline::Decoder dec(ir);
     if (!dec.is_compressed()) {
         return ir;

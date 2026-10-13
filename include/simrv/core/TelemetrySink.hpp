@@ -8,9 +8,9 @@
 #include <string>
 #include <string_view>
 
-#include "simrv/isa/Base.hpp"
+#include "simrv/isa/InstructionFields.hpp"
 #include "simrv/isa/OperationId.hpp"
-#include "simrv/xlen/Types.hpp"
+#include "simrv/xlen/ScalarTypes.hpp"
 
 namespace simrv::core {
 
@@ -41,12 +41,14 @@ class ITelemetrySink {
     virtual void set_target_fps(uint32_t fps) = 0;
     [[nodiscard]] virtual uint32_t target_fps() const = 0;
 
-    virtual void record_instruction(Register /*pc*/, simrv::isa::Opcode /*opcode*/,
+    virtual void record_instruction(simrv::xlen::Register /*pc*/, simrv::isa::Opcode /*opcode*/,
                                     simrv::isa::OperationId /*op_id*/, uint8_t /*rd*/,
-                                    Register /*rd_val*/, uint8_t /*rs1*/, Register /*rs1_val*/,
-                                    uint8_t /*rs2*/, Register /*rs2_val*/, int64_t /*imm*/,
+                                    simrv::xlen::Register /*rd_val*/, uint8_t /*rs1*/,
+                                    simrv::xlen::Register /*rs1_val*/, uint8_t /*rs2*/,
+                                    simrv::xlen::Register /*rs2_val*/, int64_t /*imm*/,
                                     uint8_t /*hart*/) {}
-    virtual void record_flight_instruction(Register /*pc*/, simrv::isa::Opcode /*opcode*/,
+    virtual void record_flight_instruction(simrv::xlen::Register /*pc*/,
+                                           simrv::isa::Opcode /*opcode*/,
                                            simrv::isa::OperationId /*op_id*/, uint8_t /*hart*/) {}
 };
 

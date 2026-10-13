@@ -6,10 +6,13 @@
 
 #include <string_view>
 
-#include "simrv/isa/Amo.hpp"                   // IWYU pragma: export
-#include "simrv/isa/Base.hpp"                  // IWYU pragma: export
-#include "simrv/isa/Compressed.hpp"            // IWYU pragma: export
-#include "simrv/isa/Fp.hpp"                    // IWYU pragma: export
+#include "simrv/isa/Amo.hpp"                // IWYU pragma: export
+#include "simrv/isa/Compressed.hpp"         // IWYU pragma: export
+#include "simrv/isa/Fp.hpp"                 // IWYU pragma: export
+#include "simrv/isa/InstructionFields.hpp"  // IWYU pragma: export
+#include "simrv/isa/InstructionFormat.hpp"  // IWYU pragma: export
+#include "simrv/isa/IsaConfig.hpp"
+#include "simrv/isa/IsaTypes.hpp"              // IWYU pragma: export
 #include "simrv/isa/OperationId.hpp"           // IWYU pragma: export
 #include "simrv/isa/Priv.hpp"                  // IWYU pragma: export
 #include "simrv/pipeline/OperationTraits.hpp"  // IWYU pragma: export
@@ -17,22 +20,21 @@
 
 namespace simrv::isa {
 
-constexpr Instruction kNop32 = 0x00000013;
-constexpr Instruction RV32_NOP = kNop32;
-
 /**
  * @brief Extracts the standard 7-bit base opcode from a 32-bit instruction word.
  * @param ir The raw instruction word.
  * @return Opcode enum representing bits [6:0].
  */
-constexpr auto opcode_of(Instruction ir) -> Opcode { return static_cast<Opcode>(ir & 0x7F); }
+constexpr auto opcode_of(simrv::xlen::Instruction ir) -> Opcode {
+    return static_cast<Opcode>(ir & 0x7F);
+}
 
 /**
  * @brief Extracts the 2-bit compressed opcode quadrant from a 16-bit compressed instruction.
  * @param ir The compressed instruction.
  * @return CompressedOpcode enum representing bits [1:0].
  */
-constexpr auto compressed_opcode_of(CompressedInstruction ir) -> CompressedOpcode {
+constexpr auto compressed_opcode_of(simrv::xlen::CompressedInstruction ir) -> CompressedOpcode {
     return static_cast<CompressedOpcode>(ir & 0x3);
 }
 
@@ -41,15 +43,17 @@ constexpr auto compressed_opcode_of(CompressedInstruction ir) -> CompressedOpcod
  * @param ir The raw instruction word.
  * @return Funct3 enum representing bits [14:12].
  */
-constexpr auto funct3_of(Instruction ir) -> Funct3 { return static_cast<Funct3>((ir >> 12) & 0x7); }
+constexpr auto funct3_of(simrv::xlen::Instruction ir) -> Funct3 {
+    return static_cast<Funct3>((ir >> 12) & 0x7);
+}
 
 /**
  * @brief Extracts the 12-bit funct12 field from a system/privileged instruction.
  * @param ir The raw instruction word.
  * @return 12-bit value representing bits [31:20].
  */
-constexpr auto funct12_of(Instruction ir) -> Funct12 {
-    return static_cast<Funct12>((ir >> 20) & 0xFFF);
+constexpr auto funct12_of(simrv::xlen::Instruction ir) -> simrv::xlen::Funct12 {
+    return static_cast<simrv::xlen::Funct12>((ir >> 20) & 0xFFF);
 }
 
 /**
@@ -57,8 +61,8 @@ constexpr auto funct12_of(Instruction ir) -> Funct12 {
  * @param ir The raw instruction word.
  * @return 7-bit value representing bits [31:25].
  */
-constexpr auto funct7_of(Instruction ir) -> Funct7 {
-    return static_cast<Funct7>((ir >> 25) & 0x7F);
+constexpr auto funct7_of(simrv::xlen::Instruction ir) -> simrv::xlen::Funct7 {
+    return static_cast<simrv::xlen::Funct7>((ir >> 25) & 0x7F);
 }
 
 /**
@@ -66,156 +70,8 @@ constexpr auto funct7_of(Instruction ir) -> Funct7 {
  * @param ir The raw instruction word.
  * @return Funct5Amo enum representing bits [31:27].
  */
-constexpr auto funct5_of(Instruction ir) -> Funct5Amo {
+constexpr auto funct5_of(simrv::xlen::Instruction ir) -> Funct5Amo {
     return static_cast<Funct5Amo>((ir >> 27) & 0x1F);
-}
-
-/**
- * @brief Return the natural access size encoded by an A-extension instruction.
- *
- * The standard encodes AMO.W with funct3=010 and AMO.D with funct3=011. Other encodings are
- * reserved and return zero so callers can reject them.
- */
-constexpr auto amo_operand_bytes(Funct3 funct3) -> unsigned {
-    if (funct3 == Funct3::Lw) return 4;
-    if (funct3 == Funct3::Ld) return 8;
-    return 0;
-}
-
-/** Return whether the AMO width exists for the build's architectural XLEN. */
-constexpr auto amo_width_supported(Funct3 funct3) -> bool {
-    return funct3 == Funct3::Lw || (simrv::xlen::kIsXLen64 && funct3 == Funct3::Ld);
-}
-
-/** Return whether an LR/SC/AMO effective address meets the A-extension alignment rule. */
-constexpr auto amo_address_aligned(Address address, Funct3 funct3) -> bool {
-    const unsigned bytes = amo_operand_bytes(funct3);
-    return bytes != 0 && (address & static_cast<Address>(bytes - 1U)) == 0;
-}
-
-/**
- * @brief Computes the bit mask for a specific ISA extension in the MISA CSR.
- * @param ext The target ISA extension.
- * @return CSRValue containing a single set bit at the extension position.
- */
-constexpr auto misa_extension_bit(IsaExtension ext) -> CSRValue {
-    return static_cast<CSRValue>(CSRValue{1} << static_cast<unsigned>(ext));
-}
-
-/**
- * @brief Computes the combined bitmask of all baseline supported extensions.
- * @return CSRValue mask for all base extensions.
- */
-constexpr auto misa_base_bits() -> CSRValue {
-    return misa_extension_bit(IsaExtension::I) | misa_extension_bit(IsaExtension::M) |
-           misa_extension_bit(IsaExtension::A) | misa_extension_bit(IsaExtension::B) |
-           misa_extension_bit(IsaExtension::F) | misa_extension_bit(IsaExtension::D) |
-           misa_extension_bit(IsaExtension::C) | misa_extension_bit(IsaExtension::S) |
-           misa_extension_bit(IsaExtension::U) | misa_extension_bit(IsaExtension::V);
-}
-
-/**
- * @brief Decodes the extension set mask matching a specified ISA preset.
- * @param preset The named ISA preset, including G/GC and the SimRV GCBV target preset.
- * @return CSRValue bitmask containing the preset's extensions.
- */
-constexpr auto isa_preset_bits(IsaPreset preset) -> CSRValue {
-    switch (preset) {
-        case IsaPreset::E:
-            return misa_extension_bit(IsaExtension::E);
-        case IsaPreset::EM:
-            return misa_extension_bit(IsaExtension::E) | misa_extension_bit(IsaExtension::M);
-        case IsaPreset::EMAC:
-            return misa_extension_bit(IsaExtension::E) | misa_extension_bit(IsaExtension::M) |
-                   misa_extension_bit(IsaExtension::A) | misa_extension_bit(IsaExtension::C);
-        case IsaPreset::I:
-            return misa_extension_bit(IsaExtension::I);
-        case IsaPreset::IM:
-            return misa_extension_bit(IsaExtension::I) | misa_extension_bit(IsaExtension::M);
-        case IsaPreset::IMA:
-            return misa_extension_bit(IsaExtension::I) | misa_extension_bit(IsaExtension::M) |
-                   misa_extension_bit(IsaExtension::A) | misa_extension_bit(IsaExtension::S) |
-                   misa_extension_bit(IsaExtension::U);
-        case IsaPreset::IMAC:
-            return misa_extension_bit(IsaExtension::I) | misa_extension_bit(IsaExtension::M) |
-                   misa_extension_bit(IsaExtension::A) | misa_extension_bit(IsaExtension::C);
-        case IsaPreset::G:
-            return misa_extension_bit(IsaExtension::I) | misa_extension_bit(IsaExtension::M) |
-                   misa_extension_bit(IsaExtension::A) | misa_extension_bit(IsaExtension::F) |
-                   misa_extension_bit(IsaExtension::D) | misa_extension_bit(IsaExtension::S) |
-                   misa_extension_bit(IsaExtension::U);
-        case IsaPreset::GC:
-            return isa_preset_bits(IsaPreset::G) | misa_extension_bit(IsaExtension::C);
-        case IsaPreset::GCBV:
-            return misa_base_bits();
-        default:
-            return misa_extension_bit(IsaExtension::I);
-    }
-}
-
-/**
- * @brief Computes the MXL (Machine XLEN) field mask to write to MISA bits [XLEN-1 : XLEN-2].
- * @return CSRValue containing the MXL value for either RV32 (01) or RV64 (10).
- */
-constexpr auto misa_mxl_field(unsigned int target_xlen = simrv::xlen::kXLenBits) -> CSRValue {
-    if constexpr (sizeof(CSRValue) == 4) {
-        // MXL=01 for RV32 in bits [31:30]
-        return static_cast<CSRValue>(1u << 30);
-    } else if constexpr (sizeof(CSRValue) == 8) {
-        if (target_xlen == 32) {
-            // MXL=01 for RV32 execution mode on RV64 in bits [63:62]
-            return static_cast<CSRValue>(1ull << 62);
-        }
-        // MXL=10 for RV64 in bits [63:62]
-        return static_cast<CSRValue>(2ull << 62);
-    } else {
-        return 0;
-    }
-}
-
-/**
- * @brief Integrates the target MXL field into an extensions mask to construct a valid MISA CSR
- * value.
- * @param misa_extensions The mask of enabled extensions.
- * @param target_xlen Architecture register width (32 or 64, defaults to simulator build XLEN).
- * @return Combined CSRValue containing both extensions and MXL configuration.
- */
-constexpr auto misa_with_mxl(CSRValue misa_extensions,
-                             unsigned int target_xlen = simrv::xlen::kXLenBits) -> CSRValue {
-    if constexpr (sizeof(CSRValue) == 4) {
-        return (misa_extensions & ~(static_cast<CSRValue>(3u) << 30)) | misa_mxl_field(target_xlen);
-    } else if constexpr (sizeof(CSRValue) == 8) {
-        return (misa_extensions & ~(static_cast<CSRValue>(3ull) << 62)) |
-               misa_mxl_field(target_xlen);
-    } else {
-        return misa_extensions | misa_mxl_field(target_xlen);
-    }
-}
-
-/** Default advertised target; V remains subject to the qualification limits documented separately.
- */
-constexpr CSRValue kMisaDefault = isa_preset_bits(IsaPreset::GCBV);
-
-/**
- * @brief Checks if a specific extension bit is set in a MISA CSR value.
- * @param misa The MISA register value.
- * @param ext The target extension.
- * @return True if the extension is enabled, false otherwise.
- */
-constexpr auto misa_has_extension(CSRValue misa, IsaExtension ext) -> bool {
-    return (misa & misa_extension_bit(ext)) != 0;
-}
-
-/**
- * @brief Apply the architectural IALIGN read mask to an exception PC.
- *
- * xepc[0] is always zero. When C is disabled and IALIGN is therefore 32,
- * xepc[1] also reads as zero (including the implicit read by xRET), while its
- * underlying writable value may be retained for a later IALIGN=16 setting.
- */
-constexpr auto epc_read_value(CSRValue epc, CSRValue misa) -> CSRValue {
-    const CSRValue alignment_mask = misa_has_extension(misa, IsaExtension::C) ? 1U : 3U;
-    return epc & ~alignment_mask;
 }
 
 /**
@@ -224,7 +80,8 @@ constexpr auto epc_read_value(CSRValue epc, CSRValue misa) -> CSRValue {
  * @param compressed True if the instruction is compressed (16-bit).
  * @return The required IsaExtension.
  */
-constexpr auto required_extension_for_instruction(Instruction ir, bool compressed) -> IsaExtension {
+constexpr auto required_extension_for_instruction(simrv::xlen::Instruction ir, bool compressed)
+    -> IsaExtension {
     if (compressed) {
         return IsaExtension::C;
     }
@@ -268,7 +125,8 @@ constexpr auto required_extension_for_instruction(Instruction ir, bool compresse
  * @param compressed True if the instruction is compressed.
  * @return True if the instruction is supported and enabled, false otherwise.
  */
-constexpr auto instruction_enabled_by_misa(CSRValue misa, Instruction ir, bool compressed) -> bool {
+constexpr auto instruction_enabled_by_misa(simrv::xlen::CsrValue misa, simrv::xlen::Instruction ir,
+                                           bool compressed) -> bool {
     return misa_has_extension(misa, required_extension_for_instruction(ir, compressed));
 }
 
@@ -278,9 +136,10 @@ constexpr auto instruction_enabled_by_misa(CSRValue misa, Instruction ir, bool c
  * operations currently represented by SimRV's B profile bit. Keep this operation-aware resolver at
  * the decode boundary so extension-disabled instructions never reach execution.
  */
-constexpr auto required_misa_extensions(OperationId op_id, bool compressed = false) -> CSRValue {
-    const CSRValue compressed_requirement =
-        compressed ? misa_extension_bit(IsaExtension::C) : CSRValue{0};
+constexpr auto required_misa_extensions(OperationId op_id, bool compressed = false)
+    -> simrv::xlen::CsrValue {
+    const simrv::xlen::CsrValue compressed_requirement =
+        compressed ? misa_extension_bit(IsaExtension::C) : simrv::xlen::CsrValue{0};
 
     const auto op = std::to_underlying(op_id);
     const auto in_range = [op](OperationId first, OperationId last) {
@@ -304,7 +163,8 @@ constexpr auto required_misa_extensions(OperationId op_id, bool compressed = fal
         return compressed_requirement | misa_extension_bit(IsaExtension::B);
     }
     if (in_range(OperationId::VSETVLI, OperationId::VWSLL_VI)) {
-        CSRValue required = compressed_requirement | misa_extension_bit(IsaExtension::V);
+        simrv::xlen::CsrValue required =
+            compressed_requirement | misa_extension_bit(IsaExtension::V);
         switch (op_id) {
             case OperationId::VFADD_VV:
             case OperationId::VFSLIDE1UP_VF:
@@ -440,9 +300,9 @@ constexpr auto required_misa_extensions(OperationId op_id, bool compressed = fal
 }
 
 /** Verify the complete extension requirement of an already decoded instruction. */
-constexpr auto instruction_enabled_by_misa(CSRValue misa, OperationId op_id,
+constexpr auto instruction_enabled_by_misa(simrv::xlen::CsrValue misa, OperationId op_id,
                                            bool compressed = false) -> bool {
-    CSRValue required = required_misa_extensions(op_id, compressed);
+    simrv::xlen::CsrValue required = required_misa_extensions(op_id, compressed);
     // The base integer operation tables are shared by RV32I and RV32E.  Substitute E for I
     // when the reduced-register base is active; E and I are mutually exclusive in MISA.
     if (misa_has_extension(misa, IsaExtension::E) &&
@@ -454,13 +314,14 @@ constexpr auto instruction_enabled_by_misa(CSRValue misa, OperationId op_id,
 }
 
 /** RV32E exposes only x0-x15; floating-point and vector register banks are unaffected. */
-constexpr auto rv32e_register_is_valid(RegId reg) noexcept -> bool {
+constexpr auto rv32e_register_is_valid(simrv::xlen::RegId reg) noexcept -> bool {
     return std::to_underlying(reg) < 16;
 }
 
 /** Check only the integer register operands used by a decoded operation. */
-constexpr auto rv32e_register_operands_valid(bool writes_int, RegId rd, bool reads_rs1_int,
-                                             RegId rs1, bool reads_rs2_int, RegId rs2) noexcept
+constexpr auto rv32e_register_operands_valid(bool writes_int, simrv::xlen::RegId rd,
+                                             bool reads_rs1_int, simrv::xlen::RegId rs1,
+                                             bool reads_rs2_int, simrv::xlen::RegId rs2) noexcept
     -> bool {
     return (!writes_int || rv32e_register_is_valid(rd)) &&
            (!reads_rs1_int || rv32e_register_is_valid(rs1)) &&
@@ -539,6 +400,10 @@ constexpr auto get_instruction_format(Opcode op) -> InstFormat {
         case Opcode::Amo:
         case Opcode::OpFp:
         case Opcode::OpV:
+        case Opcode::Custom0:
+        case Opcode::Custom1:
+        case Opcode::Custom2:
+        case Opcode::Custom3:
             return InstFormat::R;
         case Opcode::MAdd:
         case Opcode::MSub:

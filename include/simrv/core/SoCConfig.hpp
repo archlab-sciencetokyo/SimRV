@@ -15,7 +15,7 @@
 #include <utility>
 #include <vector>
 
-#include "simrv/xlen/Types.hpp"
+#include "simrv/xlen/ScalarTypes.hpp"
 
 namespace simrv::core {
 
@@ -36,6 +36,7 @@ enum class SoCDeviceKind : uint8_t {
     VirtioMmioInput,
     VirtioMmioSound,
     VirtioMmioNet,
+    VirtioMmioFs,
     DmaController,
     ResetControl,
     RingBufferEthernet,
@@ -77,6 +78,8 @@ enum class SoCDeviceKind : uint8_t {
             return "virtio-sound";
         case SoCDeviceKind::VirtioMmioNet:
             return "virtio-net";
+        case SoCDeviceKind::VirtioMmioFs:
+            return "virtio-fs";
         case SoCDeviceKind::DmaController:
             return "dma";
         case SoCDeviceKind::ResetControl:
@@ -93,15 +96,15 @@ enum class SoCDeviceKind : uint8_t {
 
 struct SoCDeviceRegion {
     std::string name;
-    Address base = 0;
-    Address size = 0;
+    simrv::xlen::Address base = 0;
+    simrv::xlen::Address size = 0;
 };
 
 struct SoCDeviceConfig {
     SoCDeviceKind kind{};
     std::string name;
-    Address base = 0;
-    Address size = 0x1000;
+    simrv::xlen::Address base = 0;
+    simrv::xlen::Address size = 0x1000;
     uint32_t irq = 0;
     bool enabled = true;
     std::vector<SoCDeviceRegion> regions;
@@ -110,9 +113,10 @@ struct SoCDeviceConfig {
     std::array<uint8_t, 6> mac_address{0x52, 0x54, 0x00, 0x12, 0x34, 0x56};
 
     SoCDeviceConfig() = default;
-    SoCDeviceConfig(SoCDeviceKind device_kind, std::string device_name, Address device_base,
-                    Address device_size = 0x1000, uint32_t device_irq = 0,
-                    bool device_enabled = true, std::vector<SoCDeviceRegion> device_regions = {},
+    SoCDeviceConfig(SoCDeviceKind device_kind, std::string device_name,
+                    simrv::xlen::Address device_base, simrv::xlen::Address device_size = 0x1000,
+                    uint32_t device_irq = 0, bool device_enabled = true,
+                    std::vector<SoCDeviceRegion> device_regions = {},
                     std::string device_compatible = {}, uint32_t device_read_value = 0,
                     std::array<uint8_t, 6> device_mac = {0x52, 0x54, 0x00, 0x12, 0x34, 0x56})
         : kind(device_kind),
@@ -133,6 +137,61 @@ struct SoCDeviceConfig {
     }
 };
 
+enum class SmpMode : uint8_t { CycleAccurate, CycleOriented };
+
+struct SharedCacheConfig {
+    bool enabled = false;
+    uint32_t capacity_bytes = 0;
+    uint32_t associativity = 1;
+    uint32_t line_bytes = 32;
+    uint32_t hit_latency = 1;
+    uint32_t miss_latency = 1;
+};
+
+struct SmpClusterConfig {
+    uint32_t id = 0;
+    std::vector<uint32_t> harts;
+    SharedCacheConfig l2{};
+};
+
+struct SmpTopologyConfig {
+    uint32_t hart_count = 1;
+    SmpMode mode = SmpMode::CycleAccurate;
+    uint32_t synchronization_quantum = 64;
+    std::vector<SmpClusterConfig> clusters;
+    SharedCacheConfig l3{.enabled = true,
+                         .capacity_bytes = 512 * 1024,
+                         .associativity = 16,
+                         .line_bytes = 32,
+                         .hit_latency = 1,
+                         .miss_latency = 1};
+
+    void resize_harts(uint32_t count) {
+        hart_count = count;
+        for (auto& cluster : clusters) {
+            std::erase_if(cluster.harts, [count](uint32_t hart) { return hart >= count; });
+        }
+        std::erase_if(clusters, [](const auto& cluster) { return cluster.harts.empty(); });
+        if (clusters.empty()) return;
+        for (uint32_t hart = 0; hart < count; ++hart) {
+            if (std::ranges::any_of(clusters, [hart](const auto& cluster) {
+                    return std::ranges::find(cluster.harts, hart) != cluster.harts.end();
+                }))
+                continue;
+            clusters.front().harts.push_back(hart);
+        }
+    }
+
+    [[nodiscard]] auto cluster_for_hart(uint32_t hart) const -> uint32_t {
+        for (const auto& cluster : clusters) {
+            if (std::ranges::find(cluster.harts, hart) != cluster.harts.end()) return cluster.id;
+        }
+        return 0;
+    }
+
+    [[nodiscard]] auto validate() const -> std::expected<void, std::string>;
+};
+
 [[nodiscard]] inline auto soc_device_kind(std::string_view name) -> std::optional<SoCDeviceKind> {
     if (name == "uart") return SoCDeviceKind::Uart;
     if (name == "rtc") return SoCDeviceKind::Rtc;
@@ -150,6 +209,7 @@ struct SoCDeviceConfig {
     if (name == "virtio-input" || name == "input") return SoCDeviceKind::VirtioMmioInput;
     if (name == "virtio-sound" || name == "sound") return SoCDeviceKind::VirtioMmioSound;
     if (name == "virtio-net" || name == "net") return SoCDeviceKind::VirtioMmioNet;
+    if (name == "virtio-fs" || name == "fs") return SoCDeviceKind::VirtioMmioFs;
     if (name == "dma" || name == "dma-controller") return SoCDeviceKind::DmaController;
     if (name == "reset-control") return SoCDeviceKind::ResetControl;
     if (name == "ring-buffer-ethernet") return SoCDeviceKind::RingBufferEthernet;
@@ -192,6 +252,8 @@ struct SoCDeviceConfig {
             return {kind, "sound0", 0x10006000, 0x1000, 7};
         case SoCDeviceKind::VirtioMmioNet:
             return {kind, "net0", 0x10007000, 0x1000, 8};
+        case SoCDeviceKind::VirtioMmioFs:
+            return {kind, "fs0", 0x1000A000, 0x1000, 9};
         case SoCDeviceKind::DmaController:
             return {kind, "dma0", 0x10009000, 0x1000, 12};
         case SoCDeviceKind::ResetControl:
@@ -203,7 +265,8 @@ struct SoCDeviceConfig {
                     0x4000,
                     2,
                     true,
-                    {{"rxbuf", 0x18000000, 0x4000}, {"txbuf", 0x1c000000, 0x2000}},
+                    {{.name = "rxbuf", .base = 0x18000000, .size = 0x4000},
+                     {.name = "txbuf", .base = 0x1c000000, .size = 0x2000}},
                     {},
                     0,
                     {0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff}};
@@ -222,10 +285,11 @@ struct SoCConfig {
     bool enable_pcie = true;
     bool enable_mmio = false;
     bool disable_unlisted_devices = false;
-    std::optional<Address> dram_base;
-    std::optional<Address> dram_size;
-    std::optional<Address> reset_pc;
-    std::optional<Address> tohost;
+    std::optional<simrv::xlen::Address> dram_base;
+    std::optional<simrv::xlen::Address> dram_size;
+    std::optional<simrv::xlen::Address> reset_pc;
+    std::optional<simrv::xlen::Address> tohost;
+    SmpTopologyConfig smp{};
     std::vector<SoCDeviceConfig> devices;
 
     [[nodiscard]] static auto virt_pcie() -> SoCConfig {
@@ -259,6 +323,7 @@ struct SoCConfig {
                     {SoCDeviceKind::VirtioMmioInput, "input0", 0x10005000, 0x1000, 6},
                     {SoCDeviceKind::VirtioMmioSound, "sound0", 0x10006000, 0x1000, 7},
                     {SoCDeviceKind::VirtioMmioNet, "net0", 0x10007000, 0x1000, 8},
+                    {SoCDeviceKind::VirtioMmioFs, "fs0", 0x1000A000, 0x1000, 9},
                     {SoCDeviceKind::DmaController, "dma0", 0x10009000, 0x1000, 12},
                 }};
     }
@@ -291,9 +356,10 @@ struct SoCConfig {
     }
 
     [[nodiscard]] auto validate() const -> std::expected<void, std::string> {
+        if (auto smp_result = smp.validate(); !smp_result) return smp_result;
         struct Region {
-            Address base;
-            Address size;
+            simrv::xlen::Address base;
+            simrv::xlen::Address size;
             std::string_view name;
         };
         std::vector<Region> regions;
@@ -306,7 +372,7 @@ struct SoCConfig {
                 return std::unexpected("Enabled SoC devices must have unique, non-empty names");
             }
             names.push_back(device.name);
-            if (device.size == 0 || device.base > ~Address{0} - device.size) {
+            if (device.size == 0 || device.base > ~simrv::xlen::Address{0} - device.size) {
                 return std::unexpected("SoC device has an invalid address range at index " +
                                        std::to_string(i));
             }
@@ -314,7 +380,7 @@ struct SoCConfig {
                 (device.kind == SoCDeviceKind::RingBufferEthernet && device.size < 28)) {
                 return std::unexpected("Platform extension has an unsupported MMIO window size");
             }
-            regions.push_back({device.base, device.size, device.name});
+            regions.push_back({.base = device.base, .size = device.size, .name = device.name});
             if (device.kind == SoCDeviceKind::DummyMmio && device.compatible.empty()) {
                 return std::unexpected("Dummy MMIO device requires a compatible string");
             }
@@ -331,15 +397,16 @@ struct SoCConfig {
                 if (rx == nullptr || tx == nullptr || rx->size < 2048 || tx->size < 2048 ||
                     !std::has_single_bit(rx->size) || !std::has_single_bit(tx->size) ||
                     rx->size > 64 * 1024 * 1024 || tx->size > 64 * 1024 * 1024) {
-                    return std::unexpected("Ring-buffer Ethernet requires power-of-two RX/TX regions");
+                    return std::unexpected(
+                        "Ring-buffer Ethernet requires power-of-two RX/TX regions");
                 }
             }
             for (const auto& extra : device.regions) {
-                if (extra.size == 0 || extra.base > ~Address{0} - extra.size) {
+                if (extra.size == 0 || extra.base > ~simrv::xlen::Address{0} - extra.size) {
                     return std::unexpected("SoC device has an invalid auxiliary region: '" +
                                            extra.name + "'");
                 }
-                regions.push_back({extra.base, extra.size, extra.name});
+                regions.push_back({.base = extra.base, .size = extra.size, .name = extra.name});
             }
         }
         for (size_t i = 0; i < regions.size(); ++i) {

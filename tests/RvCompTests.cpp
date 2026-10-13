@@ -19,14 +19,15 @@
 #include "simrv/core/SoCDeviceRegistry.hpp"
 #include "simrv/device/DummyMmio.hpp"
 #include "simrv/device/PlatformDeviceRegistry.hpp"
-#include "simrv/device/RingBufferEthernetMmio.hpp"
 #include "simrv/device/ResetControlMmio.hpp"
-#include "simrv/isa/Base.hpp"
+#include "simrv/device/RingBufferEthernetMmio.hpp"
 #include "simrv/isa/Common.hpp"
+#include "simrv/isa/IsaTypes.hpp"
+#include "simrv/memory/MemorySubsystem.hpp"
 #include "simrv/memory/MmioDevice.hpp"
 #include "simrv/pipeline/CpuModel.hpp"
 #include "simrv/util/SoCManifest.hpp"
-#include "simrv/xlen/Types.hpp"
+#include "simrv/xlen/ScalarTypes.hpp"
 
 #define TEST_CHECK(cond)                                                                  \
     do {                                                                                  \
@@ -48,14 +49,14 @@ class TestCustomMmio final : public simrv::memory::MmioDevice {
     explicit TestCustomMmio(const simrv::core::SoCDeviceConfig& config)
         : name_(config.name), base_(config.base), size_(config.size) {}
     [[nodiscard]] auto name() const -> const char* override { return name_.c_str(); }
-    [[nodiscard]] auto base_address() const -> Address override { return base_; }
-    [[nodiscard]] auto size() const -> Address override { return size_; }
-    [[nodiscard]] auto read32(Address) -> uint32_t override { return 0x51a7; }
+    [[nodiscard]] auto base_address() const -> simrv::xlen::Address override { return base_; }
+    [[nodiscard]] auto size() const -> simrv::xlen::Address override { return size_; }
+    [[nodiscard]] auto read32(simrv::xlen::Address) -> uint32_t override { return 0x51a7; }
 
    private:
     std::string name_;
-    Address base_;
-    Address size_;
+    simrv::xlen::Address base_;
+    simrv::xlen::Address size_;
 };
 }  // namespace
 
@@ -120,7 +121,7 @@ void test_rvcomp_profile_validation() {
     TEST_CHECK(profile.instruction_front_cache.refill_latency == 27);
     TEST_CHECK(profile.instruction_front_cache.backing_refill_latency == 27);
     TEST_CHECK(profile.instruction_front_cache.startup_refill_latencies ==
-               std::vector<LatencyCycles>{40});
+               std::vector<simrv::xlen::LatencyCycles>{40});
     TEST_CHECK(profile.instruction_front_cache.freeze_pipeline_on_refill);
     TEST_CHECK(profile.interconnect.request_latency == 1);
     TEST_CHECK(profile.interconnect.response_latency == 1);
@@ -136,8 +137,8 @@ void test_rvcomp_profile_validation() {
     simrv::pipeline::CpuModelConfig loaded{};
     TEST_CHECK(simrv::core::load_cpu_config(*path, loaded));
     TEST_CHECK(profile.validate().has_value());
-    const CSRValue ima_bits = simrv::isa::isa_preset_bits(IsaPreset::IMA);
-    const CSRValue ima_misa = simrv::isa::misa_with_mxl(ima_bits, 32);
+    const simrv::xlen::CsrValue ima_bits = simrv::isa::isa_preset_bits(IsaPreset::IMA);
+    const simrv::xlen::CsrValue ima_misa = simrv::isa::misa_with_mxl(ima_bits, 32);
     // In RVComp Verilog (RVComp/src/rvcom.vh): `define ISA_CODE 32'h40141101
     if constexpr (!simrv::xlen::kIsXLen64) {
         TEST_CHECK(ima_misa == 0x40141101U);
@@ -179,9 +180,9 @@ void test_rvcomp_machine_application() {
     TEST_CHECK(cpu.pipeline_sim.config.div_latency == 34);
     TEST_CHECK(cpu.state().regs.xlen == 32);
     if constexpr (!simrv::xlen::kIsXLen64) {
-        TEST_CHECK(cpu.state().misa == (0x40141101U | (1U << 23)));
+        TEST_CHECK(cpu.state().misa == 0x40141101U);
     } else {
-        TEST_CHECK(cpu.state().misa == ((1ull << 62) | 0x00141101ULL | (1ull << 23)));
+        TEST_CHECK(cpu.state().misa == ((1ull << 62) | 0x00141101ULL));
     }
 }
 
@@ -242,10 +243,9 @@ compatible = "acme,timer"
     const auto* net = parsed.find(simrv::core::SoCDeviceKind::VirtioMmioNet);
     TEST_CHECK(net != nullptr && net->name == "net1" && net->base == 0x20000000 &&
                net->size == 8192 && net->irq == 19);
-    TEST_CHECK(parsed.devices.size() == 11);
+    TEST_CHECK(parsed.devices.size() == 12);
     const auto watchdog = std::ranges::find_if(parsed.devices, [](const auto& device) {
-        return device.kind == simrv::core::SoCDeviceKind::DummyMmio &&
-               device.name == "watchdog";
+        return device.kind == simrv::core::SoCDeviceKind::DummyMmio && device.name == "watchdog";
     });
     const auto control = std::ranges::find_if(parsed.devices, [](const auto& device) {
         return device.kind == simrv::core::SoCDeviceKind::DummyMmio && device.name == "control";
@@ -274,6 +274,9 @@ void test_soc_manifest_export() {
     TEST_CHECK(text.find("\"name\": \"rvcomp\"") != std::string::npos);
     TEST_CHECK(text.find("\"manifest_version\": \"3.0\"") != std::string::npos);
     TEST_CHECK(text.find("\"generator\": \"simrv ") != std::string::npos);
+    TEST_CHECK(text.find("\"smp\": {") != std::string::npos);
+    TEST_CHECK(text.find("\"mode\": \"cycle-accurate\"") != std::string::npos);
+    TEST_CHECK(text.find("\"l3\": {\"enabled\": true") != std::string::npos);
     TEST_CHECK(text.find("\"device_policy\": \"explicit\"") != std::string::npos);
     TEST_CHECK(text.find("\"kind\": \"uart\"") != std::string::npos);
     TEST_CHECK(text.find("\"kind\": \"plic\"") != std::string::npos);
@@ -285,15 +288,20 @@ void test_soc_manifest_export() {
 
     auto custom_soc = simrv::core::SoCConfig::virt_mmio();
     custom_soc.disable_unlisted_devices = true;
-    custom_soc.devices = {{simrv::core::SoCDeviceKind::CustomMmio, "custom-timer",
-                           0x20003000, 0x1000, 0, true, {}, "acme,timer"}};
+    custom_soc.devices = {{simrv::core::SoCDeviceKind::CustomMmio,
+                           "custom-timer",
+                           0x20003000,
+                           0x1000,
+                           0,
+                           true,
+                           {},
+                           "acme,timer"}};
     custom_soc.devices.push_back(
         simrv::core::soc_device_default(simrv::core::SoCDeviceKind::ResetControl));
     std::ostringstream custom_manifest;
     TEST_CHECK(simrv::util::serialize_soc_manifest(custom_soc, custom_manifest));
     TEST_CHECK(custom_manifest.str().find("\"kind\": \"custom-mmio\"") != std::string::npos);
-    TEST_CHECK(custom_manifest.str().find("\"compatible\": \"acme,timer\"") !=
-               std::string::npos);
+    TEST_CHECK(custom_manifest.str().find("\"compatible\": \"acme,timer\"") != std::string::npos);
 
     simrv::core::MachineConfig machine_config{};
     machine_config.soc = custom_soc;
@@ -312,8 +320,8 @@ void test_soc_manifest_export() {
             return std::make_unique<TestCustomMmio>(config);
         }));
     TEST_CHECK(custom_machine.initialize().has_value());
-    auto* runtime_timer = custom_machine.memory().system_bus().router().find_by_name(
-        "custom-timer");
+    auto* runtime_timer =
+        custom_machine.memory().system_bus().router().find_by_name("custom-timer");
     TEST_CHECK(runtime_timer != nullptr && runtime_timer->base_address() == 0x20003000 &&
                runtime_timer->size() == 0x1000);
     auto* runtime_mmio = dynamic_cast<simrv::memory::MmioDevice*>(runtime_timer);
@@ -323,8 +331,8 @@ void test_soc_manifest_export() {
 
     simrv::core::Machine isolated_machine(machine_config);
     TEST_CHECK(isolated_machine.initialize().has_value());
-    auto* isolated_timer = isolated_machine.memory().system_bus().router().find_by_name(
-        "custom-timer");
+    auto* isolated_timer =
+        isolated_machine.memory().system_bus().router().find_by_name("custom-timer");
     auto* isolated_mmio = dynamic_cast<simrv::memory::MmioDevice*>(isolated_timer);
     TEST_CHECK(isolated_mmio != nullptr && isolated_mmio->read32(0) == 0);
     std::error_code ignored;
@@ -340,9 +348,8 @@ void test_rvcomp_reset_and_ethernet_extensions() {
     TEST_CHECK(machine.reboot_requested);
 
     simrv::device::RingBufferEthernetMmio ethernet(
-        machine, "ethernet", 0x14000000, 0x4000, 2, 0x18000000, 0x4000, 0x1c000000,
-        0x2000, {0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff},
-        simrv::device::NetworkBackend::Mode::User);
+        machine, "ethernet", 0x14000000, 0x4000, 2, 0x18000000, 0x4000, 0x1c000000, 0x2000,
+        {0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff}, simrv::device::virtio::NetBackend::Mode::User);
     auto* tx = static_cast<simrv::memory::MmioDevice*>(ethernet.tx_node());
     auto* csr = static_cast<simrv::memory::MmioDevice*>(ethernet.csr_node());
     auto* rx = static_cast<simrv::memory::MmioDevice*>(ethernet.rx_node());

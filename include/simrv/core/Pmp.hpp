@@ -7,21 +7,52 @@
 #include <bit>
 #include <cstdint>
 
-#include "simrv/Define.hpp"
+#include "simrv/CompilerHints.hpp"
 #include "simrv/core/Cpu.hpp"
-#include "simrv/xlen/Types.hpp"
+#include "simrv/core/PmpTypes.hpp"
+#include "simrv/xlen/AddressTypes.hpp"
 
 namespace simrv::core {
 
 enum class PmpAccessType : uint8_t {
+    None = 0,
     Read = 1,
     Write = 2,
     Execute = 4,
+    ReadWrite = Read | Write,
+    ReadExecute = Read | Execute,
+    All = Read | Write | Execute,
 };
 
-namespace pmp {
+constexpr auto operator|(PmpAccessType lhs, PmpAccessType rhs) noexcept -> PmpAccessType {
+    return static_cast<PmpAccessType>(std::to_underlying(lhs) | std::to_underlying(rhs));
+}
 
-using PmpAccessType = core::PmpAccessType;
+constexpr auto operator&(PmpAccessType lhs, PmpAccessType rhs) noexcept -> PmpAccessType {
+    return static_cast<PmpAccessType>(std::to_underlying(lhs) & std::to_underlying(rhs));
+}
+
+constexpr auto operator~(PmpAccessType access) noexcept -> PmpAccessType {
+    return static_cast<PmpAccessType>(~std::to_underlying(access) & 0x7u);
+}
+
+constexpr auto operator|=(PmpAccessType& lhs, PmpAccessType rhs) noexcept -> PmpAccessType& {
+    lhs = lhs | rhs;
+    return lhs;
+}
+
+constexpr auto operator&=(PmpAccessType& lhs, PmpAccessType rhs) noexcept -> PmpAccessType& {
+    lhs = lhs & rhs;
+    return lhs;
+}
+
+[[nodiscard]] constexpr auto has_access(PmpAccessType available, PmpAccessType requested) noexcept
+    -> bool {
+    return (std::to_underlying(available) & std::to_underlying(requested)) ==
+           std::to_underlying(requested);
+}
+
+namespace pmp {
 
 constexpr uint8_t kPmpR = 0x01;
 constexpr uint8_t kPmpW = 0x02;
@@ -35,6 +66,37 @@ constexpr uint8_t kPmpModeNa4 = 0x10;
 constexpr uint8_t kPmpModeNapot = 0x18;
 
 /**
+ * @struct PmpRange
+ * @brief 64-bit address interval representing a matching PMP entry boundary.
+ *
+ * Prevents 32-bit wrap-around when RV32 platforms check entries spanning high memory.
+ */
+struct PmpRange {
+    uint64_t base = 0;
+    uint64_t limit = 0;
+    bool full_range = false;
+
+    [[nodiscard]] constexpr auto contains(uint64_t req_start, size_t size) const noexcept -> bool {
+        if (size == 0 || size > UINT64_MAX - req_start) return false;
+        if (full_range) return true;
+        const uint64_t req_end = req_start + size;
+        return req_start >= base && req_end <= limit && limit > base;
+    }
+
+    [[nodiscard]] constexpr auto overlaps(uint64_t req_start, size_t size) const noexcept -> bool {
+        if (size == 0 || size > UINT64_MAX - req_start) return false;
+        if (full_range) return true;
+        const uint64_t req_end = req_start + size;
+        return req_start < limit && req_end > base && limit > base;
+    }
+
+    [[nodiscard]] constexpr auto partial_overlap(uint64_t req_start, size_t size) const noexcept
+        -> bool {
+        return overlaps(req_start, size) && !contains(req_start, size);
+    }
+};
+
+/**
  * @struct PmpConfigEntry
  * @brief Structured view over a single 8-bit PMP configuration register (pmpcfg).
  */
@@ -44,33 +106,76 @@ struct PmpConfigEntry {
     [[nodiscard]] constexpr auto mode() const noexcept -> PmpMode {
         return static_cast<PmpMode>(raw & kPmpA);
     }
-    [[nodiscard]] constexpr auto is_locked() const noexcept -> bool { return (raw & kPmpL) != 0; }
-    [[nodiscard]] constexpr auto readable() const noexcept -> bool { return (raw & kPmpR) != 0; }
-    [[nodiscard]] constexpr auto writable() const noexcept -> bool { return (raw & kPmpW) != 0; }
-    [[nodiscard]] constexpr auto executable() const noexcept -> bool { return (raw & kPmpX) != 0; }
+    [[nodiscard]] constexpr auto is_locked() const noexcept -> bool {
+        return (raw & PmpPermission::Lock) != 0;
+    }
+    [[nodiscard]] constexpr auto readable() const noexcept -> bool {
+        return (raw & PmpPermission::Read) != 0;
+    }
+    [[nodiscard]] constexpr auto writable() const noexcept -> bool {
+        return (raw & PmpPermission::Write) != 0;
+    }
+    [[nodiscard]] constexpr auto executable() const noexcept -> bool {
+        return (raw & PmpPermission::Execute) != 0;
+    }
+    [[nodiscard]] constexpr auto permissions() const noexcept -> PmpAccessType {
+        return static_cast<PmpAccessType>(raw & 0x7u);
+    }
     [[nodiscard]] constexpr auto allows(PmpAccessType access) const noexcept -> bool {
-        return (raw & std::to_underlying(access)) != 0;
+        return has_access(permissions(), access);
     }
 };
 
-inline auto check_access(const ArchState& state, Address paddr, size_t size, PmpAccessType access,
-                         std::optional<PrivilegeLevel> priv_override = std::nullopt) -> bool {
-    PrivilegeLevel effective_priv = priv_override.value_or(state.priv);
+[[nodiscard]] inline auto calculate_pmp_range(PmpConfigEntry cfg, simrv::xlen::Address pmpaddr_curr,
+                                              simrv::xlen::Address pmpaddr_prev) noexcept
+    -> PmpRange {
+    const PmpMode mode = cfg.mode();
+    PmpRange range{};
+    if (mode == PmpMode::Tor) {
+        range.base = static_cast<uint64_t>(pmpaddr_prev) << 2;
+        range.limit = static_cast<uint64_t>(pmpaddr_curr) << 2;
+    } else if (mode == PmpMode::Na4) {
+        range.base = static_cast<uint64_t>(pmpaddr_curr) << 2;
+        range.limit = range.base + 4;
+    } else if (mode == PmpMode::Napot) {
+        const auto raw = static_cast<uint64_t>(pmpaddr_curr);
+        const int t = std::countr_one(raw);
+        constexpr unsigned kAddrBits = sizeof(simrv::xlen::Address) * 8;
+        if (t + 3 >= static_cast<int>(kAddrBits)) {
+            range.base = 0;
+            range.full_range = true;
+        } else {
+            const uint64_t mask = (uint64_t{1} << t) - 1;
+            range.base = (raw & ~mask) << 2;
+            range.limit = range.base + (uint64_t{1} << (t + 3));
+        }
+    }
+    return range;
+}
+
+inline auto check_access(const ArchState& state, simrv::xlen::Address paddr, size_t size,
+                         PmpAccessType access,
+                         std::optional<simrv::xlen::PrivilegeLevel> priv_override = std::nullopt)
+    -> bool {
+    simrv::xlen::PrivilegeLevel effective_priv = priv_override.value_or(state.priv);
+    // MPRV is effective only when executing in Machine mode per RISC-V Privileged Architecture
     if (!priv_override.has_value() && access != PmpAccessType::Execute &&
-        (state.mstatus & enum_mask(MstatusBit::Mprv)) != 0) {
-        effective_priv =
-            static_cast<PrivilegeLevel>((state.mstatus & enum_mask(MstatusBit::Mpp)) >> 11);
+        state.priv == simrv::xlen::PrivilegeLevel::Machine &&
+        (state.mstatus & MstatusBit::Mprv) != 0) {
+        effective_priv = mstatus_mpp(state.mstatus);
     }
 
     if (simrv::compiler::likely(state.num_active_pmp == 0)) {
         return true;
     }
-    if (effective_priv == PrivilegeLevel::Machine && !state.has_locked_pmp) {
+    if (effective_priv == simrv::xlen::PrivilegeLevel::Machine && !state.has_locked_pmp) {
         return true;
     }
 
-    const Address req_start = paddr;
-    const Address req_end = paddr + size;
+    const auto req_start = static_cast<uint64_t>(paddr);
+    if (size == 0 || size > UINT64_MAX - req_start) {
+        return false;
+    }
 
     for (size_t i = 0; i < state.num_active_pmp; ++i) {
         const PmpConfigEntry cfg{state.pmpcfg[i]};
@@ -79,58 +184,33 @@ inline auto check_access(const ArchState& state, Address paddr, size_t size, Pmp
             continue;
         }
 
-        Address base = 0;
-        Address limit = 0;
-        bool full_range = false;
+        const simrv::xlen::Address prev_addr = (i == 0) ? 0 : state.pmpaddr[i - 1];
+        const PmpRange range = calculate_pmp_range(cfg, state.pmpaddr[i], prev_addr);
 
-        if (mode == PmpMode::Tor) {
-            base = (i == 0) ? 0 : (state.pmpaddr[i - 1] << 2);
-            limit = state.pmpaddr[i] << 2;
-            if (limit <= base) {
-                continue;
-            }
-        } else if (mode == PmpMode::Na4) {
-            base = state.pmpaddr[i] << 2;
-            limit = base + 4;
-        } else if (mode == PmpMode::Napot) {
-            const auto raw = static_cast<uint64_t>(state.pmpaddr[i]);
-            const int t = std::countr_one(raw);
-            constexpr unsigned kAddrBits = sizeof(Address) * 8;
-            if (t + 3 >= static_cast<int>(kAddrBits)) {
-                base = 0;
-                full_range = true;
-            } else {
-                const uint64_t mask = (uint64_t{1} << t) - 1;
-                base = static_cast<Address>((raw & ~mask) << 2);
-                limit = base + (static_cast<Address>(1) << (t + 3));
-            }
+        if (mode == PmpMode::Tor && range.limit <= range.base) {
+            continue;
         }
 
-        bool matches = false;
-        if (full_range) {
-            matches = true;
-        } else if (req_start < limit && req_end > base) {
-            // Partial overlap that is not fully contained within [base, limit] fails per RISC-V
-            // spec
-            if (req_start < base || req_end > limit) {
-                return false;
-            }
-            matches = true;
+        // Partial overlap that is not fully contained within [base, limit] fails per RISC-V spec
+        if (range.partial_overlap(req_start, size)) {
+            return false;
         }
 
-        if (matches) {
-            if (effective_priv == PrivilegeLevel::Machine && !cfg.is_locked()) {
+        if (range.contains(req_start, size)) {
+            if (effective_priv == simrv::xlen::PrivilegeLevel::Machine && !cfg.is_locked()) {
                 return true;
             }
             return cfg.allows(access);
         }
     }
 
-    return effective_priv == PrivilegeLevel::Machine;
+    return effective_priv == simrv::xlen::PrivilegeLevel::Machine;
 }
 
-inline auto check_access(const ArchState& state, PhysAddr paddr, size_t size, PmpAccessType access,
-                         std::optional<PrivilegeLevel> priv_override = std::nullopt) -> bool {
+inline auto check_access(const ArchState& state, simrv::xlen::PhysAddr paddr, size_t size,
+                         PmpAccessType access,
+                         std::optional<simrv::xlen::PrivilegeLevel> priv_override = std::nullopt)
+    -> bool {
     return check_access(state, paddr.raw(), size, access, priv_override);
 }
 

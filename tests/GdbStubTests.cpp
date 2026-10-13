@@ -20,7 +20,9 @@
 #include <string>
 #include <thread>
 
+#include "simrv/core/Cpu.hpp"
 #include "simrv/core/Machine.hpp"
+#include "simrv/debug/BreakpointManager.hpp"
 #include "simrv/debug/GdbStub.hpp"
 
 // ---------------------------------------------------------------------------
@@ -196,13 +198,13 @@ static void test_reg_encoding() {
     using simrv::debug::GdbStub;
 
     const auto hex0 = GdbStub::reg_to_hex(0);
-    EXPECT_EQ(hex0.size(), sizeof(Register) * 2);
+    EXPECT_EQ(hex0.size(), sizeof(simrv::xlen::Register) * 2);
 
-    const auto hex1 = GdbStub::reg_to_hex(static_cast<Register>(0x12345678U));
+    const auto hex1 = GdbStub::reg_to_hex(static_cast<simrv::xlen::Register>(0x12345678U));
     EXPECT_TRUE(!hex1.empty());
-    EXPECT_EQ(GdbStub::hex_to_reg(hex1, 0), static_cast<Register>(0x12345678U));
+    EXPECT_EQ(GdbStub::hex_to_reg(hex1, 0), static_cast<simrv::xlen::Register>(0x12345678U));
 
-    const Register all_ones = ~Register{0};
+    const simrv::xlen::Register all_ones = ~simrv::xlen::Register{0};
     EXPECT_EQ(GdbStub::hex_to_reg(GdbStub::reg_to_hex(all_ones), 0), all_ones);
 }
 
@@ -241,7 +243,7 @@ static auto decode_monitor_response(std::string_view response) -> std::string {
 
 static void test_breakpoint_ownership() {
     simrv::debug::BreakpointManager manager;
-    constexpr Address address = static_cast<Address>(0x80000000ULL);
+    constexpr simrv::xlen::Address address = static_cast<simrv::xlen::Address>(0x80000000ULL);
     manager.add_pc_breakpoint(address, simrv::debug::BreakpointOwner::Tui);
     manager.add_pc_breakpoint(address, simrv::debug::BreakpointOwner::Gdb);
     EXPECT_EQ(manager.get_pc_breakpoint_records().size(), 2U);
@@ -430,7 +432,7 @@ static void test_register_read() {
 
     const auto resp = client.transact("g");
     // Base integer/PC + FP registers, followed by the advertised CSR/counter registers.
-    const size_t expected_len = (33 + 11) * sizeof(Register) * 2 + 32 * 16;
+    const size_t expected_len = (33 + 11) * sizeof(simrv::xlen::Register) * 2 + 32 * 16;
     EXPECT_EQ(resp.size(), expected_len);
 }
 
@@ -450,13 +452,13 @@ static void test_single_reg_read() {
     // p0 = x0 (always zero)
     const auto resp = client.transact("p0");
     // Should be all-zero hex, length = sizeof(Register)*2
-    EXPECT_EQ(resp.size(), sizeof(Register) * 2);
+    EXPECT_EQ(resp.size(), sizeof(simrv::xlen::Register) * 2);
     for (char c : resp) EXPECT_TRUE(c == '0');
 
     const auto mstatus = client.transact("p41");
-    EXPECT_EQ(mstatus.size(), sizeof(Register) * 2);
+    EXPECT_EQ(mstatus.size(), sizeof(simrv::xlen::Register) * 2);
     const auto mcycle = client.transact("p48");
-    EXPECT_EQ(mcycle.size(), sizeof(Register) * 2);
+    EXPECT_EQ(mcycle.size(), sizeof(simrv::xlen::Register) * 2);
 }
 
 // ---------------------------------------------------------------------------
@@ -473,7 +475,8 @@ static void test_single_reg_write() {
     negotiate_no_ack(client);
 
     // Write 0xdeadbeef to x1 (ra)
-    const std::string val = simrv::debug::GdbStub::reg_to_hex(static_cast<Register>(0xdeadbeefU));
+    const std::string val =
+        simrv::debug::GdbStub::reg_to_hex(static_cast<simrv::xlen::Register>(0xdeadbeefU));
     const auto resp = client.transact(std::format("P1={}", val));
     EXPECT_EQ(resp, std::string("OK"));
     EXPECT_EQ(client.transact("P21=8877665544332211"), std::string("OK"));
@@ -494,7 +497,7 @@ static void test_memory_read() {
     negotiate_no_ack(client);
 
     // Read 4 bytes from base of DRAM
-    const Address base = h.machine.memory_geometry().dram_base;
+    const simrv::xlen::Address base = h.machine.memory_geometry().dram_base;
     const auto resp = client.transact(std::format("m{:x},4", base));
     // Should be 8 hex chars for 4 bytes
     EXPECT_EQ(resp.size(), 8u);
@@ -511,9 +514,9 @@ static void test_logical_breakpoints_and_watchpoints() {
     RspClient client(h.port());
     client.send_raw("+");
     negotiate_no_ack(client);
-    const Address base = h.machine.memory_geometry().dram_base;
+    const simrv::xlen::Address base = h.machine.memory_geometry().dram_base;
     auto ram = h.machine.ram_view();
-    *ram.unchecked_ptr(base) = static_cast<Byte>(0x13);
+    *ram.unchecked_ptr(base) = static_cast<simrv::xlen::Byte>(0x13);
 
     EXPECT_EQ(client.transact(std::format("Z0,{:x},4", base)), std::string("OK"));
     EXPECT_TRUE(h.machine.breakpoint_manager().has_pc_breakpoint(base));
@@ -545,7 +548,7 @@ static void test_logical_breakpoints_and_watchpoints() {
 static void test_detach_and_reconnect_cleanup() {
     StubHarness h;
     h.start();
-    constexpr Address bp = static_cast<Address>(0x80000000ULL);
+    constexpr simrv::xlen::Address bp = static_cast<simrv::xlen::Address>(0x80000000ULL);
 
     {
         RspClient client(h.port());
@@ -603,9 +606,9 @@ static void test_modeled_step_and_watchpoint() {
         cpu.state().pc = base;
         cpu.hart_status.store(simrv::core::HartStatus::Started);
         // addi x1,x0,7; sw x1,0(x2); jal x0,0
-        const Instruction program[]{0x00700093, 0x00112023, 0x0000006f};
+        const simrv::xlen::Instruction program[]{0x00700093, 0x00112023, 0x0000006f};
         std::memcpy(machine.ram_view().unchecked_ptr(base), program, sizeof(program));
-        cpu.state().regs.write(static_cast<RegId>(2), base + 128);
+        cpu.state().regs.write(static_cast<simrv::xlen::RegId>(2), base + 128);
         auto secondary = std::make_unique<simrv::core::CPU>();
         secondary->reset();
         secondary->state().mhartid = 1;
@@ -622,7 +625,8 @@ static void test_modeled_step_and_watchpoint() {
             EXPECT_EQ(cpu.e_icount, 0U);
             EXPECT_TRUE(client.transact("s", 2000).starts_with("T05"));
             EXPECT_EQ(cpu.e_icount, 1U);
-            EXPECT_EQ(cpu.state().regs.read(static_cast<RegId>(1)), Register{7});
+            EXPECT_EQ(cpu.state().regs.read(static_cast<simrv::xlen::RegId>(1)),
+                      simrv::xlen::Register{7});
             EXPECT_EQ(client.transact(std::format("Z2,{:x},4", base + 128)), std::string("OK"));
             client.send_packet("c");
             client.send_raw("+");
@@ -630,18 +634,18 @@ static void test_modeled_step_and_watchpoint() {
             EXPECT_EQ(cpu.e_icount, 2U);
             EXPECT_EQ(static_cast<unsigned char>(*machine.ram_view().unchecked_ptr(base + 128)),
                       7U);
-            const auto before = machine.hart(HartId{1}).e_icount;
+            const auto before = machine.hart(simrv::xlen::HartId{1}).e_icount;
             EXPECT_TRUE(client.transact("vCont;s:2;c", 2000).find("thread:2;") !=
                         std::string::npos);
-            EXPECT_EQ(machine.hart(HartId{1}).e_icount, before + 1);
+            EXPECT_EQ(machine.hart(simrv::xlen::HartId{1}).e_icount, before + 1);
             client.send_packet("c");
             client.send_raw(std::string(1, '\x03'));
             EXPECT_TRUE(client.recv_response(2000).starts_with("T02"));
             const auto primary_stopped = cpu.e_icount;
-            const auto secondary_stopped = machine.hart(HartId{1}).e_icount;
+            const auto secondary_stopped = machine.hart(simrv::xlen::HartId{1}).e_icount;
             EXPECT_EQ(client.transact("qAttached"), std::string("1"));
             EXPECT_EQ(cpu.e_icount, primary_stopped);
-            EXPECT_EQ(machine.hart(HartId{1}).e_icount, secondary_stopped);
+            EXPECT_EQ(machine.hart(simrv::xlen::HartId{1}).e_icount, secondary_stopped);
             client.send_packet("k");
         }
         simulation.join();

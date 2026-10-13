@@ -3,12 +3,10 @@
 #include <array>
 #include <cstdlib>
 #include <cstring>
-#include <filesystem>
 #include <fstream>
 #include <string>
 
 #include "MachineRuntime.hpp"
-#include "simrv/Define.hpp"
 #include "simrv/core/Boot.hpp"
 #include "simrv/core/Cpu.hpp"
 #include "simrv/core/CpuConfigParser.hpp"
@@ -18,42 +16,55 @@
 #include "simrv/core/SoCDeviceRegistry.hpp"
 #include "simrv/debug/GdbStub.hpp"
 #include "simrv/debug/SpikeLockstep.hpp"
+#include "simrv/debug/SymbolTable.hpp"
 #include "simrv/device/AIA.hpp"
 #include "simrv/device/Aclint.hpp"
 #include "simrv/device/DmaController.hpp"
-#include "simrv/device/Power.hpp"
 #include "simrv/device/PlatformDeviceRegistry.hpp"
-#include "simrv/device/Rtc.hpp"
+#include "simrv/device/Power.hpp"
 #include "simrv/device/ResetControlMmio.hpp"
+#include "simrv/device/Rtc.hpp"
 #include "simrv/device/Uart.hpp"
-#include "simrv/device/mmio/VirtioMmioBlock.hpp"
-#include "simrv/device/mmio/VirtioMmioConsole.hpp"
-#include "simrv/device/mmio/VirtioMmioGpu.hpp"
-#include "simrv/device/mmio/VirtioMmioInput.hpp"
-#include "simrv/device/mmio/VirtioMmioNet.hpp"
-#include "simrv/device/mmio/VirtioMmioRng.hpp"
-#include "simrv/device/mmio/VirtioMmioSound.hpp"
 #include "simrv/device/pci/PcieRootComplex.hpp"
-#include "simrv/device/pci/VirtioPciBlock.hpp"
-#include "simrv/device/pci/VirtioPciConsole.hpp"
-#include "simrv/device/pci/VirtioPciGpu.hpp"
-#include "simrv/device/pci/VirtioPciInput.hpp"
-#include "simrv/device/pci/VirtioPciNet.hpp"
-#include "simrv/device/pci/VirtioPciRng.hpp"
-#include "simrv/device/pci/VirtioPciSound.hpp"
-#include "simrv/memory/MemoryUtil.hpp"
 #include "simrv/util/FdtGenerator.hpp"
-#include "simrv/xlen/Types.hpp"
+#include "simrv/xlen/RegisterTypes.hpp"
 
 namespace simrv::core {
 
 namespace {
 
+void apply_cpu_model_dram_defaults(MachineConfig& config, const std::string& model_name) {
+    const bool low_dram_model = model_name == "cfu-provingground" || model_name == "rvproc";
+    const bool rvcomp_model = model_name == "rvcomp";
+    if (!low_dram_model && !rvcomp_model) return;
+
+    if (low_dram_model) {
+        config.memory.dram_base = 0;
+    } else if (!config.soc.dram_base.has_value()) {
+        config.memory.dram_base = simrv::memory::kDramBaseAddress;
+    }
+
+    constexpr auto kMinimumDramSize = simrv::xlen::Address{512} * 1024 * 1024;
+    if (!config.soc.dram_size.has_value() && config.memory.dram_size < kMinimumDramSize) {
+        config.memory.dram_size = kMinimumDramSize;
+    }
+}
+
+void apply_cpu_model_runtime_config(Machine& machine, MachineConfig& config,
+                                    const simrv::pipeline::CpuModelConfig& model) {
+    machine.primary_hart().apply_cpu_model_config(model);
+    const auto& timing = model.interconnect;
+    machine.memory().system_bus().configure_timing(
+        timing.request_latency, timing.response_latency, timing.data_request_latency,
+        timing.data_response_latency, timing.startup_data_response_latency);
+    apply_cpu_model_dram_defaults(config, model.name);
+}
+
 void resolve_start_pc_and_dram_base(simrv::core::Machine& machine,
                                     const simrv::debug::SymbolTable& symbols) {
-    Address start_pc = machine.execution_config().start_pc;
+    simrv::xlen::Address start_pc = machine.execution_config().start_pc;
     if (start_pc == simrv::boot::kStartPc || start_pc == 0) {
-        Address entry = symbols.entry_point().value_or(
+        simrv::xlen::Address entry = symbols.entry_point().value_or(
             symbols.lookup_name("_start").value_or(simrv::boot::kStartPc));
         if (entry < simrv::memory::kDramBaseAddress &&
             machine.primary_hart().cpu_model_config.name != "cfu-provingground" &&
@@ -66,7 +77,7 @@ void resolve_start_pc_and_dram_base(simrv::core::Machine& machine,
                                                   [&] { return symbols.lookup_name("_tohost"); }));
     machine.primary_hart().state().pc = machine.resolved_start_pc();
     if (machine.primary_hart().state().regs.xlen == 32) {
-        machine.primary_hart().state().pc = static_cast<Register>(
+        machine.primary_hart().state().pc = static_cast<simrv::xlen::Register>(
             static_cast<int64_t>(static_cast<int32_t>(machine.primary_hart().state().pc)));
     }
 }
@@ -77,7 +88,7 @@ void load_image_into_ram(std::string& file_path, simrv::memory::RamView ram_view
     if (machine != nullptr) {
         machine->clear_loaded_segments();
     }
-    Byte* const ram = ram_view.data();
+    simrv::xlen::Byte* const ram = ram_view.data();
     const auto capacity = static_cast<std::size_t>(ram_view.size());
     if (ram == nullptr || capacity == 0) {
         simrv::log::error("invalid destination for {} image load", image_name);
@@ -123,6 +134,37 @@ void load_image_into_ram(std::string& file_path, simrv::memory::RamView ram_view
             in.seekg(0, std::ios::beg);
 
             const char class_byte = ident[4];
+            auto load_segment = [&](const auto& phdr) {
+                if (phdr.p_type != PT_LOAD || phdr.p_filesz == 0) return;
+                const simrv::xlen::Address paddr = phdr.p_paddr != 0 ? phdr.p_paddr : phdr.p_vaddr;
+                const simrv::xlen::Address dram_base = ram_view.base();
+                simrv::xlen::Address dest_offset = 0;
+                if (paddr >= dram_base && (paddr - dram_base) < capacity) {
+                    dest_offset = paddr - dram_base;
+                } else if (paddr < capacity) {
+                    dest_offset = paddr;
+                } else {
+                    return;
+                }
+                const size_t copy_bytes = std::min<size_t>(phdr.p_filesz, capacity - dest_offset);
+                in.seekg(static_cast<std::streamoff>(phdr.p_offset), std::ios::beg);
+                if (in.read(
+                        reinterpret_cast<char*>(ram + dest_offset),
+                        static_cast<std::streamsize>(
+                            copy_bytes))) {  // NOLINT(cppcoreguidelines-pro-type-reinterpret-cast)
+                    loaded_segment = true;
+                    if (machine != nullptr) {
+                        const bool is_exec = (phdr.p_flags & 0x1) != 0;
+                        machine->record_loaded_segment(paddr, phdr.p_memsz, is_exec);
+                    }
+                    if (phdr.p_memsz > phdr.p_filesz && (dest_offset + phdr.p_filesz) < capacity) {
+                        const size_t bss_bytes = std::min<size_t>(
+                            phdr.p_memsz - phdr.p_filesz, capacity - (dest_offset + phdr.p_filesz));
+                        std::memset(ram + dest_offset + phdr.p_filesz, 0, bss_bytes);
+                    }
+                }
+            };
+
             if (class_byte == 1) {  // 32-bit ELF
                 Elf32_Ehdr ehdr{};
                 if (in.read(reinterpret_cast<char*>(&ehdr),
@@ -136,41 +178,7 @@ void load_image_into_ram(std::string& file_path, simrv::memory::RamView ram_view
                                 sizeof(
                                     Elf32_Phdr)))) {  // NOLINT(cppcoreguidelines-pro-type-reinterpret-cast)
                         for (const auto& phdr : phdrs) {
-                            if (phdr.p_type == PT_LOAD && phdr.p_filesz > 0) {
-                                const Address paddr =
-                                    phdr.p_paddr != 0 ? phdr.p_paddr : phdr.p_vaddr;
-                                const Address dram_base = ram_view.base();
-                                Address dest_offset = 0;
-                                if (paddr >= dram_base && (paddr - dram_base) < capacity) {
-                                    dest_offset = paddr - dram_base;
-                                } else if (paddr < capacity) {
-                                    dest_offset = paddr;
-                                } else {
-                                    continue;
-                                }
-                                const size_t copy_bytes =
-                                    std::min<size_t>(phdr.p_filesz, capacity - dest_offset);
-                                in.seekg(phdr.p_offset, std::ios::beg);
-                                if (in.read(
-                                        reinterpret_cast<char*>(ram + dest_offset),
-                                        static_cast<std::streamsize>(
-                                            copy_bytes))) {  // NOLINT(cppcoreguidelines-pro-type-reinterpret-cast)
-                                    loaded_segment = true;
-                                    if (machine != nullptr) {
-                                        const bool is_exec = (phdr.p_flags & 0x1) != 0;
-                                        machine->record_loaded_segment(paddr, phdr.p_memsz,
-                                                                       is_exec);
-                                    }
-                                    if (phdr.p_memsz > phdr.p_filesz &&
-                                        (dest_offset + phdr.p_filesz) < capacity) {
-                                        const size_t bss_bytes = std::min<size_t>(
-                                            phdr.p_memsz - phdr.p_filesz,
-                                            capacity - (dest_offset + phdr.p_filesz));
-                                        std::memset(ram + dest_offset + phdr.p_filesz, 0,
-                                                    bss_bytes);
-                                    }
-                                }
-                            }
+                            load_segment(phdr);
                         }
                     }
                 }
@@ -187,41 +195,7 @@ void load_image_into_ram(std::string& file_path, simrv::memory::RamView ram_view
                                 sizeof(
                                     Elf64_Phdr)))) {  // NOLINT(cppcoreguidelines-pro-type-reinterpret-cast)
                         for (const auto& phdr : phdrs) {
-                            if (phdr.p_type == PT_LOAD && phdr.p_filesz > 0) {
-                                const Address paddr =
-                                    phdr.p_paddr != 0 ? phdr.p_paddr : phdr.p_vaddr;
-                                const Address dram_base = ram_view.base();
-                                Address dest_offset = 0;
-                                if (paddr >= dram_base && (paddr - dram_base) < capacity) {
-                                    dest_offset = paddr - dram_base;
-                                } else if (paddr < capacity) {
-                                    dest_offset = paddr;
-                                } else {
-                                    continue;
-                                }
-                                const size_t copy_bytes =
-                                    std::min<size_t>(phdr.p_filesz, capacity - dest_offset);
-                                in.seekg(static_cast<std::streamoff>(phdr.p_offset), std::ios::beg);
-                                if (in.read(
-                                        reinterpret_cast<char*>(ram + dest_offset),
-                                        static_cast<std::streamsize>(
-                                            copy_bytes))) {  // NOLINT(cppcoreguidelines-pro-type-reinterpret-cast)
-                                    loaded_segment = true;
-                                    if (machine != nullptr) {
-                                        const bool is_exec = (phdr.p_flags & 0x1) != 0;
-                                        machine->record_loaded_segment(paddr, phdr.p_memsz,
-                                                                       is_exec);
-                                    }
-                                    if (phdr.p_memsz > phdr.p_filesz &&
-                                        (dest_offset + phdr.p_filesz) < capacity) {
-                                        const size_t bss_bytes = std::min<size_t>(
-                                            phdr.p_memsz - phdr.p_filesz,
-                                            capacity - (dest_offset + phdr.p_filesz));
-                                        std::memset(ram + dest_offset + phdr.p_filesz, 0,
-                                                    bss_bytes);
-                                    }
-                                }
-                            }
+                            load_segment(phdr);
                         }
                     }
                 }
@@ -312,6 +286,13 @@ auto Machine::platform_status() const -> PlatformStatusSnapshot {
 }
 
 auto Machine::initialize() -> std::expected<void, std::string> {
+    auto smp_topology = config.soc.smp;
+    if (smp_topology.clusters.empty()) smp_topology.hart_count = config.execution.num_harts;
+    if (auto topology_result =
+            memory().system_bus().coherence_hub().configure_topology(smp_topology);
+        !topology_result) {
+        return std::unexpected(topology_result.error());
+    }
     if (config.cpu_model_preset.has_value()) {
         auto model = simrv::pipeline::make_cpu_model_preset(*config.cpu_model_preset);
         const auto profile_name = simrv::pipeline::cpu_model_preset_name(*config.cpu_model_preset);
@@ -330,24 +311,7 @@ auto Machine::initialize() -> std::expected<void, std::string> {
         if (config.ras_entries != 0) {
             model.pipeline.branch_predictor.ras_entries = config.ras_entries;
         }
-        primary_hart().apply_cpu_model_config(model);
-        memory().system_bus().configure_timing(
-            model.interconnect.request_latency, model.interconnect.response_latency,
-            model.interconnect.data_request_latency, model.interconnect.data_response_latency,
-            model.interconnect.startup_data_response_latency);
-        if (model.name == "cfu-provingground" || model.name == "rvproc") {
-            config.memory.dram_base = 0x00000000;
-            if (!config.soc.dram_size.has_value() &&
-                config.memory.dram_size < Address{512} * 1024 * 1024) {
-                config.memory.dram_size = Address{512} * 1024 * 1024;
-            }
-        } else if (model.name == "rvcomp") {
-            if (!config.soc.dram_base.has_value()) config.memory.dram_base = 0x80000000;
-            if (!config.soc.dram_size.has_value() &&
-                config.memory.dram_size < Address{512} * 1024 * 1024) {
-                config.memory.dram_size = Address{512} * 1024 * 1024;
-            }
-        }
+        apply_cpu_model_runtime_config(*this, config, model);
     }
     if (!config.files.cpuconfig_path.empty()) {
         auto model = primary_hart().cpu_model_config;
@@ -357,24 +321,7 @@ auto Machine::initialize() -> std::expected<void, std::string> {
             simrv::log::error("{}", err);
             return std::unexpected(err);
         }
-        primary_hart().apply_cpu_model_config(model);
-        memory().system_bus().configure_timing(
-            model.interconnect.request_latency, model.interconnect.response_latency,
-            model.interconnect.data_request_latency, model.interconnect.data_response_latency,
-            model.interconnect.startup_data_response_latency);
-        if (model.name == "cfu-provingground" || model.name == "rvproc") {
-            config.memory.dram_base = 0x00000000;
-            if (!config.soc.dram_size.has_value() &&
-                config.memory.dram_size < Address{512} * 1024 * 1024) {
-                config.memory.dram_size = Address{512} * 1024 * 1024;
-            }
-        } else if (model.name == "rvcomp") {
-            if (!config.soc.dram_base.has_value()) config.memory.dram_base = 0x80000000;
-            if (!config.soc.dram_size.has_value() &&
-                config.memory.dram_size < Address{512} * 1024 * 1024) {
-                config.memory.dram_size = Address{512} * 1024 * 1024;
-            }
-        }
+        apply_cpu_model_runtime_config(*this, config, model);
     }
     std::string cfu_plugin_path = config.files.cfu_plugin_path;
     if (cfu_plugin_path.empty()) cfu_plugin_path = primary_hart().cpu_model_config.cfu.plugin;
@@ -403,7 +350,7 @@ auto Machine::initialize() -> std::expected<void, std::string> {
     }
     const auto ram = ram_view();
     const auto effective_dram_size = static_cast<size_t>(ram.size());
-    config.memory.dram_size = static_cast<Address>(effective_dram_size);
+    config.memory.dram_size = static_cast<simrv::xlen::Address>(effective_dram_size);
     if (!allocate_ram(effective_dram_size)) {
         const std::string err =
             "Failed to allocate main memory (" + std::to_string(effective_dram_size) + " bytes)";
@@ -478,9 +425,9 @@ auto Machine::initialize() -> std::expected<void, std::string> {
         memory().system_bus().add_node(&runtime_->pcie->mmio_node());
     }
 
-    const std::array<std::shared_ptr<simrv::device::VirtioMmioDevice>, 7> mmio_devs = {
+    const std::array<std::shared_ptr<simrv::device::VirtioMmioDevice>, 8> mmio_devs = {
         runtime_->mmio_disk,  runtime_->mmio_console, runtime_->mmio_rng, runtime_->mmio_gpu,
-        runtime_->mmio_input, runtime_->mmio_sound,   runtime_->mmio_net,
+        runtime_->mmio_input, runtime_->mmio_sound,   runtime_->mmio_net, runtime_->mmio_fs,
     };
     for (const auto& dev : mmio_devs) {
         if (dev) memory().system_bus().add_node(dev.get());
@@ -493,37 +440,54 @@ auto Machine::initialize() -> std::expected<void, std::string> {
         simrv::log::error("DRAM must be at least 1 MiB for an OS device tree");
         return std::unexpected("DRAM must be at least 1 MiB for an OS device tree");
     }
-    const Address dtb_offset =
-        linux_boot ? static_cast<Address>(effective_dram_size - static_cast<size_t>(0x00100000U))
+    const simrv::xlen::Address dtb_offset =
+        linux_boot ? static_cast<simrv::xlen::Address>(effective_dram_size -
+                                                       static_cast<size_t>(0x00100000U))
                    : simrv::boot::kInitDataAddress;
 
-    auto effective_isa_preset = [&]() -> isa::IsaPreset {
+    auto effective_isa_preset_bits = [&]() -> simrv::xlen::CsrValue {
         if (!config.files.cpuconfig_path.empty()) {
             simrv::pipeline::CpuModelConfig cfg{};
             if (simrv::core::load_cpu_config(config.files.cpuconfig_path, cfg)) {
-                return cfg.isa_preset;
+                auto bits = isa::isa_preset_bits(cfg.isa_preset);
+                if (cfg.has_isa_extension("zba") || cfg.has_isa_extension("zbb") ||
+                    cfg.has_isa_extension("zbc") || cfg.has_isa_extension("zbs")) {
+                    bits |= isa::misa_extension_bit(isa::IsaExtension::B);
+                }
+                return bits;
             }
         }
         if (config.cpu_model_preset.has_value()) {
             const auto profile_name =
                 simrv::pipeline::cpu_model_preset_name(*config.cpu_model_preset);
+            simrv::pipeline::CpuModelConfig cfg{};
             if (const auto resolved = simrv::core::resolve_cpu_model_path(profile_name)) {
-                simrv::pipeline::CpuModelConfig cfg{};
                 if (simrv::core::load_cpu_config(*resolved, cfg)) {
-                    return cfg.isa_preset;
+                    auto bits = isa::isa_preset_bits(cfg.isa_preset);
+                    if (cfg.has_isa_extension("zba") || cfg.has_isa_extension("zbb") ||
+                        cfg.has_isa_extension("zbc") || cfg.has_isa_extension("zbs")) {
+                        bits |= isa::misa_extension_bit(isa::IsaExtension::B);
+                    }
+                    return bits;
                 }
             }
-            return pipeline::make_cpu_model_preset(*config.cpu_model_preset).isa_preset;
+            cfg = pipeline::make_cpu_model_preset(*config.cpu_model_preset);
+            auto bits = isa::isa_preset_bits(cfg.isa_preset);
+            if (cfg.has_isa_extension("zba") || cfg.has_isa_extension("zbb") ||
+                cfg.has_isa_extension("zbc") || cfg.has_isa_extension("zbs")) {
+                bits |= isa::misa_extension_bit(isa::IsaExtension::B);
+            }
+            return bits;
         }
-        return isa::IsaPreset::GCBV;
+        return config.isa.isa_preset;
     };
 
     const unsigned int model_xlen = primary_hart().cpu_model_config.supported_xlen;
     const unsigned int target_xlen = (model_xlen != 0) ? model_xlen : simrv::xlen::kXLenBits;
-    CSRValue initial_misa =
-        isa::misa_with_mxl(config.isa.misa_override ? config.isa.isa_preset
-                                                    : isa::isa_preset_bits(effective_isa_preset()),
-                           target_xlen);
+    simrv::xlen::CsrValue initial_misa = isa::misa_with_mxl(
+        config.isa.misa_override ? config.isa.isa_preset : effective_isa_preset_bits(),
+        target_xlen);
+    initial_misa &= ~isa::misa_extension_bit(isa::IsaExtension::X);
     config.isa.isa_preset = initial_misa;
     if constexpr (simrv::xlen::kIsXLen64) {
         bool is_32bit = (target_xlen == 32);
@@ -571,20 +535,20 @@ auto Machine::initialize() -> std::expected<void, std::string> {
             }
         }
         if (is_32bit) {
-            initial_misa = (initial_misa & ~(3ull << 62)) | (1ull << 62);
+            initial_misa = isa::misa_with_mxl(initial_misa, 32);
         }
     }
     primary_hart().state().pc = resolved_start_pc_;
-    primary_hart().state().regs.write(static_cast<RegId>(10), 0);  // a0 = hartid
+    primary_hart().state().regs.write(static_cast<simrv::xlen::RegId>(10), 0);  // a0 = hartid
     primary_hart().state().regs.write(
-        static_cast<RegId>(11),
+        static_cast<simrv::xlen::RegId>(11),
         linux_boot ? (simrv::boot::kStartPc + dtb_offset) : 0);  // a1 = dtb
     primary_hart().state().misa = initial_misa;
     primary_hart().state().priv = kPrivMachine;
     primary_hart().state().regs.vlen = config.isa.vlen ? config.isa.vlen : 256;
     primary_hart().state().initialize_lower_xlen_fields();
     if (primary_hart().state().regs.xlen == 32) {
-        primary_hart().state().pc = static_cast<Register>(
+        primary_hart().state().pc = static_cast<simrv::xlen::Register>(
             static_cast<int64_t>(static_cast<int32_t>(primary_hart().state().pc)));
     }
     primary_hart().TLB_flush();
@@ -615,6 +579,7 @@ auto Machine::initialize() -> std::expected<void, std::string> {
             // loop so its IPI can release them into the Linux entry point. When direct-SBI is
             // active, secondary harts must start Stopped so Sbi::handle_hsm(HartStart) can claim
             // and launch them.
+            // Keep recognizing older FW_PAYLOAD bundles by their original filename.
             const bool is_fw_payload =
                 (config.files.binary_path.find("fw_payload") != std::string::npos ||
                  config.files.binary_path.find("opensbi") != std::string::npos);
@@ -625,16 +590,16 @@ auto Machine::initialize() -> std::expected<void, std::string> {
             sec_cpu->hart_status.store(sec_started ? HartStatus::Started : HartStatus::Stopped,
                                        std::memory_order_relaxed);
             for (std::size_t r = 0; r < 32; ++r) {
-                sec_cpu->state().regs.write(static_cast<RegId>(r), 0);
+                sec_cpu->state().regs.write(static_cast<simrv::xlen::RegId>(r), 0);
             }
             sec_cpu->state().pc = resolved_start_pc_;
             if (sec_cpu->state().regs.xlen == 32) {
-                sec_cpu->state().pc = static_cast<Register>(
+                sec_cpu->state().pc = static_cast<simrv::xlen::Register>(
                     static_cast<int64_t>(static_cast<int32_t>(sec_cpu->state().pc)));
             }
             sec_cpu->state().priv = kPrivMachine;
-            sec_cpu->state().regs.write(static_cast<RegId>(10), i);
-            sec_cpu->state().regs.write(static_cast<RegId>(11),
+            sec_cpu->state().regs.write(static_cast<simrv::xlen::RegId>(10), i);
+            sec_cpu->state().regs.write(static_cast<simrv::xlen::RegId>(11),
                                         linux_boot ? (simrv::boot::kStartPc + dtb_offset) : 0);
             sec_cpu->soft_tlb_flush();
             sec_cpu->TLB_flush();
@@ -668,14 +633,14 @@ auto Machine::initialize() -> std::expected<void, std::string> {
             // `ram` above captures geometry before allocation. Reacquire the view so the DTB
             // loader receives the live backing pointer as well as the resolved runtime geometry.
             const auto initialized_ram = ram_view();
-            const Address dtb_address = initialized_ram.base() + dtb_offset;
+            const simrv::xlen::Address dtb_address = initialized_ram.base() + dtb_offset;
             if (!initialized_ram.contains(dtb_address, dt_cap)) {
                 simrv::log::error("device-tree region is outside DRAM");
                 return std::unexpected("device-tree region is outside DRAM");
             }
             load_image_into_ram(config.files.dvtree_path,
                                 {initialized_ram.unchecked_ptr(dtb_address), dtb_address,
-                                 static_cast<Address>(dt_cap)},
+                                 static_cast<simrv::xlen::Address>(dt_cap)},
                                 "device-tree", tui_enabled());
         } else {
             const auto composition = platform_composition(config.platform_profile);
@@ -686,6 +651,7 @@ auto Machine::initialize() -> std::expected<void, std::string> {
                 .xlen = simrv::xlen::kXLenBits,
                 .enable_pcie = composition.pcie,
                 .enable_mmio = composition.mmio,
+                .enable_virtiofs = !config.files.virtiofs_path.empty(),
                 .enable_framebuffer = true,
                 .soc = config.soc,
             };

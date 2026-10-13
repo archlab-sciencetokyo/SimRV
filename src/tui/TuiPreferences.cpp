@@ -27,10 +27,10 @@ auto parse_slots(std::string_view text, std::vector<WorkbenchSlot>& slots) -> bo
         int scroll = 0;
         if (colon == std::string_view::npos || !parse_integer(item.substr(0, colon), page) ||
             !parse_integer(item.substr(colon + 1), scroll) ||
-            page > static_cast<unsigned>(TuiRegPage::DISPLAY) || scroll < 0 || parsed.size() >= 4) {
+            page > static_cast<unsigned>(TuiRegPage::LIVE) || scroll < 0 || parsed.size() >= 4) {
             return false;
         }
-        parsed.push_back({static_cast<TuiRegPage>(page), scroll});
+        parsed.push_back({.page = static_cast<TuiRegPage>(page), .scroll_offset = scroll});
         if (separator == std::string_view::npos) break;
         text.remove_prefix(separator + 1);
     }
@@ -87,8 +87,10 @@ auto TuiPreferences::load(const std::filesystem::path& path) -> bool {
                 const auto token = rest.substr(0, comma);
                 if (!parse_integer(token, width) || width < -1) valid = false;
                 if (&width != &candidate.back()) {
-                    if (comma == std::string_view::npos) valid = false;
-                    else rest.remove_prefix(comma + 1);
+                    if (comma == std::string_view::npos)
+                        valid = false;
+                    else
+                        rest.remove_prefix(comma + 1);
                 } else if (comma != std::string_view::npos) {
                     valid = false;
                 }
@@ -109,8 +111,7 @@ auto TuiPreferences::load(const std::filesystem::path& path) -> bool {
             try {
                 size_t consumed = 0;
                 const auto parsed_value = std::stod(std::string(value), &consumed);
-                if (consumed == value.size() && std::isfinite(parsed_value) &&
-                    parsed_value > 0.0) {
+                if (consumed == value.size() && std::isfinite(parsed_value) && parsed_value > 0.0) {
                     mouse_sensitivity = parsed_value;
                 }
             } catch (...) {
@@ -144,8 +145,8 @@ auto TuiPreferences::save(const std::filesystem::path& path) const -> bool {
     }
     output << "\ntheme=" << static_cast<unsigned>(theme)
            << "\nhigh_contrast=" << static_cast<unsigned>(high_contrast)
-           << "\nclass_mode=" << static_cast<unsigned>(class_mode) << "\ntarget_fps="
-           << target_fps << "\nstudent_guide=" << static_cast<unsigned>(student_guide)
+           << "\nclass_mode=" << static_cast<unsigned>(class_mode) << "\ntarget_fps=" << target_fps
+           << "\nstudent_guide=" << static_cast<unsigned>(student_guide)
            << "\nmouse_sensitivity=" << mouse_sensitivity << '\n';
     output.close();
     if (!output) return false;

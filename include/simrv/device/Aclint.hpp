@@ -10,7 +10,7 @@
 
 #include "simrv/memory/Mmio.hpp"
 #include "simrv/memory/MmioDevice.hpp"
-#include "simrv/xlen/Types.hpp"
+#include "simrv/xlen/ScalarTypes.hpp"
 
 namespace simrv::core {
 class Machine;
@@ -25,30 +25,32 @@ namespace simrv::device {
  */
 class AclintMtimer : public memory::MmioDevice {
    public:
-    static constexpr Address kBaseAddress = mmio::kAclintMtimerBaseAddress;
-    static constexpr Address kSize = mmio::kAclintMtimerSize;
+    static constexpr simrv::xlen::Address kBaseAddress = mmio::kAclintMtimerBaseAddress;
+    static constexpr simrv::xlen::Address kSize = mmio::kAclintMtimerSize;
     static constexpr size_t kMaxHarts = 16;
 
     explicit AclintMtimer(simrv::core::Machine* machine = nullptr);
     ~AclintMtimer() override = default;
 
     [[nodiscard]] auto name() const -> const char* override { return "aclint-mtimer"; }
-    [[nodiscard]] auto base_address() const -> Address override { return kBaseAddress; }
-    [[nodiscard]] auto size() const -> Address override { return kSize; }
+    [[nodiscard]] auto base_address() const -> simrv::xlen::Address override {
+        return kBaseAddress;
+    }
+    [[nodiscard]] auto size() const -> simrv::xlen::Address override { return kSize; }
     void reset() override;
 
-    [[nodiscard]] auto read32(Address offset) -> uint32_t override;
-    [[nodiscard]] auto read64(Address offset) -> uint64_t override;
-    void write32(Address offset, uint32_t val) override;
-    void write64(Address offset, uint64_t val) override;
+    [[nodiscard]] auto read32(simrv::xlen::Address offset) -> uint32_t override;
+    [[nodiscard]] auto read64(simrv::xlen::Address offset) -> uint64_t override;
+    void write32(simrv::xlen::Address offset, uint32_t val) override;
+    void write64(simrv::xlen::Address offset, uint64_t val) override;
 
     void tick();
-    [[nodiscard]] auto mtime() const -> Counter { return mtime_; }
-    void set_mtime(Counter val) { mtime_ = val; }
+    [[nodiscard]] auto mtime() const -> simrv::xlen::Counter { return mtime_; }
+    void set_mtime(simrv::xlen::Counter val) { mtime_ = val; }
 
    private:
-    Counter mtime_{0};
-    std::array<std::atomic<Counter>, kMaxHarts> mtimecmp_{};
+    simrv::xlen::Counter mtime_{0};
+    std::array<std::atomic<simrv::xlen::Counter>, kMaxHarts> mtimecmp_{};
 };
 
 /**
@@ -57,20 +59,22 @@ class AclintMtimer : public memory::MmioDevice {
  */
 class AclintMswi : public memory::MmioDevice {
    public:
-    static constexpr Address kBaseAddress = mmio::kAclintMswiBaseAddress;
-    static constexpr Address kSize = mmio::kAclintMswiSize;
+    static constexpr simrv::xlen::Address kBaseAddress = mmio::kAclintMswiBaseAddress;
+    static constexpr simrv::xlen::Address kSize = mmio::kAclintMswiSize;
     static constexpr size_t kMaxHarts = 16;
 
     explicit AclintMswi(simrv::core::Machine* machine = nullptr);
     ~AclintMswi() override = default;
 
     [[nodiscard]] auto name() const -> const char* override { return "aclint-mswi"; }
-    [[nodiscard]] auto base_address() const -> Address override { return kBaseAddress; }
-    [[nodiscard]] auto size() const -> Address override { return kSize; }
+    [[nodiscard]] auto base_address() const -> simrv::xlen::Address override {
+        return kBaseAddress;
+    }
+    [[nodiscard]] auto size() const -> simrv::xlen::Address override { return kSize; }
     void reset() override;
 
-    [[nodiscard]] auto read32(Address offset) -> uint32_t override;
-    void write32(Address offset, uint32_t val) override;
+    [[nodiscard]] auto read32(simrv::xlen::Address offset) -> uint32_t override;
+    void write32(simrv::xlen::Address offset, uint32_t val) override;
 
    private:
     std::array<std::atomic<uint32_t>, kMaxHarts> msip_{};

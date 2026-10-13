@@ -10,6 +10,7 @@
 #include <unordered_map>
 #include <vector>
 
+#include "simrv/CompilerHints.hpp"
 #include "simrv/memory/Bus.hpp"
 #include "simrv/memory/CoherenceHub.hpp"
 #include "simrv/memory/MmioRouter.hpp"
@@ -30,7 +31,7 @@ class TileLinkBus : public Bus {
 
     struct TimedResponse {
         TlChannelD payload{};
-        std::array<Byte, CoherenceHub::kLineBytes> line_data{};
+        std::array<simrv::xlen::Byte, CoherenceHub::kLineBytes> line_data{};
         Cycle ready_cycle = 0;
         uint64_t sequence = 0;
         bool has_line_data = false;
@@ -42,7 +43,7 @@ class TileLinkBus : public Bus {
         std::string_view opcode;
         TlSourceId source = 0;
         TlSinkId sink = 0;
-        Address address = 0;
+        simrv::xlen::Address address = 0;
         std::string_view detail;
     };
 
@@ -84,15 +85,16 @@ class TileLinkBus : public Bus {
     void set_smp_enabled(bool enabled) noexcept { is_smp_enabled_ = enabled; }
 
     auto acquire_block(const TlChannelA& req, TlChannelD& resp,
-                       std::array<Byte, CoherenceHub::kLineBytes>& line_data) -> bool;
+                       std::array<simrv::xlen::Byte, CoherenceHub::kLineBytes>& line_data) -> bool;
 
     auto acquire_perm(const TlChannelA& req, TlChannelD& resp) -> bool;
 
     auto release_line(const TlChannelC& req, TlChannelD& resp,
-                      const std::array<Byte, CoherenceHub::kLineBytes>* data = nullptr) -> bool;
+                      const std::array<simrv::xlen::Byte, CoherenceHub::kLineBytes>* data = nullptr)
+        -> bool;
 
     /// Publish a successful L1 store while holding the shared coherence lock in MT-SMP mode.
-    void mark_modified(Address line_base, HartId hart);
+    void mark_modified(simrv::xlen::Address line_base, simrv::xlen::HartId hart);
 
     void grant_ack(const TlChannelE& ack);
 
@@ -106,7 +108,8 @@ class TileLinkBus : public Bus {
     }
 
     void record_transaction(TileLinkChannel ch, std::string_view opcode, TlSourceId source,
-                            TlSinkId sink, Address address, std::string_view detail = {},
+                            TlSinkId sink, simrv::xlen::Address address,
+                            std::string_view detail = {},
                             const simrv::core::BusTraceContext* trace_context = nullptr);
     [[nodiscard]] static constexpr auto ram_capabilities() -> TlManagerCapabilities {
         return kCoherentRamCapabilities;

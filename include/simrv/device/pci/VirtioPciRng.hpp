@@ -18,7 +18,6 @@ class VirtioPciRng : public VirtioPciDevice {
     VirtioPciRng();
 
    protected:
-    auto get_device_features(uint32_t select) -> uint32_t override;
     void on_queue_notify(uint16_t queue_index) override;
 
    private:

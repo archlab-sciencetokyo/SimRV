@@ -52,6 +52,52 @@ platform metadata and `[device.<kind>]` for device entries, including `[device.u
 with `device_policy = "explicit"` registers only the devices listed in its file; presets that omit
 that policy retain their existing implicit platform devices.
 
+### SMP and shared cache topology
+
+SoC profiles can describe homogeneous hart groups and their shared cache hierarchy. For example:
+
+```ini
+[smp]
+hart_count = 4
+mode = "cycle-accurate" # or "cycle-oriented"
+synchronization_quantum = 64
+
+[smp.cluster.0]
+harts = 0, 1
+l2_enabled = true
+l2_capacity_bytes = 65536
+l2_associativity = 4
+l2_line_bytes = 32
+l2_hit_latency = 8
+l2_miss_latency = 12
+
+[smp.cluster.1]
+harts = 2, 3
+l2_enabled = true
+l2_capacity_bytes = 65536
+l2_associativity = 4
+
+[smp.l3]
+enabled = true
+capacity_bytes = 524288
+associativity = 16
+line_bytes = 32
+hit_latency = 1
+miss_latency = 1
+```
+
+Each hart has a private instruction and data L1. L2 is optional and shared by harts in the same
+cluster; L3 is an optional global shared cache. Cache geometry uses 32-byte coherent lines and
+power-of-two set and way counts. The current model uses one CPU model across all harts.
+
+The `cycle-accurate` mode advances harts and shared devices in deterministic global-cycle order.
+`cycle-oriented` executes each global cycle on hart worker threads and synchronizes at the cycle
+boundary before advancing shared devices. Shared requests are resolved by logical cycle, hart ID,
+and per-hart issue order. The synchronization quantum groups global cycles into host-side runner
+turns; it does not let one hart advance simulated time ahead of another. Cross-hart interrupts and
+hart lifecycle changes take effect at the destination hart's next execution boundary. Command-line
+options `--harts`, `--smp-mode`, and `--smp-quantum` override the profile values.
+
 Device-specific SoC entries use `[device.<kind>]` sections. Supported kinds include `uart`,
 `rtc`, `dma`, `virtio-block`, `virtio-console`, `virtio-rng`, `virtio-gpu`, `virtio-input`,
 `virtio-sound`, and `virtio-net`; each can override `name`, `base`, `size`, and `irq`. The same
@@ -251,7 +297,7 @@ response_latency = 1
 | `name` | string | `"custom"` | Identifier for the CPU model or custom configuration. |
 | `description` | string | `""` | Human-readable documentation of the core architecture. |
 | `xlen` | integer | `0` | Supported machine XLEN: `32` (RV32-only), `64` (RV64-only), or `0` (supports both RV32 and RV64 targets). Verified on startup against simulator build. |
-| `isa_preset` | string | `"gcbv"` | Target ISA extension preset: `gcbv`, `imac`, `ima`, `gc`, `im`, `i`. Setting extension names without `rv32`/`rv64` prefix allows the model to support both 32-bit and 64-bit simulator targets. Explicit `rv32*` and `rv64*` targets are also accepted. |
+| `isa_preset` | string | `"gcv"` | Target ISA extension preset: `gcv`, `gc`, `imac`, `ima`, `im`, `i`. Setting extension names without `rv32`/`rv64` prefix allows the model to support both 32-bit and 64-bit simulator targets. Explicit `rv32*` and `rv64*` targets are also accepted. |
 
 ### `[pipeline]` Section
 

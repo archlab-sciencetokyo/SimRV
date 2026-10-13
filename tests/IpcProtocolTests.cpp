@@ -2,21 +2,23 @@
  * @file IpcProtocolTests.cpp
  * @brief Unit and integration tests for SimRV IPC protocol, server, and client.
  */
-#include <cassert>
-#include <atomic>
-#include <cerrno>
-#include <chrono>
-#include <cstring>
-#include <cstdlib>
-#include <filesystem>
-#include <iostream>
 #include <sys/socket.h>
 #include <sys/stat.h>
 #include <sys/un.h>
-#include <thread>
 #include <unistd.h>
+
+#include <atomic>
+#include <cassert>
+#include <cerrno>
+#include <chrono>
+#include <cstdlib>
+#include <cstring>
+#include <filesystem>
+#include <iostream>
+#include <thread>
 #include <vector>
 
+#include "simrv/core/Cpu.hpp"
 #include "simrv/core/Machine.hpp"
 #include "simrv/core/MachineConfig.hpp"
 #include "simrv/net/Client.hpp"
@@ -161,7 +163,7 @@ void test_stale_endpoint_recovery() {
     std::filesystem::remove(sock_path);
     create_stale_socket(sock_path);
     simrv::core::Machine machine(simrv::core::MachineConfig{
-        .execution = {.appmode = true, .smp_quantum = 100, .smp_multithreaded = false},
+        .execution = {.appmode = true, .smp_quantum = 100},
     });
     std::vector<std::byte> ram(1024 * 1024, std::byte{0});
     machine.set_ram_for_testing(ram.data(), ram.size());
@@ -171,7 +173,7 @@ void test_stale_endpoint_recovery() {
         std::cerr << "stale endpoint recovery failed to start server\n";
         std::abort();
     }
-    struct stat metadata {};
+    struct stat metadata{};
     if (::stat(sock_path.c_str(), &metadata) != 0 || (metadata.st_mode & 0777) != 0600)
         std::abort();
     server.stop();
@@ -187,7 +189,7 @@ void test_client_server_socket_loopback() {
     const auto sock_path = make_socket_path("loopback");
 
     simrv::core::Machine machine(simrv::core::MachineConfig{
-        .execution = {.appmode = true, .smp_quantum = 100, .smp_multithreaded = false},
+        .execution = {.appmode = true, .smp_quantum = 100},
     });
     std::vector<std::byte> ram(1024 * 1024, std::byte{0});
     machine.set_ram_for_testing(ram.data(), ram.size());

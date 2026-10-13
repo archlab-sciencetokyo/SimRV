@@ -10,7 +10,7 @@
 #include "simrv/pipeline/OperationInfo.hpp"
 #include "simrv/pipeline/OperationTraits.hpp"
 #include "simrv/pipeline/Scoreboard.hpp"
-#include "simrv/xlen/Types.hpp"
+#include "simrv/xlen/RegisterTypes.hpp"
 
 #define TEST_CHECK(expr)                                                                     \
     do {                                                                                     \
@@ -195,19 +195,19 @@ void test_scoreboard() {
     using simrv::pipeline::Scoreboard;
 
     Scoreboard sb{};
-    TEST_CHECK(!sb.is_busy(RegBank::Integer, RegId::A0));
-    const auto fa0 = static_cast<RegId>(simrv::xlen::FpRegId::Fa0);
+    TEST_CHECK(!sb.is_busy(RegBank::Integer, simrv::xlen::RegId::A0));
+    const auto fa0 = static_cast<simrv::xlen::RegId>(simrv::xlen::FpRegId::Fa0);
     TEST_CHECK(!sb.is_busy(RegBank::Float, fa0));
 
     // Zero register x0 should never be busy
-    sb.reserve(RegBank::Integer, RegId::Zero, PipelineStage::Execute, 2, false);
-    TEST_CHECK(!sb.is_busy(RegBank::Integer, RegId::Zero));
+    sb.reserve(RegBank::Integer, simrv::xlen::RegId::Zero, PipelineStage::Execute, 2, false);
+    TEST_CHECK(!sb.is_busy(RegBank::Integer, simrv::xlen::RegId::Zero));
 
     // Integer register reservation
-    sb.reserve(RegBank::Integer, RegId::A0, PipelineStage::Execute, 1, true);
-    TEST_CHECK(sb.is_busy(RegBank::Integer, RegId::A0));
-    TEST_CHECK(sb.can_forward(RegBank::Integer, RegId::A0));
-    TEST_CHECK(sb.get_stage(RegBank::Integer, RegId::A0) == PipelineStage::Execute);
+    sb.reserve(RegBank::Integer, simrv::xlen::RegId::A0, PipelineStage::Execute, 1, true);
+    TEST_CHECK(sb.is_busy(RegBank::Integer, simrv::xlen::RegId::A0));
+    TEST_CHECK(sb.can_forward(RegBank::Integer, simrv::xlen::RegId::A0));
+    TEST_CHECK(sb.get_stage(RegBank::Integer, simrv::xlen::RegId::A0) == PipelineStage::Execute);
 
     // Float register reservation
     sb.reserve(RegBank::Float, fa0, PipelineStage::Memory, 2, false);
@@ -216,21 +216,21 @@ void test_scoreboard() {
     TEST_CHECK(sb.get_stage(RegBank::Float, fa0) == PipelineStage::Memory);
 
     // Independent banks
-    TEST_CHECK(sb.is_busy(RegBank::Integer, RegId::A0));
-    sb.release(RegBank::Integer, RegId::A0);
-    TEST_CHECK(!sb.is_busy(RegBank::Integer, RegId::A0));
+    TEST_CHECK(sb.is_busy(RegBank::Integer, simrv::xlen::RegId::A0));
+    sb.release(RegBank::Integer, simrv::xlen::RegId::A0);
+    TEST_CHECK(!sb.is_busy(RegBank::Integer, simrv::xlen::RegId::A0));
     TEST_CHECK(sb.is_busy(RegBank::Float, fa0));
 
     // Flush from stage
-    sb.reserve(RegBank::Integer, RegId::A1, PipelineStage::Execute);
-    sb.reserve(RegBank::Integer, RegId::A2, PipelineStage::Memory);
+    sb.reserve(RegBank::Integer, simrv::xlen::RegId::A1, PipelineStage::Execute);
+    sb.reserve(RegBank::Integer, simrv::xlen::RegId::A2, PipelineStage::Memory);
     sb.flush_from_stage(PipelineStage::Execute);
-    TEST_CHECK(!sb.is_busy(RegBank::Integer, RegId::A1));
-    TEST_CHECK(sb.is_busy(RegBank::Integer, RegId::A2));
+    TEST_CHECK(!sb.is_busy(RegBank::Integer, simrv::xlen::RegId::A1));
+    TEST_CHECK(sb.is_busy(RegBank::Integer, simrv::xlen::RegId::A2));
 
     // Reset
     sb.reset();
-    TEST_CHECK(!sb.is_busy(RegBank::Integer, RegId::A2));
+    TEST_CHECK(!sb.is_busy(RegBank::Integer, simrv::xlen::RegId::A2));
     TEST_CHECK(!sb.is_busy(RegBank::Float, fa0));
 }
 

@@ -1,23 +1,22 @@
 #pragma once
 
-#include "simrv/Define.hpp"
+#include "simrv/CompilerHints.hpp"
 #include "simrv/pipeline/PipelineContext.hpp"
+#include "simrv/xlen/RegisterTypes.hpp"
 
 namespace simrv::pipeline {
 
-enum class RegisterBank : uint8_t { Integer, FloatingPoint };
-
+template <simrv::xlen::RegisterIdentifier RegisterId>
 struct RegisterWriteEffect {
-    RegisterBank bank = RegisterBank::Integer;
-    RegId destination = RegId::Zero;
+    RegisterId destination = static_cast<RegisterId>(0);
     uint64_t value = 0;
     bool enabled = false;
 };
 
 /// Architectural changes produced by the writeback stage, before they are applied.
 struct WritebackEffects {
-    RegisterWriteEffect integer_write{};
-    RegisterWriteEffect floating_write{.bank = RegisterBank::FloatingPoint};
+    RegisterWriteEffect<simrv::xlen::RegId> integer_write{};
+    RegisterWriteEffect<simrv::xlen::FpRegId> floating_write{};
     bool increments_instruction_count = false;
     bool marks_floating_point_dirty = false;
 };
@@ -34,9 +33,9 @@ struct WritebackEffects {
         return effects;
     }
 
-    const auto opcode = static_cast<isa::Opcode>(context.opcode);
-    const auto funct5 = static_cast<isa::Funct5Amo>(context.funct5);
-    const auto funct3 = static_cast<isa::Funct3>(context.funct3);
+    const auto opcode = context.opcode;
+    const auto funct5 = context.funct5;
+    const auto funct3 = context.funct3;
 
     auto& integer = effects.integer_write;
     integer.destination = context.rd;
@@ -59,7 +58,7 @@ struct WritebackEffects {
     }
 
     auto& floating = effects.floating_write;
-    floating.destination = context.rd;
+    floating.destination = simrv::xlen::to_fp_reg_id(context.rd);
     if (opcode == isa::Opcode::LoadFp) {
         floating.value = context.fp_mem_rdata;
         floating.enabled = true;

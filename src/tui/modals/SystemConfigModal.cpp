@@ -251,22 +251,23 @@ void SystemConfigModal::render(std::vector<std::string>& content_rows,
     const auto pipeline = static_cast<simrv::pipeline::PipelineType>(draft.pipeline_type);
     const auto bp_type = static_cast<simrv::pipeline::BranchPredictorType>(draft.bpred_type);
     const auto settings = std::to_array<Item>({
-        {"Pipeline", std::string(simrv::pipeline::pipeline_type_name(pipeline))},
-        {"Integer multiply stall cycles", cycles(draft.mul_latency, 1)},
-        {"Integer divide stall cycles", cycles(draft.div_latency, 2)},
-        {"FP ALU stall cycles", cycles(draft.fp_alu_latency, 3)},
-        {"FP divide/sqrt stall cycles", cycles(draft.fp_div_latency, 4)},
-        {"CSR serialization latency", cycles(draft.csr_flush_penalty, 5)},
-        {"Fence serialization latency", cycles(draft.fence_flush_penalty, 6)},
-        {"Integer forwarding", draft.enable_forwarding ? "Enabled" : "Disabled"},
-        {"Branch predictor", std::string(simrv::pipeline::to_string(bp_type))},
-        {"BHT capacity", entries(draft.bht_entries, 9)},
-        {"BTB capacity", entries(draft.btb_entries, 10)},
-        {"RAS capacity", entries(draft.ras_entries, 11)},
-        {"FPGA core preset", std::string(simrv::pipeline::cpu_model_preset_name(
-                                  static_cast<simrv::pipeline::CpuModelPreset>(draft.preset)))},
-        {"Save configuration", "\033[1;32m[S] Export to .cfg...\033[0m"},
-        {"Load configuration", "\033[1;36m[L] Import from .cfg...\033[0m"},
+        {.name = "Pipeline", .value = std::string(simrv::pipeline::pipeline_type_name(pipeline))},
+        {.name = "Integer multiply stall cycles", .value = cycles(draft.mul_latency, 1)},
+        {.name = "Integer divide stall cycles", .value = cycles(draft.div_latency, 2)},
+        {.name = "FP ALU stall cycles", .value = cycles(draft.fp_alu_latency, 3)},
+        {.name = "FP divide/sqrt stall cycles", .value = cycles(draft.fp_div_latency, 4)},
+        {.name = "CSR serialization latency", .value = cycles(draft.csr_flush_penalty, 5)},
+        {.name = "Fence serialization latency", .value = cycles(draft.fence_flush_penalty, 6)},
+        {.name = "Integer forwarding", .value = draft.enable_forwarding ? "Enabled" : "Disabled"},
+        {.name = "Branch predictor", .value = std::string(simrv::pipeline::to_string(bp_type))},
+        {.name = "BHT capacity", .value = entries(draft.bht_entries, 9)},
+        {.name = "BTB capacity", .value = entries(draft.btb_entries, 10)},
+        {.name = "RAS capacity", .value = entries(draft.ras_entries, 11)},
+        {.name = "FPGA core preset",
+         .value = std::string(simrv::pipeline::cpu_model_preset_name(
+             static_cast<simrv::pipeline::CpuModelPreset>(draft.preset)))},
+        {.name = "Save configuration", .value = "\033[1;32m[S] Export to .cfg...\033[0m"},
+        {.name = "Load configuration", .value = "\033[1;36m[L] Import from .cfg...\033[0m"},
     });
     add_row(build_section_divider("Authoritative CA Policy", kThemeMint));
     for (size_t i = 0; i < settings.size(); ++i) {

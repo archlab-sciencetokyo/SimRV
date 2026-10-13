@@ -176,19 +176,26 @@ void MissionProgress::observe_symbol(std::string_view exact_symbol) {
 
 auto MissionProgress::guidance() const -> std::optional<MissionGuidance> {
     if (status() == MissionStatus::LoadError) {
-        return MissionGuidance{"Mission could not load", detail_,
-                               "Fix the lesson file, then restart.", TuiRegPage::GPR, 0};
+        return MissionGuidance{.title = "Mission could not load",
+                               .prompt = detail_,
+                               .why = "Fix the lesson file, then restart.",
+                               .destination = TuiRegPage::GPR,
+                               .glossary_topic = 0};
     }
     if (status() == MissionStatus::ProgramMismatch) {
-        return MissionGuidance{"Mission needs its example", detail_,
-                               "Named checkpoints make the observation sequence repeatable.",
-                               TuiRegPage::GPR, 0};
+        return MissionGuidance{.title = "Mission needs its example",
+                               .prompt = detail_,
+                               .why = "Named checkpoints make the observation sequence repeatable.",
+                               .destination = TuiRegPage::GPR,
+                               .glossary_topic = 0};
     }
     if (status() == MissionStatus::Complete) {
         return MissionGuidance{
-            "Mission complete", "Review Trace, registers, and stack before restarting.",
-            "You connected branch, loop, call, and return behavior to architectural state.",
-            TuiRegPage::TRACE, 0};
+            .title = "Mission complete",
+            .prompt = "Review Trace, registers, and stack before restarting.",
+            .why = "You connected branch, loop, call, and return behavior to architectural state.",
+            .destination = TuiRegPage::TRACE,
+            .glossary_topic = 0};
     }
     const auto current_step = step();
     if (!enabled() || current_step >= steps_.size()) return std::nullopt;

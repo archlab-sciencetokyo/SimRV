@@ -41,12 +41,65 @@ CFU/plugin latency values count total cycles including the issue cycle; pipeline
 settings instead count additional stall cycles after issue.
 The current decoder intentionally reserves the complete `custom-0` opcode for the configured CFU.
 
+### Compiling and Loading a Dynamic CFU Plugin
+
+CFU plugins interface with SimRV via a lightweight C ABI defined in `simrv/execute/CfuUnit.hpp`.
+To build a custom accelerator shared library:
+
+```c
+// my_cfu.c
+#include <stdint.h>
+
+struct SimRvCfuPlugin {
+    uint32_t (*execute)(uint32_t funct7, uint32_t funct3, uint32_t src1, uint32_t src2,
+                        uint32_t* latency_cycles);
+    void (*reset)(void);
+};
+
+static uint32_t my_execute(uint32_t funct7, uint32_t funct3, uint32_t src1, uint32_t src2,
+                           uint32_t* latency_cycles) {
+    if (latency_cycles) {
+        // Report execution latency in cycles (total cycles, including issue)
+        *latency_cycles = (funct3 == 1) ? 3 : 1;
+    }
+    // Custom arithmetic / bitwise accelerator operation
+    return (src1 ^ src2) + funct7;
+}
+
+static void my_reset(void) {}
+
+static const struct SimRvCfuPlugin kPlugin = {
+    .execute = my_execute,
+    .reset = my_reset,
+};
+
+const struct SimRvCfuPlugin* simrv_cfu_init(void) {
+    return &kPlugin;
+}
+```
+
+Compile the plugin into a position-independent shared object (`.so`):
+
+```bash
+# Using GCC
+gcc -O3 -shared -fPIC -o libcfu_custom.so my_cfu.c
+
+# Using Clang
+clang -O3 -shared -fPIC -o libcfu_custom.so my_cfu.c
+```
+
+Run SimRV with the compiled accelerator plugin:
+
+```bash
+simrv --cfu-plugin=./libcfu_custom.so --cpu-preset=cfu-provingground target_program.elf
+```
+
 ---
 
 ## 1. Register the Extension and Opcodes
 
 All core ISA definitions and shared constants live in
-[`include/simrv/Define.hpp`](https://github.com/archlab-sciencetokyo/SimRV/blob/dev/include/simrv/Define.hpp).
+[`include/simrv/isa/IsaTypes.hpp`](https://github.com/archlab-sciencetokyo/SimRV/blob/dev/include/simrv/isa/IsaTypes.hpp) and [`include/simrv/isa/IsaConfig.hpp`](https://github.com/archlab-sciencetokyo/SimRV/blob/dev/include/simrv/isa/IsaConfig.hpp).
 
 1. **Extension Bit:** Add your extension to the `IsaExtension` enum
    (e.g., `V = 21` for Vector).
@@ -96,9 +149,12 @@ Steps:
 
 Execution routing happens in the Execute stage:
 
-- [`src/execute/ExecuteUnit.cpp`](https://github.com/archlab-sciencetokyo/SimRV/blob/dev/src/execute/ExecuteUnit.cpp) — routing hub
-- [`src/execute/ExecuteUnitInt.cpp`](https://github.com/archlab-sciencetokyo/SimRV/blob/dev/src/execute/ExecuteUnitInt.cpp) — integer ops
-- [`src/execute/ExecuteUnitFloat.cpp`](https://github.com/archlab-sciencetokyo/SimRV/blob/dev/src/execute/ExecuteUnitFloat.cpp) — FP ops
+- [`src/execute/ExecuteUnit.cpp`](https://github.com/archlab-sciencetokyo/SimRV/blob/dev/src/execute/ExecuteUnit.cpp) — routing hub facade
+- [`src/execute/ExecuteUnitInt.cpp`](https://github.com/archlab-sciencetokyo/SimRV/blob/dev/src/execute/ExecuteUnitInt.cpp) — integer, M, and A ops
+- [`src/execute/ExecuteUnitFp.cpp`](https://github.com/archlab-sciencetokyo/SimRV/blob/dev/src/execute/ExecuteUnitFp.cpp) — FP ops (F, D)
+- [`src/execute/ExecuteUnitZb.cpp`](https://github.com/archlab-sciencetokyo/SimRV/blob/dev/src/execute/ExecuteUnitZb.cpp) — bit manipulation ops (Zb)
+- [`src/execute/ExecuteUnitVector.cpp`](https://github.com/archlab-sciencetokyo/SimRV/blob/dev/src/execute/ExecuteUnitVector.cpp) — vector ops (V)
+- [`src/execute/ExecuteUnitZk.cpp`](https://github.com/archlab-sciencetokyo/SimRV/blob/dev/src/execute/ExecuteUnitZk.cpp) — scalar cryptography ops (Zk)
 
 Steps:
 
@@ -128,7 +184,7 @@ variable length):
    via `state_`).
 
 3. **Control and Status Registers (CSRs):**
-   - Add new CSR addresses to the `Csr` enum in `Define.hpp`.
+   - Add new CSR addresses to the `Csr` enum in [`include/simrv/core/Csr.hpp`](https://github.com/archlab-sciencetokyo/SimRV/blob/dev/include/simrv/core/Csr.hpp).
    - Implement read/write behavior, access control, and illegal-instruction guards in
      [`src/core/CsrFile.cpp`](https://github.com/archlab-sciencetokyo/SimRV/blob/dev/src/core/CsrFile.cpp).
 

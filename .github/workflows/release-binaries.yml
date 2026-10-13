@@ -71,7 +71,6 @@ jobs:
           -DCMAKE_C_COMPILER=gcc
           -DCMAKE_CXX_COMPILER=g++
           -DSIMRV_WARNINGS_AS_ERRORS=ON
-          -DSIMRV_ENABLE_SDL=OFF
 
       - name: Build
         run: cmake --build --preset ${{ matrix.arch }}-release
@@ -246,8 +245,7 @@ jobs:
       - name: Configure and build
         run: |
           cmake --preset rv64-release \
-            -DCMAKE_C_COMPILER=gcc -DCMAKE_CXX_COMPILER=g++ \
-            -DSIMRV_ENABLE_SDL=OFF
+            -DCMAKE_C_COMPILER=gcc -DCMAKE_CXX_COMPILER=g++
           cmake --build --preset rv64-release --parallel 2
       - name: Validate install tree
         run: ctest --test-dir build/rv64-release --output-on-failure -R package-install-consumer

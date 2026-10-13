@@ -10,18 +10,20 @@
 #include "simrv/core/Cpu.hpp"
 #include "simrv/core/Machine.hpp"
 #include "simrv/core/RegisterFile.hpp"
+#include "simrv/isa/VectorTypes.hpp"
 #include "simrv/pipeline/OperationInfo.hpp"
 #include "simrv/pipeline/Scoreboard.hpp"
 #include "simrv/tui/TuiTheme.hpp"
 #include "simrv/tui/panels/InspectorPane.hpp"
-#include "simrv/xlen/Types.hpp"
+#include "simrv/xlen/RegisterTypes.hpp"
 
 namespace simrv::tui {
 
 namespace {
 
 auto get_in_flight_badge(const simrv::pipeline::Scoreboard& sb,
-                         simrv::pipeline::operation::RegBank bank, RegId reg) -> std::string {
+                         simrv::pipeline::operation::RegBank bank, simrv::xlen::RegId reg)
+    -> std::string {
     auto entry = sb.get_entry_data(bank, reg);
     if (!entry) return "";
     if (entry->can_forward) {
@@ -104,31 +106,35 @@ auto InspectorPane::render_registers_single_column(const simrv::core::ArchState&
         const auto& sb = projected_scoreboard_;
         switch (page_) {
             case TuiRegPage::GPR: {
-                auto val = st.regs.read(static_cast<RegId>(reg));
-                std::string name = kRegNames.at(static_cast<std::size_t>(reg));
+                auto val = st.regs.read(static_cast<simrv::xlen::RegId>(reg));
+                std::string name(kRegNames.at(static_cast<std::size_t>(reg)));
                 bool changed = paused_ && (cached_gpr_.at(static_cast<std::size_t>(reg)) != val);
                 std::string c = changed ? kThemePeach : kThemeMint;
-                std::string badge = get_in_flight_badge(
-                    sb, simrv::pipeline::operation::RegBank::Integer, static_cast<RegId>(reg));
+                std::string badge =
+                    get_in_flight_badge(sb, simrv::pipeline::operation::RegBank::Integer,
+                                        static_cast<simrv::xlen::RegId>(reg));
                 std::string col_color =
                     std::format(" {}x{:<2}\033[0m/{}{:<5}\033[0m: {}0x{:0{}x}\033[0m{}", kThemeText,
                                 reg, kThemeVal, name, c, val, simrv::xlen::kXLenHexDigits, badge);
                 return format_to_width(col_color, width);
             }
             case TuiRegPage::FPR: {
-                auto val = st.regs.read_fp(static_cast<RegId>(reg));
-                std::string name = kFpRegNames.at(static_cast<std::size_t>(reg));
+                auto val = st.regs.read_fp(
+                    simrv::xlen::to_fp_reg_id(static_cast<simrv::xlen::RegId>(reg)));
+                std::string name(kFpRegNames.at(static_cast<std::size_t>(reg)));
                 bool changed = paused_ && (cached_fpr_.at(static_cast<std::size_t>(reg)) != val);
                 std::string c = changed ? kThemePeach : kThemeMint;
-                std::string badge = get_in_flight_badge(
-                    sb, simrv::pipeline::operation::RegBank::Float, static_cast<RegId>(reg));
+                std::string badge =
+                    get_in_flight_badge(sb, simrv::pipeline::operation::RegBank::Float,
+                                        static_cast<simrv::xlen::RegId>(reg));
                 std::string col_color =
                     std::format(" {}f{:<2}\033[0m/{}{:<5}\033[0m: {}0x{:016x}\033[0m{}", kThemeText,
                                 reg, kThemeVal, name, c, val, badge);
                 return format_to_width(col_color, width);
             }
             case TuiRegPage::VEC: {
-                auto val = st.regs.read_vector(static_cast<RegId>(reg));
+                auto val = st.regs.read_vector(
+                    simrv::xlen::to_vec_reg_id(static_cast<simrv::xlen::RegId>(reg)));
                 bool changed = vec_reg_changed(
                     paused_, cached_vec_.at(static_cast<std::size_t>(reg)), val, st.regs.vlen);
                 std::string c = changed ? kThemePeach : kThemeMint;
@@ -154,11 +160,11 @@ auto InspectorPane::render_registers_double_column(const simrv::core::ArchState&
         const auto& sb = projected_scoreboard_;
         switch (page_) {
             case TuiRegPage::GPR: {
-                auto val1 = st.regs.read(static_cast<RegId>(reg1));
-                auto val2 = st.regs.read(static_cast<RegId>(reg2));
+                auto val1 = st.regs.read(static_cast<simrv::xlen::RegId>(reg1));
+                auto val2 = st.regs.read(static_cast<simrv::xlen::RegId>(reg2));
 
-                std::string name1 = kRegNames.at(static_cast<std::size_t>(reg1));
-                std::string name2 = kRegNames.at(static_cast<std::size_t>(reg2));
+                std::string name1(kRegNames.at(static_cast<std::size_t>(reg1)));
+                std::string name2(kRegNames.at(static_cast<std::size_t>(reg2)));
 
                 bool changed = paused_ && (cached_gpr_.at(static_cast<std::size_t>(reg1)) != val1);
                 std::string c1 = changed ? kThemePeach : kThemeMint;
@@ -168,12 +174,12 @@ auto InspectorPane::render_registers_double_column(const simrv::core::ArchState&
                 std::string badge1 =
                     (col_width >= 36)
                         ? get_in_flight_badge(sb, simrv::pipeline::operation::RegBank::Integer,
-                                              static_cast<RegId>(reg1))
+                                              static_cast<simrv::xlen::RegId>(reg1))
                         : "";
                 std::string badge2 =
                     (right_width >= 36)
                         ? get_in_flight_badge(sb, simrv::pipeline::operation::RegBank::Integer,
-                                              static_cast<RegId>(reg2))
+                                              static_cast<simrv::xlen::RegId>(reg2))
                         : "";
 
                 std::string col1_color = std::format(
@@ -187,11 +193,13 @@ auto InspectorPane::render_registers_double_column(const simrv::core::ArchState&
                        format_to_width(col2_color, right_width);
             }
             case TuiRegPage::FPR: {
-                auto val1 = st.regs.read_fp(static_cast<RegId>(reg1));
-                auto val2 = st.regs.read_fp(static_cast<RegId>(reg2));
+                auto val1 = st.regs.read_fp(
+                    simrv::xlen::to_fp_reg_id(static_cast<simrv::xlen::RegId>(reg1)));
+                auto val2 = st.regs.read_fp(
+                    simrv::xlen::to_fp_reg_id(static_cast<simrv::xlen::RegId>(reg2)));
 
-                std::string name1 = kFpRegNames.at(static_cast<std::size_t>(reg1));
-                std::string name2 = kFpRegNames.at(static_cast<std::size_t>(reg2));
+                std::string name1(kFpRegNames.at(static_cast<std::size_t>(reg1)));
+                std::string name2(kFpRegNames.at(static_cast<std::size_t>(reg2)));
 
                 bool changed = paused_ && (cached_fpr_.at(static_cast<std::size_t>(reg1)) != val1);
                 std::string c1 = changed ? kThemePeach : kThemeMint;
@@ -201,12 +209,12 @@ auto InspectorPane::render_registers_double_column(const simrv::core::ArchState&
                 std::string badge1 =
                     (col_width >= 36)
                         ? get_in_flight_badge(sb, simrv::pipeline::operation::RegBank::Float,
-                                              static_cast<RegId>(reg1))
+                                              static_cast<simrv::xlen::RegId>(reg1))
                         : "";
                 std::string badge2 =
                     (right_width >= 36)
                         ? get_in_flight_badge(sb, simrv::pipeline::operation::RegBank::Float,
-                                              static_cast<RegId>(reg2))
+                                              static_cast<simrv::xlen::RegId>(reg2))
                         : "";
 
                 std::string col1_color =
@@ -220,8 +228,10 @@ auto InspectorPane::render_registers_double_column(const simrv::core::ArchState&
                        format_to_width(col2_color, right_width);
             }
             case TuiRegPage::VEC: {
-                auto val1 = st.regs.read_vector(static_cast<RegId>(reg1));
-                auto val2 = st.regs.read_vector(static_cast<RegId>(reg2));
+                auto val1 = st.regs.read_vector(
+                    simrv::xlen::to_vec_reg_id(static_cast<simrv::xlen::RegId>(reg1)));
+                auto val2 = st.regs.read_vector(
+                    simrv::xlen::to_vec_reg_id(static_cast<simrv::xlen::RegId>(reg2)));
 
                 bool changed1 = vec_reg_changed(
                     paused_, cached_vec_.at(static_cast<std::size_t>(reg1)), val1, st.regs.vlen);
@@ -287,7 +297,7 @@ auto InspectorPane::render_registers_or_pipeline(const simrv::core::CPU& cpu,
             if (logical_row == 16) {
                 return section_line("Vector Control & Status", width);
             }
-            ::VtypeView const vt{st.vtype, static_cast<uint8_t>(st.regs.xlen)};
+            ::VtypeView const vt{.raw = st.vtype, .xlen = static_cast<uint8_t>(st.regs.xlen)};
             if (logical_row == 17) {
                 std::string const sew_str = vt.vill() ? "ill" : std::format("e{}", vt.sew_bits());
                 std::string const lmul_str = vt.vill() ? "ill" : [&]() {
@@ -354,7 +364,7 @@ auto InspectorPane::render_registers_or_pipeline(const simrv::core::CPU& cpu,
 }
 
 auto InspectorPane::get_register_value_at_row(int logical_row, int col_x, int pane_width) const
-    -> std::optional<Register> {
+    -> std::optional<simrv::xlen::Register> {
     const auto& st = current_cpu().state();
     bool single_col = is_single_column(pane_width);
     int reg = -1;
@@ -376,13 +386,17 @@ auto InspectorPane::get_register_value_at_row(int logical_row, int col_x, int pa
 
     if (reg >= 0 && reg < 32) {
         if (page_ == TuiRegPage::GPR) {
-            return st.regs.read(static_cast<RegId>(reg));
+            return st.regs.read(static_cast<simrv::xlen::RegId>(reg));
         }
         if (page_ == TuiRegPage::FPR) {
-            return static_cast<Register>(st.regs.read_fp(static_cast<RegId>(reg)));
+            return static_cast<simrv::xlen::Register>(
+                st.regs.read_fp(simrv::xlen::to_fp_reg_id(static_cast<simrv::xlen::RegId>(reg))));
         }
         if (page_ == TuiRegPage::VEC) {
-            return static_cast<Register>(st.regs.read_vector(static_cast<RegId>(reg)).u64[0]);
+            return static_cast<simrv::xlen::Register>(
+                st.regs
+                    .read_vector(simrv::xlen::to_vec_reg_id(static_cast<simrv::xlen::RegId>(reg)))
+                    .u64[0]);
         }
     }
     return std::nullopt;

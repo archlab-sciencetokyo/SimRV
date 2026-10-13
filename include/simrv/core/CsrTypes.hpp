@@ -4,12 +4,11 @@
  */
 #pragma once
 
-#include "simrv/xlen/Constants.hpp"
-#include "simrv/xlen/Types.hpp"
+#include "simrv/xlen/IdentifierTypes.hpp"
 
 namespace simrv::core {
 
-enum class MstatusBit : CSRValue {
+enum class MstatusBit : simrv::xlen::CsrValue {
     Uie = (1u << 0),
     Sie = (1u << 1),
     Hie = (1u << 2),
@@ -31,7 +30,75 @@ enum class MstatusBit : CSRValue {
     Tsr = (1u << 22),
 };
 
-enum class MipBit : CSRValue {
+constexpr auto operator|(MstatusBit lhs, MstatusBit rhs) noexcept -> simrv::xlen::CsrValue {
+    return std::to_underlying(lhs) | std::to_underlying(rhs);
+}
+constexpr auto operator&(MstatusBit lhs, MstatusBit rhs) noexcept -> simrv::xlen::CsrValue {
+    return std::to_underlying(lhs) & std::to_underlying(rhs);
+}
+constexpr auto operator~(MstatusBit bit) noexcept -> simrv::xlen::CsrValue {
+    return ~std::to_underlying(bit);
+}
+constexpr auto operator|(simrv::xlen::CsrValue lhs, MstatusBit rhs) noexcept
+    -> simrv::xlen::CsrValue {
+    return lhs | std::to_underlying(rhs);
+}
+constexpr auto operator|(MstatusBit lhs, simrv::xlen::CsrValue rhs) noexcept
+    -> simrv::xlen::CsrValue {
+    return std::to_underlying(lhs) | rhs;
+}
+constexpr auto operator&(simrv::xlen::CsrValue lhs, MstatusBit rhs) noexcept
+    -> simrv::xlen::CsrValue {
+    return lhs & std::to_underlying(rhs);
+}
+constexpr auto operator&(MstatusBit lhs, simrv::xlen::CsrValue rhs) noexcept
+    -> simrv::xlen::CsrValue {
+    return std::to_underlying(lhs) & rhs;
+}
+constexpr auto operator^(MstatusBit lhs, MstatusBit rhs) noexcept -> simrv::xlen::CsrValue {
+    return std::to_underlying(lhs) ^ std::to_underlying(rhs);
+}
+constexpr auto operator^(simrv::xlen::CsrValue lhs, MstatusBit rhs) noexcept
+    -> simrv::xlen::CsrValue {
+    return lhs ^ std::to_underlying(rhs);
+}
+constexpr auto operator^(MstatusBit lhs, simrv::xlen::CsrValue rhs) noexcept
+    -> simrv::xlen::CsrValue {
+    return std::to_underlying(lhs) ^ rhs;
+}
+constexpr auto operator^=(simrv::xlen::CsrValue& lhs, MstatusBit rhs) noexcept
+    -> simrv::xlen::CsrValue& {
+    lhs ^= std::to_underlying(rhs);
+    return lhs;
+}
+constexpr auto operator|=(simrv::xlen::CsrValue& lhs, MstatusBit rhs) noexcept
+    -> simrv::xlen::CsrValue& {
+    lhs |= std::to_underlying(rhs);
+    return lhs;
+}
+constexpr auto operator&=(simrv::xlen::CsrValue& lhs, MstatusBit rhs) noexcept
+    -> simrv::xlen::CsrValue& {
+    lhs &= std::to_underlying(rhs);
+    return lhs;
+}
+template <std::integral I>
+constexpr auto operator==(I lhs, MstatusBit rhs) noexcept -> bool {
+    return lhs == static_cast<I>(std::to_underlying(rhs));
+}
+template <std::integral I>
+constexpr auto operator==(MstatusBit lhs, I rhs) noexcept -> bool {
+    return static_cast<I>(std::to_underlying(lhs)) == rhs;
+}
+template <std::integral I>
+constexpr auto operator!=(I lhs, MstatusBit rhs) noexcept -> bool {
+    return !(lhs == rhs);
+}
+template <std::integral I>
+constexpr auto operator!=(MstatusBit lhs, I rhs) noexcept -> bool {
+    return !(lhs == rhs);
+}
+
+enum class MipBit : simrv::xlen::CsrValue {
     Usip = (1u << 0),
     Ssip = (1u << 1),
     Hsip = (1u << 2),
@@ -46,11 +113,73 @@ enum class MipBit : CSRValue {
     Meip = (1u << 11),
 };
 
+constexpr auto operator|(MipBit lhs, MipBit rhs) noexcept -> simrv::xlen::CsrValue {
+    return std::to_underlying(lhs) | std::to_underlying(rhs);
+}
+constexpr auto operator&(MipBit lhs, MipBit rhs) noexcept -> simrv::xlen::CsrValue {
+    return std::to_underlying(lhs) & std::to_underlying(rhs);
+}
+constexpr auto operator~(MipBit bit) noexcept -> simrv::xlen::CsrValue {
+    return ~std::to_underlying(bit);
+}
+constexpr auto operator|(simrv::xlen::CsrValue lhs, MipBit rhs) noexcept -> simrv::xlen::CsrValue {
+    return lhs | std::to_underlying(rhs);
+}
+constexpr auto operator|(MipBit lhs, simrv::xlen::CsrValue rhs) noexcept -> simrv::xlen::CsrValue {
+    return std::to_underlying(lhs) | rhs;
+}
+constexpr auto operator&(simrv::xlen::CsrValue lhs, MipBit rhs) noexcept -> simrv::xlen::CsrValue {
+    return lhs & std::to_underlying(rhs);
+}
+constexpr auto operator&(MipBit lhs, simrv::xlen::CsrValue rhs) noexcept -> simrv::xlen::CsrValue {
+    return std::to_underlying(lhs) & rhs;
+}
+constexpr auto operator^(MipBit lhs, MipBit rhs) noexcept -> simrv::xlen::CsrValue {
+    return std::to_underlying(lhs) ^ std::to_underlying(rhs);
+}
+constexpr auto operator^(simrv::xlen::CsrValue lhs, MipBit rhs) noexcept -> simrv::xlen::CsrValue {
+    return lhs ^ std::to_underlying(rhs);
+}
+constexpr auto operator^(MipBit lhs, simrv::xlen::CsrValue rhs) noexcept -> simrv::xlen::CsrValue {
+    return std::to_underlying(lhs) ^ rhs;
+}
+constexpr auto operator^=(simrv::xlen::CsrValue& lhs, MipBit rhs) noexcept
+    -> simrv::xlen::CsrValue& {
+    lhs ^= std::to_underlying(rhs);
+    return lhs;
+}
+constexpr auto operator|=(simrv::xlen::CsrValue& lhs, MipBit rhs) noexcept
+    -> simrv::xlen::CsrValue& {
+    lhs |= std::to_underlying(rhs);
+    return lhs;
+}
+constexpr auto operator&=(simrv::xlen::CsrValue& lhs, MipBit rhs) noexcept
+    -> simrv::xlen::CsrValue& {
+    lhs &= std::to_underlying(rhs);
+    return lhs;
+}
+template <std::integral I>
+constexpr auto operator==(I lhs, MipBit rhs) noexcept -> bool {
+    return lhs == static_cast<I>(std::to_underlying(rhs));
+}
+template <std::integral I>
+constexpr auto operator==(MipBit lhs, I rhs) noexcept -> bool {
+    return static_cast<I>(std::to_underlying(lhs)) == rhs;
+}
+template <std::integral I>
+constexpr auto operator!=(I lhs, MipBit rhs) noexcept -> bool {
+    return !(lhs == rhs);
+}
+template <std::integral I>
+constexpr auto operator!=(MipBit lhs, I rhs) noexcept -> bool {
+    return !(lhs == rhs);
+}
+
 /** Standard interrupt bits implemented by the SimRV single-hart platform. */
-constexpr auto interrupt_implemented_mask(bool has_s) -> CSRValue {
-    CSRValue mask = enum_mask(MipBit::Msip) | enum_mask(MipBit::Mtip) | enum_mask(MipBit::Meip);
+constexpr auto interrupt_implemented_mask(bool has_s) -> simrv::xlen::CsrValue {
+    simrv::xlen::CsrValue mask = MipBit::Msip | MipBit::Mtip | MipBit::Meip;
     if (has_s) {
-        mask |= enum_mask(MipBit::Ssip) | enum_mask(MipBit::Stip) | enum_mask(MipBit::Seip);
+        mask |= MipBit::Ssip | MipBit::Stip | MipBit::Seip;
     }
     return mask;
 }
@@ -61,13 +190,13 @@ constexpr auto interrupt_implemented_mask(bool has_s) -> CSRValue {
  * MSIP, MTIP, and MEIP are read-only signals sourced by CLINT/PLIC. Without
  * Sstc, M-mode may post SSIP, STIP, and the software component of SEIP.
  */
-constexpr auto mip_writable_mask(bool has_s) -> CSRValue {
-    return has_s ? enum_mask(MipBit::Ssip) | enum_mask(MipBit::Stip) | enum_mask(MipBit::Seip) : 0;
+constexpr auto mip_writable_mask(bool has_s) -> simrv::xlen::CsrValue {
+    return has_s ? (MipBit::Ssip | MipBit::Stip | MipBit::Seip) : 0;
 }
 
 /** Supervisor interrupt delegation bits implemented by this platform. */
-constexpr auto mideleg_writable_mask(bool has_s) -> CSRValue {
-    return has_s ? enum_mask(MipBit::Ssip) | enum_mask(MipBit::Stip) | enum_mask(MipBit::Seip) : 0;
+constexpr auto mideleg_writable_mask(bool has_s) -> simrv::xlen::CsrValue {
+    return has_s ? (MipBit::Ssip | MipBit::Stip | MipBit::Seip) : 0;
 }
 
 /**
@@ -77,38 +206,37 @@ constexpr auto mideleg_writable_mask(bool has_s) -> CSRValue {
  * and CSRRC modify only the software component. This replacement prevents an
  * asserted PLIC line from being accidentally latched into software state.
  */
-constexpr auto mip_rmw_base(CSRValue visible_mip, bool seip_software) -> CSRValue {
-    visible_mip &= ~enum_mask(MipBit::Seip);
-    if (seip_software) visible_mip |= enum_mask(MipBit::Seip);
+constexpr auto mip_rmw_base(simrv::xlen::CsrValue visible_mip, bool seip_software)
+    -> simrv::xlen::CsrValue {
+    visible_mip &= ~MipBit::Seip;
+    if (seip_software) visible_mip |= MipBit::Seip;
     return visible_mip;
 }
 
-constexpr CSRValue kMstatusMask =
-    (enum_mask(MstatusBit::Sie) | enum_mask(MstatusBit::Mie) | enum_mask(MstatusBit::Spie) |
-     enum_mask(MstatusBit::Mpie) | enum_mask(MstatusBit::Spp) | enum_mask(MstatusBit::Mpp) |
-     enum_mask(MstatusBit::Fs) | enum_mask(MstatusBit::Vs) | enum_mask(MstatusBit::Mprv) |
-     enum_mask(MstatusBit::Sum) | enum_mask(MstatusBit::Mxr) | enum_mask(MstatusBit::Tvm) |
-     enum_mask(MstatusBit::Tw) | enum_mask(MstatusBit::Tsr) |
-     (simrv::xlen::kIsXLen64 ? (static_cast<CSRValue>(0xF) << 32) : 0));
-constexpr CSRValue kSstatusMask =
-    (enum_mask(MstatusBit::Sie) | enum_mask(MstatusBit::Spie) | enum_mask(MstatusBit::Spp) |
-     enum_mask(MstatusBit::Fs) | enum_mask(MstatusBit::Vs) | enum_mask(MstatusBit::Xs) |
-     enum_mask(MstatusBit::Sum) | enum_mask(MstatusBit::Mxr) |
-     (simrv::xlen::kIsXLen64 ? (static_cast<CSRValue>(0x3) << 32) : 0));
-constexpr CSRValue kMstatusFsDirty = enum_mask(MstatusBit::Fs);
-constexpr CSRValue kMstatusSd = static_cast<CSRValue>(Word{1} << (simrv::xlen::kXLenBits - 1u));
+constexpr simrv::xlen::CsrValue kMstatusMask =
+    (MstatusBit::Sie | MstatusBit::Mie | MstatusBit::Spie | MstatusBit::Mpie | MstatusBit::Spp |
+     MstatusBit::Mpp | MstatusBit::Fs | MstatusBit::Vs | MstatusBit::Mprv | MstatusBit::Sum |
+     MstatusBit::Mxr | MstatusBit::Tvm | MstatusBit::Tw | MstatusBit::Tsr |
+     (simrv::xlen::kIsXLen64 ? (static_cast<simrv::xlen::CsrValue>(0xF) << 32) : 0));
+constexpr simrv::xlen::CsrValue kSstatusMask =
+    (MstatusBit::Sie | MstatusBit::Spie | MstatusBit::Spp | MstatusBit::Fs | MstatusBit::Vs |
+     MstatusBit::Xs | MstatusBit::Sum | MstatusBit::Mxr |
+     (simrv::xlen::kIsXLen64 ? (static_cast<simrv::xlen::CsrValue>(0x3) << 32) : 0));
+constexpr simrv::xlen::CsrValue kMstatusFsDirty = std::to_underlying(MstatusBit::Fs);
+constexpr simrv::xlen::CsrValue kMstatusSd =
+    static_cast<simrv::xlen::CsrValue>(simrv::xlen::Word{1} << (simrv::xlen::kXLenBits - 1u));
 /** sstatus fields implemented without the obsolete N-extension UIE/UPIE aliases. */
-constexpr CSRValue kMstatusSstatusReadMask = kSstatusMask | kMstatusSd;
-constexpr CSRValue kMstatusReadMask = static_cast<CSRValue>(kXLenMask);
+constexpr simrv::xlen::CsrValue kMstatusSstatusReadMask = kSstatusMask | kMstatusSd;
+constexpr simrv::xlen::CsrValue kMstatusReadMask = ~simrv::xlen::CsrValue{0};
 /**
  * Exception-delegation bits implemented by SimRV: causes 0-8, 12, 13, and 15.
  * S/M ECALL, reserved, hypervisor, and double-trap causes are read-only zero;
  * only exceptions that can originate below S-mode are exposed as delegatable.
  */
-constexpr CSRValue kMedelegWritableMask = static_cast<CSRValue>(0xB1FFu);
-constexpr CSRValue kFflagsMask = static_cast<CSRValue>(0x1fu);
-constexpr CSRValue kFrmMask = static_cast<CSRValue>(0x7u);
-constexpr CSRValue kFcsrMask = static_cast<CSRValue>(0xffu);
+constexpr simrv::xlen::CsrValue kMedelegWritableMask = static_cast<simrv::xlen::CsrValue>(0xB1FFu);
+constexpr simrv::xlen::CsrValue kFflagsMask = static_cast<simrv::xlen::CsrValue>(0x1fu);
+constexpr simrv::xlen::CsrValue kFrmMask = static_cast<simrv::xlen::CsrValue>(0x7u);
+constexpr simrv::xlen::CsrValue kFcsrMask = static_cast<simrv::xlen::CsrValue>(0xffu);
 constexpr unsigned kFrmShift = 5;
 
 /**
@@ -117,10 +245,10 @@ constexpr unsigned kFrmShift = 5;
  * SD is set when FS, VS, or XS is Dirty (binary 11). It is not independent
  * storage and therefore cannot be changed directly by a CSR write.
  */
-constexpr auto mstatus_with_sd(CSRValue mstatus) -> CSRValue {
-    const bool fs_dirty = (mstatus & enum_mask(MstatusBit::Fs)) == enum_mask(MstatusBit::Fs);
-    const bool vs_dirty = (mstatus & enum_mask(MstatusBit::Vs)) == enum_mask(MstatusBit::Vs);
-    const bool xs_dirty = (mstatus & enum_mask(MstatusBit::Xs)) == enum_mask(MstatusBit::Xs);
+constexpr auto mstatus_with_sd(simrv::xlen::CsrValue mstatus) -> simrv::xlen::CsrValue {
+    const bool fs_dirty = (mstatus & MstatusBit::Fs) == MstatusBit::Fs;
+    const bool vs_dirty = (mstatus & MstatusBit::Vs) == MstatusBit::Vs;
+    const bool xs_dirty = (mstatus & MstatusBit::Xs) == MstatusBit::Xs;
     return (fs_dirty || vs_dirty || xs_dirty) ? (mstatus | kMstatusSd) : (mstatus & ~kMstatusSd);
 }
 
@@ -132,52 +260,85 @@ constexpr auto mstatus_with_sd(CSRValue mstatus) -> CSRValue {
  * zero when neither the corresponding extension nor S-mode supplies that state.
  * SimRV chooses the permitted read-only-zero behavior for absent F and V state.
  */
-constexpr auto mstatus_writable_mask(bool has_s, bool has_u, bool has_f, bool has_v) -> CSRValue {
-    CSRValue mask = kMstatusMask;
+constexpr auto mstatus_writable_mask(bool has_s, bool has_u, bool has_f, bool has_v)
+    -> simrv::xlen::CsrValue {
+    simrv::xlen::CsrValue mask = kMstatusMask;
     if (!has_s) {
-        mask &=
-            ~(enum_mask(MstatusBit::Sie) | enum_mask(MstatusBit::Spie) |
-              enum_mask(MstatusBit::Spp) | enum_mask(MstatusBit::Sum) | enum_mask(MstatusBit::Mxr) |
-              enum_mask(MstatusBit::Tvm) | enum_mask(MstatusBit::Tsr));
+        mask &= ~(MstatusBit::Sie | MstatusBit::Spie | MstatusBit::Spp | MstatusBit::Sum |
+                  MstatusBit::Mxr | MstatusBit::Tvm | MstatusBit::Tsr);
         if constexpr (simrv::xlen::kIsXLen64) {
-            mask &= ~(static_cast<CSRValue>(0x3U) << 34U);  // SXL
+            mask &= ~(static_cast<simrv::xlen::CsrValue>(0x3U) << 34U);  // SXL
         }
     }
     if (!has_u) {
-        mask &= ~enum_mask(MstatusBit::Mprv);
+        mask &= ~MstatusBit::Mprv;
         if constexpr (simrv::xlen::kIsXLen64) {
-            mask &= ~(static_cast<CSRValue>(0x3U) << 32U);  // UXL
+            mask &= ~(static_cast<simrv::xlen::CsrValue>(0x3U) << 32U);  // UXL
         }
     }
-    if (!has_s && !has_u) mask &= ~enum_mask(MstatusBit::Tw);
-    if (!has_f) mask &= ~enum_mask(MstatusBit::Fs);
-    if (!has_v) mask &= ~enum_mask(MstatusBit::Vs);
+    if (!has_s && !has_u) mask &= ~MstatusBit::Tw;
+    if (!has_f) mask &= ~MstatusBit::Fs;
+    if (!has_v) mask &= ~MstatusBit::Vs;
     return mask;
 }
 
-/** Legalize MPP to a privilege mode implemented by this hart. */
-constexpr auto mstatus_legalize_mpp(CSRValue value, bool has_s, bool has_u) -> CSRValue {
-    const CSRValue requested = (value & enum_mask(MstatusBit::Mpp)) >> 11U;
-    const bool legal = requested == 3U || (requested == 1U && has_s) || (requested == 0U && has_u);
-    if (legal) return value;
-    return (value & ~enum_mask(MstatusBit::Mpp)) | (CSRValue{3U} << 11U);
+/** Project an MPP field value to a strongly typed PrivilegeLevel. */
+constexpr auto mstatus_mpp(simrv::xlen::CsrValue mstatus) noexcept -> simrv::xlen::PrivilegeLevel {
+    return static_cast<simrv::xlen::PrivilegeLevel>((mstatus & MstatusBit::Mpp) >> 11U);
 }
 
-/** Lowest privilege supported by an M-mode hart, encoded as an MPP value. */
-constexpr auto least_supported_mpp(bool has_s, bool has_u) -> CSRValue {
-    if (has_u) return 0;
-    if (has_s) return 1;
-    return 3;
+/** Project an SPP field value to a strongly typed PrivilegeLevel. */
+constexpr auto mstatus_spp(simrv::xlen::CsrValue mstatus) noexcept -> simrv::xlen::PrivilegeLevel {
+    return (mstatus & MstatusBit::Spp) ? simrv::xlen::PrivilegeLevel::Supervisor
+                                       : simrv::xlen::PrivilegeLevel::User;
+}
+
+/** Embed a strongly typed PrivilegeLevel into the MPP field of an mstatus value. */
+constexpr auto mstatus_with_mpp(simrv::xlen::CsrValue mstatus,
+                                simrv::xlen::PrivilegeLevel priv) noexcept
+    -> simrv::xlen::CsrValue {
+    return (mstatus & ~MstatusBit::Mpp) |
+           (static_cast<simrv::xlen::CsrValue>(std::to_underlying(priv)) << 11U);
+}
+
+/** Embed a strongly typed PrivilegeLevel into the SPP field of an mstatus value. */
+constexpr auto mstatus_with_spp(simrv::xlen::CsrValue mstatus,
+                                simrv::xlen::PrivilegeLevel priv) noexcept
+    -> simrv::xlen::CsrValue {
+    return (mstatus & ~MstatusBit::Spp) |
+           (static_cast<simrv::xlen::CsrValue>(std::to_underlying(priv)) << 8U);
+}
+
+/** MPP value mandated after xRET: U when present, otherwise M. */
+constexpr auto mstatus_mpp_after_xret(bool has_u) -> simrv::xlen::PrivilegeLevel {
+    return has_u ? simrv::xlen::PrivilegeLevel::User : simrv::xlen::PrivilegeLevel::Machine;
+}
+
+/** SRET always clears SPP, encoding User mode. */
+constexpr auto mstatus_spp_after_sret() -> simrv::xlen::PrivilegeLevel {
+    return simrv::xlen::PrivilegeLevel::User;
+}
+
+/** Legalize MPP to a privilege mode implemented by this hart. */
+constexpr auto mstatus_legalize_mpp(simrv::xlen::CsrValue value, bool has_s, bool has_u)
+    -> simrv::xlen::CsrValue {
+    const simrv::xlen::PrivilegeLevel req = mstatus_mpp(value);
+    const bool legal = req == simrv::xlen::PrivilegeLevel::Machine ||
+                       (req == simrv::xlen::PrivilegeLevel::Supervisor && has_s) ||
+                       (req == simrv::xlen::PrivilegeLevel::User && has_u);
+    if (legal) return value;
+    return mstatus_with_mpp(value, simrv::xlen::PrivilegeLevel::Machine);
 }
 
 /** Project an internal status value into the active architectural CSR width. */
-constexpr auto mstatus_read_value(CSRValue mstatus, CSRValue mask, unsigned xlen) -> CSRValue {
-    CSRValue value = mstatus_with_sd(mstatus) & mask;
+constexpr auto mstatus_read_value(simrv::xlen::CsrValue mstatus, simrv::xlen::CsrValue mask,
+                                  unsigned xlen) -> simrv::xlen::CsrValue {
+    simrv::xlen::CsrValue value = mstatus_with_sd(mstatus) & mask;
     if constexpr (simrv::xlen::kIsXLen64) {
         if (xlen == 32) {
             const bool sd = (value & kMstatusSd) != 0;
-            value = static_cast<CSRValue>(static_cast<uint32_t>(value));
-            if (sd) value |= CSRValue{1} << 31U;
+            value = static_cast<simrv::xlen::CsrValue>(static_cast<uint32_t>(value));
+            if (sd) value |= simrv::xlen::CsrValue{1} << 31U;
         }
     }
     return value;
@@ -188,19 +349,35 @@ constexpr auto mstatus_read_value(CSRValue mstatus, CSRValue mask, unsigned xlen
  * @brief Strongly typed architectural view for mstatus/sstatus values.
  */
 struct MstatusView {
-    CSRValue value{0};
+    simrv::xlen::CsrValue value{0};
 
-    [[nodiscard]] constexpr auto uie() const noexcept -> bool { return (value & (1U << 0)) != 0; }
-    [[nodiscard]] constexpr auto sie() const noexcept -> bool { return (value & (1U << 1)) != 0; }
-    [[nodiscard]] constexpr auto mie() const noexcept -> bool { return (value & (1U << 3)) != 0; }
-    [[nodiscard]] constexpr auto upie() const noexcept -> bool { return (value & (1U << 4)) != 0; }
-    [[nodiscard]] constexpr auto spie() const noexcept -> bool { return (value & (1U << 5)) != 0; }
-    [[nodiscard]] constexpr auto mpie() const noexcept -> bool { return (value & (1U << 7)) != 0; }
-    [[nodiscard]] constexpr auto spp() const noexcept -> PrivilegeLevel {
-        return (value & (1U << 8)) ? PrivilegeLevel::Supervisor : PrivilegeLevel::User;
+    constexpr MstatusView() noexcept = default;
+    constexpr explicit MstatusView(simrv::xlen::CsrValue val) noexcept : value(val) {}
+    constexpr operator simrv::xlen::CsrValue() const noexcept { return value; }
+
+    [[nodiscard]] constexpr auto uie() const noexcept -> bool {
+        return (value & MstatusBit::Uie) != 0;
     }
-    [[nodiscard]] constexpr auto mpp() const noexcept -> PrivilegeLevel {
-        return static_cast<PrivilegeLevel>((value >> 11U) & 0x3U);
+    [[nodiscard]] constexpr auto sie() const noexcept -> bool {
+        return (value & MstatusBit::Sie) != 0;
+    }
+    [[nodiscard]] constexpr auto mie() const noexcept -> bool {
+        return (value & MstatusBit::Mie) != 0;
+    }
+    [[nodiscard]] constexpr auto upie() const noexcept -> bool {
+        return (value & MstatusBit::Upie) != 0;
+    }
+    [[nodiscard]] constexpr auto spie() const noexcept -> bool {
+        return (value & MstatusBit::Spie) != 0;
+    }
+    [[nodiscard]] constexpr auto mpie() const noexcept -> bool {
+        return (value & MstatusBit::Mpie) != 0;
+    }
+    [[nodiscard]] constexpr auto spp() const noexcept -> simrv::xlen::PrivilegeLevel {
+        return mstatus_spp(value);
+    }
+    [[nodiscard]] constexpr auto mpp() const noexcept -> simrv::xlen::PrivilegeLevel {
+        return mstatus_mpp(value);
     }
     [[nodiscard]] constexpr auto fs() const noexcept -> uint8_t {
         return static_cast<uint8_t>((value >> 13U) & 0x3U);
@@ -208,13 +385,49 @@ struct MstatusView {
     [[nodiscard]] constexpr auto vs() const noexcept -> uint8_t {
         return static_cast<uint8_t>((value >> 9U) & 0x3U);
     }
-    [[nodiscard]] constexpr auto mprv() const noexcept -> bool { return (value & (1U << 17)) != 0; }
-    [[nodiscard]] constexpr auto sum() const noexcept -> bool { return (value & (1U << 18)) != 0; }
-    [[nodiscard]] constexpr auto mxr() const noexcept -> bool { return (value & (1U << 19)) != 0; }
-    [[nodiscard]] constexpr auto tvm() const noexcept -> bool { return (value & (1U << 20)) != 0; }
-    [[nodiscard]] constexpr auto tw() const noexcept -> bool { return (value & (1U << 21)) != 0; }
-    [[nodiscard]] constexpr auto tsr() const noexcept -> bool { return (value & (1U << 22)) != 0; }
+    [[nodiscard]] constexpr auto mprv() const noexcept -> bool {
+        return (value & MstatusBit::Mprv) != 0;
+    }
+    [[nodiscard]] constexpr auto sum() const noexcept -> bool {
+        return (value & MstatusBit::Sum) != 0;
+    }
+    [[nodiscard]] constexpr auto mxr() const noexcept -> bool {
+        return (value & MstatusBit::Mxr) != 0;
+    }
+    [[nodiscard]] constexpr auto tvm() const noexcept -> bool {
+        return (value & MstatusBit::Tvm) != 0;
+    }
+    [[nodiscard]] constexpr auto tw() const noexcept -> bool {
+        return (value & MstatusBit::Tw) != 0;
+    }
+    [[nodiscard]] constexpr auto tsr() const noexcept -> bool {
+        return (value & MstatusBit::Tsr) != 0;
+    }
     [[nodiscard]] constexpr auto sd() const noexcept -> bool { return (value & kMstatusSd) != 0; }
+
+    [[nodiscard]] constexpr auto with_mpp(simrv::xlen::PrivilegeLevel priv) const noexcept
+        -> MstatusView {
+        return MstatusView{mstatus_with_mpp(value, priv)};
+    }
+    [[nodiscard]] constexpr auto with_spp(simrv::xlen::PrivilegeLevel priv) const noexcept
+        -> MstatusView {
+        return MstatusView{mstatus_with_spp(value, priv)};
+    }
+    [[nodiscard]] constexpr auto with_mie(bool enable) const noexcept -> MstatusView {
+        return MstatusView{enable ? (value | MstatusBit::Mie) : (value & ~MstatusBit::Mie)};
+    }
+    [[nodiscard]] constexpr auto with_mpie(bool enable) const noexcept -> MstatusView {
+        return MstatusView{enable ? (value | MstatusBit::Mpie) : (value & ~MstatusBit::Mpie)};
+    }
+    [[nodiscard]] constexpr auto with_sie(bool enable) const noexcept -> MstatusView {
+        return MstatusView{enable ? (value | MstatusBit::Sie) : (value & ~MstatusBit::Sie)};
+    }
+    [[nodiscard]] constexpr auto with_spie(bool enable) const noexcept -> MstatusView {
+        return MstatusView{enable ? (value | MstatusBit::Spie) : (value & ~MstatusBit::Spie)};
+    }
+    [[nodiscard]] constexpr auto with_mprv(bool enable) const noexcept -> MstatusView {
+        return MstatusView{enable ? (value | MstatusBit::Mprv) : (value & ~MstatusBit::Mprv)};
+    }
 };
 
 /**
@@ -222,7 +435,14 @@ struct MstatusView {
  * @brief Strongly typed architectural view for satp address translation register.
  */
 struct SatpView {
-    CSRValue value{0};
+    simrv::xlen::CsrValue value{0};
+
+    constexpr SatpView() noexcept = default;
+    constexpr explicit SatpView(simrv::xlen::CsrValue val) noexcept : value(val) {}
+    constexpr operator simrv::xlen::CsrValue() const noexcept { return value; }
+    [[nodiscard]] constexpr auto translation_enabled() const noexcept -> bool {
+        return mode() != 0;
+    }
 
     [[nodiscard]] constexpr auto mode() const noexcept -> uint8_t {
         if constexpr (simrv::xlen::kIsXLen64) {
@@ -252,13 +472,13 @@ struct SatpView {
  * @brief Strongly typed architectural view for misa extension register.
  */
 struct MisaView {
-    CSRValue value{0};
+    simrv::xlen::CsrValue value{0};
 
     [[nodiscard]] constexpr auto has_extension(char ext) const noexcept -> bool {
         if (ext >= 'a' && ext <= 'z') ext = static_cast<char>(ext - 'a' + 'A');
         if (ext >= 'A' && ext <= 'Z') {
-            const unsigned bit = static_cast<unsigned>(ext - 'A');
-            return (value & (CSRValue{1} << bit)) != 0;
+            const auto bit = static_cast<unsigned>(ext - 'A');
+            return (value & (simrv::xlen::CsrValue{1} << bit)) != 0;
         }
         return false;
     }
@@ -268,7 +488,7 @@ struct MisaView {
 };
 
 /** Return whether a PMP CSR address exists for the active architectural XLEN. */
-constexpr auto pmp_csr_exists(CsrNumber address, unsigned xlen) -> bool {
+constexpr auto pmp_csr_exists(simrv::xlen::CsrNumber address, unsigned xlen) -> bool {
     const uint16_t addr = address.value();
     if (addr >= 0x3A0 && addr <= 0x3AF) {
         // RV64 packs eight configuration bytes per even-numbered pmpcfg CSR;
@@ -278,23 +498,31 @@ constexpr auto pmp_csr_exists(CsrNumber address, unsigned xlen) -> bool {
     return addr >= 0x3B0 && addr <= 0x3EF;
 }
 
+/** Legalize one pmpcfg byte: reserved bits read as zero and W requires R. */
+constexpr auto pmpcfg_legalize(uint8_t value) -> uint8_t {
+    value &= 0x9FU;  // L, A, and R/W/X are the implemented fields.
+    if ((value & 0x3U) == 0x2U) value &= static_cast<uint8_t>(~0x2U);
+    return value;
+}
+
 /** Debug CSR encodings are unavailable to ordinary U/S/M execution. */
-constexpr auto is_debug_csr(CsrNumber address) -> bool {
+constexpr auto is_debug_csr(simrv::xlen::CsrNumber address) -> bool {
     const uint16_t addr = address.value();
     return addr >= 0x7A0 && addr <= 0x7BF;
 }
 
 /** Apply architectural privilege, presence, and read-only checks to a CSR encoding. */
-constexpr auto csr_access_permitted(PrivilegeLevel current_priv, bool has_s, bool has_u,
-                                    CsrNumber address, bool is_write) -> bool {
+constexpr auto csr_access_permitted(simrv::xlen::PrivilegeLevel current_priv, bool has_s,
+                                    bool has_u, simrv::xlen::CsrNumber address, bool is_write)
+    -> bool {
     if (is_debug_csr(address)) return false;
     const uint16_t addr = address.value();
-    const Word required_priv = (addr >> 8U) & 0x3U;
+    const simrv::xlen::Word required_priv = (addr >> 8U) & 0x3U;
     const bool read_only = address.is_read_only();
     if (required_priv == 1U && !has_s) return false;
     if (!has_s && (addr == 0x302U || addr == 0x303U)) return false;
     if (!has_u && addr == 0x306U) return false;
-    if (static_cast<Word>(current_priv) < required_priv) return false;
+    if (static_cast<simrv::xlen::Word>(current_priv) < required_priv) return false;
     return !is_write || !read_only;
 }
 
@@ -304,7 +532,7 @@ constexpr auto csr_access_permitted(PrivilegeLevel current_priv, bool has_s, boo
  * RV32 defines high halves of its 64-bit counters. The same addresses are
  * reserved in RV64 and must not appear as implemented zero-valued CSRs.
  */
-constexpr auto is_zero_hpm_csr(CsrNumber address, unsigned xlen) -> bool {
+constexpr auto is_zero_hpm_csr(simrv::xlen::CsrNumber address, unsigned xlen) -> bool {
     const uint16_t addr = address.value();
     if ((addr >= 0x323U && addr <= 0x33FU) || (addr >= 0xB03U && addr <= 0xB1FU) ||
         (addr >= 0xC03U && addr <= 0xC1FU)) {
@@ -321,25 +549,28 @@ constexpr auto is_zero_hpm_csr(CsrNumber address, unsigned xlen) -> bool {
  * internal interrupt marker. Native RV32 builds already use bit 31 and must
  * not attempt that translation.
  */
-constexpr auto cause_read_value(CSRValue value, unsigned xlen) -> CSRValue {
+constexpr auto cause_read_value(simrv::xlen::CsrValue value, unsigned xlen)
+    -> simrv::xlen::CsrValue {
     if constexpr (simrv::xlen::kIsXLen64) {
-        constexpr CSRValue kInternalInterrupt = static_cast<CSRValue>(uint64_t{1} << 63U);
+        constexpr auto kInternalInterrupt = static_cast<simrv::xlen::CsrValue>(uint64_t{1} << 63U);
         if (xlen == 32) {
             const bool interrupt = (value & kInternalInterrupt) != 0;
-            value = static_cast<CSRValue>(static_cast<uint32_t>(value));
-            if (interrupt) value |= CSRValue{1} << 31U;
+            value = static_cast<simrv::xlen::CsrValue>(static_cast<uint32_t>(value));
+            if (interrupt) value |= simrv::xlen::CsrValue{1} << 31U;
         }
     }
     return value;
 }
 
 /** Convert a software-written architectural cause to the internal representation. */
-constexpr auto cause_write_value(CSRValue value, unsigned xlen) -> CSRValue {
+constexpr auto cause_write_value(simrv::xlen::CsrValue value, unsigned xlen)
+    -> simrv::xlen::CsrValue {
     if constexpr (simrv::xlen::kIsXLen64) {
-        constexpr CSRValue kArchitecturalRv32Interrupt = CSRValue{1} << 31U;
-        constexpr CSRValue kInternalInterrupt = static_cast<CSRValue>(uint64_t{1} << 63U);
+        constexpr simrv::xlen::CsrValue kArchitecturalRv32Interrupt = simrv::xlen::CsrValue{1}
+                                                                      << 31U;
+        constexpr auto kInternalInterrupt = static_cast<simrv::xlen::CsrValue>(uint64_t{1} << 63U);
         if (xlen == 32) {
-            value = static_cast<CSRValue>(static_cast<uint32_t>(value));
+            value = static_cast<simrv::xlen::CsrValue>(static_cast<uint32_t>(value));
             if ((value & kArchitecturalRv32Interrupt) != 0) {
                 return (value & ~kArchitecturalRv32Interrupt) | kInternalInterrupt;
             }
@@ -348,7 +579,7 @@ constexpr auto cause_write_value(CSRValue value, unsigned xlen) -> CSRValue {
     return value;
 }
 
-enum class Csr : CSRAddress {
+enum class Csr : uint16_t {
     // Uepc remains named because URET decoding uses its address before the
     // instruction is rejected when the unsupported N extension is disabled.
     Uepc = 0x041,
@@ -371,11 +602,14 @@ enum class Csr : CSRAddress {
     Sie = 0x104,
     Stvec = 0x105,
     Scounteren = 0x106,
+    Senvcfg = 0x10A,
     Sscratch = 0x140,
     Sepc = 0x141,
     Scause = 0x142,
     Stval = 0x143,
     Sip = 0x144,
+    Stimecmp = 0x14D,
+    Stimecmph = 0x15D,
     Satp = 0x180,
     Mvendorid = 0xF11,
     Marchid = 0xF12,
@@ -389,11 +623,16 @@ enum class Csr : CSRAddress {
     Mie = 0x304,
     Mtvec = 0x305,
     Mcounteren = 0x306,
+    Menvcfg = 0x30A,
+    Mcountinhibit = 0x320,
+    Menvcfgh = 0x31A,
     Mscratch = 0x340,
     Mepc = 0x341,
     Mcause = 0x342,
     Mtval = 0x343,
     Mip = 0x344,
+    Mseccfg = 0x747,
+    Mseccfgh = 0x757,
     Mcycle = 0xB00,
     Minstret = 0xB02,
     Mcycleh = 0xB80,
@@ -403,43 +642,43 @@ enum class Csr : CSRAddress {
     Instreth = 0xC82,
 };
 
-constexpr CSRAddress csr_addr(Csr csr) { return static_cast<CSRAddress>(csr); }
-constexpr CsrNumber csr_num(Csr csr) { return CsrNumber{static_cast<uint16_t>(csr)}; }
+constexpr uint16_t csr_addr(Csr csr) noexcept { return static_cast<uint16_t>(csr); }
+constexpr simrv::xlen::CsrNumber csr_num(Csr csr) noexcept { return simrv::xlen::CsrNumber{csr}; }
 
 namespace csr {
-inline constexpr CsrNumber kMstatus{0x300};
-inline constexpr CsrNumber kMisa{0x301};
-inline constexpr CsrNumber kMedeleg{0x302};
-inline constexpr CsrNumber kMideleg{0x303};
-inline constexpr CsrNumber kMie{0x304};
-inline constexpr CsrNumber kMtvec{0x305};
-inline constexpr CsrNumber kMcounteren{0x306};
-inline constexpr CsrNumber kMstatush{0x310};
-inline constexpr CsrNumber kMcountinhibit{0x320};
-inline constexpr CsrNumber kMscratch{0x340};
-inline constexpr CsrNumber kMepc{0x341};
-inline constexpr CsrNumber kMcause{0x342};
-inline constexpr CsrNumber kMtval{0x343};
-inline constexpr CsrNumber kMip{0x344};
+inline constexpr simrv::xlen::CsrNumber kMstatus{0x300};
+inline constexpr simrv::xlen::CsrNumber kMisa{0x301};
+inline constexpr simrv::xlen::CsrNumber kMedeleg{0x302};
+inline constexpr simrv::xlen::CsrNumber kMideleg{0x303};
+inline constexpr simrv::xlen::CsrNumber kMie{0x304};
+inline constexpr simrv::xlen::CsrNumber kMtvec{0x305};
+inline constexpr simrv::xlen::CsrNumber kMcounteren{0x306};
+inline constexpr simrv::xlen::CsrNumber kMstatush{0x310};
+inline constexpr simrv::xlen::CsrNumber kMcountinhibit{0x320};
+inline constexpr simrv::xlen::CsrNumber kMscratch{0x340};
+inline constexpr simrv::xlen::CsrNumber kMepc{0x341};
+inline constexpr simrv::xlen::CsrNumber kMcause{0x342};
+inline constexpr simrv::xlen::CsrNumber kMtval{0x343};
+inline constexpr simrv::xlen::CsrNumber kMip{0x344};
 
-inline constexpr CsrNumber kSstatus{0x100};
-inline constexpr CsrNumber kSie{0x104};
-inline constexpr CsrNumber kStvec{0x105};
-inline constexpr CsrNumber kScounteren{0x106};
-inline constexpr CsrNumber kSscratch{0x140};
-inline constexpr CsrNumber kSepc{0x141};
-inline constexpr CsrNumber kScause{0x142};
-inline constexpr CsrNumber kStval{0x143};
-inline constexpr CsrNumber kSip{0x144};
-inline constexpr CsrNumber kSatp{0x180};
+inline constexpr simrv::xlen::CsrNumber kSstatus{0x100};
+inline constexpr simrv::xlen::CsrNumber kSie{0x104};
+inline constexpr simrv::xlen::CsrNumber kStvec{0x105};
+inline constexpr simrv::xlen::CsrNumber kScounteren{0x106};
+inline constexpr simrv::xlen::CsrNumber kSscratch{0x140};
+inline constexpr simrv::xlen::CsrNumber kSepc{0x141};
+inline constexpr simrv::xlen::CsrNumber kScause{0x142};
+inline constexpr simrv::xlen::CsrNumber kStval{0x143};
+inline constexpr simrv::xlen::CsrNumber kSip{0x144};
+inline constexpr simrv::xlen::CsrNumber kSatp{0x180};
 
-inline constexpr CsrNumber kFflags{0x001};
-inline constexpr CsrNumber kFrm{0x002};
-inline constexpr CsrNumber kFcsr{0x003};
+inline constexpr simrv::xlen::CsrNumber kFflags{0x001};
+inline constexpr simrv::xlen::CsrNumber kFrm{0x002};
+inline constexpr simrv::xlen::CsrNumber kFcsr{0x003};
 
-inline constexpr CsrNumber kCycle{0xC00};
-inline constexpr CsrNumber kTime{0xC01};
-inline constexpr CsrNumber kInstret{0xC02};
+inline constexpr simrv::xlen::CsrNumber kCycle{0xC00};
+inline constexpr simrv::xlen::CsrNumber kTime{0xC01};
+inline constexpr simrv::xlen::CsrNumber kInstret{0xC02};
 }  // namespace csr
 
 }  // namespace simrv::core

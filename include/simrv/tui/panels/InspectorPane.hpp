@@ -14,11 +14,12 @@
 #include <vector>
 
 #include "simrv/core/RegisterFile.hpp"
+#include "simrv/isa/RegisterNames.hpp"
 #include "simrv/pipeline/Scoreboard.hpp"
 #include "simrv/tui/TuiTypes.hpp"
 #include "simrv/tui/TuiWidget.hpp"
 #include "simrv/tui/framework/ScrollView.hpp"
-#include "simrv/xlen/Types.hpp"
+#include "simrv/xlen/ScalarTypes.hpp"
 
 namespace simrv::core {
 class Machine;
@@ -34,16 +35,10 @@ struct PageGuidance;
 class MissionProgress;
 
 /// Canonical ABI register names shared by all register pane sub-units.
-inline constexpr std::array<const char*, 32> kRegNames = {
-    "zero", "ra", "sp", "gp", "tp",  "t0",  "t1", "t2", "s0/fp", "s1", "a0",
-    "a1",   "a2", "a3", "a4", "a5",  "a6",  "a7", "s2", "s3",    "s4", "s5",
-    "s6",   "s7", "s8", "s9", "s10", "s11", "t3", "t4", "t5",    "t6"};
+inline constexpr auto& kRegNames = simrv::isa::kGprPedagogicalNames;
 
 /// Canonical FP ABI register names shared by all register pane sub-units.
-inline constexpr std::array<const char*, 32> kFpRegNames = {
-    "ft0", "ft1", "ft2", "ft3", "ft4",  "ft5",  "ft6", "ft7", "fs0",  "fs1", "fa0",
-    "fa1", "fa2", "fa3", "fa4", "fa5",  "fa6",  "fa7", "fs2", "fs3",  "fs4", "fs5",
-    "fs6", "fs7", "fs8", "fs9", "fs10", "fs11", "ft8", "ft9", "ft10", "ft11"};
+inline constexpr auto& kFpRegNames = simrv::isa::kFprAbiNames;
 
 class InspectorPane : public TuiWidget {
    public:
@@ -111,14 +106,14 @@ class InspectorPane : public TuiWidget {
     void scroll_log(int lines);
     void reset_log_scroll();
     [[nodiscard]] auto get_log_scroll_offset() const -> int;
-    void set_inspect_addr(Register addr) { inspect_addr_ = addr; }
-    [[nodiscard]] auto get_inspect_addr() const -> Register { return inspect_addr_; }
+    void set_inspect_addr(simrv::xlen::Register addr) { inspect_addr_ = addr; }
+    [[nodiscard]] auto get_inspect_addr() const -> simrv::xlen::Register { return inspect_addr_; }
     void reset_inspect_addr() noexcept { inspect_addr_ = 0; }
     [[nodiscard]] auto is_custom_memory_inspect() const noexcept -> bool {
         return inspect_addr_ != 0;
     }
-    void set_explain_pc(Register pc) { explain_pc_ = pc; }
-    [[nodiscard]] auto get_explain_pc() const -> Register { return explain_pc_; }
+    void set_explain_pc(simrv::xlen::Register pc) { explain_pc_ = pc; }
+    [[nodiscard]] auto get_explain_pc() const -> simrv::xlen::Register { return explain_pc_; }
     void set_trace_buffer(const std::vector<std::string>* trace_buf) { trace_buffer_ = trace_buf; }
     void set_log_lines(std::vector<std::string> log_lines) {
         log_lines_ = std::move(log_lines);
@@ -129,10 +124,11 @@ class InspectorPane : public TuiWidget {
     [[nodiscard]] auto get_previous_page() const -> std::optional<TuiRegPage> {
         return previous_page_;
     }
-    [[nodiscard]] auto get_pipeline_pc_at_row(int logical_row) const -> Register;
+    [[nodiscard]] auto get_pipeline_pc_at_row(int logical_row) const -> simrv::xlen::Register;
     [[nodiscard]] auto get_register_value_at_row(int logical_row, int col_x, int pane_width) const
-        -> std::optional<Register>;
-    [[nodiscard]] auto get_stack_addr_at_row(int logical_row) const -> std::optional<Register>;
+        -> std::optional<simrv::xlen::Register>;
+    [[nodiscard]] auto get_stack_addr_at_row(int logical_row) const
+        -> std::optional<simrv::xlen::Register>;
     [[nodiscard]] auto is_running_label_click(int logical_row, int col, int width) const -> bool;
     [[nodiscard]] auto get_text_in_range(int start_row, int start_col, int end_row, int end_col,
                                          int width) -> std::string;
@@ -171,6 +167,7 @@ class InspectorPane : public TuiWidget {
     [[nodiscard]] auto content_total_columns(int width) const -> int;
     [[nodiscard]] auto get_running_label_start_row() const -> int;
     [[nodiscard]] auto render_active_spinner(int logical_row, int width) -> std::string;
+    [[nodiscard]] auto render_live_overview_row(int logical_row, int width) -> std::string;
     [[nodiscard]] auto render_registers_single_column(const simrv::core::ArchState& st,
                                                       int logical_row, int width) -> std::string;
     [[nodiscard]] auto render_registers_double_column(const simrv::core::ArchState& st,
@@ -200,8 +197,9 @@ class InspectorPane : public TuiWidget {
                                        int right_width) -> std::string;
     [[nodiscard]] auto render_stack_frame(const simrv::core::CPU& cpu, int logical_row,
                                           int col_width, int right_width) -> std::string;
-    [[nodiscard]] auto translate_safe(const simrv::core::CPU& cpu, Register vaddr) const
-        -> std::optional<Register>;
+    [[nodiscard]] auto translate_safe(const simrv::core::CPU& cpu,
+                                      simrv::xlen::Register vaddr) const
+        -> std::optional<simrv::xlen::Register>;
     [[nodiscard]] auto render_pipeline_timeline(const simrv::core::CPU& cpu, int logical_row,
                                                 int width) -> std::string;
     [[nodiscard]] auto render_pipeline_stages_cycle_accurate(const simrv::core::CPU& cpu,
@@ -258,11 +256,20 @@ class InspectorPane : public TuiWidget {
     bool paused_ = true;
     bool student_guide_enabled_ = false;
 
-    std::array<Register, 32> cached_gpr_{};
+    std::array<simrv::xlen::Register, 32> cached_gpr_{};
     std::array<uint64_t, 32> cached_fpr_{};
     std::array<simrv::core::VectorRegister, 32> cached_vec_{};
     simrv::pipeline::Scoreboard projected_scoreboard_{};
     std::array<std::array<std::string, 80>, 16> cached_page_rows_{};
+    struct LiveHartSnapshot {
+        simrv::xlen::Register pc = 0;
+        std::string symbol;
+        uint64_t cycles = 0;
+        uint64_t instructions = 0;
+        uint64_t timer_ticks = 0;
+        simrv::xlen::PrivilegeLevel privilege = simrv::xlen::PrivilegeLevel::Machine;
+    };
+    std::vector<LiveHartSnapshot> live_harts_;
     std::array<std::string, 80> cached_left_rows_{};
     int last_width_ = 0;
 
@@ -281,8 +288,8 @@ class InspectorPane : public TuiWidget {
     }
 
     double active_runtime_ = 0.0;
-    Register inspect_addr_ = 0;
-    Register explain_pc_ = 0;
+    simrv::xlen::Register inspect_addr_ = 0;
+    simrv::xlen::Register explain_pc_ = 0;
     const std::vector<std::string>* trace_buffer_ = nullptr;
     std::vector<std::string> log_lines_;
     int cache_inspect_type_ = 0;  // 0: ICache, 1: DCache

@@ -5,6 +5,7 @@
 #include <format>
 #include <string>
 
+#include "InspectorPaneCycleMode.hpp"
 #include "simrv/core/Cpu.hpp"
 #include "simrv/core/Machine.hpp"
 #include "simrv/pipeline/PipelineSim.hpp"
@@ -23,22 +24,7 @@ auto InspectorPane::render_hazard_stats(const simrv::core::CPU& cpu, int logical
         if (logical_row == 0) {
             return section_line("Pipeline Hazard & Forwarding Unit Inspector", width);
         }
-        if (logical_row == 4) {
-            std::string text = "\033[1;31m[!] CYCLE-ACCURATE MODE INACTIVE\033[0m";
-            int text_w = get_display_width(text);
-            int spaces = std::max(1, (width - text_w) / 2);
-            return format_to_width(std::string(static_cast<std::size_t>(spaces), ' ') + text,
-                                   width);
-        }
-        if (logical_row == 6) {
-            std::string text = (width < 45) ? "Enable Cycle-Accurate mode [,]"
-                                            : "Enable cycle mode [,] or --mode cycle-accurate";
-            int text_w = get_display_width(text);
-            int spaces = std::max(1, (width - text_w) / 2);
-            return format_to_width(
-                std::string(static_cast<std::size_t>(spaces), ' ') + kThemeMuted + text + "\033[0m",
-                width);
-        }
+        if (auto row = detail::inactive_cycle_mode_row(logical_row, width)) return *row;
         if (logical_row == 14) {
             return section_line("Status: Hazard Detection Disabled (Functional)", width);
         }
@@ -112,14 +98,14 @@ auto InspectorPane::render_hazard_stats(const simrv::core::CPU& cpu, int logical
         auto e_reg = state.e_reg;
         auto w_reg = state.w_reg;
 
-        uint32_t f_pc = static_cast<uint32_t>(f_reg.pc & 0xFFFFFFFFULL);
-        uint32_t e_pc = static_cast<uint32_t>(e_reg.pc & 0xFFFFFFFFULL);
-        uint32_t w_pc = static_cast<uint32_t>(w_reg.pc & 0xFFFFFFFFULL);
+        auto f_pc = static_cast<uint32_t>(f_reg.pc & 0xFFFFFFFFULL);
+        auto e_pc = static_cast<uint32_t>(e_reg.pc & 0xFFFFFFFFULL);
+        auto w_pc = static_cast<uint32_t>(w_reg.pc & 0xFFFFFFFFULL);
 
-        uint8_t e_rs1 = static_cast<uint8_t>(e_reg.rs1);
-        uint8_t e_rs2 = static_cast<uint8_t>(e_reg.rs2);
-        uint8_t e_rd = static_cast<uint8_t>(e_reg.rd);
-        uint8_t w_rd = static_cast<uint8_t>(w_reg.rd);
+        auto e_rs1 = static_cast<uint8_t>(e_reg.rs1);
+        auto e_rs2 = static_cast<uint8_t>(e_reg.rs2);
+        auto e_rd = static_cast<uint8_t>(e_reg.rd);
+        auto w_rd = static_cast<uint8_t>(w_reg.rd);
 
         if (logical_row == 4) {
             return format_to_width(
@@ -183,19 +169,19 @@ auto InspectorPane::render_hazard_stats(const simrv::core::CPU& cpu, int logical
     auto m_reg = state.m_reg;
     auto w_reg = state.w_reg;
 
-    uint32_t f_pc = static_cast<uint32_t>(f_reg.pc & 0xFFFFFFFFULL);
-    uint32_t d_pc = static_cast<uint32_t>(d_reg.pc & 0xFFFFFFFFULL);
-    uint32_t e_pc = static_cast<uint32_t>(e_reg.pc & 0xFFFFFFFFULL);
-    uint32_t m_pc = static_cast<uint32_t>(m_reg.pc & 0xFFFFFFFFULL);
-    uint32_t w_pc = static_cast<uint32_t>(w_reg.pc & 0xFFFFFFFFULL);
+    auto f_pc = static_cast<uint32_t>(f_reg.pc & 0xFFFFFFFFULL);
+    auto d_pc = static_cast<uint32_t>(d_reg.pc & 0xFFFFFFFFULL);
+    auto e_pc = static_cast<uint32_t>(e_reg.pc & 0xFFFFFFFFULL);
+    auto m_pc = static_cast<uint32_t>(m_reg.pc & 0xFFFFFFFFULL);
+    auto w_pc = static_cast<uint32_t>(w_reg.pc & 0xFFFFFFFFULL);
 
-    uint8_t d_rs1 = static_cast<uint8_t>(d_reg.rs1);
-    uint8_t d_rs2 = static_cast<uint8_t>(d_reg.rs2);
-    uint8_t d_rd = static_cast<uint8_t>(d_reg.rd);
-    uint8_t e_rs1 = static_cast<uint8_t>(e_reg.rs1);
-    uint8_t e_rs2 = static_cast<uint8_t>(e_reg.rs2);
-    uint8_t m_rd = static_cast<uint8_t>(m_reg.rd);
-    uint8_t w_rd = static_cast<uint8_t>(w_reg.rd);
+    auto d_rs1 = static_cast<uint8_t>(d_reg.rs1);
+    auto d_rs2 = static_cast<uint8_t>(d_reg.rs2);
+    auto d_rd = static_cast<uint8_t>(d_reg.rd);
+    auto e_rs1 = static_cast<uint8_t>(e_reg.rs1);
+    auto e_rs2 = static_cast<uint8_t>(e_reg.rs2);
+    auto m_rd = static_cast<uint8_t>(m_reg.rd);
+    auto w_rd = static_cast<uint8_t>(w_reg.rd);
 
     if (logical_row == 4) {
         return format_to_width(
@@ -255,7 +241,7 @@ auto InspectorPane::render_hazard_stats(const simrv::core::CPU& cpu, int logical
         const char* bank_name;
         std::string reg_name;
         const char* stage_name;
-        LatencyCycles latency;
+        simrv::xlen::LatencyCycles latency;
         bool can_forward;
     };
     std::vector<ActiveReservation> active_entries;
@@ -281,7 +267,7 @@ auto InspectorPane::render_hazard_stats(const simrv::core::CPU& cpu, int logical
 
     // Check Integer bank
     for (size_t r = 1; r < 32; ++r) {
-        auto reg = static_cast<RegId>(r);
+        auto reg = static_cast<simrv::xlen::RegId>(r);
         if (auto entry = sb.get_entry_data(simrv::pipeline::operation::RegBank::Integer, reg)) {
             active_entries.push_back({
                 .bank_name = "INT",
@@ -294,7 +280,7 @@ auto InspectorPane::render_hazard_stats(const simrv::core::CPU& cpu, int logical
     }
     // Check Float bank
     for (size_t r = 0; r < 32; ++r) {
-        auto reg = static_cast<RegId>(r);
+        auto reg = static_cast<simrv::xlen::RegId>(r);
         if (auto entry = sb.get_entry_data(simrv::pipeline::operation::RegBank::Float, reg)) {
             active_entries.push_back({
                 .bank_name = "FP ",
@@ -314,7 +300,7 @@ auto InspectorPane::render_hazard_stats(const simrv::core::CPU& cpu, int logical
                 width);
         }
     } else {
-        size_t entry_idx = static_cast<size_t>(logical_row - 11);
+        auto entry_idx = static_cast<size_t>(logical_row - 11);
         if (entry_idx < active_entries.size() && entry_idx < 6) {
             const auto& item = active_entries[entry_idx];
             std::string fwd_str = item.can_forward ? "\033[38;5;120m[CAN FWD]\033[0m"

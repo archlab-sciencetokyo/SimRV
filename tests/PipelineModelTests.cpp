@@ -7,14 +7,14 @@
 
 #include "simrv/cache/BaseCache.hpp"
 #include "simrv/core/RuntimeProfile.hpp"
-#include "simrv/isa/Base.hpp"
+#include "simrv/isa/InstructionFields.hpp"
 #include "simrv/pipeline/CpuModel.hpp"
 #include "simrv/pipeline/Decoder.hpp"
 #include "simrv/pipeline/OperationTraits.hpp"
 #include "simrv/pipeline/PipelineConfig.hpp"
 #include "simrv/pipeline/PipelineSim.hpp"
 #include "simrv/pipeline/RetirementEffects.hpp"
-#include "simrv/xlen/Types.hpp"
+#include "simrv/xlen/RegisterTypes.hpp"
 
 #define TEST_CHECK(expr)                                                                     \
     do {                                                                                     \
@@ -29,6 +29,7 @@ namespace {
 using simrv::isa::Opcode;
 using simrv::isa::OperationId;
 using simrv::pipeline::CpuConfig;
+using simrv::pipeline::PipelineStage;
 using simrv::pipeline::PipelineType;
 
 void test_operation_traits() {
@@ -51,12 +52,12 @@ void test_operation_traits() {
 void test_writeback_effects() {
     simrv::pipeline::PipelineContext context{};
     context.opcode = Opcode::Load;
-    context.rd = RegId::A0;
+    context.rd = simrv::xlen::RegId::A0;
     context.mem_rdata = 0x1234;
     auto effects = simrv::pipeline::build_writeback_effects(context);
     TEST_CHECK(effects.increments_instruction_count);
     TEST_CHECK(effects.integer_write.enabled);
-    TEST_CHECK(effects.integer_write.destination == RegId::A0);
+    TEST_CHECK(effects.integer_write.destination == simrv::xlen::RegId::A0);
     TEST_CHECK(effects.integer_write.value == 0x1234);
 
     context.pending_exception = ExceptionCode::FaultLoad;
@@ -66,7 +67,7 @@ void test_writeback_effects() {
 
     context = {};
     context.opcode = Opcode::LoadFp;
-    context.rd = static_cast<RegId>(FpRegId::Fa0);
+    context.rd = static_cast<simrv::xlen::RegId>(simrv::xlen::FpRegId::Fa0);
     context.fp_mem_rdata = 0x3ff0000000000000ULL;
     effects = simrv::pipeline::build_writeback_effects(context);
     TEST_CHECK(effects.floating_write.enabled);
@@ -86,6 +87,7 @@ void test_pipeline_factory_and_names() {
 
 void test_cpu_model_presets_and_validation() {
     using simrv::pipeline::CpuModelPreset;
+    using simrv::pipeline::PipelineStage;
     using simrv::pipeline::PipelineType;
     const auto tiny = simrv::pipeline::make_cpu_model_preset(CpuModelPreset::Tiny);
     TEST_CHECK(tiny.validate().has_value());
@@ -195,11 +197,11 @@ void test_pipeline_sim_wrapper() {
         .retired = true,
         .data_hazard_stall = true,
     });
-    TEST_CHECK(sim.f_reg().pc == 0x1010);
-    TEST_CHECK(sim.d_reg().pc == 0x100c);
-    TEST_CHECK(sim.e_reg().pc == 0x1008);
-    TEST_CHECK(sim.m_reg().pc == 0x1004);
-    TEST_CHECK(sim.w_reg().pc == 0x1000);
+    TEST_CHECK(sim.stage_reg(PipelineStage::Fetch).pc == 0x1010);
+    TEST_CHECK(sim.stage_reg(PipelineStage::Decode).pc == 0x100c);
+    TEST_CHECK(sim.stage_reg(PipelineStage::Execute).pc == 0x1008);
+    TEST_CHECK(sim.stage_reg(PipelineStage::Memory).pc == 0x1004);
+    TEST_CHECK(sim.stage_reg(PipelineStage::Writeback).pc == 0x1000);
     TEST_CHECK(sim.cycle_count() == 1);
     TEST_CHECK(sim.stall_cycles() == 1);
     TEST_CHECK(sim.data_hazard_stalls() == 1);
@@ -211,7 +213,7 @@ void test_pipeline_sim_wrapper() {
     auto saved = sim.save_state();
     sim.reset();
     sim.restore_state(saved);
-    TEST_CHECK(sim.e_reg().pc == 0x1008);
+    TEST_CHECK(sim.stage_reg(PipelineStage::Execute).pc == 0x1008);
     TEST_CHECK(sim.cycle_history().size() == 1);
 
     simrv::pipeline::PipelineSim fast;
@@ -228,8 +230,8 @@ void test_pipeline_sim_wrapper() {
     observable.advance_cycle(transition);
     TEST_CHECK(fast.get_stats().cycle_count == observable.get_stats().cycle_count);
     TEST_CHECK(fast.get_stats().bubble_cycles == observable.get_stats().bubble_cycles);
-    TEST_CHECK(!fast.f_reg().valid);
-    TEST_CHECK(observable.f_reg().pc == 0x2004);
+    TEST_CHECK(!fast.stage_reg(PipelineStage::Fetch).valid);
+    TEST_CHECK(observable.stage_reg(PipelineStage::Fetch).pc == 0x2004);
     TEST_CHECK(fast.cycle_history().empty());
     TEST_CHECK(observable.cycle_history().size() == 1);
 

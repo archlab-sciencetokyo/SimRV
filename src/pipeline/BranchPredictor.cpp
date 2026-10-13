@@ -2,7 +2,6 @@
 
 #include <algorithm>
 #include <bit>
-#include <format>
 
 namespace simrv::pipeline {
 
@@ -99,14 +98,14 @@ void BranchPredictor::reset() {
     stats_ = {};
 }
 
-void BranchPredictor::latch_btb_read(Address pc) {
+void BranchPredictor::latch_btb_read(simrv::xlen::Address pc) {
     if (!config_.registered_btb_read || btb_.empty() || bht_.empty()) return;
     const uint32_t btb_idx = static_cast<uint32_t>(pc >> config_.pc_shift) & btb_mask_;
     registered_btb_entry_ = btb_[btb_idx];
     registered_bht_counter_ = bht_[get_bht_index(pc, ghr_)];
 }
 
-auto BranchPredictor::predict_direction(Address pc, const DecodedInstruction& inst,
+auto BranchPredictor::predict_direction(simrv::xlen::Address pc, const DecodedInstruction& inst,
                                         uint32_t& bht_idx) -> bool {
     if (config_.type == BranchPredictorType::Disabled) {
         bht_idx = 0;
@@ -135,7 +134,7 @@ auto BranchPredictor::predict_direction(Address pc, const DecodedInstruction& in
     return is_taken_prediction(bht_[bht_idx]);
 }
 
-void BranchPredictor::ras_push(Address return_addr) {
+void BranchPredictor::ras_push(simrv::xlen::Address return_addr) {
     if (ras_.empty()) return;
     ras_[ras_head_] = return_addr;
     ras_head_ = (ras_head_ + 1) % ras_.size();
@@ -145,7 +144,7 @@ void BranchPredictor::ras_push(Address return_addr) {
     ++stats_.ras_pushes;
 }
 
-auto BranchPredictor::ras_pop() -> std::optional<Address> {
+auto BranchPredictor::ras_pop() -> std::optional<simrv::xlen::Address> {
     if (ras_count_ == 0 || ras_.empty()) return std::nullopt;
     ras_head_ = (ras_head_ + ras_.size() - 1) % ras_.size();
     --ras_count_;
@@ -153,7 +152,7 @@ auto BranchPredictor::ras_pop() -> std::optional<Address> {
     return ras_[ras_head_];
 }
 
-auto BranchPredictor::ras_peek() const noexcept -> std::optional<Address> {
+auto BranchPredictor::ras_peek() const noexcept -> std::optional<simrv::xlen::Address> {
     if (ras_count_ == 0 || ras_.empty()) return std::nullopt;
     const size_t top = (ras_head_ + ras_.size() - 1) % ras_.size();
     return ras_[top];
@@ -169,13 +168,14 @@ auto BranchPredictor::bht_distribution() const noexcept -> std::array<size_t, 4>
     return dist;
 }
 
-auto BranchPredictor::predict(Address pc, const DecodedInstruction& inst) -> BranchPrediction {
+auto BranchPredictor::predict(simrv::xlen::Address pc, const DecodedInstruction& inst)
+    -> BranchPrediction {
     BranchPrediction pred{};
     predict(pc, inst, pred);
     return pred;
 }
 
-void BranchPredictor::predict(Address pc, const DecodedInstruction& inst,
+void BranchPredictor::predict(simrv::xlen::Address pc, const DecodedInstruction& inst,
                               BranchPrediction& pred) noexcept {
     pred.reset();
     const auto opcode = inst.opcode;
@@ -216,18 +216,19 @@ void BranchPredictor::predict(Address pc, const DecodedInstruction& inst,
         return;
     }
 
-    const Address inst_len = (inst.cinsn != 0u ? 2 : 4);
-    const Address ret_addr = pc + inst_len;
+    const simrv::xlen::Address inst_len = (inst.cinsn != 0u ? 2 : 4);
+    const simrv::xlen::Address ret_addr = pc + inst_len;
 
     // Detect RISC-V function calls and returns based on link registers
     if (is_jal || is_jalr) {
-        pred.is_call = (inst.rd == RegId::Ra || inst.rd == RegId::T0);
-        pred.is_return = is_jalr && (inst.rd != RegId::Ra && inst.rd != RegId::T0) &&
-                         (inst.rs1 == RegId::Ra || inst.rs1 == RegId::T0);
+        pred.is_call = (inst.rd == simrv::xlen::RegId::Ra || inst.rd == simrv::xlen::RegId::T0);
+        pred.is_return = is_jalr &&
+                         (inst.rd != simrv::xlen::RegId::Ra && inst.rd != simrv::xlen::RegId::T0) &&
+                         (inst.rs1 == simrv::xlen::RegId::Ra || inst.rs1 == simrv::xlen::RegId::T0);
     }
 
     if (is_jal) {
-        pred.predicted_target = pc + static_cast<Address>(inst.imm);
+        pred.predicted_target = pc + static_cast<simrv::xlen::Address>(inst.imm);
         if (config_.untagged_btb) {
             const uint32_t btb_idx = static_cast<uint32_t>(pc >> config_.pc_shift) & btb_mask_;
             const auto& entry = config_.registered_btb_read && !config_.jump_uses_current_btb
@@ -284,8 +285,9 @@ void BranchPredictor::predict(Address pc, const DecodedInstruction& inst,
     // Conditional Branch
     pred.predicted_taken = predict_direction(pc, inst, pred.bht_index);
     if (pred.predicted_taken) {
-        pred.predicted_target = config_.registered_btb_read ? registered_btb_entry_.target
-                                                            : pc + static_cast<Address>(inst.imm);
+        pred.predicted_target = config_.registered_btb_read
+                                    ? registered_btb_entry_.target
+                                    : pc + static_cast<simrv::xlen::Address>(inst.imm);
     } else {
         pred.predicted_target = ret_addr;
     }

@@ -89,9 +89,9 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--simrv", default="./build/rv64-release/simrv")
     parser.add_argument("--qemu", default="qemu-system-riscv64")
-    parser.add_argument("--firmware", default="linux-images/rv64/fw_payload.bin")
-    parser.add_argument("--disk", default="linux-images/rv64/root.img")
-    parser.add_argument("--dtb", default="linux-images/rv64/devicetree.dtb")
+    parser.add_argument("--firmware", default="linux-images/rv64/alpine-gui/opensbi-linux-payload.elf")
+    parser.add_argument("--disk", default="linux-images/rv64/alpine-gui/rootfs.img")
+    parser.add_argument("--dtb", default="linux-images/rv64/alpine-gui/devicetree.dtb")
     parser.add_argument("--workload", default="dd if=/dev/zero bs=1M count=4 2>/dev/null | gzip -1 >/dev/null")
     parser.add_argument("--warmups", type=int, default=1)
     parser.add_argument("--runs", type=int, default=5)
@@ -101,7 +101,7 @@ def main():
     parser.add_argument("--markdown", default="benchmark-ia-vs-qemu.md")
     args = parser.parse_args()
     with tempfile.TemporaryDirectory(prefix="simrv-ia-qemu-") as temp:
-        qemu_disk = os.path.join(temp, "root.img")
+        qemu_disk = os.path.join(temp, "rootfs.img")
         subprocess.run(["cp", "--reflink=auto", args.disk, qemu_disk], check=True)
         simrv_cmd = [args.simrv, "--cli", "--os", "--mode", "fast", "-m", args.firmware,
                      "-D", args.disk, "-f", args.dtb, "-e", "100000000000"]

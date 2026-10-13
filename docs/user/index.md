@@ -134,7 +134,7 @@ simrv -m program.elf
 | `--trace-level <0-4>` | Limit architectural event detail: devices, calls, retirement, or detailed state. |
 | `--trace-function <name>` | Filter attributed events to an exact ELF function symbol. |
 | `--trace-device <name>` | Filter component-attributed events to an exact component name. |
-| `--log-format <text|json|json-pretty>` | Select diagnostic log rendering; default is `text`. |
+| `--log-format <text \| json \| json-pretty>` | Select diagnostic log rendering; default is `text`. |
 | `--log-file <file>` | Mirror diagnostic messages to a file in the selected log format. |
 | `--trace` | Write an aligned, labeled architectural instruction trace to `<trace-dir>/trace.txt`. |
 | `--tracepc` | Write PC stream trace to `<trace-dir>/tracepc.txt`. |
@@ -286,10 +286,10 @@ and source locations:
 ```
 
 `metadata.json` records the simulator version and commit, the lowercase single-letter ISA string
-derived from runtime `misa` for standard single-letter extensions, separately lists
-`Xsimrvtrace` as a non-standard extension, XLEN, VLEN, hart count, trace level, registered runtime
-MMIO devices and address ranges, the VirtIO RNG's fixed seed, guest ELF path and SHA-256, a SHA-256
-configuration fingerprint, exact argument vector, host OS/release/machine, and start/completion timestamps. The
+derived from runtime `misa` for standard single-letter extensions, XLEN, VLEN, hart count, trace
+level, registered runtime MMIO devices and address ranges, the VirtIO RNG's fixed seed, guest ELF
+path and SHA-256, a SHA-256 configuration fingerprint, exact argument vector, host
+OS/release/machine, and start/completion timestamps. The
 ISA string reflects `misa` and does not claim multi-letter `Z*` extension coverage. For `--isa`,
 SimRV accepts `rv32g`/`rv64g` as the standard G shorthand for IMAFD plus `Zicsr` and `Zifencei`;
 `rv32gc`/`rv64gc` add the separate C extension. SimRV also accepts `Zicsr`, `Zifencei`, and
@@ -314,7 +314,7 @@ traps. `pc` is the handler PC on entry, and `target_pc` is the resumed PC on ret
 Schema-2 event catalog:
 
 | Event | Stream | Event-specific fields |
-|---|---|---|
+| --- | --- | --- |
 | Lifecycle transitions | `events.jsonl` | `payload.status`, stop reason, retired instructions, cycles; failures may include an error and exits may include exit status |
 | Interrupt assertion/deassertion and DMA start/completion/cancellation | `events.jsonl` | interrupt source/cause or DMA component, transfer ID, byte count, and modeled cycle fields |
 | `call`, `return` | `calls.jsonl` | source/target PCs, call `return_pc`, dynamic call depth |
@@ -326,7 +326,6 @@ Schema-2 event catalog:
 | `bus_transaction` | `bus.jsonl` | bus, TileLink channel/opcode, protocol source/sink IDs, sequence, hart/master, target, address, transfer width, byte enables, data, request/completion cycles, modeled latency, response/error flags |
 | `pipeline_stall` | `pipeline.jsonl` | cycle-accurate stages stalled that cycle, each stage's PC, remaining modeled latency, and stall reason |
 | `memory_read`, `memory_write`, `memory_atomic`, `memory_fault` | `memory.jsonl` | effective/optional physical address, region/component, operation, width, values, fault/cause/tval, latency when modeled |
-| `marker_begin`, `marker_end`, `marker` | `markers.jsonl` | PC, mode, label, marker depth |
 | `header` | event streams | stream name |
 
 Mapped MMIO failures and accesses to unmapped addresses are retained as device-stream records with
@@ -383,30 +382,6 @@ registered device name or `ram`/`unmapped`. TileLink transfer `size_log2` is acc
 derived `width_bytes`; `burst_length` is measured in 8-byte TileLink beats. Synchronous paths may
 have zero modeled latency; cycle-accurate paths report the configured interconnect latency.
 
-#### Guest software annotations
-
-SimRV implements the write-command CSR `0x800` from the RISC-V custom U-level read/write range.
-This address allocation follows the [RISC-V Privileged Architecture CSR address mapping
-conventions](https://docs.riscv.org/reference/isa/priv/priv-csrs.html). It is accessed with
-standard Zicsr instructions and does not occupy a standard CSR address. This is a SimRV-specific,
-non-standard facility named `Xsimrvtrace`; it is not a ratified RISC-V extension.
-The CSR is inert when architectural tracing is disabled. Guest labels are sent as UTF-8 bytes,
-followed by one command write, so the simulator does not dereference guest pointers or translate
-guest virtual addresses:
-
-```c
-#include <simrv/trace.h>
-
-simrv_trace_begin("decode");
-simrv_marker("entered decoder");
-simrv_trace_end("decode");
-```
-
-The equivalent assembly macros are in `simrv/trace.S` and take a NUL-terminated string pointer in
-an integer register, for example `SIMRV_TRACE_BEGIN a0`. Labels are capped at 1024 bytes per event.
-Events include hart, cycle, source PC, privilege mode, label, and post-transition marker nesting
-depth. `marker_end` decrements depth only when nonzero.
-
 ### Checkpoint and resume
 
 Save a versioned architectural snapshot when a run ends and resume it with the same machine
@@ -441,7 +416,7 @@ PC and architectural register state are visible on connection; debugger protocol
 
 The SimRV TUI provides an educational visual inspection environment for architecture students and hardware engineers.
 
-```
+```text
 ┌─ SimRV 3.0 ─────────────────────────────────────────── [Hart 0: RUNNING] ─┐
 │ [Regs] [Cache] [TLB] [Pipeline] [Hazards] [Explainer] │ Guest Terminal PTY │
 │                                                      │                    │
@@ -465,7 +440,7 @@ The SimRV TUI provides an educational visual inspection environment for architec
 - **`[Tab]` / `[Shift-Tab]`**: Switch active sub-views within the left inspector pane.
 - **`[F5]` / `[c]` / `[Ctrl-P]`**: Run / Pause simulation execution.
 - **`[F6]` / `[s]`**: Step one cycle machine-wide across all harts.
-- **`[q]` / `[Ctrl-C]`**: Quit simulator.
+- **`[Ctrl-Q]` / `[F10]` / `[q]` (when paused)**: Quit simulator.
 
 !!! info "Pause to use TUI navigation"
     While the guest is running, regular keystrokes go to its UART. Pause with `Ctrl-P` before using
@@ -518,16 +493,22 @@ simrv --cli -m build/my_program.elf -H 0x80001000
 SimRV boots full Linux distributions with OpenSBI and dynamic device-tree generation.
 
 ```bash
-# Launch Linux with OpenSBI and root filesystem image
-simrv --kernel linux-images/Image \
-      --disk linux-images/root.img \
+# Launch the bundled OpenSBI + Linux image with its root filesystem
+simrv --os \
+      -m linux-images/rv64/alpine-gui/opensbi-linux-payload.elf \
+      -D linux-images/rv64/alpine-gui/rootfs.img \
+      -f linux-images/rv64/alpine-gui/devicetree.dtb \
       --smp 2
 ```
 
 ### Full-System CLI Options
 
-- `--kernel <Image>`: Linux kernel image.
-- `--disk <root.img>`: Ext4 root filesystem image (attached as `/dev/vda` via VirtIO Block).
+- `-m <opensbi-linux-payload.elf>`: OpenSBI firmware containing the Linux kernel.
+- `-D <rootfs.img>`: Ext4 root filesystem image (attached as `/dev/vda` via VirtIO Block). Guest
+  writes use a temporary overlay and are discarded when SimRV exits; the source image is unchanged.
+- `--virtiofs <DIR>`: Expose a selected host directory to Linux guests through VirtIO-FS. Guest
+  writes are immediately visible in that host directory; see
+  [Linux and Buildroot](linux.md#share-a-host-directory-with-virtio-fs).
 - `--smp <2..16>`: Number of active SMP harts (default is 1 for single-hart execution).
 - `--dtb <virt.dtb>`: Optional custom Device Tree Blob (SimRV automatically synthesizes a device tree if omitted).
 - `--dram-size <SIZE>`, `--ram-size <SIZE>`: Guest DRAM size with an optional

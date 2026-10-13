@@ -8,14 +8,15 @@
 #include <vector>
 
 #include "simrv/core/Machine.hpp"
+#include "simrv/memory/MemorySubsystem.hpp"
 
 namespace simrv::device {
 
-DmaController::DmaController(core::Machine* machine, Address base_address, Address size,
-                             uint32_t irq_num)
+DmaController::DmaController(core::Machine* machine, simrv::xlen::Address base_address,
+                             simrv::xlen::Address size, uint32_t irq_num)
     : memory::MmioDevice(machine), base_address_(base_address), size_(size), irq_num_(irq_num) {}
 
-auto DmaController::read32(Address offset) -> uint32_t {
+auto DmaController::read32(simrv::xlen::Address offset) -> uint32_t {
     switch (offset) {
         case kRegControl:
             return (control_ & kControlIntEnable) | (busy_ ? kControlBusy : 0U);
@@ -31,14 +32,13 @@ auto DmaController::read32(Address offset) -> uint32_t {
             return dst_addr_hi_;
         case kRegByteCount:
             return byte_count_;
-        case kRegInterruptAck:
-            return 0U;
         default:
+            // Interrupt acknowledgement and unmapped registers read as zero.
             return 0U;
     }
 }
 
-void DmaController::write32(Address offset, uint32_t val) {
+void DmaController::write32(simrv::xlen::Address offset, uint32_t val) {
     switch (offset) {
         case kRegControl: {
             const bool was_int_enabled = (control_ & kControlIntEnable) != 0;
@@ -134,8 +134,8 @@ void DmaController::execute_transfer(uint64_t src, uint64_t dst, uint32_t count)
     }
 
     std::vector<uint8_t> buffer(count);
-    const bool read_ok = dma_read(static_cast<Address>(src), buffer);
-    const bool write_ok = read_ok && dma_write(static_cast<Address>(dst), buffer);
+    const bool read_ok = dma_read(static_cast<simrv::xlen::Address>(src), buffer);
+    const bool write_ok = read_ok && dma_write(static_cast<simrv::xlen::Address>(dst), buffer);
 
     if (write_ok) {
         status_ |= kStatusDone;

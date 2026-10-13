@@ -63,5 +63,5 @@ evidence with the exact Git tag, architecture, guest profile, manifest, and host
 python3 scripts/release_check.py \
   --binary build/rv64-release/simrv \
   --binary build/rv32-release/simrv
-python3 scripts/check-linux-artifacts.py linux-images/rv64
+python3 scripts/check-linux-artifacts.py linux-images/rv64/alpine-gui
 ```

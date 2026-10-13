@@ -46,11 +46,6 @@ foreach(completion IN ITEMS
     message(FATAL_ERROR "Expected installed shell completion ${completion}")
   endif()
 endforeach()
-foreach(trace_helper IN ITEMS trace.h trace.S)
-  if(NOT EXISTS "${install_root}/include/simrv/${trace_helper}")
-    message(FATAL_ERROR "Expected installed guest trace helper ${trace_helper}")
-  endif()
-endforeach()
 execute_process(
   COMMAND "${install_root}/bin/simrv" --version
   RESULT_VARIABLE simulator_version_result

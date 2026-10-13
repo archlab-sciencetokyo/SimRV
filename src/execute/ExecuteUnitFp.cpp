@@ -1,17 +1,18 @@
 /**
- * @file ExecuteUnitFloat.cpp
+ * @file ExecuteUnitFp.cpp
  * @brief High-performance RISC-V floating-point execution unit implementation.
  */
+#include "simrv/execute/ExecuteUnitFp.hpp"
+
 #include <bit>
-#include <cfenv>
 #include <cmath>
 #include <cstdint>
 #include <limits>
 
-#include "simrv/Define.hpp"
-#include "simrv/execute/ExecuteUnit.hpp"
+#include "simrv/CompilerHints.hpp"
+#include "simrv/core/CsrTypes.hpp"
 #include "simrv/xlen/Constants.hpp"
-#include "simrv/xlen/Types.hpp"
+#include "simrv/xlen/RegisterTypes.hpp"
 
 #if defined(__x86_64__) || defined(_M_X64)
 #include <immintrin.h>
@@ -25,6 +26,7 @@ using simrv::isa::Funct3;
 using simrv::isa::Funct3Fp;
 using simrv::isa::Funct7Fp;
 using simrv::isa::Opcode;
+using simrv::isa::resolve_rounding_mode;
 using simrv::isa::RoundingMode;
 
 namespace fp {
@@ -42,22 +44,23 @@ constexpr auto f64_from_bits(uint64_t v) -> double { return std::bit_cast<double
 // Register Access Helpers (Branchless NaN-boxing)
 // ============================================================================
 
-constexpr auto read_f32(const FloatingRegister* freg, Word idx) -> float {
-    const FloatingRegister val = freg[idx];
+constexpr auto read_f32(const simrv::xlen::FloatingRegister* freg, simrv::xlen::Word idx) -> float {
+    const simrv::xlen::FloatingRegister val = freg[idx];
     if ((val & simrv::xlen::kF32BoxerBits) != simrv::xlen::kF32BoxerBits) {
         return f32_from_bits(0x7fc00000U);
     }
-    return f32_from_bits(
-        static_cast<uint32_t>(val & static_cast<FloatingRegister>(simrv::xlen::kLower32Mask)));
+    return f32_from_bits(static_cast<uint32_t>(
+        val & static_cast<simrv::xlen::FloatingRegister>(simrv::xlen::kLower32Mask)));
 }
 
-constexpr auto read_f64(const FloatingRegister* freg, Word idx) -> double {
+constexpr auto read_f64(const simrv::xlen::FloatingRegister* freg, simrv::xlen::Word idx)
+    -> double {
     return f64_from_bits(freg[idx]);
 }
 
-constexpr auto write_f32_boxed(float v) -> FloatingRegister {
-    return static_cast<FloatingRegister>(simrv::xlen::kF32BoxerBits) |
-           static_cast<FloatingRegister>(f32_bits(v));
+constexpr auto write_f32_boxed(float v) -> simrv::xlen::FloatingRegister {
+    return static_cast<simrv::xlen::FloatingRegister>(simrv::xlen::kF32BoxerBits) |
+           static_cast<simrv::xlen::FloatingRegister>(f32_bits(v));
 }
 
 // ============================================================================
@@ -78,8 +81,11 @@ struct FpTraits<float> {
     static constexpr Bits kQnanBits = simrv::xlen::kF32Qnan;
     static constexpr auto from_bits(Bits b) -> float { return f32_from_bits(b); }
     static constexpr auto to_bits(float v) -> Bits { return f32_bits(v); }
-    static constexpr auto to_boxed(float v) -> FloatingRegister { return write_f32_boxed(v); }
-    static constexpr auto read(const FloatingRegister* freg, Word idx) -> float {
+    static constexpr auto to_boxed(float v) -> simrv::xlen::FloatingRegister {
+        return write_f32_boxed(v);
+    }
+    static constexpr auto read(const simrv::xlen::FloatingRegister* freg, simrv::xlen::Word idx)
+        -> float {
         return read_f32(freg, idx);
     }
 };
@@ -95,8 +101,11 @@ struct FpTraits<double> {
     static constexpr Bits kQnanBits = simrv::xlen::kF64Qnan;
     static constexpr auto from_bits(Bits b) -> double { return f64_from_bits(b); }
     static constexpr auto to_bits(double v) -> Bits { return f64_bits(v); }
-    static constexpr auto to_boxed(double v) -> FloatingRegister { return f64_bits(v); }
-    static constexpr auto read(const FloatingRegister* freg, Word idx) -> double {
+    static constexpr auto to_boxed(double v) -> simrv::xlen::FloatingRegister {
+        return f64_bits(v);
+    }
+    static constexpr auto read(const simrv::xlen::FloatingRegister* freg, simrv::xlen::Word idx)
+        -> double {
         return read_f64(freg, idx);
     }
 };
@@ -152,24 +161,22 @@ constexpr auto is_snan64(double v) -> bool { return is_snan(v); }
 #if defined(__x86_64__) || defined(_M_X64)
 class FpEnvironment {
    public:
-    static inline void set_rounding_mode(Word rm, CSRValue fcsr) noexcept {
-        Word effective_rm = rm;
-        if (effective_rm == enum_mask(RoundingMode::Dyn)) {
-            effective_rm = (fcsr >> 5) & 0x7;
-        }
+    static inline void set_rounding_mode(simrv::xlen::Word rm,
+                                         simrv::xlen::CsrValue fcsr) noexcept {
+        const RoundingMode effective_rm = resolve_rounding_mode(rm, fcsr);
 
         uint32_t mxcsr_rm = 0;
         switch (effective_rm) {
-            case enum_mask(RoundingMode::Rne):
+            case RoundingMode::Rne:
                 mxcsr_rm = 0x0000;
                 break;
-            case enum_mask(RoundingMode::Rdn):
+            case RoundingMode::Rdn:
                 mxcsr_rm = 0x2000;
                 break;
-            case enum_mask(RoundingMode::Rup):
+            case RoundingMode::Rup:
                 mxcsr_rm = 0x4000;
                 break;
-            case enum_mask(RoundingMode::Rtz):
+            case RoundingMode::Rtz:
                 mxcsr_rm = 0x6000;
                 break;
             default:
@@ -185,14 +192,14 @@ class FpEnvironment {
 
     static inline void clear_exceptions() noexcept { _mm_setcsr(_mm_getcsr() & ~0x3fu); }
 
-    static inline void accumulate_exceptions(CSRValue& fcsr) noexcept {
+    static inline void accumulate_exceptions(simrv::xlen::CsrValue& fcsr) noexcept {
         const uint32_t mxcsr = _mm_getcsr();
-        uint32_t flags = 0;
-        if ((mxcsr & 0x01u) != 0) flags |= enum_mask(FflagsBit::Nv);
-        if ((mxcsr & 0x04u) != 0) flags |= enum_mask(FflagsBit::Dz);
-        if ((mxcsr & 0x08u) != 0) flags |= enum_mask(FflagsBit::Of);
-        if ((mxcsr & 0x10u) != 0) flags |= enum_mask(FflagsBit::Uf);
-        if ((mxcsr & 0x20u) != 0) flags |= enum_mask(FflagsBit::Nx);
+        simrv::xlen::CsrValue flags = 0;
+        if ((mxcsr & 0x01u) != 0) flags |= FflagsBit::Nv;
+        if ((mxcsr & 0x04u) != 0) flags |= FflagsBit::Dz;
+        if ((mxcsr & 0x08u) != 0) flags |= FflagsBit::Of;
+        if ((mxcsr & 0x10u) != 0) flags |= FflagsBit::Uf;
+        if ((mxcsr & 0x20u) != 0) flags |= FflagsBit::Nx;
         fcsr |= flags;
     }
 
@@ -201,23 +208,21 @@ class FpEnvironment {
 #else
 class FpEnvironment {
    public:
-    static inline void set_rounding_mode(Word rm, CSRValue fcsr) noexcept {
-        Word effective_rm = rm;
-        if (effective_rm == enum_mask(RoundingMode::Dyn)) {
-            effective_rm = (fcsr >> 5) & 0x7;
-        }
+    static inline void set_rounding_mode(simrv::xlen::Word rm,
+                                         simrv::xlen::CsrValue fcsr) noexcept {
+        const RoundingMode effective_rm = resolve_rounding_mode(rm, fcsr);
         int fe_round = FE_TONEAREST;
         switch (effective_rm) {
-            case enum_mask(RoundingMode::Rne):
+            case RoundingMode::Rne:
                 fe_round = FE_TONEAREST;
                 break;
-            case enum_mask(RoundingMode::Rtz):
+            case RoundingMode::Rtz:
                 fe_round = FE_TOWARDZERO;
                 break;
-            case enum_mask(RoundingMode::Rdn):
+            case RoundingMode::Rdn:
                 fe_round = FE_DOWNWARD;
                 break;
-            case enum_mask(RoundingMode::Rup):
+            case RoundingMode::Rup:
                 fe_round = FE_UPWARD;
                 break;
             default:
@@ -229,14 +234,14 @@ class FpEnvironment {
 
     static inline void clear_exceptions() noexcept { std::feclearexcept(FE_ALL_EXCEPT); }
 
-    static inline void accumulate_exceptions(CSRValue& fcsr) noexcept {
+    static inline void accumulate_exceptions(simrv::xlen::CsrValue& fcsr) noexcept {
         const int ex = std::fetestexcept(FE_ALL_EXCEPT);
-        uint32_t flags = 0;
-        if ((ex & FE_INVALID) != 0) flags |= enum_mask(FflagsBit::Nv);
-        if ((ex & FE_DIVBYZERO) != 0) flags |= enum_mask(FflagsBit::Dz);
-        if ((ex & FE_OVERFLOW) != 0) flags |= enum_mask(FflagsBit::Of);
-        if ((ex & FE_UNDERFLOW) != 0) flags |= enum_mask(FflagsBit::Uf);
-        if ((ex & FE_INEXACT) != 0) flags |= enum_mask(FflagsBit::Nx);
+        simrv::xlen::CsrValue flags = 0;
+        if ((ex & FE_INVALID) != 0) flags |= FflagsBit::Nv;
+        if ((ex & FE_DIVBYZERO) != 0) flags |= FflagsBit::Dz;
+        if ((ex & FE_OVERFLOW) != 0) flags |= FflagsBit::Of;
+        if ((ex & FE_UNDERFLOW) != 0) flags |= FflagsBit::Uf;
+        if ((ex & FE_INEXACT) != 0) flags |= FflagsBit::Nx;
         fcsr |= flags;
     }
 
@@ -249,7 +254,7 @@ class FpEnvironment {
 // ============================================================================
 
 template <typename FloatT, bool IsMax>
-static auto fminmax_riscv(FloatT a, FloatT b) -> FloatingRegister {
+static auto fminmax_riscv(FloatT a, FloatT b) -> simrv::xlen::FloatingRegister {
     using T = FpTraits<FloatT>;
     const bool a_nan = std::isnan(a);
     const bool b_nan = std::isnan(b);
@@ -273,16 +278,16 @@ static auto fminmax_riscv(FloatT a, FloatT b) -> FloatingRegister {
     return T::to_boxed(IsMax ? std::fmax(a, b) : std::fmin(a, b));
 }
 
-static auto fmin32_riscv(float a, float b) -> FloatingRegister {
+static auto fmin32_riscv(float a, float b) -> simrv::xlen::FloatingRegister {
     return fminmax_riscv<float, false>(a, b);
 }
-static auto fmax32_riscv(float a, float b) -> FloatingRegister {
+static auto fmax32_riscv(float a, float b) -> simrv::xlen::FloatingRegister {
     return fminmax_riscv<float, true>(a, b);
 }
-static auto fmin64_riscv(double a, double b) -> FloatingRegister {
+static auto fmin64_riscv(double a, double b) -> simrv::xlen::FloatingRegister {
     return fminmax_riscv<double, false>(a, b);
 }
-static auto fmax64_riscv(double a, double b) -> FloatingRegister {
+static auto fmax64_riscv(double a, double b) -> simrv::xlen::FloatingRegister {
     return fminmax_riscv<double, true>(a, b);
 }
 
@@ -290,32 +295,36 @@ static auto fmax64_riscv(double a, double b) -> FloatingRegister {
 // Floating-Point to Integer Conversion
 // ============================================================================
 
-static auto fcvt_to_int(double value, Word op_mode, Word effective_rm, CSRValue& fcsr) -> Register {
+static auto fcvt_to_int(double value, simrv::xlen::Word op_mode, RoundingMode effective_rm,
+                        simrv::xlen::CsrValue& fcsr) -> simrv::xlen::Register {
     const bool is_unsigned = (op_mode & 1) != 0;
     const bool is_64 = (op_mode >= 2);
 
-    auto saturate = [&](bool pos_inf) -> Register {
-        fcsr |= enum_mask(FflagsBit::Nv);
+    auto saturate = [&](bool pos_inf) -> simrv::xlen::Register {
+        fcsr |= FflagsBit::Nv;
         if (pos_inf) {
             if (is_64) {
-                return is_unsigned ? static_cast<Register>(std::numeric_limits<uint64_t>::max())
-                                   : static_cast<Register>(std::numeric_limits<int64_t>::max());
+                return is_unsigned ? static_cast<simrv::xlen::Register>(
+                                         std::numeric_limits<uint64_t>::max())
+                                   : static_cast<simrv::xlen::Register>(
+                                         std::numeric_limits<int64_t>::max());
             } else {
                 const uint32_t max_val =
                     is_unsigned ? std::numeric_limits<uint32_t>::max()
                                 : static_cast<uint32_t>(std::numeric_limits<int32_t>::max());
-                return static_cast<Register>(
-                    static_cast<SignedWord>(static_cast<int32_t>(max_val)));
+                return static_cast<simrv::xlen::Register>(
+                    static_cast<simrv::xlen::SignedWord>(static_cast<int32_t>(max_val)));
             }
         } else {
             if (is_64) {
                 return is_unsigned ? 0ULL
-                                   : static_cast<Register>(std::numeric_limits<int64_t>::min());
+                                   : static_cast<simrv::xlen::Register>(
+                                         std::numeric_limits<int64_t>::min());
             } else {
                 const uint32_t min_val =
                     is_unsigned ? 0U : static_cast<uint32_t>(std::numeric_limits<int32_t>::min());
-                return static_cast<Register>(
-                    static_cast<SignedWord>(static_cast<int32_t>(min_val)));
+                return static_cast<simrv::xlen::Register>(
+                    static_cast<simrv::xlen::SignedWord>(static_cast<int32_t>(min_val)));
             }
         }
     };
@@ -329,13 +338,13 @@ static auto fcvt_to_int(double value, Word op_mode, Word effective_rm, CSRValue&
     }
 
     double rounded = 0.0;
-    if (effective_rm == enum_mask(RoundingMode::Rtz)) {
+    if (effective_rm == RoundingMode::Rtz) {
         rounded = std::trunc(value);
-    } else if (effective_rm == enum_mask(RoundingMode::Rdn)) {
+    } else if (effective_rm == RoundingMode::Rdn) {
         rounded = std::floor(value);
-    } else if (effective_rm == enum_mask(RoundingMode::Rup)) {
+    } else if (effective_rm == RoundingMode::Rup) {
         rounded = std::ceil(value);
-    } else if (effective_rm == enum_mask(RoundingMode::Rmm)) {
+    } else if (effective_rm == RoundingMode::Rmm) {
         rounded = std::round(value);
     } else {
         // Round to nearest, ties to even (Rne / dynamic default fallback)
@@ -350,8 +359,8 @@ static auto fcvt_to_int(double value, Word op_mode, Word effective_rm, CSRValue&
             if (rounded >= 18446744073709551616.0) {
                 return saturate(true);
             }
-            if (rounded != value) fcsr |= enum_mask(FflagsBit::Nx);
-            return static_cast<Register>(static_cast<uint64_t>(rounded));
+            if (rounded != value) fcsr |= FflagsBit::Nx;
+            return static_cast<simrv::xlen::Register>(static_cast<uint64_t>(rounded));
         } else {
             if (rounded < -9223372036854775808.0) {
                 return saturate(false);
@@ -359,8 +368,8 @@ static auto fcvt_to_int(double value, Word op_mode, Word effective_rm, CSRValue&
             if (rounded >= 9223372036854775808.0) {
                 return saturate(true);
             }
-            if (rounded != value) fcsr |= enum_mask(FflagsBit::Nx);
-            return static_cast<Register>(static_cast<int64_t>(rounded));
+            if (rounded != value) fcsr |= FflagsBit::Nx;
+            return static_cast<simrv::xlen::Register>(static_cast<int64_t>(rounded));
         }
     } else {
         if (is_unsigned) {
@@ -370,9 +379,9 @@ static auto fcvt_to_int(double value, Word op_mode, Word effective_rm, CSRValue&
             if (rounded >= 4294967296.0) {
                 return saturate(true);
             }
-            if (rounded != value) fcsr |= enum_mask(FflagsBit::Nx);
-            return static_cast<Register>(
-                static_cast<SignedWord>(static_cast<int32_t>(static_cast<uint32_t>(rounded))));
+            if (rounded != value) fcsr |= FflagsBit::Nx;
+            return static_cast<simrv::xlen::Register>(static_cast<simrv::xlen::SignedWord>(
+                static_cast<int32_t>(static_cast<uint32_t>(rounded))));
         } else {
             if (rounded < -2147483648.0) {
                 return saturate(false);
@@ -380,8 +389,9 @@ static auto fcvt_to_int(double value, Word op_mode, Word effective_rm, CSRValue&
             if (rounded >= 2147483648.0) {
                 return saturate(true);
             }
-            if (rounded != value) fcsr |= enum_mask(FflagsBit::Nx);
-            return static_cast<Register>(static_cast<SignedWord>(static_cast<int32_t>(rounded)));
+            if (rounded != value) fcsr |= FflagsBit::Nx;
+            return static_cast<simrv::xlen::Register>(
+                static_cast<simrv::xlen::SignedWord>(static_cast<int32_t>(rounded)));
         }
     }
 }
@@ -394,8 +404,9 @@ static auto fcvt_to_int(double value, Word op_mode, Word effective_rm, CSRValue&
 
 using namespace fp;
 
-auto ExecuteUnit::fusedFp(Opcode opcode, FpFmt fmt, FpRegId rs1, FpRegId rs2, FpRegId rs3,
-                          RoundingMode rm, const FloatingRegister* freg, CSRValue& fcsr)
+auto ExecuteUnitFp::fusedFp(Opcode opcode, FpFmt fmt, simrv::xlen::FpRegId rs1,
+                            simrv::xlen::FpRegId rs2, simrv::xlen::FpRegId rs3, RoundingMode rm,
+                            const simrv::xlen::FloatingRegister* freg, simrv::xlen::CsrValue& fcsr)
     -> FpExecResult {
     FpExecResult out;
     FpEnvironment::set_rounding_mode(std::to_underlying(rm), fcsr);
@@ -463,8 +474,9 @@ auto ExecuteUnit::fusedFp(Opcode opcode, FpFmt fmt, FpRegId rs1, FpRegId rs2, Fp
 namespace fp {
 
 template <typename FloatT, typename Op>
-inline auto fp_exec_binary(FpExecResult& out, Word rm, Word rs1, Word rs2,
-                           const FloatingRegister* freg, CSRValue& fcsr, Op&& op) -> bool {
+inline auto fp_exec_binary(FpExecResult& out, simrv::xlen::Word rm, simrv::xlen::Word rs1,
+                           simrv::xlen::Word rs2, const simrv::xlen::FloatingRegister* freg,
+                           simrv::xlen::CsrValue& fcsr, Op&& op) -> bool {
     using T = FpTraits<FloatT>;
     FpEnvironment::set_rounding_mode(rm, fcsr);
     FpEnvironment::clear_exceptions();
@@ -479,8 +491,9 @@ inline auto fp_exec_binary(FpExecResult& out, Word rm, Word rs1, Word rs2,
 }
 
 template <typename FloatT, typename Op>
-inline auto fp_exec_unary(FpExecResult& out, Word rm, Word rs1, const FloatingRegister* freg,
-                          CSRValue& fcsr, Op&& op) -> bool {
+inline auto fp_exec_unary(FpExecResult& out, simrv::xlen::Word rm, simrv::xlen::Word rs1,
+                          const simrv::xlen::FloatingRegister* freg, simrv::xlen::CsrValue& fcsr,
+                          Op&& op) -> bool {
     using T = FpTraits<FloatT>;
     FpEnvironment::set_rounding_mode(rm, fcsr);
     FpEnvironment::clear_exceptions();
@@ -494,78 +507,83 @@ inline auto fp_exec_unary(FpExecResult& out, Word rm, Word rs1, const FloatingRe
     return true;
 }
 
-bool fp_exec_add_sub(FpExecResult& out, Word funct7, Word rm, Word rs1, Word rs2,
-                     const FloatingRegister* freg, CSRValue& fcsr) {
-    if (funct7 == enum_mask(Funct7Fp::FaddS))
+bool fp_exec_add_sub(FpExecResult& out, simrv::xlen::Word funct7, simrv::xlen::Word rm,
+                     simrv::xlen::Word rs1, simrv::xlen::Word rs2,
+                     const simrv::xlen::FloatingRegister* freg, simrv::xlen::CsrValue& fcsr) {
+    if (funct7 == Funct7Fp::FaddS)
         return fp_exec_binary<float>(out, rm, rs1, rs2, freg, fcsr, std::plus<float>{});
-    if (funct7 == enum_mask(Funct7Fp::FaddD))
+    if (funct7 == Funct7Fp::FaddD)
         return fp_exec_binary<double>(out, rm, rs1, rs2, freg, fcsr, std::plus<double>{});
-    if (funct7 == enum_mask(Funct7Fp::FsubS))
+    if (funct7 == Funct7Fp::FsubS)
         return fp_exec_binary<float>(out, rm, rs1, rs2, freg, fcsr, std::minus<float>{});
-    if (funct7 == enum_mask(Funct7Fp::FsubD))
+    if (funct7 == Funct7Fp::FsubD)
         return fp_exec_binary<double>(out, rm, rs1, rs2, freg, fcsr, std::minus<double>{});
     return false;
 }
 
-bool fp_exec_mul_div_sqrt(FpExecResult& out, Word funct7, Word rm, Word rs1, Word rs2,
-                          const FloatingRegister* freg, CSRValue& fcsr) {
-    if (funct7 == enum_mask(Funct7Fp::FmulS))
+bool fp_exec_mul_div_sqrt(FpExecResult& out, simrv::xlen::Word funct7, simrv::xlen::Word rm,
+                          simrv::xlen::Word rs1, simrv::xlen::Word rs2,
+                          const simrv::xlen::FloatingRegister* freg, simrv::xlen::CsrValue& fcsr) {
+    if (funct7 == Funct7Fp::FmulS)
         return fp_exec_binary<float>(out, rm, rs1, rs2, freg, fcsr, std::multiplies<float>{});
-    if (funct7 == enum_mask(Funct7Fp::FmulD))
+    if (funct7 == Funct7Fp::FmulD)
         return fp_exec_binary<double>(out, rm, rs1, rs2, freg, fcsr, std::multiplies<double>{});
-    if (funct7 == enum_mask(Funct7Fp::FdivS))
+    if (funct7 == Funct7Fp::FdivS)
         return fp_exec_binary<float>(out, rm, rs1, rs2, freg, fcsr, std::divides<float>{});
-    if (funct7 == enum_mask(Funct7Fp::FdivD))
+    if (funct7 == Funct7Fp::FdivD)
         return fp_exec_binary<double>(out, rm, rs1, rs2, freg, fcsr, std::divides<double>{});
-    if (funct7 == enum_mask(Funct7Fp::FsqrtS))
+    if (funct7 == Funct7Fp::FsqrtS)
         return fp_exec_unary<float>(out, rm, rs1, freg, fcsr, [](float x) { return std::sqrt(x); });
-    if (funct7 == enum_mask(Funct7Fp::FsqrtD))
+    if (funct7 == Funct7Fp::FsqrtD)
         return fp_exec_unary<double>(out, rm, rs1, freg, fcsr,
                                      [](double x) { return std::sqrt(x); });
     return false;
 }
 
-bool fp_exec_sgnj_minmax(FpExecResult& out, Word funct7, Funct3 funct3, Word rs1, Word rs2,
-                         const FloatingRegister* freg, CSRValue& fcsr) {
-    if (funct7 == enum_mask(Funct7Fp::FsgnjS) || funct7 == enum_mask(Funct7Fp::FsgnjD)) {
-        const bool is_d = (funct7 == enum_mask(Funct7Fp::FsgnjD));
-        FloatingRegister a = freg[rs1];
-        FloatingRegister b = freg[rs2];
+bool fp_exec_sgnj_minmax(FpExecResult& out, simrv::xlen::Word funct7, Funct3 funct3,
+                         simrv::xlen::Word rs1, simrv::xlen::Word rs2,
+                         const simrv::xlen::FloatingRegister* freg, simrv::xlen::CsrValue& fcsr) {
+    if (funct7 == Funct7Fp::FsgnjS || funct7 == Funct7Fp::FsgnjD) {
+        const bool is_d = (funct7 == Funct7Fp::FsgnjD);
+        simrv::xlen::FloatingRegister a = freg[rs1];
+        simrv::xlen::FloatingRegister b = freg[rs2];
         if (!is_d) {
             if ((a & simrv::xlen::kF32BoxerBits) != simrv::xlen::kF32BoxerBits) {
-                a = static_cast<FloatingRegister>(simrv::xlen::kF32BoxerBits) | 0x7fc00000U;
+                a = static_cast<simrv::xlen::FloatingRegister>(simrv::xlen::kF32BoxerBits) |
+                    0x7fc00000U;
             }
             if ((b & simrv::xlen::kF32BoxerBits) != simrv::xlen::kF32BoxerBits) {
-                b = static_cast<FloatingRegister>(simrv::xlen::kF32BoxerBits) | 0x7fc00000U;
+                b = static_cast<simrv::xlen::FloatingRegister>(simrv::xlen::kF32BoxerBits) |
+                    0x7fc00000U;
             }
         }
-        FloatingRegister value = 0;
+        simrv::xlen::FloatingRegister value = 0;
         const uint64_t sign_bit = is_d ? (1ULL << 63U) : (1ULL << 31U);
-        if (enum_mask(funct3) == 0) value = (a & (~sign_bit)) | (b & sign_bit);
-        if (enum_mask(funct3) == 1) value = (a & (~sign_bit)) | ((~b) & sign_bit);
-        if (enum_mask(funct3) == 2) value = a ^ (b & sign_bit);
-        out.fp_wb_data = is_d ? value
-                              : (static_cast<FloatingRegister>(simrv::xlen::kF32BoxerBits) |
-                                 (value & static_cast<FloatingRegister>(kLower32Mask)));
+        if (funct3 == Funct3Fp::Sgnj) value = (a & (~sign_bit)) | (b & sign_bit);
+        if (funct3 == Funct3Fp::Sgnjn) value = (a & (~sign_bit)) | ((~b) & sign_bit);
+        if (funct3 == Funct3Fp::Sgnjx) value = a ^ (b & sign_bit);
+        out.fp_wb_data =
+            is_d
+                ? value
+                : (static_cast<simrv::xlen::FloatingRegister>(simrv::xlen::kF32BoxerBits) |
+                   (value & static_cast<simrv::xlen::FloatingRegister>(simrv::xlen::kLower32Mask)));
         out.fp_wb_enable = true;
         return true;
     }
-    if (funct7 == enum_mask(Funct7Fp::FminmaxS)) {
+    if (funct7 == Funct7Fp::FminmaxS) {
         FpEnvironment::clear_exceptions();
         const float a = read_f32(freg, rs1);
         const float b = read_f32(freg, rs2);
-        out.fp_wb_data = (enum_mask(funct3) == enum_mask(Funct3Fp::Max)) ? fmax32_riscv(a, b)
-                                                                         : fmin32_riscv(a, b);
+        out.fp_wb_data = (funct3 == Funct3Fp::Max) ? fmax32_riscv(a, b) : fmin32_riscv(a, b);
         out.fp_wb_enable = true;
         FpEnvironment::accumulate_exceptions(fcsr);
         return true;
     }
-    if (funct7 == enum_mask(Funct7Fp::FminmaxD)) {
+    if (funct7 == Funct7Fp::FminmaxD) {
         FpEnvironment::clear_exceptions();
         const double a = read_f64(freg, rs1);
         const double b = read_f64(freg, rs2);
-        out.fp_wb_data = (enum_mask(funct3) == enum_mask(Funct3Fp::Max)) ? fmax64_riscv(a, b)
-                                                                         : fmin64_riscv(a, b);
+        out.fp_wb_data = (funct3 == Funct3Fp::Max) ? fmax64_riscv(a, b) : fmin64_riscv(a, b);
         out.fp_wb_enable = true;
         FpEnvironment::accumulate_exceptions(fcsr);
         return true;
@@ -573,9 +591,10 @@ bool fp_exec_sgnj_minmax(FpExecResult& out, Word funct7, Funct3 funct3, Word rs1
     return false;
 }
 
-bool fp_exec_cvt(FpExecResult& out, Word funct7, Word rm, Word rs1, Word rs2, Register rrs1,
-                 const FloatingRegister* freg, CSRValue& fcsr) {
-    if (funct7 == enum_mask(Funct7Fp::FcvtSD)) {
+bool fp_exec_cvt(FpExecResult& out, simrv::xlen::Word funct7, simrv::xlen::Word rm,
+                 simrv::xlen::Word rs1, simrv::xlen::Word rs2, simrv::xlen::Register rrs1,
+                 const simrv::xlen::FloatingRegister* freg, simrv::xlen::CsrValue& fcsr) {
+    if (funct7 == Funct7Fp::FcvtSD) {
         FpEnvironment::set_rounding_mode(rm, fcsr);
         FpEnvironment::clear_exceptions();
         const double src = read_f64(freg, rs1);
@@ -586,30 +605,28 @@ bool fp_exec_cvt(FpExecResult& out, Word funct7, Word rm, Word rs1, Word rs2, Re
         FpEnvironment::accumulate_exceptions(fcsr);
         return true;
     }
-    if (funct7 == enum_mask(Funct7Fp::FcvtDS)) {
+    if (funct7 == Funct7Fp::FcvtDS) {
         FpEnvironment::set_rounding_mode(rm, fcsr);
         FpEnvironment::clear_exceptions();
         const float src = read_f32(freg, rs1);
         if (is_snan32(src)) FpEnvironment::raise_invalid();
-        out.fp_wb_data = std::isnan(src) ? static_cast<FloatingRegister>(simrv::xlen::kF64Qnan)
-                                         : f64_bits(static_cast<double>(src));
+        out.fp_wb_data = std::isnan(src)
+                             ? static_cast<simrv::xlen::FloatingRegister>(simrv::xlen::kF64Qnan)
+                             : f64_bits(static_cast<double>(src));
         out.fp_wb_enable = true;
         FpEnvironment::accumulate_exceptions(fcsr);
         return true;
     }
-    if (funct7 == enum_mask(Funct7Fp::FcvtWS) || funct7 == enum_mask(Funct7Fp::FcvtWD)) {
-        const bool is_d = (funct7 == enum_mask(Funct7Fp::FcvtWD));
+    if (funct7 == Funct7Fp::FcvtWS || funct7 == Funct7Fp::FcvtWD) {
+        const bool is_d = (funct7 == Funct7Fp::FcvtWD);
         const double a = !is_d ? static_cast<double>(read_f32(freg, rs1)) : read_f64(freg, rs1);
-        Word effective_rm = rm;
-        if (effective_rm == enum_mask(RoundingMode::Dyn)) {
-            effective_rm = (fcsr >> 5) & 0x7;
-        }
+        const RoundingMode effective_rm = resolve_rounding_mode(rm, fcsr);
         out.int_wb_data = fcvt_to_int(a, rs2, effective_rm, fcsr);
         out.int_wb_enable = true;
         return true;
     }
-    if (funct7 == enum_mask(Funct7Fp::FcvtSW) || funct7 == enum_mask(Funct7Fp::FcvtDW)) {
-        const bool is_d = (funct7 == enum_mask(Funct7Fp::FcvtDW));
+    if (funct7 == Funct7Fp::FcvtSW || funct7 == Funct7Fp::FcvtDW) {
+        const bool is_d = (funct7 == Funct7Fp::FcvtDW);
         FpEnvironment::set_rounding_mode(rm, fcsr);
         FpEnvironment::clear_exceptions();
         double val = 0;
@@ -630,42 +647,43 @@ bool fp_exec_cvt(FpExecResult& out, Word funct7, Word rm, Word rs1, Word rs2, Re
     return false;
 }
 
-bool fp_exec_cmp(FpExecResult& out, Word funct7, Funct3 funct3, Word rs1, Word rs2,
-                 const FloatingRegister* freg, CSRValue& fcsr) {
-    if (funct7 == enum_mask(Funct7Fp::FcmpS) || funct7 == enum_mask(Funct7Fp::FcmpD)) {
-        const bool is_d = (funct7 == enum_mask(Funct7Fp::FcmpD));
+bool fp_exec_cmp(FpExecResult& out, simrv::xlen::Word funct7, Funct3 funct3, simrv::xlen::Word rs1,
+                 simrv::xlen::Word rs2, const simrv::xlen::FloatingRegister* freg,
+                 simrv::xlen::CsrValue& fcsr) {
+    if (funct7 == Funct7Fp::FcmpS || funct7 == Funct7Fp::FcmpD) {
+        const bool is_d = (funct7 == Funct7Fp::FcmpD);
         FpEnvironment::clear_exceptions();
         if (!is_d) {
             const float a = read_f32(freg, rs1);
             const float b = read_f32(freg, rs2);
             if (std::isnan(a) || std::isnan(b)) {
-                if (enum_mask(funct3) != enum_mask(Funct3Fp::Eq) || is_snan32(a) || is_snan32(b)) {
+                if (funct3 != Funct3Fp::Eq || is_snan32(a) || is_snan32(b)) {
                     FpEnvironment::raise_invalid();
                 }
                 out.int_wb_data = 0;
             } else {
-                if (enum_mask(funct3) == enum_mask(Funct3Fp::Eq))
-                    out.int_wb_data = static_cast<Register>(a == b);
-                if (enum_mask(funct3) == enum_mask(Funct3Fp::Lt))
-                    out.int_wb_data = static_cast<Register>(a < b);
-                if (enum_mask(funct3) == enum_mask(Funct3Fp::Leq))
-                    out.int_wb_data = static_cast<Register>(a <= b);
+                if (funct3 == Funct3Fp::Eq)
+                    out.int_wb_data = static_cast<simrv::xlen::Register>(a == b);
+                if (funct3 == Funct3Fp::Lt)
+                    out.int_wb_data = static_cast<simrv::xlen::Register>(a < b);
+                if (funct3 == Funct3Fp::Leq)
+                    out.int_wb_data = static_cast<simrv::xlen::Register>(a <= b);
             }
         } else {
             const double a = read_f64(freg, rs1);
             const double b = read_f64(freg, rs2);
             if (std::isnan(a) || std::isnan(b)) {
-                if (enum_mask(funct3) != enum_mask(Funct3Fp::Eq) || is_snan64(a) || is_snan64(b)) {
+                if (funct3 != Funct3Fp::Eq || is_snan64(a) || is_snan64(b)) {
                     FpEnvironment::raise_invalid();
                 }
                 out.int_wb_data = 0;
             } else {
-                if (enum_mask(funct3) == enum_mask(Funct3Fp::Eq))
-                    out.int_wb_data = static_cast<Register>(a == b);
-                if (enum_mask(funct3) == enum_mask(Funct3Fp::Lt))
-                    out.int_wb_data = static_cast<Register>(a < b);
-                if (enum_mask(funct3) == enum_mask(Funct3Fp::Leq))
-                    out.int_wb_data = static_cast<Register>(a <= b);
+                if (funct3 == Funct3Fp::Eq)
+                    out.int_wb_data = static_cast<simrv::xlen::Register>(a == b);
+                if (funct3 == Funct3Fp::Lt)
+                    out.int_wb_data = static_cast<simrv::xlen::Register>(a < b);
+                if (funct3 == Funct3Fp::Leq)
+                    out.int_wb_data = static_cast<simrv::xlen::Register>(a <= b);
             }
         }
         out.int_wb_enable = true;
@@ -675,27 +693,30 @@ bool fp_exec_cmp(FpExecResult& out, Word funct7, Funct3 funct3, Word rs1, Word r
     return false;
 }
 
-bool fp_exec_mv_class(FpExecResult& out, Word funct7, Funct3 funct3, Word rs1, Register rrs1,
-                      const FloatingRegister* freg) {
-    if (funct7 == enum_mask(Funct7Fp::FmvXW) || funct7 == enum_mask(Funct7Fp::FmvXD)) {
-        const bool is_d = (funct7 == enum_mask(Funct7Fp::FmvXD));
-        if (enum_mask(funct3) == enum_mask(Funct3Fp::FmvXW)) {
-            out.int_wb_data = is_d ? static_cast<Register>(freg[rs1])
-                                   : static_cast<Register>(
-                                         static_cast<SignedWord>(static_cast<int32_t>(freg[rs1])));
+bool fp_exec_mv_class(FpExecResult& out, simrv::xlen::Word funct7, Funct3 funct3,
+                      simrv::xlen::Word rs1, simrv::xlen::Register rrs1,
+                      const simrv::xlen::FloatingRegister* freg) {
+    if (funct7 == Funct7Fp::FmvXW || funct7 == Funct7Fp::FmvXD) {
+        const bool is_d = (funct7 == Funct7Fp::FmvXD);
+        if (funct3 == Funct3Fp::FmvXW) {
+            out.int_wb_data =
+                is_d ? static_cast<simrv::xlen::Register>(freg[rs1])
+                     : static_cast<simrv::xlen::Register>(
+                           static_cast<simrv::xlen::SignedWord>(static_cast<int32_t>(freg[rs1])));
             out.int_wb_enable = true;
-        } else if (enum_mask(funct3) == enum_mask(Funct3Fp::Fclass)) {
+        } else if (funct3 == Funct3Fp::Fclass) {
             out.int_wb_data = is_d ? fclass64(read_f64(freg, rs1)) : fclass32(read_f32(freg, rs1));
             out.int_wb_enable = true;
         }
         return true;
     }
-    if (funct7 == enum_mask(Funct7Fp::FmvWX) || funct7 == enum_mask(Funct7Fp::FmvDX)) {
-        const bool is_d = (funct7 == enum_mask(Funct7Fp::FmvDX));
+    if (funct7 == Funct7Fp::FmvWX || funct7 == Funct7Fp::FmvDX) {
+        const bool is_d = (funct7 == Funct7Fp::FmvDX);
         out.fp_wb_data =
-            is_d ? static_cast<FloatingRegister>(rrs1)
-                 : (static_cast<FloatingRegister>(simrv::xlen::kF32BoxerBits) |
-                    static_cast<FloatingRegister>(rrs1 & static_cast<Register>(kLower32Mask)));
+            is_d ? static_cast<simrv::xlen::FloatingRegister>(rrs1)
+                 : (static_cast<simrv::xlen::FloatingRegister>(simrv::xlen::kF32BoxerBits) |
+                    static_cast<simrv::xlen::FloatingRegister>(
+                        rrs1 & static_cast<simrv::xlen::Register>(simrv::xlen::kLower32Mask)));
         out.fp_wb_enable = true;
         return true;
     }
@@ -704,10 +725,12 @@ bool fp_exec_mv_class(FpExecResult& out, Word funct7, Funct3 funct3, Word rs1, R
 
 }  // namespace fp
 
-auto ExecuteUnit::opFp(Funct7 funct7, Funct3 funct3, FpRegId rs1, FpRegId rs2, Register rrs1,
-                       const FloatingRegister* freg, CSRValue& fcsr) -> FpExecResult {
+auto ExecuteUnitFp::opFp(simrv::xlen::Funct7 funct7, Funct3 funct3, simrv::xlen::FpRegId rs1,
+                         simrv::xlen::FpRegId rs2, simrv::xlen::Register rrs1,
+                         const simrv::xlen::FloatingRegister* freg, simrv::xlen::CsrValue& fcsr)
+    -> FpExecResult {
     FpExecResult out;
-    const Word rm = enum_mask(funct3);
+    const simrv::xlen::Word rm = std::to_underlying(funct3);
     const auto u_rs1 = std::to_underlying(rs1);
     const auto u_rs2 = std::to_underlying(rs2);
 

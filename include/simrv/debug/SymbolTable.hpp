@@ -8,7 +8,7 @@
 #include <optional>
 #include <string>
 
-#include "simrv/xlen/Types.hpp"
+#include "simrv/xlen/ScalarTypes.hpp"
 
 namespace simrv::debug {
 
@@ -20,20 +20,20 @@ enum class SymbolLoadMode : uint8_t { RuntimeEssentials, FullDebug };
  */
 struct SymbolLookupResult {
     std::string_view name;
-    Address base_addr = 0;
-    Address offset = 0;
+    simrv::xlen::Address base_addr = 0;
+    simrv::xlen::Address offset = 0;
     [[nodiscard]] constexpr auto is_exact() const noexcept -> bool { return offset == 0; }
 };
 
 struct FunctionLookupResult {
     std::string_view name;
-    Address base_addr = 0;
-    Address offset = 0;
+    simrv::xlen::Address base_addr = 0;
+    simrv::xlen::Address offset = 0;
 };
 
 struct ElfFunctionSymbol {
     std::string name;
-    Address size = 0;
+    simrv::xlen::Address size = 0;
 };
 
 class SymbolTable {
@@ -56,9 +56,11 @@ class SymbolTable {
      * @param addr Memory address to lookup.
      * @return SymbolLookupResult if found within displacement threshold, std::nullopt otherwise.
      */
-    [[nodiscard]] auto lookup_symbol(Address addr) const -> std::optional<SymbolLookupResult>;
+    [[nodiscard]] auto lookup_symbol(simrv::xlen::Address addr) const
+        -> std::optional<SymbolLookupResult>;
     /** Look up the containing ELF function without guessing from nearby data/label symbols. */
-    [[nodiscard]] auto lookup_function(Address addr) const -> std::optional<FunctionLookupResult>;
+    [[nodiscard]] auto lookup_function(simrv::xlen::Address addr) const
+        -> std::optional<FunctionLookupResult>;
 
     /**
      * @brief Look up a symbol name for a given address.
@@ -66,14 +68,17 @@ class SymbolTable {
      * @return Formatted string "symbol_name" or "symbol_name+0xoffset", or empty string if not
      * found.
      */
-    [[nodiscard]] auto lookup(Address addr) const -> std::string;
-    [[nodiscard]] auto lookup_name(const std::string& name) const -> std::optional<Address>;
-    [[nodiscard]] auto entry_point() const -> std::optional<Address> { return entry_point_; }
+    [[nodiscard]] auto lookup(simrv::xlen::Address addr) const -> std::string;
+    [[nodiscard]] auto lookup_name(const std::string& name) const
+        -> std::optional<simrv::xlen::Address>;
+    [[nodiscard]] auto entry_point() const -> std::optional<simrv::xlen::Address> {
+        return entry_point_;
+    }
 
    private:
-    std::map<Address, std::string> symbols_;
-    std::map<Address, ElfFunctionSymbol> functions_;
-    std::optional<Address> entry_point_;
+    std::map<simrv::xlen::Address, std::string> symbols_;
+    std::map<simrv::xlen::Address, ElfFunctionSymbol> functions_;
+    std::optional<simrv::xlen::Address> entry_point_;
 };
 
 }  // namespace simrv::debug

@@ -3,11 +3,13 @@
  * @brief Typed TileLink-C 1.8.1 message and permission definitions.
  */
 #pragma once
-
 #include <cstdint>
+#include <limits>
 #include <string_view>
 
-#include "simrv/xlen/Types.hpp"
+#include "simrv/memory/TileLinkTypes.hpp"
+#include "simrv/xlen/AddressTypes.hpp"
+#include "simrv/xlen/IdentifierTypes.hpp"
 
 namespace simrv::memory {
 
@@ -15,8 +17,8 @@ using TlData = uint64_t;
 using TlMask = uint8_t;
 using TlSourceId = uint16_t;
 using TlSinkId = uint16_t;
-using LineAddress = Address;
-using CacheTag = Address;
+using LineAddress = simrv::xlen::Address;
+using CacheTag = simrv::xlen::Address;
 using CacheSetIndex = uint32_t;
 using CacheOffset = uint32_t;
 using CoherenceSharersMask = uint64_t;
@@ -276,7 +278,7 @@ inline constexpr TlManagerCapabilities kMmioCapabilities{
     return TlReport::NtoN;
 }
 
-[[nodiscard]] constexpr auto make_tl_source(HartId hart, TlPort port) -> TlSourceId {
+[[nodiscard]] constexpr auto make_tl_source(simrv::xlen::HartId hart, TlPort port) -> TlSourceId {
     return static_cast<TlSourceId>((static_cast<TlSourceId>(hart.val) << 1u) |
                                    static_cast<TlSourceId>(port));
 }
@@ -289,14 +291,18 @@ struct TlChannelA {
     TlIntent intent{TlIntent::PrefetchRead};
     uint8_t size{0};
     TlSourceId source{0};
-    HartId hart{0};
-    PhysicalAddress address{0};
+    simrv::xlen::HartId hart{0};
+    uint64_t logical_cycle{std::numeric_limits<uint64_t>::max()};
+    uint64_t logical_issue_sequence{std::numeric_limits<uint64_t>::max()};
+    simrv::xlen::PhysAddr address{0};
     TlMask mask{0};
     TlData data{0};
     bool corrupt{false};
 
-    [[nodiscard]] static constexpr auto compute_mask(uint8_t transfer_size, PhysicalAddress address)
-        -> TlMask {
+    [[nodiscard]] constexpr auto operator==(const TlChannelA&) const noexcept -> bool = default;
+
+    [[nodiscard]] static constexpr auto compute_mask(uint8_t transfer_size,
+                                                     simrv::xlen::PhysAddr address) -> TlMask {
         if (transfer_size > kTlBeatSize) return 0;
         const auto bytes = static_cast<unsigned>(1u << transfer_size);
         const auto lane = static_cast<unsigned>(address.raw() & (kTlBeatBytes - 1u));
@@ -315,7 +321,9 @@ struct TlChannelB {
     TlCap cap{TlCap::ToN};
     uint8_t size{kTlBlockSize};
     TlSourceId source{0};
-    PhysicalAddress address{0};
+    simrv::xlen::PhysAddr address{0};
+
+    [[nodiscard]] constexpr auto operator==(const TlChannelB&) const noexcept -> bool = default;
 };
 
 struct TlChannelC {
@@ -323,10 +331,12 @@ struct TlChannelC {
     TlReport report{TlReport::NtoN};
     uint8_t size{kTlBlockSize};
     TlSourceId source{0};
-    HartId hart{0};
-    PhysicalAddress address{0};
+    simrv::xlen::HartId hart{0};
+    simrv::xlen::PhysAddr address{0};
     TlData data{0};
     bool corrupt{false};
+
+    [[nodiscard]] constexpr auto operator==(const TlChannelC&) const noexcept -> bool = default;
 
     [[nodiscard]] constexpr auto is_valid() const noexcept -> bool { return size <= kTlBlockSize; }
 };
@@ -341,12 +351,16 @@ struct TlChannelD {
     bool denied{false};
     bool corrupt{false};
 
+    [[nodiscard]] constexpr auto operator==(const TlChannelD&) const noexcept -> bool = default;
+
     [[nodiscard]] constexpr auto failed() const noexcept -> bool { return denied || corrupt; }
 };
 
 struct TlChannelE {
     TlOpcodeE opcode{TlOpcodeE::GrantAck};
     TlSinkId sink{0};
+
+    [[nodiscard]] constexpr auto operator==(const TlChannelE&) const noexcept -> bool = default;
 };
 
 }  // namespace simrv::memory

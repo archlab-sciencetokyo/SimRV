@@ -5,9 +5,10 @@
  */
 #pragma once
 
-#include "simrv/Define.hpp"
-#include "simrv/xlen/Constants.hpp"
-#include "simrv/xlen/Types.hpp"
+#include <string>
+
+#include "simrv/isa/TrapTypes.hpp"
+#include "simrv/xlen/ScalarTypes.hpp"
 
 namespace simrv::core {
 
@@ -17,7 +18,7 @@ struct ArchState;
 /**
  * @brief Return human-readable name of a RISC-V trap cause (interrupt or exception).
  */
-[[nodiscard]] auto trap_cause_name(TrapCause cause) -> std::string;
+[[nodiscard]] auto trap_cause_name(simrv::xlen::TrapCause cause) -> std::string;
 
 /**
  * @class TrapController
@@ -29,7 +30,8 @@ class TrapController {
      * @brief Executes Machine-mode trap return (MRET).
      *
      * Restores privilege level from MPP, re-enables interrupt enabling bit MIE from MPIE,
-     * resets MPIE to 1, sets MPP to U-mode, and updates program counter from MEPC.
+     * resets MPIE to 1, sets MPP to U-mode when implemented or M-mode otherwise, and updates
+     * program counter from MEPC.
      *
      * @param state Reference to architectural state.
      */
@@ -39,7 +41,7 @@ class TrapController {
      * @brief Executes Supervisor-mode trap return (SRET).
      *
      * Restores privilege level from SPP, re-enables SIE from SPIE, resets SPIE to 1,
-     * sets SPP to U-mode, clears MPRV, and updates program counter from SEPC.
+     * clears SPP, clears MPRV, and updates program counter from SEPC.
      *
      * @param state Reference to architectural state.
      */
@@ -56,7 +58,7 @@ class TrapController {
      * @param cause Hardware trap cause code (interrupt or exception).
      * @param tval Auxiliary trap value (e.g. faulting virtual address or instruction encoding).
      */
-    static void raise_exception(CPU& cpu, TrapCause cause, CSRValue tval);
+    static void raise_exception(CPU& cpu, simrv::xlen::TrapCause cause, simrv::xlen::CsrValue tval);
 
     /**
      * @brief Validates if the current privilege level is sufficient to execute a given privileged
@@ -72,9 +74,11 @@ class TrapController {
      * @param funct7 The 7-bit function field (used for SFENCE.VMA).
      * @return true if the instruction is allowed under current privilege, false otherwise.
      */
-    static auto can_execute_privileged_instruction(PrivilegeLevel current_priv, CSRValue misa,
-                                                   CSRValue mstatus, Instruction funct12,
-                                                   Word funct7) -> bool;
+    static auto can_execute_privileged_instruction(simrv::xlen::PrivilegeLevel current_priv,
+                                                   simrv::xlen::CsrValue misa,
+                                                   simrv::xlen::CsrValue mstatus,
+                                                   simrv::xlen::Instruction funct12,
+                                                   simrv::xlen::Word funct7) -> bool;
 
     /**
      * @brief Validates if the current privilege level has access to a specific CSR.
@@ -88,9 +92,8 @@ class TrapController {
      * @param is_write True if this is a write or read-write access to the CSR.
      * @return true if access is permitted, false if it triggers an illegal instruction exception.
      */
-    static auto can_access_csr(PrivilegeLevel current_priv, CSRValue misa, CSRAddress csr_addr,
-                               bool is_write) -> bool;
-
+    static auto can_access_csr(simrv::xlen::PrivilegeLevel current_priv, simrv::xlen::CsrValue misa,
+                               simrv::xlen::CsrNumber csr_addr, bool is_write) -> bool;
 };
 
 }  // namespace simrv::core

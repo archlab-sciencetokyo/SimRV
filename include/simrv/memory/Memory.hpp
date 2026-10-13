@@ -4,8 +4,10 @@
  */
 #pragma once
 
-#include "simrv/XLen.hpp"
+#include <cstddef>
+
 #include "simrv/memory/MemoryUtil.hpp"
+#include "simrv/xlen/ScalarTypes.hpp"
 
 namespace simrv::memory {
 inline constexpr size_t kLocalCoreMemorySize = (static_cast<size_t>(32u * 1024u));

@@ -17,7 +17,7 @@ namespace simrv::device {
  */
 class VirtioMmioBlock : public VirtioMmioDevice {
    public:
-    VirtioMmioBlock(Address base_address, uint32_t irq_num, core::Machine* machine,
+    VirtioMmioBlock(simrv::xlen::Address base_address, uint32_t irq_num, core::Machine* machine,
                     const std::string& disk_path = "");
 
     auto load_disk(const std::string& path) -> bool { return backend_.load_disk(path); }
@@ -26,7 +26,7 @@ class VirtioMmioBlock : public VirtioMmioDevice {
 
    protected:
     void on_queue_notify(uint32_t q_idx) override;
-    auto read_device_config(Address offset, std::size_t size) -> uint64_t override;
+    auto read_device_config(simrv::xlen::Address offset, std::size_t size) -> uint64_t override;
 
    private:
     virtio::BlockBackend backend_;

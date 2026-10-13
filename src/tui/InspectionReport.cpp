@@ -4,17 +4,16 @@
  */
 #include "simrv/tui/InspectionReport.hpp"
 
-#include <algorithm>
-#include <cctype>
 #include <format>
 #include <fstream>
 #include <sstream>
 
 #include "simrv/core/BuildInfo.hpp"
+#include "simrv/core/Cpu.hpp"
 #include "simrv/core/Machine.hpp"
 #include "simrv/pipeline/Decoder.hpp"
 #include "simrv/pipeline/PipelineConfig.hpp"
-#include "simrv/xlen/Types.hpp"
+#include "simrv/xlen/RegisterTypes.hpp"
 
 namespace simrv::tui {
 namespace {
@@ -64,13 +63,13 @@ auto hex_value(Value value) -> std::string {
     return std::format("0x{:0{}x}", static_cast<uint64_t>(value), simrv::xlen::kXLenHexDigits);
 }
 
-auto privilege_name(PrivilegeLevel privilege) -> std::string_view {
+auto privilege_name(simrv::xlen::PrivilegeLevel privilege) -> std::string_view {
     switch (privilege) {
-        case PrivilegeLevel::User:
+        case simrv::xlen::PrivilegeLevel::User:
             return "user";
-        case PrivilegeLevel::Supervisor:
+        case simrv::xlen::PrivilegeLevel::Supervisor:
             return "supervisor";
-        case PrivilegeLevel::Machine:
+        case simrv::xlen::PrivilegeLevel::Machine:
             return "machine";
     }
     return "unknown";
@@ -116,7 +115,7 @@ auto make_inspection_report(const simrv::core::Machine& machine, size_t hart,
     out << "    \"gpr\": [";
     for (size_t reg = 0; reg < simrv::core::RegisterFile::kNumRegisters; ++reg) {
         if (reg != 0) out << ", ";
-        out << quoted(hex_value(state.regs.read(static_cast<RegId>(reg))));
+        out << quoted(hex_value(state.regs.read(static_cast<simrv::xlen::RegId>(reg))));
     }
     out << "],\n";
     out << "    \"csr\": {\"mstatus\": " << quoted(hex_value(state.mstatus))

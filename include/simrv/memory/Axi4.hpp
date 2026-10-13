@@ -15,7 +15,7 @@
 #include <vector>
 
 #include "simrv/pipeline/CpuModel.hpp"
-#include "simrv/xlen/Types.hpp"
+#include "simrv/xlen/ScalarTypes.hpp"
 
 namespace simrv::core {
 class Machine;
@@ -70,7 +70,7 @@ enum class AxiResp : uint8_t {
 
 struct Axi4Aw {
     uint32_t id{0};
-    Address addr{0};
+    simrv::xlen::Address addr{0};
     uint8_t len{0};   // Burst length: beats - 1
     uint8_t size{3};  // Burst size: 2^size bytes per beat
     AxiBurst burst{AxiBurst::Incr};
@@ -81,7 +81,7 @@ struct Axi4Aw {
 };
 
 struct Axi4W {
-    Word data{0};
+    simrv::xlen::Word data{0};
     uint32_t strb{0xFFFFFFFFU};
     bool last{true};
 };
@@ -93,7 +93,7 @@ struct Axi4B {
 
 struct Axi4Ar {
     uint32_t id{0};
-    Address addr{0};
+    simrv::xlen::Address addr{0};
     uint8_t len{0};   // Burst length: beats - 1
     uint8_t size{3};  // Burst size: 2^size bytes per beat
     AxiBurst burst{AxiBurst::Incr};
@@ -105,7 +105,7 @@ struct Axi4Ar {
 
 struct Axi4R {
     uint32_t id{0};
-    Word data{0};
+    simrv::xlen::Word data{0};
     AxiResp resp{AxiResp::Okay};
     bool last{true};
 };
@@ -161,10 +161,10 @@ class Axi4Bridge {
     auto recv_b(Axi4B& b) -> bool;
 
     // Helper burst methods
-    auto axi_read(Address addr, uint8_t size_bytes, uint8_t len = 0)
-        -> std::pair<AxiResp, std::vector<Word>>;
-    auto axi_write(Address addr, std::span<const Word> data, uint8_t size_bytes,
-                   uint32_t strb = 0xFFFFFFFFU) -> AxiResp;
+    auto axi_read(simrv::xlen::Address addr, uint8_t size_bytes, uint8_t len = 0)
+        -> std::pair<AxiResp, std::vector<simrv::xlen::Word>>;
+    auto axi_write(simrv::xlen::Address addr, std::span<const simrv::xlen::Word> data,
+                   uint8_t size_bytes, uint32_t strb = 0xFFFFFFFFU) -> AxiResp;
 
    private:
     core::Machine* machine_{nullptr};

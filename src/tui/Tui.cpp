@@ -25,8 +25,11 @@
 #include <string>
 #include <thread>
 
+#include "simrv/core/Cpu.hpp"
 #include "simrv/core/Logger.hpp"
 #include "simrv/core/Machine.hpp"
+#include "simrv/debug/BreakpointManager.hpp"
+#include "simrv/debug/SymbolTable.hpp"
 #include "simrv/device/Uart.hpp"
 #include "simrv/isa/Common.hpp"
 #include "simrv/pipeline/Decoder.hpp"
@@ -44,8 +47,7 @@
 #include "simrv/tui/panels/InspectorPane.hpp"
 #include "simrv/tui/panels/StatusBar.hpp"
 #include "simrv/tui/panels/TerminalPane.hpp"
-#include "simrv/util/FormatUtil.hpp"
-#include "simrv/xlen/Types.hpp"
+#include "simrv/xlen/ScalarTypes.hpp"
 
 namespace simrv::tui {
 
@@ -183,10 +185,32 @@ void Tui::set_paused(bool p) {
     if (cur_paused != p || cur_machine_state != target_machine_state) {
         paused_.store(p, std::memory_order_release);
         if (!p) {
+            auto is_inspector_page = [](TuiRegPage page) {
+                return page != TuiRegPage::LIVE && page != TuiRegPage::CONSOLE &&
+                       page != TuiRegPage::DISPLAY;
+            };
+            size_t live_slot = workbench_slots_.size();
+            if (focused_slot_index_ < workbench_slots_.size() &&
+                is_inspector_page(workbench_slots_[focused_slot_index_].page)) {
+                live_slot = focused_slot_index_;
+            } else {
+                for (size_t slot = 0; slot < workbench_slots_.size(); ++slot) {
+                    if (is_inspector_page(workbench_slots_[slot].page)) {
+                        live_slot = slot;
+                        break;
+                    }
+                }
+            }
+            if (live_slot < workbench_slots_.size()) {
+                transient_live_restore_ = std::pair{live_slot, workbench_slots_[live_slot].page};
+                workbench_slots_[live_slot].page = TuiRegPage::LIVE;
+            } else {
+                transient_live_restore_.reset();
+            }
             clear_status_override();
             last_runtime_tick_ = std::chrono::steady_clock::now();
             last_speed_update_ = std::chrono::steady_clock::now();
-            last_icount_ = machine_.primary_hart().e_icount;
+            last_icount_ = total_snapshot_instruction_count();
             machine_.resume();
         } else {
             if (last_runtime_tick_ != std::chrono::steady_clock::time_point{}) {
@@ -195,6 +219,7 @@ void Tui::set_paused(bool p) {
                 last_runtime_tick_ = {};
             }
             machine_.pause();
+            clear_transient_live_overview(true);
         }
         update_trace_active_cache();
         trigger_immediate_render();
@@ -208,7 +233,8 @@ void Tui::initialize() {
     terminal_pane_ = std::make_unique<TerminalPane>();
     status_bar_ = std::make_unique<StatusBar>(machine_, this);
 
-    if (workbench_slots_.empty()) workbench_slots_ = {{TuiRegPage::GPR, 0}};
+    if (workbench_slots_.empty())
+        workbench_slots_ = {{.page = TuiRegPage::GPR, .scroll_offset = 0}};
     if (focused_slot_index_ >= workbench_slots_.size()) focused_slot_index_ = 0;
     inspector_pane_->set_page(workbench_slots_[focused_slot_index_].page);
 
@@ -413,7 +439,8 @@ void Tui::restore_preferences() {
     if (!preferences.load(preferences_path_)) return;
     layout_ = preferences.layout;
     workbench_slots_ = std::move(preferences.slots);
-    if (workbench_slots_.empty()) workbench_slots_ = {{TuiRegPage::GPR, 0}};
+    if (workbench_slots_.empty())
+        workbench_slots_ = {{.page = TuiRegPage::GPR, .scroll_offset = 0}};
     focused_slot_index_ = preferences.focused_slot;
     user_inspector_width_ = preferences.inspector_width;
     user_column_widths_ = preferences.column_widths;
@@ -430,6 +457,10 @@ void Tui::save_preferences() {
     TuiPreferences preferences;
     preferences.layout = layout_;
     preferences.slots = workbench_slots_;
+    if (transient_live_restore_ && transient_live_restore_->first < preferences.slots.size() &&
+        preferences.slots[transient_live_restore_->first].page == TuiRegPage::LIVE) {
+        preferences.slots[transient_live_restore_->first].page = transient_live_restore_->second;
+    }
     preferences.focused_slot = focused_slot_index_;
     preferences.inspector_width = user_inspector_width_;
     preferences.column_widths = user_column_widths_;
@@ -442,6 +473,26 @@ void Tui::save_preferences() {
     if (!preferences.save(preferences_path_)) {
         simrv::log::warn("Unable to save TUI preferences to {}", preferences_path_.string());
     }
+}
+
+void Tui::clear_transient_live_overview(bool restore_page) {
+    if (!transient_live_restore_) return;
+    const auto [slot, page] = *transient_live_restore_;
+    if (restore_page && slot < workbench_slots_.size() &&
+        workbench_slots_[slot].page == TuiRegPage::LIVE) {
+        workbench_slots_[slot].page = page;
+        if (inspector_pane_ && slot == focused_slot_index_) inspector_pane_->set_page(page);
+    }
+    transient_live_restore_.reset();
+    update_trace_active_cache();
+}
+
+auto Tui::total_snapshot_instruction_count() const -> uint64_t {
+    uint64_t total = 0;
+    for (size_t hart = 0; hart < machine_.num_harts(); ++hart) {
+        total += machine_.tui_execution_snapshot(hart).instruction_count;
+    }
+    return total;
 }
 
 void Tui::start_ui_thread() {
@@ -504,7 +555,8 @@ void Tui::ui_render_loop(const std::stop_token& stop_token) {
                 std::max<int64_t>(0, std::chrono::duration_cast<std::chrono::milliseconds>(
                                          deadline - std::chrono::steady_clock::now())
                                          .count()));
-            pollfd fds[] = {{STDIN_FILENO, POLLIN, 0}, {ui_wake_.get(), POLLIN, 0}};
+            pollfd fds[] = {{.fd = STDIN_FILENO, .events = POLLIN, .revents = 0},
+                            {.fd = ui_wake_.get(), .events = POLLIN, .revents = 0}};
             (void)::poll(fds, 2, timeout);
             if (fds[1].revents & POLLIN) {
                 uint64_t pending;
@@ -537,7 +589,7 @@ void Tui::print_log(const std::string& msg) {
 }
 
 void Tui::render_update_speed(std::chrono::steady_clock::time_point now) {
-    const uint64_t current_icount = machine_.tui_execution_snapshot().instruction_count;
+    const uint64_t current_icount = total_snapshot_instruction_count();
     if (!is_paused()) {
         if (last_runtime_tick_ != std::chrono::steady_clock::time_point{}) {
             runtime_duration_ +=
@@ -547,7 +599,8 @@ void Tui::render_update_speed(std::chrono::steady_clock::time_point now) {
         auto diff =
             std::chrono::duration_cast<std::chrono::milliseconds>(now - last_speed_update_).count();
         if (diff >= 50) {
-            uint64_t insns_since_last = current_icount - last_icount_;
+            uint64_t insns_since_last =
+                current_icount >= last_icount_ ? current_icount - last_icount_ : 0;
             if (diff > 0) {
                 speed_ips_ = (insns_since_last * 1000ULL) / static_cast<uint64_t>(diff);
                 kips_ = speed_ips_ / 1000;
@@ -564,7 +617,7 @@ void Tui::render_update_speed(std::chrono::steady_clock::time_point now) {
                 std::chrono::duration_cast<std::chrono::microseconds>(now - last_runtime_tick_);
             last_runtime_tick_ = std::chrono::steady_clock::time_point{};
         }
-        if (current_icount > last_icount_) {
+        if (current_icount >= last_icount_ && current_icount > last_icount_) {
             auto diff =
                 std::chrono::duration_cast<std::chrono::milliseconds>(now - last_speed_update_)
                     .count();
@@ -587,6 +640,8 @@ void Tui::render_update_speed(std::chrono::steady_clock::time_point now) {
                 last_icount_ = current_icount;
                 last_speed_update_ = now;
             }
+        } else if (current_icount < last_icount_) {
+            last_icount_ = current_icount;
         }
     }
 }
@@ -681,11 +736,14 @@ void Tui::render_build_lines(int inspector_width, int terminal_width, int num_ro
         inspector_pane_->set_log_lines({});
     }
 
+    if (focused_slot_index_ < workbench_slots_.size()) {
+        inspector_pane_->set_page(workbench_slots_[focused_slot_index_].page);
+    }
+    inspector_pane_->set_paused(paused_);
     inspector_pane_->set_selected_hart(selected_hart_);
     inspector_pane_->set_kips(kips_);
     inspector_pane_->set_max_kips(max_kips_);
     inspector_pane_->set_kips_history(kips_history_);
-    inspector_pane_->set_paused(paused_);
     inspector_pane_->set_student_guide_enabled(student_guide_enabled_);
     inspector_pane_->set_visible_rows(num_rows);
     inspector_pane_->set_active_runtime(static_cast<double>(runtime_duration_.count()) / 1000000.0);
@@ -794,7 +852,7 @@ void Tui::render_draw_sixel(int panel_x, int display_width, int display_rows,
         }
     }
 
-    const size_t total_strips = static_cast<size_t>((height + 5) / 6);
+    const auto total_strips = static_cast<size_t>((height + 5) / 6);
     if (sixel_cached_width_ != width || sixel_cached_height_ != height) {
         sixel_cached_width_ = width;
         sixel_cached_height_ = height;
@@ -819,7 +877,7 @@ void Tui::render_draw_sixel(int panel_x, int display_width, int display_rows,
     };
 
     for (int y = 0; y < height; y += 6) {
-        const size_t strip_idx = static_cast<size_t>(y / 6);
+        const auto strip_idx = static_cast<size_t>(y / 6);
         const int max_bits = std::min(6, height - y);
 
         uint64_t strip_hash = 1469598103934665603ULL;
@@ -859,8 +917,8 @@ void Tui::render_draw_sixel(int panel_x, int display_width, int display_rows,
                 const int x4 = x * 4;
                 for (int bit = 0; bit < max_bits; ++bit) {
                     const auto* p = row_ptrs[bit] + x4;
-                    const uint8_t c = static_cast<uint8_t>((kColorLut[p[2]] * 36) +
-                                                           (kColorLut[p[1]] * 6) + kColorLut[p[0]]);
+                    const auto c = static_cast<uint8_t>((kColorLut[p[2]] * 36) +
+                                                        (kColorLut[p[1]] * 6) + kColorLut[p[0]]);
                     if (last_x_for_color[c] < 0) {
                         present_colors.push_back(c);
                     }
@@ -877,8 +935,8 @@ void Tui::render_draw_sixel(int panel_x, int display_width, int display_rows,
                 const int x_off = src_x_offset[x];
                 for (int bit = 0; bit < max_bits; ++bit) {
                     const auto* p = row_ptrs[bit] + x_off;
-                    const uint8_t c = static_cast<uint8_t>((kColorLut[p[2]] * 36) +
-                                                           (kColorLut[p[1]] * 6) + kColorLut[p[0]]);
+                    const auto c = static_cast<uint8_t>((kColorLut[p[2]] * 36) +
+                                                        (kColorLut[p[1]] * 6) + kColorLut[p[0]]);
                     if (last_x_for_color[c] < 0) {
                         present_colors.push_back(c);
                     }
@@ -952,10 +1010,12 @@ auto Tui::render_framebuffer_row(int row, int width, int rows) const -> std::str
         const int source_top = std::min(source_height - 1, top * source_height / pixel_height);
         const int source_bottom =
             std::min(source_height - 1, bottom * source_height / pixel_height);
-        const auto* p_top = fb.unchecked_ptr(
-            fb.base() + static_cast<Address>((source_top * source_width + source_x) * 4));
-        const auto* p_bottom = fb.unchecked_ptr(
-            fb.base() + static_cast<Address>((source_bottom * source_width + source_x) * 4));
+        const auto* p_top =
+            fb.unchecked_ptr(fb.base() + static_cast<simrv::xlen::Address>(
+                                             (source_top * source_width + source_x) * 4));
+        const auto* p_bottom =
+            fb.unchecked_ptr(fb.base() + static_cast<simrv::xlen::Address>(
+                                             (source_bottom * source_width + source_x) * 4));
         result += std::format(
             "\033[38;2;{};{};{}m\033[48;2;{};{};{}m▀", std::to_integer<uint8_t>(p_top[2]),
             std::to_integer<uint8_t>(p_top[1]), std::to_integer<uint8_t>(p_top[0]),
@@ -1524,7 +1584,8 @@ void Tui::handle_mouse_inspector(int x, int y, int b, bool multi_column, bool is
                     render(true);
                 }
             } else if (page == TuiRegPage::PIPELINE) {
-                Register clicked_pc = inspector_pane_->get_pipeline_pc_at_row(logical_row);
+                simrv::xlen::Register clicked_pc =
+                    inspector_pane_->get_pipeline_pc_at_row(logical_row);
                 if (clicked_pc != 0) {
                     inspector_pane_->set_previous_page(TuiRegPage::PIPELINE);
                     inspector_pane_->set_explain_pc(clicked_pc);
@@ -1856,48 +1917,49 @@ void Tui::sync_workbench_slots() {
     }
 
     if (workbench_slots_.empty()) {
-        workbench_slots_.push_back({TuiRegPage::GPR, 0});
+        workbench_slots_.push_back({.page = TuiRegPage::GPR, .scroll_offset = 0});
     }
 
     if (desired == 1) {
         if (layout_ == TuiLayout::FullRight) {
-            workbench_slots_ = {{TuiRegPage::CONSOLE, 0}};
+            workbench_slots_ = {{.page = TuiRegPage::CONSOLE, .scroll_offset = 0}};
         } else {
-            workbench_slots_ = {{TuiRegPage::GPR, 0}};
+            workbench_slots_ = {{.page = TuiRegPage::GPR, .scroll_offset = 0}};
         }
     } else if (desired == 2) {
         if (workbench_slots_.size() < 2) {
-            workbench_slots_.push_back({TuiRegPage::CONSOLE, 0});
+            workbench_slots_.push_back({.page = TuiRegPage::CONSOLE, .scroll_offset = 0});
         } else if (workbench_slots_.size() > 2) {
             workbench_slots_.resize(2);
         }
     } else if (desired == 3) {
         if (workbench_slots_.size() < 3) {
             if (workbench_slots_.size() == 1) {
-                workbench_slots_.push_back({TuiRegPage::STACK, 0});
-                workbench_slots_.push_back({TuiRegPage::CONSOLE, 0});
+                workbench_slots_.push_back({.page = TuiRegPage::STACK, .scroll_offset = 0});
+                workbench_slots_.push_back({.page = TuiRegPage::CONSOLE, .scroll_offset = 0});
             } else {
-                workbench_slots_.insert(workbench_slots_.begin() + 1, {TuiRegPage::STACK, 0});
+                workbench_slots_.insert(workbench_slots_.begin() + 1,
+                                        {.page = TuiRegPage::STACK, .scroll_offset = 0});
             }
         } else if (workbench_slots_.size() > 3) {
             workbench_slots_.resize(3);
         }
     } else if (desired == 4) {
         if (workbench_slots_.size() == 1) {
-            workbench_slots_ = {{TuiRegPage::GPR, 0},
-                                {TuiRegPage::STACK, 0},
-                                {TuiRegPage::TRACE, 0},
-                                {TuiRegPage::CONSOLE, 0}};
+            workbench_slots_ = {{.page = TuiRegPage::GPR, .scroll_offset = 0},
+                                {.page = TuiRegPage::STACK, .scroll_offset = 0},
+                                {.page = TuiRegPage::TRACE, .scroll_offset = 0},
+                                {.page = TuiRegPage::CONSOLE, .scroll_offset = 0}};
         } else if (workbench_slots_.size() == 2) {
             auto last = workbench_slots_.back();
             workbench_slots_.pop_back();
-            workbench_slots_.push_back({TuiRegPage::STACK, 0});
-            workbench_slots_.push_back({TuiRegPage::TRACE, 0});
+            workbench_slots_.push_back({.page = TuiRegPage::STACK, .scroll_offset = 0});
+            workbench_slots_.push_back({.page = TuiRegPage::TRACE, .scroll_offset = 0});
             workbench_slots_.push_back(last);
         } else if (workbench_slots_.size() == 3) {
             auto last = workbench_slots_.back();
             workbench_slots_.pop_back();
-            workbench_slots_.push_back({TuiRegPage::TRACE, 0});
+            workbench_slots_.push_back({.page = TuiRegPage::TRACE, .scroll_offset = 0});
             workbench_slots_.push_back(last);
         } else if (workbench_slots_.size() > 4) {
             workbench_slots_.resize(4);
@@ -1920,6 +1982,9 @@ void Tui::sync_workbench_slots() {
 }
 
 void Tui::apply_layout_preset(LayoutPreset preset) {
+    // A preset is an explicit layout change. Do not let the execution pause path
+    // restore an old page into the newly selected layout later.
+    clear_transient_live_overview(false);
     winsize w{};
     ioctl(STDOUT_FILENO, TIOCGWINSZ, &w);
     int const term_width =
@@ -1934,20 +1999,22 @@ void Tui::apply_layout_preset(LayoutPreset preset) {
         case LayoutPreset::GeneralDebug:
             if (max_cols >= 4) {
                 layout_ = TuiLayout::FourColumn;
-                workbench_slots_ = {{TuiRegPage::GPR, 0},
-                                    {TuiRegPage::STACK, 0},
-                                    {TuiRegPage::TRACE, 0},
-                                    {TuiRegPage::CONSOLE, 0}};
+                workbench_slots_ = {{.page = TuiRegPage::GPR, .scroll_offset = 0},
+                                    {.page = TuiRegPage::STACK, .scroll_offset = 0},
+                                    {.page = TuiRegPage::TRACE, .scroll_offset = 0},
+                                    {.page = TuiRegPage::CONSOLE, .scroll_offset = 0}};
             } else if (max_cols >= 3) {
                 layout_ = TuiLayout::ThreeColumn;
-                workbench_slots_ = {
-                    {TuiRegPage::GPR, 0}, {TuiRegPage::STACK, 0}, {TuiRegPage::CONSOLE, 0}};
+                workbench_slots_ = {{.page = TuiRegPage::GPR, .scroll_offset = 0},
+                                    {.page = TuiRegPage::STACK, .scroll_offset = 0},
+                                    {.page = TuiRegPage::CONSOLE, .scroll_offset = 0}};
             } else if (max_cols >= 2) {
                 layout_ = TuiLayout::Split;
-                workbench_slots_ = {{TuiRegPage::GPR, 0}, {TuiRegPage::CONSOLE, 0}};
+                workbench_slots_ = {{.page = TuiRegPage::GPR, .scroll_offset = 0},
+                                    {.page = TuiRegPage::CONSOLE, .scroll_offset = 0}};
             } else {
                 layout_ = TuiLayout::FullLeft;
-                workbench_slots_ = {{TuiRegPage::GPR, 0}};
+                workbench_slots_ = {{.page = TuiRegPage::GPR, .scroll_offset = 0}};
             }
             set_status_override("Layout Preset: General Debug [Alt-1]");
             break;
@@ -1956,33 +2023,34 @@ void Tui::apply_layout_preset(LayoutPreset preset) {
             if (max_cols >= 4) {
                 layout_ = TuiLayout::FourColumn;
                 if (is_cycle) {
-                    workbench_slots_ = {{TuiRegPage::PIPELINE, 0},
-                                        {TuiRegPage::CACHE, 0},
-                                        {TuiRegPage::HAZARD, 0},
-                                        {TuiRegPage::CONSOLE, 0}};
+                    workbench_slots_ = {{.page = TuiRegPage::PIPELINE, .scroll_offset = 0},
+                                        {.page = TuiRegPage::CACHE, .scroll_offset = 0},
+                                        {.page = TuiRegPage::HAZARD, .scroll_offset = 0},
+                                        {.page = TuiRegPage::CONSOLE, .scroll_offset = 0}};
                 } else {
-                    workbench_slots_ = {{TuiRegPage::PIPELINE, 0},
-                                        {TuiRegPage::STACK, 0},
-                                        {TuiRegPage::TRACE, 0},
-                                        {TuiRegPage::CONSOLE, 0}};
+                    workbench_slots_ = {{.page = TuiRegPage::PIPELINE, .scroll_offset = 0},
+                                        {.page = TuiRegPage::STACK, .scroll_offset = 0},
+                                        {.page = TuiRegPage::TRACE, .scroll_offset = 0},
+                                        {.page = TuiRegPage::CONSOLE, .scroll_offset = 0}};
                 }
             } else if (max_cols >= 3) {
                 layout_ = TuiLayout::ThreeColumn;
                 if (is_cycle) {
-                    workbench_slots_ = {{TuiRegPage::PIPELINE, 0},
-                                        {TuiRegPage::CACHE, 0},
-                                        {TuiRegPage::CONSOLE, 0}};
+                    workbench_slots_ = {{.page = TuiRegPage::PIPELINE, .scroll_offset = 0},
+                                        {.page = TuiRegPage::CACHE, .scroll_offset = 0},
+                                        {.page = TuiRegPage::CONSOLE, .scroll_offset = 0}};
                 } else {
-                    workbench_slots_ = {{TuiRegPage::PIPELINE, 0},
-                                        {TuiRegPage::STACK, 0},
-                                        {TuiRegPage::CONSOLE, 0}};
+                    workbench_slots_ = {{.page = TuiRegPage::PIPELINE, .scroll_offset = 0},
+                                        {.page = TuiRegPage::STACK, .scroll_offset = 0},
+                                        {.page = TuiRegPage::CONSOLE, .scroll_offset = 0}};
                 }
             } else if (max_cols >= 2) {
                 layout_ = TuiLayout::Split;
-                workbench_slots_ = {{TuiRegPage::PIPELINE, 0}, {TuiRegPage::CONSOLE, 0}};
+                workbench_slots_ = {{.page = TuiRegPage::PIPELINE, .scroll_offset = 0},
+                                    {.page = TuiRegPage::CONSOLE, .scroll_offset = 0}};
             } else {
                 layout_ = TuiLayout::FullLeft;
-                workbench_slots_ = {{TuiRegPage::PIPELINE, 0}};
+                workbench_slots_ = {{.page = TuiRegPage::PIPELINE, .scroll_offset = 0}};
             }
             set_status_override("Layout Preset: Microarchitecture [Alt-2]");
             break;
@@ -1990,20 +2058,22 @@ void Tui::apply_layout_preset(LayoutPreset preset) {
         case LayoutPreset::TraceExecution:
             if (max_cols >= 4) {
                 layout_ = TuiLayout::FourColumn;
-                workbench_slots_ = {{TuiRegPage::GPR, 0},
-                                    {TuiRegPage::TRACE, 0},
-                                    {TuiRegPage::EXPLAIN, 0},
-                                    {TuiRegPage::CONSOLE, 0}};
+                workbench_slots_ = {{.page = TuiRegPage::GPR, .scroll_offset = 0},
+                                    {.page = TuiRegPage::TRACE, .scroll_offset = 0},
+                                    {.page = TuiRegPage::EXPLAIN, .scroll_offset = 0},
+                                    {.page = TuiRegPage::CONSOLE, .scroll_offset = 0}};
             } else if (max_cols >= 3) {
                 layout_ = TuiLayout::ThreeColumn;
-                workbench_slots_ = {
-                    {TuiRegPage::GPR, 0}, {TuiRegPage::TRACE, 0}, {TuiRegPage::CONSOLE, 0}};
+                workbench_slots_ = {{.page = TuiRegPage::GPR, .scroll_offset = 0},
+                                    {.page = TuiRegPage::TRACE, .scroll_offset = 0},
+                                    {.page = TuiRegPage::CONSOLE, .scroll_offset = 0}};
             } else if (max_cols >= 2) {
                 layout_ = TuiLayout::Split;
-                workbench_slots_ = {{TuiRegPage::TRACE, 0}, {TuiRegPage::CONSOLE, 0}};
+                workbench_slots_ = {{.page = TuiRegPage::TRACE, .scroll_offset = 0},
+                                    {.page = TuiRegPage::CONSOLE, .scroll_offset = 0}};
             } else {
                 layout_ = TuiLayout::FullLeft;
-                workbench_slots_ = {{TuiRegPage::TRACE, 0}};
+                workbench_slots_ = {{.page = TuiRegPage::TRACE, .scroll_offset = 0}};
             }
             set_status_override("Layout Preset: Trace & Execution [Alt-3]");
             break;
@@ -2012,31 +2082,34 @@ void Tui::apply_layout_preset(LayoutPreset preset) {
             if (max_cols >= 4) {
                 layout_ = TuiLayout::FourColumn;
                 if (is_cycle) {
-                    workbench_slots_ = {{TuiRegPage::STACK, 0},
-                                        {TuiRegPage::CACHE, 0},
-                                        {TuiRegPage::TLB, 0},
-                                        {TuiRegPage::BUS, 0}};
+                    workbench_slots_ = {{.page = TuiRegPage::STACK, .scroll_offset = 0},
+                                        {.page = TuiRegPage::CACHE, .scroll_offset = 0},
+                                        {.page = TuiRegPage::TLB, .scroll_offset = 0},
+                                        {.page = TuiRegPage::BUS, .scroll_offset = 0}};
                 } else {
-                    workbench_slots_ = {{TuiRegPage::STACK, 0},
-                                        {TuiRegPage::TLB, 0},
-                                        {TuiRegPage::BUS, 0},
-                                        {TuiRegPage::CONSOLE, 0}};
+                    workbench_slots_ = {{.page = TuiRegPage::STACK, .scroll_offset = 0},
+                                        {.page = TuiRegPage::TLB, .scroll_offset = 0},
+                                        {.page = TuiRegPage::BUS, .scroll_offset = 0},
+                                        {.page = TuiRegPage::CONSOLE, .scroll_offset = 0}};
                 }
             } else if (max_cols >= 3) {
                 layout_ = TuiLayout::ThreeColumn;
                 if (is_cycle) {
-                    workbench_slots_ = {
-                        {TuiRegPage::STACK, 0}, {TuiRegPage::CACHE, 0}, {TuiRegPage::BUS, 0}};
+                    workbench_slots_ = {{.page = TuiRegPage::STACK, .scroll_offset = 0},
+                                        {.page = TuiRegPage::CACHE, .scroll_offset = 0},
+                                        {.page = TuiRegPage::BUS, .scroll_offset = 0}};
                 } else {
-                    workbench_slots_ = {
-                        {TuiRegPage::STACK, 0}, {TuiRegPage::TLB, 0}, {TuiRegPage::BUS, 0}};
+                    workbench_slots_ = {{.page = TuiRegPage::STACK, .scroll_offset = 0},
+                                        {.page = TuiRegPage::TLB, .scroll_offset = 0},
+                                        {.page = TuiRegPage::BUS, .scroll_offset = 0}};
                 }
             } else if (max_cols >= 2) {
                 layout_ = TuiLayout::Split;
-                workbench_slots_ = {{TuiRegPage::STACK, 0}, {TuiRegPage::BUS, 0}};
+                workbench_slots_ = {{.page = TuiRegPage::STACK, .scroll_offset = 0},
+                                    {.page = TuiRegPage::BUS, .scroll_offset = 0}};
             } else {
                 layout_ = TuiLayout::FullLeft;
-                workbench_slots_ = {{TuiRegPage::STACK, 0}};
+                workbench_slots_ = {{.page = TuiRegPage::STACK, .scroll_offset = 0}};
             }
             set_status_override("Layout Preset: Memory & Interconnect [Alt-4]");
             break;
@@ -2075,6 +2148,9 @@ void Tui::focus_prev_slot() {
 
 void Tui::set_workbench_slot_page(size_t slot_idx, TuiRegPage page) {
     if (slot_idx < workbench_slots_.size()) {
+        if (transient_live_restore_ && transient_live_restore_->first == slot_idx) {
+            clear_transient_live_overview(false);
+        }
         workbench_slots_[slot_idx].page = page;
         if (slot_idx == 0 && inspector_pane_) {
             inspector_pane_->set_page(page);
@@ -2109,6 +2185,7 @@ void Tui::swap_workbench_slots(size_t slot_a, size_t slot_b) {
         slot_a == slot_b) {
         return;
     }
+    clear_transient_live_overview(true);
     std::swap(workbench_slots_[slot_a], workbench_slots_[slot_b]);
     if (inspector_pane_) {
         inspector_pane_->set_page(workbench_slots_[focused_slot_index_].page);
@@ -2121,6 +2198,7 @@ void Tui::swap_workbench_slots(size_t slot_a, size_t slot_b) {
 
 void Tui::move_focused_column_left() {
     if (workbench_slots_.size() <= 1 || focused_slot_index_ == 0) return;
+    clear_transient_live_overview(true);
     const size_t prev = focused_slot_index_ - 1;
     std::swap(workbench_slots_[focused_slot_index_], workbench_slots_[prev]);
     focused_slot_index_ = prev;
@@ -2135,6 +2213,7 @@ void Tui::move_focused_column_left() {
 
 void Tui::move_focused_column_right() {
     if (workbench_slots_.size() <= 1 || focused_slot_index_ + 1 >= workbench_slots_.size()) return;
+    clear_transient_live_overview(true);
     const size_t next = focused_slot_index_ + 1;
     std::swap(workbench_slots_[focused_slot_index_], workbench_slots_[next]);
     focused_slot_index_ = next;
@@ -2153,6 +2232,7 @@ auto Tui::add_workbench_column() -> bool {
         render(true);
         return false;
     }
+    clear_transient_live_overview(true);
 
     const size_t target_count = workbench_slots_.size() + 1;
     const int req_width = framework::min_width_for_columns(static_cast<uint8_t>(target_count));
@@ -2190,7 +2270,7 @@ auto Tui::add_workbench_column() -> bool {
 
     size_t const insert_at = std::min(focused_slot_index_ + 1, workbench_slots_.size());
     workbench_slots_.insert(workbench_slots_.begin() + static_cast<std::ptrdiff_t>(insert_at),
-                            {new_page, 0});
+                            {.page = new_page, .scroll_offset = 0});
     if (target_count == 2) {
         layout_ = TuiLayout::Split;
     } else if (target_count == 3) {
@@ -2223,6 +2303,7 @@ auto Tui::close_column(size_t slot_idx) -> bool {
     if (slot_idx >= workbench_slots_.size()) {
         return false;
     }
+    clear_transient_live_overview(true);
 
     const auto closed_page = workbench_slots_[slot_idx].page;
     workbench_slots_.erase(workbench_slots_.begin() + slot_idx);
@@ -2448,6 +2529,10 @@ void Tui::cycle_tool_page(bool reverse) {
 }
 
 void Tui::set_reg_page(TuiRegPage page) {
+    if (focused_slot_index_ < workbench_slots_.size() && transient_live_restore_ &&
+        transient_live_restore_->first == focused_slot_index_) {
+        clear_transient_live_overview(false);
+    }
     if (!machine_.runtime_profile.is_cycle_mode() &&
         (page == TuiRegPage::CACHE || page == TuiRegPage::BPRED || page == TuiRegPage::HAZARD)) {
         set_status_override(
@@ -2638,13 +2723,15 @@ constexpr auto ascii_to_linux_keycode_and_shift(uint8_t byte) -> std::pair<uint1
 
 void Tui::write_guest_input(uint8_t byte) {
     const auto page = focused_page();
-    if (page == TuiRegPage::CONSOLE) {
+    // The display inspector is the explicit keyboard target for VGA guests. Every other focused
+    // panel keeps the running guest's UART attached, so selecting a debugger view does not
+    // silently discard terminal input.
+    if (page != TuiRegPage::DISPLAY) {
         if (machine_.uart_device()) {
             machine_.uart_device()->push_rx_byte(normalize_guest_terminal_byte(byte));
         }
         return;
     }
-    if (page != TuiRegPage::DISPLAY) return;
 
     if (byte >= 1 && byte <= 26) {
         const auto [keycode, unused_shift] =
@@ -2675,6 +2762,7 @@ void Tui::write_guest_input(uint8_t byte) {
 }
 
 auto Tui::is_page_visible(TuiRegPage page) const noexcept -> bool {
+    if (transient_live_restore_ && transient_live_restore_->second == page) return true;
     if (!workbench_slots_.empty()) {
         for (const auto& slot : workbench_slots_) {
             if (slot.page == page) return true;
@@ -2695,9 +2783,11 @@ void Tui::update_trace_active_cache() {
     pipeline_or_detail_visible_.store(detail_visible, std::memory_order_release);
 }
 
-void Tui::record_instruction(Register pc, simrv::isa::Opcode opcode, simrv::isa::OperationId op_id,
-                             uint8_t rd, Register rd_val, uint8_t rs1, Register rs1_val,
-                             uint8_t rs2, Register rs2_val, int64_t imm, uint8_t hart) {
+void Tui::record_instruction(simrv::xlen::Register pc, simrv::isa::Opcode opcode,
+                             simrv::isa::OperationId op_id, uint8_t rd,
+                             simrv::xlen::Register rd_val, uint8_t rs1,
+                             simrv::xlen::Register rs1_val, uint8_t rs2,
+                             simrv::xlen::Register rs2_val, int64_t imm, uint8_t hart) {
     if (mission_.enabled()) {
         if (const auto symbol = machine_.symbol_table().lookup_symbol(pc);
             symbol && symbol->is_exact()) {
@@ -2726,7 +2816,7 @@ void Tui::record_instruction(Register pc, simrv::isa::Opcode opcode, simrv::isa:
     ring.write_sequence.store(slot + 1, std::memory_order_release);
 }
 
-void Tui::record_flight_instruction(Register pc, simrv::isa::Opcode opcode,
+void Tui::record_flight_instruction(simrv::xlen::Register pc, simrv::isa::Opcode opcode,
                                     simrv::isa::OperationId op_id, uint8_t hart) {
     auto& ring = flight_rings_.at(hart % kFlightRecorderHarts);
     const uint64_t slot = ring.write_sequence.load(std::memory_order_relaxed);
@@ -3011,7 +3101,7 @@ void Tui::adjust_inspector_width(int delta) {
 
 auto Tui::poll_keyboard(uint8_t& byte_out) -> bool {
     if (input_pos_ == input_size_) {
-        pollfd fd{STDIN_FILENO, POLLIN, 0};
+        pollfd fd{.fd = STDIN_FILENO, .events = POLLIN, .revents = 0};
         if (::poll(&fd, 1, 0) <= 0 || !(fd.revents & POLLIN)) return false;
         const auto count = ::read(STDIN_FILENO, input_bytes_.data(), input_bytes_.size());
         if (count <= 0) return false;
@@ -3416,7 +3506,7 @@ auto Tui::handle_debug_keyboard_input(TuiKey key) -> bool {
             break;
         case simrv::tui::TuiKey::k:
         case simrv::tui::TuiKey::K: {
-            Address pc = machine_.primary_hart().state().pc;
+            simrv::xlen::Address pc = machine_.primary_hart().state().pc;
             if (machine_.breakpoint_manager().has_pc_breakpoint(pc)) {
                 machine_.breakpoint_manager().remove_pc_breakpoint(pc);
                 modal_.open_notice("BREAKPOINT REMOVED",
@@ -3997,7 +4087,7 @@ void Tui::execute_footer_action(TuiFooterAction action) {
             open_modal(ModalType::SetWatchpoint);
             break;
         case TuiFooterAction::TogglePcBreakpoint: {
-            Address pc = machine_.primary_hart().state().pc;
+            simrv::xlen::Address pc = machine_.primary_hart().state().pc;
             if (machine_.breakpoint_manager().has_pc_breakpoint(pc)) {
                 machine_.breakpoint_manager().remove_pc_breakpoint(pc);
                 modal_.open_notice("BREAKPOINT REMOVED",
@@ -4400,7 +4490,7 @@ auto Tui::consume_control_sequence(uint8_t first_byte) -> bool {
                 }
                 continue;
             }
-            pollfd fd{STDIN_FILENO, POLLIN, 0};
+            pollfd fd{.fd = STDIN_FILENO, .events = POLLIN, .revents = 0};
             if (::poll(&fd, 1, 1000) <= 0) break;
         }
         if (!is_paused() && !is_modal_active()) {

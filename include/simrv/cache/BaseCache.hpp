@@ -20,9 +20,8 @@
 #define SIMRV_HAS_STD_MDSPAN 0
 #endif
 
-#include "simrv/Define.hpp"
 #include "simrv/memory/Bus.hpp"
-#include "simrv/xlen/Types.hpp"
+#include "simrv/xlen/ScalarTypes.hpp"
 
 namespace simrv::cache {
 
@@ -46,16 +45,17 @@ class BaseCache {
         uint64_t last_used = 0;           ///< Timestamp tick for LRU eviction (8 bytes, offset 8)
         bool valid = false;               ///< Cache line validity bit (1 byte, offset 16)
         simrv::memory::MesiState state =
-            simrv::memory::MesiState::Invalid;            ///< MESI state (offset 17)
-        std::array<uint8_t, 14> padding{};                ///< Explicit padding (offset 18..32)
-        alignas(16) std::array<Byte, kLineBytes> data{};  ///< 16-byte aligned payload buffer (32
-                                                          ///< bytes, offset 32..64)
+            simrv::memory::MesiState::Invalid;  ///< MESI state (offset 17)
+        std::array<uint8_t, 14> padding{};      ///< Explicit padding (offset 18..32)
+        alignas(16)
+            std::array<simrv::xlen::Byte, kLineBytes> data{};  ///< 16-byte aligned payload buffer
+                                                               ///< (32 bytes, offset 32..64)
     };
 
     struct EvictedLine {
         simrv::memory::LineAddress address = 0;
         simrv::memory::MesiState state = simrv::memory::MesiState::Invalid;
-        std::array<Byte, kLineBytes> data{};
+        std::array<simrv::xlen::Byte, kLineBytes> data{};
     };
 
 #if SIMRV_HAS_STD_MDSPAN
@@ -109,11 +109,11 @@ class BaseCache {
     [[nodiscard]] auto associativity() const -> uint32_t { return active_ways_; }
     [[nodiscard]] auto set_count() const -> uint32_t { return active_sets_; }
 
-    void insert(Address base_addr, const Byte* line_data,
+    void insert(simrv::xlen::Address base_addr, const simrv::xlen::Byte* line_data,
                 simrv::memory::MesiState init_state = simrv::memory::MesiState::Exclusive) {
         ++access_tick_;
         const uint32_t set_idx = get_set_index(base_addr);
-        const Address tag = get_tag(base_addr);
+        const simrv::xlen::Address tag = get_tag(base_addr);
         CacheLine* const set_base = &lines_[set_idx * active_ways_];
         CacheLine* victim = nullptr;
         uint32_t victim_way = 0;
@@ -149,7 +149,7 @@ class BaseCache {
             last_eviction_ =
                 EvictedLine{.address = victim->tag, .state = victim->state, .data = victim->data};
         } else {
-            last_evicted_tag_ = ~Address{0};
+            last_evicted_tag_ = ~simrv::xlen::Address{0};
         }
         last_replaced_set_ = set_idx;
         last_replaced_way_ = victim_way;
@@ -169,8 +169,8 @@ class BaseCache {
         std::ranges::fill(lines_, CacheLine{});
         last_replaced_set_ = 0xFFFFFFFF;
         last_replaced_way_ = 0xFFFFFFFF;
-        last_evicted_tag_ = ~Address{0};
-        last_inserted_tag_ = ~Address{0};
+        last_evicted_tag_ = ~simrv::xlen::Address{0};
+        last_inserted_tag_ = ~simrv::xlen::Address{0};
         last_eviction_.reset();
         last_accessed_set_ = 0xFFFFFFFF;
         last_access_was_hit_ = false;
@@ -192,8 +192,12 @@ class BaseCache {
     [[nodiscard]] auto replacement_count() const -> uint64_t { return replacements_; }
     [[nodiscard]] auto last_replaced_set() const -> uint32_t { return last_replaced_set_; }
     [[nodiscard]] auto last_replaced_way() const -> uint32_t { return last_replaced_way_; }
-    [[nodiscard]] auto last_evicted_tag() const -> Address { return last_evicted_tag_; }
-    [[nodiscard]] auto last_inserted_tag() const -> Address { return last_inserted_tag_; }
+    [[nodiscard]] auto last_evicted_tag() const -> simrv::xlen::Address {
+        return last_evicted_tag_;
+    }
+    [[nodiscard]] auto last_inserted_tag() const -> simrv::xlen::Address {
+        return last_inserted_tag_;
+    }
     auto take_last_eviction() -> std::optional<EvictedLine> {
         return std::exchange(last_eviction_, std::nullopt);
     }
@@ -204,11 +208,12 @@ class BaseCache {
         }
         return false;
     }
-    [[nodiscard]] auto get_line_tag(uint32_t set_idx, uint32_t way_idx) const -> Address {
+    [[nodiscard]] auto get_line_tag(uint32_t set_idx, uint32_t way_idx) const
+        -> simrv::xlen::Address {
         if (set_idx < active_sets_ && way_idx < active_ways_) {
             return line(set_idx, way_idx).tag;
         }
-        return ~Address{0};
+        return ~simrv::xlen::Address{0};
     }
     [[nodiscard]] auto get_line_state(uint32_t set_idx, uint32_t way_idx) const
         -> simrv::memory::MesiState {
@@ -230,14 +235,15 @@ class BaseCache {
         return 0;
     }
     [[nodiscard]] auto get_line_data(uint32_t set_idx, uint32_t way_idx) const
-        -> const std::array<Byte, kLineBytes>* {
+        -> const std::array<simrv::xlen::Byte, kLineBytes>* {
         if (set_idx < active_sets_ && way_idx < active_ways_) {
             return &line(set_idx, way_idx).data;
         }
         return nullptr;
     }
 
-    [[nodiscard]] constexpr auto find_matching_line(uint32_t set_idx, Address tag) noexcept
+    [[nodiscard]] constexpr auto find_matching_line(uint32_t set_idx,
+                                                    simrv::xlen::Address tag) noexcept
         -> std::pair<uint32_t, CacheLine*> {
         if (set_idx >= active_sets_) return {0xFFFFFFFF, nullptr};
         auto* line_ptr = &lines_[set_idx * active_ways_];
@@ -250,7 +256,8 @@ class BaseCache {
         return {0xFFFFFFFF, nullptr};
     }
 
-    [[nodiscard]] constexpr auto find_matching_line(uint32_t set_idx, Address tag) const noexcept
+    [[nodiscard]] constexpr auto find_matching_line(uint32_t set_idx,
+                                                    simrv::xlen::Address tag) const noexcept
         -> std::pair<uint32_t, const CacheLine*> {
         if (set_idx >= active_sets_) return {0xFFFFFFFF, nullptr};
         const auto* line_ptr = &lines_[set_idx * active_ways_];
@@ -263,16 +270,17 @@ class BaseCache {
         return {0xFFFFFFFF, nullptr};
     }
 
-    [[nodiscard]] constexpr auto find_way(uint32_t set_idx, Address tag) const noexcept
+    [[nodiscard]] constexpr auto find_way(uint32_t set_idx, simrv::xlen::Address tag) const noexcept
         -> std::optional<uint32_t> {
         const auto [w, line_ptr] = find_matching_line(set_idx, tag);
         if (line_ptr != nullptr) return w;
         return std::nullopt;
     }
 
-    [[nodiscard]] auto line_state(Address base_addr) const -> simrv::memory::MesiState {
+    [[nodiscard]] auto line_state(simrv::xlen::Address base_addr) const
+        -> simrv::memory::MesiState {
         const uint32_t set_idx = get_set_index(base_addr);
-        const Address tag = get_tag(base_addr);
+        const simrv::xlen::Address tag = get_tag(base_addr);
         const auto [w, line_ptr] = find_matching_line(set_idx, tag);
         if (line_ptr != nullptr) {
             return line_ptr->state;
@@ -280,9 +288,10 @@ class BaseCache {
         return simrv::memory::MesiState::Invalid;
     }
 
-    auto upgrade_line_state(Address base_addr, simrv::memory::MesiState new_state) -> bool {
+    auto upgrade_line_state(simrv::xlen::Address base_addr, simrv::memory::MesiState new_state)
+        -> bool {
         const uint32_t set_idx = get_set_index(base_addr);
-        const Address tag = get_tag(base_addr);
+        const simrv::xlen::Address tag = get_tag(base_addr);
         const auto [w, line_ptr] = find_matching_line(set_idx, tag);
         if (line_ptr != nullptr) {
             line_ptr->state = new_state;
@@ -292,10 +301,10 @@ class BaseCache {
         return false;
     }
 
-    auto probe_line(Address base_addr, simrv::memory::MesiState target_state,
-                    std::array<Byte, kLineBytes>* out_dirty_data = nullptr) -> bool {
+    auto probe_line(simrv::xlen::Address base_addr, simrv::memory::MesiState target_state,
+                    std::array<simrv::xlen::Byte, kLineBytes>* out_dirty_data = nullptr) -> bool {
         const uint32_t set_idx = get_set_index(base_addr);
-        const Address tag = get_tag(base_addr);
+        const simrv::xlen::Address tag = get_tag(base_addr);
         auto* line_ptr = &lines_[set_idx * active_ways_];
         for (uint32_t w = 0; w < active_ways_; ++w) {
             auto& l = line_ptr[w];
@@ -335,12 +344,14 @@ class BaseCache {
     uint32_t active_ways_ = kWays;
     uint32_t active_sets_ = kNumSets;
 
-    [[nodiscard]] auto get_set_index(Address addr) const -> simrv::memory::CacheSetIndex {
+    [[nodiscard]] auto get_set_index(simrv::xlen::Address addr) const
+        -> simrv::memory::CacheSetIndex {
         return static_cast<simrv::memory::CacheSetIndex>((addr >> kLineShift) &
                                                          (active_sets_ - 1u));
     }
 
-    [[nodiscard]] constexpr auto get_tag(Address addr) const -> simrv::memory::CacheTag {
+    [[nodiscard]] constexpr auto get_tag(simrv::xlen::Address addr) const
+        -> simrv::memory::CacheTag {
         return addr & ~static_cast<simrv::memory::CacheTag>((1u << kLineShift) - 1u);
     }
 };

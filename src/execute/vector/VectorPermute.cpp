@@ -1,9 +1,9 @@
 #include <algorithm>
 
 #include "VectorHelpers.hpp"
-#include "simrv/execute/ExecuteUnit.hpp"
+#include "VectorSubunits.hpp"
 
-namespace simrv::execute {
+namespace simrv::execute::vector {
 
 namespace {
 
@@ -27,9 +27,10 @@ uint64_t scalar_fp_bits(const core::CPU& cpu, uint64_t bits, uint32_t sew) {
 }
 
 template <typename T, typename Index>
-void execute_vrgather_vector(core::CPU& cpu, RegId rd, RegId index_reg, RegId rs2, bool vm,
-                             uint32_t vl, uint32_t vlmax) {
-    const auto& mask_reg = cpu.state().regs.read_vector(RegId::Zero);
+void execute_vrgather_vector(core::CPU& cpu, simrv::xlen::RegId rd, simrv::xlen::RegId index_reg,
+                             simrv::xlen::RegId rs2, bool vm, uint32_t vl, uint32_t vlmax) {
+    const auto& mask_reg =
+        cpu.state().regs.read_vector(simrv::xlen::to_vec_reg_id(simrv::xlen::RegId::Zero));
     std::vector<T> source(vlmax);
     std::vector<Index> indices(vl);
     for (uint32_t i = 0; i < vlmax; ++i) {
@@ -38,7 +39,7 @@ void execute_vrgather_vector(core::CPU& cpu, RegId rd, RegId index_reg, RegId rs
     for (uint32_t i = 0; i < vl; ++i) {
         indices[i] = vector::get_group_element<Index>(cpu.state().regs, index_reg, i);
     }
-    for (uint32_t i = static_cast<uint32_t>(cpu.state().vstart); i < vl; ++i) {
+    for (auto i = static_cast<uint32_t>(cpu.state().vstart); i < vl; ++i) {
         if (!vector::is_element_active(mask_reg, i, vm)) continue;
         const uint64_t index = indices[i];
         vector::set_group_element<T>(cpu.state().regs, rd, i, index < vlmax ? source[index] : T{0});
@@ -46,41 +47,46 @@ void execute_vrgather_vector(core::CPU& cpu, RegId rd, RegId index_reg, RegId rs
 }
 
 template <typename T>
-void execute_vrgather_scalar(core::CPU& cpu, RegId rd, uint64_t index, RegId rs2, bool vm,
-                             uint32_t vl, uint32_t vlmax) {
-    const auto& mask_reg = cpu.state().regs.read_vector(RegId::Zero);
+void execute_vrgather_scalar(core::CPU& cpu, simrv::xlen::RegId rd, uint64_t index,
+                             simrv::xlen::RegId rs2, bool vm, uint32_t vl, uint32_t vlmax) {
+    const auto& mask_reg =
+        cpu.state().regs.read_vector(simrv::xlen::to_vec_reg_id(simrv::xlen::RegId::Zero));
     const T value = index < vlmax ? vector::get_group_element<T>(cpu.state().regs, rs2,
                                                                  static_cast<uint32_t>(index))
                                   : T{0};
-    for (uint32_t i = static_cast<uint32_t>(cpu.state().vstart); i < vl; ++i) {
+    for (auto i = static_cast<uint32_t>(cpu.state().vstart); i < vl; ++i) {
         if (!vector::is_element_active(mask_reg, i, vm)) continue;
         vector::set_group_element<T>(cpu.state().regs, rd, i, value);
     }
 }
 
 // Whole register move helper
-void execute_vmv_whole(core::CPU& cpu, RegId rd, RegId rs2, uint32_t nr, uint32_t sew) {
+void execute_vmv_whole(core::CPU& cpu, simrv::xlen::RegId rd, simrv::xlen::RegId rs2, uint32_t nr,
+                       uint32_t sew) {
     uint32_t total_bytes = nr * cpu.state().regs.vlen_bytes();
     const uint32_t first_byte = static_cast<uint32_t>(cpu.state().vstart) * (sew / 8U);
     for (uint32_t i = first_byte; i < total_bytes; i++) {
         uint32_t src_reg = (static_cast<uint32_t>(rs2) + (i / cpu.state().regs.vlen_bytes())) % 32;
         uint32_t dst_reg = (static_cast<uint32_t>(rd) + (i / cpu.state().regs.vlen_bytes())) % 32;
-        uint8_t val = cpu.state()
-                          .regs.read_vector(static_cast<RegId>(src_reg))
-                          .u8[i % cpu.state().regs.vlen_bytes()];
+        uint8_t val =
+            cpu.state()
+                .regs
+                .read_vector(simrv::xlen::to_vec_reg_id(static_cast<simrv::xlen::RegId>(src_reg)))
+                .u8[i % cpu.state().regs.vlen_bytes()];
         cpu.state()
-            .regs.read_vector(static_cast<RegId>(dst_reg))
+            .regs.read_vector(simrv::xlen::to_vec_reg_id(static_cast<simrv::xlen::RegId>(dst_reg)))
             .u8[i % cpu.state().regs.vlen_bytes()] = val;
     }
 }
 
 // Vector compress helper
 template <typename T>
-void execute_vcompress(core::CPU& cpu, RegId rd, RegId rs2, RegId rs1, uint32_t vl) {
-    const auto& mask_reg = cpu.state().regs.read_vector(rs1);
+void execute_vcompress(core::CPU& cpu, simrv::xlen::RegId rd, simrv::xlen::RegId rs2,
+                       simrv::xlen::RegId rs1, uint32_t vl) {
+    const auto& mask_reg = cpu.state().regs.read_vector(simrv::xlen::to_vec_reg_id(rs1));
     std::vector<T> src_vals;
     src_vals.reserve(vl);
-    for (uint32_t i = static_cast<uint32_t>(cpu.state().vstart); i < vl; i++) {
+    for (auto i = static_cast<uint32_t>(cpu.state().vstart); i < vl; i++) {
         if (vector::is_element_active(mask_reg, i, false)) {
             src_vals.push_back(vector::get_group_element<T>(cpu.state().regs, rs2, i));
         }
@@ -92,8 +98,10 @@ void execute_vcompress(core::CPU& cpu, RegId rd, RegId rs2, RegId rs1, uint32_t 
 
 // Vector Slide Up
 template <typename T>
-void execute_vslideup(core::CPU& cpu, RegId rd, uint64_t offset, RegId rs2, bool vm, uint32_t vl) {
-    const auto& mask_reg = cpu.state().regs.read_vector(RegId::Zero);
+void execute_vslideup(core::CPU& cpu, simrv::xlen::RegId rd, uint64_t offset,
+                      simrv::xlen::RegId rs2, bool vm, uint32_t vl) {
+    const auto& mask_reg =
+        cpu.state().regs.read_vector(simrv::xlen::to_vec_reg_id(simrv::xlen::RegId::Zero));
 
     std::vector<T> src_vals(vl);
     for (uint32_t i = 0; i < vl; i++) {
@@ -109,9 +117,10 @@ void execute_vslideup(core::CPU& cpu, RegId rd, uint64_t offset, RegId rs2, bool
 
 // Vector Slide Down
 template <typename T>
-void execute_vslidedown(core::CPU& cpu, RegId rd, uint64_t offset, RegId rs2, bool vm,
-                        uint32_t vl) {
-    const auto& mask_reg = cpu.state().regs.read_vector(RegId::Zero);
+void execute_vslidedown(core::CPU& cpu, simrv::xlen::RegId rd, uint64_t offset,
+                        simrv::xlen::RegId rs2, bool vm, uint32_t vl) {
+    const auto& mask_reg =
+        cpu.state().regs.read_vector(simrv::xlen::to_vec_reg_id(simrv::xlen::RegId::Zero));
     const uint32_t vlmax = vector_vlmax(cpu, sizeof(T) * 8U);
 
     std::vector<T> src_vals(vlmax);
@@ -119,7 +128,7 @@ void execute_vslidedown(core::CPU& cpu, RegId rd, uint64_t offset, RegId rs2, bo
         src_vals[i] = vector::get_group_element<T>(cpu.state().regs, rs2, i);
     }
 
-    for (uint32_t i = static_cast<uint32_t>(cpu.state().vstart); i < vl; i++) {
+    for (auto i = static_cast<uint32_t>(cpu.state().vstart); i < vl; i++) {
         if (!vector::is_element_active(mask_reg, i, vm)) continue;
         T val =
             offset < vlmax && i < vlmax - offset ? src_vals[static_cast<size_t>(i + offset)] : T{0};
@@ -129,9 +138,11 @@ void execute_vslidedown(core::CPU& cpu, RegId rd, uint64_t offset, RegId rs2, bo
 
 // Vector Slide 1 Down
 template <typename T>
-void execute_vslide1down(core::CPU& cpu, RegId rd, FloatingRegister rs1_val, RegId rs2, bool vm,
+void execute_vslide1down(core::CPU& cpu, simrv::xlen::RegId rd,
+                         simrv::xlen::FloatingRegister rs1_val, simrv::xlen::RegId rs2, bool vm,
                          uint32_t vl) {
-    const auto& mask_reg = cpu.state().regs.read_vector(RegId::Zero);
+    const auto& mask_reg =
+        cpu.state().regs.read_vector(simrv::xlen::to_vec_reg_id(simrv::xlen::RegId::Zero));
     T scalar = static_cast<T>(rs1_val);
 
     std::vector<T> temp(vl);
@@ -143,7 +154,7 @@ void execute_vslide1down(core::CPU& cpu, RegId rd, FloatingRegister rs1_val, Reg
         }
     }
 
-    for (uint32_t i = static_cast<uint32_t>(cpu.state().vstart); i < vl; i++) {
+    for (auto i = static_cast<uint32_t>(cpu.state().vstart); i < vl; i++) {
         if (!vector::is_element_active(mask_reg, i, vm)) continue;
         vector::set_group_element<T>(cpu.state().regs, rd, i, temp[i]);
     }
@@ -151,9 +162,10 @@ void execute_vslide1down(core::CPU& cpu, RegId rd, FloatingRegister rs1_val, Reg
 
 // Vector Slide 1 Up
 template <typename T>
-void execute_vslide1up(core::CPU& cpu, RegId rd, FloatingRegister rs1_val, RegId rs2, bool vm,
-                       uint32_t vl) {
-    const auto& mask_reg = cpu.state().regs.read_vector(RegId::Zero);
+void execute_vslide1up(core::CPU& cpu, simrv::xlen::RegId rd, simrv::xlen::FloatingRegister rs1_val,
+                       simrv::xlen::RegId rs2, bool vm, uint32_t vl) {
+    const auto& mask_reg =
+        cpu.state().regs.read_vector(simrv::xlen::to_vec_reg_id(simrv::xlen::RegId::Zero));
     T scalar = static_cast<T>(rs1_val);
 
     std::vector<T> temp(vl);
@@ -165,17 +177,19 @@ void execute_vslide1up(core::CPU& cpu, RegId rd, FloatingRegister rs1_val, RegId
         }
     }
 
-    for (uint32_t i = static_cast<uint32_t>(cpu.state().vstart); i < vl; i++) {
+    for (auto i = static_cast<uint32_t>(cpu.state().vstart); i < vl; i++) {
         if (!vector::is_element_active(mask_reg, i, vm)) continue;
         vector::set_group_element<T>(cpu.state().regs, rd, i, temp[i]);
     }
 }
 
 template <typename T>
-void execute_vmerge_vv(core::CPU& cpu, RegId rd, RegId rs1, RegId rs2, uint32_t vl) {
-    const auto& mask_reg = cpu.state().regs.read_vector(RegId::Zero);
+void execute_vmerge_vv(core::CPU& cpu, simrv::xlen::RegId rd, simrv::xlen::RegId rs1,
+                       simrv::xlen::RegId rs2, uint32_t vl) {
+    const auto& mask_reg =
+        cpu.state().regs.read_vector(simrv::xlen::to_vec_reg_id(simrv::xlen::RegId::Zero));
 
-    for (uint32_t i = static_cast<uint32_t>(cpu.state().vstart); i < vl; i++) {
+    for (auto i = static_cast<uint32_t>(cpu.state().vstart); i < vl; i++) {
         bool mask_bit = vector::is_element_active(mask_reg, i, false);
         T val = mask_bit ? vector::get_group_element<T>(cpu.state().regs, rs1, i)
                          : vector::get_group_element<T>(cpu.state().regs, rs2, i);
@@ -184,10 +198,12 @@ void execute_vmerge_vv(core::CPU& cpu, RegId rd, RegId rs1, RegId rs2, uint32_t 
 }
 
 template <typename T>
-void execute_vmerge_scalar(core::CPU& cpu, RegId rd, T val1, RegId rs2, uint32_t vl) {
-    const auto& mask_reg = cpu.state().regs.read_vector(RegId::Zero);
+void execute_vmerge_scalar(core::CPU& cpu, simrv::xlen::RegId rd, T val1, simrv::xlen::RegId rs2,
+                           uint32_t vl) {
+    const auto& mask_reg =
+        cpu.state().regs.read_vector(simrv::xlen::to_vec_reg_id(simrv::xlen::RegId::Zero));
 
-    for (uint32_t i = static_cast<uint32_t>(cpu.state().vstart); i < vl; i++) {
+    for (auto i = static_cast<uint32_t>(cpu.state().vstart); i < vl; i++) {
         bool mask_bit = vector::is_element_active(mask_reg, i, false);
         T val = mask_bit ? val1 : vector::get_group_element<T>(cpu.state().regs, rs2, i);
         vector::set_group_element<T>(cpu.state().regs, rd, i, val);
@@ -195,18 +211,20 @@ void execute_vmerge_scalar(core::CPU& cpu, RegId rd, T val1, RegId rs2, uint32_t
 }
 
 template <typename T>
-void execute_vfmv_v_f(core::CPU& cpu, RegId rd, uint64_t bits, uint32_t vl) {
-    for (uint32_t i = static_cast<uint32_t>(cpu.state().vstart); i < vl; ++i) {
+void execute_vfmv_v_f(core::CPU& cpu, simrv::xlen::RegId rd, uint64_t bits, uint32_t vl) {
+    for (auto i = static_cast<uint32_t>(cpu.state().vstart); i < vl; ++i) {
         vector::set_group_element<T>(cpu.state().regs, rd, i, static_cast<T>(bits));
     }
 }
 
 template <typename T>
-void execute_vmerge_vi(core::CPU& cpu, RegId rd, int32_t imm, RegId rs2, uint32_t vl) {
-    const auto& mask_reg = cpu.state().regs.read_vector(RegId::Zero);
+void execute_vmerge_vi(core::CPU& cpu, simrv::xlen::RegId rd, int32_t imm, simrv::xlen::RegId rs2,
+                       uint32_t vl) {
+    const auto& mask_reg =
+        cpu.state().regs.read_vector(simrv::xlen::to_vec_reg_id(simrv::xlen::RegId::Zero));
     T val1 = static_cast<T>(imm);
 
-    for (uint32_t i = static_cast<uint32_t>(cpu.state().vstart); i < vl; i++) {
+    for (auto i = static_cast<uint32_t>(cpu.state().vstart); i < vl; i++) {
         bool mask_bit = vector::is_element_active(mask_reg, i, false);
         T val = mask_bit ? val1 : vector::get_group_element<T>(cpu.state().regs, rs2, i);
         vector::set_group_element<T>(cpu.state().regs, rd, i, val);
@@ -214,27 +232,28 @@ void execute_vmerge_vi(core::CPU& cpu, RegId rd, int32_t imm, RegId rs2, uint32_
 }
 
 template <typename T>
-void execute_vid(core::CPU& cpu, RegId rd, bool vm, uint32_t vl) {
-    const auto& mask_reg = cpu.state().regs.read_vector(RegId::Zero);
-    for (uint32_t i = static_cast<uint32_t>(cpu.state().vstart); i < vl; i++) {
+void execute_vid(core::CPU& cpu, simrv::xlen::RegId rd, bool vm, uint32_t vl) {
+    const auto& mask_reg =
+        cpu.state().regs.read_vector(simrv::xlen::to_vec_reg_id(simrv::xlen::RegId::Zero));
+    for (auto i = static_cast<uint32_t>(cpu.state().vstart); i < vl; i++) {
         if (!vector::is_element_active(mask_reg, i, vm)) continue;
         vector::set_group_element<T>(cpu.state().regs, rd, i, static_cast<T>(i));
     }
 }
 
-bool execute_vector_permute_scalar(core::CPU& cpu, isa::OperationId op_id, RegId rd, RegId rs1,
-                                   RegId rs2, uint32_t sew) {
+bool execute_vector_permute_scalar(core::CPU& cpu, isa::OperationId op_id, simrv::xlen::RegId rd,
+                                   simrv::xlen::RegId rs1, simrv::xlen::RegId rs2, uint32_t sew) {
     switch (op_id) {
         case isa::OperationId::VMV_X_S: {
-            Register val = 0;
+            simrv::xlen::Register val = 0;
             if (sew == 8)
-                val = static_cast<Register>(static_cast<int32_t>(static_cast<int8_t>(
+                val = static_cast<simrv::xlen::Register>(static_cast<int32_t>(static_cast<int8_t>(
                     vector::get_group_element<uint8_t>(cpu.state().regs, rs2, 0))));
             else if (sew == 16)
-                val = static_cast<Register>(static_cast<int32_t>(static_cast<int16_t>(
+                val = static_cast<simrv::xlen::Register>(static_cast<int32_t>(static_cast<int16_t>(
                     vector::get_group_element<uint16_t>(cpu.state().regs, rs2, 0))));
             else if (sew == 32)
-                val = static_cast<Register>(static_cast<int32_t>(
+                val = static_cast<simrv::xlen::Register>(static_cast<int32_t>(
                     vector::get_group_element<uint32_t>(cpu.state().regs, rs2, 0)));
             else
                 val = vector::get_group_element<uint64_t>(cpu.state().regs, rs2, 0);
@@ -243,7 +262,7 @@ bool execute_vector_permute_scalar(core::CPU& cpu, isa::OperationId op_id, RegId
         }
         case isa::OperationId::VMV_S_X: {
             if (cpu.state().vl == 0 || cpu.state().vstart != 0) return true;
-            Register val = cpu.state().regs.read(rs1);
+            simrv::xlen::Register val = cpu.state().regs.read(rs1);
             if (sew == 8)
                 vector::set_group_element<uint8_t>(cpu.state().regs, rd, 0,
                                                    static_cast<uint8_t>(val));
@@ -256,7 +275,8 @@ bool execute_vector_permute_scalar(core::CPU& cpu, isa::OperationId op_id, RegId
             else
                 vector::set_group_element<uint64_t>(
                     cpu.state().regs, rd, 0,
-                    static_cast<uint64_t>(static_cast<int64_t>(static_cast<SignedWord>(val))));
+                    static_cast<uint64_t>(
+                        static_cast<int64_t>(static_cast<simrv::xlen::SignedWord>(val))));
             return true;
         }
         case isa::OperationId::VFMV_F_S: {
@@ -270,12 +290,13 @@ bool execute_vector_permute_scalar(core::CPU& cpu, isa::OperationId op_id, RegId
             } else if (sew == 64) {
                 val = vector::get_group_element<uint64_t>(cpu.state().regs, rs2, 0);
             }
-            cpu.state().regs.write_fp(rd, val);
+            cpu.state().regs.write_fp(simrv::xlen::to_fp_reg_id(rd), val);
             return true;
         }
         case isa::OperationId::VFMV_S_F: {
             if (cpu.state().vl == 0 || cpu.state().vstart != 0) return true;
-            uint64_t val = scalar_fp_bits(cpu, cpu.state().regs.read_fp(rs1), sew);
+            uint64_t val =
+                scalar_fp_bits(cpu, cpu.state().regs.read_fp(simrv::xlen::to_fp_reg_id(rs1)), sew);
             if (sew == 16)
                 vector::set_group_element<uint16_t>(cpu.state().regs, rd, 0,
                                                     static_cast<uint16_t>(val));
@@ -291,13 +312,14 @@ bool execute_vector_permute_scalar(core::CPU& cpu, isa::OperationId op_id, RegId
     }
 }
 
-bool execute_vector_permute_merge(core::CPU& cpu, isa::OperationId op_id, RegId rd, RegId rs1,
-                                  RegId rs2, uint32_t vl, uint32_t sew, Register rs1_val,
-                                  int32_t simm5) {
+bool execute_vector_permute_merge(core::CPU& cpu, isa::OperationId op_id, simrv::xlen::RegId rd,
+                                  simrv::xlen::RegId rs1, simrv::xlen::RegId rs2, uint32_t vl,
+                                  uint32_t sew, simrv::xlen::Register rs1_val, int32_t simm5) {
     switch (op_id) {
         case isa::OperationId::VFMERGE_VFM:
         case isa::OperationId::VFMV_V_F: {
-            uint64_t val = scalar_fp_bits(cpu, cpu.state().regs.read_fp(rs1), sew);
+            uint64_t val =
+                scalar_fp_bits(cpu, cpu.state().regs.read_fp(simrv::xlen::to_fp_reg_id(rs1)), sew);
             if (op_id == isa::OperationId::VFMV_V_F) {
                 if (sew == 16)
                     execute_vfmv_v_f<uint16_t>(cpu, rd, val, vl);
@@ -354,8 +376,9 @@ bool execute_vector_permute_merge(core::CPU& cpu, isa::OperationId op_id, RegId 
     }
 }
 
-bool execute_vector_permute_vid(core::CPU& cpu, isa::OperationId op_id, RegId rd, RegId rs1,
-                                RegId rs2, bool vm, uint32_t vl, uint32_t sew) {
+bool execute_vector_permute_vid(core::CPU& cpu, isa::OperationId op_id, simrv::xlen::RegId rd,
+                                simrv::xlen::RegId rs1, simrv::xlen::RegId rs2, bool vm,
+                                uint32_t vl, uint32_t sew) {
     if (op_id == isa::OperationId::VID_V) {
         if (sew == 8)
             execute_vid<uint8_t>(cpu, rd, vm, vl);
@@ -381,9 +404,9 @@ bool execute_vector_permute_vid(core::CPU& cpu, isa::OperationId op_id, RegId rd
     return false;
 }
 
-bool execute_vector_permute_mv(core::CPU& cpu, isa::OperationId op_id, RegId rd, RegId rs1,
-                               RegId rs2, uint32_t vl, uint32_t sew, Register rs1_val,
-                               int32_t simm5) {
+bool execute_vector_permute_mv(core::CPU& cpu, isa::OperationId op_id, simrv::xlen::RegId rd,
+                               simrv::xlen::RegId rs1, simrv::xlen::RegId rs2, uint32_t vl,
+                               uint32_t sew, simrv::xlen::Register rs1_val, int32_t simm5) {
     switch (op_id) {
         case isa::OperationId::VMV_V_V: {
             auto add_f = []<typename T>(T, T b) -> T { return b; };
@@ -438,14 +461,15 @@ bool execute_vector_permute_mv(core::CPU& cpu, isa::OperationId op_id, RegId rd,
     }
 }
 
-bool execute_vector_permute_slide1(core::CPU& cpu, isa::OperationId op_id, RegId rd, RegId rs1,
-                                   RegId rs2, bool vm, uint32_t vl, uint32_t sew,
-                                   Register rs1_val) {
+bool execute_vector_permute_slide1(core::CPU& cpu, isa::OperationId op_id, simrv::xlen::RegId rd,
+                                   simrv::xlen::RegId rs1, simrv::xlen::RegId rs2, bool vm,
+                                   uint32_t vl, uint32_t sew, simrv::xlen::Register rs1_val) {
     const bool fp =
         op_id == isa::OperationId::VFSLIDE1UP_VF || op_id == isa::OperationId::VFSLIDE1DOWN_VF;
-    FloatingRegister scalar_val = vector::integer_scalar<uint64_t>(rs1_val);
+    auto scalar_val = vector::integer_scalar<uint64_t>(rs1_val);
     if (fp) {
-        scalar_val = scalar_fp_bits(cpu, cpu.state().regs.read_fp(rs1), sew);
+        scalar_val =
+            scalar_fp_bits(cpu, cpu.state().regs.read_fp(simrv::xlen::to_fp_reg_id(rs1)), sew);
     }
     switch (op_id) {
         case isa::OperationId::VSLIDE1UP_VX:
@@ -476,9 +500,10 @@ bool execute_vector_permute_slide1(core::CPU& cpu, isa::OperationId op_id, RegId
     }
 }
 
-bool execute_vector_permute_slidedown_up(core::CPU& cpu, isa::OperationId op_id, RegId rd,
-                                         RegId rs2, bool vm, uint32_t vl, uint32_t sew,
-                                         Register rs1_val, int32_t simm5) {
+bool execute_vector_permute_slidedown_up(core::CPU& cpu, isa::OperationId op_id,
+                                         simrv::xlen::RegId rd, simrv::xlen::RegId rs2, bool vm,
+                                         uint32_t vl, uint32_t sew, simrv::xlen::Register rs1_val,
+                                         int32_t simm5) {
     switch (op_id) {
         case isa::OperationId::VSLIDEDOWN_VX: {
             auto offset = static_cast<uint64_t>(rs1_val);
@@ -534,9 +559,11 @@ bool execute_vector_permute_slidedown_up(core::CPU& cpu, isa::OperationId op_id,
 }
 
 template <typename T>
-bool execute_vector_permute_gather_typed(core::CPU& cpu, isa::OperationId op_id, RegId rd,
-                                         RegId rs1, RegId rs2, bool vm, uint32_t vl, uint32_t vlmax,
-                                         Register rs1_val, int32_t simm5) {
+bool execute_vector_permute_gather_typed(core::CPU& cpu, isa::OperationId op_id,
+                                         simrv::xlen::RegId rd, simrv::xlen::RegId rs1,
+                                         simrv::xlen::RegId rs2, bool vm, uint32_t vl,
+                                         uint32_t vlmax, simrv::xlen::Register rs1_val,
+                                         int32_t simm5) {
     switch (op_id) {
         case isa::OperationId::VRGATHER_VV:
             execute_vrgather_vector<T, T>(cpu, rd, rs1, rs2, vm, vl, vlmax);
@@ -556,8 +583,9 @@ bool execute_vector_permute_gather_typed(core::CPU& cpu, isa::OperationId op_id,
     }
 }
 
-bool execute_vector_permute_gather(core::CPU& cpu, isa::OperationId op_id, RegId rd, RegId rs1,
-                                   RegId rs2, bool vm, uint32_t vl, uint32_t sew, Register rs1_val,
+bool execute_vector_permute_gather(core::CPU& cpu, isa::OperationId op_id, simrv::xlen::RegId rd,
+                                   simrv::xlen::RegId rs1, simrv::xlen::RegId rs2, bool vm,
+                                   uint32_t vl, uint32_t sew, simrv::xlen::Register rs1_val,
                                    int32_t simm5) {
     const uint32_t vlmax = vector_vlmax(cpu, sew);
     if (sew == 8)
@@ -575,9 +603,9 @@ bool execute_vector_permute_gather(core::CPU& cpu, isa::OperationId op_id, RegId
 
 }  // namespace
 
-void ExecuteUnit::execute_vector_permute(core::CPU& cpu, isa::OperationId op_id, RegId rd,
-                                         RegId rs1, RegId rs2, bool vm, uint32_t vl, uint32_t sew,
-                                         Register rs1_val, int32_t simm5) {
+void execute_vector_permute(core::CPU& cpu, isa::OperationId op_id, simrv::xlen::RegId rd,
+                            simrv::xlen::RegId rs1, simrv::xlen::RegId rs2, bool vm, uint32_t vl,
+                            uint32_t sew, simrv::xlen::Register rs1_val, int32_t simm5) {
     if (execute_vector_permute_scalar(cpu, op_id, rd, rs1, rs2, sew)) return;
     if (execute_vector_permute_merge(cpu, op_id, rd, rs1, rs2, vl, sew, rs1_val, simm5)) return;
     if (execute_vector_permute_vid(cpu, op_id, rd, rs1, rs2, vm, vl, sew)) return;
@@ -589,4 +617,4 @@ void ExecuteUnit::execute_vector_permute(core::CPU& cpu, isa::OperationId op_id,
         return;
 }
 
-}  // namespace simrv::execute
+}  // namespace simrv::execute::vector

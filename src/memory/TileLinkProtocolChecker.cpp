@@ -11,7 +11,7 @@ auto TileLinkProtocolChecker::accept_a(const TlChannelA& request)
         return std::unexpected(
             std::format("A source {} has illegal size {}", request.source, request.size));
     }
-    const auto bytes = static_cast<Address>(Address{1} << request.size);
+    const auto bytes = static_cast<simrv::xlen::Address>(simrv::xlen::Address{1} << request.size);
     if ((request.address & (bytes - 1u)) != 0) {
         return std::unexpected(
             std::format("A source {} address is not naturally aligned", request.source));

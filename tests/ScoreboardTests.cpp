@@ -11,7 +11,7 @@
 #include "simrv/pipeline/OperationInfo.hpp"
 #include "simrv/pipeline/OperationTraits.hpp"
 #include "simrv/pipeline/Scoreboard.hpp"
-#include "simrv/xlen/Types.hpp"
+#include "simrv/xlen/RegisterTypes.hpp"
 
 #define TEST_CHECK(expr)                                                                     \
     do {                                                                                     \
@@ -32,14 +32,14 @@ using namespace simrv::pipeline::operation;
 void test_initial_state() {
     Scoreboard sb{};
     for (size_t i = 0; i < Scoreboard::kNumIntRegisters; ++i) {
-        const auto reg = static_cast<RegId>(i);
+        const auto reg = static_cast<simrv::xlen::RegId>(i);
         TEST_CHECK(!sb.is_busy(RegBank::Integer, reg));
         TEST_CHECK(!sb.can_forward(RegBank::Integer, reg));
         TEST_CHECK(sb.get_forwarded_value(RegBank::Integer, reg) == 0);
         TEST_CHECK(!sb.get_stage(RegBank::Integer, reg).has_value());
     }
     for (size_t i = 0; i < Scoreboard::kNumFpRegisters; ++i) {
-        const auto reg = static_cast<RegId>(i);
+        const auto reg = static_cast<simrv::xlen::RegId>(i);
         TEST_CHECK(!sb.is_busy(RegBank::Float, reg));
         TEST_CHECK(!sb.can_forward(RegBank::Float, reg));
     }
@@ -48,26 +48,26 @@ void test_initial_state() {
 void test_integer_reservation_and_forwarding() {
     Scoreboard sb{};
     // Reserve x5 (T0) at Execute stage with forwarded value 42
-    sb.reserve(RegBank::Integer, RegId::T0, PipelineStage::Execute, 1, true, 42);
-    TEST_CHECK(sb.is_busy(RegBank::Integer, RegId::T0));
-    TEST_CHECK(sb.can_forward(RegBank::Integer, RegId::T0));
-    TEST_CHECK(sb.get_forwarded_value(RegBank::Integer, RegId::T0) == 42);
-    TEST_CHECK(sb.get_stage(RegBank::Integer, RegId::T0) == PipelineStage::Execute);
-    TEST_CHECK(sb.get_latency(RegBank::Integer, RegId::T0) == 1);
+    sb.reserve(RegBank::Integer, simrv::xlen::RegId::T0, PipelineStage::Execute, 1, true, 42);
+    TEST_CHECK(sb.is_busy(RegBank::Integer, simrv::xlen::RegId::T0));
+    TEST_CHECK(sb.can_forward(RegBank::Integer, simrv::xlen::RegId::T0));
+    TEST_CHECK(sb.get_forwarded_value(RegBank::Integer, simrv::xlen::RegId::T0) == 42);
+    TEST_CHECK(sb.get_stage(RegBank::Integer, simrv::xlen::RegId::T0) == PipelineStage::Execute);
+    TEST_CHECK(sb.get_latency(RegBank::Integer, simrv::xlen::RegId::T0) == 1);
 
     // x0 (Zero) must never be reserved
-    sb.reserve(RegBank::Integer, RegId::Zero, PipelineStage::Execute, 0, true, 100);
-    TEST_CHECK(!sb.is_busy(RegBank::Integer, RegId::Zero));
+    sb.reserve(RegBank::Integer, simrv::xlen::RegId::Zero, PipelineStage::Execute, 0, true, 100);
+    TEST_CHECK(!sb.is_busy(RegBank::Integer, simrv::xlen::RegId::Zero));
 
     // Release x5
-    sb.release(RegBank::Integer, RegId::T0);
-    TEST_CHECK(!sb.is_busy(RegBank::Integer, RegId::T0));
-    TEST_CHECK(!sb.can_forward(RegBank::Integer, RegId::T0));
+    sb.release(RegBank::Integer, simrv::xlen::RegId::T0);
+    TEST_CHECK(!sb.is_busy(RegBank::Integer, simrv::xlen::RegId::T0));
+    TEST_CHECK(!sb.can_forward(RegBank::Integer, simrv::xlen::RegId::T0));
 }
 
 void test_float_reservation_and_conservative_policy() {
     Scoreboard sb{};
-    const auto fa0 = static_cast<RegId>(simrv::xlen::FpRegId::Fa0);
+    const auto fa0 = static_cast<simrv::xlen::RegId>(simrv::xlen::FpRegId::Fa0);
 
     // Reserve fa0 with conservative non-forwarding (can_forward = false)
     sb.reserve(RegBank::Float, fa0, PipelineStage::Execute, 2, false);
@@ -93,7 +93,7 @@ void test_float_reservation_and_conservative_policy() {
 
 void test_fma_rs3_hazard_detection() {
     Scoreboard sb{};
-    const auto fa3 = static_cast<RegId>(simrv::xlen::FpRegId::Fa3);
+    const auto fa3 = static_cast<simrv::xlen::RegId>(simrv::xlen::FpRegId::Fa3);
 
     // Reserve fa3 in scoreboard
     sb.reserve(RegBank::Float, fa3, PipelineStage::Memory, 1, false);
@@ -103,7 +103,7 @@ void test_fma_rs3_hazard_detection() {
     // fmadd.s f0, f1, f2, fa3 (rs3 is encoded in bits 31:27 = 13 = 0x0D)
     // fmadd.s rd=0, rs1=1, rs2=2, funct3=7, rs3=13:
     // (13 << 27) | (0 << 25) | (2 << 20) | (1 << 15) | (7 << 12) | (0 << 7) | 0x43
-    constexpr Instruction fmadd_inst =
+    constexpr simrv::xlen::Instruction fmadd_inst =
         (13U << 27U) | (2U << 20U) | (1U << 15U) | (7U << 12U) | 0x43U;
     DecodedInstruction consumer{};
     unpack_instruction(consumer, fmadd_inst, OperationId::FMADD_S);
@@ -119,20 +119,20 @@ void test_fma_rs3_hazard_detection() {
 
 void test_stage_flush() {
     Scoreboard sb{};
-    sb.reserve(RegBank::Integer, RegId::T0, PipelineStage::Decode, 1, false);
-    sb.reserve(RegBank::Integer, RegId::T1, PipelineStage::Execute, 1, true, 10);
-    sb.reserve(RegBank::Integer, RegId::T2, PipelineStage::Writeback, 0, true, 20);
+    sb.reserve(RegBank::Integer, simrv::xlen::RegId::T0, PipelineStage::Decode, 1, false);
+    sb.reserve(RegBank::Integer, simrv::xlen::RegId::T1, PipelineStage::Execute, 1, true, 10);
+    sb.reserve(RegBank::Integer, simrv::xlen::RegId::T2, PipelineStage::Writeback, 0, true, 20);
 
     // Flush Decode and younger
     sb.flush_from_stage(PipelineStage::Decode);
-    TEST_CHECK(!sb.is_busy(RegBank::Integer, RegId::T0));
-    TEST_CHECK(sb.is_busy(RegBank::Integer, RegId::T1));
-    TEST_CHECK(sb.is_busy(RegBank::Integer, RegId::T2));
+    TEST_CHECK(!sb.is_busy(RegBank::Integer, simrv::xlen::RegId::T0));
+    TEST_CHECK(sb.is_busy(RegBank::Integer, simrv::xlen::RegId::T1));
+    TEST_CHECK(sb.is_busy(RegBank::Integer, simrv::xlen::RegId::T2));
 
     // Reset clears everything
     sb.reset();
-    TEST_CHECK(!sb.is_busy(RegBank::Integer, RegId::T1));
-    TEST_CHECK(!sb.is_busy(RegBank::Integer, RegId::T2));
+    TEST_CHECK(!sb.is_busy(RegBank::Integer, simrv::xlen::RegId::T1));
+    TEST_CHECK(!sb.is_busy(RegBank::Integer, simrv::xlen::RegId::T2));
 }
 
 }  // namespace

@@ -5,26 +5,80 @@
 #include "simrv/core/TrapController.hpp"
 
 #include <cstdint>
-#include <print>
 #include <string>
 
+#include "simrv/CompilerHints.hpp"
 #include "simrv/core/Cpu.hpp"
 #include "simrv/core/Logger.hpp"
 #include "simrv/core/Machine.hpp"
 #include "simrv/core/Sbi.hpp"
 #include "simrv/core/TelemetrySink.hpp"
 #include "simrv/core/Tracer.hpp"
-#include "simrv/xlen/Constants.hpp"
-#include "simrv/xlen/Helpers.hpp"
-#include "simrv/xlen/Types.hpp"
+#include "simrv/isa/Priv.hpp"
+#include "simrv/xlen/ScalarTypes.hpp"
 
 namespace simrv::core {
 
-auto trap_cause_name(TrapCause cause) -> std::string {
+namespace {
+
+[[nodiscard]] constexpr auto calculate_trap_target(simrv::xlen::CsrValue tvec,
+                                                   simrv::xlen::TrapCause cause) noexcept
+    -> simrv::xlen::Address {
+    const simrv::xlen::Address tvec_base = tvec & ~simrv::xlen::Address{3};
+    const simrv::xlen::Word tvec_mode = tvec & 3;
+    if (tvec_mode == 1 && trap_is_interrupt(cause)) {
+        return tvec_base + 4 * trap_exception_code(cause);
+    }
+    return tvec_base;
+}
+
+auto trap_delegated_to_supervisor(const ArchState& state, simrv::xlen::TrapCause cause) -> bool {
+    if (state.priv > kPrivSupervisor || !misa_has_extension(state.misa, isa::IsaExtension::S)) {
+        return false;
+    }
+    const auto cause_code = static_cast<simrv::xlen::CsrValue>(trap_exception_code(cause));
+    if (cause_code >= xlen::kXLenBits) return false;
+    const simrv::xlen::CsrValue delegation =
+        trap_is_interrupt(cause) ? state.mideleg : state.medeleg;
+    return ((delegation >> cause_code) & 1U) != 0;
+}
+
+void stack_trap_interrupt_state(ArchState& state, MstatusBit interrupt_enable,
+                                MstatusBit previous_interrupt_enable) {
+    if ((state.mstatus & interrupt_enable) != 0) {
+        state.mstatus |= previous_interrupt_enable;
+    } else {
+        state.mstatus &= ~static_cast<simrv::xlen::CsrValue>(previous_interrupt_enable);
+    }
+    state.mstatus &= ~static_cast<simrv::xlen::CsrValue>(interrupt_enable);
+}
+
+void restore_trap_interrupt_state(simrv::xlen::CsrValue& mstatus, MstatusBit interrupt_enable,
+                                  MstatusBit previous_interrupt_enable) {
+    if ((mstatus & previous_interrupt_enable) != 0) {
+        mstatus |= interrupt_enable;
+    } else {
+        mstatus &= ~static_cast<simrv::xlen::CsrValue>(interrupt_enable);
+    }
+    mstatus |= previous_interrupt_enable;
+}
+
+auto sign_extend_return_pc(const ArchState& state, simrv::xlen::Address pc)
+    -> simrv::xlen::Register {
+    if (state.regs.xlen == 32) {
+        return static_cast<simrv::xlen::Register>(static_cast<int64_t>(static_cast<int32_t>(pc)));
+    }
+    return pc;
+}
+
+}  // namespace
+
+auto trap_cause_name(simrv::xlen::TrapCause cause) -> std::string {
     const bool is_interrupt = trap_is_interrupt(cause);
-    const uint64_t code = trap_exception_code(cause);
+    const auto code = to_exception_code(cause);
+    const uint64_t numeric_code = trap_exception_code(cause);
     if (is_interrupt) {
-        switch (code) {
+        switch (numeric_code) {
             case 1:
                 return "Supervisor software interrupt";
             case 3:
@@ -37,120 +91,93 @@ auto trap_cause_name(TrapCause cause) -> std::string {
                 return "Supervisor external interrupt";
             case 11:
                 return "Machine external interrupt";
+            case 13:
+                return "Counter overflow interrupt";
             default:
-                return "Unknown interrupt " + std::to_string(code);
+                return "Unknown interrupt " + std::to_string(numeric_code);
         }
     } else {
         switch (code) {
-            case 0:
+            case ExceptionCode::MisalignedFetch:
                 return "Instruction address misaligned";
-            case 1:
+            case ExceptionCode::FaultFetch:
                 return "Instruction access fault";
-            case 2:
+            case ExceptionCode::IllegalInstruction:
                 return "Illegal instruction";
-            case 3:
+            case ExceptionCode::Breakpoint:
                 return "Breakpoint";
-            case 4:
+            case ExceptionCode::MisalignedLoad:
                 return "Load address misaligned";
-            case 5:
+            case ExceptionCode::FaultLoad:
                 return "Load access fault";
-            case 6:
+            case ExceptionCode::MisalignedStore:
                 return "Store/AMO address misaligned";
-            case 7:
+            case ExceptionCode::FaultStore:
                 return "Store/AMO access fault";
-            case 8:
+            case ExceptionCode::UserEcall:
                 return "Environment call from U-mode";
-            case 9:
+            case ExceptionCode::SupervisorEcall:
                 return "Environment call from S-mode";
-            case 11:
+            case ExceptionCode::MachineEcall:
                 return "Environment call from M-mode";
-            case 12:
+            case ExceptionCode::FetchPageFault:
                 return "Instruction page fault";
-            case 13:
+            case ExceptionCode::LoadPageFault:
                 return "Load page fault";
-            case 15:
+            case ExceptionCode::StorePageFault:
                 return "Store/AMO page fault";
+            case ExceptionCode::SoftwareCheck:
+                return "Software check / pointer checking";
+            case ExceptionCode::HardwareError:
+                return "Hardware error";
             default:
-                return "Unknown exception " + std::to_string(code);
+                return "Unknown exception " + std::to_string(numeric_code);
         }
     }
 }
 
-[[nodiscard]] constexpr auto calculate_trap_target(CSRValue tvec, TrapCause cause) noexcept
-    -> Address {
-    const Address tvec_base = tvec & ~Address{3};
-    const Word tvec_mode = tvec & 3;
-    if (tvec_mode == 1 && trap_is_interrupt(cause)) {
-        return tvec_base + 4 * trap_exception_code(cause);
-    }
-    return tvec_base;
-}
-
 void TrapController::mret(ArchState& state) {
-    CSRValue mstatus = state.mstatus;
-    const CSRValue mpp = (mstatus & enum_mask(MstatusBit::Mpp)) >> 11;
-    const CSRValue mpie = (mstatus & enum_mask(MstatusBit::Mpie)) >> 7;
+    simrv::xlen::CsrValue mstatus = state.mstatus;
+    const simrv::xlen::PrivilegeLevel target_priv = mstatus_mpp(mstatus);
 
-    // Restore MIE (bit 3) from MPIE (bit 7)
-    if (mpie != 0) {
-        mstatus |= enum_mask(MstatusBit::Mie);
-    } else {
-        mstatus &= ~enum_mask(MstatusBit::Mie);
-    }
-    // Set MPIE (bit 7) to 1
-    mstatus |= enum_mask(MstatusBit::Mpie);
+    restore_trap_interrupt_state(mstatus, MstatusBit::Mie, MstatusBit::Mpie);
     // xRET resets xPP to the least-privileged supported mode.
-    const bool has_s = isa::misa_has_extension(state.misa, isa::IsaExtension::S);
     const bool has_u = isa::misa_has_extension(state.misa, isa::IsaExtension::U);
-    mstatus = (mstatus & ~enum_mask(MstatusBit::Mpp)) | (least_supported_mpp(has_s, has_u) << 11U);
+    mstatus = mstatus_with_mpp(mstatus, mstatus_mpp_after_xret(has_u));
 
-    if (static_cast<PrivilegeLevel>(mpp) < kPrivMachine) {
-        mstatus &= ~enum_mask(MstatusBit::Mprv);
+    if (target_priv < kPrivMachine) {
+        mstatus &= ~MstatusBit::Mprv;
     }
 
     state.mstatus = mstatus;
-    state.priv = static_cast<PrivilegeLevel>(mpp);
+    state.priv = target_priv;
     state.update_xlen();
-    state.pc = isa::epc_read_value(state.mepc, state.misa);
-    if (state.regs.xlen == 32) {
-        state.pc = static_cast<Register>(static_cast<int64_t>(static_cast<int32_t>(state.pc)));
-    }
+    state.pc = sign_extend_return_pc(state, isa::epc_read_value(state.mepc, state.misa));
     state.reserved = 0;
 }
 
 void TrapController::sret(ArchState& state) {
-    CSRValue mstatus = state.mstatus;
-    const CSRValue spp = (mstatus & enum_mask(MstatusBit::Spp)) >> 8;
-    const CSRValue spie = (mstatus & enum_mask(MstatusBit::Spie)) >> 5;
+    simrv::xlen::CsrValue mstatus = state.mstatus;
+    const simrv::xlen::PrivilegeLevel target_priv = mstatus_spp(mstatus);
 
-    // Restore SIE (bit 1) from SPIE (bit 5)
-    if (spie != 0) {
-        mstatus |= enum_mask(MstatusBit::Sie);
-    } else {
-        mstatus &= ~enum_mask(MstatusBit::Sie);
-    }
-    // Set SPIE (bit 5) to 1
-    mstatus |= enum_mask(MstatusBit::Spie);
-    // Clear SPP (bit 8) to U-mode (0)
-    mstatus &= ~enum_mask(MstatusBit::Spp);
+    restore_trap_interrupt_state(mstatus, MstatusBit::Sie, MstatusBit::Spie);
+    mstatus = mstatus_with_spp(mstatus, mstatus_spp_after_sret());
 
     // Returning to a less privileged mode than M-mode always clears MPRV
-    mstatus &= ~enum_mask(MstatusBit::Mprv);
+    mstatus &= ~MstatusBit::Mprv;
 
     state.mstatus = mstatus;
-    state.priv = static_cast<PrivilegeLevel>(spp);
+    state.priv = target_priv;
     state.update_xlen();
-    state.pc = isa::epc_read_value(state.sepc, state.misa);
-    if (state.regs.xlen == 32) {
-        state.pc = static_cast<Register>(static_cast<int64_t>(static_cast<int32_t>(state.pc)));
-    }
+    state.pc = sign_extend_return_pc(state, isa::epc_read_value(state.sepc, state.misa));
     state.reserved = 0;
 }
 
-void TrapController::raise_exception(CPU& cpu, TrapCause cause, CSRValue tval) {
+void TrapController::raise_exception(CPU& cpu, simrv::xlen::TrapCause cause,
+                                     simrv::xlen::CsrValue tval) {
     ArchState& state = cpu.state();
-    const Address trap_pc = state.pc;
-    const PrivilegeLevel source_mode = state.priv;
+    const simrv::xlen::Address trap_pc = state.pc;
+    const simrv::xlen::PrivilegeLevel source_mode = state.priv;
 
     if (cpu.machine_ != nullptr &&
         simrv::compiler::unlikely(cpu.machine_->trace().is_trap_log_enabled() ||
@@ -167,47 +194,29 @@ void TrapController::raise_exception(CPU& cpu, TrapCause cause, CSRValue tval) {
         return;
     }
 
-    CSRValue deleg = 0;
-    if (state.priv <= kPrivSupervisor && misa_has_extension(state.misa, isa::IsaExtension::S)) {
-        const auto cause_code = static_cast<CSRValue>(trap_exception_code(cause));
-        if (cause_code < xlen::kXLenBits) {
-            if (trap_is_interrupt(cause)) {
-                deleg = (state.mideleg >> cause_code) & 1;
-            } else {
-                deleg = (state.medeleg >> cause_code) & 1;
-            }
-        }
-    } else {
-        deleg = 0;
-    }
-
-    if (deleg != 0u) {
+    const bool delegated = trap_delegated_to_supervisor(state, cause);
+    const simrv::xlen::PrivilegeLevel target_mode = delegated ? kPrivSupervisor : kPrivMachine;
+    const MstatusBit interrupt_enable = delegated ? MstatusBit::Sie : MstatusBit::Mie;
+    const MstatusBit previous_interrupt_enable = delegated ? MstatusBit::Spie : MstatusBit::Mpie;
+    const simrv::xlen::CsrValue trap_vector = delegated ? state.stvec : state.mtvec;
+    stack_trap_interrupt_state(state, interrupt_enable, previous_interrupt_enable);
+    if (delegated) {
         state.scause = cause;
         state.sepc = trap_pc;
         state.stval = tval;
-        state.mstatus = (state.mstatus & ~enum_mask(MstatusBit::Spie)) |
-                        (((state.mstatus & enum_mask(MstatusBit::Sie)) >> 1) << 5);
-        state.mstatus = (state.mstatus & ~enum_mask(MstatusBit::Spp)) |
-                        (static_cast<CSRValue>(std::to_underlying(state.priv)) << 8);
-        state.mstatus &= ~enum_mask(MstatusBit::Sie);
-        state.priv = kPrivSupervisor;
-        state.update_xlen();
-        state.pc = calculate_trap_target(state.stvec, cause);
+        state.mstatus = mstatus_with_spp(state.mstatus, state.priv);
     } else {
         state.mcause = cause;
         state.mepc = trap_pc;
         state.mtval = tval;
-        state.mstatus = (state.mstatus & ~enum_mask(MstatusBit::Mpie)) |
-                        (((state.mstatus & enum_mask(MstatusBit::Mie)) >> 3) << 7);
-        state.mstatus = (state.mstatus & ~enum_mask(MstatusBit::Mpp)) |
-                        (static_cast<CSRValue>(std::to_underlying(state.priv)) << 11);
-        state.mstatus &= ~enum_mask(MstatusBit::Mie);
-        state.priv = kPrivMachine;
-        state.update_xlen();
-        state.pc = calculate_trap_target(state.mtvec, cause);
+        state.mstatus = mstatus_with_mpp(state.mstatus, state.priv);
     }
+    state.priv = target_mode;
+    state.update_xlen();
+    state.pc = calculate_trap_target(trap_vector, cause);
     if (state.regs.xlen == 32) {
-        state.pc = static_cast<Register>(static_cast<int64_t>(static_cast<int32_t>(state.pc)));
+        state.pc = static_cast<simrv::xlen::Register>(
+            static_cast<int64_t>(static_cast<int32_t>(state.pc)));
     }
     if (cpu.machine_ != nullptr) {
         cpu.machine_->trace().log_architectural_trap_entry(cpu, cause, trap_pc, source_mode, tval);
@@ -232,31 +241,34 @@ void TrapController::raise_exception(CPU& cpu, TrapCause cause, CSRValue tval) {
     cpu.pipeline_context.pending_tval = 0;
 }
 
-auto TrapController::can_execute_privileged_instruction(PrivilegeLevel current_priv, CSRValue misa,
-                                                        CSRValue mstatus, Instruction funct12,
-                                                        Word funct7) -> bool {
-    if (funct12 == static_cast<Instruction>(isa::Funct12Priv::Mret)) {
+auto TrapController::can_execute_privileged_instruction(simrv::xlen::PrivilegeLevel current_priv,
+                                                        simrv::xlen::CsrValue misa,
+                                                        simrv::xlen::CsrValue mstatus,
+                                                        simrv::xlen::Instruction funct12,
+                                                        simrv::xlen::Word funct7) -> bool {
+    if (funct12 == isa::Funct12Priv::Mret) {
         return current_priv >= kPrivMachine;
     }
-    if (funct12 == static_cast<Instruction>(isa::Funct12Priv::Sret)) {
+    if (funct12 == isa::Funct12Priv::Sret) {
         return misa_has_extension(misa, isa::IsaExtension::S) && current_priv >= kPrivSupervisor &&
-               !(current_priv == kPrivSupervisor && (mstatus & enum_mask(MstatusBit::Tsr)) != 0);
+               !(current_priv == kPrivSupervisor && (mstatus & MstatusBit::Tsr) != 0);
     }
-    if (funct12 == static_cast<Instruction>(isa::Funct12Priv::Uret)) {
+    if (funct12 == isa::Funct12Priv::Uret) {
         return false;
     }
-    if (funct12 == static_cast<Instruction>(isa::Funct12Priv::Wfi)) {
+    if (funct12 == isa::Funct12Priv::Wfi) {
         return current_priv >= kPrivSupervisor &&
-               !(current_priv == kPrivSupervisor && (mstatus & enum_mask(MstatusBit::Tw)) != 0);
+               !(current_priv == kPrivSupervisor && (mstatus & MstatusBit::Tw) != 0);
     }
-    if (funct7 == static_cast<Instruction>(isa::Funct7Priv::SfenceVma)) {
+    if (funct7 == isa::Funct7Priv::SfenceVma) {
         return misa_has_extension(misa, isa::IsaExtension::S) && current_priv >= kPrivSupervisor &&
-               !(current_priv == kPrivSupervisor && (mstatus & enum_mask(MstatusBit::Tvm)) != 0);
+               !(current_priv == kPrivSupervisor && (mstatus & MstatusBit::Tvm) != 0);
     }
     return true;
 }
 
-auto TrapController::can_access_csr(PrivilegeLevel current_priv, CSRValue misa, CSRAddress csr_addr,
+auto TrapController::can_access_csr(simrv::xlen::PrivilegeLevel current_priv,
+                                    simrv::xlen::CsrValue misa, simrv::xlen::CsrNumber csr_addr,
                                     bool is_write) -> bool {
     // Debug CSRs require architectural Debug Mode, which the guest execution
     // engine does not implement. M-mode also cannot override CSR nonexistence.

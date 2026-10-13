@@ -1,8 +1,8 @@
 {
   "$schema": "schemas/release-manifest.schema.json",
   "schema_version": 2,
-  "version": "3.0.0-rc.8",
-  "release_tag": "v3.0.0-rc.8",
+  "version": "3.0.0-rc.9",
+  "release_tag": "v3.0.0-rc.9",
   "host_support": {
     "os": "Linux",
     "architecture": "x86_64",
@@ -63,8 +63,8 @@
       "redistribute": false
     },
     "linux": {
-      "url": "https://cdn.kernel.org/pub/linux/kernel/v7.x/linux-7.2.3.tar.xz",
-      "revision": "v7.2.3",
+      "url": "https://cdn.kernel.org/pub/linux/kernel/v7.x/linux-7.2.9.tar.xz",
+      "revision": "v7.2.9",
       "license": "GPL-2.0-only",
       "redistribute": false
     }
@@ -169,8 +169,8 @@
     ]
   },
   "artifacts": [
-    "SimRV-linux-x86_64-v3.0.0-rc.8.tar.gz",
-    "SimRV-rpm-packages-v3.0.0-rc.8.tar.gz",
-    "SimRV-deb-packages-v3.0.0-rc.8.tar.gz"
+    "SimRV-linux-x86_64-v3.0.0-rc.9.tar.gz",
+    "SimRV-rpm-packages-v3.0.0-rc.9.tar.gz",
+    "SimRV-deb-packages-v3.0.0-rc.9.tar.gz"
   ]
 }

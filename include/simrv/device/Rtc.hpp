@@ -5,7 +5,7 @@
 #pragma once
 
 #include "simrv/memory/TileLinkNode.hpp"
-#include "simrv/xlen/Types.hpp"
+#include "simrv/xlen/ScalarTypes.hpp"
 
 namespace simrv::core {
 class Machine;
@@ -25,14 +25,17 @@ class Rtc : public memory::TileLinkNode {
     /// Construct an RTC device instance.
     explicit Rtc(simrv::core::Machine& machine);
 
-    static constexpr Address kBaseAddress = static_cast<Address>(0x70000000u);
-    static constexpr Address kSize = static_cast<Address>(0x00001000u);
-    static constexpr Address kRtcOffset = static_cast<Address>(0x0u);
+    static constexpr simrv::xlen::Address kBaseAddress =
+        static_cast<simrv::xlen::Address>(0x70000000u);
+    static constexpr simrv::xlen::Address kSize = static_cast<simrv::xlen::Address>(0x00001000u);
+    static constexpr simrv::xlen::Address kRtcOffset = static_cast<simrv::xlen::Address>(0x0u);
     static constexpr uint32_t kRtcIrq = 11;
 
     [[nodiscard]] auto name() const -> const char* override { return "rtc"; }
-    [[nodiscard]] auto base_address() const -> Address override { return kBaseAddress; }
-    [[nodiscard]] auto size() const -> Address override { return kSize; }
+    [[nodiscard]] auto base_address() const -> simrv::xlen::Address override {
+        return kBaseAddress;
+    }
+    [[nodiscard]] auto size() const -> simrv::xlen::Address override { return kSize; }
 
     auto handle_request(const memory::TlChannelA& req, memory::TlChannelD& resp) -> bool override;
     void evaluate_alarm();

@@ -9,11 +9,10 @@
 #include <memory>
 #include <vector>
 
-#include "simrv/Define.hpp"
 #include "simrv/device/AIA.hpp"
 #include "simrv/device/pci/PciDevice.hpp"
 #include "simrv/memory/TileLinkNode.hpp"
-#include "simrv/xlen/Types.hpp"
+#include "simrv/xlen/ScalarTypes.hpp"
 
 namespace simrv::core {
 class Machine;
@@ -23,11 +22,11 @@ namespace simrv::device {
 
 class PcieRootComplex {
    public:
-    static constexpr Address kEcamBaseAddress = 0x30000000ULL;
-    static constexpr Address kEcamSize = 0x10000000ULL;  // 256MB ECAM space
+    static constexpr simrv::xlen::Address kEcamBaseAddress = 0x30000000ULL;
+    static constexpr simrv::xlen::Address kEcamSize = 0x10000000ULL;  // 256MB ECAM space
 
-    static constexpr Address kMmioBaseAddress = 0x40000000ULL;
-    static constexpr Address kMmioSize = 0x10000000ULL;  // 256MB MMIO window
+    static constexpr simrv::xlen::Address kMmioBaseAddress = 0x40000000ULL;
+    static constexpr simrv::xlen::Address kMmioSize = 0x10000000ULL;  // 256MB MMIO window
 
     PcieRootComplex(simrv::core::Machine* machine, Aplic* aplic_s = nullptr,
                     Imsic* imsic_s = nullptr);
@@ -45,11 +44,11 @@ class PcieRootComplex {
         return get_device(PciBdf{.bus = bus, .dev = dev, .func = func});
     }
 
-    [[nodiscard]] auto ecam_read(Address offset, uint8_t size) -> uint32_t;
-    void ecam_write(Address offset, uint32_t val, uint8_t size);
+    [[nodiscard]] auto ecam_read(simrv::xlen::Address offset, uint8_t size) -> uint32_t;
+    void ecam_write(simrv::xlen::Address offset, uint32_t val, uint8_t size);
 
-    [[nodiscard]] auto mmio_read(Address addr, uint8_t size) -> uint32_t;
-    void mmio_write(Address addr, uint32_t val, uint8_t size);
+    [[nodiscard]] auto mmio_read(simrv::xlen::Address addr, uint8_t size) -> uint32_t;
+    void mmio_write(simrv::xlen::Address addr, uint32_t val, uint8_t size);
 
     void assert_device_irq(PciBdf bdf);
     void assert_device_irq(uint8_t bus, uint8_t dev, uint8_t func) {
@@ -60,8 +59,10 @@ class PcieRootComplex {
        public:
         explicit EcamNode(PcieRootComplex* rc) : rc_(rc) {}
         [[nodiscard]] auto name() const -> const char* override { return "pcie-ecam"; }
-        [[nodiscard]] auto base_address() const -> Address override { return kEcamBaseAddress; }
-        [[nodiscard]] auto size() const -> Address override { return kEcamSize; }
+        [[nodiscard]] auto base_address() const -> simrv::xlen::Address override {
+            return kEcamBaseAddress;
+        }
+        [[nodiscard]] auto size() const -> simrv::xlen::Address override { return kEcamSize; }
         auto handle_request(const memory::TlChannelA& req, memory::TlChannelD& resp)
             -> bool override;
 
@@ -73,8 +74,10 @@ class PcieRootComplex {
        public:
         explicit MmioNode(PcieRootComplex* rc) : rc_(rc) {}
         [[nodiscard]] auto name() const -> const char* override { return "pcie-mmio"; }
-        [[nodiscard]] auto base_address() const -> Address override { return kMmioBaseAddress; }
-        [[nodiscard]] auto size() const -> Address override { return kMmioSize; }
+        [[nodiscard]] auto base_address() const -> simrv::xlen::Address override {
+            return kMmioBaseAddress;
+        }
+        [[nodiscard]] auto size() const -> simrv::xlen::Address override { return kMmioSize; }
         auto handle_request(const memory::TlChannelA& req, memory::TlChannelD& resp)
             -> bool override;
 

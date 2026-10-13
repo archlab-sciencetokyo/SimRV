@@ -11,7 +11,7 @@ ARCH="${ARCH:-rv64}"
 
 # Versions
 OPENSBI_VER="1.9"
-LINUX_VER="${LINUX_VER:-7.2.3}"
+LINUX_VER="${LINUX_VER:-7.2.9}"
 BUSYBOX_VER="1.38.0"
 ALPINE_VER="3.24.1"
 ALPINE_MIRROR="${SIMRV_ALPINE_MIRROR:-https://dl-cdn.alpinelinux.org/alpine/v3.24}"
@@ -124,7 +124,7 @@ while [[ $# -gt 0 ]]; do
             echo "Options:"
             echo "  --arch <rv64|rv32>              Target architecture (default: rv64)"
             echo "  --libc <auto|musl|glibc>        C library selection (default: auto)"
-            echo "  --linux-version <ver>           Linux kernel version (default: 7.2.3)"
+            echo "  --linux-version <ver>           Linux kernel version (default: 7.2.9)"
             echo "  --cross-compile <prefix>        Cross compiler prefix"
             echo "  --rootfs <alpine|buildroot>     Root filesystem implementation (default: alpine)"
             echo "  --profile <gui|fpga|debug>      Linux deployment profile (default: gui)"
@@ -191,11 +191,7 @@ else
 fi
 
 IMAGES_ROOT="${SIMRV_LINUX_IMAGES_ROOT:-$ROOT_DIR/linux-images}"
-if [[ "$ROOTFS_VARIANT" == "alpine" && "$PROFILE" == "gui" ]]; then
-    IMAGES_DIR="$IMAGES_ROOT/$ARCH"
-else
-    IMAGES_DIR="$IMAGES_ROOT/$ARCH/${ROOTFS_VARIANT}-${PROFILE}"
-fi
+IMAGES_DIR="$IMAGES_ROOT/$ARCH/${ROOTFS_VARIANT}-${PROFILE}"
 case "$CLEAN_ACTION" in
     all)
         print_step "Cleaning build and ${ARCH} image directories..."
@@ -405,7 +401,7 @@ echo "SimRV" > "$INITRAMFS_DIR/etc/hostname"
 
 cat > "$INITRAMFS_DIR/init" <<'EOF'
 #!/bin/sh
-mkdir -p /dev /proc /sys /etc /tmp /run /dev/pts
+mkdir -p /dev /proc /sys /etc /tmp /run
 # These belong to the previous guest lifetime. A simulator restart cannot
 # preserve a live Xorg process, so remove them before BusyBox starts tty1.
 rm -f /tmp/.X0-lock /tmp/.X11-unix/X0 /tmp/simrv-jwm.lock/pid
@@ -413,7 +409,12 @@ rmdir /tmp/simrv-jwm.lock 2>/dev/null || true
 /bin/mount -t proc proc /proc 2>/dev/null || true
 /bin/mount -t sysfs sysfs /sys 2>/dev/null || true
 /bin/mount -t devtmpfs devtmpfs /dev 2>/dev/null || true
+# devtmpfs covers the initramfs /dev tree, so recreate its devpts mountpoint afterward.
+mkdir -p /dev/pts
 /bin/mount -t devpts devpts /dev/pts 2>/dev/null || true
+if [ ! -e /dev/ptmx ] && [ ! -L /dev/ptmx ]; then
+    ln -s pts/ptmx /dev/ptmx 2>/dev/null || true
+fi
 
 # Fallback device nodes if devtmpfs is absent
 [ -c /dev/console ] || mknod -m 600 /dev/console c 5 1 2>/dev/null || true
@@ -422,6 +423,10 @@ rmdir /tmp/simrv-jwm.lock 2>/dev/null || true
 [ -c /dev/null ] || mknod -m 666 /dev/null c 1 3 2>/dev/null || true
 [ -c /dev/zero ] || mknod -m 666 /dev/zero c 1 5 2>/dev/null || true
 [ -c /dev/mem ] || mknod -m 600 /dev/mem c 1 1 2>/dev/null || true
+exec 3>/dev/ttyS0 2>/dev/null || exec 3>/dev/console
+boot_log() {
+    echo "[INIT] $*" >&3
+}
 if [ -c /dev/fb0 ]; then
     echo "Framebuffer: /dev/fb0 detected (640x480x32)"
 fi
@@ -433,29 +438,51 @@ if [ -b /dev/vda ]; then
     # VirtIO block discovery can race init on fast boots. Give the device and
     # its ext4 journal a few seconds to become readable before falling back to
     # the initramfs shell.
+    attempt=0
     for _ in 1 2 3 4 5; do
+        attempt=$((attempt + 1))
         if mount -t ext4 -L ROOTFS_LABEL_PLACEHOLDER /newroot 2>/dev/null || \
            mount -t ext4 /dev/vda /newroot 2>/dev/null; then
             mounted=1
             break
         fi
-        echo "Waiting for /dev/vda ext4 filesystem..." > /dev/ttyS0
+        boot_log "Waiting for root filesystem on /dev/vda (attempt $attempt/5)"
         sleep 1
     done
     if [ "$mounted" -eq 1 ]; then
-        echo "Mounted /dev/vda as root filesystem"
-        mount --move /dev /newroot/dev 2>/dev/null || true
-        mount --move /proc /newroot/proc 2>/dev/null || true
-        mount --move /sys /newroot/sys 2>/dev/null || true
+        boot_log "Mounted root filesystem on /dev/vda"
+        handoff_ok=1
+        if ! mount --move /dev /newroot/dev; then
+            boot_log "ERROR: could not move /dev into the root filesystem"
+            handoff_ok=0
+        elif ! mount --move /proc /newroot/proc; then
+            boot_log "ERROR: could not move /proc into the root filesystem"
+            mount --move /newroot/dev /dev 2>/dev/null || true
+            handoff_ok=0
+        elif ! mount --move /sys /newroot/sys; then
+            boot_log "ERROR: could not move /sys into the root filesystem"
+            mount --move /newroot/proc /proc 2>/dev/null || true
+            mount --move /newroot/dev /dev 2>/dev/null || true
+            handoff_ok=0
+        fi
         # BusyBox places the applet in /sbin; use an absolute path because the
         # initramfs shell may not have a usable PATH during early handoff.
-        echo "Switching root to ROOT_INIT_PLACEHOLDER"
-        # Reattach PID 1 to the existing kernel console after moving devtmpfs;
-        # this is the conventional BusyBox initramfs handoff form.
-        if ! exec /sbin/switch_root -c /dev/console /newroot ROOT_INIT_PLACEHOLDER; then
-            echo "switch_root failed; continuing in initramfs" > /dev/ttyS0
+        if [ "$handoff_ok" -eq 1 ]; then
+            boot_log "Switching root to ROOT_INIT_PLACEHOLDER"
+            # Reattach PID 1 to the existing kernel console after moving devtmpfs;
+            # this is the conventional BusyBox initramfs handoff form.
+            if ! exec /sbin/switch_root -c /dev/console /newroot ROOT_INIT_PLACEHOLDER; then
+                boot_log "ERROR: switch_root failed; returning to initramfs recovery"
+                mount --move /newroot/sys /sys 2>/dev/null || true
+                mount --move /newroot/proc /proc 2>/dev/null || true
+                mount --move /newroot/dev /dev 2>/dev/null || true
+            fi
         fi
+    else
+        boot_log "ERROR: could not mount the ext4 root filesystem on /dev/vda after 5 attempts"
     fi
+else
+    boot_log "ERROR: root disk /dev/vda is missing; starting initramfs recovery"
 fi
 
 [ -f /etc/hostname ] && hostname -F /etc/hostname 2>/dev/null || true
@@ -599,6 +626,8 @@ make ARCH=riscv CROSS_COMPILE="$CROSS_COMPILE" "$LINUX_DEFCONFIG"
 ./scripts/config --enable CONFIG_VIRTIO_BLK
 ./scripts/config --enable CONFIG_VIRTIO_NET
 ./scripts/config --enable CONFIG_VIRTIO_CONSOLE
+./scripts/config --enable CONFIG_FUSE_FS
+./scripts/config --enable CONFIG_VIRTIO_FS
 ./scripts/config --enable CONFIG_NET
 ./scripts/config --enable CONFIG_INET
 ./scripts/config --enable CONFIG_NETDEVICES
@@ -641,13 +670,10 @@ make ARCH=riscv CROSS_COMPILE="$CROSS_COMPILE" "$LINUX_DEFCONFIG"
 ./scripts/config --disable CONFIG_RISCV_EMULATED_UNALIGNED_ACCESS
 ./scripts/config --enable CONFIG_CC_OPTIMIZE_FOR_PERFORMANCE
 
-# Conventional low-overhead boot diagnostics. These are useful on both the
-# GUI and FPGA profiles and make serial boot timing unambiguous.
-./scripts/config --enable CONFIG_PRINTK_TIME
-./scripts/config --enable CONFIG_PRINTK_CALLER
-
 if [[ "$PROFILE" == "debug" ]]; then
     print_info "Enabling expanded kernel debug/profile instrumentation."
+    ./scripts/config --enable CONFIG_PRINTK_TIME
+    ./scripts/config --enable CONFIG_PRINTK_CALLER
     ./scripts/config --enable CONFIG_DEBUG_KERNEL
     ./scripts/config --enable CONFIG_DEBUG_FS
     ./scripts/config --enable CONFIG_KALLSYMS
@@ -661,6 +687,10 @@ if [[ "$PROFILE" == "debug" ]]; then
     ./scripts/config --enable CONFIG_DEBUG_INFO
     ./scripts/config --enable CONFIG_DEBUG_INFO_DWARF5
 else
+    # Keep normal guest boots lean; verbose kernel messages and their extra
+    # timestamp/caller formatting are reserved for the explicit debug profile.
+    ./scripts/config --disable CONFIG_PRINTK_TIME
+    ./scripts/config --disable CONFIG_PRINTK_CALLER
     ./scripts/config --disable CONFIG_DEBUG_FS
     ./scripts/config --disable CONFIG_KALLSYMS_ALL
     ./scripts/config --disable CONFIG_FUNCTION_GRAPH_TRACER
@@ -671,6 +701,11 @@ fi
 
 # Always resolve new configs non-interactively to prevent prompt hangs
 make ARCH=riscv CROSS_COMPILE="$CROSS_COMPILE" olddefconfig
+
+if [[ "$PROFILE" != "debug" ]] && grep -q '^CONFIG_PRINTK_CALLER=y$' .config; then
+    print_error "Normal image profile unexpectedly enables CONFIG_PRINTK_CALLER."
+    exit 1
+fi
 
 # Build kernel (vmlinux)
 print_step "Compiling/linking Linux Kernel v${LINUX_VER}..."
@@ -703,7 +738,8 @@ else
 fi
 sed -i -E "s#root=([^ ]+)#root=LABEL=${ROOTFS_LABEL}#; s# rdinit=/init##" "$GENERATED_DTS"
 if [[ "$PROFILE" == "debug" ]]; then
-    # The debug image is an explicit early-userspace/recovery profile.
+    # The debug image is an explicit early-userspace/recovery profile with
+    # verbose kernel messages retained.
     sed -i 's# rw loglevel=7# rw rdinit=/init loglevel=7#' "$GENERATED_DTS"
 fi
 
@@ -735,35 +771,55 @@ make PLATFORM=generic CROSS_COMPILE="$CROSS_COMPILE" \
 # Step 6: Package Outputs
 # ----------------------------------------------------------------------------
 print_step "Packaging output artifacts..."
-cp "$OPENSBI_BUILD/build/platform/generic/firmware/fw_payload.bin" "$IMAGES_DIR/fw_payload.bin"
-cp "$OPENSBI_BUILD/build/platform/generic/firmware/fw_payload.elf" "$IMAGES_DIR/fw_payload.elf"
+cp "$OPENSBI_BUILD/build/platform/generic/firmware/fw_payload.elf" "$IMAGES_DIR/opensbi-linux-payload.elf"
 cp "$LINUX_BUILD/vmlinux" "$IMAGES_DIR/vmlinux"
 cp "$BUILD_DIR/Image_${ARCH}" "$IMAGES_DIR/Image"
 
 # Also publish an unbundled OpenSBI image for FPGA boot flows. A bootloader is
 # responsible for supplying the next-stage address and DTB to this artifact;
-# fw_payload.bin remains the self-contained SimRV convenience image.
+# opensbi-linux-payload.elf remains the self-contained SimRV convenience image.
 if [[ ! -f "$OPENSBI_BUILD/build/platform/generic/firmware/fw_dynamic.bin" ]]; then
     make PLATFORM=generic CROSS_COMPILE="$CROSS_COMPILE" \
          "CC=${CROSS_COMPILE}gcc -march=${M_ARCH} -mabi=${M_ABI}" \
          PLATFORM_RISCV_XLEN="$XLEN" FW_DYNAMIC=y FW_TEXT_START=0x80000000 \
          -j"$(nproc)"
 fi
-cp "$OPENSBI_BUILD/build/platform/generic/firmware/fw_dynamic.bin" "$IMAGES_DIR/fw_dynamic.bin"
+cp "$OPENSBI_BUILD/build/platform/generic/firmware/fw_dynamic.bin" "$IMAGES_DIR/opensbi-dynamic.bin"
 
 # Create standard setup.sh
 cat > "$IMAGES_DIR/setup.sh" <<EOF
 #!/bin/bash
-IMAGES_DIR="\$(cd "\$(dirname "\${BASH_SOURCE[0]}")" && pwd)"
-export SIMRV_LINUX_MEM_IMG="\$IMAGES_DIR/fw_payload.bin"
-export SIMRV_LINUX_DISK_IMG="\$IMAGES_DIR/root.img"
+if [ -n "\${BASH_SOURCE:-}" ] && [ "\${BASH_SOURCE[0]}" = "\$0" ]; then
+    echo "Source this file to export image paths: source \$0" >&2
+    exit 1
+fi
+if [ -n "\${BASH_SOURCE:-}" ]; then
+    _simrv_setup_source="\${BASH_SOURCE[0]}"
+elif [ -n "\${ZSH_VERSION:-}" ]; then
+    _simrv_setup_source="\${(%):-%N}"
+else
+    _simrv_setup_source="\$0"
+fi
+IMAGES_DIR="\$(cd "\$(dirname "\$_simrv_setup_source")" && pwd)"
+unset _simrv_setup_source
+export SIMRV_LINUX_MEM_IMG="\$IMAGES_DIR/opensbi-linux-payload.elf"
+export SIMRV_LINUX_DISK_IMG="\$IMAGES_DIR/rootfs.img"
 export SIMRV_LINUX_DTB="\$IMAGES_DIR/devicetree.dtb"
 export SIMRV_LINUX_IMAGE="\$IMAGES_DIR/Image"
-export SIMRV_LINUX_OPENSBI="\$IMAGES_DIR/fw_dynamic.bin"
+export SIMRV_LINUX_OPENSBI="\$IMAGES_DIR/opensbi-dynamic.bin"
 export SIMRV_LINUX_PROFILE="${PROFILE}"
 export SIMRV_LINUX_ROOTFS="${ROOTFS_VARIANT}"
 export SIMRV_LINUX_TIMEOUT=60
 export SIMRV_LINUX_END=1200000
+for _simrv_setup_file in "\$SIMRV_LINUX_MEM_IMG" "\$SIMRV_LINUX_DISK_IMG" \\
+                         "\$SIMRV_LINUX_DTB" "\$SIMRV_LINUX_IMAGE" "\$SIMRV_LINUX_OPENSBI"; do
+    if [ ! -f "\$_simrv_setup_file" ]; then
+        echo "SimRV Linux image is missing: \$_simrv_setup_file" >&2
+        unset _simrv_setup_file
+        return 1 2>/dev/null || exit 1
+    fi
+done
+unset _simrv_setup_file
 echo "SimRV OpenSBI + Linux ${ROOTFS_VARIANT}/${PROFILE} setup complete"
 echo "├─ Payload image: \$SIMRV_LINUX_MEM_IMG"
 echo "├─ OpenSBI dynamic: \$SIMRV_LINUX_OPENSBI"
@@ -793,9 +849,8 @@ if [[ "$ROOTFS_VARIANT" == "buildroot" ]]; then
     make -C "$BUILDROOT_SOURCE" O="$BUILDROOT_OUTPUT" \
          BR2_EXTERNAL="$ROOT_DIR/configs/buildroot/simrv-fpga" olddefconfig
     make -C "$BUILDROOT_SOURCE" O="$BUILDROOT_OUTPUT" BR2_EXTERNAL="$ROOT_DIR/configs/buildroot/simrv-fpga" -j"$(nproc)"
-    cp "$BUILDROOT_OUTPUT/images/rootfs.ext4" "$IMAGES_DIR/root.img"
-    cp "$IMAGES_DIR/root.img" "$IMAGES_DIR/root.bin"
-    e2fsck -fy "$IMAGES_DIR/root.img" >/dev/null
+    cp "$BUILDROOT_OUTPUT/images/rootfs.ext4" "$IMAGES_DIR/rootfs.img"
+    e2fsck -fy "$IMAGES_DIR/rootfs.img" >/dev/null
 else
   if [[ "$XLEN" == "64" ]]; then
     print_step "Extracting Alpine Linux minirootfs into ext4 root disk..."
@@ -810,8 +865,9 @@ else
     # from a downloaded minirootfs and makes alternate mirrors explicit.
     printf '%s\n' "${ALPINE_MIRROR}/main" "${ALPINE_MIRROR}/community" > "$ROOTFS_DISK_DIR/etc/repositories"
     cat > "$ROOTFS_DISK_DIR/etc/inittab" <<'EOF'
+::sysinit:/usr/local/bin/simrv-early-boot
+::once:/usr/local/bin/simrv-network
 ttyS0::respawn:/sbin/getty -L 115200 ttyS0 vt100
-::sysinit:/usr/local/bin/simrv-network
 EOF
     echo "SimRV" > "$ROOTFS_DISK_DIR/etc/hostname"
     echo -e "127.0.0.1\tlocalhost SimRV\n::1\t\tlocalhost SimRV" > "$ROOTFS_DISK_DIR/etc/hosts"
@@ -971,6 +1027,22 @@ printf '%s\n' 'nameserver 10.0.2.1' 'nameserver 1.1.1.1' 'nameserver 8.8.8.8' > 
 echo '[NET] eth0 configured as 10.0.2.2/24' > /dev/ttyS0
 EOF
     chmod 755 "$ROOTFS_DISK_DIR/usr/local/bin/simrv-network"
+    cat > "$ROOTFS_DISK_DIR/usr/local/bin/simrv-early-boot" <<'EOF'
+#!/bin/sh
+
+log() {
+    echo "[INIT] $*" > /dev/ttyS0
+}
+
+log "Setting hostname from /etc/hostname"
+if ! /bin/hostname -F /etc/hostname; then
+    log "ERROR: could not set the guest hostname"
+    exit 1
+fi
+
+log "Early setup complete; network setup will run in the background"
+EOF
+    chmod 755 "$ROOTFS_DISK_DIR/usr/local/bin/simrv-early-boot"
     cat > "$ROOTFS_DISK_DIR/root/.profile" <<'EOF'
 #!/bin/sh
 
@@ -1035,11 +1107,16 @@ EndSection
 EOF
     cat > "$ROOTFS_DISK_DIR/init" <<'EOF'
 #!/bin/sh
-mkdir -p /dev /proc /sys /etc /tmp /run /dev/pts
+mkdir -p /dev /proc /sys /etc /tmp /run
 /bin/mount -t proc proc /proc 2>/dev/null || true
 /bin/mount -t sysfs sysfs /sys 2>/dev/null || true
 /bin/mount -t devtmpfs devtmpfs /dev 2>/dev/null || true
+# devtmpfs covers the image's /dev tree, so recreate its devpts mountpoint afterward.
+mkdir -p /dev/pts
 /bin/mount -t devpts devpts /dev/pts 2>/dev/null || true
+if [ ! -e /dev/ptmx ] && [ ! -L /dev/ptmx ]; then
+    ln -s pts/ptmx /dev/ptmx 2>/dev/null || true
+fi
 
 [ -c /dev/console ] || mknod -m 600 /dev/console c 5 1 2>/dev/null || true
 [ -c /dev/tty ] || mknod -m 666 /dev/tty c 5 0 2>/dev/null || true
@@ -1122,18 +1199,16 @@ EOF
     # Keep a generous writable package/data area for browsers, games, and
     # normal Alpine package-manager use.
     if [ "$DISK_MB" -lt 4096 ]; then DISK_MB=4096; fi
-    dd if=/dev/zero of="$IMAGES_DIR/root.img" bs=1M count="$DISK_MB" status=none
+    dd if=/dev/zero of="$IMAGES_DIR/rootfs.img" bs=1M count="$DISK_MB" status=none
     # Keep the guest root disk aligned with normal Linux ext4 behavior. The
     # journal provides crash recovery when a simulator or host is interrupted.
-    mkfs.ext4 -L "$ROOTFS_LABEL" -d "$ROOTFS_DISK_DIR" -F "$IMAGES_DIR/root.img"
+    mkfs.ext4 -L "$ROOTFS_LABEL" -d "$ROOTFS_DISK_DIR" -F "$IMAGES_DIR/rootfs.img"
     # Repair the newly-created golden before publishing it; future disposable-
     # run clones can then be validated without mutation.
-    e2fsck -fy "$IMAGES_DIR/root.img" >/dev/null
-    cp -f "$IMAGES_DIR/root.img" "$IMAGES_DIR/root.bin"
+    e2fsck -fy "$IMAGES_DIR/rootfs.img" >/dev/null
   else
-        /usr/sbin/dd if=/dev/zero of="$IMAGES_DIR/root.img" bs=1M count=1 status=none
-    tune2fs -L "$ROOTFS_LABEL" "$IMAGES_DIR/root.img" >/dev/null 2>&1 || true
-    cp -f "$IMAGES_DIR/root.img" "$IMAGES_DIR/root.bin"
+        /usr/sbin/dd if=/dev/zero of="$IMAGES_DIR/rootfs.img" bs=1M count=1 status=none
+    tune2fs -L "$ROOTFS_LABEL" "$IMAGES_DIR/rootfs.img" >/dev/null 2>&1 || true
   fi
 fi
 
@@ -1144,7 +1219,7 @@ if [[ "$ROOTFS_VARIANT" == "buildroot" ]]; then
     # loader. Buildroot produces rootfs.ext4; SimRV's kernel/OpenSBI and DTB
     # are generated by this script and copied beside it as the matching boot set.
     mkdir -p "$BUILDROOT_OUTPUT/images"
-    cp -f "$IMAGES_DIR/fw_payload.bin" "$BUILDROOT_OUTPUT/images/fw_payload.bin"
+    cp -f "$IMAGES_DIR/opensbi-linux-payload.elf" "$BUILDROOT_OUTPUT/images/opensbi-linux-payload.elf"
     cp -f "$IMAGES_DIR/devicetree.dtb" "$BUILDROOT_OUTPUT/images/devicetree.dtb"
 fi
 KERNEL_CONFIG="$LINUX_BUILD/.config"
@@ -1171,7 +1246,7 @@ fi
     printf '  "debug_features": %s,\n' "$DEBUG_FEATURES"
     echo '  "artifacts": {'
     first=1
-    for artifact in fw_payload.bin fw_dynamic.bin Image vmlinux devicetree.dtb root.img root.bin; do
+    for artifact in opensbi-linux-payload.elf opensbi-dynamic.bin Image vmlinux devicetree.dtb rootfs.img; do
         if [[ -f "$IMAGES_DIR/$artifact" ]]; then
             [[ "$first" -eq 1 ]] || echo ','
             printf '    "%s": "%s"' "$artifact" "$(sha256sum "$IMAGES_DIR/$artifact" | cut -d' ' -f1)"

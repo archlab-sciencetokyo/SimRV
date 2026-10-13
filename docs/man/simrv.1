@@ -44,7 +44,12 @@ Load an ELF or raw binary image into guest memory.
 Set the initial program counter.  The default is \fB0x80000000\fR.
 .TP
 .B \-D, \-\-disk, \-\-rootfs \fIfile\fR
-Attach a VirtIO block disk or root filesystem image.
+Attach a VirtIO block disk or root filesystem image. Guest writes are kept in a temporary overlay
+and discarded when SimRV exits; the source image is unchanged.
+.TP
+.B \-\-virtiofs \fIdirectory\fR
+Expose an existing host directory to Linux guests through VirtIO-FS. Guest writes go directly to
+the selected directory and persist after SimRV exits.
 .TP
 .B \-f, \-\-fdt, \-\-dtb \fIfile\fR
 Load a device-tree blob for operating-system boot.
@@ -60,15 +65,15 @@ suffixes; the default is 256 MiB for bare metal and 1 GiB for Linux.
 .B \-j, \-\-harts, \-\-smp \fIn\fR
 Configure one to sixteen simulated harts.
 .TP
-.B \-\-smp-quantum=\fIn\fR
-Set the round-robin SMP scheduling quantum in cycles.
+.B \-\-smp-mode \fImode\fR
+Select \fBcycle-accurate\fR deterministic global-cycle scheduling or \fBcycle-oriented\fR parallel scheduling.
 .TP
-.B \-\-smp-multithreaded
-Run SMP simulation workers on multiple host threads.
+.B \-\-smp-quantum=\fIn\fR
+Set the cycle-oriented synchronization quantum.
 .TP
 .B \-\-isa=\fIstring\fR
 Select the guest ISA preset: \fBrv32i\fR, \fBrv32imac\fR, \fBrv32g\fR, \fBrv32gc\fR,
-\fBrv32gcbv\fR, \fBrv64i\fR, \fBrv64imac\fR, \fBrv64g\fR, \fBrv64gc\fR, or \fBrv64gcbv\fR,
+\fBrv32gcv\fR, \fBrv64i\fR, \fBrv64imac\fR, \fBrv64g\fR, \fBrv64gc\fR, or \fBrv64gcv\fR,
 subject to the host build's capabilities. The supported ratified multi-letter extensions
 \fBZicsr\fR, \fBZifencei\fR, and \fBZicntr\fR may be appended with underscores and optional
 2.0 version suffixes. The first multi-letter extension may directly follow the base ISA;
@@ -271,7 +276,7 @@ riscv64-unknown-elf-gdb hello.elf -ex 'target remote :1234'
 .TP
 .B Linux boot
 .EX
-simrv --cli --os -m fw_payload.bin -D root.img -f devicetree.dtb
+simrv --cli --os -m opensbi-linux-payload.elf -D rootfs.img -f devicetree.dtb
 .EE
 .SH OUTPUT FILES
 .TP

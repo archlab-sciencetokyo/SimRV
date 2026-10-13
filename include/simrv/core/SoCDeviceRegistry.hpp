@@ -21,7 +21,7 @@ namespace simrv::core {
  */
 class SoCDeviceRegistry final {
    public:
-    [[nodiscard]] static auto kinds() -> std::array<SoCDeviceKind, 21> {
+    [[nodiscard]] static auto kinds() -> std::array<SoCDeviceKind, 22> {
         return {SoCDeviceKind::Uart,
                 SoCDeviceKind::Rtc,
                 SoCDeviceKind::Power,
@@ -38,6 +38,7 @@ class SoCDeviceRegistry final {
                 SoCDeviceKind::VirtioMmioInput,
                 SoCDeviceKind::VirtioMmioSound,
                 SoCDeviceKind::VirtioMmioNet,
+                SoCDeviceKind::VirtioMmioFs,
                 SoCDeviceKind::DmaController,
                 SoCDeviceKind::ResetControl,
                 SoCDeviceKind::RingBufferEthernet,

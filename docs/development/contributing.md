@@ -36,14 +36,23 @@ Always configure and build using CMake presets:
 cmake --preset rv64-release
 cmake --build --preset rv64-release -j$(nproc)
 
+# RV64 Debug build (the build preset uses four jobs)
+cmake --preset rv64-debug
+cmake --build --preset rv64-debug
+ctest --preset rv64-debug-gate
+
 # RV32 targets
 cmake --preset rv32-release
 cmake --build --preset rv32-release -j$(nproc)
 
-# Debug targets with AddressSanitizer (ASan) & UB-Sanitizer
-cmake --preset rv64-debug
-cmake --build --preset rv64-debug -j$(nproc)
+# Optional host-specialized RV64 build for local profiling
+cmake --preset rv64-native-release
+cmake --build --preset rv64-native-release -j$(nproc)
 ```
+
+For sanitizer diagnosis, use the separate `rv64-asan`, `rv64-ubsan`, and `rv64-tsan` configure and
+build presets. These place outputs under `/tmp/simrv-build/`, leaving repository `build/` for the
+RV32/RV64 release binaries and the optional native RV64 release.
 
 Published documentation exposes `stable` (from `main`) and `dev` versions through the header
 selector. Keep branch-specific claims accurate: changes pushed to `dev` are visible before they
@@ -67,7 +76,7 @@ clang-format --dry-run --Werror $(find include src tests -name "*.cpp" -o -name 
      or with `--isa rv32...`; it remains internally distinct from the native RV32 build.
 2. **Domain-Specific Type Aliases**:
    - Avoid generic primitive types (`uint64_t`, `uint32_t`, `int`) when domain aliases exist:
-     - `Word`, `Address`, `PhysAddr`, `VirtAddr`, `RegId`, `CSRValue`, `TrapCause`.
+     - `Word`, `Address`, `PhysAddr`, `VirtAddr`, `RegId`, `CsrValue`, `CsrNumber`, `TrapCause`.
    - Proactively declare strongly typed aliases for new architectural concepts.
 3. **Logging & Tracing Standards**:
    - Use `simrv::log::info`, `simrv::log::warn`, and `simrv::log::error` from `simrv/core/Logger.hpp` for console and TUI messages.

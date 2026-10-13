@@ -10,15 +10,17 @@
 #include <string>
 #include <vector>
 
-#include "simrv/Define.hpp"
 #include "simrv/core/Cpu.hpp"
 #include "simrv/core/Machine.hpp"
+#include "simrv/debug/SymbolTable.hpp"
+#include "simrv/pipeline/OperationInfo.hpp"
 #include "simrv/tui/Tui.hpp"
 #include "simrv/tui/TuiGuidance.hpp"
 #include "simrv/tui/TuiMission.hpp"
 #include "simrv/tui/TuiTheme.hpp"
 #include "simrv/tui/framework/Text.hpp"
-#include "simrv/xlen/Types.hpp"
+#include "simrv/xlen/Constants.hpp"
+#include "simrv/xlen/RegisterTypes.hpp"
 
 namespace simrv::tui {
 
@@ -45,6 +47,7 @@ auto InspectorPane::is_single_column(int width) const -> bool {
 }
 
 auto InspectorPane::get_total_rows(int width) -> int {
+    if (page_ == TuiRegPage::LIVE) return static_cast<int>(machine_.num_harts()) + 8;
     if (page_ == TuiRegPage::EXPLAIN) {
         return static_cast<int>(get_explain_rows(width).size());
     }
@@ -187,7 +190,7 @@ void InspectorPane::set_selected_hart(size_t hart) {
         rows.fill("");
     }
     cached_left_rows_.fill("");
-    update_cache();
+    if (paused_ && page_ != TuiRegPage::LIVE) update_cache();
 }
 
 auto InspectorPane::current_cpu() const -> const simrv::core::CPU& {
@@ -243,10 +246,10 @@ auto InspectorPane::content_total_columns(int width) const -> int {
         case TuiRegPage::FPR: {
             bool const single = is_single_column(width);
             if (single) {
-                int const min_single = (sizeof(Register) > 4) ? 32 : 24;
+                int const min_single = (sizeof(simrv::xlen::Register) > 4) ? 32 : 24;
                 return std::max(width, min_single);
             }
-            int const min_double = (sizeof(Register) > 4) ? 60 : 44;
+            int const min_double = (sizeof(simrv::xlen::Register) > 4) ? 60 : 44;
             return std::max(width, min_double);
         }
         case TuiRegPage::VEC: {
@@ -255,10 +258,10 @@ auto InspectorPane::content_total_columns(int width) const -> int {
         }
         case TuiRegPage::PIPELINE: {
             if (column_header_mode_ || secondary_column_mode_) {
-                int const min_pipe = (sizeof(Register) > 4) ? 46 : 44;
+                int const min_pipe = (sizeof(simrv::xlen::Register) > 4) ? 46 : 44;
                 return std::max(width, min_pipe);
             }
-            int const min_pipe = (sizeof(Register) > 4) ? 68 : 60;
+            int const min_pipe = (sizeof(simrv::xlen::Register) > 4) ? 68 : 60;
             return std::max(width, min_pipe);
         }
         case TuiRegPage::BPRED: {
@@ -274,7 +277,7 @@ auto InspectorPane::content_total_columns(int width) const -> int {
             return std::max(width, min_cache);
         }
         case TuiRegPage::STACK: {
-            int const min_stack = (sizeof(Register) > 4) ? 50 : 44;
+            int const min_stack = (sizeof(simrv::xlen::Register) > 4) ? 50 : 44;
             return std::max(width, min_stack);
         }
         case TuiRegPage::EXPLAIN: {
@@ -283,8 +286,8 @@ auto InspectorPane::content_total_columns(int width) const -> int {
         }
         case TuiRegPage::TRACE:
             return trace_total_columns();
-        case TuiRegPage::TLB:
-        case TuiRegPage::BUS:
+        case TuiRegPage::LIVE:
+            return width;
         default:
             return width;
     }
@@ -485,6 +488,7 @@ auto InspectorPane::render_tab_bar_tier2(int width) const -> std::string {
             break;
         }
         case TuiCategoryGroup::Tools: {
+            tabs.push_back({.page = TuiRegPage::LIVE, .name = "Live"});
             tabs.push_back({.page = TuiRegPage::EXPLAIN, .name = "Explain"});
             tabs.push_back({.page = TuiRegPage::TRACE, .name = "Trace"});
             break;
@@ -554,8 +558,9 @@ auto InspectorPane::get_tab_at(int row, int col) const -> std::optional<TuiRegPa
                         return TuiRegPage::PIPELINE;
                     }
                     if (span.grp == TuiCategoryGroup::Tools) {
-                        return (page_ == TuiRegPage::EXPLAIN) ? TuiRegPage::TRACE
-                                                              : TuiRegPage::EXPLAIN;
+                        if (page_ == TuiRegPage::LIVE) return TuiRegPage::EXPLAIN;
+                        if (page_ == TuiRegPage::EXPLAIN) return TuiRegPage::TRACE;
+                        return TuiRegPage::LIVE;
                     }
                 }
                 return get_default_page_for_group(span.grp,
@@ -607,6 +612,7 @@ auto InspectorPane::get_tab_at(int row, int col) const -> std::optional<TuiRegPa
                 break;
             }
             case TuiCategoryGroup::Tools: {
+                tabs.push_back({.page = TuiRegPage::LIVE, .name = "Live"});
                 tabs.push_back({.page = TuiRegPage::EXPLAIN, .name = "Explain"});
                 tabs.push_back({.page = TuiRegPage::TRACE, .name = "Trace"});
                 break;
@@ -688,13 +694,35 @@ auto InspectorPane::render_log_bottom_row(int row_idx, int num_rows, int width) 
 auto InspectorPane::current_student_guidance() const -> PageGuidance {
     if (mission_ != nullptr) {
         if (const auto mission_guidance = mission_->guidance()) {
-            return {std::string(mission_guidance->title), std::string(mission_guidance->prompt),
-                    std::string(mission_guidance->why),   KeyAction::CycleToolPage,
-                    "Open the mission observation view.", mission_guidance->glossary_topic};
+            return {.title = std::string(mission_guidance->title),
+                    .meaning = std::string(mission_guidance->prompt),
+                    .relationship = std::string(mission_guidance->why),
+                    .next_action = KeyAction::CycleToolPage,
+                    .next_hint = "Open the mission observation view.",
+                    .glossary_topic = mission_guidance->glossary_topic};
         }
     }
-    auto const& context = current_cpu().pipeline_context;
+    auto const& cpu = current_cpu();
+    auto const& context = cpu.pipeline_context;
+    auto const& st = cpu.state();
     auto const snapshot = machine_.tui_execution_snapshot(selected_hart_);
+
+    bool const has_pending_trap =
+        context.pending_exception.has_value() || st.mcause != 0 || st.scause != 0;
+    uint64_t const trap_cause = context.pending_exception.has_value()
+                                    ? static_cast<uint64_t>(*context.pending_exception)
+                                    : (st.mcause != 0 ? st.mcause : st.scause);
+
+    bool const is_csr = (simrv::pipeline::operation::info(context.op_id).side_effects &
+                         simrv::pipeline::operation::SideEffectFlags::Csr) != 0;
+    bool const is_cfu = simrv::pipeline::operation::is_cfu(context.op_id);
+    uint32_t const cfu_f7 = static_cast<uint32_t>(context.funct7);
+    uint32_t const cfu_f3 = static_cast<uint32_t>(context.funct3);
+    bool const cfu_plugin = cpu.cfu_unit.has_plugin();
+    std::string cfu_plugin_path = cfu_plugin ? std::string(cpu.cfu_unit.plugin_path()) : "";
+    uint32_t const cfu_lat = cpu.cfu_unit.query_latency(cfu_f7, cfu_f3);
+    uint32_t const cfu_stalls = cpu.cfu_unit.query_stall_cycles(cfu_f7, cfu_f3);
+
     return guidance_for_context(
         {.page = page_,
          .cycle_accurate = machine_.runtime_profile.is_cycle_mode(),
@@ -705,7 +733,22 @@ auto InspectorPane::current_student_guidance() const -> PageGuidance {
          .data_hazard_stalls = snapshot.ca_stats.data_hazard_stalls,
          .control_hazard_bubbles = snapshot.ca_stats.control_hazard_bubbles,
          .image_loaded = !machine_.binary_path().empty(),
-         .shutdown = machine_.is_shutdown_});
+         .shutdown = machine_.is_shutdown_,
+         .privilege = st.priv,
+         .has_pending_trap = has_pending_trap,
+         .trap_cause = trap_cause,
+         .translation_enabled =
+             simrv::xlen::satp_translation_enabled(st.satp, cpu.effective_data_xlen()),
+         .is_vector_op = simrv::isa::is_vector_op(context.op_id),
+         .is_csr_op = is_csr,
+         .csr_address = static_cast<uint32_t>(context.imm & 0xFFF),
+         .is_cfu_op = is_cfu,
+         .cfu_funct7 = cfu_f7,
+         .cfu_funct3 = cfu_f3,
+         .cfu_has_plugin = cfu_plugin,
+         .cfu_plugin_path = std::move(cfu_plugin_path),
+         .cfu_latency = cfu_lat,
+         .cfu_stall_cycles = cfu_stalls});
 }
 
 auto InspectorPane::render_guidance_row(int row_idx, int width) -> std::string {
@@ -827,7 +870,9 @@ auto InspectorPane::next_page_for_slot(TuiRegPage current, bool cycle_accurate) 
             return TuiRegPage::PIPELINE;
         case TuiCategoryGroup::Tools:
         default:
-            return (current == TuiRegPage::EXPLAIN) ? TuiRegPage::TRACE : TuiRegPage::EXPLAIN;
+            if (current == TuiRegPage::LIVE) return TuiRegPage::EXPLAIN;
+            if (current == TuiRegPage::EXPLAIN) return TuiRegPage::TRACE;
+            return TuiRegPage::LIVE;
     }
 }
 
@@ -926,6 +971,10 @@ auto InspectorPane::render_row_internal(int row_idx, int width, int header_rows,
         return format_to_width(res, width);
     };
 
+    if (page_ == TuiRegPage::LIVE) {
+        return finish_row(render_live_overview_row(logical_row, render_width));
+    }
+
     if (show_spinner) {
         if (!is_secondary) {
             const int stats_start = performance_start_row(is_single_column(width));
@@ -988,14 +1037,28 @@ auto InspectorPane::render_column_row(int row_idx, int width, int col_idx, size_
 void InspectorPane::update_cache() {
     auto& st = current_cpu().state();
     for (int i = 0; i < 32; ++i) {
-        cached_gpr_.at(static_cast<std::size_t>(i)) = st.regs.read(static_cast<RegId>(i));
-        cached_fpr_.at(static_cast<std::size_t>(i)) = st.regs.read_fp(static_cast<RegId>(i));
-        cached_vec_.at(static_cast<std::size_t>(i)) = st.regs.read_vector(static_cast<RegId>(i));
+        cached_gpr_.at(static_cast<std::size_t>(i)) =
+            st.regs.read(static_cast<simrv::xlen::RegId>(i));
+        cached_fpr_.at(static_cast<std::size_t>(i)) =
+            st.regs.read_fp(simrv::xlen::to_fp_reg_id(static_cast<simrv::xlen::RegId>(i)));
+        cached_vec_.at(static_cast<std::size_t>(i)) =
+            st.regs.read_vector(simrv::xlen::to_vec_reg_id(static_cast<simrv::xlen::RegId>(i)));
     }
 }
 
 void InspectorPane::refresh_execution_snapshot() {
-    projected_scoreboard_ = machine_.tui_execution_snapshot(selected_hart_).scoreboard;
+    live_harts_.clear();
+    live_harts_.reserve(machine_.num_harts());
+    for (size_t hart = 0; hart < machine_.num_harts(); ++hart) {
+        const auto snapshot = machine_.tui_execution_snapshot(hart);
+        live_harts_.push_back({.pc = snapshot.pc,
+                               .symbol = machine_.symbol_table().lookup(snapshot.pc),
+                               .cycles = snapshot.cycle_count,
+                               .instructions = snapshot.instruction_count,
+                               .timer_ticks = snapshot.timer_ticks,
+                               .privilege = snapshot.privilege});
+        if (hart == selected_hart_) projected_scoreboard_ = snapshot.scoreboard;
+    }
 }
 
 auto InspectorPane::get_visible_content_rows() const -> int {
@@ -1050,11 +1113,11 @@ void InspectorPane::scroll_horizontal(int columns, int width, bool secondary) {
 }
 
 auto InspectorPane::supports_horizontal_scroll(int width) const -> bool {
-    int const width_for_viewport =
-        width > 0 ? width : (last_width_ > 0 ? last_width_ : 60);
+    int const width_for_viewport = width > 0 ? width : (last_width_ > 0 ? last_width_ : 60);
     const int total_cols = content_total_columns(width_for_viewport);
-    const int viewport_width =
-        (total_cols > width_for_viewport) ? std::max(1, width_for_viewport - 2) : width_for_viewport;
+    const int viewport_width = (total_cols > width_for_viewport)
+                                   ? std::max(1, width_for_viewport - 2)
+                                   : width_for_viewport;
     return total_cols > viewport_width;
 }
 

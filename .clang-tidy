@@ -1,3 +1,4 @@
+# yaml-language-server: $schema=https://json.schemastore.org/clang-tidy.json
 Checks: >-
   -*,
   clang-analyzer-*,
@@ -16,6 +17,7 @@ Checks: >-
   -cppcoreguidelines-non-private-member-variables-in-classes,
   -cppcoreguidelines-special-member-functions,
   -cppcoreguidelines-pro-type-reinterpret-cast,
+  -cppcoreguidelines-pro-type-union-access,
   -cppcoreguidelines-avoid-c-arrays,
   -cppcoreguidelines-pro-bounds-array-to-pointer-decay,
   -cppcoreguidelines-avoid-non-const-global-variables,

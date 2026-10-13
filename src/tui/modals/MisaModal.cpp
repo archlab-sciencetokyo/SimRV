@@ -7,6 +7,7 @@
 #include <array>
 #include <format>
 
+#include "simrv/core/Cpu.hpp"
 #include "simrv/core/Machine.hpp"
 #include "simrv/tui/TuiTheme.hpp"
 #include "simrv/tui/modals/ModalComponents.hpp"
@@ -38,7 +39,6 @@ void MisaModal::open(MisaDraft& draft, int& cursor, const simrv::core::Machine& 
     draft.ext_s = (misa & (1ULL << ('s' - 'a'))) != 0;
     draft.ext_u = (misa & (1ULL << ('u' - 'a'))) != 0;
     draft.ext_v = (misa & (1ULL << ('v' - 'a'))) != 0;
-    draft.ext_x = (misa & (1ULL << ('x' - 'a'))) != 0;
     // An unspecified configured VLEN uses the active register-file default.
     draft.vlen = machine.isa_config().vlen ? machine.isa_config().vlen
                                            : machine.primary_hart().state().regs.vlen;
@@ -240,7 +240,8 @@ void MisaModal::render(std::vector<std::string>& content_rows,
     }
     if (show_footer) {
         add_row_cb("");
-        add_row_cb(build_modal_footer({{"[Enter]", "Apply MISA CSR"}, {"[Esc / q]", "Cancel"}}));
+        add_row_cb(build_modal_footer({{.key = "[Enter]", .action = "Apply MISA CSR"},
+                                       {.key = "[Esc / q]", .action = "Cancel"}}));
     }
 }
 

@@ -20,6 +20,7 @@ simrv_add_component(simrv-platform
   pci/VirtioPciRng.cpp
   pci/VirtioPciSound.cpp
   pci/VirtioPciNet.cpp
+  pci/VirtioPciFs.cpp
   mmio/VirtioMmioDevice.cpp
   mmio/VirtioMmioBlock.cpp
   mmio/VirtioMmioConsole.cpp
@@ -28,6 +29,8 @@ simrv_add_component(simrv-platform
   mmio/VirtioMmioRng.cpp
   mmio/VirtioMmioSound.cpp
   mmio/VirtioMmioNet.cpp
+  mmio/VirtioMmioFs.cpp
+  virtio/VirtioFsBackend.cpp
   virtio/HostAudioSink.cpp
   virtio/VirtioSoundBackend.cpp
 )

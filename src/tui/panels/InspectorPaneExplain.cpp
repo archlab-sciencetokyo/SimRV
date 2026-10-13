@@ -9,9 +9,11 @@
 #include <string>
 #include <vector>
 
-#include "simrv/Define.hpp"
 #include "simrv/core/Cpu.hpp"
 #include "simrv/core/Machine.hpp"
+#include "simrv/core/TrapController.hpp"
+#include "simrv/debug/SymbolTable.hpp"
+#include "simrv/isa/Common.hpp"
 #include "simrv/memory/MemoryUtil.hpp"
 #include "simrv/pipeline/Decoder.hpp"
 #include "simrv/pipeline/OperationInfo.hpp"
@@ -20,8 +22,7 @@
 #include "simrv/tui/TuiTheme.hpp"
 #include "simrv/tui/panels/InspectorPane.hpp"
 #include "simrv/util/InstructionExplainer.hpp"
-#include "simrv/xlen/Helpers.hpp"
-#include "simrv/xlen/Types.hpp"
+#include "simrv/xlen/RegisterTypes.hpp"
 
 namespace simrv::tui {
 
@@ -32,10 +33,10 @@ using simrv::isa::InstFormat;
 
 namespace {
 
-auto get_reg_name(RegId reg, bool is_fp) -> std::string {
+auto get_reg_name(simrv::xlen::RegId reg, bool is_fp) -> std::string {
     uint32_t r = std::to_underlying(reg);
     if (r >= 32) return std::format("r{}", r);
-    return is_fp ? kFpRegNames.at(r) : kRegNames.at(r);
+    return std::string(is_fp ? kFpRegNames.at(r) : kRegNames.at(r));
 }
 
 auto wrap_text(const std::string& text, int max_len) -> std::vector<std::string> {
@@ -225,60 +226,192 @@ auto render_visual_bitfields(InstFormat fmt, uint32_t ir_org, int width)
     switch (fmt) {
         case InstFormat::R:
             build_box({
-                {"funct7", "31..25", 7, (ir_org >> 25) & 0x7F, 0},
-                {"rs2", "24..20", 5, (ir_org >> 20) & 0x1F, 0},
-                {"rs1", "19..15", 5, (ir_org >> 15) & 0x1F, 0},
-                {"f3", "14..12", 3, (ir_org >> 12) & 0x07, 0},
-                {"rd", "11..7", 5, (ir_org >> 7) & 0x1F, 0},
-                {"opcode", "6..0", 7, ir_org & 0x7F, 0},
+                {.label = "funct7",
+                 .bits = "31..25",
+                 .bit_count = 7,
+                 .value = (ir_org >> 25) & 0x7F,
+                 .cell_w = 0},
+                {.label = "rs2",
+                 .bits = "24..20",
+                 .bit_count = 5,
+                 .value = (ir_org >> 20) & 0x1F,
+                 .cell_w = 0},
+                {.label = "rs1",
+                 .bits = "19..15",
+                 .bit_count = 5,
+                 .value = (ir_org >> 15) & 0x1F,
+                 .cell_w = 0},
+                {.label = "f3",
+                 .bits = "14..12",
+                 .bit_count = 3,
+                 .value = (ir_org >> 12) & 0x07,
+                 .cell_w = 0},
+                {.label = "rd",
+                 .bits = "11..7",
+                 .bit_count = 5,
+                 .value = (ir_org >> 7) & 0x1F,
+                 .cell_w = 0},
+                {.label = "opcode",
+                 .bits = "6..0",
+                 .bit_count = 7,
+                 .value = ir_org & 0x7F,
+                 .cell_w = 0},
             });
             break;
         case InstFormat::I:
             build_box({
-                {"imm[11:0]", "31..20", 12, (ir_org >> 20) & 0xFFF, 0},
-                {"rs1", "19..15", 5, (ir_org >> 15) & 0x1F, 0},
-                {"f3", "14..12", 3, (ir_org >> 12) & 0x07, 0},
-                {"rd", "11..7", 5, (ir_org >> 7) & 0x1F, 0},
-                {"opcode", "6..0", 7, ir_org & 0x7F, 0},
+                {.label = "imm[11:0]",
+                 .bits = "31..20",
+                 .bit_count = 12,
+                 .value = (ir_org >> 20) & 0xFFF,
+                 .cell_w = 0},
+                {.label = "rs1",
+                 .bits = "19..15",
+                 .bit_count = 5,
+                 .value = (ir_org >> 15) & 0x1F,
+                 .cell_w = 0},
+                {.label = "f3",
+                 .bits = "14..12",
+                 .bit_count = 3,
+                 .value = (ir_org >> 12) & 0x07,
+                 .cell_w = 0},
+                {.label = "rd",
+                 .bits = "11..7",
+                 .bit_count = 5,
+                 .value = (ir_org >> 7) & 0x1F,
+                 .cell_w = 0},
+                {.label = "opcode",
+                 .bits = "6..0",
+                 .bit_count = 7,
+                 .value = ir_org & 0x7F,
+                 .cell_w = 0},
             });
             break;
         case InstFormat::S:
             build_box({
-                {"imm[11:5]", "31..25", 7, (ir_org >> 25) & 0x7F, 0},
-                {"rs2", "24..20", 5, (ir_org >> 20) & 0x1F, 0},
-                {"rs1", "19..15", 5, (ir_org >> 15) & 0x1F, 0},
-                {"f3", "14..12", 3, (ir_org >> 12) & 0x07, 0},
-                {"imm[4:0]", "11..7", 5, (ir_org >> 7) & 0x1F, 0},
-                {"opcode", "6..0", 7, ir_org & 0x7F, 0},
+                {.label = "imm[11:5]",
+                 .bits = "31..25",
+                 .bit_count = 7,
+                 .value = (ir_org >> 25) & 0x7F,
+                 .cell_w = 0},
+                {.label = "rs2",
+                 .bits = "24..20",
+                 .bit_count = 5,
+                 .value = (ir_org >> 20) & 0x1F,
+                 .cell_w = 0},
+                {.label = "rs1",
+                 .bits = "19..15",
+                 .bit_count = 5,
+                 .value = (ir_org >> 15) & 0x1F,
+                 .cell_w = 0},
+                {.label = "f3",
+                 .bits = "14..12",
+                 .bit_count = 3,
+                 .value = (ir_org >> 12) & 0x07,
+                 .cell_w = 0},
+                {.label = "imm[4:0]",
+                 .bits = "11..7",
+                 .bit_count = 5,
+                 .value = (ir_org >> 7) & 0x1F,
+                 .cell_w = 0},
+                {.label = "opcode",
+                 .bits = "6..0",
+                 .bit_count = 7,
+                 .value = ir_org & 0x7F,
+                 .cell_w = 0},
             });
             break;
         case InstFormat::B:
             build_box({
-                {"imm[12:5]", "31..25", 7, (ir_org >> 25) & 0x7F, 0},
-                {"rs2", "24..20", 5, (ir_org >> 20) & 0x1F, 0},
-                {"rs1", "19..15", 5, (ir_org >> 15) & 0x1F, 0},
-                {"f3", "14..12", 3, (ir_org >> 12) & 0x07, 0},
-                {"imm[4:1|11]", "11..7", 5, (ir_org >> 7) & 0x1F, 0},
-                {"opcode", "6..0", 7, ir_org & 0x7F, 0},
+                {.label = "imm[12:5]",
+                 .bits = "31..25",
+                 .bit_count = 7,
+                 .value = (ir_org >> 25) & 0x7F,
+                 .cell_w = 0},
+                {.label = "rs2",
+                 .bits = "24..20",
+                 .bit_count = 5,
+                 .value = (ir_org >> 20) & 0x1F,
+                 .cell_w = 0},
+                {.label = "rs1",
+                 .bits = "19..15",
+                 .bit_count = 5,
+                 .value = (ir_org >> 15) & 0x1F,
+                 .cell_w = 0},
+                {.label = "f3",
+                 .bits = "14..12",
+                 .bit_count = 3,
+                 .value = (ir_org >> 12) & 0x07,
+                 .cell_w = 0},
+                {.label = "imm[4:1|11]",
+                 .bits = "11..7",
+                 .bit_count = 5,
+                 .value = (ir_org >> 7) & 0x1F,
+                 .cell_w = 0},
+                {.label = "opcode",
+                 .bits = "6..0",
+                 .bit_count = 7,
+                 .value = ir_org & 0x7F,
+                 .cell_w = 0},
             });
             break;
         case InstFormat::U:
         case InstFormat::J:
             build_box({
-                {"imm[31:12]", "31..12", 20, (ir_org >> 12) & 0xFFFFF, 0},
-                {"rd", "11..7", 5, (ir_org >> 7) & 0x1F, 0},
-                {"opcode", "6..0", 7, ir_org & 0x7F, 0},
+                {.label = "imm[31:12]",
+                 .bits = "31..12",
+                 .bit_count = 20,
+                 .value = (ir_org >> 12) & 0xFFFFF,
+                 .cell_w = 0},
+                {.label = "rd",
+                 .bits = "11..7",
+                 .bit_count = 5,
+                 .value = (ir_org >> 7) & 0x1F,
+                 .cell_w = 0},
+                {.label = "opcode",
+                 .bits = "6..0",
+                 .bit_count = 7,
+                 .value = ir_org & 0x7F,
+                 .cell_w = 0},
             });
             break;
         case InstFormat::R4:
             build_box({
-                {"rs3", "31..27", 5, (ir_org >> 27) & 0x1F, 0},
-                {"fmt", "26..25", 2, (ir_org >> 25) & 0x03, 0},
-                {"rs2", "24..20", 5, (ir_org >> 20) & 0x1F, 0},
-                {"rs1", "19..15", 5, (ir_org >> 15) & 0x1F, 0},
-                {"f3", "14..12", 3, (ir_org >> 12) & 0x07, 0},
-                {"rd", "11..7", 5, (ir_org >> 7) & 0x1F, 0},
-                {"opcode", "6..0", 7, ir_org & 0x7F, 0},
+                {.label = "rs3",
+                 .bits = "31..27",
+                 .bit_count = 5,
+                 .value = (ir_org >> 27) & 0x1F,
+                 .cell_w = 0},
+                {.label = "fmt",
+                 .bits = "26..25",
+                 .bit_count = 2,
+                 .value = (ir_org >> 25) & 0x03,
+                 .cell_w = 0},
+                {.label = "rs2",
+                 .bits = "24..20",
+                 .bit_count = 5,
+                 .value = (ir_org >> 20) & 0x1F,
+                 .cell_w = 0},
+                {.label = "rs1",
+                 .bits = "19..15",
+                 .bit_count = 5,
+                 .value = (ir_org >> 15) & 0x1F,
+                 .cell_w = 0},
+                {.label = "f3",
+                 .bits = "14..12",
+                 .bit_count = 3,
+                 .value = (ir_org >> 12) & 0x07,
+                 .cell_w = 0},
+                {.label = "rd",
+                 .bits = "11..7",
+                 .bit_count = 5,
+                 .value = (ir_org >> 7) & 0x1F,
+                 .cell_w = 0},
+                {.label = "opcode",
+                 .bits = "6..0",
+                 .bit_count = 7,
+                 .value = ir_org & 0x7F,
+                 .cell_w = 0},
             });
             break;
         default:
@@ -288,10 +421,12 @@ auto render_visual_bitfields(InstFormat fmt, uint32_t ir_org, int width)
     return rows;
 }
 
-auto read_reg_str(const simrv::core::ArchState& st, RegId reg, bool is_fp) -> std::string {
+auto read_reg_str(const simrv::core::ArchState& st, simrv::xlen::RegId reg, bool is_fp)
+    -> std::string {
     uint32_t r = std::to_underlying(reg);
     if (r == 0 && !is_fp) return std::format("0x{:0{}x}", 0, simrv::xlen::kXLenHexDigits);
-    Register val = is_fp ? st.regs.read_fp(reg) : st.regs.read(reg);
+    simrv::xlen::Register val =
+        is_fp ? st.regs.read_fp(simrv::xlen::to_fp_reg_id(reg)) : st.regs.read(reg);
     return std::format("0x{:0{}x}", val, simrv::xlen::kXLenHexDigits);
 }
 
@@ -372,6 +507,10 @@ auto format_assembly_r(const simrv::pipeline::PipelineContext& ctx, std::string_
     if (is_unary_float_op(ctx.op_id)) {
         return std::format("{} {}, {}", mnemonic, rd_name, rs1_name);
     }
+    if (ctx.op_id == CFU) {
+        return std::format("cfu func{}, {}, {}, {} [f7=0x{:02X}]", std::to_underlying(ctx.funct3),
+                           rd_name, rs1_name, rs2_name, static_cast<uint32_t>(ctx.funct7));
+    }
     return std::format("{} {}, {}, {}", mnemonic, rd_name, rs1_name, rs2_name);
 }
 
@@ -427,7 +566,7 @@ auto format_assembly_s_b_u_j_r4(const simrv::pipeline::PipelineContext& ctx, Ins
             return std::format("jal {}, {}", rd_name, ctx.imm);
         case InstFormat::R4: {
             uint32_t rs3_val = (ctx.ir_org >> 27) & 0x1F;
-            std::string rs3_name = kFpRegNames.at(rs3_val);
+            std::string rs3_name(kFpRegNames.at(rs3_val));
             return std::format("{} {}, {}, {}, {}", mnemonic, rd_name, rs1_name, rs2_name,
                                rs3_name);
         }
@@ -440,9 +579,15 @@ auto format_assembly_vector(const simrv::pipeline::PipelineContext& ctx, std::st
     -> std::string {
     auto const op_id = ctx.op_id;
 
-    auto vr_name = [](RegId r) -> std::string { return std::format("v{}", std::to_underlying(r)); };
-    auto gpr_name = [](RegId r) -> std::string { return {kRegNames.at(std::to_underlying(r))}; };
-    auto fpr_name = [](RegId r) -> std::string { return {kFpRegNames.at(std::to_underlying(r))}; };
+    auto vr_name = [](simrv::xlen::RegId r) -> std::string {
+        return std::format("v{}", std::to_underlying(r));
+    };
+    auto gpr_name = [](simrv::xlen::RegId r) -> std::string {
+        return std::string(kRegNames.at(std::to_underlying(r)));
+    };
+    auto fpr_name = [](simrv::xlen::RegId r) -> std::string {
+        return std::string(kFpRegNames.at(std::to_underlying(r)));
+    };
 
     std::string rd = vr_name(ctx.rd);
     std::string rs1 = gpr_name(ctx.rs1);
@@ -599,11 +744,11 @@ auto render_field_decoded_values(const simrv::core::ArchState& st,
         }
         if (fmt == InstFormat::R4) {
             uint32_t rs3_val = (ctx.ir_org >> 27) & 0x1F;
-            std::string rs3_name = kFpRegNames.at(rs3_val);
-            rows.push_back(
-                format_to_width(std::format("  rs3    : {} = {}", rs3_name,
-                                            read_reg_str(st, static_cast<RegId>(rs3_val), true)),
-                                width));
+            std::string rs3_name(kFpRegNames.at(rs3_val));
+            rows.push_back(format_to_width(
+                std::format("  rs3    : {} = {}", rs3_name,
+                            read_reg_str(st, static_cast<simrv::xlen::RegId>(rs3_val), true)),
+                width));
         }
     }
     if (has_funct3(fmt)) {
@@ -667,16 +812,16 @@ auto render_dataflow_breakdown(const simrv::core::ArchState& st,
         std::format("  {}Destination : {}{}\033[0m", kThemeText, kThemeMint, dst_str), width));
 
     if (is_memory(ctx.op_id)) {
-        const Register base = st.regs.read(ctx.rs1);
+        const simrv::xlen::Register base = st.regs.read(ctx.rs1);
         rows.push_back(format_to_width(
             std::format("  {}Effective Addr: {}0x{:0{}x}\033[0m = {} + {}", kThemeText, kThemeSky,
                         base + ctx.imm, simrv::xlen::kXLenHexDigits, rs1_name, ctx.imm),
             width));
     }
     if (is_control(ctx.op_id)) {
-        const Register target =
+        const simrv::xlen::Register target =
             is_jump(ctx.op_id) && info(ctx.op_id).control == ControlFlowKind::Jalr
-                ? (st.regs.read(ctx.rs1) + ctx.imm) & ~Register{1}
+                ? (st.regs.read(ctx.rs1) + ctx.imm) & ~simrv::xlen::Register{1}
                 : ctx.cpc.raw() + ctx.imm;
         rows.push_back(
             format_to_width(std::format("  {}Control Target: {}0x{:0{}x}\033[0m", kThemeText,
@@ -722,7 +867,7 @@ auto render_microarchitectural_profile(const simrv::pipeline::PipelineContext& c
 
     if (rdb != RegBank::None) {
         uint32_t rd_idx = std::to_underlying(ctx_in.rd) & 0x1FU;
-        std::string name = (rdb == RegBank::Float) ? kFpRegNames.at(rd_idx) : kRegNames.at(rd_idx);
+        std::string name((rdb == RegBank::Float) ? kFpRegNames.at(rd_idx) : kRegNames.at(rd_idx));
         rows.push_back(
             format_to_width(std::format("  {}rd (dest) : {}{:<5}\033[0m  [{}{}\033[0m]", kThemeText,
                                         kThemeMint, name, kThemeVal, bank_str(rdb)),
@@ -731,7 +876,7 @@ auto render_microarchitectural_profile(const simrv::pipeline::PipelineContext& c
     if (rs1b != RegBank::None) {
         uint32_t rs1_idx = std::to_underlying(ctx_in.rs1) & 0x1FU;
         std::string name =
-            (rs1b == RegBank::Float) ? kFpRegNames.at(rs1_idx) : kRegNames.at(rs1_idx);
+            std::string((rs1b == RegBank::Float) ? kFpRegNames.at(rs1_idx) : kRegNames.at(rs1_idx));
         rows.push_back(
             format_to_width(std::format("  {}rs1 (src1): {}{:<5}\033[0m  [{}{}\033[0m]", kThemeText,
                                         kThemePeach, name, kThemeVal, bank_str(rs1b)),
@@ -740,7 +885,7 @@ auto render_microarchitectural_profile(const simrv::pipeline::PipelineContext& c
     if (rs2b != RegBank::None) {
         uint32_t rs2_idx = std::to_underlying(ctx_in.rs2) & 0x1FU;
         std::string name =
-            (rs2b == RegBank::Float) ? kFpRegNames.at(rs2_idx) : kRegNames.at(rs2_idx);
+            std::string((rs2b == RegBank::Float) ? kFpRegNames.at(rs2_idx) : kRegNames.at(rs2_idx));
         rows.push_back(
             format_to_width(std::format("  {}rs2 (src2): {}{:<5}\033[0m  [{}{}\033[0m]", kThemeText,
                                         kThemePeach, name, kThemeVal, bank_str(rs2b)),
@@ -749,7 +894,7 @@ auto render_microarchitectural_profile(const simrv::pipeline::PipelineContext& c
     if (rs3b != RegBank::None) {
         uint32_t rs3_num = (ctx_in.ir_org >> 27U) & 0x1FU;
         std::string name =
-            (rs3b == RegBank::Float) ? kFpRegNames.at(rs3_num) : kRegNames.at(rs3_num);
+            std::string((rs3b == RegBank::Float) ? kFpRegNames.at(rs3_num) : kRegNames.at(rs3_num));
         rows.push_back(
             format_to_width(std::format("  {}rs3 (src3): {}{:<5}\033[0m  [{}{}\033[0m] (Addend)",
                                         kThemeText, kThemeSky, name, kThemeVal, bank_str(rs3b)),
@@ -844,10 +989,10 @@ auto InspectorPane::get_explain_rows(int width) -> std::vector<std::string> {
     auto& cpu = current_cpu();
     auto& st = cpu.state();
 
-    Register const target_pc = (explain_pc_ != 0) ? explain_pc_ : st.pc;
+    simrv::xlen::Register const target_pc = (explain_pc_ != 0) ? explain_pc_ : st.pc;
 
-    auto hex_addr = [](Register v) -> std::string {
-        if constexpr (sizeof(Register) <= 4) {
+    auto hex_addr = [](simrv::xlen::Register v) -> std::string {
+        if constexpr (sizeof(simrv::xlen::Register) <= 4) {
             return std::format("0x{:08x}", v);
         } else {
             auto val = static_cast<uint64_t>(v);
@@ -879,18 +1024,19 @@ auto InspectorPane::get_explain_rows(int width) -> std::vector<std::string> {
     }
 
     simrv::pipeline::PipelineContext local_ctx{};
-    const auto translate_for_inspection = [&](Address vaddr) -> std::optional<Address> {
+    const auto translate_for_inspection =
+        [&](simrv::xlen::Address vaddr) -> std::optional<simrv::xlen::Address> {
         const auto active_xlen = st.current_xlen();
         if (st.priv == kPrivMachine ||
             !simrv::xlen::satp_translation_enabled(st.satp, active_xlen)) {
             return active_xlen == 32 ? vaddr & 0xFFFFFFFFULL : vaddr;
         }
-        const Word asid = simrv::xlen::satp_asid(st.satp, active_xlen);
+        const simrv::xlen::Word asid = simrv::xlen::satp_asid(st.satp, active_xlen);
         const auto* entry = cpu.tlb.peek_inst_r(vaddr, asid, st.priv);
         if (entry == nullptr) return std::nullopt;
         return entry->p_addr | (vaddr & simrv::memory::kPageMask);
     };
-    const auto read_halfword = [&](Address vaddr) -> std::optional<uint16_t> {
+    const auto read_halfword = [&](simrv::xlen::Address vaddr) -> std::optional<uint16_t> {
         const auto paddr = translate_for_inspection(vaddr);
         if (!paddr.has_value() || !machine_.ram_view().contains(*paddr, sizeof(uint16_t))) {
             return std::nullopt;
@@ -907,7 +1053,7 @@ auto InspectorPane::get_explain_rows(int width) -> std::vector<std::string> {
         if ((*first & 0x3U) != 0x3U) {
             fetch_success = true;
         } else if (const auto second = read_halfword(target_pc + 2)) {
-            local_ctx.ir_org |= static_cast<Instruction>(*second) << 16U;
+            local_ctx.ir_org |= static_cast<simrv::xlen::Instruction>(*second) << 16U;
             fetch_success = true;
         }
     }
@@ -1057,8 +1203,78 @@ auto InspectorPane::get_explain_rows(int width) -> std::vector<std::string> {
     if (is_csr) {
         uint32_t csr_addr = ctx.imm & 0xFFF;
         std::string csr_nm = simrv::util::csr_name(csr_addr);
+        explain_rows.push_back(section_line("Target CSR Architectural Profile", width));
         explain_rows.push_back(
-            format_to_width(std::format("  CSR    : {} (addr 0x{:03X})", csr_nm, csr_addr), width));
+            format_to_width(std::format("  {}CSR Name    : {}{} (0x{:03X})\033[0m", kThemeText,
+                                        kThemePeach, csr_nm, csr_addr),
+                            width));
+        if (auto details = simrv::util::get_csr_details(csr_addr)) {
+            std::string priv_req =
+                (details->min_privilege == simrv::xlen::PrivilegeLevel::Machine)
+                    ? "Machine (M)"
+                    : ((details->min_privilege == simrv::xlen::PrivilegeLevel::Supervisor)
+                           ? "Supervisor (S)"
+                           : "User (U)");
+            explain_rows.push_back(format_to_width(
+                std::format("  {}Privilege   : {}{}\033[0m", kThemeText, kThemeMint, priv_req),
+                width));
+            explain_rows.push_back(format_to_width(
+                std::format("  {}Access Type : {}{}\033[0m", kThemeText, kThemeVal,
+                            details->read_only ? "Read-Only (RO)" : "Read/Write (RW)"),
+                width));
+            explain_rows.push_back(
+                format_to_width(std::format("  {}Extension   : {}{}\033[0m", kThemeText, kThemeMint,
+                                            details->extension),
+                                width));
+            if (!details->description.empty()) {
+                auto csr_desc_wrapped = wrap_text(std::string(details->description), width - 4);
+                for (const auto& line : csr_desc_wrapped) {
+                    explain_rows.push_back(format_to_width("  " + line, width));
+                }
+            }
+        }
+        explain_rows.push_back(format_to_width("", width));
+    }
+
+    bool const is_cfu = simrv::pipeline::operation::is_cfu(ctx.op_id);
+    if (is_cfu) {
+        uint32_t const f3 = std::to_underlying(ctx.funct3);
+        uint32_t const f7 = static_cast<uint32_t>(ctx.funct7);
+        auto const& cfu_unit = current_cpu().cfu_unit;
+        bool const has_plugin = cfu_unit.has_plugin();
+        uint32_t const latency = cfu_unit.query_latency(f7, f3);
+        uint32_t const stalls = cfu_unit.query_stall_cycles(f7, f3);
+
+        explain_rows.push_back(section_line("Custom Function Unit (CFU) Profile", width));
+        explain_rows.push_back(format_to_width(
+            std::format("  {}CFU Opcode  : {}custom-0 (0x0B)\033[0m", kThemeText, kThemePeach),
+            width));
+        explain_rows.push_back(
+            format_to_width(std::format("  {}Function ID : {}func{} (funct3 = 0b{:03b})\033[0m",
+                                        kThemeText, kThemeMint, f3, f3),
+                            width));
+        explain_rows.push_back(
+            format_to_width(std::format("  {}Sub-Opcode  : {}0x{:02X} (funct7 = 0b{:07b})\033[0m",
+                                        kThemeText, kThemeMint, f7, f7),
+                            width));
+        std::string backend_str = has_plugin
+                                      ? std::format("Dynamic Plugin ({})", cfu_unit.plugin_path())
+                                      : "Built-in Model (rvproc_cfu / bitwise OR)";
+        explain_rows.push_back(format_to_width(
+            std::format("  {}Backend     : {}{}\033[0m", kThemeText, kThemeVal, backend_str),
+            width));
+        explain_rows.push_back(format_to_width(
+            std::format("  {}Model Timing: {}{} cycle(s) ({} issue + {} stall)\033[0m", kThemeText,
+                        kThemeVal, latency, latency > 0 ? 1 : 0, stalls),
+            width));
+
+        auto cfu_details = simrv::util::get_cfu_details(f7, f3);
+        if (!cfu_details.description.empty()) {
+            auto cfu_desc_wrapped = wrap_text(cfu_details.description, width - 4);
+            for (const auto& line : cfu_desc_wrapped) {
+                explain_rows.push_back(format_to_width("  " + line, width));
+            }
+        }
         explain_rows.push_back(format_to_width("", width));
     }
 
@@ -1086,26 +1302,8 @@ auto InspectorPane::get_explain_rows(int width) -> std::vector<std::string> {
         uint64_t tval = ctx.pending_exception.has_value() ? ctx.pending_tval
                                                           : (st.mcause != 0 ? st.mtval : st.stval);
 
-        static constexpr std::array<const char*, 16> kCauseNames = {
-            "Instruction Address Misaligned",
-            "Instruction Access Fault",
-            "Illegal Instruction",
-            "Breakpoint",
-            "Load Address Misaligned",
-            "Load Access Fault",
-            "Store Address Misaligned",
-            "Store Access Fault",
-            "Environment Call (U-Mode)",
-            "Environment Call (S-Mode)",
-            "Reserved (10)",
-            "Environment Call (M-Mode)",
-            "Instruction Page Fault",
-            "Load Page Fault",
-            "Reserved (14)",
-            "Store Page Fault"};
-        std::string cause_name = (cause < kCauseNames.size())
-                                     ? kCauseNames.at(cause)
-                                     : std::format("Exception ({})", cause);
+        std::string cause_name =
+            simrv::core::trap_cause_name(static_cast<simrv::xlen::TrapCause>(cause));
         explain_rows.push_back(
             format_to_width(std::format("  {}Cause      : {}{} (0x{:X})\033[0m", kThemeText,
                                         kThemePeach, cause_name, cause),
@@ -1115,9 +1313,10 @@ auto InspectorPane::get_explain_rows(int width) -> std::vector<std::string> {
                                         kThemeVal, tval, simrv::xlen::kXLenHexDigits),
                             width));
         std::string priv_str =
-            (st.priv == PrivilegeLevel::Machine)
+            (st.priv == simrv::xlen::PrivilegeLevel::Machine)
                 ? "Machine (M)"
-                : ((st.priv == PrivilegeLevel::Supervisor) ? "Supervisor (S)" : "User (U)");
+                : ((st.priv == simrv::xlen::PrivilegeLevel::Supervisor) ? "Supervisor (S)"
+                                                                        : "User (U)");
         explain_rows.push_back(format_to_width(
             std::format("  {}Privilege  : {}{}\033[0m", kThemeText, kThemeMint, priv_str), width));
     }

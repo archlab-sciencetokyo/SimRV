@@ -15,15 +15,16 @@
 #include "simrv/core/Machine.hpp"
 #include "simrv/core/RuntimeProfile.hpp"
 #include "simrv/execute/CfuUnit.hpp"
-#include "simrv/isa/Base.hpp"
+#include "simrv/isa/InstructionFields.hpp"
 #include "simrv/isa/OperationId.hpp"
+#include "simrv/memory/MemorySubsystem.hpp"
 #include "simrv/pipeline/CpuModel.hpp"
 #include "simrv/pipeline/Decoder.hpp"
 #include "simrv/pipeline/OperationTraits.hpp"
 #include "simrv/pipeline/PipelineConfig.hpp"
 #include "simrv/pipeline/PipelineSim.hpp"
 #include "simrv/util/CliParser.hpp"
-#include "simrv/xlen/Types.hpp"
+#include "simrv/xlen/RegisterTypes.hpp"
 
 #define TEST_CHECK(expr)                                                                     \
     do {                                                                                     \
@@ -106,13 +107,13 @@ void test_cfu_instruction_decode_and_traits() {
     TEST_CHECK(d.opcode() == Opcode::Custom0);
     TEST_CHECK(static_cast<uint32_t>(d.funct3()) == 4);
     TEST_CHECK(static_cast<uint32_t>(d.funct7()) == 5);
-    TEST_CHECK(d.rd() == RegId::Ra);
-    TEST_CHECK(d.rs1() == RegId::Sp);
-    TEST_CHECK(d.rs2() == RegId::Gp);
+    TEST_CHECK(d.rd() == simrv::xlen::RegId::Ra);
+    TEST_CHECK(d.rs1() == simrv::xlen::RegId::Sp);
+    TEST_CHECK(d.rs2() == simrv::xlen::RegId::Gp);
 
     // Traits
-    const auto traits =
-        simrv::pipeline::operation::make_dependency_traits(op, Opcode::Custom0, RegId::Ra, 0);
+    const auto traits = simrv::pipeline::operation::make_dependency_traits(
+        op, Opcode::Custom0, simrv::xlen::RegId::Ra, 0);
     TEST_CHECK(traits.is_cfu);
     TEST_CHECK(traits.writes_int);
     TEST_CHECK(traits.reads_rs1_int);
@@ -188,7 +189,7 @@ void test_cfu_pipeline_hazard_timing() {
     // 2: custom0 x3, x1, x2 (OR)   (0x0020818b) -> x3 = 10 | 20 = 30
     // 3: addi x4, x3, 5 (RAW dep)  (0x00518213) -> x4 = 30 + 5 = 35
     // 4: jal x0, 0                 (0x0000006f)
-    constexpr std::array<Instruction, 5> program_dependent = {
+    constexpr std::array<simrv::xlen::Instruction, 5> program_dependent = {
         0x00a00093,  // addi x1, x0, 10
         0x01400113,  // addi x2, x0, 20
         0x0020818b,  // custom0 x3, x1, x2 (funct7=0, funct3=0)
@@ -201,8 +202,8 @@ void test_cfu_pipeline_hazard_timing() {
     // Back-to-back dependency causes a 1-cycle Decode hazard stall.
     if constexpr (!simrv::xlen::kIsXLen64) {
         simrv::core::Machine machine;
-        const Address pc = machine.memory_geometry().dram_base;
-        std::vector<Byte> ram(1024 * 1024, Byte{0});
+        const simrv::xlen::Address pc = machine.memory_geometry().dram_base;
+        std::vector<simrv::xlen::Byte> ram(1024 * 1024, simrv::xlen::Byte{0});
         machine.set_ram_for_testing(ram.data(), ram.size());
 
         auto& cpu = machine.primary_hart();
@@ -213,7 +214,7 @@ void test_cfu_pipeline_hazard_timing() {
         cpu.pipeline_sim.config = profile.pipeline;
         cpu.cpu_model_config = profile;
 
-        std::array<Byte, simrv::cache::ICache::kLineBytes> line{};
+        std::array<simrv::xlen::Byte, simrv::cache::ICache::kLineBytes> line{};
         std::memcpy(line.data(), program_dependent.data(), sizeof(program_dependent));
         std::memcpy(ram.data(), program_dependent.data(), sizeof(program_dependent));
         cpu.icache.insert(pc, line.data(), simrv::memory::MesiState::Exclusive);
@@ -227,10 +228,10 @@ void test_cfu_pipeline_hazard_timing() {
         }
 
         TEST_CHECK(cpu.e_icount == 4);
-        TEST_CHECK(cpu.state().regs.read(RegId::Ra) == 10);
-        TEST_CHECK(cpu.state().regs.read(RegId::Sp) == 20);
-        TEST_CHECK(cpu.state().regs.read(RegId::Gp) == 30);  // 10 | 20
-        TEST_CHECK(cpu.state().regs.read(RegId::Tp) == 35);  // 30 + 5
+        TEST_CHECK(cpu.state().regs.read(simrv::xlen::RegId::Ra) == 10);
+        TEST_CHECK(cpu.state().regs.read(simrv::xlen::RegId::Sp) == 20);
+        TEST_CHECK(cpu.state().regs.read(simrv::xlen::RegId::Gp) == 30);  // 10 | 20
+        TEST_CHECK(cpu.state().regs.read(simrv::xlen::RegId::Tp) == 35);  // 30 + 5
         TEST_CHECK(cpu.pipeline_sim.data_hazard_stalls() == 1);
     }
 
@@ -242,7 +243,7 @@ void test_cfu_pipeline_hazard_timing() {
     // 3: addi x5, x0, 99 (independent)
     // 4: addi x4, x3, 5 (depends on x3)
     // 5: jal x0, 0
-    constexpr std::array<Instruction, 6> program_independent = {
+    constexpr std::array<simrv::xlen::Instruction, 6> program_independent = {
         0x00a00093,  // addi x1, x0, 10
         0x01400113,  // addi x2, x0, 20
         0x0020818b,  // custom0 x3, x1, x2
@@ -253,8 +254,8 @@ void test_cfu_pipeline_hazard_timing() {
 
     if constexpr (!simrv::xlen::kIsXLen64) {
         simrv::core::Machine machine;
-        const Address pc = machine.memory_geometry().dram_base;
-        std::vector<Byte> ram(1024 * 1024, Byte{0});
+        const simrv::xlen::Address pc = machine.memory_geometry().dram_base;
+        std::vector<simrv::xlen::Byte> ram(1024 * 1024, simrv::xlen::Byte{0});
         machine.set_ram_for_testing(ram.data(), ram.size());
 
         auto& cpu = machine.primary_hart();
@@ -265,7 +266,7 @@ void test_cfu_pipeline_hazard_timing() {
         cpu.pipeline_sim.config = profile.pipeline;
         cpu.cpu_model_config = profile;
 
-        std::array<Byte, simrv::cache::ICache::kLineBytes> line{};
+        std::array<simrv::xlen::Byte, simrv::cache::ICache::kLineBytes> line{};
         std::memcpy(line.data(), program_independent.data(), sizeof(program_independent));
         std::memcpy(ram.data(), program_independent.data(), sizeof(program_independent));
         cpu.icache.insert(pc, line.data(), simrv::memory::MesiState::Exclusive);
@@ -279,9 +280,9 @@ void test_cfu_pipeline_hazard_timing() {
         }
 
         TEST_CHECK(cpu.e_icount == 5);
-        TEST_CHECK(cpu.state().regs.read(RegId::Gp) == 30);
-        TEST_CHECK(cpu.state().regs.read(RegId::T0) == 99);
-        TEST_CHECK(cpu.state().regs.read(RegId::Tp) == 35);
+        TEST_CHECK(cpu.state().regs.read(simrv::xlen::RegId::Gp) == 30);
+        TEST_CHECK(cpu.state().regs.read(simrv::xlen::RegId::T0) == 99);
+        TEST_CHECK(cpu.state().regs.read(simrv::xlen::RegId::Tp) == 35);
         TEST_CHECK(cpu.pipeline_sim.data_hazard_stalls() == 0);
     }
 }
@@ -303,9 +304,9 @@ void test_bram_prewarm_and_cli() {
     // Explicit predictor overrides survive machine initialization/profile application.
     {
         std::array<char*, 6> argv = {
-            const_cast<char*>("SimRV"),         const_cast<char*>("--tui"),
+            const_cast<char*>("SimRV"),        const_cast<char*>("--tui"),
             const_cast<char*>("--cpu-preset"), const_cast<char*>("cfu-provingground"),
-            const_cast<char*>("--bpred"),       const_cast<char*>("none")};
+            const_cast<char*>("--bpred"),      const_cast<char*>("none")};
         const auto res = simrv::util::parse_command_line(argv);
         TEST_CHECK(res.has_value());
         const auto cfg = res->options.to_machine_config();
@@ -339,7 +340,7 @@ void test_bram_prewarm_and_cli() {
     // 4. Test prewarm_bram_caches populates ICache and DCache without misses
     if constexpr (!simrv::xlen::kIsXLen64) {
         simrv::core::Machine machine;
-        std::vector<Byte> ram(1024 * 1024, Byte{0});
+        std::vector<simrv::xlen::Byte> ram(1024 * 1024, simrv::xlen::Byte{0});
         machine.set_ram_for_testing(ram.data(), ram.size());
 
         auto& cpu = machine.primary_hart();
@@ -350,16 +351,16 @@ void test_bram_prewarm_and_cli() {
         cpu.pipeline_sim.config = profile.pipeline;
         cpu.cpu_model_config = profile;
 
-        constexpr std::array<Instruction, 3> test_prog = {
+        constexpr std::array<simrv::xlen::Instruction, 3> test_prog = {
             0x00a00093,  // addi x1, x0, 10
             0x01400113,  // addi x2, x0, 20
             0x002081b3,  // add x3, x1, x2
         };
-        const Address code_addr = machine.memory_geometry().dram_base;
+        const simrv::xlen::Address code_addr = machine.memory_geometry().dram_base;
         std::memcpy(ram.data(), test_prog.data(), sizeof(test_prog));
 
         constexpr uint32_t data_val = 0x12345678;
-        const Address data_addr = machine.memory_geometry().dram_base + 0x1000;
+        const simrv::xlen::Address data_addr = machine.memory_geometry().dram_base + 0x1000;
         std::memcpy(ram.data() + (data_addr - machine.memory_geometry().dram_base), &data_val,
                     sizeof(data_val));
 
@@ -376,9 +377,9 @@ void test_bram_prewarm_and_cli() {
         TEST_CHECK(cpu.icache.miss_count() == 0);
 
         // Verify DCache hit on the prewarmed data line
-        Word read_data = 0;
+        simrv::xlen::Word read_data = 0;
         TEST_CHECK(cpu.dcache.read(data_addr, read_data,
-                                   static_cast<Instruction>(simrv::isa::Funct3::Lw)));
+                                   static_cast<simrv::xlen::Instruction>(simrv::isa::Funct3::Lw)));
         TEST_CHECK(static_cast<uint32_t>(read_data) == data_val);
         TEST_CHECK(cpu.dcache.miss_count() == 0);
     }

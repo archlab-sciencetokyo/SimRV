@@ -9,7 +9,7 @@
 #include <format>
 
 #include "simrv/core/Machine.hpp"
-#include "simrv/tui/TuiTheme.hpp"
+#include "simrv/debug/SymbolTable.hpp"
 #include "simrv/tui/modals/ModalComponents.hpp"
 #include "simrv/tui/panels/InspectorPane.hpp"
 
@@ -33,7 +33,7 @@ auto AddressModal::submit(const std::string& input, simrv::core::Machine& machin
         return true;
     }
 
-    Address addr = 0;
+    simrv::xlen::Address addr = 0;
     bool ok = false;
     if (input.starts_with("0x") || input.starts_with("0X")) {
         auto result = std::from_chars(input.data() + 2, input.data() + input.size(), addr, 16);
@@ -64,7 +64,8 @@ auto AddressModal::submit(const std::string& input, simrv::core::Machine& machin
 void AddressModal::render(std::vector<std::string>& content_rows, const std::string& input) {
     build_text_input_rows(content_rows, "Enter Address (hex), Symbol, or 'sp' to reset:", input);
     content_rows.push_back("");
-    content_rows.push_back(build_modal_footer({{"[Enter]", "Inspect"}, {"[Esc]", "Cancel"}}));
+    content_rows.push_back(build_modal_footer(
+        {{.key = "[Enter]", .action = "Inspect"}, {.key = "[Esc]", .action = "Cancel"}}));
 }
 
 }  // namespace simrv::tui::modals

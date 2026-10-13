@@ -5,7 +5,6 @@
 #include "simrv/device/Uart.hpp"
 
 #include <sys/select.h>
-#include <sys/time.h>
 #include <unistd.h>
 
 #include <cerrno>
@@ -92,7 +91,7 @@ auto Uart::start_pty() -> bool {
             int const master_fd = pty_.master_fd();
             if (master_fd < 0) break;
             FD_SET(master_fd, &fds);
-            struct timeval tv{0, 20000};
+            struct timeval tv{.tv_sec = 0, .tv_usec = 20000};
             int const ret = ::select(master_fd + 1, &fds, nullptr, nullptr, &tv);
             if (ret <= 0) continue;
             ssize_t const n = pty_.read_from_master(buf, sizeof(buf));
@@ -121,7 +120,7 @@ void Uart::stop_pty() {
 }
 
 auto Uart::handle_request(const memory::TlChannelA& req, memory::TlChannelD& resp) -> bool {
-    const Address reg = simrv::mmio::uart_reg(req.address.raw(), uart_reg_shift_);
+    const simrv::xlen::Address reg = simrv::mmio::uart_reg(req.address.raw(), uart_reg_shift_);
     if (reg == simrv::mmio::kUartRegInvalid) {
         if (req.opcode == memory::TlOpcodeA::Get) resp.data = 0;
         return true;
@@ -136,7 +135,7 @@ auto Uart::handle_request(const memory::TlChannelA& req, memory::TlChannelD& res
                 } else {
                     std::scoped_lock lock(rx_mutex_);
                     if (!rx_fifo_.empty()) {
-                        resp.data = static_cast<Word>(rx_fifo_.front());
+                        resp.data = static_cast<simrv::xlen::Word>(rx_fifo_.front());
                         rx_fifo_.pop();
                     } else {
                         resp.data = 0;
@@ -152,10 +151,11 @@ auto Uart::handle_request(const memory::TlChannelA& req, memory::TlChannelD& res
             case simrv::mmio::kUartRegIirFcr: {
                 std::scoped_lock lock(rx_mutex_);
                 const bool has_rx = !rx_fifo_.empty();
-                Word iir_val = 0x01U;
+                simrv::xlen::Word iir_val = 0x01U;
                 if (has_rx) {
                     iir_val = 0x04U;
-                } else if (tx_irq_pending_ && ((uart_ier_ & static_cast<Word>(0x2U)) != 0)) {
+                } else if (tx_irq_pending_ &&
+                           ((uart_ier_ & static_cast<simrv::xlen::Word>(0x2U)) != 0)) {
                     iir_val = 0x02U;
                     tx_irq_pending_ = false;
                     update_uart_irq(machine_, false, uart_ier_, tx_irq_pending_);
@@ -173,11 +173,12 @@ auto Uart::handle_request(const memory::TlChannelA& req, memory::TlChannelD& res
                 break;
             case simrv::mmio::kUartRegLsr: {
                 const bool has_rx = rx_ready_.load(std::memory_order_acquire);
-                resp.data = simrv::mmio::kUartLsrThreTemt |
-                            (has_rx ? simrv::mmio::kUartLsrDataReady : static_cast<Word>(0));
+                resp.data =
+                    simrv::mmio::kUartLsrThreTemt |
+                    (has_rx ? simrv::mmio::kUartLsrDataReady : static_cast<simrv::xlen::Word>(0));
             } break;
             case simrv::mmio::kUartRegMsr:
-                resp.data = static_cast<Word>(0xB0U);
+                resp.data = static_cast<simrv::xlen::Word>(0xB0U);
                 break;
             case simrv::mmio::kUartRegScr:
                 resp.data = uart_scr_;
@@ -186,7 +187,7 @@ auto Uart::handle_request(const memory::TlChannelA& req, memory::TlChannelD& res
                 resp.data = 0;
         }
     } else {
-        const Word wdata = req.data;
+        const simrv::xlen::Word wdata = req.data;
         switch (reg) {
             case simrv::mmio::kUartRegRbrThrDll:
                 if (dlab_enabled) {
@@ -271,8 +272,8 @@ void Uart::service_interrupts() {
 
 auto Uart::is_interrupt_pending() const -> bool {
     std::scoped_lock lock(rx_mutex_);
-    const bool rx_irq_enabled = (uart_ier_ & static_cast<Word>(0x1U)) != 0;
-    const bool tx_irq_enabled = (uart_ier_ & static_cast<Word>(0x2U)) != 0;
+    const bool rx_irq_enabled = (uart_ier_ & static_cast<simrv::xlen::Word>(0x1U)) != 0;
+    const bool tx_irq_enabled = (uart_ier_ & static_cast<simrv::xlen::Word>(0x2U)) != 0;
     const bool has_rx = !rx_fifo_.empty();
     return (rx_irq_enabled && has_rx) || (tx_irq_enabled && tx_irq_pending_);
 }

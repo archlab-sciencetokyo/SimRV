@@ -9,9 +9,8 @@
 #include <string_view>
 #include <vector>
 
-#include "simrv/Define.hpp"
 #include "simrv/core/SoCConfig.hpp"
-#include "simrv/xlen/Types.hpp"
+#include "simrv/xlen/ScalarTypes.hpp"
 
 namespace simrv::util {
 
@@ -27,6 +26,7 @@ struct FdtConfig {
     std::string isa_string = (SIMRV_XLEN == 64) ? "rv64imafdcbv" : "rv32imafdcbv";
     bool enable_pcie = true;
     bool enable_mmio = false;
+    bool enable_virtiofs = false;
     bool enable_framebuffer = true;
     uint64_t framebuffer_base = 0x84000000ULL;
     uint32_t framebuffer_width = 640;
