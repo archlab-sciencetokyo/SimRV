@@ -22,7 +22,7 @@ struct FdtConfig {
     std::string bootargs =
         "console=tty0 console=ttyS0,115200 earlycon=uart8250,mmio,0x10000000,115200n8 "
         "root=/dev/vda rw "
-        "loglevel=4";
+        "loglevel=7";
     std::string isa_string = (SIMRV_XLEN == 64) ? "rv64imafdcbv" : "rv32imafdcbv";
     bool enable_pcie = true;
     bool enable_mmio = false;

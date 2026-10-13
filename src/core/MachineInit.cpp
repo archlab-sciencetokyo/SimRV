@@ -445,33 +445,48 @@ auto Machine::initialize() -> std::expected<void, std::string> {
                                                        static_cast<size_t>(0x00100000U))
                    : simrv::boot::kInitDataAddress;
 
-    auto effective_isa_preset = [&]() -> isa::IsaPreset {
+    auto effective_isa_preset_bits = [&]() -> simrv::xlen::CsrValue {
         if (!config.files.cpuconfig_path.empty()) {
             simrv::pipeline::CpuModelConfig cfg{};
             if (simrv::core::load_cpu_config(config.files.cpuconfig_path, cfg)) {
-                return cfg.isa_preset;
+                auto bits = isa::isa_preset_bits(cfg.isa_preset);
+                if (cfg.has_isa_extension("zba") || cfg.has_isa_extension("zbb") ||
+                    cfg.has_isa_extension("zbc") || cfg.has_isa_extension("zbs")) {
+                    bits |= isa::misa_extension_bit(isa::IsaExtension::B);
+                }
+                return bits;
             }
         }
         if (config.cpu_model_preset.has_value()) {
             const auto profile_name =
                 simrv::pipeline::cpu_model_preset_name(*config.cpu_model_preset);
+            simrv::pipeline::CpuModelConfig cfg{};
             if (const auto resolved = simrv::core::resolve_cpu_model_path(profile_name)) {
-                simrv::pipeline::CpuModelConfig cfg{};
                 if (simrv::core::load_cpu_config(*resolved, cfg)) {
-                    return cfg.isa_preset;
+                    auto bits = isa::isa_preset_bits(cfg.isa_preset);
+                    if (cfg.has_isa_extension("zba") || cfg.has_isa_extension("zbb") ||
+                        cfg.has_isa_extension("zbc") || cfg.has_isa_extension("zbs")) {
+                        bits |= isa::misa_extension_bit(isa::IsaExtension::B);
+                    }
+                    return bits;
                 }
             }
-            return pipeline::make_cpu_model_preset(*config.cpu_model_preset).isa_preset;
+            cfg = pipeline::make_cpu_model_preset(*config.cpu_model_preset);
+            auto bits = isa::isa_preset_bits(cfg.isa_preset);
+            if (cfg.has_isa_extension("zba") || cfg.has_isa_extension("zbb") ||
+                cfg.has_isa_extension("zbc") || cfg.has_isa_extension("zbs")) {
+                bits |= isa::misa_extension_bit(isa::IsaExtension::B);
+            }
+            return bits;
         }
-        return isa::IsaPreset::GCV;
+        return config.isa.isa_preset;
     };
 
     const unsigned int model_xlen = primary_hart().cpu_model_config.supported_xlen;
     const unsigned int target_xlen = (model_xlen != 0) ? model_xlen : simrv::xlen::kXLenBits;
-    simrv::xlen::CsrValue initial_misa =
-        isa::misa_with_mxl(config.isa.misa_override ? config.isa.isa_preset
-                                                    : isa::isa_preset_bits(effective_isa_preset()),
-                           target_xlen);
+    simrv::xlen::CsrValue initial_misa = isa::misa_with_mxl(
+        config.isa.misa_override ? config.isa.isa_preset : effective_isa_preset_bits(),
+        target_xlen);
     initial_misa &= ~isa::misa_extension_bit(isa::IsaExtension::X);
     config.isa.isa_preset = initial_misa;
     if constexpr (simrv::xlen::kIsXLen64) {

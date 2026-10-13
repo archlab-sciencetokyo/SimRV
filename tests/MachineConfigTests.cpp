@@ -776,5 +776,35 @@ auto main() -> int {
         expect(to_exit_code(HostExitCode::IpcError) == 7, "HostExitCode::IpcError is 7");
     }
 
+    {
+        simrv::core::MachineConfig cfg{};
+        cfg.tui.enabled = true;
+        simrv::core::Machine machine(cfg);
+        expect(machine.initialize().has_value(), "default Machine initializes successfully");
+        expect(simrv::isa::misa_has_extension(machine.primary_hart().state().misa,
+                                              simrv::isa::IsaExtension::B),
+               "default Machine initial misa enables bitmanip extension (B)");
+    }
+
+    {
+        std::array<std::string, 3> args_str = {"SimRV", "-m", "guest.elf"};
+        std::array<char*, 3> args{};
+        for (size_t i = 0; i < args_str.size(); ++i) args[i] = args_str[i].data();
+        auto parsed = simrv::util::parse_command_line(args);
+        expect(parsed.has_value(), "default CLI args parse");
+        if (parsed) {
+            auto cfg = parsed->options.to_machine_config();
+            expect(simrv::isa::misa_has_extension(cfg.isa.isa_preset, simrv::isa::IsaExtension::B),
+                   "default CLI MachineConfig enables bitmanip extension (B)");
+            cfg.tui.enabled = true;
+            simrv::core::Machine machine(cfg);
+            expect(machine.initialize().has_value(),
+                   "CLI-configured Machine initializes successfully");
+            expect(simrv::isa::misa_has_extension(machine.primary_hart().state().misa,
+                                                  simrv::isa::IsaExtension::B),
+                   "CLI-configured Machine initial misa enables bitmanip extension (B)");
+        }
+    }
+
     return failures == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
 }

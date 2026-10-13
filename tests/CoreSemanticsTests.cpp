@@ -3071,8 +3071,8 @@ void test_dynamic_fdt_generator() {
     expect(fdt[0] == 0xd0 && fdt[1] == 0x0d && fdt[2] == 0xfe && fdt[3] == 0xed,
            "FDT magic matches 0xd00dfeed in big-endian");
     const std::string fdt_text(fdt.begin(), fdt.end());
-    expect(fdt_text.find("loglevel=4") != std::string::npos,
-           "generated FDT defaults to low-noise kernel logging for normal boots");
+    expect(fdt_text.find("loglevel=7") != std::string::npos,
+           "generated FDT displays informational kernel messages on the boot console");
     expect(fdt_text.find("earlycon=uart8250,mmio,0x10000000,115200n8") != std::string::npos,
            "Linux defaults to the standard 16550 MMIO early console, not legacy SBI console");
     expect(fdt_text.find("earlycon=sbi") == std::string::npos,

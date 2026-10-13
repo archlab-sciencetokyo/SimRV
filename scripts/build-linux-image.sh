@@ -702,6 +702,11 @@ fi
 # Always resolve new configs non-interactively to prevent prompt hangs
 make ARCH=riscv CROSS_COMPILE="$CROSS_COMPILE" olddefconfig
 
+if [[ "$PROFILE" != "debug" ]] && grep -q '^CONFIG_PRINTK_CALLER=y$' .config; then
+    print_error "Normal image profile unexpectedly enables CONFIG_PRINTK_CALLER."
+    exit 1
+fi
+
 # Build kernel (vmlinux)
 print_step "Compiling/linking Linux Kernel v${LINUX_VER}..."
 make ARCH=riscv CROSS_COMPILE="$CROSS_COMPILE" -j"$(nproc)" vmlinux
@@ -735,7 +740,7 @@ sed -i -E "s#root=([^ ]+)#root=LABEL=${ROOTFS_LABEL}#; s# rdinit=/init##" "$GENE
 if [[ "$PROFILE" == "debug" ]]; then
     # The debug image is an explicit early-userspace/recovery profile with
     # verbose kernel messages retained.
-    sed -i 's# rw loglevel=4# rw rdinit=/init loglevel=7#' "$GENERATED_DTS"
+    sed -i 's# rw loglevel=7# rw rdinit=/init loglevel=7#' "$GENERATED_DTS"
 fi
 
 # Compile DTS to DTB
