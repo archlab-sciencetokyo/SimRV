@@ -6,16 +6,16 @@ SimRV is an explainable, dual-width (RV32 / RV64) RISC-V architectural simulator
 
 ## Table of Contents
 
-1. [Architecture & Features Overview](#1-architecture--features-overview)
-2. [Installation & Quickstart](#2-installation--quickstart)
+1. [Architecture & Features Overview](#1-architecture-features-overview)
+2. [Installation & Quickstart](#2-installation-quickstart)
 3. [Command-Line Interface (CLI)](#3-command-line-interface-cli)
 4. [Interactive TUI Workbench](#4-interactive-tui-workbench)
-5. [Bare-Metal & Embedded Simulation](#5-bare-metal--embedded-simulation)
+5. [Bare-Metal & Embedded Simulation](#5-bare-metal-embedded-simulation)
 6. [Full-System Linux Emulation](#6-full-system-linux-emulation)
-7. [CPU Model Presets & Microarchitecture Tuning](#7-cpu-model-presets--microarchitecture-tuning)
+7. [CPU Model Presets & Microarchitecture Tuning](#7-cpu-model-presets-microarchitecture-tuning)
 8. [Reference Parity Verification](#8-reference-parity-verification)
 9. [Benchmarking Suite](#9-benchmarking-suite)
-10. [Troubleshooting & Reference](#10-troubleshooting--reference)
+10. [Troubleshooting & Reference](#10-troubleshooting-reference)
 
 ---
 
