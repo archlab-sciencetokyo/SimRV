@@ -715,6 +715,13 @@ auto InspectorPane::current_student_guidance() const -> PageGuidance {
 
     bool const is_csr = (simrv::pipeline::operation::info(context.op_id).side_effects &
                          simrv::pipeline::operation::SideEffectFlags::Csr) != 0;
+    bool const is_cfu = simrv::pipeline::operation::is_cfu(context.op_id);
+    uint32_t const cfu_f7 = static_cast<uint32_t>(context.funct7);
+    uint32_t const cfu_f3 = static_cast<uint32_t>(context.funct3);
+    bool const cfu_plugin = cpu.cfu_unit.has_plugin();
+    std::string cfu_plugin_path = cfu_plugin ? std::string(cpu.cfu_unit.plugin_path()) : "";
+    uint32_t const cfu_lat = cpu.cfu_unit.query_latency(cfu_f7, cfu_f3);
+    uint32_t const cfu_stalls = cpu.cfu_unit.query_stall_cycles(cfu_f7, cfu_f3);
 
     return guidance_for_context(
         {.page = page_,
@@ -734,7 +741,14 @@ auto InspectorPane::current_student_guidance() const -> PageGuidance {
              simrv::xlen::satp_translation_enabled(st.satp, cpu.effective_data_xlen()),
          .is_vector_op = simrv::isa::is_vector_op(context.op_id),
          .is_csr_op = is_csr,
-         .csr_address = static_cast<uint32_t>(context.imm & 0xFFF)});
+         .csr_address = static_cast<uint32_t>(context.imm & 0xFFF),
+         .is_cfu_op = is_cfu,
+         .cfu_funct7 = cfu_f7,
+         .cfu_funct3 = cfu_f3,
+         .cfu_has_plugin = cfu_plugin,
+         .cfu_plugin_path = std::move(cfu_plugin_path),
+         .cfu_latency = cfu_lat,
+         .cfu_stall_cycles = cfu_stalls});
 }
 
 auto InspectorPane::render_guidance_row(int row_idx, int width) -> std::string {

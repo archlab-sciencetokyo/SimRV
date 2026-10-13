@@ -1324,8 +1324,13 @@ auto get_description(OperationId op_id) -> std::pair<std::string_view, std::stri
                        "Vector Check Assertion. Validates vector registers or states for "
                        "debugging/test harness purposes."};
         arr[CFU] = {"CFU",
-                    "Custom Function Unit instruction. Dispatches an application-specific "
-                    "accelerator operation on the CUSTOM_0 opcode space."};
+                    "Custom Function Unit instruction (CUSTOM_0 opcode space). Dispatches an "
+                    "application-specific coprocessor/accelerator operation parameterized by "
+                    "funct3 (function select) "
+                    "and funct7 (custom sub-operation). Consumes scalar integer registers rs1 and "
+                    "rs2, returning the "
+                    "hardware computation result in rd with custom execution latency and pipeline "
+                    "stall cycles."};
 
         // Whole register moves
         arr[VMV1R_V] = {
@@ -2742,6 +2747,21 @@ auto get_isa_extension_name(OperationId op_id) -> std::string_view {
         return "Custom";
     }
     return "Unknown";
+}
+
+auto get_cfu_details(uint32_t funct7, uint32_t funct3) -> CfuDetails {
+    std::string desc = std::format(
+        "Dispatches custom function {} (sub-operation 0x{:02X}) to the hardware Custom Function "
+        "Unit "
+        "(CFU). Operands rs1 and rs2 are passed to accelerator logic; computed result writes to "
+        "rd.",
+        funct3, funct7);
+    return CfuDetails{
+        .funct3 = funct3,
+        .funct7 = funct7,
+        .name = "CFU",
+        .description = std::move(desc),
+    };
 }
 
 }  // namespace simrv::util

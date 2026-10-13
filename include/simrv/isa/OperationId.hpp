@@ -703,6 +703,8 @@ constexpr OperationId kOpRangeVectorEnd = VWSLL_VI;
     return op_id >= kOpRangeVectorBegin && op_id <= kOpRangeVectorEnd;
 }
 
+[[nodiscard]] constexpr auto is_cfu_op(OperationId op_id) noexcept -> bool { return op_id == CFU; }
+
 /// @brief Unified count of all valid simulator operations
 constexpr size_t kOperationIdCount = static_cast<size_t>(OperationIdCount);
 

@@ -72,6 +72,21 @@ auto get_operation_details(isa::OperationId op_id) -> std::pair<std::string_view
 }
 
 /**
+ * @brief Structured educational metadata for a Custom Function Unit (CFU) instruction.
+ */
+struct CfuDetails {
+    uint32_t funct3 = 0;
+    uint32_t funct7 = 0;
+    std::string_view name = "CFU";
+    std::string description;
+};
+
+/**
+ * @brief Retrieve educational details for a CFU operation.
+ */
+[[nodiscard]] auto get_cfu_details(uint32_t funct7, uint32_t funct3) -> CfuDetails;
+
+/**
  * @brief Get the ISA extension name (e.g., RV32I, RV32M, Privileged) that an instruction belongs
  * to.
  */

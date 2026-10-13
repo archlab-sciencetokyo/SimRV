@@ -43,6 +43,13 @@ struct GuidanceContext {
     bool is_vector_op = false;
     bool is_csr_op = false;
     uint32_t csr_address = 0;
+    bool is_cfu_op = false;
+    uint32_t cfu_funct7 = 0;
+    uint32_t cfu_funct3 = 0;
+    bool cfu_has_plugin = false;
+    std::string cfu_plugin_path{};
+    uint32_t cfu_latency = 1;
+    uint32_t cfu_stall_cycles = 0;
 };
 
 [[nodiscard]] auto guidance_for_page(TuiRegPage page, bool cycle_accurate) -> PageGuidance;

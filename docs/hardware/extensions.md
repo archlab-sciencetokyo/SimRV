@@ -41,6 +41,59 @@ CFU/plugin latency values count total cycles including the issue cycle; pipeline
 settings instead count additional stall cycles after issue.
 The current decoder intentionally reserves the complete `custom-0` opcode for the configured CFU.
 
+### Compiling and Loading a Dynamic CFU Plugin
+
+CFU plugins interface with SimRV via a lightweight C ABI defined in `simrv/execute/CfuUnit.hpp`.
+To build a custom accelerator shared library:
+
+```c
+// my_cfu.c
+#include <stdint.h>
+
+struct SimRvCfuPlugin {
+    uint32_t (*execute)(uint32_t funct7, uint32_t funct3, uint32_t src1, uint32_t src2,
+                        uint32_t* latency_cycles);
+    void (*reset)(void);
+};
+
+static uint32_t my_execute(uint32_t funct7, uint32_t funct3, uint32_t src1, uint32_t src2,
+                           uint32_t* latency_cycles) {
+    if (latency_cycles) {
+        // Report execution latency in cycles (total cycles, including issue)
+        *latency_cycles = (funct3 == 1) ? 3 : 1;
+    }
+    // Custom arithmetic / bitwise accelerator operation
+    return (src1 ^ src2) + funct7;
+}
+
+static void my_reset(void) {}
+
+static const struct SimRvCfuPlugin kPlugin = {
+    .execute = my_execute,
+    .reset = my_reset,
+};
+
+const struct SimRvCfuPlugin* simrv_cfu_init(void) {
+    return &kPlugin;
+}
+```
+
+Compile the plugin into a position-independent shared object (`.so`):
+
+```bash
+# Using GCC
+gcc -O3 -shared -fPIC -o libcfu_custom.so my_cfu.c
+
+# Using Clang
+clang -O3 -shared -fPIC -o libcfu_custom.so my_cfu.c
+```
+
+Run SimRV with the compiled accelerator plugin:
+
+```bash
+simrv --cfu-plugin=./libcfu_custom.so --cpu-preset=cfu-provingground target_program.elf
+```
+
 ---
 
 ## 1. Register the Extension and Opcodes

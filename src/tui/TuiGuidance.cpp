@@ -244,6 +244,20 @@ auto guidance_for_context(const GuidanceContext& context) -> PageGuidance {
         guidance.next_action = KeyAction::ToggleExplain;
         guidance.next_hint = "Explain the vector instruction bitfields.";
         guidance.glossary_topic = 0;
+    } else if (context.is_cfu_op) {
+        guidance.title = std::format("Custom Function Unit (CFU): func{} (0x{:02X})",
+                                     context.cfu_funct3, context.cfu_funct7);
+        std::string backend_desc = context.cfu_has_plugin ? "external accelerator plugin"
+                                                          : "built-in hardware model (rvproc_cfu)";
+        guidance.meaning = std::format(
+            "Executing custom hardware instruction on {} with {} cycle latency ({} stall(s)).",
+            backend_desc, context.cfu_latency, context.cfu_stall_cycles);
+        guidance.relationship =
+            "CFU instructions dispatch domain-specific coprocessor operations directly from the "
+            "pipeline, writing results to integer register rd without standard ALU sequences.";
+        guidance.next_action = KeyAction::ToggleExplain;
+        guidance.next_hint = "Inspect CFU accelerator function and timing.";
+        guidance.glossary_topic = 1;
     }
 
     return guidance;

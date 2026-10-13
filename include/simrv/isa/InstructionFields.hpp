@@ -38,6 +38,9 @@ enum class Opcode : uint8_t {
     System = 0x73,   ///< RV32I/RV64I: System instructions (privilege calls, CSR access)
     OpV = 0x57,      ///< RISC-V Vector Extension: Vector instructions
     Custom0 = 0x0B,  ///< RISC-V Custom/Non-standard Opcode Space 0
+    Custom1 = 0x2B,  ///< RISC-V Custom/Non-standard Opcode Space 1
+    Custom2 = 0x5B,  ///< RISC-V Custom/Non-standard Opcode Space 2
+    Custom3 = 0x7B,  ///< RISC-V Custom/Non-standard Opcode Space 3
 };
 
 /**

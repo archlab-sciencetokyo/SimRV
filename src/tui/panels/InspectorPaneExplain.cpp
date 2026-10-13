@@ -507,6 +507,10 @@ auto format_assembly_r(const simrv::pipeline::PipelineContext& ctx, std::string_
     if (is_unary_float_op(ctx.op_id)) {
         return std::format("{} {}, {}", mnemonic, rd_name, rs1_name);
     }
+    if (ctx.op_id == CFU) {
+        return std::format("cfu func{}, {}, {}, {} [f7=0x{:02X}]", std::to_underlying(ctx.funct3),
+                           rd_name, rs1_name, rs2_name, static_cast<uint32_t>(ctx.funct7));
+    }
     return std::format("{} {}, {}, {}", mnemonic, rd_name, rs1_name, rs2_name);
 }
 
@@ -1227,6 +1231,48 @@ auto InspectorPane::get_explain_rows(int width) -> std::vector<std::string> {
                 for (const auto& line : csr_desc_wrapped) {
                     explain_rows.push_back(format_to_width("  " + line, width));
                 }
+            }
+        }
+        explain_rows.push_back(format_to_width("", width));
+    }
+
+    bool const is_cfu = simrv::pipeline::operation::is_cfu(ctx.op_id);
+    if (is_cfu) {
+        uint32_t const f3 = std::to_underlying(ctx.funct3);
+        uint32_t const f7 = static_cast<uint32_t>(ctx.funct7);
+        auto const& cfu_unit = current_cpu().cfu_unit;
+        bool const has_plugin = cfu_unit.has_plugin();
+        uint32_t const latency = cfu_unit.query_latency(f7, f3);
+        uint32_t const stalls = cfu_unit.query_stall_cycles(f7, f3);
+
+        explain_rows.push_back(section_line("Custom Function Unit (CFU) Profile", width));
+        explain_rows.push_back(format_to_width(
+            std::format("  {}CFU Opcode  : {}custom-0 (0x0B)\033[0m", kThemeText, kThemePeach),
+            width));
+        explain_rows.push_back(
+            format_to_width(std::format("  {}Function ID : {}func{} (funct3 = 0b{:03b})\033[0m",
+                                        kThemeText, kThemeMint, f3, f3),
+                            width));
+        explain_rows.push_back(
+            format_to_width(std::format("  {}Sub-Opcode  : {}0x{:02X} (funct7 = 0b{:07b})\033[0m",
+                                        kThemeText, kThemeMint, f7, f7),
+                            width));
+        std::string backend_str = has_plugin
+                                      ? std::format("Dynamic Plugin ({})", cfu_unit.plugin_path())
+                                      : "Built-in Model (rvproc_cfu / bitwise OR)";
+        explain_rows.push_back(format_to_width(
+            std::format("  {}Backend     : {}{}\033[0m", kThemeText, kThemeVal, backend_str),
+            width));
+        explain_rows.push_back(format_to_width(
+            std::format("  {}Model Timing: {}{} cycle(s) ({} issue + {} stall)\033[0m", kThemeText,
+                        kThemeVal, latency, latency > 0 ? 1 : 0, stalls),
+            width));
+
+        auto cfu_details = simrv::util::get_cfu_details(f7, f3);
+        if (!cfu_details.description.empty()) {
+            auto cfu_desc_wrapped = wrap_text(cfu_details.description, width - 4);
+            for (const auto& line : cfu_desc_wrapped) {
+                explain_rows.push_back(format_to_width("  " + line, width));
             }
         }
         explain_rows.push_back(format_to_width("", width));

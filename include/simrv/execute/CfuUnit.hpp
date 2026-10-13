@@ -11,7 +11,50 @@
 
 namespace simrv::execute {
 
-/// C ABI for dynamic shared-library CFU plugins (.so).
+/**
+ * @brief C ABI for dynamic shared-library CFU plugins (.so).
+ *
+ * ### Authoring and Compiling a CFU Plugin
+ * A dynamic CFU plugin is a standard shared library exporting `simrv_cfu_init()`:
+ *
+ * ```c
+ * #include <stdint.h>
+ *
+ * static uint32_t my_cfu_execute(uint32_t funct7, uint32_t funct3,
+ *                                 uint32_t src1, uint32_t src2,
+ *                                 uint32_t* latency_cycles) {
+ *     if (latency_cycles != NULL) {
+ *         *latency_cycles = 1; // total execution latency including issue cycle
+ *     }
+ *     return src1 ^ src2;     // custom accelerator computation
+ * }
+ *
+ * static void my_cfu_reset(void) {
+ *     // Reset internal accelerator state (if any)
+ * }
+ *
+ * static const struct SimRvCfuPlugin kPlugin = {
+ *     .execute = my_cfu_execute,
+ *     .reset = my_cfu_reset,
+ * };
+ *
+ * const struct SimRvCfuPlugin* simrv_cfu_init(void) {
+ *     return &kPlugin;
+ * }
+ * ```
+ *
+ * Compile with GCC or Clang:
+ * ```bash
+ * gcc -O3 -shared -fPIC -o libcfu_custom.so my_cfu.c
+ * # or for C++:
+ * g++ -O3 -shared -fPIC -o libcfu_custom.so my_cfu.cpp
+ * ```
+ *
+ * Run with SimRV CLI or configuration preset:
+ * ```bash
+ * simrv --cfu-plugin=./libcfu_custom.so guest.elf
+ * ```
+ */
 extern "C" {
 
 struct SimRvCfuPlugin {

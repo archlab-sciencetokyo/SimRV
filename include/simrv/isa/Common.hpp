@@ -400,6 +400,10 @@ constexpr auto get_instruction_format(Opcode op) -> InstFormat {
         case Opcode::Amo:
         case Opcode::OpFp:
         case Opcode::OpV:
+        case Opcode::Custom0:
+        case Opcode::Custom1:
+        case Opcode::Custom2:
+        case Opcode::Custom3:
             return InstFormat::R;
         case Opcode::MAdd:
         case Opcode::MSub:

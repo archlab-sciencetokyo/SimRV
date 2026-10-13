@@ -16,6 +16,7 @@
 #include "simrv/core/TrapController.hpp"
 #include "simrv/debug/BreakpointManager.hpp"
 #include "simrv/debug/SymbolTable.hpp"
+#include "simrv/isa/Common.hpp"
 #include "simrv/memory/MemorySubsystem.hpp"
 #include "simrv/memory/MemoryUtil.hpp"
 #include "simrv/pipeline/OperationInfo.hpp"
@@ -671,6 +672,34 @@ void test_page_guidance() {
                                           .is_vector_op = true});
     expect(vec_guidance.title.contains("Vector") && vec_guidance.meaning.contains("element lanes"),
            "vector instructions receive vector lane guidance");
+
+    auto cfu_guidance = simrv::tui::guidance_for_context({.operation = simrv::isa::OperationId::CFU,
+                                                          .image_loaded = true,
+                                                          .is_cfu_op = true,
+                                                          .cfu_funct7 = 0x05,
+                                                          .cfu_funct3 = 4,
+                                                          .cfu_has_plugin = false,
+                                                          .cfu_latency = 1,
+                                                          .cfu_stall_cycles = 0});
+    expect(
+        cfu_guidance.title.contains("Custom Function Unit") && cfu_guidance.title.contains("func4"),
+        "CFU instruction receives dedicated student guidance with func index");
+    expect(cfu_guidance.meaning.contains("rvproc_cfu") && cfu_guidance.glossary_topic == 1,
+           "CFU student guidance references built-in hardware model and pipeline glossary");
+
+    auto cfu_plugin_guidance =
+        simrv::tui::guidance_for_context({.operation = simrv::isa::OperationId::CFU,
+                                          .image_loaded = true,
+                                          .is_cfu_op = true,
+                                          .cfu_funct7 = 0x10,
+                                          .cfu_funct3 = 1,
+                                          .cfu_has_plugin = true,
+                                          .cfu_plugin_path = "/path/libcfu.so",
+                                          .cfu_latency = 3,
+                                          .cfu_stall_cycles = 2});
+    expect(cfu_plugin_guidance.meaning.contains("external accelerator plugin") &&
+               cfu_plugin_guidance.meaning.contains("3 cycle latency"),
+           "CFU plugin guidance reports external plugin and multi-cycle stall latency");
 }
 
 void test_cleanup_input_boundaries() {
@@ -1199,6 +1228,17 @@ void test_category_groups_and_glossary() {
                pipeline_text.contains("Load-use interlock"),
            "pipeline glossary uses nested bullets for hazard mitigations");
 
+    std::vector<std::string> cfu_pipeline_rows;
+    simrv::tui::modals::GlossaryModal::render(
+        cfu_pipeline_rows,
+        [&cfu_pipeline_rows](const std::string& row) { cfu_pipeline_rows.push_back(row); }, 1, 15,
+        30, 78);
+    std::string cfu_pipeline_text;
+    for (auto const& row : cfu_pipeline_rows) cfu_pipeline_text += row + '\n';
+    expect(cfu_pipeline_text.contains("Custom function units") &&
+               cfu_pipeline_text.contains("CUSTOM_0"),
+           "pipeline glossary includes CFU accelerator concepts");
+
     std::vector<std::string> scrolled_pipeline_rows;
     simrv::tui::modals::GlossaryModal::render(
         scrolled_pipeline_rows,
@@ -1674,6 +1714,19 @@ void test_instruction_explainer_and_csr_metadata() {
     expect(simrv::core::trap_cause_name(to_trap_cause(ExceptionCode::HardwareError)) ==
                "Hardware error",
            "HardwareError trap cause is named canonically");
+
+    // 5. CFU format, traits, and details
+    expect(simrv::isa::get_instruction_format(simrv::isa::Opcode::Custom0) ==
+               simrv::isa::InstFormat::R,
+           "Custom0 opcode classifies as R-Type format");
+    expect(simrv::isa::is_cfu_op(simrv::isa::OperationId::CFU),
+           "CFU operation identifies as CFU op");
+
+    auto cfu_details = simrv::util::get_cfu_details(0x05, 4);
+    expect(cfu_details.name == "CFU" && cfu_details.funct3 == 4 && cfu_details.funct7 == 0x05,
+           "CFU details structure carries correct metadata");
+    expect(cfu_details.description.contains("custom function 4"),
+           "CFU description includes function selector");
 }
 
 void test_inspector_panels_traits_and_scoreboard() {

@@ -276,4 +276,27 @@ ACLINT/APLIC/IMSIC tests apply queued interrupt-line changes at the CPU boundary
   - Added unit test coverage for CSR metadata queries, vector operation details, ISA classification, Privileged 1.13 trap naming, and contextual guidance scenarios.
   - Re-verified dual-architecture validation gates: `rv64-release` (49/49 passed, 100%) and `rv32-release` (49/49 passed, 100%).
 
+### Pass 11: Custom Function Unit (CFU) Guidance, Profiling, Format Classification & Plugin ABI
+- **Instruction Format Classification (`Common.hpp`, `InstructionFields.hpp`, `OperationId.hpp`)**:
+  - Resolved `Opcode::Custom0..Custom3` returning `InstFormat::Unknown` in `get_instruction_format()` by classifying them canonically as `InstFormat::R`, unlocking complete R-type bitfield visualization, operand extraction, and dataflow breakdown for custom instructions.
+  - Added standard `Custom1` (0x2B), `Custom2` (0x5B), and `Custom3` (0x7B) opcode discriminants to `InstructionFields.hpp`.
+  - Added `simrv::isa::is_cfu_op(OperationId op_id)` helper.
+- **Instruction Explainer & CFU Profiling (`InstructionExplainer.hpp`, `InstructionExplainer.cpp`, `InspectorPaneExplain.cpp`)**:
+  - Introduced `CfuDetails` struct and `get_cfu_details(uint32_t funct7, uint32_t funct3)` returning pedagogical metadata for custom function index (`funct3` 0..7) and sub-operations (`funct7` 0..127).
+  - Enriched `arr[CFU]` educational description in `kOpDescriptions` with comprehensive explanation of the `custom-0` opcode space, coprocessor operand flow, and plugin execution.
+  - Added dedicated interactive "Custom Function Unit (CFU) Profile" in `InspectorPaneExplain.cpp` displaying: custom opcode, function selector, sub-opcode, active backend (built-in RTL model `rvproc_cfu` vs external `.so` plugin), execution timing (latency + pipeline stall cycles), and operand dataflow.
+  - Formatted CFU assembly output canonically as `cfu func<f3>, <rd>, <rs1>, <rs2> [f7=0x<f7>]`.
+- **Contextual CFU Student Guidance (`TuiGuidance.hpp`, `TuiGuidance.cpp`, `InspectorPane.cpp`)**:
+  - Expanded `GuidanceContext` with runtime CFU fields: `is_cfu_op`, `cfu_funct7`, `cfu_funct3`, `cfu_has_plugin`, `cfu_plugin_path`, `cfu_latency`, and `cfu_stall_cycles`.
+  - Populated CFU fields from authoritative `cpu.cfu_unit` in `InspectorPane::current_student_guidance()`.
+  - Implemented contextual student guidance in `guidance_for_context()` detailing accelerator function execution, latency, stall cycles, and direct pipeline integration, linked to Glossary Topic 1.
+- **Plugin ABI Documentation & Build Guidance (`CfuUnit.hpp`, `extensions.md`, `GlossaryModal.cpp`)**:
+  - Documented the lightweight `SimRvCfuPlugin` C ABI (`execute`, `reset`, `simrv_cfu_init`) with working C sample code and compilation instructions (`gcc -O3 -shared -fPIC -o libcfu.so`) directly in `CfuUnit.hpp` and `docs/hardware/extensions.md`.
+  - Added "Custom Function Units (CFU) & Accelerators" concepts to Topic 1 ("Pipeline Stages & Hazards") in `GlossaryModal.cpp`.
+- **Verification & Testing (`TuiFrameworkTests.cpp`, `CfuProvingGroundTests.cpp`)**:
+  - Added unit test assertions verifying `get_instruction_format(Custom0) == InstFormat::R`, `is_cfu_op`, `get_cfu_details`, CFU student guidance (built-in model and external plugin), and glossary Topic 1 accelerator concepts.
+  - Re-verified dual-architecture validation gates: `rv64-release` (49/49 passed, 100%) and `rv32-release` (49/49 passed, 100%).
+  - `clang-format` and `release_check.py` 100% clean.
+
+
 
