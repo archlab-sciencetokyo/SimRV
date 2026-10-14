@@ -10,6 +10,7 @@
 #include <algorithm>
 #include <cctype>
 #include <charconv>
+#include <cstdlib>
 #include <format>
 #include <print>
 #include <span>
@@ -1377,6 +1378,15 @@ auto parse_command_line(std::span<char* const> args) -> std::expected<ParseResul
     if (result.options.explicit_cli_mode && result.options.explicit_tui_mode) {
         return std::unexpected("--cli and --tui are mutually exclusive");
     }
+    if (result.options.fn_dvtree.empty()) {
+        if (const char* env_dtb = std::getenv("SIMRV_LINUX_DTB"); env_dtb && *env_dtb) {
+            result.options.fn_dvtree = env_dtb;
+        }
+    }
+    if (!result.options.appmode && result.options.fn_dvtree.empty()) {
+        return std::unexpected(
+            "Linux boot requires a device tree; pass -f/--dtb <FILE> or set SIMRV_LINUX_DTB");
+    }
     if (!result.options.mission.empty() &&
         (!result.options.class_mode || !result.options.explicit_tui_mode)) {
         return std::unexpected("--mission requires --class and --tui");
@@ -1718,7 +1728,9 @@ auto needs_memory_image(const ParseResult& result) -> bool {
                .description = "Attach a VirtIO block storage image."},
               {.option = "--virtiofs <DIR>",
                .description = "Share a host directory with the guest through VirtIO-FS."},
-              {.option = "-f, --fdt, --dtb <FILE>", .description = "Load a device tree blob."}}},
+              {.option = "-f, --fdt, --dtb <FILE>",
+               .description = "Linux device tree (required; patched for configured RAM and harts; "
+                              "defaults to SIMRV_LINUX_DTB)."}}},
         {.title = "Architecture and hardware",
          .entries = {{.option = "-j, --harts, --smp <N>",
                       .description = "Override the SoC profile hart count (1–16)."},

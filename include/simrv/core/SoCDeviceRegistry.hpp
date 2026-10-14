@@ -16,8 +16,8 @@ namespace simrv::core {
  * Resolves preset defaults and explicit device policy into a single device view.
  *
  * The registry deliberately contains only declarative information. Runtime device
- * factories, FDT generation, and future HDL generation can consume the same view
- * without duplicating policy decisions.
+ * factories and SoC manifest generation can consume the same view without
+ * duplicating policy decisions. Linux device trees are supplied by the user.
  */
 class SoCDeviceRegistry final {
    public:

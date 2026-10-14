@@ -4,7 +4,9 @@
 #include <cstdlib>
 #include <cstring>
 #include <fstream>
+#include <iterator>
 #include <string>
+#include <vector>
 
 #include "MachineRuntime.hpp"
 #include "simrv/core/Boot.hpp"
@@ -26,7 +28,7 @@
 #include "simrv/device/Rtc.hpp"
 #include "simrv/device/Uart.hpp"
 #include "simrv/device/pci/PcieRootComplex.hpp"
-#include "simrv/util/FdtGenerator.hpp"
+#include "simrv/util/FdtPatcher.hpp"
 #include "simrv/xlen/RegisterTypes.hpp"
 
 namespace simrv::core {
@@ -619,47 +621,25 @@ auto Machine::initialize() -> std::expected<void, std::string> {
     }
 
     if (linux_boot) {
-        const bool is_explicit_custom_dtb = !config.files.dvtree_path.empty() &&
-                                            config.files.dvtree_path != "dynamic" &&
-                                            config.files.dvtree_path != "NONE" &&
-                                            !(config.execution.num_harts > 1 &&
-                                              config.files.dvtree_path.ends_with("devicetree.dtb"));
-        if (is_explicit_custom_dtb) {
-            if (dtb_offset >= effective_dram_size) {
-                simrv::log::error("device-tree load offset is outside DRAM");
-                return std::unexpected("device-tree load offset is outside DRAM");
-            }
-            const auto dt_cap = static_cast<std::size_t>(effective_dram_size - dtb_offset);
-            // `ram` above captures geometry before allocation. Reacquire the view so the DTB
-            // loader receives the live backing pointer as well as the resolved runtime geometry.
-            const auto initialized_ram = ram_view();
-            const simrv::xlen::Address dtb_address = initialized_ram.base() + dtb_offset;
-            if (!initialized_ram.contains(dtb_address, dt_cap)) {
-                simrv::log::error("device-tree region is outside DRAM");
-                return std::unexpected("device-tree region is outside DRAM");
-            }
-            load_image_into_ram(config.files.dvtree_path,
-                                {initialized_ram.unchecked_ptr(dtb_address), dtb_address,
-                                 static_cast<simrv::xlen::Address>(dt_cap)},
-                                "device-tree", tui_enabled());
-        } else {
-            const auto composition = platform_composition(config.platform_profile);
-            simrv::util::FdtConfig const fdt_cfg{
-                .num_harts = config.execution.num_harts,
-                .dram_base = config.memory.dram_base,
-                .dram_size = effective_dram_size,
-                .xlen = simrv::xlen::kXLenBits,
-                .enable_pcie = composition.pcie,
-                .enable_mmio = composition.mmio,
-                .enable_virtiofs = !config.files.virtiofs_path.empty(),
-                .enable_framebuffer = true,
-                .soc = config.soc,
-            };
-            auto fdt_blob = simrv::util::FdtGenerator::generate(fdt_cfg);
-            if (fdt_blob.size() <= static_cast<std::size_t>(0x00100000U)) {
-                std::memcpy(ram_data() + dtb_offset, fdt_blob.data(), fdt_blob.size());
-            }
-        }
+        if (config.files.dvtree_path.empty())
+            return std::unexpected("Linux boot requires a device tree blob");
+        if (dtb_offset >= effective_dram_size)
+            return std::unexpected("device-tree load offset is outside DRAM");
+        std::ifstream input(config.files.dvtree_path, std::ios::binary);
+        if (!input) return std::unexpected("cannot open device tree: " + config.files.dvtree_path);
+        std::vector<uint8_t> input_blob{std::istreambuf_iterator<char>(input),
+                                        std::istreambuf_iterator<char>()};
+        auto patched = simrv::util::patch_fdt(input_blob, config.memory.dram_base,
+                                              effective_dram_size, config.execution.num_harts);
+        if (!patched) return std::unexpected(patched.error());
+        const auto dt_cap = static_cast<std::size_t>(effective_dram_size - dtb_offset);
+        if (patched->size() > dt_cap)
+            return std::unexpected("patched device tree does not fit in guest DRAM");
+        const auto initialized_ram = ram_view();
+        const simrv::xlen::Address dtb_address = initialized_ram.base() + dtb_offset;
+        if (!initialized_ram.contains(dtb_address, patched->size()))
+            return std::unexpected("device-tree region is outside DRAM");
+        std::memcpy(initialized_ram.unchecked_ptr(dtb_address), patched->data(), patched->size());
     }
 
     if (config.files.disk_enabled) {

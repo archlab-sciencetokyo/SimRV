@@ -52,7 +52,10 @@ Expose an existing host directory to Linux guests through VirtIO-FS. Guest write
 the selected directory and persist after SimRV exits.
 .TP
 .B \-f, \-\-fdt, \-\-dtb \fIfile\fR
-Load a device-tree blob for operating-system boot.
+Load the required device tree for Linux boot. If omitted, SimRV reads
+.B SIMRV_LINUX_DTB
+from the environment. SimRV patches the RAM range and CPU status to match configured memory and
+hart count; the blob must contain enough CPU nodes for all configured harts.
 .TP
 .B \-H, \-\-tohost-addr \fIaddress\fR
 Set the guest \fBtohost\fR termination address.

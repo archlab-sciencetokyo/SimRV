@@ -3,8 +3,12 @@
 All notable changes to SimRV are documented here.
 Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## Unreleased
+## [v3.0.0-rc.10] — 2026-10-14
 
+- **Device Tree Architecture Modernization**:
+  - Replaced the in-tree synthetic device tree generator (`FdtGenerator`) with a lightweight, robust device tree patcher (`FdtPatcher`).
+  - Standardized full-system Linux boots on user-supplied or environment-configured base DTBs (`-f/--dtb`, `--buildroot-output`, or `SIMRV_LINUX_DTB`), automatically patching guest memory range and SMP core availability while preserving original hardware nodes, interrupt maps, and kernel boot arguments.
+  - Retired the legacy synthetic `--dtb dynamic` option in favor of authoritative DTBs.
 - **Ratified RISC-V Specification Alignment**:
   - Aligned with Privileged Architecture 1.13: added standard exception causes `SoftwareCheck` (cause 18) and `HardwareError` (cause 19).
   - Implemented standard ratified CSRs with full M/S/U privilege enforcement and RV32/RV64 legality checks:
@@ -23,7 +27,6 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   - Fully retired legacy compatibility aliases `CSRValue`, `CSRAddress`, `CsrAddress`, and `GCBV`.
   - Harmonized the entire codebase onto canonical PascalCase domain types `simrv::xlen::CsrValue`, `simrv::xlen::CsrNumber`, and `simrv::isa::IsaPreset::GCZBV`.
   - Added templated implicit construction to `CsrNumber` from `Csr` enum and integral types, eliminating verbose boilerplate.
-
 
 ## [v3.0.0-rc.9] — 2026-10-08
 

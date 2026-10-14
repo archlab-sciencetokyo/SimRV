@@ -65,14 +65,15 @@ change its register semantics. The [ArchLab RVComp example platform](https://git
 TX ring windows are configurable with `region.rxbuf.base` / `region.rxbuf.size` and
 `region.txbuf.base` / `region.txbuf.size`. The `mac_address` field accepts a 48-bit hexadecimal
 value. These values feed the normalized SoC map used
-for runtime registration, FDT generation, and the SoC manifest. Check the resolved result with:
+for runtime registration and the SoC manifest. Linux device trees are supplied separately by the
+user and should describe the configured guest devices. Check the resolved result with:
 
 ```bash
 simrv --dump-soc-manifest rvcomp /tmp/my-core-soc.json
 ```
 
 Replace `rvcomp` with the applicable SoC preset. For custom CPU/SoC files, use the CPU model
-configuration workflow and inspect the platform in a guest boot or generated FDT.
+configuration workflow and inspect the platform in a guest boot.
 
 ### Reserve a device window with a dummy model
 
@@ -97,7 +98,7 @@ read_value = 0xffffffff
 Select an instance with `--trace-device watchdog` or `--trace-device fpga-control`, for example
 `simrv --cli -m program.elf --arch-trace trace.jsonl --trace-level 1 --trace-device watchdog`.
 Select the `mmio_write` event when using trace event filters to retain writes to that window. Dummy
-windows appear in generated FDT and SoC manifests, but do not implement the hardware named by their
+windows appear in the SoC manifest, but do not implement the hardware named by their
 compatible string. The section suffix supplies the trace name; set `name = "..."` to choose a
 different name.
 
@@ -140,7 +141,7 @@ is owned by the machine runtime and installed on the system bus. If no factory i
 range remains present as an inert constant-read, ignored-write
 device, so a custom SoC config can still be inspected and traced without the model. IRQ wiring is
 not part of this factory API yet; use `irq = 0`. The compatible, range, and device name are emitted
-to the generated FDT and SoC manifest in either case. `Machine::device_registry()` is scoped to one
+to the SoC manifest in either case. `Machine::device_registry()` is scoped to one
 machine and also constructs SimRV's built-in reset-control device through the same factory path.
 
 !!! warning "Custom C++ device factories do not wire interrupts yet"
@@ -197,8 +198,8 @@ it in only one code path:
 3. Construct and own the device during machine initialization, then register it on the system bus
    according to the device policy.
 4. Connect interrupts, DMA, reset, and any transport or backing storage it requires.
-5. Add generated FDT and `--dump-soc-manifest` representation when the guest or platform tooling
-   needs to discover the device. Keep the runtime map, FDT, and manifest consistent.
+5. Add `--dump-soc-manifest` representation when platform tooling needs to discover the device.
+   Update the supplied guest device tree separately when Linux needs to discover it.
 6. Add device-level register tests, address-map/config tests, and guest-facing integration
    coverage. Validate both RV32 and RV64 builds when the device is available in both.
 
@@ -213,7 +214,7 @@ to custom RTL hardware just to make it discoverable.
 - Check timing against the target's documented cycle convention and, for RTL-backed models, run
   the applicable cycle-accuracy/parity gates.
 - Confirm the complete address map has no overlaps and matches the intended reset/boot setup.
-- Check that the generated FDT and SoC manifest agree with registered runtime devices.
+- Check that the supplied guest device tree and SoC manifest agree with registered runtime devices.
 - Exercise register side effects, invalid accesses, interrupts, reset, and DMA boundaries as
   applicable.
 - Run the relevant unit and integration tests plus RV32/RV64 release gates. See the

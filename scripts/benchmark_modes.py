@@ -208,7 +208,7 @@ def main():
                         help="SMP scheduling mode to benchmark")
     parser.add_argument("--os", action="store_true", help="benchmark the Linux OS runner")
     parser.add_argument("--disk", help="Linux root disk image (required with --os)")
-    parser.add_argument("--dtb", help="optional Linux device-tree blob")
+    parser.add_argument("--dtb", default=os.environ.get("SIMRV_LINUX_DTB"), help="Linux device-tree blob (required for --os; defaults to SIMRV_LINUX_DTB)")
     parser.add_argument("--tohost")
     parser.add_argument("--limit", type=int, default=20_000_000)
     parser.add_argument("--harts", type=int, default=1)
@@ -228,6 +228,8 @@ def main():
         args.limit = 10000000000
     if args.os and not args.disk:
         parser.error("--disk is required with --os")
+    if args.os and not args.dtb:
+        parser.error("--dtb or SIMRV_LINUX_DTB is required with --os")
     if not 1 <= args.harts <= 64:
         parser.error("--harts must be between 1 and 64")
 

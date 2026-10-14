@@ -490,15 +490,15 @@ simrv --cli -m build/my_program.elf -H 0x80001000
 
 ## 6. Full-System Linux Emulation
 
-SimRV boots full Linux distributions with OpenSBI and dynamic device-tree generation.
+SimRV boots full Linux distributions with OpenSBI and a supplied device tree. SimRV patches the
+tree's RAM range and CPU status from the configured memory size and hart count.
 
 ```bash
 # Launch the bundled OpenSBI + Linux image with its root filesystem
 simrv --os \
       -m linux-images/rv64/alpine-gui/opensbi-linux-payload.elf \
       -D linux-images/rv64/alpine-gui/rootfs.img \
-      -f linux-images/rv64/alpine-gui/devicetree.dtb \
-      --smp 2
+      -f linux-images/rv64/alpine-gui/devicetree.dtb
 ```
 
 ### Full-System CLI Options
@@ -509,10 +509,13 @@ simrv --os \
 - `--virtiofs <DIR>`: Expose a selected host directory to Linux guests through VirtIO-FS. Guest
   writes are immediately visible in that host directory; see
   [Linux and Buildroot](linux.md#share-a-host-directory-with-virtio-fs).
-- `--smp <2..16>`: Number of active SMP harts (default is 1 for single-hart execution).
-- `--dtb <virt.dtb>`: Optional custom Device Tree Blob (SimRV automatically synthesizes a device tree if omitted).
+- `--smp <N>`: Number of active SMP harts (default is 1). The supplied DTB must contain at least
+  that many CPU nodes.
+- `--dtb <virt.dtb>`: Required Device Tree Blob for Linux boots. It can also come from
+  `SIMRV_LINUX_DTB`. The tree must contain CPU nodes for every configured hart; SimRV updates its
+  RAM range and enables the configured harts.
 - `--dram-size <SIZE>`, `--ram-size <SIZE>`: Guest DRAM size with an optional
-  scaled suffix such as `128M` or `2G` (official release default: 256 MiB).
+  scaled suffix such as `128M` or `2G` (Linux default: 1 GiB).
 
 ---
 
