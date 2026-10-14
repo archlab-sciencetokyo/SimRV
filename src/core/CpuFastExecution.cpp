@@ -120,10 +120,10 @@ auto CPU::try_fast_load([[maybe_unused]] Machine& machine, simrv::xlen::Address 
         return false;
     }
 
-    const unsigned active_xlen = effective_data_xlen();
+    const simrv::xlen::PrivilegeLevel eff_priv = effective_data_privilege();
+    const unsigned active_xlen = state_.xlen_for_privilege(eff_priv);
     if (active_xlen == 32) mem_addr &= 0xFFFFFFFFULL;
     const unsigned size_bytes = access_size_for_funct3(funct3);
-    const simrv::xlen::PrivilegeLevel eff_priv = effective_data_privilege();
 
     if (simrv::compiler::likely(eff_priv != kPrivMachine &&
                                 simrv::xlen::satp_translation_enabled(state_.satp, active_xlen))) {
@@ -205,10 +205,10 @@ auto CPU::try_fast_store(Machine& machine, simrv::xlen::Address mem_addr, isa::F
         return false;
     }
 
-    const unsigned active_xlen = effective_data_xlen();
+    const simrv::xlen::PrivilegeLevel eff_priv = effective_data_privilege();
+    const unsigned active_xlen = state_.xlen_for_privilege(eff_priv);
     if (active_xlen == 32) mem_addr &= 0xFFFFFFFFULL;
     const unsigned size_bytes = access_size_for_funct3(funct3);
-    const simrv::xlen::PrivilegeLevel eff_priv = effective_data_privilege();
 
     if (simrv::compiler::likely(eff_priv != kPrivMachine &&
                                 simrv::xlen::satp_translation_enabled(state_.satp, active_xlen))) {
@@ -303,14 +303,14 @@ SIMRV_ALWAYS_INLINE auto CPU::execute_cached_load(Machine& machine, CachedOp& op
             return true;
         }
     } else {
-        const unsigned active_xlen = effective_data_xlen();
+        const simrv::xlen::PrivilegeLevel eff_priv = effective_data_privilege();
+        const unsigned active_xlen = state_.xlen_for_privilege(eff_priv);
         simrv::xlen::Address lookup_addr = mem_addr;
         if (active_xlen == 32) lookup_addr &= 0xFFFFFFFFULL;
         const unsigned page_offset = lookup_addr & 0xFFFu;
         if (simrv::compiler::likely(
                 (lookup_addr & align_mask) == 0 && page_offset + size_bytes <= 4096u &&
                 simrv::xlen::satp_translation_enabled(state_.satp, active_xlen))) {
-            const simrv::xlen::PrivilegeLevel eff_priv = effective_data_privilege();
             const simrv::xlen::Word current_asid = simrv::xlen::satp_asid(state_.satp, active_xlen);
             const simrv::xlen::Address vpn = lookup_addr >> 12;
             const size_t tlb_idx = soft_tlb_index(vpn);
@@ -382,14 +382,14 @@ SIMRV_ALWAYS_INLINE auto CPU::execute_cached_store(Machine& machine, CachedOp& o
             return true;
         }
     } else {
-        const unsigned active_xlen = effective_data_xlen();
+        const simrv::xlen::PrivilegeLevel eff_priv = effective_data_privilege();
+        const unsigned active_xlen = state_.xlen_for_privilege(eff_priv);
         simrv::xlen::Address lookup_addr = mem_addr;
         if (active_xlen == 32) lookup_addr &= 0xFFFFFFFFULL;
         const unsigned page_offset = lookup_addr & 0xFFFu;
         if (simrv::compiler::likely(
                 (lookup_addr & align_mask) == 0 && page_offset + size_bytes <= 4096u &&
                 simrv::xlen::satp_translation_enabled(state_.satp, active_xlen))) {
-            const simrv::xlen::PrivilegeLevel eff_priv = effective_data_privilege();
             const simrv::xlen::Word current_asid = simrv::xlen::satp_asid(state_.satp, active_xlen);
             const simrv::xlen::Address vpn = lookup_addr >> 12;
             const size_t tlb_idx = soft_tlb_index(vpn);

@@ -30,7 +30,7 @@ using isa::Opcode;
 [[nodiscard]] SIMRV_ALWAYS_INLINE auto is_tohost_addr(const Machine& machine,
                                                       simrv::xlen::Address addr) -> bool {
     const auto tohost = machine.isa_test_tohost();
-    if (tohost != 0x80001000ULL && (addr - tohost < 8)) return true;
+    if (tohost != 0 && tohost != 0x80001000ULL && (addr - tohost < 8)) return true;
     return (addr - 0x80001000ULL < 8) || (addr - 0x40008000ULL < 8);
 }
 

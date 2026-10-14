@@ -157,8 +157,8 @@ struct alignas(128) ArchState {
     /**
      * @brief Determines the active XLEN (register width in bits: 32 or 64) based on the CPU state.
      */
-    [[nodiscard]] constexpr auto xlen_for_privilege(simrv::xlen::PrivilegeLevel level) const
-        -> unsigned {
+    [[nodiscard]] SIMRV_ALWAYS_INLINE constexpr auto xlen_for_privilege(
+        simrv::xlen::PrivilegeLevel level) const noexcept -> unsigned {
         if constexpr (!simrv::xlen::kIsXLen64) {
             return 32;
         } else {
@@ -186,7 +186,7 @@ struct alignas(128) ArchState {
         return simrv::xlen::HartId{static_cast<uint32_t>(mhartid)};
     }
 
-    constexpr void canonicalize_pc() noexcept {
+    SIMRV_ALWAYS_INLINE constexpr void canonicalize_pc() noexcept {
         if constexpr (simrv::xlen::kIsXLen64) {
             if (simrv::compiler::unlikely(regs.xlen == 32)) {
                 pc = static_cast<simrv::xlen::Register>(
@@ -246,21 +246,21 @@ struct alignas(32) SoftTlbEntry {
         nullptr;          ///< Direct host pointer base (nullptr = use paddr) (8 bytes)
     uint32_t epoch = 0;   ///< TLB generation epoch (4 bytes)
     bool global = false;  ///< Global translation flag (1 byte)
-    std::array<uint8_t, 3> reserved{};  ///< Padding to 32 bytes (3 bytes)
 
     /// Build a lookup tag from the three key fields.
-    [[nodiscard]] static constexpr auto make_tag(uint64_t vpn, uint64_t asid,
-                                                 simrv::xlen::PrivilegeLevel priv) noexcept
-        -> uint64_t {
+    [[nodiscard]] SIMRV_ALWAYS_INLINE static constexpr auto make_tag(
+        uint64_t vpn, uint64_t asid, simrv::xlen::PrivilegeLevel priv) noexcept -> uint64_t {
         return ((vpn & 0xFFFFFFFFFFULL) << 18) | ((asid & 0xFFFFu) << 2) |
                static_cast<uint64_t>(static_cast<uint8_t>(priv) & 0x3u);
     }
 
-    [[nodiscard]] constexpr auto matches(uint64_t vpn, uint64_t asid,
-                                         simrv::xlen::PrivilegeLevel priv,
-                                         uint32_t current_epoch) const noexcept -> bool {
-        if (epoch != current_epoch) return false;
-        return global ? (tag == make_tag(vpn, 0, priv)) : (tag == make_tag(vpn, asid, priv));
+    [[nodiscard]] SIMRV_ALWAYS_INLINE constexpr auto matches(uint64_t vpn, uint64_t asid,
+                                                             simrv::xlen::PrivilegeLevel priv,
+                                                             uint32_t current_epoch) const noexcept
+        -> bool {
+        if (simrv::compiler::unlikely(epoch != current_epoch)) return false;
+        return simrv::compiler::unlikely(global) ? (tag == make_tag(vpn, 0, priv))
+                                                 : (tag == make_tag(vpn, asid, priv));
     }
 
     void set(uint64_t vpn, uint64_t asid, simrv::xlen::PrivilegeLevel priv, uint32_t current_epoch,
@@ -306,8 +306,8 @@ class CPU {
      * @param vpn Virtual page number (vaddr >> 12).
      * @return Slot index in range [0, 2047].
      */
-    [[nodiscard]] static constexpr inline auto soft_tlb_index(simrv::xlen::Address vpn) noexcept
-        -> size_t {
+    [[nodiscard]] SIMRV_ALWAYS_INLINE static constexpr auto soft_tlb_index(
+        simrv::xlen::Address vpn) noexcept -> size_t {
         return static_cast<size_t>((vpn ^ (vpn >> 11)) & 2047u);
     }
 
@@ -692,7 +692,8 @@ class CPU {
     void push_trace_history(simrv::xlen::Address pc, simrv::xlen::Instruction inst,
                             const std::string& symbol);
 
-    [[nodiscard]] constexpr auto effective_data_privilege() const -> simrv::xlen::PrivilegeLevel {
+    [[nodiscard]] SIMRV_ALWAYS_INLINE constexpr auto effective_data_privilege() const noexcept
+        -> simrv::xlen::PrivilegeLevel {
         if (simrv::compiler::unlikely(state_.priv == kPrivMachine &&
                                       (state_.mstatus & MstatusBit::Mprv) != 0)) {
             return mstatus_mpp(state_.mstatus);
@@ -706,7 +707,8 @@ class CPU {
      * The privileged architecture requires MPRV accesses to use MPP's XLEN,
      * which can differ from the currently executing M-mode XLEN.
      */
-    [[nodiscard]] constexpr auto effective_data_xlen() const -> unsigned {
+    [[nodiscard]] SIMRV_ALWAYS_INLINE constexpr auto effective_data_xlen() const noexcept
+        -> unsigned {
         return state_.xlen_for_privilege(effective_data_privilege());
     }
 
@@ -744,12 +746,6 @@ class CPU {
     uint32_t soft_tlb_epoch = 1;
     void soft_tlb_flush();
     void soft_tlb_flush_selective(const core::TlbFlushFilter& filter);
-    inline void soft_tlb_flush_selective(bool match_all_vaddr, simrv::xlen::Address vaddr,
-                                         bool match_all_asid, simrv::xlen::Word asid) {
-        soft_tlb_flush_selective(core::TlbFlushFilter{
-            .vaddr = match_all_vaddr ? std::nullopt : std::make_optional(vaddr),
-            .asid = match_all_asid ? std::nullopt : std::make_optional(static_cast<Asid>(asid))});
-    }
 
     // ========== Execution Metrics ==========
     uint64_t e_icount{0};               // Total instruction count
