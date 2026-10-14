@@ -118,11 +118,13 @@ class RegisterFile {
         return read_vector(idx);
     }
 
-    [[nodiscard]] constexpr auto read(simrv::xlen::RegId idx) const -> simrv::xlen::Register {
+    [[nodiscard]] SIMRV_ALWAYS_INLINE constexpr auto read(simrv::xlen::RegId idx) const noexcept
+        -> simrv::xlen::Register {
         return reg_[std::to_underlying(idx)];
     }
 
-    constexpr void write(simrv::xlen::RegId idx, simrv::xlen::Register val) {
+    SIMRV_ALWAYS_INLINE constexpr void write(simrv::xlen::RegId idx,
+                                             simrv::xlen::Register val) noexcept {
         if (simrv::compiler::likely(idx != simrv::xlen::RegId::Zero)) {
             if constexpr (simrv::xlen::kIsXLen64) {
                 if (simrv::compiler::unlikely(xlen == 32)) {

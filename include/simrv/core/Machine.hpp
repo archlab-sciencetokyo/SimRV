@@ -230,7 +230,7 @@ class Machine final : public core::IInterruptController {
         return config.debug.spike_elf;
     }
     [[nodiscard]] auto isa_test_tohost() const noexcept -> simrv::xlen::Address {
-        return config.isa.isatest_tohost;
+        return resolved_isatest_tohost_ != 0 ? resolved_isatest_tohost_ : config.isa.isatest_tohost;
     }
     [[nodiscard]] auto memory_geometry() const noexcept -> MemoryGeometry { return config.memory; }
     [[nodiscard]] auto platform_profile() const noexcept -> PlatformProfile {
@@ -260,9 +260,6 @@ class Machine final : public core::IInterruptController {
                                  std::optional<simrv::xlen::Address> tohost_address) noexcept;
     [[nodiscard]] auto resolved_start_pc() const noexcept -> simrv::xlen::Address {
         return resolved_start_pc_;
-    }
-    [[nodiscard]] auto resolved_isatest_tohost() const noexcept -> simrv::xlen::Address {
-        return resolved_isatest_tohost_;
     }
     [[nodiscard]] auto platform_status() const -> PlatformStatusSnapshot;
     /**

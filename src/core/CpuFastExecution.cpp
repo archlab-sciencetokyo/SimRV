@@ -1015,9 +1015,10 @@ SIMRV_ALWAYS_INLINE auto CPU::run_fast_baremetal_kernel(Machine& machine, uint32
             last_flushed_icount = e_icount;
         }
         if (simrv::compiler::unlikely(
-                machine.tohost != 0 || !machine.is_running() ||
-                (kPollPause &&
-                 ((b & 0xFFu) == 0 && (machine.is_paused() || machine.debug_pause_requested()))))) {
+                machine.tohost != 0 ||
+                ((b & 0x3Fu) == 0 &&
+                 (!machine.is_running() ||
+                  (kPollPause && (machine.is_paused() || machine.debug_pause_requested())))))) {
             break;
         }
     }
@@ -1115,9 +1116,10 @@ SIMRV_ALWAYS_INLINE auto CPU::run_fast_os_kernel(Machine& machine, uint32_t batc
             last_flushed_icount = e_icount;
         }
         if (simrv::compiler::unlikely(
-                machine.tohost != 0 || !machine.is_running() ||
-                (kPollPause &&
-                 ((b & 0xFFu) == 0 && (machine.is_paused() || machine.debug_pause_requested()))))) {
+                machine.tohost != 0 ||
+                ((b & 0x3Fu) == 0 &&
+                 (!machine.is_running() ||
+                  (kPollPause && (machine.is_paused() || machine.debug_pause_requested())))))) {
             break;
         }
     }

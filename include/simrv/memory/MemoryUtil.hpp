@@ -184,23 +184,23 @@ SIMRV_ALWAYS_INLINE void host_write_fast(simrv::xlen::Byte* host_ptr, simrv::xle
 }
 
 /// Fast inline RAM read. The caller validates the address against its RamView.
-inline auto ram_read_fast(simrv::xlen::Address addr, simrv::xlen::Instruction funct3, RamView ram)
-    -> simrv::xlen::Word {
+SIMRV_ALWAYS_INLINE auto ram_read_fast(simrv::xlen::Address addr, simrv::xlen::Instruction funct3,
+                                       const RamView& ram) noexcept -> simrv::xlen::Word {
     return host_read_fast(ram.unchecked_ptr(addr), funct3);
 }
 
-inline auto ram_read_fast(simrv::xlen::PhysAddr addr, simrv::xlen::Instruction funct3, RamView ram)
-    -> simrv::xlen::Word {
+SIMRV_ALWAYS_INLINE auto ram_read_fast(simrv::xlen::PhysAddr addr, simrv::xlen::Instruction funct3,
+                                       const RamView& ram) noexcept -> simrv::xlen::Word {
     return host_read_fast(ram.unchecked_ptr(addr), funct3);
 }
 
-inline auto ram_read_fast(simrv::xlen::Address addr, isa::Funct3 funct3, RamView ram)
-    -> simrv::xlen::Word {
+SIMRV_ALWAYS_INLINE auto ram_read_fast(simrv::xlen::Address addr, isa::Funct3 funct3,
+                                       const RamView& ram) noexcept -> simrv::xlen::Word {
     return ram_read_fast(addr, static_cast<simrv::xlen::Instruction>(funct3), ram);
 }
 
-inline auto ram_read_fast(simrv::xlen::PhysAddr addr, isa::Funct3 funct3, RamView ram)
-    -> simrv::xlen::Word {
+SIMRV_ALWAYS_INLINE auto ram_read_fast(simrv::xlen::PhysAddr addr, isa::Funct3 funct3,
+                                       const RamView& ram) noexcept -> simrv::xlen::Word {
     return ram_read_fast(addr, static_cast<simrv::xlen::Instruction>(funct3), ram);
 }
 
@@ -208,23 +208,25 @@ inline auto ram_read_fast(simrv::xlen::PhysAddr addr, isa::Funct3 funct3, RamVie
 
 /// Fast inline RAM write. The caller validates the address against its RamView.
 /// Supports: SB (1 byte), SH (2 bytes), SW (4 bytes), SD (8 bytes on RV64)
-inline void ram_write_fast(simrv::xlen::Address addr, simrv::xlen::Word wdata,
-                           simrv::xlen::Instruction funct3, RamView ram) {
+SIMRV_ALWAYS_INLINE void ram_write_fast(simrv::xlen::Address addr, simrv::xlen::Word wdata,
+                                        simrv::xlen::Instruction funct3,
+                                        const RamView& ram) noexcept {
     host_write_fast(ram.unchecked_ptr(addr), wdata, funct3);
 }
 
-inline void ram_write_fast(simrv::xlen::PhysAddr addr, simrv::xlen::Word wdata,
-                           simrv::xlen::Instruction funct3, RamView ram) {
+SIMRV_ALWAYS_INLINE void ram_write_fast(simrv::xlen::PhysAddr addr, simrv::xlen::Word wdata,
+                                        simrv::xlen::Instruction funct3,
+                                        const RamView& ram) noexcept {
     host_write_fast(ram.unchecked_ptr(addr), wdata, funct3);
 }
 
-inline void ram_write_fast(simrv::xlen::Address addr, simrv::xlen::Word wdata, isa::Funct3 funct3,
-                           RamView ram) {
+SIMRV_ALWAYS_INLINE void ram_write_fast(simrv::xlen::Address addr, simrv::xlen::Word wdata,
+                                        isa::Funct3 funct3, const RamView& ram) noexcept {
     ram_write_fast(addr, wdata, static_cast<simrv::xlen::Instruction>(funct3), ram);
 }
 
-inline void ram_write_fast(simrv::xlen::PhysAddr addr, simrv::xlen::Word wdata, isa::Funct3 funct3,
-                           RamView ram) {
+SIMRV_ALWAYS_INLINE void ram_write_fast(simrv::xlen::PhysAddr addr, simrv::xlen::Word wdata,
+                                        isa::Funct3 funct3, const RamView& ram) noexcept {
     ram_write_fast(addr, wdata, static_cast<simrv::xlen::Instruction>(funct3), ram);
 }
 
