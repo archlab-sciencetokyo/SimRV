@@ -17,6 +17,8 @@
  */
 #pragma once
 
+#include <sys/types.h>
+
 #include <array>
 #include <cstdint>
 #include <optional>
