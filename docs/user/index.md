@@ -23,7 +23,7 @@ SimRV is an explainable, dual-width (RV32 / RV64) RISC-V architectural simulator
 
 SimRV simulates standard 32-bit and 64-bit RISC-V systems:
 
-- **ISA Support**: RV32GCBV / RV64GCBV (Base Integer `I`/`E`, Standard Multiply/Divide `M`, Atomic `A`, Single/Double Floating Point `F`/`D`, Compressed `C`, Bit Manipulation `B`, and Vector 1.0 `V`).
+- **ISA Support**: RV32GCZBV / RV64GCZBV (Base Integer `I`/`E`, Standard Multiply/Divide `M`, Atomic `A`, Single/Double Floating Point `F`/`D`, Compressed `C`, Bit Manipulation `B` (Zba/Zbb/Zbc/Zbs), and Vector 1.0 `V`).
 - **Privilege & System Architecture**: Machine (M), Supervisor (S), and User (U) privilege modes with PMP (Physical Memory Protection), Sv32 / Sv39 MMU page translation, CLINT / ACLINT timer and software interrupts, and PLIC / AIA (APLIC/IMSIC) interrupt routing.
 - **Microarchitectural Modeling**: Per-cycle transition kernels for three-stage, five-stage, and dual-issue pipelines with configurable branch prediction (static, bimodal, 2-level adaptive, RAS, BTB) and multi-level L1/L2/L3 cache hierarchies.
 - **Multi-Hart Coherence**: TileLink-C directory-based coherence hubs modeling MESI protocols for SMP configurations (2 to 16 harts).
@@ -105,8 +105,8 @@ simrv --cli -m program.elf
 # Run in cycle-accurate (CA) mode with step limit
 simrv --cli --ca -m program.elf -s 1000000
 
-# Load a custom CPU model preset
-simrv --cli --ca --cpu-preset configs/models/rvcomp.cfg -m program.elf
+# Load a platform configuration or custom CPU model
+simrv --cli --ca --config configs/models/rvcomp.cfg -m program.elf
 
 # Launch TUI workbench with loaded binary
 simrv -m program.elf
@@ -122,14 +122,17 @@ simrv -m program.elf
 | `--ca` | Select cycle-accurate pipeline simulation kernel. |
 | `--ia` | Select fast instruction-accurate simulation mode. |
 | `-s, -e, --steps <N>` | Evaluate machine-wide instruction limit across all harts before stopping. |
-| `--cpu-preset <path.cfg>` | Load human-editable CPU microarchitecture preset. |
+| `--config <preset \| file>` | Select a platform preset (`virt-pcie`, `virt-mmio`, `rvcomp`) or custom configuration file. |
+| `--cpu-preset <preset>` | Select a built-in CPU model preset (`tiny`, `balanced`, `performance`). |
+| `--validate-config <file>` | Validate and lint a CPU model or SoC platform configuration file. |
 | `--isa <string>` | Select a supported base ISA preset; recognized ratified Z extensions may be listed with optional supported versions. |
-| `-p, --pipeline <type>` | Pipeline microarchitecture target (`three-stage`, `five-stage`, `dual-issue`). |
-| `-H, --tohost <addr>` | Specify physical address of `tohost` communication symbol for tests. |
+| `--pipeline <type>` | Pipeline microarchitecture target (`3stage`, `5stage`). |
+| `-H, --tohost-addr <addr>` | Specify physical address of `tohost` communication symbol for tests. |
 | `--summary <file>` | Write a machine-readable JSON execution summary when the run ends. |
 | `--events <file>` | Write newline-delimited lifecycle, interrupt, and DMA events for automation. |
 | `--buildroot-output <dir>` | Load firmware, DTB, and root filesystem from a Buildroot output directory or bundle. |
 | `--uart-transcript <file>` | Save guest UART output to a file while keeping the normal CLI, TUI, or server destination. |
+| `--step-delay <us>` | Pause execution for the specified microseconds per cycle or step. |
 | `--arch-trace <file>` | Write a versioned JSONL retirement trace (defaults to detailed mode unless an execution mode is explicitly selected). |
 | `--trace-level <0-4>` | Limit architectural event detail: devices, calls, retirement, or detailed state. |
 | `--trace-function <name>` | Filter attributed events to an exact ELF function symbol. |
@@ -137,12 +140,12 @@ simrv -m program.elf
 | `--log-format <text \| json \| json-pretty>` | Select diagnostic log rendering; default is `text`. |
 | `--log-file <file>` | Mirror diagnostic messages to a file in the selected log format. |
 | `--trace` | Write an aligned, labeled architectural instruction trace to `<trace-dir>/trace.txt`. |
-| `--tracepc` | Write PC stream trace to `<trace-dir>/tracepc.txt`. |
+| `--trace-pc-range <range>` | Write PC stream trace within specified inclusive range to `<trace-dir>/tracepc.txt`. |
 | `--gdb` | Start GDB Remote Serial Protocol (RSP) server. |
 | `--gdb-port <port>` | Set GDB RSP TCP listener port (default: 1234). |
 | `--isa-info` | Show the qualified ISA, vector, privilege, and debugger capability contract. |
 | `--doctor` | Diagnose terminal presentation and portable-runtime conditions. |
-| `-v, --version` | Display version and build information. |
+| `--version` | Display version and build information. |
 | `-h, --help` | Show full command-line help message. |
 
 `--log-format` controls simulator diagnostic messages only. JSON diagnostic output uses one record

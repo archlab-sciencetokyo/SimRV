@@ -23,12 +23,17 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   - Explicitly reject legacy draft shorthands (`gcbv`, `rv32gcbv`, `rv64gcbv`, `gcb`, `rv32gcb`, `rv64gcb`) with helpful actionable error diagnostics directing users to ratified equivalents.
 - **Unified Platform Configuration & Memory Map Hardening**:
   - Consolidated CPU microarchitecture and SoC platform configurations into a single canonical `--config <PRESET | FILE>` CLI option, retiring `--cpu-config`, `--cpu-model-file`, `--model-file`, and `--soc` with clean error diagnostics.
-  - Added canonical `--validate-config <FILE>` to validate both CPU model and SoC platform configurations in a single step, retiring undocumented check aliases (`--check-cpu-model`, `--verify-cpu-model`, `--export-soc-manifest`, `--export-cpu-model`).
+  - Added canonical `--validate-config <FILE | PRESET>` to validate CPU model or SoC platform configurations and presets, retiring undocumented check aliases (`--check-cpu-model`, `--verify-cpu-model`, `--export-soc-manifest`, `--export-cpu-model`).
   - Fixed `--dump-soc-manifest` to resolve and dump custom `.cfg` files in addition to built-in presets.
   - Hardened memory mapping: `MachineConfig::validate()` and `SoCConfig::validate()` strictly check DRAM address overflow and prevent DRAM from overlapping any active MMIO device or auxiliary memory region.
   - Enhanced system bus router to detect and reject overlapping MMIO node registrations during machine initialization.
   - Corrected guest Linux DTB pointer setup in register `a1` to dynamically compute `config.memory.dram_base + dtb_offset` for non-standard DRAM base addresses.
   - Enhanced `FdtPatcher` with NOP token skipping before root nodes, `boot_cpuid_phys` preservation, dynamic memory unit address synchronization (`memory@<dram_base>`), guaranteed `device_type = "memory\0"`, and 8-byte DTB blob alignment.
+  - Fixed `CpuConfigParser` to recognize `[device.*]` and `[smp*]` sections as platform metadata without spurious unknown section warnings on combined configs.
+  - Enforced rejection of legacy draft `gcbv` shorthands in CPU model configurations and automated Zb extension expansion for `gczb` and `gczbv`.
+- **CLI & Output Cleanliness**:
+  - Restricted headless startup banner emission exclusively to `CliAction::Run`, ensuring utility and diagnostic actions (`--dump-cpu-model`, `--scaffold-cpu-model`, `--validate-config`, `--explain-inst`, etc.) write pure, unpolluted output suitable for piping and scripting.
+  - Documented `--step-delay <US>` in CLI help, completions, and user documentation.
 - **TUI & Inspection Improvements**:
   - Fixed branch predictor selection cycle in `SystemConfigModal` so `BranchPredictorType::Disabled` can be selected.
 - **Subsystem Queue & Component Deduplication**:

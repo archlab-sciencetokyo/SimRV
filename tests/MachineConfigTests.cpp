@@ -867,6 +867,47 @@ auto main() -> int {
                "CLI rejects retired alias --export-soc-manifest");
         expect(!parse_cli({"SimRV", "--export-cpu-model", "tiny"}).has_value(),
                "CLI rejects retired alias --export-cpu-model");
+
+        auto validate_soc_preset = parse_cli({"SimRV", "--validate-config", "virt-pcie"});
+        expect(validate_soc_preset.has_value() &&
+                   validate_soc_preset->action == simrv::util::CliAction::ValidateCpuModel &&
+                   validate_soc_preset->options.dump_cpu_model_preset == "virt-pcie",
+               "CLI accepts --validate-config with built-in SoC preset name");
+
+        auto validate_cpu_preset = parse_cli({"SimRV", "--validate-config", "balanced"});
+        expect(validate_cpu_preset.has_value() &&
+                   validate_cpu_preset->action == simrv::util::CliAction::ValidateCpuModel &&
+                   validate_cpu_preset->options.dump_cpu_model_preset == "balanced",
+               "CLI accepts --validate-config with built-in CPU preset name");
+    }
+
+    {
+        // CPU config parser ISA preset validation and Zb expansion
+        expect(!simrv::core::detail::parse_isa_preset_string("gcbv").has_value(),
+               "CpuConfigParser detail::parse_isa_preset_string rejects legacy draft gcbv");
+        expect(!simrv::core::detail::parse_isa_preset_string("rv64gcbv").has_value(),
+               "CpuConfigParser detail::parse_isa_preset_string rejects legacy draft rv64gcbv");
+        expect(simrv::core::detail::parse_isa_preset_string("gczbv") == simrv::isa::IsaPreset::GCV,
+               "CpuConfigParser detail::parse_isa_preset_string accepts ratified gczbv");
+
+        std::istringstream stream(
+            "[cpu]\nname = \"test_core\"\nisa_preset = \"gczbv\"\n"
+            "[device.clint]\nname = \"clint0\"\nbase = 0x2000000\nsize = 0x10000\n"
+            "[device.plic]\nname = \"plic0\"\nbase = 0xc000000\nsize = 0x400000\n"
+            "[smp]\nhart_count = 2\n");
+        simrv::pipeline::CpuModelConfig cfg{};
+        expect(simrv::core::parse_cpu_config_stream(stream, cfg),
+               "parse_cpu_config_stream successfully parses config with gczbv and device/smp "
+               "sections");
+        expect(cfg.isa_preset == simrv::isa::IsaPreset::GCV, "gczbv config maps to IsaPreset::GCV");
+        expect(std::ranges::find(cfg.isa_extensions, "zba") != cfg.isa_extensions.end(),
+               "gczbv config automatically includes zba");
+        expect(std::ranges::find(cfg.isa_extensions, "zbb") != cfg.isa_extensions.end(),
+               "gczbv config automatically includes zbb");
+        expect(std::ranges::find(cfg.isa_extensions, "zbc") != cfg.isa_extensions.end(),
+               "gczbv config automatically includes zbc");
+        expect(std::ranges::find(cfg.isa_extensions, "zbs") != cfg.isa_extensions.end(),
+               "gczbv config automatically includes zbs");
     }
 
     return failures == 0 ? EXIT_SUCCESS : EXIT_FAILURE;

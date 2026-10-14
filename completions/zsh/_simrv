@@ -28,6 +28,7 @@ _arguments -s \
   '--validate-cpu-config[Validate CPU model configuration file]:file:_files' \
   '--summary[Write execution summary]:file:_files' \
   '--events[Write lifecycle events]:file:_files' \
+  '--step-delay[Execution stepping delay in microseconds]:microseconds:' \
   '--gdb[Start GDB remote debugging]' \
   '--gdb-port[Set GDB server port]:port:' \
   '--cli[Run headless]' \

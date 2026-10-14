@@ -1830,6 +1830,8 @@ auto needs_memory_image(const ParseResult& result) -> bool {
               {.option = "--high-contrast", .description = "Enable the high-contrast TUI palette."},
               {.option = "--mouse-sensitivity <F>",
                .description = "Set TUI mouse sensitivity (default: 1.0)."},
+              {.option = "--step-delay <US>",
+               .description = "Pause execution for US microseconds per cycle/step."},
               {.option = "--inspection-output <FILE>",
                .description = "Write paused-state TUI inspection reports."},
               {.option = "--summary <FILE>",

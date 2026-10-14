@@ -195,10 +195,14 @@ auto write_lifecycle_event(std::ofstream& out, const simrv::core::Machine& machi
 auto print_isa_info() -> void {
     std::println("SimRV {} capabilities", simrv::buildinfo::kVersion);
     std::println("  host build       : RV{}", simrv::xlen::kXLenBits);
-    std::println("  public profiles  : RV32GCBV, RV64GCBV (canonical RV32GCV, RV64GCV with Zb)");
-    std::println("  selectable       : rv{}i, rv{}imac, rv{}gc, rv{}gcv (plus _zba_zbb_zbc_zbs)",
-                 simrv::xlen::kXLenBits, simrv::xlen::kXLenBits, simrv::xlen::kXLenBits,
-                 simrv::xlen::kXLenBits);
+    std::println(
+        "  public profiles  : RV32GCBV/RV32GCZBV, RV64GCBV/RV64GCZBV (canonical RV32GCV, RV64GCV "
+        "with Zb)");
+    std::println(
+        "  selectable       : rv{}i, rv{}imac, rv{}gc, rv{}gczb, rv{}gcv, rv{}gczbv (plus "
+        "_zba_zbb_zbc_zbs)",
+        simrv::xlen::kXLenBits, simrv::xlen::kXLenBits, simrv::xlen::kXLenBits,
+        simrv::xlen::kXLenBits, simrv::xlen::kXLenBits, simrv::xlen::kXLenBits);
     std::println("  vector           : RVV 1.0 implemented subset; VLEN 128..1024 bits");
     std::println("  privilege         : M/S/U, Sv32 (RV32), Sv39/Sv48 (RV64)");
     std::println("  debug frontends   : TUI, attachable Unix socket, GDB RSP");
@@ -269,12 +273,6 @@ auto main(int argc, char* argv[]) -> int {  // NOLINT(bugprone-exception-escape)
     }
 
     simrv::log::set_tui_mode(is_tui);
-
-    if (!is_tui && !skip_banner) {
-        simrv::log::info("{} v{} ({}@{})\nRunning in headless CLI mode.\n",
-                         simrv::buildinfo::kProjectDescription, simrv::buildinfo::kVersion,
-                         simrv::buildinfo::kGitBranch, simrv::buildinfo::kGitSha);
-    }
 
     // Write startup entry to MMU debug log
     std::signal(SIGINT, SIG_IGN);  // ignore control+'C'
@@ -385,22 +383,35 @@ auto main(int argc, char* argv[]) -> int {  // NOLINT(bugprone-exception-escape)
             case CliAction::ValidateCpuModel: {
                 std::string target = parsed->options.dump_cpu_model_preset;
                 if (target.empty()) {
-                    simrv::log::error("No configuration path specified to validate.");
+                    simrv::log::error("No configuration path or preset specified to validate.");
                     std::exit(simrv::core::to_exit_code(simrv::core::HostExitCode::UsageError));
                 }
                 auto resolved = simrv::core::resolve_cpu_model_path(target);
                 std::string path_str = resolved.value_or(target);
-                if (!std::filesystem::exists(path_str)) {
-                    std::println(std::cerr, "{}[ERROR]{} Configuration file not found: '{}'",
+                simrv::pipeline::CpuModelConfig cfg{};
+                simrv::core::SoCConfig soc{};
+                bool has_cpu = false;
+                bool has_soc = false;
+
+                if (std::filesystem::exists(path_str)) {
+                    has_cpu = simrv::core::parse_cpu_config(path_str, cfg);
+                    has_soc = simrv::core::load_soc_config(path_str, soc);
+                } else if (auto soc_preset = simrv::core::SoCConfig::preset(target)) {
+                    soc = *soc_preset;
+                    has_soc = true;
+                    path_str = target + " (built-in SoC preset)";
+                } else if (auto cpu_preset = simrv::pipeline::parse_cpu_model_preset(target)) {
+                    cfg = simrv::pipeline::make_cpu_model_preset(*cpu_preset);
+                    has_cpu = true;
+                    path_str = target + " (built-in CPU preset)";
+                } else {
+                    std::println(std::cerr,
+                                 "{}[ERROR]{} Configuration file or preset not found: '{}'",
                                  terminal_style(STDERR_FILENO, "\033[1;31m"),
                                  terminal_style(STDERR_FILENO, "\033[0m"), target);
                     std::exit(
                         simrv::core::to_exit_code(simrv::core::HostExitCode::ConfigurationError));
                 }
-                simrv::pipeline::CpuModelConfig cfg{};
-                const bool has_cpu = simrv::core::parse_cpu_config(path_str, cfg);
-                simrv::core::SoCConfig soc{};
-                const bool has_soc = simrv::core::load_soc_config(path_str, soc);
                 if (!has_cpu && !has_soc) {
                     std::println(std::cerr, "{}[INVALID]{} Syntax or parse error reading '{}'",
                                  terminal_style(STDERR_FILENO, "\033[1;31m"),
@@ -474,6 +485,12 @@ auto main(int argc, char* argv[]) -> int {  // NOLINT(bugprone-exception-escape)
                 std::exit(simrv::core::to_exit_code(simrv::core::HostExitCode::Success));
             }
             case CliAction::Run:
+                if (!parsed->options.tuimode && !skip_banner) {
+                    simrv::log::info("{} v{} ({}@{})\nRunning in headless CLI mode.\n",
+                                     simrv::buildinfo::kProjectDescription,
+                                     simrv::buildinfo::kVersion, simrv::buildinfo::kGitBranch,
+                                     simrv::buildinfo::kGitSha);
+                }
                 break;
         }
 
