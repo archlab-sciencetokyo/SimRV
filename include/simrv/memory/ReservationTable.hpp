@@ -10,6 +10,7 @@
 #include <optional>
 #include <unordered_map>
 
+#include "simrv/CompilerHints.hpp"
 #include "simrv/xlen/Hash.hpp"
 
 namespace simrv::memory {
@@ -200,7 +201,7 @@ class ReservationTable {
 
     /// False guarantees that an ordinary store has no LR/SC reservation to invalidate. True is
     /// deliberately conservative until reset, keeping the common no-LR workload lock-free.
-    [[nodiscard]] auto may_have_reservations() const noexcept -> bool {
+    [[nodiscard]] SIMRV_ALWAYS_INLINE auto may_have_reservations() const noexcept -> bool {
         return may_have_reservations_.load(std::memory_order_acquire);
     }
 

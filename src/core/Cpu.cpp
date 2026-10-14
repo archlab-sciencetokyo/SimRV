@@ -76,8 +76,6 @@ void CPU::reset() {
     e_ccount = 0;
     cycle_counter_start_delay_ = pipeline_sim.config.cycle_counter_start_delay;
     e_instmix.fill(0);
-    trace_history_head_ = 0;
-    trace_history_size_ = 0;
     ca_state.reset_instruction();
     ca_pipeline.reset();
     branch_predictor.configure(pipeline_sim.config.branch_predictor);
@@ -338,7 +336,11 @@ void CPU::apply_pending_interrupt_lines(Machine& machine) {
 }
 
 void CPU::apply_hart_control_boundary() noexcept {
-    switch (hart_status.load(std::memory_order_acquire)) {
+    const auto current = hart_status.load(std::memory_order_relaxed);
+    if (simrv::compiler::likely(current == HartStatus::Started)) {
+        return;
+    }
+    switch (current) {
         case HartStatus::StartPending:
         case HartStatus::ResumePending:
             hart_status.store(HartStatus::Started, std::memory_order_release);
@@ -351,17 +353,6 @@ void CPU::apply_hart_control_boundary() noexcept {
             break;
         default:
             break;
-    }
-}
-
-void CPU::push_trace_history(simrv::xlen::Address pc, simrv::xlen::Instruction inst,
-                             const std::string& symbol) {
-    // O(1) ring buffer write - no heap allocation, no shifting
-    trace_history_buf_[trace_history_head_] =
-        TraceHistoryEntry{.pc = pc, .inst = inst, .symbol = symbol};
-    trace_history_head_ = (trace_history_head_ + 1) % kTraceHistoryCapacity;
-    if (trace_history_size_ < kTraceHistoryCapacity) {
-        trace_history_size_++;
     }
 }
 

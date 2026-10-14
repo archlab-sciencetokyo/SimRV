@@ -29,6 +29,7 @@ namespace simrv::core {
 using isa::OperationId;
 namespace {
 SIMRV_ALWAYS_INLINE auto captures_tui_execution_detail(const Machine& machine) -> bool {
+    if (simrv::compiler::likely(!machine.tui_enabled())) return false;
     const auto sink = machine.telemetry_sink_raw();
     return sink && sink->captures_execution_detail();
 }

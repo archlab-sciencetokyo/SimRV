@@ -655,7 +655,7 @@ class CPU {
     SIMRV_ALWAYS_INLINE void advance_cached_pc(const CachedOp& op) {
         state_.pc += op.len();
         e_icount++;
-        if (op.cinsn) e_ccount++;
+        e_ccount += (op.cinsn != 0);
         pc_sign_extend();
         handle_cached_interrupts();
     }
@@ -665,7 +665,7 @@ class CPU {
                                                          simrv::xlen::VirtAddr target_pc) {
         state_.pc = target_pc.raw();
         e_icount++;
-        if (op.cinsn) e_ccount++;
+        e_ccount += (op.cinsn != 0);
         pc_sign_extend();
         handle_cached_interrupts();
     }
@@ -688,22 +688,6 @@ class CPU {
     [[nodiscard]] constexpr auto hart_id() const noexcept -> simrv::xlen::HartId {
         return state_.hart_id();
     }
-
-    struct TraceHistoryEntry {
-        simrv::xlen::Address pc = 0;
-        simrv::xlen::Instruction inst = 0;
-        std::string symbol;
-    };
-
-    /// Circular ring buffer for instruction trace history (TUI trace panel).
-    /// Fixed capacity of 50; O(1) push with no heap allocation after initialization.
-    static constexpr std::size_t kTraceHistoryCapacity = 50;
-    std::array<TraceHistoryEntry, kTraceHistoryCapacity> trace_history_buf_{};
-    std::size_t trace_history_head_ = 0;  ///< Next write position (wraps around)
-    std::size_t trace_history_size_ = 0;  ///< Number of valid entries (<= capacity)
-
-    void push_trace_history(simrv::xlen::Address pc, simrv::xlen::Instruction inst,
-                            const std::string& symbol);
 
     [[nodiscard]] SIMRV_ALWAYS_INLINE constexpr auto effective_data_privilege() const noexcept
         -> simrv::xlen::PrivilegeLevel {
@@ -744,7 +728,6 @@ class CPU {
     simrv::cache::DCache dcache;
     simrv::cache::TimingCacheHierarchy instruction_cache_timing;
     sbi::Sbi sbi;
-    std::ofstream* trap_log_stream = nullptr;
     bool use_opensbi = false;
     Machine* machine_ = nullptr;
     simrv::pipeline::PipelineSim pipeline_sim;

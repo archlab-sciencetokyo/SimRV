@@ -351,7 +351,7 @@ class Machine final : public core::IInterruptController {
     }
 
     /// Publish retired instructions from a hart; used by execution engines and safe for MT-SMP.
-    void record_retired_instructions(simrv::xlen::Counter count) noexcept {
+    SIMRV_ALWAYS_INLINE void record_retired_instructions(simrv::xlen::Counter count) noexcept {
         if (simrv::compiler::likely(count != 0)) {
             if (simrv::compiler::likely(!is_smp_enabled())) {
                 retired_instruction_count_.store(

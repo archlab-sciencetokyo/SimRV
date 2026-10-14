@@ -202,8 +202,8 @@ void execute_vs_whole(core::CPU& cpu, simrv::memory::MemorySubsystem& mem, simrv
                 std::memcpy(host_dst + r * vlen_bytes, vreg.u8.data(), vlen_bytes);
             }
             if (simrv::compiler::unlikely(cpu.machine_ != nullptr &&
-                                          cpu.machine_->num_harts() > 1 &&
-                                          mem.reservation_table().may_have_reservations())) {
+                                          mem.reservation_table().may_have_reservations() &&
+                                          cpu.machine_->num_harts() > 1)) {
                 mem.reservation_table().invalidate_range(physical_address, total_bytes,
                                                          cpu.hart_id());
             }
@@ -355,8 +355,8 @@ void execute_vsm(core::CPU& cpu, simrv::memory::MemorySubsystem& mem, simrv::xle
                         cpu.state().regs.read_vector(simrv::xlen::to_vec_reg_id(vs3)).u8.data(),
                         evl);
             if (simrv::compiler::unlikely(cpu.machine_ != nullptr &&
-                                          cpu.machine_->num_harts() > 1 &&
-                                          mem.reservation_table().may_have_reservations())) {
+                                          mem.reservation_table().may_have_reservations() &&
+                                          cpu.machine_->num_harts() > 1)) {
                 mem.reservation_table().invalidate_range(physical_address, evl, cpu.hart_id());
             }
             return;
@@ -410,8 +410,8 @@ void execute_vse(core::CPU& cpu, simrv::memory::MemorySubsystem& mem, simrv::xle
                 remaining -= chunk;
             }
             if (simrv::compiler::unlikely(cpu.machine_ != nullptr &&
-                                          cpu.machine_->num_harts() > 1 &&
-                                          mem.reservation_table().may_have_reservations())) {
+                                          mem.reservation_table().may_have_reservations() &&
+                                          cpu.machine_->num_harts() > 1)) {
                 mem.reservation_table().invalidate_range(physical_address, total_bytes,
                                                          cpu.hart_id());
             }

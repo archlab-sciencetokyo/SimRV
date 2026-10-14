@@ -1590,13 +1590,11 @@ auto apply_runtime_options(simrv::core::Machine* machine, const RuntimeOptions& 
     }
     machine->trace().init_dlog(options.dlog_mode);
 
-    machine->primary_hart().trap_log_stream = nullptr;
     if (options.traplog_mode) {
         machine->trace().init_trap_log(options.traplog_mode, options.fn_traplog);
         if (!machine->trace().fp_traplog.is_open()) {
             return std::unexpected("cannot open trap/SBI log file: " + options.fn_traplog);
         }
-        machine->primary_hart().trap_log_stream = &machine->trace().fp_traplog;
     }
 
     // Filename detection preserves legacy FW_PAYLOAD bundles; current published

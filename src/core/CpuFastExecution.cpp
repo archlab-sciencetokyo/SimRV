@@ -367,8 +367,8 @@ SIMRV_ALWAYS_INLINE auto CPU::execute_cached_store(Machine& machine, CachedOp& o
                                           static_cast<simrv::xlen::Instruction>(op.funct3), ram);
             state_.lr_reservation_active = false;
             if (simrv::compiler::unlikely(
-                    machine.num_harts() > 1 &&
-                    machine.memory_.reservation_table().may_have_reservations())) {
+                    machine.memory_.reservation_table().may_have_reservations() &&
+                    machine.num_harts() > 1)) {
                 machine.memory_.reservation_table().invalidate_range(mem_addr, size_bytes,
                                                                      hart_id());
             }

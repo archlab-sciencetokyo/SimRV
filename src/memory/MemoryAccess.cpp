@@ -416,7 +416,7 @@ void MemoryAccess::target_write(MemorySubsystem& mem, core::CPU& cpu, simrv::xle
     auto note_store = [&](simrv::xlen::Address paddr, size_t bytes) {
         cpu.active_context().mem_paddr = paddr;
         cpu.state().lr_reservation_active = false;
-        if (cpu.machine_->num_harts() > 1 && mem.reservation_table().may_have_reservations()) {
+        if (mem.reservation_table().may_have_reservations() && cpu.machine_->num_harts() > 1) {
             mem.reservation_table().invalidate_range(paddr, bytes, cpu.hart_id());
         }
     };
