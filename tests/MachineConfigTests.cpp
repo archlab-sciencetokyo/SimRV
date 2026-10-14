@@ -952,5 +952,38 @@ auto main() -> int {
         expect(soc_cfg.name == "piped_soc", "stream populated SoC name");
     }
 
+    {
+        // Output streaming via '-' for dump-cpu-model, scaffold-cpu-model, and dump-soc-manifest
+        std::array<std::string, 4> dump_cpu_str = {"SimRV", "--dump-cpu-model", "balanced", "-"};
+        std::array<char*, 4> dump_cpu_args = {dump_cpu_str[0].data(), dump_cpu_str[1].data(),
+                                              dump_cpu_str[2].data(), dump_cpu_str[3].data()};
+        auto parsed_dump = simrv::util::parse_command_line(dump_cpu_args);
+        expect(parsed_dump.has_value() && parsed_dump->options.dump_cpu_model_output == "-",
+               "--dump-cpu-model captures '-' as stdout output target");
+
+        std::array<std::string, 3> scaffold_str = {"SimRV", "--scaffold-cpu-model", "-"};
+        std::array<char*, 3> scaffold_args = {scaffold_str[0].data(), scaffold_str[1].data(),
+                                              scaffold_str[2].data()};
+        auto parsed_scaffold = simrv::util::parse_command_line(scaffold_args);
+        expect(parsed_scaffold.has_value() && parsed_scaffold->options.dump_cpu_model_output == "-",
+               "--scaffold-cpu-model captures '-' as stdout output target");
+
+        std::array<std::string, 4> soc_str = {"SimRV", "--dump-soc-manifest", "virt-pcie", "-"};
+        std::array<char*, 4> soc_args = {soc_str[0].data(), soc_str[1].data(), soc_str[2].data(),
+                                         soc_str[3].data()};
+        auto parsed_soc = simrv::util::parse_command_line(soc_args);
+        expect(parsed_soc.has_value() && parsed_soc->options.soc_manifest_output == "-",
+               "--dump-soc-manifest captures '-' as stdout output target");
+
+        // -r/--trace-range diagnostics refer to -r
+        std::array<std::string, 4> trace_range_str = {"SimRV", "-r", "invalid_start", "100"};
+        std::array<char*, 4> trace_range_args = {
+            trace_range_str[0].data(), trace_range_str[1].data(), trace_range_str[2].data(),
+            trace_range_str[3].data()};
+        auto parsed_trace = simrv::util::parse_command_line(trace_range_args);
+        expect(!parsed_trace.has_value() && parsed_trace.error().find("-r") != std::string::npos,
+               "-r invalid number error message references -r instead of -t");
+    }
+
     return failures == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
 }

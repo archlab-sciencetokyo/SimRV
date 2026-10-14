@@ -161,12 +161,12 @@ auto parse_positive_size(std::span<char* const> args, std::size_t& index, std::s
 
 auto parse_trace_window(RuntimeOptions& options, std::span<char* const> args, std::size_t& index)
     -> std::expected<void, std::string> {
-    return parse_scaled_required(args, index, "-t")
+    return parse_scaled_required(args, index, "-r")
         .and_then([&](uint64_t begin) -> std::expected<void, std::string> {
-            return parse_scaled_required(args, index, "-t")
+            return parse_scaled_required(args, index, "-r")
                 .and_then([&](uint64_t end) -> std::expected<void, std::string> {
                     if (begin > end) {
-                        return std::unexpected("-t begin must be <= end");
+                        return std::unexpected("-r/--trace-range begin must be <= end");
                     }
                     options.trace_enabled = true;
                     options.trace_begin = begin;
@@ -568,12 +568,6 @@ auto parse_file_options(std::string_view arg, std::span<char* const> args, std::
         options.fn_cfu_plugin = std::string(*value);
         return true;
     }
-    if (arg == "--dump-dmem") {
-        auto value = next_argument(args, i, arg);
-        if (!value) return std::unexpected(value.error());
-        options.fn_dump_dmem = std::string(*value);
-        return true;
-    }
     if (arg == "--bram-prewarm") {
         options.bram_prewarm = true;
         return true;
@@ -890,17 +884,6 @@ auto parse_tui_options(std::string_view arg, std::span<char* const> args, std::s
         result.options.explicit_cli_mode = true;
         return true;
     }
-    if (arg == "--mouse-sensitivity") {
-        auto value = next_argument(args, i, arg);
-        if (!value) return std::unexpected(value.error());
-        try {
-            double val = std::stod(std::string(*value));
-            result.options.mouse_sensitivity = val;
-        } catch (...) {
-            return std::unexpected(std::format("invalid double value for {}: {}", arg, *value));
-        }
-        return true;
-    }
     if (arg == "--inspection-output") {
         auto value = next_argument(args, i, arg);
         if (!value) return std::unexpected(value.error());
@@ -988,7 +971,7 @@ auto parse_tui_options(std::string_view arg, std::span<char* const> args, std::s
         if (arg == "--scaffold-cpu-model") {
             result.options.dump_cpu_model_preset = "balanced";
             if (i + 1 < args.size() && args[i + 1] != nullptr && args[i + 1][0] != '\0' &&
-                args[i + 1][0] != '-') {
+                (args[i + 1][0] != '-' || std::string_view(args[i + 1]) == "-")) {
                 ++i;
                 result.options.dump_cpu_model_output = args[i];
             }
@@ -997,7 +980,7 @@ auto parse_tui_options(std::string_view arg, std::span<char* const> args, std::s
             if (!value) return std::unexpected(value.error());
             result.options.dump_cpu_model_preset = std::string(*value);
             if (i + 1 < args.size() && args[i + 1] != nullptr && args[i + 1][0] != '\0' &&
-                args[i + 1][0] != '-') {
+                (args[i + 1][0] != '-' || std::string_view(args[i + 1]) == "-")) {
                 ++i;
                 result.options.dump_cpu_model_output = args[i];
             }
@@ -1010,7 +993,7 @@ auto parse_tui_options(std::string_view arg, std::span<char* const> args, std::s
         if (!value) return std::unexpected(value.error());
         result.options.soc_manifest_preset = std::string(*value);
         if (i + 1 < args.size() && args[i + 1] != nullptr && args[i + 1][0] != '\0' &&
-            args[i + 1][0] != '-') {
+            (args[i + 1][0] != '-' || std::string_view(args[i + 1]) == "-")) {
             ++i;
             result.options.soc_manifest_output = args[i];
         }
@@ -1471,7 +1454,6 @@ auto RuntimeOptions::to_machine_config() const -> simrv::core::MachineConfig {
     cfg.tui.high_contrast = high_contrast;
     cfg.tui.class_mode = class_mode;
     cfg.tui.mission = mission;
-    cfg.tui.mouse_sensitivity = mouse_sensitivity;
     cfg.tui.inspection_output = inspection_output;
 
     cfg.debug.gdb_enabled = gdb_mode;
@@ -1518,7 +1500,6 @@ auto RuntimeOptions::to_machine_config() const -> simrv::core::MachineConfig {
     cfg.files.traplog_path = fn_traplog;
     cfg.files.config_path = fn_config;
     cfg.files.cfu_plugin_path = fn_cfu_plugin;
-    cfg.files.dump_dmem_path = fn_dump_dmem;
     cfg.cpu_model_preset = cpu_model_preset;
     if (!bpred_type.empty()) {
         cfg.branch_predictor_type = pipeline::parse_branch_predictor_type(bpred_type);
@@ -1834,8 +1815,6 @@ auto needs_memory_image(const ParseResult& result) -> bool {
               {.option = "--mission <FILE>",
                .description = "Load a lesson mission (requires --class and --tui)."},
               {.option = "--high-contrast", .description = "Enable the high-contrast TUI palette."},
-              {.option = "--mouse-sensitivity <F>",
-               .description = "Set TUI mouse sensitivity (default: 1.0)."},
               {.option = "--step-delay <US>",
                .description = "Pause execution for US microseconds per cycle/step."},
               {.option = "--inspection-output <FILE>",

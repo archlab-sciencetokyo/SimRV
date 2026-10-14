@@ -355,7 +355,8 @@ auto main(int argc, char* argv[]) -> int {  // NOLINT(bugprone-exception-escape)
                     cfg = simrv::pipeline::make_cpu_model_preset(
                         simrv::pipeline::CpuModelPreset::Balanced);
                 }
-                if (!parsed->options.dump_cpu_model_output.empty()) {
+                if (!parsed->options.dump_cpu_model_output.empty() &&
+                    parsed->options.dump_cpu_model_output != "-") {
                     if (!simrv::core::save_cpu_config(parsed->options.dump_cpu_model_output, cfg,
                                                       target)) {
                         simrv::log::error("Failed to write CPU model to {}",
@@ -391,7 +392,8 @@ auto main(int argc, char* argv[]) -> int {  // NOLINT(bugprone-exception-escape)
                     std::exit(
                         simrv::core::to_exit_code(simrv::core::HostExitCode::ConfigurationError));
                 }
-                if (parsed->options.soc_manifest_output.empty()) {
+                if (parsed->options.soc_manifest_output.empty() ||
+                    parsed->options.soc_manifest_output == "-") {
                     if (!simrv::util::serialize_soc_manifest(*config, std::cout)) {
                         simrv::log::error("Failed to write SoC manifest");
                         std::exit(
@@ -725,33 +727,6 @@ auto main(int argc, char* argv[]) -> int {  // NOLINT(bugprone-exception-escape)
                     if (final_exit_code == 0) {
                         final_exit_code =
                             simrv::core::to_exit_code(simrv::core::HostExitCode::CheckpointError);
-                    }
-                }
-            }
-            if (!sim_machine->configuration().files.dump_dmem_path.empty()) {
-                std::ofstream out(sim_machine->configuration().files.dump_dmem_path);
-                if (out) {
-                    const auto ram = sim_machine->ram_view();
-                    constexpr simrv::xlen::Address kDmemBase = 0x10000000;
-                    for (size_t i = 0; i < 512; ++i) {
-                        const simrv::xlen::Address a = kDmemBase + i * 4;
-                        if (ram.contains(a, 4)) {
-                            const uint32_t val =
-                                static_cast<uint32_t>(
-                                    std::to_integer<uint8_t>(*ram.unchecked_ptr(a))) |
-                                (static_cast<uint32_t>(
-                                     std::to_integer<uint8_t>(*ram.unchecked_ptr(a + 1)))
-                                 << 8) |
-                                (static_cast<uint32_t>(
-                                     std::to_integer<uint8_t>(*ram.unchecked_ptr(a + 2)))
-                                 << 16) |
-                                (static_cast<uint32_t>(
-                                     std::to_integer<uint8_t>(*ram.unchecked_ptr(a + 3)))
-                                 << 24);
-                            std::println(out, "{:08x}", val);
-                        } else {
-                            std::println(out, "00000000");
-                        }
                     }
                 }
             }

@@ -94,7 +94,7 @@ Select a complete platform preset (\fBvirt-pcie\fR, \fBvirt-mmio\fR, or \fBrvcom
 Select the VirtIO network backend: \fBuser\fR, \fBtap\fR, \fBsocket\fR, or \fBnone\fR.
 .TP
 .B \-\-dump-soc-manifest=\fIpreset|file\fR [\fIoutput\fR]
-Write the normalized SoC registry as JSON for a built-in preset or platform configuration file.
+Write the normalized SoC registry as JSON for a built-in preset or platform configuration file. Pass \fB\-\fR or omit output to stream JSON to stdout.
 .SH EXECUTION AND PIPELINE
 .TP
 .B \-s, \-e, \-\-steps \fIn\fR
@@ -120,10 +120,10 @@ Configure branch-history, branch-target-buffer, and return-address-stack sizes.
 Select a built-in CPU model (\fBtiny\fR, \fBbalanced\fR, or \fBperformance\fR).
 .TP
 .B \-\-dump-cpu-model=\fImodel\fR [\fIfile\fR]
-Export a normalized CPU model configuration.
+Export a normalized CPU model configuration. Pass \fB\-\fR or omit file to stream JSON to stdout.
 .TP
 .B \-\-scaffold-cpu-model [\fIfile\fR]
-Generate a starter CPU model configuration.
+Generate a starter CPU model configuration. Pass \fB\-\fR or omit file to stream JSON to stdout.
 .TP
 .B \-\-validate-config=\fIfile\fR, \-\-validate-cpu-config=\fIfile\fR
 Validate and lint a CPU model or unified SoC platform configuration.

@@ -119,7 +119,6 @@ struct FilesConfig {
     std::string traplog_path;
     std::string config_path;
     std::string cfu_plugin_path;
-    std::string dump_dmem_path;
 };
 
 struct NetworkConfig {
