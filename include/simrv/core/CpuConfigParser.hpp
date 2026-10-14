@@ -5,6 +5,7 @@
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <iostream>
 #include <limits>
 #include <optional>
 #include <sstream>
@@ -1118,6 +1119,9 @@ inline auto parse_soc_config_stream(std::istream& stream, simrv::core::SoCConfig
 
 inline auto parse_soc_config(const std::filesystem::path& path, simrv::core::SoCConfig& config)
     -> bool {
+    if (path == "-") {
+        return parse_soc_config_stream(std::cin, config);
+    }
     std::ifstream file(path);
     return file.is_open() && parse_soc_config_stream(file, config);
 }
@@ -1142,9 +1146,15 @@ inline auto load_soc_config(const std::filesystem::path& path, simrv::core::SoCC
 inline auto load_platform_config(const std::filesystem::path& path,
                                  simrv::pipeline::CpuModelConfig& cpu_model,
                                  simrv::core::SoCConfig& soc_config) -> bool {
-    std::ifstream file(path);
-    if (!file.is_open()) return false;
-    std::string content((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
+    std::string content;
+    if (path == "-") {
+        content.assign((std::istreambuf_iterator<char>(std::cin)),
+                       std::istreambuf_iterator<char>());
+    } else {
+        std::ifstream file(path);
+        if (!file.is_open()) return false;
+        content.assign((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
+    }
     std::istringstream stream_cpu{content};
     std::istringstream stream_soc{content};
     (void)parse_cpu_config_stream(stream_cpu, cpu_model);
@@ -1166,6 +1176,9 @@ inline auto parse_cpu_config_string(std::string_view content,
  */
 inline auto parse_cpu_config(const std::filesystem::path& path,
                              simrv::pipeline::CpuModelConfig& config) -> bool {
+    if (path == "-") {
+        return parse_cpu_config_stream(std::cin, config);
+    }
     std::ifstream file(path);
     if (!file.is_open()) {
         return false;

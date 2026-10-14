@@ -237,6 +237,30 @@ auto print_doctor() -> int {
     return 0;
 }
 
+std::atomic<simrv::core::Machine*> g_active_cli_machine{nullptr};
+
+void handle_cli_termination_signal(int sig) {
+    simrv::util::restore_terminal_mode();
+    if (auto* machine = g_active_cli_machine.load(std::memory_order_relaxed)) {
+        machine->exit_code.store(128 + sig);
+        machine->stop(simrv::core::Machine::StopReason::ExternalStop);
+    }
+    ::signal(sig, SIG_DFL);
+    ::raise(sig);
+}
+
+void install_cli_signal_handlers() {
+    struct sigaction sa{};
+    sa.sa_handler = handle_cli_termination_signal;
+    sigemptyset(&sa.sa_mask);
+    sa.sa_flags = 0;
+    sigaction(SIGINT, &sa, nullptr);
+    sigaction(SIGTERM, &sa, nullptr);
+    sigaction(SIGHUP, &sa, nullptr);
+    sigaction(SIGQUIT, &sa, nullptr);
+    sigaction(SIGPIPE, &sa, nullptr);
+}
+
 }  // namespace
 
 auto main(int argc, char* argv[]) -> int {  // NOLINT(bugprone-exception-escape)
@@ -269,13 +293,16 @@ auto main(int argc, char* argv[]) -> int {  // NOLINT(bugprone-exception-escape)
         } else if (arg == "--log-format" && i + 1 < argc) {
             if (const auto format = simrv::log::parse_format(argv[i + 1]))
                 simrv::log::set_format(*format);
+        } else if (arg == "--log-stderr") {
+            simrv::log::set_log_to_stderr(true);
         }
     }
 
     simrv::log::set_tui_mode(is_tui);
 
-    // Write startup entry to MMU debug log
-    std::signal(SIGINT, SIG_IGN);  // ignore control+'C'
+    if (!is_tui) {
+        install_cli_signal_handlers();
+    }
 
     std::optional<simrv::core::MachineConfig> staged_configuration;
     std::optional<simrv::core::RuntimeProfile> staged_runtime_profile;
@@ -393,7 +420,15 @@ auto main(int argc, char* argv[]) -> int {  // NOLINT(bugprone-exception-escape)
                 bool has_cpu = false;
                 bool has_soc = false;
 
-                if (std::filesystem::exists(path_str)) {
+                if (target == "-") {
+                    std::string const content((std::istreambuf_iterator<char>(std::cin)),
+                                              std::istreambuf_iterator<char>());
+                    std::istringstream stream_cpu{content};
+                    std::istringstream stream_soc{content};
+                    has_cpu = simrv::core::parse_cpu_config_stream(stream_cpu, cfg);
+                    has_soc = simrv::core::parse_soc_config_stream(stream_soc, soc);
+                    path_str = "<stdin>";
+                } else if (std::filesystem::exists(path_str)) {
                     has_cpu = simrv::core::parse_cpu_config(path_str, cfg);
                     has_soc = simrv::core::load_soc_config(path_str, soc);
                 } else if (auto soc_preset = simrv::core::SoCConfig::preset(target)) {
@@ -498,6 +533,7 @@ auto main(int argc, char* argv[]) -> int {  // NOLINT(bugprone-exception-escape)
             simrv::log::set_level(*parsed->options.log_level);
         }
         simrv::log::set_format(parsed->options.log_format);
+        simrv::log::set_log_to_stderr(parsed->options.log_stderr);
 
         if (!parsed->options.fn_log.empty() && !simrv::log::set_log_file(parsed->options.fn_log)) {
             option_error("cannot open log file: " + parsed->options.fn_log,
@@ -633,7 +669,9 @@ auto main(int argc, char* argv[]) -> int {  // NOLINT(bugprone-exception-escape)
                 sim_thread.join();
             }
         } else {
+            g_active_cli_machine.store(sim_machine.get(), std::memory_order_release);
             sim_machine->run();
+            g_active_cli_machine.store(nullptr, std::memory_order_release);
         }
 
         if (ipc_server) {
@@ -652,6 +690,22 @@ auto main(int argc, char* argv[]) -> int {  // NOLINT(bugprone-exception-escape)
         } else {
             keep_running = false;
             final_exit_code = sim_machine->exit_code.load();
+            if (final_exit_code == 0) {
+                switch (sim_machine->stop_reason()) {
+                    case simrv::core::Machine::StopReason::UnhandledTrap:
+                    case simrv::core::Machine::StopReason::LockstepDivergence:
+                    case simrv::core::Machine::StopReason::GuestCrash:
+                    case simrv::core::Machine::StopReason::TohostFail:
+                        final_exit_code =
+                            simrv::core::to_exit_code(simrv::core::HostExitCode::ExecutionError);
+                        break;
+                    case simrv::core::Machine::StopReason::ExternalStop:
+                        final_exit_code = 130;
+                        break;
+                    default:
+                        break;
+                }
+            }
             if (!sim_machine->tui_enabled()) {
                 sim_machine->trace().print_summary();
             }

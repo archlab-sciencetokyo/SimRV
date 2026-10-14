@@ -82,6 +82,7 @@ struct RuntimeOptions {
     bool quiet = false;
     std::optional<simrv::log::Level> log_level;
     simrv::log::Format log_format = simrv::log::Format::Text;
+    bool log_stderr = false;
     bool dlog_mode = false;
     bool traplog_mode = false;
     bool use_disk = false;

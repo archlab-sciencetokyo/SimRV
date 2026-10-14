@@ -34,6 +34,7 @@ struct PendingLog {
 constexpr std::size_t kStartupLogLimit = 256;
 std::atomic<Level> g_log_level{Level::Info};
 std::atomic<Format> g_log_format{Format::Text};
+std::atomic<bool> g_log_to_stderr{false};
 bool g_tui_mode = false;  // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 simrv::log::LogCallback
     g_tui_callback;  // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
@@ -169,17 +170,20 @@ void emit_log(Level level, FILE* stream, std::string_view ansi_color, std::strin
             }
             return;
         } else {
-            const int fd = (stream == stderr) ? STDERR_FILENO : STDOUT_FILENO;
+            FILE* const out_stream =
+                g_log_to_stderr.load(std::memory_order_relaxed) ? stderr : stream;
+            const int fd = (out_stream == stderr) ? STDERR_FILENO : STDOUT_FILENO;
             if (format != Format::Text) {
-                std::println(stream, "{}", json_record(level, msg, format == Format::JsonPretty));
+                std::println(out_stream, "{}",
+                             json_record(level, msg, format == Format::JsonPretty));
             } else if (simrv::util::terminal_color_enabled(fd)) {
-                std::println(stream, "{}{}\033[0m", ansi_color, msg);
+                std::println(out_stream, "{}{}\033[0m", ansi_color, msg);
             } else {
-                std::println(stream, "[{}] {}", plain_tag, msg);
+                std::println(out_stream, "[{}] {}", plain_tag, msg);
             }
             // Keep readiness and guest-console diagnostics observable to CLI consumers
             // without waiting for stdout's block buffer to fill.
-            std::fflush(stream);
+            std::fflush(out_stream);
         }
     }
     if (callback) {
@@ -233,6 +237,14 @@ auto level_name(Level level) noexcept -> std::string_view {
 void set_level(Level level) noexcept { g_log_level.store(level, std::memory_order_relaxed); }
 
 auto get_level() noexcept -> Level { return g_log_level.load(std::memory_order_relaxed); }
+
+void set_log_to_stderr(bool enable) noexcept {
+    g_log_to_stderr.store(enable, std::memory_order_relaxed);
+}
+
+auto get_log_to_stderr() noexcept -> bool {
+    return g_log_to_stderr.load(std::memory_order_relaxed);
+}
 
 void set_tui_mode(bool enable) {
     std::scoped_lock lock(g_log_mutex);

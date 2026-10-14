@@ -139,6 +139,7 @@ simrv -m program.elf
 | `--trace-device <name>` | Filter component-attributed events to an exact component name. |
 | `--log-format <text \| json \| json-pretty>` | Select diagnostic log rendering; default is `text`. |
 | `--log-file <file>` | Mirror diagnostic messages to a file in the selected log format. |
+| `--log-stderr` | Route all simulator diagnostic messages to stderr instead of stdout for clean pipeline piping. |
 | `--trace` | Write an aligned, labeled architectural instruction trace to `<trace-dir>/trace.txt`. |
 | `--trace-pc-range <range>` | Write PC stream trace within specified inclusive range to `<trace-dir>/tracepc.txt`. |
 | `--gdb` | Start GDB Remote Serial Protocol (RSP) server. |

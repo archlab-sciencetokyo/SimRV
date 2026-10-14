@@ -40,6 +40,10 @@ void set_level(Level level) noexcept;
     return std::to_underlying(level) >= std::to_underlying(get_level());
 }
 
+/// Enable or disable routing of all logs to stderr instead of stdout.
+void set_log_to_stderr(bool enable) noexcept;
+[[nodiscard]] auto get_log_to_stderr() noexcept -> bool;
+
 /// Enable or disable TUI mode (suppresses raw stdout leaks during early startup).
 void set_tui_mode(bool enable);
 

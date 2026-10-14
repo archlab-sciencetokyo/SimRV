@@ -35,4 +35,5 @@ _arguments -s \
   '--tui[Run interactive TUI]' \
   '--quiet[Suppress informational logs]' \
   '--verbose[Enable debug diagnostics]' \
+  '--log-stderr[Route simulator diagnostic logs to stderr instead of stdout]' \
   '*:file:_files'

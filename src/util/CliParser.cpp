@@ -1051,6 +1051,10 @@ auto parse_debug_cosrv_options(std::string_view arg, std::span<char* const> args
         options.log_format = *format;
         return true;
     }
+    if (arg == "--log-stderr") {
+        options.log_stderr = true;
+        return true;
+    }
     if (arg == "--summary") {
         auto value = next_argument(args, i, "--summary");
         if (!value) return std::unexpected(value.error());
@@ -1786,6 +1790,8 @@ auto needs_memory_image(const ParseResult& result) -> bool {
               {.option = "-v, --verbose", .description = "Enable debug diagnostics."},
               {.option = "--log-file <FILE>",
                .description = "Mirror timestamped diagnostics to a file."},
+              {.option = "--log-stderr",
+               .description = "Route simulator diagnostic logs to stderr instead of stdout."},
               {.option = "--trace-dir <DIR>",
                .description = "Set the root directory for trace artifacts (default: trace)."},
               {.option = "--log-mmio, --dlog", .description = "Record MMIO transactions."},

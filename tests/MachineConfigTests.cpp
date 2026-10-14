@@ -910,5 +910,47 @@ auto main() -> int {
                "gczbv config automatically includes zbs");
     }
 
+    {
+        // CLI --log-stderr option parsing and Logger control
+        std::array<std::string, 4> log_stderr_str = {"SimRV", "--log-stderr", "-m", "guest.bin"};
+        std::array<char*, 4> log_stderr_args = {log_stderr_str[0].data(), log_stderr_str[1].data(),
+                                                log_stderr_str[2].data(), log_stderr_str[3].data()};
+        auto parsed = simrv::util::parse_command_line(log_stderr_args);
+        expect(parsed.has_value() && parsed->options.log_stderr,
+               "--log-stderr is parsed into runtime options");
+
+        simrv::log::set_log_to_stderr(true);
+        expect(simrv::log::get_log_to_stderr(), "simrv::log::get_log_to_stderr() reflects true");
+        simrv::log::set_log_to_stderr(false);
+        expect(!simrv::log::get_log_to_stderr(), "simrv::log::get_log_to_stderr() reflects false");
+    }
+
+    {
+        // Terminal mode restoration idempotency and state safety
+        expect(!simrv::util::global_termios_active().load(),
+               "global_termios_active is initially false");
+        simrv::util::global_termios_active().store(true);
+        simrv::util::restore_terminal_mode();
+        expect(!simrv::util::global_termios_active().load(),
+               "restore_terminal_mode atomically resets active flag");
+    }
+
+    {
+        // Stdin platform config parsing with unified [cpu] and [soc] sections
+        std::istringstream combined_stream(
+            "[cpu]\nname = \"piped_core\"\nisa_preset = \"gczbv\"\n"
+            "[soc]\nname = \"piped_soc\"\ndram_base = 0x80000000\ndram_size = 0x10000000\n");
+        simrv::pipeline::CpuModelConfig cpu_cfg{};
+        simrv::core::SoCConfig soc_cfg{};
+        expect(simrv::core::parse_cpu_config_stream(combined_stream, cpu_cfg),
+               "parse_cpu_config_stream parses piped stream");
+        combined_stream.clear();
+        combined_stream.seekg(0);
+        expect(simrv::core::parse_soc_config_stream(combined_stream, soc_cfg),
+               "parse_soc_config_stream parses piped stream");
+        expect(cpu_cfg.name == "piped_core", "stream populated CPU name");
+        expect(soc_cfg.name == "piped_soc", "stream populated SoC name");
+    }
+
     return failures == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
 }

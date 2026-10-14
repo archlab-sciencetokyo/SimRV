@@ -34,6 +34,13 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - **CLI & Output Cleanliness**:
   - Restricted headless startup banner emission exclusively to `CliAction::Run`, ensuring utility and diagnostic actions (`--dump-cpu-model`, `--scaffold-cpu-model`, `--validate-config`, `--explain-inst`, etc.) write pure, unpolluted output suitable for piping and scripting.
   - Documented `--step-delay <US>` in CLI help, completions, and user documentation.
+  - Added canonical `--log-stderr` CLI option to route all simulator diagnostic and lifecycle logs to `stderr` instead of `stdout`, keeping `stdout` reserved for guest program output during piping.
+- **Unix Behavior & Piping Hardening**:
+  - Replaced unconditionally ignored `SIGINT` with proper CLI signal handlers for `SIGINT`, `SIGTERM`, `SIGHUP`, `SIGQUIT`, and `SIGPIPE`, allowing clean Ctrl+C interruption and standard Unix exit statuses (`128 + SIG`).
+  - Added global terminal state restoration tracking to `TerminalModeGuard` to guarantee that interactive CLI runs cleanly restore the user's terminal mode on all paths (normal exit, exceptions, and terminating signals).
+  - Protected `Uart::start_input_thread()` against kernel `SIGTTIN` suspension when running as a background job on a terminal without owning the foreground process group.
+  - Ensured fatal simulator halts (`UnhandledTrap`, `LockstepDivergence`, `GuestCrash`) map to non-zero exit codes (`HostExitCode::ExecutionError`, code 5).
+  - Supported standard input streaming (`-`) for `--config -` and `--validate-config -`.
 - **TUI & Inspection Improvements**:
   - Fixed branch predictor selection cycle in `SystemConfigModal` so `BranchPredictorType::Disabled` can be selected.
 - **Subsystem Queue & Component Deduplication**:

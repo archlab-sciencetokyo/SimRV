@@ -7,6 +7,7 @@
 #include <termios.h>
 #include <unistd.h>
 
+#include <atomic>
 #include <cstdint>
 #include <cstdlib>
 #include <filesystem>
@@ -182,20 +183,39 @@ constexpr std::string_view kEnterAltScreen = "\033[?1049h";
 constexpr std::string_view kLeaveAltScreen = "\033[?1049l";
 }  // namespace ansi
 
+inline auto global_saved_termios() noexcept -> struct termios* {
+    static struct termios s_saved{};
+    return &s_saved;
+}
+
+inline auto global_termios_active() noexcept -> std::atomic<bool>& {
+    static std::atomic<bool> s_active{false};
+    return s_active;
+}
+
+inline void restore_terminal_mode() noexcept {
+    if (global_termios_active().exchange(false, std::memory_order_acq_rel)) {
+        ::tcsetattr(STDIN_FILENO, TCSANOW, global_saved_termios());
+    }
+}
+
 class TerminalModeGuard {
    public:
+    TerminalModeGuard() = default;
     ~TerminalModeGuard() {
         if (active_) {
-            tcsetattr(0, TCSANOW, &saved_);
+            restore_terminal_mode();
+            active_ = false;
         }
     }
 
     auto enable_raw_mode() -> bool {
         struct termios tty{};
-        if (tcgetattr(0, &tty) != 0) {
+        if (tcgetattr(STDIN_FILENO, &tty) != 0) {
             return false;
         }
         saved_ = tty;
+        *global_saved_termios() = tty;
 
         tty.c_iflag &= ~(IGNBRK | BRKINT | PARMRK | ISTRIP | INLCR | IGNCR | ICRNL | IXON);
         tty.c_oflag |= OPOST;
@@ -204,11 +224,13 @@ class TerminalModeGuard {
         tty.c_cflag |= CS8;
         tty.c_cc[VMIN] = 1;
         tty.c_cc[VTIME] = 0;
-        if (tcsetattr(0, TCSANOW, &tty) != 0) {
+        if (tcsetattr(STDIN_FILENO, TCSANOW, &tty) != 0) {
             return false;
         }
 
         active_ = true;
+        global_termios_active().store(true, std::memory_order_release);
+        std::atexit(restore_terminal_mode);
         return true;
     }
 
