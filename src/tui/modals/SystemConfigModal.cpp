@@ -117,7 +117,9 @@ void SystemConfigModal::adjust_setting(SysConfigDraft& draft, int index, int dir
         return;
     }
     if (index == 8) {
-        draft.bpred_type = static_cast<uint8_t>((draft.bpred_type + dir + 4) % 4);
+        constexpr int kPredictorTypes = 5;
+        draft.bpred_type =
+            static_cast<uint8_t>((draft.bpred_type + dir + kPredictorTypes) % kPredictorTypes);
         return;
     }
     if (index == 9) {

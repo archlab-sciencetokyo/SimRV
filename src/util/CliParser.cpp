@@ -983,7 +983,7 @@ auto parse_tui_options(std::string_view arg, std::span<char* const> args, std::s
         result.options.use_mix = true;
         return true;
     }
-    if (arg == "--dump-cpu-model" || arg == "--export-cpu-model" || arg == "--scaffold-cpu-model") {
+    if (arg == "--dump-cpu-model" || arg == "--scaffold-cpu-model") {
         result.action = CliAction::DumpCpuModel;
         if (arg == "--scaffold-cpu-model") {
             result.options.dump_cpu_model_preset = "balanced";
@@ -1004,7 +1004,7 @@ auto parse_tui_options(std::string_view arg, std::span<char* const> args, std::s
         }
         return true;
     }
-    if (arg == "--dump-soc-manifest" || arg == "--export-soc-manifest") {
+    if (arg == "--dump-soc-manifest") {
         result.action = CliAction::ExportSoCManifest;
         auto value = next_argument(args, i, arg);
         if (!value) return std::unexpected(value.error());
@@ -1016,8 +1016,7 @@ auto parse_tui_options(std::string_view arg, std::span<char* const> args, std::s
         }
         return true;
     }
-    if (arg == "--validate-cpu-config" || arg == "--check-cpu-model" ||
-        arg == "--verify-cpu-model") {
+    if (arg == "--validate-config" || arg == "--validate-cpu-config") {
         result.action = CliAction::ValidateCpuModel;
         auto value = next_argument(args, i, arg);
         if (!value) return std::unexpected(value.error());
@@ -1771,8 +1770,8 @@ auto needs_memory_image(const ParseResult& result) -> bool {
                .description = "Write a CPU model configuration."},
               {.option = "--scaffold-cpu-model [FILE]",
                .description = "Generate a starter CPU model configuration."},
-              {.option = "--validate-cpu-config <FILE>",
-               .description = "Validate and lint a CPU model configuration."},
+              {.option = "--validate-config, --validate-cpu-config <FILE>",
+               .description = "Validate a CPU model or platform configuration file."},
               {.option = "--cfu-plugin <LIB.SO>",
                .description = "Load a dynamic custom function unit plugin."},
               {.option = "--bram-prewarm / --no-bram-prewarm",

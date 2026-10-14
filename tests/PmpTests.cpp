@@ -233,6 +233,25 @@ void test_pmp_mmu_page_walk() {
     }
 }
 
+void test_smepmp_status_tracking() {
+    simrv::core::CPU cpu{};
+    cpu.reset();
+
+    expect(!cpu.state().has_locked_pmp, "Initial has_locked_pmp is false");
+
+    // Write mseccfg with MML = 1 (bit 0)
+    auto res = cpu.write_csr(0x747, 1);
+    expect(res.has_value(), "Write to mseccfg succeeded");
+    expect((cpu.state().mseccfg & 1u) == 1u, "cpu.state().mseccfg updated with MML=1");
+    expect(cpu.state().has_locked_pmp, "Writing mseccfg with MML=1 sets has_locked_pmp to true");
+
+    // Smepmp MML/MMWP bits 0..2 are sticky
+    auto res_clear = cpu.write_csr(0x747, 0);
+    expect(res_clear.has_value(), "Write to mseccfg succeeded");
+    expect((cpu.state().mseccfg & 1u) == 1u, "mseccfg MML bit is sticky and remains set");
+    expect(cpu.state().has_locked_pmp, "has_locked_pmp remains true due to sticky MML");
+}
+
 }  // namespace
 
 auto main() -> int {
@@ -242,6 +261,7 @@ auto main() -> int {
     test_pmp_overflowing_request();
     test_pmp_machine_mode_and_locks();
     test_pmp_csr_locking_and_updates();
+    test_smepmp_status_tracking();
     test_pmp_mmu_page_walk();
 
     if (failures != 0) {

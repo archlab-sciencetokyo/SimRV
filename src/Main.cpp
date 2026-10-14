@@ -248,7 +248,7 @@ auto main(int argc, char* argv[]) -> int {  // NOLINT(bugprone-exception-escape)
             is_tui = true;
         } else if (arg == "-h" || arg == "--help" || arg == "--version" || arg == "--license" ||
                    arg == "--isa-info" || arg == "--capabilities" || arg == "--doctor" ||
-                   arg == "--dump-soc-manifest" || arg == "--export-soc-manifest") {
+                   arg == "--dump-soc-manifest") {
             skip_banner = true;
         } else if (arg == "-q" || arg == "--quiet") {
             skip_banner = true;
@@ -349,15 +349,20 @@ auto main(int argc, char* argv[]) -> int {  // NOLINT(bugprone-exception-escape)
                 const auto target = parsed->options.soc_manifest_preset;
                 auto config = simrv::core::SoCConfig::preset(target);
                 if (!config.has_value()) {
-                    simrv::log::error("Unknown SoC preset: {}", target);
+                    if (const auto resolved = simrv::core::resolve_cpu_model_path(target)) {
+                        simrv::core::SoCConfig loaded{};
+                        if (simrv::core::load_soc_config(*resolved, loaded)) {
+                            config = loaded;
+                        }
+                    }
+                }
+                if (!config.has_value()) {
+                    simrv::log::error("Unknown SoC preset or invalid config file: {}", target);
                     std::exit(
                         simrv::core::to_exit_code(simrv::core::HostExitCode::ConfigurationError));
                 }
-                if (const auto resolved = simrv::core::resolve_cpu_model_path(target)) {
-                    (void)simrv::core::parse_soc_config(*resolved, *config);
-                }
                 if (const auto valid = config->validate(); !valid) {
-                    simrv::log::error("Invalid SoC preset '{}': {}", target, valid.error());
+                    simrv::log::error("Invalid SoC configuration '{}': {}", target, valid.error());
                     std::exit(
                         simrv::core::to_exit_code(simrv::core::HostExitCode::ConfigurationError));
                 }
@@ -380,20 +385,23 @@ auto main(int argc, char* argv[]) -> int {  // NOLINT(bugprone-exception-escape)
             case CliAction::ValidateCpuModel: {
                 std::string target = parsed->options.dump_cpu_model_preset;
                 if (target.empty()) {
-                    simrv::log::error("No CPU model path specified to validate.");
+                    simrv::log::error("No configuration path specified to validate.");
                     std::exit(simrv::core::to_exit_code(simrv::core::HostExitCode::UsageError));
                 }
                 auto resolved = simrv::core::resolve_cpu_model_path(target);
                 std::string path_str = resolved.value_or(target);
                 if (!std::filesystem::exists(path_str)) {
-                    std::println(std::cerr, "{}[ERROR]{} CPU config file not found: '{}'",
+                    std::println(std::cerr, "{}[ERROR]{} Configuration file not found: '{}'",
                                  terminal_style(STDERR_FILENO, "\033[1;31m"),
                                  terminal_style(STDERR_FILENO, "\033[0m"), target);
                     std::exit(
                         simrv::core::to_exit_code(simrv::core::HostExitCode::ConfigurationError));
                 }
                 simrv::pipeline::CpuModelConfig cfg{};
-                if (!simrv::core::parse_cpu_config(path_str, cfg)) {
+                const bool has_cpu = simrv::core::parse_cpu_config(path_str, cfg);
+                simrv::core::SoCConfig soc{};
+                const bool has_soc = simrv::core::load_soc_config(path_str, soc);
+                if (!has_cpu && !has_soc) {
                     std::println(std::cerr, "{}[INVALID]{} Syntax or parse error reading '{}'",
                                  terminal_style(STDERR_FILENO, "\033[1;31m"),
                                  terminal_style(STDERR_FILENO, "\033[0m"),
@@ -401,45 +409,66 @@ auto main(int argc, char* argv[]) -> int {  // NOLINT(bugprone-exception-escape)
                     std::exit(
                         simrv::core::to_exit_code(simrv::core::HostExitCode::ConfigurationError));
                 }
-                std::println("{}=== Validating CPU Model Configuration: {} ==={}",
+                std::println("{}=== Validating Configuration: {} ==={}",
                              terminal_style(STDOUT_FILENO, "\033[1;34m"),
                              simrv::util::terminal_path_label(path_str, STDOUT_FILENO),
                              terminal_style(STDOUT_FILENO, "\033[0m"));
-                std::println("  Model Name      : {}", cfg.name.empty() ? "(unnamed)" : cfg.name);
-                std::println("  Description     : {}",
-                             cfg.description.empty() ? "(none)" : cfg.description);
-                std::println("  Required XLEN   : {}",
-                             cfg.supported_xlen == 0 ? "Any (RV32 or RV64)"
-                                                     : std::format("RV{}", cfg.supported_xlen));
-                std::println("  Simulator XLEN  : RV{}", simrv::xlen::kXLenBits);
-                std::println("  MISA Profile    : {}",
-                             simrv::core::detail::isa_preset_name(cfg.isa_preset));
-                std::println("  Pipeline Type   : {}",
-                             simrv::pipeline::pipeline_type_name(cfg.pipeline.pipeline_type));
-                std::println("  Branch Predictor: {}",
-                             simrv::pipeline::to_string(cfg.pipeline.branch_predictor.type));
-                std::println(
-                    "  ICache Geometry : {} KiB, {} B line, {}-way (hit: {} cyc, miss: {} cyc)",
-                    cfg.instruction_cache.capacity_bytes / 1024, cfg.instruction_cache.line_bytes,
-                    cfg.instruction_cache.associativity, cfg.instruction_cache.hit_latency,
-                    cfg.instruction_cache.miss_latency);
-                std::println(
-                    "  DCache Geometry : {} KiB, {} B line, {}-way (hit: {} cyc, miss: {} cyc)",
-                    cfg.data_cache.capacity_bytes / 1024, cfg.data_cache.line_bytes,
-                    cfg.data_cache.associativity, cfg.data_cache.hit_latency,
-                    cfg.data_cache.miss_latency);
+                if (has_cpu) {
+                    std::println("  Model Name      : {}",
+                                 cfg.name.empty() ? "(unnamed)" : cfg.name);
+                    std::println("  Description     : {}",
+                                 cfg.description.empty() ? "(none)" : cfg.description);
+                    std::println("  Required XLEN   : {}",
+                                 cfg.supported_xlen == 0 ? "Any (RV32 or RV64)"
+                                                         : std::format("RV{}", cfg.supported_xlen));
+                    std::println("  Simulator XLEN  : RV{}", simrv::xlen::kXLenBits);
+                    std::println("  MISA Profile    : {}",
+                                 simrv::core::detail::isa_preset_name(cfg.isa_preset));
+                    std::println("  Pipeline Type   : {}",
+                                 simrv::pipeline::pipeline_type_name(cfg.pipeline.pipeline_type));
+                    std::println("  Branch Predictor: {}",
+                                 simrv::pipeline::to_string(cfg.pipeline.branch_predictor.type));
+                    std::println(
+                        "  ICache Geometry : {} KiB, {} B line, {}-way (hit: {} cyc, miss: {} cyc)",
+                        cfg.instruction_cache.capacity_bytes / 1024,
+                        cfg.instruction_cache.line_bytes, cfg.instruction_cache.associativity,
+                        cfg.instruction_cache.hit_latency, cfg.instruction_cache.miss_latency);
+                    std::println(
+                        "  DCache Geometry : {} KiB, {} B line, {}-way (hit: {} cyc, miss: {} cyc)",
+                        cfg.data_cache.capacity_bytes / 1024, cfg.data_cache.line_bytes,
+                        cfg.data_cache.associativity, cfg.data_cache.hit_latency,
+                        cfg.data_cache.miss_latency);
 
-                auto res = cfg.validate();
-                if (!res.has_value()) {
-                    std::println(std::cerr, "{}[INVALID]{} {}",
-                                 terminal_style(STDERR_FILENO, "\033[1;31m"),
-                                 terminal_style(STDERR_FILENO, "\033[0m"), res.error());
-                    std::exit(
-                        simrv::core::to_exit_code(simrv::core::HostExitCode::ConfigurationError));
+                    auto res = cfg.validate();
+                    if (!res.has_value()) {
+                        std::println(std::cerr, "{}[INVALID]{} CPU model: {}",
+                                     terminal_style(STDERR_FILENO, "\033[1;31m"),
+                                     terminal_style(STDERR_FILENO, "\033[0m"), res.error());
+                        std::exit(simrv::core::to_exit_code(
+                            simrv::core::HostExitCode::ConfigurationError));
+                    }
+                }
+                if (has_soc) {
+                    std::println("  SoC Name        : {}", soc.name);
+                    std::println("  Device Policy   : {}",
+                                 soc.disable_unlisted_devices ? "explicit" : "implicit defaults");
+                    if (soc.dram_base.has_value() && soc.dram_size.has_value()) {
+                        std::println("  SoC DRAM Base   : {:#x} (size: {:#x})", *soc.dram_base,
+                                     *soc.dram_size);
+                    }
+                    std::println("  SoC Devices     : {} configured", soc.devices.size());
+
+                    auto soc_res = soc.validate();
+                    if (!soc_res.has_value()) {
+                        std::println(std::cerr, "{}[INVALID]{} SoC configuration: {}",
+                                     terminal_style(STDERR_FILENO, "\033[1;31m"),
+                                     terminal_style(STDERR_FILENO, "\033[0m"), soc_res.error());
+                        std::exit(simrv::core::to_exit_code(
+                            simrv::core::HostExitCode::ConfigurationError));
+                    }
                 }
                 std::println(
-                    "{}[VALID]{} CPU model configuration is fully valid and compatible "
-                    "with this simulator.",
+                    "{}[VALID]{} Configuration is fully valid and compatible with this simulator.",
                     terminal_style(STDOUT_FILENO, "\033[1;32m"),
                     terminal_style(STDOUT_FILENO, "\033[0m"));
                 std::exit(simrv::core::to_exit_code(simrv::core::HostExitCode::Success));

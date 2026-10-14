@@ -93,8 +93,8 @@ Select a complete platform preset (\fBvirt-pcie\fR, \fBvirt-mmio\fR, or \fBrvcom
 .B \-\-net=\fIbackend\fR
 Select the VirtIO network backend: \fBuser\fR, \fBtap\fR, \fBsocket\fR, or \fBnone\fR.
 .TP
-.B \-\-dump-soc-manifest=\fIpreset\fR [\fIfile\fR]
-Write the normalized SoC registry as JSON.
+.B \-\-dump-soc-manifest=\fIpreset|file\fR [\fIoutput\fR]
+Write the normalized SoC registry as JSON for a built-in preset or platform configuration file.
 .SH EXECUTION AND PIPELINE
 .TP
 .B \-s, \-e, \-\-steps \fIn\fR
@@ -125,8 +125,8 @@ Export a normalized CPU model configuration.
 .B \-\-scaffold-cpu-model [\fIfile\fR]
 Generate a starter CPU model configuration.
 .TP
-.B \-\-validate-cpu-config=\fIfile\fR
-Validate and lint a CPU model configuration.
+.B \-\-validate-config=\fIfile\fR, \-\-validate-cpu-config=\fIfile\fR
+Validate and lint a CPU model or unified SoC platform configuration.
 .TP
 .B \-\-cfu-plugin=\fIfile.so\fR
 Load a dynamic custom function-unit plugin.

@@ -22,6 +22,10 @@ _arguments -s \
   '--load-checkpoint[Restore an architectural checkpoint]:file:_files' \
   '--save-checkpoint[Save an architectural checkpoint]:file:_files' \
   '--checkpoint-dir[Set checkpoint output directory]:directory:_directories' \
+  '--dump-soc-manifest[Dump SoC manifest JSON for preset or config]:preset or config:(virt-pcie virt-mmio rvcomp)' \
+  '--dump-cpu-model[Dump CPU model JSON for preset or config]:preset or config:(tiny balanced performance)' \
+  '--validate-config[Validate CPU model or SoC platform configuration file]:file:_files' \
+  '--validate-cpu-config[Validate CPU model configuration file]:file:_files' \
   '--summary[Write execution summary]:file:_files' \
   '--events[Write lifecycle events]:file:_files' \
   '--gdb[Start GDB remote debugging]' \

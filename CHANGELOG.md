@@ -15,17 +15,22 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
     - Sstc Extension: `stimecmp` (0x14D) and `stimecmph` (0x15D, RV32).
     - Privileged 1.13 Environment Config: `menvcfg` (0x30A), `menvcfgh` (0x31A, RV32), and `senvcfg` (0x10A).
     - Counter Inhibit: `mcountinhibit` (0x320).
-    - Smepmp Enhanced PMP Security Config: `mseccfg` (0x747) and `mseccfgh` (0x757, RV32).
+    - Smepmp Enhanced PMP Security Config: `mseccfg` (0x747) and `mseccfgh` (0x757, RV32) with automatic PMP fast-status refresh and TLB invalidation on writes.
+  - Hardened Smepmp security tracking: `has_locked_pmp` now enforces M-mode lockdown when `mseccfg.MML` or `mseccfg.MMWP` is active.
   - Aligned with SBI v2.0 / v3.0: added standard ratified error codes (`InvalidState`, `BadRange`, `Timeout`, `Io`) and `FWFT` (Firmware Features) extension ID.
 - **Ratified ISA Naming & Deprecation**:
   - Replaced legacy draft single-letter `b` presets with standard ratified multi-letter presets (`gczb`, `gczbv`, `gcv`, `rv32gczb`, `rv64gczb`, `rv32gczbv`, `rv64gczbv`, `rv32gcv`, `rv64gcv`).
   - Explicitly reject legacy draft shorthands (`gcbv`, `rv32gcbv`, `rv64gcbv`, `gcb`, `rv32gcb`, `rv64gcb`) with helpful actionable error diagnostics directing users to ratified equivalents.
 - **Unified Platform Configuration & Memory Map Hardening**:
   - Consolidated CPU microarchitecture and SoC platform configurations into a single canonical `--config <PRESET | FILE>` CLI option, retiring `--cpu-config`, `--cpu-model-file`, `--model-file`, and `--soc` with clean error diagnostics.
+  - Added canonical `--validate-config <FILE>` to validate both CPU model and SoC platform configurations in a single step, retiring undocumented check aliases (`--check-cpu-model`, `--verify-cpu-model`, `--export-soc-manifest`, `--export-cpu-model`).
+  - Fixed `--dump-soc-manifest` to resolve and dump custom `.cfg` files in addition to built-in presets.
   - Hardened memory mapping: `MachineConfig::validate()` and `SoCConfig::validate()` strictly check DRAM address overflow and prevent DRAM from overlapping any active MMIO device or auxiliary memory region.
   - Enhanced system bus router to detect and reject overlapping MMIO node registrations during machine initialization.
   - Corrected guest Linux DTB pointer setup in register `a1` to dynamically compute `config.memory.dram_base + dtb_offset` for non-standard DRAM base addresses.
   - Enhanced `FdtPatcher` with NOP token skipping before root nodes, `boot_cpuid_phys` preservation, dynamic memory unit address synchronization (`memory@<dram_base>`), guaranteed `device_type = "memory\0"`, and 8-byte DTB blob alignment.
+- **TUI & Inspection Improvements**:
+  - Fixed branch predictor selection cycle in `SystemConfigModal` so `BranchPredictorType::Disabled` can be selected.
 - **Subsystem Queue & Component Deduplication**:
   - Unified split-ring queue processing across MMIO and PCI transports for the entire VirtIO family (Block, Net, GPU, Console, RNG, Input), eliminating over 500 lines of redundant DMA and queue code.
   - Centralized atomic operations in `isa/Amo.hpp` (`perform_amo_op`) and unified 32-bit and 64-bit ELF segment loading.

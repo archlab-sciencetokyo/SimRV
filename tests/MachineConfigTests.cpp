@@ -839,5 +839,35 @@ auto main() -> int {
         }
     }
 
+    {
+        const auto parse_cli = [](std::vector<std::string> args_str) {
+            std::vector<char*> args;
+            for (auto& s : args_str) args.push_back(s.data());
+            return simrv::util::parse_command_line(args);
+        };
+
+        auto validate_cfg = parse_cli({"SimRV", "--validate-config", "configs/models/rvcomp.cfg"});
+        expect(validate_cfg.has_value(), "CLI accepts --validate-config");
+        if (validate_cfg) {
+            expect(validate_cfg->action == simrv::util::CliAction::ValidateCpuModel,
+                   "--validate-config sets CliAction::ValidateCpuModel");
+            expect(validate_cfg->options.dump_cpu_model_preset == "configs/models/rvcomp.cfg",
+                   "--validate-config sets target configuration file");
+        }
+
+        auto validate_cpu_cfg =
+            parse_cli({"SimRV", "--validate-cpu-config", "configs/models/rvcomp.cfg"});
+        expect(validate_cpu_cfg.has_value(), "CLI accepts --validate-cpu-config");
+
+        expect(!parse_cli({"SimRV", "--check-cpu-model", "configs/models/rvcomp.cfg"}).has_value(),
+               "CLI rejects retired alias --check-cpu-model");
+        expect(!parse_cli({"SimRV", "--verify-cpu-model", "configs/models/rvcomp.cfg"}).has_value(),
+               "CLI rejects retired alias --verify-cpu-model");
+        expect(!parse_cli({"SimRV", "--export-soc-manifest", "virt-pcie"}).has_value(),
+               "CLI rejects retired alias --export-soc-manifest");
+        expect(!parse_cli({"SimRV", "--export-cpu-model", "tiny"}).has_value(),
+               "CLI rejects retired alias --export-cpu-model");
+    }
+
     return failures == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
 }

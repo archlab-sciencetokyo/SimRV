@@ -130,7 +130,7 @@ struct alignas(128) ArchState {
 
     constexpr void refresh_pmp_status() {
         num_active_pmp = 0;
-        has_locked_pmp = false;
+        has_locked_pmp = (mseccfg & static_cast<simrv::xlen::CsrValue>(0x3u)) != 0;
         for (size_t i = 0; i < kNumPmpEntries; ++i) {
             const uint8_t mode = pmpcfg[i] & 0x18;
             if (mode != 0) {
