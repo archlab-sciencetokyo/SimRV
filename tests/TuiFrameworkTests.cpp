@@ -136,6 +136,14 @@ struct TuiTestAccess {
     static void set_preferences_path(Tui& tui, std::filesystem::path path) {
         tui.preferences_path_ = std::move(path);
     }
+    static auto get_terminal_pane_start_line(const Tui& tui, int num_rows) -> int {
+        return tui.get_terminal_pane_start_line(num_rows);
+    }
+    static auto vt(Tui& tui) -> VirtualTerminal& { return tui.vt_; }
+    static void set_scroll_offset(Tui& tui, int offset) { tui.scroll_offset_ = offset; }
+    static void set_user_column_widths(Tui& tui, framework::ColumnWidthOverrides widths) {
+        tui.user_column_widths_ = widths;
+    }
 };
 
 }  // namespace simrv::tui
@@ -3201,6 +3209,152 @@ void test_concurrent_terminal_and_sixel_display() {
     tui.reset_scroll();
 }
 
+void test_terminal_cursor_tracking_and_scrollback() {
+    using namespace simrv::tui;
+    simrv::core::Machine machine;
+    Tui tui(machine);
+    TuiTestAccess::init_panes(tui, machine);
+    TuiTestAccess::set_cached_term_width(tui, 80);
+    TuiTestAccess::set_cached_term_height(tui, 24);
+
+    auto& vt = TuiTestAccess::vt(tui);
+
+    // Initial state: empty terminal (default 24 rows)
+    expect(TuiTestAccess::get_terminal_pane_start_line(tui, 24) == 0,
+           "start line is 0 for empty terminal");
+
+    // Write a few lines without scrollback
+    for (int i = 0; i < 5; ++i) {
+        vt.write_string("A\r\n");
+    }
+    expect(vt.get_scrollback_size() == 0, "no scrollback after 5 lines");
+    expect(vt.get_cursor_y() == 5, "cursor_y is 5");
+    expect(TuiTestAccess::get_terminal_pane_start_line(tui, 24) == 0,
+           "start line is 0 when all lines fit in view");
+
+    // Fill screen and create scrollback (write 30 more lines to push past 24 rows)
+    for (int i = 0; i < 30; ++i) {
+        vt.write_string("B\r\n");
+    }
+    expect(vt.get_scrollback_size() > 0, "scrollback generated after filling screen");
+    const int scrollback_count = vt.get_scrollback_size();
+    expect(vt.get_lines_count() == scrollback_count + 24, "lines count equals scrollback + screen");
+
+    // At scroll_offset = 0, start line should be exactly scrollback_count
+    // so live viewport maps 1:1 with screen cells and cursor line offset equals cursor_y
+    expect(TuiTestAccess::get_terminal_pane_start_line(tui, 24) == scrollback_count,
+           "start line matches scrollback count so live viewport maps to screen cells");
+
+    const int cursor_abs_line = vt.get_scrollback_size() + vt.get_cursor_y();
+    const int start_line = TuiTestAccess::get_terminal_pane_start_line(tui, 24);
+    const int line_offset = cursor_abs_line - start_line;
+    expect(line_offset == vt.get_cursor_y(),
+           "cursor line offset in terminal pane exactly matches active cursor_y");
+
+    // When scrolled back by 4 lines, start_line moves back by 4
+    TuiTestAccess::set_scroll_offset(tui, 4);
+    expect(TuiTestAccess::get_terminal_pane_start_line(tui, 24) == scrollback_count - 4,
+           "start line shifts back proportionally when scrolling history");
+    TuiTestAccess::set_scroll_offset(tui, 0);
+}
+
+void test_sixel_display_resolution_adaptation_and_size_warning() {
+    using namespace simrv::tui;
+    using namespace simrv::core;
+
+    constexpr size_t test_dram_size = 128 * 1024 * 1024;
+    Machine machine(MachineConfig{.memory = {.dram_size = test_dram_size},
+                                  .execution = {.appmode = true},
+                                  .tui = {.enabled = true}});
+    std::vector<simrv::xlen::Byte> ram(test_dram_size, simrv::xlen::Byte{0});
+    machine.set_ram_for_testing(ram.data(), ram.size());
+    machine.primary_hart().reset();
+
+    Tui tui(machine);
+    TuiTestAccess::init_panes(tui, machine);
+    tui.close_modal();
+
+    // 1. Small width check (< kMinDisplayWidth = 24 cols)
+    TuiTestAccess::set_user_column_widths(tui, framework::kNoColumnWidthOverrides);
+    TuiTestAccess::set_layout(tui, TuiLayout::Split);
+    TuiTestAccess::set_cached_term_width(tui, 40);
+    TuiTestAccess::set_cached_term_height(tui, 24);
+    TuiTestAccess::set_workbench_slots(tui, {{TuiRegPage::DISPLAY, 0}, {TuiRegPage::CONSOLE, 0}});
+    TuiTestAccess::set_sixel_supported(tui, true);
+
+    tui.render(true);
+    const auto& small_w_lines = TuiTestAccess::last_screen_lines(tui);
+    bool found_too_small = false;
+    for (const auto& line : small_w_lines) {
+        if (line.find("Too small") != std::string::npos ||
+            line.find("Display space too small") != std::string::npos) {
+            found_too_small = true;
+            break;
+        }
+    }
+    expect(found_too_small, "displays warning when width < 24");
+
+    // Sixel drawing must be suppressed when width is under minimum
+    std::string small_sixel_cmds;
+    TuiTestAccess::render_draw_sixel(tui, 2, 20, 15, small_sixel_cmds);
+    expect(small_sixel_cmds.empty(), "sixel drawing suppressed when width < kMinDisplayWidth");
+
+    // 2. Small height check (< kMinDisplayBodyRows = 8 body rows)
+    TuiTestAccess::set_cached_term_width(tui, 80);
+    TuiTestAccess::set_cached_term_height(tui, 14);  // content_rows = 7, body_rows <= 7 < 8
+    tui.render(true);
+    const auto& small_h_lines = TuiTestAccess::last_screen_lines(tui);
+    bool found_too_small_h = false;
+    for (const auto& line : small_h_lines) {
+        if (line.find("Display space too small") != std::string::npos) {
+            found_too_small_h = true;
+            break;
+        }
+    }
+    expect(found_too_small_h, "displays warning when body rows < 8");
+
+    // Sixel drawing must be suppressed when body rows is under minimum
+    small_sixel_cmds.clear();
+    TuiTestAccess::render_draw_sixel(tui, 2, 80, 5, small_sixel_cmds);
+    expect(small_sixel_cmds.empty(),
+           "sixel drawing suppressed when body rows < kMinDisplayBodyRows");
+
+    // 3. Sixel unsupported check when panel size is sufficient
+    TuiTestAccess::set_cached_term_width(tui, 80);
+    TuiTestAccess::set_cached_term_height(tui, 24);
+    TuiTestAccess::set_sixel_supported(tui, false);
+    tui.render(true);
+    const auto& unsupp_lines = TuiTestAccess::last_screen_lines(tui);
+    bool found_unsupported = false;
+    for (const auto& line : unsupp_lines) {
+        if (line.find("Sixel graphics unsupported") != std::string::npos) {
+            found_unsupported = true;
+            break;
+        }
+    }
+    expect(found_unsupported, "displays unsupported warning when sixel not supported");
+
+    // 4. Normal sixel display: resolution adapts to terminal without 640px clamp
+    TuiTestAccess::set_sixel_supported(tui, true);
+    TuiTestAccess::set_sixel_rendered(tui, false);
+    tui.render(true);
+    const auto& normal_lines = TuiTestAccess::last_screen_lines(tui);
+    bool found_warning_in_normal = false;
+    for (const auto& line : normal_lines) {
+        if (line.find("Display space too small") != std::string::npos ||
+            line.find("Sixel graphics unsupported") != std::string::npos) {
+            found_warning_in_normal = true;
+            break;
+        }
+    }
+    expect(!found_warning_in_normal,
+           "no warnings displayed when space is sufficient and sixel supported");
+
+    std::string normal_sixel_cmds;
+    TuiTestAccess::render_draw_sixel(tui, 2, 80, 20, normal_sixel_cmds);
+    expect(!normal_sixel_cmds.empty(), "sixel commands generated for valid display dimensions");
+}
+
 }  // namespace
 
 int main() {
@@ -3247,6 +3401,8 @@ int main() {
     test_sixel_fluid_framebuffer_updates();
     test_virtio_input_and_display_mouse();
     test_concurrent_terminal_and_sixel_display();
+    test_terminal_cursor_tracking_and_scrollback();
+    test_sixel_display_resolution_adaptation_and_size_warning();
     if (failures != 0) return EXIT_FAILURE;
     std::cout << "TUI framework tests passed\n";
     return EXIT_SUCCESS;
