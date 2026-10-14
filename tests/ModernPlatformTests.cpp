@@ -2944,7 +2944,7 @@ void test_ia_multihart_lr_sc_coherence() {
     h0.pipeline_context.rd = simrv::xlen::RegId::A1;
     h0.run_memory_stage(machine);
     check(h0.state().load_res == target_addr);
-    check(h0.state().reserved == 1);
+    check(h0.state().lr_reservation_active);
     check(machine.memory().reservation_table().check_reservation(0, target_addr));
 
     // 2. Hart 1 performs a store to the same address in IA mode

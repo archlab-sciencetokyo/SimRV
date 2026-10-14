@@ -568,6 +568,7 @@ auto Machine::initialize() -> std::expected<void, std::string> {
         linux_boot ? static_cast<simrv::xlen::Register>(config.memory.dram_base + dtb_offset)
                    : 0);  // a1 = dtb
     primary_hart().state().misa = initial_misa;
+    primary_hart().state().refresh_misa_status();
     primary_hart().state().priv = kPrivMachine;
     primary_hart().state().regs.vlen = config.isa.vlen ? config.isa.vlen : 256;
     primary_hart().state().initialize_lower_xlen_fields();
@@ -597,6 +598,7 @@ auto Machine::initialize() -> std::expected<void, std::string> {
             if (!cfu_plugin_path.empty()) sec_cpu->cfu_unit.load_plugin(cfu_plugin_path);
             sec_cpu->state().mhartid = i;
             sec_cpu->state().misa = initial_misa;
+            sec_cpu->state().refresh_misa_status();
             sec_cpu->state().regs.vlen = config.isa.vlen ? config.isa.vlen : 256;
             sec_cpu->state().initialize_lower_xlen_fields();
             // When OpenSBI firmware is active, secondary harts must execute its M-mode wait

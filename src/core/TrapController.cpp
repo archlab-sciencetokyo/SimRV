@@ -153,7 +153,7 @@ void TrapController::mret(ArchState& state) {
     state.priv = target_priv;
     state.update_xlen();
     state.pc = sign_extend_return_pc(state, isa::epc_read_value(state.mepc, state.misa));
-    state.reserved = 0;
+    state.lr_reservation_active = false;
 }
 
 void TrapController::sret(ArchState& state) {
@@ -170,7 +170,7 @@ void TrapController::sret(ArchState& state) {
     state.priv = target_priv;
     state.update_xlen();
     state.pc = sign_extend_return_pc(state, isa::epc_read_value(state.sepc, state.misa));
-    state.reserved = 0;
+    state.lr_reservation_active = false;
 }
 
 void TrapController::raise_exception(CPU& cpu, simrv::xlen::TrapCause cause,
@@ -188,7 +188,7 @@ void TrapController::raise_exception(CPU& cpu, simrv::xlen::TrapCause cause,
     }
 
     if (cpu.sbi.handle_ecall(cause)) {
-        state.reserved = 0;
+        state.lr_reservation_active = false;
         cpu.pipeline_context.pending_exception = std::nullopt;
         cpu.pipeline_context.pending_tval = 0;
         return;
@@ -236,7 +236,7 @@ void TrapController::raise_exception(CPU& cpu, simrv::xlen::TrapCause cause,
             cpu.machine_->stop(Machine::StopReason::UnhandledTrap);
         }
     }
-    state.reserved = 0;
+    state.lr_reservation_active = false;
     cpu.pipeline_context.pending_exception = std::nullopt;
     cpu.pipeline_context.pending_tval = 0;
 }

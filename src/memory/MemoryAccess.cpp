@@ -415,7 +415,7 @@ void MemoryAccess::target_write(MemorySubsystem& mem, core::CPU& cpu, simrv::xle
     const unsigned size_bytes = 1u << (std::to_underlying(funct3) & 0x3u);
     auto note_store = [&](simrv::xlen::Address paddr, size_t bytes) {
         cpu.active_context().mem_paddr = paddr;
-        cpu.state().reserved = 0;
+        cpu.state().lr_reservation_active = false;
         if (cpu.machine_->num_harts() > 1 && mem.reservation_table().may_have_reservations()) {
             mem.reservation_table().invalidate_range(paddr, bytes, cpu.hart_id());
         }
@@ -493,7 +493,7 @@ void MemoryAccess::target_write(MemorySubsystem& mem, core::CPU& cpu, simrv::xle
             }
             ctx.sc_reservation_succeeded = success;
             ctx.wb_data = success ? 0 : 1;
-            cpu.state().reserved = success ? 1 : 0;
+            cpu.state().lr_reservation_active = success;
             if (!success) return;
         }
         const auto commit_write = [&]() { note_store(addr, size_bytes); };

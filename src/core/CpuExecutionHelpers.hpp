@@ -28,14 +28,16 @@ using isa::Opcode;
 }
 
 [[nodiscard]] SIMRV_ALWAYS_INLINE auto is_tohost_addr(const Machine& machine,
-                                                      simrv::xlen::Address addr) -> bool {
+                                                      simrv::xlen::Address addr) noexcept -> bool {
     const auto tohost = machine.isa_test_tohost();
-    if (tohost != 0 && tohost != 0x80001000ULL && (addr - tohost < 8)) return true;
-    return (addr - 0x80001000ULL < 8) || (addr - 0x40008000ULL < 8);
+    if (simrv::compiler::unlikely(tohost != 0 && tohost != 0x80001000ULL && (addr - tohost < 8))) {
+        return true;
+    }
+    return simrv::compiler::unlikely((addr - 0x80001000ULL < 8) || (addr - 0x40008000ULL < 8));
 }
 
 [[nodiscard]] SIMRV_ALWAYS_INLINE auto is_tohost_addr(const Machine& machine,
-                                                      simrv::xlen::PhysAddr addr) -> bool {
+                                                      simrv::xlen::PhysAddr addr) noexcept -> bool {
     return is_tohost_addr(machine, addr.raw());
 }
 }  // namespace

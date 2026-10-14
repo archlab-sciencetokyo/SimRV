@@ -718,7 +718,7 @@ void CPU::run_memory_stage_baremetal(Machine& machine) {
 
     if (opcode == Opcode::Amo && funct5 == Funct5Amo::Lr) {
         state_.load_res = addr;
-        state_.reserved = 1;
+        state_.lr_reservation_active = true;
         machine.memory_.reservation_table().set_reservation(hart_id(), addr);
     }
 
@@ -736,7 +736,7 @@ void CPU::run_memory_stage_baremetal(Machine& machine) {
     // Store Phase
     if ((opcode == Opcode::Store) ||
         (opcode == Opcode::Amo &&
-         (funct5 == Funct5Amo::Sc && (ctx.wb_data == 0u) && (state_.reserved != 0u)))) {
+         (funct5 == Funct5Amo::Sc && (ctx.wb_data == 0u) && state_.lr_reservation_active))) {
         if (simrv::compiler::likely(machine.memory_geometry().contains(addr, access_size))) {
             // Check tohost writes (fast filter for 0x80000000 or 0x40000000 regions)
             if (simrv::compiler::unlikely((addr & 0xC0000000ULL) != 0)) {
@@ -827,7 +827,7 @@ void CPU::run_memory_stage_baremetal(Machine& machine) {
     if ((opcode == Opcode::Store) || (opcode == Opcode::StoreFp) ||
         (opcode == Opcode::Amo && funct5 != Funct5Amo::Lr)) {
         if (!ctx.pending_exception.has_value()) {
-            state_.reserved = 0;
+            state_.lr_reservation_active = false;
             machine.memory_.reservation_table().invalidate_range(ctx.mem_paddr, access_size,
                                                                  hart_id());
         }

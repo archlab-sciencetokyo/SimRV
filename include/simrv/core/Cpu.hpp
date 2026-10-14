@@ -67,8 +67,12 @@ struct alignas(128) ArchState {
         mtval{};  ///< Machine Trap Value (holds faulting addresses or instruction bytes)
     simrv::xlen::CsrValue mhartid{};  ///< Machine Hardware Thread ID (processor core identifier)
     simrv::xlen::CsrValue misa = isa::kMisaDefault;  ///< Machine ISA and extensions descriptor
-    simrv::xlen::CsrValue mie{};                     ///< Machine Interrupt Enable
-    simrv::xlen::CsrValue mip{};                     ///< Machine Interrupt Pending
+    simrv::xlen::Word fetch_align_mask =
+        (isa::kMisaDefault & (simrv::xlen::CsrValue{1} << 2)) != 0
+            ? 1u
+            : 3u;  ///< Cached fetch alignment mask: 1u for C-ext (2-byte align), 3u for non-C
+    simrv::xlen::CsrValue mie{};  ///< Machine Interrupt Enable
+    simrv::xlen::CsrValue mip{};  ///< Machine Interrupt Pending
     bool seip_software{};  ///< Software-writable component of mip.SEIP (ORed with PLIC signal).
     bool seip_external{};  ///< PLIC-driven component of mip.SEIP.
     bool stip_software{};  ///< M-mode software-posted component of writable mip.STIP.
@@ -116,10 +120,9 @@ struct alignas(128) ArchState {
 
     simrv::xlen::PrivilegeLevel priv = kPrivMachine;  ///< Current processor privilege level
 
-    simrv::xlen::Address load_res{};  ///< Active memory physical address reservation for
-                                      ///< Load-Reserved / Store-Conditional (LR/SC)
-    simrv::xlen::CsrValue
-        reserved{};  ///< Reserved for internal architectural extensions or tracking
+    simrv::xlen::Address load_res{};     ///< Active memory physical address reservation for
+                                         ///< Load-Reserved / Store-Conditional (LR/SC)
+    bool lr_reservation_active = false;  ///< Active reservation flag for LR/SC
 
     /* Physical Memory Protection (PMP) */
     static constexpr size_t kNumPmpEntries = 16;
@@ -127,6 +130,15 @@ struct alignas(128) ArchState {
     std::array<simrv::xlen::Address, kNumPmpEntries> pmpaddr{};
     size_t num_active_pmp = 0;
     bool has_locked_pmp = false;
+
+    constexpr void refresh_misa_status() noexcept {
+        fetch_align_mask = (misa & (simrv::xlen::CsrValue{1} << 2)) != 0 ? 1u : 3u;
+    }
+
+    constexpr void set_misa(simrv::xlen::CsrValue new_misa) noexcept {
+        misa = new_misa;
+        refresh_misa_status();
+    }
 
     constexpr void refresh_pmp_status() {
         num_active_pmp = 0;
@@ -259,8 +271,9 @@ struct alignas(32) SoftTlbEntry {
                                                              uint32_t current_epoch) const noexcept
         -> bool {
         if (simrv::compiler::unlikely(epoch != current_epoch)) return false;
-        return simrv::compiler::unlikely(global) ? (tag == make_tag(vpn, 0, priv))
-                                                 : (tag == make_tag(vpn, asid, priv));
+        const uint64_t expected_tag = make_tag(vpn, asid, priv);
+        if (simrv::compiler::likely(tag == expected_tag)) return true;
+        return simrv::compiler::unlikely(global) && (tag == make_tag(vpn, 0, priv));
     }
 
     void set(uint64_t vpn, uint64_t asid, simrv::xlen::PrivilegeLevel priv, uint32_t current_epoch,

@@ -230,7 +230,7 @@ class Machine final : public core::IInterruptController {
         return config.debug.spike_elf;
     }
     [[nodiscard]] auto isa_test_tohost() const noexcept -> simrv::xlen::Address {
-        return resolved_isatest_tohost_ != 0 ? resolved_isatest_tohost_ : config.isa.isatest_tohost;
+        return resolved_isatest_tohost_;
     }
     [[nodiscard]] auto memory_geometry() const noexcept -> MemoryGeometry { return config.memory; }
     [[nodiscard]] auto platform_profile() const noexcept -> PlatformProfile {

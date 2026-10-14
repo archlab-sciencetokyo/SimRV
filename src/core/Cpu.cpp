@@ -46,6 +46,7 @@ void CPU::apply_cpu_model_config(const simrv::pipeline::CpuModelConfig& config) 
     const unsigned int target_xlen =
         (config.supported_xlen != 0) ? config.supported_xlen : simrv::xlen::kXLenBits;
     state_.misa = isa::misa_with_mxl(isa::isa_preset_bits(config.isa_preset), target_xlen);
+    state_.refresh_misa_status();
     state_.initialize_lower_xlen_fields();
     if (machine_ != nullptr) {
         machine_->dma_engine().set_config(config.dma);

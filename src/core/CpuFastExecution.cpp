@@ -27,9 +27,7 @@ SIMRV_ALWAYS_INLINE void CPU::execute_cached_jal(CachedOp& op) {
     simrv::xlen::Register const next_pc = state_.pc + op.len();
     pipeline_context.tkn = true;
     pipeline_context.jmp_pc = simrv::xlen::VirtAddr{state_.pc + op.imm};
-    const bool has_c = misa_has_extension(state_.misa, isa::IsaExtension::C);
-    const simrv::xlen::Word alignment_mask = has_c ? 1u : 3u;
-    if ((pipeline_context.jmp_pc & alignment_mask) != 0) {
+    if (simrv::compiler::unlikely((pipeline_context.jmp_pc & state_.fetch_align_mask) != 0)) {
         raise_exception(ExceptionCode::MisalignedFetch, pipeline_context.jmp_pc.raw());
         return;
     }
@@ -48,9 +46,7 @@ SIMRV_ALWAYS_INLINE void CPU::execute_cached_jalr(CachedOp& op, simrv::xlen::Reg
         pipeline_context.jmp_pc = simrv::xlen::VirtAddr{static_cast<simrv::xlen::Register>(
             static_cast<int64_t>(static_cast<int32_t>(pipeline_context.jmp_pc.raw())))};
     }
-    const bool has_c = misa_has_extension(state_.misa, isa::IsaExtension::C);
-    const simrv::xlen::Word alignment_mask = has_c ? 1u : 3u;
-    if ((pipeline_context.jmp_pc & alignment_mask) != 0) {
+    if (simrv::compiler::unlikely((pipeline_context.jmp_pc & state_.fetch_align_mask) != 0)) {
         raise_exception(ExceptionCode::MisalignedFetch, pipeline_context.jmp_pc.raw());
         return;
     }
@@ -92,9 +88,7 @@ SIMRV_ALWAYS_INLINE void CPU::execute_cached_branch(CachedOp& op, simrv::xlen::R
     simrv::xlen::VirtAddr const target_pc = tkn ? simrv::xlen::VirtAddr{state_.pc + op.imm}
                                                 : simrv::xlen::VirtAddr{state_.pc + op.len()};
     pipeline_context.jmp_pc = target_pc;
-    const bool has_c = misa_has_extension(state_.misa, isa::IsaExtension::C);
-    const simrv::xlen::Word alignment_mask = has_c ? 1u : 3u;
-    if (simrv::compiler::unlikely(tkn && (target_pc & alignment_mask) != 0)) {
+    if (simrv::compiler::unlikely(tkn && (target_pc & state_.fetch_align_mask) != 0)) {
         raise_exception(ExceptionCode::MisalignedFetch, target_pc.raw());
         return;
     }
@@ -371,7 +365,7 @@ SIMRV_ALWAYS_INLINE auto CPU::execute_cached_store(Machine& machine, CachedOp& o
                                     !is_tohost_addr(machine, mem_addr))) {
             simrv::memory::ram_write_fast(mem_addr, rrs2,
                                           static_cast<simrv::xlen::Instruction>(op.funct3), ram);
-            state_.reserved = 0;
+            state_.lr_reservation_active = false;
             if (simrv::compiler::unlikely(
                     machine.num_harts() > 1 &&
                     machine.memory_.reservation_table().may_have_reservations())) {
@@ -406,7 +400,7 @@ SIMRV_ALWAYS_INLINE auto CPU::execute_cached_store(Machine& machine, CachedOp& o
                         simrv::memory::host_write_fast(
                             entry.host_ptr_base + page_offset, rrs2,
                             static_cast<simrv::xlen::Instruction>(op.funct3));
-                        state_.reserved = 0;
+                        state_.lr_reservation_active = false;
                         if (simrv::compiler::unlikely(
                                 machine.num_harts() > 1 &&
                                 machine.memory_.reservation_table().may_have_reservations())) {
@@ -433,7 +427,7 @@ SIMRV_ALWAYS_INLINE auto CPU::execute_cached_store(Machine& machine, CachedOp& o
         }
     }
 
-    state_.reserved = 0;
+    state_.lr_reservation_active = false;
     if (simrv::compiler::unlikely(machine.num_harts() > 1 &&
                                   machine.memory_.reservation_table().may_have_reservations())) {
         machine.memory_.reservation_table().invalidate_range(pipeline_context.mem_paddr, size_bytes,
@@ -894,7 +888,7 @@ void CPU::execute_cached_op_fast(Machine& machine, CachedOp& op,
                     }
                 }
             }
-            state_.reserved = 0;
+            state_.lr_reservation_active = false;
             if (simrv::compiler::unlikely(
                     machine.num_harts() > 1 &&
                     machine.memory_.reservation_table().may_have_reservations())) {

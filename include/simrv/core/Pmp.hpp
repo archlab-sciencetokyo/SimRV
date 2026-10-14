@@ -126,9 +126,9 @@ struct PmpConfigEntry {
     }
 };
 
-[[nodiscard]] inline auto calculate_pmp_range(PmpConfigEntry cfg, simrv::xlen::Address pmpaddr_curr,
-                                              simrv::xlen::Address pmpaddr_prev) noexcept
-    -> PmpRange {
+[[nodiscard]] SIMRV_ALWAYS_INLINE auto calculate_pmp_range(
+    PmpConfigEntry cfg, simrv::xlen::Address pmpaddr_curr,
+    simrv::xlen::Address pmpaddr_prev) noexcept -> PmpRange {
     const PmpMode mode = cfg.mode();
     PmpRange range{};
     if (mode == PmpMode::Tor) {
@@ -153,10 +153,13 @@ struct PmpConfigEntry {
     return range;
 }
 
-inline auto check_access(const ArchState& state, simrv::xlen::Address paddr, size_t size,
-                         PmpAccessType access,
-                         std::optional<simrv::xlen::PrivilegeLevel> priv_override = std::nullopt)
-    -> bool {
+SIMRV_ALWAYS_INLINE auto check_access(
+    const ArchState& state, simrv::xlen::Address paddr, size_t size, PmpAccessType access,
+    std::optional<simrv::xlen::PrivilegeLevel> priv_override = std::nullopt) -> bool {
+    if (simrv::compiler::likely(state.num_active_pmp == 0)) {
+        return true;
+    }
+
     simrv::xlen::PrivilegeLevel effective_priv = priv_override.value_or(state.priv);
     // MPRV is effective only when executing in Machine mode per RISC-V Privileged Architecture
     if (!priv_override.has_value() && access != PmpAccessType::Execute &&
@@ -165,9 +168,6 @@ inline auto check_access(const ArchState& state, simrv::xlen::Address paddr, siz
         effective_priv = mstatus_mpp(state.mstatus);
     }
 
-    if (simrv::compiler::likely(state.num_active_pmp == 0)) {
-        return true;
-    }
     if (effective_priv == simrv::xlen::PrivilegeLevel::Machine && !state.has_locked_pmp) {
         return true;
     }
@@ -207,10 +207,9 @@ inline auto check_access(const ArchState& state, simrv::xlen::Address paddr, siz
     return effective_priv == simrv::xlen::PrivilegeLevel::Machine;
 }
 
-inline auto check_access(const ArchState& state, simrv::xlen::PhysAddr paddr, size_t size,
-                         PmpAccessType access,
-                         std::optional<simrv::xlen::PrivilegeLevel> priv_override = std::nullopt)
-    -> bool {
+SIMRV_ALWAYS_INLINE auto check_access(
+    const ArchState& state, simrv::xlen::PhysAddr paddr, size_t size, PmpAccessType access,
+    std::optional<simrv::xlen::PrivilegeLevel> priv_override = std::nullopt) -> bool {
     return check_access(state, paddr.raw(), size, access, priv_override);
 }
 

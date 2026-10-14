@@ -55,7 +55,7 @@ void CPU::memory_load_phase(Machine& machine) {
     if (opcode == Opcode::Amo && funct5 == Funct5Amo::Lr) {
         if (!ctx.pending_exception.has_value() && !ca_state.waiting_for_interconnect) {
             state_.load_res = ctx.mem_paddr.raw();
-            state_.reserved = 1;
+            state_.lr_reservation_active = true;
             machine.memory_.reservation_table().set_reservation(hart_id(), ctx.mem_paddr.raw());
         }
     }
