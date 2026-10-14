@@ -64,7 +64,7 @@ void TileLinkBus::record_transaction(TileLinkChannel ch, std::string_view opcode
     }
 }
 
-void TileLinkBus::add_node(TileLinkNode* node) { router_.register_device(node); }
+auto TileLinkBus::add_node(TileLinkNode* node) -> bool { return router_.register_device(node); }
 
 void TileLinkBus::configure_timing(uint32_t request_latency, uint32_t response_latency,
                                    uint32_t data_request_latency, uint32_t data_response_latency,

@@ -27,7 +27,7 @@ def run_simrv(simrv_bin: Path, cfg_path: Path, elf_path: Path, repo_root: Path) 
         "--ca",
         "-m", str(elf_path.resolve()),
         "-H", "0x80000000",
-        "--cpu-config", str(cfg_path.resolve())
+        "--config", str(cfg_path.resolve())
     ]
     res = subprocess.run(cmd, cwd=repo_root, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
     if res.returncode != 0:

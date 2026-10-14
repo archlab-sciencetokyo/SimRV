@@ -20,6 +20,12 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - **Ratified ISA Naming & Deprecation**:
   - Replaced legacy draft single-letter `b` presets with standard ratified multi-letter presets (`gczb`, `gczbv`, `gcv`, `rv32gczb`, `rv64gczb`, `rv32gczbv`, `rv64gczbv`, `rv32gcv`, `rv64gcv`).
   - Explicitly reject legacy draft shorthands (`gcbv`, `rv32gcbv`, `rv64gcbv`, `gcb`, `rv32gcb`, `rv64gcb`) with helpful actionable error diagnostics directing users to ratified equivalents.
+- **Unified Platform Configuration & Memory Map Hardening**:
+  - Consolidated CPU microarchitecture and SoC platform configurations into a single canonical `--config <PRESET | FILE>` CLI option, retiring `--cpu-config`, `--cpu-model-file`, `--model-file`, and `--soc` with clean error diagnostics.
+  - Hardened memory mapping: `MachineConfig::validate()` and `SoCConfig::validate()` strictly check DRAM address overflow and prevent DRAM from overlapping any active MMIO device or auxiliary memory region.
+  - Enhanced system bus router to detect and reject overlapping MMIO node registrations during machine initialization.
+  - Corrected guest Linux DTB pointer setup in register `a1` to dynamically compute `config.memory.dram_base + dtb_offset` for non-standard DRAM base addresses.
+  - Enhanced `FdtPatcher` with NOP token skipping before root nodes, `boot_cpuid_phys` preservation, dynamic memory unit address synchronization (`memory@<dram_base>`), guaranteed `device_type = "memory\0"`, and 8-byte DTB blob alignment.
 - **Subsystem Queue & Component Deduplication**:
   - Unified split-ring queue processing across MMIO and PCI transports for the entire VirtIO family (Block, Net, GPU, Console, RNG, Input), eliminating over 500 lines of redundant DMA and queue code.
   - Centralized atomic operations in `isa/Amo.hpp` (`perform_amo_op`) and unified 32-bit and 64-bit ELF segment loading.

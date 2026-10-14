@@ -87,8 +87,8 @@ subsequent multi-letter extensions are separated by underscores. \fBG\fR implies
 .B \-\-vlen=\fIbits\fR
 Set the vector register length from 128 through 1024 bits.
 .TP
-.B \-\-soc=\fIpreset\fR
-Select a complete SoC platform: \fBvirt-pcie\fR, \fBvirt-mmio\fR, or \fBrvcomp\fR.
+.B \-\-config=\fIpreset|file\fR
+Select a complete platform preset (\fBvirt-pcie\fR, \fBvirt-mmio\fR, or \fBrvcomp\fR) or load a platform configuration file defining SoC topology and microarchitectural parameters.
 .TP
 .B \-\-net=\fIbackend\fR
 Select the VirtIO network backend: \fBuser\fR, \fBtap\fR, \fBsocket\fR, or \fBnone\fR.
@@ -117,11 +117,7 @@ Select the branch predictor: \fBnone\fR, \fBstatic\fR, \fBbimodal\fR,
 Configure branch-history, branch-target-buffer, and return-address-stack sizes.
 .TP
 .B \-\-cpu-preset=\fIpreset\fR
-Select a built-in CPU model (\fBtiny\fR, \fBbalanced\fR, or \fBperformance\fR)
-or load a model configuration file.
-.TP
-.B \-\-cpu-config=\fIfile\fR
-Load a microarchitectural latency configuration.
+Select a built-in CPU model (\fBtiny\fR, \fBbalanced\fR, or \fBperformance\fR).
 .TP
 .B \-\-dump-cpu-model=\fImodel\fR [\fIfile\fR]
 Export a normalized CPU model configuration.

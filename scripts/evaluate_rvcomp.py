@@ -166,7 +166,7 @@ def main(arguments=None):
     parser.add_argument('--out', type=str, default=None, help='Output path for JSON results')
     parser.add_argument('--cpu-preset', dest='cpu_preset', type=str,
                         default="rvcomp", help='CPU preset name (default: rvcomp)')
-    parser.add_argument('--cpu-config', type=str, default=None, help='Path to custom .cfg model file')
+    parser.add_argument('--config', type=str, default=None, help='Path to custom .cfg model file')
     parser.add_argument('--simrv-bin', type=str, default=None, help='Explicit path to SimRV executable')
     parser.add_argument('--rvcomp-dir', type=str, default=os.environ.get('RVCOMP_DIR'),
                         help='RVComp checkout (or set RVCOMP_DIR; required unless --rvcomp-bin is given)')
@@ -255,8 +255,8 @@ def main(arguments=None):
         rtl_core_est_cycle = extract_number(r'===> total estimate cycle\s*:\s*(\d+)', rtl_out)
 
         # 4. Run SimRV in cycle-accurate mode
-        if args.cpu_config:
-            model_arg = f"--cpu-config {Path(args.cpu_config).resolve()}"
+        if args.config:
+            model_arg = f"--config {Path(args.config).resolve()}"
         else:
             model_arg = f"--cpu-preset {args.cpu_preset}"
         simrv_cmd = f"{simrv_bin} --cli --ca -m {elf_path.resolve()} -H 0x80000000 {model_arg}"

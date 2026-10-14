@@ -108,7 +108,7 @@ struct RuntimeOptions {
     std::string spike_bin = "spike";
     std::string spike_elf;
 
-    std::string fn_cpuconfig;
+    std::string fn_config;
     std::optional<simrv::pipeline::CpuModelPreset> cpu_model_preset;
     std::string dump_cpu_model_preset;
     std::string dump_cpu_model_output;
@@ -129,7 +129,7 @@ struct RuntimeOptions {
     bool explicit_smp_mode = false;
     uint64_t dram_size = 0;
     simrv::core::PlatformProfile platform_profile = simrv::core::PlatformProfile::Pcie;
-    std::string soc_preset = "virt-pcie";
+    std::string config_target = "virt-pcie";
     std::string net_mode = "user";
     bool server_mode = false;
     std::string server_endpoint;

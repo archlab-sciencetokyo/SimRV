@@ -88,7 +88,7 @@ def create_parser():
     parser.add_argument("--cfu-dir", default=os.environ.get("CFU_PG_DIR"),
                         help="CFU-Proving-Ground checkout (or set CFU_PG_DIR; required)")
     parser.add_argument("--simrv-bin", default=None)
-    parser.add_argument("--cpu-config", default=None)
+    parser.add_argument("--config", default=None)
     parser.add_argument("--trace-dir", default=None)
     parser.add_argument("--out", default=None)
     parser.add_argument("--verilator", default=None)
@@ -102,7 +102,7 @@ def run(arguments):
         raise RuntimeError("CFU-Proving-Ground checkout is required; pass --cfu-dir or set CFU_PG_DIR")
     cfu_dir = Path(args.cfu_dir).resolve()
     simrv_bin = Path(args.simrv_bin).resolve() if args.simrv_bin else repo_root / "build/rv32-release/simrv"
-    cpu_config = (Path(args.cpu_config).resolve() if args.cpu_config
+    cpu_config = (Path(args.config).resolve() if args.config
                   else repo_root / "configs/models/cfu-provingground.cfg")
     verilator = args.verilator or shutil.which("verilator")
     if not simrv_bin.exists():
@@ -136,7 +136,7 @@ def run(arguments):
         rtl_bin = prepare_rtl(cfu_dir, build_dir, elf_path, objcopy, verilator)
         rtl_out = run_command([str(rtl_bin), "+parity_trace"])
         simrv_out = run_command([str(simrv_bin), "--cli", "--ca", "-m", str(elf_path),
-                                 "-H", "0x80000000", "--cpu-config", str(cpu_config)],
+                                 "-H", "0x80000000", "--config", str(cpu_config)],
                                 env={**os.environ, "SIMRV_RETIRE_TRACE": "1"})
 
         rtl_cycles = extract_number(r"===> mcycle\s*:\s*(\d+)", rtl_out)

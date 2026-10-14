@@ -33,10 +33,10 @@ using it.
 Validate the file by loading it in cycle-accurate mode:
 
 ```bash
-simrv --ca --cpu-preset configs/models/my-core.cfg -m program.elf
+simrv --ca --config configs/models/my-core.cfg -m program.elf
 ```
 
-The path can be supplied through `--cpu-preset` or `--cpu-model-file`. A custom file is a
+The path can be supplied through `--config`. A custom file is a
 user-authored model; it does not add a named built-in preset. To add a built-in preset, update the
 preset enum, name parsing, factory/default configuration, and preset-focused tests. Keep the
 compiled fallback behavior intentional and document whether the preset supports RV32, RV64, or

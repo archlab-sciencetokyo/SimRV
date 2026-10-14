@@ -574,7 +574,7 @@ void Tracer::init_architecture_trace(const std::string& path) {
         config.debug.checkpoint_every, json_quote(config.debug.checkpoint_dir),
         json_quote(config.files.binary_path), json_quote(config.files.disk_path),
         config.files.disk_enabled, json_quote(config.files.virtiofs_path),
-        json_quote(config.files.cpuconfig_path), json_quote(config.files.dvtree_path),
+        json_quote(config.files.config_path), json_quote(config.files.dvtree_path),
         json_string_array(trace_command_line_));
     bool first_device = true;
     for (const auto& device : config.soc.devices) {

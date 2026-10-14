@@ -3152,15 +3152,24 @@ void test_fdt_patcher() {
     header(16, reserve_offset);
     header(20, 17);
     header(24, 16);
+    header(28, 42);
     header(32, static_cast<uint32_t>(strings.size()));
     header(36, static_cast<uint32_t>(structure.size()));
 
     auto patched = simrv::util::patch_fdt(blob, 0x80000000, 0x40000000, 1);
     expect(patched.has_value(), "valid supplied FDT is patched");
     if (!patched) return;
+    expect(patched->size() % 8 == 0, "FDT output size is 8-byte aligned");
+    const uint32_t patched_cpuid = (static_cast<uint32_t>((*patched)[28]) << 24) |
+                                   (static_cast<uint32_t>((*patched)[29]) << 16) |
+                                   (static_cast<uint32_t>((*patched)[30]) << 8) |
+                                   static_cast<uint32_t>((*patched)[31]);
+    expect(patched_cpuid == 42, "FDT patching preserves boot_cpuid_phys");
     const std::string bytes(patched->begin(), patched->end());
     expect(bytes.find("console=ttyS0 loglevel=7") != std::string::npos,
            "FDT patching preserves Linux boot arguments");
+    expect(bytes.find("memory@80000000") != std::string::npos,
+           "FDT patching updates memory node unit address to configured DRAM base");
     expect(
         bytes.find(std::string("\x00\x00\x00\x00\x80\x00\x00\x00\x00\x00\x00\x00\x40\x00\x00\x00",
                                16)) != std::string::npos,
@@ -3169,6 +3178,37 @@ void test_fdt_patcher() {
            "FDT patching disables CPU nodes above the configured hart count");
     auto too_many = simrv::util::patch_fdt(blob, 0x80000000, 0x40000000, 3);
     expect(!too_many, "FDT patching rejects a hart count without enough CPU nodes");
+
+    {
+        std::vector<uint8_t> nop_structure;
+        word(nop_structure, 4);  // kNop
+        nop_structure.insert(nop_structure.end(), structure.begin(), structure.end());
+        std::vector<uint8_t> nop_blob(40, 0);
+        word(nop_blob, 0);
+        word(nop_blob, 0);
+        word(nop_blob, 0);
+        word(nop_blob, 0);
+        nop_blob.insert(nop_blob.end(), nop_structure.begin(), nop_structure.end());
+        nop_blob.insert(nop_blob.end(), strings.begin(), strings.end());
+        auto nop_header = [&](size_t offset, uint32_t value) {
+            nop_blob[offset] = static_cast<uint8_t>(value >> 24);
+            nop_blob[offset + 1] = static_cast<uint8_t>(value >> 16);
+            nop_blob[offset + 2] = static_cast<uint8_t>(value >> 8);
+            nop_blob[offset + 3] = static_cast<uint8_t>(value);
+        };
+        nop_header(0, 0xd00dfeed);
+        nop_header(4, static_cast<uint32_t>(nop_blob.size()));
+        nop_header(8, 56);
+        nop_header(12, 56 + static_cast<uint32_t>(nop_structure.size()));
+        nop_header(16, 40);
+        nop_header(20, 17);
+        nop_header(24, 16);
+        nop_header(28, 0);
+        nop_header(32, static_cast<uint32_t>(strings.size()));
+        nop_header(36, static_cast<uint32_t>(nop_structure.size()));
+        auto nop_patched = simrv::util::patch_fdt(nop_blob, 0x80000000, 0x40000000, 1);
+        expect(nop_patched.has_value(), "FDT patching tolerates kNop token before root node");
+    }
 }
 
 void test_pmp_semantics() {

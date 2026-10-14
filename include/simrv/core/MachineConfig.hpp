@@ -15,6 +15,7 @@
 
 #include "simrv/core/BuildConfig.hpp"
 #include "simrv/core/SoCConfig.hpp"
+#include "simrv/core/SoCDeviceRegistry.hpp"
 #include "simrv/isa/IsaConfig.hpp"
 #include "simrv/memory/MemoryUtil.hpp"
 #include "simrv/pipeline/CpuModel.hpp"
@@ -116,7 +117,7 @@ struct FilesConfig {
     std::string memimg_path;
     std::string dvtree_path;
     std::string traplog_path;
-    std::string cpuconfig_path;
+    std::string config_path;
     std::string cfu_plugin_path;
     std::string dump_dmem_path;
 };
@@ -146,6 +147,23 @@ struct MachineConfig {
     [[nodiscard]] auto validate() const -> std::expected<void, std::string> {
         if (memory.dram_size == 0 || (memory.dram_size & (memory.dram_size - 1U)) != 0) {
             return std::unexpected("DRAM size must be a non-zero power of two");
+        }
+        if (memory.dram_base > ~simrv::xlen::Address{0} - memory.dram_size) {
+            return std::unexpected("DRAM address range overflows address space");
+        }
+        for (const auto& dev : SoCDeviceRegistry::resolve(soc)) {
+            if (!dev.enabled) continue;
+            if (memory.dram_base < dev.base + dev.size &&
+                dev.base < memory.dram_base + memory.dram_size) {
+                return std::unexpected("DRAM range overlaps SoC device '" + dev.name + "'");
+            }
+            for (const auto& extra : dev.regions) {
+                if (memory.dram_base < extra.base + extra.size &&
+                    extra.base < memory.dram_base + memory.dram_size) {
+                    return std::unexpected("DRAM range overlaps SoC device '" + dev.name +
+                                           "' region '" + extra.name + "'");
+                }
+            }
         }
         if (execution.num_harts == 0 || execution.num_harts > ExecutionConfig::kMaxHarts) {
             return std::unexpected("hart count must be between 1 and 16");

@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <array>
 #include <cstring>
+#include <format>
 #include <map>
 #include <set>
 #include <stdexcept>
@@ -39,11 +40,15 @@ void put64(std::vector<uint8_t>& b, uint64_t v) {
     put32(b, v);
 }
 auto align4(size_t n) -> size_t { return (n + 3) & ~size_t{3}; }
+auto align8(size_t n) -> size_t { return (n + 7) & ~size_t{7}; }
 
 struct Parser {
     std::span<const uint8_t> data, strings;
     size_t pos = 0;
     auto node() -> Node {
+        while (pos + 4 <= data.size() && be32(data, pos) == kNop) {
+            pos += 4;
+        }
         if (pos + 4 > data.size() || be32(data, pos) != kBeginNode)
             throw std::runtime_error("invalid FDT node token");
         pos += 4;
@@ -124,7 +129,8 @@ auto patch_fdt(std::span<const uint8_t> blob, uint64_t dram_base, uint64_t dram_
         if (blob.size() < 40 || be32(blob, 0) != kMagic)
             return std::unexpected("invalid device tree header");
         const auto total = be32(blob, 4), struct_off = be32(blob, 8), strings_off = be32(blob, 12),
-                   reserve_off = be32(blob, 16), version = be32(blob, 20);
+                   reserve_off = be32(blob, 16), version = be32(blob, 20),
+                   boot_cpuid_phys = be32(blob, 28);
         if (total > blob.size() || total < 40 || struct_off >= total || strings_off >= total ||
             reserve_off >= total || version < 17)
             return std::unexpected("unsupported or truncated device tree");
@@ -142,6 +148,8 @@ auto patch_fdt(std::span<const uint8_t> blob, uint64_t dram_base, uint64_t dram_
             return std::unexpected(
                 "device tree must describe SimRV RAM with exactly one memory node");
         auto* memory = memory_nodes.front();
+        memory->name = std::format("memory@{:x}", dram_base);
+        set_prop(*memory, "device_type", {'m', 'e', 'm', 'o', 'r', 'y', '\0'});
         const auto ac = cells(root, "#address-cells", 2), sc = cells(root, "#size-cells", 1);
         if ((ac != 1 && ac != 2) || (sc != 1 && sc != 2))
             return std::unexpected("memory node uses unsupported address/size cells");
@@ -219,7 +227,7 @@ auto patch_fdt(std::span<const uint8_t> blob, uint64_t dram_base, uint64_t dram_
         const uint32_t new_reserve = 40,
                        new_struct = static_cast<uint32_t>(align4(new_reserve + (r - reserve_off))),
                        new_strings = new_struct + structure.size(),
-                       new_total = new_strings + strings.size();
+                       new_total = static_cast<uint32_t>(align8(new_strings + strings.size()));
         std::vector<uint8_t> out(40, 0);
         auto write_header = [&](size_t off, uint32_t v) {
             out[off] = v >> 24;
@@ -231,6 +239,7 @@ auto patch_fdt(std::span<const uint8_t> blob, uint64_t dram_base, uint64_t dram_
         out.resize(new_struct, 0);
         out.insert(out.end(), structure.begin(), structure.end());
         out.insert(out.end(), strings.begin(), strings.end());
+        out.resize(new_total, 0);
         write_header(0, kMagic);
         write_header(4, new_total);
         write_header(8, new_struct);
@@ -238,7 +247,7 @@ auto patch_fdt(std::span<const uint8_t> blob, uint64_t dram_base, uint64_t dram_
         write_header(16, new_reserve);
         write_header(20, 17);
         write_header(24, 16);
-        write_header(28, 0);
+        write_header(28, boot_cpuid_phys);
         write_header(32, strings.size());
         write_header(36, structure.size());
         return out;

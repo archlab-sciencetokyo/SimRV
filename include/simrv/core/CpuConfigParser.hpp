@@ -1099,6 +1099,36 @@ inline auto parse_soc_config(const std::filesystem::path& path, simrv::core::SoC
 }
 
 /**
+ * @brief Load SoC configuration from a filesystem path and validate its regions and devices.
+ */
+inline auto load_soc_config(const std::filesystem::path& path, simrv::core::SoCConfig& config)
+    -> bool {
+    if (!parse_soc_config(path, config)) return false;
+    const auto valid = config.validate();
+    if (!valid) {
+        simrv::log::warn("Invalid SoC configuration: {}", valid.error());
+        return false;
+    }
+    return true;
+}
+
+/**
+ * @brief Load a combined CPU and SoC platform configuration from a filesystem path.
+ */
+inline auto load_platform_config(const std::filesystem::path& path,
+                                 simrv::pipeline::CpuModelConfig& cpu_model,
+                                 simrv::core::SoCConfig& soc_config) -> bool {
+    std::ifstream file(path);
+    if (!file.is_open()) return false;
+    std::string content((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
+    std::istringstream stream_cpu{content};
+    std::istringstream stream_soc{content};
+    (void)parse_cpu_config_stream(stream_cpu, cpu_model);
+    (void)parse_soc_config_stream(stream_soc, soc_config);
+    return true;
+}
+
+/**
  * @brief Parse CPU configuration from an in-memory string without validation against machine XLEN.
  */
 inline auto parse_cpu_config_string(std::string_view content,

@@ -147,7 +147,7 @@ auto main() -> int {
     }
     {
         std::vector<std::string> args_str = {
-            "SimRV",          "--soc",         "virt-mmio", "--harts", "4",        "--smp-mode",
+            "SimRV",          "--config",      "virt-mmio", "--harts", "4",        "--smp-mode",
             "cycle-oriented", "--smp-quantum", "11",        "-m",      "guest.bin"};
         std::vector<char*> args;
         for (auto& arg : args_str) args.push_back(arg.data());
@@ -608,12 +608,34 @@ auto main() -> int {
                "numeric --trace-pc is rejected with the sampling replacement");
     }
     {
-        std::array<std::string, 5> soc_str = {"SimRV", "--soc", "rvcomp", "-m", "guest.bin"};
-        std::array<char*, 5> soc_args{};
-        for (size_t i = 0; i < soc_str.size(); ++i) soc_args[i] = soc_str[i].data();
-        const auto parsed = simrv::util::parse_command_line(soc_args);
-        expect(parsed.has_value() && parsed->options.soc_preset == "rvcomp",
-               "canonical --soc option remains supported");
+        std::array<std::string, 5> config_str = {"SimRV", "--config", "rvcomp", "-m", "guest.bin"};
+        std::array<char*, 5> config_args{};
+        for (size_t i = 0; i < config_str.size(); ++i) config_args[i] = config_str[i].data();
+        const auto parsed = simrv::util::parse_command_line(config_args);
+        expect(parsed.has_value() && parsed->options.config_target == "rvcomp",
+               "canonical --config option selects platform preset");
+    }
+    {
+        std::array<std::string, 5> retired_soc_str = {"SimRV", "--soc", "rvcomp", "-m",
+                                                      "guest.bin"};
+        std::array<char*, 5> retired_soc_args{};
+        for (size_t i = 0; i < retired_soc_str.size(); ++i)
+            retired_soc_args[i] = retired_soc_str[i].data();
+        const auto parsed = simrv::util::parse_command_line(retired_soc_args);
+        expect(!parsed.has_value() &&
+                   parsed.error().find("unknown option '--soc'") != std::string::npos,
+               "retired --soc option is rejected");
+    }
+    {
+        std::array<std::string, 5> retired_cpu_str = {"SimRV", "--cpu-config", "model.cfg", "-m",
+                                                      "guest.bin"};
+        std::array<char*, 5> retired_cpu_args{};
+        for (size_t i = 0; i < retired_cpu_str.size(); ++i)
+            retired_cpu_args[i] = retired_cpu_str[i].data();
+        const auto parsed = simrv::util::parse_command_line(retired_cpu_args);
+        expect(!parsed.has_value() &&
+                   parsed.error().find("unknown option '--cpu-config'") != std::string::npos,
+               "retired --cpu-config option is rejected");
     }
     {
         std::array<std::string, 4> legacy_platform_str = {"SimRV", "--platform", "rvcomp", "-m"};
@@ -624,6 +646,17 @@ auto main() -> int {
         expect(!parsed.has_value() &&
                    parsed.error().find("unknown option '--platform'") != std::string::npos,
                "removed --platform alias is rejected");
+    }
+    {
+        simrv::core::MachineConfig cfg{};
+        cfg.memory.dram_base = 0x10000000ULL;
+        cfg.memory.dram_size = 0x10000ULL;
+        expect(!cfg.validate(), "MachineConfig rejects DRAM overlapping UART MMIO");
+
+        cfg.memory.dram_base =
+            static_cast<simrv::xlen::Address>(~static_cast<simrv::xlen::Address>(0) - 0x1000ULL);
+        cfg.memory.dram_size = 0x2000ULL;
+        expect(!cfg.validate(), "MachineConfig rejects DRAM range overflow");
     }
     {
         std::array<std::string, 8> args_str = {

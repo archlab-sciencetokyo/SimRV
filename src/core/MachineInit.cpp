@@ -288,6 +288,10 @@ auto Machine::platform_status() const -> PlatformStatusSnapshot {
 }
 
 auto Machine::initialize() -> std::expected<void, std::string> {
+    if (const auto valid = config.validate(); !valid) {
+        simrv::log::error("Invalid machine configuration: {}", valid.error());
+        return std::unexpected(valid.error());
+    }
     auto smp_topology = config.soc.smp;
     if (smp_topology.clusters.empty()) smp_topology.hart_count = config.execution.num_harts;
     if (auto topology_result =
@@ -315,11 +319,11 @@ auto Machine::initialize() -> std::expected<void, std::string> {
         }
         apply_cpu_model_runtime_config(*this, config, model);
     }
-    if (!config.files.cpuconfig_path.empty()) {
+    if (!config.files.config_path.empty()) {
         auto model = primary_hart().cpu_model_config;
-        if (!simrv::core::load_cpu_config(config.files.cpuconfig_path, model)) {
+        if (!simrv::core::load_cpu_config(config.files.config_path, model)) {
             const std::string err =
-                "Failed to load CPU configuration file: " + config.files.cpuconfig_path;
+                "Failed to load CPU configuration file: " + config.files.config_path;
             simrv::log::error("{}", err);
             return std::unexpected(err);
         }
@@ -397,34 +401,47 @@ auto Machine::initialize() -> std::expected<void, std::string> {
         return simrv::core::SoCDeviceRegistry::enabled(config.soc, kind);
     };
     const auto add_base_node = [&](simrv::core::SoCDeviceKind kind,
-                                   simrv::memory::TileLinkNode* node) {
-        if (device_enabled(kind) && node != nullptr) memory().system_bus().add_node(node);
+                                   simrv::memory::TileLinkNode* node) -> bool {
+        if (device_enabled(kind) && node != nullptr) {
+            return memory().system_bus().add_node(node);
+        }
+        return true;
     };
-    add_base_node(SoCDeviceKind::AclintMtimer, runtime_->aclint_mtimer.get());
-    add_base_node(SoCDeviceKind::AclintMswi, runtime_->aclint_mswi.get());
-    add_base_node(SoCDeviceKind::Imsic, runtime_->imsic_m.get());
-    add_base_node(SoCDeviceKind::Imsic, runtime_->imsic_s.get());
-    add_base_node(SoCDeviceKind::Aplic, runtime_->aplic_m.get());
-    add_base_node(SoCDeviceKind::Aplic, runtime_->aplic_s.get());
-    add_base_node(SoCDeviceKind::Rtc, runtime_->rtc.get());
-    add_base_node(SoCDeviceKind::Uart, runtime_->uart.get());
-    add_base_node(SoCDeviceKind::Power, runtime_->power.get());
-    add_base_node(SoCDeviceKind::DmaController, runtime_->dma_controller.get());
+    if (!add_base_node(SoCDeviceKind::AclintMtimer, runtime_->aclint_mtimer.get()) ||
+        !add_base_node(SoCDeviceKind::AclintMswi, runtime_->aclint_mswi.get()) ||
+        !add_base_node(SoCDeviceKind::Imsic, runtime_->imsic_m.get()) ||
+        !add_base_node(SoCDeviceKind::Imsic, runtime_->imsic_s.get()) ||
+        !add_base_node(SoCDeviceKind::Aplic, runtime_->aplic_m.get()) ||
+        !add_base_node(SoCDeviceKind::Aplic, runtime_->aplic_s.get()) ||
+        !add_base_node(SoCDeviceKind::Rtc, runtime_->rtc.get()) ||
+        !add_base_node(SoCDeviceKind::Uart, runtime_->uart.get()) ||
+        !add_base_node(SoCDeviceKind::Power, runtime_->power.get()) ||
+        !add_base_node(SoCDeviceKind::DmaController, runtime_->dma_controller.get())) {
+        return std::unexpected("Failed to register core SoC devices on system bus");
+    }
     if (runtime_->ring_buffer_ethernet) {
-        memory().system_bus().add_node(runtime_->ring_buffer_ethernet->csr_node());
-        memory().system_bus().add_node(runtime_->ring_buffer_ethernet->rx_node());
-        memory().system_bus().add_node(runtime_->ring_buffer_ethernet->tx_node());
+        if (!memory().system_bus().add_node(runtime_->ring_buffer_ethernet->csr_node()) ||
+            !memory().system_bus().add_node(runtime_->ring_buffer_ethernet->rx_node()) ||
+            !memory().system_bus().add_node(runtime_->ring_buffer_ethernet->tx_node())) {
+            return std::unexpected("Failed to register ring buffer ethernet on system bus");
+        }
     }
     for (const auto& device : runtime_->dummy_mmios) {
-        memory().system_bus().add_node(device.get());
+        if (!memory().system_bus().add_node(device.get())) {
+            return std::unexpected("Failed to register dummy MMIO device on system bus");
+        }
     }
     for (const auto& device : runtime_->extension_mmios) {
-        memory().system_bus().add_node(device.get());
+        if (!memory().system_bus().add_node(device.get())) {
+            return std::unexpected("Failed to register custom MMIO device on system bus");
+        }
     }
 
     if (runtime_->pcie) {
-        memory().system_bus().add_node(&runtime_->pcie->ecam_node());
-        memory().system_bus().add_node(&runtime_->pcie->mmio_node());
+        if (!memory().system_bus().add_node(&runtime_->pcie->ecam_node()) ||
+            !memory().system_bus().add_node(&runtime_->pcie->mmio_node())) {
+            return std::unexpected("Failed to register PCIe nodes on system bus");
+        }
     }
 
     const std::array<std::shared_ptr<simrv::device::VirtioMmioDevice>, 8> mmio_devs = {
@@ -432,11 +449,15 @@ auto Machine::initialize() -> std::expected<void, std::string> {
         runtime_->mmio_input, runtime_->mmio_sound,   runtime_->mmio_net, runtime_->mmio_fs,
     };
     for (const auto& dev : mmio_devs) {
-        if (dev) memory().system_bus().add_node(dev.get());
+        if (dev && !memory().system_bus().add_node(dev.get())) {
+            return std::unexpected("Failed to register VirtIO MMIO device on system bus");
+        }
     }
 
-    add_base_node(SoCDeviceKind::Plic, &primary_hart().plic_mmio);
-    add_base_node(SoCDeviceKind::Clint, &primary_hart().clint_mmio);
+    if (!add_base_node(SoCDeviceKind::Plic, &primary_hart().plic_mmio) ||
+        !add_base_node(SoCDeviceKind::Clint, &primary_hart().clint_mmio)) {
+        return std::unexpected("Failed to register interrupt controller on system bus");
+    }
     const bool linux_boot = !config.execution.appmode;
     if (linux_boot && effective_dram_size < static_cast<size_t>(0x00100000U)) {
         simrv::log::error("DRAM must be at least 1 MiB for an OS device tree");
@@ -448,9 +469,9 @@ auto Machine::initialize() -> std::expected<void, std::string> {
                    : simrv::boot::kInitDataAddress;
 
     auto effective_isa_preset_bits = [&]() -> simrv::xlen::CsrValue {
-        if (!config.files.cpuconfig_path.empty()) {
+        if (!config.files.config_path.empty()) {
             simrv::pipeline::CpuModelConfig cfg{};
-            if (simrv::core::load_cpu_config(config.files.cpuconfig_path, cfg)) {
+            if (simrv::core::load_cpu_config(config.files.config_path, cfg)) {
                 auto bits = isa::isa_preset_bits(cfg.isa_preset);
                 if (cfg.has_isa_extension("zba") || cfg.has_isa_extension("zbb") ||
                     cfg.has_isa_extension("zbc") || cfg.has_isa_extension("zbs")) {
@@ -544,7 +565,8 @@ auto Machine::initialize() -> std::expected<void, std::string> {
     primary_hart().state().regs.write(static_cast<simrv::xlen::RegId>(10), 0);  // a0 = hartid
     primary_hart().state().regs.write(
         static_cast<simrv::xlen::RegId>(11),
-        linux_boot ? (simrv::boot::kStartPc + dtb_offset) : 0);  // a1 = dtb
+        linux_boot ? static_cast<simrv::xlen::Register>(config.memory.dram_base + dtb_offset)
+                   : 0);  // a1 = dtb
     primary_hart().state().misa = initial_misa;
     primary_hart().state().priv = kPrivMachine;
     primary_hart().state().regs.vlen = config.isa.vlen ? config.isa.vlen : 256;
@@ -602,7 +624,9 @@ auto Machine::initialize() -> std::expected<void, std::string> {
             sec_cpu->state().priv = kPrivMachine;
             sec_cpu->state().regs.write(static_cast<simrv::xlen::RegId>(10), i);
             sec_cpu->state().regs.write(static_cast<simrv::xlen::RegId>(11),
-                                        linux_boot ? (simrv::boot::kStartPc + dtb_offset) : 0);
+                                        linux_boot ? static_cast<simrv::xlen::Register>(
+                                                         config.memory.dram_base + dtb_offset)
+                                                   : 0);
             sec_cpu->soft_tlb_flush();
             sec_cpu->TLB_flush();
             runtime_->secondary_harts.push_back(std::move(sec_cpu));

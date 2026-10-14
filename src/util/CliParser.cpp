@@ -539,11 +539,27 @@ auto parse_file_options(std::string_view arg, std::span<char* const> args, std::
         options.appmode = false;
         return true;
     }
-    if (arg == "--cpu-config" || arg == "--cpu-model-file" || arg == "--model-file") {
-        auto value = next_argument(args, i, arg);
-        if (!value) return std::unexpected(value.error());
-        const auto resolved = simrv::core::resolve_cpu_model_path(*value);
-        options.fn_cpuconfig = resolved.value_or(std::string(*value));
+    if (arg == "--config" || arg.starts_with("--config=")) {
+        constexpr std::string_view option_name = "--config";
+        constexpr std::string_view prefix = "--config=";
+        std::string_view val = arg.starts_with(prefix) ? arg.substr(prefix.size()) : "";
+        if (val.empty()) {
+            auto value = next_argument(args, i, option_name);
+            if (!value) return std::unexpected(value.error());
+            val = *value;
+        }
+        options.config_target = std::string(val);
+        const auto resolved = simrv::core::resolve_cpu_model_path(val);
+        if (resolved.has_value()) {
+            options.fn_config = *resolved;
+        } else if (std::filesystem::exists(val)) {
+            options.fn_config = std::string(val);
+        } else if (!simrv::core::SoCConfig::preset(val).has_value()) {
+            return std::unexpected(std::format(
+                "unknown platform configuration '{}'. Expected a file path or preset (virt-pcie, "
+                "virt-mmio, rvcomp).",
+                val));
+        }
         return true;
     }
     if (arg == "--cfu-plugin") {
@@ -759,7 +775,7 @@ auto parse_mode_options(std::string_view arg, std::span<char* const> args, std::
         if (!value) return std::unexpected(value.error());
         const auto resolved = simrv::core::resolve_cpu_model_path(*value);
         if (resolved.has_value()) {
-            result.options.fn_cpuconfig = *resolved;
+            result.options.fn_config = *resolved;
             simrv::pipeline::CpuModelConfig loaded{};
             if (!simrv::core::load_cpu_config(*resolved, loaded)) {
                 return std::unexpected(
@@ -934,27 +950,6 @@ auto parse_tui_options(std::string_view arg, std::span<char* const> args, std::s
     }
     if (arg == "--no-forwarding") {
         result.options.disable_forwarding = true;
-        return true;
-    }
-    if (arg == "--soc" || arg.starts_with("--soc=")) {
-        constexpr std::string_view option_name = "--soc";
-        constexpr std::string_view prefix = "--soc=";
-        std::string_view p = arg.starts_with(prefix) ? arg.substr(prefix.size()) : "";
-        if (p.empty()) {
-            auto value = next_argument(args, i, option_name);
-            if (!value) return std::unexpected(value.error());
-            p = *value;
-        }
-        const auto preset = simrv::core::SoCConfig::preset(p);
-        if (!preset.has_value()) {
-            return std::unexpected(
-                std::format("unknown SoC preset: {}. Allowed: virt-pcie, virt-mmio, rvcomp", p));
-        }
-        result.options.soc_preset = std::string(p);
-        result.options.platform_profile = preset->enable_mmio ? simrv::core::PlatformProfile::Mmio
-                                          : preset->enable_pcie
-                                              ? simrv::core::PlatformProfile::Pcie
-                                              : simrv::core::PlatformProfile::None;
         return true;
     }
     if (arg == "--net") {
@@ -1518,7 +1513,7 @@ auto RuntimeOptions::to_machine_config() const -> simrv::core::MachineConfig {
     cfg.files.disk_enabled = use_disk;
     cfg.files.dvtree_path = fn_dvtree;
     cfg.files.traplog_path = fn_traplog;
-    cfg.files.cpuconfig_path = fn_cpuconfig;
+    cfg.files.config_path = fn_config;
     cfg.files.cfu_plugin_path = fn_cfu_plugin;
     cfg.files.dump_dmem_path = fn_dump_dmem;
     cfg.cpu_model_preset = cpu_model_preset;
@@ -1530,40 +1525,38 @@ auto RuntimeOptions::to_machine_config() const -> simrv::core::MachineConfig {
     cfg.ras_entries = ras_size;
     if (bram_prewarm.has_value()) {
         cfg.bram_prewarm = *bram_prewarm;
-    } else if (fn_cpuconfig.find("cfu-provingground") != std::string::npos ||
-               fn_cpuconfig.find("rvproc") != std::string::npos) {
+    } else if (fn_config.find("cfu-provingground") != std::string::npos ||
+               fn_config.find("rvproc") != std::string::npos) {
         cfg.bram_prewarm = true;
     }
 
     cfg.network.mode = net_mode;
-    cfg.platform_profile = platform_profile;
-    if (const auto preset = simrv::core::SoCConfig::preset(soc_preset)) {
+    if (const auto preset = simrv::core::SoCConfig::preset(config_target)) {
         cfg.soc = *preset;
-        if (const auto model_path = simrv::core::resolve_cpu_model_path(soc_preset)) {
-            simrv::core::parse_soc_config(*model_path, cfg.soc);
-            if (cfg.files.cpuconfig_path.empty() && !cfg.soc.cpu_model.empty()) {
-                cfg.files.cpuconfig_path = *model_path;
-            }
+    }
+    if (!fn_config.empty()) {
+        simrv::pipeline::CpuModelConfig model{};
+        if (simrv::core::load_platform_config(fn_config, model, cfg.soc)) {
             if (!cfg.soc.cpu_model.empty()) {
-                simrv::pipeline::CpuModelConfig model{};
-                if (simrv::core::parse_cpu_config(*model_path, model)) {
-                    cfg.isa.misa_xlen = model.supported_xlen;
-                    cfg.isa.isa_preset = simrv::isa::isa_preset_bits(model.isa_preset);
-                    cfg.isa.misa_override = true;
-                }
+                cfg.isa.misa_xlen = model.supported_xlen;
+                cfg.isa.isa_preset = simrv::isa::isa_preset_bits(model.isa_preset);
+                cfg.isa.misa_override = true;
             }
-        }
-        if (cfg.soc.dram_base.has_value()) cfg.memory.dram_base = *cfg.soc.dram_base;
-        if (dram_size == 0 && cfg.soc.dram_size.has_value()) {
-            cfg.memory.dram_size = *cfg.soc.dram_size;
-        }
-        if (cfg.execution.start_pc == simrv::boot::kStartPc && cfg.soc.reset_pc.has_value()) {
-            cfg.execution.start_pc = *cfg.soc.reset_pc;
-        }
-        if (cfg.isa.isatest_tohost == 0x80001000 && cfg.soc.tohost.has_value()) {
-            cfg.isa.isatest_tohost = *cfg.soc.tohost;
         }
     }
+    if (cfg.soc.dram_base.has_value()) cfg.memory.dram_base = *cfg.soc.dram_base;
+    if (dram_size == 0 && cfg.soc.dram_size.has_value()) {
+        cfg.memory.dram_size = *cfg.soc.dram_size;
+    }
+    if (cfg.execution.start_pc == simrv::boot::kStartPc && cfg.soc.reset_pc.has_value()) {
+        cfg.execution.start_pc = *cfg.soc.reset_pc;
+    }
+    if (cfg.isa.isatest_tohost == 0x80001000 && cfg.soc.tohost.has_value()) {
+        cfg.isa.isatest_tohost = *cfg.soc.tohost;
+    }
+    cfg.platform_profile = cfg.soc.enable_mmio   ? simrv::core::PlatformProfile::Mmio
+                           : cfg.soc.enable_pcie ? simrv::core::PlatformProfile::Pcie
+                                                 : simrv::core::PlatformProfile::None;
     if (explicit_num_harts) cfg.soc.smp.resize_harts(num_harts);
     cfg.execution.num_harts = cfg.soc.smp.hart_count;
     cfg.execution.smp_mode =
@@ -1744,8 +1737,9 @@ auto needs_memory_image(const ParseResult& result) -> bool {
                       .description = "Select a RISC-V ISA profile such as rv32gc or rv64gc."},
                      {.option = "--vlen <BITS>",
                       .description = "Set vector register length (128–1024; default: 256)."},
-                     {.option = "--soc <PRESET>",
-                      .description = "Select virt-pcie, virt-mmio, or rvcomp."},
+                     {.option = "--config <PRESET | FILE>",
+                      .description =
+                          "Select platform preset (virt-pcie, virt-mmio, rvcomp) or file path."},
                      {.option = "--dump-soc-manifest <PRESET> [FILE]",
                       .description = "Export the normalized SoC registry as JSON."},
                      {.option = "--net <BACKEND>",
@@ -1771,8 +1765,6 @@ auto needs_memory_image(const ParseResult& result) -> bool {
               {.option = "--bht-size <N>", .description = "Set branch history table entries."},
               {.option = "--btb-size <N>", .description = "Set branch target buffer entries."},
               {.option = "--ras-size <N>", .description = "Set return address stack entries."},
-              {.option = "--cpu-config <FILE>",
-               .description = "Load a microarchitectural latency configuration."},
               {.option = "--cpu-preset <PRESET>",
                .description = "Select tiny, balanced, performance, or a model file."},
               {.option = "--dump-cpu-model <MODEL> [FILE]",

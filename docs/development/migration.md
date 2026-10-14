@@ -10,8 +10,10 @@ and SDK consumers must update as described below.
 - Select cycle structure with `--pipeline 3stage` or `--pipeline 5stage`.
 - Removed pipeline presets and aliases are rejected; no compatibility aliases are provided.
 - Rollback, snapshots used for rollback, and reverse-stepping commands/APIs are removed.
-- Use `--soc` instead of the removed `--platform` alias. Use `--trace-pc-range START-END` (or
-  `--trace-pc START-END`) for architectural PC filters and `--trace-pc-period N` for PC sampling.
+- Use `--config` to select a platform preset (`virt-pcie`, `virt-mmio`, `rvcomp`) or load a platform
+  configuration file. The deprecated `--platform`, `--soc`, `--cpu-config`, and `--model-file` flags
+  have been removed. Use `--trace-pc-range START-END` (or `--trace-pc START-END`) for architectural
+  PC filters and `--trace-pc-period N` for PC sampling.
 
 ## Configuration and platform
 
