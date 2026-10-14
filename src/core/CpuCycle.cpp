@@ -312,8 +312,7 @@ void CPU::run_cycle(Machine& machine) {
             const bool copy_ctx = captures_tui_execution_detail(machine) ||
                                   machine.trace().is_architecture_trace_enabled() ||
                                   machine.lockstep_enabled() || machine.debugger_enabled() ||
-                                  machine.branch_trace_enabled() ||
-                                  (machine.configuration().execution.strace != 0);
+                                  machine.branch_trace_enabled();
             const bool inst_mix =
                 machine.instruction_mix_enabled() || captures_tui_execution_detail(machine);
             if (simrv::compiler::unlikely(copy_ctx && inst_mix)) {
@@ -563,8 +562,7 @@ void CPU::run_cycle_baremetal(Machine& machine) {
             const bool copy_ctx = captures_tui_execution_detail(machine) ||
                                   machine.trace().is_architecture_trace_enabled() ||
                                   machine.lockstep_enabled() || machine.debugger_enabled() ||
-                                  machine.branch_trace_enabled() ||
-                                  (machine.configuration().execution.strace != 0);
+                                  machine.branch_trace_enabled();
             const bool inst_mix =
                 machine.instruction_mix_enabled() || captures_tui_execution_detail(machine);
             if (simrv::compiler::unlikely(copy_ctx && inst_mix)) {

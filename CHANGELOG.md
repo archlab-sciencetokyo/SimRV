@@ -5,6 +5,11 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [v3.0.0-rc.10] — 2026-10-14
 
+- Removed the local socket TUI attachment workflow and its installed `simrv/net` interfaces.
+- Removed the ambiguous `--trace-pc` alias; use `--trace-pc-range` for architectural trace filters.
+- Removed legacy `--trace-pc-period` and `-I, --dump-init` bringup options.
+- Optimized simulation hot paths: elided mutex acquisition and heap operations in pending input servicing, added network device polling guard, switched to direct RamView address containment, streamlined tohost checking, and optimized fast kernel retired instruction accounting.
+
 - **Device Tree Architecture Modernization**:
   - Replaced the in-tree synthetic device tree generator (`FdtGenerator`) with a lightweight, robust device tree patcher (`FdtPatcher`).
   - Standardized full-system Linux boots on user-supplied or environment-configured base DTBs (`-f/--dtb`, `--buildroot-output`, or `SIMRV_LINUX_DTB`), automatically patching guest memory range and SMP core availability while preserving original hardware nodes, interrupt maps, and kernel boot arguments.

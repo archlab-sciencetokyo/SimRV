@@ -136,7 +136,8 @@ class ReleaseToolTests(unittest.TestCase):
         self.assertIn('"manifest_version"', smoke)
         self.assertIn("simrv --doctor", guide)
         self.assertIn("simrv --isa-info", guide)
-        self.assertIn("simrv --attach", guide)
+        self.assertNotIn("--listen-tui", guide)
+        self.assertNotIn("--attach", guide)
 
     def test_native_package_versions_match_release_semver(self):
         version = json.loads((ROOT / "release/release-manifest.json").read_text())["version"]

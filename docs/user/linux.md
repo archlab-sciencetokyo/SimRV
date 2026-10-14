@@ -193,8 +193,7 @@ menu includes one SimRV Games submenu for Chess, Gomoku, Klondike, and Snake; it
 boot so persistent root filesystems do not accumulate duplicate menus. The guest log reports
 `[JWM]` and `[NET]` milestones on the UART, which makes the path suitable for headless CI smoke
 checks as well as interactive TUI/Sixel sessions. If the host terminal has no Sixel support, use
-the framebuffer or a plain terminal attachment; guest graphics are independent of Sixel
-presentation.
+the guest serial console; guest graphics are independent of Sixel presentation.
 
 The Alpine simulator image intentionally has an empty root password so serial login and privilege
 tests work out of the box. Set a board-specific password or key-based policy before using an image

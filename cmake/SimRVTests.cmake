@@ -127,9 +127,6 @@ if(BUILD_TESTING)
       APPEND
       PROPERTY LABELS thread)
   endif()
-  simrv_add_runtime_test(simrv-ipc-protocol-tests tests/IpcProtocolTests.cpp
-                         ipc-protocol "gate;regress;ipc;net;thread")
-
   add_library(test-cfu-plugin SHARED tests/TestCfuPlugin.cpp)
   target_include_directories(test-cfu-plugin
                              PRIVATE "${PROJECT_SOURCE_DIR}/include")
@@ -174,7 +171,7 @@ if(BUILD_TESTING)
   set_tests_properties(cli-isa-info PROPERTIES PASS_REGULAR_EXPRESSION "RV64GCBV"
                                                LABELS "gate;regress;cli;release")
   add_test(NAME cli-doctor COMMAND $<TARGET_FILE:SimRV> --doctor)
-  set_tests_properties(cli-doctor PROPERTIES PASS_REGULAR_EXPRESSION "attach transport"
+  set_tests_properties(cli-doctor PROPERTIES PASS_REGULAR_EXPRESSION "SimRV environment diagnostics"
                                              LABELS "gate;regress;cli;release")
   add_test(NAME cli-summary-rejects-stdout COMMAND $<TARGET_FILE:SimRV> --summary -)
   set_tests_properties(

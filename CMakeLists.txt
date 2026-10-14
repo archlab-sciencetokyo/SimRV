@@ -271,7 +271,6 @@ add_subdirectory(src/memory)
 add_subdirectory(src/device)
 add_subdirectory(src/debug)
 add_subdirectory(src/tui)
-add_subdirectory(src/net)
 # Runtime is the composition target and must be declared after all component
 # object targets.
 add_subdirectory(src/core)

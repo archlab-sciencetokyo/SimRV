@@ -54,12 +54,10 @@ struct ExecutionConfig {
     std::optional<SmpMode> smp_mode{};
     simrv::pipeline::PipelineType pipeline_type = simrv::pipeline::PipelineType::FiveStage;
     simrv::xlen::Address start_pc = 0;
-    simrv::xlen::Counter strace = 0;
     simrv::xlen::Counter fincnt = std::numeric_limits<simrv::xlen::Counter>::max();
     simrv::xlen::Counter trace_begin = std::numeric_limits<simrv::xlen::Counter>::max();
     simrv::xlen::Counter trace_end = std::numeric_limits<simrv::xlen::Counter>::max();
     simrv::xlen::Counter enabletimer = std::numeric_limits<simrv::xlen::Counter>::max();
-    simrv::xlen::Counter memimg_cycle = std::numeric_limits<simrv::xlen::Counter>::max();
     bool realtime_pacing = false;
 };
 

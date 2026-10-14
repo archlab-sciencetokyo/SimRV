@@ -28,8 +28,9 @@ using isa::Opcode;
 }
 
 inline auto is_tohost_addr(const Machine& machine, simrv::xlen::Address addr) -> bool {
-    return (addr - machine.isa_test_tohost() < 8) || (addr - 0x80001000ULL < 8) ||
-           (addr - 0x40008000ULL < 8);
+    const auto tohost = machine.isa_test_tohost();
+    if (tohost != 0x80001000ULL && (addr - tohost < 8)) return true;
+    return (addr - 0x80001000ULL < 8) || (addr - 0x40008000ULL < 8);
 }
 
 inline auto is_tohost_addr(const Machine& machine, simrv::xlen::PhysAddr addr) -> bool {

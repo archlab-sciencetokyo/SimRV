@@ -23,7 +23,6 @@ enum class CliAction : uint8_t {
     ShowIsaInfo,
     Doctor,
     ExplainInstruction,
-    Attach,
     DumpCpuModel,
     ExportSoCManifest,
     ValidateCpuModel
@@ -60,8 +59,6 @@ struct RuntimeOptions {
 
     simrv::xlen::Address start_pc = simrv::boot::kStartPc;
     simrv::xlen::Counter fincnt = std::numeric_limits<simrv::xlen::Counter>::max();
-    simrv::xlen::Counter memimg = std::numeric_limits<simrv::xlen::Counter>::max();
-    simrv::xlen::Counter strace = 0;
     simrv::xlen::Counter trace_begin = std::numeric_limits<simrv::xlen::Counter>::max();
     simrv::xlen::Counter trace_end = std::numeric_limits<simrv::xlen::Counter>::max();
     simrv::xlen::Counter enabletimer = 0UL;
@@ -130,10 +127,6 @@ struct RuntimeOptions {
     simrv::core::PlatformProfile platform_profile = simrv::core::PlatformProfile::Pcie;
     std::string config_target = "virt-pcie";
     std::string net_mode = "user";
-    bool server_mode = false;
-    std::string server_endpoint;
-    bool attach_mode = false;
-    std::string attach_endpoint;
 
     [[nodiscard]] auto to_machine_config() const -> simrv::core::MachineConfig;
 };

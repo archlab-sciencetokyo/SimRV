@@ -657,27 +657,8 @@ auto parse_execution_options(std::string_view arg, std::span<char* const> args, 
         return true;
     }
     if (arg == "--trace-pc") {
-        auto value = next_argument(args, i, arg);
-        if (!value) return std::unexpected(value.error());
-        if (!parse_trace_pc_range(*value, options))
-            return std::unexpected(
-                "--trace-pc expects START-END; use --trace-pc-period for sampling");
-        return true;
-    }
-    if (arg == "--trace-pc-period") {
-        auto value = next_argument(args, i, arg);
-        if (!value) return std::unexpected(value.error());
-        uint64_t period = 0;
-        if (!parse_scaled_u64(*value, period))
-            return std::unexpected(std::format("invalid numeric value for {}", arg));
-        options.strace = period;
-        return true;
-    }
-    if (arg == "--dump-init" || arg == "-I") {
-        auto value = parse_scaled_required(args, i, arg);
-        if (!value) return std::unexpected(value.error());
-        options.memimg = *value;
-        return true;
+        return std::unexpected(
+            "--trace-pc was removed; use --trace-pc-range START-END to filter --arch-trace events");
     }
     if (arg == "-R" || arg == "--realtime") {
         options.realtime_pacing = true;
@@ -903,32 +884,6 @@ auto parse_tui_options(std::string_view arg, std::span<char* const> args, std::s
         auto value = next_argument(args, i, arg);
         if (!value) return std::unexpected(value.error());
         result.options.mission = std::string(*value);
-        return true;
-    }
-    if (arg == "--server" || arg.starts_with("--server=") || arg == "--listen-tui" ||
-        arg.starts_with("--listen-tui=")) {
-        result.options.server_mode = true;
-        std::string_view ep = arg.starts_with("--server=")       ? arg.substr(9)
-                              : arg.starts_with("--listen-tui=") ? arg.substr(13)
-                                                                 : "";
-        if (ep.empty() && i + 1 < args.size() && args[i + 1] != nullptr && args[i + 1][0] != '\0' &&
-            args[i + 1][0] != '-') {
-            ++i;
-            ep = args[i];
-        }
-        result.options.server_endpoint = ep.empty() ? "/tmp/simrv.sock" : std::string(ep);
-        return true;
-    }
-    if (arg == "--attach" || arg.starts_with("--attach=")) {
-        result.options.attach_mode = true;
-        result.action = CliAction::Attach;
-        std::string_view ep = arg.starts_with("--attach=") ? arg.substr(9) : "";
-        if (ep.empty()) {
-            auto value = next_argument(args, i, arg);
-            if (!value) return std::unexpected(value.error());
-            ep = *value;
-        }
-        result.options.attach_endpoint = ep.empty() ? "/tmp/simrv.sock" : std::string(ep);
         return true;
     }
     if (arg == "--no-forwarding") {
@@ -1417,7 +1372,7 @@ auto resolve_runtime_profile(const RuntimeOptions& options) -> simrv::core::Runt
                 break;
         }
     }
-    profile.tracing = options.bp_trace || options.trace_enabled || options.strace != 0 ||
+    profile.tracing = options.bp_trace || options.trace_enabled ||
                       options.trace_begin != std::numeric_limits<simrv::xlen::Counter>::max();
     profile.lockstep = options.lockstep_mode;
     profile.gdb = options.gdb_mode;
@@ -1433,11 +1388,9 @@ auto RuntimeOptions::to_machine_config() const -> simrv::core::MachineConfig {
     cfg.execution.appmode = appmode;
     cfg.execution.start_pc = start_pc;
     cfg.execution.fincnt = fincnt;
-    cfg.execution.strace = strace;
     cfg.execution.trace_begin = trace_begin;
     cfg.execution.trace_end = trace_end;
     cfg.execution.enabletimer = enabletimer;
-    cfg.execution.memimg_cycle = memimg;
     cfg.execution.num_harts = num_harts;
     cfg.execution.smp_quantum = smp_quantum;
     if (explicit_realtime_mode) {
@@ -1668,7 +1621,6 @@ auto needs_memory_image(const ParseResult& result) -> bool {
     return result.options.fn_memimg.empty() && !result.options.tuimode &&
            result.action != CliAction::ExplainInstruction && result.action != CliAction::ShowHelp &&
            result.action != CliAction::ShowVersion && result.action != CliAction::ShowLicense &&
-           result.action != CliAction::Attach && !result.options.attach_mode &&
            result.action != CliAction::DumpCpuModel &&
            result.action != CliAction::ExportSoCManifest &&
            result.action != CliAction::ValidateCpuModel;
@@ -1795,16 +1747,11 @@ auto needs_memory_image(const ParseResult& result) -> bool {
               {.option = "--trace-before-cycle <N>",
                .description = "Set the inclusive end of the trace cycle window."},
               {.option = "--trace-pc-range <START-END>",
-               .description = "Filter architectural events by inclusive PC range."},
-              {.option = "--trace-pc <START-END>", .description = "Alias for --trace-pc-range."},
-              {.option = "--trace-pc-period <N>",
-               .description = "Sample the PC trace every N instructions."},
+               .description = "Filter architectural trace events by inclusive PC range."},
               {.option = "--trace", .description = "Record a full architectural text trace."},
-              {.option = "-r, --trace-range <BG> <EN>",
-               .description = "Record an execution trace snapshot for a step range."},
+              {.option = "-r, --trace-range <BEGIN> <END>",
+               .description = "Record text trace snapshots within an inclusive mtime range."},
               {.option = "--trace-bpred", .description = "Record branch prediction events."},
-              {.option = "-I, --dump-init <N>",
-               .description = "Dump architectural memory and TLB state at cycle N."},
               {.option = "--instmix", .description = "Write an instruction mix report on exit."}}},
         {.title = "Interactive mode and reports",
          .entries =

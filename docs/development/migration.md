@@ -12,8 +12,9 @@ and SDK consumers must update as described below.
 - Rollback, snapshots used for rollback, and reverse-stepping commands/APIs are removed.
 - Use `--config` to select a platform preset (`virt-pcie`, `virt-mmio`, `rvcomp`) or load a platform
   configuration file. The deprecated `--platform`, `--soc`, `--cpu-config`, and `--model-file` flags
-  have been removed. Use `--trace-pc-range START-END` (or `--trace-pc START-END`) for architectural
-  PC filters and `--trace-pc-period N` for PC sampling.
+  have been removed. Use `--trace-pc-range START-END` for filters on `--arch-trace`. The legacy
+  `--trace-pc-period` and `-I, --dump-init` bringup options have been removed.
+- `--trace-range BEGIN END` bounds text snapshots by the inclusive CLINT `mtime` counter.
 
 ## Configuration and platform
 
@@ -50,6 +51,11 @@ parameters remain transport types.
 `TuiExecutionSnapshot` is now a stable per-hart snapshot containing cycle, instruction, timer,
 cache, and cycle-accurate statistics. `tui_execution_snapshot(hart)` selects a hart and defaults to
 hart 0 when no argument is provided.
+
+The local socket TUI attachment workflow and its installed `simrv/net` client, server, and protocol
+headers have been removed. `Machine::set_persistent_control()`, `Machine::persistent_control()`, and
+`HostExitCode::IpcError` were specific to that workflow and are removed as well. Use the in-process
+TUI for interactive inspection or GDB RSP for remote debugger control.
 
 Logging and persisted schemas do not receive compatibility shims. Regenerate configuration rather
 than translating removed fields at runtime.

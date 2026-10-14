@@ -555,7 +555,7 @@ auto main() -> int {
                                                         "uart0",
                                                         "--trace-hart",
                                                         "1",
-                                                        "--trace-pc",
+                                                        "--trace-pc-range",
                                                         "0x80000000-0x80001000",
                                                         "--trace-after-cycle",
                                                         "100",
@@ -594,8 +594,7 @@ auto main() -> int {
         for (size_t i = 0; i < trace_pc_period_str.size(); ++i)
             trace_pc_period_args[i] = trace_pc_period_str[i].data();
         const auto parsed = simrv::util::parse_command_line(trace_pc_period_args);
-        expect(parsed.has_value() && parsed->options.strace == 8,
-               "--trace-pc-period retains numeric PC sampling");
+        expect(!parsed.has_value(), "--trace-pc-period is rejected as obsolete");
     }
     {
         std::array<std::string, 5> legacy_pc_trace_str = {"SimRV", "--trace-pc", "8", "-m",
@@ -604,8 +603,8 @@ auto main() -> int {
         for (size_t i = 0; i < legacy_pc_trace_str.size(); ++i)
             legacy_pc_trace_args[i] = legacy_pc_trace_str[i].data();
         const auto parsed = simrv::util::parse_command_line(legacy_pc_trace_args);
-        expect(!parsed.has_value() && parsed.error().find("--trace-pc-period") != std::string::npos,
-               "numeric --trace-pc is rejected with the sampling replacement");
+        expect(!parsed.has_value() && parsed.error().find("--trace-pc-range") != std::string::npos,
+               "ambiguous --trace-pc is rejected directing to --trace-pc-range");
     }
     {
         std::array<std::string, 5> config_str = {"SimRV", "--config", "rvcomp", "-m", "guest.bin"};
@@ -806,7 +805,6 @@ auto main() -> int {
                "HostExitCode::ExecutionError is 5");
         expect(to_exit_code(HostExitCode::CheckpointError) == 6,
                "HostExitCode::CheckpointError is 6");
-        expect(to_exit_code(HostExitCode::IpcError) == 7, "HostExitCode::IpcError is 7");
     }
 
     {
@@ -983,6 +981,16 @@ auto main() -> int {
         auto parsed_trace = simrv::util::parse_command_line(trace_range_args);
         expect(!parsed_trace.has_value() && parsed_trace.error().find("-r") != std::string::npos,
                "-r invalid number error message references -r instead of -t");
+    }
+
+    {
+        for (const std::string_view removed_option : {"--server", "--listen-tui", "--attach"}) {
+            std::array<std::string, 2> storage = {"SimRV", std::string(removed_option)};
+            std::array<char*, 2> args = {storage[0].data(), storage[1].data()};
+            const auto parsed = simrv::util::parse_command_line(args);
+            expect(!parsed.has_value() && parsed.error().contains("unknown option"),
+                   "removed attach options are rejected as unknown options");
+        }
     }
 
     return failures == 0 ? EXIT_SUCCESS : EXIT_FAILURE;

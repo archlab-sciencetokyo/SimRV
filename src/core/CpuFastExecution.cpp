@@ -101,8 +101,9 @@ SIMRV_ALWAYS_INLINE void CPU::execute_cached_branch(CachedOp& op, simrv::xlen::R
     commit_cached_branch_target(op, target_pc);
 }
 
-auto CPU::try_fast_load(Machine& machine, simrv::xlen::Address mem_addr, isa::Funct3 funct3,
-                        simrv::xlen::Register& out_val, const simrv::memory::RamView& ram) -> bool {
+auto CPU::try_fast_load([[maybe_unused]] Machine& machine, simrv::xlen::Address mem_addr,
+                        isa::Funct3 funct3, simrv::xlen::Register& out_val,
+                        const simrv::memory::RamView& ram) -> bool {
     if (simrv::compiler::unlikely(!is_aligned_for_funct3(mem_addr, funct3))) {
         return false;
     }
@@ -111,7 +112,7 @@ auto CPU::try_fast_load(Machine& machine, simrv::xlen::Address mem_addr, isa::Fu
                                 (state_.mstatus & MstatusBit::Mprv) == 0)) {
         if (simrv::compiler::unlikely(state_.has_locked_pmp)) return false;
         const unsigned size_bytes = access_size_for_funct3(funct3);
-        if (simrv::compiler::likely(machine.memory_geometry().contains(mem_addr, size_bytes))) {
+        if (simrv::compiler::likely(ram.contains(mem_addr, size_bytes))) {
             out_val = simrv::memory::ram_read_fast(
                 mem_addr, static_cast<simrv::xlen::Instruction>(funct3), ram);
             return true;
@@ -142,7 +143,7 @@ auto CPU::try_fast_load(Machine& machine, simrv::xlen::Address mem_addr, isa::Fu
                                                   static_cast<simrv::xlen::Instruction>(funct3));
                 return true;
             }
-            if (simrv::compiler::likely(machine.memory_geometry().contains(paddr, size_bytes))) {
+            if (simrv::compiler::likely(ram.contains(paddr, size_bytes))) {
                 out_val = simrv::memory::ram_read_fast(
                     paddr, static_cast<simrv::xlen::Instruction>(funct3), ram);
                 return true;
@@ -166,14 +167,14 @@ auto CPU::try_fast_load(Machine& machine, simrv::xlen::Address mem_addr, isa::Fu
                     host_base + (mem_addr & 0xFFF), static_cast<simrv::xlen::Instruction>(funct3));
                 return true;
             }
-            if (simrv::compiler::likely(machine.memory_geometry().contains(paddr, size_bytes))) {
+            if (simrv::compiler::likely(ram.contains(paddr, size_bytes))) {
                 out_val = simrv::memory::ram_read_fast(
                     paddr, static_cast<simrv::xlen::Instruction>(funct3), ram);
                 return true;
             }
         }
     } else {
-        if (simrv::compiler::likely(machine.memory_geometry().contains(mem_addr, size_bytes) &&
+        if (simrv::compiler::likely(ram.contains(mem_addr, size_bytes) &&
                                     core::pmp::check_access(state_, mem_addr, size_bytes,
                                                             core::PmpAccessType::Read, eff_priv))) {
             out_val = simrv::memory::ram_read_fast(
@@ -194,7 +195,7 @@ auto CPU::try_fast_store(Machine& machine, simrv::xlen::Address mem_addr, isa::F
                                 (state_.mstatus & MstatusBit::Mprv) == 0)) {
         if (simrv::compiler::unlikely(state_.has_locked_pmp)) return false;
         const unsigned size_bytes = access_size_for_funct3(funct3);
-        if (simrv::compiler::likely(machine.memory_geometry().contains(mem_addr, size_bytes) &&
+        if (simrv::compiler::likely(ram.contains(mem_addr, size_bytes) &&
                                     !is_tohost_addr(machine, mem_addr))) {
             simrv::memory::ram_write_fast(mem_addr, rrs2,
                                           static_cast<simrv::xlen::Instruction>(funct3), ram);
@@ -230,7 +231,7 @@ auto CPU::try_fast_store(Machine& machine, simrv::xlen::Address mem_addr, isa::F
                 pipeline_context.mem_paddr = paddr;
                 return true;
             }
-            if (simrv::compiler::likely(machine.memory_geometry().contains(paddr, size_bytes))) {
+            if (simrv::compiler::likely(ram.contains(paddr, size_bytes))) {
                 simrv::memory::ram_write_fast(paddr, rrs2,
                                               static_cast<simrv::xlen::Instruction>(funct3), ram);
                 pipeline_context.mem_paddr = paddr;
@@ -259,7 +260,7 @@ auto CPU::try_fast_store(Machine& machine, simrv::xlen::Address mem_addr, isa::F
                 pipeline_context.mem_paddr = paddr;
                 return true;
             }
-            if (simrv::compiler::likely(machine.memory_geometry().contains(paddr, size_bytes))) {
+            if (simrv::compiler::likely(ram.contains(paddr, size_bytes))) {
                 simrv::memory::ram_write_fast(paddr, rrs2,
                                               static_cast<simrv::xlen::Instruction>(funct3), ram);
                 pipeline_context.mem_paddr = paddr;
@@ -267,11 +268,10 @@ auto CPU::try_fast_store(Machine& machine, simrv::xlen::Address mem_addr, isa::F
             }
         }
     } else {
-        if (simrv::compiler::likely(machine.memory_geometry().contains(mem_addr, size_bytes) &&
-                                    !is_tohost_addr(machine, mem_addr) &&
-                                    core::pmp::check_access(state_, mem_addr, size_bytes,
-                                                            core::PmpAccessType::Write,
-                                                            eff_priv))) {
+        if (simrv::compiler::likely(
+                ram.contains(mem_addr, size_bytes) && !is_tohost_addr(machine, mem_addr) &&
+                core::pmp::check_access(state_, mem_addr, size_bytes, core::PmpAccessType::Write,
+                                        eff_priv))) {
             simrv::memory::ram_write_fast(mem_addr, rrs2,
                                           static_cast<simrv::xlen::Instruction>(funct3), ram);
             pipeline_context.mem_paddr = mem_addr;
@@ -295,7 +295,7 @@ SIMRV_ALWAYS_INLINE auto CPU::execute_cached_load(Machine& machine, CachedOp& op
                                 (state_.mstatus & MstatusBit::Mprv) == 0 &&
                                 !state_.has_locked_pmp)) {
         if (simrv::compiler::likely((mem_addr & align_mask) == 0 &&
-                                    machine.memory_geometry().contains(mem_addr, size_bytes))) {
+                                    ram.contains(mem_addr, size_bytes))) {
             mem_rdata = simrv::memory::ram_read_fast(
                 mem_addr, static_cast<simrv::xlen::Instruction>(op.funct3), ram);
             state_.regs.write_branchless(op.rd, mem_rdata);
@@ -367,7 +367,7 @@ SIMRV_ALWAYS_INLINE auto CPU::execute_cached_store(Machine& machine, CachedOp& o
                                 (state_.mstatus & MstatusBit::Mprv) == 0 &&
                                 !state_.has_locked_pmp)) {
         if (simrv::compiler::likely((mem_addr & align_mask) == 0 &&
-                                    machine.memory_geometry().contains(mem_addr, size_bytes) &&
+                                    ram.contains(mem_addr, size_bytes) &&
                                     !is_tohost_addr(machine, mem_addr))) {
             simrv::memory::ram_write_fast(mem_addr, rrs2,
                                           static_cast<simrv::xlen::Instruction>(op.funct3), ram);
@@ -731,9 +731,8 @@ void CPU::execute_cached_op_fast(Machine& machine, CachedOp& op,
                 simrv::compiler::likely(state_.priv == kPrivMachine &&
                                         (state_.mstatus & MstatusBit::Mprv) == 0 &&
                                         !state_.has_locked_pmp)) {
-                if (simrv::compiler::likely(
-                        (mem_addr & align_mask) == 0 &&
-                        machine.memory_geometry().contains(mem_addr, size_bytes))) {
+                if (simrv::compiler::likely((mem_addr & align_mask) == 0 &&
+                                            ram.contains(mem_addr, size_bytes))) {
                     mem_rdata = simrv::memory::ram_read_fast(
                         mem_addr, static_cast<simrv::xlen::Instruction>(op.funct3), ram);
                     loaded = true;
@@ -810,10 +809,9 @@ void CPU::execute_cached_op_fast(Machine& machine, CachedOp& op,
                 simrv::compiler::likely(state_.priv == kPrivMachine &&
                                         (state_.mstatus & MstatusBit::Mprv) == 0 &&
                                         !state_.has_locked_pmp)) {
-                if (simrv::compiler::likely(
-                        (mem_addr & align_mask) == 0 &&
-                        machine.memory_geometry().contains(mem_addr, size_bytes) &&
-                        !is_tohost_addr(machine, mem_addr))) {
+                if (simrv::compiler::likely((mem_addr & align_mask) == 0 &&
+                                            ram.contains(mem_addr, size_bytes) &&
+                                            !is_tohost_addr(machine, mem_addr))) {
                     simrv::memory::ram_write_fast(
                         mem_addr, fp_data, static_cast<simrv::xlen::Instruction>(op.funct3), ram);
                     pipeline_context.mem_paddr = mem_addr;
@@ -971,20 +969,19 @@ SIMRV_ALWAYS_INLINE auto CPU::run_fast_baremetal_kernel(Machine& machine, uint32
                                                         const simrv::memory::RamView& ram)
     -> uint32_t {
     uint32_t cached_ops = 0;
-    simrv::xlen::Counter accumulated_retired = 0;
+    simrv::xlen::Counter last_flushed_icount = e_icount;
     for (uint32_t b = 0; b < batch_size; ++b) {
         auto* cached = decode_cache.lookup(state_.pc);
         if (simrv::compiler::likely(cached != nullptr)) {
-            const simrv::xlen::Counter retired_before = e_icount;
             execute_cached_op_fast<kCopyContext, kInstMix>(machine, *cached, ram);
-            accumulated_retired += (e_icount - retired_before);
             ++cached_ops;
         } else {
-            if (accumulated_retired > 0) {
-                machine.record_retired_instructions(accumulated_retired);
-                accumulated_retired = 0;
+            const auto delta = e_icount - last_flushed_icount;
+            if (delta > 0) {
+                machine.record_retired_instructions(delta);
             }
             run_cycle_baremetal_miss(machine);
+            last_flushed_icount = e_icount;
         }
         if (simrv::compiler::unlikely(
                 machine.tohost != 0 || !machine.is_running() ||
@@ -993,8 +990,9 @@ SIMRV_ALWAYS_INLINE auto CPU::run_fast_baremetal_kernel(Machine& machine, uint32
             break;
         }
     }
-    if (accumulated_retired > 0) {
-        machine.record_retired_instructions(accumulated_retired);
+    const auto delta = e_icount - last_flushed_icount;
+    if (delta > 0) {
+        machine.record_retired_instructions(delta);
     }
     return cached_ops;
 }
@@ -1048,7 +1046,7 @@ template <bool kCopyContext, bool kInstMix, bool kPollPause>
 SIMRV_ALWAYS_INLINE auto CPU::run_fast_os_kernel(Machine& machine, uint32_t batch_size,
                                                  const simrv::memory::RamView& ram) -> uint32_t {
     uint32_t cached_ops = 0;
-    simrv::xlen::Counter accumulated_retired = 0;
+    simrv::xlen::Counter last_flushed_icount = e_icount;
     uint32_t chunk_cycles = 0;
 
     auto flush_clint_and_retired = [&]() {
@@ -1063,18 +1061,17 @@ SIMRV_ALWAYS_INLINE auto CPU::run_fast_os_kernel(Machine& machine, uint32_t batc
             }
             chunk_cycles = 0;
         }
-        if (accumulated_retired > 0) {
-            machine.record_retired_instructions(accumulated_retired);
-            accumulated_retired = 0;
+        const auto delta = e_icount - last_flushed_icount;
+        if (delta > 0) {
+            machine.record_retired_instructions(delta);
+            last_flushed_icount = e_icount;
         }
     };
 
     for (uint32_t b = 0; b < batch_size; ++b) {
         auto* cached = decode_cache.lookup(state_.pc);
         if (simrv::compiler::likely(cached != nullptr)) {
-            const simrv::xlen::Counter retired_before = e_icount;
             execute_cached_op_fast<kCopyContext, kInstMix>(machine, *cached, ram);
-            accumulated_retired += (e_icount - retired_before);
             ++cached_ops;
             ++chunk_cycles;
 
@@ -1084,6 +1081,7 @@ SIMRV_ALWAYS_INLINE auto CPU::run_fast_os_kernel(Machine& machine, uint32_t batc
         } else {
             flush_clint_and_retired();
             run_fast_cycle_miss(machine);
+            last_flushed_icount = e_icount;
         }
         if (simrv::compiler::unlikely(
                 machine.tohost != 0 || !machine.is_running() ||

@@ -34,8 +34,6 @@
 #include "simrv/core/Machine.hpp"
 #include "simrv/core/TelemetrySink.hpp"
 #include "simrv/core/Tracer.hpp"
-#include "simrv/net/Client.hpp"
-#include "simrv/net/Server.hpp"
 #include "simrv/tui/Tui.hpp"
 #include "simrv/util/CliParser.hpp"
 #include "simrv/util/FormatUtil.hpp"
@@ -205,7 +203,7 @@ auto print_isa_info() -> void {
         simrv::xlen::kXLenBits, simrv::xlen::kXLenBits, simrv::xlen::kXLenBits);
     std::println("  vector           : RVV 1.0 implemented subset; VLEN 128..1024 bits");
     std::println("  privilege         : M/S/U, Sv32 (RV32), Sv39/Sv48 (RV64)");
-    std::println("  debug frontends   : TUI, attachable Unix socket, GDB RSP");
+    std::println("  debug frontends   : TUI, GDB RSP");
     std::println("  qualified caveats : RMM arithmetic and complete RVV are not claimed");
     std::println("  see               : docs/architecture/compliance.md");
 }
@@ -225,12 +223,11 @@ auto print_doctor() -> int {
     std::println("SimRV environment diagnostics");
     std::println("  version          : {}", simrv::buildinfo::kVersion);
     std::println("  host             : Linux x86-64 expected for release binaries");
-    std::println("  interactive TTY  : {}", tty ? "yes" : "no (use --cli or --attach for pipes)");
+    std::println("  interactive TTY  : {}", tty ? "yes" : "no (use --cli for pipes)");
     std::println("  TERM             : {}", term_value.empty() ? "(unset)" : term_value);
     std::println("  Sixel hint       : {}",
                  sixel ? "detected" : "not detected (text TUI remains available)");
     std::println("  mouse protocol   : SGR-pixel mode requested by interactive TUI");
-    std::println("  attach transport : local framed Unix socket, bounded and versioned");
     std::println(
         "  package runtime  : use the static musl archive outside the tested native package "
         "matrix");
@@ -307,7 +304,6 @@ auto main(int argc, char* argv[]) -> int {  // NOLINT(bugprone-exception-escape)
     std::optional<simrv::core::MachineConfig> staged_configuration;
     std::optional<simrv::core::RuntimeProfile> staged_runtime_profile;
 
-    std::shared_ptr<simrv::net::SimRvServer> ipc_server;
     std::ofstream event_stream;
     bool event_stream_opened = false;
     std::mutex event_stream_mutex;
@@ -340,9 +336,6 @@ auto main(int argc, char* argv[]) -> int {  // NOLINT(bugprone-exception-escape)
             case CliAction::ExplainInstruction:
                 simrv::util::explain_instruction(parsed->options.explain_inst_val);
                 std::exit(simrv::core::to_exit_code(simrv::core::HostExitCode::Success));
-            case CliAction::Attach:
-                return simrv::net::run_client(parsed->options.attach_endpoint,
-                                              !parsed->options.tuimode);
             case CliAction::DumpCpuModel: {
                 simrv::pipeline::CpuModelConfig cfg{};
                 std::string target = parsed->options.dump_cpu_model_preset;
@@ -542,11 +535,6 @@ auto main(int argc, char* argv[]) -> int {  // NOLINT(bugprone-exception-escape)
                          simrv::core::HostExitCode::ConfigurationError);
         }
 
-        if (parsed->options.server_mode) {
-            parsed->options.tuimode = false;
-            is_tui = false;
-            simrv::log::set_tui_mode(false);
-        }
         auto machine_config = staged_configuration.value_or(parsed->options.to_machine_config());
         if (const auto valid = machine_config.validate(); !valid) {
             option_error(valid.error(), simrv::core::HostExitCode::ConfigurationError);
@@ -566,7 +554,6 @@ auto main(int argc, char* argv[]) -> int {  // NOLINT(bugprone-exception-escape)
             }
         }
 
-        sim_machine->set_persistent_control(parsed->options.server_mode);
         std::string lifecycle_path = parsed->options.fn_events;
         if (lifecycle_path.empty() && !parsed->options.fn_archtrace.empty()) {
             const std::filesystem::path retire_path(parsed->options.fn_archtrace);
@@ -628,20 +615,6 @@ auto main(int argc, char* argv[]) -> int {  // NOLINT(bugprone-exception-escape)
             tui->initialize();
         }
 
-        if (parsed->options.server_mode) {
-            if (ipc_server)
-                ipc_server->bind(*sim_machine);
-            else
-                ipc_server = std::make_shared<simrv::net::SimRvServer>(
-                    *sim_machine, parsed->options.server_endpoint);
-            sim_machine->set_telemetry_sink(ipc_server);
-            sim_machine->set_console_sink(ipc_server);
-            if (!ipc_server->start()) {
-                ipc_server->unbind();
-                return simrv::core::to_exit_code(simrv::core::HostExitCode::IpcError);
-            }
-        }
-
         std::shared_ptr<UartTranscriptSink> uart_transcript;
         if (!parsed->options.fn_uart_transcript.empty()) {
             uart_transcript = std::make_shared<UartTranscriptSink>(
@@ -659,8 +632,7 @@ auto main(int argc, char* argv[]) -> int {  // NOLINT(bugprone-exception-escape)
         // attempt raw mode at all.
         TerminalModeGuard terminal_mode;
         const bool owns_terminal = simrv::util::owns_interactive_terminal();
-        if (!parsed->options.server_mode && !sim_machine->tui_enabled() && owns_terminal &&
-            !terminal_mode.enable_raw_mode()) {
+        if (!sim_machine->tui_enabled() && owns_terminal && !terminal_mode.enable_raw_mode()) {
             simrv::log::warn("Terminal raw mode setup failed; continuing in current mode");
         }
         if (sim_machine->tui_enabled()) {
@@ -674,10 +646,6 @@ auto main(int argc, char* argv[]) -> int {  // NOLINT(bugprone-exception-escape)
             g_active_cli_machine.store(sim_machine.get(), std::memory_order_release);
             sim_machine->run();
             g_active_cli_machine.store(nullptr, std::memory_order_release);
-        }
-
-        if (ipc_server) {
-            ipc_server->unbind();
         }
 
         if (sim_machine->reboot_requested) {

@@ -166,14 +166,10 @@ retirement, and level 4 detailed state.
 Write an aligned architectural trace to \fBtrace/trace.txt\fR.
 .TP
 .B \-r, \-\-trace-range \fIbegin end\fR
-Capture a trace for an inclusive execution range.
-.TP
-.B \-\-trace-pc-period=\fIn\fR
-Sample the program counter every \fIn\fR steps into \fBtrace/tracepc.txt\fR.
+Capture text trace snapshots within an inclusive \fBmtime\fR range.
 .TP
 .B \-\-trace-pc-range=\fIstart-end\fR
-Filter architectural trace events by an inclusive program-counter range. The range form of
-\fB\-\-trace-pc\fR is an alias; use \fB\-\-trace-pc-period\fR for sampling.
+Filter architectural trace events by an inclusive program-counter range.
 .TP
 .B \-\-trace-bpred
 Record branch-prediction decisions.
@@ -183,9 +179,6 @@ Record MMIO transactions in \fBtrace/dlog.txt\fR.
 .TP
 .B \-\-trap-log=\fIfile\fR
 Write architectural trap and SBI events to a file.
-.TP
-.B \-I, \-\-dump-init=\fIcycle\fR
-Dump initial architectural memory and TLB state at a selected cycle.
 .SH DEBUGGING AND CHECKPOINTS
 .TP
 .B \-\-gdb

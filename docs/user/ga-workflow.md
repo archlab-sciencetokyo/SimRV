@@ -12,10 +12,10 @@ simrv --doctor
 simrv --isa-info
 ```
 
-`--doctor` reports whether the process has an interactive terminal, whether the environment gives
-the TUI a Sixel hint, and which local attach transport is available. A missing Sixel terminal is
-not an error: the text TUI remains supported. `--isa-info` is the authoritative user-facing
-summary of the qualified ISA and the explicitly unqualified areas.
+`--doctor` reports whether the process has an interactive terminal and whether the environment
+gives the TUI a Sixel hint. A missing Sixel terminal is not an error: the text TUI remains
+supported. `--isa-info` is the authoritative user-facing summary of the qualified ISA and the
+explicitly unqualified areas.
 
 ## Run the golden bare-metal path
 
@@ -28,17 +28,6 @@ The guest writes to the simulated UART and exits through `tohost`. For a graphic
 use the Linux image instructions and verify the Alpine/JWM desktop with VirtIO GPU, input, sound,
 and networking enabled. Sixel display rendering is an optional host presentation layer; guest
 framebuffer behavior is validated independently.
-
-## Attach and inspect a running guest
-
-```bash
-simrv --cli --listen-tui /tmp/simrv.sock -m examples/hello/build-rv64/hello.elf
-simrv --attach /tmp/simrv.sock
-```
-
-Pause, step, inspect registers and memory, then detach and reconnect. The guest state must remain
-alive across detach. The same guest can be debugged through GDB with `--gdb`; TUI and GDB are
-separate frontends by design.
 
 ## Export a compatible SoC description
 

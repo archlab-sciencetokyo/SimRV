@@ -141,7 +141,7 @@ simrv -m program.elf
 | `--log-file <file>` | Mirror diagnostic messages to a file in the selected log format. |
 | `--log-stderr` | Route all simulator diagnostic messages to stderr instead of stdout for clean pipeline piping. |
 | `--trace` | Write an aligned, labeled architectural instruction trace to `<trace-dir>/trace.txt`. |
-| `--trace-pc-range <range>` | Write PC stream trace within specified inclusive range to `<trace-dir>/tracepc.txt`. |
+| `--trace-pc-range <range>` | Filter `--arch-trace` events to the specified inclusive PC range. |
 | `--gdb` | Start GDB Remote Serial Protocol (RSP) server. |
 | `--gdb-port <port>` | Set GDB RSP TCP listener port (default: 1234). |
 | `--isa-info` | Show the qualified ISA, vector, privilege, and debugger capability contract. |
@@ -242,9 +242,9 @@ simrv --cli -m program.elf --arch-trace results/retire.jsonl --trace-level 4 \
 are conjunctive. `--trace-function` uses the loaded ELF symbol table and matches the exact symbol
 containing the event PC; events without a resolvable symbol are excluded. `--trace-device` matches
 the event envelope's `component` exactly and excludes events without a component attribution. The
-PC range is inclusive and accepts hexadecimal or decimal addresses. `--trace-pc START-END` is an
-alias for `--trace-pc-range`. Use `--trace-pc-period N` to sample the PC trace; numeric values for
-`--trace-pc` are rejected with a migration hint.
+PC range is inclusive and accepts hexadecimal or decimal addresses. Use `--trace-pc-range START-END`
+to filter events in an architectural trace. The ambiguous `--trace-pc` option is rejected with a
+migration hint to `--trace-pc-range`.
 Events without an architectural PC (for example bus transactions and interrupt assertion edges) are
 excluded while a PC range is active. Filtering occurs before event serialization. Lifecycle records
 in `events.jsonl` are always retained, so filters cannot hide run completion or failure. Selected
@@ -610,7 +610,8 @@ simrv-benchmark --suite realworld --latex-table
 - **Q: Where are instruction traces written when passing `--trace`?**
   *A:* Traces are saved in the `trace/` directory relative to your working directory by default.
   Use `--trace-dir DIR` to select another root. The `trace.txt` file presents labeled, aligned
-  cycle, instruction, register, and CSR fields; periodic PC samples remain in `tracepc.txt`.
+  cycle, instruction, register, and CSR fields; `--trace-range BEGIN END` limits snapshots to an
+  inclusive `mtime` range.
 
 - **Q: How can I connect GDB to debug a running binary?**
   *A:* Launch SimRV with `--gdb --cli -m program.elf`, then in another terminal run:

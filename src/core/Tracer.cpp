@@ -213,7 +213,6 @@ class ConditionalTracerLock {
 };
 
 constexpr auto D_TRACE_HEX_WIDTH = static_cast<int>(simrv::xlen::kXLenHexDigits);
-constexpr simrv::xlen::Counter D_TRACEPC_INTERVAL = 1000;
 constexpr uint64_t kRetireIndexStride = 256;
 
 class RetirementRecordBuilder {
@@ -766,7 +765,6 @@ void Tracer::flush_all() {
     if (fp_pipeline_.is_open()) fp_pipeline_.flush();
     if (fp_memory.is_open()) fp_memory.flush();
     if (fp_registers_.is_open()) fp_registers_.flush();
-    if (fp_tracepc_.is_open()) fp_tracepc_.flush();
     if (fp_bpred_.is_open()) fp_bpred_.flush();
 }
 
@@ -1476,147 +1474,6 @@ void Tracer::write_trace_metadata(bool completed) {
         json_quote(trace_started_at_), completed ? json_quote(trace_timestamp()) : "null");
 }
 
-void Tracer::dump_init_artifacts() {
-    auto* cpu = &machine_.primary_hart();
-    const auto ram = machine_.ram_view();
-    std::error_code ec;
-    ensure_artifact_directory();
-
-    {
-        std::ofstream out(artifact_path("init_mem.txt"));
-        const auto dram_base = machine_.memory_geometry().dram_base;
-        const auto dram_size = static_cast<uint64_t>(machine_.memory_geometry().dram_size);
-        constexpr uint64_t kBlockSize = 16;
-        bool skipping = false;
-
-        for (uint64_t offset = 0; offset < dram_size; offset += kBlockSize) {
-            const uint64_t current_len = std::min<uint64_t>(kBlockSize, dram_size - offset);
-            bool all_zero = true;
-            for (uint64_t b = 0; b < current_len; ++b) {
-                if (std::to_integer<uint8_t>(*ram.unchecked_ptr(dram_base + offset + b)) != 0) {
-                    all_zero = false;
-                    break;
-                }
-            }
-            if (all_zero) {
-                if (!skipping) {
-                    std::println(out, "*");
-                    skipping = true;
-                }
-                continue;
-            }
-            skipping = false;
-
-            std::print(out, "{:08x}: ", offset);
-            for (uint64_t b = 0; b < current_len; ++b) {
-                const auto val =
-                    std::to_integer<uint8_t>(*ram.unchecked_ptr(dram_base + offset + b));
-                std::print(out, "{:02x}{}", val, (b == 7 ? "  " : " "));
-            }
-            for (uint64_t b = current_len; b < kBlockSize; ++b) {
-                std::print(out, "   {}", (b == 7 ? " " : ""));
-            }
-            std::print(out, " |");
-            for (uint64_t b = 0; b < current_len; ++b) {
-                const char ch = static_cast<char>(
-                    std::to_integer<uint8_t>(*ram.unchecked_ptr(dram_base + offset + b)));
-                out.put((ch >= 32 && ch <= 126) ? ch : '.');
-            }
-            std::println(out, "|");
-        }
-        simrv::log::info("file {} was generated after {} cycle(s)",
-                         artifact_path("init_mem.txt").string(),
-                         static_cast<simrv::xlen::Counter>(cpu->clint_mmio.mtime.load()));
-    }
-
-    std::ofstream out(artifact_path("init_reg.txt"));
-    auto write_xlen = [&out](std::string_view lhs, simrv::xlen::Word value) -> void {
-        std::println(out, "{}={}'h{:0{}x};", lhs, simrv::xlen::kXLenBits, value,
-                     simrv::xlen::kXLenHexDigits);
-    };
-    auto write_32 = [&out](std::string_view lhs, simrv::xlen::Word value) -> void {
-        std::println(out, "{}=32'h{:08x};", lhs, value);
-    };
-    auto write_64 = [&out](std::string_view lhs, simrv::xlen::Counter value) -> void {
-        std::println(out, "{}=64'h{:016x};", lhs, value);
-    };
-
-    write_xlen("p.pc", cpu->state().pc);
-    for (uint8_t i = 1; i < 32; ++i) {
-        std::println(out, "p.regs.mem[{}]={}'h{:0{}x};", i, simrv::xlen::kXLenBits,
-                     cpu->state().regs.read(static_cast<simrv::xlen::RegId>(i)),
-                     simrv::xlen::kXLenHexDigits);
-    }
-    for (uint8_t i = 0; i < 32; ++i) {
-        std::println(out, "p.fregs.mem[{}]={}'h{:016x};", i, 64,
-                     cpu->state().regs.read_fp(
-                         simrv::xlen::to_fp_reg_id(static_cast<simrv::xlen::RegId>(i))));
-    }
-    write_xlen("p.fcsr        ", cpu->state().fcsr);
-    write_xlen("p.mstatus     ", cpu->state().mstatus);
-    write_xlen("p.mtvec       ", cpu->state().mtvec);
-    write_xlen("p.mscratch    ", cpu->state().mscratch);
-    write_xlen("p.mepc        ", cpu->state().mepc);
-    write_xlen("p.mcause      ", cpu->state().mcause);
-    write_xlen("p.mtval       ", cpu->state().mtval);
-    write_xlen("p.mhartid     ", cpu->state().mhartid);
-    write_xlen("p.misa        ", cpu->state().misa);
-    write_xlen("p.mie         ", cpu->state().mie);
-    write_xlen("p.mip         ", cpu->state().mip);
-    write_xlen("p.medeleg     ", cpu->state().medeleg);
-    write_xlen("p.mideleg     ", cpu->state().mideleg);
-    write_xlen("p.mcounteren  ", cpu->state().mcounteren);
-    write_xlen("p.stvec       ", cpu->state().stvec);
-    write_xlen("p.sscratch    ", cpu->state().sscratch);
-    write_xlen("p.sepc        ", cpu->state().sepc);
-    write_xlen("p.scause      ", cpu->state().scause);
-    write_xlen("p.stval       ", cpu->state().stval);
-    write_xlen("p.satp        ", cpu->state().satp);
-    write_xlen("p.scounteren  ", cpu->state().scounteren);
-    write_xlen("p.priv        ", std::to_underlying(cpu->state().priv));
-
-    write_64("p.mtime       ", cpu->clint_mmio.mtime);
-    write_64("p.mtimecmp    ", cpu->clint_mmio.mtimecmp);
-
-    write_xlen("p.load_res    ", cpu->state().load_res);
-    std::println(out, "p.reserved    = 1'h{:x};", cpu->state().reserved);
-    write_xlen("p.pending_exception   ",
-               cpu->pipeline_context.pending_exception
-                   ? std::to_underlying(*cpu->pipeline_context.pending_exception)
-                   : simrv::xlen::kWordAllOnes);
-    write_xlen("p.pending_tval", cpu->pipeline_context.pending_tval);
-
-    const size_t kNumSets = simrv::core::Tlb::kNumSets;
-    for (simrv::xlen::Word i = 0; i < simrv::memory::kTlbSize; ++i) {
-        const auto& entry = cpu->tlb.inst_r.at(i % kNumSets).at(i / kNumSets);
-        std::println(out, "mmu.TLB_inst_r.r_valid[{}] ={};", i, static_cast<int>(entry.valid));
-        std::println(out, "mmu.TLB_inst_r.mem[{}][39:22] =18'h{:05x};", i, entry.v_addr >> 14);
-        std::println(out, "mmu.TLB_inst_r.mem[{}][21:0] =22'h{:06x};", i, entry.p_addr >> 10);
-    }
-    for (simrv::xlen::Word i = 0; i < simrv::memory::kTlbSize; ++i) {
-        const auto& entry = cpu->tlb.data_r.at(i % kNumSets).at(i / kNumSets);
-        std::println(out, "mmu.TLB_data_r.r_valid[{}] ={};", i, static_cast<int>(entry.valid));
-        std::println(out, "mmu.TLB_data_r.mem[{}][39:22] =18'h{:05x};", i, entry.v_addr >> 14);
-        std::println(out, "mmu.TLB_data_r.mem[{}][21:0] =22'h{:06x};", i, entry.p_addr >> 10);
-    }
-    for (simrv::xlen::Word i = 0; i < simrv::memory::kTlbSize; ++i) {
-        const auto& entry = cpu->tlb.data_w.at(i % kNumSets).at(i / kNumSets);
-        std::println(out, "mmu.TLB_data_w.r_valid[{}] ={};", i, static_cast<int>(entry.valid));
-        std::println(out, "mmu.TLB_data_w.mem[{}][39:22] =18'h{:05x};", i, entry.v_addr >> 14);
-        std::println(out, "mmu.TLB_data_w.mem[{}][21:0] =22'h{:06x};", i, entry.p_addr >> 10);
-    }
-
-    const auto platform = machine_.platform_status();
-    write_32("platform.virtio_console.status", platform.console_status);
-    write_32("platform.virtio_disk.status   ", platform.disk_status);
-    write_32("platform.virtio_disk.isr      ", platform.disk_isr);
-    write_64("platform.virtio_disk.capacity ", platform.disk_capacity_sectors);
-
-    simrv::log::info("file {} was generated after {} cycle(s)",
-                     artifact_path("init_reg.txt").string(),
-                     static_cast<simrv::xlen::Counter>(cpu->clint_mmio.mtime.load()));
-}
-
 void Tracer::write_instruction_mix_report() {
     std::error_code ec;
     ensure_artifact_directory();
@@ -1882,21 +1739,6 @@ auto Tracer::write_summary_json(const std::string& path) -> bool {
     }
     out << "  ]\n}\n";
     return static_cast<bool>(out);
-}
-
-void Tracer::emit_periodic_pc_trace(simrv::xlen::Counter mtime, simrv::xlen::Register cpc) {
-    if ((mtime % D_TRACEPC_INTERVAL) == 0) {
-        ConditionalTracerLock lock(mutex_, machine_.is_smp_enabled());
-        if (!tracepc_opened_) {
-            tracepc_opened_ = true;
-            ensure_artifact_directory();
-            const auto path = artifact_path("tracepc.txt");
-            fp_tracepc_.open(path);
-            simrv::log::info("generate trace file: {}", path.string());
-        }
-        std::println(fp_tracepc_, "{:08} {:0{}x}", static_cast<int>(mtime / D_TRACEPC_INTERVAL),
-                     cpc, D_TRACE_HEX_WIDTH);
-    }
 }
 
 void Tracer::emit_branch_prediction_trace(simrv::xlen::Counter mtime, simrv::xlen::Register cpc,

@@ -533,8 +533,6 @@ class Machine final : public core::IInterruptController {
     [[nodiscard]] bool has_control_commands() const noexcept {
         return controls_pending_.load(std::memory_order_acquire);
     }
-    void set_persistent_control(bool enabled) noexcept { persistent_control_ = enabled; }
-    [[nodiscard]] bool persistent_control() const noexcept { return persistent_control_; }
     void complete_step_with(std::function<void(Machine&)> callback) {
         step_completion_ = std::move(callback);
     }
@@ -565,6 +563,7 @@ class Machine final : public core::IInterruptController {
     void prepare_runner_cycle();
     void service_pending_input();
     void service_network();
+    void update_network_devices_status() noexcept;
     void finalize_runner_cycle();
     void publish_tui_execution_snapshot() noexcept;
     void publish_tui_execution_snapshot_for_hart(size_t hart) noexcept;
@@ -579,7 +578,8 @@ class Machine final : public core::IInterruptController {
     std::atomic<bool> controls_pending_{false};
     std::mutex input_mutex_;
     std::deque<PendingInputEvent> pending_input_events_;
-    bool persistent_control_ = false;
+    std::atomic<bool> has_pending_input_{false};
+    bool has_network_devices_{false};
     std::function<void(Machine&)> step_completion_;
     mutable std::mutex staged_configuration_mutex_;
     std::optional<MachineConfig> staged_configuration_;

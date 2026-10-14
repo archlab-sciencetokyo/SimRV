@@ -22,8 +22,7 @@ enum class HostExitCode : int {
     ConfigurationError = 3,
     InitializationError = 4,
     ExecutionError = 5,
-    CheckpointError = 6,
-    IpcError = 7
+    CheckpointError = 6
 };
 
 [[nodiscard]] constexpr auto to_exit_code(HostExitCode code) noexcept -> int {

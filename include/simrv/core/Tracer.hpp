@@ -75,12 +75,10 @@ class Tracer {
     [[nodiscard]] auto is_trap_log_enabled() const noexcept -> bool;
     [[nodiscard]] auto is_dlog_enabled() const noexcept -> bool;
 
-    void dump_init_artifacts();
     void write_instruction_mix_report();
     void print_summary();
     /** Write a stable machine-readable execution summary for automation. */
     [[nodiscard]] auto write_summary_json(const std::string& path) -> bool;
-    void emit_periodic_pc_trace(simrv::xlen::Counter mtime, simrv::xlen::Register cpc);
     void emit_branch_prediction_trace(simrv::xlen::Counter mtime, simrv::xlen::Register cpc,
                                       simrv::xlen::Register jmp_pc, isa::Opcode r_opcode,
                                       bool r_tkn);
@@ -138,8 +136,6 @@ class Tracer {
 
     Machine& machine_;
     mutable std::mutex mutex_;
-    std::ofstream fp_tracepc_;
-    bool tracepc_opened_ = false;
     std::ofstream fp_bpred_;
     bool bpred_opened_ = false;
     std::vector<unsigned> call_depth_;
