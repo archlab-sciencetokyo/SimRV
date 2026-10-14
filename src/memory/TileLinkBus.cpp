@@ -225,13 +225,13 @@ void TileLinkBus::process_request(const TimedRequest& request) {
                                       funct3 == static_cast<simrv::xlen::Instruction>(Funct3::Sd))
                                    : (funct3 == static_cast<simrv::xlen::Instruction>(Funct3::Sw));
         if (is_tohost_write) {
-            if (req.address == machine_.configuration().isa.isatest_tohost ||
-                req.address == 0x80001000 || req.address == 0x40008000) {
+            if (req.address == machine_.isa_test_tohost() || req.address == 0x80001000 ||
+                req.address == 0x40008000) {
                 machine_.tohost = simrv::xlen::kIsXLen64
                                       ? req.data
                                       : ((machine_.tohost & 0xFFFFFFFF00000000ULL) | req.data);
             } else if (!simrv::xlen::kIsXLen64 &&
-                       (req.address == machine_.configuration().isa.isatest_tohost + 4 ||
+                       (req.address == machine_.isa_test_tohost() + 4 ||
                         req.address == 0x80001004 || req.address == 0x40008004)) {
                 machine_.tohost = (machine_.tohost & 0x00000000FFFFFFFFULL) |
                                   (static_cast<uint64_t>(req.data) << 32);

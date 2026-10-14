@@ -180,12 +180,6 @@ class Machine final : public core::IInterruptController {
      * Machine. */
     [[nodiscard]] auto device_registry() noexcept -> simrv::device::PlatformDeviceRegistry&;
     [[nodiscard]] auto tui_enabled() const noexcept -> bool { return config.tui.enabled; }
-    [[nodiscard]] auto mouse_sensitivity() const noexcept -> double {
-        return config.tui.mouse_sensitivity;
-    }
-    void set_mouse_sensitivity(double sensitivity) noexcept {
-        config.tui.mouse_sensitivity = sensitivity;
-    }
     [[nodiscard]] auto high_contrast_enabled() const noexcept -> bool {
         return config.tui.high_contrast;
     }

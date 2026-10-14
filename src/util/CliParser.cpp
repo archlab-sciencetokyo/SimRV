@@ -1450,7 +1450,6 @@ auto RuntimeOptions::to_machine_config() const -> simrv::core::MachineConfig {
     cfg.files.virtiofs_path = fn_virtiofs;
     cfg.files.disk_enabled = use_disk;
     cfg.files.dvtree_path = fn_dvtree;
-    cfg.files.traplog_path = fn_traplog;
     cfg.files.config_path = fn_config;
     cfg.files.cfu_plugin_path = fn_cfu_plugin;
     cfg.cpu_model_preset = cpu_model_preset;

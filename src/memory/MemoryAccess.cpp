@@ -527,8 +527,7 @@ void MemoryAccess::target_write(MemorySubsystem& mem, core::CPU& cpu, simrv::xle
         }
         if ((cpu.cpu_model_config.name == "cfu-provingground" ||
              cpu.cpu_model_config.name == "rvproc") &&
-            (addr == cpu.machine_->configuration().isa.isatest_tohost ||
-             (addr & 0x80000000ULL) != 0)) {
+            (addr == cpu.machine_->isa_test_tohost() || (addr & 0x80000000ULL) != 0)) {
             if (funct3 == Funct3::Sw && (data == 0x00020000ULL || (data & 1ULL) != 0)) {
                 cpu.machine_->tohost = data;
             } else {
@@ -555,14 +554,13 @@ void MemoryAccess::target_write(MemorySubsystem& mem, core::CPU& cpu, simrv::xle
                     cpu.machine_->tohost = value;
                 }
             };
-            if (addr == cpu.machine_->configuration().isa.isatest_tohost || addr == 0x80001000 ||
+            if (addr == cpu.machine_->isa_test_tohost() || addr == 0x80001000 ||
                 addr == 0x40008000) {
                 publish_host_write(simrv::xlen::kIsXLen64
                                        ? data
                                        : ((cpu.machine_->tohost & 0xFFFFFFFF00000000ULL) | data));
-            } else if (!simrv::xlen::kIsXLen64 &&
-                       (addr == cpu.machine_->configuration().isa.isatest_tohost + 4 ||
-                        addr == 0x80001004 || addr == 0x40008004)) {
+            } else if (!simrv::xlen::kIsXLen64 && (addr == cpu.machine_->isa_test_tohost() + 4 ||
+                                                   addr == 0x80001004 || addr == 0x40008004)) {
                 publish_host_write((cpu.machine_->tohost & 0x00000000FFFFFFFFULL) |
                                    (static_cast<uint64_t>(data) << 32));
             }

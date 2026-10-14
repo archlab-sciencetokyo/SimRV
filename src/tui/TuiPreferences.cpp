@@ -107,15 +107,6 @@ auto TuiPreferences::load(const std::filesystem::path& path) -> bool {
         } else if (key == "target_fps" && parse_integer(value, parsed) && parsed >= 1 &&
                    parsed <= 120) {
             target_fps = parsed;
-        } else if (key == "mouse_sensitivity") {
-            try {
-                size_t consumed = 0;
-                const auto parsed_value = std::stod(std::string(value), &consumed);
-                if (consumed == value.size() && std::isfinite(parsed_value) && parsed_value > 0.0) {
-                    mouse_sensitivity = parsed_value;
-                }
-            } catch (...) {
-            }
         }
     }
     if (focused_slot >= slots.size()) focused_slot = 0;
@@ -146,8 +137,7 @@ auto TuiPreferences::save(const std::filesystem::path& path) const -> bool {
     output << "\ntheme=" << static_cast<unsigned>(theme)
            << "\nhigh_contrast=" << static_cast<unsigned>(high_contrast)
            << "\nclass_mode=" << static_cast<unsigned>(class_mode) << "\ntarget_fps=" << target_fps
-           << "\nstudent_guide=" << static_cast<unsigned>(student_guide)
-           << "\nmouse_sensitivity=" << mouse_sensitivity << '\n';
+           << "\nstudent_guide=" << static_cast<unsigned>(student_guide) << '\n';
     output.close();
     if (!output) return false;
     std::filesystem::rename(temporary_path, path, error);

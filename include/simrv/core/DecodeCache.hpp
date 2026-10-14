@@ -202,10 +202,10 @@ class DecodeCache {
     [[nodiscard]] inline auto lookup(simrv::xlen::Register pc) noexcept -> CachedOp* {
         const size_t set_idx = calc_set(pc);
         auto& set = sets_[set_idx];
-        if (simrv::compiler::likely(set.ways[0].valid && set.ways[0].cpc == pc)) {
+        if (simrv::compiler::likely(set.ways[0].cpc == pc && set.ways[0].valid)) {
             return &set.ways[0];
         }
-        if (set.ways[1].valid && set.ways[1].cpc == pc) {
+        if (set.ways[1].cpc == pc && set.ways[1].valid) {
             return &set.ways[1];
         }
         return nullptr;
@@ -223,9 +223,9 @@ class DecodeCache {
         const size_t set_idx = calc_set(pc);
         auto& set = sets_[set_idx];
         uint8_t way = 0;
-        if (set.ways[0].valid && set.ways[0].cpc == pc) {
+        if (set.ways[0].cpc == pc && set.ways[0].valid) {
             way = 0;
-        } else if (set.ways[1].valid && set.ways[1].cpc == pc) {
+        } else if (set.ways[1].cpc == pc && set.ways[1].valid) {
             way = 1;
         } else if (!set.ways[0].valid) {
             way = 0;

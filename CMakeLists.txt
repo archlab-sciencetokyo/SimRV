@@ -243,9 +243,6 @@ endif()
 set(SIMRV_DRAM_SIZE_MB
     "256"
     CACHE STRING "DRAM size in megabytes (must be power of 2)")
-set(SIMRV_DISK_SIZE_MB
-    "256"
-    CACHE STRING "Disk size in megabytes")
 set(SIMRV_SPIKE_PATH
     "spike"
     CACHE

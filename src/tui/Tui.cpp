@@ -447,7 +447,6 @@ void Tui::restore_preferences() {
     set_theme_style(preferences.theme);
     machine_.set_high_contrast_enabled(preferences.high_contrast);
     machine_.set_class_mode_enabled(preferences.class_mode);
-    machine_.set_mouse_sensitivity(preferences.mouse_sensitivity);
     student_guide_enabled_ = preferences.student_guide;
     set_target_fps(preferences.target_fps);
 }
@@ -469,7 +468,6 @@ void Tui::save_preferences() {
     preferences.class_mode = machine_.class_mode_enabled();
     preferences.student_guide = student_guide_enabled_;
     preferences.target_fps = target_fps();
-    preferences.mouse_sensitivity = machine_.mouse_sensitivity();
     if (!preferences.save(preferences_path_)) {
         simrv::log::warn("Unable to save TUI preferences to {}", preferences_path_.string());
     }

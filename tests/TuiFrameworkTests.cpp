@@ -249,7 +249,6 @@ void test_tui_preferences_round_trip() {
     expected.class_mode = true;
     expected.student_guide = true;
     expected.target_fps = 45;
-    expected.mouse_sensitivity = 1.75;
     expect(expected.save(path), "TUI preferences save successfully");
 
     TuiPreferences actual;
@@ -261,8 +260,7 @@ void test_tui_preferences_round_trip() {
                actual.focused_slot == expected.focused_slot &&
                actual.column_widths == expected.column_widths && actual.theme == expected.theme &&
                actual.high_contrast && actual.class_mode && actual.student_guide &&
-               actual.target_fps == expected.target_fps &&
-               actual.mouse_sensitivity == expected.mouse_sensitivity,
+               actual.target_fps == expected.target_fps,
            "TUI layout and presentation options survive a save and reload");
     std::filesystem::remove_all(root, ignored);
 

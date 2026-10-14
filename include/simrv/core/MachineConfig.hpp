@@ -13,7 +13,6 @@
 #include <string>
 #include <utility>
 
-#include "simrv/core/BuildConfig.hpp"
 #include "simrv/core/SoCConfig.hpp"
 #include "simrv/core/SoCDeviceRegistry.hpp"
 #include "simrv/isa/IsaConfig.hpp"
@@ -67,7 +66,6 @@ struct TuiConfig {
     bool class_mode = false;
     /// Optional external classroom mission path. Missions are local guidance only.
     std::string mission = {};
-    double mouse_sensitivity = 1.0;
     std::string inspection_output = {};
 };
 
@@ -112,9 +110,7 @@ struct FilesConfig {
     std::string disk_path;
     std::string virtiofs_path;
     bool disk_enabled = false;
-    std::string memimg_path;
     std::string dvtree_path;
-    std::string traplog_path;
     std::string config_path;
     std::string cfu_plugin_path;
 };
@@ -137,7 +133,6 @@ struct MachineConfig {
     uint32_t btb_entries = 0;
     uint32_t ras_entries = 0;
     bool bram_prewarm = false;
-    unsigned disk_size_mb = SIMRV_DISK_SIZE_MB;
     PlatformProfile platform_profile = PlatformProfile::Pcie;
     SoCConfig soc = SoCConfig::virt_pcie();
 

@@ -636,7 +636,7 @@ class CPU {
             dispatch_pending_interrupts();
         }
     }
-    inline void pc_sign_extend() { state_.canonicalize_pc(); }
+    SIMRV_ALWAYS_INLINE void pc_sign_extend() noexcept { state_.canonicalize_pc(); }
 
     /// Advance PC by op.len(), update instruction counters, sign-extend PC, and process interrupts.
     SIMRV_ALWAYS_INLINE void advance_cached_pc(const CachedOp& op) {
