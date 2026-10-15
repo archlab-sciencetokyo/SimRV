@@ -2615,7 +2615,7 @@ void test_pcie_and_virtio_pci() {
     // Probe BAR 0 (low dword):
     rc.ecam_write(0x40000 + 0x10, 0xFFFFFFFFU, 4);
     const uint32_t bar0_low_probe = rc.ecam_read(0x40000 + 0x10, 4);
-    assert((bar0_low_probe & ~0xFU) == ~(0x4000ULL - 1));
+    assert((bar0_low_probe & ~0xFU) == ~(0x4000U - 1U));
     assert((bar0_low_probe & 0x04) != 0);  // 64-bit flag
     (void)bar0_low_probe;
 
