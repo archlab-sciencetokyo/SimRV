@@ -3,6 +3,12 @@
 All notable changes to SimRV are documented here.
 Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v3.0.0-rc.11] — unreleased
+
+- Direct Soft TLB host-page fast-path translation and redundant PMP bypass.
+- PCIe MSI and MSI-X message-signaled interrupt capability and routing to AIA.
+- Basic-block straight-line instruction chaining in instruction-fast mode.
+
 ## [v3.0.0-rc.10] — 2026-10-15
 
 - Removed the local socket TUI attachment workflow and its installed `simrv/net` interfaces.
@@ -904,6 +910,7 @@ on inspector polish, correctness fixes, and CLI normalization.
 
 - Initial public alpha: CMake preset infrastructure, Clang-20 CI, base RISC-V pipeline
 
+[v3.0.0-rc.11]: https://github.com/archlab-sciencetokyo/SimRV/releases/tag/v3.0.0-rc.11
 [v3.0.0-rc.10]: https://github.com/archlab-sciencetokyo/SimRV/releases/tag/v3.0.0-rc.10
 [v3.0.0-rc.9]: https://github.com/archlab-sciencetokyo/SimRV/releases/tag/v3.0.0-rc.9
 [v3.0.0-rc.8]: https://github.com/archlab-sciencetokyo/SimRV/releases/tag/v3.0.0-rc.8
