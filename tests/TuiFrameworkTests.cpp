@@ -119,6 +119,12 @@ struct TuiTestAccess {
     static auto sixel_framebuffer_signature(const Tui& tui) -> uint64_t {
         return tui.sixel_framebuffer_signature_;
     }
+    static auto compute_sixel_dimensions(int panel_cols, int body_rows, int cell_width_px,
+                                         int cell_height_px, int source_width = 800,
+                                         int source_height = 600) {
+        return Tui::compute_sixel_dimensions(panel_cols, body_rows, cell_width_px, cell_height_px,
+                                             source_width, source_height);
+    }
     static void render_draw_sixel(Tui& tui, int panel_x, int display_width, int display_rows,
                                   std::string& update_cmds) {
         tui.render_draw_sixel(panel_x, display_width, display_rows, update_cmds);
@@ -135,6 +141,14 @@ struct TuiTestAccess {
     }
     static void set_preferences_path(Tui& tui, std::filesystem::path path) {
         tui.preferences_path_ = std::move(path);
+    }
+    static auto get_terminal_pane_start_line(const Tui& tui, int num_rows) -> int {
+        return tui.get_terminal_pane_start_line(num_rows);
+    }
+    static auto vt(Tui& tui) -> VirtualTerminal& { return tui.vt_; }
+    static void set_scroll_offset(Tui& tui, int offset) { tui.scroll_offset_ = offset; }
+    static void set_user_column_widths(Tui& tui, framework::ColumnWidthOverrides widths) {
+        tui.user_column_widths_ = widths;
     }
 };
 
@@ -249,7 +263,6 @@ void test_tui_preferences_round_trip() {
     expected.class_mode = true;
     expected.student_guide = true;
     expected.target_fps = 45;
-    expected.mouse_sensitivity = 1.75;
     expect(expected.save(path), "TUI preferences save successfully");
 
     TuiPreferences actual;
@@ -261,8 +274,7 @@ void test_tui_preferences_round_trip() {
                actual.focused_slot == expected.focused_slot &&
                actual.column_widths == expected.column_widths && actual.theme == expected.theme &&
                actual.high_contrast && actual.class_mode && actual.student_guide &&
-               actual.target_fps == expected.target_fps &&
-               actual.mouse_sensitivity == expected.mouse_sensitivity,
+               actual.target_fps == expected.target_fps,
            "TUI layout and presentation options survive a save and reload");
     std::filesystem::remove_all(root, ignored);
 
@@ -3090,8 +3102,8 @@ void test_sixel_fluid_framebuffer_updates() {
     machine.primary_hart().reset();
 
     const auto fb = machine.framebuffer_view();
-    expect(fb.data() != nullptr && fb.size() == 640 * 480 * 4,
-           "valid 640x480 framebuffer mapped for testing");
+    expect(fb.data() != nullptr && fb.size() == 800 * 600 * 4,
+           "valid 800x600 framebuffer mapped for testing");
 
     Tui tui(machine);
     TuiTestAccess::init_panes(tui, machine);
@@ -3134,16 +3146,16 @@ void test_virtio_input_and_display_mouse() {
     expect(!out_pos.has_value(), "out-of-bounds coordinates return nullopt");
 
     // In-bounds cell mapping
-    const auto in_pos = TuiTestAccess::display_coords_to_fb(tui, 40, 15, 0, 80, 24);
+    const auto in_pos = TuiTestAccess::display_coords_to_fb(tui, 20, 14, 0, 80, 24);
     expect(in_pos.has_value(), "valid display coordinates map to framebuffer pixel");
-    expect(in_pos->first >= 0 && in_pos->first < 640, "fb_x within 640 width");
-    expect(in_pos->second >= 0 && in_pos->second < 480, "fb_y within 480 height");
+    expect(in_pos->first >= 0 && in_pos->first < 800, "fb_x within 800 width");
+    expect(in_pos->second >= 0 && in_pos->second < 600, "fb_y within 600 height");
 
     // Pixel mode coordinate mapping (x > term_width or y > term_height)
     const auto px_pos = TuiTestAccess::display_coords_to_fb(tui, 250, 120, 0, 80, 24);
     if (px_pos.has_value()) {
-        expect(px_pos->first >= 0 && px_pos->first < 640, "pixel-mode fb_x within 640 width");
-        expect(px_pos->second >= 0 && px_pos->second < 480, "pixel-mode fb_y within 480 height");
+        expect(px_pos->first >= 0 && px_pos->first < 800, "pixel-mode fb_x within 800 width");
+        expect(px_pos->second >= 0 && px_pos->second < 600, "pixel-mode fb_y within 600 height");
     }
 
     // Configure workbench with DISPLAY slot
@@ -3159,9 +3171,18 @@ void test_virtio_input_and_display_mouse() {
     machine.send_input_mouse_wheel(1);
 
     // Test mouse click and wheel handling on DISPLAY
-    TuiTestAccess::handle_display_mouse(tui, 40, 15, 0 /* BTN_LEFT */, 0, 80, 24);
+    TuiTestAccess::handle_display_mouse(tui, 20, 14, 0 /* BTN_LEFT */, 0, 80, 24);
     TuiTestAccess::handle_display_mouse(tui, 10, 10, 64, 0, 80, 24);
     TuiTestAccess::handle_display_mouse(tui, 10, 10, 65, 0, 80, 24);
+
+    // Test dynamic framebuffer adaptation (e.g. legacy 640x480 DTB image)
+    machine.set_framebuffer_resolution_for_testing(640, 480);
+    expect(machine.framebuffer_width() == 640, "adapted width is 640");
+    expect(machine.framebuffer_height() == 480, "adapted height is 480");
+    const auto adapted_pos = TuiTestAccess::display_coords_to_fb(tui, 20, 14, 0, 80, 24);
+    expect(adapted_pos.has_value(), "adapted display coordinates map to framebuffer pixel");
+    expect(adapted_pos->first >= 0 && adapted_pos->first < 640, "fb_x within adapted 640 width");
+    expect(adapted_pos->second >= 0 && adapted_pos->second < 480, "fb_y within adapted 480 height");
 }
 
 void test_concurrent_terminal_and_sixel_display() {
@@ -3201,6 +3222,191 @@ void test_concurrent_terminal_and_sixel_display() {
     TuiTestAccess::set_focused_slot(tui, 0);
     tui.scroll(5);
     tui.reset_scroll();
+}
+
+void test_terminal_cursor_tracking_and_scrollback() {
+    using namespace simrv::tui;
+    simrv::core::Machine machine;
+    Tui tui(machine);
+    TuiTestAccess::init_panes(tui, machine);
+    TuiTestAccess::set_cached_term_width(tui, 80);
+    TuiTestAccess::set_cached_term_height(tui, 24);
+
+    auto& vt = TuiTestAccess::vt(tui);
+
+    // Initial state: empty terminal (default 24 rows)
+    expect(TuiTestAccess::get_terminal_pane_start_line(tui, 24) == 0,
+           "start line is 0 for empty terminal");
+
+    // Write a few lines without scrollback
+    for (int i = 0; i < 5; ++i) {
+        vt.write_string("A\r\n");
+    }
+    expect(vt.get_scrollback_size() == 0, "no scrollback after 5 lines");
+    expect(vt.get_cursor_y() == 5, "cursor_y is 5");
+    expect(TuiTestAccess::get_terminal_pane_start_line(tui, 24) == 0,
+           "start line is 0 when all lines fit in view");
+
+    // Fill screen and create scrollback (write 30 more lines to push past 24 rows)
+    for (int i = 0; i < 30; ++i) {
+        vt.write_string("B\r\n");
+    }
+    expect(vt.get_scrollback_size() > 0, "scrollback generated after filling screen");
+    const int scrollback_count = vt.get_scrollback_size();
+    expect(vt.get_lines_count() == scrollback_count + 24, "lines count equals scrollback + screen");
+
+    // At scroll_offset = 0, start line should be exactly scrollback_count
+    // so live viewport maps 1:1 with screen cells and cursor line offset equals cursor_y
+    expect(TuiTestAccess::get_terminal_pane_start_line(tui, 24) == scrollback_count,
+           "start line matches scrollback count so live viewport maps to screen cells");
+
+    const int cursor_abs_line = vt.get_scrollback_size() + vt.get_cursor_y();
+    const int start_line = TuiTestAccess::get_terminal_pane_start_line(tui, 24);
+    const int line_offset = cursor_abs_line - start_line;
+    expect(line_offset == vt.get_cursor_y(),
+           "cursor line offset in terminal pane exactly matches active cursor_y");
+
+    // When scrolled back by 4 lines, start_line moves back by 4
+    TuiTestAccess::set_scroll_offset(tui, 4);
+    expect(TuiTestAccess::get_terminal_pane_start_line(tui, 24) == scrollback_count - 4,
+           "start line shifts back proportionally when scrolling history");
+    TuiTestAccess::set_scroll_offset(tui, 0);
+}
+
+void test_sixel_display_resolution_adaptation_and_size_warning() {
+    using namespace simrv::tui;
+    using namespace simrv::core;
+
+    constexpr size_t test_dram_size = 128 * 1024 * 1024;
+    Machine machine(MachineConfig{.memory = {.dram_size = test_dram_size},
+                                  .execution = {.appmode = true},
+                                  .tui = {.enabled = true}});
+    std::vector<simrv::xlen::Byte> ram(test_dram_size, simrv::xlen::Byte{0});
+    machine.set_ram_for_testing(ram.data(), ram.size());
+    machine.primary_hart().reset();
+
+    Tui tui(machine);
+    TuiTestAccess::init_panes(tui, machine);
+    tui.close_modal();
+
+    // 1. Small width check (< kMinDisplayWidth = 24 cols)
+    TuiTestAccess::set_user_column_widths(tui, framework::kNoColumnWidthOverrides);
+    TuiTestAccess::set_layout(tui, TuiLayout::Split);
+    TuiTestAccess::set_cached_term_width(tui, 40);
+    TuiTestAccess::set_cached_term_height(tui, 24);
+    TuiTestAccess::set_workbench_slots(tui, {{TuiRegPage::DISPLAY, 0}, {TuiRegPage::CONSOLE, 0}});
+    TuiTestAccess::set_sixel_supported(tui, true);
+
+    tui.render(true);
+    const auto& small_w_lines = TuiTestAccess::last_screen_lines(tui);
+    bool found_too_small = false;
+    for (const auto& line : small_w_lines) {
+        if (line.find("Too small") != std::string::npos ||
+            line.find("Display space too small") != std::string::npos) {
+            found_too_small = true;
+            break;
+        }
+    }
+    expect(found_too_small, "displays warning when width < 24");
+
+    // Sixel drawing must be suppressed when width is under minimum
+    std::string small_sixel_cmds;
+    TuiTestAccess::render_draw_sixel(tui, 2, 20, 15, small_sixel_cmds);
+    expect(small_sixel_cmds.empty(), "sixel drawing suppressed when width < kMinDisplayWidth");
+
+    // 2. Small height check (< kMinDisplayBodyRows = 8 body rows)
+    TuiTestAccess::set_cached_term_width(tui, 80);
+    TuiTestAccess::set_cached_term_height(tui, 14);  // content_rows = 7, body_rows <= 7 < 8
+    tui.render(true);
+    const auto& small_h_lines = TuiTestAccess::last_screen_lines(tui);
+    bool found_too_small_h = false;
+    for (const auto& line : small_h_lines) {
+        if (line.find("Display space too small") != std::string::npos) {
+            found_too_small_h = true;
+            break;
+        }
+    }
+    expect(found_too_small_h, "displays warning when body rows < 8");
+
+    // Sixel drawing must be suppressed when body rows is under minimum
+    small_sixel_cmds.clear();
+    TuiTestAccess::render_draw_sixel(tui, 2, 80, 5, small_sixel_cmds);
+    expect(small_sixel_cmds.empty(),
+           "sixel drawing suppressed when body rows < kMinDisplayBodyRows");
+
+    // 3. Sixel unsupported check when panel size is sufficient
+    TuiTestAccess::set_cached_term_width(tui, 80);
+    TuiTestAccess::set_cached_term_height(tui, 24);
+    TuiTestAccess::set_sixel_supported(tui, false);
+    tui.render(true);
+    const auto& unsupp_lines = TuiTestAccess::last_screen_lines(tui);
+    bool found_unsupported = false;
+    for (const auto& line : unsupp_lines) {
+        if (line.find("Sixel graphics unsupported") != std::string::npos) {
+            found_unsupported = true;
+            break;
+        }
+    }
+    expect(found_unsupported, "displays unsupported warning when sixel not supported");
+
+    // 4. Normal sixel display: resolution adapts to terminal without 640px clamp
+    TuiTestAccess::set_sixel_supported(tui, true);
+    TuiTestAccess::set_sixel_rendered(tui, false);
+    tui.render(true);
+    const auto& normal_lines = TuiTestAccess::last_screen_lines(tui);
+    bool found_warning_in_normal = false;
+    for (const auto& line : normal_lines) {
+        if (line.find("Display space too small") != std::string::npos ||
+            line.find("Sixel graphics unsupported") != std::string::npos) {
+            found_warning_in_normal = true;
+            break;
+        }
+    }
+    expect(!found_warning_in_normal,
+           "no warnings displayed when space is sufficient and sixel supported");
+
+    std::string normal_sixel_cmds;
+    TuiTestAccess::render_draw_sixel(tui, 2, 80, 20, normal_sixel_cmds);
+    expect(!normal_sixel_cmds.empty(), "sixel commands generated for valid display dimensions");
+
+    // 5. Verify strictly integer scaling calculations
+    // Exact 1x native scale when terminal has sufficient space for 1x but not 2x
+    const auto dims_1x = TuiTestAccess::compute_sixel_dimensions(100, 40, 10, 20, 800, 600);
+    expect(dims_1x.first == 800 && dims_1x.second == 600,
+           "1000x800 space uses exact 1x scale (800x600)");
+
+    // Fractional space must NOT scale fractionally; must remain 1x integer scale
+    const auto dims_frac = TuiTestAccess::compute_sixel_dimensions(120, 45, 10, 20, 800, 600);
+    expect(dims_frac.first == 800 && dims_frac.second == 600,
+           "1200x900 space uses exact 1x scale rather than fractional 1.5x");
+
+    // Exact 2x scale when space is >= 1600x1200
+    const auto dims_2x = TuiTestAccess::compute_sixel_dimensions(200, 60, 10, 20, 800, 600);
+    expect(dims_2x.first == 1600 && dims_2x.second == 1200,
+           "2000x1200 space uses exact 2x integer scale (1600x1200)");
+
+    // Exact 3x scale when space is >= 2400x1800
+    const auto dims_3x = TuiTestAccess::compute_sixel_dimensions(300, 100, 10, 20, 800, 600);
+    expect(dims_3x.first == 2400 && dims_3x.second == 1800,
+           "3000x2000 space uses exact 3x integer scale (2400x1800)");
+
+    // Integer downscaling (1/2x) when space is < 800x600
+    const auto dims_half = TuiTestAccess::compute_sixel_dimensions(64, 25, 10, 20, 800, 600);
+    expect(dims_half.first == 400 && dims_half.second == 300,
+           "640x500 space uses exact 1/2x integer scale (400x300)");
+
+    // Integer downscaling (1/4x) for very small panels
+    const auto dims_quarter = TuiTestAccess::compute_sixel_dimensions(25, 10, 10, 20, 800, 600);
+    expect(dims_quarter.first == 200 && dims_quarter.second == 150,
+           "250x200 space uses exact 1/4x integer scale (200x150)");
+
+    // Legacy 640x480 guest framebuffer integer scaling
+    const auto dims_legacy_1x = TuiTestAccess::compute_sixel_dimensions(80, 30, 10, 20, 640, 480);
+    expect(dims_legacy_1x.first == 640 && dims_legacy_1x.second == 480,
+           "800x600 space for 640x480 guest uses exact 1x scale (640x480)");
+    const auto dims_legacy_2x = TuiTestAccess::compute_sixel_dimensions(150, 50, 10, 20, 640, 480);
+    expect(dims_legacy_2x.first == 1280 && dims_legacy_2x.second == 960,
+           "1500x1000 space for 640x480 guest uses exact 2x scale (1280x960)");
 }
 
 }  // namespace
@@ -3249,6 +3455,8 @@ int main() {
     test_sixel_fluid_framebuffer_updates();
     test_virtio_input_and_display_mouse();
     test_concurrent_terminal_and_sixel_display();
+    test_terminal_cursor_tracking_and_scrollback();
+    test_sixel_display_resolution_adaptation_and_size_warning();
     if (failures != 0) return EXIT_FAILURE;
     std::cout << "TUI framework tests passed\n";
     return EXIT_SUCCESS;

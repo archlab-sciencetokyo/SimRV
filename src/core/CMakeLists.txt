@@ -2,7 +2,7 @@ simrv_add_component(simrv-foundation
   Logger.cpp
   SoCConfig.cpp
   XlenHelpers.cpp
-  ../util/FdtGenerator.cpp
+  ../util/FdtPatcher.cpp
   ../util/SoCManifest.cpp
 )
 add_library(simrv::foundation ALIAS simrv-foundation)
@@ -34,7 +34,6 @@ add_library(simrv-runtime STATIC
   $<TARGET_OBJECTS:simrv-debug>
   $<TARGET_OBJECTS:simrv-tui-framework>
   $<TARGET_OBJECTS:simrv-tui>
-  $<TARGET_OBJECTS:simrv-net>
   $<TARGET_OBJECTS:simrv-core>
 )
 add_library(simrv::runtime ALIAS simrv-runtime)

@@ -136,6 +136,7 @@ void PlatformBuilder::compose(Machine& machine) {
             }
         }
     }
+    machine.update_network_devices_status();
 }
 
 }  // namespace simrv::core

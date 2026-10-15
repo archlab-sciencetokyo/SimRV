@@ -409,13 +409,21 @@ struct SoCConfig {
                 regions.push_back({.base = extra.base, .size = extra.size, .name = extra.name});
             }
         }
+        if (dram_base.has_value() && dram_size.has_value()) {
+            if (*dram_size == 0 || *dram_base > ~simrv::xlen::Address{0} - *dram_size) {
+                return std::unexpected("SoC memory configuration has an invalid DRAM range");
+            }
+            regions.push_back({.base = *dram_base, .size = *dram_size, .name = "dram"});
+        } else if (dram_size.has_value() && *dram_size == 0) {
+            return std::unexpected("SoC DRAM size must be non-zero");
+        }
         for (size_t i = 0; i < regions.size(); ++i) {
             for (size_t j = 0; j < i; ++j) {
                 const auto& region = regions[i];
                 const auto& other = regions[j];
                 if (region.base < other.base + other.size &&
                     other.base < region.base + region.size) {
-                    return std::unexpected("SoC MMIO regions overlap: '" +
+                    return std::unexpected("SoC memory/MMIO regions overlap: '" +
                                            std::string(region.name) + "' and '" +
                                            std::string(other.name) + "'");
                 }

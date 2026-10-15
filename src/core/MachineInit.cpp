@@ -4,7 +4,9 @@
 #include <cstdlib>
 #include <cstring>
 #include <fstream>
+#include <iterator>
 #include <string>
+#include <vector>
 
 #include "MachineRuntime.hpp"
 #include "simrv/core/Boot.hpp"
@@ -26,7 +28,7 @@
 #include "simrv/device/Rtc.hpp"
 #include "simrv/device/Uart.hpp"
 #include "simrv/device/pci/PcieRootComplex.hpp"
-#include "simrv/util/FdtGenerator.hpp"
+#include "simrv/util/FdtPatcher.hpp"
 #include "simrv/xlen/RegisterTypes.hpp"
 
 namespace simrv::core {
@@ -67,8 +69,7 @@ void resolve_start_pc_and_dram_base(simrv::core::Machine& machine,
         simrv::xlen::Address entry = symbols.entry_point().value_or(
             symbols.lookup_name("_start").value_or(simrv::boot::kStartPc));
         if (entry < simrv::memory::kDramBaseAddress &&
-            machine.primary_hart().cpu_model_config.name != "cfu-provingground" &&
-            machine.primary_hart().cpu_model_config.name != "rvproc") {
+            !machine.primary_hart().cpu_model_config.is_provingground_or_rvproc) {
             entry += simrv::memory::kDramBaseAddress;
         }
         start_pc = entry;
@@ -286,6 +287,10 @@ auto Machine::platform_status() const -> PlatformStatusSnapshot {
 }
 
 auto Machine::initialize() -> std::expected<void, std::string> {
+    if (const auto valid = config.validate(); !valid) {
+        simrv::log::error("Invalid machine configuration: {}", valid.error());
+        return std::unexpected(valid.error());
+    }
     auto smp_topology = config.soc.smp;
     if (smp_topology.clusters.empty()) smp_topology.hart_count = config.execution.num_harts;
     if (auto topology_result =
@@ -313,11 +318,11 @@ auto Machine::initialize() -> std::expected<void, std::string> {
         }
         apply_cpu_model_runtime_config(*this, config, model);
     }
-    if (!config.files.cpuconfig_path.empty()) {
+    if (!config.files.config_path.empty()) {
         auto model = primary_hart().cpu_model_config;
-        if (!simrv::core::load_cpu_config(config.files.cpuconfig_path, model)) {
+        if (!simrv::core::load_cpu_config(config.files.config_path, model)) {
             const std::string err =
-                "Failed to load CPU configuration file: " + config.files.cpuconfig_path;
+                "Failed to load CPU configuration file: " + config.files.config_path;
             simrv::log::error("{}", err);
             return std::unexpected(err);
         }
@@ -395,34 +400,47 @@ auto Machine::initialize() -> std::expected<void, std::string> {
         return simrv::core::SoCDeviceRegistry::enabled(config.soc, kind);
     };
     const auto add_base_node = [&](simrv::core::SoCDeviceKind kind,
-                                   simrv::memory::TileLinkNode* node) {
-        if (device_enabled(kind) && node != nullptr) memory().system_bus().add_node(node);
+                                   simrv::memory::TileLinkNode* node) -> bool {
+        if (device_enabled(kind) && node != nullptr) {
+            return memory().system_bus().add_node(node);
+        }
+        return true;
     };
-    add_base_node(SoCDeviceKind::AclintMtimer, runtime_->aclint_mtimer.get());
-    add_base_node(SoCDeviceKind::AclintMswi, runtime_->aclint_mswi.get());
-    add_base_node(SoCDeviceKind::Imsic, runtime_->imsic_m.get());
-    add_base_node(SoCDeviceKind::Imsic, runtime_->imsic_s.get());
-    add_base_node(SoCDeviceKind::Aplic, runtime_->aplic_m.get());
-    add_base_node(SoCDeviceKind::Aplic, runtime_->aplic_s.get());
-    add_base_node(SoCDeviceKind::Rtc, runtime_->rtc.get());
-    add_base_node(SoCDeviceKind::Uart, runtime_->uart.get());
-    add_base_node(SoCDeviceKind::Power, runtime_->power.get());
-    add_base_node(SoCDeviceKind::DmaController, runtime_->dma_controller.get());
+    if (!add_base_node(SoCDeviceKind::AclintMtimer, runtime_->aclint_mtimer.get()) ||
+        !add_base_node(SoCDeviceKind::AclintMswi, runtime_->aclint_mswi.get()) ||
+        !add_base_node(SoCDeviceKind::Imsic, runtime_->imsic_m.get()) ||
+        !add_base_node(SoCDeviceKind::Imsic, runtime_->imsic_s.get()) ||
+        !add_base_node(SoCDeviceKind::Aplic, runtime_->aplic_m.get()) ||
+        !add_base_node(SoCDeviceKind::Aplic, runtime_->aplic_s.get()) ||
+        !add_base_node(SoCDeviceKind::Rtc, runtime_->rtc.get()) ||
+        !add_base_node(SoCDeviceKind::Uart, runtime_->uart.get()) ||
+        !add_base_node(SoCDeviceKind::Power, runtime_->power.get()) ||
+        !add_base_node(SoCDeviceKind::DmaController, runtime_->dma_controller.get())) {
+        return std::unexpected("Failed to register core SoC devices on system bus");
+    }
     if (runtime_->ring_buffer_ethernet) {
-        memory().system_bus().add_node(runtime_->ring_buffer_ethernet->csr_node());
-        memory().system_bus().add_node(runtime_->ring_buffer_ethernet->rx_node());
-        memory().system_bus().add_node(runtime_->ring_buffer_ethernet->tx_node());
+        if (!memory().system_bus().add_node(runtime_->ring_buffer_ethernet->csr_node()) ||
+            !memory().system_bus().add_node(runtime_->ring_buffer_ethernet->rx_node()) ||
+            !memory().system_bus().add_node(runtime_->ring_buffer_ethernet->tx_node())) {
+            return std::unexpected("Failed to register ring buffer ethernet on system bus");
+        }
     }
     for (const auto& device : runtime_->dummy_mmios) {
-        memory().system_bus().add_node(device.get());
+        if (!memory().system_bus().add_node(device.get())) {
+            return std::unexpected("Failed to register dummy MMIO device on system bus");
+        }
     }
     for (const auto& device : runtime_->extension_mmios) {
-        memory().system_bus().add_node(device.get());
+        if (!memory().system_bus().add_node(device.get())) {
+            return std::unexpected("Failed to register custom MMIO device on system bus");
+        }
     }
 
     if (runtime_->pcie) {
-        memory().system_bus().add_node(&runtime_->pcie->ecam_node());
-        memory().system_bus().add_node(&runtime_->pcie->mmio_node());
+        if (!memory().system_bus().add_node(&runtime_->pcie->ecam_node()) ||
+            !memory().system_bus().add_node(&runtime_->pcie->mmio_node())) {
+            return std::unexpected("Failed to register PCIe nodes on system bus");
+        }
     }
 
     const std::array<std::shared_ptr<simrv::device::VirtioMmioDevice>, 8> mmio_devs = {
@@ -430,11 +448,15 @@ auto Machine::initialize() -> std::expected<void, std::string> {
         runtime_->mmio_input, runtime_->mmio_sound,   runtime_->mmio_net, runtime_->mmio_fs,
     };
     for (const auto& dev : mmio_devs) {
-        if (dev) memory().system_bus().add_node(dev.get());
+        if (dev && !memory().system_bus().add_node(dev.get())) {
+            return std::unexpected("Failed to register VirtIO MMIO device on system bus");
+        }
     }
 
-    add_base_node(SoCDeviceKind::Plic, &primary_hart().plic_mmio);
-    add_base_node(SoCDeviceKind::Clint, &primary_hart().clint_mmio);
+    if (!add_base_node(SoCDeviceKind::Plic, &primary_hart().plic_mmio) ||
+        !add_base_node(SoCDeviceKind::Clint, &primary_hart().clint_mmio)) {
+        return std::unexpected("Failed to register interrupt controller on system bus");
+    }
     const bool linux_boot = !config.execution.appmode;
     if (linux_boot && effective_dram_size < static_cast<size_t>(0x00100000U)) {
         simrv::log::error("DRAM must be at least 1 MiB for an OS device tree");
@@ -446,9 +468,9 @@ auto Machine::initialize() -> std::expected<void, std::string> {
                    : simrv::boot::kInitDataAddress;
 
     auto effective_isa_preset_bits = [&]() -> simrv::xlen::CsrValue {
-        if (!config.files.cpuconfig_path.empty()) {
+        if (!config.files.config_path.empty()) {
             simrv::pipeline::CpuModelConfig cfg{};
-            if (simrv::core::load_cpu_config(config.files.cpuconfig_path, cfg)) {
+            if (simrv::core::load_cpu_config(config.files.config_path, cfg)) {
                 auto bits = isa::isa_preset_bits(cfg.isa_preset);
                 if (cfg.has_isa_extension("zba") || cfg.has_isa_extension("zbb") ||
                     cfg.has_isa_extension("zbc") || cfg.has_isa_extension("zbs")) {
@@ -542,8 +564,10 @@ auto Machine::initialize() -> std::expected<void, std::string> {
     primary_hart().state().regs.write(static_cast<simrv::xlen::RegId>(10), 0);  // a0 = hartid
     primary_hart().state().regs.write(
         static_cast<simrv::xlen::RegId>(11),
-        linux_boot ? (simrv::boot::kStartPc + dtb_offset) : 0);  // a1 = dtb
+        linux_boot ? static_cast<simrv::xlen::Register>(config.memory.dram_base + dtb_offset)
+                   : 0);  // a1 = dtb
     primary_hart().state().misa = initial_misa;
+    primary_hart().state().refresh_misa_status();
     primary_hart().state().priv = kPrivMachine;
     primary_hart().state().regs.vlen = config.isa.vlen ? config.isa.vlen : 256;
     primary_hart().state().initialize_lower_xlen_fields();
@@ -573,6 +597,7 @@ auto Machine::initialize() -> std::expected<void, std::string> {
             if (!cfu_plugin_path.empty()) sec_cpu->cfu_unit.load_plugin(cfu_plugin_path);
             sec_cpu->state().mhartid = i;
             sec_cpu->state().misa = initial_misa;
+            sec_cpu->state().refresh_misa_status();
             sec_cpu->state().regs.vlen = config.isa.vlen ? config.isa.vlen : 256;
             sec_cpu->state().initialize_lower_xlen_fields();
             // When OpenSBI firmware is active, secondary harts must execute its M-mode wait
@@ -600,7 +625,9 @@ auto Machine::initialize() -> std::expected<void, std::string> {
             sec_cpu->state().priv = kPrivMachine;
             sec_cpu->state().regs.write(static_cast<simrv::xlen::RegId>(10), i);
             sec_cpu->state().regs.write(static_cast<simrv::xlen::RegId>(11),
-                                        linux_boot ? (simrv::boot::kStartPc + dtb_offset) : 0);
+                                        linux_boot ? static_cast<simrv::xlen::Register>(
+                                                         config.memory.dram_base + dtb_offset)
+                                                   : 0);
             sec_cpu->soft_tlb_flush();
             sec_cpu->TLB_flush();
             runtime_->secondary_harts.push_back(std::move(sec_cpu));
@@ -619,47 +646,34 @@ auto Machine::initialize() -> std::expected<void, std::string> {
     }
 
     if (linux_boot) {
-        const bool is_explicit_custom_dtb = !config.files.dvtree_path.empty() &&
-                                            config.files.dvtree_path != "dynamic" &&
-                                            config.files.dvtree_path != "NONE" &&
-                                            !(config.execution.num_harts > 1 &&
-                                              config.files.dvtree_path.ends_with("devicetree.dtb"));
-        if (is_explicit_custom_dtb) {
-            if (dtb_offset >= effective_dram_size) {
-                simrv::log::error("device-tree load offset is outside DRAM");
-                return std::unexpected("device-tree load offset is outside DRAM");
-            }
-            const auto dt_cap = static_cast<std::size_t>(effective_dram_size - dtb_offset);
-            // `ram` above captures geometry before allocation. Reacquire the view so the DTB
-            // loader receives the live backing pointer as well as the resolved runtime geometry.
-            const auto initialized_ram = ram_view();
-            const simrv::xlen::Address dtb_address = initialized_ram.base() + dtb_offset;
-            if (!initialized_ram.contains(dtb_address, dt_cap)) {
-                simrv::log::error("device-tree region is outside DRAM");
-                return std::unexpected("device-tree region is outside DRAM");
-            }
-            load_image_into_ram(config.files.dvtree_path,
-                                {initialized_ram.unchecked_ptr(dtb_address), dtb_address,
-                                 static_cast<simrv::xlen::Address>(dt_cap)},
-                                "device-tree", tui_enabled());
-        } else {
-            const auto composition = platform_composition(config.platform_profile);
-            simrv::util::FdtConfig const fdt_cfg{
-                .num_harts = config.execution.num_harts,
-                .dram_base = config.memory.dram_base,
-                .dram_size = effective_dram_size,
-                .xlen = simrv::xlen::kXLenBits,
-                .enable_pcie = composition.pcie,
-                .enable_mmio = composition.mmio,
-                .enable_virtiofs = !config.files.virtiofs_path.empty(),
-                .enable_framebuffer = true,
-                .soc = config.soc,
-            };
-            auto fdt_blob = simrv::util::FdtGenerator::generate(fdt_cfg);
-            if (fdt_blob.size() <= static_cast<std::size_t>(0x00100000U)) {
-                std::memcpy(ram_data() + dtb_offset, fdt_blob.data(), fdt_blob.size());
+        if (config.files.dvtree_path.empty())
+            return std::unexpected("Linux boot requires a device tree blob");
+        if (dtb_offset >= effective_dram_size)
+            return std::unexpected("device-tree load offset is outside DRAM");
+        std::ifstream input(config.files.dvtree_path, std::ios::binary);
+        if (!input) return std::unexpected("cannot open device tree: " + config.files.dvtree_path);
+        std::vector<uint8_t> input_blob{std::istreambuf_iterator<char>(input),
+                                        std::istreambuf_iterator<char>()};
+        simrv::util::FdtFramebufferInfo fb_info{};
+        auto patched =
+            simrv::util::patch_fdt(input_blob, config.memory.dram_base, effective_dram_size,
+                                   config.execution.num_harts, &fb_info);
+        if (!patched) return std::unexpected(patched.error());
+        if (fb_info.width > 0 && fb_info.height > 0) {
+            framebuffer_geometry_.width = fb_info.width;
+            framebuffer_geometry_.height = fb_info.height;
+            if (fb_info.base != 0) {
+                framebuffer_geometry_.base = fb_info.base;
             }
         }
+        const auto dt_cap = static_cast<std::size_t>(effective_dram_size - dtb_offset);
+        if (patched->size() > dt_cap)
+            return std::unexpected("patched device tree does not fit in guest DRAM");
+        const auto initialized_ram = ram_view();
+        const simrv::xlen::Address dtb_address = initialized_ram.base() + dtb_offset;
+        if (!initialized_ram.contains(dtb_address, patched->size()))
+            return std::unexpected("device-tree region is outside DRAM");
+        std::memcpy(initialized_ram.unchecked_ptr(dtb_address), patched->data(), patched->size());
     }
 
     if (config.files.disk_enabled) {

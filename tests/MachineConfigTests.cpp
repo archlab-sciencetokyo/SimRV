@@ -147,7 +147,7 @@ auto main() -> int {
     }
     {
         std::vector<std::string> args_str = {
-            "SimRV",          "--soc",         "virt-mmio", "--harts", "4",        "--smp-mode",
+            "SimRV",          "--config",      "virt-mmio", "--harts", "4",        "--smp-mode",
             "cycle-oriented", "--smp-quantum", "11",        "-m",      "guest.bin"};
         std::vector<char*> args;
         for (auto& arg : args_str) args.push_back(arg.data());
@@ -555,7 +555,7 @@ auto main() -> int {
                                                         "uart0",
                                                         "--trace-hart",
                                                         "1",
-                                                        "--trace-pc",
+                                                        "--trace-pc-range",
                                                         "0x80000000-0x80001000",
                                                         "--trace-after-cycle",
                                                         "100",
@@ -594,8 +594,7 @@ auto main() -> int {
         for (size_t i = 0; i < trace_pc_period_str.size(); ++i)
             trace_pc_period_args[i] = trace_pc_period_str[i].data();
         const auto parsed = simrv::util::parse_command_line(trace_pc_period_args);
-        expect(parsed.has_value() && parsed->options.strace == 8,
-               "--trace-pc-period retains numeric PC sampling");
+        expect(!parsed.has_value(), "--trace-pc-period is rejected as obsolete");
     }
     {
         std::array<std::string, 5> legacy_pc_trace_str = {"SimRV", "--trace-pc", "8", "-m",
@@ -604,16 +603,38 @@ auto main() -> int {
         for (size_t i = 0; i < legacy_pc_trace_str.size(); ++i)
             legacy_pc_trace_args[i] = legacy_pc_trace_str[i].data();
         const auto parsed = simrv::util::parse_command_line(legacy_pc_trace_args);
-        expect(!parsed.has_value() && parsed.error().find("--trace-pc-period") != std::string::npos,
-               "numeric --trace-pc is rejected with the sampling replacement");
+        expect(!parsed.has_value() && parsed.error().find("--trace-pc-range") != std::string::npos,
+               "ambiguous --trace-pc is rejected directing to --trace-pc-range");
     }
     {
-        std::array<std::string, 5> soc_str = {"SimRV", "--soc", "rvcomp", "-m", "guest.bin"};
-        std::array<char*, 5> soc_args{};
-        for (size_t i = 0; i < soc_str.size(); ++i) soc_args[i] = soc_str[i].data();
-        const auto parsed = simrv::util::parse_command_line(soc_args);
-        expect(parsed.has_value() && parsed->options.soc_preset == "rvcomp",
-               "canonical --soc option remains supported");
+        std::array<std::string, 5> config_str = {"SimRV", "--config", "rvcomp", "-m", "guest.bin"};
+        std::array<char*, 5> config_args{};
+        for (size_t i = 0; i < config_str.size(); ++i) config_args[i] = config_str[i].data();
+        const auto parsed = simrv::util::parse_command_line(config_args);
+        expect(parsed.has_value() && parsed->options.config_target == "rvcomp",
+               "canonical --config option selects platform preset");
+    }
+    {
+        std::array<std::string, 5> retired_soc_str = {"SimRV", "--soc", "rvcomp", "-m",
+                                                      "guest.bin"};
+        std::array<char*, 5> retired_soc_args{};
+        for (size_t i = 0; i < retired_soc_str.size(); ++i)
+            retired_soc_args[i] = retired_soc_str[i].data();
+        const auto parsed = simrv::util::parse_command_line(retired_soc_args);
+        expect(!parsed.has_value() &&
+                   parsed.error().find("unknown option '--soc'") != std::string::npos,
+               "retired --soc option is rejected");
+    }
+    {
+        std::array<std::string, 5> retired_cpu_str = {"SimRV", "--cpu-config", "model.cfg", "-m",
+                                                      "guest.bin"};
+        std::array<char*, 5> retired_cpu_args{};
+        for (size_t i = 0; i < retired_cpu_str.size(); ++i)
+            retired_cpu_args[i] = retired_cpu_str[i].data();
+        const auto parsed = simrv::util::parse_command_line(retired_cpu_args);
+        expect(!parsed.has_value() &&
+                   parsed.error().find("unknown option '--cpu-config'") != std::string::npos,
+               "retired --cpu-config option is rejected");
     }
     {
         std::array<std::string, 4> legacy_platform_str = {"SimRV", "--platform", "rvcomp", "-m"};
@@ -624,6 +645,17 @@ auto main() -> int {
         expect(!parsed.has_value() &&
                    parsed.error().find("unknown option '--platform'") != std::string::npos,
                "removed --platform alias is rejected");
+    }
+    {
+        simrv::core::MachineConfig cfg{};
+        cfg.memory.dram_base = 0x10000000ULL;
+        cfg.memory.dram_size = 0x10000ULL;
+        expect(!cfg.validate(), "MachineConfig rejects DRAM overlapping UART MMIO");
+
+        cfg.memory.dram_base =
+            static_cast<simrv::xlen::Address>(~static_cast<simrv::xlen::Address>(0) - 0x1000ULL);
+        cfg.memory.dram_size = 0x2000ULL;
+        expect(!cfg.validate(), "MachineConfig rejects DRAM range overflow");
     }
     {
         std::array<std::string, 8> args_str = {
@@ -773,7 +805,6 @@ auto main() -> int {
                "HostExitCode::ExecutionError is 5");
         expect(to_exit_code(HostExitCode::CheckpointError) == 6,
                "HostExitCode::CheckpointError is 6");
-        expect(to_exit_code(HostExitCode::IpcError) == 7, "HostExitCode::IpcError is 7");
     }
 
     {
@@ -803,6 +834,162 @@ auto main() -> int {
             expect(simrv::isa::misa_has_extension(machine.primary_hart().state().misa,
                                                   simrv::isa::IsaExtension::B),
                    "CLI-configured Machine initial misa enables bitmanip extension (B)");
+        }
+    }
+
+    {
+        const auto parse_cli = [](std::vector<std::string> args_str) {
+            std::vector<char*> args;
+            for (auto& s : args_str) args.push_back(s.data());
+            return simrv::util::parse_command_line(args);
+        };
+
+        auto validate_cfg = parse_cli({"SimRV", "--validate-config", "configs/models/rvcomp.cfg"});
+        expect(validate_cfg.has_value(), "CLI accepts --validate-config");
+        if (validate_cfg) {
+            expect(validate_cfg->action == simrv::util::CliAction::ValidateCpuModel,
+                   "--validate-config sets CliAction::ValidateCpuModel");
+            expect(validate_cfg->options.dump_cpu_model_preset == "configs/models/rvcomp.cfg",
+                   "--validate-config sets target configuration file");
+        }
+
+        auto validate_cpu_cfg =
+            parse_cli({"SimRV", "--validate-cpu-config", "configs/models/rvcomp.cfg"});
+        expect(validate_cpu_cfg.has_value(), "CLI accepts --validate-cpu-config");
+
+        expect(!parse_cli({"SimRV", "--check-cpu-model", "configs/models/rvcomp.cfg"}).has_value(),
+               "CLI rejects retired alias --check-cpu-model");
+        expect(!parse_cli({"SimRV", "--verify-cpu-model", "configs/models/rvcomp.cfg"}).has_value(),
+               "CLI rejects retired alias --verify-cpu-model");
+        expect(!parse_cli({"SimRV", "--export-soc-manifest", "virt-pcie"}).has_value(),
+               "CLI rejects retired alias --export-soc-manifest");
+        expect(!parse_cli({"SimRV", "--export-cpu-model", "tiny"}).has_value(),
+               "CLI rejects retired alias --export-cpu-model");
+
+        auto validate_soc_preset = parse_cli({"SimRV", "--validate-config", "virt-pcie"});
+        expect(validate_soc_preset.has_value() &&
+                   validate_soc_preset->action == simrv::util::CliAction::ValidateCpuModel &&
+                   validate_soc_preset->options.dump_cpu_model_preset == "virt-pcie",
+               "CLI accepts --validate-config with built-in SoC preset name");
+
+        auto validate_cpu_preset = parse_cli({"SimRV", "--validate-config", "balanced"});
+        expect(validate_cpu_preset.has_value() &&
+                   validate_cpu_preset->action == simrv::util::CliAction::ValidateCpuModel &&
+                   validate_cpu_preset->options.dump_cpu_model_preset == "balanced",
+               "CLI accepts --validate-config with built-in CPU preset name");
+    }
+
+    {
+        // CPU config parser ISA preset validation and Zb expansion
+        expect(!simrv::core::detail::parse_isa_preset_string("gcbv").has_value(),
+               "CpuConfigParser detail::parse_isa_preset_string rejects legacy draft gcbv");
+        expect(!simrv::core::detail::parse_isa_preset_string("rv64gcbv").has_value(),
+               "CpuConfigParser detail::parse_isa_preset_string rejects legacy draft rv64gcbv");
+        expect(simrv::core::detail::parse_isa_preset_string("gczbv") == simrv::isa::IsaPreset::GCV,
+               "CpuConfigParser detail::parse_isa_preset_string accepts ratified gczbv");
+
+        std::istringstream stream(
+            "[cpu]\nname = \"test_core\"\nisa_preset = \"gczbv\"\n"
+            "[device.clint]\nname = \"clint0\"\nbase = 0x2000000\nsize = 0x10000\n"
+            "[device.plic]\nname = \"plic0\"\nbase = 0xc000000\nsize = 0x400000\n"
+            "[smp]\nhart_count = 2\n");
+        simrv::pipeline::CpuModelConfig cfg{};
+        expect(simrv::core::parse_cpu_config_stream(stream, cfg),
+               "parse_cpu_config_stream successfully parses config with gczbv and device/smp "
+               "sections");
+        expect(cfg.isa_preset == simrv::isa::IsaPreset::GCV, "gczbv config maps to IsaPreset::GCV");
+        expect(std::ranges::find(cfg.isa_extensions, "zba") != cfg.isa_extensions.end(),
+               "gczbv config automatically includes zba");
+        expect(std::ranges::find(cfg.isa_extensions, "zbb") != cfg.isa_extensions.end(),
+               "gczbv config automatically includes zbb");
+        expect(std::ranges::find(cfg.isa_extensions, "zbc") != cfg.isa_extensions.end(),
+               "gczbv config automatically includes zbc");
+        expect(std::ranges::find(cfg.isa_extensions, "zbs") != cfg.isa_extensions.end(),
+               "gczbv config automatically includes zbs");
+    }
+
+    {
+        // CLI --log-stderr option parsing and Logger control
+        std::array<std::string, 4> log_stderr_str = {"SimRV", "--log-stderr", "-m", "guest.bin"};
+        std::array<char*, 4> log_stderr_args = {log_stderr_str[0].data(), log_stderr_str[1].data(),
+                                                log_stderr_str[2].data(), log_stderr_str[3].data()};
+        auto parsed = simrv::util::parse_command_line(log_stderr_args);
+        expect(parsed.has_value() && parsed->options.log_stderr,
+               "--log-stderr is parsed into runtime options");
+
+        simrv::log::set_log_to_stderr(true);
+        expect(simrv::log::get_log_to_stderr(), "simrv::log::get_log_to_stderr() reflects true");
+        simrv::log::set_log_to_stderr(false);
+        expect(!simrv::log::get_log_to_stderr(), "simrv::log::get_log_to_stderr() reflects false");
+    }
+
+    {
+        // Terminal mode restoration idempotency and state safety
+        expect(!simrv::util::global_termios_active().load(),
+               "global_termios_active is initially false");
+        simrv::util::global_termios_active().store(true);
+        simrv::util::restore_terminal_mode();
+        expect(!simrv::util::global_termios_active().load(),
+               "restore_terminal_mode atomically resets active flag");
+    }
+
+    {
+        // Stdin platform config parsing with unified [cpu] and [soc] sections
+        std::istringstream combined_stream(
+            "[cpu]\nname = \"piped_core\"\nisa_preset = \"gczbv\"\n"
+            "[soc]\nname = \"piped_soc\"\ndram_base = 0x80000000\ndram_size = 0x10000000\n");
+        simrv::pipeline::CpuModelConfig cpu_cfg{};
+        simrv::core::SoCConfig soc_cfg{};
+        expect(simrv::core::parse_cpu_config_stream(combined_stream, cpu_cfg),
+               "parse_cpu_config_stream parses piped stream");
+        combined_stream.clear();
+        combined_stream.seekg(0);
+        expect(simrv::core::parse_soc_config_stream(combined_stream, soc_cfg),
+               "parse_soc_config_stream parses piped stream");
+        expect(cpu_cfg.name == "piped_core", "stream populated CPU name");
+        expect(soc_cfg.name == "piped_soc", "stream populated SoC name");
+    }
+
+    {
+        // Output streaming via '-' for dump-cpu-model, scaffold-cpu-model, and dump-soc-manifest
+        std::array<std::string, 4> dump_cpu_str = {"SimRV", "--dump-cpu-model", "balanced", "-"};
+        std::array<char*, 4> dump_cpu_args = {dump_cpu_str[0].data(), dump_cpu_str[1].data(),
+                                              dump_cpu_str[2].data(), dump_cpu_str[3].data()};
+        auto parsed_dump = simrv::util::parse_command_line(dump_cpu_args);
+        expect(parsed_dump.has_value() && parsed_dump->options.dump_cpu_model_output == "-",
+               "--dump-cpu-model captures '-' as stdout output target");
+
+        std::array<std::string, 3> scaffold_str = {"SimRV", "--scaffold-cpu-model", "-"};
+        std::array<char*, 3> scaffold_args = {scaffold_str[0].data(), scaffold_str[1].data(),
+                                              scaffold_str[2].data()};
+        auto parsed_scaffold = simrv::util::parse_command_line(scaffold_args);
+        expect(parsed_scaffold.has_value() && parsed_scaffold->options.dump_cpu_model_output == "-",
+               "--scaffold-cpu-model captures '-' as stdout output target");
+
+        std::array<std::string, 4> soc_str = {"SimRV", "--dump-soc-manifest", "virt-pcie", "-"};
+        std::array<char*, 4> soc_args = {soc_str[0].data(), soc_str[1].data(), soc_str[2].data(),
+                                         soc_str[3].data()};
+        auto parsed_soc = simrv::util::parse_command_line(soc_args);
+        expect(parsed_soc.has_value() && parsed_soc->options.soc_manifest_output == "-",
+               "--dump-soc-manifest captures '-' as stdout output target");
+
+        // -r/--trace-range diagnostics refer to -r
+        std::array<std::string, 4> trace_range_str = {"SimRV", "-r", "invalid_start", "100"};
+        std::array<char*, 4> trace_range_args = {
+            trace_range_str[0].data(), trace_range_str[1].data(), trace_range_str[2].data(),
+            trace_range_str[3].data()};
+        auto parsed_trace = simrv::util::parse_command_line(trace_range_args);
+        expect(!parsed_trace.has_value() && parsed_trace.error().find("-r") != std::string::npos,
+               "-r invalid number error message references -r instead of -t");
+    }
+
+    {
+        for (const std::string_view removed_option : {"--server", "--listen-tui", "--attach"}) {
+            std::array<std::string, 2> storage = {"SimRV", std::string(removed_option)};
+            std::array<char*, 2> args = {storage[0].data(), storage[1].data()};
+            const auto parsed = simrv::util::parse_command_line(args);
+            expect(!parsed.has_value() && parsed.error().contains("unknown option"),
+                   "removed attach options are rejected as unknown options");
         }
     }
 

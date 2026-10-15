@@ -16,6 +16,7 @@
 #include <unordered_map>
 #include <vector>
 
+#include "simrv/CompilerHints.hpp"
 #include "simrv/isa/InstructionFields.hpp"
 #include "simrv/isa/TrapTypes.hpp"
 #include "simrv/xlen/IdentifierTypes.hpp"
@@ -69,18 +70,26 @@ class Tracer {
     void init_trap_log(bool traplog_mode, const std::string& fn_traplog);
     void init_dlog(bool dlog_mode);
 
-    [[nodiscard]] auto is_trace_enabled() const noexcept -> bool;
-    [[nodiscard]] auto is_architecture_trace_enabled() const noexcept -> bool;
-    [[nodiscard]] auto needs_retiring_context() const noexcept -> bool;
-    [[nodiscard]] auto is_trap_log_enabled() const noexcept -> bool;
-    [[nodiscard]] auto is_dlog_enabled() const noexcept -> bool;
+    [[nodiscard]] SIMRV_ALWAYS_INLINE auto is_trace_enabled() const noexcept -> bool {
+        return fp_trace.is_open();
+    }
+    [[nodiscard]] SIMRV_ALWAYS_INLINE auto is_architecture_trace_enabled() const noexcept -> bool {
+        return architecture_trace_enabled_;
+    }
+    [[nodiscard]] SIMRV_ALWAYS_INLINE auto needs_retiring_context() const noexcept -> bool {
+        return retirement_context_needed_;
+    }
+    [[nodiscard]] SIMRV_ALWAYS_INLINE auto is_trap_log_enabled() const noexcept -> bool {
+        return fp_traplog.is_open();
+    }
+    [[nodiscard]] SIMRV_ALWAYS_INLINE auto is_dlog_enabled() const noexcept -> bool {
+        return fp_dlog.is_open();
+    }
 
-    void dump_init_artifacts();
     void write_instruction_mix_report();
     void print_summary();
     /** Write a stable machine-readable execution summary for automation. */
     [[nodiscard]] auto write_summary_json(const std::string& path) -> bool;
-    void emit_periodic_pc_trace(simrv::xlen::Counter mtime, simrv::xlen::Register cpc);
     void emit_branch_prediction_trace(simrv::xlen::Counter mtime, simrv::xlen::Register cpc,
                                       simrv::xlen::Register jmp_pc, isa::Opcode r_opcode,
                                       bool r_tkn);
@@ -108,7 +117,10 @@ class Tracer {
                  simrv::xlen::Word a1, simrv::xlen::Address pc, simrv::xlen::HartId hart);
     void log_architecture_retirement(const CPU& cpu,
                                      const pipeline::PipelineContext& retiring_context);
-    [[nodiscard]] auto is_register_write_trace_enabled() const noexcept -> bool;
+    [[nodiscard]] SIMRV_ALWAYS_INLINE auto is_register_write_trace_enabled() const noexcept
+        -> bool {
+        return fp_registers_.is_open();
+    }
     void capture_register_write_before(CPU& cpu, pipeline::PipelineContext& context);
     void flush_all();
 
@@ -138,8 +150,6 @@ class Tracer {
 
     Machine& machine_;
     mutable std::mutex mutex_;
-    std::ofstream fp_tracepc_;
-    bool tracepc_opened_ = false;
     std::ofstream fp_bpred_;
     bool bpred_opened_ = false;
     std::vector<unsigned> call_depth_;

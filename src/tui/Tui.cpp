@@ -62,6 +62,17 @@ namespace {
 
 constexpr int kInspectorContentStartRow = 4;
 constexpr int kInspectorLogAreaHeight = 6;
+constexpr int kMinDisplayWidth = 24;
+constexpr int kMinDisplayBodyRows = 8;
+
+[[nodiscard]] auto center_pane_text(std::string_view text, int width) -> std::string {
+    const int text_w = get_display_width(text);
+    if (text_w >= width) return format_to_width(std::string(text), width);
+    const int left_pad = (width - text_w) / 2;
+    const int right_pad = width - text_w - left_pad;
+    return std::string(static_cast<size_t>(left_pad), ' ') + std::string(text) +
+           std::string(static_cast<size_t>(right_pad), ' ');
+}
 
 [[nodiscard]] auto inspector_log_start_row(int terminal_height) -> int {
     int const content_rows = std::max(1, terminal_height - framework::kFrameChromeRows);
@@ -139,6 +150,32 @@ void handle_sigwinch(int sig) {
 }
 
 }  // namespace
+
+auto Tui::compute_sixel_dimensions(int panel_cols, int body_rows, int cell_width_px,
+                                   int cell_height_px, int source_width, int source_height) noexcept
+    -> std::pair<int, int> {
+    const int src_w = std::max(1, source_width);
+    const int src_h = std::max(1, source_height);
+    const int cell_width = std::max(1, cell_width_px);
+    const int cell_height = std::max(1, cell_height_px);
+    const int max_width = std::max(1, panel_cols * cell_width);
+    const int max_height = std::max(1, body_rows * cell_height);
+
+    if (max_width >= src_w && max_height >= src_h) {
+        // Integer upscaling: 1x, 2x, 3x, etc. Every source pixel is duplicated
+        // into an exact NxN square of terminal pixels without fractional jitter.
+        const int scale = std::max(1, std::min(max_width / src_w, max_height / src_h));
+        return {scale * src_w, scale * src_h};
+    }
+
+    // Integer downscaling: 1/2x, 1/3x, 1/4x, etc. Pixels are sub-sampled at
+    // uniform integer strides, preserving clean pixel alignment.
+    const int divisor = std::max(std::max(2, (src_w + max_width - 1) / max_width),
+                                 (src_h + max_height - 1) / max_height);
+    const int width = std::max(1, src_w / divisor);
+    const int height = std::max(1, src_h / divisor);
+    return {width, height};
+}
 
 Tui::Tui(simrv::core::Machine& machine) : machine_(machine), modal_(machine) {
     preferences_path_ = TuiPreferences::default_path();
@@ -447,7 +484,6 @@ void Tui::restore_preferences() {
     set_theme_style(preferences.theme);
     machine_.set_high_contrast_enabled(preferences.high_contrast);
     machine_.set_class_mode_enabled(preferences.class_mode);
-    machine_.set_mouse_sensitivity(preferences.mouse_sensitivity);
     student_guide_enabled_ = preferences.student_guide;
     set_target_fps(preferences.target_fps);
 }
@@ -469,7 +505,6 @@ void Tui::save_preferences() {
     preferences.class_mode = machine_.class_mode_enabled();
     preferences.student_guide = student_guide_enabled_;
     preferences.target_fps = target_fps();
-    preferences.mouse_sensitivity = machine_.mouse_sensitivity();
     if (!preferences.save(preferences_path_)) {
         simrv::log::warn("Unable to save TUI preferences to {}", preferences_path_.string());
     }
@@ -647,7 +682,7 @@ void Tui::render_update_speed(std::chrono::steady_clock::time_point now) {
 }
 
 auto Tui::get_terminal_pane_start_line(int num_rows) const -> int {
-    int total_lines = vt_.get_scrollback_size() + vt_.get_cursor_y() + 1;
+    int total_lines = vt_.get_lines_count();
     int end_exclusive = std::max(0, total_lines - scroll_offset_);
     return std::max(0, end_exclusive - num_rows);
 }
@@ -765,7 +800,9 @@ void Tui::render_build_lines(int inspector_width, int terminal_width, int num_ro
 
 void Tui::render_draw_sixel(int panel_x, int display_width, int display_rows,
                             std::string& update_cmds) {
-    if (modal_.is_active() || display_width <= 0 || display_rows <= 0) return;
+    const int body_rows = std::max(1, display_rows - 1);
+    if (modal_.is_active() || display_width < kMinDisplayWidth || body_rows < kMinDisplayBodyRows)
+        return;
 
     // Ensure a clean background across the entire display body before positioning
     // the Sixel graphic, clearing any leftover modal or text layer cells.
@@ -779,28 +816,16 @@ void Tui::render_draw_sixel(int panel_x, int display_width, int display_rows,
     const auto fb = machine_.framebuffer_view();
     if (fb.data() == nullptr) return;
 
-    constexpr int source_width = 640;
-    constexpr int source_height = 480;
+    const int source_width = static_cast<int>(machine_.framebuffer_width());
+    const int source_height = static_cast<int>(machine_.framebuffer_height());
     constexpr int palette_side = 6;
     constexpr int palette_size = palette_side * palette_side * palette_side;
-    // Fit the 4:3 framebuffer to the panel's pixel rectangle, then round to whole terminal
-    // cells so the placement remains stable as the terminal is resized.
-    // The first row is the column header in the multi-column workbench.  Fit only
-    // inside the body so the sixel never reaches the footer and triggers terminal
-    // scrolling while it is placed.
-    const int body_rows = std::max(1, display_rows - 1);
     const int cell_width = std::max(1, cell_width_px_);
     const int cell_height = std::max(1, cell_height_px_);
-    // Fit the native framebuffer in pixels. Keep the source raster at native
-    // resolution whenever the panel is large enough; resampling the 640x480
-    // console font is what made the boot text unreadable.
-    int width = std::min(source_width, std::max(1, display_width * cell_width));
-    int height = std::max(1, width * source_height / source_width);
-    const int max_height = std::max(1, body_rows * cell_height);
-    if (height > max_height) {
-        height = max_height;
-        width = std::max(1, height * source_width / source_height);
-    }
+    // Fit the framebuffer to the panel's pixel rectangle, adapting to the terminal
+    // size while preserving the aspect ratio.
+    const auto [width, height] = compute_sixel_dimensions(display_width, body_rows, cell_width,
+                                                          cell_height, source_width, source_height);
     const int image_cols = std::max(1, (width + cell_width - 1) / cell_width);
     const int image_rows = std::max(1, (height + cell_height - 1) / cell_height);
 
@@ -844,11 +869,14 @@ void Tui::render_draw_sixel(int panel_x, int display_width, int display_rows,
 
     const auto* fb_bytes = reinterpret_cast<const uint8_t*>(fb.data());
     const bool same_dims = (width == source_width && height == source_height);
-    std::vector<int> src_x_offset;
     if (!same_dims) {
-        src_x_offset.resize(width);
-        for (int x = 0; x < width; ++x) {
-            src_x_offset[x] = std::min(source_width - 1, x * source_width / width) * 4;
+        if (sixel_src_x_offset_.size() != static_cast<size_t>(width) ||
+            sixel_cached_source_width_ != source_width) {
+            sixel_cached_source_width_ = source_width;
+            sixel_src_x_offset_.resize(width);
+            for (int x = 0; x < width; ++x) {
+                sixel_src_x_offset_[x] = std::min(source_width - 1, x * source_width / width) * 4;
+            }
         }
     }
 
@@ -858,17 +886,18 @@ void Tui::render_draw_sixel(int panel_x, int display_width, int display_rows,
         sixel_cached_height_ = height;
         sixel_strip_signatures_.clear();
         sixel_cached_strips_.clear();
+        sixel_strip_masks_.assign(static_cast<size_t>(palette_size * width), 0);
     }
     if (sixel_strip_signatures_.size() != total_strips) {
         sixel_strip_signatures_.assign(total_strips, 0);
         sixel_cached_strips_.resize(total_strips);
     }
 
-    std::vector<uint8_t> strip_masks(static_cast<size_t>(palette_size * width), 0);
+    auto& strip_masks = sixel_strip_masks_;
     std::array<int16_t, palette_size> last_x_for_color;
     last_x_for_color.fill(-1);
-    std::vector<uint8_t> present_colors;
-    present_colors.reserve(32);
+    auto& present_colors = sixel_present_colors_;
+    present_colors.clear();
 
     auto append_uint = [](std::string& out, unsigned val) {
         char buf[16];
@@ -932,7 +961,7 @@ void Tui::render_draw_sixel(int panel_x, int display_width, int display_rows,
                 row_ptrs[bit] = fb_bytes + static_cast<size_t>(src_y * source_width * 4);
             }
             for (int x = 0; x < width; ++x) {
-                const int x_off = src_x_offset[x];
+                const int x_off = sixel_src_x_offset_[x];
                 for (int bit = 0; bit < max_bits; ++bit) {
                     const auto* p = row_ptrs[bit] + x_off;
                     const auto c = static_cast<uint8_t>((kColorLut[p[2]] * 36) +
@@ -994,8 +1023,8 @@ void Tui::render_draw_sixel(int panel_x, int display_width, int display_rows,
 
 auto Tui::render_framebuffer_row(int row, int width, int rows) const -> std::string {
     const auto fb = machine_.framebuffer_view();
-    constexpr int source_width = 640;
-    constexpr int source_height = 480;
+    const int source_width = static_cast<int>(machine_.framebuffer_width());
+    const int source_height = static_cast<int>(machine_.framebuffer_height());
     if (fb.data() == nullptr || width <= 0 || rows <= 0)
         return std::string(std::max(0, width), ' ');
 
@@ -1003,19 +1032,19 @@ auto Tui::render_framebuffer_row(int row, int width, int rows) const -> std::str
     const int pixel_height = std::max(2, rows * 2);
     const int top = std::clamp(row * 2, 0, pixel_height - 1);
     const int bottom = std::min(pixel_height - 1, top + 1);
+    const int source_top = std::min(source_height - 1, top * source_height / pixel_height);
+    const int source_bottom = std::min(source_height - 1, bottom * source_height / pixel_height);
+    const auto* row_top = fb.unchecked_ptr(
+        fb.base() + static_cast<simrv::xlen::Address>(source_top * source_width * 4));
+    const auto* row_bottom = fb.unchecked_ptr(
+        fb.base() + static_cast<simrv::xlen::Address>(source_bottom * source_width * 4));
+
     std::string result;
     result.reserve(static_cast<size_t>(width) * 32);
     for (int x = 0; x < width; ++x) {
         const int source_x = std::min(source_width - 1, x * source_width / pixel_width);
-        const int source_top = std::min(source_height - 1, top * source_height / pixel_height);
-        const int source_bottom =
-            std::min(source_height - 1, bottom * source_height / pixel_height);
-        const auto* p_top =
-            fb.unchecked_ptr(fb.base() + static_cast<simrv::xlen::Address>(
-                                             (source_top * source_width + source_x) * 4));
-        const auto* p_bottom =
-            fb.unchecked_ptr(fb.base() + static_cast<simrv::xlen::Address>(
-                                             (source_bottom * source_width + source_x) * 4));
+        const auto* p_top = row_top + static_cast<size_t>(source_x * 4);
+        const auto* p_bottom = row_bottom + static_cast<size_t>(source_x * 4);
         result += std::format(
             "\033[38;2;{};{};{}m\033[48;2;{};{};{}m▀", std::to_integer<uint8_t>(p_top[2]),
             std::to_integer<uint8_t>(p_top[1]), std::to_integer<uint8_t>(p_top[0]),
@@ -1038,18 +1067,14 @@ auto Tui::display_coords_to_fb(int x, int y, size_t col_idx, int term_width, int
     const int col_width = col_widths.widths[col_idx];
     const int num_rows = std::max(1, term_height - framework::kFrameChromeRows);
     const int body_rows = std::max(1, num_rows - 1);
+    if (col_width < kMinDisplayWidth || body_rows < kMinDisplayBodyRows) return std::nullopt;
     const int cell_width = std::max(1, cell_width_px_);
     const int cell_height = std::max(1, cell_height_px_);
-    constexpr int source_width = 640;
-    constexpr int source_height = 480;
+    const int source_width = static_cast<int>(machine_.framebuffer_width());
+    const int source_height = static_cast<int>(machine_.framebuffer_height());
 
-    int width = std::min(source_width, std::max(1, col_width * cell_width));
-    int height = width * source_height / source_width;
-    const int max_height = std::max(1, body_rows * cell_height);
-    if (height > max_height) {
-        height = max_height;
-        width = std::max(1, height * source_width / source_height);
-    }
+    const auto [width, height] = compute_sixel_dimensions(col_width, body_rows, cell_width,
+                                                          cell_height, source_width, source_height);
     const int image_cols = std::max(1, (width + cell_width - 1) / cell_width);
     const int image_rows = std::max(1, (height + cell_height - 1) / cell_height);
     const int x_offset = std::max(0, (col_width - image_cols) / 2);
@@ -1216,7 +1241,11 @@ void Tui::render(bool force) {
         sync_workbench_slots();
     }
     const bool multi_headers = (col_widths.count >= 2);
-    const bool draw_sixel = sixel_supported_ && has_display && !modal_.is_active();
+    const bool display_too_small =
+        has_display && (display_col < col_widths.count) &&
+        (col_widths.widths[display_col] < kMinDisplayWidth || num_rows - 1 < kMinDisplayBodyRows);
+    const bool draw_sixel =
+        sixel_supported_ && has_display && !display_too_small && !modal_.is_active();
     uint64_t framebuffer_signature = 0;
     if (draw_sixel) {
         const auto fb = machine_.framebuffer_view();
@@ -1267,8 +1296,8 @@ void Tui::render(bool force) {
     std::vector<std::string> new_lines = compose_multi_frame_lines(
         frame, term_width, col_widths, status_bar_->render_row(0, term_width),
         status_bar_->render_row(1, term_width),
-        [this, total_cols = col_widths.count, multi_headers](size_t col_idx, int row,
-                                                             int width) -> std::string {
+        [this, total_cols = col_widths.count, multi_headers, num_rows](size_t col_idx, int row,
+                                                                       int width) -> std::string {
             if (col_idx < workbench_slots_.size()) {
                 const auto page = workbench_slots_[col_idx].page;
                 const bool is_focused = (col_idx == focused_slot_index_);
@@ -1285,10 +1314,49 @@ void Tui::render(bool force) {
                     return terminal_pane_->render_row(row, width);
                 }
                 if (page == TuiRegPage::DISPLAY) {
-                    if (multi_headers && row == 0)
+                    if (multi_headers && row == 0) {
                         return inspector_pane_->render_column_header(static_cast<int>(col_idx),
                                                                      "Display", is_focused, width,
                                                                      "", true, total_cols > 1);
+                    }
+                    const int total_content_rows =
+                        multi_headers ? std::max(1, num_rows - 1) : num_rows;
+                    const int body_row = multi_headers ? row - 1 : row;
+                    if (width < kMinDisplayWidth || total_content_rows < kMinDisplayBodyRows) {
+                        const std::string_view title_text =
+                            (width >= 27) ? "[ Display space too small ]" : "[ Too small ]";
+                        const std::string_view hint_text =
+                            (width >= 30) ? "(expand panel: ']' or resize)" : "(resize panel)";
+                        const int mid_row = total_content_rows / 2;
+                        if (total_content_rows == 1) {
+                            if (body_row == 0) {
+                                return center_pane_text(
+                                    std::format("\033[33m{}\033[0m", title_text), width);
+                            }
+                        } else {
+                            if (body_row == mid_row - 1) {
+                                return center_pane_text(
+                                    std::format("\033[33m{}\033[0m", title_text), width);
+                            }
+                            if (body_row == mid_row) {
+                                return center_pane_text(std::format("\033[90m{}\033[0m", hint_text),
+                                                        width);
+                            }
+                        }
+                        return std::string(static_cast<size_t>(std::max(0, width)), ' ');
+                    }
+                    if (!sixel_supported_) {
+                        const std::string_view unsupp_text =
+                            (width >= 30)   ? "[ Sixel graphics unsupported ]"
+                            : (width >= 21) ? "[ Sixel unsupported ]"
+                                            : "[ No Sixel ]";
+                        const int mid_row = total_content_rows / 2;
+                        if (body_row == mid_row) {
+                            return center_pane_text(std::format("\033[33m{}\033[0m", unsupp_text),
+                                                    width);
+                        }
+                        return std::string(static_cast<size_t>(std::max(0, width)), ' ');
+                    }
                     return std::string(static_cast<size_t>(std::max(0, width)), ' ');
                 }
                 inspector_pane_->set_page(page);

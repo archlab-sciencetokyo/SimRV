@@ -52,12 +52,21 @@ class MmioRouter {
      */
     void clear();
 
+    struct DeviceEntry {
+        simrv::xlen::Address base = 0;
+        simrv::xlen::Address end = 0;
+        TileLinkNode* node = nullptr;
+        simrv::xlen::Address alignment = 1;
+        bool is_read_only = false;
+    };
+
     /**
      * @brief Resolve which registered MMIO device handles the target address.
      * @param addr Target byte address.
      * @return Pointer to target TileLinkNode if found, nullptr otherwise.
      */
     [[nodiscard]] auto resolve_device(simrv::xlen::Address addr) const -> TileLinkNode*;
+    [[nodiscard]] auto resolve_entry(simrv::xlen::Address addr) const -> const DeviceEntry*;
 
     /**
      * @brief Search for a device node by string name.
@@ -90,12 +99,6 @@ class MmioRouter {
     }
 
    private:
-    struct DeviceEntry {
-        simrv::xlen::Address base = 0;
-        simrv::xlen::Address end = 0;
-        TileLinkNode* node = nullptr;
-    };
-
     static constexpr size_t kMruCapacity = 4;
 
     std::vector<TileLinkNode*> nodes_;

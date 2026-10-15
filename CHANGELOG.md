@@ -3,19 +3,51 @@
 All notable changes to SimRV are documented here.
 Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## Unreleased
+## [v3.0.0-rc.10] — 2026-10-15
 
+- Removed the local socket TUI attachment workflow and its installed `simrv/net` interfaces.
+- Removed the ambiguous `--trace-pc` alias; use `--trace-pc-range` for architectural trace filters.
+- Removed legacy `--trace-pc-period` and `-I, --dump-init` bringup options.
+- Optimized simulation hot paths: elided mutex acquisition and heap operations in pending input servicing, added network device polling guard, switched to direct RamView address containment, streamlined tohost checking, and optimized fast kernel retired instruction accounting.
+
+- **Device Tree Architecture Modernization**:
+  - Replaced the in-tree synthetic device tree generator (`FdtGenerator`) with a lightweight, robust device tree patcher (`FdtPatcher`).
+  - Standardized full-system Linux boots on user-supplied or environment-configured base DTBs (`-f/--dtb`, `--buildroot-output`, or `SIMRV_LINUX_DTB`), automatically patching guest memory range and SMP core availability while preserving original hardware nodes, interrupt maps, and kernel boot arguments.
+  - Retired the legacy synthetic `--dtb dynamic` option in favor of authoritative DTBs.
 - **Ratified RISC-V Specification Alignment**:
   - Aligned with Privileged Architecture 1.13: added standard exception causes `SoftwareCheck` (cause 18) and `HardwareError` (cause 19).
   - Implemented standard ratified CSRs with full M/S/U privilege enforcement and RV32/RV64 legality checks:
     - Sstc Extension: `stimecmp` (0x14D) and `stimecmph` (0x15D, RV32).
     - Privileged 1.13 Environment Config: `menvcfg` (0x30A), `menvcfgh` (0x31A, RV32), and `senvcfg` (0x10A).
     - Counter Inhibit: `mcountinhibit` (0x320).
-    - Smepmp Enhanced PMP Security Config: `mseccfg` (0x747) and `mseccfgh` (0x757, RV32).
+    - Smepmp Enhanced PMP Security Config: `mseccfg` (0x747) and `mseccfgh` (0x757, RV32) with automatic PMP fast-status refresh and TLB invalidation on writes.
+  - Hardened Smepmp security tracking: `has_locked_pmp` now enforces M-mode lockdown when `mseccfg.MML` or `mseccfg.MMWP` is active.
   - Aligned with SBI v2.0 / v3.0: added standard ratified error codes (`InvalidState`, `BadRange`, `Timeout`, `Io`) and `FWFT` (Firmware Features) extension ID.
 - **Ratified ISA Naming & Deprecation**:
   - Replaced legacy draft single-letter `b` presets with standard ratified multi-letter presets (`gczb`, `gczbv`, `gcv`, `rv32gczb`, `rv64gczb`, `rv32gczbv`, `rv64gczbv`, `rv32gcv`, `rv64gcv`).
   - Explicitly reject legacy draft shorthands (`gcbv`, `rv32gcbv`, `rv64gcbv`, `gcb`, `rv32gcb`, `rv64gcb`) with helpful actionable error diagnostics directing users to ratified equivalents.
+- **Unified Platform Configuration & Memory Map Hardening**:
+  - Consolidated CPU microarchitecture and SoC platform configurations into a single canonical `--config <PRESET | FILE>` CLI option, retiring `--cpu-config`, `--cpu-model-file`, `--model-file`, and `--soc` with clean error diagnostics.
+  - Added canonical `--validate-config <FILE | PRESET>` to validate CPU model or SoC platform configurations and presets, retiring undocumented check aliases (`--check-cpu-model`, `--verify-cpu-model`, `--export-soc-manifest`, `--export-cpu-model`).
+  - Fixed `--dump-soc-manifest` to resolve and dump custom `.cfg` files in addition to built-in presets.
+  - Hardened memory mapping: `MachineConfig::validate()` and `SoCConfig::validate()` strictly check DRAM address overflow and prevent DRAM from overlapping any active MMIO device or auxiliary memory region.
+  - Enhanced system bus router to detect and reject overlapping MMIO node registrations during machine initialization.
+  - Corrected guest Linux DTB pointer setup in register `a1` to dynamically compute `config.memory.dram_base + dtb_offset` for non-standard DRAM base addresses.
+  - Enhanced `FdtPatcher` with NOP token skipping before root nodes, `boot_cpuid_phys` preservation, dynamic memory unit address synchronization (`memory@<dram_base>`), guaranteed `device_type = "memory\0"`, and 8-byte DTB blob alignment.
+  - Fixed `CpuConfigParser` to recognize `[device.*]` and `[smp*]` sections as platform metadata without spurious unknown section warnings on combined configs.
+  - Enforced rejection of legacy draft `gcbv` shorthands in CPU model configurations and automated Zb extension expansion for `gczb` and `gczbv`.
+- **CLI & Output Cleanliness**:
+  - Restricted headless startup banner emission exclusively to `CliAction::Run`, ensuring utility and diagnostic actions (`--dump-cpu-model`, `--scaffold-cpu-model`, `--validate-config`, `--explain-inst`, etc.) write pure, unpolluted output suitable for piping and scripting.
+  - Documented `--step-delay <US>` in CLI help, completions, and user documentation.
+  - Added canonical `--log-stderr` CLI option to route all simulator diagnostic and lifecycle logs to `stderr` instead of `stdout`, keeping `stdout` reserved for guest program output during piping.
+- **Unix Behavior & Piping Hardening**:
+  - Replaced unconditionally ignored `SIGINT` with proper CLI signal handlers for `SIGINT`, `SIGTERM`, `SIGHUP`, `SIGQUIT`, and `SIGPIPE`, allowing clean Ctrl+C interruption and standard Unix exit statuses (`128 + SIG`).
+  - Added global terminal state restoration tracking to `TerminalModeGuard` to guarantee that interactive CLI runs cleanly restore the user's terminal mode on all paths (normal exit, exceptions, and terminating signals).
+  - Protected `Uart::start_input_thread()` against kernel `SIGTTIN` suspension when running as a background job on a terminal without owning the foreground process group.
+  - Ensured fatal simulator halts (`UnhandledTrap`, `LockstepDivergence`, `GuestCrash`) map to non-zero exit codes (`HostExitCode::ExecutionError`, code 5).
+  - Supported standard input streaming (`-`) for `--config -` and `--validate-config -`.
+- **TUI & Inspection Improvements**:
+  - Fixed branch predictor selection cycle in `SystemConfigModal` so `BranchPredictorType::Disabled` can be selected.
 - **Subsystem Queue & Component Deduplication**:
   - Unified split-ring queue processing across MMIO and PCI transports for the entire VirtIO family (Block, Net, GPU, Console, RNG, Input), eliminating over 500 lines of redundant DMA and queue code.
   - Centralized atomic operations in `isa/Amo.hpp` (`perform_amo_op`) and unified 32-bit and 64-bit ELF segment loading.
@@ -23,7 +55,26 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   - Fully retired legacy compatibility aliases `CSRValue`, `CSRAddress`, `CsrAddress`, and `GCBV`.
   - Harmonized the entire codebase onto canonical PascalCase domain types `simrv::xlen::CsrValue`, `simrv::xlen::CsrNumber`, and `simrv::isa::IsaPreset::GCZBV`.
   - Added templated implicit construction to `CsrNumber` from `Csr` enum and integral types, eliminating verbose boilerplate.
-
+- **TUI Sixel Integer Scaling & 800x600 Framebuffer Architecture**:
+  - Enforced strict integer scaling ($1\times, 2\times, 3\times$ integer replication and $1/2\times, 1/3\times$ integer divisor downsampling) in Sixel image generation, preventing fractional pixel distortion, blurring, and aliasing artifacts.
+  - Upgraded standard framebuffer resolution from 640x480 to 800x600 across `MachineConfig`, DTB templates (`virt-rv64.dts`, `virt-rv32.dts`), and Linux boot scripts, paired with dynamic guest DTB geometry auto-adaptation in `FdtPatcher` and `MachineInit`.
+  - Added pixel-accurate cell and SGR-pixel mouse coordinate scaling mapped to arbitrary display resolutions.
+- **Simulation Hot-Path Performance Optimizations**:
+  - Eliminated virtual dispatch in MMIO routing with entry metadata caching and direct address comparisons (`MmioRouter`).
+  - Always-inlined fetch branch prediction fast-path (`BranchPredictor.hpp`) with non-control instruction early-exit.
+  - Bypassed atomic RMW bus locking (`lock xchg`) in CPU interrupt line servicing when no lines are active.
+  - Always-inlined Tracer status accessors and cached raw subsystem pointers (`tracer_raw_`, `breakpoint_manager_raw_`) on `Machine`.
+  - Decoupled inner-loop `tohost` memory polling to 64-instruction batch intervals.
+  - Inlined DecodeCache lookup and adopted branchless register writes for jumps (`write_branchless`).
+  - Short-circuited soft TLB reservation table checks across all scalar and FP store paths.
+  - Eliminated heap churn in Sixel rendering by retaining reusable strip masks and precomputed coordinate lookup tables.
+- **PCIe & MMIO Subsystem Modernization**:
+  - Replaced generic integer primitives with explicit domain-specific types (`MmioOffset`, `MmioBytes`, `MmioData8`..`MmioData64`, `PciBarOffset`, `PciBarSize`, `PciBarMask`, `PciMmioData`, `VirtioQueueIndex`, `VirtioFeatureWord`, `VirtioIsrStatus`).
+  - Implemented fast active BAR routing using a 4-entry MRU cache and binary search over non-overlapping intervals in `PcieRootComplex`.
+  - Implemented $\mathcal{O}(1)$ slot dispatch for ECAM configuration access (`devices_by_slot_[32]`) returning raw `PciDevice*` without `std::shared_ptr` refcount overhead.
+  - Implemented full 64-bit BAR probe sizing and 64-bit MMIO data transfers (`PciMmioData`).
+  - Implemented PCIe INTx level deassertion on VirtIO ISR register reads (`0x200..0x2FF`) and device reset.
+  - Centralized physical DRAM DMA read/write transfers with bounds checking and CoherenceHub line invalidation in `MemorySubsystem::dma_read` and `dma_write`.
 
 ## [v3.0.0-rc.9] — 2026-10-08
 
@@ -853,10 +904,12 @@ on inspector polish, correctness fixes, and CLI normalization.
 
 - Initial public alpha: CMake preset infrastructure, Clang-20 CI, base RISC-V pipeline
 
-[v3.0.0-rc.5]: https://github.com/archlab-sciencetokyo/SimRV/releases/tag/v3.0.0-rc.5
-[v3.0.0-rc.6]: https://github.com/archlab-sciencetokyo/SimRV/releases/tag/v3.0.0-rc.6
-[v3.0.0-rc.7]: https://github.com/archlab-sciencetokyo/SimRV/releases/tag/v3.0.0-rc.7
+[v3.0.0-rc.10]: https://github.com/archlab-sciencetokyo/SimRV/releases/tag/v3.0.0-rc.10
+[v3.0.0-rc.9]: https://github.com/archlab-sciencetokyo/SimRV/releases/tag/v3.0.0-rc.9
 [v3.0.0-rc.8]: https://github.com/archlab-sciencetokyo/SimRV/releases/tag/v3.0.0-rc.8
+[v3.0.0-rc.7]: https://github.com/archlab-sciencetokyo/SimRV/releases/tag/v3.0.0-rc.7
+[v3.0.0-rc.6]: https://github.com/archlab-sciencetokyo/SimRV/releases/tag/v3.0.0-rc.6
+[v3.0.0-rc.5]: https://github.com/archlab-sciencetokyo/SimRV/releases/tag/v3.0.0-rc.5
 [v3.0.0-rc.4]: https://github.com/archlab-sciencetokyo/SimRV/releases/tag/v3.0.0-rc.4
 [v3.0.0-rc.3]: https://github.com/archlab-sciencetokyo/SimRV/releases/tag/v3.0.0-rc.3
 [v3.0.0-rc.2]: https://github.com/archlab-sciencetokyo/SimRV/releases/tag/v3.0.0-rc.2

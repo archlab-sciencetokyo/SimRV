@@ -10,6 +10,7 @@
 #include <algorithm>
 #include <cctype>
 #include <charconv>
+#include <cstdlib>
 #include <format>
 #include <print>
 #include <span>
@@ -160,12 +161,12 @@ auto parse_positive_size(std::span<char* const> args, std::size_t& index, std::s
 
 auto parse_trace_window(RuntimeOptions& options, std::span<char* const> args, std::size_t& index)
     -> std::expected<void, std::string> {
-    return parse_scaled_required(args, index, "-t")
+    return parse_scaled_required(args, index, "-r")
         .and_then([&](uint64_t begin) -> std::expected<void, std::string> {
-            return parse_scaled_required(args, index, "-t")
+            return parse_scaled_required(args, index, "-r")
                 .and_then([&](uint64_t end) -> std::expected<void, std::string> {
                     if (begin > end) {
-                        return std::unexpected("-t begin must be <= end");
+                        return std::unexpected("-r/--trace-range begin must be <= end");
                     }
                     options.trace_enabled = true;
                     options.trace_begin = begin;
@@ -538,23 +539,33 @@ auto parse_file_options(std::string_view arg, std::span<char* const> args, std::
         options.appmode = false;
         return true;
     }
-    if (arg == "--cpu-config" || arg == "--cpu-model-file" || arg == "--model-file") {
-        auto value = next_argument(args, i, arg);
-        if (!value) return std::unexpected(value.error());
-        const auto resolved = simrv::core::resolve_cpu_model_path(*value);
-        options.fn_cpuconfig = resolved.value_or(std::string(*value));
+    if (arg == "--config" || arg.starts_with("--config=")) {
+        constexpr std::string_view option_name = "--config";
+        constexpr std::string_view prefix = "--config=";
+        std::string_view val = arg.starts_with(prefix) ? arg.substr(prefix.size()) : "";
+        if (val.empty()) {
+            auto value = next_argument(args, i, option_name);
+            if (!value) return std::unexpected(value.error());
+            val = *value;
+        }
+        options.config_target = std::string(val);
+        const auto resolved = simrv::core::resolve_cpu_model_path(val);
+        if (resolved.has_value()) {
+            options.fn_config = *resolved;
+        } else if (std::filesystem::exists(val)) {
+            options.fn_config = std::string(val);
+        } else if (!simrv::core::SoCConfig::preset(val).has_value()) {
+            return std::unexpected(std::format(
+                "unknown platform configuration '{}'. Expected a file path or preset (virt-pcie, "
+                "virt-mmio, rvcomp).",
+                val));
+        }
         return true;
     }
     if (arg == "--cfu-plugin") {
         auto value = next_argument(args, i, arg);
         if (!value) return std::unexpected(value.error());
         options.fn_cfu_plugin = std::string(*value);
-        return true;
-    }
-    if (arg == "--dump-dmem") {
-        auto value = next_argument(args, i, arg);
-        if (!value) return std::unexpected(value.error());
-        options.fn_dump_dmem = std::string(*value);
         return true;
     }
     if (arg == "--bram-prewarm") {
@@ -646,27 +657,8 @@ auto parse_execution_options(std::string_view arg, std::span<char* const> args, 
         return true;
     }
     if (arg == "--trace-pc") {
-        auto value = next_argument(args, i, arg);
-        if (!value) return std::unexpected(value.error());
-        if (!parse_trace_pc_range(*value, options))
-            return std::unexpected(
-                "--trace-pc expects START-END; use --trace-pc-period for sampling");
-        return true;
-    }
-    if (arg == "--trace-pc-period") {
-        auto value = next_argument(args, i, arg);
-        if (!value) return std::unexpected(value.error());
-        uint64_t period = 0;
-        if (!parse_scaled_u64(*value, period))
-            return std::unexpected(std::format("invalid numeric value for {}", arg));
-        options.strace = period;
-        return true;
-    }
-    if (arg == "--dump-init" || arg == "-I") {
-        auto value = parse_scaled_required(args, i, arg);
-        if (!value) return std::unexpected(value.error());
-        options.memimg = *value;
-        return true;
+        return std::unexpected(
+            "--trace-pc was removed; use --trace-pc-range START-END to filter --arch-trace events");
     }
     if (arg == "-R" || arg == "--realtime") {
         options.realtime_pacing = true;
@@ -758,7 +750,7 @@ auto parse_mode_options(std::string_view arg, std::span<char* const> args, std::
         if (!value) return std::unexpected(value.error());
         const auto resolved = simrv::core::resolve_cpu_model_path(*value);
         if (resolved.has_value()) {
-            result.options.fn_cpuconfig = *resolved;
+            result.options.fn_config = *resolved;
             simrv::pipeline::CpuModelConfig loaded{};
             if (!simrv::core::load_cpu_config(*resolved, loaded)) {
                 return std::unexpected(
@@ -873,17 +865,6 @@ auto parse_tui_options(std::string_view arg, std::span<char* const> args, std::s
         result.options.explicit_cli_mode = true;
         return true;
     }
-    if (arg == "--mouse-sensitivity") {
-        auto value = next_argument(args, i, arg);
-        if (!value) return std::unexpected(value.error());
-        try {
-            double val = std::stod(std::string(*value));
-            result.options.mouse_sensitivity = val;
-        } catch (...) {
-            return std::unexpected(std::format("invalid double value for {}: {}", arg, *value));
-        }
-        return true;
-    }
     if (arg == "--inspection-output") {
         auto value = next_argument(args, i, arg);
         if (!value) return std::unexpected(value.error());
@@ -905,55 +886,8 @@ auto parse_tui_options(std::string_view arg, std::span<char* const> args, std::s
         result.options.mission = std::string(*value);
         return true;
     }
-    if (arg == "--server" || arg.starts_with("--server=") || arg == "--listen-tui" ||
-        arg.starts_with("--listen-tui=")) {
-        result.options.server_mode = true;
-        std::string_view ep = arg.starts_with("--server=")       ? arg.substr(9)
-                              : arg.starts_with("--listen-tui=") ? arg.substr(13)
-                                                                 : "";
-        if (ep.empty() && i + 1 < args.size() && args[i + 1] != nullptr && args[i + 1][0] != '\0' &&
-            args[i + 1][0] != '-') {
-            ++i;
-            ep = args[i];
-        }
-        result.options.server_endpoint = ep.empty() ? "/tmp/simrv.sock" : std::string(ep);
-        return true;
-    }
-    if (arg == "--attach" || arg.starts_with("--attach=")) {
-        result.options.attach_mode = true;
-        result.action = CliAction::Attach;
-        std::string_view ep = arg.starts_with("--attach=") ? arg.substr(9) : "";
-        if (ep.empty()) {
-            auto value = next_argument(args, i, arg);
-            if (!value) return std::unexpected(value.error());
-            ep = *value;
-        }
-        result.options.attach_endpoint = ep.empty() ? "/tmp/simrv.sock" : std::string(ep);
-        return true;
-    }
     if (arg == "--no-forwarding") {
         result.options.disable_forwarding = true;
-        return true;
-    }
-    if (arg == "--soc" || arg.starts_with("--soc=")) {
-        constexpr std::string_view option_name = "--soc";
-        constexpr std::string_view prefix = "--soc=";
-        std::string_view p = arg.starts_with(prefix) ? arg.substr(prefix.size()) : "";
-        if (p.empty()) {
-            auto value = next_argument(args, i, option_name);
-            if (!value) return std::unexpected(value.error());
-            p = *value;
-        }
-        const auto preset = simrv::core::SoCConfig::preset(p);
-        if (!preset.has_value()) {
-            return std::unexpected(
-                std::format("unknown SoC preset: {}. Allowed: virt-pcie, virt-mmio, rvcomp", p));
-        }
-        result.options.soc_preset = std::string(p);
-        result.options.platform_profile = preset->enable_mmio ? simrv::core::PlatformProfile::Mmio
-                                          : preset->enable_pcie
-                                              ? simrv::core::PlatformProfile::Pcie
-                                              : simrv::core::PlatformProfile::None;
         return true;
     }
     if (arg == "--net") {
@@ -987,12 +921,12 @@ auto parse_tui_options(std::string_view arg, std::span<char* const> args, std::s
         result.options.use_mix = true;
         return true;
     }
-    if (arg == "--dump-cpu-model" || arg == "--export-cpu-model" || arg == "--scaffold-cpu-model") {
+    if (arg == "--dump-cpu-model" || arg == "--scaffold-cpu-model") {
         result.action = CliAction::DumpCpuModel;
         if (arg == "--scaffold-cpu-model") {
             result.options.dump_cpu_model_preset = "balanced";
             if (i + 1 < args.size() && args[i + 1] != nullptr && args[i + 1][0] != '\0' &&
-                args[i + 1][0] != '-') {
+                (args[i + 1][0] != '-' || std::string_view(args[i + 1]) == "-")) {
                 ++i;
                 result.options.dump_cpu_model_output = args[i];
             }
@@ -1001,27 +935,26 @@ auto parse_tui_options(std::string_view arg, std::span<char* const> args, std::s
             if (!value) return std::unexpected(value.error());
             result.options.dump_cpu_model_preset = std::string(*value);
             if (i + 1 < args.size() && args[i + 1] != nullptr && args[i + 1][0] != '\0' &&
-                args[i + 1][0] != '-') {
+                (args[i + 1][0] != '-' || std::string_view(args[i + 1]) == "-")) {
                 ++i;
                 result.options.dump_cpu_model_output = args[i];
             }
         }
         return true;
     }
-    if (arg == "--dump-soc-manifest" || arg == "--export-soc-manifest") {
+    if (arg == "--dump-soc-manifest") {
         result.action = CliAction::ExportSoCManifest;
         auto value = next_argument(args, i, arg);
         if (!value) return std::unexpected(value.error());
         result.options.soc_manifest_preset = std::string(*value);
         if (i + 1 < args.size() && args[i + 1] != nullptr && args[i + 1][0] != '\0' &&
-            args[i + 1][0] != '-') {
+            (args[i + 1][0] != '-' || std::string_view(args[i + 1]) == "-")) {
             ++i;
             result.options.soc_manifest_output = args[i];
         }
         return true;
     }
-    if (arg == "--validate-cpu-config" || arg == "--check-cpu-model" ||
-        arg == "--verify-cpu-model") {
+    if (arg == "--validate-config" || arg == "--validate-cpu-config") {
         result.action = CliAction::ValidateCpuModel;
         auto value = next_argument(args, i, arg);
         if (!value) return std::unexpected(value.error());
@@ -1054,6 +987,10 @@ auto parse_debug_cosrv_options(std::string_view arg, std::span<char* const> args
                 "unsupported log format '{}' (supported: text, json, json-pretty)", *value));
         }
         options.log_format = *format;
+        return true;
+    }
+    if (arg == "--log-stderr") {
+        options.log_stderr = true;
         return true;
     }
     if (arg == "--summary") {
@@ -1377,6 +1314,15 @@ auto parse_command_line(std::span<char* const> args) -> std::expected<ParseResul
     if (result.options.explicit_cli_mode && result.options.explicit_tui_mode) {
         return std::unexpected("--cli and --tui are mutually exclusive");
     }
+    if (result.options.fn_dvtree.empty()) {
+        if (const char* env_dtb = std::getenv("SIMRV_LINUX_DTB"); env_dtb && *env_dtb) {
+            result.options.fn_dvtree = env_dtb;
+        }
+    }
+    if (!result.options.appmode && result.options.fn_dvtree.empty()) {
+        return std::unexpected(
+            "Linux boot requires a device tree; pass -f/--dtb <FILE> or set SIMRV_LINUX_DTB");
+    }
     if (!result.options.mission.empty() &&
         (!result.options.class_mode || !result.options.explicit_tui_mode)) {
         return std::unexpected("--mission requires --class and --tui");
@@ -1426,7 +1372,7 @@ auto resolve_runtime_profile(const RuntimeOptions& options) -> simrv::core::Runt
                 break;
         }
     }
-    profile.tracing = options.bp_trace || options.trace_enabled || options.strace != 0 ||
+    profile.tracing = options.bp_trace || options.trace_enabled ||
                       options.trace_begin != std::numeric_limits<simrv::xlen::Counter>::max();
     profile.lockstep = options.lockstep_mode;
     profile.gdb = options.gdb_mode;
@@ -1442,11 +1388,9 @@ auto RuntimeOptions::to_machine_config() const -> simrv::core::MachineConfig {
     cfg.execution.appmode = appmode;
     cfg.execution.start_pc = start_pc;
     cfg.execution.fincnt = fincnt;
-    cfg.execution.strace = strace;
     cfg.execution.trace_begin = trace_begin;
     cfg.execution.trace_end = trace_end;
     cfg.execution.enabletimer = enabletimer;
-    cfg.execution.memimg_cycle = memimg;
     cfg.execution.num_harts = num_harts;
     cfg.execution.smp_quantum = smp_quantum;
     if (explicit_realtime_mode) {
@@ -1463,7 +1407,6 @@ auto RuntimeOptions::to_machine_config() const -> simrv::core::MachineConfig {
     cfg.tui.high_contrast = high_contrast;
     cfg.tui.class_mode = class_mode;
     cfg.tui.mission = mission;
-    cfg.tui.mouse_sensitivity = mouse_sensitivity;
     cfg.tui.inspection_output = inspection_output;
 
     cfg.debug.gdb_enabled = gdb_mode;
@@ -1507,10 +1450,8 @@ auto RuntimeOptions::to_machine_config() const -> simrv::core::MachineConfig {
     cfg.files.virtiofs_path = fn_virtiofs;
     cfg.files.disk_enabled = use_disk;
     cfg.files.dvtree_path = fn_dvtree;
-    cfg.files.traplog_path = fn_traplog;
-    cfg.files.cpuconfig_path = fn_cpuconfig;
+    cfg.files.config_path = fn_config;
     cfg.files.cfu_plugin_path = fn_cfu_plugin;
-    cfg.files.dump_dmem_path = fn_dump_dmem;
     cfg.cpu_model_preset = cpu_model_preset;
     if (!bpred_type.empty()) {
         cfg.branch_predictor_type = pipeline::parse_branch_predictor_type(bpred_type);
@@ -1520,40 +1461,38 @@ auto RuntimeOptions::to_machine_config() const -> simrv::core::MachineConfig {
     cfg.ras_entries = ras_size;
     if (bram_prewarm.has_value()) {
         cfg.bram_prewarm = *bram_prewarm;
-    } else if (fn_cpuconfig.find("cfu-provingground") != std::string::npos ||
-               fn_cpuconfig.find("rvproc") != std::string::npos) {
+    } else if (fn_config.find("cfu-provingground") != std::string::npos ||
+               fn_config.find("rvproc") != std::string::npos) {
         cfg.bram_prewarm = true;
     }
 
     cfg.network.mode = net_mode;
-    cfg.platform_profile = platform_profile;
-    if (const auto preset = simrv::core::SoCConfig::preset(soc_preset)) {
+    if (const auto preset = simrv::core::SoCConfig::preset(config_target)) {
         cfg.soc = *preset;
-        if (const auto model_path = simrv::core::resolve_cpu_model_path(soc_preset)) {
-            simrv::core::parse_soc_config(*model_path, cfg.soc);
-            if (cfg.files.cpuconfig_path.empty() && !cfg.soc.cpu_model.empty()) {
-                cfg.files.cpuconfig_path = *model_path;
-            }
+    }
+    if (!fn_config.empty()) {
+        simrv::pipeline::CpuModelConfig model{};
+        if (simrv::core::load_platform_config(fn_config, model, cfg.soc)) {
             if (!cfg.soc.cpu_model.empty()) {
-                simrv::pipeline::CpuModelConfig model{};
-                if (simrv::core::parse_cpu_config(*model_path, model)) {
-                    cfg.isa.misa_xlen = model.supported_xlen;
-                    cfg.isa.isa_preset = simrv::isa::isa_preset_bits(model.isa_preset);
-                    cfg.isa.misa_override = true;
-                }
+                cfg.isa.misa_xlen = model.supported_xlen;
+                cfg.isa.isa_preset = simrv::isa::isa_preset_bits(model.isa_preset);
+                cfg.isa.misa_override = true;
             }
-        }
-        if (cfg.soc.dram_base.has_value()) cfg.memory.dram_base = *cfg.soc.dram_base;
-        if (dram_size == 0 && cfg.soc.dram_size.has_value()) {
-            cfg.memory.dram_size = *cfg.soc.dram_size;
-        }
-        if (cfg.execution.start_pc == simrv::boot::kStartPc && cfg.soc.reset_pc.has_value()) {
-            cfg.execution.start_pc = *cfg.soc.reset_pc;
-        }
-        if (cfg.isa.isatest_tohost == 0x80001000 && cfg.soc.tohost.has_value()) {
-            cfg.isa.isatest_tohost = *cfg.soc.tohost;
         }
     }
+    if (cfg.soc.dram_base.has_value()) cfg.memory.dram_base = *cfg.soc.dram_base;
+    if (dram_size == 0 && cfg.soc.dram_size.has_value()) {
+        cfg.memory.dram_size = *cfg.soc.dram_size;
+    }
+    if (cfg.execution.start_pc == simrv::boot::kStartPc && cfg.soc.reset_pc.has_value()) {
+        cfg.execution.start_pc = *cfg.soc.reset_pc;
+    }
+    if (cfg.isa.isatest_tohost == 0x80001000 && cfg.soc.tohost.has_value()) {
+        cfg.isa.isatest_tohost = *cfg.soc.tohost;
+    }
+    cfg.platform_profile = cfg.soc.enable_mmio   ? simrv::core::PlatformProfile::Mmio
+                           : cfg.soc.enable_pcie ? simrv::core::PlatformProfile::Pcie
+                                                 : simrv::core::PlatformProfile::None;
     if (explicit_num_harts) cfg.soc.smp.resize_harts(num_harts);
     cfg.execution.num_harts = cfg.soc.smp.hart_count;
     cfg.execution.smp_mode =
@@ -1651,13 +1590,11 @@ auto apply_runtime_options(simrv::core::Machine* machine, const RuntimeOptions& 
     }
     machine->trace().init_dlog(options.dlog_mode);
 
-    machine->primary_hart().trap_log_stream = nullptr;
     if (options.traplog_mode) {
         machine->trace().init_trap_log(options.traplog_mode, options.fn_traplog);
         if (!machine->trace().fp_traplog.is_open()) {
             return std::unexpected("cannot open trap/SBI log file: " + options.fn_traplog);
         }
-        machine->primary_hart().trap_log_stream = &machine->trace().fp_traplog;
     }
 
     // Filename detection preserves legacy FW_PAYLOAD bundles; current published
@@ -1681,7 +1618,6 @@ auto needs_memory_image(const ParseResult& result) -> bool {
     return result.options.fn_memimg.empty() && !result.options.tuimode &&
            result.action != CliAction::ExplainInstruction && result.action != CliAction::ShowHelp &&
            result.action != CliAction::ShowVersion && result.action != CliAction::ShowLicense &&
-           result.action != CliAction::Attach && !result.options.attach_mode &&
            result.action != CliAction::DumpCpuModel &&
            result.action != CliAction::ExportSoCManifest &&
            result.action != CliAction::ValidateCpuModel;
@@ -1718,7 +1654,9 @@ auto needs_memory_image(const ParseResult& result) -> bool {
                .description = "Attach a VirtIO block storage image."},
               {.option = "--virtiofs <DIR>",
                .description = "Share a host directory with the guest through VirtIO-FS."},
-              {.option = "-f, --fdt, --dtb <FILE>", .description = "Load a device tree blob."}}},
+              {.option = "-f, --fdt, --dtb <FILE>",
+               .description = "Linux device tree (required; patched for configured RAM and harts; "
+                              "defaults to SIMRV_LINUX_DTB)."}}},
         {.title = "Architecture and hardware",
          .entries = {{.option = "-j, --harts, --smp <N>",
                       .description = "Override the SoC profile hart count (1–16)."},
@@ -1732,8 +1670,9 @@ auto needs_memory_image(const ParseResult& result) -> bool {
                       .description = "Select a RISC-V ISA profile such as rv32gc or rv64gc."},
                      {.option = "--vlen <BITS>",
                       .description = "Set vector register length (128–1024; default: 256)."},
-                     {.option = "--soc <PRESET>",
-                      .description = "Select virt-pcie, virt-mmio, or rvcomp."},
+                     {.option = "--config <PRESET | FILE>",
+                      .description =
+                          "Select platform preset (virt-pcie, virt-mmio, rvcomp) or file path."},
                      {.option = "--dump-soc-manifest <PRESET> [FILE]",
                       .description = "Export the normalized SoC registry as JSON."},
                      {.option = "--net <BACKEND>",
@@ -1759,16 +1698,14 @@ auto needs_memory_image(const ParseResult& result) -> bool {
               {.option = "--bht-size <N>", .description = "Set branch history table entries."},
               {.option = "--btb-size <N>", .description = "Set branch target buffer entries."},
               {.option = "--ras-size <N>", .description = "Set return address stack entries."},
-              {.option = "--cpu-config <FILE>",
-               .description = "Load a microarchitectural latency configuration."},
               {.option = "--cpu-preset <PRESET>",
                .description = "Select tiny, balanced, performance, or a model file."},
               {.option = "--dump-cpu-model <MODEL> [FILE]",
                .description = "Write a CPU model configuration."},
               {.option = "--scaffold-cpu-model [FILE]",
                .description = "Generate a starter CPU model configuration."},
-              {.option = "--validate-cpu-config <FILE>",
-               .description = "Validate and lint a CPU model configuration."},
+              {.option = "--validate-config, --validate-cpu-config <FILE>",
+               .description = "Validate a CPU model or platform configuration file."},
               {.option = "--cfu-plugin <LIB.SO>",
                .description = "Load a dynamic custom function unit plugin."},
               {.option = "--bram-prewarm / --no-bram-prewarm",
@@ -1783,6 +1720,8 @@ auto needs_memory_image(const ParseResult& result) -> bool {
               {.option = "-v, --verbose", .description = "Enable debug diagnostics."},
               {.option = "--log-file <FILE>",
                .description = "Mirror timestamped diagnostics to a file."},
+              {.option = "--log-stderr",
+               .description = "Route simulator diagnostic logs to stderr instead of stdout."},
               {.option = "--trace-dir <DIR>",
                .description = "Set the root directory for trace artifacts (default: trace)."},
               {.option = "--log-mmio, --dlog", .description = "Record MMIO transactions."},
@@ -1805,16 +1744,11 @@ auto needs_memory_image(const ParseResult& result) -> bool {
               {.option = "--trace-before-cycle <N>",
                .description = "Set the inclusive end of the trace cycle window."},
               {.option = "--trace-pc-range <START-END>",
-               .description = "Filter architectural events by inclusive PC range."},
-              {.option = "--trace-pc <START-END>", .description = "Alias for --trace-pc-range."},
-              {.option = "--trace-pc-period <N>",
-               .description = "Sample the PC trace every N instructions."},
+               .description = "Filter architectural trace events by inclusive PC range."},
               {.option = "--trace", .description = "Record a full architectural text trace."},
-              {.option = "-r, --trace-range <BG> <EN>",
-               .description = "Record an execution trace snapshot for a step range."},
+              {.option = "-r, --trace-range <BEGIN> <END>",
+               .description = "Record text trace snapshots within an inclusive mtime range."},
               {.option = "--trace-bpred", .description = "Record branch prediction events."},
-              {.option = "-I, --dump-init <N>",
-               .description = "Dump architectural memory and TLB state at cycle N."},
               {.option = "--instmix", .description = "Write an instruction mix report on exit."}}},
         {.title = "Interactive mode and reports",
          .entries =
@@ -1825,8 +1759,8 @@ auto needs_memory_image(const ParseResult& result) -> bool {
               {.option = "--mission <FILE>",
                .description = "Load a lesson mission (requires --class and --tui)."},
               {.option = "--high-contrast", .description = "Enable the high-contrast TUI palette."},
-              {.option = "--mouse-sensitivity <F>",
-               .description = "Set TUI mouse sensitivity (default: 1.0)."},
+              {.option = "--step-delay <US>",
+               .description = "Pause execution for US microseconds per cycle/step."},
               {.option = "--inspection-output <FILE>",
                .description = "Write paused-state TUI inspection reports."},
               {.option = "--summary <FILE>",

@@ -5,6 +5,7 @@
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <iostream>
 #include <limits>
 #include <optional>
 #include <sstream>
@@ -92,8 +93,7 @@ inline auto parse_isa_preset_string(std::string_view val) -> std::optional<simrv
         return simrv::isa::IsaPreset::GC;
     }
     if (iequals(val, "gcv") || iequals(val, "rv32gcv") || iequals(val, "rv64gcv") ||
-        iequals(val, "gczbv") || iequals(val, "rv32gczbv") || iequals(val, "rv64gczbv") ||
-        iequals(val, "gcbv") || iequals(val, "rv32gcbv") || iequals(val, "rv64gcbv")) {
+        iequals(val, "gczbv") || iequals(val, "rv32gczbv") || iequals(val, "rv64gczbv")) {
         return simrv::isa::IsaPreset::GCV;
     }
     return std::nullopt;
@@ -288,7 +288,8 @@ inline auto parse_cpu_config_stream(std::istream& stream, simrv::pipeline::CpuMo
         SocMetadata,
         MemoryMetadata,
         BootMetadata,
-        UartMetadata
+        DeviceMetadata,
+        SmpMetadata
     };
     Section current_section = Section::Global;
 
@@ -350,8 +351,10 @@ inline auto parse_cpu_config_stream(std::istream& stream, simrv::pipeline::CpuMo
                 current_section = Section::MemoryMetadata;
             } else if (detail::iequals(sec_name, "boot")) {
                 current_section = Section::BootMetadata;
-            } else if (detail::iequals(sec_name, "device.uart")) {
-                current_section = Section::UartMetadata;
+            } else if (sec_name.starts_with("device.") || sec_name.starts_with("device")) {
+                current_section = Section::DeviceMetadata;
+            } else if (sec_name.starts_with("smp")) {
+                current_section = Section::SmpMetadata;
             } else {
                 simrv::log::warn("Unknown CPU config section: [{}]", sec_name);
             }
@@ -369,7 +372,8 @@ inline auto parse_cpu_config_stream(std::istream& stream, simrv::pipeline::CpuMo
         // SoC metadata is parsed separately by parse_soc_config_stream. Keep the
         // combined preset file valid when it is consumed as a CPU model.
         if (current_section == Section::SocMetadata || current_section == Section::MemoryMetadata ||
-            current_section == Section::BootMetadata || current_section == Section::UartMetadata) {
+            current_section == Section::BootMetadata ||
+            current_section == Section::DeviceMetadata || current_section == Section::SmpMetadata) {
             continue;
         }
 
@@ -410,6 +414,16 @@ inline auto parse_cpu_config_stream(std::istream& stream, simrv::pipeline::CpuMo
                     // ISA preset for the single-letter portion.
                     if (base_preset.has_value()) {
                         config.isa_preset = *base_preset;
+                    } else if (detail::iequals(val_str, "gcbv") ||
+                               detail::iequals(val_str, "rv32gcbv") ||
+                               detail::iequals(val_str, "rv64gcbv") ||
+                               detail::iequals(val_str, "gcb") ||
+                               detail::iequals(val_str, "rv32gcb") ||
+                               detail::iequals(val_str, "rv64gcb")) {
+                        simrv::log::warn(
+                            "Legacy draft ISA shorthand '{}' is deprecated and retired in 3.0; use "
+                            "ratified preset 'gczbv' or 'gczb' instead",
+                            val_str);
                     } else {
                         simrv::log::warn("Unknown ISA preset '{}'", val_str);
                     }
@@ -419,6 +433,17 @@ inline auto parse_cpu_config_stream(std::istream& stream, simrv::pipeline::CpuMo
                     }
                 }
                 const auto unquoted = detail::unquote(val_str);
+                if (detail::iequals(unquoted, "gczb") || detail::iequals(unquoted, "rv32gczb") ||
+                    detail::iequals(unquoted, "rv64gczb") || detail::iequals(unquoted, "gczbv") ||
+                    detail::iequals(unquoted, "rv32gczbv") ||
+                    detail::iequals(unquoted, "rv64gczbv") || unquoted.contains("gczb")) {
+                    for (const auto& ext : {"zba", "zbb", "zbc", "zbs"}) {
+                        if (std::ranges::find(config.isa_extensions, ext) ==
+                            config.isa_extensions.end()) {
+                            config.isa_extensions.emplace_back(ext);
+                        }
+                    }
+                }
                 if (unquoted.starts_with("rv32") || unquoted.starts_with("RV32") ||
                     (base_preset.has_value() && (*base_preset == simrv::isa::IsaPreset::E ||
                                                  *base_preset == simrv::isa::IsaPreset::EM ||
@@ -1094,8 +1119,47 @@ inline auto parse_soc_config_stream(std::istream& stream, simrv::core::SoCConfig
 
 inline auto parse_soc_config(const std::filesystem::path& path, simrv::core::SoCConfig& config)
     -> bool {
+    if (path == "-") {
+        return parse_soc_config_stream(std::cin, config);
+    }
     std::ifstream file(path);
     return file.is_open() && parse_soc_config_stream(file, config);
+}
+
+/**
+ * @brief Load SoC configuration from a filesystem path and validate its regions and devices.
+ */
+inline auto load_soc_config(const std::filesystem::path& path, simrv::core::SoCConfig& config)
+    -> bool {
+    if (!parse_soc_config(path, config)) return false;
+    const auto valid = config.validate();
+    if (!valid) {
+        simrv::log::warn("Invalid SoC configuration: {}", valid.error());
+        return false;
+    }
+    return true;
+}
+
+/**
+ * @brief Load a combined CPU and SoC platform configuration from a filesystem path.
+ */
+inline auto load_platform_config(const std::filesystem::path& path,
+                                 simrv::pipeline::CpuModelConfig& cpu_model,
+                                 simrv::core::SoCConfig& soc_config) -> bool {
+    std::string content;
+    if (path == "-") {
+        content.assign((std::istreambuf_iterator<char>(std::cin)),
+                       std::istreambuf_iterator<char>());
+    } else {
+        std::ifstream file(path);
+        if (!file.is_open()) return false;
+        content.assign((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
+    }
+    std::istringstream stream_cpu{content};
+    std::istringstream stream_soc{content};
+    (void)parse_cpu_config_stream(stream_cpu, cpu_model);
+    (void)parse_soc_config_stream(stream_soc, soc_config);
+    return true;
 }
 
 /**
@@ -1112,6 +1176,9 @@ inline auto parse_cpu_config_string(std::string_view content,
  */
 inline auto parse_cpu_config(const std::filesystem::path& path,
                              simrv::pipeline::CpuModelConfig& config) -> bool {
+    if (path == "-") {
+        return parse_cpu_config_stream(std::cin, config);
+    }
     std::ifstream file(path);
     if (!file.is_open()) {
         return false;

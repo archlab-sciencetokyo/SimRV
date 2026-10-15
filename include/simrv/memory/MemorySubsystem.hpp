@@ -44,6 +44,11 @@ class MemorySubsystem {
     /// Access the immutable DRAM address range selected by the owning machine.
     [[nodiscard]] auto memory_geometry() const noexcept -> const simrv::core::MemoryGeometry&;
 
+    /// Direct DMA read from guest physical memory with cache line invalidation
+    auto dma_read(simrv::xlen::Address paddr, void* dst, size_t len) -> bool;
+    /// Direct DMA write to guest physical memory with cache line invalidation
+    auto dma_write(simrv::xlen::Address paddr, const void* src, size_t len) -> bool;
+
    private:
     simrv::core::Machine& machine_;
     std::unique_ptr<simrv::Mmu> mmu_;

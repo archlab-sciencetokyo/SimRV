@@ -52,7 +52,10 @@ Expose an existing host directory to Linux guests through VirtIO-FS. Guest write
 the selected directory and persist after SimRV exits.
 .TP
 .B \-f, \-\-fdt, \-\-dtb \fIfile\fR
-Load a device-tree blob for operating-system boot.
+Load the required device tree for Linux boot. If omitted, SimRV reads
+.B SIMRV_LINUX_DTB
+from the environment. SimRV patches the RAM range and CPU status to match configured memory and
+hart count; the blob must contain enough CPU nodes for all configured harts.
 .TP
 .B \-H, \-\-tohost-addr \fIaddress\fR
 Set the guest \fBtohost\fR termination address.
@@ -84,14 +87,14 @@ subsequent multi-letter extensions are separated by underscores. \fBG\fR implies
 .B \-\-vlen=\fIbits\fR
 Set the vector register length from 128 through 1024 bits.
 .TP
-.B \-\-soc=\fIpreset\fR
-Select a complete SoC platform: \fBvirt-pcie\fR, \fBvirt-mmio\fR, or \fBrvcomp\fR.
+.B \-\-config=\fIpreset|file\fR
+Select a complete platform preset (\fBvirt-pcie\fR, \fBvirt-mmio\fR, or \fBrvcomp\fR) or load a platform configuration file defining SoC topology and microarchitectural parameters.
 .TP
 .B \-\-net=\fIbackend\fR
 Select the VirtIO network backend: \fBuser\fR, \fBtap\fR, \fBsocket\fR, or \fBnone\fR.
 .TP
-.B \-\-dump-soc-manifest=\fIpreset\fR [\fIfile\fR]
-Write the normalized SoC registry as JSON.
+.B \-\-dump-soc-manifest=\fIpreset|file\fR [\fIoutput\fR]
+Write the normalized SoC registry as JSON for a built-in preset or platform configuration file. Pass \fB\-\fR or omit output to stream JSON to stdout.
 .SH EXECUTION AND PIPELINE
 .TP
 .B \-s, \-e, \-\-steps \fIn\fR
@@ -114,20 +117,16 @@ Select the branch predictor: \fBnone\fR, \fBstatic\fR, \fBbimodal\fR,
 Configure branch-history, branch-target-buffer, and return-address-stack sizes.
 .TP
 .B \-\-cpu-preset=\fIpreset\fR
-Select a built-in CPU model (\fBtiny\fR, \fBbalanced\fR, or \fBperformance\fR)
-or load a model configuration file.
-.TP
-.B \-\-cpu-config=\fIfile\fR
-Load a microarchitectural latency configuration.
+Select a built-in CPU model (\fBtiny\fR, \fBbalanced\fR, or \fBperformance\fR).
 .TP
 .B \-\-dump-cpu-model=\fImodel\fR [\fIfile\fR]
-Export a normalized CPU model configuration.
+Export a normalized CPU model configuration. Pass \fB\-\fR or omit file to stream JSON to stdout.
 .TP
 .B \-\-scaffold-cpu-model [\fIfile\fR]
-Generate a starter CPU model configuration.
+Generate a starter CPU model configuration. Pass \fB\-\fR or omit file to stream JSON to stdout.
 .TP
-.B \-\-validate-cpu-config=\fIfile\fR
-Validate and lint a CPU model configuration.
+.B \-\-validate-config=\fIfile\fR, \-\-validate-cpu-config=\fIfile\fR
+Validate and lint a CPU model or unified SoC platform configuration.
 .TP
 .B \-\-cfu-plugin=\fIfile.so\fR
 Load a dynamic custom function-unit plugin.
@@ -167,14 +166,10 @@ retirement, and level 4 detailed state.
 Write an aligned architectural trace to \fBtrace/trace.txt\fR.
 .TP
 .B \-r, \-\-trace-range \fIbegin end\fR
-Capture a trace for an inclusive execution range.
-.TP
-.B \-\-trace-pc-period=\fIn\fR
-Sample the program counter every \fIn\fR steps into \fBtrace/tracepc.txt\fR.
+Capture text trace snapshots within an inclusive \fBmtime\fR range.
 .TP
 .B \-\-trace-pc-range=\fIstart-end\fR
-Filter architectural trace events by an inclusive program-counter range. The range form of
-\fB\-\-trace-pc\fR is an alias; use \fB\-\-trace-pc-period\fR for sampling.
+Filter architectural trace events by an inclusive program-counter range.
 .TP
 .B \-\-trace-bpred
 Record branch-prediction decisions.
@@ -184,9 +179,6 @@ Record MMIO transactions in \fBtrace/dlog.txt\fR.
 .TP
 .B \-\-trap-log=\fIfile\fR
 Write architectural trap and SBI events to a file.
-.TP
-.B \-I, \-\-dump-init=\fIcycle\fR
-Dump initial architectural memory and TLB state at a selected cycle.
 .SH DEBUGGING AND CHECKPOINTS
 .TP
 .B \-\-gdb

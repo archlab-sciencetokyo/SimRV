@@ -4,8 +4,7 @@ add_library(simrv-project-options INTERFACE)
 target_compile_features(simrv-project-options INTERFACE cxx_std_23)
 target_compile_definitions(
   simrv-project-options
-  INTERFACE SIMRV_XLEN=${SIMRV_XLEN} SIMRV_DRAM_SIZE_MB=${SIMRV_DRAM_SIZE_MB}
-            SIMRV_DISK_SIZE_MB=${SIMRV_DISK_SIZE_MB})
+  INTERFACE SIMRV_XLEN=${SIMRV_XLEN} SIMRV_DRAM_SIZE_MB=${SIMRV_DRAM_SIZE_MB})
 target_compile_options(
   simrv-project-options
   INTERFACE

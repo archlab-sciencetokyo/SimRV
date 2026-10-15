@@ -10,11 +10,11 @@ VirtioPciSound::VirtioPciSound() : VirtioPciDevice(virtio::kDevIdSound, 0x040100
     init_bar(4, sizeof(virtio::VirtioSndConfig), false, false);
 }
 
-auto VirtioPciSound::read_device_config(simrv::xlen::Address offset, uint8_t size) -> uint32_t {
+auto VirtioPciSound::read_device_config(PciBarOffset offset, PciAccessBytes size) -> PciMmioData {
     return backend_.read_config(offset, size);
 }
 
-void VirtioPciSound::on_queue_notify(uint16_t queue_index) {
+void VirtioPciSound::on_queue_notify(virtio::VirtioQueueIndex queue_index) {
     if (queue_index >= queues_.size()) return;
     auto& q = queues_[queue_index];
 

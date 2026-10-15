@@ -3,7 +3,7 @@ cmake_minimum_required(VERSION 3.31...4.3)
 # Keep the release version authoritative here. The project() version is derived
 # from it so CMake, BuildInfo, CPack, release tooling, and citation checks use
 # the same source value.
-set(SIMRV_VERSION "3.0.0-rc.9")
+set(SIMRV_VERSION "3.0.0-rc.10")
 string(REGEX REPLACE "-.*$" "" SIMRV_PROJECT_VERSION "${SIMRV_VERSION}")
 
 project(
@@ -243,9 +243,6 @@ endif()
 set(SIMRV_DRAM_SIZE_MB
     "256"
     CACHE STRING "DRAM size in megabytes (must be power of 2)")
-set(SIMRV_DISK_SIZE_MB
-    "256"
-    CACHE STRING "Disk size in megabytes")
 set(SIMRV_SPIKE_PATH
     "spike"
     CACHE
@@ -271,7 +268,6 @@ add_subdirectory(src/memory)
 add_subdirectory(src/device)
 add_subdirectory(src/debug)
 add_subdirectory(src/tui)
-add_subdirectory(src/net)
 # Runtime is the composition target and must be declared after all component
 # object targets.
 add_subdirectory(src/core)

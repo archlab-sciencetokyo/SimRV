@@ -12,6 +12,7 @@
 
 #include "simrv/core/Machine.hpp"
 #include "simrv/tui/Tui.hpp"
+#include "simrv/util/FormatUtil.hpp"
 
 namespace simrv::device {
 
@@ -38,6 +39,11 @@ Uart::~Uart() {
 
 void Uart::start_input_thread() {
     if (machine_.tui_enabled()) return;  // TUI manages its own input
+    if (::isatty(STDIN_FILENO) && !simrv::util::owns_interactive_terminal()) {
+        // Prevent SIGTTIN suspension when SimRV is executed in the background of an interactive
+        // shell session.
+        return;
+    }
     input_thread_stop_.store(false, std::memory_order_relaxed);
     input_thread_ = std::thread([this]() -> void {
         constexpr int stdin_fd = STDIN_FILENO;

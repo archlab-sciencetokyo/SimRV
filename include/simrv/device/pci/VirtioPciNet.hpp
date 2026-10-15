@@ -22,9 +22,10 @@ class VirtioPciNet : public VirtioPciDevice {
     void poll_backend();
 
    protected:
-    auto get_device_features(uint32_t select) -> uint32_t override;
-    void on_queue_notify(uint16_t queue_index) override;
-    auto read_device_config(simrv::xlen::Address offset, uint8_t size) -> uint32_t override;
+    auto get_device_features(virtio::VirtioFeatureWord select)
+        -> virtio::VirtioFeatureWord override;
+    void on_queue_notify(virtio::VirtioQueueIndex queue_index) override;
+    auto read_device_config(PciBarOffset offset, PciAccessBytes size) -> PciMmioData override;
 
    private:
     virtio::NetBackend backend_;

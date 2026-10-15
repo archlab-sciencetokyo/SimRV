@@ -7,6 +7,7 @@
 #include <cstddef>
 #include <span>
 
+#include "simrv/CompilerHints.hpp"
 #include "simrv/core/BuildConfig.hpp"
 #include "simrv/xlen/AddressTypes.hpp"
 
@@ -18,10 +19,9 @@ inline constexpr simrv::xlen::Address kDramSize =
     static_cast<simrv::xlen::Address>(SIMRV_DRAM_SIZE_MB * 1024u * 1024u);
 
 /// Overflow-safe containment test for a physical memory region.
-[[nodiscard]] constexpr auto address_range_contains(simrv::xlen::Address base,
-                                                    simrv::xlen::Address extent,
-                                                    simrv::xlen::Address address, size_t size)
-    -> bool {
+[[nodiscard]] SIMRV_ALWAYS_INLINE constexpr auto address_range_contains(
+    simrv::xlen::Address base, simrv::xlen::Address extent, simrv::xlen::Address address,
+    size_t size) noexcept -> bool {
     return size != 0 && size <= extent && address >= base && address - base <= extent - size;
 }
 
@@ -49,20 +49,22 @@ class RamView {
     [[nodiscard]] constexpr auto span() const noexcept -> std::span<simrv::xlen::Byte> {
         return {data_, static_cast<std::size_t>(size_)};
     }
-    [[nodiscard]] constexpr auto contains(simrv::xlen::Address address,
-                                          size_t bytes = 1) const noexcept -> bool {
+    [[nodiscard]] SIMRV_ALWAYS_INLINE constexpr auto contains(simrv::xlen::Address address,
+                                                              size_t bytes = 1) const noexcept
+        -> bool {
         return data_ != nullptr && address_range_contains(base_, size_, address, bytes);
     }
-    [[nodiscard]] constexpr auto contains(simrv::xlen::PhysAddr address,
-                                          size_t bytes = 1) const noexcept -> bool {
+    [[nodiscard]] SIMRV_ALWAYS_INLINE constexpr auto contains(simrv::xlen::PhysAddr address,
+                                                              size_t bytes = 1) const noexcept
+        -> bool {
         return contains(address.raw(), bytes);
     }
-    [[nodiscard]] constexpr auto unchecked_ptr(simrv::xlen::Address address) const noexcept
-        -> simrv::xlen::Byte* {
+    [[nodiscard]] SIMRV_ALWAYS_INLINE constexpr auto unchecked_ptr(
+        simrv::xlen::Address address) const noexcept -> simrv::xlen::Byte* {
         return data_ + (address - base_);
     }
-    [[nodiscard]] constexpr auto unchecked_ptr(simrv::xlen::PhysAddr address) const noexcept
-        -> simrv::xlen::Byte* {
+    [[nodiscard]] SIMRV_ALWAYS_INLINE constexpr auto unchecked_ptr(
+        simrv::xlen::PhysAddr address) const noexcept -> simrv::xlen::Byte* {
         return unchecked_ptr(address.raw());
     }
 

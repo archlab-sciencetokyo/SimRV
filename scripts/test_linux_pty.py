@@ -57,7 +57,7 @@ def main():
     mem_img = os.environ.get("SIMRV_LINUX_MEM_IMG", os.path.join(images_dir, "opensbi-linux-payload.elf"))
     disk_img_default = os.path.join(images_dir, "rootfs.img")
     disk_img = os.environ.get("SIMRV_LINUX_DISK_IMG", disk_img_default)
-    dtb_img = os.environ.get("SIMRV_LINUX_DTB", "dynamic")
+    dtb_img = os.environ.get("SIMRV_LINUX_DTB", os.path.join(images_dir, "devicetree.dtb"))
     timeout_secs = int(os.environ.get("SIMRV_TEST_TIMEOUT", "300"))
     instruction_limit = os.environ.get("SIMRV_TEST_INSTRUCTIONS", "20000000000")
     expected_cpus = int(os.environ.get("SIMRV_TEST_EXPECT_CPUS", "0"))
@@ -77,6 +77,9 @@ def main():
     if not os.path.exists(mem_img):
         print(f"Skip: Linux memory image not found at '{mem_img}'", file=sys.stderr)
         sys.exit(2)
+    if not os.path.exists(dtb_img):
+        print(f"Error: Linux device tree not found at '{dtb_img}'", file=sys.stderr)
+        sys.exit(2)
 
     cmd = [
         simrv_bin,
@@ -86,8 +89,7 @@ def main():
         "--tui",
         "-e", instruction_limit  # Leave enough execution time for rootfs handoff and login.
     ]
-    if dtb_img and dtb_img != "dynamic" and dtb_img != "NONE" and os.path.exists(dtb_img):
-        cmd.extend(["-f", dtb_img])
+    cmd.extend(["-f", dtb_img])
     cmd.extend(shlex.split(os.environ.get("SIMRV_TEST_EXTRA_ARGS", "")))
 
     print(f"Running Linux PTY boot test: {' '.join(cmd)}")

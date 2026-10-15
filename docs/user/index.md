@@ -23,7 +23,7 @@ SimRV is an explainable, dual-width (RV32 / RV64) RISC-V architectural simulator
 
 SimRV simulates standard 32-bit and 64-bit RISC-V systems:
 
-- **ISA Support**: RV32GCBV / RV64GCBV (Base Integer `I`/`E`, Standard Multiply/Divide `M`, Atomic `A`, Single/Double Floating Point `F`/`D`, Compressed `C`, Bit Manipulation `B`, and Vector 1.0 `V`).
+- **ISA Support**: RV32GCZBV / RV64GCZBV (Base Integer `I`/`E`, Standard Multiply/Divide `M`, Atomic `A`, Single/Double Floating Point `F`/`D`, Compressed `C`, Bit Manipulation `B` (Zba/Zbb/Zbc/Zbs), and Vector 1.0 `V`).
 - **Privilege & System Architecture**: Machine (M), Supervisor (S), and User (U) privilege modes with PMP (Physical Memory Protection), Sv32 / Sv39 MMU page translation, CLINT / ACLINT timer and software interrupts, and PLIC / AIA (APLIC/IMSIC) interrupt routing.
 - **Microarchitectural Modeling**: Per-cycle transition kernels for three-stage, five-stage, and dual-issue pipelines with configurable branch prediction (static, bimodal, 2-level adaptive, RAS, BTB) and multi-level L1/L2/L3 cache hierarchies.
 - **Multi-Hart Coherence**: TileLink-C directory-based coherence hubs modeling MESI protocols for SMP configurations (2 to 16 harts).
@@ -105,8 +105,8 @@ simrv --cli -m program.elf
 # Run in cycle-accurate (CA) mode with step limit
 simrv --cli --ca -m program.elf -s 1000000
 
-# Load a custom CPU model preset
-simrv --cli --ca --cpu-preset configs/models/rvcomp.cfg -m program.elf
+# Load a platform configuration or custom CPU model
+simrv --cli --ca --config configs/models/rvcomp.cfg -m program.elf
 
 # Launch TUI workbench with loaded binary
 simrv -m program.elf
@@ -122,27 +122,31 @@ simrv -m program.elf
 | `--ca` | Select cycle-accurate pipeline simulation kernel. |
 | `--ia` | Select fast instruction-accurate simulation mode. |
 | `-s, -e, --steps <N>` | Evaluate machine-wide instruction limit across all harts before stopping. |
-| `--cpu-preset <path.cfg>` | Load human-editable CPU microarchitecture preset. |
+| `--config <preset \| file>` | Select a platform preset (`virt-pcie`, `virt-mmio`, `rvcomp`) or custom configuration file. |
+| `--cpu-preset <preset>` | Select a built-in CPU model preset (`tiny`, `balanced`, `performance`). |
+| `--validate-config <file>` | Validate and lint a CPU model or SoC platform configuration file. |
 | `--isa <string>` | Select a supported base ISA preset; recognized ratified Z extensions may be listed with optional supported versions. |
-| `-p, --pipeline <type>` | Pipeline microarchitecture target (`three-stage`, `five-stage`, `dual-issue`). |
-| `-H, --tohost <addr>` | Specify physical address of `tohost` communication symbol for tests. |
+| `--pipeline <type>` | Pipeline microarchitecture target (`3stage`, `5stage`). |
+| `-H, --tohost-addr <addr>` | Specify physical address of `tohost` communication symbol for tests. |
 | `--summary <file>` | Write a machine-readable JSON execution summary when the run ends. |
 | `--events <file>` | Write newline-delimited lifecycle, interrupt, and DMA events for automation. |
 | `--buildroot-output <dir>` | Load firmware, DTB, and root filesystem from a Buildroot output directory or bundle. |
 | `--uart-transcript <file>` | Save guest UART output to a file while keeping the normal CLI, TUI, or server destination. |
+| `--step-delay <us>` | Pause execution for the specified microseconds per cycle or step. |
 | `--arch-trace <file>` | Write a versioned JSONL retirement trace (defaults to detailed mode unless an execution mode is explicitly selected). |
 | `--trace-level <0-4>` | Limit architectural event detail: devices, calls, retirement, or detailed state. |
 | `--trace-function <name>` | Filter attributed events to an exact ELF function symbol. |
 | `--trace-device <name>` | Filter component-attributed events to an exact component name. |
 | `--log-format <text \| json \| json-pretty>` | Select diagnostic log rendering; default is `text`. |
 | `--log-file <file>` | Mirror diagnostic messages to a file in the selected log format. |
+| `--log-stderr` | Route all simulator diagnostic messages to stderr instead of stdout for clean pipeline piping. |
 | `--trace` | Write an aligned, labeled architectural instruction trace to `<trace-dir>/trace.txt`. |
-| `--tracepc` | Write PC stream trace to `<trace-dir>/tracepc.txt`. |
+| `--trace-pc-range <range>` | Filter `--arch-trace` events to the specified inclusive PC range. |
 | `--gdb` | Start GDB Remote Serial Protocol (RSP) server. |
 | `--gdb-port <port>` | Set GDB RSP TCP listener port (default: 1234). |
 | `--isa-info` | Show the qualified ISA, vector, privilege, and debugger capability contract. |
 | `--doctor` | Diagnose terminal presentation and portable-runtime conditions. |
-| `-v, --version` | Display version and build information. |
+| `--version` | Display version and build information. |
 | `-h, --help` | Show full command-line help message. |
 
 `--log-format` controls simulator diagnostic messages only. JSON diagnostic output uses one record
@@ -238,9 +242,9 @@ simrv --cli -m program.elf --arch-trace results/retire.jsonl --trace-level 4 \
 are conjunctive. `--trace-function` uses the loaded ELF symbol table and matches the exact symbol
 containing the event PC; events without a resolvable symbol are excluded. `--trace-device` matches
 the event envelope's `component` exactly and excludes events without a component attribution. The
-PC range is inclusive and accepts hexadecimal or decimal addresses. `--trace-pc START-END` is an
-alias for `--trace-pc-range`. Use `--trace-pc-period N` to sample the PC trace; numeric values for
-`--trace-pc` are rejected with a migration hint.
+PC range is inclusive and accepts hexadecimal or decimal addresses. Use `--trace-pc-range START-END`
+to filter events in an architectural trace. The ambiguous `--trace-pc` option is rejected with a
+migration hint to `--trace-pc-range`.
 Events without an architectural PC (for example bus transactions and interrupt assertion edges) are
 excluded while a PC range is active. Filtering occurs before event serialization. Lifecycle records
 in `events.jsonl` are always retained, so filters cannot hide run completion or failure. Selected
@@ -490,15 +494,15 @@ simrv --cli -m build/my_program.elf -H 0x80001000
 
 ## 6. Full-System Linux Emulation
 
-SimRV boots full Linux distributions with OpenSBI and dynamic device-tree generation.
+SimRV boots full Linux distributions with OpenSBI and a supplied device tree. SimRV patches the
+tree's RAM range and CPU status from the configured memory size and hart count.
 
 ```bash
 # Launch the bundled OpenSBI + Linux image with its root filesystem
 simrv --os \
       -m linux-images/rv64/alpine-gui/opensbi-linux-payload.elf \
       -D linux-images/rv64/alpine-gui/rootfs.img \
-      -f linux-images/rv64/alpine-gui/devicetree.dtb \
-      --smp 2
+      -f linux-images/rv64/alpine-gui/devicetree.dtb
 ```
 
 ### Full-System CLI Options
@@ -509,10 +513,13 @@ simrv --os \
 - `--virtiofs <DIR>`: Expose a selected host directory to Linux guests through VirtIO-FS. Guest
   writes are immediately visible in that host directory; see
   [Linux and Buildroot](linux.md#share-a-host-directory-with-virtio-fs).
-- `--smp <2..16>`: Number of active SMP harts (default is 1 for single-hart execution).
-- `--dtb <virt.dtb>`: Optional custom Device Tree Blob (SimRV automatically synthesizes a device tree if omitted).
+- `--smp <N>`: Number of active SMP harts (default is 1). The supplied DTB must contain at least
+  that many CPU nodes.
+- `--dtb <virt.dtb>`: Required Device Tree Blob for Linux boots. It can also come from
+  `SIMRV_LINUX_DTB`. The tree must contain CPU nodes for every configured hart; SimRV updates its
+  RAM range and enables the configured harts.
 - `--dram-size <SIZE>`, `--ram-size <SIZE>`: Guest DRAM size with an optional
-  scaled suffix such as `128M` or `2G` (official release default: 256 MiB).
+  scaled suffix such as `128M` or `2G` (Linux default: 1 GiB).
 
 ---
 
@@ -603,7 +610,8 @@ simrv-benchmark --suite realworld --latex-table
 - **Q: Where are instruction traces written when passing `--trace`?**
   *A:* Traces are saved in the `trace/` directory relative to your working directory by default.
   Use `--trace-dir DIR` to select another root. The `trace.txt` file presents labeled, aligned
-  cycle, instruction, register, and CSR fields; periodic PC samples remain in `tracepc.txt`.
+  cycle, instruction, register, and CSR fields; `--trace-range BEGIN END` limits snapshots to an
+  inclusive `mtime` range.
 
 - **Q: How can I connect GDB to debug a running binary?**
   *A:* Launch SimRV with `--gdb --cli -m program.elf`, then in another terminal run:

@@ -24,9 +24,9 @@ class VirtioPciInput : public VirtioPciDevice {
     void push_mouse_wheel(int32_t delta);
 
    protected:
-    void on_queue_notify(uint16_t queue_index) override;
-    auto read_device_config(simrv::xlen::Address offset, uint8_t size) -> uint32_t override;
-    void write_device_config(simrv::xlen::Address offset, uint32_t val, uint8_t size) override;
+    void on_queue_notify(virtio::VirtioQueueIndex queue_index) override;
+    auto read_device_config(PciBarOffset offset, PciAccessBytes size) -> PciMmioData override;
+    void write_device_config(PciBarOffset offset, PciMmioData val, PciAccessBytes size) override;
 
    private:
     void process_eventq();

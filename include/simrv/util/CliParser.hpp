@@ -23,7 +23,6 @@ enum class CliAction : uint8_t {
     ShowIsaInfo,
     Doctor,
     ExplainInstruction,
-    Attach,
     DumpCpuModel,
     ExportSoCManifest,
     ValidateCpuModel
@@ -60,8 +59,6 @@ struct RuntimeOptions {
 
     simrv::xlen::Address start_pc = simrv::boot::kStartPc;
     simrv::xlen::Counter fincnt = std::numeric_limits<simrv::xlen::Counter>::max();
-    simrv::xlen::Counter memimg = std::numeric_limits<simrv::xlen::Counter>::max();
-    simrv::xlen::Counter strace = 0;
     simrv::xlen::Counter trace_begin = std::numeric_limits<simrv::xlen::Counter>::max();
     simrv::xlen::Counter trace_end = std::numeric_limits<simrv::xlen::Counter>::max();
     simrv::xlen::Counter enabletimer = 0UL;
@@ -82,6 +79,7 @@ struct RuntimeOptions {
     bool quiet = false;
     std::optional<simrv::log::Level> log_level;
     simrv::log::Format log_format = simrv::log::Format::Text;
+    bool log_stderr = false;
     bool dlog_mode = false;
     bool traplog_mode = false;
     bool use_disk = false;
@@ -108,18 +106,16 @@ struct RuntimeOptions {
     std::string spike_bin = "spike";
     std::string spike_elf;
 
-    std::string fn_cpuconfig;
+    std::string fn_config;
     std::optional<simrv::pipeline::CpuModelPreset> cpu_model_preset;
     std::string dump_cpu_model_preset;
     std::string dump_cpu_model_output;
     std::string soc_manifest_preset;
     std::string soc_manifest_output;
     std::string fn_cfu_plugin;
-    std::string fn_dump_dmem;
     std::optional<bool> bram_prewarm;
     uint64_t step_delay_us = 0;
     uint32_t explain_inst_val = 0;
-    double mouse_sensitivity = 1.0;
     unsigned int vlen = 0;
     uint32_t num_harts = 1;
     uint32_t smp_quantum = 100;
@@ -129,12 +125,8 @@ struct RuntimeOptions {
     bool explicit_smp_mode = false;
     uint64_t dram_size = 0;
     simrv::core::PlatformProfile platform_profile = simrv::core::PlatformProfile::Pcie;
-    std::string soc_preset = "virt-pcie";
+    std::string config_target = "virt-pcie";
     std::string net_mode = "user";
-    bool server_mode = false;
-    std::string server_endpoint;
-    bool attach_mode = false;
-    std::string attach_endpoint;
 
     [[nodiscard]] auto to_machine_config() const -> simrv::core::MachineConfig;
 };

@@ -25,7 +25,6 @@ struct TuiPreferences {
     bool class_mode = false;
     bool student_guide = false;
     uint32_t target_fps = 60;
-    double mouse_sensitivity = 1.0;
 
     [[nodiscard]] static auto default_path() -> std::filesystem::path;
     [[nodiscard]] auto load(const std::filesystem::path& path) -> bool;

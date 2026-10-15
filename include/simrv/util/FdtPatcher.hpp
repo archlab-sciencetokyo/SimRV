@@ -1,0 +1,24 @@
+#pragma once
+
+#include <cstdint>
+#include <expected>
+#include <span>
+#include <string>
+#include <vector>
+
+namespace simrv::util {
+
+struct FdtFramebufferInfo {
+    uint32_t width = 0;
+    uint32_t height = 0;
+    uint32_t stride = 0;
+    uint64_t base = 0;
+    uint64_t size = 0;
+};
+
+/** Patch a supplied flattened device tree to match the active SimRV RAM and hart count. */
+auto patch_fdt(std::span<const uint8_t> blob, uint64_t dram_base, uint64_t dram_size,
+               uint32_t num_harts, FdtFramebufferInfo* out_fb = nullptr)
+    -> std::expected<std::vector<uint8_t>, std::string>;
+
+}  // namespace simrv::util

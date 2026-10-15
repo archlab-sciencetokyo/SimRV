@@ -11,7 +11,7 @@ SimRV supports full Linux OS boot as part of its integration validation gate. Yo
 
 - **`SIMRV_LINUX_MEM_IMG`**: OpenSBI `FW_PAYLOAD` convenience image containing Linux
 - **`SIMRV_LINUX_DISK_IMG`**: Root filesystem image
-- **`SIMRV_LINUX_DTB`** (optional): Device tree blob
+- **`SIMRV_LINUX_DTB`**: Required device tree blob for Linux boots when `-f/--dtb` is omitted
 
 Every build also publishes standalone `Image`, `opensbi-dynamic.bin`, `devicetree.dtb`, and
 `manifest.json` artifacts. The payload is convenient for SimRV; FPGA bootloaders should use
@@ -45,7 +45,44 @@ building them from source.
 
 # Show full make/compiler commands when diagnosing a failed build
 ./scripts/build-linux-image.sh --verbose
+
+# Reuse the published kernel if its architecture, profile, initramfs, and config match
+./scripts/build-linux-image.sh --reuse-kernel
 ```
+
+With `--reuse-kernel`, the builder preserves the existing Linux build tree while checking the
+published image manifest and kernel hash. It skips the kernel compile only when the architecture,
+Linux version, profile, rootfs, initramfs, and kernel configuration all match. If they differ, it
+cleans generated kernel objects and rebuilds using the selected configuration.
+
+### Selecting Guest Component Versions
+
+The builder accepts version overrides for Linux, OpenSBI, BusyBox, Alpine, and Buildroot. For
+example:
+
+```bash
+./scripts/build-linux-image.sh --linux-version 7.2.10 --opensbi-version 1.9 \
+    --alpine-version 3.24.2
+```
+
+The current defaults are Linux 7.2.10, OpenSBI 1.9, BusyBox 1.38.0, Alpine 3.24.2, and Buildroot
+2025.02.18. Buildroot stays on its long-term-support series by default. When selecting another
+Buildroot release, pass its archive SHA-256 as `--buildroot-sha256` as well; the script verifies
+the archive before extracting it. Source archives are cached by version, so switching versions
+keeps the previously downloaded sources available.
+
+Check upstream versions without starting a build:
+
+```bash
+./scripts/build-linux-image.sh --check-updates
+```
+
+To review and save available upstream versions to `scripts/linux-versions.conf`, then build using
+them, run `--update-versions`. It asks for confirmation first. Add `--prune-old-sources` to offer
+an additional confirmation before deleting cached source archives and trees for replaced versions.
+`--yes` accepts both prompts for unattended use. Buildroot checks both its LTS and stable lines,
+but a new LTS pin must be selected manually with `--buildroot-version` and a verified
+`--buildroot-sha256` before it can be saved.
 
 This will:
 
@@ -55,7 +92,8 @@ This will:
 4. ✅ Create compatible images in `./linux-images/<arch>/<rootfs>-<profile>/`
 
 Build output is concise by default: timestamped stage markers and warnings/errors remain visible,
-while repetitive compiler command lines are suppressed. Use `--verbose` or set
+while repetitive compiler command lines are suppressed. Interactive concise builds show a small
+spinner during parallel make steps. Use `--verbose` or set
 `SIMRV_LINUX_VERBOSE=1` to restore the full make transcript. In interactive terminals, the
 builder also updates the terminal title, sends a completion notice, and emits clickable OSC 8
 links for the published image directory and manifest; redirected output stays escape-code free.
@@ -77,7 +115,10 @@ source ./linux-images/rv32/alpine-gui/setup.sh
 
 This exports `SIMRV_LINUX_MEM_IMG`, `SIMRV_LINUX_DISK_IMG`, and `SIMRV_LINUX_DTB`.
 It also exports `SIMRV_LINUX_IMAGE`, `SIMRV_LINUX_OPENSBI`, `SIMRV_LINUX_ROOTFS`, and
-`SIMRV_LINUX_PROFILE` for bootloaders and test harnesses.
+`SIMRV_LINUX_PROFILE` for bootloaders and test harnesses. It defines
+`simrv_linux_setup_network`, which runs the host TAP/NAT setup helper with `sudo`. The Alpine
+guest configures `eth0` as `10.0.2.2/24` and uses `10.0.2.1` as its gateway; call the helper before
+launching the guest when using the TAP backend.
 
 ### FPGA baseline profile
 
@@ -163,10 +204,10 @@ python3 scripts/check-linux-artifacts.py linux-images/rv64/alpine-debug
 The same profile is available through CMake as `linux-images-debug` when
 `SIMRV_ENABLE_LINUX_TOOLS` is enabled. The manifest records the exact kernel
 configuration hash and enabled debug feature set for reproducibility. Because this is an explicit
-early-userspace debug profile, its DTB also includes `rdinit=/init` and `loglevel=7`. Normal
-generated device trees use `loglevel=7`, so informational kernel messages remain visible on the
-boot console. The image templates also use `loglevel=7`; pass the profile's DTB with
-`-f "$SIMRV_LINUX_DTB"` to use its image-specific boot arguments.
+early-userspace debug profile, its DTB also includes `rdinit=/init` and `loglevel=7`. Image
+templates use the Linux default `loglevel=7`. Linux boots require a supplied DTB; SimRV patches
+its RAM range and CPU status to match `--dram-size` and `--smp` while preserving boot arguments.
+The DTB must include enough CPU nodes for the selected hart count.
 
 All profiles retain conventional built-in initramfs, serial console, VirtIO, ext4/JBD2, procfs,
 sysfs, and tmpfs support. Debug tracing is deliberately excluded from the normal GUI and FPGA
@@ -185,22 +226,25 @@ reboot     # Cleanly restarts the guest system
 
 The RV64 disk image contains an idempotent `start-jwm` helper. The image builder bundles the
 pinned desktop packages when the RISC-V user emulator is available; otherwise the helper falls
-back to installing them on the first networked boot. BusyBox `getty` authenticates on `ttyS0`, and
-root's `/root/.profile` starts the helper in the background only after a successful login. It waits
-for `/dev/fb0` and the VirtIO input device, then starts Xorg on the simulated framebuffer and JWM.
+back to installing them on the first networked boot. Getty provides login prompts on both `ttyS0`
+and framebuffer console `tty1`. After a successful root login on either console, `/root/.profile`
+starts the helper in the background, leaving the shell visible until Xorg takes over `tty1`. The
+helper waits for `/dev/fb0` and the VirtIO input device, then starts Xorg on the simulated
+framebuffer and JWM.
 The JWM Applications
-menu includes one SimRV Games submenu for Chess, Gomoku, Klondike, and Snake; it is rebuilt idempotently on every
-boot so persistent root filesystems do not accumulate duplicate menus. The guest log reports
+menu includes a System Monitor entry for `htop` and one SimRV Games submenu for Chess, Gomoku,
+Klondike, and Snake; these entries are rebuilt idempotently on every boot so persistent root
+filesystems do not accumulate duplicate menus. The guest log reports
 `[JWM]` and `[NET]` milestones on the UART, which makes the path suitable for headless CI smoke
 checks as well as interactive TUI/Sixel sessions. If the host terminal has no Sixel support, use
-the framebuffer or a plain terminal attachment; guest graphics are independent of Sixel
-presentation.
+the guest serial console; guest graphics are independent of Sixel presentation.
 
 The Alpine simulator image intentionally has an empty root password so serial login and privilege
 tests work out of the box. Set a board-specific password or key-based policy before using an image
 on shared or production FPGA hardware.
 
-For TAP networking, run `scripts/setup-simrv-tap.sh` before launching the guest. It configures the
+For TAP networking, run `simrv_linux_setup_network` after sourcing the generated `setup.sh`, or run
+`sudo scripts/setup-simrv-tap.sh` before launching the guest. It configures the
 gateway/NAT path and, when `socat` is available, relays UDP and TCP DNS on `10.0.2.1:53` to the
 host's first non-loopback resolver. The guest network service uses that gateway resolver first, which
 avoids depending on a WSL-specific resolver address.
@@ -367,10 +411,10 @@ Deletes the previous build and starts fresh.
 Control build parallelism:
 
 ```bash
-JOBS=4 ./scripts/build-linux-image.sh
+SIMRV_LINUX_JOBS=4 ./scripts/build-linux-image.sh
 ```
 
-Default is `$(nproc)` (number of CPU cores).
+The default is four jobs. Set `SIMRV_LINUX_JOBS` to a positive integer to use a different limit.
 
 ### Architecture Selection
 
@@ -399,10 +443,10 @@ cmake --build --preset rv64-release --target linux-images-buildroot
 ```text
 linux-build/
 ├── sources/
-│   ├── linux-7.2.9.tar.xz
+│   ├── linux-7.2.10.tar.xz
 │   ├── opensbi-1.9.tar.gz
 │   └── buildroot-2025.02.18.tar.xz  # Buildroot profile only
-├── linux-7.2.9/               # shared extracted kernel source/build tree
+├── linux-7.2.10/              # shared extracted kernel source/build tree
 │   └── vmlinux
 ├── initramfs-rv64/             # generated per architecture
 ├── rootfs-disk-rv64/            # recreated during each image build

@@ -29,6 +29,7 @@ namespace simrv::core {
 using isa::OperationId;
 namespace {
 SIMRV_ALWAYS_INLINE auto captures_tui_execution_detail(const Machine& machine) -> bool {
+    if (simrv::compiler::likely(!machine.tui_enabled())) return false;
     const auto sink = machine.telemetry_sink_raw();
     return sink && sink->captures_execution_detail();
 }
@@ -103,7 +104,7 @@ void CPU::run_fast_cycle_miss(Machine& machine) {
 
     tick_cycle_clock(machine);
 
-    if (machine.telemetry_sink_raw()) {
+    if (simrv::compiler::unlikely(machine.tui_enabled()) && machine.telemetry_sink_raw()) {
         record_trace_for_tui(machine);
     }
 
@@ -117,7 +118,8 @@ void CPU::run_fast_cycle_miss(Machine& machine) {
             }
         }
     }
-    if (e_icount != retired_before && machine.trace().needs_retiring_context()) {
+    if (e_icount != retired_before &&
+        simrv::compiler::unlikely(machine.trace().needs_retiring_context())) {
         machine.trace().log_architecture_retirement(*this, pipeline_context);
     }
     machine.record_retired_instructions(e_icount - retired_before);
@@ -279,7 +281,8 @@ void CPU::run_cycle(Machine& machine) {
         }
         tick_cycle_clock(machine, ca_pipeline.retired_this_cycle);
         if (ca_pipeline.retired_this_cycle) {
-            if (e_icount != retired_before && machine.trace().needs_retiring_context()) {
+            if (e_icount != retired_before &&
+                simrv::compiler::unlikely(machine.trace().needs_retiring_context())) {
                 machine.trace().log_architecture_retirement(*this, pipeline_context);
             }
             if (retain_retiring_context) {
@@ -312,8 +315,7 @@ void CPU::run_cycle(Machine& machine) {
             const bool copy_ctx = captures_tui_execution_detail(machine) ||
                                   machine.trace().is_architecture_trace_enabled() ||
                                   machine.lockstep_enabled() || machine.debugger_enabled() ||
-                                  machine.branch_trace_enabled() ||
-                                  (machine.configuration().execution.strace != 0);
+                                  machine.branch_trace_enabled();
             const bool inst_mix =
                 machine.instruction_mix_enabled() || captures_tui_execution_detail(machine);
             if (simrv::compiler::unlikely(copy_ctx && inst_mix)) {
@@ -357,7 +359,7 @@ void CPU::run_cycle(Machine& machine) {
     tick_cycle_clock(machine);
 
     // Record trace logs for active debug TUI components.
-    if (machine.telemetry_sink_raw()) {
+    if (simrv::compiler::unlikely(machine.tui_enabled()) && machine.telemetry_sink_raw()) {
         record_trace_for_tui(machine);
     }
 
@@ -371,7 +373,8 @@ void CPU::run_cycle(Machine& machine) {
             }
         }
     }
-    if (e_icount != retired_before && machine.trace().needs_retiring_context()) {
+    if (e_icount != retired_before &&
+        simrv::compiler::unlikely(machine.trace().needs_retiring_context())) {
         machine.trace().log_architecture_retirement(*this, pipeline_context);
     }
     machine.record_retired_instructions(e_icount - retired_before);
@@ -419,6 +422,7 @@ SIMRV_ALWAYS_INLINE void CPU::tick_cycle_clock(Machine& machine, bool interrupt_
 }
 
 void CPU::record_trace_for_tui(Machine& machine) {
+    if (simrv::compiler::likely(!machine.tui_enabled())) return;
     auto sink = machine.telemetry_sink_raw();
     if (!sink) return;
 
@@ -502,7 +506,7 @@ void CPU::run_cycle_baremetal_miss(Machine& machine) {
         clint_mmio.rtc_divider = 0;
         evaluate_timer_interrupt();
     }
-    if (machine.telemetry_sink_raw()) {
+    if (simrv::compiler::unlikely(machine.tui_enabled()) && machine.telemetry_sink_raw()) {
         record_trace_for_tui(machine);
     }
 
@@ -516,7 +520,8 @@ void CPU::run_cycle_baremetal_miss(Machine& machine) {
             }
         }
     }
-    if (e_icount != retired_before && machine.trace().needs_retiring_context()) {
+    if (e_icount != retired_before &&
+        simrv::compiler::unlikely(machine.trace().needs_retiring_context())) {
         machine.trace().log_architecture_retirement(*this, pipeline_context);
     }
     machine.record_retired_instructions(e_icount - retired_before);
@@ -563,8 +568,7 @@ void CPU::run_cycle_baremetal(Machine& machine) {
             const bool copy_ctx = captures_tui_execution_detail(machine) ||
                                   machine.trace().is_architecture_trace_enabled() ||
                                   machine.lockstep_enabled() || machine.debugger_enabled() ||
-                                  machine.branch_trace_enabled() ||
-                                  (machine.configuration().execution.strace != 0);
+                                  machine.branch_trace_enabled();
             const bool inst_mix =
                 machine.instruction_mix_enabled() || captures_tui_execution_detail(machine);
             if (simrv::compiler::unlikely(copy_ctx && inst_mix)) {
@@ -583,7 +587,7 @@ void CPU::run_cycle_baremetal(Machine& machine) {
                 clint_mmio.rtc_divider = 0;
                 evaluate_timer_interrupt();
             }
-            if (machine.telemetry_sink_raw()) {
+            if (simrv::compiler::unlikely(machine.tui_enabled()) && machine.telemetry_sink_raw()) {
                 record_trace_for_tui(machine);
             }
             if (simrv::compiler::unlikely(machine.breakpoint_manager().has_any())) {
@@ -597,7 +601,8 @@ void CPU::run_cycle_baremetal(Machine& machine) {
                     }
                 }
             }
-            if (e_icount != retired_before && machine.trace().needs_retiring_context()) {
+            if (e_icount != retired_before &&
+                simrv::compiler::unlikely(machine.trace().needs_retiring_context())) {
                 machine.trace().log_architecture_retirement(*this, pipeline_context);
             }
             machine.record_retired_instructions(e_icount - retired_before);
@@ -720,7 +725,7 @@ void CPU::run_memory_stage_baremetal(Machine& machine) {
 
     if (opcode == Opcode::Amo && funct5 == Funct5Amo::Lr) {
         state_.load_res = addr;
-        state_.reserved = 1;
+        state_.lr_reservation_active = true;
         machine.memory_.reservation_table().set_reservation(hart_id(), addr);
     }
 
@@ -738,7 +743,7 @@ void CPU::run_memory_stage_baremetal(Machine& machine) {
     // Store Phase
     if ((opcode == Opcode::Store) ||
         (opcode == Opcode::Amo &&
-         (funct5 == Funct5Amo::Sc && (ctx.wb_data == 0u) && (state_.reserved != 0u)))) {
+         (funct5 == Funct5Amo::Sc && (ctx.wb_data == 0u) && state_.lr_reservation_active))) {
         if (simrv::compiler::likely(machine.memory_geometry().contains(addr, access_size))) {
             // Check tohost writes (fast filter for 0x80000000 or 0x40000000 regions)
             if (simrv::compiler::unlikely((addr & 0xC0000000ULL) != 0)) {
@@ -829,7 +834,7 @@ void CPU::run_memory_stage_baremetal(Machine& machine) {
     if ((opcode == Opcode::Store) || (opcode == Opcode::StoreFp) ||
         (opcode == Opcode::Amo && funct5 != Funct5Amo::Lr)) {
         if (!ctx.pending_exception.has_value()) {
-            state_.reserved = 0;
+            state_.lr_reservation_active = false;
             machine.memory_.reservation_table().invalidate_range(ctx.mem_paddr, access_size,
                                                                  hart_id());
         }

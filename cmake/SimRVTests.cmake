@@ -127,9 +127,6 @@ if(BUILD_TESTING)
       APPEND
       PROPERTY LABELS thread)
   endif()
-  simrv_add_runtime_test(simrv-ipc-protocol-tests tests/IpcProtocolTests.cpp
-                         ipc-protocol "gate;regress;ipc;net;thread")
-
   add_library(test-cfu-plugin SHARED tests/TestCfuPlugin.cpp)
   target_include_directories(test-cfu-plugin
                              PRIVATE "${PROJECT_SOURCE_DIR}/include")
@@ -174,7 +171,7 @@ if(BUILD_TESTING)
   set_tests_properties(cli-isa-info PROPERTIES PASS_REGULAR_EXPRESSION "RV64GCBV"
                                                LABELS "gate;regress;cli;release")
   add_test(NAME cli-doctor COMMAND $<TARGET_FILE:SimRV> --doctor)
-  set_tests_properties(cli-doctor PROPERTIES PASS_REGULAR_EXPRESSION "attach transport"
+  set_tests_properties(cli-doctor PROPERTIES PASS_REGULAR_EXPRESSION "SimRV environment diagnostics"
                                              LABELS "gate;regress;cli;release")
   add_test(NAME cli-summary-rejects-stdout COMMAND $<TARGET_FILE:SimRV> --summary -)
   set_tests_properties(
@@ -299,7 +296,7 @@ if(BUILD_TESTING)
         "SIMRV_BIN=$<TARGET_FILE:SimRV>;SIMRV_IMAGES_DIR=${TEST_IMAGES_DIR}")
     set(LINUX_PTY_PROFILE_ENV
         "${LINUX_PTY_COMMON_ENV};SIMRV_LINUX_DTB=${TEST_IMAGES_DIR}/devicetree.dtb")
-    set(LINUX_PTY_DYNAMIC_ENV "${LINUX_PTY_COMMON_ENV};SIMRV_LINUX_DTB=NONE")
+    set(LINUX_PTY_DYNAMIC_ENV "${LINUX_PTY_COMMON_ENV};SIMRV_LINUX_DTB=${TEST_IMAGES_DIR}/devicetree.dtb")
     simrv_add_linux_pty_test(
       linux-boot-pty
       "${LINUX_PTY_PROFILE_ENV};SIMRV_TEST_INSTRUCTIONS=20000000000;SIMRV_TEST_TIMEOUT=300"

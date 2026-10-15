@@ -13,8 +13,8 @@
 #include <string>
 #include <utility>
 
-#include "simrv/core/BuildConfig.hpp"
 #include "simrv/core/SoCConfig.hpp"
+#include "simrv/core/SoCDeviceRegistry.hpp"
 #include "simrv/isa/IsaConfig.hpp"
 #include "simrv/memory/MemoryUtil.hpp"
 #include "simrv/pipeline/CpuModel.hpp"
@@ -53,12 +53,10 @@ struct ExecutionConfig {
     std::optional<SmpMode> smp_mode{};
     simrv::pipeline::PipelineType pipeline_type = simrv::pipeline::PipelineType::FiveStage;
     simrv::xlen::Address start_pc = 0;
-    simrv::xlen::Counter strace = 0;
     simrv::xlen::Counter fincnt = std::numeric_limits<simrv::xlen::Counter>::max();
     simrv::xlen::Counter trace_begin = std::numeric_limits<simrv::xlen::Counter>::max();
     simrv::xlen::Counter trace_end = std::numeric_limits<simrv::xlen::Counter>::max();
     simrv::xlen::Counter enabletimer = std::numeric_limits<simrv::xlen::Counter>::max();
-    simrv::xlen::Counter memimg_cycle = std::numeric_limits<simrv::xlen::Counter>::max();
     bool realtime_pacing = false;
 };
 
@@ -68,7 +66,6 @@ struct TuiConfig {
     bool class_mode = false;
     /// Optional external classroom mission path. Missions are local guidance only.
     std::string mission = {};
-    double mouse_sensitivity = 1.0;
     std::string inspection_output = {};
 };
 
@@ -113,16 +110,26 @@ struct FilesConfig {
     std::string disk_path;
     std::string virtiofs_path;
     bool disk_enabled = false;
-    std::string memimg_path;
     std::string dvtree_path;
-    std::string traplog_path;
-    std::string cpuconfig_path;
+    std::string config_path;
     std::string cfu_plugin_path;
-    std::string dump_dmem_path;
 };
 
 struct NetworkConfig {
     std::string mode = "user";
+};
+
+struct FramebufferConfig {
+    uint32_t width = 800;
+    uint32_t height = 600;
+    simrv::xlen::Address base = 0x84000000ULL;
+
+    [[nodiscard]] constexpr auto size_bytes() const noexcept -> size_t {
+        return static_cast<size_t>(width) * height * 4;
+    }
+    [[nodiscard]] constexpr auto stride_bytes() const noexcept -> size_t {
+        return static_cast<size_t>(width) * 4;
+    }
 };
 
 struct MachineConfig {
@@ -133,19 +140,36 @@ struct MachineConfig {
     IsaConfig isa{};
     FilesConfig files{};
     NetworkConfig network{};
+    FramebufferConfig framebuffer{};
     std::optional<simrv::pipeline::CpuModelPreset> cpu_model_preset{};
     std::optional<simrv::pipeline::BranchPredictorType> branch_predictor_type{};
     uint32_t bht_entries = 0;
     uint32_t btb_entries = 0;
     uint32_t ras_entries = 0;
     bool bram_prewarm = false;
-    unsigned disk_size_mb = SIMRV_DISK_SIZE_MB;
     PlatformProfile platform_profile = PlatformProfile::Pcie;
     SoCConfig soc = SoCConfig::virt_pcie();
 
     [[nodiscard]] auto validate() const -> std::expected<void, std::string> {
         if (memory.dram_size == 0 || (memory.dram_size & (memory.dram_size - 1U)) != 0) {
             return std::unexpected("DRAM size must be a non-zero power of two");
+        }
+        if (memory.dram_base > ~simrv::xlen::Address{0} - memory.dram_size) {
+            return std::unexpected("DRAM address range overflows address space");
+        }
+        for (const auto& dev : SoCDeviceRegistry::resolve(soc)) {
+            if (!dev.enabled) continue;
+            if (memory.dram_base < dev.base + dev.size &&
+                dev.base < memory.dram_base + memory.dram_size) {
+                return std::unexpected("DRAM range overlaps SoC device '" + dev.name + "'");
+            }
+            for (const auto& extra : dev.regions) {
+                if (memory.dram_base < extra.base + extra.size &&
+                    extra.base < memory.dram_base + memory.dram_size) {
+                    return std::unexpected("DRAM range overlaps SoC device '" + dev.name +
+                                           "' region '" + extra.name + "'");
+                }
+            }
         }
         if (execution.num_harts == 0 || execution.num_harts > ExecutionConfig::kMaxHarts) {
             return std::unexpected("hart count must be between 1 and 16");
@@ -195,7 +219,19 @@ struct MachineConfig {
         if (!soc.smp.clusters.empty() && soc.smp.hart_count != execution.num_harts) {
             return std::unexpected("SoC SMP hart count must match the resolved machine hart count");
         }
+        if (framebuffer.width == 0 || framebuffer.height == 0) {
+            return std::unexpected("framebuffer dimensions must be non-zero");
+        }
         return {};
+    }
+
+    template <typename Self>
+    constexpr auto&& with_framebuffer(this Self&& self, uint32_t width, uint32_t height,
+                                      simrv::xlen::Address base = 0x84000000ULL) noexcept {
+        self.framebuffer.width = width;
+        self.framebuffer.height = height;
+        self.framebuffer.base = base;
+        return std::forward<Self>(self);
     }
 
     template <typename Self>

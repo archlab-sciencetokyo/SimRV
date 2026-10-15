@@ -415,8 +415,8 @@ void MemoryAccess::target_write(MemorySubsystem& mem, core::CPU& cpu, simrv::xle
     const unsigned size_bytes = 1u << (std::to_underlying(funct3) & 0x3u);
     auto note_store = [&](simrv::xlen::Address paddr, size_t bytes) {
         cpu.active_context().mem_paddr = paddr;
-        cpu.state().reserved = 0;
-        if (cpu.machine_->num_harts() > 1 && mem.reservation_table().may_have_reservations()) {
+        cpu.state().lr_reservation_active = false;
+        if (mem.reservation_table().may_have_reservations() && cpu.machine_->num_harts() > 1) {
             mem.reservation_table().invalidate_range(paddr, bytes, cpu.hart_id());
         }
     };
@@ -493,7 +493,7 @@ void MemoryAccess::target_write(MemorySubsystem& mem, core::CPU& cpu, simrv::xle
             }
             ctx.sc_reservation_succeeded = success;
             ctx.wb_data = success ? 0 : 1;
-            cpu.state().reserved = success ? 1 : 0;
+            cpu.state().lr_reservation_active = success;
             if (!success) return;
         }
         const auto commit_write = [&]() { note_store(addr, size_bytes); };
@@ -525,10 +525,8 @@ void MemoryAccess::target_write(MemorySubsystem& mem, core::CPU& cpu, simrv::xle
             ack.sink = timed.payload.sink;
             mem.system_bus().grant_ack(ack);
         }
-        if ((cpu.cpu_model_config.name == "cfu-provingground" ||
-             cpu.cpu_model_config.name == "rvproc") &&
-            (addr == cpu.machine_->configuration().isa.isatest_tohost ||
-             (addr & 0x80000000ULL) != 0)) {
+        if (simrv::compiler::unlikely(cpu.cpu_model_config.is_provingground_or_rvproc) &&
+            (addr == cpu.machine_->isa_test_tohost() || (addr & 0x80000000ULL) != 0)) {
             if (funct3 == Funct3::Sw && (data == 0x00020000ULL || (data & 1ULL) != 0)) {
                 cpu.machine_->tohost = data;
             } else {
@@ -555,14 +553,13 @@ void MemoryAccess::target_write(MemorySubsystem& mem, core::CPU& cpu, simrv::xle
                     cpu.machine_->tohost = value;
                 }
             };
-            if (addr == cpu.machine_->configuration().isa.isatest_tohost || addr == 0x80001000 ||
+            if (addr == cpu.machine_->isa_test_tohost() || addr == 0x80001000 ||
                 addr == 0x40008000) {
                 publish_host_write(simrv::xlen::kIsXLen64
                                        ? data
                                        : ((cpu.machine_->tohost & 0xFFFFFFFF00000000ULL) | data));
-            } else if (!simrv::xlen::kIsXLen64 &&
-                       (addr == cpu.machine_->configuration().isa.isatest_tohost + 4 ||
-                        addr == 0x80001004 || addr == 0x40008004)) {
+            } else if (!simrv::xlen::kIsXLen64 && (addr == cpu.machine_->isa_test_tohost() + 4 ||
+                                                   addr == 0x80001004 || addr == 0x40008004)) {
                 publish_host_write((cpu.machine_->tohost & 0x00000000FFFFFFFFULL) |
                                    (static_cast<uint64_t>(data) << 32));
             }

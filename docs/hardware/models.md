@@ -32,9 +32,7 @@ SimRV automatically resolves CPU models by preset name or direct file path:
 simrv --ca --cpu-preset rvcomp -m program.elf
 
 # Run with an explicit custom configuration file
-simrv --ca --cpu-preset configs/models/my_core.cfg -m program.elf
-# or equivalently:
-simrv --ca --cpu-model-file configs/models/my_core.cfg -m program.elf
+simrv --ca --config configs/models/my_core.cfg -m program.elf
 ```
 
 Hardware-backed presets can also describe the complete SoC in the same file. For example,
@@ -44,10 +42,10 @@ and its paper, [“Design and implementation of a high-performance RISC-V SoC fo
 It contains CPU timing, DRAM/boot metadata, a UART map, and an explicit device policy:
 
 ```bash
-simrv --soc rvcomp --ca -m program.elf
+simrv --config rvcomp --ca -m program.elf
 ```
 
-Use `--soc` to select a complete platform preset. Combined CPU/SoC model files use `[soc]` for
+Use `--config` to select a complete platform preset or custom configuration file. Combined CPU/SoC model files use `[soc]` for
 platform metadata and `[device.<kind>]` for device entries, including `[device.uart]`. A preset
 with `device_policy = "explicit"` registers only the devices listed in its file; presets that omit
 that policy retain their existing implicit platform devices.

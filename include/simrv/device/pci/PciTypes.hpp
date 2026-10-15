@@ -1,7 +1,55 @@
+/**
+ * @file PciTypes.hpp
+ * @brief PCI/PCIe domain types, capability enumerations, and BDF identifiers.
+ */
 #pragma once
 
 #include <cstdint>
 #include <utility>
+
+#include "simrv/xlen/ScalarTypes.hpp"
+
+namespace simrv::device {
+
+// Domain type aliases for PCI configuration & endpoints
+using PciVendorId = uint16_t;
+using PciDeviceId = uint16_t;
+using PciSubsystemVendorId = uint16_t;
+using PciSubsystemId = uint16_t;
+using PciRevisionId = uint8_t;
+using PciClassCode = uint32_t;
+
+using PciBusNumber = uint8_t;
+using PciDeviceNumber = uint8_t;
+using PciFunctionNumber = uint8_t;
+
+using BarIndex = uint8_t;
+using PciBarIndex = BarIndex;
+using PciBarOffset = simrv::xlen::Address;
+using PciBarSize = uint64_t;
+using PciBarMask = uint64_t;
+
+using PciConfigOffset = uint16_t;
+using PciAccessBytes = uint8_t;
+using PciConfigData = uint32_t;
+using PciMmioData = simrv::xlen::Word;
+
+/**
+ * @struct PciBdf
+ * @brief Bus / Device / Function PCI topology coordinate.
+ */
+struct PciBdf {
+    PciBusNumber bus{0};
+    PciDeviceNumber dev{0};
+    PciFunctionNumber func{0};
+
+    [[nodiscard]] constexpr auto raw_address() const noexcept -> uint32_t {
+        return (static_cast<uint32_t>(bus) << 20) | (static_cast<uint32_t>(dev) << 15) |
+               (static_cast<uint32_t>(func) << 12);
+    }
+    constexpr auto operator<=>(const PciBdf&) const noexcept = default;
+    constexpr bool operator==(const PciBdf&) const noexcept = default;
+};
 
 // PCIe domain types
 enum class PciCommandBit : uint16_t {
@@ -91,3 +139,5 @@ enum class PciCapabilityId : uint8_t {
     EnhancedAllocation = 20,
     FlatteningPortal = 21
 };
+
+}  // namespace simrv::device

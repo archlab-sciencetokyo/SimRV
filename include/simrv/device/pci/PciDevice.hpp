@@ -15,54 +15,44 @@ namespace simrv::device {
 
 class PcieRootComplex;
 
-using PciVendorId = uint16_t;
-using PciDeviceId = uint16_t;
-using PciClassCode = uint32_t;
-using BarIndex = uint8_t;
-
-struct PciBdf {
-    uint8_t bus{0};
-    uint8_t dev{0};
-    uint8_t func{0};
-
-    [[nodiscard]] constexpr auto raw_address() const noexcept -> uint32_t {
-        return (static_cast<uint32_t>(bus) << 20) | (static_cast<uint32_t>(dev) << 15) |
-               (static_cast<uint32_t>(func) << 12);
-    }
-    constexpr auto operator<=>(const PciBdf&) const noexcept = default;
-    constexpr bool operator==(const PciBdf&) const noexcept = default;
-};
-
 /**
  * @class PciDevice
  * @brief Base class representing a PCI/PCIe Type 0 endpoint.
  */
 class PciDevice {
    public:
-    PciDevice(PciVendorId vendor_id, PciDeviceId device_id, uint8_t revision_id,
+    PciDevice(PciVendorId vendor_id, PciDeviceId device_id, PciRevisionId revision_id,
               PciClassCode class_code);
     virtual ~PciDevice() = default;
 
     virtual void reset();
 
-    [[nodiscard]] virtual auto config_read(simrv::xlen::Address offset, uint8_t size) -> uint32_t;
-    virtual void config_write(simrv::xlen::Address offset, uint32_t val, uint8_t size);
+    [[nodiscard]] virtual auto config_read(PciConfigOffset offset, PciAccessBytes size)
+        -> PciConfigData;
+    virtual void config_write(PciConfigOffset offset, PciConfigData val, PciAccessBytes size);
 
-    [[nodiscard]] virtual auto bar_read(BarIndex bar_idx, simrv::xlen::Address offset, uint8_t size)
-        -> uint32_t;
-    virtual void bar_write(BarIndex bar_idx, simrv::xlen::Address offset, uint32_t val,
-                           uint8_t size);
+    [[nodiscard]] virtual auto bar_read(PciBarIndex bar_idx, PciBarOffset offset,
+                                        PciAccessBytes size) -> PciMmioData;
+    virtual void bar_write(PciBarIndex bar_idx, PciBarOffset offset, PciMmioData val,
+                           PciAccessBytes size);
 
-    [[nodiscard]] auto bar_base(BarIndex bar_idx) const -> simrv::xlen::Address;
-    [[nodiscard]] auto bar_size(BarIndex bar_idx) const -> simrv::xlen::Address;
-    [[nodiscard]] auto contains_mmio(simrv::xlen::Address addr, BarIndex& out_bar,
-                                     simrv::xlen::Address& out_offset) const -> bool;
+    [[nodiscard]] auto bar_base(PciBarIndex bar_idx) const -> simrv::xlen::Address;
+    [[nodiscard]] auto bar_size(PciBarIndex bar_idx) const -> PciBarSize;
+    [[nodiscard]] auto bar_is_64bit(PciBarIndex bar_idx) const noexcept -> bool {
+        return bar_idx < 6 && bar_is_64bit_[bar_idx];
+    }
+    [[nodiscard]] auto contains_mmio(simrv::xlen::Address addr, PciBarIndex& out_bar,
+                                     PciBarOffset& out_offset) const -> bool;
 
     void set_root_complex(PcieRootComplex* rc, PciBdf bdf);
-    void set_root_complex(PcieRootComplex* rc, uint8_t bus, uint8_t dev, uint8_t func) {
+    void set_root_complex(PcieRootComplex* rc, PciBusNumber bus, PciDeviceNumber dev,
+                          PciFunctionNumber func) {
         set_root_complex(rc, PciBdf{.bus = bus, .dev = dev, .func = func});
     }
     void trigger_irq();
+    void deassert_irq();
+
+    virtual void on_bar_updated(PciBarIndex bar_idx);
 
     [[nodiscard]] auto bdf() const noexcept -> PciBdf { return bdf_; }
     [[nodiscard]] auto has_command_bit(PciCommandBit bit) const noexcept -> bool {
@@ -72,12 +62,13 @@ class PciDevice {
     }
 
    protected:
-    void init_bar(BarIndex bar_idx, simrv::xlen::Address size, bool is_64bit = false,
+    void init_bar(PciBarIndex bar_idx, PciBarSize size, bool is_64bit = false,
                   bool is_prefetchable = false);
 
     std::array<uint8_t, 256> config_space_{{0}};
-    std::array<simrv::xlen::Address, 6> bar_sizes_{{0}};
-    std::array<simrv::xlen::Address, 6> bar_masks_{{0}};
+    std::array<simrv::xlen::Address, 6> bar_bases_{{0}};
+    std::array<PciBarSize, 6> bar_sizes_{{0}};
+    std::array<PciBarMask, 6> bar_masks_{{0}};
     std::array<bool, 6> bar_is_64bit_{{false}};
 
     PcieRootComplex* root_complex_{nullptr};

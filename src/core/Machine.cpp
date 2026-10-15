@@ -156,6 +156,8 @@ Machine::Runtime::Runtime(Machine& machine, bool appmode)
 
 Machine::Machine(MachineConfig machine_config)
     : runtime_(std::make_unique<Runtime>(*this, machine_config.execution.appmode)),
+      tracer_raw_(&runtime_->tracer),
+      breakpoint_manager_raw_(&runtime_->breakpoints),
       device_registry_(std::make_unique<simrv::device::PlatformDeviceRegistry>()),
       memory_(runtime_->memory) {
     runtime_->primary_cpu.machine_ = this;
@@ -193,7 +195,10 @@ void Machine::apply_configuration(MachineConfig machine_config) {
     }
     resolved_start_pc_ = config.execution.start_pc;
     resolved_isatest_tohost_ = config.isa.isatest_tohost;
-    memory_.system_bus().set_smp_enabled(is_smp_enabled());
+    framebuffer_geometry_ = config.framebuffer;
+    is_smp_enabled_ =
+        config.execution.smp_mode.value_or(config.soc.smp.mode) == SmpMode::CycleOriented;
+    memory_.system_bus().set_smp_enabled(is_smp_enabled_);
     if (tui_enabled() || debugger_enabled()) {
         execution_state_.store(ExecutionState::Paused, std::memory_order_release);
     }
@@ -275,8 +280,8 @@ auto Machine::ram_view() const noexcept -> simrv::memory::RamView {
 }
 
 auto Machine::framebuffer_view() const noexcept -> simrv::memory::RamView {
-    constexpr simrv::xlen::Address base = 0x84000000ULL;
-    constexpr simrv::xlen::Address size = 640ULL * 480ULL * 4ULL;
+    const auto size = static_cast<simrv::xlen::Address>(framebuffer_geometry_.size_bytes());
+    const auto base = framebuffer_geometry_.base;
     const auto ram = ram_view();
     if (!ram.contains(base, static_cast<std::size_t>(size))) return {};
     return {ram.unchecked_ptr(base), base, size};
@@ -514,22 +519,26 @@ void Machine::send_input_key(uint16_t code, bool pressed) {
     const std::scoped_lock lock(input_mutex_);
     pending_input_events_.push_back(
         {.type = PendingInputEvent::Type::Key, .code = code, .pressed = pressed});
+    has_pending_input_.store(true, std::memory_order_release);
 }
 
 void Machine::send_input_mouse_motion(int32_t x, int32_t y) {
     const std::scoped_lock lock(input_mutex_);
     pending_input_events_.push_back({.type = PendingInputEvent::Type::MouseMotion, .x = x, .y = y});
+    has_pending_input_.store(true, std::memory_order_release);
 }
 
 void Machine::send_input_mouse_button(uint16_t button, bool pressed) {
     const std::scoped_lock lock(input_mutex_);
     pending_input_events_.push_back(
         {.type = PendingInputEvent::Type::MouseButton, .code = button, .pressed = pressed});
+    has_pending_input_.store(true, std::memory_order_release);
 }
 
 void Machine::send_input_mouse_wheel(int32_t delta) {
     const std::scoped_lock lock(input_mutex_);
     pending_input_events_.push_back({.type = PendingInputEvent::Type::MouseWheel, .x = delta});
+    has_pending_input_.store(true, std::memory_order_release);
 }
 
 auto Machine::pcie_root() noexcept -> simrv::device::PcieRootComplex* {
@@ -555,16 +564,16 @@ auto Machine::lockstep() const noexcept -> const simrv::debug::SpikeLockstep* {
 }
 
 auto Machine::breakpoint_manager() noexcept -> simrv::debug::BreakpointManager& {
-    return runtime_->breakpoints;
+    return *breakpoint_manager_raw_;
 }
 
 auto Machine::breakpoint_manager() const noexcept -> const simrv::debug::BreakpointManager& {
-    return runtime_->breakpoints;
+    return *breakpoint_manager_raw_;
 }
 
-auto Machine::trace() noexcept -> Tracer& { return runtime_->tracer; }
+auto Machine::trace() noexcept -> Tracer& { return *tracer_raw_; }
 
-auto Machine::trace() const noexcept -> const Tracer& { return runtime_->tracer; }
+auto Machine::trace() const noexcept -> const Tracer& { return *tracer_raw_; }
 
 auto Machine::symbol_table() noexcept -> simrv::debug::SymbolTable& { return runtime_->symbols; }
 
@@ -606,10 +615,14 @@ void Machine::prepare_runner_cycle() {
 }
 
 void Machine::service_pending_input() {
+    if (!has_pending_input_.load(std::memory_order_relaxed)) {
+        return;
+    }
     std::deque<PendingInputEvent> events;
     {
         const std::scoped_lock lock(input_mutex_);
         events.swap(pending_input_events_);
+        has_pending_input_.store(false, std::memory_order_release);
     }
 
     for (const auto& event : events) {
@@ -647,7 +660,14 @@ void Machine::service_pending_input() {
     }
 }
 
+void Machine::update_network_devices_status() noexcept {
+    has_network_devices_ =
+        runtime_ && (runtime_->pci_net != nullptr || runtime_->mmio_net != nullptr ||
+                     runtime_->ring_buffer_ethernet != nullptr);
+}
+
 void Machine::service_network() {
+    if (!has_network_devices_) return;
     if (runtime_->pci_net) runtime_->pci_net->poll_backend();
     if (runtime_->mmio_net) runtime_->mmio_net->poll_backend();
     if (runtime_->ring_buffer_ethernet) runtime_->ring_buffer_ethernet->poll_backend();
@@ -757,7 +777,7 @@ void Machine::service_control_commands() {
 
 bool Machine::sampled_instruction_execution() const {
     return runtime_profile.allows_fast_batch() && !is_stepping() && !lockstep_enabled() &&
-           !debugger_enabled() && !branch_trace_enabled() && config.execution.strace == 0 &&
+           !debugger_enabled() && !branch_trace_enabled() &&
            config.execution.trace_begin == std::numeric_limits<simrv::xlen::Counter>::max() &&
            !breakpoint_manager().has_any() &&
            (!telemetry_sink_ || (!telemetry_sink_->captures_execution_detail() &&
@@ -770,8 +790,7 @@ void Machine::finalize_runner_cycle() {
 
 auto Machine::fast_batch_policy() const -> std::optional<FastBatchPolicy> {
     if (!runtime_profile.allows_fast_batch() || is_stepping() || lockstep_enabled() ||
-        branch_trace_enabled() || config.execution.strace != 0 || breakpoint_manager().has_any() ||
-        is_smp_enabled()) {
+        branch_trace_enabled() || breakpoint_manager().has_any() || is_smp_enabled()) {
         return std::nullopt;
     }
     if (tui_enabled() && (!telemetry_sink_ || telemetry_sink_->is_trace_active() ||
@@ -792,7 +811,6 @@ auto Machine::fast_batch_policy() const -> std::optional<FastBatchPolicy> {
 auto Machine::ca_batch_quantum() const noexcept -> uint32_t {
     if (!runtime_profile.is_cycle_mode() || is_smp_enabled() || is_stepping() ||
         debugger_enabled() || lockstep_enabled() || branch_trace_enabled() ||
-        config.execution.strace != 0 ||
         config.execution.trace_begin != std::numeric_limits<simrv::xlen::Counter>::max() ||
         breakpoint_manager().has_any()) {
         return 1;
@@ -939,7 +957,7 @@ void RunnerBase::execute_ca_batch(Machine& machine) {
         !machine.breakpoint_manager().has_any()) {
         auto quantum = std::max(1U, machine.config.execution.smp_quantum);
         if (machine.debugger_enabled() || machine.lockstep_enabled() ||
-            machine.branch_trace_enabled() || machine.config.execution.strace != 0 ||
+            machine.branch_trace_enabled() ||
             machine.config.execution.trace_begin !=
                 std::numeric_limits<simrv::xlen::Counter>::max() ||
             (machine.tui_enabled() && machine.telemetry_sink_ &&
@@ -1065,7 +1083,10 @@ auto BaremetalRunner::execute_fast_batch(Machine& machine, uint32_t batch_size) 
 }
 
 void BaremetalRunner::finalize(Machine& machine) {
-    if (simrv::compiler::unlikely(machine.trace().fp_trace.is_open())) {
+    auto& cpu = machine.primary_hart();
+    const bool trace_window = cpu.clint_mmio.mtime >= machine.config.execution.trace_begin &&
+                              cpu.clint_mmio.mtime <= machine.config.execution.trace_end;
+    if (simrv::compiler::unlikely(machine.trace().fp_trace.is_open() && trace_window)) {
         machine.trace().write_trace_snapshot();
     }
     if (simrv::compiler::unlikely(machine.tohost != 0)) machine.finalize_cycle_tohost();
@@ -1086,19 +1107,7 @@ void BaremetalRunner::finalize(Machine& machine) {
 
 void OsRunner::start(Machine& machine) { start_threads(machine, false); }
 
-void OsRunner::prepare(Machine& machine) {
-    reset_runner_transients(machine);
-    if (simrv::compiler::likely(machine.runtime_profile.is_instruction_fast() &&
-                                machine.primary_hart().clint_mmio.mtime <=
-                                    machine.config.execution.enabletimer)) {
-        if (simrv::compiler::unlikely(machine.primary_hart().clint_mmio.mtime ==
-                                      machine.config.execution.memimg_cycle)) {
-            machine.trace().dump_init_artifacts();
-        }
-    } else if (machine.primary_hart().clint_mmio.mtime == machine.config.execution.memimg_cycle) {
-        machine.trace().dump_init_artifacts();
-    }
-}
+void OsRunner::prepare(Machine& machine) { reset_runner_transients(machine); }
 
 void OsRunner::execute(Machine& machine) {
     if (machine.runtime_profile.is_cycle_mode()) {
@@ -1147,14 +1156,9 @@ void OsRunner::finalize(Machine& machine) {
     if (simrv::compiler::likely(
             machine.runtime_profile.is_instruction_fast() &&
             (!machine.tui_enabled() || machine.config.execution.ui_worker_threaded) &&
-            machine.config.execution.strace == 0 && !trace_window &&
-            !machine.branch_trace_enabled())) {
+            !trace_window && !machine.branch_trace_enabled())) {
         if (simrv::compiler::unlikely(machine.tohost != 0)) machine.finalize_cycle_tohost();
     } else {
-        if (simrv::compiler::unlikely(machine.config.execution.strace != 0 &&
-                                      cpu.clint_mmio.mtime >= machine.config.execution.strace))
-            machine.trace().emit_periodic_pc_trace(cpu.clint_mmio.mtime,
-                                                   cpu.pipeline_context.cpc.raw());
         if (simrv::compiler::unlikely(trace_window)) machine.trace().write_trace_snapshot();
         if (simrv::compiler::unlikely(machine.branch_trace_enabled()))
             machine.trace().emit_branch_prediction_trace(
@@ -1584,7 +1588,7 @@ void Machine::stop(StopReason reason) {
     notify_control_event();
     stop_runner();
     if (telemetry_sink_ || tui_enabled()) publish_tui_execution_snapshot();
-    if (!tui_enabled() && !persistent_control_) {
+    if (!tui_enabled()) {
         is_running_ = false;
     }
     if (telemetry_sink_) {
@@ -1651,7 +1655,7 @@ void Machine::run() {
     }
 
     // Start background stdin input thread for non-TUI mode
-    if (auto* uart = uart_device(); uart && !tui_enabled() && !persistent_control_) {
+    if (auto* uart = uart_device(); uart && !tui_enabled()) {
         uart->start_input_thread();
     }
 
@@ -1669,15 +1673,9 @@ void Machine::run() {
     reset_realtime_anchor();
     bool was_paused = false;
     while (is_running() &&
-           (persistent_control_ ||
-            execution_state_.load(std::memory_order_relaxed) != ExecutionState::Stopped)) {
+           execution_state_.load(std::memory_order_relaxed) != ExecutionState::Stopped) {
         service_control_commands();
         if (!is_running()) break;
-        if (persistent_control_ && is_stopped()) {
-            const auto generation = control_event_generation_.load(std::memory_order_acquire);
-            if (!has_control_commands()) control_event_generation_.wait(generation);
-            continue;
-        }
         if (runtime_->gdb_stub) runtime_->gdb_stub->service_pending(*this);
         service_debug_halt();
         if (runtime_->gdb_stub && runtime_->gdb_stub->pause_requested() &&
@@ -1730,13 +1728,8 @@ void Machine::run() {
                                               std::numeric_limits<simrv::xlen::Counter>::max() &&
                                           retired_instruction_count() >= config.execution.fincnt)) {
                 simrv::log::info("finished by -e option");
-                if (persistent_control_) {
-                    stop(StopReason::InstructionLimit);
-                    simrv::util::benchmark_event("stopped", retired_instruction_count());
-                } else {
-                    stop_reason_ = StopReason::InstructionLimit;
-                    is_running_ = false;
-                }
+                stop_reason_ = StopReason::InstructionLimit;
+                is_running_ = false;
             }
             if (auto* uart = uart_device();
                 !tui_enabled() && uart && !uart->is_input_thread_running()) {
@@ -1759,13 +1752,8 @@ void Machine::run() {
                                           std::numeric_limits<simrv::xlen::Counter>::max() &&
                                       retired_instruction_count() >= config.execution.fincnt)) {
             simrv::log::info("finished by -e option");
-            if (persistent_control_) {
-                stop(StopReason::InstructionLimit);
-                simrv::util::benchmark_event("stopped", retired_instruction_count());
-            } else {
-                stop_reason_ = StopReason::InstructionLimit;
-                is_running_ = false;
-            }
+            stop_reason_ = StopReason::InstructionLimit;
+            is_running_ = false;
         }
 
         if (telemetry_sink_) {

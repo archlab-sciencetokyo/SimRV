@@ -117,28 +117,7 @@ flowchart TD
 
 ---
 
-## 5. Attachable TUI Sessions
-
-SimRV supports detached headless simulation with on-demand interactive TUI attachment over local Unix domain sockets:
-
-```bash
-# 1. Start headless simulation server in the background
-simrv --cli --listen-tui /tmp/simrv.sock -m examples/hello/build-rv64/hello.elf
-
-# 2. Attach the interactive TUI workbench from another terminal
-simrv --attach /tmp/simrv.sock
-
-# 3. Stream plain screen snapshots to a file or pipe
-simrv --cli --attach /tmp/simrv.sock > guest-screen.log
-```
-
-- Detaching does not interrupt guest execution; the guest continues at full hardware simulation speed.
-- Re-attaching immediately resynchronizes live register, pipeline, and console state.
-- The IPC protocol is framed, versioned, and validates payload bounds for safe local operation.
-
----
-
-## 6. Classroom Mode & Student Guidance
+## 5. Classroom Mode & Student Guidance
 
 When launched with `--class`, SimRV enables pedagogical student guidance features designed for computer architecture courses:
 
@@ -152,7 +131,7 @@ simrv --class -m examples/isa/bin/demo.elf
 
 ---
 
-## 7. Architecture & Customization (For Developers)
+## 6. Architecture & Customization (For Developers)
 
 The TUI subsystem is modularly partitioned under `include/simrv/tui/`:
 

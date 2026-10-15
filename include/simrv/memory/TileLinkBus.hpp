@@ -51,7 +51,7 @@ class TileLinkBus : public Bus {
 
     explicit TileLinkBus(simrv::core::Machine& machine);
 
-    void add_node(TileLinkNode* node);
+    auto add_node(TileLinkNode* node) -> bool;
     /// Set fixed ready/valid-style transport delays for CA. Both values are at least one cycle.
     void configure_timing(uint32_t request_latency, uint32_t response_latency,
                           uint32_t data_request_latency = 0, uint32_t data_response_latency = 0,

@@ -4,6 +4,8 @@
  */
 #include "simrv/device/pci/PcieRootComplex.hpp"
 
+#include <algorithm>
+
 #include "simrv/core/Cpu.hpp"
 #include "simrv/core/Machine.hpp"
 
@@ -15,59 +17,154 @@ PcieRootComplex::PcieRootComplex(simrv::core::Machine* machine, Aplic* aplic_s, 
 auto PcieRootComplex::attach_device(PciBdf bdf, std::shared_ptr<PciDevice> device) -> bool {
     if (!device) return false;
     device->set_root_complex(this, bdf);
-    attached_devices_.push_back({.bdf = bdf, .device = device});
+    if (bdf.bus == 0 && bdf.dev < kMaxSlots && bdf.func == 0) {
+        devices_by_slot_[bdf.dev] = device.get();
+    }
+    owned_devices_.push_back(device);
+    rebuild_bar_mappings();
     return true;
 }
 
-auto PcieRootComplex::get_device(PciBdf bdf) -> std::shared_ptr<PciDevice> {
-    for (auto& entry : attached_devices_) {
-        if (entry.bdf == bdf) {
-            return entry.device;
+auto PcieRootComplex::get_device(PciBdf bdf) const noexcept -> PciDevice* {
+    if (bdf.bus == 0 && bdf.dev < kMaxSlots && bdf.func == 0) {
+        return devices_by_slot_[bdf.dev];
+    }
+    for (const auto& dev : owned_devices_) {
+        if (dev && dev->bdf() == bdf) {
+            return dev.get();
         }
     }
     return nullptr;
 }
 
-auto PcieRootComplex::ecam_read(simrv::xlen::Address offset, uint8_t size) -> uint32_t {
-    const auto bus = static_cast<uint8_t>((offset >> 20) & 0xFF);
-    const auto dev = static_cast<uint8_t>((offset >> 15) & 0x1F);
-    const auto func = static_cast<uint8_t>((offset >> 12) & 0x07);
-    const simrv::xlen::Address reg_offset = offset & 0xFFF;
+void PcieRootComplex::rebuild_bar_mappings() {
+    active_bars_.clear();
+    mru_bar_count_ = 0;
+    for (const auto& dev : owned_devices_) {
+        if (!dev) continue;
+        for (uint8_t i = 0; i < 6; ++i) {
+            const simrv::xlen::Address size = dev->bar_size(i);
+            const simrv::xlen::Address base = dev->bar_base(i);
+            if (size > 0 && base != 0 && base >= kMmioBaseAddress &&
+                (base + size) <= (kMmioBaseAddress + kMmioSize)) {
+                active_bars_.push_back(BarMapping{
+                    .base = base,
+                    .end = base + size,
+                    .device = dev.get(),
+                    .bar_idx = i,
+                });
+            }
+            if (dev->bar_is_64bit(i)) {
+                ++i;
+            }
+        }
+    }
+    std::ranges::sort(active_bars_, [](const auto& a, const auto& b) { return a.base < b.base; });
+}
 
-    auto d = get_device(bus, dev, func);
-    if (!d) return 0xFFFFFFFFU;
+auto PcieRootComplex::ecam_read(simrv::xlen::Address offset, PciAccessBytes size) -> PciConfigData {
+    const auto bus = static_cast<PciBusNumber>((offset >> 20) & 0xFF);
+    const auto dev = static_cast<PciDeviceNumber>((offset >> 15) & 0x1F);
+    const auto func = static_cast<PciFunctionNumber>((offset >> 12) & 0x07);
+    const auto reg_offset = static_cast<PciConfigOffset>(offset & 0xFFF);
+
+    auto* d = get_device(bus, dev, func);
+    if (d == nullptr) return 0xFFFFFFFFU;
     return d->config_read(reg_offset, size);
 }
 
-void PcieRootComplex::ecam_write(simrv::xlen::Address offset, uint32_t val, uint8_t size) {
-    const auto bus = static_cast<uint8_t>((offset >> 20) & 0xFF);
-    const auto dev = static_cast<uint8_t>((offset >> 15) & 0x1F);
-    const auto func = static_cast<uint8_t>((offset >> 12) & 0x07);
-    const simrv::xlen::Address reg_offset = offset & 0xFFF;
+void PcieRootComplex::ecam_write(simrv::xlen::Address offset, PciConfigData val,
+                                 PciAccessBytes size) {
+    const auto bus = static_cast<PciBusNumber>((offset >> 20) & 0xFF);
+    const auto dev = static_cast<PciDeviceNumber>((offset >> 15) & 0x1F);
+    const auto func = static_cast<PciFunctionNumber>((offset >> 12) & 0x07);
+    const auto reg_offset = static_cast<PciConfigOffset>(offset & 0xFFF);
 
-    auto d = get_device(bus, dev, func);
-    if (d) {
+    auto* d = get_device(bus, dev, func);
+    if (d != nullptr) {
         d->config_write(reg_offset, val, size);
     }
 }
 
-auto PcieRootComplex::mmio_read(simrv::xlen::Address addr, uint8_t size) -> uint32_t {
-    for (auto& entry : attached_devices_) {
-        BarIndex bar_idx = 0;
-        simrv::xlen::Address offset = 0;
-        if (entry.device && entry.device->contains_mmio(addr, bar_idx, offset)) {
-            return entry.device->bar_read(bar_idx, offset, size);
+auto PcieRootComplex::mmio_read(simrv::xlen::Address addr, PciAccessBytes size) -> PciMmioData {
+    if (active_bars_.empty() || addr < kMmioBaseAddress || addr >= kMmioBaseAddress + kMmioSize) {
+        return 0;
+    }
+
+    // Check 4-entry MRU cache
+    for (size_t i = 0; i < mru_bar_count_; ++i) {
+        const auto& entry = mru_bars_[i];
+        if (addr >= entry.base && (addr + size) <= entry.end) {
+            if (i > 0) {
+                const auto hit = entry;
+                for (size_t j = i; j > 0; --j) {
+                    mru_bars_[j] = mru_bars_[j - 1];
+                }
+                mru_bars_[0] = hit;
+            }
+            return mru_bars_[0].device->bar_read(
+                mru_bars_[0].bar_idx, static_cast<PciBarOffset>(addr - mru_bars_[0].base), size);
+        }
+    }
+
+    // Binary search over sorted base addresses
+    auto it = std::ranges::upper_bound(active_bars_, addr, {}, &BarMapping::base);
+    while (it != active_bars_.begin()) {
+        --it;
+        if (addr < it->end && (addr + size) <= it->end) {
+            const size_t shift_limit = std::min(mru_bar_count_, kBarMruCapacity - 1);
+            for (size_t j = shift_limit; j > 0; --j) {
+                mru_bars_[j] = mru_bars_[j - 1];
+            }
+            mru_bars_[0] = *it;
+            if (mru_bar_count_ < kBarMruCapacity) {
+                ++mru_bar_count_;
+            }
+            return it->device->bar_read(it->bar_idx, static_cast<PciBarOffset>(addr - it->base),
+                                        size);
         }
     }
     return 0;
 }
 
-void PcieRootComplex::mmio_write(simrv::xlen::Address addr, uint32_t val, uint8_t size) {
-    for (auto& entry : attached_devices_) {
-        BarIndex bar_idx = 0;
-        simrv::xlen::Address offset = 0;
-        if (entry.device && entry.device->contains_mmio(addr, bar_idx, offset)) {
-            entry.device->bar_write(bar_idx, offset, val, size);
+void PcieRootComplex::mmio_write(simrv::xlen::Address addr, PciMmioData val, PciAccessBytes size) {
+    if (active_bars_.empty() || addr < kMmioBaseAddress || addr >= kMmioBaseAddress + kMmioSize) {
+        return;
+    }
+
+    // Check 4-entry MRU cache
+    for (size_t i = 0; i < mru_bar_count_; ++i) {
+        const auto& entry = mru_bars_[i];
+        if (addr >= entry.base && (addr + size) <= entry.end) {
+            if (i > 0) {
+                const auto hit = entry;
+                for (size_t j = i; j > 0; --j) {
+                    mru_bars_[j] = mru_bars_[j - 1];
+                }
+                mru_bars_[0] = hit;
+            }
+            mru_bars_[0].device->bar_write(mru_bars_[0].bar_idx,
+                                           static_cast<PciBarOffset>(addr - mru_bars_[0].base), val,
+                                           size);
+            return;
+        }
+    }
+
+    // Binary search over sorted base addresses
+    auto it = std::ranges::upper_bound(active_bars_, addr, {}, &BarMapping::base);
+    while (it != active_bars_.begin()) {
+        --it;
+        if (addr < it->end && (addr + size) <= it->end) {
+            const size_t shift_limit = std::min(mru_bar_count_, kBarMruCapacity - 1);
+            for (size_t j = shift_limit; j > 0; --j) {
+                mru_bars_[j] = mru_bars_[j - 1];
+            }
+            mru_bars_[0] = *it;
+            if (mru_bar_count_ < kBarMruCapacity) {
+                ++mru_bar_count_;
+            }
+            it->device->bar_write(it->bar_idx, static_cast<PciBarOffset>(addr - it->base), val,
+                                  size);
             return;
         }
     }
@@ -84,6 +181,17 @@ void PcieRootComplex::assert_device_irq(PciBdf bdf) {
     }
 }
 
+void PcieRootComplex::deassert_device_irq(PciBdf bdf) {
+    const simrv::xlen::InterruptSourceId irq_source = 16 + (bdf.dev % 8);
+
+    if (aplic_s_ != nullptr) {
+        aplic_s_->set_irq(irq_source, false);
+    }
+    if (machine_ != nullptr) {
+        machine_->set_platform_irq(static_cast<int>(irq_source), false);
+    }
+}
+
 auto PcieRootComplex::EcamNode::handle_request(const memory::TlChannelA& req,
                                                memory::TlChannelD& resp) -> bool {
     const simrv::xlen::Address offset = (req.address - kEcamBaseAddress).raw();
@@ -96,9 +204,9 @@ auto PcieRootComplex::EcamNode::handle_request(const memory::TlChannelA& req,
     resp.denied = false;
     resp.corrupt = false;
 
-    const uint8_t size = 1 << req.size;
+    const auto size = static_cast<PciAccessBytes>(1u << (req.size & 0x3u));
     if (is_write) {
-        rc_->ecam_write(offset, static_cast<uint32_t>(req.data), size);
+        rc_->ecam_write(offset, static_cast<PciConfigData>(req.data), size);
     } else {
         resp.data = rc_->ecam_read(offset, size);
     }
@@ -117,9 +225,9 @@ auto PcieRootComplex::MmioNode::handle_request(const memory::TlChannelA& req,
     resp.denied = false;
     resp.corrupt = false;
 
-    const uint8_t size = 1 << req.size;
+    const auto size = static_cast<PciAccessBytes>(1u << (req.size & 0x3u));
     if (is_write) {
-        rc_->mmio_write(addr, static_cast<uint32_t>(req.data), size);
+        rc_->mmio_write(addr, static_cast<PciMmioData>(req.data), size);
     } else {
         resp.data = rc_->mmio_read(addr, size);
     }

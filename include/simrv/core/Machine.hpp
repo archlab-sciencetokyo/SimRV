@@ -149,6 +149,8 @@ class Machine final : public core::IInterruptController {
     };
 
     std::unique_ptr<Runtime> runtime_;
+    Tracer* tracer_raw_{nullptr};
+    simrv::debug::BreakpointManager* breakpoint_manager_raw_{nullptr};
     std::unique_ptr<simrv::device::PlatformDeviceRegistry> device_registry_;
     simrv::xlen::Counter next_checkpoint_cycle_ = 0;
 
@@ -180,12 +182,6 @@ class Machine final : public core::IInterruptController {
      * Machine. */
     [[nodiscard]] auto device_registry() noexcept -> simrv::device::PlatformDeviceRegistry&;
     [[nodiscard]] auto tui_enabled() const noexcept -> bool { return config.tui.enabled; }
-    [[nodiscard]] auto mouse_sensitivity() const noexcept -> double {
-        return config.tui.mouse_sensitivity;
-    }
-    void set_mouse_sensitivity(double sensitivity) noexcept {
-        config.tui.mouse_sensitivity = sensitivity;
-    }
     [[nodiscard]] auto high_contrast_enabled() const noexcept -> bool {
         return config.tui.high_contrast;
     }
@@ -236,7 +232,7 @@ class Machine final : public core::IInterruptController {
         return config.debug.spike_elf;
     }
     [[nodiscard]] auto isa_test_tohost() const noexcept -> simrv::xlen::Address {
-        return config.isa.isatest_tohost;
+        return resolved_isatest_tohost_;
     }
     [[nodiscard]] auto memory_geometry() const noexcept -> MemoryGeometry { return config.memory; }
     [[nodiscard]] auto platform_profile() const noexcept -> PlatformProfile {
@@ -266,9 +262,6 @@ class Machine final : public core::IInterruptController {
                                  std::optional<simrv::xlen::Address> tohost_address) noexcept;
     [[nodiscard]] auto resolved_start_pc() const noexcept -> simrv::xlen::Address {
         return resolved_start_pc_;
-    }
-    [[nodiscard]] auto resolved_isatest_tohost() const noexcept -> simrv::xlen::Address {
-        return resolved_isatest_tohost_;
     }
     [[nodiscard]] auto platform_status() const -> PlatformStatusSnapshot;
     /**
@@ -355,14 +348,12 @@ class Machine final : public core::IInterruptController {
     [[nodiscard]] auto retired_instruction_count() const noexcept -> simrv::xlen::Counter {
         return retired_instruction_count_.load(std::memory_order_relaxed);
     }
-    [[nodiscard]] auto is_smp_enabled() const noexcept -> bool {
-        return config.execution.smp_mode.value_or(config.soc.smp.mode) == SmpMode::CycleOriented;
-    }
+    [[nodiscard]] auto is_smp_enabled() const noexcept -> bool { return is_smp_enabled_; }
 
     /// Publish retired instructions from a hart; used by execution engines and safe for MT-SMP.
-    void record_retired_instructions(simrv::xlen::Counter count) noexcept {
+    SIMRV_ALWAYS_INLINE void record_retired_instructions(simrv::xlen::Counter count) noexcept {
         if (simrv::compiler::likely(count != 0)) {
-            if (simrv::compiler::likely(!is_smp_enabled())) {
+            if (simrv::compiler::likely(!is_smp_enabled_)) {
                 retired_instruction_count_.store(
                     retired_instruction_count_.load(std::memory_order_relaxed) + count,
                     std::memory_order_relaxed);
@@ -410,6 +401,8 @@ class Machine final : public core::IInterruptController {
     std::chrono::steady_clock::time_point start_time_{};
     simrv::xlen::Address resolved_start_pc_ = 0;
     simrv::xlen::Address resolved_isatest_tohost_ = 0;
+    FramebufferConfig framebuffer_geometry_{};
+    bool is_smp_enabled_ = false;
 
    public:
     /// Inspect a simulated hart by index (0 is the primary/boot hart).
@@ -424,6 +417,19 @@ class Machine final : public core::IInterruptController {
     [[nodiscard]] auto ram_data() const noexcept -> const simrv::xlen::Byte*;
     [[nodiscard]] auto ram_view() const noexcept -> simrv::memory::RamView;
     [[nodiscard]] auto framebuffer_view() const noexcept -> simrv::memory::RamView;
+    [[nodiscard]] auto framebuffer_geometry() const noexcept -> const FramebufferConfig& {
+        return framebuffer_geometry_;
+    }
+    [[nodiscard]] auto framebuffer_width() const noexcept -> uint32_t {
+        return framebuffer_geometry_.width;
+    }
+    [[nodiscard]] auto framebuffer_height() const noexcept -> uint32_t {
+        return framebuffer_geometry_.height;
+    }
+    void set_framebuffer_resolution_for_testing(uint32_t width, uint32_t height) noexcept {
+        framebuffer_geometry_.width = width;
+        framebuffer_geometry_.height = height;
+    }
     [[nodiscard]] auto tui_execution_snapshot(size_t hart = 0) const noexcept
         -> TuiExecutionSnapshot;
     /// Platform capability used by built-in devices to publish an external interrupt level.
@@ -460,8 +466,20 @@ class Machine final : public core::IInterruptController {
     [[nodiscard]] auto breakpoint_manager() noexcept -> simrv::debug::BreakpointManager&;
     [[nodiscard]] auto breakpoint_manager() const noexcept
         -> const simrv::debug::BreakpointManager&;
+    [[nodiscard]] SIMRV_ALWAYS_INLINE auto breakpoint_manager_raw() noexcept
+        -> simrv::debug::BreakpointManager* {
+        return breakpoint_manager_raw_;
+    }
+    [[nodiscard]] SIMRV_ALWAYS_INLINE auto breakpoint_manager_raw() const noexcept
+        -> const simrv::debug::BreakpointManager* {
+        return breakpoint_manager_raw_;
+    }
     [[nodiscard]] auto trace() noexcept -> Tracer&;
     [[nodiscard]] auto trace() const noexcept -> const Tracer&;
+    [[nodiscard]] SIMRV_ALWAYS_INLINE auto tracer_raw() noexcept -> Tracer* { return tracer_raw_; }
+    [[nodiscard]] SIMRV_ALWAYS_INLINE auto tracer_raw() const noexcept -> const Tracer* {
+        return tracer_raw_;
+    }
     [[nodiscard]] auto symbol_table() noexcept -> simrv::debug::SymbolTable&;
     [[nodiscard]] auto symbol_table() const noexcept -> const simrv::debug::SymbolTable&;
 
@@ -509,6 +527,7 @@ class Machine final : public core::IInterruptController {
     void set_tui_enabled_for_testing(bool enabled) noexcept { config.tui.enabled = enabled; }
     void set_smp_parallel_for_testing(bool enabled) noexcept {
         config.execution.smp_mode = enabled ? SmpMode::CycleOriented : SmpMode::CycleAccurate;
+        is_smp_enabled_ = enabled;
     }
     void set_instruction_limit_for_testing(simrv::xlen::Counter limit) noexcept {
         config.execution.fincnt = limit;
@@ -533,8 +552,6 @@ class Machine final : public core::IInterruptController {
     [[nodiscard]] bool has_control_commands() const noexcept {
         return controls_pending_.load(std::memory_order_acquire);
     }
-    void set_persistent_control(bool enabled) noexcept { persistent_control_ = enabled; }
-    [[nodiscard]] bool persistent_control() const noexcept { return persistent_control_; }
     void complete_step_with(std::function<void(Machine&)> callback) {
         step_completion_ = std::move(callback);
     }
@@ -565,6 +582,7 @@ class Machine final : public core::IInterruptController {
     void prepare_runner_cycle();
     void service_pending_input();
     void service_network();
+    void update_network_devices_status() noexcept;
     void finalize_runner_cycle();
     void publish_tui_execution_snapshot() noexcept;
     void publish_tui_execution_snapshot_for_hart(size_t hart) noexcept;
@@ -579,7 +597,8 @@ class Machine final : public core::IInterruptController {
     std::atomic<bool> controls_pending_{false};
     std::mutex input_mutex_;
     std::deque<PendingInputEvent> pending_input_events_;
-    bool persistent_control_ = false;
+    std::atomic<bool> has_pending_input_{false};
+    bool has_network_devices_{false};
     std::function<void(Machine&)> step_completion_;
     mutable std::mutex staged_configuration_mutex_;
     std::optional<MachineConfig> staged_configuration_;

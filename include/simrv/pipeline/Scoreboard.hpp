@@ -32,7 +32,6 @@ class Scoreboard {
         simrv::xlen::Register forwarded_value{0};
         simrv::xlen::LatencyCycles latency{0};
         PipelineStage stage{PipelineStage::Fetch};
-        bool busy{false};
         bool can_forward{false};
     };
 
@@ -58,7 +57,6 @@ class Scoreboard {
                     .forwarded_value = forwarded_value,
                     .latency = latency,
                     .stage = stage,
-                    .busy = true,
                     .can_forward = can_forward,
                 };
                 return;
@@ -69,7 +67,6 @@ class Scoreboard {
                     .forwarded_value = forwarded_value,
                     .latency = latency,
                     .stage = stage,
-                    .busy = true,
                     .can_forward = can_forward,
                 };
                 return;
@@ -80,7 +77,6 @@ class Scoreboard {
                     .forwarded_value = forwarded_value,
                     .latency = latency,
                     .stage = stage,
-                    .busy = true,
                     .can_forward = can_forward,
                 };
                 return;

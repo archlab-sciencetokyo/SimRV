@@ -598,12 +598,16 @@ auto CsrFile::write(simrv::xlen::CsrNumber addr, simrv::xlen::CsrValue wdata)
         case csr_addr(Csr::Mseccfg): {
             const auto sticky = cpu_.state().mseccfg & static_cast<simrv::xlen::CsrValue>(0x7u);
             cpu_.state().mseccfg = wdata | sticky;
+            cpu_.state().refresh_pmp_status();
+            cpu_.TLB_flush();
             break;
         }
         case csr_addr(Csr::Mseccfgh):
             return require_rv32_counter().and_then(
                 [this, wdata]() -> std::expected<void, ExceptionCode> {
                     cpu_.state().mseccfgh = wdata;
+                    cpu_.state().refresh_pmp_status();
+                    cpu_.TLB_flush();
                     return {};
                 });
         case csr_addr(Csr::Mscratch):

@@ -8,6 +8,7 @@
 #include <span>
 
 #include "simrv/memory/Bus.hpp"
+#include "simrv/memory/MmioTypes.hpp"
 #include "simrv/memory/TileLinkNode.hpp"
 #include "simrv/xlen/ScalarTypes.hpp"
 
@@ -30,15 +31,15 @@ class MmioDevice : public TileLinkNode {
     ~MmioDevice() override = default;
 
     // Fast-path typed read/write interfaces (offset is relative to base_address)
-    [[nodiscard]] virtual auto read8(simrv::xlen::Address offset) -> uint8_t;
-    [[nodiscard]] virtual auto read16(simrv::xlen::Address offset) -> uint16_t;
-    [[nodiscard]] virtual auto read32(simrv::xlen::Address offset) -> uint32_t;
-    [[nodiscard]] virtual auto read64(simrv::xlen::Address offset) -> uint64_t;
+    [[nodiscard]] virtual auto read8(MmioOffset offset) -> MmioData8;
+    [[nodiscard]] virtual auto read16(MmioOffset offset) -> MmioData16;
+    [[nodiscard]] virtual auto read32(MmioOffset offset) -> MmioData32;
+    [[nodiscard]] virtual auto read64(MmioOffset offset) -> MmioData64;
 
-    virtual void write8(simrv::xlen::Address offset, uint8_t val);
-    virtual void write16(simrv::xlen::Address offset, uint16_t val);
-    virtual void write32(simrv::xlen::Address offset, uint32_t val);
-    virtual void write64(simrv::xlen::Address offset, uint64_t val);
+    virtual void write8(MmioOffset offset, MmioData8 val);
+    virtual void write16(MmioOffset offset, MmioData16 val);
+    virtual void write32(MmioOffset offset, MmioData32 val);
+    virtual void write64(MmioOffset offset, MmioData64 val);
 
     // TileLink channel adaptation
     auto handle_request(const TlChannelA& req, TlChannelD& resp) -> bool override;

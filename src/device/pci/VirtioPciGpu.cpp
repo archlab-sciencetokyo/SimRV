@@ -10,7 +10,7 @@ namespace simrv::device {
 
 VirtioPciGpu::VirtioPciGpu() : VirtioPciDevice(virtio::kDevIdGpu, 0x030000, 2) {}
 
-auto VirtioPciGpu::read_device_config(simrv::xlen::Address offset, uint8_t size) -> uint32_t {
+auto VirtioPciGpu::read_device_config(PciBarOffset offset, PciAccessBytes size) -> PciMmioData {
     (void)size;
     if (offset == 0) return 0;  // events_read
     if (offset == 4) return 0;  // events_clear
@@ -18,7 +18,7 @@ auto VirtioPciGpu::read_device_config(simrv::xlen::Address offset, uint8_t size)
     return 0;
 }
 
-void VirtioPciGpu::on_queue_notify(uint16_t queue_index) {
+void VirtioPciGpu::on_queue_notify(virtio::VirtioQueueIndex queue_index) {
     if (queue_index >= queues_.size()) return;
     auto& q = queues_[queue_index];
 

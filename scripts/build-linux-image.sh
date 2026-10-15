@@ -10,22 +10,37 @@ BUILD_DIR="${SIMRV_LINUX_BUILD_DIR:-$ROOT_DIR/linux-build}"
 ARCH="${ARCH:-rv64}"
 
 # Versions
+VERSION_FILE="${SIMRV_LINUX_VERSION_FILE:-$SCRIPT_DIR/linux-versions.conf}"
+ENV_LINUX_VER="${LINUX_VER:-}"
+LINUX_VER="7.2.10"
 OPENSBI_VER="1.9"
-LINUX_VER="${LINUX_VER:-7.2.9}"
 BUSYBOX_VER="1.38.0"
-ALPINE_VER="3.24.1"
-ALPINE_MIRROR="${SIMRV_ALPINE_MIRROR:-https://dl-cdn.alpinelinux.org/alpine/v3.24}"
+ALPINE_VER="3.24.2"
+ALPINE_MIRROR="${SIMRV_ALPINE_MIRROR:-}"
 BUILDROOT_VER="2025.02.18"
-BUILDROOT_SHA256="e38ad1df6ea0479fff6419a87a64535d02131674d463be154a763ef725b55321"
+BUILDROOT_DEFAULT_SHA256="e38ad1df6ea0479fff6419a87a64535d02131674d463be154a763ef725b55321"
+BUILDROOT_SHA256=""
+if [[ -f "$VERSION_FILE" ]]; then
+    while IFS='=' read -r component version; do
+        case "$component" in
+            linux) LINUX_VER="$version" ;;
+            opensbi) OPENSBI_VER="$version" ;;
+            busybox) BUSYBOX_VER="$version" ;;
+            alpine) ALPINE_VER="$version" ;;
+            buildroot) BUILDROOT_VER="$version" ;;
+        esac
+    done < "$VERSION_FILE"
+fi
+[[ -z "$ENV_LINUX_VER" ]] || LINUX_VER="$ENV_LINUX_VER"
 
 # Terminal UI
 INTERACTIVE=0
 if [[ -t 1 ]]; then
     INTERACTIVE=1
-    GREEN='\033[0;32m'
-    BLUE='\033[0;34m'
-    RED='\033[0;31m'
-    NC='\033[0m'
+    GREEN=$'\033[0;32m'
+    BLUE=$'\033[0;34m'
+    RED=$'\033[0;31m'
+    NC=$'\033[0m'
 else
     GREEN=''
     BLUE=''
@@ -34,7 +49,11 @@ else
 fi
 
 log_stamp() { date '+%H:%M:%S'; }
-print_step() { printf '%s%s==>%s %s\n' "$GREEN" "$(log_stamp)" "$NC" "$1"; }
+CURRENT_STEP=""
+print_step() {
+    CURRENT_STEP="$1"
+    printf '%s%s==>%s %s\n' "$GREEN" "$(log_stamp)" "$NC" "$CURRENT_STEP"
+}
 print_info() { printf '%s%s  |%s %s\n' "$BLUE" "$(log_stamp)" "$NC" "$1"; }
 print_error() { printf '%s%s  !%s %s\n' "$RED" "$(log_stamp)" "$NC" "$1" >&2; }
 
@@ -71,6 +90,12 @@ PROFILE="${PROFILE:-gui}"
 DRAM_SIZE_MB="${SIMRV_LINUX_DRAM_SIZE_MB:-512}"
 CLEAN_ACTION=""
 VERBOSE="${SIMRV_LINUX_VERBOSE:-0}"
+JOBS="${SIMRV_LINUX_JOBS:-4}"
+CHECK_UPDATES=0
+UPDATE_VERSIONS=0
+PRUNE_OLD_SOURCES=0
+ASSUME_YES=0
+REUSE_KERNEL_ARTIFACT=0
 
 # Parse arguments
 while [[ $# -gt 0 ]]; do
@@ -86,6 +111,41 @@ while [[ $# -gt 0 ]]; do
         --linux-version)
             LINUX_VER="$2"
             shift
+            ;;
+        --opensbi-version)
+            OPENSBI_VER="$2"
+            shift
+            ;;
+        --busybox-version)
+            BUSYBOX_VER="$2"
+            shift
+            ;;
+        --alpine-version)
+            ALPINE_VER="$2"
+            shift
+            ;;
+        --buildroot-version)
+            BUILDROOT_VER="$2"
+            shift
+            ;;
+        --buildroot-sha256)
+            BUILDROOT_SHA256="$2"
+            shift
+            ;;
+        --check-updates)
+            CHECK_UPDATES=1
+            ;;
+        --update-versions)
+            UPDATE_VERSIONS=1
+            ;;
+        --prune-old-sources)
+            PRUNE_OLD_SOURCES=1
+            ;;
+        --yes)
+            ASSUME_YES=1
+            ;;
+        --reuse-kernel)
+            REUSE_KERNEL_ARTIFACT=1
             ;;
         --cross-compile)
             CROSS_COMPILE="$2"
@@ -124,16 +184,29 @@ while [[ $# -gt 0 ]]; do
             echo "Options:"
             echo "  --arch <rv64|rv32>              Target architecture (default: rv64)"
             echo "  --libc <auto|musl|glibc>        C library selection (default: auto)"
-            echo "  --linux-version <ver>           Linux kernel version (default: 7.2.9)"
+            echo "  --linux-version <ver>           Linux kernel version (default: 7.2.10)"
+            echo "  --opensbi-version <ver>         OpenSBI version (default: 1.9)"
+            echo "  --busybox-version <ver>         BusyBox version (default: 1.38.0)"
+            echo "  --alpine-version <ver>          Alpine minirootfs version (default: 3.24.2)"
+            echo "  --buildroot-version <ver>       Buildroot version (default: 2025.02.18 LTS)"
+            echo "  --buildroot-sha256 <hash>       Required with non-default Buildroot version"
+            echo "  --check-updates                 Compare pinned versions with upstream releases and exit"
+            echo "  --update-versions               Review, save, and build with upstream versions"
+            echo "  --prune-old-sources             With --update-versions, delete stale source caches"
+            echo "  --yes                           Accept update and cleanup prompts"
+            echo "  --reuse-kernel                  Reuse a published kernel when its inputs match"
             echo "  --cross-compile <prefix>        Cross compiler prefix"
             echo "  --rootfs <alpine|buildroot>     Root filesystem implementation (default: alpine)"
             echo "  --profile <gui|fpga|debug>      Linux deployment profile (default: gui)"
             echo "  --dram-size-mb <mb>             DTB DRAM size (default: 512)"
-            echo "  --alpine-mirror <url>           Alpine v3.24 mirror base URL"
+            echo "  --alpine-mirror <url>           Alpine mirror base URL (default follows version)"
             echo "  --verbose                       Show full make/compiler command output"
             echo "  --clean                         Clean build and images directories"
             echo "  --clean-build                   Clean build directory while keeping images"
             echo "  --clean-old-kernels             Prune older kernel trees, keeping current version"
+            echo "Environment:"
+            echo "  SIMRV_LINUX_JOBS=<n>            Parallel make jobs (default: 4)"
+            echo "  SIMRV_LINUX_VERSION_FILE=<path> Version pins file (default: scripts/linux-versions.conf)"
             echo "  -h, --help                      Show this help message"
             exit 0
             ;;
@@ -146,19 +219,212 @@ esac
 shift
 done
 
+for version in "$LINUX_VER" "$OPENSBI_VER" "$BUSYBOX_VER" "$ALPINE_VER" "$BUILDROOT_VER"; do
+    if [[ ! "$version" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]]; then
+        print_error "Invalid component version '$version'."
+        exit 1
+    fi
+done
+
+if (( PRUNE_OLD_SOURCES && ! UPDATE_VERSIONS )); then
+    print_error "--prune-old-sources requires --update-versions."
+    exit 1
+fi
+
+check_upstream_versions() {
+    local output
+    UPSTREAM_STATUS=0
+    if output=$(python3 "$SCRIPT_DIR/check-linux-versions.py"); then
+        :
+    else
+        UPSTREAM_STATUS=$?
+        print_error "Unable to check upstream versions; check network access and retry."
+    fi
+    UPSTREAM_JSON="$output"
+}
+version_is_newer() {
+    python3 - "$1" "$2" <<'PY'
+import re
+import sys
+parts = lambda value: tuple(int(part) for part in re.findall(r"\d+", value))
+sys.exit(0 if parts(sys.argv[1]) > parts(sys.argv[2]) else 1)
+PY
+}
+
+if (( CHECK_UPDATES || UPDATE_VERSIONS )); then
+    check_upstream_versions
+    UPSTREAM_VERSIONS=$(python3 -c 'import json,sys; print("\n".join(f"{k}={v}" for k,v in json.load(sys.stdin)["versions"].items()))' <<< "$UPSTREAM_JSON")
+    UPSTREAM_ERRORS=$(python3 -c 'import json,sys; print("\n".join(f"{k}: {v}" for k,v in json.load(sys.stdin)["errors"].items()))' <<< "$UPSTREAM_JSON")
+    declare -A UPDATES=()
+    while IFS='=' read -r component version; do
+        [[ -n "$component" ]] || continue
+        if [[ ! "$version" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]]; then
+            print_error "Invalid version returned for $component: '$version'."
+            exit 1
+        fi
+        if [[ "$component" == "buildroot_stable" ]]; then
+            print_info "Buildroot latest stable: ${version} (the saved pin follows the LTS series)."
+            continue
+        fi
+        if [[ "$component" == "buildroot_lts" ]]; then
+            if version_is_newer "$version" "$BUILDROOT_VER"; then
+                print_info "Buildroot LTS update available: ${BUILDROOT_VER} -> ${version}; set it manually with --buildroot-sha256 to verify the archive."
+            else
+                printf 'Up to date:       %-12s %s\n' "$component" "$BUILDROOT_VER"
+            fi
+            continue
+        fi
+        case "$component" in
+            linux) current="$LINUX_VER" ;;
+            opensbi) current="$OPENSBI_VER" ;;
+            busybox) current="$BUSYBOX_VER" ;;
+            alpine) current="$ALPINE_VER" ;;
+            *) continue ;;
+        esac
+        if version_is_newer "$version" "$current"; then
+            UPDATES["$component"]="$version"
+            printf 'Update available: %-12s %s -> %s\n' "$component" "$current" "$version"
+        elif [[ "$version" == "$current" ]]; then
+            printf 'Up to date:       %-12s %s\n' "$component" "$current"
+        else
+            printf 'Pinned version:   %-12s %s (upstream latest: %s)\n' "$component" "$current" "$version"
+        fi
+    done <<< "$UPSTREAM_VERSIONS"
+    if [[ -n "$UPSTREAM_ERRORS" ]]; then
+        print_info "Some upstream checks failed:"
+        while IFS= read -r error; do [[ -z "$error" ]] || print_info "  $error"; done <<< "$UPSTREAM_ERRORS"
+    fi
+    if (( UPSTREAM_STATUS != 0 )); then
+        print_error "No upstream release versions could be read."
+        exit 1
+    fi
+    if (( CHECK_UPDATES && ! UPDATE_VERSIONS )); then
+        exit 0
+    fi
+    if (( ${#UPDATES[@]} == 0 )); then
+        print_info "No automatically applicable component updates are available."
+        exit 0
+    fi
+    if (( ASSUME_YES == 0 )); then
+        if [[ ! -t 0 ]]; then
+            print_error "--update-versions needs a terminal prompt or --yes."
+            exit 1
+        fi
+        read -r -p "Save these upstream versions to $VERSION_FILE and use them for this build? [y/N] " answer
+        [[ "$answer" =~ ^[Yy]([Ee][Ss])?$ ]] || { print_info "Version update cancelled."; exit 0; }
+        if (( PRUNE_OLD_SOURCES )); then
+            read -r -p "Also delete cached archives and source trees for replaced versions? [y/N] " answer
+            [[ "$answer" =~ ^[Yy]([Ee][Ss])?$ ]] || PRUNE_OLD_SOURCES=0
+        fi
+    fi
+    OLD_LINUX_VER="$LINUX_VER"
+    OLD_OPENSBI_VER="$OPENSBI_VER"
+    OLD_BUSYBOX_VER="$BUSYBOX_VER"
+    OLD_ALPINE_VER="$ALPINE_VER"
+    [[ -z "${UPDATES[linux]:-}" ]] || LINUX_VER="${UPDATES[linux]}"
+    [[ -z "${UPDATES[opensbi]:-}" ]] || OPENSBI_VER="${UPDATES[opensbi]}"
+    [[ -z "${UPDATES[busybox]:-}" ]] || BUSYBOX_VER="${UPDATES[busybox]}"
+    [[ -z "${UPDATES[alpine]:-}" ]] || ALPINE_VER="${UPDATES[alpine]}"
+    [[ -z "${UPDATES[buildroot_lts]:-}" ]] || BUILDROOT_VER="${UPDATES[buildroot_lts]}"
+    version_tmp="${VERSION_FILE}.tmp.$$"
+    {
+        printf 'linux=%s\n' "$LINUX_VER"
+        printf 'opensbi=%s\n' "$OPENSBI_VER"
+        printf 'busybox=%s\n' "$BUSYBOX_VER"
+        printf 'alpine=%s\n' "$ALPINE_VER"
+        printf 'buildroot=%s\n' "$BUILDROOT_VER"
+    } > "$version_tmp"
+    mv "$version_tmp" "$VERSION_FILE"
+    if (( PRUNE_OLD_SOURCES )); then
+        for stale in \
+            "$BUILD_DIR/linux-${OLD_LINUX_VER}" \
+            "$BUILD_DIR/sources/linux-${OLD_LINUX_VER}.tar.xz" \
+            "$BUILD_DIR/opensbi-${OLD_OPENSBI_VER}" \
+            "$BUILD_DIR/sources/opensbi-${OLD_OPENSBI_VER}.tar.gz" \
+            "$BUILD_DIR/busybox-${OLD_BUSYBOX_VER}" \
+            "$BUILD_DIR/sources/busybox-${OLD_BUSYBOX_VER}.tar.bz2" \
+            "$BUILD_DIR/sources/alpine-minirootfs-${OLD_ALPINE_VER}-riscv64.tar.gz"; do
+            [[ -e "$stale" ]] && rm -rf -- "$stale"
+        done
+    fi
+    print_info "Saved updated version pins to $VERSION_FILE."
+fi
+
+if [[ -z "$ALPINE_MIRROR" ]]; then
+    ALPINE_MIRROR="https://dl-cdn.alpinelinux.org/alpine/v${ALPINE_VER%.*}"
+fi
+for version in "$LINUX_VER" "$OPENSBI_VER" "$BUSYBOX_VER" "$ALPINE_VER" "$BUILDROOT_VER"; do
+    if [[ ! "$version" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]]; then
+        print_error "Invalid component version '$version'."
+        exit 1
+    fi
+done
+if [[ "$ROOTFS_VARIANT" == "buildroot" ]]; then
+    if [[ -z "$BUILDROOT_SHA256" ]]; then
+        if [[ "$BUILDROOT_VER" == "2025.02.18" ]]; then
+            BUILDROOT_SHA256="$BUILDROOT_DEFAULT_SHA256"
+        else
+            print_error "--buildroot-sha256 is required when selecting a non-default Buildroot version."
+            exit 1
+        fi
+    fi
+    if [[ ! "$BUILDROOT_SHA256" =~ ^[[:xdigit:]]{64}$ ]]; then
+        print_error "Buildroot SHA-256 must be 64 hexadecimal characters."
+        exit 1
+    fi
+fi
+
+if [[ ! "$JOBS" =~ ^[1-9][0-9]*$ ]]; then
+    print_error "SIMRV_LINUX_JOBS must be a positive integer (got '$JOBS')."
+    exit 1
+fi
+
 BUILD_STARTED=$(date +%s)
 terminal_title "SimRV Linux build: starting"
 trap 'status=$?; if [[ "$status" -eq 0 ]]; then terminal_title "SimRV Linux build: complete"; terminal_notice "SimRV Linux build complete"; else terminal_title "SimRV Linux build: failed"; terminal_notice "SimRV Linux build failed"; fi; exit "$status"' EXIT
 
 # Keep the normal build transcript focused on the meaningful stage markers.
 # The function wrapper applies to every make invocation below, including
-# BusyBox and Buildroot, while --verbose preserves the traditional transcript
-# for compiler/debugging work.
+# BusyBox and Buildroot. Parallel builds show a small spinner in interactive
+# concise mode, while --verbose preserves the compiler/debugging transcript.
 MAKE_QUIET_ARGS=()
 if [[ "$VERBOSE" != "1" ]]; then
     MAKE_QUIET_ARGS=(-s --no-print-directory)
 fi
-make() { command make "${MAKE_QUIET_ARGS[@]}" "$@"; }
+make() {
+    local show_progress=0
+    for arg in "$@"; do
+        if [[ "$arg" == -j* ]]; then
+            show_progress=1
+            break
+        fi
+    done
+    if [[ "$VERBOSE" == "1" || "$INTERACTIVE" != "1" || "$show_progress" != "1" ]]; then
+        command make "${MAKE_QUIET_ARGS[@]}" "$@"
+        return
+    fi
+
+    local step="${CURRENT_STEP:-Build in progress}"
+    local frames='|/-.'
+    local frame=0
+    local make_status=0
+    command make "${MAKE_QUIET_ARGS[@]}" "$@" &
+    local make_pid=$!
+    trap 'kill -TERM "$make_pid" 2>/dev/null || true; wait "$make_pid" 2>/dev/null || true; printf "\r\033[K%s%s [interrupted]%s\n" "$RED" "$step" "$NC"; exit 130' INT TERM
+    while kill -0 "$make_pid" 2>/dev/null; do
+        printf '\r\033[K%s%s [%c]%s' "$BLUE" "$step" "${frames:frame % 4:1}" "$NC"
+        frame=$((frame + 1))
+        sleep 0.15
+    done
+    wait "$make_pid" || make_status=$?
+    trap - INT TERM
+    if [[ "$make_status" -eq 0 ]]; then
+        printf '\r\033[K%s%s [done]%s\n' "$GREEN" "$step" "$NC"
+    else
+        printf '\r\033[K%s%s [failed]%s\n' "$RED" "$step" "$NC"
+    fi
+    return "$make_status"
+}
 
 if [[ "$ROOTFS_VARIANT" != "alpine" && "$ROOTFS_VARIANT" != "buildroot" ]]; then
     print_error "Unsupported rootfs '$ROOTFS_VARIANT' (expected alpine or buildroot)."
@@ -254,7 +520,8 @@ else
 fi
 
 print_info "Target: ${ARCH} (XLEN=${XLEN}, ${M_ARCH}, ${M_ABI})"
-print_info "Profile: ${ROOTFS_VARIANT}/${PROFILE}; libc=${LIBC}; jobs=$(nproc)"
+print_info "Profile: ${ROOTFS_VARIANT}/${PROFILE}; libc=${LIBC}; jobs=${JOBS}"
+print_info "Versions: Linux ${LINUX_VER}; OpenSBI ${OPENSBI_VER}; BusyBox ${BUSYBOX_VER}; Alpine ${ALPINE_VER}; Buildroot ${BUILDROOT_VER}"
 print_info "Output: $(link_path "$IMAGES_DIR")"
 if [[ "$VERBOSE" == "1" ]]; then
     print_info "Verbose make output enabled"
@@ -362,7 +629,9 @@ if [[ "$XLEN" == "32" || "$ROOTFS_VARIANT" == "buildroot" ]]; then
         sed -i 's/CONFIG_TC=y/# CONFIG_TC is not set/' "$BUSYBOX_BUILD/.config"
         sed -i 's/CONFIG_FEATURE_TC_INGRESS=y/# CONFIG_FEATURE_TC_INGRESS is not set/' "$BUSYBOX_BUILD/.config"
         print_step "Compiling BusyBox (${ARCH})..."
-        make -C "$BUSYBOX_BUILD" ARCH=riscv CROSS_COMPILE="$CROSS_COMPILE" CC="$BUSYBOX_CC" LD="$BUSYBOX_LD" "EXTRA_LDFLAGS=$BUSYBOX_LDFLAGS" -j"$(nproc)" install
+        make -C "$BUSYBOX_BUILD" ARCH=riscv CROSS_COMPILE="$CROSS_COMPILE" \
+             CC="$BUSYBOX_CC" LD="$BUSYBOX_LD" \
+             "EXTRA_LDFLAGS=$BUSYBOX_LDFLAGS" -j"$JOBS" install
     fi
     cp -a "$BUSYBOX_BUILD/_install/"* "$INITRAMFS_DIR/"
 else
@@ -428,7 +697,7 @@ boot_log() {
     echo "[INIT] $*" >&3
 }
 if [ -c /dev/fb0 ]; then
-    echo "Framebuffer: /dev/fb0 detected (640x480x32)"
+    echo "Framebuffer: /dev/fb0 detected (800x600x32)"
 fi
 
 # If an external root disk (/dev/vda) is provided, mount and switch_root into it
@@ -542,39 +811,7 @@ nod /dev/mem     0600 0 0 c 1 1
 LISTEOF
 
 # Walk the initramfs dir and emit the rest of the manifest entries
-python3 - "$INITRAMFS_DIR" >> "$CPIO_LIST" <<'PYEOF'
-import os, stat, sys
-initramfs_dir = sys.argv[1]
-for root, dirs, files in os.walk(initramfs_dir, followlinks=False):
-    dirs.sort(); files.sort()
-    rel_root = os.path.relpath(root, initramfs_dir)
-    if rel_root == ".":
-        rel_root = ""
-    # Skip /dev — already handled by hardcoded nod entries above
-    if rel_root == "dev" or rel_root.startswith("dev/"):
-        dirs.clear()
-        continue
-    if rel_root:
-        st = os.stat(root)
-        print(f"dir /{rel_root} 0{oct(stat.S_IMODE(st.st_mode))[2:]} 0 0")
-    for fname in sorted(files):
-        fpath = os.path.join(root, fname)
-        rel_path = os.path.relpath(fpath, initramfs_dir)
-        if rel_path.startswith("dev/"): continue
-        try:
-            st = os.lstat(fpath)
-        except OSError:
-            continue
-        mode = f"0{oct(stat.S_IMODE(st.st_mode))[2:]}"
-        if stat.S_ISLNK(st.st_mode):
-            print(f"slink /{rel_path} {os.readlink(fpath)} {mode} 0 0")
-        elif stat.S_ISREG(st.st_mode):
-            print(f"file /{rel_path} {fpath} {mode} 0 0")
-        elif stat.S_ISCHR(st.st_mode):
-            print(f"nod /{rel_path} {mode} 0 0 c {os.major(st.st_rdev)} {os.minor(st.st_rdev)}")
-        elif stat.S_ISBLK(st.st_mode):
-            print(f"nod /{rel_path} {mode} 0 0 b {os.major(st.st_rdev)} {os.minor(st.st_rdev)}")
-PYEOF
+python3 "$SCRIPT_DIR/gen-initramfs-manifest.py" "$INITRAMFS_DIR" >> "$CPIO_LIST"
 
 if [[ -x "$GEN_INIT_CPIO_BIN" ]]; then
     print_step "Generating initramfs cpio via gen_init_cpio..."
@@ -596,8 +833,8 @@ cd "$LINUX_BUILD"
 # before changing XLEN so stale architecture-specific objects cannot be linked
 # into the next kernel.
 print_step "Cleaning Linux build tree before configuring ${ARCH}..."
-if [[ "${SIMRV_LINUX_REUSE_KERNEL:-0}" == "1" ]]; then
-    print_info "Reusing existing Linux build tree (SIMRV_LINUX_REUSE_KERNEL=1)."
+if [[ "${SIMRV_LINUX_REUSE_KERNEL:-0}" == "1" || "$REUSE_KERNEL_ARTIFACT" == "1" ]]; then
+    print_info "Preserving the existing Linux build tree for kernel reuse."
 else
     make ARCH=riscv CROSS_COMPILE="$CROSS_COMPILE" mrproper
 fi
@@ -707,9 +944,30 @@ if [[ "$PROFILE" != "debug" ]] && grep -q '^CONFIG_PRINTK_CALLER=y$' .config; th
     exit 1
 fi
 
+KERNEL_CONFIG="$LINUX_BUILD/.config"
+KERNEL_CONFIG_SHA256=$(sha256sum "$KERNEL_CONFIG" | cut -d' ' -f1)
+INITRAMFS_SHA256=$(sha256sum "$BUILD_DIR/initramfs_${ARCH}.cpio" | cut -d' ' -f1)
+REUSE_KERNEL=0
+if [[ "$REUSE_KERNEL_ARTIFACT" == "1" ]]; then
+    if python3 "$SCRIPT_DIR/check-kernel-reuse.py" \
+        "$IMAGES_DIR/manifest.json" "$IMAGES_DIR/vmlinux" "$ARCH" "$LINUX_VER" \
+        "$PROFILE" "$ROOTFS_VARIANT" "$INITRAMFS_SHA256" "$KERNEL_CONFIG_SHA256"; then
+        cp "$IMAGES_DIR/vmlinux" "$LINUX_BUILD/vmlinux"
+        REUSE_KERNEL=1
+        print_info "Skipping kernel rebuild; the published kernel matches the current inputs."
+    else
+        print_info "The published kernel does not match; compiling it now."
+        print_step "Cleaning generated kernel objects before rebuilding..."
+        make ARCH=riscv CROSS_COMPILE="$CROSS_COMPILE" clean
+        make ARCH=riscv CROSS_COMPILE="$CROSS_COMPILE" olddefconfig
+    fi
+fi
+
 # Build kernel (vmlinux)
-print_step "Compiling/linking Linux Kernel v${LINUX_VER}..."
-make ARCH=riscv CROSS_COMPILE="$CROSS_COMPILE" -j"$(nproc)" vmlinux
+if [[ "$REUSE_KERNEL" != "1" ]]; then
+    print_step "Compiling/linking Linux Kernel v${LINUX_VER}..."
+    make ARCH=riscv CROSS_COMPILE="$CROSS_COMPILE" -j"$JOBS" vmlinux
+fi
 
 # Objcopy to bin format
 "${CROSS_COMPILE}objcopy" -O binary vmlinux "$BUILD_DIR/vmlinux_${ARCH}.bin"
@@ -763,7 +1021,7 @@ make PLATFORM=generic CROSS_COMPILE="$CROSS_COMPILE" \
      FW_PAYLOAD_FDT_PATH="$IMAGES_DIR/devicetree.dtb" \
      FW_TEXT_START=0x80000000 \
      FW_PAYLOAD_FDT_ADDR=0x8FF00000 \
-     -j"$(nproc)"
+     -j"$JOBS"
 
 
 
@@ -782,7 +1040,7 @@ if [[ ! -f "$OPENSBI_BUILD/build/platform/generic/firmware/fw_dynamic.bin" ]]; t
     make PLATFORM=generic CROSS_COMPILE="$CROSS_COMPILE" \
          "CC=${CROSS_COMPILE}gcc -march=${M_ARCH} -mabi=${M_ABI}" \
          PLATFORM_RISCV_XLEN="$XLEN" FW_DYNAMIC=y FW_TEXT_START=0x80000000 \
-         -j"$(nproc)"
+         -j"$JOBS"
 fi
 cp "$OPENSBI_BUILD/build/platform/generic/firmware/fw_dynamic.bin" "$IMAGES_DIR/opensbi-dynamic.bin"
 
@@ -809,8 +1067,12 @@ export SIMRV_LINUX_IMAGE="\$IMAGES_DIR/Image"
 export SIMRV_LINUX_OPENSBI="\$IMAGES_DIR/opensbi-dynamic.bin"
 export SIMRV_LINUX_PROFILE="${PROFILE}"
 export SIMRV_LINUX_ROOTFS="${ROOTFS_VARIANT}"
+export SIMRV_LINUX_TAP_SETUP="${SCRIPT_DIR}/setup-simrv-tap.sh"
 export SIMRV_LINUX_TIMEOUT=60
 export SIMRV_LINUX_END=1200000
+simrv_linux_setup_network() {
+    sudo "\$SIMRV_LINUX_TAP_SETUP"
+}
 for _simrv_setup_file in "\$SIMRV_LINUX_MEM_IMG" "\$SIMRV_LINUX_DISK_IMG" \\
                          "\$SIMRV_LINUX_DTB" "\$SIMRV_LINUX_IMAGE" "\$SIMRV_LINUX_OPENSBI"; do
     if [ ! -f "\$_simrv_setup_file" ]; then
@@ -826,6 +1088,7 @@ echo "├─ OpenSBI dynamic: \$SIMRV_LINUX_OPENSBI"
 echo "├─ Linux Image: \$SIMRV_LINUX_IMAGE"
 echo "├─ Disk image: \$SIMRV_LINUX_DISK_IMG"
 echo "└─ Device tree: \$SIMRV_LINUX_DTB"
+echo "Guest network: 10.0.2.2/24 via 10.0.2.1; run simrv_linux_setup_network for TAP/NAT access"
 EOF
 chmod +x "$IMAGES_DIR/setup.sh"
 
@@ -848,7 +1111,9 @@ if [[ "$ROOTFS_VARIANT" == "buildroot" ]]; then
     cp "$BUILDROOT_CONFIG" "$BUILDROOT_OUTPUT/.config"
     make -C "$BUILDROOT_SOURCE" O="$BUILDROOT_OUTPUT" \
          BR2_EXTERNAL="$ROOT_DIR/configs/buildroot/simrv-fpga" olddefconfig
-    make -C "$BUILDROOT_SOURCE" O="$BUILDROOT_OUTPUT" BR2_EXTERNAL="$ROOT_DIR/configs/buildroot/simrv-fpga" -j"$(nproc)"
+    print_step "Building Buildroot ${BUILDROOT_VER} FPGA root filesystem..."
+    make -C "$BUILDROOT_SOURCE" O="$BUILDROOT_OUTPUT" \
+         BR2_EXTERNAL="$ROOT_DIR/configs/buildroot/simrv-fpga" -j"$JOBS"
     cp "$BUILDROOT_OUTPUT/images/rootfs.ext4" "$IMAGES_DIR/rootfs.img"
     e2fsck -fy "$IMAGES_DIR/rootfs.img" >/dev/null
 else
@@ -868,6 +1133,7 @@ else
 ::sysinit:/usr/local/bin/simrv-early-boot
 ::once:/usr/local/bin/simrv-network
 ttyS0::respawn:/sbin/getty -L 115200 ttyS0 vt100
+tty1::respawn:/sbin/getty -L 38400 tty1 linux
 EOF
     echo "SimRV" > "$ROOTFS_DISK_DIR/etc/hostname"
     echo -e "127.0.0.1\tlocalhost SimRV\n::1\t\tlocalhost SimRV" > "$ROOTFS_DISK_DIR/etc/hosts"
@@ -936,10 +1202,10 @@ chmod 1777 /tmp/.X11-unix /tmp/.ICE-unix
 # The Alpine minirootfs is intentionally small and does not include the X11
 # desktop packages. Install them lazily on the first networked boot so a clean
 # image and a rebuilt image have the same GUI behavior.
-if [ ! -x /usr/bin/xinit ]; then
+if [ ! -x /usr/bin/xinit ] || [ ! -x /usr/bin/htop ]; then
     echo "[JWM] Installing X11 desktop packages on first boot..." > /dev/ttyS0
     if ! apk add --no-cache xorg-server xinit jwm xterm xf86-video-fbdev \
-        xf86-input-evdev font-misc-misc font-dejavu links-graphics bsd-games \
+        xf86-input-evdev font-misc-misc font-dejavu links-graphics bsd-games htop \
         gnuchess > /tmp/simrv-apk.log 2>&1; then
         echo "[JWM] X11 package installation failed; see /tmp/simrv-apk.log" > /dev/ttyS0
         sed -n '1,24p' /tmp/simrv-apk.log > /dev/ttyS0 2>/dev/null || true
@@ -977,6 +1243,7 @@ if [ -f /etc/system.jwmrc ]; then
     sed -i '/^[[:space:]]*<Menu icon="games" label="Games">$/,/^[[:space:]]*<\/Menu>$/d' \
         /etc/system.jwmrc
     sed -i '/label="Gimp"/i\
+            <Program label="System Monitor">xterm -T htop -e htop</Program>\
             <!-- SimRV Games submenu -->\
             <Menu icon="games" label="Games">\
                 <Program label="Chess">xterm -T Chess -e gnuchess</Program>\
@@ -1046,10 +1313,10 @@ EOF
     cat > "$ROOTFS_DISK_DIR/root/.profile" <<'EOF'
 #!/bin/sh
 
-# Start the GUI only after an authenticated serial login. Keep it in the
-# background so the login shell remains available for diagnostics.
+# Start the GUI only after an authenticated framebuffer or serial login. Keep
+# it in the background so the shell remains visible until X takes over tty1.
 case "$(tty 2>/dev/null || true)" in
-    /dev/ttyS0)
+    /dev/ttyS0|/dev/tty1)
         if [ "$(id -u)" = 0 ] && [ -x /usr/local/bin/start-jwm ]; then
             /usr/local/bin/start-jwm >/tmp/simrv-jwm.log 2>&1 &
         fi
@@ -1101,7 +1368,7 @@ Section "Screen"
     SubSection "Display"
         Depth 24
         FbBpp 32
-        Modes "640x480"
+        Modes "800x600" "640x480"
     EndSubSection
 EndSection
 EOF
@@ -1126,7 +1393,7 @@ fi
 [ -c /dev/mem ] || mknod -m 600 /dev/mem c 1 1 2>/dev/null || true
 
 if [ -c /dev/fb0 ]; then
-    echo "Framebuffer: /dev/fb0 detected (640x480x32)"
+    echo "Framebuffer: /dev/fb0 detected (800x600x32)"
         if [ -w /dev/fb0 ]; then
             echo "Framebuffer: /dev/fb0 is writable"
         fi
@@ -1164,12 +1431,13 @@ EOF
         "$qemu_riscv64" -L "$ROOTFS_DISK_DIR" "$ROOTFS_DISK_DIR/sbin/apk" \
             --root "$ROOTFS_DISK_DIR" --no-cache --no-scripts add \
             xorg-server xinit jwm xterm xf86-video-fbdev xf86-input-evdev \
-            font-misc-misc font-dejavu links-graphics bsd-games gnuchess
+            font-misc-misc font-dejavu links-graphics bsd-games gnuchess htop
         apk_status=$?
         set -e
         if [[ -x "$ROOTFS_DISK_DIR/usr/bin/xinit" &&
               -x "$ROOTFS_DISK_DIR/usr/libexec/Xorg" &&
-              -x "$ROOTFS_DISK_DIR/usr/bin/jwm" ]]; then
+              -x "$ROOTFS_DISK_DIR/usr/bin/jwm" &&
+              -x "$ROOTFS_DISK_DIR/usr/bin/htop" ]]; then
             print_info "X11/JWM package files bundled (apk status ${apk_status})."
             sed -i 's/Sans-12:bold/DejaVu Sans-12:bold/g; s/>Sans-12</>DejaVu Sans-12</g' \
                 "$ROOTFS_DISK_DIR/etc/system.jwmrc"
@@ -1180,6 +1448,7 @@ EOF
             sed -i '/^[[:space:]]*<Menu icon="games" label="Games">$/,/^[[:space:]]*<\/Menu>$/d' \
                 "$ROOTFS_DISK_DIR/etc/system.jwmrc"
             sed -i '/label="Gimp"/i\
+            <Program label="System Monitor">xterm -T htop -e htop</Program>\
             <!-- SimRV Games submenu -->\
             <Menu icon="games" label="Games">\
                 <Program label="Chess">xterm -T Chess -e gnuchess</Program>\
@@ -1243,6 +1512,7 @@ fi
     printf '  "rootfs_label": "%s",\n' "$ROOTFS_LABEL"
     printf '  "bootargs": "%s",\n' "$BOOTARGS"
     printf '  "kernel_config_sha256": "%s",\n' "$KERNEL_CONFIG_SHA256"
+    printf '  "initramfs_sha256": "%s",\n' "$INITRAMFS_SHA256"
     printf '  "debug_features": %s,\n' "$DEBUG_FEATURES"
     echo '  "artifacts": {'
     first=1

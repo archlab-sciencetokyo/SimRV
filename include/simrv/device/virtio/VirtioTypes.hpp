@@ -1,7 +1,23 @@
+/**
+ * @file VirtioTypes.hpp
+ * @brief VirtIO domain types, queue descriptor flags, and device status flags.
+ */
 #pragma once
 
 #include <cstdint>
 #include <utility>
+
+#include "simrv/xlen/ScalarTypes.hpp"
+
+namespace simrv::device::virtio {
+
+using VirtioQueueIndex = uint16_t;
+using VirtioQueueSize = uint16_t;
+using VirtioQueueAddr = simrv::xlen::Address;
+using VirtioDeviceId = uint16_t;
+using VirtioFeatureBits = uint64_t;
+using VirtioFeatureWord = uint32_t;
+using VirtioIsrStatus = uint8_t;
 
 // VirtIO domain types
 enum class VirtioDeviceStatus : uint8_t {
@@ -31,3 +47,5 @@ constexpr auto operator&=(VirtqDescFlag& lhs, VirtqDescFlag rhs) noexcept -> Vir
     lhs = lhs & rhs;
     return lhs;
 }
+
+}  // namespace simrv::device::virtio
