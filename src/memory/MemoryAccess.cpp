@@ -157,9 +157,8 @@ auto MemoryAccess::target_read(MemorySubsystem& mem, core::CPU& cpu, simrv::xlen
                     simrv::compiler::unlikely(!core::pmp::check_access(
                         cpu.state(), paddr, size_bytes, pmp_req, eff_priv))) {
                     // Access check failed, fall through to fault handler below
-                } else if (simrv::compiler::likely(entry.host_ptr_base != nullptr)) {
-                    return simrv::memory::host_read_fast(
-                        entry.host_ptr_base + (v_addr.raw() & 0xFFF), funct3);
+                } else if (simrv::compiler::likely(entry.has_host_ptr())) {
+                    return simrv::memory::host_read_fast(entry.host_ptr(v_addr.raw()), funct3);
                 }
                 if (simrv::compiler::likely(geometry.contains(paddr, size_bytes))) {
                     if (simrv::compiler::unlikely(!core::pmp::check_access(
@@ -726,9 +725,8 @@ void MemoryAccess::target_write(MemorySubsystem& mem, core::CPU& cpu, simrv::xle
                 if (simrv::compiler::likely(core::pmp::check_access(cpu.state(), paddr, size_bytes,
                                                                     core::PmpAccessType::Write,
                                                                     eff_priv) &&
-                                            entry.host_ptr_base != nullptr)) {
-                    simrv::memory::host_write_fast(entry.host_ptr_base + (v_addr.raw() & 0xFFF),
-                                                   wdata, funct3);
+                                            entry.has_host_ptr())) {
+                    simrv::memory::host_write_fast(entry.host_ptr(v_addr.raw()), wdata, funct3);
                     note_store(paddr.raw(), size_bytes);
                     return;
                 }

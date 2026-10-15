@@ -254,10 +254,10 @@ struct alignas(32) SoftTlbEntry {
 
     uint64_t tag = kInvalidTag;  ///< Packed VPN | ASID | priv; kInvalidTag when empty (8 bytes)
     simrv::xlen::PhysAddr paddr_base{0};  ///< Physical page base (paddr & ~0xFFF) (8 bytes)
-    simrv::xlen::Byte* host_ptr_base =
-        nullptr;          ///< Direct host pointer base (nullptr = use paddr) (8 bytes)
-    uint32_t epoch = 0;   ///< TLB generation epoch (4 bytes)
-    bool global = false;  ///< Global translation flag (1 byte)
+    uintptr_t host_offset = 0;  ///< Direct host offset: (host_base - (vpn << 12)) (8 bytes)
+    uint32_t epoch = 0;         ///< TLB generation epoch (4 bytes)
+    bool global = false;        ///< Global translation flag (1 byte)
+    bool has_host = false;      ///< Direct host pointer valid flag (1 byte)
 
     /// Build a lookup tag from the three key fields.
     [[nodiscard]] SIMRV_ALWAYS_INLINE static constexpr auto make_tag(
@@ -276,26 +276,44 @@ struct alignas(32) SoftTlbEntry {
         return simrv::compiler::unlikely(global) && (tag == make_tag(vpn, 0, priv));
     }
 
+    [[nodiscard]] SIMRV_ALWAYS_INLINE bool has_host_ptr() const noexcept { return has_host; }
+
+    [[nodiscard]] SIMRV_ALWAYS_INLINE auto host_ptr(simrv::xlen::Address vaddr) const noexcept
+        -> simrv::xlen::Byte* {
+        return reinterpret_cast<simrv::xlen::Byte*>(host_offset + static_cast<uintptr_t>(vaddr));
+    }
+
+    [[nodiscard]] SIMRV_ALWAYS_INLINE auto host_ptr_base() const noexcept -> simrv::xlen::Byte* {
+        return has_host ? reinterpret_cast<simrv::xlen::Byte*>(host_offset + ((tag >> 18) << 12))
+                        : nullptr;
+    }
+
     void set(uint64_t vpn, uint64_t asid, simrv::xlen::PrivilegeLevel priv, uint32_t current_epoch,
              simrv::xlen::PhysAddr paddr_base_in, simrv::xlen::Byte* host_ptr_base_in,
              bool is_global = false) noexcept {
         tag = make_tag(vpn, is_global ? 0 : asid, priv);
         epoch = current_epoch;
         paddr_base = paddr_base_in;
-        host_ptr_base = host_ptr_base_in;
+        has_host = (host_ptr_base_in != nullptr);
+        host_offset = has_host ? (reinterpret_cast<uintptr_t>(host_ptr_base_in) -
+                                  (static_cast<uintptr_t>(vpn) << 12U))
+                               : 0;
         global = is_global;
     }
 
     void invalidate() noexcept {
         tag = kInvalidTag;
         paddr_base = 0;
-        host_ptr_base = nullptr;
+        host_offset = 0;
+        has_host = false;
         global = false;
     }
+
     [[nodiscard]] bool valid(uint32_t current_epoch) const noexcept {
         return epoch == current_epoch && tag != kInvalidTag;
     }
 };
+static_assert(sizeof(SoftTlbEntry) == 32, "SoftTlbEntry must be exactly 32 bytes");
 
 enum class HartStatus : uint8_t {
     Started = 0,
@@ -653,6 +671,14 @@ class CPU {
         }
     }
     SIMRV_ALWAYS_INLINE void pc_sign_extend() noexcept { state_.canonicalize_pc(); }
+
+    /// Advance PC by op.len() and update instruction counters for straight ALU ops without
+    /// branch/interrupt overhead.
+    SIMRV_ALWAYS_INLINE void advance_cached_pc_alu(const CachedOp& op) {
+        state_.pc += op.len();
+        e_icount++;
+        e_ccount += (op.cinsn != 0);
+    }
 
     /// Advance PC by op.len(), update instruction counters, sign-extend PC, and process interrupts.
     SIMRV_ALWAYS_INLINE void advance_cached_pc(const CachedOp& op) {

@@ -129,10 +129,9 @@ auto CPU::try_fast_load([[maybe_unused]] Machine& machine, simrv::xlen::Address 
                     return false;
                 }
             }
-            if (simrv::compiler::likely(entry.host_ptr_base != nullptr)) {
-                out_val =
-                    simrv::memory::host_read_fast(entry.host_ptr_base + (mem_addr & 0xFFF),
-                                                  static_cast<simrv::xlen::Instruction>(funct3));
+            if (simrv::compiler::likely(entry.has_host_ptr())) {
+                out_val = simrv::memory::host_read_fast(
+                    entry.host_ptr(mem_addr), static_cast<simrv::xlen::Instruction>(funct3));
                 return true;
             }
             const simrv::xlen::Address paddr = (entry.paddr_base + (mem_addr & 0xFFF)).raw();
@@ -220,8 +219,8 @@ auto CPU::try_fast_store(Machine& machine, simrv::xlen::Address mem_addr, isa::F
             if (simrv::compiler::unlikely(is_tohost_addr(machine, paddr))) {
                 return false;
             }
-            if (simrv::compiler::likely(entry.host_ptr_base != nullptr)) {
-                simrv::memory::host_write_fast(entry.host_ptr_base + (mem_addr & 0xFFF), rrs2,
+            if (simrv::compiler::likely(entry.has_host_ptr())) {
+                simrv::memory::host_write_fast(entry.host_ptr(mem_addr), rrs2,
                                                static_cast<simrv::xlen::Instruction>(funct3));
                 pipeline_context.mem_paddr = paddr;
                 return true;
@@ -317,17 +316,17 @@ SIMRV_ALWAYS_INLINE auto CPU::execute_cached_load(Machine& machine, CachedOp& op
                     if (simrv::compiler::unlikely(!core::pmp::check_access(
                             state_, paddr, size_bytes, core::PmpAccessType::Read, eff_priv))) {
                         // Let MemoryAccess raise the architectural access fault.
-                    } else if (simrv::compiler::likely(entry.host_ptr_base != nullptr)) {
+                    } else if (simrv::compiler::likely(entry.has_host_ptr())) {
                         mem_rdata = simrv::memory::host_read_fast(
-                            entry.host_ptr_base + page_offset,
+                            entry.host_ptr(lookup_addr),
                             static_cast<simrv::xlen::Instruction>(op.funct3));
                         state_.regs.write_branchless(op.rd, mem_rdata);
                         advance_cached_pc(op);
                         return true;
                     }
-                } else if (simrv::compiler::likely(entry.host_ptr_base != nullptr)) {
+                } else if (simrv::compiler::likely(entry.has_host_ptr())) {
                     mem_rdata = simrv::memory::host_read_fast(
-                        entry.host_ptr_base + page_offset,
+                        entry.host_ptr(lookup_addr),
                         static_cast<simrv::xlen::Instruction>(op.funct3));
                     state_.regs.write_branchless(op.rd, mem_rdata);
                     advance_cached_pc(op);
@@ -404,10 +403,10 @@ SIMRV_ALWAYS_INLINE auto CPU::execute_cached_store(Machine& machine, CachedOp& o
                         state_, paddr, size_bytes, core::PmpAccessType::Write, eff_priv))) {
                     // Let MemoryAccess raise the architectural access fault.
                 } else {
-                    if (simrv::compiler::likely(entry.host_ptr_base != nullptr &&
+                    if (simrv::compiler::likely(entry.has_host_ptr() &&
                                                 !is_tohost_addr(machine, paddr))) {
                         simrv::memory::host_write_fast(
-                            entry.host_ptr_base + page_offset, rrs2,
+                            entry.host_ptr(lookup_addr), rrs2,
                             static_cast<simrv::xlen::Instruction>(op.funct3));
                         state_.lr_reservation_active = false;
                         if (simrv::compiler::unlikely(
@@ -792,9 +791,9 @@ void CPU::execute_cached_op_fast(Machine& machine, CachedOp& op,
                             simrv::compiler::unlikely(!core::pmp::check_access(
                                 state_, paddr, size_bytes, core::PmpAccessType::Read, eff_priv))) {
                             // Let fallback raise the architectural fault.
-                        } else if (simrv::compiler::likely(entry.host_ptr_base != nullptr)) {
+                        } else if (simrv::compiler::likely(entry.has_host_ptr())) {
                             mem_rdata = simrv::memory::host_read_fast(
-                                entry.host_ptr_base + page_offset,
+                                entry.host_ptr(lookup_addr),
                                 static_cast<simrv::xlen::Instruction>(op.funct3));
                             loaded = true;
                         }
@@ -873,10 +872,10 @@ void CPU::execute_cached_op_fast(Machine& machine, CachedOp& op,
                             simrv::compiler::unlikely(!core::pmp::check_access(
                                 state_, paddr, size_bytes, core::PmpAccessType::Write, eff_priv))) {
                             // Let fallback raise the architectural fault.
-                        } else if (simrv::compiler::likely(entry.host_ptr_base != nullptr &&
+                        } else if (simrv::compiler::likely(entry.has_host_ptr() &&
                                                            !is_tohost_addr(machine, paddr))) {
                             simrv::memory::host_write_fast(
-                                entry.host_ptr_base + page_offset, fp_data,
+                                entry.host_ptr(lookup_addr), fp_data,
                                 static_cast<simrv::xlen::Instruction>(op.funct3));
                             pipeline_context.mem_paddr = paddr;
                             stored = true;
@@ -997,7 +996,7 @@ void CPU::execute_cached_op_fast(Machine& machine, CachedOp& op,
     // Shared writeback tail - only ALU arms (those that break) reach here.
     // Branchless GPR write: write rd unconditionally, then re-zero x0.
     state_.regs.write_branchless(op.rd, wb_data);
-    advance_cached_pc(op);
+    advance_cached_pc_alu(op);
 }
 
 template <bool kCopyContext, bool kInstMix, bool kPollPause>
@@ -1029,6 +1028,12 @@ SIMRV_ALWAYS_INLINE auto CPU::run_fast_baremetal_kernel(Machine& machine, uint32
                 ++cached_ops;
                 ++b;
             }
+            if constexpr (simrv::xlen::kIsXLen64) {
+                if (simrv::compiler::unlikely(state_.regs.xlen == 32)) {
+                    state_.canonicalize_pc();
+                }
+            }
+            handle_cached_interrupts();
         } else {
             const auto delta = e_icount - last_flushed_icount;
             if (delta > 0) {
@@ -1052,6 +1057,12 @@ SIMRV_ALWAYS_INLINE auto CPU::run_fast_baremetal_kernel(Machine& machine, uint32
     if (delta > 0) {
         machine.record_retired_instructions(delta);
     }
+    if constexpr (simrv::xlen::kIsXLen64) {
+        if (simrv::compiler::unlikely(state_.regs.xlen == 32)) {
+            state_.canonicalize_pc();
+        }
+    }
+    handle_cached_interrupts();
     return cached_ops;
 }
 
@@ -1150,6 +1161,12 @@ SIMRV_ALWAYS_INLINE auto CPU::run_fast_os_kernel(Machine& machine, uint32_t batc
                 ++chunk_cycles;
                 ++b;
             }
+            if constexpr (simrv::xlen::kIsXLen64) {
+                if (simrv::compiler::unlikely(state_.regs.xlen == 32)) {
+                    state_.canonicalize_pc();
+                }
+            }
+            handle_cached_interrupts();
 
             if (simrv::compiler::unlikely(chunk_cycles >= 64)) {
                 flush_clint_and_retired();
@@ -1171,6 +1188,11 @@ SIMRV_ALWAYS_INLINE auto CPU::run_fast_os_kernel(Machine& machine, uint32_t batc
         }
     }
     flush_clint_and_retired();
+    if constexpr (simrv::xlen::kIsXLen64) {
+        if (simrv::compiler::unlikely(state_.regs.xlen == 32)) {
+            state_.canonicalize_pc();
+        }
+    }
     return cached_ops;
 }
 

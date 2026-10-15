@@ -52,7 +52,8 @@ class RamView {
     [[nodiscard]] SIMRV_ALWAYS_INLINE constexpr auto contains(simrv::xlen::Address address,
                                                               size_t bytes = 1) const noexcept
         -> bool {
-        return data_ != nullptr && address_range_contains(base_, size_, address, bytes);
+        return data_ != nullptr && bytes <= size_ &&
+               (static_cast<simrv::xlen::Address>(address - base_) <= (size_ - bytes));
     }
     [[nodiscard]] SIMRV_ALWAYS_INLINE constexpr auto contains(simrv::xlen::PhysAddr address,
                                                               size_t bytes = 1) const noexcept

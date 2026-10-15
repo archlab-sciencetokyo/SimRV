@@ -74,12 +74,12 @@ namespace {
                         cpu.state(), paddr, total_bytes, core::PmpAccessType::Write, eff_priv))) {
                     return nullptr;
                 }
-                if (simrv::compiler::likely(entry.host_ptr_base != nullptr)) {
+                if (simrv::compiler::likely(entry.has_host_ptr())) {
                     if (simrv::compiler::unlikely(is_tohost_addr_range(cpu, paddr, total_bytes))) {
                         return nullptr;
                     }
                     if (physical_address != nullptr) *physical_address = paddr;
-                    return entry.host_ptr_base + page_offset;
+                    return entry.host_ptr(lookup_addr);
                 }
             }
         } else {
@@ -92,8 +92,8 @@ namespace {
                         cpu.state(), paddr, total_bytes, core::PmpAccessType::Read, eff_priv))) {
                     return nullptr;
                 }
-                if (simrv::compiler::likely(entry.host_ptr_base != nullptr)) {
-                    return entry.host_ptr_base + page_offset;
+                if (simrv::compiler::likely(entry.has_host_ptr())) {
+                    return entry.host_ptr(lookup_addr);
                 }
             }
         }
