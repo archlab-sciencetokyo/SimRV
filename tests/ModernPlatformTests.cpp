@@ -2455,7 +2455,9 @@ void test_pcie_and_virtio_pci() {
     std::vector<simrv::xlen::Byte> ram(1024 * 1024, simrv::xlen::Byte{0});
     machine.set_ram_for_testing(ram.data(), ram.size());
 
-    simrv::device::PcieRootComplex rc(&machine);
+    simrv::device::Imsic imsic_s(&machine, simrv::device::Imsic::Privilege::Supervisor,
+                                 simrv::mmio::kImsicSBaseAddress, simrv::mmio::kImsicSSize);
+    simrv::device::PcieRootComplex rc(&machine, nullptr, &imsic_s);
     auto blk = std::make_shared<simrv::device::VirtioPciBlock>();
     blk->bar_write(0, 0x00, 0, 4);
     const uint32_t block_features = blk->bar_read(0, 0x04, 4);
@@ -2521,6 +2523,27 @@ void test_pcie_and_virtio_pci() {
     const auto isr_status = rc.mmio_read(0x40001000 + 0x200, 4);
     (void)isr_status;
     assert(((plic.plic_pending[0] >> 17) & 1) == 0);
+
+    // Test MSI capability configuration and MSI interrupt delivery to IMSIC
+    assert(!blk->is_msi_enabled());
+    assert(rc.ecam_read(0x8000 + 0x84, 1) == 0x05);  // MSI Cap ID
+    rc.ecam_write(0x8000 + 0x84 + 0x04, static_cast<uint32_t>(simrv::mmio::kImsicSBaseAddress), 4);
+    rc.ecam_write(0x8000 + 0x84 + 0x08,
+                  static_cast<uint32_t>(simrv::mmio::kImsicSBaseAddress >> 32), 4);
+    rc.ecam_write(0x8000 + 0x84 + 0x0C, 9, 2);        // Message data: vector 9
+    rc.ecam_write(0x8000 + 0x84 + 0x02, 0x0081U, 2);  // Enable MSI + 64-bit capable
+    assert(blk->is_msi_enabled());
+    assert(blk->msi_address() == simrv::mmio::kImsicSBaseAddress);
+    assert(blk->msi_data() == 9);
+
+    imsic_s.csr_write(0, 0x70, 1);        // eidelivery = 1
+    imsic_s.csr_write(0, 0xC0, 1U << 9);  // enable interrupt ID 9
+    blk->trigger_irq();                   // With MSI enabled, routes via send_msi to IMSIC
+    assert((imsic_s.csr_read(0, 0x44) & 0xffff) == 9);  // topei returns ID 9
+
+    // Disable MSI: subsequent interrupts fall back to INTx pin assertion
+    rc.ecam_write(0x8000 + 0x84 + 0x02, 0x0080U, 2);
+    assert(!blk->is_msi_enabled());
 
     // Attach Console (Slot 2), RNG (Slot 3), GPU (Slot 4), Input (Slot 5), Sound (Slot 6)
     auto console = std::make_shared<simrv::device::VirtioPciConsole>();

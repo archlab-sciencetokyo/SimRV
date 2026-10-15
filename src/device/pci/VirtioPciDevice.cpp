@@ -30,6 +30,9 @@ VirtioPciDevice::VirtioPciDevice(PciSubsystemId subsystem_device_id, PciClassCod
     add_pci_cap(2, 0, 0x100, 0x100, 4);  // Notify cfg
     add_pci_cap(3, 0, 0x200, 0x100);     // ISR cfg
     add_pci_cap(4, 0, 0x300, 0x100);     // Device cfg
+
+    init_msi(next_cap_offset_, true);  // Standard 64-bit MSI capability
+    next_cap_offset_ = static_cast<PciConfigOffset>(next_cap_offset_ + 24);
 }
 
 void VirtioPciDevice::reset() {

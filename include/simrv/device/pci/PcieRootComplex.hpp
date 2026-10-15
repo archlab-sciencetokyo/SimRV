@@ -60,6 +60,12 @@ class PcieRootComplex {
         deassert_device_irq(PciBdf{.bus = bus, .dev = dev, .func = func});
     }
 
+    void send_msi(PciBdf bdf, simrv::xlen::Address addr, uint32_t message_data);
+    void send_msi(PciBusNumber bus, PciDeviceNumber dev, PciFunctionNumber func,
+                  simrv::xlen::Address addr, uint32_t message_data) {
+        send_msi(PciBdf{.bus = bus, .dev = dev, .func = func}, addr, message_data);
+    }
+
     void rebuild_bar_mappings();
 
     struct BarMapping {
