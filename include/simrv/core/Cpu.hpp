@@ -438,6 +438,9 @@ class CPU {
     /// Queue external interrupt wire changes for application by this hart at its next boundary.
     void queue_interrupt_line(core::MipBit bit, bool asserted) noexcept;
     void apply_pending_interrupt_lines(Machine& machine);
+    [[nodiscard]] SIMRV_ALWAYS_INLINE auto has_pending_interrupt_lines() const noexcept -> bool {
+        return pending_interrupt_lines_.load(std::memory_order_relaxed) != 0;
+    }
     [[nodiscard]] auto next_logical_issue_sequence() noexcept -> uint64_t {
         return next_logical_issue_sequence_++;
     }

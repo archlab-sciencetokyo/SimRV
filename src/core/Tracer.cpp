@@ -720,18 +720,6 @@ void Tracer::init_dlog(bool dlog_mode) {
     }
 }
 
-auto Tracer::is_trace_enabled() const noexcept -> bool { return fp_trace.is_open(); }
-auto Tracer::is_architecture_trace_enabled() const noexcept -> bool {
-    return architecture_trace_enabled_;
-}
-auto Tracer::needs_retiring_context() const noexcept -> bool { return retirement_context_needed_; }
-auto Tracer::is_trap_log_enabled() const noexcept -> bool { return fp_traplog.is_open(); }
-auto Tracer::is_dlog_enabled() const noexcept -> bool { return fp_dlog.is_open(); }
-
-auto Tracer::is_register_write_trace_enabled() const noexcept -> bool {
-    return fp_registers_.is_open();
-}
-
 void Tracer::capture_register_write_before(CPU& cpu, pipeline::PipelineContext& context) {
     if (!fp_registers_.is_open() || !context.traits.writes_vec) return;
     ConditionalTracerLock lock(mutex_, machine_.is_smp_enabled());

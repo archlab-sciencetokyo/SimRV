@@ -601,31 +601,31 @@ void CPU::execute_cached_op_fast(Machine& machine, CachedOp& op,
         case isa::ADDW: {
             const simrv::xlen::Register rrs2 = state_.regs.read(op.rs2);
             wb_data = static_cast<simrv::xlen::Register>(
-                static_cast<int64_t>(static_cast<int32_t>(rrs1 + rrs2)));
+                static_cast<simrv::xlen::SignedWord>(static_cast<int32_t>(rrs1 + rrs2)));
             break;
         }
         case isa::SUBW: {
             const simrv::xlen::Register rrs2 = state_.regs.read(op.rs2);
             wb_data = static_cast<simrv::xlen::Register>(
-                static_cast<int64_t>(static_cast<int32_t>(rrs1 - rrs2)));
+                static_cast<simrv::xlen::SignedWord>(static_cast<int32_t>(rrs1 - rrs2)));
             break;
         }
         case isa::SLLW: {
             const simrv::xlen::Register rrs2 = state_.regs.read(op.rs2);
-            wb_data = static_cast<simrv::xlen::Register>(static_cast<int64_t>(
+            wb_data = static_cast<simrv::xlen::Register>(static_cast<simrv::xlen::SignedWord>(
                 static_cast<int32_t>(static_cast<uint32_t>(rrs1) << (rrs2 & 0x1f))));
             break;
         }
         case isa::SRLW: {
             const simrv::xlen::Register rrs2 = state_.regs.read(op.rs2);
-            wb_data = static_cast<simrv::xlen::Register>(static_cast<int64_t>(
+            wb_data = static_cast<simrv::xlen::Register>(static_cast<simrv::xlen::SignedWord>(
                 static_cast<int32_t>(static_cast<uint32_t>(rrs1) >> (rrs2 & 0x1f))));
             break;
         }
         case isa::SRAW: {
             const simrv::xlen::Register rrs2 = state_.regs.read(op.rs2);
             wb_data = static_cast<simrv::xlen::Register>(
-                static_cast<int64_t>(static_cast<int32_t>(rrs1) >> (rrs2 & 0x1f)));
+                static_cast<simrv::xlen::SignedWord>(static_cast<int32_t>(rrs1) >> (rrs2 & 0x1f)));
             break;
         }
         // ---- Scalar ALU with immediate ----
@@ -684,19 +684,19 @@ void CPU::execute_cached_op_fast(Machine& machine, CachedOp& op,
         // ---- 32-bit immediate ops (RV64 only) ----
         case isa::ADDIW:
             wb_data = static_cast<simrv::xlen::Register>(
-                static_cast<int64_t>(static_cast<int32_t>(rrs1 + op.imm)));
+                static_cast<simrv::xlen::SignedWord>(static_cast<int32_t>(rrs1 + op.imm)));
             break;
         case isa::SLLIW:
-            wb_data = static_cast<simrv::xlen::Register>(static_cast<int64_t>(
+            wb_data = static_cast<simrv::xlen::Register>(static_cast<simrv::xlen::SignedWord>(
                 static_cast<int32_t>(static_cast<uint32_t>(rrs1) << (op.imm & 0x1f))));
             break;
         case isa::SRLIW:
-            wb_data = static_cast<simrv::xlen::Register>(static_cast<int64_t>(
+            wb_data = static_cast<simrv::xlen::Register>(static_cast<simrv::xlen::SignedWord>(
                 static_cast<int32_t>(static_cast<uint32_t>(rrs1) >> (op.imm & 0x1f))));
             break;
         case isa::SRAIW:
-            wb_data = static_cast<simrv::xlen::Register>(
-                static_cast<int64_t>(static_cast<int32_t>(rrs1) >> (op.imm & 0x1f)));
+            wb_data = static_cast<simrv::xlen::Register>(static_cast<simrv::xlen::SignedWord>(
+                static_cast<int32_t>(rrs1) >> (op.imm & 0x1f)));
             break;
         // ---- Upper-immediate (no rs1) ----
         case isa::LUI:

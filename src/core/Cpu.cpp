@@ -302,6 +302,7 @@ void CPU::queue_interrupt_line(core::MipBit bit, bool asserted) noexcept {
 }
 
 void CPU::apply_pending_interrupt_lines(Machine& machine) {
+    if (simrv::compiler::likely(!has_pending_interrupt_lines())) return;
     const uint16_t pending = pending_interrupt_lines_.exchange(0, std::memory_order_acquire);
     if (pending == 0) return;
     constexpr std::array<core::MipBit, 6> lines{core::MipBit::Mtip, core::MipBit::Msip,

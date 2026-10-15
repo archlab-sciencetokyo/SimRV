@@ -14,6 +14,7 @@
 #include <string_view>
 #include <vector>
 
+#include "simrv/CompilerHints.hpp"
 #include "simrv/debug/DebugTypes.hpp"
 #include "simrv/xlen/IdentifierTypes.hpp"
 #include "simrv/xlen/RegisterTypes.hpp"
@@ -89,7 +90,9 @@ class BreakpointManager {
     /// Clear all configured PC breakpoints
     void clear_pc_breakpoints();
     /// Check whether any PC breakpoint or watchpoint is active
-    [[nodiscard]] auto has_any() const -> bool { return active_.load(std::memory_order_acquire); }
+    [[nodiscard]] SIMRV_ALWAYS_INLINE auto has_any() const noexcept -> bool {
+        return active_.load(std::memory_order_relaxed);
+    }
     /// Check if a PC breakpoint is set at the given address
     [[nodiscard]] auto has_pc_breakpoint(simrv::xlen::Address addr) const -> bool;
     /// Get the contiguous span of all active PC breakpoint addresses

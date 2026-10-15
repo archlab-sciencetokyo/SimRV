@@ -149,6 +149,8 @@ class Machine final : public core::IInterruptController {
     };
 
     std::unique_ptr<Runtime> runtime_;
+    Tracer* tracer_raw_{nullptr};
+    simrv::debug::BreakpointManager* breakpoint_manager_raw_{nullptr};
     std::unique_ptr<simrv::device::PlatformDeviceRegistry> device_registry_;
     simrv::xlen::Counter next_checkpoint_cycle_ = 0;
 
@@ -464,8 +466,20 @@ class Machine final : public core::IInterruptController {
     [[nodiscard]] auto breakpoint_manager() noexcept -> simrv::debug::BreakpointManager&;
     [[nodiscard]] auto breakpoint_manager() const noexcept
         -> const simrv::debug::BreakpointManager&;
+    [[nodiscard]] SIMRV_ALWAYS_INLINE auto breakpoint_manager_raw() noexcept
+        -> simrv::debug::BreakpointManager* {
+        return breakpoint_manager_raw_;
+    }
+    [[nodiscard]] SIMRV_ALWAYS_INLINE auto breakpoint_manager_raw() const noexcept
+        -> const simrv::debug::BreakpointManager* {
+        return breakpoint_manager_raw_;
+    }
     [[nodiscard]] auto trace() noexcept -> Tracer&;
     [[nodiscard]] auto trace() const noexcept -> const Tracer&;
+    [[nodiscard]] SIMRV_ALWAYS_INLINE auto tracer_raw() noexcept -> Tracer* { return tracer_raw_; }
+    [[nodiscard]] SIMRV_ALWAYS_INLINE auto tracer_raw() const noexcept -> const Tracer* {
+        return tracer_raw_;
+    }
     [[nodiscard]] auto symbol_table() noexcept -> simrv::debug::SymbolTable&;
     [[nodiscard]] auto symbol_table() const noexcept -> const simrv::debug::SymbolTable&;
 

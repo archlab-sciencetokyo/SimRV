@@ -104,7 +104,7 @@ void CPU::run_fast_cycle_miss(Machine& machine) {
 
     tick_cycle_clock(machine);
 
-    if (machine.telemetry_sink_raw()) {
+    if (simrv::compiler::unlikely(machine.tui_enabled()) && machine.telemetry_sink_raw()) {
         record_trace_for_tui(machine);
     }
 
@@ -118,7 +118,8 @@ void CPU::run_fast_cycle_miss(Machine& machine) {
             }
         }
     }
-    if (e_icount != retired_before && machine.trace().needs_retiring_context()) {
+    if (e_icount != retired_before &&
+        simrv::compiler::unlikely(machine.trace().needs_retiring_context())) {
         machine.trace().log_architecture_retirement(*this, pipeline_context);
     }
     machine.record_retired_instructions(e_icount - retired_before);
@@ -280,7 +281,8 @@ void CPU::run_cycle(Machine& machine) {
         }
         tick_cycle_clock(machine, ca_pipeline.retired_this_cycle);
         if (ca_pipeline.retired_this_cycle) {
-            if (e_icount != retired_before && machine.trace().needs_retiring_context()) {
+            if (e_icount != retired_before &&
+                simrv::compiler::unlikely(machine.trace().needs_retiring_context())) {
                 machine.trace().log_architecture_retirement(*this, pipeline_context);
             }
             if (retain_retiring_context) {
@@ -357,7 +359,7 @@ void CPU::run_cycle(Machine& machine) {
     tick_cycle_clock(machine);
 
     // Record trace logs for active debug TUI components.
-    if (machine.telemetry_sink_raw()) {
+    if (simrv::compiler::unlikely(machine.tui_enabled()) && machine.telemetry_sink_raw()) {
         record_trace_for_tui(machine);
     }
 
@@ -371,7 +373,8 @@ void CPU::run_cycle(Machine& machine) {
             }
         }
     }
-    if (e_icount != retired_before && machine.trace().needs_retiring_context()) {
+    if (e_icount != retired_before &&
+        simrv::compiler::unlikely(machine.trace().needs_retiring_context())) {
         machine.trace().log_architecture_retirement(*this, pipeline_context);
     }
     machine.record_retired_instructions(e_icount - retired_before);
@@ -419,6 +422,7 @@ SIMRV_ALWAYS_INLINE void CPU::tick_cycle_clock(Machine& machine, bool interrupt_
 }
 
 void CPU::record_trace_for_tui(Machine& machine) {
+    if (simrv::compiler::likely(!machine.tui_enabled())) return;
     auto sink = machine.telemetry_sink_raw();
     if (!sink) return;
 
@@ -502,7 +506,7 @@ void CPU::run_cycle_baremetal_miss(Machine& machine) {
         clint_mmio.rtc_divider = 0;
         evaluate_timer_interrupt();
     }
-    if (machine.telemetry_sink_raw()) {
+    if (simrv::compiler::unlikely(machine.tui_enabled()) && machine.telemetry_sink_raw()) {
         record_trace_for_tui(machine);
     }
 
@@ -516,7 +520,8 @@ void CPU::run_cycle_baremetal_miss(Machine& machine) {
             }
         }
     }
-    if (e_icount != retired_before && machine.trace().needs_retiring_context()) {
+    if (e_icount != retired_before &&
+        simrv::compiler::unlikely(machine.trace().needs_retiring_context())) {
         machine.trace().log_architecture_retirement(*this, pipeline_context);
     }
     machine.record_retired_instructions(e_icount - retired_before);
@@ -582,7 +587,7 @@ void CPU::run_cycle_baremetal(Machine& machine) {
                 clint_mmio.rtc_divider = 0;
                 evaluate_timer_interrupt();
             }
-            if (machine.telemetry_sink_raw()) {
+            if (simrv::compiler::unlikely(machine.tui_enabled()) && machine.telemetry_sink_raw()) {
                 record_trace_for_tui(machine);
             }
             if (simrv::compiler::unlikely(machine.breakpoint_manager().has_any())) {
@@ -596,7 +601,8 @@ void CPU::run_cycle_baremetal(Machine& machine) {
                     }
                 }
             }
-            if (e_icount != retired_before && machine.trace().needs_retiring_context()) {
+            if (e_icount != retired_before &&
+                simrv::compiler::unlikely(machine.trace().needs_retiring_context())) {
                 machine.trace().log_architecture_retirement(*this, pipeline_context);
             }
             machine.record_retired_instructions(e_icount - retired_before);

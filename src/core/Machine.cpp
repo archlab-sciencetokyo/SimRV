@@ -156,6 +156,8 @@ Machine::Runtime::Runtime(Machine& machine, bool appmode)
 
 Machine::Machine(MachineConfig machine_config)
     : runtime_(std::make_unique<Runtime>(*this, machine_config.execution.appmode)),
+      tracer_raw_(&runtime_->tracer),
+      breakpoint_manager_raw_(&runtime_->breakpoints),
       device_registry_(std::make_unique<simrv::device::PlatformDeviceRegistry>()),
       memory_(runtime_->memory) {
     runtime_->primary_cpu.machine_ = this;
@@ -562,16 +564,16 @@ auto Machine::lockstep() const noexcept -> const simrv::debug::SpikeLockstep* {
 }
 
 auto Machine::breakpoint_manager() noexcept -> simrv::debug::BreakpointManager& {
-    return runtime_->breakpoints;
+    return *breakpoint_manager_raw_;
 }
 
 auto Machine::breakpoint_manager() const noexcept -> const simrv::debug::BreakpointManager& {
-    return runtime_->breakpoints;
+    return *breakpoint_manager_raw_;
 }
 
-auto Machine::trace() noexcept -> Tracer& { return runtime_->tracer; }
+auto Machine::trace() noexcept -> Tracer& { return *tracer_raw_; }
 
-auto Machine::trace() const noexcept -> const Tracer& { return runtime_->tracer; }
+auto Machine::trace() const noexcept -> const Tracer& { return *tracer_raw_; }
 
 auto Machine::symbol_table() noexcept -> simrv::debug::SymbolTable& { return runtime_->symbols; }
 
