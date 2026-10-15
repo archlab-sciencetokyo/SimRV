@@ -45,7 +45,8 @@ struct CachedOp {
     uint8_t mem_size : 4 = 0;
     bool valid : 1 = false;
     uint8_t next_victim : 1 = 0;
-    uint8_t reserved : 6 = 0;
+    bool is_straight_alu : 1 = false;
+    uint8_t reserved : 5 = 0;
 
     [[nodiscard]] constexpr auto len() const noexcept -> uint8_t { return cinsn ? 2u : 4u; }
     [[nodiscard]] constexpr auto align_mask() const noexcept -> uint8_t {
@@ -78,6 +79,12 @@ struct CachedOp {
         rs2 = decoded.rs2;
         funct3 = decoded.funct3;
         traits = decoded.traits;
+        is_straight_alu = !decoded.traits.is_control && !decoded.traits.is_mem_load &&
+                          !decoded.traits.is_mem_store && !decoded.traits.is_serializing &&
+                          !decoded.traits.is_cfu && !decoded.traits.writes_vec &&
+                          !decoded.traits.writes_fp && !decoded.traits.reads_rs1_fp &&
+                          !decoded.traits.reads_rs2_fp && !decoded.traits.reads_rs3_fp &&
+                          !decoded.pending_exception.has_value() && decoded.op_id != isa::UNKNOWN;
         if (decoded.traits.is_mem_load) {
             mem_size = static_cast<uint8_t>(1u << (static_cast<unsigned>(decoded.funct3) & 0x3u));
             if (decoded.traits.writes_fp) {

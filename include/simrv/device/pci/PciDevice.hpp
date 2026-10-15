@@ -52,6 +52,17 @@ class PciDevice {
     void trigger_irq();
     void deassert_irq();
 
+    void init_msi(uint8_t cap_offset = 0x48, bool is_64bit = true);
+    [[nodiscard]] auto is_msi_enabled() const noexcept -> bool;
+    [[nodiscard]] auto msi_address() const noexcept -> simrv::xlen::Address;
+    [[nodiscard]] auto msi_data() const noexcept -> uint16_t;
+
+    void init_msix(uint8_t cap_offset, PciBarIndex table_bar, uint32_t table_offset,
+                   PciBarIndex pba_bar, uint32_t pba_offset, uint16_t table_size = 4);
+    [[nodiscard]] auto is_msix_enabled() const noexcept -> bool;
+
+    void trigger_msi(uint16_t vector = 0);
+
     virtual void on_bar_updated(PciBarIndex bar_idx);
 
     [[nodiscard]] auto bdf() const noexcept -> PciBdf { return bdf_; }
@@ -70,6 +81,9 @@ class PciDevice {
     std::array<PciBarSize, 6> bar_sizes_{{0}};
     std::array<PciBarMask, 6> bar_masks_{{0}};
     std::array<bool, 6> bar_is_64bit_{{false}};
+
+    uint8_t msi_cap_offset_{0};
+    uint8_t msix_cap_offset_{0};
 
     PcieRootComplex* root_complex_{nullptr};
     PciBdf bdf_{};

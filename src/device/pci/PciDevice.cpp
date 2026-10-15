@@ -48,7 +48,11 @@ void PciDevice::set_root_complex(PcieRootComplex* rc, PciBdf bdf) {
 
 void PciDevice::trigger_irq() {
     if (root_complex_ != nullptr) {
-        root_complex_->assert_device_irq(bdf_.bus, bdf_.dev, bdf_.func);
+        if (is_msi_enabled()) {
+            root_complex_->send_msi(bdf_, msi_address(), msi_data());
+        } else {
+            root_complex_->assert_device_irq(bdf_.bus, bdf_.dev, bdf_.func);
+        }
     }
 }
 
@@ -56,6 +60,101 @@ void PciDevice::deassert_irq() {
     if (root_complex_ != nullptr) {
         root_complex_->deassert_device_irq(bdf_.bus, bdf_.dev, bdf_.func);
     }
+}
+
+void PciDevice::trigger_msi(uint16_t vector) {
+    if (root_complex_ != nullptr && is_msi_enabled()) {
+        root_complex_->send_msi(bdf_, msi_address(), static_cast<uint32_t>(msi_data() + vector));
+    }
+}
+
+void PciDevice::init_msi(uint8_t cap_offset, bool is_64bit) {
+    msi_cap_offset_ = cap_offset;
+    config_space_[0x06] |= 0x10;  // Capabilities List present
+
+    if (config_space_[0x34] == 0) {
+        config_space_[0x34] = cap_offset;
+    } else {
+        uint8_t curr = config_space_[0x34];
+        while (config_space_[curr + 1] != 0 && config_space_[curr + 1] != cap_offset) {
+            curr = config_space_[curr + 1];
+        }
+        config_space_[curr + 1] = cap_offset;
+    }
+
+    config_space_[cap_offset] = static_cast<uint8_t>(PciCapabilityId::Msi);
+    config_space_[cap_offset + 1] = 0;
+    const uint16_t ctrl = is_64bit ? 0x0080U : 0x0000U;
+    std::memcpy(&config_space_[cap_offset + 2], &ctrl, 2);
+    const uint32_t zero = 0;
+    std::memcpy(&config_space_[cap_offset + 4], &zero, 4);
+    std::memcpy(&config_space_[cap_offset + 8], &zero, 4);
+    if (is_64bit) {
+        std::memcpy(&config_space_[cap_offset + 12], &zero, 4);
+    }
+}
+
+auto PciDevice::is_msi_enabled() const noexcept -> bool {
+    if (msi_cap_offset_ == 0) return false;
+    uint16_t ctrl = 0;
+    std::memcpy(&ctrl, &config_space_[msi_cap_offset_ + 2], 2);
+    return (ctrl & 0x0001U) != 0;
+}
+
+auto PciDevice::msi_address() const noexcept -> simrv::xlen::Address {
+    if (msi_cap_offset_ == 0) return 0;
+    uint16_t ctrl = 0;
+    std::memcpy(&ctrl, &config_space_[msi_cap_offset_ + 2], 2);
+    uint32_t lo = 0;
+    std::memcpy(&lo, &config_space_[msi_cap_offset_ + 4], 4);
+    if ((ctrl & 0x0080U) != 0) {
+        uint32_t hi = 0;
+        std::memcpy(&hi, &config_space_[msi_cap_offset_ + 8], 4);
+        return static_cast<simrv::xlen::Address>((static_cast<uint64_t>(hi) << 32) | lo);
+    }
+    return lo;
+}
+
+auto PciDevice::msi_data() const noexcept -> uint16_t {
+    if (msi_cap_offset_ == 0) return 0;
+    uint16_t ctrl = 0;
+    std::memcpy(&ctrl, &config_space_[msi_cap_offset_ + 2], 2);
+    uint16_t data = 0;
+    const uint8_t data_offset = msi_cap_offset_ + ((ctrl & 0x0080U) != 0 ? 12 : 8);
+    std::memcpy(&data, &config_space_[data_offset], 2);
+    return data;
+}
+
+void PciDevice::init_msix(uint8_t cap_offset, PciBarIndex table_bar, uint32_t table_offset,
+                          PciBarIndex pba_bar, uint32_t pba_offset, uint16_t table_size) {
+    msix_cap_offset_ = cap_offset;
+    config_space_[0x06] |= 0x10;
+
+    if (config_space_[0x34] == 0) {
+        config_space_[0x34] = cap_offset;
+    } else {
+        uint8_t curr = config_space_[0x34];
+        while (config_space_[curr + 1] != 0 && config_space_[curr + 1] != cap_offset) {
+            curr = config_space_[curr + 1];
+        }
+        config_space_[curr + 1] = cap_offset;
+    }
+
+    config_space_[cap_offset] = static_cast<uint8_t>(PciCapabilityId::MsiX);
+    config_space_[cap_offset + 1] = 0;
+    const uint16_t ctrl = (table_size > 0 ? table_size - 1 : 0) & 0x07FFU;
+    std::memcpy(&config_space_[cap_offset + 2], &ctrl, 2);
+    const uint32_t table_bir = (table_offset & ~0x7U) | (table_bar & 0x7U);
+    std::memcpy(&config_space_[cap_offset + 4], &table_bir, 4);
+    const uint32_t pba_bir = (pba_offset & ~0x7U) | (pba_bar & 0x7U);
+    std::memcpy(&config_space_[cap_offset + 8], &pba_bir, 4);
+}
+
+auto PciDevice::is_msix_enabled() const noexcept -> bool {
+    if (msix_cap_offset_ == 0) return false;
+    uint16_t ctrl = 0;
+    std::memcpy(&ctrl, &config_space_[msix_cap_offset_ + 2], 2);
+    return (ctrl & 0x8000U) != 0;
 }
 
 void PciDevice::on_bar_updated(PciBarIndex bar_idx) {

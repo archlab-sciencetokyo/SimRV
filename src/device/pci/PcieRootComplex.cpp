@@ -8,6 +8,7 @@
 
 #include "simrv/core/Cpu.hpp"
 #include "simrv/core/Machine.hpp"
+#include "simrv/memory/MemorySubsystem.hpp"
 
 namespace simrv::device {
 
@@ -189,6 +190,23 @@ void PcieRootComplex::deassert_device_irq(PciBdf bdf) {
     }
     if (machine_ != nullptr) {
         machine_->set_platform_irq(static_cast<int>(irq_source), false);
+    }
+}
+
+void PcieRootComplex::send_msi(PciBdf bdf, simrv::xlen::Address addr, uint32_t message_data) {
+    (void)bdf;
+    if (imsic_s_ != nullptr && addr >= imsic_s_->base_address() &&
+        addr < imsic_s_->base_address() + imsic_s_->size()) {
+        imsic_s_->write32(addr - imsic_s_->base_address(), message_data);
+        return;
+    }
+    if (aplic_s_ != nullptr && addr >= aplic_s_->base_address() &&
+        addr < aplic_s_->base_address() + aplic_s_->size()) {
+        aplic_s_->write32(addr - aplic_s_->base_address(), message_data);
+        return;
+    }
+    if (machine_ != nullptr) {
+        machine_->memory().dma_write(addr, &message_data, sizeof(message_data));
     }
 }
 
