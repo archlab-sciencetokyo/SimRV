@@ -886,8 +886,8 @@ void CPU::execute_cached_op_fast(Machine& machine, CachedOp& op,
             }
             state_.lr_reservation_active = false;
             if (simrv::compiler::unlikely(
-                    machine.num_harts() > 1 &&
-                    machine.memory_.reservation_table().may_have_reservations())) {
+                    machine.memory_.reservation_table().may_have_reservations() &&
+                    machine.num_harts() > 1)) {
                 machine.memory_.reservation_table().invalidate_range(pipeline_context.mem_paddr,
                                                                      size_bytes, hart_id());
             }

@@ -94,14 +94,20 @@ void MmioRouter::rebuild_entries() {
         if (node == nullptr) continue;
         const simrv::xlen::Address base = node->base_address();
         const simrv::xlen::Address end = base + node->size();
-        entries_.push_back(DeviceEntry{.base = base, .end = end, .node = node});
+        entries_.push_back(DeviceEntry{
+            .base = base,
+            .end = end,
+            .node = node,
+            .alignment = node->alignment(),
+            .is_read_only = node->is_read_only(),
+        });
         min_base_ = std::min(min_base_, base);
         max_end_ = std::max(max_end_, end);
     }
     std::ranges::sort(entries_, [](const auto& a, const auto& b) { return a.base < b.base; });
 }
 
-auto MmioRouter::resolve_device(simrv::xlen::Address addr) const -> TileLinkNode* {
+auto MmioRouter::resolve_entry(simrv::xlen::Address addr) const -> const DeviceEntry* {
     if (entries_.empty() || addr < min_base_ || addr >= max_end_) {
         return nullptr;
     }
@@ -109,7 +115,7 @@ auto MmioRouter::resolve_device(simrv::xlen::Address addr) const -> TileLinkNode
     // Check 4-entry MRU cache (covers high-frequency alternating UART, CLINT, PLIC, VirtIO)
     for (size_t i = 0; i < mru_count_; ++i) {
         const auto& entry = mru_entries_[i];
-        if (addr >= entry.base && addr < entry.end && entry.node->contains(addr)) {
+        if (addr >= entry.base && addr < entry.end) {
             if (i > 0) {
                 const auto hit = entry;
                 for (size_t j = i; j > 0; --j) {
@@ -117,7 +123,7 @@ auto MmioRouter::resolve_device(simrv::xlen::Address addr) const -> TileLinkNode
                 }
                 mru_entries_[0] = hit;
             }
-            return mru_entries_[0].node;
+            return &mru_entries_[0];
         }
     }
 
@@ -126,7 +132,7 @@ auto MmioRouter::resolve_device(simrv::xlen::Address addr) const -> TileLinkNode
 
     while (it != entries_.begin()) {
         --it;
-        if (addr < it->end && it->node->contains(addr)) {
+        if (addr < it->end) {
             const size_t shift_limit = std::min(mru_count_, kMruCapacity - 1);
             for (size_t j = shift_limit; j > 0; --j) {
                 mru_entries_[j] = mru_entries_[j - 1];
@@ -135,15 +141,16 @@ auto MmioRouter::resolve_device(simrv::xlen::Address addr) const -> TileLinkNode
             if (mru_count_ < kMruCapacity) {
                 ++mru_count_;
             }
-            return it->node;
-        }
-        if (addr >= it->end) {
-            // For nested devices with subrange holes, continue checking enclosing entries
-            continue;
+            return &mru_entries_[0];
         }
     }
 
     return nullptr;
+}
+
+auto MmioRouter::resolve_device(simrv::xlen::Address addr) const -> TileLinkNode* {
+    const auto* entry = resolve_entry(addr);
+    return entry != nullptr ? entry->node : nullptr;
 }
 
 auto MmioRouter::find_by_name(std::string_view name) const -> TileLinkNode* {
@@ -156,8 +163,8 @@ auto MmioRouter::find_by_name(std::string_view name) const -> TileLinkNode* {
 }
 
 auto MmioRouter::route_request(const TlChannelA& req, TlChannelD& resp) -> bool {
-    TileLinkNode* device = resolve_device(req.address.raw());
-    if (device == nullptr) {
+    const DeviceEntry* entry = resolve_entry(req.address.raw());
+    if (entry == nullptr) {
         resp.denied = true;
         ++bus_error_count_;
         const bool is_read = req.opcode == TlOpcodeA::Get;
@@ -174,6 +181,7 @@ auto MmioRouter::route_request(const TlChannelA& req, TlChannelD& resp) -> bool 
         return false;
     }
 
+    TileLinkNode* device = entry->node;
     const bool is_read = (req.opcode == TlOpcodeA::Get);
     const bool is_write =
         (req.opcode == TlOpcodeA::PutFullData || req.opcode == TlOpcodeA::PutPartialData);
@@ -196,14 +204,14 @@ auto MmioRouter::route_request(const TlChannelA& req, TlChannelD& resp) -> bool 
     }
 
     if (request_bytes - 1 > std::numeric_limits<simrv::xlen::Address>::max() - req.address.raw() ||
-        !device->contains((req.address + request_bytes - 1).raw())) {
+        req.address.raw() + request_bytes > entry->end) {
         resp.denied = true;
         ++bus_error_count_;
         trace_access(true);
         return true;
     }
 
-    if (is_write && device->is_read_only()) {
+    if (is_write && entry->is_read_only) {
         resp.denied = true;
         ++bus_error_count_;
         trace_access(true);
@@ -211,7 +219,7 @@ auto MmioRouter::route_request(const TlChannelA& req, TlChannelD& resp) -> bool 
     }
 
     // Alignment validation against device requirements
-    const simrv::xlen::Address align = device->alignment();
+    const simrv::xlen::Address align = entry->alignment;
     if (align > 1 && (req.address % align) != 0) {
         resp.denied = true;
         ++bus_error_count_;
