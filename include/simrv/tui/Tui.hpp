@@ -116,6 +116,12 @@ class Tui : public core::ITelemetrySink, public core::IConsoleSink {
     void request_full_screen_redraw() noexcept { full_screen_redraw_requested_ = true; }
     [[nodiscard]] auto is_page_visible(TuiRegPage page) const noexcept -> bool;
 
+    [[nodiscard]] static auto compute_sixel_dimensions(int panel_cols, int body_rows,
+                                                       int cell_width_px, int cell_height_px,
+                                                       int source_width = 800,
+                                                       int source_height = 600) noexcept
+        -> std::pair<int, int>;
+
     void set_paused(bool p) override;
     [[nodiscard]] auto is_paused() const -> bool override {
         return paused_.load(std::memory_order_relaxed);

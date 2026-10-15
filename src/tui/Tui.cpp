@@ -74,26 +74,6 @@ constexpr int kMinDisplayBodyRows = 8;
            std::string(static_cast<size_t>(right_pad), ' ');
 }
 
-[[nodiscard]] inline auto compute_sixel_dimensions(int panel_cols, int body_rows, int cell_width_px,
-                                                   int cell_height_px, int source_width = 800,
-                                                   int source_height = 600) noexcept
-    -> std::pair<int, int> {
-    const int src_w = std::max(1, source_width);
-    const int src_h = std::max(1, source_height);
-    const int cell_width = std::max(1, cell_width_px);
-    const int cell_height = std::max(1, cell_height_px);
-    const int max_width = std::max(1, panel_cols * cell_width);
-    const int max_height = std::max(1, body_rows * cell_height);
-
-    int width = max_width;
-    int height = std::max(1, width * src_h / src_w);
-    if (height > max_height) {
-        height = max_height;
-        width = std::max(1, height * src_w / src_h);
-    }
-    return {width, height};
-}
-
 [[nodiscard]] auto inspector_log_start_row(int terminal_height) -> int {
     int const content_rows = std::max(1, terminal_height - framework::kFrameChromeRows);
     return kInspectorContentStartRow + (content_rows - kInspectorLogAreaHeight);
@@ -170,6 +150,32 @@ void handle_sigwinch(int sig) {
 }
 
 }  // namespace
+
+auto Tui::compute_sixel_dimensions(int panel_cols, int body_rows, int cell_width_px,
+                                   int cell_height_px, int source_width, int source_height) noexcept
+    -> std::pair<int, int> {
+    const int src_w = std::max(1, source_width);
+    const int src_h = std::max(1, source_height);
+    const int cell_width = std::max(1, cell_width_px);
+    const int cell_height = std::max(1, cell_height_px);
+    const int max_width = std::max(1, panel_cols * cell_width);
+    const int max_height = std::max(1, body_rows * cell_height);
+
+    if (max_width >= src_w && max_height >= src_h) {
+        // Integer upscaling: 1x, 2x, 3x, etc. Every source pixel is duplicated
+        // into an exact NxN square of terminal pixels without fractional jitter.
+        const int scale = std::max(1, std::min(max_width / src_w, max_height / src_h));
+        return {scale * src_w, scale * src_h};
+    }
+
+    // Integer downscaling: 1/2x, 1/3x, 1/4x, etc. Pixels are sub-sampled at
+    // uniform integer strides, preserving clean pixel alignment.
+    const int divisor = std::max(std::max(2, (src_w + max_width - 1) / max_width),
+                                 (src_h + max_height - 1) / max_height);
+    const int width = std::max(1, src_w / divisor);
+    const int height = std::max(1, src_h / divisor);
+    return {width, height};
+}
 
 Tui::Tui(simrv::core::Machine& machine) : machine_(machine), modal_(machine) {
     preferences_path_ = TuiPreferences::default_path();
