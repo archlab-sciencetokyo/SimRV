@@ -122,10 +122,12 @@ auto CPU::try_fast_load([[maybe_unused]] Machine& machine, simrv::xlen::Address 
         const size_t tlb_idx = soft_tlb_index(vpn);
         const auto& entry = soft_tlb_read[tlb_idx];
         if (simrv::compiler::likely(entry.matches(vpn, current_asid, eff_priv, soft_tlb_epoch))) {
-            const simrv::xlen::Address paddr = (entry.paddr_base + (mem_addr & 0xFFF)).raw();
-            if (simrv::compiler::unlikely(!core::pmp::check_access(
-                    state_, paddr, size_bytes, core::PmpAccessType::Read, eff_priv))) {
-                return false;
+            if (simrv::compiler::unlikely(state_.num_active_pmp > 0)) {
+                const simrv::xlen::Address paddr = (entry.paddr_base + (mem_addr & 0xFFF)).raw();
+                if (simrv::compiler::unlikely(!core::pmp::check_access(
+                        state_, paddr, size_bytes, core::PmpAccessType::Read, eff_priv))) {
+                    return false;
+                }
             }
             if (simrv::compiler::likely(entry.host_ptr_base != nullptr)) {
                 out_val =
@@ -133,6 +135,7 @@ auto CPU::try_fast_load([[maybe_unused]] Machine& machine, simrv::xlen::Address 
                                                   static_cast<simrv::xlen::Instruction>(funct3));
                 return true;
             }
+            const simrv::xlen::Address paddr = (entry.paddr_base + (mem_addr & 0xFFF)).raw();
             if (simrv::compiler::likely(ram.contains(paddr, size_bytes))) {
                 out_val = simrv::memory::ram_read_fast(
                     paddr, static_cast<simrv::xlen::Instruction>(funct3), ram);
@@ -208,9 +211,11 @@ auto CPU::try_fast_store(Machine& machine, simrv::xlen::Address mem_addr, isa::F
         const auto& entry = soft_tlb_write[tlb_idx];
         if (simrv::compiler::likely(entry.matches(vpn, current_asid, eff_priv, soft_tlb_epoch))) {
             simrv::xlen::PhysAddr const paddr = entry.paddr_base + (mem_addr & 0xFFF);
-            if (simrv::compiler::unlikely(!core::pmp::check_access(
-                    state_, paddr, size_bytes, core::PmpAccessType::Write, eff_priv))) {
-                return false;
+            if (simrv::compiler::unlikely(state_.num_active_pmp > 0)) {
+                if (simrv::compiler::unlikely(!core::pmp::check_access(
+                        state_, paddr, size_bytes, core::PmpAccessType::Write, eff_priv))) {
+                    return false;
+                }
             }
             if (simrv::compiler::unlikely(is_tohost_addr(machine, paddr))) {
                 return false;
@@ -307,12 +312,12 @@ SIMRV_ALWAYS_INLINE auto CPU::execute_cached_load(Machine& machine, CachedOp& op
             const auto& entry = soft_tlb_read[tlb_idx];
             if (simrv::compiler::likely(
                     entry.matches(vpn, current_asid, eff_priv, soft_tlb_epoch))) {
-                const simrv::xlen::Address paddr = (entry.paddr_base + page_offset).raw();
-                if (simrv::compiler::unlikely(!core::pmp::check_access(
-                        state_, paddr, size_bytes, core::PmpAccessType::Read, eff_priv))) {
-                    // Let MemoryAccess raise the architectural access fault.
-                } else {
-                    if (simrv::compiler::likely(entry.host_ptr_base != nullptr)) {
+                if (simrv::compiler::unlikely(state_.num_active_pmp > 0)) {
+                    const simrv::xlen::Address paddr = (entry.paddr_base + page_offset).raw();
+                    if (simrv::compiler::unlikely(!core::pmp::check_access(
+                            state_, paddr, size_bytes, core::PmpAccessType::Read, eff_priv))) {
+                        // Let MemoryAccess raise the architectural access fault.
+                    } else if (simrv::compiler::likely(entry.host_ptr_base != nullptr)) {
                         mem_rdata = simrv::memory::host_read_fast(
                             entry.host_ptr_base + page_offset,
                             static_cast<simrv::xlen::Instruction>(op.funct3));
@@ -320,6 +325,13 @@ SIMRV_ALWAYS_INLINE auto CPU::execute_cached_load(Machine& machine, CachedOp& op
                         advance_cached_pc(op);
                         return true;
                     }
+                } else if (simrv::compiler::likely(entry.host_ptr_base != nullptr)) {
+                    mem_rdata = simrv::memory::host_read_fast(
+                        entry.host_ptr_base + page_offset,
+                        static_cast<simrv::xlen::Instruction>(op.funct3));
+                    state_.regs.write_branchless(op.rd, mem_rdata);
+                    advance_cached_pc(op);
+                    return true;
                 }
             }
         }
@@ -387,7 +399,8 @@ SIMRV_ALWAYS_INLINE auto CPU::execute_cached_store(Machine& machine, CachedOp& o
             if (simrv::compiler::likely(
                     entry.matches(vpn, current_asid, eff_priv, soft_tlb_epoch))) {
                 const simrv::xlen::Address paddr = (entry.paddr_base + page_offset).raw();
-                if (simrv::compiler::unlikely(!core::pmp::check_access(
+                if (simrv::compiler::unlikely(state_.num_active_pmp > 0) &&
+                    simrv::compiler::unlikely(!core::pmp::check_access(
                         state_, paddr, size_bytes, core::PmpAccessType::Write, eff_priv))) {
                     // Let MemoryAccess raise the architectural access fault.
                 } else {
@@ -775,10 +788,11 @@ void CPU::execute_cached_op_fast(Machine& machine, CachedOp& op,
                     if (simrv::compiler::likely(
                             entry.matches(vpn, current_asid, eff_priv, soft_tlb_epoch))) {
                         const simrv::xlen::Address paddr = (entry.paddr_base + page_offset).raw();
-                        if (simrv::compiler::likely(
-                                core::pmp::check_access(state_, paddr, size_bytes,
-                                                        core::PmpAccessType::Read, eff_priv) &&
-                                entry.host_ptr_base != nullptr)) {
+                        if (simrv::compiler::unlikely(state_.num_active_pmp > 0) &&
+                            simrv::compiler::unlikely(!core::pmp::check_access(
+                                state_, paddr, size_bytes, core::PmpAccessType::Read, eff_priv))) {
+                            // Let fallback raise the architectural fault.
+                        } else if (simrv::compiler::likely(entry.host_ptr_base != nullptr)) {
                             mem_rdata = simrv::memory::host_read_fast(
                                 entry.host_ptr_base + page_offset,
                                 static_cast<simrv::xlen::Instruction>(op.funct3));
@@ -854,16 +868,17 @@ void CPU::execute_cached_op_fast(Machine& machine, CachedOp& op,
                     const auto& entry = soft_tlb_write[tlb_idx];
                     if (simrv::compiler::likely(
                             entry.matches(vpn, current_asid, eff_priv, soft_tlb_epoch))) {
-                        if (simrv::compiler::likely(
-                                core::pmp::check_access(state_, entry.paddr_base + page_offset,
-                                                        size_bytes, core::PmpAccessType::Write,
-                                                        eff_priv) &&
-                                entry.host_ptr_base != nullptr &&
-                                !is_tohost_addr(machine, entry.paddr_base + page_offset))) {
+                        const simrv::xlen::Address paddr = (entry.paddr_base + page_offset).raw();
+                        if (simrv::compiler::unlikely(state_.num_active_pmp > 0) &&
+                            simrv::compiler::unlikely(!core::pmp::check_access(
+                                state_, paddr, size_bytes, core::PmpAccessType::Write, eff_priv))) {
+                            // Let fallback raise the architectural fault.
+                        } else if (simrv::compiler::likely(entry.host_ptr_base != nullptr &&
+                                                           !is_tohost_addr(machine, paddr))) {
                             simrv::memory::host_write_fast(
                                 entry.host_ptr_base + page_offset, fp_data,
                                 static_cast<simrv::xlen::Instruction>(op.funct3));
-                            pipeline_context.mem_paddr = entry.paddr_base + page_offset;
+                            pipeline_context.mem_paddr = paddr;
                             stored = true;
                         }
                     }

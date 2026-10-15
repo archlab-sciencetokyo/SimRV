@@ -153,9 +153,11 @@ auto MemoryAccess::target_read(MemorySubsystem& mem, core::CPU& cpu, simrv::xlen
                     entry.matches(vpn, current_asid, eff_priv, cpu.soft_tlb_epoch))) {
                 const simrv::xlen::PhysAddr paddr = entry.paddr_base + (v_addr.raw() & 0xFFF);
                 cpu.active_context().mem_paddr = paddr;
-                if (simrv::compiler::likely(core::pmp::check_access(cpu.state(), paddr, size_bytes,
-                                                                    pmp_req, eff_priv) &&
-                                            entry.host_ptr_base != nullptr)) {
+                if (simrv::compiler::unlikely(cpu.state().num_active_pmp > 0) &&
+                    simrv::compiler::unlikely(!core::pmp::check_access(
+                        cpu.state(), paddr, size_bytes, pmp_req, eff_priv))) {
+                    // Access check failed, fall through to fault handler below
+                } else if (simrv::compiler::likely(entry.host_ptr_base != nullptr)) {
                     return simrv::memory::host_read_fast(
                         entry.host_ptr_base + (v_addr.raw() & 0xFFF), funct3);
                 }

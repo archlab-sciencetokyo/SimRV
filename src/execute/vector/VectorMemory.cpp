@@ -69,7 +69,8 @@ namespace {
             if (simrv::compiler::likely(
                     entry.matches(vpn, current_asid, eff_priv, cpu.soft_tlb_epoch))) {
                 const simrv::xlen::Address paddr = (entry.paddr_base + page_offset).raw();
-                if (simrv::compiler::unlikely(!core::pmp::check_access(
+                if (simrv::compiler::unlikely(cpu.state().num_active_pmp > 0) &&
+                    simrv::compiler::unlikely(!core::pmp::check_access(
                         cpu.state(), paddr, total_bytes, core::PmpAccessType::Write, eff_priv))) {
                     return nullptr;
                 }
@@ -86,7 +87,8 @@ namespace {
             if (simrv::compiler::likely(
                     entry.matches(vpn, current_asid, eff_priv, cpu.soft_tlb_epoch))) {
                 const simrv::xlen::Address paddr = (entry.paddr_base + page_offset).raw();
-                if (simrv::compiler::unlikely(!core::pmp::check_access(
+                if (simrv::compiler::unlikely(cpu.state().num_active_pmp > 0) &&
+                    simrv::compiler::unlikely(!core::pmp::check_access(
                         cpu.state(), paddr, total_bytes, core::PmpAccessType::Read, eff_priv))) {
                     return nullptr;
                 }
