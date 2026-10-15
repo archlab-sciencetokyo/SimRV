@@ -3096,8 +3096,8 @@ void test_sixel_fluid_framebuffer_updates() {
     machine.primary_hart().reset();
 
     const auto fb = machine.framebuffer_view();
-    expect(fb.data() != nullptr && fb.size() == 640 * 480 * 4,
-           "valid 640x480 framebuffer mapped for testing");
+    expect(fb.data() != nullptr && fb.size() == 800 * 600 * 4,
+           "valid 800x600 framebuffer mapped for testing");
 
     Tui tui(machine);
     TuiTestAccess::init_panes(tui, machine);
@@ -3142,14 +3142,14 @@ void test_virtio_input_and_display_mouse() {
     // In-bounds cell mapping
     const auto in_pos = TuiTestAccess::display_coords_to_fb(tui, 40, 15, 0, 80, 24);
     expect(in_pos.has_value(), "valid display coordinates map to framebuffer pixel");
-    expect(in_pos->first >= 0 && in_pos->first < 640, "fb_x within 640 width");
-    expect(in_pos->second >= 0 && in_pos->second < 480, "fb_y within 480 height");
+    expect(in_pos->first >= 0 && in_pos->first < 800, "fb_x within 800 width");
+    expect(in_pos->second >= 0 && in_pos->second < 600, "fb_y within 600 height");
 
     // Pixel mode coordinate mapping (x > term_width or y > term_height)
     const auto px_pos = TuiTestAccess::display_coords_to_fb(tui, 250, 120, 0, 80, 24);
     if (px_pos.has_value()) {
-        expect(px_pos->first >= 0 && px_pos->first < 640, "pixel-mode fb_x within 640 width");
-        expect(px_pos->second >= 0 && px_pos->second < 480, "pixel-mode fb_y within 480 height");
+        expect(px_pos->first >= 0 && px_pos->first < 800, "pixel-mode fb_x within 800 width");
+        expect(px_pos->second >= 0 && px_pos->second < 600, "pixel-mode fb_y within 600 height");
     }
 
     // Configure workbench with DISPLAY slot
@@ -3168,6 +3168,15 @@ void test_virtio_input_and_display_mouse() {
     TuiTestAccess::handle_display_mouse(tui, 40, 15, 0 /* BTN_LEFT */, 0, 80, 24);
     TuiTestAccess::handle_display_mouse(tui, 10, 10, 64, 0, 80, 24);
     TuiTestAccess::handle_display_mouse(tui, 10, 10, 65, 0, 80, 24);
+
+    // Test dynamic framebuffer adaptation (e.g. legacy 640x480 DTB image)
+    machine.set_framebuffer_resolution_for_testing(640, 480);
+    expect(machine.framebuffer_width() == 640, "adapted width is 640");
+    expect(machine.framebuffer_height() == 480, "adapted height is 480");
+    const auto adapted_pos = TuiTestAccess::display_coords_to_fb(tui, 40, 15, 0, 80, 24);
+    expect(adapted_pos.has_value(), "adapted display coordinates map to framebuffer pixel");
+    expect(adapted_pos->first >= 0 && adapted_pos->first < 640, "fb_x within adapted 640 width");
+    expect(adapted_pos->second >= 0 && adapted_pos->second < 480, "fb_y within adapted 480 height");
 }
 
 void test_concurrent_terminal_and_sixel_display() {

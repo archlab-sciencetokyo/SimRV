@@ -401,6 +401,7 @@ class Machine final : public core::IInterruptController {
     std::chrono::steady_clock::time_point start_time_{};
     simrv::xlen::Address resolved_start_pc_ = 0;
     simrv::xlen::Address resolved_isatest_tohost_ = 0;
+    FramebufferConfig framebuffer_geometry_{};
 
    public:
     /// Inspect a simulated hart by index (0 is the primary/boot hart).
@@ -415,6 +416,19 @@ class Machine final : public core::IInterruptController {
     [[nodiscard]] auto ram_data() const noexcept -> const simrv::xlen::Byte*;
     [[nodiscard]] auto ram_view() const noexcept -> simrv::memory::RamView;
     [[nodiscard]] auto framebuffer_view() const noexcept -> simrv::memory::RamView;
+    [[nodiscard]] auto framebuffer_geometry() const noexcept -> const FramebufferConfig& {
+        return framebuffer_geometry_;
+    }
+    [[nodiscard]] auto framebuffer_width() const noexcept -> uint32_t {
+        return framebuffer_geometry_.width;
+    }
+    [[nodiscard]] auto framebuffer_height() const noexcept -> uint32_t {
+        return framebuffer_geometry_.height;
+    }
+    void set_framebuffer_resolution_for_testing(uint32_t width, uint32_t height) noexcept {
+        framebuffer_geometry_.width = width;
+        framebuffer_geometry_.height = height;
+    }
     [[nodiscard]] auto tui_execution_snapshot(size_t hart = 0) const noexcept
         -> TuiExecutionSnapshot;
     /// Platform capability used by built-in devices to publish an external interrupt level.

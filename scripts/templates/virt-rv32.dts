@@ -25,17 +25,17 @@
         #size-cells = <2>;
         ranges;
         framebuffer@84000000 {
-            reg = <0x0 0x84000000 0x0 0x0012c000>;
+            reg = <0x0 0x84000000 0x0 0x001d4c00>;
             no-map;
         };
     };
 
     framebuffer@84000000 {
         compatible = "simple-framebuffer";
-        reg = <0x0 0x84000000 0x0 0x0012c000>;
-        width = <640>;
-        height = <480>;
-        stride = <2560>;
+        reg = <0x0 0x84000000 0x0 0x001d4c00>;
+        width = <800>;
+        height = <600>;
+        stride = <3200>;
         format = "a8r8g8b8";
     };
 

@@ -12,7 +12,8 @@
             "generator": "Ninja",
             "environment": {
                 "CCACHE_DIR": "${sourceDir}/build/.ccache",
-                "CCACHE_TEMPDIR": "${sourceDir}/build/.ccache-tmp"
+                "CCACHE_TEMPDIR": "${sourceDir}/build/.ccache-tmp",
+                "CCACHE_MAXSIZE": "12G"
             }
         },
         {
@@ -128,7 +129,8 @@
             "hidden": true,
             "environment": {
                 "CCACHE_DIR": "${sourceDir}/build/.ccache",
-                "CCACHE_TEMPDIR": "${sourceDir}/build/.ccache-tmp"
+                "CCACHE_TEMPDIR": "${sourceDir}/build/.ccache-tmp",
+                "CCACHE_MAXSIZE": "12G"
             }
         },
         {

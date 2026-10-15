@@ -119,6 +119,19 @@ struct NetworkConfig {
     std::string mode = "user";
 };
 
+struct FramebufferConfig {
+    uint32_t width = 800;
+    uint32_t height = 600;
+    simrv::xlen::Address base = 0x84000000ULL;
+
+    [[nodiscard]] constexpr auto size_bytes() const noexcept -> size_t {
+        return static_cast<size_t>(width) * height * 4;
+    }
+    [[nodiscard]] constexpr auto stride_bytes() const noexcept -> size_t {
+        return static_cast<size_t>(width) * 4;
+    }
+};
+
 struct MachineConfig {
     MemoryGeometry memory{};
     ExecutionConfig execution{};
@@ -127,6 +140,7 @@ struct MachineConfig {
     IsaConfig isa{};
     FilesConfig files{};
     NetworkConfig network{};
+    FramebufferConfig framebuffer{};
     std::optional<simrv::pipeline::CpuModelPreset> cpu_model_preset{};
     std::optional<simrv::pipeline::BranchPredictorType> branch_predictor_type{};
     uint32_t bht_entries = 0;
@@ -205,7 +219,19 @@ struct MachineConfig {
         if (!soc.smp.clusters.empty() && soc.smp.hart_count != execution.num_harts) {
             return std::unexpected("SoC SMP hart count must match the resolved machine hart count");
         }
+        if (framebuffer.width == 0 || framebuffer.height == 0) {
+            return std::unexpected("framebuffer dimensions must be non-zero");
+        }
         return {};
+    }
+
+    template <typename Self>
+    constexpr auto&& with_framebuffer(this Self&& self, uint32_t width, uint32_t height,
+                                      simrv::xlen::Address base = 0x84000000ULL) noexcept {
+        self.framebuffer.width = width;
+        self.framebuffer.height = height;
+        self.framebuffer.base = base;
+        return std::forward<Self>(self);
     }
 
     template <typename Self>

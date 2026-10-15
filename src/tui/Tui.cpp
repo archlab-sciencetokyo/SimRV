@@ -75,20 +75,21 @@ constexpr int kMinDisplayBodyRows = 8;
 }
 
 [[nodiscard]] inline auto compute_sixel_dimensions(int panel_cols, int body_rows, int cell_width_px,
-                                                   int cell_height_px) noexcept
+                                                   int cell_height_px, int source_width = 800,
+                                                   int source_height = 600) noexcept
     -> std::pair<int, int> {
-    constexpr int source_width = 640;
-    constexpr int source_height = 480;
+    const int src_w = std::max(1, source_width);
+    const int src_h = std::max(1, source_height);
     const int cell_width = std::max(1, cell_width_px);
     const int cell_height = std::max(1, cell_height_px);
     const int max_width = std::max(1, panel_cols * cell_width);
     const int max_height = std::max(1, body_rows * cell_height);
 
     int width = max_width;
-    int height = std::max(1, width * source_height / source_width);
+    int height = std::max(1, width * src_h / src_w);
     if (height > max_height) {
         height = max_height;
-        width = std::max(1, height * source_width / source_height);
+        width = std::max(1, height * src_w / src_h);
     }
     return {width, height};
 }
@@ -809,16 +810,16 @@ void Tui::render_draw_sixel(int panel_x, int display_width, int display_rows,
     const auto fb = machine_.framebuffer_view();
     if (fb.data() == nullptr) return;
 
-    constexpr int source_width = 640;
-    constexpr int source_height = 480;
+    const int source_width = static_cast<int>(machine_.framebuffer_width());
+    const int source_height = static_cast<int>(machine_.framebuffer_height());
     constexpr int palette_side = 6;
     constexpr int palette_size = palette_side * palette_side * palette_side;
     const int cell_width = std::max(1, cell_width_px_);
     const int cell_height = std::max(1, cell_height_px_);
-    // Fit the 4:3 framebuffer to the panel's pixel rectangle, adapting to the terminal
-    // size while preserving the 4:3 aspect ratio.
-    const auto [width, height] =
-        compute_sixel_dimensions(display_width, body_rows, cell_width, cell_height);
+    // Fit the framebuffer to the panel's pixel rectangle, adapting to the terminal
+    // size while preserving the aspect ratio.
+    const auto [width, height] = compute_sixel_dimensions(display_width, body_rows, cell_width,
+                                                          cell_height, source_width, source_height);
     const int image_cols = std::max(1, (width + cell_width - 1) / cell_width);
     const int image_rows = std::max(1, (height + cell_height - 1) / cell_height);
 
@@ -1012,8 +1013,8 @@ void Tui::render_draw_sixel(int panel_x, int display_width, int display_rows,
 
 auto Tui::render_framebuffer_row(int row, int width, int rows) const -> std::string {
     const auto fb = machine_.framebuffer_view();
-    constexpr int source_width = 640;
-    constexpr int source_height = 480;
+    const int source_width = static_cast<int>(machine_.framebuffer_width());
+    const int source_height = static_cast<int>(machine_.framebuffer_height());
     if (fb.data() == nullptr || width <= 0 || rows <= 0)
         return std::string(std::max(0, width), ' ');
 
@@ -1059,11 +1060,11 @@ auto Tui::display_coords_to_fb(int x, int y, size_t col_idx, int term_width, int
     if (col_width < kMinDisplayWidth || body_rows < kMinDisplayBodyRows) return std::nullopt;
     const int cell_width = std::max(1, cell_width_px_);
     const int cell_height = std::max(1, cell_height_px_);
-    constexpr int source_width = 640;
-    constexpr int source_height = 480;
+    const int source_width = static_cast<int>(machine_.framebuffer_width());
+    const int source_height = static_cast<int>(machine_.framebuffer_height());
 
-    const auto [width, height] =
-        compute_sixel_dimensions(col_width, body_rows, cell_width, cell_height);
+    const auto [width, height] = compute_sixel_dimensions(col_width, body_rows, cell_width,
+                                                          cell_height, source_width, source_height);
     const int image_cols = std::max(1, (width + cell_width - 1) / cell_width);
     const int image_rows = std::max(1, (height + cell_height - 1) / cell_height);
     const int x_offset = std::max(0, (col_width - image_cols) / 2);

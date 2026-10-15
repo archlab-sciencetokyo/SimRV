@@ -86,6 +86,11 @@ struct Parser {
         throw std::runtime_error("unterminated FDT node");
     }
 };
+auto prop(const Node& n, std::string_view name) -> const Prop* {
+    for (const auto& p : n.props)
+        if (p.name == name) return &p;
+    return nullptr;
+}
 auto prop(Node& n, std::string_view name) -> Prop* {
     for (auto& p : n.props)
         if (p.name == name) return &p;
@@ -97,7 +102,7 @@ auto child(Node& n, std::string_view name) -> Node* {
     return nullptr;
 }
 auto cells(const Node& n, std::string_view name, uint32_t fallback) -> uint32_t {
-    auto* p = prop(const_cast<Node&>(n), name);
+    const auto* p = prop(n, name);
     return p && p->data.size() == 4 ? be32(p->data, 0) : fallback;
 }
 auto encode_cells(uint64_t v, uint32_t count) -> std::vector<uint8_t> {
@@ -124,7 +129,8 @@ auto is_memory(Node& n) -> bool {
 }  // namespace
 
 auto patch_fdt(std::span<const uint8_t> blob, uint64_t dram_base, uint64_t dram_size,
-               uint32_t num_harts) -> std::expected<std::vector<uint8_t>, std::string> {
+               uint32_t num_harts, FdtFramebufferInfo* out_fb)
+    -> std::expected<std::vector<uint8_t>, std::string> {
     try {
         if (blob.size() < 40 || be32(blob, 0) != kMagic)
             return std::unexpected("invalid device tree header");
@@ -140,6 +146,32 @@ auto patch_fdt(std::span<const uint8_t> blob, uint64_t dram_base, uint64_t dram_
         Parser parser{blob.subspan(struct_off, struct_size),
                       blob.subspan(strings_off, strings_size)};
         auto root = parser.node();
+        if (out_fb != nullptr) {
+            *out_fb = {};
+            for (const auto& c : root.children) {
+                if (c.name.starts_with("framebuffer@") || c.name == "framebuffer") {
+                    const auto* wp = prop(c, "width");
+                    const auto* hp = prop(c, "height");
+                    const auto* sp = prop(c, "stride");
+                    const auto* rp = prop(c, "reg");
+                    if (wp != nullptr && wp->data.size() >= 4) out_fb->width = be32(wp->data, 0);
+                    if (hp != nullptr && hp->data.size() >= 4) out_fb->height = be32(hp->data, 0);
+                    if (sp != nullptr && sp->data.size() >= 4) out_fb->stride = be32(sp->data, 0);
+                    if (rp != nullptr && rp->data.size() >= 4) {
+                        const auto ac = cells(root, "#address-cells", 2);
+                        const auto sc = cells(root, "#size-cells", 1);
+                        if (ac == 2 && rp->data.size() >= 8 + sc * 4) {
+                            out_fb->base = be64(rp->data, 0);
+                            out_fb->size = (sc == 2) ? be64(rp->data, 8) : be32(rp->data, 8);
+                        } else if (ac == 1 && rp->data.size() >= 4 + sc * 4) {
+                            out_fb->base = be32(rp->data, 0);
+                            out_fb->size = (sc == 2) ? be64(rp->data, 4) : be32(rp->data, 4);
+                        }
+                    }
+                    break;
+                }
+            }
+        }
         std::vector<Node*> memory_nodes;
         for (auto& c : root.children)
             if (is_memory(c)) memory_nodes.push_back(&c);

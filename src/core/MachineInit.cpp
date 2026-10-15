@@ -655,9 +655,18 @@ auto Machine::initialize() -> std::expected<void, std::string> {
         if (!input) return std::unexpected("cannot open device tree: " + config.files.dvtree_path);
         std::vector<uint8_t> input_blob{std::istreambuf_iterator<char>(input),
                                         std::istreambuf_iterator<char>()};
-        auto patched = simrv::util::patch_fdt(input_blob, config.memory.dram_base,
-                                              effective_dram_size, config.execution.num_harts);
+        simrv::util::FdtFramebufferInfo fb_info{};
+        auto patched =
+            simrv::util::patch_fdt(input_blob, config.memory.dram_base, effective_dram_size,
+                                   config.execution.num_harts, &fb_info);
         if (!patched) return std::unexpected(patched.error());
+        if (fb_info.width > 0 && fb_info.height > 0) {
+            framebuffer_geometry_.width = fb_info.width;
+            framebuffer_geometry_.height = fb_info.height;
+            if (fb_info.base != 0) {
+                framebuffer_geometry_.base = fb_info.base;
+            }
+        }
         const auto dt_cap = static_cast<std::size_t>(effective_dram_size - dtb_offset);
         if (patched->size() > dt_cap)
             return std::unexpected("patched device tree does not fit in guest DRAM");

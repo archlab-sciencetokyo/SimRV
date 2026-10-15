@@ -193,6 +193,7 @@ void Machine::apply_configuration(MachineConfig machine_config) {
     }
     resolved_start_pc_ = config.execution.start_pc;
     resolved_isatest_tohost_ = config.isa.isatest_tohost;
+    framebuffer_geometry_ = config.framebuffer;
     memory_.system_bus().set_smp_enabled(is_smp_enabled());
     if (tui_enabled() || debugger_enabled()) {
         execution_state_.store(ExecutionState::Paused, std::memory_order_release);
@@ -275,8 +276,8 @@ auto Machine::ram_view() const noexcept -> simrv::memory::RamView {
 }
 
 auto Machine::framebuffer_view() const noexcept -> simrv::memory::RamView {
-    constexpr simrv::xlen::Address base = 0x84000000ULL;
-    constexpr simrv::xlen::Address size = 640ULL * 480ULL * 4ULL;
+    const auto size = static_cast<simrv::xlen::Address>(framebuffer_geometry_.size_bytes());
+    const auto base = framebuffer_geometry_.base;
     const auto ram = ram_view();
     if (!ram.contains(base, static_cast<std::size_t>(size))) return {};
     return {ram.unchecked_ptr(base), base, size};
