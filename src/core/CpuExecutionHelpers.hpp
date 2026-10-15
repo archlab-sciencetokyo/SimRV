@@ -30,10 +30,11 @@ using isa::Opcode;
 [[nodiscard]] SIMRV_ALWAYS_INLINE auto is_tohost_addr(const Machine& machine,
                                                       simrv::xlen::Address addr) noexcept -> bool {
     const auto tohost = machine.isa_test_tohost();
-    if (simrv::compiler::unlikely(tohost != 0 && tohost != 0x80001000ULL && (addr - tohost < 8))) {
+    if (simrv::compiler::unlikely(tohost != 0 && (addr - tohost < 8))) {
         return true;
     }
-    return simrv::compiler::unlikely((addr - 0x80001000ULL < 8) || (addr - 0x40008000ULL < 8));
+    const auto masked = addr & ~simrv::xlen::Address{0x7ULL};
+    return simrv::compiler::unlikely(masked == 0x80001000ULL || masked == 0x40008000ULL);
 }
 
 [[nodiscard]] SIMRV_ALWAYS_INLINE auto is_tohost_addr(const Machine& machine,

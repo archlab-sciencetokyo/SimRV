@@ -31,9 +31,7 @@ SIMRV_ALWAYS_INLINE void CPU::execute_cached_jal(CachedOp& op) {
         raise_exception(ExceptionCode::MisalignedFetch, pipeline_context.jmp_pc.raw());
         return;
     }
-    if (op.rd != simrv::xlen::RegId::Zero) {
-        state_.regs.write(op.rd, next_pc);
-    }
+    state_.regs.write_branchless(op.rd, next_pc);
     commit_cached_branch_target(op, pipeline_context.jmp_pc);
 }
 
@@ -50,9 +48,7 @@ SIMRV_ALWAYS_INLINE void CPU::execute_cached_jalr(CachedOp& op, simrv::xlen::Reg
         raise_exception(ExceptionCode::MisalignedFetch, pipeline_context.jmp_pc.raw());
         return;
     }
-    if (op.rd != simrv::xlen::RegId::Zero) {
-        state_.regs.write(op.rd, next_pc);
-    }
+    state_.regs.write_branchless(op.rd, next_pc);
     commit_cached_branch_target(op, pipeline_context.jmp_pc);
 }
 
@@ -428,8 +424,8 @@ SIMRV_ALWAYS_INLINE auto CPU::execute_cached_store(Machine& machine, CachedOp& o
     }
 
     state_.lr_reservation_active = false;
-    if (simrv::compiler::unlikely(machine.num_harts() > 1 &&
-                                  machine.memory_.reservation_table().may_have_reservations())) {
+    if (simrv::compiler::unlikely(machine.memory_.reservation_table().may_have_reservations() &&
+                                  machine.num_harts() > 1)) {
         machine.memory_.reservation_table().invalidate_range(pipeline_context.mem_paddr, size_bytes,
                                                              hart_id());
     }

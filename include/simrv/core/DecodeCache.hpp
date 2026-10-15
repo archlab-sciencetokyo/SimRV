@@ -199,7 +199,7 @@ class DecodeCache {
      * @param pc Program counter address.
      * @return Pointer to CachedOp if hit, or nullptr on miss.
      */
-    [[nodiscard]] inline auto lookup(simrv::xlen::Register pc) noexcept -> CachedOp* {
+    [[nodiscard]] SIMRV_ALWAYS_INLINE auto lookup(simrv::xlen::Register pc) noexcept -> CachedOp* {
         const size_t set_idx = calc_set(pc);
         auto& set = sets_[set_idx];
         if (simrv::compiler::likely(set.ways[0].cpc == pc && set.ways[0].valid)) {
@@ -210,7 +210,7 @@ class DecodeCache {
         }
         return nullptr;
     }
-    [[nodiscard]] inline auto lookup(simrv::xlen::VirtAddr pc) noexcept -> CachedOp* {
+    [[nodiscard]] SIMRV_ALWAYS_INLINE auto lookup(simrv::xlen::VirtAddr pc) noexcept -> CachedOp* {
         return lookup(pc.raw());
     }
 

@@ -110,6 +110,7 @@ struct CpuModelConfig {
     // ISA preset so CPU presets can describe extensions such as Zkn/Zkr/Zkt losslessly.
     std::vector<std::string> isa_extensions{};
     bool enable_idle_spans = true;
+    bool is_provingground_or_rvproc = false;
 
     [[nodiscard]] auto has_isa_extension(std::string_view extension) const -> bool {
         return std::ranges::find(isa_extensions, extension) != isa_extensions.end();

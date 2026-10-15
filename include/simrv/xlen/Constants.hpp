@@ -4,6 +4,7 @@
  */
 #pragma once
 
+#include "simrv/CompilerHints.hpp"
 #include "simrv/xlen/ScalarTypes.hpp"
 
 namespace simrv::xlen {
@@ -95,7 +96,8 @@ template <unsigned XLen = kXLenBits>
     }
 }
 
-[[nodiscard]] inline auto satp_mode(Word satp, unsigned xlen) -> Word {
+[[nodiscard]] SIMRV_ALWAYS_INLINE constexpr auto satp_mode(Word satp, unsigned xlen) noexcept
+    -> Word {
     if constexpr (kXLenBits == 32) {
         return satp_mode<32>(satp);
     } else {
@@ -103,7 +105,9 @@ template <unsigned XLen = kXLenBits>
     }
 }
 
-[[nodiscard]] inline auto satp_translation_enabled(Word satp, unsigned xlen) -> bool {
+[[nodiscard]] SIMRV_ALWAYS_INLINE constexpr auto satp_translation_enabled(Word satp,
+                                                                          unsigned xlen) noexcept
+    -> bool {
     if constexpr (kXLenBits == 32) {
         return satp_translation_enabled<32>(satp);
     } else {
@@ -112,7 +116,9 @@ template <unsigned XLen = kXLenBits>
     }
 }
 
-[[nodiscard]] inline auto satp_mode_supported(Word mode, unsigned xlen) -> bool {
+[[nodiscard]] SIMRV_ALWAYS_INLINE constexpr auto satp_mode_supported(Word mode,
+                                                                     unsigned xlen) noexcept
+    -> bool {
     if constexpr (kXLenBits == 32) {
         return satp_mode_supported<32>(mode);
     } else {
@@ -120,7 +126,8 @@ template <unsigned XLen = kXLenBits>
     }
 }
 
-[[nodiscard]] inline auto satp_asid(Word satp, unsigned xlen) -> Word {
+[[nodiscard]] SIMRV_ALWAYS_INLINE constexpr auto satp_asid(Word satp, unsigned xlen) noexcept
+    -> Word {
     if constexpr (kXLenBits == 32) {
         return satp_asid<32>(satp);
     } else {
@@ -128,7 +135,8 @@ template <unsigned XLen = kXLenBits>
     }
 }
 
-[[nodiscard]] inline auto satp_root_ppn(Word satp, unsigned xlen) -> Word {
+[[nodiscard]] SIMRV_ALWAYS_INLINE constexpr auto satp_root_ppn(Word satp, unsigned xlen) noexcept
+    -> Word {
     if constexpr (kXLenBits == 32) {
         return satp_root_ppn<32>(satp);
     } else {

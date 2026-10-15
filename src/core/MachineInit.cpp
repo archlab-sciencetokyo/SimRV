@@ -69,8 +69,7 @@ void resolve_start_pc_and_dram_base(simrv::core::Machine& machine,
         simrv::xlen::Address entry = symbols.entry_point().value_or(
             symbols.lookup_name("_start").value_or(simrv::boot::kStartPc));
         if (entry < simrv::memory::kDramBaseAddress &&
-            machine.primary_hart().cpu_model_config.name != "cfu-provingground" &&
-            machine.primary_hart().cpu_model_config.name != "rvproc") {
+            !machine.primary_hart().cpu_model_config.is_provingground_or_rvproc) {
             entry += simrv::memory::kDramBaseAddress;
         }
         start_pc = entry;

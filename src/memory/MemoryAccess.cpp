@@ -525,8 +525,7 @@ void MemoryAccess::target_write(MemorySubsystem& mem, core::CPU& cpu, simrv::xle
             ack.sink = timed.payload.sink;
             mem.system_bus().grant_ack(ack);
         }
-        if ((cpu.cpu_model_config.name == "cfu-provingground" ||
-             cpu.cpu_model_config.name == "rvproc") &&
+        if (simrv::compiler::unlikely(cpu.cpu_model_config.is_provingground_or_rvproc) &&
             (addr == cpu.machine_->isa_test_tohost() || (addr & 0x80000000ULL) != 0)) {
             if (funct3 == Funct3::Sw && (data == 0x00020000ULL || (data & 1ULL) != 0)) {
                 cpu.machine_->tohost = data;

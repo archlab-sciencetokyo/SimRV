@@ -1032,19 +1032,19 @@ auto Tui::render_framebuffer_row(int row, int width, int rows) const -> std::str
     const int pixel_height = std::max(2, rows * 2);
     const int top = std::clamp(row * 2, 0, pixel_height - 1);
     const int bottom = std::min(pixel_height - 1, top + 1);
+    const int source_top = std::min(source_height - 1, top * source_height / pixel_height);
+    const int source_bottom = std::min(source_height - 1, bottom * source_height / pixel_height);
+    const auto* row_top = fb.unchecked_ptr(
+        fb.base() + static_cast<simrv::xlen::Address>(source_top * source_width * 4));
+    const auto* row_bottom = fb.unchecked_ptr(
+        fb.base() + static_cast<simrv::xlen::Address>(source_bottom * source_width * 4));
+
     std::string result;
     result.reserve(static_cast<size_t>(width) * 32);
     for (int x = 0; x < width; ++x) {
         const int source_x = std::min(source_width - 1, x * source_width / pixel_width);
-        const int source_top = std::min(source_height - 1, top * source_height / pixel_height);
-        const int source_bottom =
-            std::min(source_height - 1, bottom * source_height / pixel_height);
-        const auto* p_top =
-            fb.unchecked_ptr(fb.base() + static_cast<simrv::xlen::Address>(
-                                             (source_top * source_width + source_x) * 4));
-        const auto* p_bottom =
-            fb.unchecked_ptr(fb.base() + static_cast<simrv::xlen::Address>(
-                                             (source_bottom * source_width + source_x) * 4));
+        const auto* p_top = row_top + static_cast<size_t>(source_x * 4);
+        const auto* p_bottom = row_bottom + static_cast<size_t>(source_x * 4);
         result += std::format(
             "\033[38;2;{};{};{}m\033[48;2;{};{};{}m▀", std::to_integer<uint8_t>(p_top[2]),
             std::to_integer<uint8_t>(p_top[1]), std::to_integer<uint8_t>(p_top[0]),
