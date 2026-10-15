@@ -2528,8 +2528,9 @@ void test_pcie_and_virtio_pci() {
     assert(!blk->is_msi_enabled());
     assert(rc.ecam_read(0x8000 + 0x84, 1) == 0x05);  // MSI Cap ID
     rc.ecam_write(0x8000 + 0x84 + 0x04, static_cast<uint32_t>(simrv::mmio::kImsicSBaseAddress), 4);
-    rc.ecam_write(0x8000 + 0x84 + 0x08,
-                  static_cast<uint32_t>(simrv::mmio::kImsicSBaseAddress >> 32), 4);
+    rc.ecam_write(
+        0x8000 + 0x84 + 0x08,
+        static_cast<uint32_t>(static_cast<uint64_t>(simrv::mmio::kImsicSBaseAddress) >> 32), 4);
     rc.ecam_write(0x8000 + 0x84 + 0x0C, 9, 2);        // Message data: vector 9
     rc.ecam_write(0x8000 + 0x84 + 0x02, 0x0081U, 2);  // Enable MSI + 64-bit capable
     assert(blk->is_msi_enabled());
