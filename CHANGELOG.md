@@ -3,7 +3,7 @@
 All notable changes to SimRV are documented here.
 Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [v3.0.0-rc.10] — 2026-10-14
+## [v3.0.0-rc.10] — 2026-10-15
 
 - Removed the local socket TUI attachment workflow and its installed `simrv/net` interfaces.
 - Removed the ambiguous `--trace-pc` alias; use `--trace-pc-range` for architectural trace filters.
@@ -55,6 +55,26 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   - Fully retired legacy compatibility aliases `CSRValue`, `CSRAddress`, `CsrAddress`, and `GCBV`.
   - Harmonized the entire codebase onto canonical PascalCase domain types `simrv::xlen::CsrValue`, `simrv::xlen::CsrNumber`, and `simrv::isa::IsaPreset::GCZBV`.
   - Added templated implicit construction to `CsrNumber` from `Csr` enum and integral types, eliminating verbose boilerplate.
+- **TUI Sixel Integer Scaling & 800x600 Framebuffer Architecture**:
+  - Enforced strict integer scaling ($1\times, 2\times, 3\times$ integer replication and $1/2\times, 1/3\times$ integer divisor downsampling) in Sixel image generation, preventing fractional pixel distortion, blurring, and aliasing artifacts.
+  - Upgraded standard framebuffer resolution from 640x480 to 800x600 across `MachineConfig`, DTB templates (`virt-rv64.dts`, `virt-rv32.dts`), and Linux boot scripts, paired with dynamic guest DTB geometry auto-adaptation in `FdtPatcher` and `MachineInit`.
+  - Added pixel-accurate cell and SGR-pixel mouse coordinate scaling mapped to arbitrary display resolutions.
+- **Simulation Hot-Path Performance Optimizations**:
+  - Eliminated virtual dispatch in MMIO routing with entry metadata caching and direct address comparisons (`MmioRouter`).
+  - Always-inlined fetch branch prediction fast-path (`BranchPredictor.hpp`) with non-control instruction early-exit.
+  - Bypassed atomic RMW bus locking (`lock xchg`) in CPU interrupt line servicing when no lines are active.
+  - Always-inlined Tracer status accessors and cached raw subsystem pointers (`tracer_raw_`, `breakpoint_manager_raw_`) on `Machine`.
+  - Decoupled inner-loop `tohost` memory polling to 64-instruction batch intervals.
+  - Inlined DecodeCache lookup and adopted branchless register writes for jumps (`write_branchless`).
+  - Short-circuited soft TLB reservation table checks across all scalar and FP store paths.
+  - Eliminated heap churn in Sixel rendering by retaining reusable strip masks and precomputed coordinate lookup tables.
+- **PCIe & MMIO Subsystem Modernization**:
+  - Replaced generic integer primitives with explicit domain-specific types (`MmioOffset`, `MmioBytes`, `MmioData8`..`MmioData64`, `PciBarOffset`, `PciBarSize`, `PciBarMask`, `PciMmioData`, `VirtioQueueIndex`, `VirtioFeatureWord`, `VirtioIsrStatus`).
+  - Implemented fast active BAR routing using a 4-entry MRU cache and binary search over non-overlapping intervals in `PcieRootComplex`.
+  - Implemented $\mathcal{O}(1)$ slot dispatch for ECAM configuration access (`devices_by_slot_[32]`) returning raw `PciDevice*` without `std::shared_ptr` refcount overhead.
+  - Implemented full 64-bit BAR probe sizing and 64-bit MMIO data transfers (`PciMmioData`).
+  - Implemented PCIe INTx level deassertion on VirtIO ISR register reads (`0x200..0x2FF`) and device reset.
+  - Centralized physical DRAM DMA read/write transfers with bounds checking and CoherenceHub line invalidation in `MemorySubsystem::dma_read` and `dma_write`.
 
 ## [v3.0.0-rc.9] — 2026-10-08
 
@@ -884,10 +904,12 @@ on inspector polish, correctness fixes, and CLI normalization.
 
 - Initial public alpha: CMake preset infrastructure, Clang-20 CI, base RISC-V pipeline
 
-[v3.0.0-rc.5]: https://github.com/archlab-sciencetokyo/SimRV/releases/tag/v3.0.0-rc.5
-[v3.0.0-rc.6]: https://github.com/archlab-sciencetokyo/SimRV/releases/tag/v3.0.0-rc.6
-[v3.0.0-rc.7]: https://github.com/archlab-sciencetokyo/SimRV/releases/tag/v3.0.0-rc.7
+[v3.0.0-rc.10]: https://github.com/archlab-sciencetokyo/SimRV/releases/tag/v3.0.0-rc.10
+[v3.0.0-rc.9]: https://github.com/archlab-sciencetokyo/SimRV/releases/tag/v3.0.0-rc.9
 [v3.0.0-rc.8]: https://github.com/archlab-sciencetokyo/SimRV/releases/tag/v3.0.0-rc.8
+[v3.0.0-rc.7]: https://github.com/archlab-sciencetokyo/SimRV/releases/tag/v3.0.0-rc.7
+[v3.0.0-rc.6]: https://github.com/archlab-sciencetokyo/SimRV/releases/tag/v3.0.0-rc.6
+[v3.0.0-rc.5]: https://github.com/archlab-sciencetokyo/SimRV/releases/tag/v3.0.0-rc.5
 [v3.0.0-rc.4]: https://github.com/archlab-sciencetokyo/SimRV/releases/tag/v3.0.0-rc.4
 [v3.0.0-rc.3]: https://github.com/archlab-sciencetokyo/SimRV/releases/tag/v3.0.0-rc.3
 [v3.0.0-rc.2]: https://github.com/archlab-sciencetokyo/SimRV/releases/tag/v3.0.0-rc.2
