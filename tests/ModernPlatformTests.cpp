@@ -2489,6 +2489,39 @@ void test_pcie_and_virtio_pci() {
     // Assign BAR 0 address in MMIO window: 0x40001000
     rc.ecam_write(0x8000 + 0x10, 0x40001000U, 4);
 
+    // Fast active BAR routing verification
+    assert(rc.active_bar_count() == 1);
+    assert(rc.get_device(0, 1, 0) == blk.get());
+    assert(rc.get_device(0, 8, 0) == nullptr);
+
+    // MMIO read/write routed to BAR 0
+    rc.mmio_write(0x40001000 + 0x00, 1, 4);
+    assert(rc.mmio_read(0x40001000 + 0x04, 4) ==
+           simrv::device::virtio::kVirtioFVersion1FeatureWord);
+
+    // Virtqueue 64-bit address writes via split 32-bit MMIO
+    rc.mmio_write(0x40001000 + 0x16, 0, 2);
+    rc.mmio_write(0x40001000 + 0x20, 0x80001234U, 4);
+    rc.mmio_write(0x40001000 + 0x24, 0x00000001U, 4);
+    assert(blk->get_queue_state(0)->desc_addr == 0x180001234ULL);
+
+#if SIMRV_XLEN == 64
+    // 64-bit MMIO access
+    rc.mmio_write(0x40001000 + 0x20, 0x180005678ULL, 8);
+    assert(blk->get_queue_state(0)->desc_addr == 0x180005678ULL);
+    assert(rc.mmio_read(0x40001000 + 0x20, 8) == 0x180005678ULL);
+#endif
+
+    // Test INTx assertion and deassertion on reading ISR offset 0x200
+    auto& plic = machine.cpu.plic_mmio;
+    (void)plic;
+    assert(((plic.plic_pending[0] >> 17) & 1) == 0);
+    blk->trigger_irq();
+    assert(((plic.plic_pending[0] >> 17) & 1) == 1);
+    const auto isr_status = rc.mmio_read(0x40001000 + 0x200, 4);
+    (void)isr_status;
+    assert(((plic.plic_pending[0] >> 17) & 1) == 0);
+
     // Attach Console (Slot 2), RNG (Slot 3), GPU (Slot 4), Input (Slot 5), Sound (Slot 6)
     auto console = std::make_shared<simrv::device::VirtioPciConsole>();
     auto rng = std::make_shared<simrv::device::VirtioPciRng>();
@@ -2561,6 +2594,41 @@ void test_pcie_and_virtio_pci() {
     assert((net_id & 0xffff) == 0x1AF4);
     assert((net_id >> 16) == 0x1041);
     (void)net_id;
+
+    // 64-bit BAR probe sizing and addressing on a 64-bit endpoint
+    class Test64BitEndpoint : public simrv::device::PciDevice {
+       public:
+        Test64BitEndpoint() : PciDevice(0x1234, 0x5678, 0x01, 0x020000) {
+            init_bar(0, 0x4000, true, false);  // 16KB 64-bit BAR at BAR 0/1
+        }
+        auto bar_read(simrv::device::PciBarIndex bar_idx, simrv::device::PciBarOffset offset,
+                      simrv::device::PciAccessBytes size) -> simrv::device::PciMmioData override {
+            (void)bar_idx;
+            (void)offset;
+            (void)size;
+            return 0xCAFEBABE;
+        }
+    };
+    auto test_ep = std::make_shared<Test64BitEndpoint>();
+    rc.attach_device(0, 8, 0, test_ep);
+    // ECAM offset for dev 8: (8 << 15) = 0x40000
+    // Probe BAR 0 (low dword):
+    rc.ecam_write(0x40000 + 0x10, 0xFFFFFFFFU, 4);
+    const uint32_t bar0_low_probe = rc.ecam_read(0x40000 + 0x10, 4);
+    assert((bar0_low_probe & ~0xFU) == ~(0x4000ULL - 1));
+    assert((bar0_low_probe & 0x04) != 0);  // 64-bit flag
+    (void)bar0_low_probe;
+
+    // Probe BAR 1 (high dword):
+    rc.ecam_write(0x40000 + 0x14, 0xFFFFFFFFU, 4);
+    const uint32_t bar0_hi_probe = rc.ecam_read(0x40000 + 0x14, 4);
+    assert(bar0_hi_probe == 0xFFFFFFFFU);
+    (void)bar0_hi_probe;
+
+    // Assign address: 0x40020000
+    rc.ecam_write(0x40000 + 0x10, 0x40020000U, 4);
+    rc.ecam_write(0x40000 + 0x14, 0x00000000U, 4);
+    assert(rc.mmio_read(0x40020000, 4) == 0xCAFEBABE);
 
     std::cout << "[PASS] test_pcie_and_virtio_pci\n";
 }

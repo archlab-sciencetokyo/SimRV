@@ -18,7 +18,7 @@ class VirtioPciRng : public VirtioPciDevice {
     VirtioPciRng();
 
    protected:
-    void on_queue_notify(uint16_t queue_index) override;
+    void on_queue_notify(virtio::VirtioQueueIndex queue_index) override;
 
    private:
     virtio::RngBackend backend_;

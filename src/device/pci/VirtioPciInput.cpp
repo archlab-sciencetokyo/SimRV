@@ -10,7 +10,7 @@ namespace simrv::device {
 
 VirtioPciInput::VirtioPciInput() : VirtioPciDevice(virtio::kDevIdInput, 0x090000, 2) {}
 
-void VirtioPciInput::on_queue_notify(uint16_t queue_index) {
+void VirtioPciInput::on_queue_notify(virtio::VirtioQueueIndex queue_index) {
     if (queue_index == 0) {
         process_eventq();
     }
@@ -61,12 +61,13 @@ void VirtioPciInput::push_mouse_wheel(int32_t delta) {
     push_event(0x00 /* EV_SYN */, 0 /* SYN_REPORT */, 0);
 }
 
-auto VirtioPciInput::read_device_config(simrv::xlen::Address offset, uint8_t size) -> uint32_t {
+auto VirtioPciInput::read_device_config(PciBarOffset offset, PciAccessBytes size) -> PciMmioData {
     return backend_.read_config(offset, size);
 }
 
-void VirtioPciInput::write_device_config(simrv::xlen::Address offset, uint32_t val, uint8_t size) {
-    backend_.write_config(offset, val, size);
+void VirtioPciInput::write_device_config(PciBarOffset offset, PciMmioData val,
+                                         PciAccessBytes size) {
+    backend_.write_config(offset, static_cast<uint32_t>(val), size);
 }
 
 }  // namespace simrv::device

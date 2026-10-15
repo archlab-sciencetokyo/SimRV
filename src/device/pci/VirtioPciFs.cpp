@@ -10,19 +10,19 @@ VirtioPciFs::VirtioPciFs(const std::string& shared_directory, std::string tag)
     queues_[1].num_max = queues_[1].num = 128;  // REQUEST
 }
 
-auto VirtioPciFs::read_device_config(simrv::xlen::Address offset, uint8_t size) -> uint32_t {
-    uint32_t value = 0;
-    for (uint8_t i = 0; i < size && i < 4; ++i) {
+auto VirtioPciFs::read_device_config(PciBarOffset offset, PciAccessBytes size) -> PciMmioData {
+    PciMmioData value = 0;
+    for (uint8_t i = 0; i < size && i < sizeof(PciMmioData); ++i) {
         const auto index = static_cast<size_t>(offset + i);
         const uint8_t byte = index < backend_.tag().size() ? backend_.tag()[index]
                              : index == 36                 ? 1
                                                            : 0;
-        value |= static_cast<uint32_t>(byte) << (i * 8);
+        value |= static_cast<PciMmioData>(byte) << (i * 8);
     }
     return value;
 }
 
-void VirtioPciFs::on_queue_notify(uint16_t queue_index) {
+void VirtioPciFs::on_queue_notify(virtio::VirtioQueueIndex queue_index) {
     if (queue_index >= queues_.size()) return;
     backend_.process_queue(
         queues_[queue_index],

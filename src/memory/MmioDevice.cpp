@@ -117,47 +117,17 @@ auto MmioDevice::handle_request(const TlChannelA& req, TlChannelD& resp) -> bool
 }
 
 auto MmioDevice::dma_read(simrv::xlen::Address paddr, std::span<uint8_t> dst) -> bool {
-    if (machine_ == nullptr || machine_->ram_data() == nullptr || dst.empty()) {
+    if (machine_ == nullptr || dst.empty()) {
         return false;
     }
-    const auto geometry = machine_->memory_geometry();
-    if (!geometry.contains(paddr, dst.size())) {
-        return false;
-    }
-    if (!machine_->runtime_profile.is_instruction_mode()) {
-        const simrv::xlen::Address first_line =
-            paddr & ~(simrv::xlen::Address{CoherenceHub::kLineBytes - 1u});
-        const simrv::xlen::Address last_line =
-            (paddr + dst.size() - 1u) & ~(simrv::xlen::Address{CoherenceHub::kLineBytes - 1u});
-        for (simrv::xlen::Address line = first_line;; line += CoherenceHub::kLineBytes) {
-            machine_->memory().system_bus().coherence_hub().invalidate_line_external(line);
-            if (line == last_line) break;
-        }
-    }
-    std::memcpy(dst.data(), machine_->ram_data() + (paddr - geometry.dram_base), dst.size());
-    return true;
+    return machine_->memory().dma_read(paddr, dst.data(), dst.size());
 }
 
 auto MmioDevice::dma_write(simrv::xlen::Address paddr, std::span<const uint8_t> src) -> bool {
-    if (machine_ == nullptr || machine_->ram_data() == nullptr || src.empty()) {
+    if (machine_ == nullptr || src.empty()) {
         return false;
     }
-    const auto geometry = machine_->memory_geometry();
-    if (!geometry.contains(paddr, src.size())) {
-        return false;
-    }
-    if (!machine_->runtime_profile.is_instruction_mode()) {
-        const simrv::xlen::Address first_line =
-            paddr & ~(simrv::xlen::Address{CoherenceHub::kLineBytes - 1u});
-        const simrv::xlen::Address last_line =
-            (paddr + src.size() - 1u) & ~(simrv::xlen::Address{CoherenceHub::kLineBytes - 1u});
-        for (simrv::xlen::Address line = first_line;; line += CoherenceHub::kLineBytes) {
-            machine_->memory().system_bus().coherence_hub().invalidate_line_external(line);
-            if (line == last_line) break;
-        }
-    }
-    std::memcpy(machine_->ram_data() + (paddr - geometry.dram_base), src.data(), src.size());
-    return true;
+    return machine_->memory().dma_write(paddr, src.data(), src.size());
 }
 
 }  // namespace simrv::memory

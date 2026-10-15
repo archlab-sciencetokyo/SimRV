@@ -32,10 +32,6 @@
 
 namespace simrv::device::virtio {
 
-// VirtIO Types
-using VirtioDeviceId = uint16_t;
-using VirtioQueueIndex = uint16_t;
-
 // VirtIO 1.2 Device IDs
 inline constexpr VirtioDeviceId kDevIdNet = 1;
 inline constexpr VirtioDeviceId kDevIdBlock = 2;

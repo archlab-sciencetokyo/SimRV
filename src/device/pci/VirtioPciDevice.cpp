@@ -12,7 +12,7 @@
 
 namespace simrv::device {
 
-VirtioPciDevice::VirtioPciDevice(uint16_t subsystem_device_id, PciClassCode class_code,
+VirtioPciDevice::VirtioPciDevice(PciSubsystemId subsystem_device_id, PciClassCode class_code,
                                  size_t max_queues)
     : PciDevice(kVirtioPciVendorId,
                 static_cast<PciDeviceId>(kVirtioPciModernDeviceBase + subsystem_device_id), 0x01,
@@ -35,6 +35,7 @@ VirtioPciDevice::VirtioPciDevice(uint16_t subsystem_device_id, PciClassCode clas
 void VirtioPciDevice::reset() {
     device_status_ = 0;
     isr_status_ = 0;
+    deassert_irq();
     driver_features_ = 0;
     driver_features_sel_ = 0;
     device_features_sel_ = 0;
@@ -47,8 +48,8 @@ void VirtioPciDevice::reset() {
     }
 }
 
-void VirtioPciDevice::add_pci_cap(uint8_t cap_type, uint8_t bar, uint32_t offset, uint32_t length,
-                                  uint32_t notify_mult) {
+void VirtioPciDevice::add_pci_cap(uint8_t cap_type, PciBarIndex bar, PciBarOffset offset,
+                                  PciBarSize length, uint32_t notify_mult) {
     uint8_t cap_offset = next_cap_offset_;
     uint8_t cap_len = (cap_type == 2) ? 20 : 16;
     if (cap_offset + cap_len > 0x100) return;
@@ -68,8 +69,10 @@ void VirtioPciDevice::add_pci_cap(uint8_t cap_type, uint8_t bar, uint32_t offset
     config_space_[cap_offset + 2] = cap_len;
     config_space_[cap_offset + 3] = cap_type;
     config_space_[cap_offset + 4] = bar;
-    std::memcpy(&config_space_[cap_offset + 8], &offset, 4);
-    std::memcpy(&config_space_[cap_offset + 12], &length, 4);
+    auto offset_u32 = static_cast<uint32_t>(offset);
+    auto length_u32 = static_cast<uint32_t>(length);
+    std::memcpy(&config_space_[cap_offset + 8], &offset_u32, 4);
+    std::memcpy(&config_space_[cap_offset + 12], &length_u32, 4);
     if (cap_type == 2) {
         std::memcpy(&config_space_[cap_offset + 16], &notify_mult, 4);
     }
@@ -77,55 +80,17 @@ void VirtioPciDevice::add_pci_cap(uint8_t cap_type, uint8_t bar, uint32_t offset
 }
 
 auto VirtioPciDevice::dma_read(simrv::xlen::Address paddr, void* dst, size_t len) -> bool {
-    if (!root_complex_ || !root_complex_->machine() || !root_complex_->machine()->ram_data())
-        return false;
-    auto& machine = *root_complex_->machine();
-    auto* mem = machine.ram_data();
-    const auto geometry = machine.memory_geometry();
-    if (!geometry.contains(paddr, len) || len == 0) return false;
-    if (!machine.runtime_profile.is_instruction_mode()) {
-        const simrv::xlen::Address first_line =
-            paddr & ~(simrv::xlen::Address{simrv::memory::CoherenceHub::kLineBytes - 1u});
-        const simrv::xlen::Address last_line =
-            (paddr + len - 1u) &
-            ~(simrv::xlen::Address{simrv::memory::CoherenceHub::kLineBytes - 1u});
-        for (simrv::xlen::Address line = first_line;;
-             line += simrv::memory::CoherenceHub::kLineBytes) {
-            machine.memory().system_bus().coherence_hub().invalidate_line_external(line);
-            if (line == last_line) break;
-        }
-    }
-    simrv::xlen::Address offset = paddr - geometry.dram_base;
-    std::memcpy(dst, mem + offset, len);
-    return true;
+    if (!root_complex_ || !root_complex_->machine()) return false;
+    return root_complex_->machine()->memory().dma_read(paddr, dst, len);
 }
 
 auto VirtioPciDevice::dma_write(simrv::xlen::Address paddr, const void* src, size_t len) -> bool {
-    if (!root_complex_ || !root_complex_->machine() || !root_complex_->machine()->ram_data())
-        return false;
-    auto& machine = *root_complex_->machine();
-    auto* mem = machine.ram_data();
-    const auto geometry = machine.memory_geometry();
-    if (!geometry.contains(paddr, len) || len == 0) return false;
-    if (!machine.runtime_profile.is_instruction_mode()) {
-        const simrv::xlen::Address first_line =
-            paddr & ~(simrv::xlen::Address{simrv::memory::CoherenceHub::kLineBytes - 1u});
-        const simrv::xlen::Address last_line =
-            (paddr + len - 1u) &
-            ~(simrv::xlen::Address{simrv::memory::CoherenceHub::kLineBytes - 1u});
-        for (simrv::xlen::Address line = first_line;;
-             line += simrv::memory::CoherenceHub::kLineBytes) {
-            machine.memory().system_bus().coherence_hub().invalidate_line_external(line);
-            if (line == last_line) break;
-        }
-    }
-    simrv::xlen::Address offset = paddr - geometry.dram_base;
-    std::memcpy(mem + offset, src, len);
-    return true;
+    if (!root_complex_ || !root_complex_->machine()) return false;
+    return root_complex_->machine()->memory().dma_write(paddr, src, len);
 }
 
-auto VirtioPciDevice::bar_read(BarIndex bar_idx, simrv::xlen::Address offset, uint8_t size)
-    -> uint32_t {
+auto VirtioPciDevice::bar_read(PciBarIndex bar_idx, PciBarOffset offset, PciAccessBytes size)
+    -> PciMmioData {
     if (bar_idx != 0) return 0;
 
     // Common Config (0x000 - 0x0FF)
@@ -161,9 +126,13 @@ auto VirtioPciDevice::bar_read(BarIndex bar_idx, simrv::xlen::Address offset, ui
             }
             case 0x1E:
                 return queue_select_;  // queue_notify_off
-            case 0x20: {               // queue_desc low
-                if (queue_select_ < queues_.size())
+            case 0x20: {               // queue_desc low / full 64-bit
+                if (queue_select_ < queues_.size()) {
+                    if (size == 8) {
+                        return static_cast<PciMmioData>(queues_[queue_select_].desc_addr);
+                    }
                     return static_cast<uint32_t>(queues_[queue_select_].desc_addr & 0xFFFFFFFFULL);
+                }
                 return 0;
             }
             case 0x24: {  // queue_desc high
@@ -171,10 +140,14 @@ auto VirtioPciDevice::bar_read(BarIndex bar_idx, simrv::xlen::Address offset, ui
                     return static_cast<uint32_t>(queues_[queue_select_].desc_addr >> 32);
                 return 0;
             }
-            case 0x28: {  // queue_driver low
-                if (queue_select_ < queues_.size())
+            case 0x28: {  // queue_driver low / full 64-bit
+                if (queue_select_ < queues_.size()) {
+                    if (size == 8) {
+                        return static_cast<PciMmioData>(queues_[queue_select_].driver_addr);
+                    }
                     return static_cast<uint32_t>(queues_[queue_select_].driver_addr &
                                                  0xFFFFFFFFULL);
+                }
                 return 0;
             }
             case 0x2C: {  // queue_driver high
@@ -182,10 +155,14 @@ auto VirtioPciDevice::bar_read(BarIndex bar_idx, simrv::xlen::Address offset, ui
                     return static_cast<uint32_t>(queues_[queue_select_].driver_addr >> 32);
                 return 0;
             }
-            case 0x30: {  // queue_device low
-                if (queue_select_ < queues_.size())
+            case 0x30: {  // queue_device low / full 64-bit
+                if (queue_select_ < queues_.size()) {
+                    if (size == 8) {
+                        return static_cast<PciMmioData>(queues_[queue_select_].device_addr);
+                    }
                     return static_cast<uint32_t>(queues_[queue_select_].device_addr &
                                                  0xFFFFFFFFULL);
+                }
                 return 0;
             }
             case 0x34: {  // queue_device high
@@ -205,8 +182,9 @@ auto VirtioPciDevice::bar_read(BarIndex bar_idx, simrv::xlen::Address offset, ui
 
     // ISR Config (0x200 - 0x2FF)
     if (offset >= 0x200 && offset < 0x300) {
-        uint32_t isr = isr_status_;
+        PciMmioData isr = isr_status_;
         isr_status_ = 0;  // Clear on read
+        deassert_irq();
         return isr;
     }
 
@@ -218,29 +196,29 @@ auto VirtioPciDevice::bar_read(BarIndex bar_idx, simrv::xlen::Address offset, ui
     return 0;
 }
 
-void VirtioPciDevice::bar_write(BarIndex bar_idx, simrv::xlen::Address offset, uint32_t val,
-                                uint8_t size) {
+void VirtioPciDevice::bar_write(PciBarIndex bar_idx, PciBarOffset offset, PciMmioData val,
+                                PciAccessBytes size) {
     if (bar_idx != 0) return;
 
     // Common Config
     if (offset < 0x100) {
         switch (offset) {
             case 0x00:
-                device_features_sel_ = val;
+                device_features_sel_ = static_cast<virtio::VirtioFeatureWord>(val);
                 break;
             case 0x08:
-                driver_features_sel_ = val;
+                driver_features_sel_ = static_cast<virtio::VirtioFeatureWord>(val);
                 break;
             case 0x0C:
-                driver_features_ = val;
-                on_driver_features(driver_features_sel_, val);
+                driver_features_ = static_cast<virtio::VirtioFeatureWord>(val);
+                on_driver_features(driver_features_sel_, driver_features_);
                 break;
             case 0x14:
                 device_status_ = static_cast<uint8_t>(val);
                 if (device_status_ == 0) reset();
                 break;
             case 0x16:
-                queue_select_ = static_cast<uint16_t>(val);
+                queue_select_ = static_cast<virtio::VirtioQueueIndex>(val);
                 break;
             case 0x18:
                 if (queue_select_ < queues_.size()) {
@@ -254,9 +232,13 @@ void VirtioPciDevice::bar_write(BarIndex bar_idx, simrv::xlen::Address offset, u
                 break;
             case 0x20:
                 if (queue_select_ < queues_.size()) {
-                    queues_[queue_select_].desc_addr =
-                        (queues_[queue_select_].desc_addr & 0xFFFFFFFF00000000ULL) |
-                        (val & 0xFFFFFFFFULL);
+                    if (size == 8) {
+                        queues_[queue_select_].desc_addr = val;
+                    } else {
+                        queues_[queue_select_].desc_addr =
+                            (queues_[queue_select_].desc_addr & 0xFFFFFFFF00000000ULL) |
+                            (val & 0xFFFFFFFFULL);
+                    }
                 }
                 break;
             case 0x24:
@@ -268,9 +250,13 @@ void VirtioPciDevice::bar_write(BarIndex bar_idx, simrv::xlen::Address offset, u
                 break;
             case 0x28:
                 if (queue_select_ < queues_.size()) {
-                    queues_[queue_select_].driver_addr =
-                        (queues_[queue_select_].driver_addr & 0xFFFFFFFF00000000ULL) |
-                        (val & 0xFFFFFFFFULL);
+                    if (size == 8) {
+                        queues_[queue_select_].driver_addr = val;
+                    } else {
+                        queues_[queue_select_].driver_addr =
+                            (queues_[queue_select_].driver_addr & 0xFFFFFFFF00000000ULL) |
+                            (val & 0xFFFFFFFFULL);
+                    }
                 }
                 break;
             case 0x2C:
@@ -282,9 +268,13 @@ void VirtioPciDevice::bar_write(BarIndex bar_idx, simrv::xlen::Address offset, u
                 break;
             case 0x30:
                 if (queue_select_ < queues_.size()) {
-                    queues_[queue_select_].device_addr =
-                        (queues_[queue_select_].device_addr & 0xFFFFFFFF00000000ULL) |
-                        (val & 0xFFFFFFFFULL);
+                    if (size == 8) {
+                        queues_[queue_select_].device_addr = val;
+                    } else {
+                        queues_[queue_select_].device_addr =
+                            (queues_[queue_select_].device_addr & 0xFFFFFFFF00000000ULL) |
+                            (val & 0xFFFFFFFFULL);
+                    }
                 }
                 break;
             case 0x34:

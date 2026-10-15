@@ -12,7 +12,7 @@ namespace simrv::device {
 
 VirtioPciConsole::VirtioPciConsole() : VirtioPciDevice(virtio::kDevIdConsole, 0x070000, 2) {}
 
-auto VirtioPciConsole::read_device_config(simrv::xlen::Address offset, uint8_t size) -> uint32_t {
+auto VirtioPciConsole::read_device_config(PciBarOffset offset, PciAccessBytes size) -> PciMmioData {
     (void)size;
     if (offset == 0) {
         return 80 | (24 << 16);  // cols=80, rows=24
@@ -25,7 +25,7 @@ void VirtioPciConsole::send_input(uint8_t ch) {
     on_queue_notify(0);  // Trigger receive queue processing
 }
 
-void VirtioPciConsole::on_queue_notify(uint16_t queue_index) {
+void VirtioPciConsole::on_queue_notify(virtio::VirtioQueueIndex queue_index) {
     if (queue_index >= queues_.size()) return;
     virtio::process_console_queue(
         queue_index, queues_[queue_index], backend_,

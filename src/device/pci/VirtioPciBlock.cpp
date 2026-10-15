@@ -16,7 +16,8 @@ namespace simrv::device {
 VirtioPciBlock::VirtioPciBlock(const std::string& disk_path)
     : VirtioPciDevice(virtio::kDevIdBlock, 0x010000, 1), backend_(disk_path) {}
 
-auto VirtioPciBlock::get_device_features(uint32_t select) -> uint32_t {
+auto VirtioPciBlock::get_device_features(virtio::VirtioFeatureWord select)
+    -> virtio::VirtioFeatureWord {
     if (select == 0) {
         return (1U << 9) | (1U << 13) | (1U << 14);  // FLUSH, DISCARD, WRITE_ZEROES
     }
@@ -26,9 +27,11 @@ auto VirtioPciBlock::get_device_features(uint32_t select) -> uint32_t {
     return 0;
 }
 
-auto VirtioPciBlock::read_device_config(simrv::xlen::Address offset, uint8_t size) -> uint32_t {
-    (void)size;
+auto VirtioPciBlock::read_device_config(PciBarOffset offset, PciAccessBytes size) -> PciMmioData {
     const uint64_t capacity = backend_.capacity_sectors();
+    if (size == 8 && offset == 0) {
+        return static_cast<PciMmioData>(capacity);
+    }
     if (offset == 0) return static_cast<uint32_t>(capacity & 0xFFFFFFFFULL);
     if (offset == 4) return static_cast<uint32_t>((capacity >> 32) & 0xFFFFFFFFULL);
     if (offset == 36 || offset == 48) return virtio::BlockBackend::kMaxRangeSectors;
@@ -37,7 +40,7 @@ auto VirtioPciBlock::read_device_config(simrv::xlen::Address offset, uint8_t siz
     return 0;
 }
 
-void VirtioPciBlock::on_queue_notify(uint16_t queue_index) {
+void VirtioPciBlock::on_queue_notify(virtio::VirtioQueueIndex queue_index) {
     if (queue_index >= queues_.size()) return;
     auto& q = queues_[queue_index];
     core::Machine* machine = root_complex_ != nullptr ? root_complex_->machine() : nullptr;

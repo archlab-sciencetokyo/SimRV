@@ -73,9 +73,11 @@ void VirtioPciNet::poll_backend() {
     if (backend_.poll_host_rx() != 0) on_queue_notify(0);
 }
 
-auto VirtioPciNet::get_device_features(uint32_t select) -> uint32_t {
+auto VirtioPciNet::get_device_features(virtio::VirtioFeatureWord select)
+    -> virtio::VirtioFeatureWord {
     if (select == 0) {
-        return static_cast<uint32_t>(virtio::kVirtioNetFMac | virtio::kVirtioNetFStatus);
+        return static_cast<virtio::VirtioFeatureWord>(virtio::kVirtioNetFMac |
+                                                      virtio::kVirtioNetFStatus);
     }
     if (select == 1) {
         return virtio::kVirtioFVersion1FeatureWord;
@@ -83,9 +85,9 @@ auto VirtioPciNet::get_device_features(uint32_t select) -> uint32_t {
     return 0;
 }
 
-auto VirtioPciNet::read_device_config(simrv::xlen::Address offset, uint8_t size) -> uint32_t {
+auto VirtioPciNet::read_device_config(PciBarOffset offset, PciAccessBytes size) -> PciMmioData {
     const auto& mac = backend_.get_mac();
-    uint32_t value = 0;
+    PciMmioData value = 0;
     for (uint8_t byte = 0; byte < size && byte < sizeof(value); ++byte) {
         const auto config_offset = offset + byte;
         uint8_t value_byte = 0;
@@ -94,12 +96,12 @@ auto VirtioPciNet::read_device_config(simrv::xlen::Address offset, uint8_t size)
         } else if (config_offset == 6) {
             value_byte = 1;  // VIRTIO_NET_S_LINK_UP
         }
-        value |= static_cast<uint32_t>(value_byte) << (byte * 8);
+        value |= static_cast<PciMmioData>(value_byte) << (byte * 8);
     }
     return value;
 }
 
-void VirtioPciNet::on_queue_notify(uint16_t queue_index) {
+void VirtioPciNet::on_queue_notify(virtio::VirtioQueueIndex queue_index) {
     if (queue_index >= queues_.size()) return;
     auto& q = queues_[queue_index];
     core::Machine* machine = root_complex_ != nullptr ? root_complex_->machine() : nullptr;
