@@ -402,8 +402,8 @@ SIMRV_ALWAYS_INLINE auto CPU::execute_cached_store(Machine& machine, CachedOp& o
                             static_cast<simrv::xlen::Instruction>(op.funct3));
                         state_.lr_reservation_active = false;
                         if (simrv::compiler::unlikely(
-                                machine.num_harts() > 1 &&
-                                machine.memory_.reservation_table().may_have_reservations())) {
+                                machine.memory_.reservation_table().may_have_reservations() &&
+                                machine.num_harts() > 1)) {
                             machine.memory_.reservation_table().invalidate_range(paddr, size_bytes,
                                                                                  hart_id());
                         }
@@ -1007,13 +1007,15 @@ SIMRV_ALWAYS_INLINE auto CPU::run_fast_baremetal_kernel(Machine& machine, uint32
             }
             run_cycle_baremetal_miss(machine);
             last_flushed_icount = e_icount;
+            if (simrv::compiler::unlikely(machine.tohost != 0)) {
+                break;
+            }
         }
-        if (simrv::compiler::unlikely(
-                machine.tohost != 0 ||
-                ((b & 0x3Fu) == 0 &&
-                 (!machine.is_running() ||
-                  (kPollPause && (machine.is_paused() || machine.debug_pause_requested())))))) {
-            break;
+        if (simrv::compiler::unlikely((b & 0x3Fu) == 0)) {
+            if (machine.tohost != 0 || !machine.is_running() ||
+                (kPollPause && (machine.is_paused() || machine.debug_pause_requested()))) {
+                break;
+            }
         }
     }
     const auto delta = e_icount - last_flushed_icount;
@@ -1108,13 +1110,15 @@ SIMRV_ALWAYS_INLINE auto CPU::run_fast_os_kernel(Machine& machine, uint32_t batc
             flush_clint_and_retired();
             run_fast_cycle_miss(machine);
             last_flushed_icount = e_icount;
+            if (simrv::compiler::unlikely(machine.tohost != 0)) {
+                break;
+            }
         }
-        if (simrv::compiler::unlikely(
-                machine.tohost != 0 ||
-                ((b & 0x3Fu) == 0 &&
-                 (!machine.is_running() ||
-                  (kPollPause && (machine.is_paused() || machine.debug_pause_requested())))))) {
-            break;
+        if (simrv::compiler::unlikely((b & 0x3Fu) == 0)) {
+            if (machine.tohost != 0 || !machine.is_running() ||
+                (kPollPause && (machine.is_paused() || machine.debug_pause_requested()))) {
+                break;
+            }
         }
     }
     flush_clint_and_retired();

@@ -869,11 +869,14 @@ void Tui::render_draw_sixel(int panel_x, int display_width, int display_rows,
 
     const auto* fb_bytes = reinterpret_cast<const uint8_t*>(fb.data());
     const bool same_dims = (width == source_width && height == source_height);
-    std::vector<int> src_x_offset;
     if (!same_dims) {
-        src_x_offset.resize(width);
-        for (int x = 0; x < width; ++x) {
-            src_x_offset[x] = std::min(source_width - 1, x * source_width / width) * 4;
+        if (sixel_src_x_offset_.size() != static_cast<size_t>(width) ||
+            sixel_cached_source_width_ != source_width) {
+            sixel_cached_source_width_ = source_width;
+            sixel_src_x_offset_.resize(width);
+            for (int x = 0; x < width; ++x) {
+                sixel_src_x_offset_[x] = std::min(source_width - 1, x * source_width / width) * 4;
+            }
         }
     }
 
@@ -883,17 +886,18 @@ void Tui::render_draw_sixel(int panel_x, int display_width, int display_rows,
         sixel_cached_height_ = height;
         sixel_strip_signatures_.clear();
         sixel_cached_strips_.clear();
+        sixel_strip_masks_.assign(static_cast<size_t>(palette_size * width), 0);
     }
     if (sixel_strip_signatures_.size() != total_strips) {
         sixel_strip_signatures_.assign(total_strips, 0);
         sixel_cached_strips_.resize(total_strips);
     }
 
-    std::vector<uint8_t> strip_masks(static_cast<size_t>(palette_size * width), 0);
+    auto& strip_masks = sixel_strip_masks_;
     std::array<int16_t, palette_size> last_x_for_color;
     last_x_for_color.fill(-1);
-    std::vector<uint8_t> present_colors;
-    present_colors.reserve(32);
+    auto& present_colors = sixel_present_colors_;
+    present_colors.clear();
 
     auto append_uint = [](std::string& out, unsigned val) {
         char buf[16];
@@ -957,7 +961,7 @@ void Tui::render_draw_sixel(int panel_x, int display_width, int display_rows,
                 row_ptrs[bit] = fb_bytes + static_cast<size_t>(src_y * source_width * 4);
             }
             for (int x = 0; x < width; ++x) {
-                const int x_off = src_x_offset[x];
+                const int x_off = sixel_src_x_offset_[x];
                 for (int bit = 0; bit < max_bits; ++bit) {
                     const auto* p = row_ptrs[bit] + x_off;
                     const auto c = static_cast<uint8_t>((kColorLut[p[2]] * 36) +
