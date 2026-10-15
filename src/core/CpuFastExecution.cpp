@@ -1006,11 +1006,29 @@ SIMRV_ALWAYS_INLINE auto CPU::run_fast_baremetal_kernel(Machine& machine, uint32
     -> uint32_t {
     uint32_t cached_ops = 0;
     simrv::xlen::Counter last_flushed_icount = e_icount;
-    for (uint32_t b = 0; b < batch_size; ++b) {
+    uint32_t b = 0;
+    while (b < batch_size) {
         auto* cached = decode_cache.lookup(state_.pc);
         if (simrv::compiler::likely(cached != nullptr)) {
             execute_cached_op_fast<kCopyContext, kInstMix>(machine, *cached, ram);
             ++cached_ops;
+            ++b;
+
+            // Straight-line instruction chaining: execute consecutive non-trapping,
+            // non-control ALU operations in a tight inner loop without re-checking
+            // outer boundaries until a 64-instruction boundary or control flow/miss is reached.
+            while (cached->is_straight_alu && b < batch_size && ((b & 0x3Fu) != 0) &&
+                   simrv::compiler::likely((state_.mip & state_.mie) == 0u)) {
+                auto* next_cached = decode_cache.lookup(state_.pc);
+                if (simrv::compiler::unlikely(next_cached == nullptr ||
+                                              !next_cached->is_straight_alu)) {
+                    break;
+                }
+                cached = next_cached;
+                execute_cached_op_fast<kCopyContext, kInstMix>(machine, *cached, ram);
+                ++cached_ops;
+                ++b;
+            }
         } else {
             const auto delta = e_icount - last_flushed_icount;
             if (delta > 0) {
@@ -1021,6 +1039,7 @@ SIMRV_ALWAYS_INLINE auto CPU::run_fast_baremetal_kernel(Machine& machine, uint32
             if (simrv::compiler::unlikely(machine.tohost != 0)) {
                 break;
             }
+            ++b;
         }
         if (simrv::compiler::unlikely((b & 0x3Fu) == 0)) {
             if (machine.tohost != 0 || !machine.is_running() ||
@@ -1107,12 +1126,30 @@ SIMRV_ALWAYS_INLINE auto CPU::run_fast_os_kernel(Machine& machine, uint32_t batc
         }
     };
 
-    for (uint32_t b = 0; b < batch_size; ++b) {
+    uint32_t b = 0;
+    while (b < batch_size) {
         auto* cached = decode_cache.lookup(state_.pc);
         if (simrv::compiler::likely(cached != nullptr)) {
             execute_cached_op_fast<kCopyContext, kInstMix>(machine, *cached, ram);
             ++cached_ops;
             ++chunk_cycles;
+            ++b;
+
+            // Straight-line instruction chaining: execute consecutive non-trapping,
+            // non-control ALU operations until next 64-cycle chunk or control flow/miss.
+            while (cached->is_straight_alu && b < batch_size && chunk_cycles < 64 &&
+                   simrv::compiler::likely((state_.mip & state_.mie) == 0u)) {
+                auto* next_cached = decode_cache.lookup(state_.pc);
+                if (simrv::compiler::unlikely(next_cached == nullptr ||
+                                              !next_cached->is_straight_alu)) {
+                    break;
+                }
+                cached = next_cached;
+                execute_cached_op_fast<kCopyContext, kInstMix>(machine, *cached, ram);
+                ++cached_ops;
+                ++chunk_cycles;
+                ++b;
+            }
 
             if (simrv::compiler::unlikely(chunk_cycles >= 64)) {
                 flush_clint_and_retired();
@@ -1124,6 +1161,7 @@ SIMRV_ALWAYS_INLINE auto CPU::run_fast_os_kernel(Machine& machine, uint32_t batc
             if (simrv::compiler::unlikely(machine.tohost != 0)) {
                 break;
             }
+            ++b;
         }
         if (simrv::compiler::unlikely((b & 0x3Fu) == 0)) {
             if (machine.tohost != 0 || !machine.is_running() ||
