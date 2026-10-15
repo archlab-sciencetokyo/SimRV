@@ -194,7 +194,9 @@ void Machine::apply_configuration(MachineConfig machine_config) {
     resolved_start_pc_ = config.execution.start_pc;
     resolved_isatest_tohost_ = config.isa.isatest_tohost;
     framebuffer_geometry_ = config.framebuffer;
-    memory_.system_bus().set_smp_enabled(is_smp_enabled());
+    is_smp_enabled_ =
+        config.execution.smp_mode.value_or(config.soc.smp.mode) == SmpMode::CycleOriented;
+    memory_.system_bus().set_smp_enabled(is_smp_enabled_);
     if (tui_enabled() || debugger_enabled()) {
         execution_state_.store(ExecutionState::Paused, std::memory_order_release);
     }

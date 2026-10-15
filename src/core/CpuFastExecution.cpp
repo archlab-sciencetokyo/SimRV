@@ -759,14 +759,14 @@ void CPU::execute_cached_op_fast(Machine& machine, CachedOp& op,
                     loaded = true;
                 }
             } else if (fast_width_supported) {
-                const unsigned active_xlen = effective_data_xlen();
+                const simrv::xlen::PrivilegeLevel eff_priv = effective_data_privilege();
+                const unsigned active_xlen = state_.xlen_for_privilege(eff_priv);
                 simrv::xlen::Address lookup_addr = mem_addr;
                 if (active_xlen == 32) lookup_addr &= 0xFFFFFFFFULL;
                 const unsigned page_offset = lookup_addr & 0xFFFu;
                 if (simrv::compiler::likely(
                         (lookup_addr & align_mask) == 0 && page_offset + size_bytes <= 4096u &&
                         simrv::xlen::satp_translation_enabled(state_.satp, active_xlen))) {
-                    const simrv::xlen::PrivilegeLevel eff_priv = effective_data_privilege();
                     const simrv::xlen::Word current_asid =
                         simrv::xlen::satp_asid(state_.satp, active_xlen);
                     const simrv::xlen::Address vpn = lookup_addr >> 12;
@@ -839,14 +839,14 @@ void CPU::execute_cached_op_fast(Machine& machine, CachedOp& op,
                     stored = true;
                 }
             } else if (fast_width_supported) {
-                const unsigned active_xlen = effective_data_xlen();
+                const simrv::xlen::PrivilegeLevel eff_priv = effective_data_privilege();
+                const unsigned active_xlen = state_.xlen_for_privilege(eff_priv);
                 simrv::xlen::Address lookup_addr = mem_addr;
                 if (active_xlen == 32) lookup_addr &= 0xFFFFFFFFULL;
                 const unsigned page_offset = lookup_addr & 0xFFFu;
                 if (simrv::compiler::likely(
                         (lookup_addr & align_mask) == 0 && page_offset + size_bytes <= 4096u &&
                         simrv::xlen::satp_translation_enabled(state_.satp, active_xlen))) {
-                    const simrv::xlen::PrivilegeLevel eff_priv = effective_data_privilege();
                     const simrv::xlen::Word current_asid =
                         simrv::xlen::satp_asid(state_.satp, active_xlen);
                     const simrv::xlen::Address vpn = lookup_addr >> 12;

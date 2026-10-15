@@ -346,14 +346,12 @@ class Machine final : public core::IInterruptController {
     [[nodiscard]] auto retired_instruction_count() const noexcept -> simrv::xlen::Counter {
         return retired_instruction_count_.load(std::memory_order_relaxed);
     }
-    [[nodiscard]] auto is_smp_enabled() const noexcept -> bool {
-        return config.execution.smp_mode.value_or(config.soc.smp.mode) == SmpMode::CycleOriented;
-    }
+    [[nodiscard]] auto is_smp_enabled() const noexcept -> bool { return is_smp_enabled_; }
 
     /// Publish retired instructions from a hart; used by execution engines and safe for MT-SMP.
     SIMRV_ALWAYS_INLINE void record_retired_instructions(simrv::xlen::Counter count) noexcept {
         if (simrv::compiler::likely(count != 0)) {
-            if (simrv::compiler::likely(!is_smp_enabled())) {
+            if (simrv::compiler::likely(!is_smp_enabled_)) {
                 retired_instruction_count_.store(
                     retired_instruction_count_.load(std::memory_order_relaxed) + count,
                     std::memory_order_relaxed);
@@ -402,6 +400,7 @@ class Machine final : public core::IInterruptController {
     simrv::xlen::Address resolved_start_pc_ = 0;
     simrv::xlen::Address resolved_isatest_tohost_ = 0;
     FramebufferConfig framebuffer_geometry_{};
+    bool is_smp_enabled_ = false;
 
    public:
     /// Inspect a simulated hart by index (0 is the primary/boot hart).
@@ -514,6 +513,7 @@ class Machine final : public core::IInterruptController {
     void set_tui_enabled_for_testing(bool enabled) noexcept { config.tui.enabled = enabled; }
     void set_smp_parallel_for_testing(bool enabled) noexcept {
         config.execution.smp_mode = enabled ? SmpMode::CycleOriented : SmpMode::CycleAccurate;
+        is_smp_enabled_ = enabled;
     }
     void set_instruction_limit_for_testing(simrv::xlen::Counter limit) noexcept {
         config.execution.fincnt = limit;
