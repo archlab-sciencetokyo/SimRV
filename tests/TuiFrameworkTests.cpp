@@ -1,4 +1,5 @@
 #include <chrono>
+#include <cmath>
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
@@ -131,6 +132,10 @@ struct TuiTestAccess {
     }
     static auto display_coords_to_fb(const Tui& tui, int x, int y, size_t col_idx, int tw, int th) {
         return tui.display_coords_to_fb(x, y, col_idx, tw, th);
+    }
+    static auto display_pixels_to_fb(const Tui& tui, int x, int y, size_t col_idx, int tw, int th,
+                                     int tpw = 0, int tph = 0) {
+        return tui.display_pixels_to_fb(x, y, col_idx, tw, th, tpw, tph);
     }
     static void handle_display_mouse(Tui& tui, int x, int y, int b, size_t col_idx, int tw,
                                      int th) {
@@ -2791,6 +2796,14 @@ void test_multi_column_panel_management_and_modal_usability() {
     simrv::tui::TuiTestAccess::set_focused_slot(tui, 1);
     expect(tui.focused_slot() == 1, "column 1 is initially focused");
 
+    // The separator belongs to the preceding panel; the next panel begins after it.
+    simrv::tui::TuiTestAccess::consume_control_seq(tui, "\033[<0;54;4M");
+    expect(tui.focused_slot() == 1, "divider click does not activate either workbench column");
+    simrv::tui::TuiTestAccess::set_focused_slot(tui, 0);
+    simrv::tui::TuiTestAccess::consume_control_seq(tui, "\033[<0;55;4M");
+    expect(tui.focused_slot() == 1, "first cell after divider focuses the second column");
+    simrv::tui::TuiTestAccess::set_focused_slot(tui, 1);
+
     // Click on column 0 row 4:
     // First click should focus column 0 without opening modal or cycling tabs
     tui.handle_mouse(10, 4, 0);
@@ -3151,11 +3164,156 @@ void test_virtio_input_and_display_mouse() {
     expect(in_pos->first >= 0 && in_pos->first < 800, "fb_x within 800 width");
     expect(in_pos->second >= 0 && in_pos->second < 600, "fb_y within 600 height");
 
-    // Pixel mode coordinate mapping (x > term_width or y > term_height)
-    const auto px_pos = TuiTestAccess::display_coords_to_fb(tui, 250, 120, 0, 80, 24);
-    if (px_pos.has_value()) {
-        expect(px_pos->first >= 0 && px_pos->first < 800, "pixel-mode fb_x within 800 width");
-        expect(px_pos->second >= 0 && px_pos->second < 600, "pixel-mode fb_y within 600 height");
+    // SGR mouse coordinates stay in terminal cells. Map the center cell of the
+    // sixel image to its corresponding framebuffer point.
+    constexpr int mouse_term_width = 400;
+    constexpr int mouse_term_height = 300;
+    constexpr int cell_width = 8;
+    constexpr int cell_height = 16;
+    constexpr int body_rows = mouse_term_height - 7 - 1;
+    const auto widths = TuiTestAccess::column_widths(tui, mouse_term_width);
+    const int panel_width = widths.widths[0];
+    const int source_width = static_cast<int>(machine.framebuffer_width());
+    const int source_height = static_cast<int>(machine.framebuffer_height());
+    const auto [image_width, image_height] = TuiTestAccess::compute_sixel_dimensions(
+        panel_width, body_rows, cell_width, cell_height, source_width, source_height);
+    const int image_cols = std::max(1, (image_width + cell_width - 1) / cell_width);
+    const int image_rows = std::max(1, (image_height + cell_height - 1) / cell_height);
+    const int display_x = 2 + std::max(0, (panel_width - image_cols) / 2);
+    const int display_y = 5 + std::max(0, (body_rows - image_rows) / 2);
+    const int x = display_x + image_cols / 2;
+    const int y = display_y + image_rows / 2;
+    const int rel_col = x - display_x;
+    const int rel_row = y - display_y;
+    const int px =
+        std::clamp((2 * rel_col + 1) * image_width / (2 * image_cols), 0, image_width - 1);
+    const int py =
+        std::clamp((2 * rel_row + 1) * image_height / (2 * image_rows), 0, image_height - 1);
+    const auto mapped =
+        TuiTestAccess::display_coords_to_fb(tui, x, y, 0, mouse_term_width, mouse_term_height);
+    expect(mapped.has_value(), "cell coordinates inside the sixel image map");
+    if (mapped.has_value()) {
+        expect(mapped->first == std::clamp(px * source_width / image_width, 0, source_width - 1),
+               "cell mouse x maps through the rendered sixel scale");
+        expect(
+            mapped->second == std::clamp(py * source_height / image_height, 0, source_height - 1),
+            "cell mouse y maps through the rendered sixel scale");
+    }
+
+    // Check distant points too: a cell-size mismatch must not grow into a cursor drift
+    // proportional to distance from the image's upper-left corner.
+    for (const auto [column_fraction, row_fraction] :
+         std::array<std::pair<int, int>, 3>{{{1, 4}, {3, 4}, {9, 10}}}) {
+        const int sample_x = display_x + (image_cols - 1) * column_fraction / row_fraction;
+        const int sample_y = display_y + (image_rows - 1) * column_fraction / row_fraction;
+        const auto sample = TuiTestAccess::display_coords_to_fb(
+            tui, sample_x, sample_y, 0, mouse_term_width, mouse_term_height);
+        expect(sample.has_value(), "distant cell coordinates inside the sixel image map");
+        if (sample.has_value()) {
+            const int sample_col = sample_x - display_x;
+            const int sample_row = sample_y - display_y;
+            const int sample_px = (2 * sample_col + 1) * image_width / (2 * image_cols);
+            const int sample_py = (2 * sample_row + 1) * image_height / (2 * image_rows);
+            expect(sample->first ==
+                       std::clamp(sample_px * source_width / image_width, 0, source_width - 1),
+                   "distant mouse x remains aligned with the sixel raster");
+            expect(sample->second ==
+                       std::clamp(sample_py * source_height / image_height, 0, source_height - 1),
+                   "distant mouse y remains aligned with the sixel raster");
+        }
+    }
+
+    // Pixel reports should map directly into the sixel raster, avoiding cell-scale drift.
+    const int raster_col = 2 + std::max(0, (panel_width - image_cols) / 2);
+    const int raster_row = 5 + std::max(0, (body_rows - image_rows) / 2);
+    for (const auto [fraction_num, fraction_den] :
+         std::array<std::pair<int, int>, 3>{{{1, 4}, {1, 2}, {9, 10}}}) {
+        const int raster_px = (image_width - 1) * fraction_num / fraction_den;
+        const int raster_py = (image_height - 1) * fraction_num / fraction_den;
+        const int pixel_x = (raster_col - 1) * cell_width + raster_px + 1;
+        const int pixel_y = (raster_row - 1) * cell_height + raster_py + 1;
+        const auto pixel_mapped = TuiTestAccess::display_pixels_to_fb(
+            tui, pixel_x, pixel_y, 0, mouse_term_width, mouse_term_height,
+            mouse_term_width * cell_width, mouse_term_height * cell_height);
+        expect(pixel_mapped.has_value(), "pixel coordinates inside the sixel raster map");
+        if (pixel_mapped.has_value()) {
+            expect(pixel_mapped->first ==
+                       std::clamp(raster_px * source_width / image_width, 0, source_width - 1),
+                   "pixel mouse x maps without cumulative sixel scale drift");
+            expect(pixel_mapped->second ==
+                       std::clamp(raster_py * source_height / image_height, 0, source_height - 1),
+                   "pixel mouse y maps without cumulative sixel scale drift");
+        }
+    }
+
+    // Terminal cell metrics can differ from the queried pixel size used to choose the
+    // sixel raster dimensions. Convert both the origin and the distance into raster units,
+    // so a pitch mismatch does not accumulate as the pointer moves across the image.
+    constexpr int actual_cell_width = cell_width + 1;
+    constexpr int actual_cell_height = cell_height + 2;
+    const int actual_pixel_x =
+        (raster_col - 1) * actual_cell_width +
+        ((image_width - 1) * actual_cell_width + cell_width - 1) / cell_width;
+    const int actual_pixel_y =
+        (raster_row - 1) * actual_cell_height +
+        ((image_height - 1) * actual_cell_height + cell_height - 1) / cell_height;
+    const auto drift_mapped = TuiTestAccess::display_pixels_to_fb(
+        tui, actual_pixel_x + 1, actual_pixel_y + 1, 0, mouse_term_width, mouse_term_height,
+        mouse_term_width * actual_cell_width, mouse_term_height * actual_cell_height);
+    expect(drift_mapped.has_value(), "distant pixel coordinate maps with mismatched cell metrics");
+    if (drift_mapped.has_value()) {
+        expect(drift_mapped->first == (image_width - 1) * source_width / image_width &&
+                   drift_mapped->second == (image_height - 1) * source_height / image_height,
+               "terminal pixel geometry keeps the far raster corner aligned");
+    }
+
+    // A terminal may report a few pixels of window padding beyond its cell grid. Spreading
+    // those pixels across every cell causes the mapped cursor to drift across the sixel image.
+    constexpr int padded_pixel_width = mouse_term_width * cell_width + 4;
+    constexpr int padded_pixel_height = mouse_term_height * cell_height + 4;
+    const int padded_pixel_x = 2 + (raster_col - 1) * cell_width + image_width - 1;
+    const int padded_pixel_y = 2 + (raster_row - 1) * cell_height + image_height - 1;
+    const auto padded_mapped = TuiTestAccess::display_pixels_to_fb(
+        tui, padded_pixel_x + 1, padded_pixel_y + 1, 0, mouse_term_width, mouse_term_height,
+        padded_pixel_width, padded_pixel_height);
+    expect(padded_mapped.has_value(), "far sixel point maps with terminal window padding");
+    if (padded_mapped.has_value()) {
+        expect(padded_mapped->first == (image_width - 1) * source_width / image_width &&
+                   padded_mapped->second == (image_height - 1) * source_height / image_height,
+               "terminal window padding does not create distance-dependent cursor drift");
+    }
+
+    // Fractional display scaling can produce a non-integral average cell pitch. Rounding
+    // that pitch makes the error accumulate with distance from the sixel image origin.
+    constexpr double fractional_cell_width = 8.5;
+    constexpr double fractional_cell_height = 17.25;
+    const int fractional_pixel_x =
+        static_cast<int>(std::lround((raster_col - 1) * fractional_cell_width +
+                                     (image_width - 1) * fractional_cell_width / cell_width)) +
+        1;
+    const int fractional_pixel_y =
+        static_cast<int>(std::lround((raster_row - 1) * fractional_cell_height +
+                                     (image_height - 1) * fractional_cell_height / cell_height)) +
+        1;
+    const auto fractional_mapped = TuiTestAccess::display_pixels_to_fb(
+        tui, fractional_pixel_x, fractional_pixel_y, 0, mouse_term_width, mouse_term_height,
+        static_cast<int>(mouse_term_width * fractional_cell_width),
+        static_cast<int>(mouse_term_height * fractional_cell_height));
+    expect(fractional_mapped.has_value(), "far sixel point maps with fractional cell pitch");
+    if (fractional_mapped.has_value()) {
+        const int fractional_raster_x = static_cast<int>(
+            std::floor((fractional_pixel_x - 1 - (raster_col - 1) * fractional_cell_width) *
+                       cell_width / fractional_cell_width));
+        const int fractional_raster_y = static_cast<int>(
+            std::floor((fractional_pixel_y - 1 - (raster_row - 1) * fractional_cell_height) *
+                       cell_height / fractional_cell_height));
+        expect(
+            fractional_mapped->first == std::clamp(fractional_raster_x * source_width / image_width,
+                                                   0, source_width - 1) &&
+                fractional_mapped->second ==
+                    std::clamp(fractional_raster_y * source_height / image_height, 0,
+                               source_height - 1),
+            "fractional cell pitch does not accumulate pointer drift across the raster");
     }
 
     // Configure workbench with DISPLAY slot

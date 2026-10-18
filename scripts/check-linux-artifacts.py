@@ -104,6 +104,20 @@ def main() -> int:
                     fail("Alpine network setup must run asynchronously so serial getty can start")
                 if "::sysinit:/usr/local/bin/simrv-network" in inittab:
                     fail("Alpine network setup must not block serial getty during sysinit")
+                profile = subprocess.run(
+                    [debugfs, "-R", "cat /root/.profile", str(images / "rootfs.img")],
+                    capture_output=True,
+                    text=True,
+                ).stdout
+                if "/usr/local/bin/start-jwm" in profile:
+                    fail("Alpine login profile must leave graphical startup to the user")
+                startx = subprocess.run(
+                    [debugfs, "-R", "cat /usr/local/bin/startx", str(images / "rootfs.img")],
+                    capture_output=True,
+                    text=True,
+                ).stdout
+                if "exec /usr/local/bin/start-jwm" not in startx:
+                    fail("Alpine startx command must launch the configured JWM session")
 
     print(f"Linux artifact validation passed: {images}")
     return 0

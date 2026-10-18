@@ -13,6 +13,8 @@
 
 namespace simrv::core {
 
+class CPU;
+
 /**
  * @struct VectorRegister
  * @brief Represents a single RISC-V Vector Extension register (VLEN up to 1024 bits).
@@ -46,6 +48,9 @@ class RegisterFile {
    public:
     /// Number of architectural GPRs, FPRs, and vector registers (32)
     static constexpr std::size_t kNumRegisters = 32;
+    /// Storage size for GPRs: 32 architectural registers plus slot 32 as a discard sink for x0
+    /// writes
+    static constexpr std::size_t kGprStorageSize = 33;
 
     struct RegisterProxy {
         RegisterFile* rf;
@@ -118,6 +123,11 @@ class RegisterFile {
         return read_vector(idx);
     }
 
+    [[nodiscard]] SIMRV_ALWAYS_INLINE constexpr auto read(uint8_t idx) const noexcept
+        -> simrv::xlen::Register {
+        return reg_[idx];
+    }
+
     [[nodiscard]] SIMRV_ALWAYS_INLINE constexpr auto read(simrv::xlen::RegId idx) const noexcept
         -> simrv::xlen::Register {
         return reg_[std::to_underlying(idx)];
@@ -125,29 +135,21 @@ class RegisterFile {
 
     SIMRV_ALWAYS_INLINE constexpr void write(simrv::xlen::RegId idx,
                                              simrv::xlen::Register val) noexcept {
-        if (simrv::compiler::likely(idx != simrv::xlen::RegId::Zero)) {
-            if constexpr (simrv::xlen::kIsXLen64) {
-                if (simrv::compiler::unlikely(xlen == 32)) {
-                    val = static_cast<simrv::xlen::Register>(
-                        static_cast<int64_t>(static_cast<int32_t>(val)));
-                }
-            }
-            reg_[std::to_underlying(idx)] = val;
-        }
-    }
-
-    /// Branchless GPR write: always writes to rd, then re-zeros x0.
-    /// In RV64-mode, sign-extends to 64-bit for 32-bit execution mode.
-    SIMRV_ALWAYS_INLINE constexpr void write_branchless(simrv::xlen::RegId idx,
-                                                        simrv::xlen::Register val) {
         if constexpr (simrv::xlen::kIsXLen64) {
             if (simrv::compiler::unlikely(xlen == 32)) {
                 val = static_cast<simrv::xlen::Register>(
                     static_cast<int64_t>(static_cast<int32_t>(val)));
             }
         }
-        reg_[std::to_underlying(idx)] = val;
-        reg_[0] = 0;
+        const uint8_t u_idx = (idx == simrv::xlen::RegId::Zero) ? 32 : std::to_underlying(idx);
+        reg_[u_idx] = val;
+    }
+
+    /// Branchless GPR write: writes to rd (redirecting Zero to discard slot).
+    /// In RV64-mode, sign-extends to 64-bit for 32-bit execution mode.
+    SIMRV_ALWAYS_INLINE constexpr void write_branchless(simrv::xlen::RegId idx,
+                                                        simrv::xlen::Register val) {
+        write(idx, val);
     }
 
     [[nodiscard]] constexpr auto read_fp(simrv::xlen::FpRegId idx) const
@@ -186,7 +188,35 @@ class RegisterFile {
     }
 
    private:
-    alignas(64) std::array<simrv::xlen::Register, kNumRegisters> reg_{};
+    friend class CPU;
+
+    /// Branchless GPR write used by a fast kernel whose guest XLEN is fixed for the current ALU
+    /// chain.
+    SIMRV_ALWAYS_INLINE constexpr void write_xlen64(uint8_t idx,
+                                                    simrv::xlen::Register val) noexcept {
+        reg_[idx] = val;
+    }
+    SIMRV_ALWAYS_INLINE constexpr void write_xlen64(simrv::xlen::RegId idx,
+                                                    simrv::xlen::Register val) noexcept {
+        write_xlen64(std::to_underlying(idx), val);
+    }
+
+    /// Branchless GPR write used by a fast kernel whose guest XLEN is fixed for the current ALU
+    /// chain.
+    SIMRV_ALWAYS_INLINE constexpr void write_xlen32(uint8_t idx,
+                                                    simrv::xlen::Register val) noexcept {
+        if constexpr (simrv::xlen::kIsXLen64) {
+            val =
+                static_cast<simrv::xlen::Register>(static_cast<int64_t>(static_cast<int32_t>(val)));
+        }
+        reg_[idx] = val;
+    }
+    SIMRV_ALWAYS_INLINE constexpr void write_xlen32(simrv::xlen::RegId idx,
+                                                    simrv::xlen::Register val) noexcept {
+        write_xlen32(std::to_underlying(idx), val);
+    }
+
+    alignas(64) std::array<simrv::xlen::Register, kGprStorageSize> reg_{};
     alignas(64) std::array<simrv::xlen::FloatingRegister, kNumRegisters> freg_{};
     alignas(kVlenMaxBytes) std::array<VectorRegister, kNumRegisters> vreg_{};
 };

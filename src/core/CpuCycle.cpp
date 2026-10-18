@@ -72,6 +72,7 @@ auto execute_dram_amo(T* mem_ptr, simrv::xlen::Word rs2_val, Funct5Amo funct5) -
 }  // namespace
 
 void CPU::run_fast_cycle_miss(Machine& machine) {
+    sync_decode_context();
     const simrv::xlen::Counter retired_before = e_icount;
     bool success = fetch_stage(machine, state_.pc) && decode_stage(machine);
 
@@ -128,6 +129,7 @@ void CPU::run_fast_cycle_miss(Machine& machine) {
 void CPU::run_cycle(Machine& machine) {
     apply_hart_control_boundary();
     apply_pending_interrupt_lines(machine);
+    sync_decode_context();
     CPU* previous_active_cpu = active_execution_cpu_;
     active_execution_cpu_ = this;
     struct BoundaryCommit {
@@ -470,6 +472,7 @@ void CPU::record_trace_for_tui(Machine& machine) {
 }
 
 void CPU::run_cycle_baremetal_miss(Machine& machine) {
+    sync_decode_context();
     const simrv::xlen::Counter retired_before = e_icount;
     run_fetch_stage_baremetal(machine);
     const bool success = !pipeline_context.pending_exception.has_value() && decode_stage(machine);
@@ -530,6 +533,7 @@ void CPU::run_cycle_baremetal_miss(Machine& machine) {
 void CPU::run_cycle_baremetal(Machine& machine) {
     apply_hart_control_boundary();
     apply_pending_interrupt_lines(machine);
+    sync_decode_context();
     CPU* previous_active_cpu = active_execution_cpu_;
     active_execution_cpu_ = this;
     struct BoundaryCommit {

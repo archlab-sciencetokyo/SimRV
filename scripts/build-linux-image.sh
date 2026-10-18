@@ -1276,6 +1276,12 @@ cd /root
     2>&1 | tee /tmp/xorg.log > /dev/ttyS0
 EOF
     chmod 755 "$ROOTFS_DISK_DIR/usr/local/bin/start-jwm"
+    cat > "$ROOTFS_DISK_DIR/usr/local/bin/startx" <<'EOF'
+#!/bin/sh
+# Keep the familiar command while preparing the bundled JWM session first.
+exec /usr/local/bin/start-jwm "$@"
+EOF
+    chmod 755 "$ROOTFS_DISK_DIR/usr/local/bin/startx"
     cat > "$ROOTFS_DISK_DIR/usr/local/bin/simrv-network" <<'EOF'
 #!/bin/sh
 set -eu
@@ -1313,15 +1319,7 @@ EOF
     cat > "$ROOTFS_DISK_DIR/root/.profile" <<'EOF'
 #!/bin/sh
 
-# Start the GUI only after an authenticated framebuffer or serial login. Keep
-# it in the background so the shell remains visible until X takes over tty1.
-case "$(tty 2>/dev/null || true)" in
-    /dev/ttyS0|/dev/tty1)
-        if [ "$(id -u)" = 0 ] && [ -x /usr/local/bin/start-jwm ]; then
-            /usr/local/bin/start-jwm >/tmp/simrv-jwm.log 2>&1 &
-        fi
-        ;;
-esac
+# Start the graphical session manually with `startx` after logging in.
 EOF
     chmod 755 "$ROOTFS_DISK_DIR/root/.profile"
     cat > "$ROOTFS_DISK_DIR/root/.xinitrc" <<'EOF'

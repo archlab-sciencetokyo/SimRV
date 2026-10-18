@@ -180,7 +180,50 @@ void test_decode_cache_compact_round_robin() {
     expect(restored.pending_tval == 0, "pending_tval match");
     expect(!restored.pending_exception.has_value(), "pending_exception match");
 
+    auto wide_immediate = decoded;
+    wide_immediate.imm = std::numeric_limits<int32_t>::min();
+    simrv::core::CachedOp compact_immediate{};
+    compact_immediate.copy_from(wide_immediate);
+    simrv::pipeline::DecodedInstruction restored_immediate{};
+    compact_immediate.copy_to(restored_immediate);
+    expect(restored_immediate.imm == wide_immediate.imm,
+           "RV64 decode-cache storage preserves the signed U-type immediate range");
+
     const simrv::xlen::Register first_pc = decoded.cpc.raw();
+    simrv::core::DecodeCache sequential_cache;
+    sequential_cache.insert(first_pc, first);
+    auto* sequential_predecessor = sequential_cache.lookup(first_pc);
+    const auto sequential_pc = first_pc + first.len();
+    sequential_cache.insert(sequential_pc, first);
+    expect(sequential_cache.lookup_aligned(first_pc) == sequential_predecessor,
+           "aligned fast lookup finds a valid decoded instruction");
+    expect(sequential_cache.lookup(~simrv::xlen::Register{0}) == nullptr,
+           "general decode-cache lookup rejects the odd invalid-entry tag");
+    expect(sequential_cache.lookup_aligned(~simrv::xlen::Register{0}) == nullptr,
+           "fast decode-cache lookup treats the invalid-entry tag as a cache miss");
+    expect(sequential_cache.lookup_next_aligned(*sequential_predecessor, sequential_pc) ==
+               sequential_cache.lookup(sequential_pc),
+           "aligned successor lookup finds a valid decoded instruction");
+    expect(sequential_cache.lookup_next(*sequential_predecessor, sequential_pc) ==
+               sequential_cache.lookup(sequential_pc),
+           "decode cache uses the predecessor's precomputed sequential set");
+    sequential_cache.flush_page(sequential_pc & ~simrv::xlen::Address{0xFFF});
+    expect(sequential_cache.lookup_next_aligned(*sequential_predecessor, sequential_pc) == nullptr,
+           "aligned successor lookup observes page invalidation");
+    expect(sequential_cache.lookup_next(*sequential_predecessor, sequential_pc) == nullptr,
+           "sequential lookup observes page invalidation");
+
+    sequential_cache.flush();
+    auto compressed_predecessor = first;
+    compressed_predecessor.cinsn = 1;
+    sequential_cache.insert(first_pc, compressed_predecessor);
+    sequential_predecessor = sequential_cache.lookup(first_pc);
+    const auto compressed_next_pc = first_pc + 2;
+    sequential_cache.insert(compressed_next_pc, first);
+    expect(sequential_cache.lookup_next(*sequential_predecessor, compressed_next_pc) ==
+               sequential_cache.lookup(compressed_next_pc),
+           "sequential lookup accounts for compressed instruction length");
+
     simrv::xlen::Register second_pc = first_pc + 2;
     while (simrv::core::DecodeCache::calc_set(second_pc) !=
            simrv::core::DecodeCache::calc_set(first_pc)) {
@@ -205,15 +248,16 @@ void test_decode_cache_compact_round_robin() {
     expect(cache.lookup(second_pc) == nullptr && cache.lookup(third_pc) == nullptr,
            "decode cache flush invalidates every way");
 
-    static_assert(sizeof(simrv::core::CachedOp) <= (sizeof(simrv::xlen::Address) == 8 ? 32 : 24),
-                  "CachedOp must maintain a 32-byte (RV64) / 24-byte (RV32) compact footprint");
+    static_assert(sizeof(simrv::core::CachedOp) == (sizeof(simrv::xlen::Address) == 8 ? 32 : 28),
+                  "CachedOp must preserve its RV64/RV32 cache-line footprint");
     static_assert(sizeof(simrv::core::DecodeCache::CacheSet) <= 64,
                   "CacheSet must match single 64-byte host cache line");
-    static_assert(sizeof(simrv::core::DecodeCache) <= 128 * 1024,
-                  "DecodeCache total footprint must be 128KB");
+    static_assert(sizeof(simrv::core::DecodeCache) <= 128 * 1024 + 64,
+                  "DecodeCache storage plus its aligned context byte must fit in 128KB");
 
     // Fast memory precomputed attributes
     simrv::pipeline::DecodedInstruction load_inst{};
+    load_inst.op_id = simrv::isa::LW;
     load_inst.traits.is_mem_load = true;
     load_inst.funct3 = simrv::isa::Funct3::Lw;
     simrv::core::CachedOp load_op{};
@@ -224,6 +268,7 @@ void test_decode_cache_compact_round_robin() {
     expect(load_op.align_mask() == 3, "LW align_mask is 3");
 
     simrv::pipeline::DecodedInstruction lbu_inst{};
+    lbu_inst.op_id = simrv::isa::LBU;
     lbu_inst.traits.is_mem_load = true;
     lbu_inst.funct3 = simrv::isa::Funct3::Lbu;
     simrv::core::CachedOp lbu_op{};
@@ -234,6 +279,7 @@ void test_decode_cache_compact_round_robin() {
     expect(lbu_op.align_mask() == 0, "LBU align_mask is 0");
 
     simrv::pipeline::DecodedInstruction store_inst{};
+    store_inst.op_id = simrv::isa::SD;
     store_inst.traits.is_mem_store = true;
     store_inst.funct3 = simrv::isa::Funct3::Sd;
     simrv::core::CachedOp store_op{};
@@ -243,6 +289,7 @@ void test_decode_cache_compact_round_robin() {
     expect(store_op.align_mask() == 7, "SD align_mask is 7");
 
     simrv::pipeline::DecodedInstruction fld_inst{};
+    fld_inst.op_id = simrv::isa::FLD;
     fld_inst.traits.is_mem_load = true;
     fld_inst.traits.writes_fp = true;
     fld_inst.funct3 = simrv::isa::Funct3::Fld;
@@ -265,6 +312,8 @@ void test_hosted_rv32_cached_shift_width() {
 
         simrv::core::CachedOp shift{};
         shift.op_id = simrv::isa::SRL;
+        shift.is_straight_alu = true;
+        shift.set_fast_alu_kind(simrv::core::FastAluKind::Srl);
         shift.rd = simrv::xlen::RegId::A0;
         shift.rs1 = simrv::xlen::RegId::A1;
         shift.rs2 = simrv::xlen::RegId::A2;
@@ -273,6 +322,172 @@ void test_hosted_rv32_cached_shift_width() {
         cpu.execute_cached_op_fast<false, false>(machine, shift, machine.ram_view());
         expect(state.regs.read(simrv::xlen::RegId::A0) == 0x40000000U,
                "hosted RV32 cached SRL truncates its operand and masks shift amounts to five bits");
+
+        auto execute_rv32_alu = [&](simrv::isa::OperationId op_id, uint32_t lhs, uint32_t rhs,
+                                    int32_t imm = 0) {
+            simrv::core::CachedOp op{};
+            op.op_id = op_id;
+            op.is_straight_alu = true;
+            op.set_fast_alu_kind(simrv::core::CachedOp::classify_fast_alu(op_id));
+            op.rd = simrv::xlen::RegId::A0;
+            op.rs1 = simrv::xlen::RegId::A1;
+            op.rs2 = simrv::xlen::RegId::A2;
+            op.imm = imm;
+            state.regs.write(simrv::xlen::RegId::A1, lhs);
+            state.regs.write(simrv::xlen::RegId::A2, rhs);
+            cpu.execute_cached_op_fast<false, false>(machine, op, machine.ram_view());
+            return state.regs.read(simrv::xlen::RegId::A0);
+        };
+
+        expect(execute_rv32_alu(simrv::isa::SLTU, 0xFFFFFFFFU, 0x80000000U) == 0,
+               "hosted RV32 cached SLTU compares unsigned 32-bit operands");
+        expect(execute_rv32_alu(simrv::isa::SLTIU, 0x80000000U, 0, -1) == 1,
+               "hosted RV32 cached SLTIU compares against a sign-extended 12-bit immediate");
+        expect(execute_rv32_alu(simrv::isa::MULH, 0x80000000U, 2) ==
+                   static_cast<simrv::xlen::Register>(~simrv::xlen::Register{0}),
+               "hosted RV32 cached MULH returns the upper half of a signed 32-bit product");
+        expect(execute_rv32_alu(simrv::isa::MULHSU, 0xFFFFFFFEU, 0xFFFFFFFFU) ==
+                   static_cast<simrv::xlen::Register>(0xFFFFFFFFFFFFFFFEULL),
+               "hosted RV32 cached MULHSU uses signed-by-unsigned 32-bit operands");
+        expect(execute_rv32_alu(simrv::isa::MULHU, 0xFFFFFFFFU, 0xFFFFFFFFU) ==
+                   static_cast<simrv::xlen::Register>(0xFFFFFFFFFFFFFFFEULL),
+               "hosted RV32 cached MULHU returns the upper half of a 32-bit unsigned product");
+
+        auto execute_rv32_branch = [&](simrv::isa::OperationId op_id, uint32_t lhs, uint32_t rhs,
+                                       int32_t imm) {
+            simrv::core::CachedOp op{};
+            op.op_id = op_id;
+            op.rd = simrv::xlen::RegId::Zero;
+            op.rs1 = simrv::xlen::RegId::A1;
+            op.rs2 = simrv::xlen::RegId::A2;
+            op.imm = imm;
+            state.regs.write(simrv::xlen::RegId::A1, lhs);
+            state.regs.write(simrv::xlen::RegId::A2, rhs);
+            const auto branch_pc = state.pc;
+            cpu.execute_cached_op_fast<false, false>(machine, op, machine.ram_view());
+            return state.pc == branch_pc + imm;
+        };
+        expect(execute_rv32_branch(simrv::isa::BLTU, 0x7FFFFFFFU, 0x80000000U, 8),
+               "hosted RV32 cached BLTU compares operands as unsigned 32-bit values");
+        expect(execute_rv32_branch(simrv::isa::BGEU, 0xFFFFFFFFU, 0x80000000U, 8),
+               "hosted RV32 cached BGEU compares operands as unsigned 32-bit values");
+
+        auto execute_rv32_fallback = [&](simrv::isa::OperationId op_id, simrv::xlen::Instruction ir,
+                                         simrv::isa::Funct3 funct3, uint32_t lhs, uint32_t rhs,
+                                         uint32_t expected, const char* description) {
+            simrv::pipeline::DecodedInstruction decoded{};
+            decoded.cpc = simrv::xlen::VirtAddr{state.pc};
+            decoded.ir = ir;
+            decoded.op_id = op_id;
+            decoded.opcode = simrv::isa::Opcode::Op;
+            decoded.rd = simrv::xlen::RegId::A0;
+            decoded.rs1 = simrv::xlen::RegId::A1;
+            decoded.rs2 = simrv::xlen::RegId::A2;
+            decoded.funct3 = funct3;
+            decoded.funct7 = static_cast<simrv::xlen::Funct7>((ir >> 25U) & 0x7FU);
+            decoded.traits.reads_rs1_int = true;
+            decoded.traits.reads_rs2_int = true;
+            decoded.traits.writes_int = true;
+            simrv::core::CachedOp op{};
+            op.copy_from(decoded);
+            state.regs.write(simrv::xlen::RegId::A1, lhs);
+            state.regs.write(simrv::xlen::RegId::A2, rhs);
+            cpu.execute_cached_op_fast<false, false>(machine, op, machine.ram_view());
+            const auto expected_register = static_cast<simrv::xlen::Register>(
+                static_cast<int64_t>(static_cast<int32_t>(expected)));
+            expect(state.regs.read(simrv::xlen::RegId::A0) == expected_register, description);
+        };
+        execute_rv32_fallback(simrv::isa::DIV, 0x02C5C533, static_cast<simrv::isa::Funct3>(4), 21,
+                              3, 7,
+                              "hosted RV32 cached DIV uses the generic RV32 execution fallback");
+        execute_rv32_fallback(simrv::isa::REM, 0x02C5E533, static_cast<simrv::isa::Funct3>(6), 23,
+                              5, 3,
+                              "hosted RV32 cached REM uses the generic RV32 execution fallback");
+        execute_rv32_fallback(simrv::isa::CLZ, 0x60059533, static_cast<simrv::isa::Funct3>(1), 1, 0,
+                              31,
+                              "hosted RV32 cached CLZ uses the generic bit-manipulation fallback");
+
+        // Exercise the deferred chain boundary: ADDI can execute in the fast chain, while DIV
+        // must stop the chain and run through the existing generic cached fallback.
+        cpu.sync_decode_context();
+        cpu.decode_cache.flush();
+        state.pc = 0x1000;
+        state.regs.write(simrv::xlen::RegId::A1, 21);
+        state.regs.write(simrv::xlen::RegId::A2, 3);
+        simrv::pipeline::DecodedInstruction addi_decoded{};
+        addi_decoded.cpc = simrv::xlen::VirtAddr{0x1000};
+        addi_decoded.ir = 0x00158513;  // addi a0, a1, 1
+        addi_decoded.op_id = simrv::isa::ADDI;
+        addi_decoded.opcode = simrv::isa::Opcode::OpImm;
+        addi_decoded.rd = simrv::xlen::RegId::A0;
+        addi_decoded.rs1 = simrv::xlen::RegId::A1;
+        addi_decoded.imm = 1;
+        addi_decoded.traits.reads_rs1_int = true;
+        addi_decoded.traits.writes_int = true;
+        simrv::core::CachedOp addi{};
+        addi.copy_from(addi_decoded);
+        cpu.decode_cache.insert(addi_decoded.cpc, addi);
+
+        simrv::pipeline::DecodedInstruction div_decoded{};
+        div_decoded.cpc = simrv::xlen::VirtAddr{0x1004};
+        div_decoded.ir = 0x02C5C533;  // div a0, a1, a2
+        div_decoded.op_id = simrv::isa::DIV;
+        div_decoded.opcode = simrv::isa::Opcode::Op;
+        div_decoded.rd = simrv::xlen::RegId::A0;
+        div_decoded.rs1 = simrv::xlen::RegId::A1;
+        div_decoded.rs2 = simrv::xlen::RegId::A2;
+        div_decoded.funct3 = static_cast<simrv::isa::Funct3>(4);
+        div_decoded.funct7 = 1;
+        div_decoded.traits.reads_rs1_int = true;
+        div_decoded.traits.reads_rs2_int = true;
+        div_decoded.traits.writes_int = true;
+        simrv::core::CachedOp div{};
+        div.copy_from(div_decoded);
+        cpu.decode_cache.insert(div_decoded.cpc, div);
+
+        cpu.run_fast_baremetal_batch(machine, 2, {});
+        expect(state.regs.read(simrv::xlen::RegId::A0) == 7,
+               "hosted RV32 chained execution falls back to execute DIV correctly");
+        expect(state.pc == 0x1008, "hosted RV32 chained fallback commits the sequential PC");
+    }
+}
+
+void test_hosted_rv32_cycle_accurate_alu_width() {
+    if constexpr (simrv::xlen::kIsXLen64) {
+        simrv::core::Machine machine;
+        auto& cpu = machine.hart(simrv::xlen::HartId{0});
+        std::array<simrv::xlen::Byte, 4096> ram{};
+        constexpr simrv::xlen::Instruction nop = 0x00000013;
+        for (size_t offset = 0; offset < ram.size(); offset += sizeof(nop)) {
+            std::memcpy(ram.data() + offset, &nop, sizeof(nop));
+        }
+        constexpr std::array<simrv::xlen::Instruction, 3> program = {
+            0x800000B7,  // lui   x1, 0x80000 (RV32 INT32_MIN)
+            0x00200113,  // addi  x2, x0, 2
+            0x022091B3,  // mulh  x3, x1, x2
+        };
+        std::memcpy(ram.data(), program.data(), sizeof(program));
+        machine.set_ram_for_testing(ram);
+        machine.memory().initialize_mmu();
+        cpu.reset();
+        machine.runtime_profile.engine = simrv::core::ExecutionEngine::CycleFast;
+        auto& state = cpu.state();
+        state.misa =
+            (state.misa & ~(simrv::xlen::CsrValue{3} << 62U)) | (simrv::xlen::CsrValue{1} << 62U);
+        state.initialize_lower_xlen_fields();
+        state.pc = simrv::memory::kDramBaseAddress;
+
+        uint32_t cycles = 0;
+        while (cpu.e_icount < program.size() && cycles < 128) {
+            cpu.run_cycle(machine);
+            machine.memory().system_bus().advance_cycle();
+            ++cycles;
+        }
+        expect(cpu.e_icount >= program.size(),
+               "hosted RV32 cycle-accurate pipeline retires the high-half multiply program");
+        expect(state.regs.read(simrv::xlen::RegId::Gp) ==
+                   static_cast<simrv::xlen::Register>(~simrv::xlen::Register{0}),
+               "cycle-accurate RV32 MULH returns the upper half of a signed 32-bit product");
     }
 }
 
@@ -430,7 +645,6 @@ void test_selective_tlb_and_decode_cache_flush() {
 
     // Perform selective flush for Page A (match_all_vaddr = false, match_all_asid = true)
     cpu.TLB_flush(false, kPageA, true, 0);
-
     // Page A should be invalidated in soft TLB and decode cache
     expect(!cpu.soft_tlb_read[idxA].valid(cpu.soft_tlb_epoch),
            "selective flush invalidates soft TLB read A");
@@ -518,6 +732,15 @@ void test_runtime_ram_view() {
            "runtime RAM view uses the configured DRAM base as its offset");
     expect(!ram.contains(kUpperDramBase + bytes.size(), 1),
            "runtime RAM view rejects its end address");
+    expect(!ram.contains(kUpperDramBase - 1, 1),
+           "runtime RAM view rejects addresses below its configured base");
+
+    const simrv::memory::RamView extreme_view(bytes.data(), kUpperDramBase,
+                                              std::numeric_limits<simrv::xlen::Address>::max());
+    expect(!extreme_view.contains(kUpperDramBase - 2, 1),
+           "runtime RAM view rejects below-base addresses despite unsigned wraparound");
+    expect(!ram.contains(std::numeric_limits<simrv::xlen::Address>::max(), 2),
+           "runtime RAM view rejects ranges that overflow the address width");
 
     std::array<simrv::xlen::Byte, 8192> pages{};
     const simrv::memory::RamView page_view(pages.data(), kUpperDramBase, pages.size());
@@ -2953,6 +3176,47 @@ void test_interrupt_priority() {
            "SEI precedes SSI and STI");
 }
 
+void test_fast_baremetal_pending_interrupt_boundary() {
+    simrv::core::Machine machine;
+    auto& cpu = machine.primary_hart();
+    cpu.reset();
+
+    constexpr simrv::xlen::Register pc = 0x1000;
+    constexpr simrv::xlen::Register handler = 0x2000;
+    auto& state = cpu.state();
+    state.pc = pc;
+    state.mtvec = handler;
+    state.mstatus |= simrv::core::MstatusBit::Mie;
+    state.mie |= simrv::core::MipBit::Mtip;
+    machine.set_hart_irq(simrv::xlen::HartId{0}, simrv::core::InterruptType::Timer,
+                         simrv::xlen::PrivilegeLevel::Machine, true);
+
+    simrv::pipeline::DecodedInstruction decoded{};
+    decoded.cpc = simrv::xlen::VirtAddr{pc};
+    decoded.ir = 0x00100093;  // addi x1, x0, 1
+    decoded.op_id = simrv::isa::ADDI;
+    decoded.opcode = simrv::isa::Opcode::OpImm;
+    decoded.rd = simrv::xlen::RegId::Ra;
+    decoded.rs1 = simrv::xlen::RegId::Zero;
+    decoded.imm = 1;
+    decoded.traits.writes_int = true;
+    simrv::core::CachedOp cached{};
+    cached.copy_from(decoded);
+    cpu.sync_decode_context();
+    cpu.decode_cache.insert(pc, cached);
+
+    cpu.run_fast_baremetal_batch(machine, 1, {});
+
+    expect(state.regs.read(simrv::xlen::RegId::Ra) == 1,
+           "fast path retires one cached instruction before a pending interrupt");
+    const auto interrupt_flag = simrv::xlen::Register{1} << (sizeof(simrv::xlen::Register) * 8 - 1);
+    expect((state.mcause & interrupt_flag) != 0 && (state.mcause & 0xFFU) == 7U,
+           "fast path takes the pending machine timer interrupt");
+    expect(state.mepc == pc + 4 && state.pc == handler,
+           "fast path interrupt boundary saves the next instruction PC");
+    expect(cpu.e_icount == 1, "fast path counts exactly one instruction before the interrupt");
+}
+
 void test_epc_ialign_mask() {
     const simrv::xlen::CsrValue with_c =
         simrv::isa::misa_extension_bit(simrv::isa::IsaExtension::C);
@@ -3522,6 +3786,7 @@ int main() {
     test_unaligned_host_access();
     test_decode_cache_compact_round_robin();
     test_hosted_rv32_cached_shift_width();
+    test_hosted_rv32_cycle_accurate_alu_width();
     test_compressed_instruction_decode_and_flush();
     test_privilege_returns_flush_cached_instructions();
     test_selective_tlb_and_decode_cache_flush();
@@ -3558,6 +3823,7 @@ int main() {
     test_privileged_decode_legality();
     test_csr_privilege_presence();
     test_interrupt_priority();
+    test_fast_baremetal_pending_interrupt_boundary();
     test_epc_ialign_mask();
     test_rv32_cause_translation();
     test_lower_privilege_xlen_initialization();

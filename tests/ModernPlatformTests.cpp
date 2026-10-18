@@ -48,6 +48,7 @@
 #include "simrv/device/virtio/VirtioCore.hpp"
 #include "simrv/device/virtio/VirtioSoundCore.hpp"
 #include "simrv/memory/Axi4.hpp"
+#include "simrv/memory/MemoryAccess.hpp"
 #include "simrv/memory/MemorySubsystem.hpp"
 #include "simrv/memory/MemoryUtil.hpp"
 #include "simrv/memory/MmioDevice.hpp"
@@ -72,6 +73,23 @@ class DummyDevice : public simrv::memory::MmioDevice {
         last_val_ = val + static_cast<uint32_t>(offset);
     }
     uint32_t last_val_{0};
+};
+
+class CorruptResponseNode : public simrv::memory::TileLinkNode {
+   public:
+    [[nodiscard]] auto name() const -> const char* override { return "corrupt-response"; }
+    [[nodiscard]] auto base_address() const -> simrv::xlen::Address override { return 0x3000U; }
+    [[nodiscard]] auto size() const -> simrv::xlen::Address override { return 0x100U; }
+    auto handle_request(const simrv::memory::TlChannelA& request,
+                        simrv::memory::TlChannelD& response) -> bool override {
+        response.opcode = request.opcode == simrv::memory::TlOpcodeA::Get
+                              ? simrv::memory::TlOpcodeD::AccessAckData
+                              : simrv::memory::TlOpcodeD::AccessAck;
+        response.source = request.source;
+        response.size = request.size;
+        response.corrupt = true;
+        return true;
+    }
 };
 
 using ConcreteMachine = simrv::core::Machine;
@@ -863,6 +881,122 @@ void test_timed_smp_coherence_ordering() {
     std::cout << "[PASS] test_timed_smp_coherence_ordering\n";
 }
 
+void test_memory_access_fails_closed_when_request_is_rejected() {
+    const auto check = [](bool condition) {
+        if (!condition) std::abort();
+    };
+    ConcreteMachine machine;
+    std::vector<simrv::xlen::Byte> ram(1024 * 1024, simrv::xlen::Byte{0});
+    machine.set_ram_for_testing(ram.data(), ram.size());
+    machine.cpu.machine_ = &machine;
+    machine.runtime_profile.engine = simrv::core::ExecutionEngine::CycleFast;
+
+    constexpr simrv::xlen::Address address = simrv::memory::kDramBaseAddress + 0x180;
+    constexpr simrv::xlen::Address blocker_address = simrv::memory::kDramBaseAddress + 0x200;
+    ram[0x180] = simrv::xlen::Byte{0x78};
+    ram[0x181] = simrv::xlen::Byte{0x56};
+    ram[0x182] = simrv::xlen::Byte{0x34};
+    ram[0x183] = simrv::xlen::Byte{0x12};
+
+    auto& hart = machine.cpu;
+    auto& bus = machine.memory().system_bus();
+    const auto source = simrv::memory::make_tl_source(hart.hart_id(), simrv::memory::TlPort::Data);
+    simrv::memory::TlChannelA blocker{};
+    blocker.opcode = simrv::memory::TlOpcodeA::Get;
+    blocker.size = 2;
+    blocker.hart = hart.hart_id();
+    blocker.source = source;
+    blocker.address = blocker_address;
+
+    check(bus.send_request(blocker));
+    hart.ca_state.waiting_for_interconnect = false;
+    hart.active_context().pending_exception.reset();
+    const auto read = simrv::memory::MemoryAccess::target_read(
+        machine.memory(), hart, simrv::xlen::VirtAddr{address}, simrv::isa::Funct3::Lw);
+    check(read == 0);
+    check(hart.active_context().pending_exception == ExceptionCode::FaultLoad);
+    check(hart.active_context().pending_tval == address);
+    check(!hart.ca_state.waiting_for_interconnect);
+    bus.cancel_source(source);
+
+    check(bus.send_request(blocker));
+    hart.ca_state.waiting_for_interconnect = false;
+    hart.active_context().pending_exception.reset();
+    simrv::memory::MemoryAccess::target_write(machine.memory(), hart,
+                                              simrv::xlen::VirtAddr{address}, 0xDEADBEEFU,
+                                              simrv::isa::Funct3::Sw);
+    check(hart.active_context().pending_exception == ExceptionCode::FaultStore);
+    check(hart.active_context().pending_tval == address);
+    check(!hart.ca_state.waiting_for_interconnect);
+    check(ram[0x180] == simrv::xlen::Byte{0x78});
+    check(ram[0x181] == simrv::xlen::Byte{0x56});
+    check(ram[0x182] == simrv::xlen::Byte{0x34});
+    check(ram[0x183] == simrv::xlen::Byte{0x12});
+    check(hart.dcache.line_state(address) == simrv::memory::MesiState::Invalid);
+    bus.cancel_source(source);
+
+    const simrv::xlen::VirtAddr unmapped{0x1000};
+    hart.ca_state.data_transfer.reset();
+    hart.ca_state.waiting_for_interconnect = false;
+    hart.active_context().pending_exception.reset();
+    const auto denied_read = simrv::memory::MemoryAccess::target_read(
+        machine.memory(), hart, unmapped, simrv::isa::Funct3::Lw);
+    check(hart.ca_state.waiting_for_interconnect);
+    bus.advance_cycle();
+    check(denied_read == 0);
+    const auto denied_response_read = simrv::memory::MemoryAccess::target_read(
+        machine.memory(), hart, unmapped, simrv::isa::Funct3::Lw);
+    check(denied_response_read == 0);
+    check(hart.active_context().pending_exception == ExceptionCode::FaultLoad);
+    check(hart.active_context().pending_tval == unmapped.raw());
+    check(!hart.ca_state.data_transfer.active);
+
+    hart.ca_state.data_transfer.reset();
+    hart.ca_state.waiting_for_interconnect = false;
+    hart.active_context().pending_exception.reset();
+    simrv::memory::MemoryAccess::target_write(machine.memory(), hart, unmapped, 0xDEADBEEFU,
+                                              simrv::isa::Funct3::Sw);
+    check(hart.ca_state.waiting_for_interconnect);
+    bus.advance_cycle();
+    simrv::memory::MemoryAccess::target_write(machine.memory(), hart, unmapped, 0xDEADBEEFU,
+                                              simrv::isa::Funct3::Sw);
+    check(hart.active_context().pending_exception == ExceptionCode::FaultStore);
+    check(hart.active_context().pending_tval == unmapped.raw());
+    check(!hart.ca_state.data_transfer.active);
+
+    CorruptResponseNode corrupt_node;
+    check(bus.add_node(&corrupt_node));
+    const simrv::xlen::VirtAddr corrupt_address{corrupt_node.base_address()};
+    hart.ca_state.data_transfer.reset();
+    hart.ca_state.waiting_for_interconnect = false;
+    hart.active_context().pending_exception.reset();
+    const auto corrupt_first_read = simrv::memory::MemoryAccess::target_read(
+        machine.memory(), hart, corrupt_address, simrv::isa::Funct3::Lw);
+    check(hart.ca_state.waiting_for_interconnect);
+    bus.advance_cycle();
+    check(corrupt_first_read == 0);
+    const auto corrupt_read = simrv::memory::MemoryAccess::target_read(
+        machine.memory(), hart, corrupt_address, simrv::isa::Funct3::Lw);
+    check(corrupt_read == 0);
+    check(hart.active_context().pending_exception == ExceptionCode::FaultLoad);
+    check(hart.active_context().pending_tval == corrupt_address.raw());
+    check(!hart.ca_state.data_transfer.active);
+
+    hart.ca_state.data_transfer.reset();
+    hart.ca_state.waiting_for_interconnect = false;
+    hart.active_context().pending_exception.reset();
+    simrv::memory::MemoryAccess::target_write(machine.memory(), hart, corrupt_address, 0xDEADBEEFU,
+                                              simrv::isa::Funct3::Sw);
+    check(hart.ca_state.waiting_for_interconnect);
+    bus.advance_cycle();
+    simrv::memory::MemoryAccess::target_write(machine.memory(), hart, corrupt_address, 0xDEADBEEFU,
+                                              simrv::isa::Funct3::Sw);
+    check(hart.active_context().pending_exception == ExceptionCode::FaultStore);
+    check(hart.active_context().pending_tval == corrupt_address.raw());
+    check(!hart.ca_state.data_transfer.active);
+    std::cout << "[PASS] test_memory_access_fails_closed_when_request_is_rejected\n";
+}
+
 void test_modified_line_does_not_refill_stale_shared_data() {
     const auto check = [](bool condition) {
         if (!condition) std::abort();
@@ -908,6 +1042,137 @@ void test_modified_line_does_not_refill_stale_shared_data() {
     check(refilled == updated);
     bus.grant_ack(simrv::memory::TlChannelE{.sink = response.sink});
     std::cout << "[PASS] test_modified_line_does_not_refill_stale_shared_data\n";
+}
+
+void test_release_data_writes_back_without_directory_entry() {
+    const auto check = [](bool condition) {
+        if (!condition) std::abort();
+    };
+    ConcreteMachine machine;
+    std::vector<simrv::xlen::Byte> ram(1024 * 1024, simrv::xlen::Byte{0});
+    machine.set_ram_for_testing(ram.data(), ram.size());
+    machine.cpu.machine_ = &machine;
+
+    constexpr simrv::xlen::Address line = simrv::memory::kDramBaseAddress + 0x240;
+    std::array<simrv::xlen::Byte, simrv::memory::CoherenceHub::kLineBytes> released{};
+    for (size_t i = 0; i < released.size(); ++i)
+        released[i] = static_cast<simrv::xlen::Byte>((i * 13u + 7u) & 0xffu);
+
+    simrv::memory::TlChannelC release{};
+    release.opcode = simrv::memory::TlOpcodeC::ReleaseData;
+    release.report =
+        simrv::memory::report_for(simrv::memory::MesiState::Modified, simrv::memory::TlCap::ToN);
+    release.size = simrv::memory::kTlBlockSize;
+    release.source = simrv::memory::make_tl_source(0, simrv::memory::TlPort::Data);
+    release.hart = 0;
+    release.address = line;
+
+    simrv::memory::TlChannelD response{};
+    auto& bus = machine.memory().system_bus();
+    check(bus.release_line(release, response, &released));
+    check(response.opcode == simrv::memory::TlOpcodeD::ReleaseAck);
+    check(std::memcmp(ram.data() + 0x240, released.data(), released.size()) == 0);
+    check(bus.coherence_hub().stats().writeback_count == 1);
+
+    std::array<simrv::xlen::Byte, simrv::memory::CoherenceHub::kLineBytes> cached{};
+    simrv::memory::MesiState state = simrv::memory::MesiState::Invalid;
+    check(bus.coherence_hub().l3_cache().lookup_line(line, cached, state));
+    check(cached == released);
+    std::cout << "[PASS] test_release_data_writes_back_without_directory_entry\n";
+}
+
+void test_machine_reset_clears_coherence_state_after_cache_reset() {
+    const auto check = [](bool condition) {
+        if (!condition) std::abort();
+    };
+    ConcreteMachine machine;
+    std::vector<simrv::xlen::Byte> ram(1024 * 1024, simrv::xlen::Byte{0});
+    machine.set_ram_for_testing(ram.data(), ram.size());
+    machine.cpu.machine_ = &machine;
+    machine.memory().initialize_mmu();
+
+    constexpr simrv::xlen::Address line = simrv::memory::kDramBaseAddress + 0x2a0;
+    constexpr uint32_t value = 0x76543210;
+    auto& bus = machine.memory().system_bus();
+    simrv::memory::TlChannelA acquire{};
+    acquire.opcode = simrv::memory::TlOpcodeA::AcquireBlock;
+    acquire.grow = simrv::memory::TlGrow::NtoT;
+    acquire.source = 3;
+    acquire.hart = 0;
+    acquire.address = line;
+    acquire.size = simrv::memory::kTlBlockSize;
+    simrv::memory::TlChannelD response{};
+    std::array<simrv::xlen::Byte, simrv::memory::CoherenceHub::kLineBytes> data{};
+    check(bus.acquire_block(acquire, response, data));
+    bus.grant_ack(simrv::memory::TlChannelE{.sink = response.sink});
+    machine.cpu.dcache.insert(line, data.data(), simrv::memory::MesiState::Exclusive);
+    check(machine.cpu.dcache.write(line, value, 2));
+    bus.mark_modified(line, 0);
+    std::memcpy(ram.data() + 0x2a0, &value, sizeof(value));
+    check(bus.coherence_hub().get_directory_state(line).state ==
+          simrv::memory::MesiState::Modified);
+
+    machine.reset_state();
+
+    check(machine.cpu.dcache.line_state(line) == simrv::memory::MesiState::Invalid);
+    check(bus.coherence_hub().get_directory_state(line).state == simrv::memory::MesiState::Invalid);
+    uint32_t backing_value = 0;
+    std::memcpy(&backing_value, ram.data() + 0x2a0, sizeof(backing_value));
+    check(backing_value == value);
+    std::cout << "[PASS] test_machine_reset_clears_coherence_state_after_cache_reset\n";
+}
+
+void test_cross_line_dma_write_invalidates_only_touched_lines() {
+    size_t check_index = 0;
+    const auto check = [&check_index](bool condition) {
+        ++check_index;
+        if (!condition) {
+            std::cerr << "cross-line DMA check failed: " << check_index << '\n';
+            std::abort();
+        }
+    };
+    ConcreteMachine machine;
+    std::vector<simrv::xlen::Byte> ram(1024 * 1024, simrv::xlen::Byte{0});
+    machine.set_ram_for_testing(ram.data(), ram.size());
+    machine.cpu.machine_ = &machine;
+    machine.memory().initialize_mmu();
+    machine.runtime_profile.engine = simrv::core::ExecutionEngine::CycleFast;
+
+    constexpr simrv::xlen::Address first_line = simrv::memory::kDramBaseAddress + 0x300;
+    auto& bus = machine.memory().system_bus();
+    for (unsigned index = 0; index < 3; ++index) {
+        simrv::memory::TlChannelA acquire{};
+        acquire.opcode = simrv::memory::TlOpcodeA::AcquireBlock;
+        acquire.grow = simrv::memory::TlGrow::NtoB;
+        acquire.source = static_cast<simrv::memory::TlSourceId>(4 + index * 2);
+        acquire.hart = 0;
+        acquire.address = first_line + index * simrv::memory::CoherenceHub::kLineBytes;
+        acquire.size = simrv::memory::kTlBlockSize;
+        simrv::memory::TlChannelD response{};
+        std::array<simrv::xlen::Byte, simrv::memory::CoherenceHub::kLineBytes> data{};
+        check(bus.acquire_block(acquire, response, data));
+        bus.grant_ack(simrv::memory::TlChannelE{.sink = response.sink});
+        machine.cpu.dcache.insert(acquire.address.raw(), data.data(),
+                                  simrv::memory::mesi_for(response.cap));
+    }
+
+    constexpr std::array<simrv::xlen::Byte, 8> replacement{
+        simrv::xlen::Byte{1}, simrv::xlen::Byte{2}, simrv::xlen::Byte{3}, simrv::xlen::Byte{4},
+        simrv::xlen::Byte{5}, simrv::xlen::Byte{6}, simrv::xlen::Byte{7}, simrv::xlen::Byte{8}};
+    const auto write_address = first_line + simrv::memory::CoherenceHub::kLineBytes - 4;
+    check(machine.memory().dma_write(write_address, replacement.data(), replacement.size()));
+    check(machine.cpu.dcache.line_state(first_line) == simrv::memory::MesiState::Invalid);
+    check(machine.cpu.dcache.line_state(first_line + simrv::memory::CoherenceHub::kLineBytes) ==
+          simrv::memory::MesiState::Invalid);
+    check(machine.cpu.dcache.line_state(first_line + 2 * simrv::memory::CoherenceHub::kLineBytes) ==
+          simrv::memory::MesiState::Exclusive);
+    check(std::memcmp(ram.data() + 0x31c, replacement.data(), replacement.size()) == 0);
+
+    const std::array<simrv::xlen::Byte, 8> out_of_range{};
+    const auto final_bytes = ram.size() - 4;
+    check(!machine.memory().dma_write(simrv::memory::kDramBaseAddress + final_bytes,
+                                      out_of_range.data(), out_of_range.size()));
+    std::cout << "[PASS] test_cross_line_dma_write_invalidates_only_touched_lines\n";
 }
 
 void test_profiled_shared_cache_clusters() {
@@ -2266,13 +2531,12 @@ void test_dynamic_mode_switching_cache_behavior() {
         if (!condition) std::abort();
     };
 
-    ConcreteMachine machine;
+    ConcreteMachine machine(simrv::core::MachineConfig{.bram_prewarm = true});
     std::vector<simrv::xlen::Byte> ram(1024 * 1024, simrv::xlen::Byte{0});
     machine.set_ram_for_testing(ram.data(), ram.size());
     machine.cpu.machine_ = &machine;
     machine.cpu.reset();
     machine.memory().initialize_mmu();
-
     // Start in InstructionFast mode
     machine.runtime_profile.engine = simrv::core::ExecutionEngine::InstructionFast;
     machine.cpu.pipeline_sim.config.pipeline_type = simrv::pipeline::PipelineType::FiveStage;
@@ -2289,6 +2553,8 @@ void test_dynamic_mode_switching_cache_behavior() {
         0xffdff06f,  // jal   x0, -4 (repeat cached WFI)
     };
     std::memcpy(ram.data(), program.data(), sizeof(program));
+    machine.record_loaded_segment(pc, sizeof(program), true);
+    machine.record_loaded_segment(data_address, simrv::memory::CoherenceHub::kLineBytes, false);
     machine.cpu.state().pc = pc;
 
     // Step 2 instructions in fast functional mode
@@ -2304,6 +2570,12 @@ void test_dynamic_mode_switching_cache_behavior() {
     machine.switch_execution_engine(simrv::core::ExecutionEngine::CycleObservable);
     check(machine.runtime_profile.is_cycle_mode());
     check(machine.cpu.pipeline_sim.config.record_snapshots);
+    check(machine.cpu.icache.line_state(pc) == simrv::memory::MesiState::Shared);
+    check(machine.cpu.dcache.line_state(data_address) == simrv::memory::MesiState::Shared);
+    const auto prewarmed_data_dir =
+        machine.memory().system_bus().coherence_hub().get_directory_state(data_address);
+    check(prewarmed_data_dir.state == simrv::memory::MesiState::Shared);
+    check(prewarmed_data_dir.sharers_mask == 1);
 
     // Step in cycle mode through addi, sw, and lw
     uint32_t guard = 0;
@@ -3777,7 +4049,11 @@ int main(int argc, char** argv) {
     test_timed_interconnect_cancellation();
     test_timed_page_walk_transitions();
     test_timed_smp_coherence_ordering();
+    test_memory_access_fails_closed_when_request_is_rejected();
     test_modified_line_does_not_refill_stale_shared_data();
+    test_release_data_writes_back_without_directory_entry();
+    test_machine_reset_clears_coherence_state_after_cache_reset();
+    test_cross_line_dma_write_invalidates_only_touched_lines();
     test_profiled_shared_cache_clusters();
     test_tilelink_c_acquire_perm_upgrade();
     test_tilelink_c_prefetch_intent();

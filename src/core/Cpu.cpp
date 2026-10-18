@@ -50,6 +50,7 @@ void CPU::apply_cpu_model_config(const simrv::pipeline::CpuModelConfig& config) 
     state_.misa = isa::misa_with_mxl(isa::isa_preset_bits(config.isa_preset), target_xlen);
     state_.refresh_misa_status();
     state_.initialize_lower_xlen_fields();
+    sync_decode_context();
     if (machine_ != nullptr) {
         machine_->dma_engine().set_config(config.dma);
     }
@@ -73,6 +74,7 @@ void CPU::reset() {
                           (static_cast<simrv::xlen::CsrValue>(2) << 32);
     }
     state_.initialize_lower_xlen_fields();
+    dcache.flush();
     TLB_flush();
     e_icount = 0;
     e_ccount = 0;
@@ -87,11 +89,19 @@ void CPU::reset() {
 void CPU::TLB_flush() {
     tlb.flush();
     decode_cache.flush();
-    icache.flush();
-    dcache.flush();
-    instruction_cache_timing.flush();
+    if (!machine_ || machine_->runtime_profile.is_cycle_mode()) {
+        icache.flush();
+        instruction_cache_timing.flush();
+    }
+    soft_tlb_flush();
+    sync_decode_context();
+}
+
+void CPU::flush_data_tlb() {
+    tlb.flush_data();
     soft_tlb_flush();
 }
+
 void CPU::TLB_flush(const core::TlbFlushFilter& filter) {
     tlb.flush_selective(filter);
     if (filter.vaddr) {
@@ -182,8 +192,6 @@ void CPU::mret() {
     const auto old_privilege = state_.priv;
     const auto old_mstatus = state_.mstatus;
     TrapController::mret(state_);
-    // Cached instruction execution skips fetch, so a privilege change must force the
-    // next instruction through fetch/PMP checks. MRET also updates MPP/MPRV state.
     if (state_.priv != old_privilege || state_.mstatus != old_mstatus) {
         TLB_flush();
     }
@@ -217,8 +225,6 @@ void CPU::raise_exception(simrv::xlen::TrapCause cause, simrv::xlen::CsrValue tv
     const auto old_mstatus = state_.mstatus;
     TrapController::raise_exception(*this, cause, tval);
     if (state_.priv != old_privilege || state_.mstatus != old_mstatus) {
-        // Trap entry can enter a privilege with different PMP execute permissions.
-        // It also rewrites MPP/SPP, which can change MPRV data permissions.
         TLB_flush();
     }
 }

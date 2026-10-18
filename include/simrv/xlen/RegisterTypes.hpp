@@ -43,7 +43,8 @@ enum class RegId : uint8_t {
     T3 = 28,
     T4 = 29,
     T5 = 30,
-    T6 = 31
+    T6 = 31,
+    Discard = 32
 };
 
 enum class FpRegId : uint8_t {
@@ -118,12 +119,12 @@ enum class VecRegId : uint8_t {
 
 /// Explicitly reinterpret an instruction's five-bit register index as an FPR index.
 constexpr auto to_fp_reg_id(RegId id) noexcept -> FpRegId {
-    return static_cast<FpRegId>(std::to_underlying(id));
+    return static_cast<FpRegId>(std::to_underlying(id) & 0x1Fu);
 }
 
 /// Explicitly reinterpret an instruction's five-bit register index as a vector register index.
 constexpr auto to_vec_reg_id(RegId id) noexcept -> VecRegId {
-    return static_cast<VecRegId>(std::to_underlying(id));
+    return static_cast<VecRegId>(std::to_underlying(id) & 0x1Fu);
 }
 
 constexpr auto to_fp_reg_id(FpRegId id) noexcept -> FpRegId { return id; }

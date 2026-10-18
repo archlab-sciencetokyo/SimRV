@@ -13,6 +13,7 @@
 #include <filesystem>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <queue>
 #include <stop_token>
 #include <string>
@@ -348,6 +349,7 @@ class Tui : public core::ITelemetrySink, public core::IConsoleSink {
     std::vector<uint8_t> sixel_present_colors_{};
     bool modal_active_last_frame_{false};
     std::optional<size_t> display_mouse_capture_;
+    bool display_mouse_pixel_mode_{false};
     std::optional<std::pair<int, int>> display_mouse_last_fb_;
     VirtualTerminal vt_;
     LogBuffer log_buffer_;
@@ -470,7 +472,12 @@ class Tui : public core::ITelemetrySink, public core::IConsoleSink {
     [[nodiscard]] auto display_coords_to_fb(int x, int y, size_t col_idx, int term_width,
                                             int term_height) const
         -> std::optional<std::pair<int, int>>;
+    [[nodiscard]] auto display_pixels_to_fb(int x, int y, size_t col_idx, int term_width,
+                                            int term_height, int term_pixel_width = 0,
+                                            int term_pixel_height = 0) const
+        -> std::optional<std::pair<int, int>>;
     void handle_display_mouse(int x, int y, int b, size_t col_idx, int term_width, int term_height);
+    void enable_display_pixel_mouse();
     void init_terminal_raw_mode();
     void detect_terminal_sixel_support(const std::string& resp);
 };

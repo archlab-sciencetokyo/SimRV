@@ -15,6 +15,13 @@ void Tlb::flush() {
     data_w_lru.fill(0);
 }
 
+void Tlb::flush_data() {
+    for (auto& set : data_r) set.fill(TLBEntry{});
+    for (auto& set : data_w) set.fill(TLBEntry{});
+    data_r_lru.fill(0);
+    data_w_lru.fill(0);
+}
+
 void Tlb::flush_selective(const TlbFlushFilter& filter) {
     if (!filter.vaddr && !filter.asid) {
         flush();

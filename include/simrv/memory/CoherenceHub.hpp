@@ -72,6 +72,9 @@ class CoherenceHub {
     /// Invalidate every cached copy before a coherent implicit/DMA memory write.
     void invalidate_line_external(LineAddress line_base);
 
+    /// Register a clean line populated directly during machine startup prewarming.
+    void register_preloaded_line(LineAddress line_base, simrv::xlen::HartId hart);
+
     [[nodiscard]] auto stats() const -> const CoherenceStats& { return stats_; }
     void reset_stats() { stats_ = {}; }
 

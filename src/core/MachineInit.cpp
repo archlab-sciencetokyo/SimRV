@@ -575,6 +575,7 @@ auto Machine::initialize() -> std::expected<void, std::string> {
         primary_hart().state().pc = static_cast<simrv::xlen::Register>(
             static_cast<int64_t>(static_cast<int32_t>(primary_hart().state().pc)));
     }
+    primary_hart().dcache.flush();
     primary_hart().TLB_flush();
 
     load_image_into_ram(config.files.binary_path, ram_view(), "memory", tui_enabled(), this);

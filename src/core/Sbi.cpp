@@ -157,12 +157,10 @@ auto Sbi::handle_rfence(simrv::xlen::Word func_id) -> bool {
                 auto& target_cpu = cpu_.machine_->hart(h);
                 if (fid == RfenceFid::RemoteFenceI) {
                     target_cpu.icache.flush();
-                    target_cpu.dcache.flush();
                     target_cpu.decode_cache.flush();
                 } else if (fid == RfenceFid::RemoteSfenceVma ||
                            fid == RfenceFid::RemoteSfenceVmaAsid) {
                     target_cpu.TLB_flush();
-                    target_cpu.dcache.flush();
                 }
             }
         }
@@ -170,11 +168,9 @@ auto Sbi::handle_rfence(simrv::xlen::Word func_id) -> bool {
         if (detail::is_hart_selected(hart_mask, hart_mask_base, cpu_.state().mhartid)) {
             if (fid == RfenceFid::RemoteFenceI) {
                 cpu_.icache.flush();
-                cpu_.dcache.flush();
                 cpu_.decode_cache.flush();
             } else if (fid == RfenceFid::RemoteSfenceVma || fid == RfenceFid::RemoteSfenceVmaAsid) {
                 cpu_.TLB_flush();
-                cpu_.dcache.flush();
             }
         }
     }

@@ -225,6 +225,17 @@ void CoherenceHub::invalidate_line_external(LineAddress line_base) {
     erase_dir_entry(aligned_addr);
 }
 
+void CoherenceHub::register_preloaded_line(LineAddress line_base, simrv::xlen::HartId hart) {
+    const LineAddress aligned_addr = line_base & ~(static_cast<LineAddress>(kLineBytes - 1u));
+    if (hart >= machine_.num_harts()) return;
+    DirectoryEntry entry{};
+    if (lookup_dir_entry(aligned_addr, entry) && entry.state != MesiState::Shared) return;
+    entry.state = MesiState::Shared;
+    entry.owner_hart.reset();
+    entry.sharers_mask |= (uint64_t{1} << hart.val);
+    update_dir_entry(aligned_addr, entry);
+}
+
 auto CoherenceHub::handle_acquire(const TlChannelA& req, TlChannelD& resp,
                                   std::array<simrv::xlen::Byte, kLineBytes>& line_buffer,
                                   uint32_t& service_latency) -> bool {
@@ -446,21 +457,22 @@ auto CoherenceHub::handle_release(const TlChannelC& req, TlChannelD& resp,
         (req.address & ~(static_cast<simrv::xlen::Address>(kLineBytes - 1u))).raw();
     stats_.release_count++;
 
+    if (req.opcode == TlOpcodeC::ReleaseData && release_data != nullptr) {
+        if (l3_enabled_) l3_cache_.write_line(line_base, *release_data, MesiState::Exclusive);
+        if (auto* l2 = l2_cache_for_hart(req.hart.val))
+            l2->cache.write_line(line_base, *release_data, MesiState::Exclusive);
+        auto* dram_ptr = machine_.ram_data();
+        const auto geometry = machine_.memory_geometry();
+        if (dram_ptr != nullptr && geometry.contains(line_base, kLineBytes)) {
+            const simrv::xlen::Address offset = line_base - geometry.dram_base;
+            std::memcpy(dram_ptr + offset, release_data->data(), kLineBytes);
+            stats_.writeback_count++;
+        }
+    }
+
     DirectoryEntry dir_entry{};
     if (lookup_dir_entry(line_base, dir_entry)) {
         dir_entry.sharers_mask &= ~(uint64_t{1} << req.hart);
-        if (req.opcode == TlOpcodeC::ReleaseData && release_data != nullptr) {
-            if (l3_enabled_) l3_cache_.write_line(line_base, *release_data, MesiState::Exclusive);
-            if (auto* l2 = l2_cache_for_hart(req.hart.val))
-                l2->cache.write_line(line_base, *release_data, MesiState::Exclusive);
-            auto* dram_ptr = machine_.ram_data();
-            const auto geometry = machine_.memory_geometry();
-            if (dram_ptr != nullptr && geometry.contains(line_base, kLineBytes)) {
-                const simrv::xlen::Address offset = line_base - geometry.dram_base;
-                std::memcpy(dram_ptr + offset, release_data->data(), kLineBytes);
-                stats_.writeback_count++;
-            }
-        }
         if (req.hart < machine_.num_harts()) {
             const auto& hart = machine_.hart(req.hart);
             const bool other_copy = hart.icache.line_state(line_base) != MesiState::Invalid ||

@@ -357,9 +357,11 @@ auto Machine::load_checkpoint(const std::string& filepath) -> std::expected<void
         cpu.e_icount = hart_state.instruction_count;
         cpu.e_ccount = hart_state.cycle_count;
         cpu.clint_mmio.mcycle = hart_state.mcycle;
+        cpu.dcache.flush();
         cpu.TLB_flush();
     }
     std::memcpy(ram.data(), ram_image.data(), ram_image.size());
+    memory().system_bus().coherence_hub().clear();
     return {};
 }
 
@@ -1183,6 +1185,19 @@ void OsRunner::finalize(Machine& machine) {
 
 void Machine::reset_state() {
     dma_engine_.clear();
+    auto& bus = memory().system_bus();
+    for (size_t hart = 0; hart < num_harts(); ++hart) {
+        const auto hart_id = this->hart(hart).hart_id();
+        bus.cancel_source(
+            simrv::memory::make_tl_source(hart_id, simrv::memory::TlPort::Instruction));
+        bus.cancel_source(simrv::memory::make_tl_source(hart_id, simrv::memory::TlPort::Data));
+        if (hart == 0) continue;
+        auto& cpu = this->hart(hart);
+        cpu.ca_pipeline.reset();
+        cpu.ca_state.reset_instruction();
+        cpu.dcache.flush();
+        cpu.TLB_flush();
+    }
     std::vector<uint32_t> asserted_platform_irqs;
     {
         std::scoped_lock lock(platform_irq_state_mutex_);
@@ -1214,6 +1229,7 @@ void Machine::reset_state() {
         std::memory_order_release);
     execution_state_.notify_all();
     primary_hart().reset();
+    bus.coherence_hub().clear();
     if (runtime_->ring_buffer_ethernet) runtime_->ring_buffer_ethernet->reset();
     if (config.bram_prewarm) {
         prewarm_bram_caches();
@@ -1245,6 +1261,7 @@ void Machine::switch_execution_engine_sync(ExecutionEngine engine) {
         if (to_cycle) {
             cpu.icache.flush(true);
             cpu.dcache.flush(true);
+            cpu.instruction_cache_timing.flush();
             cpu.branch_predictor.configure(cpu.pipeline_sim.config.branch_predictor);
             cpu.branch_predictor.reset();
             cpu.pipeline_sim.config.record_snapshots =
@@ -1290,7 +1307,9 @@ void Machine::prewarm_bram_caches() {
                     for (simrv::xlen::Address addr = start; addr < end; addr += kLineBytes) {
                         if (ram.contains(addr, kLineBytes)) {
                             cpu.icache.insert(addr, ram.unchecked_ptr(addr),
-                                              simrv::memory::MesiState::Exclusive);
+                                              simrv::memory::MesiState::Shared);
+                            memory().system_bus().coherence_hub().register_preloaded_line(
+                                addr, cpu.hart_id());
                         }
                     }
                 } else {
@@ -1305,7 +1324,9 @@ void Machine::prewarm_bram_caches() {
                     for (simrv::xlen::Address addr = start; addr < end; addr += kLineBytes) {
                         if (ram.contains(addr, kLineBytes)) {
                             cpu.dcache.insert(addr, ram.unchecked_ptr(addr),
-                                              simrv::memory::MesiState::Exclusive);
+                                              simrv::memory::MesiState::Shared);
+                            memory().system_bus().coherence_hub().register_preloaded_line(
+                                addr, cpu.hart_id());
                         }
                     }
                 }
@@ -1318,7 +1339,9 @@ void Machine::prewarm_bram_caches() {
             for (simrv::xlen::Address addr = dram_base; addr < i_end; addr += kILineBytes) {
                 if (ram.contains(addr, kILineBytes)) {
                     cpu.icache.insert(addr, ram.unchecked_ptr(addr),
-                                      simrv::memory::MesiState::Exclusive);
+                                      simrv::memory::MesiState::Shared);
+                    memory().system_bus().coherence_hub().register_preloaded_line(addr,
+                                                                                  cpu.hart_id());
                 }
             }
 
@@ -1329,7 +1352,9 @@ void Machine::prewarm_bram_caches() {
             for (simrv::xlen::Address addr = dmem_base; addr < d_end; addr += kDLineBytes) {
                 if (ram.contains(addr, kDLineBytes)) {
                     cpu.dcache.insert(addr, ram.unchecked_ptr(addr),
-                                      simrv::memory::MesiState::Exclusive);
+                                      simrv::memory::MesiState::Shared);
+                    memory().system_bus().coherence_hub().register_preloaded_line(addr,
+                                                                                  cpu.hart_id());
                 }
             }
         }

@@ -72,6 +72,7 @@ void release_instruction_eviction(Machine& machine, CPU& cpu) {
 // ==========================================
 
 void CPU::run_fetch_stage(Machine& machine) {
+    sync_decode_context();
     auto& ctx = active_context();
     if (!check_fetch_alignment(state_, ctx)) return;
 
@@ -153,11 +154,14 @@ void CPU::fetch_address_translate(Machine& machine) {
             if (tlb_e1) {
                 w_padr1 = tlb_e1->p_addr + (w_vadr1 & simrv::memory::kPageMask);
                 simrv::xlen::Byte* const host_base =
-                    machine.ram_view().contains(tlb_e1->p_addr, 4096)
+                    (machine.ram_view().contains(tlb_e1->p_addr, 4096) &&
+                     (state_.num_active_pmp == 0 ||
+                      core::pmp::check_access(state_, tlb_e1->p_addr, 4096,
+                                              core::PmpAccessType::Execute, state_.priv)))
                         ? machine.ram_view().unchecked_ptr(tlb_e1->p_addr)
                         : nullptr;
                 soft_tlb_inst[tlb_idx1].set(vpn1, current_asid, state_.priv, soft_tlb_epoch,
-                                            tlb_e1->p_addr, host_base);
+                                            tlb_e1->p_addr, host_base, tlb_e1->global);
             }
         }
 
@@ -177,11 +181,14 @@ void CPU::fetch_address_translate(Machine& machine) {
                 if (tlb_e2) {
                     w_padr2 = tlb_e2->p_addr + (w_vadr2 & simrv::memory::kPageMask);
                     simrv::xlen::Byte* const host_base =
-                        machine.ram_view().contains(tlb_e2->p_addr, 4096)
+                        (machine.ram_view().contains(tlb_e2->p_addr, 4096) &&
+                         (state_.num_active_pmp == 0 ||
+                          core::pmp::check_access(state_, tlb_e2->p_addr, 4096,
+                                                  core::PmpAccessType::Execute, state_.priv)))
                             ? machine.ram_view().unchecked_ptr(tlb_e2->p_addr)
                             : nullptr;
                     soft_tlb_inst[tlb_idx2].set(vpn2, current_asid, state_.priv, soft_tlb_epoch,
-                                                tlb_e2->p_addr, host_base);
+                                                tlb_e2->p_addr, host_base, tlb_e2->global);
                 }
             }
         }
@@ -224,7 +231,10 @@ void CPU::fetch_resolve_page_walk(Machine& machine, int state) {
                     const simrv::xlen::Address vpn = w_vadr >> 12;
                     const simrv::xlen::PhysAddr page_base = w_padr & ~simrv::memory::kPageMask;
                     simrv::xlen::Byte* const host_base =
-                        machine.ram_view().contains(page_base, 4096)
+                        (machine.ram_view().contains(page_base, 4096) &&
+                         (state_.num_active_pmp == 0 ||
+                          core::pmp::check_access(state_, page_base, 4096,
+                                                  core::PmpAccessType::Execute, state_.priv)))
                             ? machine.ram_view().unchecked_ptr(page_base)
                             : nullptr;
                     soft_tlb_inst[core::CPU::soft_tlb_index(vpn)].set(
@@ -300,7 +310,13 @@ auto CPU::translate_stage_address(Machine& machine, simrv::xlen::VirtAddr virtua
     request.hart = hart_id();
     request.address = walk.pte_address;
     request.data = walk.status == PageWalkStatus::WritePte ? walk.pte_update_mask : walk.pte;
-    machine.memory_.system_bus().send_request(request);
+    if (!machine.memory_.system_bus().send_request(request)) {
+        ca_state.waiting_for_interconnect = false;
+        Mmu::fail_page_walk_access(walk);
+        const auto fault = walk.fault;
+        timed_walk.reset();
+        return std::expected<PageWalkResult, simrv::xlen::TrapCause>{std::unexpected(fault)};
+    }
     timed_walk.request_pending = true;
     ca_state.waiting_for_interconnect = true;
     return std::nullopt;
@@ -436,7 +452,13 @@ void CPU::fetch_read_instruction_word(Machine& machine) {
                 req.hart = hart_id();
                 req.source = fill.source;
                 req.address = line_base;
-                machine.memory_.system_bus().send_request(req);
+                if (!machine.memory_.system_bus().send_request(req)) {
+                    ca_state.waiting_for_interconnect = false;
+                    ctx.pending_exception = ExceptionCode::FaultFetch;
+                    ctx.pending_tval = state_.pc;
+                    fill.reset();
+                    return;
+                }
                 fill.request_pending = true;
                 ca_state.waiting_for_interconnect = true;
                 return;
@@ -533,7 +555,13 @@ void CPU::fetch_read_instruction_word(Machine& machine) {
                 req.hart = hart_id();
                 req.source = fill.source;
                 req.address = h_line_base;
-                machine.memory_.system_bus().send_request(req);
+                if (!machine.memory_.system_bus().send_request(req)) {
+                    ca_state.waiting_for_interconnect = false;
+                    ctx.pending_exception = ExceptionCode::FaultFetch;
+                    ctx.pending_tval = vaddr;
+                    fill.reset();
+                    return std::nullopt;
+                }
                 fill.request_pending = true;
                 ca_state.waiting_for_interconnect = true;
                 return std::nullopt;
@@ -586,7 +614,12 @@ void CPU::fetch_read_instruction_word(Machine& machine) {
         req_l.source =
             simrv::memory::make_tl_source(req_l.hart, simrv::memory::TlPort::Instruction);
         req_l.address = ctx.padr1.raw();
-        machine.memory_.system_bus().send_request(req_l);
+        if (!machine.memory_.system_bus().send_request(req_l)) {
+            ca_state.waiting_for_interconnect = false;
+            ctx.pending_exception = ExceptionCode::FaultFetch;
+            ctx.pending_tval = state_.pc;
+            return;
+        }
         simrv::memory::TlChannelD resp_l{};
         if (!machine.memory_.system_bus().get_response(req_l.source, resp_l) || resp_l.failed()) {
             ctx.pending_exception = ExceptionCode::FaultFetch;
@@ -612,7 +645,12 @@ void CPU::fetch_read_instruction_word(Machine& machine) {
                 req_h.source =
                     simrv::memory::make_tl_source(req_h.hart, simrv::memory::TlPort::Instruction);
                 req_h.address = ctx.padr2.raw();
-                machine.memory_.system_bus().send_request(req_h);
+                if (!machine.memory_.system_bus().send_request(req_h)) {
+                    ca_state.waiting_for_interconnect = false;
+                    ctx.pending_exception = ExceptionCode::FaultFetch;
+                    ctx.pending_tval = state_.pc + 2;
+                    return;
+                }
                 simrv::memory::TlChannelD resp_h{};
                 if (!machine.memory_.system_bus().get_response(req_h.source, resp_h) ||
                     resp_h.failed()) {

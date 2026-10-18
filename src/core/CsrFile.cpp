@@ -121,10 +121,6 @@ void CsrFile::setMstatus(simrv::xlen::CsrValue wdata) {
         }
     }
     simrv::xlen::CsrValue const mod = cpu_.state().mstatus ^ wdata;
-    // Bits whose change must flush the TLB and decode cache:
-    // - Mprv/Sum/Mxr: address translation mode changes
-    // - Fs/Vs: FP/Vector state enable changes invalidate cached illegal-instruction checks
-    // - Sxl/Uxl (bits 35:34 and 33:32): XLEN changes alter RVC decompression (C.JAL vs C.ADDIW)
     const simrv::xlen::CsrValue tlb_sensitive =
         MstatusBit::Mprv | MstatusBit::Sum | MstatusBit::Mxr | MstatusBit::Fs | MstatusBit::Vs;
     const auto xlen_bits = static_cast<simrv::xlen::CsrValue>(uint64_t{0xFULL} << 32U);
@@ -138,6 +134,7 @@ void CsrFile::setMstatus(simrv::xlen::CsrValue wdata) {
     // otherwise SD and effective-XLEN calculations could observe absent state.
     cpu_.state().mstatus &= mask;
     cpu_.state().update_xlen();
+    cpu_.sync_decode_context();
 }
 
 auto CsrFile::read(simrv::xlen::CsrNumber addr) const
@@ -663,7 +660,6 @@ auto CsrFile::write(simrv::xlen::CsrNumber addr, simrv::xlen::CsrValue wdata)
                 if (cpu_.state().satp != wdata) {
                     cpu_.state().satp = wdata;
                     cpu_.TLB_flush();
-                    cpu_.decode_cache.flush();
                 }
                 // Latch: once translation is enabled it is never "un-seen"
                 if (mode != 0) {
