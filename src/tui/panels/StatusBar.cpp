@@ -102,7 +102,7 @@ struct LeftHeaderLayout {
                                   type == simrv::pipeline::PipelineType::ThreeStage ? 3 : 5);
     }
     if (machine.num_harts() > 1) {
-        const std::string smp_mode = machine.is_smp_enabled() ? "CO" : "CA";
+        const std::string smp_mode = machine.is_smp_enabled() ? "MT" : "ST";
         result.mode += std::format(" · SMP:{} ({})", machine.num_harts(), smp_mode);
     }
     return result;

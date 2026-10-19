@@ -748,7 +748,9 @@ auto InspectorPane::current_student_guidance() const -> PageGuidance {
          .cfu_has_plugin = cfu_plugin,
          .cfu_plugin_path = std::move(cfu_plugin_path),
          .cfu_latency = cfu_lat,
-         .cfu_stall_cycles = cfu_stalls});
+         .cfu_stall_cycles = cfu_stalls,
+         .cpu_clock_hz = machine_.configuration().execution.cpu_clock_hz,
+         .timebase_hz = machine_.configuration().execution.timebase_hz});
 }
 
 auto InspectorPane::render_guidance_row(int row_idx, int width) -> std::string {

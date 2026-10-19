@@ -236,6 +236,7 @@ auto Sbi::handle_hsm(simrv::xlen::Word func_id) -> bool {
             target_cpu.state().regs.write(simrv::xlen::RegId::A0, target_hart);
             target_cpu.state().regs.write(simrv::xlen::RegId::A1, opaque);
             target_cpu.hart_status.store(HartStatus::Started, std::memory_order_release);
+            target_cpu.wake_from_wfi();
             target_cpu.hart_status.notify_all();
             cpu_.machine_->notify_control_event();
             sbi_return(static_cast<simrv::xlen::SignedWord>(SbiError::Success), 0);

@@ -4,6 +4,7 @@
  */
 #pragma once
 
+#include <atomic>
 #include <cstdint>
 #include <deque>
 #include <mutex>
@@ -72,17 +73,20 @@ class TileLinkBus : public Bus {
 
     /// Advance deterministic arbitration by one interconnect clock.
     SIMRV_ALWAYS_INLINE void advance_cycle() noexcept {
-        if (simrv::compiler::likely(!has_pending_requests_ && !is_smp_enabled_)) {
-            ++cycle_;
+        if (simrv::compiler::likely(!has_pending_requests_.load(std::memory_order_relaxed))) {
+            cycle_.fetch_add(1, std::memory_order_relaxed);
             return;
         }
         advance_cycle_slow();
     }
     void advance_cycle_slow();
-    [[nodiscard]] auto cycle() const noexcept -> Cycle { return cycle_; }
+    [[nodiscard]] auto cycle() const noexcept -> Cycle {
+        return cycle_.load(std::memory_order_relaxed);
+    }
     [[nodiscard]] auto pending_requests() const noexcept -> size_t { return req_queue_.size(); }
     [[nodiscard]] auto pending_responses() const noexcept -> size_t;
     void set_smp_enabled(bool enabled) noexcept { is_smp_enabled_ = enabled; }
+    [[nodiscard]] auto is_smp_enabled() const noexcept -> bool { return is_smp_enabled_; }
 
     auto acquire_block(const TlChannelA& req, TlChannelD& resp,
                        std::array<simrv::xlen::Byte, CoherenceHub::kLineBytes>& line_data) -> bool;
@@ -158,7 +162,7 @@ class TileLinkBus : public Bus {
     MmioRouter router_;
     CoherenceHub coherence_hub_;
     TileLinkProtocolChecker protocol_checker_;
-    Cycle cycle_ = 0;
+    std::atomic<Cycle> cycle_{0};
     uint64_t next_sequence_ = 0;
     uint32_t request_latency_ = 1;
     uint32_t response_latency_ = 1;
@@ -166,13 +170,12 @@ class TileLinkBus : public Bus {
     uint32_t data_response_latency_ = 1;
     uint32_t startup_data_response_latency_ = 0;
     uint64_t data_response_count_ = 0;
-    bool has_pending_requests_ = false;
+    std::atomic<bool> has_pending_requests_{false};
     bool is_smp_enabled_ = false;
     std::deque<TimedRequest> req_queue_;
     std::deque<TimedDBeat> d_queue_;
     simrv::util::SmallFlatMap<TlSourceId, DAssembly, 32> d_assemblies_;
     std::deque<TlTransactionRecord> transaction_history_;
-    [[nodiscard]] auto is_smp_enabled() const noexcept -> bool { return is_smp_enabled_; }
 };
 
 }  // namespace simrv::memory

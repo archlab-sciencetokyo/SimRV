@@ -552,9 +552,10 @@ void Tracer::init_architecture_trace(const std::string& path) {
             ? std::format("{}", std::to_underlying(*config.branch_predictor_type))
             : "null",
         config.execution.smp_quantum,
-        json_quote(config.execution.smp_mode.value_or(config.soc.smp.mode) == SmpMode::CycleAccurate
-                       ? "cycle-accurate"
-                       : "cycle-oriented"),
+        json_quote(config.execution.smp_mode.value_or(config.soc.smp.mode) ==
+                           SmpMode::SingleThreaded
+                       ? "single-threaded"
+                       : "multi-threaded"),
         json_quote(config.soc.name), json_quote(config.soc.cpu_model), config.soc.enable_pcie,
         config.soc.enable_mmio, config.soc.disable_unlisted_devices, config.debug.trace_level,
         json_quote(config.debug.trace_events), json_quote(config.debug.trace_function),

@@ -988,10 +988,13 @@ inline auto parse_soc_config_stream(std::istream& stream, simrv::core::SoCConfig
                 else if (key == "synchronization_quantum" || key == "sync_quantum")
                     config.smp.synchronization_quantum = static_cast<uint32_t>(*parsed);
             } else if (key == "mode") {
-                if (detail::iequals(value, "cycle-accurate"))
-                    config.smp.mode = simrv::core::SmpMode::CycleAccurate;
-                else if (detail::iequals(value, "cycle-oriented"))
-                    config.smp.mode = simrv::core::SmpMode::CycleOriented;
+                if (detail::iequals(value, "single-threaded") ||
+                    detail::iequals(value, "lockstep") || detail::iequals(value, "cycle-accurate"))
+                    config.smp.mode = simrv::core::SmpMode::SingleThreaded;
+                else if (detail::iequals(value, "multi-threaded") ||
+                         detail::iequals(value, "parallel") ||
+                         detail::iequals(value, "cycle-oriented"))
+                    config.smp.mode = simrv::core::SmpMode::MultiThreaded;
                 else
                     return false;
             }

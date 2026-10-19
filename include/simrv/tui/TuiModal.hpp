@@ -119,7 +119,7 @@ struct SettingsDraft {
     bool lockstep_mode = false;
     uint32_t num_harts = 1;
     uint32_t smp_quantum = 1000;
-    bool smp_cycle_oriented = false;
+    bool smp_multi_threaded = false;
     uint8_t platform_profile = 0;  // 0: PCIe, 1: MMIO
     uint64_t dram_size_mb = 256;
     std::string net_mode = "user";

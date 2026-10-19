@@ -548,7 +548,7 @@ void test_sysconfig_modal_modes() {
     settings_draft.tui_fps = 30;
     settings_draft.num_harts = 1;
     settings_draft.smp_quantum = 1000;
-    settings_draft.smp_cycle_oriented = false;
+    settings_draft.smp_multi_threaded = false;
     int s_cursor = 0;
 
     SettingsModal::move_cursor(s_cursor, 3);
@@ -561,7 +561,7 @@ void test_sysconfig_modal_modes() {
     expect(settings_draft.num_harts == 4, "Settings modal adjusts SMP active core count");
 
     SettingsModal::adjust_setting(settings_draft, 5, 1);
-    expect(settings_draft.smp_cycle_oriented == true,
+    expect(settings_draft.smp_multi_threaded == true,
            "Settings modal toggles the SMP execution mode");
 
     SettingsModal::adjust_setting(settings_draft, 6, 1);

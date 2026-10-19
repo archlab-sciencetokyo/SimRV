@@ -109,10 +109,11 @@ void RunnerBase::wait_for_quiescence() { wait_for_worker_quiescence(workers_in_c
 
 void RunnerBase::stop_threads() {
     workers_running_.store(false, std::memory_order_release);
-    cycle_oriented_generation_.fetch_add(1, std::memory_order_release);
-    cycle_oriented_completed_.fetch_add(1, std::memory_order_release);
-    cycle_oriented_generation_.notify_all();
-    cycle_oriented_completed_.notify_all();
+    workers_sleeping_.store(0, std::memory_order_relaxed);
+    cycle_generation_.fetch_add(1, std::memory_order_release);
+    cycle_completed_.fetch_add(1, std::memory_order_release);
+    cycle_generation_.notify_all();
+    cycle_completed_.notify_all();
     if (machine_ != nullptr) machine_->notify_control_event();
     const auto self_id = std::this_thread::get_id();
     for (auto& thread : worker_threads_) {
@@ -128,18 +129,34 @@ void RunnerBase::stop_threads() {
     worker_threads_.clear();
 }
 
-void RunnerBase::synchronize_cycle_oriented_workers(Machine& machine) {
+void RunnerBase::synchronize_multithreaded_workers(Machine& machine) {
     if (!machine.runtime_profile.is_cycle_mode() || !machine.is_smp_enabled() ||
         worker_threads_.empty()) {
         return;
     }
-    cycle_oriented_completed_.store(0, std::memory_order_relaxed);
-    cycle_oriented_generation_.fetch_add(1, std::memory_order_release);
-    cycle_oriented_generation_.notify_all();
+    if (simrv::compiler::unlikely(machine.runtime_->secondary_hart_count !=
+                                  machine.runtime_->secondary_harts.size())) {
+        machine.runtime_->refresh_secondary_hart_ptrs();
+    }
+    const auto target = machine.runtime_->secondary_hart_count;
+    cycle_completed_.store(0, std::memory_order_relaxed);
+    cycle_generation_.fetch_add(1, std::memory_order_release);
+    if (simrv::compiler::unlikely(workers_sleeping_.load(std::memory_order_relaxed) > 0)) {
+        cycle_generation_.notify_all();
+    }
+
+    constexpr uint32_t kSpinLimit = 1000;
+    for (uint32_t spin = 0; spin < kSpinLimit; ++spin) {
+        if (cycle_completed_.load(std::memory_order_acquire) >= target) {
+            return;
+        }
+        simrv::compiler::cpu_relax();
+    }
+
     while (workers_running_.load(std::memory_order_acquire)) {
-        const auto completed = cycle_oriented_completed_.load(std::memory_order_acquire);
-        if (completed >= machine.runtime_->secondary_harts.size()) return;
-        cycle_oriented_completed_.wait(completed, std::memory_order_acquire);
+        const auto completed = cycle_completed_.load(std::memory_order_acquire);
+        if (completed >= target) return;
+        cycle_completed_.wait(completed, std::memory_order_acquire);
     }
 }
 
@@ -197,8 +214,10 @@ void Machine::apply_configuration(MachineConfig machine_config) {
     resolved_isatest_tohost_ = config.isa.isatest_tohost;
     framebuffer_geometry_ = config.framebuffer;
     is_smp_enabled_ =
-        config.execution.smp_mode.value_or(config.soc.smp.mode) == SmpMode::CycleOriented;
+        config.execution.smp_mode.value_or(config.soc.smp.mode) == SmpMode::MultiThreaded;
     memory_.system_bus().set_smp_enabled(is_smp_enabled_);
+    clock_divider_ = simrv::core::timing::DeterministicClockDivider(config.execution.cpu_clock_hz,
+                                                                    config.execution.timebase_hz);
     if (tui_enabled() || debugger_enabled()) {
         execution_state_.store(ExecutionState::Paused, std::memory_order_release);
     }
@@ -243,6 +262,7 @@ auto Machine::mutable_ram_data_for_testing() noexcept -> simrv::xlen::Byte*& {
 void Machine::add_hart_for_testing(std::unique_ptr<CPU> hart) {
     hart->machine_ = this;
     runtime_->secondary_harts.push_back(std::move(hart));
+    runtime_->refresh_secondary_hart_ptrs();
 }
 
 auto Machine::test_secondary_harts() noexcept -> std::vector<std::unique_ptr<simrv::core::CPU>>& {
@@ -836,8 +856,9 @@ void RunnerBase::start_threads(Machine& machine, bool baremetal) {
     }
     stop_threads();
     machine_ = &machine;
-    cycle_oriented_generation_.store(0, std::memory_order_relaxed);
-    cycle_oriented_completed_.store(0, std::memory_order_relaxed);
+    cycle_generation_.store(0, std::memory_order_relaxed);
+    workers_sleeping_.store(0, std::memory_order_relaxed);
+    cycle_completed_.store(0, std::memory_order_relaxed);
     workers_running_.store(true, std::memory_order_release);
     const bool poll_debug_pause = machine.debugger_enabled() || machine.tui_enabled();
     for (size_t i = 0; i < machine.runtime_->secondary_harts.size(); ++i) {
@@ -865,22 +886,31 @@ void RunnerBase::start_threads(Machine& machine, bool baremetal) {
                     continue;
                 }
                 if (machine.runtime_profile.is_cycle_mode()) {
-                    auto generation = cycle_oriented_generation_.load(std::memory_order_acquire);
-                    while (generation <= observed_cycle_generation &&
-                           workers_running_.load(std::memory_order_acquire) &&
-                           !stop_token.stop_requested()) {
-                        cycle_oriented_generation_.wait(generation, std::memory_order_acquire);
-                        generation = cycle_oriented_generation_.load(std::memory_order_acquire);
+                    auto generation = cycle_generation_.load(std::memory_order_acquire);
+                    if (generation <= observed_cycle_generation) {
+                        constexpr uint32_t kWorkerSpinLimit = 800;
+                        for (uint32_t spin = 0; spin < kWorkerSpinLimit; ++spin) {
+                            simrv::compiler::cpu_relax();
+                            generation = cycle_generation_.load(std::memory_order_acquire);
+                            if (generation > observed_cycle_generation) break;
+                        }
+                    }
+                    if (generation <= observed_cycle_generation) {
+                        workers_sleeping_.fetch_add(1, std::memory_order_relaxed);
+                        while (generation <= observed_cycle_generation &&
+                               workers_running_.load(std::memory_order_acquire) &&
+                               !stop_token.stop_requested()) {
+                            cycle_generation_.wait(generation, std::memory_order_acquire);
+                            generation = cycle_generation_.load(std::memory_order_acquire);
+                        }
+                        workers_sleeping_.fetch_sub(1, std::memory_order_relaxed);
                     }
                     if (!workers_running_.load(std::memory_order_acquire) ||
                         stop_token.stop_requested()) {
                         break;
                     }
-                    const auto work_generation =
-                        cycle_oriented_generation_.load(std::memory_order_acquire);
-                    observed_cycle_generation = work_generation;
+                    observed_cycle_generation = generation;
 
-                    workers_in_cycle_.fetch_add(1, std::memory_order_acq_rel);
                     g_secondary_runner_active = true;
                     if (hart.hart_status.load(std::memory_order_relaxed) == HartStatus::Started) {
                         hart.pipeline_context.pending_exception = std::nullopt;
@@ -890,11 +920,11 @@ void RunnerBase::start_threads(Machine& machine, bool baremetal) {
                     }
                     machine.publish_requested_tui_sample(i + 1);
                     g_secondary_runner_active = false;
-                    workers_in_cycle_.fetch_sub(1, std::memory_order_acq_rel);
-                    workers_in_cycle_.notify_all();
 
-                    cycle_oriented_completed_.fetch_add(1, std::memory_order_release);
-                    cycle_oriented_completed_.notify_one();
+                    const auto prev = cycle_completed_.fetch_add(1, std::memory_order_release);
+                    if (prev + 1 >= machine.runtime_->secondary_hart_count) {
+                        cycle_completed_.notify_one();
+                    }
                     continue;
                 }
                 for (uint32_t step = 0;
@@ -1976,6 +2006,10 @@ void Machine::finalize_cycle_tohost() {
                     // Write success response (bytes written) to fromhost
                     uint64_t resp = arg2;
                     std::memcpy(ram.unchecked_ptr(fromhost_addr), &resp, sizeof(resp));
+                    for (size_t i = 0; i < num_harts(); ++i) {
+                        hart(i).dcache.probe_line(fromhost_addr, simrv::memory::MesiState::Invalid);
+                    }
+                    memory_.system_bus().coherence_hub().invalidate_line_external(fromhost_addr);
                     tohost = 0;
                     return;
                 } else if (syscall_num == 93) {  // SYS_exit
@@ -2042,12 +2076,15 @@ Machine::~Machine() {
 }
 
 void Machine::advance_ca_global_cycle() {
-    primary_hart().run_cycle(*this);
-    if (simrv::compiler::unlikely(!runtime_->secondary_harts.empty())) {
-        for (const auto [i, secondary] : std::views::enumerate(runtime_->secondary_harts)) {
-            if (secondary->hart_status.load(std::memory_order_relaxed) == HartStatus::Started) {
-                secondary->run_cycle(*this);
-            }
+    primary_hart().run_ca_cycle_fast(*this);
+    if (simrv::compiler::unlikely(runtime_->secondary_hart_count !=
+                                  runtime_->secondary_harts.size())) {
+        runtime_->refresh_secondary_hart_ptrs();
+    }
+    for (size_t i = 0; i < runtime_->secondary_hart_count; ++i) {
+        auto* secondary = runtime_->secondary_hart_ptrs[i];
+        if (secondary->hart_status.load(std::memory_order_relaxed) == HartStatus::Started) {
+            secondary->run_ca_cycle_fast(*this);
         }
     }
 
@@ -2055,9 +2092,11 @@ void Machine::advance_ca_global_cycle() {
 }
 
 void Machine::advance_ca_primary_cycle() {
-    primary_hart().run_cycle(*this);
-    std::visit([this](auto& runner) { runner.synchronize_cycle_oriented_workers(*this); },
-               runtime_->runner);
+    primary_hart().run_ca_cycle_fast(*this);
+    if (simrv::compiler::unlikely(is_smp_enabled_)) {
+        std::visit([this](auto& runner) { runner.synchronize_multithreaded_workers(*this); },
+                   runtime_->runner);
+    }
     advance_ca_platform_cycle(false);
 }
 
@@ -2069,16 +2108,20 @@ void Machine::advance_ca_platform_cycle(bool synchronize_secondary_harts) {
     auto& cpu = primary_hart();
     memory_.system_bus().advance_cycle();
     dma_engine_.advance_cycle(memory_.system_bus().cycle());
-    if (simrv::compiler::unlikely(++cpu.clint_mmio.rtc_divider >= timing::kCyclesPerTimebaseTick)) {
-        ++cpu.clint_mmio.mtime;
-        cpu.clint_mmio.rtc_divider = 0;
+    if (clock_divider_.advance_ca_cycle(cpu.clint_mmio.rtc_divider, cpu.clint_mmio.mtime)) {
         cpu.evaluate_timer_interrupt();
-        if (synchronize_secondary_harts &&
-            simrv::compiler::unlikely(!runtime_->secondary_harts.empty())) {
-            const auto global_time = cpu.clint_mmio.mtime.load(std::memory_order_relaxed);
-            for (auto& secondary : runtime_->secondary_harts) {
-                secondary->clint_mmio.mtime.store(global_time, std::memory_order_relaxed);
-                secondary->evaluate_timer_interrupt();
+        if (synchronize_secondary_harts) {
+            if (simrv::compiler::unlikely(runtime_->secondary_hart_count !=
+                                          runtime_->secondary_harts.size())) {
+                runtime_->refresh_secondary_hart_ptrs();
+            }
+            if (runtime_->secondary_hart_count != 0) {
+                const auto global_time = cpu.clint_mmio.mtime.load(std::memory_order_relaxed);
+                for (size_t i = 0; i < runtime_->secondary_hart_count; ++i) {
+                    auto* secondary = runtime_->secondary_hart_ptrs[i];
+                    secondary->clint_mmio.mtime.store(global_time, std::memory_order_relaxed);
+                    secondary->evaluate_timer_interrupt();
+                }
             }
         }
     }

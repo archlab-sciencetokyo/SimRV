@@ -49,8 +49,9 @@ void TileLinkBus::record_transaction(TileLinkChannel ch, std::string_view opcode
     if (transaction_history_.size() >= kMaxTransactionHistory) {
         transaction_history_.pop_front();
     }
+    const auto current_cycle = cycle_.load(std::memory_order_relaxed);
     transaction_history_.push_back(TlTransactionRecord{
-        .cycle = cycle_,
+        .cycle = current_cycle,
         .channel = ch,
         .opcode = opcode,
         .source = source,
@@ -60,7 +61,7 @@ void TileLinkBus::record_transaction(TileLinkChannel ch, std::string_view opcode
     });
     if (machine_.trace().is_architecture_trace_enabled()) {
         machine_.trace().log_bus_transaction(
-            cycle_, to_char(ch), opcode, source, sink, address, detail,
+            current_cycle, to_char(ch), opcode, source, sink, address, detail,
             trace_context != nullptr ? *trace_context : simrv::core::BusTraceContext{});
     }
 }
@@ -89,11 +90,12 @@ auto TileLinkBus::send_request(const TlChannelA& req) -> bool {
     simrv::core::BusTraceContext trace_context;
     const bool capture_trace_context = machine_.trace().is_architecture_trace_enabled() &&
                                        machine_.configuration().debug.trace_level >= 4;
+    const auto current_cycle = cycle_.load(std::memory_order_relaxed);
     if (capture_trace_context) {
         const auto* target = router_.resolve_device(req.address.raw());
         trace_context = {
             .sequence = next_sequence_,
-            .request_cycle = cycle_,
+            .request_cycle = current_cycle,
             .completion_cycle = std::nullopt,
             .latency_cycles = std::nullopt,
             .hart = req.hart.val,
@@ -113,7 +115,7 @@ auto TileLinkBus::send_request(const TlChannelA& req) -> bool {
     record_transaction(TileLinkChannel::A, to_string(req.opcode), req.source, 0, req.address.raw(),
                        to_string(req.grow), capture_trace_context ? &trace_context : nullptr);
     const auto logical_cycle =
-        req.logical_cycle == std::numeric_limits<Cycle>::max() ? cycle_ : req.logical_cycle;
+        req.logical_cycle == std::numeric_limits<Cycle>::max() ? current_cycle : req.logical_cycle;
     TimedRequest timed_request{
         .payload = req,
         .submitted_cycle = logical_cycle,
@@ -133,18 +135,18 @@ auto TileLinkBus::send_request(const TlChannelA& req) -> bool {
                    std::tuple{rhs.submitted_cycle, rhs.payload.hart.val, rhs_issue, rhs.sequence};
         });
     req_queue_.insert(position, std::move(timed_request));
-    has_pending_requests_ = true;
+    has_pending_requests_.store(true, std::memory_order_release);
     return true;
 }
 
 void TileLinkBus::advance_cycle_slow() {
-    SmpLockGuard lock(bus_mutex_, is_smp_enabled_);
-    ++cycle_;
+    SmpLockGuard lock(bus_mutex_, is_smp_enabled());
+    const auto current_cycle = cycle_.fetch_add(1, std::memory_order_relaxed) + 1;
     if (!req_queue_.empty() &&
-        req_queue_.front().submitted_cycle + req_queue_.front().request_latency <= cycle_) {
+        req_queue_.front().submitted_cycle + req_queue_.front().request_latency <= current_cycle) {
         auto request = std::move(req_queue_.front());
         req_queue_.pop_front();
-        has_pending_requests_ = !req_queue_.empty();
+        has_pending_requests_.store(!req_queue_.empty(), std::memory_order_release);
         process_request(request);
     }
 }
@@ -287,7 +289,8 @@ void TileLinkBus::process_request(const TimedRequest& request) {
             ? startup_data_response_latency_
             : (data_port ? data_response_latency_ : response_latency_);
     response_latency += cache_service_latency - 1;
-    if (machine_.dma_engine().is_transfer_active(cycle_)) {
+    const auto current_cycle = cycle_.load(std::memory_order_relaxed);
+    if (machine_.dma_engine().is_transfer_active(current_cycle)) {
         response_latency += machine_.dma_engine().config().memory_contention_penalty;
     }
     if (data_port) ++data_response_count_;
@@ -300,7 +303,7 @@ void TileLinkBus::process_request(const TimedRequest& request) {
             .payload = payload,
             // A latency of one exposes the first beat in the request-completion cycle. Each
             // following beat occupies its own D-channel transfer cycle.
-            .ready_cycle = cycle_ + response_latency - 1 + beat,
+            .ready_cycle = current_cycle + response_latency - 1 + beat,
             .sequence = request.sequence,
             .beat_index = beat,
             .beat_count = beat_count,
@@ -314,8 +317,8 @@ void TileLinkBus::process_request(const TimedRequest& request) {
         response_context = {
             .sequence = request.sequence,
             .request_cycle = request.submitted_cycle,
-            .completion_cycle = cycle_ + response_latency - 1,
-            .latency_cycles = cycle_ + response_latency - 1 - request.submitted_cycle,
+            .completion_cycle = current_cycle + response_latency - 1,
+            .latency_cycles = current_cycle + response_latency - 1 - request.submitted_cycle,
             .hart = req.hart.val,
             .transfer_size = req.size,
             .burst_length = beat_count,
@@ -344,7 +347,7 @@ void TileLinkBus::cancel_source(TlSourceId source_id) {
     std::erase_if(req_queue_, [source_id](const TimedRequest& request) {
         return request.payload.source == source_id;
     });
-    has_pending_requests_ = !req_queue_.empty();
+    has_pending_requests_.store(!req_queue_.empty(), std::memory_order_release);
     std::erase_if(d_queue_, [source_id](const TimedDBeat& response) {
         return response.payload.source == source_id;
     });
@@ -384,9 +387,12 @@ auto TileLinkBus::get_response(TlSourceId source_id, TlChannelD& resp) -> bool {
 auto TileLinkBus::consume_d_beat(TlSourceId source_id, bool honor_ready, TimedResponse& response)
     -> bool {
     if (d_queue_.empty()) return false;
-    auto beat = std::ranges::find_if(d_queue_, [this, source_id, honor_ready](const auto& item) {
-        return item.payload.source == source_id && (!honor_ready || item.ready_cycle <= cycle_);
-    });
+    const auto current_cycle = cycle_.load(std::memory_order_relaxed);
+    auto beat =
+        std::ranges::find_if(d_queue_, [source_id, honor_ready, current_cycle](const auto& item) {
+            return item.payload.source == source_id &&
+                   (!honor_ready || item.ready_cycle <= current_cycle);
+        });
     if (beat == d_queue_.end()) return false;
 
     auto [assembly_it, inserted] = d_assemblies_.try_emplace(source_id);

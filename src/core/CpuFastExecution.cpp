@@ -2390,10 +2390,8 @@ void CPU::run_fast_baremetal_batch(Machine& machine, uint32_t batch_size,
 
     if (cached_ops > 0) {
         clint_mmio.mcycle += cached_ops;
-        clint_mmio.rtc_divider += cached_ops;
-        if (clint_mmio.rtc_divider >= timing::kCyclesPerTimebaseTick) {
-            clint_mmio.mtime += clint_mmio.rtc_divider / timing::kCyclesPerTimebaseTick;
-            clint_mmio.rtc_divider %= timing::kCyclesPerTimebaseTick;
+        if (machine.clock_divider().advance_fast_cycles(cached_ops, clint_mmio.rtc_divider,
+                                                        clint_mmio.mtime) > 0) {
             evaluate_timer_interrupt();
         }
     }
@@ -2410,10 +2408,8 @@ SIMRV_ALWAYS_INLINE auto CPU::run_fast_os_kernel(Machine& machine, uint32_t batc
     auto flush_clint_and_retired = [&]() {
         if (chunk_cycles > 0) {
             clint_mmio.mcycle += chunk_cycles;
-            clint_mmio.rtc_divider += chunk_cycles;
-            if (clint_mmio.rtc_divider >= timing::kCyclesPerTimebaseTick) {
-                clint_mmio.mtime += clint_mmio.rtc_divider / timing::kCyclesPerTimebaseTick;
-                clint_mmio.rtc_divider %= timing::kCyclesPerTimebaseTick;
+            if (machine.clock_divider().advance_fast_cycles(chunk_cycles, clint_mmio.rtc_divider,
+                                                            clint_mmio.mtime) > 0) {
                 evaluate_timer_interrupt();
                 handle_cached_interrupts();
             }
@@ -2465,12 +2461,10 @@ SIMRV_ALWAYS_INLINE auto CPU::run_fast_os_kernel(Machine& machine, uint32_t batc
                             chain_size = 0;
                             compressed_count = 0;
                             clint_mmio.mcycle += chunk_cycles;
-                            clint_mmio.rtc_divider += chunk_cycles;
-                            if (simrv::compiler::unlikely(clint_mmio.rtc_divider >=
-                                                          timing::kCyclesPerTimebaseTick)) {
-                                clint_mmio.mtime +=
-                                    clint_mmio.rtc_divider / timing::kCyclesPerTimebaseTick;
-                                clint_mmio.rtc_divider %= timing::kCyclesPerTimebaseTick;
+                            if (simrv::compiler::unlikely(
+                                    machine.clock_divider().advance_fast_cycles(
+                                        chunk_cycles, clint_mmio.rtc_divider, clint_mmio.mtime) >
+                                    0)) {
                                 evaluate_timer_interrupt();
                             }
                             chunk_cycles = 0;

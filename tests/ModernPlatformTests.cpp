@@ -1451,7 +1451,7 @@ void test_global_cycle_smp_amo_retry() {
     std::cout << "[PASS] test_global_cycle_smp_amo_retry\n";
 }
 
-void test_cycle_oriented_parallel_matches_global_cycle() {
+void test_multithreaded_parallel_matches_global_cycle() {
     const auto run = [](simrv::core::SmpMode mode) {
         simrv::core::Machine machine(simrv::core::MachineConfig{
             .execution = {.appmode = true, .smp_quantum = 7, .smp_mode = mode}});
@@ -1475,13 +1475,13 @@ void test_cycle_oriented_parallel_matches_global_cycle() {
         std::memcpy(ram.data(), program.data(), sizeof(program));
         machine.hart(0).state().pc = pc;
         machine.hart(1).state().pc = pc;
-        if (mode == simrv::core::SmpMode::CycleOriented) {
+        if (mode == simrv::core::SmpMode::MultiThreaded) {
             machine.start_runner_for_testing();
         }
         for (uint32_t cycle = 0; cycle < 40; ++cycle) {
             machine.execute_cycle_for_testing();
         }
-        if (mode == simrv::core::SmpMode::CycleOriented) {
+        if (mode == simrv::core::SmpMode::MultiThreaded) {
             machine.stop_runner_for_testing();
         }
         return std::array<std::array<uint64_t, 5>, 2>{
@@ -1495,13 +1495,13 @@ void test_cycle_oriented_parallel_matches_global_cycle() {
                                     machine.memory().system_bus().cycle()},
         };
     };
-    const auto deterministic = run(simrv::core::SmpMode::CycleAccurate);
-    const auto parallel = run(simrv::core::SmpMode::CycleOriented);
+    const auto deterministic = run(simrv::core::SmpMode::SingleThreaded);
+    const auto parallel = run(simrv::core::SmpMode::MultiThreaded);
     if (parallel != deterministic) {
-        std::cerr << "cycle-oriented SMP diverged from global-cycle execution\n";
+        std::cerr << "multi-threaded SMP diverged from global-cycle execution\n";
         std::abort();
     }
-    std::cout << "[PASS] test_cycle_oriented_parallel_matches_global_cycle\n";
+    std::cout << "[PASS] test_multithreaded_parallel_matches_global_cycle\n";
 }
 
 void test_global_cycle_timer_phase_ordering() {
@@ -1631,7 +1631,7 @@ void test_ca_mt_smp_pause_and_snapshots() {
         simrv::core::MachineConfig{.execution = {.appmode = false,
                                                  .num_harts = kNumHarts,
                                                  .smp_quantum = 32,
-                                                 .smp_mode = simrv::core::SmpMode::CycleOriented},
+                                                 .smp_mode = simrv::core::SmpMode::MultiThreaded},
                                    .tui = {.enabled = true, .inspection_output = {}}});
     std::vector<simrv::xlen::Byte> ram(1024 * 1024, simrv::xlen::Byte{0});
     machine.set_ram_for_testing(ram.data(), ram.size());
@@ -1768,7 +1768,7 @@ void test_tui_mode_sim_thread_multiple_step_sync() {
     ConcreteMachine machine(
         simrv::core::MachineConfig{.execution = {.appmode = true,
                                                  .num_harts = 2,
-                                                 .smp_mode = simrv::core::SmpMode::CycleOriented},
+                                                 .smp_mode = simrv::core::SmpMode::MultiThreaded},
                                    .tui = {.enabled = true, .inspection_output = {}}});
     std::vector<simrv::xlen::Byte> ram(1024 * 1024, simrv::xlen::Byte{0});
     machine.set_ram_for_testing(ram.data(), ram.size());
@@ -3370,7 +3370,7 @@ void test_ia_multithreaded_smp_execution() {
         if (!condition) std::abort();
     };
     simrv::core::Machine machine(simrv::core::MachineConfig{
-        .execution = {.appmode = true, .smp_mode = simrv::core::SmpMode::CycleOriented}});
+        .execution = {.appmode = true, .smp_mode = simrv::core::SmpMode::MultiThreaded}});
     std::vector<simrv::xlen::Byte> ram(1024 * 1024, simrv::xlen::Byte{0});
     machine.set_ram_for_testing(ram.data(), ram.size());
     machine.runtime_profile.engine = simrv::core::ExecutionEngine::InstructionFast;
@@ -4059,7 +4059,7 @@ int main(int argc, char** argv) {
     test_tilelink_c_prefetch_intent();
     test_global_cycle_smp_pipeline_ordering();
     test_global_cycle_smp_amo_retry();
-    test_cycle_oriented_parallel_matches_global_cycle();
+    test_multithreaded_parallel_matches_global_cycle();
     test_global_cycle_timer_phase_ordering();
     test_ca_quantum_smp_batching();
     test_ca_quantum_single_hart_batching();

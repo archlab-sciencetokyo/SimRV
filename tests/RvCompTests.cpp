@@ -275,7 +275,7 @@ void test_soc_manifest_export() {
     TEST_CHECK(text.find("\"manifest_version\": \"3.0\"") != std::string::npos);
     TEST_CHECK(text.find("\"generator\": \"simrv ") != std::string::npos);
     TEST_CHECK(text.find("\"smp\": {") != std::string::npos);
-    TEST_CHECK(text.find("\"mode\": \"cycle-accurate\"") != std::string::npos);
+    TEST_CHECK(text.find("\"mode\": \"single-threaded\"") != std::string::npos);
     TEST_CHECK(text.find("\"l3\": {\"enabled\": true") != std::string::npos);
     TEST_CHECK(text.find("\"device_policy\": \"explicit\"") != std::string::npos);
     TEST_CHECK(text.find("\"kind\": \"uart\"") != std::string::npos);

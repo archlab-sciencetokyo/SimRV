@@ -633,6 +633,7 @@ auto Machine::initialize() -> std::expected<void, std::string> {
             sec_cpu->TLB_flush();
             runtime_->secondary_harts.push_back(std::move(sec_cpu));
         }
+        runtime_->refresh_secondary_hart_ptrs();
     }
 
     if (config.bram_prewarm) {
@@ -656,9 +657,9 @@ auto Machine::initialize() -> std::expected<void, std::string> {
         std::vector<uint8_t> input_blob{std::istreambuf_iterator<char>(input),
                                         std::istreambuf_iterator<char>()};
         simrv::util::FdtFramebufferInfo fb_info{};
-        auto patched =
-            simrv::util::patch_fdt(input_blob, config.memory.dram_base, effective_dram_size,
-                                   config.execution.num_harts, &fb_info);
+        auto patched = simrv::util::patch_fdt(
+            input_blob, config.memory.dram_base, effective_dram_size, config.execution.num_harts,
+            &fb_info, config.execution.timebase_hz, config.execution.cpu_clock_hz);
         if (!patched) return std::unexpected(patched.error());
         if (fb_info.width > 0 && fb_info.height > 0) {
             framebuffer_geometry_.width = fb_info.width;
