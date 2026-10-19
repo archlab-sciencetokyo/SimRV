@@ -896,9 +896,63 @@ auto InspectorPane::render_pipeline_stages_functional_high(const simrv::core::CP
             return format_to_width("", width);
         }
         case 18:
+            return section_line("Instruction Flight Flow", width);
+        case 19: {
+            const bool has_mem =
+                pipeline::operation::is_load(ctx.op_id) || pipeline::operation::is_store(ctx.op_id);
+            const bool has_wb = pipeline::operation::writes_integer(ctx.op_id) ||
+                                pipeline::operation::writes_float(ctx.op_id);
+            return format_to_width(
+                std::format(" \033[1;32m[IF]\033[0m → \033[1;33m[ID]\033[0m → "
+                            "\033[1;31m[EX]\033[0m → {} → {}",
+                            has_mem ? "\033[1;34m[MEM]\033[0m" : "\033[90m[mem:—]\033[0m",
+                            has_wb ? "\033[1;37m[WB]\033[0m" : "\033[90m[wb:—]\033[0m"),
+                width);
+        }
+        case 20: {
+            const auto r1_name = reg_name(ctx.rs1);
+            const auto r2_name = reg_name(ctx.rs2);
+            return format_to_width(
+                std::format(" \033[90mOperands:\033[0m {}:{}  {}:{} → \033[90mALU:\033[0m {}",
+                            r1_name, hex_val(ctx.rrs1), r2_name, hex_val(ctx.rrs2),
+                            hex_val(ctx.wb_data)),
+                width);
+        }
+        case 21: {
+            if (pipeline::operation::is_load(ctx.op_id)) {
+                return format_to_width(
+                    std::format(" \033[90mMemory:\033[0m Load from {} → Data: {}",
+                                hex_val(ctx.mem_addr), hex_val(ctx.wb_data)),
+                    width);
+            }
+            if (pipeline::operation::is_store(ctx.op_id)) {
+                return format_to_width(std::format(" \033[90mMemory:\033[0m Store to {} ← Data: {}",
+                                                   hex_val(ctx.mem_addr), hex_val(ctx.mem_wdata)),
+                                       width);
+            }
+            return format_to_width(" \033[90mMemory: None (ALU/Register-only)\033[0m", width);
+        }
+        case 22: {
+            if (pipeline::operation::writes_integer(ctx.op_id) &&
+                ctx.rd != simrv::xlen::RegId::Zero) {
+                return format_to_width(std::format(" \033[90mCommit:\033[0m Writeback {} ← {} "
+                                                   "\033[38;5;158m[Committed]\033[0m",
+                                                   reg_name(ctx.rd), hex_val(ctx.wb_data)),
+                                       width);
+            }
+            if (pipeline::operation::writes_float(ctx.op_id)) {
+                return format_to_width(std::format(" \033[90mCommit:\033[0m Writeback {} ← {} "
+                                                   "\033[38;5;158m[Committed]\033[0m",
+                                                   fp_reg_name(ctx.rd), hex_val(ctx.wb_data)),
+                                       width);
+            }
+            return format_to_width(
+                " \033[90mCommit: Branch / CSR / Trap \033[38;5;158m[Committed]\033[0m", width);
+        }
+        case 23:
             return format_to_width("", width);
-        case 19:
-            return section_line("End Pipeline View", width);
+        case 24:
+            return section_line("End Flight Flow", width);
         default:
             return format_to_width("", width);
     }

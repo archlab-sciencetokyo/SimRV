@@ -131,6 +131,24 @@ struct alignas(128) ArchState {
     size_t num_active_pmp = 0;
     bool has_locked_pmp = false;
 
+    /* Debug Triggers (Sdtrig) */
+    static constexpr size_t kNumTriggers = 4;
+    simrv::xlen::CsrValue tselect = 0;
+    std::array<simrv::xlen::CsrValue, kNumTriggers> tdata1{};
+    std::array<simrv::xlen::CsrValue, kNumTriggers> tdata2{};
+    std::array<simrv::xlen::CsrValue, kNumTriggers> tdata3{};
+    bool has_active_triggers = false;
+
+    constexpr void refresh_trigger_status() noexcept {
+        has_active_triggers = false;
+        for (size_t i = 0; i < kNumTriggers; ++i) {
+            if (tdata1[i] != 0) {
+                has_active_triggers = true;
+                break;
+            }
+        }
+    }
+
     constexpr void refresh_misa_status() noexcept {
         fetch_align_mask = (misa & (simrv::xlen::CsrValue{1} << 2)) != 0 ? 1u : 3u;
     }
@@ -415,6 +433,31 @@ class CPU {
      */
     auto write_csr(simrv::xlen::CsrNumber addr, simrv::xlen::CsrValue val)
         -> std::expected<void, ExceptionCode>;
+
+    /**
+     * @brief Checks if an instruction fetch PC matches any active Sdtrig execution trigger.
+     */
+    [[nodiscard]] SIMRV_ALWAYS_INLINE auto check_triggers_pc(simrv::xlen::Address pc) const noexcept
+        -> bool {
+        if (!state_.has_active_triggers) return false;
+        const unsigned xlen = state_.regs.xlen;
+        for (size_t i = 0; i < ArchState::kNumTriggers; ++i) {
+            const auto t1 = state_.tdata1[i];
+            if (t1 == 0) continue;
+            const auto type = (static_cast<uint64_t>(t1) >> (xlen == 64 ? 60U : 28U)) & 0xFU;
+            if (type != 2) continue;
+            if ((t1 & (1U << 19U)) != 0) continue;  // select=1 matches data, not address
+            if ((t1 & (1U << 2U)) == 0) continue;   // execute not enabled
+            const bool m = (t1 & (1U << 6U)) != 0;
+            const bool s = (t1 & (1U << 4U)) != 0;
+            const bool u = (t1 & (1U << 3U)) != 0;
+            if (state_.priv == simrv::xlen::PrivilegeLevel::Machine && !m) continue;
+            if (state_.priv == simrv::xlen::PrivilegeLevel::Supervisor && !s) continue;
+            if (state_.priv == simrv::xlen::PrivilegeLevel::User && !u) continue;
+            if (pc == state_.tdata2[i]) return true;
+        }
+        return false;
+    }
 
     /**
      * @brief Handles execution return from a machine-mode trap (MRET instruction).

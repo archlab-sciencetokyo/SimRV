@@ -339,6 +339,39 @@ auto CsrFile::read(simrv::xlen::CsrNumber addr) const
             rcsr = cpu_.state().mhartid;
             break;
 
+        case csr_addr(Csr::Tselect):
+            rcsr = cpu_.state().tselect;
+            break;
+        case csr_addr(Csr::Tdata1):
+            if (cpu_.state().tselect < ArchState::kNumTriggers) {
+                rcsr = cpu_.state().tdata1[cpu_.state().tselect];
+            } else {
+                rcsr = 0;
+            }
+            break;
+        case csr_addr(Csr::Tdata2):
+            if (cpu_.state().tselect < ArchState::kNumTriggers) {
+                rcsr = cpu_.state().tdata2[cpu_.state().tselect];
+            } else {
+                rcsr = 0;
+            }
+            break;
+        case csr_addr(Csr::Tdata3):
+            if (cpu_.state().tselect < ArchState::kNumTriggers) {
+                rcsr = cpu_.state().tdata3[cpu_.state().tselect];
+            } else {
+                rcsr = 0;
+            }
+            break;
+        case csr_addr(Csr::Tinfo):
+            rcsr = (1U << 2U);
+            break;
+        case csr_addr(Csr::Tcontrol):
+        case csr_addr(Csr::Mcontext):
+        case csr_addr(Csr::Scontext):
+            rcsr = 0;
+            break;
+
         default:
             if (pmp_csr_exists(addr, cpu_.state().regs.xlen)) {
                 if (addr.value() >= 0x3A0 && addr.value() <= 0x3AF) {
@@ -674,6 +707,43 @@ auto CsrFile::write(simrv::xlen::CsrNumber addr, simrv::xlen::CsrValue wdata)
             break;
         case csr_addr(Csr::Sstatus):
             setMstatus((cpu_.state().mstatus & ~kSstatusMask) | (wdata & kSstatusMask));
+            break;
+
+        case csr_addr(Csr::Tselect):
+            cpu_.state().tselect = wdata;
+            break;
+        case csr_addr(Csr::Tdata1):
+            if (cpu_.state().tselect < ArchState::kNumTriggers) {
+                const unsigned xlen = cpu_.state().regs.xlen;
+                const auto type = static_cast<uint32_t>(
+                    (static_cast<uint64_t>(wdata) >> (xlen == 64 ? 60U : 28U)) & 0xFU);
+                if (type == 2) {
+                    constexpr simrv::xlen::CsrValue mask = (1U << 6U) | (1U << 4U) | (1U << 3U) |
+                                                           (1U << 2U) | (1U << 1U) | (1U << 0U) |
+                                                           (1U << 19U);
+                    const auto type_hdr =
+                        static_cast<simrv::xlen::CsrValue>(uint64_t{2} << (xlen == 64 ? 60U : 28U));
+                    cpu_.state().tdata1[cpu_.state().tselect] = type_hdr | (wdata & mask);
+                } else if (type == 0) {
+                    cpu_.state().tdata1[cpu_.state().tselect] = 0;
+                }
+                cpu_.state().refresh_trigger_status();
+            }
+            break;
+        case csr_addr(Csr::Tdata2):
+            if (cpu_.state().tselect < ArchState::kNumTriggers) {
+                cpu_.state().tdata2[cpu_.state().tselect] = wdata;
+            }
+            break;
+        case csr_addr(Csr::Tdata3):
+            if (cpu_.state().tselect < ArchState::kNumTriggers) {
+                cpu_.state().tdata3[cpu_.state().tselect] = wdata;
+            }
+            break;
+        case csr_addr(Csr::Tinfo):
+        case csr_addr(Csr::Tcontrol):
+        case csr_addr(Csr::Mcontext):
+        case csr_addr(Csr::Scontext):
             break;
         default:
             if (pmp_csr_exists(addr, cpu_.state().regs.xlen)) {

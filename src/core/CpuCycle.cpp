@@ -156,6 +156,10 @@ void CPU::run_cycle(Machine& machine) {
             }
         }
     }
+    if (simrv::compiler::unlikely(state_.has_active_triggers && check_triggers_pc(state_.pc))) {
+        raise_exception(static_cast<simrv::xlen::TrapCause>(ExceptionCode::Breakpoint), state_.pc);
+        return;
+    }
     if (machine.runtime_profile.is_cycle_mode()) {
         execute_ca_cycle_stages(machine, retired_before);
         return;
@@ -615,6 +619,10 @@ void CPU::run_cycle_baremetal(Machine& machine) {
                 return;
             }
         }
+    }
+    if (simrv::compiler::unlikely(state_.has_active_triggers && check_triggers_pc(state_.pc))) {
+        raise_exception(static_cast<simrv::xlen::TrapCause>(ExceptionCode::Breakpoint), state_.pc);
+        return;
     }
     pipeline_context.pending_exception = std::nullopt;
     pipeline_context.pending_tval = 0;

@@ -866,8 +866,11 @@ void test_csr_summary_and_presence_rules() {
     expect(pmp_csr_exists(0x3A1, 32), "RV32 defines odd-numbered pmpcfg CSRs");
     expect(!pmp_csr_exists(0x3A1, 64), "RV64 reserves odd-numbered pmpcfg CSR addresses");
     expect(pmp_csr_exists(0x3A2, 64), "RV64 defines even-numbered pmpcfg CSRs");
-    expect(simrv::core::is_debug_csr(0x7A0),
-           "debug-only CSR encodings are identified independently of M-mode privilege");
+    expect(
+        simrv::core::is_debug_csr(0x7B0),
+        "debug-only CSR encodings (0x7B0-0x7BF) are identified independently of M-mode privilege");
+    expect(!simrv::core::is_debug_csr(0x7A0),
+           "Sdtrig trigger CSRs (0x7A0-0x7AF) are accessible to M-mode");
 
     const simrv::xlen::CsrValue m_only =
         simrv::core::mstatus_writable_mask(false, false, false, false);
@@ -3833,11 +3836,79 @@ void test_cache_hierarchy_semantics() {
     expect(!l3.lookup_line(test_addr, read_buf, state), "L3 lookup misses after invalidation");
 }
 
+void test_sdtrig_trigger_registers() {
+    simrv::core::Machine machine;
+    auto& cpu = machine.hart(0);
+    auto& csr = cpu.csr_file;
+
+    // 1. Initial trigger state
+    auto tselect_val = csr.read(csr_addr(simrv::core::Csr::Tselect));
+    expect(tselect_val.has_value() && *tselect_val == 0, "tselect initialized to 0");
+
+    auto tinfo_val = csr.read(csr_addr(simrv::core::Csr::Tinfo));
+    expect(tinfo_val.has_value() && (*tinfo_val & 0x4U) == 0x4U,
+           "tinfo reports mcontrol (type 2) support in bit 2");
+
+    // 2. Select trigger 1 and write tdata1/tdata2
+    auto res_sel = csr.write(csr_addr(simrv::core::Csr::Tselect), 1);
+    expect(res_sel.has_value(), "tselect write succeeded");
+    auto cur_sel = csr.read(csr_addr(simrv::core::Csr::Tselect));
+    expect(cur_sel.has_value() && *cur_sel == 1, "tselect reflects written index 1");
+
+    // Configure mcontrol on trigger 1: type=2, execute=1 (bit 2), m=1 (bit 6), s=1 (bit 4), u=1
+    // (bit 3)
+    const unsigned xlen = cpu.state().regs.xlen;
+    const simrv::xlen::CsrValue type_hdr =
+        static_cast<simrv::xlen::CsrValue>(uint64_t{2} << (xlen == 64 ? 60U : 28U));
+    const simrv::xlen::CsrValue mcontrol_cfg =
+        type_hdr | (1U << 6U) | (1U << 4U) | (1U << 3U) | (1U << 2U);
+    auto res_tdata1 = csr.write(csr_addr(simrv::core::Csr::Tdata1), mcontrol_cfg);
+    expect(res_tdata1.has_value(), "tdata1 write succeeded");
+
+    auto tdata1_read = csr.read(csr_addr(simrv::core::Csr::Tdata1));
+    expect(tdata1_read.has_value() && *tdata1_read == mcontrol_cfg,
+           "tdata1 preserves mcontrol configuration");
+    expect(cpu.state().has_active_triggers, "has_active_triggers flag set after enabling trigger");
+
+    const simrv::xlen::Address target_pc = 0x80001000;
+    auto res_tdata2 = csr.write(csr_addr(simrv::core::Csr::Tdata2), target_pc);
+    expect(res_tdata2.has_value(), "tdata2 write succeeded");
+
+    auto tdata2_read = csr.read(csr_addr(simrv::core::Csr::Tdata2));
+    expect(tdata2_read.has_value() && *tdata2_read == target_pc, "tdata2 preserves match PC");
+
+    // 3. Trigger matching check
+    expect(cpu.check_triggers_pc(target_pc), "check_triggers_pc matches configured trigger PC");
+    expect(!cpu.check_triggers_pc(target_pc + 4), "check_triggers_pc rejects mismatched PC");
+
+    // 4. Privilege check: U-mode / S-mode rejected, M-mode permitted
+    expect(!simrv::core::TrapController::can_access_csr(
+               simrv::xlen::PrivilegeLevel::User, cpu.state().misa,
+               simrv::core::csr_num(simrv::core::Csr::Tselect), false),
+           "User mode access to tselect rejected");
+    expect(!simrv::core::TrapController::can_access_csr(
+               simrv::xlen::PrivilegeLevel::Supervisor, cpu.state().misa,
+               simrv::core::csr_num(simrv::core::Csr::Tselect), false),
+           "Supervisor mode access to tselect rejected");
+    expect(simrv::core::TrapController::can_access_csr(
+               simrv::xlen::PrivilegeLevel::Machine, cpu.state().misa,
+               simrv::core::csr_num(simrv::core::Csr::Tselect), false),
+           "Machine mode access to tselect permitted");
+
+    // 5. Disable trigger 1
+    auto res_dis = csr.write(csr_addr(simrv::core::Csr::Tdata1), 0);
+    expect(res_dis.has_value(), "tdata1 disable succeeded");
+    expect(!cpu.state().has_active_triggers,
+           "has_active_triggers cleared when all triggers disabled");
+    expect(!cpu.check_triggers_pc(target_pc), "disabled trigger does not match");
+}
+
 }  // namespace
 
 int main() {
     test_strong_semantic_types();
     test_cache_hierarchy_semantics();
+    test_sdtrig_trigger_registers();
     test_unaligned_host_access();
     test_decode_cache_compact_round_robin();
     test_hosted_rv32_cached_shift_width();
