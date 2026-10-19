@@ -541,10 +541,35 @@ template <typename T>
 void execute_vlse(core::CPU& cpu, simrv::memory::MemorySubsystem& mem, simrv::xlen::RegId rd,
                   simrv::xlen::Register base_addr, simrv::xlen::Register stride_reg_val, bool vm,
                   uint32_t vl, uint32_t nfields, uint32_t field_registers, isa::Funct3 mem_f3) {
+    if (vl == 0 || static_cast<uint32_t>(cpu.state().vstart) >= vl) return;
     const auto& mask_reg =
         cpu.state().regs.read_vector(simrv::xlen::to_vec_reg_id(simrv::xlen::RegId::Zero));
     auto stride = static_cast<int64_t>(
         static_cast<std::make_signed_t<simrv::xlen::Register>>(stride_reg_val));
+
+    // Direct host DRAM fast-path when strided span resides within a single physical page
+    if (stride >= 0 && cpu.state().vstart == 0 && !cpu.state().has_active_triggers) {
+        const uint64_t total_span = static_cast<uint64_t>(vl - 1) * static_cast<uint64_t>(stride) +
+                                    static_cast<uint64_t>(nfields) * sizeof(T);
+        if (total_span <= 4096u) {
+            auto* host_ptr = get_direct_host_memory_for_range(
+                cpu, base_addr, static_cast<uint32_t>(total_span), false);
+            if (host_ptr != nullptr) {
+                for (uint32_t i = 0; i < vl; ++i) {
+                    if (!vector::is_element_active(mask_reg, i, vm)) continue;
+                    for (uint32_t f = 0; f < nfields; ++f) {
+                        const size_t offset = static_cast<size_t>(i * stride + f * sizeof(T));
+                        T val = 0;
+                        std::memcpy(&val, host_ptr + offset, sizeof(T));
+                        const auto target = static_cast<simrv::xlen::RegId>(
+                            static_cast<uint32_t>(rd) + f * field_registers);
+                        vector::set_group_element<T>(cpu.state().regs, target, i, val);
+                    }
+                }
+                return;
+            }
+        }
+    }
 
     for (auto i = static_cast<uint32_t>(cpu.state().vstart); i < vl; i++) {
         if (!vector::is_element_active(mask_reg, i, vm)) continue;
@@ -590,10 +615,34 @@ template <typename T>
 void execute_vsse(core::CPU& cpu, simrv::memory::MemorySubsystem& mem, simrv::xlen::RegId vs3,
                   simrv::xlen::Register base_addr, simrv::xlen::Register stride_reg_val, bool vm,
                   uint32_t vl, uint32_t nfields, uint32_t field_registers, isa::Funct3 mem_f3) {
+    if (vl == 0 || static_cast<uint32_t>(cpu.state().vstart) >= vl) return;
     const auto& mask_reg =
         cpu.state().regs.read_vector(simrv::xlen::to_vec_reg_id(simrv::xlen::RegId::Zero));
     auto stride = static_cast<int64_t>(
         static_cast<std::make_signed_t<simrv::xlen::Register>>(stride_reg_val));
+
+    // Direct host DRAM fast-path when strided span resides within a single physical page
+    if (stride >= 0 && cpu.state().vstart == 0 && !cpu.state().has_active_triggers) {
+        const uint64_t total_span = static_cast<uint64_t>(vl - 1) * static_cast<uint64_t>(stride) +
+                                    static_cast<uint64_t>(nfields) * sizeof(T);
+        if (total_span <= 4096u) {
+            auto* host_ptr = get_direct_host_memory_for_range(
+                cpu, base_addr, static_cast<uint32_t>(total_span), true);
+            if (host_ptr != nullptr) {
+                for (uint32_t i = 0; i < vl; ++i) {
+                    if (!vector::is_element_active(mask_reg, i, vm)) continue;
+                    for (uint32_t f = 0; f < nfields; ++f) {
+                        const size_t offset = static_cast<size_t>(i * stride + f * sizeof(T));
+                        const auto source = static_cast<simrv::xlen::RegId>(
+                            static_cast<uint32_t>(vs3) + f * field_registers);
+                        T val = vector::get_group_element<T>(cpu.state().regs, source, i);
+                        std::memcpy(host_ptr + offset, &val, sizeof(T));
+                    }
+                }
+                return;
+            }
+        }
+    }
 
     for (auto i = static_cast<uint32_t>(cpu.state().vstart); i < vl; i++) {
         if (!vector::is_element_active(mask_reg, i, vm)) continue;

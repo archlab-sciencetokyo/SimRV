@@ -83,6 +83,47 @@ auto format_vec_value(const simrv::core::VectorRegister& val, unsigned vlen, int
     return full_hex.substr(0, static_cast<std::size_t>(std::max(4, avail_w)));
 }
 
+auto format_vec_elements(const simrv::core::VectorRegister& val, unsigned vlen, uint64_t vtype,
+                         uint32_t vl, uint32_t vstart, unsigned reg_idx, int avail_w)
+    -> std::string {
+    VtypeView vt{vtype, 64};
+    if (vt.vill() || avail_w < 20) {
+        return format_vec_value(val, vlen, avail_w);
+    }
+
+    const unsigned sew_bytes = 1u << vt.sew_field();
+    const unsigned elems_per_reg = (vlen / 8) / sew_bytes;
+    if (elems_per_reg == 0) {
+        return format_vec_value(val, vlen, avail_w);
+    }
+
+    std::string out = "[";
+    for (unsigned e = 0; e < elems_per_reg; ++e) {
+        const uint32_t g_idx = reg_idx * elems_per_reg + e;
+        const bool is_active = (g_idx >= vstart && g_idx < vl);
+        const char* color = is_active ? "\033[1;37m" : "\033[38;5;242m";
+        if (e > 0) out += " ";
+
+        if (sew_bytes == 1) {
+            out += std::format("{}{:02x}\033[0m", color, val.u8[e]);
+        } else if (sew_bytes == 2) {
+            out += std::format("{}{:04x}\033[0m", color, val.u16[e]);
+        } else if (sew_bytes == 4) {
+            out += std::format("{}{:08x}\033[0m", color, val.u32[e]);
+        } else {
+            out += std::format("{}{:016x}\033[0m", color, val.u64[e]);
+        }
+
+        if (static_cast<int>(e + 1) < static_cast<int>(elems_per_reg) &&
+            static_cast<int>(out.length() - (e + 1) * 11) > avail_w - 6) {
+            out += " \033[38;5;242m..\033[0m";
+            break;
+        }
+    }
+    out += "]";
+    return out;
+}
+
 auto vec_reg_changed(bool paused, const simrv::core::VectorRegister& cached,
                      const simrv::core::VectorRegister& val, unsigned vlen) -> bool {
     if (!paused) return false;
@@ -138,7 +179,8 @@ auto InspectorPane::render_registers_single_column(const simrv::core::ArchState&
                 bool changed = vec_reg_changed(
                     paused_, cached_vec_.at(static_cast<std::size_t>(reg)), val, st.regs.vlen);
                 std::string c = changed ? kThemePeach : kThemeMint;
-                std::string val_str = format_vec_value(val, st.regs.vlen, std::max(10, width - 6));
+                std::string val_str = format_vec_elements(val, st.regs.vlen, st.vtype, st.vl,
+                                                          st.vstart, reg, std::max(10, width - 6));
                 std::string col_color =
                     std::format(" {}v{:<2}\033[0m: {}{}\033[0m", kThemeText, reg, c, val_str);
                 return format_to_width(col_color, width);
@@ -242,9 +284,11 @@ auto InspectorPane::render_registers_double_column(const simrv::core::ArchState&
                 std::string c2 = changed2 ? kThemePeach : kThemeMint;
 
                 std::string val1_str =
-                    format_vec_value(val1, st.regs.vlen, std::max(10, col_width - 8));
+                    format_vec_elements(val1, st.regs.vlen, st.vtype, st.vl, st.vstart, reg1,
+                                        std::max(10, col_width - 8));
                 std::string val2_str =
-                    format_vec_value(val2, st.regs.vlen, std::max(10, right_width - 8));
+                    format_vec_elements(val2, st.regs.vlen, st.vtype, st.vl, st.vstart, reg2,
+                                        std::max(10, right_width - 8));
 
                 std::string col1_color =
                     std::format(" {}v{:<2}\033[0m: {}{}\033[0m", kThemeText, reg1, c1, val1_str);

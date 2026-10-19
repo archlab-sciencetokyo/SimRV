@@ -90,6 +90,11 @@ auto MemoryAccess::target_read(MemorySubsystem& mem, core::CPU& cpu, simrv::xlen
             }
         }
     }
+    if (simrv::compiler::unlikely(cpu.check_triggers_mem(v_addr.raw(), size_bytes, false))) {
+        cpu.active_context().pending_exception = ExceptionCode::Breakpoint;
+        cpu.active_context().pending_tval = v_addr.raw();
+        return 0;
+    }
     if (simrv::compiler::unlikely(crosses_page || crosses_cache_line)) {
         simrv::xlen::Word result = 0;
         for (unsigned b = 0; b < size_bytes; ++b) {
@@ -464,6 +469,11 @@ void MemoryAccess::target_write(MemorySubsystem& mem, core::CPU& cpu, simrv::xle
                                               hit->description);
             }
         }
+    }
+    if (simrv::compiler::unlikely(cpu.check_triggers_mem(v_addr.raw(), size_bytes, true))) {
+        cpu.active_context().pending_exception = ExceptionCode::Breakpoint;
+        cpu.active_context().pending_tval = v_addr.raw();
+        return;
     }
     if (simrv::compiler::unlikely(crosses_page || crosses_cache_line)) {
         for (unsigned b = 0; b < size_bytes; ++b) {

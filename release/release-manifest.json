@@ -12,8 +12,12 @@
     }
   },
   "package_support": {
-    "rpm": ["Fedora 44"],
-    "deb": ["Debian sid"],
+    "rpm": [
+      "Fedora 44"
+    ],
+    "deb": [
+      "Debian sid"
+    ],
     "portable_static": [
       "Fedora 40",
       "Ubuntu 22.04",
