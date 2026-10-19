@@ -307,7 +307,7 @@ if(BUILD_TESTING)
       200 "external;linux;pty;privilege")
     simrv_add_linux_pty_test(
       linux-ia-quantum-smp-pty
-      "${LINUX_PTY_DYNAMIC_ENV};SIMRV_TEST_EXTRA_ARGS=--smp 2 --smp-quantum 100;SIMRV_TEST_EXPECT_CPUS=2;SIMRV_TEST_INSTRUCTIONS=12000000000;SIMRV_TEST_TIMEOUT=180"
+      "${LINUX_PTY_DYNAMIC_ENV};SIMRV_TEST_EXTRA_ARGS=--smp 2;SIMRV_TEST_EXPECT_CPUS=2;SIMRV_TEST_INSTRUCTIONS=12000000000;SIMRV_TEST_TIMEOUT=180"
       200 "external;linux;pty;ia;smp;quantum")
     simrv_add_linux_pty_test(
       linux-ca-boot-pty
@@ -315,11 +315,11 @@ if(BUILD_TESTING)
       440 "external;linux;pty;ca")
     simrv_add_linux_pty_test(
       linux-ca-quantum-smp-pty
-      "${LINUX_PTY_DYNAMIC_ENV};SIMRV_TEST_EXTRA_ARGS=--mode cycle-accurate --smp 2 --smp-quantum 100;SIMRV_TEST_EXPECT_CPUS=2;SIMRV_TEST_INSTRUCTIONS=12000000000;SIMRV_TEST_TIMEOUT=480"
+      "${LINUX_PTY_DYNAMIC_ENV};SIMRV_TEST_EXTRA_ARGS=--mode cycle-accurate --smp 2;SIMRV_TEST_EXPECT_CPUS=2;SIMRV_TEST_INSTRUCTIONS=12000000000;SIMRV_TEST_TIMEOUT=480"
       500 "external;linux;pty;ca;smp;quantum")
     simrv_add_linux_pty_test(
       linux-ca-mt-smp-pty
-      "${LINUX_PTY_DYNAMIC_ENV};SIMRV_TEST_EXTRA_ARGS=--mode cycle-accurate --smp 2 --smp-mode cycle-oriented --smp-quantum 100;SIMRV_TEST_EXPECT_CPUS=2;SIMRV_TEST_INSTRUCTIONS=12000000000;SIMRV_TEST_TIMEOUT=480"
+      "${LINUX_PTY_DYNAMIC_ENV};SIMRV_TEST_EXTRA_ARGS=--mode cycle-accurate --smp 2;SIMRV_TEST_EXPECT_CPUS=2;SIMRV_TEST_INSTRUCTIONS=12000000000;SIMRV_TEST_TIMEOUT=480"
       500 "external;linux;pty;ca;smp;mt;thread")
     simrv_add_linux_pty_test(
       linux-poweroff-quit-pty

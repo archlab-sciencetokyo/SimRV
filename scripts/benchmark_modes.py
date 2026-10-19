@@ -30,8 +30,6 @@ def command(args, mode, pipeline, tui):
     result += ["--mode", mode]
     if pipeline:
         result += ["--pipeline", pipeline]
-    if args.smp_mode:
-        result += ["--smp-mode", args.smp_mode]
     if args.harts > 1:
         result += ["--smp", str(args.harts)]
     if args.os:
@@ -204,8 +202,6 @@ def main():
     parser.add_argument("--simrv", default="./build/rv64-release/simrv")
     parser.add_argument("--image", required=True)
     parser.add_argument("--boot", action="store_true", help="measure Linux boot through a shell command")
-    parser.add_argument("--smp-mode", choices=("cycle-accurate", "cycle-oriented"),
-                        help="SMP scheduling mode to benchmark")
     parser.add_argument("--os", action="store_true", help="benchmark the Linux OS runner")
     parser.add_argument("--disk", help="Linux root disk image (required with --os)")
     parser.add_argument("--dtb", default=os.environ.get("SIMRV_LINUX_DTB"), help="Linux device-tree blob (required for --os; defaults to SIMRV_LINUX_DTB)")
@@ -254,7 +250,7 @@ def main():
     report = {"schema": 3, "simrv_sha256": digest(args.simrv),
               "image_sha256": digest(args.image),
               "disk_sha256": digest(args.disk) if args.os else None,
-              "smp_mode": args.smp_mode, "limit": args.limit, "harts": args.harts,
+              "limit": args.limit, "harts": args.harts,
               "terminal": [args.columns, args.rows], "modes": {}}
     for name, mode, pipeline, tui in modes:
         cmd = command(args, mode, pipeline, tui)

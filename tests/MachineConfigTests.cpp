@@ -11,6 +11,7 @@
 #include "simrv/core/Logger.hpp"
 #include "simrv/core/Machine.hpp"
 #include "simrv/core/MachineConfig.hpp"
+#include "simrv/core/PlatformTiming.hpp"
 #include "simrv/core/Telemetry.hpp"
 #include "simrv/util/CliParser.hpp"
 #include "simrv/util/FormatUtil.hpp"
@@ -137,7 +138,7 @@ auto main() -> int {
             "[smp.l3]\n"
             "enabled = false\n"};
         expect(simrv::core::parse_soc_config_stream(profile, soc) && soc.smp.hart_count == 4 &&
-                   soc.smp.mode == simrv::core::SmpMode::CycleOriented &&
+                   soc.smp.mode == simrv::core::SmpMode::MultiThreaded &&
                    soc.smp.synchronization_quantum == 23 && soc.smp.clusters.size() == 2 &&
                    soc.smp.clusters[0].l2.enabled && !soc.smp.l3.enabled &&
                    soc.smp.validate().has_value(),
@@ -146,28 +147,32 @@ auto main() -> int {
         expect(!soc.smp.validate(), "SMP profile rejects incomplete cluster membership");
     }
     {
-        std::vector<std::string> args_str = {
-            "SimRV",          "--config",      "virt-mmio", "--harts", "4",        "--smp-mode",
-            "cycle-oriented", "--smp-quantum", "11",        "-m",      "guest.bin"};
+        std::vector<std::string> args_str = {"SimRV", "--config", "virt-mmio", "--harts",
+                                             "4",     "-m",       "guest.bin"};
         std::vector<char*> args;
         for (auto& arg : args_str) args.push_back(arg.data());
         const auto parsed =
             simrv::util::parse_command_line(std::span<char* const>{args.data(), args.size()});
         if (parsed) {
             const auto cfg = parsed->options.to_machine_config();
-            expect(cfg.execution.num_harts == 4 &&
-                       cfg.execution.smp_mode == simrv::core::SmpMode::CycleOriented &&
-                       cfg.execution.smp_quantum == 11 && cfg.soc.smp.hart_count == 4,
+            expect(cfg.execution.num_harts == 4 && cfg.soc.smp.hart_count == 4,
                    "explicit SMP CLI settings override profile defaults");
         } else {
             expect(false, "SMP CLI overrides parse");
         }
-        args_str = {"SimRV", "--smp-multithreaded", "-m", "guest.bin"};
+        args_str = {"SimRV", "--smp-mode", "multi-threaded", "-m", "guest.bin"};
         args.clear();
         for (auto& arg : args_str) args.push_back(arg.data());
-        const auto legacy =
+        const auto rejected_smp_mode =
             simrv::util::parse_command_line(std::span<char* const>{args.data(), args.size()});
-        expect(!legacy, "removed multithreaded compatibility spelling is rejected");
+        expect(!rejected_smp_mode, "removed --smp-mode CLI flag is rejected");
+
+        args_str = {"SimRV", "--smp-quantum", "11", "-m", "guest.bin"};
+        args.clear();
+        for (auto& arg : args_str) args.push_back(arg.data());
+        const auto rejected_smp_quantum =
+            simrv::util::parse_command_line(std::span<char* const>{args.data(), args.size()});
+        expect(!rejected_smp_quantum, "removed --smp-quantum CLI flag is rejected");
     }
     expect(defaults.memory.contains(defaults.memory.dram_base), "DRAM base is contained");
     expect(defaults.memory.contains(defaults.memory.dram_base, 4), "DRAM range is contained");
@@ -990,6 +995,91 @@ auto main() -> int {
             const auto parsed = simrv::util::parse_command_line(args);
             expect(!parsed.has_value() && parsed.error().contains("unknown option"),
                    "removed attach options are rejected as unknown options");
+        }
+    }
+
+    {
+        // Deterministic clock divider and frequency CLI options
+        std::array<std::string, 7> freq_str = {"SimRV", "--cpu-clock", "100MHz",   "--timebase-hz",
+                                               "10MHz", "-m",          "guest.elf"};
+        std::array<char*, 7> freq_args{};
+        for (size_t i = 0; i < freq_str.size(); ++i) freq_args[i] = freq_str[i].data();
+        const auto parsed_freq = simrv::util::parse_command_line(freq_args);
+        expect(parsed_freq.has_value() && parsed_freq->options.cpu_clock_hz == 100'000'000ULL,
+               "--cpu-clock 100MHz parsed correctly");
+        expect(parsed_freq.has_value() && parsed_freq->options.timebase_hz == 10'000'000ULL,
+               "--timebase-hz 10MHz parsed correctly");
+
+        // Alias --clock-hz
+        std::array<std::string, 5> alias_str = {"SimRV", "--clock-hz", "1GHz", "-m", "guest.elf"};
+        std::array<char*, 5> alias_args{};
+        for (size_t i = 0; i < alias_str.size(); ++i) alias_args[i] = alias_str[i].data();
+        const auto parsed_alias = simrv::util::parse_command_line(alias_args);
+        expect(parsed_alias.has_value() && parsed_alias->options.cpu_clock_hz == 1'000'000'000ULL,
+               "--clock-hz 1GHz parsed correctly");
+
+        // Invalid frequency rejected
+        std::array<std::string, 5> bad_freq_str = {"SimRV", "--cpu-clock", "invalid", "-m",
+                                                   "guest.elf"};
+        std::array<char*, 5> bad_freq_args{};
+        for (size_t i = 0; i < bad_freq_str.size(); ++i) bad_freq_args[i] = bad_freq_str[i].data();
+        const auto parsed_bad = simrv::util::parse_command_line(bad_freq_args);
+        expect(!parsed_bad.has_value(), "invalid frequency string is rejected");
+
+        // Timebase > CPU clock validation failure
+        simrv::core::MachineConfig bad_cfg{};
+        bad_cfg.execution.cpu_clock_hz = 10'000'000ULL;
+        bad_cfg.execution.timebase_hz = 100'000'000ULL;
+        expect(!bad_cfg.validate().has_value(),
+               "timebase > cpu_clock is rejected by config validation");
+
+        // DeterministicClockDivider unit verification: exact divider
+        {
+            simrv::core::timing::DeterministicClockDivider divider(100'000'000ULL, 10'000'000ULL);
+            expect(divider.is_exact_multiple, "100MHz:10MHz is an exact divider");
+            expect(divider.exact_cycles_per_tick == 10, "100MHz:10MHz divider ratio is 10");
+
+            std::atomic<simrv::xlen::Counter> mtime{0};
+            uint32_t rtc_divider = 0;
+            for (size_t c = 0; c < 100; ++c) {
+                (void)divider.advance_ca_cycle(rtc_divider, mtime);
+            }
+            expect(mtime.load() == 10,
+                   "100 CA cycles at 10:1 ratio produces exactly 10 mtime ticks");
+            expect(rtc_divider == 0, "rtc_divider wrapped cleanly to 0");
+
+            // Fast cycles advancement
+            divider.reset();
+            mtime.store(0);
+            rtc_divider = 0;
+            const uint64_t ticks = divider.advance_fast_cycles(100, rtc_divider, mtime);
+            expect(ticks == 10, "advance_fast_cycles returns 10 elapsed ticks");
+            expect(mtime.load() == 10,
+                   "100 fast cycles at 10:1 ratio produces exactly 10 mtime ticks");
+            expect(rtc_divider == 0, "rtc_divider wrapped cleanly to 0");
+        }
+
+        // DeterministicClockDivider unit verification: fractional divider
+        {
+            simrv::core::timing::DeterministicClockDivider divider(100'000'000ULL, 30'000'000ULL);
+            expect(!divider.is_exact_multiple, "100MHz:30MHz is fractional");
+
+            std::atomic<simrv::xlen::Counter> mtime_ca{0};
+            uint32_t rtc_ca = 0;
+            for (size_t c = 0; c < 100; ++c) {
+                (void)divider.advance_ca_cycle(rtc_ca, mtime_ca);
+            }
+            expect(mtime_ca.load() == 30,
+                   "100 CA cycles at 100MHz:30MHz produces exactly 30 mtime ticks");
+
+            // Equivalence with fast advancement
+            divider.reset();
+            std::atomic<simrv::xlen::Counter> mtime_fast{0};
+            uint32_t rtc_fast = 0;
+            const uint64_t fast_ticks = divider.advance_fast_cycles(100, rtc_fast, mtime_fast);
+            expect(fast_ticks == 30, "advance_fast_cycles returns 30 fractional ticks");
+            expect(mtime_fast.load() == mtime_ca.load(),
+                   "Deterministic equivalence: fast advancement matches CA cycle stepping exactly");
         }
     }
 

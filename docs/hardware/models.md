@@ -4,17 +4,27 @@ SimRV provides a microarchitectural CPU modeling framework that enables cycle-ac
 
 ## Platform clock contract
 
-SimRV's virtual platform currently uses a fixed 160 MHz CPU clock and a 10 MHz `mtime` timebase.
-Thus, 16 cycle-accurate model cycles equal one `mtime` tick (100 ns). The power-of-two divider keeps
-timer accumulation exact and inexpensive. Pipeline, cache,
-interconnect, and host-interface latency settings are expressed in CPU clock cycles. Their absolute
-time is therefore `cycles / 160 MHz`, while timer delays are `mtime_ticks / 10 MHz`.
+SimRV's virtual platform models a nominal CPU core clock and a deterministic `mtime` architectural timer timebase. By default, the simulator uses a **160 MHz CPU clock** and a **10 MHz `mtime` timebase**, advancing the timer at exactly one tick per 16 cycle-accurate model cycles (100 ns per tick).
 
-This conversion is hardware-meaningful only in `--mode cycle-accurate`, and only to the extent that
-the selected model's cycle latencies match the target RTL or processor. Fast and detailed modes use
-one virtual cycle per instruction step to keep counters and guest timers deterministic; their
-reported virtual time must not be treated as a hardware performance prediction. `minstret` remains
-a retired-instruction count in all modes.
+Both clock frequencies are configurable at runtime via command-line options:
+- `--cpu-clock <FREQ>, --clock-hz <FREQ>`: Sets the CPU core clock frequency in Hz (e.g. `160000000`, `100MHz`, `50MHz`).
+- `--timebase-hz <FREQ>`: Sets the CLINT/ACLINT/RTC timer timebase in Hz (default: `10000000` / 10 MHz).
+
+### Deterministic Clock Division Math
+
+Timer progression is driven cycle-accurately by `DeterministicClockDivider` (`include/simrv/core/PlatformTiming.hpp`), maintaining zero-drift alignment between physical simulation cycles and architectural timer state:
+1. **Exact Integer Dividers** ($\text{CPU\_HZ} \pmod{\text{TIMEBASE\_HZ}} = 0$): When the CPU clock is an exact integer multiple of the timebase (such as 160 MHz / 10 MHz = 16 cycles/tick), the divider operates as a single-cycle integer modulo accumulator with zero fractional rounding or drift.
+2. **Fractional Phase Accumulators** ($\text{fractional} \neq 0$): For arbitrary or asymmetric clock pairings (e.g. 100 MHz CPU with 10 MHz timer, or 50 MHz CPU with 32.768 kHz RTC), SimRV employs a cycle-exact 64-bit fixed-point phase accumulator (`phase += fractional`). Accumulated fractional phase carries into integer timer ticks deterministically, ensuring that guest wall-clock time remains drift-free over billions of cycles.
+
+### Dynamic Device Tree (FDT) Propagation
+
+When simulated Linux or OpenSBI boots, SimRV's dynamic device tree patcher (`simrv::util::patch_device_tree_frequencies`) updates the active FDT blob prior to kernel jump:
+- `/cpus/timebase-frequency`: dynamically patched to the active `--timebase-hz`.
+- `/cpus/cpu@*/clock-frequency`: dynamically patched to the active `--cpu-clock`.
+
+This allows guest operating systems (Linux, Zephyr, FreeRTOS) to automatically calculate accurate BogoMIPS, delay loops (`udelay`), and timer interrupt deadlines matching the simulated hardware. Pipeline, cache, interconnect, and host-interface latency settings remain expressed in CPU clock cycles; absolute execution time is `cycles / cpu_clock_hz`, while guest timer delays are `mtime_ticks / timebase_hz`.
+
+This physical conversion is hardware-meaningful only in `--mode cycle-accurate`, and only to the extent that the selected model's cycle latencies match the target RTL or processor. Fast and detailed modes use one virtual cycle per instruction step to keep counters and guest timers deterministic; their reported virtual time must not be treated as a hardware performance prediction. `minstret` remains a retired-instruction count in all modes.
 
 ---
 
@@ -88,13 +98,13 @@ Each hart has a private instruction and data L1. L2 is optional and shared by ha
 cluster; L3 is an optional global shared cache. Cache geometry uses 32-byte coherent lines and
 power-of-two set and way counts. The current model uses one CPU model across all harts.
 
-The `cycle-accurate` mode advances harts and shared devices in deterministic global-cycle order.
-`cycle-oriented` executes each global cycle on hart worker threads and synchronizes at the cycle
+The `single-threaded` mode advances harts and shared devices in deterministic global-cycle order.
+`multi-threaded` executes each global cycle on hart worker threads and synchronizes at the cycle
 boundary before advancing shared devices. Shared requests are resolved by logical cycle, hart ID,
 and per-hart issue order. The synchronization quantum groups global cycles into host-side runner
 turns; it does not let one hart advance simulated time ahead of another. Cross-hart interrupts and
-hart lifecycle changes take effect at the destination hart's next execution boundary. Command-line
-options `--harts`, `--smp-mode`, and `--smp-quantum` override the profile values.
+hart lifecycle changes take effect at the destination hart's next execution boundary. Active hart
+count can be overridden via `--harts`.
 
 Device-specific SoC entries use `[device.<kind>]` sections. Supported kinds include `uart`,
 `rtc`, `dma`, `virtio-block`, `virtio-console`, `virtio-rng`, `virtio-gpu`, `virtio-input`,

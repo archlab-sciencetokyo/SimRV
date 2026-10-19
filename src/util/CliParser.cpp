@@ -69,6 +69,16 @@ auto parse_scaled_u64(std::string_view num, uint64_t& out) -> bool {
     return true;
 }
 
+auto parse_frequency_hz(std::string_view num, uint64_t& out) -> bool {
+    if (num.empty()) {
+        return false;
+    }
+    if (num.ends_with("hz") || num.ends_with("Hz") || num.ends_with("HZ")) {
+        num.remove_suffix(2);
+    }
+    return parse_scaled_u64(num, out);
+}
+
 auto parse_u64_base0(std::string_view num, uint64_t& out) -> bool {
     if (num.empty()) {
         return false;
@@ -670,6 +680,26 @@ auto parse_execution_options(std::string_view arg, std::span<char* const> args, 
         options.explicit_realtime_mode = true;
         return true;
     }
+    if (arg == "--cpu-clock" || arg == "--clock-hz" || arg == "--clock") {
+        auto value = next_argument(args, i, arg);
+        if (!value) return std::unexpected(value.error());
+        uint64_t hz = 0;
+        if (!parse_frequency_hz(*value, hz) || hz == 0) {
+            return std::unexpected(std::format("invalid CPU clock frequency value for {}", arg));
+        }
+        options.cpu_clock_hz = hz;
+        return true;
+    }
+    if (arg == "--timebase-hz" || arg == "--timebase") {
+        auto value = next_argument(args, i, arg);
+        if (!value) return std::unexpected(value.error());
+        uint64_t hz = 0;
+        if (!parse_frequency_hz(*value, hz) || hz == 0) {
+            return std::unexpected(std::format("invalid timebase frequency value for {}", arg));
+        }
+        options.timebase_hz = hz;
+        return true;
+    }
     return false;
 }
 
@@ -811,31 +841,6 @@ auto parse_mode_options(std::string_view arg, std::span<char* const> args, std::
         }
         result.options.num_harts = val;
         result.options.explicit_num_harts = true;
-        return true;
-    }
-    if (arg == "--smp-quantum") {
-        auto value = next_argument(args, i, arg);
-        if (!value) return std::unexpected(value.error());
-        uint32_t val = 0;
-        if (!parse_u32_base0(*value, val) || val == 0) {
-            return std::unexpected(std::format("invalid quantum value for {}", arg));
-        }
-        result.options.smp_quantum = val;
-        result.options.explicit_smp_quantum = true;
-        return true;
-    }
-    if (arg == "--smp-mode") {
-        auto value = next_argument(args, i, arg);
-        if (!value) return std::unexpected(value.error());
-        if (*value == "cycle-accurate") {
-            result.options.smp_mode = simrv::core::SmpMode::CycleAccurate;
-        } else if (*value == "cycle-oriented") {
-            result.options.smp_mode = simrv::core::SmpMode::CycleOriented;
-        } else {
-            return std::unexpected(std::format(
-                "unsupported SMP mode '{}' (supported: cycle-accurate, cycle-oriented)", *value));
-        }
-        result.options.explicit_smp_mode = true;
         return true;
     }
     if (arg == "--ram-size" || arg == "--memory-size" || arg == "--dram-size" ||
@@ -1392,7 +1397,6 @@ auto RuntimeOptions::to_machine_config() const -> simrv::core::MachineConfig {
     cfg.execution.trace_end = trace_end;
     cfg.execution.enabletimer = enabletimer;
     cfg.execution.num_harts = num_harts;
-    cfg.execution.smp_quantum = smp_quantum;
     if (explicit_realtime_mode) {
         cfg.execution.realtime_pacing = realtime_pacing;
     } else {
@@ -1401,6 +1405,12 @@ auto RuntimeOptions::to_machine_config() const -> simrv::core::MachineConfig {
     }
     if (auto parsed = pipeline::parse_pipeline_type(pipeline_type)) {
         cfg.execution.pipeline_type = *parsed;
+    }
+    if (cpu_clock_hz.has_value()) {
+        cfg.execution.cpu_clock_hz = *cpu_clock_hz;
+    }
+    if (timebase_hz.has_value()) {
+        cfg.execution.timebase_hz = *timebase_hz;
     }
 
     cfg.tui.enabled = tuimode;
@@ -1495,12 +1505,8 @@ auto RuntimeOptions::to_machine_config() const -> simrv::core::MachineConfig {
                                                  : simrv::core::PlatformProfile::None;
     if (explicit_num_harts) cfg.soc.smp.resize_harts(num_harts);
     cfg.execution.num_harts = cfg.soc.smp.hart_count;
-    cfg.execution.smp_mode =
-        explicit_smp_mode && smp_mode.has_value() ? smp_mode : cfg.soc.smp.mode;
-    if (explicit_smp_mode && smp_mode.has_value()) cfg.soc.smp.mode = *smp_mode;
-    cfg.execution.smp_quantum =
-        explicit_smp_quantum ? smp_quantum : cfg.soc.smp.synchronization_quantum;
-    if (explicit_smp_quantum) cfg.soc.smp.synchronization_quantum = smp_quantum;
+    cfg.execution.smp_mode = cfg.soc.smp.mode;
+    cfg.execution.smp_quantum = cfg.soc.smp.synchronization_quantum;
     return cfg;
 }
 
@@ -1525,7 +1531,7 @@ auto apply_runtime_options(simrv::core::Machine* machine, const RuntimeOptions& 
                                                                          : "none";
     const auto& smp = machine->configuration().soc.smp;
     const auto smp_mode =
-        smp.mode == simrv::core::SmpMode::CycleAccurate ? "cycle-accurate" : "cycle-oriented";
+        smp.mode == simrv::core::SmpMode::SingleThreaded ? "single-threaded" : "multi-threaded";
     simrv::log::info(
         "Run configuration: RV{}, {}-mode, {} hart(s), SMP {}, quantum {}, {} platform, {} MiB RAM",
         machine->primary_hart().state().regs.xlen, options.appmode ? "bare-metal" : "OS",
@@ -1660,10 +1666,6 @@ auto needs_memory_image(const ParseResult& result) -> bool {
         {.title = "Architecture and hardware",
          .entries = {{.option = "-j, --harts, --smp <N>",
                       .description = "Override the SoC profile hart count (1–16)."},
-                     {.option = "--smp-mode <MODE>",
-                      .description = "Override SoC mode: cycle-accurate or cycle-oriented."},
-                     {.option = "--smp-quantum <N>",
-                      .description = "Override cycle-oriented synchronization quantum."},
                      {.option = "--dram-size, --ram-size <SIZE>",
                       .description = "Set DRAM size (for example, 128M or 2G)."},
                      {.option = "--isa <ISA>",
@@ -1684,6 +1686,10 @@ auto needs_memory_image(const ParseResult& result) -> bool {
                .description = "Stop after N instructions retire across all harts."},
               {.option = "-t, -l, --timer <N>",
                .description = "Raise a CLINT timer interrupt after N cycles."},
+              {.option = "--cpu-clock, --clock-hz <FREQ>",
+               .description = "Set CPU clock frequency (e.g. 100MHz, 160MHz, 1GHz)."},
+              {.option = "--timebase-hz <FREQ>",
+               .description = "Set RTC timebase frequency (e.g. 10MHz, 32768Hz)."},
               {.option = "-R, --realtime",
                .description = "Throttle execution to host real time (1:1)."},
               {.option = "--no-realtime",
