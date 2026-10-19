@@ -86,7 +86,6 @@ void invalidate_debug_state(simrv::core::Machine& machine, simrv::core::CPU& cpu
     cpu.ca_state.reset_instruction();
     cpu.TLB_flush();
     cpu.icache.flush();
-    cpu.dcache.flush();
 }
 }  // namespace
 
@@ -611,8 +610,7 @@ auto GdbStub::cmd_write_memory(const std::string& pkt, simrv::core::Machine& mac
     }
     const auto addr = static_cast<simrv::xlen::Address>(*address);
     const auto len = static_cast<size_t>(*length);
-
-    const auto ram = machine.ram_view();
+    if (len == 0) return "OK";
 
     auto hd = [](char c) -> uint8_t {
         if (c >= '0' && c <= '9') return static_cast<uint8_t>(c - '0');
@@ -621,16 +619,17 @@ auto GdbStub::cmd_write_memory(const std::string& pkt, simrv::core::Machine& mac
         return 0;
     };
 
+    std::vector<simrv::xlen::Byte> bytes;
+    bytes.reserve(len);
     for (size_t i = 0; i < len; ++i) {
         const auto hex_off = colon + 1 + i * 2;
         if (hex_off + 1 >= pkt.size()) break;
         const auto byte_val =
             static_cast<uint8_t>((hd(pkt.at(hex_off)) << 4) | hd(pkt.at(hex_off + 1)));
-        const auto phys = static_cast<uint64_t>(addr) + i;
-        if (ram.contains(phys)) {
-            *ram.unchecked_ptr(phys) = static_cast<simrv::xlen::Byte>(byte_val);
-        }
+        bytes.push_back(static_cast<simrv::xlen::Byte>(byte_val));
     }
+    if (bytes.size() != len || !machine.memory().dma_write(addr, bytes.data(), bytes.size()))
+        return "E01";
     for (size_t hart = 0; hart < machine.num_harts(); ++hart) {
         invalidate_debug_state(machine, machine.hart(hart));
     }

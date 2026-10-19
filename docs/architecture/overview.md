@@ -67,16 +67,16 @@ at the retirement boundary.
 
 ### Counters, clocks, and virtual time
 
-The virtual platform advertises a 160 MHz CPU clock and a 10 MHz architectural timer timebase.
-These values are defined together in `PlatformTiming.hpp`; consequently, `mtime` advances once per
-16 modeled CPU cycles and one timer tick represents 100 ns. The power-of-two divider keeps timer
-accumulation exact and inexpensive.
+The virtual platform models a nominal CPU clock (default: 160 MHz) and an architectural timer timebase (default: 10 MHz), configurable via `--cpu-clock` and `--timebase-hz`.
+Timing progression is governed by `DeterministicClockDivider` in `PlatformTiming.hpp`; by default, `mtime` advances once per
+16 modeled CPU cycles (100 ns per tick). Exact integer dividers eliminate fractional drift, while arbitrary frequency pairings
+use a 64-bit phase accumulator to guarantee cycle-exact timer progression across multi-billion-cycle runs.
 
 Counter interpretation depends on the execution policy:
 
 - In cycle-accurate mode, `mcycle`/`cycle` advances for every modeled clock cycle, including stalls,
   bubbles, cache/interconnect waits, and recovery cycles. Cycle-based device and memory delays can
-  therefore be converted to virtual seconds using the advertised 160 MHz clock.
+  therefore be converted to virtual seconds using the active CPU clock frequency.
 - In fast and detailed instruction-accurate modes, one execution step is assigned one virtual CPU
   cycle. `mcycle` and `mtime` remain deterministic and useful to guest software, but elapsed virtual
   time is not a prediction of physical hardware time or workload latency.
@@ -154,22 +154,22 @@ In `cycle-accurate` mode, CA uses deterministic global cycles. On each cycle Sim
 3. Updates shared timer and interrupt-pending state.
 4. Performs termination and presentation work outside the architectural step.
 
-`--smp-quantum N` batches up to `N` of those complete global cycles before host-side UART and TUI
+The SMP synchronization quantum batches complete global cycles before host-side UART and TUI
 presentation work. It does not give one hart a longer modeled time slice: all started harts still
 advance exactly once per global cycle. Debugging, tracing, breakpoints, delayed execution, and
 single-step reduce the batch to one cycle.
 
-With `--smp-mode cycle-oriented`, harts execute each global cycle on separate worker threads and
-synchronize at the cycle boundary before the shared fabric and timers advance. Requests from that
-cycle are ordered by logical cycle, hart ID, and per-hart issue order. Interrupt lines and hart
-lifecycle changes are applied at hart boundaries. `--smp-quantum N` groups up to N complete global
-cycles into one host-side runner turn; cycle ordering remains synchronized within the batch. Pause,
-reboot, reconfiguration, shutdown, and single-step first quiesce the workers.
+In `multi-threaded` SMP mode (configured via SoC profile), harts execute each global cycle on separate
+worker threads and synchronize at the cycle boundary before the shared fabric and timers advance.
+Requests from that cycle are ordered by logical cycle, hart ID, and per-hart issue order. Interrupt
+lines and hart lifecycle changes are applied at hart boundaries. The synchronization quantum groups
+complete global cycles into one host-side runner turn; cycle ordering remains synchronized within
+the batch. Pause, reboot, reconfiguration, shutdown, and single-step first quiesce the workers.
 
-!!! warning "Use deterministic CA for cycle parity"
-    Use `cycle-accurate` mode for cycle traces and cycle-by-cycle RTL comparisons. `cycle-oriented`
-    mode keeps global cycle counts and shared-request ordering deterministic while executing hart
-    work in parallel; synchronization overhead can outweigh the parallel work on short workloads.
+!!! warning "Use deterministic single-threaded for cycle parity"
+    Use `single-threaded` (lockstep) mode for cycle traces and cycle-by-cycle RTL comparisons.
+    `multi-threaded` mode keeps global cycle counts and shared-request ordering deterministic while
+    executing hart work in parallel; synchronization overhead can outweigh the parallel work on short workloads.
 
 The CPU model controls pipeline, cache, and interconnect timing. Cache hit/miss
 latencies and TileLink request/response latencies are positive whole-cycle

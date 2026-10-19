@@ -21,7 +21,7 @@ and SDK consumers must update as described below.
 - `MachineConfig` is the single configuration value. Hart count is
   `MachineConfig::execution.num_harts`.
 - UI worker threading is `execution.ui_worker_threaded`; select hart scheduling through
-  `execution.smp_mode` (`CycleAccurate` or `CycleOriented`).
+  `execution.smp_mode` (`SingleThreaded` or `MultiThreaded`).
 - Platform profiles are `Pcie` and `Mmio`. The mixed `Hybrid` profile was removed.
 - `load_cpu_config` now accepts `CpuModelConfig`; read pipeline timing through its `pipeline` member.
 - Pipeline `mul_latency`, `div_latency`, `fp_alu_latency`, and `fp_div_latency` now mean additional
@@ -32,11 +32,11 @@ and SDK consumers must update as described below.
 ## SMP timing
 
 Cycle-accurate SMP uses deterministic global-cycle scheduling and deterministic hart ordering.
-`--smp-mode cycle-oriented` executes each global cycle on hart worker threads, then synchronizes
-before advancing the shared fabric and timers. Requests are ordered by logical cycle, hart ID, and
-per-hart issue order. `--smp-quantum` groups global cycles into host-side runner turns; ordering
-remains synchronized at every cycle boundary. Pause, step, reboot, and shutdown wait for workers to
-reach a boundary.
+Multi-threaded SMP (`mode = multi-threaded` in SoC profiles) executes each global cycle on hart worker
+threads, then synchronizes before advancing the shared fabric and timers. Requests are ordered by
+logical cycle, hart ID, and per-hart issue order. The synchronization quantum groups global cycles into
+host-side runner turns; ordering remains synchronized at every cycle boundary. Pause, step, reboot,
+and shutdown wait for workers to reach a boundary.
 
 The CLI, typed configuration, and TUI all support 1 through 16 harts. Changing the hart count in
 the TUI stages the configuration and takes effect after reboot.

@@ -136,11 +136,10 @@ void uart_puts(const char* s) {
 
 ### Real-Time Clock / Timer Delay
 
-Use the RTC `mtime` register at `0x70000000` to measure virtual-platform delays. `mtime`
-runs at 10 MHz (10,000 ticks = 1 ms). In cycle-accurate mode this is derived from the
-advertised 160 MHz CPU clock at one timer tick per 16 modeled CPU cycles. In instruction-accurate
-mode it is virtual time based on the one-cycle-per-instruction timing policy, not a hardware timing
-prediction.
+Use the RTC `mtime` register at `0x70000000` (or CLINT `mtime` at `0x0200bff8` / ACLINT `mtime` at `0x02007ff8`) to measure platform delays. By default, `mtime`
+runs at 10 MHz (10,000 ticks = 1 ms), configurable via `--timebase-hz <FREQ>`. In cycle-accurate mode, timer progression is derived from the
+nominal CPU clock (`--cpu-clock <FREQ>`, default: 160 MHz) via a deterministic divider. In instruction-accurate
+mode it advances deterministically per retired instruction, not as a hardware timing prediction.
 
 ```c
 #define RTC_MTIME ((volatile uint64_t*)0x70000000)

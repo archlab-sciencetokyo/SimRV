@@ -68,12 +68,6 @@ suffixes; the default is 256 MiB for bare metal and 1 GiB for Linux.
 .B \-j, \-\-harts, \-\-smp \fIn\fR
 Configure one to sixteen simulated harts.
 .TP
-.B \-\-smp-mode \fImode\fR
-Select \fBcycle-accurate\fR deterministic global-cycle scheduling or \fBcycle-oriented\fR parallel scheduling.
-.TP
-.B \-\-smp-quantum=\fIn\fR
-Set the cycle-oriented synchronization quantum.
-.TP
 .B \-\-isa=\fIstring\fR
 Select the guest ISA preset: \fBrv32i\fR, \fBrv32imac\fR, \fBrv32g\fR, \fBrv32gc\fR,
 \fBrv32gcv\fR, \fBrv64i\fR, \fBrv64imac\fR, \fBrv64g\fR, \fBrv64gc\fR, or \fBrv64gcv\fR,
@@ -96,6 +90,12 @@ Select the VirtIO network backend: \fBuser\fR, \fBtap\fR, \fBsocket\fR, or \fBno
 .B \-\-dump-soc-manifest=\fIpreset|file\fR [\fIoutput\fR]
 Write the normalized SoC registry as JSON for a built-in preset or platform configuration file. Pass \fB\-\fR or omit output to stream JSON to stdout.
 .SH EXECUTION AND PIPELINE
+.TP
+.B \-\-cpu\-clock=\fIhertz\fR, \-\-clock\-hz=\fIhertz\fR
+Set the nominal CPU core clock frequency in Hz (default: 160000000 / 160MHz).
+.TP
+.B \-\-timebase\-hz=\fIhertz\fR
+Set the CLINT/ACLINT/RTC architectural timer timebase frequency in Hz (default: 10000000 / 10MHz).
 .TP
 .B \-s, \-e, \-\-steps \fIn\fR
 Stop after \fIn\fR instructions have retired across all harts.

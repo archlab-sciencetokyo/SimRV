@@ -75,6 +75,8 @@ struct RuntimeOptions {
     bool explicit_cli_mode = false;
     bool realtime_pacing = false;
     bool explicit_realtime_mode = false;
+    std::optional<uint64_t> cpu_clock_hz;
+    std::optional<uint64_t> timebase_hz;
     bool verbose = false;
     bool quiet = false;
     std::optional<simrv::log::Level> log_level;
@@ -118,11 +120,7 @@ struct RuntimeOptions {
     uint32_t explain_inst_val = 0;
     unsigned int vlen = 0;
     uint32_t num_harts = 1;
-    uint32_t smp_quantum = 100;
-    std::optional<simrv::core::SmpMode> smp_mode;
     bool explicit_num_harts = false;
-    bool explicit_smp_quantum = false;
-    bool explicit_smp_mode = false;
     uint64_t dram_size = 0;
     simrv::core::PlatformProfile platform_profile = simrv::core::PlatformProfile::Pcie;
     std::string config_target = "virt-pcie";

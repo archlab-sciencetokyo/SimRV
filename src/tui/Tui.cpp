@@ -17,6 +17,7 @@
 #include <cerrno>
 #include <charconv>
 #include <chrono>
+#include <cmath>
 #include <csignal>
 #include <cstdio>
 #include <cstdlib>
@@ -64,6 +65,26 @@ constexpr int kInspectorContentStartRow = 4;
 constexpr int kInspectorLogAreaHeight = 6;
 constexpr int kMinDisplayWidth = 24;
 constexpr int kMinDisplayBodyRows = 8;
+
+struct PanelColumnHit {
+    size_t index;
+    int local_x;
+    int screen_start_x;
+};
+
+[[nodiscard]] auto locate_panel_column(int x, const framework::ColumnWidths& columns)
+    -> std::optional<PanelColumnHit> {
+    int screen_start_x = 2;
+    for (size_t i = 0; i < columns.count; ++i) {
+        const int width = columns.widths[i];
+        if (x >= screen_start_x && x < screen_start_x + width) {
+            return PanelColumnHit{
+                .index = i, .local_x = x - screen_start_x, .screen_start_x = screen_start_x};
+        }
+        screen_start_x += width + 1;  // one divider separates adjacent content panels
+    }
+    return std::nullopt;
+}
 
 [[nodiscard]] auto center_pane_text(std::string_view text, int width) -> std::string {
     const int text_w = get_display_width(text);
@@ -312,6 +333,8 @@ void Tui::initialize() {
     tcsetattr(STDIN_FILENO, TCSANOW, &term);
 
     // Query OSC 22 pointer-shape support, cell pixel size, and primary device attributes.
+    // Keep mouse reports in terminal cells: pixel mode depends on terminal-specific pixel
+    // metrics and can shift every TUI hit target when those metrics differ from the renderer.
     constexpr std::string_view terminal_queries =
         "\033]22;?pointer\033\\\033]22;?__current__\033\\\033[16t\033[c";
     write_all(STDOUT_FILENO, terminal_queries);
@@ -429,9 +452,9 @@ void Tui::initialize() {
 
     g_tui_active = true;
 
-    const char* init_seq =
-        "\033[?1049h\033[2J\033[H\033[?1000h\033[?1003h\033[?1006h\033[?1016h\033[?2004h\033[?25l";
-    (void)(::write(STDOUT_FILENO, init_seq, strlen(init_seq)) == 0);
+    std::string init_seq = "\033[?1049h\033[2J\033[H\033[?1000h\033[?1003h\033[?1006h";
+    init_seq += "\033[?2004h\033[?25l";
+    write_all(STDOUT_FILENO, init_seq);
 
     struct sigaction sa{};
     sa.sa_handler = handle_sigwinch;
@@ -1082,32 +1105,97 @@ auto Tui::display_coords_to_fb(int x, int y, size_t col_idx, int term_width, int
     const int display_x = display_panel_x + x_offset;
     const int display_y = 5 + y_offset;
 
-    // Check if coordinates are reporting in SGR-Pixel mode (1016)
-    if (x > term_width || y > term_height) {
-        const int panel_pixel_x = (display_x - 1) * cell_width;
-        const int panel_pixel_y = (display_y - 1) * cell_height;
-        const int px = (x - 1) - panel_pixel_x;
-        const int py = (y - 1) - panel_pixel_y;
-        if (px >= 0 && px < width && py >= 0 && py < height) {
-            const int fb_x = std::clamp(px * source_width / width, 0, source_width - 1);
-            const int fb_y = std::clamp(py * source_height / height, 0, source_height - 1);
-            return std::make_pair(fb_x, fb_y);
-        }
-        return std::nullopt;
-    }
-
     const int rel_col = x - display_x;
     const int rel_row = y - display_y;
     if (rel_col >= 0 && rel_col < image_cols && rel_row >= 0 && rel_row < image_rows) {
-        // Map through the cell center, scaled by the actual rendered image dimension
-        // rather than the cell-padded image_cols/image_rows, preserving exact aspect ratio.
-        const int px = std::clamp(rel_col * cell_width + (cell_width / 2), 0, width - 1);
-        const int py = std::clamp(rel_row * cell_height + (cell_height / 2), 0, height - 1);
+        // Mouse reports identify terminal cells, while sixel raster attributes identify pixels.
+        // Map each occupied cell proportionally across the exact raster extent. Using the queried
+        // cell pixel size here accumulates scale error when a terminal's reported metrics differ
+        // from the metrics it uses to place sixel graphics.
+        const int px = std::clamp((2 * rel_col + 1) * width / (2 * image_cols), 0, width - 1);
+        const int py = std::clamp((2 * rel_row + 1) * height / (2 * image_rows), 0, height - 1);
         const int fb_x = std::clamp(px * source_width / width, 0, source_width - 1);
         const int fb_y = std::clamp(py * source_height / height, 0, source_height - 1);
         return std::make_pair(fb_x, fb_y);
     }
     return std::nullopt;
+}
+
+auto Tui::display_pixels_to_fb(int x, int y, size_t col_idx, int term_width, int term_height,
+                               int term_pixel_width, int term_pixel_height) const
+    -> std::optional<std::pair<int, int>> {
+    auto const col_widths = column_widths(term_width);
+    if (col_idx >= col_widths.count || x <= 0 || y <= 0) return std::nullopt;
+
+    int panel_x = 2;
+    for (size_t c = 0; c < col_idx; ++c) panel_x += col_widths.widths[c] + 1;
+    const int panel_width = col_widths.widths[col_idx];
+    const int rows = std::max(1, term_height - framework::kFrameChromeRows);
+    const int body_rows = std::max(1, rows - 1);
+    if (panel_width < kMinDisplayWidth || body_rows < kMinDisplayBodyRows) return std::nullopt;
+
+    const int cell_width = std::max(1, cell_width_px_);
+    const int cell_height = std::max(1, cell_height_px_);
+    const int source_width = static_cast<int>(machine_.framebuffer_width());
+    const int source_height = static_cast<int>(machine_.framebuffer_height());
+    const auto [width, height] = compute_sixel_dimensions(panel_width, body_rows, cell_width,
+                                                          cell_height, source_width, source_height);
+    const int image_cols = std::max(1, (width + cell_width - 1) / cell_width);
+    const int image_rows = std::max(1, (height + cell_height - 1) / cell_height);
+    const int image_col = panel_x + std::max(0, (panel_width - image_cols) / 2);
+    const int image_row = 5 + std::max(0, (body_rows - image_rows) / 2);
+    // Pixel reports are absolute terminal pixels. Sixel placement starts at a character
+    // cell, whose physical pitch can differ slightly from the cell-size query used to
+    // choose the raster dimensions. Anchor the raster from the terminal's full pixel
+    // geometry so that any pitch discrepancy does not accumulate across the image.
+    if (term_pixel_width <= 0 || term_pixel_height <= 0) {
+        struct winsize w{};
+        if (ioctl(STDOUT_FILENO, TIOCGWINSZ, &w) == 0) {
+            term_pixel_width = w.ws_xpixel;
+            term_pixel_height = w.ws_ypixel;
+        }
+    }
+    const auto pixel_geometry = [](int screen_pixels, int cells, int cell_pixels, int image_cell) {
+        double pitch = static_cast<double>(cell_pixels);
+        double leading_padding = 0.0;
+        if (screen_pixels > 0 && cells > 0) {
+            const double measured_pitch = static_cast<double>(screen_pixels) / cells;
+            const double integral_pitch = std::round(measured_pitch);
+            // Some terminals have fractional effective cell pitches (for example under
+            // fractional display scaling). Rounding that pitch to an integer introduces a
+            // small error per cell which grows into visible pointer drift across the Sixel
+            // raster. Keep fractional pitches unless the average is close enough to an
+            // integer that the difference is plausibly just a few pixels of window padding.
+            const double padding = static_cast<double>(screen_pixels) - integral_pitch * cells;
+            const bool integral_grid = std::abs(measured_pitch - integral_pitch) <= 0.02;
+            if (integral_grid && padding >= 0.0 && padding <= 2.0 * integral_pitch) {
+                pitch = integral_pitch;
+                leading_padding = padding / 2.0;
+            } else {
+                // The full window geometry is the best available scale estimate when the
+                // queried cell size or integer-pitch assumption does not match the renderer.
+                pitch = measured_pitch;
+            }
+        }
+        return std::pair{leading_padding + static_cast<double>(image_cell - 1) * pitch, pitch};
+    };
+    const auto [raster_origin_x, actual_pitch_x] =
+        pixel_geometry(term_pixel_width, term_width, cell_width, image_col);
+    const auto [raster_origin_y, actual_pitch_y] =
+        pixel_geometry(term_pixel_height, term_height, cell_height, image_row);
+    // Raster dimensions are chosen using the queried cell pixel size, while SGR 1016
+    // reports coordinates using the terminal's actual pixel pitch. Convert the distance
+    // from the image origin back into raster pixels as well as correcting the origin;
+    // correcting only the origin leaves a scale error that grows across the image.
+    const int raster_x =
+        static_cast<int>(std::floor(((x - 1) - raster_origin_x) * cell_width / actual_pitch_x));
+    const int raster_y =
+        static_cast<int>(std::floor(((y - 1) - raster_origin_y) * cell_height / actual_pitch_y));
+    if (raster_x < 0 || raster_x >= width || raster_y < 0 || raster_y >= height)
+        return std::nullopt;
+    const int fb_x = std::clamp(raster_x * source_width / width, 0, source_width - 1);
+    const int fb_y = std::clamp(raster_y * source_height / height, 0, source_height - 1);
+    return std::make_pair(fb_x, fb_y);
 }
 
 void Tui::handle_display_mouse(int x, int y, int b, size_t col_idx, int term_width,
@@ -1131,6 +1219,19 @@ void Tui::handle_display_mouse(int x, int y, int b, size_t col_idx, int term_wid
     if (btn != 0) {
         machine_.send_input_mouse_button(btn, true);
     }
+}
+
+void Tui::enable_display_pixel_mouse() {
+    if (display_mouse_pixel_mode_ || !sixel_supported_ || !sixel_rendered_) return;
+    struct winsize w{};
+    if (ioctl(STDOUT_FILENO, TIOCGWINSZ, &w) != 0 || w.ws_col == 0 || w.ws_row == 0 ||
+        w.ws_xpixel == 0 || w.ws_ypixel == 0) {
+        // Without the terminal's full pixel geometry, pixel mode cannot be mapped without
+        // distance-dependent rounding error. Keep cell reports and the proportional raster map.
+        return;
+    }
+    write_all(STDOUT_FILENO, "\033[?1016h");
+    display_mouse_pixel_mode_ = true;
 }
 
 void Tui::render(bool force) {
@@ -1774,27 +1875,6 @@ void Tui::handle_mouse(int x, int y, int b) {
     auto const col_widths = column_widths(term_width);
     if (col_widths.count == 0) return;
 
-    // Find which column x falls into
-    size_t clicked_col = 0;
-    int cur_x = 1;
-    int col_local_x = 0;
-    for (size_t i = 0; i < col_widths.count; ++i) {
-        int const cw = col_widths.widths[i];
-        if (x >= cur_x && (x < cur_x + cw + 1 || i + 1 == col_widths.count)) {
-            clicked_col = i;
-            col_local_x = std::max(0, x - cur_x - 1);
-            break;
-        }
-        cur_x += cw + 1;
-    }
-
-    const size_t previous_focused_slot = focused_slot_index_;
-
-    if (b == 0 && clicked_col < workbench_slots_.size() && y != 4) {
-        focused_slot_index_ = clicked_col;
-        update_trace_active_cache();
-    }
-
     if (y < 4) {
         // Header clicks: row 2 is the actual header text row; rows 1 and 3 are top border and
         // divider
@@ -1803,6 +1883,17 @@ void Tui::handle_mouse(int x, int y, int b) {
             execute_header_action(hit);
         }
         return;
+    }
+
+    const auto column_hit = locate_panel_column(x, col_widths);
+    if (!column_hit) return;
+    const size_t clicked_col = column_hit->index;
+    const int col_local_x = column_hit->local_x;
+    const size_t previous_focused_slot = focused_slot_index_;
+
+    if (b == 0 && clicked_col < workbench_slots_.size() && y != 4) {
+        focused_slot_index_ = clicked_col;
+        update_trace_active_cache();
     }
 
     // Body clicks (y >= 4)
@@ -1902,6 +1993,7 @@ void Tui::handle_mouse(int x, int y, int b) {
         if (page == TuiRegPage::DISPLAY) {
             if (b == 0 || b == 1 || b == 2) display_mouse_capture_ = clicked_col;
             handle_display_mouse(x, y, b, clicked_col, term_width, term_height);
+            if (b == 0 || b == 1 || b == 2) enable_display_pixel_mouse();
             return;
         }
 
@@ -1927,16 +2019,9 @@ auto Tui::is_clickable_at(int x, int y, int term_width, int term_height) const -
     }
 
     const auto columns = column_widths(term_width);
-    size_t column = 0;
-    int start_x = 1;
-    for (size_t i = 0; i < columns.count; ++i) {
-        if (x >= start_x && x < start_x + columns.widths[i] + 1) {
-            column = i;
-            break;
-        }
-        start_x += columns.widths[i] + 1;
-    }
-    if (column >= workbench_slots_.size()) return false;
+    const auto column_hit = locate_panel_column(x, columns);
+    if (!column_hit || column_hit->index >= workbench_slots_.size()) return false;
+    const size_t column = column_hit->index;
     if (columns.count > 1 && y == 4) return true;
     if (columns.count == 1 && inspector_pane_ && (y == 4 || y == 5)) {
         return inspector_pane_->get_tab_at(y == 4 ? 0 : 1, x - 2).has_value() || y == 4;
@@ -4577,6 +4662,16 @@ auto Tui::consume_control_sequence(uint8_t first_byte) -> bool {
     int x = 0;
     int y = 0;
     if (parse_sgr_mouse(esc_buf_, button, x, y)) {
+        const int raw_x = x;
+        const int raw_y = y;
+        // Pixel reports are enabled only while dragging on the sixel guest display. Convert them
+        // back to cells for ordinary TUI hit testing; the display mapper consumes raw pixels.
+        if (display_mouse_pixel_mode_) {
+            const int cell_width = std::max(1, cell_width_px_);
+            const int cell_height = std::max(1, cell_height_px_);
+            x = (raw_x - 1) / cell_width + 1;
+            y = (raw_y - 1) / cell_height + 1;
+        }
         if (esc_buf_.back() == 'm') {
             // Button release - finalize any active selection drag.
             if (selection_.is_selecting) {
@@ -4600,6 +4695,10 @@ auto Tui::consume_control_sequence(uint8_t first_byte) -> bool {
                 }
                 display_mouse_capture_.reset();
                 display_mouse_last_fb_.reset();
+                if (display_mouse_pixel_mode_) {
+                    write_all(STDOUT_FILENO, "\033[?1016l");
+                    display_mouse_pixel_mode_ = false;
+                }
             }
             return true;
         }
@@ -4635,9 +4734,23 @@ auto Tui::consume_control_sequence(uint8_t first_byte) -> bool {
                 int const th = (cached_term_height_ > 0) ? cached_term_height_
                                                          : (w.ws_row > 0 ? w.ws_row : 24);
                 const size_t display_col = display_mouse_capture_.value_or(focused_slot_index_);
-                if (auto fb = display_coords_to_fb(x, y, display_col, tw, th)) {
+                auto fb = display_mouse_pixel_mode_
+                              ? display_pixels_to_fb(raw_x, raw_y, display_col, tw, th)
+                              : display_coords_to_fb(x, y, display_col, tw, th);
+                if (fb) {
                     machine_.send_input_mouse_motion(fb->first, fb->second);
                     display_mouse_last_fb_ = fb;
+                    // Cell reports can introduce a growing scale error over a Sixel image
+                    // when the terminal's physical cell pitch differs from its size query.
+                    // Switch to pixel reports as soon as the pointer enters the image, so
+                    // ordinary hover motion uses the same raster mapping as a drag.
+                    if (!display_mouse_pixel_mode_) enable_display_pixel_mouse();
+                } else if (display_mouse_pixel_mode_ && !display_mouse_capture_.has_value()) {
+                    // Pixel reporting is only needed over the Sixel surface. Restore normal
+                    // cell reports when the pointer leaves it to keep other TUI hit testing
+                    // independent of terminal pixel metrics.
+                    write_all(STDOUT_FILENO, "\033[?1016l");
+                    display_mouse_pixel_mode_ = false;
                 }
             }
             return true;
@@ -4754,37 +4867,32 @@ auto Tui::consume_control_sequence(uint8_t first_byte) -> bool {
                                                  : (w_sel.ws_col > 0 ? w_sel.ws_col : 80);
             auto sel_cols = column_widths(sel_w);
             size_t sel_col_idx = 0;
-            int cur_cx = 1;
             int col_local_x = 0;
-            int col_w = (sel_cols.count > 0) ? sel_cols.widths[0] : sel_w;
-            int col_start_x = 2;
+            int col_w = 0;
+            int col_start_x = 0;
             SelectionPane sel_pane = SelectionPane::None;
-            for (size_t ci = 0; ci < sel_cols.count; ++ci) {
-                int cw = sel_cols.widths[ci];
-                if (x >= cur_cx && (x < cur_cx + cw + 1 || ci + 1 == sel_cols.count)) {
-                    sel_col_idx = ci;
-                    col_w = cw;
-                    col_start_x = cur_cx + 1;
-                    col_local_x = std::clamp(x - col_start_x, 0, std::max(0, cw - 1));
-                    if (ci < workbench_slots_.size() &&
-                        workbench_slots_[ci].page == TuiRegPage::CONSOLE) {
-                        sel_pane = SelectionPane::TerminalPane;
-                    } else if (ci < workbench_slots_.size() &&
-                               workbench_slots_[ci].page == TuiRegPage::DISPLAY) {
-                        // A running DISPLAY column is an interactive guest surface. Do not
-                        // enter the paused inspector-selection path; route the click directly
-                        // to the guest's virtio-input device instead.
-                        focused_slot_index_ = ci;
-                        display_mouse_capture_ = ci;
-                        handle_display_mouse(x, y, button, ci, sel_w, term_h);
-                        return true;
-                    } else {
-                        if (!paused_) return true;
-                        sel_pane = SelectionPane::InspectorPane;
-                    }
-                    break;
-                }
-                cur_cx += cw + 1;
+            const auto selection_column = locate_panel_column(x, sel_cols);
+            if (!selection_column) return true;
+            sel_col_idx = selection_column->index;
+            col_w = sel_cols.widths[sel_col_idx];
+            col_start_x = selection_column->screen_start_x;
+            col_local_x = selection_column->local_x;
+            if (sel_col_idx < workbench_slots_.size() &&
+                workbench_slots_[sel_col_idx].page == TuiRegPage::CONSOLE) {
+                sel_pane = SelectionPane::TerminalPane;
+            } else if (sel_col_idx < workbench_slots_.size() &&
+                       workbench_slots_[sel_col_idx].page == TuiRegPage::DISPLAY) {
+                // A running DISPLAY column is an interactive guest surface. Do not
+                // enter the paused inspector-selection path; route the click directly
+                // to the guest's virtio-input device instead.
+                focused_slot_index_ = sel_col_idx;
+                display_mouse_capture_ = sel_col_idx;
+                handle_display_mouse(x, y, button, sel_col_idx, sel_w, term_h);
+                enable_display_pixel_mouse();
+                return true;
+            } else {
+                if (!paused_) return true;
+                sel_pane = SelectionPane::InspectorPane;
             }
             selection_ = SelectionState{};
             selection_.pane = sel_pane;

@@ -32,10 +32,12 @@ auto AclintMtimer::read32(simrv::xlen::Address offset) -> uint32_t {
         return is_hi ? static_cast<uint32_t>(cmp >> 32) : static_cast<uint32_t>(cmp & 0xffffffffU);
     }
     if (offset == 0x7ff8U || offset == 0xbff8U) {
-        return static_cast<uint32_t>(mtime_ & 0xffffffffU);
+        const uint64_t cur_time = machine_ != nullptr ? machine_->platform_time() : mtime_;
+        return static_cast<uint32_t>(cur_time & 0xffffffffU);
     }
     if (offset == 0x7ffcU || offset == 0xbffcU) {
-        return static_cast<uint32_t>(mtime_ >> 32);
+        const uint64_t cur_time = machine_ != nullptr ? machine_->platform_time() : mtime_;
+        return static_cast<uint32_t>(cur_time >> 32);
     }
     return 0;
 }
@@ -46,7 +48,7 @@ auto AclintMtimer::read64(simrv::xlen::Address offset) -> uint64_t {
         return mtimecmp_[hart_idx].load(std::memory_order_relaxed);
     }
     if (offset == 0x7ff8U || offset == 0xbff8U) {
-        return mtime_;
+        return machine_ != nullptr ? machine_->platform_time() : mtime_;
     }
     const uint64_t lo = read32(offset);
     const uint64_t hi = read32(offset + 4);
@@ -66,9 +68,15 @@ void AclintMtimer::write32(simrv::xlen::Address offset, uint32_t val) {
         tick();
     } else if (offset == 0x7ff8U || offset == 0xbff8U) {
         mtime_ = (mtime_ & 0xffffffff00000000ULL) | static_cast<uint64_t>(val);
+        if (machine_ != nullptr) {
+            machine_->primary_hart().clint_mmio.mtime.store(mtime_, std::memory_order_release);
+        }
         tick();
     } else if (offset == 0x7ffcU || offset == 0xbffcU) {
         mtime_ = (mtime_ & 0xffffffffULL) | (static_cast<uint64_t>(val) << 32);
+        if (machine_ != nullptr) {
+            machine_->primary_hart().clint_mmio.mtime.store(mtime_, std::memory_order_release);
+        }
         tick();
     }
 }
@@ -80,6 +88,9 @@ void AclintMtimer::write64(simrv::xlen::Address offset, uint64_t val) {
         tick();
     } else if (offset == 0x7ff8U || offset == 0xbff8U) {
         mtime_ = val;
+        if (machine_ != nullptr) {
+            machine_->primary_hart().clint_mmio.mtime.store(mtime_, std::memory_order_release);
+        }
         tick();
     } else {
         write32(offset, static_cast<uint32_t>(val & 0xffffffffU));
@@ -91,12 +102,13 @@ void AclintMtimer::tick() {
     if (machine_ == nullptr) {
         return;
     }
+    const uint64_t cur_time = machine_->platform_time();
     const size_t total_harts = machine_->num_harts();
     for (size_t i = 0; i < total_harts && i < kMaxHarts; ++i) {
         const uint64_t cmp = mtimecmp_[i].load(std::memory_order_relaxed);
         machine_->set_hart_irq(simrv::xlen::HartId{static_cast<uint32_t>(i)},
                                core::InterruptType::Timer, simrv::xlen::PrivilegeLevel::Machine,
-                               mtime_ >= cmp);
+                               cur_time >= cmp);
     }
 }
 

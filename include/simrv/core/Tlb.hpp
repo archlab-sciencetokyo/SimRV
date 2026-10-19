@@ -93,6 +93,11 @@ class Tlb {
     void flush();
 
     /**
+     * @brief Invalidate all entries in data read and write TLBs, preserving instruction TLB.
+     */
+    void flush_data();
+
+    /**
      * @brief Selectively invalidate entries matching the filter criteria.
      * @param filter Flush filter specifying optional vaddr and ASID constraints.
      */

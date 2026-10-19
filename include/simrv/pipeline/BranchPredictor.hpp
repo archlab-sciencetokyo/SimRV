@@ -215,6 +215,10 @@ class BranchPredictor {
     void configure(const BranchPredictorConfig& config);
     void reset();
 
+    [[nodiscard]] constexpr auto has_registered_btb() const noexcept -> bool {
+        return config_.registered_btb_read;
+    }
+
     SIMRV_ALWAYS_INLINE void latch_btb_read(simrv::xlen::Address pc) noexcept {
         if (!config_.registered_btb_read || btb_.empty() || bht_.empty()) return;
         const uint32_t btb_idx = static_cast<uint32_t>(pc >> config_.pc_shift) & btb_mask_;

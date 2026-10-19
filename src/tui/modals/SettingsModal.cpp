@@ -36,9 +36,9 @@ void SettingsModal::open(SettingsDraft& draft, const simrv::core::Machine& machi
     draft.lockstep_mode = machine.lockstep_enabled();
     draft.num_harts = machine.execution_config().num_harts;
     draft.smp_quantum = machine.execution_config().smp_quantum;
-    draft.smp_cycle_oriented =
+    draft.smp_multi_threaded =
         machine.execution_config().smp_mode.value_or(machine.configuration().soc.smp.mode) ==
-        simrv::core::SmpMode::CycleOriented;
+        simrv::core::SmpMode::MultiThreaded;
     draft.platform_profile = static_cast<uint8_t>(machine.platform_profile());
     draft.dram_size_mb = machine.memory_geometry().dram_size / (1024ULL * 1024ULL);
     draft.net_mode = machine.network_mode();
@@ -135,7 +135,7 @@ void SettingsModal::adjust_setting(SettingsDraft& draft, int dir,
                     break;
                 }
                 case 5:  // SMP Execution Mode
-                    draft.smp_cycle_oriented = !draft.smp_cycle_oriented;
+                    draft.smp_multi_threaded = !draft.smp_multi_threaded;
                     break;
                 case 6: {  // SMP Scheduler Quantum (insns/slice)
                     static constexpr std::array<uint32_t, 12> kQuantumLevels = {
@@ -279,8 +279,8 @@ auto SettingsModal::submit(const SettingsDraft& draft, simrv::core::Machine& mac
     next.network.mode = draft.net_mode;
     next.execution.num_harts = draft.num_harts;
     next.execution.smp_quantum = draft.smp_quantum;
-    next.execution.smp_mode = draft.smp_cycle_oriented ? simrv::core::SmpMode::CycleOriented
-                                                       : simrv::core::SmpMode::CycleAccurate;
+    next.execution.smp_mode = draft.smp_multi_threaded ? simrv::core::SmpMode::MultiThreaded
+                                                       : simrv::core::SmpMode::SingleThreaded;
     next.soc.smp.resize_harts(draft.num_harts);
     next.soc.smp.mode = *next.execution.smp_mode;
     next.soc.smp.synchronization_quantum = draft.smp_quantum;
@@ -402,8 +402,8 @@ void SettingsModal::render(std::vector<std::string>& content_rows,
              .val = std::format("\033[1;32m[{} Core{}]\033[0m", draft.num_harts,
                                 draft.num_harts > 1 ? "s" : "")},
             {.name = "SMP Execution Mode",
-             .val = draft.smp_cycle_oriented ? "\033[1;36m[Cycle-Oriented]\033[0m"
-                                             : "\033[1;33m[Cycle-Accurate]\033[0m"},
+             .val = draft.smp_multi_threaded ? "\033[1;36m[Multi-Threaded]\033[0m"
+                                             : "\033[1;33m[Single-Threaded]\033[0m"},
             {.name = "SMP Scheduler Quantum",
              .val = std::format("\033[1;36m[{} insns/slice]\033[0m", draft.smp_quantum)},
             {.name = "Platform Bus Topology", .val = profile_str},

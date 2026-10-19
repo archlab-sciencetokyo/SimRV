@@ -50,6 +50,10 @@ struct GuidanceContext {
     std::string cfu_plugin_path{};
     uint32_t cfu_latency = 1;
     uint32_t cfu_stall_cycles = 0;
+
+    // Platform timing context
+    uint64_t cpu_clock_hz = 0;
+    uint64_t timebase_hz = 0;
 };
 
 [[nodiscard]] auto guidance_for_page(TuiRegPage page, bool cycle_accurate) -> PageGuidance;

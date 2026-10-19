@@ -51,7 +51,7 @@ auto platform_name(const simrv::core::SoCConfig& config) -> std::string_view {
 }
 
 auto mode_name(simrv::core::SmpMode mode) -> std::string_view {
-    return mode == simrv::core::SmpMode::CycleAccurate ? "cycle-accurate" : "cycle-oriented";
+    return mode == simrv::core::SmpMode::SingleThreaded ? "single-threaded" : "multi-threaded";
 }
 
 void write_cache(std::ostream& out, const simrv::core::SharedCacheConfig& cache) {

@@ -114,4 +114,12 @@ enum class Funct3 : uint8_t {
     Csrrci = 0x7,  ///< CSR Read and Clear Bits Immediate
 };
 
+[[nodiscard]] constexpr auto operator==(uint8_t lhs, Funct3 rhs) noexcept -> bool {
+    return lhs == static_cast<uint8_t>(rhs);
+}
+
+[[nodiscard]] constexpr auto operator==(Funct3 lhs, uint8_t rhs) noexcept -> bool {
+    return static_cast<uint8_t>(lhs) == rhs;
+}
+
 }  // namespace simrv::isa

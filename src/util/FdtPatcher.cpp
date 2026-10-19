@@ -129,8 +129,8 @@ auto is_memory(Node& n) -> bool {
 }  // namespace
 
 auto patch_fdt(std::span<const uint8_t> blob, uint64_t dram_base, uint64_t dram_size,
-               uint32_t num_harts, FdtFramebufferInfo* out_fb)
-    -> std::expected<std::vector<uint8_t>, std::string> {
+               uint32_t num_harts, FdtFramebufferInfo* out_fb, uint64_t timebase_hz,
+               uint64_t cpu_clock_hz) -> std::expected<std::vector<uint8_t>, std::string> {
     try {
         if (blob.size() < 40 || be32(blob, 0) != kMagic)
             return std::unexpected("invalid device tree header");
@@ -212,12 +212,22 @@ auto patch_fdt(std::span<const uint8_t> blob, uint64_t dram_base, uint64_t dram_
                 return std::unexpected(
                     "device tree must contain CPU nodes for every configured hart (missing hart " +
                     std::to_string(i) + ")");
+        if (timebase_hz != 0) {
+            std::vector<uint8_t> tb_data;
+            put32(tb_data, static_cast<uint32_t>(timebase_hz));
+            set_prop(*cpus, "timebase-frequency", std::move(tb_data));
+        }
         for (auto* c : cpu_nodes) {
             auto* rp = prop(*c, "reg");
             const auto id = cpu_ac == 1 ? be32(rp->data, 0) : be64(rp->data, 0);
             const std::string status = id < num_harts ? "okay" : "disabled";
             set_prop(*c, "status", std::vector<uint8_t>(status.begin(), status.end()));
             prop(*c, "status")->data.push_back(0);
+            if (cpu_clock_hz != 0) {
+                std::vector<uint8_t> clk_data;
+                put32(clk_data, static_cast<uint32_t>(cpu_clock_hz));
+                set_prop(*c, "clock-frequency", std::move(clk_data));
+            }
         }
         std::set<std::string> property_names;
         auto gather = [&](auto&& self, const Node& n) -> void {

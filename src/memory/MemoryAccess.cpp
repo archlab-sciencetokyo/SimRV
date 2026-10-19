@@ -153,11 +153,8 @@ auto MemoryAccess::target_read(MemorySubsystem& mem, core::CPU& cpu, simrv::xlen
                     entry.matches(vpn, current_asid, eff_priv, cpu.soft_tlb_epoch))) {
                 const simrv::xlen::PhysAddr paddr = entry.paddr_base + (v_addr.raw() & 0xFFF);
                 cpu.active_context().mem_paddr = paddr;
-                if (simrv::compiler::likely(core::pmp::check_access(cpu.state(), paddr, size_bytes,
-                                                                    pmp_req, eff_priv) &&
-                                            entry.host_ptr_base != nullptr)) {
-                    return simrv::memory::host_read_fast(
-                        entry.host_ptr_base + (v_addr.raw() & 0xFFF), funct3);
+                if (simrv::compiler::likely(entry.has_host_ptr() && !(is_amo && !is_lr))) {
+                    return simrv::memory::host_read_fast(entry.host_ptr(v_addr.raw()), funct3);
                 }
                 if (simrv::compiler::likely(geometry.contains(paddr, size_bytes))) {
                     if (simrv::compiler::unlikely(!core::pmp::check_access(
@@ -214,7 +211,12 @@ auto MemoryAccess::target_read(MemorySubsystem& mem, core::CPU& cpu, simrv::xlen
                 req.size = kTlBeatSize;
                 req.address = addr & ~(static_cast<simrv::xlen::Address>(kTlBeatBytes - 1u));
             }
-            mem.system_bus().send_request(req);
+            if (!mem.system_bus().send_request(req)) {
+                cpu.ca_state.waiting_for_interconnect = false;
+                cpu.active_context().pending_exception = ExceptionCode::FaultLoad;
+                cpu.active_context().pending_tval = v_addr.raw();
+                return 0;
+            }
 
             if (cpu.machine_->runtime_profile.is_cycle_mode()) {
                 transfer = {
@@ -300,7 +302,12 @@ auto MemoryAccess::target_read(MemorySubsystem& mem, core::CPU& cpu, simrv::xlen
         req.address = line_base;
 
         if (cpu.machine_->runtime_profile.is_cycle_mode()) {
-            mem.system_bus().send_request(req);
+            if (!mem.system_bus().send_request(req)) {
+                cpu.ca_state.waiting_for_interconnect = false;
+                cpu.active_context().pending_exception = ExceptionCode::FaultLoad;
+                cpu.active_context().pending_tval = v_addr.raw();
+                return 0;
+            }
             transfer = {.address = line_base,
                         .source = req.source,
                         .active = true,
@@ -311,7 +318,7 @@ auto MemoryAccess::target_read(MemorySubsystem& mem, core::CPU& cpu, simrv::xlen
         }
 
         TlChannelD resp{};
-        if (mem.system_bus().acquire_block(req, resp, line_data)) {
+        if (mem.system_bus().acquire_block(req, resp, line_data) && !resp.failed()) {
             cpu.dcache.insert(line_base, line_data.data(), mesi_for(resp.cap));
             release_evicted_line(mem.system_bus(), cpu.dcache, cpu.hart_id(), TlPort::Data);
             TlChannelE ack{};
@@ -319,7 +326,9 @@ auto MemoryAccess::target_read(MemorySubsystem& mem, core::CPU& cpu, simrv::xlen
             mem.system_bus().grant_ack(ack);
             return read_refill_data(line_data, line_base);
         }
-        return simrv::memory::ram_read_fast(addr, funct3, cpu.machine_->ram_view());
+        cpu.active_context().pending_exception = ExceptionCode::FaultLoad;
+        cpu.active_context().pending_tval = v_addr.raw();
+        return 0;
     };
 
     const simrv::xlen::Address eff_vaddr = (simrv::xlen::kIsXLen64 && active_xlen == 32)
@@ -388,12 +397,18 @@ auto MemoryAccess::target_read(MemorySubsystem& mem, core::CPU& cpu, simrv::xlen
         if (cpu.machine_->runtime_profile.is_instruction_mode() && geometry.contains(p_addr)) {
             const simrv::xlen::Address vpn = v_addr.raw() >> 12;
             const size_t tlb_idx = core::CPU::soft_tlb_index(vpn);
+            const simrv::xlen::Address ppage = p_addr & ~0xFFFULL;
             simrv::xlen::Byte* host_base =
-                cpu.machine_->ram_view().unchecked_ptr(p_addr & ~0xFFFULL);
+                (cpu.machine_->ram_view().contains(ppage, 4096) &&
+                 (cpu.state().num_active_pmp == 0 ||
+                  core::pmp::check_access(cpu.state(), ppage, 4096, core::PmpAccessType::Read,
+                                          eff_priv)))
+                    ? cpu.machine_->ram_view().unchecked_ptr(ppage)
+                    : nullptr;
             cpu.soft_tlb_read[tlb_idx].set(
                 vpn, translation_enabled ? static_cast<uint64_t>(current_asid) : ~uint64_t{0},
-                eff_priv, cpu.soft_tlb_epoch, p_addr & ~0xFFFULL, host_base, is_global);
-            if (cpu.soft_tlb_write[tlb_idx].paddr_base != (p_addr & ~0xFFFULL)) {
+                eff_priv, cpu.soft_tlb_epoch, ppage, host_base, is_global);
+            if (cpu.soft_tlb_write[tlb_idx].paddr_base != ppage) {
                 cpu.soft_tlb_write[tlb_idx].invalidate();
             }
         }
@@ -481,21 +496,25 @@ void MemoryAccess::target_write(MemorySubsystem& mem, core::CPU& cpu, simrv::xle
         }
     }
 
+    auto check_sc_reservation = [&](simrv::xlen::Address addr) -> bool {
+        auto& ctx = cpu.active_context();
+        if (!is_sc || ctx.sc_reservation_checked) return true;
+
+        ctx.sc_reservation_checked = true;
+        bool success = mem.reservation_table().check_and_clear_reservation(cpu.hart_id(), addr);
+        if (success && cpu.machine_->lockstep() && cpu.machine_->lockstep()->is_running()) {
+            const auto lockstep_success = cpu.machine_->lockstep()->determine_sc_success();
+            if (lockstep_success.has_value() && !lockstep_success.value()) success = false;
+        }
+        ctx.sc_reservation_succeeded = success;
+        ctx.wb_data = success ? 0 : 1;
+        cpu.state().lr_reservation_active = success;
+        return success;
+    };
+
     auto issue_write = [&](simrv::xlen::Address addr, simrv::xlen::Word data) -> void {
         auto& ctx = cpu.active_context();
         ctx.mem_paddr = addr;
-        if (is_sc && !ctx.sc_reservation_checked) {
-            ctx.sc_reservation_checked = true;
-            bool success = mem.reservation_table().check_and_clear_reservation(cpu.hart_id(), addr);
-            if (success && cpu.machine_->lockstep() && cpu.machine_->lockstep()->is_running()) {
-                const auto lockstep_success = cpu.machine_->lockstep()->determine_sc_success();
-                if (lockstep_success.has_value() && !lockstep_success.value()) success = false;
-            }
-            ctx.sc_reservation_succeeded = success;
-            ctx.wb_data = success ? 0 : 1;
-            cpu.state().lr_reservation_active = success;
-            if (!success) return;
-        }
         const auto commit_write = [&]() { note_store(addr, size_bytes); };
         auto& transfer = cpu.ca_state.data_transfer;
         if (cpu.machine_->runtime_profile.is_cycle_mode() && transfer.active &&
@@ -527,6 +546,7 @@ void MemoryAccess::target_write(MemorySubsystem& mem, core::CPU& cpu, simrv::xle
         }
         if (simrv::compiler::unlikely(cpu.cpu_model_config.is_provingground_or_rvproc) &&
             (addr == cpu.machine_->isa_test_tohost() || (addr & 0x80000000ULL) != 0)) {
+            if (!check_sc_reservation(addr)) return;
             if (funct3 == Funct3::Sw && (data == 0x00020000ULL || (data & 1ULL) != 0)) {
                 cpu.machine_->tohost = data;
             } else {
@@ -553,33 +573,41 @@ void MemoryAccess::target_write(MemorySubsystem& mem, core::CPU& cpu, simrv::xle
                     cpu.machine_->tohost = value;
                 }
             };
+            const bool is_guest_xlen32 = (cpu.state().regs.xlen == 32) || !simrv::xlen::kIsXLen64;
             if (addr == cpu.machine_->isa_test_tohost() || addr == 0x80001000 ||
                 addr == 0x40008000) {
-                publish_host_write(simrv::xlen::kIsXLen64
-                                       ? data
-                                       : ((cpu.machine_->tohost & 0xFFFFFFFF00000000ULL) | data));
-            } else if (!simrv::xlen::kIsXLen64 && (addr == cpu.machine_->isa_test_tohost() + 4 ||
-                                                   addr == 0x80001004 || addr == 0x40008004)) {
+                if (!check_sc_reservation(addr)) return;
+                publish_host_write(
+                    is_guest_xlen32
+                        ? ((cpu.machine_->tohost & 0xFFFFFFFF00000000ULL) | (data & 0xFFFFFFFFULL))
+                        : data);
+            } else if (is_guest_xlen32 && (addr == cpu.machine_->isa_test_tohost() + 4 ||
+                                           addr == 0x80001004 || addr == 0x40008004)) {
+                if (!check_sc_reservation(addr)) return;
                 publish_host_write((cpu.machine_->tohost & 0x00000000FFFFFFFFULL) |
-                                   (static_cast<uint64_t>(data) << 32));
+                                   (static_cast<uint64_t>(data & 0xFFFFFFFFULL) << 32));
             }
         }
         if (cpu.machine_->runtime_profile.is_instruction_mode() &&
             geometry.contains(addr, size_bytes)) {
+            if (!check_sc_reservation(addr)) return;
             simrv::memory::ram_write_fast(addr, data, funct3, cpu.machine_->ram_view());
             commit_write();
             return;
         }
         if (geometry.contains(addr, size_bytes)) {
+            const simrv::xlen::Address line_base =
+                addr & ~(static_cast<simrv::xlen::Address>(simrv::cache::DCache::kLineBytes - 1u));
+            const auto line_state = cpu.dcache.line_state(line_base);
+            const bool has_trunk = line_state == simrv::memory::MesiState::Exclusive ||
+                                   line_state == simrv::memory::MesiState::Modified;
+            if (is_sc && has_trunk && !check_sc_reservation(addr)) return;
+
             bool first_write = false;
             bool cache_write_completed = cpu.dcache.write(addr, data, funct3, &first_write);
             if (!cache_write_completed) {
                 // Not in Trunk state; acquire Trunk ownership via TL-C
-                const simrv::xlen::Address line_base =
-                    addr &
-                    ~(static_cast<simrv::xlen::Address>(simrv::cache::DCache::kLineBytes - 1u));
-                const bool is_upgrade =
-                    (cpu.dcache.line_state(line_base) == simrv::memory::MesiState::Shared);
+                const bool is_upgrade = (line_state == simrv::memory::MesiState::Shared);
                 TlChannelA req{};
                 req.opcode = is_upgrade ? TlOpcodeA::AcquirePerm : TlOpcodeA::AcquireBlock;
                 req.grow = is_upgrade ? TlGrow::BtoT : TlGrow::NtoT;
@@ -591,7 +619,12 @@ void MemoryAccess::target_write(MemorySubsystem& mem, core::CPU& cpu, simrv::xle
                 req.address = line_base;
 
                 if (cpu.machine_->runtime_profile.is_cycle_mode()) {
-                    mem.system_bus().send_request(req);
+                    if (!mem.system_bus().send_request(req)) {
+                        cpu.ca_state.waiting_for_interconnect = false;
+                        cpu.active_context().pending_exception = ExceptionCode::FaultStore;
+                        cpu.active_context().pending_tval = v_addr.raw();
+                        return;
+                    }
                     transfer = {.address = line_base,
                                 .source = req.source,
                                 .active = true,
@@ -603,28 +636,35 @@ void MemoryAccess::target_write(MemorySubsystem& mem, core::CPU& cpu, simrv::xle
 
                 TlChannelD resp{};
                 if (is_upgrade) {
-                    if (mem.system_bus().acquire_perm(req, resp)) {
+                    if (mem.system_bus().acquire_perm(req, resp) && !resp.failed()) {
                         cpu.dcache.upgrade_line_state(line_base, mesi_for(resp.cap));
                         TlChannelE ack{};
                         ack.sink = resp.sink;
                         mem.system_bus().grant_ack(ack);
+                        if (is_sc && !check_sc_reservation(addr)) return;
                         cache_write_completed = cpu.dcache.write(addr, data, funct3, &first_write);
                     }
                 } else {
                     std::array<simrv::xlen::Byte, simrv::cache::DCache::kLineBytes> line_data{};
-                    if (mem.system_bus().acquire_block(req, resp, line_data)) {
+                    if (mem.system_bus().acquire_block(req, resp, line_data) && !resp.failed()) {
                         cpu.dcache.insert(line_base, line_data.data(), mesi_for(resp.cap));
                         release_evicted_line(mem.system_bus(), cpu.dcache, cpu.hart_id(),
                                              TlPort::Data);
                         TlChannelE ack{};
                         ack.sink = resp.sink;
                         mem.system_bus().grant_ack(ack);
+                        if (is_sc && !check_sc_reservation(addr)) return;
                         cache_write_completed = cpu.dcache.write(addr, data, funct3, &first_write);
                     }
                 }
             }
             if (cache_write_completed && first_write) {
                 mem.system_bus().mark_modified(addr, cpu.hart_id());
+            }
+            if (!cache_write_completed) {
+                cpu.active_context().pending_exception = ExceptionCode::FaultStore;
+                cpu.active_context().pending_tval = v_addr.raw();
+                return;
             }
             simrv::memory::ram_write_fast(addr, data, funct3, cpu.machine_->ram_view());
             commit_write();
@@ -677,7 +717,13 @@ void MemoryAccess::target_write(MemorySubsystem& mem, core::CPU& cpu, simrv::xle
             }
             return;
         }
-        mem.system_bus().send_request(req);
+        if (!check_sc_reservation(addr)) return;
+        if (!mem.system_bus().send_request(req)) {
+            cpu.ca_state.waiting_for_interconnect = false;
+            cpu.active_context().pending_exception = ExceptionCode::FaultStore;
+            cpu.active_context().pending_tval = v_addr.raw();
+            return;
+        }
         if (cpu.machine_->runtime_profile.is_cycle_mode()) {
             transfer = {.address = addr, .source = req.source, .active = true, .is_write = true};
             cpu.ca_state.waiting_for_interconnect = true;
@@ -715,29 +761,18 @@ void MemoryAccess::target_write(MemorySubsystem& mem, core::CPU& cpu, simrv::xle
             if (simrv::compiler::likely(
                     entry.matches(vpn, current_asid, eff_priv, cpu.soft_tlb_epoch))) {
                 const simrv::xlen::PhysAddr paddr = entry.paddr_base + (v_addr.raw() & 0xFFF);
+                if (simrv::compiler::likely(entry.has_host_ptr())) {
+                    simrv::memory::host_write_fast(entry.host_ptr(v_addr.raw()), wdata, funct3);
+                    note_store(paddr.raw(), size_bytes);
+                    return;
+                }
                 if (simrv::compiler::unlikely(!core::pmp::check_access(
                         cpu.state(), paddr, size_bytes, core::PmpAccessType::Write, eff_priv))) {
                     cpu.active_context().pending_exception = ExceptionCode::FaultStore;
                     cpu.active_context().pending_tval = v_addr.raw();
                     return;
                 }
-                if (simrv::compiler::likely(core::pmp::check_access(cpu.state(), paddr, size_bytes,
-                                                                    core::PmpAccessType::Write,
-                                                                    eff_priv) &&
-                                            entry.host_ptr_base != nullptr)) {
-                    simrv::memory::host_write_fast(entry.host_ptr_base + (v_addr.raw() & 0xFFF),
-                                                   wdata, funct3);
-                    note_store(paddr.raw(), size_bytes);
-                    return;
-                }
                 if (simrv::compiler::likely(geometry.contains(paddr, size_bytes))) {
-                    if (simrv::compiler::unlikely(
-                            !core::pmp::check_access(cpu.state(), paddr, size_bytes,
-                                                     core::PmpAccessType::Write, eff_priv))) {
-                        cpu.active_context().pending_exception = ExceptionCode::FaultStore;
-                        cpu.active_context().pending_tval = v_addr.raw();
-                        return;
-                    }
                     simrv::memory::ram_write_fast(paddr, wdata, funct3, cpu.machine_->ram_view());
                     note_store(paddr.raw(), size_bytes);
                     return;
@@ -809,12 +844,18 @@ void MemoryAccess::target_write(MemorySubsystem& mem, core::CPU& cpu, simrv::xle
         if (cpu.machine_->runtime_profile.is_instruction_mode() && geometry.contains(p_addr)) {
             const simrv::xlen::Address vpn = v_addr.raw() >> 12;
             const size_t tlb_idx = core::CPU::soft_tlb_index(vpn);
+            const simrv::xlen::Address ppage = p_addr & ~0xFFFULL;
             simrv::xlen::Byte* host_base =
-                cpu.machine_->ram_view().unchecked_ptr(p_addr & ~0xFFFULL);
+                (cpu.machine_->ram_view().contains(ppage, 4096) &&
+                 (cpu.state().num_active_pmp == 0 ||
+                  core::pmp::check_access(cpu.state(), ppage, 4096, core::PmpAccessType::Write,
+                                          eff_priv)))
+                    ? cpu.machine_->ram_view().unchecked_ptr(ppage)
+                    : nullptr;
             cpu.soft_tlb_write[tlb_idx].set(
                 vpn, translation_enabled ? static_cast<uint64_t>(current_asid) : ~uint64_t{0},
-                eff_priv, cpu.soft_tlb_epoch, p_addr & ~0xFFFULL, host_base, is_global);
-            if (cpu.soft_tlb_read[tlb_idx].paddr_base != (p_addr & ~0xFFFULL)) {
+                eff_priv, cpu.soft_tlb_epoch, ppage, host_base, is_global);
+            if (cpu.soft_tlb_read[tlb_idx].paddr_base != ppage) {
                 cpu.soft_tlb_read[tlb_idx].invalidate();
             }
         }

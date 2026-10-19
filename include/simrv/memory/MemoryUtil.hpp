@@ -161,6 +161,45 @@ SIMRV_ALWAYS_INLINE auto host_read_fast(const simrv::xlen::Byte* host_ptr,
     }
 }
 
+SIMRV_ALWAYS_INLINE auto host_read_fast_aligned(const simrv::xlen::Byte* host_ptr,
+                                                simrv::xlen::Instruction funct3) noexcept
+    -> simrv::xlen::Word {
+    const auto f3 = funct3 & 0x7u;
+    if (f3 == 3) {
+        if constexpr (simrv::xlen::kIsXLen64) {
+            return *reinterpret_cast<const uint64_t*>(host_ptr);
+        } else {
+            return *reinterpret_cast<const uint32_t*>(host_ptr);
+        }
+    }
+    if (f3 == 1) {
+        return static_cast<simrv::xlen::Word>(
+            static_cast<simrv::xlen::SignedWord>(*reinterpret_cast<const int16_t*>(host_ptr)));
+    }
+    if (f3 == 4) {
+        return *reinterpret_cast<const uint8_t*>(host_ptr);
+    }
+    if (f3 == 2) {
+        return static_cast<simrv::xlen::Word>(
+            static_cast<simrv::xlen::SignedWord>(*reinterpret_cast<const int32_t*>(host_ptr)));
+    }
+    if (f3 == 5) {
+        return *reinterpret_cast<const uint16_t*>(host_ptr);
+    }
+    if (f3 == 0) {
+        return static_cast<simrv::xlen::Word>(
+            static_cast<simrv::xlen::SignedWord>(*reinterpret_cast<const int8_t*>(host_ptr)));
+    }
+    if (f3 == 6) {
+        return static_cast<simrv::xlen::Word>(*reinterpret_cast<const uint32_t*>(host_ptr));
+    }
+#if defined(__GNUC__) || defined(__clang__)
+    __builtin_unreachable();
+#else
+    return 0;
+#endif
+}
+
 SIMRV_ALWAYS_INLINE void host_write_fast(simrv::xlen::Byte* host_ptr, simrv::xlen::Register val,
                                          simrv::xlen::Instruction funct3) noexcept {
     switch (funct3 & 0x3u) {
@@ -181,6 +220,41 @@ SIMRV_ALWAYS_INLINE void host_write_fast(simrv::xlen::Byte* host_ptr, simrv::xle
             }
             return;
     }
+}
+
+SIMRV_ALWAYS_INLINE void host_write_fast_aligned(simrv::xlen::Byte* host_ptr,
+                                                 simrv::xlen::Register val,
+                                                 simrv::xlen::Instruction funct3) noexcept {
+    const auto f3 = funct3 & 0x3u;
+    if (f3 == 3) {
+        if constexpr (simrv::xlen::kIsXLen64) {
+            *reinterpret_cast<uint64_t*>(host_ptr) = static_cast<uint64_t>(val);
+            return;
+        } else {
+            *reinterpret_cast<uint32_t*>(host_ptr) = static_cast<uint32_t>(val);
+            return;
+        }
+    }
+    if (f3 == 2) {
+        *reinterpret_cast<uint32_t*>(host_ptr) = static_cast<uint32_t>(val);
+        return;
+    }
+    if (f3 == 0) {
+        *reinterpret_cast<uint8_t*>(host_ptr) = static_cast<uint8_t>(val);
+        return;
+    }
+    *reinterpret_cast<uint16_t*>(host_ptr) = static_cast<uint16_t>(val);
+}
+
+SIMRV_ALWAYS_INLINE auto host_read_fast_aligned(const simrv::xlen::Byte* host_ptr,
+                                                isa::Funct3 funct3) noexcept -> simrv::xlen::Word {
+    return host_read_fast_aligned(host_ptr, static_cast<simrv::xlen::Instruction>(funct3));
+}
+
+SIMRV_ALWAYS_INLINE void host_write_fast_aligned(simrv::xlen::Byte* host_ptr,
+                                                 simrv::xlen::Register val,
+                                                 isa::Funct3 funct3) noexcept {
+    host_write_fast_aligned(host_ptr, val, static_cast<simrv::xlen::Instruction>(funct3));
 }
 
 /// Fast inline RAM read. The caller validates the address against its RamView.

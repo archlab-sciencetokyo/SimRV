@@ -55,7 +55,7 @@ class RunnerBase {
     virtual ~RunnerBase();
     void wait_for_quiescence();
     void stop(Machine& machine);
-    void synchronize_cycle_oriented_workers(Machine& machine);
+    void synchronize_multithreaded_workers(Machine& machine);
 
    protected:
     void start_threads(Machine& machine, bool baremetal);
@@ -65,10 +65,11 @@ class RunnerBase {
     void stop_threads();
 
     std::vector<std::jthread> worker_threads_;
-    std::atomic<bool> workers_running_{false};
+    alignas(64) std::atomic<uint64_t> cycle_generation_{0};
+    alignas(64) std::atomic<uint32_t> workers_sleeping_{0};
+    alignas(64) std::atomic<size_t> cycle_completed_{0};
+    alignas(64) std::atomic<bool> workers_running_{false};
     std::atomic<uint32_t> workers_in_cycle_{0};
-    std::atomic<uint64_t> cycle_oriented_generation_{0};
-    std::atomic<size_t> cycle_oriented_completed_{0};
     Machine* machine_ = nullptr;
 };
 
@@ -136,6 +137,16 @@ class Machine::Runtime {
 
     CPU primary_cpu;
     std::vector<std::unique_ptr<CPU>> secondary_harts;
+    std::array<CPU*, ExecutionConfig::kMaxHarts> secondary_hart_ptrs{};
+    size_t secondary_hart_count{0};
+
+    void refresh_secondary_hart_ptrs() noexcept {
+        secondary_hart_count = std::min(secondary_harts.size(), secondary_hart_ptrs.size());
+        for (size_t i = 0; i < secondary_hart_count; ++i) {
+            secondary_hart_ptrs[i] = secondary_harts[i].get();
+        }
+    }
+
     RamStorage ram;
     std::unique_ptr<simrv::Rtc> rtc;
     std::unique_ptr<simrv::device::Uart> uart;

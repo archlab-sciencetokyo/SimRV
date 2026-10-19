@@ -403,8 +403,16 @@ class Machine final : public core::IInterruptController {
     simrv::xlen::Address resolved_isatest_tohost_ = 0;
     FramebufferConfig framebuffer_geometry_{};
     bool is_smp_enabled_ = false;
+    simrv::core::timing::DeterministicClockDivider clock_divider_{};
 
    public:
+    [[nodiscard]] auto clock_divider() const noexcept
+        -> const simrv::core::timing::DeterministicClockDivider& {
+        return clock_divider_;
+    }
+    [[nodiscard]] auto clock_divider() noexcept -> simrv::core::timing::DeterministicClockDivider& {
+        return clock_divider_;
+    }
     /// Inspect a simulated hart by index (0 is the primary/boot hart).
     [[nodiscard]] auto hart(size_t index = 0) -> CPU&;
     [[nodiscard]] auto hart(size_t index = 0) const -> const CPU&;
@@ -526,7 +534,7 @@ class Machine final : public core::IInterruptController {
     }
     void set_tui_enabled_for_testing(bool enabled) noexcept { config.tui.enabled = enabled; }
     void set_smp_parallel_for_testing(bool enabled) noexcept {
-        config.execution.smp_mode = enabled ? SmpMode::CycleOriented : SmpMode::CycleAccurate;
+        config.execution.smp_mode = enabled ? SmpMode::MultiThreaded : SmpMode::SingleThreaded;
         is_smp_enabled_ = enabled;
     }
     void set_instruction_limit_for_testing(simrv::xlen::Counter limit) noexcept {

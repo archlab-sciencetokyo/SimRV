@@ -104,22 +104,23 @@ auto guidance_for_context(const GuidanceContext& context) -> PageGuidance {
                 .glossary_topic = 4};
             break;
         case TuiRegPage::HAZARD:
-            guidance = {.title = "Pipeline hazards",
-                        .meaning = "RAW dependencies and structural conflicts can stall.",
-                        .relationship =
-                            "Forwarding helps only when a producer's result is available in time.",
-                        .next_action = KeyAction::Settings,
-                        .next_hint = "Review forwarding and latency configuration in Settings.",
-                        .glossary_topic = 1};
+            guidance = {
+                .title = "Pipeline hazards",
+                .meaning = "RAW dependencies and structural conflicts can stall younger stages.",
+                .relationship =
+                    "Forwarding resolves data hazards in 0 bubbles when producer results align.",
+                .next_action = KeyAction::Settings,
+                .next_hint = "Review forwarding and latency configuration in Settings.",
+                .glossary_topic = 1};
             break;
         case TuiRegPage::BUS:
-            guidance = {
-                .title = "Memory and MMIO",
-                .meaning = "The bus routes DRAM and device requests by address.",
-                .relationship = "Device and IRQ state connect software requests to peripherals.",
-                .next_action = KeyAction::InspectAddress,
-                .next_hint = "Inspect a mapped address or descriptor.",
-                .glossary_topic = 5};
+            guidance = {.title = "Memory and MMIO",
+                        .meaning = "The bus routes DRAM and device requests by physical address.",
+                        .relationship =
+                            "CLINT/ACLINT timebase and IRQ routing connect hardware timers to CPU.",
+                        .next_action = KeyAction::InspectAddress,
+                        .next_hint = "Inspect a mapped address or descriptor.",
+                        .glossary_topic = 5};
             break;
         case TuiRegPage::TRACE:
             guidance = {
@@ -194,6 +195,18 @@ auto guidance_for_context(const GuidanceContext& context) -> PageGuidance {
         (context.data_hazard_stalls + context.control_hazard_bubbles) > 0) {
         guidance.meaning = std::format("Telemetry records {} data stalls and {} control bubbles.",
                                        context.data_hazard_stalls, context.control_hazard_bubbles);
+    }
+    if (context.page == TuiRegPage::BUS && context.cpu_clock_hz > 0 && context.timebase_hz > 0) {
+        const double cpu_mhz = static_cast<double>(context.cpu_clock_hz) / 1'000'000.0;
+        const double timebase_mhz = static_cast<double>(context.timebase_hz) / 1'000'000.0;
+        const double cycles_per_tick =
+            static_cast<double>(context.cpu_clock_hz) / static_cast<double>(context.timebase_hz);
+        guidance.meaning = std::format(
+            "Bus routes DRAM & MMIO at {:.1f} MHz CPU clock ({:.1f} MHz timer timebase).", cpu_mhz,
+            timebase_mhz);
+        guidance.relationship = std::format(
+            "CLINT/ACLINT mtime increments at 1 tick per {:.1f} CPU cycles ({:.1f} ns/tick).",
+            cycles_per_tick, 1000.0 / timebase_mhz);
     }
 
     if (context.has_pending_trap) {

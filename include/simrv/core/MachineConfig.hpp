@@ -13,6 +13,7 @@
 #include <string>
 #include <utility>
 
+#include "simrv/core/PlatformTiming.hpp"
 #include "simrv/core/SoCConfig.hpp"
 #include "simrv/core/SoCDeviceRegistry.hpp"
 #include "simrv/isa/IsaConfig.hpp"
@@ -58,6 +59,8 @@ struct ExecutionConfig {
     simrv::xlen::Counter trace_end = std::numeric_limits<simrv::xlen::Counter>::max();
     simrv::xlen::Counter enabletimer = std::numeric_limits<simrv::xlen::Counter>::max();
     bool realtime_pacing = false;
+    uint64_t cpu_clock_hz = simrv::core::timing::kCpuClockHz;
+    uint64_t timebase_hz = simrv::core::timing::kTimebaseHz;
 };
 
 struct TuiConfig {
@@ -222,7 +225,24 @@ struct MachineConfig {
         if (framebuffer.width == 0 || framebuffer.height == 0) {
             return std::unexpected("framebuffer dimensions must be non-zero");
         }
+        if (execution.cpu_clock_hz == 0) {
+            return std::unexpected("CPU clock frequency must be non-zero");
+        }
+        if (execution.timebase_hz == 0) {
+            return std::unexpected("timebase frequency must be non-zero");
+        }
+        if (execution.timebase_hz > execution.cpu_clock_hz) {
+            return std::unexpected("timebase frequency cannot exceed CPU clock frequency");
+        }
         return {};
+    }
+
+    template <typename Self>
+    constexpr auto&& with_clock_hz(this Self&& self, uint64_t cpu_clk,
+                                   uint64_t timebase = simrv::core::timing::kTimebaseHz) noexcept {
+        self.execution.cpu_clock_hz = cpu_clk;
+        self.execution.timebase_hz = timebase;
+        return std::forward<Self>(self);
     }
 
     template <typename Self>

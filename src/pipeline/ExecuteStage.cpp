@@ -104,7 +104,6 @@ void CPU::execute_core(Machine& machine) {
             ctx.tkn = false;
             if (ctx.funct3 == Funct3::FenceI) {
                 icache.flush();
-                dcache.flush();
                 decode_cache.flush();
             } else if (ctx.ir == 0x0100000f) {
                 // RISC-V PAUSE (Zihintpause / cpu_relax): architectural NOP pipeline hint

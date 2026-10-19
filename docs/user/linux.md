@@ -224,13 +224,12 @@ reboot     # Cleanly restarts the guest system
 
 ### RV64 graphical smoke path
 
-The RV64 disk image contains an idempotent `start-jwm` helper. The image builder bundles the
-pinned desktop packages when the RISC-V user emulator is available; otherwise the helper falls
-back to installing them on the first networked boot. Getty provides login prompts on both `ttyS0`
-and framebuffer console `tty1`. After a successful root login on either console, `/root/.profile`
-starts the helper in the background, leaving the shell visible until Xorg takes over `tty1`. The
-helper waits for `/dev/fb0` and the VirtIO input device, then starts Xorg on the simulated
-framebuffer and JWM.
+The RV64 disk image contains an idempotent `start-jwm` helper, exposed as the `startx` login
+command. The image builder bundles the pinned desktop packages when the RISC-V user emulator is
+available; otherwise `startx` installs them on its first networked run. Getty provides login
+prompts on both `ttyS0` and framebuffer console `tty1`; logging in leaves the shell available, and
+you can launch the desktop with `startx`. The helper waits for `/dev/fb0` and the VirtIO input
+device, then starts Xorg on the simulated framebuffer and JWM.
 The JWM Applications
 menu includes a System Monitor entry for `htop` and one SimRV Games submenu for Chess, Gomoku,
 Klondike, and Snake; these entries are rebuilt idempotently on every boot so persistent root

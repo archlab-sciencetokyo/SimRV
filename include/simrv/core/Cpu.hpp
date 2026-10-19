@@ -254,10 +254,10 @@ struct alignas(32) SoftTlbEntry {
 
     uint64_t tag = kInvalidTag;  ///< Packed VPN | ASID | priv; kInvalidTag when empty (8 bytes)
     simrv::xlen::PhysAddr paddr_base{0};  ///< Physical page base (paddr & ~0xFFF) (8 bytes)
-    simrv::xlen::Byte* host_ptr_base =
-        nullptr;          ///< Direct host pointer base (nullptr = use paddr) (8 bytes)
-    uint32_t epoch = 0;   ///< TLB generation epoch (4 bytes)
-    bool global = false;  ///< Global translation flag (1 byte)
+    uintptr_t host_offset = 0;  ///< Direct host offset: (host_base - (vpn << 12)) (8 bytes)
+    uint32_t epoch = 0;         ///< TLB generation epoch (4 bytes)
+    bool global = false;        ///< Global translation flag (1 byte)
+    bool has_host = false;      ///< Direct host pointer valid flag (1 byte)
 
     /// Build a lookup tag from the three key fields.
     [[nodiscard]] SIMRV_ALWAYS_INLINE static constexpr auto make_tag(
@@ -273,29 +273,48 @@ struct alignas(32) SoftTlbEntry {
         if (simrv::compiler::unlikely(epoch != current_epoch)) return false;
         const uint64_t expected_tag = make_tag(vpn, asid, priv);
         if (simrv::compiler::likely(tag == expected_tag)) return true;
-        return simrv::compiler::unlikely(global) && (tag == make_tag(vpn, 0, priv));
+        return simrv::compiler::unlikely(global) &&
+               ((tag & ~uint64_t{0x3FFFCULL}) == make_tag(vpn, 0, priv));
+    }
+
+    [[nodiscard]] SIMRV_ALWAYS_INLINE bool has_host_ptr() const noexcept { return has_host; }
+
+    [[nodiscard]] SIMRV_ALWAYS_INLINE auto host_ptr(simrv::xlen::Address vaddr) const noexcept
+        -> simrv::xlen::Byte* {
+        return reinterpret_cast<simrv::xlen::Byte*>(host_offset + static_cast<uintptr_t>(vaddr));
+    }
+
+    [[nodiscard]] SIMRV_ALWAYS_INLINE auto host_ptr_base() const noexcept -> simrv::xlen::Byte* {
+        return has_host ? reinterpret_cast<simrv::xlen::Byte*>(host_offset + ((tag >> 18) << 12))
+                        : nullptr;
     }
 
     void set(uint64_t vpn, uint64_t asid, simrv::xlen::PrivilegeLevel priv, uint32_t current_epoch,
              simrv::xlen::PhysAddr paddr_base_in, simrv::xlen::Byte* host_ptr_base_in,
              bool is_global = false) noexcept {
-        tag = make_tag(vpn, is_global ? 0 : asid, priv);
+        tag = make_tag(vpn, asid, priv);
         epoch = current_epoch;
         paddr_base = paddr_base_in;
-        host_ptr_base = host_ptr_base_in;
+        has_host = (host_ptr_base_in != nullptr);
+        host_offset = has_host ? (reinterpret_cast<uintptr_t>(host_ptr_base_in) -
+                                  (static_cast<uintptr_t>(vpn) << 12U))
+                               : 0;
         global = is_global;
     }
 
     void invalidate() noexcept {
         tag = kInvalidTag;
         paddr_base = 0;
-        host_ptr_base = nullptr;
+        host_offset = 0;
+        has_host = false;
         global = false;
     }
+
     [[nodiscard]] bool valid(uint32_t current_epoch) const noexcept {
         return epoch == current_epoch && tag != kInvalidTag;
     }
 };
+static_assert(sizeof(SoftTlbEntry) == 32, "SoftTlbEntry must be exactly 32 bytes");
 
 enum class HartStatus : uint8_t {
     Started = 0,
@@ -341,6 +360,12 @@ class CPU {
      * invalidates the decode cache.
      */
     void TLB_flush();
+
+    /**
+     * @brief Flushes only data TLB and soft-TLB entries (e.g., on SUM/MXR changes) while
+     * preserving instruction TLB, I-Cache, and DecodeCache.
+     */
+    void flush_data_tlb();
 
     /**
      * @brief Selectively flushes TLB entries matching the specified filter criteria.
@@ -455,6 +480,10 @@ class CPU {
     /// Advance exactly one authoritative CA transition.  Machine owns the global CA clock and
     /// calls this directly; IA never uses this entry point.
     void advance_ca_cycle(Machine& machine);
+    void run_ca_cycle_fast(Machine& machine);
+    void execute_ca_cycle_stages(Machine& machine, simrv::xlen::Counter retired_before);
+    [[nodiscard]] auto is_wfi_quiescent() const noexcept -> bool { return wfi_quiescent_; }
+    void wake_from_wfi() noexcept { wfi_quiescent_ = false; }
     void run_ca_pipeline_cycle(Machine& machine);
     /// Install a validated model before reset/reboot and recreate CA-local timing state.
     void apply_cpu_model_config(const simrv::pipeline::CpuModelConfig& config);
@@ -482,8 +511,10 @@ class CPU {
      * @param machine Reference to the top-level machine orchestration.
      * @param op Reference to the cached pre-decoded operation.
      */
-    template <bool kCopyContext = false, bool kInstMix = false>
+    template <bool kCopyContext = false, bool kInstMix = false, bool kDeferAluCommit = false>
     void execute_cached_op_fast(Machine& machine, CachedOp& op, const simrv::memory::RamView& ram);
+    template <bool kCopyContext, bool kInstMix, bool kDeferAluCommit>
+    SIMRV_ALWAYS_INLINE auto execute_cached_alu_fast(CachedOp& op) -> bool;
 
     template <bool kCopyContext, bool kInstMix, bool kPollPause>
     SIMRV_ALWAYS_INLINE auto run_fast_baremetal_kernel(Machine& machine, uint32_t batch_size,
@@ -630,6 +661,7 @@ class CPU {
    private:
     SIMRV_ALWAYS_INLINE auto execute_cached_jal(CachedOp& op) -> void;
     SIMRV_ALWAYS_INLINE auto execute_cached_jalr(CachedOp& op, simrv::xlen::Register rrs1) -> void;
+    template <isa::OperationId kBranchOp, bool kCopyContext>
     SIMRV_ALWAYS_INLINE auto execute_cached_branch(CachedOp& op, simrv::xlen::Register rrs1,
                                                    simrv::xlen::Register rrs2) -> void;
     SIMRV_ALWAYS_INLINE auto try_fast_load(Machine& machine, simrv::xlen::Address mem_addr,
@@ -638,13 +670,25 @@ class CPU {
     SIMRV_ALWAYS_INLINE auto try_fast_store(Machine& machine, simrv::xlen::Address mem_addr,
                                             isa::Funct3 funct3, simrv::xlen::Register rrs2,
                                             const simrv::memory::RamView& ram) -> bool;
+    template <isa::OperationId kLoadOp>
     SIMRV_ALWAYS_INLINE auto execute_cached_load(Machine& machine, CachedOp& op,
                                                  simrv::xlen::Register rrs1,
                                                  const simrv::memory::RamView& ram) -> bool;
+    template <isa::OperationId kStoreOp>
     SIMRV_ALWAYS_INLINE auto execute_cached_store(Machine& machine, CachedOp& op,
                                                   simrv::xlen::Register rrs1,
                                                   simrv::xlen::Register rrs2,
                                                   const simrv::memory::RamView& ram) -> bool;
+    template <bool kGuestXlen64, bool kCopyContext, bool kInstMix, bool kDeferAluCommit>
+    SIMRV_ALWAYS_INLINE auto execute_cached_alu_fast_xlen(CachedOp& op, FastOp kind) -> bool;
+    template <bool kGuestXlen64, bool kCopyContext, bool kInstMix, bool kDeferAluCommit>
+    SIMRV_ALWAYS_INLINE auto execute_cached_alu_fast_xlen(CachedOp& op) -> bool;
+    [[gnu::noinline]] auto advance_sequential_miss_baremetal(CachedOp* chained,
+                                                             simrv::xlen::Register next_pc) noexcept
+        -> CachedOp*;
+    [[gnu::noinline]] auto resolve_branch_target_baremetal(CachedOp* chained,
+                                                           simrv::xlen::Register target_pc) noexcept
+        -> CachedOp*;
     auto execute_cached_fallback(Machine& machine) -> void;
     auto dispatch_pending_interrupts() -> void;
     SIMRV_ALWAYS_INLINE auto handle_cached_interrupts() -> void {
@@ -654,23 +698,31 @@ class CPU {
     }
     SIMRV_ALWAYS_INLINE void pc_sign_extend() noexcept { state_.canonicalize_pc(); }
 
-    /// Advance PC by op.len(), update instruction counters, sign-extend PC, and process interrupts.
+    /// Advance PC by op.len() and update instruction counters for straight ALU ops without
+    /// branch/interrupt overhead.
+    SIMRV_ALWAYS_INLINE void advance_cached_pc_alu(const CachedOp& op) {
+        state_.pc += op.len();
+        e_icount++;
+        e_ccount += (op.cinsn != 0);
+    }
+
+    /// Advance PC by op.len(), update instruction counters, and sign-extend PC.
+    /// The enclosing fast-execution kernel processes interrupts once after the instruction.
     SIMRV_ALWAYS_INLINE void advance_cached_pc(const CachedOp& op) {
         state_.pc += op.len();
         e_icount++;
         e_ccount += (op.cinsn != 0);
         pc_sign_extend();
-        handle_cached_interrupts();
     }
 
-    /// Set PC to target_pc, update instruction counters, sign-extend PC, and process interrupts.
+    /// Set PC to target_pc, update instruction counters, and sign-extend PC.
+    /// The enclosing fast-execution kernel processes interrupts once after the instruction.
     SIMRV_ALWAYS_INLINE void commit_cached_branch_target(const CachedOp& op,
                                                          simrv::xlen::VirtAddr target_pc) {
         state_.pc = target_pc.raw();
         e_icount++;
         e_ccount += (op.cinsn != 0);
         pc_sign_extend();
-        handle_cached_interrupts();
     }
 
     ArchState state_;
@@ -712,6 +764,30 @@ class CPU {
         return state_.xlen_for_privilege(effective_data_privilege());
     }
 
+    /**
+     * @brief Computes an 8-bit architectural decode context tag encoding privilege, effective
+     * data privilege (MPRV/MPP), active XLEN, FS/VS enable state, and RVC alignment.
+     */
+    [[nodiscard]] SIMRV_ALWAYS_INLINE constexpr auto compute_decode_context() const noexcept
+        -> uint8_t {
+        const uint8_t priv_bits = static_cast<uint8_t>(state_.priv) & 0x3u;
+        const uint8_t eff_priv_bits = static_cast<uint8_t>(effective_data_privilege()) & 0x3u;
+        const uint8_t xlen_bit = (state_.regs.xlen == 64) ? 0x10u : 0u;
+        const uint8_t fs_bit = ((state_.mstatus & MstatusBit::Fs) != 0) ? 0x20u : 0u;
+        const uint8_t vs_bit = ((state_.mstatus & MstatusBit::Vs) != 0) ? 0x40u : 0u;
+        const uint8_t rvc_bit = (state_.fetch_align_mask == 1u) ? 0x80u : 0u;
+        return static_cast<uint8_t>(priv_bits | (eff_priv_bits << 2u) | xlen_bit | fs_bit | vs_bit |
+                                    rvc_bit);
+    }
+
+    SIMRV_ALWAYS_INLINE void sync_decode_context() noexcept {
+        const auto ctx = compute_decode_context();
+        if (simrv::compiler::unlikely(ctx != cached_decode_context_)) {
+            cached_decode_context_ = ctx;
+            decode_cache.set_active_context(ctx);
+        }
+    }
+
     Tlb tlb;
 
     simrv::device::Plic plic_mmio;
@@ -739,12 +815,14 @@ class CPU {
     simrv::pipeline::HartCycleState ca_state{};
     simrv::pipeline::HartPipelineState ca_pipeline{};
     DecodeCache decode_cache;
+    uint8_t cached_decode_context_{0xFF};
     alignas(64) std::array<SoftTlbEntry, 2048> soft_tlb_read{};
     alignas(64) std::array<SoftTlbEntry, 2048> soft_tlb_write{};
     alignas(64) std::array<SoftTlbEntry, 2048> soft_tlb_inst{};
     uint32_t soft_tlb_epoch = 1;
     void soft_tlb_flush();
     void soft_tlb_flush_selective(const core::TlbFlushFilter& filter);
+    bool wfi_quiescent_{false};
 
     // ========== Execution Metrics ==========
     uint64_t e_icount{0};               // Total instruction count

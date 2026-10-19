@@ -137,7 +137,14 @@ struct SoCDeviceConfig {
     }
 };
 
-enum class SmpMode : uint8_t { CycleAccurate, CycleOriented };
+enum class SmpMode : uint8_t {
+    SingleThreaded = 0,  ///< Deterministic lockstep execution on the primary simulation thread
+    MultiThreaded = 1,   ///< Concurrent execution across background host worker threads
+
+    // Backward-compatible aliases
+    CycleAccurate = SingleThreaded,
+    CycleOriented = MultiThreaded,
+};
 
 struct SharedCacheConfig {
     bool enabled = false;
