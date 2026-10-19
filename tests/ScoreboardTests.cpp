@@ -135,12 +135,51 @@ void test_stage_flush() {
     TEST_CHECK(!sb.is_busy(RegBank::Integer, simrv::xlen::RegId::T2));
 }
 
+void test_integer_raw_hazard_forwardable_mask() {
+    Scoreboard sb{};
+    // Reserve x5 (T0) with can_forward = true
+    sb.reserve(RegBank::Integer, simrv::xlen::RegId::T0, PipelineStage::Execute, 0, true, 42);
+    // Reserve x6 (T1) with can_forward = false (e.g. load in flight)
+    sb.reserve(RegBank::Integer, simrv::xlen::RegId::T1, PipelineStage::Execute, 1, false, 0);
+
+    DecodedInstruction consumer_t0{};
+    // add a0, t0, zero (ir = 0x00028533: rd=10(a0), rs1=5(t0), rs2=0)
+    unpack_instruction(consumer_t0, 0x00028533, OperationId::ADD);
+    TEST_CHECK(consumer_t0.traits.reads_rs1_int);
+    TEST_CHECK(consumer_t0.rs1 == simrv::xlen::RegId::T0);
+
+    // When forwarding is enabled, t0 can forward -> no hazard
+    TEST_CHECK(!sb.has_raw_hazard(consumer_t0, true));
+    // When forwarding is disabled, t0 cannot forward -> hazard!
+    TEST_CHECK(sb.has_raw_hazard(consumer_t0, false));
+
+    DecodedInstruction consumer_t1{};
+    // add a0, t1, zero (ir = 0x00030533: rd=10(a0), rs1=6(t1), rs2=0)
+    unpack_instruction(consumer_t1, 0x00030533, OperationId::ADD);
+    TEST_CHECK(consumer_t1.traits.reads_rs1_int);
+    TEST_CHECK(consumer_t1.rs1 == simrv::xlen::RegId::T1);
+
+    // t1 cannot forward -> hazard regardless of forwarding setting!
+    TEST_CHECK(sb.has_raw_hazard(consumer_t1, true));
+    TEST_CHECK(sb.has_raw_hazard(consumer_t1, false));
+
+    // Release t1
+    sb.release(RegBank::Integer, simrv::xlen::RegId::T1);
+    TEST_CHECK(!sb.has_raw_hazard(consumer_t1, true));
+    TEST_CHECK(!sb.has_raw_hazard(consumer_t1, false));
+
+    // Release t0
+    sb.release(RegBank::Integer, simrv::xlen::RegId::T0);
+    TEST_CHECK(!sb.has_raw_hazard(consumer_t0, false));
+}
+
 }  // namespace
 
 int main() {
     std::cout << "=== Running Scoreboard Unit Tests ===\n";
     test_initial_state();
     test_integer_reservation_and_forwarding();
+    test_integer_raw_hazard_forwardable_mask();
     test_float_reservation_and_conservative_policy();
     test_fma_rs3_hazard_detection();
     test_stage_flush();

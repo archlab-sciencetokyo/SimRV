@@ -157,12 +157,109 @@ void CPU::run_cycle(Machine& machine) {
         }
     }
     if (machine.runtime_profile.is_cycle_mode()) {
-        run_ca_pipeline_cycle(machine);
-        const bool record_snapshots =
-            pipeline_sim.config.record_snapshots &&
-            (!machine.tui_enabled() || captures_tui_execution_detail(machine));
-        const bool three_stage =
-            pipeline_sim.config.pipeline_type == pipeline::PipelineType::ThreeStage;
+        execute_ca_cycle_stages(machine, retired_before);
+        return;
+    }
+    if ((machine.runtime_profile.is_instruction_fast() ||
+         machine.sampled_instruction_execution()) &&
+        !machine.breakpoint_manager().has_any()) {
+        // Mode 2: Cached fast-path functional execution (pre-decoded direct-lookup cache).
+        // Bypasses pipeline orchestration and fetches from direct lookup cache if available.
+        auto* cached = decode_cache.lookup(state_.pc);
+        if (simrv::compiler::likely(cached != nullptr)) {
+            const bool copy_ctx = captures_tui_execution_detail(machine) ||
+                                  machine.trace().is_architecture_trace_enabled() ||
+                                  machine.lockstep_enabled() || machine.debugger_enabled() ||
+                                  machine.branch_trace_enabled();
+            const bool inst_mix =
+                machine.instruction_mix_enabled() || captures_tui_execution_detail(machine);
+            if (simrv::compiler::unlikely(copy_ctx && inst_mix)) {
+                execute_cached_op_fast<true, true>(machine, *cached, machine.ram_view());
+            } else if (simrv::compiler::unlikely(copy_ctx)) {
+                execute_cached_op_fast<true, false>(machine, *cached, machine.ram_view());
+            } else if (simrv::compiler::unlikely(inst_mix)) {
+                execute_cached_op_fast<false, true>(machine, *cached, machine.ram_view());
+            } else {
+                execute_cached_op_fast<false, false>(machine, *cached, machine.ram_view());
+            }
+        } else {
+            run_fast_cycle_miss(machine);
+            return;
+        }
+    } else {
+        // Observable instruction mode uses the same semantic stages without coroutine state.
+        bool success = fetch_stage(machine, state_.pc) && decode_stage(machine);
+        if (success) {
+            if (simrv::compiler::likely(machine.appmode_enabled() && state_.priv == kPrivMachine &&
+                                        (state_.mstatus & MstatusBit::Mprv) == 0)) {
+                success = execute_stage(machine);
+                if (success) {
+                    run_memory_stage_baremetal(machine);
+                    success = !pipeline_context.pending_exception.has_value() &&
+                              writeback_stage(machine) && commit_stage(machine);
+                }
+            } else {
+                success = execute_stage(machine) && memory_stage(machine) &&
+                          writeback_stage(machine) && commit_stage(machine);
+            }
+        }
+        if (!success) {
+            const auto cause =
+                pipeline_context.pending_exception.value_or(ExceptionCode::MisalignedFetch);
+            raise_exception(static_cast<simrv::xlen::TrapCause>(cause),
+                            pipeline_context.pending_tval);
+        }
+    }
+
+    tick_cycle_clock(machine);
+
+    // Record trace logs for active debug TUI components.
+    if (simrv::compiler::unlikely(machine.tui_enabled()) && machine.telemetry_sink_raw()) {
+        record_trace_for_tui(machine);
+    }
+
+    if (simrv::compiler::unlikely(machine.breakpoint_manager().has_any())) {
+        if (auto hit = machine.breakpoint_manager().check_reg_changes(state_, prev_state_)) {
+            if (auto* stub = machine.debugger(); stub && stub->is_connected()) {
+                machine.debug_halt(hart_id(), GdbSignal::SigTrap);
+            } else if (auto sink = machine.telemetry_sink_raw()) {
+                sink->set_status_override(hit->description);
+                sink->pause_loop();
+            }
+        }
+    }
+    if (e_icount != retired_before &&
+        simrv::compiler::unlikely(machine.trace().needs_retiring_context())) {
+        machine.trace().log_architecture_retirement(*this, pipeline_context);
+    }
+    machine.record_retired_instructions(e_icount - retired_before);
+}
+
+void CPU::execute_ca_cycle_stages(Machine& machine, simrv::xlen::Counter retired_before) {
+    run_ca_pipeline_cycle(machine);
+    const bool record_snapshots =
+        pipeline_sim.config.record_snapshots &&
+        (!machine.tui_enabled() || captures_tui_execution_detail(machine));
+    const bool three_stage =
+        pipeline_sim.config.pipeline_type == pipeline::PipelineType::ThreeStage;
+    const bool has_events_or_stalls =
+        ca_pipeline.data_hazard_stall || ca_pipeline.control_flush ||
+        ca_pipeline.fetch->remaining_latency != 0 ||
+        (three_stage ? ca_pipeline.decode->remaining_latency
+                     : (ca_pipeline.execute->remaining_latency != 0 ||
+                        ca_pipeline.memory->remaining_latency != 0)) ||
+        ca_pipeline.writeback->remaining_latency != 0 || ca_pipeline.fetch->icache_miss ||
+        ca_pipeline.memory->dcache_miss || ca_pipeline.writeback->dcache_miss ||
+        ca_pipeline.retired->dcache_miss || ca_pipeline.fetch->tlb_miss ||
+        ca_pipeline.memory->tlb_miss || ca_pipeline.writeback->tlb_miss ||
+        ca_state.instruction_fill.active || ca_state.data_transfer.active ||
+        ca_state.instruction_walk.active || ca_state.data_walk.active ||
+        simrv::compiler::unlikely(machine.trace().is_architecture_trace_enabled()) ||
+        simrv::compiler::unlikely(record_snapshots);
+
+    if (simrv::compiler::likely(!has_events_or_stalls)) {
+        pipeline_sim.record_clean_cycle();
+    } else {
         const bool instruction_walk = ca_state.instruction_walk.active;
         const bool data_walk = ca_state.data_walk.active;
         const bool fetch_stalled = ca_pipeline.fetch->remaining_latency != 0 ||
@@ -273,113 +370,75 @@ void CPU::run_cycle(Machine& machine) {
                 instruction_walk || data_walk || ca_pipeline.fetch->tlb_miss ||
                     ca_pipeline.memory->tlb_miss || ca_pipeline.writeback->tlb_miss);
         }
-        const auto retired_pc = state_.pc;
-        const bool capture_tui = captures_tui_execution_detail(machine);
-        const bool retain_retiring_context =
-            capture_tui || machine.trace().needs_retiring_context();
-        if (simrv::compiler::unlikely(ca_pipeline.retired_this_cycle && retain_retiring_context)) {
-            std::swap(pipeline_context, ca_pipeline.retired->context);
-            if (capture_tui) record_trace_for_tui(machine);
-        }
-        tick_cycle_clock(machine, ca_pipeline.retired_this_cycle);
-        if (ca_pipeline.retired_this_cycle) {
-            if (e_icount != retired_before &&
-                simrv::compiler::unlikely(machine.trace().needs_retiring_context())) {
-                machine.trace().log_architecture_retirement(*this, pipeline_context);
-            }
-            if (retain_retiring_context) {
-                std::swap(pipeline_context, ca_pipeline.retired->context);
-            }
-        }
-        if (ca_pipeline.retired_this_cycle && state_.pc != retired_pc) {
-            machine.memory().system_bus().cancel_source(
-                simrv::memory::make_tl_source(hart_id(), simrv::memory::TlPort::Instruction));
-            ca_pipeline.reset();
-            ca_pipeline.initialized = true;
-            ca_pipeline.fetch_pc = state_.pc;
-            ca_state.instruction_fill.reset();
-            ca_state.data_transfer.reset();
-            ca_state.instruction_walk.reset();
-            ca_state.data_walk.reset();
-        }
-        if (ca_pipeline.retired_this_cycle) {
-            machine.record_retired_instructions(e_icount - retired_before);
-        }
-        return;
     }
-    if ((machine.runtime_profile.is_instruction_fast() ||
-         machine.sampled_instruction_execution()) &&
-        !machine.breakpoint_manager().has_any()) {
-        // Mode 2: Cached fast-path functional execution (pre-decoded direct-lookup cache).
-        // Bypasses pipeline orchestration and fetches from direct lookup cache if available.
-        auto* cached = decode_cache.lookup(state_.pc);
-        if (simrv::compiler::likely(cached != nullptr)) {
-            const bool copy_ctx = captures_tui_execution_detail(machine) ||
-                                  machine.trace().is_architecture_trace_enabled() ||
-                                  machine.lockstep_enabled() || machine.debugger_enabled() ||
-                                  machine.branch_trace_enabled();
-            const bool inst_mix =
-                machine.instruction_mix_enabled() || captures_tui_execution_detail(machine);
-            if (simrv::compiler::unlikely(copy_ctx && inst_mix)) {
-                execute_cached_op_fast<true, true>(machine, *cached, machine.ram_view());
-            } else if (simrv::compiler::unlikely(copy_ctx)) {
-                execute_cached_op_fast<true, false>(machine, *cached, machine.ram_view());
-            } else if (simrv::compiler::unlikely(inst_mix)) {
-                execute_cached_op_fast<false, true>(machine, *cached, machine.ram_view());
-            } else {
-                execute_cached_op_fast<false, false>(machine, *cached, machine.ram_view());
-            }
+    const auto retired_pc = state_.pc;
+    const bool capture_tui = captures_tui_execution_detail(machine);
+    const bool retain_retiring_context = capture_tui || machine.trace().needs_retiring_context();
+    if (simrv::compiler::unlikely(ca_pipeline.retired_this_cycle && retain_retiring_context)) {
+        std::swap(pipeline_context, ca_pipeline.retired->context);
+        if (capture_tui) record_trace_for_tui(machine);
+    }
+    tick_cycle_clock(machine, ca_pipeline.retired_this_cycle);
+    if (ca_pipeline.retired_this_cycle) {
+        if (e_icount != retired_before &&
+            simrv::compiler::unlikely(machine.trace().needs_retiring_context())) {
+            machine.trace().log_architecture_retirement(*this, pipeline_context);
+        }
+        if (retain_retiring_context) {
+            std::swap(pipeline_context, ca_pipeline.retired->context);
+        }
+    }
+    if (ca_pipeline.retired_this_cycle && state_.pc != retired_pc) {
+        machine.memory().system_bus().cancel_source(
+            simrv::memory::make_tl_source(hart_id(), simrv::memory::TlPort::Instruction));
+        ca_pipeline.reset();
+        ca_pipeline.initialized = true;
+        ca_pipeline.fetch_pc = state_.pc;
+        ca_state.instruction_fill.reset();
+        ca_state.data_transfer.reset();
+        ca_state.instruction_walk.reset();
+        ca_state.data_walk.reset();
+    }
+    if (ca_pipeline.retired_this_cycle) {
+        machine.record_retired_instructions(e_icount - retired_before);
+    }
+}
+
+void CPU::run_ca_cycle_fast(Machine& machine) {
+    if (simrv::compiler::unlikely(wfi_quiescent_)) {
+        apply_pending_interrupt_lines(machine);
+        if ((state_.mip & state_.mie) != 0) {
+            wfi_quiescent_ = false;
         } else {
-            run_fast_cycle_miss(machine);
+            tick_cycle_clock(machine, false);
+            pipeline_sim.record_clean_cycle();
             return;
         }
-    } else {
-        // Observable instruction mode uses the same semantic stages without coroutine state.
-        bool success = fetch_stage(machine, state_.pc) && decode_stage(machine);
-        if (success) {
-            if (simrv::compiler::likely(machine.appmode_enabled() && state_.priv == kPrivMachine &&
-                                        (state_.mstatus & MstatusBit::Mprv) == 0)) {
-                success = execute_stage(machine);
-                if (success) {
-                    run_memory_stage_baremetal(machine);
-                    success = !pipeline_context.pending_exception.has_value() &&
-                              writeback_stage(machine) && commit_stage(machine);
-                }
-            } else {
-                success = execute_stage(machine) && memory_stage(machine) &&
-                          writeback_stage(machine) && commit_stage(machine);
-            }
-        }
-        if (!success) {
-            const auto cause =
-                pipeline_context.pending_exception.value_or(ExceptionCode::MisalignedFetch);
-            raise_exception(static_cast<simrv::xlen::TrapCause>(cause),
-                            pipeline_context.pending_tval);
-        }
     }
-
-    tick_cycle_clock(machine);
-
-    // Record trace logs for active debug TUI components.
-    if (simrv::compiler::unlikely(machine.tui_enabled()) && machine.telemetry_sink_raw()) {
-        record_trace_for_tui(machine);
-    }
-
+    apply_pending_interrupt_lines(machine);
+    CPU* previous_active_cpu = active_execution_cpu_;
+    active_execution_cpu_ = this;
+    const simrv::xlen::Counter retired_before = e_icount;
     if (simrv::compiler::unlikely(machine.breakpoint_manager().has_any())) {
-        if (auto hit = machine.breakpoint_manager().check_reg_changes(state_, prev_state_)) {
+        prev_state_ = state_;
+        if (auto hit = machine.breakpoint_manager().check_pc(state_.pc, hart_id(), e_icount)) {
             if (auto* stub = machine.debugger(); stub && stub->is_connected()) {
-                machine.debug_halt(hart_id(), GdbSignal::SigTrap);
+                machine.breakpoint_manager().set_skip_once_pc(state_.pc, hart_id(), e_icount);
+                machine.debug_halt(hart_id(), GdbSignal::SigTrap, "swbreak:;");
+                active_execution_cpu_ = previous_active_cpu;
+                return;
             } else if (auto sink = machine.telemetry_sink_raw()) {
+                machine.breakpoint_manager().set_skip_once_pc(state_.pc, hart_id(), e_icount);
                 sink->set_status_override(hit->description);
                 sink->pause_loop();
+                active_execution_cpu_ = previous_active_cpu;
+                return;
             }
         }
     }
-    if (e_icount != retired_before &&
-        simrv::compiler::unlikely(machine.trace().needs_retiring_context())) {
-        machine.trace().log_architecture_retirement(*this, pipeline_context);
-    }
-    machine.record_retired_instructions(e_icount - retired_before);
+    execute_ca_cycle_stages(machine, retired_before);
+    apply_hart_control_boundary();
+    active_execution_cpu_ = previous_active_cpu;
 }
 
 void CPU::advance_ca_cycle(Machine& machine) {
@@ -388,7 +447,7 @@ void CPU::advance_ca_cycle(Machine& machine) {
     if (!machine.runtime_profile.is_cycle_mode()) {
         return;
     }
-    run_cycle(machine);
+    run_ca_cycle_fast(machine);
 }
 
 SIMRV_ALWAYS_INLINE void CPU::tick_cycle_clock(Machine& machine, bool interrupt_boundary) {
@@ -402,10 +461,7 @@ SIMRV_ALWAYS_INLINE void CPU::tick_cycle_clock(Machine& machine, bool interrupt_
         return;
     }
     if (state_.mhartid == 0) {
-        ++clint_mmio.rtc_divider;
-        if (clint_mmio.rtc_divider == timing::kCyclesPerTimebaseTick) {
-            ++clint_mmio.mtime;
-            clint_mmio.rtc_divider = 0;
+        if (machine.clock_divider().advance_ca_cycle(clint_mmio.rtc_divider, clint_mmio.mtime)) {
             evaluate_timer_interrupt();
             // Parallel harts evaluate their own interrupt state; hart 0 only publishes time.
             if (simrv::compiler::unlikely(!machine.is_smp_enabled() && machine.num_harts() > 1)) {
@@ -503,10 +559,7 @@ void CPU::run_cycle_baremetal_miss(Machine& machine) {
     }
 
     clint_mmio.mcycle++;
-    clint_mmio.rtc_divider++;
-    if (clint_mmio.rtc_divider == timing::kCyclesPerTimebaseTick) {
-        clint_mmio.mtime++;
-        clint_mmio.rtc_divider = 0;
+    if (machine.clock_divider().advance_ca_cycle(clint_mmio.rtc_divider, clint_mmio.mtime)) {
         evaluate_timer_interrupt();
     }
     if (simrv::compiler::unlikely(machine.tui_enabled()) && machine.telemetry_sink_raw()) {
@@ -585,10 +638,8 @@ void CPU::run_cycle_baremetal(Machine& machine) {
                 execute_cached_op_fast<false, false>(machine, *cached, machine.ram_view());
             }
             clint_mmio.mcycle++;
-            clint_mmio.rtc_divider++;
-            if (clint_mmio.rtc_divider == timing::kCyclesPerTimebaseTick) {
-                clint_mmio.mtime++;
-                clint_mmio.rtc_divider = 0;
+            if (machine.clock_divider().advance_ca_cycle(clint_mmio.rtc_divider,
+                                                         clint_mmio.mtime)) {
                 evaluate_timer_interrupt();
             }
             if (simrv::compiler::unlikely(machine.tui_enabled()) && machine.telemetry_sink_raw()) {
@@ -862,37 +913,37 @@ auto CPU::fetch_stage(Machine& machine, simrv::xlen::Address pc) -> bool {
 
     run_fetch_stage(machine);
 
-    return !pipeline_context.pending_exception.has_value();
+    return !active_context().pending_exception.has_value();
 }
 
 auto CPU::decode_stage(Machine& machine) -> bool {
     run_decode_stage(machine);
-    return !pipeline_context.pending_exception.has_value();
+    return !active_context().pending_exception.has_value();
 }
 
 auto CPU::execute_stage(Machine& machine) -> bool {
-    if (machine.trace().is_register_write_trace_enabled() && pipeline_context.traits.writes_vec) {
-        if (pipeline_context.trace_sequence == 0)
-            pipeline_context.trace_sequence = ++next_register_trace_sequence_;
-        machine.trace().capture_register_write_before(*this, pipeline_context);
+    auto& ctx = active_context();
+    if (machine.trace().is_register_write_trace_enabled() && ctx.traits.writes_vec) {
+        if (ctx.trace_sequence == 0) ctx.trace_sequence = ++next_register_trace_sequence_;
+        machine.trace().capture_register_write_before(*this, ctx);
     }
     run_execute_stage(machine);
-    return !pipeline_context.pending_exception.has_value();
+    return !ctx.pending_exception.has_value();
 }
 
 auto CPU::memory_stage(Machine& machine) -> bool {
     run_memory_stage(machine);
-    return !pipeline_context.pending_exception.has_value();
+    return !active_context().pending_exception.has_value();
 }
 
 auto CPU::writeback_stage(Machine& machine) -> bool {
     run_writeback_stage(machine);
-    return !pipeline_context.pending_exception.has_value();
+    return !active_context().pending_exception.has_value();
 }
 
 auto CPU::commit_stage(Machine& machine) -> bool {
     run_commit_stage(machine);
-    return !pipeline_context.pending_exception.has_value();
+    return !active_context().pending_exception.has_value();
 }
 
 }  // namespace simrv::core

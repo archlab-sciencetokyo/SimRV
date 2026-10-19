@@ -72,7 +72,6 @@ void release_instruction_eviction(Machine& machine, CPU& cpu) {
 // ==========================================
 
 void CPU::run_fetch_stage(Machine& machine) {
-    sync_decode_context();
     auto& ctx = active_context();
     if (!check_fetch_alignment(state_, ctx)) return;
 

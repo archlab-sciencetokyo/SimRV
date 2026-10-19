@@ -74,6 +74,7 @@ void CPU::reset() {
                           (static_cast<simrv::xlen::CsrValue>(2) << 32);
     }
     state_.initialize_lower_xlen_fields();
+    cached_decode_context_ = 0xFF;
     dcache.flush();
     TLB_flush();
     e_icount = 0;
@@ -82,6 +83,7 @@ void CPU::reset() {
     e_instmix.fill(0);
     ca_state.reset_instruction();
     ca_pipeline.reset();
+    wfi_quiescent_ = false;
     branch_predictor.configure(pipeline_sim.config.branch_predictor);
     branch_predictor.reset();
 }
@@ -194,6 +196,8 @@ void CPU::mret() {
     TrapController::mret(state_);
     if (state_.priv != old_privilege || state_.mstatus != old_mstatus) {
         TLB_flush();
+    } else {
+        sync_decode_context();
     }
 }
 
@@ -203,6 +207,8 @@ void CPU::sret() {
     TrapController::sret(state_);
     if (state_.priv != old_privilege || state_.mstatus != old_mstatus) {
         TLB_flush();
+    } else {
+        sync_decode_context();
     }
 }
 
@@ -226,6 +232,8 @@ void CPU::raise_exception(simrv::xlen::TrapCause cause, simrv::xlen::CsrValue tv
     TrapController::raise_exception(*this, cause, tval);
     if (state_.priv != old_privilege || state_.mstatus != old_mstatus) {
         TLB_flush();
+    } else {
+        sync_decode_context();
     }
 }
 

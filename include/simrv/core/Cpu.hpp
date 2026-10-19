@@ -480,6 +480,10 @@ class CPU {
     /// Advance exactly one authoritative CA transition.  Machine owns the global CA clock and
     /// calls this directly; IA never uses this entry point.
     void advance_ca_cycle(Machine& machine);
+    void run_ca_cycle_fast(Machine& machine);
+    void execute_ca_cycle_stages(Machine& machine, simrv::xlen::Counter retired_before);
+    [[nodiscard]] auto is_wfi_quiescent() const noexcept -> bool { return wfi_quiescent_; }
+    void wake_from_wfi() noexcept { wfi_quiescent_ = false; }
     void run_ca_pipeline_cycle(Machine& machine);
     /// Install a validated model before reset/reboot and recreate CA-local timing state.
     void apply_cpu_model_config(const simrv::pipeline::CpuModelConfig& config);
@@ -777,7 +781,11 @@ class CPU {
     }
 
     SIMRV_ALWAYS_INLINE void sync_decode_context() noexcept {
-        decode_cache.set_active_context(compute_decode_context());
+        const auto ctx = compute_decode_context();
+        if (simrv::compiler::unlikely(ctx != cached_decode_context_)) {
+            cached_decode_context_ = ctx;
+            decode_cache.set_active_context(ctx);
+        }
     }
 
     Tlb tlb;
@@ -807,12 +815,14 @@ class CPU {
     simrv::pipeline::HartCycleState ca_state{};
     simrv::pipeline::HartPipelineState ca_pipeline{};
     DecodeCache decode_cache;
+    uint8_t cached_decode_context_{0xFF};
     alignas(64) std::array<SoftTlbEntry, 2048> soft_tlb_read{};
     alignas(64) std::array<SoftTlbEntry, 2048> soft_tlb_write{};
     alignas(64) std::array<SoftTlbEntry, 2048> soft_tlb_inst{};
     uint32_t soft_tlb_epoch = 1;
     void soft_tlb_flush();
     void soft_tlb_flush_selective(const core::TlbFlushFilter& filter);
+    bool wfi_quiescent_{false};
 
     // ========== Execution Metrics ==========
     uint64_t e_icount{0};               // Total instruction count

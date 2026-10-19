@@ -22,6 +22,20 @@ constexpr auto unlikely(const T& value) -> bool {
     return static_cast<bool>(value);
 #endif
 }
+
+inline void cpu_relax() noexcept {
+#if defined(__x86_64__) || defined(_M_X64) || defined(__i386__) || defined(_M_IX86)
+#if defined(__GNUC__) || defined(__clang__)
+    __builtin_ia32_pause();
+#else
+    _mm_pause();
+#endif
+#elif defined(__aarch64__) || defined(__arm__)
+#if defined(__GNUC__) || defined(__clang__)
+    asm volatile("yield" ::: "memory");
+#endif
+#endif
+}
 }  // namespace simrv::compiler
 
 #if defined(__GNUC__) || defined(__clang__)

@@ -23,6 +23,31 @@ void CPU::run_memory_stage(Machine& machine) {
         return;
     }
     auto& ctx = active_context();
+    const auto opcode = static_cast<Opcode>(ctx.opcode);
+
+    if (simrv::compiler::likely(opcode == Opcode::Load || opcode == Opcode::LoadFp)) {
+        if (!ctx.memory_load_complete) {
+            memory_load_phase(machine);
+            if (ca_state.waiting_for_interconnect || ctx.pending_exception.has_value()) return;
+            ctx.memory_load_complete = true;
+        }
+        return;
+    }
+
+    if (simrv::compiler::likely(opcode == Opcode::Store || opcode == Opcode::StoreFp)) {
+        ctx.mem_wdata = (opcode == Opcode::Store)
+                            ? ctx.rrs2
+                            : static_cast<simrv::xlen::Register>(
+                                  ctx.fp_mem_wdata & static_cast<simrv::xlen::FloatingRegister>(
+                                                         simrv::xlen::kLower32Mask));
+        memory_store_phase(machine);
+        return;
+    }
+
+    if (opcode != Opcode::Amo) {
+        return;
+    }
+
     if (!ctx.memory_load_complete) {
         memory_load_phase(machine);
         if (ca_state.waiting_for_interconnect || ctx.pending_exception.has_value()) return;
@@ -30,7 +55,6 @@ void CPU::run_memory_stage(Machine& machine) {
     }
     memory_prepare_store_data(machine);
     memory_store_phase(machine);
-    if (ca_state.waiting_for_interconnect) return;
 }
 
 void CPU::memory_load_phase(Machine& machine) {

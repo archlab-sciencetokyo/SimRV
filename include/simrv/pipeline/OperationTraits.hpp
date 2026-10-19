@@ -1,5 +1,8 @@
 #pragma once
 
+#include <array>
+
+#include "simrv/CompilerHints.hpp"
 #include "simrv/isa/InstructionFields.hpp"
 #include "simrv/isa/OperationId.hpp"
 #include "simrv/pipeline/DecodedInstruction.hpp"
@@ -192,66 +195,93 @@ namespace simrv::pipeline::operation {
            opcode == isa::Opcode::NMAdd || opcode == isa::Opcode::NMSub;
 }
 
+consteval auto generate_static_op_traits() {
+    std::array<DependencyTraits, isa::kOperationIdCount> table{};
+    for (size_t i = 0; i < isa::kOperationIdCount; ++i) {
+        const auto op = static_cast<isa::OperationId>(i);
+        const auto inf = info(op);
+        DependencyTraits dt{};
+        dt.writes_int = (inf.operands.rd == RegBank::Integer);
+        dt.writes_fp = (inf.operands.rd == RegBank::Float);
+        dt.writes_vec = (inf.operands.rd == RegBank::Vector);
+        dt.reads_rs1_int = (inf.operands.rs1 == RegBank::Integer);
+        dt.reads_rs2_int = (inf.operands.rs2 == RegBank::Integer);
+        dt.reads_rs1_fp = (inf.operands.rs1 == RegBank::Float);
+        dt.reads_rs2_fp = (inf.operands.rs2 == RegBank::Float);
+        dt.reads_rs3_fp = (inf.operands.rs3 == RegBank::Float);
+        const bool is_atomic = (inf.memory == MemoryAccessKind::Atomic);
+        const bool is_load = (inf.memory == MemoryAccessKind::Load);
+        const bool is_store = (inf.memory == MemoryAccessKind::Store);
+        const bool is_amo_load =
+            is_atomic && (op != isa::OperationId::SC_W && op != isa::OperationId::SC_D);
+        dt.is_mem_load = (is_load || is_amo_load) && (inf.operands.rd == RegBank::Integer);
+        dt.is_mem_store = is_store || (is_atomic && !is_load);
+        dt.is_control = (inf.control != ControlFlowKind::None);
+        const bool vector = (op >= isa::OperationId::VSETVLI && op <= isa::OperationId::VWSLL_VI);
+        dt.is_serializing = vector || (inf.side_effects & SideEffectFlags::Serializing);
+        dt.is_cfu = (inf.execution_class == ExecutionClass::Cfu);
+        table[i] = dt;
+    }
+    return table;
+}
+
+inline constexpr auto kStaticOpTraitsTable = generate_static_op_traits();
+
 [[nodiscard]] constexpr auto make_dependency_traits(isa::OperationId op_id, isa::Opcode opcode,
                                                     simrv::xlen::RegId rd,
                                                     isa::Funct5Amo funct5) noexcept
     -> DependencyTraits {
-    DependencyTraits dt{};
-    if (op_id != isa::UNKNOWN) {
-        dt.writes_int = writes_integer(op_id) && (rd != simrv::xlen::RegId::Zero);
-        dt.writes_fp = writes_float(op_id);
-        dt.writes_vec = writes_vector(op_id);
-        dt.reads_rs1_int = is_rs1_int(op_id);
-        dt.reads_rs2_int = is_rs2_int(op_id);
-        dt.reads_rs1_fp = is_rs1_fp(op_id);
-        dt.reads_rs2_fp = is_rs2_fp(op_id);
-        dt.reads_rs3_fp = is_rs3_fp(op_id);
-        const bool is_amo_load = (is_atomic(op_id) && op_id != isa::OperationId::SC_W &&
-                                  op_id != isa::OperationId::SC_D);
-        dt.is_mem_load = (is_load(op_id) || is_amo_load) && dt.writes_int;
-        dt.is_mem_store = is_store(op_id) || (is_atomic(op_id) && !is_load(op_id));
-        dt.is_control = is_control(op_id);
-        const bool vector =
-            op_id >= isa::OperationId::VSETVLI && op_id <= isa::OperationId::VWSLL_VI;
-        dt.is_serializing = vector || is_serializing(op_id) || opcode == isa::Opcode::System ||
-                            opcode == isa::Opcode::MiscMem;
-        dt.is_cfu = is_cfu(op_id);
-    } else {
-        const bool fp_dst = (opcode == isa::Opcode::LoadFp || opcode == isa::Opcode::MAdd ||
-                             opcode == isa::Opcode::MSub || opcode == isa::Opcode::NMAdd ||
-                             opcode == isa::Opcode::NMSub || opcode == isa::Opcode::OpFp);
-        const bool fp_rs1 = (opcode == isa::Opcode::OpFp || opcode == isa::Opcode::MAdd ||
-                             opcode == isa::Opcode::MSub || opcode == isa::Opcode::NMSub ||
-                             opcode == isa::Opcode::NMAdd);
-        const bool fp_rs2 = (opcode == isa::Opcode::StoreFp || opcode == isa::Opcode::OpFp ||
-                             opcode == isa::Opcode::MAdd || opcode == isa::Opcode::MSub ||
-                             opcode == isa::Opcode::NMSub || opcode == isa::Opcode::NMAdd);
-        const bool writes_int_calc = [&]() {
-            if (rd == simrv::xlen::RegId::Zero) return false;
-            switch (opcode) {
-                case isa::Opcode::Branch:
-                case isa::Opcode::Store:
-                case isa::Opcode::StoreFp:
-                case isa::Opcode::MiscMem:
-                    return false;
-                default:
-                    return !fp_dst;
+    if (simrv::compiler::likely(op_id != isa::UNKNOWN)) {
+        const auto idx = static_cast<size_t>(op_id);
+        if (simrv::compiler::likely(idx < kStaticOpTraitsTable.size())) {
+            DependencyTraits dt = kStaticOpTraitsTable[idx];
+            if (simrv::compiler::unlikely(rd == simrv::xlen::RegId::Zero)) {
+                dt.writes_int = false;
+                dt.is_mem_load = false;
             }
-        }();
-        dt.writes_int = writes_int_calc;
-        dt.writes_fp = fp_dst;
-        dt.reads_rs1_int = reads_rs1(opcode) && !fp_rs1;
-        dt.reads_rs2_int = reads_rs2(opcode) && !fp_rs2;
-        dt.reads_rs1_fp = reads_rs1(opcode) && fp_rs1;
-        dt.reads_rs2_fp = reads_rs2(opcode) && fp_rs2;
-        dt.reads_rs3_fp = reads_rs3(opcode);
-        dt.is_mem_load = (opcode == isa::Opcode::Load) ||
-                         (opcode == isa::Opcode::Amo && funct5 != isa::Funct5Amo::Sc);
-        dt.is_mem_store = (opcode == isa::Opcode::Store || opcode == isa::Opcode::StoreFp);
-        dt.is_control = (opcode == isa::Opcode::Branch || opcode == isa::Opcode::Jal ||
-                         opcode == isa::Opcode::Jalr);
-        dt.is_serializing = (opcode == isa::Opcode::System || opcode == isa::Opcode::MiscMem);
+            if (simrv::compiler::unlikely(opcode == isa::Opcode::System ||
+                                          opcode == isa::Opcode::MiscMem)) {
+                dt.is_serializing = true;
+            }
+            return dt;
+        }
     }
+
+    DependencyTraits dt{};
+    const bool fp_dst = (opcode == isa::Opcode::LoadFp || opcode == isa::Opcode::MAdd ||
+                         opcode == isa::Opcode::MSub || opcode == isa::Opcode::NMAdd ||
+                         opcode == isa::Opcode::NMSub || opcode == isa::Opcode::OpFp);
+    const bool fp_rs1 = (opcode == isa::Opcode::OpFp || opcode == isa::Opcode::MAdd ||
+                         opcode == isa::Opcode::MSub || opcode == isa::Opcode::NMSub ||
+                         opcode == isa::Opcode::NMAdd);
+    const bool fp_rs2 = (opcode == isa::Opcode::StoreFp || opcode == isa::Opcode::OpFp ||
+                         opcode == isa::Opcode::MAdd || opcode == isa::Opcode::MSub ||
+                         opcode == isa::Opcode::NMSub || opcode == isa::Opcode::NMAdd);
+    const bool writes_int_calc = [&]() {
+        if (rd == simrv::xlen::RegId::Zero) return false;
+        switch (opcode) {
+            case isa::Opcode::Branch:
+            case isa::Opcode::Store:
+            case isa::Opcode::StoreFp:
+            case isa::Opcode::MiscMem:
+                return false;
+            default:
+                return !fp_dst;
+        }
+    }();
+    dt.writes_int = writes_int_calc;
+    dt.writes_fp = fp_dst;
+    dt.reads_rs1_int = reads_rs1(opcode) && !fp_rs1;
+    dt.reads_rs2_int = reads_rs2(opcode) && !fp_rs2;
+    dt.reads_rs1_fp = reads_rs1(opcode) && fp_rs1;
+    dt.reads_rs2_fp = reads_rs2(opcode) && fp_rs2;
+    dt.reads_rs3_fp = reads_rs3(opcode);
+    dt.is_mem_load = (opcode == isa::Opcode::Load) ||
+                     (opcode == isa::Opcode::Amo && funct5 != isa::Funct5Amo::Sc);
+    dt.is_mem_store = (opcode == isa::Opcode::Store || opcode == isa::Opcode::StoreFp);
+    dt.is_control = (opcode == isa::Opcode::Branch || opcode == isa::Opcode::Jal ||
+                     opcode == isa::Opcode::Jalr);
+    dt.is_serializing = (opcode == isa::Opcode::System || opcode == isa::Opcode::MiscMem);
     return dt;
 }
 

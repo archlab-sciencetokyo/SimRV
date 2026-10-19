@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <optional>
 
+#include "simrv/CompilerHints.hpp"
 #include "simrv/pipeline/OperationInfo.hpp"
 #include "simrv/pipeline/OperationTraits.hpp"
 #include "simrv/xlen/RegisterTypes.hpp"
@@ -41,6 +42,7 @@ class Scoreboard {
 
     constexpr void reset() noexcept {
         int_busy_mask_ = 0;
+        int_forwardable_mask_ = 0;
         fp_busy_mask_ = 0;
         vec_busy_mask_ = 0;
     }
@@ -53,6 +55,11 @@ class Scoreboard {
             case operation::RegBank::Integer:
                 if (index == 0 || index >= kNumIntRegisters) return;
                 int_busy_mask_ |= (1U << index);
+                if (can_forward) {
+                    int_forwardable_mask_ |= (1U << index);
+                } else {
+                    int_forwardable_mask_ &= ~(1U << index);
+                }
                 int_registers_[index] = Entry{
                     .forwarded_value = forwarded_value,
                     .latency = latency,
@@ -91,6 +98,7 @@ class Scoreboard {
             case operation::RegBank::Integer:
                 if (index == 0 || index >= kNumIntRegisters) return;
                 int_busy_mask_ &= ~(1U << index);
+                int_forwardable_mask_ &= ~(1U << index);
                 return;
             case operation::RegBank::Float:
                 if (index >= kNumFpRegisters) return;
@@ -121,8 +129,28 @@ class Scoreboard {
         }
     }
 
+    [[nodiscard]] constexpr auto has_forwardable_int() const noexcept -> bool {
+        return int_forwardable_mask_ != 0;
+    }
+
+    [[nodiscard]] constexpr auto can_forward_int(simrv::xlen::RegId reg) const noexcept -> bool {
+        const auto index = static_cast<size_t>(reg);
+        return (index > 0 && index < kNumIntRegisters) &&
+               ((int_forwardable_mask_ & (1U << index)) != 0);
+    }
+
+    [[nodiscard]] constexpr auto get_forwarded_int_unchecked(simrv::xlen::RegId reg) const noexcept
+        -> simrv::xlen::Register {
+        return int_registers_[static_cast<size_t>(reg)].forwarded_value;
+    }
+
     [[nodiscard]] constexpr auto can_forward(operation::RegBank bank,
                                              simrv::xlen::RegId reg) const noexcept -> bool {
+        const auto index = static_cast<size_t>(reg);
+        if (bank == operation::RegBank::Integer) {
+            return (index > 0 && index < kNumIntRegisters) &&
+                   ((int_forwardable_mask_ & (1U << index)) != 0);
+        }
         if (!is_busy(bank, reg)) return false;
         const auto* entry = get_entry(bank, reg);
         return entry != nullptr && entry->can_forward;
@@ -131,6 +159,13 @@ class Scoreboard {
     [[nodiscard]] constexpr auto get_forwarded_value(operation::RegBank bank,
                                                      simrv::xlen::RegId reg) const noexcept
         -> simrv::xlen::Register {
+        const auto index = static_cast<size_t>(reg);
+        if (bank == operation::RegBank::Integer) {
+            return (index > 0 && index < kNumIntRegisters &&
+                    (int_forwardable_mask_ & (1U << index)) != 0)
+                       ? int_registers_[index].forwarded_value
+                       : 0;
+        }
         if (!is_busy(bank, reg)) return 0;
         const auto* entry = get_entry(bank, reg);
         return (entry != nullptr && entry->can_forward) ? entry->forwarded_value : 0;
@@ -170,38 +205,30 @@ class Scoreboard {
                                                 bool forwarding_enabled) const noexcept -> bool {
         const auto& traits = consumer.traits;
 
-        // Integer RAW dependencies
-        if (traits.reads_rs1_int && consumer.rs1 != simrv::xlen::RegId::Zero) {
-            if (is_busy(operation::RegBank::Integer, consumer.rs1)) {
-                if (!forwarding_enabled ||
-                    !can_forward(operation::RegBank::Integer, consumer.rs1)) {
-                    return true;
-                }
-            }
-        }
-        if (traits.reads_rs2_int && consumer.rs2 != simrv::xlen::RegId::Zero) {
-            if (is_busy(operation::RegBank::Integer, consumer.rs2)) {
-                if (!forwarding_enabled ||
-                    !can_forward(operation::RegBank::Integer, consumer.rs2)) {
-                    return true;
-                }
+        // Integer RAW dependencies: bitwise check against consumer rs1/rs2 mask (excluding x0)
+        const uint32_t read_mask =
+            ((traits.reads_rs1_int ? (1U << static_cast<size_t>(consumer.rs1)) : 0U) |
+             (traits.reads_rs2_int ? (1U << static_cast<size_t>(consumer.rs2)) : 0U)) &
+            ~1U;
+
+        if (read_mask != 0) {
+            const uint32_t blocking =
+                forwarding_enabled ? (int_busy_mask_ & ~int_forwardable_mask_) : int_busy_mask_;
+            if (simrv::compiler::unlikely((blocking & read_mask) != 0)) {
+                return true;
             }
         }
 
         // Floating-point RAW dependencies (conservative: stall until retired and released)
-        if (traits.reads_rs1_fp) {
-            if (is_busy(operation::RegBank::Float, consumer.rs1)) {
-                return true;
+        if (simrv::compiler::unlikely(fp_busy_mask_ != 0)) {
+            uint32_t fp_read_mask = 0;
+            if (traits.reads_rs1_fp) fp_read_mask |= (1U << static_cast<size_t>(consumer.rs1));
+            if (traits.reads_rs2_fp) fp_read_mask |= (1U << static_cast<size_t>(consumer.rs2));
+            if (traits.reads_rs3_fp) {
+                const auto rs3 = static_cast<size_t>((consumer.ir >> 27U) & 0x1FU);
+                fp_read_mask |= (1U << rs3);
             }
-        }
-        if (traits.reads_rs2_fp) {
-            if (is_busy(operation::RegBank::Float, consumer.rs2)) {
-                return true;
-            }
-        }
-        if (traits.reads_rs3_fp) {
-            const auto rs3 = static_cast<simrv::xlen::RegId>((consumer.ir >> 27U) & 0x1FU);
-            if (is_busy(operation::RegBank::Float, rs3)) {
+            if ((fp_busy_mask_ & fp_read_mask) != 0) {
                 return true;
             }
         }
@@ -247,12 +274,14 @@ class Scoreboard {
             }
         };
         flush_bank(int_registers_, int_busy_mask_);
+        int_forwardable_mask_ &= int_busy_mask_;
         flush_bank(fp_registers_, fp_busy_mask_);
         flush_bank(vec_registers_, vec_busy_mask_);
     }
 
    private:
     uint32_t int_busy_mask_{0};
+    uint32_t int_forwardable_mask_{0};
     uint32_t fp_busy_mask_{0};
     uint32_t vec_busy_mask_{0};
 

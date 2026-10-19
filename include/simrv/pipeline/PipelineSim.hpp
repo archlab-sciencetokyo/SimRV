@@ -184,6 +184,10 @@ class PipelineSim {
         ca_kernel_active_ = true;
         update_stats(metrics);
     }
+    SIMRV_ALWAYS_INLINE void record_clean_cycle() noexcept {
+        ca_kernel_active_ = true;
+        ++ca_stats_.cycle_count;
+    }
     SIMRV_ALWAYS_INLINE void record_cycle_stats(bool fetch_stalled, bool decode_stalled,
                                                 bool execute_stalled, bool memory_stalled,
                                                 bool writeback_stalled, bool data_hazard_stall,

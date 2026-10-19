@@ -4,6 +4,7 @@
 #include "simrv/core/Cpu.hpp"
 #include "simrv/core/Machine.hpp"
 #include "simrv/core/Tracer.hpp"
+#include "simrv/execute/ExecuteUnit.hpp"
 #include "simrv/memory/MemorySubsystem.hpp"
 #include "simrv/pipeline/OperationTraits.hpp"
 #include "simrv/tui/Tui.hpp"
@@ -16,6 +17,9 @@ namespace {
 [[nodiscard]] auto is_store_conditional(const pipeline::PipelineContext& context) noexcept -> bool {
     return context.opcode == isa::Opcode::Amo && context.funct5 == isa::Funct5Amo::Sc;
 }
+
+const bool g_retire_trace = std::getenv("SIMRV_RETIRE_TRACE") != nullptr;
+const bool g_cache_trace = std::getenv("SIMRV_CACHE_TRACE") != nullptr;
 }  // namespace
 
 void CPU::run_ca_pipeline_cycle(Machine& machine) {
@@ -54,7 +58,9 @@ void CPU::run_ca_pipeline_cycle(Machine& machine) {
         pipe.fetch_pc = state_.pc;
         pipe.initialized = true;
     }
-    branch_predictor.latch_btb_read(pipe.fetch_pc);
+    if (simrv::compiler::unlikely(branch_predictor.has_registered_btb())) {
+        branch_predictor.latch_btb_read(pipe.fetch_pc);
+    }
 
     auto run_with_context = [&](CycleInstructionSlot& slot, auto&& operation) -> bool {
         active_context_ = &slot.context;
@@ -94,16 +100,15 @@ void CPU::run_ca_pipeline_cycle(Machine& machine) {
         pipe.initialized = true;
     };
     auto apply_forwarding = [&](pipeline::PipelineContext& consumer) {
-        if (!pipeline_sim.config.enable_forwarding) return;
+        if (!pipeline_sim.config.enable_forwarding || !pipe.scoreboard.has_forwardable_int())
+            return;
         if (consumer.traits.reads_rs1_int && consumer.rs1 != simrv::xlen::RegId::Zero &&
-            pipe.scoreboard.can_forward(pipeline::operation::RegBank::Integer, consumer.rs1)) {
-            consumer.rrs1 = pipe.scoreboard.get_forwarded_value(
-                pipeline::operation::RegBank::Integer, consumer.rs1);
+            pipe.scoreboard.can_forward_int(consumer.rs1)) {
+            consumer.rrs1 = pipe.scoreboard.get_forwarded_int_unchecked(consumer.rs1);
         }
         if (consumer.traits.reads_rs2_int && consumer.rs2 != simrv::xlen::RegId::Zero &&
-            pipe.scoreboard.can_forward(pipeline::operation::RegBank::Integer, consumer.rs2)) {
-            consumer.rrs2 = pipe.scoreboard.get_forwarded_value(
-                pipeline::operation::RegBank::Integer, consumer.rs2);
+            pipe.scoreboard.can_forward_int(consumer.rs2)) {
+            consumer.rrs2 = pipe.scoreboard.get_forwarded_int_unchecked(consumer.rs2);
         }
     };
 
@@ -164,23 +169,40 @@ void CPU::run_ca_pipeline_cycle(Machine& machine) {
                 trap_at_retirement(*writeback);
                 return;
             }
-            const bool retired = run_with_context(
-                *writeback, [&] { return writeback_stage(machine) && commit_stage(machine); });
-            if (!retired) {
-                trap_at_retirement(*writeback);
-                return;
-            }
             const bool was_serializing = writeback->serializing;
-            static const bool retire_trace = std::getenv("SIMRV_RETIRE_TRACE") != nullptr;
-            if (retire_trace) {
+            if (simrv::compiler::likely(!was_serializing && !writeback->context.traits.writes_fp &&
+                                        writeback->context.opcode != isa::Opcode::System &&
+                                        !writeback->context.pending_exception.has_value() &&
+                                        (state_.mip & state_.mie) == 0 &&
+                                        !machine.instruction_mix_enabled())) {
+                ++e_icount;
+                if (writeback->wb_valid) {
+                    state_.regs.write_branchless(writeback->wb_dest, writeback->wb_val);
+                }
+                if (writeback->context.cinsn != 0u) {
+                    ++e_ccount;
+                }
+            } else {
+                const bool retired = run_with_context(
+                    *writeback, [&] { return writeback_stage(machine) && commit_stage(machine); });
+                if (!retired) {
+                    trap_at_retirement(*writeback);
+                    return;
+                }
+            }
+            if (simrv::compiler::unlikely(g_retire_trace)) {
                 std::println(stderr, "CYCLETRACE cycle={} inst={} pc={:08x} ir={:08x}",
                              pipeline_sim.cycle_count(), e_icount, writeback->context.cpc.raw(),
                              writeback->context.ir);
             }
+            const bool is_wfi = writeback->context.op_id == isa::OperationId::WFI;
             if (retain_retired_slot) *pipe.retired = *writeback;
             writeback->invalidate();
             pipe.retired_this_cycle = true;
             ca_state.retired_this_cycle = true;
+            if (is_wfi && (state_.mip & state_.mie) == 0) {
+                wfi_quiescent_ = true;
+            }
             if (was_serializing) {
                 pipe.fetch_pc = state_.pc;
                 pipe.frontend_blocked = false;
@@ -198,29 +220,43 @@ void CPU::run_ca_pipeline_cycle(Machine& machine) {
             --memory->remaining_latency;
         } else {
             if (!memory->memory_complete) {
-                const auto misses_before = dcache.miss_count();
-                const bool success =
-                    run_with_context(*memory, [&] { return memory_stage(machine); });
-                if (dcache.miss_count() != misses_before) {
-                    memory->dcache_miss = true;
-                }
-                if (ca_state.waiting_for_interconnect) return;
-                memory->memory_complete = true;
-                if (memory->context.traits.is_mem_load) {
-                    memory->wb_val = memory->context.mem_rdata;
-                    memory->wb_valid =
-                        (memory->writes_int && memory->wb_dest != simrv::xlen::RegId::Zero);
-                } else if (memory->context.traits.is_cfu) {
-                    memory->wb_val = memory->context.wb_data;
-                    memory->wb_valid =
-                        (memory->writes_int && memory->wb_dest != simrv::xlen::RegId::Zero);
-                } else if (is_store_conditional(memory->context)) {
-                    memory->wb_val = memory->context.wb_data;
-                    memory->wb_valid =
-                        (memory->writes_int && memory->wb_dest != simrv::xlen::RegId::Zero);
-                }
-                if (!success && !memory->context.pending_exception.has_value()) {
-                    memory->context.pending_exception = ExceptionCode::FaultLoad;
+                const auto mem_op = memory->context.opcode;
+                const bool is_mem_op = memory->context.traits.is_mem_load ||
+                                       memory->context.traits.is_mem_store ||
+                                       mem_op == isa::Opcode::LoadFp ||
+                                       mem_op == isa::Opcode::StoreFp || mem_op == isa::Opcode::Amo;
+                if (simrv::compiler::likely(!is_mem_op)) {
+                    memory->memory_complete = true;
+                    if (simrv::compiler::unlikely(memory->context.traits.is_cfu)) {
+                        memory->wb_val = memory->context.wb_data;
+                        memory->wb_valid =
+                            (memory->writes_int && memory->wb_dest != simrv::xlen::RegId::Zero);
+                    }
+                } else {
+                    const auto misses_before = dcache.miss_count();
+                    const bool success =
+                        run_with_context(*memory, [&] { return memory_stage(machine); });
+                    if (dcache.miss_count() != misses_before) {
+                        memory->dcache_miss = true;
+                    }
+                    if (ca_state.waiting_for_interconnect) return;
+                    memory->memory_complete = true;
+                    if (memory->context.traits.is_mem_load) {
+                        memory->wb_val = memory->context.mem_rdata;
+                        memory->wb_valid =
+                            (memory->writes_int && memory->wb_dest != simrv::xlen::RegId::Zero);
+                    } else if (memory->context.traits.is_cfu) {
+                        memory->wb_val = memory->context.wb_data;
+                        memory->wb_valid =
+                            (memory->writes_int && memory->wb_dest != simrv::xlen::RegId::Zero);
+                    } else if (is_store_conditional(memory->context)) {
+                        memory->wb_val = memory->context.wb_data;
+                        memory->wb_valid =
+                            (memory->writes_int && memory->wb_dest != simrv::xlen::RegId::Zero);
+                    }
+                    if (!success && !memory->context.pending_exception.has_value()) {
+                        memory->context.pending_exception = ExceptionCode::FaultLoad;
+                    }
                 }
             }
             if (memory->remaining_latency == 0) {
@@ -233,27 +269,103 @@ void CPU::run_ca_pipeline_cycle(Machine& machine) {
     // Execute is side-effect-free for non-serializing instructions.
     auto* execute = pipe.execute;
     if (!three_stage && execute->valid && !pipe.memory->valid) {
-        if (execute->remaining_latency > 0) {
+        if (simrv::compiler::unlikely(execute->remaining_latency > 0)) {
             --execute->remaining_latency;
         } else {
             if (!execute->serializing && !execute->executed) {
-                const simrv::xlen::Register saved_pc = state_.pc;
-                state_.pc = execute->context.cpc.raw();
-                (void)run_with_context(*execute, [&] { return execute_stage(machine); });
-                state_.pc = saved_pc;
+                auto& ctx = execute->context;
+                bool executed_fast = false;
+                switch (ctx.opcode) {
+                    case isa::Opcode::OpImm:
+                        ctx.tkn = false;
+                        ctx.wb_data = execute::ExecuteUnit::aluInt(ctx.rrs1, ctx.imm, ctx.op_id,
+                                                                   state_.regs.xlen);
+                        executed_fast = true;
+                        break;
+                    case isa::Opcode::Op:
+                        ctx.tkn = false;
+                        ctx.wb_data = execute::ExecuteUnit::aluInt(ctx.rrs1, ctx.rrs2, ctx.op_id,
+                                                                   state_.regs.xlen);
+                        executed_fast = true;
+                        break;
+                    case isa::Opcode::OpImm32:
+                        ctx.tkn = false;
+                        ctx.wb_data = execute::ExecuteUnit::aluIntW(ctx.rrs1, ctx.imm, ctx.op_id);
+                        executed_fast = true;
+                        break;
+                    case isa::Opcode::Op32:
+                        ctx.tkn = false;
+                        ctx.wb_data = execute::ExecuteUnit::aluIntW(ctx.rrs1, ctx.rrs2, ctx.op_id);
+                        executed_fast = true;
+                        break;
+                    case isa::Opcode::Lui:
+                        ctx.tkn = false;
+                        ctx.wb_data = ctx.imm;
+                        executed_fast = true;
+                        break;
+                    case isa::Opcode::Auipc:
+                        ctx.tkn = false;
+                        ctx.wb_data = (ctx.cpc + ctx.imm).raw();
+                        executed_fast = true;
+                        break;
+                    case isa::Opcode::Load:
+                    case isa::Opcode::Store:
+                        ctx.tkn = false;
+                        ctx.mem_addr = ctx.rrs1 + ctx.imm;
+                        executed_fast = true;
+                        break;
+                    case isa::Opcode::Branch:
+                        ctx.tkn = execute::ExecuteUnit::branchTaken(ctx.rrs1, ctx.rrs2, ctx.funct3,
+                                                                    state_.regs.xlen);
+                        ctx.jmp_pc = ctx.cpc + ctx.imm;
+                        if (state_.regs.xlen == 32) {
+                            ctx.jmp_pc = simrv::xlen::VirtAddr{static_cast<simrv::xlen::Register>(
+                                static_cast<int64_t>(static_cast<int32_t>(ctx.jmp_pc.raw())))};
+                        }
+                        executed_fast = true;
+                        break;
+                    case isa::Opcode::Jal:
+                        ctx.tkn = true;
+                        ctx.wb_data = (ctx.cpc + ((ctx.cinsn != 0u) ? 2 : 4)).raw();
+                        ctx.jmp_pc = ctx.cpc + ctx.imm;
+                        executed_fast = true;
+                        break;
+                    case isa::Opcode::Jalr:
+                        ctx.tkn = true;
+                        ctx.wb_data = (ctx.cpc + ((ctx.cinsn != 0u) ? 2 : 4)).raw();
+                        ctx.jmp_pc = simrv::xlen::VirtAddr{(ctx.rrs1 + ctx.imm) &
+                                                           ~static_cast<simrv::xlen::Register>(1)};
+                        if (state_.regs.xlen == 32) {
+                            ctx.jmp_pc = simrv::xlen::VirtAddr{static_cast<simrv::xlen::Register>(
+                                static_cast<int64_t>(static_cast<int32_t>(ctx.jmp_pc.raw())))};
+                        }
+                        executed_fast = true;
+                        break;
+                    default:
+                        break;
+                }
+                if (!executed_fast) {
+                    const simrv::xlen::Register saved_pc = state_.pc;
+                    state_.pc = execute->context.cpc.raw();
+                    (void)run_with_context(*execute, [&] { return execute_stage(machine); });
+                    state_.pc = saved_pc;
+                }
                 execute->executed = true;
-                if (execute->context.traits.is_mem_load || execute->context.traits.is_cfu ||
-                    is_store_conditional(execute->context)) {
+                if (simrv::compiler::unlikely(execute->context.traits.is_mem_load ||
+                                              execute->context.traits.is_cfu ||
+                                              is_store_conditional(execute->context))) {
                     execute->wb_valid = false;
                 } else if (execute->writes_int && execute->wb_dest != simrv::xlen::RegId::Zero) {
-                    execute->wb_val = (execute->context.opcode == isa::Opcode::System &&
-                                       execute->context.funct3 != isa::Funct3::Priv)
-                                          ? execute->context.rcsr
-                                          : execute->context.wb_data;
+                    execute->wb_val =
+                        simrv::compiler::unlikely(execute->context.opcode == isa::Opcode::System &&
+                                                  execute->context.funct3 != isa::Funct3::Priv)
+                            ? execute->context.rcsr
+                            : execute->context.wb_data;
                     execute->wb_valid = true;
                 }
 
-                if (execute->context.traits.is_control || execute->prediction.false_control_alias) {
+                if (simrv::compiler::unlikely(execute->context.traits.is_control ||
+                                              execute->prediction.false_control_alias)) {
                     const simrv::xlen::Address sequential =
                         (execute->context.cpc + (execute->context.cinsn != 0u ? 2 : 4)).raw();
                     const simrv::xlen::Address target =
@@ -285,19 +397,21 @@ void CPU::run_ca_pipeline_cycle(Machine& machine) {
             }
             std::swap(pipe.memory, pipe.execute);
             pipe.execute->invalidate();
-            if (pipe.memory->valid &&
+            if (simrv::compiler::unlikely(cpu_model_config.data_cache.hit_latency > 1) &&
+                pipe.memory->valid &&
                 (pipe.memory->context.traits.is_mem_load ||
-                 pipeline::operation::is_store(pipe.memory->context.op_id)) &&
-                cpu_model_config.data_cache.hit_latency > 1) {
+                 pipe.memory->context.opcode == isa::Opcode::LoadFp ||
+                 pipe.memory->context.traits.is_mem_store ||
+                 pipe.memory->context.opcode == isa::Opcode::StoreFp)) {
                 pipe.memory->remaining_latency = cpu_model_config.data_cache.hit_latency - 1;
             }
         }
     }
 
     // Decode waits for unresolved producers using the register scoreboard.
-    pipe.sync_scoreboard(/*include_decode=*/false);
     auto* decode = pipe.decode;
     if (decode->valid && !pipe.execute->valid) {
+        pipe.sync_scoreboard(/*include_decode=*/false);
         const bool hazard =
             pipe.scoreboard.has_raw_hazard(decode->context, pipeline_sim.config.enable_forwarding);
         pipe.data_hazard_stall = hazard;
@@ -323,11 +437,14 @@ void CPU::run_ca_pipeline_cycle(Machine& machine) {
                                              : decode->context.wb_data;
                         decode->wb_valid = true;
                     }
-                    if (pipeline::operation::is_multiply(decode->context.op_id)) {
+                    const auto exec_class =
+                        pipeline::operation::info(decode->context.op_id).execution_class;
+                    if (exec_class == pipeline::operation::ExecutionClass::Multiply) {
                         decode->remaining_latency = pipeline_sim.config.mul_latency;
-                    } else if (pipeline::operation::is_divide_or_remainder(decode->context.op_id)) {
+                    } else if (exec_class ==
+                               pipeline::operation::ExecutionClass::DivideOrRemainder) {
                         decode->remaining_latency = pipeline_sim.config.div_latency;
-                    } else if (pipeline::operation::is_cfu(decode->context.op_id)) {
+                    } else if (decode->context.traits.is_cfu) {
                         decode->remaining_latency = cfu_unit.query_stall_cycles(
                             decode->context.funct7, std::to_underlying(decode->context.funct3));
                     }
@@ -383,30 +500,57 @@ void CPU::run_ca_pipeline_cycle(Machine& machine) {
                     pipe.decode->invalidate();
                 }
             } else {
-                (void)run_with_context(*decode, [&] {
-                    fetch_operands(machine);
-                    apply_forwarding(active_context());
-                    return !active_context().pending_exception.has_value();
-                });
+                if (simrv::compiler::likely(decode->context.opcode != isa::Opcode::System &&
+                                            !decode->context.pending_exception.has_value())) {
+                    decode->context.rrs1 = state_.regs.read(decode->context.rs1);
+                    decode->context.rrs2 = state_.regs.read(decode->context.rs2);
+                    decode->context.rcsr = 0;
+                    apply_forwarding(decode->context);
+                } else {
+                    (void)run_with_context(*decode, [&] {
+                        fetch_operands(machine);
+                        apply_forwarding(active_context());
+                        return !active_context().pending_exception.has_value();
+                    });
+                }
                 auto* ex_slot = pipe.decode;
                 std::swap(pipe.execute, pipe.decode);
                 pipe.decode->invalidate();
 
-                if (pipeline::operation::is_multiply(ex_slot->context.op_id)) {
-                    ex_slot->remaining_latency = pipeline_sim.config.mul_latency;
-                } else if (pipeline::operation::is_divide_or_remainder(ex_slot->context.op_id)) {
-                    ex_slot->remaining_latency = pipeline_sim.config.div_latency;
-                } else if (pipeline::operation::is_fp_divide_or_sqrt(ex_slot->context.op_id)) {
-                    ex_slot->remaining_latency = pipeline_sim.config.fp_div_latency;
-                } else if (pipeline::operation::is_fp_alu(ex_slot->context.op_id)) {
-                    ex_slot->remaining_latency = pipeline_sim.config.fp_alu_latency;
-                } else if (pipeline::operation::is_cfu(ex_slot->context.op_id)) {
-                    ex_slot->remaining_latency = cfu_unit.query_stall_cycles(
-                        ex_slot->context.funct7, std::to_underlying(ex_slot->context.funct3));
-                } else if (ex_slot->context.opcode == isa::Opcode::System) {
-                    ex_slot->remaining_latency = pipeline_sim.config.csr_flush_penalty;
-                } else if (ex_slot->context.opcode == isa::Opcode::MiscMem) {
-                    ex_slot->remaining_latency = pipeline_sim.config.fence_flush_penalty;
+                if (simrv::compiler::unlikely(
+                        ex_slot->context.traits.is_serializing ||
+                        pipeline::operation::info(ex_slot->context.op_id).execution_class !=
+                            pipeline::operation::ExecutionClass::Default)) {
+                    using pipeline::operation::ExecutionClass;
+                    const auto exec_class =
+                        pipeline::operation::info(ex_slot->context.op_id).execution_class;
+                    switch (exec_class) {
+                        case ExecutionClass::Multiply:
+                            ex_slot->remaining_latency = pipeline_sim.config.mul_latency;
+                            break;
+                        case ExecutionClass::DivideOrRemainder:
+                            ex_slot->remaining_latency = pipeline_sim.config.div_latency;
+                            break;
+                        case ExecutionClass::FpDivideOrSqrt:
+                            ex_slot->remaining_latency = pipeline_sim.config.fp_div_latency;
+                            break;
+                        case ExecutionClass::FpAlu:
+                            ex_slot->remaining_latency = pipeline_sim.config.fp_alu_latency;
+                            break;
+                        case ExecutionClass::Cfu:
+                            ex_slot->remaining_latency = cfu_unit.query_stall_cycles(
+                                ex_slot->context.funct7,
+                                std::to_underlying(ex_slot->context.funct3));
+                            break;
+                        default:
+                            if (ex_slot->context.opcode == isa::Opcode::System) {
+                                ex_slot->remaining_latency = pipeline_sim.config.csr_flush_penalty;
+                            } else if (ex_slot->context.opcode == isa::Opcode::MiscMem) {
+                                ex_slot->remaining_latency =
+                                    pipeline_sim.config.fence_flush_penalty;
+                            }
+                            break;
+                    }
                 }
             }
         }
@@ -445,7 +589,10 @@ void CPU::run_ca_pipeline_cycle(Machine& machine) {
             fetch->serializing = true;
             pipe.frontend_blocked = true;
         } else {
-            decode_fields(machine);
+            if (simrv::compiler::unlikely(fetch->context.opcode == static_cast<isa::Opcode>(0) &&
+                                          fetch->context.op_id == isa::UNKNOWN)) {
+                decode_fields(machine);
+            }
             fetch->serializing = fetch->context.traits.is_serializing;
             fetch->writes_int = fetch->context.traits.writes_int;
             fetch->writes_fp = fetch->context.traits.writes_fp;
@@ -463,8 +610,8 @@ void CPU::run_ca_pipeline_cycle(Machine& machine) {
                 } else {
                     fetch->remaining_latency = refill_wait;
                 }
-                static const bool cache_trace = std::getenv("SIMRV_CACHE_TRACE") != nullptr;
-                if (cache_trace && (!access.hit || ca_state.icache_miss)) {
+                if (simrv::compiler::unlikely(g_cache_trace) &&
+                    (!access.hit || ca_state.icache_miss)) {
                     std::println(stderr,
                                  "CACHETRACE cycle={} pc={:08x} hit={} level={} backing_miss={} "
                                  "latency={}",
@@ -477,7 +624,8 @@ void CPU::run_ca_pipeline_cycle(Machine& machine) {
             const simrv::xlen::Address width = fetch->context.cinsn != 0u ? 2 : 4;
             const simrv::xlen::Address sequential = (fetch->context.cpc + width).raw();
 
-            if (fetch->context.traits.is_control || branch_predictor.config().predict_non_control) {
+            if (simrv::compiler::unlikely(fetch->context.traits.is_control ||
+                                          branch_predictor.config().predict_non_control)) {
                 branch_predictor.predict(fetch->context.cpc.raw(), fetch->context,
                                          fetch->prediction);
                 if (fetch->prediction.predicted_taken && fetch->prediction.predicted_target != 0) {
@@ -502,7 +650,9 @@ void CPU::run_ca_pipeline_cycle(Machine& machine) {
         }
         active_context_ = &pipeline_context;
     }
-    pipe.sync_scoreboard();
+    if (simrv::compiler::unlikely(machine.tui_enabled() || pipeline_sim.config.record_snapshots)) {
+        pipe.sync_scoreboard();
+    }
 }
 
 }  // namespace simrv::core
