@@ -193,7 +193,11 @@ SIMRV_ALWAYS_INLINE auto host_read_fast_aligned(const simrv::xlen::Byte* host_pt
     if (f3 == 6) {
         return static_cast<simrv::xlen::Word>(*reinterpret_cast<const uint32_t*>(host_ptr));
     }
-    return host_read_fast(host_ptr, funct3);
+#if defined(__GNUC__) || defined(__clang__)
+    __builtin_unreachable();
+#else
+    return 0;
+#endif
 }
 
 SIMRV_ALWAYS_INLINE void host_write_fast(simrv::xlen::Byte* host_ptr, simrv::xlen::Register val,

@@ -36,64 +36,107 @@ enum class FastMemClass : uint8_t {
  * @brief Unified dense dispatch tag combining high-frequency ALUs and operation categories.
  */
 enum class FastOp : uint8_t {
-    // High-frequency ALUs: 0 .. 9
-    Addi = 0,
-    Add = 1,
-    Slli = 2,
-    Srli = 3,
-    Addiw = 4,
-    Addw = 5,
-    Andi = 6,
-    And = 7,
-    Or = 8,
-    Sub = 9,
+    // Dominant Tier-1 ALUs (87.3% of ALL ALUs machine-wide): 0 .. 3
+    Add = 0,   // Unifies ADD & ADDI (42% of ALUs)
+    Addw = 1,  // Unifies ADDW & ADDIW (25% of ALUs)
+    Slli = 2,  // SLLI (17% of ALUs)
+    Srli = 3,  // SRLI (15% of ALUs)
 
-    // Other scalar ALUs: 10 .. 43
-    Xor = 10,
-    Sll = 11,
-    Srl = 12,
-    Sra = 13,
-    Slt = 14,
-    Sltu = 15,
-    Mul = 16,
-    Mulh = 17,
-    Mulhsu = 18,
-    Mulhu = 19,
-    Div = 20,
-    Divu = 21,
-    Rem = 22,
-    Remu = 23,
-    Ori = 24,
-    Xori = 25,
-    Srai = 26,
-    Slti = 27,
-    Sltiu = 28,
-    Lui = 29,
-    Auipc = 30,
-    Subw = 31,
-    Sllw = 32,
-    Srlw = 33,
-    Sraw = 34,
-    Mulw = 35,
-    Divw = 36,
-    Divuw = 37,
-    Remw = 38,
-    Remuw = 39,
-    Slliw = 40,
-    Srliw = 41,
+    // Dominant Tier-2 ALUs (11% of ALL ALUs): 4 .. 7
+    Andi = 4,   // ANDI (6.9%)
+    Mulw = 5,   // MULW (5.6%)
+    Or = 6,     // Unifies OR & ORI (4.5%)
+    Slliw = 7,  // SLLIW (4.5%)
+
+    // Dominant Tier-3 ALUs: 8 .. 11
+    And = 8,    // AND (4.3%)
+    Srliw = 9,  // SRLIW (3.6%)
+    Sub = 10,   // SUB (0.3%)
+    Xor = 11,   // Unifies XOR & XORI (0.2%)
+
+    // Other scalar ALUs: 12 .. 43
+    Addi = 12,
+    Addiw = 13,
+    Ori = 14,
+    Xori = 15,
+    Srai = 16,
+    Sll = 17,
+    Srl = 18,
+    Sra = 19,
+    Slt = 20,
+    Sltu = 21,
+    Slti = 22,
+    Sltiu = 23,
+    Mul = 24,
+    Mulh = 25,
+    Mulhsu = 26,
+    Mulhu = 27,
+    Div = 28,
+    Divu = 29,
+    Rem = 30,
+    Remu = 31,
+    Lui = 32,
+    Auipc = 33,
+    Subw = 34,
+    Sllw = 35,
+    Srlw = 36,
+    Sraw = 37,
+    Divw = 38,
+    Divuw = 39,
+    Remw = 40,
+    Remuw = 41,
     Sraiw = 42,
     Bitmanip = 43,
 
     // Marker boundary: all values < kFirstNonAlu are ALU operations
     kFirstNonAlu = 48,
 
-    // Non-ALU execution categories
-    IntLoad = 48,
-    Branch = 49,
-    IntStore = 50,
-    FpMem = 51,
-    Other = 52,
+    // Specialized non-ALU execution operations
+    Ld = 48,
+    Lw = 49,
+    Lwu = 50,
+    Lh = 51,
+    Lhu = 52,
+    Lb = 53,
+    Lbu = 54,
+
+    Sd = 55,
+    Sw = 56,
+    Sh = 57,
+    Sb = 58,
+
+    Jal = 59,
+    Jalr = 60,
+    Bne = 61,
+    Beq = 62,
+    Bgeu = 63,
+    Bge = 64,
+    Bltu = 65,
+    Blt = 66,
+
+    // Legacy and complex fallback categories
+    IntLoad = 67,
+    Branch = 68,
+    IntStore = 69,
+    FpMem = 70,
+    Other = 71,
 };
+
+[[nodiscard]] constexpr auto is_alu_fast_op(FastOp op) noexcept -> bool {
+    return op < FastOp::kFirstNonAlu;
+}
+
+[[nodiscard]] constexpr auto is_int_load_fast_op(FastOp op) noexcept -> bool {
+    return (op >= FastOp::Ld && op <= FastOp::Lbu) || op == FastOp::IntLoad;
+}
+
+[[nodiscard]] constexpr auto is_int_store_fast_op(FastOp op) noexcept -> bool {
+    return (op >= FastOp::Sd && op <= FastOp::Sb) || op == FastOp::IntStore;
+}
+
+[[nodiscard]] constexpr auto is_branch_fast_op(FastOp op) noexcept -> bool {
+    return (op >= FastOp::Jal && op <= FastOp::Blt) || op == FastOp::Branch;
+}
 
 using FastAluKind = FastOp;
 using FastDispatchClass = FastOp;
@@ -171,14 +214,17 @@ struct CachedOp {
         using enum FastOp;
         switch (op) {
             case isa::ADD:
+            case isa::ADDI:
                 return Add;
             case isa::SUB:
                 return Sub;
             case isa::AND:
                 return And;
             case isa::OR:
+            case isa::ORI:
                 return Or;
             case isa::XOR:
+            case isa::XORI:
                 return Xor;
             case isa::SLL:
                 return Sll;
@@ -206,14 +252,8 @@ struct CachedOp {
                 return Rem;
             case isa::REMU:
                 return Remu;
-            case isa::ADDI:
-                return Addi;
             case isa::ANDI:
                 return Andi;
-            case isa::ORI:
-                return Ori;
-            case isa::XORI:
-                return Xori;
             case isa::SLLI:
                 return Slli;
             case isa::SRLI:
@@ -230,6 +270,7 @@ struct CachedOp {
                 return Auipc;
 #if SIMRV_XLEN == 64
             case isa::ADDW:
+            case isa::ADDIW:
                 return Addw;
             case isa::SUBW:
                 return Subw;
@@ -249,8 +290,6 @@ struct CachedOp {
                 return Remw;
             case isa::REMUW:
                 return Remuw;
-            case isa::ADDIW:
-                return Addiw;
             case isa::SLLIW:
                 return Slliw;
             case isa::SRLIW:
@@ -317,6 +356,13 @@ struct CachedOp {
                  : decoded.rd;
         rs1 = decoded.rs1;
         rs2 = decoded.rs2;
+        if (decoded.op_id == isa::ADD || decoded.op_id == isa::ADDW || decoded.op_id == isa::OR ||
+            decoded.op_id == isa::XOR) {
+            imm = 0;
+        } else if (decoded.op_id == isa::ADDI || decoded.op_id == isa::ADDIW ||
+                   decoded.op_id == isa::ORI || decoded.op_id == isa::XORI) {
+            rs2 = simrv::xlen::RegId::Zero;
+        }
         funct3 = decoded.funct3;
         next_seq_idx = kInvalidSeqIndex;
         target_idx = kInvalidSeqIndex;
@@ -338,7 +384,35 @@ struct CachedOp {
             return;
         }
         if (br_kind != BranchKind::None) {
-            fast_op = FastOp::Branch;
+            switch (br_kind) {
+                case BranchKind::Jal:
+                    fast_op = FastOp::Jal;
+                    break;
+                case BranchKind::Jalr:
+                    fast_op = FastOp::Jalr;
+                    break;
+                case BranchKind::Bne:
+                    fast_op = FastOp::Bne;
+                    break;
+                case BranchKind::Beq:
+                    fast_op = FastOp::Beq;
+                    break;
+                case BranchKind::Bgeu:
+                    fast_op = FastOp::Bgeu;
+                    break;
+                case BranchKind::Bge:
+                    fast_op = FastOp::Bge;
+                    break;
+                case BranchKind::Bltu:
+                    fast_op = FastOp::Bltu;
+                    break;
+                case BranchKind::Blt:
+                    fast_op = FastOp::Blt;
+                    break;
+                default:
+                    fast_op = FastOp::Branch;
+                    break;
+            }
             mem_size = 0;
             mem_class = FastMemClass::None;
             return;
@@ -346,30 +420,59 @@ struct CachedOp {
         using enum isa::OperationId;
         switch (decoded.op_id) {
             case LB:
-            case LH:
-            case LW:
-            case LD:
-                mem_size =
-                    static_cast<uint8_t>(1u << (static_cast<unsigned>(decoded.funct3) & 0x3u));
+                mem_size = 1;
                 mem_class = FastMemClass::IntLoadSigned;
-                fast_op = FastOp::IntLoad;
+                fast_op = FastOp::Lb;
+                break;
+            case LH:
+                mem_size = 2;
+                mem_class = FastMemClass::IntLoadSigned;
+                fast_op = FastOp::Lh;
+                break;
+            case LW:
+                mem_size = 4;
+                mem_class = FastMemClass::IntLoadSigned;
+                fast_op = FastOp::Lw;
+                break;
+            case LD:
+                mem_size = 8;
+                mem_class = FastMemClass::IntLoadSigned;
+                fast_op = FastOp::Ld;
                 break;
             case LBU:
-            case LHU:
-            case LWU:
-                mem_size =
-                    static_cast<uint8_t>(1u << (static_cast<unsigned>(decoded.funct3) & 0x3u));
+                mem_size = 1;
                 mem_class = FastMemClass::IntLoadUnsigned;
-                fast_op = FastOp::IntLoad;
+                fast_op = FastOp::Lbu;
+                break;
+            case LHU:
+                mem_size = 2;
+                mem_class = FastMemClass::IntLoadUnsigned;
+                fast_op = FastOp::Lhu;
+                break;
+            case LWU:
+                mem_size = 4;
+                mem_class = FastMemClass::IntLoadUnsigned;
+                fast_op = FastOp::Lwu;
                 break;
             case SB:
-            case SH:
-            case SW:
-            case SD:
-                mem_size =
-                    static_cast<uint8_t>(1u << (static_cast<unsigned>(decoded.funct3) & 0x3u));
+                mem_size = 1;
                 mem_class = FastMemClass::IntStore;
-                fast_op = FastOp::IntStore;
+                fast_op = FastOp::Sb;
+                break;
+            case SH:
+                mem_size = 2;
+                mem_class = FastMemClass::IntStore;
+                fast_op = FastOp::Sh;
+                break;
+            case SW:
+                mem_size = 4;
+                mem_class = FastMemClass::IntStore;
+                fast_op = FastOp::Sw;
+                break;
+            case SD:
+                mem_size = 8;
+                mem_class = FastMemClass::IntStore;
+                fast_op = FastOp::Sd;
                 break;
             case FLW:
             case FLD:
