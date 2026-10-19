@@ -573,17 +573,19 @@ void MemoryAccess::target_write(MemorySubsystem& mem, core::CPU& cpu, simrv::xle
                     cpu.machine_->tohost = value;
                 }
             };
+            const bool is_guest_xlen32 = (cpu.state().regs.xlen == 32) || !simrv::xlen::kIsXLen64;
             if (addr == cpu.machine_->isa_test_tohost() || addr == 0x80001000 ||
                 addr == 0x40008000) {
                 if (!check_sc_reservation(addr)) return;
-                publish_host_write(simrv::xlen::kIsXLen64
-                                       ? data
-                                       : ((cpu.machine_->tohost & 0xFFFFFFFF00000000ULL) | data));
-            } else if (!simrv::xlen::kIsXLen64 && (addr == cpu.machine_->isa_test_tohost() + 4 ||
-                                                   addr == 0x80001004 || addr == 0x40008004)) {
+                publish_host_write(
+                    is_guest_xlen32
+                        ? ((cpu.machine_->tohost & 0xFFFFFFFF00000000ULL) | (data & 0xFFFFFFFFULL))
+                        : data);
+            } else if (is_guest_xlen32 && (addr == cpu.machine_->isa_test_tohost() + 4 ||
+                                           addr == 0x80001004 || addr == 0x40008004)) {
                 if (!check_sc_reservation(addr)) return;
                 publish_host_write((cpu.machine_->tohost & 0x00000000FFFFFFFFULL) |
-                                   (static_cast<uint64_t>(data) << 32));
+                                   (static_cast<uint64_t>(data & 0xFFFFFFFFULL) << 32));
             }
         }
         if (cpu.machine_->runtime_profile.is_instruction_mode() &&

@@ -1910,10 +1910,11 @@ void Machine::finalize_cycle_tohost() {
         return;
     }
 
-    // Standard 64-bit HTIF handling
+    const bool is_guest_xlen32 = (primary_hart().state().regs.xlen == 32);
     const auto dev = static_cast<uint8_t>(tohost >> 56);
     const auto cmd = static_cast<uint8_t>(tohost >> 48);
-    const uint64_t payload = tohost & 0x0000FFFFFFFFFFFFULL;
+    const uint64_t payload =
+        is_guest_xlen32 ? (tohost & 0xFFFFFFFFULL) : (tohost & 0x0000FFFFFFFFFFFFULL);
 
     if (dev == 1 && cmd == 1) {
         // HTIF Console Print
@@ -1958,14 +1959,15 @@ void Machine::finalize_cycle_tohost() {
                 if (syscall_num == 64) {  // SYS_write
                     const simrv::xlen::Address fromhost_addr =
                         (isa_test_tohost() != 0 ? isa_test_tohost() : 0x80001000) + 8;
-                    if (!ram.contains(arg1, static_cast<size_t>(arg2)) ||
+                    const auto buf_addr = is_guest_xlen32 ? (arg1 & 0xFFFFFFFFULL) : arg1;
+                    if (!ram.contains(buf_addr, static_cast<size_t>(arg2)) ||
                         !ram.contains(fromhost_addr, sizeof(uint64_t))) {
                         simrv::log::warn(
                             "HTIF SYS_write references RAM outside the configured DRAM");
                         tohost = 0;
                         return;
                     }
-                    const std::span<const simrv::xlen::Byte> bytes(ram.unchecked_ptr(arg1),
+                    const std::span<const simrv::xlen::Byte> bytes(ram.unchecked_ptr(buf_addr),
                                                                    static_cast<size_t>(arg2));
                     for (const simrv::xlen::Byte byte : bytes) {
                         console_write(static_cast<char>(byte));
