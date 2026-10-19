@@ -103,6 +103,33 @@ constexpr auto integer_scalar(simrv::xlen::Register value) -> T {
 template <typename T, typename Op>
 inline void perform_vv(core::CPU& cpu, simrv::xlen::RegId rd, simrv::xlen::RegId rs1,
                        simrv::xlen::RegId rs2, bool vm, uint32_t vl, Op op) {
+    if (vm && cpu.state().vstart == 0) {
+        const uint32_t elems_per_reg = cpu.state().regs.vlen_bytes() / sizeof(T);
+        uint32_t remaining = vl;
+        uint32_t reg_idx = 0;
+        while (remaining > 0) {
+            const uint32_t chunk = std::min(remaining, elems_per_reg);
+            const auto d_reg =
+                static_cast<simrv::xlen::RegId>((std::to_underlying(rd) + reg_idx) & 0x1F);
+            const auto s1_reg =
+                static_cast<simrv::xlen::RegId>((std::to_underlying(rs1) + reg_idx) & 0x1F);
+            const auto s2_reg =
+                static_cast<simrv::xlen::RegId>((std::to_underlying(rs2) + reg_idx) & 0x1F);
+            auto& vd = cpu.state().regs.read_vector(simrv::xlen::to_vec_reg_id(d_reg));
+            const auto& vs1 = cpu.state().regs.read_vector(simrv::xlen::to_vec_reg_id(s1_reg));
+            const auto& vs2 = cpu.state().regs.read_vector(simrv::xlen::to_vec_reg_id(s2_reg));
+            auto* dst = reinterpret_cast<T*>(vd.u8.data());
+            const auto* src1 = reinterpret_cast<const T*>(vs1.u8.data());
+            const auto* src2 = reinterpret_cast<const T*>(vs2.u8.data());
+            for (uint32_t j = 0; j < chunk; ++j) {
+                dst[j] = op(src2[j], src1[j]);
+            }
+            remaining -= chunk;
+            ++reg_idx;
+        }
+        return;
+    }
+
     const auto& mask_reg =
         cpu.state().regs.read_vector(simrv::xlen::to_vec_reg_id(simrv::xlen::RegId::Zero));
 
@@ -117,6 +144,30 @@ inline void perform_vv(core::CPU& cpu, simrv::xlen::RegId rd, simrv::xlen::RegId
 template <typename T, typename Op>
 inline void perform_vx(core::CPU& cpu, simrv::xlen::RegId rd, simrv::xlen::Register rs1_val,
                        simrv::xlen::RegId rs2, bool vm, uint32_t vl, Op op) {
+    if (vm && cpu.state().vstart == 0) {
+        const T val1 = integer_scalar<T>(rs1_val);
+        const uint32_t elems_per_reg = cpu.state().regs.vlen_bytes() / sizeof(T);
+        uint32_t remaining = vl;
+        uint32_t reg_idx = 0;
+        while (remaining > 0) {
+            const uint32_t chunk = std::min(remaining, elems_per_reg);
+            const auto d_reg =
+                static_cast<simrv::xlen::RegId>((std::to_underlying(rd) + reg_idx) & 0x1F);
+            const auto s2_reg =
+                static_cast<simrv::xlen::RegId>((std::to_underlying(rs2) + reg_idx) & 0x1F);
+            auto& vd = cpu.state().regs.read_vector(simrv::xlen::to_vec_reg_id(d_reg));
+            const auto& vs2 = cpu.state().regs.read_vector(simrv::xlen::to_vec_reg_id(s2_reg));
+            auto* dst = reinterpret_cast<T*>(vd.u8.data());
+            const auto* src2 = reinterpret_cast<const T*>(vs2.u8.data());
+            for (uint32_t j = 0; j < chunk; ++j) {
+                dst[j] = op(src2[j], val1);
+            }
+            remaining -= chunk;
+            ++reg_idx;
+        }
+        return;
+    }
+
     const auto& mask_reg =
         cpu.state().regs.read_vector(simrv::xlen::to_vec_reg_id(simrv::xlen::RegId::Zero));
     T val1 = integer_scalar<T>(rs1_val);
@@ -131,6 +182,30 @@ inline void perform_vx(core::CPU& cpu, simrv::xlen::RegId rd, simrv::xlen::Regis
 template <typename T, typename Op>
 inline void perform_vi(core::CPU& cpu, simrv::xlen::RegId rd, int32_t imm, simrv::xlen::RegId rs2,
                        bool vm, uint32_t vl, Op op) {
+    if (vm && cpu.state().vstart == 0) {
+        const T val1 = static_cast<T>(imm);
+        const uint32_t elems_per_reg = cpu.state().regs.vlen_bytes() / sizeof(T);
+        uint32_t remaining = vl;
+        uint32_t reg_idx = 0;
+        while (remaining > 0) {
+            const uint32_t chunk = std::min(remaining, elems_per_reg);
+            const auto d_reg =
+                static_cast<simrv::xlen::RegId>((std::to_underlying(rd) + reg_idx) & 0x1F);
+            const auto s2_reg =
+                static_cast<simrv::xlen::RegId>((std::to_underlying(rs2) + reg_idx) & 0x1F);
+            auto& vd = cpu.state().regs.read_vector(simrv::xlen::to_vec_reg_id(d_reg));
+            const auto& vs2 = cpu.state().regs.read_vector(simrv::xlen::to_vec_reg_id(s2_reg));
+            auto* dst = reinterpret_cast<T*>(vd.u8.data());
+            const auto* src2 = reinterpret_cast<const T*>(vs2.u8.data());
+            for (uint32_t j = 0; j < chunk; ++j) {
+                dst[j] = op(src2[j], val1);
+            }
+            remaining -= chunk;
+            ++reg_idx;
+        }
+        return;
+    }
+
     const auto& mask_reg =
         cpu.state().regs.read_vector(simrv::xlen::to_vec_reg_id(simrv::xlen::RegId::Zero));
     T val1 = static_cast<T>(imm);

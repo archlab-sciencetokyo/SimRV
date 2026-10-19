@@ -1424,17 +1424,38 @@ void test_vector_bulk_memory_operations() {
                "page-crossing vle8 falls back seamlessly and transfers correctly");
     }
 
-    // 3. Whole-register load/store bulk test
-    regs.write(base_reg, ram.base() + 0x300);
+    // Cross-page vse8 test: buffer spanning 4096-byte boundary
+    regs.write(base_reg, ram.base() + 0xFF8);
+    simrv::execute::ExecuteUnit::execute_vector(
+        cpu, machine.memory(), simrv::isa::OperationId::VSE8_V, memory_ir(vs, base_reg));
+    for (uint32_t i = 0; i < 16; ++i) {
+        expect(ram.data()[0xFF8 + i] == simrv::xlen::Byte{static_cast<uint8_t>(0x70 + i)},
+               "page-crossing vse8 transfers correctly across 4KB boundary");
+    }
+
+    // 3. Whole-register load/store bulk test (including page-boundary crossing)
+    regs.write(base_reg, ram.base() + 0xFF0);
     for (uint32_t i = 0; i < regs.vlen_bytes(); ++i) {
-        ram.data()[0x300 + i] = simrv::xlen::Byte{static_cast<uint8_t>(0x10 + (i & 0x7F))};
+        ram.data()[0xFF0 + i] = simrv::xlen::Byte{static_cast<uint8_t>(0x10 + (i & 0x7F))};
     }
     simrv::execute::ExecuteUnit::execute_vector(
         cpu, machine.memory(), simrv::isa::OperationId::VL1RE8_V, memory_ir(vd, base_reg));
     for (uint32_t i = 0; i < regs.vlen_bytes(); ++i) {
         expect(regs.read_vector(simrv::xlen::to_vec_reg_id(vd)).u8[i] ==
                    static_cast<uint8_t>(0x10 + (i & 0x7F)),
-               "bulk vl1re8 accurately transfers whole register");
+               "bulk vl1re8 accurately transfers whole register across page boundary");
+    }
+
+    // 4. Unmasked batched arithmetic test (VADD_VV)
+    constexpr auto v_add_ir = static_cast<simrv::xlen::Instruction>(
+        (std::to_underlying(vd) << 15U) | (std::to_underlying(vd) << 7U) |
+        (std::to_underlying(vs) << 20U) | (1U << 25U));
+    simrv::execute::ExecuteUnit::execute_vector(cpu, machine.memory(),
+                                                simrv::isa::OperationId::VADD_VV, v_add_ir);
+    for (uint32_t i = 0; i < 16; ++i) {
+        const uint8_t expected = static_cast<uint8_t>((0x70 + i) + (0x10 + (i & 0x7F)));
+        expect(regs.read_vector(simrv::xlen::to_vec_reg_id(vd)).u8[i] == expected,
+               "batched unmasked vadd_vv produces correct SIMD sums");
     }
 }
 
