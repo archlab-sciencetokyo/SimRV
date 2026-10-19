@@ -185,7 +185,8 @@ struct CachedOp {
     uint8_t mem_size : 4 = 0;
     uint8_t op_len = 4;
     uint8_t next_victim : 1 = 0;
-    uint8_t reserved : 7 = 0;
+    uint8_t is_straight_mem : 1 = 0;
+    uint8_t reserved : 6 = 0;
     [[nodiscard]] constexpr auto len() const noexcept -> uint8_t { return op_len; }
     [[nodiscard]] constexpr auto is_compressed() const noexcept -> bool { return op_len == 2u; }
     [[nodiscard]] constexpr auto align_mask() const noexcept -> uint8_t {
@@ -311,6 +312,9 @@ struct CachedOp {
     }
 
     [[nodiscard]] constexpr auto has_fast_alu() const noexcept -> bool { return is_alu(); }
+    [[nodiscard]] constexpr auto has_fast_mem() const noexcept -> bool {
+        return is_straight_mem != 0;
+    }
 
     [[nodiscard]] constexpr auto fast_alu_kind() const noexcept -> FastOp { return fast_op; }
 
@@ -372,6 +376,13 @@ struct CachedOp {
                           !decoded.traits.is_cfu && !decoded.traits.writes_vec &&
                           !decoded.traits.writes_fp && !decoded.traits.reads_rs1_fp &&
                           !decoded.traits.reads_rs2_fp && !decoded.traits.reads_rs3_fp &&
+                          !decoded.pending_exception.has_value() && decoded.op_id != isa::UNKNOWN;
+        is_straight_mem = (decoded.traits.is_mem_load || decoded.traits.is_mem_store) &&
+                          !decoded.traits.is_control && !decoded.traits.is_serializing &&
+                          !decoded.traits.is_cfu && !decoded.traits.writes_vec &&
+                          !decoded.traits.writes_fp && !decoded.traits.reads_rs1_fp &&
+                          !decoded.traits.reads_rs2_fp && !decoded.traits.reads_rs3_fp &&
+                          decoded.opcode != isa::Opcode::Amo &&
                           !decoded.pending_exception.has_value() && decoded.op_id != isa::UNKNOWN;
         const auto alu_op = is_straight_alu ? classify_fast_alu(decoded.op_id) : FastOp::Other;
         const auto br_kind = !decoded.pending_exception.has_value() ? classify_branch(decoded.op_id)
@@ -837,6 +848,40 @@ class DecodeCache {
         entry.target_idx = kInvalidSeqIndex;
         entry.op_len = static_cast<uint8_t>(op.cinsn != 0 ? 2u : (op.op_len ? op.op_len : 4u));
         set.set_next_victim(static_cast<uint8_t>(1U - way));
+
+        // Pre-link sequential successor if already present in decode cache
+        const auto next_pc = pc + entry.op_len;
+        if (const auto* next_op = lookup_aligned(next_pc);
+            next_op != nullptr && next_op->cpc.raw() == next_pc && next_op->valid) {
+            entry.next_seq_idx = index_of(next_op);
+        }
+
+        // Pre-link relative branch/jump target if already present in decode cache
+        if (entry.branch_kind != BranchKind::None && entry.branch_kind != BranchKind::Jalr) {
+            const auto target_pc = static_cast<simrv::xlen::Register>(pc + entry.imm);
+            if (const auto* target_op = lookup_aligned(target_pc);
+                target_op != nullptr && target_op->cpc.raw() == target_pc && target_op->valid) {
+                entry.target_idx = index_of(target_op);
+            }
+        }
+
+        // Backward link: check if predecessor instructions at pc - 2 or pc - 4 can link to this
+        // entry
+        const auto entry_idx = index_of(&entry);
+        if (pc >= 2) {
+            if (auto* prev2 = lookup_aligned(pc - 2); prev2 != nullptr &&
+                                                      prev2->cpc.raw() == (pc - 2) &&
+                                                      prev2->valid && prev2->op_len == 2) {
+                prev2->next_seq_idx = entry_idx;
+            }
+        }
+        if (pc >= 4) {
+            if (auto* prev4 = lookup_aligned(pc - 4); prev4 != nullptr &&
+                                                      prev4->cpc.raw() == (pc - 4) &&
+                                                      prev4->valid && prev4->op_len == 4) {
+                prev4->next_seq_idx = entry_idx;
+            }
+        }
     }
     inline void insert(simrv::xlen::VirtAddr pc, const CachedOp& op) { insert(pc.raw(), op); }
 

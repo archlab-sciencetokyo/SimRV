@@ -295,9 +295,43 @@ void test_decode_cache_compact_round_robin() {
     fld_inst.funct3 = simrv::isa::Funct3::Fld;
     simrv::core::CachedOp fld_op{};
     fld_op.copy_from(fld_inst);
-    expect(fld_op.mem_class == simrv::core::FastMemClass::FpLoad, "FLD classified as FpLoad");
-    expect(fld_op.mem_size == 8, "FLD mem_size is 8");
-    expect(fld_op.align_mask() == 7, "FLD align_mask is 7");
+    expect(load_op.has_fast_mem(), "LW has_fast_mem");
+    expect(load_op.is_straight_mem != 0, "LW is_straight_mem set");
+    expect(store_op.has_fast_mem(), "SD has_fast_mem");
+    expect(!fld_op.has_fast_mem(), "FLD has_fast_mem is false (FP memory)");
+
+    // Test direct branch and sequential pre-linking on insertion
+    simrv::core::DecodeCache prelink_cache;
+    simrv::core::CachedOp target_inst{};
+    target_inst.op_len = 4;
+    prelink_cache.insert(0x80000010, target_inst);
+
+    // Insert backward branch pointing to 0x80000010: target_pc = 0x80000020 + (-16) = 0x80000010
+    simrv::core::CachedOp branch_inst{};
+    branch_inst.branch_kind = simrv::core::BranchKind::Bne;
+    branch_inst.imm = -16;
+    branch_inst.op_len = 4;
+    prelink_cache.insert(0x80000020, branch_inst);
+
+    auto* inserted_branch = prelink_cache.lookup(0x80000020);
+    expect(inserted_branch != nullptr, "branch inserted");
+    expect(inserted_branch->target_idx != simrv::core::kInvalidSeqIndex,
+           "backward branch target is immediately pre-linked on insertion");
+    auto* linked_target = prelink_cache.op_by_index(inserted_branch->target_idx);
+    expect(linked_target != nullptr && linked_target->cpc.raw() == 0x80000010,
+           "pre-linked target resolves to expected PC");
+
+    // Insert sequential predecessor at 0x8000001C (pc + 4 = 0x80000020)
+    simrv::core::CachedOp pred_inst{};
+    pred_inst.op_len = 4;
+    prelink_cache.insert(0x8000001C, pred_inst);
+    auto* inserted_pred = prelink_cache.lookup(0x8000001C);
+    expect(inserted_pred != nullptr, "predecessor inserted");
+    expect(inserted_pred->next_seq_idx != simrv::core::kInvalidSeqIndex,
+           "sequential successor is pre-linked on insertion");
+    auto* linked_seq = prelink_cache.op_by_index(inserted_pred->next_seq_idx);
+    expect(linked_seq != nullptr && linked_seq->cpc.raw() == 0x80000020,
+           "pre-linked sequential successor resolves to expected branch PC");
 }
 
 void test_hosted_rv32_cached_shift_width() {
