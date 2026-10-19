@@ -3,7 +3,15 @@
 All notable changes to SimRV are documented here.
 Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [v3.0.0-rc.13] — unreleased
+## [v3.0.0-rc.14] — unreleased
+
+- Interactive full-screen hex dump and memory inspector modal with cursor navigation, address seeking, and multi-format word interpretation.
+- In-place memory byte and word editing during simulation pause.
+- Hardware cache data prefetcher and TileLink-C Coherence Hub telemetry integration in InspectorPaneCache.
+- Multi-hart SMP visual switcher modal and universal pane redirection.
+- Pipeline hazard operand forwarding network and branch predictor confidence meter visualization.
+
+## [v3.0.0-rc.13] — 2026-10-20
 
 - Standard RISC-V Sdtrig extension hardware watchpoints (`check_triggers_mem`) for load and store data access matching.
 - TUI hardware trigger management and status integration in BreakpointModal.
