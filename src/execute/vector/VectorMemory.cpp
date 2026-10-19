@@ -131,17 +131,37 @@ void execute_vl_whole(core::CPU& cpu, simrv::memory::MemorySubsystem& mem, simrv
                 return;
             }
         }
-        simrv::xlen::Byte* host_src =
-            get_direct_host_memory_for_range(cpu, base_addr, total_bytes, false);
-        if (host_src != nullptr) {
-            for (uint32_t r = 0; r < nr; ++r) {
+        uint32_t byte_idx = 0;
+        while (byte_idx < total_bytes) {
+            const simrv::xlen::Address cur_addr = base_addr + byte_idx;
+            const uint32_t page_offset = cur_addr & 0xFFFu;
+            const uint32_t page_remain_bytes = 4096u - page_offset;
+            const uint32_t chunk_bytes = std::min(total_bytes - byte_idx, page_remain_bytes);
+            simrv::xlen::Byte* host_src =
+                get_direct_host_memory_for_range(cpu, cur_addr, chunk_bytes, false);
+            if (host_src == nullptr) {
+                break;
+            }
+            uint32_t chunk_rem = chunk_bytes;
+            uint32_t chunk_copied = 0;
+            while (chunk_rem > 0) {
+                const uint32_t cur_byte = byte_idx + chunk_copied;
+                const uint32_t r = cur_byte / vlen_bytes;
+                const uint32_t in_reg = cur_byte % vlen_bytes;
+                const uint32_t reg_chunk = std::min(chunk_rem, vlen_bytes - in_reg);
                 const auto reg_idx =
                     static_cast<simrv::xlen::RegId>((static_cast<uint32_t>(rd) + r) % 32);
                 auto& vreg = cpu.state().regs.read_vector(simrv::xlen::to_vec_reg_id(reg_idx));
-                std::memcpy(vreg.u8.data(), host_src + r * vlen_bytes, vlen_bytes);
+                std::memcpy(&vreg.u8[in_reg], host_src + chunk_copied, reg_chunk);
+                chunk_copied += reg_chunk;
+                chunk_rem -= reg_chunk;
             }
+            byte_idx += chunk_bytes;
+        }
+        if (byte_idx == total_bytes) {
             return;
         }
+        cpu.state().vstart = byte_idx / element_bytes;
     }
 
     const uint32_t elements = nr * vlen_bytes / element_bytes;
@@ -192,25 +212,45 @@ void execute_vs_whole(core::CPU& cpu, simrv::memory::MemorySubsystem& mem, simrv
     const uint32_t vlen_bytes = cpu.state().regs.vlen_bytes();
     const uint32_t total_bytes = nr * vlen_bytes;
     if (cpu.state().vstart == 0 && total_bytes > 0) {
-        simrv::xlen::Address physical_address = 0;
-        simrv::xlen::Byte* host_dst =
-            get_direct_host_memory_for_range(cpu, base_addr, total_bytes, true, &physical_address);
-        if (host_dst != nullptr) {
-            for (uint32_t r = 0; r < nr; ++r) {
+        uint32_t byte_idx = 0;
+        while (byte_idx < total_bytes) {
+            const simrv::xlen::Address cur_addr = base_addr + byte_idx;
+            const uint32_t page_offset = cur_addr & 0xFFFu;
+            const uint32_t page_remain_bytes = 4096u - page_offset;
+            const uint32_t chunk_bytes = std::min(total_bytes - byte_idx, page_remain_bytes);
+            simrv::xlen::Address physical_address = 0;
+            simrv::xlen::Byte* host_dst = get_direct_host_memory_for_range(
+                cpu, cur_addr, chunk_bytes, true, &physical_address);
+            if (host_dst == nullptr) {
+                break;
+            }
+            uint32_t chunk_rem = chunk_bytes;
+            uint32_t chunk_copied = 0;
+            while (chunk_rem > 0) {
+                const uint32_t cur_byte = byte_idx + chunk_copied;
+                const uint32_t r = cur_byte / vlen_bytes;
+                const uint32_t in_reg = cur_byte % vlen_bytes;
+                const uint32_t reg_chunk = std::min(chunk_rem, vlen_bytes - in_reg);
                 const auto reg_idx =
                     static_cast<simrv::xlen::RegId>((static_cast<uint32_t>(vs3) + r) % 32);
                 const auto& vreg =
                     cpu.state().regs.read_vector(simrv::xlen::to_vec_reg_id(reg_idx));
-                std::memcpy(host_dst + r * vlen_bytes, vreg.u8.data(), vlen_bytes);
+                std::memcpy(host_dst + chunk_copied, &vreg.u8[in_reg], reg_chunk);
+                chunk_copied += reg_chunk;
+                chunk_rem -= reg_chunk;
             }
             if (simrv::compiler::unlikely(cpu.machine_ != nullptr &&
                                           mem.reservation_table().may_have_reservations() &&
                                           cpu.machine_->num_harts() > 1)) {
-                mem.reservation_table().invalidate_range(physical_address, total_bytes,
+                mem.reservation_table().invalidate_range(physical_address, chunk_bytes,
                                                          cpu.hart_id());
             }
+            byte_idx += chunk_bytes;
+        }
+        if (byte_idx == total_bytes) {
             return;
         }
+        cpu.state().vstart = byte_idx;
     }
 
     for (auto i = static_cast<uint32_t>(cpu.state().vstart); i < total_bytes; i++) {
@@ -244,29 +284,44 @@ void execute_vle(core::CPU& cpu, simrv::memory::MemorySubsystem& mem, simrv::xle
                 return;
             }
         }
-        const uint32_t total_bytes = vl * sizeof(T);
-        simrv::xlen::Byte* host_src =
-            get_direct_host_memory_for_range(cpu, base_addr, total_bytes, false);
-        if (host_src != nullptr) {
-            uint32_t remaining = vl;
-            uint32_t elem_idx = 0;
-            uint32_t byte_offset = 0;
-            const uint32_t elems_per_reg = cpu.state().regs.vlen_bytes() / sizeof(T);
-            while (remaining > 0) {
-                const uint32_t reg_offset = elem_idx / elems_per_reg;
-                const uint32_t in_reg = elem_idx % elems_per_reg;
-                const uint32_t chunk = std::min(remaining, elems_per_reg - in_reg);
+        uint32_t elem_idx = 0;
+        const uint32_t elems_per_reg = cpu.state().regs.vlen_bytes() / sizeof(T);
+        while (elem_idx < vl) {
+            const simrv::xlen::Address cur_addr = base_addr + elem_idx * sizeof(T);
+            const uint32_t page_offset = cur_addr & 0xFFFu;
+            const uint32_t page_remain_bytes = 4096u - page_offset;
+            const uint32_t page_remain_elems = page_remain_bytes / sizeof(T);
+            if (page_remain_elems == 0) {
+                break;
+            }
+            const uint32_t chunk_elems = std::min(vl - elem_idx, page_remain_elems);
+            const uint32_t chunk_bytes = chunk_elems * sizeof(T);
+            simrv::xlen::Byte* host_src =
+                get_direct_host_memory_for_range(cpu, cur_addr, chunk_bytes, false);
+            if (host_src == nullptr) {
+                break;
+            }
+            uint32_t chunk_rem = chunk_elems;
+            uint32_t chunk_copied = 0;
+            while (chunk_rem > 0) {
+                const uint32_t cur_elem = elem_idx + chunk_copied;
+                const uint32_t reg_offset = cur_elem / elems_per_reg;
+                const uint32_t in_reg = cur_elem % elems_per_reg;
+                const uint32_t chunk = std::min(chunk_rem, elems_per_reg - in_reg);
                 const auto actual_reg =
                     static_cast<simrv::xlen::RegId>((std::to_underlying(rd) + reg_offset) & 0x1F);
                 auto& vreg = cpu.state().regs.read_vector(simrv::xlen::to_vec_reg_id(actual_reg));
-                std::memcpy(&vreg.u8[in_reg * sizeof(T)], host_src + byte_offset,
+                std::memcpy(&vreg.u8[in_reg * sizeof(T)], host_src + chunk_copied * sizeof(T),
                             chunk * sizeof(T));
-                elem_idx += chunk;
-                byte_offset += chunk * sizeof(T);
-                remaining -= chunk;
+                chunk_copied += chunk;
+                chunk_rem -= chunk;
             }
+            elem_idx += chunk_elems;
+        }
+        if (elem_idx == vl) {
             return;
         }
+        cpu.state().vstart = elem_idx;
     }
 
     const auto& mask_reg =
@@ -388,37 +443,52 @@ void execute_vse(core::CPU& cpu, simrv::memory::MemorySubsystem& mem, simrv::xle
                 return;
             }
         }
-        const uint32_t total_bytes = vl * sizeof(T);
-        simrv::xlen::Address physical_address = 0;
-        simrv::xlen::Byte* host_dst =
-            get_direct_host_memory_for_range(cpu, base_addr, total_bytes, true, &physical_address);
-        if (host_dst != nullptr) {
-            uint32_t remaining = vl;
-            uint32_t elem_idx = 0;
-            uint32_t byte_offset = 0;
-            const uint32_t elems_per_reg = cpu.state().regs.vlen_bytes() / sizeof(T);
-            while (remaining > 0) {
-                const uint32_t reg_offset = elem_idx / elems_per_reg;
-                const uint32_t in_reg = elem_idx % elems_per_reg;
-                const uint32_t chunk = std::min(remaining, elems_per_reg - in_reg);
+        uint32_t elem_idx = 0;
+        const uint32_t elems_per_reg = cpu.state().regs.vlen_bytes() / sizeof(T);
+        while (elem_idx < vl) {
+            const simrv::xlen::Address cur_addr = base_addr + elem_idx * sizeof(T);
+            const uint32_t page_offset = cur_addr & 0xFFFu;
+            const uint32_t page_remain_bytes = 4096u - page_offset;
+            const uint32_t page_remain_elems = page_remain_bytes / sizeof(T);
+            if (page_remain_elems == 0) {
+                break;
+            }
+            const uint32_t chunk_elems = std::min(vl - elem_idx, page_remain_elems);
+            const uint32_t chunk_bytes = chunk_elems * sizeof(T);
+            simrv::xlen::Address physical_address = 0;
+            simrv::xlen::Byte* host_dst = get_direct_host_memory_for_range(
+                cpu, cur_addr, chunk_bytes, true, &physical_address);
+            if (host_dst == nullptr) {
+                break;
+            }
+            uint32_t chunk_rem = chunk_elems;
+            uint32_t chunk_copied = 0;
+            while (chunk_rem > 0) {
+                const uint32_t cur_elem = elem_idx + chunk_copied;
+                const uint32_t reg_offset = cur_elem / elems_per_reg;
+                const uint32_t in_reg = cur_elem % elems_per_reg;
+                const uint32_t chunk = std::min(chunk_rem, elems_per_reg - in_reg);
                 const auto source_reg =
                     static_cast<simrv::xlen::RegId>((std::to_underlying(vs3) + reg_offset) & 0x1F);
                 const auto& vreg =
                     cpu.state().regs.read_vector(simrv::xlen::to_vec_reg_id(source_reg));
-                std::memcpy(host_dst + byte_offset, &vreg.u8[in_reg * sizeof(T)],
+                std::memcpy(host_dst + chunk_copied * sizeof(T), &vreg.u8[in_reg * sizeof(T)],
                             chunk * sizeof(T));
-                elem_idx += chunk;
-                byte_offset += chunk * sizeof(T);
-                remaining -= chunk;
+                chunk_copied += chunk;
+                chunk_rem -= chunk;
             }
             if (simrv::compiler::unlikely(cpu.machine_ != nullptr &&
                                           mem.reservation_table().may_have_reservations() &&
                                           cpu.machine_->num_harts() > 1)) {
-                mem.reservation_table().invalidate_range(physical_address, total_bytes,
+                mem.reservation_table().invalidate_range(physical_address, chunk_bytes,
                                                          cpu.hart_id());
             }
+            elem_idx += chunk_elems;
+        }
+        if (elem_idx == vl) {
             return;
         }
+        cpu.state().vstart = elem_idx;
     }
 
     const auto& mask_reg =

@@ -295,9 +295,43 @@ void test_decode_cache_compact_round_robin() {
     fld_inst.funct3 = simrv::isa::Funct3::Fld;
     simrv::core::CachedOp fld_op{};
     fld_op.copy_from(fld_inst);
-    expect(fld_op.mem_class == simrv::core::FastMemClass::FpLoad, "FLD classified as FpLoad");
-    expect(fld_op.mem_size == 8, "FLD mem_size is 8");
-    expect(fld_op.align_mask() == 7, "FLD align_mask is 7");
+    expect(load_op.has_fast_mem(), "LW has_fast_mem");
+    expect(load_op.is_straight_mem != 0, "LW is_straight_mem set");
+    expect(store_op.has_fast_mem(), "SD has_fast_mem");
+    expect(!fld_op.has_fast_mem(), "FLD has_fast_mem is false (FP memory)");
+
+    // Test direct branch and sequential pre-linking on insertion
+    simrv::core::DecodeCache prelink_cache;
+    simrv::core::CachedOp target_inst{};
+    target_inst.op_len = 4;
+    prelink_cache.insert(0x80000010, target_inst);
+
+    // Insert backward branch pointing to 0x80000010: target_pc = 0x80000020 + (-16) = 0x80000010
+    simrv::core::CachedOp branch_inst{};
+    branch_inst.branch_kind = simrv::core::BranchKind::Bne;
+    branch_inst.imm = -16;
+    branch_inst.op_len = 4;
+    prelink_cache.insert(0x80000020, branch_inst);
+
+    auto* inserted_branch = prelink_cache.lookup(0x80000020);
+    expect(inserted_branch != nullptr, "branch inserted");
+    expect(inserted_branch->target_idx != simrv::core::kInvalidSeqIndex,
+           "backward branch target is immediately pre-linked on insertion");
+    auto* linked_target = prelink_cache.op_by_index(inserted_branch->target_idx);
+    expect(linked_target != nullptr && linked_target->cpc.raw() == 0x80000010,
+           "pre-linked target resolves to expected PC");
+
+    // Insert sequential predecessor at 0x8000001C (pc + 4 = 0x80000020)
+    simrv::core::CachedOp pred_inst{};
+    pred_inst.op_len = 4;
+    prelink_cache.insert(0x8000001C, pred_inst);
+    auto* inserted_pred = prelink_cache.lookup(0x8000001C);
+    expect(inserted_pred != nullptr, "predecessor inserted");
+    expect(inserted_pred->next_seq_idx != simrv::core::kInvalidSeqIndex,
+           "sequential successor is pre-linked on insertion");
+    auto* linked_seq = prelink_cache.op_by_index(inserted_pred->next_seq_idx);
+    expect(linked_seq != nullptr && linked_seq->cpc.raw() == 0x80000020,
+           "pre-linked sequential successor resolves to expected branch PC");
 }
 
 void test_hosted_rv32_cached_shift_width() {
@@ -832,8 +866,11 @@ void test_csr_summary_and_presence_rules() {
     expect(pmp_csr_exists(0x3A1, 32), "RV32 defines odd-numbered pmpcfg CSRs");
     expect(!pmp_csr_exists(0x3A1, 64), "RV64 reserves odd-numbered pmpcfg CSR addresses");
     expect(pmp_csr_exists(0x3A2, 64), "RV64 defines even-numbered pmpcfg CSRs");
-    expect(simrv::core::is_debug_csr(0x7A0),
-           "debug-only CSR encodings are identified independently of M-mode privilege");
+    expect(
+        simrv::core::is_debug_csr(0x7B0),
+        "debug-only CSR encodings (0x7B0-0x7BF) are identified independently of M-mode privilege");
+    expect(!simrv::core::is_debug_csr(0x7A0),
+           "Sdtrig trigger CSRs (0x7A0-0x7AF) are accessible to M-mode");
 
     const simrv::xlen::CsrValue m_only =
         simrv::core::mstatus_writable_mask(false, false, false, false);
@@ -1390,17 +1427,38 @@ void test_vector_bulk_memory_operations() {
                "page-crossing vle8 falls back seamlessly and transfers correctly");
     }
 
-    // 3. Whole-register load/store bulk test
-    regs.write(base_reg, ram.base() + 0x300);
+    // Cross-page vse8 test: buffer spanning 4096-byte boundary
+    regs.write(base_reg, ram.base() + 0xFF8);
+    simrv::execute::ExecuteUnit::execute_vector(
+        cpu, machine.memory(), simrv::isa::OperationId::VSE8_V, memory_ir(vs, base_reg));
+    for (uint32_t i = 0; i < 16; ++i) {
+        expect(ram.data()[0xFF8 + i] == simrv::xlen::Byte{static_cast<uint8_t>(0x70 + i)},
+               "page-crossing vse8 transfers correctly across 4KB boundary");
+    }
+
+    // 3. Whole-register load/store bulk test (including page-boundary crossing)
+    regs.write(base_reg, ram.base() + 0xFF0);
     for (uint32_t i = 0; i < regs.vlen_bytes(); ++i) {
-        ram.data()[0x300 + i] = simrv::xlen::Byte{static_cast<uint8_t>(0x10 + (i & 0x7F))};
+        ram.data()[0xFF0 + i] = simrv::xlen::Byte{static_cast<uint8_t>(0x10 + (i & 0x7F))};
     }
     simrv::execute::ExecuteUnit::execute_vector(
         cpu, machine.memory(), simrv::isa::OperationId::VL1RE8_V, memory_ir(vd, base_reg));
     for (uint32_t i = 0; i < regs.vlen_bytes(); ++i) {
         expect(regs.read_vector(simrv::xlen::to_vec_reg_id(vd)).u8[i] ==
                    static_cast<uint8_t>(0x10 + (i & 0x7F)),
-               "bulk vl1re8 accurately transfers whole register");
+               "bulk vl1re8 accurately transfers whole register across page boundary");
+    }
+
+    // 4. Unmasked batched arithmetic test (VADD_VV)
+    constexpr auto v_add_ir = static_cast<simrv::xlen::Instruction>(
+        (std::to_underlying(vd) << 15U) | (std::to_underlying(vd) << 7U) |
+        (std::to_underlying(vs) << 20U) | (1U << 25U));
+    simrv::execute::ExecuteUnit::execute_vector(cpu, machine.memory(),
+                                                simrv::isa::OperationId::VADD_VV, v_add_ir);
+    for (uint32_t i = 0; i < 16; ++i) {
+        const uint8_t expected = static_cast<uint8_t>((0x70 + i) + (0x10 + (i & 0x7F)));
+        expect(regs.read_vector(simrv::xlen::to_vec_reg_id(vd)).u8[i] == expected,
+               "batched unmasked vadd_vv produces correct SIMD sums");
     }
 }
 
@@ -3778,11 +3836,79 @@ void test_cache_hierarchy_semantics() {
     expect(!l3.lookup_line(test_addr, read_buf, state), "L3 lookup misses after invalidation");
 }
 
+void test_sdtrig_trigger_registers() {
+    simrv::core::Machine machine;
+    auto& cpu = machine.hart(0);
+    auto& csr = cpu.csr_file;
+
+    // 1. Initial trigger state
+    auto tselect_val = csr.read(csr_addr(simrv::core::Csr::Tselect));
+    expect(tselect_val.has_value() && *tselect_val == 0, "tselect initialized to 0");
+
+    auto tinfo_val = csr.read(csr_addr(simrv::core::Csr::Tinfo));
+    expect(tinfo_val.has_value() && (*tinfo_val & 0x4U) == 0x4U,
+           "tinfo reports mcontrol (type 2) support in bit 2");
+
+    // 2. Select trigger 1 and write tdata1/tdata2
+    auto res_sel = csr.write(csr_addr(simrv::core::Csr::Tselect), 1);
+    expect(res_sel.has_value(), "tselect write succeeded");
+    auto cur_sel = csr.read(csr_addr(simrv::core::Csr::Tselect));
+    expect(cur_sel.has_value() && *cur_sel == 1, "tselect reflects written index 1");
+
+    // Configure mcontrol on trigger 1: type=2, execute=1 (bit 2), m=1 (bit 6), s=1 (bit 4), u=1
+    // (bit 3)
+    const unsigned xlen = cpu.state().regs.xlen;
+    const simrv::xlen::CsrValue type_hdr =
+        static_cast<simrv::xlen::CsrValue>(uint64_t{2} << (xlen == 64 ? 60U : 28U));
+    const simrv::xlen::CsrValue mcontrol_cfg =
+        type_hdr | (1U << 6U) | (1U << 4U) | (1U << 3U) | (1U << 2U);
+    auto res_tdata1 = csr.write(csr_addr(simrv::core::Csr::Tdata1), mcontrol_cfg);
+    expect(res_tdata1.has_value(), "tdata1 write succeeded");
+
+    auto tdata1_read = csr.read(csr_addr(simrv::core::Csr::Tdata1));
+    expect(tdata1_read.has_value() && *tdata1_read == mcontrol_cfg,
+           "tdata1 preserves mcontrol configuration");
+    expect(cpu.state().has_active_triggers, "has_active_triggers flag set after enabling trigger");
+
+    const simrv::xlen::Address target_pc = 0x80001000;
+    auto res_tdata2 = csr.write(csr_addr(simrv::core::Csr::Tdata2), target_pc);
+    expect(res_tdata2.has_value(), "tdata2 write succeeded");
+
+    auto tdata2_read = csr.read(csr_addr(simrv::core::Csr::Tdata2));
+    expect(tdata2_read.has_value() && *tdata2_read == target_pc, "tdata2 preserves match PC");
+
+    // 3. Trigger matching check
+    expect(cpu.check_triggers_pc(target_pc), "check_triggers_pc matches configured trigger PC");
+    expect(!cpu.check_triggers_pc(target_pc + 4), "check_triggers_pc rejects mismatched PC");
+
+    // 4. Privilege check: U-mode / S-mode rejected, M-mode permitted
+    expect(!simrv::core::TrapController::can_access_csr(
+               simrv::xlen::PrivilegeLevel::User, cpu.state().misa,
+               simrv::core::csr_num(simrv::core::Csr::Tselect), false),
+           "User mode access to tselect rejected");
+    expect(!simrv::core::TrapController::can_access_csr(
+               simrv::xlen::PrivilegeLevel::Supervisor, cpu.state().misa,
+               simrv::core::csr_num(simrv::core::Csr::Tselect), false),
+           "Supervisor mode access to tselect rejected");
+    expect(simrv::core::TrapController::can_access_csr(
+               simrv::xlen::PrivilegeLevel::Machine, cpu.state().misa,
+               simrv::core::csr_num(simrv::core::Csr::Tselect), false),
+           "Machine mode access to tselect permitted");
+
+    // 5. Disable trigger 1
+    auto res_dis = csr.write(csr_addr(simrv::core::Csr::Tdata1), 0);
+    expect(res_dis.has_value(), "tdata1 disable succeeded");
+    expect(!cpu.state().has_active_triggers,
+           "has_active_triggers cleared when all triggers disabled");
+    expect(!cpu.check_triggers_pc(target_pc), "disabled trigger does not match");
+}
+
 }  // namespace
 
 int main() {
     test_strong_semantic_types();
     test_cache_hierarchy_semantics();
+    test_sdtrig_trigger_registers();
     test_unaligned_host_access();
     test_decode_cache_compact_round_robin();
     test_hosted_rv32_cached_shift_width();

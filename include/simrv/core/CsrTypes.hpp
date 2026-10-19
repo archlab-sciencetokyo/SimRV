@@ -505,10 +505,10 @@ constexpr auto pmpcfg_legalize(uint8_t value) -> uint8_t {
     return value;
 }
 
-/** Debug CSR encodings are unavailable to ordinary U/S/M execution. */
+/** Debug Mode CSR encodings (0x7B0-0x7BF) are unavailable to ordinary U/S/M execution. */
 constexpr auto is_debug_csr(simrv::xlen::CsrNumber address) -> bool {
     const uint16_t addr = address.value();
-    return addr >= 0x7A0 && addr <= 0x7BF;
+    return addr >= 0x7B0 && addr <= 0x7BF;
 }
 
 /** Apply architectural privilege, presence, and read-only checks to a CSR encoding. */
@@ -633,6 +633,14 @@ enum class Csr : uint16_t {
     Mip = 0x344,
     Mseccfg = 0x747,
     Mseccfgh = 0x757,
+    Tselect = 0x7A0,
+    Tdata1 = 0x7A1,
+    Tdata2 = 0x7A2,
+    Tdata3 = 0x7A3,
+    Tinfo = 0x7A4,
+    Tcontrol = 0x7A5,
+    Mcontext = 0x7A8,
+    Scontext = 0x7AA,
     Mcycle = 0xB00,
     Minstret = 0xB02,
     Mcycleh = 0xB80,
@@ -675,6 +683,15 @@ inline constexpr simrv::xlen::CsrNumber kSatp{0x180};
 inline constexpr simrv::xlen::CsrNumber kFflags{0x001};
 inline constexpr simrv::xlen::CsrNumber kFrm{0x002};
 inline constexpr simrv::xlen::CsrNumber kFcsr{0x003};
+
+inline constexpr simrv::xlen::CsrNumber kTselect{0x7A0};
+inline constexpr simrv::xlen::CsrNumber kTdata1{0x7A1};
+inline constexpr simrv::xlen::CsrNumber kTdata2{0x7A2};
+inline constexpr simrv::xlen::CsrNumber kTdata3{0x7A3};
+inline constexpr simrv::xlen::CsrNumber kTinfo{0x7A4};
+inline constexpr simrv::xlen::CsrNumber kTcontrol{0x7A5};
+inline constexpr simrv::xlen::CsrNumber kMcontext{0x7A8};
+inline constexpr simrv::xlen::CsrNumber kScontext{0x7AA};
 
 inline constexpr simrv::xlen::CsrNumber kCycle{0xC00};
 inline constexpr simrv::xlen::CsrNumber kTime{0xC01};

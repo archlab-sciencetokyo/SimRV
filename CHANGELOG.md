@@ -3,11 +3,24 @@
 All notable changes to SimRV are documented here.
 Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [v3.0.0-rc.11] — unreleased
+## [v3.0.0-rc.12] — unreleased
+
+- Intra-chunk direct branch pre-linking in DecodeCache.
+- Contiguous DRAM memory chaining in fast execution kernels.
+- Multi-page unit-stride vector memory transfer chunking.
+- Contiguous unmasked vector integer SIMD batching.
+- Standard RISC-V Sdtrig extension (`tselect`, `tdata1`, `tdata2`, `tdata3`, `tinfo`) hardware triggers.
+- TUI pipeline flight flow inspector view.
+
+## [v3.0.0-rc.11] — 2026-10-19
 
 - Direct Soft TLB host-page fast-path translation and redundant PMP bypass.
 - PCIe MSI and MSI-X message-signaled interrupt capability and routing to AIA.
 - Basic-block straight-line instruction chaining in instruction-fast mode.
+- Cycle-accurate pipeline kernels and register scoreboard hazard detection optimization.
+- Multi-threaded SMP zero-syscall steady-state barrier synchronization with cacheline-isolated atomics.
+- Unified SMP concurrency architecture (`SingleThreaded` / `MultiThreaded`) and removal of obsolete CLI flags.
+- Deterministic platform timing clock divider calculation.
 
 ## [v3.0.0-rc.10] — 2026-10-15
 
