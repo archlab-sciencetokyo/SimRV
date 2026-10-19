@@ -6,6 +6,7 @@
 
 #include "simrv/CompilerHints.hpp"
 #include "simrv/cache/BaseCache.hpp"
+#include "simrv/cache/DataPrefetcher.hpp"
 #include "simrv/isa/InstructionFields.hpp"
 #include "simrv/memory/MemoryUtil.hpp"
 #include "simrv/xlen/ScalarTypes.hpp"
@@ -31,12 +32,19 @@ class DCache : public BaseCache<1024, 32, 8> {
         return write(addr, data, static_cast<simrv::xlen::Instruction>(funct3), out_first_write);
     }
 
+    [[nodiscard]] auto prefetcher() noexcept -> DataPrefetcher& { return prefetcher_; }
+    [[nodiscard]] auto prefetcher() const noexcept -> const DataPrefetcher& { return prefetcher_; }
+
     auto handle_probe(const simrv::memory::TlChannelB& req, simrv::memory::TlChannelC& resp,
                       std::array<simrv::xlen::Byte, kLineBytes>& dirty_data) -> bool;
+
+   private:
+    DataPrefetcher prefetcher_{};
 };
 
 inline auto DCache::read(simrv::xlen::Address addr, simrv::xlen::Word& data,
                          simrv::xlen::Instruction funct3) -> bool {
+    (void)prefetcher_.observe(addr, kLineBytes);
     const uint32_t set_idx = get_set_index(addr);
     const simrv::xlen::Address tag = get_tag(addr);
     const unsigned size_bytes = 1u << (funct3 & 0x3u);
@@ -56,6 +64,11 @@ inline auto DCache::read(simrv::xlen::Address addr, simrv::xlen::Word& data,
         std::memcpy(&raw, cache_line->data.data() + byte_offset, size_bytes);
         data = simrv::memory::extend_loaded_value(raw, static_cast<uint8_t>(funct3));
 
+        if (simrv::compiler::unlikely(cache_line->is_prefetched)) {
+            prefetcher_.record_prefetch_hit();
+            cache_line->is_prefetched = false;
+        }
+
         cache_line->last_used = ++access_tick_;
         ++hits_;
         last_access_was_hit_ = true;
@@ -70,6 +83,7 @@ inline auto DCache::read(simrv::xlen::Address addr, simrv::xlen::Word& data,
 
 inline auto DCache::write(simrv::xlen::Address addr, simrv::xlen::Word data,
                           simrv::xlen::Instruction funct3, bool* out_first_write) -> bool {
+    (void)prefetcher_.observe(addr, kLineBytes);
     const unsigned size_bytes = 1u << (funct3 & 0x3u);
     const uint32_t byte_offset = addr & (kLineBytes - 1u);
 

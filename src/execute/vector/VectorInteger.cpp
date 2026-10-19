@@ -453,9 +453,33 @@ template <typename T_dest, typename T_src>
 void execute_vwredsum_vs(core::CPU& cpu, simrv::xlen::RegId rd, simrv::xlen::RegId rs1,
                          simrv::xlen::RegId rs2, bool vm, uint32_t vl) {
     if (vl == 0) return;
+    auto sum = vector::get_group_element<T_dest>(cpu.state().regs, rs1, 0);
+
+    // Contiguous unmasked SIMD batch reduction
+    if (vm && cpu.state().vstart == 0) {
+        const uint32_t elems_per_reg =
+            static_cast<uint32_t>(cpu.state().regs.vlen_bytes() / sizeof(T_src));
+        uint32_t remaining = vl;
+        uint32_t reg_idx = 0;
+        while (remaining > 0) {
+            const uint32_t count = std::min(remaining, elems_per_reg);
+            const auto cur_reg_id =
+                static_cast<simrv::xlen::RegId>(static_cast<uint32_t>(rs2) + reg_idx);
+            const auto& cur_reg =
+                cpu.state().regs.read_vector(simrv::xlen::to_vec_reg_id(cur_reg_id));
+            const auto* src_ptr = reinterpret_cast<const T_src*>(cur_reg.u8.data());
+            for (uint32_t j = 0; j < count; ++j) {
+                sum += static_cast<T_dest>(src_ptr[j]);
+            }
+            remaining -= count;
+            reg_idx++;
+        }
+        vector::set_group_element<T_dest>(cpu.state().regs, rd, 0, sum);
+        return;
+    }
+
     const auto& mask_reg =
         cpu.state().regs.read_vector(simrv::xlen::to_vec_reg_id(simrv::xlen::RegId::Zero));
-    auto sum = vector::get_group_element<T_dest>(cpu.state().regs, rs1, 0);
     for (auto i = static_cast<uint32_t>(cpu.state().vstart); i < vl; i++) {
         if (!vector::is_element_active(mask_reg, i, vm)) continue;
         auto val2 = vector::get_group_element<T_src>(cpu.state().regs, rs2, i);
@@ -470,6 +494,30 @@ void execute_vred_vs(core::CPU& cpu, simrv::xlen::RegId rd, simrv::xlen::RegId r
                      simrv::xlen::RegId rs2, bool vm, uint32_t vl, Op op) {
     if (vl == 0) return;
     T result = vector::get_group_element<T>(cpu.state().regs, rs1, 0);
+
+    // Contiguous unmasked SIMD batch reduction
+    if (vm && cpu.state().vstart == 0) {
+        const uint32_t elems_per_reg =
+            static_cast<uint32_t>(cpu.state().regs.vlen_bytes() / sizeof(T));
+        uint32_t remaining = vl;
+        uint32_t reg_idx = 0;
+        while (remaining > 0) {
+            const uint32_t count = std::min(remaining, elems_per_reg);
+            const auto cur_reg_id =
+                static_cast<simrv::xlen::RegId>(static_cast<uint32_t>(rs2) + reg_idx);
+            const auto& cur_reg =
+                cpu.state().regs.read_vector(simrv::xlen::to_vec_reg_id(cur_reg_id));
+            const auto* src_ptr = reinterpret_cast<const T*>(cur_reg.u8.data());
+            for (uint32_t j = 0; j < count; ++j) {
+                result = op(result, src_ptr[j]);
+            }
+            remaining -= count;
+            reg_idx++;
+        }
+        vector::set_group_element<T>(cpu.state().regs, rd, 0, result);
+        return;
+    }
+
     const auto& mask_reg =
         cpu.state().regs.read_vector(simrv::xlen::to_vec_reg_id(simrv::xlen::RegId::Zero));
     for (auto i = static_cast<uint32_t>(cpu.state().vstart); i < vl; i++) {

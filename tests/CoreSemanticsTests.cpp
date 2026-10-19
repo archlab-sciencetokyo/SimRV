@@ -1460,6 +1460,62 @@ void test_vector_bulk_memory_operations() {
         expect(regs.read_vector(simrv::xlen::to_vec_reg_id(vd)).u8[i] == expected,
                "batched unmasked vadd_vv produces correct SIMD sums");
     }
+
+    // 5. Strided fast-path memory operations (vlse8 / vsse8)
+    constexpr auto stride_reg = static_cast<simrv::xlen::RegId>(11);
+    regs.write(stride_reg, 2);  // Stride of 2 bytes
+    regs.write(base_reg, ram.base() + 0x300);
+    for (uint32_t i = 0; i < 32; ++i) {
+        ram.data()[0x300 + i] = simrv::xlen::Byte{static_cast<uint8_t>(0xC0 + i)};
+    }
+    const auto strided_ir = [](simrv::xlen::RegId vector_reg, simrv::xlen::RegId rs1,
+                               simrv::xlen::RegId rs2) {
+        return static_cast<simrv::xlen::Instruction>(
+            (std::to_underlying(rs2) << 20U) | (std::to_underlying(rs1) << 15U) |
+            (std::to_underlying(vector_reg) << 7U) | (1U << 25U));
+    };
+    cpu.state().vl = 8;
+    cpu.state().vstart = 0;
+    simrv::execute::ExecuteUnit::execute_vector(cpu, machine.memory(),
+                                                simrv::isa::OperationId::VLSE8_V,
+                                                strided_ir(vd, base_reg, stride_reg));
+    for (uint32_t i = 0; i < 8; ++i) {
+        expect(regs.read_vector(simrv::xlen::to_vec_reg_id(vd)).u8[i] ==
+                   static_cast<uint8_t>(0xC0 + i * 2),
+               "strided vlse8 transfers elements using direct DRAM fast-path");
+    }
+
+    // Modify and write back with vsse8
+    for (uint32_t i = 0; i < 8; ++i) {
+        regs.read_vector(simrv::xlen::to_vec_reg_id(vd)).u8[i] = static_cast<uint8_t>(0x30 + i);
+    }
+    regs.write(base_reg, ram.base() + 0x400);
+    simrv::execute::ExecuteUnit::execute_vector(cpu, machine.memory(),
+                                                simrv::isa::OperationId::VSSE8_V,
+                                                strided_ir(vd, base_reg, stride_reg));
+    for (uint32_t i = 0; i < 8; ++i) {
+        expect(ram.data()[0x400 + i * 2] == simrv::xlen::Byte{static_cast<uint8_t>(0x30 + i)},
+               "strided vsse8 stores elements using direct DRAM fast-path");
+    }
+
+    // 6. Vector unmasked batch reduction (VREDSUM_VS)
+    constexpr auto v_red_ir = static_cast<simrv::xlen::Instruction>(
+        (std::to_underlying(vd) << 15U) | (std::to_underlying(vd) << 7U) |
+        (std::to_underlying(vs) << 20U) | (1U << 25U));
+    // Initial accumulator vs1[0] = 10
+    regs.read_vector(simrv::xlen::to_vec_reg_id(vd)).u8[0] = 10;
+    cpu.state().vl = 8;
+    cpu.state().vstart = 0;
+    // Elements of vs: 0x70, 0x71, ..., 0x77
+    uint32_t expected_sum = 10;
+    for (uint32_t i = 0; i < 8; ++i) {
+        expected_sum += static_cast<uint8_t>(0x70 + i);
+    }
+    simrv::execute::ExecuteUnit::execute_vector(cpu, machine.memory(),
+                                                simrv::isa::OperationId::VREDSUM_VS, v_red_ir);
+    expect(regs.read_vector(simrv::xlen::to_vec_reg_id(vd)).u8[0] ==
+               static_cast<uint8_t>(expected_sum),
+           "unmasked vredsum_vs computes accurate reduction sum via SIMD fast-path");
 }
 
 void test_vector_integer_remainder_and_reverse_subtract() {
@@ -3834,6 +3890,27 @@ void test_cache_hierarchy_semantics() {
 
     l3.invalidate_line(test_addr);
     expect(!l3.lookup_line(test_addr, read_buf, state), "L3 lookup misses after invalidation");
+
+    // Test Hardware Data Prefetcher in DCache
+    simrv::cache::DCache dcache{};
+    auto& pf = dcache.prefetcher();
+    expect(pf.is_enabled(), "DataPrefetcher is enabled by default");
+    expect(pf.prefetches_issued() == 0, "Initial prefetches issued count is 0");
+
+    // Simulate sequential stride of 32 bytes (cache line size)
+    auto pred1 = pf.observe(0x80001000, 32);
+    expect(!pred1.has_value(), "First access establishes initial stream entry without prediction");
+
+    auto pred2 = pf.observe(0x80001020, 32);
+    expect(!pred2.has_value(), "Second access trains stride to +32 bytes");
+
+    auto pred3 = pf.observe(0x80001040, 32);
+    expect(pred3.has_value() && *pred3 == 0x80001060,
+           "Third access meets confidence threshold and predicts next line (0x80001060)");
+    expect(pf.prefetches_issued() == 1, "Prefetch counter incremented on prediction");
+
+    pf.record_prefetch_hit();
+    expect(pf.prefetch_hits() == 1, "Prefetch hit recorded accurately");
 }
 
 void test_sdtrig_trigger_registers() {
@@ -3903,12 +3980,69 @@ void test_sdtrig_trigger_registers() {
     expect(!cpu.check_triggers_pc(target_pc), "disabled trigger does not match");
 }
 
+void test_sdtrig_memory_watchpoints() {
+    simrv::core::Machine machine;
+    auto& cpu = machine.hart(0);
+    auto& csr = cpu.csr_file;
+    const unsigned xlen = cpu.state().regs.xlen;
+
+    // 1. Configure trigger 2 as a store watchpoint at 0x80002000
+    auto res_sel = csr.write(csr_addr(simrv::core::Csr::Tselect), 2);
+    expect(res_sel.has_value(), "tselect write to 2 succeeded");
+
+    // store=1 (bit 1), load=0 (bit 0), m=1 (bit 6), s=1 (bit 4), u=1 (bit 3)
+    const simrv::xlen::CsrValue type_hdr =
+        static_cast<simrv::xlen::CsrValue>(uint64_t{2} << (xlen == 64 ? 60U : 28U));
+    const simrv::xlen::CsrValue store_cfg =
+        type_hdr | (1U << 6U) | (1U << 4U) | (1U << 3U) | (1U << 1U);
+    auto res_tdata1 = csr.write(csr_addr(simrv::core::Csr::Tdata1), store_cfg);
+    expect(res_tdata1.has_value(), "tdata1 store watchpoint write succeeded");
+
+    const simrv::xlen::Address watch_addr = 0x80002000;
+    auto res_tdata2 = csr.write(csr_addr(simrv::core::Csr::Tdata2), watch_addr);
+    expect(res_tdata2.has_value(), "tdata2 watch address write succeeded");
+    expect(cpu.state().has_active_triggers, "has_active_triggers is true for store watchpoint");
+
+    // 2. Validate store vs load matching
+    expect(cpu.check_triggers_mem(watch_addr, 4, true), "store watchpoint matches exact write");
+    expect(!cpu.check_triggers_mem(watch_addr, 4, false), "store watchpoint rejects read access");
+    expect(!cpu.check_triggers_mem(watch_addr + 8, 4, true),
+           "store watchpoint rejects disjoint write address");
+    expect(cpu.check_triggers_mem(watch_addr - 2, 4, true),
+           "store watchpoint matches overlapping write access");
+
+    // 3. Configure trigger 3 as a load-only watchpoint at 0x80003000 (M-mode only)
+    (void)csr.write(csr_addr(simrv::core::Csr::Tselect), 3);
+    const simrv::xlen::CsrValue load_cfg = type_hdr | (1U << 6U) | (1U << 0U);  // m=1, load=1
+    (void)csr.write(csr_addr(simrv::core::Csr::Tdata1), load_cfg);
+    const simrv::xlen::Address load_addr = 0x80003000;
+    (void)csr.write(csr_addr(simrv::core::Csr::Tdata2), load_addr);
+
+    expect(cpu.check_triggers_mem(load_addr, 4, false),
+           "load watchpoint matches read access in M-mode");
+    expect(!cpu.check_triggers_mem(load_addr, 4, true), "load watchpoint rejects write access");
+
+    // Privilege check: switch to U-mode
+    cpu.state().priv = simrv::xlen::PrivilegeLevel::User;
+    expect(!cpu.check_triggers_mem(load_addr, 4, false),
+           "M-mode-only load watchpoint is ignored in User mode");
+    cpu.state().priv = simrv::xlen::PrivilegeLevel::Machine;
+
+    // 4. Clean up triggers
+    (void)csr.write(csr_addr(simrv::core::Csr::Tselect), 2);
+    (void)csr.write(csr_addr(simrv::core::Csr::Tdata1), 0);
+    (void)csr.write(csr_addr(simrv::core::Csr::Tselect), 3);
+    (void)csr.write(csr_addr(simrv::core::Csr::Tdata1), 0);
+    expect(!cpu.state().has_active_triggers, "has_active_triggers cleared after cleaning up");
+}
+
 }  // namespace
 
 int main() {
     test_strong_semantic_types();
     test_cache_hierarchy_semantics();
     test_sdtrig_trigger_registers();
+    test_sdtrig_memory_watchpoints();
     test_unaligned_host_access();
     test_decode_cache_compact_round_robin();
     test_hosted_rv32_cached_shift_width();

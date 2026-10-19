@@ -3,7 +3,16 @@
 All notable changes to SimRV are documented here.
 Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [v3.0.0-rc.12] — unreleased
+## [v3.0.0-rc.13] — unreleased
+
+- Standard RISC-V Sdtrig extension hardware watchpoints (`check_triggers_mem`) for load and store data access matching.
+- TUI hardware trigger management and status integration in BreakpointModal.
+- RVV 1.0 single-page strided vector memory fast-paths (`vlse` / `vsse`).
+- Host-vectorized SIMD reduction trees for vector integer operations (`vredsum`, `vredmax`, `vredmin`).
+- Microarchitecture L1/L2 hardware data stream/stride prefetcher for detailed and cycle-accurate pipeline modes.
+- TUI `vtype`-aware dynamic vector register file grid inspector with active versus tail element differentiation.
+
+## [v3.0.0-rc.12] — 2026-10-19
 
 - Intra-chunk direct branch pre-linking in DecodeCache.
 - Contiguous DRAM memory chaining in fast execution kernels.

@@ -460,6 +460,39 @@ class CPU {
     }
 
     /**
+     * @brief Checks if a memory access range matches any active Sdtrig load/store trigger.
+     */
+    [[nodiscard]] SIMRV_ALWAYS_INLINE auto check_triggers_mem(simrv::xlen::Address addr,
+                                                              uint32_t size,
+                                                              bool is_write) const noexcept
+        -> bool {
+        if (!state_.has_active_triggers) return false;
+        const unsigned xlen = state_.regs.xlen;
+        const uint32_t span = (size > 0) ? size : 1u;
+        for (size_t i = 0; i < ArchState::kNumTriggers; ++i) {
+            const auto t1 = state_.tdata1[i];
+            if (t1 == 0) continue;
+            const auto type = (static_cast<uint64_t>(t1) >> (xlen == 64 ? 60U : 28U)) & 0xFU;
+            if (type != 2) continue;
+            if ((t1 & (1U << 19U)) != 0) continue;  // select=1 matches data, not address
+            if (is_write) {
+                if ((t1 & (1U << 1U)) == 0) continue;  // store not enabled
+            } else {
+                if ((t1 & (1U << 0U)) == 0) continue;  // load not enabled
+            }
+            const bool m = (t1 & (1U << 6U)) != 0;
+            const bool s = (t1 & (1U << 4U)) != 0;
+            const bool u = (t1 & (1U << 3U)) != 0;
+            if (state_.priv == simrv::xlen::PrivilegeLevel::Machine && !m) continue;
+            if (state_.priv == simrv::xlen::PrivilegeLevel::Supervisor && !s) continue;
+            if (state_.priv == simrv::xlen::PrivilegeLevel::User && !u) continue;
+            const simrv::xlen::Address t2 = state_.tdata2[i];
+            if (addr <= t2 && t2 < addr + span) return true;
+        }
+        return false;
+    }
+
+    /**
      * @brief Handles execution return from a machine-mode trap (MRET instruction).
      * Restores privilege level and interrupt enable bits from `mstatus`.
      */

@@ -98,10 +98,40 @@ auto BreakpointModal::submit(ModalType type, const std::string& input,
     return false;
 }
 
+struct ActiveTriggerInfo {
+    size_t index{};
+    bool is_execute{};
+    bool is_load{};
+    bool is_store{};
+    simrv::xlen::Address addr{};
+};
+
+auto get_active_triggers(const simrv::core::Machine& machine) -> std::vector<ActiveTriggerInfo> {
+    std::vector<ActiveTriggerInfo> trigs;
+    const auto& state = machine.primary_hart().state();
+    if (!state.has_active_triggers) return trigs;
+    const unsigned xlen = state.regs.xlen;
+    for (size_t i = 0; i < simrv::core::ArchState::kNumTriggers; ++i) {
+        const auto t1 = state.tdata1[i];
+        if (t1 == 0) continue;
+        const auto type = (static_cast<uint64_t>(t1) >> (xlen == 64 ? 60U : 28U)) & 0xFU;
+        if (type != 2) continue;
+        ActiveTriggerInfo info;
+        info.index = i;
+        info.is_execute = (t1 & (1U << 2U)) != 0;
+        info.is_store = (t1 & (1U << 1U)) != 0;
+        info.is_load = (t1 & (1U << 0U)) != 0;
+        info.addr = state.tdata2[i];
+        trigs.push_back(info);
+    }
+    return trigs;
+}
+
 void BreakpointModal::move_cursor(int& cursor, int delta, const simrv::core::Machine& machine) {
     const auto& pc_bps = machine.breakpoint_manager().get_pc_breakpoints();
     const auto& wps = machine.breakpoint_manager().get_watchpoints();
-    int count = static_cast<int>(pc_bps.size() + wps.size());
+    const auto trigs = get_active_triggers(machine);
+    int count = static_cast<int>(pc_bps.size() + wps.size() + trigs.size());
     if (count == 0) {
         cursor = 0;
         return;
@@ -114,7 +144,8 @@ auto BreakpointModal::remove_at_cursor(
     const std::function<void(const std::string&)>& set_status_override_cb) -> bool {
     const auto& pc_bps = machine.breakpoint_manager().get_pc_breakpoints();
     const auto& wps = machine.breakpoint_manager().get_watchpoints();
-    int total = static_cast<int>(pc_bps.size() + wps.size());
+    const auto trigs = get_active_triggers(machine);
+    int total = static_cast<int>(pc_bps.size() + wps.size() + trigs.size());
     if (total == 0 || cursor < 0 || cursor >= total) return false;
 
     if (cursor < static_cast<int>(pc_bps.size())) {
@@ -124,7 +155,7 @@ auto BreakpointModal::remove_at_cursor(
         if (set_status_override_cb) {
             set_status_override_cb(std::format("Removed breakpoint at 0x{:08x}", pc));
         }
-    } else {
+    } else if (cursor < static_cast<int>(pc_bps.size() + wps.size())) {
         auto wp_idx = static_cast<std::size_t>(cursor - static_cast<int>(pc_bps.size()));
         const auto& wp = wps[wp_idx];
         std::string name = (wp.target == simrv::debug::WatchTarget::Memory)
@@ -134,10 +165,20 @@ auto BreakpointModal::remove_at_cursor(
         if (set_status_override_cb) {
             set_status_override_cb(std::format("Removed watchpoint on {}", name));
         }
+    } else {
+        auto trig_idx =
+            static_cast<std::size_t>(cursor - static_cast<int>(pc_bps.size() + wps.size()));
+        const auto& trig = trigs[trig_idx];
+        machine.primary_hart().state().tdata1[trig.index] = 0;
+        machine.primary_hart().state().refresh_trigger_status();
+        if (set_status_override_cb) {
+            set_status_override_cb(std::format("Disabled hardware trigger #{}", trig.index));
+        }
     }
     const auto& new_pc_bps = machine.breakpoint_manager().get_pc_breakpoints();
     const auto& new_wps = machine.breakpoint_manager().get_watchpoints();
-    int new_total = static_cast<int>(new_pc_bps.size() + new_wps.size());
+    const auto new_trigs = get_active_triggers(machine);
+    int new_total = static_cast<int>(new_pc_bps.size() + new_wps.size() + new_trigs.size());
     if (new_total == 0) {
         cursor = 0;
     } else if (cursor >= new_total) {
@@ -174,11 +215,13 @@ void BreakpointModal::render(ModalType type, std::vector<std::string>& content_r
         if (!machine) return;
         const auto& pc_bps = machine->breakpoint_manager().get_pc_breakpoints();
         const auto& wps = machine->breakpoint_manager().get_watchpoints();
+        const auto trigs = get_active_triggers(*machine);
 
         int item_idx = 0;
-        if (pc_bps.empty() && wps.empty()) {
+        if (pc_bps.empty() && wps.empty() && trigs.empty()) {
             content_rows.push_back(
-                std::format("  {}No active breakpoints or watchpoints.\033[0m", kThemeMuted));
+                std::format("  {}No active breakpoints, watchpoints, or hardware triggers.\033[0m",
+                            kThemeMuted));
         } else {
             for (auto pc : pc_bps) {
                 bool is_sel = (item_idx == bp_cursor);
@@ -201,6 +244,18 @@ void BreakpointModal::render(ModalType type, std::vector<std::string>& content_r
                     content_rows.push_back(std::format(
                         "{}Register Watchpoint on \033[1;35m{}\033[0m", prefix, wp.reg_name));
                 }
+                item_idx++;
+            }
+            for (const auto& trig : trigs) {
+                if (item_idx >= 9) break;
+                bool is_sel = (item_idx == bp_cursor);
+                std::string prefix = is_sel ? std::format("{}>\033[0m ", kThemeMint) : "  ";
+                std::string kind = trig.is_execute ? "PC Match"
+                                   : (trig.is_load && trig.is_store)
+                                       ? "RW Watch"
+                                       : (trig.is_store ? "Write Watch" : "Read Watch");
+                content_rows.push_back(std::format("{}Sdtrig #{} [{}]: \033[1;36m0x{:08x}\033[0m",
+                                                   prefix, trig.index, kind, trig.addr));
                 item_idx++;
             }
         }

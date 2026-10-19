@@ -46,7 +46,8 @@ class BaseCache {
         bool valid = false;               ///< Cache line validity bit (1 byte, offset 16)
         simrv::memory::MesiState state =
             simrv::memory::MesiState::Invalid;  ///< MESI state (offset 17)
-        std::array<uint8_t, 14> padding{};      ///< Explicit padding (offset 18..32)
+        bool is_prefetched = false;             ///< Prefetched line indicator (1 byte, offset 18)
+        std::array<uint8_t, 13> padding{};      ///< Explicit padding (offset 19..32)
         alignas(16)
             std::array<simrv::xlen::Byte, kLineBytes> data{};  ///< 16-byte aligned payload buffer
                                                                ///< (32 bytes, offset 32..64)
