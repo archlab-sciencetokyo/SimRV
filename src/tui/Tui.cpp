@@ -43,7 +43,9 @@
 #include "simrv/tui/TuiKeybindings.hpp"
 #include "simrv/tui/TuiLayoutPolicy.hpp"
 #include "simrv/tui/TuiTheme.hpp"
+#include "simrv/tui/modals/HartModal.hpp"
 #include "simrv/tui/modals/LoadModal.hpp"
+#include "simrv/tui/modals/MemoryModal.hpp"
 #include "simrv/tui/modals/ToolPickerModal.hpp"
 #include "simrv/tui/panels/InspectorPane.hpp"
 #include "simrv/tui/panels/StatusBar.hpp"
@@ -3597,6 +3599,115 @@ auto Tui::handle_modal_keyboard_input(uint8_t byte, TuiKey key) -> bool {
         return true;
     }
 
+    if (mtype == ModalType::SwitchHart) {
+        if (byte == 27 || key == simrv::tui::TuiKey::Esc || byte == 'q' || byte == 'Q') {
+            close_modal();
+            return true;
+        }
+        if (key == simrv::tui::TuiKey::Enter || key == simrv::tui::TuiKey::Newline || byte == ' ') {
+            submit_modal();
+            return true;
+        }
+        if (byte >= '0' && byte <= '9') {
+            size_t const hart_idx = static_cast<size_t>(byte - '0');
+            if (hart_idx < machine_.num_harts()) {
+                selected_hart_ = hart_idx;
+                if (inspector_pane_) {
+                    inspector_pane_->set_selected_hart(selected_hart_);
+                    inspector_pane_->update_cache();
+                }
+                set_status_override(
+                    std::format("Active telemetry switched to Hart {}", selected_hart_));
+                close_modal();
+                render(true);
+                return true;
+            }
+        }
+        if (byte == 'j' || byte == 'J') {
+            modal_.move_hart_cursor(1);
+            render(true);
+            return true;
+        }
+        if (byte == 'k' || byte == 'K') {
+            modal_.move_hart_cursor(-1);
+            render(true);
+            return true;
+        }
+        return true;
+    }
+
+    if (mtype == ModalType::MemoryDump) {
+        auto in_mode = modals::MemoryModal::input_mode();
+        if (in_mode == modals::MemoryModal::InputMode::GotoAddress ||
+            in_mode == modals::MemoryModal::InputMode::EditByte) {
+            if (byte == 27 || key == simrv::tui::TuiKey::Esc) {
+                modals::MemoryModal::set_input_mode(modals::MemoryModal::InputMode::Normal);
+                modal_.set_input("");
+                render(true);
+                return true;
+            }
+            if (key == simrv::tui::TuiKey::Enter || key == simrv::tui::TuiKey::Newline) {
+                submit_modal();
+                render(true);
+                return true;
+            }
+            if (byte == 8 || byte == 127 || key == simrv::tui::TuiKey::Backspace) {
+                modal_.pop_char();
+                render(true);
+                return true;
+            }
+            if (byte >= 32 && byte <= 126) {
+                modal_.push_char(static_cast<char>(byte));
+                render(true);
+                return true;
+            }
+            return true;
+        }
+
+        if (byte == 27 || key == simrv::tui::TuiKey::Esc || byte == 'q' || byte == 'Q') {
+            close_modal();
+            return true;
+        }
+        if (byte == 'v' || byte == 'V') {
+            modal_.toggle_memory_mode();
+            render(true);
+            return true;
+        }
+        if (byte == 'g' || byte == 'G') {
+            modals::MemoryModal::set_input_mode(modals::MemoryModal::InputMode::GotoAddress);
+            modal_.set_input("");
+            render(true);
+            return true;
+        }
+        if (byte == 'e' || byte == 'E') {
+            modals::MemoryModal::set_input_mode(modals::MemoryModal::InputMode::EditByte);
+            modal_.set_input("");
+            render(true);
+            return true;
+        }
+        if (byte == 'h' || byte == 'H') {
+            modal_.move_memory_cursor(-1, 0);
+            render(true);
+            return true;
+        }
+        if (byte == 'l' || byte == 'L') {
+            modal_.move_memory_cursor(1, 0);
+            render(true);
+            return true;
+        }
+        if (byte == 'j' || byte == 'J') {
+            modal_.move_memory_cursor(0, 1);
+            render(true);
+            return true;
+        }
+        if (byte == 'k' || byte == 'K') {
+            modal_.move_memory_cursor(0, -1);
+            render(true);
+            return true;
+        }
+        return true;
+    }
+
     if (key == simrv::tui::TuiKey::F10) {
         machine_.request_exit();
         close_modal();
@@ -3652,6 +3763,10 @@ auto Tui::handle_debug_keyboard_input(TuiKey key) -> bool {
         case simrv::tui::TuiKey::i:
         case simrv::tui::TuiKey::I:
             open_modal(ModalType::InspectAddress);
+            break;
+        case simrv::tui::TuiKey::d:
+        case simrv::tui::TuiKey::D:
+            open_modal(ModalType::MemoryDump);
             break;
         case simrv::tui::TuiKey::m:
         case simrv::tui::TuiKey::M:
@@ -3837,7 +3952,11 @@ auto Tui::handle_navigation_keyboard_input(uint8_t byte, TuiKey key) -> bool {
             return true;
         case simrv::tui::TuiKey::n:
         case simrv::tui::TuiKey::N:
-            select_next_hart();
+            if (machine_.num_harts() > 1) {
+                open_modal(ModalType::SwitchHart);
+            } else {
+                select_next_hart();
+            }
             return true;
         case simrv::tui::TuiKey::CtrlW:
             open_tool_picker(focused_slot_index_);
@@ -4257,7 +4376,7 @@ void Tui::execute_footer_action(TuiFooterAction action) {
             open_modal(ModalType::SetSpeed);
             break;
         case TuiFooterAction::InspectMem:
-            open_modal(ModalType::InspectAddress);
+            open_modal(ModalType::MemoryDump);
             break;
         case TuiFooterAction::LoadBinary:
             open_modal(ModalType::LoadBinary);
@@ -4278,7 +4397,11 @@ void Tui::execute_footer_action(TuiFooterAction action) {
             open_modal(ModalType::ManageBreakpoints);
             break;
         case TuiFooterAction::SwitchHart:
-            select_next_hart();
+            if (machine_.num_harts() > 1) {
+                open_modal(ModalType::SwitchHart);
+            } else {
+                select_next_hart();
+            }
             break;
         case TuiFooterAction::ToggleTheme:
             cycle_theme_style();
@@ -4472,6 +4595,16 @@ auto Tui::handle_arrow_key_sequence() -> bool {
             render(true);
             return true;
         }
+        if (get_active_modal() == ModalType::MemoryDump) {
+            modal_.move_memory_cursor(0, direction);
+            render(true);
+            return true;
+        }
+        if (get_active_modal() == ModalType::SwitchHart) {
+            modal_.move_hart_cursor(direction);
+            render(true);
+            return true;
+        }
         if (paused_ && inspector_pane_) {
             auto page = focused_page();
             if (page == TuiRegPage::CACHE) {
@@ -4500,6 +4633,11 @@ auto Tui::handle_arrow_key_sequence() -> bool {
         }
         if (get_active_modal() == ModalType::Settings) {
             modal_.adjust_setting_at_cursor(direction);
+            render(true);
+            return true;
+        }
+        if (get_active_modal() == ModalType::MemoryDump) {
+            modal_.move_memory_cursor(direction, 0);
             render(true);
             return true;
         }
@@ -4533,6 +4671,11 @@ auto Tui::handle_arrow_key_sequence() -> bool {
             render(true);
             return true;
         }
+        if (get_active_modal() == ModalType::MemoryDump) {
+            modal_.scroll_memory_page(-1);
+            render(true);
+            return true;
+        }
         if (focused_page() == TuiRegPage::CONSOLE) {
             scroll(-10);
         } else {
@@ -4547,6 +4690,11 @@ auto Tui::handle_arrow_key_sequence() -> bool {
         }
         if (get_active_modal() == ModalType::Glossary) {
             modal_.scroll_glossary_content(5);
+            render(true);
+            return true;
+        }
+        if (get_active_modal() == ModalType::MemoryDump) {
+            modal_.scroll_memory_page(1);
             render(true);
             return true;
         }

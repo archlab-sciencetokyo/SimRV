@@ -35,8 +35,10 @@
 #include "simrv/tui/framework/Layout.hpp"
 #include "simrv/tui/modals/AddressModal.hpp"
 #include "simrv/tui/modals/GlossaryModal.hpp"
+#include "simrv/tui/modals/HartModal.hpp"
 #include "simrv/tui/modals/HelpModal.hpp"
 #include "simrv/tui/modals/LoadModal.hpp"
+#include "simrv/tui/modals/MemoryModal.hpp"
 #include "simrv/tui/modals/ModalComponents.hpp"
 #include "simrv/tui/modals/SettingsModal.hpp"
 #include "simrv/tui/modals/SystemConfigModal.hpp"
@@ -3567,6 +3569,102 @@ void test_sixel_display_resolution_adaptation_and_size_warning() {
            "1500x1000 space for 640x480 guest uses exact 2x scale (1280x960)");
 }
 
+void test_memory_modal_and_hart_modal() {
+    using namespace simrv::tui::modals;
+
+    simrv::core::Machine machine;
+    std::vector<simrv::xlen::Byte> ram(64 * 1024, simrv::xlen::Byte{0});
+    machine.set_ram_for_testing(ram);
+    machine.memory().initialize_mmu();
+
+    // Populate some known test bytes in RAM
+    ram[0x1000] = simrv::xlen::Byte{0xAB};
+    ram[0x1001] = simrv::xlen::Byte{0xCD};
+    ram[0x1002] = simrv::xlen::Byte{0xEF};
+    ram[0x1003] = simrv::xlen::Byte{0x12};
+
+    // 1. Test MemoryModal navigation and inspection
+    const simrv::xlen::Address start_addr = simrv::memory::kDramBaseAddress + 0x1000;
+    MemoryModal::open(start_addr, machine, nullptr);
+    expect(MemoryModal::current_address() == start_addr, "MemoryModal opens at target address");
+    expect(MemoryModal::input_mode() == MemoryModal::InputMode::Normal,
+           "MemoryModal starts in Normal mode");
+
+    // Move cursor within row
+    MemoryModal::move_cursor(1, 0, machine);
+    expect(MemoryModal::current_address() == start_addr + 1, "move_cursor moves right 1 byte");
+
+    // Move cursor across rows
+    MemoryModal::move_cursor(0, 2, machine);
+    expect(MemoryModal::current_address() == start_addr + 1 + 32,
+           "move_cursor down 2 rows advances 32 bytes");
+
+    // Page scrolling
+    MemoryModal::scroll_page(1, machine);
+    expect(MemoryModal::current_address() > start_addr + 32, "scroll_page advances memory window");
+
+    // Toggle addressing mode
+    MemoryModal::toggle_addressing_mode();
+    MemoryModal::toggle_addressing_mode();
+
+    // Goto Address
+    MemoryModal::set_input_mode(MemoryModal::InputMode::GotoAddress);
+    expect(MemoryModal::input_mode() == MemoryModal::InputMode::GotoAddress,
+           "GotoAddress mode set");
+    std::string status_msg;
+    auto set_status = [&](const std::string& msg) { status_msg = msg; };
+    const bool goto_ok = MemoryModal::submit_input("0x80001000", machine, nullptr, set_status);
+    expect(goto_ok, "submit_input with valid hex address succeeds");
+    expect(MemoryModal::current_address() == static_cast<simrv::xlen::Address>(0x80001000ULL),
+           "MemoryModal navigated to 0x80001000");
+    expect(MemoryModal::input_mode() == MemoryModal::InputMode::Normal,
+           "Input mode returns to Normal after goto");
+
+    // In-place byte editing
+    MemoryModal::set_input_mode(MemoryModal::InputMode::EditByte);
+    const bool edit_ok = MemoryModal::submit_input("7F", machine, nullptr, set_status);
+    expect(edit_ok, "submit_input with valid hex byte succeeds");
+    expect(static_cast<uint8_t>(ram[0x1000]) == 0x7FU, "Byte in RAM updated in-place");
+    expect(MemoryModal::input_mode() == MemoryModal::InputMode::Normal,
+           "Input mode returns to Normal after edit");
+
+    // MemoryModal rendering test
+    std::vector<std::string> mem_rows;
+    auto add_mem_row = [&](const std::string& r) { mem_rows.push_back(r); };
+    MemoryModal::render(mem_rows, add_mem_row, "", machine, nullptr, 30, 80);
+    expect(!mem_rows.empty(), "MemoryModal generates render rows");
+    bool found_hex_header = false;
+    for (const auto& row : mem_rows) {
+        if (row.contains("Focus:") || row.contains("Word32:")) {
+            found_hex_header = true;
+            break;
+        }
+    }
+    expect(found_hex_header, "MemoryModal renders Focus / Data Interpretations sections");
+
+    // 2. Test HartModal navigation and switching
+    HartModal::open(0, machine);
+    HartModal::move_cursor(1, machine);
+    HartModal::move_cursor(-1, machine);
+    size_t selected_hart = 999;
+    const bool hart_sub_ok = HartModal::submit(machine, selected_hart);
+    expect(hart_sub_ok, "HartModal::submit succeeds");
+    expect(selected_hart == 0, "HartModal selects primary hart on single-hart machine");
+
+    std::vector<std::string> hart_rows;
+    auto add_hart_row = [&](const std::string& r) { hart_rows.push_back(r); };
+    HartModal::render(hart_rows, add_hart_row, machine);
+    expect(!hart_rows.empty(), "HartModal generates render rows");
+    bool found_hart_table = false;
+    for (const auto& row : hart_rows) {
+        if (row.contains("Hart") && row.contains("Status")) {
+            found_hart_table = true;
+            break;
+        }
+    }
+    expect(found_hart_table, "HartModal renders hart table header");
+}
+
 }  // namespace
 
 int main() {
@@ -3615,6 +3713,7 @@ int main() {
     test_concurrent_terminal_and_sixel_display();
     test_terminal_cursor_tracking_and_scrollback();
     test_sixel_display_resolution_adaptation_and_size_warning();
+    test_memory_modal_and_hart_modal();
     if (failures != 0) return EXIT_FAILURE;
     std::cout << "TUI framework tests passed\n";
     return EXIT_SUCCESS;

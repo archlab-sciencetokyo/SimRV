@@ -199,15 +199,19 @@ auto InspectorPane::render_hazard_stats(const simrv::core::CPU& cpu, int logical
             width);
     }
     if (logical_row == 6) {
-        bool fwd_rs1 = (e_reg.valid && e_rs1 != 0 && (e_rs1 == m_rd || e_rs1 == w_rd));
-        bool fwd_rs2 = (e_reg.valid && e_rs2 != 0 && (e_rs2 == m_rd || e_rs2 == w_rd));
+        std::string rs1_source = (e_rs1 == 0)                     ? "x0"
+                                 : (e_rs1 == m_rd && m_reg.valid) ? "\033[1;36mMEM→EX\033[0m"
+                                 : (e_rs1 == w_rd && w_reg.valid) ? "\033[1;32mWB→EX\033[0m"
+                                                                  : "\033[38;5;244mRegFile\033[0m";
+        std::string rs2_source = (e_rs2 == 0)                     ? "x0"
+                                 : (e_rs2 == m_rd && m_reg.valid) ? "\033[1;36mMEM→EX\033[0m"
+                                 : (e_rs2 == w_rd && w_reg.valid) ? "\033[1;32mWB→EX\033[0m"
+                                                                  : "\033[38;5;244mRegFile\033[0m";
         return format_to_width(
-            std::format("  {}EX  Stage:\033[0m {}PC {:08x}\033[0m │ {}Fwd rs1:\033[0m{}\033[0m "
-                        "{}rs2:\033[0m{}\033[0m",
-                        kThemeText, kThemeVal, e_pc, kThemeText,
-                        (fwd_rs1 ? "\033[38;5;120mYES\033[0m" : "\033[38;5;244mNO\033[0m"),
-                        kThemeText,
-                        (fwd_rs2 ? "\033[38;5;120mYES\033[0m" : "\033[38;5;244mNO\033[0m")),
+            std::format("  {}EX  Stage:\033[0m {}PC {:08x}\033[0m │ {}rs1:\033[0m{} │ "
+                        "{}rs2:\033[0m{}",
+                        kThemeText, kThemeVal, e_pc, kThemeText, rs1_source, kThemeText,
+                        rs2_source),
             width);
     }
     if (logical_row == 7) {
@@ -331,6 +335,49 @@ auto InspectorPane::render_hazard_stats(const simrv::core::CPU& cpu, int logical
             std::format("  {}Status:\033[0m \033[38;5;120m[FLOWING]\033[0m No data hazard stalls "
                         "this cycle",
                         kThemeText),
+            width);
+    }
+    if (logical_row == 19) {
+        uint32_t int_mask = sb.int_busy_mask();
+        uint32_t fp_mask = sb.fp_busy_mask();
+        uint32_t fwd_mask = sb.int_forwardable_mask();
+        return format_to_width(
+            std::format("  {}Scoreboard Bitmasks:\033[0m INT:{}0x{:08x}\033[0m │ "
+                        "FP:{}0x{:08x}\033[0m │ Fwd:{}0x{:08x}\033[0m",
+                        kThemeText, kThemeVal, int_mask, kThemeText, fp_mask, kThemeMint, fwd_mask),
+            width);
+    }
+    if (logical_row == 20) {
+        return section_line("Branch Predictor 2-Bit Saturation & Direction Confidence", width);
+    }
+    if (logical_row == 21) {
+        uint8_t counter = cpu.branch_predictor.get_counter_for_pc(f_reg.pc);
+        std::string gauge;
+        switch (counter) {
+            case 0:
+                gauge = "\033[1;31m[░░░░] Strongly Not-Taken (0/3)\033[0m";
+                break;
+            case 1:
+                gauge = "\033[33m[▓░░░] Weakly Not-Taken   (1/3)\033[0m";
+                break;
+            case 2:
+                gauge = "\033[36m[▓▓▓░] Weakly Taken       (2/3)\033[0m";
+                break;
+            case 3:
+            default:
+                gauge = "\033[1;32m[▓▓▓▓] Strongly Taken     (3/3)\033[0m";
+                break;
+        }
+        return format_to_width(
+            std::format("  {}PC {:08x}:\033[0m {}  {}GHR: 0x{:03x}\033[0m", kThemeText, f_pc, gauge,
+                        kThemeMuted, cpu.branch_predictor.ghr()),
+            width);
+    }
+    if (logical_row == 22) {
+        auto dist = cpu.branch_predictor.bht_distribution();
+        return format_to_width(
+            std::format("  {}PHT Distribution:\033[0m SNT:{:<5} WNT:{:<5} WT:{:<5} ST:{:<5}",
+                        kThemeText, dist[0], dist[1], dist[2], dist[3]),
             width);
     }
 

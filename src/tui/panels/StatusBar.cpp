@@ -703,10 +703,15 @@ auto StatusBar::render_row(int row_idx, int width) -> std::string {
         std::string mode_prefix;
 
         if (machine_.num_harts() > 1) {
+            bool const is_wfi = machine_.hart(selected).is_wfi_quiescent();
             std::string const hart_label =
-                (inner_w < 88) ? std::format("H{}/{}", selected, machine_.num_harts())
-                               : std::format("HART {}/{}", selected, machine_.num_harts());
-            mode_prefix += " " + header_badge(hart_label, "\033[45;37m", "\033[48;5;183;38;5;232m");
+                (inner_w < 88)
+                    ? std::format("H{}/{}{}", selected, machine_.num_harts(), is_wfi ? "z" : "")
+                    : std::format("HART {}/{}{}", selected, machine_.num_harts(),
+                                  is_wfi ? " (WFI)" : "");
+            mode_prefix +=
+                " " + header_badge(hart_label, is_wfi ? "\033[46;30m" : "\033[45;37m",
+                                   is_wfi ? "\033[48;5;117;38;5;232m" : "\033[48;5;183;38;5;232m");
         }
         std::string const speed_label =
             speed_control_label(machine_, tui_, kips_, paused_, inner_w / 2);

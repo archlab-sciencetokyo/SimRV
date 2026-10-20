@@ -229,6 +229,12 @@ class BaseCache {
         }
         return false;
     }
+    [[nodiscard]] auto is_line_prefetched(uint32_t set_idx, uint32_t way_idx) const -> bool {
+        if (set_idx < active_sets_ && way_idx < active_ways_) {
+            return line(set_idx, way_idx).is_prefetched;
+        }
+        return false;
+    }
     [[nodiscard]] auto get_line_last_used(uint32_t set_idx, uint32_t way_idx) const -> uint64_t {
         if (set_idx < active_sets_ && way_idx < active_ways_) {
             return line(set_idx, way_idx).last_used;
