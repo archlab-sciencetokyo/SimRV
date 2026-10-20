@@ -259,8 +259,8 @@ simrv --tui --class --mission lessons/control-flow-calls.mission -m control-flow
 simrv --cli -m control-flow-calls.elf --mode fast
 ```
 
-> [!TIP]
-> TUI mode is SimRV's default execution interface, so passing `--mission <file>` is sufficient: SimRV will automatically start in TUI mode and enable student classroom guidance (`--class`). Running `--mission` with headless `--cli` is rejected.
+!!! tip "Default TUI Execution"
+    TUI mode is SimRV's default execution interface, so passing `--mission <file>` is sufficient: SimRV will automatically start in TUI mode and enable student classroom guidance (`--class`). Running `--mission` with headless `--cli` is rejected.
 
 ### Mission File Specification (`.mission`)
 

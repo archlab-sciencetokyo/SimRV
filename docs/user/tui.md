@@ -130,7 +130,7 @@ simrv --class --mission examples/isa/lessons/control-flow-calls.mission -m contr
 ```
 
 - **Interactive Guidance Pane**: When paused, the guide explains the currently selected inspector view and suggests a context-sensitive next exploration action. Press `Enter` to execute the suggested action.
-- **Structured Missions (`--mission`)**: Load sequential pedagogical checkpoints that automatically highlight relevant inspector panels (Registers, Stack, Explainer, Trace) as students execute assembly assignments. See the [Instructor Guide in the Classroom Reference Manual](classroom.md#5-instructor-guide-authoring--deploying-classroom-missions) for mission authoring instructions.
+- **Structured Missions (`--mission`)**: Load sequential pedagogical checkpoints that automatically highlight relevant inspector panels (Registers, Stack, Explainer, Trace) as students execute assembly assignments. See the [Instructor Guide in the Classroom Reference Manual](classroom.md#5-instructor-guide-authoring-deploying-classroom-missions) for mission authoring instructions.
 - **Mission Controls**: Press `Enter` to follow the active suggestion, `g` to show/hide guidance, `z` to dismiss the mission, or `Z` (Shift-Z) to restart from step 0.
 - **Architecture Glossary**: Press `?` to open the educational glossary jump-linked to the architectural concept represented by the active inspector view (e.g., pipeline hazard interlocks, cache associativity, or virtual memory translation).
 
