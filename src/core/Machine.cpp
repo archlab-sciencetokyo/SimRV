@@ -468,6 +468,9 @@ void Machine::maybe_save_periodic_checkpoint() {
 }
 
 void Machine::set_platform_irq(simrv::xlen::IrqNumber irq, bool asserted) {
+    if (!runtime_) {
+        return;
+    }
     runtime_->primary_cpu.plic_set_irq(irq, asserted);
     bool changed = false;
     {
