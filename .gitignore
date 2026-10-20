@@ -28,6 +28,8 @@ SimRV
 # Build system outputs
 build*
 !configs/buildroot/
+!examples/**/build-*/
+!examples/**/build-*/*
 linux-build
 linux-images/
 CMakeUserPresets.json

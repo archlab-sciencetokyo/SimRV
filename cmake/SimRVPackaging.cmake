@@ -71,7 +71,7 @@ install(FILES scripts/experiment_metadata.py
 install(
   DIRECTORY configs/models/
   DESTINATION ${CMAKE_INSTALL_DATADIR}/SimRV/models
-  COMPONENT Tools
+  COMPONENT Runtime
   FILES_MATCHING
   PATTERN "*.cfg")
 install(
@@ -88,11 +88,17 @@ install(
   FILES_MATCHING
   PATTERN "*.md")
 install(
+  DIRECTORY examples/hello/
+  DESTINATION ${CMAKE_INSTALL_DOCDIR}/examples/hello
+  COMPONENT Runtime
+  PATTERN ".gitignore" EXCLUDE
+  PATTERN "*.o" EXCLUDE)
+install(
   DIRECTORY examples/isa/
   DESTINATION ${CMAKE_INSTALL_DOCDIR}/examples/isa
   COMPONENT Runtime
   PATTERN ".gitignore" EXCLUDE
-  PATTERN "build-*" EXCLUDE)
+  PATTERN "*.o" EXCLUDE)
 
 install(FILES docs/man/simrv.1 DESTINATION ${CMAKE_INSTALL_MANDIR}/man1
         COMPONENT Runtime)

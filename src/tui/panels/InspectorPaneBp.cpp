@@ -150,6 +150,12 @@ auto InspectorPane::render_bp_stats(const simrv::core::CPU& cpu, int logical_row
             width);
     }
     if (logical_row == 14) {
+        if (cfg.type == simrv::pipeline::BranchPredictorType::Disabled) {
+            return section_line("Status: Predictor Disabled (Sequential)", width);
+        }
+        if (cfg.type == simrv::pipeline::BranchPredictorType::Static) {
+            return section_line("Status: Static BTFNT Active (No Speculation)", width);
+        }
         return section_line("Status: Active Speculation Enabled", width);
     }
 

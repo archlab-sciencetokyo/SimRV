@@ -351,6 +351,21 @@ auto InspectorPane::render_hazard_stats(const simrv::core::CPU& cpu, int logical
         return section_line("Branch Predictor 2-Bit Saturation & Direction Confidence", width);
     }
     if (logical_row == 21) {
+        const auto bp_type = cpu.branch_predictor.config().type;
+        if (bp_type == simrv::pipeline::BranchPredictorType::Disabled) {
+            return format_to_width(
+                std::format("  {}Status:\033[0m \033[38;5;244mDisabled (sequential fetch, no "
+                            "speculation)\033[0m",
+                            kThemeText),
+                width);
+        }
+        if (bp_type == simrv::pipeline::BranchPredictorType::Static) {
+            return format_to_width(
+                std::format("  {}Policy:\033[0m {}Static BTFNT (Backward Taken, Forward "
+                            "Not-Taken)\033[0m",
+                            kThemeText, kThemeMint),
+                width);
+        }
         uint8_t counter = cpu.branch_predictor.get_counter_for_pc(f_reg.pc);
         std::string gauge;
         switch (counter) {
@@ -361,7 +376,7 @@ auto InspectorPane::render_hazard_stats(const simrv::core::CPU& cpu, int logical
                 gauge = "\033[33m[▓░░░] Weakly Not-Taken   (1/3)\033[0m";
                 break;
             case 2:
-                gauge = "\033[36m[▓▓▓░] Weakly Taken       (2/3)\033[0m";
+                gauge = "\033[36m[▓▓░░] Weakly Taken       (2/3)\033[0m";
                 break;
             case 3:
             default:
@@ -374,6 +389,15 @@ auto InspectorPane::render_hazard_stats(const simrv::core::CPU& cpu, int logical
             width);
     }
     if (logical_row == 22) {
+        const auto bp_type = cpu.branch_predictor.config().type;
+        if (bp_type == simrv::pipeline::BranchPredictorType::Disabled ||
+            bp_type == simrv::pipeline::BranchPredictorType::Static) {
+            return format_to_width(
+                std::format("  {}PHT Table:\033[0m \033[38;5;244mN/A (No Pattern History Table "
+                            "configured)\033[0m",
+                            kThemeText),
+                width);
+        }
         auto dist = cpu.branch_predictor.bht_distribution();
         return format_to_width(
             std::format("  {}PHT Distribution:\033[0m SNT:{:<5} WNT:{:<5} WT:{:<5} ST:{:<5}",

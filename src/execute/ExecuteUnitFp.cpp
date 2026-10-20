@@ -7,6 +7,7 @@
 #include <bit>
 #include <cmath>
 #include <cstdint>
+#include <functional>
 #include <limits>
 
 #include "simrv/CompilerHints.hpp"
