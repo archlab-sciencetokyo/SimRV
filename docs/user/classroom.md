@@ -234,3 +234,189 @@ Description (Behavior):
 | `x` | Paused | Export the configured inspection report |
 | `Tab` | All | Focus next workbench column / right pane |
 | `Ctrl-R` | All | Soft-reboot guest simulation |
+
+---
+
+## 5. Instructor Guide: Authoring & Deploying Classroom Missions
+
+SimRV provides a dedicated **Mission Framework** for instructors teaching computer architecture and systems programming. Classroom missions allow instructors to create interactive, checkpoint-based lab assignments where students are guided through assembly and microarchitectural concepts inside the TUI workbench.
+
+### Design Principles
+
+- **Zero-Telemetry & Privacy-Preserving:** Missions collect no student telemetry, personal data, or network activity. Everything executes entirely on the student's local machine.
+- **Scaffolded Guided Exploration:** Missions automatically focus relevant workbench views (Registers, Stack, Explainer, or Trace) as students advance through key program checkpoints.
+- **Non-Locking:** Students retain full control to step, inspect, open modals, or pause at any point. Students can dismiss a mission with `z` to explore freely or restart it with `Z`.
+
+### Classroom Command Line Invocations
+
+To launch a mission, invoke SimRV with the `--class` (classroom guidance) and `--mission` options:
+
+```bash
+# Student invocation: launch interactive mission with matching ELF
+simrv --tui --class --mission lessons/control-flow-calls.mission -m control-flow-calls.elf
+
+# Verification / non-interactive check
+simrv --cli -m control-flow-calls.elf --mode fast
+```
+
+> [!IMPORTANT]
+> The `--mission` option strictly requires both `--class` and `--tui`. SimRV will reject running a mission in headless CLI mode or without classroom guidance enabled.
+
+### Mission File Specification (`.mission`)
+
+Missions are simple, declarative configuration files following the version 1 format.
+
+#### Top-level `[mission]` Header
+
+```toml
+# SimRV classroom mission format, version 1
+[mission]
+version = "1"
+id = "control-flow-and-abi"
+program = "control-flow-calls.elf"
+```
+
+- `version`: Must be `"1"`.
+- `id`: An identifier for the assignment or lesson.
+- `program`: The exact filename of the ELF binary expected for this mission (e.g. `lab1.elf`). SimRV validates the loaded binary against this name and displays a helpful error if a mismatched binary is loaded.
+
+#### Checkpoint Steps (`[step]`)
+
+Each mission consists of one or more sequential `[step]` blocks:
+
+```toml
+[step]
+label = "mission_branch"
+title = "Conditional Branching"
+prompt = "Predict whether bne branches to target, then single-step [F6]."
+why = "Branches compare register values and update PC using a signed immediate offset."
+view = "explain"
+glossary = "0"
+```
+
+| Field | Type | Description |
+| :--- | :--- | :--- |
+| `label` | string | Exact symbol name in the ELF symbol table where this checkpoint triggers (e.g., a function label or milestone tag). |
+| `title` | string | Short title rendered in the student guidance header. |
+| `prompt` | string | Actionable prompt directing the student what to observe, predict, or calculate. |
+| `why` | string | Pedagogical explanation articulating *why* the architectural behavior occurs. |
+| `view` | string | Workbench view to focus automatically: `"explain"`, `"registers"`, `"stack"`, or `"trace"`. |
+| `glossary` | string (int) | (Optional) Topic index in the Architecture Glossary (`[F9]`) relevant to this concept. |
+
+### How Missions Progress in Class
+
+1. **Symbolic Checkpoints:** SimRV monitors retired instructions and PC targets. When the program reaches the exact address of `label`, the mission advances to that step.
+2. **Ordered Progression:** Checkpoints must be encountered in sequence. Out-of-order execution (such as multiple loop iterations) will not trigger future steps prematurely.
+3. **Automatic Context Switching:** When advancing to a step, SimRV automatically switches the focused workbench panel to the `view` specified in the step (e.g., opening the Stack pane when inspecting callee frames).
+4. **Completion:** When the final checkpoint is visited, the status bar displays ` MISSION COMPLETE `, and the guidance drawer provides summary review guidance.
+
+### Student Keyboard Controls During a Mission
+
+| Key | Action |
+| :--- | :--- |
+| **`Enter`** | Perform the active suggestion (e.g., focus recommended tab or step forward). |
+| **`g`** | Show / hide the student guidance drawer. |
+| **`z`** | Dismiss the active mission (returns to unconstrained free simulation). |
+| **`Z`** (Shift-Z) | Restart the mission from step 0. |
+
+---
+
+### Step-by-Step Instructor Tutorial: Creating a Lab Assignment
+
+Here is how an instructor can author a complete lab assignment:
+
+#### Step 1: Write the Lab Assembly Code with Symbolic Checkpoints
+
+In your assembly code (`lab1_abi.S`), insert symbolic labels where you want students to pause and observe state:
+
+```assembly
+    .global _start
+    .global mission_branch
+    .global mission_call
+    .global mission_done
+    .text
+
+_start:
+    li a0, 5
+    li a1, 10
+
+mission_branch:
+    # Checkpoint 1: Students observe condition before branch
+    beq a0, a1, skip_branch
+    addi a0, a0, 1
+
+mission_call:
+    # Checkpoint 2: Students observe ra and sp before function call
+    call helper_func
+
+mission_done:
+    # Checkpoint 3: Students inspect return value in a0
+    wfi
+
+helper_func:
+    addi sp, sp, -16
+    sd ra, 8(sp)
+    add a0, a0, a1
+    ld ra, 8(sp)
+    addi sp, sp, 16
+    ret
+```
+
+#### Step 2: Compile with Debug Symbols
+
+Compile the assembly with `-g` so labels are retained in the ELF symbol table:
+
+```bash
+riscv64-unknown-elf-gcc -nostdlib -g -Ttext=0x80000000 lab1_abi.S -o lab1_abi.elf
+```
+
+#### Step 3: Write the `.mission` File
+
+Create `lab1_abi.mission`:
+
+```toml
+[mission]
+version = "1"
+id = "lab1-abi-functions"
+program = "lab1_abi.elf"
+
+[step]
+label = "mission_branch"
+title = "Branch Evaluation"
+prompt = "Check a0 and a1 in Registers [F3]; determine if beq will branch."
+why = "Branch decisions depend solely on register operand equality."
+view = "explain"
+glossary = "0"
+
+[step]
+label = "mission_call"
+title = "Function Call Setup"
+prompt = "Inspect ra and sp before the call instruction executes."
+why = "The call pseudo-instruction (jal) overwrites ra with the return address."
+view = "registers"
+glossary = "0"
+
+[step]
+label = "mission_done"
+title = "Function Return & ABI Contract"
+prompt = "Observe the computed return value in a0 and verify sp was restored."
+why = "Callee-saved registers like sp must be restored before returning to the caller."
+view = "registers"
+glossary = "0"
+```
+
+#### Step 4: Grading & Verification Without Surveillance
+
+Instructors can verify student lab completion through portable inspection reports:
+
+```bash
+# Student generates an inspection report at the final milestone by pressing 'x':
+simrv --tui --class --mission lab1_abi.mission -m lab1_abi.elf --inspection-output student_submission.json
+```
+
+Instructors can then validate student submissions using Python by comparing `student_submission.json` against a golden reference run:
+
+```bash
+# Verify architectural state (PC, registers, instructions retired) matches expectation
+python3 scripts/validate_submission.py --golden golden_inspection.json --student student_submission.json
+```

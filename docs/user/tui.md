@@ -122,11 +122,16 @@ flowchart TD
 When launched with `--class`, SimRV enables pedagogical student guidance features designed for computer architecture courses:
 
 ```bash
+# General classroom guidance
 simrv --class -m examples/isa/bin/demo.elf
+
+# Structured classroom mission
+simrv --class --mission examples/isa/lessons/control-flow-calls.mission -m control-flow-calls.elf
 ```
 
 - **Interactive Guidance Pane**: When paused, the guide explains the currently selected inspector view and suggests a context-sensitive next exploration action. Press `Enter` to execute the suggested action.
-- **Toggle Guide**: Press `g` to show or hide the guidance pane.
+- **Structured Missions (`--mission`)**: Load sequential pedagogical checkpoints that automatically highlight relevant inspector panels (Registers, Stack, Explainer, Trace) as students execute assembly assignments. See the [Instructor Guide in the Classroom Reference Manual](classroom.md#5-instructor-guide-authoring--deploying-classroom-missions) for mission authoring instructions.
+- **Mission Controls**: Press `Enter` to follow the active suggestion, `g` to show/hide guidance, `z` to dismiss the mission, or `Z` (Shift-Z) to restart from step 0.
 - **Architecture Glossary**: Press `?` to open the educational glossary jump-linked to the architectural concept represented by the active inspector view (e.g., pipeline hazard interlocks, cache associativity, or virtual memory translation).
 
 ---
