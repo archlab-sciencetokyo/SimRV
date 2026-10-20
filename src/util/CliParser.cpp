@@ -1328,9 +1328,14 @@ auto parse_command_line(std::span<char* const> args) -> std::expected<ParseResul
         return std::unexpected(
             "Linux boot requires a device tree; pass -f/--dtb <FILE> or set SIMRV_LINUX_DTB");
     }
-    if (!result.options.mission.empty() &&
-        (!result.options.class_mode || !result.options.explicit_tui_mode)) {
-        return std::unexpected("--mission requires --class and --tui");
+    if (!result.options.mission.empty()) {
+        if (result.options.explicit_cli_mode) {
+            return std::unexpected(
+                "--mission requires interactive TUI mode (cannot be used with --cli)");
+        }
+        if (!result.options.class_mode) {
+            result.options.class_mode = true;
+        }
     }
     if (result.options.trace_after_cycle && result.options.trace_before_cycle &&
         *result.options.trace_after_cycle > *result.options.trace_before_cycle) {
@@ -1763,7 +1768,7 @@ auto needs_memory_image(const ParseResult& result) -> bool {
               {.option = "-c, --cli", .description = "Force headless command-line execution."},
               {.option = "--class, --edu", .description = "Enable classroom guidance."},
               {.option = "--mission <FILE>",
-               .description = "Load a lesson mission (requires --class and --tui)."},
+               .description = "Load a lesson mission (runs in interactive TUI mode)."},
               {.option = "--high-contrast", .description = "Enable the high-contrast TUI palette."},
               {.option = "--step-delay <US>",
                .description = "Pause execution for US microseconds per cycle/step."},

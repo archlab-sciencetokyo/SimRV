@@ -844,14 +844,40 @@ void test_classroom_cli_defaults() {
                mission_parsed->options.to_machine_config().tui.mission == mission_path,
            "mission CLI selects an external classroom mission");
 
-    std::array<std::string, 6> invalid_storage = {"SimRV",      "--class", "--mission",
-                                                  mission_path, "-m",      "demo.elf"};
-    std::array<char*, 6> invalid_args{};
+    // Rejects non-TUI (headless CLI) invocation
+    std::array<std::string, 7> invalid_storage = {"SimRV",      "--cli", "--class", "--mission",
+                                                  mission_path, "-m",    "demo.elf"};
+    std::array<char*, 7> invalid_args{};
     for (size_t index = 0; index < invalid_storage.size(); ++index) {
         invalid_args[index] = invalid_storage[index].data();
     }
     expect(!simrv::util::parse_command_line(invalid_args).has_value(),
-           "mission rejects a non-TUI classroom invocation");
+           "mission rejects a non-TUI headless CLI invocation");
+
+    // Accepts --class --mission without explicit --tui (TUI is default)
+    std::array<std::string, 6> default_tui_storage = {
+        "SimRV", "--class", "--mission", mission_path, "-m", "control-flow-calls.elf"};
+    std::array<char*, 6> default_tui_args{};
+    for (size_t index = 0; index < default_tui_storage.size(); ++index) {
+        default_tui_args[index] = default_tui_storage[index].data();
+    }
+    const auto default_tui_parsed = simrv::util::parse_command_line(default_tui_args);
+    expect(default_tui_parsed.has_value() &&
+               default_tui_parsed->options.to_machine_config().tui.mission == mission_path,
+           "mission CLI succeeds with default TUI without requiring explicit --tui");
+
+    // Accepts --mission alone and auto-enables class_mode
+    std::array<std::string, 5> mission_only_storage = {"SimRV", "--mission", mission_path, "-m",
+                                                       "control-flow-calls.elf"};
+    std::array<char*, 5> mission_only_args{};
+    for (size_t index = 0; index < mission_only_storage.size(); ++index) {
+        mission_only_args[index] = mission_only_storage[index].data();
+    }
+    const auto mission_only_parsed = simrv::util::parse_command_line(mission_only_args);
+    expect(mission_only_parsed.has_value() &&
+               mission_only_parsed->options.to_machine_config().tui.class_mode &&
+               mission_only_parsed->options.to_machine_config().tui.mission == mission_path,
+           "--mission automatically enables class_mode without requiring explicit --class");
 }
 
 void test_load_modal_path_completion() {
