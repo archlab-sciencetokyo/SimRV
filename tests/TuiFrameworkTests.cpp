@@ -3187,10 +3187,8 @@ void test_virtio_input_and_display_mouse() {
     const int y = display_y + image_rows / 2;
     const int rel_col = x - display_x;
     const int rel_row = y - display_y;
-    const int px =
-        std::clamp((2 * rel_col + 1) * image_width / (2 * image_cols), 0, image_width - 1);
-    const int py =
-        std::clamp((2 * rel_row + 1) * image_height / (2 * image_rows), 0, image_height - 1);
+    const int px = std::clamp(rel_col * cell_width + cell_width / 2, 0, image_width - 1);
+    const int py = std::clamp(rel_row * cell_height + cell_height / 2, 0, image_height - 1);
     const auto mapped =
         TuiTestAccess::display_coords_to_fb(tui, x, y, 0, mouse_term_width, mouse_term_height);
     expect(mapped.has_value(), "cell coordinates inside the sixel image map");
@@ -3214,8 +3212,10 @@ void test_virtio_input_and_display_mouse() {
         if (sample.has_value()) {
             const int sample_col = sample_x - display_x;
             const int sample_row = sample_y - display_y;
-            const int sample_px = (2 * sample_col + 1) * image_width / (2 * image_cols);
-            const int sample_py = (2 * sample_row + 1) * image_height / (2 * image_rows);
+            const int sample_px =
+                std::clamp(sample_col * cell_width + cell_width / 2, 0, image_width - 1);
+            const int sample_py =
+                std::clamp(sample_row * cell_height + cell_height / 2, 0, image_height - 1);
             expect(sample->first ==
                        std::clamp(sample_px * source_width / image_width, 0, source_width - 1),
                    "distant mouse x remains aligned with the sixel raster");
@@ -3249,16 +3249,12 @@ void test_virtio_input_and_display_mouse() {
     }
 
     // Terminal cell metrics can differ from the queried pixel size used to choose the
-    // sixel raster dimensions. Convert both the origin and the distance into raster units,
-    // so a pitch mismatch does not accumulate as the pointer moves across the image.
+    // sixel raster dimensions. The raster origin anchors from the terminal's physical geometry,
+    // and distance inside the raster maps 1:1 without cumulative scale drift.
     constexpr int actual_cell_width = cell_width + 1;
     constexpr int actual_cell_height = cell_height + 2;
-    const int actual_pixel_x =
-        (raster_col - 1) * actual_cell_width +
-        ((image_width - 1) * actual_cell_width + cell_width - 1) / cell_width;
-    const int actual_pixel_y =
-        (raster_row - 1) * actual_cell_height +
-        ((image_height - 1) * actual_cell_height + cell_height - 1) / cell_height;
+    const int actual_pixel_x = (raster_col - 1) * actual_cell_width + (image_width - 1);
+    const int actual_pixel_y = (raster_row - 1) * actual_cell_height + (image_height - 1);
     const auto drift_mapped = TuiTestAccess::display_pixels_to_fb(
         tui, actual_pixel_x + 1, actual_pixel_y + 1, 0, mouse_term_width, mouse_term_height,
         mouse_term_width * actual_cell_width, mouse_term_height * actual_cell_height);
@@ -3290,12 +3286,12 @@ void test_virtio_input_and_display_mouse() {
     constexpr double fractional_cell_width = 8.5;
     constexpr double fractional_cell_height = 17.25;
     const int fractional_pixel_x =
-        static_cast<int>(std::lround((raster_col - 1) * fractional_cell_width +
-                                     (image_width - 1) * fractional_cell_width / cell_width)) +
+        static_cast<int>(
+            std::lround((raster_col - 1) * fractional_cell_width + (image_width - 1))) +
         1;
     const int fractional_pixel_y =
-        static_cast<int>(std::lround((raster_row - 1) * fractional_cell_height +
-                                     (image_height - 1) * fractional_cell_height / cell_height)) +
+        static_cast<int>(
+            std::lround((raster_row - 1) * fractional_cell_height + (image_height - 1))) +
         1;
     const auto fractional_mapped = TuiTestAccess::display_pixels_to_fb(
         tui, fractional_pixel_x, fractional_pixel_y, 0, mouse_term_width, mouse_term_height,
@@ -3303,19 +3299,9 @@ void test_virtio_input_and_display_mouse() {
         static_cast<int>(mouse_term_height * fractional_cell_height));
     expect(fractional_mapped.has_value(), "far sixel point maps with fractional cell pitch");
     if (fractional_mapped.has_value()) {
-        const int fractional_raster_x = static_cast<int>(
-            std::floor((fractional_pixel_x - 1 - (raster_col - 1) * fractional_cell_width) *
-                       cell_width / fractional_cell_width));
-        const int fractional_raster_y = static_cast<int>(
-            std::floor((fractional_pixel_y - 1 - (raster_row - 1) * fractional_cell_height) *
-                       cell_height / fractional_cell_height));
-        expect(
-            fractional_mapped->first == std::clamp(fractional_raster_x * source_width / image_width,
-                                                   0, source_width - 1) &&
-                fractional_mapped->second ==
-                    std::clamp(fractional_raster_y * source_height / image_height, 0,
-                               source_height - 1),
-            "fractional cell pitch does not accumulate pointer drift across the raster");
+        expect(fractional_mapped->first == (image_width - 1) * source_width / image_width &&
+                   fractional_mapped->second == (image_height - 1) * source_height / image_height,
+               "fractional cell pitch does not accumulate pointer drift across the raster");
     }
 
     // Configure workbench with DISPLAY slot

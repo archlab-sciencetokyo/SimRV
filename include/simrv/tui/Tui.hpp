@@ -278,7 +278,7 @@ class Tui : public core::ITelemetrySink, public core::IConsoleSink {
     [[nodiscard]] auto selected_hart() const -> size_t { return selected_hart_; }
     void select_next_hart();
 
-    void handle_mouse(int x, int y, int b);
+    void handle_mouse(int x, int y, int b, int raw_x = 0, int raw_y = 0);
     [[nodiscard]] auto is_clickable_at(int x, int y, int term_width, int term_height) const -> bool;
     void update_pointer_shape(bool clickable);
 
@@ -476,7 +476,8 @@ class Tui : public core::ITelemetrySink, public core::IConsoleSink {
                                             int term_height, int term_pixel_width = 0,
                                             int term_pixel_height = 0) const
         -> std::optional<std::pair<int, int>>;
-    void handle_display_mouse(int x, int y, int b, size_t col_idx, int term_width, int term_height);
+    void handle_display_mouse(int x, int y, int b, size_t col_idx, int term_width, int term_height,
+                              int raw_x = 0, int raw_y = 0);
     void enable_display_pixel_mouse();
     void init_terminal_raw_mode();
     void detect_terminal_sixel_support(const std::string& resp);

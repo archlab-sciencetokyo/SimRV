@@ -135,9 +135,7 @@ class Scoreboard {
     [[nodiscard]] constexpr auto int_busy_mask() const noexcept -> uint32_t {
         return int_busy_mask_;
     }
-    [[nodiscard]] constexpr auto fp_busy_mask() const noexcept -> uint32_t {
-        return fp_busy_mask_;
-    }
+    [[nodiscard]] constexpr auto fp_busy_mask() const noexcept -> uint32_t { return fp_busy_mask_; }
     [[nodiscard]] constexpr auto int_forwardable_mask() const noexcept -> uint32_t {
         return int_forwardable_mask_;
     }
