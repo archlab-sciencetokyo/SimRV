@@ -24,6 +24,7 @@
 #include "simrv/tui/modals/HartModal.hpp"
 #include "simrv/tui/modals/HelpModal.hpp"
 #include "simrv/tui/modals/LoadModal.hpp"
+#include "simrv/tui/modals/LogModal.hpp"
 #include "simrv/tui/modals/MemoryModal.hpp"
 #include "simrv/tui/modals/MisaModal.hpp"
 #include "simrv/tui/modals/ModalComponents.hpp"
@@ -96,6 +97,9 @@ void TuiModal::open(ModalType type, InspectorPane* inspector_pane, uint64_t step
         case ModalType::SwitchHart:
             modals::HartModal::open(0, machine_);
             break;
+        case ModalType::LogViewer:
+            if (log_buffer_) modals::LogModal::open(*log_buffer_);
+            break;
         default:
             break;
     }
@@ -136,10 +140,18 @@ void TuiModal::refresh_file_picker() {
     namespace fs = std::filesystem;
     file_picker_entries_.clear();
     std::error_code error;
+    auto case_insensitive_contains = [](std::string_view h, std::string_view n) {
+        if (n.empty()) return true;
+        auto it = std::search(h.begin(), h.end(), n.begin(), n.end(), [](char c1, char c2) {
+            return std::tolower(static_cast<unsigned char>(c1)) ==
+                   std::tolower(static_cast<unsigned char>(c2));
+        });
+        return it != h.end();
+    };
     for (fs::directory_iterator it(file_picker_directory_, error), end; !error && it != end;
          it.increment(error)) {
         const auto filename = it->path().filename().string();
-        if (!filename.starts_with(file_picker_filter_)) continue;
+        if (!case_insensitive_contains(filename, file_picker_filter_)) continue;
         file_picker_entries_.push_back(it->path());
     }
     std::ranges::sort(file_picker_entries_, [](const fs::path& left, const fs::path& right) {
@@ -360,6 +372,29 @@ void TuiModal::scroll_memory_page(int pages) { modals::MemoryModal::scroll_page(
 
 void TuiModal::toggle_memory_mode() { modals::MemoryModal::toggle_addressing_mode(); }
 
+void TuiModal::open_log_viewer() {
+    active_modal_ = ModalType::LogViewer;
+    rendered_box_width_ = 0;
+    input_.clear();
+    if (log_buffer_) modals::LogModal::open(*log_buffer_);
+}
+
+void TuiModal::scroll_log_viewer(int delta, int total_lines, int visible_lines) {
+    modals::LogModal::scroll(delta, total_lines, visible_lines);
+}
+
+void TuiModal::scroll_log_viewer_page(int pages, int total_lines, int visible_lines) {
+    modals::LogModal::scroll_page(pages, total_lines, visible_lines);
+}
+
+void TuiModal::toggle_log_follow() { modals::LogModal::toggle_follow(); }
+
+void TuiModal::cycle_log_level() { modals::LogModal::cycle_filter_level(); }
+
+void TuiModal::set_log_filter_level(std::optional<simrv::log::Level> level) {
+    modals::LogModal::set_filter_level(level);
+}
+
 void TuiModal::move_hart_cursor(int delta) { modals::HartModal::move_cursor(delta, machine_); }
 
 void TuiModal::close() {
@@ -577,6 +612,9 @@ void TuiModal::handle_wheel(int delta) {
         case ModalType::SwitchHart:
             move_hart_cursor(delta);
             break;
+        case ModalType::LogViewer:
+            modals::LogModal::scroll(delta * 2, 2000, 20);
+            break;
         default:
             break;
     }
@@ -604,7 +642,8 @@ auto TuiModal::handle_click(int x, int y, int term_width, int term_height) -> Mo
     bool is_wide_modal =
         (is_help || is_glossary || active_modal_ == ModalType::Settings ||
          active_modal_ == ModalType::Notice || active_modal_ == ModalType::PlatformChangeConfirm ||
-         active_modal_ == ModalType::LayoutPresets || active_modal_ == ModalType::ToolPicker);
+         active_modal_ == ModalType::LayoutPresets || active_modal_ == ModalType::ToolPicker ||
+         active_modal_ == ModalType::LogViewer || active_modal_ == ModalType::MemoryDump);
     const int fallback_width = is_wide_modal ? 78 : 58;
     const bool has_rendered_geometry = rendered_box_width_ > 0 &&
                                        rendered_term_width_ == term_width &&
@@ -617,6 +656,8 @@ auto TuiModal::handle_click(int x, int y, int term_width, int term_height) -> Mo
                        ? kGeneralSettingsContentRows
                    : (active_modal_ == ModalType::Glossary)      ? 26
                    : (active_modal_ == ModalType::Help)          ? 24
+                   : (active_modal_ == ModalType::LogViewer)     ? 24
+                   : (active_modal_ == ModalType::MemoryDump)    ? 18
                    : (active_modal_ == ModalType::ToolPicker)    ? 22
                    : (active_modal_ == ModalType::LayoutPresets) ? 12
                                                                  : 10;
@@ -721,6 +762,7 @@ auto TuiModal::handle_click(int x, int y, int term_width, int term_height) -> Mo
                 case ModalType::LoadCpuConfig:
                 case ModalType::MemoryDump:
                 case ModalType::SwitchHart:
+                case ModalType::LogViewer:
                     return action == 0 ? ModalClickResult::Submit : ModalClickResult::Closed;
                 case ModalType::LoadFilePicker:
                     return ModalClickResult::Handled;
@@ -829,6 +871,38 @@ auto TuiModal::handle_click(int x, int y, int term_width, int term_height) -> Mo
             if (tool_idx.has_value()) {
                 tool_picker_cursor_ = static_cast<int>(*tool_idx);
                 return ModalClickResult::Submit;
+            }
+            return ModalClickResult::Handled;
+        }
+
+        case ModalType::MemoryDump: {
+            if (content_row >= 2 && content_row < 12) {
+                int r = content_row - 2;
+                const auto& cpu = machine_.primary_hart();
+                bool ok = modals::MemoryModal::handle_cell_click(r, rel_x, cpu.state().regs.xlen);
+                if (ok) return ModalClickResult::Handled;
+            }
+            return ModalClickResult::Handled;
+        }
+
+        case ModalType::LogViewer: {
+            if (content_row == 0) {
+                if (rel_x >= 1 && rel_x < 12) {
+                    modals::LogModal::set_filter_level(std::nullopt);
+                } else if (rel_x >= 13 && rel_x < 26) {
+                    modals::LogModal::set_filter_level(simrv::log::Level::Info);
+                } else if (rel_x >= 27 && rel_x < 40) {
+                    modals::LogModal::set_filter_level(simrv::log::Level::Warn);
+                } else if (rel_x >= 41 && rel_x < 54) {
+                    modals::LogModal::set_filter_level(simrv::log::Level::Error);
+                } else if (rel_x >= 55) {
+                    modals::LogModal::toggle_follow();
+                }
+                return ModalClickResult::Handled;
+            }
+            if (content_row == 1) {
+                modals::LogModal::toggle_search_mode();
+                return ModalClickResult::Handled;
             }
             return ModalClickResult::Handled;
         }
@@ -996,7 +1070,9 @@ void TuiModal::render_overlay(std::vector<std::string>& lines, int term_width,
             break;
         case ModalType::LoadFilePicker: {
             add_row(std::format("Directory: {}", file_picker_directory_.string()));
-            add_row(std::format("Filter: {}_", file_picker_filter_));
+            add_row(std::format(
+                "Filter: {}_  \033[2m(Type to filter, Backspace: edit, Esc: back)\033[0m",
+                file_picker_filter_));
             add_row("");
             if (file_picker_entries_.empty()) {
                 add_row("No matching files or directories");
@@ -1037,6 +1113,12 @@ void TuiModal::render_overlay(std::vector<std::string>& lines, int term_width,
             break;
         case ModalType::SwitchHart:
             modals::HartModal::render(content_rows, add_row, machine_);
+            break;
+        case ModalType::LogViewer:
+            if (log_buffer_) {
+                modals::LogModal::render(content_rows, add_row, *log_buffer_, term_height,
+                                         provisional_width);
+            }
             break;
         default:
             break;

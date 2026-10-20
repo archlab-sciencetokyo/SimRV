@@ -25,6 +25,7 @@ simrv_add_component(simrv-tui
   modals/HartModal.cpp
   modals/HelpModal.cpp
   modals/LoadModal.cpp
+  modals/LogModal.cpp
   modals/MemoryModal.cpp
   modals/MisaModal.cpp
   modals/ModalComponents.cpp

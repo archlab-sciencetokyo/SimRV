@@ -32,6 +32,7 @@ class MemoryModal {
     static void scroll_page(int pages, const simrv::core::Machine& machine);
     static void toggle_addressing_mode();
     static void set_input_mode(InputMode mode);
+    static auto handle_cell_click(int row, int rel_x, unsigned int xlen) -> bool;
     [[nodiscard]] static auto input_mode() -> InputMode;
     [[nodiscard]] static auto current_address() -> simrv::xlen::Address;
 

@@ -96,6 +96,11 @@ auto tools_registry() -> const std::vector<ToolEntry>& {
          .label = "Live Overview",
          .description = "Live per-hart activity and performance totals",
          .group = TuiCategoryGroup::Tools},
+        {.page = TuiRegPage::LOG,
+         .accelerator = 'o',
+         .label = "Execution Log",
+         .description = "Structured simulation and subsystem diagnostic logs",
+         .group = TuiCategoryGroup::Tools},
     };
     return kTools;
 }
@@ -146,17 +151,19 @@ auto ToolPickerModal::tool_index_at_row(int content_row) -> std::optional<size_t
             return 13;  // DISPLAY
         case 20:
             return 14;  // LIVE
+        case 21:
+            return 15;  // LOG
         default:
             return std::nullopt;
     }
 }
 
 auto ToolPickerModal::row_for_tool_index(size_t index) -> int {
-    static constexpr std::array<int, 15> kRows = {
-        3,  4,  5,          // GPR, FPR, VEC
-        7,  8,  9,  10,     // STACK, CACHE, TLB, BUS
-        12, 13, 14,         // PIPELINE, BPRED, HAZARD
-        16, 17, 18, 19, 20  // TRACE, EXPLAIN, CONSOLE, DISPLAY, LIVE
+    static constexpr std::array<int, 16> kRows = {
+        3,  4,  5,              // GPR, FPR, VEC
+        7,  8,  9,  10,         // STACK, CACHE, TLB, BUS
+        12, 13, 14,             // PIPELINE, BPRED, HAZARD
+        16, 17, 18, 19, 20, 21  // TRACE, EXPLAIN, CONSOLE, DISPLAY, LIVE, LOG
     };
     if (index < kRows.size()) {
         return kRows[index];

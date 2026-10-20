@@ -38,6 +38,8 @@ std::atomic<bool> g_log_to_stderr{false};
 bool g_tui_mode = false;  // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 simrv::log::LogCallback
     g_tui_callback;  // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
+simrv::log::StructuredLogCallback
+    g_tui_structured_callback;  // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 std::deque<PendingLog>
     g_startup_logs;        // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 std::mutex g_log_mutex;    // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
@@ -108,35 +110,13 @@ auto json_record(Level level, const std::string& msg, bool pretty) -> std::strin
 
 auto tui_message(Level level, const std::string& message,
                  std::chrono::steady_clock::time_point timestamp) -> std::string {
-    std::string_view severity_color;
-    switch (level) {
-        case Level::Trace:
-            severity_color = "\033[38;5;244m";
-            break;
-        case Level::Debug:
-            severity_color = "\033[38;5;141m";
-            break;
-        case Level::Info:
-            severity_color = "\033[36m";
-            break;
-        case Level::Warn:
-            severity_color = "\033[93m";
-            break;
-        case Level::Error:
-            severity_color = "\033[91m";
-            break;
-        case Level::Off:
-            return "";
-    }
-
-    const double elapsed = std::chrono::duration<double>(timestamp - g_log_epoch).count();
-    return std::format("\033[38;5;244m[+{:.1f}s]\033[0m {}[{}]\033[0m {}\n", elapsed,
-                       severity_color, level_name(level), message);
+    return format_tui_message(level, message, timestamp);
 }
 
 void emit_log(Level level, FILE* stream, std::string_view ansi_color, std::string_view plain_tag,
               const std::string& msg) {
     LogCallback callback;
+    StructuredLogCallback structured_callback;
     const auto format = g_log_format.load(std::memory_order_relaxed);
     const auto timestamp = std::chrono::steady_clock::now();
     {
@@ -152,7 +132,8 @@ void emit_log(Level level, FILE* stream, std::string_view ansi_color, std::strin
             }
             g_log_file.flush();
         }
-        if (g_tui_callback) {
+        if (g_tui_structured_callback || g_tui_callback) {
+            structured_callback = g_tui_structured_callback;
             callback = g_tui_callback;
         } else if (g_tui_mode) {
             if (level >= Level::Warn) {
@@ -186,12 +167,43 @@ void emit_log(Level level, FILE* stream, std::string_view ansi_color, std::strin
             std::fflush(out_stream);
         }
     }
+    if (structured_callback) {
+        structured_callback({.level = level, .message = msg, .timestamp = timestamp});
+    }
     if (callback) {
         callback(tui_message(level, msg, timestamp));
     }
 }
 
 }  // namespace
+
+auto format_tui_message(Level level, std::string_view message,
+                        std::chrono::steady_clock::time_point timestamp) -> std::string {
+    std::string_view severity_color;
+    switch (level) {
+        case Level::Trace:
+            severity_color = "\033[38;5;244m";
+            break;
+        case Level::Debug:
+            severity_color = "\033[38;5;141m";
+            break;
+        case Level::Info:
+            severity_color = "\033[36m";
+            break;
+        case Level::Warn:
+            severity_color = "\033[93m";
+            break;
+        case Level::Error:
+            severity_color = "\033[91m";
+            break;
+        case Level::Off:
+            return "";
+    }
+
+    const double elapsed = std::chrono::duration<double>(timestamp - g_log_epoch).count();
+    return std::format("\033[38;5;244m[+{:.1f}s]\033[0m {}[{}]\033[0m {}\n", elapsed,
+                       severity_color, level_name(level), message);
+}
 
 auto parse_level(std::string_view str) noexcept -> std::optional<Level> {
     if (str == "trace" || str == "TRACE") return Level::Trace;
@@ -258,11 +270,28 @@ void set_tui_callback(LogCallback cb) {
         std::scoped_lock lock(g_log_mutex);
         g_tui_callback = std::move(cb);
         callback = g_tui_callback;
-        if (callback) pending.swap(g_startup_logs);
+        if (callback && !g_tui_structured_callback) pending.swap(g_startup_logs);
     }
     if (callback) {
         for (const auto& entry : pending) {
             callback(tui_message(entry.level, entry.message, entry.timestamp));
+        }
+    }
+}
+
+void set_tui_structured_callback(StructuredLogCallback cb) {
+    std::deque<PendingLog> pending;
+    StructuredLogCallback callback;
+    {
+        std::scoped_lock lock(g_log_mutex);
+        g_tui_structured_callback = std::move(cb);
+        callback = g_tui_structured_callback;
+        if (callback) pending.swap(g_startup_logs);
+    }
+    if (callback) {
+        for (const auto& entry : pending) {
+            callback(
+                {.level = entry.level, .message = entry.message, .timestamp = entry.timestamp});
         }
     }
 }

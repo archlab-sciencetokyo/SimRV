@@ -234,9 +234,26 @@ inline auto resolve_cpu_model_path(std::string_view name_or_path) -> std::option
             if (std::filesystem::is_regular_file(rel_models, ec)) {
                 return rel_models.string();
             }
+            const std::filesystem::path installed_models =
+                root / "share" / "SimRV" / "models" / (std::string(name_or_path) + ".cfg");
+            if (std::filesystem::is_regular_file(installed_models, ec)) {
+                return installed_models.string();
+            }
         }
     }
 #endif
+
+    for (const auto& system_root : {std::filesystem::path("/usr/share/SimRV/models"),
+                                    std::filesystem::path("/usr/local/share/SimRV/models")}) {
+        const auto sys_cfg = system_root / (std::string(name_or_path) + ".cfg");
+        if (std::filesystem::is_regular_file(sys_cfg, ec)) {
+            return sys_cfg.string();
+        }
+        const auto sys_direct = system_root / p;
+        if (std::filesystem::is_regular_file(sys_direct, ec)) {
+            return sys_direct.string();
+        }
+    }
 
     const char* env_dir = std::getenv("SIMRV_CONFIG_DIR");
     if (env_dir != nullptr && *env_dir != '\0') {

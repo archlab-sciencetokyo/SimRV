@@ -146,6 +146,8 @@ simrv -m program.elf
 | `--gdb-port <port>` | Set GDB RSP TCP listener port (default: 1234). |
 | `--isa-info` | Show the qualified ISA, vector, privilege, and debugger capability contract. |
 | `--doctor` | Diagnose terminal presentation and portable-runtime conditions. |
+| `--class` | Enable student classroom mode with interactive contextual guidance. |
+| `--mission <file.mission>` | Load a versioned classroom lab mission with sequential checkpoints (requires `--class` and `--tui`). |
 | `--version` | Display version and build information. |
 | `-h, --help` | Show full command-line help message. |
 

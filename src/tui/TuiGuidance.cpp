@@ -166,6 +166,15 @@ auto guidance_for_context(const GuidanceContext& context) -> PageGuidance {
                 .next_hint = "Run or pause guest execution.",
                 .glossary_topic = 0};
             break;
+        case TuiRegPage::LOG:
+            guidance = {
+                .title = "Execution log",
+                .meaning = "Structured event stream from simulation, devices, and subsystems.",
+                .relationship = "Filter by severity or open the full log viewer modal with [L].",
+                .next_action = KeyAction::OpenLogModal,
+                .next_hint = "Open the interactive full-screen log viewer.",
+                .glossary_topic = 0};
+            break;
     }
 
     using namespace simrv::pipeline::operation;

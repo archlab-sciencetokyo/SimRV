@@ -27,7 +27,7 @@ auto parse_slots(std::string_view text, std::vector<WorkbenchSlot>& slots) -> bo
         int scroll = 0;
         if (colon == std::string_view::npos || !parse_integer(item.substr(0, colon), page) ||
             !parse_integer(item.substr(colon + 1), scroll) ||
-            page > static_cast<unsigned>(TuiRegPage::LIVE) || scroll < 0 || parsed.size() >= 4) {
+            page > static_cast<unsigned>(TuiRegPage::LOG) || scroll < 0 || parsed.size() >= 4) {
             return false;
         }
         parsed.push_back({.page = static_cast<TuiRegPage>(page), .scroll_offset = scroll});

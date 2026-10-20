@@ -3,7 +3,15 @@
 All notable changes to SimRV are documented here.
 Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [v3.0.0-rc.14] — unreleased
+## [v3.0.0-rc.15] — unreleased
+
+- Interactive terminal text selection polish with double-click word selection, triple-click line selection, and automatic OSC 52 clipboard export.
+- Interactive Hex and ASCII byte click navigation and editing in MemoryModal.
+- Real-time case-insensitive search and prefix filtering across file pickers and tool pickers.
+- Classroom and mission mode text reflow for compact screens and objective completion status indication.
+- Resolved keybinding conflict between Hex Memory Inspector (`[d]`) and pane scrolling, harmonizing all keyboard and scroll mechanics.
+
+## [v3.0.0-rc.14] — 2026-10-20
 
 - Interactive full-screen hex dump and memory inspector modal with cursor navigation, address seeking, and multi-format word interpretation.
 - In-place memory byte and word editing during simulation pause.

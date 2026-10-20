@@ -51,6 +51,9 @@ auto InspectorPane::get_total_rows(int width) -> int {
     if (page_ == TuiRegPage::EXPLAIN) {
         return static_cast<int>(get_explain_rows(width).size());
     }
+    if (page_ == TuiRegPage::LOG) {
+        return static_cast<int>(log_lines_.size());
+    }
     bool const single_column = is_single_column(width);
     if (secondary_column_mode_) {
         return performance_start_row(single_column);
@@ -298,6 +301,7 @@ void InspectorPane::configure_current_viewport(int width) {
     const int total_rows =
         (page_ == TuiRegPage::EXPLAIN) ? static_cast<int>(get_explain_rows(width).size())
         : (page_ == TuiRegPage::TRACE) ? static_cast<int>(trace_buffer_ ? trace_buffer_->size() : 0)
+        : (page_ == TuiRegPage::LOG)   ? static_cast<int>(log_lines_.size())
                                        : get_total_rows(width);
     const int total_cols = content_total_columns(width);
     const int viewport_width = (total_cols > width) ? std::max(1, width - 2) : width;
@@ -491,6 +495,7 @@ auto InspectorPane::render_tab_bar_tier2(int width) const -> std::string {
             tabs.push_back({.page = TuiRegPage::LIVE, .name = "Live"});
             tabs.push_back({.page = TuiRegPage::EXPLAIN, .name = "Explain"});
             tabs.push_back({.page = TuiRegPage::TRACE, .name = "Trace"});
+            tabs.push_back({.page = TuiRegPage::LOG, .name = "Log"});
             break;
         }
     }
@@ -560,6 +565,7 @@ auto InspectorPane::get_tab_at(int row, int col) const -> std::optional<TuiRegPa
                     if (span.grp == TuiCategoryGroup::Tools) {
                         if (page_ == TuiRegPage::LIVE) return TuiRegPage::EXPLAIN;
                         if (page_ == TuiRegPage::EXPLAIN) return TuiRegPage::TRACE;
+                        if (page_ == TuiRegPage::TRACE) return TuiRegPage::LOG;
                         return TuiRegPage::LIVE;
                     }
                 }
@@ -615,6 +621,7 @@ auto InspectorPane::get_tab_at(int row, int col) const -> std::optional<TuiRegPa
                 tabs.push_back({.page = TuiRegPage::LIVE, .name = "Live"});
                 tabs.push_back({.page = TuiRegPage::EXPLAIN, .name = "Explain"});
                 tabs.push_back({.page = TuiRegPage::TRACE, .name = "Trace"});
+                tabs.push_back({.page = TuiRegPage::LOG, .name = "Log"});
                 break;
             }
         }
@@ -677,9 +684,9 @@ auto InspectorPane::render_log_bottom_row(int row_idx, int num_rows, int width) 
             } else if (below > 0) {
                 summary = std::format("Log (▼ {} below)", below);
             }
-            return section_line(summary + " · click to jump · u/d scroll", width);
+            return section_line(summary + " · [L] modal · wheel scroll", width);
         }
-        return section_line("Log · u/d scroll", width);
+        return section_line("Log · [L] modal · wheel scroll", width);
     }
     if (log_lines_.empty()) {
         return format_to_width("", width);
@@ -755,31 +762,41 @@ auto InspectorPane::current_student_guidance() const -> PageGuidance {
 
 auto InspectorPane::render_guidance_row(int row_idx, int width) -> std::string {
     auto const guidance = current_student_guidance();
+    const bool compact = (width < 65);
     switch (row_idx) {
         case 0:
-            return section_line("Student Guide · " + guidance.title, width);
-        case 1:
-            return format_to_width(" What you see: " + guidance.meaning, width);
-        case 2:
-            return format_to_width(" Why it matters: " + guidance.relationship, width);
+            return section_line(
+                compact ? ("Guide · " + guidance.title) : ("Student Guide · " + guidance.title),
+                width);
+        case 1: {
+            std::string text =
+                compact ? (" See: " + guidance.meaning) : (" What you see: " + guidance.meaning);
+            return format_to_width(text, width);
+        }
+        case 2: {
+            std::string text = compact ? (" Why: " + guidance.relationship)
+                                       : (" Why it matters: " + guidance.relationship);
+            return format_to_width(text, width);
+        }
         case 3: {
             auto const& binding = Keybindings::get(guidance.next_action);
             auto const& activate = Keybindings::get(KeyAction::ActivateStudentGuide);
-            return format_to_width(" Try next: " + activate.key_display + " " + guidance.next_hint +
-                                       " (" + binding.key_display + ")  [?] Glossary",
-                                   width);
+            std::string text;
+            if (compact) {
+                text = std::format(" Next: {} {} ({})", activate.key_display, guidance.next_hint,
+                                   binding.key_display);
+            } else {
+                text = std::format(" Try next: {} {} ({})  [?] Glossary", activate.key_display,
+                                   guidance.next_hint, binding.key_display);
+            }
+            return format_to_width(text, width);
         }
         default:
             return format_to_width("", width);
     }
 }
 
-auto InspectorPane::has_tool_menu(TuiRegPage page) const -> bool {
-    if (page == TuiRegPage::PIPELINE && !machine_.runtime_profile.is_cycle_mode()) {
-        return false;
-    }
-    return true;
-}
+auto InspectorPane::has_tool_menu(TuiRegPage /*page*/) const -> bool { return true; }
 
 auto InspectorPane::render_column_header(int col_idx, const char* name, bool is_focused, int width,
                                          std::string_view key_hint, bool has_menu,
@@ -893,13 +910,18 @@ auto InspectorPane::render_row_internal(int row_idx, int width, int header_rows,
     bool const show_guidance =
         !is_secondary &&
         should_show_guidance(paused_, student_guide_enabled_, visible_rows_, width);
-    int const guidance_start = visible_rows_ - kLogAreaHeight - kGuidanceHeight;
-    if (!is_secondary && page_ != TuiRegPage::EXPLAIN && page_ != TuiRegPage::TRACE) {
+    bool const show_log_drawer =
+        !is_secondary && log_drawer_open_ && (visible_rows_ >= 15) &&
+        (page_ != TuiRegPage::EXPLAIN && page_ != TuiRegPage::TRACE && page_ != TuiRegPage::LOG);
+    int const guidance_start =
+        visible_rows_ - (show_log_drawer ? kLogAreaHeight : 0) - kGuidanceHeight;
+    if (!is_secondary && page_ != TuiRegPage::EXPLAIN && page_ != TuiRegPage::TRACE &&
+        page_ != TuiRegPage::LOG) {
         if (show_guidance && row_idx >= guidance_start &&
             row_idx < guidance_start + kGuidanceHeight) {
             return render_guidance_row(row_idx - guidance_start, width);
         }
-        if (visible_rows_ >= 15 && row_idx >= visible_rows_ - kLogAreaHeight) {
+        if (show_log_drawer && row_idx >= visible_rows_ - kLogAreaHeight) {
             int log_row_idx = row_idx - (visible_rows_ - kLogAreaHeight);
             return render_log_bottom_row(log_row_idx, kLogAreaHeight, width);
         }
@@ -924,18 +946,30 @@ auto InspectorPane::render_row_internal(int row_idx, int width, int header_rows,
     int const content_row_idx = row_idx - header_rows;
     int const logical_row = content_row_idx + sv.offset_y();
 
-    if (page_ == TuiRegPage::TRACE || page_ == TuiRegPage::EXPLAIN) {
-        return sv.render_row(content_row_idx, width,
-                             [this, render_width, &explain_rows](framework::RowIndex r,
-                                                                 framework::ColumnIndex, int) {
-                                 if (page_ == TuiRegPage::TRACE) {
-                                     return render_trace_row(r, render_width);
-                                 }
-                                 if (r >= 0 && r < static_cast<int>(explain_rows.size())) {
-                                     return explain_rows.at(static_cast<std::size_t>(r));
-                                 }
-                                 return std::string{};
-                             });
+    if (page_ == TuiRegPage::TRACE || page_ == TuiRegPage::EXPLAIN || page_ == TuiRegPage::LOG) {
+        return sv.render_row(
+            content_row_idx, width,
+            [this, render_width, &explain_rows](framework::RowIndex r, framework::ColumnIndex,
+                                                int) {
+                if (page_ == TuiRegPage::LOG) {
+                    if (log_lines_.empty()) {
+                        if (r == 0) return format_to_width(" [No log records yet]", render_width);
+                        return format_to_width("", render_width);
+                    }
+                    if (r >= 0 && r < static_cast<int>(log_lines_.size())) {
+                        return format_to_width(" " + log_lines_.at(static_cast<std::size_t>(r)),
+                                               render_width);
+                    }
+                    return format_to_width("", render_width);
+                }
+                if (page_ == TuiRegPage::TRACE) {
+                    return render_trace_row(r, render_width);
+                }
+                if (r >= 0 && r < static_cast<int>(explain_rows.size())) {
+                    return explain_rows.at(static_cast<std::size_t>(r));
+                }
+                return std::string{};
+            });
     }
 
     if (sv.can_scroll_up() && content_row_idx == 0) {
@@ -1071,9 +1105,12 @@ auto InspectorPane::get_visible_content_rows() const -> int {
     constexpr int kGuidanceHeight = 4;
     bool const show_guidance =
         should_show_guidance(paused_, student_guide_enabled_, visible_rows_, last_width_);
+    bool const show_log_drawer =
+        log_drawer_open_ && (visible_rows_ >= 15) &&
+        (page_ != TuiRegPage::EXPLAIN && page_ != TuiRegPage::TRACE && page_ != TuiRegPage::LOG);
     int max_content_rows = visible_rows_ - (column_header_mode_ ? 1 : 2);
-    if (page_ != TuiRegPage::EXPLAIN && page_ != TuiRegPage::TRACE) {
-        if (visible_rows_ >= 15) {
+    if (page_ != TuiRegPage::EXPLAIN && page_ != TuiRegPage::TRACE && page_ != TuiRegPage::LOG) {
+        if (show_log_drawer) {
             max_content_rows -= kLogAreaHeight;
         }
         if (show_guidance) {

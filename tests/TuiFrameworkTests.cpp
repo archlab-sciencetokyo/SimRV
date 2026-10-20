@@ -38,6 +38,7 @@
 #include "simrv/tui/modals/HartModal.hpp"
 #include "simrv/tui/modals/HelpModal.hpp"
 #include "simrv/tui/modals/LoadModal.hpp"
+#include "simrv/tui/modals/LogModal.hpp"
 #include "simrv/tui/modals/MemoryModal.hpp"
 #include "simrv/tui/modals/ModalComponents.hpp"
 #include "simrv/tui/modals/SettingsModal.hpp"
@@ -372,7 +373,7 @@ void test_utf8_and_theme_helpers() {
 
 void test_key_registry() {
     const auto bindings = simrv::tui::Keybindings::all();
-    expect(bindings.size() == 35, "all key actions have registry entries");
+    expect(bindings.size() == 37, "all key actions have registry entries");
     std::set<simrv::tui::KeyAction> actions;
     std::set<char> claimed_chars;
     for (const auto& binding : bindings) {
@@ -843,14 +844,40 @@ void test_classroom_cli_defaults() {
                mission_parsed->options.to_machine_config().tui.mission == mission_path,
            "mission CLI selects an external classroom mission");
 
-    std::array<std::string, 6> invalid_storage = {"SimRV",      "--class", "--mission",
-                                                  mission_path, "-m",      "demo.elf"};
-    std::array<char*, 6> invalid_args{};
+    // Rejects non-TUI (headless CLI) invocation
+    std::array<std::string, 7> invalid_storage = {"SimRV",      "--cli", "--class", "--mission",
+                                                  mission_path, "-m",    "demo.elf"};
+    std::array<char*, 7> invalid_args{};
     for (size_t index = 0; index < invalid_storage.size(); ++index) {
         invalid_args[index] = invalid_storage[index].data();
     }
     expect(!simrv::util::parse_command_line(invalid_args).has_value(),
-           "mission rejects a non-TUI classroom invocation");
+           "mission rejects a non-TUI headless CLI invocation");
+
+    // Accepts --class --mission without explicit --tui (TUI is default)
+    std::array<std::string, 6> default_tui_storage = {
+        "SimRV", "--class", "--mission", mission_path, "-m", "control-flow-calls.elf"};
+    std::array<char*, 6> default_tui_args{};
+    for (size_t index = 0; index < default_tui_storage.size(); ++index) {
+        default_tui_args[index] = default_tui_storage[index].data();
+    }
+    const auto default_tui_parsed = simrv::util::parse_command_line(default_tui_args);
+    expect(default_tui_parsed.has_value() &&
+               default_tui_parsed->options.to_machine_config().tui.mission == mission_path,
+           "mission CLI succeeds with default TUI without requiring explicit --tui");
+
+    // Accepts --mission alone and auto-enables class_mode
+    std::array<std::string, 5> mission_only_storage = {"SimRV", "--mission", mission_path, "-m",
+                                                       "control-flow-calls.elf"};
+    std::array<char*, 5> mission_only_args{};
+    for (size_t index = 0; index < mission_only_storage.size(); ++index) {
+        mission_only_args[index] = mission_only_storage[index].data();
+    }
+    const auto mission_only_parsed = simrv::util::parse_command_line(mission_only_args);
+    expect(mission_only_parsed.has_value() &&
+               mission_only_parsed->options.to_machine_config().tui.class_mode &&
+               mission_only_parsed->options.to_machine_config().tui.mission == mission_path,
+           "--mission automatically enables class_mode without requiring explicit --class");
 }
 
 void test_load_modal_path_completion() {
@@ -2483,7 +2510,10 @@ void test_tui_differential_rendering_and_throttling() {
 void test_multi_column_workbench_tools_and_swapping() {
     // 1. ToolPickerModal catalog and accelerator lookup
     const auto& tools = simrv::tui::modals::ToolPickerModal::all_tools();
-    expect(tools.size() == 15, "tool picker provides 15 selectable workbench tools");
+    expect(tools.size() == 16, "tool picker provides 16 selectable workbench tools");
+    expect(simrv::tui::modals::ToolPickerModal::find_by_accelerator('o') ==
+               simrv::tui::TuiRegPage::LOG,
+           "accelerator 'o' maps to LOG");
     expect(simrv::tui::modals::ToolPickerModal::find_by_accelerator('g') ==
                simrv::tui::TuiRegPage::GPR,
            "accelerator 'g' maps to GPR");
@@ -2649,26 +2679,26 @@ void test_multi_column_workbench_tools_and_swapping() {
     expect(modal.get_tool_picker_slot() == 1, "modal targets column 1");
     tui.close_modal();
 
-    // 6. Pipeline menu suppression in functional mode
+    // 6. Pipeline menu available in functional/IA mode
     tui.set_workbench_slot_page(0, simrv::tui::TuiRegPage::PIPELINE);
     tui.handle_mouse(10, 6, 0);  // click in body of slot 0 to focus it
     expect(tui.focused_slot() == 0, "slot 0 is focused");
 
     auto* inspector = simrv::tui::TuiTestAccess::inspector(tui);
     expect(inspector != nullptr, "inspector pane is initialized");
-    expect(!inspector->has_tool_menu(simrv::tui::TuiRegPage::PIPELINE),
-           "pipeline panel in functional mode has no tool menu");
+    expect(inspector->has_tool_menu(simrv::tui::TuiRegPage::PIPELINE),
+           "pipeline panel in functional mode has tool menu");
 
-    std::string hdr = inspector->render_column_header(0, "Pipeline", true, 46, "", false);
-    expect(hdr.find("▼") == std::string::npos,
-           "dropdown affordance is omitted when has_menu is false");
-    expect(hdr.find("[Ctrl-W]") == std::string::npos,
-           "tool hint is omitted when has_menu is false");
+    std::string hdr = inspector->render_column_header(
+        0, "Pipeline", true, 46, "", inspector->has_tool_menu(simrv::tui::TuiRegPage::PIPELINE));
+    expect(hdr.find("▼") != std::string::npos,
+           "dropdown affordance is present when has_menu is true");
+    expect(hdr.find("[Ctrl-W]") != std::string::npos, "tool hint is present when has_menu is true");
 
-    // Click on focused pipeline header when only stages tool is available:
+    // Click on focused pipeline header opens tool picker:
     tui.handle_mouse(10, 4, 0);
-    expect(!tui.is_modal_active(),
-           "clicking header of pipeline panel in functional mode does not open menu");
+    expect(tui.is_modal_active(), "clicking header of pipeline panel opens tool menu");
+    tui.close_modal();
 
     // 7. Pipeline panel width check (fits within 46 columns without false horizontal scroll
     // overflow)
@@ -2858,7 +2888,7 @@ void test_multi_column_panel_management_and_modal_usability() {
     const auto& scrolled_screen = simrv::tui::TuiTestAccess::last_screen_lines(tui);
     size_t log_header_row = scrolled_screen.size();
     for (size_t i = 0; i < scrolled_screen.size(); ++i) {
-        if (strip_ansi(scrolled_screen.at(i)).find("Log · u/d scroll") != std::string::npos) {
+        if (strip_ansi(scrolled_screen.at(i)).find("Log · ") != std::string::npos) {
             log_header_row = i;
             break;
         }
@@ -3649,6 +3679,71 @@ void test_memory_modal_and_hart_modal() {
         }
     }
     expect(found_hart_table, "HartModal renders hart table header");
+
+    // 3. Test MemoryModal interactive hex and ascii cell clicking
+    MemoryModal::open(0x80000000ULL, machine, nullptr);
+    constexpr unsigned int xlen = 64;
+    // Row 2 byte 0 at rel_x = 16
+    expect(MemoryModal::handle_cell_click(2, 16, xlen), "Clicking byte 0 at row 2 succeeds");
+    expect(MemoryModal::current_address() == (0x80000000ULL + 2 * 16 + 0),
+           "Current address matches clicked row 2 byte 0");
+
+    // Row 3 byte 8 at rel_x = 16 + 8 * 3 + 1 = 41
+    expect(MemoryModal::handle_cell_click(3, 41, xlen), "Clicking byte 8 at row 3 succeeds");
+    expect(MemoryModal::current_address() == (0x80000000ULL + 3 * 16 + 8),
+           "Current address matches clicked row 3 byte 8");
+
+    // Row 4 ASCII byte 5 at rel_x = 16 + 51 + 5 = 72
+    expect(MemoryModal::handle_cell_click(4, 72, xlen), "Clicking ASCII byte 5 at row 4 succeeds");
+    expect(MemoryModal::current_address() == (0x80000000ULL + 4 * 16 + 5),
+           "Current address matches clicked row 4 ASCII byte 5");
+}
+
+void test_rc15_features() {
+    using namespace simrv::tui;
+    using namespace simrv::tui::modals;
+
+    // 1. LogModal functionality
+    LogBuffer log_buffer;
+    log_buffer.push(simrv::log::Level::Info, "Standard informational log message");
+    log_buffer.push(simrv::log::Level::Warn, "A warning to pay attention to");
+    log_buffer.push(simrv::log::Level::Error, "A critical error condition");
+
+    expect(log_buffer.warn_count() == 1, "LogBuffer correctly tallies warnings");
+    expect(log_buffer.error_count() == 1, "LogBuffer correctly tallies errors");
+
+    LogModal modal;
+    modal.open(log_buffer);
+    expect(modal.is_following(), "LogModal opens with follow tail enabled");
+    modal.toggle_follow();
+    expect(!modal.is_following(), "toggle_follow turns follow off");
+
+    expect(!modal.filter_level().has_value(), "LogModal starts with no filter (ALL)");
+    modal.cycle_filter_level();
+    expect(modal.filter_level() == simrv::log::Level::Info, "Filter cycled to Info");
+    modal.cycle_filter_level();
+    expect(modal.filter_level() == simrv::log::Level::Warn, "Filter cycled to Warn");
+    modal.cycle_filter_level();
+    expect(modal.filter_level() == simrv::log::Level::Error, "Filter cycled to Error");
+    modal.cycle_filter_level();
+    expect(!modal.filter_level().has_value(), "Filter cycled back to ALL");
+
+    modal.set_search_query("critical");
+    expect(modal.search_query() == "critical", "Search query set");
+    std::string copied = modal.copy_text(log_buffer);
+    expect(copied.contains("critical error"), "copy_text filters and returns matching content");
+
+    std::vector<std::string> rows;
+    auto add_row = [&](const std::string& r) { rows.push_back(r); };
+    modal.render(rows, add_row, log_buffer, 30, 80);
+    expect(!rows.empty(), "LogModal renders rows");
+
+    // 2. KeyAction verification for [d] and [L]
+    const auto& dump_binding = Keybindings::get(KeyAction::DumpMemory);
+    expect(dump_binding.primary_char == 'd' && dump_binding.alt_char == 'D',
+           "DumpMemory is bound to 'd'/'D'");
+    const auto& log_binding = Keybindings::get(KeyAction::OpenLogModal);
+    expect(log_binding.primary_char == 'L', "OpenLogModal is bound to 'L'");
 }
 
 }  // namespace
@@ -3700,6 +3795,7 @@ int main() {
     test_terminal_cursor_tracking_and_scrollback();
     test_sixel_display_resolution_adaptation_and_size_warning();
     test_memory_modal_and_hart_modal();
+    test_rc15_features();
     if (failures != 0) return EXIT_FAILURE;
     std::cout << "TUI framework tests passed\n";
     return EXIT_SUCCESS;

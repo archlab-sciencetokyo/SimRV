@@ -664,7 +664,11 @@ auto StatusBar::render_row(int row_idx, int width) -> std::string {
         // Header
         const size_t selected = tui_ ? tui_->selected_hart() : 0;
         std::string status_badge = status_override_;
-        if (status_badge.empty()) {
+        if (tui_ && tui_->mission_progress().completed()) {
+            bool use_ansi = use_basic_ansi_badges();
+            status_badge = use_ansi ? "\033[42;30m MISSION COMPLETE \033[0m"
+                                    : "\033[48;5;121m\033[38;5;232m MISSION COMPLETE \033[0m";
+        } else if (status_badge.empty()) {
             bool use_ansi = use_basic_ansi_badges();
             const auto st = machine_.execution_state();
             if (machine_.is_shutdown_ || st == simrv::core::ExecutionState::Stopped) {
@@ -716,6 +720,18 @@ auto StatusBar::render_row(int row_idx, int width) -> std::string {
         std::string const speed_label =
             speed_control_label(machine_, tui_, kips_, paused_, inner_w / 2);
         mode_prefix += " " + header_badge(speed_label, "\033[43;30m", "\033[48;5;223;38;5;232m");
+
+        if (tui_) {
+            if (tui_->log_buffer().error_count() > 0) {
+                mode_prefix +=
+                    " " + header_badge(std::format("{} ✖", tui_->log_buffer().error_count()),
+                                       "\033[41;37m", "\033[48;5;196;38;5;231m");
+            } else if (tui_->log_buffer().warn_count() > 0) {
+                mode_prefix +=
+                    " " + header_badge(std::format("{} ⚠", tui_->log_buffer().warn_count()),
+                                       "\033[43;30m", "\033[48;5;223;38;5;232m");
+            }
+        }
 
         std::string mid_text;
         if (scroll_offset_ > 0) {
