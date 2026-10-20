@@ -5,6 +5,7 @@
 #pragma once
 
 #include <atomic>
+#include <chrono>
 #include <cstdint>
 #include <format>
 #include <functional>
@@ -18,7 +19,14 @@ namespace simrv::log {
 enum class Level : uint8_t { Trace = 0, Debug = 1, Info = 2, Warn = 3, Error = 4, Off = 5 };
 enum class Format : uint8_t { Text, Json, JsonPretty };
 
+struct LogRecord {
+    Level level = Level::Info;
+    std::string message;
+    std::chrono::steady_clock::time_point timestamp = std::chrono::steady_clock::now();
+};
+
 using LogCallback = std::function<void(const std::string&)>;
+using StructuredLogCallback = std::function<void(const LogRecord&)>;
 
 /// Parse a log level string case-insensitively.
 [[nodiscard]] auto parse_level(std::string_view str) noexcept -> std::optional<Level>;
@@ -49,6 +57,14 @@ void set_tui_mode(bool enable);
 
 /// Register a callback to route logs to the TUI (if active).
 void set_tui_callback(LogCallback cb);
+
+/// Register a structured callback to route log records with level and timestamp to the TUI.
+void set_tui_structured_callback(StructuredLogCallback cb);
+
+/// Format a TUI log message with relative timestamp and severity badge.
+[[nodiscard]] auto format_tui_message(Level level, std::string_view message,
+                                      std::chrono::steady_clock::time_point timestamp =
+                                          std::chrono::steady_clock::now()) -> std::string;
 
 /// Mirror all subsequent log records to a timestamped UTF-8 developer log.
 [[nodiscard]] auto set_log_file(std::string_view path) -> bool;

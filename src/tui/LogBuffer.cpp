@@ -5,7 +5,11 @@
 
 #include "simrv/tui/LogBuffer.hpp"
 
+#include <algorithm>
+#include <cctype>
+#include <format>
 #include <sstream>
+#include <utility>
 
 #include "simrv/tui/TuiTheme.hpp"
 
@@ -147,22 +151,59 @@ void wrap_single_line(std::string_view raw_line, int max_width,
     }
 }
 
+auto case_insensitive_contains(std::string_view haystack, std::string_view needle) -> bool {
+    if (needle.empty()) return true;
+    auto it = std::search(haystack.begin(), haystack.end(), needle.begin(), needle.end(),
+                          [](char ch1, char ch2) {
+                              return std::tolower(static_cast<unsigned char>(ch1)) ==
+                                     std::tolower(static_cast<unsigned char>(ch2));
+                          });
+    return it != haystack.end();
+}
+
 }  // namespace
 
 LogBuffer::LogBuffer(std::size_t max_capacity) : max_capacity_(max_capacity) {}
 
 void LogBuffer::push(std::string message) {
+    simrv::log::Level lvl = simrv::log::Level::Info;
+    if (message.find("[ERROR]") != std::string::npos ||
+        message.find("ERROR") != std::string::npos) {
+        lvl = simrv::log::Level::Error;
+    } else if (message.find("[WARN]") != std::string::npos ||
+               message.find("WARN") != std::string::npos) {
+        lvl = simrv::log::Level::Warn;
+    } else if (message.find("[DEBUG]") != std::string::npos) {
+        lvl = simrv::log::Level::Debug;
+    } else if (message.find("[TRACE]") != std::string::npos) {
+        lvl = simrv::log::Level::Trace;
+    }
+    push(lvl, std::move(message));
+}
+
+void LogBuffer::push(simrv::log::Level level, std::string message,
+                     std::chrono::steady_clock::time_point timestamp) {
+    push(LogEntry{.timestamp = timestamp, .level = level, .text = std::move(message)});
+}
+
+void LogBuffer::push(LogEntry entry) {
     std::scoped_lock lock(mutex_);
     if (entries_.size() >= max_capacity_) {
+        if (entries_.front().level == simrv::log::Level::Warn && warn_count_ > 0) --warn_count_;
+        if (entries_.front().level == simrv::log::Level::Error && error_count_ > 0) --error_count_;
         entries_.pop_front();
     }
-    entries_.push_back(LogEntry{.text = std::move(message)});
+    if (entry.level == simrv::log::Level::Warn) ++warn_count_;
+    if (entry.level == simrv::log::Level::Error) ++error_count_;
+    entries_.push_back(std::move(entry));
     ++revision_;
 }
 
 void LogBuffer::clear() {
     std::scoped_lock lock(mutex_);
     entries_.clear();
+    warn_count_ = 0;
+    error_count_ = 0;
     ++revision_;
 }
 
@@ -176,17 +217,43 @@ auto LogBuffer::empty() const -> bool {
     return entries_.empty();
 }
 
-auto LogBuffer::get_wrapped_lines(int max_width, int max_rows) const -> std::vector<std::string> {
+auto LogBuffer::warn_count() const -> std::size_t {
+    std::scoped_lock lock(mutex_);
+    return warn_count_;
+}
+
+auto LogBuffer::error_count() const -> std::size_t {
+    std::scoped_lock lock(mutex_);
+    return error_count_;
+}
+
+auto LogBuffer::get_all_entries() const -> std::vector<LogEntry> {
+    std::scoped_lock lock(mutex_);
+    return {entries_.begin(), entries_.end()};
+}
+
+auto LogBuffer::get_wrapped_lines(int max_width, int max_rows,
+                                  std::optional<simrv::log::Level> min_level,
+                                  std::string_view search_filter) const
+    -> std::vector<std::string> {
     std::scoped_lock lock(mutex_);
     if (entries_.empty() || max_width <= 0 || max_rows <= 0) {
         return {};
     }
-    if (cached_revision_ == revision_ && cached_width_ == max_width && cached_rows_ == max_rows) {
+    if (cached_revision_ == revision_ && cached_width_ == max_width && cached_rows_ == max_rows &&
+        cached_min_level_ == min_level && cached_filter_ == search_filter) {
         return cached_wrapped_lines_;
     }
 
     std::vector<std::string> all_wrapped;
     for (const auto& entry : entries_) {
+        if (min_level.has_value() &&
+            std::to_underlying(entry.level) < std::to_underlying(*min_level)) {
+            continue;
+        }
+        if (!search_filter.empty() && !case_insensitive_contains(entry.text, search_filter)) {
+            continue;
+        }
         std::stringstream ss(entry.text);
         std::string line;
         while (std::getline(ss, line)) {
@@ -208,6 +275,8 @@ auto LogBuffer::get_wrapped_lines(int max_width, int max_rows) const -> std::vec
     cached_revision_ = revision_;
     cached_width_ = max_width;
     cached_rows_ = max_rows;
+    cached_min_level_ = min_level;
+    cached_filter_ = std::string(search_filter);
     return cached_wrapped_lines_;
 }
 

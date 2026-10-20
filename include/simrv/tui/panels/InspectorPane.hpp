@@ -120,6 +120,9 @@ class InspectorPane : public TuiWidget {
         // The log header occupies one of the six fixed rows.
         log_scroll_view_.set_geometry(static_cast<int>(log_lines_.size()), 5);
     }
+    void toggle_log_drawer() { log_drawer_open_ = !log_drawer_open_; }
+    [[nodiscard]] auto is_log_drawer_open() const -> bool { return log_drawer_open_; }
+    void set_log_drawer_open(bool open) { log_drawer_open_ = open; }
     void set_previous_page(TuiRegPage p) { previous_page_ = p; }
     [[nodiscard]] auto get_previous_page() const -> std::optional<TuiRegPage> {
         return previous_page_;
@@ -260,7 +263,7 @@ class InspectorPane : public TuiWidget {
     std::array<uint64_t, 32> cached_fpr_{};
     std::array<simrv::core::VectorRegister, 32> cached_vec_{};
     simrv::pipeline::Scoreboard projected_scoreboard_{};
-    std::array<std::array<std::string, 80>, 16> cached_page_rows_{};
+    std::array<std::array<std::string, 80>, 24> cached_page_rows_{};
     struct LiveHartSnapshot {
         simrv::xlen::Register pc = 0;
         std::string symbol;
@@ -277,7 +280,8 @@ class InspectorPane : public TuiWidget {
     uint64_t max_kips_ = 0;
     std::vector<uint64_t> kips_history_;
     int visible_rows_ = 25;
-    std::array<framework::ScrollView, 16> scroll_views_{};
+    bool log_drawer_open_ = true;
+    std::array<framework::ScrollView, 24> scroll_views_{};
     framework::ScrollView log_scroll_view_{framework::ScrollIndicatorMode::HeaderSummary};
 
     [[nodiscard]] auto current_scroll_view() -> framework::ScrollView& {

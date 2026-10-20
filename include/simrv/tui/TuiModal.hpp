@@ -12,6 +12,7 @@
 #include <utility>
 #include <vector>
 
+#include "simrv/core/Logger.hpp"
 #include "simrv/tui/TuiKey.hpp"
 #include "simrv/tui/TuiTypes.hpp"
 #include "simrv/tui/framework/Types.hpp"
@@ -26,6 +27,7 @@ enum class PlatformProfile : uint8_t;
 namespace simrv::tui {
 
 class InspectorPane;
+class LogBuffer;
 
 enum class ModalType : uint8_t {
     None,
@@ -47,7 +49,8 @@ enum class ModalType : uint8_t {
     LoadCpuConfig,
     LoadFilePicker,
     MemoryDump,
-    SwitchHart
+    SwitchHart,
+    LogViewer
 };
 
 struct SysConfigDraft {
@@ -141,6 +144,7 @@ class TuiModal {
     [[nodiscard]] auto get_type() const -> ModalType { return active_modal_; }
     [[nodiscard]] auto get_input() const -> const std::string& { return input_; }
     void set_input(std::string input) { input_ = std::move(input); }
+    void set_log_buffer(LogBuffer* buf) { log_buffer_ = buf; }
 
     void open(ModalType type, InspectorPane* left_pane, uint64_t step_delay_us);
     void close();
@@ -207,6 +211,12 @@ class TuiModal {
     [[nodiscard]] auto get_selected_tool_page() const -> TuiRegPage;
 
     void open_memory_dump(simrv::xlen::Address addr = 0, InspectorPane* inspector_pane = nullptr);
+    void open_log_viewer();
+    void scroll_log_viewer(int delta, int total_lines = 100, int visible_lines = 20);
+    void scroll_log_viewer_page(int pages, int total_lines = 100, int visible_lines = 20);
+    void toggle_log_follow();
+    void cycle_log_level();
+    void set_log_filter_level(std::optional<simrv::log::Level> level);
     void open_switch_hart(size_t current_hart);
     void move_memory_cursor(int delta_byte, int delta_row);
     void scroll_memory_page(int pages);
@@ -250,6 +260,7 @@ class TuiModal {
 
    private:
     simrv::core::Machine& machine_;
+    LogBuffer* log_buffer_ = nullptr;
     ModalType active_modal_ = ModalType::None;
     std::string input_;
     std::string notice_title_;

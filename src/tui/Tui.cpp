@@ -45,6 +45,7 @@
 #include "simrv/tui/TuiTheme.hpp"
 #include "simrv/tui/modals/HartModal.hpp"
 #include "simrv/tui/modals/LoadModal.hpp"
+#include "simrv/tui/modals/LogModal.hpp"
 #include "simrv/tui/modals/MemoryModal.hpp"
 #include "simrv/tui/modals/ToolPickerModal.hpp"
 #include "simrv/tui/panels/InspectorPane.hpp"
@@ -201,6 +202,7 @@ auto Tui::compute_sixel_dimensions(int panel_cols, int body_rows, int cell_width
 }
 
 Tui::Tui(simrv::core::Machine& machine) : machine_(machine), modal_(machine) {
+    modal_.set_log_buffer(&log_buffer_);
     preferences_path_ = TuiPreferences::default_path();
     student_guide_enabled_ = machine_.class_mode_enabled();
     restore_preferences();
@@ -503,7 +505,8 @@ void Tui::initialize() {
     sa.sa_flags = SA_RESTART;
     sigaction(SIGWINCH, &sa, nullptr);
 
-    simrv::log::set_tui_callback([this](const std::string& msg) -> void { print_log(msg); });
+    simrv::log::set_tui_structured_callback(
+        [this](const simrv::log::LogRecord& rec) -> void { print_log(rec); });
 
     start_ui_thread();
 
@@ -516,6 +519,7 @@ void Tui::shutdown() {
     save_preferences();
     stop_ui_thread();
     if (backend_) backend_->detach();
+    simrv::log::set_tui_structured_callback(nullptr);
     simrv::log::set_tui_callback(nullptr);
     if (osc22_pointer_supported_) {
         std::string sequence = "\033]22;";
@@ -680,9 +684,24 @@ void Tui::handle_char_write(char ch) {
 }
 
 void Tui::print_log(const std::string& msg) {
+    std::string text = msg;
+    if (!text.empty() && text.back() == '\n') text.pop_back();
     {
         std::scoped_lock lock(io_mutex_);
-        log_fifo_.push(msg);
+        log_fifo_.push(LogEntry{.timestamp = std::chrono::steady_clock::now(),
+                                .level = simrv::log::Level::Info,
+                                .text = std::move(text)});
+    }
+    trigger_immediate_render();
+}
+
+void Tui::print_log(const simrv::log::LogRecord& rec) {
+    std::string text = simrv::log::format_tui_message(rec.level, rec.message, rec.timestamp);
+    if (!text.empty() && text.back() == '\n') text.pop_back();
+    {
+        std::scoped_lock lock(io_mutex_);
+        log_fifo_.push(
+            LogEntry{.timestamp = rec.timestamp, .level = rec.level, .text = std::move(text)});
     }
     trigger_immediate_render();
 }
@@ -825,12 +844,21 @@ void Tui::render_build_lines(int inspector_width, int terminal_width, int num_ro
         }
     }
 
-    bool const log_visible = (num_rows >= 15 && !workbench_slots_.empty() &&
-                              workbench_slots_[0].page != TuiRegPage::EXPLAIN &&
-                              workbench_slots_[0].page != TuiRegPage::TRACE);
+    bool has_log_page = false;
+    for (const auto& slot : workbench_slots_) {
+        if (slot.page == TuiRegPage::LOG) {
+            has_log_page = true;
+            break;
+        }
+    }
+    bool const log_visible = has_log_page || (inspector_pane_->is_log_drawer_open() &&
+                                              num_rows >= 15 && !workbench_slots_.empty() &&
+                                              workbench_slots_[0].page != TuiRegPage::EXPLAIN &&
+                                              workbench_slots_[0].page != TuiRegPage::TRACE &&
+                                              workbench_slots_[0].page != TuiRegPage::LOG);
     if (log_visible) {
         int const log_width = std::max(10, inspector_width - 2);
-        inspector_pane_->set_log_lines(log_buffer_.get_wrapped_lines(log_width, 100));
+        inspector_pane_->set_log_lines(log_buffer_.get_wrapped_lines(log_width, 1000));
     } else {
         inspector_pane_->set_log_lines({});
     }
@@ -1275,7 +1303,7 @@ void Tui::render(bool force) {
     std::unique_lock<std::mutex> lock(tui_mutex_);
 
     std::string local_tx;
-    std::queue<std::string> local_log;
+    std::queue<simrv::tui::LogEntry> local_log;
     {
         std::scoped_lock io_lock(io_mutex_);
         std::swap(tx_buffer_, local_tx);
@@ -3736,6 +3764,89 @@ auto Tui::handle_modal_keyboard_input(uint8_t byte, TuiKey key) -> bool {
         return true;
     }
 
+    if (mtype == ModalType::LogViewer) {
+        if (modals::LogModal::is_search_mode()) {
+            if (byte == 27 || key == simrv::tui::TuiKey::Esc) {
+                modals::LogModal::toggle_search_mode();
+                render(true);
+                return true;
+            }
+            if (key == simrv::tui::TuiKey::Enter || key == simrv::tui::TuiKey::Newline) {
+                modals::LogModal::toggle_search_mode();
+                render(true);
+                return true;
+            }
+            if (byte == 8 || byte == 127 || key == simrv::tui::TuiKey::Backspace) {
+                std::string q = modals::LogModal::search_query();
+                if (!q.empty()) q.pop_back();
+                modals::LogModal::set_search_query(std::move(q));
+                render(true);
+                return true;
+            }
+            if (byte >= 32 && byte <= 126) {
+                std::string q = modals::LogModal::search_query();
+                q.push_back(static_cast<char>(byte));
+                modals::LogModal::set_search_query(std::move(q));
+                render(true);
+                return true;
+            }
+            return true;
+        }
+
+        if (byte == 27 || key == simrv::tui::TuiKey::Esc || byte == 'q' || byte == 'Q') {
+            close_modal();
+            return true;
+        }
+        if (byte == 'a' || byte == 'A') {
+            modal_.set_log_filter_level(std::nullopt);
+            render(true);
+            return true;
+        }
+        if (byte == 'i' || byte == 'I') {
+            modal_.set_log_filter_level(simrv::log::Level::Info);
+            render(true);
+            return true;
+        }
+        if (byte == 'w' || byte == 'W') {
+            modal_.set_log_filter_level(simrv::log::Level::Warn);
+            render(true);
+            return true;
+        }
+        if (byte == 'e' || byte == 'E') {
+            modal_.set_log_filter_level(simrv::log::Level::Error);
+            render(true);
+            return true;
+        }
+        if (byte == 'f' || byte == 'F') {
+            modal_.toggle_log_follow();
+            render(true);
+            return true;
+        }
+        if (byte == '/') {
+            modals::LogModal::toggle_search_mode();
+            render(true);
+            return true;
+        }
+        if (byte == 'y' || byte == 'Y' || byte == 'c' || byte == 'C') {
+            std::string text = modals::LogModal::copy_text(log_buffer_);
+            copy_to_clipboard(text);
+            set_status_override("Copied logs to clipboard");
+            render(true);
+            return true;
+        }
+        if (byte == 'j' || byte == 'J') {
+            modal_.scroll_log_viewer(1, 2000, 20);
+            render(true);
+            return true;
+        }
+        if (byte == 'k' || byte == 'K') {
+            modal_.scroll_log_viewer(-1, 2000, 20);
+            render(true);
+            return true;
+        }
+        return true;
+    }
+
     if (key == simrv::tui::TuiKey::F10) {
         machine_.request_exit();
         close_modal();
@@ -3960,19 +4071,10 @@ auto Tui::handle_navigation_keyboard_input(uint8_t byte, TuiKey key) -> bool {
         case simrv::tui::TuiKey::U:
             if (focused_page() == TuiRegPage::CONSOLE) {
                 scroll(5);
-            } else if (inspector_pane_) {
-                inspector_pane_->scroll_log(2);
-                render(true);
             }
             return true;
-        case simrv::tui::TuiKey::d:
-        case simrv::tui::TuiKey::D:
-            if (focused_page() == TuiRegPage::CONSOLE) {
-                scroll(-5);
-            } else if (inspector_pane_) {
-                inspector_pane_->scroll_log(-2);
-                render(true);
-            }
+        case simrv::tui::TuiKey::L:
+            open_modal(ModalType::LogViewer);
             return true;
         case simrv::tui::TuiKey::o:
         case simrv::tui::TuiKey::O:
@@ -4140,6 +4242,14 @@ auto Tui::handle_normal_keyboard_input(uint8_t byte, TuiKey key) -> void {
 
     if (handle_navigation_keyboard_input(byte, key) || handle_speed_keyboard_input(key)) return;
 
+    if (key == simrv::tui::TuiKey::CtrlL) {
+        if (inspector_pane_) {
+            inspector_pane_->toggle_log_drawer();
+            render(true);
+        }
+        return;
+    }
+
     // Memory inspection is an architectural teaching/observation tool, not a debug-diagnostics
     // feature. Keep its input semantics aligned with the canonical keybinding registry.
     if (key == simrv::tui::TuiKey::i || key == simrv::tui::TuiKey::I) {
@@ -4150,7 +4260,8 @@ auto Tui::handle_normal_keyboard_input(uint8_t byte, TuiKey key) -> void {
     if (key == simrv::tui::TuiKey::Colon || key == simrv::tui::TuiKey::w ||
         key == simrv::tui::TuiKey::W || key == simrv::tui::TuiKey::m ||
         key == simrv::tui::TuiKey::M || key == simrv::tui::TuiKey::k ||
-        key == simrv::tui::TuiKey::K) {
+        key == simrv::tui::TuiKey::K || key == simrv::tui::TuiKey::d ||
+        key == simrv::tui::TuiKey::D) {
         if (handle_debug_keyboard_input(key)) return;
     }
 
@@ -4633,6 +4744,11 @@ auto Tui::handle_arrow_key_sequence() -> bool {
             render(true);
             return true;
         }
+        if (get_active_modal() == ModalType::LogViewer) {
+            modal_.scroll_log_viewer(direction * 2);
+            render(true);
+            return true;
+        }
         if (paused_ && inspector_pane_) {
             auto page = focused_page();
             if (page == TuiRegPage::CACHE) {
@@ -4666,6 +4782,11 @@ auto Tui::handle_arrow_key_sequence() -> bool {
         }
         if (get_active_modal() == ModalType::MemoryDump) {
             modal_.move_memory_cursor(direction, 0);
+            render(true);
+            return true;
+        }
+        if (get_active_modal() == ModalType::LogViewer) {
+            modal_.cycle_log_level();
             render(true);
             return true;
         }
@@ -4704,6 +4825,11 @@ auto Tui::handle_arrow_key_sequence() -> bool {
             render(true);
             return true;
         }
+        if (get_active_modal() == ModalType::LogViewer) {
+            modal_.scroll_log_viewer_page(-1);
+            render(true);
+            return true;
+        }
         if (focused_page() == TuiRegPage::CONSOLE) {
             scroll(-10);
         } else {
@@ -4723,6 +4849,11 @@ auto Tui::handle_arrow_key_sequence() -> bool {
         }
         if (get_active_modal() == ModalType::MemoryDump) {
             modal_.scroll_memory_page(1);
+            render(true);
+            return true;
+        }
+        if (get_active_modal() == ModalType::LogViewer) {
+            modal_.scroll_log_viewer_page(1);
             render(true);
             return true;
         }
@@ -5105,11 +5236,75 @@ auto Tui::consume_control_sequence(uint8_t first_byte) -> bool {
                 .y = selection_.content_start_y,
                 .width = col_w,
                 .height = selection_.content_end_y - selection_.content_start_y + 1};
-            selection_.start_x = col_local_x;
-            selection_.start_y = y;
-            selection_.end_x = col_local_x;
-            selection_.end_y = y;
-            selection_.is_selecting = true;
+
+            auto const now = std::chrono::steady_clock::now();
+            auto const elapsed_ms =
+                std::chrono::duration_cast<std::chrono::milliseconds>(now - last_click_time_)
+                    .count();
+            if (elapsed_ms < 400 && last_click_x_ == x && last_click_y_ == y) {
+                click_count_ = (click_count_ % 3) + 1;
+            } else {
+                click_count_ = 1;
+            }
+            last_click_time_ = now;
+            last_click_x_ = x;
+            last_click_y_ = y;
+
+            if (click_count_ == 2) {
+                // Double click: word selection
+                std::string line;
+                if (sel_pane == SelectionPane::TerminalPane) {
+                    int start_line = get_terminal_pane_start_line(cached_num_rows_);
+                    int r = start_line + (y - selection_.content_start_y);
+                    line = vt_.get_text_in_range(r, 0, r, col_w);
+                } else if (sel_pane == SelectionPane::InspectorPane && inspector_pane_) {
+                    int r = y - selection_.content_start_y;
+                    line = inspector_pane_->get_text_in_range(r, 0, r, col_w, col_w);
+                }
+                auto is_word_char = [](char ch) {
+                    return std::isalnum(static_cast<unsigned char>(ch)) || ch == '_' || ch == '$' ||
+                           ch == '%' || ch == '@' || ch == '.' || ch == '-' || ch == '+' ||
+                           ch == 'x' || ch == 'X';
+                };
+                int word_start = col_local_x;
+                int word_end = col_local_x;
+                if (!line.empty() && col_local_x < static_cast<int>(line.size())) {
+                    while (word_start > 0 &&
+                           is_word_char(line[static_cast<size_t>(word_start - 1)])) {
+                        --word_start;
+                    }
+                    while (word_end + 1 < static_cast<int>(line.size()) &&
+                           is_word_char(line[static_cast<size_t>(word_end + 1)])) {
+                        ++word_end;
+                    }
+                }
+                selection_.start_x = word_start;
+                selection_.end_x = word_end;
+                selection_.start_y = y;
+                selection_.end_y = y;
+                selection_.is_active = true;
+                selection_.is_selecting = false;
+                copy_active_selection();
+                render(true);
+                return true;
+            } else if (click_count_ == 3) {
+                // Triple click: entire row selection
+                selection_.start_x = 0;
+                selection_.end_x = std::max(0, col_w - 1);
+                selection_.start_y = y;
+                selection_.end_y = y;
+                selection_.is_active = true;
+                selection_.is_selecting = false;
+                copy_active_selection();
+                render(true);
+                return true;
+            } else {
+                selection_.start_x = col_local_x;
+                selection_.start_y = y;
+                selection_.end_x = col_local_x;
+                selection_.end_y = y;
+                selection_.is_selecting = true;
+            }
         }
 
         if (esc_buf_.back() == 'M') {

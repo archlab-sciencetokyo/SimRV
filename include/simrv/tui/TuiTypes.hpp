@@ -32,6 +32,7 @@ enum class TuiRegPage : uint8_t {
     CONSOLE,
     DISPLAY,
     LIVE,
+    LOG,
     DISASM = CONSOLE
 };
 
@@ -103,6 +104,8 @@ struct WorkbenchSlot {
             return "Display";
         case TuiRegPage::LIVE:
             return "Live Overview";
+        case TuiRegPage::LOG:
+            return "Execution Log";
     }
     return "Tool View";
 }

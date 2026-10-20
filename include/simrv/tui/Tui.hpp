@@ -91,6 +91,7 @@ class Tui : public core::ITelemetrySink, public core::IConsoleSink {
     void render(bool force = false);
     void handle_char_write(char ch) override;
     void print_log(const std::string& msg);
+    void print_log(const simrv::log::LogRecord& rec);
 
     void start_ui_thread() override;
     void stop_ui_thread() override;
@@ -257,6 +258,8 @@ class Tui : public core::ITelemetrySink, public core::IConsoleSink {
     [[nodiscard]] auto mission_progress() const noexcept -> const MissionProgress& {
         return mission_;
     }
+    [[nodiscard]] auto log_buffer() const noexcept -> const LogBuffer& { return log_buffer_; }
+    [[nodiscard]] auto log_buffer() noexcept -> LogBuffer& { return log_buffer_; }
     [[nodiscard]] auto is_trace_active() const -> bool override {
         return trace_or_livetrace_active_.load(std::memory_order_relaxed);
     }
@@ -387,6 +390,10 @@ class Tui : public core::ITelemetrySink, public core::IConsoleSink {
     bool full_screen_redraw_requested_{true};
     RenderStats render_stats_{};
     SelectionState selection_;
+    std::chrono::steady_clock::time_point last_click_time_{};
+    int last_click_x_ = -1;
+    int last_click_y_ = -1;
+    int click_count_ = 0;
     std::chrono::steady_clock::time_point last_speed_update_{std::chrono::steady_clock::now()};
     uint64_t last_icount_ = 0;
     uint64_t speed_ips_ = 0;
@@ -420,7 +427,7 @@ class Tui : public core::ITelemetrySink, public core::IConsoleSink {
 
     // Thread-safe queues for decoupling writes from simulation
     std::string tx_buffer_;
-    std::queue<std::string> log_fifo_;
+    std::queue<simrv::tui::LogEntry> log_fifo_;
     mutable std::mutex tui_mutex_;
     mutable std::mutex io_mutex_;
 

@@ -108,6 +108,40 @@ void MemoryModal::set_input_mode(InputMode mode) { mode_ = mode; }
 
 auto MemoryModal::input_mode() -> MemoryModal::InputMode { return mode_; }
 
+auto MemoryModal::handle_cell_click(int row, int rel_x, unsigned int xlen) -> bool {
+    if (row < 0 || row >= 10) return false;
+    const int prefix_len = (xlen == 64) ? 16 : 14;
+
+    // Check Hex portion
+    if (rel_x >= prefix_len && rel_x < prefix_len + 49) {
+        int hex_offset = rel_x - prefix_len;
+        int byte = -1;
+        if (hex_offset < 24) {
+            byte = hex_offset / 3;
+        } else if (hex_offset >= 25 && hex_offset < 49) {
+            byte = 8 + (hex_offset - 25) / 3;
+        }
+        if (byte >= 0 && byte < 16) {
+            cursor_row_ = row;
+            cursor_byte_ = byte;
+            return true;
+        }
+    }
+
+    // Check ASCII portion
+    const int ascii_start = prefix_len + 51;
+    if (rel_x >= ascii_start && rel_x < ascii_start + 16) {
+        int byte = rel_x - ascii_start;
+        if (byte >= 0 && byte < 16) {
+            cursor_row_ = row;
+            cursor_byte_ = byte;
+            return true;
+        }
+    }
+
+    return false;
+}
+
 auto MemoryModal::current_address() -> simrv::xlen::Address {
     return base_address_ + static_cast<simrv::xlen::Address>(cursor_row_ * 16 + cursor_byte_);
 }

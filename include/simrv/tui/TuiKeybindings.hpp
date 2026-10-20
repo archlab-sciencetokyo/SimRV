@@ -50,7 +50,9 @@ enum class KeyAction : uint8_t {
     MoveColumnLeft,
     MoveColumnRight,
     AddColumn,
-    CloseColumn
+    CloseColumn,
+    DumpMemory,
+    OpenLogModal
 };
 
 enum class ActionCategory : uint8_t { Execution, Inspect, Navigate, Configure, Help };
