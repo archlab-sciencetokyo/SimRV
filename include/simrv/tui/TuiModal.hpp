@@ -45,7 +45,9 @@ enum class ModalType : uint8_t {
     ToolPicker,
     SaveCpuConfig,
     LoadCpuConfig,
-    LoadFilePicker
+    LoadFilePicker,
+    MemoryDump,
+    SwitchHart
 };
 
 struct SysConfigDraft {
@@ -203,6 +205,13 @@ class TuiModal {
     [[nodiscard]] auto get_tool_picker_cursor() const -> int { return tool_picker_cursor_; }
     [[nodiscard]] auto get_tool_picker_num_slots() const -> int { return tool_picker_num_slots_; }
     [[nodiscard]] auto get_selected_tool_page() const -> TuiRegPage;
+
+    void open_memory_dump(simrv::xlen::Address addr = 0, InspectorPane* inspector_pane = nullptr);
+    void open_switch_hart(size_t current_hart);
+    void move_memory_cursor(int delta_byte, int delta_row);
+    void scroll_memory_page(int pages);
+    void toggle_memory_mode();
+    void move_hart_cursor(int delta);
 
     void open_notice(const std::string& title, const std::string& message, bool is_error = false);
     void open_platform_confirm(const SettingsDraft& draft);

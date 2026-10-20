@@ -395,6 +395,11 @@ class BranchPredictor {
     [[nodiscard]] auto ras_depth() const noexcept -> size_t { return ras_count_; }
     [[nodiscard]] auto ras_peek() const noexcept -> std::optional<simrv::xlen::Address>;
     [[nodiscard]] auto bht_distribution() const noexcept -> std::array<size_t, 4>;
+    [[nodiscard]] auto get_counter_for_pc(simrv::xlen::Address pc) const noexcept -> uint8_t {
+        if (bht_.empty()) return 0;
+        const auto idx = get_bht_index(pc, ghr_);
+        return (idx < bht_.size()) ? bht_[idx] : 0;
+    }
 
     SIMRV_ALWAYS_INLINE void update_btb(simrv::xlen::Address pc,
                                         simrv::xlen::Address target) noexcept {

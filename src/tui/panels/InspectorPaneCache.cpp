@@ -69,10 +69,13 @@ auto render_cache_way_row(const simrv::core::CPU& cpu, int way_idx, int inspect_
         coh_tag = std::format("{}[I ]\033[0m", kThemeMuted);
     }
 
+    bool is_pref = (!is_icache && dc.is_line_prefetched(set_idx, way_u32));
+    std::string pref_str = is_pref ? std::format(" \033[1;36m[P]\033[0m") : "";
+
     std::string way_prefix = std::format(
-        "{} {} [V:{}] Tag: {}", way_str, coh_tag,
+        "{} {} [V:{}] Tag: {}{}", way_str, coh_tag,
         valid ? std::format("{}1\033[0m", kThemeMint) : std::format("{}0\033[0m", kThemeMuted),
-        status_tag);
+        status_tag, pref_str);
 
     uint32_t last_hit_way_idx = is_icache ? ic.last_hit_way() : dc.last_hit_way();
     bool is_hit_way = (set_idx == last_set && last_hit && way_u32 == last_hit_way_idx);
@@ -340,6 +343,28 @@ auto InspectorPane::render_cache_stats(const simrv::core::CPU& cpu, int logical_
             return format_to_width(
                 std::format(" {}Last Evicted Tag:\033[0m {}  │  {}Location:\033[0m {}", kThemeText,
                             ev_str, kThemeText, r_loc),
+                width);
+        }
+        case 16: {
+            uint64_t pf_iss = dc.prefetcher().prefetches_issued();
+            uint64_t pf_hit = dc.prefetcher().prefetch_hits();
+            double pf_rate =
+                (pf_iss == 0) ? 0.0
+                              : 100.0 * static_cast<double>(pf_hit) / static_cast<double>(pf_iss);
+            if (width < 55) {
+                return format_to_width(
+                    std::format(
+                        " {}HW Prefetch:\033[0m Iss:{}{}\033[0m Hit:{}{}\033[0m ({:>4.1f}%)",
+                        kThemeText, kThemeMint, simrv::util::format_scaled(pf_iss), kThemeSky,
+                        simrv::util::format_scaled(pf_hit), pf_rate),
+                    width);
+            }
+            return format_to_width(
+                std::format(" {}Hardware Prefetcher:\033[0m Lookahead: {}8 streams\033[0m │ "
+                            "Issued: {}{:<6}\033[0m │ Hits: {}{:<6}\033[0m ({:>4.1f}%)",
+                            kThemeText, kThemeMint, kThemeText,
+                            simrv::util::format_with_commas(pf_iss), kThemeSky,
+                            simrv::util::format_with_commas(pf_hit), pf_rate),
                 width);
         }
         default:

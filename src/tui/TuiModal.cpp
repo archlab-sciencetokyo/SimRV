@@ -21,8 +21,10 @@
 #include "simrv/tui/modals/AddressModal.hpp"
 #include "simrv/tui/modals/BreakpointModal.hpp"
 #include "simrv/tui/modals/GlossaryModal.hpp"
+#include "simrv/tui/modals/HartModal.hpp"
 #include "simrv/tui/modals/HelpModal.hpp"
 #include "simrv/tui/modals/LoadModal.hpp"
+#include "simrv/tui/modals/MemoryModal.hpp"
 #include "simrv/tui/modals/MisaModal.hpp"
 #include "simrv/tui/modals/ModalComponents.hpp"
 #include "simrv/tui/modals/SettingsModal.hpp"
@@ -87,6 +89,12 @@ void TuiModal::open(ModalType type, InspectorPane* inspector_pane, uint64_t step
             break;
         case ModalType::Help:
             reset_help_scroll();
+            break;
+        case ModalType::MemoryDump:
+            modals::MemoryModal::open(0, machine_, inspector_pane);
+            break;
+        case ModalType::SwitchHart:
+            modals::HartModal::open(0, machine_);
             break;
         default:
             break;
@@ -330,6 +338,30 @@ auto TuiModal::get_selected_tool_page() const -> TuiRegPage {
     return page.value_or(TuiRegPage::GPR);
 }
 
+void TuiModal::open_memory_dump(simrv::xlen::Address addr, InspectorPane* inspector_pane) {
+    active_modal_ = ModalType::MemoryDump;
+    rendered_box_width_ = 0;
+    input_.clear();
+    modals::MemoryModal::open(addr, machine_, inspector_pane);
+}
+
+void TuiModal::open_switch_hart(size_t current_hart) {
+    active_modal_ = ModalType::SwitchHart;
+    rendered_box_width_ = 0;
+    input_.clear();
+    modals::HartModal::open(current_hart, machine_);
+}
+
+void TuiModal::move_memory_cursor(int delta_byte, int delta_row) {
+    modals::MemoryModal::move_cursor(delta_byte, delta_row, machine_);
+}
+
+void TuiModal::scroll_memory_page(int pages) { modals::MemoryModal::scroll_page(pages, machine_); }
+
+void TuiModal::toggle_memory_mode() { modals::MemoryModal::toggle_addressing_mode(); }
+
+void TuiModal::move_hart_cursor(int delta) { modals::HartModal::move_cursor(delta, machine_); }
+
 void TuiModal::close() {
     active_modal_ = ModalType::None;
     rendered_box_width_ = 0;
@@ -471,6 +503,28 @@ auto TuiModal::submit(InspectorPane* inspector_pane, std::atomic<uint64_t>& step
                 return false;
             }
         }
+        case ModalType::MemoryDump: {
+            result = modals::MemoryModal::submit_input(input_, machine_, inspector_pane,
+                                                       set_status_override_cb);
+            if (result) {
+                input_.clear();
+            }
+            return result;
+        }
+        case ModalType::SwitchHart: {
+            size_t selected = 0;
+            if (modals::HartModal::submit(machine_, selected)) {
+                if (inspector_pane) {
+                    inspector_pane->set_selected_hart(selected);
+                    inspector_pane->update_cache();
+                }
+                set_status_override_cb(
+                    std::format("Active telemetry switched to Hart {}", selected));
+                active_modal_ = ModalType::None;
+                return true;
+            }
+            return false;
+        }
         default:
             break;
     }
@@ -516,6 +570,12 @@ void TuiModal::handle_wheel(int delta) {
             break;
         case ModalType::ToolPicker:
             move_tool_picker_cursor(delta);
+            break;
+        case ModalType::MemoryDump:
+            move_memory_cursor(0, delta);
+            break;
+        case ModalType::SwitchHart:
+            move_hart_cursor(delta);
             break;
         default:
             break;
@@ -659,6 +719,8 @@ auto TuiModal::handle_click(int x, int y, int term_width, int term_height) -> Mo
                 case ModalType::LayoutPresets:
                 case ModalType::SaveCpuConfig:
                 case ModalType::LoadCpuConfig:
+                case ModalType::MemoryDump:
+                case ModalType::SwitchHart:
                     return action == 0 ? ModalClickResult::Submit : ModalClickResult::Closed;
                 case ModalType::LoadFilePicker:
                     return ModalClickResult::Handled;
@@ -969,6 +1031,13 @@ void TuiModal::render_overlay(std::vector<std::string>& lines, int term_width,
                                             {.key = "[Esc]", .action = "Back"}}));
             break;
         }
+        case ModalType::MemoryDump:
+            modals::MemoryModal::render(content_rows, add_row, input_, machine_, nullptr,
+                                        term_height, provisional_width);
+            break;
+        case ModalType::SwitchHart:
+            modals::HartModal::render(content_rows, add_row, machine_);
+            break;
         default:
             break;
     }

@@ -22,8 +22,10 @@ simrv_add_component(simrv-tui
   modals/AddressModal.cpp
   modals/BreakpointModal.cpp
   modals/GlossaryModal.cpp
+  modals/HartModal.cpp
   modals/HelpModal.cpp
   modals/LoadModal.cpp
+  modals/MemoryModal.cpp
   modals/MisaModal.cpp
   modals/ModalComponents.cpp
   modals/SettingsModal.cpp

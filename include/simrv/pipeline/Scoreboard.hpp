@@ -132,6 +132,15 @@ class Scoreboard {
     [[nodiscard]] constexpr auto has_forwardable_int() const noexcept -> bool {
         return int_forwardable_mask_ != 0;
     }
+    [[nodiscard]] constexpr auto int_busy_mask() const noexcept -> uint32_t {
+        return int_busy_mask_;
+    }
+    [[nodiscard]] constexpr auto fp_busy_mask() const noexcept -> uint32_t {
+        return fp_busy_mask_;
+    }
+    [[nodiscard]] constexpr auto int_forwardable_mask() const noexcept -> uint32_t {
+        return int_forwardable_mask_;
+    }
 
     [[nodiscard]] constexpr auto can_forward_int(simrv::xlen::RegId reg) const noexcept -> bool {
         const auto index = static_cast<size_t>(reg);
