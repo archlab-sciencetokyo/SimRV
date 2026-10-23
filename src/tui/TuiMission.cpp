@@ -2,6 +2,7 @@
 #include "simrv/tui/TuiMission.hpp"
 
 #include <algorithm>
+#include <charconv>
 #include <cctype>
 #include <format>
 #include <fstream>
@@ -57,8 +58,17 @@ auto page_for(std::string_view value) -> std::optional<TuiRegPage> {
     if (value == "bus") return TuiRegPage::BUS;
     if (value == "console") return TuiRegPage::CONSOLE;
     if (value == "display") return TuiRegPage::DISPLAY;
-    if (value == "live") return TuiRegPage::LIVE;
+    if (value == "live") return TuiRegPage::GPR;
     return std::nullopt;
+}
+
+auto parse_mission_speed(std::string_view value) -> std::optional<uint64_t> {
+    uint64_t speed_hz = 0;
+    const auto [end, error] = std::from_chars(value.data(), value.data() + value.size(), speed_hz);
+    if (error != std::errc{} || end != value.data() + value.size() || speed_hz > 1'000'000) {
+        return std::nullopt;
+    }
+    return speed_hz;
 }
 
 auto basename(std::string_view path) -> std::string_view {
@@ -76,6 +86,7 @@ auto MissionProgress::load(std::string_view mission_path) -> bool {
     detail_.clear();
     steps_.clear();
     checkpoints_.clear();
+    speed_hz_ = 30;
     std::ifstream input(mission_path_);
     if (!input) {
         detail_ = std::format("Cannot open mission file: {}", mission_path_);
@@ -153,6 +164,10 @@ auto MissionProgress::load(std::string_view mission_path) -> bool {
                 description_ = *value;
             } else if (key == "goal") {
                 goal_ = *value;
+            } else if (key == "speed_hz") {
+                const auto speed = parse_mission_speed(*value);
+                if (!speed) return fail("speed_hz must be an integer from 0 to 1000000");
+                speed_hz_ = *speed;
             } else if (key != "id") {
                 return fail("unknown [mission] key");
             }
@@ -167,6 +182,11 @@ auto MissionProgress::load(std::string_view mission_path) -> bool {
                 step.guidance.prompt = *value;
             else if (key == "why")
                 step.guidance.why = *value;
+            else if (key == "speed_hz") {
+                step.speed_hz = parse_mission_speed(*value);
+                if (!step.speed_hz)
+                    return fail("speed_hz must be an integer from 0 to 1000000");
+            }
             else if (key == "view") {
                 const auto page = page_for(*value);
                 if (!page) return fail("unknown step view");
@@ -256,6 +276,7 @@ void MissionProgress::configure(std::string_view mission_path, std::string_view 
         description_.clear();
         goal_.clear();
         detail_.clear();
+        speed_hz_ = 30;
         steps_.clear();
         checkpoints_.clear();
         status_.store(MissionStatus::Inactive, std::memory_order_relaxed);
@@ -354,6 +375,13 @@ auto MissionProgress::guidance() const -> std::optional<MissionGuidance> {
     auto guidance = steps_[current_step].guidance;
     guidance.title = std::format("{}/{} · {}", current_step + 1, steps_.size(), guidance.title);
     return guidance;
+}
+
+auto MissionProgress::speed_hz() const noexcept -> uint64_t {
+    const size_t current_step = step();
+    if (current_step < steps_.size() && steps_[current_step].speed_hz)
+        return *steps_[current_step].speed_hz;
+    return speed_hz_;
 }
 
 }  // namespace simrv::tui

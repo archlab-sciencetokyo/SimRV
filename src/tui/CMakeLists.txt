@@ -42,7 +42,6 @@ simrv_add_component(simrv-tui
   panels/InspectorPaneHazard.cpp
   panels/InspectorPaneIo.cpp
   panels/InspectorPaneStats.cpp
-  panels/InspectorPaneLive.cpp
   panels/InspectorPaneExplain.cpp
   panels/InspectorPaneStack.cpp
   panels/TerminalPane.cpp

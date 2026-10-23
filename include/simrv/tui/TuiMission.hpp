@@ -11,7 +11,6 @@
 #include <string>
 #include <string_view>
 #include <vector>
-#include <vector>
 
 #include "simrv/tui/TuiTypes.hpp"
 
@@ -60,6 +59,7 @@ class MissionProgress {
     [[nodiscard]] auto step() const noexcept -> size_t {
         return step_.load(std::memory_order_relaxed);
     }
+    [[nodiscard]] auto speed_hz() const noexcept -> uint64_t;
     [[nodiscard]] auto guidance() const -> std::optional<MissionGuidance>;
     [[nodiscard]] auto detail() const noexcept -> std::string_view { return detail_; }
     [[nodiscard]] auto description() const noexcept -> std::string_view { return description_; }
@@ -71,6 +71,7 @@ class MissionProgress {
     struct MissionStep {
         std::string id;
         MissionGuidance guidance;
+        std::optional<uint64_t> speed_hz;
     };
     struct MissionCheckpoint {
         std::string symbol;
@@ -84,6 +85,7 @@ class MissionProgress {
     std::string description_;
     std::string goal_;
     std::string detail_;
+    uint64_t speed_hz_ = 30;
     std::vector<MissionStep> steps_;
     std::vector<MissionCheckpoint> checkpoints_;
     std::atomic<MissionStatus> status_{MissionStatus::Inactive};

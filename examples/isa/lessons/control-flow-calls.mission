@@ -5,6 +5,7 @@ id = "control-flow-calls"
 program = "control-flow-calls.elf"
 description = "Explore conditional branches, loops, calls, and returns in a small RISC-V program."
 goal = "Explain how control flow and the calling convention work together across a function call."
+speed_hz = "30"
 
 [step]
 id = "branch-prediction"

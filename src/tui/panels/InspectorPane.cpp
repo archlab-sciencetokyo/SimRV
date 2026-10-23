@@ -46,7 +46,6 @@ auto InspectorPane::is_single_column(int width) const -> bool {
 }
 
 auto InspectorPane::get_total_rows(int width) -> int {
-    if (page_ == TuiRegPage::LIVE) return static_cast<int>(machine_.num_harts()) + 8;
     if (page_ == TuiRegPage::EXPLAIN) {
         return static_cast<int>(get_explain_rows(width).size());
     }
@@ -153,15 +152,6 @@ auto InspectorPane::render_active_spinner(int logical_row, int width) -> std::st
         return format_to_width(std::string(static_cast<std::size_t>(left_padding), ' ') + banner,
                                width);
     }
-    const auto p_idx = static_cast<std::size_t>(page_) % cached_page_rows_.size();
-    if (logical_row >= 0 &&
-        static_cast<std::size_t>(logical_row) < cached_page_rows_[p_idx].size()) {
-        const auto& cached = cached_page_rows_[p_idx].at(static_cast<std::size_t>(logical_row));
-        if (!cached.empty()) return cached;
-    }
-    if (logical_row >= 0 && static_cast<std::size_t>(logical_row) < cached_left_rows_.size()) {
-        return cached_left_rows_.at(static_cast<std::size_t>(logical_row));
-    }
     return format_to_width("", width);
 }
 
@@ -172,6 +162,7 @@ auto InspectorPane::is_running_label_click(int logical_row, int col, int width) 
 }
 
 void InspectorPane::set_page(TuiRegPage page) {
+    if (page == TuiRegPage::LIVE) page = TuiRegPage::GPR;
     if (!machine_.runtime_profile.is_cycle_mode()) {
         if (page == TuiRegPage::CACHE) page = TuiRegPage::STACK;
         if (page == TuiRegPage::BPRED || page == TuiRegPage::HAZARD) page = TuiRegPage::PIPELINE;
@@ -192,7 +183,7 @@ void InspectorPane::set_selected_hart(size_t hart) {
         rows.fill("");
     }
     cached_left_rows_.fill("");
-    if (paused_ && page_ != TuiRegPage::LIVE) update_cache();
+    if (paused_) update_cache();
 }
 
 auto InspectorPane::current_cpu() const -> const simrv::core::CPU& {
@@ -288,8 +279,6 @@ auto InspectorPane::content_total_columns(int width) const -> int {
         }
         case TuiRegPage::TRACE:
             return trace_total_columns();
-        case TuiRegPage::LIVE:
-            return width;
         default:
             return width;
     }
@@ -762,14 +751,23 @@ auto InspectorPane::render_row_internal(int row_idx, int width, int header_rows,
         return format_to_width("", width);
     }
 
-    bool show_spinner = !paused_;
-    if (show_spinner) {
+    const auto* page_info = get_page_info(page_);
+    const int stats_start = performance_start_row(is_single_column(width));
+    const int stats_end = stats_start + performance_row_count();
+    const bool is_sampled_metrics_row = !is_secondary && logical_row >= stats_start &&
+                                        logical_row < stats_end;
+    const auto row_content_category =
+        is_sampled_metrics_row ? TuiFastModeContent::SampledMetrics
+        : page_info != nullptr      ? page_info->fast_mode_content
+                                    : TuiFastModeContent::Stable;
+    bool show_spinner = false;
+    if (!paused_) {
         uint64_t delay =
             tui_ ? tui_->step_delay_us_.load(std::memory_order_relaxed)
                  : (machine_.telemetry_sink() ? machine_.telemetry_sink()->step_delay_us() : 0);
-        if (delay >= 10000) {
-            show_spinner = false;
-        }
+        show_spinner = delay < ((1'000'000U + Tui::kDetailedExecutionMaxHz - 1) /
+                                Tui::kDetailedExecutionMaxHz) &&
+                       row_content_category == TuiFastModeContent::FastChangingDetail;
     }
 
     auto finish_row = [&](std::string res) {
@@ -782,23 +780,16 @@ auto InspectorPane::render_row_internal(int row_idx, int width, int header_rows,
         return format_to_width(res, width);
     };
 
-    if (page_ == TuiRegPage::LIVE) {
-        return finish_row(render_live_overview_row(logical_row, render_width));
-    }
-
-    if (show_spinner) {
-        if (!is_secondary) {
-            const int stats_start = performance_start_row(is_single_column(width));
-            const int stats_end = stats_start + performance_row_count();
-            if (logical_row >= stats_start && logical_row < stats_end) {
-                const int stats_row = logical_row - stats_start;
-                if (!machine_.runtime_profile.is_cycle_mode()) {
-                    return finish_row(render_sampled_machine_performance_stats(
-                        machine_.tui_execution_snapshot(), stats_row, render_width));
-                }
-                return finish_row(render_cycle_accurate_stats(
-                    machine_.tui_execution_snapshot(selected_hart_), stats_row, render_width));
+    if (show_spinner || (!paused_ && row_content_category == TuiFastModeContent::SampledMetrics)) {
+        // Sampled metrics stay live on a snapshot even when fast-changing detail is hidden.
+        if (row_content_category == TuiFastModeContent::SampledMetrics) {
+            const int stats_row = logical_row - stats_start;
+            if (!machine_.runtime_profile.is_cycle_mode()) {
+                return finish_row(render_sampled_machine_performance_stats(
+                    machine_.tui_execution_snapshot(), stats_row, render_width));
             }
+            return finish_row(render_cycle_accurate_stats(
+                machine_.tui_execution_snapshot(selected_hart_), stats_row, render_width));
         }
         // High-speed UI frames use only a stable execution snapshot and cached pane state.
         return render_active_spinner(logical_row, width);
@@ -858,16 +849,8 @@ void InspectorPane::update_cache() {
 }
 
 void InspectorPane::refresh_execution_snapshot() {
-    live_harts_.clear();
-    live_harts_.reserve(machine_.num_harts());
     for (size_t hart = 0; hart < machine_.num_harts(); ++hart) {
         const auto snapshot = machine_.tui_execution_snapshot(hart);
-        live_harts_.push_back({.pc = snapshot.pc,
-                               .symbol = machine_.symbol_table().lookup(snapshot.pc),
-                               .cycles = snapshot.cycle_count,
-                               .instructions = snapshot.instruction_count,
-                               .timer_ticks = snapshot.timer_ticks,
-                               .privilege = snapshot.privilege});
         if (hart == selected_hart_) projected_scoreboard_ = snapshot.scoreboard;
     }
 }

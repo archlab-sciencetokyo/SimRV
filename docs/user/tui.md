@@ -56,10 +56,11 @@ The interface is structured into three primary sections:
 
 ### Slow execution mode
 
-At configured execution delays of 10 ms or more (100 Hz or slower), visible pipeline, hazard,
-predictor, trace, disassembly, and explanation views capture detailed per-instruction state. Above
-100 Hz, those views use sampled state to keep execution overhead low. Paused inspection and active
-trace capture retain detailed state at every speed.
+At configured execution frequencies of 60 Hz or slower, visible pipeline and detailed register,
+memory, bus, and predictor views capture per-instruction state. At higher frequencies, only the
+fast-changing detail group in those panels is replaced with a running indicator; sampled performance
+counters remain visible and continue updating. Console, display, trace, and log panels stay available
+while running. Paused inspection and active trace capture retain detailed state at every speed.
 
 ---
 
@@ -73,31 +74,37 @@ The TUI provides responsive hotkeys for simulation control and state inspection:
 | :--- | :--- | :--- |
 | **`Ctrl-P`** / **`F5`** / **`c`** | Run / Pause | Toggle between continuous execution and paused inspection. |
 | **`s`** / **`F6`** | Step Instruction | Execute exactly one instruction machine-wide across all harts. |
-| **`c`** (in CA mode) | Step Cycle | Advance the pipeline and clock by exactly one hardware cycle. |
 | **`Ctrl-R`** | Reboot | Reset architectural state, reload images, and restart simulation. |
 | **`Ctrl-Q`** / **`F10`** / **`q`** | Quit | Exit SimRV cleanly and restore host terminal attributes. |
+| **`f`** | Set Frequency | Set the requested simulation frequency. |
+| **`v`** | Toggle Precision | Switch between IA and CA execution modes. |
 
 ### Navigation & Focus
 
 | Key | Action | Description |
 | :--- | :--- | :--- |
-| **`Tab`** / **`Shift-Tab`** | Change Focus | Cycle keyboard focus between the Inspector pane and Guest Console. |
-| **`1`** – **`9`** | Switch Inspector View | Select Inspector sub-views (1: Regs, 2: Pipeline, 3: Cache, etc.). |
+| **`Tab`** / **`Shift-Tab`** | Change Focus | Move between workbench columns. |
+| **`F3`** | Cycle Register Pages | Cycle the tabs in the Registers group. |
+| **`F11`** | Cycle Tool Pages | Cycle the tabs in the Tools group. |
+| **`Ctrl-W`** | Choose Column View | Open the tool picker for the focused workbench column. |
+| **`F4`** / **`Alt-1`**–**`Alt-4`** | Layout Presets | Open or directly select a workbench layout preset. |
+| **`[`** / **`]`** | Resize Split | Adjust the relative width between inspector and console columns. |
 | **`Up`** / **`Down`** | Scroll | Scroll active panel line by line. |
 | **`PageUp`** / **`PageDown`** | Page Scroll | Scroll active panel by page. |
 | **`Home`** / **`End`** | Jump Boundary | Jump to the top or bottom of the active panel. |
-| **`[`** / **`]`** | Resize Split | Adjust the relative width between inspector and console columns. |
-| **`u`** / **`d`** | Scroll Logs | Scroll the bottom diagnostic message log window. |
 
 ### File & Search Operations
 
 | Key | Action | Description |
 | :--- | :--- | :--- |
-| **`Ctrl-O`** / **`F2`** | Open / Load | Open the binary, disk, or CPU model file picker modal. |
+| **`o`** | Load | Open the binary, disk, or CPU model workflow. |
+| **`Ctrl-O`** (in a load modal) | Browse | Open the file picker for the active load workflow. |
+| **`F2`** / **`,`** | Settings | Open simulator settings. |
 | **`Ctrl-F`** / **`/`** | Search Console | Search UART terminal history (available when paused). |
 | **`n`** / **`N`** | Next / Prev Match | Move to the next or previous search match in console scrollback. |
 | **`Esc`** | Cancel / Close | Close active modal dialog or cancel active search query. |
-| **`F1`** / **`?`** | Help & Glossary | Open keyboard shortcut reference or architectural glossary. |
+| **`F1`** / **`h`** | Help | Open the keyboard shortcut reference. |
+| **`F9`** / **`?`** | Glossary | Open the architectural glossary. |
 
 ---
 

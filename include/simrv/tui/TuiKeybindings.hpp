@@ -55,7 +55,14 @@ enum class KeyAction : uint8_t {
     OpenLogModal,
     CheckMissionObjective,
     RevealMissionWhy,
-    AdvanceMissionStep
+    AdvanceMissionStep,
+    OpenTracePage,
+    SelectPage1,
+    SelectPage2,
+    SelectPage3,
+    SelectPage4,
+    NarrowFocusedColumn,
+    WidenFocusedColumn
 };
 
 enum class ActionCategory : uint8_t { Execution, Inspect, Navigate, Configure, Help };

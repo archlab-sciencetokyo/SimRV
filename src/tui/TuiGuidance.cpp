@@ -37,6 +37,7 @@ auto guidance_for_context(const GuidanceContext& context) -> PageGuidance {
     PageGuidance guidance;
     switch (context.page) {
         case TuiRegPage::GPR:
+        case TuiRegPage::LIVE:
             guidance = {.title = "Integer registers",
                         .meaning = "GPRs hold addresses, operands, and integer results.",
                         .relationship =
@@ -145,15 +146,6 @@ auto guidance_for_context(const GuidanceContext& context) -> PageGuidance {
                         .relationship = "sp and frame pointers connect ABI conventions to memory.",
                         .next_action = KeyAction::InspectAddress,
                         .next_hint = "Open a selected stack or register address.",
-                        .glossary_topic = 0};
-            break;
-        case TuiRegPage::LIVE:
-            guidance = {.title = "Live execution overview",
-                        .meaning = "Hart rows show sampled PCs and architectural privilege modes.",
-                        .relationship =
-                            "Totals combine all harts; rates describe recent simulator throughput.",
-                        .next_action = KeyAction::RunPause,
-                        .next_hint = "Pause execution to inspect stable architectural state.",
                         .glossary_topic = 0};
             break;
         case TuiRegPage::CONSOLE:

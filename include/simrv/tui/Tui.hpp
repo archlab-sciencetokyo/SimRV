@@ -78,7 +78,7 @@ class Tui : public core::ITelemetrySink, public core::IConsoleSink {
    public:
     static constexpr size_t kTraceBufferSize = 200;
     static constexpr size_t kFlightRecorderHarts = 16;
-    static constexpr uint64_t kDetailedExecutionMaxHz = 100;
+    static constexpr uint64_t kDetailedExecutionMaxHz = 60;
     explicit Tui(simrv::core::Machine& machine);
     ~Tui() override;
 
@@ -133,8 +133,9 @@ class Tui : public core::ITelemetrySink, public core::IConsoleSink {
     /// higher rates the UI renders sampled state instead, keeping the simulator hot path lean.
     [[nodiscard]] auto captures_execution_detail() const -> bool override {
         if (is_paused() || is_trace_active()) return true;
-        if (step_delay_us_.load(std::memory_order_relaxed) >=
-            (1'000'000U / kDetailedExecutionMaxHz)) {
+        constexpr uint64_t kSlowModeMinDelayUs =
+            (1'000'000U + kDetailedExecutionMaxHz - 1) / kDetailedExecutionMaxHz;
+        if (step_delay_us_.load(std::memory_order_relaxed) >= kSlowModeMinDelayUs) {
             return pipeline_or_detail_visible_.load(std::memory_order_relaxed);
         }
         return false;
@@ -158,6 +159,7 @@ class Tui : public core::ITelemetrySink, public core::IConsoleSink {
         }
     }
     void reset_speed_history();
+    void apply_mission_speed();
 
     std::atomic<uint64_t> step_delay_us_{0};
     void open_modal(ModalType type) {
@@ -277,7 +279,6 @@ class Tui : public core::ITelemetrySink, public core::IConsoleSink {
     void apply_mission_guidance_layout();
     void refresh_mission_layout_notice();
     void sync_workbench_slots();
-    void clear_transient_live_overview(bool restore_page);
     [[nodiscard]] auto total_snapshot_instruction_count() const -> uint64_t;
     struct TraceRecord {
         simrv::xlen::Register pc = 0;
@@ -362,7 +363,6 @@ class Tui : public core::ITelemetrySink, public core::IConsoleSink {
     bool inspection_overwrite_armed_{false};
     std::vector<WorkbenchSlot> workbench_slots_{{.page = TuiRegPage::GPR, .scroll_offset = 0},
                                                 {.page = TuiRegPage::CONSOLE, .scroll_offset = 0}};
-    std::optional<std::pair<size_t, TuiRegPage>> transient_live_restore_;
     size_t focused_slot_index_ = 0;
     size_t selected_hart_ = 0;
     TuiLayout layout_ = TuiLayout::Split;
@@ -456,7 +456,6 @@ class Tui : public core::ITelemetrySink, public core::IConsoleSink {
     auto handle_normal_keyboard_input(uint8_t byte, TuiKey key) -> void;
     auto search_terminal_scrollback(bool reverse) -> bool;
     bool handle_speed_keyboard_input(TuiKey key);
-    bool handle_navigation_keyboard_input(uint8_t byte, TuiKey key);
     auto handle_mouse_inspector(int x, int y, int b, bool multi_column = false,
                                 bool is_secondary = false, int col_width = 0) -> void;
     void format_trace_inst(const TraceRecord& rec, const std::string& op_name, bool rd_fp,

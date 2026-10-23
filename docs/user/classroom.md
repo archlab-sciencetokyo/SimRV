@@ -284,6 +284,9 @@ goal = "Explain how control flow and the calling convention work together across
 - `program`: The exact filename of the ELF binary expected for this mission (e.g. `lab1.elf`). SimRV validates the loaded binary against this name and displays a helpful error if a mismatched binary is loaded.
 - `description`: (Optional) A short lesson introduction shown when the mission opens.
 - `goal`: (Optional) The overall learning outcome shown with the first objective.
+- `speed_hz`: (Optional) Default TUI execution frequency for the mission, from `0` (maximum speed)
+  to `1000000`. Missions default to `30` Hz so students can follow visible state. A step may
+  override this value.
 
 #### Teaching Steps (`[step]`)
 
@@ -311,6 +314,12 @@ glossary = "0"
 | `view` | string | Fallback workbench view to focus when `panels` is omitted. |
 | `panels` | string | Optional comma-separated workbench pages for this step (one to four), such as `"explain,registers,trace"`. |
 | `glossary` | string (int) | (Optional) Topic index in the Architecture Glossary (`[F9]`) relevant to this concept. |
+| `speed_hz` | string (int) | (Optional) Execution frequency for this step. Overrides the mission default until the next step. `0` selects maximum speed. |
+
+The **Set Speed** modal (`f`) shows the current frequency and explains the inspector behavior:
+at 60 Hz or slower, detailed values remain visible; above 60 Hz, only fast-changing detail is
+replaced by a running indicator while sampled counters continue updating. Mission speed is applied
+when the mission starts, restarts, and advances to a step with a speed setting.
 
 #### Program Checkpoints (`[checkpoint]`)
 

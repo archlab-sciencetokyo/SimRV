@@ -973,7 +973,8 @@ auto InspectorPane::get_explain_rows(int width) -> std::vector<std::string> {
         uint64_t delay =
             tui_ ? tui_->step_delay_us_.load(std::memory_order_relaxed)
                  : (machine_.telemetry_sink() ? machine_.telemetry_sink()->step_delay_us() : 0);
-        if (delay >= 10000) {
+        if (delay >= ((1'000'000U + Tui::kDetailedExecutionMaxHz - 1) /
+                      Tui::kDetailedExecutionMaxHz)) {
             show_disabled = false;
         }
     }

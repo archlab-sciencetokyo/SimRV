@@ -71,6 +71,7 @@ struct TuiTestAccess {
         tui.mission_.configure(path, binary);
         tui.mission_revision_seen_ = tui.mission_.revision();
     }
+    static void apply_mission_speed(Tui& tui) { tui.apply_mission_speed(); }
     static void apply_mission_layout(Tui& tui) { tui.apply_mission_guidance_layout(); }
     static void refresh_mission_layout_notice(Tui& tui) { tui.refresh_mission_layout_notice(); }
     static void drain_trace(Tui& tui) { tui.drain_trace_records(); }
@@ -129,9 +130,6 @@ struct TuiTestAccess {
         return false;
     }
     static auto selection(const Tui& tui) -> const SelectionState& { return tui.selection_; }
-    static auto handle_nav_key(Tui& tui, uint8_t byte, TuiKey key) -> bool {
-        return tui.handle_navigation_keyboard_input(byte, key);
-    }
     static void set_sixel_supported(Tui& tui, bool s) { tui.sixel_supported_ = s; }
     static void set_sixel_rendered(Tui& tui, bool rendered) { tui.sixel_rendered_ = rendered; }
     static auto sixel_framebuffer_signature(const Tui& tui) -> uint64_t {
@@ -276,7 +274,7 @@ void test_tui_preferences_round_trip() {
 
     TuiPreferences expected;
     expected.layout = TuiLayout::ThreeColumn;
-    expected.slots = {{TuiRegPage::TRACE, 3}, {TuiRegPage::BUS, 1}, {TuiRegPage::LIVE, 0}};
+    expected.slots = {{TuiRegPage::TRACE, 3}, {TuiRegPage::BUS, 1}, {TuiRegPage::GPR, 0}};
     expected.focused_slot = 1;
     expected.inspector_width = 42;
     expected.column_widths = {42, 35, 28, -1};
@@ -289,7 +287,7 @@ void test_tui_preferences_round_trip() {
     expect(actual.layout == expected.layout && actual.slots.size() == expected.slots.size() &&
                actual.slots[0].page == expected.slots[0].page &&
                actual.slots[0].scroll_offset == expected.slots[0].scroll_offset &&
-               actual.slots[2].page == TuiRegPage::LIVE &&
+               actual.slots[2].page == TuiRegPage::GPR &&
                actual.focused_slot == expected.focused_slot &&
                actual.column_widths == expected.column_widths && actual.theme == expected.theme &&
                actual.high_contrast,
@@ -383,7 +381,7 @@ void test_utf8_and_theme_helpers() {
 
 void test_key_registry() {
     const auto bindings = simrv::tui::Keybindings::all();
-    expect(bindings.size() == 38, "all key actions have registry entries");
+    expect(bindings.size() == 45, "all key actions have registry entries");
     std::set<simrv::tui::KeyAction> actions;
     std::set<char> claimed_chars;
     const auto categories = simrv::tui::Keybindings::categories();
@@ -749,22 +747,47 @@ void test_cpu_config_reload_confirmation_and_slow_mode() {
     simrv::core::Machine speed_machine;
     Tui speed_tui(speed_machine);
     simrv::tui::TuiTestAccess::set_paused(speed_tui, false);
-    TuiTestAccess::set_pipeline_detail_visible(speed_tui, true);
-    speed_tui.set_step_delay_us(9'999);
+    speed_tui.set_step_delay_us(16'666);
     expect(!speed_tui.captures_execution_detail(),
-           "execution above 100 Hz uses sampled rather than detailed capture");
-    speed_tui.set_step_delay_us(10'000);
+           "execution faster than 60 Hz uses sampled rather than detailed capture");
+    speed_tui.set_step_delay_us(16'667);
+    speed_tui.set_reg_page(simrv::tui::TuiRegPage::CONSOLE);
+    expect(!speed_tui.captures_execution_detail(),
+           "Console does not request pipeline detail capture through the DISASM alias");
+    speed_tui.set_reg_page(simrv::tui::TuiRegPage::PIPELINE);
+    TuiTestAccess::set_pipeline_detail_visible(speed_tui, true);
     expect(speed_tui.captures_execution_detail(),
-           "execution at 100 Hz captures detail for visible pipeline views");
+           "execution at 60 Hz captures detail for visible pipeline views");
     speed_tui.set_step_delay_us(0);
     expect(!speed_tui.captures_execution_detail(),
            "unthrottled execution keeps the fast sampled path");
+
+    speed_machine.publish_tui_execution_snapshot_for_testing();
+    TuiTestAccess::init_panes(speed_tui, speed_machine);
+    auto* speed_inspector = TuiTestAccess::inspector(speed_tui);
+    speed_inspector->set_paused(false);
+    speed_inspector->set_visible_rows(45);
+    speed_inspector->set_page(simrv::tui::TuiRegPage::GPR);
+    const auto running_detail = strip_ansi(speed_inspector->render_row(2, 80));
+    const auto hidden_registers = strip_ansi(speed_inspector->render_row(3, 80));
+    const auto live_counters = strip_ansi(speed_inspector->render_row(24, 80));
+    expect(running_detail.contains("RUNNING") && !hidden_registers.contains("x1"),
+           "unthrottled register detail is replaced by the running indicator");
+    expect(live_counters.contains("retired"),
+           "sampled performance counters remain visible in the same inspector panel");
 
     std::filesystem::remove_all(root, ignored);
 }
 
 void test_page_guidance() {
     using simrv::tui::TuiRegPage;
+    expect(simrv::tui::get_page_info(TuiRegPage::GPR)->fast_mode_content ==
+               simrv::tui::TuiFastModeContent::FastChangingDetail &&
+               simrv::tui::get_page_info(TuiRegPage::TRACE)->fast_mode_content ==
+                   simrv::tui::TuiFastModeContent::Stable &&
+               simrv::tui::get_page_info(TuiRegPage::CONSOLE)->fast_mode_content ==
+                   simrv::tui::TuiFastModeContent::Stable,
+           "fast-mode policy hides detailed content groups while sampled tools stay visible");
     constexpr TuiRegPage pages[] = {TuiRegPage::GPR,      TuiRegPage::FPR,     TuiRegPage::VEC,
                                     TuiRegPage::PIPELINE, TuiRegPage::CACHE,   TuiRegPage::TLB,
                                     TuiRegPage::BPRED,    TuiRegPage::HAZARD,  TuiRegPage::BUS,
@@ -1053,7 +1076,8 @@ void test_control_flow_calls_mission() {
                          "examples/isa/lessons/control-flow-calls.mission")
                             .string();
     mission.configure(lesson, "/tmp/control-flow-calls.elf");
-    expect(mission.enabled() && mission.step() == 0, "mission starts for its bundled ELF");
+    expect(mission.enabled() && mission.step() == 0 && mission.speed_hz() == 30,
+           "mission starts for its bundled ELF at the classroom default of 30 Hz");
     expect(mission.description().contains("conditional branches"),
            "mission loads the lesson description");
     expect(mission.goal().contains("calling convention"), "mission loads the lesson goal");
@@ -1063,6 +1087,27 @@ void test_control_flow_calls_mission() {
                mission.guidance()->panels.front() == simrv::tui::TuiRegPage::EXPLAIN &&
                mission.guidance()->panels.back() == simrv::tui::TuiRegPage::TRACE,
            "mission step provides a complete multi-panel workbench layout");
+
+    const auto speed_lesson =
+        std::filesystem::temp_directory_path() / "simrv-mission-speed-test.mission";
+    {
+        std::ofstream output(speed_lesson);
+        output << "[mission]\nversion = \"1\"\nprogram = \"pace.elf\"\n"
+                  "speed_hz = \"30\"\n\n"
+                  "[step]\nid = \"default\"\ntitle = \"Default\"\n"
+                  "prompt = \"Observe\"\nwhy = \"Learn\"\nview = \"registers\"\n\n"
+                  "[step]\nid = \"override\"\ntitle = \"Override\"\n"
+                  "prompt = \"Observe\"\nwhy = \"Learn\"\nview = \"registers\"\n"
+                  "speed_hz = \"45\"\n";
+    }
+    simrv::tui::MissionProgress speed_mission;
+    speed_mission.configure(speed_lesson.string(), "/tmp/pace.elf");
+    expect(speed_mission.enabled() && speed_mission.speed_hz() == 30 &&
+               speed_mission.advance_step() && speed_mission.speed_hz() == 45,
+           "a mission step can override the mission-wide execution frequency");
+    std::error_code speed_lesson_error;
+    std::filesystem::remove(speed_lesson, speed_lesson_error);
+
     simrv::core::Machine machine;
     simrv::tui::TuiModal modal(machine);
     modal.set_mission_progress(&mission);
@@ -1130,6 +1175,9 @@ void test_control_flow_calls_mission() {
     expect(layout_tui.get_workbench_slots().size() == 3 &&
                simrv::tui::TuiTestAccess::status_override(layout_tui).contains("144x10"),
            "mission warns when the requested three-panel layout does not fit the terminal");
+    simrv::tui::TuiTestAccess::apply_mission_speed(layout_tui);
+    expect(layout_tui.step_delay_us() == 33'334,
+           "classroom mission configures the simulator to its readable default frequency");
     simrv::tui::TuiTestAccess::set_cached_term_width(layout_tui, 160);
     simrv::tui::TuiTestAccess::refresh_mission_layout_notice(layout_tui);
     expect(simrv::tui::TuiTestAccess::status_override(layout_tui).contains("now fits"),
@@ -1200,8 +1248,8 @@ void test_tui_running_state_synchronization() {
     expect(tui->is_paused(), "tui.is_paused() is true on startup");
     tui->set_paused(false);
     expect(!tui->is_paused(), "tui.is_paused() is false after unpausing");
-    expect(tui->get_workbench_slots()[0].page == simrv::tui::TuiRegPage::LIVE,
-           "running while Console is focused shows Live in the first inspector column");
+    expect(tui->get_workbench_slots()[0].page == simrv::tui::TuiRegPage::GPR,
+           "running while Console is focused keeps the selected inspector page visible");
     expect(tui->get_workbench_slots()[1].page == simrv::tui::TuiRegPage::CONSOLE,
            "starting execution leaves the other workbench column unchanged");
     tui->save_preferences();
@@ -1210,7 +1258,7 @@ void test_tui_running_state_synchronization() {
                saved_preferences.slots[0].page == simrv::tui::TuiRegPage::GPR &&
                saved_preferences.slots[1].page == simrv::tui::TuiRegPage::CONSOLE &&
                saved_preferences.slots[2].page == simrv::tui::TuiRegPage::DISPLAY,
-           "saving while running does not persist the temporary Live page");
+           "saving while running preserves the selected workbench pages");
     expect(machine.execution_state() == simrv::core::ExecutionState::Running,
            "machine execution state is Running after unpausing TUI");
     expect(!machine.is_paused(), "machine.is_paused() is false after unpausing");
@@ -1218,21 +1266,21 @@ void test_tui_running_state_synchronization() {
     tui->set_paused(true);
     expect(tui->is_paused(), "tui.is_paused() is true after pausing");
     expect(tui->get_workbench_slots()[0].page == simrv::tui::TuiRegPage::GPR,
-           "pausing restores the inspector that was visible before execution");
+           "pausing keeps the inspector page selected during execution");
     expect(tui->focused_slot() == 1,
-           "showing Live from a Console-focused state does not move keyboard focus");
+           "running from a Console-focused state does not move keyboard focus");
     expect(machine.execution_state() == simrv::core::ExecutionState::Paused,
            "machine execution state is Paused after pausing TUI");
     expect(machine.is_paused(), "machine.is_paused() is true after pausing");
 
     simrv::tui::TuiTestAccess::set_focused_slot(*tui, 2);
     tui->set_paused(false);
-    expect(tui->get_workbench_slots()[0].page == simrv::tui::TuiRegPage::LIVE &&
+    expect(tui->get_workbench_slots()[0].page == simrv::tui::TuiRegPage::GPR &&
                tui->get_workbench_slots()[2].page == simrv::tui::TuiRegPage::DISPLAY,
-           "running while Display is focused shows Live without replacing the display");
+           "running while Display is focused preserves inspector and display pages");
     tui->set_paused(true);
     expect(tui->get_workbench_slots()[0].page == simrv::tui::TuiRegPage::GPR,
-           "pausing after a Display-focused run restores the inspector page");
+           "pausing after a Display-focused run keeps the inspector page");
 
     simrv::tui::TuiTestAccess::set_focused_slot(*tui, 0);
     tui->set_paused(false);
@@ -1246,89 +1294,6 @@ void test_tui_running_state_synchronization() {
     tui.reset();
     std::error_code ignored;
     std::filesystem::remove(preferences_path, ignored);
-}
-
-void test_live_overview_snapshots_and_hart_rows() {
-    using namespace simrv::tui;
-    simrv::core::Machine machine(simrv::core::MachineConfig{
-        .execution = {.num_harts = 2}, .tui = {.enabled = true, .inspection_output = {}}});
-    machine.add_hart_for_testing(std::make_unique<simrv::core::CPU>());
-    auto& hart0 = machine.hart(0);
-    auto& hart1 = machine.hart(1);
-    hart0.state().pc = 0x80000100;
-    hart0.state().priv = simrv::xlen::PrivilegeLevel::Machine;
-    hart0.e_icount = 1200;
-    hart0.clint_mmio.mcycle = 3000;
-    hart1.state().pc = 0x8000abcd;
-    hart1.state().priv = simrv::xlen::PrivilegeLevel::Supervisor;
-    hart1.e_icount = 800;
-    hart1.clint_mmio.mcycle = 5000;
-    hart0.clint_mmio.mtime.store(15'000'000);
-    // Resolve a real executable symbol so the Live view exercises PC annotation as well as
-    // preserving the raw architectural address.
-    if (machine.symbol_table().load_from_elf("/proc/self/exe")) {
-        if (const auto main_address = machine.symbol_table().lookup_name("main")) {
-            hart0.state().pc = *main_address;
-        }
-    }
-    machine.publish_tui_execution_snapshot_for_testing();
-    hart0.state().pc = 0xdead;
-    hart1.state().pc = 0xbeef;
-    hart1.state().priv = simrv::xlen::PrivilegeLevel::User;
-
-    InspectorPane pane(machine);
-    pane.set_selected_hart(1);
-    pane.refresh_execution_snapshot();
-    pane.set_page(TuiRegPage::LIVE);
-    pane.set_paused(false);
-    pane.set_active_runtime(2.0);
-    pane.set_kips(1234);
-    pane.set_max_kips(2300);
-    pane.set_visible_rows(30);
-
-    const auto h0 = strip_ansi(pane.render_row(4, 80));
-    const auto h1 = strip_ansi(pane.render_row(5, 80));
-    expect(h0.contains("H0") && h0.contains("M") && h0.contains("main"),
-           "Live Overview renders hart 0 PC symbol and machine privilege from its snapshot");
-    expect(h1.contains(">H1") && h1.contains("S") && h1.contains("8000abcd"),
-           "Live Overview marks selected hart and renders supervisor privilege from its snapshot");
-    expect(strip_ansi(pane.render_row(7, 80)).contains("2,000"),
-           "Live Overview aggregates retired instructions across harts");
-    expect(strip_ansi(pane.render_row(7, 80)).contains("8,000"),
-           "Live Overview labels and aggregates hart cycles across harts");
-    expect(strip_ansi(pane.render_row(8, 80)).contains("1.23 MIPS") &&
-               strip_ansi(pane.render_row(8, 80)).contains("1.0 KIPS"),
-           "Live Overview shows recent and average throughput");
-    expect(strip_ansi(pane.render_row(9, 80)).contains("IPC") &&
-               strip_ansi(pane.render_row(9, 80)).contains("CPI"),
-           "Live Overview shows aggregate IPC and CPI");
-    expect(strip_ansi(pane.render_row(10, 80)).contains("2.00s") &&
-               strip_ansi(pane.render_row(10, 80)).contains("1.50s"),
-           "Live Overview shows host runtime and guest virtual time");
-    expect(strip_ansi(pane.render_row(11, 80)).contains("instruction-fast") &&
-               strip_ansi(pane.render_row(11, 80)).contains("2.30 MIPS"),
-           "Live Overview shows execution engine and peak throughput");
-    machine.runtime_profile.engine = simrv::core::ExecutionEngine::CycleFast;
-    expect(strip_ansi(pane.render_row(2, 80)).contains("CA"),
-           "Live Overview identifies cycle-accurate execution mode");
-
-    pane.set_visible_rows(8);
-    (void)pane.render_row(2, 32);
-    pane.scroll(1, 32);
-    const auto scrolled = strip_ansi(pane.render_row(4, 32));
-    expect(scrolled.contains("H1"),
-           "narrow Live Overview scrolls to hart rows beyond the viewport");
-
-    simrv::core::Machine empty_machine;
-    empty_machine.publish_tui_execution_snapshot_for_testing();
-    InspectorPane empty_pane(empty_machine);
-    empty_pane.refresh_execution_snapshot();
-    empty_pane.set_page(TuiRegPage::LIVE);
-    empty_pane.set_paused(true);
-    empty_pane.set_visible_rows(30);
-    expect(strip_ansi(empty_pane.render_row(7, 80)).contains("0.0 KIPS") &&
-               strip_ansi(empty_pane.render_row(8, 80)).contains("0.00"),
-           "zero-count startup renders finite throughput and aggregate ratios");
 }
 
 void test_inspection_report() {
@@ -2702,7 +2667,7 @@ void test_tui_differential_rendering_and_throttling() {
 void test_multi_column_workbench_tools_and_swapping() {
     // 1. ToolPickerModal catalog and accelerator lookup
     const auto& tools = simrv::tui::modals::ToolPickerModal::all_tools();
-    expect(tools.size() == 16, "tool picker provides 16 selectable workbench tools");
+    expect(tools.size() == 15, "tool picker provides 15 selectable workbench tools");
     expect(simrv::tui::modals::ToolPickerModal::find_by_accelerator('o') ==
                simrv::tui::TuiRegPage::LOG,
            "accelerator 'o' maps to LOG");
@@ -2748,9 +2713,8 @@ void test_multi_column_workbench_tools_and_swapping() {
     expect(simrv::tui::modals::ToolPickerModal::find_by_accelerator('y') ==
                simrv::tui::TuiRegPage::DISPLAY,
            "accelerator 'y' maps to DISPLAY");
-    expect(simrv::tui::modals::ToolPickerModal::find_by_accelerator('l') ==
-               simrv::tui::TuiRegPage::LIVE,
-           "accelerator 'l' maps to Live Overview");
+    expect(!simrv::tui::modals::ToolPickerModal::find_by_accelerator('l').has_value(),
+           "accelerator 'l' is no longer reserved for Live Overview");
     expect(!simrv::tui::modals::ToolPickerModal::find_by_accelerator('q').has_value(),
            "accelerator 'q' is not bound to a tool (reserved for exit/close)");
 
@@ -2826,7 +2790,7 @@ void test_multi_column_workbench_tools_and_swapping() {
     expect(simrv::tui::modals::ToolPickerModal::tool_index_at_row(19) == 13,
            "row 19 maps to tool 13 (DISPLAY)");
     expect(simrv::tui::modals::ToolPickerModal::tool_index_at_row(20) == 14,
-           "row 20 maps to tool 14 (LIVE)");
+           "row 20 maps to tool 14 (LOG)");
     expect(!simrv::tui::modals::ToolPickerModal::tool_index_at_row(2).has_value(),
            "row 2 is category banner, maps to no tool");
     expect(simrv::tui::modals::ToolPickerModal::row_for_tool_index(0) == 3,
@@ -2848,7 +2812,7 @@ void test_multi_column_workbench_tools_and_swapping() {
     }
     expect(found_modal_control, "modal control hitboxes are detectable for pointer styling");
     // TRACE (tool index 10) is at content row 16; terminal Y: start_y (3) + 1 (border) + 16
-    // (content) + 1 (1-indexed) = 20 after Live Overview adds one row to the modal.
+    // (content) + 1 (1-indexed) = 20.
     auto click_res = modal.handle_click(60, 20, 120, 30);
     expect(click_res == simrv::tui::TuiModal::ModalClickResult::Submit,
            "clicking tool row submits selection");
@@ -3222,11 +3186,10 @@ void test_multi_column_panel_management_and_modal_usability() {
     expect(modal.get_settings_draft().active_tab == 0, "Tab in Settings cycled tab forward to 0");
     tui.close_modal();
 
-    // Verify Ctrl-L is removed from navigation handling
+    // Verify Ctrl-L is removed from the key registry.
     const auto layout_before = simrv::tui::TuiTestAccess::layout(tui);
-    const bool handled_ctrl_l =
-        simrv::tui::TuiTestAccess::handle_nav_key(tui, 12, simrv::tui::TuiKey::CtrlL);
-    expect(!handled_ctrl_l, "Ctrl-L is not handled as a navigation command");
+    expect(!simrv::tui::Keybindings::match(simrv::tui::TuiKey::CtrlL).has_value(),
+           "Ctrl-L is not registered as a navigation command");
     expect(simrv::tui::TuiTestAccess::layout(tui) == layout_before, "Ctrl-L did not cycle layout");
 }
 
@@ -3957,7 +3920,6 @@ int main() {
     test_control_flow_calls_mission();
     test_drawer_stack_layout();
     test_tui_running_state_synchronization();
-    test_live_overview_snapshots_and_hart_rows();
     test_inspection_report();
     test_help_uses_canonical_registry();
     test_category_groups_and_glossary();
