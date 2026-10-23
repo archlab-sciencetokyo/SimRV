@@ -9,9 +9,11 @@ Target: `dev`
 - [x] CLI option metadata and shared SoC platform-map descriptors.
 - [x] Classroom mission workflow, source examples, and TileLink contention display.
 - [x] Configuration restart confirmation, forwarding status, and slow-mode detail capture.
-- [ ] Complete RV64 and RV32 builds and gate suites.
-- [ ] Validate release metadata, package contents, package dependencies, and install behavior.
-- [ ] Run release-tool, schema, hosted-RV32, and binary qualification checks.
+- [x] Complete RV64 and RV32 release builds and gate suites.
+- [x] Validate release metadata, native package contents and dependencies, and SDK install behavior.
+- [x] Run release-tool, schema, and RV32/RV64 binary qualification checks.
+- [ ] Hosted RV32 workflow qualification remains for CI. `lintian` and `rpmlint` were unavailable
+      locally; DEB metadata and RPM package digests were checked with native package tools.
 
 This candidate is being qualified locally. Do not tag or publish it as part of this handoff.
 The distributed artifact remains the RV64-capable `simrv` binary; native RV32 is the strict-width
