@@ -10,6 +10,7 @@
 #include <vector>
 
 #include "simrv/tui/TuiModal.hpp"
+#include "simrv/core/PlatformMap.h"
 #include "simrv/xlen/AddressTypes.hpp"
 
 namespace simrv::core {
@@ -47,7 +48,7 @@ class MemoryModal {
                        InspectorPane* inspector_pane, int term_height, int term_width);
 
    private:
-    static inline simrv::xlen::Address base_address_{0x80000000ULL};
+    static inline simrv::xlen::Address base_address_{SIMRV_PLATFORM_DRAM_BASE};
     static inline int cursor_byte_{0};  // 0 to 15 within row
     static inline int cursor_row_{0};   // 0 to num_rows-1
     static inline bool physical_mode_{false};

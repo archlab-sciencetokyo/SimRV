@@ -29,7 +29,7 @@ namespace simrv::debug {
 enum class WatchType : uint8_t { Read, Write, Access };
 
 /// Frontend that owns a breakpoint or watchpoint.
-enum class BreakpointOwner : uint8_t { Tui = 1, Gdb = 2 };
+enum class BreakpointOwner : uint8_t { Tui = 1, Gdb = 2, Mission = 3 };
 
 /// Logical instruction breakpoint owned by one debugger frontend.
 struct PcBreakpoint {

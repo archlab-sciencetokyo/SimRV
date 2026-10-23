@@ -15,8 +15,7 @@
 #include "simrv/debug/SymbolTable.hpp"
 #include "simrv/pipeline/OperationInfo.hpp"
 #include "simrv/tui/Tui.hpp"
-#include "simrv/tui/TuiGuidance.hpp"
-#include "simrv/tui/TuiMission.hpp"
+#include "simrv/tui/TuiDrawer.hpp"
 #include "simrv/tui/TuiTheme.hpp"
 #include "simrv/tui/framework/Text.hpp"
 #include "simrv/xlen/Constants.hpp"
@@ -318,6 +317,30 @@ struct TabSlot {
     std::optional<TuiRegPage> page = std::nullopt;
 };
 
+struct PageTab {
+    TuiRegPage page;
+    std::string name;
+};
+
+auto page_tabs(TuiCategoryGroup group, bool has_fp, bool has_vector, bool cycle_accurate,
+               bool custom_memory, int cache_inspect_type, bool cycling = false)
+    -> std::vector<PageTab> {
+    std::vector<PageTab> tabs;
+    for (const auto& info : kTuiPages) {
+        if (info.group != group || (cycling ? !info.cycle_page : !info.visible_tab) ||
+            (info.cycle_accurate_only && !cycle_accurate) ||
+            (info.floating_point_only && !has_fp) || (info.vector_only && !has_vector)) {
+            continue;
+        }
+        std::string name(info.tab_name);
+        if (info.page == TuiRegPage::STACK && custom_memory) name = "Memory";
+        if (info.page == TuiRegPage::CACHE)
+            name = cache_inspect_type == 0 ? "Cache:IC" : "Cache:DC";
+        tabs.push_back({.page = info.page, .name = std::move(name)});
+    }
+    return tabs;
+}
+
 struct ComputedTabSpan {
     int start_col;
     int width;
@@ -371,20 +394,18 @@ auto layout_tabs_equally(const std::vector<TabSlot>& slots, int available_width)
 }
 
 auto get_tier1_group_name(TuiCategoryGroup grp, int width) -> std::string_view {
-    if (width < 44) {
-        if (grp == TuiCategoryGroup::Regs) return "Regs";
-        if (grp == TuiCategoryGroup::Pipeline) return "Pipe";
+    for (const auto& info : kTuiCategories) {
+        if (info.group == grp) {
+            return width < 44 ? info.compact_name : info.name;
+        }
     }
-    return get_category_name(grp);
+    return "Tools";
 }
 
 auto get_tier1_group_center(TuiCategoryGroup grp, int width) -> int {
-    constexpr std::array<TuiCategoryGroup, 4> kGroups = {
-        TuiCategoryGroup::Regs, TuiCategoryGroup::Memory, TuiCategoryGroup::Pipeline,
-        TuiCategoryGroup::Tools};
     std::vector<TabSlot> slots;
-    slots.reserve(4);
-    for (auto g : kGroups) {
+    slots.reserve(std::size(kTuiCategoryGroups));
+    for (auto g : kTuiCategoryGroups) {
         auto const name = get_tier1_group_name(g, width);
         slots.push_back({.text = "",
                          .display_width = static_cast<int>(name.length()) + 2,
@@ -427,13 +448,10 @@ auto layout_tier2_tabs(const std::vector<TabSlot>& slots, int available_width,
 
 auto InspectorPane::render_tab_bar_tier1(int width) const -> std::string {
     TuiCategoryGroup const current_grp = get_category_group(page_);
-    constexpr std::array<TuiCategoryGroup, 4> kGroups = {
-        TuiCategoryGroup::Regs, TuiCategoryGroup::Memory, TuiCategoryGroup::Pipeline,
-        TuiCategoryGroup::Tools};
 
     std::vector<TabSlot> slots;
-    slots.reserve(4);
-    for (auto grp : kGroups) {
+    slots.reserve(std::size(kTuiCategoryGroups));
+    for (auto grp : kTuiCategoryGroups) {
         auto const name = get_tier1_group_name(grp, width);
         std::string text;
         if (grp == current_grp) {
@@ -452,53 +470,11 @@ auto InspectorPane::render_tab_bar_tier1(int width) const -> std::string {
 
 auto InspectorPane::render_tab_bar_tier2(int width) const -> std::string {
     TuiCategoryGroup const grp = get_category_group(page_);
-    struct SubTab {
-        TuiRegPage page;
-        std::string name;
-    };
-    std::vector<SubTab> tabs;
-
-    switch (grp) {
-        case TuiCategoryGroup::Regs: {
-            tabs.push_back({.page = TuiRegPage::GPR, .name = "GPR"});
-            bool has_f = (current_cpu().state().misa & (1ULL << ('f' - 'a'))) != 0;
-            bool has_d = (current_cpu().state().misa & (1ULL << ('d' - 'a'))) != 0;
-            bool has_v = (current_cpu().state().misa & (1ULL << ('v' - 'a'))) != 0;
-            if (has_f || has_d) {
-                tabs.push_back({.page = TuiRegPage::FPR, .name = "FPR"});
-            }
-            if (has_v) {
-                tabs.push_back({.page = TuiRegPage::VEC, .name = "VEC"});
-            }
-            break;
-        }
-        case TuiCategoryGroup::Memory: {
-            tabs.push_back({.page = TuiRegPage::STACK,
-                            .name = is_custom_memory_inspect() ? "Memory" : "Stack"});
-            if (machine_.runtime_profile.is_cycle_mode()) {
-                std::string cache_name = (cache_inspect_type_ == 0) ? "Cache:IC" : "Cache:DC";
-                tabs.push_back({.page = TuiRegPage::CACHE, .name = cache_name});
-            }
-            tabs.push_back({.page = TuiRegPage::TLB, .name = "TLB"});
-            tabs.push_back({.page = TuiRegPage::BUS, .name = "Bus"});
-            break;
-        }
-        case TuiCategoryGroup::Pipeline: {
-            tabs.push_back({.page = TuiRegPage::PIPELINE, .name = "Stages"});
-            if (machine_.runtime_profile.is_cycle_mode()) {
-                tabs.push_back({.page = TuiRegPage::BPRED, .name = "BPred"});
-                tabs.push_back({.page = TuiRegPage::HAZARD, .name = "Hazard"});
-            }
-            break;
-        }
-        case TuiCategoryGroup::Tools: {
-            tabs.push_back({.page = TuiRegPage::LIVE, .name = "Live"});
-            tabs.push_back({.page = TuiRegPage::EXPLAIN, .name = "Explain"});
-            tabs.push_back({.page = TuiRegPage::TRACE, .name = "Trace"});
-            tabs.push_back({.page = TuiRegPage::LOG, .name = "Log"});
-            break;
-        }
-    }
+    const auto misa = current_cpu().state().misa;
+    const auto tabs = page_tabs(grp, (misa & ((1ULL << ('f' - 'a')) | (1ULL << ('d' - 'a')))) != 0,
+                                (misa & (1ULL << ('v' - 'a'))) != 0,
+                                machine_.runtime_profile.is_cycle_mode(),
+                                is_custom_memory_inspect(), cache_inspect_type_);
 
     std::vector<TabSlot> slots;
     slots.reserve(tabs.size());
@@ -523,13 +499,9 @@ auto InspectorPane::get_tab_at(int row, int col) const -> std::optional<TuiRegPa
     int const width = last_width_ > 0 ? last_width_ : 50;
 
     if (row == 0) {
-        constexpr std::array<TuiCategoryGroup, 4> kGroups = {
-            TuiCategoryGroup::Regs, TuiCategoryGroup::Memory, TuiCategoryGroup::Pipeline,
-            TuiCategoryGroup::Tools};
-
         std::vector<TabSlot> slots;
-        slots.reserve(4);
-        for (auto grp : kGroups) {
+        slots.reserve(std::size(kTuiCategoryGroups));
+        for (auto grp : kTuiCategoryGroups) {
             auto const name = get_tier1_group_name(grp, width);
             slots.push_back({.text = "",
                              .display_width = static_cast<int>(name.length()) + 2,
@@ -541,33 +513,7 @@ auto InspectorPane::get_tab_at(int row, int col) const -> std::optional<TuiRegPa
         for (const auto& span : spans) {
             if (col >= span.start_col && col < span.start_col + span.width) {
                 if (span.grp == get_category_group(page_)) {
-                    // Clicking active group cycles within that group
-                    if (span.grp == TuiCategoryGroup::Regs) {
-                        if (page_ == TuiRegPage::GPR) return TuiRegPage::FPR;
-                        if (page_ == TuiRegPage::FPR) return TuiRegPage::VEC;
-                        return TuiRegPage::GPR;
-                    }
-                    if (span.grp == TuiCategoryGroup::Memory) {
-                        if (page_ == TuiRegPage::STACK)
-                            return machine_.runtime_profile.is_cycle_mode() ? TuiRegPage::CACHE
-                                                                            : TuiRegPage::TLB;
-                        if (page_ == TuiRegPage::CACHE) return TuiRegPage::TLB;
-                        if (page_ == TuiRegPage::TLB) return TuiRegPage::BUS;
-                        return TuiRegPage::STACK;
-                    }
-                    if (span.grp == TuiCategoryGroup::Pipeline) {
-                        if (page_ == TuiRegPage::PIPELINE)
-                            return machine_.runtime_profile.is_cycle_mode() ? TuiRegPage::BPRED
-                                                                            : TuiRegPage::PIPELINE;
-                        if (page_ == TuiRegPage::BPRED) return TuiRegPage::HAZARD;
-                        return TuiRegPage::PIPELINE;
-                    }
-                    if (span.grp == TuiCategoryGroup::Tools) {
-                        if (page_ == TuiRegPage::LIVE) return TuiRegPage::EXPLAIN;
-                        if (page_ == TuiRegPage::EXPLAIN) return TuiRegPage::TRACE;
-                        if (page_ == TuiRegPage::TRACE) return TuiRegPage::LOG;
-                        return TuiRegPage::LIVE;
-                    }
+                    return next_page_for_slot(page_, machine_.runtime_profile.is_cycle_mode());
                 }
                 return get_default_page_for_group(span.grp,
                                                   machine_.runtime_profile.is_cycle_mode());
@@ -578,53 +524,11 @@ auto InspectorPane::get_tab_at(int row, int col) const -> std::optional<TuiRegPa
 
     if (row == 1) {
         TuiCategoryGroup const grp = get_category_group(page_);
-        struct SubTab {
-            TuiRegPage page;
-            std::string name;
-        };
-        std::vector<SubTab> tabs;
-
-        switch (grp) {
-            case TuiCategoryGroup::Regs: {
-                tabs.push_back({.page = TuiRegPage::GPR, .name = "GPR"});
-                bool has_f = (current_cpu().state().misa & (1ULL << ('f' - 'a'))) != 0;
-                bool has_d = (current_cpu().state().misa & (1ULL << ('d' - 'a'))) != 0;
-                bool has_v = (current_cpu().state().misa & (1ULL << ('v' - 'a'))) != 0;
-                if (has_f || has_d) {
-                    tabs.push_back({.page = TuiRegPage::FPR, .name = "FPR"});
-                }
-                if (has_v) {
-                    tabs.push_back({.page = TuiRegPage::VEC, .name = "VEC"});
-                }
-                break;
-            }
-            case TuiCategoryGroup::Memory: {
-                tabs.push_back({.page = TuiRegPage::STACK,
-                                .name = is_custom_memory_inspect() ? "Memory" : "Stack"});
-                if (machine_.runtime_profile.is_cycle_mode()) {
-                    std::string cache_name = (cache_inspect_type_ == 0) ? "Cache:IC" : "Cache:DC";
-                    tabs.push_back({.page = TuiRegPage::CACHE, .name = cache_name});
-                }
-                tabs.push_back({.page = TuiRegPage::TLB, .name = "TLB"});
-                tabs.push_back({.page = TuiRegPage::BUS, .name = "Bus"});
-                break;
-            }
-            case TuiCategoryGroup::Pipeline: {
-                tabs.push_back({.page = TuiRegPage::PIPELINE, .name = "Stages"});
-                if (machine_.runtime_profile.is_cycle_mode()) {
-                    tabs.push_back({.page = TuiRegPage::BPRED, .name = "BPred"});
-                    tabs.push_back({.page = TuiRegPage::HAZARD, .name = "Hazard"});
-                }
-                break;
-            }
-            case TuiCategoryGroup::Tools: {
-                tabs.push_back({.page = TuiRegPage::LIVE, .name = "Live"});
-                tabs.push_back({.page = TuiRegPage::EXPLAIN, .name = "Explain"});
-                tabs.push_back({.page = TuiRegPage::TRACE, .name = "Trace"});
-                tabs.push_back({.page = TuiRegPage::LOG, .name = "Log"});
-                break;
-            }
-        }
+        const auto misa = current_cpu().state().misa;
+        const auto tabs = page_tabs(
+            grp, (misa & ((1ULL << ('f' - 'a')) | (1ULL << ('d' - 'a')))) != 0,
+            (misa & (1ULL << ('v' - 'a'))) != 0, machine_.runtime_profile.is_cycle_mode(),
+            is_custom_memory_inspect(), cache_inspect_type_);
 
         std::vector<TabSlot> slots;
         slots.reserve(tabs.size());
@@ -698,104 +602,6 @@ auto InspectorPane::render_log_bottom_row(int row_idx, int num_rows, int width) 
     return format_to_width(" " + log_lines_.at(static_cast<std::size_t>(log_idx)), width);
 }
 
-auto InspectorPane::current_student_guidance() const -> PageGuidance {
-    if (mission_ != nullptr) {
-        if (const auto mission_guidance = mission_->guidance()) {
-            return {.title = std::string(mission_guidance->title),
-                    .meaning = std::string(mission_guidance->prompt),
-                    .relationship = std::string(mission_guidance->why),
-                    .next_action = KeyAction::CycleToolPage,
-                    .next_hint = "Open the mission observation view.",
-                    .glossary_topic = mission_guidance->glossary_topic};
-        }
-    }
-    auto const& cpu = current_cpu();
-    auto const& context = cpu.pipeline_context;
-    auto const& st = cpu.state();
-    auto const snapshot = machine_.tui_execution_snapshot(selected_hart_);
-
-    bool const has_pending_trap =
-        context.pending_exception.has_value() || st.mcause != 0 || st.scause != 0;
-    uint64_t const trap_cause = context.pending_exception.has_value()
-                                    ? static_cast<uint64_t>(*context.pending_exception)
-                                    : (st.mcause != 0 ? st.mcause : st.scause);
-
-    bool const is_csr = (simrv::pipeline::operation::info(context.op_id).side_effects &
-                         simrv::pipeline::operation::SideEffectFlags::Csr) != 0;
-    bool const is_cfu = simrv::pipeline::operation::is_cfu(context.op_id);
-    uint32_t const cfu_f7 = static_cast<uint32_t>(context.funct7);
-    uint32_t const cfu_f3 = static_cast<uint32_t>(context.funct3);
-    bool const cfu_plugin = cpu.cfu_unit.has_plugin();
-    std::string cfu_plugin_path = cfu_plugin ? std::string(cpu.cfu_unit.plugin_path()) : "";
-    uint32_t const cfu_lat = cpu.cfu_unit.query_latency(cfu_f7, cfu_f3);
-    uint32_t const cfu_stalls = cpu.cfu_unit.query_stall_cycles(cfu_f7, cfu_f3);
-
-    return guidance_for_context(
-        {.page = page_,
-         .cycle_accurate = machine_.runtime_profile.is_cycle_mode(),
-         .instruction_valid = context.op_id != simrv::isa::OperationId::UNKNOWN,
-         .operation = context.op_id,
-         .destination = static_cast<uint8_t>(context.rd),
-         .cache_misses = snapshot.icache_misses + snapshot.dcache_misses,
-         .data_hazard_stalls = snapshot.ca_stats.data_hazard_stalls,
-         .control_hazard_bubbles = snapshot.ca_stats.control_hazard_bubbles,
-         .image_loaded = !machine_.binary_path().empty(),
-         .shutdown = machine_.is_shutdown_,
-         .privilege = st.priv,
-         .has_pending_trap = has_pending_trap,
-         .trap_cause = trap_cause,
-         .translation_enabled =
-             simrv::xlen::satp_translation_enabled(st.satp, cpu.effective_data_xlen()),
-         .is_vector_op = simrv::isa::is_vector_op(context.op_id),
-         .is_csr_op = is_csr,
-         .csr_address = static_cast<uint32_t>(context.imm & 0xFFF),
-         .is_cfu_op = is_cfu,
-         .cfu_funct7 = cfu_f7,
-         .cfu_funct3 = cfu_f3,
-         .cfu_has_plugin = cfu_plugin,
-         .cfu_plugin_path = std::move(cfu_plugin_path),
-         .cfu_latency = cfu_lat,
-         .cfu_stall_cycles = cfu_stalls,
-         .cpu_clock_hz = machine_.configuration().execution.cpu_clock_hz,
-         .timebase_hz = machine_.configuration().execution.timebase_hz});
-}
-
-auto InspectorPane::render_guidance_row(int row_idx, int width) -> std::string {
-    auto const guidance = current_student_guidance();
-    const bool compact = (width < 65);
-    switch (row_idx) {
-        case 0:
-            return section_line(
-                compact ? ("Guide · " + guidance.title) : ("Student Guide · " + guidance.title),
-                width);
-        case 1: {
-            std::string text =
-                compact ? (" See: " + guidance.meaning) : (" What you see: " + guidance.meaning);
-            return format_to_width(text, width);
-        }
-        case 2: {
-            std::string text = compact ? (" Why: " + guidance.relationship)
-                                       : (" Why it matters: " + guidance.relationship);
-            return format_to_width(text, width);
-        }
-        case 3: {
-            auto const& binding = Keybindings::get(guidance.next_action);
-            auto const& activate = Keybindings::get(KeyAction::ActivateStudentGuide);
-            std::string text;
-            if (compact) {
-                text = std::format(" Next: {} {} ({})", activate.key_display, guidance.next_hint,
-                                   binding.key_display);
-            } else {
-                text = std::format(" Try next: {} {} ({})  [?] Glossary", activate.key_display,
-                                   guidance.next_hint, binding.key_display);
-            }
-            return format_to_width(text, width);
-        }
-        default:
-            return format_to_width("", width);
-    }
-}
-
 auto InspectorPane::has_tool_menu(TuiRegPage /*page*/) const -> bool { return true; }
 
 auto InspectorPane::render_column_header(int col_idx, const char* name, bool is_focused, int width,
@@ -863,36 +669,15 @@ auto InspectorPane::render_column_header(int col_idx, const char* name, bool is_
 auto InspectorPane::next_page_for_slot(TuiRegPage current, bool cycle_accurate) const
     -> TuiRegPage {
     const TuiCategoryGroup grp = get_category_group(current);
-    switch (grp) {
-        case TuiCategoryGroup::Regs: {
-            bool const has_f = (current_cpu().state().misa & (1ULL << ('f' - 'a'))) != 0;
-            bool const has_d = (current_cpu().state().misa & (1ULL << ('d' - 'a'))) != 0;
-            bool const has_v = (current_cpu().state().misa & (1ULL << ('v' - 'a'))) != 0;
-            if (current == TuiRegPage::GPR) {
-                if (has_f || has_d) return TuiRegPage::FPR;
-                if (has_v) return TuiRegPage::VEC;
-                return TuiRegPage::GPR;
-            }
-            if (current == TuiRegPage::FPR) return has_v ? TuiRegPage::VEC : TuiRegPage::GPR;
-            return TuiRegPage::GPR;
-        }
-        case TuiCategoryGroup::Memory:
-            if (current == TuiRegPage::STACK)
-                return cycle_accurate ? TuiRegPage::CACHE : TuiRegPage::TLB;
-            if (current == TuiRegPage::CACHE) return TuiRegPage::TLB;
-            if (current == TuiRegPage::TLB) return TuiRegPage::BUS;
-            return TuiRegPage::STACK;
-        case TuiCategoryGroup::Pipeline:
-            if (current == TuiRegPage::PIPELINE)
-                return cycle_accurate ? TuiRegPage::BPRED : TuiRegPage::PIPELINE;
-            if (current == TuiRegPage::BPRED) return TuiRegPage::HAZARD;
-            return TuiRegPage::PIPELINE;
-        case TuiCategoryGroup::Tools:
-        default:
-            if (current == TuiRegPage::LIVE) return TuiRegPage::EXPLAIN;
-            if (current == TuiRegPage::EXPLAIN) return TuiRegPage::TRACE;
-            return TuiRegPage::LIVE;
-    }
+    const auto misa = current_cpu().state().misa;
+    const auto tabs = page_tabs(
+        grp, (misa & ((1ULL << ('f' - 'a')) | (1ULL << ('d' - 'a')))) != 0,
+        (misa & (1ULL << ('v' - 'a'))) != 0, cycle_accurate, is_custom_memory_inspect(),
+        cache_inspect_type_, true);
+    if (tabs.empty()) return current;
+    const auto found = std::ranges::find(tabs, current, &PageTab::page);
+    if (found == tabs.end() || std::next(found) == tabs.end()) return tabs.front().page;
+    return std::next(found)->page;
 }
 
 auto InspectorPane::render_row_internal(int row_idx, int width, int header_rows, bool is_secondary)
@@ -905,27 +690,17 @@ auto InspectorPane::render_row_internal(int row_idx, int width, int header_rows,
         if (page_ == TuiRegPage::BPRED || page_ == TuiRegPage::HAZARD) page_ = TuiRegPage::PIPELINE;
     }
 
-    constexpr int kGuidanceHeight = 4;
-    constexpr int kLogAreaHeight = 6;
-    bool const show_guidance =
-        !is_secondary &&
-        should_show_guidance(paused_, student_guide_enabled_, visible_rows_, width);
-    bool const show_log_drawer =
-        !is_secondary && log_drawer_open_ && (visible_rows_ >= 15) &&
-        (page_ != TuiRegPage::EXPLAIN && page_ != TuiRegPage::TRACE && page_ != TuiRegPage::LOG);
-    int const guidance_start =
-        visible_rows_ - (show_log_drawer ? kLogAreaHeight : 0) - kGuidanceHeight;
-    if (!is_secondary && page_ != TuiRegPage::EXPLAIN && page_ != TuiRegPage::TRACE &&
-        page_ != TuiRegPage::LOG) {
-        if (show_guidance && row_idx >= guidance_start &&
-            row_idx < guidance_start + kGuidanceHeight) {
-            return render_guidance_row(row_idx - guidance_start, width);
-        }
-        if (show_log_drawer && row_idx >= visible_rows_ - kLogAreaHeight) {
-            int log_row_idx = row_idx - (visible_rows_ - kLogAreaHeight);
-            return render_log_bottom_row(log_row_idx, kLogAreaHeight, width);
-        }
+    TuiDrawerStack drawers;
+    const bool drawer_page = page_ != TuiRegPage::EXPLAIN && page_ != TuiRegPage::TRACE &&
+                             page_ != TuiRegPage::LOG;
+    if (!is_secondary && drawer_page && log_drawer_open_ && visible_rows_ >= 15) {
+        drawers.add({.height = 6,
+                     .render_row = [this](int row, int drawer_width) {
+                         return render_log_bottom_row(row, 6, drawer_width);
+                     }});
     }
+    if (auto drawer_row = drawers.render_row(row_idx, visible_rows_, width))
+        return std::move(*drawer_row);
 
     int const max_content_rows = get_visible_content_rows();
     int const total_cols = content_total_columns(width);
@@ -1101,22 +876,13 @@ auto InspectorPane::get_visible_content_rows() const -> int {
     if (secondary_column_mode_) {
         return std::max(1, visible_rows_ - 1);
     }
-    constexpr int kLogAreaHeight = 6;
-    constexpr int kGuidanceHeight = 4;
-    bool const show_guidance =
-        should_show_guidance(paused_, student_guide_enabled_, visible_rows_, last_width_);
-    bool const show_log_drawer =
-        log_drawer_open_ && (visible_rows_ >= 15) &&
-        (page_ != TuiRegPage::EXPLAIN && page_ != TuiRegPage::TRACE && page_ != TuiRegPage::LOG);
+    TuiDrawerStack drawers;
+    const bool drawer_page = page_ != TuiRegPage::EXPLAIN && page_ != TuiRegPage::TRACE &&
+                             page_ != TuiRegPage::LOG;
+    if (drawer_page && log_drawer_open_ && visible_rows_ >= 15)
+        drawers.add({.height = 6, .render_row = [](int, int) { return std::string{}; }});
     int max_content_rows = visible_rows_ - (column_header_mode_ ? 1 : 2);
-    if (page_ != TuiRegPage::EXPLAIN && page_ != TuiRegPage::TRACE && page_ != TuiRegPage::LOG) {
-        if (show_log_drawer) {
-            max_content_rows -= kLogAreaHeight;
-        }
-        if (show_guidance) {
-            max_content_rows -= kGuidanceHeight;
-        }
-    }
+    max_content_rows -= drawers.height();
     return std::max(1, max_content_rows);
 }
 

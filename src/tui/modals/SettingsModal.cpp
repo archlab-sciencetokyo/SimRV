@@ -7,9 +7,12 @@
 #include <algorithm>
 #include <array>
 #include <format>
+#include <sstream>
 
 #include "simrv/core/Cpu.hpp"
+#include "simrv/core/CpuConfigParser.hpp"
 #include "simrv/core/Machine.hpp"
+#include "simrv/memory/RamView.hpp"
 #include "simrv/tui/Tui.hpp"
 #include "simrv/tui/TuiTheme.hpp"
 #include "simrv/tui/modals/MisaModal.hpp"
@@ -27,8 +30,6 @@ void SettingsModal::open(SettingsDraft& draft, const simrv::core::Machine& machi
     // Tab 0: General
     draft.cycle_accurate = machine.runtime_profile.is_cycle_mode();
     draft.high_contrast = machine.high_contrast_enabled();
-    draft.class_mode = machine.class_mode_enabled();
-    draft.tui_fps = machine.telemetry_sink() ? machine.telemetry_sink()->target_fps() : 30;
     draft.use_mix = machine.instruction_mix_enabled();
     draft.bp_trace = machine.branch_trace_enabled();
     draft.traplog_mode = machine.trap_log_enabled();
@@ -108,36 +109,16 @@ void SettingsModal::adjust_setting(SettingsDraft& draft, int dir,
                 case 1:
                     draft.high_contrast = !draft.high_contrast;
                     break;
-                case 2:
-                    draft.class_mode = !draft.class_mode;
-                    break;
-                case 3: {  // TUI Target Refresh Rate
-                    static constexpr std::array<uint32_t, 4> kFpsOptions = {10, 15, 30, 60};
-                    size_t curr_idx = 2;  // default 30
-                    for (size_t f = 0; f < kFpsOptions.size(); ++f) {
-                        if (draft.tui_fps == kFpsOptions[f]) {
-                            curr_idx = f;
-                            break;
-                        }
-                    }
-                    if (dir > 0) {
-                        curr_idx = (curr_idx + 1) % kFpsOptions.size();
-                    } else {
-                        curr_idx = (curr_idx + kFpsOptions.size() - 1) % kFpsOptions.size();
-                    }
-                    draft.tui_fps = kFpsOptions[curr_idx];
-                    break;
-                }
-                case 4: {  // Active SMP Hart Count
+                case 2: {  // Active SMP Hart Count
                     int v = static_cast<int>(draft.num_harts) + dir;
                     draft.num_harts = static_cast<uint32_t>(std::clamp(
                         v, 1, static_cast<int>(simrv::core::ExecutionConfig::kMaxHarts)));
                     break;
                 }
-                case 5:  // SMP Execution Mode
+                case 3:  // SMP Execution Mode
                     draft.smp_multi_threaded = !draft.smp_multi_threaded;
                     break;
-                case 6: {  // SMP Scheduler Quantum (insns/slice)
+                case 4: {  // SMP Scheduler Quantum (insns/slice)
                     static constexpr std::array<uint32_t, 12> kQuantumLevels = {
                         10, 25, 50, 100, 250, 500, 1000, 2500, 5000, 10000, 50000, 100000};
                     size_t curr = 6;  // default 1000
@@ -158,10 +139,10 @@ void SettingsModal::adjust_setting(SettingsDraft& draft, int dir,
                     }
                     break;
                 }
-                case 7:  // Platform Profile (0: PCIe, 1: MMIO)
+                case 5:  // Platform Profile (0: PCIe, 1: MMIO)
                     draft.platform_profile = static_cast<uint8_t>((draft.platform_profile + 1) % 2);
                     break;
-                case 8: {  // Physical RAM Capacity (MB)
+                case 6: {  // Physical RAM Capacity (MB)
                     static constexpr std::array<uint64_t, 8> kRamSizes = {32,  64,   128,  256,
                                                                           512, 1024, 2048, 4096};
                     size_t curr_idx = 3;  // default 256
@@ -179,7 +160,7 @@ void SettingsModal::adjust_setting(SettingsDraft& draft, int dir,
                     draft.dram_size_mb = kRamSizes[curr_idx];
                     break;
                 }
-                case 9:  // VirtIO Network Backend
+                case 7:  // VirtIO Network Backend
                     if (draft.net_mode == "user")
                         draft.net_mode = (dir > 0) ? "tap" : "none";
                     else if (draft.net_mode == "tap")
@@ -189,21 +170,21 @@ void SettingsModal::adjust_setting(SettingsDraft& draft, int dir,
                     else
                         draft.net_mode = (dir > 0) ? "user" : "socket";
                     break;
-                case 10:
+                case 8:
                     if (machine && machine->spike_binary().empty()) break;
                     draft.lockstep_mode = !draft.lockstep_mode;
                     break;
-                case 11:
+                case 9:
                     if (!draft.cycle_accurate) break;
                     draft.bp_trace = !draft.bp_trace;
                     break;
-                case 12:
+                case 10:
                     draft.use_mix = !draft.use_mix;
                     break;
-                case 13:
+                case 11:
                     draft.traplog_mode = !draft.traplog_mode;
                     break;
-                case 14:
+                case 12:
                     if (machine && machine->appmode_enabled()) break;
                     draft.dlog_mode = !draft.dlog_mode;
                     break;
@@ -246,23 +227,18 @@ void SettingsModal::apply_isa_preset(SettingsDraft& draft, int preset_idx) {
 }
 
 auto SettingsModal::submit(const SettingsDraft& draft, simrv::core::Machine& machine,
-                           const std::function<void(TuiRegPage)>& set_reg_page_cb) -> bool {
+                           const std::function<void(TuiRegPage)>& set_reg_page_cb,
+                           const std::function<void(simrv::core::MachineConfig, SysConfigDraft,
+                                                    bool)>&
+                               confirm_reconfiguration) -> bool {
     // 1. General & UI settings
     machine.runtime_profile.interaction = simrv::core::InteractionMode::Tui;
     const auto target_engine = simrv::core::select_execution_engine(
         draft.cycle_accurate, machine.runtime_profile.interaction);
-    if (machine.runtime_profile.engine != target_engine) {
-        machine.switch_execution_engine(target_engine);
-    }
     if (draft.high_contrast != machine.high_contrast_enabled()) {
         set_high_contrast(draft.high_contrast);
         machine.set_high_contrast_enabled(draft.high_contrast);
     }
-    machine.set_class_mode_enabled(draft.class_mode);
-    if (machine.telemetry_sink()) {
-        machine.telemetry_sink()->set_target_fps(draft.tui_fps);
-    }
-
     machine.set_instruction_mix_enabled(draft.use_mix);
     machine.set_branch_trace_enabled(draft.bp_trace);
     machine.set_trap_log_enabled(draft.traplog_mode);
@@ -304,6 +280,19 @@ auto SettingsModal::submit(const SettingsDraft& draft, simrv::core::Machine& mac
         next.network.mode != machine.network_mode() ||
         next.debug.lockstep_enabled != machine.lockstep_enabled();
 
+    auto requested_cpu_model = machine.primary_hart().cpu_model_config;
+    bool cpu_model_changed = false;
+    if (draft.sys_config.cycle_accurate) {
+        if (!SystemConfigModal::apply_to_model(draft.sys_config, requested_cpu_model)) return false;
+        std::ostringstream current_model_text;
+        std::ostringstream requested_model_text;
+        simrv::core::serialize_cpu_config(machine.primary_hart().cpu_model_config,
+                                          current_model_text);
+        simrv::core::serialize_cpu_config(requested_cpu_model, requested_model_text);
+        cpu_model_changed = current_model_text.str() != requested_model_text.str();
+        need_reboot = need_reboot || cpu_model_changed;
+    }
+
     // 2. MISA Extensions
     uint64_t const new_misa = draft.misa.to_misa_val();
     const auto current_vlen = machine.isa_config().vlen ? machine.isa_config().vlen
@@ -320,11 +309,19 @@ auto SettingsModal::submit(const SettingsDraft& draft, simrv::core::Machine& mac
     }
 
     if (need_reboot) {
+        if (draft.sys_config.cycle_accurate)
+            next.cpu_model_config_override = std::move(requested_cpu_model);
+        if (confirm_reconfiguration) {
+            confirm_reconfiguration(std::move(next), draft.sys_config, draft.cycle_accurate);
+            return false;
+        }
+        machine.switch_execution_engine(target_engine);
         (void)machine.stage_reconfiguration(std::move(next));
+    } else {
+        machine.switch_execution_engine(target_engine);
+        // 3. System Microarchitecture applies immediately only when no machine restart is needed.
+        if (cpu_model_changed) SystemConfigModal::submit(draft.sys_config, machine);
     }
-
-    // 3. System Microarchitecture
-    SystemConfigModal::submit(draft.sys_config, machine);
 
     return true;
 }
@@ -367,17 +364,7 @@ void SettingsModal::render(std::vector<std::string>& content_rows,
         else
             net_str = "\033[90m[Disabled]\033[0m";
 
-        std::string fps_str;
-        if (draft.tui_fps == 10)
-            fps_str = "\033[1;33m[10 FPS (Power Saver)]\033[0m";
-        else if (draft.tui_fps == 15)
-            fps_str = "\033[1;36m[15 FPS (Turbo IA)]\033[0m";
-        else if (draft.tui_fps == 60)
-            fps_str = "\033[1;35m[60 FPS (Ultra Smooth)]\033[0m";
-        else
-            fps_str = "\033[1;32m[30 FPS (Standard)]\033[0m";
-
-        constexpr simrv::xlen::Address dram_base = 0x80000000ULL;
+        constexpr simrv::xlen::Address dram_base = simrv::memory::kDramBaseAddress;
         std::string ram_str =
             std::format("\033[1;36m[{} MB (0x{:08x}–0x{:08x})]\033[0m", draft.dram_size_mb,
                         dram_base, dram_base + (draft.dram_size_mb * 1024ULL * 1024ULL) - 1);
@@ -394,10 +381,6 @@ void SettingsModal::render(std::vector<std::string>& content_rows,
             {.name = "Color Theme / Contrast",
              .val = draft.high_contrast ? "\033[1;33m[High Contrast B&W]\033[0m"
                                         : "\033[1;34m[Adaptive / Terminal Colors]\033[0m"},
-            {.name = "Presentation Mode",
-             .val = draft.class_mode ? "\033[1;35m[Classroom / Large]\033[0m"
-                                     : "\033[90m[Standard]\033[0m"},
-            {.name = "TUI Target Refresh Rate", .val = fps_str},
             {.name = "Active SMP Hart Count",
              .val = std::format("\033[1;32m[{} Core{}]\033[0m", draft.num_harts,
                                 draft.num_harts > 1 ? "s" : "")},

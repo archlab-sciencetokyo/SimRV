@@ -86,6 +86,8 @@ auto get_modal_metadata(ModalType type, bool is_notice_error, std::string_view n
             return {.title = " MULTI-HART SMP SWITCHER [H/n] ", .is_wide = true};
         case ModalType::LogViewer:
             return {.title = " SIMULATOR LOG VIEWER [L] ", .is_wide = true};
+        case ModalType::MissionObjective:
+            return {.title = " MISSION OBJECTIVE [F12] ", .is_wide = true};
         case ModalType::None:
         default:
             return {.title = "", .is_wide = false};

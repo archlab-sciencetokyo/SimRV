@@ -100,13 +100,6 @@ auto TuiPreferences::load(const std::filesystem::path& path) -> bool {
             theme = static_cast<TuiThemeStyle>(parsed);
         } else if (key == "high_contrast" && parse_integer(value, parsed) && parsed <= 1) {
             high_contrast = parsed != 0;
-        } else if (key == "class_mode" && parse_integer(value, parsed) && parsed <= 1) {
-            class_mode = parsed != 0;
-        } else if (key == "student_guide" && parse_integer(value, parsed) && parsed <= 1) {
-            student_guide = parsed != 0;
-        } else if (key == "target_fps" && parse_integer(value, parsed) && parsed >= 1 &&
-                   parsed <= 120) {
-            target_fps = parsed;
         }
     }
     if (focused_slot >= slots.size()) focused_slot = 0;
@@ -136,8 +129,7 @@ auto TuiPreferences::save(const std::filesystem::path& path) const -> bool {
     }
     output << "\ntheme=" << static_cast<unsigned>(theme)
            << "\nhigh_contrast=" << static_cast<unsigned>(high_contrast)
-           << "\nclass_mode=" << static_cast<unsigned>(class_mode) << "\ntarget_fps=" << target_fps
-           << "\nstudent_guide=" << static_cast<unsigned>(student_guide) << '\n';
+           << '\n';
     output.close();
     if (!output) return false;
     std::filesystem::rename(temporary_path, path, error);

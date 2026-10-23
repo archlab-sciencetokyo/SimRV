@@ -328,6 +328,9 @@ auto Machine::initialize() -> std::expected<void, std::string> {
         }
         apply_cpu_model_runtime_config(*this, config, model);
     }
+    if (config.cpu_model_config_override) {
+        apply_cpu_model_runtime_config(*this, config, *config.cpu_model_config_override);
+    }
     std::string cfu_plugin_path = config.files.cfu_plugin_path;
     if (cfu_plugin_path.empty()) cfu_plugin_path = primary_hart().cpu_model_config.cfu.plugin;
     if (!cfu_plugin_path.empty()) {
@@ -468,6 +471,15 @@ auto Machine::initialize() -> std::expected<void, std::string> {
                    : simrv::boot::kInitDataAddress;
 
     auto effective_isa_preset_bits = [&]() -> simrv::xlen::CsrValue {
+        if (config.cpu_model_config_override) {
+            const auto& cfg = *config.cpu_model_config_override;
+            auto bits = isa::isa_preset_bits(cfg.isa_preset);
+            if (cfg.has_isa_extension("zba") || cfg.has_isa_extension("zbb") ||
+                cfg.has_isa_extension("zbc") || cfg.has_isa_extension("zbs")) {
+                bits |= isa::misa_extension_bit(isa::IsaExtension::B);
+            }
+            return bits;
+        }
         if (!config.files.config_path.empty()) {
             simrv::pipeline::CpuModelConfig cfg{};
             if (simrv::core::load_cpu_config(config.files.config_path, cfg)) {

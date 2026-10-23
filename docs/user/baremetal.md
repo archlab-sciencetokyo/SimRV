@@ -21,6 +21,10 @@ SimRV uses a physical memory map where memory-mapped I/O (MMIO) and PCIe devices
 | **RTC** | `0x70000000` | `0x00001000` (4 KB) | Real-Time Clock (`mtime` mirror) |
 | **System RAM** | `0x80000000` | Configurable (e.g. 128 MB – 2 GB) | Main physical memory space |
 
+The conventional base addresses and DMA region constants are shared with firmware headers in
+[`include/simrv/core/PlatformMap.h`](../../include/simrv/core/PlatformMap.h). Platform configuration
+files may override individual SoC device descriptors.
+
 ---
 
 ## Writing Baremetal Programs

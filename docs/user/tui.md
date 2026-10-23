@@ -54,6 +54,13 @@ The interface is structured into three primary sections:
    - **`Memory & Stack`**: Hex memory dump and stack frame unwind view.
 3. **Right Guest Terminal**: Interactive virtual terminal connected directly to the guest platform's 16550A UART (`ttyS0`), VirtIO console, or Sixel graphical framebuffer.
 
+### Slow execution mode
+
+At configured execution delays of 10 ms or more (100 Hz or slower), visible pipeline, hazard,
+predictor, trace, disassembly, and explanation views capture detailed per-instruction state. Above
+100 Hz, those views use sampled state to keep execution overhead low. Paused inspection and active
+trace capture retain detailed state at every speed.
+
 ---
 
 ## 3. Keyboard Navigation & Shortcuts
@@ -117,21 +124,17 @@ flowchart TD
 
 ---
 
-## 5. Classroom Mode & Student Guidance
+## 5. Classroom Missions
 
-When launched with `--class`, SimRV enables pedagogical student guidance features designed for computer architecture courses:
+Classroom guidance is provided by an editable mission file. `--mission` enables the classroom flow
+and opens its first step; no separate class switch is needed:
 
 ```bash
-# General classroom guidance
-simrv --class -m examples/isa/bin/demo.elf
-
-# Structured classroom mission
-simrv --class --mission examples/isa/lessons/control-flow-calls.mission -m control-flow-calls.elf
+simrv --mission examples/isa/lessons/control-flow-calls.mission -m control-flow-calls.elf
 ```
 
-- **Interactive Guidance Pane**: When paused, the guide explains the currently selected inspector view and suggests a context-sensitive next exploration action. Press `Enter` to execute the suggested action.
-- **Structured Missions (`--mission`)**: Load sequential pedagogical checkpoints that automatically highlight relevant inspector panels (Registers, Stack, Explainer, Trace) as students execute assembly assignments. See the [Instructor Guide in the Classroom Reference Manual](classroom.md#5-instructor-guide-authoring-deploying-classroom-missions) for mission authoring instructions.
-- **Mission Controls**: Press `Enter` to follow the active suggestion, `g` to show/hide guidance, `z` to dismiss the mission, or `Z` (Shift-Z) to restart from step 0.
+- **Structured Missions (`--mission`)**: Load instructional steps and independent named checkpoints that focus relevant inspector panels. See the [Instructor Guide](classroom.md#5-instructor-guide-authoring-deploying-classroom-missions).
+- **Mission Controls**: Press `F12` to reopen/check the current step, `y` to reveal its `why` rationale, `Space` to advance instructions (stopping at an unreached checkpoint), and `Enter` to hide the modal and show the workbench. `z` dismisses the mission; `Z` restarts it.
 - **Architecture Glossary**: Press `?` to open the educational glossary jump-linked to the architectural concept represented by the active inspector view (e.g., pipeline hazard interlocks, cache associativity, or virtual memory translation).
 
 ---

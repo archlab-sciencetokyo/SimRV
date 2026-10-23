@@ -18,15 +18,16 @@
 
 namespace simrv::tui::modals {
 
-auto LoadModal::complete_path(std::string& input) -> bool {
+auto LoadModal::inspect_path(std::string_view input) -> PathCompletionResult {
     namespace fs = std::filesystem;
     const fs::path typed(input);
     const auto parent = typed.has_parent_path() ? typed.parent_path() : fs::path(".");
     const auto prefix = typed.filename().string();
     std::error_code error;
-    std::vector<std::string> matches;
+    PathCompletionResult result;
     for (fs::directory_iterator it(parent, error), end; !error && it != end; it.increment(error)) {
         const auto filename = it->path().filename().string();
+        if (!prefix.starts_with('.') && filename.starts_with('.')) continue;
         if (!filename.starts_with(prefix)) continue;
         std::string candidate;
         if (typed.has_parent_path()) {
@@ -35,20 +36,29 @@ auto LoadModal::complete_path(std::string& input) -> bool {
             candidate += fs::path::preferred_separator;
         }
         candidate += filename;
+        error.clear();
         if (it->is_directory(error)) candidate += fs::path::preferred_separator;
-        matches.push_back(std::move(candidate));
+        error.clear();
+        result.matches.push_back(std::move(candidate));
     }
-    if (matches.empty()) return false;
-    std::ranges::sort(matches);
-    std::string common = matches.front();
-    for (auto it = std::next(matches.begin()); it != matches.end(); ++it) {
+    std::ranges::sort(result.matches);
+    if (result.matches.empty()) return result;
+    result.common_prefix = result.matches.front();
+    for (auto it = std::next(result.matches.begin()); it != result.matches.end(); ++it) {
         const auto& candidate = *it;
         const auto mismatch =
-            std::mismatch(common.begin(), common.end(), candidate.begin(), candidate.end());
-        common.resize(static_cast<size_t>(std::distance(common.begin(), mismatch.first)));
+            std::mismatch(result.common_prefix.begin(), result.common_prefix.end(),
+                          candidate.begin(), candidate.end());
+        result.common_prefix.resize(static_cast<size_t>(
+            std::distance(result.common_prefix.begin(), mismatch.first)));
     }
-    if (common.size() <= input.size()) return false;
-    input = std::move(common);
+    return result;
+}
+
+auto LoadModal::complete_path(std::string& input) -> bool {
+    auto completion = inspect_path(input);
+    if (completion.common_prefix.size() <= input.size()) return false;
+    input = std::move(completion.common_prefix);
     return true;
 }
 
@@ -178,7 +188,15 @@ auto LoadModal::submit(ModalType type, const std::string& input, bool load_appmo
 
 void LoadModal::render(ModalType type, std::vector<std::string>& content_rows,
                        const std::string& input, bool load_appmode, bool load_buildroot_mode,
-                       const std::string& staged_binary_path) {
+                       const std::string& staged_binary_path,
+                       std::span<const std::string> completion_preview) {
+    const auto append_completion_preview = [&] {
+        if (completion_preview.empty()) return;
+        content_rows.push_back("");
+        for (const auto& line : completion_preview) {
+            content_rows.push_back(std::format("  {}{}\033[0m", kThemeMuted, line));
+        }
+    };
     if (type == ModalType::LoadBinary) {
         build_text_input_rows(
             content_rows,
@@ -189,6 +207,7 @@ void LoadModal::render(ModalType type, std::vector<std::string>& content_rows,
                 : "e.g. img/hello.bin, linux-images/rv64/alpine-gui/opensbi-linux-payload.elf");
         content_rows.push_back("");
         content_rows.push_back(std::format("  {}[Tab] Complete path{}", kThemeMuted, "\033[0m"));
+        append_completion_preview();
         content_rows.push_back(std::format("  {}[Ctrl-O] Browse files\033[0m", kThemeMuted));
         content_rows.push_back("");
         const auto mode_label = load_buildroot_mode ? "Buildroot folder"
@@ -207,6 +226,7 @@ void LoadModal::render(ModalType type, std::vector<std::string>& content_rows,
         build_text_input_rows(content_rows, "Enter disk image filepath:", input,
                               "e.g. linux-images/rv64/alpine-gui/rootfs.img or rootfs.ext4");
         content_rows.push_back(std::format("  {}[Tab] Complete path\033[0m", kThemeMuted));
+        append_completion_preview();
         content_rows.push_back(std::format("  {}[Ctrl-O] Browse files\033[0m", kThemeMuted));
         if (!staged_binary_path.empty()) {
             content_rows.push_back("");
@@ -222,6 +242,7 @@ void LoadModal::render(ModalType type, std::vector<std::string>& content_rows,
                               "Enter CPU model filepath (.cfg) or preset name:", input,
                               "e.g. configs/models/rvcomp.cfg, cfu-provingground, balanced");
         content_rows.push_back(std::format("  {}[Tab] Complete path\033[0m", kThemeMuted));
+        append_completion_preview();
         content_rows.push_back(std::format("  {}[Ctrl-O] Browse files\033[0m", kThemeMuted));
         content_rows.push_back("");
         content_rows.push_back(

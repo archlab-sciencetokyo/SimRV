@@ -7,6 +7,7 @@
 
 #include "simrv/core/Cpu.hpp"
 #include "simrv/core/Machine.hpp"
+#include "simrv/core/PlatformMap.h"
 #include "simrv/device/Uart.hpp"
 #include "simrv/memory/MemorySubsystem.hpp"
 #include "simrv/memory/TileLinkBus.hpp"
@@ -55,11 +56,17 @@ auto InspectorPane::render_io_stats(const simrv::core::CPU& cpu, int logical_row
                             kThemeSky, is_mmio ? "MMIO" : "ECAM"),
                 width);
         }
+        const auto topology =
+            is_mmio
+                ? std::format("\033[38;5;117mMMIO {:#x}..{:#x}",
+                              static_cast<uint64_t>(SIMRV_PLATFORM_VIRTIO_BLOCK_BASE),
+                              static_cast<uint64_t>(SIMRV_PLATFORM_VIRTIO_NET_BASE))
+                : std::format("\033[38;5;117mECAM {:#x} │ BAR {:#x}",
+                              static_cast<uint64_t>(SIMRV_PLATFORM_PCIE_ECAM_BASE),
+                              static_cast<uint64_t>(SIMRV_PLATFORM_PCIE_WINDOW_BASE));
         return format_to_width(
-            std::format("  {}Space:\033[0m {}DRAM 0x80000000\033[0m │ {}\033[0m", kThemeText,
-                        kThemeMint,
-                        is_mmio ? "\033[38;5;117mMMIO 0x10001000..0x10007000"
-                                : "\033[38;5;117mECAM 0x30000000 │ BAR 0x40000000"),
+            std::format("  {}Space:\033[0m {}DRAM {:#010x}\033[0m │ {}\033[0m", kThemeText,
+                        kThemeMint, static_cast<uint64_t>(memory::kDramBaseAddress), topology),
             width);
     }
     if (logical_row == 2) {
@@ -274,11 +281,37 @@ auto InspectorPane::render_io_stats(const simrv::core::CPU& cpu, int logical_row
             width);
     }
     if (logical_row == 18) {
+        return section_line("DMA Contention & Shared Bus Delay", width);
+    }
+    if (logical_row == 19) {
+        const auto stats = machine_.memory().system_bus().contention_stats();
+        const auto state = stats.dma_active
+                               ? (stats.dma_penalty_cycles == 0
+                                      ? std::string("\033[38;5;215mACTIVE · no added penalty\033[0m")
+                                      : std::format("\033[38;5;215mACTIVE · +{} cycles/request\033[0m",
+                                                    stats.dma_penalty_cycles))
+                               : std::string("\033[38;5;120mIDLE\033[0m");
+        if (width < 58) {
+            return format_to_width(
+                std::format("  {}DMA:\033[0m {} │ {}Delayed:\033[0m {} │ {}Added:\033[0m {} cyc",
+                            kThemeText, state, kThemeText,
+                            simrv::util::format_with_commas(stats.delayed_requests), kThemeText,
+                            simrv::util::format_with_commas(stats.added_latency_cycles)),
+                width);
+        }
+        return format_to_width(
+            std::format("  {}DMA:\033[0m {} │ {}Requests delayed:\033[0m {} │ {}Added latency:\033[0m {} cycles",
+                        kThemeText, state, kThemeText,
+                        simrv::util::format_with_commas(stats.delayed_requests), kThemeText,
+                        simrv::util::format_with_commas(stats.added_latency_cycles)),
+            width);
+    }
+    if (logical_row == 20) {
         return section_line("Recent Bus Transactions", width);
     }
-    if (logical_row >= 19 && logical_row <= 24) {
+    if (logical_row >= 21 && logical_row <= 24) {
         auto const& history = machine_.memory().system_bus().transaction_history();
-        int const tx_index = static_cast<int>(history.size()) - 1 - (logical_row - 19);
+        int const tx_index = static_cast<int>(history.size()) - 1 - (logical_row - 21);
         if (tx_index >= 0 && tx_index < static_cast<int>(history.size())) {
             auto const& tx = history[tx_index];
             const char* ch_color = kThemeMint;

@@ -181,6 +181,26 @@ void SystemConfigModal::toggle_setting(SysConfigDraft& draft, int index) {
 auto SystemConfigModal::submit(const SysConfigDraft& draft, simrv::core::Machine& machine) -> bool {
     if (!draft.cycle_accurate) return true;
     auto model = machine.primary_hart().cpu_model_config;
+    if (!apply_to_model(draft, model)) return false;
+    for (size_t hart = 0; hart < machine.num_harts(); ++hart) {
+        auto& cpu = machine.hart(hart);
+        cpu.cpu_model_config = model;
+        cpu.pipeline_sim.config = model.pipeline;
+        (void)cpu.icache.configure(model.instruction_cache.capacity_bytes,
+                                   model.instruction_cache.associativity);
+        (void)cpu.dcache.configure(model.data_cache.capacity_bytes, model.data_cache.associativity);
+        cpu.ca_state.reset_instruction();
+        cpu.ca_pipeline.reset();
+        cpu.branch_predictor.configure(cpu.pipeline_sim.config.branch_predictor);
+        cpu.branch_predictor.reset();
+    }
+    machine.set_pipeline_type(static_cast<simrv::pipeline::PipelineType>(draft.pipeline_type));
+    return true;
+}
+
+auto SystemConfigModal::apply_to_model(const SysConfigDraft& draft,
+                                       simrv::pipeline::CpuModelConfig& model) -> bool {
+    if (!draft.cycle_accurate) return true;
     const auto selected_preset = static_cast<simrv::pipeline::CpuModelPreset>(draft.preset);
     if (selected_preset != simrv::pipeline::CpuModelPreset::Custom) {
         model = simrv::pipeline::make_cpu_model_preset(selected_preset);
@@ -203,21 +223,7 @@ auto SystemConfigModal::submit(const SysConfigDraft& draft, simrv::core::Machine
     }
     // Explicit field editing retains the named preset only while it remains an exact preset.
     model.preset = selected_preset;
-    if (!model.validate()) return false;
-    for (size_t hart = 0; hart < machine.num_harts(); ++hart) {
-        auto& cpu = machine.hart(hart);
-        cpu.cpu_model_config = model;
-        cpu.pipeline_sim.config = model.pipeline;
-        (void)cpu.icache.configure(model.instruction_cache.capacity_bytes,
-                                   model.instruction_cache.associativity);
-        (void)cpu.dcache.configure(model.data_cache.capacity_bytes, model.data_cache.associativity);
-        cpu.ca_state.reset_instruction();
-        cpu.ca_pipeline.reset();
-        cpu.branch_predictor.configure(cpu.pipeline_sim.config.branch_predictor);
-        cpu.branch_predictor.reset();
-    }
-    machine.set_pipeline_type(static_cast<simrv::pipeline::PipelineType>(draft.pipeline_type));
-    return true;
+    return static_cast<bool>(model.validate());
 }
 
 void SystemConfigModal::render(std::vector<std::string>& content_rows,

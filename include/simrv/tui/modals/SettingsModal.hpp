@@ -8,6 +8,7 @@
 #include <string>
 #include <vector>
 
+#include "simrv/core/MachineConfig.hpp"
 #include "simrv/tui/TuiModal.hpp"
 
 namespace simrv::core {
@@ -34,7 +35,10 @@ class SettingsModal {
     static void pop_digit(SettingsDraft& draft, std::string& input);
     static void apply_isa_preset(SettingsDraft& draft, int preset_idx);
     static auto submit(const SettingsDraft& draft, simrv::core::Machine& machine,
-                       const std::function<void(TuiRegPage)>& set_reg_page_cb) -> bool;
+                       const std::function<void(TuiRegPage)>& set_reg_page_cb,
+                       const std::function<void(simrv::core::MachineConfig, SysConfigDraft,
+                                                bool)>&
+                           confirm_reconfiguration = {}) -> bool;
     static void render(std::vector<std::string>& content_rows,
                        const std::function<void(const std::string&)>& add_row_cb,
                        const SettingsDraft& draft, const simrv::core::Machine& machine);

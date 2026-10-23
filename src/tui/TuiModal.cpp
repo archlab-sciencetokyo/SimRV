@@ -9,6 +9,7 @@
 #include <filesystem>
 #include <format>
 #include <numeric>
+#include <sstream>
 #include <string_view>
 
 #include "simrv/core/Cpu.hpp"
@@ -17,6 +18,7 @@
 #include "simrv/debug/BreakpointManager.hpp"
 #include "simrv/tui/TuiLayoutPolicy.hpp"
 #include "simrv/tui/TuiTheme.hpp"
+#include "simrv/tui/TuiMission.hpp"
 #include "simrv/tui/framework/Modal.hpp"
 #include "simrv/tui/modals/AddressModal.hpp"
 #include "simrv/tui/modals/BreakpointModal.hpp"
@@ -63,6 +65,7 @@ void TuiModal::open(ModalType type, InspectorPane* inspector_pane, uint64_t step
     active_modal_ = type;
     rendered_box_width_ = 0;
     input_.clear();
+    path_completion_preview_.clear();
     bp_cursor_ = 0;
     switch (type) {
         case ModalType::SetBreakpoint:
@@ -108,6 +111,7 @@ void TuiModal::open(ModalType type, InspectorPane* inspector_pane, uint64_t step
 void TuiModal::open_save_cpu_config() {
     active_modal_ = ModalType::SaveCpuConfig;
     rendered_box_width_ = 0;
+    path_completion_preview_.clear();
     const auto preset =
         static_cast<simrv::pipeline::CpuModelPreset>(settings_draft_.sys_config.preset);
     const auto name = simrv::pipeline::cpu_model_preset_name(preset);
@@ -117,6 +121,7 @@ void TuiModal::open_save_cpu_config() {
 void TuiModal::open_load_cpu_config() {
     active_modal_ = ModalType::LoadCpuConfig;
     rendered_box_width_ = 0;
+    path_completion_preview_.clear();
     const auto& name = machine_.primary_hart().cpu_model_config.name;
     input_ = name.empty() ? "configs/models/rvcomp.cfg" : name;
 }
@@ -127,6 +132,7 @@ void TuiModal::open_file_picker() {
         return;
     file_picker_return_modal_ = active_modal_;
     file_picker_return_input_ = input_;
+    path_completion_preview_.clear();
     const std::filesystem::path typed(input_);
     file_picker_directory_ = typed.has_parent_path() ? typed.parent_path() : ".";
     if (file_picker_directory_.empty()) file_picker_directory_ = ".";
@@ -296,7 +302,8 @@ auto TuiModal::remove_bp_at_cursor(
                                                                  if (set_status_override_cb)
                                                                      set_status_override_cb(msg);
                                                              });
-    if (removed && !removed_msg.empty()) {
+    if (removed && !removed_msg.empty() &&
+        removed_msg.find("managed by the mission") == std::string::npos) {
         std::string title = (removed_msg.find("watchpoint") != std::string::npos ||
                              removed_msg.find("Watchpoint") != std::string::npos)
                                 ? "WATCHPOINT REMOVED"
@@ -379,6 +386,14 @@ void TuiModal::open_log_viewer() {
     if (log_buffer_) modals::LogModal::open(*log_buffer_);
 }
 
+void TuiModal::open_mission_objective() {
+    if (mission_ == nullptr || !mission_->guidance()) return;
+    active_modal_ = ModalType::MissionObjective;
+    mission_why_revealed_ = false;
+    rendered_box_width_ = 0;
+    input_.clear();
+}
+
 void TuiModal::scroll_log_viewer(int delta, int total_lines, int visible_lines) {
     modals::LogModal::scroll(delta, total_lines, visible_lines);
 }
@@ -401,6 +416,7 @@ void TuiModal::close() {
     active_modal_ = ModalType::None;
     rendered_box_width_ = 0;
     input_.clear();
+    path_completion_preview_.clear();
 }
 
 auto TuiModal::submit(InspectorPane* inspector_pane, std::atomic<uint64_t>& step_delay_us,
@@ -469,12 +485,12 @@ auto TuiModal::submit(InspectorPane* inspector_pane, std::atomic<uint64_t>& step
             }
             break;
         case ModalType::Settings: {
-            if (settings_draft_.platform_profile !=
-                static_cast<uint8_t>(machine_.platform_profile())) {
-                open_platform_confirm(settings_draft_);
-                return false;
-            }
-            result = modals::SettingsModal::submit(settings_draft_, machine_, set_reg_page_cb);
+            result = modals::SettingsModal::submit(
+                settings_draft_, machine_, set_reg_page_cb,
+                [this](simrv::core::MachineConfig next, SysConfigDraft, bool cycle_accurate) {
+                    open_reconfiguration_confirm(std::move(next), "Machine settings changed",
+                                                 cycle_accurate);
+                });
             if (result) {
                 open_notice("SETTINGS SAVED",
                             "Simulator & SMP settings saved and applied successfully.", false);
@@ -525,18 +541,33 @@ auto TuiModal::submit(InspectorPane* inspector_pane, std::atomic<uint64_t>& step
             }
         }
         case ModalType::LoadCpuConfig: {
-            bool success = modals::LoadModal::submit(
-                ModalType::LoadCpuConfig, input_, false, false, machine_, staged_binary_path_,
-                staged_mode_change_, staged_target_appmode_, set_status_override_cb);
-            if (success) {
-                open_notice("CPU MODEL LOADED", std::format("Loaded configuration from {}", input_),
-                            false);
-                return true;
-            } else {
-                open_notice("LOAD FAILED", std::format("Failed to load CPU model '{}'", input_),
+            if (input_.empty()) return false;
+            const auto resolved = simrv::core::resolve_cpu_model_path(input_);
+            const auto target_path = resolved.value_or(std::filesystem::path(input_));
+            simrv::pipeline::CpuModelConfig loaded{};
+            if (!simrv::core::load_cpu_config(target_path, loaded)) {
+                open_notice("LOAD FAILED",
+                            std::format("Failed to load CPU model '{}' (check architecture)", input_),
                             true);
                 return false;
             }
+            std::ostringstream current_text;
+            std::ostringstream loaded_text;
+            simrv::core::serialize_cpu_config(machine_.primary_hart().cpu_model_config,
+                                              current_text);
+            simrv::core::serialize_cpu_config(loaded, loaded_text);
+            if (current_text.str() == loaded_text.str()) {
+                open_notice("CPU MODEL UNCHANGED",
+                            std::format("{} is already active; no restart is needed.", loaded.name),
+                            false);
+                return true;
+            }
+            auto next = machine_.configuration();
+            next.cpu_model_config_override = std::move(loaded);
+            next.files.config_path.clear();
+            open_reconfiguration_confirm(std::move(next),
+                                         std::format("CPU model: {}", input_));
+            return false;
         }
         case ModalType::MemoryDump: {
             result = modals::MemoryModal::submit_input(input_, machine_, inspector_pane,
@@ -634,6 +665,29 @@ void TuiModal::open_platform_confirm(const SettingsDraft& draft) {
     pending_platform_draft_ = draft;
 }
 
+void TuiModal::open_reconfiguration_confirm(simrv::core::MachineConfig config,
+                                            std::string summary,
+                                            std::optional<bool> cycle_accurate) {
+    active_modal_ = ModalType::ConfigurationChangeConfirm;
+    input_.clear();
+    pending_reconfiguration_ = std::move(config);
+    pending_cycle_accurate_ = cycle_accurate;
+    pending_reconfiguration_summary_ = std::move(summary);
+}
+
+auto TuiModal::apply_pending_reconfiguration() -> std::expected<void, std::string> {
+    if (!pending_reconfiguration_)
+        return std::unexpected("No simulator configuration is pending");
+    if (const auto valid = pending_reconfiguration_->validate(); !valid)
+        return std::unexpected(valid.error());
+    if (pending_cycle_accurate_) {
+        const auto engine = simrv::core::select_execution_engine(
+            *pending_cycle_accurate_, simrv::core::InteractionMode::Tui);
+        machine_.switch_execution_engine_sync(engine);
+    }
+    return machine_.stage_reconfiguration(*pending_reconfiguration_);
+}
+
 auto TuiModal::handle_click(int x, int y, int term_width, int term_height) -> ModalClickResult {
     if (active_modal_ == ModalType::None) return ModalClickResult::Ignored;
 
@@ -642,6 +696,7 @@ auto TuiModal::handle_click(int x, int y, int term_width, int term_height) -> Mo
     bool is_wide_modal =
         (is_help || is_glossary || active_modal_ == ModalType::Settings ||
          active_modal_ == ModalType::Notice || active_modal_ == ModalType::PlatformChangeConfirm ||
+         active_modal_ == ModalType::ConfigurationChangeConfirm ||
          active_modal_ == ModalType::LayoutPresets || active_modal_ == ModalType::ToolPicker ||
          active_modal_ == ModalType::LogViewer || active_modal_ == ModalType::MemoryDump);
     const int fallback_width = is_wide_modal ? 78 : 58;
@@ -752,6 +807,10 @@ auto TuiModal::handle_click(int x, int y, int term_width, int term_height) -> Mo
                     if (active_modal_ == ModalType::PlatformChangeConfirm && action == 1)
                         return ModalClickResult::DiscardRequested;
                     return ModalClickResult::Closed;
+                case ModalType::ConfigurationChangeConfirm:
+                    if (action == 0) return ModalClickResult::ReloadRequested;
+                    if (action == 1) return ModalClickResult::DiscardRequested;
+                    return ModalClickResult::Closed;
                 case ModalType::SetBreakpoint:
                 case ModalType::SetWatchpoint:
                 case ModalType::SetSpeed:
@@ -763,6 +822,7 @@ auto TuiModal::handle_click(int x, int y, int term_width, int term_height) -> Mo
                 case ModalType::MemoryDump:
                 case ModalType::SwitchHart:
                 case ModalType::LogViewer:
+                case ModalType::MissionObjective:
                     return action == 0 ? ModalClickResult::Submit : ModalClickResult::Closed;
                 case ModalType::LoadFilePicker:
                     return ModalClickResult::Handled;
@@ -800,6 +860,7 @@ auto TuiModal::handle_click(int x, int y, int term_width, int term_height) -> Mo
             return ModalClickResult::Closed;
 
         case ModalType::PlatformChangeConfirm:
+        case ModalType::ConfigurationChangeConfirm:
             return ModalClickResult::Handled;
 
         case ModalType::Glossary: {
@@ -907,6 +968,9 @@ auto TuiModal::handle_click(int x, int y, int term_width, int term_height) -> Mo
             return ModalClickResult::Handled;
         }
 
+        case ModalType::MissionObjective:
+            return ModalClickResult::Handled;
+
         default:
             break;
     }
@@ -972,11 +1036,13 @@ void TuiModal::render_overlay(std::vector<std::string>& lines, int term_width,
             break;
         case ModalType::LoadBinary:
             modals::LoadModal::render(active_modal_, content_rows, input_, load_appmode_,
-                                      load_buildroot_mode_, staged_binary_path_);
+                                      load_buildroot_mode_, staged_binary_path_,
+                                      path_completion_preview_);
             break;
         case ModalType::LoadDiskImage:
             modals::LoadModal::render(active_modal_, content_rows, input_, load_appmode_,
-                                      load_buildroot_mode_, staged_binary_path_);
+                                      load_buildroot_mode_, staged_binary_path_,
+                                      path_completion_preview_);
             break;
         case ModalType::Glossary:
             modals::GlossaryModal::render(content_rows, add_row, glossary_topic_, glossary_scroll_,
@@ -988,6 +1054,50 @@ void TuiModal::render_overlay(std::vector<std::string>& lines, int term_width,
         case ModalType::Help:
             modals::HelpModal::render(content_rows, add_row, term_height, provisional_width);
             break;
+        case ModalType::MissionObjective: {
+            const auto guidance = mission_ != nullptr ? mission_->guidance() : std::nullopt;
+            if (guidance) {
+                if (mission_->step() == 0 && !mission_->description().empty()) {
+                    add_row("Lesson");
+                    add_row(" " + std::string(mission_->description()));
+                }
+                if (mission_->step() == 0 && !mission_->goal().empty()) {
+                    add_row("Goal");
+                    add_row(" " + std::string(mission_->goal()));
+                }
+                if (mission_->step() == 0 &&
+                    (!mission_->description().empty() || !mission_->goal().empty()))
+                    add_row("");
+                add_row(guidance->title);
+                add_row("");
+                add_row("What to do");
+                add_row(" " + guidance->prompt);
+                add_row("");
+                add_row(mission_why_revealed_ ? "Why it matters" : "Why it matters [y to reveal]");
+                if (mission_why_revealed_) add_row(" " + guidance->why);
+                add_row("");
+                const bool complete = mission_->completed();
+                const bool reached = mission_->checkpoint_reached();
+                const bool has_checkpoint = !mission_->checkpoint_symbol().empty();
+                add_row(complete ? "Mission complete · all checkpoints reached"
+                                 : (!has_checkpoint
+                                        ? "No checkpoint here · Space shows the next instruction"
+                                        : (reached ? "Checkpoint reached · Space shows the next instruction"
+                                                   : "Checkpoint not reached yet")));
+                if (reached && !mission_->checkpoint_message().empty()) {
+                    add_row("Checkpoint message");
+                    add_row(" " + std::string(mission_->checkpoint_message()));
+                }
+                add_row("");
+                add_row(complete
+                            ? " [Enter] Hide   [F12] Check   [y] Why   [F9 / ?] Glossary"
+                            : " [Space] Next instruction   [Enter] Hide   [F12] Check   [y] Why   [F9 / ?] Glossary");
+            } else {
+                add_row("No active mission objective.");
+                add_row(modals::build_modal_footer({{.key = "[Esc]", .action = "Close"}}));
+            }
+            break;
+        }
         case ModalType::LayoutPresets: {
             add_row("Select a workbench preset to configure pane columns:");
             add_row("");
@@ -1057,6 +1167,21 @@ void TuiModal::render_overlay(std::vector<std::string>& lines, int term_width,
                                             {.key = "[D / Space]", .action = "Discard Change"},
                                             {.key = "[Esc / q]", .action = "Cancel"}}));
         } break;
+        case ModalType::ConfigurationChangeConfirm:
+            add_row("");
+            add_row(std::format("  {}Configuration requires a simulator restart:\033[0m",
+                                kThemeText));
+            add_row(std::format("    {}{}\033[0m", kThemeMuted,
+                                pending_reconfiguration_summary_));
+            add_row("");
+            add_row("  Applying this model resets CPU, cache, and pipeline state.");
+            add_row("  The simulator must restart with the new configuration.");
+            add_row("");
+            add_row(modals::build_modal_footer(
+                {{.key = "[R / Enter]", .action = "Reload Simulator"},
+                 {.key = "[D / Space]", .action = "Discard Change"},
+                 {.key = "[Esc / q]", .action = "Cancel"}}));
+            break;
         case ModalType::SaveCpuConfig:
             modals::build_text_input_rows(content_rows,
                                           "Enter Configuration Path or Name:", input_);
@@ -1066,7 +1191,7 @@ void TuiModal::render_overlay(std::vector<std::string>& lines, int term_width,
             break;
         case ModalType::LoadCpuConfig:
             modals::LoadModal::render(ModalType::LoadCpuConfig, content_rows, input_, false, false,
-                                      "");
+                                      "", path_completion_preview_);
             break;
         case ModalType::LoadFilePicker: {
             add_row(std::format("Directory: {}", file_picker_directory_.string()));

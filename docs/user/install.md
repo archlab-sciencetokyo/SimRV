@@ -78,6 +78,20 @@ Native packages are qualified in release CI on the following x86-64 distribution
 The native packages are tested rather than promised for every derivative. Use the static TGZ when a
 distribution is outside this matrix or when package-manager integration is unavailable.
 
+## What the packages include
+
+| Package | Included content | Compatibility notes |
+| --- | --- | --- |
+| `simrv` | Simulator, CPU model configs, user docs, example assembly/source, and classroom mission files | x86-64 Linux host; RV64 guests and RV32 guest compatibility |
+| `simrv-tools` | CPU model wizard, tuning and RTL parity utilities, and their Python support files | Requires Python 3; RTL parity also needs the selected external RTL/toolchain environment |
+| `simrv-benchmark` | Benchmark driver and experiment metadata helper | Requires Python 3 and separately prepared benchmark workloads |
+
+Packages do not include a RISC-V cross compiler, generated guest ELF files, Linux images, or
+external test suites. The example Makefiles build into `/tmp` by default; install a RISC-V ELF
+toolchain to build them. The sample mission and its source are installed under
+`/usr/share/doc/SimRV/examples/isa`. Copy that tree to a writable directory before building an
+installed example.
+
 ## Build from source
 
 Source builds require a C++23 compiler, CMake 3.31 or newer, and Ninja:

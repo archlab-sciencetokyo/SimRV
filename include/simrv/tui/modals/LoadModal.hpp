@@ -5,7 +5,9 @@
 #pragma once
 
 #include <functional>
+#include <span>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "simrv/tui/TuiModal.hpp"
@@ -15,6 +17,11 @@ class Machine;
 }
 
 namespace simrv::tui::modals {
+
+struct PathCompletionResult {
+    std::vector<std::string> matches;
+    std::string common_prefix;
+};
 
 class LoadModal {
    public:
@@ -28,7 +35,9 @@ class LoadModal {
         -> bool;
     static void render(ModalType type, std::vector<std::string>& content_rows,
                        const std::string& input, bool load_appmode, bool load_buildroot_mode,
-                       const std::string& staged_binary_path);
+                       const std::string& staged_binary_path,
+                       std::span<const std::string> completion_preview = {});
+    [[nodiscard]] static auto inspect_path(std::string_view input) -> PathCompletionResult;
     [[nodiscard]] static auto complete_path(std::string& input) -> bool;
 };
 

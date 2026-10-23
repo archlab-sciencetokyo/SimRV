@@ -27,6 +27,7 @@
 #include "simrv/isa/OperationId.hpp"
 #include "simrv/tui/LogBuffer.hpp"
 #include "simrv/tui/TuiKey.hpp"
+#include "simrv/tui/TuiKeybindings.hpp"
 #include "simrv/tui/TuiMission.hpp"
 #include "simrv/tui/TuiModal.hpp"
 #include "simrv/tui/TuiPreferences.hpp"
@@ -159,15 +160,6 @@ class Tui : public core::ITelemetrySink, public core::IConsoleSink {
     void reset_speed_history();
 
     std::atomic<uint64_t> step_delay_us_{0};
-    std::atomic<uint32_t> tui_target_fps_{60};
-
-    void set_target_fps(uint32_t fps) override {
-        tui_target_fps_.store(fps > 0 ? fps : 60, std::memory_order_relaxed);
-    }
-    [[nodiscard]] auto target_fps() const -> uint32_t override {
-        return tui_target_fps_.load(std::memory_order_relaxed);
-    }
-
     void open_modal(ModalType type) {
         if (!is_paused()) {
             pause_loop();
@@ -248,11 +240,6 @@ class Tui : public core::ITelemetrySink, public core::IConsoleSink {
                                    simrv::isa::OperationId op_id, uint8_t hart) override;
     /// Export the selected hart's paused architectural state and recent trace as JSON.
     void export_inspection_report();
-    /// Toggle the interactive Student Guide used while paused.
-    void toggle_student_guide();
-    /// Perform the context-sensitive action currently proposed by the Student Guide.
-    void activate_student_guide_suggestion();
-    [[nodiscard]] auto is_student_guide_enabled() const -> bool { return student_guide_enabled_; }
     void dismiss_mission();
     void restart_mission();
     [[nodiscard]] auto mission_progress() const noexcept -> const MissionProgress& {
@@ -286,6 +273,9 @@ class Tui : public core::ITelemetrySink, public core::IConsoleSink {
     void update_pointer_shape(bool clickable);
 
    private:
+    void sync_mission_checkpoint();
+    void apply_mission_guidance_layout();
+    void refresh_mission_layout_notice();
     void sync_workbench_slots();
     void clear_transient_live_overview(bool restore_page);
     [[nodiscard]] auto total_snapshot_instruction_count() const -> uint64_t;
@@ -365,8 +355,10 @@ class Tui : public core::ITelemetrySink, public core::IConsoleSink {
     int terminal_rows_start_ = 0;
     std::vector<std::string> last_screen_lines_;
     std::atomic<bool> paused_{true};
-    bool student_guide_enabled_{false};
     MissionProgress mission_;
+    uint64_t mission_revision_seen_ = 0;
+    std::optional<bool> mission_layout_fits_;
+    std::optional<simrv::xlen::Address> mission_breakpoint_addr_;
     bool inspection_overwrite_armed_{false};
     std::vector<WorkbenchSlot> workbench_slots_{{.page = TuiRegPage::GPR, .scroll_offset = 0},
                                                 {.page = TuiRegPage::CONSOLE, .scroll_offset = 0}};
@@ -453,6 +445,7 @@ class Tui : public core::ITelemetrySink, public core::IConsoleSink {
     void drain_trace_records();
 
     void execute_footer_action(TuiFooterAction action);
+    void execute_key_action(KeyAction action);
     void execute_header_action(HeaderHitResult hit);
     [[nodiscard]] auto column_widths(int terminal_width) const -> framework::ColumnWidths;
     auto handle_alt_key(char key, uint8_t byte) -> bool;
@@ -462,7 +455,6 @@ class Tui : public core::ITelemetrySink, public core::IConsoleSink {
     bool handle_modal_breakpoint(ModalType mtype, uint8_t byte, TuiKey key);
     auto handle_normal_keyboard_input(uint8_t byte, TuiKey key) -> void;
     auto search_terminal_scrollback(bool reverse) -> bool;
-    auto handle_debug_keyboard_input(TuiKey key) -> bool;
     bool handle_speed_keyboard_input(TuiKey key);
     bool handle_navigation_keyboard_input(uint8_t byte, TuiKey key);
     auto handle_mouse_inspector(int x, int y, int b, bool multi_column = false,

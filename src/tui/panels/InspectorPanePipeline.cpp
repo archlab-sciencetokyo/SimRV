@@ -600,9 +600,9 @@ auto InspectorPane::render_pipeline_stages_ca_hazards(const simrv::core::CPU& cp
                     width);
             }
             auto paths = get_active_forwarding_paths(ps);
-            std::string paths_str = "None";
+            std::string paths_str = "Enabled · idle";
             if (!paths.empty()) {
-                paths_str = "";
+                paths_str = "Enabled · ";
                 for (size_t i = 0; i < paths.size(); ++i) {
                     if (i > 0) paths_str += ", ";
                     paths_str += paths[i];

@@ -38,6 +38,13 @@ class TileLinkBus : public Bus {
         bool has_line_data = false;
     };
 
+    struct ContentionStats {
+        bool dma_active = false;
+        uint32_t dma_penalty_cycles = 0;
+        uint64_t delayed_requests = 0;
+        uint64_t added_latency_cycles = 0;
+    };
+
     struct TlTransactionRecord {
         Cycle cycle = 0;
         TileLinkChannel channel = TileLinkChannel::A;
@@ -85,6 +92,7 @@ class TileLinkBus : public Bus {
     }
     [[nodiscard]] auto pending_requests() const noexcept -> size_t { return req_queue_.size(); }
     [[nodiscard]] auto pending_responses() const noexcept -> size_t;
+    [[nodiscard]] auto contention_stats() const -> ContentionStats;
     void set_smp_enabled(bool enabled) noexcept { is_smp_enabled_ = enabled; }
     [[nodiscard]] auto is_smp_enabled() const noexcept -> bool { return is_smp_enabled_; }
 
@@ -157,6 +165,8 @@ class TileLinkBus : public Bus {
     simrv::core::Machine& machine_;
     uint64_t read_count_ = 0;
     uint64_t write_count_ = 0;
+    std::atomic<uint64_t> dma_delayed_requests_{0};
+    std::atomic<uint64_t> dma_added_latency_cycles_{0};
 
     mutable std::recursive_mutex bus_mutex_;
     MmioRouter router_;

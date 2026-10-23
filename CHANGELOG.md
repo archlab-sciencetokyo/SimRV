@@ -3,6 +3,13 @@
 All notable changes to SimRV are documented here.
 Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v3.0.0-rc.16] — unreleased
+
+- Centralized TUI action, inspector page, CLI option, and SoC platform-map metadata to reduce behavior drift.
+- Added visible TileLink bus contention reporting and a classroom mission workflow for guided ISA examples.
+- Added restart confirmation for machine and CPU model changes; unchanged CPU models no longer restart the simulator.
+- Clarified live forwarding status, slow-mode detail capture, package contents, and source-only sample build requirements.
+
 ## [v3.0.0-rc.15] — unreleased
 
 - Interactive terminal text selection polish with double-click word selection, triple-click line selection, and automatic OSC 52 clipboard export.

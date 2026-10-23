@@ -151,9 +151,23 @@ auto BreakpointModal::remove_at_cursor(
     if (cursor < static_cast<int>(pc_bps.size())) {
         auto it = std::next(pc_bps.begin(), cursor);
         simrv::xlen::Address pc = *it;
+        const auto& records = machine.breakpoint_manager().get_pc_breakpoint_records();
+        const bool has_tui = std::ranges::any_of(records, [pc](const auto& record) {
+            return record.addr == pc && record.owner == simrv::debug::BreakpointOwner::Tui;
+        });
+        const bool has_mission = std::ranges::any_of(records, [pc](const auto& record) {
+            return record.addr == pc && record.owner == simrv::debug::BreakpointOwner::Mission;
+        });
+        if (!has_tui && has_mission) {
+            if (set_status_override_cb)
+                set_status_override_cb("Lesson checkpoint is managed by the mission; dismiss it with z to remove it.");
+            return true;
+        }
         machine.breakpoint_manager().remove_pc_breakpoint(pc);
         if (set_status_override_cb) {
-            set_status_override_cb(std::format("Removed breakpoint at 0x{:08x}", pc));
+            set_status_override_cb(has_mission
+                                       ? std::format("Removed user breakpoint at 0x{:08x}; lesson checkpoint remains", pc)
+                                       : std::format("Removed breakpoint at 0x{:08x}", pc));
         }
     } else if (cursor < static_cast<int>(pc_bps.size() + wps.size())) {
         auto wp_idx = static_cast<std::size_t>(cursor - static_cast<int>(pc_bps.size()));
@@ -228,8 +242,19 @@ void BreakpointModal::render(ModalType type, std::vector<std::string>& content_r
                 std::string prefix = is_sel ? std::format("{}>\033[0m ", kThemeMint) : "  ";
                 std::string sym = machine->symbol_table().lookup(pc);
                 std::string sym_str = sym.empty() ? "" : std::format(" ({})", sym);
-                content_rows.push_back(std::format("{}PC Breakpoint at \033[1;33m0x{:08x}\033[0m{}",
-                                                   prefix, pc, sym_str));
+                const auto& records = machine->breakpoint_manager().get_pc_breakpoint_records();
+                const bool mission_owned = std::ranges::any_of(records, [pc](const auto& record) {
+                    return record.addr == pc &&
+                           record.owner == simrv::debug::BreakpointOwner::Mission;
+                });
+                const bool user_owned = std::ranges::any_of(records, [pc](const auto& record) {
+                    return record.addr == pc && record.owner == simrv::debug::BreakpointOwner::Tui;
+                });
+                const auto kind = mission_owned && !user_owned ? "Mission checkpoint at"
+                                  : mission_owned                ? "Breakpoint + checkpoint at"
+                                                                : "PC Breakpoint at";
+                content_rows.push_back(std::format("{}{} \033[1;33m0x{:08x}\033[0m{}",
+                                                   prefix, kind, pc, sym_str));
                 item_idx++;
                 if (item_idx >= 9) break;
             }

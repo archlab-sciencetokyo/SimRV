@@ -5,6 +5,7 @@
 #pragma once
 
 #include <cstdint>
+#include <string_view>
 
 #include "simrv/tui/framework/Layout.hpp"
 #include "simrv/xlen/IdentifierTypes.hpp"
@@ -36,6 +37,62 @@ enum class TuiRegPage : uint8_t {
     DISASM = CONSOLE
 };
 
+struct TuiPageInfo {
+    TuiRegPage page;
+    TuiCategoryGroup group;
+    std::string_view name;
+    std::string_view tab_name;
+    bool cycle_accurate_only = false;
+    bool floating_point_only = false;
+    bool vector_only = false;
+    bool default_for_group = false;
+    bool cycle_page = true;
+    bool visible_tab = true;
+};
+
+inline constexpr TuiPageInfo kTuiPages[] = {
+    {TuiRegPage::GPR, TuiCategoryGroup::Regs, "GPR Registers", "GPR", false, false, false, true},
+    {TuiRegPage::FPR, TuiCategoryGroup::Regs, "FPR Float Regs", "FPR", false, true},
+    {TuiRegPage::VEC, TuiCategoryGroup::Regs, "Vector Registers", "VEC", false, false, true},
+    {TuiRegPage::STACK, TuiCategoryGroup::Memory, "Stack & Memory", "Stack", false, false, false, true},
+    {TuiRegPage::CACHE, TuiCategoryGroup::Memory, "Cache Hierarchy", "Cache", true},
+    {TuiRegPage::TLB, TuiCategoryGroup::Memory, "TLB & Page Table", "TLB"},
+    {TuiRegPage::BUS, TuiCategoryGroup::Memory, "Bus & Coherence", "Bus"},
+    {TuiRegPage::PIPELINE, TuiCategoryGroup::Pipeline, "Pipeline Stages", "Stages", false, false, false, true},
+    {TuiRegPage::BPRED, TuiCategoryGroup::Pipeline, "Branch Predictor", "BPred", true},
+    {TuiRegPage::HAZARD, TuiCategoryGroup::Pipeline, "Hazards & Stalls", "Hazard", true},
+    {TuiRegPage::LIVE, TuiCategoryGroup::Tools, "Live Overview", "Live", false, false, false, false, true},
+    {TuiRegPage::EXPLAIN, TuiCategoryGroup::Tools, "Instruction Explainer", "Explain", false, false, false, true},
+    {TuiRegPage::TRACE, TuiCategoryGroup::Tools, "Execution Trace", "Trace"},
+    {TuiRegPage::LOG, TuiCategoryGroup::Tools, "Execution Log", "Log", false, false, false, false, false, true},
+    {TuiRegPage::CONSOLE, TuiCategoryGroup::Tools, "Console", "Console", false, false, false, false, false, false},
+    {TuiRegPage::DISPLAY, TuiCategoryGroup::Tools, "Display", "Display", false, false, false, false, false, false},
+};
+
+struct TuiCategoryInfo {
+    TuiCategoryGroup group;
+    std::string_view name;
+    std::string_view compact_name;
+};
+
+inline constexpr TuiCategoryInfo kTuiCategories[] = {
+    {TuiCategoryGroup::Regs, "Registers", "Regs"},
+    {TuiCategoryGroup::Memory, "Memory", "Memory"},
+    {TuiCategoryGroup::Pipeline, "Pipeline", "Pipe"},
+    {TuiCategoryGroup::Tools, "Tools", "Tools"},
+};
+
+inline constexpr TuiCategoryGroup kTuiCategoryGroups[] = {
+    TuiCategoryGroup::Regs, TuiCategoryGroup::Memory, TuiCategoryGroup::Pipeline,
+    TuiCategoryGroup::Tools};
+
+[[nodiscard]] constexpr auto get_page_info(TuiRegPage page) -> const TuiPageInfo* {
+    for (const auto& info : kTuiPages) {
+        if (info.page == page) return &info;
+    }
+    return nullptr;
+}
+
 enum class LayoutPreset : uint8_t {
     GeneralDebug,
     Microarchitecture,
@@ -49,95 +106,29 @@ struct WorkbenchSlot {
 };
 
 [[nodiscard]] constexpr auto get_category_group(TuiRegPage page) -> TuiCategoryGroup {
-    switch (page) {
-        case TuiRegPage::GPR:
-        case TuiRegPage::FPR:
-        case TuiRegPage::VEC:
-            return TuiCategoryGroup::Regs;
-        case TuiRegPage::STACK:
-        case TuiRegPage::CACHE:
-        case TuiRegPage::TLB:
-        case TuiRegPage::BUS:
-            return TuiCategoryGroup::Memory;
-        case TuiRegPage::PIPELINE:
-        case TuiRegPage::BPRED:
-        case TuiRegPage::HAZARD:
-            return TuiCategoryGroup::Pipeline;
-        case TuiRegPage::TRACE:
-        case TuiRegPage::EXPLAIN:
-        case TuiRegPage::CONSOLE:
-        case TuiRegPage::DISPLAY:
-        default:
-            return TuiCategoryGroup::Tools;
-    }
+    const auto* info = get_page_info(page);
+    return info != nullptr ? info->group : TuiCategoryGroup::Tools;
 }
 
 [[nodiscard]] constexpr auto get_page_name(TuiRegPage page) -> const char* {
-    switch (page) {
-        case TuiRegPage::GPR:
-            return "GPR Registers";
-        case TuiRegPage::FPR:
-            return "FPR Float Regs";
-        case TuiRegPage::VEC:
-            return "Vector Registers";
-        case TuiRegPage::PIPELINE:
-            return "Pipeline Stages";
-        case TuiRegPage::CACHE:
-            return "Cache Hierarchy";
-        case TuiRegPage::TLB:
-            return "TLB & Page Table";
-        case TuiRegPage::BPRED:
-            return "Branch Predictor";
-        case TuiRegPage::HAZARD:
-            return "Hazards & Stalls";
-        case TuiRegPage::BUS:
-            return "Bus & Coherence";
-        case TuiRegPage::TRACE:
-            return "Execution Trace";
-        case TuiRegPage::EXPLAIN:
-            return "Instruction Explainer";
-        case TuiRegPage::STACK:
-            return "Stack & Memory";
-        case TuiRegPage::CONSOLE:
-            return "Console";
-        case TuiRegPage::DISPLAY:
-            return "Display";
-        case TuiRegPage::LIVE:
-            return "Live Overview";
-        case TuiRegPage::LOG:
-            return "Execution Log";
-    }
-    return "Tool View";
+    const auto* info = get_page_info(page);
+    return info != nullptr ? info->name.data() : "Tool View";
 }
 
 [[nodiscard]] constexpr auto get_default_page_for_group(TuiCategoryGroup group,
                                                         bool /*cycle_accurate*/ = false)
     -> TuiRegPage {
-    switch (group) {
-        case TuiCategoryGroup::Regs:
-            return TuiRegPage::GPR;
-        case TuiCategoryGroup::Memory:
-            return TuiRegPage::STACK;
-        case TuiCategoryGroup::Pipeline:
-            return TuiRegPage::PIPELINE;
-        case TuiCategoryGroup::Tools:
-        default:
-            return TuiRegPage::EXPLAIN;
+    for (const auto& info : kTuiPages) {
+        if (info.group == group && info.default_for_group) return info.page;
     }
+    return TuiRegPage::EXPLAIN;
 }
 
 [[nodiscard]] constexpr auto get_category_name(TuiCategoryGroup group) -> const char* {
-    switch (group) {
-        case TuiCategoryGroup::Regs:
-            return "Registers";
-        case TuiCategoryGroup::Memory:
-            return "Memory";
-        case TuiCategoryGroup::Pipeline:
-            return "Pipeline";
-        case TuiCategoryGroup::Tools:
-        default:
-            return "Tools";
+    for (const auto& info : kTuiCategories) {
+        if (info.group == group) return info.name.data();
     }
+    return "Tools";
 }
 
 enum class TuiRightPanelMode : uint8_t { Terminal, Display };
@@ -171,7 +162,6 @@ enum class TuiFooterAction : uint8_t {
     TogglePcBreakpoint,
     ManageBreakpoints,
     InspectMem,
-    ToggleStudentGuide,
     LoadBinary,
     Quit,
     CycleRegs,

@@ -3,51 +3,74 @@
 version = "1"
 id = "control-flow-calls"
 program = "control-flow-calls.elf"
+description = "Explore conditional branches, loops, calls, and returns in a small RISC-V program."
+goal = "Explain how control flow and the calling convention work together across a function call."
 
 [step]
-label = "mission_branch"
-title = "Conditional branch"
+id = "branch-prediction"
+title = "Predict the branch"
 prompt = "Predict whether bne changes the PC, then inspect a0."
 why = "A branch chooses the next instruction from register values and an immediate."
 view = "explain"
+panels = "explain,registers,trace"
 glossary = "0"
 
 [step]
-label = "mission_loop"
-title = "Loop control"
-prompt = "Follow one loop iteration in Trace; find the back edge."
+id = "loop-observation"
+title = "Trace the loop"
+prompt = "Follow one loop iteration in Trace and find the back edge."
 why = "A loop is repeated control flow, not a special ISA instruction."
 view = "trace"
+panels = "trace,registers"
 glossary = "0"
 
+[checkpoint]
+label = "mission_loop"
+after_step = 2
+message = "The loop reached its back edge. Compare this PC with the earlier iteration."
+
 [step]
-label = "mission_before_call"
+id = "call-setup"
 title = "Call setup"
 prompt = "Inspect a0, a1, ra, and sp before jal enters add_pair."
 why = "The ABI gives argument, return-address, and stack registers shared meanings."
 view = "registers"
+panels = "registers,stack,trace"
 glossary = "0"
 
 [step]
-label = "mission_in_callee"
+id = "callee-frame"
 title = "Callee frame"
 prompt = "Open Stack and observe sp move before ra is saved."
 why = "A callee protects the caller's return path in its stack frame."
 view = "stack"
+panels = "stack,registers,trace"
 glossary = "0"
 
+[checkpoint]
+label = "mission_in_callee"
+after_step = 4
+message = "You are inside add_pair. Inspect the arguments and the saved return address."
+
 [step]
-label = "mission_after_call"
-title = "Return"
+id = "return-flow"
+title = "Return to the caller"
 prompt = "Use Trace to connect jalr with the instruction after the call."
 why = "ret is jalr through ra: it restores the caller's control flow."
 view = "trace"
+panels = "trace,registers,stack"
 glossary = "0"
 
 [step]
-label = "mission_done"
-title = "ABI result"
+id = "result-review"
+title = "Review the ABI result"
 prompt = "Inspect a0 and sp; explain why the result and stack are stable."
 why = "Returning values in a0 while restoring sp makes calls compose safely."
 view = "registers"
+panels = "registers,trace,stack"
 glossary = "0"
+
+[checkpoint]
+label = "mission_done"
+after_step = 6
+message = "The lesson program reached its final marker. Review the result and restored stack."

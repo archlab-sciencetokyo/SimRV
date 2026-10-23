@@ -22,6 +22,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <filesystem>
 #include <format>
 #include <string>
 #include <thread>
@@ -54,6 +55,10 @@
 #include "simrv/xlen/ScalarTypes.hpp"
 
 namespace simrv::tui {
+
+namespace {
+constexpr uint32_t kTuiTargetFps = 60;
+}
 
 static struct termios
     g_saved_termios;                  // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
@@ -204,11 +209,14 @@ auto Tui::compute_sixel_dimensions(int panel_cols, int body_rows, int cell_width
 Tui::Tui(simrv::core::Machine& machine) : machine_(machine), modal_(machine) {
     modal_.set_log_buffer(&log_buffer_);
     preferences_path_ = TuiPreferences::default_path();
-    student_guide_enabled_ = machine_.class_mode_enabled();
     restore_preferences();
     main_thread_id_ = std::this_thread::get_id();
     last_speed_update_ = std::chrono::steady_clock::now();
     mission_.configure(machine_.mission_id(), machine_.binary_path());
+    sync_mission_checkpoint();
+    modal_.set_mission_progress(&mission_);
+    mission_revision_seen_ = mission_.revision();
+    if (mission_.guidance()) modal_.open_mission_objective();
     update_trace_active_cache();
     vt_.set_scroll_offset_callback([this](int lines) -> void {
         if (scroll_offset_ > 0) {
@@ -223,7 +231,81 @@ Tui::Tui(simrv::core::Machine& machine) : machine_(machine), modal_(machine) {
     }
 }
 
-Tui::~Tui() { shutdown(); }
+Tui::~Tui() {
+    shutdown();
+    if (mission_breakpoint_addr_)
+        machine_.breakpoint_manager().remove_pc_breakpoint(
+            *mission_breakpoint_addr_, simrv::debug::BreakpointOwner::Mission);
+}
+
+void Tui::sync_mission_checkpoint() {
+    if (mission_breakpoint_addr_) {
+        machine_.breakpoint_manager().remove_pc_breakpoint(
+            *mission_breakpoint_addr_, simrv::debug::BreakpointOwner::Mission);
+        mission_breakpoint_addr_.reset();
+    }
+    const auto checkpoint = mission_.checkpoint_symbol();
+    if (checkpoint.empty()) return;
+    const auto address = machine_.symbol_table().lookup_name(std::string(checkpoint));
+    if (!address) {
+        set_status_override(std::format(
+            "Mission checkpoint '{}' is missing from the ELF; run check_mission.py.", checkpoint));
+        return;
+    }
+    machine_.breakpoint_manager().add_pc_breakpoint(
+        *address, simrv::debug::BreakpointOwner::Mission);
+    mission_breakpoint_addr_ = *address;
+}
+
+void Tui::apply_mission_guidance_layout() {
+    const auto guidance = mission_.guidance();
+    if (!guidance || workbench_slots_.empty()) return;
+    if (!guidance->panels.empty()) {
+        workbench_slots_.clear();
+        for (const auto page : guidance->panels)
+            workbench_slots_.push_back({.page = page, .scroll_offset = 0});
+        layout_ = workbench_slots_.size() == 1 ? TuiLayout::FullLeft
+                  : workbench_slots_.size() == 2 ? TuiLayout::Split
+                  : workbench_slots_.size() == 3 ? TuiLayout::ThreeColumn
+                                                  : TuiLayout::FourColumn;
+        focused_slot_index_ = 0;
+    } else {
+        const auto found = std::ranges::find_if(workbench_slots_, [&](const auto& slot) {
+            return slot.page == guidance->destination;
+        });
+        if (found != workbench_slots_.end()) {
+            focused_slot_index_ = static_cast<size_t>(found - workbench_slots_.begin());
+        } else {
+            if (focused_slot_index_ >= workbench_slots_.size()) focused_slot_index_ = 0;
+            workbench_slots_[focused_slot_index_].page = guidance->destination;
+        }
+    }
+    if (inspector_pane_ && focused_slot_index_ < workbench_slots_.size())
+        inspector_pane_->set_page(workbench_slots_[focused_slot_index_].page);
+    mission_layout_fits_.reset();
+}
+
+void Tui::refresh_mission_layout_notice() {
+    const auto guidance = mission_.guidance();
+    if (!guidance || guidance->panels.empty() || cached_term_width_ <= 0 ||
+        cached_term_height_ <= 0) {
+        return;
+    }
+    const auto panel_count = static_cast<uint8_t>(guidance->panels.size());
+    const int required_width = framework::min_width_for_columns(panel_count);
+    const bool fits = cached_term_width_ >= required_width &&
+                      cached_term_height_ >= framework::kMinimumTerminalHeight;
+    const auto prior = mission_layout_fits_;
+    if (prior && *prior == fits) return;
+    mission_layout_fits_ = fits;
+    if (!fits) {
+        set_status_override(std::format(
+            "Mission layout needs at least {}x{}; current window is {}x{}. Resize or reduce this step's panels.",
+            required_width, framework::kMinimumTerminalHeight, cached_term_width_, cached_term_height_));
+    } else if (prior && !*prior) {
+        set_status_override("Mission panel layout now fits the current window.");
+    }
+}
 
 void Tui::set_paused(bool p) {
     if (!p && machine_.is_shutdown_) {
@@ -291,13 +373,13 @@ void Tui::set_paused(bool p) {
 void Tui::initialize() {
     backend_ = std::make_shared<LocalTuiBackend>(machine_);
     inspector_pane_ = std::make_unique<InspectorPane>(machine_, this);
-    inspector_pane_->set_mission_progress(&mission_);
     terminal_pane_ = std::make_unique<TerminalPane>();
     status_bar_ = std::make_unique<StatusBar>(machine_, this);
 
     if (workbench_slots_.empty())
         workbench_slots_ = {{.page = TuiRegPage::GPR, .scroll_offset = 0}};
     if (focused_slot_index_ >= workbench_slots_.size()) focused_slot_index_ = 0;
+    apply_mission_guidance_layout();
     inspector_pane_->set_page(workbench_slots_[focused_slot_index_].page);
 
     set_high_contrast(machine_.high_contrast_enabled());
@@ -551,9 +633,6 @@ void Tui::restore_preferences() {
     user_column_widths_ = preferences.column_widths;
     set_theme_style(preferences.theme);
     machine_.set_high_contrast_enabled(preferences.high_contrast);
-    machine_.set_class_mode_enabled(preferences.class_mode);
-    student_guide_enabled_ = preferences.student_guide;
-    set_target_fps(preferences.target_fps);
 }
 
 void Tui::save_preferences() {
@@ -570,9 +649,6 @@ void Tui::save_preferences() {
     preferences.column_widths = user_column_widths_;
     preferences.theme = get_active_theme_style();
     preferences.high_contrast = machine_.high_contrast_enabled();
-    preferences.class_mode = machine_.class_mode_enabled();
-    preferences.student_guide = student_guide_enabled_;
-    preferences.target_fps = target_fps();
     if (!preferences.save(preferences_path_)) {
         simrv::log::warn("Unable to save TUI preferences to {}", preferences_path_.string());
     }
@@ -643,7 +719,7 @@ void Tui::ui_render_loop(const std::stop_token& stop_token) {
             processing_ui_input_.store(false, std::memory_order_release);
             const auto now = std::chrono::steady_clock::now();
             const auto interval =
-                std::chrono::milliseconds(std::max(1u, 1000 / std::clamp(target_fps(), 1u, 120u)));
+                std::chrono::milliseconds(1000 / kTuiTargetFps);
             if (now >= next_sample) {
                 if (!is_paused() && backend_) backend_->request_sample();
                 next_sample = now + interval;
@@ -871,7 +947,6 @@ void Tui::render_build_lines(int inspector_width, int terminal_width, int num_ro
     inspector_pane_->set_kips(kips_);
     inspector_pane_->set_max_kips(max_kips_);
     inspector_pane_->set_kips_history(kips_history_);
-    inspector_pane_->set_student_guide_enabled(student_guide_enabled_);
     inspector_pane_->set_visible_rows(num_rows);
     inspector_pane_->set_active_runtime(static_cast<double>(runtime_duration_.count()) / 1000000.0);
     inspector_pane_->set_trace_buffer(&trace_buffer_);
@@ -1302,6 +1377,14 @@ void Tui::render(bool force) {
     }
     std::unique_lock<std::mutex> lock(tui_mutex_);
 
+    const auto mission_revision = mission_.revision();
+    if (mission_revision != mission_revision_seen_ &&
+        (get_active_modal() == ModalType::None ||
+         get_active_modal() == ModalType::MissionObjective)) {
+        if (mission_.guidance()) modal_.open_mission_objective();
+        mission_revision_seen_ = mission_revision;
+    }
+
     std::string local_tx;
     std::queue<simrv::tui::LogEntry> local_log;
     {
@@ -1338,7 +1421,7 @@ void Tui::render(bool force) {
     TuiRightPanelMode const panel_mode =
         has_display && !has_console ? TuiRightPanelMode::Display : TuiRightPanelMode::Terminal;
     auto now = std::chrono::steady_clock::now();
-    const auto min_interval_us = 1'000'000U / std::clamp(target_fps(), 1u, 120u);
+    const auto min_interval_us = 1'000'000U / kTuiTargetFps;
     const auto elapsed_us =
         std::chrono::duration_cast<std::chrono::microseconds>(now - last_draw_time_).count();
     const bool resized = g_resized != 0;
@@ -1384,6 +1467,7 @@ void Tui::render(bool force) {
     }
     int const term_width = cached_term_width_;
     int const term_height = cached_term_height_;
+    refresh_mission_layout_notice();
     const FrameGeometry frame = calculate_frame_geometry(
         term_width, term_height, layout_, user_inspector_width_, user_column_widths_);
     if (!frame.renderable) return;
@@ -3453,7 +3537,11 @@ auto Tui::handle_modal_breakpoint(ModalType mtype, uint8_t byte, TuiKey key) -> 
         } else if (byte == 'c' || byte == 'C') {
             machine_.breakpoint_manager().clear_pc_breakpoints();
             machine_.breakpoint_manager().clear_watchpoints();
-            modal_.open_notice("BREAKPOINTS CLEARED", "Cleared all breakpoints and watchpoints.",
+            sync_mission_checkpoint();
+            modal_.open_notice("BREAKPOINTS CLEARED",
+                               mission_.enabled()
+                                   ? "Cleared user breakpoints and watchpoints. The active mission checkpoint remains configured."
+                                   : "Cleared all breakpoints and watchpoints.",
                                false);
             render(true);
         } else if (key == simrv::tui::TuiKey::Tab || byte == 'j' || byte == 'J') {
@@ -3475,6 +3563,60 @@ auto Tui::handle_modal_keyboard_input(uint8_t byte, TuiKey key) -> bool {
     if (!is_modal_active()) return false;
 
     auto mtype = get_active_modal();
+    if (mtype == ModalType::MissionObjective) {
+        if (byte == 'y' || byte == 'Y') {
+            modal_.toggle_mission_why();
+            render(true);
+            return true;
+        }
+        if (key == TuiKey::F9 || key == TuiKey::QuestionMark) {
+            if (const auto guidance = mission_.guidance())
+                modal_.set_glossary_topic(guidance->glossary_topic);
+            open_modal(ModalType::Glossary);
+            return true;
+        }
+        if (key == TuiKey::Enter || key == TuiKey::Newline) {
+            close_modal();
+            return true;
+        }
+        if (byte == ' ') {
+            if (mission_.completed()) return true;
+            if (mission_.advance_step()) {
+                sync_mission_checkpoint();
+                if (const auto guidance = mission_.guidance()) {
+                    apply_mission_guidance_layout();
+                    set_status_override("Next instruction. Checkpoint status follows the guest program.");
+                } else {
+                    set_status_override("Mission instructions complete. Review your observations.");
+                }
+            } else {
+                set_status_override(mission_.checkpoint_symbol().empty()
+                                        ? "No further instruction is available."
+                                        : "Checkpoint not reached. Follow the instruction, then continue.");
+            }
+            render(true);
+            return true;
+        }
+        if (key == TuiKey::F12) {
+            set_status_override(mission_.checkpoint_symbol().empty()
+                                    ? "No checkpoint is attached to this step."
+                                    : (mission_.checkpoint_reached()
+                                           ? "Checkpoint reached. Press Space for the next instruction."
+                                           : "Objective checkpoint not reached yet."));
+            render(true);
+            return true;
+        }
+        if (byte == 'z' || byte == 'Z') {
+            if (byte == 'z') dismiss_mission();
+            else restart_mission();
+            return true;
+        }
+        if (key == TuiKey::Esc || byte == 27) {
+            close_modal();
+            return true;
+        }
+        return true;
+    }
     if (mtype == ModalType::LoadFilePicker) {
         modal_.file_picker_input(byte, key);
         render(true);
@@ -3585,6 +3727,31 @@ auto Tui::handle_modal_keyboard_input(uint8_t byte, TuiKey key) -> bool {
         }
         if (byte == 27 || key == simrv::tui::TuiKey::Esc || byte == 'q' || byte == 'Q') {
             open_modal(ModalType::Settings);
+            render(true);
+            return true;
+        }
+        return true;
+    }
+    if (mtype == ModalType::ConfigurationChangeConfirm) {
+        if (byte == 'r' || byte == 'R' || key == simrv::tui::TuiKey::Enter ||
+            key == simrv::tui::TuiKey::Newline) {
+            auto staged = modal_.apply_pending_reconfiguration();
+            close_modal();
+            if (!staged) {
+                modal_.open_notice("CONFIGURATION RELOAD FAILED", staged.error(), true);
+                render(true);
+            }
+            return true;
+        }
+        if (byte == 'd' || byte == 'D' || byte == ' ') {
+            close_modal();
+            modal_.open_notice("CONFIGURATION CHANGE DISCARDED",
+                               "The active simulator configuration remains unchanged.", false);
+            render(true);
+            return true;
+        }
+        if (byte == 27 || key == simrv::tui::TuiKey::Esc || byte == 'q' || byte == 'Q') {
+            close_modal();
             render(true);
             return true;
         }
@@ -3869,13 +4036,37 @@ auto Tui::handle_modal_keyboard_input(uint8_t byte, TuiKey key) -> bool {
               get_active_modal() == ModalType::LoadDiskImage ||
               get_active_modal() == ModalType::LoadCpuConfig) &&
              key == simrv::tui::TuiKey::Tab) {
-        auto input = modal_.get_input();
-        if (modals::LoadModal::complete_path(input)) {
-            modal_.set_input(std::move(input));
-            set_status_override("PATH COMPLETED");
+        const auto input_before = modal_.get_input();
+        auto completion = modals::LoadModal::inspect_path(input_before);
+        const bool extended = completion.common_prefix.size() > input_before.size();
+        modal_.set_input(extended ? std::move(completion.common_prefix) : input_before);
+
+        std::vector<std::string> preview;
+        if (completion.matches.empty()) {
+            preview.emplace_back("No matches for this entry. Type more to search.");
+            set_status_override("NO PATH MATCHES");
         } else {
-            set_status_override("NO PATH COMPLETION");
+            preview.emplace_back(completion.matches.size() == 1 ? "Match:" : "Matches:");
+            constexpr size_t kVisibleCompletions = 3;
+            const auto visible = std::min(completion.matches.size(), kVisibleCompletions);
+            for (size_t i = 0; i < visible; ++i) {
+                auto label = std::filesystem::path(completion.matches[i])
+                                 .lexically_normal()
+                                 .filename()
+                                 .string();
+                if (label.empty()) label = completion.matches[i];
+                preview.push_back(std::format("- {}", label));
+            }
+            if (completion.matches.size() > visible) {
+                preview.push_back(std::format("+{} more; type more to narrow.",
+                                              completion.matches.size() - visible));
+            } else if (completion.matches.size() > 1) {
+                preview.emplace_back("Type more to narrow the list.");
+            }
+            set_status_override(extended ? "PATH COMPLETED; OPTIONS SHOWN BELOW"
+                                         : "PATH OPTIONS SHOWN BELOW");
         }
+        modal_.set_path_completion_preview(std::move(preview));
         render(true);
     } else if (get_active_modal() == ModalType::LoadBinary && key == simrv::tui::TuiKey::BackTab) {
         modal_.toggle_load_mode();
@@ -3886,48 +4077,6 @@ auto Tui::handle_modal_keyboard_input(uint8_t byte, TuiKey key) -> bool {
     } else if (byte >= 32 && byte <= 126 && get_active_modal() != ModalType::Help) {
         modal_.push_char(static_cast<char>(byte));
         render(true);
-    }
-    return true;
-}
-
-auto Tui::handle_debug_keyboard_input(TuiKey key) -> bool {
-    switch (key) {
-        case simrv::tui::TuiKey::Colon:
-            open_modal(ModalType::SetBreakpoint);
-            break;
-        case simrv::tui::TuiKey::w:
-        case simrv::tui::TuiKey::W:
-            open_modal(ModalType::SetWatchpoint);
-            break;
-        case simrv::tui::TuiKey::i:
-        case simrv::tui::TuiKey::I:
-            open_modal(ModalType::InspectAddress);
-            break;
-        case simrv::tui::TuiKey::d:
-        case simrv::tui::TuiKey::D:
-            open_modal(ModalType::MemoryDump);
-            break;
-        case simrv::tui::TuiKey::m:
-        case simrv::tui::TuiKey::M:
-            open_modal(ModalType::ManageBreakpoints);
-            break;
-        case simrv::tui::TuiKey::k:
-        case simrv::tui::TuiKey::K: {
-            simrv::xlen::Address pc = machine_.primary_hart().state().pc;
-            if (machine_.breakpoint_manager().has_pc_breakpoint(pc)) {
-                machine_.breakpoint_manager().remove_pc_breakpoint(pc);
-                modal_.open_notice("BREAKPOINT REMOVED",
-                                   std::format("Removed PC breakpoint at 0x{:08x}", pc), false);
-            } else {
-                machine_.breakpoint_manager().add_pc_breakpoint(pc);
-                modal_.open_notice("BREAKPOINT CREATED",
-                                   std::format("PC breakpoint set at 0x{:08x}", pc), false);
-            }
-            render(true);
-            break;
-        }
-        default:
-            return false;
     }
     return true;
 }
@@ -3965,84 +4114,8 @@ auto Tui::handle_speed_keyboard_input(TuiKey key) -> bool {
 
 auto Tui::handle_navigation_keyboard_input(uint8_t byte, TuiKey key) -> bool {
     switch (key) {
-        case simrv::tui::TuiKey::Tab:
-            focus_next_slot();
-            return true;
-        case simrv::tui::TuiKey::BackTab:
-            focus_prev_slot();
-            return true;
-        case simrv::tui::TuiKey::CtrlA:
-        case simrv::tui::TuiKey::CtrlN:
-            add_workbench_column();
-            return true;
-        case simrv::tui::TuiKey::CtrlX:
-            close_focused_column();
-            return true;
-        case simrv::tui::TuiKey::F1:
-            if (get_active_modal() == ModalType::Help)
-                close_modal();
-            else
-                open_modal(ModalType::Help);
-            return true;
-        case simrv::tui::TuiKey::F2:
-            if (get_active_modal() == ModalType::Settings)
-                close_modal();
-            else
-                open_modal(ModalType::Settings);
-            return true;
-        case simrv::tui::TuiKey::F3:
-            cycle_reg_page();
-            return true;
-        case simrv::tui::TuiKey::F4:
-            if (get_active_modal() == ModalType::LayoutPresets)
-                close_modal();
-            else
-                open_modal(ModalType::LayoutPresets);
-            return true;
-        case simrv::tui::TuiKey::F5:
-            toggle_run_state();
-            return true;
-        case simrv::tui::TuiKey::F6:
-            execute_footer_action(TuiFooterAction::Step);
-            return true;
         case simrv::tui::TuiKey::F7:
             set_reg_page(TuiRegPage::TRACE);
-            return true;
-        case simrv::tui::TuiKey::F8:
-            execute_footer_action(TuiFooterAction::TogglePcBreakpoint);
-            return true;
-        case simrv::tui::TuiKey::F9:
-            if (get_active_modal() == ModalType::Glossary)
-                close_modal();
-            else
-                open_modal(ModalType::Glossary);
-            return true;
-        case simrv::tui::TuiKey::F10:
-            machine_.request_exit();
-            return true;
-        case simrv::tui::TuiKey::F11:
-            cycle_tool_page();
-            return true;
-        case simrv::tui::TuiKey::e:
-        case simrv::tui::TuiKey::E:
-            toggle_explain();
-            return true;
-        case simrv::tui::TuiKey::f:
-        case simrv::tui::TuiKey::F:
-            open_modal(ModalType::SetSpeed);
-            return true;
-        case simrv::tui::TuiKey::QuestionMark:
-            if (inspector_pane_) {
-                modal_.set_glossary_topic(
-                    guidance_for_page(inspector_pane_->get_page(),
-                                      machine_.runtime_profile.is_cycle_mode())
-                        .glossary_topic);
-            }
-            open_modal(ModalType::Glossary);
-            return true;
-        case simrv::tui::TuiKey::h:
-        case simrv::tui::TuiKey::H:
-            open_modal(ModalType::Help);
             return true;
         case simrv::tui::TuiKey::LeftBracket:
             adjust_inspector_width(-2);
@@ -4050,74 +4123,7 @@ auto Tui::handle_navigation_keyboard_input(uint8_t byte, TuiKey key) -> bool {
         case simrv::tui::TuiKey::RightBracket:
             adjust_inspector_width(2);
             return true;
-        case simrv::tui::TuiKey::t:
-        case simrv::tui::TuiKey::T:
-            cycle_theme_style();
-            render(true);
-            return true;
-        case simrv::tui::TuiKey::v:
-        case simrv::tui::TuiKey::V:
-            toggle_execution_mode();
-            return true;
-        case simrv::tui::TuiKey::g:
-        case simrv::tui::TuiKey::G:
-            toggle_student_guide();
-            return true;
-        case simrv::tui::TuiKey::x:
-        case simrv::tui::TuiKey::X:
-            export_inspection_report();
-            return true;
-        case simrv::tui::TuiKey::u:
-        case simrv::tui::TuiKey::U:
-            if (focused_page() == TuiRegPage::CONSOLE) {
-                scroll(5);
-            }
-            return true;
-        case simrv::tui::TuiKey::L:
-            open_modal(ModalType::LogViewer);
-            return true;
-        case simrv::tui::TuiKey::o:
-        case simrv::tui::TuiKey::O:
-            open_modal(ModalType::LoadBinary);
-            return true;
-        case simrv::tui::TuiKey::n:
-        case simrv::tui::TuiKey::N:
-            if (machine_.num_harts() > 1) {
-                open_modal(ModalType::SwitchHart);
-            } else {
-                select_next_hart();
-            }
-            return true;
-        case simrv::tui::TuiKey::CtrlW:
-            open_tool_picker(focused_slot_index_);
-            return true;
-        case simrv::tui::TuiKey::Less:
-            move_focused_column_left();
-            return true;
-        case simrv::tui::TuiKey::Greater:
-            move_focused_column_right();
-            return true;
         default:
-            if (byte == '<') {
-                move_focused_column_left();
-                return true;
-            }
-            if (byte == '>') {
-                move_focused_column_right();
-                return true;
-            }
-            if (byte == 0x17) {
-                open_tool_picker(focused_slot_index_);
-                return true;
-            }
-            if (byte == 0x01 || byte == 0x0e) {
-                add_workbench_column();
-                return true;
-            }
-            if (byte == 0x18) {
-                close_focused_column();
-                return true;
-            }
             if (byte == '1') {
                 set_reg_page(TuiRegPage::GPR);
                 return true;
@@ -4132,10 +4138,6 @@ auto Tui::handle_navigation_keyboard_input(uint8_t byte, TuiKey key) -> bool {
             }
             if (byte == '4') {
                 set_reg_page(TuiRegPage::EXPLAIN);
-                return true;
-            }
-            if (byte == ',' || key == simrv::tui::TuiKey::Comma) {
-                open_modal(ModalType::Settings);
                 return true;
             }
             return false;
@@ -4188,42 +4190,17 @@ auto Tui::handle_normal_keyboard_input(uint8_t byte, TuiKey key) -> void {
         return;
     }
 
-    if (key == simrv::tui::TuiKey::CtrlP || key == simrv::tui::TuiKey::c ||
-        key == simrv::tui::TuiKey::C) {
-        if (machine_.is_shutdown_) {
-            modal_.open_notice("SYSTEM SHUTDOWN",
-                               "Target system has shutdown.\n\nPlease reboot [Ctrl-R], load a "
-                               "binary [o], or quit [q].",
-                               false);
-            render(true);
-            return;
-        }
-        if (machine_.binary_path().empty() && machine_.primary_hart().state().pc == 0) {
-            modal_.open_notice("NO PROGRAM LOADED",
-                               "Cannot run simulation: PC is 0x0.\n\nPlease load a program binary "
-                               "image first [o].",
-                               false);
-            render(true);
-            return;
-        }
-        unpause_loop();
+    if (const auto action = Keybindings::match(key)) {
+        execute_key_action(*action);
         return;
     }
-    if (key == simrv::tui::TuiKey::CtrlR) {
-        machine_.request_reboot();
-        return;
-    }
+
     if (byte == 'z') {
         dismiss_mission();
         return;
     }
     if (byte == 'Z') {
         restart_mission();
-        return;
-    }
-    if ((key == simrv::tui::TuiKey::Enter || key == simrv::tui::TuiKey::Newline) &&
-        student_guide_enabled_ && is_paused()) {
-        activate_student_guide_suggestion();
         return;
     }
     if (key == simrv::tui::TuiKey::Enter || key == simrv::tui::TuiKey::Newline) {
@@ -4234,8 +4211,7 @@ auto Tui::handle_normal_keyboard_input(uint8_t byte, TuiKey key) -> void {
         write_guest_input(3);
         return;
     }
-    if (key == simrv::tui::TuiKey::CtrlQ || key == simrv::tui::TuiKey::CtrlC ||
-        key == simrv::tui::TuiKey::q || key == simrv::tui::TuiKey::Q) {
+    if (key == simrv::tui::TuiKey::CtrlC) {
         machine_.request_exit();
         return;
     }
@@ -4250,43 +4226,6 @@ auto Tui::handle_normal_keyboard_input(uint8_t byte, TuiKey key) -> void {
         return;
     }
 
-    // Memory inspection is an architectural teaching/observation tool, not a debug-diagnostics
-    // feature. Keep its input semantics aligned with the canonical keybinding registry.
-    if (key == simrv::tui::TuiKey::i || key == simrv::tui::TuiKey::I) {
-        open_modal(ModalType::InspectAddress);
-        return;
-    }
-
-    if (key == simrv::tui::TuiKey::Colon || key == simrv::tui::TuiKey::w ||
-        key == simrv::tui::TuiKey::W || key == simrv::tui::TuiKey::m ||
-        key == simrv::tui::TuiKey::M || key == simrv::tui::TuiKey::k ||
-        key == simrv::tui::TuiKey::K || key == simrv::tui::TuiKey::d ||
-        key == simrv::tui::TuiKey::D) {
-        if (handle_debug_keyboard_input(key)) return;
-    }
-
-    if (key == simrv::tui::TuiKey::s || key == simrv::tui::TuiKey::S) {
-        if (machine_.binary_path().empty() && machine_.primary_hart().state().pc == 0) {
-            modal_.open_notice(
-                "NO PROGRAM LOADED",
-                "Cannot step: PC is 0x0.\n\nPlease load a program binary image first [o].", false);
-            render(true);
-            return;
-        }
-        if (machine_.is_shutdown_) {
-            modal_.open_notice("SYSTEM SHUTDOWN",
-                               "Target system has shutdown.\n\nPlease reboot [Ctrl-R], load a "
-                               "binary [o], or quit [q].",
-                               false);
-            render(true);
-            return;
-        } else {
-            if (!is_paused()) pause_loop();
-            machine_.step_sync();
-            update_cache();
-            render(true);
-        }
-    }
 }
 
 auto Tui::search_terminal_scrollback(bool reverse) -> bool {
@@ -4317,6 +4256,13 @@ auto Tui::search_terminal_scrollback(bool reverse) -> bool {
 }
 
 void Tui::pause_loop() {
+    if (mission_.enabled()) {
+        const auto pc = machine_.primary_hart().state().pc;
+        if (const auto symbol = machine_.symbol_table().lookup_symbol(pc);
+            symbol && symbol->is_exact()) {
+            mission_.observe_symbol(symbol->name);
+        }
+    }
     set_paused(true);
     update_cache();
     render(true);
@@ -4324,67 +4270,21 @@ void Tui::pause_loop() {
 
 void Tui::unpause_loop() { set_paused(false); }
 
-void Tui::toggle_student_guide() {
-    student_guide_enabled_ = !student_guide_enabled_;
-    set_status_override(
-        std::format("Student Guide {}", student_guide_enabled_ ? "enabled" : "hidden"));
-    render(true);
-}
-
 void Tui::dismiss_mission() {
     mission_.dismiss();
-    set_status_override("Mission dismissed; the Student Guide remains available.");
+    sync_mission_checkpoint();
+    if (get_active_modal() == ModalType::MissionObjective) close_modal();
+    set_status_override("Mission dismissed; free exploration is available.");
     render(true);
 }
 
 void Tui::restart_mission() {
     mission_.restart();
+    sync_mission_checkpoint();
+    apply_mission_guidance_layout();
+    if (mission_.guidance()) modal_.open_mission_objective();
     set_status_override("Mission restarted at objective 1.");
     render(true);
-}
-
-void Tui::activate_student_guide_suggestion() {
-    if (!student_guide_enabled_ || !is_paused() || !inspector_pane_) return;
-
-    if (const auto mission_guidance = mission_.guidance()) {
-        set_reg_page(mission_guidance->destination);
-        set_status_override(std::string(mission_guidance->prompt));
-        return;
-    }
-
-    auto const guidance = inspector_pane_->current_student_guidance();
-    switch (guidance.next_action) {
-        case KeyAction::Step:
-            handle_normal_keyboard_input('s', TuiKey::s);
-            break;
-        case KeyAction::LoadBinary:
-            open_modal(ModalType::LoadBinary);
-            break;
-        case KeyAction::Reset:
-            machine_.request_reboot();
-            break;
-        case KeyAction::CycleRegPage:
-            cycle_reg_page();
-            break;
-        case KeyAction::CycleToolPage:
-            cycle_tool_page();
-            break;
-        case KeyAction::ToggleExplain:
-            toggle_explain();
-            break;
-        case KeyAction::InspectAddress:
-            open_modal(ModalType::InspectAddress);
-            break;
-        case KeyAction::Settings:
-            open_modal(ModalType::Settings);
-            break;
-        default:
-            set_status_override(std::format("Use {} to {}",
-                                            Keybindings::get(guidance.next_action).key_display,
-                                            guidance.next_hint));
-            render(true);
-            break;
-    }
 }
 
 void Tui::execute_header_action(HeaderHitResult hit) {
@@ -4526,9 +4426,6 @@ void Tui::execute_footer_action(TuiFooterAction action) {
         case TuiFooterAction::Quit:
             machine_.request_exit();
             break;
-        case TuiFooterAction::ToggleStudentGuide:
-            toggle_student_guide();
-            break;
         case TuiFooterAction::OpenSettings:
             open_modal(ModalType::Settings);
             break;
@@ -4573,6 +4470,133 @@ void Tui::execute_footer_action(TuiFooterAction action) {
     }
 }
 
+void Tui::execute_key_action(KeyAction action) {
+    switch (action) {
+        case KeyAction::Step:
+            execute_footer_action(TuiFooterAction::Step);
+            break;
+        case KeyAction::RunPause:
+            execute_footer_action(TuiFooterAction::RunPause);
+            break;
+        case KeyAction::Reset:
+            execute_footer_action(TuiFooterAction::Reboot);
+            break;
+        case KeyAction::SetBreakpoint:
+            execute_footer_action(TuiFooterAction::SetBreakpoint);
+            break;
+        case KeyAction::SetWatchpoint:
+            execute_footer_action(TuiFooterAction::SetWatchpoint);
+            break;
+        case KeyAction::ManageBreakpoints:
+            execute_footer_action(TuiFooterAction::ManageBreakpoints);
+            break;
+        case KeyAction::TogglePcBreakpoint:
+            execute_footer_action(TuiFooterAction::TogglePcBreakpoint);
+            break;
+        case KeyAction::InspectAddress:
+            open_modal(ModalType::InspectAddress);
+            break;
+        case KeyAction::SetSpeed:
+            execute_footer_action(TuiFooterAction::SetSpeed);
+            break;
+        case KeyAction::LoadBinary:
+            execute_footer_action(TuiFooterAction::LoadBinary);
+            break;
+        case KeyAction::Settings:
+            execute_footer_action(TuiFooterAction::OpenSettings);
+            break;
+        case KeyAction::Help:
+            execute_footer_action(TuiFooterAction::ToggleHelp);
+            break;
+        case KeyAction::Quit:
+            execute_footer_action(TuiFooterAction::Quit);
+            break;
+        case KeyAction::FocusNextPane:
+            execute_footer_action(TuiFooterAction::FocusNextPane);
+            break;
+        case KeyAction::FocusPrevPane:
+            execute_footer_action(TuiFooterAction::FocusPrevPane);
+            break;
+        case KeyAction::CycleRegPage:
+            execute_footer_action(TuiFooterAction::CycleRegs);
+            break;
+        case KeyAction::CycleToolPage:
+            execute_footer_action(TuiFooterAction::CycleTools);
+            break;
+        case KeyAction::ToggleExplain:
+            toggle_explain();
+            break;
+        case KeyAction::ExportInspection:
+            export_inspection_report();
+            break;
+        case KeyAction::SwitchHart:
+            execute_footer_action(TuiFooterAction::SwitchHart);
+            break;
+        case KeyAction::OpenGlossary:
+            if (const auto guidance = mission_.guidance()) {
+                modal_.set_glossary_topic(guidance->glossary_topic);
+            } else if (inspector_pane_) {
+                modal_.set_glossary_topic(
+                    guidance_for_page(inspector_pane_->get_page(),
+                                      machine_.runtime_profile.is_cycle_mode())
+                        .glossary_topic);
+            }
+            open_modal(ModalType::Glossary);
+            break;
+        case KeyAction::ToggleTheme:
+            execute_footer_action(TuiFooterAction::ToggleTheme);
+            break;
+        case KeyAction::SelectPreset1:
+            apply_layout_preset(LayoutPreset::GeneralDebug);
+            break;
+        case KeyAction::SelectPreset2:
+            apply_layout_preset(LayoutPreset::Microarchitecture);
+            break;
+        case KeyAction::SelectPreset3:
+            apply_layout_preset(LayoutPreset::TraceExecution);
+            break;
+        case KeyAction::SelectPreset4:
+            apply_layout_preset(LayoutPreset::MemoryInterconnect);
+            break;
+        case KeyAction::OpenLayoutPresets:
+            open_modal(ModalType::LayoutPresets);
+            break;
+        case KeyAction::ToggleExecutionMode:
+            execute_footer_action(TuiFooterAction::ToggleExecutionMode);
+            break;
+        case KeyAction::OpenToolPicker:
+            execute_footer_action(TuiFooterAction::OpenToolPicker);
+            break;
+        case KeyAction::MoveColumnLeft:
+            execute_footer_action(TuiFooterAction::MoveColumnLeft);
+            break;
+        case KeyAction::MoveColumnRight:
+            execute_footer_action(TuiFooterAction::MoveColumnRight);
+            break;
+        case KeyAction::AddColumn:
+            execute_footer_action(TuiFooterAction::AddColumn);
+            break;
+        case KeyAction::CloseColumn:
+            execute_footer_action(TuiFooterAction::CloseColumn);
+            break;
+        case KeyAction::DumpMemory:
+            execute_footer_action(TuiFooterAction::InspectMem);
+            break;
+        case KeyAction::OpenLogModal:
+            open_modal(ModalType::LogViewer);
+            break;
+        case KeyAction::CheckMissionObjective:
+            if (mission_.guidance()) open_modal(ModalType::MissionObjective);
+            break;
+        case KeyAction::RevealMissionWhy:
+            if (mission_.guidance()) open_modal(ModalType::MissionObjective);
+            break;
+        case KeyAction::AdvanceMissionStep:
+            if (mission_.guidance()) open_modal(ModalType::MissionObjective);
+            break;
+    }
+}
+
 void Tui::select_next_hart() {
     if (machine_.num_harts() > 1) {
         selected_hart_ = (selected_hart_ + 1) % machine_.num_harts();
@@ -4586,59 +4610,18 @@ void Tui::select_next_hart() {
 }
 
 auto Tui::handle_alt_key(char key, uint8_t byte) -> bool {
+    if (const auto action = Keybindings::match_alt(key)) {
+        execute_key_action(*action);
+        return true;
+    }
     switch (key) {
-        case '1':
-            apply_layout_preset(LayoutPreset::GeneralDebug);
-            return true;
-        case '2':
-            apply_layout_preset(LayoutPreset::Microarchitecture);
-            return true;
-        case '3':
-            apply_layout_preset(LayoutPreset::TraceExecution);
-            return true;
-        case '4':
-            apply_layout_preset(LayoutPreset::MemoryInterconnect);
-            return true;
-        case '<':
-            move_focused_column_left();
-            return true;
-        case '>':
-            move_focused_column_right();
-            return true;
-        case 'n':
-        case 'N':
-        case 'a':
-        case 'A':
-            add_workbench_column();
-            return true;
-        case 'x':
-        case 'X':
-            close_focused_column();
-            return true;
-        case 'e':
-        case 'E':
-            toggle_explain();
-            return true;
-        case 'o':
-        case 'O':
-            open_modal(ModalType::LoadBinary);
-            return true;
-        case 't':
-        case 'T':
-            cycle_theme_style();
-            render(true);
-            return true;
-        case 'u':
-        case 'U':
-            scroll(5);
-            return true;
         case 'w':
         case 'W':
             scroll_inspector(-2);
             return true;
-        case 's':
-        case 'S':
-            open_modal(ModalType::Settings);
+        case 'u':
+        case 'U':
+            scroll(5);
             return true;
         case 'z':
         case 'Z':
@@ -4874,7 +4857,10 @@ auto Tui::handle_arrow_key_sequence() -> bool {
         if (is_modal_active()) {
             return handle_modal_keyboard_input(0, simrv::tui::TuiKey::BackTab);
         }
-        return handle_navigation_keyboard_input(0, simrv::tui::TuiKey::BackTab);
+        // BackTab is registered as FocusPrevPane; pass it through the common action matcher so
+        // dispatch, help, and footer metadata all describe the same behavior.
+        handle_normal_keyboard_input(0, simrv::tui::TuiKey::BackTab);
+        return true;
     } else if (esc_buf_ == "\033OP" || esc_buf_ == "\033[11~" || esc_buf_ == "\033[1;2P" ||
                esc_buf_ == "\033[O1P" || esc_buf_ == "\033[[A") {
         return handle_navigation_keyboard_input(0, simrv::tui::TuiKey::F1);
@@ -5077,17 +5063,25 @@ auto Tui::consume_control_sequence(uint8_t first_byte) -> bool {
                                                            : (w_m.ws_col > 0 ? w_m.ws_col : 80);
                     int term_hm = (cached_term_height_ > 0) ? cached_term_height_
                                                             : (w_m.ws_row > 0 ? w_m.ws_row : 24);
+                    const auto clicked_modal = get_active_modal();
                     auto res = modal_.handle_click(x, y, term_wm, term_hm);
                     if (res == TuiModal::ModalClickResult::Closed) {
                         close_modal();
                     } else if (res == TuiModal::ModalClickResult::ReloadRequested) {
                         close_modal();
-                        auto draft = modal_.get_pending_platform_draft();
-                        auto next = machine_.configuration();
-                        next.platform_profile = draft.platform_profile == 0
-                                                    ? simrv::core::PlatformProfile::Pcie
-                                                    : simrv::core::PlatformProfile::Mmio;
-                        (void)machine_.stage_reconfiguration(std::move(next));
+                        if (clicked_modal == ModalType::ConfigurationChangeConfirm) {
+                            auto staged = modal_.apply_pending_reconfiguration();
+                            if (!staged)
+                                modal_.open_notice("CONFIGURATION RELOAD FAILED", staged.error(),
+                                                   true);
+                        } else {
+                            auto draft = modal_.get_pending_platform_draft();
+                            auto next = machine_.configuration();
+                            next.platform_profile = draft.platform_profile == 0
+                                                        ? simrv::core::PlatformProfile::Pcie
+                                                        : simrv::core::PlatformProfile::Mmio;
+                            (void)machine_.stage_reconfiguration(std::move(next));
+                        }
                     } else if (res == TuiModal::ModalClickResult::DiscardRequested) {
                         close_modal();
                     } else if (res == TuiModal::ModalClickResult::Submit) {

@@ -9,6 +9,7 @@
 namespace simrv::tui {
 
 enum class TuiKey : uint8_t {
+    None = 0,
     CtrlA = 1,
     CtrlB = 2,
     CtrlC = 3,
