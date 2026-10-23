@@ -98,6 +98,7 @@ install(
   DESTINATION ${CMAKE_INSTALL_DOCDIR}/examples/isa
   COMPONENT Runtime
   PATTERN ".gitignore" EXCLUDE
+  PATTERN "build-*" EXCLUDE
   PATTERN "*.o" EXCLUDE)
 
 install(FILES docs/man/simrv.1 DESTINATION ${CMAKE_INSTALL_MANDIR}/man1
