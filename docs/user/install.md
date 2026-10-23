@@ -32,7 +32,7 @@ archive at the same prefix. Use a native package when managed upgrades and remov
 
 ## Fedora and RPM systems
 
-The RPM bundle contains a standard repository index and three packages. For a normal simulator
+The RPM bundle contains a standard repository index and four packages. For a normal simulator
 installation, install only the runtime package:
 
 ```bash
@@ -41,9 +41,16 @@ sudo dnf install ./simrv-rpm/simrv-[0-9]*.rpm
 simrv --version
 ```
 
-Install `simrv-tools-*.rpm` for model and parity utilities, or `simrv-benchmark-*.rpm` for the
-benchmark driver. Upgrade by installing the corresponding packages from a newer bundle. Remove
-them with `sudo dnf remove simrv simrv-tools simrv-benchmark`.
+Install `simrv-devel-*.rpm` to develop C++ applications against SimRV, `simrv-tools-*.rpm` for
+model and parity utilities, or `simrv-benchmark-*.rpm` for the benchmark driver. Upgrade by
+installing the corresponding packages from a newer bundle. Remove them with
+`sudo dnf remove simrv simrv-devel simrv-tools simrv-benchmark`.
+
+To install the runtime and SDK together from the downloaded bundle:
+
+```bash
+sudo dnf install ./simrv-rpm/simrv-[0-9]*.rpm ./simrv-rpm/simrv-devel-[0-9]*.rpm
+```
 
 ## Debian and Ubuntu
 
@@ -56,9 +63,39 @@ sudo apt install ./simrv-deb/simrv_*_amd64.deb
 simrv --version
 ```
 
-The optional tools and benchmark packages depend on `simrv`. Install their `.deb` files with the
-same command when needed. Upgrade from a newer bundle or remove the packages with
-`sudo apt remove simrv simrv-tools simrv-benchmark`.
+The optional `simrv-devel` package provides the C++ SDK and depends on the matching `simrv`
+version. The tools and benchmark packages also depend on `simrv`. Install the needed `.deb` files
+with the same command. Upgrade from a newer bundle or remove packages with
+`sudo apt remove simrv simrv-devel simrv-tools simrv-benchmark`.
+
+To install the runtime and SDK together from the downloaded bundle:
+
+```bash
+sudo apt install ./simrv-deb/simrv_*_amd64.deb ./simrv-deb/simrv-devel_*_amd64.deb
+```
+
+## C++ development package
+
+The native `simrv-devel` package contains SimRV's public C++ headers, the static runtime library,
+and the CMake package that exports `SimRV::runtime`. It is optional and is not part of the portable
+TGZ. Native SDK packages are qualified on Debian sid and Fedora 44; the SDK expects a C++23-capable
+compiler with a standard library ABI compatible with the host package. Source installs also
+provide the CMake package and do not require a native development package.
+
+Link the exported target from a CMake project:
+
+```cmake
+find_package(SimRV 3.0 CONFIG REQUIRED)
+target_link_libraries(my_app PRIVATE SimRV::runtime)
+```
+
+The target supplies the C++23 compile requirement and required system link dependencies. A
+consumer can then include public headers such as `simrv/core/MachineConfig.hpp`.
+
+The native package puts the CMake config in the system search path. A full source install also
+installs the SDK under its chosen prefix; for the default `/usr/local/simrv` source prefix, pass
+`-DCMAKE_PREFIX_PATH=/usr/local/simrv` when configuring the consumer. The runtime-only TGZ has no
+headers, library, or CMake package and cannot serve as an SDK.
 
 ## Supported Linux distributions
 
@@ -83,6 +120,7 @@ distribution is outside this matrix or when package-manager integration is unava
 | Package | Included content | Compatibility notes |
 | --- | --- | --- |
 | `simrv` | Simulator, CPU model configs, user docs, example assembly/source, and classroom mission files | x86-64 Linux host; RV64 guests and RV32 guest compatibility |
+| `simrv-devel` | Public C++ headers, static runtime library, and `SimRV::runtime` CMake package | Optional native SDK; C++23 compiler and host-compatible C++ standard library |
 | `simrv-tools` | CPU model wizard, tuning and RTL parity utilities, and their Python support files | Requires Python 3; RTL parity also needs the selected external RTL/toolchain environment |
 | `simrv-benchmark` | Benchmark driver and experiment metadata helper | Requires Python 3 and separately prepared benchmark workloads |
 
@@ -90,7 +128,22 @@ Packages do not include a RISC-V cross compiler, generated guest ELF files, Linu
 external test suites. The example Makefiles build into `/tmp` by default; install a RISC-V ELF
 toolchain to build them. The sample mission and its source are installed under
 `/usr/share/doc/SimRV/examples/isa`. Copy that tree to a writable directory before building an
-installed example.
+installed example. For example, with a RISC-V GCC toolchain whose executable is named
+`riscv64-unknown-elf-gcc`:
+
+```bash
+example_dir="$(mktemp -d)"
+cp -a /usr/share/doc/SimRV/examples/isa "$example_dir/"
+cd "$example_dir/isa"
+make XLEN=64 RISCV_PREFIX=riscv64-unknown-elf-
+simrv --tui --baremetal \
+  -m /tmp/simrv-isa-rv64/control-flow-calls.elf \
+  --mission lessons/control-flow-calls.mission
+```
+
+To use another cross toolchain, set `RISCV_PREFIX` to its compiler prefix and ensure it targets
+the selected XLEN and ABI. The generated ELF stays in `/tmp`; the mission path is relative to the
+copied source tree. The side-by-side mission layout needs a terminal at least 144 columns wide.
 
 ## Build from source
 

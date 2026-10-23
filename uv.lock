@@ -1967,8 +1967,6 @@ dev = [
 ]
 docs = [
     { name = "mike", marker = "python_full_version >= '3.11'" },
-    { name = "mkdocs" },
-    { name = "mkdocs-material" },
     { name = "pymdown-extensions" },
     { name = "zensical", marker = "python_full_version >= '3.11'" },
 ]
@@ -1989,8 +1987,6 @@ dev = [
 ]
 docs = [
     { name = "mike", marker = "python_full_version >= '3.11'", git = "https://github.com/squidfunk/mike.git" },
-    { name = "mkdocs", specifier = ">=1.6,<2" },
-    { name = "mkdocs-material", specifier = ">=9.7,<10" },
     { name = "pymdown-extensions", specifier = ">=11,<12" },
     { name = "zensical", marker = "python_full_version >= '3.11'", specifier = "==0.0.68" },
 ]

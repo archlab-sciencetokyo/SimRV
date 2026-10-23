@@ -133,18 +133,37 @@ jobs:
         run: |
           set -euo pipefail
           mapfile -t rpms < <(find packages -maxdepth 1 -name '*.rpm' -type f | sort)
-          test "${#rpms[@]}" -eq 3
+          test "${#rpms[@]}" -eq 4
           for package in "${rpms[@]}"; do rpm -qpl "$package" >/dev/null; done
           runtime_rpm="$(find packages -maxdepth 1 -name 'simrv-[0-9]*.rpm' -type f)"
+          development_rpm="$(find packages -maxdepth 1 -name 'simrv-devel-[0-9]*.rpm' -type f)"
           rpm -qpl "$runtime_rpm" > packages/runtime-rpm-contents.txt
+          rpm -qpl "$development_rpm" > packages/development-rpm-contents.txt
           grep -q '/usr/bin/simrv$' packages/runtime-rpm-contents.txt
+          grep -q '/include/simrv/core/MachineConfig.hpp$' packages/development-rpm-contents.txt
+          grep -q '/libsimrv-runtime.a$' packages/development-rpm-contents.txt
+          grep -q '/cmake/SimRV/SimRVConfig.cmake$' packages/development-rpm-contents.txt
+          if grep -Eq '/include/simrv/|/libsimrv-runtime\.a$|/cmake/SimRV/' packages/runtime-rpm-contents.txt; then
+            echo "Runtime RPM unexpectedly contains SDK files" >&2
+            exit 1
+          fi
           if grep -q 'simrv-benchmark' packages/runtime-rpm-contents.txt; then
             echo "Runtime RPM unexpectedly contains benchmark tooling" >&2
             exit 1
           fi
+          rpm -qp --requires "$development_rpm" | grep -Fx "simrv = $(rpm -qp --qf '%{VERSION}-%{RELEASE}' "$runtime_rpm")"
           rpmlint --rpmlintrc packaging/simrv.rpmlintrc packages/*.rpm
           dnf install -y packages/*.rpm
           simrv --version | grep -F "${{ steps.names.outputs.simrv_version }}"
+          cmake -S tests/package-consumer -B packages/consumer-build
+          cmake --build packages/consumer-build
+          packages/consumer-build/simrv-package-consumer
+          dnf remove -y simrv-devel
+          rpm -q simrv >/dev/null
+          if rpm -q simrv-devel >/dev/null 2>&1; then
+            echo "simrv-devel remained installed after removal" >&2
+            exit 1
+          fi
 
       - name: Upload workflow artifacts
         if: matrix.arch == 'rv64'
@@ -256,13 +275,24 @@ jobs:
           mkdir -p packages
           cpack --config build/rv64-release/CPackConfig.cmake -G DEB -B packages
           mapfile -t debs < <(find packages -maxdepth 1 -name '*.deb' -type f | sort)
-          test "${#debs[@]}" -eq 3
+          test "${#debs[@]}" -eq 4
           for package in "${debs[@]}"; do dpkg-deb --contents "$package" >/dev/null; done
           runtime_deb="$(find packages -maxdepth 1 -name 'simrv_[0-9]*.deb' -type f)"
+          development_deb="$(find packages -maxdepth 1 -name 'simrv-devel_[0-9]*.deb' -type f)"
           dpkg-deb --contents "$runtime_deb" > packages/runtime-deb-contents.txt
+          dpkg-deb --contents "$development_deb" > packages/development-deb-contents.txt
           grep -q '/usr/bin/simrv$' packages/runtime-deb-contents.txt
+          grep -q '/include/simrv/core/MachineConfig.hpp$' packages/development-deb-contents.txt
+          grep -q '/libsimrv-runtime.a$' packages/development-deb-contents.txt
+          grep -q '/cmake/SimRV/SimRVConfig.cmake$' packages/development-deb-contents.txt
+          if grep -Eq '/include/simrv/|/libsimrv-runtime\.a$|/cmake/SimRV/' packages/runtime-deb-contents.txt; then
+            echo "Runtime DEB unexpectedly contains SDK files" >&2
+            exit 1
+          fi
           dpkg-deb --field "$runtime_deb" Depends > packages/runtime-deb-depends.txt
           grep -q 'libc6' packages/runtime-deb-depends.txt
+          runtime_version="$(dpkg-deb --field "$runtime_deb" Version)"
+          dpkg-deb --field "$development_deb" Depends | grep -F "simrv (= ${runtime_version})"
           if grep -q 'simrv-benchmark' packages/runtime-deb-contents.txt; then
             echo "Runtime DEB unexpectedly contains benchmark tooling" >&2
             exit 1
@@ -272,6 +302,17 @@ jobs:
             packages/*.deb
           apt-get install -y ./packages/*.deb
           simrv --version | grep -F "${{ steps.names.outputs.simrv_version }}"
+          cmake -S tests/package-consumer -B packages/consumer-build
+          cmake --build packages/consumer-build
+          packages/consumer-build/simrv-package-consumer
+          apt-get remove -y simrv-devel
+          dpkg-query -W -f='${Status}' simrv | grep -Fx 'install ok installed'
+          development_status="$(dpkg-query -W -f='${Status}' simrv-devel 2>/dev/null || true)"
+          if [[ "${development_status}" == 'install ok installed' ]]; then
+            echo "simrv-devel remained installed after removal" >&2
+            exit 1
+          fi
+          test ! -e /usr/include/simrv/core/MachineConfig.hpp
       - uses: actions/upload-artifact@v7
         with:
           name: ${{ steps.names.outputs.asset_base }}-deb
@@ -366,13 +407,14 @@ jobs:
           mkdir -p dist rpm-packages deb-packages
           find staging -type f -name '*.rpm' -exec cp {} rpm-packages/ \;
           find staging -type f -name '*.deb' -exec cp {} deb-packages/ \;
-          test "$(find rpm-packages -type f -name '*.rpm' | wc -l)" -eq 3
-          test "$(find deb-packages -type f -name '*.deb' | wc -l)" -eq 3
+          test "$(find rpm-packages -type f -name '*.rpm' | wc -l)" -eq 4
+          test "$(find deb-packages -type f -name '*.deb' | wc -l)" -eq 4
           createrepo_c rpm-packages
           test -f rpm-packages/repodata/repomd.xml
           grep -q 'type="primary"' rpm-packages/repodata/repomd.xml
           (cd deb-packages && dpkg-scanpackages . /dev/null > Packages)
-          test "$(grep -c '^Package: ' deb-packages/Packages)" -eq 3
+          test "$(grep -c '^Package: ' deb-packages/Packages)" -eq 4
+          grep -q '^Package: simrv-devel$' deb-packages/Packages
           grep -q '^Filename: \./simrv' deb-packages/Packages
           grep -q '^Depends: simrv ' deb-packages/Packages
           tar --sort=name --mtime=@0 --owner=0 --group=0 --numeric-owner \
