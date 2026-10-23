@@ -92,6 +92,7 @@ install(
   DESTINATION ${CMAKE_INSTALL_DOCDIR}/examples/hello
   COMPONENT Runtime
   PATTERN ".gitignore" EXCLUDE
+  PATTERN "build-*" EXCLUDE
   PATTERN "*.o" EXCLUDE)
 install(
   DIRECTORY examples/isa/
