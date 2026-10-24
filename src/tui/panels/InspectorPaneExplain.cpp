@@ -89,330 +89,83 @@ auto render_visual_bitfields(InstFormat fmt, uint32_t ir_org, int width)
     -> std::vector<std::string> {
     std::vector<std::string> rows;
 
-    // --- Narrow mode: aligned two-column text list (no box drawing) ---
-    if (width < 56) {
-        uint32_t op = ir_org & 0x7F;
-        uint32_t rd = (ir_org >> 7) & 0x1F;
-        uint32_t f3 = (ir_org >> 12) & 0x07;
-        uint32_t rs1 = (ir_org >> 15) & 0x1F;
-        uint32_t rs2 = (ir_org >> 20) & 0x1F;
-        uint32_t f7 = (ir_org >> 25) & 0x7F;
-        uint32_t imm12 = (ir_org >> 20) & 0xFFF;
-        uint32_t imm20 = (ir_org >> 12) & 0xFFFFF;
-
-        rows.push_back(format_to_width(
-            std::format(" {}Opcode [6:0]  :{} {:07b} (0x{:02X})", kThemeText, "\033[0m", op, op),
-            width));
-        if (has_rd(fmt))
-            rows.push_back(format_to_width(
-                std::format(" {}rd     [11:7] :{} {:05b} (x{})", kThemeText, "\033[0m", rd, rd),
-                width));
-        if (has_funct3(fmt))
-            rows.push_back(format_to_width(
-                std::format(" {}funct3 [14:12]:{} {:03b} (0x{:X})", kThemeText, "\033[0m", f3, f3),
-                width));
-        if (has_rs1(fmt))
-            rows.push_back(format_to_width(
-                std::format(" {}rs1    [19:15]:{} {:05b} (x{})", kThemeText, "\033[0m", rs1, rs1),
-                width));
-        if (has_rs2(fmt))
-            rows.push_back(format_to_width(
-                std::format(" {}rs2    [24:20]:{} {:05b} (x{})", kThemeText, "\033[0m", rs2, rs2),
-                width));
-        if (has_funct7(fmt))
-            rows.push_back(format_to_width(std::format(" {}funct7 [31:25]:{} {:07b} (0x{:02X})",
-                                                       kThemeText, "\033[0m", f7, f7),
-                                           width));
-        if (fmt == InstFormat::I)
-            rows.push_back(format_to_width(
-                std::format(" {}imm    [11:0] :{} {:012b} ({})", kThemeText, "\033[0m", imm12,
-                            static_cast<int32_t>((imm12 ^ 0x800) - 0x800)),
-                width));
-        else if (fmt == InstFormat::U || fmt == InstFormat::J)
-            rows.push_back(format_to_width(std::format(" {}imm    [31:12]:{} {:020b} (0x{:05X})",
-                                                       kThemeText, "\033[0m", imm20, imm20),
-                                           width));
-        return rows;
-    }
-
-    // --- Box mode: compute-driven column widths ---
-    // Each column: label text, bit-range text, bit count, extracted value
-    struct Col {
-        std::string label;
-        std::string bits;
-        int bit_count;
-        uint32_t value;
-        int cell_w;  // computed inner cell width (excl. borders)
+    // One unboxed row per encoded field keeps the bit layout readable at every pane width.
+    auto add_field = [&](std::string_view label, unsigned high, unsigned low) {
+        const unsigned bit_count = high - low + 1;
+        const uint32_t mask = (uint32_t{1} << bit_count) - 1;
+        const uint32_t value = (ir_org >> low) & mask;
+        rows.push_back(
+            format_to_width(std::format(" {}{:<16} [{:02}:{:02}]  {}{:0{}b}\033[0m", kThemeText,
+                                        label, high, low, kThemeVal, value, bit_count),
+                            width));
     };
-
-    auto make_cols = [](std::vector<Col> cols) -> std::vector<Col> {
-        for (auto& c : cols) {
-            int min_w = std::max(
-                {static_cast<int>(c.label.size()), static_cast<int>(c.bits.size()), c.bit_count});
-            c.cell_w = min_w + 2;
-        }
-        return cols;
+    auto add_opcode = [&] { add_field("opcode", 6, 0); };
+    auto add_rd = [&] {
+        if (has_rd(fmt)) add_field("rd", 11, 7);
     };
-
-    // Build one content row (label / bits / value)
-    auto content_row = [](const std::vector<Col>& cols, int row_kind,
-                          const std::string& theme) -> std::string {
-        std::string row = std::format(" {}", theme);
-        for (auto const& c : cols) {
-            row += std::format("\xe2\x94\x82\033[0m", theme);  // | (themed) + reset for cell text
-            std::string cell;
-            switch (row_kind) {
-                case 0:
-                    cell = c.label;
-                    break;
-                case 1:
-                    cell = c.bits;
-                    break;
-                default:
-                    cell = std::format("{:0{}b}", c.value, c.bit_count);
-                    break;
-            }
-            int disp = static_cast<int>(cell.size());
-            int pad = std::max(0, c.cell_w - disp);
-            int lpad = pad / 2;
-            int rpad = pad - lpad;
-            row += std::string(static_cast<std::size_t>(lpad), ' ');
-            row += cell;
-            row += std::string(static_cast<std::size_t>(rpad), ' ');
-            row += theme;  // re-apply theme before the next | separator
-        }
-        row += std::format("\xe2\x94\x82\033[0m", theme);
-        return row;
+    auto add_funct3 = [&] {
+        if (has_funct3(fmt)) add_field("funct3", 14, 12);
     };
-
-    // Reusable box builder
-    auto build_box = [&](std::vector<Col> raw_cols) {
-        auto cols = make_cols(std::move(raw_cols));
-        // top border
-        {
-            std::string row = std::format(" {}\xe2\x94\x8c", kThemeBorder);
-            for (std::size_t i = 0; i < cols.size(); ++i) {
-                for (int j = 0; j < cols.at(i).cell_w; ++j) row += "\xe2\x94\x80";
-                row += (i + 1 < cols.size()) ? "\xe2\x94\xac" : "\xe2\x94\x90";
-            }
-            row += "\033[0m";
-            rows.push_back(format_to_width(row, width));
-        }
-        rows.push_back(format_to_width(content_row(cols, 0, kThemeBorder), width));
-        rows.push_back(format_to_width(content_row(cols, 1, kThemeBorder), width));
-        // mid border
-        {
-            std::string row = std::format(" {}\xe2\x94\x9c", kThemeBorder);
-            for (std::size_t i = 0; i < cols.size(); ++i) {
-                for (int j = 0; j < cols.at(i).cell_w; ++j) row += "\xe2\x94\x80";
-                row += (i + 1 < cols.size()) ? "\xe2\x94\xbc" : "\xe2\x94\xa4";
-            }
-            row += "\033[0m";
-            rows.push_back(format_to_width(row, width));
-        }
-        rows.push_back(format_to_width(content_row(cols, 2, kThemeBorder), width));
-        // bottom border
-        {
-            std::string row = std::format(" {}\xe2\x94\x94", kThemeBorder);
-            for (std::size_t i = 0; i < cols.size(); ++i) {
-                for (int j = 0; j < cols.at(i).cell_w; ++j) row += "\xe2\x94\x80";
-                row += (i + 1 < cols.size()) ? "\xe2\x94\xb4" : "\xe2\x94\x98";
-            }
-            row += "\033[0m";
-            rows.push_back(format_to_width(row, width));
-        }
+    auto add_rs1 = [&] {
+        if (has_rs1(fmt)) add_field("rs1", 19, 15);
+    };
+    auto add_rs2 = [&] {
+        if (has_rs2(fmt)) add_field("rs2", 24, 20);
+    };
+    auto add_funct7 = [&] {
+        if (has_funct7(fmt)) add_field("funct7", 31, 25);
     };
 
     switch (fmt) {
         case InstFormat::R:
-            build_box({
-                {.label = "funct7",
-                 .bits = "31..25",
-                 .bit_count = 7,
-                 .value = (ir_org >> 25) & 0x7F,
-                 .cell_w = 0},
-                {.label = "rs2",
-                 .bits = "24..20",
-                 .bit_count = 5,
-                 .value = (ir_org >> 20) & 0x1F,
-                 .cell_w = 0},
-                {.label = "rs1",
-                 .bits = "19..15",
-                 .bit_count = 5,
-                 .value = (ir_org >> 15) & 0x1F,
-                 .cell_w = 0},
-                {.label = "f3",
-                 .bits = "14..12",
-                 .bit_count = 3,
-                 .value = (ir_org >> 12) & 0x07,
-                 .cell_w = 0},
-                {.label = "rd",
-                 .bits = "11..7",
-                 .bit_count = 5,
-                 .value = (ir_org >> 7) & 0x1F,
-                 .cell_w = 0},
-                {.label = "opcode",
-                 .bits = "6..0",
-                 .bit_count = 7,
-                 .value = ir_org & 0x7F,
-                 .cell_w = 0},
-            });
+            add_funct7();
+            add_rs2();
+            add_rs1();
+            add_funct3();
+            add_rd();
+            add_opcode();
             break;
         case InstFormat::I:
-            build_box({
-                {.label = "imm[11:0]",
-                 .bits = "31..20",
-                 .bit_count = 12,
-                 .value = (ir_org >> 20) & 0xFFF,
-                 .cell_w = 0},
-                {.label = "rs1",
-                 .bits = "19..15",
-                 .bit_count = 5,
-                 .value = (ir_org >> 15) & 0x1F,
-                 .cell_w = 0},
-                {.label = "f3",
-                 .bits = "14..12",
-                 .bit_count = 3,
-                 .value = (ir_org >> 12) & 0x07,
-                 .cell_w = 0},
-                {.label = "rd",
-                 .bits = "11..7",
-                 .bit_count = 5,
-                 .value = (ir_org >> 7) & 0x1F,
-                 .cell_w = 0},
-                {.label = "opcode",
-                 .bits = "6..0",
-                 .bit_count = 7,
-                 .value = ir_org & 0x7F,
-                 .cell_w = 0},
-            });
+            add_field("imm[11:0]", 31, 20);
+            add_rs1();
+            add_funct3();
+            add_rd();
+            add_opcode();
             break;
         case InstFormat::S:
-            build_box({
-                {.label = "imm[11:5]",
-                 .bits = "31..25",
-                 .bit_count = 7,
-                 .value = (ir_org >> 25) & 0x7F,
-                 .cell_w = 0},
-                {.label = "rs2",
-                 .bits = "24..20",
-                 .bit_count = 5,
-                 .value = (ir_org >> 20) & 0x1F,
-                 .cell_w = 0},
-                {.label = "rs1",
-                 .bits = "19..15",
-                 .bit_count = 5,
-                 .value = (ir_org >> 15) & 0x1F,
-                 .cell_w = 0},
-                {.label = "f3",
-                 .bits = "14..12",
-                 .bit_count = 3,
-                 .value = (ir_org >> 12) & 0x07,
-                 .cell_w = 0},
-                {.label = "imm[4:0]",
-                 .bits = "11..7",
-                 .bit_count = 5,
-                 .value = (ir_org >> 7) & 0x1F,
-                 .cell_w = 0},
-                {.label = "opcode",
-                 .bits = "6..0",
-                 .bit_count = 7,
-                 .value = ir_org & 0x7F,
-                 .cell_w = 0},
-            });
+            add_field("imm[11:5]", 31, 25);
+            add_rs2();
+            add_rs1();
+            add_funct3();
+            add_field("imm[4:0]", 11, 7);
+            add_opcode();
             break;
         case InstFormat::B:
-            build_box({
-                {.label = "imm[12:5]",
-                 .bits = "31..25",
-                 .bit_count = 7,
-                 .value = (ir_org >> 25) & 0x7F,
-                 .cell_w = 0},
-                {.label = "rs2",
-                 .bits = "24..20",
-                 .bit_count = 5,
-                 .value = (ir_org >> 20) & 0x1F,
-                 .cell_w = 0},
-                {.label = "rs1",
-                 .bits = "19..15",
-                 .bit_count = 5,
-                 .value = (ir_org >> 15) & 0x1F,
-                 .cell_w = 0},
-                {.label = "f3",
-                 .bits = "14..12",
-                 .bit_count = 3,
-                 .value = (ir_org >> 12) & 0x07,
-                 .cell_w = 0},
-                {.label = "imm[4:1|11]",
-                 .bits = "11..7",
-                 .bit_count = 5,
-                 .value = (ir_org >> 7) & 0x1F,
-                 .cell_w = 0},
-                {.label = "opcode",
-                 .bits = "6..0",
-                 .bit_count = 7,
-                 .value = ir_org & 0x7F,
-                 .cell_w = 0},
-            });
+            add_field("imm[12|10:5]", 31, 25);
+            add_rs2();
+            add_rs1();
+            add_funct3();
+            add_field("imm[4:1|11]", 11, 7);
+            add_opcode();
             break;
         case InstFormat::U:
+            add_field("imm[31:12]", 31, 12);
+            add_rd();
+            add_opcode();
+            break;
         case InstFormat::J:
-            build_box({
-                {.label = "imm[31:12]",
-                 .bits = "31..12",
-                 .bit_count = 20,
-                 .value = (ir_org >> 12) & 0xFFFFF,
-                 .cell_w = 0},
-                {.label = "rd",
-                 .bits = "11..7",
-                 .bit_count = 5,
-                 .value = (ir_org >> 7) & 0x1F,
-                 .cell_w = 0},
-                {.label = "opcode",
-                 .bits = "6..0",
-                 .bit_count = 7,
-                 .value = ir_org & 0x7F,
-                 .cell_w = 0},
-            });
+            add_field("imm[20|10:1|11|19:12]", 31, 12);
+            add_rd();
+            add_opcode();
             break;
         case InstFormat::R4:
-            build_box({
-                {.label = "rs3",
-                 .bits = "31..27",
-                 .bit_count = 5,
-                 .value = (ir_org >> 27) & 0x1F,
-                 .cell_w = 0},
-                {.label = "fmt",
-                 .bits = "26..25",
-                 .bit_count = 2,
-                 .value = (ir_org >> 25) & 0x03,
-                 .cell_w = 0},
-                {.label = "rs2",
-                 .bits = "24..20",
-                 .bit_count = 5,
-                 .value = (ir_org >> 20) & 0x1F,
-                 .cell_w = 0},
-                {.label = "rs1",
-                 .bits = "19..15",
-                 .bit_count = 5,
-                 .value = (ir_org >> 15) & 0x1F,
-                 .cell_w = 0},
-                {.label = "f3",
-                 .bits = "14..12",
-                 .bit_count = 3,
-                 .value = (ir_org >> 12) & 0x07,
-                 .cell_w = 0},
-                {.label = "rd",
-                 .bits = "11..7",
-                 .bit_count = 5,
-                 .value = (ir_org >> 7) & 0x1F,
-                 .cell_w = 0},
-                {.label = "opcode",
-                 .bits = "6..0",
-                 .bit_count = 7,
-                 .value = ir_org & 0x7F,
-                 .cell_w = 0},
-            });
+            add_field("rs3", 31, 27);
+            add_field("fmt", 26, 25);
+            add_rs2();
+            add_rs1();
+            add_funct3();
+            add_rd();
+            add_opcode();
             break;
         default:
             rows.push_back(format_to_width(" (Unknown instruction format layout)", width));
@@ -973,7 +726,8 @@ auto InspectorPane::get_explain_rows(int width) -> std::vector<std::string> {
         uint64_t delay =
             tui_ ? tui_->step_delay_us_.load(std::memory_order_relaxed)
                  : (machine_.telemetry_sink() ? machine_.telemetry_sink()->step_delay_us() : 0);
-        if (delay >= 10000) {
+        if (delay >=
+            ((1'000'000U + Tui::kDetailedExecutionMaxHz - 1) / Tui::kDetailedExecutionMaxHz)) {
             show_disabled = false;
         }
     }

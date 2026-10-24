@@ -92,7 +92,6 @@ struct RuntimeOptions {
     RequestedExecutionMode execution_mode = RequestedExecutionMode::Fast;
     bool execution_mode_explicit = false;
     bool high_contrast = false;
-    bool class_mode = false;
     std::string mission;
     std::string pipeline_type = "5stage";
     bool disable_forwarding = false;

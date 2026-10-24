@@ -139,6 +139,17 @@ auto TileLinkBus::send_request(const TlChannelA& req) -> bool {
     return true;
 }
 
+auto TileLinkBus::contention_stats() const -> ContentionStats {
+    const auto current_cycle = cycle_.load(std::memory_order_relaxed);
+    const auto dma_config = machine_.dma_engine().config();
+    return ContentionStats{
+        .dma_active = machine_.dma_engine().is_transfer_active(current_cycle),
+        .dma_penalty_cycles = dma_config.memory_contention_penalty,
+        .delayed_requests = dma_delayed_requests_.load(std::memory_order_relaxed),
+        .added_latency_cycles = dma_added_latency_cycles_.load(std::memory_order_relaxed),
+    };
+}
+
 void TileLinkBus::advance_cycle_slow() {
     SmpLockGuard lock(bus_mutex_, is_smp_enabled());
     const auto current_cycle = cycle_.fetch_add(1, std::memory_order_relaxed) + 1;
@@ -290,8 +301,13 @@ void TileLinkBus::process_request(const TimedRequest& request) {
             : (data_port ? data_response_latency_ : response_latency_);
     response_latency += cache_service_latency - 1;
     const auto current_cycle = cycle_.load(std::memory_order_relaxed);
-    if (machine_.dma_engine().is_transfer_active(current_cycle)) {
-        response_latency += machine_.dma_engine().config().memory_contention_penalty;
+    const auto dma_config = machine_.dma_engine().config();
+    if (machine_.dma_engine().is_transfer_active(current_cycle) &&
+        dma_config.memory_contention_penalty != 0) {
+        response_latency += dma_config.memory_contention_penalty;
+        dma_delayed_requests_.fetch_add(1, std::memory_order_relaxed);
+        dma_added_latency_cycles_.fetch_add(dma_config.memory_contention_penalty,
+                                            std::memory_order_relaxed);
     }
     if (data_port) ++data_response_count_;
     for (uint8_t beat = 0; beat < beat_count; ++beat) {

@@ -24,6 +24,12 @@ if(NOT build_tree_build_result EQUAL 0)
     FATAL_ERROR
       "Build-tree package consumer build failed: ${build_tree_build_result}")
 endif()
+execute_process(
+  COMMAND "${consumer_root}/build-tree/simrv-package-consumer"
+  RESULT_VARIABLE build_tree_run_result)
+if(NOT build_tree_run_result EQUAL 0)
+  message(FATAL_ERROR "Build-tree package consumer failed: ${build_tree_run_result}")
+endif()
 
 execute_process(
   COMMAND "${CMAKE_COMMAND}" --install "${SIMRV_BINARY_DIR}" --prefix
@@ -122,4 +128,10 @@ execute_process(
 if(NOT build_result EQUAL 0)
   message(
     FATAL_ERROR "Installed-package consumer build failed: ${build_result}")
+endif()
+execute_process(
+  COMMAND "${consumer_root}/build/simrv-package-consumer"
+  RESULT_VARIABLE consumer_run_result)
+if(NOT consumer_run_result EQUAL 0)
+  message(FATAL_ERROR "Installed-package consumer failed: ${consumer_run_result}")
 endif()

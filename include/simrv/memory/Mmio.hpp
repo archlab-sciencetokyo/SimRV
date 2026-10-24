@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <cstdint>
 
+#include "simrv/core/PlatformMap.h"
 #include "simrv/xlen/ScalarTypes.hpp"
 
 namespace simrv::mmio {
@@ -45,30 +46,31 @@ inline constexpr simrv::xlen::Address kImsicSSize = static_cast<simrv::xlen::Add
 
 // PCIe ECAM hierarchy and MMIO 32-bit window
 inline constexpr simrv::xlen::Address kPcieEcamBaseAddress =
-    static_cast<simrv::xlen::Address>(0x30000000u);
+    static_cast<simrv::xlen::Address>(SIMRV_PLATFORM_PCIE_ECAM_BASE);
 inline constexpr simrv::xlen::Address kPcieEcamSize =
     static_cast<simrv::xlen::Address>(0x10000000u);
 inline constexpr simrv::xlen::Address kPcieMmioBaseAddress =
-    static_cast<simrv::xlen::Address>(0x40000000u);
+    static_cast<simrv::xlen::Address>(SIMRV_PLATFORM_PCIE_WINDOW_BASE);
 inline constexpr simrv::xlen::Address kPcieMmioSize =
-    static_cast<simrv::xlen::Address>(0x10000000u);
+    static_cast<simrv::xlen::Address>(SIMRV_PLATFORM_PCIE_WINDOW_SIZE);
 
 // Standard VirtIO-MMIO v2 base address range (0x10001000..0x10008000)
 inline constexpr simrv::xlen::Address kVirtioMmioBaseAddress =
-    static_cast<simrv::xlen::Address>(0x10001000u);
+    static_cast<simrv::xlen::Address>(SIMRV_PLATFORM_VIRTIO_BLOCK_BASE);
 inline constexpr simrv::xlen::Address kVirtioMmioSlotSize =
-    static_cast<simrv::xlen::Address>(0x1000u);
+    static_cast<simrv::xlen::Address>(SIMRV_PLATFORM_VIRTIO_SLOT_SIZE);
 
 // Standalone DMA Controller (0x10009000..0x1000A000)
 inline constexpr simrv::xlen::Address kDmaControllerBaseAddress =
-    static_cast<simrv::xlen::Address>(0x10009000u);
+    static_cast<simrv::xlen::Address>(SIMRV_PLATFORM_DMA_BASE);
 inline constexpr simrv::xlen::Address kDmaControllerSize =
-    static_cast<simrv::xlen::Address>(0x00001000u);
-inline constexpr uint32_t kDmaControllerIrq = 12;
+    static_cast<simrv::xlen::Address>(SIMRV_PLATFORM_DMA_SIZE);
+inline constexpr uint32_t kDmaControllerIrq = SIMRV_PLATFORM_DMA_IRQ;
 
 inline constexpr simrv::xlen::Address kUartBaseAddress =
-    static_cast<simrv::xlen::Address>(0x10000000u);
-inline constexpr simrv::xlen::Address kUartSize = static_cast<simrv::xlen::Address>(0x00000100u);
+    static_cast<simrv::xlen::Address>(SIMRV_PLATFORM_UART_BASE);
+inline constexpr simrv::xlen::Address kUartSize =
+    static_cast<simrv::xlen::Address>(SIMRV_PLATFORM_UART_SIZE);
 
 inline constexpr simrv::xlen::Word kUartLcrDlabMask = static_cast<simrv::xlen::Word>(0x80U);
 inline constexpr simrv::xlen::Word kUartLsrDataReady = static_cast<simrv::xlen::Word>(0x01U);

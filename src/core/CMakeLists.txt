@@ -44,9 +44,13 @@ target_include_directories(simrv-runtime PUBLIC
   $<BUILD_INTERFACE:${PROJECT_BINARY_DIR}/generated>
   $<INSTALL_INTERFACE:include>
 )
+target_compile_features(simrv-runtime PUBLIC cxx_std_23)
 set_target_properties(simrv-runtime PROPERTIES
   POSITION_INDEPENDENT_CODE ON
   EXPORT_NAME runtime
 )
 simrv_apply_options(simrv-runtime)
 set_property(TARGET simrv-runtime PROPERTY INTERFACE_LINK_LIBRARIES "")
+if(CMAKE_DL_LIBS)
+  target_link_libraries(simrv-runtime INTERFACE ${CMAKE_DL_LIBS})
+endif()

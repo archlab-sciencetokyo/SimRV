@@ -31,8 +31,6 @@ struct TuiExecutionSnapshot;
 namespace simrv::tui {
 
 class Tui;
-struct PageGuidance;
-class MissionProgress;
 
 /// Canonical ABI register names shared by all register pane sub-units.
 inline constexpr auto& kRegNames = simrv::isa::kGprPedagogicalNames;
@@ -87,10 +85,6 @@ class InspectorPane : public TuiWidget {
     void set_max_kips(uint64_t max_kips) { max_kips_ = max_kips; }
     void set_kips_history(const std::vector<uint64_t>& history) { kips_history_ = history; }
     void set_paused(bool paused) { paused_ = paused; }
-    void set_student_guide_enabled(bool enabled) { student_guide_enabled_ = enabled; }
-    void set_mission_progress(const MissionProgress* mission) { mission_ = mission; }
-    void set_learn_enabled(bool enabled) { set_student_guide_enabled(enabled); }
-    [[nodiscard]] auto current_student_guidance() const -> PageGuidance;
     void set_visible_rows(int rows) { visible_rows_ = rows; }
     [[nodiscard]] auto get_visible_content_rows() const -> int;
     void set_active_runtime(double secs) { active_runtime_ = secs; }
@@ -149,12 +143,10 @@ class InspectorPane : public TuiWidget {
 
    private:
     std::optional<TuiRegPage> previous_page_;
-    const MissionProgress* mission_ = nullptr;
     [[nodiscard]] auto render_tab_bar_tier1(int width) const -> std::string;
     [[nodiscard]] auto render_tab_bar_tier2(int width) const -> std::string;
     [[nodiscard]] auto render_trace_row(int logical_row, int width) -> std::string;
     [[nodiscard]] auto render_log_bottom_row(int row_idx, int num_rows, int width) -> std::string;
-    [[nodiscard]] auto render_guidance_row(int row_idx, int width) -> std::string;
     [[nodiscard]] auto active_cache_set_count() const -> int;
     [[nodiscard]] auto active_cache_way_count() const -> int;
 
@@ -170,7 +162,6 @@ class InspectorPane : public TuiWidget {
     [[nodiscard]] auto content_total_columns(int width) const -> int;
     [[nodiscard]] auto get_running_label_start_row() const -> int;
     [[nodiscard]] auto render_active_spinner(int logical_row, int width) -> std::string;
-    [[nodiscard]] auto render_live_overview_row(int logical_row, int width) -> std::string;
     [[nodiscard]] auto render_registers_single_column(const simrv::core::ArchState& st,
                                                       int logical_row, int width) -> std::string;
     [[nodiscard]] auto render_registers_double_column(const simrv::core::ArchState& st,
@@ -257,22 +248,12 @@ class InspectorPane : public TuiWidget {
     size_t selected_hart_ = 0;
     TuiRegPage page_ = TuiRegPage::GPR;
     bool paused_ = true;
-    bool student_guide_enabled_ = false;
 
     std::array<simrv::xlen::Register, 32> cached_gpr_{};
     std::array<uint64_t, 32> cached_fpr_{};
     std::array<simrv::core::VectorRegister, 32> cached_vec_{};
     simrv::pipeline::Scoreboard projected_scoreboard_{};
     std::array<std::array<std::string, 80>, 24> cached_page_rows_{};
-    struct LiveHartSnapshot {
-        simrv::xlen::Register pc = 0;
-        std::string symbol;
-        uint64_t cycles = 0;
-        uint64_t instructions = 0;
-        uint64_t timer_ticks = 0;
-        simrv::xlen::PrivilegeLevel privilege = simrv::xlen::PrivilegeLevel::Machine;
-    };
-    std::vector<LiveHartSnapshot> live_harts_;
     std::array<std::string, 80> cached_left_rows_{};
     int last_width_ = 0;
 

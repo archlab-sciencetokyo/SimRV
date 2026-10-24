@@ -15,6 +15,7 @@
 #include <utility>
 #include <vector>
 
+#include "simrv/core/PlatformMap.h"
 #include "simrv/xlen/ScalarTypes.hpp"
 
 namespace simrv::core {
@@ -228,7 +229,7 @@ struct SmpTopologyConfig {
 [[nodiscard]] inline auto soc_device_default(SoCDeviceKind kind) -> SoCDeviceConfig {
     switch (kind) {
         case SoCDeviceKind::Uart:
-            return {kind, "uart0", 0x10000000, 0x100, 10};
+            return {kind, "uart0", SIMRV_PLATFORM_UART_BASE, SIMRV_PLATFORM_UART_SIZE, 10};
         case SoCDeviceKind::Rtc:
             return {kind, "rtc0", 0x70000000, 0x1000, 11};
         case SoCDeviceKind::Power:
@@ -246,23 +247,32 @@ struct SmpTopologyConfig {
         case SoCDeviceKind::Clint:
             return {kind, "clint0", 0x60000000, 0xc0000, 0};
         case SoCDeviceKind::VirtioMmioBlock:
-            return {kind, "disk0", 0x10001000, 0x1000, 2};
+            return {kind, "disk0", SIMRV_PLATFORM_VIRTIO_BLOCK_BASE,
+                    SIMRV_PLATFORM_VIRTIO_SLOT_SIZE, 2};
         case SoCDeviceKind::VirtioMmioConsole:
-            return {kind, "console0", 0x10002000, 0x1000, 1};
+            return {kind, "console0", SIMRV_PLATFORM_VIRTIO_CONSOLE_BASE,
+                    SIMRV_PLATFORM_VIRTIO_SLOT_SIZE, 1};
         case SoCDeviceKind::VirtioMmioRng:
-            return {kind, "rng0", 0x10003000, 0x1000, 4};
+            return {kind, "rng0", SIMRV_PLATFORM_VIRTIO_RNG_BASE,
+                    SIMRV_PLATFORM_VIRTIO_SLOT_SIZE, 4};
         case SoCDeviceKind::VirtioMmioGpu:
-            return {kind, "gpu0", 0x10004000, 0x1000, 5};
+            return {kind, "gpu0", SIMRV_PLATFORM_VIRTIO_GPU_BASE,
+                    SIMRV_PLATFORM_VIRTIO_SLOT_SIZE, 5};
         case SoCDeviceKind::VirtioMmioInput:
-            return {kind, "input0", 0x10005000, 0x1000, 6};
+            return {kind, "input0", SIMRV_PLATFORM_VIRTIO_INPUT_BASE,
+                    SIMRV_PLATFORM_VIRTIO_SLOT_SIZE, 6};
         case SoCDeviceKind::VirtioMmioSound:
-            return {kind, "sound0", 0x10006000, 0x1000, 7};
+            return {kind, "sound0", SIMRV_PLATFORM_VIRTIO_SOUND_BASE,
+                    SIMRV_PLATFORM_VIRTIO_SLOT_SIZE, 7};
         case SoCDeviceKind::VirtioMmioNet:
-            return {kind, "net0", 0x10007000, 0x1000, 8};
+            return {kind, "net0", SIMRV_PLATFORM_VIRTIO_NET_BASE,
+                    SIMRV_PLATFORM_VIRTIO_SLOT_SIZE, 8};
         case SoCDeviceKind::VirtioMmioFs:
-            return {kind, "fs0", 0x1000A000, 0x1000, 9};
+            return {kind, "fs0", SIMRV_PLATFORM_VIRTIO_FS_BASE,
+                    SIMRV_PLATFORM_VIRTIO_SLOT_SIZE, 9};
         case SoCDeviceKind::DmaController:
-            return {kind, "dma0", 0x10009000, 0x1000, 12};
+            return {kind, "dma0", SIMRV_PLATFORM_DMA_BASE, SIMRV_PLATFORM_DMA_SIZE,
+                    SIMRV_PLATFORM_DMA_IRQ};
         case SoCDeviceKind::ResetControl:
             return {kind, "reset", 0x10000100, 4, 0};
         case SoCDeviceKind::RingBufferEthernet:
@@ -322,17 +332,15 @@ struct SoCConfig {
                 .dram_size = std::nullopt,
                 .reset_pc = std::nullopt,
                 .tohost = std::nullopt,
-                .devices = {
-                    {SoCDeviceKind::VirtioMmioBlock, "disk0", 0x10001000, 0x1000, 2},
-                    {SoCDeviceKind::VirtioMmioConsole, "console0", 0x10002000, 0x1000, 1},
-                    {SoCDeviceKind::VirtioMmioRng, "rng0", 0x10003000, 0x1000, 4},
-                    {SoCDeviceKind::VirtioMmioGpu, "gpu0", 0x10004000, 0x1000, 5},
-                    {SoCDeviceKind::VirtioMmioInput, "input0", 0x10005000, 0x1000, 6},
-                    {SoCDeviceKind::VirtioMmioSound, "sound0", 0x10006000, 0x1000, 7},
-                    {SoCDeviceKind::VirtioMmioNet, "net0", 0x10007000, 0x1000, 8},
-                    {SoCDeviceKind::VirtioMmioFs, "fs0", 0x1000A000, 0x1000, 9},
-                    {SoCDeviceKind::DmaController, "dma0", 0x10009000, 0x1000, 12},
-                }};
+                .devices = {soc_device_default(SoCDeviceKind::VirtioMmioBlock),
+                            soc_device_default(SoCDeviceKind::VirtioMmioConsole),
+                            soc_device_default(SoCDeviceKind::VirtioMmioRng),
+                            soc_device_default(SoCDeviceKind::VirtioMmioGpu),
+                            soc_device_default(SoCDeviceKind::VirtioMmioInput),
+                            soc_device_default(SoCDeviceKind::VirtioMmioSound),
+                            soc_device_default(SoCDeviceKind::VirtioMmioNet),
+                            soc_device_default(SoCDeviceKind::VirtioMmioFs),
+                            soc_device_default(SoCDeviceKind::DmaController)}};
     }
 
     [[nodiscard]] static auto rvcomp() -> SoCConfig {

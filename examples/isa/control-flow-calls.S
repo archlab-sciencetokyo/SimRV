@@ -12,8 +12,10 @@
 .global _start
 .global mission_branch
 .global mission_loop
+.global mission_loop_backedge
 .global mission_before_call
 .global mission_in_callee
+.global mission_frame_ready
 .global mission_after_call
 .global mission_done
 .global add_pair
@@ -27,6 +29,7 @@ mission_branch:
     ebreak
 mission_loop:
     addi a0, a0, -1
+mission_loop_backedge:
     bne a0, zero, mission_loop
     li a0, 20
     li a1, 22
@@ -41,6 +44,7 @@ add_pair:
 mission_in_callee:
     addi sp, sp, -FRAME
     REG_S ra, 0(sp)
+mission_frame_ready:
     add a0, a0, a1
     REG_L ra, 0(sp)
     addi sp, sp, FRAME

@@ -3,6 +3,7 @@
 
 #include <format>
 #include <fstream>
+#include <sstream>
 
 #include "simrv/core/BuildInfo.hpp"
 #include "simrv/core/CpuConfigParser.hpp"
@@ -12,36 +13,34 @@ namespace simrv::util {
 
 namespace {
 
-auto json_escape(std::string_view value) -> std::string {
-    std::string escaped;
-    escaped.reserve(value.size());
-    for (const char ch : value) {
+void write_quoted(std::ostream& out, std::string_view value);
+
+auto quoted(std::string_view value) -> std::string {
+    std::ostringstream result;
+    write_quoted(result, value);
+    return result.str();
+}
+
+void write_quoted(std::ostream& out, std::string_view value) {
+    constexpr std::string_view hex = "0123456789abcdef";
+    out.put('"');
+    for (const unsigned char ch : value) {
         switch (ch) {
-            case '"':
-                escaped += "\\\"";
-                break;
-            case '\\':
-                escaped += "\\\\";
-                break;
-            case '\n':
-                escaped += "\\n";
-                break;
-            case '\r':
-                escaped += "\\r";
-                break;
-            case '\t':
-                escaped += "\\t";
-                break;
+            case '"': out << "\\\""; break;
+            case '\\': out << "\\\\"; break;
+            case '\n': out << "\\n"; break;
+            case '\r': out << "\\r"; break;
+            case '\t': out << "\\t"; break;
             default:
-                escaped += ch;
+                if (ch < 0x20) {
+                    out << "\\u00" << hex.at(ch >> 4) << hex.at(ch & 0x0f);
+                } else {
+                    out.put(static_cast<char>(ch));
+                }
                 break;
         }
     }
-    return escaped;
-}
-
-auto quoted(std::string_view value) -> std::string {
-    return std::format("\"{}\"", json_escape(value));
+    out.put('"');
 }
 
 auto platform_name(const simrv::core::SoCConfig& config) -> std::string_view {
@@ -90,7 +89,8 @@ auto serialize_soc_manifest(const simrv::core::SoCConfig& config, std::ostream& 
     out << "{\n";
     out << "  \"schema_version\": 1,\n";
     out << "  \"manifest_version\": \"3.0\",\n";
-    out << "  \"generator\": \"simrv " << json_escape(simrv::buildinfo::kVersion) << "\",\n";
+    out << "  \"generator\": " << quoted(std::format("simrv {}", simrv::buildinfo::kVersion))
+        << ",\n";
     out << "  \"name\": " << quoted(config.name) << ",\n";
     out << "  \"cpu_model\": " << quoted(config.cpu_model) << ",\n";
     out << "  \"smp\": {\n";
@@ -149,7 +149,9 @@ auto serialize_soc_manifest(const simrv::core::SoCConfig& config, std::ostream& 
         out << "    {\n";
         out << "      \"kind\": " << quoted(simrv::core::soc_device_kind_name(device.kind))
             << ",\n";
-        out << "      \"name\": " << quoted(device.name) << ",\n";
+        out << "      \"name\": ";
+        write_quoted(out, device.name);
+        out << ",\n";
         out << "      \"transport\": " << quoted(transport_name(config, device.kind)) << ",\n";
         out << "      \"base\": " << device.base << ",\n";
         out << "      \"size\": " << device.size << ",\n";

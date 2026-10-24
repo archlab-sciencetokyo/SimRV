@@ -47,7 +47,8 @@ auto InspectorPane::render_hazard_stats(const simrv::core::CPU& cpu, int logical
         return section_line("Pipeline Hazard & Forwarding Unit Inspector", width);
     }
     if (logical_row == 1) {
-        if (width < 50) {
+        if (framework::active_render_context().density == framework::Density::Compact ||
+            width < 50) {
             return format_to_width(
                 std::format("  {}Stalls:\033[0m {}{}\033[0m ({:3.0f}%) {}RAW:\033[0m {}{}\033[0m",
                             kThemeText, kThemeCoral, simrv::util::format_scaled(total_stalls),
@@ -65,7 +66,8 @@ auto InspectorPane::render_hazard_stats(const simrv::core::CPU& cpu, int logical
             width);
     }
     if (logical_row == 2) {
-        if (width < 50) {
+        if (framework::active_render_context().density == framework::Density::Compact ||
+            width < 50) {
             return format_to_width(
                 std::format(
                     "  {}IC:\033[0m {}{}\033[0m {}DC:\033[0m {}{}\033[0m {}TLB:\033[0m {}{}\033[0m",

@@ -14,7 +14,7 @@ namespace simrv::tui::modals {
 void StepModal::open(ModalType type, std::string& input, uint64_t step_delay_us) {
     input.clear();
     if (type == ModalType::SetSpeed) {
-        uint64_t hz = step_delay_us > 0 ? (1000000 / step_delay_us) : 0;
+        uint64_t hz = step_delay_us > 0 ? ((1'000'000 + step_delay_us / 2) / step_delay_us) : 0;
         input = std::to_string(hz);
     }
 }
@@ -36,7 +36,7 @@ auto StepModal::submit(ModalType type, const std::string& input,
     }
 
     if (type == ModalType::SetSpeed) {
-        uint64_t delay = (val > 0) ? (1000000 / val) : 0;
+        uint64_t delay = (val > 0) ? (1 + (999'999 / val)) : 0;
         step_delay_us.store(delay, std::memory_order_relaxed);
         if (on_speed_changed_cb) on_speed_changed_cb();
     }
@@ -48,6 +48,8 @@ void StepModal::render(ModalType type, std::vector<std::string>& content_rows,
     if (type == ModalType::SetSpeed) {
         build_text_input_rows(content_rows, "Enter Target Frequency (Hz, 0=Max):", input,
                               "Examples: 1000 (1kHz), 1000000 (1MHz), 0 (maximum speed)");
+        content_rows.push_back("  At 60 Hz or slower, detailed values stay visible.");
+        content_rows.push_back("  Above 60 Hz, fast-changing detail uses a spinner; sampled counters stay live.");
         content_rows.push_back("");
         content_rows.push_back(build_modal_footer(
             {{.key = "[Enter]", .action = "Apply"}, {.key = "[Esc]", .action = "Cancel"}}));

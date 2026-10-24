@@ -47,7 +47,8 @@ auto render_cache_way_row(const simrv::core::CPU& cpu, int way_idx, int inspect_
     std::string status_tag;
     if (!valid) {
         status_tag = std::format("{}INVALID\033[0m", kThemeMuted);
-    } else if (width < 45) {
+    } else if (framework::active_render_context().density == framework::Density::Compact ||
+               width < 45) {
         status_tag = std::format("{}0x{:08x}…\033[0m", kThemeVal, static_cast<uint32_t>(tag));
     } else {
         status_tag = std::format("{}0x{:016x}\033[0m", kThemeVal, tag);
@@ -89,7 +90,7 @@ auto render_cache_way_row(const simrv::core::CPU& cpu, int way_idx, int inspect_
     }
 
     std::string line_str;
-    if (width < 45) {
+    if (framework::active_render_context().density == framework::Density::Compact || width < 45) {
         line_str = std::format("{}{}", cursor_marker, way_prefix);
     } else {
         line_str = std::format("{}{}  LRU:{:<8}{}", cursor_marker, way_prefix, lru, highlight);
@@ -177,7 +178,8 @@ auto InspectorPane::render_cache_stats(const simrv::core::CPU& cpu, int logical_
             uint64_t tot = h + m;
             double mr =
                 (tot == 0) ? 0.0 : 100.0 * static_cast<double>(m) / static_cast<double>(tot);
-            if (width < 50) {
+            if (framework::active_render_context().density == framework::Density::Compact ||
+                width < 50) {
                 return format_to_width(
                     std::format(" {}L1I\033[0m H:{}{}\033[0m M:{}{}\033[0m MR:{}{:>4.1f}%\033[0m",
                                 kThemeText, kThemeMint, simrv::util::format_scaled(h), kThemeCoral,
@@ -197,7 +199,8 @@ auto InspectorPane::render_cache_stats(const simrv::core::CPU& cpu, int logical_
             uint64_t tot = h + m;
             double mr =
                 (tot == 0) ? 0.0 : 100.0 * static_cast<double>(m) / static_cast<double>(tot);
-            if (width < 50) {
+            if (framework::active_render_context().density == framework::Density::Compact ||
+                width < 50) {
                 return format_to_width(
                     std::format(" {}L1D\033[0m H:{}{}\033[0m M:{}{}\033[0m MR:{}{:>4.1f}%\033[0m",
                                 kThemeText, kThemeMint, simrv::util::format_scaled(h), kThemeCoral,
@@ -224,7 +227,8 @@ auto InspectorPane::render_cache_stats(const simrv::core::CPU& cpu, int logical_
             uint64_t dtot = dh + dm;
             double dratio = (dtot == 0) ? 1.0 : static_cast<double>(dh) / static_cast<double>(dtot);
 
-            if (width < 45) {
+            if (framework::active_render_context().density == framework::Density::Compact ||
+                width < 45) {
                 int bar_w = std::max(3, (width - 24) / 2);
                 std::string dbar = make_bar(dratio, bar_w);
                 std::string l3bar = make_bar(l3_ratio, bar_w);
@@ -351,7 +355,8 @@ auto InspectorPane::render_cache_stats(const simrv::core::CPU& cpu, int logical_
             double pf_rate =
                 (pf_iss == 0) ? 0.0
                               : 100.0 * static_cast<double>(pf_hit) / static_cast<double>(pf_iss);
-            if (width < 55) {
+            if (framework::active_render_context().density == framework::Density::Compact ||
+                width < 55) {
                 return format_to_width(
                     std::format(
                         " {}HW Prefetch:\033[0m Iss:{}{}\033[0m Hit:{}{}\033[0m ({:>4.1f}%)",

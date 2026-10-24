@@ -38,8 +38,6 @@ class ITelemetrySink {
     virtual void stop_ui_thread() = 0;
     [[nodiscard]] virtual bool is_ui_thread_running() const = 0;
     virtual void set_sim_thread_sleeping(bool sleeping) = 0;
-    virtual void set_target_fps(uint32_t fps) = 0;
-    [[nodiscard]] virtual uint32_t target_fps() const = 0;
 
     virtual void record_instruction(simrv::xlen::Register /*pc*/, simrv::isa::Opcode /*opcode*/,
                                     simrv::isa::OperationId /*op_id*/, uint8_t /*rd*/,

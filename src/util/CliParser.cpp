@@ -33,6 +33,27 @@ using isa::IsaPreset;
 
 namespace {
 
+enum class CliArgumentForm : uint8_t { None, Required, Optional, RequiredThenOptional };
+
+struct HelpEntry {
+    std::string_view option;
+    std::string_view description;
+    std::vector<std::string_view> hidden_aliases;
+    bool accepts_equals_value = false;
+    bool show_in_help = true;
+    std::string_view id;
+};
+
+struct HelpSection {
+    std::string_view title;
+    std::vector<HelpEntry> entries;
+};
+
+[[nodiscard]] auto cli_help_sections() -> const std::vector<HelpSection>&;
+[[nodiscard]] auto cli_option_id(std::string_view arg) -> std::string_view;
+[[nodiscard]] auto cli_argument_form(const HelpEntry& entry) -> CliArgumentForm;
+[[nodiscard]] auto cli_short_flag_takes_argument(char c) -> bool;
+
 auto parse_scaled_u64(std::string_view num, uint64_t& out) -> bool {
     if (num.empty()) {
         return false;
@@ -499,7 +520,8 @@ auto effective_isa_preset(const RuntimeOptions& options) -> IsaPreset {
 
 auto parse_file_options(std::string_view arg, std::span<char* const> args, std::size_t& i,
                         RuntimeOptions& options) -> std::expected<bool, std::string> {
-    if (arg == "--buildroot-output") {
+    const auto option_id = cli_option_id(arg);
+    if (option_id == "--buildroot-output") {
         auto value = next_argument(args, i, arg);
         if (!value) return std::unexpected(value.error());
         auto bundle = resolve_buildroot_image_bundle(*value);
@@ -515,14 +537,13 @@ auto parse_file_options(std::string_view arg, std::span<char* const> args, std::
         options.use_opensbi = true;
         return true;
     }
-    if (arg == "-m" || arg == "--image" || arg == "--memory" || arg == "--kernel" ||
-        arg == "--payload") {
+    if (option_id == "--image") {
         auto value = next_argument(args, i, arg);
         if (!value) return std::unexpected(value.error());
         options.fn_memimg = std::string(*value);
         return true;
     }
-    if (arg == "-D" || arg == "--disk" || arg == "--rootfs" || arg == "--drive") {
+    if (option_id == "--disk") {
         auto value = next_argument(args, i, arg);
         if (!value) return std::unexpected(value.error());
         options.fn_dskimg = std::string(*value);
@@ -530,7 +551,7 @@ auto parse_file_options(std::string_view arg, std::span<char* const> args, std::
         options.appmode = false;
         return true;
     }
-    if (arg == "--virtiofs" || arg.starts_with("--virtiofs=")) {
+    if (option_id == "--virtiofs") {
         std::string_view path = arg.starts_with("--virtiofs=") ? arg.substr(11) : "";
         if (path.empty()) {
             auto value = next_argument(args, i, "--virtiofs");
@@ -542,14 +563,14 @@ auto parse_file_options(std::string_view arg, std::span<char* const> args, std::
         options.appmode = false;
         return true;
     }
-    if (arg == "-f" || arg == "--fdt" || arg == "--dtb") {
+    if (option_id == "--fdt") {
         auto value = next_argument(args, i, arg);
         if (!value) return std::unexpected(value.error());
         options.fn_dvtree = std::string(*value);
         options.appmode = false;
         return true;
     }
-    if (arg == "--config" || arg.starts_with("--config=")) {
+    if (option_id == "--config") {
         constexpr std::string_view option_name = "--config";
         constexpr std::string_view prefix = "--config=";
         std::string_view val = arg.starts_with(prefix) ? arg.substr(prefix.size()) : "";
@@ -572,28 +593,28 @@ auto parse_file_options(std::string_view arg, std::span<char* const> args, std::
         }
         return true;
     }
-    if (arg == "--cfu-plugin") {
+    if (option_id == "--cfu-plugin") {
         auto value = next_argument(args, i, arg);
         if (!value) return std::unexpected(value.error());
         options.fn_cfu_plugin = std::string(*value);
         return true;
     }
-    if (arg == "--bram-prewarm") {
+    if (option_id == "--bram-prewarm") {
         options.bram_prewarm = true;
         return true;
     }
-    if (arg == "--no-bram-prewarm") {
+    if (option_id == "--no-bram-prewarm") {
         options.bram_prewarm = false;
         return true;
     }
-    if (arg == "--trap-log" || arg == "--traplog") {
+    if (option_id == "--trap-log") {
         auto value = next_argument(args, i, arg);
         if (!value) return std::unexpected(value.error());
         options.fn_traplog = std::string(*value);
         options.traplog_mode = true;
         return true;
     }
-    if (arg == "--arch-trace" || arg == "--architecture-trace") {
+    if (option_id == "--arch-trace") {
         auto value = next_argument(args, i, arg);
         if (!value) return std::unexpected(value.error());
         options.fn_archtrace = std::string(*value);
@@ -603,13 +624,13 @@ auto parse_file_options(std::string_view arg, std::span<char* const> args, std::
         }
         return true;
     }
-    if (arg == "--log-file") {
+    if (option_id == "--log-file") {
         auto value = next_argument(args, i, arg);
         if (!value) return std::unexpected(value.error());
         options.fn_log = std::string(*value);
         return true;
     }
-    if (arg == "--trace-dir" || arg == "--trace-directory") {
+    if (option_id == "--trace-dir") {
         auto value = next_argument(args, i, arg);
         if (!value) return std::unexpected(value.error());
         if (value->empty()) return std::unexpected(std::format("{} requires a directory", arg));
@@ -621,37 +642,37 @@ auto parse_file_options(std::string_view arg, std::span<char* const> args, std::
 
 auto parse_execution_options(std::string_view arg, std::span<char* const> args, std::size_t& i,
                              RuntimeOptions& options) -> std::expected<bool, std::string> {
-    if (arg == "-s" || arg == "--steps" || arg == "-e" || arg == "--max-steps" ||
-        arg == "--instructions" || arg == "--insts") {
+    const auto option_id = cli_option_id(arg);
+    if (option_id == "--steps") {
         auto value = parse_scaled_required(args, i, arg);
         if (!value) return std::unexpected(value.error());
         options.fincnt = *value;
         return true;
     }
-    if (arg == "--pc" || arg == "--start-pc" || arg == "--entry") {
+    if (option_id == "--pc") {
         auto value = parse_u32_required(args, i, arg);
         if (!value) return std::unexpected(value.error());
         options.start_pc = *value;
         return true;
     }
-    if (arg == "-t" || arg == "--timer" || arg == "-l") {
+    if (option_id == "--timer") {
         auto value = parse_scaled_required(args, i, arg);
         if (!value) return std::unexpected(value.error());
         options.enabletimer = *value;
         return true;
     }
-    if (arg == "-H" || arg == "--tohost-addr" || arg == "--tohost") {
+    if (option_id == "--tohost-addr") {
         auto value = parse_u32_required(args, i, arg);
         if (!value) return std::unexpected(value.error());
         options.isatest_tohost = *value;
         return true;
     }
-    if (arg == "--trace-range" || arg == "-r") {
+    if (option_id == "--trace-range") {
         auto trace = parse_trace_window(options, args, i);
         if (!trace) return std::unexpected(trace.error());
         return true;
     }
-    if (arg == "--trace") {
+    if (option_id == "--trace") {
         options.trace_enabled = true;
         options.trace_begin = 0;
         options.trace_end = std::numeric_limits<simrv::xlen::Counter>::max();
@@ -659,28 +680,28 @@ auto parse_execution_options(std::string_view arg, std::span<char* const> args, 
         options.execution_mode_explicit = true;
         return true;
     }
-    if (arg == "--trace-pc-range") {
+    if (option_id == "--trace-pc-range") {
         auto value = next_argument(args, i, arg);
         if (!value) return std::unexpected(value.error());
         if (!parse_trace_pc_range(*value, options))
             return std::unexpected("--trace-pc-range expects START-END with START <= END");
         return true;
     }
-    if (arg == "--trace-pc") {
+    if (option_id == "--trace-pc") {
         return std::unexpected(
             "--trace-pc was removed; use --trace-pc-range START-END to filter --arch-trace events");
     }
-    if (arg == "-R" || arg == "--realtime") {
+    if (option_id == "--realtime") {
         options.realtime_pacing = true;
         options.explicit_realtime_mode = true;
         return true;
     }
-    if (arg == "--no-realtime") {
+    if (option_id == "--no-realtime") {
         options.realtime_pacing = false;
         options.explicit_realtime_mode = true;
         return true;
     }
-    if (arg == "--cpu-clock" || arg == "--clock-hz" || arg == "--clock") {
+    if (option_id == "--cpu-clock") {
         auto value = next_argument(args, i, arg);
         if (!value) return std::unexpected(value.error());
         uint64_t hz = 0;
@@ -690,7 +711,7 @@ auto parse_execution_options(std::string_view arg, std::span<char* const> args, 
         options.cpu_clock_hz = hz;
         return true;
     }
-    if (arg == "--timebase-hz" || arg == "--timebase") {
+    if (option_id == "--timebase-hz") {
         auto value = next_argument(args, i, arg);
         if (!value) return std::unexpected(value.error());
         uint64_t hz = 0;
@@ -705,7 +726,8 @@ auto parse_execution_options(std::string_view arg, std::span<char* const> args, 
 
 auto parse_mode_options(std::string_view arg, std::span<char* const> args, std::size_t& i,
                         ParseResult& result) -> std::expected<bool, std::string> {
-    if (arg == "--isa") {
+    const auto option_id = cli_option_id(arg);
+    if (option_id == "--isa") {
         auto value = next_argument(args, i, "--isa");
         if (!value) return std::unexpected(value.error());
         auto parsed_misa = parse_isa_preset(*value);
@@ -716,7 +738,7 @@ auto parse_mode_options(std::string_view arg, std::span<char* const> args, std::
         result.options.misa_override = true;
         return true;
     }
-    if (arg == "--vlen") {
+    if (option_id == "--vlen") {
         auto value = next_argument(args, i, arg);
         if (!value) return std::unexpected(value.error());
         uint32_t val = 0;
@@ -730,25 +752,25 @@ auto parse_mode_options(std::string_view arg, std::span<char* const> args, std::
         result.options.vlen = val;
         return true;
     }
-    if (arg == "-b" || arg == "--baremetal") {
+    if (option_id == "--baremetal") {
         result.options.appmode = true;
         return true;
     }
-    if (arg == "--os") {
+    if (option_id == "--os") {
         result.options.appmode = false;
         return true;
     }
-    if (arg == "--ca") {
+    if (option_id == "--ca") {
         result.options.execution_mode = RequestedExecutionMode::CycleAccurate;
         result.options.execution_mode_explicit = true;
         return true;
     }
-    if (arg == "--ia") {
+    if (option_id == "--ia") {
         result.options.execution_mode = RequestedExecutionMode::Fast;
         result.options.execution_mode_explicit = true;
         return true;
     }
-    if (arg == "--mode") {
+    if (option_id == "--mode") {
         auto value = next_argument(args, i, arg);
         if (!value) return std::unexpected(value.error());
         if (*value == "fast") {
@@ -765,7 +787,7 @@ auto parse_mode_options(std::string_view arg, std::span<char* const> args, std::
         result.options.execution_mode_explicit = true;
         return true;
     }
-    if (arg == "--pipeline") {
+    if (option_id == "--pipeline") {
         auto value = next_argument(args, i, arg);
         if (!value) return std::unexpected(value.error());
         if (!pipeline::parse_pipeline_type(*value).has_value()) {
@@ -775,7 +797,7 @@ auto parse_mode_options(std::string_view arg, std::span<char* const> args, std::
         result.options.pipeline_type = std::string(*value);
         return true;
     }
-    if (arg == "--cpu-preset") {
+    if (option_id == "--cpu-preset") {
         auto value = next_argument(args, i, arg);
         if (!value) return std::unexpected(value.error());
         const auto resolved = simrv::core::resolve_cpu_model_path(*value);
@@ -799,7 +821,7 @@ auto parse_mode_options(std::string_view arg, std::span<char* const> args, std::
         result.options.cpu_model_preset = parsed;
         return true;
     }
-    if (arg == "--bpred" || arg == "--bpred-type") {
+    if (option_id == "--bpred") {
         auto value = next_argument(args, i, arg);
         if (!value) return std::unexpected(value.error());
         if (!pipeline::parse_branch_predictor_type(*value).has_value()) {
@@ -811,26 +833,25 @@ auto parse_mode_options(std::string_view arg, std::span<char* const> args, std::
         result.options.bpred_type = std::string(*value);
         return true;
     }
-    if (arg == "--bht-size" || arg == "--bht-entries") {
+    if (option_id == "--bht-size") {
         auto value = parse_positive_size(args, i, arg, "BHT");
         if (!value) return std::unexpected(value.error());
         result.options.bht_size = *value;
         return true;
     }
-    if (arg == "--btb-size" || arg == "--btb-entries") {
+    if (option_id == "--btb-size") {
         auto value = parse_positive_size(args, i, arg, "BTB");
         if (!value) return std::unexpected(value.error());
         result.options.btb_size = *value;
         return true;
     }
-    if (arg == "--ras-size" || arg == "--ras-entries") {
+    if (option_id == "--ras-size") {
         auto value = parse_positive_size(args, i, arg, "RAS");
         if (!value) return std::unexpected(value.error());
         result.options.ras_size = *value;
         return true;
     }
-    if (arg == "--smp" || arg == "-smp" || arg == "--cores" || arg == "--harts" ||
-        arg == "--num-harts" || arg == "-j") {
+    if (option_id == "--harts") {
         auto value = next_argument(args, i, arg);
         if (!value) return std::unexpected(value.error());
         uint32_t val = 0;
@@ -843,8 +864,7 @@ auto parse_mode_options(std::string_view arg, std::span<char* const> args, std::
         result.options.explicit_num_harts = true;
         return true;
     }
-    if (arg == "--ram-size" || arg == "--memory-size" || arg == "--dram-size" ||
-        arg == "--mem-size") {
+    if (option_id == "--dram-size") {
         auto value = next_argument(args, i, arg);
         if (!value) return std::unexpected(value.error());
         uint64_t val = 0;
@@ -860,42 +880,39 @@ auto parse_mode_options(std::string_view arg, std::span<char* const> args, std::
 
 auto parse_tui_options(std::string_view arg, std::span<char* const> args, std::size_t& i,
                        ParseResult& result) -> std::expected<bool, std::string> {
-    if (arg == "--tui" || arg == "-u") {
+    const auto option_id = cli_option_id(arg);
+    if (option_id == "--tui") {
         result.options.tuimode = true;
         result.options.explicit_tui_mode = true;
         return true;
     }
-    if (arg == "--cli" || arg == "-c") {
+    if (option_id == "--cli") {
         result.options.tuimode = false;
         result.options.explicit_cli_mode = true;
         return true;
     }
-    if (arg == "--inspection-output") {
+    if (option_id == "--inspection-output") {
         auto value = next_argument(args, i, arg);
         if (!value) return std::unexpected(value.error());
         if (value->empty()) return std::unexpected("--inspection-output requires a non-empty path");
         result.options.inspection_output = std::string(*value);
         return true;
     }
-    if (arg == "--high-contrast") {
+    if (option_id == "--high-contrast") {
         result.options.high_contrast = true;
         return true;
     }
-    if (arg == "--class" || arg == "--edu") {
-        result.options.class_mode = true;
-        return true;
-    }
-    if (arg == "--mission") {
+    if (option_id == "--mission") {
         auto value = next_argument(args, i, arg);
         if (!value) return std::unexpected(value.error());
         result.options.mission = std::string(*value);
         return true;
     }
-    if (arg == "--no-forwarding") {
+    if (option_id == "--no-forwarding") {
         result.options.disable_forwarding = true;
         return true;
     }
-    if (arg == "--net") {
+    if (option_id == "--net") {
         auto value = next_argument(args, i, arg);
         if (!value) return std::unexpected(value.error());
         std::string_view net_opt = *value;
@@ -906,7 +923,7 @@ auto parse_tui_options(std::string_view arg, std::span<char* const> args, std::s
         result.options.net_mode = std::string(net_opt);
         return true;
     }
-    if (arg == "--explain-inst" || arg == "--explain") {
+    if (option_id == "--explain-inst") {
         auto value = next_argument(args, i, arg);
         if (!value) return std::unexpected(value.error());
         uint32_t raw_val = 0;
@@ -918,17 +935,17 @@ auto parse_tui_options(std::string_view arg, std::span<char* const> args, std::s
         result.options.explain_inst_val = raw_val;
         return true;
     }
-    if (arg == "--log-mmio" || arg == "--dlog") {
+    if (option_id == "--log-mmio") {
         result.options.dlog_mode = true;
         return true;
     }
-    if (arg == "--instmix") {
+    if (option_id == "--instmix") {
         result.options.use_mix = true;
         return true;
     }
-    if (arg == "--dump-cpu-model" || arg == "--scaffold-cpu-model") {
+    if (option_id == "--dump-cpu-model" || option_id == "--scaffold-cpu-model") {
         result.action = CliAction::DumpCpuModel;
-        if (arg == "--scaffold-cpu-model") {
+        if (option_id == "--scaffold-cpu-model") {
             result.options.dump_cpu_model_preset = "balanced";
             if (i + 1 < args.size() && args[i + 1] != nullptr && args[i + 1][0] != '\0' &&
                 (args[i + 1][0] != '-' || std::string_view(args[i + 1]) == "-")) {
@@ -947,7 +964,7 @@ auto parse_tui_options(std::string_view arg, std::span<char* const> args, std::s
         }
         return true;
     }
-    if (arg == "--dump-soc-manifest") {
+    if (option_id == "--dump-soc-manifest") {
         result.action = CliAction::ExportSoCManifest;
         auto value = next_argument(args, i, arg);
         if (!value) return std::unexpected(value.error());
@@ -959,7 +976,7 @@ auto parse_tui_options(std::string_view arg, std::span<char* const> args, std::s
         }
         return true;
     }
-    if (arg == "--validate-config" || arg == "--validate-cpu-config") {
+    if (option_id == "--validate-config") {
         result.action = CliAction::ValidateCpuModel;
         auto value = next_argument(args, i, arg);
         if (!value) return std::unexpected(value.error());
@@ -971,7 +988,8 @@ auto parse_tui_options(std::string_view arg, std::span<char* const> args, std::s
 
 auto parse_debug_cosrv_options(std::string_view arg, std::span<char* const> args, std::size_t& i,
                                RuntimeOptions& options) -> std::expected<bool, std::string> {
-    if (arg == "--log-level") {
+    const auto option_id = cli_option_id(arg);
+    if (option_id == "--log-level") {
         auto value = next_argument(args, i, "--log-level");
         if (!value) return std::unexpected(value.error());
         auto level = simrv::log::parse_level(*value);
@@ -983,7 +1001,7 @@ auto parse_debug_cosrv_options(std::string_view arg, std::span<char* const> args
         options.log_level = level;
         return true;
     }
-    if (arg == "--log-format") {
+    if (option_id == "--log-format") {
         auto value = next_argument(args, i, "--log-format");
         if (!value) return std::unexpected(value.error());
         const auto format = simrv::log::parse_format(*value);
@@ -994,11 +1012,11 @@ auto parse_debug_cosrv_options(std::string_view arg, std::span<char* const> args
         options.log_format = *format;
         return true;
     }
-    if (arg == "--log-stderr") {
+    if (option_id == "--log-stderr") {
         options.log_stderr = true;
         return true;
     }
-    if (arg == "--summary") {
+    if (option_id == "--summary") {
         auto value = next_argument(args, i, "--summary");
         if (!value) return std::unexpected(value.error());
         if (value->empty() || *value == "-") {
@@ -1008,7 +1026,7 @@ auto parse_debug_cosrv_options(std::string_view arg, std::span<char* const> args
         options.fn_summary = std::string(*value);
         return true;
     }
-    if (arg == "--events") {
+    if (option_id == "--events") {
         auto value = next_argument(args, i, "--events");
         if (!value) return std::unexpected(value.error());
         if (value->empty() || *value == "-") {
@@ -1018,7 +1036,7 @@ auto parse_debug_cosrv_options(std::string_view arg, std::span<char* const> args
         options.fn_events = std::string(*value);
         return true;
     }
-    if (arg == "--uart-transcript") {
+    if (option_id == "--uart-transcript") {
         auto value = next_argument(args, i, arg);
         if (!value) return std::unexpected(value.error());
         if (value->empty() || *value == "-") {
@@ -1027,18 +1045,18 @@ auto parse_debug_cosrv_options(std::string_view arg, std::span<char* const> args
         options.fn_uart_transcript = std::string(*value);
         return true;
     }
-    if (arg == "--trace-level") {
+    if (option_id == "--trace-level") {
         auto value = parse_u32_required(args, i, arg);
         if (!value) return std::unexpected(value.error());
         if (*value > 4) return std::unexpected("--trace-level must be between 0 and 4");
         options.trace_level = static_cast<uint8_t>(*value);
         return true;
     }
-    if (arg == "--trace-register-writes") {
+    if (option_id == "--trace-register-writes") {
         options.trace_register_writes = true;
         return true;
     }
-    if (arg == "--trace-events") {
+    if (option_id == "--trace-events") {
         auto value = next_argument(args, i, arg);
         if (!value) return std::unexpected(value.error());
         if (value->empty()) return std::unexpected("--trace-events requires a non-empty list");
@@ -1061,82 +1079,82 @@ auto parse_debug_cosrv_options(std::string_view arg, std::span<char* const> args
         options.trace_events = std::string(*value);
         return true;
     }
-    if (arg == "--trace-function" || arg == "--trace-device") {
+    if (option_id == "--trace-function" || option_id == "--trace-device") {
         auto value = next_argument(args, i, arg);
         if (!value) return std::unexpected(value.error());
         if (value->empty()) return std::unexpected(std::format("{} requires a name", arg));
-        if (arg == "--trace-function")
+        if (option_id == "--trace-function")
             options.trace_function = std::string(*value);
         else
             options.trace_device = std::string(*value);
         return true;
     }
-    if (arg == "--trace-hart") {
+    if (option_id == "--trace-hart") {
         auto value = parse_u32_required(args, i, arg);
         if (!value) return std::unexpected(value.error());
         options.trace_hart = *value;
         return true;
     }
-    if (arg == "--trace-after-cycle" || arg == "--trace-before-cycle") {
+    if (option_id == "--trace-after-cycle" || option_id == "--trace-before-cycle") {
         auto value = parse_scaled_required(args, i, arg);
         if (!value) return std::unexpected(value.error());
-        if (arg == "--trace-after-cycle")
+        if (option_id == "--trace-after-cycle")
             options.trace_after_cycle = *value;
         else
             options.trace_before_cycle = *value;
         return true;
     }
-    if (arg == "--save-checkpoint" || arg == "--checkpoint-out") {
+    if (option_id == "--save-checkpoint") {
         auto value = next_argument(args, i, arg);
         if (!value) return std::unexpected(value.error());
         if (value->empty()) return std::unexpected(std::format("{} requires a file path", arg));
         options.fn_save_checkpoint = std::string(*value);
         return true;
     }
-    if (arg == "--load-checkpoint" || arg == "--checkpoint-in") {
+    if (option_id == "--load-checkpoint") {
         auto value = next_argument(args, i, arg);
         if (!value) return std::unexpected(value.error());
         if (value->empty()) return std::unexpected(std::format("{} requires a file path", arg));
         options.fn_load_checkpoint = std::string(*value);
         return true;
     }
-    if (arg == "--checkpoint-every") {
+    if (option_id == "--checkpoint-every") {
         auto value = parse_scaled_required(args, i, arg);
         if (!value) return std::unexpected(value.error());
         if (*value == 0) return std::unexpected("--checkpoint-every must be greater than zero");
         options.checkpoint_every = *value;
         return true;
     }
-    if (arg == "--checkpoint-dir") {
+    if (option_id == "--checkpoint-dir") {
         auto value = next_argument(args, i, arg);
         if (!value) return std::unexpected(value.error());
         if (value->empty()) return std::unexpected("--checkpoint-dir requires a directory path");
         options.checkpoint_dir = std::string(*value);
         return true;
     }
-    if (arg == "-q" || arg == "--quiet") {
+    if (option_id == "--quiet") {
         options.quiet = true;
         if (!options.log_level.has_value()) {
             options.log_level = simrv::log::Level::Warn;
         }
         return true;
     }
-    if (arg == "-v" || arg == "--verbose") {
+    if (option_id == "--verbose") {
         options.verbose = true;
         if (!options.log_level.has_value()) {
             options.log_level = simrv::log::Level::Debug;
         }
         return true;
     }
-    if (arg == "--trace-bpred") {
+    if (option_id == "--trace-bpred") {
         options.bp_trace = true;
         return true;
     }
-    if (arg == "--gdb") {
+    if (option_id == "--gdb") {
         options.gdb_mode = true;
         return true;
     }
-    if (arg == "--gdb-port") {
+    if (option_id == "--gdb-port") {
         auto value = next_argument(args, i, arg);
         if (!value) return std::unexpected(value.error());
         uint64_t port_val = 0;
@@ -1146,11 +1164,11 @@ auto parse_debug_cosrv_options(std::string_view arg, std::span<char* const> args
         options.gdb_port = static_cast<uint16_t>(port_val);
         return true;
     }
-    if (arg == "--lockstep") {
+    if (option_id == "--lockstep") {
         options.lockstep_mode = true;
         return true;
     }
-    if (arg == "--step-delay" || arg == "--speed") {
+    if (option_id == "--step-delay") {
         auto value = next_argument(args, i, std::string(arg));
         if (!value) return std::unexpected(value.error());
         uint64_t delay_val = 0;
@@ -1160,13 +1178,13 @@ auto parse_debug_cosrv_options(std::string_view arg, std::span<char* const> args
         options.step_delay_us = delay_val;
         return true;
     }
-    if (arg == "--spike-bin") {
+    if (option_id == "--spike-bin") {
         auto value = next_argument(args, i, "--spike-bin");
         if (!value) return std::unexpected(value.error());
         options.spike_bin = std::string(*value);
         return true;
     }
-    if (arg == "--spike-elf") {
+    if (option_id == "--spike-elf") {
         auto value = next_argument(args, i, "--spike-elf");
         if (!value) return std::unexpected(value.error());
         options.spike_elf = std::string(*value);
@@ -1176,13 +1194,12 @@ auto parse_debug_cosrv_options(std::string_view arg, std::span<char* const> args
 }
 
 auto is_known_short_flag(char c) -> bool {
-    static constexpr std::string_view kShortFlags = "mDfcsetlHrIbujvqjhR";
-    return kShortFlags.find(c) != std::string_view::npos;
+    const char option_chars[] = {'-', c};
+    return !cli_option_id(std::string_view(option_chars, 2)).empty();
 }
 
 auto short_flag_takes_argument(char c) -> bool {
-    static constexpr std::string_view kArgFlags = "mDfsetlHrIj";
-    return kArgFlags.find(c) != std::string_view::npos;
+    return cli_short_flag_takes_argument(c);
 }
 
 auto expand_short_flags(const std::vector<std::string>& original_args) -> std::vector<std::string> {
@@ -1252,23 +1269,24 @@ auto parse_command_line(std::span<char* const> args) -> std::expected<ParseResul
 
     for (std::size_t i = 1; i < expanded_span.size(); ++i) {
         std::string_view const arg = expanded_span[i];
-        if (arg == "-h" || arg == "--help") {
+        const std::string_view option_id = cli_option_id(arg);
+        if (option_id == "--help") {
             result.action = CliAction::ShowHelp;
             return result;
         }
-        if (arg == "--version") {
+        if (option_id == "--version") {
             result.action = CliAction::ShowVersion;
             return result;
         }
-        if (arg == "--license") {
+        if (option_id == "--license") {
             result.action = CliAction::ShowLicense;
             return result;
         }
-        if (arg == "--isa-info" || arg == "--capabilities") {
+        if (option_id == "--isa-info") {
             result.action = CliAction::ShowIsaInfo;
             return result;
         }
-        if (arg == "--doctor") {
+        if (option_id == "--doctor") {
             result.action = CliAction::Doctor;
             return result;
         }
@@ -1333,9 +1351,7 @@ auto parse_command_line(std::span<char* const> args) -> std::expected<ParseResul
             return std::unexpected(
                 "--mission requires interactive TUI mode (cannot be used with --cli)");
         }
-        if (!result.options.class_mode) {
-            result.options.class_mode = true;
-        }
+        result.options.tuimode = true;
     }
     if (result.options.trace_after_cycle && result.options.trace_before_cycle &&
         *result.options.trace_after_cycle > *result.options.trace_before_cycle) {
@@ -1420,7 +1436,6 @@ auto RuntimeOptions::to_machine_config() const -> simrv::core::MachineConfig {
 
     cfg.tui.enabled = tuimode;
     cfg.tui.high_contrast = high_contrast;
-    cfg.tui.class_mode = class_mode;
     cfg.tui.mission = mission;
     cfg.tui.inspection_output = inspection_output;
 
@@ -1634,27 +1649,20 @@ auto needs_memory_image(const ParseResult& result) -> bool {
            result.action != CliAction::ValidateCpuModel;
 }
 
-[[noreturn]] auto usage(std::string_view prog_name, int status) -> void {
-    const bool use_color = simrv::util::terminal_color_enabled(STDOUT_FILENO);
-    auto style = [use_color](std::string_view ansi_code) -> std::string_view {
-        return use_color ? ansi_code : "";
-    };
-    using namespace simrv::util::ansi;
-    struct HelpEntry {
-        std::string_view option;
-        std::string_view description;
-    };
-    struct HelpSection {
-        std::string_view title;
-        std::vector<HelpEntry> entries;
-    };
-    std::vector<HelpSection> sections{
+namespace {
+
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wmissing-field-initializers"
+auto cli_help_sections() -> const std::vector<HelpSection>& {
+    static const std::vector<HelpSection> sections{
         {.title = "Basic and image loading",
          .entries =
              {{.option = "-m, --image, --memory <FILE>",
-               .description = "Load an ELF or raw binary image."},
+               .description = "Load an ELF or raw binary image.",
+               .hidden_aliases = {"--kernel", "--payload"}},
               {.option = "--pc, --start-pc <ADDR>",
-               .description = "Set the initial program counter (default: 0x80000000)."},
+               .description = "Set the initial program counter (default: 0x80000000).",
+               .hidden_aliases = {"--entry"}},
               {.option = "-b, --baremetal",
                .description = "Run a bare-metal application (default)."},
               {.option = "--os", .description = "Boot an operating system (Linux or RTOS)."},
@@ -1662,24 +1670,29 @@ auto needs_memory_image(const ParseResult& result) -> bool {
                .description =
                    "Load firmware, DTB, and rootfs together from a Buildroot output directory."},
               {.option = "-D, --disk, --rootfs <FILE>",
-               .description = "Attach a VirtIO block storage image."},
+               .description = "Attach a VirtIO block storage image.",
+               .hidden_aliases = {"--drive"}},
               {.option = "--virtiofs <DIR>",
-               .description = "Share a host directory with the guest through VirtIO-FS."},
+               .description = "Share a host directory with the guest through VirtIO-FS.",
+               .accepts_equals_value = true},
               {.option = "-f, --fdt, --dtb <FILE>",
                .description = "Linux device tree (required; patched for configured RAM and harts; "
                               "defaults to SIMRV_LINUX_DTB)."}}},
         {.title = "Architecture and hardware",
          .entries = {{.option = "-j, --harts, --smp <N>",
-                      .description = "Override the SoC profile hart count (1–16)."},
+                      .description = "Override the SoC profile hart count (1–16).",
+                      .hidden_aliases = {"-smp", "--cores", "--num-harts"}},
                      {.option = "--dram-size, --ram-size <SIZE>",
-                      .description = "Set DRAM size (for example, 128M or 2G)."},
+                      .description = "Set DRAM size (for example, 128M or 2G).",
+                      .hidden_aliases = {"--memory-size", "--mem-size"}},
                      {.option = "--isa <ISA>",
                       .description = "Select a RISC-V ISA profile such as rv32gc or rv64gc."},
                      {.option = "--vlen <BITS>",
                       .description = "Set vector register length (128–1024; default: 256)."},
                      {.option = "--config <PRESET | FILE>",
                       .description =
-                          "Select platform preset (virt-pcie, virt-mmio, rvcomp) or file path."},
+                          "Select platform preset (virt-pcie, virt-mmio, rvcomp) or file path.",
+                      .accepts_equals_value = true},
                      {.option = "--dump-soc-manifest <PRESET> [FILE]",
                       .description = "Export the normalized SoC registry as JSON."},
                      {.option = "--net <BACKEND>",
@@ -1688,13 +1701,16 @@ auto needs_memory_image(const ParseResult& result) -> bool {
         {.title = "Execution and pipeline",
          .entries =
              {{.option = "-s, -e, --steps <N>",
-               .description = "Stop after N instructions retire across all harts."},
+               .description = "Stop after N instructions retire across all harts.",
+               .hidden_aliases = {"--max-steps", "--instructions", "--insts"}},
               {.option = "-t, -l, --timer <N>",
                .description = "Raise a CLINT timer interrupt after N cycles."},
               {.option = "--cpu-clock, --clock-hz <FREQ>",
-               .description = "Set CPU clock frequency (e.g. 100MHz, 160MHz, 1GHz)."},
+               .description = "Set CPU clock frequency (e.g. 100MHz, 160MHz, 1GHz).",
+               .hidden_aliases = {"--clock"}},
               {.option = "--timebase-hz <FREQ>",
-               .description = "Set RTC timebase frequency (e.g. 10MHz, 32768Hz)."},
+               .description = "Set RTC timebase frequency (e.g. 10MHz, 32768Hz).",
+               .hidden_aliases = {"--timebase"}},
               {.option = "-R, --realtime",
                .description = "Throttle execution to host real time (1:1)."},
               {.option = "--no-realtime",
@@ -1705,10 +1721,14 @@ auto needs_memory_image(const ParseResult& result) -> bool {
                .description = "Select the CA pipeline: 3stage or 5stage (default)."},
               {.option = "--no-forwarding", .description = "Disable operand forwarding."},
               {.option = "--bpred <TYPE>",
-               .description = "Select none, static, bimodal, gshare, or tournament prediction."},
-              {.option = "--bht-size <N>", .description = "Set branch history table entries."},
-              {.option = "--btb-size <N>", .description = "Set branch target buffer entries."},
-              {.option = "--ras-size <N>", .description = "Set return address stack entries."},
+               .description = "Select none, static, bimodal, gshare, or tournament prediction.",
+               .hidden_aliases = {"--bpred-type"}},
+              {.option = "--bht-size <N>", .description = "Set branch history table entries.",
+               .hidden_aliases = {"--bht-entries"}},
+              {.option = "--btb-size <N>", .description = "Set branch target buffer entries.",
+               .hidden_aliases = {"--btb-entries"}},
+              {.option = "--ras-size <N>", .description = "Set return address stack entries.",
+               .hidden_aliases = {"--ras-entries"}},
               {.option = "--cpu-preset <PRESET>",
                .description = "Select tiny, balanced, performance, or a model file."},
               {.option = "--dump-cpu-model <MODEL> [FILE]",
@@ -1734,12 +1754,14 @@ auto needs_memory_image(const ParseResult& result) -> bool {
               {.option = "--log-stderr",
                .description = "Route simulator diagnostic logs to stderr instead of stdout."},
               {.option = "--trace-dir <DIR>",
-               .description = "Set the root directory for trace artifacts (default: trace)."},
+               .description = "Set the root directory for trace artifacts (default: trace).",
+               .hidden_aliases = {"--trace-directory"}},
               {.option = "--log-mmio, --dlog", .description = "Record MMIO transactions."},
               {.option = "--trap-log, --traplog <FILE>",
                .description = "Write architectural trap and SBI events."},
               {.option = "--arch-trace <FILE>",
-               .description = "Write JSONL architectural retirement and profile events."},
+               .description = "Write JSONL architectural retirement and profile events.",
+               .hidden_aliases = {"--architecture-trace"}},
               {.option = "--trace-level <0-4>", .description = "Limit architectural event detail."},
               {.option = "--trace-register-writes",
                .description = "Emit opt-in FP and vector register writes."},
@@ -1766,12 +1788,12 @@ auto needs_memory_image(const ParseResult& result) -> bool {
              {{.option = "-u, --tui",
                .description = "Enable the interactive TUI (default on a foreground terminal)."},
               {.option = "-c, --cli", .description = "Force headless command-line execution."},
-              {.option = "--class, --edu", .description = "Enable classroom guidance."},
               {.option = "--mission <FILE>",
-               .description = "Load a lesson mission (runs in interactive TUI mode)."},
+               .description = "Load a lesson mission and enable classroom guidance (interactive TUI)."},
               {.option = "--high-contrast", .description = "Enable the high-contrast TUI palette."},
               {.option = "--step-delay <US>",
-               .description = "Pause execution for US microseconds per cycle/step."},
+               .description = "Pause execution for US microseconds per cycle/step.",
+               .hidden_aliases = {"--speed"}},
               {.option = "--inspection-output <FILE>",
                .description = "Write paused-state TUI inspection reports."},
               {.option = "--summary <FILE>",
@@ -1781,9 +1803,11 @@ auto needs_memory_image(const ParseResult& result) -> bool {
               {.option = "--uart-transcript <FILE>",
                .description = "Save guest UART output while keeping its normal destination."},
               {.option = "--save-checkpoint <FILE>",
-               .description = "Save architectural state on exit."},
+               .description = "Save architectural state on exit.",
+               .hidden_aliases = {"--checkpoint-out"}},
               {.option = "--load-checkpoint <FILE>",
-               .description = "Resume from an architectural checkpoint."},
+               .description = "Resume from an architectural checkpoint.",
+               .hidden_aliases = {"--checkpoint-in"}},
               {.option = "--checkpoint-every <CYCLES>",
                .description = "Write periodic architectural checkpoints."},
               {.option = "--checkpoint-dir <DIR>",
@@ -1791,9 +1815,11 @@ auto needs_memory_image(const ParseResult& result) -> bool {
         {.title = "Debugging and information",
          .entries = {
              {.option = "-H, --tohost-addr <ADDR>",
-              .description = "Set the tohost address used for test termination."},
+              .description = "Set the tohost address used for test termination.",
+              .hidden_aliases = {"--tohost"}},
              {.option = "--explain-inst <HEX>",
-              .description = "Disassemble and explain a 32-bit instruction."},
+              .description = "Disassemble and explain a 32-bit instruction.",
+              .hidden_aliases = {"--explain"}},
              {.option = "--gdb", .description = "Start the GDB remote stub in CLI mode."},
              {.option = "--gdb-port <PORT>",
               .description = "Set the GDB server port (default: 1234)."},
@@ -1802,10 +1828,112 @@ auto needs_memory_image(const ParseResult& result) -> bool {
              {.option = "--spike-elf <PATH>", .description = "Set the ELF image used by Spike."},
              {.option = "--version", .description = "Display the version and target architecture."},
              {.option = "--isa-info",
-              .description = "Show qualified ISA and frontend capabilities."},
+              .description = "Show qualified ISA and frontend capabilities.",
+              .hidden_aliases = {"--capabilities"}},
              {.option = "--doctor", .description = "Diagnose terminal and runtime environment."},
              {.option = "--license", .description = "Display the license and copyright notice."},
-             {.option = "-h, --help", .description = "Show this help."}}}};
+             {.option = "-h, --help", .description = "Show this help."}}},
+        {.title = "",
+         .entries = {{.option = "--no-bram-prewarm",
+                      .description = "",
+                      .show_in_help = false,
+                      .id = "--no-bram-prewarm"},
+                     {.option = "--ca", .description = "", .show_in_help = false},
+                     {.option = "--ia", .description = "", .show_in_help = false},
+                     {.option = "--trace-pc", .description = "", .show_in_help = false}}}};
+    return sections;
+}
+#pragma GCC diagnostic pop
+
+auto cli_option_id(std::string_view arg) -> std::string_view {
+    for (const auto& section : cli_help_sections()) {
+        for (const auto& entry : section.entries) {
+            std::string_view canonical = entry.id;
+            std::string_view names = entry.option;
+            while (canonical.empty() && !names.empty()) {
+                const auto comma = names.find(',');
+                auto name = names.substr(0, comma);
+                while (!name.empty() && name.front() == ' ') name.remove_prefix(1);
+                if (const auto space = name.find_first_of(" \t"); space != std::string_view::npos)
+                    name = name.substr(0, space);
+                if (name.starts_with("--")) {
+                    canonical = name;
+                    break;
+                }
+                if (comma == std::string_view::npos) break;
+                names.remove_prefix(comma + 1);
+            }
+            if (canonical.empty()) continue;
+
+            names = entry.option;
+            while (!names.empty()) {
+                const auto comma = names.find(',');
+                auto name = names.substr(0, comma);
+                while (!name.empty() && name.front() == ' ') name.remove_prefix(1);
+                if (const auto space = name.find_first_of(" \t"); space != std::string_view::npos)
+                    name = name.substr(0, space);
+                if (arg == name || (entry.accepts_equals_value && arg.starts_with(name) &&
+                                    arg.size() > name.size() && arg[name.size()] == '=')) {
+                    return canonical;
+                }
+                if (comma == std::string_view::npos) break;
+                names.remove_prefix(comma + 1);
+            }
+            for (const auto alias : entry.hidden_aliases) {
+                if (arg == alias) return canonical;
+            }
+        }
+    }
+    return {};
+}
+
+auto cli_argument_form(const HelpEntry& entry) -> CliArgumentForm {
+    const bool required = entry.option.find('<') != std::string_view::npos;
+    const bool optional = entry.option.find('[') != std::string_view::npos;
+    if (required && optional) return CliArgumentForm::RequiredThenOptional;
+    if (required) return CliArgumentForm::Required;
+    if (optional) return CliArgumentForm::Optional;
+    return CliArgumentForm::None;
+}
+
+auto cli_short_flag_takes_argument(char c) -> bool {
+    const char option_chars[] = {'-', c};
+    const std::string_view option(option_chars, 2);
+    const auto canonical = cli_option_id(option);
+    if (canonical.empty()) return false;
+    for (const auto& section : cli_help_sections()) {
+        for (const auto& entry : section.entries) {
+            bool contains_option = std::ranges::find(entry.hidden_aliases, option) !=
+                                  entry.hidden_aliases.end();
+            std::string_view names = entry.option;
+            while (!contains_option && !names.empty()) {
+                const auto comma = names.find(',');
+                auto name = names.substr(0, comma);
+                while (!name.empty() && name.front() == ' ') name.remove_prefix(1);
+                if (const auto space = name.find_first_of(" \t"); space != std::string_view::npos)
+                    name = name.substr(0, space);
+                contains_option = name == option;
+                if (comma == std::string_view::npos) break;
+                names.remove_prefix(comma + 1);
+            }
+            if (!contains_option) continue;
+            const auto form = cli_argument_form(entry);
+            return form == CliArgumentForm::Required ||
+                   form == CliArgumentForm::RequiredThenOptional;
+        }
+    }
+    return false;
+}
+
+}  // namespace
+
+[[noreturn]] auto usage(std::string_view prog_name, int status) -> void {
+    const bool use_color = simrv::util::terminal_color_enabled(STDOUT_FILENO);
+    auto style = [use_color](std::string_view ansi_code) -> std::string_view {
+        return use_color ? ansi_code : "";
+    };
+    using namespace simrv::util::ansi;
+    const auto& sections = cli_help_sections();
 
     auto executable = prog_name.substr(prog_name.find_last_of('/') == std::string_view::npos
                                            ? 0
@@ -1818,15 +1946,20 @@ auto needs_memory_image(const ParseResult& result) -> bool {
     std::size_t option_width = 0;
     for (const auto& section : sections)
         for (const auto& entry : section.entries)
-            option_width = std::max(option_width, entry.option.size());
+            if (entry.show_in_help) option_width = std::max(option_width, entry.option.size());
     const std::size_t description_width = std::max<std::size_t>(
         20, terminal_width > option_width + 6 ? terminal_width - option_width - 6 : 20);
 
     std::print(stdout, "{}SimRV{} — RISC-V simulator\n", style(kBoldFgBrightBlue), style(kReset));
     std::print(stdout, "{}Usage:{} {} [options]\n\n", style(kBold), style(kReset), executable);
     for (const auto& section : sections) {
+        if (std::ranges::none_of(section.entries,
+                                 [](const HelpEntry& entry) { return entry.show_in_help; })) {
+            continue;
+        }
         std::print(stdout, "{}{}{}\n", style(kBoldFgBrightBlue), section.title, style(kReset));
         for (const auto& entry : section.entries) {
+            if (!entry.show_in_help) continue;
             std::size_t position = 0;
             bool first_line = true;
             while (position < entry.description.size()) {

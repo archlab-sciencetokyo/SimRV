@@ -5,6 +5,9 @@
 
 int main() {
     simrv::core::MachineConfig config{};
-    return (!std::string_view(simrv::buildinfo::kVersion).empty() && config.execution.appmode) ? 0
-                                                                                               : 1;
+    const auto valid = config.validate();
+    return (!std::string_view(simrv::buildinfo::kVersion).empty() && config.execution.appmode &&
+            valid)
+               ? 0
+               : 1;
 }
