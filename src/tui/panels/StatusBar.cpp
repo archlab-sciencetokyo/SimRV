@@ -27,24 +27,25 @@ namespace {
 
 [[nodiscard]] auto speed_control_label(const simrv::core::Machine& machine, const Tui* tui,
                                        uint64_t kips, bool paused, int width) -> std::string {
+    const bool compact = framework::active_render_context().density == framework::Density::Compact;
     uint64_t const delay =
         tui ? tui->step_delay_us_.load(std::memory_order_relaxed)
             : (machine.telemetry_sink() ? machine.telemetry_sink()->step_delay_us() : 0);
     if (delay > 0) {
         double const hz = 1000000.0 / static_cast<double>(delay);
-        if (width < 60)
+        if (compact || width < 60)
             return hz >= 1000.0 ? std::format("{:.0f}kHz", hz / 1000.0)
                                 : std::format("{:.0f}Hz", hz);
         return hz >= 1000.0 ? std::format("SPEED {:.0f}kHz", hz / 1000.0)
                             : std::format("SPEED {:.0f}Hz", hz);
     }
     if (machine.is_realtime_pacing_enabled()) {
-        if (paused) return width < 60 ? "STEP" : "REALTIME (1x)";
-        return width < 60 ? "1x RT" : "REALTIME (1x)";
+        if (paused) return (compact || width < 60) ? "STEP" : "REALTIME (1x)";
+        return (compact || width < 60) ? "1x RT" : "REALTIME (1x)";
     }
-    if (paused) return width < 60 ? "STEP" : "MAX";
-    return width < 60 ? std::format("{:.1f}M", static_cast<double>(kips) / 1000.0)
-                      : std::format("{:.1f} MIPS", static_cast<double>(kips) / 1000.0);
+    if (paused) return (compact || width < 60) ? "STEP" : "MAX";
+    return (compact || width < 60) ? std::format("{:.1f}M", static_cast<double>(kips) / 1000.0)
+                                   : std::format("{:.1f} MIPS", static_cast<double>(kips) / 1000.0);
 }
 
 [[nodiscard]] auto format_metric_count(uint64_t value) -> std::string {
@@ -78,13 +79,18 @@ struct LeftHeaderLayout {
 
 [[nodiscard]] auto make_left_header_layout(const simrv::core::Machine& machine, int target_width,
                                            size_t selected_hart) -> LeftHeaderLayout {
+    const bool compact = framework::active_render_context().density == framework::Density::Compact;
     std::string binary_name = machine.binary_path();
     auto const last_slash = binary_name.find_last_of("/\\");
     if (last_slash != std::string::npos) binary_name = binary_name.substr(last_slash + 1);
     if (binary_name.empty()) binary_name = "application";
 
     LeftHeaderLayout result{.identity = " SimRV", .mode = {}};
-    if (target_width >= 45) result.identity += "  " + binary_name;
+    if (target_width >= 45 && !compact) result.identity += "  " + binary_name;
+    if (compact) {
+        result.mode = machine.runtime_profile.is_cycle_mode() ? "CA" : "IA";
+        return result;
+    }
     if (target_width < 35) return result;
 
     const bool cycle_mode = machine.runtime_profile.is_cycle_mode();
@@ -408,6 +414,29 @@ static const auto running_row2_entries = paused_row2_entries;
 namespace {
 
 [[nodiscard]] auto footer_entry_text(const FooterEntry& entry) -> std::string {
+    const bool compact = framework::active_render_context().density == framework::Density::Compact;
+    if (compact && entry.action.has_value()) {
+        switch (*entry.action) {
+            case TuiFooterAction::Step:
+                return "[F6] Step";
+            case TuiFooterAction::RunPause:
+                return std::string_view(entry.text).find("Pause") != std::string_view::npos
+                           ? "[F5] Pause"
+                           : "[F5] Run";
+            case TuiFooterAction::SetSpeed:
+                return "[f] Speed";
+            case TuiFooterAction::OpenToolPicker:
+                return "[Ctrl-W] Tools";
+            case TuiFooterAction::FocusNextPane:
+                return "[Tab] Panel";
+            case TuiFooterAction::SetBreakpoint:
+                return "[:] Break";
+            case TuiFooterAction::SetWatchpoint:
+                return "[w] Watch";
+            default:
+                break;
+        }
+    }
     if (entry.action == TuiFooterAction::RunPause &&
         std::string_view(entry.text).find("Pause") != std::string_view::npos) {
         return entry.text;
@@ -502,17 +531,18 @@ auto process_footer_row(std::span<const FooterEntry> entries, int inner_w, bool 
     -> std::pair<std::string, std::optional<TuiFooterAction>> {
     std::vector<FooterEntry> active_entries =
         filter_footer_entries(entries, inner_w, is_debug_mode, is_smp);
+    const bool compact = framework::active_render_context().density == framework::Density::Compact;
 
     int content_len = 0;
     for (const auto& e : active_entries) {
         std::string text = footer_entry_text(e);
         if (e.category == FooterCategory::Separator) {
-            text = "  ·  ";
+            text = compact ? " " : "  ·  ";
         }
         content_len += footer_display_width(text);
     }
     int pad = inner_w - content_len;
-    int left_pad = (pad > 0) ? (pad / 2) : 0;
+    int left_pad = (pad > 0 && !compact) ? (pad / 2) : 0;
     int right_pad = (pad > 0) ? (pad - left_pad) : 0;
 
     std::string row_str;
@@ -526,7 +556,7 @@ auto process_footer_row(std::span<const FooterEntry> entries, int inner_w, bool 
     for (const auto& e : active_entries) {
         std::string text = footer_entry_text(e);
         if (e.category == FooterCategory::Separator) {
-            text = "  ·  ";
+            text = compact ? " " : "  ·  ";
         }
         int item_len = footer_display_width(text);
         if (hit_col.has_value() && e.action.has_value()) {
@@ -660,6 +690,7 @@ auto StatusBar::get_footer_action_at_col(int col, int row_idx, int terminal_widt
 }
 
 auto StatusBar::render_row(int row_idx, int width) -> std::string {
+    const bool compact = framework::active_render_context().density == framework::Density::Compact;
     if (row_idx == 0) {
         // Header
         const size_t selected = tui_ ? tui_->selected_hart() : 0;
@@ -703,6 +734,21 @@ auto StatusBar::render_row(int row_idx, int width) -> std::string {
             left_info += std::format("   \033[1m{}{}\033[0m", kThemeSky, styled_mode);
         }
         left_info += "   " + status_badge;
+        if (status_override_.empty() && tui_ && tui_->mission_progress().enabled()) {
+            const auto& mission = tui_->mission_progress();
+            const auto cp = mission.checkpoint_symbol();
+            const bool reached = mission.checkpoint_reached();
+            std::string const mission_label =
+                cp.empty()
+                    ? std::format("STEP {}/{} [n/F12]", mission.step() + 1, mission.step_count())
+                : reached ? std::format("STEP {}/{} · ✓ {} [n/F12]", mission.step() + 1,
+                                        mission.step_count(), cp)
+                          : std::format("STEP {}/{} · {} [F5/F12]", mission.step() + 1,
+                                        mission.step_count(), cp);
+            left_info +=
+                " " + header_badge(mission_label, reached ? "\033[42;30m" : "\033[46;30m",
+                                   reached ? "\033[48;5;121;38;5;232m" : "\033[48;5;117;38;5;232m");
+        }
 
         std::string mode_prefix;
 
@@ -745,7 +791,10 @@ auto StatusBar::render_row(int row_idx, int width) -> std::string {
             std::string const metric_sep = std::format(" {}·\033[0m ", kThemeMuted);
 
             if (machine_.runtime_profile.is_cycle_mode()) {
-                if (inner_w >= 105) {
+                if (compact) {
+                    mid_text = std::format("{}i {}c", format_metric_count(icount),
+                                           format_metric_count(cycles));
+                } else if (inner_w >= 105) {
                     mid_text =
                         std::format("Cycles {}{}Inst {}{}CPI {:.2f}", format_metric_count(cycles),
                                     metric_sep, format_metric_count(icount), metric_sep, cpi);
@@ -759,6 +808,8 @@ auto StatusBar::render_row(int row_idx, int width) -> std::string {
                 } else {
                     mid_text = std::format("{} inst", format_metric_count(icount));
                 }
+            } else if (compact) {
+                mid_text = std::format("{} inst", format_metric_count(icount));
             } else {
                 if (inner_w >= 85) {
                     mid_text = std::format("Instructions {}", format_metric_count(icount));
@@ -802,6 +853,17 @@ auto StatusBar::render_row(int row_idx, int width) -> std::string {
                 screen += make_repeated_string("-", col_widths.widths[c]) + "+";
             }
             screen += "\033[0m\n";
+        } else if (compact) {
+            screen +=
+                std::string(kThemeBorder) + "┌" + make_repeated_string("─", inner_w) + "┐\033[0m\n";
+            screen += std::string(kThemeBorder) + "│\033[0m" + header_line +
+                      std::string(kThemeBorder) + "│\033[0m\n";
+            screen += std::string(kThemeBorder) + "├";
+            for (size_t c = 0; c < col_widths.count; ++c) {
+                screen += make_repeated_string("─", col_widths.widths[c]);
+                if (c + 1 < col_widths.count) screen += "┬";
+            }
+            screen += "┤\033[0m\n";
         } else {
             screen +=
                 std::string(kThemeBorder) + "╔" + make_repeated_string("═", inner_w) + "╗\033[0m\n";
@@ -826,6 +888,14 @@ auto StatusBar::render_row(int row_idx, int width) -> std::string {
                 process_footer_row(paused_row1_entries, width - 2, is_dbg, is_smp, false).first;
             footer_line2 =
                 process_footer_row(paused_row2_entries, width - 2, is_dbg, is_smp, true).first;
+        } else if (compact) {
+            std::string screen =
+                std::string(kThemeBorder) + "│\033[0m" + footer_line1 + kThemeBorder + "│\033[0m\n";
+            screen +=
+                std::string(kThemeBorder) + "│\033[0m" + footer_line2 + kThemeBorder + "│\033[0m\n";
+            screen +=
+                std::string(kThemeBorder) + "└" + make_repeated_string("─", width - 2) + "┘\033[0m";
+            return screen;
         } else {
             footer_line1 =
                 process_footer_row(running_row1_entries, width - 2, is_dbg, is_smp, false).first;

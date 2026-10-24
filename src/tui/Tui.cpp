@@ -215,6 +215,7 @@ Tui::Tui(simrv::core::Machine& machine) : machine_(machine), modal_(machine) {
     mission_.configure(machine_.mission_id(), machine_.binary_path());
     apply_mission_speed();
     sync_mission_checkpoint();
+    apply_mission_guidance_layout();
     modal_.set_mission_progress(&mission_);
     mission_revision_seen_ = mission_.revision();
     if (mission_.guidance()) modal_.open_mission_objective();
@@ -235,26 +236,27 @@ Tui::Tui(simrv::core::Machine& machine) : machine_(machine), modal_(machine) {
 Tui::~Tui() {
     shutdown();
     if (mission_breakpoint_addr_)
-        machine_.breakpoint_manager().remove_pc_breakpoint(
-            *mission_breakpoint_addr_, simrv::debug::BreakpointOwner::Mission);
+        machine_.breakpoint_manager().remove_pc_breakpoint(*mission_breakpoint_addr_,
+                                                           simrv::debug::BreakpointOwner::Mission);
 }
 
 void Tui::sync_mission_checkpoint() {
     if (mission_breakpoint_addr_) {
-        machine_.breakpoint_manager().remove_pc_breakpoint(
-            *mission_breakpoint_addr_, simrv::debug::BreakpointOwner::Mission);
+        machine_.breakpoint_manager().remove_pc_breakpoint(*mission_breakpoint_addr_,
+                                                           simrv::debug::BreakpointOwner::Mission);
         mission_breakpoint_addr_.reset();
     }
-    const auto checkpoint = mission_.checkpoint_symbol();
-    if (checkpoint.empty()) return;
+    const auto progress = mission_.checkpoint_progress();
+    if (!progress || progress->reached) return;
+    const auto checkpoint = std::string_view(progress->symbol);
     const auto address = machine_.symbol_table().lookup_name(std::string(checkpoint));
     if (!address) {
         set_status_override(std::format(
             "Mission checkpoint '{}' is missing from the ELF; run check_mission.py.", checkpoint));
         return;
     }
-    machine_.breakpoint_manager().add_pc_breakpoint(
-        *address, simrv::debug::BreakpointOwner::Mission);
+    machine_.breakpoint_manager().add_pc_breakpoint(*address,
+                                                    simrv::debug::BreakpointOwner::Mission);
     mission_breakpoint_addr_ = *address;
 }
 
@@ -265,15 +267,14 @@ void Tui::apply_mission_guidance_layout() {
         workbench_slots_.clear();
         for (const auto page : guidance->panels)
             workbench_slots_.push_back({.page = page, .scroll_offset = 0});
-        layout_ = workbench_slots_.size() == 1 ? TuiLayout::FullLeft
+        layout_ = workbench_slots_.size() == 1   ? TuiLayout::FullLeft
                   : workbench_slots_.size() == 2 ? TuiLayout::Split
                   : workbench_slots_.size() == 3 ? TuiLayout::ThreeColumn
-                                                  : TuiLayout::FourColumn;
+                                                 : TuiLayout::FourColumn;
         focused_slot_index_ = 0;
     } else {
-        const auto found = std::ranges::find_if(workbench_slots_, [&](const auto& slot) {
-            return slot.page == guidance->destination;
-        });
+        const auto found = std::ranges::find_if(
+            workbench_slots_, [&](const auto& slot) { return slot.page == guidance->destination; });
         if (found != workbench_slots_.end()) {
             focused_slot_index_ = static_cast<size_t>(found - workbench_slots_.begin());
         } else {
@@ -296,13 +297,19 @@ void Tui::refresh_mission_layout_notice() {
     const int required_width = framework::min_width_for_columns(panel_count);
     const bool fits = cached_term_width_ >= required_width &&
                       cached_term_height_ >= framework::kMinimumTerminalHeight;
+    const auto supported_by_width =
+        std::min<uint8_t>(panel_count, framework::max_supported_columns(cached_term_width_));
+    const auto visible_panels =
+        cached_term_height_ >= framework::kMinimumTerminalHeight ? supported_by_width : uint8_t{0};
     const auto prior = mission_layout_fits_;
     if (prior && *prior == fits) return;
     mission_layout_fits_ = fits;
     if (!fits) {
-        set_status_override(std::format(
-            "Mission layout needs at least {}x{}; current window is {}x{}. Resize or reduce this step's panels.",
-            required_width, framework::kMinimumTerminalHeight, cached_term_width_, cached_term_height_));
+        set_status_override(
+            std::format("Mission needs {}x{}; window is {}x{}, showing {}/{} panels. Resize or "
+                        "reduce this step's panels.",
+                        required_width, framework::kMinimumTerminalHeight, cached_term_width_,
+                        cached_term_height_, visible_panels, panel_count));
     } else if (prior && !*prior) {
         set_status_override("Mission panel layout now fits the current window.");
     }
@@ -603,6 +610,8 @@ void Tui::restore_preferences() {
     TuiPreferences preferences;
     if (!preferences.load(preferences_path_)) return;
     layout_ = preferences.layout;
+    density_mode_ = preferences.density_mode;
+    modal_.set_density_mode(density_mode_);
     workbench_slots_ = std::move(preferences.slots);
     if (workbench_slots_.empty())
         workbench_slots_ = {{.page = TuiRegPage::GPR, .scroll_offset = 0}};
@@ -623,6 +632,7 @@ void Tui::save_preferences() {
     preferences.column_widths = user_column_widths_;
     preferences.theme = get_active_theme_style();
     preferences.high_contrast = machine_.high_contrast_enabled();
+    preferences.density_mode = density_mode_;
     if (!preferences.save(preferences_path_)) {
         simrv::log::warn("Unable to save TUI preferences to {}", preferences_path_.string());
     }
@@ -680,8 +690,7 @@ void Tui::ui_render_loop(const std::stop_token& stop_token) {
             update();
             processing_ui_input_.store(false, std::memory_order_release);
             const auto now = std::chrono::steady_clock::now();
-            const auto interval =
-                std::chrono::milliseconds(1000 / kTuiTargetFps);
+            const auto interval = std::chrono::milliseconds(1000 / kTuiTargetFps);
             if (now >= next_sample) {
                 if (!is_paused() && backend_) backend_->request_sample();
                 next_sample = now + interval;
@@ -1340,11 +1349,24 @@ void Tui::render(bool force) {
     std::unique_lock<std::mutex> lock(tui_mutex_);
 
     const auto mission_revision = mission_.revision();
-    if (mission_revision != mission_revision_seen_ &&
-        (get_active_modal() == ModalType::None ||
-         get_active_modal() == ModalType::MissionObjective)) {
-        if (mission_.guidance()) modal_.open_mission_objective();
+    if (mission_revision != mission_revision_seen_) {
         mission_revision_seen_ = mission_revision;
+        if (get_active_modal() == ModalType::None && mission_.enabled() &&
+            mission_.checkpoint_reached()) {
+            const auto progress = mission_.checkpoint_progress();
+            const auto symbol = progress ? std::string_view(progress->symbol) : std::string_view{};
+            const auto msg = progress ? std::string_view(progress->message) : std::string_view{};
+            if (!msg.empty()) {
+                set_status_override(std::format(
+                    "Checkpoint '{}' after step {} reached: {}  [n] Next step  [F12] Objective",
+                    symbol, progress->after_step, msg));
+            } else if (!symbol.empty()) {
+                set_status_override(
+                    std::format("Checkpoint '{}' after step {} reached. Inspect workbench, then "
+                                "press [n] Next step or [F12] Objective.",
+                                symbol, progress ? progress->after_step : mission_.step() + 1));
+            }
+        }
     }
 
     std::string local_tx;
@@ -1498,11 +1520,15 @@ void Tui::render(bool force) {
     render_build_lines(inspector_width, console_width, term_content_rows, panel_mode);
     lock.unlock();
 
+    framework::ScopedRenderContext status_context(
+        {.width = term_width,
+         .height = term_height,
+         .density = framework::resolve_density(density_mode_, term_width, term_height)});
     std::vector<std::string> new_lines = compose_multi_frame_lines(
         frame, term_width, col_widths, status_bar_->render_row(0, term_width),
         status_bar_->render_row(1, term_width),
-        [this, total_cols = col_widths.count, multi_headers, num_rows](size_t col_idx, int row,
-                                                                       int width) -> std::string {
+        [this, total_cols = col_widths.count, multi_headers, num_rows, term_content_rows](
+            size_t col_idx, int row, int width) -> std::string {
             if (col_idx < workbench_slots_.size()) {
                 const auto page = workbench_slots_[col_idx].page;
                 const bool is_focused = (col_idx == focused_slot_index_);
@@ -1565,6 +1591,11 @@ void Tui::render(bool force) {
                     return std::string(static_cast<size_t>(std::max(0, width)), ' ');
                 }
                 inspector_pane_->set_page(page);
+                framework::ScopedRenderContext panel_context(
+                    {.width = width,
+                     .height = term_content_rows,
+                     .density =
+                         framework::resolve_density(density_mode_, width, term_content_rows)});
                 auto rendered = inspector_pane_->render_column_row(
                     row, width, static_cast<int>(col_idx), total_cols, is_focused, multi_headers);
                 if (selection_.is_active && selection_.pane == SelectionPane::InspectorPane &&
@@ -2497,9 +2528,9 @@ auto Tui::add_workbench_column() -> bool {
         return false;
     }
 
-    const std::array<TuiRegPage, 6> candidates = {
-        TuiRegPage::CONSOLE, TuiRegPage::STACK, TuiRegPage::TRACE,
-        TuiRegPage::PIPELINE, TuiRegPage::CACHE, TuiRegPage::GPR};
+    const std::array<TuiRegPage, 6> candidates = {TuiRegPage::CONSOLE, TuiRegPage::STACK,
+                                                  TuiRegPage::TRACE,   TuiRegPage::PIPELINE,
+                                                  TuiRegPage::CACHE,   TuiRegPage::GPR};
     TuiRegPage new_page = TuiRegPage::CONSOLE;
     for (auto c : candidates) {
         bool already_used = false;
@@ -2822,7 +2853,25 @@ void Tui::export_inspection_report() {
     }
 
     drain_trace_records();
-    const std::string report = make_inspection_report(machine_, selected_hart_, trace_buffer_);
+    std::optional<MissionEvidence> mission_evidence;
+    if (!mission_.lesson_id().empty()) {
+        auto reached = mission_.reached_checkpoint_events();
+        auto checkpoint_states = mission_.checkpoints_progress();
+        std::vector<MissionEvidence::CheckpointDetail> details;
+        details.reserve(reached.size());
+        for (const auto& symbol : reached) {
+            const auto checkpoint = std::ranges::find(checkpoint_states, symbol,
+                                                       &MissionCheckpointProgress::symbol);
+            details.push_back({symbol, checkpoint == checkpoint_states.end()
+                                           ? std::string{}
+                                           : checkpoint->message});
+        }
+        mission_evidence = MissionEvidence{.lesson_id = std::string(mission_.lesson_id()),
+                                           .reached_checkpoints = std::move(reached),
+                                           .checkpoint_details = std::move(details)};
+    }
+    const std::string report = make_inspection_report(
+        machine_, selected_hart_, trace_buffer_, mission_evidence ? &*mission_evidence : nullptr);
     const auto result = write_inspection_report(destination, report, inspection_overwrite_armed_);
     if (!result) {
         inspection_overwrite_armed_ = false;
@@ -3497,9 +3546,9 @@ auto Tui::handle_modal_breakpoint(ModalType mtype, uint8_t byte, TuiKey key) -> 
             machine_.breakpoint_manager().clear_watchpoints();
             sync_mission_checkpoint();
             modal_.open_notice("BREAKPOINTS CLEARED",
-                               mission_.enabled()
-                                   ? "Cleared user breakpoints and watchpoints. The active mission checkpoint remains configured."
-                                   : "Cleared all breakpoints and watchpoints.",
+                               mission_.enabled() ? "Cleared user breakpoints and watchpoints. The "
+                                                    "active mission checkpoint remains configured."
+                                                  : "Cleared all breakpoints and watchpoints.",
                                false);
             render(true);
         } else if (key == simrv::tui::TuiKey::Tab || byte == 'j' || byte == 'J') {
@@ -3523,7 +3572,7 @@ auto Tui::handle_modal_keyboard_input(uint8_t byte, TuiKey key) -> bool {
     auto mtype = get_active_modal();
     if (mtype == ModalType::MissionObjective) {
         if (byte == 'y' || byte == 'Y') {
-            modal_.toggle_mission_why();
+            modal_.cycle_mission_hint();
             render(true);
             return true;
         }
@@ -3537,37 +3586,50 @@ auto Tui::handle_modal_keyboard_input(uint8_t byte, TuiKey key) -> bool {
             close_modal();
             return true;
         }
-        if (byte == ' ') {
+        if (key == TuiKey::F5) {
             if (mission_.completed()) return true;
-            if (mission_.advance_step()) {
-                apply_mission_speed();
-                sync_mission_checkpoint();
-                if (const auto guidance = mission_.guidance()) {
-                    apply_mission_guidance_layout();
-                    set_status_override("Next instruction. Checkpoint status follows the guest program.");
-                } else {
-                    set_status_override("Mission instructions complete. Review your observations.");
-                }
-            } else {
-                set_status_override(mission_.checkpoint_symbol().empty()
-                                        ? "No further instruction is available."
-                                        : "Checkpoint not reached. Follow the instruction, then continue.");
+            if (mission_.checkpoint_reached()) {
+                set_status_override("Checkpoint reached. Press Space or n for the next instruction.");
+                render(true);
+                return true;
             }
+            close_modal();
+            execute_footer_action(TuiFooterAction::RunPause);
+            return true;
+        }
+        if (key == TuiKey::F6) {
+            if (mission_.completed()) return true;
+            close_modal();
+            execute_footer_action(TuiFooterAction::Step);
+            return true;
+        }
+        if (byte == ' ' || byte == 'n' || byte == 'N') {
+            if (mission_.completed()) return true;
+            (void)advance_mission_step();
+            render(true);
+            return true;
+        }
+        if (byte == 'p' || byte == 'P' || byte == 'b' || byte == 'B' || key == TuiKey::Backspace ||
+            byte == 8 || byte == 127) {
+            (void)previous_mission_step();
             render(true);
             return true;
         }
         if (key == TuiKey::F12) {
-            set_status_override(mission_.checkpoint_symbol().empty()
-                                    ? "No checkpoint is attached to this step."
-                                    : (mission_.checkpoint_reached()
-                                           ? "Checkpoint reached. Press Space for the next instruction."
-                                           : "Objective checkpoint not reached yet."));
-            render(true);
+            // Checkpoint progress is always shown in the objective modal.
             return true;
         }
-        if (byte == 'z' || byte == 'Z') {
-            if (byte == 'z') dismiss_mission();
-            else restart_mission();
+        if (byte == 'r' || byte == 'R') {
+            restart_mission();
+            return true;
+        }
+        if (!mission_.completed() && (byte == 'd' || byte == 'D')) {
+            dismiss_mission();
+            return true;
+        }
+        if (mission_.completed() && (byte == 'q' || byte == 'Q' || key == TuiKey::F10)) {
+            close_modal();
+            machine_.request_exit();
             return true;
         }
         if (key == TuiKey::Esc || byte == 27) {
@@ -4117,7 +4179,36 @@ auto Tui::handle_normal_keyboard_input(uint8_t byte, TuiKey key) -> void {
         return;
     }
 
+    if (mission_.enabled() || mission_.completed()) {
+        if ((byte == 'n' || byte == 'N') && machine_.num_harts() <= 1) {
+            if (advance_mission_step() && mission_.guidance()) {
+                modal_.open_mission_objective();
+            }
+            render(true);
+            return;
+        }
+        if ((byte == 'p' || byte == 'P') && mission_.can_previous_step()) {
+            if (previous_mission_step() && mission_.guidance()) {
+                modal_.open_mission_objective();
+            }
+            render(true);
+            return;
+        }
+        if (mission_.completed() && (byte == 'r' || byte == 'R')) {
+            restart_mission();
+            return;
+        }
+    }
+
     if (const auto action = Keybindings::match(key)) {
+        if (*action == KeyAction::RunPause &&
+            (mission_.completed() || mission_.checkpoint_reached())) {
+            set_status_override(mission_.completed()
+                                    ? "Mission complete. Review, restart with r, or exit with q."
+                                    : "Checkpoint reached. Press n for the next instruction before running again.");
+            render(true);
+            return;
+        }
         execute_key_action(*action);
         return;
     }
@@ -4152,7 +4243,6 @@ auto Tui::handle_normal_keyboard_input(uint8_t byte, TuiKey key) -> void {
         }
         return;
     }
-
 }
 
 auto Tui::search_terminal_scrollback(bool reverse) -> bool {
@@ -4182,14 +4272,81 @@ auto Tui::search_terminal_scrollback(bool reverse) -> bool {
     return false;
 }
 
-void Tui::pause_loop() {
-    if (mission_.enabled()) {
-        const auto pc = machine_.primary_hart().state().pc;
-        if (const auto symbol = machine_.symbol_table().lookup_symbol(pc);
-            symbol && symbol->is_exact()) {
-            mission_.observe_symbol(symbol->name);
+void Tui::observe_current_pc_symbol() {
+    if (!mission_.enabled()) return;
+    const auto pc = machine_.primary_hart().state().pc;
+    if (const auto symbol = machine_.symbol_table().lookup_symbol(pc);
+        symbol && symbol->is_exact()) {
+        mission_.observe_symbol(symbol->name);
+    }
+    if (mission_.revision() != mission_revision_seen_) {
+        mission_revision_seen_ = mission_.revision();
+        if (get_active_modal() == ModalType::None && mission_.enabled() &&
+            mission_.checkpoint_reached()) {
+            const auto progress = mission_.checkpoint_progress();
+            const auto symbol = progress ? std::string_view(progress->symbol) : std::string_view{};
+            const auto msg = progress ? std::string_view(progress->message) : std::string_view{};
+            if (!msg.empty()) {
+                set_status_override(std::format(
+                    "Checkpoint '{}' after step {} reached: {}  [n] Next step  [F12] Objective",
+                    symbol, progress->after_step, msg));
+            } else if (!symbol.empty()) {
+                set_status_override(
+                    std::format("Checkpoint '{}' after step {} reached. Inspect workbench, then "
+                                "press [n] Next step or [F12] Objective.",
+                                symbol, progress ? progress->after_step : mission_.step() + 1));
+            }
         }
     }
+}
+
+auto Tui::advance_mission_step() -> bool {
+    if (mission_.completed()) return false;
+    if (mission_.advance_step()) {
+        apply_mission_speed();
+        sync_mission_checkpoint();
+        observe_current_pc_symbol();
+        mission_revision_seen_ = mission_.revision();
+        if (mission_.completed()) {
+            apply_mission_guidance_layout();
+            set_status_override("Mission complete. Review the result, or restart with r.");
+        } else if (mission_.guidance()) {
+            apply_mission_guidance_layout();
+            set_status_override("Next instruction. Checkpoint status follows the guest program.");
+        }
+        return true;
+    }
+    set_status_override(mission_.checkpoint_symbol().empty()
+                            ? "No further instruction is available."
+                            : "Checkpoint not reached. Follow the instruction, then continue.");
+    return false;
+}
+
+auto Tui::previous_mission_step() -> bool {
+    if (!mission_.previous_step()) return false;
+    apply_mission_speed();
+    sync_mission_checkpoint();
+    observe_current_pc_symbol();
+    mission_revision_seen_ = mission_.revision();
+    if (mission_.guidance()) {
+        apply_mission_guidance_layout();
+        set_status_override(
+            std::format("Returned to step {} of {}.", mission_.step() + 1, mission_.step_count()));
+    }
+    return true;
+}
+
+void Tui::clear_trace_buffers() {
+    for (auto& ring : flight_rings_) {
+        ring.write_sequence.store(0, std::memory_order_relaxed);
+    }
+    flight_sequence_.store(0, std::memory_order_relaxed);
+    rendered_flight_sequences_.fill(0);
+    trace_buffer_.clear();
+}
+
+void Tui::pause_loop() {
+    observe_current_pc_symbol();
     set_paused(true);
     update_cache();
     render(true);
@@ -4206,10 +4363,25 @@ void Tui::dismiss_mission() {
 }
 
 void Tui::restart_mission() {
+    if (!is_paused()) pause_loop();
+    if (machine_.primary_hart().state().pc != 0 || machine_.resolved_start_pc() != 0 ||
+        machine_.is_shutdown_) {
+        machine_.reset_state();
+        if (machine_.resolved_start_pc() != 0) {
+            machine_.primary_hart().state().pc = machine_.resolved_start_pc();
+        }
+        clear_trace_buffers();
+        update_cache();
+        if (ui_running_.load(std::memory_order_acquire)) {
+            machine_.request_reboot();
+        }
+    }
     mission_.restart();
     apply_mission_speed();
     sync_mission_checkpoint();
+    observe_current_pc_symbol();
     apply_mission_guidance_layout();
+    mission_revision_seen_ = mission_.revision();
     if (mission_.guidance()) modal_.open_mission_objective();
     set_status_override("Mission restarted at objective 1.");
     render(true);
@@ -4290,6 +4462,7 @@ void Tui::execute_footer_action(TuiFooterAction action) {
             } else {
                 if (!is_paused()) pause_loop();
                 machine_.step_sync();
+                observe_current_pc_symbol();
                 update_cache();
                 render(true);
             }
@@ -4514,12 +4687,6 @@ void Tui::execute_key_action(KeyAction action) {
             open_modal(ModalType::LogViewer);
             break;
         case KeyAction::CheckMissionObjective:
-            if (mission_.guidance()) open_modal(ModalType::MissionObjective);
-            break;
-        case KeyAction::RevealMissionWhy:
-            if (mission_.guidance()) open_modal(ModalType::MissionObjective);
-            break;
-        case KeyAction::AdvanceMissionStep:
             if (mission_.guidance()) open_modal(ModalType::MissionObjective);
             break;
         case KeyAction::OpenTracePage:
@@ -4946,6 +5113,19 @@ auto Tui::consume_control_sequence(uint8_t first_byte) -> bool {
         render(true);
         return true;
     }
+
+    struct winsize mouse_size{};
+    ioctl(STDOUT_FILENO, TIOCGWINSZ, &mouse_size);
+    const int mouse_width = cached_term_width_ > 0
+                                ? cached_term_width_
+                                : (mouse_size.ws_col > 0 ? mouse_size.ws_col : 80);
+    const int mouse_height = cached_term_height_ > 0
+                                 ? cached_term_height_
+                                 : (mouse_size.ws_row > 0 ? mouse_size.ws_row : 24);
+    framework::ScopedRenderContext mouse_render_context(
+        {.width = mouse_width,
+         .height = mouse_height,
+         .density = framework::resolve_density(density_mode_, mouse_width, mouse_height)});
 
     // 1. Mouse reporting
     int button = 0;

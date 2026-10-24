@@ -2,8 +2,8 @@
 #include "simrv/tui/TuiMission.hpp"
 
 #include <algorithm>
-#include <charconv>
 #include <cctype>
+#include <charconv>
 #include <format>
 #include <fstream>
 
@@ -32,14 +32,29 @@ auto unquote(std::string_view value) -> std::optional<std::string> {
         }
         if (++i >= value.size()) return std::nullopt;
         switch (value[i]) {
-            case '"': decoded.push_back('"'); break;
-            case '\\': decoded.push_back('\\'); break;
-            case 'n': decoded.push_back('\n'); break;
-            case 'r': decoded.push_back('\r'); break;
-            case 't': decoded.push_back('\t'); break;
-            case 'b': decoded.push_back('\b'); break;
-            case 'f': decoded.push_back('\f'); break;
-            default: return std::nullopt;
+            case '"':
+                decoded.push_back('"');
+                break;
+            case '\\':
+                decoded.push_back('\\');
+                break;
+            case 'n':
+                decoded.push_back('\n');
+                break;
+            case 'r':
+                decoded.push_back('\r');
+                break;
+            case 't':
+                decoded.push_back('\t');
+                break;
+            case 'b':
+                decoded.push_back('\b');
+                break;
+            case 'f':
+                decoded.push_back('\f');
+                break;
+            default:
+                return std::nullopt;
         }
     }
     return decoded;
@@ -80,6 +95,7 @@ auto basename(std::string_view path) -> std::string_view {
 
 auto MissionProgress::load(std::string_view mission_path) -> bool {
     mission_path_ = mission_path;
+    lesson_id_.clear();
     expected_program_.clear();
     description_.clear();
     goal_.clear();
@@ -87,6 +103,10 @@ auto MissionProgress::load(std::string_view mission_path) -> bool {
     steps_.clear();
     checkpoints_.clear();
     speed_hz_ = 30;
+    {
+        std::scoped_lock lock(checkpoint_events_mutex_);
+        checkpoint_events_.clear();
+    }
     std::ifstream input(mission_path_);
     if (!input) {
         detail_ = std::format("Cannot open mission file: {}", mission_path_);
@@ -139,7 +159,7 @@ auto MissionProgress::load(std::string_view mission_path) -> bool {
         if (text == "[mission]" || text == "[step]" || text == "[checkpoint]") {
             if (!finish_step() || !finish_checkpoint()) return false;
             section = text == "[mission]" ? Section::Mission
-                      : text == "[step]" ? Section::Step
+                      : text == "[step]"  ? Section::Step
                                           : Section::Checkpoint;
             step_open = section == Section::Step;
             checkpoint_open = section == Section::Checkpoint;
@@ -160,6 +180,8 @@ auto MissionProgress::load(std::string_view mission_path) -> bool {
                 saw_version = true;
             } else if (key == "program") {
                 expected_program_ = *value;
+            } else if (key == "id") {
+                lesson_id_ = *value;
             } else if (key == "description") {
                 description_ = *value;
             } else if (key == "goal") {
@@ -180,14 +202,16 @@ auto MissionProgress::load(std::string_view mission_path) -> bool {
                 step.guidance.title = *value;
             else if (key == "prompt")
                 step.guidance.prompt = *value;
+            else if (key == "learn")
+                step.guidance.learn = *value;
+            else if (key == "hint")
+                step.guidance.hint = *value;
             else if (key == "why")
                 step.guidance.why = *value;
             else if (key == "speed_hz") {
                 step.speed_hz = parse_mission_speed(*value);
-                if (!step.speed_hz)
-                    return fail("speed_hz must be an integer from 0 to 1000000");
-            }
-            else if (key == "view") {
+                if (!step.speed_hz) return fail("speed_hz must be an integer from 0 to 1000000");
+            } else if (key == "view") {
                 const auto page = page_for(*value);
                 if (!page) return fail("unknown step view");
                 step.guidance.destination = *page;
@@ -273,12 +297,17 @@ void MissionProgress::configure(std::string_view mission_path, std::string_view 
     if (mission_path.empty()) {
         mission_path_.clear();
         expected_program_.clear();
+        lesson_id_.clear();
         description_.clear();
         goal_.clear();
         detail_.clear();
         speed_hz_ = 30;
         steps_.clear();
         checkpoints_.clear();
+        {
+            std::scoped_lock lock(checkpoint_events_mutex_);
+            checkpoint_events_.clear();
+        }
         status_.store(MissionStatus::Inactive, std::memory_order_relaxed);
         return;
     }
@@ -299,55 +328,146 @@ void MissionProgress::restart() {
         status() != MissionStatus::ProgramMismatch) {
         step_.store(0, std::memory_order_relaxed);
         checkpoint_reached_.store(false, std::memory_order_relaxed);
+        {
+            std::scoped_lock lock(checkpoint_events_mutex_);
+            checkpoint_events_.clear();
+        }
         revision_.fetch_add(1, std::memory_order_relaxed);
         status_.store(MissionStatus::Active, std::memory_order_relaxed);
     }
 }
 
 void MissionProgress::observe_symbol(std::string_view exact_symbol) {
-    if (!enabled() || exact_symbol != checkpoint_symbol()) return;
-    if (!checkpoint_reached_.exchange(true, std::memory_order_relaxed))
-        revision_.fetch_add(1, std::memory_order_relaxed);
+    if (!enabled()) return;
+    const auto checkpoint = checkpoint_progress();
+    if (!checkpoint || checkpoint->reached || exact_symbol != checkpoint->symbol) return;
+    {
+        std::scoped_lock lock(checkpoint_events_mutex_);
+        if (std::ranges::find(checkpoint_events_, exact_symbol) != checkpoint_events_.end()) return;
+        checkpoint_events_.emplace_back(exact_symbol);
+    }
+    checkpoint_reached_.store(true, std::memory_order_relaxed);
+    revision_.fetch_add(1, std::memory_order_relaxed);
 }
 
-auto MissionProgress::advance_step() noexcept -> bool {
+auto MissionProgress::reached_checkpoint_events() const -> std::vector<std::string> {
+    std::scoped_lock lock(checkpoint_events_mutex_);
+    return checkpoint_events_;
+}
+
+auto MissionProgress::advance_step() -> bool {
     if (!can_advance_step()) return false;
     const auto next_step = step() + 1;
-    checkpoint_reached_.store(false, std::memory_order_relaxed);
     step_.store(next_step, std::memory_order_relaxed);
-    revision_.fetch_add(1, std::memory_order_relaxed);
     if (next_step >= steps_.size()) {
+        checkpoint_reached_.store(false, std::memory_order_relaxed);
         status_.store(MissionStatus::Complete, std::memory_order_relaxed);
+    } else {
+        const auto next_symbol = checkpoint_symbol();
+        bool already_reached = false;
+        if (!next_symbol.empty()) {
+            std::scoped_lock lock(checkpoint_events_mutex_);
+            already_reached =
+                std::ranges::find(checkpoint_events_, next_symbol) != checkpoint_events_.end();
+        }
+        checkpoint_reached_.store(already_reached, std::memory_order_relaxed);
     }
+    revision_.fetch_add(1, std::memory_order_relaxed);
     return true;
 }
 
 auto MissionProgress::can_advance_step() const noexcept -> bool {
     if (!enabled()) return false;
-    if (checkpoint_symbol().empty()) return true;
-    return checkpoint_reached();
+    const size_t boundary = step() + 1;
+    for (const auto& checkpoint : checkpoints_) {
+        if (checkpoint.after_step != boundary) continue;
+        std::scoped_lock lock(checkpoint_events_mutex_);
+        return std::ranges::find(checkpoint_events_, checkpoint.symbol) != checkpoint_events_.end();
+    }
+    return true;
+}
+
+auto MissionProgress::previous_step() -> bool {
+    if (!can_previous_step()) return false;
+    const auto prev_step = step() - 1;
+    status_.store(MissionStatus::Active, std::memory_order_relaxed);
+    step_.store(prev_step, std::memory_order_relaxed);
+    const auto prev_symbol = checkpoint_symbol();
+    bool already_reached = false;
+    if (!prev_symbol.empty()) {
+        std::scoped_lock lock(checkpoint_events_mutex_);
+        already_reached =
+            std::ranges::find(checkpoint_events_, prev_symbol) != checkpoint_events_.end();
+    }
+    checkpoint_reached_.store(already_reached, std::memory_order_relaxed);
+    revision_.fetch_add(1, std::memory_order_relaxed);
+    return true;
+}
+
+auto MissionProgress::can_previous_step() const noexcept -> bool {
+    return (enabled() || completed()) && step() > 0 && !steps_.empty();
 }
 
 auto MissionProgress::checkpoint_symbol() const noexcept -> std::string_view {
-    const auto current_step = step();
-    if (!enabled() || current_step >= steps_.size()) return {};
-    const size_t after_step = current_step + 1;
+    if ((!enabled() && !completed()) || steps_.empty()) return {};
+    const size_t next_boundary = step() + 1;
+    const MissionCheckpoint* next = nullptr;
     for (const auto& checkpoint : checkpoints_)
-        if (checkpoint.after_step == after_step) return checkpoint.symbol;
-    return {};
+        if (checkpoint.after_step >= next_boundary &&
+            (next == nullptr || checkpoint.after_step < next->after_step))
+            next = &checkpoint;
+    return next ? std::string_view(next->symbol) : std::string_view{};
 }
 
 auto MissionProgress::checkpoint_message() const noexcept -> std::string_view {
-    const size_t after_step = step() + 1;
+    if ((!enabled() && !completed()) || steps_.empty()) return {};
+    const size_t next_boundary = step() + 1;
+    const MissionCheckpoint* next = nullptr;
     for (const auto& checkpoint : checkpoints_)
-        if (checkpoint.after_step == after_step) return checkpoint.message;
-    return {};
+        if (checkpoint.after_step >= next_boundary &&
+            (next == nullptr || checkpoint.after_step < next->after_step))
+            next = &checkpoint;
+    return next ? std::string_view(next->message) : std::string_view{};
+}
+
+auto MissionProgress::checkpoint_progress() const -> std::optional<MissionCheckpointProgress> {
+    if ((!enabled() && !completed()) || steps_.empty()) return std::nullopt;
+    const size_t next_boundary = step() + 1;
+    std::scoped_lock lock(checkpoint_events_mutex_);
+    const MissionCheckpoint* next = nullptr;
+    for (const auto& checkpoint : checkpoints_) {
+        if (checkpoint.after_step >= next_boundary &&
+            (next == nullptr || checkpoint.after_step < next->after_step))
+            next = &checkpoint;
+    }
+    if (next == nullptr) return std::nullopt;
+    const bool reached = std::ranges::find(checkpoint_events_, next->symbol) != checkpoint_events_.end();
+    return MissionCheckpointProgress{next->symbol, next->message, next->after_step, reached};
+}
+
+auto MissionProgress::checkpoints_progress() const -> std::vector<MissionCheckpointProgress> {
+    std::scoped_lock lock(checkpoint_events_mutex_);
+    std::vector<MissionCheckpointProgress> progress;
+    progress.reserve(checkpoints_.size());
+    for (const auto& checkpoint : checkpoints_) {
+        const bool reached = std::ranges::find(checkpoint_events_, checkpoint.symbol) != checkpoint_events_.end();
+        progress.push_back({checkpoint.symbol, checkpoint.message, checkpoint.after_step, reached});
+    }
+    std::ranges::sort(progress, {}, &MissionCheckpointProgress::after_step);
+    return progress;
+}
+
+auto MissionProgress::reached_checkpoint_count() const -> size_t {
+    std::scoped_lock lock(checkpoint_events_mutex_);
+    return checkpoint_events_.size();
 }
 
 auto MissionProgress::guidance() const -> std::optional<MissionGuidance> {
     if (status() == MissionStatus::LoadError) {
         return MissionGuidance{.title = "Mission could not load",
+                               .learn = {},
                                .prompt = detail_,
+                               .hint = {},
                                .why = "Fix the lesson file, then restart.",
                                .destination = TuiRegPage::GPR,
                                .panels = {},
@@ -355,7 +475,9 @@ auto MissionProgress::guidance() const -> std::optional<MissionGuidance> {
     }
     if (status() == MissionStatus::ProgramMismatch) {
         return MissionGuidance{.title = "Mission needs its example",
+                               .learn = {},
                                .prompt = detail_,
+                               .hint = {},
                                .why = "Named checkpoints make the observation sequence repeatable.",
                                .destination = TuiRegPage::GPR,
                                .panels = {},
@@ -364,16 +486,20 @@ auto MissionProgress::guidance() const -> std::optional<MissionGuidance> {
     if (status() == MissionStatus::Complete) {
         return MissionGuidance{
             .title = "Mission complete",
-            .prompt = "Review Trace, registers, and stack before restarting.",
+            .learn = {},
+            .prompt =
+                "Review the result and restored stack. Restart the lesson or exit when ready.",
+            .hint = {},
             .why = "You connected branch, loop, call, and return behavior to architectural state.",
             .destination = TuiRegPage::TRACE,
-            .panels = {},
+            .panels = {TuiRegPage::TRACE, TuiRegPage::GPR, TuiRegPage::STACK},
             .glossary_topic = 0};
     }
     const auto current_step = step();
     if (!enabled() || current_step >= steps_.size()) return std::nullopt;
     auto guidance = steps_[current_step].guidance;
-    guidance.title = std::format("{}/{} · {}", current_step + 1, steps_.size(), guidance.title);
+    guidance.title =
+        std::format("Step {} of {} · {}", current_step + 1, steps_.size(), guidance.title);
     return guidance;
 }
 

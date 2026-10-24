@@ -105,7 +105,9 @@ auto InspectorPane::render_machine_performance_stats(const simrv::core::CPU& cpu
                                                          1000.0 / active_runtime_)
                                  : 0;
         if (width >= 52) {
-            const bool compact = width < 70;
+            const bool compact =
+                framework::active_render_context().density == framework::Density::Compact ||
+                width < 70;
             const std::string average_label = compact ? "avg" : "average";
             const std::string suffix =
                 std::format("]  {}: {}", average_label, format_speed(average));
@@ -150,7 +152,9 @@ auto InspectorPane::render_sampled_machine_performance_stats(
                                         active_runtime_)
                 : 0;
         if (width >= 52) {
-            const bool compact = width < 70;
+            const bool compact =
+                framework::active_render_context().density == framework::Density::Compact ||
+                width < 70;
             const std::string average_label = compact ? "avg" : "average";
             const std::string suffix =
                 std::format("]  {}: {}", average_label, format_speed(average));
@@ -198,7 +202,9 @@ auto InspectorPane::render_cycle_accurate_stats(const simrv::core::TuiExecutionS
                                         active_runtime_)
                 : 0;
         if (width >= 52) {
-            const bool compact = width < 70;
+            const bool compact =
+                framework::active_render_context().density == framework::Density::Compact ||
+                width < 70;
             const std::string average_label = compact ? "avg" : "average";
             const std::string suffix =
                 std::format("]  {}: {}", average_label, format_speed(average));

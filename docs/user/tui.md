@@ -108,6 +108,18 @@ The TUI provides responsive hotkeys for simulation control and state inspection:
 
 ---
 
+### Panel Density
+
+The Settings modal includes **Panel Density** with three choices:
+
+- **Auto** uses compact presentation when a panel is narrower than 60 columns or shorter than 24 rows. Each workbench panel is evaluated independently.
+- **Compact** uses abbreviated labels, tighter spacing, and reflowed content wherever space allows.
+- **Comfortable** keeps the fuller labels and spacing wherever the available panel size allows.
+
+Density changes presentation only. Values remain available in compact panels by scrolling, and the guest console text is not rewritten. The choice is saved with the other TUI preferences; preference files created before this setting default to Auto.
+
+---
+
 ## 4. Input Routing & Terminal Focus
 
 To avoid dropping keystrokes or clashing between simulator commands and guest shell commands, SimRV enforces an intuitive, state-dependent input routing model:
@@ -141,7 +153,7 @@ simrv --mission examples/isa/lessons/control-flow-calls.mission -m control-flow-
 ```
 
 - **Structured Missions (`--mission`)**: Load instructional steps and independent named checkpoints that focus relevant inspector panels. See the [Instructor Guide](classroom.md#5-instructor-guide-authoring-deploying-classroom-missions).
-- **Mission Controls**: Press `F12` to reopen/check the current step, `y` to reveal its `why` rationale, `Space` to advance instructions (stopping at an unreached checkpoint), and `Enter` to hide the modal and show the workbench. `z` dismisses the mission; `Z` restarts it.
+- **Mission Controls**: The modal shows the lesson goal, the step learning target, the task, and the next checkpoint boundary. Press `F12` to open or reopen it. `F5` runs to the next unreached checkpoint, even when its boundary is a later instruction; reaching it records progress without moving the instruction cursor. `F5` never advances an instruction and is blocked once the checkpoint is reached. Press `Space` / `n` in the modal to advance instructions; an unreached checkpoint only blocks crossing its `after_step` boundary. `F6` single-steps, `p` reviews the previous instruction, and `y` cycles hidden → hint → `why`. `Enter` / `Esc` hide the modal and `d` dismisses the mission. Outside the modal, `Space` retains its simulator step action. Completion shows reached/total checkpoint counts and explains the explicit paused `x` report export for TA review.
 - **Architecture Glossary**: Press `?` to open the educational glossary jump-linked to the architectural concept represented by the active inspector view (e.g., pipeline hazard interlocks, cache associativity, or virtual memory translation).
 
 ---

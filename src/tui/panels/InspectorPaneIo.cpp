@@ -50,20 +50,20 @@ auto InspectorPane::render_io_stats(const simrv::core::CPU& cpu, int logical_row
                             width);
     }
     if (logical_row == 1) {
-        if (width < 50) {
+        if (framework::active_render_context().density == framework::Density::Compact ||
+            width < 50) {
             return format_to_width(
                 std::format("  {}Space:\033[0m {}DRAM\033[0m │ {}{}\033[0m", kThemeText, kThemeMint,
                             kThemeSky, is_mmio ? "MMIO" : "ECAM"),
                 width);
         }
         const auto topology =
-            is_mmio
-                ? std::format("\033[38;5;117mMMIO {:#x}..{:#x}",
-                              static_cast<uint64_t>(SIMRV_PLATFORM_VIRTIO_BLOCK_BASE),
-                              static_cast<uint64_t>(SIMRV_PLATFORM_VIRTIO_NET_BASE))
-                : std::format("\033[38;5;117mECAM {:#x} │ BAR {:#x}",
-                              static_cast<uint64_t>(SIMRV_PLATFORM_PCIE_ECAM_BASE),
-                              static_cast<uint64_t>(SIMRV_PLATFORM_PCIE_WINDOW_BASE));
+            is_mmio ? std::format("\033[38;5;117mMMIO {:#x}..{:#x}",
+                                  static_cast<uint64_t>(SIMRV_PLATFORM_VIRTIO_BLOCK_BASE),
+                                  static_cast<uint64_t>(SIMRV_PLATFORM_VIRTIO_NET_BASE))
+                    : std::format("\033[38;5;117mECAM {:#x} │ BAR {:#x}",
+                                  static_cast<uint64_t>(SIMRV_PLATFORM_PCIE_ECAM_BASE),
+                                  static_cast<uint64_t>(SIMRV_PLATFORM_PCIE_WINDOW_BASE));
         return format_to_width(
             std::format("  {}Space:\033[0m {}DRAM {:#010x}\033[0m │ {}\033[0m", kThemeText,
                         kThemeMint, static_cast<uint64_t>(memory::kDramBaseAddress), topology),
@@ -88,7 +88,8 @@ auto InspectorPane::render_io_stats(const simrv::core::CPU& cpu, int logical_row
         uint32_t irq_stat = platform.disk_isr;
         uint64_t cap_sec = platform.disk_capacity_sectors;
         auto status_str = format_dev_status(status);
-        if (width < 50) {
+        if (framework::active_render_context().density == framework::Density::Compact ||
+            width < 50) {
             return format_to_width(
                 std::format("  {}Blk:\033[0m {} │ {}Cap:\033[0m {}{}MB\033[0m", kThemeText,
                             status_str, kThemeText, kThemeVal, (cap_sec * 512) / (1024 * 1024)),
@@ -106,7 +107,8 @@ auto InspectorPane::render_io_stats(const simrv::core::CPU& cpu, int logical_row
         std::string mac_str = "52:54:00:12:34:56";
         size_t tx_pkts = platform.network_tx_packets;
         auto status_str = format_dev_status(net_status);
-        if (width < 50) {
+        if (framework::active_render_context().density == framework::Density::Compact ||
+            width < 50) {
             return format_to_width(
                 std::format("  {}Net:\033[0m {} │ {}Tx:\033[0m {}{}\033[0m", kThemeText, status_str,
                             kThemeText, kThemeMint, tx_pkts),
@@ -125,7 +127,8 @@ auto InspectorPane::render_io_stats(const simrv::core::CPU& cpu, int logical_row
         uint32_t c_status = platform.console_status;
         auto c_str = format_dev_status(c_status);
 
-        if (width < 50) {
+        if (framework::active_render_context().density == framework::Density::Compact ||
+            width < 50) {
             return format_to_width(
                 std::format("  {}Console:\033[0m {} │ {}UART:\033[0m \033[38;5;120m115200\033[0m",
                             kThemeText, c_str, kThemeText),
@@ -150,7 +153,8 @@ auto InspectorPane::render_io_stats(const simrv::core::CPU& cpu, int logical_row
         std::string dma_str =
             platform.dma_busy ? "\033[38;5;215mBUSY\033[0m" : "\033[38;5;120mREADY\033[0m";
 
-        if (width < 65) {
+        if (framework::active_render_context().density == framework::Density::Compact ||
+            width < 65) {
             return format_to_width(
                 std::format(
                     "  {}RNG:\033[0m {} │ {}GPU:\033[0m {} │ {}Snd:\033[0m {} │ {}DMA:\033[0m {}",
@@ -209,7 +213,8 @@ auto InspectorPane::render_io_stats(const simrv::core::CPU& cpu, int logical_row
     }
     if (logical_row == 14) {
         const auto& c_stats = machine_.memory().system_bus().coherence_hub().stats();
-        if (width < 50) {
+        if (framework::active_render_context().density == framework::Density::Compact ||
+            width < 50) {
             return format_to_width(
                 std::format(
                     "  {}Acq:\033[0m {}{:<5}\033[0m │ {}Prb:\033[0m {}{:<5}\033[0m │ "
@@ -231,7 +236,8 @@ auto InspectorPane::render_io_stats(const simrv::core::CPU& cpu, int logical_row
     }
     if (logical_row == 15) {
         const auto& c_stats = machine_.memory().system_bus().coherence_hub().stats();
-        if (width < 50) {
+        if (framework::active_render_context().density == framework::Density::Compact ||
+            width < 50) {
             return format_to_width(
                 std::format("  {}Rel:\033[0m {}{:<5}\033[0m │ {}Inv:\033[0m {}{:<5}\033[0m │ "
                             "{}WB:\033[0m {}{}\033[0m",
@@ -257,7 +263,8 @@ auto InspectorPane::render_io_stats(const simrv::core::CPU& cpu, int logical_row
     if (logical_row == 17) {
         auto const& bus = machine_.memory().system_bus();
         auto const& checker = bus.protocol_checker();
-        if (width < 50) {
+        if (framework::active_render_context().density == framework::Density::Compact ||
+            width < 50) {
             return format_to_width(
                 std::format("  {}A:\033[0m{}{}\033[0m │ {}B:\033[0m{}{}\033[0m │ "
                             "{}C:\033[0m{}{}\033[0m │ {}D:\033[0m{}{}\033[0m │ "
@@ -285,13 +292,15 @@ auto InspectorPane::render_io_stats(const simrv::core::CPU& cpu, int logical_row
     }
     if (logical_row == 19) {
         const auto stats = machine_.memory().system_bus().contention_stats();
-        const auto state = stats.dma_active
-                               ? (stats.dma_penalty_cycles == 0
-                                      ? std::string("\033[38;5;215mACTIVE · no added penalty\033[0m")
-                                      : std::format("\033[38;5;215mACTIVE · +{} cycles/request\033[0m",
-                                                    stats.dma_penalty_cycles))
-                               : std::string("\033[38;5;120mIDLE\033[0m");
-        if (width < 58) {
+        const auto state =
+            stats.dma_active
+                ? (stats.dma_penalty_cycles == 0
+                       ? std::string("\033[38;5;215mACTIVE · no added penalty\033[0m")
+                       : std::format("\033[38;5;215mACTIVE · +{} cycles/request\033[0m",
+                                     stats.dma_penalty_cycles))
+                : std::string("\033[38;5;120mIDLE\033[0m");
+        if (framework::active_render_context().density == framework::Density::Compact ||
+            width < 58) {
             return format_to_width(
                 std::format("  {}DMA:\033[0m {} │ {}Delayed:\033[0m {} │ {}Added:\033[0m {} cyc",
                             kThemeText, state, kThemeText,
@@ -300,7 +309,8 @@ auto InspectorPane::render_io_stats(const simrv::core::CPU& cpu, int logical_row
                 width);
         }
         return format_to_width(
-            std::format("  {}DMA:\033[0m {} │ {}Requests delayed:\033[0m {} │ {}Added latency:\033[0m {} cycles",
+            std::format("  {}DMA:\033[0m {} │ {}Requests delayed:\033[0m {} │ {}Added "
+                        "latency:\033[0m {} cycles",
                         kThemeText, state, kThemeText,
                         simrv::util::format_with_commas(stats.delayed_requests), kThemeText,
                         simrv::util::format_with_commas(stats.added_latency_cycles)),

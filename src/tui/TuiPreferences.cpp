@@ -31,8 +31,8 @@ auto parse_slots(std::string_view text, std::vector<WorkbenchSlot>& slots) -> bo
             return false;
         }
         parsed.push_back({.page = page == static_cast<unsigned>(TuiRegPage::LIVE)
-                                  ? TuiRegPage::GPR
-                                  : static_cast<TuiRegPage>(page),
+                                      ? TuiRegPage::GPR
+                                      : static_cast<TuiRegPage>(page),
                           .scroll_offset = scroll});
         if (separator == std::string_view::npos) break;
         text.remove_prefix(separator + 1);
@@ -103,6 +103,8 @@ auto TuiPreferences::load(const std::filesystem::path& path) -> bool {
             theme = static_cast<TuiThemeStyle>(parsed);
         } else if (key == "high_contrast" && parse_integer(value, parsed) && parsed <= 1) {
             high_contrast = parsed != 0;
+        } else if (key == "density" && parse_integer(value, parsed) && parsed <= 2) {
+            density_mode = static_cast<framework::DensityMode>(parsed);
         }
     }
     if (focused_slot >= slots.size()) focused_slot = 0;
@@ -132,7 +134,7 @@ auto TuiPreferences::save(const std::filesystem::path& path) const -> bool {
     }
     output << "\ntheme=" << static_cast<unsigned>(theme)
            << "\nhigh_contrast=" << static_cast<unsigned>(high_contrast)
-           << '\n';
+           << "\ndensity=" << static_cast<unsigned>(density_mode) << '\n';
     output.close();
     if (!output) return false;
     std::filesystem::rename(temporary_path, path, error);

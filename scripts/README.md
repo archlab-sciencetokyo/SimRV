@@ -35,5 +35,5 @@ This directory contains development, benchmarking, release verification, and Lin
 
 - **`run_vector_tests.py`**: Automated runner for the RISC-V Vector (RVV 1.0) compliance test suite.
 - **`code_metrics.py`**: Source code diagnostic analyzer tracking lines of code, cyclomatic complexity, and test ratios.
-- **`create_mission.py`**: Interactive educator wizard for generating editable classroom `.mission` files.
-- **`check_mission.py`**: Validates mission fields and checks checkpoint labels against an ELF when `readelf` is available.
+- **`create_mission.py`**: Interactive educator wizard for generating and previewing editable classroom `.mission` files.
+- **`check_mission.py`**: Validates mission fields, previews grouped lesson flow, checks checkpoint symbols, and can run an optional headless checkpoint smoke test against the guest ELF.

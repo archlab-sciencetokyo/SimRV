@@ -4,8 +4,8 @@
  */
 #pragma once
 
-#include <cstdint>
 #include <array>
+#include <cstdint>
 #include <optional>
 #include <span>
 #include <string>
@@ -54,8 +54,6 @@ enum class KeyAction : uint8_t {
     DumpMemory,
     OpenLogModal,
     CheckMissionObjective,
-    RevealMissionWhy,
-    AdvanceMissionStep,
     OpenTracePage,
     SelectPage1,
     SelectPage2,

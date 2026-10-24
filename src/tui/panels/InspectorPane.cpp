@@ -42,7 +42,7 @@ auto InspectorPane::is_single_column(int width) const -> bool {
     bool const is_reg_page =
         (page_ == TuiRegPage::GPR || page_ == TuiRegPage::FPR || page_ == TuiRegPage::VEC);
     if (!is_reg_page) return false;
-    return width < 60;
+    return framework::active_render_context().density == framework::Density::Compact || width < 60;
 }
 
 auto InspectorPane::get_total_rows(int width) -> int {
@@ -385,7 +385,10 @@ auto layout_tabs_equally(const std::vector<TabSlot>& slots, int available_width)
 auto get_tier1_group_name(TuiCategoryGroup grp, int width) -> std::string_view {
     for (const auto& info : kTuiCategories) {
         if (info.group == grp) {
-            return width < 44 ? info.compact_name : info.name;
+            return framework::active_render_context().density == framework::Density::Compact ||
+                           width < 44
+                       ? info.compact_name
+                       : info.name;
         }
     }
     return "Tools";
@@ -460,10 +463,10 @@ auto InspectorPane::render_tab_bar_tier1(int width) const -> std::string {
 auto InspectorPane::render_tab_bar_tier2(int width) const -> std::string {
     TuiCategoryGroup const grp = get_category_group(page_);
     const auto misa = current_cpu().state().misa;
-    const auto tabs = page_tabs(grp, (misa & ((1ULL << ('f' - 'a')) | (1ULL << ('d' - 'a')))) != 0,
-                                (misa & (1ULL << ('v' - 'a'))) != 0,
-                                machine_.runtime_profile.is_cycle_mode(),
-                                is_custom_memory_inspect(), cache_inspect_type_);
+    const auto tabs =
+        page_tabs(grp, (misa & ((1ULL << ('f' - 'a')) | (1ULL << ('d' - 'a')))) != 0,
+                  (misa & (1ULL << ('v' - 'a'))) != 0, machine_.runtime_profile.is_cycle_mode(),
+                  is_custom_memory_inspect(), cache_inspect_type_);
 
     std::vector<TabSlot> slots;
     slots.reserve(tabs.size());
@@ -514,10 +517,10 @@ auto InspectorPane::get_tab_at(int row, int col) const -> std::optional<TuiRegPa
     if (row == 1) {
         TuiCategoryGroup const grp = get_category_group(page_);
         const auto misa = current_cpu().state().misa;
-        const auto tabs = page_tabs(
-            grp, (misa & ((1ULL << ('f' - 'a')) | (1ULL << ('d' - 'a')))) != 0,
-            (misa & (1ULL << ('v' - 'a'))) != 0, machine_.runtime_profile.is_cycle_mode(),
-            is_custom_memory_inspect(), cache_inspect_type_);
+        const auto tabs =
+            page_tabs(grp, (misa & ((1ULL << ('f' - 'a')) | (1ULL << ('d' - 'a')))) != 0,
+                      (misa & (1ULL << ('v' - 'a'))) != 0, machine_.runtime_profile.is_cycle_mode(),
+                      is_custom_memory_inspect(), cache_inspect_type_);
 
         std::vector<TabSlot> slots;
         slots.reserve(tabs.size());
@@ -659,10 +662,9 @@ auto InspectorPane::next_page_for_slot(TuiRegPage current, bool cycle_accurate) 
     -> TuiRegPage {
     const TuiCategoryGroup grp = get_category_group(current);
     const auto misa = current_cpu().state().misa;
-    const auto tabs = page_tabs(
-        grp, (misa & ((1ULL << ('f' - 'a')) | (1ULL << ('d' - 'a')))) != 0,
-        (misa & (1ULL << ('v' - 'a'))) != 0, cycle_accurate, is_custom_memory_inspect(),
-        cache_inspect_type_, true);
+    const auto tabs = page_tabs(grp, (misa & ((1ULL << ('f' - 'a')) | (1ULL << ('d' - 'a')))) != 0,
+                                (misa & (1ULL << ('v' - 'a'))) != 0, cycle_accurate,
+                                is_custom_memory_inspect(), cache_inspect_type_, true);
     if (tabs.empty()) return current;
     const auto found = std::ranges::find(tabs, current, &PageTab::page);
     if (found == tabs.end() || std::next(found) == tabs.end()) return tabs.front().page;
@@ -680,11 +682,10 @@ auto InspectorPane::render_row_internal(int row_idx, int width, int header_rows,
     }
 
     TuiDrawerStack drawers;
-    const bool drawer_page = page_ != TuiRegPage::EXPLAIN && page_ != TuiRegPage::TRACE &&
-                             page_ != TuiRegPage::LOG;
+    const bool drawer_page =
+        page_ != TuiRegPage::EXPLAIN && page_ != TuiRegPage::TRACE && page_ != TuiRegPage::LOG;
     if (!is_secondary && drawer_page && log_drawer_open_ && visible_rows_ >= 15) {
-        drawers.add({.height = 6,
-                     .render_row = [this](int row, int drawer_width) {
+        drawers.add({.height = 6, .render_row = [this](int row, int drawer_width) {
                          return render_log_bottom_row(row, 6, drawer_width);
                      }});
     }
@@ -754,12 +755,11 @@ auto InspectorPane::render_row_internal(int row_idx, int width, int header_rows,
     const auto* page_info = get_page_info(page_);
     const int stats_start = performance_start_row(is_single_column(width));
     const int stats_end = stats_start + performance_row_count();
-    const bool is_sampled_metrics_row = !is_secondary && logical_row >= stats_start &&
-                                        logical_row < stats_end;
-    const auto row_content_category =
-        is_sampled_metrics_row ? TuiFastModeContent::SampledMetrics
-        : page_info != nullptr      ? page_info->fast_mode_content
-                                    : TuiFastModeContent::Stable;
+    const bool is_sampled_metrics_row =
+        !is_secondary && logical_row >= stats_start && logical_row < stats_end;
+    const auto row_content_category = is_sampled_metrics_row ? TuiFastModeContent::SampledMetrics
+                                      : page_info != nullptr ? page_info->fast_mode_content
+                                                             : TuiFastModeContent::Stable;
     bool show_spinner = false;
     if (!paused_) {
         uint64_t delay =
@@ -860,8 +860,8 @@ auto InspectorPane::get_visible_content_rows() const -> int {
         return std::max(1, visible_rows_ - 1);
     }
     TuiDrawerStack drawers;
-    const bool drawer_page = page_ != TuiRegPage::EXPLAIN && page_ != TuiRegPage::TRACE &&
-                             page_ != TuiRegPage::LOG;
+    const bool drawer_page =
+        page_ != TuiRegPage::EXPLAIN && page_ != TuiRegPage::TRACE && page_ != TuiRegPage::LOG;
     if (drawer_page && log_drawer_open_ && visible_rows_ >= 15)
         drawers.add({.height = 6, .render_row = [](int, int) { return std::string{}; }});
     int max_content_rows = visible_rows_ - (column_header_mode_ ? 1 : 2);

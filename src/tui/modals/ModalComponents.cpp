@@ -96,6 +96,8 @@ auto get_modal_metadata(ModalType type, bool is_notice_error, std::string_view n
 
 auto format_action_hint(std::string_view key, std::string_view action, std::string_view color)
     -> std::string {
+    if (framework::active_render_context().density == framework::Density::Compact)
+        return std::format("{}[{}]\033[0m {}{}\033[0m", color, unbox_key(key), kThemeMuted, action);
     return std::format("\033[1;7m{} {} \033[0m {}{}\033[0m", color, unbox_key(key), kThemeMuted,
                        action);
 }
@@ -104,7 +106,8 @@ auto build_modal_footer(std::span<const ModalActionHint> hints) -> std::string {
     if (hints.empty()) {
         return "";
     }
-    constexpr std::string_view sep = " · ";
+    const std::string_view sep =
+        framework::active_render_context().density == framework::Density::Compact ? " " : " · ";
 
     std::string out(kControlRowMarker);
     for (size_t i = 0; i < hints.size(); ++i) {
@@ -121,7 +124,8 @@ auto build_modal_footer(std::initializer_list<ModalActionHint> hints) -> std::st
 }
 
 auto build_modal_tab_bar(std::span<const std::string_view> tabs, size_t active_tab) -> std::string {
-    constexpr std::string_view sep = " · ";
+    const std::string_view sep =
+        framework::active_render_context().density == framework::Density::Compact ? " " : " · ";
 
     std::string out(kControlRowMarker);
     for (size_t i = 0; i < tabs.size(); ++i) {
@@ -150,11 +154,13 @@ auto layout_modal_control_row(std::string row, int inner_width) -> framework::Re
     }
     row.erase(marker, kControlRowMarker.size());
     int const row_width = get_display_width(row);
-    int const left = std::max(0, (inner_width - row_width) / 2);
+    const bool compact = framework::active_render_context().density == framework::Density::Compact;
+    int const left = compact ? 0 : std::max(0, (inner_width - row_width) / 2);
 
     framework::RenderedControl result;
     result.text = framework::align_row({.text = std::move(row),
-                                        .alignment = framework::HorizontalAlign::Center,
+                                        .alignment = compact ? framework::HorizontalAlign::Left
+                                                             : framework::HorizontalAlign::Center,
                                         .role = framework::Role::Accent,
                                         .kind = framework::RowKind::Controls},
                                        inner_width)
@@ -179,7 +185,7 @@ auto layout_modal_control_row(std::string row, int inner_width) -> framework::Re
             plain.push_back(ch);
         }
     }
-    constexpr std::string_view separator = " · ";
+    const std::string_view separator = compact ? " " : " · ";
     while (!plain.empty() && plain.back() == ' ') plain.pop_back();
     int start = left;
     auto byte_start = static_cast<std::size_t>(left);
@@ -192,13 +198,15 @@ auto layout_modal_control_row(std::string row, int inner_width) -> framework::Re
         result.spans.push_back(
             {.start = start, .width = group_width, .id = std::to_string(index++)});
         if (end == std::string::npos) break;
-        start += group_width + 3;
+        start += group_width + static_cast<int>(separator.size());
         byte_start = end + separator.size();
     }
     return result;
 }
 
 auto build_section_divider(std::string_view title, std::string_view color) -> std::string {
+    if (framework::active_render_context().density == framework::Density::Compact)
+        return std::format("{}{}\033[0m", color, title);
     return std::format("{}\033[1;35m── {} ──\033[0m", color, title);
 }
 

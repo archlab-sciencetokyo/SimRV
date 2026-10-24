@@ -187,7 +187,12 @@ class Tui : public core::ITelemetrySink, public core::IConsoleSink {
         modal_.submit(
             inspector_pane_.get(), step_delay_us_, [this](TuiRegPage page) { set_reg_page(page); },
             [this](const std::string& status) { set_status_override(status); },
-            [this]() { reset_speed_history(); });
+            [this]() { reset_speed_history(); },
+            [this](framework::DensityMode mode) {
+                density_mode_ = mode;
+                modal_.set_density_mode(mode);
+                save_preferences();
+            });
         full_screen_redraw_requested_ = true;
         render(true);
     }
@@ -275,6 +280,10 @@ class Tui : public core::ITelemetrySink, public core::IConsoleSink {
     void update_pointer_shape(bool clickable);
 
    private:
+    void observe_current_pc_symbol();
+    auto advance_mission_step() -> bool;
+    auto previous_mission_step() -> bool;
+    void clear_trace_buffers();
     void sync_mission_checkpoint();
     void apply_mission_guidance_layout();
     void refresh_mission_layout_notice();
@@ -366,6 +375,7 @@ class Tui : public core::ITelemetrySink, public core::IConsoleSink {
     size_t focused_slot_index_ = 0;
     size_t selected_hart_ = 0;
     TuiLayout layout_ = TuiLayout::Split;
+    framework::DensityMode density_mode_ = framework::DensityMode::Auto;
     std::atomic<uint64_t> current_instruction_count_{0};
     std::atomic<bool> trace_or_livetrace_active_{false};
     std::atomic<bool> pipeline_or_detail_visible_{false};

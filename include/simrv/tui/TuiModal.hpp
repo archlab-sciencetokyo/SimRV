@@ -120,6 +120,7 @@ struct SettingsDraft {
     // Tab 0: General / UI
     bool cycle_accurate = false;
     bool high_contrast = false;
+    framework::DensityMode density_mode = framework::DensityMode::Auto;
     bool use_mix = false;
     bool bp_trace = false;
     bool traplog_mode = false;
@@ -142,6 +143,10 @@ struct SettingsDraft {
 class TuiModal {
    public:
     explicit TuiModal(simrv::core::Machine& machine);
+    void set_density_mode(framework::DensityMode mode) noexcept { density_mode_ = mode; }
+    [[nodiscard]] auto density_mode() const noexcept -> framework::DensityMode {
+        return density_mode_;
+    }
 
     [[nodiscard]] auto is_active() const -> bool { return active_modal_ != ModalType::None; }
     [[nodiscard]] auto get_type() const -> ModalType { return active_modal_; }
@@ -163,7 +168,9 @@ class TuiModal {
     auto submit(InspectorPane* left_pane, std::atomic<uint64_t>& step_delay_us,
                 const std::function<void(TuiRegPage)>& set_reg_page_cb,
                 const std::function<void(const std::string&)>& set_status_override_cb,
-                const std::function<void()>& on_speed_changed_cb) -> bool;
+                const std::function<void()>& on_speed_changed_cb,
+                const std::function<void(framework::DensityMode)>& on_density_changed_cb = {})
+        -> bool;
 
     void push_char(char c) {
         input_.push_back(c);
@@ -231,9 +238,9 @@ class TuiModal {
     void open_log_viewer();
     void set_mission_progress(const MissionProgress* mission) { mission_ = mission; }
     void open_mission_objective();
-    void toggle_mission_why() noexcept { mission_why_revealed_ = !mission_why_revealed_; }
-    [[nodiscard]] auto mission_why_revealed() const noexcept -> bool {
-        return mission_why_revealed_;
+    void cycle_mission_hint() noexcept;
+    [[nodiscard]] auto mission_hint_level() const noexcept -> uint8_t {
+        return mission_hint_level_;
     }
     void scroll_log_viewer(int delta, int total_lines = 100, int visible_lines = 20);
     void scroll_log_viewer_page(int pages, int total_lines = 100, int visible_lines = 20);
@@ -287,7 +294,7 @@ class TuiModal {
    private:
     simrv::core::Machine& machine_;
     const MissionProgress* mission_ = nullptr;
-    bool mission_why_revealed_ = false;
+    uint8_t mission_hint_level_ = 0;
     LogBuffer* log_buffer_ = nullptr;
     ModalType active_modal_ = ModalType::None;
     std::string input_;
@@ -296,6 +303,7 @@ class TuiModal {
     bool notice_is_error_ = false;
     int bp_cursor_ = 0;
     SettingsDraft settings_draft_;
+    framework::DensityMode density_mode_ = framework::DensityMode::Auto;
     SettingsDraft pending_platform_draft_;
     std::optional<simrv::core::MachineConfig> pending_reconfiguration_;
     std::optional<bool> pending_cycle_accurate_;

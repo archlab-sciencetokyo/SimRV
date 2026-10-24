@@ -12,13 +12,13 @@ namespace simrv::tui {
 
 static const auto kKeyBindings =
     std::to_array<KeyBindingInfo>({{.action = KeyAction::Step,
-                                    .key_display = "[F6] / [s]",
+                                    .key_display = "[F6] / [s] / [Space]",
                                     .primary_char = 's',
                                     .alt_char = 'S',
                                     .footer_label = "[F6] Step",
                                     .help_label = "Step 1 instruction",
                                     .category = ActionCategory::Execution,
-                                    .special_keys = {TuiKey::F6}},
+                                    .special_keys = {TuiKey::F6, TuiKey::Space}},
                                    {.action = KeyAction::RunPause,
                                     .key_display = "[F5] / [c] / [Ctrl-P]",
                                     .primary_char = 'c',
@@ -324,30 +324,11 @@ static const auto kKeyBindings =
                                     .primary_char = '\0',
                                     .alt_char = '\0',
                                     .footer_label = "[F12] Objective",
-                                    .help_label = "Check Mission Objective Progress",
+                                    .help_label = "Open or Reopen Mission Instruction",
                                     .category = ActionCategory::Help,
                                     .allowed_running = true,
                                     .allowed_in_modal = true,
                                     .special_keys = {TuiKey::F12}},
-                                   {.action = KeyAction::RevealMissionWhy,
-                                    .key_display = "[y]",
-                                    .primary_char = 'y',
-                                    .alt_char = 'Y',
-                                    .footer_label = "[y] Why",
-                                    .help_label = "Reveal Mission Rationale Hint",
-                                    .category = ActionCategory::Help,
-                                    .allowed_running = true,
-                                    .allowed_in_modal = true},
-                                   {.action = KeyAction::AdvanceMissionStep,
-                                    .key_display = "[Space]",
-                                    .primary_char = '\0',
-                                    .alt_char = '\0',
-                                    .footer_label = "[Tab] Next Step",
-                                    .help_label = "Advance Mission Instruction",
-                                    .category = ActionCategory::Help,
-                                    .allowed_running = true,
-                                    .allowed_in_modal = true,
-                                    .special_keys = {TuiKey::Space}},
                                    {.action = KeyAction::OpenTracePage,
                                     .key_display = "[F7]",
                                     .primary_char = '\0',
@@ -456,8 +437,7 @@ auto Keybindings::categories() -> std::span<const ActionCategoryInfo> {
 auto Keybindings::unavailable_reason(KeyAction action, const ActionContext& context)
     -> std::string_view {
     if (context.modal_active && action != KeyAction::Quit && action != KeyAction::Help &&
-        action != KeyAction::CheckMissionObjective && action != KeyAction::RevealMissionWhy &&
-        action != KeyAction::AdvanceMissionStep) {
+        action != KeyAction::CheckMissionObjective) {
         return "Close the active dialog first";
     }
     if (context.shutdown && action != KeyAction::Reset && action != KeyAction::LoadBinary &&
@@ -484,12 +464,6 @@ auto Keybindings::unavailable_reason(KeyAction action, const ActionContext& cont
         return "Load a program image first";
     }
     if (action == KeyAction::CheckMissionObjective && !context.mission_active) {
-        return "Start a classroom mission first";
-    }
-    if (action == KeyAction::RevealMissionWhy && !context.mission_active) {
-        return "Start a classroom mission first";
-    }
-    if (action == KeyAction::AdvanceMissionStep && !context.mission_active) {
         return "Start a classroom mission first";
     }
     return {};

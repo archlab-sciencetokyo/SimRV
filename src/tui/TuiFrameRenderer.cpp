@@ -7,6 +7,7 @@
 #include <format>
 
 #include "simrv/tui/TuiTheme.hpp"
+#include "simrv/tui/framework/Types.hpp"
 
 namespace simrv::tui {
 
@@ -73,7 +74,8 @@ auto compose_multi_frame_lines(const FrameGeometry& frame, int terminal_width,
 
     const auto style = get_active_theme_style();
     const bool is_ansi = (style == TuiThemeStyle::ClassicAnsi);
-    const char* border_v = is_ansi ? "|" : "║";
+    const bool compact = framework::active_render_context().density == framework::Density::Compact;
+    const char* border_v = is_ansi ? "|" : compact ? "│" : "║";
     const char* div_v = is_ansi ? "|" : "│";
 
     for (int row = 0; row < frame.content_rows; ++row) {
@@ -85,7 +87,7 @@ auto compose_multi_frame_lines(const FrameGeometry& frame, int terminal_width,
             is_rule[col] = is_horizontal_rule(cells[col], is_ansi ? "-" : "─");
         }
 
-        const char* left_border = is_rule[0] ? (is_ansi ? "+" : "╟") : border_v;
+        const char* left_border = is_rule[0] ? (is_ansi ? "+" : compact ? "├" : "╟") : border_v;
         std::string line;
         line += std::format("{}{}\033[0m", kThemeBorder, left_border);
 
@@ -105,7 +107,7 @@ auto compose_multi_frame_lines(const FrameGeometry& frame, int terminal_width,
         }
 
         const bool last_rule = is_rule[col_widths.count - 1];
-        const char* right_border = last_rule ? (is_ansi ? "+" : "╢") : border_v;
+        const char* right_border = last_rule ? (is_ansi ? "+" : compact ? "┤" : "╢") : border_v;
         line += std::format("{}{}\033[0m", kThemeBorder, right_border);
         lines.push_back(std::move(line));
     }
@@ -117,6 +119,14 @@ auto compose_multi_frame_lines(const FrameGeometry& frame, int terminal_width,
             bottom += "+";
         }
         bottom += "\033[0m";
+        lines.push_back(std::move(bottom));
+    } else if (compact) {
+        std::string bottom = std::format("{}└", kThemeBorder);
+        for (size_t col = 0; col < col_widths.count; ++col) {
+            bottom += make_repeated_string("─", col_widths.widths[col]);
+            if (col + 1 < col_widths.count) bottom += "┴";
+        }
+        bottom += std::format("┘\033[0m");
         lines.push_back(std::move(bottom));
     } else {
         std::string bottom = std::format("{}╠", kThemeBorder);

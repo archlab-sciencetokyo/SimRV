@@ -83,9 +83,11 @@ auto InspectorPane::render_stack_frame(const simrv::core::CPU& cpu, int logical_
         }
         if (logical_row == 5) {
             std::string const text =
-                is_mem_watch   ? "Address not in DRAM range. Press 'm' to choose another."
-                : (width < 48) ? "Activates after guest initializes sp."
-                               : "Stack watch activates after guest initializes sp.";
+                is_mem_watch ? "Address not in DRAM range. Press 'm' to choose another."
+                : (framework::active_render_context().density == framework::Density::Compact ||
+                   width < 48)
+                    ? "Activates after guest initializes sp."
+                    : "Stack watch activates after guest initializes sp.";
             return inactive_row(std::format("{}{}\033[0m", kThemeMuted, text));
         }
         if (logical_row == 14) {
@@ -104,7 +106,8 @@ auto InspectorPane::render_stack_frame(const simrv::core::CPU& cpu, int logical_
         if (is_mem_watch) {
             std::string sym = machine_.symbol_table().lookup(aligned_base);
             std::string title;
-            if (!sym.empty() && width >= 56) {
+            if (!sym.empty() && width >= 56 &&
+                framework::active_render_context().density != framework::Density::Compact) {
                 title = (xlen == 64)
                             ? std::format("Memory Watch: <{}> [0x{:016x}]", sym, aligned_base)
                             : std::format("Memory Watch: <{}> [0x{:08x}]", sym, aligned_base);
@@ -114,18 +117,23 @@ auto InspectorPane::render_stack_frame(const simrv::core::CPU& cpu, int logical_
             }
             return section_line(title, width);
         }
-        std::string title = width >= 50 ? std::format("Stack Watch ({})",
-                                                      is_16b_aligned ? "16B aligned" : "unaligned")
-                                        : "Stack Watch";
+        std::string title =
+            width >= 50 && framework::active_render_context().density != framework::Density::Compact
+                ? std::format("Stack Watch ({})", is_16b_aligned ? "16B aligned" : "unaligned")
+                : "Stack Watch";
         return section_line(title, width);
     }
     if (logical_row == 14) {
         std::string footer_desc;
         if (is_mem_watch) {
-            footer_desc = (width >= 60) ? "Memory View · [m] Set Addr · [sp] Stack · [↑/↓] Scroll"
-                                        : "Memory · [m] Addr · [sp] Stack";
+            const bool comfortable =
+                framework::active_render_context().density != framework::Density::Compact;
+            footer_desc = (width >= 60 && comfortable)
+                              ? "Memory View · [m] Set Addr · [sp] Stack · [↑/↓] Scroll"
+                              : "Memory · [m] Addr · [sp] Stack";
         } else {
-            if (width >= 60) {
+            if (width >= 60 &&
+                framework::active_render_context().density != framework::Density::Compact) {
                 footer_desc = std::format("Occupancy: sp · frame · scratch ({}) · [m] Memory",
                                           is_16b_aligned ? "16B aligned" : "unaligned");
             } else {
@@ -243,7 +251,8 @@ auto InspectorPane::render_stack_frame(const simrv::core::CPU& cpu, int logical_
         2 + static_cast<int>(addr_str.length()) + 2 + 8 + 2 + static_cast<int>(val_str.length());
 
     std::string ascii_part;
-    if (!ascii_str.empty() && width >= 60) {
+    if (!ascii_str.empty() && width >= 60 &&
+        framework::active_render_context().density != framework::Density::Compact) {
         ascii_part = std::format(" \033[38;5;240m|\033[0m{}\033[38;5;240m|\033[0m", ascii_str);
         printable_len += static_cast<int>(ascii_str.length()) + 3;
     }

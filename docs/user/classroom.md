@@ -220,7 +220,7 @@ Description (Behavior):
 | `F8` / `k` | Paused | Toggle PC breakpoint at current PC |
 | `F9` / `?` | Paused | Open Architecture Glossary modal at active topic |
 | `F10` / `q` / `Ctrl-Q` | All | Cleanly terminate simulation |
-| `F12` | Classroom mission | Check the active objective and reopen its explanation modal |
+| `F12` | Classroom mission | Open or reopen the current instruction modal |
 | `Alt-1` .. `Alt-4` | All | Apply Workbench Layout Presets directly (1..4) |
 | `l` / `Alt-L` | Paused | Cycle left inspector tool tabs (Pipe / Cache / BP / Hazard / TLB / Bus / IO / Stats) |
 | `o` / `Alt-O` | Paused | Open Binary & Disk Image Loader modal |
@@ -283,7 +283,7 @@ goal = "Explain how control flow and the calling convention work together across
 - `id`: An identifier for the assignment or lesson.
 - `program`: The exact filename of the ELF binary expected for this mission (e.g. `lab1.elf`). SimRV validates the loaded binary against this name and displays a helpful error if a mismatched binary is loaded.
 - `description`: (Optional) A short lesson introduction shown when the mission opens.
-- `goal`: (Optional) The overall learning outcome shown with the first objective.
+- `goal`: (Optional) The overall learning outcome shown with each instruction.
 - `speed_hz`: (Optional) Default TUI execution frequency for the mission, from `0` (maximum speed)
   to `1000000`. Missions default to `30` Hz so students can follow visible state. A step may
   override this value.
@@ -299,6 +299,7 @@ symbols:
 id = "branch-prediction"
 title = "Conditional Branching"
 prompt = "Predict whether bne branches to target, then single-step [F6]."
+learn = "Connect the branch decision to the next PC value."
 why = "Branches compare register values and update PC using a signed immediate offset."
 view = "explain"
 panels = "explain,registers,trace"
@@ -310,6 +311,8 @@ glossary = "0"
 | `id` | string | Unique educator-facing step identifier. |
 | `title` | string | Short title rendered in the student guidance header. |
 | `prompt` | string | Actionable prompt directing the student what to observe, predict, or calculate. |
+| `learn` | string | (Optional) The learning target for this step, shown separately from the task prompt. Older missions use the step title for orientation. |
+| `hint` | string | (Optional) Short first hint shown before the fuller `why` explanation. |
 | `why` | string | Pedagogical explanation articulating *why* the architectural behavior occurs. |
 | `view` | string | Fallback workbench view to focus when `panels` is omitted. |
 | `panels` | string | Optional comma-separated workbench pages for this step (one to four), such as `"explain,registers,trace"`. |
@@ -342,11 +345,11 @@ message = "The loop reached its back edge. Compare this PC with the earlier iter
 
 ### How Missions Progress in Class
 
-1. **Independent Steps and Checkpoints:** Students move through instruction steps with **Space**; **Tab** remains available for panel focus. Checkpoints sit after chosen steps and are reached only when the guest program hits their named symbols.
-2. **Checkpoint Feedback:** The modal opens at mission start and when a checkpoint is reached. Its configured message explains what to inspect at that point. **F12** reopens the current instruction and reports checkpoint state.
-3. **Workbenches per Step:** `panels` can configure the entire one-to-four panel workbench for a step. If omitted, SimRV focuses or selects the single `view` page.
-4. **Hide and Return:** **Enter** hides the modal and shows the workbench. It does not advance or mark the instruction complete.
-5. **Optional Hint:** The step's `why` rationale is hidden initially. Press **y** to reveal or hide it; this does not affect checkpoint state.
+1. **Understand the instruction:** The modal shows the lesson goal, what this step teaches, the observation task, and its checkpoint boundary. Use **y** for the optional hint and then the `why` explanation.
+2. **Run and inspect:** Press **F5** to run to the next unreached named checkpoint at any time, even if its boundary is a later instruction; press **F6** to single-step. Reaching a checkpoint pauses execution and records it without moving the instruction cursor. The modal identifies the boundary and its reached status.
+3. **Continue in order:** Press **Space** or **n** in the modal (or **n** on the workbench) to move through instructions. A future checkpoint may be reached early; students can still read earlier steps, but cannot advance past the step named by `after_step` until its checkpoint is reached. F5 never advances an instruction.
+4. **Review and finish:** Press **F12** to reopen the current instruction and **p** to review the previous one. Completion shows reached/total checkpoint counts and leaves the workbench available for review. To save TA evidence, press **x** while paused with an inspection report output path configured. The report records the lesson ID and reached checkpoint symbols in encounter order, without identity or grades.
+5. **Workbenches per Step:** `panels` can configure the entire one-to-four panel workbench for a step. If omitted, SimRV focuses or selects the single `view` page.
 
 When the terminal is too narrow or short for a requested layout, the status line reports the
 required and current window size. The panel layout remains selected and will fit automatically
@@ -357,14 +360,17 @@ panels; the minimum terminal height is 10 rows.
 
 | Key | Action |
 | :--- | :--- |
-| **`F12`** | Open the mission objective and check whether its checkpoint has been reached. |
-| **`Space`** | Advance to the next instruction; stops at an unreached checkpoint. |
-| **`y`** | Reveal or hide the step's `why` rationale as an optional hint. |
-| **`Enter`** | Hide the modal and return to the workbench. |
-| **`Esc`** | Close the mission objective modal; reopen it with **F12**. |
+| **`F5`** | Run to the next unreached checkpoint (automatically hides the modal). It does not advance the instructional step and is blocked after that checkpoint is reached. |
+| **`F6`** | Single-step one instruction (automatically hides the mission modal if open). |
+| **`n` / `Space`** | Advance the instruction cursor in the modal. Progress cannot cross an unreached checkpoint boundary; outside the modal, `n` advances and `Space` single-steps the CPU. |
+| **`p`** | Return to the previous mission step for review. |
+| **`F12`** | Open or reopen the current instruction modal. |
+| **`y`** | Cycle from hidden to the short hint to the full `why`; without `hint`, toggle `why`. |
+| **`Enter` / `Esc`** | Hide the modal and return to the workbench without advancing. |
 | **`Ctrl-L`** | Show / hide the compact simulator log drawer. |
-| **`z`** | Dismiss the active mission (returns to unconstrained free simulation). |
-| **`Z`** (Shift-Z) | Restart the mission from step 0. |
+| **`r`** | Reset guest state to the entry point and restart the mission from step 1. |
+| **`d`** | Dismiss the active mission and continue in free exploration. |
+| **`q` / `F10`** (completed lesson) | Exit SimRV after reviewing the final workbench. |
 
 ### Creating and Checking a Mission
 
@@ -381,7 +387,21 @@ the checker also verifies that every checkpoint label is present in the ELF symb
 ```bash
 python3 scripts/check_mission.py lessons/my-lesson.mission
 python3 scripts/check_mission.py lessons/my-lesson.mission --program build/my-program.elf
+python3 scripts/check_mission.py lessons/my-lesson.mission --preview
+python3 scripts/check_mission.py lessons/my-lesson.mission --program build/my-program.elf --smoke-test
 ```
+
+The creator asks for an optional learning target on each step, then prints a grouped lesson-flow
+preview with the student-facing learning target, task, hint, and rationale, followed by the editable
+version-1 mission before saving. The checker reports the same grouped sequence, effective speed,
+panel layout, minimum width, student-facing text, and checkpoint messages. It also catches
+duplicate step IDs, invalid boundaries, duplicate or unsupported panels, and missing ELF symbols.
+Use `--smoke-test` when the simulator binary is available to execute the guest headlessly and check
+that checkpoint symbols are reached in boundary order. By default the checker looks for SimRV in
+`build/rv64-release` or `build/rv32-release`; pass `--simrv <path>` to select another build.
+`--max-instructions` (default 100000) and `--timeout` (default 30 seconds) bound the run. An
+unreached checkpoint reports its boundary and suggests checking guest control flow or increasing
+the instruction cap.
 
 ---
 
@@ -484,18 +504,26 @@ after_step = 3
 message = "The function returned. Verify a0 and sp before reviewing the trace."
 ```
 
-#### Step 4: Grading & Verification Without Surveillance
+#### Step 4: TA Checkpoint Evidence
 
-Instructors can verify student lab completion through portable inspection reports:
+When a student explicitly exports the paused inspection report with `x`, it includes the mission
+identifier and reached checkpoint symbols in encounter order. The mission section contains no
+student identity or grading data. Checkpoints show which named program markers were reached; they
+do not certify that a student completed an observation or explanation.
 
-```bash
-# Student generates an inspection report at the final milestone by pressing 'x':
-simrv --mission lab1_abi.mission -m lab1_abi.elf --inspection-output student_submission.json
+```json
+"mission": {
+  "id": "lab1-abi",
+  "reached_checkpoints": ["mission_branch", "mission_call", "mission_done"],
+  "checkpoint_details": [
+    {"symbol": "mission_branch", "message": "Compare the branch PC with its target."},
+    {"symbol": "mission_call", "message": "Inspect ra and sp before jal."},
+    {"symbol": "mission_done", "message": "Verify a0 and sp."}
+  ]
+}
 ```
 
-Instructors can then validate student submissions using Python by comparing `student_submission.json` against a golden reference run:
-
 ```bash
-# Verify architectural state (PC, registers, instructions retired) matches expectation
-python3 scripts/validate_submission.py --golden golden_inspection.json --student student_submission.json
+# Student exports the paused inspection report; it includes checkpoint evidence when a mission is active:
+simrv --mission lab1_abi.mission -m lab1_abi.elf --inspection-output mission_report.json
 ```
