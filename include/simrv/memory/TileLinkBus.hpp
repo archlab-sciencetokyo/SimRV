@@ -28,21 +28,21 @@ namespace simrv::memory {
 
 class TileLinkBus : public Bus {
    public:
-    using Cycle = uint64_t;
+    using Cycle = simrv::xlen::CycleCount;
 
     struct TimedResponse {
         TlChannelD payload{};
         std::array<simrv::xlen::Byte, CoherenceHub::kLineBytes> line_data{};
         Cycle ready_cycle = 0;
-        uint64_t sequence = 0;
+        simrv::xlen::Counter sequence = 0;
         bool has_line_data = false;
     };
 
     struct ContentionStats {
         bool dma_active = false;
-        uint32_t dma_penalty_cycles = 0;
-        uint64_t delayed_requests = 0;
-        uint64_t added_latency_cycles = 0;
+        simrv::xlen::LatencyCycles dma_penalty_cycles = 0;
+        simrv::xlen::Counter delayed_requests = 0;
+        simrv::xlen::LatencyCycles added_latency_cycles = 0;
     };
 
     struct TlTransactionRecord {
@@ -130,10 +130,10 @@ class TileLinkBus : public Bus {
         return kMmioCapabilities;
     }
 
-    [[nodiscard]] auto read_count() const -> uint64_t override {
+    [[nodiscard]] auto read_count() const -> simrv::xlen::Counter override {
         return read_count_ + router_.mmio_read_count() + coherence_hub_.stats().acquire_count;
     }
-    [[nodiscard]] auto write_count() const -> uint64_t override {
+    [[nodiscard]] auto write_count() const -> simrv::xlen::Counter override {
         return write_count_ + router_.mmio_write_count() + coherence_hub_.stats().writeback_count;
     }
 
@@ -141,14 +141,14 @@ class TileLinkBus : public Bus {
     struct TimedRequest {
         TlChannelA payload{};
         Cycle submitted_cycle = 0;
-        uint32_t request_latency = 1;
-        uint64_t sequence = 0;
+        simrv::xlen::LatencyCycles request_latency = 1;
+        simrv::xlen::Counter sequence = 0;
     };
 
     struct TimedDBeat {
         TlChannelD payload{};
         Cycle ready_cycle = 0;
-        uint64_t sequence = 0;
+        simrv::xlen::Counter sequence = 0;
         uint8_t beat_index = 0;
         uint8_t beat_count = 1;
     };
@@ -163,10 +163,10 @@ class TileLinkBus : public Bus {
     auto consume_d_beat(TlSourceId source_id, bool honor_ready, TimedResponse& response) -> bool;
 
     simrv::core::Machine& machine_;
-    uint64_t read_count_ = 0;
-    uint64_t write_count_ = 0;
-    std::atomic<uint64_t> dma_delayed_requests_{0};
-    std::atomic<uint64_t> dma_added_latency_cycles_{0};
+    simrv::xlen::Counter read_count_ = 0;
+    simrv::xlen::Counter write_count_ = 0;
+    std::atomic<simrv::xlen::Counter> dma_delayed_requests_{0};
+    std::atomic<simrv::xlen::LatencyCycles> dma_added_latency_cycles_{0};
 
     mutable std::recursive_mutex bus_mutex_;
     MmioRouter router_;

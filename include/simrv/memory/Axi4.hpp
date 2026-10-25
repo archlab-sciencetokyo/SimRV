@@ -68,8 +68,10 @@ enum class AxiResp : uint8_t {
 // AXI4 Five Channel Payloads
 // -----------------------------------------------------------------------------
 
+using AxiId = uint32_t;
+
 struct Axi4Aw {
-    uint32_t id{0};
+    AxiId id{0};
     simrv::xlen::Address addr{0};
     uint8_t len{0};   // Burst length: beats - 1
     uint8_t size{3};  // Burst size: 2^size bytes per beat
@@ -87,12 +89,12 @@ struct Axi4W {
 };
 
 struct Axi4B {
-    uint32_t id{0};
+    AxiId id{0};
     AxiResp resp{AxiResp::Okay};
 };
 
 struct Axi4Ar {
-    uint32_t id{0};
+    AxiId id{0};
     simrv::xlen::Address addr{0};
     uint8_t len{0};   // Burst length: beats - 1
     uint8_t size{3};  // Burst size: 2^size bytes per beat
@@ -104,7 +106,7 @@ struct Axi4Ar {
 };
 
 struct Axi4R {
-    uint32_t id{0};
+    AxiId id{0};
     simrv::xlen::Word data{0};
     AxiResp resp{AxiResp::Okay};
     bool last{true};
@@ -123,11 +125,11 @@ class Axi4Tracer {
     void enable(bool en = true);
     [[nodiscard]] auto is_enabled() const noexcept -> bool { return enabled_; }
 
-    void trace_aw(uint64_t cycle, const Axi4Aw& aw);
-    void trace_w(uint64_t cycle, const Axi4W& w);
-    void trace_b(uint64_t cycle, const Axi4B& b);
-    void trace_ar(uint64_t cycle, const Axi4Ar& ar);
-    void trace_r(uint64_t cycle, const Axi4R& r);
+    void trace_aw(simrv::xlen::CycleCount cycle, const Axi4Aw& aw);
+    void trace_w(simrv::xlen::CycleCount cycle, const Axi4W& w);
+    void trace_b(simrv::xlen::CycleCount cycle, const Axi4B& b);
+    void trace_ar(simrv::xlen::CycleCount cycle, const Axi4Ar& ar);
+    void trace_r(simrv::xlen::CycleCount cycle, const Axi4R& r);
 
    private:
     std::mutex mutex_;

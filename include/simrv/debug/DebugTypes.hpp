@@ -2,6 +2,8 @@
 
 #include <cstdint>
 
+namespace simrv::debug {
+
 // Symbol table & debugger domain types
 enum class SymbolType : uint8_t {
     NoType = 0,
@@ -25,3 +27,13 @@ enum class GdbBreakpointType : uint8_t {
     AccessWatch
 };
 enum class GdbSignal : uint8_t { SigInt = 2, SigTrap = 5, SigSegv = 11 };
+
+}  // namespace simrv::debug
+
+// Backward compatibility aliases in root namespace
+using simrv::debug::BreakpointId;
+using simrv::debug::GdbBreakpointType;
+using simrv::debug::GdbSignal;
+using simrv::debug::SymbolBinding;
+using simrv::debug::SymbolType;
+using simrv::debug::WatchpointId;

@@ -46,8 +46,14 @@ class MemorySubsystem {
 
     /// Direct DMA read from guest physical memory with cache line invalidation
     auto dma_read(simrv::xlen::Address paddr, void* dst, size_t len) -> bool;
+    auto dma_read(simrv::xlen::PhysAddr paddr, void* dst, size_t len) -> bool {
+        return dma_read(paddr.raw(), dst, len);
+    }
     /// Direct DMA write to guest physical memory with cache line invalidation
     auto dma_write(simrv::xlen::Address paddr, const void* src, size_t len) -> bool;
+    auto dma_write(simrv::xlen::PhysAddr paddr, const void* src, size_t len) -> bool {
+        return dma_write(paddr.raw(), src, len);
+    }
 
    private:
     simrv::core::Machine& machine_;

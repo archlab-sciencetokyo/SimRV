@@ -13,6 +13,8 @@
 namespace simrv::core {
 class Machine;
 class CPU;
+class IInterruptController;
+using IInterruptSink = IInterruptController;
 }  // namespace simrv::core
 
 namespace simrv::device {
@@ -31,6 +33,8 @@ class Imsic : public memory::MmioDevice {
     Imsic(simrv::core::Machine* machine, Privilege priv, simrv::xlen::Address base_addr,
           simrv::xlen::Address size);
     ~Imsic() override = default;
+
+    void set_sink(simrv::core::IInterruptController* sink) noexcept { sink_ = sink; }
 
     [[nodiscard]] auto name() const -> const char* override {
         return priv_ == Privilege::Machine ? "imsic-m" : "imsic-s";
@@ -54,6 +58,7 @@ class Imsic : public memory::MmioDevice {
     void update_hart(simrv::xlen::HartId hart_idx);
 
    private:
+    simrv::core::IInterruptController* sink_{nullptr};
     Privilege priv_{Privilege::Machine};
     simrv::xlen::Address base_addr_{0};
     simrv::xlen::Address size_{0};
@@ -81,6 +86,8 @@ class Aplic : public memory::MmioDevice {
           simrv::xlen::Address size, Imsic* imsic = nullptr);
     ~Aplic() override = default;
 
+    void set_sink(simrv::core::IInterruptController* sink) noexcept { sink_ = sink; }
+
     [[nodiscard]] auto name() const -> const char* override {
         return priv_ == Privilege::Machine ? "aplic-m" : "aplic-s";
     }
@@ -98,6 +105,7 @@ class Aplic : public memory::MmioDevice {
     void update();
 
    private:
+    simrv::core::IInterruptController* sink_{nullptr};
     Privilege priv_{Privilege::Machine};
     simrv::xlen::Address base_addr_{0};
     simrv::xlen::Address size_{0};

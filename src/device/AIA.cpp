@@ -7,6 +7,7 @@
 #include <bit>
 
 #include "simrv/core/Cpu.hpp"
+#include "simrv/core/InterruptController.hpp"
 #include "simrv/core/Machine.hpp"
 
 namespace simrv::device {
@@ -136,7 +137,14 @@ void Imsic::trigger_msi(simrv::xlen::HartId hart_idx, simrv::xlen::InterruptSour
 
 void Imsic::update_hart(simrv::xlen::HartId hart_idx) {
     const size_t h = hart_idx.value();
-    if (machine_ == nullptr || h >= machine_->num_harts() || h >= kMaxHarts) {
+    core::IInterruptController* target_sink = sink_;
+    if (target_sink == nullptr && machine_ != nullptr) {
+        target_sink = machine_;
+    }
+    if (target_sink == nullptr) {
+        return;
+    }
+    if (machine_ != nullptr && (h >= machine_->num_harts() || h >= kMaxHarts)) {
         return;
     }
     const auto& file = files_[h];
@@ -153,7 +161,7 @@ void Imsic::update_hart(simrv::xlen::HartId hart_idx) {
 
     const auto priv_level = (priv_ == Privilege::Machine) ? simrv::xlen::PrivilegeLevel::Machine
                                                           : simrv::xlen::PrivilegeLevel::Supervisor;
-    machine_->set_hart_irq(h, core::InterruptType::External, priv_level, has_pending);
+    target_sink->set_hart_irq(hart_idx, core::InterruptType::External, priv_level, has_pending);
 }
 
 // =========================================================================
@@ -322,15 +330,22 @@ void Aplic::update() {
                     eiid ? simrv::xlen::InterruptSourceId{eiid}
                          : simrv::xlen::InterruptSourceId{static_cast<uint32_t>(src)});
                 pending_ &= ~(1ULL << src);  // In MSI mode, message has been dispatched
-            } else if (!msi_mode && machine_ != nullptr) {
-                const uint32_t tgt = target_[src];
-                const size_t hart_idx = (tgt >> 18) & 0x3fffU;
-                if (hart_idx < machine_->num_harts()) {
-                    const auto priv_level = (priv_ == Privilege::Machine)
-                                                ? simrv::xlen::PrivilegeLevel::Machine
-                                                : simrv::xlen::PrivilegeLevel::Supervisor;
-                    machine_->set_hart_irq(simrv::xlen::HartId{static_cast<uint32_t>(hart_idx)},
-                                           core::InterruptType::External, priv_level, true);
+            } else if (!msi_mode) {
+                core::IInterruptController* target_sink = sink_;
+                if (target_sink == nullptr && machine_ != nullptr) {
+                    target_sink = machine_;
+                }
+                if (target_sink != nullptr) {
+                    const uint32_t tgt = target_[src];
+                    const size_t hart_idx = (tgt >> 18) & 0x3fffU;
+                    if (machine_ == nullptr || hart_idx < machine_->num_harts()) {
+                        const auto priv_level = (priv_ == Privilege::Machine)
+                                                    ? simrv::xlen::PrivilegeLevel::Machine
+                                                    : simrv::xlen::PrivilegeLevel::Supervisor;
+                        target_sink->set_hart_irq(
+                            simrv::xlen::HartId{static_cast<uint32_t>(hart_idx)},
+                            core::InterruptType::External, priv_level, true);
+                    }
                 }
             }
         }

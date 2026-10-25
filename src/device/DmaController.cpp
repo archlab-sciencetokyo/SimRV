@@ -97,8 +97,8 @@ void DmaController::reset() noexcept {
 void DmaController::start_transfer() {
     if (busy_) return;
 
-    const uint64_t src = src_address();
-    const uint64_t dst = dst_address();
+    const simrv::xlen::PhysAddr src = src_address();
+    const simrv::xlen::PhysAddr dst = dst_address();
     const uint32_t count = byte_count_;
     status_ = 0;
 
@@ -123,7 +123,8 @@ void DmaController::start_transfer() {
     }
 }
 
-void DmaController::execute_transfer(uint64_t src, uint64_t dst, uint32_t count) {
+void DmaController::execute_transfer(simrv::xlen::PhysAddr src, simrv::xlen::PhysAddr dst,
+                                     uint32_t count) {
     busy_ = false;
     if (machine_ == nullptr || count == 0) {
         status_ |= kStatusError;
@@ -134,8 +135,8 @@ void DmaController::execute_transfer(uint64_t src, uint64_t dst, uint32_t count)
     }
 
     std::vector<uint8_t> buffer(count);
-    const bool read_ok = dma_read(static_cast<simrv::xlen::Address>(src), buffer);
-    const bool write_ok = read_ok && dma_write(static_cast<simrv::xlen::Address>(dst), buffer);
+    const bool read_ok = dma_read(src, buffer);
+    const bool write_ok = read_ok && dma_write(dst, buffer);
 
     if (write_ok) {
         status_ |= kStatusDone;

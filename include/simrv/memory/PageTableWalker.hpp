@@ -14,7 +14,7 @@ namespace simrv::core {
 struct ArchState;
 }  // namespace simrv::core
 
-namespace simrv {
+namespace simrv::memory {
 
 using PteFlags = uint8_t;
 
@@ -156,8 +156,6 @@ struct PageWalkResult {
     }
 };
 
-namespace memory {
-
 /**
  * @class PageTableWalker
  * @brief Handles architectural Sv32, Sv39, and Sv48 hardware page table walks.
@@ -233,6 +231,15 @@ class PageTableWalker {
     static constexpr simrv::xlen::Word kPteShift = 10;
 };
 
-}  // namespace memory
+}  // namespace simrv::memory
 
+namespace simrv {
+using memory::PageTableWalker;
+using memory::PageWalkResult;
+using memory::PageWalkState;
+using memory::PageWalkStatus;
+using memory::PteAccess;
+using memory::PteFlag;
+using memory::PteFlags;
+using memory::PteView;
 }  // namespace simrv
