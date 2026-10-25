@@ -109,6 +109,7 @@ struct CpuConfig {
     bool enable_forwarding = true;
     bool enable_instruction_prefetch = false;
     bool record_snapshots = false;
+    bool divider_early_out = false;
     PipelineType pipeline_type = PipelineType::FiveStage;
     BranchPredictorConfig branch_predictor{};
 };

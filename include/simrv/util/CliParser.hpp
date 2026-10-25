@@ -95,6 +95,7 @@ struct RuntimeOptions {
     std::string mission;
     std::string pipeline_type = "5stage";
     bool disable_forwarding = false;
+    bool divider_early_out = false;
     std::string bpred_type;
     uint32_t bht_size = 0;
     uint32_t btb_size = 0;

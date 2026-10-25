@@ -1010,9 +1010,10 @@ void RunnerBase::execute_ca_batch(Machine& machine) {
         const auto fincnt = machine.config.execution.fincnt;
         for (uint32_t cycle = 0; cycle < quantum && machine.is_running(); ++cycle) {
             machine.advance_ca_primary_cycle();
-            if (machine.execution_state() != ExecutionState::Running || machine.tohost != 0 ||
-                (fincnt != std::numeric_limits<simrv::xlen::Counter>::max() &&
-                 machine.retired_instruction_count() >= fincnt)) {
+            if (simrv::compiler::unlikely(
+                    machine.execution_state() != ExecutionState::Running || machine.tohost != 0 ||
+                    (fincnt != std::numeric_limits<simrv::xlen::Counter>::max() &&
+                     machine.retired_instruction_count() >= fincnt))) {
                 break;
             }
         }

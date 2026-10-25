@@ -912,6 +912,10 @@ auto parse_tui_options(std::string_view arg, std::span<char* const> args, std::s
         result.options.disable_forwarding = true;
         return true;
     }
+    if (option_id == "--early-out-div") {
+        result.options.divider_early_out = true;
+        return true;
+    }
     if (option_id == "--net") {
         auto value = next_argument(args, i, arg);
         if (!value) return std::unexpected(value.error());
@@ -1584,6 +1588,7 @@ auto apply_runtime_options(simrv::core::Machine* machine, const RuntimeOptions& 
         cpu.pipeline_sim.config.pipeline_type = parsed_pipe;
         cpu.pipeline_sim.config.record_snapshots = machine->runtime_profile.records_cycle_history();
         cpu.pipeline_sim.config.enable_forwarding = !options.disable_forwarding;
+        cpu.pipeline_sim.config.divider_early_out = options.divider_early_out;
 
         if (!options.bpred_type.empty()) {
             if (const auto bp_type = pipeline::parse_branch_predictor_type(options.bpred_type)) {
@@ -1717,6 +1722,8 @@ auto cli_help_sections() -> const std::vector<HelpSection>& {
                      {.option = "--pipeline <TYPE>",
                       .description = "Select the CA pipeline: 3stage or 5stage (default)."},
                      {.option = "--no-forwarding", .description = "Disable operand forwarding."},
+                     {.option = "--early-out-div",
+                      .description = "Enable realistic data-dependent early-out division latency."},
                      {.option = "--bpred <TYPE>",
                       .description =
                           "Select none, static, bimodal, gshare, or tournament prediction.",

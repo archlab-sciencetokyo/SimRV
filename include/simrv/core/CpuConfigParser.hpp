@@ -534,6 +534,12 @@ inline auto parse_cpu_config_stream(std::istream& stream, simrv::pipeline::CpuMo
                 }
                 continue;
             }
+            if (key == "divider_early_out" || key == "early_out_div") {
+                if (const auto b = detail::parse_bool(val_str); b.has_value()) {
+                    config.pipeline.divider_early_out = *b;
+                }
+                continue;
+            }
             if (key == "mul_latency") {
                 config.pipeline.mul_latency =
                     static_cast<uint32_t>(std::stoul(std::string(val_str)));
@@ -1312,6 +1318,7 @@ inline void serialize_cpu_config(const simrv::pipeline::CpuModelConfig& config, 
                 : "five-stage")
         << "\"\n";
     out << "enable_forwarding = " << (config.pipeline.enable_forwarding ? "true" : "false") << "\n";
+    out << "divider_early_out = " << (config.pipeline.divider_early_out ? "true" : "false") << "\n";
     out << "mul_latency = " << config.pipeline.mul_latency << "\n";
     out << "div_latency = " << config.pipeline.div_latency << "\n";
     out << "fp_alu_latency = " << config.pipeline.fp_alu_latency << "\n";
