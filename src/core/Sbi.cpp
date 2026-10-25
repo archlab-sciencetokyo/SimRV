@@ -494,7 +494,11 @@ auto Sbi::handle_ecall(simrv::xlen::TrapCause cause) -> bool {
         return false;
     }
 
-    if (!detail::is_direct_sbi_ecall(cause)) {
+    const bool is_uefi_m_ecall =
+        (cause == ExceptionCode::MachineEcall) &&
+        (cpu_.machine_ != nullptr && cpu_.machine_->files_config().uefi_enabled);
+
+    if (!detail::is_direct_sbi_ecall(cause) && !is_uefi_m_ecall) {
         return false;
     }
 

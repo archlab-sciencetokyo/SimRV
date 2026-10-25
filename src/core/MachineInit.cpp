@@ -685,7 +685,7 @@ auto Machine::initialize() -> std::expected<void, std::string> {
 
     // If launched without a binary in TUI mode, skip image-dependent init --
     // the TUI will open the LoadBinary modal and call load_program_binary() later.
-    if (config.files.binary_path.empty() && tui_enabled()) {
+    if (config.files.binary_path.empty() && !config.files.uefi_enabled && tui_enabled()) {
         execution_state_.store(ExecutionState::Paused, std::memory_order_release);
         return {};
     }
