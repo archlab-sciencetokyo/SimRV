@@ -21,6 +21,132 @@
 
 namespace simrv::tui::modals {
 
+void SettingsModal::render_content(std::vector<std::string>& content_rows, int /*width*/,
+                                   int /*height*/) {
+    auto add_row = [&](std::string s) { content_rows.push_back(std::move(s)); };
+    render(content_rows, add_row, draft_, *machine_);
+}
+
+auto SettingsModal::cursor_row() const -> int {
+    return draft_.active_tab == 0 ? general_setting_row(draft_.tab_cursor[0])
+                                  : 3 + draft_.tab_cursor[draft_.active_tab];
+}
+
+void SettingsModal::scroll_to_top() { move_cursor(draft_, -999999); }
+
+void SettingsModal::scroll_to_bottom() { move_cursor(draft_, 999999); }
+
+void SettingsModal::handle_wheel(int delta) { move_cursor(draft_, delta); }
+
+auto SettingsModal::handle_key(uint8_t byte, TuiKey key) -> framework::ModalAction {
+    if (byte == 27 || key == simrv::tui::TuiKey::Esc || byte == 'q' || byte == 'Q') {
+        return framework::ModalAction::Close;
+    }
+    if (key == simrv::tui::TuiKey::Enter || key == simrv::tui::TuiKey::Newline) {
+        if (draft_.active_tab == 2 && draft_.tab_cursor[2] == 13) {
+            if (host_) host_->open_save_cpu_config();
+            return framework::ModalAction::Continue;
+        }
+        if (draft_.active_tab == 2 && draft_.tab_cursor[2] == 14) {
+            if (host_) host_->open_load_cpu_config();
+            return framework::ModalAction::Continue;
+        }
+        return framework::ModalAction::Submit;
+    }
+    if (key == simrv::tui::TuiKey::Tab) {
+        cycle_tab(draft_, 1);
+        return framework::ModalAction::Continue;
+    }
+    if (key == simrv::tui::TuiKey::BackTab) {
+        cycle_tab(draft_, -1);
+        return framework::ModalAction::Continue;
+    }
+    if (byte == '1') {
+        set_tab(draft_, 0);
+        return framework::ModalAction::Continue;
+    }
+    if (byte == '2') {
+        set_tab(draft_, 1);
+        return framework::ModalAction::Continue;
+    }
+    if (byte == '3') {
+        set_tab(draft_, 2);
+        return framework::ModalAction::Continue;
+    }
+    if (byte == ' ') {
+        if (draft_.active_tab == 2 && draft_.tab_cursor[2] == 13) {
+            if (host_) host_->open_save_cpu_config();
+            return framework::ModalAction::Continue;
+        }
+        if (draft_.active_tab == 2 && draft_.tab_cursor[2] == 14) {
+            if (host_) host_->open_load_cpu_config();
+            return framework::ModalAction::Continue;
+        }
+        toggle_setting(draft_, machine_);
+        return framework::ModalAction::Continue;
+    }
+    if ((byte == 's' || byte == 'S') && draft_.active_tab == 2) {
+        if (host_) host_->open_save_cpu_config();
+        return framework::ModalAction::Continue;
+    }
+    if ((byte == 'l' || byte == 'L') && draft_.active_tab == 2) {
+        if (host_) host_->open_load_cpu_config();
+        return framework::ModalAction::Continue;
+    }
+    if (byte == 'p' || byte == 'P') {
+        apply_isa_preset(draft_, 0);
+        return framework::ModalAction::Continue;
+    }
+    if (byte == 'i' || byte == 'I') {
+        apply_isa_preset(draft_, 1);
+        return framework::ModalAction::Continue;
+    }
+    if (byte == 'g' || byte == 'G') {
+        apply_isa_preset(draft_, 2);
+        return framework::ModalAction::Continue;
+    }
+    if (byte >= '0' && byte <= '9') {
+        std::string dummy;
+        push_digit(draft_, dummy, static_cast<char>(byte));
+        return framework::ModalAction::Continue;
+    }
+    if (byte == 8 || byte == 127 || key == simrv::tui::TuiKey::Backspace) {
+        std::string dummy;
+        pop_digit(draft_, dummy);
+        return framework::ModalAction::Continue;
+    }
+    return framework::ModalAction::Continue;
+}
+
+auto SettingsModal::handle_control_click(int content_row, size_t action_index)
+    -> framework::ModalAction {
+    if (content_row == 0) {
+        set_tab(draft_, static_cast<uint8_t>(action_index));
+        return framework::ModalAction::Continue;
+    }
+    return action_index == 0 ? framework::ModalAction::Submit : framework::ModalAction::Close;
+}
+
+auto SettingsModal::handle_click(framework::ScreenCoord local_pt, framework::ScreenSize box_size)
+    -> framework::ModalAction {
+    if (draft_.active_tab != 0) return framework::ModalAction::Continue;
+    const int item = general_setting_at_row(local_pt.y - 1);
+    if (item < 0) return framework::ModalAction::Continue;
+    draft_.tab_cursor[0] = item;
+    if (box_size.width > 0 && local_pt.x > box_size.width / 2 + 10) {
+        adjust_setting(draft_, 1);
+    } else if (box_size.width > 0 && local_pt.x > box_size.width / 2) {
+        adjust_setting(draft_, -1);
+    } else {
+        toggle_setting(draft_, machine_);
+    }
+    return framework::ModalAction::Continue;
+}
+
+auto SettingsModal::handle_click(framework::ScreenCoord local_pt) -> framework::ModalAction {
+    return handle_click(local_pt, framework::ScreenSize{.width = 0, .height = 0});
+}
+
 void SettingsModal::open(SettingsDraft& draft, const simrv::core::Machine& machine,
                          framework::DensityMode density_mode) {
     draft.active_tab = 0;

@@ -9,7 +9,7 @@ import sys
 from pathlib import Path
 
 VIEWS = ("explain", "registers", "stack", "trace")
-PANELS = (*VIEWS, "pipeline", "cache", "tlb", "hazard", "branch-predictor", "bus", "console", "display", "live")
+PANELS = (*VIEWS, "pipeline", "cache", "tlb", "hazard", "branch-predictor", "bus", "console", "display")
 
 
 def toml_string(value: str) -> str:

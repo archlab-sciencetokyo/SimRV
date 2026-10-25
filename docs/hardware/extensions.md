@@ -154,7 +154,6 @@ Execution routing happens in the Execute stage:
 - [`src/execute/ExecuteUnitFp.cpp`](https://github.com/archlab-sciencetokyo/SimRV/blob/dev/src/execute/ExecuteUnitFp.cpp) — FP ops (F, D)
 - [`src/execute/ExecuteUnitZb.cpp`](https://github.com/archlab-sciencetokyo/SimRV/blob/dev/src/execute/ExecuteUnitZb.cpp) — bit manipulation ops (Zb)
 - [`src/execute/ExecuteUnitVector.cpp`](https://github.com/archlab-sciencetokyo/SimRV/blob/dev/src/execute/ExecuteUnitVector.cpp) — vector ops (V)
-- [`src/execute/ExecuteUnitZk.cpp`](https://github.com/archlab-sciencetokyo/SimRV/blob/dev/src/execute/ExecuteUnitZk.cpp) — scalar cryptography ops (Zk)
 
 Steps:
 

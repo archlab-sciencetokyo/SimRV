@@ -256,6 +256,41 @@ if(BUILD_TESTING)
                    ${CMAKE_SOURCE_DIR}/tests/RtlParityToolTests.py)
   set_tests_properties(rtl-parity-tools PROPERTIES LABELS
                                                    "gate;regress;pipeline")
+  add_test(NAME mission-tools
+           COMMAND ${PYTHON_BIN}
+                   ${CMAKE_SOURCE_DIR}/tests/MissionToolTests.py)
+  set_tests_properties(mission-tools PROPERTIES LABELS "regress;tui")
+
+  # End-to-End (E2E) 4-tier testing suites
+  add_test(NAME e2e-tier1-features
+           COMMAND ${PYTHON_BIN} ${CMAKE_SOURCE_DIR}/tests/RunE2ETests.py
+                   --simrv $<TARGET_FILE:SimRV> --tier 1)
+  set_tests_properties(e2e-tier1-features
+                       PROPERTIES LABELS "regress;e2e;e2e-tier1" TIMEOUT 60)
+
+  add_test(NAME e2e-tier2-boundaries
+           COMMAND ${PYTHON_BIN} ${CMAKE_SOURCE_DIR}/tests/RunE2ETests.py
+                   --simrv $<TARGET_FILE:SimRV> --tier 2)
+  set_tests_properties(e2e-tier2-boundaries
+                       PROPERTIES LABELS "regress;e2e;e2e-tier2" TIMEOUT 30)
+
+  add_test(NAME e2e-tier3-combinations
+           COMMAND ${PYTHON_BIN} ${CMAKE_SOURCE_DIR}/tests/RunE2ETests.py
+                   --simrv $<TARGET_FILE:SimRV> --tier 3)
+  set_tests_properties(e2e-tier3-combinations
+                       PROPERTIES LABELS "regress;e2e;e2e-tier3" TIMEOUT 30)
+
+  add_test(NAME e2e-tier4-scenarios
+           COMMAND ${PYTHON_BIN} ${CMAKE_SOURCE_DIR}/tests/RunE2ETests.py
+                   --simrv $<TARGET_FILE:SimRV> --tier 4)
+  set_tests_properties(e2e-tier4-scenarios
+                       PROPERTIES LABELS "regress;e2e;e2e-tier4" TIMEOUT 30)
+
+  add_test(NAME e2e-all-tiers
+           COMMAND ${PYTHON_BIN} ${CMAKE_SOURCE_DIR}/tests/RunE2ETests.py
+                   --simrv $<TARGET_FILE:SimRV> --tier all)
+  set_tests_properties(e2e-all-tiers
+                       PROPERTIES LABELS "regress;e2e;e2e-all" TIMEOUT 120)
 
   # Optional App/Linux smoke tests
   if(DEFINED ENV{SIMRV_APP_IMG})

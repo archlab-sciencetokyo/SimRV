@@ -77,6 +77,7 @@ namespace simrv::core {
 
 class CPU;
 class IConsoleSink;
+class IExecutionController;
 class ITelemetrySink;
 class Tracer;
 class BaremetalRunner;
@@ -488,6 +489,9 @@ class Machine final : public core::IInterruptController {
     }
     [[nodiscard]] auto symbol_table() noexcept -> simrv::debug::SymbolTable&;
     [[nodiscard]] auto symbol_table() const noexcept -> const simrv::debug::SymbolTable&;
+
+    [[nodiscard]] auto execution_controller() noexcept -> IExecutionController*;
+    [[nodiscard]] auto execution_controller() const noexcept -> const IExecutionController*;
 
     [[nodiscard]] auto telemetry_sink() noexcept -> std::shared_ptr<ITelemetrySink> {
         return telemetry_sink_;

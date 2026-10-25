@@ -7,8 +7,8 @@
 #include <cstddef>
 #include <cstdint>
 #include <expected>
-#include <format>
 #include <filesystem>
+#include <format>
 #include <limits>
 #include <optional>
 #include <string>
@@ -158,8 +158,8 @@ struct MachineConfig {
     [[nodiscard]] auto validate() const -> std::expected<void, std::string> {
         if (cpu_model_config_override) {
             if (auto model_result = cpu_model_config_override->validate(); !model_result)
-                return std::unexpected(std::format("invalid staged CPU model: {}",
-                                                   model_result.error()));
+                return std::unexpected(
+                    std::format("invalid staged CPU model: {}", model_result.error()));
         }
         if (memory.dram_size == 0 || (memory.dram_size & (memory.dram_size - 1U)) != 0) {
             return std::unexpected("DRAM size must be a non-zero power of two");

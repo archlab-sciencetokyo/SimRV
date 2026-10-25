@@ -10,6 +10,26 @@
 
 namespace simrv::tui::framework {
 
+auto ScrollView::render_top_indicator(int width) const -> std::string {
+    if (!can_scroll_up()) {
+        return fit_to_width("", width);
+    }
+    auto const theme = active_theme();
+    std::string text = std::format(" {}▲ [{} more lines above - scroll up]\033[0m",
+                                   theme.palette.muted, remaining_above());
+    return fit_to_width(text, width);
+}
+
+auto ScrollView::render_bottom_indicator(int width) const -> std::string {
+    if (!can_scroll_down()) {
+        return fit_to_width("", width);
+    }
+    auto const theme = active_theme();
+    std::string text = std::format(" {}▼ [{} more lines below - scroll down]\033[0m",
+                                   theme.palette.muted, remaining_below());
+    return fit_to_width(text, width);
+}
+
 auto ScrollView::render_row(int visible_row_idx, int width, RowRenderer renderer) const
     -> std::string {
     if (visible_row_idx < 0 ||
@@ -19,21 +39,18 @@ auto ScrollView::render_row(int visible_row_idx, int width, RowRenderer renderer
 
     if (indicator_mode_ == ScrollIndicatorMode::EmbeddedRows) {
         if (can_scroll_up() && visible_row_idx == 0) {
-            auto const theme = active_theme();
-            std::string text = std::format(" {}▲ [{} more lines above - scroll up]\033[0m",
-                                           theme.palette.muted, bounds_.remaining_above());
-            return fit_to_width(text, width);
+            return render_top_indicator(width);
         }
         if (can_scroll_down() && visible_row_idx == bounds_.viewport_height - 1 &&
             bounds_.viewport_height > 1) {
-            auto const theme = active_theme();
-            std::string text = std::format(" {}▼ [{} more lines below - scroll down]\033[0m",
-                                           theme.palette.muted, bounds_.remaining_below());
-            return fit_to_width(text, width);
+            return render_bottom_indicator(width);
         }
     }
 
-    RowIndex const logical_row = visible_row_idx + bounds_.offset_y;
+    RowIndex const logical_row =
+        bounds_.origin == ScrollOrigin::Top
+            ? visible_row_idx + bounds_.offset_y
+            : bounds_.total_rows - bounds_.viewport_height - bounds_.offset_y + visible_row_idx;
     ColumnIndex const logical_col = bounds_.offset_x;
     if (logical_row < 0 || (bounds_.total_rows > 0 && logical_row >= bounds_.total_rows)) {
         return fit_to_width("", width);
@@ -72,8 +89,8 @@ auto ScrollView::format_horizontal_row(std::string_view raw_line, int width) con
 auto ScrollView::header_summary(std::string_view base_title) const -> std::string {
     std::string v_info;
     if (bounds_.total_rows > bounds_.viewport_height) {
-        const int above = bounds_.remaining_above();
-        const int below = bounds_.remaining_below();
+        const int above = remaining_above();
+        const int below = remaining_below();
         if (above > 0 && below > 0) {
             v_info = std::format("▲ {} above · ▼ {} below", above, below);
         } else if (above > 0) {
@@ -85,8 +102,8 @@ auto ScrollView::header_summary(std::string_view base_title) const -> std::strin
 
     std::string h_info;
     if (bounds_.total_cols > bounds_.viewport_width && bounds_.viewport_width > 0) {
-        const int left = bounds_.remaining_left();
-        const int right = bounds_.remaining_right();
+        const int left = remaining_left();
+        const int right = remaining_right();
         if (left > 0 && right > 0) {
             h_info = std::format("◀ {} left · ▶ {} right", left, right);
         } else if (left > 0) {

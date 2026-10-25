@@ -67,6 +67,43 @@ struct ShortcutGroup {
 
 }  // namespace
 
+void HelpModal::render_content(std::vector<std::string>& content_rows, int width, int height) {
+    auto add_row = [&](std::string s) { content_rows.push_back(std::move(s)); };
+    render(content_rows, add_row, height, width);
+}
+
+auto HelpModal::handle_key(uint8_t byte, TuiKey key) -> framework::ModalAction {
+    if (byte == 27 || key == simrv::tui::TuiKey::Esc || byte == 'q' || byte == 'Q' ||
+        key == simrv::tui::TuiKey::QuestionMark || key == simrv::tui::TuiKey::F1) {
+        return framework::ModalAction::Close;
+    }
+    if (byte == 'j' || byte == 'J' || key == simrv::tui::TuiKey::Tab) {
+        scroll_ = std::max(0, scroll_ + 1);
+        return framework::ModalAction::Continue;
+    }
+    if (byte == 'k' || byte == 'K' || key == simrv::tui::TuiKey::BackTab) {
+        scroll_ = std::max(0, scroll_ - 1);
+        return framework::ModalAction::Continue;
+    }
+    if (byte == ' ' || key == simrv::tui::TuiKey::Enter || key == simrv::tui::TuiKey::Newline) {
+        scroll_ = std::max(0, scroll_ + 5);
+        return framework::ModalAction::Continue;
+    }
+    return framework::ModalAction::Continue;
+}
+
+auto HelpModal::handle_control_click(int content_row, size_t action_index)
+    -> framework::ModalAction {
+    (void)content_row;
+    (void)action_index;
+    return framework::ModalAction::Close;
+}
+
+auto HelpModal::handle_click(framework::ScreenCoord local_pt) -> framework::ModalAction {
+    (void)local_pt;
+    return framework::ModalAction::Continue;
+}
+
 void HelpModal::render(std::vector<std::string>& content_rows,
                        const std::function<void(const std::string&)>& add_row_cb, int term_height,
                        int box_w) {

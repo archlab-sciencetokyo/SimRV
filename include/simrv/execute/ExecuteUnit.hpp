@@ -9,7 +9,6 @@
 #include "simrv/execute/ExecuteUnitInt.hpp"
 #include "simrv/execute/ExecuteUnitVector.hpp"
 #include "simrv/execute/ExecuteUnitZb.hpp"
-#include "simrv/execute/ExecuteUnitZk.hpp"
 
 namespace simrv::execute {
 

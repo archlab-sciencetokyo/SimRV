@@ -160,7 +160,7 @@ auto guidance_for_context(const GuidanceContext& context) -> PageGuidance {
             break;
         case TuiRegPage::LOG:
             guidance = {
-                .title = "Execution log",
+                .title = "Simulator log",
                 .meaning = "Structured event stream from simulation, devices, and subsystems.",
                 .relationship = "Filter by severity or open the full log viewer modal with [L].",
                 .next_action = KeyAction::OpenLogModal,

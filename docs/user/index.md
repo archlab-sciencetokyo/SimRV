@@ -42,7 +42,7 @@ For the portable archive and native RPM or DEB packages, start with the dedicate
 ### Prerequisites
 
 - Modern C++23 compiler: **Clang 22+** or **GCC 16+**
-- Build tools: **CMake 3.31+**, **Ninja**, **mold** (recommended for fast linking)
+- Build tools: **CMake 3.31+**, **Ninja**
 - Python: **Python 3.10+** (for utility tools and test suites)
 
 ### Building from Source

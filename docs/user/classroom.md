@@ -345,10 +345,10 @@ message = "The loop reached its back edge. Compare this PC with the earlier iter
 
 ### How Missions Progress in Class
 
-1. **Understand the instruction:** The modal shows the lesson goal, what this step teaches, the observation task, and its checkpoint boundary. Use **y** for the optional hint and then the `why` explanation.
-2. **Run and inspect:** Press **F5** to run to the next unreached named checkpoint at any time, even if its boundary is a later instruction; press **F6** to single-step. Reaching a checkpoint pauses execution and records it without moving the instruction cursor. The modal identifies the boundary and its reached status.
-3. **Continue in order:** Press **Space** or **n** in the modal (or **n** on the workbench) to move through instructions. A future checkpoint may be reached early; students can still read earlier steps, but cannot advance past the step named by `after_step` until its checkpoint is reached. F5 never advances an instruction.
-4. **Review and finish:** Press **F12** to reopen the current instruction and **p** to review the previous one. Completion shows reached/total checkpoint counts and leaves the workbench available for review. To save TA evidence, press **x** while paused with an inspection report output path configured. The report records the lesson ID and reached checkpoint symbols in encounter order, without identity or grades.
+1. **Read one instruction:** The modal shows the lesson goal, the current learning target, and one task. Use **y** to reveal a hint, then the explanation if needed.
+2. **Run and inspect:** Press **F5** to run to the named checkpoint shown in the modal, or **F6** to single-step. When the modal is hidden (and the primary Inspector column is at least 56 columns wide by 15 rows high), a compact 2-line **Mission Drawer** at the bottom of the primary Inspector panel keeps the active step title, checkpoint status, and `Task:` prompt visible alongside live registers and trace. Reaching a checkpoint pauses execution, updates the drawer with the checkpoint message, and records the checkpoint without moving the instruction cursor. If the checkpoint belongs to a later step, the modal says it was reached early.
+3. **Continue the lesson:** Press **Space** or **n** in the modal (or **n** on the workbench) to move through instructions. You can read earlier instructions after reaching a checkpoint early, but cannot advance past its `after_step` boundary before it is reached. F5 never advances an instruction.
+4. **Review and finish:** Press **F12** to reopen the current instruction and **p** to review the previous one. Completion shows reached/total checkpoint counts and leaves the workbench available for review. To save TA evidence, press **x** while paused with an inspection report output path configured. The report records the lesson ID, completion status, step and checkpoint counts, and reached checkpoint symbols in encounter order, without identity or grades.
 5. **Workbenches per Step:** `panels` can configure the entire one-to-four panel workbench for a step. If omitted, SimRV focuses or selects the single `view` page.
 
 When the terminal is too narrow or short for a requested layout, the status line reports the
@@ -360,7 +360,7 @@ panels; the minimum terminal height is 10 rows.
 
 | Key | Action |
 | :--- | :--- |
-| **`F5`** | Run to the next unreached checkpoint (automatically hides the modal). It does not advance the instructional step and is blocked after that checkpoint is reached. |
+| **`F5`** | Run to the checkpoint named in the modal (automatically hides the modal). It does not advance the instruction and is blocked after that checkpoint is reached. |
 | **`F6`** | Single-step one instruction (automatically hides the mission modal if open). |
 | **`n` / `Space`** | Advance the instruction cursor in the modal. Progress cannot cross an unreached checkpoint boundary; outside the modal, `n` advances and `Space` single-steps the CPU. |
 | **`p`** | Return to the previous mission step for review. |
@@ -507,13 +507,18 @@ message = "The function returned. Verify a0 and sp before reviewing the trace."
 #### Step 4: TA Checkpoint Evidence
 
 When a student explicitly exports the paused inspection report with `x`, it includes the mission
-identifier and reached checkpoint symbols in encounter order. The mission section contains no
-student identity or grading data. Checkpoints show which named program markers were reached; they
-do not certify that a student completed an observation or explanation.
+identifier, completion state, current/total step counts, total checkpoint count, and reached
+checkpoint symbols in encounter order. The mission section contains no student identity or grading
+data. Checkpoints show which named program markers were reached; they do not certify that a student
+completed an observation or explanation.
 
 ```json
 "mission": {
   "id": "lab1-abi",
+  "completed": true,
+  "step": 3,
+  "step_count": 3,
+  "checkpoint_count": 3,
   "reached_checkpoints": ["mission_branch", "mission_call", "mission_done"],
   "checkpoint_details": [
     {"symbol": "mission_branch", "message": "Compare the branch PC with its target."},

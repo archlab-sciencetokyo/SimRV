@@ -8,8 +8,8 @@
 #include <string>
 #include <vector>
 
-#include "simrv/tui/TuiModal.hpp"
 #include "simrv/pipeline/CpuModel.hpp"
+#include "simrv/tui/TuiModal.hpp"
 
 namespace simrv::core {
 class Machine;
@@ -28,8 +28,8 @@ class SystemConfigModal {
     static void push_digit(SysConfigDraft& draft, int cursor, std::string& input, char digit);
     static void pop_digit(SysConfigDraft& draft, int cursor, std::string& input);
     static auto submit(const SysConfigDraft& draft, simrv::core::Machine& machine) -> bool;
-    static auto apply_to_model(const SysConfigDraft& draft,
-                               simrv::pipeline::CpuModelConfig& model) -> bool;
+    static auto apply_to_model(const SysConfigDraft& draft, simrv::pipeline::CpuModelConfig& model)
+        -> bool;
     static void render(std::vector<std::string>& content_rows,
                        const std::function<void(const std::string&)>& add_row_cb,
                        const SysConfigDraft& draft, int cursor, const std::string& input = "");

@@ -20,6 +20,10 @@ enum class InspectionReportWriteStatus { Written, WouldOverwrite };
 
 struct MissionEvidence {
     std::string lesson_id;
+    bool completed = false;
+    size_t step = 0;
+    size_t step_count = 0;
+    size_t checkpoint_count = 0;
     std::vector<std::string> reached_checkpoints;
     struct CheckpointDetail {
         std::string symbol;

@@ -1,48 +1,24 @@
 /**
  * @file TuiDrawer.hpp
- * @brief Reusable bottom-drawer layout for TUI panels.
+ * @brief Domain bottom-drawer specifications for SimRV TUI inspector panels.
  */
 #pragma once
 
-#include <functional>
-#include <optional>
-#include <string>
-#include <utility>
-#include <vector>
+#include <cstdint>
+
+#include "simrv/tui/framework/Drawer.hpp"
 
 namespace simrv::tui {
 
-/// A panel drawer owns its row content; the stack handles shared placement and content space.
-struct TuiDrawer {
-    int height = 0;
-    std::function<std::string(int row, int width)> render_row;
+inline constexpr int kInspectorPanelTopRow = 4;
+
+enum class TuiDrawerId : uint8_t {
+    Log,
+    Mission,
 };
 
-class TuiDrawerStack {
-   public:
-    void add(TuiDrawer drawer) {
-        if (drawer.height <= 0 || !drawer.render_row) return;
-        total_height_ += drawer.height;
-        drawers_.push_back(std::move(drawer));
-    }
-
-    [[nodiscard]] auto height() const noexcept -> int { return total_height_; }
-
-    [[nodiscard]] auto render_row(int row, int total_rows, int width) const
-        -> std::optional<std::string> {
-        if (row < total_rows - total_height_ || row >= total_rows) return std::nullopt;
-        int first = total_rows - total_height_;
-        for (const auto& drawer : drawers_) {
-            if (row < first + drawer.height)
-                return drawer.render_row(row - first, width);
-            first += drawer.height;
-        }
-        return std::nullopt;
-    }
-
-   private:
-    std::vector<TuiDrawer> drawers_;
-    int total_height_ = 0;
-};
+using TuiDrawerSpan = framework::DrawerSpan<TuiDrawerId>;
+using TuiDrawer = framework::Drawer<TuiDrawerId>;
+using TuiDrawerStack = framework::DrawerStack<TuiDrawerId>;
 
 }  // namespace simrv::tui

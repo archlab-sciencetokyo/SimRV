@@ -17,7 +17,7 @@ STEP_KEYS = {"id", "title", "prompt", "learn", "hint", "why", "view", "panels", 
 REQUIRED_STEP_KEYS = {"id", "title", "prompt", "why"}
 CHECKPOINT_KEYS = {"label", "after_step", "message"}
 VIEWS = {"explain", "registers", "stack", "trace"}
-PANELS = VIEWS | {"pipeline", "cache", "tlb", "hazard", "branch-predictor", "bus", "console", "display", "live"}
+PANELS = VIEWS | {"pipeline", "cache", "tlb", "hazard", "branch-predictor", "bus", "console", "display"}
 
 
 def parse_mission(path: Path) -> tuple[dict[str, str], list[dict[str, str]], list[dict[str, str | int]]]:

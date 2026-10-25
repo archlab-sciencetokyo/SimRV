@@ -43,17 +43,7 @@
 
 namespace simrv::debug {
 
-// ---------------------------------------------------------------------------
-// ANSI colour helpers
-// ---------------------------------------------------------------------------
-
 namespace {
-[[maybe_unused]] constexpr const char* kRed = "\033[31m";
-[[maybe_unused]] constexpr const char* kGreen = "\033[32m";
-[[maybe_unused]] constexpr const char* kYellow = "\033[33m";
-[[maybe_unused]] constexpr const char* kBold = "\033[1m";
-[[maybe_unused]] constexpr const char* kReset = "\033[0m";
-
 // ABI register names for prettier output
 constexpr std::array<const char*, 32> kAbiNames = {
     "zero", "ra", "sp", "gp", "tp",  "t0",  "t1", "t2", "s0", "s1", "a0",

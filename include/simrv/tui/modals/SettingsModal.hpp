@@ -4,21 +4,72 @@
  */
 #pragma once
 
+#include <algorithm>
+#include <array>
 #include <functional>
 #include <string>
 #include <vector>
 
 #include "simrv/core/MachineConfig.hpp"
 #include "simrv/tui/TuiModal.hpp"
+#include "simrv/tui/framework/Modal.hpp"
 
 namespace simrv::core {
 class Machine;
 }
 
+namespace simrv::tui {
+class TuiModal;
+}
+
 namespace simrv::tui::modals {
 
-class SettingsModal {
+constexpr std::array<int, 14> kGeneralSettingRows = {5,  6,  7,  8,  9,  12, 13,
+                                                     14, 17, 18, 19, 22, 25, 28};
+constexpr int kGeneralSettingsContentRows = 29;
+
+[[nodiscard]] constexpr inline auto general_setting_row(int item) noexcept -> int {
+    return (item >= 0 && static_cast<size_t>(item) < kGeneralSettingRows.size())
+               ? kGeneralSettingRows[static_cast<size_t>(item)]
+               : 0;
+}
+
+[[nodiscard]] inline auto general_setting_at_row(int row) noexcept -> int {
+    const auto it = std::ranges::find(kGeneralSettingRows, row);
+    return it == kGeneralSettingRows.end()
+               ? -1
+               : static_cast<int>(std::distance(kGeneralSettingRows.begin(), it));
+}
+
+class SettingsModal : public framework::IModal {
    public:
+    explicit SettingsModal(TuiModal* host, simrv::core::Machine* machine, SettingsDraft& draft)
+        : host_(host), machine_(machine), draft_(draft) {}
+
+    SettingsModal() : host_(nullptr), machine_(nullptr), draft_(owned_draft_) {}
+
+    [[nodiscard]] auto title() const -> std::string override {
+        return "Simulator Settings & Microarchitecture Configuration";
+    }
+    [[nodiscard]] auto type() const -> ModalType override { return ModalType::Settings; }
+
+    void render_content(std::vector<std::string>& content_rows, int width, int height) override;
+    auto handle_key(uint8_t byte, TuiKey key) -> framework::ModalAction override;
+    auto handle_control_click(int content_row, size_t action_index)
+        -> framework::ModalAction override;
+    auto handle_click(framework::ScreenCoord local_pt) -> framework::ModalAction override;
+    auto handle_click(framework::ScreenCoord local_pt, framework::ScreenSize box_size)
+        -> framework::ModalAction override;
+
+    [[nodiscard]] auto cursor_row() const -> int override;
+    void scroll_to_top() override;
+    void scroll_to_bottom() override;
+    void handle_wheel(int delta) override;
+    auto handle_horizontal(int delta) -> bool override {
+        adjust_setting(draft_, delta);
+        return true;
+    }
+
     static void open(SettingsDraft& draft, const simrv::core::Machine& machine,
                      framework::DensityMode density_mode = framework::DensityMode::Auto);
     static void move_cursor(SettingsDraft& draft, int delta);
@@ -42,6 +93,12 @@ class SettingsModal {
     static void render(std::vector<std::string>& content_rows,
                        const std::function<void(const std::string&)>& add_row_cb,
                        const SettingsDraft& draft, const simrv::core::Machine& machine);
+
+   private:
+    SettingsDraft owned_draft_;
+    TuiModal* host_;
+    simrv::core::Machine* machine_;
+    SettingsDraft& draft_;
 };
 
 }  // namespace simrv::tui::modals

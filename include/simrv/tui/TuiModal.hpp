@@ -17,7 +17,9 @@
 #include "simrv/core/MachineConfig.hpp"
 #include "simrv/tui/TuiKey.hpp"
 #include "simrv/tui/TuiTypes.hpp"
+#include "simrv/tui/framework/Modal.hpp"
 #include "simrv/tui/framework/Types.hpp"
+#include "simrv/tui/modals/ToolPickerModal.hpp"
 #include "simrv/xlen/Helpers.hpp"
 #include "simrv/xlen/ScalarTypes.hpp"
 
@@ -28,35 +30,14 @@ enum class PlatformProfile : uint8_t;
 
 namespace simrv::tui {
 
+namespace modals {
+class FilePickerModal;
+class MissionObjectiveModal;
+}  // namespace modals
+
 class InspectorPane;
 class LogBuffer;
 class MissionProgress;
-
-enum class ModalType : uint8_t {
-    None,
-    SetBreakpoint,
-    SetWatchpoint,
-    SetSpeed,
-    InspectAddress,
-    LoadBinary,
-    LoadDiskImage,
-    Help,
-    Glossary,
-    Settings,
-    ManageBreakpoints,
-    Notice,
-    PlatformChangeConfirm,
-    ConfigurationChangeConfirm,
-    LayoutPresets,
-    ToolPicker,
-    SaveCpuConfig,
-    LoadCpuConfig,
-    LoadFilePicker,
-    MemoryDump,
-    SwitchHart,
-    LogViewer,
-    MissionObjective
-};
 
 struct SysConfigDraft {
     uint8_t preset = 1;         // tiny, balanced, performance, custom
@@ -148,7 +129,19 @@ class TuiModal {
         return density_mode_;
     }
 
-    [[nodiscard]] auto is_active() const -> bool { return active_modal_ != ModalType::None; }
+    [[nodiscard]] auto is_active() const -> bool {
+        return active_modal_ != ModalType::None || active_modal_impl_ != nullptr;
+    }
+    [[nodiscard]] auto active_modal_impl() noexcept -> framework::IModal* {
+        return active_modal_impl_.get();
+    }
+    [[nodiscard]] auto active_modal_impl() const noexcept -> const framework::IModal* {
+        return active_modal_impl_.get();
+    }
+    void open_custom_modal(std::unique_ptr<framework::IModal> modal) {
+        close();
+        active_modal_impl_ = std::move(modal);
+    }
     [[nodiscard]] auto get_type() const -> ModalType { return active_modal_; }
     [[nodiscard]] auto get_input() const -> const std::string& { return input_; }
     void set_input(std::string input) {
@@ -213,7 +206,10 @@ class TuiModal {
 
     void scroll_help(int delta);
     void reset_help_scroll() { help_scroll_ = 0; }
+    void scroll_to_top();
+    void scroll_to_bottom();
     void handle_wheel(int delta);
+    auto handle_horizontal(int delta) -> bool;
 
     void move_preset_cursor(int delta) {
         preset_cursor_ = std::clamp(preset_cursor_ + delta, 0, 3);
@@ -233,6 +229,8 @@ class TuiModal {
     [[nodiscard]] auto get_tool_picker_cursor() const -> int { return tool_picker_cursor_; }
     [[nodiscard]] auto get_tool_picker_num_slots() const -> int { return tool_picker_num_slots_; }
     [[nodiscard]] auto get_selected_tool_page() const -> TuiRegPage;
+    [[nodiscard]] auto tool_filter() const -> modals::ToolFilter;
+    void set_selected_hart(size_t hart) { selected_hart_ = hart; }
 
     void open_memory_dump(simrv::xlen::Address addr = 0, InspectorPane* inspector_pane = nullptr);
     void open_log_viewer();
@@ -276,14 +274,7 @@ class TuiModal {
                                       std::optional<bool> cycle_accurate = std::nullopt);
     [[nodiscard]] auto apply_pending_reconfiguration() -> std::expected<void, std::string>;
 
-    enum class ModalClickResult : uint8_t {
-        Ignored,
-        Handled,
-        Closed,
-        Submit,
-        ReloadRequested,
-        DiscardRequested
-    };
+    using ModalClickResult = framework::ModalAction;
 
     [[nodiscard]] auto handle_click(int x, int y, int term_width, int term_height)
         -> ModalClickResult;
@@ -297,6 +288,7 @@ class TuiModal {
     uint8_t mission_hint_level_ = 0;
     LogBuffer* log_buffer_ = nullptr;
     ModalType active_modal_ = ModalType::None;
+    std::unique_ptr<framework::IModal> active_modal_impl_{};
     std::string input_;
     std::string notice_title_;
     std::string notice_message_;
@@ -312,6 +304,7 @@ class TuiModal {
     int glossary_scroll_ = 0;
     mutable int help_scroll_ = 0;
     int preset_cursor_ = 0;
+    size_t selected_hart_ = 0;
     int tool_picker_slot_ = 0;
     int tool_picker_cursor_ = 0;
     int tool_picker_num_slots_ = 3;
@@ -342,6 +335,9 @@ class TuiModal {
         std::vector<framework::ControlSpan> spans;
     };
     mutable std::vector<RenderedControlRow> rendered_control_rows_;
+
+    friend class modals::FilePickerModal;
+    friend class modals::MissionObjectiveModal;
 };
 
 }  // namespace simrv::tui

@@ -2074,6 +2074,10 @@ Machine::~Machine() {
         }
     }
     stop_runner();
+    // The UI sink can own mission breakpoints and refers back to this Machine. Release both
+    // sink references while BreakpointManager and the rest of the runtime are still alive.
+    telemetry_sink_.reset();
+    console_sink_.reset();
     // Destroy callbacks and runner objects while their Machine wake state is still alive.
     runtime_.reset();
 }
@@ -2128,6 +2132,14 @@ void Machine::advance_ca_platform_cycle(bool synchronize_secondary_harts) {
             }
         }
     }
+}
+
+auto Machine::execution_controller() noexcept -> IExecutionController* {
+    return telemetry_sink_.get();
+}
+
+auto Machine::execution_controller() const noexcept -> const IExecutionController* {
+    return telemetry_sink_.get();
 }
 
 }  // namespace simrv::core

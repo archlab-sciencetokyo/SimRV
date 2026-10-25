@@ -61,20 +61,7 @@ auto unquote(std::string_view value) -> std::optional<std::string> {
 }
 
 auto page_for(std::string_view value) -> std::optional<TuiRegPage> {
-    if (value == "registers") return TuiRegPage::GPR;
-    if (value == "stack") return TuiRegPage::STACK;
-    if (value == "trace") return TuiRegPage::TRACE;
-    if (value == "explain") return TuiRegPage::EXPLAIN;
-    if (value == "pipeline") return TuiRegPage::PIPELINE;
-    if (value == "cache") return TuiRegPage::CACHE;
-    if (value == "tlb") return TuiRegPage::TLB;
-    if (value == "hazard") return TuiRegPage::HAZARD;
-    if (value == "branch-predictor") return TuiRegPage::BPRED;
-    if (value == "bus") return TuiRegPage::BUS;
-    if (value == "console") return TuiRegPage::CONSOLE;
-    if (value == "display") return TuiRegPage::DISPLAY;
-    if (value == "live") return TuiRegPage::GPR;
-    return std::nullopt;
+    return parse_tui_page_slug(value);
 }
 
 auto parse_mission_speed(std::string_view value) -> std::optional<uint64_t> {
@@ -130,8 +117,14 @@ auto MissionProgress::load(std::string_view mission_path) -> bool {
         if (!step_open) return true;
         if (step.id.empty() || step.guidance.title.empty() || step.guidance.prompt.empty() ||
             step.guidance.why.empty() || (!step_has_view && step.guidance.panels.empty())) {
-            detail_ = "Each [step] requires label, title, prompt, why, and either view or panels.";
+            detail_ = "Each [step] requires id, title, prompt, why, and either view or panels.";
             return false;
+        }
+        for (const auto& existing : steps_) {
+            if (existing.id == step.id) {
+                detail_ = std::format("Duplicate [step] id '{}'.", step.id);
+                return false;
+            }
         }
         steps_.push_back(std::move(step));
         step = {};
@@ -234,11 +227,14 @@ auto MissionProgress::load(std::string_view mission_path) -> bool {
                 if (step.guidance.panels.empty() || step.guidance.panels.size() > 4)
                     return fail("panels must list between one and four views");
             } else if (key == "glossary") {
-                try {
-                    step.guidance.glossary_topic = std::stoi(*value);
-                } catch (...) {
-                    return fail("glossary must be an integer encoded as a string");
+                int topic = -1;
+                const auto [end, error] =
+                    std::from_chars(value->data(), value->data() + value->size(), topic);
+                if (error != std::errc{} || end != value->data() + value->size() || topic < 0 ||
+                    topic > 5) {
+                    return fail("glossary must be an integer from 0 to 5 encoded as a string");
                 }
+                step.guidance.glossary_topic = topic;
             } else {
                 return fail("unknown [step] key");
             }
@@ -441,7 +437,8 @@ auto MissionProgress::checkpoint_progress() const -> std::optional<MissionCheckp
             next = &checkpoint;
     }
     if (next == nullptr) return std::nullopt;
-    const bool reached = std::ranges::find(checkpoint_events_, next->symbol) != checkpoint_events_.end();
+    const bool reached =
+        std::ranges::find(checkpoint_events_, next->symbol) != checkpoint_events_.end();
     return MissionCheckpointProgress{next->symbol, next->message, next->after_step, reached};
 }
 
@@ -450,7 +447,8 @@ auto MissionProgress::checkpoints_progress() const -> std::vector<MissionCheckpo
     std::vector<MissionCheckpointProgress> progress;
     progress.reserve(checkpoints_.size());
     for (const auto& checkpoint : checkpoints_) {
-        const bool reached = std::ranges::find(checkpoint_events_, checkpoint.symbol) != checkpoint_events_.end();
+        const bool reached =
+            std::ranges::find(checkpoint_events_, checkpoint.symbol) != checkpoint_events_.end();
         progress.push_back({checkpoint.symbol, checkpoint.message, checkpoint.after_step, reached});
     }
     std::ranges::sort(progress, {}, &MissionCheckpointProgress::after_step);
@@ -497,10 +495,7 @@ auto MissionProgress::guidance() const -> std::optional<MissionGuidance> {
     }
     const auto current_step = step();
     if (!enabled() || current_step >= steps_.size()) return std::nullopt;
-    auto guidance = steps_[current_step].guidance;
-    guidance.title =
-        std::format("Step {} of {} · {}", current_step + 1, steps_.size(), guidance.title);
-    return guidance;
+    return steps_[current_step].guidance;
 }
 
 auto MissionProgress::speed_hz() const noexcept -> uint64_t {

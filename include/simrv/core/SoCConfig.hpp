@@ -253,11 +253,11 @@ struct SmpTopologyConfig {
             return {kind, "console0", SIMRV_PLATFORM_VIRTIO_CONSOLE_BASE,
                     SIMRV_PLATFORM_VIRTIO_SLOT_SIZE, 1};
         case SoCDeviceKind::VirtioMmioRng:
-            return {kind, "rng0", SIMRV_PLATFORM_VIRTIO_RNG_BASE,
-                    SIMRV_PLATFORM_VIRTIO_SLOT_SIZE, 4};
+            return {kind, "rng0", SIMRV_PLATFORM_VIRTIO_RNG_BASE, SIMRV_PLATFORM_VIRTIO_SLOT_SIZE,
+                    4};
         case SoCDeviceKind::VirtioMmioGpu:
-            return {kind, "gpu0", SIMRV_PLATFORM_VIRTIO_GPU_BASE,
-                    SIMRV_PLATFORM_VIRTIO_SLOT_SIZE, 5};
+            return {kind, "gpu0", SIMRV_PLATFORM_VIRTIO_GPU_BASE, SIMRV_PLATFORM_VIRTIO_SLOT_SIZE,
+                    5};
         case SoCDeviceKind::VirtioMmioInput:
             return {kind, "input0", SIMRV_PLATFORM_VIRTIO_INPUT_BASE,
                     SIMRV_PLATFORM_VIRTIO_SLOT_SIZE, 6};
@@ -265,11 +265,10 @@ struct SmpTopologyConfig {
             return {kind, "sound0", SIMRV_PLATFORM_VIRTIO_SOUND_BASE,
                     SIMRV_PLATFORM_VIRTIO_SLOT_SIZE, 7};
         case SoCDeviceKind::VirtioMmioNet:
-            return {kind, "net0", SIMRV_PLATFORM_VIRTIO_NET_BASE,
-                    SIMRV_PLATFORM_VIRTIO_SLOT_SIZE, 8};
+            return {kind, "net0", SIMRV_PLATFORM_VIRTIO_NET_BASE, SIMRV_PLATFORM_VIRTIO_SLOT_SIZE,
+                    8};
         case SoCDeviceKind::VirtioMmioFs:
-            return {kind, "fs0", SIMRV_PLATFORM_VIRTIO_FS_BASE,
-                    SIMRV_PLATFORM_VIRTIO_SLOT_SIZE, 9};
+            return {kind, "fs0", SIMRV_PLATFORM_VIRTIO_FS_BASE, SIMRV_PLATFORM_VIRTIO_SLOT_SIZE, 9};
         case SoCDeviceKind::DmaController:
             return {kind, "dma0", SIMRV_PLATFORM_DMA_BASE, SIMRV_PLATFORM_DMA_SIZE,
                     SIMRV_PLATFORM_DMA_IRQ};

@@ -26,11 +26,21 @@ void write_quoted(std::ostream& out, std::string_view value) {
     out.put('"');
     for (const unsigned char ch : value) {
         switch (ch) {
-            case '"': out << "\\\""; break;
-            case '\\': out << "\\\\"; break;
-            case '\n': out << "\\n"; break;
-            case '\r': out << "\\r"; break;
-            case '\t': out << "\\t"; break;
+            case '"':
+                out << "\\\"";
+                break;
+            case '\\':
+                out << "\\\\";
+                break;
+            case '\n':
+                out << "\\n";
+                break;
+            case '\r':
+                out << "\\r";
+                break;
+            case '\t':
+                out << "\\t";
+                break;
             default:
                 if (ch < 0x20) {
                     out << "\\u00" << hex.at(ch >> 4) << hex.at(ch & 0x0f);

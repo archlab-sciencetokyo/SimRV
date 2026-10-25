@@ -33,7 +33,9 @@
 #include "simrv/tui/TuiPreferences.hpp"
 #include "simrv/tui/TuiTypes.hpp"
 #include "simrv/tui/VirtualTerminal.hpp"
+#include "simrv/tui/framework/PointerRouter.hpp"
 #include "simrv/tui/framework/Subpanel.hpp"
+#include "simrv/tui/framework/Workbench.hpp"
 #include "simrv/util/UniqueFd.hpp"
 #include "simrv/xlen/ScalarTypes.hpp"
 
@@ -170,6 +172,14 @@ class Tui : public core::ITelemetrySink, public core::IConsoleSink {
         set_paused(true);
         render(true);
     }
+    void open_custom_modal(std::unique_ptr<framework::IModal> modal) {
+        if (!is_paused()) {
+            pause_loop();
+        }
+        modal_.open_custom_modal(std::move(modal));
+        set_paused(true);
+        render(true);
+    }
     void close_modal() {
         modal_.close();
         full_screen_redraw_requested_ = true;
@@ -219,9 +229,23 @@ class Tui : public core::ITelemetrySink, public core::IConsoleSink {
     void focus_next_slot();
     void focus_prev_slot();
     [[nodiscard]] auto is_terminal_focused() const noexcept -> bool { return !is_paused(); }
-    [[nodiscard]] auto focused_slot() const noexcept -> size_t { return focused_slot_index_; }
+    [[nodiscard]] auto focused_slot() const noexcept -> size_t {
+        return workbench_.focused_index();
+    }
     [[nodiscard]] auto get_workbench_slots() const noexcept -> const std::vector<WorkbenchSlot>& {
-        return workbench_slots_;
+        return workbench_.slots();
+    }
+    [[nodiscard]] auto workbench() const noexcept -> const framework::Workbench<WorkbenchSlot, 4>& {
+        return workbench_;
+    }
+    [[nodiscard]] auto workbench() noexcept -> framework::Workbench<WorkbenchSlot, 4>& {
+        return workbench_;
+    }
+    [[nodiscard]] auto pointer_router() const noexcept -> const framework::PointerRouter& {
+        return pointer_router_;
+    }
+    [[nodiscard]] auto pointer_router() noexcept -> framework::PointerRouter& {
+        return pointer_router_;
     }
     void set_workbench_slot_page(size_t slot_idx, TuiRegPage page);
     /// Cycle the tool page for the given workbench slot (wraps within the slot's category group).
@@ -370,9 +394,12 @@ class Tui : public core::ITelemetrySink, public core::IConsoleSink {
     std::optional<bool> mission_layout_fits_;
     std::optional<simrv::xlen::Address> mission_breakpoint_addr_;
     bool inspection_overwrite_armed_{false};
-    std::vector<WorkbenchSlot> workbench_slots_{{.page = TuiRegPage::GPR, .scroll_offset = 0},
-                                                {.page = TuiRegPage::CONSOLE, .scroll_offset = 0}};
-    size_t focused_slot_index_ = 0;
+    framework::PointerRouter pointer_router_{};
+    framework::Workbench<WorkbenchSlot, 4> workbench_{
+        {{.page = TuiRegPage::GPR, .scroll_offset = 0},
+         {.page = TuiRegPage::CONSOLE, .scroll_offset = 0}}};
+    std::vector<WorkbenchSlot>& workbench_slots_ = workbench_.slots();
+    size_t& focused_slot_index_ = workbench_.focused_index_ref();
     size_t selected_hart_ = 0;
     TuiLayout layout_ = TuiLayout::Split;
     framework::DensityMode density_mode_ = framework::DensityMode::Auto;
@@ -461,8 +488,6 @@ class Tui : public core::ITelemetrySink, public core::IConsoleSink {
     auto handle_alt_key(char key, uint8_t byte) -> bool;
     auto handle_arrow_key_sequence() -> bool;
     auto handle_modal_keyboard_input(uint8_t byte, TuiKey key) -> bool;
-    bool handle_modal_settings(ModalType mtype, uint8_t byte, TuiKey key);
-    bool handle_modal_breakpoint(ModalType mtype, uint8_t byte, TuiKey key);
     auto handle_normal_keyboard_input(uint8_t byte, TuiKey key) -> void;
     auto search_terminal_scrollback(bool reverse) -> bool;
     bool handle_speed_keyboard_input(TuiKey key);
@@ -472,8 +497,8 @@ class Tui : public core::ITelemetrySink, public core::IConsoleSink {
                            bool rs1_fp, bool rs2_fp, std::string& inst_str,
                            std::string& side_effect);
     void render_update_speed(std::chrono::steady_clock::time_point now);
-    void render_build_lines(int inspector_width, int terminal_width, int num_rows,
-                            TuiRightPanelMode panel_mode);
+    void render_build_lines(int inspector_width, int terminal_width, int terminal_rows,
+                            int frame_content_rows, TuiRightPanelMode panel_mode);
     [[nodiscard]] auto render_framebuffer_row(int row, int width, int rows) const -> std::string;
     void render_draw_sixel(int display_x, int display_width, int display_rows,
                            std::string& update_cmds);

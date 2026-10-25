@@ -63,6 +63,7 @@ class MissionToolTests(unittest.TestCase):
             (mission_text(speed="1000001"), "speed_hz"),
             (mission_text(step_speed="1000001"), "speed_hz"),
             (mission_text(panels="registers,unknown"), "panels"),
+            (mission_text(panels="registers,live"), "panels"),
             (mission_text(panels="registers,registers"), "panels"),
             (mission_text(after_step="2"), "after_step"),
         )

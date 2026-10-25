@@ -15,6 +15,39 @@
 
 namespace simrv::tui::modals {
 
+void AddressModal::render_content(std::vector<std::string>& content_rows, int /*width*/,
+                                  int /*height*/) {
+    render(content_rows, input_);
+}
+
+auto AddressModal::handle_key(uint8_t byte, TuiKey key) -> framework::ModalAction {
+    if (byte == 27 || key == simrv::tui::TuiKey::Esc) {
+        return framework::ModalAction::Close;
+    }
+    if (key == simrv::tui::TuiKey::Enter || key == simrv::tui::TuiKey::Newline) {
+        return framework::ModalAction::Submit;
+    }
+    if (byte == 8 || byte == 127 || key == simrv::tui::TuiKey::Backspace) {
+        if (!input_.empty()) input_.pop_back();
+        return framework::ModalAction::Continue;
+    }
+    if (byte >= 32 && byte <= 126) {
+        input_.push_back(static_cast<char>(byte));
+        return framework::ModalAction::Continue;
+    }
+    return framework::ModalAction::Continue;
+}
+
+auto AddressModal::handle_control_click(int /*content_row*/, size_t action_index)
+    -> framework::ModalAction {
+    return action_index == 0 ? framework::ModalAction::Submit : framework::ModalAction::Close;
+}
+
+auto AddressModal::handle_click(framework::ScreenCoord local_pt) -> framework::ModalAction {
+    (void)local_pt;
+    return framework::ModalAction::Continue;
+}
+
 void AddressModal::open(std::string& input, InspectorPane* inspector_pane) {
     input = std::format("0x{:08x}", inspector_pane ? inspector_pane->get_inspect_addr() : 0);
 }
