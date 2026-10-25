@@ -29,6 +29,17 @@ enum class PteFlag : PteFlags {
     D = (1 << 7),
 };
 
+/**
+ * @enum PtePbmt
+ * @brief RISC-V Svpbmt Page-Based Memory Types (PTE bits 62:61) per Privileged ISA 1.13.
+ */
+enum class PtePbmt : uint8_t {
+    Pma = 0,           ///< Standard physical memory attribute
+    NonCacheable = 1,  ///< Non-cacheable, idempotent memory (NC)
+    Io = 2,            ///< I/O memory, non-cacheable non-idempotent (IO)
+    Reserved = 3,      ///< Reserved encoding
+};
+
 constexpr auto operator|(PteFlag lhs, PteFlag rhs) noexcept -> PteFlag {
     return static_cast<PteFlag>(std::to_underlying(lhs) | std::to_underlying(rhs));
 }
@@ -107,8 +118,20 @@ struct PteView {
     [[nodiscard]] constexpr auto flags() const noexcept -> PteFlags {
         return static_cast<PteFlags>(raw & 0xFF);
     }
+    [[nodiscard]] constexpr auto pbmt() const noexcept -> PtePbmt {
+        return static_cast<PtePbmt>((static_cast<uint64_t>(raw) >> 61U) & 0x3U);
+    }
+    [[nodiscard]] constexpr auto is_napot() const noexcept -> bool {
+        return ((static_cast<uint64_t>(raw) >> 63U) & 0x1U) != 0;
+    }
     [[nodiscard]] constexpr auto has_reserved_bits(unsigned pte_size) const noexcept -> bool {
-        return pte_size == 8 && (static_cast<uint64_t>(raw) >> 54U) != 0;
+        if (pte_size == 8) {
+            constexpr uint64_t kReservedMask = (0x7FULL << 54U);
+            const bool reserved_fields = (static_cast<uint64_t>(raw) & kReservedMask) != 0;
+            const bool invalid_pbmt = (pbmt() == PtePbmt::Reserved);
+            return reserved_fields || invalid_pbmt;
+        }
+        return false;
     }
 };
 
@@ -241,5 +264,6 @@ using memory::PageWalkStatus;
 using memory::PteAccess;
 using memory::PteFlag;
 using memory::PteFlags;
+using memory::PtePbmt;
 using memory::PteView;
 }  // namespace simrv

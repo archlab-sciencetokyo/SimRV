@@ -59,7 +59,7 @@ enum class RfenceFid : std::uint8_t {
     RemoteHfenceVvma = 0x6,
 };
 
-constexpr simrv::xlen::Word kSpecVersion_2_0 = 0x02000000U;
+constexpr simrv::xlen::Word kSpecVersion_3_0 = kSbiSpecVersion_3_0;
 // Project-specific ID (ASCII "SIM"). ID 1 is reserved for OpenSBI and must not be reported by
 // SimRV's direct execution environment. An official SBI implementation ID has not been assigned.
 constexpr simrv::xlen::Word kImplId_SimRV = 0x53494DU;
@@ -92,7 +92,7 @@ void Sbi::sbi_return(simrv::xlen::SignedWord error, simrv::xlen::Word value) {
 auto Sbi::handle_base(simrv::xlen::Word func_id) -> bool {
     switch (static_cast<BaseFid>(func_id)) {
         case BaseFid::GetSpecVersion:
-            sbi_return(static_cast<simrv::xlen::SignedWord>(SbiError::Success), kSpecVersion_2_0);
+            sbi_return(static_cast<simrv::xlen::SignedWord>(SbiError::Success), kSpecVersion_3_0);
             return true;
         case BaseFid::GetImplId:
             sbi_return(static_cast<simrv::xlen::SignedWord>(SbiError::Success), kImplId_SimRV);
@@ -150,28 +150,43 @@ auto Sbi::handle_rfence(simrv::xlen::Word func_id) -> bool {
         return true;
     }
 
+    const auto apply_rfence_to_cpu = [&](core::CPU& target_cpu) {
+        if (fid == RfenceFid::RemoteFenceI) {
+            target_cpu.icache.flush();
+            target_cpu.decode_cache.flush();
+        } else if (fid == RfenceFid::RemoteSfenceVma || fid == RfenceFid::RemoteSfenceVmaAsid) {
+            const simrv::xlen::Address start_addr = cpu_.state().regs.read(simrv::xlen::RegId::A2);
+            const simrv::xlen::Address size = cpu_.state().regs.read(simrv::xlen::RegId::A3);
+            const std::optional<Asid> filter_asid =
+                (fid == RfenceFid::RemoteSfenceVmaAsid)
+                    ? std::make_optional(
+                          static_cast<Asid>(cpu_.state().regs.read(simrv::xlen::RegId::A4)))
+                    : std::nullopt;
+
+            constexpr simrv::xlen::Address kAllMask = ~static_cast<simrv::xlen::Address>(0);
+            if ((start_addr == 0 && size == 0) || size == kAllMask || size > (16 * 4096) ||
+                (start_addr + size < start_addr)) {
+                target_cpu.TLB_flush(
+                    core::TlbFlushFilter{.vaddr = std::nullopt, .asid = filter_asid});
+            } else {
+                for (simrv::xlen::Address addr = start_addr; addr < start_addr + size;
+                     addr += 4096) {
+                    target_cpu.TLB_flush(core::TlbFlushFilter{.vaddr = addr, .asid = filter_asid});
+                }
+            }
+        }
+    };
+
     if (cpu_.machine_ != nullptr) {
         const size_t n_harts = cpu_.machine_->num_harts();
         for (size_t h = 0; h < n_harts; ++h) {
             if (detail::is_hart_selected(hart_mask, hart_mask_base, h)) {
-                auto& target_cpu = cpu_.machine_->hart(h);
-                if (fid == RfenceFid::RemoteFenceI) {
-                    target_cpu.icache.flush();
-                    target_cpu.decode_cache.flush();
-                } else if (fid == RfenceFid::RemoteSfenceVma ||
-                           fid == RfenceFid::RemoteSfenceVmaAsid) {
-                    target_cpu.TLB_flush();
-                }
+                apply_rfence_to_cpu(cpu_.machine_->hart(h));
             }
         }
     } else {
         if (detail::is_hart_selected(hart_mask, hart_mask_base, cpu_.state().mhartid)) {
-            if (fid == RfenceFid::RemoteFenceI) {
-                cpu_.icache.flush();
-                cpu_.decode_cache.flush();
-            } else if (fid == RfenceFid::RemoteSfenceVma || fid == RfenceFid::RemoteSfenceVmaAsid) {
-                cpu_.TLB_flush();
-            }
+            apply_rfence_to_cpu(cpu_);
         }
     }
     sbi_return(static_cast<simrv::xlen::SignedWord>(SbiError::Success), 0);

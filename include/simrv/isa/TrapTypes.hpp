@@ -151,11 +151,53 @@ constexpr simrv::xlen::PrivilegeLevel kPrivMachine = simrv::xlen::PrivilegeLevel
     }
 }
 
+/// Return the relative priority rank of a synchronous exception per Privileged ISA 1.13 Table 3.7.
+/// Lower integer value corresponds to higher architectural priority (1 is highest).
+[[nodiscard]] constexpr auto exception_priority_rank(ExceptionCode code) noexcept -> uint8_t {
+    switch (code) {
+        case ExceptionCode::MisalignedFetch:
+            return 1;
+        case ExceptionCode::FaultFetch:
+        case ExceptionCode::FetchPageFault:
+            return 2;
+        case ExceptionCode::IllegalInstruction:
+            return 3;
+        case ExceptionCode::Breakpoint:
+        case ExceptionCode::UserEcall:
+        case ExceptionCode::SupervisorEcall:
+        case ExceptionCode::HypervisorEcall:
+        case ExceptionCode::MachineEcall:
+            return 4;
+        case ExceptionCode::MisalignedStore:
+        case ExceptionCode::MisalignedLoad:
+            return 5;
+        case ExceptionCode::FaultStore:
+        case ExceptionCode::StorePageFault:
+        case ExceptionCode::FaultLoad:
+        case ExceptionCode::LoadPageFault:
+            return 6;
+        case ExceptionCode::SoftwareCheck:
+        case ExceptionCode::HardwareError:
+            return 7;
+        default:
+            return 255;
+    }
+}
+
+/// Select the higher-priority synchronous exception between two candidate causes per Privileged
+/// ISA 1.13.
+[[nodiscard]] constexpr auto higher_priority_exception(ExceptionCode a, ExceptionCode b) noexcept
+    -> ExceptionCode {
+    return exception_priority_rank(a) <= exception_priority_rank(b) ? a : b;
+}
+
 }  // namespace simrv::isa
 
 // Global compatibility aliases per repository guidelines
 using simrv::isa::ecall_for_privilege;
+using simrv::isa::exception_priority_rank;
 using simrv::isa::ExceptionCode;
+using simrv::isa::higher_priority_exception;
 using simrv::isa::InterruptCode;
 using simrv::isa::kExceptionCodeMask;
 using simrv::isa::kInterruptCauseBit;

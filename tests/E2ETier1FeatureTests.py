@@ -521,7 +521,7 @@ class E2ETier1FeatureTests(unittest.TestCase):
                 self.assertTrue(p.name.endswith("Tests.cpp"), f"Non-conforming test file: {p.name}")
 
     def test_f3_4_ctest_label_coverage(self) -> None:
-        """Verify gate label covers 48 core verification tests."""
+        """Verify gate label covers 49 core verification tests."""
         res = subprocess.run(
             ["ctest", "--test-dir", str(ROOT / "build/rv64-release"), "-N", "-L", "gate"],
             capture_output=True,
@@ -529,7 +529,7 @@ class E2ETier1FeatureTests(unittest.TestCase):
             check=False,
         )
         self.assertEqual(res.returncode, 0, res.stderr)
-        self.assertIn("Total Tests: 48", res.stdout)
+        self.assertIn("Total Tests: 49", res.stdout)
 
     # -------------------------------------------------------------------------
     # Feature 14: F4.1 Hot-Path Zero-Regression Invariants
@@ -693,10 +693,10 @@ class E2ETier1FeatureTests(unittest.TestCase):
     # Feature 18: F5.1 RV64 Gate 100% Pass
     # -------------------------------------------------------------------------
     def test_f5_1_rv64_gate_test_discovery(self) -> None:
-        """Verify 48 gate tests discovered in rv64-release."""
+        """Verify 49 gate tests discovered in rv64-release."""
         res = subprocess.run(["ctest", "--test-dir", str(ROOT / "build/rv64-release"), "-N", "-L", "gate"], capture_output=True, text=True, check=False)
         self.assertEqual(res.returncode, 0, res.stderr)
-        self.assertIn("Total Tests: 48", res.stdout)
+        self.assertIn("Total Tests: 49", res.stdout)
 
     def test_f5_1_rv64_gate_execution(self) -> None:
         """Verify sample RV64 gate tests pass."""
@@ -724,10 +724,10 @@ class E2ETier1FeatureTests(unittest.TestCase):
     # Feature 19: F5.2 RV32 Gate 100% Pass
     # -------------------------------------------------------------------------
     def test_f5_2_rv32_gate_test_discovery(self) -> None:
-        """Verify 48 gate tests discovered in rv32-release."""
+        """Verify 49 gate tests discovered in rv32-release."""
         res = subprocess.run(["ctest", "--test-dir", str(ROOT / "build/rv32-release"), "-N", "-L", "gate"], capture_output=True, text=True, check=False)
         self.assertEqual(res.returncode, 0, res.stderr)
-        self.assertIn("Total Tests: 48", res.stdout)
+        self.assertIn("Total Tests: 49", res.stdout)
 
     def test_f5_2_rv32_gate_execution(self) -> None:
         """Verify sample RV32 gate tests pass."""

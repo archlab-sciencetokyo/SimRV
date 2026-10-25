@@ -34,6 +34,9 @@ class MemorySubsystem {
     [[nodiscard]] auto mmu() const -> simrv::Mmu* { return mmu_.get(); }
     /// Access system TileLink interconnect bus
     [[nodiscard]] auto system_bus() -> simrv::memory::TileLinkBus& { return system_bus_; }
+    [[nodiscard]] auto system_bus() const -> const simrv::memory::TileLinkBus& {
+        return system_bus_;
+    }
     /// Access LR/SC reservation tracking table
     [[nodiscard]] auto reservation_table() -> simrv::memory::ReservationTable& {
         return reservation_table_;

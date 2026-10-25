@@ -14,6 +14,7 @@ simrv_add_component(simrv-core
   TrapController.cpp
   CsrFile.cpp
   PerformanceCounters.cpp
+  SimulationStats.cpp
   Tracer.cpp
   Sbi.cpp
   Tlb.cpp
