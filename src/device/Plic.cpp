@@ -7,6 +7,7 @@
 #include <ranges>
 
 #include "simrv/core/Cpu.hpp"
+#include "simrv/core/InterruptController.hpp"
 #include "simrv/core/Machine.hpp"
 #include "simrv/device/Uart.hpp"
 #include "simrv/xlen/IdentifierTypes.hpp"
@@ -35,31 +36,43 @@ namespace {
 
 }  // namespace
 
+Plic::Plic(core::CPU& cpu) : cpu_(&cpu) {}
+
+Plic::Plic(core::IInterruptController* sink, core::CPU* cpu) : sink_(sink), cpu_(cpu) {}
+
 void Plic::update_mip() {
-    if (cpu_.machine_ != nullptr) {
-        const size_t n_harts = cpu_.machine_->num_harts();
+    core::IInterruptController* target_sink = sink_;
+    if (target_sink == nullptr && cpu_ != nullptr && cpu_->machine_ != nullptr) {
+        target_sink = cpu_->machine_;
+    }
+
+    if (target_sink != nullptr) {
+        const size_t n_harts =
+            (cpu_ != nullptr && cpu_->machine_ != nullptr) ? cpu_->machine_->num_harts() : 1;
         for (size_t h = 0; h < n_harts; ++h) {
             const bool m_asserted = (find_highest_pending_plic_source(*this, 2 * h) != 0);
             const bool s_asserted = (find_highest_pending_plic_source(*this, 2 * h + 1) != 0);
-            cpu_.machine_->set_hart_irq(static_cast<simrv::xlen::HartId>(h),
-                                        core::InterruptType::External,
-                                        simrv::xlen::PrivilegeLevel::Machine, m_asserted);
-            cpu_.machine_->set_hart_irq(static_cast<simrv::xlen::HartId>(h),
-                                        core::InterruptType::External,
-                                        simrv::xlen::PrivilegeLevel::Supervisor, s_asserted);
+            target_sink->set_hart_irq(static_cast<simrv::xlen::HartId>(h),
+                                      core::InterruptType::External,
+                                      simrv::xlen::PrivilegeLevel::Machine, m_asserted);
+            target_sink->set_hart_irq(static_cast<simrv::xlen::HartId>(h),
+                                      core::InterruptType::External,
+                                      simrv::xlen::PrivilegeLevel::Supervisor, s_asserted);
         }
         return;
     }
 
     // Standalone CPU without Machine container (e.g. focused unit tests)
-    auto& target_state = cpu_.state();
-    if (find_highest_pending_plic_source(*this, 0) != 0) {
-        target_state.mip |= core::MipBit::Meip;
-    } else {
-        target_state.mip &= ~core::MipBit::Meip;
+    if (cpu_ != nullptr) {
+        auto& target_state = cpu_->state();
+        if (find_highest_pending_plic_source(*this, 0) != 0) {
+            target_state.mip |= core::MipBit::Meip;
+        } else {
+            target_state.mip &= ~core::MipBit::Meip;
+        }
+        target_state.seip_external = (find_highest_pending_plic_source(*this, 1) != 0);
+        target_state.refresh_supervisor_pending();
     }
-    target_state.seip_external = (find_highest_pending_plic_source(*this, 1) != 0);
-    target_state.refresh_supervisor_pending();
 }
 
 void Plic::set_irq(simrv::xlen::IrqNumber irq_num, int state_val) {
@@ -153,8 +166,9 @@ void Plic::mmio_write(simrv::xlen::Address offset, simrv::xlen::Word wdata) {
                 if (plic_claim[ctx_idx] == static_cast<simrv::xlen::InterruptSourceId>(wdata) &&
                     wdata != 0) {
                     plic_claim[ctx_idx] = 0;
-                    if (cpu_.machine_ && wdata == 3 && cpu_.machine_->uart_device() &&
-                        cpu_.machine_->uart_device()->is_interrupt_pending()) {
+                    if (cpu_ != nullptr && cpu_->machine_ != nullptr && wdata == 3 &&
+                        cpu_->machine_->uart_device() != nullptr &&
+                        cpu_->machine_->uart_device()->is_interrupt_pending()) {
                         set_irq(static_cast<simrv::xlen::IrqNumber>(wdata), 1);
                     }
                 }

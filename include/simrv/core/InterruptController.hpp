@@ -30,4 +30,7 @@ class IInterruptController {
                               simrv::xlen::PrivilegeLevel priv, bool asserted) = 0;
 };
 
+/// Alias representing an abstract interrupt sink endpoint.
+using IInterruptSink = IInterruptController;
+
 }  // namespace simrv::core

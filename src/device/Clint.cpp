@@ -8,6 +8,7 @@
 #include <limits>
 
 #include "simrv/core/Cpu.hpp"
+#include "simrv/core/InterruptController.hpp"
 #include "simrv/core/Machine.hpp"
 #include "simrv/xlen/Constants.hpp"
 #include "simrv/xlen/IdentifierTypes.hpp"
@@ -25,7 +26,16 @@ constexpr simrv::xlen::Address kClintMtimeOffset = 0xbff8;
 
 }  // namespace
 
-Clint::Clint(core::CPU& cpu) : cpu_(cpu) {
+Clint::Clint(core::CPU& cpu) : cpu_(&cpu) {
+    for (auto& cmp : hart_mtimecmp) {
+        cmp.store(std::numeric_limits<simrv::xlen::Counter>::max(), std::memory_order_relaxed);
+    }
+    for (auto& timer : hart_supervisor_timer) {
+        timer.store(false, std::memory_order_relaxed);
+    }
+}
+
+Clint::Clint(core::IInterruptController* sink, core::CPU* cpu) : sink_(sink), cpu_(cpu) {
     for (auto& cmp : hart_mtimecmp) {
         cmp.store(std::numeric_limits<simrv::xlen::Counter>::max(), std::memory_order_relaxed);
     }
@@ -81,10 +91,12 @@ auto Clint::handle_request(const memory::TlChannelA& req, memory::TlChannelD& re
             if (off == kClintMtimeOffset || off == 0x7ff8) {
                 supervisor_timer.store(false, std::memory_order_release);
                 mtime.store(static_cast<simrv::xlen::Counter>(req.data), std::memory_order_release);
-                cpu_.evaluate_timer_interrupt();
-                if (cpu_.machine_) {
-                    for (size_t hart = 1; hart < cpu_.machine_->num_harts(); ++hart) {
-                        cpu_.machine_->hart(hart).evaluate_timer_interrupt();
+                if (cpu_ != nullptr) {
+                    cpu_->evaluate_timer_interrupt();
+                    if (cpu_->machine_ != nullptr) {
+                        for (size_t hart = 1; hart < cpu_->machine_->num_harts(); ++hart) {
+                            cpu_->machine_->hart(hart).evaluate_timer_interrupt();
+                        }
                     }
                 }
             } else if (off >= kClintMtimecmpOffset &&
@@ -94,13 +106,16 @@ auto Clint::handle_request(const memory::TlChannelA& req, memory::TlChannelD& re
                     supervisor_timer.store(false, std::memory_order_release);
                     mtimecmp.store(static_cast<simrv::xlen::Counter>(req.data),
                                    std::memory_order_release);
-                    cpu_.evaluate_timer_interrupt();
+                    if (cpu_ != nullptr) {
+                        cpu_->evaluate_timer_interrupt();
+                    }
                 } else {
                     hart_supervisor_timer.at(hid).store(false, std::memory_order_release);
                     hart_mtimecmp.at(hid).store(static_cast<simrv::xlen::Counter>(req.data),
                                                 std::memory_order_release);
-                    if (cpu_.machine_ && hid < cpu_.machine_->num_harts()) {
-                        cpu_.machine_->hart(hid).evaluate_timer_interrupt();
+                    if (cpu_ != nullptr && cpu_->machine_ != nullptr &&
+                        hid < cpu_->machine_->num_harts()) {
+                        cpu_->machine_->hart(hid).evaluate_timer_interrupt();
                     }
                 }
             } else {
@@ -119,11 +134,11 @@ auto Clint::handle_request(const memory::TlChannelA& req, memory::TlChannelD& re
 auto Clint::mmio_read(simrv::xlen::Address offset) const -> simrv::xlen::Word {
     if (offset < 0x4000 || (offset >= 0x80000 && offset < 0x84000)) {
         const size_t hart_id = (offset >= 0x80000) ? ((offset - 0x80000) / 4) : (offset / 4);
-        if (cpu_.machine_ && hart_id < cpu_.machine_->num_harts()) {
-            return (cpu_.machine_->hart(hart_id).state().mip & core::MipBit::Msip) != 0 ? 1 : 0;
+        if (cpu_ != nullptr && cpu_->machine_ != nullptr && hart_id < cpu_->machine_->num_harts()) {
+            return (cpu_->machine_->hart(hart_id).state().mip & core::MipBit::Msip) != 0 ? 1 : 0;
         }
-        if (hart_id == 0) {
-            return (cpu_.state().mip & core::MipBit::Msip) != 0 ? 1 : 0;
+        if (cpu_ != nullptr && hart_id == 0) {
+            return (cpu_->state().mip & core::MipBit::Msip) != 0 ? 1 : 0;
         }
         return 0;
     }
@@ -150,15 +165,19 @@ void Clint::mmio_write(simrv::xlen::Address offset, simrv::xlen::Word wdata) {
     const simrv::xlen::Counter wdata_64 = static_cast<simrv::xlen::Counter>(wdata) & kWord32Mask;
     if (offset < 0x4000 || (offset >= 0x80000 && offset < 0x84000)) {
         const size_t hart_id = (offset >= 0x80000) ? ((offset - 0x80000) / 4) : (offset / 4);
-        if (cpu_.machine_ && hart_id < cpu_.machine_->num_harts()) {
-            cpu_.machine_->set_hart_irq(static_cast<simrv::xlen::HartId>(hart_id),
-                                        core::InterruptType::Software,
-                                        simrv::xlen::PrivilegeLevel::Machine, (wdata & 1) != 0);
-        } else if (hart_id == 0) {
+        core::IInterruptController* target_sink = sink_;
+        if (target_sink == nullptr && cpu_ != nullptr && cpu_->machine_ != nullptr) {
+            target_sink = cpu_->machine_;
+        }
+        if (target_sink != nullptr) {
+            target_sink->set_hart_irq(static_cast<simrv::xlen::HartId>(hart_id),
+                                      core::InterruptType::Software,
+                                      simrv::xlen::PrivilegeLevel::Machine, (wdata & 1) != 0);
+        } else if (cpu_ != nullptr && hart_id == 0) {
             if ((wdata & 1) != 0) {
-                cpu_.state().mip |= core::MipBit::Msip;
+                cpu_->state().mip |= core::MipBit::Msip;
             } else {
-                cpu_.state().mip &= ~core::MipBit::Msip;
+                cpu_->state().mip &= ~core::MipBit::Msip;
             }
         }
         return;
@@ -172,7 +191,9 @@ void Clint::mmio_write(simrv::xlen::Address offset, simrv::xlen::Word wdata) {
             mtimecmp.store(is_hi ? ((cur & kWord32Mask) | (wdata_64 << kWord32Shift))
                                  : ((cur & ~kWord32Mask) | wdata_64),
                            std::memory_order_release);
-            cpu_.evaluate_timer_interrupt();
+            if (cpu_ != nullptr) {
+                cpu_->evaluate_timer_interrupt();
+            }
         } else {
             hart_supervisor_timer.at(hart_id).store(false, std::memory_order_release);
             const simrv::xlen::Counter cur =
@@ -181,8 +202,9 @@ void Clint::mmio_write(simrv::xlen::Address offset, simrv::xlen::Word wdata) {
                                                 ? ((cur & kWord32Mask) | (wdata_64 << kWord32Shift))
                                                 : ((cur & ~kWord32Mask) | wdata_64),
                                             std::memory_order_release);
-            if (cpu_.machine_ && hart_id < cpu_.machine_->num_harts()) {
-                cpu_.machine_->hart(hart_id).evaluate_timer_interrupt();
+            if (cpu_ != nullptr && cpu_->machine_ != nullptr &&
+                hart_id < cpu_->machine_->num_harts()) {
+                cpu_->machine_->hart(hart_id).evaluate_timer_interrupt();
             }
         }
         return;
@@ -191,14 +213,18 @@ void Clint::mmio_write(simrv::xlen::Address offset, simrv::xlen::Word wdata) {
         supervisor_timer.store(false, std::memory_order_release);
         const simrv::xlen::Counter cur = mtime.load(std::memory_order_relaxed);
         mtime.store((cur & ~kWord32Mask) | wdata_64, std::memory_order_release);
-        cpu_.evaluate_timer_interrupt();
+        if (cpu_ != nullptr) {
+            cpu_->evaluate_timer_interrupt();
+        }
         return;
     }
     if (offset == kClintMtimeOffset + 4) {
         supervisor_timer.store(false, std::memory_order_release);
         const simrv::xlen::Counter cur = mtime.load(std::memory_order_relaxed);
         mtime.store((cur & kWord32Mask) | (wdata_64 << kWord32Shift), std::memory_order_release);
-        cpu_.evaluate_timer_interrupt();
+        if (cpu_ != nullptr) {
+            cpu_->evaluate_timer_interrupt();
+        }
         return;
     }
 }

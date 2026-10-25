@@ -9,6 +9,7 @@
 
 #include "simrv/core/Cpu.hpp"
 #include "simrv/core/Machine.hpp"
+#include "simrv/memory/MemorySubsystem.hpp"
 
 namespace simrv::device {
 
@@ -44,6 +45,26 @@ auto VirtioMmioDevice::dma_write_bytes(uint64_t phys_addr, const std::byte* src,
     -> bool {
     return dma_write(phys_addr,
                      std::span<const uint8_t>(reinterpret_cast<const uint8_t*>(src), len));
+}
+
+auto VirtioMmioDevice::is_cycle_mode() const noexcept -> bool {
+    return machine_ != nullptr && machine_->runtime_profile.is_cycle_mode();
+}
+
+auto VirtioMmioDevice::is_dma_enabled() const noexcept -> bool {
+    return machine_ != nullptr && machine_->dma_engine().is_enabled();
+}
+
+void VirtioMmioDevice::schedule_deferred_dma(size_t transfer_bytes,
+                                             std::function<void()> completion_callback) {
+    if (machine_ != nullptr && machine_->runtime_profile.is_cycle_mode() &&
+        machine_->dma_engine().is_enabled()) {
+        const auto current_cycle = machine_->memory().system_bus().cycle();
+        machine_->dma_engine().schedule_transfer(transfer_bytes, current_cycle,
+                                                 std::move(completion_callback));
+    } else if (completion_callback) {
+        completion_callback();
+    }
 }
 
 auto VirtioMmioDevice::read8(simrv::xlen::Address offset) -> uint8_t {

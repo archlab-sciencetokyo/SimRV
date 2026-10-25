@@ -15,6 +15,8 @@
 namespace simrv::core {
 class CPU;
 struct ArchState;
+class IInterruptController;
+using IInterruptSink = IInterruptController;
 }  // namespace simrv::core
 
 namespace simrv::device {
@@ -25,7 +27,10 @@ namespace simrv::device {
  */
 class Plic : public memory::TileLinkNode {
    public:
-    explicit Plic(core::CPU& cpu) : cpu_(cpu) {}
+    explicit Plic(core::CPU& cpu);
+    explicit Plic(core::IInterruptController* sink, core::CPU* cpu = nullptr);
+
+    void set_sink(core::IInterruptController* sink) noexcept { sink_ = sink; }
 
     static constexpr simrv::xlen::Address kBaseAddress = simrv::mmio::kPlicBaseAddress;
     static constexpr simrv::xlen::Address kSize = simrv::mmio::kPlicSize;
@@ -63,7 +68,8 @@ class Plic : public memory::TileLinkNode {
     std::array<simrv::xlen::InterruptSourceId, kMaxPlicContexts> plic_claim{};
 
    private:
-    core::CPU& cpu_;
+    core::IInterruptController* sink_{nullptr};
+    core::CPU* cpu_{nullptr};
     [[nodiscard]] auto get_context_for_offset(simrv::xlen::Address offset) const
         -> std::optional<simrv::xlen::PlicContextId>;
 };

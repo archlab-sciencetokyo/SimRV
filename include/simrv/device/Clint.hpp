@@ -15,6 +15,8 @@
 
 namespace simrv::core {
 class CPU;
+class IInterruptController;
+using IInterruptSink = IInterruptController;
 }  // namespace simrv::core
 
 namespace simrv::device {
@@ -26,6 +28,9 @@ namespace simrv::device {
 class Clint : public memory::TileLinkNode {
    public:
     explicit Clint(core::CPU& cpu);
+    explicit Clint(core::IInterruptController* sink, core::CPU* cpu = nullptr);
+
+    void set_sink(core::IInterruptController* sink) noexcept { sink_ = sink; }
 
     static constexpr simrv::xlen::Address kBaseAddress = simrv::mmio::kClintBaseAddress;
     static constexpr simrv::xlen::Address kSize = simrv::mmio::kClintSize;
@@ -56,7 +61,8 @@ class Clint : public memory::TileLinkNode {
     uint32_t rtc_divider{0};
 
    private:
-    core::CPU& cpu_;
+    core::IInterruptController* sink_{nullptr};
+    core::CPU* cpu_{nullptr};
 };
 
 }  // namespace simrv::device
