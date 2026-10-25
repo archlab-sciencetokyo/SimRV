@@ -8,7 +8,7 @@
 
 namespace simrv::device {
 
-VirtioPciGpu::VirtioPciGpu() : VirtioPciDevice(virtio::kDevIdGpu, 0x030000, 2) {}
+VirtioPciGpu::VirtioPciGpu() : VirtioPciDevice(virtio::kDevIdGpu, 0x038000, 2) {}
 
 auto VirtioPciGpu::read_device_config(PciBarOffset offset, PciAccessBytes size) -> PciMmioData {
     (void)size;

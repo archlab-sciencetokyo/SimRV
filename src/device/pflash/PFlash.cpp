@@ -212,14 +212,39 @@ void PFlash::write8(simrv::memory::MmioOffset offset, simrv::memory::MmioData8 v
 }
 
 void PFlash::write16(simrv::memory::MmioOffset offset, simrv::memory::MmioData16 val) {
+    if (mode_ == PFlashMode::ProgramPending) {
+        if (offset + 1 < storage_.size()) {
+            storage_[offset] = static_cast<uint8_t>(val & 0xFF);
+            storage_[offset + 1] = static_cast<uint8_t>((val >> 8) & 0xFF);
+            dirty_ = true;
+        }
+        mode_ = PFlashMode::ReadStatus;
+        return;
+    }
     handle_command(offset, val & 0xFF);
 }
 
 void PFlash::write32(simrv::memory::MmioOffset offset, simrv::memory::MmioData32 val) {
+    if (mode_ == PFlashMode::ProgramPending) {
+        if (offset + 3 < storage_.size()) {
+            std::memcpy(storage_.data() + offset, &val, sizeof(val));
+            dirty_ = true;
+        }
+        mode_ = PFlashMode::ReadStatus;
+        return;
+    }
     handle_command(offset, val & 0xFF);
 }
 
 void PFlash::write64(simrv::memory::MmioOffset offset, simrv::memory::MmioData64 val) {
+    if (mode_ == PFlashMode::ProgramPending) {
+        if (offset + 7 < storage_.size()) {
+            std::memcpy(storage_.data() + offset, &val, sizeof(val));
+            dirty_ = true;
+        }
+        mode_ = PFlashMode::ReadStatus;
+        return;
+    }
     handle_command(offset, static_cast<uint32_t>(val & 0xFF));
 }
 
