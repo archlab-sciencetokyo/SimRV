@@ -718,7 +718,7 @@ auto CsrFile::write(simrv::xlen::CsrNumber addr, simrv::xlen::CsrValue wdata)
             if (simrv::xlen::satp_mode_supported(mode, xlen)) {
                 if (cpu_.state().satp != wdata) {
                     cpu_.state().satp = wdata;
-                    cpu_.TLB_flush();
+                    cpu_.TLB_flush_satp();
                 }
                 // Latch: once translation is enabled it is never "un-seen"
                 if (mode != 0) {

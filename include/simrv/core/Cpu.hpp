@@ -292,10 +292,13 @@ struct alignas(32) SoftTlbEntry {
                                                              simrv::xlen::PrivilegeLevel priv,
                                                              uint32_t current_epoch) const noexcept
         -> bool {
-        if (simrv::compiler::unlikely(epoch != current_epoch)) return false;
-        const uint64_t expected_tag = make_tag(vpn, asid, priv);
-        if (simrv::compiler::likely(tag == expected_tag)) return true;
-        return simrv::compiler::unlikely(global) &&
+        if (simrv::compiler::likely(epoch == current_epoch)) {
+            const uint64_t expected_tag = make_tag(vpn, asid, priv);
+            if (simrv::compiler::likely(tag == expected_tag)) return true;
+            return simrv::compiler::unlikely(global) &&
+                   ((tag & ~uint64_t{0x3FFFCULL}) == make_tag(vpn, 0, priv));
+        }
+        return simrv::compiler::unlikely(global && tag != kInvalidTag) &&
                ((tag & ~uint64_t{0x3FFFCULL}) == make_tag(vpn, 0, priv));
     }
 
@@ -382,6 +385,12 @@ class CPU {
      * invalidates the decode cache.
      */
     void TLB_flush();
+
+    /**
+     * @brief Flushes user-space TLB and decode cache entries on satp switch while preserving
+     * global kernel translations.
+     */
+    void TLB_flush_satp();
 
     /**
      * @brief Flushes only data TLB and soft-TLB entries (e.g., on SUM/MXR changes) while

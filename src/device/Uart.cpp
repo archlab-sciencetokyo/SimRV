@@ -33,6 +33,7 @@ void update_uart_irq(simrv::core::Machine& machine, bool uart_rx_ready, uint8_t 
 Uart::Uart(simrv::core::Machine& machine) : machine_(machine) {}
 
 Uart::~Uart() {
+    flush_tx_buffer();
     stop_input_thread();
     stop_pty();
 }
@@ -117,7 +118,18 @@ auto Uart::start_pty() -> bool {
     return true;
 }
 
+void Uart::flush_tx_buffer() noexcept {
+    if (tx_buffer_len_ == 0) return;
+    if (pty_.is_open()) {
+        (void)pty_.write_to_master(tx_buffer_.data(), tx_buffer_len_);
+    } else if (!machine_.console_sink()) {
+        (void)::write(STDOUT_FILENO, tx_buffer_.data(), tx_buffer_len_);
+    }
+    tx_buffer_len_ = 0;
+}
+
 void Uart::stop_pty() {
+    flush_tx_buffer();
     pty_reader_stop_.store(true, std::memory_order_relaxed);
     if (pty_reader_thread_.joinable()) {
         pty_reader_thread_.join();
@@ -200,14 +212,15 @@ auto Uart::handle_request(const memory::TlChannelA& req, memory::TlChannelD& res
                     uart_dll_ = static_cast<uint8_t>(wdata & 0xffU);
                 } else {
                     const auto ch = static_cast<uint8_t>(wdata & 0xffU);
-                    // Mirror output to both the built-in TUI and an attached PTY terminal.
-                    if (pty_.is_open()) {
-                        (void)pty_.write_byte_to_master(ch);
-                    }
+                    // Mirror output to built-in TUI console sink.
                     if (machine_.console_sink()) {
                         machine_.console_sink()->handle_char_write(static_cast<char>(ch));
-                    } else if (!pty_.is_open()) {
-                        (void)(::write(STDOUT_FILENO, &ch, 1) == 0);
+                    }
+                    if (pty_.is_open() || !machine_.console_sink()) {
+                        tx_buffer_[tx_buffer_len_++] = ch;
+                        if (ch == '\n' || tx_buffer_len_ >= tx_buffer_.size()) {
+                            flush_tx_buffer();
+                        }
                     }
                     tx_irq_pending_ = true;
                     const bool has_rx = rx_ready_.load(std::memory_order_acquire);

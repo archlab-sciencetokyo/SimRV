@@ -612,6 +612,31 @@ class DecodeCache {
     }
 
     /**
+     * @brief Invalidate all entries in user space, preserving supervisor/kernel code.
+     */
+    void flush_user() noexcept {
+        for (auto& set : sets_) {
+            for (auto& way : set.ways) {
+                if (way.valid) {
+                    const auto cpc = way.cpc.raw();
+                    // In canonical RISC-V Sv39/Sv48 and Sv32, kernel address space is in the higher
+                    // half (sign bit set, i.e. cpc >= 0x80000000 on RV32 or cpc >=
+                    // 0xFFFFFFFF80000000 on RV64). User-space addresses have the sign bit clear
+                    // (non-negative signed value).
+                    const bool is_user =
+                        (static_cast<std::make_signed_t<simrv::xlen::Address>>(cpc) >= 0);
+                    if (is_user) {
+                        way.valid = 0;
+                        way.next_seq_idx = kInvalidSeqIndex;
+                        way.target_idx = kInvalidSeqIndex;
+                        way.cpc = simrv::xlen::VirtAddr{~simrv::xlen::Register{0}};
+                    }
+                }
+            }
+        }
+    }
+
+    /**
      * @brief Invalidate all entries in the decode cache residing in a specific 4KB virtual page.
      * @param vpage 4KB-aligned virtual page address.
      */
