@@ -697,6 +697,8 @@ auto Machine::initialize() -> std::expected<void, std::string> {
 
     if (instruction_mix_enabled()) {
         primary_hart().e_instmix.fill(0);
+        primary_hart().perf_counters.reset();
+        primary_hart().last_retire_cycle_ = 0;
     }
 
     // ---- GDB stub initialization ----

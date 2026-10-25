@@ -992,6 +992,7 @@ SIMRV_ALWAYS_INLINE auto CPU::execute_cached_alu_fast_xlen(CachedOp& op, FastOp 
     }
     if constexpr (kInstMix) {
         e_instmix[static_cast<std::size_t>(op.op_id)]++;
+        perf_counters.record_retire(op.op_id, 1);
     }
     if constexpr (simrv::xlen::kIsXLen64) {
         if constexpr (kGuestXlen64) {
@@ -1036,6 +1037,7 @@ void CPU::execute_cached_op_fast(Machine& machine, CachedOp& op,
 
     if constexpr (kInstMix) {
         e_instmix[static_cast<std::size_t>(op.op_id)]++;
+        perf_counters.record_retire(op.op_id, 1);
     }
 
     // Control, memory, and uncommon instructions retain their precise cached/fallback paths.

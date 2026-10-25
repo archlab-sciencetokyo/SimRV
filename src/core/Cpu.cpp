@@ -81,6 +81,8 @@ void CPU::reset() {
     e_ccount = 0;
     cycle_counter_start_delay_ = pipeline_sim.config.cycle_counter_start_delay;
     e_instmix.fill(0);
+    perf_counters.reset();
+    last_retire_cycle_ = 0;
     ca_state.reset_instruction();
     ca_pipeline.reset();
     wfi_quiescent_ = false;

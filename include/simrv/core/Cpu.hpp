@@ -19,6 +19,7 @@
 #include "simrv/core/CsrTypes.hpp"
 #include "simrv/core/DecodeCache.hpp"
 #include "simrv/core/FastBatchPolicy.hpp"
+#include "simrv/core/PerformanceCounters.hpp"
 #include "simrv/core/RegisterFile.hpp"
 #include "simrv/core/Sbi.hpp"
 #include "simrv/core/Tlb.hpp"
@@ -907,6 +908,8 @@ class CPU {
     simrv::xlen::Counter e_icount{0};   // Total instruction count
     simrv::xlen::Counter e_ccount = 0;  // Compressed instructions executed
     simrv::xlen::LatencyCycles cycle_counter_start_delay_ = 0;
+    simrv::xlen::CycleCount last_retire_cycle_{0};
+    PerformanceCounters perf_counters{};
     std::array<simrv::xlen::Counter, isa::OperationIdCount>
         e_instmix{};  // Instruction-mix statistics
 };

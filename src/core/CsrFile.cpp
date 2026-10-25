@@ -389,9 +389,35 @@ auto CsrFile::read(simrv::xlen::CsrNumber addr) const
                 }
                 break;
             }
-            if (is_zero_hpm_csr(addr, cpu_.state().regs.xlen)) {
-                rcsr = 0;
+            const auto a = addr.value();
+            if (a >= 0x323U && a <= 0x33FU) {
+                rcsr = static_cast<simrv::xlen::CsrValue>(
+                    cpu_.perf_counters.read_hpmevent(a - 0x320U));
                 break;
+            }
+            if (a >= 0xB03U && a <= 0xB1FU) {
+                rcsr = static_cast<simrv::xlen::CsrValue>(
+                    cpu_.perf_counters.read_hpmcounter(a - 0xB00U));
+                break;
+            }
+            if (a >= 0xC03U && a <= 0xC1FU) {
+                rcsr = static_cast<simrv::xlen::CsrValue>(
+                    cpu_.perf_counters.read_hpmcounter(a - 0xC00U));
+                break;
+            }
+            if (cpu_.state().regs.xlen == 32U) {
+                if (a >= 0xB83U && a <= 0xB9FU) {
+                    return require_rv32_counter().transform([this, a]() {
+                        return static_cast<simrv::xlen::CsrValue>(
+                            cpu_.perf_counters.read_hpmcounter(a - 0xB80U) >> kHighWordShift);
+                    });
+                }
+                if (a >= 0xC83U && a <= 0xC9FU) {
+                    return require_rv32_counter().transform([this, a]() {
+                        return static_cast<simrv::xlen::CsrValue>(
+                            cpu_.perf_counters.read_hpmcounter(a - 0xC80U) >> kHighWordShift);
+                    });
+                }
             }
             return std::unexpected(ExceptionCode::IllegalInstruction);
     }
@@ -768,8 +794,38 @@ auto CsrFile::write(simrv::xlen::CsrNumber addr, simrv::xlen::CsrValue wdata)
                 cpu_.TLB_flush();
                 break;
             }
-            if (is_zero_hpm_csr(addr, cpu_.state().regs.xlen)) {
+            const auto a = addr.value();
+            if (a >= 0x323U && a <= 0x33FU) {
+                cpu_.perf_counters.write_hpmevent(a - 0x320U, static_cast<uint64_t>(wdata));
                 break;
+            }
+            if (a >= 0xB03U && a <= 0xB1FU) {
+                const auto idx = a - 0xB00U;
+                if constexpr (simrv::xlen::kIsXLen64) {
+                    if (cpu_.state().regs.xlen == 64U) {
+                        cpu_.perf_counters.write_hpmcounter(idx, static_cast<uint64_t>(wdata));
+                    } else {
+                        const auto cur = cpu_.perf_counters.read_hpmcounter(idx);
+                        cpu_.perf_counters.write_hpmcounter(
+                            idx, (cur & 0xFFFFFFFF00000000ULL) | static_cast<uint32_t>(wdata));
+                    }
+                } else {
+                    const auto cur = cpu_.perf_counters.read_hpmcounter(idx);
+                    cpu_.perf_counters.write_hpmcounter(
+                        idx, (cur & 0xFFFFFFFF00000000ULL) | static_cast<uint32_t>(wdata));
+                }
+                break;
+            }
+            if (cpu_.state().regs.xlen == 32U && a >= 0xB83U && a <= 0xB9FU) {
+                return require_rv32_counter().and_then(
+                    [this, a, wdata]() -> std::expected<void, ExceptionCode> {
+                        const auto idx = a - 0xB80U;
+                        const auto cur = cpu_.perf_counters.read_hpmcounter(idx);
+                        cpu_.perf_counters.write_hpmcounter(
+                            idx, (cur & 0x00000000FFFFFFFFULL) |
+                                     (static_cast<uint64_t>(wdata) << kHighWordShift));
+                        return {};
+                    });
             }
             return std::unexpected(ExceptionCode::IllegalInstruction);
     }

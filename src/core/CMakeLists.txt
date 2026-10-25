@@ -13,6 +13,7 @@ simrv_add_component(simrv-core
   PlatformBuilder.cpp
   TrapController.cpp
   CsrFile.cpp
+  PerformanceCounters.cpp
   Tracer.cpp
   Sbi.cpp
   Tlb.cpp
