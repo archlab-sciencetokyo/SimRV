@@ -44,7 +44,9 @@ class DCache : public BaseCache<1024, 32, 8> {
 
 inline auto DCache::read(simrv::xlen::Address addr, simrv::xlen::Word& data,
                          simrv::xlen::Instruction funct3) -> bool {
-    (void)prefetcher_.observe(addr, kLineBytes);
+    if (simrv::compiler::unlikely(prefetcher_.is_enabled())) {
+        (void)prefetcher_.observe(addr, kLineBytes);
+    }
     const uint32_t set_idx = get_set_index(addr);
     const simrv::xlen::Address tag = get_tag(addr);
     const unsigned size_bytes = 1u << (funct3 & 0x3u);
@@ -83,7 +85,9 @@ inline auto DCache::read(simrv::xlen::Address addr, simrv::xlen::Word& data,
 
 inline auto DCache::write(simrv::xlen::Address addr, simrv::xlen::Word data,
                           simrv::xlen::Instruction funct3, bool* out_first_write) -> bool {
-    (void)prefetcher_.observe(addr, kLineBytes);
+    if (simrv::compiler::unlikely(prefetcher_.is_enabled())) {
+        (void)prefetcher_.observe(addr, kLineBytes);
+    }
     const unsigned size_bytes = 1u << (funct3 & 0x3u);
     const uint32_t byte_offset = addr & (kLineBytes - 1u);
 

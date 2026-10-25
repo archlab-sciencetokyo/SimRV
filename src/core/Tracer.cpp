@@ -1600,6 +1600,36 @@ void Tracer::write_instruction_mix_report() {
                      simrv::util::format_with_commas(stats.cycles), cat_cycle_share, cat_cpi);
     }
 
+    const auto& primary = machine_.primary_hart();
+    const auto ic_hits = primary.icache.hit_count();
+    const auto ic_misses = primary.icache.miss_count();
+    const auto ic_total = ic_hits + ic_misses;
+    const double ic_rate =
+        ic_total == 0 ? 100.0
+                      : (static_cast<double>(ic_hits) * 100.0) / static_cast<double>(ic_total);
+
+    const auto dc_hits = primary.dcache.hit_count();
+    const auto dc_misses = primary.dcache.miss_count();
+    const auto dc_total = dc_hits + dc_misses;
+    const double dc_rate =
+        dc_total == 0 ? 100.0
+                      : (static_cast<double>(dc_hits) * 100.0) / static_cast<double>(dc_total);
+
+    const auto& ps = primary.pipeline_sim;
+
+    std::println(out, "\n--- Memory & Cache Subsystem ---");
+    std::println(out, "  L1 Instruction Cache : {:>12} hits | {:>10} misses | {:>6.2f}% hit rate",
+                 simrv::util::format_with_commas(ic_hits),
+                 simrv::util::format_with_commas(ic_misses), ic_rate);
+    std::println(out, "  L1 Data Cache        : {:>12} hits | {:>10} misses | {:>6.2f}% hit rate",
+                 simrv::util::format_with_commas(dc_hits),
+                 simrv::util::format_with_commas(dc_misses), dc_rate);
+    if (machine_.runtime_profile.is_cycle_mode() || ps.stall_cycles() > 0) {
+        std::println(out, "  Pipeline Stalls      : {:>12} icache stalls | {:>10} dcache stalls",
+                     simrv::util::format_with_commas(ps.icache_stalls()),
+                     simrv::util::format_with_commas(ps.dcache_stalls()));
+    }
+
     simrv::log::info(
         "file {} was generated after {} cycle(s)", path.string(),
         static_cast<simrv::xlen::Counter>(machine_.primary_hart().clint_mmio.mtime.load()));

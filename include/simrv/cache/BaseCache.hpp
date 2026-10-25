@@ -20,6 +20,7 @@
 #define SIMRV_HAS_STD_MDSPAN 0
 #endif
 
+#include "simrv/CompilerHints.hpp"
 #include "simrv/memory/Bus.hpp"
 #include "simrv/xlen/ScalarTypes.hpp"
 
@@ -252,8 +253,18 @@ class BaseCache {
     [[nodiscard]] constexpr auto find_matching_line(uint32_t set_idx,
                                                     simrv::xlen::Address tag) noexcept
         -> std::pair<uint32_t, CacheLine*> {
-        if (set_idx >= active_sets_) return {0xFFFFFFFF, nullptr};
+        if (simrv::compiler::unlikely(set_idx >= active_sets_)) return {0xFFFFFFFF, nullptr};
         auto* line_ptr = &lines_[set_idx * active_ways_];
+
+        // Direct MRU fast path: check last hit way first when accessing the same set.
+        if (last_access_was_hit_ && set_idx == last_accessed_set_ && last_hit_way_ < active_ways_) {
+            auto& l = line_ptr[last_hit_way_];
+            if (simrv::compiler::likely(l.valid && l.tag == tag &&
+                                        l.state != simrv::memory::MesiState::Invalid)) {
+                return {last_hit_way_, &l};
+            }
+        }
+
         for (uint32_t w = 0; w < active_ways_; ++w) {
             auto& l = line_ptr[w];
             if (l.valid && l.tag == tag && l.state != simrv::memory::MesiState::Invalid) {
@@ -266,8 +277,18 @@ class BaseCache {
     [[nodiscard]] constexpr auto find_matching_line(uint32_t set_idx,
                                                     simrv::xlen::Address tag) const noexcept
         -> std::pair<uint32_t, const CacheLine*> {
-        if (set_idx >= active_sets_) return {0xFFFFFFFF, nullptr};
+        if (simrv::compiler::unlikely(set_idx >= active_sets_)) return {0xFFFFFFFF, nullptr};
         const auto* line_ptr = &lines_[set_idx * active_ways_];
+
+        // Direct MRU fast path: check last hit way first when accessing the same set.
+        if (last_access_was_hit_ && set_idx == last_accessed_set_ && last_hit_way_ < active_ways_) {
+            const auto& l = line_ptr[last_hit_way_];
+            if (simrv::compiler::likely(l.valid && l.tag == tag &&
+                                        l.state != simrv::memory::MesiState::Invalid)) {
+                return {last_hit_way_, &l};
+            }
+        }
+
         for (uint32_t w = 0; w < active_ways_; ++w) {
             const auto& l = line_ptr[w];
             if (l.valid && l.tag == tag && l.state != simrv::memory::MesiState::Invalid) {

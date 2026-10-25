@@ -61,6 +61,21 @@ BENCHMARKS = [
         "elf": "loops-arrays.elf",
         "description": "Sequential loop iteration and indexed memory access",
     },
+    {
+        "category": "Atomic Memory",
+        "elf": "atomics.elf",
+        "description": "LR, SC, AMOSWAP, AMOADD, AMOAND, AMOOR, AMOXOR",
+    },
+    {
+        "category": "System & Traps",
+        "elf": "traps.elf",
+        "description": "ECALL, CSR access, trap handling and MRET",
+    },
+    {
+        "category": "CSR & Counters",
+        "elf": "counters.elf",
+        "description": "CYCLE, TIME, INSTRET, and HPM performance counters",
+    },
 ]
 
 
@@ -68,11 +83,18 @@ def parse_instmix_report(report_path: Path):
     if not report_path.is_file():
         return {}
     results = {}
+    cache_info = {}
     in_category_summary = False
+    in_cache_summary = False
     with open(report_path, "r", encoding="utf-8") as f:
         for line in f:
             if "--- Category Summary ---" in line:
                 in_category_summary = True
+                in_cache_summary = False
+                continue
+            if "--- Memory & Cache Subsystem ---" in line:
+                in_category_summary = False
+                in_cache_summary = True
                 continue
             if in_category_summary and ":" in line and "(" in line:
                 parts = line.split(":")
@@ -92,7 +114,12 @@ def parse_instmix_report(report_path: Path):
                         }
                     except ValueError:
                         pass
-    return results
+            elif in_cache_summary and ":" in line and "|" in line:
+                parts = line.split(":")
+                label = parts[0].strip()
+                details = parts[1].strip()
+                cache_info[label] = details
+    return {"categories": results, "cache": cache_info}
 
 
 def run_benchmark(simrv_bin: str, elf_path: Path, steps: int, mode: str, runs: int):
