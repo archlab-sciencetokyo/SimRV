@@ -6,17 +6,17 @@
 
 namespace simrv::pipeline {
 
-template <simrv::xlen::RegisterIdentifier RegisterId>
+template <simrv::xlen::RegisterIdentifier RegisterId, typename ValueType = simrv::xlen::Register>
 struct RegisterWriteEffect {
     RegisterId destination = static_cast<RegisterId>(0);
-    uint64_t value = 0;
+    ValueType value = 0;
     bool enabled = false;
 };
 
 /// Architectural changes produced by the writeback stage, before they are applied.
 struct WritebackEffects {
-    RegisterWriteEffect<simrv::xlen::RegId> integer_write{};
-    RegisterWriteEffect<simrv::xlen::FpRegId> floating_write{};
+    RegisterWriteEffect<simrv::xlen::RegId, simrv::xlen::Register> integer_write{};
+    RegisterWriteEffect<simrv::xlen::FpRegId, simrv::xlen::FloatingRegister> floating_write{};
     bool increments_instruction_count = false;
     bool marks_floating_point_dirty = false;
 };

@@ -96,7 +96,7 @@ auto CfuUnit::execute(uint32_t funct7, uint32_t funct3, uint32_t src1, uint32_t 
     return src1 | src2;
 }
 
-auto CfuUnit::query_latency(uint32_t funct7, uint32_t funct3) const -> uint32_t {
+auto CfuUnit::query_latency(uint32_t funct7, uint32_t funct3) const -> simrv::xlen::LatencyCycles {
     if (plugin_ != nullptr && plugin_->execute != nullptr) {
         uint32_t latency = 1;
         plugin_->execute(funct7, funct3, 0, 0, &latency);

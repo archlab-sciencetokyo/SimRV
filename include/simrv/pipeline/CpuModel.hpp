@@ -57,7 +57,7 @@ struct InterconnectTiming {
 
 struct DmaTimingConfig {
     bool enabled = false;
-    uint32_t setup_latency = 32;
+    simrv::xlen::LatencyCycles setup_latency = 32;
     uint32_t bandwidth_bytes_per_cycle = 8;
     uint32_t memory_contention_penalty = 2;
 };
@@ -79,7 +79,8 @@ struct CfuConfig {
     std::string plugin{};
     std::string rtl_module{};
     std::string interface{"rs1-rs2-rd"};
-    uint32_t default_latency{1};  // CFU/plugin latency is total cycles, including issue.
+    simrv::xlen::LatencyCycles default_latency{
+        1};  // CFU/plugin latency is total cycles, including issue.
 
     [[nodiscard]] auto validate() const -> std::expected<void, std::string> {
         if (default_latency == 0) {

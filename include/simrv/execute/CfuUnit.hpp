@@ -9,6 +9,8 @@
 #include <string>
 #include <string_view>
 
+#include "simrv/xlen/ScalarTypes.hpp"
+
 namespace simrv::execute {
 
 /**
@@ -92,21 +94,25 @@ class CfuUnit {
         -> uint32_t;
 
     /// Query the execution latency in cycles for the specified funct7/funct3 operation.
-    [[nodiscard]] auto query_latency(uint32_t funct7, uint32_t funct3) const -> uint32_t;
+    [[nodiscard]] auto query_latency(uint32_t funct7, uint32_t funct3) const
+        -> simrv::xlen::LatencyCycles;
 
     /// Query additional stall cycles after the CFU issue cycle.
-    [[nodiscard]] auto query_stall_cycles(uint32_t funct7, uint32_t funct3) const -> uint32_t {
-        const uint32_t total_cycles = query_latency(funct7, funct3);
+    [[nodiscard]] auto query_stall_cycles(uint32_t funct7, uint32_t funct3) const
+        -> simrv::xlen::LatencyCycles {
+        const auto total_cycles = query_latency(funct7, funct3);
         return total_cycles > 0 ? total_cycles - 1 : 0;
     }
 
     /// Set the latency used by the built-in CFU implementation.
-    void set_default_latency(uint32_t latency) noexcept {
+    void set_default_latency(simrv::xlen::LatencyCycles latency) noexcept {
         default_latency_ = latency == 0 ? 1 : latency;
     }
 
     /// Returns the latency in cycles produced by the most recent execute() invocation.
-    [[nodiscard]] auto last_latency() const noexcept -> uint32_t { return last_latency_; }
+    [[nodiscard]] auto last_latency() const noexcept -> simrv::xlen::LatencyCycles {
+        return last_latency_;
+    }
 
     /// Returns true if an external plugin is currently loaded.
     [[nodiscard]] auto has_plugin() const noexcept -> bool { return plugin_handle_ != nullptr; }
@@ -118,8 +124,8 @@ class CfuUnit {
     void* plugin_handle_ = nullptr;
     const SimRvCfuPlugin* plugin_ = nullptr;
     std::string plugin_path_{};
-    uint32_t last_latency_ = 1;
-    uint32_t default_latency_ = 1;
+    simrv::xlen::LatencyCycles last_latency_ = 1;
+    simrv::xlen::LatencyCycles default_latency_ = 1;
 };
 
 }  // namespace simrv::execute

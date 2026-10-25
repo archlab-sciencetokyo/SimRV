@@ -5,6 +5,7 @@
 #include <simrv/CompilerHints.hpp>
 #include <simrv/isa/InstructionFields.hpp>
 #include <simrv/pipeline/CycleTransition.hpp>
+#include <simrv/pipeline/StageContracts.hpp>
 #include <simrv/xlen/RegisterTypes.hpp>
 #include <vector>
 

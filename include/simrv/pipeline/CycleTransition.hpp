@@ -15,7 +15,7 @@ namespace simrv::pipeline {
 
 struct InstructionFillState {
     static constexpr size_t kLineBytes = 32;
-    simrv::xlen::Address line_base = 0;
+    simrv::xlen::PhysAddr line_base{0};
     uint32_t next_offset = 0;
     simrv::memory::TlSourceId source = 0;
     bool active = false;
@@ -27,7 +27,7 @@ struct InstructionFillState {
 
 struct InstructionPrefetchState {
     static constexpr size_t kLineBytes = 32;
-    simrv::xlen::Address line_base = 0;
+    simrv::xlen::PhysAddr line_base{0};
     simrv::memory::TlSourceId source = 0;
     bool active = false;
     bool request_pending = false;
