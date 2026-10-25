@@ -21,7 +21,7 @@ namespace simrv::core {
  */
 class SoCDeviceRegistry final {
    public:
-    [[nodiscard]] static auto kinds() -> std::array<SoCDeviceKind, 22> {
+    [[nodiscard]] static auto kinds() -> std::array<SoCDeviceKind, 23> {
         return {SoCDeviceKind::Uart,
                 SoCDeviceKind::Rtc,
                 SoCDeviceKind::Power,
@@ -43,12 +43,14 @@ class SoCDeviceRegistry final {
                 SoCDeviceKind::ResetControl,
                 SoCDeviceKind::RingBufferEthernet,
                 SoCDeviceKind::DummyMmio,
-                SoCDeviceKind::CustomMmio};
+                SoCDeviceKind::CustomMmio,
+                SoCDeviceKind::PFlash};
     }
 
     [[nodiscard]] static auto enabled(const SoCConfig& config, SoCDeviceKind kind) -> bool {
         if (kind == SoCDeviceKind::ResetControl || kind == SoCDeviceKind::RingBufferEthernet ||
-            kind == SoCDeviceKind::DummyMmio || kind == SoCDeviceKind::CustomMmio) {
+            kind == SoCDeviceKind::DummyMmio || kind == SoCDeviceKind::CustomMmio ||
+            kind == SoCDeviceKind::PFlash) {
             return config.find(kind) != nullptr;
         }
         return !config.disable_unlisted_devices || config.find(kind) != nullptr;

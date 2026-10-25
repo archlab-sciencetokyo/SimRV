@@ -89,4 +89,3 @@ using core::MachineStatsSnapshot;
 using core::Stat;
 using core::take_stats_snapshot;
 }  // namespace simrv
-

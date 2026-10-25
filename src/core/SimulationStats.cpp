@@ -150,4 +150,3 @@ auto MachineStatsSnapshot::to_string() const -> std::string {
 }
 
 }  // namespace simrv::core
-

@@ -15,6 +15,7 @@
 #include "simrv/core/Logger.hpp"
 #include "simrv/core/Machine.hpp"
 #include "simrv/core/PlatformBuilder.hpp"
+#include "simrv/core/PlatformMap.h"
 #include "simrv/core/SoCDeviceRegistry.hpp"
 #include "simrv/debug/GdbStub.hpp"
 #include "simrv/debug/SpikeLockstep.hpp"
@@ -28,6 +29,7 @@
 #include "simrv/device/Rtc.hpp"
 #include "simrv/device/Uart.hpp"
 #include "simrv/device/pci/PcieRootComplex.hpp"
+#include "simrv/util/FdtGenerator.hpp"
 #include "simrv/util/FdtPatcher.hpp"
 #include "simrv/xlen/RegisterTypes.hpp"
 
@@ -446,6 +448,13 @@ auto Machine::initialize() -> std::expected<void, std::string> {
         }
     }
 
+    if (runtime_->pflash0 && !memory().system_bus().add_node(runtime_->pflash0.get())) {
+        return std::unexpected("Failed to register PFlash0 on system bus");
+    }
+    if (runtime_->pflash1 && !memory().system_bus().add_node(runtime_->pflash1.get())) {
+        return std::unexpected("Failed to register PFlash1 on system bus");
+    }
+
     const std::array<std::shared_ptr<simrv::device::VirtioMmioDevice>, 8> mmio_devs = {
         runtime_->mmio_disk,  runtime_->mmio_console, runtime_->mmio_rng, runtime_->mmio_gpu,
         runtime_->mmio_input, runtime_->mmio_sound,   runtime_->mmio_net, runtime_->mmio_fs,
@@ -590,15 +599,37 @@ auto Machine::initialize() -> std::expected<void, std::string> {
     primary_hart().dcache.flush();
     primary_hart().TLB_flush();
 
-    load_image_into_ram(config.files.binary_path, ram_view(), "memory", tui_enabled(), this);
-    symbol_table().load_from_elf(
-        config.debug.spike_elf.empty() ? config.files.binary_path : config.debug.spike_elf, true,
-        (runtime_profile.interaction == InteractionMode::Tui ||
-         !config.debug.architecture_trace_path.empty() || !config.debug.trace_function.empty())
-            ? simrv::debug::SymbolLoadMode::FullDebug
-            : simrv::debug::SymbolLoadMode::RuntimeEssentials);
+    if (config.files.uefi_enabled) {
+        if (!config.files.uefi_code_path.empty() && runtime_->pflash0) {
+            if (!runtime_->pflash0->load_image(config.files.uefi_code_path)) {
+                simrv::log::warn("failed to load UEFI code image from {}",
+                                 config.files.uefi_code_path);
+            }
+        }
+        if (!config.files.uefi_vars_path.empty() && runtime_->pflash1) {
+            runtime_->pflash1->load_image(config.files.uefi_vars_path);
+            runtime_->pflash1->set_backing_file(config.files.uefi_vars_path);
+        }
+        set_resolved_boot_state(SIMRV_PLATFORM_PFLASH0_BASE, std::nullopt);
+        primary_hart().state().pc = SIMRV_PLATFORM_PFLASH0_BASE;
+    }
+
+    if (!config.files.binary_path.empty()) {
+        load_image_into_ram(config.files.binary_path, ram_view(), "memory", tui_enabled(), this);
+        symbol_table().load_from_elf(
+            config.debug.spike_elf.empty() ? config.files.binary_path : config.debug.spike_elf,
+            true,
+            (runtime_profile.interaction == InteractionMode::Tui ||
+             !config.debug.architecture_trace_path.empty() || !config.debug.trace_function.empty())
+                ? simrv::debug::SymbolLoadMode::FullDebug
+                : simrv::debug::SymbolLoadMode::RuntimeEssentials);
+    }
 
     resolve_start_pc_and_dram_base(*this, symbol_table());
+    if (config.files.uefi_enabled) {
+        set_resolved_boot_state(SIMRV_PLATFORM_PFLASH0_BASE, std::nullopt);
+        primary_hart().state().pc = SIMRV_PLATFORM_PFLASH0_BASE;
+    }
 
     runtime_->secondary_harts.clear();
     if (config.execution.num_harts > 1) {
@@ -660,19 +691,30 @@ auto Machine::initialize() -> std::expected<void, std::string> {
     }
 
     if (linux_boot) {
-        if (config.files.dvtree_path.empty())
-            return std::unexpected("Linux boot requires a device tree blob");
+        std::vector<uint8_t> final_blob;
+        simrv::util::FdtFramebufferInfo fb_info{};
+        if (config.files.auto_fdt || config.files.dvtree_path.empty()) {
+            if (config.files.dvtree_path.empty() && !config.files.auto_fdt) {
+                return std::unexpected("Linux boot requires a device tree blob");
+            }
+            final_blob = simrv::util::generate_platform_fdt(config, device_registry_.get());
+        } else {
+            std::ifstream input(config.files.dvtree_path, std::ios::binary);
+            if (!input)
+                return std::unexpected("cannot open device tree: " + config.files.dvtree_path);
+            std::vector<uint8_t> input_blob{std::istreambuf_iterator<char>(input),
+                                            std::istreambuf_iterator<char>()};
+            auto patched =
+                simrv::util::patch_fdt(input_blob, config.memory.dram_base, effective_dram_size,
+                                       config.execution.num_harts, &fb_info,
+                                       config.execution.timebase_hz, config.execution.cpu_clock_hz);
+            if (!patched) return std::unexpected(patched.error());
+            final_blob = std::move(*patched);
+        }
+
         if (dtb_offset >= effective_dram_size)
             return std::unexpected("device-tree load offset is outside DRAM");
-        std::ifstream input(config.files.dvtree_path, std::ios::binary);
-        if (!input) return std::unexpected("cannot open device tree: " + config.files.dvtree_path);
-        std::vector<uint8_t> input_blob{std::istreambuf_iterator<char>(input),
-                                        std::istreambuf_iterator<char>()};
-        simrv::util::FdtFramebufferInfo fb_info{};
-        auto patched = simrv::util::patch_fdt(
-            input_blob, config.memory.dram_base, effective_dram_size, config.execution.num_harts,
-            &fb_info, config.execution.timebase_hz, config.execution.cpu_clock_hz);
-        if (!patched) return std::unexpected(patched.error());
+
         if (fb_info.width > 0 && fb_info.height > 0) {
             framebuffer_geometry_.width = fb_info.width;
             framebuffer_geometry_.height = fb_info.height;
@@ -681,13 +723,14 @@ auto Machine::initialize() -> std::expected<void, std::string> {
             }
         }
         const auto dt_cap = static_cast<std::size_t>(effective_dram_size - dtb_offset);
-        if (patched->size() > dt_cap)
-            return std::unexpected("patched device tree does not fit in guest DRAM");
+        if (final_blob.size() > dt_cap)
+            return std::unexpected("device tree does not fit in guest DRAM");
         const auto initialized_ram = ram_view();
         const simrv::xlen::Address dtb_address = initialized_ram.base() + dtb_offset;
-        if (!initialized_ram.contains(dtb_address, patched->size()))
+        if (!initialized_ram.contains(dtb_address, final_blob.size()))
             return std::unexpected("device-tree region is outside DRAM");
-        std::memcpy(initialized_ram.unchecked_ptr(dtb_address), patched->data(), patched->size());
+        std::memcpy(initialized_ram.unchecked_ptr(dtb_address), final_blob.data(),
+                    final_blob.size());
     }
 
     if (config.files.disk_enabled) {

@@ -117,6 +117,11 @@ struct FilesConfig {
     std::string dvtree_path;
     std::string config_path;
     std::string cfu_plugin_path;
+    std::string uefi_code_path;
+    std::string uefi_vars_path;
+    bool uefi_enabled = false;
+    bool auto_fdt = false;
+    std::string bootargs;
 };
 
 struct NetworkConfig {

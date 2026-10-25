@@ -10,6 +10,7 @@ simrv_add_component(simrv-platform
   RingBufferEthernetMmio.cpp
   DummyMmio.cpp
   DmaController.cpp
+  pflash/PFlash.cpp
   pci/PciDevice.cpp
   pci/PcieRootComplex.cpp
   pci/VirtioPciDevice.cpp

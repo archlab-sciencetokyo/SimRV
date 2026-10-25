@@ -44,11 +44,21 @@ inline constexpr simrv::xlen::Address kImsicSBaseAddress =
     static_cast<simrv::xlen::Address>(0x28000000u);
 inline constexpr simrv::xlen::Address kImsicSSize = static_cast<simrv::xlen::Address>(0x00010000u);
 
+// Parallel NOR Flash (PFlash)
+inline constexpr simrv::xlen::Address kPflash0BaseAddress =
+    static_cast<simrv::xlen::Address>(SIMRV_PLATFORM_PFLASH0_BASE);
+inline constexpr simrv::xlen::Address kPflash0Size =
+    static_cast<simrv::xlen::Address>(SIMRV_PLATFORM_PFLASH0_SIZE);
+inline constexpr simrv::xlen::Address kPflash1BaseAddress =
+    static_cast<simrv::xlen::Address>(SIMRV_PLATFORM_PFLASH1_BASE);
+inline constexpr simrv::xlen::Address kPflash1Size =
+    static_cast<simrv::xlen::Address>(SIMRV_PLATFORM_PFLASH1_SIZE);
+
 // PCIe ECAM hierarchy and MMIO 32-bit window
 inline constexpr simrv::xlen::Address kPcieEcamBaseAddress =
     static_cast<simrv::xlen::Address>(SIMRV_PLATFORM_PCIE_ECAM_BASE);
 inline constexpr simrv::xlen::Address kPcieEcamSize =
-    static_cast<simrv::xlen::Address>(0x10000000u);
+    static_cast<simrv::xlen::Address>(SIMRV_PLATFORM_PCIE_ECAM_SIZE);
 inline constexpr simrv::xlen::Address kPcieMmioBaseAddress =
     static_cast<simrv::xlen::Address>(SIMRV_PLATFORM_PCIE_WINDOW_BASE);
 inline constexpr simrv::xlen::Address kPcieMmioSize =

@@ -44,6 +44,7 @@
 #include "simrv/device/pci/VirtioPciNet.hpp"
 #include "simrv/device/pci/VirtioPciRng.hpp"
 #include "simrv/device/pci/VirtioPciSound.hpp"
+#include "simrv/device/pflash/PFlash.hpp"
 #include "simrv/memory/Axi4.hpp"
 #include "simrv/memory/MemorySubsystem.hpp"
 #include "simrv/xlen/ScalarTypes.hpp"
@@ -162,6 +163,8 @@ class Machine::Runtime {
     std::unique_ptr<simrv::device::Imsic> imsic_s;
     std::unique_ptr<simrv::device::Aplic> aplic_m;
     std::unique_ptr<simrv::device::Aplic> aplic_s;
+    std::unique_ptr<simrv::device::PFlash> pflash0;
+    std::unique_ptr<simrv::device::PFlash> pflash1;
     std::unique_ptr<simrv::device::PcieRootComplex> pcie;
     std::shared_ptr<simrv::device::VirtioPciBlock> pci_disk;
     std::shared_ptr<simrv::device::VirtioPciConsole> pci_console;

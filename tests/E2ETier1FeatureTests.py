@@ -529,7 +529,7 @@ class E2ETier1FeatureTests(unittest.TestCase):
             check=False,
         )
         self.assertEqual(res.returncode, 0, res.stderr)
-        self.assertIn("Total Tests: 50", res.stdout)
+        self.assertIn("Total Tests: 52", res.stdout)
 
     # -------------------------------------------------------------------------
     # Feature 14: F4.1 Hot-Path Zero-Regression Invariants
@@ -696,7 +696,7 @@ class E2ETier1FeatureTests(unittest.TestCase):
         """Verify 49 gate tests discovered in rv64-release."""
         res = subprocess.run(["ctest", "--test-dir", str(ROOT / "build/rv64-release"), "-N", "-L", "gate"], capture_output=True, text=True, check=False)
         self.assertEqual(res.returncode, 0, res.stderr)
-        self.assertIn("Total Tests: 50", res.stdout)
+        self.assertIn("Total Tests: 52", res.stdout)
 
     def test_f5_1_rv64_gate_execution(self) -> None:
         """Verify sample RV64 gate tests pass."""
@@ -727,7 +727,7 @@ class E2ETier1FeatureTests(unittest.TestCase):
         """Verify 49 gate tests discovered in rv32-release."""
         res = subprocess.run(["ctest", "--test-dir", str(ROOT / "build/rv32-release"), "-N", "-L", "gate"], capture_output=True, text=True, check=False)
         self.assertEqual(res.returncode, 0, res.stderr)
-        self.assertIn("Total Tests: 50", res.stdout)
+        self.assertIn("Total Tests: 52", res.stdout)
 
     def test_f5_2_rv32_gate_execution(self) -> None:
         """Verify sample RV32 gate tests pass."""

@@ -155,6 +155,14 @@ if(BUILD_TESTING)
     simrv-rva23-profile-tests tests/Rva23ProfileTests.cpp
     rva23-profile "gate;regress;core;isa;cache")
 
+  simrv_add_runtime_test(
+    simrv-pflash-tests tests/PFlashTests.cpp
+    pflash "gate;regress;device;pflash;uefi")
+
+  simrv_add_runtime_test(
+    simrv-fdt-generator-tests tests/FdtGeneratorTests.cpp
+    fdt-generator "gate;regress;core;fdt;platform")
+
   # Architectural equivalence is a first-class native gate.  The fixture
   # deliberately exercises functional execution and both CA pipelines while
   # excluding cache/cycle/UI observations.

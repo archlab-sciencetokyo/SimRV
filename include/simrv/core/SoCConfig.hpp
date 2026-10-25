@@ -43,6 +43,7 @@ enum class SoCDeviceKind : uint8_t {
     RingBufferEthernet,
     DummyMmio,
     CustomMmio,
+    PFlash,
 };
 
 [[nodiscard]] inline auto soc_device_kind_name(SoCDeviceKind kind) -> std::string_view {
@@ -91,6 +92,8 @@ enum class SoCDeviceKind : uint8_t {
             return "dummy-mmio";
         case SoCDeviceKind::CustomMmio:
             return "custom-mmio";
+        case SoCDeviceKind::PFlash:
+            return "pflash";
     }
     return "unknown";
 }
@@ -290,6 +293,16 @@ struct SmpTopologyConfig {
             return {kind, "dummy", 0, 4, 0, true, {}, "simrv,dummy-mmio", 0};
         case SoCDeviceKind::CustomMmio:
             return {kind, "custom", 0, 0x1000, 0, true, {}, {}, 0};
+        case SoCDeviceKind::PFlash:
+            return {kind,
+                    "pflash0",
+                    0x20000000,
+                    0x02000000,
+                    0,
+                    true,
+                    {{.name = "pflash1", .base = 0x22000000, .size = 0x02000000}},
+                    "cfi-flash",
+                    0};
     }
     return {};
 }
@@ -318,7 +331,7 @@ struct SoCConfig {
                 .dram_size = std::nullopt,
                 .reset_pc = std::nullopt,
                 .tohost = std::nullopt,
-                .devices = {}};
+                .devices = {soc_device_default(SoCDeviceKind::PFlash)}};
     }
 
     [[nodiscard]] static auto virt_mmio() -> SoCConfig {

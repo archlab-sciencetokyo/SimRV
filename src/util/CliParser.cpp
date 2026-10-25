@@ -20,6 +20,7 @@
 #include "simrv/core/Cpu.hpp"
 #include "simrv/core/CpuConfigParser.hpp"
 #include "simrv/core/Logger.hpp"
+#include "simrv/core/PlatformMap.h"
 #include "simrv/core/Tracer.hpp"
 #include "simrv/pipeline/PipelineConfig.hpp"
 #include "simrv/tui/Tui.hpp"
@@ -566,8 +567,40 @@ auto parse_file_options(std::string_view arg, std::span<char* const> args, std::
     if (option_id == "--fdt") {
         auto value = next_argument(args, i, arg);
         if (!value) return std::unexpected(value.error());
-        options.fn_dvtree = std::string(*value);
+        if (*value == "auto") {
+            options.auto_fdt = true;
+        } else {
+            options.fn_dvtree = std::string(*value);
+        }
         options.appmode = false;
+        return true;
+    }
+    if (option_id == "--auto-fdt") {
+        options.auto_fdt = true;
+        options.appmode = false;
+        return true;
+    }
+    if (option_id == "--uefi") {
+        options.uefi_enabled = true;
+        options.auto_fdt = true;
+        options.appmode = false;
+        options.platform_profile = simrv::core::PlatformProfile::Pcie;
+        if (i + 1 < args.size() && args[i + 1][0] != '-') {
+            ++i;
+            options.fn_uefi = std::string(args[i]);
+        }
+        return true;
+    }
+    if (option_id == "--uefi-vars") {
+        auto value = next_argument(args, i, "--uefi-vars");
+        if (!value) return std::unexpected(value.error());
+        options.fn_uefi_vars = std::string(*value);
+        return true;
+    }
+    if (option_id == "--bootargs") {
+        auto value = next_argument(args, i, "--bootargs");
+        if (!value) return std::unexpected(value.error());
+        options.bootargs = std::string(*value);
         return true;
     }
     if (option_id == "--config") {
@@ -1357,7 +1390,8 @@ auto parse_command_line(std::span<char* const> args) -> std::expected<ParseResul
             result.options.fn_dvtree = env_dtb;
         }
     }
-    if (!result.options.appmode && result.options.fn_dvtree.empty()) {
+    if (!result.options.appmode && result.options.fn_dvtree.empty() && !result.options.auto_fdt &&
+        !result.options.uefi_enabled) {
         return std::unexpected(
             "Linux boot requires a device tree; pass -f/--dtb <FILE> or set SIMRV_LINUX_DTB");
     }
@@ -1498,6 +1532,11 @@ auto RuntimeOptions::to_machine_config() const -> simrv::core::MachineConfig {
     cfg.files.dvtree_path = fn_dvtree;
     cfg.files.config_path = fn_config;
     cfg.files.cfu_plugin_path = fn_cfu_plugin;
+    cfg.files.uefi_code_path = fn_uefi;
+    cfg.files.uefi_vars_path = fn_uefi_vars;
+    cfg.files.uefi_enabled = uefi_enabled;
+    cfg.files.auto_fdt = auto_fdt;
+    cfg.files.bootargs = bootargs;
     cfg.cpu_model_preset = cpu_model_preset;
     if (!bpred_type.empty()) {
         cfg.branch_predictor_type = pipeline::parse_branch_predictor_type(bpred_type);
@@ -1536,9 +1575,14 @@ auto RuntimeOptions::to_machine_config() const -> simrv::core::MachineConfig {
     if (cfg.isa.isatest_tohost == 0x80001000 && cfg.soc.tohost.has_value()) {
         cfg.isa.isatest_tohost = *cfg.soc.tohost;
     }
-    cfg.platform_profile = cfg.soc.enable_mmio   ? simrv::core::PlatformProfile::Mmio
-                           : cfg.soc.enable_pcie ? simrv::core::PlatformProfile::Pcie
-                                                 : simrv::core::PlatformProfile::None;
+    if (uefi_enabled) {
+        cfg.soc.enable_pcie = true;
+        cfg.platform_profile = simrv::core::PlatformProfile::Pcie;
+    } else {
+        cfg.platform_profile = cfg.soc.enable_mmio   ? simrv::core::PlatformProfile::Mmio
+                               : cfg.soc.enable_pcie ? simrv::core::PlatformProfile::Pcie
+                                                     : simrv::core::PlatformProfile::None;
+    }
     if (explicit_num_harts) cfg.soc.smp.resize_harts(num_harts);
     cfg.execution.num_harts = cfg.soc.smp.hart_count;
     cfg.execution.smp_mode = cfg.soc.smp.mode;
@@ -1592,6 +1636,14 @@ auto apply_runtime_options(simrv::core::Machine* machine, const RuntimeOptions& 
                          smp.synchronization_quantum, options.gdb_mode, options.gdb_port);
     }
     if (options.traplog_mode) simrv::log::info("Trap/SBI log: {}", options.fn_traplog);
+    if (options.uefi_enabled) {
+        simrv::log::info(
+            "UEFI mode active: PFlash Bank 0 (code) at 0x{:08x}, Bank 1 (vars) at 0x{:08x}",
+            SIMRV_PLATFORM_PFLASH0_BASE, SIMRV_PLATFORM_PFLASH1_BASE);
+    }
+    if (options.auto_fdt) {
+        simrv::log::info("Automatic Flattened Device Tree (FDT) generator active");
+    }
 
     auto apply_config_to_cpu = [&](simrv::core::CPU& cpu) {
         if (options.cpu_model_preset.has_value()) {
@@ -1660,6 +1712,9 @@ auto apply_runtime_options(simrv::core::Machine* machine, const RuntimeOptions& 
 }
 
 auto needs_memory_image(const ParseResult& result) -> bool {
+    if (result.options.uefi_enabled && !result.options.fn_uefi.empty()) {
+        return false;
+    }
     return result.options.fn_memimg.empty() && !result.options.tuimode &&
            result.action != CliAction::ExplainInstruction && result.action != CliAction::ShowHelp &&
            result.action != CliAction::ShowVersion && result.action != CliAction::ShowLicense &&
@@ -1685,6 +1740,14 @@ auto cli_help_sections() -> const std::vector<HelpSection>& {
               {.option = "-b, --baremetal",
                .description = "Run a bare-metal application (default)."},
               {.option = "--os", .description = "Boot an operating system (Linux or RTOS)."},
+              {.option = "--uefi [CODE.fd]",
+               .description = "Boot via UEFI firmware (PFlash Bank 0 on virt-pcie profile)."},
+              {.option = "--uefi-vars <VARS.fd>",
+               .description = "Persistent NVRAM storage image for UEFI variables (PFlash Bank 1)."},
+              {.option = "--auto-fdt",
+               .description = "Synthesize compliant device tree directly into guest DRAM."},
+              {.option = "--bootargs <ARGS>",
+               .description = "Override or set kernel boot arguments in /chosen node."},
               {.option = "--buildroot-output <DIR>",
                .description =
                    "Load firmware, DTB, and rootfs together from a Buildroot output directory."},

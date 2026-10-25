@@ -34,6 +34,11 @@ struct RuntimeOptions {
     std::string fn_dskimg;
     std::string fn_virtiofs;
     std::string fn_dvtree;
+    std::string fn_uefi;
+    std::string fn_uefi_vars;
+    bool uefi_enabled = false;
+    bool auto_fdt = false;
+    std::string bootargs;
     std::string fn_traplog;
     std::string fn_log;
     std::string fn_summary;
