@@ -16,12 +16,14 @@ namespace simrv::isa {
  * instructions).
  */
 enum class Funct12Priv : uint16_t {
-    Ecall = 0x000,   ///< Environment Call (raises trap based on current privilege level)
-    Ebreak = 0x001,  ///< Breakpoint trap (yields to debugger)
-    Uret = 0x002,    ///< User-mode Trap Return
-    Sret = 0x102,    ///< Supervisor-mode Trap Return
-    Mret = 0x302,    ///< Machine-mode Trap Return
-    Wfi = 0x105,     ///< Wait for Interrupt (stalls CPU until a pending interrupt is served)
+    Ecall = 0x000,          ///< Environment Call (raises trap based on current privilege level)
+    Ebreak = 0x001,         ///< Breakpoint trap (yields to debugger)
+    Uret = 0x002,           ///< User-mode Trap Return
+    Sret = 0x102,           ///< Supervisor-mode Trap Return
+    Mret = 0x302,           ///< Machine-mode Trap Return
+    Wfi = 0x105,            ///< Wait for Interrupt (stalls CPU until a pending interrupt is served)
+    SfenceWInval = 0x180,   ///< Svinval SFENCE.W.INVAL
+    SfenceInvalIr = 0x181,  ///< Svinval SFENCE.INVAL.IR
 };
 
 /**
@@ -32,6 +34,7 @@ enum class Funct12Priv : uint16_t {
 enum class Funct7Priv : uint8_t {
     SfenceVma = 0x09,  ///< Supervisor Memory-Management Fence (SFENCE.VMA, invalidates page table
                        ///< TLB entries)
+    SinvalVma = 0x0B,  ///< Svinval SINVAL.VMA
 };
 
 template <std::integral I>

@@ -87,6 +87,8 @@ enum class FastOp : uint8_t {
     Remuw = 41,
     Sraiw = 42,
     Bitmanip = 43,
+    CzeroEqz = 44,
+    CzeroNez = 45,
 
     // Marker boundary: all values < kFirstNonAlu are ALU operations
     kFirstNonAlu = 48,
@@ -253,6 +255,10 @@ struct CachedOp {
                 return Rem;
             case isa::REMU:
                 return Remu;
+            case isa::CZERO_EQZ:
+                return CzeroEqz;
+            case isa::CZERO_NEZ:
+                return CzeroNez;
             case isa::ANDI:
                 return Andi;
             case isa::SLLI:

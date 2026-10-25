@@ -964,6 +964,16 @@ SIMRV_ALWAYS_INLINE auto CPU::execute_cached_alu_fast_xlen(CachedOp& op, FastOp 
             case FastAluKind::Auipc:
                 wb_data = op.cpc.raw() + op.imm;
                 break;
+            case FastAluKind::CzeroEqz: {
+                const simrv::xlen::Register rrs2 = state_.regs.read(op.rs2);
+                wb_data = (rrs2 == 0) ? 0 : rrs1;
+                break;
+            }
+            case FastAluKind::CzeroNez: {
+                const simrv::xlen::Register rrs2 = state_.regs.read(op.rs2);
+                wb_data = (rrs2 != 0) ? 0 : rrs1;
+                break;
+            }
             default: {
                 if (kind != FastOp::Bitmanip) {
                     __builtin_unreachable();

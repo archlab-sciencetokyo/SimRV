@@ -46,4 +46,18 @@ enum class IsaPreset : uint8_t {
     GCV,   ///< G plus Compressed and Vector 1.0 (V)
 };
 
+/**
+ * @enum ArchitectureProfile
+ * @brief Formal RISC-V Architectural Profiles per RVI Profiles Specification.
+ */
+enum class ArchitectureProfile : uint8_t {
+    Legacy,    ///< Unconstrained standard RV32GC / RV64GC
+    Rva20U64,  ///< RVA20 User-mode 64-bit profile
+    Rva20S64,  ///< RVA20 Supervisor-mode 64-bit profile
+    Rva22U64,  ///< RVA22 User-mode 64-bit profile
+    Rva22S64,  ///< RVA22 Supervisor-mode 64-bit profile
+    Rva23U64,  ///< RVA23 User-mode 64-bit profile
+    Rva23S64,  ///< RVA23 Supervisor-mode 64-bit profile (Default for RV64)
+};
+
 }  // namespace simrv::isa

@@ -67,6 +67,14 @@ auto ExecuteUnitInt::aluInt32(simrv::xlen::Register in1, simrv::xlen::Register i
             res32 = static_cast<int32_t>(u1 & u2);
             break;
 
+        // Zicond (Integer Conditional Operations)
+        case CZERO_EQZ:
+            res32 = (u2 == 0) ? 0 : static_cast<int32_t>(u1);
+            break;
+        case CZERO_NEZ:
+            res32 = (u2 != 0) ? 0 : static_cast<int32_t>(u1);
+            break;
+
         // M-Extension
         case MUL:
             res32 = static_cast<int32_t>(u1 * u2);
@@ -162,6 +170,12 @@ auto ExecuteUnitInt::aluInt(simrv::xlen::Register in1, simrv::xlen::Register in2
         case AND:
         case ANDI:
             return in1 & in2;
+
+        // Zicond (Integer Conditional Operations)
+        case CZERO_EQZ:
+            return (in2 == 0) ? 0 : in1;
+        case CZERO_NEZ:
+            return (in2 != 0) ? 0 : in1;
 
         // M-Extension
         case MUL:

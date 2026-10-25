@@ -35,6 +35,25 @@ class DCache : public BaseCache<1024, 32, 8> {
     [[nodiscard]] auto prefetcher() noexcept -> DataPrefetcher& { return prefetcher_; }
     [[nodiscard]] auto prefetcher() const noexcept -> const DataPrefetcher& { return prefetcher_; }
 
+    auto zero_line(simrv::xlen::Address addr) -> bool {
+        const uint32_t set_idx = get_set_index(addr);
+        const simrv::xlen::Address tag = get_tag(addr);
+        auto* line_ptr = &lines_[set_idx * active_ways_];
+        for (uint32_t w = 0; w < active_ways_; ++w) {
+            auto& l = line_ptr[w];
+            if (l.valid && l.tag == tag) {
+                std::memset(l.data.data(), 0, kLineBytes);
+                l.state = simrv::memory::MesiState::Modified;
+                l.last_used = ++access_tick_;
+                ++hits_;
+                last_access_was_hit_ = true;
+                last_hit_way_ = w;
+                return true;
+            }
+        }
+        return false;
+    }
+
     auto handle_probe(const simrv::memory::TlChannelB& req, simrv::memory::TlChannelC& resp,
                       std::array<simrv::xlen::Byte, kLineBytes>& dirty_data) -> bool;
 

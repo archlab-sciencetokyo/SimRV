@@ -263,7 +263,8 @@ auto TrapController::can_execute_privileged_instruction(simrv::xlen::PrivilegeLe
         return current_priv >= kPrivSupervisor &&
                !(current_priv == kPrivSupervisor && (mstatus & MstatusBit::Tw) != 0);
     }
-    if (funct7 == isa::Funct7Priv::SfenceVma) {
+    if (funct7 == isa::Funct7Priv::SfenceVma || funct7 == isa::Funct7Priv::SinvalVma ||
+        funct12 == isa::Funct12Priv::SfenceWInval || funct12 == isa::Funct12Priv::SfenceInvalIr) {
         return misa_has_extension(misa, isa::IsaExtension::S) && current_priv >= kPrivSupervisor &&
                !(current_priv == kPrivSupervisor && (mstatus & MstatusBit::Tvm) != 0);
     }

@@ -102,7 +102,9 @@ void CPU::execute_core(Machine& machine) {
             break;
         case Opcode::MiscMem:
             ctx.tkn = false;
-            if (ctx.funct3 == Funct3::FenceI) {
+            if (isa::is_cmo_op(ctx.op_id)) {
+                ctx.mem_addr = ctx.rrs1;
+            } else if (ctx.funct3 == Funct3::FenceI) {
                 icache.flush();
                 decode_cache.flush();
             } else if (ctx.ir == 0x0100000f) {
@@ -289,7 +291,10 @@ void CPU::execute_system(Machine& machine) {
                 break;
             }
             default:
-                if (ctx.funct7 == static_cast<simrv::xlen::Instruction>(Funct7Priv::SfenceVma)) {
+                if (ctx.funct7 == static_cast<simrv::xlen::Instruction>(Funct7Priv::SfenceVma) ||
+                    ctx.funct7 == static_cast<simrv::xlen::Instruction>(Funct7Priv::SinvalVma) ||
+                    static_cast<Funct12Priv>(ctx.funct12) == Funct12Priv::SfenceWInval ||
+                    static_cast<Funct12Priv>(ctx.funct12) == Funct12Priv::SfenceInvalIr) {
                     ctx.tkn = false;
                 }
                 break;

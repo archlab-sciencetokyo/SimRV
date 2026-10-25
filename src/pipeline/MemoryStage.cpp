@@ -25,6 +25,11 @@ void CPU::run_memory_stage(Machine& machine) {
     auto& ctx = active_context();
     const auto opcode = static_cast<Opcode>(ctx.opcode);
 
+    if (isa::is_cmo_op(ctx.op_id)) {
+        simrv::memory::MemoryAccess::execute_cmo(machine.memory_, *this, ctx.mem_addr, ctx.op_id);
+        return;
+    }
+
     if (simrv::compiler::likely(opcode == Opcode::Load || opcode == Opcode::LoadFp)) {
         if (!ctx.memory_load_complete) {
             memory_load_phase(machine);

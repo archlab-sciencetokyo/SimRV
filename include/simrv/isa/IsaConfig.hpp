@@ -1,6 +1,10 @@
 #pragma once
 
+#include <optional>
+#include <string_view>
+
 #include "simrv/isa/IsaTypes.hpp"
+#include "simrv/xlen/AddressTypes.hpp"
 #include "simrv/xlen/ScalarTypes.hpp"
 
 namespace simrv::isa {
@@ -135,5 +139,49 @@ constexpr auto epc_read_value(simrv::xlen::CsrValue epc, simrv::xlen::CsrValue m
         misa_has_extension(misa, IsaExtension::C) ? 1U : 3U;
     return epc & ~alignment_mask;
 }
+
+/**
+ * @brief Returns the canonical string representation of an architecture profile.
+ */
+constexpr auto to_profile_string(ArchitectureProfile profile) noexcept -> std::string_view {
+    switch (profile) {
+        case ArchitectureProfile::Legacy:
+            return "legacy";
+        case ArchitectureProfile::Rva20U64:
+            return "rva20u64";
+        case ArchitectureProfile::Rva20S64:
+            return "rva20s64";
+        case ArchitectureProfile::Rva22U64:
+            return "rva22u64";
+        case ArchitectureProfile::Rva22S64:
+            return "rva22s64";
+        case ArchitectureProfile::Rva23U64:
+            return "rva23u64";
+        case ArchitectureProfile::Rva23S64:
+            return "rva23s64";
+    }
+    return "unknown";
+}
+
+/**
+ * @brief Parses an architecture profile name from string.
+ */
+constexpr auto parse_architecture_profile(std::string_view str) noexcept
+    -> std::optional<ArchitectureProfile> {
+    if (str == "legacy" || str == "rv64gc" || str == "rv32gc") return ArchitectureProfile::Legacy;
+    if (str == "rva20u64") return ArchitectureProfile::Rva20U64;
+    if (str == "rva20s64" || str == "rva20") return ArchitectureProfile::Rva20S64;
+    if (str == "rva22u64") return ArchitectureProfile::Rva22U64;
+    if (str == "rva22s64" || str == "rva22") return ArchitectureProfile::Rva22S64;
+    if (str == "rva23u64") return ArchitectureProfile::Rva23U64;
+    if (str == "rva23s64" || str == "rva23") return ArchitectureProfile::Rva23S64;
+    return std::nullopt;
+}
+
+/**
+ * @brief Default architecture profile for the simulator instance.
+ */
+constexpr ArchitectureProfile kDefaultArchitectureProfile =
+    simrv::xlen::kIsXLen64 ? ArchitectureProfile::Rva23S64 : ArchitectureProfile::Legacy;
 
 }  // namespace simrv::isa

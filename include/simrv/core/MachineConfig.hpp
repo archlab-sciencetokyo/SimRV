@@ -62,6 +62,7 @@ struct ExecutionConfig {
     bool realtime_pacing = false;
     uint64_t cpu_clock_hz = simrv::core::timing::kCpuClockHz;
     uint64_t timebase_hz = simrv::core::timing::kTimebaseHz;
+    simrv::isa::ArchitectureProfile profile = simrv::isa::kDefaultArchitectureProfile;
 };
 
 struct TuiConfig {

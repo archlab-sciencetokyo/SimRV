@@ -98,7 +98,9 @@ void CPU::commit_control_flow_and_traps([[maybe_unused]] Machine& machine) {
                 }
                 default:
                     if (ctx.funct7 ==
-                        static_cast<simrv::xlen::Instruction>(Funct7Priv::SfenceVma)) {
+                            static_cast<simrv::xlen::Instruction>(Funct7Priv::SfenceVma) ||
+                        ctx.funct7 ==
+                            static_cast<simrv::xlen::Instruction>(Funct7Priv::SinvalVma)) {
                         const bool match_all_vaddr = (std::to_underlying(ctx.rs1) == 0);
                         const bool match_all_asid = (std::to_underlying(ctx.rs2) == 0);
                         TLB_flush(match_all_vaddr, ctx.rrs1, match_all_asid,

@@ -151,6 +151,10 @@ if(BUILD_TESTING)
     simrv-modern-simulator-standards-tests tests/ModernSimulatorStandardsTests.cpp
     modern-standards "gate;regress;core;sbi;isa")
 
+  simrv_add_runtime_test(
+    simrv-rva23-profile-tests tests/Rva23ProfileTests.cpp
+    rva23-profile "gate;regress;core;isa;cache")
+
   # Architectural equivalence is a first-class native gate.  The fixture
   # deliberately exercises functional execution and both CA pipelines while
   # excluding cache/cycle/UI observations.

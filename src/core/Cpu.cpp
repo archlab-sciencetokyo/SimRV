@@ -73,6 +73,10 @@ void CPU::reset() {
         state_.mstatus |= (static_cast<simrv::xlen::CsrValue>(2) << 34) |
                           (static_cast<simrv::xlen::CsrValue>(2) << 32);
     }
+    // Enable CBZE (bit 6), CBCFE (bit 4), and CBIE (bits 5:4) by default for RVA23 CMO
+    // compatibility
+    state_.menvcfg = static_cast<simrv::xlen::CsrValue>((1ULL << 6) | (3ULL << 4));
+    state_.senvcfg = static_cast<simrv::xlen::CsrValue>((1ULL << 6) | (3ULL << 4));
     state_.initialize_lower_xlen_fields();
     cached_decode_context_ = 0xFF;
     dcache.flush();

@@ -616,6 +616,18 @@ const std::array<std::string_view, static_cast<size_t>(isa::OperationIdCount)> O
     "VWSLL_VI",
     "VCHECK",
     "CFU",
+    "CZERO_EQZ",
+    "CZERO_NEZ",
+    "CBO_ZERO",
+    "CBO_CLEAN",
+    "CBO_FLUSH",
+    "CBO_INVAL",
+    "PREFETCH_I",
+    "PREFETCH_R",
+    "PREFETCH_W",
+    "SINVAL_VMA",
+    "SFENCE_W_INVAL",
+    "SFENCE_INVAL_IR",
     "UNKNOWN"};
 
 auto operation_name(isa::OperationId operation) noexcept -> std::string_view {
@@ -653,6 +665,13 @@ constexpr std::array<OperationId, 8> kOpImmBaseTable = {
 
 [[nodiscard]] constexpr auto decode_op_imm(uint32_t funct3, uint32_t funct7,
                                            simrv::xlen::Instruction ir) noexcept -> OperationId {
+    const bool rd_is_zero = ((ir >> 7) & 0x1F) == 0;
+    if (funct3 == 6 && rd_is_zero) {
+        const uint32_t f5 = (ir >> 20U) & 0x1FU;
+        if (f5 == 0x00) return OperationId::PREFETCH_I;
+        if (f5 == 0x01) return OperationId::PREFETCH_R;
+        if (f5 == 0x03) return OperationId::PREFETCH_W;
+    }
     if (funct3 < kOpImmBaseTable.size() && kOpImmBaseTable[funct3] != OperationId::UNKNOWN) {
         return kOpImmBaseTable[funct3];
     }
@@ -715,6 +734,7 @@ consteval auto generate_op_standard_table() {
     // funct3 = 5
     table.assign(5, 0x00, OperationId::SRL);
     table.assign(5, 0x05, OperationId::MINU);
+    table.assign(5, 0x07, OperationId::CZERO_EQZ);
     table.assign(5, 0x20, OperationId::SRA);
     table.assign(5, 0x24, OperationId::BEXT);
     table.assign(5, 0x30, OperationId::ROR);
@@ -728,6 +748,7 @@ consteval auto generate_op_standard_table() {
     // funct3 = 7
     table.assign(7, 0x00, OperationId::AND);
     table.assign(7, 0x05, OperationId::MAXU);
+    table.assign(7, 0x07, OperationId::CZERO_NEZ);
     table.assign(7, 0x20, OperationId::ANDN);
 
     return table;
@@ -823,9 +844,15 @@ auto decode_system_priv(uint32_t funct7, simrv::xlen::Instruction ir) -> Operati
             return (rd_is_zero && rs1_is_zero) ? OperationId::MRET : OperationId::UNKNOWN;
         case 0x105:
             return (rd_is_zero && rs1_is_zero) ? OperationId::WFI : OperationId::UNKNOWN;
+        case 0x180:
+            return (rd_is_zero && rs1_is_zero) ? OperationId::SFENCE_W_INVAL : OperationId::UNKNOWN;
+        case 0x181:
+            return (rd_is_zero && rs1_is_zero) ? OperationId::SFENCE_INVAL_IR
+                                               : OperationId::UNKNOWN;
         default:
             // SFENCE.VMA uses rs1/rs2 operands but reserves rd=x0.
             if (funct7 == 0x09 && rd_is_zero) return OperationId::SFENCE_VMA;
+            if (funct7 == 0x0B && rd_is_zero) return OperationId::SINVAL_VMA;
             break;
     }
     return OperationId::UNKNOWN;
@@ -845,12 +872,31 @@ auto decode_system(uint32_t funct3, uint32_t funct7, simrv::xlen::Instruction ir
     return decode_system_csr(funct3);
 }
 
-constexpr std::array<OperationId, 8> kMiscMemTable = {
-    OperationId::FENCE,   OperationId::FENCE_I, OperationId::UNKNOWN, OperationId::UNKNOWN,
-    OperationId::UNKNOWN, OperationId::UNKNOWN, OperationId::UNKNOWN, OperationId::UNKNOWN,
-};
-
-constexpr auto decode_misc_mem = decode_table<kMiscMemTable>;
+auto decode_misc_mem(uint32_t funct3, simrv::xlen::Instruction ir) -> OperationId {
+    const bool rd_is_zero = ((ir >> 7U) & 0x1FU) == 0;
+    const uint32_t f12 = ir >> 20U;
+    if (funct3 == 0) {
+        return OperationId::FENCE;
+    }
+    if (funct3 == 1) {
+        return OperationId::FENCE_I;
+    }
+    if (funct3 == 2 && rd_is_zero) {
+        switch (f12) {
+            case 0x004:
+                return OperationId::CBO_ZERO;
+            case 0x001:
+                return OperationId::CBO_CLEAN;
+            case 0x002:
+                return OperationId::CBO_FLUSH;
+            case 0x000:
+                return OperationId::CBO_INVAL;
+            default:
+                break;
+        }
+    }
+    return OperationId::UNKNOWN;
+}
 
 auto decode_ext_i(Opcode op, uint32_t funct3, uint32_t funct7, simrv::xlen::Instruction ir)
     -> OperationId {
@@ -878,7 +924,7 @@ auto decode_ext_i(Opcode op, uint32_t funct3, uint32_t funct7, simrv::xlen::Inst
         case Opcode::Op32:
             return decode_op32_standard(funct3, funct7);
         case Opcode::MiscMem:
-            return decode_misc_mem(funct3);
+            return decode_misc_mem(funct3, ir);
         case Opcode::System:
             return decode_system(funct3, funct7, ir);
         default:

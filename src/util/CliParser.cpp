@@ -738,6 +738,19 @@ auto parse_mode_options(std::string_view arg, std::span<char* const> args, std::
         result.options.misa_override = true;
         return true;
     }
+    if (option_id == "--profile") {
+        auto value = next_argument(args, i, "--profile");
+        if (!value) return std::unexpected(value.error());
+        auto parsed = isa::parse_architecture_profile(*value);
+        if (!parsed) {
+            return std::unexpected(
+                std::format("invalid architecture profile '{}' (valid: rva23, rva23s64, rva23u64, "
+                            "rva22, rva22s64, rva20, legacy)",
+                            *value));
+        }
+        result.options.profile = *parsed;
+        return true;
+    }
     if (option_id == "--vlen") {
         auto value = next_argument(args, i, arg);
         if (!value) return std::unexpected(value.error());
@@ -1435,6 +1448,7 @@ auto RuntimeOptions::to_machine_config() const -> simrv::core::MachineConfig {
     if (timebase_hz.has_value()) {
         cfg.execution.timebase_hz = *timebase_hz;
     }
+    cfg.execution.profile = profile;
 
     cfg.tui.enabled = tuimode;
     cfg.tui.high_contrast = high_contrast;
@@ -1555,9 +1569,11 @@ auto apply_runtime_options(simrv::core::Machine* machine, const RuntimeOptions& 
     const auto smp_mode =
         smp.mode == simrv::core::SmpMode::SingleThreaded ? "single-threaded" : "multi-threaded";
     simrv::log::info(
-        "Run configuration: RV{}, {}-mode, {} hart(s), SMP {}, quantum {}, {} platform, {} MiB RAM",
+        "Run configuration: RV{}, {}-mode, {} hart(s), SMP {}, quantum {}, {} platform, profile "
+        "{}, {} MiB RAM",
         machine->primary_hart().state().regs.xlen, options.appmode ? "bare-metal" : "OS",
         smp.hart_count, smp_mode, smp.synchronization_quantum, platform_name,
+        isa::to_profile_string(options.profile),
         machine->configuration().memory.dram_size / (1024ULL * 1024ULL));
     simrv::log::info(
         "Shared caches: L1 private per hart, L2 {} cluster(s), L3 {} ({} KiB)",
@@ -1690,6 +1706,9 @@ auto cli_help_sections() -> const std::vector<HelpSection>& {
                       .hidden_aliases = {"--memory-size", "--mem-size"}},
                      {.option = "--isa <ISA>",
                       .description = "Select a RISC-V ISA profile such as rv32gc or rv64gc."},
+                     {.option = "--profile <PROFILE>",
+                      .description =
+                          "Select formal architecture profile (rva23, rva23s64, rva22, legacy)."},
                      {.option = "--vlen <BITS>",
                       .description = "Set vector register length (128–1024; default: 256)."},
                      {.option = "--config <PRESET | FILE>",
