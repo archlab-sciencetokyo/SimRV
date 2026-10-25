@@ -10,19 +10,20 @@
 namespace simrv::execute::vector {
 
 // Helper to check/get active elements under mask
-inline bool is_element_active(const core::VectorRegister& mask_reg, uint32_t i, bool vm) {
+inline bool is_element_active(const core::VectorRegister& mask_reg,
+                              simrv::xlen::VectorElementIndex i, bool vm) {
     if (vm) return true;
     return (mask_reg.u8[i / 8] & (1u << (i % 8))) !=
            0;  // NOLINT(cppcoreguidelines-pro-type-union-access)
 }
 
-inline bool get_mask_bit(const core::VectorRegister& mask_reg, uint32_t i) {
+inline bool get_mask_bit(const core::VectorRegister& mask_reg, simrv::xlen::VectorElementIndex i) {
     return (mask_reg.u8[i / 8] & (1u << (i % 8))) !=
            0;  // NOLINT(cppcoreguidelines-pro-type-union-access)
 }
 
 // Helper to write mask bits
-inline void set_mask_bit(core::VectorRegister& dest, uint32_t i, bool val) {
+inline void set_mask_bit(core::VectorRegister& dest, simrv::xlen::VectorElementIndex i, bool val) {
     uint32_t byte_idx = i / 8;
     uint32_t bit_idx = i % 8;
     if (val) {
@@ -35,7 +36,7 @@ inline void set_mask_bit(core::VectorRegister& dest, uint32_t i, bool val) {
 // Helper to read group element
 template <typename T>
 inline T get_group_element(const core::RegisterFile& regs, simrv::xlen::RegId base_reg,
-                           uint32_t i) {
+                           simrv::xlen::VectorElementIndex i) {
     const uint32_t elems_per_reg = regs.vlen_bytes() / sizeof(T);
     const uint32_t shift = std::countr_zero(elems_per_reg);
     uint32_t reg_offset = i >> shift;
@@ -65,8 +66,8 @@ inline T get_group_element(const core::RegisterFile& regs, simrv::xlen::RegId ba
 
 // Helper to write group element
 template <typename T>
-inline void set_group_element(core::RegisterFile& regs, simrv::xlen::RegId base_reg, uint32_t i,
-                              T val) {
+inline void set_group_element(core::RegisterFile& regs, simrv::xlen::RegId base_reg,
+                              simrv::xlen::VectorElementIndex i, T val) {
     const uint32_t elems_per_reg = regs.vlen_bytes() / sizeof(T);
     const uint32_t shift = std::countr_zero(elems_per_reg);
     uint32_t reg_offset = i >> shift;

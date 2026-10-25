@@ -19,10 +19,10 @@ using Opcode = simrv::isa::Opcode;
 
 class Decoder {
    public:
-    explicit constexpr Decoder(uint32_t inst) : inst_(inst) {}
+    explicit constexpr Decoder(simrv::xlen::Instruction inst) : inst_(inst) {}
 
     /// Get raw instruction word
-    [[nodiscard]] constexpr auto raw() const -> uint32_t { return inst_; }
+    [[nodiscard]] constexpr auto raw() const -> simrv::xlen::Instruction { return inst_; }
 
     /// Check if the instruction is compressed (16-bit)
     [[nodiscard]] constexpr auto is_compressed() const -> bool { return (inst_ & 0x3) != 0x3; }
@@ -152,7 +152,7 @@ class Decoder {
     }
 
    private:
-    uint32_t inst_;
+    simrv::xlen::Instruction inst_;
 };
 
 /// Decode instruction word to internal OperationId enum
