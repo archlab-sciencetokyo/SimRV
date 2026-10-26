@@ -27,6 +27,7 @@
     ]
   },
   "guest_profiles": [
+    "RVA23",
     "RV32GCBV",
     "RV64GCBV"
   ],
