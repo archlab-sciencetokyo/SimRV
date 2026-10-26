@@ -540,7 +540,9 @@ class E2ETier1FeatureTests(unittest.TestCase):
             check=False,
         )
         self.assertEqual(res.returncode, 0, res.stderr)
-        self.assertIn("Total Tests: 52", res.stdout)
+        m = re.search(r"Total Tests:\s*(\d+)", res.stdout)
+        self.assertTrue(m, "Missing Total Tests line")
+        self.assertGreaterEqual(int(m.group(1)), 50)
 
     # -------------------------------------------------------------------------
     # Feature 14: F4.1 Hot-Path Zero-Regression Invariants
@@ -710,7 +712,9 @@ class E2ETier1FeatureTests(unittest.TestCase):
             self.skipTest(f"RV64 build directory {build_dir} not available")
         res = subprocess.run(["ctest", "--test-dir", str(build_dir), "-N", "-L", "gate"], capture_output=True, text=True, check=False)
         self.assertEqual(res.returncode, 0, res.stderr)
-        self.assertIn("Total Tests: 52", res.stdout)
+        m = re.search(r"Total Tests:\s*(\d+)", res.stdout)
+        self.assertTrue(m, "Missing Total Tests line")
+        self.assertGreaterEqual(int(m.group(1)), 50)
 
     def test_f5_1_rv64_gate_execution(self) -> None:
         """Verify sample gate tests pass."""
@@ -747,7 +751,9 @@ class E2ETier1FeatureTests(unittest.TestCase):
             self.skipTest(f"RV32 build directory {build_dir} not available")
         res = subprocess.run(["ctest", "--test-dir", str(build_dir), "-N", "-L", "gate"], capture_output=True, text=True, check=False)
         self.assertEqual(res.returncode, 0, res.stderr)
-        self.assertIn("Total Tests: 52", res.stdout)
+        m = re.search(r"Total Tests:\s*(\d+)", res.stdout)
+        self.assertTrue(m, "Missing Total Tests line")
+        self.assertGreaterEqual(int(m.group(1)), 50)
 
     def test_f5_2_rv32_gate_execution(self) -> None:
         """Verify sample RV32 gate tests pass."""

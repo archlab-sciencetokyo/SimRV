@@ -151,6 +151,9 @@ jobs:
         export RISCV_TESTS_DIR="${RUNNER_TEMP}/riscv-tests"
         SUITES=(--suite native --suite isa)
         DEPENDENCIES=(--dependency riscv_tests="${RUNNER_TEMP}/riscv-tests")
+        if [[ "${{ matrix.arch }}" == "rv64" ]]; then
+          SUITES+=(--suite rva23-act)
+        fi
         if [[ "${{ matrix.compiler }}" == "gcc" ]]; then
           SUITES+=(--suite vector --suite package)
           DEPENDENCIES+=(--dependency vector_tests="${RUNNER_TEMP}/riscv-vector-tests")

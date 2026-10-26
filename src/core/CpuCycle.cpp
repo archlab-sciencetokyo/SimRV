@@ -699,6 +699,11 @@ void CPU::run_memory_stage_baremetal(Machine& machine) {
         return;
     }
 
+    if (isa::is_cmo_op(ctx.op_id)) {
+        simrv::memory::MemoryAccess::execute_cmo(machine.memory_, *this, ctx.mem_addr, ctx.op_id);
+        return;
+    }
+
     const auto opcode = static_cast<Opcode>(ctx.opcode);
     const auto funct5 = ctx.funct5;
     const auto addr = ctx.mem_addr;

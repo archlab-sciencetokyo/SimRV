@@ -163,15 +163,10 @@ if(BUILD_TESTING)
     simrv-fdt-generator-tests tests/FdtGeneratorTests.cpp
     fdt-generator "gate;regress;core;fdt;platform")
 
-  # Architectural equivalence is a first-class native gate.  The fixture
+  # Architectural equivalence is a first-class native gate. The fixture
   # deliberately exercises functional execution and both CA pipelines while
   # excluding cache/cycle/UI observations.
-  add_executable(simrv-semantic-equivalence-tests tests/ModernPlatformTests.cpp)
-  set_property(GLOBAL APPEND PROPERTY SIMRV_NATIVE_TEST_TARGETS
-                                      simrv-semantic-equivalence-tests)
-  target_link_libraries(simrv-semantic-equivalence-tests PRIVATE simrv-runtime)
-  simrv_configure_native_test(simrv-semantic-equivalence-tests)
-  add_test(NAME semantic-equivalence COMMAND simrv-semantic-equivalence-tests
+  add_test(NAME semantic-equivalence COMMAND simrv-modern-platform-tests
                                              --semantic-equivalence)
   set_tests_properties(semantic-equivalence
                        PROPERTIES LABELS "gate;semantic;equivalence")
@@ -306,7 +301,24 @@ if(BUILD_TESTING)
            COMMAND ${PYTHON_BIN} ${CMAKE_SOURCE_DIR}/tests/RunE2ETests.py
                    --simrv $<TARGET_FILE:SimRV> --tier all)
   set_tests_properties(e2e-all-tiers
-                       PROPERTIES LABELS "regress;e2e;e2e-all" TIMEOUT 120)
+                       PROPERTIES LABELS "e2e;e2e-all" TIMEOUT 120)
+
+  # RVA23 Architectural Compatibility Tests (ACT)
+  if(SIMRV_XLEN STREQUAL "64")
+    add_test(NAME rva23-act
+             COMMAND ${PYTHON_BIN} ${CMAKE_SOURCE_DIR}/scripts/run_act_tests.py
+                     --simrv $<TARGET_FILE:SimRV>
+                     --xlen ${SIMRV_XLEN}
+                     --work-dir ${CMAKE_CURRENT_BINARY_DIR}/act-qualification)
+    set_tests_properties(rva23-act
+                         PROPERTIES LABELS "gate;regress;rva23;act;profile" TIMEOUT 45)
+  endif()
+
+  add_test(NAME act-runner-tests
+           COMMAND ${PYTHON_BIN} -m unittest tests/ActRunnerTests.py
+           WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+  set_tests_properties(act-runner-tests
+                       PROPERTIES LABELS "gate;regress;act;tool" TIMEOUT 15)
 
   # Optional App/Linux smoke tests
   if(DEFINED ENV{SIMRV_APP_IMG})
