@@ -1,12 +1,12 @@
 # RISC-V Compliance Scope
 
-SimRV targets the ratified RISC-V **RVA23 Profile** (`rva23s64` and `rva23u64`) as its primary 64-bit architectural compliance target, alongside ratified `rv32gczbv` and `rv64gczbv` implementation targets. This is an implementation and qualification target, not a claim of formal RISC-V International architectural certification. A release is considered verified only for behavior covered by the checked-in semantic tests, the Architectural Compatibility Test (ACT) qualification suite, the configured `riscv-tests` suites, vector tests, and Spike lockstep workloads run by the release gates.
+SimRV targets the ratified RISC-V **RVA23 Profile** (`rva23s64` and `rva23u64`) as its primary 64-bit architectural compliance target, alongside ratified `rv32gczbv` and `rv64gczbv` implementation targets. This is an implementation and verification target, not a claim of formal RISC-V International architectural certification. A release is considered verified only for behavior covered by the checked-in semantic tests, the Architectural Compatibility Test (ACT) test suite, the configured `riscv-tests` suites, vector tests, and Spike lockstep workloads run by the release gates.
 
 ## Architectural scope
 
 | Area | Implemented scope | Verification evidence |
 | --- | --- | --- |
-| Standard profiles | RVA23 (`rva23s64` default, `rva23u64`), RV32GCBV, RV64GCBV | Profile test suites, RVA23 ACT qualification gate |
+| Standard profiles | RVA23 (`rva23s64` default, `rva23u64`), RV32GCBV, RV64GCBV | Profile test suites, RVA23 ACT test gate |
 | Base ISA | RV32I and RV64I | RV32/RV64 ISA gates, ACT suite, and Spike lockstep |
 | General-purpose extensions | M, A, F, D, C; see FP qualification note below | ISA gates, focused semantic tests, ACT suite, lockstep |
 | Bit manipulation | Zba, Zbb, Zbc, Zbs (`Zb*`) | Bitmanip ISA tests, ACT suite, and lockstep |
@@ -36,7 +36,7 @@ instructions that update restart state before a fault.
 
 ## Architectural Compatibility Testing (ACT)
 
-SimRV qualifies its default 64-bit profile (`rva23s64`) against the RISC-V Architectural Compatibility Test (ACT) framework:
+SimRV verifies its default 64-bit profile (`rva23s64`) against the RISC-V Architectural Compatibility Test (ACT) framework:
 
 - **Signature dumping**: Bare-metal execution supports `--signature <file>` or `+signature=<file>`, extracting memory between `begin_signature` (or `rvtest_sig_begin`) and `end_signature` (or `rvtest_sig_end`) to format-compliant hex output files.
 - **RVA23 Mandatory Extensions**: Automated regression suites verify Zicond, CMO, Svinval, Bitmanip (`zba`, `zbb`, `zbs`), and profile CSR configurations against golden architectural signatures.
