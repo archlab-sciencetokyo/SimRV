@@ -74,7 +74,7 @@ class MemoryModal : public framework::IModal {
 
    private:
     std::string owned_input_;
-    TuiModal* host_;
+    [[maybe_unused]] TuiModal* host_;
     simrv::core::Machine* machine_;
     std::string& input_;
 

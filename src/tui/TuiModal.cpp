@@ -45,26 +45,7 @@
 
 namespace simrv::tui {
 
-namespace {
-
-constexpr std::array<int, 14> kGeneralSettingRows = {5,  6,  7,  8,  9,  12, 13,
-                                                     14, 17, 18, 19, 22, 25, 28};
-constexpr int kGeneralSettingsContentRows = 29;
-
-[[nodiscard]] constexpr auto general_setting_row(int item) noexcept -> int {
-    return (item >= 0 && static_cast<size_t>(item) < kGeneralSettingRows.size())
-               ? kGeneralSettingRows[static_cast<size_t>(item)]
-               : 0;
-}
-
-[[nodiscard]] inline auto general_setting_at_row(int row) noexcept -> int {
-    const auto it = std::ranges::find(kGeneralSettingRows, row);
-    return it == kGeneralSettingRows.end()
-               ? -1
-               : static_cast<int>(std::distance(kGeneralSettingRows.begin(), it));
-}
-
-}  // namespace
+namespace {}  // namespace
 
 TuiModal::TuiModal(simrv::core::Machine& machine) : machine_(machine) {}
 
@@ -784,7 +765,7 @@ auto TuiModal::handle_click(int x, int y, int term_width, int term_height) -> Mo
     if (provisional_width < 35) return ModalClickResult::Ignored;
 
     int est_rows = (active_modal_ == ModalType::Settings && settings_draft_.active_tab == 0)
-                       ? kGeneralSettingsContentRows
+                       ? modals::kGeneralSettingsContentRows
                    : (active_modal_ == ModalType::Glossary)   ? 26
                    : (active_modal_ == ModalType::Help)       ? 24
                    : (active_modal_ == ModalType::LogViewer)  ? 24

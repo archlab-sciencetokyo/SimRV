@@ -79,7 +79,7 @@ class PFlash final : public memory::MmioDevice {
     [[nodiscard]] auto read_cfi(simrv::xlen::Address offset) const -> uint8_t;
     void handle_command(simrv::xlen::Address offset, uint32_t value);
 
-    core::Machine& machine_;
+    [[maybe_unused]] core::Machine& machine_;
     simrv::xlen::Address base_;
     simrv::xlen::Address size_;
     uint32_t sector_size_;

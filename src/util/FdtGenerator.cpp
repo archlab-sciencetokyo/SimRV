@@ -17,14 +17,14 @@ namespace simrv::util {
 
 namespace {
 
-constexpr uint32_t kFdtMagic = 0xd00dfeedU;
-constexpr uint32_t kFdtVersion = 17U;
-constexpr uint32_t kFdtLastCompVersion = 16U;
+constexpr FdtMagic kFdtMagic = 0xd00dfeedU;
+constexpr FdtToken kFdtVersion = 17U;
+constexpr FdtToken kFdtLastCompVersion = 16U;
 
-constexpr uint32_t kFdtBeginNode = 0x00000001U;
-constexpr uint32_t kFdtEndNode = 0x00000002U;
-constexpr uint32_t kFdtProp = 0x00000003U;
-constexpr uint32_t kFdtEnd = 0x00000009U;
+constexpr FdtToken kFdtBeginNode = 0x00000001U;
+constexpr FdtToken kFdtEndNode = 0x00000002U;
+constexpr FdtToken kFdtProp = 0x00000003U;
+constexpr FdtToken kFdtEnd = 0x00000009U;
 
 }  // namespace
 
@@ -48,13 +48,13 @@ void FdtGenerator::pad4(std::vector<uint8_t>& buf) {
     }
 }
 
-auto FdtGenerator::get_string_offset(std::string_view name) -> uint32_t {
+auto FdtGenerator::get_string_offset(std::string_view name) -> FdtOffset {
     std::string key(name);
     auto it = string_offsets_.find(key);
     if (it != string_offsets_.end()) {
         return it->second;
     }
-    const auto offset = static_cast<uint32_t>(string_data_.size());
+    const auto offset = static_cast<FdtOffset>(string_data_.size());
     string_data_.insert(string_data_.end(), name.begin(), name.end());
     string_data_.push_back('\0');
     string_offsets_[std::move(key)] = offset;
@@ -71,7 +71,7 @@ void FdtGenerator::begin_node(std::string_view name) {
 void FdtGenerator::end_node() { put_be32(struct_data_, kFdtEndNode); }
 
 void FdtGenerator::property_raw(std::string_view name, std::span<const uint8_t> data) {
-    const uint32_t nameoff = get_string_offset(name);
+    const FdtOffset nameoff = get_string_offset(name);
     put_be32(struct_data_, kFdtProp);
     put_be32(struct_data_, static_cast<uint32_t>(data.size()));
     put_be32(struct_data_, nameoff);
@@ -81,7 +81,7 @@ void FdtGenerator::property_raw(std::string_view name, std::span<const uint8_t> 
     }
 }
 
-void FdtGenerator::property_u32(std::string_view name, uint32_t value) {
+void FdtGenerator::property_u32(std::string_view name, FdtCell value) {
     std::vector<uint8_t> data;
     put_be32(data, value);
     property_raw(name, data);
@@ -102,27 +102,27 @@ void FdtGenerator::property_string(std::string_view name, std::string_view value
 void FdtGenerator::property_stringlist(std::string_view name,
                                        std::span<const std::string_view> strings) {
     std::vector<uint8_t> data;
-    for (const auto& s : strings) {
+    for (const auto s : strings) {
         data.insert(data.end(), s.begin(), s.end());
         data.push_back('\0');
     }
     property_raw(name, data);
 }
 
-void FdtGenerator::property_array_u32(std::string_view name, std::span<const uint32_t> values) {
+void FdtGenerator::property_array_u32(std::string_view name, std::span<const FdtCell> values) {
     std::vector<uint8_t> data;
-    data.reserve(values.size() * 4U);
-    for (const auto val : values) {
-        put_be32(data, val);
+    data.reserve(values.size() * sizeof(FdtCell));
+    for (const auto v : values) {
+        put_be32(data, v);
     }
     property_raw(name, data);
 }
 
 void FdtGenerator::property_array_u64(std::string_view name, std::span<const uint64_t> values) {
     std::vector<uint8_t> data;
-    data.reserve(values.size() * 8U);
-    for (const auto val : values) {
-        put_be64(data, val);
+    data.reserve(values.size() * sizeof(uint64_t));
+    for (const auto v : values) {
+        put_be64(data, v);
     }
     property_raw(name, data);
 }
@@ -130,24 +130,19 @@ void FdtGenerator::property_array_u64(std::string_view name, std::span<const uin
 void FdtGenerator::property_empty(std::string_view name) { property_raw(name, {}); }
 
 auto FdtGenerator::serialize() const -> std::vector<uint8_t> {
-    std::vector<uint8_t> struct_copy = struct_data_;
-    put_be32(struct_copy, kFdtEnd);
-
-    constexpr uint32_t kHeaderSize = 40U;
-    constexpr uint32_t kRsvMapSize = 16U;  // 8 bytes addr (0) + 8 bytes size (0)
-
-    const uint32_t off_mem_rsvmap = kHeaderSize;
-    const uint32_t off_dt_struct = off_mem_rsvmap + kRsvMapSize;
-    const auto size_dt_struct = static_cast<uint32_t>(struct_copy.size());
+    const uint32_t header_size = 40U;
+    const uint32_t mem_rsv_size = 16U;  // Empty memory reservation block
+    const uint32_t off_mem_rsvmap = header_size;
+    const uint32_t off_dt_struct = off_mem_rsvmap + mem_rsv_size;
+    const uint32_t size_dt_struct = static_cast<uint32_t>(struct_data_.size() + 4U);  // + FDT_END
     const uint32_t off_dt_strings = off_dt_struct + size_dt_struct;
-    const auto size_dt_strings = static_cast<uint32_t>(string_data_.size());
-
+    const uint32_t size_dt_strings = static_cast<uint32_t>(string_data_.size());
     const uint32_t totalsize = off_dt_strings + size_dt_strings;
 
     std::vector<uint8_t> dtb;
     dtb.reserve(totalsize);
 
-    // Header
+    // Header (40 bytes)
     put_be32(dtb, kFdtMagic);
     put_be32(dtb, totalsize);
     put_be32(dtb, off_dt_struct);
@@ -155,16 +150,17 @@ auto FdtGenerator::serialize() const -> std::vector<uint8_t> {
     put_be32(dtb, off_mem_rsvmap);
     put_be32(dtb, kFdtVersion);
     put_be32(dtb, kFdtLastCompVersion);
-    put_be32(dtb, 0);  // boot_cpuid_phys
+    put_be32(dtb, 0U);  // boot_cpuid_phys
     put_be32(dtb, size_dt_strings);
     put_be32(dtb, size_dt_struct);
 
-    // Memory reservation map (empty list, terminated by 16 zero bytes)
-    put_be64(dtb, 0);
-    put_be64(dtb, 0);
+    // Empty memory reservation block (16 bytes: uint64 0, uint64 0)
+    put_be64(dtb, 0ULL);
+    put_be64(dtb, 0ULL);
 
-    // Structure block
-    dtb.insert(dtb.end(), struct_copy.begin(), struct_copy.end());
+    // Structure block + FDT_END
+    dtb.insert(dtb.end(), struct_data_.begin(), struct_data_.end());
+    put_be32(dtb, kFdtEnd);
 
     // Strings block
     dtb.insert(dtb.end(), string_data_.begin(), string_data_.end());
@@ -173,17 +169,18 @@ auto FdtGenerator::serialize() const -> std::vector<uint8_t> {
 }
 
 auto generate_platform_fdt(const core::MachineConfig& config,
-                           const device::PlatformDeviceRegistry* registry) -> std::vector<uint8_t> {
+                           [[maybe_unused]] const device::PlatformDeviceRegistry* registry)
+    -> std::vector<uint8_t> {
     FdtGenerator fdt;
 
     const bool is_pcie = (config.platform_profile == core::PlatformProfile::Pcie);
-    const uint32_t num_harts = std::max(1U, config.execution.num_harts);
-    const uint64_t dram_base = config.memory.dram_base;
-    const uint64_t dram_size = config.memory.dram_size;
-    const uint32_t timebase =
+    const uint32_t num_harts = std::max(1U, static_cast<uint32_t>(config.execution.num_harts));
+    const simrv::xlen::Address dram_base = config.memory.dram_base;
+    const simrv::xlen::Address dram_size = config.memory.dram_size;
+    const auto timebase =
         static_cast<uint32_t>(config.execution.timebase_hz != 0 ? config.execution.timebase_hz
                                                                 : core::timing::kTimebaseHz);
-    const uint32_t clock_hz =
+    const auto clock_hz =
         static_cast<uint32_t>(config.execution.cpu_clock_hz != 0 ? config.execution.cpu_clock_hz
                                                                  : core::timing::kCpuClockHz);
 
@@ -235,7 +232,7 @@ auto generate_platform_fdt(const core::MachineConfig& config,
         fdt.property_u32("#address-cells", 0);
         fdt.property_empty("interrupt-controller");
         fdt.property_string("compatible", "riscv,cpu-intc");
-        fdt.property_u32("phandle", 100U + hart);
+        fdt.property_phandle("phandle", 100U + hart);
         fdt.end_node();  // interrupt-controller
 
         fdt.end_node();  // cpu@hart
@@ -245,7 +242,7 @@ auto generate_platform_fdt(const core::MachineConfig& config,
     // /memory
     fdt.begin_node(std::format("memory@{:x}", dram_base));
     fdt.property_string("device_type", "memory");
-    fdt.property_array_u64("reg", {dram_base, dram_size});
+    fdt.property_reg("reg", dram_base, dram_size);
     fdt.end_node();
 
     // /soc
@@ -258,17 +255,17 @@ auto generate_platform_fdt(const core::MachineConfig& config,
     // UART
     fdt.begin_node("uart@10000000");
     fdt.property_string("compatible", "ns16550a");
-    fdt.property_array_u64("reg", {0x10000000ULL, 0x100ULL});
+    fdt.property_reg("reg", 0x10000000ULL, 0x100ULL);
     fdt.property_u32("clock-frequency", 3686400);
-    fdt.property_u32("interrupt-parent", 1U);  // PLIC phandle
+    fdt.property_phandle("interrupt-parent", 1U);  // PLIC phandle
     fdt.property_u32("interrupts", 10U);
     fdt.end_node();
 
     // RTC
     fdt.begin_node("rtc@101000");
     fdt.property_string("compatible", "google,goldfish-rtc");
-    fdt.property_array_u64("reg", {0x101000ULL, 0x1000ULL});
-    fdt.property_u32("interrupt-parent", 1U);
+    fdt.property_reg("reg", 0x101000ULL, 0x1000ULL);
+    fdt.property_phandle("interrupt-parent", 1U);
     fdt.property_u32("interrupts", 11U);
     fdt.end_node();
 
@@ -276,15 +273,15 @@ auto generate_platform_fdt(const core::MachineConfig& config,
     fdt.begin_node("power@100000");
     static constexpr std::string_view kPowerCompat[] = {"syscon-poweroff", "syscon"};
     fdt.property_stringlist("compatible", kPowerCompat);
-    fdt.property_array_u64("reg", {0x100000ULL, 0x1000ULL});
+    fdt.property_reg("reg", 0x100000ULL, 0x1000ULL);
     fdt.end_node();
 
     // CLINT
     fdt.begin_node("clint@60000000");
     static constexpr std::string_view kClintCompat[] = {"riscv,clint0", "sifive,clint0"};
     fdt.property_stringlist("compatible", kClintCompat);
-    fdt.property_array_u64("reg", {0x60000000ULL, 0x10000ULL});
-    std::vector<uint32_t> clint_irqs;
+    fdt.property_reg("reg", 0x60000000ULL, 0x10000ULL);
+    std::vector<FdtCell> clint_irqs;
     for (uint32_t hart = 0; hart < num_harts; ++hart) {
         clint_irqs.push_back(100U + hart);  // cpu phandle
         clint_irqs.push_back(3U);           // M-software IRQ
@@ -298,12 +295,12 @@ auto generate_platform_fdt(const core::MachineConfig& config,
     fdt.begin_node("plic@50000000");
     static constexpr std::string_view kPlicCompat[] = {"riscv,plic0", "sifive,plic-1.0.0"};
     fdt.property_stringlist("compatible", kPlicCompat);
-    fdt.property_array_u64("reg", {0x50000000ULL, 0x4000000ULL});
+    fdt.property_reg("reg", 0x50000000ULL, 0x4000000ULL);
     fdt.property_u32("riscv,ndev", 32);
     fdt.property_empty("interrupt-controller");
     fdt.property_u32("#interrupt-cells", 1);
-    fdt.property_u32("phandle", 1U);
-    std::vector<uint32_t> plic_irqs;
+    fdt.property_phandle("phandle", 1U);
+    std::vector<FdtCell> plic_irqs;
     for (uint32_t hart = 0; hart < num_harts; ++hart) {
         plic_irqs.push_back(100U + hart);
         plic_irqs.push_back(11U);  // M-external IRQ
@@ -331,40 +328,36 @@ auto generate_platform_fdt(const core::MachineConfig& config,
         fdt.begin_node("pci@30000000");
         fdt.property_string("compatible", "pci-host-ecam-generic");
         fdt.property_string("device_type", "pci");
-        fdt.property_array_u64("reg",
-                               {SIMRV_PLATFORM_PCIE_ECAM_BASE, SIMRV_PLATFORM_PCIE_ECAM_SIZE});
+        fdt.property_reg("reg", SIMRV_PLATFORM_PCIE_ECAM_BASE, SIMRV_PLATFORM_PCIE_ECAM_SIZE);
         fdt.property_u32("#address-cells", 3);
         fdt.property_u32("#size-cells", 2);
         fdt.property_array_u32("bus-range", {0, 255});
         // 32-bit MMIO aperture: flags=0x02000000 (32-bit non-prefetchable memory)
         // pci_addr=0x40000000, cpu_addr=0x40000000, size=0x10000000
-        const uint32_t pci_ranges[] = {0x02000000U, 0x00000000U, 0x40000000U, 0x00000000U,
-                                       0x40000000U, 0x00000000U, 0x10000000U};
+        const FdtCell pci_ranges[] = {0x02000000U, 0x00000000U, 0x40000000U, 0x00000000U,
+                                      0x40000000U, 0x00000000U, 0x10000000U};
         fdt.property_array_u32("ranges", pci_ranges);
         fdt.end_node();
     } else {
         // VirtIO MMIO slots for embedded / FPGA target
         static constexpr struct {
-            uint64_t addr;
+            simrv::xlen::Address addr;
             uint32_t irq;
-        } kVirtioMmioSlots[] = {
-            {SIMRV_PLATFORM_VIRTIO_BLOCK_BASE, 1U}, {SIMRV_PLATFORM_VIRTIO_CONSOLE_BASE, 2U},
-            {SIMRV_PLATFORM_VIRTIO_RNG_BASE, 3U},   {SIMRV_PLATFORM_VIRTIO_GPU_BASE, 4U},
-            {SIMRV_PLATFORM_VIRTIO_INPUT_BASE, 5U}, {SIMRV_PLATFORM_VIRTIO_SOUND_BASE, 6U},
-            {SIMRV_PLATFORM_VIRTIO_NET_BASE, 7U},   {SIMRV_PLATFORM_VIRTIO_FS_BASE, 8U},
+        } kVirtioSlots[] = {
+            {0x10001000ULL, 1}, {0x10002000ULL, 2}, {0x10003000ULL, 3}, {0x10004000ULL, 4},
+            {0x10005000ULL, 5}, {0x10006000ULL, 6}, {0x10007000ULL, 7}, {0x10008000ULL, 8},
         };
-
-        for (const auto& slot : kVirtioMmioSlots) {
-            fdt.begin_node(std::format("virtio_mmio@{:x}", slot.addr));
+        for (const auto& slot : kVirtioSlots) {
+            fdt.begin_node(std::format("virtio@{:x}", slot.addr));
             fdt.property_string("compatible", "virtio,mmio");
-            fdt.property_array_u64("reg", {slot.addr, SIMRV_PLATFORM_VIRTIO_SLOT_SIZE});
-            fdt.property_u32("interrupt-parent", 1U);  // PLIC
+            fdt.property_reg("reg", slot.addr, 0x1000ULL);
+            fdt.property_phandle("interrupt-parent", 1U);
             fdt.property_u32("interrupts", slot.irq);
             fdt.end_node();
         }
     }
 
-    fdt.end_node();  // soc
+    fdt.end_node();  // /soc
     fdt.end_node();  // root
 
     return fdt.serialize();

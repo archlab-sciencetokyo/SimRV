@@ -39,7 +39,7 @@ class LayoutPresetsModal : public framework::IModal {
 
    private:
     int owned_cursor_ = 0;
-    TuiModal* host_;
+    [[maybe_unused]] TuiModal* host_;
     int& cursor_;
 };
 

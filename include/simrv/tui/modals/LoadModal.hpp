@@ -85,8 +85,8 @@ class LoadModal : public framework::IModal {
     std::string owned_staged_binary_path_;
     std::vector<std::string> owned_completion_preview_;
 
-    TuiModal* host_;
-    simrv::core::Machine* machine_;
+    [[maybe_unused]] TuiModal* host_;
+    [[maybe_unused]] simrv::core::Machine* machine_;
     ModalType type_;
     std::string& input_;
     bool& load_appmode_;
