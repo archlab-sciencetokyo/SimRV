@@ -53,7 +53,7 @@ jobs:
     needs: changes
     if: needs.changes.outputs.cpp == 'true'
     runs-on: ubuntu-latest
-    timeout-minutes: 120
+    timeout-minutes: 30
     container:
       image: fedora:44
 
@@ -173,7 +173,7 @@ jobs:
     needs: changes
     if: needs.changes.outputs.cpp == 'true'
     runs-on: ubuntu-latest
-    timeout-minutes: 90
+    timeout-minutes: 30
     container:
       image: fedora:44
     steps:
@@ -215,7 +215,7 @@ jobs:
     needs: changes
     if: needs.changes.outputs.cpp == 'true'
     runs-on: ubuntu-latest
-    timeout-minutes: 120
+    timeout-minutes: 30
     container:
       image: fedora:44
       options: --security-opt seccomp=unconfined
