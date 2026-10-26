@@ -54,6 +54,14 @@ The interface is structured into three primary sections:
    - **`Memory & Stack`**: Hex memory dump and stack frame unwind view.
 3. **Right Guest Terminal**: Interactive virtual terminal connected directly to the guest platform's 16550A UART (`ttyS0`), VirtIO console, or Sixel graphical framebuffer.
 
+### Slow execution mode
+
+At configured execution frequencies of 60 Hz or slower, visible pipeline and detailed register,
+memory, bus, and predictor views capture per-instruction state. At higher frequencies, only the
+fast-changing detail group in those panels is replaced with a running indicator; sampled performance
+counters remain visible and continue updating. Console, display, trace, and log panels stay available
+while running. Paused inspection and active trace capture retain detailed state at every speed.
+
 ---
 
 ## 3. Keyboard Navigation & Shortcuts
@@ -66,31 +74,49 @@ The TUI provides responsive hotkeys for simulation control and state inspection:
 | :--- | :--- | :--- |
 | **`Ctrl-P`** / **`F5`** / **`c`** | Run / Pause | Toggle between continuous execution and paused inspection. |
 | **`s`** / **`F6`** | Step Instruction | Execute exactly one instruction machine-wide across all harts. |
-| **`c`** (in CA mode) | Step Cycle | Advance the pipeline and clock by exactly one hardware cycle. |
 | **`Ctrl-R`** | Reboot | Reset architectural state, reload images, and restart simulation. |
 | **`Ctrl-Q`** / **`F10`** / **`q`** | Quit | Exit SimRV cleanly and restore host terminal attributes. |
+| **`f`** | Set Frequency | Set the requested simulation frequency. |
+| **`v`** | Toggle Precision | Switch between IA and CA execution modes. |
 
 ### Navigation & Focus
 
 | Key | Action | Description |
 | :--- | :--- | :--- |
-| **`Tab`** / **`Shift-Tab`** | Change Focus | Cycle keyboard focus between the Inspector pane and Guest Console. |
-| **`1`** – **`9`** | Switch Inspector View | Select Inspector sub-views (1: Regs, 2: Pipeline, 3: Cache, etc.). |
+| **`Tab`** / **`Shift-Tab`** | Change Focus | Move between workbench columns. |
+| **`F3`** | Cycle Register Pages | Cycle the tabs in the Registers group. |
+| **`F11`** | Cycle Tool Pages | Cycle the tabs in the Tools group. |
+| **`Ctrl-W`** | Choose Column View | Open the tool picker for the focused workbench column. |
+| **`F4`** / **`Alt-1`**–**`Alt-4`** | Layout Presets | Open or directly select a workbench layout preset. |
+| **`[`** / **`]`** | Resize Split | Adjust the relative width between inspector and console columns. |
 | **`Up`** / **`Down`** | Scroll | Scroll active panel line by line. |
 | **`PageUp`** / **`PageDown`** | Page Scroll | Scroll active panel by page. |
 | **`Home`** / **`End`** | Jump Boundary | Jump to the top or bottom of the active panel. |
-| **`[`** / **`]`** | Resize Split | Adjust the relative width between inspector and console columns. |
-| **`u`** / **`d`** | Scroll Logs | Scroll the bottom diagnostic message log window. |
 
 ### File & Search Operations
 
 | Key | Action | Description |
 | :--- | :--- | :--- |
-| **`Ctrl-O`** / **`F2`** | Open / Load | Open the binary, disk, or CPU model file picker modal. |
+| **`o`** | Load | Open the binary, disk, or CPU model workflow. |
+| **`Ctrl-O`** (in a load modal) | Browse | Open the file picker for the active load workflow. |
+| **`F2`** / **`,`** | Settings | Open simulator settings. |
 | **`Ctrl-F`** / **`/`** | Search Console | Search UART terminal history (available when paused). |
 | **`n`** / **`N`** | Next / Prev Match | Move to the next or previous search match in console scrollback. |
 | **`Esc`** | Cancel / Close | Close active modal dialog or cancel active search query. |
-| **`F1`** / **`?`** | Help & Glossary | Open keyboard shortcut reference or architectural glossary. |
+| **`F1`** / **`h`** | Help | Open the keyboard shortcut reference. |
+| **`F9`** / **`?`** | Glossary | Open the architectural glossary. |
+
+---
+
+### Panel Density
+
+The Settings modal includes **Panel Density** with three choices:
+
+- **Auto** uses compact presentation when a panel is narrower than 60 columns or shorter than 24 rows. Each workbench panel is evaluated independently.
+- **Compact** uses abbreviated labels, tighter spacing, and reflowed content wherever space allows.
+- **Comfortable** keeps the fuller labels and spacing wherever the available panel size allows.
+
+Density changes presentation only. Values remain available in compact panels by scrolling, and the guest console text is not rewritten. The choice is saved with the other TUI preferences; preference files created before this setting default to Auto.
 
 ---
 
@@ -117,21 +143,17 @@ flowchart TD
 
 ---
 
-## 5. Classroom Mode & Student Guidance
+## 5. Classroom Missions
 
-When launched with `--class`, SimRV enables pedagogical student guidance features designed for computer architecture courses:
+Classroom guidance is provided by an editable mission file. `--mission` enables the classroom flow
+and opens its first step; no separate class switch is needed:
 
 ```bash
-# General classroom guidance
-simrv --class -m examples/isa/bin/demo.elf
-
-# Structured classroom mission
-simrv --class --mission examples/isa/lessons/control-flow-calls.mission -m control-flow-calls.elf
+simrv --mission examples/isa/lessons/control-flow-calls.mission -m control-flow-calls.elf
 ```
 
-- **Interactive Guidance Pane**: When paused, the guide explains the currently selected inspector view and suggests a context-sensitive next exploration action. Press `Enter` to execute the suggested action.
-- **Structured Missions (`--mission`)**: Load sequential pedagogical checkpoints that automatically highlight relevant inspector panels (Registers, Stack, Explainer, Trace) as students execute assembly assignments. See the [Instructor Guide in the Classroom Reference Manual](classroom.md#5-instructor-guide-authoring-deploying-classroom-missions) for mission authoring instructions.
-- **Mission Controls**: Press `Enter` to follow the active suggestion, `g` to show/hide guidance, `z` to dismiss the mission, or `Z` (Shift-Z) to restart from step 0.
+- **Structured Missions (`--mission`)**: Load instructional steps and independent named checkpoints that focus relevant inspector panels. See the [Instructor Guide](classroom.md#5-instructor-guide-authoring-deploying-classroom-missions).
+- **Mission Controls**: The modal keeps the student view focused on the lesson goal, current learning target, task, checkpoint state, and one next action. Press `F12` to open or reopen it. `F5` runs to the named checkpoint, even when its boundary is a later instruction; reaching it records progress without moving the instruction cursor. `F5` never advances an instruction and is blocked once the checkpoint is reached. Press `Space` / `n` in the modal to advance instructions; an unreached checkpoint only blocks crossing its `after_step` boundary. `F6` single-steps, `p` reviews the previous instruction, and `y` cycles hidden → hint → `why`. `Enter` / `Esc` hide the modal and `d` dismisses the mission. Outside the modal, `Space` retains its simulator step action. Completion shows reached/total checkpoint counts; TAs can export checkpoint evidence with `x` from the paused workbench.
 - **Architecture Glossary**: Press `?` to open the educational glossary jump-linked to the architectural concept represented by the active inspector view (e.g., pipeline hazard interlocks, cache associativity, or virtual memory translation).
 
 ---

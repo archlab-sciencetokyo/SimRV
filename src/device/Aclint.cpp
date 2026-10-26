@@ -7,6 +7,7 @@
 #include <limits>
 
 #include "simrv/core/Cpu.hpp"
+#include "simrv/core/InterruptController.hpp"
 #include "simrv/core/Machine.hpp"
 
 namespace simrv::device {
@@ -16,6 +17,11 @@ namespace simrv::device {
 // =========================================================================
 
 AclintMtimer::AclintMtimer(simrv::core::Machine* machine) : memory::MmioDevice(machine) { reset(); }
+
+AclintMtimer::AclintMtimer(simrv::core::IInterruptController* sink, simrv::core::Machine* machine)
+    : memory::MmioDevice(machine), sink_(sink) {
+    reset();
+}
 
 void AclintMtimer::reset() {
     mtime_ = 0;
@@ -99,16 +105,20 @@ void AclintMtimer::write64(simrv::xlen::Address offset, uint64_t val) {
 }
 
 void AclintMtimer::tick() {
-    if (machine_ == nullptr) {
+    core::IInterruptController* target_sink = sink_;
+    if (target_sink == nullptr && machine_ != nullptr) {
+        target_sink = machine_;
+    }
+    if (target_sink == nullptr) {
         return;
     }
-    const uint64_t cur_time = machine_->platform_time();
-    const size_t total_harts = machine_->num_harts();
+    const uint64_t cur_time = machine_ != nullptr ? machine_->platform_time() : mtime_;
+    const size_t total_harts = machine_ != nullptr ? machine_->num_harts() : kMaxHarts;
     for (size_t i = 0; i < total_harts && i < kMaxHarts; ++i) {
         const uint64_t cmp = mtimecmp_[i].load(std::memory_order_relaxed);
-        machine_->set_hart_irq(simrv::xlen::HartId{static_cast<uint32_t>(i)},
-                               core::InterruptType::Timer, simrv::xlen::PrivilegeLevel::Machine,
-                               cur_time >= cmp);
+        target_sink->set_hart_irq(simrv::xlen::HartId{static_cast<uint32_t>(i)},
+                                  core::InterruptType::Timer, simrv::xlen::PrivilegeLevel::Machine,
+                                  cur_time >= cmp);
     }
 }
 
@@ -117,6 +127,11 @@ void AclintMtimer::tick() {
 // =========================================================================
 
 AclintMswi::AclintMswi(simrv::core::Machine* machine) : memory::MmioDevice(machine) { reset(); }
+
+AclintMswi::AclintMswi(simrv::core::IInterruptController* sink, simrv::core::Machine* machine)
+    : memory::MmioDevice(machine), sink_(sink) {
+    reset();
+}
 
 void AclintMswi::reset() {
     for (auto& s : msip_) {
@@ -137,10 +152,14 @@ void AclintMswi::write32(simrv::xlen::Address offset, uint32_t val) {
         const size_t hart_idx = offset / 4U;
         const uint32_t bit = val & 1U;
         msip_[hart_idx].store(bit, std::memory_order_relaxed);
-        if (machine_ != nullptr && hart_idx < machine_->num_harts()) {
-            machine_->set_hart_irq(simrv::xlen::HartId{static_cast<uint32_t>(hart_idx)},
-                                   core::InterruptType::Software,
-                                   simrv::xlen::PrivilegeLevel::Machine, bit != 0);
+        core::IInterruptController* target_sink = sink_;
+        if (target_sink == nullptr && machine_ != nullptr) {
+            target_sink = machine_;
+        }
+        if (target_sink != nullptr && (machine_ == nullptr || hart_idx < machine_->num_harts())) {
+            target_sink->set_hart_irq(simrv::xlen::HartId{static_cast<uint32_t>(hart_idx)},
+                                      core::InterruptType::Software,
+                                      simrv::xlen::PrivilegeLevel::Machine, bit != 0);
         }
     }
 }

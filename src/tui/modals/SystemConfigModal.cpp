@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <array>
 #include <format>
+#include <utility>
 
 #include "simrv/core/Cpu.hpp"
 #include "simrv/core/Machine.hpp"
@@ -14,6 +15,47 @@
 namespace simrv::tui::modals {
 
 namespace {
+
+[[nodiscard]] constexpr auto to_pipeline_type(uint8_t raw) noexcept
+    -> simrv::pipeline::PipelineType {
+    if (raw == static_cast<uint8_t>(simrv::pipeline::PipelineType::ThreeStage)) {
+        return simrv::pipeline::PipelineType::ThreeStage;
+    }
+    return simrv::pipeline::PipelineType::FiveStage;
+}
+
+[[nodiscard]] constexpr auto to_cpu_model_preset(uint8_t raw) noexcept
+    -> simrv::pipeline::CpuModelPreset {
+    switch (raw) {
+        case static_cast<uint8_t>(simrv::pipeline::CpuModelPreset::Tiny):
+            return simrv::pipeline::CpuModelPreset::Tiny;
+        case static_cast<uint8_t>(simrv::pipeline::CpuModelPreset::Balanced):
+            return simrv::pipeline::CpuModelPreset::Balanced;
+        case static_cast<uint8_t>(simrv::pipeline::CpuModelPreset::Performance):
+            return simrv::pipeline::CpuModelPreset::Performance;
+        case static_cast<uint8_t>(simrv::pipeline::CpuModelPreset::Custom):
+        default:
+            return simrv::pipeline::CpuModelPreset::Custom;
+    }
+}
+
+[[nodiscard]] constexpr auto to_branch_predictor_type(uint8_t raw) noexcept
+    -> simrv::pipeline::BranchPredictorType {
+    switch (raw) {
+        case static_cast<uint8_t>(simrv::pipeline::BranchPredictorType::Static):
+            return simrv::pipeline::BranchPredictorType::Static;
+        case static_cast<uint8_t>(simrv::pipeline::BranchPredictorType::Bimodal):
+            return simrv::pipeline::BranchPredictorType::Bimodal;
+        case static_cast<uint8_t>(simrv::pipeline::BranchPredictorType::GShare):
+            return simrv::pipeline::BranchPredictorType::GShare;
+        case static_cast<uint8_t>(simrv::pipeline::BranchPredictorType::Tournament):
+            return simrv::pipeline::BranchPredictorType::Tournament;
+        case static_cast<uint8_t>(simrv::pipeline::BranchPredictorType::Disabled):
+            return simrv::pipeline::BranchPredictorType::Disabled;
+        default:
+            return simrv::pipeline::BranchPredictorType::Static;
+    }
+}
 
 constexpr int kSettingCount = 15;
 
@@ -100,13 +142,18 @@ void SystemConfigModal::move_cursor(const SysConfigDraft& draft, int& cursor, in
 void SystemConfigModal::adjust_setting(SysConfigDraft& draft, int index, int dir) {
     if (!draft.cycle_accurate) return;
     if (index == 0) {
-        draft.pipeline_type = static_cast<uint8_t>(draft.pipeline_type == 0 ? 1 : 0);
+        const auto current_type = to_pipeline_type(draft.pipeline_type);
+        draft.pipeline_type =
+            static_cast<uint8_t>(current_type == simrv::pipeline::PipelineType::FiveStage
+                                     ? simrv::pipeline::PipelineType::ThreeStage
+                                     : simrv::pipeline::PipelineType::FiveStage);
         return;
     }
     if (index == 12) {
         constexpr int kProfiles = 4;
-        draft.preset = static_cast<uint8_t>((draft.preset + dir + kProfiles) % kProfiles);
-        const auto preset = static_cast<simrv::pipeline::CpuModelPreset>(draft.preset);
+        const auto current_idx = std::to_underlying(to_cpu_model_preset(draft.preset));
+        draft.preset = static_cast<uint8_t>((current_idx + dir + kProfiles) % kProfiles);
+        const auto preset = to_cpu_model_preset(draft.preset);
         if (preset != simrv::pipeline::CpuModelPreset::Custom) {
             assign_pipeline(draft, simrv::pipeline::make_cpu_model_preset(preset));
         }
@@ -118,8 +165,9 @@ void SystemConfigModal::adjust_setting(SysConfigDraft& draft, int index, int dir
     }
     if (index == 8) {
         constexpr int kPredictorTypes = 5;
+        const auto current_idx = std::to_underlying(to_branch_predictor_type(draft.bpred_type));
         draft.bpred_type =
-            static_cast<uint8_t>((draft.bpred_type + dir + kPredictorTypes) % kPredictorTypes);
+            static_cast<uint8_t>((current_idx + dir + kPredictorTypes) % kPredictorTypes);
         return;
     }
     if (index == 9) {
@@ -181,29 +229,7 @@ void SystemConfigModal::toggle_setting(SysConfigDraft& draft, int index) {
 auto SystemConfigModal::submit(const SysConfigDraft& draft, simrv::core::Machine& machine) -> bool {
     if (!draft.cycle_accurate) return true;
     auto model = machine.primary_hart().cpu_model_config;
-    const auto selected_preset = static_cast<simrv::pipeline::CpuModelPreset>(draft.preset);
-    if (selected_preset != simrv::pipeline::CpuModelPreset::Custom) {
-        model = simrv::pipeline::make_cpu_model_preset(selected_preset);
-    }
-    auto& cfg = model.pipeline;
-    {
-        cfg.pipeline_type = static_cast<simrv::pipeline::PipelineType>(draft.pipeline_type);
-        cfg.mul_latency = draft.mul_latency;
-        cfg.div_latency = draft.div_latency;
-        cfg.fp_alu_latency = draft.fp_alu_latency;
-        cfg.fp_div_latency = draft.fp_div_latency;
-        cfg.csr_flush_penalty = draft.csr_flush_penalty;
-        cfg.fence_flush_penalty = draft.fence_flush_penalty;
-        cfg.enable_forwarding = draft.enable_forwarding;
-        cfg.branch_predictor.type =
-            static_cast<simrv::pipeline::BranchPredictorType>(draft.bpred_type);
-        cfg.branch_predictor.bht_entries = draft.bht_entries;
-        cfg.branch_predictor.btb_entries = draft.btb_entries;
-        cfg.branch_predictor.ras_entries = draft.ras_entries;
-    }
-    // Explicit field editing retains the named preset only while it remains an exact preset.
-    model.preset = selected_preset;
-    if (!model.validate()) return false;
+    if (!apply_to_model(draft, model)) return false;
     for (size_t hart = 0; hart < machine.num_harts(); ++hart) {
         auto& cpu = machine.hart(hart);
         cpu.cpu_model_config = model;
@@ -216,8 +242,35 @@ auto SystemConfigModal::submit(const SysConfigDraft& draft, simrv::core::Machine
         cpu.branch_predictor.configure(cpu.pipeline_sim.config.branch_predictor);
         cpu.branch_predictor.reset();
     }
-    machine.set_pipeline_type(static_cast<simrv::pipeline::PipelineType>(draft.pipeline_type));
+    machine.set_pipeline_type(to_pipeline_type(draft.pipeline_type));
     return true;
+}
+
+auto SystemConfigModal::apply_to_model(const SysConfigDraft& draft,
+                                       simrv::pipeline::CpuModelConfig& model) -> bool {
+    if (!draft.cycle_accurate) return true;
+    const auto selected_preset = to_cpu_model_preset(draft.preset);
+    if (selected_preset != simrv::pipeline::CpuModelPreset::Custom) {
+        model = simrv::pipeline::make_cpu_model_preset(selected_preset);
+    }
+    auto& cfg = model.pipeline;
+    {
+        cfg.pipeline_type = to_pipeline_type(draft.pipeline_type);
+        cfg.mul_latency = draft.mul_latency;
+        cfg.div_latency = draft.div_latency;
+        cfg.fp_alu_latency = draft.fp_alu_latency;
+        cfg.fp_div_latency = draft.fp_div_latency;
+        cfg.csr_flush_penalty = draft.csr_flush_penalty;
+        cfg.fence_flush_penalty = draft.fence_flush_penalty;
+        cfg.enable_forwarding = draft.enable_forwarding;
+        cfg.branch_predictor.type = to_branch_predictor_type(draft.bpred_type);
+        cfg.branch_predictor.bht_entries = draft.bht_entries;
+        cfg.branch_predictor.btb_entries = draft.btb_entries;
+        cfg.branch_predictor.ras_entries = draft.ras_entries;
+    }
+    // Explicit field editing retains the named preset only while it remains an exact preset.
+    model.preset = selected_preset;
+    return static_cast<bool>(model.validate());
 }
 
 void SystemConfigModal::render(std::vector<std::string>& content_rows,
@@ -250,8 +303,8 @@ void SystemConfigModal::render(std::vector<std::string>& content_rows,
                                  input)
                    : std::format("\033[1;36m{} entries\033[0m", value);
     };
-    const auto pipeline = static_cast<simrv::pipeline::PipelineType>(draft.pipeline_type);
-    const auto bp_type = static_cast<simrv::pipeline::BranchPredictorType>(draft.bpred_type);
+    const auto pipeline = to_pipeline_type(draft.pipeline_type);
+    const auto bp_type = to_branch_predictor_type(draft.bpred_type);
     const auto settings = std::to_array<Item>({
         {.name = "Pipeline", .value = std::string(simrv::pipeline::pipeline_type_name(pipeline))},
         {.name = "Integer multiply stall cycles", .value = cycles(draft.mul_latency, 1)},
@@ -266,8 +319,8 @@ void SystemConfigModal::render(std::vector<std::string>& content_rows,
         {.name = "BTB capacity", .value = entries(draft.btb_entries, 10)},
         {.name = "RAS capacity", .value = entries(draft.ras_entries, 11)},
         {.name = "FPGA core preset",
-         .value = std::string(simrv::pipeline::cpu_model_preset_name(
-             static_cast<simrv::pipeline::CpuModelPreset>(draft.preset)))},
+         .value = std::string(
+             simrv::pipeline::cpu_model_preset_name(to_cpu_model_preset(draft.preset)))},
         {.name = "Save configuration", .value = "\033[1;32m[S] Export to .cfg...\033[0m"},
         {.name = "Load configuration", .value = "\033[1;36m[L] Import from .cfg...\033[0m"},
     });
@@ -276,7 +329,7 @@ void SystemConfigModal::render(std::vector<std::string>& content_rows,
         const bool selected = static_cast<int>(i) == cursor;
         add_row(build_menu_item_row(settings[i].name, settings[i].value, selected, 29));
     }
-    const auto preset = static_cast<simrv::pipeline::CpuModelPreset>(draft.preset);
+    const auto preset = to_cpu_model_preset(draft.preset);
     if (preset != simrv::pipeline::CpuModelPreset::Custom) {
         const auto model = simrv::pipeline::make_cpu_model_preset(preset);
         add_row(std::format("{}BRAM L1: I {} KiB/{}-way · D {} KiB/{}-way · {} B lines\033[0m",

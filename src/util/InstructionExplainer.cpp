@@ -1332,6 +1332,40 @@ auto get_description(OperationId op_id) -> std::pair<std::string_view, std::stri
                     "hardware computation result in rd with custom execution latency and pipeline "
                     "stall cycles."};
 
+        // Zicond
+        arr[CZERO_EQZ] = {"CZERO.EQZ",
+                          "Conditional Zero (If Equal to Zero). Writes 0 to rd if rs2 is zero; "
+                          "otherwise copies rs1 to rd."};
+        arr[CZERO_NEZ] = {
+            "CZERO.NEZ",
+            "Conditional Zero (If Not Equal to Zero). Writes 0 to rd if rs2 is not zero; "
+            "otherwise copies rs1 to rd."};
+        // Zicbo
+        arr[CBO_ZERO] = {"CBO.ZERO",
+                         "Cache-Block Zero. Writes zeroes to the entire cache block containing the "
+                         "address in rs1."};
+        arr[CBO_CLEAN] = {"CBO.CLEAN",
+                          "Cache-Block Clean. Writes back dirty data in the cache block containing "
+                          "the address in rs1 to memory."};
+        arr[CBO_FLUSH] = {
+            "CBO.FLUSH",
+            "Cache-Block Flush. Writes back dirty data and invalidates the cache block "
+            "containing the address in rs1."};
+        arr[CBO_INVAL] = {"CBO.INVAL",
+                          "Cache-Block Invalidate. Invalidates the cache block containing the "
+                          "address in rs1 without writeback."};
+        arr[PREFETCH_I] = {"PREFETCH.I", "Instruction Cache Prefetch hint."};
+        arr[PREFETCH_R] = {"PREFETCH.R", "Data Cache Read Prefetch hint."};
+        arr[PREFETCH_W] = {"PREFETCH.W", "Data Cache Write Prefetch hint."};
+        // Svinval
+        arr[SINVAL_VMA] = {"SINVAL.VMA",
+                           "Fine-grained TLB invalidation for virtual address and/or ASID."};
+        arr[SFENCE_W_INVAL] = {"SFENCE.W.INVAL",
+                               "Orders memory writes before fine-grained page table invalidation."};
+        arr[SFENCE_INVAL_IR] = {
+            "SFENCE.INVAL.IR",
+            "Orders fine-grained page table invalidations before instruction fetch."};
+
         // Whole register moves
         arr[VMV1R_V] = {
             "VMV1R.V",

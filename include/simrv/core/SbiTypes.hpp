@@ -5,6 +5,16 @@
 
 #include "simrv/xlen/ScalarTypes.hpp"
 
+namespace simrv::sbi {
+
+// Standard RISC-V SBI specification version constants
+inline constexpr uint32_t kSbiSpecVersion_0_1 = 0x00000001U;
+inline constexpr uint32_t kSbiSpecVersion_0_2 = 0x00000002U;
+inline constexpr uint32_t kSbiSpecVersion_0_3 = 0x00000003U;
+inline constexpr uint32_t kSbiSpecVersion_1_0 = 0x01000000U;
+inline constexpr uint32_t kSbiSpecVersion_2_0 = 0x02000000U;
+inline constexpr uint32_t kSbiSpecVersion_3_0 = 0x03000000U;
+
 // SBI domain types
 enum class SbiError : int64_t {
     Success = 0,
@@ -58,3 +68,28 @@ constexpr auto operator!=(simrv::xlen::Word raw, SbiExtId ext) noexcept -> bool 
 constexpr auto operator!=(SbiExtId ext, simrv::xlen::Word raw) noexcept -> bool {
     return !(ext == raw);
 }
+
+}  // namespace simrv::sbi
+
+namespace simrv {
+using sbi::kSbiSpecVersion_0_1;
+using sbi::kSbiSpecVersion_0_2;
+using sbi::kSbiSpecVersion_0_3;
+using sbi::kSbiSpecVersion_1_0;
+using sbi::kSbiSpecVersion_2_0;
+using sbi::kSbiSpecVersion_3_0;
+using sbi::SbiError;
+using sbi::SbiExtId;
+using sbi::SbiRet;
+}  // namespace simrv
+
+// Global compatibility aliases
+using simrv::sbi::kSbiSpecVersion_0_1;
+using simrv::sbi::kSbiSpecVersion_0_2;
+using simrv::sbi::kSbiSpecVersion_0_3;
+using simrv::sbi::kSbiSpecVersion_1_0;
+using simrv::sbi::kSbiSpecVersion_2_0;
+using simrv::sbi::kSbiSpecVersion_3_0;
+using simrv::sbi::SbiError;
+using simrv::sbi::SbiExtId;
+using simrv::sbi::SbiRet;

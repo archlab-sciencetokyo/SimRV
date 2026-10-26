@@ -12,6 +12,8 @@
 #include "simrv/CompilerHints.hpp"
 #include "simrv/core/Machine.hpp"
 #include "simrv/core/Tracer.hpp"
+#include "simrv/memory/MemorySubsystem.hpp"
+#include "simrv/memory/Mmu.hpp"
 
 namespace simrv::core {
 CPU::CPU() : plic_mmio(*this), clint_mmio(*this), csr_file(*this), sbi(*this) { reset(); }
@@ -73,6 +75,10 @@ void CPU::reset() {
         state_.mstatus |= (static_cast<simrv::xlen::CsrValue>(2) << 34) |
                           (static_cast<simrv::xlen::CsrValue>(2) << 32);
     }
+    // Enable CBZE (bit 6), CBCFE (bit 4), and CBIE (bits 5:4) by default for RVA23 CMO
+    // compatibility
+    state_.menvcfg = static_cast<simrv::xlen::CsrValue>((1ULL << 6) | (3ULL << 4));
+    state_.senvcfg = static_cast<simrv::xlen::CsrValue>((1ULL << 6) | (3ULL << 4));
     state_.initialize_lower_xlen_fields();
     cached_decode_context_ = 0xFF;
     dcache.flush();
@@ -81,6 +87,8 @@ void CPU::reset() {
     e_ccount = 0;
     cycle_counter_start_delay_ = pipeline_sim.config.cycle_counter_start_delay;
     e_instmix.fill(0);
+    perf_counters.reset();
+    last_retire_cycle_ = 0;
     ca_state.reset_instruction();
     ca_pipeline.reset();
     wfi_quiescent_ = false;
@@ -99,9 +107,24 @@ void CPU::TLB_flush() {
     sync_decode_context();
 }
 
+void CPU::TLB_flush_satp() {
+    const auto current_asid =
+        static_cast<::Asid>(simrv::xlen::satp_asid(state_.satp, state_.regs.xlen));
+    tlb.flush_selective(core::TlbFlushFilter{.vaddr = std::nullopt, .asid = current_asid});
+    decode_cache.flush_user();
+    soft_tlb_flush();
+    if (machine_ != nullptr && machine_->memory().mmu() != nullptr) {
+        machine_->memory().mmu()->flush_pdc();
+    }
+    sync_decode_context();
+}
+
 void CPU::flush_data_tlb() {
     tlb.flush_data();
     soft_tlb_flush();
+    if (machine_ != nullptr && machine_->memory().mmu() != nullptr) {
+        machine_->memory().mmu()->flush_pdc();
+    }
 }
 
 void CPU::TLB_flush(const core::TlbFlushFilter& filter) {
@@ -112,6 +135,9 @@ void CPU::TLB_flush(const core::TlbFlushFilter& filter) {
         decode_cache.flush();
     }
     soft_tlb_flush_selective(filter);
+    if (machine_ != nullptr && machine_->memory().mmu() != nullptr) {
+        machine_->memory().mmu()->flush_pdc();
+    }
 }
 
 void CPU::soft_tlb_flush() {
@@ -294,6 +320,35 @@ void CPU::evaluate_timer_interrupt() {
         };
         log_transition(MipBit::Mtip, 7, "aclint_mtimer");
         log_transition(MipBit::Stip, 5, "aclint_mtimer");
+    }
+}
+
+void CPU::fast_forward_wfi(Machine& machine) {
+    if (!machine.appmode_enabled() || (state_.mip & state_.mie) != 0) {
+        return;
+    }
+    auto& primary_clint = machine.primary_hart().clint_mmio;
+    const simrv::xlen::Counter cur_mtime = primary_clint.mtime.load(std::memory_order_relaxed);
+    simrv::xlen::Counter cur_cmp = primary_clint.mtimecmp.load(std::memory_order_relaxed);
+    const auto hid = static_cast<size_t>(state_.mhartid);
+    if (hid > 0 && hid < simrv::device::Clint::kMaxClintHarts) {
+        cur_cmp = primary_clint.hart_mtimecmp.at(hid).load(std::memory_order_relaxed);
+    }
+    simrv::xlen::Counter next_deadline = cur_cmp;
+    bool stce = false;
+    if constexpr (simrv::xlen::kIsXLen64) {
+        stce = (state_.menvcfg & (1ULL << 63U)) != 0;
+    } else {
+        stce = (state_.menvcfgh & (1UL << 31U)) != 0;
+    }
+    if (stce && state_.stimecmp != std::numeric_limits<simrv::xlen::Counter>::max() &&
+        state_.stimecmp < next_deadline) {
+        next_deadline = state_.stimecmp;
+    }
+    if (next_deadline > cur_mtime &&
+        next_deadline != std::numeric_limits<simrv::xlen::Counter>::max()) {
+        primary_clint.mtime.store(next_deadline, std::memory_order_relaxed);
+        evaluate_timer_interrupt();
     }
 }
 

@@ -55,6 +55,7 @@ class Uart : public memory::TileLinkNode {
     [[nodiscard]] auto has_pty() const -> bool { return pty_.is_open(); }
     [[nodiscard]] auto pty() -> PtyBridge& { return pty_; }
     [[nodiscard]] auto pty() const -> const PtyBridge& { return pty_; }
+    void flush_tx_buffer() noexcept;
 
    private:
     simrv::core::Machine& machine_;
@@ -67,6 +68,9 @@ class Uart : public memory::TileLinkNode {
     uint8_t uart_dlm_ = 0;
     bool tx_irq_pending_ = false;
     bool fcr_fifo_enabled_ = true;
+
+    std::array<uint8_t, 256> tx_buffer_{};
+    size_t tx_buffer_len_ = 0;
 
     std::queue<uint8_t> rx_fifo_;
     std::atomic<bool> rx_ready_{false};

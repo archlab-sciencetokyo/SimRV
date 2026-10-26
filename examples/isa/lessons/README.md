@@ -1,6 +1,8 @@
 # SimRV Classroom Sample Missions
 
-This directory contains ready-to-run educational classroom missions for computer architecture and assembly courses.
+This directory contains editable educational classroom missions for computer architecture and
+assembly courses. Packages include the mission and source files, but omit generated build
+directories and ELF binaries.
 
 ## Available Missions
 
@@ -8,7 +10,7 @@ This directory contains ready-to-run educational classroom missions for computer
 
 - **Target Program:** `control-flow-calls.elf`
 - **Source Code:** [`examples/isa/control-flow-calls.S`](../control-flow-calls.S)
-- **Prebuilt ELF:** [`examples/isa/build-rv64/control-flow-calls.elf`](../build-rv64/control-flow-calls.elf)
+- **Build target:** `control-flow-calls.elf` (build with the example Makefile)
 - **Concepts Covered:**
   1. **Conditional Branching:** Evaluating `bne` branch condition based on register operands.
   2. **Loop Control:** Following backward loop branches in the Trace inspector.
@@ -21,19 +23,25 @@ This directory contains ready-to-run educational classroom missions for computer
 
 ## Quickstart for Students
 
-To run this sample mission in interactive classroom mode:
+From a source checkout, build the sample and run it in interactive classroom mode:
 
 ```bash
-# Launch the sample mission (runs in TUI mode with classroom guidance enabled)
-simrv --mission examples/isa/lessons/control-flow-calls.mission -m examples/isa/build-rv64/control-flow-calls.elf
+make -C examples/isa XLEN=64
+simrv --mission examples/isa/lessons/control-flow-calls.mission \
+  -m /tmp/simrv-isa-rv64/control-flow-calls.elf
 ```
+
+The source package installs examples under `/usr/share/doc/SimRV/examples/isa`. Copy that
+directory to a writable location, build it with a RISC-V ELF toolchain, and point `--mission` and
+`-m` at the copied files. SimRV packages do not include a guest compiler or generated guest ELF.
 
 ### Student Controls Inside the Mission
 
 - **Step Execution:** Press `F6` (or `s`) to step forward one instruction.
 - **Run / Pause:** Press `F5` (or `c`) to run or pause simulation.
-- **Follow Guidance:** Press `Enter` to follow the suggested action in the bottom Guidance drawer.
-- **Toggle Guide:** Press `g` to show or hide the Guidance drawer.
+- **Mission progress:** Press `F12` to review checkpoint and objective progress.
+- **Rationale hint:** Press `y` to reveal or hide the current step's explanation.
+- **Step instructions:** Press `Space` to advance the lesson instructions.
 - **Dismiss Mission:** Press `z` to dismiss the mission and freely explore the simulator.
 - **Restart Mission:** Press `Z` (`Shift-Z`) to restart the mission from step 0.
 - **Architecture Glossary:** Press `F9` (or `?`) to view detailed RISC-V architectural explanations.

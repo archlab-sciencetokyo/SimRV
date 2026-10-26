@@ -14,7 +14,7 @@ namespace simrv::core {
 struct ArchState;
 }  // namespace simrv::core
 
-namespace simrv {
+namespace simrv::memory {
 
 using PteFlags = uint8_t;
 
@@ -27,6 +27,17 @@ enum class PteFlag : PteFlags {
     G = (1 << 5),
     A = (1 << 6),
     D = (1 << 7),
+};
+
+/**
+ * @enum PtePbmt
+ * @brief RISC-V Svpbmt Page-Based Memory Types (PTE bits 62:61) per Privileged ISA 1.13.
+ */
+enum class PtePbmt : uint8_t {
+    Pma = 0,           ///< Standard physical memory attribute
+    NonCacheable = 1,  ///< Non-cacheable, idempotent memory (NC)
+    Io = 2,            ///< I/O memory, non-cacheable non-idempotent (IO)
+    Reserved = 3,      ///< Reserved encoding
 };
 
 constexpr auto operator|(PteFlag lhs, PteFlag rhs) noexcept -> PteFlag {
@@ -102,13 +113,26 @@ struct PteView {
         return (raw & (PteFlag::U | PteFlag::A | PteFlag::D)) != 0;
     }
     [[nodiscard]] constexpr auto ppn() const noexcept -> simrv::xlen::PpnIndex {
-        return static_cast<simrv::xlen::PpnIndex>(raw >> 10);
+        constexpr uint64_t kPpnMask = (1ULL << 44) - 1ULL;
+        return static_cast<simrv::xlen::PpnIndex>((raw >> 10) & kPpnMask);
     }
     [[nodiscard]] constexpr auto flags() const noexcept -> PteFlags {
         return static_cast<PteFlags>(raw & 0xFF);
     }
+    [[nodiscard]] constexpr auto pbmt() const noexcept -> PtePbmt {
+        return static_cast<PtePbmt>((static_cast<uint64_t>(raw) >> 61U) & 0x3U);
+    }
+    [[nodiscard]] constexpr auto is_napot() const noexcept -> bool {
+        return ((static_cast<uint64_t>(raw) >> 63U) & 0x1U) != 0;
+    }
     [[nodiscard]] constexpr auto has_reserved_bits(unsigned pte_size) const noexcept -> bool {
-        return pte_size == 8 && (static_cast<uint64_t>(raw) >> 54U) != 0;
+        if (pte_size == 8) {
+            constexpr uint64_t kReservedMask = (0x7FULL << 54U);
+            const bool reserved_fields = (static_cast<uint64_t>(raw) & kReservedMask) != 0;
+            const bool invalid_pbmt = (pbmt() == PtePbmt::Reserved);
+            return reserved_fields || invalid_pbmt;
+        }
+        return false;
     }
 };
 
@@ -131,6 +155,7 @@ struct PageWalkState {
     unsigned pte_size = 0;
     unsigned vpn_bits_per_level = 0;
     simrv::xlen::PageTableLevel level = -1;
+    simrv::xlen::Word satp_root{0};
     bool update_access_bits = true;
     PageWalkStatus status = PageWalkStatus::Fault;
     const core::ArchState* arch_state = nullptr;
@@ -155,8 +180,6 @@ struct PageWalkResult {
         return physical_address.raw() == other;
     }
 };
-
-namespace memory {
 
 /**
  * @class PageTableWalker
@@ -218,7 +241,24 @@ class PageTableWalker {
                             const core::ArchState* arch_state = nullptr) const
         -> std::expected<PageWalkResult, simrv::xlen::TrapCause>;
 
+    void flush_pdc() noexcept {
+        if (++pdc_epoch_ == 0) {
+            pdc_epoch_ = 1;
+            pdc_.fill({});
+        }
+    }
+
    private:
+    struct PdcEntry {
+        simrv::xlen::Word satp_root{0};
+        simrv::xlen::Word vpn_prefix{0};
+        simrv::xlen::PhysAddr table_address{0};
+        uint32_t epoch{0};
+    };
+
+    static constexpr size_t kPdcSize = 256;
+    mutable std::array<PdcEntry, kPdcSize> pdc_{};
+    mutable uint32_t pdc_epoch_{1};
     RamView ram_{};
 
     [[nodiscard]] auto pte_access_valid(simrv::xlen::PhysAddr address, unsigned size) const noexcept
@@ -233,6 +273,16 @@ class PageTableWalker {
     static constexpr simrv::xlen::Word kPteShift = 10;
 };
 
-}  // namespace memory
+}  // namespace simrv::memory
 
+namespace simrv {
+using memory::PageTableWalker;
+using memory::PageWalkResult;
+using memory::PageWalkState;
+using memory::PageWalkStatus;
+using memory::PteAccess;
+using memory::PteFlag;
+using memory::PteFlags;
+using memory::PtePbmt;
+using memory::PteView;
 }  // namespace simrv

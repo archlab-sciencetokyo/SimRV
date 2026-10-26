@@ -40,4 +40,14 @@ inline constexpr int kFrameChromeRows = framework::kFrameChromeRows;
                                        minimum_width);
 }
 
+/// Map a workbench column count (1-4) to its canonical TuiLayout mode.
+[[nodiscard]] constexpr auto layout_for_column_count(size_t count,
+                                                     bool single_is_console = false) noexcept
+    -> TuiLayout {
+    if (count <= 1) return single_is_console ? TuiLayout::FullRight : TuiLayout::FullLeft;
+    if (count == 2) return TuiLayout::Split;
+    if (count == 3) return TuiLayout::ThreeColumn;
+    return TuiLayout::FourColumn;
+}
+
 }  // namespace simrv::tui

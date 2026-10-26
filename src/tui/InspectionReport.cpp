@@ -84,7 +84,8 @@ auto platform_name(simrv::core::PlatformProfile profile) -> std::string_view {
 }  // namespace
 
 auto make_inspection_report(const simrv::core::Machine& machine, size_t hart,
-                            std::span<const std::string> recent_trace) -> std::string {
+                            std::span<const std::string> recent_trace,
+                            const MissionEvidence* mission) -> std::string {
     const size_t selected_hart = machine.num_harts() == 0 ? 0 : hart % machine.num_harts();
     const auto& cpu = machine.hart(selected_hart);
     const auto& state = cpu.state();
@@ -127,6 +128,28 @@ auto make_inspection_report(const simrv::core::Machine& machine, size_t hart,
         << ", \"scause\": " << quoted(hex_value(state.scause))
         << ", \"stval\": " << quoted(hex_value(state.stval)) << "}\n";
     out << "  },\n";
+    if (mission != nullptr) {
+        out << "  \"mission\": {\"id\": " << quoted(mission->lesson_id)
+            << ", \"completed\": " << (mission->completed ? "true" : "false")
+            << ", \"step\": " << mission->step << ", \"step_count\": " << mission->step_count
+            << ", \"checkpoint_count\": " << mission->checkpoint_count
+            << ", \"completed\": " << (mission->completed ? "true" : "false")
+            << ", \"step\": " << mission->step << ", \"step_count\": " << mission->step_count
+            << ", \"checkpoint_count\": " << mission->checkpoint_count
+            << ", \"reached_checkpoints\": [";
+        for (size_t index = 0; index < mission->reached_checkpoints.size(); ++index) {
+            if (index != 0) out << ", ";
+            out << quoted(mission->reached_checkpoints[index]);
+        }
+        out << "], \"checkpoint_details\": [";
+        for (size_t index = 0; index < mission->checkpoint_details.size(); ++index) {
+            if (index != 0) out << ", ";
+            const auto& checkpoint = mission->checkpoint_details[index];
+            out << "{\"symbol\": " << quoted(checkpoint.symbol)
+                << ", \"message\": " << quoted(checkpoint.message) << "}";
+        }
+        out << "]},\n";
+    }
     out << "  \"counters\": {\"instructions\": " << snapshot.instruction_count
         << ", \"cycles\": " << snapshot.cycle_count << ", \"icache_hits\": " << snapshot.icache_hits
         << ", \"icache_misses\": " << snapshot.icache_misses

@@ -113,7 +113,7 @@ class PcieRootComplex {
    private:
     simrv::core::Machine* machine_;
     Aplic* aplic_s_;
-    [[maybe_unused]] Imsic* imsic_s_;
+    Imsic* imsic_s_;
 
     EcamNode ecam_node_{this};
     MmioNode mmio_node_{this};

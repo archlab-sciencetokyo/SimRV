@@ -146,6 +146,26 @@ consteval auto generate_operation_info() {
     set_props({ADD, SUB, SLL, SLT, SLTU, XOR, SRL, SRA, OR, AND, ADDW, SUBW, SLLW, SRLW, SRAW},
               exec_def, {.rd = b_int, .rs1 = b_int, .rs2 = b_int, .rs3 = b_none});
 
+    // Zicond (czero.eqz, czero.nez)
+    set_props({CZERO_EQZ, CZERO_NEZ}, exec_def,
+              {.rd = b_int, .rs1 = b_int, .rs2 = b_int, .rs3 = b_none});
+
+    // Zicbo (Cache Block Operations)
+    set_props({CBO_ZERO}, exec_def, {.rd = b_none, .rs1 = b_int, .rs2 = b_none, .rs3 = b_none},
+              mem_store);
+    set_props({CBO_CLEAN, CBO_FLUSH, CBO_INVAL}, exec_def,
+              {.rd = b_none, .rs1 = b_int, .rs2 = b_none, .rs3 = b_none}, mem_none, ctrl_none,
+              side_fence);
+    set_props({PREFETCH_I, PREFETCH_R, PREFETCH_W}, exec_def,
+              {.rd = b_none, .rs1 = b_int, .rs2 = b_none, .rs3 = b_none}, mem_none, ctrl_none);
+
+    // Svinval (Fine-Grained Page Table Invalidation)
+    set_props({SINVAL_VMA}, exec_def, {.rd = b_none, .rs1 = b_int, .rs2 = b_int, .rs3 = b_none},
+              mem_none, ctrl_none, side_sys);
+    set_props({SFENCE_W_INVAL, SFENCE_INVAL_IR}, exec_def,
+              {.rd = b_none, .rs1 = b_none, .rs2 = b_none, .rs3 = b_none}, mem_none, ctrl_none,
+              side_fence);
+
     // System / Fences / CSRs
     set_props({FENCE, FENCE_I}, exec_def,
               {.rd = b_none, .rs1 = b_none, .rs2 = b_none, .rs3 = b_none}, mem_none, ctrl_none,

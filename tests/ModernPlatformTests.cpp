@@ -132,7 +132,7 @@ void test_left_pane_runtime_summaries() {
     pane.set_paused(false);
     check(row(0).contains("RUNNING") && row(0).contains("sampled state"),
           "running view uses a compact sampled-state banner");
-    check(row(1).contains("x1"), "running view preserves cached register context");
+    check(!row(1).contains("x1"), "running view hides fast-changing register detail");
     pane.set_kips(12'345);
     check(row(21).contains("Performance") && row(24).contains("12.35 MIPS"),
           "running view keeps performance telemetry live");

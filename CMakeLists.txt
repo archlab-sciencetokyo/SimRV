@@ -3,7 +3,7 @@ cmake_minimum_required(VERSION 3.31...4.3)
 # Keep the release version authoritative here. The project() version is derived
 # from it so CMake, BuildInfo, CPack, release tooling, and citation checks use
 # the same source value.
-set(SIMRV_VERSION "3.0.0-rc.15")
+set(SIMRV_VERSION "3.0.0-rc.16")
 string(REGEX REPLACE "-.*$" "" SIMRV_PROJECT_VERSION "${SIMRV_VERSION}")
 
 project(
@@ -150,19 +150,10 @@ if(NOT "cxx_std_23" IN_LIST CMAKE_CXX_COMPILE_FEATURES)
   )
 endif()
 
-option(SIMRV_PREFER_MOLD "Prefer mold linker for fast links when available" ON)
 option(SIMRV_PREFER_LLD "Prefer lld for Clang links when available" ON)
 option(SIMRV_ENABLE_LTO "Enable link-time optimization for Release builds" ON)
 
 set(SIMRV_LINKER_NAME "system")
-if(SIMRV_PREFER_MOLD)
-  find_program(SIMRV_MOLD_EXECUTABLE NAMES mold)
-  if(SIMRV_MOLD_EXECUTABLE)
-    add_link_options($<$<LINK_LANGUAGE:CXX>:-fuse-ld=mold>)
-    set(SIMRV_LINKER_NAME "mold")
-    message(STATUS "Fast linking enabled with mold.")
-  endif()
-endif()
 
 if(SIMRV_LINKER_NAME STREQUAL "system"
    AND SIMRV_PREFER_LLD
@@ -176,8 +167,7 @@ if(SIMRV_LINKER_NAME STREQUAL "system"
 endif()
 
 if(CMAKE_BUILD_TYPE STREQUAL "Release" AND SIMRV_ENABLE_LTO)
-  if(SIMRV_LINKER_NAME MATCHES "lld|mold" AND CMAKE_CXX_COMPILER_ID STREQUAL
-                                              "Clang")
+  if(SIMRV_LINKER_NAME STREQUAL "lld" AND CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
     set(CMAKE_INTERPROCEDURAL_OPTIMIZATION ON)
     message(
       STATUS "Release LTO enabled across the runtime with ${SIMRV_LINKER_NAME}."
@@ -195,7 +185,7 @@ if(CMAKE_BUILD_TYPE STREQUAL "Release" AND SIMRV_ENABLE_LTO)
       message(STATUS "Release LTO disabled: ${SIMRV_IPO_ERROR}")
     endif()
   else()
-    message(STATUS "Release LTO disabled: Clang requires lld or mold.")
+    message(STATUS "Release LTO disabled: Clang requires lld.")
   endif()
 endif()
 

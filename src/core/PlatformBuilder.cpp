@@ -25,6 +25,7 @@
 #include "simrv/device/pci/VirtioPciNet.hpp"
 #include "simrv/device/pci/VirtioPciRng.hpp"
 #include "simrv/device/pci/VirtioPciSound.hpp"
+#include "simrv/device/pflash/PFlash.hpp"
 
 namespace simrv::core {
 
@@ -50,6 +51,19 @@ void PlatformBuilder::compose(Machine& machine) {
     }
 
     if (composition.pcie) {
+        const bool pflash_enabled =
+            machine.config.files.uefi_enabled ||
+            SoCDeviceRegistry::enabled(machine.config.soc, SoCDeviceKind::PFlash);
+        if (pflash_enabled) {
+            machine.runtime_->pflash0 = std::make_unique<simrv::device::PFlash>(
+                machine, simrv::mmio::kPflash0BaseAddress, simrv::mmio::kPflash0Size, 128 * 1024,
+                /*read_only=*/true, "pflash0");
+
+            machine.runtime_->pflash1 = std::make_unique<simrv::device::PFlash>(
+                machine, simrv::mmio::kPflash1BaseAddress, simrv::mmio::kPflash1Size, 128 * 1024,
+                /*read_only=*/false, "pflash1");
+        }
+
         machine.runtime_->pcie = std::make_unique<simrv::device::PcieRootComplex>(
             &machine, machine.runtime_->aplic_s.get(), machine.runtime_->imsic_s.get());
         const auto enabled = [&](SoCDeviceKind kind) {

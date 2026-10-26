@@ -67,6 +67,12 @@ class MmioRouter {
      */
     [[nodiscard]] auto resolve_device(simrv::xlen::Address addr) const -> TileLinkNode*;
     [[nodiscard]] auto resolve_entry(simrv::xlen::Address addr) const -> const DeviceEntry*;
+    [[nodiscard]] auto resolve_device(simrv::xlen::PhysAddr paddr) const -> TileLinkNode* {
+        return resolve_device(paddr.raw());
+    }
+    [[nodiscard]] auto resolve_entry(simrv::xlen::PhysAddr paddr) const -> const DeviceEntry* {
+        return resolve_entry(paddr.raw());
+    }
 
     /**
      * @brief Search for a device node by string name.
@@ -88,9 +94,11 @@ class MmioRouter {
      */
     [[nodiscard]] auto devices() const -> const std::vector<TileLinkNode*>& { return nodes_; }
 
-    [[nodiscard]] auto mmio_read_count() const -> uint64_t { return mmio_read_count_; }
-    [[nodiscard]] auto mmio_write_count() const -> uint64_t { return mmio_write_count_; }
-    [[nodiscard]] auto bus_error_count() const -> uint64_t { return bus_error_count_; }
+    [[nodiscard]] auto mmio_read_count() const -> simrv::xlen::Counter { return mmio_read_count_; }
+    [[nodiscard]] auto mmio_write_count() const -> simrv::xlen::Counter {
+        return mmio_write_count_;
+    }
+    [[nodiscard]] auto bus_error_count() const -> simrv::xlen::Counter { return bus_error_count_; }
 
     void reset_stats() {
         mmio_read_count_ = 0;
@@ -107,9 +115,9 @@ class MmioRouter {
     simrv::xlen::Address max_end_ = 0;
     mutable std::array<DeviceEntry, kMruCapacity> mru_entries_{};
     mutable size_t mru_count_ = 0;
-    uint64_t mmio_read_count_ = 0;
-    uint64_t mmio_write_count_ = 0;
-    uint64_t bus_error_count_ = 0;
+    simrv::xlen::Counter mmio_read_count_ = 0;
+    simrv::xlen::Counter mmio_write_count_ = 0;
+    simrv::xlen::Counter bus_error_count_ = 0;
     simrv::core::Tracer* tracer_ = nullptr;
 
     void rebuild_entries();

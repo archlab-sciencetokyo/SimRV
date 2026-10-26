@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "simrv/device/pci/PciDevice.hpp"
+#include "simrv/device/virtio/IVirtioTransport.hpp"
 #include "simrv/device/virtio/VirtioCore.hpp"
 #include "simrv/xlen/ScalarTypes.hpp"
 
@@ -17,7 +18,7 @@ namespace simrv::device {
  * @class VirtioPciDevice
  * @brief Modern VirtIO 1.2 PCIe transport endpoint base class.
  */
-class VirtioPciDevice : public PciDevice {
+class VirtioPciDevice : public PciDevice, public virtio::IVirtioTransport {
    public:
     static constexpr PciVendorId kVirtioPciVendorId = 0x1AF4;
     static constexpr PciDeviceId kVirtioPciModernDeviceBase = 0x1040;
@@ -43,6 +44,15 @@ class VirtioPciDevice : public PciDevice {
         }
         return nullptr;
     }
+
+    void trigger_irq() override;
+    auto dma_read_bytes(uint64_t phys_addr, std::byte* dst, std::size_t len) -> bool override;
+    auto dma_write_bytes(uint64_t phys_addr, const std::byte* src, std::size_t len)
+        -> bool override;
+    [[nodiscard]] auto is_cycle_mode() const noexcept -> bool override;
+    [[nodiscard]] auto is_dma_enabled() const noexcept -> bool override;
+    void schedule_deferred_dma(size_t transfer_bytes,
+                               std::function<void()> completion_callback) override;
 
    protected:
     virtual auto get_device_features(virtio::VirtioFeatureWord select)

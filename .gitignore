@@ -40,6 +40,8 @@ bpred.txt
 init_virtio.txt
 trace.txt
 tracepc.txt
+*.img
+*.fd
 .simrv/
 .vscode/
 

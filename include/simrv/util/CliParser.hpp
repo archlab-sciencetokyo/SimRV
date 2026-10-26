@@ -34,6 +34,11 @@ struct RuntimeOptions {
     std::string fn_dskimg;
     std::string fn_virtiofs;
     std::string fn_dvtree;
+    std::string fn_uefi;
+    std::string fn_uefi_vars;
+    bool uefi_enabled = false;
+    bool auto_fdt = false;
+    std::string bootargs;
     std::string fn_traplog;
     std::string fn_log;
     std::string fn_summary;
@@ -64,6 +69,7 @@ struct RuntimeOptions {
     simrv::xlen::Counter enabletimer = 0UL;
     simrv::xlen::Address isatest_tohost = 0x80001000;
     isa::IsaPreset isa_preset = isa::IsaPreset::GCV;
+    isa::ArchitectureProfile profile = isa::kDefaultArchitectureProfile;
     bool has_zb_extensions = false;
     std::vector<std::string> isa_extensions{};
     bool misa_override = false;
@@ -92,10 +98,10 @@ struct RuntimeOptions {
     RequestedExecutionMode execution_mode = RequestedExecutionMode::Fast;
     bool execution_mode_explicit = false;
     bool high_contrast = false;
-    bool class_mode = false;
     std::string mission;
     std::string pipeline_type = "5stage";
     bool disable_forwarding = false;
+    bool divider_early_out = false;
     std::string bpred_type;
     uint32_t bht_size = 0;
     uint32_t btb_size = 0;

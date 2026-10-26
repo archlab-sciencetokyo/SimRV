@@ -12,9 +12,13 @@ Spike lockstep workloads run by the release gates.
 | Base ISA | RV32I and RV64I | RV32/RV64 ISA gates and Spike lockstep |
 | General-purpose extensions | M, A, F, D, C; see FP qualification note below | ISA gates, focused semantic tests, lockstep |
 | Bit manipulation | Zba, Zbb, Zbc, Zbs (`Zb*`) | Bitmanip ISA tests and lockstep |
+| Conditional operations | Zicond (`czero.eqz`, `czero.nez`) | Core semantic and RVA23 profile gates |
+| Cache management | CMO (`cbo.clean`, `cbo.flush`, `cbo.inval`, `cbo.zero`) | Core semantic and RVA23 profile gates |
+| TLB invalidation | Svinval (`sinval.vma`, `sfence.w.inval`, `sfence.inval.ir`) | Core semantic and RVA23 profile gates |
 | Vector | Implemented subset of RISC-V Vector 1.0 (`V`), configurable VLEN | Vector regression suite and lockstep |
 | Privilege | M/S/U execution, traps, interrupts, and CSR access (Privileged ISA 1.13) | Core semantic and Linux boot gates |
-| Address translation | Sv32 for RV32; Sv39 for RV64 | MMU tests and Linux boot gates |
+| Address translation | Sv32 for RV32; Sv39 for RV64 with Page Directory Cache | MMU tests and Linux boot gates |
+| Standard profiles | RVA23 (default RV64 target), RV32GCBV, RV64GCBV | Profile test suites and gate verification |
 
 `G` includes I, M, A, F, D, Zicsr, and Zifencei. The `Zb` and `V` extensions above are additional
 extensions; they are not implied by `G`. MISA contains the single-letter extension bits only and

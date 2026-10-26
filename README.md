@@ -201,23 +201,23 @@ The TUI supports interactive stepping, breakpoints, and live hardware-state insp
 
 ### Classroom integration
 
-SimRV accepts ordinary RISC-V ELF files and needs no course-specific lesson format. Instructors can
-use the same command across exercises; `--class` starts the TUI paused with the interactive Student
-Guide visible, while students remain free to inspect any subsystem.
+SimRV accepts ordinary RISC-V ELF files. Instructors can add an optional `.mission` file to provide
+editable student prompts and named program checkpoints; `--mission` starts the interactive TUI with
+the lesson modal.
 
 ```bash
-./build/rv64-release/simrv --tui --baremetal -m exercise.elf --class \
+./build/rv64-release/simrv --tui --baremetal -m exercise.elf \
   --inspection-output inspection.json
 ```
 
-The optional external `control-flow-calls.mission` lesson turns the Student Guide into a local
-sequence of branch, loop, call, return, and ABI observations. Build the supplied example first,
-then pass the lesson path to `--class --mission`. Missions do not collect identity or grading data,
-and students remain free to use the normal TUI controls.
+To use the supplied lesson, build its example ELF and pass the lesson path with `--mission`.
+Missions do not collect identity or grading data, and students remain free to use the normal TUI
+controls.
 
 Students can load (`o`), step (`s`), inspect (`r`/`l`), explain (`e`), open the relevant glossary
-topic (`?`), and trace (`v`) without changing the workload. The Student Guide proposes a
-context-sensitive next action; `Enter` performs it and `g` shows or hides the guide. Pressing `x`
+topic (`?`), and trace (`v`) without changing the workload. In a mission, `F12` reopens the active
+step. Press `Enter` to hide the modal and `Space` to advance the instruction; only named symbols mark
+checkpoints as reached. Pressing `x`
 while paused writes the configured, schema-versioned inspection report; existing files require a
 second explicit export action. See the [educational reference](docs/user/classroom.md),
 [bare-metal guide](docs/user/baremetal.md), and [source-first ISA examples](examples/isa/).
@@ -237,8 +237,9 @@ second explicit export action. See the [educational reference](docs/user/classro
 | `[m]` | Manage breakpoints and watchpoints |
 | `[l]` / `[Alt-L]` | Cycle tool inspector tab (Pipe / Cache / BP / Hazard / TLB / Bus / IO / Stats) |
 | `[r]` / `[Alt-R]` | Cycle register tab (GPR / FPR / VEC / CSR) |
-| `[g]` | Show / hide the interactive Student Guide |
-| `[Enter]` | Perform the Student Guide's suggested action when visible |
+| `[F12]` | Reopen the current mission step and check its checkpoint |
+| `[Enter]` | Hide the current mission modal |
+| `[Space]` | Advance to the next instruction; stops at an unreached checkpoint |
 | `[e]` | Toggle instruction explanation |
 | `[?]` | Open glossary at the active inspector topic |
 | `[v]` | Toggle execution trace capture |

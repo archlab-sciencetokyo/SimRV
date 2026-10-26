@@ -5,6 +5,7 @@
 #pragma once
 
 #include "simrv/isa/InstructionFields.hpp"
+#include "simrv/isa/OperationId.hpp"
 #include "simrv/xlen/AddressTypes.hpp"
 
 namespace simrv::core {
@@ -43,6 +44,9 @@ class MemoryAccess {
                          simrv::xlen::Word data, isa::Funct3 funct3);
     static void storeFp(MemorySubsystem& mem, core::CPU& cpu, simrv::xlen::VirtAddr addr,
                         simrv::xlen::FloatingRegister data, isa::Funct3 funct3);
+
+    static void execute_cmo(MemorySubsystem& mem, core::CPU& cpu, simrv::xlen::VirtAddr addr,
+                            isa::OperationId op);
 };
 
 }  // namespace simrv::memory

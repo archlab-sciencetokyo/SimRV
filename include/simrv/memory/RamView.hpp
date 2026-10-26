@@ -9,12 +9,13 @@
 
 #include "simrv/CompilerHints.hpp"
 #include "simrv/core/BuildConfig.hpp"
+#include "simrv/core/PlatformMap.h"
 #include "simrv/xlen/AddressTypes.hpp"
 
 namespace simrv::memory {
 
 inline constexpr simrv::xlen::Address kDramBaseAddress =
-    static_cast<simrv::xlen::Address>(0x80000000u);
+    static_cast<simrv::xlen::Address>(SIMRV_PLATFORM_DRAM_BASE);
 inline constexpr simrv::xlen::Address kDramSize =
     static_cast<simrv::xlen::Address>(SIMRV_DRAM_SIZE_MB * 1024u * 1024u);
 

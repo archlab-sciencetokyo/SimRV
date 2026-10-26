@@ -9,6 +9,7 @@
 #include <span>
 #include <vector>
 
+#include "simrv/device/virtio/IVirtioTransport.hpp"
 #include "simrv/device/virtio/VirtioCore.hpp"
 #include "simrv/memory/MmioDevice.hpp"
 
@@ -22,7 +23,7 @@ namespace simrv::device {
  * @class VirtioMmioDevice
  * @brief Base class for Modern VirtIO-MMIO v2 Devices.
  */
-class VirtioMmioDevice : public memory::MmioDevice {
+class VirtioMmioDevice : public memory::MmioDevice, public virtio::IVirtioTransport {
    public:
     VirtioMmioDevice(const char* name, simrv::xlen::Address base_address, simrv::xlen::Address size,
                      uint32_t device_id, uint32_t irq_num, core::Machine* machine);
@@ -54,7 +55,11 @@ class VirtioMmioDevice : public memory::MmioDevice {
         return &queues_[q_idx];
     }
 
-    void trigger_irq();
+    void trigger_irq() override;
+    [[nodiscard]] auto is_cycle_mode() const noexcept -> bool override;
+    [[nodiscard]] auto is_dma_enabled() const noexcept -> bool override;
+    void schedule_deferred_dma(size_t transfer_bytes,
+                               std::function<void()> completion_callback) override;
 
    protected:
     virtual void on_queue_notify(uint32_t q_idx) = 0;
@@ -70,8 +75,9 @@ class VirtioMmioDevice : public memory::MmioDevice {
         (void)size;
     }
 
-    auto dma_read_bytes(uint64_t phys_addr, std::byte* dst, std::size_t len) -> bool;
-    auto dma_write_bytes(uint64_t phys_addr, const std::byte* src, std::size_t len) -> bool;
+    auto dma_read_bytes(uint64_t phys_addr, std::byte* dst, std::size_t len) -> bool override;
+    auto dma_write_bytes(uint64_t phys_addr, const std::byte* src, std::size_t len)
+        -> bool override;
 
     void add_queue(uint16_t max_size);
 

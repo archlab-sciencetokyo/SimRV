@@ -147,6 +147,22 @@ if(BUILD_TESTING)
     simrv-cpu-model-loader-tests tests/CpuModelLoaderTests.cpp cpu-model-loader
     "gate;regress;pipeline;model")
 
+  simrv_add_runtime_test(
+    simrv-modern-simulator-standards-tests tests/ModernSimulatorStandardsTests.cpp
+    modern-standards "gate;regress;core;sbi;isa")
+
+  simrv_add_runtime_test(
+    simrv-rva23-profile-tests tests/Rva23ProfileTests.cpp
+    rva23-profile "gate;regress;core;isa;cache")
+
+  simrv_add_runtime_test(
+    simrv-pflash-tests tests/PFlashTests.cpp
+    pflash "gate;regress;device;pflash;uefi")
+
+  simrv_add_runtime_test(
+    simrv-fdt-generator-tests tests/FdtGeneratorTests.cpp
+    fdt-generator "gate;regress;core;fdt;platform")
+
   # Architectural equivalence is a first-class native gate.  The fixture
   # deliberately exercises functional execution and both CA pipelines while
   # excluding cache/cycle/UI observations.
@@ -256,6 +272,41 @@ if(BUILD_TESTING)
                    ${CMAKE_SOURCE_DIR}/tests/RtlParityToolTests.py)
   set_tests_properties(rtl-parity-tools PROPERTIES LABELS
                                                    "gate;regress;pipeline")
+  add_test(NAME mission-tools
+           COMMAND ${PYTHON_BIN}
+                   ${CMAKE_SOURCE_DIR}/tests/MissionToolTests.py)
+  set_tests_properties(mission-tools PROPERTIES LABELS "regress;tui")
+
+  # End-to-End (E2E) 4-tier testing suites
+  add_test(NAME e2e-tier1-features
+           COMMAND ${PYTHON_BIN} ${CMAKE_SOURCE_DIR}/tests/RunE2ETests.py
+                   --simrv $<TARGET_FILE:SimRV> --tier 1)
+  set_tests_properties(e2e-tier1-features
+                       PROPERTIES LABELS "regress;e2e;e2e-tier1" TIMEOUT 60)
+
+  add_test(NAME e2e-tier2-boundaries
+           COMMAND ${PYTHON_BIN} ${CMAKE_SOURCE_DIR}/tests/RunE2ETests.py
+                   --simrv $<TARGET_FILE:SimRV> --tier 2)
+  set_tests_properties(e2e-tier2-boundaries
+                       PROPERTIES LABELS "regress;e2e;e2e-tier2" TIMEOUT 30)
+
+  add_test(NAME e2e-tier3-combinations
+           COMMAND ${PYTHON_BIN} ${CMAKE_SOURCE_DIR}/tests/RunE2ETests.py
+                   --simrv $<TARGET_FILE:SimRV> --tier 3)
+  set_tests_properties(e2e-tier3-combinations
+                       PROPERTIES LABELS "regress;e2e;e2e-tier3" TIMEOUT 30)
+
+  add_test(NAME e2e-tier4-scenarios
+           COMMAND ${PYTHON_BIN} ${CMAKE_SOURCE_DIR}/tests/RunE2ETests.py
+                   --simrv $<TARGET_FILE:SimRV> --tier 4)
+  set_tests_properties(e2e-tier4-scenarios
+                       PROPERTIES LABELS "regress;e2e;e2e-tier4" TIMEOUT 30)
+
+  add_test(NAME e2e-all-tiers
+           COMMAND ${PYTHON_BIN} ${CMAKE_SOURCE_DIR}/tests/RunE2ETests.py
+                   --simrv $<TARGET_FILE:SimRV> --tier all)
+  set_tests_properties(e2e-all-tiers
+                       PROPERTIES LABELS "regress;e2e;e2e-all" TIMEOUT 120)
 
   # Optional App/Linux smoke tests
   if(DEFINED ENV{SIMRV_APP_IMG})
@@ -617,11 +668,20 @@ if(BUILD_TESTING)
     benchmark PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR} LABELS
                          "benchmark;perf" SKIP_RETURN_CODE 2)
 
+  set(_consumer_cxx_flags "${CMAKE_CXX_FLAGS}")
+  set(_consumer_exe_linker_flags "${CMAKE_EXE_LINKER_FLAGS}")
+  if(_simrv_sanitizer_flags)
+    string(APPEND _consumer_cxx_flags " -fsanitize=${_simrv_sanitizer_flags}")
+    string(APPEND _consumer_exe_linker_flags " -fsanitize=${_simrv_sanitizer_flags}")
+  endif()
   add_test(
     NAME package-install-consumer
     COMMAND
       ${CMAKE_COMMAND} -D SIMRV_SOURCE_DIR=${CMAKE_SOURCE_DIR} -D
-      SIMRV_BINARY_DIR=${CMAKE_BINARY_DIR} -P
+      SIMRV_BINARY_DIR=${CMAKE_BINARY_DIR}
+      -D "CMAKE_CXX_COMPILER=${CMAKE_CXX_COMPILER}"
+      -D "CMAKE_CXX_FLAGS=${_consumer_cxx_flags}"
+      -D "CMAKE_EXE_LINKER_FLAGS=${_consumer_exe_linker_flags}" -P
       ${CMAKE_SOURCE_DIR}/cmake/TestPackageConsumer.cmake)
   set_tests_properties(package-install-consumer
                        PROPERTIES LABELS "gate;regress;package;sdk")

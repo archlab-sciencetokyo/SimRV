@@ -114,6 +114,21 @@ auto PageTableWalker::begin_walk(simrv::xlen::VirtAddr v_addr, PteAccess access,
     state.level = levels - 1;
     const simrv::xlen::PhysAddr root = simrv::xlen::PhysAddr{
         static_cast<simrv::xlen::Word>(simrv::xlen::satp_root_ppn(satp, xlen) << 12)};
+    state.satp_root = root.raw();
+
+    if (xlen == 64 && mode == 8) {
+        // Sv39 Page Directory Cache lookup: 2 MiB region (VPN[2..1], bits 38:21)
+        const simrv::xlen::Word vpn_prefix = (v_addr.raw() >> 21) & 0x3FFFFU;
+        const size_t pdc_idx = (vpn_prefix ^ (vpn_prefix >> 8)) & (kPdcSize - 1);
+        const auto& entry = pdc_[pdc_idx];
+        if (entry.epoch == pdc_epoch_ && entry.satp_root == state.satp_root &&
+            entry.vpn_prefix == vpn_prefix) {
+            state.level = 0;
+            select_next_pte(state, entry.table_address);
+            return state;
+        }
+    }
+
     select_next_pte(state, root);
     return state;
 }
@@ -140,8 +155,23 @@ void PageTableWalker::accept_pte(PageWalkState& state, simrv::xlen::Word pte) co
             return;
         }
         --state.level;
-        select_next_pte(
-            state, simrv::xlen::PhysAddr{static_cast<simrv::xlen::Word>((pte >> kPteShift) << 12)});
+        const simrv::xlen::Word ppn_mask =
+            state.pte_size == 8 ? static_cast<simrv::xlen::Word>((uint64_t{1} << 44) - 1)
+                                : static_cast<simrv::xlen::Word>((uint32_t{1} << 22) - 1);
+        const simrv::xlen::PhysAddr next_table = simrv::xlen::PhysAddr{
+            static_cast<simrv::xlen::Word>(((pte >> kPteShift) & ppn_mask) << 12)};
+
+        // Cache the Level-0 table address in the Page Directory Cache for Sv39 walks
+        if (state.xlen == 64 && state.level == 0 && state.vpn_bits_per_level == 9) {
+            const simrv::xlen::Word vpn_prefix = (state.virtual_address.raw() >> 21) & 0x3FFFFU;
+            const size_t pdc_idx = (vpn_prefix ^ (vpn_prefix >> 8)) & (kPdcSize - 1);
+            pdc_[pdc_idx] = PdcEntry{.satp_root = state.satp_root,
+                                     .vpn_prefix = vpn_prefix,
+                                     .table_address = next_table,
+                                     .epoch = pdc_epoch_};
+        }
+
+        select_next_pte(state, next_table);
         return;
     }
 
@@ -162,7 +192,10 @@ void PageTableWalker::accept_pte(PageWalkState& state, simrv::xlen::Word pte) co
         state.level == 0
             ? 0
             : (static_cast<simrv::xlen::Word>(1) << (state.level * state.vpn_bits_per_level)) - 1;
-    const simrv::xlen::Word ppn = pte >> kPteShift;
+    const simrv::xlen::Word ppn_mask =
+        state.pte_size == 8 ? static_cast<simrv::xlen::Word>((uint64_t{1} << 44) - 1)
+                            : static_cast<simrv::xlen::Word>((uint32_t{1} << 22) - 1);
+    const simrv::xlen::Word ppn = (pte >> kPteShift) & ppn_mask;
     if ((ppn & low_ppn_mask) != 0) {
         state.fault = page_fault_for(state.access);
         state.status = PageWalkStatus::Fault;

@@ -1081,6 +1081,42 @@ auto main() -> int {
             expect(mtime_fast.load() == mtime_ca.load(),
                    "Deterministic equivalence: fast advancement matches CA cycle stepping exactly");
         }
+
+        // RISC-V Hardware Performance Monitor (Zihpm) and PerformanceCounters verification
+        {
+            simrv::core::PerformanceCounters perf;
+            perf.reset();
+            expect(perf.read_hpmevent(3) == 0, "Initial hpmevent3 is 0");
+            expect(perf.read_hpmcounter(3) == 0, "Initial hpmcounter3 is 0");
+
+            // Configure counter 3 to monitor instructions (event 2)
+            perf.write_hpmevent(3, static_cast<uint64_t>(simrv::core::HpmEvent::Instructions));
+            expect(perf.read_hpmevent(3) == 2, "Configured hpmevent3 reads back event ID 2");
+
+            // Event notification increments configured counter
+            perf.notify_event(simrv::core::HpmEvent::Instructions, 10);
+            expect(perf.read_hpmcounter(3) == 10, "Counter 3 incremented by 10 on matching event");
+
+            // Unrelated event does not affect counter 3
+            perf.notify_event(simrv::core::HpmEvent::ICacheMiss, 5);
+            expect(perf.read_hpmcounter(3) == 10, "Counter 3 unchanged on non-matching event");
+
+            // Counter write updates value
+            perf.write_hpmcounter(3, 100);
+            expect(perf.read_hpmcounter(3) == 100, "Counter 3 write updates value to 100");
+
+            // Inhibit bit suppresses counting
+            constexpr uint32_t kInhibitCounter3 = 1U << 3;
+            perf.notify_event(simrv::core::HpmEvent::Instructions, 15, kInhibitCounter3);
+            expect(perf.read_hpmcounter(3) == 100,
+                   "Counter 3 suppressed when inhibited via mcountinhibit");
+
+            // Instruction retirement recording with latency and stalls
+            perf.record_retire(simrv::isa::ADDI, 4);
+            expect(perf.inst_count(simrv::isa::ADDI) == 1, "Instruction count for ADDI is 1");
+            expect(perf.inst_cycles(simrv::isa::ADDI) == 4, "Cumulative cycles for ADDI is 4");
+            expect(perf.inst_stalls(simrv::isa::ADDI) == 3, "Stall cycles for ADDI is 3");
+        }
     }
 
     return failures == 0 ? EXIT_SUCCESS : EXIT_FAILURE;

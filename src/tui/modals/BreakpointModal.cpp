@@ -12,11 +12,143 @@
 #include "simrv/core/Machine.hpp"
 #include "simrv/debug/BreakpointManager.hpp"
 #include "simrv/debug/SymbolTable.hpp"
+#include "simrv/tui/TuiModal.hpp"
 #include "simrv/tui/TuiTheme.hpp"
 #include "simrv/tui/modals/ModalComponents.hpp"
 #include "simrv/tui/panels/InspectorPane.hpp"
 
 namespace simrv::tui::modals {
+
+auto BreakpointModal::title() const -> std::string {
+    if (type_ == ModalType::SetBreakpoint) return "Set PC Breakpoint";
+    if (type_ == ModalType::SetWatchpoint) return "Set Memory Watchpoint";
+    return "Manage Breakpoints & Watchpoints";
+    if (type_ == ModalType::SetBreakpoint) return " SET BREAKPOINT ";
+    if (type_ == ModalType::SetWatchpoint) return " SET WATCHPOINT ";
+    return " MANAGE BREAKPOINTS & WATCHPOINTS ";
+}
+
+void BreakpointModal::render_content(std::vector<std::string>& content_rows, int /*width*/,
+                                     int /*height*/) {
+    render(type_, content_rows, input_, machine_, cursor_);
+}
+
+auto BreakpointModal::cursor_row() const -> int {
+    return type_ == ModalType::ManageBreakpoints ? 2 + cursor_ : 0;
+}
+
+void BreakpointModal::scroll_to_top() {
+    if (type_ == ModalType::ManageBreakpoints) cursor_ = 0;
+}
+
+void BreakpointModal::scroll_to_bottom() {
+    if (type_ == ModalType::ManageBreakpoints && machine_) {
+        move_cursor(cursor_, 999999, *machine_);
+    }
+}
+
+void BreakpointModal::handle_wheel(int delta) {
+    if (type_ == ModalType::ManageBreakpoints && machine_) {
+        move_cursor(cursor_, delta, *machine_);
+    }
+}
+
+auto BreakpointModal::handle_key(uint8_t byte, TuiKey key) -> framework::ModalAction {
+    if (type_ == ModalType::ManageBreakpoints) {
+        if (byte == 27 || key == simrv::tui::TuiKey::Esc || byte == 'q' || byte == 'Q') {
+            return framework::ModalAction::Close;
+        }
+        if (key == simrv::tui::TuiKey::Enter || key == simrv::tui::TuiKey::Newline || byte == ' ' ||
+            byte == 8 || byte == 127 || key == simrv::tui::TuiKey::Backspace) {
+            if (host_) host_->remove_bp_at_cursor({});
+            return framework::ModalAction::Continue;
+        }
+        if (byte == 'a' || byte == 'A') {
+            if (host_) host_->open(ModalType::SetBreakpoint, nullptr, 0);
+            return framework::ModalAction::Continue;
+        }
+        if (byte == 'w' || byte == 'W') {
+            if (host_) host_->open(ModalType::SetWatchpoint, nullptr, 0);
+            return framework::ModalAction::Continue;
+        }
+        if (byte == 'c' || byte == 'C') {
+            if (machine_) {
+                machine_->breakpoint_manager().clear_pc_breakpoints();
+                machine_->breakpoint_manager().clear_watchpoints();
+            }
+            cursor_ = 0;
+            return framework::ModalAction::Continue;
+        }
+        if (byte == 'j' || byte == 'J') {
+            handle_wheel(1);
+            return framework::ModalAction::Continue;
+        }
+        if (byte == 'k' || byte == 'K') {
+            handle_wheel(-1);
+            return framework::ModalAction::Continue;
+        }
+        return framework::ModalAction::Continue;
+    }
+
+    if (byte == 27 || key == simrv::tui::TuiKey::Esc) {
+        return framework::ModalAction::Close;
+    }
+    if (key == simrv::tui::TuiKey::Enter || key == simrv::tui::TuiKey::Newline) {
+        return framework::ModalAction::Submit;
+    }
+    if (byte == 8 || byte == 127 || key == simrv::tui::TuiKey::Backspace) {
+        if (!input_.empty()) input_.pop_back();
+        return framework::ModalAction::Continue;
+    }
+    if (byte >= 32 && byte <= 126) {
+        input_.push_back(static_cast<char>(byte));
+        return framework::ModalAction::Continue;
+    }
+    return framework::ModalAction::Continue;
+}
+
+auto BreakpointModal::handle_control_click(int content_row, size_t action_index)
+    -> framework::ModalAction {
+    if (type_ == ModalType::ManageBreakpoints) {
+        if (content_row >= 8) {
+            if (action_index == 0) {
+                if (host_) host_->open(ModalType::SetBreakpoint, nullptr, 0);
+                return framework::ModalAction::Continue;
+            }
+            if (action_index == 1) {
+                if (host_) host_->open(ModalType::SetWatchpoint, nullptr, 0);
+                return framework::ModalAction::Continue;
+            }
+        }
+        if (action_index == 0) {
+            handle_wheel(-1);
+            return framework::ModalAction::Continue;
+        }
+        if (action_index == 1) {
+            handle_wheel(1);
+            return framework::ModalAction::Continue;
+        }
+        if (action_index == 2) {
+            if (host_) host_->remove_bp_at_cursor({});
+            return framework::ModalAction::Continue;
+        }
+        if (action_index == 3) {
+            if (machine_) {
+                machine_->breakpoint_manager().clear_pc_breakpoints();
+                machine_->breakpoint_manager().clear_watchpoints();
+            }
+            cursor_ = 0;
+            return framework::ModalAction::Continue;
+        }
+        return framework::ModalAction::Close;
+    }
+    return action_index == 0 ? framework::ModalAction::Submit : framework::ModalAction::Close;
+}
+
+auto BreakpointModal::handle_click(framework::ScreenCoord local_pt) -> framework::ModalAction {
+    (void)local_pt;
+    return framework::ModalAction::Continue;
+}
 
 void BreakpointModal::open(ModalType type, std::string& input, simrv::core::Machine& machine,
                            InspectorPane* inspector_pane) {
@@ -151,9 +283,26 @@ auto BreakpointModal::remove_at_cursor(
     if (cursor < static_cast<int>(pc_bps.size())) {
         auto it = std::next(pc_bps.begin(), cursor);
         simrv::xlen::Address pc = *it;
+        const auto& records = machine.breakpoint_manager().get_pc_breakpoint_records();
+        const bool has_tui = std::ranges::any_of(records, [pc](const auto& record) {
+            return record.addr == pc && record.owner == simrv::debug::BreakpointOwner::Tui;
+        });
+        const bool has_mission = std::ranges::any_of(records, [pc](const auto& record) {
+            return record.addr == pc && record.owner == simrv::debug::BreakpointOwner::Mission;
+        });
+        if (!has_tui && has_mission) {
+            if (set_status_override_cb)
+                set_status_override_cb(
+                    "Lesson checkpoint is managed by the mission; dismiss it with z to remove it.");
+            return true;
+        }
         machine.breakpoint_manager().remove_pc_breakpoint(pc);
         if (set_status_override_cb) {
-            set_status_override_cb(std::format("Removed breakpoint at 0x{:08x}", pc));
+            set_status_override_cb(
+                has_mission
+                    ? std::format("Removed user breakpoint at 0x{:08x}; lesson checkpoint remains",
+                                  pc)
+                    : std::format("Removed breakpoint at 0x{:08x}", pc));
         }
     } else if (cursor < static_cast<int>(pc_bps.size() + wps.size())) {
         auto wp_idx = static_cast<std::size_t>(cursor - static_cast<int>(pc_bps.size()));
@@ -228,8 +377,19 @@ void BreakpointModal::render(ModalType type, std::vector<std::string>& content_r
                 std::string prefix = is_sel ? std::format("{}>\033[0m ", kThemeMint) : "  ";
                 std::string sym = machine->symbol_table().lookup(pc);
                 std::string sym_str = sym.empty() ? "" : std::format(" ({})", sym);
-                content_rows.push_back(std::format("{}PC Breakpoint at \033[1;33m0x{:08x}\033[0m{}",
-                                                   prefix, pc, sym_str));
+                const auto& records = machine->breakpoint_manager().get_pc_breakpoint_records();
+                const bool mission_owned = std::ranges::any_of(records, [pc](const auto& record) {
+                    return record.addr == pc &&
+                           record.owner == simrv::debug::BreakpointOwner::Mission;
+                });
+                const bool user_owned = std::ranges::any_of(records, [pc](const auto& record) {
+                    return record.addr == pc && record.owner == simrv::debug::BreakpointOwner::Tui;
+                });
+                const auto kind = mission_owned && !user_owned ? "Mission checkpoint at"
+                                  : mission_owned              ? "Breakpoint + checkpoint at"
+                                                               : "PC Breakpoint at";
+                content_rows.push_back(
+                    std::format("{}{} \033[1;33m0x{:08x}\033[0m{}", prefix, kind, pc, sym_str));
                 item_idx++;
                 if (item_idx >= 9) break;
             }

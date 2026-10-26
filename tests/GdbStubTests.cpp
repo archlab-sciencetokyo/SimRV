@@ -254,6 +254,17 @@ static void test_breakpoint_ownership() {
     EXPECT_TRUE(manager.has_pc_breakpoint(address));
     manager.clear_owner(simrv::debug::BreakpointOwner::Tui);
     EXPECT_TRUE(!manager.has_pc_breakpoint(address));
+    constexpr simrv::xlen::Address lesson_address =
+        static_cast<simrv::xlen::Address>(0x80000004ULL);
+    manager.add_pc_breakpoint(lesson_address, simrv::debug::BreakpointOwner::Tui);
+    manager.add_pc_breakpoint(lesson_address, simrv::debug::BreakpointOwner::Mission);
+    manager.remove_pc_breakpoint(lesson_address, simrv::debug::BreakpointOwner::Tui);
+    EXPECT_TRUE(manager.has_pc_breakpoint(lesson_address));
+    EXPECT_EQ(manager.get_pc_breakpoint_records().size(), 1U);
+    EXPECT_EQ(manager.get_pc_breakpoint_records().front().owner,
+              simrv::debug::BreakpointOwner::Mission);
+    manager.remove_pc_breakpoint(lesson_address, simrv::debug::BreakpointOwner::Mission);
+    EXPECT_TRUE(!manager.has_pc_breakpoint(lesson_address));
     manager.add_watchpoint(address, 4, simrv::debug::WatchType::Write, "tui");
     const auto tui_id = manager.get_watchpoints().front().id;
     manager.add_watchpoint(address, 4, simrv::debug::WatchType::Write, "gdb",

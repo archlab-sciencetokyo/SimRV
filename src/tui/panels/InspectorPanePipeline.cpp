@@ -145,7 +145,8 @@ auto get_computation_desc(const simrv::pipeline::PipelineContext& ctx, int width
     std::string reg2 = is_rs2_fp ? fp_reg_name(ctx.rs2) : reg_name(ctx.rs2);
 
     if (is_load_opcode(opc)) {
-        if (width < 68) {
+        if (framework::active_render_context().density == framework::Density::Compact ||
+            width < 68) {
             std::string offset_str = (ctx.imm != 0) ? std::format(" + {}", ctx.imm) : "";
             return std::format(" {}Computation : {}[{}{}] → {}\033[0m", kThemeText, kThemeMint,
                                reg1, offset_str, hex_val(ctx.mem_rdata));
@@ -154,7 +155,8 @@ auto get_computation_desc(const simrv::pipeline::PipelineContext& ctx, int width
                            hex_val(ctx.rrs1), ctx.imm, hex_val(ctx.mem_rdata));
     }
     if (is_store_opcode(opc)) {
-        if (width < 68) {
+        if (framework::active_render_context().density == framework::Density::Compact ||
+            width < 68) {
             std::string offset_str = (ctx.imm != 0) ? std::format(" + {}", ctx.imm) : "";
             return std::format(" {}Computation : {}{} ({}) → [{}{}]\033[0m", kThemeText, kThemeMint,
                                reg2, hex_val(ctx.rrs2), reg1, offset_str);
@@ -163,7 +165,8 @@ auto get_computation_desc(const simrv::pipeline::PipelineContext& ctx, int width
                            hex_val(ctx.rrs2), hex_val(ctx.rrs1), ctx.imm);
     }
     if (is_branch_opcode(opc)) {
-        if (width < 68) {
+        if (framework::active_render_context().density == framework::Density::Compact ||
+            width < 68) {
             return std::format(" {}Computation : {}{} vs {} → {}\033[0m", kThemeText, kThemeMint,
                                reg1, reg2, ctx.tkn ? "Taken" : "Not Taken");
         }
@@ -172,7 +175,8 @@ auto get_computation_desc(const simrv::pipeline::PipelineContext& ctx, int width
                            ctx.tkn ? "Taken" : "Not Taken");
     }
     if (opc == Opcode::Jal) {
-        if (width < 68) {
+        if (framework::active_render_context().density == framework::Density::Compact ||
+            width < 68) {
             return std::format(" {}Computation : {}Jump → {} (link in rd)\033[0m", kThemeText,
                                kThemeMint, hex_val(ctx.jmp_pc));
         }
@@ -180,7 +184,8 @@ auto get_computation_desc(const simrv::pipeline::PipelineContext& ctx, int width
                            kThemeMint, hex_val(ctx.jmp_pc), hex_val((ctx.cpc + 4).raw()));
     }
     if (opc == Opcode::Jalr) {
-        if (width < 68) {
+        if (framework::active_render_context().density == framework::Density::Compact ||
+            width < 68) {
             return std::format(" {}Computation : {}Jump → {} (link in rd)\033[0m", kThemeText,
                                kThemeMint, hex_val(ctx.jmp_pc));
         }
@@ -192,7 +197,8 @@ auto get_computation_desc(const simrv::pipeline::PipelineContext& ctx, int width
                            hex_val(ctx.wb_data));
     }
     if (opc == Opcode::Auipc) {
-        if (width < 68) {
+        if (framework::active_render_context().density == framework::Density::Compact ||
+            width < 68) {
             return std::format(" {}Computation : {}PC + (imm << 12) = {}\033[0m", kThemeText,
                                kThemeMint, hex_val(ctx.wb_data));
         }
@@ -227,7 +233,8 @@ auto get_computation_desc(const simrv::pipeline::PipelineContext& ctx, int width
                            kThemeMint, hex_val(ctx.rrs1), hex_val(ctx.rrs2), hex_val(ctx.wb_data));
     }
     if (fmt == InstFormat::R) {
-        if (width < 68) {
+        if (framework::active_render_context().density == framework::Density::Compact ||
+            width < 68) {
             return std::format(" {}Computation : {}{} {} {} = {}\033[0m", kThemeText, kThemeMint,
                                reg1, op_name, reg2, hex_val(ctx.wb_data));
         }
@@ -235,7 +242,7 @@ auto get_computation_desc(const simrv::pipeline::PipelineContext& ctx, int width
                            hex_val(ctx.rrs1), op_name, hex_val(ctx.rrs2), hex_val(ctx.wb_data));
     }
     // I-type ALU
-    if (width < 68) {
+    if (framework::active_render_context().density == framework::Density::Compact || width < 68) {
         return std::format(" {}Computation : {}{} {} {} = {}\033[0m", kThemeText, kThemeMint, reg1,
                            op_name, ctx.imm, hex_val(ctx.wb_data));
     }
@@ -600,9 +607,9 @@ auto InspectorPane::render_pipeline_stages_ca_hazards(const simrv::core::CPU& cp
                     width);
             }
             auto paths = get_active_forwarding_paths(ps);
-            std::string paths_str = "None";
+            std::string paths_str = "Enabled · idle";
             if (!paths.empty()) {
-                paths_str = "";
+                paths_str = "Enabled · ";
                 for (size_t i = 0; i < paths.size(); ++i) {
                     if (i > 0) paths_str += ", ";
                     paths_str += paths[i];

@@ -343,10 +343,8 @@ void CPU::fetch_read_instruction_word(Machine& machine) {
 
     if (simrv::compiler::likely(machine.memory_geometry().contains(ctx.padr1, sizeof(uint16_t)) &&
                                 machine.memory_geometry().contains(ctx.padr2, sizeof(uint16_t)))) {
-        const simrv::xlen::Address line_base =
-            (ctx.padr1 &
-             ~(static_cast<simrv::xlen::Address>(simrv::cache::ICache::kLineBytes - 1u)))
-                .raw();
+        const simrv::xlen::PhysAddr line_base =
+            ctx.padr1 & ~(static_cast<simrv::xlen::Address>(simrv::cache::ICache::kLineBytes - 1u));
         const bool refill_in_progress = machine.runtime_profile.is_cycle_mode() &&
                                         ca_state.instruction_fill.active &&
                                         ca_state.instruction_fill.line_base == line_base;
@@ -360,14 +358,14 @@ void CPU::fetch_read_instruction_word(Machine& machine) {
             }
         }
 
-        auto trigger_prefetch = [&](simrv::xlen::Address base) {
+        auto trigger_prefetch = [&](simrv::xlen::PhysAddr base) {
             if (machine.runtime_profile.is_cycle_mode() &&
                 pipeline_sim.config.enable_instruction_prefetch &&
                 !ca_state.instruction_fill.active && !ca_state.instruction_prefetch.active) {
-                const simrv::xlen::Address next_line = base + simrv::cache::ICache::kLineBytes;
-                if (machine.memory_geometry().contains(next_line,
+                const simrv::xlen::PhysAddr next_line = base + simrv::cache::ICache::kLineBytes;
+                if (machine.memory_geometry().contains(next_line.raw(),
                                                        simrv::cache::ICache::kLineBytes) &&
-                    icache.line_state(next_line) == simrv::memory::MesiState::Invalid) {
+                    icache.line_state(next_line.raw()) == simrv::memory::MesiState::Invalid) {
                     simrv::memory::TlChannelA pf_req{};
                     pf_req.opcode = simrv::memory::TlOpcodeA::Intent;
                     pf_req.intent = simrv::memory::TlIntent::PrefetchRead;
@@ -375,7 +373,7 @@ void CPU::fetch_read_instruction_word(Machine& machine) {
                     pf_req.hart = hart_id();
                     pf_req.source = simrv::memory::make_tl_source(
                         pf_req.hart, simrv::memory::TlPort::Instruction);
-                    pf_req.address = next_line;
+                    pf_req.address = next_line.raw();
                     if (machine.memory_.system_bus().send_request(pf_req)) {
                         ca_state.instruction_prefetch.active = true;
                         ca_state.instruction_prefetch.request_pending = true;
@@ -426,7 +424,7 @@ void CPU::fetch_read_instruction_word(Machine& machine) {
                         fill.reset();
                         return;
                     }
-                    icache.insert(line_base, timed.line_data.data(),
+                    icache.insert(line_base.raw(), timed.line_data.data(),
                                   simrv::memory::mesi_for(timed.payload.cap));
                     release_instruction_eviction(machine, *this);
                     machine.memory_.system_bus().grant_ack(
@@ -434,7 +432,7 @@ void CPU::fetch_read_instruction_word(Machine& machine) {
                     fill.reset();
                     trigger_prefetch(line_base);
 
-                    const auto byte_offset = static_cast<size_t>(ctx.padr1.raw() - line_base);
+                    const auto byte_offset = static_cast<size_t>(ctx.padr1.raw() - line_base.raw());
                     std::memcpy(&w_data, timed.line_data.data() + byte_offset, sizeof(w_data));
                     if ((w_data & 0x3) != 0x3) {
                         ctx.ir_org = w_data & 0xFFFF;
@@ -479,10 +477,10 @@ void CPU::fetch_read_instruction_word(Machine& machine) {
                 ctx.pending_tval = state_.pc;
                 return;
             }
-            icache.insert(line_base, line_data.data(), simrv::memory::mesi_for(resp.cap));
+            icache.insert(line_base.raw(), line_data.data(), simrv::memory::mesi_for(resp.cap));
             release_instruction_eviction(machine, *this);
             machine.memory_.system_bus().grant_ack(simrv::memory::TlChannelE{.sink = resp.sink});
-            const auto byte_offset = static_cast<size_t>(ctx.padr1.raw() - line_base);
+            const auto byte_offset = static_cast<size_t>(ctx.padr1.raw() - line_base.raw());
             std::memcpy(&w_data, line_data.data() + byte_offset, sizeof(w_data));
             if ((w_data & 0x3) != 0x3) {
                 ctx.ir_org = w_data & 0xFFFF;
@@ -495,10 +493,8 @@ void CPU::fetch_read_instruction_word(Machine& machine) {
         auto fetch_halfword = [&](simrv::xlen::PhysAddr paddr,
                                   simrv::xlen::Address vaddr) -> std::optional<uint16_t> {
             uint16_t h_data = 0;
-            const simrv::xlen::Address h_line_base =
-                (paddr &
-                 ~(static_cast<simrv::xlen::Address>(simrv::cache::ICache::kLineBytes - 1u)))
-                    .raw();
+            const simrv::xlen::PhysAddr h_line_base =
+                paddr & ~(static_cast<simrv::xlen::Address>(simrv::cache::ICache::kLineBytes - 1u));
             const bool h_refill_in_progress = machine.runtime_profile.is_cycle_mode() &&
                                               ca_state.instruction_fill.active &&
                                               ca_state.instruction_fill.line_base == h_line_base;
@@ -534,7 +530,7 @@ void CPU::fetch_read_instruction_word(Machine& machine) {
                         fill.reset();
                         return std::nullopt;
                     }
-                    icache.insert(h_line_base, timed.line_data.data(),
+                    icache.insert(h_line_base.raw(), timed.line_data.data(),
                                   simrv::memory::mesi_for(timed.payload.cap));
                     release_instruction_eviction(machine, *this);
                     machine.memory_.system_bus().grant_ack(
@@ -542,7 +538,7 @@ void CPU::fetch_read_instruction_word(Machine& machine) {
                     fill.reset();
                     trigger_prefetch(h_line_base);
 
-                    const auto byte_offset = static_cast<size_t>(paddr.raw() - h_line_base);
+                    const auto byte_offset = static_cast<size_t>(paddr.raw() - h_line_base.raw());
                     std::memcpy(&h_data, timed.line_data.data() + byte_offset, sizeof(h_data));
                     return h_data;
                 }
@@ -553,7 +549,7 @@ void CPU::fetch_read_instruction_word(Machine& machine) {
                 req.size = simrv::memory::kTlBlockSize;
                 req.hart = hart_id();
                 req.source = fill.source;
-                req.address = h_line_base;
+                req.address = h_line_base.raw();
                 if (!machine.memory_.system_bus().send_request(req)) {
                     ca_state.waiting_for_interconnect = false;
                     ctx.pending_exception = ExceptionCode::FaultFetch;
@@ -573,7 +569,7 @@ void CPU::fetch_read_instruction_word(Machine& machine) {
             req.hart = hart_id();
             req.source =
                 simrv::memory::make_tl_source(req.hart, simrv::memory::TlPort::Instruction);
-            req.address = h_line_base;
+            req.address = h_line_base.raw();
             simrv::memory::TlChannelD resp{};
             if (!machine.memory_.system_bus().acquire_block(req, resp, line_data) ||
                 resp.failed()) {
@@ -581,10 +577,10 @@ void CPU::fetch_read_instruction_word(Machine& machine) {
                 ctx.pending_tval = vaddr;
                 return std::nullopt;
             }
-            icache.insert(h_line_base, line_data.data(), simrv::memory::mesi_for(resp.cap));
+            icache.insert(h_line_base.raw(), line_data.data(), simrv::memory::mesi_for(resp.cap));
             release_instruction_eviction(machine, *this);
             machine.memory_.system_bus().grant_ack(simrv::memory::TlChannelE{.sink = resp.sink});
-            const auto byte_offset = static_cast<size_t>(paddr.raw() - h_line_base);
+            const auto byte_offset = static_cast<size_t>(paddr.raw() - h_line_base.raw());
             std::memcpy(&h_data, line_data.data() + byte_offset, sizeof(h_data));
             return h_data;
         };

@@ -22,7 +22,7 @@ Build one example directly for RV64:
 ```bash
 riscv64-unknown-elf-gcc -march=rv64gc -mabi=lp64d -nostdlib -static \
   -T examples/isa/linker.ld -o /tmp/simrv-arithmetic.elf examples/isa/arithmetic.S
-./build/rv64-release/simrv --tui --baremetal -m /tmp/simrv-arithmetic.elf --class
+./build/rv64-release/simrv --tui --baremetal -m /tmp/simrv-arithmetic.elf
 ```
 
 For RV32, use `-march=rv32gc -mabi=ilp32d` and the RV32 SimRV build. Each program stops in a
@@ -53,9 +53,8 @@ modify independently, not sequenced exercises.
 
 ## Interactive exploration
 
-Press `g` to show or hide the Student Guide, `Enter` to perform its suggested action, `e` to explain
-the current instruction, `?` for the relevant glossary topic, and `v` to record a short execution
-trace.
+Press `e` to explain the current instruction, `?` for the relevant glossary topic, and `v` to
+record a short execution trace.
 
 Every example exports descriptive `checkpoint_*` symbols. Press `:` in the paused TUI, enter one of
 those names, and continue with `c`; SimRV pauses before the labeled instruction. This makes it easy
@@ -71,24 +70,24 @@ Build the examples, then launch the named ELF with the classroom mission:
 
 ```bash
 ./build/rv64-release/simrv --tui --baremetal \
-  -m /tmp/simrv-isa-rv64/control-flow-calls.elf --class \
+  -m /tmp/simrv-isa-rv64/control-flow-calls.elf \
   --mission examples/isa/lessons/control-flow-calls.mission
 ```
 
-The mission is local guidance, not an assessment. It follows the `mission_*` labels in order and
-uses Enter to open the relevant inspector view. Students can freely step, set breakpoints, or hide
-the guide; `z` dismisses the mission and `Z` restarts it without modifying the guest program.
+The mission is local guidance, not an assessment. It presents instructional steps and pauses at
+the separately configured `mission_*` checkpoints. Students can freely inspect the program; `z`
+dismisses the mission and `Z` restarts it without modifying the guest program.
 
-Mission files use a versioned `[mission]` section followed by ordered `[step]` sections. A step
-references an ELF label and supplies its title, prompt, architectural rationale, target inspector
-view, and glossary topic. This keeps course flow editable alongside course material without
-rebuilding SimRV; unknown or incomplete fields are rejected with a local guide message.
+Mission files use a versioned `[mission]` section, ordered `[step]` sections, and independent
+`[checkpoint]` sections. Checkpoints refer to the step boundary they gate and can supply a message
+for the reached modal. This keeps course flow editable alongside course material without rebuilding
+SimRV.
 
 For the interactive UART example:
 
 ```bash
 ./build/rv64-release/simrv --tui --baremetal \
-  -m /tmp/simrv-isa-rv64/uart-input-echo.elf --class
+  -m /tmp/simrv-isa-rv64/uart-input-echo.elf
 ```
 
 Press `c` to run. Type into the guest terminal when prompted; while running, input routes directly

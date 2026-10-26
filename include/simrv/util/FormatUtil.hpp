@@ -150,29 +150,9 @@ constexpr std::string_view kBrightMagenta = "\033[95m";
 constexpr std::string_view kBrightCyan = "\033[96m";
 constexpr std::string_view kBrightWhite = "\033[97m";
 
-// Background colors
-constexpr std::string_view kBgBlack = "\033[40m";
-constexpr std::string_view kBgRed = "\033[41m";
-constexpr std::string_view kBgGreen = "\033[42m";
-constexpr std::string_view kBgYellow = "\033[43m";
-constexpr std::string_view kBgBlue = "\033[44m";
-constexpr std::string_view kBgMagenta = "\033[45m";
-constexpr std::string_view kBgCyan = "\033[46m";
-constexpr std::string_view kBgWhite = "\033[47m";
-
-// Combined styles used in SimRV TUI
-constexpr std::string_view kBgYellowFgBlack = "\033[1;43;30m";
-constexpr std::string_view kBgGreenFgBlack = "\033[1;42;30m";
-constexpr std::string_view kBgRedFgBlack = "\033[1;30;41m";
-constexpr std::string_view kBgYellowFgBlackBlink = "\033[1;5;30;43m";
-
 constexpr std::string_view kBoldFgBrightBlue = "\033[1;94m";
-constexpr std::string_view kBoldFgBrightWhite = "\033[1;97m";
 constexpr std::string_view kBoldFgBrightGreen = "\033[1;92m";
-constexpr std::string_view kBoldFgCyan = "\033[1;36m";
 constexpr std::string_view kBoldFgRed = "\033[1;31m";
-constexpr std::string_view kBoldFgBrightBlack = "\033[1;90m";
-constexpr std::string_view kBoldFgBrightYellow = "\033[1;93m";
 
 // Terminal control sequences
 constexpr std::string_view kClearScreen = "\033[2J";

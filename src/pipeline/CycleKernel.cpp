@@ -18,6 +18,64 @@ namespace {
     return context.opcode == isa::Opcode::Amo && context.funct5 == isa::Funct5Amo::Sc;
 }
 
+[[nodiscard]] auto compute_div_latency(const pipeline::PipelineContext& ctx,
+                                       const pipeline::CpuConfig& config, unsigned xlen) noexcept
+    -> simrv::xlen::LatencyCycles {
+    if (!config.divider_early_out) {
+        return config.div_latency;
+    }
+    const auto u1 = ctx.rrs1;
+    const auto u2 = ctx.rrs2;
+    if (u2 == 0) return 1;
+
+    const bool is_w = (ctx.opcode == isa::Opcode::Op32 || ctx.opcode == isa::Opcode::OpImm32);
+    const bool is_signed = (ctx.op_id == isa::DIV || ctx.op_id == isa::REM ||
+                            ctx.op_id == isa::DIVW || ctx.op_id == isa::REMW);
+
+    uint64_t mag1 = 0;
+    uint64_t mag2 = 0;
+
+    if (is_w || xlen == 32) {
+        const auto raw1 = static_cast<uint32_t>(u1);
+        const auto raw2 = static_cast<uint32_t>(u2);
+        if (is_signed) {
+            const auto s1 = static_cast<int32_t>(raw1);
+            const auto s2 = static_cast<int32_t>(raw2);
+            if (s1 == std::numeric_limits<int32_t>::min() && s2 == -1) return 1;
+            mag1 = s1 < 0 ? static_cast<uint64_t>(-static_cast<int64_t>(s1))
+                          : static_cast<uint64_t>(s1);
+            mag2 = s2 < 0 ? static_cast<uint64_t>(-static_cast<int64_t>(s2))
+                          : static_cast<uint64_t>(s2);
+        } else {
+            mag1 = raw1;
+            mag2 = raw2;
+        }
+        if (mag1 < mag2) return 2;
+        const auto clz1 = std::countl_zero(static_cast<uint32_t>(mag1));
+        const auto clz2 = std::countl_zero(static_cast<uint32_t>(mag2));
+        const auto diff = clz2 > clz1 ? (clz2 - clz1) : 0;
+        return std::clamp<simrv::xlen::LatencyCycles>(
+            static_cast<simrv::xlen::LatencyCycles>(2 + diff), 2, config.div_latency);
+    } else {
+        if (is_signed) {
+            const auto s1 = static_cast<int64_t>(u1);
+            const auto s2 = static_cast<int64_t>(u2);
+            if (s1 == std::numeric_limits<int64_t>::min() && s2 == -1) return 1;
+            mag1 = s1 < 0 ? static_cast<uint64_t>(-s1) : static_cast<uint64_t>(s1);
+            mag2 = s2 < 0 ? static_cast<uint64_t>(-s2) : static_cast<uint64_t>(s2);
+        } else {
+            mag1 = u1;
+            mag2 = u2;
+        }
+        if (mag1 < mag2) return 2;
+        const auto clz1 = std::countl_zero(mag1);
+        const auto clz2 = std::countl_zero(mag2);
+        const auto diff = clz2 > clz1 ? (clz2 - clz1) : 0;
+        return std::clamp<simrv::xlen::LatencyCycles>(
+            static_cast<simrv::xlen::LatencyCycles>(2 + (diff / 2)), 2, config.div_latency);
+    }
+}
+
 const bool g_retire_trace = std::getenv("SIMRV_RETIRE_TRACE") != nullptr;
 const bool g_cache_trace = std::getenv("SIMRV_CACHE_TRACE") != nullptr;
 }  // namespace
@@ -443,7 +501,8 @@ void CPU::run_ca_pipeline_cycle(Machine& machine) {
                         decode->remaining_latency = pipeline_sim.config.mul_latency;
                     } else if (exec_class ==
                                pipeline::operation::ExecutionClass::DivideOrRemainder) {
-                        decode->remaining_latency = pipeline_sim.config.div_latency;
+                        decode->remaining_latency = compute_div_latency(
+                            decode->context, pipeline_sim.config, state_.regs.xlen);
                     } else if (decode->context.traits.is_cfu) {
                         decode->remaining_latency = cfu_unit.query_stall_cycles(
                             decode->context.funct7, std::to_underlying(decode->context.funct3));
@@ -529,7 +588,8 @@ void CPU::run_ca_pipeline_cycle(Machine& machine) {
                             ex_slot->remaining_latency = pipeline_sim.config.mul_latency;
                             break;
                         case ExecutionClass::DivideOrRemainder:
-                            ex_slot->remaining_latency = pipeline_sim.config.div_latency;
+                            ex_slot->remaining_latency = compute_div_latency(
+                                ex_slot->context, pipeline_sim.config, state_.regs.xlen);
                             break;
                         case ExecutionClass::FpDivideOrSqrt:
                             ex_slot->remaining_latency = pipeline_sim.config.fp_div_latency;

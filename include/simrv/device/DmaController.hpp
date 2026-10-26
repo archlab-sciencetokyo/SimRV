@@ -80,13 +80,17 @@ class DmaController : public memory::MmioDevice {
     [[nodiscard]] auto is_busy() const noexcept -> bool { return busy_; }
     [[nodiscard]] auto is_done() const noexcept -> bool { return (status_ & kStatusDone) != 0; }
     [[nodiscard]] auto is_error() const noexcept -> bool { return (status_ & kStatusError) != 0; }
-    [[nodiscard]] auto irq_num() const noexcept -> uint32_t { return irq_num_; }
-
-    [[nodiscard]] auto src_address() const noexcept -> uint64_t {
-        return static_cast<uint64_t>(src_addr_lo_) | (static_cast<uint64_t>(src_addr_hi_) << 32);
+    [[nodiscard]] auto irq_num() const noexcept -> simrv::xlen::IrqNumber {
+        return static_cast<simrv::xlen::IrqNumber>(irq_num_);
     }
-    [[nodiscard]] auto dst_address() const noexcept -> uint64_t {
-        return static_cast<uint64_t>(dst_addr_lo_) | (static_cast<uint64_t>(dst_addr_hi_) << 32);
+
+    [[nodiscard]] auto src_address() const noexcept -> simrv::xlen::PhysAddr {
+        return simrv::xlen::PhysAddr{static_cast<simrv::xlen::Address>(
+            (static_cast<uint64_t>(src_addr_hi_) << 32) | src_addr_lo_)};
+    }
+    [[nodiscard]] auto dst_address() const noexcept -> simrv::xlen::PhysAddr {
+        return simrv::xlen::PhysAddr{static_cast<simrv::xlen::Address>(
+            (static_cast<uint64_t>(dst_addr_hi_) << 32) | dst_addr_lo_)};
     }
     [[nodiscard]] auto byte_count() const noexcept -> uint32_t { return byte_count_; }
 
@@ -94,7 +98,7 @@ class DmaController : public memory::MmioDevice {
 
    private:
     void start_transfer();
-    void execute_transfer(uint64_t src, uint64_t dst, uint32_t count);
+    void execute_transfer(simrv::xlen::PhysAddr src, simrv::xlen::PhysAddr dst, uint32_t count);
 
     simrv::xlen::Address base_address_;
     simrv::xlen::Address size_;

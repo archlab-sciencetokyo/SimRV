@@ -628,6 +628,21 @@ enum OperationId : uint16_t {
     VWSLL_VI,
     VCHECK,
     CFU,
+    /* Zicond (Integer Conditional Operations) */
+    CZERO_EQZ,
+    CZERO_NEZ,
+    /* Zicbo (Cache Block Operations) */
+    CBO_ZERO,
+    CBO_CLEAN,
+    CBO_FLUSH,
+    CBO_INVAL,
+    PREFETCH_I,
+    PREFETCH_R,
+    PREFETCH_W,
+    /* Svinval (Fine-Grained Page Table Invalidation) */
+    SINVAL_VMA,
+    SFENCE_W_INVAL,
+    SFENCE_INVAL_IR,
     /* Others */
     UNKNOWN,
     OperationIdCount
@@ -704,6 +719,18 @@ constexpr OperationId kOpRangeVectorEnd = VWSLL_VI;
 }
 
 [[nodiscard]] constexpr auto is_cfu_op(OperationId op_id) noexcept -> bool { return op_id == CFU; }
+
+[[nodiscard]] constexpr auto is_zicond_op(OperationId op_id) noexcept -> bool {
+    return op_id == CZERO_EQZ || op_id == CZERO_NEZ;
+}
+
+[[nodiscard]] constexpr auto is_cmo_op(OperationId op_id) noexcept -> bool {
+    return op_id >= CBO_ZERO && op_id <= PREFETCH_W;
+}
+
+[[nodiscard]] constexpr auto is_svinval_op(OperationId op_id) noexcept -> bool {
+    return op_id >= SINVAL_VMA && op_id <= SFENCE_INVAL_IR;
+}
 
 /// @brief Unified count of all valid simulator operations
 constexpr size_t kOperationIdCount = static_cast<size_t>(OperationIdCount);

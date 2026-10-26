@@ -92,6 +92,42 @@ auto VirtioPciDevice::dma_write(simrv::xlen::Address paddr, const void* src, siz
     return root_complex_->machine()->memory().dma_write(paddr, src, len);
 }
 
+void VirtioPciDevice::trigger_irq() {
+    isr_status_ |= 0x1;
+    PciDevice::trigger_irq();
+}
+
+auto VirtioPciDevice::dma_read_bytes(uint64_t phys_addr, std::byte* dst, std::size_t len) -> bool {
+    return dma_read(phys_addr, dst, len);
+}
+
+auto VirtioPciDevice::dma_write_bytes(uint64_t phys_addr, const std::byte* src, std::size_t len)
+    -> bool {
+    return dma_write(phys_addr, src, len);
+}
+
+auto VirtioPciDevice::is_cycle_mode() const noexcept -> bool {
+    return root_complex_ != nullptr && root_complex_->machine() != nullptr &&
+           root_complex_->machine()->runtime_profile.is_cycle_mode();
+}
+
+auto VirtioPciDevice::is_dma_enabled() const noexcept -> bool {
+    return root_complex_ != nullptr && root_complex_->machine() != nullptr &&
+           root_complex_->machine()->dma_engine().is_enabled();
+}
+
+void VirtioPciDevice::schedule_deferred_dma(size_t transfer_bytes,
+                                            std::function<void()> completion_callback) {
+    if (is_cycle_mode() && is_dma_enabled()) {
+        auto* machine = root_complex_->machine();
+        const auto current_cycle = machine->memory().system_bus().cycle();
+        machine->dma_engine().schedule_transfer(transfer_bytes, current_cycle,
+                                                std::move(completion_callback));
+    } else if (completion_callback) {
+        completion_callback();
+    }
+}
+
 auto VirtioPciDevice::bar_read(PciBarIndex bar_idx, PciBarOffset offset, PciAccessBytes size)
     -> PciMmioData {
     if (bar_idx != 0) return 0;

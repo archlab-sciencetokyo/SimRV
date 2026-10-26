@@ -28,7 +28,12 @@ void CPU::writeback_registers(Machine& machine) {
     e_icount += effects.increments_instruction_count;
     if (simrv::compiler::unlikely(machine.instruction_mix_enabled()) &&
         effects.increments_instruction_count != 0) {
-        e_instmix[static_cast<std::size_t>(active_context().op_id)]++;
+        const auto op = active_context().op_id;
+        e_instmix[static_cast<std::size_t>(op)]++;
+        const auto cur_cycle = clint_mmio.mcycle;
+        const auto delta = cur_cycle > last_retire_cycle_ ? (cur_cycle - last_retire_cycle_) : 1;
+        last_retire_cycle_ = cur_cycle;
+        perf_counters.record_retire(op, delta);
     }
     if (effects.floating_write.enabled) {
         if (machine.trace().is_register_write_trace_enabled()) {
@@ -93,7 +98,9 @@ void CPU::commit_control_flow_and_traps([[maybe_unused]] Machine& machine) {
                 }
                 default:
                     if (ctx.funct7 ==
-                        static_cast<simrv::xlen::Instruction>(Funct7Priv::SfenceVma)) {
+                            static_cast<simrv::xlen::Instruction>(Funct7Priv::SfenceVma) ||
+                        ctx.funct7 ==
+                            static_cast<simrv::xlen::Instruction>(Funct7Priv::SinvalVma)) {
                         const bool match_all_vaddr = (std::to_underlying(ctx.rs1) == 0);
                         const bool match_all_asid = (std::to_underlying(ctx.rs2) == 0);
                         TLB_flush(match_all_vaddr, ctx.rrs1, match_all_asid,

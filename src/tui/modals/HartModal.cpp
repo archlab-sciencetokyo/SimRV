@@ -16,6 +16,66 @@
 
 namespace simrv::tui::modals {
 
+void HartModal::render_content(std::vector<std::string>& content_rows, int /*width*/,
+                               int /*height*/) {
+    auto add_row = [&](std::string s) { content_rows.push_back(std::move(s)); };
+    if (machine_) render(content_rows, add_row, *machine_);
+}
+
+void HartModal::scroll_to_top() {
+    if (machine_) move_cursor(-999999, *machine_);
+}
+
+void HartModal::scroll_to_bottom() {
+    if (machine_) move_cursor(999999, *machine_);
+}
+
+void HartModal::handle_wheel(int delta) {
+    if (machine_) move_cursor(delta, *machine_);
+}
+
+auto HartModal::handle_key(uint8_t byte, TuiKey key) -> framework::ModalAction {
+    if (byte == 27 || key == simrv::tui::TuiKey::Esc || byte == 'q' || byte == 'Q') {
+        return framework::ModalAction::Close;
+    }
+    if (key == simrv::tui::TuiKey::Enter || key == simrv::tui::TuiKey::Newline || byte == ' ') {
+        return framework::ModalAction::Submit;
+    }
+    if (byte >= '0' && byte <= '9') {
+        size_t const hart_idx = static_cast<size_t>(byte - '0');
+        if (machine_ && hart_idx < machine_->num_harts()) {
+            cursor_ = static_cast<int>(hart_idx);
+            return framework::ModalAction::Submit;
+        }
+    }
+    if (byte == 'j' || byte == 'J') {
+        handle_wheel(1);
+        return framework::ModalAction::Continue;
+    }
+    if (byte == 'k' || byte == 'K') {
+        handle_wheel(-1);
+        return framework::ModalAction::Continue;
+    }
+    return framework::ModalAction::Continue;
+}
+
+auto HartModal::handle_control_click(int /*content_row*/, size_t action_index)
+    -> framework::ModalAction {
+    return action_index == 0 ? framework::ModalAction::Submit : framework::ModalAction::Close;
+}
+
+auto HartModal::handle_click(framework::ScreenCoord local_pt) -> framework::ModalAction {
+    int content_row = local_pt.y - 1;
+    if (content_row >= 3 && machine_) {
+        int hart_idx = content_row - 3;
+        if (hart_idx >= 0 && static_cast<size_t>(hart_idx) < machine_->num_harts()) {
+            cursor_ = hart_idx;
+            return framework::ModalAction::Submit;
+        }
+    }
+    return framework::ModalAction::Continue;
+}
+
 void HartModal::open(size_t current_hart, const simrv::core::Machine& machine) {
     const size_t total = machine.num_harts();
     cursor_ = (total > 0) ? static_cast<int>(current_hart % total) : 0;

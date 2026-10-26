@@ -27,6 +27,15 @@ enum class ScrollIndicatorMode : std::uint8_t {
     HeaderSummary,
 };
 
+enum class ScrollDirection : std::uint8_t { Up, Down, Left, Right };
+enum class ScrollGranularity : std::uint8_t { Step, Page, Edge };
+enum class ScrollOrigin : std::uint8_t { Top, Bottom };
+
+inline constexpr int kDefaultVerticalStep = 1;
+inline constexpr int kDefaultHorizontalStep = 4;
+inline constexpr int kDefaultWheelVerticalStep = 2;
+inline constexpr int kDefaultConsoleWheelStep = 5;
+
 struct ScrollBounds {
     RowCount total_rows = 0;
     RowCount viewport_height = 0;
@@ -36,25 +45,31 @@ struct ScrollBounds {
     ColumnCount viewport_width = 0;
     ScrollOffset offset_x = 0;
 
+    ScrollOrigin origin = ScrollOrigin::Top;
+
     [[nodiscard]] constexpr auto max_offset_y() const -> ScrollOffset {
         return std::max(0, total_rows - viewport_height);
     }
     [[nodiscard]] constexpr auto max_offset_x() const -> ScrollOffset {
         return std::max(0, total_cols - viewport_width);
     }
-    [[nodiscard]] constexpr auto can_scroll_up() const -> bool { return offset_y > 0; }
+    [[nodiscard]] constexpr auto can_scroll_up() const -> bool {
+        return origin == ScrollOrigin::Top ? offset_y > 0 : offset_y < max_offset_y();
+    }
     [[nodiscard]] constexpr auto can_scroll_down() const -> bool {
-        return offset_y < max_offset_y();
+        return origin == ScrollOrigin::Top ? offset_y < max_offset_y() : offset_y > 0;
     }
     [[nodiscard]] constexpr auto can_scroll_left() const -> bool { return offset_x > 0; }
     [[nodiscard]] constexpr auto can_scroll_right() const -> bool {
         return offset_x < max_offset_x();
     }
     [[nodiscard]] constexpr auto remaining_above() const -> RowCount {
-        return std::max(0, offset_y);
+        return origin == ScrollOrigin::Top ? std::max(0, offset_y)
+                                           : std::max(0, max_offset_y() - offset_y);
     }
     [[nodiscard]] constexpr auto remaining_below() const -> RowCount {
-        return std::max(0, total_rows - (offset_y + viewport_height));
+        return origin == ScrollOrigin::Top ? std::max(0, max_offset_y() - offset_y)
+                                           : std::max(0, offset_y);
     }
     [[nodiscard]] constexpr auto remaining_left() const -> ColumnCount {
         return std::max(0, offset_x);
@@ -70,10 +85,19 @@ class ScrollView {
                                                   int visible_width)>;
 
     constexpr ScrollView() = default;
-    constexpr explicit ScrollView(ScrollIndicatorMode mode) : indicator_mode_(mode) {}
+    constexpr explicit ScrollView(ScrollIndicatorMode mode, ScrollOrigin origin = ScrollOrigin::Top)
+        : indicator_mode_(mode) {
+        bounds_.origin = origin;
+    }
 
     void set_indicator_mode(ScrollIndicatorMode mode) { indicator_mode_ = mode; }
     [[nodiscard]] auto indicator_mode() const -> ScrollIndicatorMode { return indicator_mode_; }
+
+    void set_origin(ScrollOrigin origin) {
+        bounds_.origin = origin;
+        clamp();
+    }
+    [[nodiscard]] auto origin() const -> ScrollOrigin { return bounds_.origin; }
 
     void set_geometry(RowCount total_rows, RowCount viewport_height, ColumnCount total_cols = 0,
                       ColumnCount viewport_width = 0) {
@@ -124,6 +148,56 @@ class ScrollView {
         scroll_x(pages * page_step);
     }
 
+    void scroll(ScrollDirection direction, ScrollGranularity granularity = ScrollGranularity::Step,
+                int custom_step = 0) {
+        switch (direction) {
+            case ScrollDirection::Up: {
+                if (granularity == ScrollGranularity::Edge) {
+                    scroll_to_top();
+                } else if (granularity == ScrollGranularity::Page) {
+                    scroll_pages_y(bounds_.origin == ScrollOrigin::Top ? -1 : 1);
+                } else {
+                    int const step = custom_step > 0 ? custom_step : kDefaultVerticalStep;
+                    scroll_y(bounds_.origin == ScrollOrigin::Top ? -step : step);
+                }
+                break;
+            }
+            case ScrollDirection::Down: {
+                if (granularity == ScrollGranularity::Edge) {
+                    scroll_to_bottom();
+                } else if (granularity == ScrollGranularity::Page) {
+                    scroll_pages_y(bounds_.origin == ScrollOrigin::Top ? 1 : -1);
+                } else {
+                    int const step = custom_step > 0 ? custom_step : kDefaultVerticalStep;
+                    scroll_y(bounds_.origin == ScrollOrigin::Top ? step : -step);
+                }
+                break;
+            }
+            case ScrollDirection::Left: {
+                if (granularity == ScrollGranularity::Edge) {
+                    reset_x();
+                } else if (granularity == ScrollGranularity::Page) {
+                    scroll_pages_x(-1);
+                } else {
+                    int const step = custom_step > 0 ? custom_step : kDefaultHorizontalStep;
+                    scroll_x(-step);
+                }
+                break;
+            }
+            case ScrollDirection::Right: {
+                if (granularity == ScrollGranularity::Edge) {
+                    scroll_to_right();
+                } else if (granularity == ScrollGranularity::Page) {
+                    scroll_pages_x(1);
+                } else {
+                    int const step = custom_step > 0 ? custom_step : kDefaultHorizontalStep;
+                    scroll_x(step);
+                }
+                break;
+            }
+        }
+    }
+
     void reset_y() { bounds_.offset_y = 0; }
 
     void reset_x() { bounds_.offset_x = 0; }
@@ -133,7 +207,21 @@ class ScrollView {
         reset_x();
     }
 
-    void scroll_to_bottom() { bounds_.offset_y = bounds_.max_offset_y(); }
+    void scroll_to_top() {
+        if (bounds_.origin == ScrollOrigin::Top) {
+            bounds_.offset_y = 0;
+        } else {
+            bounds_.offset_y = bounds_.max_offset_y();
+        }
+    }
+
+    void scroll_to_bottom() {
+        if (bounds_.origin == ScrollOrigin::Top) {
+            bounds_.offset_y = bounds_.max_offset_y();
+        } else {
+            bounds_.offset_y = 0;
+        }
+    }
 
     void scroll_to_right() { bounds_.offset_x = bounds_.max_offset_x(); }
 
@@ -153,6 +241,9 @@ class ScrollView {
     [[nodiscard]] auto remaining_below() const -> RowCount { return bounds_.remaining_below(); }
     [[nodiscard]] auto remaining_left() const -> ColumnCount { return bounds_.remaining_left(); }
     [[nodiscard]] auto remaining_right() const -> ColumnCount { return bounds_.remaining_right(); }
+
+    [[nodiscard]] auto render_top_indicator(int width) const -> std::string;
+    [[nodiscard]] auto render_bottom_indicator(int width) const -> std::string;
 
     [[nodiscard]] auto render_row(int visible_row_idx, int width, RowRenderer renderer) const
         -> std::string;

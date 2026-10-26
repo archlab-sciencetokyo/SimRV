@@ -2,6 +2,8 @@
 
 #include <cstdint>
 
+namespace simrv {
+
 inline constexpr unsigned kVlenMaxBits = 1024;
 inline constexpr unsigned kVlenMaxBytes = kVlenMaxBits / 8;
 
@@ -64,3 +66,14 @@ struct VtypeView {
         return 1u << sew_field();
     }
 };
+
+}  // namespace simrv
+
+// Global compatibility aliases per repository guidelines
+using simrv::kVlenMaxBits;
+using simrv::kVlenMaxBytes;
+using simrv::Vlmul;
+using simrv::Vma;
+using simrv::Vsew;
+using simrv::Vta;
+using simrv::VtypeView;

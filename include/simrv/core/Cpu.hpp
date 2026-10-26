@@ -19,6 +19,7 @@
 #include "simrv/core/CsrTypes.hpp"
 #include "simrv/core/DecodeCache.hpp"
 #include "simrv/core/FastBatchPolicy.hpp"
+#include "simrv/core/PerformanceCounters.hpp"
 #include "simrv/core/RegisterFile.hpp"
 #include "simrv/core/Sbi.hpp"
 #include "simrv/core/Tlb.hpp"
@@ -95,7 +96,8 @@ struct alignas(128) ArchState {
         stvec{};  ///< Supervisor Trap-Vector Base-Address (address of supervisor trap handler)
     simrv::xlen::CsrValue sscratch{};  ///< Supervisor Scratch register
     simrv::xlen::CsrValue senvcfg{};   ///< Supervisor Environment Configuration (0x10A)
-    uint64_t stimecmp{UINT64_MAX};     ///< Supervisor Timer Compare (Sstc, 0x14D / 0x15D)
+    simrv::xlen::TimeBaseTicks stimecmp{
+        UINT64_MAX};  ///< Supervisor Timer Compare (Sstc, 0x14D / 0x15D)
     simrv::xlen::CsrValue
         sepc{};  ///< Supervisor Exception Program Counter (returns address on SRET)
     simrv::xlen::TrapCause scause{};     ///< Supervisor Trap Cause
@@ -279,19 +281,24 @@ struct alignas(32) SoftTlbEntry {
 
     /// Build a lookup tag from the three key fields.
     [[nodiscard]] SIMRV_ALWAYS_INLINE static constexpr auto make_tag(
-        uint64_t vpn, uint64_t asid, simrv::xlen::PrivilegeLevel priv) noexcept -> uint64_t {
+        simrv::xlen::VpnIndex vpn, uint64_t asid, simrv::xlen::PrivilegeLevel priv) noexcept
+        -> uint64_t {
         return ((vpn & 0xFFFFFFFFFFULL) << 18) | ((asid & 0xFFFFu) << 2) |
                static_cast<uint64_t>(static_cast<uint8_t>(priv) & 0x3u);
     }
 
-    [[nodiscard]] SIMRV_ALWAYS_INLINE constexpr auto matches(uint64_t vpn, uint64_t asid,
+    [[nodiscard]] SIMRV_ALWAYS_INLINE constexpr auto matches(simrv::xlen::VpnIndex vpn,
+                                                             uint64_t asid,
                                                              simrv::xlen::PrivilegeLevel priv,
                                                              uint32_t current_epoch) const noexcept
         -> bool {
-        if (simrv::compiler::unlikely(epoch != current_epoch)) return false;
-        const uint64_t expected_tag = make_tag(vpn, asid, priv);
-        if (simrv::compiler::likely(tag == expected_tag)) return true;
-        return simrv::compiler::unlikely(global) &&
+        if (simrv::compiler::likely(epoch == current_epoch)) {
+            const uint64_t expected_tag = make_tag(vpn, asid, priv);
+            if (simrv::compiler::likely(tag == expected_tag)) return true;
+            return simrv::compiler::unlikely(global) &&
+                   ((tag & ~uint64_t{0x3FFFCULL}) == make_tag(vpn, 0, priv));
+        }
+        return simrv::compiler::unlikely(global && tag != kInvalidTag) &&
                ((tag & ~uint64_t{0x3FFFCULL}) == make_tag(vpn, 0, priv));
     }
 
@@ -307,9 +314,9 @@ struct alignas(32) SoftTlbEntry {
                         : nullptr;
     }
 
-    void set(uint64_t vpn, uint64_t asid, simrv::xlen::PrivilegeLevel priv, uint32_t current_epoch,
-             simrv::xlen::PhysAddr paddr_base_in, simrv::xlen::Byte* host_ptr_base_in,
-             bool is_global = false) noexcept {
+    void set(simrv::xlen::VpnIndex vpn, uint64_t asid, simrv::xlen::PrivilegeLevel priv,
+             uint32_t current_epoch, simrv::xlen::PhysAddr paddr_base_in,
+             simrv::xlen::Byte* host_ptr_base_in, bool is_global = false) noexcept {
         tag = make_tag(vpn, asid, priv);
         epoch = current_epoch;
         paddr_base = paddr_base_in;
@@ -357,7 +364,7 @@ class CPU {
      * @return Slot index in range [0, 2047].
      */
     [[nodiscard]] SIMRV_ALWAYS_INLINE static constexpr auto soft_tlb_index(
-        simrv::xlen::Address vpn) noexcept -> size_t {
+        simrv::xlen::VpnIndex vpn) noexcept -> size_t {
         return static_cast<size_t>((vpn ^ (vpn >> 11)) & 2047u);
     }
 
@@ -378,6 +385,12 @@ class CPU {
      * invalidates the decode cache.
      */
     void TLB_flush();
+
+    /**
+     * @brief Flushes user-space TLB and decode cache entries on satp switch while preserving
+     * global kernel translations.
+     */
+    void TLB_flush_satp();
 
     /**
      * @brief Flushes only data TLB and soft-TLB entries (e.g., on SUM/MXR changes) while
@@ -536,13 +549,18 @@ class CPU {
      * Asserts timer interrupt pending flags in `mip` if current `mtime` >= `mtimecmp`.
      */
     void evaluate_timer_interrupt();
+    /**
+     * @brief Fast-forwards simulation virtual time (mtime) to the next timer deadline (mtimecmp or
+     * stimecmp) on WFI when no interrupts are pending, coalescing idle spin loops.
+     */
+    void fast_forward_wfi(Machine& machine);
     /// Queue external interrupt wire changes for application by this hart at its next boundary.
     void queue_interrupt_line(core::MipBit bit, bool asserted) noexcept;
     void apply_pending_interrupt_lines(Machine& machine);
     [[nodiscard]] SIMRV_ALWAYS_INLINE auto has_pending_interrupt_lines() const noexcept -> bool {
         return pending_interrupt_lines_.load(std::memory_order_relaxed) != 0;
     }
-    [[nodiscard]] auto next_logical_issue_sequence() noexcept -> uint64_t {
+    [[nodiscard]] auto next_logical_issue_sequence() noexcept -> simrv::xlen::Counter {
         return next_logical_issue_sequence_++;
     }
     /// Apply HSM status transitions only from the hart's own execution thread.
@@ -805,8 +823,8 @@ class CPU {
     ArchState prev_state_;
     // Six dirty bits followed by six value bits: MTIP, MSIP, MEIP, STIP, SSIP, SEIP.
     std::atomic<uint16_t> pending_interrupt_lines_{0};
-    uint64_t next_register_trace_sequence_ = 0;
-    uint64_t next_logical_issue_sequence_ = 0;
+    simrv::xlen::Counter next_register_trace_sequence_ = 0;
+    simrv::xlen::Counter next_logical_issue_sequence_ = 0;
 
    public:
     /// Zero-cost read-only access to architectural state for tracing/logging.
@@ -901,10 +919,13 @@ class CPU {
     bool wfi_quiescent_{false};
 
     // ========== Execution Metrics ==========
-    uint64_t e_icount{0};               // Total instruction count
+    simrv::xlen::Counter e_icount{0};   // Total instruction count
     simrv::xlen::Counter e_ccount = 0;  // Compressed instructions executed
     simrv::xlen::LatencyCycles cycle_counter_start_delay_ = 0;
-    std::array<uint64_t, isa::OperationIdCount> e_instmix{};  // Instruction-mix statistics
+    simrv::xlen::CycleCount last_retire_cycle_{0};
+    PerformanceCounters perf_counters{};
+    std::array<simrv::xlen::Counter, isa::OperationIdCount>
+        e_instmix{};  // Instruction-mix statistics
 };
 
 }  // namespace simrv::core

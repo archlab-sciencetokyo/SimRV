@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <array>
 #include <format>
+#include <numeric>
 #include <string>
 #include <vector>
 
@@ -215,6 +216,90 @@ auto get_topic_data(int index) -> TopicData {
 void GlossaryModal::open(int& topic_idx, int& scroll_offset) {
     topic_idx = 0;
     scroll_offset = 0;
+}
+
+void GlossaryModal::render_content(std::vector<std::string>& content_rows, int width, int height) {
+    auto add_row = [&](std::string s) { content_rows.push_back(std::move(s)); };
+    render(content_rows, add_row, topic_idx_, scroll_offset_, height, width);
+}
+
+auto GlossaryModal::handle_key(uint8_t byte, TuiKey key) -> framework::ModalAction {
+    if (byte == 27 || key == simrv::tui::TuiKey::Esc || byte == 'q' || byte == 'Q' ||
+        key == simrv::tui::TuiKey::QuestionMark) {
+        return framework::ModalAction::Close;
+    }
+    if (key == simrv::tui::TuiKey::Tab || byte == 'l' || byte == 'L') {
+        move_topic(topic_idx_, scroll_offset_, 1);
+        return framework::ModalAction::Continue;
+    }
+    if (key == simrv::tui::TuiKey::BackTab || byte == 'h' || byte == 'H') {
+        move_topic(topic_idx_, scroll_offset_, -1);
+        return framework::ModalAction::Continue;
+    }
+    if (byte >= '1' && byte <= '6') {
+        topic_idx_ = byte - '1';
+        scroll_offset_ = 0;
+        return framework::ModalAction::Continue;
+    }
+    if (byte == ' ' || key == simrv::tui::TuiKey::Enter || key == simrv::tui::TuiKey::Newline) {
+        move_topic(topic_idx_, scroll_offset_, 1);
+        return framework::ModalAction::Continue;
+    }
+    return framework::ModalAction::Continue;
+}
+
+void GlossaryModal::handle_wheel(int delta) { scroll_content(scroll_offset_, delta * 2, 30); }
+
+auto GlossaryModal::handle_control_click(int content_row, size_t action_index)
+    -> framework::ModalAction {
+    if (content_row == 0) {
+        topic_idx_ = static_cast<int>(action_index);
+        scroll_offset_ = 0;
+    } else if (action_index == 0) {
+        move_topic(topic_idx_, scroll_offset_, -1);
+    } else if (action_index == 1) {
+        move_topic(topic_idx_, scroll_offset_, 1);
+    } else if (action_index == 2) {
+        scroll_content(scroll_offset_, -2, 30);
+    } else if (action_index == 3) {
+        scroll_content(scroll_offset_, 2, 30);
+    } else {
+        return framework::ModalAction::Close;
+    }
+    return framework::ModalAction::Continue;
+}
+
+auto GlossaryModal::handle_click(framework::ScreenCoord local_pt) -> framework::ModalAction {
+    (void)local_pt;
+    return framework::ModalAction::Continue;
+}
+
+auto GlossaryModal::handle_click(framework::ScreenCoord local_pt, framework::ScreenSize box_size)
+    -> framework::ModalAction {
+    int content_row = local_pt.y - 1;
+    if (content_row == 0) {
+        constexpr std::array<int, 6> kTabWidths = {8, 8, 9, 10, 9, 13};
+        constexpr int kSeparatorWidth = 3;
+        int const controls_width = std::accumulate(kTabWidths.begin(), kTabWidths.end(), 0) +
+                                   (static_cast<int>(kTabWidths.size()) - 1) * kSeparatorWidth;
+        int current_x = 1 + std::max(0, (box_size.width - 2 - controls_width) / 2);
+        for (size_t i = 0; i < kTabWidths.size(); ++i) {
+            if (local_pt.x >= current_x && local_pt.x < current_x + kTabWidths.at(i)) {
+                topic_idx_ = static_cast<int>(i);
+                scroll_offset_ = 0;
+                return framework::ModalAction::Continue;
+            }
+            current_x += kTabWidths.at(i) + kSeparatorWidth;
+        }
+    } else if (content_row >= 2 && content_row < box_size.height - 4) {
+        if (local_pt.x >= box_size.width / 2) {
+            move_topic(topic_idx_, scroll_offset_, 1);
+        } else {
+            move_topic(topic_idx_, scroll_offset_, -1);
+        }
+        return framework::ModalAction::Continue;
+    }
+    return framework::ModalAction::Continue;
 }
 
 void GlossaryModal::move_topic(int& topic_idx, int& scroll_offset, int delta) {

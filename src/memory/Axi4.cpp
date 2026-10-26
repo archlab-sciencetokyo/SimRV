@@ -99,7 +99,7 @@ void Axi4Tracer::set_path(const std::string& path) {
     out_.open(path, std::ios::out | std::ios::trunc);
 }
 
-void Axi4Tracer::trace_aw(uint64_t cycle, const Axi4Aw& aw) {
+void Axi4Tracer::trace_aw(simrv::xlen::CycleCount cycle, const Axi4Aw& aw) {
     if (!enabled_ || !out_.is_open()) return;
     const std::lock_guard lock(mutex_);
     out_ << std::format("[{:>10}] AW: ID={:<2} ADDR=0x{:08x} LEN={:<2} SIZE={}B BURST={}\n", cycle,
@@ -107,20 +107,20 @@ void Axi4Tracer::trace_aw(uint64_t cycle, const Axi4Aw& aw) {
                         aw.size < 32 ? (uint32_t{1} << aw.size) : 0, to_string(aw.burst));
 }
 
-void Axi4Tracer::trace_w(uint64_t cycle, const Axi4W& w) {
+void Axi4Tracer::trace_w(simrv::xlen::CycleCount cycle, const Axi4W& w) {
     if (!enabled_ || !out_.is_open()) return;
     const std::lock_guard lock(mutex_);
     out_ << std::format("[{:>10}] W:        DATA=0x{:016x} STRB=0x{:02x} LAST={}\n", cycle,
                         static_cast<uint64_t>(w.data), w.strb, w.last ? 1 : 0);
 }
 
-void Axi4Tracer::trace_b(uint64_t cycle, const Axi4B& b) {
+void Axi4Tracer::trace_b(simrv::xlen::CycleCount cycle, const Axi4B& b) {
     if (!enabled_ || !out_.is_open()) return;
     const std::lock_guard lock(mutex_);
     out_ << std::format("[{:>10}] B:  ID={:<2} RESP={}\n", cycle, b.id, to_string(b.resp));
 }
 
-void Axi4Tracer::trace_ar(uint64_t cycle, const Axi4Ar& ar) {
+void Axi4Tracer::trace_ar(simrv::xlen::CycleCount cycle, const Axi4Ar& ar) {
     if (!enabled_ || !out_.is_open()) return;
     const std::lock_guard lock(mutex_);
     out_ << std::format("[{:>10}] AR: ID={:<2} ADDR=0x{:08x} LEN={:<2} SIZE={}B BURST={}\n", cycle,
@@ -128,7 +128,7 @@ void Axi4Tracer::trace_ar(uint64_t cycle, const Axi4Ar& ar) {
                         ar.size < 32 ? (uint32_t{1} << ar.size) : 0, to_string(ar.burst));
 }
 
-void Axi4Tracer::trace_r(uint64_t cycle, const Axi4R& r) {
+void Axi4Tracer::trace_r(simrv::xlen::CycleCount cycle, const Axi4R& r) {
     if (!enabled_ || !out_.is_open()) return;
     const std::lock_guard lock(mutex_);
     out_ << std::format("[{:>10}] R:  ID={:<2} DATA=0x{:016x} RESP={} LAST={}\n", cycle, r.id,

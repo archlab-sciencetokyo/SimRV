@@ -38,6 +38,32 @@ auto MmioRouter::register_device(TileLinkNode* node) -> bool {
         const simrv::xlen::Address overlap_begin = std::max(base, ex_base);
         const simrv::xlen::Address overlap_end = std::min(end, ex_end);
         if (overlap_begin < overlap_end) {
+            // O(1) fast endpoint collision checks
+            if ((node->contains(overlap_begin) && existing->contains(overlap_begin)) ||
+                (node->contains(overlap_end - 1) && existing->contains(overlap_end - 1))) {
+                simrv::log::warn(
+                    "MMIO address range collision detected: '{}' [{:#x}, {:#x}) conflicts with "
+                    "'{}' "
+                    "[{:#x}, {:#x})",
+                    node->name(), static_cast<unsigned long long>(base),
+                    static_cast<unsigned long long>(end), existing->name(),
+                    static_cast<unsigned long long>(ex_base),
+                    static_cast<unsigned long long>(ex_end));
+                return false;
+            }
+            // Bound scan limit to prevent latency/DoS hazard on large gigabyte windows
+            constexpr simrv::xlen::Address kMaxHoleScanBytes = 4096;
+            if (overlap_end - overlap_begin > kMaxHoleScanBytes) {
+                simrv::log::warn(
+                    "MMIO address range collision detected: '{}' [{:#x}, {:#x}) conflicts with "
+                    "'{}' "
+                    "[{:#x}, {:#x})",
+                    node->name(), static_cast<unsigned long long>(base),
+                    static_cast<unsigned long long>(end), existing->name(),
+                    static_cast<unsigned long long>(ex_base),
+                    static_cast<unsigned long long>(ex_end));
+                return false;
+            }
             bool collision = false;
             for (simrv::xlen::Address address = overlap_begin; address < overlap_end; ++address) {
                 if (node->contains(address) && existing->contains(address)) {

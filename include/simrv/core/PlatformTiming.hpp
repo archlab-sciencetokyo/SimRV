@@ -8,16 +8,40 @@
 
 namespace simrv::core::timing {
 
-inline constexpr uint64_t kCpuClockHz = 160'000'000ULL;
-inline constexpr uint64_t kTimebaseHz = 10'000'000ULL;
+using ClockHz = uint64_t;
+using TimebaseHz = uint64_t;
+using CycleCount = uint64_t;
+using TimeNs = uint64_t;
+
+inline constexpr ClockHz kCpuClockHz = 160'000'000ULL;
+inline constexpr TimebaseHz kTimebaseHz = 10'000'000ULL;
 static_assert(kCpuClockHz % kTimebaseHz == 0);
 static_assert(1'000'000'000ULL % kTimebaseHz == 0);
 inline constexpr uint32_t kCyclesPerTimebaseTick = static_cast<uint32_t>(kCpuClockHz / kTimebaseHz);
 static_assert((kCyclesPerTimebaseTick & (kCyclesPerTimebaseTick - 1)) == 0);
-inline constexpr uint64_t kNanosecondsPerTimebaseTick = 1'000'000'000ULL / kTimebaseHz;
+inline constexpr TimeNs kNanosecondsPerTimebaseTick = 1'000'000'000ULL / kTimebaseHz;
 
-[[nodiscard]] constexpr auto timer_ticks_to_seconds(uint64_t ticks) -> double {
+[[nodiscard]] constexpr auto timer_ticks_to_seconds(uint64_t ticks) noexcept -> double {
     return static_cast<double>(ticks) / static_cast<double>(kTimebaseHz);
+}
+
+[[nodiscard]] constexpr auto cycles_to_nanoseconds(CycleCount cycles,
+                                                   ClockHz clock_hz = kCpuClockHz) noexcept
+    -> TimeNs {
+    return clock_hz != 0 ? (cycles * 1'000'000'000ULL) / clock_hz : 0;
+}
+
+[[nodiscard]] constexpr auto nanoseconds_to_cycles(TimeNs ns,
+                                                   ClockHz clock_hz = kCpuClockHz) noexcept
+    -> CycleCount {
+    return (ns * clock_hz) / 1'000'000'000ULL;
+}
+
+[[nodiscard]] constexpr auto timebase_ticks_to_cycles(uint64_t ticks,
+                                                      ClockHz clock_hz = kCpuClockHz,
+                                                      TimebaseHz timebase_hz = kTimebaseHz) noexcept
+    -> CycleCount {
+    return timebase_hz != 0 ? (ticks * clock_hz) / timebase_hz : 0;
 }
 
 /**
@@ -97,3 +121,15 @@ struct DeterministicClockDivider {
 };
 
 }  // namespace simrv::core::timing
+
+namespace simrv {
+using core::timing::ClockHz;
+using core::timing::CycleCount;
+using core::timing::DeterministicClockDivider;
+using core::timing::kCpuClockHz;
+using core::timing::kCyclesPerTimebaseTick;
+using core::timing::kNanosecondsPerTimebaseTick;
+using core::timing::kTimebaseHz;
+using core::timing::TimebaseHz;
+using core::timing::TimeNs;
+}  // namespace simrv

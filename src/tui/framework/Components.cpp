@@ -19,17 +19,21 @@ auto align_row(Row row, int width) -> Row {
 
 auto keycap(std::string_view key, Role role) -> std::string {
     auto const theme = active_theme();
+    if (active_render_context().density == Density::Compact)
+        return std::format("{}[{}]\033[0m", theme.color(role), key);
     return std::format("\033[1;7m{} {} \033[0m", theme.color(role), key);
 }
 
 auto action_row(std::span<const Action> actions, int width) -> RenderedControl {
     auto const theme = active_theme();
+    const bool compact = active_render_context().density == Density::Compact;
     RenderedControl result;
     int cursor = 0;
     for (std::size_t i = 0; i < actions.size(); ++i) {
         if (i > 0) {
-            result.text += std::format(" {}·\033[0m ", theme.palette.muted);
-            cursor += 3;
+            const std::string separator = compact ? " " : " · ";
+            result.text += std::format("{}{}\033[0m", theme.palette.muted, separator);
+            cursor += static_cast<int>(separator.size());
         }
         std::string const control = keycap(actions[i].key, actions[i].role) + " " +
                                     std::string(theme.palette.muted) + actions[i].label + "\033[0m";
@@ -38,7 +42,7 @@ auto action_row(std::span<const Action> actions, int width) -> RenderedControl {
         result.text += control;
         cursor += control_width;
     }
-    int const left = std::max(0, (width - cursor) / 2);
+    int const left = compact ? 0 : std::max(0, (width - cursor) / 2);
     result.text =
         fit_to_width(std::string(static_cast<std::size_t>(left), ' ') + result.text, width);
     for (auto& span : result.spans) span.start += left;
@@ -67,6 +71,8 @@ auto tab_row(std::span<const Tab> tabs, std::size_t selected, int width) -> Rend
 auto section_divider(std::string_view title, int width) -> std::string {
     auto const theme = active_theme();
     std::string const label = " " + std::string(title) + " ";
+    if (active_render_context().density == Density::Compact)
+        return fit_to_width(std::format("{}{}\033[0m", theme.palette.text, label), width);
     int const remaining = std::max(0, width - display_width(label));
     int const left = std::min(4, remaining / 2);
     return fit_to_width(std::string(theme.palette.border) +
@@ -78,13 +84,16 @@ auto section_divider(std::string_view title, int width) -> std::string {
 auto scroll_indicator(int before, int after, int width) -> std::string {
     auto const theme = active_theme();
     std::string text;
+    const bool compact = active_render_context().density == Density::Compact;
     if (before > 0)
-        text +=
-            std::format("{}{} {} above\033[0m", theme.palette.muted, theme.glyphs.arrow_up, before);
+        text += compact ? std::format("{}↑{}\033[0m", theme.palette.muted, before)
+                        : std::format("{}{} {} above\033[0m", theme.palette.muted,
+                                      theme.glyphs.arrow_up, before);
     if (before > 0 && after > 0) text += std::format(" {}·\033[0m ", theme.palette.muted);
     if (after > 0)
-        text += std::format("{}{} {} below\033[0m", theme.palette.muted, theme.glyphs.arrow_down,
-                            after);
+        text += compact ? std::format("↓{}\033[0m", after)
+                        : std::format("{}{} {} below\033[0m", theme.palette.muted,
+                                      theme.glyphs.arrow_down, after);
     return align_row({.text = std::move(text),
                       .alignment = HorizontalAlign::Center,
                       .role = Role::Muted,

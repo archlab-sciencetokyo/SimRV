@@ -1477,20 +1477,42 @@ void Tracer::write_instruction_mix_report() {
         std::string_view name;
         std::string_view category;
         uint64_t count;
+        uint64_t cycles;
+        uint64_t stalls;
+    };
+
+    struct CategoryStats {
+        uint64_t count{0};
+        uint64_t cycles{0};
+        uint64_t stalls{0};
     };
 
     std::vector<Entry> entries;
-    std::map<std::string_view, uint64_t> category_totals;
-    uint64_t total = 0;
+    std::map<std::string_view, CategoryStats> category_totals;
+    uint64_t total_count = 0;
+    uint64_t total_cycles = 0;
+
+    const auto& perf = machine_.primary_hart().perf_counters;
 
     for (auto const [i, count] : std::views::enumerate(machine_.primary_hart().e_instmix)) {
         if (count == 0) continue;
         const auto op = static_cast<simrv::isa::OperationId>(i);
         const auto name = simrv::pipeline::operation_name(op);
         const auto category = categorize_operation(op);
-        entries.push_back({.name = name, .category = category, .count = count});
-        category_totals[category] += count;
-        total += count;
+        uint64_t cycles = perf.inst_cycles(op);
+        if (cycles == 0) cycles = count;
+        const uint64_t stalls = perf.inst_stalls(op);
+
+        entries.push_back({.name = name,
+                           .category = category,
+                           .count = count,
+                           .cycles = cycles,
+                           .stalls = stalls});
+        category_totals[category].count += count;
+        category_totals[category].cycles += cycles;
+        category_totals[category].stalls += stalls;
+        total_count += count;
+        total_cycles += cycles;
     }
 
     std::ranges::sort(entries, [](const auto& a, const auto& b) {
@@ -1498,51 +1520,114 @@ void Tracer::write_instruction_mix_report() {
         return a.name < b.name;
     });
 
-    std::println(
-        out, "================================================================================");
-    std::println(out, "                         INSTRUCTION MIX REPORT");
-    std::println(
-        out, "================================================================================");
+    std::println(out,
+                 "================================================================================="
+                 "=======================================");
+    std::println(out, "                                     INSTRUCTION MIX & PERFORMANCE REPORT");
+    std::println(out,
+                 "================================================================================="
+                 "=======================================");
     std::println(out, " Target: RV{} | Primary hart: {} | Configured harts: {} | Engine: {}",
                  simrv::xlen::kXLenBits,
                  static_cast<unsigned>(machine_.primary_hart().state().mhartid),
                  machine_.num_harts(), machine_.runtime_profile.execution_name());
-    std::println(out, " Counts below are retired instructions from the primary hart.");
+    std::println(
+        out, " Counts and cycles below are from the primary hart hardware performance monitor.");
     std::println(out, "");
     std::println(out,
-                 " Rank  Instruction             Category              Count      Share  Cumul");
-    std::println(
-        out, "--------------------------------------------------------------------------------");
+                 "  Rank  Instruction           Category              Count      Share        "
+                 "Cycles     Cycle%  Avg CPI    Stall Cyc");
+    std::println(out,
+                 "---------------------------------------------------------------------------------"
+                 "---------------------------------------");
 
-    uint64_t cumulative = 0;
     for (size_t rank = 0; rank < entries.size(); ++rank) {
         const auto& e = entries[rank];
-        cumulative += e.count;
-        const double share =
-            total == 0 ? 0.0 : (static_cast<double>(e.count) * 100.0) / static_cast<double>(total);
-        const double cumul_pct =
-            total == 0 ? 0.0
-                       : (static_cast<double>(cumulative) * 100.0) / static_cast<double>(total);
-        std::println(out, "{:>5}  {:<22}  {:<16}  {:>12}  {:>5.2f}%  {:>5.2f}%", rank + 1, e.name,
-                     e.category, simrv::util::format_with_commas(e.count), share, cumul_pct);
+        const double share = total_count == 0 ? 0.0
+                                              : (static_cast<double>(e.count) * 100.0) /
+                                                    static_cast<double>(total_count);
+        const double cycle_share = total_cycles == 0 ? 0.0
+                                                     : (static_cast<double>(e.cycles) * 100.0) /
+                                                           static_cast<double>(total_cycles);
+        const double cpi =
+            e.count == 0 ? 0.0 : static_cast<double>(e.cycles) / static_cast<double>(e.count);
+
+        std::println(
+            out, " {:>5}  {:<20}  {:<16}  {:>12}  {:>6.2f}%  {:>12}  {:>6.2f}%  {:>7.2f}  {:>11}",
+            rank + 1, e.name, e.category, simrv::util::format_with_commas(e.count), share,
+            simrv::util::format_with_commas(e.cycles), cycle_share, cpi,
+            simrv::util::format_with_commas(e.stalls));
     }
 
+    std::println(out,
+                 "---------------------------------------------------------------------------------"
+                 "---------------------------------------");
+    const double overall_cpi =
+        total_count == 0 ? 0.0
+                         : static_cast<double>(total_cycles) / static_cast<double>(total_count);
     std::println(
-        out, "--------------------------------------------------------------------------------");
-    std::println(out, " Total Instructions Retired: {:>16}",
-                 simrv::util::format_with_commas(total));
-    std::println(
-        out, "================================================================================\n");
+        out, " Total Instructions Retired: {:>16} | Total Cycles: {:>16} | Overall CPI: {:>6.2f}",
+        simrv::util::format_with_commas(total_count), simrv::util::format_with_commas(total_cycles),
+        overall_cpi);
+    std::println(out,
+                 "================================================================================="
+                 "=======================================\n");
 
     std::println(out, "--- Category Summary ---");
-    std::vector<std::pair<std::string_view, uint64_t>> cat_sorted(category_totals.begin(),
-                                                                  category_totals.end());
-    std::ranges::sort(cat_sorted, [](const auto& a, const auto& b) { return a.second > b.second; });
-    for (const auto& [cat, cat_cnt] : cat_sorted) {
-        const double cat_share =
-            total == 0 ? 0.0 : (static_cast<double>(cat_cnt) * 100.0) / static_cast<double>(total);
-        std::println(out, "  {:<18} : {:>12}  ({:>5.2f}%)", cat,
-                     simrv::util::format_with_commas(cat_cnt), cat_share);
+    std::println(
+        out,
+        "  Category           :        Count   (  Share) |       Cycles   ( Cycle%) |  Avg CPI");
+    std::println(
+        out,
+        "  --------------------------------------------------------------------------------------");
+    std::vector<std::pair<std::string_view, CategoryStats>> cat_sorted(category_totals.begin(),
+                                                                       category_totals.end());
+    std::ranges::sort(cat_sorted,
+                      [](const auto& a, const auto& b) { return a.second.count > b.second.count; });
+    for (const auto& [cat, stats] : cat_sorted) {
+        const double cat_share = total_count == 0 ? 0.0
+                                                  : (static_cast<double>(stats.count) * 100.0) /
+                                                        static_cast<double>(total_count);
+        const double cat_cycle_share =
+            total_cycles == 0
+                ? 0.0
+                : (static_cast<double>(stats.cycles) * 100.0) / static_cast<double>(total_cycles);
+        const double cat_cpi =
+            stats.count == 0 ? 0.0
+                             : static_cast<double>(stats.cycles) / static_cast<double>(stats.count);
+        std::println(out, "  {:<18} : {:>12}   ({:>6.2f}%) | {:>12}   ({:>6.2f}%) | {:>8.2f}", cat,
+                     simrv::util::format_with_commas(stats.count), cat_share,
+                     simrv::util::format_with_commas(stats.cycles), cat_cycle_share, cat_cpi);
+    }
+
+    const auto& primary = machine_.primary_hart();
+    const auto ic_hits = primary.icache.hit_count();
+    const auto ic_misses = primary.icache.miss_count();
+    const auto ic_total = ic_hits + ic_misses;
+    const double ic_rate =
+        ic_total == 0 ? 100.0
+                      : (static_cast<double>(ic_hits) * 100.0) / static_cast<double>(ic_total);
+
+    const auto dc_hits = primary.dcache.hit_count();
+    const auto dc_misses = primary.dcache.miss_count();
+    const auto dc_total = dc_hits + dc_misses;
+    const double dc_rate =
+        dc_total == 0 ? 100.0
+                      : (static_cast<double>(dc_hits) * 100.0) / static_cast<double>(dc_total);
+
+    const auto& ps = primary.pipeline_sim;
+
+    std::println(out, "\n--- Memory & Cache Subsystem ---");
+    std::println(out, "  L1 Instruction Cache : {:>12} hits | {:>10} misses | {:>6.2f}% hit rate",
+                 simrv::util::format_with_commas(ic_hits),
+                 simrv::util::format_with_commas(ic_misses), ic_rate);
+    std::println(out, "  L1 Data Cache        : {:>12} hits | {:>10} misses | {:>6.2f}% hit rate",
+                 simrv::util::format_with_commas(dc_hits),
+                 simrv::util::format_with_commas(dc_misses), dc_rate);
+    if (machine_.runtime_profile.is_cycle_mode() || ps.stall_cycles() > 0) {
+        std::println(out, "  Pipeline Stalls      : {:>12} icache stalls | {:>10} dcache stalls",
+                     simrv::util::format_with_commas(ps.icache_stalls()),
+                     simrv::util::format_with_commas(ps.dcache_stalls()));
     }
 
     simrv::log::info(

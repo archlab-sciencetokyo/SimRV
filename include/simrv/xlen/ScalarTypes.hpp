@@ -63,6 +63,9 @@ using InterruptPriority = uint32_t;
 using PlicContextId = uint32_t;
 enum class IrqLevel : bool { Deasserted = false, Asserted = true };
 using TimeBaseTicks = Counter;
+using ByteOffset = uint64_t;
+using VectorElementIndex = uint32_t;
+using VectorLength = uint32_t;
 
 using Funct7 = uint8_t;
 using Funct12 = uint16_t;

@@ -296,12 +296,16 @@ void test_soc_manifest_export() {
                            true,
                            {},
                            "acme,timer"}};
+    custom_soc.devices.front().name = "custom\x01timer";
     custom_soc.devices.push_back(
         simrv::core::soc_device_default(simrv::core::SoCDeviceKind::ResetControl));
     std::ostringstream custom_manifest;
     TEST_CHECK(simrv::util::serialize_soc_manifest(custom_soc, custom_manifest));
+    // Keep control characters JSON-safe rather than emitting invalid raw bytes.
     TEST_CHECK(custom_manifest.str().find("\"kind\": \"custom-mmio\"") != std::string::npos);
     TEST_CHECK(custom_manifest.str().find("\"compatible\": \"acme,timer\"") != std::string::npos);
+    TEST_CHECK(custom_manifest.str().find("custom\\u0001timer") != std::string::npos);
+    custom_soc.devices.front().name = "custom-timer";
 
     simrv::core::MachineConfig machine_config{};
     machine_config.soc = custom_soc;

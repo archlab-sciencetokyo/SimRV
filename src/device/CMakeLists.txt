@@ -10,6 +10,7 @@ simrv_add_component(simrv-platform
   RingBufferEthernetMmio.cpp
   DummyMmio.cpp
   DmaController.cpp
+  pflash/PFlash.cpp
   pci/PciDevice.cpp
   pci/PcieRootComplex.cpp
   pci/VirtioPciDevice.cpp
@@ -33,6 +34,7 @@ simrv_add_component(simrv-platform
   virtio/VirtioFsBackend.cpp
   virtio/HostAudioSink.cpp
   virtio/VirtioSoundBackend.cpp
+  virtio/VirtioBlockBackend.cpp
 )
 target_link_libraries(simrv-platform PUBLIC ${CMAKE_DL_LIBS})
 add_library(simrv::platform ALIAS simrv-platform)

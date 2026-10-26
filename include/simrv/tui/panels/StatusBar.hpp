@@ -65,7 +65,6 @@ class StatusBar : public TuiWidget {
     int right_width_ = 0;
     framework::ColumnWidthOverrides column_width_overrides_ = framework::kNoColumnWidthOverrides;
 
-    [[maybe_unused]] uint64_t last_icount_ = 0;
     uint64_t kips_ = 0;
 };
 

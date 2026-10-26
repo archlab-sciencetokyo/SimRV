@@ -6,6 +6,7 @@
 #include <span>
 #include <vector>
 
+#include "simrv/CompilerHints.hpp"
 #include "simrv/xlen/ScalarTypes.hpp"
 
 namespace simrv::cache {
@@ -24,6 +25,10 @@ class TimingCache {
         ways_ = std::max(1u, associativity);
         line_bytes_ = std::max(1u, line_bytes);
         sets_ = enabled_ ? capacity_bytes / (ways_ * line_bytes_) : 0;
+        line_shift_ = std::has_single_bit(line_bytes_) ? std::countr_zero(line_bytes_) : 0;
+        set_shift_ = (sets_ > 0 && std::has_single_bit(sets_)) ? std::countr_zero(sets_) : 0;
+        set_mask_ = sets_ > 0 ? (sets_ - 1u) : 0;
+        is_pow2_ = std::has_single_bit(line_bytes_) && (sets_ > 0 && std::has_single_bit(sets_));
         entries_.assign(static_cast<size_t>(sets_) * ways_, Entry{});
         tick_ = 0;
     }
@@ -38,9 +43,18 @@ class TimingCache {
     [[nodiscard]] auto access(simrv::xlen::Address address) -> Access {
         if (!enabled_) return {};
         const auto raw = static_cast<uint64_t>(address);
-        const uint64_t line = raw / line_bytes_;
-        const auto set = static_cast<uint32_t>(line & (sets_ - 1));
-        const uint64_t tag = line / sets_;
+        uint64_t line = 0;
+        uint32_t set = 0;
+        uint64_t tag = 0;
+        if (simrv::compiler::likely(is_pow2_)) {
+            line = raw >> line_shift_;
+            set = static_cast<uint32_t>(line & set_mask_);
+            tag = line >> set_shift_;
+        } else {
+            line = raw / line_bytes_;
+            set = static_cast<uint32_t>(line & (sets_ - 1));
+            tag = line / sets_;
+        }
         Entry* victim = nullptr;
         uint32_t victim_way = 0;
         for (uint32_t way = 0; way < ways_; ++way) {
@@ -74,6 +88,10 @@ class TimingCache {
     uint32_t sets_ = 0;
     uint32_t ways_ = 1;
     uint32_t line_bytes_ = 1;
+    uint32_t line_shift_ = 0;
+    uint32_t set_shift_ = 0;
+    uint32_t set_mask_ = 0;
+    bool is_pow2_ = false;
     bool enabled_ = false;
 };
 

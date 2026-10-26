@@ -8,14 +8,18 @@
 #include <cstdint>
 #include <filesystem>
 #include <functional>
+#include <optional>
 #include <string>
 #include <utility>
 #include <vector>
 
 #include "simrv/core/Logger.hpp"
+#include "simrv/core/MachineConfig.hpp"
 #include "simrv/tui/TuiKey.hpp"
 #include "simrv/tui/TuiTypes.hpp"
+#include "simrv/tui/framework/Modal.hpp"
 #include "simrv/tui/framework/Types.hpp"
+#include "simrv/tui/modals/ToolPickerModal.hpp"
 #include "simrv/xlen/Helpers.hpp"
 #include "simrv/xlen/ScalarTypes.hpp"
 
@@ -26,32 +30,14 @@ enum class PlatformProfile : uint8_t;
 
 namespace simrv::tui {
 
+namespace modals {
+class FilePickerModal;
+class MissionObjectiveModal;
+}  // namespace modals
+
 class InspectorPane;
 class LogBuffer;
-
-enum class ModalType : uint8_t {
-    None,
-    SetBreakpoint,
-    SetWatchpoint,
-    SetSpeed,
-    InspectAddress,
-    LoadBinary,
-    LoadDiskImage,
-    Help,
-    Glossary,
-    Settings,
-    ManageBreakpoints,
-    Notice,
-    PlatformChangeConfirm,
-    LayoutPresets,
-    ToolPicker,
-    SaveCpuConfig,
-    LoadCpuConfig,
-    LoadFilePicker,
-    MemoryDump,
-    SwitchHart,
-    LogViewer
-};
+class MissionProgress;
 
 struct SysConfigDraft {
     uint8_t preset = 1;         // tiny, balanced, performance, custom
@@ -115,8 +101,7 @@ struct SettingsDraft {
     // Tab 0: General / UI
     bool cycle_accurate = false;
     bool high_contrast = false;
-    bool class_mode = false;
-    uint32_t tui_fps = 30;
+    framework::DensityMode density_mode = framework::DensityMode::Auto;
     bool use_mix = false;
     bool bp_trace = false;
     bool traplog_mode = false;
@@ -139,11 +124,36 @@ struct SettingsDraft {
 class TuiModal {
    public:
     explicit TuiModal(simrv::core::Machine& machine);
+    void set_density_mode(framework::DensityMode mode) noexcept { density_mode_ = mode; }
+    [[nodiscard]] auto density_mode() const noexcept -> framework::DensityMode {
+        return density_mode_;
+    }
 
-    [[nodiscard]] auto is_active() const -> bool { return active_modal_ != ModalType::None; }
+    [[nodiscard]] auto is_active() const -> bool {
+        return active_modal_ != ModalType::None || active_modal_impl_ != nullptr;
+    }
+    [[nodiscard]] auto active_modal_impl() noexcept -> framework::IModal* {
+        return active_modal_impl_.get();
+    }
+    [[nodiscard]] auto active_modal_impl() const noexcept -> const framework::IModal* {
+        return active_modal_impl_.get();
+    }
+    void open_custom_modal(std::unique_ptr<framework::IModal> modal) {
+        close();
+        active_modal_impl_ = std::move(modal);
+    }
     [[nodiscard]] auto get_type() const -> ModalType { return active_modal_; }
     [[nodiscard]] auto get_input() const -> const std::string& { return input_; }
-    void set_input(std::string input) { input_ = std::move(input); }
+    void set_input(std::string input) {
+        input_ = std::move(input);
+        path_completion_preview_.clear();
+    }
+    void set_path_completion_preview(std::vector<std::string> preview) {
+        path_completion_preview_ = std::move(preview);
+    }
+    [[nodiscard]] auto path_completion_preview() const -> const std::vector<std::string>& {
+        return path_completion_preview_;
+    }
     void set_log_buffer(LogBuffer* buf) { log_buffer_ = buf; }
 
     void open(ModalType type, InspectorPane* left_pane, uint64_t step_delay_us);
@@ -151,13 +161,20 @@ class TuiModal {
     auto submit(InspectorPane* left_pane, std::atomic<uint64_t>& step_delay_us,
                 const std::function<void(TuiRegPage)>& set_reg_page_cb,
                 const std::function<void(const std::string&)>& set_status_override_cb,
-                const std::function<void()>& on_speed_changed_cb) -> bool;
+                const std::function<void()>& on_speed_changed_cb,
+                const std::function<void(framework::DensityMode)>& on_density_changed_cb = {})
+        -> bool;
 
-    void push_char(char c) { input_.push_back(c); }
+    void push_char(char c) {
+        input_.push_back(c);
+        path_completion_preview_.clear();
+    }
     void pop_char() {
         if (!input_.empty()) input_.pop_back();
+        path_completion_preview_.clear();
     }
     void toggle_load_mode() {
+        path_completion_preview_.clear();
         if (load_buildroot_mode_) {
             load_buildroot_mode_ = false;
             load_appmode_ = true;
@@ -189,7 +206,10 @@ class TuiModal {
 
     void scroll_help(int delta);
     void reset_help_scroll() { help_scroll_ = 0; }
+    void scroll_to_top();
+    void scroll_to_bottom();
     void handle_wheel(int delta);
+    auto handle_horizontal(int delta) -> bool;
 
     void move_preset_cursor(int delta) {
         preset_cursor_ = std::clamp(preset_cursor_ + delta, 0, 3);
@@ -209,9 +229,17 @@ class TuiModal {
     [[nodiscard]] auto get_tool_picker_cursor() const -> int { return tool_picker_cursor_; }
     [[nodiscard]] auto get_tool_picker_num_slots() const -> int { return tool_picker_num_slots_; }
     [[nodiscard]] auto get_selected_tool_page() const -> TuiRegPage;
+    [[nodiscard]] auto tool_filter() const -> modals::ToolFilter;
+    void set_selected_hart(size_t hart) { selected_hart_ = hart; }
 
     void open_memory_dump(simrv::xlen::Address addr = 0, InspectorPane* inspector_pane = nullptr);
     void open_log_viewer();
+    void set_mission_progress(const MissionProgress* mission) { mission_ = mission; }
+    void open_mission_objective();
+    void cycle_mission_hint() noexcept;
+    [[nodiscard]] auto mission_hint_level() const noexcept -> uint8_t {
+        return mission_hint_level_;
+    }
     void scroll_log_viewer(int delta, int total_lines = 100, int visible_lines = 20);
     void scroll_log_viewer_page(int pages, int total_lines = 100, int visible_lines = 20);
     void toggle_log_follow();
@@ -242,15 +270,11 @@ class TuiModal {
     [[nodiscard]] auto get_pending_platform_draft() const -> const SettingsDraft& {
         return pending_platform_draft_;
     }
+    void open_reconfiguration_confirm(simrv::core::MachineConfig config, std::string summary,
+                                      std::optional<bool> cycle_accurate = std::nullopt);
+    [[nodiscard]] auto apply_pending_reconfiguration() -> std::expected<void, std::string>;
 
-    enum class ModalClickResult : uint8_t {
-        Ignored,
-        Handled,
-        Closed,
-        Submit,
-        ReloadRequested,
-        DiscardRequested
-    };
+    using ModalClickResult = framework::ModalAction;
 
     [[nodiscard]] auto handle_click(int x, int y, int term_width, int term_height)
         -> ModalClickResult;
@@ -260,25 +284,34 @@ class TuiModal {
 
    private:
     simrv::core::Machine& machine_;
+    const MissionProgress* mission_ = nullptr;
+    uint8_t mission_hint_level_ = 0;
     LogBuffer* log_buffer_ = nullptr;
     ModalType active_modal_ = ModalType::None;
+    std::unique_ptr<framework::IModal> active_modal_impl_{};
     std::string input_;
     std::string notice_title_;
     std::string notice_message_;
     bool notice_is_error_ = false;
     int bp_cursor_ = 0;
     SettingsDraft settings_draft_;
+    framework::DensityMode density_mode_ = framework::DensityMode::Auto;
     SettingsDraft pending_platform_draft_;
+    std::optional<simrv::core::MachineConfig> pending_reconfiguration_;
+    std::optional<bool> pending_cycle_accurate_;
+    std::string pending_reconfiguration_summary_;
     int glossary_topic_ = 0;
     int glossary_scroll_ = 0;
     mutable int help_scroll_ = 0;
     int preset_cursor_ = 0;
+    size_t selected_hart_ = 0;
     int tool_picker_slot_ = 0;
     int tool_picker_cursor_ = 0;
     int tool_picker_num_slots_ = 3;
     TuiRegPage tool_picker_current_page_ = TuiRegPage::GPR;
     bool load_appmode_ = true;  // Toggle for App (baremetal) vs OS (Linux) mode in LoadBinary modal
     bool load_buildroot_mode_ = false;
+    std::vector<std::string> path_completion_preview_;
     std::string staged_binary_path_;
     bool staged_mode_change_ = false;
     bool staged_target_appmode_ = false;
@@ -302,6 +335,9 @@ class TuiModal {
         std::vector<framework::ControlSpan> spans;
     };
     mutable std::vector<RenderedControlRow> rendered_control_rows_;
+
+    friend class modals::FilePickerModal;
+    friend class modals::MissionObjectiveModal;
 };
 
 }  // namespace simrv::tui

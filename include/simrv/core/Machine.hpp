@@ -77,6 +77,7 @@ namespace simrv::core {
 
 class CPU;
 class IConsoleSink;
+class IExecutionController;
 class ITelemetrySink;
 class Tracer;
 class BaremetalRunner;
@@ -186,8 +187,6 @@ class Machine final : public core::IInterruptController {
         return config.tui.high_contrast;
     }
     void set_high_contrast_enabled(bool enabled) noexcept { config.tui.high_contrast = enabled; }
-    [[nodiscard]] auto class_mode_enabled() const noexcept -> bool { return config.tui.class_mode; }
-    void set_class_mode_enabled(bool enabled) noexcept { config.tui.class_mode = enabled; }
     [[nodiscard]] auto mission_id() const noexcept -> const std::string& {
         return config.tui.mission;
     }
@@ -490,6 +489,9 @@ class Machine final : public core::IInterruptController {
     }
     [[nodiscard]] auto symbol_table() noexcept -> simrv::debug::SymbolTable&;
     [[nodiscard]] auto symbol_table() const noexcept -> const simrv::debug::SymbolTable&;
+
+    [[nodiscard]] auto execution_controller() noexcept -> IExecutionController*;
+    [[nodiscard]] auto execution_controller() const noexcept -> const IExecutionController*;
 
     [[nodiscard]] auto telemetry_sink() noexcept -> std::shared_ptr<ITelemetrySink> {
         return telemetry_sink_;

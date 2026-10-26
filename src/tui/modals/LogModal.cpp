@@ -14,6 +14,90 @@
 
 namespace simrv::tui::modals {
 
+void LogModal::render_content(std::vector<std::string>& content_rows, int width, int height) {
+    auto add_row = [&](std::string s) { content_rows.push_back(std::move(s)); };
+    if (log_buffer_) render(content_rows, add_row, *log_buffer_, height, width);
+}
+
+void LogModal::scroll_to_top() { scroll_page(-99999, 0, 0); }
+
+void LogModal::scroll_to_bottom() { scroll_page(99999, 0, 0); }
+
+void LogModal::handle_wheel(int delta) { scroll(delta * 2, 2000, 20); }
+
+auto LogModal::handle_key(uint8_t byte, TuiKey key) -> framework::ModalAction {
+    if (is_search_mode()) {
+        if (byte == 27 || key == simrv::tui::TuiKey::Esc) {
+            toggle_search_mode();
+            return framework::ModalAction::Continue;
+        }
+        if (key == simrv::tui::TuiKey::Enter || key == simrv::tui::TuiKey::Newline) {
+            toggle_search_mode();
+            return framework::ModalAction::Continue;
+        }
+        if (byte == 8 || byte == 127 || key == simrv::tui::TuiKey::Backspace) {
+            std::string q = search_query();
+            if (!q.empty()) q.pop_back();
+            set_search_query(std::move(q));
+            return framework::ModalAction::Continue;
+        }
+        if (byte >= 32 && byte <= 126) {
+            std::string q = search_query();
+            q.push_back(static_cast<char>(byte));
+            set_search_query(std::move(q));
+            return framework::ModalAction::Continue;
+        }
+        return framework::ModalAction::Continue;
+    }
+
+    if (byte == 27 || key == simrv::tui::TuiKey::Esc || byte == 'q' || byte == 'Q') {
+        return framework::ModalAction::Close;
+    }
+    if (byte == 'a' || byte == 'A') {
+        set_filter_level(std::nullopt);
+        return framework::ModalAction::Continue;
+    }
+    if (byte == 'i' || byte == 'I') {
+        set_filter_level(simrv::log::Level::Info);
+        return framework::ModalAction::Continue;
+    }
+    if (byte == 'w' || byte == 'W') {
+        set_filter_level(simrv::log::Level::Warn);
+        return framework::ModalAction::Continue;
+    }
+    if (byte == 'e' || byte == 'E') {
+        set_filter_level(simrv::log::Level::Error);
+        return framework::ModalAction::Continue;
+    }
+    if (byte == 'f' || byte == 'F') {
+        toggle_follow();
+        return framework::ModalAction::Continue;
+    }
+    if (byte == '/') {
+        toggle_search_mode();
+        return framework::ModalAction::Continue;
+    }
+    if (byte == 'j' || byte == 'J') {
+        scroll(1, 2000, 20);
+        return framework::ModalAction::Continue;
+    }
+    if (byte == 'k' || byte == 'K') {
+        scroll(-1, 2000, 20);
+        return framework::ModalAction::Continue;
+    }
+    return framework::ModalAction::Continue;
+}
+
+auto LogModal::handle_control_click(int /*content_row*/, size_t action_index)
+    -> framework::ModalAction {
+    return action_index == 0 ? framework::ModalAction::Submit : framework::ModalAction::Close;
+}
+
+auto LogModal::handle_click(framework::ScreenCoord local_pt) -> framework::ModalAction {
+    (void)local_pt;
+    return framework::ModalAction::Continue;
+}
+
 namespace {
 
 auto strip_ansi(std::string_view str) -> std::string {

@@ -9,25 +9,34 @@
 #include <filesystem>
 #include <format>
 #include <numeric>
+#include <sstream>
 #include <string_view>
 
 #include "simrv/core/Cpu.hpp"
 #include "simrv/core/CpuConfigParser.hpp"
 #include "simrv/core/Machine.hpp"
 #include "simrv/debug/BreakpointManager.hpp"
+#include "simrv/debug/SymbolTable.hpp"
 #include "simrv/tui/TuiLayoutPolicy.hpp"
+#include "simrv/tui/TuiMission.hpp"
 #include "simrv/tui/TuiTheme.hpp"
 #include "simrv/tui/framework/Modal.hpp"
+#include "simrv/tui/framework/Text.hpp"
 #include "simrv/tui/modals/AddressModal.hpp"
 #include "simrv/tui/modals/BreakpointModal.hpp"
+#include "simrv/tui/modals/ConfirmModal.hpp"
+#include "simrv/tui/modals/FilePickerModal.hpp"
 #include "simrv/tui/modals/GlossaryModal.hpp"
 #include "simrv/tui/modals/HartModal.hpp"
 #include "simrv/tui/modals/HelpModal.hpp"
+#include "simrv/tui/modals/LayoutPresetsModal.hpp"
 #include "simrv/tui/modals/LoadModal.hpp"
 #include "simrv/tui/modals/LogModal.hpp"
 #include "simrv/tui/modals/MemoryModal.hpp"
 #include "simrv/tui/modals/MisaModal.hpp"
+#include "simrv/tui/modals/MissionObjectiveModal.hpp"
 #include "simrv/tui/modals/ModalComponents.hpp"
+#include "simrv/tui/modals/NoticeModal.hpp"
 #include "simrv/tui/modals/SettingsModal.hpp"
 #include "simrv/tui/modals/StepModal.hpp"
 #include "simrv/tui/modals/SystemConfigModal.hpp"
@@ -36,26 +45,7 @@
 
 namespace simrv::tui {
 
-namespace {
-
-constexpr std::array<int, 18> kGeneralSettingRows = {4,  5,  6,  7,  8,  9,  12, 13, 14,
-                                                     17, 18, 19, 22, 23, 26, 27, 28, 29};
-constexpr int kGeneralSettingsContentRows = 30;
-
-[[nodiscard]] constexpr auto general_setting_row(int item) noexcept -> int {
-    return (item >= 0 && static_cast<size_t>(item) < kGeneralSettingRows.size())
-               ? kGeneralSettingRows[static_cast<size_t>(item)]
-               : 0;
-}
-
-[[nodiscard]] inline auto general_setting_at_row(int row) noexcept -> int {
-    const auto it = std::ranges::find(kGeneralSettingRows, row);
-    return it == kGeneralSettingRows.end()
-               ? -1
-               : static_cast<int>(std::distance(kGeneralSettingRows.begin(), it));
-}
-
-}  // namespace
+namespace {}  // namespace
 
 TuiModal::TuiModal(simrv::core::Machine& machine) : machine_(machine) {}
 
@@ -63,44 +53,71 @@ void TuiModal::open(ModalType type, InspectorPane* inspector_pane, uint64_t step
     active_modal_ = type;
     rendered_box_width_ = 0;
     input_.clear();
+    path_completion_preview_.clear();
     bp_cursor_ = 0;
     switch (type) {
         case ModalType::SetBreakpoint:
         case ModalType::SetWatchpoint:
             modals::BreakpointModal::open(type, input_, machine_, inspector_pane);
+            active_modal_impl_ = std::make_unique<modals::BreakpointModal>(this, &machine_, type,
+                                                                           input_, bp_cursor_);
+            break;
+        case ModalType::ManageBreakpoints:
+            active_modal_impl_ = std::make_unique<modals::BreakpointModal>(this, &machine_, type,
+                                                                           input_, bp_cursor_);
             break;
         case ModalType::SetSpeed:
             modals::StepModal::open(type, input_, step_delay_us);
+            active_modal_impl_ = std::make_unique<modals::StepModal>(input_);
             break;
         case ModalType::InspectAddress:
             modals::AddressModal::open(input_, inspector_pane);
+            active_modal_impl_ = std::make_unique<modals::AddressModal>(input_);
             break;
         case ModalType::LoadBinary:
             load_buildroot_mode_ = false;
             modals::LoadModal::open(type, input_, load_appmode_, machine_);
+            active_modal_impl_ = std::make_unique<modals::LoadModal>(
+                this, &machine_, type, input_, load_appmode_, load_buildroot_mode_,
+                staged_binary_path_, path_completion_preview_);
             break;
         case ModalType::LoadDiskImage:
             modals::LoadModal::open(type, input_, load_appmode_, machine_);
+            active_modal_impl_ = std::make_unique<modals::LoadModal>(
+                this, &machine_, type, input_, load_appmode_, load_buildroot_mode_,
+                staged_binary_path_, path_completion_preview_);
             break;
         case ModalType::Glossary:
             modals::GlossaryModal::open(glossary_topic_, glossary_scroll_);
+            active_modal_impl_ =
+                std::make_unique<modals::GlossaryModal>(glossary_topic_, glossary_scroll_);
             break;
         case ModalType::Settings:
-            modals::SettingsModal::open(settings_draft_, machine_);
+            modals::SettingsModal::open(settings_draft_, machine_, density_mode_);
+            active_modal_impl_ =
+                std::make_unique<modals::SettingsModal>(this, &machine_, settings_draft_);
             break;
         case ModalType::Help:
             reset_help_scroll();
+            active_modal_impl_ = std::make_unique<modals::HelpModal>(help_scroll_);
             break;
         case ModalType::MemoryDump:
-            modals::MemoryModal::open(0, machine_, inspector_pane);
+            open_memory_dump(0, inspector_pane);
             break;
         case ModalType::SwitchHart:
-            modals::HartModal::open(0, machine_);
+            open_switch_hart(0);
             break;
         case ModalType::LogViewer:
-            if (log_buffer_) modals::LogModal::open(*log_buffer_);
+            open_log_viewer();
+            break;
+        case ModalType::LayoutPresets:
+            active_modal_impl_ = std::make_unique<modals::LayoutPresetsModal>(this, preset_cursor_);
+            break;
+        case ModalType::MissionObjective:
+            open_mission_objective();
             break;
         default:
+            active_modal_impl_.reset();
             break;
     }
 }
@@ -108,17 +125,25 @@ void TuiModal::open(ModalType type, InspectorPane* inspector_pane, uint64_t step
 void TuiModal::open_save_cpu_config() {
     active_modal_ = ModalType::SaveCpuConfig;
     rendered_box_width_ = 0;
+    path_completion_preview_.clear();
     const auto preset =
         static_cast<simrv::pipeline::CpuModelPreset>(settings_draft_.sys_config.preset);
     const auto name = simrv::pipeline::cpu_model_preset_name(preset);
     input_ = std::format("configs/models/{}.cfg", name);
+    active_modal_impl_ = std::make_unique<modals::LoadModal>(
+        this, &machine_, active_modal_, input_, load_appmode_, load_buildroot_mode_,
+        staged_binary_path_, path_completion_preview_);
 }
 
 void TuiModal::open_load_cpu_config() {
     active_modal_ = ModalType::LoadCpuConfig;
     rendered_box_width_ = 0;
+    path_completion_preview_.clear();
     const auto& name = machine_.primary_hart().cpu_model_config.name;
     input_ = name.empty() ? "configs/models/rvcomp.cfg" : name;
+    active_modal_impl_ = std::make_unique<modals::LoadModal>(
+        this, &machine_, active_modal_, input_, load_appmode_, load_buildroot_mode_,
+        staged_binary_path_, path_completion_preview_);
 }
 
 void TuiModal::open_file_picker() {
@@ -127,12 +152,14 @@ void TuiModal::open_file_picker() {
         return;
     file_picker_return_modal_ = active_modal_;
     file_picker_return_input_ = input_;
+    path_completion_preview_.clear();
     const std::filesystem::path typed(input_);
     file_picker_directory_ = typed.has_parent_path() ? typed.parent_path() : ".";
     if (file_picker_directory_.empty()) file_picker_directory_ = ".";
     file_picker_filter_ = typed.filename().string();
     file_picker_select_directory_ = load_buildroot_mode_;
     active_modal_ = ModalType::LoadFilePicker;
+    active_modal_impl_ = std::make_unique<modals::FilePickerModal>(*this);
     refresh_file_picker();
 }
 
@@ -191,12 +218,18 @@ void TuiModal::accept_file_picker_entry() {
     if (file_picker_select_directory_ && selected == fs::path(".")) {
         input_ = file_picker_directory_.string();
         active_modal_ = file_picker_return_modal_;
+        active_modal_impl_ = std::make_unique<modals::LoadModal>(
+            this, &machine_, active_modal_, input_, load_appmode_, load_buildroot_mode_,
+            staged_binary_path_, path_completion_preview_);
         file_picker_entries_.clear();
         return;
     }
     if (file_picker_select_directory_ && selected == file_picker_directory_) {
         input_ = selected.string();
         active_modal_ = file_picker_return_modal_;
+        active_modal_impl_ = std::make_unique<modals::LoadModal>(
+            this, &machine_, active_modal_, input_, load_appmode_, load_buildroot_mode_,
+            staged_binary_path_, path_completion_preview_);
         file_picker_entries_.clear();
         return;
     }
@@ -210,6 +243,9 @@ void TuiModal::accept_file_picker_entry() {
     }
     input_ = selected.string();
     active_modal_ = file_picker_return_modal_;
+    active_modal_impl_ = std::make_unique<modals::LoadModal>(
+        this, &machine_, active_modal_, input_, load_appmode_, load_buildroot_mode_,
+        staged_binary_path_, path_completion_preview_);
     file_picker_entries_.clear();
 }
 
@@ -217,6 +253,9 @@ void TuiModal::file_picker_input(uint8_t byte, TuiKey key) {
     if (key == TuiKey::Esc || byte == 27 || byte == 'q' || byte == 'Q') {
         input_ = file_picker_return_input_;
         active_modal_ = file_picker_return_modal_;
+        active_modal_impl_ = std::make_unique<modals::LoadModal>(
+            this, &machine_, active_modal_, input_, load_appmode_, load_buildroot_mode_,
+            staged_binary_path_, path_completion_preview_);
         file_picker_entries_.clear();
         return;
     }
@@ -296,7 +335,8 @@ auto TuiModal::remove_bp_at_cursor(
                                                                  if (set_status_override_cb)
                                                                      set_status_override_cb(msg);
                                                              });
-    if (removed && !removed_msg.empty()) {
+    if (removed && !removed_msg.empty() &&
+        removed_msg.find("managed by the mission") == std::string::npos) {
         std::string title = (removed_msg.find("watchpoint") != std::string::npos ||
                              removed_msg.find("Watchpoint") != std::string::npos)
                                 ? "WATCHPOINT REMOVED"
@@ -306,30 +346,37 @@ auto TuiModal::remove_bp_at_cursor(
     return removed;
 }
 
+auto TuiModal::tool_filter() const -> modals::ToolFilter {
+    return modals::ToolPickerModal::make_filter(machine_, selected_hart_);
+}
+
 void TuiModal::open_tool_picker(int slot_idx, TuiRegPage current_page, int num_slots) {
     active_modal_ = ModalType::ToolPicker;
     tool_picker_num_slots_ = std::max(1, num_slots);
     tool_picker_slot_ = std::clamp(slot_idx, 0, tool_picker_num_slots_ - 1);
     tool_picker_current_page_ = current_page;
     tool_picker_cursor_ = 0;
-    const auto& list = modals::ToolPickerModal::all_tools();
+    const auto list = modals::ToolPickerModal::all_tools(tool_filter());
     for (size_t i = 0; i < list.size(); ++i) {
         if (list[i].page == current_page) {
             tool_picker_cursor_ = static_cast<int>(i);
             break;
         }
     }
+    active_modal_impl_ = std::make_unique<modals::ToolPickerModal>(
+        tool_picker_slot_, tool_picker_cursor_, tool_picker_current_page_, tool_picker_num_slots_,
+        tool_filter());
 }
 
 void TuiModal::move_tool_picker_cursor(int delta) {
-    const int count = static_cast<int>(modals::ToolPickerModal::total_tool_count());
+    const int count = static_cast<int>(modals::ToolPickerModal::total_tool_count(tool_filter()));
     if (count <= 0) return;
     tool_picker_cursor_ = (tool_picker_cursor_ + delta) % count;
     if (tool_picker_cursor_ < 0) tool_picker_cursor_ += count;
 }
 
 void TuiModal::set_tool_picker_cursor(int cursor) {
-    const int count = static_cast<int>(modals::ToolPickerModal::total_tool_count());
+    const int count = static_cast<int>(modals::ToolPickerModal::total_tool_count(tool_filter()));
     if (count <= 0) return;
     tool_picker_cursor_ = std::clamp(cursor, 0, count - 1);
 }
@@ -346,7 +393,8 @@ void TuiModal::cycle_tool_picker_slot(int num_slots, int direction) {
 }
 
 auto TuiModal::get_selected_tool_page() const -> TuiRegPage {
-    auto page = modals::ToolPickerModal::tool_at_index(static_cast<size_t>(tool_picker_cursor_));
+    auto page = modals::ToolPickerModal::tool_at_index(static_cast<size_t>(tool_picker_cursor_),
+                                                       tool_filter());
     return page.value_or(TuiRegPage::GPR);
 }
 
@@ -355,6 +403,7 @@ void TuiModal::open_memory_dump(simrv::xlen::Address addr, InspectorPane* inspec
     rendered_box_width_ = 0;
     input_.clear();
     modals::MemoryModal::open(addr, machine_, inspector_pane);
+    active_modal_impl_ = std::make_unique<modals::MemoryModal>(this, &machine_, input_);
 }
 
 void TuiModal::open_switch_hart(size_t current_hart) {
@@ -362,6 +411,7 @@ void TuiModal::open_switch_hart(size_t current_hart) {
     rendered_box_width_ = 0;
     input_.clear();
     modals::HartModal::open(current_hart, machine_);
+    active_modal_impl_ = std::make_unique<modals::HartModal>(machine_);
 }
 
 void TuiModal::move_memory_cursor(int delta_byte, int delta_row) {
@@ -377,6 +427,26 @@ void TuiModal::open_log_viewer() {
     rendered_box_width_ = 0;
     input_.clear();
     if (log_buffer_) modals::LogModal::open(*log_buffer_);
+    active_modal_impl_ = std::make_unique<modals::LogModal>(this, log_buffer_);
+}
+
+void TuiModal::open_mission_objective() {
+    if (mission_ == nullptr || !mission_->guidance()) return;
+    active_modal_ = ModalType::MissionObjective;
+    mission_hint_level_ = 0;
+    rendered_box_width_ = 0;
+    input_.clear();
+    active_modal_impl_ = std::make_unique<modals::MissionObjectiveModal>(this, &machine_, mission_,
+                                                                         mission_hint_level_);
+}
+
+void TuiModal::cycle_mission_hint() noexcept {
+    const auto guidance = mission_ != nullptr ? mission_->guidance() : std::nullopt;
+    if (guidance && !guidance->hint.empty()) {
+        mission_hint_level_ = static_cast<uint8_t>((mission_hint_level_ + 1) % 3);
+    } else {
+        mission_hint_level_ = mission_hint_level_ == 2 ? 0 : 2;
+    }
 }
 
 void TuiModal::scroll_log_viewer(int delta, int total_lines, int visible_lines) {
@@ -399,14 +469,18 @@ void TuiModal::move_hart_cursor(int delta) { modals::HartModal::move_cursor(delt
 
 void TuiModal::close() {
     active_modal_ = ModalType::None;
+    active_modal_impl_.reset();
     rendered_box_width_ = 0;
     input_.clear();
+    path_completion_preview_.clear();
 }
 
 auto TuiModal::submit(InspectorPane* inspector_pane, std::atomic<uint64_t>& step_delay_us,
                       const std::function<void(TuiRegPage)>& set_reg_page_cb,
                       const std::function<void(const std::string&)>& set_status_override_cb,
-                      const std::function<void()>& on_speed_changed_cb) -> bool {
+                      const std::function<void()>& on_speed_changed_cb,
+                      const std::function<void(framework::DensityMode)>& on_density_changed_cb)
+    -> bool {
     (void)set_status_override_cb;
     bool result = false;
     ModalType current_modal = active_modal_;
@@ -457,6 +531,9 @@ auto TuiModal::submit(InspectorPane* inspector_pane, std::atomic<uint64_t>& step
             if (current_modal == ModalType::LoadBinary && staged_mode_change_ && !load_appmode_) {
                 active_modal_ = ModalType::LoadDiskImage;
                 input_ = machine_.disk_path();
+                active_modal_impl_ = std::make_unique<modals::LoadModal>(
+                    this, &machine_, active_modal_, input_, load_appmode_, load_buildroot_mode_,
+                    staged_binary_path_, path_completion_preview_);
                 return false;
             }
             if (result) {
@@ -469,12 +546,13 @@ auto TuiModal::submit(InspectorPane* inspector_pane, std::atomic<uint64_t>& step
             }
             break;
         case ModalType::Settings: {
-            if (settings_draft_.platform_profile !=
-                static_cast<uint8_t>(machine_.platform_profile())) {
-                open_platform_confirm(settings_draft_);
-                return false;
-            }
-            result = modals::SettingsModal::submit(settings_draft_, machine_, set_reg_page_cb);
+            if (on_density_changed_cb) on_density_changed_cb(settings_draft_.density_mode);
+            result = modals::SettingsModal::submit(
+                settings_draft_, machine_, set_reg_page_cb,
+                [this](simrv::core::MachineConfig next, SysConfigDraft, bool cycle_accurate) {
+                    open_reconfiguration_confirm(std::move(next), "Machine settings changed",
+                                                 cycle_accurate);
+                });
             if (result) {
                 open_notice("SETTINGS SAVED",
                             "Simulator & SMP settings saved and applied successfully.", false);
@@ -525,18 +603,33 @@ auto TuiModal::submit(InspectorPane* inspector_pane, std::atomic<uint64_t>& step
             }
         }
         case ModalType::LoadCpuConfig: {
-            bool success = modals::LoadModal::submit(
-                ModalType::LoadCpuConfig, input_, false, false, machine_, staged_binary_path_,
-                staged_mode_change_, staged_target_appmode_, set_status_override_cb);
-            if (success) {
-                open_notice("CPU MODEL LOADED", std::format("Loaded configuration from {}", input_),
-                            false);
-                return true;
-            } else {
-                open_notice("LOAD FAILED", std::format("Failed to load CPU model '{}'", input_),
-                            true);
+            if (input_.empty()) return false;
+            const auto resolved = simrv::core::resolve_cpu_model_path(input_);
+            const auto target_path = resolved.value_or(std::filesystem::path(input_));
+            simrv::pipeline::CpuModelConfig loaded{};
+            if (!simrv::core::load_cpu_config(target_path, loaded)) {
+                open_notice(
+                    "LOAD FAILED",
+                    std::format("Failed to load CPU model '{}' (check architecture)", input_),
+                    true);
                 return false;
             }
+            std::ostringstream current_text;
+            std::ostringstream loaded_text;
+            simrv::core::serialize_cpu_config(machine_.primary_hart().cpu_model_config,
+                                              current_text);
+            simrv::core::serialize_cpu_config(loaded, loaded_text);
+            if (current_text.str() == loaded_text.str()) {
+                open_notice("CPU MODEL UNCHANGED",
+                            std::format("{} is already active; no restart is needed.", loaded.name),
+                            false);
+                return true;
+            }
+            auto next = machine_.configuration();
+            next.cpu_model_config_override = std::move(loaded);
+            next.files.config_path.clear();
+            open_reconfiguration_confirm(std::move(next), std::format("CPU model: {}", input_));
+            return false;
         }
         case ModalType::MemoryDump: {
             result = modals::MemoryModal::submit_input(input_, machine_, inspector_pane,
@@ -586,38 +679,29 @@ void TuiModal::scroll_glossary_content(int delta) {
 
 void TuiModal::scroll_help(int delta) { help_scroll_ = std::max(0, help_scroll_ + delta); }
 
-void TuiModal::handle_wheel(int delta) {
-    switch (active_modal_) {
-        case ModalType::Help:
-            scroll_help(delta * 2);
-            break;
-        case ModalType::Glossary:
-            scroll_glossary_content(delta * 2);
-            break;
-        case ModalType::Settings:
-            move_settings_cursor(delta);
-            break;
-        case ModalType::ManageBreakpoints:
-            move_bp_cursor(delta);
-            break;
-        case ModalType::LayoutPresets:
-            move_preset_cursor(delta);
-            break;
-        case ModalType::ToolPicker:
-            move_tool_picker_cursor(delta);
-            break;
-        case ModalType::MemoryDump:
-            move_memory_cursor(0, delta);
-            break;
-        case ModalType::SwitchHart:
-            move_hart_cursor(delta);
-            break;
-        case ModalType::LogViewer:
-            modals::LogModal::scroll(delta * 2, 2000, 20);
-            break;
-        default:
-            break;
+void TuiModal::scroll_to_top() {
+    if (active_modal_impl_) {
+        active_modal_impl_->scroll_to_top();
     }
+}
+
+void TuiModal::scroll_to_bottom() {
+    if (active_modal_impl_) {
+        active_modal_impl_->scroll_to_bottom();
+    }
+}
+
+void TuiModal::handle_wheel(int delta) {
+    if (active_modal_impl_) {
+        active_modal_impl_->handle_wheel(delta);
+    }
+}
+
+auto TuiModal::handle_horizontal(int delta) -> bool {
+    if (active_modal_impl_) {
+        return active_modal_impl_->handle_horizontal(delta);
+    }
+    return false;
 }
 
 void TuiModal::open_notice(const std::string& title, const std::string& message, bool is_error) {
@@ -626,22 +710,50 @@ void TuiModal::open_notice(const std::string& title, const std::string& message,
     notice_title_ = title;
     notice_message_ = message;
     notice_is_error_ = is_error;
+    active_modal_impl_ = std::make_unique<modals::NoticeModal>(this, &machine_, notice_title_,
+                                                               notice_message_, notice_is_error_);
 }
 
 void TuiModal::open_platform_confirm(const SettingsDraft& draft) {
     active_modal_ = ModalType::PlatformChangeConfirm;
     input_.clear();
     pending_platform_draft_ = draft;
+    active_modal_impl_ = std::make_unique<modals::ConfirmModal>(this, &machine_, active_modal_,
+                                                                &pending_platform_draft_, "");
+}
+
+void TuiModal::open_reconfiguration_confirm(simrv::core::MachineConfig config, std::string summary,
+                                            std::optional<bool> cycle_accurate) {
+    active_modal_ = ModalType::ConfigurationChangeConfirm;
+    input_.clear();
+    pending_reconfiguration_ = std::move(config);
+    pending_cycle_accurate_ = cycle_accurate;
+    pending_reconfiguration_summary_ = std::move(summary);
+    active_modal_impl_ = std::make_unique<modals::ConfirmModal>(
+        this, &machine_, active_modal_, nullptr, pending_reconfiguration_summary_);
+}
+
+auto TuiModal::apply_pending_reconfiguration() -> std::expected<void, std::string> {
+    if (!pending_reconfiguration_) return std::unexpected("No simulator configuration is pending");
+    if (const auto valid = pending_reconfiguration_->validate(); !valid)
+        return std::unexpected(valid.error());
+    if (pending_cycle_accurate_) {
+        const auto engine = simrv::core::select_execution_engine(*pending_cycle_accurate_,
+                                                                 simrv::core::InteractionMode::Tui);
+        machine_.switch_execution_engine_sync(engine);
+    }
+    return machine_.stage_reconfiguration(*pending_reconfiguration_);
 }
 
 auto TuiModal::handle_click(int x, int y, int term_width, int term_height) -> ModalClickResult {
-    if (active_modal_ == ModalType::None) return ModalClickResult::Ignored;
+    if (active_modal_ == ModalType::None && !active_modal_impl_) return ModalClickResult::Ignored;
 
     bool is_help = (active_modal_ == ModalType::Help);
     bool is_glossary = (active_modal_ == ModalType::Glossary);
     bool is_wide_modal =
         (is_help || is_glossary || active_modal_ == ModalType::Settings ||
          active_modal_ == ModalType::Notice || active_modal_ == ModalType::PlatformChangeConfirm ||
+         active_modal_ == ModalType::ConfigurationChangeConfirm ||
          active_modal_ == ModalType::LayoutPresets || active_modal_ == ModalType::ToolPicker ||
          active_modal_ == ModalType::LogViewer || active_modal_ == ModalType::MemoryDump);
     const int fallback_width = is_wide_modal ? 78 : 58;
@@ -653,12 +765,13 @@ auto TuiModal::handle_click(int x, int y, int term_width, int term_height) -> Mo
     if (provisional_width < 35) return ModalClickResult::Ignored;
 
     int est_rows = (active_modal_ == ModalType::Settings && settings_draft_.active_tab == 0)
-                       ? kGeneralSettingsContentRows
-                   : (active_modal_ == ModalType::Glossary)      ? 26
-                   : (active_modal_ == ModalType::Help)          ? 24
-                   : (active_modal_ == ModalType::LogViewer)     ? 24
-                   : (active_modal_ == ModalType::MemoryDump)    ? 18
-                   : (active_modal_ == ModalType::ToolPicker)    ? 22
+                       ? modals::kGeneralSettingsContentRows
+                   : (active_modal_ == ModalType::Glossary)   ? 26
+                   : (active_modal_ == ModalType::Help)       ? 24
+                   : (active_modal_ == ModalType::LogViewer)  ? 24
+                   : (active_modal_ == ModalType::MemoryDump) ? 18
+                   : (active_modal_ == ModalType::ToolPicker)
+                       ? modals::ToolPickerModal::content_row_count(tool_filter())
                    : (active_modal_ == ModalType::LayoutPresets) ? 12
                                                                  : 10;
 
@@ -680,7 +793,8 @@ auto TuiModal::handle_click(int x, int y, int term_width, int term_height) -> Mo
     int start_x = overlay.start_x + 1;  // 1-indexed terminal col
 
     if (x < start_x || x >= start_x + box_w || y < start_y || y >= start_y + box_h) {
-        if (active_modal_ != ModalType::LoadBinary || !machine_.binary_path().empty()) {
+        if (active_modal_impl_ || active_modal_ != ModalType::LoadBinary ||
+            !machine_.binary_path().empty()) {
             close();
             return ModalClickResult::Closed;
         }
@@ -691,246 +805,88 @@ auto TuiModal::handle_click(int x, int y, int term_width, int term_height) -> Mo
     int rel_x = x - start_x;
 
     if (rel_y == 0 || rel_y == box_h - 1) return ModalClickResult::Handled;
-    int content_row = rel_y - 1;
 
     for (auto const& control_row : rendered_control_rows_) {
         if (control_row.relative_y != rel_y) continue;
         int const control_column = rel_x - 1;
         for (std::size_t action = 0; action < control_row.spans.size(); ++action) {
             if (!control_row.spans[action].contains(control_column)) continue;
-            switch (active_modal_) {
-                case ModalType::Glossary:
-                    if (control_row.content_row == 0) {
-                        set_glossary_topic(static_cast<int>(action));
-                    } else if (action == 0) {
-                        move_glossary_topic(-1);
-                    } else if (action == 1) {
-                        move_glossary_topic(1);
-                    } else if (control_row.spans.size() == 5 && action == 2) {
-                        scroll_glossary_content(-2);
-                    } else if (control_row.spans.size() == 5 && action == 3) {
-                        scroll_glossary_content(2);
-                    } else {
-                        return ModalClickResult::Closed;
-                    }
-                    return ModalClickResult::Handled;
-                case ModalType::Settings:
-                    if (control_row.content_row == 0) {
-                        set_settings_tab(static_cast<uint8_t>(action));
-                        return ModalClickResult::Handled;
-                    }
-                    return action == 0 ? ModalClickResult::Submit : ModalClickResult::Closed;
-                case ModalType::ManageBreakpoints: {
-                    int last_control_row = 0;
-                    for (auto const& row : rendered_control_rows_) {
-                        last_control_row = std::max(last_control_row, row.content_row);
-                    }
-                    if (control_row.content_row == last_control_row) {
-                        open(action == 0 ? ModalType::SetBreakpoint : ModalType::SetWatchpoint,
-                             nullptr, 0);
-                    } else if (action == 0) {
-                        move_bp_cursor(-1);
-                    } else if (action == 1) {
-                        move_bp_cursor(1);
-                    } else if (action == 2) {
-                        remove_bp_at_cursor({});
-                    } else if (action == 3) {
-                        machine_.breakpoint_manager().clear_pc_breakpoints();
-                        machine_.breakpoint_manager().clear_watchpoints();
-                        bp_cursor_ = 0;
-                    } else {
-                        return ModalClickResult::Closed;
-                    }
-                    return ModalClickResult::Handled;
-                }
-                case ModalType::LoadDiskImage:
-                    return ModalClickResult::Submit;
-                case ModalType::Notice:
-                case ModalType::PlatformChangeConfirm:
-                    if (active_modal_ == ModalType::PlatformChangeConfirm && action == 0)
-                        return ModalClickResult::ReloadRequested;
-                    if (active_modal_ == ModalType::PlatformChangeConfirm && action == 1)
-                        return ModalClickResult::DiscardRequested;
+            if (active_modal_impl_) {
+                auto act =
+                    active_modal_impl_->handle_control_click(control_row.content_row, action);
+                if (act == framework::ModalAction::Close) {
+                    close();
                     return ModalClickResult::Closed;
-                case ModalType::SetBreakpoint:
-                case ModalType::SetWatchpoint:
-                case ModalType::SetSpeed:
-                case ModalType::InspectAddress:
-                case ModalType::LoadBinary:
-                case ModalType::LayoutPresets:
-                case ModalType::SaveCpuConfig:
-                case ModalType::LoadCpuConfig:
-                case ModalType::MemoryDump:
-                case ModalType::SwitchHart:
-                case ModalType::LogViewer:
-                    return action == 0 ? ModalClickResult::Submit : ModalClickResult::Closed;
-                case ModalType::LoadFilePicker:
-                    return ModalClickResult::Handled;
-                case ModalType::Help:
-                case ModalType::None:
-                    return ModalClickResult::Handled;
-                case ModalType::ToolPicker:
-                    if (control_row.content_row == 0) {
-                        set_tool_picker_slot(static_cast<int>(action));
-                        return ModalClickResult::Handled;
-                    }
-                    if (action == 0) {
-                        return ModalClickResult::Submit;
-                    }
-                    if (action == 1) {
-                        move_tool_picker_cursor(1);
-                        return ModalClickResult::Handled;
-                    }
-                    if (action == 2) {
-                        cycle_tool_picker_slot();
-                        return ModalClickResult::Handled;
-                    }
-                    if (action == 3) {
-                        close();
-                        return ModalClickResult::Closed;
-                    }
-                    return ModalClickResult::Handled;
+                }
+                if (act == framework::ModalAction::Submit) {
+                    return ModalClickResult::Submit;
+                }
+                if (act == framework::ModalAction::ReloadRequested) {
+                    return ModalClickResult::ReloadRequested;
+                }
+                if (act == framework::ModalAction::DiscardRequested) {
+                    return ModalClickResult::DiscardRequested;
+                }
+                return ModalClickResult::Handled;
             }
         }
     }
 
-    switch (active_modal_) {
-        case ModalType::Notice:
+    if (active_modal_impl_) {
+        auto act = active_modal_impl_->handle_click(
+            framework::ScreenCoord{.x = rel_x, .y = rel_y},
+            framework::ScreenSize{.width = box_w, .height = box_h});
+        if (act == framework::ModalAction::Close) {
             close();
             return ModalClickResult::Closed;
-
-        case ModalType::PlatformChangeConfirm:
-            return ModalClickResult::Handled;
-
-        case ModalType::Glossary: {
-            if (content_row == 0) {
-                // Topic buttons: 1.Regs (8) | 2.Pipe (8) | 3.Cache (9) | 4.VM/TLB (10) | 5.BPred
-                // (9) | 6.Priv/Trap (13)
-                constexpr std::array<int, 6> kTabWidths = {8, 8, 9, 10, 9, 13};
-                constexpr int kSeparatorWidth = 3;
-                int const controls_width =
-                    std::accumulate(kTabWidths.begin(), kTabWidths.end(), 0) +
-                    (static_cast<int>(kTabWidths.size()) - 1) * kSeparatorWidth;
-                int current_x = 1 + std::max(0, (box_w - 2 - controls_width) / 2);
-                for (size_t i = 0; i < kTabWidths.size(); ++i) {
-                    if (rel_x >= current_x && rel_x < current_x + kTabWidths.at(i)) {
-                        set_glossary_topic(static_cast<int>(i));
-                        return ModalClickResult::Handled;
-                    }
-                    current_x += kTabWidths.at(i) + kSeparatorWidth;
-                }
-            } else if (content_row >= 2 && content_row < box_h - 4) {
-                if (rel_x >= box_w / 2) {
-                    move_glossary_topic(1);
-                } else {
-                    move_glossary_topic(-1);
-                }
-                return ModalClickResult::Handled;
-            }
-            return ModalClickResult::Handled;
         }
-
-        case ModalType::Settings: {
-            if (settings_draft_.active_tab != 0) return ModalClickResult::Handled;
-            const int visible_rows = overlay.visible_content_rows;
-            const int cursor_row = general_setting_row(settings_draft_.tab_cursor[0]);
-            const int scroll_start = kGeneralSettingsContentRows > visible_rows
-                                         ? std::clamp(cursor_row - visible_rows / 2, 0,
-                                                      kGeneralSettingsContentRows - visible_rows)
-                                         : 0;
-            const int item_idx = general_setting_at_row(content_row + scroll_start);
-            if (item_idx >= 0) {
-                settings_draft_.tab_cursor[0] = item_idx;
-                if (rel_x > box_w / 2 + 10) {
-                    adjust_setting_at_cursor(1);
-                } else if (rel_x > box_w / 2 && rel_x <= box_w / 2 + 10) {
-                    adjust_setting_at_cursor(-1);
-                } else {
-                    toggle_setting_at_cursor();
-                }
-                return ModalClickResult::Handled;
-            }
-            return ModalClickResult::Handled;
+        if (act == framework::ModalAction::Submit) {
+            return ModalClickResult::Submit;
         }
-
-        case ModalType::Help:
-            close();
-            return ModalClickResult::Closed;
-
-        case ModalType::LayoutPresets: {
-            int sel = content_row - 2;
-            if (sel >= 0 && sel <= 3) {
-                preset_cursor_ = sel;
-                return ModalClickResult::Submit;
-            }
-            return ModalClickResult::Handled;
+        if (act == framework::ModalAction::ReloadRequested) {
+            return ModalClickResult::ReloadRequested;
         }
-
-        case ModalType::ToolPicker: {
-            auto const tool_idx = modals::ToolPickerModal::tool_index_at_row(content_row);
-            if (tool_idx.has_value()) {
-                tool_picker_cursor_ = static_cast<int>(*tool_idx);
-                return ModalClickResult::Submit;
-            }
-            return ModalClickResult::Handled;
+        if (act == framework::ModalAction::DiscardRequested) {
+            return ModalClickResult::DiscardRequested;
         }
-
-        case ModalType::MemoryDump: {
-            if (content_row >= 2 && content_row < 12) {
-                int r = content_row - 2;
-                const auto& cpu = machine_.primary_hart();
-                bool ok = modals::MemoryModal::handle_cell_click(r, rel_x, cpu.state().regs.xlen);
-                if (ok) return ModalClickResult::Handled;
-            }
-            return ModalClickResult::Handled;
-        }
-
-        case ModalType::LogViewer: {
-            if (content_row == 0) {
-                if (rel_x >= 1 && rel_x < 12) {
-                    modals::LogModal::set_filter_level(std::nullopt);
-                } else if (rel_x >= 13 && rel_x < 26) {
-                    modals::LogModal::set_filter_level(simrv::log::Level::Info);
-                } else if (rel_x >= 27 && rel_x < 40) {
-                    modals::LogModal::set_filter_level(simrv::log::Level::Warn);
-                } else if (rel_x >= 41 && rel_x < 54) {
-                    modals::LogModal::set_filter_level(simrv::log::Level::Error);
-                } else if (rel_x >= 55) {
-                    modals::LogModal::toggle_follow();
-                }
-                return ModalClickResult::Handled;
-            }
-            if (content_row == 1) {
-                modals::LogModal::toggle_search_mode();
-                return ModalClickResult::Handled;
-            }
-            return ModalClickResult::Handled;
-        }
-
-        default:
-            break;
+        return ModalClickResult::Handled;
     }
+
     return ModalClickResult::Handled;
 }
 
 auto TuiModal::is_control_at(int x, int y) const -> bool {
-    if (active_modal_ == ModalType::None || rendered_box_width_ == 0 || rendered_box_height_ == 0)
+    if ((active_modal_ == ModalType::None && !active_modal_impl_) || rendered_box_width_ == 0 ||
+        rendered_box_height_ == 0)
         return false;
     const int relative_y = y - rendered_start_y_ - 1;
     const int control_column = x - rendered_start_x_ - 3;
     for (const auto& row : rendered_control_rows_) {
         if (row.relative_y != relative_y) continue;
-        return std::ranges::any_of(row.spans, [control_column](const auto& span) {
-            return span.contains(control_column);
-        });
+        if (std::ranges::any_of(row.spans, [control_column](const auto& span) {
+                return span.contains(control_column);
+            })) {
+            return true;
+        }
+    }
+    if (active_modal_impl_) {
+        const int rel_x = x - rendered_start_x_ - 1;
+        return active_modal_impl_->is_custom_control_at(rel_x, relative_y);
     }
     return false;
 }
 
 void TuiModal::render_overlay(std::vector<std::string>& lines, int term_width,
                               int term_height) const {
-    if (active_modal_ == ModalType::None || lines.empty()) return;
+    if ((active_modal_ == ModalType::None && !active_modal_impl_) || lines.empty()) return;
     rendered_control_rows_.clear();
+    const int modal_available_width = std::max(0, term_width - 4);
+    const int modal_available_height = std::max(0, term_height - 4);
+    framework::ScopedRenderContext render_context(
+        {.width = modal_available_width,
+         .height = modal_available_height,
+         .density = framework::resolve_density(density_mode_, modal_available_width,
+                                               modal_available_height)});
 
     const auto meta = modals::get_modal_metadata(active_modal_, notice_is_error_, notice_title_);
     const int maximum_width = term_width - 4;
@@ -938,212 +894,17 @@ void TuiModal::render_overlay(std::vector<std::string>& lines, int term_width,
     if (provisional_width < 35) return;
 
     std::string m_bg = kThemeModalBg;
-    std::string m_rst = std::string("\033[0m") + m_bg;
 
     std::vector<std::string> content_rows;
-    auto add_row = [&](const std::string& formatted_str) {
-        std::string s = formatted_str;
-        std::string target = "\033[0m";
-        size_t pos = 0;
-        while ((pos = s.find(target, pos)) != std::string::npos) {
-            s.replace(pos, target.length(), m_rst);
-            pos += m_rst.length();
-        }
-        content_rows.push_back(s);
-    };
 
-    const std::string& title = meta.title;
-    switch (active_modal_) {
-        case ModalType::SetBreakpoint:
-            modals::BreakpointModal::render(active_modal_, content_rows, input_, &machine_);
-            break;
-        case ModalType::SetWatchpoint:
-            modals::BreakpointModal::render(active_modal_, content_rows, input_, &machine_);
-            break;
-        case ModalType::ManageBreakpoints:
-            modals::BreakpointModal::render(active_modal_, content_rows, input_, &machine_,
-                                            bp_cursor_);
-            break;
-        case ModalType::SetSpeed:
-            modals::StepModal::render(active_modal_, content_rows, input_);
-            break;
-        case ModalType::InspectAddress:
-            modals::AddressModal::render(content_rows, input_);
-            break;
-        case ModalType::LoadBinary:
-            modals::LoadModal::render(active_modal_, content_rows, input_, load_appmode_,
-                                      load_buildroot_mode_, staged_binary_path_);
-            break;
-        case ModalType::LoadDiskImage:
-            modals::LoadModal::render(active_modal_, content_rows, input_, load_appmode_,
-                                      load_buildroot_mode_, staged_binary_path_);
-            break;
-        case ModalType::Glossary:
-            modals::GlossaryModal::render(content_rows, add_row, glossary_topic_, glossary_scroll_,
-                                          term_height, provisional_width);
-            break;
-        case ModalType::Settings:
-            modals::SettingsModal::render(content_rows, add_row, settings_draft_, machine_);
-            break;
-        case ModalType::Help:
-            modals::HelpModal::render(content_rows, add_row, term_height, provisional_width);
-            break;
-        case ModalType::LayoutPresets: {
-            add_row("Select a workbench preset to configure pane columns:");
-            add_row("");
-            const std::array<std::pair<const char*, const char*>, 4> presets = {
-                {{"1 / Alt-1", "General Debug        [GPR, Stack, Trace, Console]"},
-                 {"2 / Alt-2", "Microarchitecture    [Pipeline, Cache, Hazard, Console]"},
-                 {"3 / Alt-3", "Trace & Execution    [GPR, Trace, Explain, Console]"},
-                 {"4 / Alt-4", "Memory & Interconnect[Stack, TLB/Cache, Bus]"}}};
-            for (size_t i = 0; i < presets.size(); ++i) {
-                bool is_sel = (preset_cursor_ == static_cast<int>(i));
-                std::string line;
-                if (is_sel) {
-                    line = std::format(" \033[1;7m [{}] {:<44} \033[0m", presets[i].first,
-                                       presets[i].second);
-                } else {
-                    line = std::format("  [{}] {:<44}", presets[i].first, presets[i].second);
-                }
-                add_row(line);
-            }
-            add_row("");
-            add_row(modals::build_modal_footer({{.key = "[Enter / 1-4]", .action = "Apply Preset"},
-                                                {.key = "[Up/Down]", .action = "Navigate"},
-                                                {.key = "[Esc / q / F4]", .action = "Cancel"}}));
-            break;
-        }
-        case ModalType::ToolPicker: {
-            modals::ToolPickerModal::render(content_rows, add_row, tool_picker_slot_,
-                                            tool_picker_cursor_, tool_picker_current_page_,
-                                            term_height, provisional_width, tool_picker_num_slots_);
-            break;
-        }
-        case ModalType::Notice:
-            add_row("");
-            {
-                std::size_t start = 0;
-                std::size_t pos = 0;
-                while ((pos = notice_message_.find('\n', start)) != std::string::npos) {
-                    add_row(std::format(" {}", notice_message_.substr(start, pos - start)));
-                    start = pos + 1;
-                }
-                if (start < notice_message_.size()) {
-                    add_row(std::format(" {}", notice_message_.substr(start)));
-                }
-            }
-            add_row("");
-            add_row(modals::build_modal_footer(
-                {{.key = "[Enter / Space / Esc]", .action = "Dismiss"}}));
-            break;
-        case ModalType::PlatformChangeConfirm: {
-            add_row("");
-            const char* cur_prof =
-                (machine_.platform_profile() == simrv::core::PlatformProfile::Pcie)
-                    ? "PCIe (PCIe 1.2 + ECAM)"
-                    : "MMIO (VirtIO-MMIO v2)";
-            const char* new_prof = (pending_platform_draft_.platform_profile == 0)
-                                       ? "PCIe (PCIe 1.2 + ECAM)"
-                                       : "MMIO (VirtIO-MMIO v2)";
-            add_row(std::format("  {}Platform profile changed:\033[0m", kThemeText));
-            add_row(std::format("    {}Current:\033[0m \033[1;36m{}\033[0m", kThemeText, cur_prof));
-            add_row(std::format("    {}Target :\033[0m \033[1;32m{}\033[0m", kThemeText, new_prof));
-            add_row("");
-            add_row("  Changing the platform bus topology requires regenerating the");
-            add_row("  Device Tree (FDT) and restarting CPU execution state.");
-            add_row("");
-            add_row(
-                modals::build_modal_footer({{.key = "[R / Enter]", .action = "Reload Simulator"},
-                                            {.key = "[D / Space]", .action = "Discard Change"},
-                                            {.key = "[Esc / q]", .action = "Cancel"}}));
-        } break;
-        case ModalType::SaveCpuConfig:
-            modals::build_text_input_rows(content_rows,
-                                          "Enter Configuration Path or Name:", input_);
-            content_rows.push_back("");
-            content_rows.push_back(modals::build_modal_footer(
-                {{.key = "[Enter]", .action = "Save"}, {.key = "[Esc]", .action = "Cancel"}}));
-            break;
-        case ModalType::LoadCpuConfig:
-            modals::LoadModal::render(ModalType::LoadCpuConfig, content_rows, input_, false, false,
-                                      "");
-            break;
-        case ModalType::LoadFilePicker: {
-            add_row(std::format("Directory: {}", file_picker_directory_.string()));
-            add_row(std::format(
-                "Filter: {}_  \033[2m(Type to filter, Backspace: edit, Esc: back)\033[0m",
-                file_picker_filter_));
-            add_row("");
-            if (file_picker_entries_.empty()) {
-                add_row("No matching files or directories");
-            } else {
-                constexpr int kMaxEntries = 14;
-                const int count = static_cast<int>(file_picker_entries_.size());
-                int first = std::max(0, file_picker_cursor_ - kMaxEntries / 2);
-                first = std::min(first, std::max(0, count - kMaxEntries));
-                const int last = std::min(count, first + kMaxEntries);
-                const auto parent_entry = (file_picker_directory_ / "..").lexically_normal();
-                for (int i = first; i < last; ++i) {
-                    const auto& entry = file_picker_entries_[static_cast<size_t>(i)];
-                    if (entry == parent_entry) {
-                        add_row(std::format("{} ..", i == file_picker_cursor_ ? ">" : " "));
-                        continue;
-                    }
-                    if (file_picker_select_directory_ && entry == std::filesystem::path(".")) {
-                        add_row(std::format("{} [Use this directory]",
-                                            i == file_picker_cursor_ ? ">" : " "));
-                        continue;
-                    }
-                    std::error_code error;
-                    const bool directory = std::filesystem::is_directory(entry, error) && !error;
-                    add_row(std::format("{} {}{}", i == file_picker_cursor_ ? ">" : " ",
-                                        entry.filename().string(), directory ? "/" : ""));
-                }
-            }
-            add_row("");
-            add_row(
-                modals::build_modal_footer({{.key = "[Enter]", .action = "Select / Open Directory"},
-                                            {.key = "[Type]", .action = "Filter"},
-                                            {.key = "[Esc]", .action = "Back"}}));
-            break;
-        }
-        case ModalType::MemoryDump:
-            modals::MemoryModal::render(content_rows, add_row, input_, machine_, nullptr,
-                                        term_height, provisional_width);
-            break;
-        case ModalType::SwitchHart:
-            modals::HartModal::render(content_rows, add_row, machine_);
-            break;
-        case ModalType::LogViewer:
-            if (log_buffer_) {
-                modals::LogModal::render(content_rows, add_row, *log_buffer_, term_height,
-                                         provisional_width);
-            }
-            break;
-        default:
-            break;
+    const std::string title = active_modal_impl_ ? active_modal_impl_->title() : meta.title;
+    if (active_modal_impl_) {
+        active_modal_impl_->render_content(content_rows, provisional_width, modal_available_height);
     }
 
     if (content_rows.empty()) return;
 
-    int cursor_row = 0;
-    switch (active_modal_) {
-        case ModalType::Settings:
-            cursor_row = settings_draft_.active_tab == 0
-                             ? general_setting_row(settings_draft_.tab_cursor[0])
-                             : 3 + settings_draft_.tab_cursor[settings_draft_.active_tab];
-            break;
-        case ModalType::ManageBreakpoints:
-            cursor_row = 2 + bp_cursor_;
-            break;
-        case ModalType::ToolPicker:
-            cursor_row = modals::ToolPickerModal::row_for_tool_index(
-                static_cast<size_t>(tool_picker_cursor_));
-            break;
-        default:
-            cursor_row = 0;
-            break;
-    }
+    int cursor_row = active_modal_impl_ ? active_modal_impl_->cursor_row() : 0;
 
     const int available_height = std::min(term_height, static_cast<int>(lines.size()));
     std::vector<framework::Row> measured_rows;

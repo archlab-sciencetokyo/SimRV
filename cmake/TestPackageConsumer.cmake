@@ -6,9 +6,20 @@ set(consumer_source "${SIMRV_SOURCE_DIR}/tests/package-consumer")
 set(consumer_root "${SIMRV_BINARY_DIR}/package-consumer-check")
 set(install_root "${consumer_root}/install")
 
+set(extra_consumer_args)
+if(DEFINED CMAKE_CXX_COMPILER AND NOT "${CMAKE_CXX_COMPILER}" STREQUAL "")
+  list(APPEND extra_consumer_args "-DCMAKE_CXX_COMPILER=${CMAKE_CXX_COMPILER}")
+endif()
+if(DEFINED CMAKE_CXX_FLAGS AND NOT "${CMAKE_CXX_FLAGS}" STREQUAL "")
+  list(APPEND extra_consumer_args "-DCMAKE_CXX_FLAGS=${CMAKE_CXX_FLAGS}")
+endif()
+if(DEFINED CMAKE_EXE_LINKER_FLAGS AND NOT "${CMAKE_EXE_LINKER_FLAGS}" STREQUAL "")
+  list(APPEND extra_consumer_args "-DCMAKE_EXE_LINKER_FLAGS=${CMAKE_EXE_LINKER_FLAGS}")
+endif()
+
 execute_process(
   COMMAND "${CMAKE_COMMAND}" -E env CCACHE_DISABLE=1 "${CMAKE_COMMAND}" -S "${consumer_source}" -B
-          "${consumer_root}/build-tree" -D "SimRV_DIR=${SIMRV_BINARY_DIR}"
+          "${consumer_root}/build-tree" -D "SimRV_DIR=${SIMRV_BINARY_DIR}" ${extra_consumer_args}
   RESULT_VARIABLE build_tree_configure_result)
 if(NOT build_tree_configure_result EQUAL 0)
   message(
@@ -23,6 +34,12 @@ if(NOT build_tree_build_result EQUAL 0)
   message(
     FATAL_ERROR
       "Build-tree package consumer build failed: ${build_tree_build_result}")
+endif()
+execute_process(
+  COMMAND "${consumer_root}/build-tree/simrv-package-consumer"
+  RESULT_VARIABLE build_tree_run_result)
+if(NOT build_tree_run_result EQUAL 0)
+  message(FATAL_ERROR "Build-tree package consumer failed: ${build_tree_run_result}")
 endif()
 
 execute_process(
@@ -109,7 +126,7 @@ list(GET package_dirs 0 package_dir)
 
 execute_process(
   COMMAND "${CMAKE_COMMAND}" -S "${consumer_source}" -B "${consumer_root}/build"
-          -D "SimRV_DIR=${package_dir}" RESULT_VARIABLE configure_result)
+          -D "SimRV_DIR=${package_dir}" ${extra_consumer_args} RESULT_VARIABLE configure_result)
 if(NOT configure_result EQUAL 0)
   message(
     FATAL_ERROR
@@ -122,4 +139,10 @@ execute_process(
 if(NOT build_result EQUAL 0)
   message(
     FATAL_ERROR "Installed-package consumer build failed: ${build_result}")
+endif()
+execute_process(
+  COMMAND "${consumer_root}/build/simrv-package-consumer"
+  RESULT_VARIABLE consumer_run_result)
+if(NOT consumer_run_result EQUAL 0)
+  message(FATAL_ERROR "Installed-package consumer failed: ${consumer_run_result}")
 endif()

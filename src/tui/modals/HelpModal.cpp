@@ -5,7 +5,6 @@
 #include "simrv/tui/modals/HelpModal.hpp"
 
 #include <algorithm>
-#include <array>
 #include <format>
 #include <string>
 #include <utility>
@@ -24,56 +23,34 @@ namespace {
 using Shortcut = std::pair<std::string, std::string>;
 
 struct ShortcutGroup {
+    ActionCategory category;
     std::string_view title;
     std::vector<Shortcut> shortcuts;
 };
 
-[[nodiscard]] auto group_index(KeyAction action) -> size_t {
-    switch (action) {
-        case KeyAction::Step:
-        case KeyAction::RunPause:
-        case KeyAction::Reset:
-        case KeyAction::SetSpeed:
-        case KeyAction::Quit:
-            return 0;
-        case KeyAction::SetBreakpoint:
-        case KeyAction::SetWatchpoint:
-        case KeyAction::ManageBreakpoints:
-        case KeyAction::TogglePcBreakpoint:
-        case KeyAction::InspectAddress:
-        case KeyAction::ExportInspection:
-            return 1;
-        case KeyAction::Settings:
-        case KeyAction::ToggleTheme:
-        case KeyAction::LoadBinary:
-            return 3;
-        case KeyAction::Help:
-        case KeyAction::ToggleStudentGuide:
-        case KeyAction::ActivateStudentGuide:
-        case KeyAction::OpenGlossary:
-            return 4;
-        default:
-            return 2;
+[[nodiscard]] auto help_shortcuts() -> std::vector<ShortcutGroup> {
+    std::vector<ShortcutGroup> groups;
+    for (const auto& category : Keybindings::categories()) {
+        groups.push_back({.category = category.category, .title = category.title, .shortcuts = {}});
     }
-}
-
-[[nodiscard]] auto help_shortcuts() -> std::array<ShortcutGroup, 5> {
-    std::array<ShortcutGroup, 5> groups = {{{.title = "Execution", .shortcuts = {}},
-                                            {.title = "Inspect & Debug", .shortcuts = {}},
-                                            {.title = "Navigation & Views", .shortcuts = {}},
-                                            {.title = "Configuration", .shortcuts = {}},
-                                            {.title = "Help & Learning", .shortcuts = {}}}};
     const auto bindings = Keybindings::all();
     for (const auto& binding : bindings) {
-        groups[group_index(binding.action)].shortcuts.emplace_back(binding.key_display,
-                                                                   binding.help_label);
+        const auto group = std::ranges::find(groups, binding.category, &ShortcutGroup::category);
+        if (group != groups.end()) {
+            group->shortcuts.emplace_back(binding.key_display, binding.help_label);
+        }
     }
-    groups[2].shortcuts.emplace_back("[u/d] / [PgUp/Dn]", "Scroll terminal or logs");
-    groups[2].shortcuts.emplace_back("[Alt-w/s]", "Scroll inspection pane");
-    groups[2].shortcuts.emplace_back("[ [ / ] ]", "Resize split panes");
-    groups[3].shortcuts.emplace_back("[Alt-h]", "Toggle High Contrast");
-    groups[3].shortcuts.emplace_back("[Alt-t]", "Toggle Sakura Pastel");
-    groups[4].shortcuts.emplace_back("[Esc]", "Close active dialog");
+    const auto group_for = [&](ActionCategory category) -> ShortcutGroup& {
+        return *std::ranges::find(groups, category, &ShortcutGroup::category);
+    };
+    auto& navigation = group_for(ActionCategory::Navigate).shortcuts;
+    navigation.emplace_back("[u/d] / [PgUp/Dn]", "Scroll terminal or logs");
+    navigation.emplace_back("[Alt-w/s]", "Scroll inspection pane");
+    navigation.emplace_back("[ [ / ] ]", "Resize split panes");
+    auto& configuration = group_for(ActionCategory::Configure).shortcuts;
+    configuration.emplace_back("[Alt-h]", "Toggle High Contrast");
+    configuration.emplace_back("[Alt-t]", "Toggle Sakura Pastel");
+    group_for(ActionCategory::Help).shortcuts.emplace_back("[Esc]", "Close active dialog");
     for (auto& group : groups) {
         std::ranges::sort(group.shortcuts, {}, &Shortcut::second);
     }
@@ -89,6 +66,43 @@ struct ShortcutGroup {
 }
 
 }  // namespace
+
+void HelpModal::render_content(std::vector<std::string>& content_rows, int width, int height) {
+    auto add_row = [&](std::string s) { content_rows.push_back(std::move(s)); };
+    render(content_rows, add_row, height, width);
+}
+
+auto HelpModal::handle_key(uint8_t byte, TuiKey key) -> framework::ModalAction {
+    if (byte == 27 || key == simrv::tui::TuiKey::Esc || byte == 'q' || byte == 'Q' ||
+        key == simrv::tui::TuiKey::QuestionMark || key == simrv::tui::TuiKey::F1) {
+        return framework::ModalAction::Close;
+    }
+    if (byte == 'j' || byte == 'J' || key == simrv::tui::TuiKey::Tab) {
+        scroll_ = std::max(0, scroll_ + 1);
+        return framework::ModalAction::Continue;
+    }
+    if (byte == 'k' || byte == 'K' || key == simrv::tui::TuiKey::BackTab) {
+        scroll_ = std::max(0, scroll_ - 1);
+        return framework::ModalAction::Continue;
+    }
+    if (byte == ' ' || key == simrv::tui::TuiKey::Enter || key == simrv::tui::TuiKey::Newline) {
+        scroll_ = std::max(0, scroll_ + 5);
+        return framework::ModalAction::Continue;
+    }
+    return framework::ModalAction::Continue;
+}
+
+auto HelpModal::handle_control_click(int content_row, size_t action_index)
+    -> framework::ModalAction {
+    (void)content_row;
+    (void)action_index;
+    return framework::ModalAction::Close;
+}
+
+auto HelpModal::handle_click(framework::ScreenCoord local_pt) -> framework::ModalAction {
+    (void)local_pt;
+    return framework::ModalAction::Continue;
+}
 
 void HelpModal::render(std::vector<std::string>& content_rows,
                        const std::function<void(const std::string&)>& add_row_cb, int term_height,

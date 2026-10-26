@@ -78,20 +78,23 @@ auto trap_cause_name(simrv::xlen::TrapCause cause) -> std::string {
     const auto code = to_exception_code(cause);
     const uint64_t numeric_code = trap_exception_code(cause);
     if (is_interrupt) {
-        switch (numeric_code) {
-            case 1:
+        const auto irq = to_interrupt_code(cause);
+        switch (irq) {
+            case InterruptCode::SupervisorSoftware:
                 return "Supervisor software interrupt";
-            case 3:
+            case InterruptCode::MachineSoftware:
                 return "Machine software interrupt";
-            case 5:
+            case InterruptCode::SupervisorTimer:
                 return "Supervisor timer interrupt";
-            case 7:
+            case InterruptCode::MachineTimer:
                 return "Machine timer interrupt";
-            case 9:
+            case InterruptCode::SupervisorExternal:
                 return "Supervisor external interrupt";
-            case 11:
+            case InterruptCode::MachineExternal:
                 return "Machine external interrupt";
-            case 13:
+            case InterruptCode::SupervisorGuestExternal:
+                return "Supervisor guest external interrupt";
+            case InterruptCode::CounterOverflow:
                 return "Counter overflow interrupt";
             default:
                 return "Unknown interrupt " + std::to_string(numeric_code);
@@ -260,7 +263,8 @@ auto TrapController::can_execute_privileged_instruction(simrv::xlen::PrivilegeLe
         return current_priv >= kPrivSupervisor &&
                !(current_priv == kPrivSupervisor && (mstatus & MstatusBit::Tw) != 0);
     }
-    if (funct7 == isa::Funct7Priv::SfenceVma) {
+    if (funct7 == isa::Funct7Priv::SfenceVma || funct7 == isa::Funct7Priv::SinvalVma ||
+        funct12 == isa::Funct12Priv::SfenceWInval || funct12 == isa::Funct12Priv::SfenceInvalIr) {
         return misa_has_extension(misa, isa::IsaExtension::S) && current_priv >= kPrivSupervisor &&
                !(current_priv == kPrivSupervisor && (mstatus & MstatusBit::Tvm) != 0);
     }

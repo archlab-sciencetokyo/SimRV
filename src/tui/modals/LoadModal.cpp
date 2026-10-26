@@ -12,21 +12,122 @@
 #include "simrv/core/Cpu.hpp"
 #include "simrv/core/CpuConfigParser.hpp"
 #include "simrv/core/Machine.hpp"
+#include "simrv/tui/TuiModal.hpp"
 #include "simrv/tui/TuiTheme.hpp"
 #include "simrv/tui/modals/ModalComponents.hpp"
 #include "simrv/util/BuildrootImageBundle.hpp"
 
 namespace simrv::tui::modals {
 
-auto LoadModal::complete_path(std::string& input) -> bool {
+auto LoadModal::title() const -> std::string {
+    if (type_ == ModalType::LoadBinary) return "Load Program Binary (ELF)";
+    if (type_ == ModalType::LoadDiskImage) return "Load Disk Image";
+    if (type_ == ModalType::LoadCpuConfig) return "Load CPU Model Configuration";
+    if (type_ == ModalType::SaveCpuConfig) return "Save CPU Model Configuration";
+    return "Load File";
+    if (type_ == ModalType::LoadBinary) return " LOAD PROGRAM BINARY ";
+    if (type_ == ModalType::LoadDiskImage) return " LOAD DISK IMAGE (Optional) ";
+    if (type_ == ModalType::LoadCpuConfig) return " LOAD CPU MODEL CONFIGURATION (.cfg) ";
+    if (type_ == ModalType::SaveCpuConfig) return " SAVE CPU MODEL CONFIGURATION (.cfg) ";
+    return " SELECT FILE ";
+}
+
+void LoadModal::render_content(std::vector<std::string>& content_rows, int /*width*/,
+                               int /*height*/) {
+    if (type_ == ModalType::SaveCpuConfig) {
+        build_text_input_rows(content_rows, "Enter Configuration Path or Name:", input_);
+        content_rows.push_back("");
+        content_rows.push_back(build_modal_footer(
+            {{.key = "[Enter]", .action = "Save"}, {.key = "[Esc]", .action = "Cancel"}}));
+        return;
+    }
+    render(type_, content_rows, input_, load_appmode_, load_buildroot_mode_, staged_binary_path_,
+           completion_preview_);
+}
+
+auto LoadModal::handle_key(uint8_t byte, TuiKey key) -> framework::ModalAction {
+    if (key == simrv::tui::TuiKey::CtrlO || byte == 15) {
+        if (host_) host_->open_file_picker();
+        return framework::ModalAction::Continue;
+    }
+    if (byte == 27 || key == simrv::tui::TuiKey::Esc) {
+        return framework::ModalAction::Close;
+    }
+    if (key == simrv::tui::TuiKey::Enter || key == simrv::tui::TuiKey::Newline) {
+        return framework::ModalAction::Submit;
+    }
+    if (key == simrv::tui::TuiKey::Tab) {
+        const auto input_before = input_;
+        auto completion = inspect_path(input_before);
+        const bool extended = completion.common_prefix.size() > input_before.size();
+        if (extended) input_ = std::move(completion.common_prefix);
+
+        completion_preview_.clear();
+        if (completion.matches.empty()) {
+            completion_preview_.emplace_back("No matches for this entry. Type more to search.");
+        } else {
+            completion_preview_.emplace_back(completion.matches.size() == 1 ? "Match:"
+                                                                            : "Matches:");
+            constexpr size_t kVisibleCompletions = 3;
+            const auto visible = std::min(completion.matches.size(), kVisibleCompletions);
+            for (size_t i = 0; i < visible; ++i) {
+                auto label = std::filesystem::path(completion.matches[i])
+                                 .lexically_normal()
+                                 .filename()
+                                 .string();
+                if (label.empty()) label = completion.matches[i];
+                completion_preview_.push_back(std::format("- {}", label));
+            }
+            if (completion.matches.size() > visible) {
+                completion_preview_.push_back(std::format("+{} more; type more to narrow.",
+                                                          completion.matches.size() - visible));
+            } else if (completion.matches.size() > 1) {
+                completion_preview_.emplace_back("Type more to narrow the list.");
+            }
+        }
+        return framework::ModalAction::Continue;
+    }
+    if (type_ == ModalType::LoadBinary && key == simrv::tui::TuiKey::BackTab) {
+        if (host_) host_->toggle_load_mode();
+        return framework::ModalAction::Continue;
+    }
+    if (byte == 8 || byte == 127 || key == simrv::tui::TuiKey::Backspace) {
+        if (!input_.empty()) input_.pop_back();
+        completion_preview_.clear();
+        return framework::ModalAction::Continue;
+    }
+    if (byte >= 32 && byte <= 126) {
+        input_.push_back(static_cast<char>(byte));
+        completion_preview_.clear();
+        return framework::ModalAction::Continue;
+    }
+    return framework::ModalAction::Continue;
+}
+
+auto LoadModal::handle_control_click(int content_row, size_t action_index)
+    -> framework::ModalAction {
+    (void)content_row;
+    if (type_ == ModalType::LoadDiskImage) {
+        return framework::ModalAction::Submit;
+    }
+    return action_index == 0 ? framework::ModalAction::Submit : framework::ModalAction::Close;
+}
+
+auto LoadModal::handle_click(framework::ScreenCoord local_pt) -> framework::ModalAction {
+    (void)local_pt;
+    return framework::ModalAction::Continue;
+}
+
+auto LoadModal::inspect_path(std::string_view input) -> PathCompletionResult {
     namespace fs = std::filesystem;
     const fs::path typed(input);
     const auto parent = typed.has_parent_path() ? typed.parent_path() : fs::path(".");
     const auto prefix = typed.filename().string();
     std::error_code error;
-    std::vector<std::string> matches;
+    PathCompletionResult result;
     for (fs::directory_iterator it(parent, error), end; !error && it != end; it.increment(error)) {
         const auto filename = it->path().filename().string();
+        if (!prefix.starts_with('.') && filename.starts_with('.')) continue;
         if (!filename.starts_with(prefix)) continue;
         std::string candidate;
         if (typed.has_parent_path()) {
@@ -35,20 +136,29 @@ auto LoadModal::complete_path(std::string& input) -> bool {
             candidate += fs::path::preferred_separator;
         }
         candidate += filename;
+        error.clear();
         if (it->is_directory(error)) candidate += fs::path::preferred_separator;
-        matches.push_back(std::move(candidate));
+        error.clear();
+        result.matches.push_back(std::move(candidate));
     }
-    if (matches.empty()) return false;
-    std::ranges::sort(matches);
-    std::string common = matches.front();
-    for (auto it = std::next(matches.begin()); it != matches.end(); ++it) {
+    std::ranges::sort(result.matches);
+    if (result.matches.empty()) return result;
+    result.common_prefix = result.matches.front();
+    for (auto it = std::next(result.matches.begin()); it != result.matches.end(); ++it) {
         const auto& candidate = *it;
         const auto mismatch =
-            std::mismatch(common.begin(), common.end(), candidate.begin(), candidate.end());
-        common.resize(static_cast<size_t>(std::distance(common.begin(), mismatch.first)));
+            std::mismatch(result.common_prefix.begin(), result.common_prefix.end(),
+                          candidate.begin(), candidate.end());
+        result.common_prefix.resize(
+            static_cast<size_t>(std::distance(result.common_prefix.begin(), mismatch.first)));
     }
-    if (common.size() <= input.size()) return false;
-    input = std::move(common);
+    return result;
+}
+
+auto LoadModal::complete_path(std::string& input) -> bool {
+    auto completion = inspect_path(input);
+    if (completion.common_prefix.size() <= input.size()) return false;
+    input = std::move(completion.common_prefix);
     return true;
 }
 
@@ -178,7 +288,15 @@ auto LoadModal::submit(ModalType type, const std::string& input, bool load_appmo
 
 void LoadModal::render(ModalType type, std::vector<std::string>& content_rows,
                        const std::string& input, bool load_appmode, bool load_buildroot_mode,
-                       const std::string& staged_binary_path) {
+                       const std::string& staged_binary_path,
+                       std::span<const std::string> completion_preview) {
+    const auto append_completion_preview = [&] {
+        if (completion_preview.empty()) return;
+        content_rows.push_back("");
+        for (const auto& line : completion_preview) {
+            content_rows.push_back(std::format("  {}{}\033[0m", kThemeMuted, line));
+        }
+    };
     if (type == ModalType::LoadBinary) {
         build_text_input_rows(
             content_rows,
@@ -189,6 +307,7 @@ void LoadModal::render(ModalType type, std::vector<std::string>& content_rows,
                 : "e.g. img/hello.bin, linux-images/rv64/alpine-gui/opensbi-linux-payload.elf");
         content_rows.push_back("");
         content_rows.push_back(std::format("  {}[Tab] Complete path{}", kThemeMuted, "\033[0m"));
+        append_completion_preview();
         content_rows.push_back(std::format("  {}[Ctrl-O] Browse files\033[0m", kThemeMuted));
         content_rows.push_back("");
         const auto mode_label = load_buildroot_mode ? "Buildroot folder"
@@ -207,6 +326,7 @@ void LoadModal::render(ModalType type, std::vector<std::string>& content_rows,
         build_text_input_rows(content_rows, "Enter disk image filepath:", input,
                               "e.g. linux-images/rv64/alpine-gui/rootfs.img or rootfs.ext4");
         content_rows.push_back(std::format("  {}[Tab] Complete path\033[0m", kThemeMuted));
+        append_completion_preview();
         content_rows.push_back(std::format("  {}[Ctrl-O] Browse files\033[0m", kThemeMuted));
         if (!staged_binary_path.empty()) {
             content_rows.push_back("");
@@ -222,6 +342,7 @@ void LoadModal::render(ModalType type, std::vector<std::string>& content_rows,
                               "Enter CPU model filepath (.cfg) or preset name:", input,
                               "e.g. configs/models/rvcomp.cfg, cfu-provingground, balanced");
         content_rows.push_back(std::format("  {}[Tab] Complete path\033[0m", kThemeMuted));
+        append_completion_preview();
         content_rows.push_back(std::format("  {}[Ctrl-O] Browse files\033[0m", kThemeMuted));
         content_rows.push_back("");
         content_rows.push_back(

@@ -52,12 +52,6 @@ jobs:
           SIMRV_DOCS_CHANNEL: development
         run: uv run --frozen zensical build --strict
 
-      - name: Verify MkDocs compatibility build
-        env:
-          SIMRV_DOCS_CHANNEL: development
-          SIMRV_DOCS_SITE_DIR: site-mkdocs
-        run: uv run --frozen mkdocs build --strict
-
       - name: Check documentation links
         uses: lycheeverse/lychee-action@v2
         with:

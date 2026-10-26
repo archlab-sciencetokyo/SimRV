@@ -42,7 +42,7 @@ For the portable archive and native RPM or DEB packages, start with the dedicate
 ### Prerequisites
 
 - Modern C++23 compiler: **Clang 22+** or **GCC 16+**
-- Build tools: **CMake 3.31+**, **Ninja**, **mold** (recommended for fast linking)
+- Build tools: **CMake 3.31+**, **Ninja**
 - Python: **Python 3.10+** (for utility tools and test suites)
 
 ### Building from Source
@@ -146,8 +146,7 @@ simrv -m program.elf
 | `--gdb-port <port>` | Set GDB RSP TCP listener port (default: 1234). |
 | `--isa-info` | Show the qualified ISA, vector, privilege, and debugger capability contract. |
 | `--doctor` | Diagnose terminal presentation and portable-runtime conditions. |
-| `--class` | Enable student classroom mode with interactive contextual guidance. |
-| `--mission <file.mission>` | Load a versioned classroom lab mission with sequential checkpoints (requires `--class` and `--tui`). |
+| `--mission <file.mission>` | Load an editable classroom lesson with instructional steps and named checkpoints in the interactive TUI. |
 | `--version` | Display version and build information. |
 | `-h, --help` | Show full command-line help message. |
 

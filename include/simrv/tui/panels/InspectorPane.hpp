@@ -16,6 +16,7 @@
 #include "simrv/core/RegisterFile.hpp"
 #include "simrv/isa/RegisterNames.hpp"
 #include "simrv/pipeline/Scoreboard.hpp"
+#include "simrv/tui/TuiDrawer.hpp"
 #include "simrv/tui/TuiTypes.hpp"
 #include "simrv/tui/TuiWidget.hpp"
 #include "simrv/tui/framework/ScrollView.hpp"
@@ -31,8 +32,6 @@ struct TuiExecutionSnapshot;
 namespace simrv::tui {
 
 class Tui;
-struct PageGuidance;
-class MissionProgress;
 
 /// Canonical ABI register names shared by all register pane sub-units.
 inline constexpr auto& kRegNames = simrv::isa::kGprPedagogicalNames;
@@ -87,10 +86,6 @@ class InspectorPane : public TuiWidget {
     void set_max_kips(uint64_t max_kips) { max_kips_ = max_kips; }
     void set_kips_history(const std::vector<uint64_t>& history) { kips_history_ = history; }
     void set_paused(bool paused) { paused_ = paused; }
-    void set_student_guide_enabled(bool enabled) { student_guide_enabled_ = enabled; }
-    void set_mission_progress(const MissionProgress* mission) { mission_ = mission; }
-    void set_learn_enabled(bool enabled) { set_student_guide_enabled(enabled); }
-    [[nodiscard]] auto current_student_guidance() const -> PageGuidance;
     void set_visible_rows(int rows) { visible_rows_ = rows; }
     [[nodiscard]] auto get_visible_content_rows() const -> int;
     void set_active_runtime(double secs) { active_runtime_ = secs; }
@@ -98,9 +93,14 @@ class InspectorPane : public TuiWidget {
     /// width; this avoids using the last-rendered column's geometry in multi-panel layouts.
     void scroll(int lines, int width = -1, bool secondary = false);
     void reset_scroll();
+    void scroll_to_top();
+    void scroll_to_bottom(int width = -1, bool secondary = false);
+    void set_scroll_offset(int offset, int width = -1, bool secondary = false);
     [[nodiscard]] auto get_scroll_offset() const -> int;
     void scroll_horizontal(int columns, int width = -1, bool secondary = false);
     void reset_horizontal_scroll();
+    void scroll_to_left();
+    void scroll_to_right(int width = -1, bool secondary = false);
     [[nodiscard]] auto get_horizontal_scroll_offset() const -> int;
     [[nodiscard]] auto supports_horizontal_scroll(int width = -1) const -> bool;
     void scroll_log(int lines);
@@ -123,6 +123,16 @@ class InspectorPane : public TuiWidget {
     void toggle_log_drawer() { log_drawer_open_ = !log_drawer_open_; }
     [[nodiscard]] auto is_log_drawer_open() const -> bool { return log_drawer_open_; }
     void set_log_drawer_open(bool open) { log_drawer_open_ = open; }
+    [[nodiscard]] auto active_drawers(int width, int total_rows = -1,
+                                      bool is_secondary = false) const -> TuiDrawerStack;
+    [[nodiscard]] auto drawer_at_terminal_row(int term_y, int width, int total_rows = -1,
+                                              bool is_secondary = false) const
+        -> std::optional<TuiDrawerSpan>;
+    [[nodiscard]] auto find_drawer_span(TuiDrawerId id, int width, int total_rows = -1,
+                                        bool is_secondary = false) const
+        -> std::optional<TuiDrawerSpan>;
+    [[nodiscard]] auto content_end_terminal_row(int width, int total_rows = -1,
+                                                bool is_secondary = false) const -> int;
     void set_previous_page(TuiRegPage p) { previous_page_ = p; }
     [[nodiscard]] auto get_previous_page() const -> std::optional<TuiRegPage> {
         return previous_page_;
@@ -149,12 +159,13 @@ class InspectorPane : public TuiWidget {
 
    private:
     std::optional<TuiRegPage> previous_page_;
-    const MissionProgress* mission_ = nullptr;
     [[nodiscard]] auto render_tab_bar_tier1(int width) const -> std::string;
     [[nodiscard]] auto render_tab_bar_tier2(int width) const -> std::string;
     [[nodiscard]] auto render_trace_row(int logical_row, int width) -> std::string;
+    [[nodiscard]] auto has_mission_drawer(int width, int total_rows = -1,
+                                          bool is_secondary = false) const -> bool;
+    [[nodiscard]] auto render_mission_bottom_row(int row_idx, int width) -> std::string;
     [[nodiscard]] auto render_log_bottom_row(int row_idx, int num_rows, int width) -> std::string;
-    [[nodiscard]] auto render_guidance_row(int row_idx, int width) -> std::string;
     [[nodiscard]] auto active_cache_set_count() const -> int;
     [[nodiscard]] auto active_cache_way_count() const -> int;
 
@@ -170,7 +181,6 @@ class InspectorPane : public TuiWidget {
     [[nodiscard]] auto content_total_columns(int width) const -> int;
     [[nodiscard]] auto get_running_label_start_row() const -> int;
     [[nodiscard]] auto render_active_spinner(int logical_row, int width) -> std::string;
-    [[nodiscard]] auto render_live_overview_row(int logical_row, int width) -> std::string;
     [[nodiscard]] auto render_registers_single_column(const simrv::core::ArchState& st,
                                                       int logical_row, int width) -> std::string;
     [[nodiscard]] auto render_registers_double_column(const simrv::core::ArchState& st,
@@ -257,22 +267,12 @@ class InspectorPane : public TuiWidget {
     size_t selected_hart_ = 0;
     TuiRegPage page_ = TuiRegPage::GPR;
     bool paused_ = true;
-    bool student_guide_enabled_ = false;
 
     std::array<simrv::xlen::Register, 32> cached_gpr_{};
     std::array<uint64_t, 32> cached_fpr_{};
     std::array<simrv::core::VectorRegister, 32> cached_vec_{};
     simrv::pipeline::Scoreboard projected_scoreboard_{};
     std::array<std::array<std::string, 80>, 24> cached_page_rows_{};
-    struct LiveHartSnapshot {
-        simrv::xlen::Register pc = 0;
-        std::string symbol;
-        uint64_t cycles = 0;
-        uint64_t instructions = 0;
-        uint64_t timer_ticks = 0;
-        simrv::xlen::PrivilegeLevel privilege = simrv::xlen::PrivilegeLevel::Machine;
-    };
-    std::vector<LiveHartSnapshot> live_harts_;
     std::array<std::string, 80> cached_left_rows_{};
     int last_width_ = 0;
 
@@ -282,7 +282,8 @@ class InspectorPane : public TuiWidget {
     int visible_rows_ = 25;
     bool log_drawer_open_ = true;
     std::array<framework::ScrollView, 24> scroll_views_{};
-    framework::ScrollView log_scroll_view_{framework::ScrollIndicatorMode::HeaderSummary};
+    framework::ScrollView log_scroll_view_{framework::ScrollIndicatorMode::HeaderSummary,
+                                           framework::ScrollOrigin::Bottom};
 
     [[nodiscard]] auto current_scroll_view() -> framework::ScrollView& {
         return scroll_views_.at(static_cast<std::size_t>(page_) % scroll_views_.size());

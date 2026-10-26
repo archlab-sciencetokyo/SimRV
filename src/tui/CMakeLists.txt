@@ -2,11 +2,13 @@ simrv_add_component(simrv-tui-framework
   LogBuffer.cpp
   TuiFrameRenderer.cpp
   TuiTheme.cpp
-  framework/Text.cpp
-  framework/Theme.cpp
+  framework/ActionFooter.cpp
   framework/Components.cpp
   framework/Modal.cpp
   framework/ScrollView.cpp
+  framework/TabBar.cpp
+  framework/Text.cpp
+  framework/Theme.cpp
 )
 add_library(simrv::tui-framework ALIAS simrv-tui-framework)
 
@@ -21,14 +23,19 @@ simrv_add_component(simrv-tui
   TuiModal.cpp
   modals/AddressModal.cpp
   modals/BreakpointModal.cpp
+  modals/ConfirmModal.cpp
+  modals/FilePickerModal.cpp
   modals/GlossaryModal.cpp
   modals/HartModal.cpp
   modals/HelpModal.cpp
+  modals/LayoutPresetsModal.cpp
   modals/LoadModal.cpp
   modals/LogModal.cpp
   modals/MemoryModal.cpp
   modals/MisaModal.cpp
+  modals/MissionObjectiveModal.cpp
   modals/ModalComponents.cpp
+  modals/NoticeModal.cpp
   modals/SettingsModal.cpp
   modals/SystemConfigModal.cpp
   modals/StepModal.cpp
@@ -42,7 +49,6 @@ simrv_add_component(simrv-tui
   panels/InspectorPaneHazard.cpp
   panels/InspectorPaneIo.cpp
   panels/InspectorPaneStats.cpp
-  panels/InspectorPaneLive.cpp
   panels/InspectorPaneExplain.cpp
   panels/InspectorPaneStack.cpp
   panels/TerminalPane.cpp

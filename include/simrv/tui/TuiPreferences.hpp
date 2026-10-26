@@ -9,6 +9,7 @@
 
 #include "simrv/tui/TuiTheme.hpp"
 #include "simrv/tui/TuiTypes.hpp"
+#include "simrv/tui/framework/Types.hpp"
 
 namespace simrv::tui {
 
@@ -22,9 +23,7 @@ struct TuiPreferences {
     framework::ColumnWidthOverrides column_widths = framework::kNoColumnWidthOverrides;
     TuiThemeStyle theme = TuiThemeStyle::ModernUnicode;
     bool high_contrast = false;
-    bool class_mode = false;
-    bool student_guide = false;
-    uint32_t target_fps = 60;
+    framework::DensityMode density_mode = framework::DensityMode::Auto;
 
     [[nodiscard]] static auto default_path() -> std::filesystem::path;
     [[nodiscard]] auto load(const std::filesystem::path& path) -> bool;

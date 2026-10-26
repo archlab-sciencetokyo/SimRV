@@ -7,6 +7,20 @@
 
 #include "simrv/xlen/ScalarTypes.hpp"
 
+namespace simrv::isa {
+
+/// Standard RISC-V interrupt cause codes per Privileged ISA 1.13.
+enum class InterruptCode : uint8_t {
+    SupervisorSoftware = 1,
+    MachineSoftware = 3,
+    SupervisorTimer = 5,
+    MachineTimer = 7,
+    SupervisorExternal = 9,
+    MachineExternal = 11,
+    SupervisorGuestExternal = 12,
+    CounterOverflow = 13,
+};
+
 /// Flag bit distinguishing interrupts from synchronous exceptions.
 enum class TrapFlag : simrv::xlen::TrapCause {
     Interrupt =
@@ -38,6 +52,10 @@ constexpr auto to_trap_cause(ExceptionCode code) noexcept -> simrv::xlen::TrapCa
     return static_cast<simrv::xlen::TrapCause>(code);
 }
 
+constexpr auto to_trap_cause(InterruptCode code) noexcept -> simrv::xlen::TrapCause {
+    return std::to_underlying(TrapFlag::Interrupt) | static_cast<simrv::xlen::TrapCause>(code);
+}
+
 constexpr auto operator==(simrv::xlen::TrapCause cause, ExceptionCode code) noexcept -> bool {
     return cause == static_cast<simrv::xlen::TrapCause>(code);
 }
@@ -51,6 +69,22 @@ constexpr auto operator!=(simrv::xlen::TrapCause cause, ExceptionCode code) noex
 }
 
 constexpr auto operator!=(ExceptionCode code, simrv::xlen::TrapCause cause) noexcept -> bool {
+    return !(code == cause);
+}
+
+constexpr auto operator==(simrv::xlen::TrapCause cause, InterruptCode code) noexcept -> bool {
+    return cause == to_trap_cause(code);
+}
+
+constexpr auto operator==(InterruptCode code, simrv::xlen::TrapCause cause) noexcept -> bool {
+    return to_trap_cause(code) == cause;
+}
+
+constexpr auto operator!=(simrv::xlen::TrapCause cause, InterruptCode code) noexcept -> bool {
+    return !(cause == code);
+}
+
+constexpr auto operator!=(InterruptCode code, simrv::xlen::TrapCause cause) noexcept -> bool {
     return !(code == cause);
 }
 
@@ -70,6 +104,11 @@ constexpr auto to_exception_code(simrv::xlen::TrapCause cause) noexcept -> Excep
     return static_cast<ExceptionCode>(cause & kExceptionCodeMask);
 }
 
+/// Convert an untyped or masked interrupt cause value to a typed InterruptCode.
+constexpr auto to_interrupt_code(simrv::xlen::TrapCause cause) noexcept -> InterruptCode {
+    return static_cast<InterruptCode>(cause & kExceptionCodeMask);
+}
+
 /// Query whether a trap cause represents an asynchronous interrupt.
 constexpr auto trap_is_interrupt(simrv::xlen::TrapCause cause) -> bool {
     return (cause & kInterruptCauseBit) != 0u;
@@ -79,10 +118,16 @@ constexpr auto trap_is_interrupt(simrv::xlen::TrapCause cause) -> bool {
 constexpr auto select_highest_priority_interrupt(simrv::xlen::Word mask) -> simrv::xlen::Word {
     // Fixed priority: MEI -> MSI -> MTI -> SEI -> SSI -> STI -> LCOFI. Platform interrupt
     // bits (16+) fall back to descending cause number, SimRV's documented custom ordering.
-    constexpr std::array<simrv::xlen::Word, 7> kPriorityOrder = {11u, 3u, 7u, 9u, 1u, 5u, 13u};
-    for (simrv::xlen::Word const irq : kPriorityOrder) {
-        if ((mask & (1u << irq)) != 0u) {
-            return irq;
+    constexpr std::array<InterruptCode, 7> kPriorityOrder = {
+        InterruptCode::MachineExternal,    InterruptCode::MachineSoftware,
+        InterruptCode::MachineTimer,       InterruptCode::SupervisorExternal,
+        InterruptCode::SupervisorSoftware, InterruptCode::SupervisorTimer,
+        InterruptCode::CounterOverflow,
+    };
+    for (InterruptCode const irq : kPriorityOrder) {
+        auto const shift = std::to_underlying(irq);
+        if ((mask & (simrv::xlen::Word{1} << shift)) != 0u) {
+            return shift;
         }
     }
     return static_cast<simrv::xlen::Word>(std::bit_width(mask) - 1u);
@@ -105,3 +150,64 @@ constexpr simrv::xlen::PrivilegeLevel kPrivMachine = simrv::xlen::PrivilegeLevel
             return ExceptionCode::MachineEcall;
     }
 }
+
+/// Return the relative priority rank of a synchronous exception per Privileged ISA 1.13 Table 3.7.
+/// Lower integer value corresponds to higher architectural priority (1 is highest).
+[[nodiscard]] constexpr auto exception_priority_rank(ExceptionCode code) noexcept -> uint8_t {
+    switch (code) {
+        case ExceptionCode::MisalignedFetch:
+            return 1;
+        case ExceptionCode::FaultFetch:
+        case ExceptionCode::FetchPageFault:
+            return 2;
+        case ExceptionCode::IllegalInstruction:
+            return 3;
+        case ExceptionCode::Breakpoint:
+        case ExceptionCode::UserEcall:
+        case ExceptionCode::SupervisorEcall:
+        case ExceptionCode::HypervisorEcall:
+        case ExceptionCode::MachineEcall:
+            return 4;
+        case ExceptionCode::MisalignedStore:
+        case ExceptionCode::MisalignedLoad:
+            return 5;
+        case ExceptionCode::FaultStore:
+        case ExceptionCode::StorePageFault:
+        case ExceptionCode::FaultLoad:
+        case ExceptionCode::LoadPageFault:
+            return 6;
+        case ExceptionCode::SoftwareCheck:
+        case ExceptionCode::HardwareError:
+            return 7;
+        default:
+            return 255;
+    }
+}
+
+/// Select the higher-priority synchronous exception between two candidate causes per Privileged
+/// ISA 1.13.
+[[nodiscard]] constexpr auto higher_priority_exception(ExceptionCode a, ExceptionCode b) noexcept
+    -> ExceptionCode {
+    return exception_priority_rank(a) <= exception_priority_rank(b) ? a : b;
+}
+
+}  // namespace simrv::isa
+
+// Global compatibility aliases per repository guidelines
+using simrv::isa::ecall_for_privilege;
+using simrv::isa::exception_priority_rank;
+using simrv::isa::ExceptionCode;
+using simrv::isa::higher_priority_exception;
+using simrv::isa::InterruptCode;
+using simrv::isa::kExceptionCodeMask;
+using simrv::isa::kInterruptCauseBit;
+using simrv::isa::kPrivMachine;
+using simrv::isa::kPrivSupervisor;
+using simrv::isa::kPrivUser;
+using simrv::isa::select_highest_priority_interrupt;
+using simrv::isa::to_exception_code;
+using simrv::isa::to_interrupt_code;
+using simrv::isa::to_trap_cause;
+using simrv::isa::trap_exception_code;
+using simrv::isa::trap_is_interrupt;
+using simrv::isa::TrapFlag;

@@ -102,7 +102,9 @@ void CPU::execute_core(Machine& machine) {
             break;
         case Opcode::MiscMem:
             ctx.tkn = false;
-            if (ctx.funct3 == Funct3::FenceI) {
+            if (isa::is_cmo_op(ctx.op_id)) {
+                ctx.mem_addr = ctx.rrs1;
+            } else if (ctx.funct3 == Funct3::FenceI) {
                 icache.flush();
                 decode_cache.flush();
             } else if (ctx.ir == 0x0100000f) {
@@ -277,19 +279,14 @@ void CPU::execute_system(Machine& machine) {
                 break;
             case Funct12Priv::Wfi: {
                 ctx.tkn = false;
-                if (machine.appmode_enabled() && (state_.mip & state_.mie) == 0) {
-                    const simrv::xlen::Counter cur_cmp =
-                        clint_mmio.mtimecmp.load(std::memory_order_relaxed);
-                    if (cur_cmp > clint_mmio.mtime.load(std::memory_order_relaxed) &&
-                        cur_cmp != std::numeric_limits<simrv::xlen::Counter>::max()) {
-                        clint_mmio.mtime.store(cur_cmp, std::memory_order_relaxed);
-                        evaluate_timer_interrupt();
-                    }
-                }
+                fast_forward_wfi(machine);
                 break;
             }
             default:
-                if (ctx.funct7 == static_cast<simrv::xlen::Instruction>(Funct7Priv::SfenceVma)) {
+                if (ctx.funct7 == static_cast<simrv::xlen::Instruction>(Funct7Priv::SfenceVma) ||
+                    ctx.funct7 == static_cast<simrv::xlen::Instruction>(Funct7Priv::SinvalVma) ||
+                    static_cast<Funct12Priv>(ctx.funct12) == Funct12Priv::SfenceWInval ||
+                    static_cast<Funct12Priv>(ctx.funct12) == Funct12Priv::SfenceInvalIr) {
                     ctx.tkn = false;
                 }
                 break;

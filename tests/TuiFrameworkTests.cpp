@@ -13,6 +13,7 @@
 #include <string_view>
 
 #include "simrv/core/Cpu.hpp"
+#include "simrv/core/CpuConfigParser.hpp"
 #include "simrv/core/Machine.hpp"
 #include "simrv/core/TrapController.hpp"
 #include "simrv/debug/BreakpointManager.hpp"
@@ -25,6 +26,7 @@
 #include "simrv/tui/InspectionReport.hpp"
 #include "simrv/tui/LogBuffer.hpp"
 #include "simrv/tui/Tui.hpp"
+#include "simrv/tui/TuiDrawer.hpp"
 #include "simrv/tui/TuiFrameRenderer.hpp"
 #include "simrv/tui/TuiGuidance.hpp"
 #include "simrv/tui/TuiInputRouter.hpp"
@@ -32,6 +34,7 @@
 #include "simrv/tui/TuiLayoutPolicy.hpp"
 #include "simrv/tui/TuiTheme.hpp"
 #include "simrv/tui/VirtualTerminal.hpp"
+#include "simrv/tui/framework/Framework.hpp"
 #include "simrv/tui/framework/Layout.hpp"
 #include "simrv/tui/modals/AddressModal.hpp"
 #include "simrv/tui/modals/GlossaryModal.hpp"
@@ -59,6 +62,28 @@ struct TuiTestAccess {
     static auto modal(Tui& tui) -> TuiModal& { return tui.modal_; }
     static void set_cached_term_width(Tui& tui, int w) { tui.cached_term_width_ = w; }
     static void set_cached_term_height(Tui& tui, int h) { tui.cached_term_height_ = h; }
+    static void set_pipeline_detail_visible(Tui& tui, bool visible) {
+        tui.pipeline_or_detail_visible_.store(visible, std::memory_order_relaxed);
+    }
+    static void set_paused(Tui& tui, bool paused) {
+        tui.paused_.store(paused, std::memory_order_relaxed);
+    }
+    static void set_mission_breakpoint(Tui& tui, simrv::xlen::Address address) {
+        tui.machine_.breakpoint_manager().add_pc_breakpoint(address,
+                                                            simrv::debug::BreakpointOwner::Mission);
+        tui.mission_breakpoint_addr_ = address;
+    }
+    static void configure_mission(Tui& tui, std::string_view path, std::string_view binary) {
+        tui.mission_.configure(path, binary);
+        tui.mission_revision_seen_ = tui.mission_.revision();
+    }
+    static void observe_mission_symbol(Tui& tui, std::string_view symbol) {
+        tui.mission_.observe_symbol(symbol);
+    }
+    static auto mission_progress(Tui& tui) -> MissionProgress& { return tui.mission_; }
+    static void apply_mission_speed(Tui& tui) { tui.apply_mission_speed(); }
+    static void apply_mission_layout(Tui& tui) { tui.apply_mission_guidance_layout(); }
+    static void refresh_mission_layout_notice(Tui& tui) { tui.refresh_mission_layout_notice(); }
     static void drain_trace(Tui& tui) { tui.drain_trace_records(); }
     static auto trace_rows(const Tui& tui) -> const std::vector<std::string>& {
         return tui.trace_buffer_;
@@ -83,9 +108,12 @@ struct TuiTestAccess {
         return tui.status_override_;
     }
     static auto workbench_slots(const Tui& tui) -> const std::vector<WorkbenchSlot>& {
-        return tui.workbench_slots_;
+        return tui.workbench_.slots();
     }
-    static void set_focused_slot(Tui& tui, size_t slot) { tui.focused_slot_index_ = slot; }
+    static void set_focused_slot(Tui& tui, size_t slot) {
+        tui.workbench_.focus(slot);
+        tui.focused_slot_index_ = tui.workbench_.focused_index();
+    }
     static auto column_widths(const Tui& tui, int width) -> framework::ColumnWidths {
         return tui.column_widths(width);
     }
@@ -114,10 +142,10 @@ struct TuiTestAccess {
         }
         return false;
     }
-    static auto selection(const Tui& tui) -> const SelectionState& { return tui.selection_; }
-    static auto handle_nav_key(Tui& tui, uint8_t byte, TuiKey key) -> bool {
-        return tui.handle_navigation_keyboard_input(byte, key);
+    static auto handle_alt_key(Tui& tui, char key, uint8_t byte) -> bool {
+        return tui.handle_alt_key(key, byte);
     }
+    static auto selection(const Tui& tui) -> const SelectionState& { return tui.selection_; }
     static void set_sixel_supported(Tui& tui, bool s) { tui.sixel_supported_ = s; }
     static void set_sixel_rendered(Tui& tui, bool rendered) { tui.sixel_rendered_ = rendered; }
     static auto sixel_framebuffer_signature(const Tui& tui) -> uint64_t {
@@ -145,7 +173,7 @@ struct TuiTestAccess {
         tui.handle_display_mouse(x, y, b, col_idx, tw, th);
     }
     static void set_workbench_slots(Tui& tui, std::vector<WorkbenchSlot> slots) {
-        tui.workbench_slots_ = std::move(slots);
+        tui.workbench_.set_slots(std::move(slots));
     }
     static void set_preferences_path(Tui& tui, std::filesystem::path path) {
         tui.preferences_path_ = std::move(path);
@@ -255,6 +283,7 @@ void test_terminal_controls() {
 
 void test_tui_preferences_round_trip() {
     using namespace simrv::tui;
+    using simrv::tui::framework::DensityMode;
     const auto root = std::filesystem::temp_directory_path() / "simrv-tui-preferences-test";
     const auto path = root / "tui.conf";
     std::error_code ignored;
@@ -262,15 +291,13 @@ void test_tui_preferences_round_trip() {
 
     TuiPreferences expected;
     expected.layout = TuiLayout::ThreeColumn;
-    expected.slots = {{TuiRegPage::TRACE, 3}, {TuiRegPage::BUS, 1}, {TuiRegPage::LIVE, 0}};
+    expected.slots = {{TuiRegPage::TRACE, 3}, {TuiRegPage::BUS, 1}, {TuiRegPage::GPR, 0}};
     expected.focused_slot = 1;
     expected.inspector_width = 42;
     expected.column_widths = {42, 35, 28, -1};
     expected.theme = TuiThemeStyle::SakuraPastel;
     expected.high_contrast = true;
-    expected.class_mode = true;
-    expected.student_guide = true;
-    expected.target_fps = 45;
+    expected.density_mode = DensityMode::Compact;
     expect(expected.save(path), "TUI preferences save successfully");
 
     TuiPreferences actual;
@@ -278,12 +305,18 @@ void test_tui_preferences_round_trip() {
     expect(actual.layout == expected.layout && actual.slots.size() == expected.slots.size() &&
                actual.slots[0].page == expected.slots[0].page &&
                actual.slots[0].scroll_offset == expected.slots[0].scroll_offset &&
-               actual.slots[2].page == TuiRegPage::LIVE &&
+               actual.slots[2].page == TuiRegPage::GPR &&
                actual.focused_slot == expected.focused_slot &&
                actual.column_widths == expected.column_widths && actual.theme == expected.theme &&
-               actual.high_contrast && actual.class_mode && actual.student_guide &&
-               actual.target_fps == expected.target_fps,
+               actual.high_contrast && actual.density_mode == expected.density_mode,
            "TUI layout and presentation options survive a save and reload");
+    {
+        std::ofstream old_file(path);
+        old_file << "version=1\n";
+    }
+    TuiPreferences old_preferences;
+    expect(old_preferences.load(path) && old_preferences.density_mode == DensityMode::Auto,
+           "older preference files default panel density to Auto");
     std::filesystem::remove_all(root, ignored);
 
     const auto tui_path = root / "live-tui.conf";
@@ -308,6 +341,20 @@ void test_tui_preferences_round_trip() {
     }
     (void)setenv("SIMRV_TUI_PREFERENCES", "off", 1);
     std::filesystem::remove_all(root, ignored);
+}
+
+void test_density_resolution() {
+    using namespace simrv::tui::framework;
+    expect(resolve_density(DensityMode::Auto, 59, 40) == Density::Compact,
+           "Auto uses compact density for a narrow surface");
+    expect(resolve_density(DensityMode::Auto, 80, 23) == Density::Compact,
+           "Auto uses compact density for a short surface");
+    expect(resolve_density(DensityMode::Auto, 80, 24) == Density::Comfortable,
+           "Auto uses comfortable density when the surface has room");
+    expect(resolve_density(DensityMode::Compact, 120, 40) == Density::Compact,
+           "forced Compact overrides surface geometry");
+    expect(resolve_density(DensityMode::Comfortable, 20, 10) == Density::Comfortable,
+           "forced Comfortable overrides surface geometry");
 }
 
 void test_terminal_scrollback_and_selection() {
@@ -373,23 +420,55 @@ void test_utf8_and_theme_helpers() {
 
 void test_key_registry() {
     const auto bindings = simrv::tui::Keybindings::all();
-    expect(bindings.size() == 37, "all key actions have registry entries");
+    expect(bindings.size() == 43, "all key actions have registry entries");
     std::set<simrv::tui::KeyAction> actions;
     std::set<char> claimed_chars;
+    const auto categories = simrv::tui::Keybindings::categories();
     for (const auto& binding : bindings) {
         actions.insert(binding.action);
         expect(!binding.key_display.empty(), "key display is not empty");
         expect(!binding.help_label.empty(), "help description is not empty");
         expect(&simrv::tui::Keybindings::get(binding.action) == &binding,
                "action lookup returns the canonical registry entry");
+        expect(std::ranges::any_of(categories,
+                                   [&binding](const auto& category) {
+                                       return category.category == binding.category;
+                                   }),
+               "every registered action uses a declared category");
+        bool has_key_match = false;
         if (binding.primary_char != '\0') {
+            has_key_match = true;
             expect(claimed_chars.insert(binding.primary_char).second,
                    "canonical primary bindings do not collide");
+            expect(simrv::tui::Keybindings::match(
+                       static_cast<simrv::tui::TuiKey>(binding.primary_char)) == binding.action,
+                   "primary key dispatch matches its help descriptor");
         }
         if (binding.alt_char != '\0' && binding.alt_char != binding.primary_char) {
+            has_key_match = true;
             expect(claimed_chars.insert(binding.alt_char).second,
                    "canonical alternate bindings do not collide");
+            expect(simrv::tui::Keybindings::match(
+                       static_cast<simrv::tui::TuiKey>(binding.alt_char)) == binding.action,
+                   "alternate key dispatch matches its help descriptor");
         }
+        for (const auto key : binding.special_keys) {
+            if (key == simrv::tui::TuiKey::None) continue;
+            has_key_match = true;
+            expect(simrv::tui::Keybindings::match(key) == binding.action,
+                   "special key dispatch matches its help descriptor");
+        }
+        if (binding.alt_sequence != '\0') {
+            has_key_match = true;
+            expect(simrv::tui::Keybindings::match_alt(binding.alt_sequence) == binding.action,
+                   "Alt sequence dispatch matches its help descriptor");
+        }
+        if (binding.alt_sequence_alt != '\0') {
+            has_key_match = true;
+            expect(simrv::tui::Keybindings::match_alt(binding.alt_sequence_alt) == binding.action,
+                   "alternate Alt sequence dispatch matches its help descriptor");
+        }
+        expect(has_key_match, "every registered action has a key match");
     }
     expect(actions.size() == bindings.size(), "key actions are unique");
     expect(simrv::tui::Keybindings::get_help_key(simrv::tui::KeyAction::Quit).find("Ctrl-Q") !=
@@ -437,6 +516,15 @@ void test_key_registry() {
     expect(simrv::tui::Keybindings::get_help_key(simrv::tui::KeyAction::Quit).find("F10") !=
                std::string::npos,
            "canonical F10 is Quit");
+    expect(simrv::tui::Keybindings::get_help_key(simrv::tui::KeyAction::CheckMissionObjective) ==
+               "[F12]",
+           "F12 is the only registered mission modal shortcut");
+    expect(simrv::tui::Keybindings::get_help_key(simrv::tui::KeyAction::Step).contains("Space") &&
+               simrv::tui::Keybindings::match(simrv::tui::TuiKey::Space) ==
+                   simrv::tui::KeyAction::Step,
+           "Space retains simulator stepping outside the mission modal");
+    expect(!simrv::tui::Keybindings::match(static_cast<simrv::tui::TuiKey>('y')),
+           "y is not registered as a global mission action");
 
     constexpr simrv::tui::TuiFooterAction footer_actions[] = {
         simrv::tui::TuiFooterAction::Step,
@@ -451,7 +539,6 @@ void test_key_registry() {
         simrv::tui::TuiFooterAction::ToggleHelp,
         simrv::tui::TuiFooterAction::RunPause,
         simrv::tui::TuiFooterAction::Quit,
-        simrv::tui::TuiFooterAction::ToggleStudentGuide,
         simrv::tui::TuiFooterAction::OpenSettings,
         simrv::tui::TuiFooterAction::ManageBreakpoints,
         simrv::tui::TuiFooterAction::Reboot,
@@ -481,6 +568,8 @@ void test_key_registry() {
     using simrv::tui::KeyAction;
     expect(!claimed_chars.contains('b') && !claimed_chars.contains('B'),
            "removed backstep keys remain unbound");
+    expect(!claimed_chars.contains('g') && !claimed_chars.contains('G'),
+           "removed general guidance keys remain unbound");
     ActionContext paused{.paused = true, .image_loaded = true, .cycle_accurate = true};
     expect(simrv::tui::Keybindings::is_available(KeyAction::Step, paused),
            "step is available for a paused loaded image");
@@ -488,19 +577,11 @@ void test_key_registry() {
     running.paused = false;
     expect(!simrv::tui::Keybindings::is_available(KeyAction::InspectAddress, running),
            "inspection requires a paused machine");
-    expect(!simrv::tui::Keybindings::is_available(KeyAction::ToggleStudentGuide, running),
-           "the Student Guide can only be changed while navigating the paused TUI");
-    const auto& guide_binding = simrv::tui::Keybindings::get(KeyAction::ToggleStudentGuide);
-    expect(guide_binding.primary_char == 'g' && guide_binding.footer_label == "[g] Guide" &&
-               guide_binding.help_label.contains("Student Guide"),
-           "the Student Guide has one mnemonic canonical binding and name");
-    expect(simrv::tui::Keybindings::get(KeyAction::ActivateStudentGuide).key_display == "[Enter]",
-           "performing the guide suggestion has a canonical Enter binding");
-    expect(!simrv::tui::Keybindings::is_available(KeyAction::ActivateStudentGuide, paused),
-           "Enter retains its normal meaning while the Student Guide is hidden");
-    paused.student_guide_enabled = true;
-    expect(simrv::tui::Keybindings::is_available(KeyAction::ActivateStudentGuide, paused),
-           "the guide action becomes available when the paused guide is visible");
+    expect(!simrv::tui::Keybindings::is_available(KeyAction::CheckMissionObjective, paused),
+           "mission progress key is unavailable outside classroom missions");
+    paused.mission_active = true;
+    expect(simrv::tui::Keybindings::is_available(KeyAction::CheckMissionObjective, paused),
+           "mission progress key becomes available for an active mission");
     expect(simrv::tui::Keybindings::unavailable_reason(KeyAction::InspectAddress, running) ==
                "Pause the simulator first",
            "disabled actions explain how to become available");
@@ -546,28 +627,30 @@ void test_sysconfig_modal_modes() {
     SystemConfigModal::move_cursor(ia_draft, cursor, 1);
     expect(cursor == 0, "IA mode has no navigable CA pipeline items");
 
-    // Test TUI FPS & SMP configuration in SettingsModal
+    // Test SMP configuration in SettingsModal
     SettingsDraft settings_draft;
-    settings_draft.tui_fps = 30;
+    SettingsModal::adjust_setting(settings_draft, 2, 1);
+    expect(settings_draft.density_mode == simrv::tui::framework::DensityMode::Compact,
+           "Settings modal can select compact panel density");
+    SettingsModal::adjust_setting(settings_draft, 2, 1);
+    expect(settings_draft.density_mode == simrv::tui::framework::DensityMode::Comfortable,
+           "Settings modal cycles panel density choices");
     settings_draft.num_harts = 1;
     settings_draft.smp_quantum = 1000;
     settings_draft.smp_multi_threaded = false;
     int s_cursor = 0;
 
     SettingsModal::move_cursor(s_cursor, 3);
-    expect(s_cursor == 3, "Settings modal advances cursor to TUI Target Refresh Rate");
+    expect(s_cursor == 3, "Settings modal advances cursor to active SMP Hart Count");
 
-    SettingsModal::adjust_setting(settings_draft, 3, 1);
-    expect(settings_draft.tui_fps == 60, "Settings modal cycles TUI FPS to 60");
-
-    SettingsModal::adjust_setting(settings_draft, 4, 3);
+    SettingsModal::adjust_setting(settings_draft, 3, 3);
     expect(settings_draft.num_harts == 4, "Settings modal adjusts SMP active core count");
 
-    SettingsModal::adjust_setting(settings_draft, 5, 1);
+    SettingsModal::adjust_setting(settings_draft, 4, 1);
     expect(settings_draft.smp_multi_threaded == true,
            "Settings modal toggles the SMP execution mode");
 
-    SettingsModal::adjust_setting(settings_draft, 6, 1);
+    SettingsModal::adjust_setting(settings_draft, 5, 1);
     expect(settings_draft.smp_quantum == 2500, "Settings modal advances SMP quantum level");
 
     simrv::core::Machine settings_machine;
@@ -590,19 +673,36 @@ void test_sysconfig_modal_modes() {
     mode_draft.sys_config.cycle_accurate = true;
     expect(SettingsModal::submit(mode_draft, live_mode_machine, [](simrv::tui::TuiRegPage) {}),
            "Settings modal accepts live switch to Cycle-Accurate mode");
-    expect(!live_mode_machine.reboot_requested,
-           "Switching to cycle-accurate mode in settings does NOT reboot the machine");
+    expect(live_mode_machine.reboot_requested &&
+               live_mode_machine.take_staged_reconfiguration().has_value(),
+           "Switching to cycle-accurate mode stages its CPU model for restart");
     expect(live_mode_machine.runtime_profile.is_cycle_mode(),
            "Machine runtime profile successfully updated to cycle-accurate mode");
 
-    mode_draft.cycle_accurate = false;
-    mode_draft.sys_config.cycle_accurate = false;
-    expect(SettingsModal::submit(mode_draft, live_mode_machine, [](simrv::tui::TuiRegPage) {}),
-           "Settings modal accepts live switch to Instruction-Accurate mode");
-    expect(!live_mode_machine.reboot_requested,
-           "Switching to instruction-accurate mode in settings does NOT reboot the machine");
-    expect(live_mode_machine.runtime_profile.is_instruction_mode(),
-           "Machine runtime profile successfully updated to instruction mode");
+    simrv::core::Machine cancelled_mode_machine;
+    SettingsDraft cancelled_mode_draft;
+    SettingsModal::open(cancelled_mode_draft, cancelled_mode_machine);
+    cancelled_mode_draft.cycle_accurate = true;
+    cancelled_mode_draft.sys_config.cycle_accurate = true;
+    bool requested_cycle_mode = false;
+    expect(!SettingsModal::submit(
+               cancelled_mode_draft, cancelled_mode_machine, [](simrv::tui::TuiRegPage) {},
+               [&requested_cycle_mode](simrv::core::MachineConfig, SysConfigDraft, bool ca) {
+                   requested_cycle_mode = ca;
+               }),
+           "settings requiring a restart wait for confirmation");
+    expect(requested_cycle_mode && cancelled_mode_machine.runtime_profile.is_instruction_mode() &&
+               !cancelled_mode_machine.reboot_requested,
+           "cancelling a settings restart leaves the active execution mode unchanged");
+
+    simrv::core::Machine ia_mode_machine;
+    SettingsDraft ia_mode_draft;
+    SettingsModal::open(ia_mode_draft, ia_mode_machine);
+    expect(SettingsModal::submit(ia_mode_draft, ia_mode_machine, [](simrv::tui::TuiRegPage) {}),
+           "Settings modal keeps an unchanged Instruction-Accurate model active");
+    expect(
+        !ia_mode_machine.reboot_requested && ia_mode_machine.runtime_profile.is_instruction_mode(),
+        "unchanged Instruction-Accurate configuration does not request a restart");
 
     // Verify render text in IA mode contains disabled note for CA options
     std::vector<std::string> rows;
@@ -620,8 +720,114 @@ void test_sysconfig_modal_modes() {
            "IA mode render explicitly surfaces disabled status for CA options");
 }
 
+void test_cpu_config_reload_confirmation_and_slow_mode() {
+    using simrv::tui::ModalType;
+    using simrv::tui::Tui;
+    using simrv::tui::TuiKey;
+    using simrv::tui::TuiTestAccess;
+
+    const auto root = std::filesystem::temp_directory_path() / "simrv-cpu-config-confirm";
+    std::error_code ignored;
+    std::filesystem::create_directories(root, ignored);
+    const auto unchanged_path = (root / "unchanged.cfg").string();
+    const auto changed_path = (root / "changed.cfg").string();
+
+    simrv::core::Machine unchanged_machine;
+    const auto current_model = unchanged_machine.primary_hart().cpu_model_config;
+    expect(simrv::core::save_cpu_config(unchanged_path, current_model),
+           "write an unchanged CPU model for confirmation testing");
+    Tui unchanged_tui(unchanged_machine);
+    unchanged_tui.open_modal(ModalType::LoadCpuConfig);
+    auto& unchanged_modal = TuiTestAccess::modal(unchanged_tui);
+    unchanged_modal.open_load_cpu_config();
+    while (!unchanged_modal.get_input().empty()) unchanged_modal.pop_char();
+    for (char ch : unchanged_path) unchanged_modal.push_char(ch);
+    unchanged_tui.submit_modal();
+    expect(unchanged_tui.get_active_modal() == ModalType::Notice &&
+               !unchanged_machine.reboot_requested,
+           "loading an unchanged CPU model skips reload confirmation");
+
+    auto changed_model = current_model;
+    changed_model.pipeline.enable_forwarding = !changed_model.pipeline.enable_forwarding;
+    expect(simrv::core::save_cpu_config(changed_path, changed_model),
+           "write a changed CPU model for confirmation testing");
+
+    auto prepare_changed_load = [&](Tui& tui) {
+        tui.open_modal(ModalType::LoadCpuConfig);
+        auto& modal = TuiTestAccess::modal(tui);
+        modal.open_load_cpu_config();
+        while (!modal.get_input().empty()) modal.pop_char();
+        for (char ch : changed_path) modal.push_char(ch);
+        tui.submit_modal();
+    };
+
+    simrv::core::Machine cancelled_machine;
+    Tui cancelled_tui(cancelled_machine);
+    prepare_changed_load(cancelled_tui);
+    expect(cancelled_tui.get_active_modal() == ModalType::ConfigurationChangeConfirm &&
+               !cancelled_machine.reboot_requested,
+           "changed CPU model waits for confirmation before reboot");
+    TuiTestAccess::handle_modal_key(cancelled_tui, 'D', static_cast<TuiKey>('D'));
+    expect(!cancelled_machine.reboot_requested &&
+               cancelled_machine.primary_hart().cpu_model_config.pipeline.enable_forwarding ==
+                   current_model.pipeline.enable_forwarding,
+           "discarding a CPU model leaves active execution configuration unchanged");
+
+    simrv::core::Machine confirmed_machine;
+    Tui confirmed_tui(confirmed_machine);
+    prepare_changed_load(confirmed_tui);
+    TuiTestAccess::handle_modal_key(confirmed_tui, 'R', static_cast<TuiKey>('R'));
+    auto staged = confirmed_machine.take_staged_reconfiguration();
+    expect(confirmed_machine.reboot_requested && staged.has_value() &&
+               staged->cpu_model_config_override.has_value() &&
+               staged->cpu_model_config_override->pipeline.enable_forwarding ==
+                   changed_model.pipeline.enable_forwarding,
+           "confirmed CPU model is staged for the simulator restart");
+
+    simrv::core::Machine speed_machine;
+    Tui speed_tui(speed_machine);
+    simrv::tui::TuiTestAccess::set_paused(speed_tui, false);
+    speed_tui.set_step_delay_us(16'666);
+    expect(!speed_tui.captures_execution_detail(),
+           "execution faster than 60 Hz uses sampled rather than detailed capture");
+    speed_tui.set_step_delay_us(16'667);
+    speed_tui.set_reg_page(simrv::tui::TuiRegPage::CONSOLE);
+    expect(!speed_tui.captures_execution_detail(),
+           "Console does not request pipeline detail capture through the DISASM alias");
+    speed_tui.set_reg_page(simrv::tui::TuiRegPage::PIPELINE);
+    TuiTestAccess::set_pipeline_detail_visible(speed_tui, true);
+    expect(speed_tui.captures_execution_detail(),
+           "execution at 60 Hz captures detail for visible pipeline views");
+    speed_tui.set_step_delay_us(0);
+    expect(!speed_tui.captures_execution_detail(),
+           "unthrottled execution keeps the fast sampled path");
+
+    speed_machine.publish_tui_execution_snapshot_for_testing();
+    TuiTestAccess::init_panes(speed_tui, speed_machine);
+    auto* speed_inspector = TuiTestAccess::inspector(speed_tui);
+    speed_inspector->set_paused(false);
+    speed_inspector->set_visible_rows(45);
+    speed_inspector->set_page(simrv::tui::TuiRegPage::GPR);
+    const auto running_detail = strip_ansi(speed_inspector->render_row(2, 80));
+    const auto hidden_registers = strip_ansi(speed_inspector->render_row(3, 80));
+    const auto live_counters = strip_ansi(speed_inspector->render_row(24, 80));
+    expect(running_detail.contains("RUNNING") && !hidden_registers.contains("x1"),
+           "unthrottled register detail is replaced by the running indicator");
+    expect(live_counters.contains("retired"),
+           "sampled performance counters remain visible in the same inspector panel");
+
+    std::filesystem::remove_all(root, ignored);
+}
+
 void test_page_guidance() {
     using simrv::tui::TuiRegPage;
+    expect(simrv::tui::get_page_info(TuiRegPage::GPR)->fast_mode_content ==
+                   simrv::tui::TuiFastModeContent::FastChangingDetail &&
+               simrv::tui::get_page_info(TuiRegPage::TRACE)->fast_mode_content ==
+                   simrv::tui::TuiFastModeContent::Stable &&
+               simrv::tui::get_page_info(TuiRegPage::CONSOLE)->fast_mode_content ==
+                   simrv::tui::TuiFastModeContent::Stable,
+           "fast-mode policy hides detailed content groups while sampled tools stay visible");
     constexpr TuiRegPage pages[] = {TuiRegPage::GPR,      TuiRegPage::FPR,     TuiRegPage::VEC,
                                     TuiRegPage::PIPELINE, TuiRegPage::CACHE,   TuiRegPage::TLB,
                                     TuiRegPage::BPRED,    TuiRegPage::HAZARD,  TuiRegPage::BUS,
@@ -635,14 +841,6 @@ void test_page_guidance() {
         expect(!simrv::tui::Keybindings::get(guidance.next_action).key_display.empty(),
                "each inspection page links to a canonical action");
     }
-    expect(!simrv::tui::should_show_guidance(true, false, 24),
-           "guidance is hidden by default until the Student Guide is enabled");
-    expect(simrv::tui::should_show_guidance(true, true, 24),
-           "the Student Guide is visible while paused when space permits");
-    expect(!simrv::tui::should_show_guidance(false, true, 24),
-           "guidance does not replace guest-terminal content while running");
-    expect(!simrv::tui::should_show_guidance(true, true, 15),
-           "architectural data wins over guidance in short terminals");
 
     auto memory_guidance =
         simrv::tui::guidance_for_context({.page = TuiRegPage::GPR,
@@ -802,82 +1000,47 @@ void test_mirrored_modal_arrows() {
 }
 
 void test_classroom_cli_defaults() {
-    std::array<std::string, 7> storage = {"SimRV",       "--tui", "--class", "--inspection-output",
-                                          "report.json", "-m",    "demo.elf"};
-    std::array<char*, 7> arguments{};
-    for (size_t index = 0; index < storage.size(); ++index) {
-        arguments[index] = storage[index].data();
-    }
-    auto parsed = simrv::util::parse_command_line(arguments);
-    expect(parsed.has_value(), "classroom CLI options parse together");
-    if (!parsed) return;
-    auto config = parsed->options.to_machine_config();
-    expect(config.tui.enabled && config.tui.class_mode,
-           "classroom CLI selects the guided TUI profile");
-    expect(config.tui.inspection_output == "report.json",
-           "inspection output path reaches typed machine configuration");
-    simrv::core::Machine machine(config);
-    simrv::tui::Tui tui(machine);
-    expect(tui.is_student_guide_enabled(),
-           "classroom mode starts the interactive Student Guide enabled");
-
-    simrv::core::MachineConfig empty_config{};
-    empty_config.tui.enabled = true;
-    empty_config.tui.class_mode = true;
-    simrv::core::Machine empty_machine(empty_config);
-    simrv::tui::Tui empty_tui(empty_machine);
-    empty_tui.activate_student_guide_suggestion();
-    expect(empty_tui.get_active_modal() == simrv::tui::ModalType::LoadBinary,
-           "the Student Guide can execute its context-sensitive suggestion");
-
     const auto mission_path = (std::filesystem::path(__FILE__).parent_path().parent_path() /
                                "examples/isa/lessons/control-flow-calls.mission")
                                   .string();
-    std::array<std::string, 7> mission_storage = {
-        "SimRV", "--tui", "--class", "--mission", mission_path, "-m", "control-flow-calls.elf"};
-    std::array<char*, 7> mission_args{};
+    std::array<std::string, 5> mission_storage = {"SimRV", "--mission", mission_path, "-m",
+                                                  "control-flow-calls.elf"};
+    std::array<char*, 5> mission_args{};
     for (size_t index = 0; index < mission_storage.size(); ++index) {
         mission_args[index] = mission_storage[index].data();
     }
     const auto mission_parsed = simrv::util::parse_command_line(mission_args);
-    expect(mission_parsed.has_value() &&
+    expect(mission_parsed.has_value() && mission_parsed->options.to_machine_config().tui.enabled &&
                mission_parsed->options.to_machine_config().tui.mission == mission_path,
-           "mission CLI selects an external classroom mission");
+           "--mission alone selects interactive classroom mode");
 
-    // Rejects non-TUI (headless CLI) invocation
-    std::array<std::string, 7> invalid_storage = {"SimRV",      "--cli", "--class", "--mission",
+    std::array<std::string, 3> class_only_storage = {"SimRV", "--class", "-m"};
+    std::array<char*, 3> class_only_args{};
+    for (size_t index = 0; index < class_only_storage.size(); ++index) {
+        class_only_args[index] = class_only_storage[index].data();
+    }
+    expect(!simrv::util::parse_command_line(class_only_args).has_value(),
+           "the removed --class switch is not accepted");
+
+    std::array<std::string, 5> mission_storage_with_report = {"SimRV", "--mission", mission_path,
+                                                              "--inspection-output", "report.json"};
+    std::array<char*, 5> report_args{};
+    for (size_t index = 0; index < mission_storage_with_report.size(); ++index) {
+        report_args[index] = mission_storage_with_report[index].data();
+    }
+    const auto report_parsed = simrv::util::parse_command_line(report_args);
+    expect(report_parsed.has_value() &&
+               report_parsed->options.to_machine_config().tui.inspection_output == "report.json",
+           "inspection output path reaches typed machine configuration");
+
+    std::array<std::string, 6> invalid_storage = {"SimRV",      "--cli", "--mission",
                                                   mission_path, "-m",    "demo.elf"};
-    std::array<char*, 7> invalid_args{};
-    for (size_t index = 0; index < invalid_storage.size(); ++index) {
+    std::array<char*, 6> invalid_args{};
+    for (size_t index = 0; index < invalid_args.size(); ++index) {
         invalid_args[index] = invalid_storage[index].data();
     }
     expect(!simrv::util::parse_command_line(invalid_args).has_value(),
            "mission rejects a non-TUI headless CLI invocation");
-
-    // Accepts --class --mission without explicit --tui (TUI is default)
-    std::array<std::string, 6> default_tui_storage = {
-        "SimRV", "--class", "--mission", mission_path, "-m", "control-flow-calls.elf"};
-    std::array<char*, 6> default_tui_args{};
-    for (size_t index = 0; index < default_tui_storage.size(); ++index) {
-        default_tui_args[index] = default_tui_storage[index].data();
-    }
-    const auto default_tui_parsed = simrv::util::parse_command_line(default_tui_args);
-    expect(default_tui_parsed.has_value() &&
-               default_tui_parsed->options.to_machine_config().tui.mission == mission_path,
-           "mission CLI succeeds with default TUI without requiring explicit --tui");
-
-    // Accepts --mission alone and auto-enables class_mode
-    std::array<std::string, 5> mission_only_storage = {"SimRV", "--mission", mission_path, "-m",
-                                                       "control-flow-calls.elf"};
-    std::array<char*, 5> mission_only_args{};
-    for (size_t index = 0; index < mission_only_storage.size(); ++index) {
-        mission_only_args[index] = mission_only_storage[index].data();
-    }
-    const auto mission_only_parsed = simrv::util::parse_command_line(mission_only_args);
-    expect(mission_only_parsed.has_value() &&
-               mission_only_parsed->options.to_machine_config().tui.class_mode &&
-               mission_only_parsed->options.to_machine_config().tui.mission == mission_path,
-           "--mission automatically enables class_mode without requiring explicit --class");
 }
 
 void test_load_modal_path_completion() {
@@ -953,20 +1116,358 @@ void test_control_flow_calls_mission() {
                          "examples/isa/lessons/control-flow-calls.mission")
                             .string();
     mission.configure(lesson, "/tmp/control-flow-calls.elf");
-    expect(mission.enabled() && mission.step() == 0, "mission starts for its bundled ELF");
-    expect(mission.guidance()->title.contains("Conditional branch"),
-           "mission starts at branch objective");
-    mission.observe_symbol("mission_loop");
-    expect(mission.step() == 0, "out-of-order checkpoints do not advance a mission");
-    for (const auto* checkpoint : {"mission_branch", "mission_loop", "mission_before_call",
-                                   "mission_in_callee", "mission_after_call", "mission_done"}) {
-        mission.observe_symbol(checkpoint);
+    expect(mission.enabled() && mission.step() == 0 && mission.speed_hz() == 30,
+           "mission starts for its bundled ELF at the classroom default of 30 Hz");
+    expect(mission.lesson_id() == "control-flow-calls",
+           "mission preserves its educator-facing identifier for reports");
+    expect(mission.description().contains("one branch"), "mission loads the lesson description");
+    expect(mission.goal().contains("stack"), "mission loads the lesson goal");
+    expect(mission.guidance()->title == "Follow the branch",
+           "mission starts at branch objective without duplicate step prefix");
+    expect(mission.guidance()->panels.size() == 3 &&
+               mission.guidance()->panels.front() == simrv::tui::TuiRegPage::EXPLAIN &&
+               mission.guidance()->panels.back() == simrv::tui::TuiRegPage::TRACE,
+           "mission step provides a complete multi-panel workbench layout");
+
+    const auto speed_lesson =
+        std::filesystem::temp_directory_path() / "simrv-mission-speed-test.mission";
+    {
+        std::ofstream output(speed_lesson);
+        output << "[mission]\nversion = \"1\"\nprogram = \"pace.elf\"\n"
+                  "speed_hz = \"30\"\n\n"
+                  "[step]\nid = \"default\"\ntitle = \"Default\"\n"
+                  "prompt = \"Observe\"\nwhy = \"Learn\"\nview = \"registers\"\n\n"
+                  "[step]\nid = \"override\"\ntitle = \"Override\"\n"
+                  "prompt = \"Observe\"\nwhy = \"Learn\"\nview = \"registers\"\n"
+                  "speed_hz = \"45\"\n";
     }
+    simrv::tui::MissionProgress speed_mission;
+    speed_mission.configure(speed_lesson.string(), "/tmp/pace.elf");
+    expect(speed_mission.enabled() && speed_mission.speed_hz() == 30 &&
+               speed_mission.advance_step() && speed_mission.speed_hz() == 45,
+           "a mission step can override the mission-wide execution frequency");
+    std::error_code speed_lesson_error;
+    std::filesystem::remove(speed_lesson, speed_lesson_error);
+
+    simrv::core::Machine machine;
+    simrv::tui::TuiModal no_hint_modal(machine);
+    no_hint_modal.set_mission_progress(&speed_mission);
+    no_hint_modal.open_mission_objective();
+    std::vector<std::string> no_hint_rows(20, std::string(100, ' '));
+    no_hint_modal.render_overlay(no_hint_rows, 100, 20);
+    std::string no_hint_render;
+    for (const auto& row : no_hint_rows) no_hint_render += row;
+    expect(no_hint_render.find("Why [y to reveal]") != std::string::npos,
+           "steps without a short hint retain the existing rationale reveal");
+    no_hint_modal.cycle_mission_hint();
+    expect(no_hint_modal.mission_hint_level() == 2,
+           "one y reveals the full rationale when no short hint is authored");
+
+    simrv::tui::TuiModal modal(machine);
+    modal.set_mission_progress(&mission);
+    modal.open_mission_objective();
+    expect(modal.get_type() == simrv::tui::ModalType::MissionObjective,
+           "mission objective modal opens with the active lesson");
+    std::vector<std::string> modal_rows(30, std::string(100, ' '));
+    modal.render_overlay(modal_rows, 100, 30);
+    std::string rendered_modal;
+    for (const auto& row : modal_rows) rendered_modal += row;
+    expect(rendered_modal.find("Goal: Use the PC") != std::string::npos,
+           "mission modal includes the lesson goal");
+    expect(rendered_modal.find("Step 1/6 · Follow the branch") != std::string::npos &&
+               rendered_modal.find("Step 1 of 6") == std::string::npos,
+           "mission modal formats step title cleanly without duplicate step prefix");
+    expect(rendered_modal.find("Waiting for mission_loop · after step 1") != std::string::npos,
+           "mission modal identifies the pending checkpoint boundary");
+    expect(rendered_modal.find("Learn: Relate a branch decision") != std::string::npos &&
+               rendered_modal.find("Relate a branch decision to the next program counter") !=
+                   std::string::npos,
+           "mission modal explains the learning target");
+    expect(rendered_modal.find("Hint [y to reveal]") != std::string::npos,
+           "mission modal explains how to reveal a hint");
+    expect(rendered_modal.find("Next: press F5 to run to mission_loop") != std::string::npos,
+           "mission modal states one direct next action");
+    expect(rendered_modal.find("Flow:") == std::string::npos &&
+               rendered_modal.find("checkpoints 0/6") == std::string::npos &&
+               rendered_modal.find("At the branch, a0 is 2") == std::string::npos &&
+               rendered_modal.find("conditional branch selects") == std::string::npos,
+           "mission modal omits progress notation and unrevealed teaching content");
+    modal.cycle_mission_hint();
+    modal_rows.assign(30, std::string(100, ' '));
+    modal.render_overlay(modal_rows, 100, 30);
+    rendered_modal.clear();
+    for (const auto& row : modal_rows) rendered_modal += row;
+    expect(rendered_modal.find("At the branch, a0 is 2") != std::string::npos &&
+               rendered_modal.find("conditional branch selects") == std::string::npos,
+           "first y reveals the short hint before the rationale");
+    modal.cycle_mission_hint();
+    modal_rows.assign(30, std::string(100, ' '));
+    modal.render_overlay(modal_rows, 100, 30);
+    rendered_modal.clear();
+    for (const auto& row : modal_rows) rendered_modal += row;
+    expect(rendered_modal.find("conditional branch selects") != std::string::npos,
+           "second y reveals the full rationale");
+    modal.cycle_mission_hint();
+    modal_rows.assign(30, std::string(100, ' '));
+    modal.render_overlay(modal_rows, 100, 30);
+    rendered_modal.clear();
+    for (const auto& row : modal_rows) rendered_modal += row;
+    expect(rendered_modal.find("At the branch, a0 is 2") == std::string::npos &&
+               rendered_modal.find("conditional branch selects") == std::string::npos,
+           "third y hides both hint levels");
+    expect(!mission.can_advance_step() && mission.checkpoint_symbol() == "mission_loop",
+           "the branch observation waits at the branch target checkpoint");
+    mission.observe_symbol("mission_loop");
+    expect(mission.checkpoint_reached() && mission.step() == 0,
+           "reaching a separate checkpoint marks only its symbol state");
+    mission.observe_symbol("mission_loop");
+    expect(mission.reached_checkpoint_events() == std::vector<std::string>{"mission_loop"},
+           "checkpoint evidence records each reached symbol once in order");
+    modal_rows.assign(30, std::string(100, ' '));
+    modal.render_overlay(modal_rows, 100, 30);
+    rendered_modal.clear();
+    for (const auto& row : modal_rows) rendered_modal += row;
+    expect(rendered_modal.find("Checkpoint reached · mission_loop") != std::string::npos,
+           "mission modal reports automatic checkpoint completion");
+    expect(rendered_modal.find("The branch was taken; execution is now at the loop body.") !=
+               std::string::npos,
+           "mission modal displays the reached checkpoint's configured message");
+    expect(mission.advance_step() && mission.step() == 1 && !mission.guidance()->learn.empty() &&
+               mission.checkpoint_symbol() == "mission_loop_backedge",
+           "acknowledging the branch opens the loop observation with its learning target");
+    mission.observe_symbol("mission_loop_backedge");
+    expect(mission.checkpoint_reached() && mission.advance_step() && mission.step() == 2 &&
+               !mission.guidance()->learn.empty() &&
+               mission.checkpoint_symbol() == "mission_before_call",
+           "the loop back-edge checkpoint gates the next instruction");
+    mission.observe_symbol("mission_before_call");
+    expect(mission.checkpoint_reached() && mission.advance_step() && mission.step() == 3 &&
+               !mission.guidance()->learn.empty() &&
+               mission.checkpoint_symbol() == "mission_frame_ready",
+           "the call setup checkpoint gates inspection of the callee");
+    mission.observe_symbol("mission_frame_ready");
+    expect(mission.checkpoint_reached() && mission.advance_step() && mission.step() == 4 &&
+               !mission.guidance()->learn.empty() &&
+               mission.checkpoint_symbol() == "mission_after_call",
+           "the callee checkpoint gates tracing the return");
+    mission.observe_symbol("mission_after_call");
+    expect(mission.checkpoint_reached() && mission.advance_step() && mission.step() == 5 &&
+               !mission.guidance()->learn.empty() && mission.checkpoint_symbol() == "mission_done",
+           "the return checkpoint gates final result review");
+    mission.observe_symbol("mission_done");
+    expect(mission.enabled() && mission.checkpoint_reached() && mission.step() == 5,
+           "final checkpoint is reached independently of the modal");
+    expect(mission.advance_step(), "next instruction advances after final checkpoint");
     expect(mission.completed() && mission.step() == 6, "ordered checkpoints complete the mission");
+    expect(
+        mission.reached_checkpoint_events() ==
+            std::vector<std::string>{"mission_loop", "mission_loop_backedge", "mission_before_call",
+                                     "mission_frame_ready", "mission_after_call", "mission_done"},
+        "TA evidence records all reached checkpoint symbols in order");
     expect(mission.guidance()->title.contains("complete"),
            "completed mission provides review guidance");
+
+    const auto independent_lesson =
+        std::filesystem::temp_directory_path() / "simrv-independent-checkpoint-test.mission";
+    {
+        std::ofstream output(independent_lesson);
+        output << "[mission]\nversion = \"1\"\nprogram = \"independent.elf\"\n"
+                  "goal = \"Understand the sequence\"\n\n"
+                  "[step]\nid = \"first\"\ntitle = \"First\"\n"
+                  "prompt = \"Observe first\"\nlearn = \"Learn the first concept\"\n"
+                  "why = \"It matters\"\nview = \"registers\"\n\n"
+                  "[step]\nid = \"second\"\ntitle = \"Second\"\n"
+                  "prompt = \"Observe second\"\nwhy = \"It matters too\"\n"
+                  "view = \"trace\"\n\n"
+                  "[checkpoint]\nlabel = \"later_marker\"\nafter_step = 2\n"
+                  "message = \"Later boundary\"\n";
+    }
+    simrv::tui::MissionProgress independent;
+    independent.configure(independent_lesson.string(), "/tmp/independent.elf");
+    expect(independent.enabled() && independent.guidance()->learn == "Learn the first concept" &&
+               independent.checkpoint_progress()->after_step == 2 && independent.can_advance_step(),
+           "optional learning target loads and a future checkpoint does not block earlier "
+           "instruction");
+    independent.observe_symbol("later_marker");
+    expect(independent.step() == 0 && independent.checkpoint_reached() &&
+               independent.checkpoint_progress()->reached && independent.can_advance_step(),
+           "a future checkpoint is recorded early without moving the cursor and gates its own "
+           "boundary");
+    simrv::tui::TuiModal progress_modal(machine);
+    progress_modal.set_mission_progress(&independent);
+    progress_modal.open_mission_objective();
+    std::vector<std::string> progress_rows(30, std::string(120, ' '));
+    progress_modal.render_overlay(progress_rows, 120, 30);
+    std::string progress_text;
+    for (const auto& row : progress_rows) progress_text += row;
+    expect(progress_text.find("Reached early · later_marker (after step 2)") != std::string::npos &&
+               progress_text.find("continue reading through step 2") != std::string::npos &&
+               progress_text.find("Flow:") == std::string::npos,
+           "student guidance explains an early checkpoint without a dense progress strip");
+
+    simrv::core::Machine recovery_machine;
+    recovery_machine.is_shutdown_.store(true);
+    recovery_machine.stop_reason_.store(simrv::core::Machine::StopReason::GuestCrash);
+    simrv::tui::MissionProgress recovery_progress;
+    recovery_progress.configure(independent_lesson.string(), "/tmp/independent.elf");
+    simrv::tui::TuiModal recovery_modal(recovery_machine);
+    recovery_modal.set_mission_progress(&recovery_progress);
+    recovery_modal.open_mission_objective();
+    std::vector<std::string> recovery_rows(30, std::string(120, ' '));
+    recovery_modal.render_overlay(recovery_rows, 120, 30);
+    std::string recovery_text;
+    for (const auto& row : recovery_rows) recovery_text += row;
+    expect(recovery_text.find("The program stopped before reaching this checkpoint.") !=
+                   std::string::npos &&
+               recovery_text.find("restart with r") != std::string::npos &&
+               recovery_text.find("[r] Restart") != std::string::npos,
+           "mission guidance offers recovery when the guest stops before a checkpoint");
+    expect(independent.advance_step() && independent.step() == 1 && independent.can_advance_step(),
+           "students can advance up to an already reached checkpoint boundary");
+    expect(independent.advance_step() && independent.completed() &&
+               independent.reached_checkpoint_count() == 1,
+           "reaching the boundary allows completion with factual checkpoint progress");
+    std::error_code independent_error;
+    std::filesystem::remove(independent_lesson, independent_error);
+
+    simrv::core::Machine layout_machine;
+    simrv::tui::Tui layout_tui(layout_machine);
+    simrv::tui::TuiTestAccess::init_panes(layout_tui, layout_machine);
+    simrv::tui::TuiTestAccess::configure_mission(layout_tui, lesson, "/tmp/control-flow-calls.elf");
+    simrv::tui::TuiTestAccess::set_cached_term_width(layout_tui, 100);
+    simrv::tui::TuiTestAccess::set_cached_term_height(layout_tui, 24);
+    simrv::tui::TuiTestAccess::apply_mission_layout(layout_tui);
+    simrv::tui::TuiTestAccess::refresh_mission_layout_notice(layout_tui);
+    if (auto* inspector = simrv::tui::TuiTestAccess::inspector(layout_tui)) {
+        inspector->set_page(simrv::tui::TuiRegPage::GPR);
+        inspector->set_visible_rows(18);
+        const std::string drawer_row0 = inspector->render_row(16, 80);
+        const std::string drawer_row1 = inspector->render_row(17, 80);
+        expect(drawer_row0.contains("Mission 1/6: Follow the branch") &&
+                   drawer_row0.contains("mission_loop") && drawer_row1.contains("Task:"),
+               "primary inspector pane renders the 2-line mission drawer when a mission is active");
+    }
+    expect(layout_tui.get_workbench_slots().size() == 3 &&
+               simrv::tui::TuiTestAccess::column_widths(layout_tui, 100).count == 2 &&
+               simrv::tui::TuiTestAccess::status_override(layout_tui).contains("144x10"),
+           "mission retains the full layout, shows fitting panels, and warns when it is too small");
+    simrv::tui::TuiTestAccess::apply_mission_speed(layout_tui);
+    expect(layout_tui.step_delay_us() == 33'334,
+           "classroom mission configures the simulator to its readable default frequency");
+    simrv::tui::TuiTestAccess::set_cached_term_width(layout_tui, 160);
+    simrv::tui::TuiTestAccess::refresh_mission_layout_notice(layout_tui);
+    expect(simrv::tui::TuiTestAccess::column_widths(layout_tui, 160).count == 3 &&
+               simrv::tui::TuiTestAccess::status_override(layout_tui).contains("now fits"),
+           "mission reports when the requested panel layout fits after resizing");
+    auto& lesson_modal = simrv::tui::TuiTestAccess::modal(layout_tui);
+    lesson_modal.open_mission_objective();
+    simrv::tui::TuiTestAccess::handle_modal_key(layout_tui, '\r', simrv::tui::TuiKey::Enter);
+    expect(layout_tui.get_active_modal() == simrv::tui::ModalType::None &&
+               layout_tui.mission_progress().step() == 0,
+           "Enter hides the mission modal without advancing or completing the instruction");
+    simrv::tui::TuiTestAccess::handle_normal_key(layout_tui, 0, simrv::tui::TuiKey::F12);
+    expect(layout_tui.get_active_modal() == simrv::tui::ModalType::MissionObjective,
+           "F12 reopens the current mission instruction from the workbench");
+    const auto status_before_f12 = simrv::tui::TuiTestAccess::status_override(layout_tui);
+    simrv::tui::TuiTestAccess::handle_modal_key(layout_tui, 0, simrv::tui::TuiKey::F12);
+    expect(layout_tui.get_active_modal() == simrv::tui::ModalType::MissionObjective &&
+               simrv::tui::TuiTestAccess::status_override(layout_tui) == status_before_f12,
+           "F12 inside the mission modal does not duplicate its visible checkpoint status");
+    simrv::tui::TuiTestAccess::handle_modal_key(layout_tui, 27, simrv::tui::TuiKey::Esc);
+    expect(layout_tui.get_active_modal() == simrv::tui::ModalType::None &&
+               layout_tui.mission_progress().step() == 0,
+           "Esc hides the mission modal with the same non-advancing behavior as Enter");
+    lesson_modal.open_mission_objective();
+    simrv::tui::TuiTestAccess::observe_mission_symbol(layout_tui, "mission_loop");
+    simrv::tui::TuiTestAccess::handle_modal_key(layout_tui, ' ', simrv::tui::TuiKey::Space);
+    const auto active_after_advance = layout_tui.get_active_modal();
+    simrv::tui::TuiTestAccess::handle_modal_key(layout_tui, '\t', simrv::tui::TuiKey::Tab);
+    expect(layout_tui.mission_progress().step() == 1 &&
+               active_after_advance == simrv::tui::ModalType::MissionObjective &&
+               layout_tui.focused_slot() == 0,
+           "Space advances instruction while Tab remains unrelated to mission navigation");
+    simrv::tui::TuiTestAccess::handle_modal_key(layout_tui, 'p', simrv::tui::TuiKey::p);
+    expect(layout_tui.mission_progress().step() == 0 &&
+               layout_tui.mission_progress().checkpoint_reached(),
+           "p returns to the previous mission step and preserves its reached checkpoint state");
+    simrv::tui::TuiTestAccess::handle_modal_key(layout_tui, 'n', simrv::tui::TuiKey::n);
+    expect(layout_tui.mission_progress().step() == 1 &&
+               !layout_tui.mission_progress().checkpoint_reached(),
+           "n advances to the next mission step");
+
+    layout_machine.set_resolved_boot_state(0x80000000, std::nullopt);
+    layout_machine.primary_hart().state().pc = 0x80000004;
+    layout_machine.primary_hart().state().regs.write(simrv::xlen::RegId::A0, 99);
+    simrv::tui::TuiTestAccess::handle_modal_key(layout_tui, 0, simrv::tui::TuiKey::F5);
+    expect(layout_tui.get_active_modal() == simrv::tui::ModalType::None && !layout_tui.is_paused(),
+           "F5 inside the mission modal hides the modal and starts guest execution directly");
+    simrv::tui::TuiTestAccess::observe_mission_symbol(layout_tui, "mission_loop_backedge");
+    layout_tui.pause_loop();
+    expect(layout_tui.get_active_modal() == simrv::tui::ModalType::None &&
+               layout_tui.mission_progress().checkpoint_reached() &&
+               simrv::tui::TuiTestAccess::status_override(layout_tui)
+                   .contains("Checkpoint 'mission_loop_backedge' after step 2 reached"),
+           "reaching a checkpoint keeps the workbench unobstructed and shows a status notice");
+    simrv::tui::TuiTestAccess::handle_normal_key(layout_tui, 0, simrv::tui::TuiKey::F5);
+    expect(layout_tui.mission_progress().step() == 1 && layout_tui.is_paused() &&
+               simrv::tui::TuiTestAccess::status_override(layout_tui)
+                   .contains("Press n for the next instruction"),
+           "F5 cannot run past a reached checkpoint before the student advances the instruction");
+    simrv::tui::TuiTestAccess::handle_normal_key(layout_tui, 'n', simrv::tui::TuiKey::n);
+    expect(layout_tui.mission_progress().step() == 2 &&
+               layout_tui.get_active_modal() == simrv::tui::ModalType::MissionObjective,
+           "pressing n on the workbench after a checkpoint advances and opens the next objective");
+    layout_tui.restart_mission();
+    expect(layout_tui.mission_progress().step() == 0 &&
+               layout_machine.primary_hart().state().pc == 0x80000000 &&
+               layout_machine.primary_hart().state().regs.read(simrv::xlen::RegId::A0) == 0,
+           "restarting a mission also resets guest architectural state to the entry point");
+
+    simrv::core::Machine completion_machine;
+    simrv::tui::Tui completion_tui(completion_machine);
+    simrv::tui::TuiTestAccess::configure_mission(completion_tui, lesson,
+                                                 "/tmp/control-flow-calls.elf");
+    auto& completion_progress = simrv::tui::TuiTestAccess::mission_progress(completion_tui);
+    while (completion_progress.step() < 5) {
+        if (!completion_progress.can_advance_step())
+            simrv::tui::TuiTestAccess::observe_mission_symbol(
+                completion_tui, completion_progress.checkpoint_symbol());
+        expect(completion_progress.advance_step(),
+               "test setup advances to final lesson instruction");
+    }
+    simrv::tui::TuiTestAccess::observe_mission_symbol(completion_tui, "mission_done");
+    simrv::tui::TuiTestAccess::modal(completion_tui).open_mission_objective();
+    std::vector<std::string> final_modal_rows(30, std::string(100, ' '));
+    simrv::tui::TuiTestAccess::modal(completion_tui).render_overlay(final_modal_rows, 100, 30);
+    std::string final_modal_text;
+    for (const auto& row : final_modal_rows) final_modal_text += row;
+    expect(final_modal_text.find("Checkpoint reached · mission_done") != std::string::npos &&
+               final_modal_text.find("[Space] Finish") != std::string::npos,
+           "final checkpoint explains that Space completes the lesson for review");
+    simrv::tui::TuiTestAccess::handle_modal_key(completion_tui, ' ', simrv::tui::TuiKey::Space);
+    expect(completion_progress.completed(), "final instruction advances the mission to complete");
+    expect(completion_machine.stop_reason() == simrv::core::Machine::StopReason::Running &&
+               !completion_machine.is_shutdown_ &&
+               simrv::tui::TuiTestAccess::modal(completion_tui).get_type() ==
+                   simrv::tui::ModalType::MissionObjective,
+           "mission completion leaves the paused simulator open for review");
+    final_modal_rows.assign(30, std::string(100, ' '));
+    simrv::tui::TuiTestAccess::modal(completion_tui).render_overlay(final_modal_rows, 100, 30);
+    final_modal_text.clear();
+    for (const auto& row : final_modal_rows) final_modal_text += row;
+    expect(
+        final_modal_text.find("6 of 6 checkpoints reached") != std::string::npos &&
+            final_modal_text.find("press x while paused on the workbench") == std::string::npos &&
+            final_modal_text.find("[r] Restart") != std::string::npos &&
+            final_modal_text.find("[q / F10] Exit simulator") != std::string::npos,
+        "completion screen offers review, restart, and an explicit simulator exit");
+    simrv::tui::TuiTestAccess::handle_modal_key(completion_tui, 'q', simrv::tui::TuiKey::q);
+    expect(completion_machine.stop_reason() == simrv::core::Machine::StopReason::GuestExit,
+           "the completed mission screen exits only after an explicit quit action");
+
     mission.restart();
-    expect(mission.enabled() && mission.step() == 0, "mission restart resets local progress");
+    expect(mission.enabled() && mission.step() == 0 && mission.reached_checkpoint_events().empty(),
+           "mission restart resets local progress and checkpoint evidence");
     mission.dismiss();
     expect(
         mission.status() == simrv::tui::MissionStatus::Inactive && !mission.guidance().has_value(),
@@ -979,6 +1480,105 @@ void test_control_flow_calls_mission() {
     expect(
         mission.status() == simrv::tui::MissionStatus::LoadError && mission.guidance().has_value(),
         "mission reports an unavailable external lesson file");
+
+    const auto invalid_lesson =
+        std::filesystem::temp_directory_path() / "simrv-invalid-mission-validation.mission";
+    {
+        std::ofstream output(invalid_lesson);
+        output << "[mission]\nversion = \"1\"\nprogram = \"demo.elf\"\n\n"
+                  "[step]\nid = \"dup\"\ntitle = \"First\"\n"
+                  "prompt = \"Observe\"\nwhy = \"Reason\"\nview = \"registers\"\n\n"
+                  "[step]\nid = \"dup\"\ntitle = \"Second\"\n"
+                  "prompt = \"Observe\"\nwhy = \"Reason\"\nview = \"registers\"\n";
+    }
+    mission.configure(invalid_lesson.string(), "/tmp/demo.elf");
+    expect(mission.status() == simrv::tui::MissionStatus::LoadError &&
+               mission.guidance()->prompt.contains("Duplicate [step] id"),
+           "mission loader rejects duplicate step ids");
+    {
+        std::ofstream output(invalid_lesson);
+        output << "[mission]\nversion = \"1\"\nprogram = \"demo.elf\"\n\n"
+                  "[step]\nid = \"one\"\ntitle = \"First\"\n"
+                  "prompt = \"Observe\"\nwhy = \"Reason\"\nview = \"registers\"\n"
+                  "glossary = \"6\"\n";
+    }
+    mission.configure(invalid_lesson.string(), "/tmp/demo.elf");
+    expect(mission.status() == simrv::tui::MissionStatus::LoadError &&
+               mission.guidance()->prompt.contains("glossary"),
+           "mission loader rejects out-of-range glossary topics");
+    std::error_code invalid_error;
+    std::filesystem::remove(invalid_lesson, invalid_error);
+}
+
+void test_drawer_stack_layout() {
+    simrv::tui::TuiDrawerStack drawers;
+    drawers.add({.id = simrv::tui::TuiDrawerId::Log,
+                 .name = "Log",
+                 .height = 3,
+                 .render_row = [](int row, int) { return "log " + std::to_string(row); }});
+    drawers.add({.id = simrv::tui::TuiDrawerId::Mission,
+                 .name = "Mission",
+                 .height = 2,
+                 .render_row = [](int row, int) { return row == 0 ? "guide" : "guide body"; }});
+    expect(drawers.height() == 5, "drawer stack reserves the combined open drawer height");
+    expect(drawers.top_drawer_row(10) == 5, "top_drawer_row identifies start of drawer stack");
+    expect(drawers.render_row(5, 10, 80) == "log 0" && drawers.render_row(7, 10, 80) == "log 2" &&
+               drawers.render_row(8, 10, 80) == "guide" &&
+               drawers.render_row(9, 10, 80) == "guide body",
+           "drawer stack places reusable drawers in insertion order at the panel bottom");
+    expect(!drawers.render_row(4, 10, 80), "drawer stack leaves panel rows outside its region");
+
+    const auto log_span = drawers.find_span(simrv::tui::TuiDrawerId::Log, 10);
+    const auto mission_span = drawers.find_span(simrv::tui::TuiDrawerId::Mission, 10);
+    expect(log_span.has_value() && log_span->start_row == 5 && log_span->height == 3 &&
+               log_span->is_header_row(5) && !log_span->is_header_row(6),
+           "find_span returns exact Log drawer geometry and header row check");
+    expect(mission_span.has_value() && mission_span->start_row == 8 && mission_span->height == 2 &&
+               mission_span->contains(9) && !mission_span->contains(7),
+           "find_span returns exact Mission drawer geometry");
+    expect(drawers.drawer_at_row(6, 10)->id == simrv::tui::TuiDrawerId::Log &&
+               drawers.drawer_at_row(8, 10)->id == simrv::tui::TuiDrawerId::Mission &&
+               !drawers.drawer_at_row(4, 10).has_value(),
+           "drawer_at_row hit-tests each drawer span accurately");
+
+    // Verify interactive Mission drawer click and Log drawer toggle bounds in Tui
+    const auto lesson = (std::filesystem::path(__FILE__).parent_path().parent_path() /
+                         "examples/isa/lessons/control-flow-calls.mission")
+                            .string();
+    simrv::core::Machine machine;
+    simrv::tui::Tui tui(machine);
+    simrv::tui::TuiTestAccess::init_panes(tui, machine);
+    simrv::tui::TuiTestAccess::configure_mission(tui, lesson, "/tmp/control-flow-calls.elf");
+    simrv::tui::TuiTestAccess::set_cached_term_width(tui, 160);
+    simrv::tui::TuiTestAccess::set_cached_term_height(tui, 32);
+    if (tui.is_modal_active()) tui.close_modal();
+    tui.set_workbench_slot_page(0, simrv::tui::TuiRegPage::GPR);
+    tui.render(true);
+
+    auto* pane = simrv::tui::TuiTestAccess::inspector(tui);
+    // At term_height = 32, num_rows = 25 (>= 20), so Log (rows 17..22, term y 21..26) and
+    // Mission (rows 23..24, term y 27..28) are both active on column 0.
+    const auto active = pane->active_drawers(80, 25, false);
+    expect(active.height() == 8, "both 6-row Log and 2-row Mission drawers are active at 25 rows");
+    expect(pane->drawer_at_terminal_row(27, 80, 25, false)->id == simrv::tui::TuiDrawerId::Mission,
+           "terminal row 27 maps to the Mission drawer");
+    expect(pane->drawer_at_terminal_row(21, 80, 25, false)->id == simrv::tui::TuiDrawerId::Log,
+           "terminal row 21 maps to the Log drawer header");
+
+    // Clicking the Mission drawer opens the MissionObjective modal
+    tui.handle_mouse(10, 27, 0);
+    expect(
+        tui.is_modal_active() && tui.get_active_modal() == simrv::tui::ModalType::MissionObjective,
+        "clicking the Mission drawer opens the MissionObjective modal");
+    tui.close_modal();
+
+    // Toggling the Log drawer off removes Log drawer hit-capture and expands main content bounds
+    pane->set_log_drawer_open(false);
+    expect(!pane->find_drawer_span(simrv::tui::TuiDrawerId::Log, 80, 25, false).has_value(),
+           "closing Log drawer removes its span from active_drawers");
+    expect(pane->content_end_terminal_row(80, 25, false) == 26,
+           "closing Log drawer extends main content end row down to above Mission drawer");
+    pane->set_log_drawer_open(true);
 }
 
 void test_tui_running_state_synchronization() {
@@ -1002,8 +1602,8 @@ void test_tui_running_state_synchronization() {
     expect(tui->is_paused(), "tui.is_paused() is true on startup");
     tui->set_paused(false);
     expect(!tui->is_paused(), "tui.is_paused() is false after unpausing");
-    expect(tui->get_workbench_slots()[0].page == simrv::tui::TuiRegPage::LIVE,
-           "running while Console is focused shows Live in the first inspector column");
+    expect(tui->get_workbench_slots()[0].page == simrv::tui::TuiRegPage::GPR,
+           "running while Console is focused keeps the selected inspector page visible");
     expect(tui->get_workbench_slots()[1].page == simrv::tui::TuiRegPage::CONSOLE,
            "starting execution leaves the other workbench column unchanged");
     tui->save_preferences();
@@ -1012,7 +1612,7 @@ void test_tui_running_state_synchronization() {
                saved_preferences.slots[0].page == simrv::tui::TuiRegPage::GPR &&
                saved_preferences.slots[1].page == simrv::tui::TuiRegPage::CONSOLE &&
                saved_preferences.slots[2].page == simrv::tui::TuiRegPage::DISPLAY,
-           "saving while running does not persist the temporary Live page");
+           "saving while running preserves the selected workbench pages");
     expect(machine.execution_state() == simrv::core::ExecutionState::Running,
            "machine execution state is Running after unpausing TUI");
     expect(!machine.is_paused(), "machine.is_paused() is false after unpausing");
@@ -1020,21 +1620,21 @@ void test_tui_running_state_synchronization() {
     tui->set_paused(true);
     expect(tui->is_paused(), "tui.is_paused() is true after pausing");
     expect(tui->get_workbench_slots()[0].page == simrv::tui::TuiRegPage::GPR,
-           "pausing restores the inspector that was visible before execution");
+           "pausing keeps the inspector page selected during execution");
     expect(tui->focused_slot() == 1,
-           "showing Live from a Console-focused state does not move keyboard focus");
+           "running from a Console-focused state does not move keyboard focus");
     expect(machine.execution_state() == simrv::core::ExecutionState::Paused,
            "machine execution state is Paused after pausing TUI");
     expect(machine.is_paused(), "machine.is_paused() is true after pausing");
 
     simrv::tui::TuiTestAccess::set_focused_slot(*tui, 2);
     tui->set_paused(false);
-    expect(tui->get_workbench_slots()[0].page == simrv::tui::TuiRegPage::LIVE &&
+    expect(tui->get_workbench_slots()[0].page == simrv::tui::TuiRegPage::GPR &&
                tui->get_workbench_slots()[2].page == simrv::tui::TuiRegPage::DISPLAY,
-           "running while Display is focused shows Live without replacing the display");
+           "running while Display is focused preserves inspector and display pages");
     tui->set_paused(true);
     expect(tui->get_workbench_slots()[0].page == simrv::tui::TuiRegPage::GPR,
-           "pausing after a Display-focused run restores the inspector page");
+           "pausing after a Display-focused run keeps the inspector page");
 
     simrv::tui::TuiTestAccess::set_focused_slot(*tui, 0);
     tui->set_paused(false);
@@ -1050,87 +1650,15 @@ void test_tui_running_state_synchronization() {
     std::filesystem::remove(preferences_path, ignored);
 }
 
-void test_live_overview_snapshots_and_hart_rows() {
-    using namespace simrv::tui;
-    simrv::core::Machine machine(simrv::core::MachineConfig{
-        .execution = {.num_harts = 2}, .tui = {.enabled = true, .inspection_output = {}}});
-    machine.add_hart_for_testing(std::make_unique<simrv::core::CPU>());
-    auto& hart0 = machine.hart(0);
-    auto& hart1 = machine.hart(1);
-    hart0.state().pc = 0x80000100;
-    hart0.state().priv = simrv::xlen::PrivilegeLevel::Machine;
-    hart0.e_icount = 1200;
-    hart0.clint_mmio.mcycle = 3000;
-    hart1.state().pc = 0x8000abcd;
-    hart1.state().priv = simrv::xlen::PrivilegeLevel::Supervisor;
-    hart1.e_icount = 800;
-    hart1.clint_mmio.mcycle = 5000;
-    hart0.clint_mmio.mtime.store(15'000'000);
-    // Resolve a real executable symbol so the Live view exercises PC annotation as well as
-    // preserving the raw architectural address.
-    if (machine.symbol_table().load_from_elf("/proc/self/exe")) {
-        if (const auto main_address = machine.symbol_table().lookup_name("main")) {
-            hart0.state().pc = *main_address;
-        }
-    }
-    machine.publish_tui_execution_snapshot_for_testing();
-    hart0.state().pc = 0xdead;
-    hart1.state().pc = 0xbeef;
-    hart1.state().priv = simrv::xlen::PrivilegeLevel::User;
-
-    InspectorPane pane(machine);
-    pane.set_selected_hart(1);
-    pane.refresh_execution_snapshot();
-    pane.set_page(TuiRegPage::LIVE);
-    pane.set_paused(false);
-    pane.set_active_runtime(2.0);
-    pane.set_kips(1234);
-    pane.set_max_kips(2300);
-    pane.set_visible_rows(30);
-
-    const auto h0 = strip_ansi(pane.render_row(4, 80));
-    const auto h1 = strip_ansi(pane.render_row(5, 80));
-    expect(h0.contains("H0") && h0.contains("M") && h0.contains("main"),
-           "Live Overview renders hart 0 PC symbol and machine privilege from its snapshot");
-    expect(h1.contains(">H1") && h1.contains("S") && h1.contains("8000abcd"),
-           "Live Overview marks selected hart and renders supervisor privilege from its snapshot");
-    expect(strip_ansi(pane.render_row(7, 80)).contains("2,000"),
-           "Live Overview aggregates retired instructions across harts");
-    expect(strip_ansi(pane.render_row(7, 80)).contains("8,000"),
-           "Live Overview labels and aggregates hart cycles across harts");
-    expect(strip_ansi(pane.render_row(8, 80)).contains("1.23 MIPS") &&
-               strip_ansi(pane.render_row(8, 80)).contains("1.0 KIPS"),
-           "Live Overview shows recent and average throughput");
-    expect(strip_ansi(pane.render_row(9, 80)).contains("IPC") &&
-               strip_ansi(pane.render_row(9, 80)).contains("CPI"),
-           "Live Overview shows aggregate IPC and CPI");
-    expect(strip_ansi(pane.render_row(10, 80)).contains("2.00s") &&
-               strip_ansi(pane.render_row(10, 80)).contains("1.50s"),
-           "Live Overview shows host runtime and guest virtual time");
-    expect(strip_ansi(pane.render_row(11, 80)).contains("instruction-fast") &&
-               strip_ansi(pane.render_row(11, 80)).contains("2.30 MIPS"),
-           "Live Overview shows execution engine and peak throughput");
-    machine.runtime_profile.engine = simrv::core::ExecutionEngine::CycleFast;
-    expect(strip_ansi(pane.render_row(2, 80)).contains("CA"),
-           "Live Overview identifies cycle-accurate execution mode");
-
-    pane.set_visible_rows(8);
-    (void)pane.render_row(2, 32);
-    pane.scroll(1, 32);
-    const auto scrolled = strip_ansi(pane.render_row(4, 32));
-    expect(scrolled.contains("H1"),
-           "narrow Live Overview scrolls to hart rows beyond the viewport");
-
-    simrv::core::Machine empty_machine;
-    empty_machine.publish_tui_execution_snapshot_for_testing();
-    InspectorPane empty_pane(empty_machine);
-    empty_pane.refresh_execution_snapshot();
-    empty_pane.set_page(TuiRegPage::LIVE);
-    empty_pane.set_paused(true);
-    empty_pane.set_visible_rows(30);
-    expect(strip_ansi(empty_pane.render_row(7, 80)).contains("0.0 KIPS") &&
-               strip_ansi(empty_pane.render_row(8, 80)).contains("0.00"),
-           "zero-count startup renders finite throughput and aggregate ratios");
+void test_machine_releases_tui_sinks_before_runtime() {
+    auto machine = std::make_unique<simrv::core::Machine>();
+    auto tui = std::make_shared<simrv::tui::Tui>(*machine);
+    simrv::tui::TuiTestAccess::set_mission_breakpoint(*tui, 0x80000024);
+    machine->set_telemetry_sink(tui);
+    machine->set_console_sink(tui);
+    tui.reset();
+    machine.reset();
+    expect(true, "machine releases the mission TUI before destroying its breakpoint manager");
 }
 
 void test_inspection_report() {
@@ -1151,8 +1679,35 @@ void test_inspection_report() {
     const std::string expected_a0 = simrv::xlen::kIsXLen64 ? "0x000000000000002a" : "0x0000002a";
     expect(report.contains(expected_a0), "inspection report captures GPR state");
     expect(report.contains("addi a0, zero, 42"), "inspection report captures recent trace");
+    expect(!report.contains("\"mission\""), "non-mission reports omit mission evidence");
     expect(!report.contains("student") && !report.contains("grade"),
            "inspection report contains no identity or grading fields");
+
+    const simrv::tui::MissionEvidence evidence{
+        .lesson_id = "lesson-demo",
+        .completed = true,
+        .step = 2,
+        .step_count = 2,
+        .checkpoint_count = 2,
+        .reached_checkpoints = {"entry", "finish"},
+        .checkpoint_details = {{"entry", "Start here"}, {"finish", "Result reached"}}};
+    const std::string mission_report =
+        simrv::tui::make_inspection_report(machine, 1, trace, &evidence);
+    const auto entry_pos = mission_report.find("\"entry\"");
+    const auto finish_pos = mission_report.find("\"finish\"");
+    expect(mission_report.find("\"id\": \"lesson-demo\"") != std::string::npos &&
+               mission_report.find("\"completed\": true") != std::string::npos &&
+               mission_report.find("\"step\": 2") != std::string::npos &&
+               mission_report.find("\"step_count\": 2") != std::string::npos &&
+               mission_report.find("\"checkpoint_count\": 2") != std::string::npos &&
+               mission_report.find("\"reached_checkpoints\"") != std::string::npos &&
+               mission_report.find("\"message\": \"Start here\"") != std::string::npos &&
+               mission_report.find("\"message\": \"Result reached\"") != std::string::npos &&
+               entry_pos != std::string::npos && finish_pos > entry_pos,
+           "inspection export includes lesson id, completion metadata, and ordered checkpoint "
+           "evidence");
+    expect(!mission_report.contains("student") && !mission_report.contains("grade"),
+           "mission evidence adds no student identity or grading fields");
 
     const auto path = std::filesystem::temp_directory_path() / "simrv-inspection-report-test.json";
     std::error_code error;
@@ -1327,10 +1882,6 @@ void test_category_groups_and_glossary() {
         expect(simrv::tui::get_display_width(row) <= 40,
                "narrow glossary rows do not exceed the modal width");
     }
-    expect(!simrv::tui::should_show_guidance(true, true, 24, 55),
-           "guided text stays hidden when the inspector is too narrow to read it");
-    expect(simrv::tui::should_show_guidance(true, true, 24, 56),
-           "guided text appears at the readable inspector width threshold");
 
     int topic_idx = 0;
     int scroll_offset = 0;
@@ -2061,6 +2612,14 @@ void test_horizontal_scrolling() {
     (void)pane.render_column_row(1, 40, 1, 3, true);
     expect(pane.supports_horizontal_scroll(), "STACK on 40-col pane supports horizontal scroll");
 
+    pane.set_page(simrv::tui::TuiRegPage::BUS);
+    (void)pane.render_column_row(1, 40, 1, 3, true);
+    expect(pane.supports_horizontal_scroll(), "BUS on 40-col pane supports horizontal scroll");
+
+    pane.set_page(simrv::tui::TuiRegPage::TLB);
+    (void)pane.render_column_row(1, 40, 1, 3, true);
+    expect(pane.supports_horizontal_scroll(), "TLB on 40-col pane supports horizontal scroll");
+
     pane.set_page(simrv::tui::TuiRegPage::EXPLAIN);
     (void)pane.render_column_row(1, 40, 1, 3, true);
     expect(pane.supports_horizontal_scroll(), "EXPLAIN on 40-col pane supports horizontal scroll");
@@ -2203,10 +2762,10 @@ void test_bus_inspector_and_tilelink_channels() {
     simrv::tui::InspectorPane pane(machine);
     pane.set_page(simrv::tui::TuiRegPage::BUS);
     pane.set_visible_rows(45);
-    pane.set_student_guide_enabled(false);
 
     const int width = 88;
-    // Row 0 and 1 are tier 1 and tier 2 tab bars; logical_row 16 is row_idx 18
+    // The bus view has two tab rows followed by its logical rows. DMA contention now
+    // occupies logical rows 18-19, before the transaction history.
     const std::string r16 = strip_ansi(pane.render_row(18, width));
     expect(r16.find("TileLink-C Channels") != std::string::npos,
            "row 18 contains TileLink-C channel section header");
@@ -2215,11 +2774,11 @@ void test_bus_inspector_and_tilelink_channels() {
     expect(r17.find("A(Req)") != std::string::npos && r17.find("B(Probe)") != std::string::npos,
            "row 19 contains channel status indicators");
 
-    const std::string r18 = strip_ansi(pane.render_row(20, width));
+    const std::string r18 = strip_ansi(pane.render_row(22, width));
     expect(r18.find("Recent Bus Transactions") != std::string::npos,
            "row 20 contains Recent Bus Transactions header");
 
-    const std::string r19 = strip_ansi(pane.render_row(21, width));
+    const std::string r19 = strip_ansi(pane.render_row(23, width));
     expect(r19.find("[E]") != std::string::npos && r19.find("GrantAck") != std::string::npos,
            "row 21 contains latest recorded transaction (E GrantAck)");
 
@@ -2472,8 +3031,6 @@ void test_tui_differential_rendering_and_throttling() {
     // min_interval) throttle
     TuiTestAccess::set_ui_running(tui, true);
     TuiTestAccess::set_last_draw_time(tui, std::chrono::steady_clock::now());
-    tui.set_target_fps(30);  // 33ms interval
-
     // Immediate render attempt within interval should be throttled
     tui.render(true);
     expect(stats.throttled_frames == 1,
@@ -2510,7 +3067,7 @@ void test_tui_differential_rendering_and_throttling() {
 void test_multi_column_workbench_tools_and_swapping() {
     // 1. ToolPickerModal catalog and accelerator lookup
     const auto& tools = simrv::tui::modals::ToolPickerModal::all_tools();
-    expect(tools.size() == 16, "tool picker provides 16 selectable workbench tools");
+    expect(tools.size() == 15, "tool picker provides 15 selectable workbench tools");
     expect(simrv::tui::modals::ToolPickerModal::find_by_accelerator('o') ==
                simrv::tui::TuiRegPage::LOG,
            "accelerator 'o' maps to LOG");
@@ -2556,14 +3113,14 @@ void test_multi_column_workbench_tools_and_swapping() {
     expect(simrv::tui::modals::ToolPickerModal::find_by_accelerator('y') ==
                simrv::tui::TuiRegPage::DISPLAY,
            "accelerator 'y' maps to DISPLAY");
-    expect(simrv::tui::modals::ToolPickerModal::find_by_accelerator('l') ==
-               simrv::tui::TuiRegPage::LIVE,
-           "accelerator 'l' maps to Live Overview");
+    expect(!simrv::tui::modals::ToolPickerModal::find_by_accelerator('l').has_value(),
+           "accelerator 'l' is no longer reserved for Live Overview");
     expect(!simrv::tui::modals::ToolPickerModal::find_by_accelerator('q').has_value(),
            "accelerator 'q' is not bound to a tool (reserved for exit/close)");
 
     // 2. Tui workbench slot swapping and movement
     simrv::core::Machine machine;
+    machine.runtime_profile.engine = simrv::core::ExecutionEngine::CycleObservable;
     simrv::tui::Tui tui(machine);
     simrv::tui::TuiTestAccess::init_panes(tui, machine);
     simrv::tui::TuiTestAccess::set_cached_term_width(tui, 120);
@@ -2634,7 +3191,7 @@ void test_multi_column_workbench_tools_and_swapping() {
     expect(simrv::tui::modals::ToolPickerModal::tool_index_at_row(19) == 13,
            "row 19 maps to tool 13 (DISPLAY)");
     expect(simrv::tui::modals::ToolPickerModal::tool_index_at_row(20) == 14,
-           "row 20 maps to tool 14 (LIVE)");
+           "row 20 maps to tool 14 (LOG)");
     expect(!simrv::tui::modals::ToolPickerModal::tool_index_at_row(2).has_value(),
            "row 2 is category banner, maps to no tool");
     expect(simrv::tui::modals::ToolPickerModal::row_for_tool_index(0) == 3,
@@ -2656,7 +3213,7 @@ void test_multi_column_workbench_tools_and_swapping() {
     }
     expect(found_modal_control, "modal control hitboxes are detectable for pointer styling");
     // TRACE (tool index 10) is at content row 16; terminal Y: start_y (3) + 1 (border) + 16
-    // (content) + 1 (1-indexed) = 20 after Live Overview adds one row to the modal.
+    // (content) + 1 (1-indexed) = 20.
     auto click_res = modal.handle_click(60, 20, 120, 30);
     expect(click_res == simrv::tui::TuiModal::ModalClickResult::Submit,
            "clicking tool row submits selection");
@@ -2976,8 +3533,9 @@ void test_multi_column_panel_management_and_modal_usability() {
     expect(!tui.is_modal_active(), "help modal closed with 'q'");
 
     // 6. Shift-Tab and Ctrl-Left/Right directional column navigation
+    if (tui.is_modal_active()) tui.close_modal();
     tui.add_workbench_column();
-    expect(slots.size() == 2, "workbench has 2 columns");
+    expect(tui.get_workbench_slots().size() == 2, "workbench has 2 columns");
     simrv::tui::TuiTestAccess::set_focused_slot(tui, 0);
     expect(tui.focused_slot() == 0, "focus starts at slot 0");
 
@@ -2996,15 +3554,15 @@ void test_multi_column_panel_management_and_modal_usability() {
     // Reverse cycling: r vs R (registers), l vs L (tools)
     tui.set_workbench_slot_page(1, simrv::tui::TuiRegPage::GPR);
     tui.cycle_reg_page(true);
-    expect(slots[1].page != simrv::tui::TuiRegPage::GPR,
+    expect(tui.get_workbench_slots()[1].page != simrv::tui::TuiRegPage::GPR,
            "reverse cycle_reg_page moved away from GPR");
     tui.cycle_reg_page(false);
-    expect(slots[1].page == simrv::tui::TuiRegPage::GPR,
+    expect(tui.get_workbench_slots()[1].page == simrv::tui::TuiRegPage::GPR,
            "forward cycle_reg_page moved back to GPR");
 
     tui.cycle_tool_page(true);
-    expect(slots[1].page == simrv::tui::TuiRegPage::CONSOLE ||
-               slots[1].page == simrv::tui::TuiRegPage::EXPLAIN,
+    expect(tui.get_workbench_slots()[1].page == simrv::tui::TuiRegPage::CONSOLE ||
+               tui.get_workbench_slots()[1].page == simrv::tui::TuiRegPage::EXPLAIN,
            "reverse cycle_tool_page moved to Tools group");
 
     // Shift-Tab inside ToolPickerModal
@@ -3029,11 +3587,10 @@ void test_multi_column_panel_management_and_modal_usability() {
     expect(modal.get_settings_draft().active_tab == 0, "Tab in Settings cycled tab forward to 0");
     tui.close_modal();
 
-    // Verify Ctrl-L is removed from navigation handling
+    // Verify Ctrl-L is removed from the key registry.
     const auto layout_before = simrv::tui::TuiTestAccess::layout(tui);
-    const bool handled_ctrl_l =
-        simrv::tui::TuiTestAccess::handle_nav_key(tui, 12, simrv::tui::TuiKey::CtrlL);
-    expect(!handled_ctrl_l, "Ctrl-L is not handled as a navigation command");
+    expect(!simrv::tui::Keybindings::match(simrv::tui::TuiKey::CtrlL).has_value(),
+           "Ctrl-L is not registered as a navigation command");
     expect(simrv::tui::TuiTestAccess::layout(tui) == layout_before, "Ctrl-L did not cycle layout");
 }
 
@@ -3746,12 +4303,433 @@ void test_rc15_features() {
     expect(log_binding.primary_char == 'L', "OpenLogModal is bound to 'L'");
 }
 
+void test_formalized_registry_and_presets() {
+    using namespace simrv::tui;
+    using namespace simrv::tui::modals;
+
+    // 1. Unified kTuiPages invariants & ToolPickerModal synchronization
+    expect(std::size(kTuiPages) == ToolPickerModal::total_tool_count(),
+           "kTuiPages count matches ToolPickerModal tool count");
+    expect(std::string(get_page_name(TuiRegPage::LOG)) == "Simulator Log",
+           "LOG page name is Simulator Log");
+    expect(std::string(get_page_info(TuiRegPage::LOG)->picker_label) == "Simulator Log",
+           "LOG picker label is Simulator Log");
+    for (const auto& info : kTuiPages) {
+        expect(!info.name.empty() && !info.tab_name.empty() && !info.picker_label.empty() &&
+                   !info.description.empty() && info.accelerator != '\0',
+               "every TuiPageInfo entry has complete display and picker metadata");
+        expect(ToolPickerModal::find_by_accelerator(info.accelerator) == info.page,
+               "every TuiPageInfo accelerator resolves in ToolPickerModal");
+        if (!info.mission_slug.empty()) {
+            expect(parse_tui_page_slug(info.mission_slug) == info.page,
+                   "every mission_slug round-trips through parse_tui_page_slug");
+        }
+    }
+    for (size_t i = 0; i < ToolPickerModal::total_tool_count(); ++i) {
+        const int row = ToolPickerModal::row_for_tool_index(i);
+        expect(ToolPickerModal::tool_index_at_row(row) == i,
+               "ToolPickerModal row_for_tool_index and tool_index_at_row round-trip");
+    }
+
+    // 2. Category group cycling and layout_for_column_count policy
+    expect(cycle_category_group(TuiCategoryGroup::Regs, false) == TuiCategoryGroup::Memory &&
+               cycle_category_group(TuiCategoryGroup::Regs, true) == TuiCategoryGroup::Tools,
+           "cycle_category_group wraps forward and reverse across kTuiCategoryGroups");
+    expect(layout_for_column_count(1, false) == TuiLayout::FullLeft &&
+               layout_for_column_count(1, true) == TuiLayout::FullRight &&
+               layout_for_column_count(2) == TuiLayout::Split &&
+               layout_for_column_count(3) == TuiLayout::ThreeColumn &&
+               layout_for_column_count(4) == TuiLayout::FourColumn,
+           "layout_for_column_count maps 1-4 columns to canonical TuiLayout values");
+
+    // 3. Table-driven kLayoutPresets across column counts and IA/CA modes
+    for (const auto& preset : kLayoutPresets) {
+        expect(!preset.name.empty() && !preset.shortcut_label.empty() &&
+                   !preset.modal_summary.empty() && !preset.status_notice.empty(),
+               "every LayoutPresetInfo entry has complete labels and status notice");
+        for (uint8_t cols = 1; cols <= 4; ++cols) {
+            const auto [ia_pages, ia_count] = preset.slots_for(cols, false);
+            const auto [ca_pages, ca_count] = preset.slots_for(cols, true);
+            expect(ia_count == cols && ca_count == cols,
+                   "LayoutPresetInfo::slots_for returns requested column count");
+            for (size_t c = 0; c < ia_count; ++c) {
+                const auto* pinfo = get_page_info(ia_pages[c]);
+                expect(pinfo != nullptr && !pinfo->cycle_accurate_only,
+                       "instruction-accurate preset slots never assign cycle-accurate-only pages");
+            }
+        }
+    }
+
+    // 4. ToolPickerModal mode-aligned filtering (unavailable tools hidden)
+    ToolFilter ia_filter{.cycle_accurate = false, .has_fp = false, .has_vector = false};
+    const auto ia_tools = ToolPickerModal::all_tools(ia_filter);
+    expect(ia_tools.size() == 10, "IA mode without FP/Vector provides exactly 10 tools");
+    expect(!ToolPickerModal::find_by_accelerator('c', ia_filter).has_value(),
+           "CACHE unavailable in IA");
+    expect(!ToolPickerModal::find_by_accelerator('d', ia_filter).has_value(),
+           "BPRED unavailable in IA");
+    expect(!ToolPickerModal::find_by_accelerator('z', ia_filter).has_value(),
+           "HAZARD unavailable in IA");
+    expect(!ToolPickerModal::find_by_accelerator('f', ia_filter).has_value(),
+           "FPR unavailable without FP");
+    expect(!ToolPickerModal::find_by_accelerator('v', ia_filter).has_value(),
+           "VEC unavailable without Vector");
+    expect(ToolPickerModal::find_by_accelerator('o', ia_filter) == TuiRegPage::LOG,
+           "LOG available in IA");
+    expect(ToolPickerModal::content_row_count(ia_filter) == 18,
+           "IA content row count adapts to 18 rows");
+
+    for (size_t i = 0; i < ia_tools.size(); ++i) {
+        const int row = ToolPickerModal::row_for_tool_index(i, ia_filter);
+        expect(ToolPickerModal::tool_index_at_row(row, ia_filter) == i,
+               "filtered ToolPickerModal row mapping round-trips cleanly");
+    }
+}
+
+void test_formalized_scroll_framework() {
+    using namespace simrv::tui::framework;
+
+    // 1. ScrollBounds & ScrollView in Top-down mode
+    ScrollView top_sv(ScrollIndicatorMode::EmbeddedRows, ScrollOrigin::Top);
+    top_sv.set_geometry(100, 20, 80, 40);
+    expect(!top_sv.can_scroll_up(), "top-pinned scrollview at offset 0 cannot scroll up");
+    expect(top_sv.can_scroll_down(), "top-pinned scrollview at offset 0 can scroll down");
+    expect(top_sv.remaining_above() == 0, "remaining above is 0 initially");
+    expect(top_sv.remaining_below() == 80, "remaining below is 80 initially");
+
+    top_sv.scroll(ScrollDirection::Down, ScrollGranularity::Step, 5);
+    expect(top_sv.offset_y() == 5, "scroll Down advances offset_y by 5");
+    expect(top_sv.can_scroll_up(), "after scroll down, can scroll up");
+    expect(top_sv.remaining_above() == 5, "remaining above is 5");
+    expect(top_sv.remaining_below() == 75, "remaining below is 75");
+
+    top_sv.scroll(ScrollDirection::Right, ScrollGranularity::Step, 10);
+    expect(top_sv.offset_x() == 10, "scroll Right advances offset_x by 10");
+    top_sv.scroll(ScrollDirection::Left, ScrollGranularity::Edge);
+    expect(top_sv.offset_x() == 0, "scroll Left with Edge resets offset_x to 0");
+
+    top_sv.scroll_to_bottom();
+    expect(top_sv.offset_y() == 80, "scroll_to_bottom jumps to max_offset_y (80)");
+    expect(!top_sv.can_scroll_down(), "at bottom, cannot scroll down");
+    top_sv.scroll_to_top();
+    expect(top_sv.offset_y() == 0, "scroll_to_top jumps back to 0");
+
+    // Indicator rendering
+    top_sv.scroll_y(10);
+    const auto top_ind = strip_ansi(top_sv.render_top_indicator(60));
+    const auto bot_ind = strip_ansi(top_sv.render_bottom_indicator(60));
+    expect(top_ind.contains("more lines above - scroll up"), "top indicator contains upward hint");
+    expect(bot_ind.contains("more lines below - scroll down"),
+           "bottom indicator contains downward hint");
+
+    // 2. ScrollBounds & ScrollView in Bottom-pinned mode (Log/Terminal scrollback)
+    ScrollView bot_sv(ScrollIndicatorMode::HeaderSummary, ScrollOrigin::Bottom);
+    bot_sv.set_geometry(50, 10);
+    expect(bot_sv.offset_y() == 0, "bottom-pinned view starts at offset 0 (live tail)");
+    expect(bot_sv.can_scroll_up(), "bottom-pinned view can scroll up into history");
+    expect(!bot_sv.can_scroll_down(), "bottom-pinned view cannot scroll below live tail");
+    expect(bot_sv.remaining_above() == 40, "bottom-pinned view has 40 older lines above");
+    expect(bot_sv.remaining_below() == 0, "bottom-pinned view has 0 lines below at tail");
+
+    bot_sv.scroll(ScrollDirection::Up, ScrollGranularity::Step, 4);
+    expect(bot_sv.offset_y() == 4, "scrolling Up into history advances offset_y to 4");
+    expect(bot_sv.remaining_above() == 36, "remaining above decrements to 36");
+    expect(bot_sv.remaining_below() == 4, "remaining below increments to 4");
+    const auto log_summary = bot_sv.header_summary("Log");
+    expect(log_summary.contains("▲ 36 above") && log_summary.contains("▼ 4 below"),
+           "bottom-pinned header summary displays visual above and below correctly");
+
+    // 3. Navigation Alt keys (Alt-w, Alt-s, Alt-u, Alt-d)
+    simrv::core::Machine machine;
+    simrv::tui::Tui tui(machine);
+    simrv::tui::TuiTestAccess::init_panes(tui, machine);
+    tui.set_reg_page(simrv::tui::TuiRegPage::GPR);
+
+    expect(simrv::tui::TuiTestAccess::handle_alt_key(tui, 'w', 0),
+           "Alt-w handled for inspector scroll up");
+    expect(simrv::tui::TuiTestAccess::handle_alt_key(tui, 's', 0),
+           "Alt-s handled for inspector scroll down");
+    expect(simrv::tui::TuiTestAccess::handle_alt_key(tui, 'u', 0),
+           "Alt-u handled for terminal scroll up");
+    expect(simrv::tui::TuiTestAccess::handle_alt_key(tui, 'd', 0),
+           "Alt-d handled for terminal scroll down");
+
+    // 4. Home and End sequences
+    expect(simrv::tui::TuiTestAccess::consume_control_seq(tui, "\033[H"),
+           "Home key sequence accepted");
+    expect(simrv::tui::TuiTestAccess::consume_control_seq(tui, "\033[F"),
+           "End key sequence accepted");
+    expect(simrv::tui::TuiTestAccess::consume_control_seq(tui, "\033[4~"),
+           "Alternate End key accepted");
+
+    // 5. Workbench slot scroll offset tracking
+    tui.scroll_inspector(6);
+    const auto& slots = simrv::tui::TuiTestAccess::workbench_slots(tui);
+    expect(!slots.empty() && slots.front().scroll_offset == 6,
+           "scrolling inspector updates focused workbench slot scroll_offset");
+    tui.reset_scroll_inspector();
+    expect(slots.front().scroll_offset == 0,
+           "resetting inspector scroll updates workbench slot scroll_offset to 0");
+
+    // 6. Multi-column drawer row alignment
+    simrv::tui::InspectorPane test_pane(machine);
+    test_pane.set_log_lines({"l0", "l1", "l2", "l3", "l4", "l5", "l6", "l7", "l8", "l9"});
+    test_pane.set_page(simrv::tui::TuiRegPage::GPR);
+    test_pane.set_paused(true);
+    test_pane.set_visible_rows(39);
+    // In a 39-row multi-column frame:
+    // row 0 is column header
+    // rows 1..32 are content rows (row 32 is bottom indicator)
+    // rows 33..38 are drawer rows (height 6, with row 33 header and row 38 bottom log line)
+    const auto drawer_header = strip_ansi(test_pane.render_column_row(33, 40, 0, 3, true));
+    const auto last_drawer_row = strip_ansi(test_pane.render_column_row(38, 40, 0, 3, true));
+    expect(drawer_header.contains("Log (▲ 5 above)"),
+           "multi-column drawer header starts immediately after content rows");
+    expect(last_drawer_row.contains("l9"),
+           "multi-column drawer bottom row aligns with the last frame row without leakage");
+}
+
+void test_formalized_framework_primitives() {
+    using namespace simrv::tui::framework;
+
+    // 1. Generic DrawerStack
+    DrawerStack<uint8_t> drawers;
+    drawers.add({.id = 1, .name = "DrawerA", .height = 4, .render_row = [](int r, int) {
+                     return "rowA" + std::to_string(r);
+                 }});
+    drawers.add({.id = 2, .name = "DrawerB", .height = 2, .render_row = [](int r, int) {
+                     return "rowB" + std::to_string(r);
+                 }});
+    expect(drawers.height() == 6, "drawer stack total height is 6");
+    expect(drawers.size() == 2, "drawer stack has 2 drawers");
+    expect(drawers.top_drawer_row(20) == 14, "top drawer starts at row 14 of 20");
+
+    auto spanA = drawers.find_span(1, 20);
+    expect(spanA.has_value() && spanA->start_row == 14 && spanA->height == 4,
+           "spanA starts at 14 with height 4");
+    expect(spanA->is_header_row(14) && !spanA->is_header_row(15), "row 14 is header for spanA");
+    expect(spanA->contains(14) && spanA->contains(17) && !spanA->contains(18),
+           "spanA bounds check");
+    expect(spanA->start_terminal_row(4) == 18, "spanA maps to terminal row 18 with offset 4");
+
+    auto spanB = drawers.find_span(2, 20);
+    expect(spanB.has_value() && spanB->start_row == 18 && spanB->height == 2,
+           "spanB starts at 18 with height 2");
+
+    expect(drawers.render_row(14, 20, 40) == "rowA0", "drawer row 14 renders rowA0");
+    expect(drawers.render_row(17, 20, 40) == "rowA3", "drawer row 17 renders rowA3");
+    expect(drawers.render_row(18, 20, 40) == "rowB0", "drawer row 18 renders rowB0");
+    expect(drawers.render_row(19, 20, 40) == "rowB1", "drawer row 19 renders rowB1");
+    expect(!drawers.render_row(13, 20, 40).has_value(), "row outside drawers returns nullopt");
+    expect(!drawers.render_row(20, 20, 40).has_value(), "row >= total returns nullopt");
+
+    // 2. TabBar component
+    TabBar tabs;
+    tabs.add_item({.id = 10, .label = "General", .shortcut = '1'});
+    tabs.add_item({.id = 20, .label = "Extensions", .shortcut = '2'});
+    tabs.add_item({.id = 30, .label = "Advanced", .shortcut = '3'});
+    expect(tabs.size() == 3, "tab bar has 3 items");
+    tabs.set_active_index(0);
+
+    const auto rendered_tabs = tabs.render(60, Density::Comfortable, HorizontalAlign::Center);
+    expect(tabs.spans().size() == 3, "rendering generated 3 tab spans");
+    const auto& s0 = tabs.spans()[0];
+    const auto& s1 = tabs.spans()[1];
+    const auto& s2 = tabs.spans()[2];
+    expect(s0.start_col < s1.start_col && s1.start_col < s2.start_col,
+           "tabs ordered left to right");
+
+    expect(tabs.hit_test(s0.start_col) == 0, "hit-testing first column of tab 0 returns index 0");
+    expect(tabs.hit_test(s0.start_col + s0.width - 1) == 0,
+           "hit-testing last column of tab 0 returns 0");
+    expect(tabs.hit_test_id(s1.start_col) == 20, "hit-test by id returns id 20 for tab 1");
+    expect(tabs.hit_test(s2.start_col) == 2, "hit-test tab 2 returns index 2");
+    if (s0.start_col > 0) {
+        expect(!tabs.hit_test(s0.start_col - 1).has_value(), "column before tabs returns nullopt");
+    }
+
+    // 3. ActionFooter component
+    ActionFooter footer;
+    footer.add_action({.key_hint = "[Enter]", .label = "Apply", .action_id = 101});
+    footer.add_action({.key_hint = "[Esc]", .label = "Cancel", .action_id = 102});
+    expect(footer.size() == 2, "footer has 2 actions");
+
+    const auto rendered_footer = footer.render(60, Density::Comfortable, HorizontalAlign::Center);
+    expect(footer.spans().size() == 2, "rendering generated 2 action spans");
+    const auto& a0 = footer.spans()[0];
+    const auto& a1 = footer.spans()[1];
+    expect(footer.hit_test(a0.start_col) == 101, "clicking first action returns action_id 101");
+    expect(footer.hit_test(a1.start_col) == 102, "clicking second action returns action_id 102");
+    expect(!footer.hit_test(0).has_value(), "clicking leading space returns nullopt");
+
+    // 4. Workbench component
+    struct TestSlot {
+        int id = 0;
+        int scroll = 0;
+    };
+    Workbench<TestSlot, 4> wb;
+    expect(wb.size() == 1, "workbench starts with 1 slot");
+    expect(wb.capacity() == 4, "workbench capacity is 4");
+    expect(wb.focused_index() == 0, "focused index starts at 0");
+    expect(!wb.can_close(), "cannot close single slot");
+    expect(wb.can_add(), "can add when size < 4");
+
+    expect(wb.add({.id = 10, .scroll = 0}), "adding slot 1 succeeds");
+    expect(wb.size() == 2, "size is now 2");
+    expect(wb.focused_index() == 1, "focus moved to added slot");
+    expect(wb.can_close(), "can close when size > 1");
+
+    expect(wb.add({.id = 20, .scroll = 0}), "adding slot 2 succeeds");
+    expect(wb.add({.id = 30, .scroll = 0}), "adding slot 3 succeeds");
+    expect(wb.size() == 4, "workbench has 4 slots");
+    expect(!wb.can_add(), "cannot add past capacity 4");
+    expect(!wb.add({.id = 40, .scroll = 0}), "adding past capacity returns false");
+
+    // Focus navigation
+    expect(wb.focused_index() == 3, "focus is at 3");
+    wb.focus_next();
+    expect(wb.focused_index() == 0, "focus wraps to 0");
+    wb.focus_prev();
+    expect(wb.focused_index() == 3, "focus wraps back to 3");
+
+    // Swap and move
+    wb.focus(1);
+    expect(wb[1].id == 10, "slot 1 has id 10");
+    expect(wb[2].id == 20, "slot 2 has id 20");
+    expect(wb.move_right(1), "move_right(1) succeeds");
+    expect(wb[1].id == 20 && wb[2].id == 10, "slots 1 and 2 swapped");
+    expect(wb.focused_index() == 2, "focused index tracked moved slot to 2");
+
+    // Close
+    expect(wb.close(0), "close slot 0 succeeds");
+    expect(wb.size() == 3, "size is now 3");
+    expect(wb.focused_index() == 1, "focused index adjusted down after close");
+
+    // 5. PointerRouter component
+    PointerRouter router;
+    int background_clicks = 0;
+    int modal_clicks = 0;
+
+    router.add_target(ScreenRect{.origin = {.x = 0, .y = 0}, .size = {.width = 80, .height = 24}},
+                      0, "background", [&](const PointerEvent&) {
+                          ++background_clicks;
+                          return true;
+                      });
+
+    router.add_target(ScreenRect{.origin = {.x = 20, .y = 5}, .size = {.width = 40, .height = 10}},
+                      10, "modal", [&](const PointerEvent&) {
+                          ++modal_clicks;
+                          return true;
+                      });
+
+    expect(router.target_count() == 2, "router has 2 targets");
+
+    // Click outside modal (at 5, 2)
+    expect(router.dispatch(PointerEvent{.pos = {.x = 5, .y = 2}}),
+           "event dispatched outside modal");
+    expect(background_clicks == 1 && modal_clicks == 0, "only background received click");
+
+    // Click inside modal (at 25, 7)
+    expect(router.dispatch(PointerEvent{.pos = {.x = 25, .y = 7}}),
+           "event dispatched inside modal");
+    expect(background_clicks == 1 && modal_clicks == 1,
+           "modal with higher z-order intercepted click");
+
+    // Click completely out of screen bounds
+    expect(!router.dispatch(PointerEvent{.pos = {.x = 90, .y = 30}}),
+           "out-of-bounds event rejected");
+}
+
+class TestModal : public simrv::tui::framework::IModal {
+   public:
+    [[nodiscard]] auto title() const -> std::string override { return "Test Custom Modal"; }
+    void render_content(std::vector<std::string>& content_rows, int /*width*/,
+                        int /*height*/) override {
+        content_rows.push_back("Custom Modal Body Content");
+        content_rows.push_back("[Enter] Submit  [Esc] Close");
+    }
+    auto handle_key(uint8_t byte, simrv::tui::TuiKey key)
+        -> simrv::tui::framework::ModalAction override {
+        if (byte == 'q' || key == simrv::tui::TuiKey::Esc)
+            return simrv::tui::framework::ModalAction::Close;
+        if (key == simrv::tui::TuiKey::Enter) return simrv::tui::framework::ModalAction::Submit;
+        return simrv::tui::framework::ModalAction::Continue;
+    }
+    auto handle_click(simrv::tui::framework::ScreenCoord local_pt)
+        -> simrv::tui::framework::ModalAction override {
+        if (local_pt.y == 2) return simrv::tui::framework::ModalAction::Submit;
+        return simrv::tui::framework::ModalAction::Continue;
+    }
+};
+
+void test_modal_host_and_custom_dialog() {
+    using namespace simrv::tui;
+    using namespace simrv::tui::framework;
+
+    // 1. Pure ModalHost testing
+    ModalHost host;
+    expect(!host.is_active(), "host is initially inactive");
+    expect(host.modal() == nullptr, "host has no modal");
+
+    host.open(std::make_unique<TestModal>());
+    expect(host.is_active(), "host is active after open");
+    expect(host.modal() != nullptr, "host has modal");
+    expect(host.modal()->title() == "Test Custom Modal", "title matches");
+
+    // Key handling: Continue
+    auto act = host.handle_key('a', TuiKey::None);
+    expect(act == ModalAction::Continue, "regular key continues");
+    expect(host.is_active(), "host remains active");
+
+    // Click handling: Submit
+    auto click_act = host.handle_click(ScreenCoord{.x = 5, .y = 2});
+    expect(click_act == ModalAction::Submit, "clicking row 2 submits");
+    expect(host.is_active(), "host remains active on submit");
+
+    // Key handling: Close
+    act = host.handle_key('q', TuiKey::None);
+    expect(act == ModalAction::Close, "q closes modal");
+    expect(!host.is_active(), "host is closed after Close action");
+
+    // 2. Integration with TuiModal
+    simrv::core::Machine machine;
+    TuiModal modal(machine);
+    expect(!modal.is_active(), "TuiModal starts inactive");
+
+    modal.open_custom_modal(std::make_unique<TestModal>());
+    expect(modal.is_active(), "TuiModal is active with custom modal");
+    expect(modal.active_modal_impl() != nullptr, "active_modal_impl is non-null");
+
+    std::vector<std::string> lines(30, std::string(80, ' '));
+    modal.render_overlay(lines, 80, 24);
+
+    bool found_title = false;
+    bool found_body = false;
+    for (const auto& line : lines) {
+        if (line.find("Test Custom Modal") != std::string::npos) found_title = true;
+        if (line.find("Custom Modal Body Content") != std::string::npos) found_body = true;
+    }
+    expect(found_title, "custom modal title was rendered in overlay");
+    expect(found_body, "custom modal body content was rendered in overlay");
+
+    // Click inside modal box (y=12 is inside the centered box)
+    auto click_res = modal.handle_click(40, 12, 80, 24);
+    expect(click_res == TuiModal::ModalClickResult::Handled,
+           "click inside custom modal was handled");
+
+    // Click outside box closes modal
+    click_res = modal.handle_click(1, 1, 80, 24);
+    expect(click_res == TuiModal::ModalClickResult::Closed, "click outside custom modal closed it");
+    expect(!modal.is_active(), "modal is inactive after outside click");
+}
+
 }  // namespace
 
 int main() {
     (void)setenv("SIMRV_TUI_PREFERENCES", "off", 1);
     test_uart_search_ctrl_f_and_escape_cancel();
     test_tui_preferences_round_trip();
+    test_density_resolution();
     test_terminal_controls();
     test_terminal_scrollback_and_selection();
     test_utf8_and_theme_helpers();
@@ -3762,12 +4740,14 @@ int main() {
     test_classroom_cli_defaults();
     test_load_modal_path_completion();
     test_control_flow_calls_mission();
+    test_drawer_stack_layout();
     test_tui_running_state_synchronization();
-    test_live_overview_snapshots_and_hart_rows();
+    test_machine_releases_tui_sinks_before_runtime();
     test_inspection_report();
     test_help_uses_canonical_registry();
     test_category_groups_and_glossary();
     test_sysconfig_modal_modes();
+    test_cpu_config_reload_confirmation_and_slow_mode();
     test_input_routing();
     test_responsive_layout();
     test_frame_composition();
@@ -3796,6 +4776,10 @@ int main() {
     test_sixel_display_resolution_adaptation_and_size_warning();
     test_memory_modal_and_hart_modal();
     test_rc15_features();
+    test_formalized_registry_and_presets();
+    test_formalized_scroll_framework();
+    test_formalized_framework_primitives();
+    test_modal_host_and_custom_dialog();
     if (failures != 0) return EXIT_FAILURE;
     std::cout << "TUI framework tests passed\n";
     return EXIT_SUCCESS;

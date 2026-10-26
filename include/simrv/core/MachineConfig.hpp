@@ -8,6 +8,7 @@
 #include <cstdint>
 #include <expected>
 #include <filesystem>
+#include <format>
 #include <limits>
 #include <optional>
 #include <string>
@@ -61,12 +62,12 @@ struct ExecutionConfig {
     bool realtime_pacing = false;
     uint64_t cpu_clock_hz = simrv::core::timing::kCpuClockHz;
     uint64_t timebase_hz = simrv::core::timing::kTimebaseHz;
+    simrv::isa::ArchitectureProfile profile = simrv::isa::kDefaultArchitectureProfile;
 };
 
 struct TuiConfig {
     bool enabled = false;
     bool high_contrast = false;
-    bool class_mode = false;
     /// Optional external classroom mission path. Missions are local guidance only.
     std::string mission = {};
     std::string inspection_output = {};
@@ -116,6 +117,11 @@ struct FilesConfig {
     std::string dvtree_path;
     std::string config_path;
     std::string cfu_plugin_path;
+    std::string uefi_code_path;
+    std::string uefi_vars_path;
+    bool uefi_enabled = false;
+    bool auto_fdt = false;
+    std::string bootargs;
 };
 
 struct NetworkConfig {
@@ -145,6 +151,8 @@ struct MachineConfig {
     NetworkConfig network{};
     FramebufferConfig framebuffer{};
     std::optional<simrv::pipeline::CpuModelPreset> cpu_model_preset{};
+    /// Runtime-only CPU model override staged by the TUI for the next simulator restart.
+    std::optional<simrv::pipeline::CpuModelConfig> cpu_model_config_override{};
     std::optional<simrv::pipeline::BranchPredictorType> branch_predictor_type{};
     uint32_t bht_entries = 0;
     uint32_t btb_entries = 0;
@@ -154,6 +162,11 @@ struct MachineConfig {
     SoCConfig soc = SoCConfig::virt_pcie();
 
     [[nodiscard]] auto validate() const -> std::expected<void, std::string> {
+        if (cpu_model_config_override) {
+            if (auto model_result = cpu_model_config_override->validate(); !model_result)
+                return std::unexpected(
+                    std::format("invalid staged CPU model: {}", model_result.error()));
+        }
         if (memory.dram_size == 0 || (memory.dram_size & (memory.dram_size - 1U)) != 0) {
             return std::unexpected("DRAM size must be a non-zero power of two");
         }

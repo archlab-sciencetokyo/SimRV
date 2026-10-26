@@ -3,51 +3,102 @@
 version = "1"
 id = "control-flow-calls"
 program = "control-flow-calls.elf"
+description = "Trace one branch, one loop, and a call to add_pair."
+goal = "Use the PC, registers, and stack to explain how a function call changes and restores machine state."
+speed_hz = "30"
 
 [step]
-label = "mission_branch"
-title = "Conditional branch"
-prompt = "Predict whether bne changes the PC, then inspect a0."
-why = "A branch chooses the next instruction from register values and an immediate."
+id = "branch-observation"
+title = "Follow the branch"
+prompt = "In Trace, find bne. Compare its target with the PC after the branch runs."
+learn = "Relate a branch decision to the next program counter."
+hint = "At the branch, a0 is 2 and zero is 0."
+why = "A conditional branch selects either its target or the next sequential instruction."
 view = "explain"
+panels = "explain,registers,trace"
 glossary = "0"
 
-[step]
+[checkpoint]
 label = "mission_loop"
-title = "Loop control"
-prompt = "Follow one loop iteration in Trace; find the back edge."
-why = "A loop is repeated control flow, not a special ISA instruction."
-view = "trace"
-glossary = "0"
+after_step = 1
+message = "The branch was taken; execution is now at the loop body."
 
 [step]
+id = "loop-observation"
+title = "Trace one loop iteration"
+prompt = "Follow the decrement and branch in Trace. Compare the back-edge target and watch a0 change."
+learn = "Connect a backward branch target to repeated loop execution."
+hint = "The branch at mission_loop_backedge returns to the loop body while a0 is nonzero."
+why = "A loop is ordinary instructions whose branch returns execution to an earlier address."
+view = "trace"
+panels = "trace,registers"
+glossary = "0"
+
+[checkpoint]
+label = "mission_loop_backedge"
+after_step = 2
+message = "The branch returns to the loop body because a0 is nonzero."
+
+[step]
+id = "call-setup"
+title = "Inspect the call setup"
+prompt = "Before jal, verify a0=20 and a1=22 in Registers."
+learn = "Identify how caller arguments are passed in ABI registers before a call."
+hint = "The caller places the two arguments in a0 and a1."
+why = "The RISC-V calling convention assigns shared roles to argument, return-address, and stack registers."
+view = "registers"
+panels = "registers,stack,trace"
+glossary = "0"
+
+[checkpoint]
 label = "mission_before_call"
-title = "Call setup"
-prompt = "Inspect a0, a1, ra, and sp before jal enters add_pair."
-why = "The ABI gives argument, return-address, and stack registers shared meanings."
-view = "registers"
-glossary = "0"
+after_step = 3
+message = "The caller has loaded 20 and 22; the next instruction enters add_pair."
 
 [step]
-label = "mission_in_callee"
-title = "Callee frame"
-prompt = "Open Stack and observe sp move before ra is saved."
-why = "A callee protects the caller's return path in its stack frame."
+id = "callee-frame"
+title = "Inspect the callee frame"
+prompt = "Inspect the new sp and saved ra in Stack after the add_pair prologue."
+learn = "Observe how a function prologue allocates stack space and saves the return address."
+hint = "The frame size is one XLEN register: 8 bytes on RV64 and 4 bytes on RV32."
+why = "The callee saves its return address before using the stack frame, then restores it before ret."
 view = "stack"
+panels = "stack,registers,trace"
 glossary = "0"
 
+[checkpoint]
+label = "mission_frame_ready"
+after_step = 4
+message = "The callee saved ra on the stack and reserved its frame."
+
 [step]
-label = "mission_after_call"
-title = "Return"
-prompt = "Use Trace to connect jalr with the instruction after the call."
-why = "ret is jalr through ra: it restores the caller's control flow."
+id = "return-flow"
+title = "Follow the return"
+prompt = "Follow ret in Trace and find mission_after_call. Compare the return PC with ra."
+learn = "Trace how ret restores control to the caller using the return address register."
+hint = "ret jumps to the address held in ra."
+why = "ret is an alias for jalr through ra, which resumes the caller after the call instruction."
 view = "trace"
+panels = "trace,registers,stack"
 glossary = "0"
 
+[checkpoint]
+label = "mission_after_call"
+after_step = 5
+message = "The function returned; inspect a0 and the restored sp."
+
 [step]
-label = "mission_done"
-title = "ABI result"
-prompt = "Inspect a0 and sp; explain why the result and stack are stable."
-why = "Returning values in a0 while restoring sp makes calls compose safely."
+id = "result-review"
+title = "Check the result"
+prompt = "Verify a0=42 and compare sp with its value before the call."
+learn = "Verify that the return value is in a0 and the caller stack pointer is restored."
+hint = "add_pair adds 20 and 22, returns the sum in a0, and restores its stack frame."
+why = "Returning the result in a0 and restoring sp lets the caller continue with valid state."
 view = "registers"
+panels = "registers,trace,stack"
 glossary = "0"
+
+[checkpoint]
+label = "mission_done"
+after_step = 6
+message = "The result is in a0. Compare sp with its value before the call."

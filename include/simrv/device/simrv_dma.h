@@ -12,14 +12,16 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "simrv/core/PlatformMap.h"
+
 #ifdef __cplusplus
 extern "C" {
 #endif
 
 /* Default physical memory map base address and IRQ */
-#define SIMRV_DMA_BASE_ADDR 0x10009000ULL
-#define SIMRV_DMA_SIZE 0x1000ULL
-#define SIMRV_DMA_IRQ 12U
+#define SIMRV_DMA_BASE_ADDR SIMRV_PLATFORM_DMA_BASE
+#define SIMRV_DMA_SIZE SIMRV_PLATFORM_DMA_SIZE
+#define SIMRV_DMA_IRQ SIMRV_PLATFORM_DMA_IRQ
 
 /* Register Offsets (32-bit aligned) */
 #define SIMRV_DMA_REG_CONTROL 0x00U

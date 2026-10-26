@@ -15,11 +15,93 @@
 #include "simrv/debug/SymbolTable.hpp"
 #include "simrv/memory/MemorySubsystem.hpp"
 #include "simrv/memory/RamView.hpp"
+#include "simrv/tui/TuiModal.hpp"
 #include "simrv/tui/TuiTheme.hpp"
 #include "simrv/tui/modals/ModalComponents.hpp"
 #include "simrv/tui/panels/InspectorPane.hpp"
 
 namespace simrv::tui::modals {
+
+void MemoryModal::render_content(std::vector<std::string>& content_rows, int width, int height) {
+    auto add_row = [&](std::string s) { content_rows.push_back(std::move(s)); };
+    if (machine_) render(content_rows, add_row, input_, *machine_, nullptr, height, width);
+}
+
+void MemoryModal::handle_wheel(int delta) {
+    if (machine_) move_cursor(0, delta, *machine_);
+}
+
+auto MemoryModal::handle_key(uint8_t byte, TuiKey key) -> framework::ModalAction {
+    auto in_mode = input_mode();
+    if (in_mode == InputMode::GotoAddress || in_mode == InputMode::EditByte) {
+        if (byte == 27 || key == simrv::tui::TuiKey::Esc) {
+            set_input_mode(InputMode::Normal);
+            input_.clear();
+            return framework::ModalAction::Continue;
+        }
+        if (key == simrv::tui::TuiKey::Enter || key == simrv::tui::TuiKey::Newline) {
+            return framework::ModalAction::Submit;
+        }
+        if (byte == 8 || byte == 127 || key == simrv::tui::TuiKey::Backspace) {
+            if (!input_.empty()) input_.pop_back();
+            return framework::ModalAction::Continue;
+        }
+        if (byte >= 32 && byte <= 126) {
+            input_.push_back(static_cast<char>(byte));
+            return framework::ModalAction::Continue;
+        }
+        return framework::ModalAction::Continue;
+    }
+
+    if (byte == 27 || key == simrv::tui::TuiKey::Esc || byte == 'q' || byte == 'Q') {
+        return framework::ModalAction::Close;
+    }
+    if (byte == 'v' || byte == 'V') {
+        toggle_addressing_mode();
+        return framework::ModalAction::Continue;
+    }
+    if (byte == 'g' || byte == 'G') {
+        set_input_mode(InputMode::GotoAddress);
+        input_.clear();
+        return framework::ModalAction::Continue;
+    }
+    if (byte == 'e' || byte == 'E') {
+        set_input_mode(InputMode::EditByte);
+        input_.clear();
+        return framework::ModalAction::Continue;
+    }
+    if (machine_) {
+        if (byte == 'h' || byte == 'H') {
+            move_cursor(-1, 0, *machine_);
+            return framework::ModalAction::Continue;
+        }
+        if (byte == 'l' || byte == 'L') {
+            move_cursor(1, 0, *machine_);
+            return framework::ModalAction::Continue;
+        }
+        if (byte == 'j' || byte == 'J') {
+            move_cursor(0, 1, *machine_);
+            return framework::ModalAction::Continue;
+        }
+        if (byte == 'k' || byte == 'K') {
+            move_cursor(0, -1, *machine_);
+            return framework::ModalAction::Continue;
+        }
+    }
+    return framework::ModalAction::Continue;
+}
+
+auto MemoryModal::handle_control_click(int /*content_row*/, size_t action_index)
+    -> framework::ModalAction {
+    return action_index == 0 ? framework::ModalAction::Submit : framework::ModalAction::Close;
+}
+
+auto MemoryModal::handle_click(framework::ScreenCoord local_pt) -> framework::ModalAction {
+    int content_row = local_pt.y - 1;
+    unsigned int xlen = machine_ ? machine_->primary_hart().state().regs.xlen : 64;
+    handle_cell_click(content_row, local_pt.x, xlen);
+    return framework::ModalAction::Continue;
+}
 
 namespace {
 

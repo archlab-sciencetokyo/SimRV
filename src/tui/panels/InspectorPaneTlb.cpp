@@ -108,7 +108,8 @@ auto InspectorPane::render_tlb_stats(const simrv::core::CPU& cpu, int logical_ro
         return section_line("Virtual Memory & TLB Inspector", width);
     }
     if (logical_row == 1) {
-        if (width < 54) {
+        if (framework::active_render_context().density == framework::Density::Compact ||
+            width < 54) {
             return format_to_width(
                 std::format(
                     "  {}SATP: {}{:<5}\033[0m │ {}ASID: {}{:<2}\033[0m │ {}PPN: {}0x{:x}\033[0m",
@@ -127,7 +128,8 @@ auto InspectorPane::render_tlb_stats(const simrv::core::CPU& cpu, int logical_ro
     }
 
     if (active_entries.empty()) {
-        if (width < 56) {
+        if (framework::active_render_context().density == framework::Density::Compact ||
+            width < 56) {
             if (logical_row == 3) {
                 return format_to_width(
                     std::format("  {}<No active TLB entries cached>\033[0m", kThemeMuted), width);
@@ -153,7 +155,8 @@ auto InspectorPane::render_tlb_stats(const simrv::core::CPU& cpu, int logical_ro
         const auto& e = active_entries[static_cast<size_t>(entry_idx)];
         auto v_trunc = static_cast<uint32_t>(e.vaddr & 0xFFFFFFFFULL);
         auto p_trunc = static_cast<uint32_t>(e.paddr & 0xFFFFFFFFULL);
-        if (width < 50) {
+        if (framework::active_render_context().density == framework::Density::Compact ||
+            width < 50) {
             return format_to_width(std::format("  \033[1m{:<6}\033[0m{:08x}➔{:08x} {}[{}]\033[0m",
                                                e.type, v_trunc, p_trunc, kThemePink, e.priv_str),
                                    width);

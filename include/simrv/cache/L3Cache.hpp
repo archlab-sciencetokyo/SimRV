@@ -24,13 +24,11 @@ class L3Cache : public BaseCache<16384, 32, 16> {
         const simrv::xlen::Address tag = get_tag(line_base);
         last_accessed_set_ = set_idx;
 
-        const auto way_opt = find_way(set_idx, tag);
-        if (way_opt.has_value()) {
-            const uint32_t w = *way_opt;
-            auto& cache_line = line(set_idx, w);
-            out_state = cache_line.state;
-            std::memcpy(out_data.data(), cache_line.data.data(), kLineBytes);
-            cache_line.last_used = ++access_tick_;
+        const auto [w, cache_line] = find_matching_line(set_idx, tag);
+        if (cache_line != nullptr) {
+            out_state = cache_line->state;
+            std::memcpy(out_data.data(), cache_line->data.data(), kLineBytes);
+            cache_line->last_used = ++access_tick_;
             ++hits_;
             last_access_was_hit_ = true;
             last_hit_way_ = w;
