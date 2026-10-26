@@ -64,8 +64,8 @@ class LogModal : public framework::IModal {
                        const LogBuffer& log_buffer, int term_height, int term_width);
 
    private:
-    TuiModal* host_;
-    LogBuffer* log_buffer_;
+    [[maybe_unused]] TuiModal* host_;
+    [[maybe_unused]] LogBuffer* log_buffer_;
     static inline int scroll_offset_y_{0};
     static inline bool follow_tail_{true};
     static inline std::optional<simrv::log::Level> min_level_{std::nullopt};

@@ -13,6 +13,9 @@ endif()
 if(DEFINED CMAKE_CXX_FLAGS AND NOT "${CMAKE_CXX_FLAGS}" STREQUAL "")
   list(APPEND extra_consumer_args "-DCMAKE_CXX_FLAGS=${CMAKE_CXX_FLAGS}")
 endif()
+if(DEFINED CMAKE_EXE_LINKER_FLAGS AND NOT "${CMAKE_EXE_LINKER_FLAGS}" STREQUAL "")
+  list(APPEND extra_consumer_args "-DCMAKE_EXE_LINKER_FLAGS=${CMAKE_EXE_LINKER_FLAGS}")
+endif()
 
 execute_process(
   COMMAND "${CMAKE_COMMAND}" -E env CCACHE_DISABLE=1 "${CMAKE_COMMAND}" -S "${consumer_source}" -B

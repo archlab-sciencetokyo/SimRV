@@ -311,6 +311,8 @@ class E2ETier1FeatureTests(unittest.TestCase):
             cmd = ["--cli", "--baremetal", "-m", str(self.hello64), "-D", str(dummy_disk), "--steps", "100"]
             if self.dtb.is_file():
                 cmd.extend(["-f", str(self.dtb)])
+            else:
+                cmd.append("--auto-fdt")
             res = run_simrv(self.simrv64, cmd)
             self.assertEqual(res.returncode, 0, res.stderr)
 
@@ -594,7 +596,7 @@ class E2ETier1FeatureTests(unittest.TestCase):
     def test_f4_2_tlb_set_alignment(self) -> None:
         """Verify TLB and MMU operations in modern platform tests."""
         ctest_res = subprocess.run(
-            ["ctest", "--test-dir", str(ROOT / "build/rv64-release"), "-R", "^core-semantics$", "--output-on-failure"],
+            ["ctest", "--test-dir", str(get_active_build_dir()), "-R", "^core-semantics$", "--output-on-failure"],
             capture_output=True,
             text=True,
             check=False,
@@ -698,13 +700,19 @@ class E2ETier1FeatureTests(unittest.TestCase):
     # -------------------------------------------------------------------------
     def test_f5_1_rv64_gate_test_discovery(self) -> None:
         """Verify gate tests discovered in release preset."""
-        res = subprocess.run(["ctest", "--test-dir", str(get_active_build_dir()), "-N", "-L", "gate"], capture_output=True, text=True, check=False)
+        build_dir = get_active_build_dir(64)
+        if not (build_dir / "CTestTestfile.cmake").is_file():
+            self.skipTest(f"RV64 build directory {build_dir} not available")
+        res = subprocess.run(["ctest", "--test-dir", str(build_dir), "-N", "-L", "gate"], capture_output=True, text=True, check=False)
         self.assertEqual(res.returncode, 0, res.stderr)
         self.assertIn("Total Tests: 52", res.stdout)
 
     def test_f5_1_rv64_gate_execution(self) -> None:
         """Verify sample gate tests pass."""
-        res = subprocess.run(["ctest", "--test-dir", str(get_active_build_dir()), "-R", "^(cli-doctor|cli-isa-info)$"], capture_output=True, text=True, check=False)
+        build_dir = get_active_build_dir(64)
+        if not (build_dir / "CTestTestfile.cmake").is_file():
+            self.skipTest(f"RV64 build directory {build_dir} not available")
+        res = subprocess.run(["ctest", "--test-dir", str(build_dir), "-R", "^(cli-doctor|cli-isa-info)$"], capture_output=True, text=True, check=False)
         self.assertEqual(res.returncode, 0, res.stderr)
 
     def test_f5_1_rv64_cli_options(self) -> None:
@@ -729,13 +737,19 @@ class E2ETier1FeatureTests(unittest.TestCase):
     # -------------------------------------------------------------------------
     def test_f5_2_rv32_gate_test_discovery(self) -> None:
         """Verify 49 gate tests discovered in rv32-release."""
-        res = subprocess.run(["ctest", "--test-dir", str(ROOT / "build/rv32-release"), "-N", "-L", "gate"], capture_output=True, text=True, check=False)
+        build_dir = get_active_build_dir(32)
+        if not (build_dir / "CTestTestfile.cmake").is_file():
+            self.skipTest(f"RV32 build directory {build_dir} not available")
+        res = subprocess.run(["ctest", "--test-dir", str(build_dir), "-N", "-L", "gate"], capture_output=True, text=True, check=False)
         self.assertEqual(res.returncode, 0, res.stderr)
         self.assertIn("Total Tests: 52", res.stdout)
 
     def test_f5_2_rv32_gate_execution(self) -> None:
         """Verify sample RV32 gate tests pass."""
-        res = subprocess.run(["ctest", "--test-dir", str(ROOT / "build/rv32-release"), "-R", "^(cli-doctor|cli-isa-info)$"], capture_output=True, text=True, check=False)
+        build_dir = get_active_build_dir(32)
+        if not (build_dir / "CTestTestfile.cmake").is_file():
+            self.skipTest(f"RV32 build directory {build_dir} not available")
+        res = subprocess.run(["ctest", "--test-dir", str(build_dir), "-R", "^(cli-doctor|cli-isa-info)$"], capture_output=True, text=True, check=False)
         self.assertEqual(res.returncode, 0, res.stderr)
 
     def test_f5_2_rv32_native_binary(self) -> None:

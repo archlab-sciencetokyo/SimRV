@@ -43,8 +43,8 @@ class MissionObjectiveModal : public framework::IModal {
 
    private:
     uint8_t owned_hint_level_ = 0;
-    TuiModal* host_;
-    simrv::core::Machine* machine_;
+    [[maybe_unused]] TuiModal* host_;
+    [[maybe_unused]] simrv::core::Machine* machine_;
     const MissionProgress* mission_;
     uint8_t& hint_level_;
 };

@@ -96,6 +96,8 @@ class E2ETier3CombinationTests(unittest.TestCase):
             ]
             if self.dtb.is_file():
                 cmd.extend(["-f", str(self.dtb)])
+            else:
+                cmd.append("--auto-fdt")
             res = run_simrv(self.simrv64, cmd)
             self.assertEqual(res.returncode, 0, res.stderr)
             self.assertIn("instruction-observable", res.stdout)

@@ -668,13 +668,20 @@ if(BUILD_TESTING)
     benchmark PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR} LABELS
                          "benchmark;perf" SKIP_RETURN_CODE 2)
 
+  set(_consumer_cxx_flags "${CMAKE_CXX_FLAGS}")
+  set(_consumer_exe_linker_flags "${CMAKE_EXE_LINKER_FLAGS}")
+  if(_simrv_sanitizer_flags)
+    string(APPEND _consumer_cxx_flags " -fsanitize=${_simrv_sanitizer_flags}")
+    string(APPEND _consumer_exe_linker_flags " -fsanitize=${_simrv_sanitizer_flags}")
+  endif()
   add_test(
     NAME package-install-consumer
     COMMAND
       ${CMAKE_COMMAND} -D SIMRV_SOURCE_DIR=${CMAKE_SOURCE_DIR} -D
       SIMRV_BINARY_DIR=${CMAKE_BINARY_DIR}
       -D "CMAKE_CXX_COMPILER=${CMAKE_CXX_COMPILER}"
-      -D "CMAKE_CXX_FLAGS=${CMAKE_CXX_FLAGS}" -P
+      -D "CMAKE_CXX_FLAGS=${_consumer_cxx_flags}"
+      -D "CMAKE_EXE_LINKER_FLAGS=${_consumer_exe_linker_flags}" -P
       ${CMAKE_SOURCE_DIR}/cmake/TestPackageConsumer.cmake)
   set_tests_properties(package-install-consumer
                        PROPERTIES LABELS "gate;regress;package;sdk")

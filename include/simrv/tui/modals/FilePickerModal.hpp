@@ -31,7 +31,7 @@ class FilePickerModal : public framework::IModal {
     auto handle_click(framework::ScreenCoord local_pt) -> framework::ModalAction override;
 
    private:
-    TuiModal* host_;
+    [[maybe_unused]] TuiModal* host_;
 };
 
 }  // namespace simrv::tui::modals

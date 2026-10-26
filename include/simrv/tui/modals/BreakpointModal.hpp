@@ -66,9 +66,9 @@ class BreakpointModal : public framework::IModal {
    private:
     std::string owned_input_;
     int owned_cursor_ = 0;
-    TuiModal* host_;
-    simrv::core::Machine* machine_;
-    ModalType type_;
+    [[maybe_unused]] TuiModal* host_;
+    [[maybe_unused]] simrv::core::Machine* machine_;
+    [[maybe_unused]] ModalType type_;
     std::string& input_;
     int& cursor_;
 };
