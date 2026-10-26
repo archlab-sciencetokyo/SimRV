@@ -12,13 +12,13 @@ Spike lockstep workloads run by the release gates.
 | Base ISA | RV32I and RV64I | RV32/RV64 ISA gates and Spike lockstep |
 | General-purpose extensions | M, A, F, D, C; see FP qualification note below | ISA gates, focused semantic tests, lockstep |
 | Bit manipulation | Zba, Zbb, Zbc, Zbs (`Zb*`) | Bitmanip ISA tests and lockstep |
-| Conditional operations | Zicond (`czero.eqz`, `czero.nez`) | Core semantic and RVA23 profile gates |
-| Cache management | CMO (`cbo.clean`, `cbo.flush`, `cbo.inval`, `cbo.zero`) | Core semantic and RVA23 profile gates |
-| TLB invalidation | Svinval (`sinval.vma`, `sfence.w.inval`, `sfence.inval.ir`) | Core semantic and RVA23 profile gates |
+| Conditional operations | Zicond (`czero.eqz`, `czero.nez`) | Core semantic, RVA23 profile gates, and ACT suite |
+| Cache management | CMO (`cbo.clean`, `cbo.flush`, `cbo.inval`, `cbo.zero`) | Core semantic, RVA23 profile gates, and ACT suite |
+| TLB invalidation | Svinval (`sinval.vma`, `sfence.w.inval`, `sfence.inval.ir`) | Core semantic, RVA23 profile gates, and ACT suite |
 | Vector | Implemented subset of RISC-V Vector 1.0 (`V`), configurable VLEN | Vector regression suite and lockstep |
 | Privilege | M/S/U execution, traps, interrupts, and CSR access (Privileged ISA 1.13) | Core semantic and Linux boot gates |
 | Address translation | Sv32 for RV32; Sv39 for RV64 with Page Directory Cache | MMU tests and Linux boot gates |
-| Standard profiles | RVA23 (default RV64 target), RV32GCBV, RV64GCBV | Profile test suites and gate verification |
+| Standard profiles | RVA23 (default RV64 target), RV32GCBV, RV64GCBV | Profile test suites, RVA23 ACT qualification gate |
 
 `G` includes I, M, A, F, D, Zicsr, and Zifencei. The `Zb` and `V` extensions above are additional
 extensions; they are not implied by `G`. MISA contains the single-letter extension bits only and
@@ -36,6 +36,14 @@ maximum VLMAX, prestart elements remain undisturbed, and successful vector instr
 specification defines as non-restartable with nonzero `vstart` raise an illegal-instruction trap.
 Dispatched vector instructions conservatively transition `mstatus.VS` to Dirty, including
 instructions that update restart state before a fault.
+
+## Architectural Compatibility Testing (ACT)
+
+SimRV qualifies its default 64-bit profile (`rva23s64`) against the RISC-V Architectural Compatibility Test (ACT) framework:
+
+- **Signature dumping**: Bare-metal execution supports `--signature <file>` or `+signature=<file>`, extracting memory between `begin_signature` (or `rvtest_sig_begin`) and `end_signature` (or `rvtest_sig_end`) to format-compliant hex output files.
+- **RVA23 Mandatory Extensions**: Automated regression suites verify Zicond, CMO, Svinval, Bitmanip (`zba`, `zbb`, `zbs`), and profile CSR configurations against golden architectural signatures.
+- **Continuous Integration**: The `rva23-act` suite is registered as a required verification gate in release evidence generation and verified across dual-width CI runs.
 
 ## Known qualification gaps
 
