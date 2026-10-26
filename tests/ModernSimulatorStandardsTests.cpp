@@ -2,16 +2,23 @@
  * @file ModernSimulatorStandardsTests.cpp
  * @brief Regression tests for Privileged ISA 1.13, SBI v3.0, timing domains, and simulation stats.
  */
+#include <array>
 #include <cassert>
+#include <cstring>
+#include <filesystem>
+#include <fstream>
 #include <iostream>
 #include <string>
+#include <vector>
 
 #include "simrv/core/Cpu.hpp"
 #include "simrv/core/Machine.hpp"
 #include "simrv/core/PlatformTiming.hpp"
 #include "simrv/core/SbiTypes.hpp"
 #include "simrv/core/SimulationStats.hpp"
+#include "simrv/debug/SymbolTable.hpp"
 #include "simrv/isa/TrapTypes.hpp"
+#include "simrv/memory/MemorySubsystem.hpp"
 #include "simrv/memory/PageTableWalker.hpp"
 
 namespace {
@@ -161,6 +168,48 @@ void test_simulation_stats() {
     TEST_ASSERT(text_str.find("=== SimRV Simulation Statistics ===") != std::string::npos);
 }
 
+void test_architectural_signature_dump() {
+    simrv::core::Machine machine;
+    std::array<simrv::xlen::Byte, 4096> backing{};
+    machine.set_ram_for_testing(backing.data(), backing.size());
+    machine.memory().initialize_mmu();
+
+    const std::string sig_path = "/tmp/simrv_test_signature.sig";
+
+    // 1. Missing symbols fails cleanly
+    TEST_ASSERT(!machine.dump_signature(sig_path));
+
+    // 2. Add signature symbols
+    const simrv::xlen::Address begin_sig = 0x80000100;
+    const simrv::xlen::Address end_sig = 0x80000110;  // 16 bytes = 4 words
+    machine.symbol_table().add_symbol_for_testing(begin_sig, "begin_signature");
+    machine.symbol_table().add_symbol_for_testing(end_sig, "end_signature");
+
+    // Populate RAM at begin_sig (offset 0x100 within DRAM base 0x80000000)
+    const uint32_t words[4] = {0x12345678, 0xdeadbeef, 0x00000001, 0xaabbccdd};
+    std::memcpy(backing.data() + 0x100, words, sizeof(words));
+
+    // Dump signature
+    TEST_ASSERT(machine.dump_signature(sig_path));
+
+    // Read back and verify format
+    std::ifstream in(sig_path);
+    TEST_ASSERT(in.is_open());
+    std::string line;
+    std::vector<std::string> lines;
+    while (std::getline(in, line)) {
+        if (!line.empty()) lines.push_back(line);
+    }
+    in.close();
+    std::filesystem::remove(sig_path);
+
+    TEST_ASSERT(lines.size() == 4);
+    TEST_ASSERT(lines[0] == "12345678");
+    TEST_ASSERT(lines[1] == "deadbeef");
+    TEST_ASSERT(lines[2] == "00000001");
+    TEST_ASSERT(lines[3] == "aabbccdd");
+}
+
 }  // namespace
 
 int main() {
@@ -170,6 +219,7 @@ int main() {
     test_sbi_version_and_rfence();
     test_platform_timing_conversions();
     test_simulation_stats();
+    test_architectural_signature_dump();
     std::cout << "All ModernSimulatorStandardsTests passed successfully!" << std::endl;
     return 0;
 }

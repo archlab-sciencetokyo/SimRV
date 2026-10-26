@@ -67,7 +67,10 @@ auto parse_elf_symbols(std::ifstream& fs, std::map<simrv::xlen::Address, std::st
                 sym.st_value != 0 &&
                 (type == STT_FUNC || type == STT_OBJECT || type == STT_NOTYPE)) {
                 std::string name = &strtab[sym.st_name];
-                const bool runtime_essential = name == "_start" || name == "tohost";
+                const bool runtime_essential =
+                    name == "_start" || name == "tohost" || name == "begin_signature" ||
+                    name == "end_signature" || name == "rvtest_sig_begin" ||
+                    name == "rvtest_sig_end";
                 if (!name.empty() && name.find('$') == std::string::npos &&
                     (mode == SymbolLoadMode::FullDebug || runtime_essential)) {
                     out_symbols[sym.st_value] = name;

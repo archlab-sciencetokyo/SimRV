@@ -307,6 +307,56 @@ auto Machine::framebuffer_view() const noexcept -> simrv::memory::RamView {
     return {ram.unchecked_ptr(base), base, size};
 }
 
+auto Machine::dump_signature(const std::string& filepath) const -> bool {
+    if (filepath.empty()) {
+        return false;
+    }
+    const auto& syms = symbol_table();
+    const auto begin_opt = syms.lookup_name("begin_signature").or_else([&] {
+        return syms.lookup_name("rvtest_sig_begin");
+    });
+    const auto end_opt = syms.lookup_name("end_signature").or_else([&] {
+        return syms.lookup_name("rvtest_sig_end");
+    });
+    if (!begin_opt || !end_opt) {
+        simrv::log::warn(
+            "Signature dumping requested but begin_signature/end_signature symbols not found");
+        return false;
+    }
+    if (*begin_opt >= *end_opt) {
+        simrv::log::warn("Invalid signature address range: begin=0x{:x} end=0x{:x}", *begin_opt,
+                         *end_opt);
+        return false;
+    }
+
+    std::ofstream out(filepath, std::ios::trunc);
+    if (!out) {
+        simrv::log::error("Cannot open signature output file: {}", filepath);
+        return false;
+    }
+
+    const auto len = static_cast<size_t>(*end_opt - *begin_opt);
+    std::vector<uint8_t> buffer(len, 0);
+    auto& mem = const_cast<Machine*>(this)->memory();
+    if (!mem.dma_read(*begin_opt, buffer.data(), len)) {
+        simrv::log::error("Failed to read signature range from memory: 0x{:x} - 0x{:x}", *begin_opt,
+                          *end_opt);
+        return false;
+    }
+
+    for (size_t i = 0; i < len; i += 4) {
+        uint32_t word = 0;
+        for (size_t b = 0; b < 4 && (i + b) < len; ++b) {
+            word |= static_cast<uint32_t>(buffer[i + b]) << (b * 8);
+        }
+        std::print(out, "{:08x}\n", word);
+    }
+    out.flush();
+    simrv::log::info("Wrote architectural test signature to {} ({} words)", filepath,
+                     (len + 3) / 4);
+    return true;
+}
+
 auto Machine::save_checkpoint(const std::string& filepath) const
     -> std::expected<void, std::string> {
     const auto ram = ram_view();

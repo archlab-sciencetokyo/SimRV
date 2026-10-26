@@ -688,6 +688,15 @@ auto main(int argc, char* argv[]) -> int {  // NOLINT(bugprone-exception-escape)
                         simrv::core::to_exit_code(simrv::core::HostExitCode::GeneralError);
                 }
             }
+            if (!parsed->options.fn_signature.empty() &&
+                !sim_machine->dump_signature(parsed->options.fn_signature)) {
+                simrv::log::error("Cannot write architectural signature to {}",
+                                  parsed->options.fn_signature);
+                if (final_exit_code == 0) {
+                    final_exit_code =
+                        simrv::core::to_exit_code(simrv::core::HostExitCode::GeneralError);
+                }
+            }
             if (!parsed->options.fn_save_checkpoint.empty()) {
                 const auto saved = sim_machine->save_checkpoint(parsed->options.fn_save_checkpoint);
                 if (!saved) {

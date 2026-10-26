@@ -274,6 +274,9 @@ class Machine final : public core::IInterruptController {
         -> std::expected<void, std::string>;
     [[nodiscard]] auto load_checkpoint(const std::string& filepath)
         -> std::expected<void, std::string>;
+    /// Dump the memory range between begin_signature and end_signature symbols to an ACT signature
+    /// file.
+    [[nodiscard]] auto dump_signature(const std::string& filepath) const -> bool;
     struct LoadedMemorySegment {
         simrv::xlen::Address paddr = 0;
         size_t size = 0;

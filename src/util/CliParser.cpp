@@ -552,6 +552,15 @@ auto parse_file_options(std::string_view arg, std::span<char* const> args, std::
         options.appmode = false;
         return true;
     }
+    if (option_id == "--signature") {
+        auto value = next_argument(args, i, arg);
+        if (!value) return std::unexpected(value.error());
+        if (value->empty() || *value == "-") {
+            return std::unexpected("--signature requires a writable file path");
+        }
+        options.fn_signature = std::string(*value);
+        return true;
+    }
     if (option_id == "--virtiofs") {
         std::string_view path = arg.starts_with("--virtiofs=") ? arg.substr(11) : "";
         if (path.empty()) {
@@ -1317,6 +1326,10 @@ auto parse_command_line(std::span<char* const> args) -> std::expected<ParseResul
 
     for (std::size_t i = 1; i < expanded_span.size(); ++i) {
         std::string_view const arg = expanded_span[i];
+        if (arg.starts_with("+signature=")) {
+            result.options.fn_signature = std::string(arg.substr(11));
+            continue;
+        }
         const std::string_view option_id = cli_option_id(arg);
         if (option_id == "--help") {
             result.action = CliAction::ShowHelp;
@@ -1908,6 +1921,9 @@ auto cli_help_sections() -> const std::vector<HelpSection>& {
              {{.option = "-H, --tohost-addr <ADDR>",
                .description = "Set the tohost address used for test termination.",
                .hidden_aliases = {"--tohost"}},
+              {.option = "--signature <FILE>",
+               .description = "Dump architectural test signature on exit.",
+               .hidden_aliases = {"+signature="}},
               {.option = "--explain-inst <HEX>",
                .description = "Disassemble and explain a 32-bit instruction.",
                .hidden_aliases = {"--explain"}},
