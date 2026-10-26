@@ -3,7 +3,13 @@
 All notable changes to SimRV are documented here.
 Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [v3.0.0-rc.16] — unreleased
+## [v3.0.0-rc.17] — unreleased
+
+- Integrated RVA23 profile qualification through RISC-V Architectural Compatibility Tests (ACT).
+- Added architectural signature dumping (`--signature <file>`) for ACT conformance evaluation.
+- Optimized GCC test compilation and link throughput by skipping interprocedural optimization on native test targets.
+
+## [v3.0.0-rc.16] — 2026-10-26
 
 - Implemented standard RVA23 profile as default architecture configuration, incorporating Zicond (czero.eqz, czero.nez), Cache Management Operations (CMO: cbo.clean, cbo.flush, cbo.inval, cbo.zero), and Fine-Grained Address-Translation Invalidation (Svinval: sinval.vma, sfence.w.inval, sfence.inval.ir).
 - Formalized RISC-V Privileged specification compliance, standard trap/exception priority ordering, SBI v3.0 interface handling, and STCE / stimecmp supervisor timer interrupt scheduling.
