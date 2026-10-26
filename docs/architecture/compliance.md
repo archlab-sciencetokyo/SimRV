@@ -1,24 +1,21 @@
 # RISC-V Compliance Scope
 
-SimRV targets the ratified `rv32gczbv` and `rv64gczbv` ISA strings. This is an implementation target, not a
-claim of RISC-V architectural certification. A release is considered verified only for behavior
-covered by the checked-in semantic tests, the configured `riscv-tests` suites, vector tests, and
-Spike lockstep workloads run by the release gates.
+SimRV targets the ratified RISC-V **RVA23 Profile** (`rva23s64` and `rva23u64`) as its primary 64-bit architectural compliance target, alongside ratified `rv32gczbv` and `rv64gczbv` implementation targets. This is an implementation and qualification target, not a claim of formal RISC-V International architectural certification. A release is considered verified only for behavior covered by the checked-in semantic tests, the Architectural Compatibility Test (ACT) qualification suite, the configured `riscv-tests` suites, vector tests, and Spike lockstep workloads run by the release gates.
 
 ## Architectural scope
 
 | Area | Implemented scope | Verification evidence |
 | --- | --- | --- |
-| Base ISA | RV32I and RV64I | RV32/RV64 ISA gates and Spike lockstep |
-| General-purpose extensions | M, A, F, D, C; see FP qualification note below | ISA gates, focused semantic tests, lockstep |
-| Bit manipulation | Zba, Zbb, Zbc, Zbs (`Zb*`) | Bitmanip ISA tests and lockstep |
+| Standard profiles | RVA23 (`rva23s64` default, `rva23u64`), RV32GCBV, RV64GCBV | Profile test suites, RVA23 ACT qualification gate |
+| Base ISA | RV32I and RV64I | RV32/RV64 ISA gates, ACT suite, and Spike lockstep |
+| General-purpose extensions | M, A, F, D, C; see FP qualification note below | ISA gates, focused semantic tests, ACT suite, lockstep |
+| Bit manipulation | Zba, Zbb, Zbc, Zbs (`Zb*`) | Bitmanip ISA tests, ACT suite, and lockstep |
 | Conditional operations | Zicond (`czero.eqz`, `czero.nez`) | Core semantic, RVA23 profile gates, and ACT suite |
-| Cache management | CMO (`cbo.clean`, `cbo.flush`, `cbo.inval`, `cbo.zero`) | Core semantic, RVA23 profile gates, and ACT suite |
+| Cache management | CMO (`cbo.clean`, `cbo.flush`, `cbo.inval`, `cbo.zero`, `prefetch.*`) | Core semantic, RVA23 profile gates, and ACT suite |
 | TLB invalidation | Svinval (`sinval.vma`, `sfence.w.inval`, `sfence.inval.ir`) | Core semantic, RVA23 profile gates, and ACT suite |
 | Vector | Implemented subset of RISC-V Vector 1.0 (`V`), configurable VLEN | Vector regression suite and lockstep |
-| Privilege | M/S/U execution, traps, interrupts, and CSR access (Privileged ISA 1.13) | Core semantic and Linux boot gates |
+| Privilege | M/S/U execution, traps, interrupts, and CSR access (Privileged ISA 1.13) | Core semantic, ACT suite, and Linux boot gates |
 | Address translation | Sv32 for RV32; Sv39 for RV64 with Page Directory Cache | MMU tests and Linux boot gates |
-| Standard profiles | RVA23 (default RV64 target), RV32GCBV, RV64GCBV | Profile test suites, RVA23 ACT qualification gate |
 
 `G` includes I, M, A, F, D, Zicsr, and Zifencei. The `Zb` and `V` extensions above are additional
 extensions; they are not implied by `G`. MISA contains the single-letter extension bits only and

@@ -16,9 +16,9 @@
   <img src="https://img.shields.io/badge/SMP-2%20to%2016%20cores-brightgreen.svg" alt="SMP"/>
 </p>
 
-SimRV is an explainable, dual-width (RV32 / RV64) RISC-V research simulator featuring an interactive terminal workbench (TUI), cycle-accurate in-order pipeline modeling, cache hierarchy inspection, and full-system Linux OS emulation. It provides functional and cycle-accurate modes for compile-time fixed **RV64GCBV** and **RV32GCBV** implementation targets. The distributed RV64-capable binary also runs RV32 guests; the native RV32 target remains a strict-width verification build.
+SimRV is an explainable, dual-width (RV32 / RV64) RISC-V research simulator featuring an interactive terminal workbench (TUI), cycle-accurate in-order pipeline modeling, cache hierarchy inspection, and full-system Linux OS emulation. It provides functional and cycle-accurate modes targeting the **RVA23 profile** (`rva23s64` default) and ratified **RV64GCBV** / **RV32GCBV** architectural specifications. The distributed RV64-capable binary also runs RV32 guests; the native RV32 target remains a strict-width verification build.
 
-SimRV is not RISC-V certified. `RV32GCBV` and `RV64GCBV` are implementation targets; see the [compliance scope](docs/architecture/compliance.md) for verified coverage and known gaps.
+SimRV is not RISC-V certified. RVA23, `RV64GCBV`, and `RV32GCBV` are implementation and qualification targets; see the [compliance scope](docs/architecture/compliance.md) for verified coverage, ACT qualification, and known gaps.
 
 ---
 
