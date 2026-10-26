@@ -1017,26 +1017,22 @@ void MemoryAccess::execute_cmo(MemorySubsystem& mem, core::CPU& cpu, simrv::xlen
                 *cpu.machine_, simrv::xlen::VirtAddr{vaddr}, access_type, eff_priv, active_xlen,
                 TlPort::Data, cpu.ca_state.data_walk);
             if (!translate_res.has_value()) return;
-            auto chain_res =
-                (*translate_res)
-                    .and_then(
-                        [&](PageWalkResult res) -> std::expected<void, simrv::xlen::TrapCause> {
-                            paddr = res.physical_address.raw();
-                            if (access_type == PteAccess::Write) {
-                                cpu.tlb.insert_data_w(vaddr, paddr, current_asid, eff_priv,
-                                                      res.global());
-                            } else {
-                                cpu.tlb.insert_data_r(vaddr, paddr, current_asid, eff_priv,
-                                                      res.global());
-                            }
-                            return {};
-                        })
-                    .or_else([&](simrv::xlen::TrapCause error)
-                                 -> std::expected<void, simrv::xlen::TrapCause> {
-                        cpu.active_context().pending_exception = to_exception_code(error);
-                        cpu.active_context().pending_tval = vaddr;
-                        return {};
-                    });
+            (void)(*translate_res)
+                .and_then([&](PageWalkResult res) -> std::expected<void, simrv::xlen::TrapCause> {
+                    paddr = res.physical_address.raw();
+                    if (access_type == PteAccess::Write) {
+                        cpu.tlb.insert_data_w(vaddr, paddr, current_asid, eff_priv, res.global());
+                    } else {
+                        cpu.tlb.insert_data_r(vaddr, paddr, current_asid, eff_priv, res.global());
+                    }
+                    return {};
+                })
+                .or_else([&](simrv::xlen::TrapCause error)
+                             -> std::expected<void, simrv::xlen::TrapCause> {
+                    cpu.active_context().pending_exception = to_exception_code(error);
+                    cpu.active_context().pending_tval = vaddr;
+                    return {};
+                });
             if (cpu.active_context().pending_exception.has_value()) return;
         }
     }

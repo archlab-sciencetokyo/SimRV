@@ -549,6 +549,11 @@ class CPU {
      * Asserts timer interrupt pending flags in `mip` if current `mtime` >= `mtimecmp`.
      */
     void evaluate_timer_interrupt();
+    /**
+     * @brief Fast-forwards simulation virtual time (mtime) to the next timer deadline (mtimecmp or
+     * stimecmp) on WFI when no interrupts are pending, coalescing idle spin loops.
+     */
+    void fast_forward_wfi(Machine& machine);
     /// Queue external interrupt wire changes for application by this hart at its next boundary.
     void queue_interrupt_line(core::MipBit bit, bool asserted) noexcept;
     void apply_pending_interrupt_lines(Machine& machine);

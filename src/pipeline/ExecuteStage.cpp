@@ -279,15 +279,7 @@ void CPU::execute_system(Machine& machine) {
                 break;
             case Funct12Priv::Wfi: {
                 ctx.tkn = false;
-                if (machine.appmode_enabled() && (state_.mip & state_.mie) == 0) {
-                    const simrv::xlen::Counter cur_cmp =
-                        clint_mmio.mtimecmp.load(std::memory_order_relaxed);
-                    if (cur_cmp > clint_mmio.mtime.load(std::memory_order_relaxed) &&
-                        cur_cmp != std::numeric_limits<simrv::xlen::Counter>::max()) {
-                        clint_mmio.mtime.store(cur_cmp, std::memory_order_relaxed);
-                        evaluate_timer_interrupt();
-                    }
-                }
+                fast_forward_wfi(machine);
                 break;
             }
             default:

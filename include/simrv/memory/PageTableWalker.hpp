@@ -113,7 +113,8 @@ struct PteView {
         return (raw & (PteFlag::U | PteFlag::A | PteFlag::D)) != 0;
     }
     [[nodiscard]] constexpr auto ppn() const noexcept -> simrv::xlen::PpnIndex {
-        return static_cast<simrv::xlen::PpnIndex>(raw >> 10);
+        constexpr uint64_t kPpnMask = (1ULL << 44) - 1ULL;
+        return static_cast<simrv::xlen::PpnIndex>((raw >> 10) & kPpnMask);
     }
     [[nodiscard]] constexpr auto flags() const noexcept -> PteFlags {
         return static_cast<PteFlags>(raw & 0xFF);
@@ -154,6 +155,7 @@ struct PageWalkState {
     unsigned pte_size = 0;
     unsigned vpn_bits_per_level = 0;
     simrv::xlen::PageTableLevel level = -1;
+    simrv::xlen::Word satp_root{0};
     bool update_access_bits = true;
     PageWalkStatus status = PageWalkStatus::Fault;
     const core::ArchState* arch_state = nullptr;
@@ -239,7 +241,24 @@ class PageTableWalker {
                             const core::ArchState* arch_state = nullptr) const
         -> std::expected<PageWalkResult, simrv::xlen::TrapCause>;
 
+    void flush_pdc() noexcept {
+        if (++pdc_epoch_ == 0) {
+            pdc_epoch_ = 1;
+            pdc_.fill({});
+        }
+    }
+
    private:
+    struct PdcEntry {
+        simrv::xlen::Word satp_root{0};
+        simrv::xlen::Word vpn_prefix{0};
+        simrv::xlen::PhysAddr table_address{0};
+        uint32_t epoch{0};
+    };
+
+    static constexpr size_t kPdcSize = 256;
+    mutable std::array<PdcEntry, kPdcSize> pdc_{};
+    mutable uint32_t pdc_epoch_{1};
     RamView ram_{};
 
     [[nodiscard]] auto pte_access_valid(simrv::xlen::PhysAddr address, unsigned size) const noexcept
