@@ -672,7 +672,9 @@ if(BUILD_TESTING)
     NAME package-install-consumer
     COMMAND
       ${CMAKE_COMMAND} -D SIMRV_SOURCE_DIR=${CMAKE_SOURCE_DIR} -D
-      SIMRV_BINARY_DIR=${CMAKE_BINARY_DIR} -P
+      SIMRV_BINARY_DIR=${CMAKE_BINARY_DIR}
+      -D "CMAKE_CXX_COMPILER=${CMAKE_CXX_COMPILER}"
+      -D "CMAKE_CXX_FLAGS=${CMAKE_CXX_FLAGS}" -P
       ${CMAKE_SOURCE_DIR}/cmake/TestPackageConsumer.cmake)
   set_tests_properties(package-install-consumer
                        PROPERTIES LABELS "gate;regress;package;sdk")

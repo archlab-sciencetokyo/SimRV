@@ -324,7 +324,7 @@ void CPU::evaluate_timer_interrupt() {
 }
 
 void CPU::fast_forward_wfi(Machine& machine) {
-    if ((state_.mip & state_.mie) != 0) {
+    if (!machine.appmode_enabled() || (state_.mip & state_.mie) != 0) {
         return;
     }
     auto& primary_clint = machine.primary_hart().clint_mmio;

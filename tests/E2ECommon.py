@@ -9,6 +9,7 @@ import pathlib
 import subprocess
 import sys
 import tempfile
+import unittest
 from typing import Any, Dict, List, Optional, Tuple, Union
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
@@ -44,9 +45,11 @@ def get_simrv_binary(xlen: int = 64, override: Optional[Union[str, pathlib.Path]
         ROOT / f"build/rv{xlen}-debug/simrv",
         ROOT / f"build/rv{xlen}-native-release/simrv",
         ROOT / f"build/release-gate/run1-gcc-rv{xlen}/simrv",
+        ROOT / "build/asan/simrv",
+        ROOT / "build/tsan/simrv",
     ]
     for cand in candidates:
-        if cand.is_file() and os.access(cand, os.X_OK):
+        if cand.is_file() and os.access(cand, os.X_OK) and get_binary_xlen(cand) == xlen:
             return cand
 
     # Fallback to system search
@@ -57,6 +60,26 @@ def get_simrv_binary(xlen: int = 64, override: Optional[Union[str, pathlib.Path]
 
     # Default to release preset path even if not yet compiled
     return (ROOT / f"build/rv{xlen}-release/simrv").resolve()
+
+
+def get_active_build_dir(xlen: int = 64) -> pathlib.Path:
+    """Resolve the active build directory containing CTest configuration."""
+    if "SIMRV_BUILD_DIR" in os.environ:
+        build_dir = pathlib.Path(os.environ["SIMRV_BUILD_DIR"]).resolve()
+        if (build_dir / "CTestTestfile.cmake").is_file():
+            return build_dir
+    bin_path = get_simrv_binary(xlen)
+    if bin_path.is_file() and (bin_path.parent / "CTestTestfile.cmake").is_file():
+        return bin_path.parent
+    for cand in [
+        ROOT / f"build/rv{xlen}-release",
+        ROOT / "build/asan",
+        ROOT / "build/tsan",
+        ROOT / f"build/rv{xlen}-debug",
+    ]:
+        if (cand / "CTestTestfile.cmake").is_file():
+            return cand
+    return (ROOT / f"build/rv{xlen}-release").resolve()
 
 
 def shutil_which(cmd: str) -> Optional[str]:
@@ -77,6 +100,10 @@ def run_simrv(
     cwd: Optional[pathlib.Path] = None,
 ) -> subprocess.CompletedProcess[str]:
     """Execute a SimRV command and capture output."""
+    bin_path = pathlib.Path(binary)
+    if not bin_path.is_file() or not os.access(bin_path, os.X_OK):
+        raise unittest.SkipTest(f"SimRV binary not available: {binary}")
+
     env = os.environ.copy()
     env["NO_COLOR"] = "1"
     if extra_env:

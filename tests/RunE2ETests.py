@@ -27,6 +27,7 @@ def run_e2e_suites(
     """Run E2E test tiers and optionally generate a JSON report."""
     if simrv_bin:
         simrv_bin = pathlib.Path(simrv_bin).resolve()
+        os.environ["SIMRV_BUILD_DIR"] = str(simrv_bin.parent)
         xlen = get_binary_xlen(simrv_bin)
         if xlen == 32:
             os.environ["SIMRV32_BIN"] = str(simrv_bin)

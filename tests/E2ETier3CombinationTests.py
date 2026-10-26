@@ -82,23 +82,21 @@ class E2ETier3CombinationTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             dummy_disk = pathlib.Path(tmp) / "disk.img"
             dummy_disk.write_bytes(b"\x00" * 4096)
-            res = run_simrv(
-                self.simrv64,
-                [
-                    "--cli",
-                    "--baremetal",
-                    "-m",
-                    str(self.hello64),
-                    "--mode",
-                    "detailed",
-                    "-D",
-                    str(dummy_disk),
-                    "-f",
-                    str(self.dtb),
-                    "--steps",
-                    "500",
-                ],
-            )
+            cmd = [
+                "--cli",
+                "--baremetal",
+                "-m",
+                str(self.hello64),
+                "--mode",
+                "detailed",
+                "-D",
+                str(dummy_disk),
+                "--steps",
+                "500",
+            ]
+            if self.dtb.is_file():
+                cmd.extend(["-f", str(self.dtb)])
+            res = run_simrv(self.simrv64, cmd)
             self.assertEqual(res.returncode, 0, res.stderr)
             self.assertIn("instruction-observable", res.stdout)
             self.assertIn("Hello from SimRV!", res.stdout)

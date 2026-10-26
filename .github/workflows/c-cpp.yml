@@ -218,10 +218,11 @@ jobs:
     timeout-minutes: 120
     container:
       image: fedora:44
+      options: --security-opt seccomp=unconfined
     steps:
     - uses: actions/checkout@v6
     - name: Install build tools
-      run: dnf install -y cmake ninja-build gcc gcc-c++ libtsan python3
+      run: dnf install -y cmake ninja-build gcc gcc-c++ libtsan python3 util-linux
     - name: Configure TSan
       run: >-
         cmake -S . -B build/tsan -G Ninja
@@ -232,4 +233,4 @@ jobs:
     - name: Run thread-safety suite
       env:
         TSAN_OPTIONS: halt_on_error=1:second_deadlock_stack=1
-      run: ctest --test-dir build/tsan --output-on-failure -L thread
+      run: setarch $(uname -m) -R ctest --test-dir build/tsan --output-on-failure -L thread

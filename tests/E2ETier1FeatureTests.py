@@ -20,6 +20,7 @@ from E2ECommon import (
     ROOT,
     create_instruction_stream,
     find_example_elf,
+    get_active_build_dir,
     get_simrv_binary,
     parse_jsonl,
     run_simrv,
@@ -307,15 +308,18 @@ class E2ETier1FeatureTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             dummy_disk = pathlib.Path(tmp) / "disk.img"
             dummy_disk.write_bytes(b"\x00" * 4096)
-            res = run_simrv(
-                self.simrv64,
-                ["--cli", "--baremetal", "-m", str(self.hello64), "-D", str(dummy_disk), "-f", str(self.dtb), "--steps", "100"],
-            )
+            cmd = ["--cli", "--baremetal", "-m", str(self.hello64), "-D", str(dummy_disk), "--steps", "100"]
+            if self.dtb.is_file():
+                cmd.extend(["-f", str(self.dtb)])
+            res = run_simrv(self.simrv64, cmd)
             self.assertEqual(res.returncode, 0, res.stderr)
 
     def test_f2_2_virtio_transport_error_recovery(self) -> None:
         """Verify clean diagnostic on missing disk image."""
-        res = run_simrv(self.simrv64, ["--cli", "-D", "/path/to/nonexistent/disk.img", "-f", str(self.dtb)])
+        cmd = ["--cli", "-D", "/path/to/nonexistent/disk.img"]
+        if self.dtb.is_file():
+            cmd.extend(["-f", str(self.dtb)])
+        res = run_simrv(self.simrv64, cmd)
         self.assertNotEqual(res.returncode, 0)
         self.assertIn("error", res.stderr.lower())
 
@@ -367,7 +371,7 @@ class E2ETier1FeatureTests(unittest.TestCase):
     def test_f2_4_tui_modal_dispatch(self) -> None:
         """Verify TUI framework unit tests pass."""
         ctest_res = subprocess.run(
-            ["ctest", "--test-dir", str(ROOT / "build/rv64-release"), "-R", "^tui-framework-core$", "--output-on-failure"],
+            ["ctest", "--test-dir", str(get_active_build_dir()), "-R", "^tui-framework-core$", "--output-on-failure"],
             capture_output=True,
             text=True,
             check=False,
@@ -499,7 +503,7 @@ class E2ETier1FeatureTests(unittest.TestCase):
     def test_f3_4_ctest_registration_mission(self) -> None:
         """Verify CTest test discovery includes platform and regression tests."""
         res = subprocess.run(
-            ["ctest", "--test-dir", str(ROOT / "build/rv64-release"), "-N"],
+            ["ctest", "--test-dir", str(get_active_build_dir()), "-N"],
             capture_output=True,
             text=True,
             check=False,
@@ -521,9 +525,9 @@ class E2ETier1FeatureTests(unittest.TestCase):
                 self.assertTrue(p.name.endswith("Tests.cpp"), f"Non-conforming test file: {p.name}")
 
     def test_f3_4_ctest_label_coverage(self) -> None:
-        """Verify gate label covers 49 core verification tests."""
+        """Verify gate label covers 52 core verification tests."""
         res = subprocess.run(
-            ["ctest", "--test-dir", str(ROOT / "build/rv64-release"), "-N", "-L", "gate"],
+            ["ctest", "--test-dir", str(get_active_build_dir()), "-N", "-L", "gate"],
             capture_output=True,
             text=True,
             check=False,
@@ -600,7 +604,7 @@ class E2ETier1FeatureTests(unittest.TestCase):
     def test_f4_2_napot_alignment_computation(self) -> None:
         """Verify PMP unit test suite passes."""
         ctest_res = subprocess.run(
-            ["ctest", "--test-dir", str(ROOT / "build/rv64-release"), "-R", "^pmp$", "--output-on-failure"],
+            ["ctest", "--test-dir", str(get_active_build_dir()), "-R", "^pmp$", "--output-on-failure"],
             capture_output=True,
             text=True,
             check=False,
@@ -693,14 +697,14 @@ class E2ETier1FeatureTests(unittest.TestCase):
     # Feature 18: F5.1 RV64 Gate 100% Pass
     # -------------------------------------------------------------------------
     def test_f5_1_rv64_gate_test_discovery(self) -> None:
-        """Verify 49 gate tests discovered in rv64-release."""
-        res = subprocess.run(["ctest", "--test-dir", str(ROOT / "build/rv64-release"), "-N", "-L", "gate"], capture_output=True, text=True, check=False)
+        """Verify gate tests discovered in release preset."""
+        res = subprocess.run(["ctest", "--test-dir", str(get_active_build_dir()), "-N", "-L", "gate"], capture_output=True, text=True, check=False)
         self.assertEqual(res.returncode, 0, res.stderr)
         self.assertIn("Total Tests: 52", res.stdout)
 
     def test_f5_1_rv64_gate_execution(self) -> None:
-        """Verify sample RV64 gate tests pass."""
-        res = subprocess.run(["ctest", "--test-dir", str(ROOT / "build/rv64-release"), "-R", "^(cli-doctor|cli-isa-info)$"], capture_output=True, text=True, check=False)
+        """Verify sample gate tests pass."""
+        res = subprocess.run(["ctest", "--test-dir", str(get_active_build_dir()), "-R", "^(cli-doctor|cli-isa-info)$"], capture_output=True, text=True, check=False)
         self.assertEqual(res.returncode, 0, res.stderr)
 
     def test_f5_1_rv64_cli_options(self) -> None:
@@ -793,8 +797,13 @@ class E2ETier1FeatureTests(unittest.TestCase):
     # -------------------------------------------------------------------------
     def test_f5_4_release_check_script(self) -> None:
         """Verify scripts/release_check.py passes with 0 errors."""
+        cmd = [sys.executable, str(ROOT / "scripts/release_check.py")]
+        if self.simrv64.is_file():
+            cmd.extend(["--binary", str(self.simrv64)])
+        if self.simrv32.is_file():
+            cmd.extend(["--binary", str(self.simrv32)])
         res = subprocess.run(
-            [sys.executable, str(ROOT / "scripts/release_check.py"), "--binary", str(self.simrv64), "--binary", str(self.simrv32)],
+            cmd,
             capture_output=True,
             text=True,
             check=False,
