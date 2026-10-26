@@ -11,6 +11,8 @@
   <a href="https://github.com/archlab-sciencetokyo/SimRV/releases"><img src="https://img.shields.io/github/v/release/archlab-sciencetokyo/SimRV?include_prereleases" alt="Latest SimRV release"/></a>
   <a href="https://github.com/archlab-sciencetokyo/SimRV/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-MIT-green.svg" alt="License"/></a>
   <img src="https://img.shields.io/badge/C%2B%2B-23-purple.svg" alt="C++23"/>
+  <a href="docs/architecture/compliance.md"><img src="https://img.shields.io/badge/profile-RVA23%20Target-blue.svg" alt="Profile RVA23 Target"/></a>
+  <a href="tests/act/"><img src="https://img.shields.io/badge/ACT%20Suite-Passing-success.svg" alt="ACT Suite"/></a>
   <img src="https://img.shields.io/badge/architecture-RV32GCBV%20%7C%20RV64GCBV-orange.svg" alt="Architecture"/>
   <img src="https://img.shields.io/badge/SMP-2%20to%2016%20cores-brightgreen.svg" alt="SMP"/>
 </p>
