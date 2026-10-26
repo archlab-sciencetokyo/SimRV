@@ -11,6 +11,7 @@ import json
 import os
 import pathlib
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -516,6 +517,10 @@ class E2ETier1FeatureTests(unittest.TestCase):
 
     def test_f3_4_no_orphaned_pyc(self) -> None:
         """Verify no .pyc files are tracked in git index."""
+        if not shutil.which("git"):
+            pyc_files = list(ROOT.rglob("*.pyc"))
+            self.assertEqual(pyc_files, [], f"Found orphaned .pyc files: {pyc_files}")
+            return
         res = subprocess.run(["git", "ls-files", "*.pyc"], cwd=ROOT, capture_output=True, text=True, check=False)
         self.assertEqual(res.stdout.strip(), "", "Found git-tracked .pyc files")
 
