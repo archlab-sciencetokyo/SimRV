@@ -15,82 +15,26 @@
 #include <vector>
 
 #include "simrv/core/Logger.hpp"
+#include "simrv/util/ElfTypes.hpp"
 
 namespace simrv::debug {
 
 namespace {
 
 constexpr size_t kElfIdentSize = 16;
-constexpr uint8_t kElfClass32 = 1;
-constexpr uint8_t kElfClass64 = 2;
-constexpr uint32_t kElfSymbolTable = 2;
-constexpr uint8_t kElfSymbolNotype = 0;
-constexpr uint8_t kElfSymbolObject = 1;
-constexpr uint8_t kElfSymbolFunction = 2;
 constexpr std::array<uint8_t, 4> kElfMagic = {0x7f, 'E', 'L', 'F'};
-
-struct Elf32_Ehdr {
-    uint8_t e_ident[kElfIdentSize];
-    uint16_t e_type;
-    uint16_t e_machine;
-    uint32_t e_version;
-    uint32_t e_entry;
-    uint32_t e_phoff;
-    uint32_t e_shoff;
-    uint32_t e_flags;
-    uint16_t e_ehsize;
-    uint16_t e_phentsize;
-    uint16_t e_phnum;
-    uint16_t e_shentsize;
-    uint16_t e_shnum;
-    uint16_t e_shstrndx;
-};
-
-struct Elf64_Ehdr {
-    uint8_t e_ident[kElfIdentSize];
-    uint16_t e_type;
-    uint16_t e_machine;
-    uint32_t e_version;
-    uint64_t e_entry;
-    uint64_t e_phoff;
-    uint64_t e_shoff;
-    uint32_t e_flags;
-    uint16_t e_ehsize;
-    uint16_t e_phentsize;
-    uint16_t e_phnum;
-    uint16_t e_shentsize;
-    uint16_t e_shnum;
-    uint16_t e_shstrndx;
-};
-
-struct Elf32_Shdr {
-    uint32_t sh_name, sh_type, sh_flags, sh_addr, sh_offset, sh_size;
-    uint32_t sh_link, sh_info, sh_addralign, sh_entsize;
-};
-
-struct Elf64_Shdr {
-    uint32_t sh_name, sh_type;
-    uint64_t sh_flags, sh_addr, sh_offset, sh_size;
-    uint32_t sh_link, sh_info;
-    uint64_t sh_addralign, sh_entsize;
-};
-
-struct Elf32_Sym {
-    uint32_t st_name, st_value, st_size;
-    uint8_t st_info, st_other;
-    uint16_t st_shndx;
-};
-
-struct Elf64_Sym {
-    uint32_t st_name;
-    uint8_t st_info, st_other;
-    uint16_t st_shndx;
-    uint64_t st_value, st_size;
-};
-
-static_assert(sizeof(Elf32_Ehdr) == 52 && sizeof(Elf64_Ehdr) == 64);
-static_assert(sizeof(Elf32_Shdr) == 40 && sizeof(Elf64_Shdr) == 64);
-static_assert(sizeof(Elf32_Sym) == 16 && sizeof(Elf64_Sym) == 24);
+using util::elf::Elf32_Ehdr;
+using util::elf::Elf32_Shdr;
+using util::elf::Elf32_Sym;
+using util::elf::Elf64_Ehdr;
+using util::elf::Elf64_Shdr;
+using util::elf::Elf64_Sym;
+using util::elf::kClass32;
+using util::elf::kClass64;
+using util::elf::kSymbolFunction;
+using util::elf::kSymbolNotype;
+using util::elf::kSymbolObject;
+using util::elf::kSymbolTable;
 
 template <typename Ehdr, typename Shdr, typename Sym, typename StTypeFunc>
 auto parse_elf_symbols(std::ifstream& fs, std::map<simrv::xlen::Address, std::string>& out_symbols,
@@ -114,7 +58,7 @@ auto parse_elf_symbols(std::ifstream& fs, std::map<simrv::xlen::Address, std::st
     int symtab_idx = -1;
     int strtab_idx = -1;
     for (int i = 0; std::cmp_less(i, ehdr.e_shnum); ++i) {
-        if (shdrs[i].sh_type == kElfSymbolTable) {
+        if (shdrs[i].sh_type == kSymbolTable) {
             symtab_idx = i;
             strtab_idx = static_cast<int>(shdrs[i].sh_link);
         }
@@ -137,8 +81,7 @@ auto parse_elf_symbols(std::ifstream& fs, std::map<simrv::xlen::Address, std::st
             const auto type = get_type(sym.st_info);
             if (sym.st_name != 0 && static_cast<size_t>(sym.st_name) < strtab.size() &&
                 sym.st_value != 0 &&
-                (type == kElfSymbolFunction || type == kElfSymbolObject ||
-                 type == kElfSymbolNotype)) {
+                (type == kSymbolFunction || type == kSymbolObject || type == kSymbolNotype)) {
                 std::string name = &strtab[sym.st_name];
                 const bool runtime_essential =
                     name == "_start" || name == "tohost" || name == "begin_signature" ||
@@ -147,7 +90,7 @@ auto parse_elf_symbols(std::ifstream& fs, std::map<simrv::xlen::Address, std::st
                 if (!name.empty() && name.find('$') == std::string::npos &&
                     (mode == SymbolLoadMode::FullDebug || runtime_essential)) {
                     out_symbols[sym.st_value] = name;
-                    if (type == kElfSymbolFunction) {
+                    if (type == kSymbolFunction) {
                         out_functions[sym.st_value] = ElfFunctionSymbol{
                             .name = std::move(name),
                             .size = static_cast<simrv::xlen::Address>(sym.st_size)};
@@ -219,14 +162,14 @@ auto SymbolTable::load_from_elf(const std::string& elf_path, bool clear_existing
     }
 
     const auto elf_class = ident[4];
-    if (elf_class != kElfClass32 && elf_class != kElfClass64) {
+    if (elf_class != kClass32 && elf_class != kClass64) {
         return false;
     }
 
     fs.seekg(0, std::ios::beg);
 
     std::optional<simrv::xlen::Address> ep;
-    if (elf_class == kElfClass32) {
+    if (elf_class == kClass32) {
         if (!parse_elf_symbols<Elf32_Ehdr, Elf32_Shdr, Elf32_Sym>(
                 fs, symbols_, functions_, ep, [](auto info) { return info & 0x0fU; }, mode)) {
             return false;
@@ -255,11 +198,11 @@ auto SymbolTable::load_from_elf(const std::string& elf_path, bool clear_existing
                         const auto k_class = kident[4];
                         kfs.seekg(0, std::ios::beg);
                         std::optional<simrv::xlen::Address> kep;
-                        if (k_class == kElfClass32) {
+                        if (k_class == kClass32) {
                             (void)parse_elf_symbols<Elf32_Ehdr, Elf32_Shdr, Elf32_Sym>(
                                 kfs, symbols_, functions_, kep,
                                 [](auto info) { return info & 0x0fU; }, mode);
-                        } else if (k_class == kElfClass64) {
+                        } else if (k_class == kClass64) {
                             (void)parse_elf_symbols<Elf64_Ehdr, Elf64_Shdr, Elf64_Sym>(
                                 kfs, symbols_, functions_, kep,
                                 [](auto info) { return info & 0x0fU; }, mode);

@@ -1,5 +1,3 @@
-#include <elf.h>
-
 #include <array>
 #include <cstdlib>
 #include <cstring>
@@ -29,6 +27,7 @@
 #include "simrv/device/Rtc.hpp"
 #include "simrv/device/Uart.hpp"
 #include "simrv/device/pci/PcieRootComplex.hpp"
+#include "simrv/util/ElfTypes.hpp"
 #include "simrv/util/FdtGenerator.hpp"
 #include "simrv/util/FdtPatcher.hpp"
 #include "simrv/xlen/RegisterTypes.hpp"
@@ -36,6 +35,14 @@
 namespace simrv::core {
 
 namespace {
+
+using util::elf::Elf32_Ehdr;
+using util::elf::Elf32_Phdr;
+using util::elf::Elf64_Ehdr;
+using util::elf::Elf64_Phdr;
+using util::elf::kClass32;
+using util::elf::kClass64;
+using util::elf::kLoadSegment;
 
 void apply_cpu_model_dram_defaults(MachineConfig& config, const std::string& model_name) {
     const bool low_dram_model = model_name == "cfu-provingground" || model_name == "rvproc";
@@ -138,7 +145,7 @@ void load_image_into_ram(std::string& file_path, simrv::memory::RamView ram_view
 
             const char class_byte = ident[4];
             auto load_segment = [&](const auto& phdr) {
-                if (phdr.p_type != PT_LOAD || phdr.p_filesz == 0) return;
+                if (phdr.p_type != kLoadSegment || phdr.p_filesz == 0) return;
                 const simrv::xlen::Address paddr = phdr.p_paddr != 0 ? phdr.p_paddr : phdr.p_vaddr;
                 const simrv::xlen::Address dram_base = ram_view.base();
                 simrv::xlen::Address dest_offset = 0;
@@ -168,7 +175,7 @@ void load_image_into_ram(std::string& file_path, simrv::memory::RamView ram_view
                 }
             };
 
-            if (class_byte == 1) {  // 32-bit ELF
+            if (class_byte == kClass32) {
                 Elf32_Ehdr ehdr{};
                 if (in.read(reinterpret_cast<char*>(&ehdr),
                             sizeof(ehdr))) {  // NOLINT(cppcoreguidelines-pro-type-reinterpret-cast)
@@ -185,7 +192,7 @@ void load_image_into_ram(std::string& file_path, simrv::memory::RamView ram_view
                         }
                     }
                 }
-            } else if (class_byte == 2) {  // 64-bit ELF
+            } else if (class_byte == kClass64) {
                 Elf64_Ehdr ehdr{};
                 if (in.read(reinterpret_cast<char*>(&ehdr),
                             sizeof(ehdr))) {  // NOLINT(cppcoreguidelines-pro-type-reinterpret-cast)
@@ -545,7 +552,7 @@ auto Machine::initialize() -> std::expected<void, std::string> {
                     if (file.read(header.data(), 5)) {
                         if (header[0] == 0x7f && header[1] == 'E' && header[2] == 'L' &&
                             header[3] == 'F') {
-                            if (header[4] == 1) {  // ELFCLASS32
+                            if (header[4] == kClass32) {
                                 is_32bit = true;
                             }
                         }

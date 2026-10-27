@@ -36,3 +36,9 @@ jobs:
             -DSIMRV_ENABLE_LTO=OFF
       - name: Build simulator
         run: cmake --build build/macos --target SimRV --parallel 2
+      - name: Upload simulator binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: simrv-macos-${{ matrix.arch }}
+          path: build/macos/SimRV
+          if-no-files-found: error
