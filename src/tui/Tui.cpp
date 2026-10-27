@@ -309,6 +309,10 @@ void Tui::refresh_mission_layout_notice() {
 }
 
 void Tui::set_paused(bool p) {
+    if (!p && mission_execution_stopped_) {
+        set_mission_execution_stopped_notice();
+        return;
+    }
     if (!p && machine_.is_shutdown_) {
         modal_.open_notice("SYSTEM SHUTDOWN",
                            "Target system has shutdown.\n\nPlease reboot [Ctrl-R], load a binary "
@@ -329,8 +333,12 @@ void Tui::set_paused(bool p) {
         p ? simrv::core::ExecutionState::Paused : simrv::core::ExecutionState::Running;
     if (cur_paused != p || cur_machine_state != target_machine_state) {
         paused_.store(p, std::memory_order_release);
+        if (inspector_pane_) inspector_pane_->set_paused(p);
         if (!p) {
             clear_status_override();
+            // Keep the state from before this run as the comparison baseline so changed
+            // registers remain highlighted when execution pauses at a breakpoint/checkpoint.
+            update_cache();
             last_runtime_tick_ = std::chrono::steady_clock::now();
             last_speed_update_ = std::chrono::steady_clock::now();
             last_icount_ = total_snapshot_instruction_count();
@@ -346,6 +354,10 @@ void Tui::set_paused(bool p) {
         update_trace_active_cache();
         trigger_immediate_render();
     }
+}
+
+void Tui::set_mission_execution_stopped_notice() {
+    set_status_override("Lesson complete. Guest execution is stopped for review.");
 }
 
 void Tui::initialize() {
@@ -697,7 +709,6 @@ void Tui::ui_render_loop(const std::stop_token& stop_token) {
                 next_sample = now + interval;
             }
             const bool force = full_render_requested_.exchange(false, std::memory_order_acq_rel);
-            if (is_paused() && (force || g_resized)) update_cache();
             render(force);
             const auto deadline = is_paused() && !frame_dirty_
                                       ? now + std::chrono::milliseconds(200)
@@ -1361,12 +1372,11 @@ void Tui::render(bool force) {
             const auto msg = progress ? std::string_view(progress->message) : std::string_view{};
             if (!msg.empty()) {
                 set_status_override(std::format(
-                    "Checkpoint '{}' after step {} reached: {}  [n] Next step  [F12] Objective",
+                    "Checkpoint '{}' after step {} reached: {}",
                     symbol, progress->after_step, msg));
             } else if (!symbol.empty()) {
                 set_status_override(
-                    std::format("Checkpoint '{}' after step {} reached. Inspect workbench, then "
-                                "press [n] Next step or [F12] Objective.",
+                    std::format("Checkpoint '{}' after step {} reached. Review the workbench.",
                                 symbol, progress ? progress->after_step : mission_.step() + 1));
             }
         }
@@ -3184,7 +3194,11 @@ auto Tui::handle_modal_keyboard_input(uint8_t byte, TuiKey key) -> bool {
             return true;
         }
         if (key == TuiKey::F5) {
-            if (mission_.completed()) return true;
+            if (mission_execution_stopped_) {
+                set_mission_execution_stopped_notice();
+                render(true);
+                return true;
+            }
             if (mission_.checkpoint_reached()) {
                 set_status_override(
                     "Checkpoint reached. Press Space or n for the next instruction.");
@@ -3206,7 +3220,11 @@ auto Tui::handle_modal_keyboard_input(uint8_t byte, TuiKey key) -> bool {
             return true;
         }
         if (key == TuiKey::F6) {
-            if (mission_.completed()) return true;
+            if (mission_execution_stopped_) {
+                set_mission_execution_stopped_notice();
+                render(true);
+                return true;
+            }
             close_modal();
             execute_footer_action(TuiFooterAction::Step);
             return true;
@@ -3406,11 +3424,14 @@ auto Tui::handle_normal_keyboard_input(uint8_t byte, TuiKey key) -> void {
             return;
         }
         if (*action == KeyAction::RunPause &&
-            (mission_.completed() || mission_.checkpoint_reached())) {
+            (mission_execution_stopped_ || mission_.checkpoint_reached())) {
+            if (mission_execution_stopped_) {
+                set_mission_execution_stopped_notice();
+                render(true);
+                return;
+            }
             set_status_override(
-                mission_.completed()
-                    ? "Mission complete. Review, restart with r, or exit with q."
-                    : "Checkpoint reached. Press n for the next instruction before running again.");
+                "Checkpoint reached. Review the lesson step before running again.");
             render(true);
             return;
         }
@@ -3499,12 +3520,11 @@ void Tui::observe_current_pc_symbol() {
             const auto msg = progress ? std::string_view(progress->message) : std::string_view{};
             if (!msg.empty()) {
                 set_status_override(std::format(
-                    "Checkpoint '{}' after step {} reached: {}  [n] Next step  [F12] Objective",
+                    "Checkpoint '{}' after step {} reached: {}",
                     symbol, progress->after_step, msg));
             } else if (!symbol.empty()) {
                 set_status_override(
-                    std::format("Checkpoint '{}' after step {} reached. Inspect workbench, then "
-                                "press [n] Next step or [F12] Objective.",
+                    std::format("Checkpoint '{}' after step {} reached. Review the workbench.",
                                 symbol, progress ? progress->after_step : mission_.step() + 1));
             }
         }
@@ -3519,11 +3539,15 @@ auto Tui::advance_mission_step() -> bool {
         observe_current_pc_symbol();
         mission_revision_seen_ = mission_.revision();
         if (mission_.completed()) {
+            // Keep the completed guest frozen for review. Run and step actions are also
+            // guarded below, so keyboard shortcuts cannot execute past the lesson ending.
+            set_paused(true);
+            mission_execution_stopped_ = true;
             apply_mission_guidance_layout();
-            set_status_override("Mission complete. Review the result, or restart with r.");
+            set_mission_execution_stopped_notice();
         } else if (mission_.guidance()) {
             apply_mission_guidance_layout();
-            set_status_override("Next instruction. Checkpoint status follows the guest program.");
+            set_status_override("Next lesson step. Checkpoint status follows the guest program.");
         }
         return true;
     }
@@ -3559,7 +3583,6 @@ void Tui::clear_trace_buffers() {
 void Tui::pause_loop() {
     observe_current_pc_symbol();
     set_paused(true);
-    update_cache();
     render(true);
 }
 
@@ -3588,6 +3611,7 @@ void Tui::restart_mission() {
         }
     }
     mission_.restart();
+    mission_execution_stopped_ = false;
     apply_mission_speed();
     sync_mission_checkpoint();
     observe_current_pc_symbol();
@@ -3601,7 +3625,10 @@ void Tui::restart_mission() {
 void Tui::execute_header_action(HeaderHitResult hit) {
     switch (hit.action) {
         case HeaderAction::RunPause:
-            if (machine_.is_shutdown_) {
+            if (mission_execution_stopped_) {
+                set_mission_execution_stopped_notice();
+                render(true);
+            } else if (machine_.is_shutdown_) {
                 machine_.request_reboot();
             } else if (paused_) {
                 unpause_loop();
@@ -3628,7 +3655,12 @@ void Tui::execute_header_action(HeaderHitResult hit) {
             open_tool_picker(focused_slot_index_);
             break;
         case HeaderAction::ToggleAttached:
-            toggle_run_state();
+            if (mission_execution_stopped_) {
+                set_mission_execution_stopped_notice();
+                render(true);
+            } else {
+                toggle_run_state();
+            }
             break;
         case HeaderAction::SetSpeed:
             open_modal(ModalType::SetSpeed);
@@ -3658,7 +3690,10 @@ void Tui::execute_footer_action(TuiFooterAction action) {
             machine_.request_reboot();
             break;
         case TuiFooterAction::Step:
-            if (machine_.is_shutdown_) {
+            if (mission_execution_stopped_) {
+                set_mission_execution_stopped_notice();
+                render(true);
+            } else if (machine_.is_shutdown_) {
                 modal_.open_notice("SYSTEM SHUTDOWN",
                                    "Target system has shutdown.\n\nPlease reboot [Ctrl-R], load a "
                                    "binary [o], or quit [q].",
@@ -3672,14 +3707,18 @@ void Tui::execute_footer_action(TuiFooterAction action) {
                 render(true);
             } else {
                 if (!is_paused()) pause_loop();
+                // Compare the step's result to the exact state immediately before it.
+                update_cache();
                 machine_.step_sync();
                 observe_current_pc_symbol();
-                update_cache();
                 render(true);
             }
             break;
         case TuiFooterAction::RunPause:
-            if (machine_.is_shutdown_) {
+            if (mission_execution_stopped_) {
+                set_mission_execution_stopped_notice();
+                render(true);
+            } else if (machine_.is_shutdown_) {
                 modal_.open_notice("SYSTEM SHUTDOWN",
                                    "Target system has shutdown.\n\nPlease reboot [Ctrl-R], load a "
                                    "binary [o], or quit [q].",

@@ -11,6 +11,7 @@
 #include "simrv/tui/Tui.hpp"
 #include "simrv/tui/TuiKeybindings.hpp"
 #include "simrv/tui/TuiTheme.hpp"
+#include "simrv/tui/framework/Text.hpp"
 
 namespace simrv::tui {
 
@@ -124,10 +125,9 @@ auto StatusBar::is_pos_on_status_badge(int x, int width) const -> bool {
     int const inner_w = std::max(0, width - 2);
     size_t const selected = tui_ ? tui_->selected_hart() : 0;
     auto const header = make_left_header_layout(machine_, inner_w / 2, selected);
-    std::string status_text = paused_ ? " PAUSED " : " RUNNING ";
-    if (!status_override_.empty()) {
-        status_text = status_override_;
-    }
+    std::string status_text = machine_.is_shutdown_ ? " SHUTDOWN "
+                              : paused_ ? " PAUSED "
+                                        : " RUNNING ";
     int const badge_len = get_display_width(status_text);
 
     int x_start = 2 + get_display_width(header.identity) + 3;
@@ -694,12 +694,8 @@ auto StatusBar::render_row(int row_idx, int width) -> std::string {
     if (row_idx == 0) {
         // Header
         const size_t selected = tui_ ? tui_->selected_hart() : 0;
-        std::string status_badge = status_override_;
-        if (tui_ && tui_->mission_progress().completed()) {
-            bool use_ansi = use_basic_ansi_badges();
-            status_badge = use_ansi ? "\033[42;30m MISSION COMPLETE \033[0m"
-                                    : "\033[48;5;121m\033[38;5;232m MISSION COMPLETE \033[0m";
-        } else if (status_badge.empty()) {
+        std::string status_badge;
+        {
             bool use_ansi = use_basic_ansi_badges();
             const auto st = machine_.execution_state();
             if (machine_.is_shutdown_ || st == simrv::core::ExecutionState::Stopped) {
@@ -715,9 +711,6 @@ auto StatusBar::render_row(int row_idx, int width) -> std::string {
                 status_badge = use_ansi ? "\033[42;30m RUNNING \033[0m"
                                         : "\033[48;5;121m\033[38;5;232m RUNNING \033[0m";
             }
-        } else if (status_badge == "\033[1;38;5;234;48;5;210m TRAPPED \033[0m" &&
-                   use_basic_ansi_badges()) {
-            status_badge = "\033[1;41;37m TRAPPED \033[0m";
         }
         int const inner_w = std::max(0, width - 2);
         auto const left_header = make_left_header_layout(machine_, inner_w / 2, selected);
@@ -734,20 +727,39 @@ auto StatusBar::render_row(int row_idx, int width) -> std::string {
             left_info += std::format("   \033[1m{}{}\033[0m", kThemeSky, styled_mode);
         }
         left_info += "   " + status_badge;
-        if (status_override_.empty() && tui_ && tui_->mission_progress().enabled()) {
+        if (tui_ && tui_->mission_progress().enabled()) {
             const auto& mission = tui_->mission_progress();
             const auto cp = mission.checkpoint_symbol();
             const bool reached = mission.checkpoint_reached();
-            std::string const mission_label =
-                cp.empty()
-                    ? std::format("STEP {}/{} [n/F12]", mission.step() + 1, mission.step_count())
-                : reached ? std::format("STEP {}/{} · ✓ {} [n/F12]", mission.step() + 1,
+            std::string const mission_label = mission.completed()
+                ? std::format("LESSON DONE · {}/{} CHECKPOINTS", mission.reached_checkpoint_count(),
+                              mission.checkpoint_count())
+                : cp.empty() ? std::format("STEP {}/{} · NO CHECKPOINT", mission.step() + 1,
+                                           mission.step_count())
+                : reached ? std::format("STEP {}/{} · ✓ {}", mission.step() + 1,
                                         mission.step_count(), cp)
-                          : std::format("STEP {}/{} · {} [F5/F12]", mission.step() + 1,
+                          : std::format("STEP {}/{} · WAIT {}", mission.step() + 1,
                                         mission.step_count(), cp);
-            left_info +=
-                " " + header_badge(mission_label, reached ? "\033[42;30m" : "\033[46;30m",
-                                   reached ? "\033[48;5;121;38;5;232m" : "\033[48;5;117;38;5;232m");
+            const auto mission_badge = header_badge(
+                mission_label, (reached || mission.completed()) ? "\033[42;30m" : "\033[46;30m",
+                reached || mission.completed() ? "\033[48;5;121;38;5;232m"
+                                               : "\033[48;5;117;38;5;232m");
+            left_info += " " + mission_badge;
+            if (!status_override_.empty() && get_display_width(left_info) > inner_w / 2) {
+                std::string const short_progress =
+                    mission.completed()
+                        ? std::format("DONE {}/{}", mission.reached_checkpoint_count(),
+                                      mission.checkpoint_count())
+                    : std::format("STEP {}/{} · {}", mission.step() + 1, mission.step_count(),
+                                  cp.empty() ? "NO CP" : reached ? "REACHED" : "WAIT");
+                left_info = status_badge + " " +
+                            header_badge(short_progress,
+                                         (reached || mission.completed()) ? "\033[42;30m"
+                                                                          : "\033[46;30m",
+                                         reached || mission.completed()
+                                             ? "\033[48;5;121;38;5;232m"
+                                             : "\033[48;5;117;38;5;232m");
+            }
         }
 
         std::string mode_prefix;
@@ -780,7 +792,22 @@ auto StatusBar::render_row(int row_idx, int width) -> std::string {
         }
 
         std::string mid_text;
-        if (scroll_offset_ > 0) {
+        if (!status_override_.empty()) {
+            // Temporary notices use the center of the header. Keep machine state and lesson
+            // progress in the left cluster and drop lower priority telemetry to make room.
+            const int available = std::max(0, inner_w - get_display_width(left_info) - 1);
+            std::string notice = status_override_;
+            if (get_display_width(notice) > available && available > 1) {
+                auto lines = framework::wrap_text(notice, available - 1, 1);
+                notice = lines.empty() ? std::string{} : lines.front();
+                if (notice.size() < status_override_.size()) {
+                    while (!notice.empty() && notice.back() != ' ') notice.pop_back();
+                    while (!notice.empty() && notice.back() == ' ') notice.pop_back();
+                    notice += "…";
+                }
+            }
+            mid_text = notice;
+        } else if (scroll_offset_ > 0) {
             mid_text = std::format("═══ SCROLLBACK (-{}) ['c'/'Enter' Live] ═══", scroll_offset_);
         } else {
             const auto snapshot = machine_.tui_execution_snapshot(selected);
@@ -819,9 +846,12 @@ auto StatusBar::render_row(int row_idx, int width) -> std::string {
             }
         }
 
-        std::string right_info = mode_prefix;
-        if (!mid_text.empty()) {
-            right_info += "   " + mid_text;
+        std::string right_info;
+        if (!status_override_.empty()) {
+            right_info = mid_text;
+        } else {
+            right_info = mode_prefix;
+            if (!mid_text.empty()) right_info += "   " + mid_text;
         }
 
         int const left_w = get_display_width(left_info);

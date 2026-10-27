@@ -1,7 +1,8 @@
 # Building Linux Images for SimRV
 
-This guide explains how to build RISC-V RV32GC (or RV64GC) Linux kernel and rootfs
-images for SimRV testing. The default RV64 image builder also provisions a reproducible Alpine
+This guide explains how to build RISC-V Linux kernel and rootfs images for SimRV's
+RVA23-targeted RV64 system and its supported RV32 compatibility configurations. The default
+RV64 image builder also provisions a reproducible Alpine
 Linux graphical path using Xorg, JWM, VirtIO framebuffer/input, a terminal, and small
 offline-friendly demo applications.
 

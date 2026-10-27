@@ -16,9 +16,9 @@
   <img src="https://img.shields.io/badge/SMP-2%20to%2016%20cores-brightgreen.svg" alt="SMP"/>
 </p>
 
-SimRV is an explainable, dual-width (RV32 / RV64) RISC-V research simulator featuring an interactive terminal workbench (TUI), cycle-accurate in-order pipeline modeling, cache hierarchy inspection, and full-system Linux OS emulation. It provides functional and cycle-accurate modes targeting the **RVA23 profile** (`rva23s64` default) and ratified **RV64GCBV** / **RV32GCBV** architectural specifications. The distributed RV64-capable binary also runs RV32 guests; the native RV32 target remains a strict-width verification build.
+SimRV is an explainable, dual-width (RV32 / RV64) RISC-V research simulator featuring an interactive terminal workbench (TUI), cycle-accurate in-order pipeline modeling, cache hierarchy inspection, and full-system Linux OS emulation. It provides functional and cycle-accurate modes targeting the **RVA23 profile** (`rva23s64` default), with RV32 and narrower compatibility presets available for workloads and verification. The distributed RV64-capable binary also runs RV32 guests; the native RV32 target remains a strict-width verification build.
 
-SimRV is not RISC-V certified. RVA23, `RV64GCBV`, and `RV32GCBV` are implementation and verification targets; see the [compliance scope](docs/architecture/compliance.md) for verified coverage, ACT testing, and known gaps.
+SimRV is not RISC-V certified. RVA23 is an implementation and verification target, not a formal certification claim; see the [compliance scope](docs/architecture/compliance.md) for verified coverage, ACT testing, and known gaps.
 
 ---
 
@@ -190,8 +190,8 @@ Run Linux OS image with disk & devicetree:
 Override ISA preset or Vector register length (VLEN):
 
 ```bash
-# Select the explicit RV64GCBV target profile and a 512-bit VLEN
-./build/rv64-release/simrv -m img/vector.bin --isa rv64gcbv --vlen 512
+# Select the explicit RV64 vector and Bitmanip ISA preset with a 512-bit VLEN
+./build/rv64-release/simrv -m img/vector.bin --isa rv64gcv_zba_zbb_zbc_zbs --vlen 512
 ```
 
 ---
@@ -253,7 +253,7 @@ second explicit export action. See the [educational reference](docs/user/classro
 
 ## Supported RISC-V Extensions
 
-RV32GCBV and RV64GCBV are implementation-target names, not complete conformance claims.
+RVA23 is the primary architectural target; RV32 and narrower ISA presets support compatibility and verification workloads.
 
 See [RISC-V compliance scope](docs/architecture/compliance.md) for the precise architectural boundary,
 the [TileLink-C profile](docs/architecture/tilelink.md) for protocol/coherence scope, and the

@@ -6,6 +6,17 @@ directories and ELF binaries.
 
 ## Available Missions
 
+### SimRV Debug Tour (`simrv-debug-tour.mission`)
+
+- **Target Program:** `simrv-debug-tour.elf`
+- **Source Code:** [`examples/isa/simrv-debug-tour.S`](../simrv-debug-tour.S)
+- **Build target:** `simrv-debug-tour.elf` (build with the example Makefile)
+- **Concepts Covered:** Reading the PC, stepping through a branch, watching a register change,
+  setting a symbol breakpoint, and diagnosing an intentional wrong result.
+- **Student quickstart:** [`simrv-debug-tour-student-readme.md`](simrv-debug-tour-student-readme.md)
+- **Labmate test sheet:** [`simrv-debug-tour-test.md`](simrv-debug-tour-test.md)
+- **RV32IMA build:** `make -C examples/isa XLEN=32 ARCH=rv32ima ABI=ilp32`
+
 ### 1. Control Flow & ABI Function Calls (`control-flow-calls.mission`)
 
 - **Target Program:** `control-flow-calls.elf`
@@ -37,13 +48,13 @@ directory to a writable location, build it with a RISC-V ELF toolchain, and poin
 
 ### Student Controls Inside the Mission
 
-- **Step Execution:** Press `F6` (or `s`) to step forward one instruction.
-- **Run / Pause:** Press `F5` (or `c`) to run or pause simulation.
-- **Mission progress:** Press `F12` to review checkpoint and objective progress.
-- **Rationale hint:** Press `y` to reveal or hide the current step's explanation.
-- **Step instructions:** Press `Space` to advance the lesson instructions.
-- **Dismiss Mission:** Press `z` to dismiss the mission and freely explore the simulator.
-- **Restart Mission:** Press `Z` (`Shift-Z`) to restart the mission from step 0.
+- **Step execution:** Press `F6` (or `S`) to execute one guest instruction and inspect its effect.
+- **Run to a stop:** Press `F5` (or `C`) to run until the next active breakpoint or mission checkpoint. It can pass over guest instructions; use `F6` to inspect them one at a time.
+- **Lesson Tasks:** Press `F12` to open or reopen the current task, goal, hint, and checkpoint status.
+- **Hint and rationale:** Press `Y` to cycle through hidden, hint, and full explanation.
+- **Next lesson step:** Press `Space` in Tasks or `N` from the workbench. This advances teaching content, not guest execution or checkpoint evidence.
+- **Dismiss mission:** Press `z` to dismiss the mission and explore freely.
+- **Restart mission:** Press `Z` (`Shift-Z`) to restart the guest and lesson from step 1.
 - **Architecture Glossary:** Press `F9` (or `?`) to view detailed RISC-V architectural explanations.
 
 ---

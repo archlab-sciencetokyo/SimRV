@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <format>
+#include <iterator>
 #include <string>
 #include <vector>
 
@@ -13,40 +14,94 @@
 #include "simrv/debug/SymbolTable.hpp"
 #include "simrv/tui/TuiMission.hpp"
 #include "simrv/tui/TuiModal.hpp"
+#include "simrv/tui/framework/Theme.hpp"
+#include "simrv/tui/framework/Text.hpp"
 #include "simrv/tui/modals/ModalComponents.hpp"
 
 namespace simrv::tui::modals {
 
-void MissionObjectiveModal::render_content(std::vector<std::string>& content_rows, int /*width*/,
+namespace {
+
+[[nodiscard]] auto format_inline_text(std::string_view text, std::string_view value_color)
+    -> std::string {
+    std::string result;
+    result.reserve(text.size() + 24);
+    for (std::size_t i = 0; i < text.size();) {
+        if (text[i] == '`') {
+            const auto close = text.find('`', i + 1);
+            if (close != std::string_view::npos) {
+                result += std::format("\033[1m{}{}\033[0m", value_color,
+                                      text.substr(i + 1, close - i - 1));
+                i = close + 1;
+                continue;
+            }
+        }
+        if (text.substr(i).starts_with("**")) {
+            const auto close = text.find("**", i + 2);
+            if (close != std::string_view::npos) {
+                result += std::format("\033[1m{}\033[0m", text.substr(i + 2, close - i - 2));
+                i = close + 2;
+                continue;
+            }
+        }
+        result.push_back(text[i++]);
+    }
+    return result;
+}
+
+}  // namespace
+
+void MissionObjectiveModal::render_content(std::vector<std::string>& content_rows, int width,
                                            int /*height*/) {
-    auto add_row = [&](std::string s) { content_rows.push_back(std::move(s)); };
+    const int text_width = std::max(1, width - 4);
+    auto add_row = [&](std::string s) {
+        auto wrapped = framework::wrap_text(s, text_width, 2);
+        content_rows.insert(content_rows.end(), std::make_move_iterator(wrapped.begin()),
+                            std::make_move_iterator(wrapped.end()));
+    };
+    const auto palette = framework::active_theme().palette;
+    auto add_labeled_row = [&](std::string_view label, std::string_view text,
+                               std::string_view color) {
+        add_row(std::format("{}\033[1m{}:\033[0m {}", color, label,
+                            format_inline_text(text, palette.value)));
+    };
+    auto add_status_row = [&](std::string_view text, std::string_view color) {
+        add_row(std::format("{}{}\033[0m", color, text));
+    };
+    auto add_footer = [&](std::initializer_list<ModalActionHint> hints) {
+        content_rows.push_back(build_modal_footer(hints));
+    };
     const auto guidance = mission_ != nullptr ? mission_->guidance() : std::nullopt;
     if (guidance) {
-        if (!mission_->goal().empty()) {
-            add_row("Goal: " + std::string(mission_->goal()));
-        } else if (!mission_->description().empty()) {
-            add_row("Lesson: " + std::string(mission_->description()));
-        }
+        const bool has_context = !mission_->description().empty() || !mission_->goal().empty();
+        if (!mission_->description().empty())
+            add_labeled_row("Scenario", mission_->description(), palette.accent);
+        if (!mission_->goal().empty()) add_labeled_row("Goal", mission_->goal(), palette.success);
+        if (has_context) add_row("");
         const bool complete = mission_->completed();
         const auto step_number =
             std::min(mission_->step() + (complete ? 0U : 1U), mission_->step_count());
-        add_row(
-            std::format("Step {}/{} · {}", step_number, mission_->step_count(), guidance->title));
-        add_row("Learn: " + (guidance->learn.empty() ? guidance->title : guidance->learn));
-        add_row("Task: " + guidance->prompt);
+        add_row(std::format("{}\033[1mStep {}/{} · {}\033[0m", palette.accent, step_number,
+                            mission_->step_count(), guidance->title));
+        add_labeled_row("Learn", guidance->learn.empty() ? guidance->title : guidance->learn,
+                        palette.value);
+        add_row("");
+        add_labeled_row("Task", guidance->prompt, palette.text);
+        add_row("");
         if (!guidance->hint.empty()) {
             if (hint_level_ == 0) {
-                add_row("Hint [y to reveal]");
+                add_labeled_row("Hint", "Press Y to reveal.", palette.warning);
             } else if (hint_level_ == 1) {
-                add_row("Hint: " + guidance->hint + " [y for why]");
+                add_labeled_row("Hint", guidance->hint + "  [Y for why]", palette.warning);
             } else {
-                add_row("Why: " + guidance->why + " [y to hide]");
+                add_labeled_row("Why", guidance->why + "  [Y to hide]", palette.muted);
             }
         } else if (hint_level_ == 2) {
-            add_row("Why: " + guidance->why + " [y to hide]");
+            add_labeled_row("Why", guidance->why + "  [Y to hide]", palette.muted);
         } else {
-            add_row("Why [y to reveal]");
+            add_labeled_row("Why", "Press Y to reveal.", palette.muted);
         }
+        add_row("");
         const auto checkpoint = mission_->checkpoint_progress();
         const bool has_checkpoint = checkpoint.has_value();
         const bool reached = checkpoint && checkpoint->reached;
@@ -57,68 +112,91 @@ void MissionObjectiveModal::render_content(std::vector<std::string>& content_row
         const bool reached_ahead = reached && checkpoint->after_step > mission_->step() + 1;
         const bool guest_stopped_for_checkpoint =
             !complete && has_checkpoint && !reached && machine_ && machine_->is_shutdown_;
-        add_row(
-            complete
-                ? std::format("Mission complete · {} of {} checkpoints reached",
-                              mission_->reached_checkpoint_count(), mission_->checkpoint_count())
-                : (!has_checkpoint
-                       ? "No checkpoint for this instruction"
-                       : (reached
-                              ? (reached_ahead
-                                     ? std::format("Reached early · {} (after step {})",
-                                                   checkpoint->symbol, checkpoint->after_step)
-                                     : std::format("Checkpoint reached · {}", checkpoint->symbol))
-                              : std::format("Waiting for {} · after step {}", checkpoint->symbol,
-                                            checkpoint->after_step))));
+        if (complete) {
+            add_status_row(std::format("✓ Lesson complete · {} of {} checkpoints reached",
+                                       mission_->reached_checkpoint_count(),
+                                       mission_->checkpoint_count()),
+                           palette.success);
+        } else if (!has_checkpoint) {
+            add_status_row("No checkpoint for this lesson step.", palette.muted);
+        } else if (reached) {
+            add_status_row(reached_ahead
+                               ? std::format("✓ Checkpoint reached early · {} (after step {})",
+                                             checkpoint->symbol, checkpoint->after_step)
+                               : std::format("✓ Checkpoint reached · {}", checkpoint->symbol),
+                           palette.success);
+        } else {
+            add_status_row(std::format("○ Checkpoint waiting · {} (after step {})",
+                                       checkpoint->symbol, checkpoint->after_step),
+                           palette.warning);
+        }
         if (checkpoint_symbol_missing) {
-            add_row("This lesson checkpoint is missing from the loaded program.");
-            add_row("Ask your instructor to provide the matching program file.");
+            add_status_row("This checkpoint is not in the loaded program.", palette.danger);
+            add_row("Ask your instructor for the matching program file.");
         }
         if (reached && !checkpoint->message.empty()) {
-            add_row(" " + checkpoint->message);
+            add_labeled_row("Checkpoint note", checkpoint->message, palette.value);
         }
         if (guest_stopped_for_checkpoint) {
-            add_row("The program stopped before reaching this checkpoint.");
-            add_row("Next: restart with r, or press Enter to inspect the stopped state.");
-        } else if (!complete && has_checkpoint && !reached && !checkpoint_symbol_missing) {
-            add_row(
-                std::format("Next: press F5 to run to {}. This does not advance the instruction.",
-                            checkpoint->symbol));
-        } else if (!complete && reached_ahead) {
-            add_row(
-                std::format("Next: press Space to continue reading through step {}. The checkpoint "
-                            "is already reached.",
-                            checkpoint->after_step));
-        } else if (!complete && reached && final_step) {
-            add_row("Next: press Space to finish the lesson.");
-        } else if (!complete && reached) {
-            add_row("Next: press Space for the next instruction.");
-        } else if (!complete && !has_checkpoint && !final_step) {
-            add_row("Next: press Space for the next instruction.");
+            add_status_row("The program stopped before reaching this checkpoint.", palette.danger);
         }
         add_row("");
+        const std::string hint_action =
+            !guidance->hint.empty()
+                ? (hint_level_ == 0 ? "Show hint"
+                   : hint_level_ == 1 ? "Show why"
+                                      : "Hide why")
+                : (hint_level_ == 2 ? "Hide why" : "Show why");
         if (complete) {
-            add_row(mission_->can_previous_step()
-                        ? " [Enter / Esc] Workbench   [p] Previous   [r] Restart"
-                        : " [Enter / Esc] Workbench   [r] Restart");
-            add_row(" [q / F10] Exit simulator");
+            add_status_row("Guest execution is stopped. The final state is safe to review.",
+                           palette.success);
+            if (mission_->can_previous_step()) {
+                add_footer({{.key = "[Enter / Esc]", .action = "Workbench"},
+                            {.key = "[P]", .action = "Previous", .color = kThemePink}});
+            } else {
+                add_footer({{.key = "[Enter / Esc]", .action = "Workbench"}});
+            }
+            add_footer({{.key = "[R]", .action = "Restart", .color = kThemeMint},
+                        {.key = "[Q / F10]", .action = "Exit", .color = kThemeCoral}});
         } else if (guest_stopped_for_checkpoint) {
-            add_row(" [r] Restart   [Enter / Esc] Inspect state   [p] Previous");
+            add_footer({{.key = "[R]", .action = "Restart", .color = kThemeMint},
+                        {.key = "[Enter / Esc]", .action = "Inspect state"},
+                        {.key = "[P]", .action = "Previous", .color = kThemePink}});
+        } else if (!mission_->enabled()) {
+            add_footer({{.key = "[Enter / Esc]", .action = "Close"}});
+        } else if (!mission_->can_advance_step() && has_checkpoint) {
+            if (checkpoint_symbol_missing) {
+                add_footer({{.key = "[F6]", .action = "Step", .color = kThemePeach},
+                            {.key = "[Enter / Esc]", .action = "Hide"},
+                            {.key = "[Y]", .action = hint_action, .color = kThemePink}});
+            } else {
+                add_footer({{.key = "[F5]", .action = "Run to checkpoint", .color = kThemePeach},
+                            {.key = "[F6]", .action = "Step", .color = kThemePeach},
+                            {.key = "[Enter / Esc]", .action = "Hide"},
+                            {.key = "[Y]", .action = hint_action, .color = kThemePink}});
+            }
         } else {
-            add_row(
-                has_checkpoint && !reached && !checkpoint_symbol_missing
-                    ? " [F5] Run   [F6] Step   [Space] Next   [Enter / Esc] Hide   [y] Hint"
-                    : (checkpoint_symbol_missing
-                           ? " [F6] Step   [Space] Next   [Enter / Esc] Hide   [y] Hint"
-                           : (final_step ? " [Space] Finish   [Enter / Esc] Hide   [y] Hint"
-                                         : (reached ? " [Space] Next instruction   [Enter / Esc] "
-                                                      "Hide   [y] Hint"
-                                                    : " [Space] Next instruction   [F5] Run   "
-                                                      "[Enter / Esc] Hide   [y] Hint"))));
-            if (mission_->can_previous_step())
-                add_row(" [p] Previous   [r] Restart   [F9 / ?] Glossary");
-            else
-                add_row(" [r] Restart   [F9 / ?] Glossary");
+            if (has_checkpoint && !reached && !checkpoint_symbol_missing) {
+                add_footer({{.key = "[Space / N]",
+                             .action = final_step ? "Finish lesson" : "Next lesson step",
+                             .color = kThemeSky},
+                            {.key = "[F5]", .action = "Run to checkpoint",
+                             .color = kThemePeach}});
+            } else {
+                add_footer({{.key = "[Space / N]",
+                             .action = final_step ? "Finish lesson" : "Next lesson step",
+                             .color = kThemeSky}});
+            }
+            add_footer({{.key = "[Enter / Esc]", .action = "Hide"},
+                        {.key = "[Y]", .action = hint_action, .color = kThemePink}});
+            if (mission_->can_previous_step()) {
+                add_footer({{.key = "[P]", .action = "Previous / Undo", .color = kThemePink},
+                            {.key = "[R]", .action = "Restart", .color = kThemeMint},
+                            {.key = "[F9 / ?]", .action = "Glossary"}});
+            } else {
+                add_footer({{.key = "[R]", .action = "Restart", .color = kThemeMint},
+                            {.key = "[F9 / ?]", .action = "Glossary"}});
+            }
         }
     } else {
         add_row("No active mission objective.");

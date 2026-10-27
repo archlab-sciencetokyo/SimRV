@@ -21,9 +21,11 @@ SimRV is an explainable, dual-width (RV32 / RV64) RISC-V architectural simulator
 
 ## 1. Architecture & Features Overview
 
-SimRV simulates standard 32-bit and 64-bit RISC-V systems:
+SimRV's primary architectural target is the ratified RVA23 profile (`rva23s64` by default). The
+RV64-capable release also runs RV32 guests, and compatibility ISA presets are available for narrower
+workloads and verification:
 
-- **ISA Support**: RV32GCZBV / RV64GCZBV (Base Integer `I`/`E`, Standard Multiply/Divide `M`, Atomic `A`, Single/Double Floating Point `F`/`D`, Compressed `C`, Bit Manipulation `B` (Zba/Zbb/Zbc/Zbs), and Vector 1.0 `V`).
+- **ISA Support**: RVA23 (`rva23s64` default; `rva23u64` also available), plus RV32 and narrower compatibility presets. Implemented extensions include Base Integer, Multiply/Divide, Atomic, Single/Double Floating Point, Compressed, Bit Manipulation, and a qualified subset of Vector 1.0; see the [compliance scope](../architecture/compliance.md) for coverage and known gaps.
 - **Privilege & System Architecture**: Machine (M), Supervisor (S), and User (U) privilege modes with PMP (Physical Memory Protection), Sv32 / Sv39 MMU page translation, CLINT / ACLINT timer and software interrupts, and PLIC / AIA (APLIC/IMSIC) interrupt routing.
 - **Microarchitectural Modeling**: Per-cycle transition kernels for three-stage, five-stage, and dual-issue pipelines with configurable branch prediction (static, bimodal, 2-level adaptive, RAS, BTB) and multi-level L1/L2/L3 cache hierarchies.
 - **Multi-Hart Coherence**: TileLink-C directory-based coherence hubs modeling MESI protocols for SMP configurations (2 to 16 harts).
@@ -443,9 +445,9 @@ The SimRV TUI provides an educational visual inspection environment for architec
 - **Search UART scrollback**: Pause and focus the console pane, press `Ctrl-F` (or `/`), enter a query, then use `n` / `N` to move between matches. Press `Esc` to cancel search input.
 - **Load files**: In binary, disk, and CPU model path dialogs, use `Tab` to complete the shared path prefix, or `Ctrl-O` to browse and filter files. `Shift-Tab` in the binary dialog cycles bare-metal, OS, and Buildroot-folder modes.
 - **`[Tab]` / `[Shift-Tab]`**: Switch active sub-views within the left inspector pane.
-- **`[F5]` / `[c]` / `[Ctrl-P]`**: Run / Pause simulation execution.
-- **`[F6]` / `[s]`**: Step one cycle machine-wide across all harts.
-- **`[Ctrl-Q]` / `[F10]` / `[q]` (when paused)**: Quit simulator.
+- **`[F5]` / `[C]` / `[Ctrl-P]`**: Run / Pause simulation execution.
+- **`[F6]` / `[S]`**: Step one cycle machine-wide across all harts.
+- **`[Ctrl-Q]` / `[F10]` / `[Q]` (when paused)**: Quit simulator.
 
 !!! info "Pause to use TUI navigation"
     While the guest is running, regular keystrokes go to its UART. Pause with `Ctrl-P` before using

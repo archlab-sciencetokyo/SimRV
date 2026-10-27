@@ -390,6 +390,7 @@ class Tui : public core::ITelemetrySink, public core::IConsoleSink {
     std::vector<std::string> last_screen_lines_;
     std::atomic<bool> paused_{true};
     MissionProgress mission_;
+    bool mission_execution_stopped_{false};
     uint64_t mission_revision_seen_ = 0;
     std::optional<bool> mission_layout_fits_;
     std::optional<simrv::xlen::Address> mission_breakpoint_addr_;
@@ -482,6 +483,7 @@ class Tui : public core::ITelemetrySink, public core::IConsoleSink {
     void drain_trace_records();
 
     void execute_footer_action(TuiFooterAction action);
+    void set_mission_execution_stopped_notice();
     void execute_key_action(KeyAction action);
     void execute_header_action(HeaderHitResult hit);
     [[nodiscard]] auto column_widths(int terminal_width) const -> framework::ColumnWidths;

@@ -133,9 +133,6 @@ auto make_inspection_report(const simrv::core::Machine& machine, size_t hart,
             << ", \"completed\": " << (mission->completed ? "true" : "false")
             << ", \"step\": " << mission->step << ", \"step_count\": " << mission->step_count
             << ", \"checkpoint_count\": " << mission->checkpoint_count
-            << ", \"completed\": " << (mission->completed ? "true" : "false")
-            << ", \"step\": " << mission->step << ", \"step_count\": " << mission->step_count
-            << ", \"checkpoint_count\": " << mission->checkpoint_count
             << ", \"reached_checkpoints\": [";
         for (size_t index = 0; index < mission->reached_checkpoints.size(); ++index) {
             if (index != 0) out << ", ";

@@ -72,12 +72,12 @@ The TUI provides responsive hotkeys for simulation control and state inspection:
 
 | Key | Action | Description |
 | :--- | :--- | :--- |
-| **`Ctrl-P`** / **`F5`** / **`c`** | Run / Pause | Toggle between continuous execution and paused inspection. |
-| **`s`** / **`F6`** | Step Instruction | Execute exactly one instruction machine-wide across all harts. |
+| **`Ctrl-P`** / **`F5`** / **`C`** | Run / Pause | Toggle between continuous execution and paused inspection. |
+| **`S`** / **`F6`** | Step Instruction | Execute exactly one instruction machine-wide across all harts. |
 | **`Ctrl-R`** | Reboot | Reset architectural state, reload images, and restart simulation. |
-| **`Ctrl-Q`** / **`F10`** / **`q`** | Quit | Exit SimRV cleanly and restore host terminal attributes. |
-| **`f`** | Set Frequency | Set the requested simulation frequency. |
-| **`v`** | Toggle Precision | Switch between IA and CA execution modes. |
+| **`Ctrl-Q`** / **`F10`** / **`Q`** | Quit | Exit SimRV cleanly and restore host terminal attributes. |
+| **`F`** | Set Frequency | Set the requested simulation frequency. |
+| **`V`** | Toggle Precision | Switch between IA and CA execution modes. |
 
 ### Navigation & Focus
 
@@ -97,13 +97,13 @@ The TUI provides responsive hotkeys for simulation control and state inspection:
 
 | Key | Action | Description |
 | :--- | :--- | :--- |
-| **`o`** | Load | Open the binary, disk, or CPU model workflow. |
+| **`O`** | Load | Open the binary, disk, or CPU model workflow. |
 | **`Ctrl-O`** (in a load modal) | Browse | Open the file picker for the active load workflow. |
 | **`F2`** / **`,`** | Settings | Open simulator settings. |
 | **`Ctrl-F`** / **`/`** | Search Console | Search UART terminal history (available when paused). |
 | **`n`** / **`N`** | Next / Prev Match | Move to the next or previous search match in console scrollback. |
 | **`Esc`** | Cancel / Close | Close active modal dialog or cancel active search query. |
-| **`F1`** / **`h`** | Help | Open the keyboard shortcut reference. |
+| **`F1`** / **`H`** | Help | Open the keyboard shortcut reference. |
 | **`F9`** / **`?`** | Glossary | Open the architectural glossary. |
 
 ---
@@ -153,7 +153,7 @@ simrv --mission examples/isa/lessons/control-flow-calls.mission -m control-flow-
 ```
 
 - **Structured Missions (`--mission`)**: Load instructional steps and independent named checkpoints that focus relevant inspector panels. See the [Instructor Guide](classroom.md#5-instructor-guide-authoring-deploying-classroom-missions).
-- **Mission Controls**: The modal keeps the student view focused on the lesson goal, current learning target, task, checkpoint state, and one next action. Press `F12` to open or reopen it. `F5` runs to the named checkpoint, even when its boundary is a later instruction; reaching it records progress without moving the instruction cursor. `F5` never advances an instruction and is blocked once the checkpoint is reached. Press `Space` / `n` in the modal to advance instructions; an unreached checkpoint only blocks crossing its `after_step` boundary. `F6` single-steps, `p` reviews the previous instruction, and `y` cycles hidden → hint → `why`. `Enter` / `Esc` hide the modal and `d` dismisses the mission. Outside the modal, `Space` retains its simulator step action. Completion shows reached/total checkpoint counts; TAs can export checkpoint evidence with `x` from the paused workbench.
+- **Mission Controls**: The modal keeps the student view focused on the lesson goal, current learning target, task, checkpoint state, and controls available in that state. Press `F12` to open or reopen Lesson Tasks / Guide. `F5` runs to the named checkpoint, even when its boundary follows a later lesson step; reaching it records progress without moving the lesson-step cursor. `F5` never advances a lesson step and is blocked once the checkpoint is reached. Press `Space` / `N` in Lesson Tasks / Guide to advance steps; an unreached checkpoint blocks only its own boundary, and the modal shows Next when advancing is allowed. `P` returns to the previous lesson step if you advance by mistake; it does not rewind guest execution. Use `R` to restart guest execution. `F6` single-steps a CPU instruction, and `Y` cycles hidden → hint → `why`. `Enter` / `Esc` hide Lesson Tasks and `z` dismisses the mission. Outside the modal, `Space` retains its simulator step action. Completion shows reached/total checkpoint counts; TAs can export checkpoint evidence with `X` from the paused workbench.
 - **Architecture Glossary**: Press `?` to open the educational glossary jump-linked to the architectural concept represented by the active inspector view (e.g., pipeline hazard interlocks, cache associativity, or virtual memory translation).
 
 ---

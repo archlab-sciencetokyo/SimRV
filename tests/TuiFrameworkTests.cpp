@@ -68,6 +68,8 @@ struct TuiTestAccess {
     static void set_paused(Tui& tui, bool paused) {
         tui.paused_.store(paused, std::memory_order_relaxed);
     }
+    static void set_execution_paused(Tui& tui, bool paused) { tui.set_paused(paused); }
+    static void update_tui(Tui& tui) { tui.update(); }
     static void set_mission_breakpoint(Tui& tui, simrv::xlen::Address address) {
         tui.machine_.breakpoint_manager().add_pc_breakpoint(address,
                                                             simrv::debug::BreakpointOwner::Mission);
@@ -507,6 +509,10 @@ void test_key_registry() {
     expect(simrv::tui::Keybindings::get_help_key(simrv::tui::KeyAction::Step).find("F6") !=
                std::string::npos,
            "canonical F6 is Step");
+    expect(simrv::tui::Keybindings::get_help_key(simrv::tui::KeyAction::Step).contains("[S]") &&
+               simrv::tui::Keybindings::match(static_cast<simrv::tui::TuiKey>('S')) ==
+                   simrv::tui::KeyAction::Step,
+           "uppercase key labels in help remain directly usable");
     expect(simrv::tui::Keybindings::get_help_key(simrv::tui::KeyAction::TogglePcBreakpoint)
                    .find("F8") != std::string::npos,
            "canonical F8 is TogglePcBreakpoint");
@@ -1157,7 +1163,7 @@ void test_control_flow_calls_mission() {
     no_hint_modal.render_overlay(no_hint_rows, 100, 20);
     std::string no_hint_render;
     for (const auto& row : no_hint_rows) no_hint_render += row;
-    expect(no_hint_render.find("Why [y to reveal]") != std::string::npos,
+    expect(no_hint_render.find("Why: Press Y to reveal.") != std::string::npos,
            "steps without a short hint retain the existing rationale reveal");
     no_hint_modal.cycle_mission_hint();
     expect(no_hint_modal.mission_hint_level() == 2,
@@ -1177,21 +1183,53 @@ void test_control_flow_calls_mission() {
     expect(rendered_modal.find("Step 1/6 · Follow the branch") != std::string::npos &&
                rendered_modal.find("Step 1 of 6") == std::string::npos,
            "mission modal formats step title cleanly without duplicate step prefix");
-    expect(rendered_modal.find("Waiting for mission_loop · after step 1") != std::string::npos,
+    expect(rendered_modal.find("Checkpoint waiting · mission_loop (after step 1)") !=
+               std::string::npos,
            "mission modal identifies the pending checkpoint boundary");
     expect(rendered_modal.find("Learn: Relate a branch decision") != std::string::npos &&
                rendered_modal.find("Relate a branch decision to the next program counter") !=
                    std::string::npos,
            "mission modal explains the learning target");
-    expect(rendered_modal.find("Hint [y to reveal]") != std::string::npos,
+    expect(rendered_modal.find("Hint: Press Y to reveal.") != std::string::npos,
            "mission modal explains how to reveal a hint");
-    expect(rendered_modal.find("Next: press F5 to run to mission_loop") != std::string::npos,
-           "mission modal states one direct next action");
+    expect(rendered_modal.find("Next:") == std::string::npos &&
+               rendered_modal.find("Run to checkpoint") != std::string::npos &&
+               rendered_modal.find("Step") != std::string::npos,
+           "mission modal leaves step-specific guidance to the task and lists available controls in the footer");
     expect(rendered_modal.find("Flow:") == std::string::npos &&
                rendered_modal.find("checkpoints 0/6") == std::string::npos &&
                rendered_modal.find("At the branch, a0 is 2") == std::string::npos &&
                rendered_modal.find("conditional branch selects") == std::string::npos,
            "mission modal omits progress notation and unrevealed teaching content");
+    modal_rows.assign(30, std::string(60, ' '));
+    modal.render_overlay(modal_rows, 60, 30);
+    bool task_prefix_visible = false;
+    bool task_tail_visible = false;
+    for (const auto& row : modal_rows) {
+        const auto plain_row = strip_ansi(row);
+        task_prefix_visible |= plain_row.find("Task: In Trace, find bne.") != std::string::npos;
+        task_tail_visible |= plain_row.find("PC after the branch runs.") != std::string::npos;
+    }
+    expect(task_prefix_visible && task_tail_visible,
+           "mission modal wraps long task text across rows at narrow terminal widths");
+    modal_rows.assign(40, std::string(200, ' '));
+    modal.render_overlay(modal_rows, 200, 40);
+    int mission_modal_width = 0;
+    for (const auto& row : modal_rows) {
+        const auto plain_row = strip_ansi(row);
+        const std::string left_glyph = plain_row.find("┌") != std::string::npos ? "┌" : "+";
+        const std::string right_glyph = left_glyph == "┌" ? "┐" : "+";
+        const auto left = plain_row.find(left_glyph);
+        const auto right = left == std::string::npos ? std::string::npos
+                                                      : plain_row.find(right_glyph, left + 1);
+        if (right != std::string::npos) {
+            mission_modal_width = simrv::tui::framework::display_width(
+                std::string_view(plain_row).substr(left, right - left + right_glyph.size()));
+            break;
+        }
+    }
+    expect(mission_modal_width > 0 && mission_modal_width <= 100,
+           "mission modal adapts to content but caps its width at 100 columns");
     modal.cycle_mission_hint();
     modal_rows.assign(30, std::string(100, ' '));
     modal.render_overlay(modal_rows, 100, 30);
@@ -1320,7 +1358,8 @@ void test_control_flow_calls_mission() {
     expect(recovery_text.find("The program stopped before reaching this checkpoint.") !=
                    std::string::npos &&
                recovery_text.find("restart with r") != std::string::npos &&
-               recovery_text.find("[r] Restart") != std::string::npos,
+               recovery_text.find(" R ") != std::string::npos &&
+               recovery_text.find("Restart") != std::string::npos,
            "mission guidance offers recovery when the guest stops before a checkpoint");
     expect(independent.advance_step() && independent.step() == 1 && independent.can_advance_step(),
            "students can advance up to an already reached checkpoint boundary");
@@ -1341,11 +1380,24 @@ void test_control_flow_calls_mission() {
     if (auto* inspector = simrv::tui::TuiTestAccess::inspector(layout_tui)) {
         inspector->set_page(simrv::tui::TuiRegPage::GPR);
         inspector->set_visible_rows(18);
-        const std::string drawer_row0 = inspector->render_row(16, 80);
-        const std::string drawer_row1 = inspector->render_row(17, 80);
-        expect(drawer_row0.contains("Mission 1/6: Follow the branch") &&
-                   drawer_row0.contains("mission_loop") && drawer_row1.contains("Task:"),
-               "primary inspector pane renders the 2-line mission drawer when a mission is active");
+        const std::string drawer_row0 = inspector->render_row(13, 80);
+        const std::string drawer_row1 = inspector->render_row(14, 80);
+        const std::string drawer_row2 = inspector->render_row(15, 80);
+        const std::string drawer_row3 = inspector->render_row(16, 80);
+        const std::string drawer_row4 = inspector->render_row(17, 80);
+        const auto plain_drawer_row0 = strip_ansi(drawer_row0);
+        const auto plain_drawer_row1 = strip_ansi(drawer_row1);
+        const auto plain_drawer_row2 = strip_ansi(drawer_row2);
+        const auto plain_drawer_row3 = strip_ansi(drawer_row3);
+        const auto plain_drawer_row4 = strip_ansi(drawer_row4);
+        expect(plain_drawer_row0.contains("[F12] Tasks") &&
+                   plain_drawer_row1.contains("Step 1/6") &&
+                   plain_drawer_row1.contains("Follow the branch") &&
+                   plain_drawer_row2.contains("Focus:") &&
+                   plain_drawer_row3.contains("Checkpoint waiting") &&
+                   plain_drawer_row3.contains("mission_loop") &&
+                   plain_drawer_row4.contains("[F5] Run"),
+               "primary inspector pane renders a concise 5-line mission drawer with F12 guidance");
     }
     expect(layout_tui.get_workbench_slots().size() == 3 &&
                simrv::tui::TuiTestAccess::column_widths(layout_tui, 100).count == 2 &&
@@ -1411,7 +1463,7 @@ void test_control_flow_calls_mission() {
     simrv::tui::TuiTestAccess::handle_normal_key(layout_tui, 0, simrv::tui::TuiKey::F5);
     expect(layout_tui.mission_progress().step() == 1 && layout_tui.is_paused() &&
                simrv::tui::TuiTestAccess::status_override(layout_tui)
-                   .contains("Press n for the next instruction"),
+                   .contains("Review the lesson step before running again"),
            "F5 cannot run past a reached checkpoint before the student advances the instruction");
     simrv::tui::TuiTestAccess::handle_normal_key(layout_tui, 'n', simrv::tui::TuiKey::n);
     expect(layout_tui.mission_progress().step() == 2 &&
@@ -1424,9 +1476,11 @@ void test_control_flow_calls_mission() {
            "restarting a mission also resets guest architectural state to the entry point");
 
     simrv::core::Machine completion_machine;
+    completion_machine.primary_hart().state().pc = simrv::memory::kDramBaseAddress;
     simrv::tui::Tui completion_tui(completion_machine);
     simrv::tui::TuiTestAccess::configure_mission(completion_tui, lesson,
                                                  "/tmp/control-flow-calls.elf");
+    simrv::tui::TuiTestAccess::set_execution_paused(completion_tui, false);
     auto& completion_progress = simrv::tui::TuiTestAccess::mission_progress(completion_tui);
     while (completion_progress.step() < 5) {
         if (!completion_progress.can_advance_step())
@@ -1442,25 +1496,37 @@ void test_control_flow_calls_mission() {
     std::string final_modal_text;
     for (const auto& row : final_modal_rows) final_modal_text += row;
     expect(final_modal_text.find("Checkpoint reached · mission_done") != std::string::npos &&
-               final_modal_text.find("[Space] Finish") != std::string::npos,
+               final_modal_text.find("Space / N") != std::string::npos &&
+               final_modal_text.find("Finish lesson") != std::string::npos,
            "final checkpoint explains that Space completes the lesson for review");
     simrv::tui::TuiTestAccess::handle_modal_key(completion_tui, ' ', simrv::tui::TuiKey::Space);
     expect(completion_progress.completed(), "final instruction advances the mission to complete");
     expect(completion_machine.stop_reason() == simrv::core::Machine::StopReason::Running &&
-               !completion_machine.is_shutdown_ &&
+               completion_machine.is_paused() && completion_tui.is_paused() &&
                simrv::tui::TuiTestAccess::modal(completion_tui).get_type() ==
                    simrv::tui::ModalType::MissionObjective,
-           "mission completion leaves the paused simulator open for review");
+           "mission completion pauses guest execution and keeps the final state open for review");
     final_modal_rows.assign(30, std::string(100, ' '));
     simrv::tui::TuiTestAccess::modal(completion_tui).render_overlay(final_modal_rows, 100, 30);
     final_modal_text.clear();
     for (const auto& row : final_modal_rows) final_modal_text += row;
     expect(
         final_modal_text.find("6 of 6 checkpoints reached") != std::string::npos &&
+            final_modal_text.find("Guest execution is stopped") != std::string::npos &&
             final_modal_text.find("press x while paused on the workbench") == std::string::npos &&
-            final_modal_text.find("[r] Restart") != std::string::npos &&
-            final_modal_text.find("[q / F10] Exit simulator") != std::string::npos,
-        "completion screen offers review, restart, and an explicit simulator exit");
+            final_modal_text.find("Restart") != std::string::npos &&
+            final_modal_text.find("Q / F10") != std::string::npos &&
+            final_modal_text.find("Exit") != std::string::npos,
+        "completion screen explains the stopped guest and offers review, restart, and exit");
+    simrv::tui::TuiTestAccess::handle_modal_key(completion_tui, '\r', simrv::tui::TuiKey::Enter);
+    const auto completed_pc = completion_machine.primary_hart().state().pc;
+    simrv::tui::TuiTestAccess::handle_normal_key(completion_tui, 0, simrv::tui::TuiKey::F6);
+    simrv::tui::TuiTestAccess::handle_normal_key(completion_tui, 0, simrv::tui::TuiKey::F5);
+    simrv::tui::TuiTestAccess::handle_normal_key(completion_tui, ' ', simrv::tui::TuiKey::Space);
+    expect(completion_machine.primary_hart().state().pc == completed_pc &&
+               completion_machine.is_paused() && completion_tui.is_paused(),
+           "F5 and F6 cannot resume or step guest execution after mission completion");
+    simrv::tui::TuiTestAccess::modal(completion_tui).open_mission_objective();
     simrv::tui::TuiTestAccess::handle_modal_key(completion_tui, 'q', simrv::tui::TuiKey::q);
     expect(completion_machine.stop_reason() == simrv::core::Machine::StopReason::GuestExit,
            "the completed mission screen exits only after an explicit quit action");
@@ -1510,6 +1576,45 @@ void test_control_flow_calls_mission() {
     std::filesystem::remove(invalid_lesson, invalid_error);
 }
 
+void test_register_change_highlight() {
+    simrv::core::Machine machine;
+    simrv::tui::InspectorPane pane(machine);
+    pane.set_page(simrv::tui::TuiRegPage::GPR);
+    pane.set_paused(true);
+    pane.update_cache();
+    machine.primary_hart().state().regs.write(simrv::xlen::RegId::A0, 7);
+
+    const auto changed_row = pane.render_row(12, 80);
+    expect(changed_row.find(simrv::tui::kThemePeach) != std::string::npos,
+           "GPR values that differ from the pre-execution snapshot use the changed-value color");
+
+    pane.update_cache();
+    const auto stable_row = pane.render_row(12, 80);
+    expect(stable_row.find(simrv::tui::kThemePeach) == std::string::npos,
+           "register change highlight clears after a fresh baseline snapshot");
+
+    simrv::core::Machine running_machine;
+    running_machine.primary_hart().state().pc = simrv::memory::kDramBaseAddress;
+    running_machine.primary_hart().state().regs.write(simrv::xlen::RegId::A0, 7);
+    simrv::tui::Tui tui(running_machine);
+    simrv::tui::TuiTestAccess::init_panes(tui, running_machine);
+    if (tui.is_modal_active()) tui.close_modal();
+    running_machine.primary_hart().state().pc = simrv::memory::kDramBaseAddress;
+    running_machine.primary_hart().state().regs.write(simrv::xlen::RegId::A0, 7);
+    simrv::tui::TuiTestAccess::set_execution_paused(tui, false);
+    simrv::tui::TuiTestAccess::update_cache(tui);
+    running_machine.primary_hart().state().regs.write(simrv::xlen::RegId::A0, 8);
+    simrv::tui::TuiTestAccess::set_execution_paused(tui, true);
+    auto* running_pane = simrv::tui::TuiTestAccess::inspector(tui);
+    running_pane->set_visible_rows(24);
+    // The normal update loop re-selects the active hart every frame. It must not
+    // replace the pre-run comparison snapshot when that hart has not changed.
+    simrv::tui::TuiTestAccess::update_tui(tui);
+    const auto paused_a0_row = running_pane->render_row(12, 80);
+    expect(paused_a0_row.find(simrv::tui::kThemePeach) != std::string::npos,
+           "the TUI retains its pre-run register snapshot when execution pauses");
+}
+
 void test_drawer_stack_layout() {
     simrv::tui::TuiDrawerStack drawers;
     drawers.add({.id = simrv::tui::TuiDrawerId::Log,
@@ -1556,14 +1661,14 @@ void test_drawer_stack_layout() {
     tui.render(true);
 
     auto* pane = simrv::tui::TuiTestAccess::inspector(tui);
-    // At term_height = 32, num_rows = 25 (>= 20), so Log (rows 17..22, term y 21..26) and
-    // Mission (rows 23..24, term y 27..28) are both active on column 0.
+    // At term_height = 32, num_rows = 25 (>= 20), so Log (rows 14..19, term y 18..23) and
+    // Mission (rows 20..24, term y 24..28) are both active on column 0.
     const auto active = pane->active_drawers(80, 25, false);
-    expect(active.height() == 8, "both 6-row Log and 2-row Mission drawers are active at 25 rows");
+    expect(active.height() == 11, "6-row Log and 5-row Mission drawers are active at 25 rows");
     expect(pane->drawer_at_terminal_row(27, 80, 25, false)->id == simrv::tui::TuiDrawerId::Mission,
            "terminal row 27 maps to the Mission drawer");
-    expect(pane->drawer_at_terminal_row(21, 80, 25, false)->id == simrv::tui::TuiDrawerId::Log,
-           "terminal row 21 maps to the Log drawer header");
+    expect(pane->drawer_at_terminal_row(18, 80, 25, false)->id == simrv::tui::TuiDrawerId::Log,
+           "terminal row 18 maps to the Log drawer header");
 
     // Clicking the Mission drawer opens the MissionObjective modal
     tui.handle_mouse(10, 27, 0);
@@ -1576,7 +1681,7 @@ void test_drawer_stack_layout() {
     pane->set_log_drawer_open(false);
     expect(!pane->find_drawer_span(simrv::tui::TuiDrawerId::Log, 80, 25, false).has_value(),
            "closing Log drawer removes its span from active_drawers");
-    expect(pane->content_end_terminal_row(80, 25, false) == 26,
+    expect(pane->content_end_terminal_row(80, 25, false) == 23,
            "closing Log drawer extends main content end row down to above Mission drawer");
     pane->set_log_drawer_open(true);
 }
@@ -2158,13 +2263,27 @@ void test_modal_components() {
 
     const auto meta_notice = get_modal_metadata(simrv::tui::ModalType::Notice, true, "ALERT");
     expect(meta_notice.title.contains("❌ ALERT"), "Notice error title contains icon and name");
+    expect(get_modal_metadata(simrv::tui::ModalType::MissionObjective).title.contains("LESSON TASKS / GUIDE"),
+           "the mission modal is named Lesson Guide to distinguish it from CPU instructions");
 
     // Test unified footer builder
     const auto footer = build_modal_footer({{"[Enter]", "Apply"}, {"[Esc]", "Cancel"}});
     expect(footer.contains(" Enter ") && footer.contains("Apply") && footer.contains(" Esc ") &&
                footer.contains("Cancel"),
            "Modal footer renders filled keycaps and action labels");
+    expect(build_modal_footer({{"[y]", "Hint"}}).contains(" Y "),
+           "shared modal footers capitalize single-letter key names consistently");
+    expect(footer.contains("\033[1;7m"), "modal keycaps use a filled style");
     const int footer_width = simrv::tui::get_display_width(footer);
+    std::string compact_footer;
+    {
+        simrv::tui::framework::ScopedRenderContext context(
+            {.width = 42, .height = 18, .density = simrv::tui::framework::Density::Compact});
+        compact_footer = build_modal_footer({{"[Enter]", "Apply"}, {"[Esc]", "Cancel"}});
+    }
+    expect(compact_footer.contains("\033[1;7m") &&
+               simrv::tui::get_display_width(compact_footer) < footer_width,
+           "compact modal footers retain filled keycaps while reducing separator spacing");
     const auto centered_footer = align_modal_control_row(footer, 60);
     expect(strip_ansi(centered_footer)
                .starts_with(std::string(static_cast<std::size_t>((60 - footer_width) / 2), ' ')),
@@ -3278,6 +3397,20 @@ void test_multi_column_panel_management_and_modal_usability() {
            "status bar row 0 does not contain PANE 1/ badge");
     expect(header_row.find("PANE 2/") == std::string::npos,
            "status bar row 0 does not contain PANE 2/ badge");
+    simrv::tui::TuiTestAccess::configure_mission(
+        tui, "examples/isa/lessons/control-flow-calls.mission", "/tmp/control-flow-calls.elf");
+    expect(tui.mission_progress().enabled(), "status header fixture has an active mission");
+    status_bar->set_status_override("Checkpoint mission_loop reached; inspect the workbench now.");
+    const auto mission_notice = strip_ansi(status_bar->render_row(0, 120));
+    expect(mission_notice.contains("PAUSED"), "temporary notices preserve paused state");
+    expect(mission_notice.contains("STEP 1/6"), "temporary notices preserve lesson step progress");
+    expect(mission_notice.contains("Checkpoint mission_loop reached"),
+           "temporary notices remain visible beside lesson progress");
+    const auto narrow_mission_notice = strip_ansi(status_bar->render_row(0, 80));
+    expect(narrow_mission_notice.contains("PAUSED"), "narrow headers preserve machine state");
+    expect(narrow_mission_notice.contains("STEP 1/6"), "narrow headers preserve lesson progress");
+    expect(narrow_mission_notice.contains("Checkpoint"),
+           "narrow headers keep a shortened notice alongside machine and lesson state");
 
     // Click on SimRV title should map to LoadBinary
     auto act = status_bar->get_header_action_at_col(2, 120);
@@ -4739,6 +4872,7 @@ int main() {
     test_page_guidance();
     test_classroom_cli_defaults();
     test_load_modal_path_completion();
+    test_register_change_highlight();
     test_control_flow_calls_mission();
     test_drawer_stack_layout();
     test_tui_running_state_synchronization();

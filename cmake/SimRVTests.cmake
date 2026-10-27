@@ -48,6 +48,7 @@ if(BUILD_TESTING)
   # registry.
   simrv_add_runtime_test(simrv-tui-tests tests/TuiFrameworkTests.cpp
                          tui-framework "gate;regress;tui")
+  set_tests_properties(tui-framework PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
   if(SIMRV_ENABLE_TSAN)
     set_property(
       TEST tui-framework

@@ -1,12 +1,12 @@
 # RISC-V Compliance Scope
 
-SimRV targets the ratified RISC-V **RVA23 Profile** (`rva23s64` and `rva23u64`) as its primary 64-bit architectural compliance target, alongside ratified `rv32gczbv` and `rv64gczbv` implementation targets. This is an implementation and verification target, not a claim of formal RISC-V International architectural certification. A release is considered verified only for behavior covered by the checked-in semantic tests, the Architectural Compatibility Test (ACT) test suite, the configured `riscv-tests` suites, vector tests, and Spike lockstep workloads run by the release gates.
+SimRV targets the ratified RISC-V **RVA23 Profile** (`rva23s64` and `rva23u64`) as its primary 64-bit architectural profile. RVA23 is the project's primary ISA target; RV32 and narrower compatibility presets are also supported for dual-width validation and workloads. This is an implementation and verification target, not a claim of formal RISC-V International architectural certification. A release is considered verified only for behavior covered by the checked-in semantic tests, the Architectural Compatibility Test (ACT) test suite, the configured `riscv-tests` suites, vector tests, and Spike lockstep workloads run by the release gates.
 
 ## Architectural scope
 
 | Area | Implemented scope | Verification evidence |
 | --- | --- | --- |
-| Standard profiles | RVA23 (`rva23s64` default, `rva23u64`), RV32GCBV, RV64GCBV | Profile test suites, RVA23 ACT test gate |
+| Standard profiles | RVA23 (`rva23s64` default, `rva23u64`); RV32 compatibility profiles | RVA23 profile test suites and ACT test gate; RV32 ISA gates |
 | Base ISA | RV32I and RV64I | RV32/RV64 ISA gates, ACT suite, and Spike lockstep |
 | General-purpose extensions | M, A, F, D, C; see FP qualification note below | ISA gates, focused semantic tests, ACT suite, lockstep |
 | Bit manipulation | Zba, Zbb, Zbc, Zbs (`Zb*`) | Bitmanip ISA tests, ACT suite, and lockstep |
@@ -21,8 +21,9 @@ SimRV targets the ratified RISC-V **RVA23 Profile** (`rva23s64` and `rva23u64`) 
 extensions; they are not implied by `G`. MISA contains the single-letter extension bits only and
 therefore cannot describe individual `Zb*` subsets.
 
-The `--isa gc` preset selects G plus C and does not implicitly enable B or V. SimRV's canonical target
-preset is `gcv` (or `gc` for profiles without vector); XLEN-qualified forms
+The `--isa gc` preset selects G plus C and does not implicitly enable B or V. SimRV's canonical
+extension preset is `gcv` (or `gc` for profiles without vector); RVA23 profile selection is the
+primary way to request the project's target architecture. XLEN-qualified forms
 such as `rv64gcv` and `rv64gc` are standard. Ratified Bitmanip sub-extensions (`zba`, `zbb`, `zbc`, `zbs`)
 are appended canonically (e.g. `rv64gcv_zba_zbb_zbc_zbs` or `rv64gc_zba_zbb_zbc_zbs`). Legacy draft shorthands such as `gcbv` and `rv64gcbv`
 are rejected with diagnostic guidance. Naming the preset explicitly does not override the vector qualification limits below.
