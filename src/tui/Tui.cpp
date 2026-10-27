@@ -5,7 +5,6 @@
 #include "simrv/tui/Tui.hpp"
 
 #include <poll.h>
-#include <sys/eventfd.h>
 #include <sys/ioctl.h>
 #include <sys/select.h>
 #include <termios.h>
@@ -663,8 +662,7 @@ void Tui::start_ui_thread() {
     if (ui_running_.load(std::memory_order_relaxed)) {
         return;
     }
-    ui_wake_.reset(eventfd(0, EFD_NONBLOCK | EFD_CLOEXEC));
-    if (!ui_wake_) throw std::runtime_error("cannot create TUI wake descriptor");
+    if (!ui_wake_.open()) throw std::runtime_error("cannot create TUI wake channel");
     machine_.request_tui_sample();
     ui_running_.store(true, std::memory_order_release);
     ui_thread_ =
@@ -689,8 +687,7 @@ void Tui::stop_ui_thread() {
 
 void Tui::trigger_immediate_render() {
     if (!render_requested_.exchange(true, std::memory_order_acq_rel) && ui_wake_) {
-        const uint64_t one = 1;
-        (void)::write(ui_wake_.get(), &one, sizeof(one));
+        ui_wake_.signal();
     }
 }
 
@@ -718,11 +715,10 @@ void Tui::ui_render_loop(const std::stop_token& stop_token) {
                                          deadline - std::chrono::steady_clock::now())
                                          .count()));
             pollfd fds[] = {{.fd = STDIN_FILENO, .events = POLLIN, .revents = 0},
-                            {.fd = ui_wake_.get(), .events = POLLIN, .revents = 0}};
+                            {.fd = ui_wake_.fd(), .events = POLLIN, .revents = 0}};
             (void)::poll(fds, 2, timeout);
             if (fds[1].revents & POLLIN) {
-                uint64_t pending;
-                (void)::read(ui_wake_.get(), &pending, sizeof(pending));
+                ui_wake_.drain();
             }
         } catch (const std::exception& e) {
             simrv::log::error("TUI render loop exception: {}", e.what());

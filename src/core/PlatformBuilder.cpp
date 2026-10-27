@@ -2,6 +2,7 @@
 #include "simrv/core/PlatformBuilder.hpp"
 
 #include <memory>
+#include <utility>
 
 #include "MachineRuntime.hpp"
 #include "simrv/core/Logger.hpp"
@@ -91,11 +92,19 @@ void PlatformBuilder::compose(Machine& machine) {
             machine.runtime_->pci_net = std::make_shared<simrv::device::VirtioPciNet>(network_mode);
         }
         if (!machine.config.files.virtiofs_path.empty() && enabled(SoCDeviceKind::VirtioMmioFs)) {
-            machine.runtime_->pci_fs =
+            auto pci_fs =
                 std::make_shared<simrv::device::VirtioPciFs>(machine.config.files.virtiofs_path);
-            if (!machine.runtime_->pci_fs->is_ready())
+            if (pci_fs->is_ready()) {
+                machine.runtime_->pci_fs = std::move(pci_fs);
+            } else {
+#if defined(__linux__)
                 simrv::log::error("cannot open VirtIO-FS share directory '{}'",
                                   machine.config.files.virtiofs_path);
+#else
+                simrv::log::warn(
+                    "VirtIO-FS host shares are unavailable on this platform; device omitted");
+#endif
+            }
         }
         const std::array<std::shared_ptr<simrv::device::PciDevice>, 8> pci_devices = {
             machine.runtime_->pci_disk, machine.runtime_->pci_console, machine.runtime_->pci_rng,
@@ -142,11 +151,19 @@ void PlatformBuilder::compose(Machine& machine) {
         }
         if (!machine.config.files.virtiofs_path.empty()) {
             if (const auto device = descriptor(SoCDeviceKind::VirtioMmioFs)) {
-                machine.runtime_->mmio_fs = std::make_shared<simrv::device::VirtioMmioFs>(
+                auto mmio_fs = std::make_shared<simrv::device::VirtioMmioFs>(
                     device->base, device->irq, &machine, machine.config.files.virtiofs_path);
-                if (!machine.runtime_->mmio_fs->is_ready())
+                if (mmio_fs->is_ready()) {
+                    machine.runtime_->mmio_fs = std::move(mmio_fs);
+                } else {
+#if defined(__linux__)
                     simrv::log::error("cannot open VirtIO-FS share directory '{}'",
                                       machine.config.files.virtiofs_path);
+#else
+                    simrv::log::warn(
+                        "VirtIO-FS host shares are unavailable on this platform; device omitted");
+#endif
+                }
             }
         }
     }

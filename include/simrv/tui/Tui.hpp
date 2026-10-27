@@ -36,7 +36,7 @@
 #include "simrv/tui/framework/PointerRouter.hpp"
 #include "simrv/tui/framework/Subpanel.hpp"
 #include "simrv/tui/framework/Workbench.hpp"
-#include "simrv/util/UniqueFd.hpp"
+#include "simrv/util/WakeupFd.hpp"
 #include "simrv/xlen/ScalarTypes.hpp"
 
 namespace simrv::core {
@@ -449,7 +449,7 @@ class Tui : public core::ITelemetrySink, public core::IConsoleSink {
     std::atomic<bool> render_requested_{false};
     std::atomic<bool> full_render_requested_{false};
     std::shared_ptr<LocalTuiBackend> backend_;
-    simrv::util::UniqueFd ui_wake_;
+    simrv::util::WakeupFd ui_wake_;
     bool frame_dirty_ = true;
     std::array<uint8_t, 256> input_bytes_{};
     size_t input_pos_ = 0;
