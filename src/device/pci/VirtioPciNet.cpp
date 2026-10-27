@@ -4,11 +4,14 @@
  */
 #include "simrv/device/pci/VirtioPciNet.hpp"
 
+#include <unistd.h>
+
+#if defined(__linux__)
 #include <fcntl.h>
 #include <linux/if_tun.h>
 #include <net/if.h>
 #include <sys/ioctl.h>
-#include <unistd.h>
+#endif
 
 #include <cerrno>
 #include <cstdlib>
@@ -26,6 +29,7 @@ namespace simrv::device {
 virtio::NetBackend::NetBackend(Mode mode) : mode_(mode) {
     if (mode_ != Mode::Tap) return;
 
+#if defined(__linux__)
     const char* requested = std::getenv("SIMRV_TAP_IFACE");
     const char* interface_name = (requested && *requested) ? requested : "simrv0";
     const int fd = ::open("/dev/net/tun", O_RDWR | O_NONBLOCK | O_CLOEXEC);
@@ -43,6 +47,9 @@ virtio::NetBackend::NetBackend(Mode mode) : mode_(mode) {
         return;
     }
     host_fd_ = util::UniqueFd(fd);
+#else
+    simrv::log::warn("VirtIO TAP backend is only available on Linux");
+#endif
 }
 
 virtio::NetBackend::~NetBackend() = default;
