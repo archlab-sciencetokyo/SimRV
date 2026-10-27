@@ -165,9 +165,8 @@ auto MissionProgress::load(std::string_view mission_path) -> bool {
         if (equals == std::string_view::npos) return fail("expected key = \"value\"");
         const auto key = trim(text.substr(0, equals));
         auto raw_value = trim(text.substr(equals + 1));
-        const auto canonical_key = section == Section::Step && key == "label"
-                                       ? std::string_view("id")
-                                       : key;
+        const auto canonical_key =
+            section == Section::Step && key == "label" ? std::string_view("id") : key;
         if (std::ranges::find(section_keys, canonical_key) != section_keys.end())
             return fail("duplicate key");
         section_keys.emplace_back(canonical_key);

@@ -356,9 +356,10 @@ void BreakpointModal::render(ModalType type, std::vector<std::string>& content_r
     } else if (type == ModalType::ManageBreakpoints) {
         content_rows.push_back(
             std::format("{}Active Breakpoints, Watchpoints & Triggers:\033[0m", kThemeText));
-        content_rows.push_back(std::format(
-            "  {}Select a row to inspect or remove it. Mission checkpoints are lesson-owned.\033[0m",
-            kThemeMuted));
+        content_rows.push_back(
+            std::format("  {}Select a row to inspect or remove it. Mission checkpoints are "
+                        "lesson-owned.\033[0m",
+                        kThemeMuted));
         content_rows.push_back("");
 
         if (!machine) return;
@@ -421,14 +422,14 @@ void BreakpointModal::render(ModalType type, std::vector<std::string>& content_r
         }
 
         content_rows.push_back("");
-        content_rows.push_back(build_modal_footer({{.key = "[↑ / ↓]", .action = "Select"},
-                                                   {.key = "[Enter / Backspace]",
-                                                    .action = "Remove selected"},
-                                                   {.key = "[Esc]", .action = "Close"}}));
-        content_rows.push_back(build_modal_footer({{.key = "[A]", .action = "Add PC breakpoint"},
-                                                   {.key = "[W]", .action = "Add watchpoint"},
-                                                   {.key = "[C]",
-                                                    .action = "Clear breakpoints / watchpoints"}}));
+        content_rows.push_back(
+            build_modal_footer({{.key = "[↑ / ↓]", .action = "Select"},
+                                {.key = "[Enter / Backspace]", .action = "Remove selected"},
+                                {.key = "[Esc]", .action = "Close"}}));
+        content_rows.push_back(
+            build_modal_footer({{.key = "[A]", .action = "Add PC breakpoint"},
+                                {.key = "[W]", .action = "Add watchpoint"},
+                                {.key = "[C]", .action = "Clear breakpoints / watchpoints"}}));
     }
 }
 

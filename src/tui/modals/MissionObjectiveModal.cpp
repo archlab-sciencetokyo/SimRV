@@ -14,8 +14,8 @@
 #include "simrv/debug/SymbolTable.hpp"
 #include "simrv/tui/TuiMission.hpp"
 #include "simrv/tui/TuiModal.hpp"
-#include "simrv/tui/framework/Theme.hpp"
 #include "simrv/tui/framework/Text.hpp"
+#include "simrv/tui/framework/Theme.hpp"
 #include "simrv/tui/modals/ModalComponents.hpp"
 
 namespace simrv::tui::modals {
@@ -113,10 +113,10 @@ void MissionObjectiveModal::render_content(std::vector<std::string>& content_row
         const bool guest_stopped_for_checkpoint =
             !complete && has_checkpoint && !reached && machine_ && machine_->is_shutdown_;
         if (complete) {
-            add_status_row(std::format("✓ Lesson complete · {} of {} checkpoints reached",
-                                       mission_->reached_checkpoint_count(),
-                                       mission_->checkpoint_count()),
-                           palette.success);
+            add_status_row(
+                std::format("✓ Lesson complete · {} of {} checkpoints reached",
+                            mission_->reached_checkpoint_count(), mission_->checkpoint_count()),
+                palette.success);
         } else if (!has_checkpoint) {
             add_status_row("No checkpoint for this lesson step.", palette.muted);
         } else if (reached) {
@@ -141,12 +141,11 @@ void MissionObjectiveModal::render_content(std::vector<std::string>& content_row
             add_status_row("The program stopped before reaching this checkpoint.", palette.danger);
         }
         add_row("");
-        const std::string hint_action =
-            !guidance->hint.empty()
-                ? (hint_level_ == 0 ? "Show hint"
-                   : hint_level_ == 1 ? "Show why"
-                                      : "Hide why")
-                : (hint_level_ == 2 ? "Hide why" : "Show why");
+        const std::string hint_action = !guidance->hint.empty()
+                                            ? (hint_level_ == 0   ? "Show hint"
+                                               : hint_level_ == 1 ? "Show why"
+                                                                  : "Hide why")
+                                            : (hint_level_ == 2 ? "Hide why" : "Show why");
         if (complete) {
             add_status_row("Guest execution is stopped. The final state is safe to review.",
                            palette.success);
@@ -180,8 +179,7 @@ void MissionObjectiveModal::render_content(std::vector<std::string>& content_row
                 add_footer({{.key = "[Space / N]",
                              .action = final_step ? "Finish lesson" : "Next lesson step",
                              .color = kThemeSky},
-                            {.key = "[F5]", .action = "Run to checkpoint",
-                             .color = kThemePeach}});
+                            {.key = "[F5]", .action = "Run to checkpoint", .color = kThemePeach}});
             } else {
                 add_footer({{.key = "[Space / N]",
                              .action = final_step ? "Finish lesson" : "Next lesson step",

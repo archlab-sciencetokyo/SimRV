@@ -126,8 +126,8 @@ auto StatusBar::is_pos_on_status_badge(int x, int width) const -> bool {
     size_t const selected = tui_ ? tui_->selected_hart() : 0;
     auto const header = make_left_header_layout(machine_, inner_w / 2, selected);
     std::string status_text = machine_.is_shutdown_ ? " SHUTDOWN "
-                              : paused_ ? " PAUSED "
-                                        : " RUNNING ";
+                              : paused_             ? " PAUSED "
+                                                    : " RUNNING ";
     int const badge_len = get_display_width(status_text);
 
     int x_start = 2 + get_display_width(header.identity) + 3;
@@ -731,15 +731,16 @@ auto StatusBar::render_row(int row_idx, int width) -> std::string {
             const auto& mission = tui_->mission_progress();
             const auto cp = mission.checkpoint_symbol();
             const bool reached = mission.checkpoint_reached();
-            std::string const mission_label = mission.completed()
-                ? std::format("LESSON DONE · {}/{} CHECKPOINTS", mission.reached_checkpoint_count(),
-                              mission.checkpoint_count())
+            std::string const mission_label =
+                mission.completed()
+                    ? std::format("LESSON DONE · {}/{} CHECKPOINTS",
+                                  mission.reached_checkpoint_count(), mission.checkpoint_count())
                 : cp.empty() ? std::format("STEP {}/{} · NO CHECKPOINT", mission.step() + 1,
                                            mission.step_count())
-                : reached ? std::format("STEP {}/{} · ✓ {}", mission.step() + 1,
-                                        mission.step_count(), cp)
-                          : std::format("STEP {}/{} · WAIT {}", mission.step() + 1,
-                                        mission.step_count(), cp);
+                : reached
+                    ? std::format("STEP {}/{} · ✓ {}", mission.step() + 1, mission.step_count(), cp)
+                    : std::format("STEP {}/{} · WAIT {}", mission.step() + 1, mission.step_count(),
+                                  cp);
             const auto mission_badge = header_badge(
                 mission_label, (reached || mission.completed()) ? "\033[42;30m" : "\033[46;30m",
                 reached || mission.completed() ? "\033[48;5;121;38;5;232m"
@@ -750,15 +751,16 @@ auto StatusBar::render_row(int row_idx, int width) -> std::string {
                     mission.completed()
                         ? std::format("DONE {}/{}", mission.reached_checkpoint_count(),
                                       mission.checkpoint_count())
-                    : std::format("STEP {}/{} · {}", mission.step() + 1, mission.step_count(),
-                                  cp.empty() ? "NO CP" : reached ? "REACHED" : "WAIT");
-                left_info = status_badge + " " +
-                            header_badge(short_progress,
-                                         (reached || mission.completed()) ? "\033[42;30m"
-                                                                          : "\033[46;30m",
-                                         reached || mission.completed()
-                                             ? "\033[48;5;121;38;5;232m"
-                                             : "\033[48;5;117;38;5;232m");
+                        : std::format("STEP {}/{} · {}", mission.step() + 1, mission.step_count(),
+                                      cp.empty() ? "NO CP"
+                                      : reached  ? "REACHED"
+                                                 : "WAIT");
+                left_info =
+                    status_badge + " " +
+                    header_badge(short_progress,
+                                 (reached || mission.completed()) ? "\033[42;30m" : "\033[46;30m",
+                                 reached || mission.completed() ? "\033[48;5;121;38;5;232m"
+                                                                : "\033[48;5;117;38;5;232m");
             }
         }
 

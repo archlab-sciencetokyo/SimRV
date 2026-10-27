@@ -143,8 +143,7 @@ auto wrap_text(std::string_view text, int width, int continuation_indent)
         }
         const auto word = text.substr(word_start, i - word_start);
         const int separator_width = pending_space && row_has_content ? 1 : 0;
-        if (row_has_content &&
-            columns + separator_width + display_width(word) > width) {
+        if (row_has_content && columns + separator_width + display_width(word) > width) {
             finish_row();
         } else if (separator_width > 0) {
             current.push_back(' ');

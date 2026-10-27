@@ -33,8 +33,7 @@ constexpr std::string_view kControlGroupMarker = "\033[0;0m\033[0;0m";
                                 std::isspace(static_cast<unsigned char>(result[i + 1])) != 0;
         if (starts_token && ends_token &&
             std::isalpha(static_cast<unsigned char>(result[i])) != 0) {
-            result[i] = static_cast<char>(
-                std::toupper(static_cast<unsigned char>(result[i])));
+            result[i] = static_cast<char>(std::toupper(static_cast<unsigned char>(result[i])));
         }
     }
     return result;
@@ -203,9 +202,8 @@ auto layout_modal_control_row(std::string row, int inner_width) -> framework::Re
         if (!has_next) segment_width = std::max(0, segment_width - right);
         if (segment_width > 0 && span_start < inner_width) {
             const int visible_width = std::min(segment_width, inner_width - span_start);
-            result.spans.push_back({.start = span_start,
-                                    .width = visible_width,
-                                    .id = std::to_string(index)});
+            result.spans.push_back(
+                {.start = span_start, .width = visible_width, .id = std::to_string(index)});
         }
         if (!has_next) break;
         span_start += segment_width + separator_width;

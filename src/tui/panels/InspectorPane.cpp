@@ -636,8 +636,7 @@ auto InspectorPane::render_mission_bottom_row(int row_idx, int width) -> std::st
     if (!guidance) return format_to_width("", width);
     const auto cp = mission.checkpoint_progress();
     if (row_idx == 0)
-        return section_line(mission.completed() ? "[F12] Lesson Summary" : "[F12] Tasks",
-                            width);
+        return section_line(mission.completed() ? "[F12] Lesson Summary" : "[F12] Tasks", width);
     if (row_idx == 1) {
         return format_to_width(std::format(" Step {}/{} · {}", mission.step() + 1,
                                            mission.step_count(), guidance->title),
@@ -660,14 +659,12 @@ auto InspectorPane::render_mission_bottom_row(int row_idx, int width) -> std::st
                 width);
         }
         if (!cp) return format_to_width(" No checkpoint for this step", width);
-        return format_to_width(
-            cp->reached ? std::format(" Checkpoint reached · {}", cp->symbol)
-                        : std::format(" Checkpoint waiting · {} · after step {}", cp->symbol,
-                                      cp->after_step),
-            width);
+        return format_to_width(cp->reached ? std::format(" Checkpoint reached · {}", cp->symbol)
+                                           : std::format(" Checkpoint waiting · {} · after step {}",
+                                                         cp->symbol, cp->after_step),
+                               width);
     }
-    if (mission.completed())
-        return format_to_width(" Controls: [R] Restart · [Q/F10] Exit", width);
+    if (mission.completed()) return format_to_width(" Controls: [R] Restart · [Q/F10] Exit", width);
     if (cp && !cp->reached) {
         if (mission.can_advance_step())
             return format_to_width(" Controls: [N] Next · [F5] Run", width);

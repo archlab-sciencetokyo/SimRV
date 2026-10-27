@@ -890,10 +890,9 @@ void TuiModal::render_overlay(std::vector<std::string>& lines, int term_width,
 
     const auto meta = modals::get_modal_metadata(active_modal_, notice_is_error_, notice_title_);
     constexpr int kMissionObjectiveMaxWidth = 100;
-    const int maximum_width =
-        std::min(term_width - 4, active_modal_ == ModalType::MissionObjective
-                                     ? kMissionObjectiveMaxWidth
-                                     : term_width - 4);
+    const int maximum_width = std::min(term_width - 4, active_modal_ == ModalType::MissionObjective
+                                                           ? kMissionObjectiveMaxWidth
+                                                           : term_width - 4);
     const int provisional_width = maximum_width;
     if (provisional_width < 35) return;
 

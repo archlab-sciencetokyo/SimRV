@@ -1139,7 +1139,7 @@ void test_control_flow_calls_mission() {
         std::filesystem::temp_directory_path() / "simrv-mission-speed-test.mission";
     {
         std::ofstream output(speed_lesson);
-        output << "[mission]\nversion = \"1\"\nprogram = \"pace.elf\"\n"
+        output << "[mission]\nversion = \"1\"\nid = \"speed-test\"\nprogram = \"pace.elf\"\n"
                   "speed_hz = \"30\"\n\n"
                   "[step]\nid = \"default\"\ntitle = \"Default\"\n"
                   "prompt = \"Observe\"\nwhy = \"Learn\"\nview = \"registers\"\n\n"
@@ -1162,7 +1162,7 @@ void test_control_flow_calls_mission() {
     std::vector<std::string> no_hint_rows(20, std::string(100, ' '));
     no_hint_modal.render_overlay(no_hint_rows, 100, 20);
     std::string no_hint_render;
-    for (const auto& row : no_hint_rows) no_hint_render += row;
+    for (const auto& row : no_hint_rows) no_hint_render += strip_ansi(row);
     expect(no_hint_render.find("Why: Press Y to reveal.") != std::string::npos,
            "steps without a short hint retain the existing rationale reveal");
     no_hint_modal.cycle_mission_hint();
@@ -1177,7 +1177,7 @@ void test_control_flow_calls_mission() {
     std::vector<std::string> modal_rows(30, std::string(100, ' '));
     modal.render_overlay(modal_rows, 100, 30);
     std::string rendered_modal;
-    for (const auto& row : modal_rows) rendered_modal += row;
+    for (const auto& row : modal_rows) rendered_modal += strip_ansi(row);
     expect(rendered_modal.find("Goal: Use the PC") != std::string::npos,
            "mission modal includes the lesson goal");
     expect(rendered_modal.find("Step 1/6 · Follow the branch") != std::string::npos &&
@@ -1195,7 +1195,8 @@ void test_control_flow_calls_mission() {
     expect(rendered_modal.find("Next:") == std::string::npos &&
                rendered_modal.find("Run to checkpoint") != std::string::npos &&
                rendered_modal.find("Step") != std::string::npos,
-           "mission modal leaves step-specific guidance to the task and lists available controls in the footer");
+           "mission modal leaves step-specific guidance to the task and lists available controls "
+           "in the footer");
     expect(rendered_modal.find("Flow:") == std::string::npos &&
                rendered_modal.find("checkpoints 0/6") == std::string::npos &&
                rendered_modal.find("At the branch, a0 is 2") == std::string::npos &&
@@ -1220,8 +1221,8 @@ void test_control_flow_calls_mission() {
         const std::string left_glyph = plain_row.find("┌") != std::string::npos ? "┌" : "+";
         const std::string right_glyph = left_glyph == "┌" ? "┐" : "+";
         const auto left = plain_row.find(left_glyph);
-        const auto right = left == std::string::npos ? std::string::npos
-                                                      : plain_row.find(right_glyph, left + 1);
+        const auto right =
+            left == std::string::npos ? std::string::npos : plain_row.find(right_glyph, left + 1);
         if (right != std::string::npos) {
             mission_modal_width = simrv::tui::framework::display_width(
                 std::string_view(plain_row).substr(left, right - left + right_glyph.size()));
@@ -1234,7 +1235,7 @@ void test_control_flow_calls_mission() {
     modal_rows.assign(30, std::string(100, ' '));
     modal.render_overlay(modal_rows, 100, 30);
     rendered_modal.clear();
-    for (const auto& row : modal_rows) rendered_modal += row;
+    for (const auto& row : modal_rows) rendered_modal += strip_ansi(row);
     expect(rendered_modal.find("At the branch, a0 is 2") != std::string::npos &&
                rendered_modal.find("conditional branch selects") == std::string::npos,
            "first y reveals the short hint before the rationale");
@@ -1242,14 +1243,14 @@ void test_control_flow_calls_mission() {
     modal_rows.assign(30, std::string(100, ' '));
     modal.render_overlay(modal_rows, 100, 30);
     rendered_modal.clear();
-    for (const auto& row : modal_rows) rendered_modal += row;
+    for (const auto& row : modal_rows) rendered_modal += strip_ansi(row);
     expect(rendered_modal.find("conditional branch selects") != std::string::npos,
            "second y reveals the full rationale");
     modal.cycle_mission_hint();
     modal_rows.assign(30, std::string(100, ' '));
     modal.render_overlay(modal_rows, 100, 30);
     rendered_modal.clear();
-    for (const auto& row : modal_rows) rendered_modal += row;
+    for (const auto& row : modal_rows) rendered_modal += strip_ansi(row);
     expect(rendered_modal.find("At the branch, a0 is 2") == std::string::npos &&
                rendered_modal.find("conditional branch selects") == std::string::npos,
            "third y hides both hint levels");
@@ -1264,7 +1265,7 @@ void test_control_flow_calls_mission() {
     modal_rows.assign(30, std::string(100, ' '));
     modal.render_overlay(modal_rows, 100, 30);
     rendered_modal.clear();
-    for (const auto& row : modal_rows) rendered_modal += row;
+    for (const auto& row : modal_rows) rendered_modal += strip_ansi(row);
     expect(rendered_modal.find("Checkpoint reached · mission_loop") != std::string::npos,
            "mission modal reports automatic checkpoint completion");
     expect(rendered_modal.find("The branch was taken; execution is now at the loop body.") !=
@@ -1309,7 +1310,8 @@ void test_control_flow_calls_mission() {
         std::filesystem::temp_directory_path() / "simrv-independent-checkpoint-test.mission";
     {
         std::ofstream output(independent_lesson);
-        output << "[mission]\nversion = \"1\"\nprogram = \"independent.elf\"\n"
+        output << "[mission]\nversion = \"1\"\nid = \"independent-test\"\n"
+                  "program = \"independent.elf\"\n"
                   "goal = \"Understand the sequence\"\n\n"
                   "[step]\nid = \"first\"\ntitle = \"First\"\n"
                   "prompt = \"Observe first\"\nlearn = \"Learn the first concept\"\n"
@@ -1337,9 +1339,11 @@ void test_control_flow_calls_mission() {
     std::vector<std::string> progress_rows(30, std::string(120, ' '));
     progress_modal.render_overlay(progress_rows, 120, 30);
     std::string progress_text;
-    for (const auto& row : progress_rows) progress_text += row;
-    expect(progress_text.find("Reached early · later_marker (after step 2)") != std::string::npos &&
-               progress_text.find("continue reading through step 2") != std::string::npos &&
+    for (const auto& row : progress_rows) progress_text += strip_ansi(row);
+    expect(progress_text.find("Checkpoint reached early · later_marker (after step 2)") !=
+                   std::string::npos &&
+               progress_text.find("Space / N") != std::string::npos &&
+               progress_text.find("Next lesson step") != std::string::npos &&
                progress_text.find("Flow:") == std::string::npos,
            "student guidance explains an early checkpoint without a dense progress strip");
 
@@ -1354,11 +1358,10 @@ void test_control_flow_calls_mission() {
     std::vector<std::string> recovery_rows(30, std::string(120, ' '));
     recovery_modal.render_overlay(recovery_rows, 120, 30);
     std::string recovery_text;
-    for (const auto& row : recovery_rows) recovery_text += row;
+    for (const auto& row : recovery_rows) recovery_text += strip_ansi(row);
     expect(recovery_text.find("The program stopped before reaching this checkpoint.") !=
                    std::string::npos &&
-               recovery_text.find("restart with r") != std::string::npos &&
-               recovery_text.find(" R ") != std::string::npos &&
+               recovery_text.find("R  Restart") != std::string::npos &&
                recovery_text.find("Restart") != std::string::npos,
            "mission guidance offers recovery when the guest stops before a checkpoint");
     expect(independent.advance_step() && independent.step() == 1 && independent.can_advance_step(),
@@ -2217,6 +2220,9 @@ void test_themes_and_mouse_interactions() {
     // 3. Validate Theme Cycling
     set_theme_style(TuiThemeStyle::ModernUnicode);
     expect(get_active_theme_style() == TuiThemeStyle::ModernUnicode, "active style is modern");
+    expect(std::string(simrv::tui::g_theme_modal_bg) == "\033[49m" &&
+               std::string(simrv::tui::g_theme_muted) == "\033[90m",
+           "adaptive theme uses terminal-default background and standard muted colors");
     cycle_theme_style();
     expect(get_active_theme_style() == TuiThemeStyle::ClassicAnsi, "cycled to classic ansi");
     cycle_theme_style();
@@ -2263,7 +2269,8 @@ void test_modal_components() {
 
     const auto meta_notice = get_modal_metadata(simrv::tui::ModalType::Notice, true, "ALERT");
     expect(meta_notice.title.contains("❌ ALERT"), "Notice error title contains icon and name");
-    expect(get_modal_metadata(simrv::tui::ModalType::MissionObjective).title.contains("LESSON TASKS / GUIDE"),
+    expect(get_modal_metadata(simrv::tui::ModalType::MissionObjective)
+               .title.contains("LESSON TASKS / GUIDE"),
            "the mission modal is named Lesson Guide to distinguish it from CPU instructions");
 
     // Test unified footer builder

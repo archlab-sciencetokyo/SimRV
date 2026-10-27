@@ -1371,9 +1371,8 @@ void Tui::render(bool force) {
             const auto symbol = progress ? std::string_view(progress->symbol) : std::string_view{};
             const auto msg = progress ? std::string_view(progress->message) : std::string_view{};
             if (!msg.empty()) {
-                set_status_override(std::format(
-                    "Checkpoint '{}' after step {} reached: {}",
-                    symbol, progress->after_step, msg));
+                set_status_override(std::format("Checkpoint '{}' after step {} reached: {}", symbol,
+                                                progress->after_step, msg));
             } else if (!symbol.empty()) {
                 set_status_override(
                     std::format("Checkpoint '{}' after step {} reached. Review the workbench.",
@@ -3430,8 +3429,7 @@ auto Tui::handle_normal_keyboard_input(uint8_t byte, TuiKey key) -> void {
                 render(true);
                 return;
             }
-            set_status_override(
-                "Checkpoint reached. Review the lesson step before running again.");
+            set_status_override("Checkpoint reached. Review the lesson step before running again.");
             render(true);
             return;
         }
@@ -3519,9 +3517,8 @@ void Tui::observe_current_pc_symbol() {
             const auto symbol = progress ? std::string_view(progress->symbol) : std::string_view{};
             const auto msg = progress ? std::string_view(progress->message) : std::string_view{};
             if (!msg.empty()) {
-                set_status_override(std::format(
-                    "Checkpoint '{}' after step {} reached: {}",
-                    symbol, progress->after_step, msg));
+                set_status_override(std::format("Checkpoint '{}' after step {} reached: {}", symbol,
+                                                progress->after_step, msg));
             } else if (!symbol.empty()) {
                 set_status_override(
                     std::format("Checkpoint '{}' after step {} reached. Review the workbench.",

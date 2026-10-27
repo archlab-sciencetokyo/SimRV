@@ -27,6 +27,18 @@ simrv --version
 
 This is the recommended option for older distributions, containers, and compute servers.
 
+For a per-user install without administrator rights, extract it under `~/.local` instead:
+
+```bash
+mkdir -p "$HOME/.local"
+tar -xzf SimRV-linux-x86_64-vVERSION.tar.gz \
+  --strip-components=1 -C "$HOME/.local"
+"$HOME/.local/bin/simrv" --version
+```
+
+Add `~/.local/bin` to `PATH` if it is not already there. The archive does not register with the
+system package manager; native `.deb` and `.rpm` installs normally need administrator rights.
+
 Remove the installed files using the archive's file list, or replace them by extracting a newer
 archive at the same prefix. Use a native package when managed upgrades and removal matter.
 
@@ -78,9 +90,9 @@ sudo apt install ./simrv-deb/simrv_*_amd64.deb ./simrv-deb/simrv-devel_*_amd64.d
 
 The native `simrv-devel` package contains SimRV's public C++ headers, the static runtime library,
 and the CMake package that exports `SimRV::runtime`. It is optional and is not part of the portable
-TGZ. Native SDK packages are qualified on Debian sid and Fedora 44; the SDK expects a C++23-capable
-compiler with a standard library ABI compatible with the host package. Source installs also
-provide the CMake package and do not require a native development package.
+TGZ. Native SDK packages are qualified on Ubuntu 24.04 and RHEL 9-compatible systems; the SDK
+expects a C++23-capable compiler. Source installs also provide the CMake package and do not require
+a native development package.
 
 Link the exported target from a CMake project:
 
@@ -108,8 +120,8 @@ Native packages are qualified in release CI on the following x86-64 distribution
 
 | Package | Tested distributions | Notes |
 | --- | --- | --- |
-| RPM | Fedora 44 (the release-build baseline) | Install with `dnf`; older RPM distributions should use the static TGZ unless their glibc/libstdc++ ABI is newer enough. |
-| DEB | Debian sid (the release-build baseline) | Install with `apt`; older Debian/Ubuntu releases should use the static TGZ. |
+| RPM | Rocky Linux 9 and Fedora 44 | Built against the RHEL 9 glibc baseline; the simulator statically links its C++ runtime. |
+| DEB | Ubuntu 24.04 and Debian sid | Built against Ubuntu 24.04; the simulator statically links its C++ runtime. |
 | Static TGZ | Fedora 40, Ubuntu 22.04/24.04, Debian 12/13, and newer x86-64 Linux | Does not require glibc, libstdc++, or TOML runtime packages. |
 
 The native packages are tested rather than promised for every derivative. Use the static TGZ when a

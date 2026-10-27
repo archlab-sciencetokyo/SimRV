@@ -69,7 +69,10 @@ class ReleaseToolTests(unittest.TestCase):
         self.assertNotIn("rpm-packages/rv32", workflow)
         self.assertNotIn("rpm-packages/rv64", workflow)
         self.assertIn("repodata/repomd.xml", workflow)
-        self.assertIn("if: matrix.arch == 'rv64'", workflow)
+        self.assertIn("rpm-packages:", workflow)
+        self.assertIn("registry.access.redhat.com/ubi9/ubi:9", workflow)
+        self.assertIn("ppa:ubuntu-toolchain-r/test", workflow)
+        self.assertIn("-static-libgcc -static-libstdc++", workflow)
         self.assertIn("rpmlint --rpmlintrc packaging/simrv.rpmlintrc packages/*.rpm", workflow)
         self.assertIn("lintian --fail-on error", workflow)
         self.assertIn("dnf install -y packages/*.rpm", workflow)
@@ -96,7 +99,8 @@ class ReleaseToolTests(unittest.TestCase):
             ],
         )
         self.assertIn("Ubuntu 22.04", manifest["package_support"]["portable_static"])
-        self.assertEqual(manifest["package_support"]["rpm"], ["Fedora 44"])
+        self.assertEqual(manifest["package_support"]["rpm"], ["Rocky Linux 9", "Fedora 44"])
+        self.assertEqual(manifest["package_support"]["deb"], ["Ubuntu 24.04", "Debian sid"])
 
     def test_citation_matches_release_version(self):
         version = json.loads((ROOT / "release/release-manifest.json").read_text())["version"]

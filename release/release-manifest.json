@@ -13,9 +13,11 @@
   },
   "package_support": {
     "rpm": [
+      "Rocky Linux 9",
       "Fedora 44"
     ],
     "deb": [
+      "Ubuntu 24.04",
       "Debian sid"
     ],
     "portable_static": [
