@@ -27,6 +27,7 @@ preset's configured cache-line geometry remains a separate platform requirement.
 | May-be-operations | Zimop MOP.R and MOP.RR encodings write zero to `rd` | RVA23 profile unit tests |
 | Additional compressed integer | Zcb's byte/halfword loads and stores, multiply, and bit-manipulation instructions | RVA23 compressed decode tests |
 | Non-temporal locality hints | Zihintntl NTL.P1/PALL/S1/ALL and C.NTL variants decode as ignorable HINTs | RVA23 hint-encoding tests |
+| Pause hint | Zihintpause `PAUSE` (`FENCE W,0`) decodes as a valid fence with no successor set | RVA23 pause-encoding test |
 | Cache management | CMO (`cbo.clean`, `cbo.flush`, `cbo.inval`, `cbo.zero`, `prefetch.*`) | Core semantic, RVA23 profile gates, and ACT suite |
 | Cache-block size | Zic64b: 64-byte naturally aligned blocks across L1/L2/L3, coherence, and CMO; FDT advertises Zic64b and all CMO block sizes | Cache geometry, CMO, and FDT regression tests |
 | Misaligned main-memory accesses | Zicclsm loads and stores, including accesses spanning cache-block and page boundaries; FDT advertises Zicclsm | RVA23 main-memory alignment and FDT tests |

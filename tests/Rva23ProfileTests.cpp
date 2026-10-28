@@ -674,6 +674,12 @@ void test_zihintntl_encodings() {
     }
 }
 
+void test_zihintpause_encoding() {
+    // PAUSE is encoded as FENCE W,0, a valid fence with no successor set.
+    constexpr uint32_t pause = (1U << 24U) | 0x0FU;
+    TEST_ASSERT(simrv::pipeline::decoder(pause) == simrv::isa::OperationId::FENCE);
+}
+
 void test_cmo_decoder_and_predicates() {
     using namespace simrv::isa;
 
@@ -1317,6 +1323,9 @@ int main() {
     std::cout << "[RUN] test_zihintntl_encodings" << std::endl;
     test_zihintntl_encodings();
     std::cout << "[PASS] test_zihintntl_encodings" << std::endl;
+    std::cout << "[RUN] test_zihintpause_encoding" << std::endl;
+    test_zihintpause_encoding();
+    std::cout << "[PASS] test_zihintpause_encoding" << std::endl;
 
     std::cout << "[RUN] test_zicclsm_unaligned_main_memory" << std::endl;
     test_zicclsm_unaligned_main_memory();
