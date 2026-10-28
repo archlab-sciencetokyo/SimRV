@@ -218,8 +218,9 @@ auto generate_platform_fdt(const core::MachineConfig& config,
         "v",      "zvbb",   "zvkt",   "zicntr", "zihpm",    "zicsr",      "zifencei", "zihintpause",
         "zihintntl", "zkt",
         "zic64b", "zicclsm", "za64rs", "ziccamoa", "zfhmin", "zvfhmin", "zfa", "zicond", "zicboz",
-        "zicbom", "zicbop", "zawrs",   "svinval", "svpbmt",     "svnapot", "sstc",
-        "sscofpmf", "ziccrse", "ziccif",
+        "zicbom", "zicbop", "zawrs",   "svinval", "svpbmt", "svnapot", "svade",
+        "ssccptr", "sscofpmf", "sscounterenw", "sstc", "sstvala", "sstvecd", "ziccrse",
+        "ziccif",
     };
     std::vector<std::string_view> guest_extensions(std::begin(kSupportedGuestExts),
                                                    std::end(kSupportedGuestExts));

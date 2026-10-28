@@ -134,7 +134,14 @@ void test_generate_platform_fdt_pcie() {
     expect(blob_contains_string(blob, "zvbb"), "Zvbb vector bit-manipulation advertised");
     expect(blob_contains_string(blob, "zvkt"), "Zvkt vector data-independent latency advertised");
     expect(blob_contains_string(blob, "zkt"), "Zkt data-independent latency advertised");
-    expect(blob_contains_string(blob, "sscofpmf"), "Sscofpmf overflow interrupt support advertised");
+    expect(blob_contains_string(blob, "svade"), "Svade page-fault behavior advertised");
+    expect(blob_contains_string(blob, "ssccptr"), "Ssccptr page-table reads advertised");
+    expect(blob_contains_string(blob, "sscounterenw"),
+           "Sscounterenw HPM counter enables advertised");
+    expect(blob_contains_string(blob, "sstvala"), "Sstvala supervisor trap values advertised");
+    expect(blob_contains_string(blob, "sstvecd"), "Sstvecd direct trap vectors advertised");
+    expect(blob_contains_string(blob, "sscofpmf"),
+           "Sscofpmf overflow interrupt support advertised");
     expect(blob_contains_string(blob, "ziccrse"), "Ziccrse main-memory support advertised");
     expect(blob_contains_string(blob, "ziccif"), "Ziccif atomic fetch support advertised");
     expect(blob_contains_string(blob, "ssnpm") == simrv::xlen::kIsXLen64,
