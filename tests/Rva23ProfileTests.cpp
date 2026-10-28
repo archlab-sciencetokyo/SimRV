@@ -1026,6 +1026,121 @@ void test_profile_engine() {
     }
 }
 
+void test_svpbmt_noncacheable_and_io_accesses() {
+    if constexpr (simrv::xlen::kIsXLen64) {
+        using simrv::isa::Funct3;
+        using simrv::isa::Opcode;
+        using simrv::xlen::PrivilegeLevel;
+
+        simrv::core::Machine machine;
+        std::vector<simrv::xlen::Byte> ram(1024 * 1024, simrv::xlen::Byte{0});
+        machine.set_ram_for_testing(ram.data(), ram.size());
+        machine.memory().initialize_mmu();
+        auto& cpu = machine.primary_hart();
+        cpu.reset();
+        auto& state = cpu.state();
+        state.misa |= simrv::isa::misa_extension_bit(simrv::isa::IsaExtension::S) |
+                      simrv::isa::misa_extension_bit(simrv::isa::IsaExtension::U);
+        state.initialize_lower_xlen_fields();
+
+        constexpr simrv::xlen::Address kDram = simrv::memory::kDramBaseAddress;
+        constexpr simrv::xlen::Address kRoot = kDram + 0x1000;
+        constexpr simrv::xlen::Address kLevel1 = kDram + 0x2000;
+        constexpr simrv::xlen::Address kLevel0 = kDram + 0x3000;
+        constexpr simrv::xlen::Address kPhysical = kDram + 0x8000;
+        constexpr simrv::xlen::Address kVirtual = 0x40000;
+        const auto write_pte = [&](simrv::xlen::Address address, uint64_t value) {
+            std::memcpy(ram.data() + (address - kDram), &value, sizeof(value));
+        };
+        constexpr uint64_t kValid = 1U;
+        constexpr uint64_t kLeaf = kValid | (uint64_t{1} << 1U) | (uint64_t{1} << 2U) |
+                                   (uint64_t{1} << 6U) | (uint64_t{1} << 7U);
+        write_pte(kRoot, ((kLevel1 >> 12U) << 10U) | kValid);
+        write_pte(kLevel1, ((kLevel0 >> 12U) << 10U) | kValid);
+        const auto leaf_address = kLevel0 + ((kVirtual >> 12U) & 0x1FFU) * 8U;
+        const uint64_t leaf_base = ((kPhysical >> 12U) << 10U) | kLeaf;
+        write_pte(leaf_address, leaf_base | (uint64_t{1} << 61U));  // PBMT=NC
+        state.satp = (uint64_t{8} << 60U) | (kRoot >> 12U);
+        state.priv = PrivilegeLevel::Supervisor;
+
+        constexpr uint64_t kDirtyValue = UINT64_C(0xA5A5A5A5A5A5A5A5);
+        std::array<simrv::xlen::Byte, simrv::cache::DCache::kLineBytes> dirty_line{};
+        dirty_line.fill(simrv::xlen::Byte{0xA5});
+        const auto line_base = kPhysical & ~(simrv::cache::DCache::kLineBytes - 1U);
+        auto& bus = machine.memory().system_bus();
+        simrv::memory::TlChannelA acquire{};
+        acquire.opcode = simrv::memory::TlOpcodeA::AcquireBlock;
+        acquire.grow = simrv::memory::TlGrow::NtoT;
+        acquire.source = 1;
+        acquire.hart = cpu.hart_id();
+        acquire.address = line_base;
+        acquire.size = simrv::memory::kTlBlockSize;
+        simrv::memory::TlChannelD grant{};
+        std::array<simrv::xlen::Byte, simrv::memory::CoherenceHub::kLineBytes> acquired_line{};
+        TEST_ASSERT(bus.acquire_block(acquire, grant, acquired_line));
+        bus.grant_ack(simrv::memory::TlChannelE{.sink = grant.sink});
+        cpu.dcache.insert(line_base, acquired_line.data(), simrv::memory::MesiState::Exclusive);
+        for (size_t i = 0; i < dirty_line.size(); ++i) {
+            TEST_ASSERT(cpu.dcache.write(line_base + i, 0xA5U, Funct3::Sb));
+        }
+        machine.memory().system_bus().mark_modified(line_base, cpu.hart_id());
+
+        auto& ctx = cpu.active_context();
+        ctx = {};
+        ctx.opcode = Opcode::Load;
+        const auto reads_before = machine.memory().system_bus().read_count();
+        const auto misses_before = cpu.dcache.miss_count();
+        const auto loaded = simrv::memory::MemoryAccess::target_read(
+            machine.memory(), cpu, simrv::xlen::VirtAddr{kVirtual}, Funct3::Ld);
+        TEST_ASSERT(!ctx.pending_exception.has_value());
+        TEST_ASSERT(loaded == kDirtyValue);
+        TEST_ASSERT(machine.memory().system_bus().read_count() > reads_before);
+        TEST_ASSERT(cpu.dcache.miss_count() == misses_before);
+        TEST_ASSERT(cpu.dcache.line_state(line_base) == simrv::memory::MesiState::Invalid);
+        const auto* read_entry = cpu.tlb.lookup_data_r(kVirtual, 0, PrivilegeLevel::Supervisor);
+        TEST_ASSERT(read_entry != nullptr && read_entry->pbmt == simrv::PtePbmt::NonCacheable);
+
+        ctx = {};
+        ctx.opcode = Opcode::Store;
+        constexpr uint64_t kNcStore = UINT64_C(0x1122334455667788);
+        const auto writes_before = machine.memory().system_bus().write_count();
+        simrv::memory::MemoryAccess::target_write(machine.memory(), cpu,
+                                                  simrv::xlen::VirtAddr{kVirtual}, kNcStore,
+                                                  Funct3::Sd);
+        TEST_ASSERT(!ctx.pending_exception.has_value());
+        TEST_ASSERT(machine.memory().system_bus().write_count() > writes_before);
+        TEST_ASSERT(cpu.dcache.line_state(line_base) == simrv::memory::MesiState::Invalid);
+        uint64_t ram_value = 0;
+        std::memcpy(&ram_value, ram.data() + (kPhysical - kDram), sizeof(ram_value));
+        TEST_ASSERT(ram_value == kNcStore);
+
+        write_pte(leaf_address, leaf_base | (uint64_t{2} << 61U));  // PBMT=IO
+        cpu.flush_data_tlb();
+        ctx = {};
+        ctx.opcode = Opcode::Load;
+        const auto io_reads_before = machine.memory().system_bus().read_count();
+        const auto io_loaded = simrv::memory::MemoryAccess::target_read(
+            machine.memory(), cpu, simrv::xlen::VirtAddr{kVirtual}, Funct3::Ld);
+        TEST_ASSERT(!ctx.pending_exception.has_value());
+        TEST_ASSERT(io_loaded == kNcStore);
+        TEST_ASSERT(machine.memory().system_bus().read_count() > io_reads_before);
+        read_entry = cpu.tlb.lookup_data_r(kVirtual, 0, PrivilegeLevel::Supervisor);
+        TEST_ASSERT(read_entry != nullptr && read_entry->pbmt == simrv::PtePbmt::Io);
+
+        ctx = {};
+        ctx.opcode = Opcode::Store;
+        constexpr uint64_t kIoStore = UINT64_C(0x8877665544332211);
+        const auto io_writes_before = machine.memory().system_bus().write_count();
+        simrv::memory::MemoryAccess::target_write(machine.memory(), cpu,
+                                                  simrv::xlen::VirtAddr{kVirtual}, kIoStore,
+                                                  Funct3::Sd);
+        TEST_ASSERT(!ctx.pending_exception.has_value());
+        TEST_ASSERT(machine.memory().system_bus().write_count() > io_writes_before);
+        std::memcpy(&ram_value, ram.data() + (kPhysical - kDram), sizeof(ram_value));
+        TEST_ASSERT(ram_value == kIoStore);
+    }
+}
+
 }  // namespace
 
 int main() {
@@ -1048,6 +1163,9 @@ int main() {
     std::cout << "[RUN] test_ziccif_atomic_instruction_fetch_under_smp_store" << std::endl;
     test_ziccif_atomic_instruction_fetch_under_smp_store();
     std::cout << "[PASS] test_ziccif_atomic_instruction_fetch_under_smp_store" << std::endl;
+    std::cout << "[RUN] test_svpbmt_noncacheable_and_io_accesses" << std::endl;
+    test_svpbmt_noncacheable_and_io_accesses();
+    std::cout << "[PASS] test_svpbmt_noncacheable_and_io_accesses" << std::endl;
     std::cout << "[RUN] test_ziccamoa_main_memory_atomics" << std::endl;
     test_ziccamoa_main_memory_atomics();
     std::cout << "[PASS] test_ziccamoa_main_memory_atomics" << std::endl;

@@ -160,7 +160,8 @@ auto CPU::try_fast_load([[maybe_unused]] Machine& machine, simrv::xlen::Address 
             return false;
         }
         TLBEntry* tlb_e = tlb.lookup_data_r(mem_addr, current_asid, eff_priv);
-        if (simrv::compiler::likely(tlb_e != nullptr)) {
+        if (simrv::compiler::likely(tlb_e != nullptr &&
+                                    tlb_e->pbmt == simrv::memory::PtePbmt::Pma)) {
             simrv::xlen::Address const paddr = tlb_e->p_addr + (mem_addr & 0xFFF);
             if (simrv::compiler::unlikely(!core::pmp::check_access(
                     state_, paddr, size_bytes, core::PmpAccessType::Read, eff_priv))) {
@@ -259,7 +260,8 @@ auto CPU::try_fast_store(Machine& machine, simrv::xlen::Address mem_addr, isa::F
             return false;
         }
         TLBEntry* tlb_e = tlb.lookup_data_w(mem_addr, current_asid, eff_priv);
-        if (simrv::compiler::likely(tlb_e != nullptr)) {
+        if (simrv::compiler::likely(tlb_e != nullptr &&
+                                    tlb_e->pbmt == simrv::memory::PtePbmt::Pma)) {
             simrv::xlen::Address const paddr = tlb_e->p_addr + (mem_addr & 0xFFF);
             if (simrv::compiler::unlikely(is_tohost_addr(machine, paddr))) {
                 return false;
@@ -372,7 +374,8 @@ SIMRV_ALWAYS_INLINE auto CPU::execute_cached_load(Machine& machine, CachedOp& op
                     return true;
                 }
             } else if (TLBEntry* tlb_e = tlb.lookup_data_r(lookup_addr, current_asid, eff_priv);
-                       simrv::compiler::likely(tlb_e != nullptr)) {
+                       simrv::compiler::likely(tlb_e != nullptr &&
+                                               tlb_e->pbmt == simrv::memory::PtePbmt::Pma)) {
                 const simrv::xlen::Address paddr = tlb_e->p_addr + page_offset;
                 if (simrv::compiler::likely(state_.num_active_pmp == 0 ||
                                             core::pmp::check_access(state_, paddr, size_bytes,
@@ -492,7 +495,8 @@ SIMRV_ALWAYS_INLINE auto CPU::execute_cached_store(Machine& machine, CachedOp& o
                     return true;
                 }
             } else if (TLBEntry* tlb_e = tlb.lookup_data_w(lookup_addr, current_asid, eff_priv);
-                       simrv::compiler::likely(tlb_e != nullptr)) {
+                       simrv::compiler::likely(tlb_e != nullptr &&
+                                               tlb_e->pbmt == simrv::memory::PtePbmt::Pma)) {
                 const simrv::xlen::Address paddr = tlb_e->p_addr + page_offset;
                 if (simrv::compiler::likely(
                         (state_.num_active_pmp == 0 ||

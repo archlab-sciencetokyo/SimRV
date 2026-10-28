@@ -10,6 +10,7 @@
 #include "simrv/CompilerHints.hpp"
 #include "simrv/core/TlbTypes.hpp"
 #include "simrv/memory/MemoryUtil.hpp"
+#include "simrv/memory/PageTableWalker.hpp"
 #include "simrv/xlen/ScalarTypes.hpp"
 
 namespace simrv::core {
@@ -26,6 +27,7 @@ struct alignas(32) TLBEntry {
     Asid asid{};                    ///< Address Space Identifier (2 bytes)
     simrv::xlen::PrivilegeLevel priv =
         simrv::xlen::PrivilegeLevel::User;  ///< Architectural privilege level (1 byte)
+    simrv::memory::PtePbmt pbmt = simrv::memory::PtePbmt::Pma;  ///< Translated memory type
     bool valid{false};                      ///< Entry validity flag (1 byte)
     bool global{false};                     ///< Global page mapping flag (1 byte)
 };
@@ -145,7 +147,8 @@ class Tlb {
      */
     template <TlbAccessKind Kind>
     inline auto insert(simrv::xlen::Address vaddr, simrv::xlen::Address paddr, Asid asid,
-                       simrv::xlen::PrivilegeLevel priv, bool global = false) -> TLBEntry* {
+                       simrv::xlen::PrivilegeLevel priv, bool global = false,
+                       simrv::memory::PtePbmt pbmt = simrv::memory::PtePbmt::Pma) -> TLBEntry* {
         auto& table = select_table_static<Kind>();
         auto& lru = select_lru_static<Kind>();
         const auto set = calc_set(vaddr);
@@ -159,6 +162,7 @@ class Tlb {
             set_entries[0].priv == priv) {
             set_entries[0].p_addr = ppage;
             set_entries[0].global = global;
+            set_entries[0].pbmt = pbmt;
             lru[set] = 1;
             return &set_entries[0];
         }
@@ -168,6 +172,7 @@ class Tlb {
             set_entries[1].priv == priv) {
             set_entries[1].p_addr = ppage;
             set_entries[1].global = global;
+            set_entries[1].pbmt = pbmt;
             lru[set] = 0;
             return &set_entries[1];
         }
@@ -179,6 +184,7 @@ class Tlb {
         entry.asid = asid;
         entry.priv = priv;
         entry.global = global;
+        entry.pbmt = pbmt;
         entry.valid = true;
         lru[set] = 1 - way;
         return &entry;
@@ -230,8 +236,10 @@ class Tlb {
     }
 
     inline auto insert_inst_r(simrv::xlen::Address vaddr, simrv::xlen::Address paddr, Asid asid,
-                              simrv::xlen::PrivilegeLevel priv, bool global = false) -> TLBEntry* {
-        return insert<TlbAccessKind::Instruction>(vaddr, paddr, asid, priv, global);
+                              simrv::xlen::PrivilegeLevel priv, bool global = false,
+                              simrv::memory::PtePbmt pbmt = simrv::memory::PtePbmt::Pma)
+        -> TLBEntry* {
+        return insert<TlbAccessKind::Instruction>(vaddr, paddr, asid, priv, global, pbmt);
     }
 
     [[nodiscard]] inline auto lookup_data_r(simrv::xlen::Address vaddr, Asid asid,
@@ -240,8 +248,10 @@ class Tlb {
     }
 
     inline auto insert_data_r(simrv::xlen::Address vaddr, simrv::xlen::Address paddr, Asid asid,
-                              simrv::xlen::PrivilegeLevel priv, bool global = false) -> TLBEntry* {
-        return insert<TlbAccessKind::DataRead>(vaddr, paddr, asid, priv, global);
+                              simrv::xlen::PrivilegeLevel priv, bool global = false,
+                              simrv::memory::PtePbmt pbmt = simrv::memory::PtePbmt::Pma)
+        -> TLBEntry* {
+        return insert<TlbAccessKind::DataRead>(vaddr, paddr, asid, priv, global, pbmt);
     }
 
     [[nodiscard]] inline auto lookup_data_w(simrv::xlen::Address vaddr, Asid asid,
@@ -250,8 +260,10 @@ class Tlb {
     }
 
     inline auto insert_data_w(simrv::xlen::Address vaddr, simrv::xlen::Address paddr, Asid asid,
-                              simrv::xlen::PrivilegeLevel priv, bool global = false) -> TLBEntry* {
-        return insert<TlbAccessKind::DataWrite>(vaddr, paddr, asid, priv, global);
+                              simrv::xlen::PrivilegeLevel priv, bool global = false,
+                              simrv::memory::PtePbmt pbmt = simrv::memory::PtePbmt::Pma)
+        -> TLBEntry* {
+        return insert<TlbAccessKind::DataWrite>(vaddr, paddr, asid, priv, global, pbmt);
     }
 
    private:

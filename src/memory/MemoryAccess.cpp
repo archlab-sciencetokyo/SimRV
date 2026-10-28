@@ -84,6 +84,7 @@ auto MemoryAccess::target_read(MemorySubsystem& mem, core::CPU& cpu, simrv::xlen
     const unsigned size_bytes = 1u << (std::to_underlying(funct3) & 0x3u);  // unchanged
     const bool is_amo = (static_cast<Opcode>(cpu.active_context().opcode) == Opcode::Amo);
     const bool is_lr = is_amo && (cpu.active_context().funct5 == Funct5Amo::Lr);
+    simrv::memory::PtePbmt pbmt = simrv::memory::PtePbmt::Pma;
 
     const bool crosses_page =
         ((v_addr & simrv::memory::kPageMask) + size_bytes) > (1u << simrv::memory::kPageShift);
@@ -201,11 +202,12 @@ auto MemoryAccess::target_read(MemorySubsystem& mem, core::CPU& cpu, simrv::xlen
 
     auto issue_read = [&](simrv::xlen::Address addr) -> simrv::xlen::Word {
         cpu.active_context().mem_paddr = addr;
-        if (cpu.machine_->runtime_profile.is_instruction_mode() &&
+        if (pbmt == simrv::memory::PtePbmt::Pma &&
+            cpu.machine_->runtime_profile.is_instruction_mode() &&
             geometry.contains(addr, size_bytes)) {
             return simrv::memory::ram_read_fast(addr, funct3, cpu.machine_->ram_view());
         }
-        if (!geometry.contains(addr, size_bytes)) {
+        if (!geometry.contains(addr, size_bytes) || pbmt != simrv::memory::PtePbmt::Pma) {
             auto& transfer = cpu.ca_state.data_transfer;
             if (cpu.machine_->runtime_profile.is_cycle_mode() && transfer.active) {
                 TileLinkBus::TimedResponse timed{};
@@ -385,6 +387,7 @@ auto MemoryAccess::target_read(MemorySubsystem& mem, core::CPU& cpu, simrv::xlen
     } else if (entry) {
         p_addr = entry->p_addr + (v_addr.raw() & simrv::memory::kPageMask);
         is_global = entry->global;
+        pbmt = entry->pbmt;
     } else {
         cpu.active_context().tlb_miss = true;
         cpu.record_hpm_event(core::HpmEvent::DTlbMiss);
@@ -397,10 +400,12 @@ auto MemoryAccess::target_read(MemorySubsystem& mem, core::CPU& cpu, simrv::xlen
                 .and_then([&](PageWalkResult res) -> std::expected<void, simrv::xlen::TrapCause> {
                     p_addr = res.physical_address.raw();
                     is_global = res.global();
-                    cpu.tlb.insert_data_r(v_addr.raw(), p_addr, current_asid, eff_priv, is_global);
+                    pbmt = simrv::memory::PteView{.raw = res.pte}.pbmt();
+                    cpu.tlb.insert_data_r(v_addr.raw(), p_addr, current_asid, eff_priv, is_global,
+                                          pbmt);
                     if (is_amo && !is_lr) {
                         cpu.tlb.insert_data_w(v_addr.raw(), p_addr, current_asid, eff_priv,
-                                              is_global);
+                                              is_global, pbmt);
                     }
                     return {};
                 })
@@ -424,7 +429,8 @@ auto MemoryAccess::target_read(MemorySubsystem& mem, core::CPU& cpu, simrv::xlen
             cpu.active_context().pending_tval = v_addr.raw();
             return 0;
         }
-        if (cpu.machine_->runtime_profile.is_instruction_mode() && geometry.contains(p_addr)) {
+        if (pbmt == simrv::memory::PtePbmt::Pma &&
+            cpu.machine_->runtime_profile.is_instruction_mode() && geometry.contains(p_addr)) {
             const simrv::xlen::Address vpn = v_addr.raw() >> 12;
             const size_t tlb_idx = core::CPU::soft_tlb_index(vpn);
             const simrv::xlen::Address ppage = p_addr & ~0xFFFULL;
@@ -441,6 +447,10 @@ auto MemoryAccess::target_read(MemorySubsystem& mem, core::CPU& cpu, simrv::xlen
             if (cpu.soft_tlb_write[tlb_idx].paddr_base != ppage) {
                 cpu.soft_tlb_write[tlb_idx].invalidate();
             }
+        } else if (pbmt != simrv::memory::PtePbmt::Pma && translation_enabled) {
+            const size_t tlb_idx = core::CPU::soft_tlb_index(v_addr.raw() >> 12U);
+            cpu.soft_tlb_read[tlb_idx].invalidate();
+            cpu.soft_tlb_write[tlb_idx].invalidate();
         }
         cpu.active_context().mem_paddr = p_addr;
         return issue_read(p_addr);
@@ -473,6 +483,7 @@ void MemoryAccess::target_write(MemorySubsystem& mem, core::CPU& cpu, simrv::xle
                                      size_bytes) > simrv::cache::DCache::kLineBytes;
     const bool is_amo = (static_cast<Opcode>(cpu.active_context().opcode) == Opcode::Amo);
     const bool is_sc = is_amo && (cpu.active_context().funct5 == Funct5Amo::Sc);
+    simrv::memory::PtePbmt pbmt = simrv::memory::PtePbmt::Pma;
     if (simrv::compiler::unlikely((v_addr & (size_bytes - 1u)) != 0)) {
         if (is_amo) {
             cpu.active_context().pending_exception = ExceptionCode::MisalignedStore;
@@ -624,14 +635,15 @@ void MemoryAccess::target_write(MemorySubsystem& mem, core::CPU& cpu, simrv::xle
                                    (static_cast<uint64_t>(data & 0xFFFFFFFFULL) << 32));
             }
         }
-        if (cpu.machine_->runtime_profile.is_instruction_mode() &&
+        if (pbmt == simrv::memory::PtePbmt::Pma &&
+            cpu.machine_->runtime_profile.is_instruction_mode() &&
             geometry.contains(addr, size_bytes)) {
             if (!check_sc_reservation(addr)) return;
             simrv::memory::ram_write_fast(addr, data, funct3, cpu.machine_->ram_view());
             commit_write();
             return;
         }
-        if (geometry.contains(addr, size_bytes)) {
+        if (geometry.contains(addr, size_bytes) && pbmt == simrv::memory::PtePbmt::Pma) {
             const simrv::xlen::Address line_base =
                 addr & ~(static_cast<simrv::xlen::Address>(simrv::cache::DCache::kLineBytes - 1u));
             const auto line_state = cpu.dcache.line_state(line_base);
@@ -851,6 +863,7 @@ void MemoryAccess::target_write(MemorySubsystem& mem, core::CPU& cpu, simrv::xle
     } else if (entry) {
         p_addr = entry->p_addr + (v_addr.raw() & simrv::memory::kPageMask);
         is_global = entry->global;
+        pbmt = entry->pbmt;
     } else {
         cpu.active_context().tlb_miss = true;
         cpu.record_hpm_event(core::HpmEvent::DTlbMiss);
@@ -863,7 +876,9 @@ void MemoryAccess::target_write(MemorySubsystem& mem, core::CPU& cpu, simrv::xle
                 .and_then([&](PageWalkResult res) -> std::expected<void, simrv::xlen::TrapCause> {
                     p_addr = res.physical_address.raw();
                     is_global = res.global();
-                    cpu.tlb.insert_data_w(v_addr.raw(), p_addr, current_asid, eff_priv, is_global);
+                    pbmt = simrv::memory::PteView{.raw = res.pte}.pbmt();
+                    cpu.tlb.insert_data_w(v_addr.raw(), p_addr, current_asid, eff_priv, is_global,
+                                          pbmt);
                     return {};
                 })
                 .or_else([&](simrv::xlen::TrapCause error)
@@ -882,7 +897,8 @@ void MemoryAccess::target_write(MemorySubsystem& mem, core::CPU& cpu, simrv::xle
             cpu.active_context().pending_tval = v_addr.raw();
             return;
         }
-        if (cpu.machine_->runtime_profile.is_instruction_mode() && geometry.contains(p_addr)) {
+        if (pbmt == simrv::memory::PtePbmt::Pma &&
+            cpu.machine_->runtime_profile.is_instruction_mode() && geometry.contains(p_addr)) {
             const simrv::xlen::Address vpn = v_addr.raw() >> 12;
             const size_t tlb_idx = core::CPU::soft_tlb_index(vpn);
             const simrv::xlen::Address ppage = p_addr & ~0xFFFULL;
@@ -899,6 +915,10 @@ void MemoryAccess::target_write(MemorySubsystem& mem, core::CPU& cpu, simrv::xle
             if (cpu.soft_tlb_read[tlb_idx].paddr_base != ppage) {
                 cpu.soft_tlb_read[tlb_idx].invalidate();
             }
+        } else if (pbmt != simrv::memory::PtePbmt::Pma && translation_enabled) {
+            const size_t tlb_idx = core::CPU::soft_tlb_index(v_addr.raw() >> 12U);
+            cpu.soft_tlb_read[tlb_idx].invalidate();
+            cpu.soft_tlb_write[tlb_idx].invalidate();
         }
         issue_write(p_addr, wdata);
     }
