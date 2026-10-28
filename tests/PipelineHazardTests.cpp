@@ -4,7 +4,10 @@
  * dependencies, and cross-bank conversions.
  */
 #include <cstdlib>
+#include <array>
+#include <cstring>
 #include <iostream>
+#include <vector>
 
 #include "simrv/cache/ICache.hpp"
 #include "simrv/core/Cpu.hpp"
@@ -231,6 +234,77 @@ void test_cycle_kernel_bit_for_bit_hazard_stall_counters() {
     TEST_CHECK(stalls_3s_nofwd == 0);
 }
 
+void test_zkt_fixed_instruction_latency() {
+    using simrv::pipeline::operation::ExecutionClass;
+    constexpr std::array zkt_ops{
+        OperationId::LUI,     OperationId::AUIPC, OperationId::ADDI,   OperationId::SLTI,
+        OperationId::SLTIU,   OperationId::XORI,  OperationId::ORI,    OperationId::ANDI,
+        OperationId::SLLI,    OperationId::SRLI,  OperationId::SRAI,   OperationId::ADD,
+        OperationId::SUB,     OperationId::SLL,   OperationId::SLT,    OperationId::SLTU,
+        OperationId::XOR,     OperationId::SRL,   OperationId::SRA,    OperationId::OR,
+        OperationId::AND,     OperationId::ADDIW, OperationId::SLLIW,  OperationId::SRLIW,
+        OperationId::SRAIW,   OperationId::ADDW,  OperationId::SUBW,   OperationId::SLLW,
+        OperationId::SRLW,    OperationId::SRAW,  OperationId::MUL,    OperationId::MULH,
+        OperationId::MULHSU,  OperationId::MULHU, OperationId::MULW,   OperationId::ANDN,
+        OperationId::ORN,     OperationId::XNOR,  OperationId::ROL,    OperationId::ROR,
+        OperationId::RORI,    OperationId::ROLW,  OperationId::RORW,   OperationId::RORIW,
+        OperationId::CLMUL,   OperationId::CLMULH, OperationId::PACK,  OperationId::PACKW,
+        OperationId::REV8,
+    };
+    for (const auto op : zkt_ops) {
+        const auto cls = simrv::pipeline::operation::info(op).execution_class;
+        TEST_CHECK(cls == ExecutionClass::Default || cls == ExecutionClass::Multiply);
+    }
+    TEST_CHECK(simrv::pipeline::operation::info(OperationId::DIV).execution_class ==
+               ExecutionClass::DivideOrRemainder);
+    TEST_CHECK(simrv::pipeline::operation::info(OperationId::REM).execution_class ==
+               ExecutionClass::DivideOrRemainder);
+
+    constexpr simrv::xlen::Instruction add = 0x002081B3;  // add x3, x1, x2
+    constexpr simrv::xlen::Instruction mul = 0x022081B3;  // mul x3, x1, x2
+    const auto run_one = [&](simrv::xlen::Instruction instruction, simrv::xlen::Register lhs,
+                             simrv::xlen::Register rhs, simrv::pipeline::PipelineType type) {
+        simrv::core::Machine machine;
+        constexpr size_t ram_size = 1024 * 1024;
+        std::vector<simrv::xlen::Byte> ram(ram_size, simrv::xlen::Byte{0});
+        machine.set_ram_for_testing(ram.data(), ram.size());
+        auto& cpu = machine.primary_hart();
+        cpu.machine_ = &machine;
+        cpu.reset();
+        machine.runtime_profile.engine = simrv::core::ExecutionEngine::CycleFast;
+        cpu.pipeline_sim.config.pipeline_type = type;
+
+        const auto pc = machine.memory_geometry().dram_base;
+        const std::array<simrv::xlen::Instruction, 2> program = {instruction, 0x0000006F};
+        std::memcpy(ram.data(), program.data(), sizeof(program));
+        std::array<simrv::xlen::Byte, simrv::cache::ICache::kLineBytes> line{};
+        std::memcpy(line.data(), program.data(), sizeof(program));
+        cpu.icache.insert(pc, line.data(), simrv::memory::MesiState::Exclusive);
+        cpu.state().pc = pc;
+        cpu.state().regs.write(simrv::xlen::RegId::Ra, lhs);
+        cpu.state().regs.write(simrv::xlen::RegId::Sp, rhs);
+
+        uint32_t cycles = 0;
+        while (cpu.e_icount < 1 && cycles < 64) {
+            cpu.run_cycle(machine);
+            machine.memory().system_bus().advance_cycle();
+            ++cycles;
+        }
+        TEST_CHECK(cpu.e_icount == 1);
+        return cycles;
+    };
+
+    for (const auto type : {simrv::pipeline::PipelineType::ThreeStage,
+                            simrv::pipeline::PipelineType::FiveStage}) {
+        TEST_CHECK(run_one(add, 0, 0, type) ==
+                   run_one(add, ~simrv::xlen::Register{0}, simrv::xlen::Register{0x55555555U},
+                           type));
+        TEST_CHECK(run_one(mul, 0, 0, type) ==
+                   run_one(mul, ~simrv::xlen::Register{0}, simrv::xlen::Register{0x55555555U},
+                           type));
+    }
+}
+
 void test_cycle_kernel_fp_hazard_stall_counters() {
     // Verifies FP conservative hazard stalls in cycle simulation:
     // 1: addi     x1, x0, 2
@@ -296,6 +370,7 @@ int main() {
     test_cross_bank_conversion_hazards();
     test_pipeline_sim_hazard_events();
     test_cycle_kernel_bit_for_bit_hazard_stall_counters();
+    test_zkt_fixed_instruction_latency();
     test_cycle_kernel_fp_hazard_stall_counters();
     std::cout << "=== All Pipeline Hazard Tests Passed Successfully ===\n";
     return 0;

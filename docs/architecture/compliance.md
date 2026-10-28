@@ -36,6 +36,7 @@ preset's configured cache-line geometry remains a separate platform requirement.
 | Additional scalar FP | Zfa RV64 instructions: FLI.S/D, FMINM/FMAXM, FLEQ/FLTQ, FROUND/FROUNDNX, and FCVTMOD.W.D; FDT advertises Zfa | RVA23 instruction decode, semantics, flags, and FDT tests |
 | Wait-on-reservation-set | Zawrs WRS.NTO/WRS.STO encodings retire immediately (SimRV does not model low-power waits); FDT advertises Zawrs | RVA23 decode, reserved-encoding, retirement, and FDT tests |
 | Vector bit manipulation | Zvbb operations decode and execute for supported SEW widths; FDT advertises Zvbb | Core semantic tests for bitwise, rotate, count, reverse, and widening-shift operations |
+| Data-independent latency | Implemented Zkt-listed integer instructions have operand-independent guest-cycle latency; DIV/REM are excluded as specified; FDT advertises Zkt | Pipeline tests across operand patterns and three- and five-stage models |
 | TLB invalidation | Svinval (`sinval.vma`, `sfence.w.inval`, `sfence.inval.ir`) | Core semantic, RVA23 profile gates, and ACT suite |
 | Vector | Implemented subset of RISC-V Vector 1.0 (`V`), configurable VLEN | Vector regression suite and lockstep |
 | Privilege | M/S/U execution, traps, interrupts, and CSR access (Privileged ISA 1.13) | Core semantic, ACT suite, and Linux boot gates |
@@ -79,7 +80,7 @@ SimRV verifies its default 64-bit profile (`rva23s64`) against the RISC-V Archit
 
 - Full RVA23S64 is not yet qualified. The following mandatory requirements remain incomplete or
   need profile-level qualification:
-  - Unprivileged extensions: Zkt, Zvkt, and Supm.
+  - Unprivileged extensions: Zvkt and Supm.
   - Memory requirements: the Ziccif and Ziccrse main-memory PMA guarantees.
   - Supervisor profile requirements: Ssnpm pointer masking, Sscofpmf, Ssu64xl, and the augmented
     hypervisor architecture Sha, including H, Ssstateen, and its required guest state and

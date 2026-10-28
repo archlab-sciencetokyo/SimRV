@@ -214,7 +214,7 @@ auto generate_platform_fdt(const core::MachineConfig& config,
     static constexpr std::string_view kSupportedGuestExts[] = {
         "i",      "m",      "a",       "f",        "d",           "c",      "b",
         "v",      "zvbb",   "zicntr", "zihpm",    "zicsr",      "zifencei", "zihintpause",
-        "zihintntl",
+        "zihintntl", "zkt",
         "zic64b", "zicclsm", "za64rs", "ziccamoa", "zfhmin", "zvfhmin", "zfa", "zicond", "zicboz",
         "zicbom", "zicbop", "zawrs",   "svinval", "svpbmt",     "svnapot", "sstc",
         "sscofpmf",
