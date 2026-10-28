@@ -133,6 +133,65 @@ void test_za64rs_reservation_set() {
     TEST_ASSERT(!table.check_reservation(0, kAddress));
 }
 
+void test_ziccrse_eventual_lr_sc_success() {
+    simrv::core::Machine machine;
+    auto secondary = std::make_unique<simrv::core::CPU>();
+    secondary->reset();
+    secondary->state().mhartid = 1;
+    machine.add_hart_for_testing(std::move(secondary));
+    std::vector<simrv::xlen::Byte> ram(1024 * 1024, simrv::xlen::Byte{0});
+    machine.set_ram_for_testing(ram.data(), ram.size());
+    machine.memory().initialize_mmu();
+    constexpr simrv::xlen::Address kAddress = simrv::memory::kDramBaseAddress + 0x200;
+
+    const auto lr = [&](simrv::core::CPU& cpu) {
+        auto& ctx = cpu.active_context();
+        ctx = {};
+        ctx.opcode = simrv::isa::Opcode::Amo;
+        ctx.funct5 = simrv::isa::Funct5Amo::Lr;
+        ctx.funct3 = simrv::isa::Funct3::Sw;
+        ctx.mem_addr = kAddress;
+        ctx.rrs1 = kAddress;
+        cpu.run_memory_stage(machine);
+        TEST_ASSERT(!ctx.pending_exception.has_value());
+        TEST_ASSERT(cpu.state().lr_reservation_active);
+    };
+    const auto sc = [&](simrv::core::CPU& cpu, uint32_t value) {
+        auto& ctx = cpu.active_context();
+        ctx = {};
+        ctx.opcode = simrv::isa::Opcode::Amo;
+        ctx.funct5 = simrv::isa::Funct5Amo::Sc;
+        ctx.funct3 = simrv::isa::Funct3::Sw;
+        ctx.mem_addr = kAddress;
+        ctx.rrs1 = kAddress;
+        ctx.rrs2 = value;
+        cpu.run_memory_stage(machine);
+        TEST_ASSERT(!ctx.pending_exception.has_value());
+        return ctx.wb_data;
+    };
+
+    auto& hart0 = machine.primary_hart();
+    auto& hart1 = machine.hart(1);
+    hart0.state().priv = simrv::xlen::PrivilegeLevel::Machine;
+    hart1.state().priv = simrv::xlen::PrivilegeLevel::Machine;
+
+    // Both harts reserve the same word. With no unconditional writer, one SC makes progress
+    // and invalidates the competing reservation; the losing hart can retry from a fresh LR.
+    lr(hart0);
+    lr(hart1);
+    TEST_ASSERT(sc(hart0, 1) == 0);
+    TEST_ASSERT(sc(hart1, 2) != 0);
+
+    lr(hart0);
+    lr(hart1);
+    TEST_ASSERT(sc(hart1, 3) == 0);
+    TEST_ASSERT(sc(hart0, 4) != 0);
+
+    uint32_t final_value = 0;
+    std::memcpy(&final_value, ram.data() + 0x200, sizeof(final_value));
+    TEST_ASSERT(final_value == 3);
+}
+
 void test_ziccamoa_main_memory_atomics() {
     using simrv::isa::Funct3;
     using simrv::isa::Funct5Amo;
@@ -892,6 +951,10 @@ int main() {
     std::cout << "[RUN] test_za64rs_reservation_set" << std::endl;
     test_za64rs_reservation_set();
     std::cout << "[PASS] test_za64rs_reservation_set" << std::endl;
+
+    std::cout << "[RUN] test_ziccrse_eventual_lr_sc_success" << std::endl;
+    test_ziccrse_eventual_lr_sc_success();
+    std::cout << "[PASS] test_ziccrse_eventual_lr_sc_success" << std::endl;
     std::cout << "[RUN] test_ziccamoa_main_memory_atomics" << std::endl;
     test_ziccamoa_main_memory_atomics();
     std::cout << "[PASS] test_ziccamoa_main_memory_atomics" << std::endl;
