@@ -9,6 +9,8 @@
 #include <stdexcept>
 #include <string_view>
 
+#include "simrv/xlen/ScalarTypes.hpp"
+
 namespace simrv::util {
 namespace {
 constexpr uint32_t kMagic = 0xd00dfeed;
@@ -248,8 +250,9 @@ auto patch_fdt(std::span<const uint8_t> blob, uint64_t dram_base, uint64_t dram_
                     "zihintntl", "zkt",    "zvbb",   "zic64b", "zicclsm", "za64rs", "ziccamoa", "zfhmin",
                     "zvfhmin", "zfa", "zicond", "zicboz",
                     "zicbom",    "zicbop", "zawrs",   "svinval", "svpbmt", "svnapot", "sstc",
-                    "sscofpmf"};
+                    "sscofpmf", "ssu64xl"};
                 for (const auto ext : kSupportedGuestExts) {
+                    if (ext == "ssu64xl" && !simrv::xlen::kIsXLen64) continue;
                     bool present = false;
                     size_t offset = 0;
                     while (offset < isa_ext_prop->data.size()) {

@@ -6,6 +6,7 @@
 
 #include <cstring>
 #include <format>
+#include <iterator>
 #include <span>
 
 #include "simrv/core/PlatformMap.h"
@@ -13,6 +14,7 @@
 #include "simrv/core/PlatformTiming.hpp"
 #include "simrv/core/SoCDeviceRegistry.hpp"
 #include "simrv/memory/Mmio.hpp"
+#include "simrv/xlen/ScalarTypes.hpp"
 
 namespace simrv::util {
 
@@ -219,6 +221,9 @@ auto generate_platform_fdt(const core::MachineConfig& config,
         "zicbom", "zicbop", "zawrs",   "svinval", "svpbmt",     "svnapot", "sstc",
         "sscofpmf",
     };
+    std::vector<std::string_view> guest_extensions(std::begin(kSupportedGuestExts),
+                                                   std::end(kSupportedGuestExts));
+    if constexpr (simrv::xlen::kIsXLen64) guest_extensions.emplace_back("ssu64xl");
 
     for (uint32_t hart = 0; hart < num_harts; ++hart) {
         fdt.begin_node(std::format("cpu@{}", hart));
@@ -228,7 +233,7 @@ auto generate_platform_fdt(const core::MachineConfig& config,
         fdt.property_string("status", "okay");
         fdt.property_u32("clock-frequency", clock_hz);
         fdt.property_string("riscv,isa-base", simrv::xlen::kIsXLen64 ? "rv64i" : "rv32i");
-        fdt.property_stringlist("riscv,isa-extensions", kSupportedGuestExts);
+        fdt.property_stringlist("riscv,isa-extensions", guest_extensions);
         fdt.property_u32("riscv,cbom-block-size", 64);
         fdt.property_u32("riscv,cbop-block-size", 64);
         fdt.property_u32("riscv,cboz-block-size", 64);

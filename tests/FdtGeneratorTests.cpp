@@ -14,6 +14,7 @@
 
 #include "simrv/core/MachineConfig.hpp"
 #include "simrv/util/FdtGenerator.hpp"
+#include "simrv/xlen/ScalarTypes.hpp"
 #include "simrv/util/FdtPatcher.hpp"
 
 namespace {
@@ -132,6 +133,8 @@ void test_generate_platform_fdt_pcie() {
     expect(blob_contains_string(blob, "zawrs"), "Zawrs wait-on-reservation-set advertised");
     expect(blob_contains_string(blob, "zvbb"), "Zvbb vector bit-manipulation advertised");
     expect(blob_contains_string(blob, "zkt"), "Zkt data-independent latency advertised");
+    expect(blob_contains_string(blob, "ssu64xl") == simrv::xlen::kIsXLen64,
+           "Ssu64xl is advertised only by the RV64 guest");
     expect(blob_contains_string(blob, "riscv,pmu"), "RISC-V PMU node present");
     expect(blob_contains_string(blob, "riscv,event-to-mhpmevent"),
            "standard branch-miss mapping present");
@@ -189,7 +192,8 @@ void test_patch_fdt_advertises_zihintntl_and_64_byte_cmo() {
                blob_contains_string(*patched, "zfa") &&
                blob_contains_string(*patched, "zawrs") &&
                blob_contains_string(*patched, "zvbb") &&
-               blob_contains_string(*patched, "zkt"),
+               blob_contains_string(*patched, "zkt") &&
+               blob_contains_string(*patched, "ssu64xl") == simrv::xlen::kIsXLen64,
            "patched CPU node advertises supported RVA23 memory extensions");
     expect(fdt_property_u32(*patched, "riscv,cbom-block-size") == 64,
            "patched CPU node reports 64-byte Zicbom blocks");

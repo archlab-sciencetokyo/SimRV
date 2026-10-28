@@ -16,6 +16,7 @@
 #include "simrv/cache/L2Cache.hpp"
 #include "simrv/cache/L3Cache.hpp"
 #include "simrv/core/Cpu.hpp"
+#include "simrv/core/CsrFile.hpp"
 #include "simrv/core/Machine.hpp"
 #include "simrv/execute/ExecuteUnit.hpp"
 #include "simrv/isa/Common.hpp"
@@ -586,6 +587,31 @@ void test_zawrs_instructions() {
     TEST_ASSERT(!effects.integer_write.enabled && !effects.floating_write.enabled);
 }
 
+void test_ssu64xl_user_xlen_csr() {
+    if constexpr (simrv::xlen::kIsXLen64) {
+        simrv::core::Machine machine;
+        auto& cpu = machine.hart(0);
+        cpu.state().misa = (simrv::xlen::CsrValue{2} << 62U) |
+                           simrv::isa::misa_extension_bit(simrv::isa::IsaExtension::I) |
+                           simrv::isa::misa_extension_bit(simrv::isa::IsaExtension::S) |
+                           simrv::isa::misa_extension_bit(simrv::isa::IsaExtension::U);
+        cpu.state().initialize_lower_xlen_fields();
+
+        constexpr uint64_t kUxlMask = uint64_t{0x3} << 32U;
+        constexpr uint64_t kSxlMask = uint64_t{0x3} << 34U;
+        const uint64_t requested =
+            (static_cast<uint64_t>(cpu.state().mstatus) & ~(kUxlMask | kSxlMask)) |
+            (uint64_t{2} << 32U) | (uint64_t{2} << 34U);
+        const auto write = cpu.csr_file.write(
+            simrv::xlen::CsrNumber{0x300}, static_cast<simrv::xlen::CsrValue>(requested));
+        TEST_ASSERT(write.has_value());
+        const auto status = cpu.csr_file.read(simrv::xlen::CsrNumber{0x100});
+        TEST_ASSERT(status.has_value());
+        TEST_ASSERT(((static_cast<uint64_t>(*status) >> 32U) & 0x3U) == 2U);
+        TEST_ASSERT(((static_cast<uint64_t>(cpu.state().mstatus) >> 34U) & 0x3U) == 2U);
+    }
+}
+
 void test_zcb_decompression() {
     struct Encoding {
         uint16_t match;
@@ -761,6 +787,10 @@ int main() {
     std::cout << "[RUN] test_zawrs_instructions" << std::endl;
     test_zawrs_instructions();
     std::cout << "[PASS] test_zawrs_instructions" << std::endl;
+
+    std::cout << "[RUN] test_ssu64xl_user_xlen_csr" << std::endl;
+    test_ssu64xl_user_xlen_csr();
+    std::cout << "[PASS] test_ssu64xl_user_xlen_csr" << std::endl;
 
     std::cout << "[RUN] test_zimop_decoder" << std::endl;
     test_zimop_decoder();
