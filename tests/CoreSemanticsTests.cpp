@@ -1634,6 +1634,72 @@ void test_vector_integer_remainder_and_reverse_subtract() {
            "vredmaxu compares reduction elements as unsigned SEW values");
 }
 
+void test_zvbb_integer_semantics() {
+    simrv::core::Machine machine;
+    auto& cpu = machine.hart(0);
+    auto& regs = cpu.state().regs;
+    cpu.state().misa = simrv::isa::kMisaDefault;
+    cpu.state().vtype = 0;  // SEW=8, LMUL=1
+    cpu.state().vl = 2;
+    cpu.state().vstart = 0;
+
+    constexpr auto vd = static_cast<simrv::xlen::RegId>(2);
+    constexpr auto vs1 = static_cast<simrv::xlen::RegId>(4);
+    constexpr auto vs2 = static_cast<simrv::xlen::RegId>(6);
+    const auto instruction = [](auto dst, auto src1, auto src2) {
+        return static_cast<simrv::xlen::Instruction>(
+            (1U << 25U) | (std::to_underlying(src2) << 20U) |
+            (std::to_underlying(src1) << 15U) | (std::to_underlying(dst) << 7U) | 0x57U);
+    };
+    auto& a = regs.read_vector(simrv::xlen::to_vec_reg_id(vs2));
+    auto& b = regs.read_vector(simrv::xlen::to_vec_reg_id(vs1));
+    auto& d = regs.read_vector(simrv::xlen::to_vec_reg_id(vd));
+    a.u8[0] = 0x81;
+    a.u8[1] = 0x00;
+    b.u8[0] = 0x01;
+    b.u8[1] = 0x01;
+
+    const auto run = [&](simrv::isa::OperationId op) {
+        cpu.active_context().pending_exception.reset();
+        simrv::execute::ExecuteUnit::execute_vector(cpu, machine.memory(), op,
+                                                     instruction(vd, vs1, vs2));
+        expect(!cpu.active_context().pending_exception.has_value(),
+               "implemented Zvbb instruction executes legally at SEW=8");
+    };
+    run(simrv::isa::OperationId::VANDN_VV);
+    expect(d.u8[0] == 0x80 && d.u8[1] == 0,
+           "Zvbb vandn computes vs2 AND NOT vs1");
+    run(simrv::isa::OperationId::VROL_VV);
+    expect(d.u8[0] == 0x03 && d.u8[1] == 0,
+           "Zvbb vector rotate-left uses each element's low shift bits");
+    run(simrv::isa::OperationId::VROR_VV);
+    expect(d.u8[0] == 0xC0 && d.u8[1] == 0,
+           "Zvbb vector rotate-right handles element-width wraparound");
+    run(simrv::isa::OperationId::VCLZ_V);
+    expect(d.u8[0] == 0 && d.u8[1] == 8,
+           "Zvbb clz handles high-bit and zero operands");
+    run(simrv::isa::OperationId::VCTZ_V);
+    expect(d.u8[0] == 0 && d.u8[1] == 8,
+           "Zvbb ctz handles odd and zero operands");
+    run(simrv::isa::OperationId::VCPOP_V);
+    expect(d.u8[0] == 2 && d.u8[1] == 0,
+           "Zvbb population count handles sparse and zero operands");
+    run(simrv::isa::OperationId::VBREV_V);
+    expect(d.u8[0] == 0x81 && d.u8[1] == 0,
+           "Zvbb bit reverse is defined across the complete element width");
+    run(simrv::isa::OperationId::VBREV8_V);
+    expect(d.u8[0] == 0x81 && d.u8[1] == 0,
+           "Zvbb byte bit reverse handles byte elements");
+    run(simrv::isa::OperationId::VREV8_V);
+    expect(d.u8[0] == 0x81 && d.u8[1] == 0,
+           "Zvbb byte reverse is an identity for byte elements");
+
+    cpu.state().vl = 1;
+    run(simrv::isa::OperationId::VWSLL_VV);
+    expect(regs.read_vector(simrv::xlen::to_vec_reg_id(vd)).u16[0] == 0x0102,
+           "Zvbb widening shift-left produces a widened result");
+}
+
 void test_vector_gather() {
     simrv::core::Machine machine;
     auto& cpu = machine.hart(0);
@@ -4098,6 +4164,7 @@ int main() {
     test_vector_mask_and_fault_only_first_memory();
     test_vector_bulk_memory_operations();
     test_vector_integer_remainder_and_reverse_subtract();
+    test_zvbb_integer_semantics();
     test_vector_gather();
     test_vector_configuration_large_avl();
     test_vector_configuration_preserved_vl();

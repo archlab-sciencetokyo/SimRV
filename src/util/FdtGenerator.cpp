@@ -213,7 +213,8 @@ auto generate_platform_fdt(const core::MachineConfig& config,
     // docs/architecture/compliance.md until the remaining mandatory extensions are implemented.
     static constexpr std::string_view kSupportedGuestExts[] = {
         "i",      "m",      "a",       "f",        "d",           "c",      "b",
-        "v",      "zicntr", "zihpm",  "zicsr",    "zifencei",   "zihintpause", "zihintntl",
+        "v",      "zvbb",   "zicntr", "zihpm",    "zicsr",      "zifencei", "zihintpause",
+        "zihintntl",
         "zic64b", "zicclsm", "za64rs", "ziccamoa", "zfhmin", "zvfhmin", "zfa", "zicond", "zicboz",
         "zicbom", "zicbop", "zawrs",   "svinval", "svpbmt",     "svnapot", "sstc",
         "sscofpmf",

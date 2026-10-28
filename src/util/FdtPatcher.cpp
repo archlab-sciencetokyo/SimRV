@@ -245,7 +245,7 @@ auto patch_fdt(std::span<const uint8_t> blob, uint64_t dram_base, uint64_t dram_
             if (isa_ext_prop != nullptr) {
                 // Advertise only supported additions; this is not the complete RVA23 set.
                 static constexpr std::string_view kSupportedGuestExts[] = {
-                    "zihintntl", "zic64b", "zicclsm", "za64rs", "ziccamoa", "zfhmin",
+                    "zihintntl", "zvbb",   "zic64b", "zicclsm", "za64rs", "ziccamoa", "zfhmin",
                     "zvfhmin", "zfa", "zicond", "zicboz",
                     "zicbom",    "zicbop", "zawrs",   "svinval", "svpbmt", "svnapot", "sstc",
                     "sscofpmf"};
