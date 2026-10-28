@@ -793,13 +793,13 @@ void test_sstvecd_and_sstvala_supervisor_traps() {
     const auto direct_stvec = cpu.csr_file.read(simrv::core::Csr::Stvec);
     TEST_ASSERT(direct_stvec.has_value() && *direct_stvec == kVectorBase);
 
-    constexpr simrv::xlen::CsrValue kFaultAddress = 0x12345678;
+    constexpr simrv::xlen::CsrValue kTrapValue = 0x12345678;
     constexpr std::array causes = {
-        simrv::isa::ExceptionCode::MisalignedFetch, simrv::isa::ExceptionCode::FaultFetch,
-        simrv::isa::ExceptionCode::MisalignedLoad,  simrv::isa::ExceptionCode::FaultLoad,
-        simrv::isa::ExceptionCode::MisalignedStore, simrv::isa::ExceptionCode::FaultStore,
-        simrv::isa::ExceptionCode::FetchPageFault,  simrv::isa::ExceptionCode::LoadPageFault,
-        simrv::isa::ExceptionCode::StorePageFault,
+        simrv::isa::ExceptionCode::MisalignedFetch,    simrv::isa::ExceptionCode::FaultFetch,
+        simrv::isa::ExceptionCode::MisalignedLoad,     simrv::isa::ExceptionCode::FaultLoad,
+        simrv::isa::ExceptionCode::MisalignedStore,    simrv::isa::ExceptionCode::FaultStore,
+        simrv::isa::ExceptionCode::IllegalInstruction, simrv::isa::ExceptionCode::FetchPageFault,
+        simrv::isa::ExceptionCode::LoadPageFault,      simrv::isa::ExceptionCode::StorePageFault,
     };
     simrv::xlen::CsrValue delegation = 0;
     for (const auto cause : causes) {
@@ -812,10 +812,10 @@ void test_sstvecd_and_sstvala_supervisor_traps() {
         state.pc = 0x2000;
         state.medeleg = delegation;
         state.stvec = kVectorBase;
-        cpu.raise_exception(cause, kFaultAddress);
+        cpu.raise_exception(cause, kTrapValue);
         TEST_ASSERT(cpu.state().priv == simrv::xlen::PrivilegeLevel::Supervisor);
         TEST_ASSERT(cpu.state().pc == kVectorBase);
-        TEST_ASSERT(cpu.state().stval == kFaultAddress);
+        TEST_ASSERT(cpu.state().stval == kTrapValue);
     }
 }
 
