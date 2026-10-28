@@ -32,6 +32,7 @@ preset's configured cache-line geometry remains a separate platform requirement.
 | Misaligned main-memory accesses | Zicclsm loads and stores, including accesses spanning cache-block and page boundaries; FDT advertises Zicclsm | RVA23 main-memory alignment and FDT tests |
 | Reservation-set size | Za64rs uses naturally aligned 64-byte reservation sets; FDT advertises Za64rs | RVA23 reservation-set and FDT tests |
 | LR/SC eventual progress | With competing constrained attempts and no unconditional writer, one SC succeeds and invalidates the other reservation; FDT advertises Ziccrse | RVA23 multi-hart LR/SC progress test and existing atomic-coherence tests |
+| Atomic instruction fetch | Ziccif aligned instruction fetches up to 32 bits are synchronized against instruction-mode SMP writes; cycle-mode fetch uses coherent I-cache line fills; FDT advertises Ziccif | RVA23 concurrent fetch/store test and cycle-mode cache-coherence tests |
 | Main-memory AMOs | Ziccamoa: all Zaamo arithmetic and logical AMOs on main memory; FDT advertises Ziccamoa | RVA23 AMO integration tests across word and doubleword widths |
 | Minimal half precision | Zfhmin transfers, moves, and binary16 conversions; Zvfhmin widening/narrowing vector conversions at SEW=16; FDT advertises both | RVA23 scalar conversion, vector conversion, and FDT tests |
 | Additional scalar FP | Zfa RV64 instructions: FLI.S/D, FMINM/FMAXM, FLEQ/FLTQ, FROUND/FROUNDNX, and FCVTMOD.W.D; FDT advertises Zfa | RVA23 instruction decode, semantics, flags, and FDT tests |
@@ -85,7 +86,6 @@ SimRV verifies its default 64-bit profile (`rva23s64`) against the RISC-V Archit
 
 - Full RVA23S64 is not yet qualified. The following mandatory requirements remain incomplete or
   need profile-level qualification:
-  - Memory requirement: the Ziccif main-memory instruction-fetch atomicity guarantee.
   - Supervisor profile requirements: the augmented hypervisor architecture Sha, including H,
     Ssstateen, and its required guest state and
     translation behavior.

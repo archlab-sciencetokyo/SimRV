@@ -10,6 +10,7 @@
 #include <memory>
 #include <mutex>
 #include <optional>
+#include <shared_mutex>
 #include <span>
 #include <string>
 #include <unordered_map>
@@ -150,6 +151,7 @@ class Machine final : public core::IInterruptController {
     };
 
     std::unique_ptr<Runtime> runtime_;
+    std::shared_mutex instruction_memory_mutex_;
     Tracer* tracer_raw_{nullptr};
     simrv::debug::BreakpointManager* breakpoint_manager_raw_{nullptr};
     std::unique_ptr<simrv::device::PlatformDeviceRegistry> device_registry_;
@@ -426,6 +428,9 @@ class Machine final : public core::IInterruptController {
     [[nodiscard]] auto ram_data() noexcept -> simrv::xlen::Byte*;
     [[nodiscard]] auto ram_data() const noexcept -> const simrv::xlen::Byte*;
     [[nodiscard]] auto ram_view() const noexcept -> simrv::memory::RamView;
+    [[nodiscard]] auto instruction_memory_mutex() noexcept -> std::shared_mutex& {
+        return instruction_memory_mutex_;
+    }
     [[nodiscard]] auto framebuffer_view() const noexcept -> simrv::memory::RamView;
     [[nodiscard]] auto framebuffer_geometry() const noexcept -> const FramebufferConfig& {
         return framebuffer_geometry_;

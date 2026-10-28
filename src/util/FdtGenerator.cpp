@@ -219,7 +219,7 @@ auto generate_platform_fdt(const core::MachineConfig& config,
         "zihintntl", "zkt",
         "zic64b", "zicclsm", "za64rs", "ziccamoa", "zfhmin", "zvfhmin", "zfa", "zicond", "zicboz",
         "zicbom", "zicbop", "zawrs",   "svinval", "svpbmt",     "svnapot", "sstc",
-        "sscofpmf", "ziccrse",
+        "sscofpmf", "ziccrse", "ziccif",
     };
     std::vector<std::string_view> guest_extensions(std::begin(kSupportedGuestExts),
                                                    std::end(kSupportedGuestExts));

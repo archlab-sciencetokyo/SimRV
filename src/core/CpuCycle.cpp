@@ -4,6 +4,7 @@
  */
 #include <array>
 #include <atomic>
+#include <shared_mutex>
 #include <string_view>
 
 #include "CpuExecutionHelpers.hpp"
@@ -547,6 +548,19 @@ void CPU::run_cycle_baremetal_miss(Machine& machine) {
     const simrv::xlen::Counter retired_before = e_icount;
     run_fetch_stage_baremetal(machine);
     const bool success = !pipeline_context.pending_exception.has_value() && decode_stage(machine);
+
+    std::shared_lock<std::shared_mutex> memory_read_lock;
+    std::unique_lock<std::shared_mutex> memory_write_lock;
+    if (success && machine.is_smp_enabled() && machine.runtime_profile.is_instruction_mode()) {
+        const auto opcode = static_cast<isa::Opcode>(pipeline_context.opcode);
+        if (opcode == isa::Opcode::Load || opcode == isa::Opcode::LoadFp) {
+            memory_read_lock = std::shared_lock(machine.instruction_memory_mutex());
+        } else if (opcode == isa::Opcode::Store || opcode == isa::Opcode::StoreFp ||
+                   opcode == isa::Opcode::Amo || opcode == isa::Opcode::OpV ||
+                   isa::is_cmo_op(pipeline_context.op_id)) {
+            memory_write_lock = std::unique_lock(machine.instruction_memory_mutex());
+        }
+    }
 
     if (success && !pipeline_context.pending_exception.has_value()) {
         CachedOp op;

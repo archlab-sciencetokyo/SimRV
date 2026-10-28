@@ -4,6 +4,7 @@
  */
 #include <cstdint>
 #include <optional>
+#include <shared_mutex>
 #include <utility>
 
 #include "simrv/CompilerHints.hpp"
@@ -323,6 +324,10 @@ auto CPU::translate_stage_address(Machine& machine, simrv::xlen::VirtAddr virtua
 }
 
 void CPU::fetch_read_instruction_word(Machine& machine) {
+    std::shared_lock<std::shared_mutex> memory_read_lock;
+    if (machine.is_smp_enabled() && machine.runtime_profile.is_instruction_mode()) {
+        memory_read_lock = std::shared_lock(machine.instruction_memory_mutex());
+    }
     auto& ctx = active_context();
     if (ctx.pending_exception.has_value()) {
         return;

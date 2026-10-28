@@ -6,9 +6,11 @@
 #include <array>
 #include <cassert>
 #include <bit>
+#include <atomic>
 #include <cmath>
 #include <cstring>
 #include <iostream>
+#include <thread>
 #include <vector>
 
 #include "simrv/cache/DCache.hpp"
@@ -219,6 +221,64 @@ void test_ziccrse_eventual_lr_sc_success() {
     uint32_t loop_value = 0;
     std::memcpy(&loop_value, ram.data() + 0x204, sizeof(loop_value));
     TEST_ASSERT(loop_value == 2);
+}
+
+void test_ziccif_atomic_instruction_fetch_under_smp_store() {
+    simrv::core::Machine machine;
+    machine.set_smp_parallel_for_testing(true);
+    machine.runtime_profile.engine = simrv::core::ExecutionEngine::InstructionFast;
+    std::vector<simrv::xlen::Byte> ram(1024 * 1024, simrv::xlen::Byte{0});
+    machine.set_ram_for_testing(ram.data(), ram.size());
+    machine.memory().initialize_mmu();
+    auto secondary = std::make_unique<simrv::core::CPU>();
+    secondary->reset();
+    secondary->state().mhartid = 1;
+    machine.add_hart_for_testing(std::move(secondary));
+
+    constexpr simrv::xlen::Address kTarget = simrv::memory::kDramBaseAddress + 0x100;
+    constexpr simrv::xlen::Address kWriter = simrv::memory::kDramBaseAddress + 0x300;
+    constexpr uint32_t kInstructionA = 0x00100193U;  // addi gp, zero, 1
+    constexpr uint32_t kInstructionB = 0x00200193U;  // addi gp, zero, 2
+    constexpr std::array<uint32_t, 6> kWriterProgram = {
+        0x001002B7U,  // lui t0, 0x00100
+        0x19328293U,  // addi t0, t0, 0x193
+        0x00300337U,  // lui t1, 0x00300
+        0x00552023U,  // sw t0, 0(a0)
+        0x0062C2B3U,  // xor t0, t0, t1
+        0xFF9FF06FU,  // jal zero, -8
+    };
+    std::memcpy(ram.data() + 0x100, &kInstructionA, sizeof(kInstructionA));
+    std::memcpy(ram.data() + 0x300, kWriterProgram.data(), sizeof(kWriterProgram));
+
+    auto& writer = machine.hart(1);
+    writer.state().priv = simrv::xlen::PrivilegeLevel::Machine;
+    writer.state().pc = kWriter;
+    writer.state().regs.write(simrv::xlen::RegId::A0, kTarget);
+
+    auto& fetcher = machine.primary_hart();
+    fetcher.state().priv = simrv::xlen::PrivilegeLevel::Machine;
+    std::atomic<bool> writer_done{false};
+    std::jthread writer_thread([&] {
+        for (unsigned i = 0; i < 20'000; ++i) {
+            writer.run_cycle_baremetal(machine);
+            if ((i & 63U) == 0) std::this_thread::yield();
+        }
+        writer_done.store(true, std::memory_order_release);
+    });
+
+    bool saw_a = false;
+    bool saw_b = false;
+    for (unsigned i = 0; i < 100'000 && !writer_done.load(std::memory_order_acquire); ++i) {
+        TEST_ASSERT(fetcher.fetch_stage(machine, kTarget));
+        const auto fetched = fetcher.active_context().ir_org;
+        TEST_ASSERT(fetched == kInstructionA || fetched == kInstructionB);
+        saw_a |= fetched == kInstructionA;
+        saw_b |= fetched == kInstructionB;
+        if ((i & 63U) == 0) std::this_thread::yield();
+    }
+    writer_thread.join();
+    TEST_ASSERT(saw_a);
+    TEST_ASSERT(saw_b);
 }
 
 void test_ziccamoa_main_memory_atomics() {
@@ -984,6 +1044,10 @@ int main() {
     std::cout << "[RUN] test_ziccrse_eventual_lr_sc_success" << std::endl;
     test_ziccrse_eventual_lr_sc_success();
     std::cout << "[PASS] test_ziccrse_eventual_lr_sc_success" << std::endl;
+
+    std::cout << "[RUN] test_ziccif_atomic_instruction_fetch_under_smp_store" << std::endl;
+    test_ziccif_atomic_instruction_fetch_under_smp_store();
+    std::cout << "[PASS] test_ziccif_atomic_instruction_fetch_under_smp_store" << std::endl;
     std::cout << "[RUN] test_ziccamoa_main_memory_atomics" << std::endl;
     test_ziccamoa_main_memory_atomics();
     std::cout << "[PASS] test_ziccamoa_main_memory_atomics" << std::endl;

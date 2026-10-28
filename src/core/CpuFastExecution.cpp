@@ -4,6 +4,7 @@
  */
 #include <array>
 #include <limits>
+#include <shared_mutex>
 
 #include "CpuExecutionHelpers.hpp"
 #include "simrv/CompilerHints.hpp"
@@ -1037,6 +1038,19 @@ void CPU::execute_cached_op_fast(Machine& machine, CachedOp& op,
     }
     if (op.has_fast_alu() && execute_cached_alu_fast<kCopyContext, kInstMix, kDeferAluCommit>(op)) {
         return;
+    }
+
+    std::shared_lock<std::shared_mutex> memory_read_lock;
+    std::unique_lock<std::shared_mutex> memory_write_lock;
+    if (machine.is_smp_enabled() && machine.runtime_profile.is_instruction_mode()) {
+        const auto opcode = op.opcode();
+        if (opcode == isa::Opcode::Load || opcode == isa::Opcode::LoadFp) {
+            memory_read_lock = std::shared_lock(machine.instruction_memory_mutex());
+        } else if (opcode == isa::Opcode::Store || opcode == isa::Opcode::StoreFp ||
+                   opcode == isa::Opcode::Amo || opcode == isa::Opcode::OpV ||
+                   isa::is_cmo_op(op.op_id)) {
+            memory_write_lock = std::unique_lock(machine.instruction_memory_mutex());
+        }
     }
 
     if constexpr (kCopyContext) {
@@ -2262,6 +2276,14 @@ SIMRV_ALWAYS_INLINE auto CPU::run_fast_baremetal_kernel(Machine& machine, uint32
                 // a single instruction and return to the precise interrupt boundary instead of
                 // branching on the same pending bit after every operation in the chain.
                 if (simrv::compiler::unlikely((state_.mip & state_.mie) != 0u)) {
+                    execute_cached_op_fast<false, false>(machine, *cached, ram);
+                    ++cached_ops;
+                    ++b;
+                } else if (simrv::compiler::unlikely(
+                               multi_hart && machine.runtime_profile.is_instruction_mode())) {
+                    // Fast chains execute memory operations inline. Keep SMP instruction-mode
+                    // operations on the individually synchronized path so stores cannot race
+                    // an instruction fetch of the same naturally aligned word.
                     execute_cached_op_fast<false, false>(machine, *cached, ram);
                     ++cached_ops;
                     ++b;

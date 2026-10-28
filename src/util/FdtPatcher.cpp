@@ -250,7 +250,7 @@ auto patch_fdt(std::span<const uint8_t> blob, uint64_t dram_base, uint64_t dram_
                     "zihintntl", "zkt",    "zvbb",   "zvkt",   "zic64b", "zicclsm", "za64rs", "ziccamoa", "zfhmin",
                     "zvfhmin", "zfa", "zicond", "zicboz",
                     "zicbom",    "zicbop", "zawrs",   "svinval", "svpbmt", "svnapot", "sstc",
-                    "sscofpmf", "ziccrse", "ssu64xl", "ssnpm", "supm"};
+                    "sscofpmf", "ziccrse", "ziccif", "ssu64xl", "ssnpm", "supm"};
                 for (const auto ext : kSupportedGuestExts) {
                     if ((ext == "ssu64xl" || ext == "ssnpm" || ext == "supm") &&
                         !simrv::xlen::kIsXLen64)

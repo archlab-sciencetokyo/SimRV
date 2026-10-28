@@ -136,6 +136,7 @@ void test_generate_platform_fdt_pcie() {
     expect(blob_contains_string(blob, "zkt"), "Zkt data-independent latency advertised");
     expect(blob_contains_string(blob, "sscofpmf"), "Sscofpmf overflow interrupt support advertised");
     expect(blob_contains_string(blob, "ziccrse"), "Ziccrse main-memory support advertised");
+    expect(blob_contains_string(blob, "ziccif"), "Ziccif atomic fetch support advertised");
     expect(blob_contains_string(blob, "ssnpm") == simrv::xlen::kIsXLen64,
            "Ssnpm pointer masking is advertised only by the RV64 guest");
     expect(blob_contains_string(blob, "supm") == simrv::xlen::kIsXLen64,
@@ -203,6 +204,7 @@ void test_patch_fdt_advertises_zihintntl_and_64_byte_cmo() {
                blob_contains_string(*patched, "zkt") &&
                blob_contains_string(*patched, "sscofpmf") &&
                blob_contains_string(*patched, "ziccrse") &&
+               blob_contains_string(*patched, "ziccif") &&
                blob_contains_string(*patched, "ssnpm") == simrv::xlen::kIsXLen64 &&
                blob_contains_string(*patched, "supm") == simrv::xlen::kIsXLen64 &&
                blob_contains_string(*patched, "ssu64xl") == simrv::xlen::kIsXLen64,
