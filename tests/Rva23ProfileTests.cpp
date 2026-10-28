@@ -10,6 +10,7 @@
 #include <cmath>
 #include <cstring>
 #include <iostream>
+#include <limits>
 #include <thread>
 #include <vector>
 
@@ -29,6 +30,7 @@
 #include "simrv/memory/MemoryAccess.hpp"
 #include "simrv/memory/MemorySubsystem.hpp"
 #include "simrv/memory/ReservationTable.hpp"
+#include "simrv/memory/TileLinkBus.hpp"
 #include "simrv/pipeline/Decoder.hpp"
 #include "simrv/pipeline/RetirementEffects.hpp"
 #include "simrv/xlen/AddressTypes.hpp"
@@ -1029,6 +1031,7 @@ void test_profile_engine() {
 void test_svpbmt_noncacheable_and_io_accesses() {
     if constexpr (simrv::xlen::kIsXLen64) {
         using simrv::isa::Funct3;
+        using simrv::isa::Funct5Amo;
         using simrv::isa::Opcode;
         using simrv::xlen::PrivilegeLevel;
 
@@ -1114,6 +1117,15 @@ void test_svpbmt_noncacheable_and_io_accesses() {
         std::memcpy(&ram_value, ram.data() + (kPhysical - kDram), sizeof(ram_value));
         TEST_ASSERT(ram_value == kNcStore);
 
+        ctx = {};
+        ctx.opcode = Opcode::Amo;
+        ctx.funct5 = Funct5Amo::Add;
+        const auto nc_amo_reads_before = machine.memory().system_bus().read_count();
+        (void)simrv::memory::MemoryAccess::target_read(
+            machine.memory(), cpu, simrv::xlen::VirtAddr{kVirtual}, Funct3::Ld);
+        TEST_ASSERT(ctx.pending_exception == simrv::isa::ExceptionCode::FaultStore);
+        TEST_ASSERT(machine.memory().system_bus().read_count() == nc_amo_reads_before);
+
         write_pte(leaf_address, leaf_base | (uint64_t{2} << 61U));  // PBMT=IO
         cpu.flush_data_tlb();
         ctx = {};
@@ -1138,6 +1150,105 @@ void test_svpbmt_noncacheable_and_io_accesses() {
         TEST_ASSERT(machine.memory().system_bus().write_count() > io_writes_before);
         std::memcpy(&ram_value, ram.data() + (kPhysical - kDram), sizeof(ram_value));
         TEST_ASSERT(ram_value == kIoStore);
+
+        ctx = {};
+        ctx.opcode = Opcode::Amo;
+        ctx.funct5 = Funct5Amo::Lr;
+        const auto io_amo_reads_before = machine.memory().system_bus().read_count();
+        (void)simrv::memory::MemoryAccess::target_read(
+            machine.memory(), cpu, simrv::xlen::VirtAddr{kVirtual}, Funct3::Ld);
+        TEST_ASSERT(ctx.pending_exception == simrv::isa::ExceptionCode::FaultLoad);
+        TEST_ASSERT(machine.memory().system_bus().read_count() == io_amo_reads_before);
+
+        ctx = {};
+        ctx.opcode = Opcode::Amo;
+        ctx.funct5 = Funct5Amo::Sc;
+        const auto io_amo_writes_before = machine.memory().system_bus().write_count();
+        simrv::memory::MemoryAccess::target_write(machine.memory(), cpu,
+                                                  simrv::xlen::VirtAddr{kVirtual}, kIoStore,
+                                                  Funct3::Sd);
+        TEST_ASSERT(ctx.pending_exception == simrv::isa::ExceptionCode::FaultStore);
+        TEST_ASSERT(machine.memory().system_bus().write_count() == io_amo_writes_before);
+    }
+}
+
+void test_svpbmt_io_access_ordering() {
+    if constexpr (simrv::xlen::kIsXLen64) {
+        using simrv::xlen::PrivilegeLevel;
+
+        simrv::core::Machine machine;
+        std::vector<simrv::xlen::Byte> ram(1024 * 1024, simrv::xlen::Byte{0});
+        machine.set_ram_for_testing(ram.data(), ram.size());
+        machine.memory().initialize_mmu();
+        machine.runtime_profile.engine = simrv::core::ExecutionEngine::CycleFast;
+
+        auto& cpu = machine.primary_hart();
+        cpu.reset();
+        auto& state = cpu.state();
+        state.misa |= simrv::isa::misa_extension_bit(simrv::isa::IsaExtension::S);
+        state.initialize_lower_xlen_fields();
+        state.priv = PrivilegeLevel::Supervisor;
+
+        constexpr simrv::xlen::Address kDram = simrv::memory::kDramBaseAddress;
+        constexpr simrv::xlen::Address kCodeVirtual = 0x10000;
+        constexpr simrv::xlen::Address kIoVirtual = 0x40000;
+        constexpr simrv::xlen::Address kPmaVirtual = 0x50000;
+        constexpr simrv::xlen::Address kIoPhysical = kDram + 0x8000;
+        constexpr simrv::xlen::Address kPmaPhysical = kDram + 0x9000;
+        state.satp = uint64_t{8} << 60U;
+        state.pc = kCodeVirtual;
+        cpu.state().regs.write(simrv::xlen::RegId::Ra, kIoVirtual);
+        cpu.state().regs.write(simrv::xlen::RegId::Sp, UINT64_C(0x1122334455667788));
+        cpu.state().regs.write(simrv::xlen::RegId::Gp, UINT64_C(0x8877665544332211));
+        cpu.state().regs.write(simrv::xlen::RegId::Tp, kPmaVirtual);
+        cpu.state().regs.write(simrv::xlen::RegId::T0, UINT64_C(0x123456789ABCDEF0));
+
+        constexpr std::array<uint32_t, 6> kProgram{
+            0x0020B023U,  // sd sp, 0(ra)
+            0x0FF0000FU,  // fence iorw, iorw
+            0x00323023U,  // sd gp, 0(tp)
+            0x0FF0000FU,  // fence iorw, iorw
+            0x0050B823U,  // sd t0, 16(ra)
+            0x0000006FU,  // jal zero, 0
+        };
+        std::memcpy(ram.data(), kProgram.data(), sizeof(kProgram));
+        std::array<simrv::xlen::Byte, simrv::cache::ICache::kLineBytes> instruction_line{};
+        std::memcpy(instruction_line.data(), kProgram.data(), sizeof(kProgram));
+        cpu.icache.insert(kDram, instruction_line.data(), simrv::memory::MesiState::Exclusive);
+
+        cpu.tlb.insert_inst_r(kCodeVirtual, kDram, 0, PrivilegeLevel::Supervisor);
+        cpu.tlb.insert_data_w(kIoVirtual, kIoPhysical, 0, PrivilegeLevel::Supervisor, false,
+                              simrv::memory::PtePbmt::Io);
+        cpu.tlb.insert_data_w(kPmaVirtual, kPmaPhysical, 0, PrivilegeLevel::Supervisor);
+
+        for (unsigned cycle = 0; cpu.e_icount < 5 && cycle < 256; ++cycle) {
+            cpu.run_cycle(machine);
+            machine.memory().system_bus().advance_cycle();
+        }
+        TEST_ASSERT(cpu.e_icount >= 5);
+
+        size_t first_io_store = std::numeric_limits<size_t>::max();
+        size_t pma_store = std::numeric_limits<size_t>::max();
+        size_t second_io_store = std::numeric_limits<size_t>::max();
+        size_t transaction_index = 0;
+        for (const auto& transaction : machine.memory().system_bus().transaction_history()) {
+            if (transaction.channel == TileLinkChannel::A) {
+                if (transaction.opcode == "PutFullData" && transaction.address == kIoPhysical) {
+                    first_io_store = std::min(first_io_store, transaction_index);
+                } else if (transaction.opcode == "AcquireBlock" &&
+                           transaction.address == kPmaPhysical) {
+                    pma_store = std::min(pma_store, transaction_index);
+                } else if (transaction.opcode == "PutFullData" &&
+                           transaction.address == kIoPhysical + 16U) {
+                    second_io_store = std::min(second_io_store, transaction_index);
+                }
+            }
+            ++transaction_index;
+        }
+        TEST_ASSERT(first_io_store < pma_store);
+        TEST_ASSERT(pma_store < second_io_store);
+        TEST_ASSERT(cpu.tlb.lookup_data_w(kIoVirtual, 0, PrivilegeLevel::Supervisor)->pbmt ==
+                    simrv::memory::PtePbmt::Io);
     }
 }
 
@@ -1166,6 +1277,9 @@ int main() {
     std::cout << "[RUN] test_svpbmt_noncacheable_and_io_accesses" << std::endl;
     test_svpbmt_noncacheable_and_io_accesses();
     std::cout << "[PASS] test_svpbmt_noncacheable_and_io_accesses" << std::endl;
+    std::cout << "[RUN] test_svpbmt_io_access_ordering" << std::endl;
+    test_svpbmt_io_access_ordering();
+    std::cout << "[PASS] test_svpbmt_io_access_ordering" << std::endl;
     std::cout << "[RUN] test_ziccamoa_main_memory_atomics" << std::endl;
     test_ziccamoa_main_memory_atomics();
     std::cout << "[PASS] test_ziccamoa_main_memory_atomics" << std::endl;

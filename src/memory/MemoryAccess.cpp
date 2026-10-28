@@ -429,6 +429,12 @@ auto MemoryAccess::target_read(MemorySubsystem& mem, core::CPU& cpu, simrv::xlen
             cpu.active_context().pending_tval = v_addr.raw();
             return 0;
         }
+        if (is_amo && pbmt != simrv::memory::PtePbmt::Pma) {
+            cpu.active_context().pending_exception =
+                is_lr ? ExceptionCode::FaultLoad : ExceptionCode::FaultStore;
+            cpu.active_context().pending_tval = v_addr.raw();
+            return 0;
+        }
         if (pbmt == simrv::memory::PtePbmt::Pma &&
             cpu.machine_->runtime_profile.is_instruction_mode() && geometry.contains(p_addr)) {
             const simrv::xlen::Address vpn = v_addr.raw() >> 12;
@@ -893,6 +899,11 @@ void MemoryAccess::target_write(MemorySubsystem& mem, core::CPU& cpu, simrv::xle
     if (!cpu.active_context().pending_exception.has_value()) {
         if (simrv::compiler::unlikely(!core::pmp::check_access(
                 cpu.state(), p_addr, size_bytes, core::PmpAccessType::Write, eff_priv))) {
+            cpu.active_context().pending_exception = ExceptionCode::FaultStore;
+            cpu.active_context().pending_tval = v_addr.raw();
+            return;
+        }
+        if (is_amo && pbmt != simrv::memory::PtePbmt::Pma) {
             cpu.active_context().pending_exception = ExceptionCode::FaultStore;
             cpu.active_context().pending_tval = v_addr.raw();
             return;
