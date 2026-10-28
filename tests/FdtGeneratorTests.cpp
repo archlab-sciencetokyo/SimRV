@@ -132,6 +132,7 @@ void test_generate_platform_fdt_pcie() {
     expect(blob_contains_string(blob, "zfa"), "Zfa scalar floating-point extensions advertised");
     expect(blob_contains_string(blob, "zawrs"), "Zawrs wait-on-reservation-set advertised");
     expect(blob_contains_string(blob, "zvbb"), "Zvbb vector bit-manipulation advertised");
+    expect(blob_contains_string(blob, "zvkt"), "Zvkt vector data-independent latency advertised");
     expect(blob_contains_string(blob, "zkt"), "Zkt data-independent latency advertised");
     expect(blob_contains_string(blob, "sscofpmf"), "Sscofpmf overflow interrupt support advertised");
     expect(blob_contains_string(blob, "ssu64xl") == simrv::xlen::kIsXLen64,
@@ -193,6 +194,7 @@ void test_patch_fdt_advertises_zihintntl_and_64_byte_cmo() {
                blob_contains_string(*patched, "zfa") &&
                blob_contains_string(*patched, "zawrs") &&
                blob_contains_string(*patched, "zvbb") &&
+               blob_contains_string(*patched, "zvkt") &&
                blob_contains_string(*patched, "zkt") &&
                blob_contains_string(*patched, "sscofpmf") &&
                blob_contains_string(*patched, "ssu64xl") == simrv::xlen::kIsXLen64,

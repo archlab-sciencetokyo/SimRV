@@ -36,6 +36,7 @@ preset's configured cache-line geometry remains a separate platform requirement.
 | Additional scalar FP | Zfa RV64 instructions: FLI.S/D, FMINM/FMAXM, FLEQ/FLTQ, FROUND/FROUNDNX, and FCVTMOD.W.D; FDT advertises Zfa | RVA23 instruction decode, semantics, flags, and FDT tests |
 | Wait-on-reservation-set | Zawrs WRS.NTO/WRS.STO encodings retire immediately (SimRV does not model low-power waits); FDT advertises Zawrs | RVA23 decode, reserved-encoding, retirement, and FDT tests |
 | Vector bit manipulation | Zvbb operations decode and execute for supported SEW widths; FDT advertises Zvbb | Core semantic tests for bitwise, rotate, count, reverse, and widening-shift operations |
+| Vector data-independent latency | All implemented Zvkt-listed operations have operand-independent guest-cycle latency; FDT advertises Zvkt | Pipeline cycle tests across vector operand patterns and three- and five-stage models |
 | Data-independent latency | Implemented Zkt-listed integer instructions have operand-independent guest-cycle latency; DIV/REM are excluded as specified; FDT advertises Zkt | Pipeline tests across operand patterns and three- and five-stage models |
 | Lower-mode XLEN | RV64 U-mode supports UXL=64 through the `mstatus`/`sstatus` CSR path; RV64 FDT advertises Ssu64xl | RVA23 CSR WARL and FDT tests |
 | Counter overflow filtering | Sscofpmf implements M/S/U event filtering, counter inhibit, sticky overflow reporting, and delegated LCOFIP; FDT advertises Sscofpmf | RVA23 CSR, overflow, and interrupt-delegation tests |
@@ -82,7 +83,7 @@ SimRV verifies its default 64-bit profile (`rva23s64`) against the RISC-V Archit
 
 - Full RVA23S64 is not yet qualified. The following mandatory requirements remain incomplete or
   need profile-level qualification:
-  - Unprivileged extensions: Zvkt and Supm.
+  - Unprivileged extensions: Supm.
   - Memory requirements: the Ziccif and Ziccrse main-memory PMA guarantees.
   - Supervisor profile requirements: Ssnpm pointer masking and the augmented
     hypervisor architecture Sha, including H, Ssstateen, and its required guest state and

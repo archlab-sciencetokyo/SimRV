@@ -50,7 +50,7 @@
             reg = <0>;
             riscv,isa = "rv64imafdcbv";
             riscv,isa-base = "rv64i";
-            riscv,isa-extensions = "i", "m", "a", "f", "d", "c", "b", "v", "zvbb", "zkt", "zicntr", "zihpm", "zicsr", "zifencei", "zihintpause", "zicond", "zicboz", "zicbom", "zicbop", "zawrs", "svinval", "svpbmt", "svnapot", "sstc", "sscofpmf", "ssu64xl";
+            riscv,isa-extensions = "i", "m", "a", "f", "d", "c", "b", "v", "zvbb", "zvkt", "zkt", "zicntr", "zihpm", "zicsr", "zifencei", "zihintpause", "zicond", "zicboz", "zicbom", "zicbop", "zawrs", "svinval", "svpbmt", "svnapot", "sstc", "sscofpmf", "ssu64xl";
             riscv,cbom-block-size = <32>;
             riscv,cboz-block-size = <32>;
             mmu-type = "riscv,sv39";

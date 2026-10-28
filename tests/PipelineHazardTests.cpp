@@ -16,6 +16,7 @@
 #include "simrv/isa/OperationId.hpp"
 #include "simrv/memory/MemorySubsystem.hpp"
 #include "simrv/memory/MemoryUtil.hpp"
+#include "simrv/pipeline/Decoder.hpp"
 #include "simrv/pipeline/OperationTraits.hpp"
 #include "simrv/pipeline/PipelineConfig.hpp"
 #include "simrv/pipeline/PipelineSim.hpp"
@@ -305,6 +306,72 @@ void test_zkt_fixed_instruction_latency() {
     }
 }
 
+void test_zvkt_vector_latency() {
+    using simrv::pipeline::operation::ExecutionClass;
+    constexpr std::array zvkt_ops{
+        OperationId::VANDN_VV, OperationId::VANDN_VX, OperationId::VROL_VV,
+        OperationId::VROL_VX, OperationId::VROR_VV,  OperationId::VROR_VX,
+        OperationId::VROR_VI, OperationId::VCLZ_V,   OperationId::VCTZ_V,
+        OperationId::VCPOP_V,  OperationId::VBREV_V,  OperationId::VBREV8_V,
+        OperationId::VREV8_V,  OperationId::VWSLL_VV, OperationId::VWSLL_VX,
+        OperationId::VWSLL_VI,
+    };
+    for (const auto op : zvkt_ops) {
+        TEST_CHECK(simrv::pipeline::operation::info(op).execution_class == ExecutionClass::Default);
+    }
+
+    constexpr simrv::xlen::Instruction kVandnVv =
+        (1U << 26U) | (1U << 25U) | (6U << 20U) | (4U << 15U) | (2U << 7U) | 0x57U;
+    constexpr simrv::xlen::Instruction kVclzV =
+        (0x12U << 26U) | (1U << 25U) | (6U << 20U) | (8U << 15U) | (2U << 12U) |
+        (2U << 7U) | 0x57U;
+    TEST_CHECK(simrv::pipeline::decoder(kVandnVv) == OperationId::VANDN_VV);
+    TEST_CHECK(simrv::pipeline::decoder(kVclzV) == OperationId::VCLZ_V);
+
+    const auto run_vector = [&](simrv::xlen::Instruction instruction, uint8_t pattern,
+                                simrv::pipeline::PipelineType type) {
+        simrv::core::Machine machine;
+        constexpr size_t ram_size = 1024 * 1024;
+        std::vector<simrv::xlen::Byte> ram(ram_size, simrv::xlen::Byte{0});
+        machine.set_ram_for_testing(ram.data(), ram.size());
+        auto& cpu = machine.primary_hart();
+        cpu.machine_ = &machine;
+        cpu.reset();
+        machine.runtime_profile.engine = simrv::core::ExecutionEngine::CycleFast;
+        cpu.pipeline_sim.config.pipeline_type = type;
+        cpu.state().mstatus |= simrv::core::MstatusBit::Vs;
+        cpu.state().vl = 1;
+        cpu.state().vtype = 0;
+        auto& vector = cpu.state().regs.read_vector(
+            simrv::xlen::to_vec_reg_id(static_cast<simrv::xlen::RegId>(6)));
+        vector.u8[0] = pattern;
+        vector.u8[1] = static_cast<uint8_t>(~pattern);
+
+        const auto pc = machine.memory_geometry().dram_base;
+        const std::array<simrv::xlen::Instruction, 2> program = {instruction, 0x0000006F};
+        std::memcpy(ram.data(), program.data(), sizeof(program));
+        std::array<simrv::xlen::Byte, simrv::cache::ICache::kLineBytes> line{};
+        std::memcpy(line.data(), program.data(), sizeof(program));
+        cpu.icache.insert(pc, line.data(), simrv::memory::MesiState::Exclusive);
+        cpu.state().pc = pc;
+
+        uint32_t cycles = 0;
+        while (cpu.e_icount < 1 && cycles < 64) {
+            cpu.run_cycle(machine);
+            machine.memory().system_bus().advance_cycle();
+            ++cycles;
+        }
+        TEST_CHECK(cpu.e_icount == 1);
+        return cycles;
+    };
+
+    for (const auto type : {simrv::pipeline::PipelineType::ThreeStage,
+                            simrv::pipeline::PipelineType::FiveStage}) {
+        TEST_CHECK(run_vector(kVandnVv, 0, type) == run_vector(kVandnVv, 0xA5, type));
+        TEST_CHECK(run_vector(kVclzV, 0, type) == run_vector(kVclzV, 0xA5, type));
+    }
+}
+
 void test_cycle_kernel_fp_hazard_stall_counters() {
     // Verifies FP conservative hazard stalls in cycle simulation:
     // 1: addi     x1, x0, 2
@@ -371,6 +438,7 @@ int main() {
     test_pipeline_sim_hazard_events();
     test_cycle_kernel_bit_for_bit_hazard_stall_counters();
     test_zkt_fixed_instruction_latency();
+    test_zvkt_vector_latency();
     test_cycle_kernel_fp_hazard_stall_counters();
     std::cout << "=== All Pipeline Hazard Tests Passed Successfully ===\n";
     return 0;
