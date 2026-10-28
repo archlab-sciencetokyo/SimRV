@@ -44,6 +44,7 @@ preset's configured cache-line geometry remains a separate platform requirement.
 | Counter overflow filtering | Sscofpmf implements M/S/U event filtering, counter inhibit, sticky overflow reporting, and delegated LCOFIP; FDT advertises Sscofpmf | RVA23 CSR, overflow, and interrupt-delegation tests |
 | User pointer masking | Ssnpm selects U-mode PMLEN=0 or PMLEN=7 through `senvcfg.PMM`; Supm is implied; RV64 FDT advertises both | RVA23 WARL and tagged physical load/store tests; FDT tests |
 | NAPOT translation contiguity | Svnapot maps aligned 64 KiB regions through level-0 PTEs for Sv39/Sv48/Sv57; invalid N encodings fault; FDT advertises Svnapot | Svnapot alias translation and reserved-encoding tests; FDT tests |
+| Page-based memory types | Svpbmt decodes PMA/NC/IO leaf attributes and faults reserved PBMT encodings; NC/IO attributes are not yet applied to memory access, cacheability, or ordering; FDT advertises Svpbmt | Svpbmt PTE legality and attribute-retention tests; access behavior remains unqualified |
 | TLB invalidation | Svinval (`sinval.vma`, `sfence.w.inval`, `sfence.inval.ir`) | Core semantic, RVA23 profile gates, and ACT suite |
 | Vector | Implemented subset of RISC-V Vector 1.0 (`V`), configurable VLEN | Vector regression suite and lockstep |
 | Privilege | M/S/U execution, traps, interrupts, and CSR access (Privileged ISA 1.13) | Core semantic, ACT suite, and Linux boot gates |
@@ -87,6 +88,8 @@ SimRV verifies its default 64-bit profile (`rva23s64`) against the RISC-V Archit
 
 - Full RVA23S64 is not yet qualified. The following mandatory requirements remain incomplete or
   need profile-level qualification:
+  - Svpbmt NC/IO attributes are decoded from leaf PTEs but are not yet applied to memory access
+    cacheability and ordering behavior.
   - Sha is absent: H; Ssstateen (`sstateen0-3` and `hstateen0-3`); Shcounterenw; Shvstvala;
     Shtvala; Shvstvecd; Shvsatpa; and Shgatpa. This includes guest trap values, writable guest
     counter enables, guest supervisor translation, and second-stage SvNNx4 translation.

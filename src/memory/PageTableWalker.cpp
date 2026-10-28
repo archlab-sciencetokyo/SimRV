@@ -149,7 +149,8 @@ void PageTableWalker::accept_pte(PageWalkState& state, simrv::xlen::Word pte) co
     }
 
     if (view.is_table_pointer()) {
-        if (view.is_napot() || view.table_pointer_has_reserved_bits() || state.level == 0) {
+        if (view.is_napot() || view.pbmt() != PtePbmt::Pma ||
+            view.table_pointer_has_reserved_bits() || state.level == 0) {
             state.fault = page_fault_for(state.access);
             state.status = PageWalkStatus::Fault;
             return;

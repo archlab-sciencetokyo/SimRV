@@ -2991,6 +2991,22 @@ void test_sv39_reserved_pte_bits() {
         expect(!reserved.has_value() &&
                    reserved.error() == std::to_underlying(ExceptionCode::LoadPageFault),
                "Sv39 faults on reserved PTE bits when Svnapot/Svpbmt are absent");
+
+        write_pte(kRoot, ((kLevel1 >> 12U) << 10U) | kValid | (uint64_t{1} << 61U));
+        const auto reserved_nonleaf_pbmt =
+            mmu.translate(kVirtual, simrv::PteAccess::Read, kPrivSupervisor, 0, kSatp, 64, false);
+        expect(!reserved_nonleaf_pbmt.has_value() &&
+                   reserved_nonleaf_pbmt.error() ==
+                       std::to_underlying(ExceptionCode::LoadPageFault),
+               "Svpbmt faults when a non-leaf PTE sets PBMT bits");
+
+        write_pte(kRoot, ((kLevel1 >> 12U) << 10U) | kValid);
+        write_pte(kLevel0 + 8, ((kPhysical >> 12U) << 10U) | kLeafFlags | (uint64_t{1} << 61U));
+        const auto noncacheable =
+            mmu.translate(kVirtual, simrv::PteAccess::Read, kPrivSupervisor, 0, kSatp, 64, false);
+        expect(noncacheable.has_value() && *noncacheable == 0x4234 &&
+                   simrv::PteView{.raw = noncacheable->pte}.pbmt() == simrv::PtePbmt::NonCacheable,
+               "Svpbmt NC leaf translations retain the PBMT attribute");
     }
 }
 
