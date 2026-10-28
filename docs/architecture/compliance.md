@@ -21,6 +21,7 @@ preset's configured cache-line geometry remains a separate platform requirement.
 | Standard profiles | RVA23S64 is the intended target; mandatory-extension coverage remains incomplete | Focused tests for selected RVA23 features; these are not a full profile-conformance result |
 | Base ISA | RV32I and RV64I | RV32/RV64 ISA gates, ACT suite, and Spike lockstep |
 | General-purpose extensions | M, A, F, D, C; see FP qualification note below | ISA gates, focused semantic tests, ACT suite, lockstep |
+| Instruction-fetch fence | Zifencei `FENCE.I` invalidates the executing hart's instruction cache and decode cache | RVA23 local instruction-state flush test; SMP instruction-fetch coherence tests |
 | Bit manipulation | Zba, Zbb, Zbc, Zbs (`Zb*`) | Bitmanip ISA tests, ACT suite, and lockstep |
 | Conditional operations | Zicond (`czero.eqz`, `czero.nez`) | Core semantic, RVA23 profile gates, and ACT suite |
 | Compressed may-be-operations | Zcmop `C.MOP.n` encodings decode as architectural no-ops | RVA23 profile unit tests |

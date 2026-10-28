@@ -680,6 +680,36 @@ void test_zihintpause_encoding() {
     TEST_ASSERT(simrv::pipeline::decoder(pause) == simrv::isa::OperationId::FENCE);
 }
 
+void test_zifencei_flushes_local_instruction_state() {
+    simrv::core::Machine machine;
+    auto& cpu = machine.primary_hart();
+    constexpr simrv::xlen::Address kLineAddress = 0x1000;
+    std::array<simrv::xlen::Byte, 64> line{};
+    cpu.icache.insert(kLineAddress, line.data());
+    uint32_t cached_word = 0;
+    TEST_ASSERT(cpu.icache.read(kLineAddress, cached_word));
+
+    simrv::pipeline::DecodedInstruction decoded{};
+    decoded.cpc = simrv::xlen::VirtAddr{kLineAddress};
+    decoded.ir = 0x00000013;
+    decoded.op_id = simrv::isa::OperationId::ADDI;
+    simrv::core::CachedOp cached{};
+    cached.copy_from(decoded);
+    cpu.decode_cache.insert(decoded.cpc, cached);
+    TEST_ASSERT(cpu.decode_cache.lookup(decoded.cpc) != nullptr);
+
+    auto& context = cpu.active_context();
+    context.ir = 0x0000100F;
+    context.opcode = simrv::isa::Opcode::MiscMem;
+    context.funct3 = simrv::isa::Funct3::FenceI;
+    context.op_id = simrv::isa::OperationId::FENCE_I;
+    TEST_ASSERT(cpu.execute_stage(machine));
+
+    uint32_t instruction = 0;
+    TEST_ASSERT(!cpu.icache.read(kLineAddress, instruction));
+    TEST_ASSERT(cpu.decode_cache.lookup(decoded.cpc) == nullptr);
+}
+
 void test_cmo_decoder_and_predicates() {
     using namespace simrv::isa;
 
@@ -1326,6 +1356,9 @@ int main() {
     std::cout << "[RUN] test_zihintpause_encoding" << std::endl;
     test_zihintpause_encoding();
     std::cout << "[PASS] test_zihintpause_encoding" << std::endl;
+    std::cout << "[RUN] test_zifencei_flushes_local_instruction_state" << std::endl;
+    test_zifencei_flushes_local_instruction_state();
+    std::cout << "[PASS] test_zifencei_flushes_local_instruction_state" << std::endl;
 
     std::cout << "[RUN] test_zicclsm_unaligned_main_memory" << std::endl;
     test_zicclsm_unaligned_main_memory();
