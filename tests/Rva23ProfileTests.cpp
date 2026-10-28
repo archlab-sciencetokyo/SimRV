@@ -190,6 +190,35 @@ void test_ziccrse_eventual_lr_sc_success() {
     uint32_t final_value = 0;
     std::memcpy(&final_value, ram.data() + 0x200, sizeof(final_value));
     TEST_ASSERT(final_value == 3);
+
+    // Run a real constrained loop (LR, ADDI, SC, BNE) on two interleaved harts. Neither loop
+    // performs an unconditional write, so both must eventually leave the retry branch.
+    constexpr simrv::xlen::Address kCode = simrv::memory::kDramBaseAddress + 0x100;
+    const auto amo = [](uint32_t funct5, uint32_t rs2, uint32_t rd) {
+        return (funct5 << 27U) | (rs2 << 20U) | (10U << 15U) | (2U << 12U) | (rd << 7U) | 0x2FU;
+    };
+    constexpr uint32_t kAddiT0T0One = 0x00128293U;
+    constexpr uint32_t kBneT1ZeroMinus12 =
+        0xFE031AE3U;  // bne t1, zero, -12
+    const std::array<uint32_t, 4> loop = {amo(2, 0, 5), kAddiT0T0One, amo(3, 5, 6),
+                                          kBneT1ZeroMinus12};
+    std::memcpy(ram.data() + 0x100, loop.data(), sizeof(loop));
+    constexpr uint32_t kLoopInitial = 0;
+    std::memcpy(ram.data() + 0x204, &kLoopInitial, sizeof(kLoopInitial));
+    hart0.state().pc = kCode;
+    hart1.state().pc = kCode;
+    hart0.state().regs.write(simrv::xlen::RegId::A0, kAddress + 4);
+    hart1.state().regs.write(simrv::xlen::RegId::A0, kAddress + 4);
+    const auto done = [kCode](const simrv::core::CPU& cpu) { return cpu.state().pc == kCode + 16; };
+    for (unsigned steps = 0; steps < 32 && (!done(hart0) || !done(hart1)); ++steps) {
+        if (!done(hart0)) hart0.run_cycle_baremetal(machine);
+        if (!done(hart1)) hart1.run_cycle_baremetal(machine);
+    }
+    TEST_ASSERT(done(hart0));
+    TEST_ASSERT(done(hart1));
+    uint32_t loop_value = 0;
+    std::memcpy(&loop_value, ram.data() + 0x204, sizeof(loop_value));
+    TEST_ASSERT(loop_value == 2);
 }
 
 void test_ziccamoa_main_memory_atomics() {
