@@ -408,8 +408,7 @@ auto CsrFile::read(simrv::xlen::CsrNumber addr) const
             const auto a = addr.value();
             if (a >= 0x323U && a <= 0x33FU) {
                 const auto value = cpu_.perf_counters.read_hpmevent(a - 0x320U);
-                rcsr = cpu_.state().regs.xlen == 32U ? static_cast<uint32_t>(value)
-                                                     : static_cast<simrv::xlen::CsrValue>(value);
+                rcsr = static_cast<simrv::xlen::CsrValue>(value);
                 break;
             }
             if (cpu_.state().regs.xlen == 32U && a >= 0x723U && a <= 0x73FU) {
