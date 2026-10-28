@@ -38,6 +38,7 @@ preset's configured cache-line geometry remains a separate platform requirement.
 | Vector bit manipulation | Zvbb operations decode and execute for supported SEW widths; FDT advertises Zvbb | Core semantic tests for bitwise, rotate, count, reverse, and widening-shift operations |
 | Data-independent latency | Implemented Zkt-listed integer instructions have operand-independent guest-cycle latency; DIV/REM are excluded as specified; FDT advertises Zkt | Pipeline tests across operand patterns and three- and five-stage models |
 | Lower-mode XLEN | RV64 U-mode supports UXL=64 through the `mstatus`/`sstatus` CSR path; RV64 FDT advertises Ssu64xl | RVA23 CSR WARL and FDT tests |
+| Counter overflow filtering | Sscofpmf implements M/S/U event filtering, counter inhibit, sticky overflow reporting, and delegated LCOFIP; FDT advertises Sscofpmf | RVA23 CSR, overflow, and interrupt-delegation tests |
 | TLB invalidation | Svinval (`sinval.vma`, `sfence.w.inval`, `sfence.inval.ir`) | Core semantic, RVA23 profile gates, and ACT suite |
 | Vector | Implemented subset of RISC-V Vector 1.0 (`V`), configurable VLEN | Vector regression suite and lockstep |
 | Privilege | M/S/U execution, traps, interrupts, and CSR access (Privileged ISA 1.13) | Core semantic, ACT suite, and Linux boot gates |
@@ -83,7 +84,7 @@ SimRV verifies its default 64-bit profile (`rva23s64`) against the RISC-V Archit
   need profile-level qualification:
   - Unprivileged extensions: Zvkt and Supm.
   - Memory requirements: the Ziccif and Ziccrse main-memory PMA guarantees.
-  - Supervisor profile requirements: Ssnpm pointer masking, Sscofpmf, and the augmented
+  - Supervisor profile requirements: Ssnpm pointer masking and the augmented
     hypervisor architecture Sha, including H, Ssstateen, and its required guest state and
     translation behavior.
 

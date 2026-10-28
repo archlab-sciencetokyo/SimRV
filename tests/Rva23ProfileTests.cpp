@@ -612,6 +612,79 @@ void test_ssu64xl_user_xlen_csr() {
     }
 }
 
+void test_sscofpmf_counter_overflow_and_filtering() {
+    if constexpr (simrv::xlen::kIsXLen64) {
+        simrv::core::Machine machine;
+        auto& cpu = machine.hart(0);
+        auto& state = cpu.state();
+        auto& counters = cpu.perf_counters;
+        constexpr simrv::xlen::CsrNumber kMhpmevent3{0x323};
+        constexpr simrv::xlen::CsrNumber kMcountinhibit{0x320};
+        constexpr simrv::xlen::CsrNumber kMip{0x344};
+        constexpr simrv::xlen::CsrNumber kMideleg{0x303};
+        constexpr simrv::xlen::CsrNumber kSip{0x144};
+        constexpr uint64_t kCounterMask = uint64_t{1} << 3U;
+        constexpr uint64_t kUserInhibit = uint64_t{1} << 60U;
+        constexpr uint64_t kSupervisorInhibit = uint64_t{1} << 61U;
+        constexpr uint64_t kMachineInhibit = uint64_t{1} << 62U;
+        constexpr uint64_t kOverflow = uint64_t{1} << 63U;
+        constexpr simrv::xlen::CsrValue kLcofip = simrv::xlen::CsrValue{1} << 13U;
+        const auto event = static_cast<uint64_t>(simrv::core::HpmEvent::Cycles);
+
+        counters.reset();
+        TEST_ASSERT(cpu.csr_file.write(kMhpmevent3, event | kUserInhibit).has_value());
+        counters.write_hpmcounter(3, 7);
+        state.priv = simrv::xlen::PrivilegeLevel::User;
+        cpu.record_hpm_event(simrv::core::HpmEvent::Cycles);
+        TEST_ASSERT(counters.read_hpmcounter(3) == 7);
+
+        state.priv = simrv::xlen::PrivilegeLevel::Machine;
+        TEST_ASSERT(cpu.csr_file.write(kMhpmevent3, event | kSupervisorInhibit).has_value());
+        state.priv = simrv::xlen::PrivilegeLevel::Supervisor;
+        cpu.record_hpm_event(simrv::core::HpmEvent::Cycles);
+        TEST_ASSERT(counters.read_hpmcounter(3) == 7);
+
+        state.priv = simrv::xlen::PrivilegeLevel::Machine;
+        TEST_ASSERT(cpu.csr_file.write(kMhpmevent3, event).has_value());
+        state.priv = simrv::xlen::PrivilegeLevel::Supervisor;
+        cpu.record_hpm_event(simrv::core::HpmEvent::Cycles);
+        TEST_ASSERT(counters.read_hpmcounter(3) == 8);
+
+        state.priv = simrv::xlen::PrivilegeLevel::Machine;
+        TEST_ASSERT(cpu.csr_file.write(kMhpmevent3, event | kMachineInhibit).has_value());
+        cpu.record_hpm_event(simrv::core::HpmEvent::Cycles);
+        TEST_ASSERT(counters.read_hpmcounter(3) == 8);
+        TEST_ASSERT(cpu.csr_file.write(kMhpmevent3, event).has_value());
+        TEST_ASSERT(cpu.csr_file.write(kMcountinhibit, kCounterMask).has_value());
+        state.priv = simrv::xlen::PrivilegeLevel::Supervisor;
+        cpu.record_hpm_event(simrv::core::HpmEvent::Cycles);
+        TEST_ASSERT(counters.read_hpmcounter(3) == 8);
+
+        state.priv = simrv::xlen::PrivilegeLevel::Machine;
+        TEST_ASSERT(cpu.csr_file.write(kMcountinhibit, 0).has_value());
+        TEST_ASSERT(cpu.csr_file.write(kMhpmevent3, event).has_value());
+        counters.write_hpmcounter(3, UINT64_MAX);
+        cpu.record_hpm_event(simrv::core::HpmEvent::Cycles);
+        TEST_ASSERT(counters.read_hpmcounter(3) == 0);
+        TEST_ASSERT((counters.read_overflow_mask() & kCounterMask) != 0);
+        TEST_ASSERT((counters.read_hpmevent(3) & kOverflow) != 0);
+        TEST_ASSERT((state.mip & kLcofip) != 0);
+
+        TEST_ASSERT(cpu.csr_file.write(kMideleg, kLcofip).has_value());
+        state.priv = simrv::xlen::PrivilegeLevel::Supervisor;
+        const auto sip = cpu.csr_file.read(kSip);
+        TEST_ASSERT(sip.has_value() && (*sip & kLcofip) != 0);
+
+        state.priv = simrv::xlen::PrivilegeLevel::Machine;
+        TEST_ASSERT(cpu.csr_file.write(kMhpmevent3, event).has_value());
+        TEST_ASSERT((counters.read_overflow_mask() & kCounterMask) == 0);
+        TEST_ASSERT(cpu.csr_file.write(kMip, 0).has_value());
+        counters.write_hpmcounter(3, UINT64_MAX);
+        cpu.record_hpm_event(simrv::core::HpmEvent::Cycles);
+        TEST_ASSERT((state.mip & kLcofip) != 0);
+    }
+}
+
 void test_zcb_decompression() {
     struct Encoding {
         uint16_t match;
@@ -791,6 +864,10 @@ int main() {
     std::cout << "[RUN] test_ssu64xl_user_xlen_csr" << std::endl;
     test_ssu64xl_user_xlen_csr();
     std::cout << "[PASS] test_ssu64xl_user_xlen_csr" << std::endl;
+
+    std::cout << "[RUN] test_sscofpmf_counter_overflow_and_filtering" << std::endl;
+    test_sscofpmf_counter_overflow_and_filtering();
+    std::cout << "[PASS] test_sscofpmf_counter_overflow_and_filtering" << std::endl;
 
     std::cout << "[RUN] test_zimop_decoder" << std::endl;
     test_zimop_decoder();
