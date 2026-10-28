@@ -263,6 +263,30 @@ void test_zkt_fixed_instruction_latency() {
 
     constexpr simrv::xlen::Instruction add = 0x002081B3;  // add x3, x1, x2
     constexpr simrv::xlen::Instruction mul = 0x022081B3;  // mul x3, x1, x2
+    const auto encode_r = [](uint32_t funct7, uint32_t funct3, uint32_t opcode = 0x33U) {
+        constexpr uint32_t rd = 3;
+        constexpr uint32_t rs1 = 1;
+        constexpr uint32_t rs2 = 2;
+        return static_cast<simrv::xlen::Instruction>((funct7 << 25U) | (rs2 << 20U) |
+                                                      (rs1 << 15U) | (funct3 << 12U) |
+                                                      (rd << 7U) | opcode);
+    };
+    constexpr std::array<simrv::xlen::Register, 3> operand_patterns{
+        0,
+        ~simrv::xlen::Register{0},
+        UINT64_C(0x8000000000000001),
+    };
+    const std::array zkt_bitmanip_ops{
+        encode_r(0x05, 0x1),  // clmul
+        encode_r(0x05, 0x3),  // clmulh
+        encode_r(0x20, 0x7),  // andn
+        encode_r(0x20, 0x6),  // orn
+        encode_r(0x20, 0x4),  // xnor
+        encode_r(0x30, 0x1),  // rol
+        encode_r(0x30, 0x5),  // ror
+        encode_r(0x04, 0x4),  // pack
+        encode_r(0x04, 0x4, 0x3b),  // packw
+    };
     const auto run_one = [&](simrv::xlen::Instruction instruction, simrv::xlen::Register lhs,
                              simrv::xlen::Register rhs, simrv::pipeline::PipelineType type) {
         simrv::core::Machine machine;
@@ -303,6 +327,15 @@ void test_zkt_fixed_instruction_latency() {
         TEST_CHECK(run_one(mul, 0, 0, type) ==
                    run_one(mul, ~simrv::xlen::Register{0}, simrv::xlen::Register{0x55555555U},
                            type));
+        for (const auto instruction : zkt_bitmanip_ops) {
+            const auto expected_cycles = run_one(instruction, operand_patterns[0],
+                                                 operand_patterns[0], type);
+            for (const auto lhs : operand_patterns) {
+                for (const auto rhs : operand_patterns) {
+                    TEST_CHECK(run_one(instruction, lhs, rhs, type) == expected_cycles);
+                }
+            }
+        }
     }
 }
 
