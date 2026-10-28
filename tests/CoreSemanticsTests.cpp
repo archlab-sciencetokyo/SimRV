@@ -9,6 +9,7 @@
 #include <string>
 #include <string_view>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 
 #include "simrv/cache/L2Cache.hpp"
@@ -897,8 +898,9 @@ void test_csr_summary_and_presence_rules() {
                (simrv::core::mip_writable_mask(true) & MipBit::Mtip) == 0 &&
                (simrv::core::mip_writable_mask(true) & MipBit::Meip) == 0,
            "CLINT/PLIC machine pending bits are read-only in mip");
-    expect(simrv::core::mip_writable_mask(true) == (MipBit::Ssip | MipBit::Stip | MipBit::Seip),
-           "M-mode can post the standard supervisor pending interrupts without Sstc");
+    expect(simrv::core::mip_writable_mask(true) ==
+               (MipBit::Ssip | MipBit::Stip | MipBit::Seip | MipBit::Lcofip),
+           "M-mode can post supervisor interrupts and the Sscofpmf overflow interrupt");
     expect(simrv::core::interrupt_implemented_mask(false) ==
                (MipBit::Msip | MipBit::Mtip | MipBit::Meip),
            "M-only profiles hardwire supervisor interrupt bits to zero");
@@ -2992,6 +2994,83 @@ void test_sv39_reserved_pte_bits() {
     }
 }
 
+void test_svnapot_64k_translation() {
+    if constexpr (simrv::xlen::kIsXLen64) {
+        std::array<simrv::xlen::Byte, 0x30000> ram{};
+        const simrv::memory::RamView ram_view(ram.data(), 0, ram.size());
+        constexpr simrv::xlen::Address kRoot = 0x1000;
+        constexpr simrv::xlen::Address kLevel1 = 0x2000;
+        constexpr simrv::xlen::Address kLevel0 = 0x3000;
+        constexpr simrv::xlen::Address kVirtualBase = 0x40000;
+        constexpr simrv::xlen::Address kPhysicalBase = 0x10000;
+        constexpr simrv::xlen::Word kValidReadAccessed =
+            std::to_underlying(simrv::PteFlag::V) | std::to_underlying(simrv::PteFlag::R) |
+            std::to_underlying(simrv::PteFlag::A);
+        constexpr simrv::xlen::Word kNapot = uint64_t{1} << 63U;
+        const auto write_pte = [ram_view](simrv::xlen::Address address,
+                                          simrv::xlen::Word pte) {
+            simrv::memory::ram_write_fast(
+                address, pte, static_cast<simrv::xlen::Instruction>(simrv::isa::Funct3::Sd),
+                ram_view);
+        };
+
+        const simrv::xlen::Word napot_leaf = (((kPhysicalBase >> 12U) | 0x8U) << 10U) |
+                                             kValidReadAccessed | kNapot;
+        constexpr simrv::xlen::Address kLevel2 = 0x4000;
+        constexpr simrv::xlen::Address kLevel3 = 0x5000;
+        const auto pointer = [](simrv::xlen::Address address) {
+            return ((address >> 12U) << 10U) | std::to_underlying(simrv::PteFlag::V);
+        };
+        for (const auto& [mode, leaf_table] :
+             {std::pair{8U, kLevel0}, std::pair{9U, kLevel2}, std::pair{10U, kLevel3}}) {
+            write_pte(kRoot, pointer(kLevel1));
+            write_pte(kLevel1, pointer(kLevel0));
+            if (mode >= 9U) write_pte(kLevel0, pointer(kLevel2));
+            if (mode >= 10U) write_pte(kLevel2, pointer(kLevel3));
+
+            // NAPOT mappings replicate the PTE across all sixteen 4 KiB entries in the range.
+            const auto first_leaf_address =
+                leaf_table + ((kVirtualBase >> 12U) & 0x1F0U) * 8U;
+            for (simrv::xlen::Address entry = 0; entry < 16; ++entry) {
+                write_pte(first_leaf_address + entry * 8U, napot_leaf);
+            }
+
+            const simrv::xlen::Word satp =
+                static_cast<simrv::xlen::Word>((static_cast<uint64_t>(mode) << 60U) |
+                                               (kRoot >> 12U));
+            simrv::Mmu mmu(ram.data(), 0, ram.size());
+            for (simrv::xlen::Address page = 0; page < 16; ++page) {
+                const simrv::xlen::Address virtual_address =
+                    kVirtualBase + page * 0x1000U + 0xABC;
+                const simrv::xlen::Address expected = kPhysicalBase + page * 0x1000U + 0xABC;
+                const auto translated = mmu.translate(virtual_address, simrv::PteAccess::Read,
+                                                      kPrivSupervisor, 0, satp, 64, false);
+                expect(translated.has_value() && *translated == expected,
+                       "Svnapot translates each 4 KiB alias in Sv39/Sv48/Sv57");
+            }
+
+            if (mode == 8U) {
+                write_pte(first_leaf_address, ((kPhysicalBase >> 12U | 0x4U) << 10U) |
+                                                 kValidReadAccessed | kNapot);
+                const auto bad_ppn = mmu.translate(kVirtualBase, simrv::PteAccess::Read,
+                                                   kPrivSupervisor, 0, satp, 64, false);
+                expect(!bad_ppn.has_value() &&
+                           bad_ppn.error() ==
+                               std::to_underlying(ExceptionCode::LoadPageFault),
+                       "Svnapot faults on reserved PPN encodings");
+
+                write_pte(kLevel1, ((kPhysicalBase >> 12U) << 10U) | kValidReadAccessed | kNapot);
+                const auto bad_level = mmu.translate(kVirtualBase, simrv::PteAccess::Read,
+                                                     kPrivSupervisor, 0, satp, 64, false);
+                expect(!bad_level.has_value() &&
+                           bad_level.error() ==
+                               std::to_underlying(ExceptionCode::LoadPageFault),
+                       "Svnapot faults when N is set on a superpage-level leaf");
+            }
+        }
+    }
+}
+
 void test_atomic_alignment() {
     using simrv::isa::amo_address_aligned;
     using simrv::isa::amo_width_supported;
@@ -4179,6 +4258,7 @@ int main() {
     test_named_isa_presets();
     test_sv32_page_walk();
     test_sv39_reserved_pte_bits();
+    test_svnapot_64k_translation();
     test_atomic_alignment();
     test_atomic_decode_legality();
     test_fp_decode_legality();

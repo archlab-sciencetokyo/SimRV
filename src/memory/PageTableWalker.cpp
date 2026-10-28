@@ -149,7 +149,7 @@ void PageTableWalker::accept_pte(PageWalkState& state, simrv::xlen::Word pte) co
     }
 
     if (view.is_table_pointer()) {
-        if (view.table_pointer_has_reserved_bits() || state.level == 0) {
+        if (view.is_napot() || view.table_pointer_has_reserved_bits() || state.level == 0) {
             state.fault = page_fault_for(state.access);
             state.status = PageWalkStatus::Fault;
             return;
@@ -175,6 +175,16 @@ void PageTableWalker::accept_pte(PageWalkState& state, simrv::xlen::Word pte) co
         return;
     }
 
+    // Svnapot standardizes 64 KiB leaf mappings in the level-0 PTE for Sv39/Sv48/Sv57.
+    // PPN[3:0]=1000 is the encoding marker; the implicit PTE value substitutes VPN[0][3:0]
+    // into those bits to select one of the sixteen contiguous 4 KiB physical pages.
+    if (view.is_napot() &&
+        (state.pte_size != 8 || state.level != 0 || !view.has_valid_napot_ppn_encoding())) {
+        state.fault = page_fault_for(state.access);
+        state.status = PageWalkStatus::Fault;
+        return;
+    }
+
     const bool mxr = (state.mstatus & MstatusBit::Mxr) != 0u;
     const bool pte_r = view.readable();
     const bool pte_w = view.writable();
@@ -195,7 +205,11 @@ void PageTableWalker::accept_pte(PageWalkState& state, simrv::xlen::Word pte) co
     const simrv::xlen::Word ppn_mask =
         state.pte_size == 8 ? static_cast<simrv::xlen::Word>((uint64_t{1} << 44) - 1)
                             : static_cast<simrv::xlen::Word>((uint32_t{1} << 22) - 1);
-    const simrv::xlen::Word ppn = (pte >> kPteShift) & ppn_mask;
+    simrv::xlen::Word ppn = (pte >> kPteShift) & ppn_mask;
+    if (view.is_napot()) {
+        const simrv::xlen::Word vpn0 = (state.virtual_address.raw() >> 12U) & 0xFU;
+        ppn = (ppn & ~simrv::xlen::Word{0xF}) | vpn0;
+    }
     if ((ppn & low_ppn_mask) != 0) {
         state.fault = page_fault_for(state.access);
         state.status = PageWalkStatus::Fault;

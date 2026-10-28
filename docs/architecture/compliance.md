@@ -43,13 +43,14 @@ preset's configured cache-line geometry remains a separate platform requirement.
 | Lower-mode XLEN | RV64 U-mode supports UXL=64 through the `mstatus`/`sstatus` CSR path; RV64 FDT advertises Ssu64xl | RVA23 CSR WARL and FDT tests |
 | Counter overflow filtering | Sscofpmf implements M/S/U event filtering, counter inhibit, sticky overflow reporting, and delegated LCOFIP; FDT advertises Sscofpmf | RVA23 CSR, overflow, and interrupt-delegation tests |
 | User pointer masking | Ssnpm selects U-mode PMLEN=0 or PMLEN=7 through `senvcfg.PMM`; Supm is implied; RV64 FDT advertises both | RVA23 WARL and tagged physical load/store tests; FDT tests |
+| NAPOT translation contiguity | Svnapot maps aligned 64 KiB regions through level-0 PTEs for Sv39/Sv48/Sv57; invalid N encodings fault; FDT advertises Svnapot | Svnapot alias translation and reserved-encoding tests; FDT tests |
 | TLB invalidation | Svinval (`sinval.vma`, `sfence.w.inval`, `sfence.inval.ir`) | Core semantic, RVA23 profile gates, and ACT suite |
 | Vector | Implemented subset of RISC-V Vector 1.0 (`V`), configurable VLEN | Vector regression suite and lockstep |
 | Privilege | M/S/U execution, traps, interrupts, and CSR access (Privileged ISA 1.13) | Core semantic, ACT suite, and Linux boot gates |
 | Address translation | Sv32 for RV32; Sv39 for RV64 with Page Directory Cache | MMU tests and Linux boot gates |
 
 RVA23S64 includes every RVA23U64 mandatory extension, plus Zifencei and the privileged
-requirements defined by RVA23S64. Those include Svnapot, Sstc, Sscofpmf, Ssnpm, Ssu64xl, and Sha
+requirements defined by RVA23S64. Those include Sstc, Sscofpmf, Ssnpm, Ssu64xl, and Sha
 (H plus the required state-enable, counter-enable, guest trap-value, and guest translation
 features). SimRV does not currently implement all of these requirements. The existing profile test
 name and default-profile selection are not evidence that this list is complete. See the [RVA23
@@ -86,10 +87,9 @@ SimRV verifies its default 64-bit profile (`rva23s64`) against the RISC-V Archit
 
 - Full RVA23S64 is not yet qualified. The following mandatory requirements remain incomplete or
   need profile-level qualification:
-  - Supervisor profile requirements: the augmented hypervisor architecture Sha, including H,
-    Ssstateen, and its required guest state and
-    translation behavior.
-
+  - Sha is absent: H; Ssstateen (`sstateen0-3` and `hstateen0-3`); Shcounterenw; Shvstvala;
+    Shtvala; Shvstvecd; Shvsatpa; and Shgatpa. This includes guest trap values, writable guest
+    counter enables, guest supervisor translation, and second-stage SvNNx4 translation.
 
   This list is a starting qualification checklist, not a claim that every other mandatory item
   has passed conformance testing. See the [normative RVA23 profile specification](https://github.com/riscv/riscv-profiles/blob/main/src/rva23-profile.adoc)

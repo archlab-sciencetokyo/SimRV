@@ -125,6 +125,9 @@ struct PteView {
     [[nodiscard]] constexpr auto is_napot() const noexcept -> bool {
         return ((static_cast<uint64_t>(raw) >> 63U) & 0x1U) != 0;
     }
+    [[nodiscard]] constexpr auto has_valid_napot_ppn_encoding() const noexcept -> bool {
+        return (ppn() & 0xFU) == 0x8U;
+    }
     [[nodiscard]] constexpr auto has_reserved_bits(unsigned pte_size) const noexcept -> bool {
         if (pte_size == 8) {
             constexpr uint64_t kReservedMask = (0x7FULL << 54U);
