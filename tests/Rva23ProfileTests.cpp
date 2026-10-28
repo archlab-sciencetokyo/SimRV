@@ -781,6 +781,44 @@ void test_svade_faults_on_clear_accessed_and_dirty_bits() {
     }
 }
 
+void test_sstvecd_and_sstvala_supervisor_traps() {
+    simrv::core::CPU cpu;
+    cpu.reset();
+    constexpr simrv::xlen::CsrValue kVectorBase = 0x12345000;
+    TEST_ASSERT(cpu.csr_file.write(simrv::core::Csr::Stvec, kVectorBase | 1U).has_value());
+    const auto stvec = cpu.csr_file.read(simrv::core::Csr::Stvec);
+    TEST_ASSERT(stvec.has_value());
+    TEST_ASSERT((*stvec & ~simrv::xlen::CsrValue{3}) == kVectorBase);
+    TEST_ASSERT(cpu.csr_file.write(simrv::core::Csr::Stvec, kVectorBase).has_value());
+    const auto direct_stvec = cpu.csr_file.read(simrv::core::Csr::Stvec);
+    TEST_ASSERT(direct_stvec.has_value() && *direct_stvec == kVectorBase);
+
+    constexpr simrv::xlen::CsrValue kFaultAddress = 0x12345678;
+    constexpr std::array causes = {
+        simrv::isa::ExceptionCode::MisalignedFetch, simrv::isa::ExceptionCode::FaultFetch,
+        simrv::isa::ExceptionCode::MisalignedLoad,  simrv::isa::ExceptionCode::FaultLoad,
+        simrv::isa::ExceptionCode::MisalignedStore, simrv::isa::ExceptionCode::FaultStore,
+        simrv::isa::ExceptionCode::FetchPageFault,  simrv::isa::ExceptionCode::LoadPageFault,
+        simrv::isa::ExceptionCode::StorePageFault,
+    };
+    simrv::xlen::CsrValue delegation = 0;
+    for (const auto cause : causes) {
+        delegation |= simrv::xlen::CsrValue{1} << std::to_underlying(cause);
+    }
+
+    for (const auto cause : causes) {
+        auto& state = cpu.state();
+        state.priv = simrv::xlen::PrivilegeLevel::User;
+        state.pc = 0x2000;
+        state.medeleg = delegation;
+        state.stvec = kVectorBase;
+        cpu.raise_exception(cause, kFaultAddress);
+        TEST_ASSERT(cpu.state().priv == simrv::xlen::PrivilegeLevel::Supervisor);
+        TEST_ASSERT(cpu.state().pc == kVectorBase);
+        TEST_ASSERT(cpu.state().stval == kFaultAddress);
+    }
+}
+
 void test_cmo_decoder_and_predicates() {
     using namespace simrv::isa;
 
@@ -1433,6 +1471,9 @@ int main() {
     std::cout << "[RUN] test_svade_faults_on_clear_accessed_and_dirty_bits" << std::endl;
     test_svade_faults_on_clear_accessed_and_dirty_bits();
     std::cout << "[PASS] test_svade_faults_on_clear_accessed_and_dirty_bits" << std::endl;
+    std::cout << "[RUN] test_sstvecd_and_sstvala_supervisor_traps" << std::endl;
+    test_sstvecd_and_sstvala_supervisor_traps();
+    std::cout << "[PASS] test_sstvecd_and_sstvala_supervisor_traps" << std::endl;
 
     std::cout << "[RUN] test_zicclsm_unaligned_main_memory" << std::endl;
     test_zicclsm_unaligned_main_memory();
