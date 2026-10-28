@@ -209,6 +209,8 @@ void test_zfa_scalar_instructions() {
     TEST_ASSERT(required_misa_extensions(OperationId::FLI_S) == misa_extension_bit(IsaExtension::F));
     TEST_ASSERT(required_misa_extensions(OperationId::FCVTMOD_W_D) ==
                 (misa_extension_bit(IsaExtension::F) | misa_extension_bit(IsaExtension::D)));
+    TEST_ASSERT(is_f_op(OperationId::FROUNDNX_S));
+    TEST_ASSERT(is_d_op(OperationId::FCVTMOD_W_D));
 
     std::array<simrv::xlen::FloatingRegister, 32> fp{};
     simrv::xlen::CsrValue fcsr = 0;

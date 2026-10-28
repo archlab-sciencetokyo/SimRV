@@ -728,11 +728,36 @@ constexpr OperationId kOpRangeVectorEnd = VWSLL_VI;
 }
 
 [[nodiscard]] constexpr auto is_f_op(OperationId op_id) noexcept -> bool {
-    return op_id >= kOpRangeRv32fBegin && op_id <= kOpRangeRv32fEnd;
+    if (op_id >= kOpRangeRv32fBegin && op_id <= kOpRangeRv32fEnd) return true;
+    switch (op_id) {
+        case FLI_S:
+        case FMINM_S:
+        case FMAXM_S:
+        case FLEQ_S:
+        case FLTQ_S:
+        case FROUND_S:
+        case FROUNDNX_S:
+            return true;
+        default:
+            return false;
+    }
 }
 
 [[nodiscard]] constexpr auto is_d_op(OperationId op_id) noexcept -> bool {
-    return op_id >= kOpRangeRv32dBegin && op_id <= kOpRangeRv32dEnd;
+    if (op_id >= kOpRangeRv32dBegin && op_id <= kOpRangeRv32dEnd) return true;
+    switch (op_id) {
+        case FLI_D:
+        case FMINM_D:
+        case FMAXM_D:
+        case FLEQ_D:
+        case FLTQ_D:
+        case FROUND_D:
+        case FROUNDNX_D:
+        case FCVTMOD_W_D:
+            return true;
+        default:
+            return false;
+    }
 }
 
 [[nodiscard]] constexpr auto is_zfhmin_op(OperationId op_id) noexcept -> bool {
