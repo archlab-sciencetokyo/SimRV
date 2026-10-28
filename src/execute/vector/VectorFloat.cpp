@@ -2,9 +2,10 @@
 #include <cmath>
 #include <limits>
 
-#include "simrv/isa/FpConversions.hpp"
 #include "VectorHelpers.hpp"
 #include "VectorSubunits.hpp"
+#include "simrv/execute/RoundingRmm.hpp"
+#include "simrv/isa/FpConversions.hpp"
 
 namespace simrv::execute::vector {
 
@@ -65,12 +66,25 @@ auto round_rmm_f32(double exact) -> float {
     if (!std::isfinite(exact) || !std::isfinite(rounded) || exact == 0.0) return rounded;
     if (static_cast<double>(rounded) == exact) return rounded;
 
-    // Incrementing the binary32 magnitude is side-effect free; nextafter would raise
-    // host underflow/overflow flags while merely inspecting a neighboring value.
-    const auto away = std::bit_cast<float>(std::bit_cast<uint32_t>(rounded) + 1U);
-    if (!std::isfinite(away)) return rounded;
-    const double midpoint = (static_cast<double>(rounded) + static_cast<double>(away)) / 2.0;
-    if (exact == midpoint) rounded = away;
+    // Inspect both adjacent magnitudes. RNE can choose either side of a tie,
+    // while RMM always chooses the larger magnitude.
+    const uint32_t bits = std::bit_cast<uint32_t>(rounded);
+    const uint32_t magnitude_bits = bits & UINT32_C(0x7FFFFFFF);
+    const double magnitude = std::abs(exact);
+    if (magnitude_bits != 0) {
+        const auto lower = std::bit_cast<float>(magnitude_bits - 1U);
+        const double lower_midpoint = (static_cast<double>(lower) +
+                                       static_cast<double>(std::bit_cast<float>(magnitude_bits))) /
+                                      2.0;
+        if (magnitude == lower_midpoint) return rounded;
+    }
+    const auto upper = std::bit_cast<float>(magnitude_bits + 1U);
+    if (!std::isfinite(upper)) return rounded;
+    const double upper_midpoint =
+        (static_cast<double>(std::bit_cast<float>(magnitude_bits)) + static_cast<double>(upper)) /
+        2.0;
+    if (magnitude == upper_midpoint)
+        return std::bit_cast<float>((magnitude_bits + 1U) | (bits & UINT32_C(0x80000000)));
     return rounded;
 }
 
@@ -1744,3 +1758,34 @@ void execute_vector_float(core::CPU& cpu, isa::OperationId op_id, simrv::xlen::R
 }
 
 }  // namespace simrv::execute::vector
+
+namespace simrv::execute::rmm {
+
+auto add(float lhs, float rhs) -> float { return vector::round_rmm_f32(double(lhs) + double(rhs)); }
+auto add(double lhs, double rhs) -> double { return vector::round_rmm_f64_sum(lhs, rhs); }
+auto sub(float lhs, float rhs) -> float { return vector::round_rmm_f32(double(lhs) - double(rhs)); }
+auto sub(double lhs, double rhs) -> double { return vector::round_rmm_f64_sum(lhs, -rhs); }
+auto mul(float lhs, float rhs) -> float { return vector::round_rmm_f32(double(lhs) * double(rhs)); }
+auto mul(double lhs, double rhs) -> double { return vector::round_rmm_f64_product(lhs, rhs); }
+auto div(float lhs, float rhs) -> float { return vector::round_rmm_f32_quotient(lhs, rhs); }
+auto div(double lhs, double rhs) -> double { return vector::round_rmm_f64_quotient(lhs, rhs); }
+auto sqrt(float value) -> float { return vector::round_rmm_sqrt(value); }
+auto sqrt(double value) -> double { return vector::round_rmm_sqrt(value); }
+auto fma(float lhs, float rhs, float addend) -> float {
+    return vector::round_rmm_fma(lhs, rhs, addend);
+}
+auto fma(double lhs, double rhs, double addend) -> double {
+    return vector::round_rmm_fma(lhs, rhs, addend);
+}
+auto narrow_f32(double value) -> float { return vector::round_rmm_f32(value); }
+
+auto from_integer_f32(int32_t value) -> float { return vector::round_rmm_integer<float>(value); }
+auto from_integer_f32(uint32_t value) -> float { return vector::round_rmm_integer<float>(value); }
+auto from_integer_f32(int64_t value) -> float { return vector::round_rmm_integer<float>(value); }
+auto from_integer_f32(uint64_t value) -> float { return vector::round_rmm_integer<float>(value); }
+auto from_integer_f64(int32_t value) -> double { return vector::round_rmm_integer<double>(value); }
+auto from_integer_f64(uint32_t value) -> double { return vector::round_rmm_integer<double>(value); }
+auto from_integer_f64(int64_t value) -> double { return vector::round_rmm_integer<double>(value); }
+auto from_integer_f64(uint64_t value) -> double { return vector::round_rmm_integer<double>(value); }
+
+}  // namespace simrv::execute::rmm

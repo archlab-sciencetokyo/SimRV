@@ -552,6 +552,65 @@ void test_binary16_narrowing_rounding_and_flags() {
     TEST_ASSERT(converted.bits == UINT16_C(0x3C01));
 }
 
+void test_scalar_rmm_rounding() {
+    using namespace simrv;
+    std::array<xlen::FloatingRegister, 32> fp{};
+    xlen::CsrValue fcsr = 0;
+    const auto boxed = [](uint32_t bits) {
+        return static_cast<uint64_t>(xlen::kF32BoxerBits) | bits;
+    };
+    const auto execute = [&](uint32_t funct7, uint32_t rm, uint32_t rs1, uint32_t rs2,
+                             xlen::Register integer_source = 0) {
+        return execute::ExecuteUnit::opFp(funct7, static_cast<isa::Funct3>(rm),
+                                          xlen::to_fp_reg_id(rs1), xlen::to_fp_reg_id(rs2),
+                                          integer_source, fp.data(), fcsr);
+    };
+
+    fp[1] = boxed(UINT32_C(0x3F800000));  // 1.0
+    fp[2] = boxed(UINT32_C(0x33800000));  // 2^-24
+    fcsr = 0;
+    auto result = execute(0x00, 4, 1, 2);
+    TEST_ASSERT((result.fp_wb_data & UINT64_C(0xFFFFFFFF)) == UINT32_C(0x3F800001));
+    TEST_ASSERT((fcsr & isa::FflagsBit::Nx) != 0);
+
+    fp[1] = std::bit_cast<uint64_t>(1.0);
+    fp[2] = std::bit_cast<uint64_t>(0x1p-53);
+    fcsr = 0;
+    result = execute(0x01, 4, 1, 2);
+    TEST_ASSERT(result.fp_wb_data == UINT64_C(0x3FF0000000000001));
+    TEST_ASSERT((fcsr & isa::FflagsBit::Nx) != 0);
+
+    fp[1] = std::bit_cast<uint64_t>(1.0 + 0x1p-24);
+    fcsr = 0;
+    result = execute(0x20, 4, 1, 0);  // FCVT.S.D
+    TEST_ASSERT((result.fp_wb_data & UINT64_C(0xFFFFFFFF)) == UINT32_C(0x3F800001));
+    TEST_ASSERT((fcsr & isa::FflagsBit::Nx) != 0);
+
+    fcsr = 0;
+    result = execute(0x68, 4, 0, 0, 16777217);  // FCVT.S.W
+    TEST_ASSERT((result.fp_wb_data & UINT64_C(0xFFFFFFFF)) == UINT32_C(0x4B800001));
+    TEST_ASSERT((fcsr & isa::FflagsBit::Nx) != 0);
+
+    fcsr = 0;
+    result = execute(0x69, 4, 0, 2, 16777217);  // FCVT.D.L
+    TEST_ASSERT(result.fp_wb_data == std::bit_cast<uint64_t>(16777217.0));
+    TEST_ASSERT((fcsr & isa::FflagsBit::Nx) == 0);
+    fcsr = 0;
+    result = execute(0x69, 4, 0, 2, xlen::Register{9007199254740993ULL});
+    TEST_ASSERT(result.fp_wb_data == std::bit_cast<uint64_t>(9007199254740994.0));
+    TEST_ASSERT((fcsr & isa::FflagsBit::Nx) != 0);
+
+    fp[1] = boxed(UINT32_C(0x3F800001));
+    fp[2] = boxed(UINT32_C(0x3F7FFFFE));
+    fp[3] = boxed(std::bit_cast<uint32_t>(0x1p-24F + 0x1p-46F));
+    fcsr = 0;
+    result = execute::ExecuteUnit::fusedFp(isa::Opcode::MAdd, FpFmt::Single, xlen::to_fp_reg_id(1),
+                                           xlen::to_fp_reg_id(2), xlen::to_fp_reg_id(3),
+                                           isa::RoundingMode::Rmm, fp.data(), fcsr);
+    TEST_ASSERT((result.fp_wb_data & UINT64_C(0xFFFFFFFF)) == UINT32_C(0x3F800001));
+    TEST_ASSERT((fcsr & isa::FflagsBit::Nx) != 0);
+}
+
 void test_zvfhmin_vector_conversions() {
     simrv::core::Machine machine;
     auto& cpu = machine.primary_hart();
@@ -1292,6 +1351,9 @@ int main() {
     std::cout << "[RUN] test_binary16_narrowing_rounding_and_flags" << std::endl;
     test_binary16_narrowing_rounding_and_flags();
     std::cout << "[PASS] test_binary16_narrowing_rounding_and_flags" << std::endl;
+    std::cout << "[RUN] test_scalar_rmm_rounding" << std::endl;
+    test_scalar_rmm_rounding();
+    std::cout << "[PASS] test_scalar_rmm_rounding" << std::endl;
     std::cout << "[RUN] test_zvfhmin_vector_conversions" << std::endl;
     test_zvfhmin_vector_conversions();
     std::cout << "[PASS] test_zvfhmin_vector_conversions" << std::endl;

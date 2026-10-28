@@ -4,8 +4,8 @@
  */
 #include "simrv/execute/ExecuteUnitFp.hpp"
 
-#include <bit>
 #include <array>
+#include <bit>
 #include <cfenv>
 #include <cmath>
 #include <cstdint>
@@ -14,10 +14,11 @@
 
 #include "simrv/CompilerHints.hpp"
 #include "simrv/core/CsrTypes.hpp"
+#include "simrv/execute/RoundingRmm.hpp"
 #include "simrv/isa/FpConversions.hpp"
-#include "vector/VectorHelpers.hpp"
 #include "simrv/xlen/Constants.hpp"
 #include "simrv/xlen/RegisterTypes.hpp"
+#include "vector/VectorHelpers.hpp"
 
 #if defined(__x86_64__) || defined(_M_X64)
 #include <immintrin.h>
@@ -459,16 +460,16 @@ auto ExecuteUnitFp::fusedFp(Opcode opcode, FpFmt fmt, simrv::xlen::FpRegId rs1,
         float value = 0.0F;
         switch (opcode) {
             case Opcode::MAdd:
-                value = __builtin_fmaf(a, b, c);
+                value = rm == RoundingMode::Rmm ? rmm::fma(a, b, c) : __builtin_fmaf(a, b, c);
                 break;
             case Opcode::MSub:
-                value = __builtin_fmaf(a, b, -c);
+                value = rm == RoundingMode::Rmm ? rmm::fma(a, b, -c) : __builtin_fmaf(a, b, -c);
                 break;
             case Opcode::NMAdd:
-                value = -__builtin_fmaf(a, b, c);
+                value = -(rm == RoundingMode::Rmm ? rmm::fma(a, b, c) : __builtin_fmaf(a, b, c));
                 break;
             case Opcode::NMSub:
-                value = -__builtin_fmaf(a, b, -c);
+                value = -(rm == RoundingMode::Rmm ? rmm::fma(a, b, -c) : __builtin_fmaf(a, b, -c));
                 break;
             default:
                 break;
@@ -485,16 +486,16 @@ auto ExecuteUnitFp::fusedFp(Opcode opcode, FpFmt fmt, simrv::xlen::FpRegId rs1,
         double value = 0.0;
         switch (opcode) {
             case Opcode::MAdd:
-                value = __builtin_fma(a, b, c);
+                value = rm == RoundingMode::Rmm ? rmm::fma(a, b, c) : __builtin_fma(a, b, c);
                 break;
             case Opcode::MSub:
-                value = __builtin_fma(a, b, -c);
+                value = rm == RoundingMode::Rmm ? rmm::fma(a, b, -c) : __builtin_fma(a, b, -c);
                 break;
             case Opcode::NMAdd:
-                value = -__builtin_fma(a, b, c);
+                value = -(rm == RoundingMode::Rmm ? rmm::fma(a, b, c) : __builtin_fma(a, b, c));
                 break;
             case Opcode::NMSub:
-                value = -__builtin_fma(a, b, -c);
+                value = -(rm == RoundingMode::Rmm ? rmm::fma(a, b, -c) : __builtin_fma(a, b, -c));
                 break;
             default:
                 break;
@@ -548,33 +549,54 @@ inline auto fp_exec_unary(FpExecResult& out, simrv::xlen::Word rm, simrv::xlen::
 bool fp_exec_add_sub(FpExecResult& out, simrv::xlen::Word funct7, simrv::xlen::Word rm,
                      simrv::xlen::Word rs1, simrv::xlen::Word rs2,
                      const simrv::xlen::FloatingRegister* freg, simrv::xlen::CsrValue& fcsr) {
+    const bool rmm_mode = resolve_rounding_mode(rm, fcsr) == RoundingMode::Rmm;
     if (funct7 == Funct7Fp::FaddS)
-        return fp_exec_binary<float>(out, rm, rs1, rs2, freg, fcsr, std::plus<float>{});
+        return fp_exec_binary<float>(out, rm, rs1, rs2, freg, fcsr, [=](float a, float b) {
+            return rmm_mode ? rmm::add(a, b) : a + b;
+        });
     if (funct7 == Funct7Fp::FaddD)
-        return fp_exec_binary<double>(out, rm, rs1, rs2, freg, fcsr, std::plus<double>{});
+        return fp_exec_binary<double>(out, rm, rs1, rs2, freg, fcsr, [=](double a, double b) {
+            return rmm_mode ? rmm::add(a, b) : a + b;
+        });
     if (funct7 == Funct7Fp::FsubS)
-        return fp_exec_binary<float>(out, rm, rs1, rs2, freg, fcsr, std::minus<float>{});
+        return fp_exec_binary<float>(out, rm, rs1, rs2, freg, fcsr, [=](float a, float b) {
+            return rmm_mode ? rmm::sub(a, b) : a - b;
+        });
     if (funct7 == Funct7Fp::FsubD)
-        return fp_exec_binary<double>(out, rm, rs1, rs2, freg, fcsr, std::minus<double>{});
+        return fp_exec_binary<double>(out, rm, rs1, rs2, freg, fcsr, [=](double a, double b) {
+            return rmm_mode ? rmm::sub(a, b) : a - b;
+        });
     return false;
 }
 
 bool fp_exec_mul_div_sqrt(FpExecResult& out, simrv::xlen::Word funct7, simrv::xlen::Word rm,
                           simrv::xlen::Word rs1, simrv::xlen::Word rs2,
                           const simrv::xlen::FloatingRegister* freg, simrv::xlen::CsrValue& fcsr) {
+    const bool rmm_mode = resolve_rounding_mode(rm, fcsr) == RoundingMode::Rmm;
     if (funct7 == Funct7Fp::FmulS)
-        return fp_exec_binary<float>(out, rm, rs1, rs2, freg, fcsr, std::multiplies<float>{});
+        return fp_exec_binary<float>(out, rm, rs1, rs2, freg, fcsr, [=](float a, float b) {
+            return rmm_mode ? rmm::mul(a, b) : a * b;
+        });
     if (funct7 == Funct7Fp::FmulD)
-        return fp_exec_binary<double>(out, rm, rs1, rs2, freg, fcsr, std::multiplies<double>{});
+        return fp_exec_binary<double>(out, rm, rs1, rs2, freg, fcsr, [=](double a, double b) {
+            return rmm_mode ? rmm::mul(a, b) : a * b;
+        });
     if (funct7 == Funct7Fp::FdivS)
-        return fp_exec_binary<float>(out, rm, rs1, rs2, freg, fcsr, std::divides<float>{});
+        return fp_exec_binary<float>(out, rm, rs1, rs2, freg, fcsr, [=](float a, float b) {
+            return rmm_mode ? rmm::div(a, b) : a / b;
+        });
     if (funct7 == Funct7Fp::FdivD)
-        return fp_exec_binary<double>(out, rm, rs1, rs2, freg, fcsr, std::divides<double>{});
+        return fp_exec_binary<double>(out, rm, rs1, rs2, freg, fcsr, [=](double a, double b) {
+            return rmm_mode ? rmm::div(a, b) : a / b;
+        });
     if (funct7 == Funct7Fp::FsqrtS)
-        return fp_exec_unary<float>(out, rm, rs1, freg, fcsr, [](float x) { return std::sqrt(x); });
+        return fp_exec_unary<float>(out, rm, rs1, freg, fcsr, [=](float x) {
+            return rmm_mode ? rmm::sqrt(x) : std::sqrt(x);
+        });
     if (funct7 == Funct7Fp::FsqrtD)
-        return fp_exec_unary<double>(out, rm, rs1, freg, fcsr,
-                                     [](double x) { return std::sqrt(x); });
+        return fp_exec_unary<double>(out, rm, rs1, freg, fcsr, [=](double x) {
+            return rmm_mode ? rmm::sqrt(x) : std::sqrt(x);
+        });
     return false;
 }
 
@@ -730,12 +752,15 @@ bool fp_exec_cvt(FpExecResult& out, simrv::xlen::Word funct7, simrv::xlen::Word 
         return true;
     }
     if (funct7 == Funct7Fp::FcvtSD) {
+        const auto mode = resolve_rounding_mode(rm, fcsr);
         FpEnvironment::set_rounding_mode(rm, fcsr);
         FpEnvironment::clear_exceptions();
         const double src = read_f64(freg, rs1);
         if (is_snan64(src)) FpEnvironment::raise_invalid();
+        const float converted =
+            mode == RoundingMode::Rmm ? rmm::narrow_f32(src) : static_cast<float>(src);
         out.fp_wb_data = std::isnan(src) ? write_f32_boxed(f32_from_bits(simrv::xlen::kF32Qnan))
-                                         : write_f32_boxed(static_cast<float>(src));
+                                         : write_f32_boxed(converted);
         out.fp_wb_enable = true;
         FpEnvironment::accumulate_exceptions(fcsr);
         return true;
@@ -764,17 +789,25 @@ bool fp_exec_cvt(FpExecResult& out, simrv::xlen::Word funct7, simrv::xlen::Word 
         const bool is_d = (funct7 == Funct7Fp::FcvtDW);
         FpEnvironment::set_rounding_mode(rm, fcsr);
         FpEnvironment::clear_exceptions();
-        double val = 0;
+        const bool rmm_mode = resolve_rounding_mode(rm, fcsr) == RoundingMode::Rmm;
+        double val64 = 0;
+        float val32 = 0;
+        const auto convert_integer = [&](auto value) {
+            if (is_d)
+                val64 = rmm_mode ? rmm::from_integer_f64(value) : static_cast<double>(value);
+            else
+                val32 = rmm_mode ? rmm::from_integer_f32(value) : static_cast<float>(value);
+        };
         if (rs2 == 0)
-            val = static_cast<double>(static_cast<int32_t>(rrs1));
+            convert_integer(static_cast<int32_t>(rrs1));
         else if (rs2 == 1)
-            val = static_cast<double>(static_cast<uint32_t>(rrs1));
+            convert_integer(static_cast<uint32_t>(rrs1));
         else if (rs2 == 2)
-            val = static_cast<double>(static_cast<int64_t>(rrs1));
+            convert_integer(static_cast<int64_t>(rrs1));
         else if (rs2 == 3)
-            val = static_cast<double>(static_cast<uint64_t>(rrs1));
+            convert_integer(static_cast<uint64_t>(rrs1));
 
-        out.fp_wb_data = is_d ? f64_bits(val) : write_f32_boxed(static_cast<float>(val));
+        out.fp_wb_data = is_d ? f64_bits(val64) : write_f32_boxed(val32);
         out.fp_wb_enable = true;
         FpEnvironment::accumulate_exceptions(fcsr);
         return true;

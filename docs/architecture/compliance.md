@@ -97,11 +97,11 @@ SimRV verifies its default 64-bit profile (`rva23s64`) against the RISC-V Archit
   and its mandatory requirements when closing each item. FDT advertisements describe SimRV's
   present capabilities and must not be read as a declaration of complete RVA23 conformance.
 
-- Scalar and vector floating-point use the host floating-point environment for RNE, RTZ, RDN, and
-  RUP. The architectural RMM (nearest, ties to maximum magnitude) mode currently falls back to host
-  RNE for arithmetic operations. Integer conversions implement RMM explicitly. Until an RMM
-  arithmetic implementation and reference comparisons are added, F/D are implemented but not
-  fully qualified for every rounding mode.
+- Scalar and vector floating-point support RNE, RTZ, RDN, RUP, and RMM. Scalar RMM arithmetic,
+  fused operations, narrowing, and integer-to-float conversions use software tie detection over
+  host RNE results; integer conversions to integer and binary16 conversions implement RMM
+  explicitly. Focused scalar and vector semantic tests cover halfway cases and accrued flags. This
+  does not replace broad reference comparison or full architectural conformance testing.
 - The vector decoder and execution engine implement a substantial RVV 1.0 subset, not every
   instruction in the ratified V extension. Vector FP currently covers selected add, fused
   multiply-accumulate, and scalar move/merge operations. SEW=16 vector FP is rejected because the
