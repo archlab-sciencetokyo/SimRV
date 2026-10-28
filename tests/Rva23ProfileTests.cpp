@@ -710,6 +710,77 @@ void test_zifencei_flushes_local_instruction_state() {
     TEST_ASSERT(cpu.decode_cache.lookup(decoded.cpc) == nullptr);
 }
 
+void test_svade_faults_on_clear_accessed_and_dirty_bits() {
+    if constexpr (simrv::xlen::kIsXLen64) {
+        simrv::core::Machine machine;
+        std::vector<simrv::xlen::Byte> ram(0x10000, simrv::xlen::Byte{0});
+        machine.set_ram_for_testing(ram.data(), ram.size());
+        machine.memory().initialize_mmu();
+        auto& cpu = machine.primary_hart();
+        const auto memory = machine.memory().memory_geometry();
+        const simrv::xlen::Address root = memory.dram_base + 0x1000;
+        const simrv::xlen::Address level1 = memory.dram_base + 0x2000;
+        const simrv::xlen::Address level0 = memory.dram_base + 0x3000;
+        const simrv::xlen::Address physical = memory.dram_base + 0x5000;
+        constexpr simrv::xlen::Address kVirtual = 0x4000;
+        constexpr uint64_t kValid = std::to_underlying(simrv::PteFlag::V);
+        constexpr uint64_t kPermissions = std::to_underlying(simrv::PteFlag::R) |
+                                          std::to_underlying(simrv::PteFlag::W) |
+                                          std::to_underlying(simrv::PteFlag::X);
+        const auto write_pte = [&](simrv::xlen::Address address, uint64_t pte) {
+            TEST_ASSERT(machine.memory().dma_write(address, &pte, sizeof(pte)));
+        };
+        const auto read_pte = [&](simrv::xlen::Address address) {
+            uint64_t pte = 0;
+            TEST_ASSERT(machine.memory().dma_read(address, &pte, sizeof(pte)));
+            return pte;
+        };
+
+        write_pte(root, ((level1 >> 12U) << 10U) | kValid);
+        write_pte(level1, ((level0 >> 12U) << 10U) | kValid);
+        const simrv::xlen::Address leaf_address = level0 + 4U * sizeof(uint64_t);
+        const uint64_t leaf_without_ad = ((physical >> 12U) << 10U) | kValid | kPermissions;
+        write_pte(leaf_address, leaf_without_ad);
+        cpu.state().priv = simrv::xlen::PrivilegeLevel::Supervisor;
+        cpu.state().satp = (uint64_t{8} << 60U) | (root >> 12U);
+
+        auto load = cpu.translate_stage_address(
+            machine, simrv::xlen::VirtAddr{kVirtual}, simrv::PteAccess::Read,
+            simrv::xlen::PrivilegeLevel::Supervisor, 64, simrv::memory::TlPort::Data,
+            cpu.ca_state.data_walk);
+        TEST_ASSERT(load.has_value() && !load->has_value());
+        TEST_ASSERT(load->error() ==
+                    std::to_underlying(simrv::isa::ExceptionCode::LoadPageFault));
+        TEST_ASSERT(read_pte(leaf_address) == leaf_without_ad);
+
+        auto fetch = cpu.translate_stage_address(
+            machine, simrv::xlen::VirtAddr{kVirtual}, simrv::PteAccess::Code,
+            simrv::xlen::PrivilegeLevel::Supervisor, 64, simrv::memory::TlPort::Instruction,
+            cpu.ca_state.instruction_walk);
+        TEST_ASSERT(fetch.has_value() && !fetch->has_value());
+        TEST_ASSERT(fetch->error() ==
+                    std::to_underlying(simrv::isa::ExceptionCode::FetchPageFault));
+        TEST_ASSERT(read_pte(leaf_address) == leaf_without_ad);
+
+        const uint64_t leaf_accessed = leaf_without_ad | std::to_underlying(simrv::PteFlag::A);
+        write_pte(leaf_address, leaf_accessed);
+        machine.memory().mmu()->flush_pdc();
+        auto store = cpu.translate_stage_address(
+            machine, simrv::xlen::VirtAddr{kVirtual}, simrv::PteAccess::Write,
+            simrv::xlen::PrivilegeLevel::Supervisor, 64, simrv::memory::TlPort::Data,
+            cpu.ca_state.data_walk);
+        TEST_ASSERT(store.has_value() && !store->has_value());
+        TEST_ASSERT(store->error() ==
+                    std::to_underlying(simrv::isa::ExceptionCode::StorePageFault));
+        TEST_ASSERT(read_pte(leaf_address) == leaf_accessed);
+
+        constexpr uint64_t kAdue = uint64_t{1} << 61U;
+        TEST_ASSERT(cpu.csr_file.write(simrv::core::Csr::Menvcfg, kAdue).has_value());
+        const auto menvcfg = cpu.csr_file.read(simrv::core::Csr::Menvcfg);
+        TEST_ASSERT(menvcfg.has_value() && (*menvcfg & kAdue) == 0);
+    }
+}
+
 void test_cmo_decoder_and_predicates() {
     using namespace simrv::isa;
 
@@ -1359,6 +1430,9 @@ int main() {
     std::cout << "[RUN] test_zifencei_flushes_local_instruction_state" << std::endl;
     test_zifencei_flushes_local_instruction_state();
     std::cout << "[PASS] test_zifencei_flushes_local_instruction_state" << std::endl;
+    std::cout << "[RUN] test_svade_faults_on_clear_accessed_and_dirty_bits" << std::endl;
+    test_svade_faults_on_clear_accessed_and_dirty_bits();
+    std::cout << "[PASS] test_svade_faults_on_clear_accessed_and_dirty_bits" << std::endl;
 
     std::cout << "[RUN] test_zicclsm_unaligned_main_memory" << std::endl;
     test_zicclsm_unaligned_main_memory();

@@ -260,7 +260,7 @@ auto CPU::translate_stage_address(Machine& machine, simrv::xlen::VirtAddr virtua
     auto* mmu = machine.memory_.mmu();
     if (machine.runtime_profile.is_instruction_mode()) {
         return mmu->translate(virtual_address, access, privilege, state_.mstatus, state_.satp,
-                              active_xlen, true, &state_);
+                              active_xlen, false, &state_);
     }
 
     if (!timed_walk.active || timed_walk.walk.virtual_address != virtual_address ||
@@ -269,7 +269,7 @@ auto CPU::translate_stage_address(Machine& machine, simrv::xlen::VirtAddr virtua
             machine.memory_.system_bus().cancel_source(timed_walk.source);
         }
         timed_walk.walk = mmu->begin_page_walk(virtual_address, access, privilege, state_.mstatus,
-                                               state_.satp, active_xlen, true, &state_);
+                                               state_.satp, active_xlen, false, &state_);
         timed_walk.source = simrv::memory::make_tl_source(hart_id(), port);
         timed_walk.active = true;
         timed_walk.request_pending = false;

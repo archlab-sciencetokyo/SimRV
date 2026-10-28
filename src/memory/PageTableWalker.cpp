@@ -238,7 +238,15 @@ void PageTableWalker::accept_pte(PageWalkState& state, simrv::xlen::Word pte) co
     if (state.access == PteAccess::Write) {
         updated |= PteFlag::D;
     }
-    if (state.update_access_bits && updated != pte) {
+    if (updated != pte && !state.update_access_bits) {
+        // Svade requires a page fault when software has not set a required
+        // accessed or dirty bit. Hardware A/D updates are reserved for an
+        // implementation that exposes Svadu and enables menvcfg.ADUE.
+        state.fault = page_fault_for(state.access);
+        state.status = PageWalkStatus::Fault;
+        return;
+    }
+    if (updated != pte) {
         if (state.arch_state != nullptr &&
             !core::pmp::check_access(*state.arch_state, state.pte_address, state.pte_size,
                                      core::PmpAccessType::Write,

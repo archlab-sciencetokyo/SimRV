@@ -281,10 +281,13 @@ auto CsrFile::read(simrv::xlen::CsrNumber addr) const
             rcsr = cpu_.state().mcountinhibit;
             break;
         case csr_addr(Csr::Menvcfg):
-            rcsr = cpu_.state().menvcfg;
+            rcsr = static_cast<simrv::xlen::CsrValue>(
+                static_cast<uint64_t>(cpu_.state().menvcfg) & ~(uint64_t{1} << 61U));
             break;
         case csr_addr(Csr::Menvcfgh):
-            return require_rv32_counter().transform([this]() { return cpu_.state().menvcfgh; });
+            return require_rv32_counter().transform([this]() {
+                return cpu_.state().menvcfgh & ~(simrv::xlen::CsrValue{1} << 29U);
+            });
         case csr_addr(Csr::Mseccfg):
             rcsr = cpu_.state().mseccfg;
             break;
@@ -678,13 +681,17 @@ auto CsrFile::write(simrv::xlen::CsrNumber addr, simrv::xlen::CsrValue wdata)
                 wdata = static_cast<simrv::xlen::CsrValue>(
                     static_cast<uint64_t>(wdata) & ~kPmmMask);
             }
+            // Svadu is not implemented, so ADUE is read-only zero and the
+            // mandatory Svade page-fault scheme remains active.
+            wdata = static_cast<simrv::xlen::CsrValue>(
+                static_cast<uint64_t>(wdata) & ~(uint64_t{1} << 61U));
             cpu_.state().menvcfg = wdata;
             cpu_.evaluate_timer_interrupt();
             break;
         case csr_addr(Csr::Menvcfgh):
             return require_rv32_counter().and_then(
                 [this, wdata]() -> std::expected<void, ExceptionCode> {
-                    cpu_.state().menvcfgh = wdata;
+                    cpu_.state().menvcfgh = wdata & ~(simrv::xlen::CsrValue{1} << 29U);
                     cpu_.evaluate_timer_interrupt();
                     return {};
                 });
