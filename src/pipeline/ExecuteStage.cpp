@@ -162,6 +162,12 @@ void CPU::execute_core(Machine& machine) {
 
 void CPU::execute_system(Machine& machine) {
     auto& ctx = active_context();
+    if (ctx.op_id == isa::OperationId::WRS_NTO || ctx.op_id == isa::OperationId::WRS_STO) {
+        // SimRV does not model low-power waits. Zawrs permits a stalled instruction to complete
+        // early for any reason, so both wait-on-reservation-set instructions retire immediately.
+        ctx.tkn = false;
+        return;
+    }
     if (ctx.funct3 == Funct3::Priv) {
         switch (static_cast<Funct12Priv>(ctx.funct12)) {
             case Funct12Priv::Ecall:

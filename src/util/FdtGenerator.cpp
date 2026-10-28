@@ -215,7 +215,8 @@ auto generate_platform_fdt(const core::MachineConfig& config,
         "i",      "m",      "a",       "f",        "d",           "c",      "b",
         "v",      "zicntr", "zihpm",  "zicsr",    "zifencei",   "zihintpause", "zihintntl",
         "zic64b", "zicclsm", "za64rs", "ziccamoa", "zfhmin", "zvfhmin", "zfa", "zicond", "zicboz",
-        "zicbom", "zicbop", "svinval", "svpbmt",   "svnapot",     "sstc",   "sscofpmf",
+        "zicbom", "zicbop", "zawrs",   "svinval", "svpbmt",     "svnapot", "sstc",
+        "sscofpmf",
     };
 
     for (uint32_t hart = 0; hart < num_harts; ++hart) {

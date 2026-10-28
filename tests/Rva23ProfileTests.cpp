@@ -559,6 +559,33 @@ void test_zimop_decoder() {
     TEST_ASSERT(effects.integer_write.value == 0);
 }
 
+void test_zawrs_instructions() {
+    using namespace simrv::isa;
+    constexpr uint32_t kWrsNto = (0x09DU << 20U) | 0x73U;
+    constexpr uint32_t kWrsSto = (0x01DU << 20U) | 0x73U;
+    TEST_ASSERT(simrv::pipeline::decoder(kWrsNto) == OperationId::WRS_NTO);
+    TEST_ASSERT(simrv::pipeline::decoder(kWrsSto) == OperationId::WRS_STO);
+    TEST_ASSERT(required_misa_extensions(OperationId::WRS_NTO) == misa_extension_bit(IsaExtension::A));
+    TEST_ASSERT(simrv::pipeline::decoder(kWrsNto | (1U << 15U)) == OperationId::UNKNOWN);
+    TEST_ASSERT(simrv::pipeline::decoder(kWrsSto | (1U << 7U)) == OperationId::UNKNOWN);
+
+    for (const auto priv : {simrv::xlen::PrivilegeLevel::User,
+                            simrv::xlen::PrivilegeLevel::Supervisor,
+                            simrv::xlen::PrivilegeLevel::Machine}) {
+        TEST_ASSERT(simrv::core::TrapController::can_execute_privileged_instruction(
+            priv, 0, 0, 0x09D, 0));
+        TEST_ASSERT(simrv::core::TrapController::can_execute_privileged_instruction(
+            priv, 0, 0, 0x01D, 0));
+    }
+
+    simrv::pipeline::PipelineContext context{};
+    context.opcode = Opcode::System;
+    context.op_id = OperationId::WRS_NTO;
+    const auto effects = simrv::pipeline::build_writeback_effects(context);
+    TEST_ASSERT(effects.increments_instruction_count);
+    TEST_ASSERT(!effects.integer_write.enabled && !effects.floating_write.enabled);
+}
+
 void test_zcb_decompression() {
     struct Encoding {
         uint16_t match;
@@ -730,6 +757,10 @@ int main() {
     std::cout << "[RUN] test_zcmop_noop_decompression" << std::endl;
     test_zcmop_noop_decompression();
     std::cout << "[PASS] test_zcmop_noop_decompression" << std::endl;
+
+    std::cout << "[RUN] test_zawrs_instructions" << std::endl;
+    test_zawrs_instructions();
+    std::cout << "[PASS] test_zawrs_instructions" << std::endl;
 
     std::cout << "[RUN] test_zimop_decoder" << std::endl;
     test_zimop_decoder();

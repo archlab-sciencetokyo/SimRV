@@ -641,6 +641,8 @@ const std::array<std::string_view, static_cast<size_t>(isa::OperationIdCount)> O
     "FLEQ_S", "FLTQ_S", "FLEQ_D", "FLTQ_D", "FROUND_S", "FROUNDNX_S",
     "FROUND_D", "FROUNDNX_D", "FCVTMOD_W_D",
     "MOP",
+    "WRS_NTO",
+    "WRS_STO",
     "UNKNOWN"};
 
 auto operation_name(isa::OperationId operation) noexcept -> std::string_view {
@@ -857,6 +859,14 @@ auto decode_system_priv(uint32_t funct7, simrv::xlen::Instruction ir) -> Operati
             return (rd_is_zero && rs1_is_zero) ? OperationId::MRET : OperationId::UNKNOWN;
         case 0x105:
             return (rd_is_zero && rs1_is_zero) ? OperationId::WFI : OperationId::UNKNOWN;
+        case 0x09D:
+            return (rd_is_zero && rs1_is_zero && ((ir >> 12U) & 0x7U) == 0)
+                       ? OperationId::WRS_NTO
+                       : OperationId::UNKNOWN;
+        case 0x01D:
+            return (rd_is_zero && rs1_is_zero && ((ir >> 12U) & 0x7U) == 0)
+                       ? OperationId::WRS_STO
+                       : OperationId::UNKNOWN;
         case 0x180:
             return (rd_is_zero && rs1_is_zero) ? OperationId::SFENCE_W_INVAL : OperationId::UNKNOWN;
         case 0x181:

@@ -247,7 +247,7 @@ auto patch_fdt(std::span<const uint8_t> blob, uint64_t dram_base, uint64_t dram_
                 static constexpr std::string_view kSupportedGuestExts[] = {
                     "zihintntl", "zic64b", "zicclsm", "za64rs", "ziccamoa", "zfhmin",
                     "zvfhmin", "zfa", "zicond", "zicboz",
-                    "zicbom",    "zicbop", "svinval", "svpbmt", "svnapot", "sstc",
+                    "zicbom",    "zicbop", "zawrs",   "svinval", "svpbmt", "svnapot", "sstc",
                     "sscofpmf"};
                 for (const auto ext : kSupportedGuestExts) {
                     bool present = false;

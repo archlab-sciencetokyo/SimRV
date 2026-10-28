@@ -167,6 +167,9 @@ constexpr auto required_misa_extensions(OperationId op_id, bool compressed = fal
         }
         return required;
     }
+    if (op_id == OperationId::WRS_NTO || op_id == OperationId::WRS_STO) {
+        return compressed_requirement | misa_extension_bit(IsaExtension::A);
+    }
     switch (op_id) {
         case OperationId::FLI_S:
         case OperationId::FMINM_S:

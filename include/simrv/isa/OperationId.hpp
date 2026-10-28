@@ -670,6 +670,9 @@ enum OperationId : uint16_t {
     FCVTMOD_W_D,
     /* Zimop (May-Be-Operations) */
     MOP,
+    /* Zawrs (Wait-on-Reservation-Set) */
+    WRS_NTO,
+    WRS_STO,
     /* Others */
     UNKNOWN,
     OperationIdCount
