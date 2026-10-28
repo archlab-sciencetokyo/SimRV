@@ -23,6 +23,24 @@
 namespace simrv::memory {
 
 namespace {
+[[nodiscard]] auto apply_user_pointer_mask(core::CPU& cpu, simrv::xlen::VirtAddr address,
+                                           unsigned active_xlen) -> simrv::xlen::VirtAddr {
+    if (active_xlen != 64 || cpu.effective_data_privilege() != simrv::xlen::PrivilegeLevel::User)
+        return address;
+
+    constexpr uint64_t kPmmMask = uint64_t{0x3} << 32U;
+    const auto pmm = (static_cast<uint64_t>(cpu.state().senvcfg) & kPmmMask) >> 32U;
+    if (pmm != 2U) return address;  // RVA23 requires PMLEN=0 and PMLEN=7.
+
+    constexpr uint64_t kLow57Mask = (uint64_t{1} << 57U) - 1U;
+    const uint64_t low = address.raw() & kLow57Mask;
+    const bool translated =
+        cpu.effective_data_privilege() != simrv::xlen::PrivilegeLevel::Machine &&
+        simrv::xlen::satp_mode(cpu.state().satp, active_xlen) != 0;
+    const uint64_t upper = translated && ((low >> 56U) & 1U) != 0 ? ~kLow57Mask : 0;
+    return simrv::xlen::VirtAddr{static_cast<simrv::xlen::Word>(low | upper)};
+}
+
 template <typename Cache>
 void release_evicted_line(TileLinkBus& bus, Cache& cache, simrv::xlen::HartId hart, TlPort port,
                           core::CPU& cpu) {
@@ -58,6 +76,7 @@ auto MemoryAccess::target_read(MemorySubsystem& mem, core::CPU& cpu, simrv::xlen
     const auto& geometry = mem.memory_geometry();
     const unsigned active_xlen = cpu.effective_data_xlen();
     if (active_xlen == 32) v_addr &= 0xFFFFFFFFULL;
+    v_addr = apply_user_pointer_mask(cpu, v_addr, active_xlen);
     if (simrv::compiler::unlikely(cpu.active_context().pending_exception.has_value())) {
         return 0;
     }
@@ -434,6 +453,7 @@ void MemoryAccess::target_write(MemorySubsystem& mem, core::CPU& cpu, simrv::xle
     const auto& geometry = mem.memory_geometry();
     const unsigned active_xlen = cpu.effective_data_xlen();
     if (active_xlen == 32) v_addr &= 0xFFFFFFFFULL;
+    v_addr = apply_user_pointer_mask(cpu, v_addr, active_xlen);
     if (simrv::compiler::unlikely(cpu.active_context().pending_exception.has_value())) {
         return;
     }

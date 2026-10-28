@@ -135,6 +135,10 @@ void test_generate_platform_fdt_pcie() {
     expect(blob_contains_string(blob, "zvkt"), "Zvkt vector data-independent latency advertised");
     expect(blob_contains_string(blob, "zkt"), "Zkt data-independent latency advertised");
     expect(blob_contains_string(blob, "sscofpmf"), "Sscofpmf overflow interrupt support advertised");
+    expect(blob_contains_string(blob, "ssnpm") == simrv::xlen::kIsXLen64,
+           "Ssnpm pointer masking is advertised only by the RV64 guest");
+    expect(blob_contains_string(blob, "supm") == simrv::xlen::kIsXLen64,
+           "Supm user pointer masking is advertised only by the RV64 guest");
     expect(blob_contains_string(blob, "ssu64xl") == simrv::xlen::kIsXLen64,
            "Ssu64xl is advertised only by the RV64 guest");
     expect(blob_contains_string(blob, "riscv,pmu"), "RISC-V PMU node present");
@@ -197,6 +201,8 @@ void test_patch_fdt_advertises_zihintntl_and_64_byte_cmo() {
                blob_contains_string(*patched, "zvkt") &&
                blob_contains_string(*patched, "zkt") &&
                blob_contains_string(*patched, "sscofpmf") &&
+               blob_contains_string(*patched, "ssnpm") == simrv::xlen::kIsXLen64 &&
+               blob_contains_string(*patched, "supm") == simrv::xlen::kIsXLen64 &&
                blob_contains_string(*patched, "ssu64xl") == simrv::xlen::kIsXLen64,
            "patched CPU node advertises supported RVA23 memory extensions");
     expect(fdt_property_u32(*patched, "riscv,cbom-block-size") == 64,

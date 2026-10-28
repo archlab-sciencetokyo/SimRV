@@ -615,9 +615,19 @@ auto CsrFile::write(simrv::xlen::CsrNumber addr, simrv::xlen::CsrValue wdata)
         case csr_addr(Csr::Stval):
             cpu_.state().stval = wdata;
             break;
-        case csr_addr(Csr::Senvcfg):
+        case csr_addr(Csr::Senvcfg): {
+            if constexpr (simrv::xlen::kIsXLen64) {
+                constexpr uint64_t kPmmMask = uint64_t{0x3} << 32U;
+                const bool has_u = isa::misa_has_extension(cpu_.state().misa, isa::IsaExtension::U);
+                const auto pmm = (static_cast<uint64_t>(wdata) & kPmmMask) >> 32U;
+                if (!has_s || !has_u || (pmm != 0U && pmm != 2U)) {
+                    wdata = static_cast<simrv::xlen::CsrValue>(
+                        static_cast<uint64_t>(wdata) & ~kPmmMask);
+                }
+            }
             cpu_.state().senvcfg = wdata;
             break;
+        }
         case csr_addr(Csr::Stimecmp):
             if (cpu_.state().priv < simrv::xlen::PrivilegeLevel::Machine) {
                 bool stce = false;
@@ -663,6 +673,11 @@ auto CsrFile::write(simrv::xlen::CsrNumber addr, simrv::xlen::CsrValue wdata)
             cpu_.state().mcountinhibit = wdata & ~static_cast<simrv::xlen::CsrValue>(2);
             break;
         case csr_addr(Csr::Menvcfg):
+            if constexpr (simrv::xlen::kIsXLen64) {
+                constexpr uint64_t kPmmMask = uint64_t{0x3} << 32U;
+                wdata = static_cast<simrv::xlen::CsrValue>(
+                    static_cast<uint64_t>(wdata) & ~kPmmMask);
+            }
             cpu_.state().menvcfg = wdata;
             cpu_.evaluate_timer_interrupt();
             break;

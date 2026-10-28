@@ -4,8 +4,8 @@ SimRV targets the ratified RISC-V **RVA23 Profile** (`rva23s64` and `rva23u64`) 
 
 **The current implementation is not yet a complete RVA23S64 implementation.** Selecting the
 `rva23s64` profile names the intended target; it does not imply that every mandatory profile
-extension is implemented or advertised. In particular, the augmented hypervisor extension (Sha),
-pointer masking, and several scalar and vector extensions are not yet complete. The matrix below
+extension is implemented or advertised. In particular, the augmented hypervisor extension (Sha)
+and several scalar and vector extensions are not yet complete. The matrix below
 records implemented areas and the qualification gaps; full
 RVA23 remains the goal.
 
@@ -40,6 +40,7 @@ preset's configured cache-line geometry remains a separate platform requirement.
 | Data-independent latency | Implemented Zkt-listed integer instructions have operand-independent guest-cycle latency; DIV/REM are excluded as specified; FDT advertises Zkt | Pipeline tests across operand patterns and three- and five-stage models |
 | Lower-mode XLEN | RV64 U-mode supports UXL=64 through the `mstatus`/`sstatus` CSR path; RV64 FDT advertises Ssu64xl | RVA23 CSR WARL and FDT tests |
 | Counter overflow filtering | Sscofpmf implements M/S/U event filtering, counter inhibit, sticky overflow reporting, and delegated LCOFIP; FDT advertises Sscofpmf | RVA23 CSR, overflow, and interrupt-delegation tests |
+| User pointer masking | Ssnpm selects U-mode PMLEN=0 or PMLEN=7 through `senvcfg.PMM`; Supm is implied; RV64 FDT advertises both | RVA23 WARL and tagged physical load/store tests; FDT tests |
 | TLB invalidation | Svinval (`sinval.vma`, `sfence.w.inval`, `sfence.inval.ir`) | Core semantic, RVA23 profile gates, and ACT suite |
 | Vector | Implemented subset of RISC-V Vector 1.0 (`V`), configurable VLEN | Vector regression suite and lockstep |
 | Privilege | M/S/U execution, traps, interrupts, and CSR access (Privileged ISA 1.13) | Core semantic, ACT suite, and Linux boot gates |
@@ -83,10 +84,9 @@ SimRV verifies its default 64-bit profile (`rva23s64`) against the RISC-V Archit
 
 - Full RVA23S64 is not yet qualified. The following mandatory requirements remain incomplete or
   need profile-level qualification:
-  - Unprivileged extensions: Supm.
   - Memory requirements: the Ziccif and Ziccrse main-memory PMA guarantees.
-  - Supervisor profile requirements: Ssnpm pointer masking and the augmented
-    hypervisor architecture Sha, including H, Ssstateen, and its required guest state and
+  - Supervisor profile requirements: the augmented hypervisor architecture Sha, including H,
+    Ssstateen, and its required guest state and
     translation behavior.
 
 

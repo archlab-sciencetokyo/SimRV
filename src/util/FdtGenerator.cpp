@@ -223,7 +223,11 @@ auto generate_platform_fdt(const core::MachineConfig& config,
     };
     std::vector<std::string_view> guest_extensions(std::begin(kSupportedGuestExts),
                                                    std::end(kSupportedGuestExts));
-    if constexpr (simrv::xlen::kIsXLen64) guest_extensions.emplace_back("ssu64xl");
+    if constexpr (simrv::xlen::kIsXLen64) {
+        guest_extensions.emplace_back("ssu64xl");
+        guest_extensions.emplace_back("ssnpm");
+        guest_extensions.emplace_back("supm");
+    }
 
     for (uint32_t hart = 0; hart < num_harts; ++hart) {
         fdt.begin_node(std::format("cpu@{}", hart));

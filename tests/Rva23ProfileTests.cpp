@@ -612,6 +612,77 @@ void test_ssu64xl_user_xlen_csr() {
     }
 }
 
+void test_supm_user_data_pointer_masking() {
+    if constexpr (simrv::xlen::kIsXLen64) {
+        simrv::core::Machine machine;
+        std::vector<simrv::xlen::Byte> ram(1024 * 1024, simrv::xlen::Byte{0});
+        machine.set_ram_for_testing(ram.data(), ram.size());
+        machine.memory().initialize_mmu();
+        auto& cpu = machine.primary_hart();
+        cpu.reset();
+        auto& state = cpu.state();
+        state.misa |= simrv::isa::misa_extension_bit(simrv::isa::IsaExtension::S) |
+                      simrv::isa::misa_extension_bit(simrv::isa::IsaExtension::U);
+        state.initialize_lower_xlen_fields();
+
+        constexpr simrv::xlen::Address kBase = simrv::memory::kDramBaseAddress + 0x100;
+        constexpr simrv::xlen::Register kValue = 0x0123456789ABCDEFULL;
+        constexpr uint64_t kPmmMask = uint64_t{0x3} << 32U;
+        constexpr uint64_t kPmmSeven = uint64_t{2} << 32U;
+        const simrv::xlen::VirtAddr tagged{kBase | (uint64_t{0x55} << 57U)};
+
+        state.priv = simrv::xlen::PrivilegeLevel::Machine;
+        cpu.active_context().opcode = simrv::isa::Opcode::Store;
+        cpu.active_context().pending_exception.reset();
+        simrv::memory::MemoryAccess::target_write(machine.memory(), cpu,
+                                                  simrv::xlen::VirtAddr{kBase}, kValue,
+                                                  simrv::isa::Funct3::Sd);
+        TEST_ASSERT(!cpu.active_context().pending_exception.has_value());
+
+        state.priv = simrv::xlen::PrivilegeLevel::Supervisor;
+        const auto invalid_pmm = cpu.csr_file.write(
+            simrv::xlen::CsrNumber{0x10A}, static_cast<simrv::xlen::CsrValue>(uint64_t{1} << 32U));
+        TEST_ASSERT(invalid_pmm.has_value());
+        TEST_ASSERT((static_cast<uint64_t>(state.senvcfg) & kPmmMask) == 0);
+
+        state.priv = simrv::xlen::PrivilegeLevel::User;
+        cpu.active_context().opcode = simrv::isa::Opcode::Load;
+        cpu.active_context().pending_exception.reset();
+        (void)simrv::memory::MemoryAccess::target_read(machine.memory(), cpu, tagged,
+                                                       simrv::isa::Funct3::Ld);
+        TEST_ASSERT(cpu.active_context().pending_exception.has_value());
+
+        state.priv = simrv::xlen::PrivilegeLevel::Supervisor;
+        const auto enable_pmm = cpu.csr_file.write(
+            simrv::xlen::CsrNumber{0x10A}, static_cast<simrv::xlen::CsrValue>(kPmmSeven));
+        TEST_ASSERT(enable_pmm.has_value());
+        TEST_ASSERT((static_cast<uint64_t>(state.senvcfg) & kPmmMask) == kPmmSeven);
+
+        state.priv = simrv::xlen::PrivilegeLevel::User;
+        cpu.active_context().opcode = simrv::isa::Opcode::Load;
+        cpu.active_context().pending_exception.reset();
+        const auto loaded = simrv::memory::MemoryAccess::target_read(
+            machine.memory(), cpu, tagged, simrv::isa::Funct3::Ld);
+        TEST_ASSERT(!cpu.active_context().pending_exception.has_value());
+        TEST_ASSERT(loaded == kValue);
+
+        cpu.active_context().opcode = simrv::isa::Opcode::Store;
+        cpu.active_context().pending_exception.reset();
+        simrv::memory::MemoryAccess::target_write(machine.memory(), cpu,
+                                                  simrv::xlen::VirtAddr{tagged.raw() + 8U}, kValue,
+                                                  simrv::isa::Funct3::Sd);
+        TEST_ASSERT(!cpu.active_context().pending_exception.has_value());
+
+        state.priv = simrv::xlen::PrivilegeLevel::Machine;
+        cpu.active_context().opcode = simrv::isa::Opcode::Load;
+        cpu.active_context().pending_exception.reset();
+        const auto stored = simrv::memory::MemoryAccess::target_read(
+            machine.memory(), cpu, simrv::xlen::VirtAddr{kBase + 8U}, simrv::isa::Funct3::Ld);
+        TEST_ASSERT(!cpu.active_context().pending_exception.has_value());
+        TEST_ASSERT(stored == kValue);
+    }
+}
+
 void test_sscofpmf_counter_overflow_and_filtering() {
     if constexpr (simrv::xlen::kIsXLen64) {
         simrv::core::Machine machine;
@@ -864,6 +935,10 @@ int main() {
     std::cout << "[RUN] test_ssu64xl_user_xlen_csr" << std::endl;
     test_ssu64xl_user_xlen_csr();
     std::cout << "[PASS] test_ssu64xl_user_xlen_csr" << std::endl;
+
+    std::cout << "[RUN] test_supm_user_data_pointer_masking" << std::endl;
+    test_supm_user_data_pointer_masking();
+    std::cout << "[PASS] test_supm_user_data_pointer_masking" << std::endl;
 
     std::cout << "[RUN] test_sscofpmf_counter_overflow_and_filtering" << std::endl;
     test_sscofpmf_counter_overflow_and_filtering();

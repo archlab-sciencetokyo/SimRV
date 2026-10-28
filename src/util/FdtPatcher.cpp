@@ -250,9 +250,11 @@ auto patch_fdt(std::span<const uint8_t> blob, uint64_t dram_base, uint64_t dram_
                     "zihintntl", "zkt",    "zvbb",   "zvkt",   "zic64b", "zicclsm", "za64rs", "ziccamoa", "zfhmin",
                     "zvfhmin", "zfa", "zicond", "zicboz",
                     "zicbom",    "zicbop", "zawrs",   "svinval", "svpbmt", "svnapot", "sstc",
-                    "sscofpmf", "ssu64xl"};
+                    "sscofpmf", "ssu64xl", "ssnpm", "supm"};
                 for (const auto ext : kSupportedGuestExts) {
-                    if (ext == "ssu64xl" && !simrv::xlen::kIsXLen64) continue;
+                    if ((ext == "ssu64xl" || ext == "ssnpm" || ext == "supm") &&
+                        !simrv::xlen::kIsXLen64)
+                        continue;
                     bool present = false;
                     size_t offset = 0;
                     while (offset < isa_ext_prop->data.size()) {
