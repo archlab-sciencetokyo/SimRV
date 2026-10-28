@@ -22,7 +22,8 @@ namespace simrv::core {
 
 namespace {
 constexpr unsigned kHighWordShift = 32;
-constexpr simrv::xlen::CsrValue kCounterEnableMask = static_cast<simrv::xlen::CsrValue>(0x7u);
+constexpr simrv::xlen::CsrValue kCounterEnableMask =
+    static_cast<simrv::xlen::CsrValue>(0xFFFFFFFFU);
 
 [[nodiscard]] constexpr auto fp_accessible(const ArchState& state) noexcept -> bool {
     return isa::misa_has_extension(state.misa, isa::IsaExtension::F) &&

@@ -591,14 +591,16 @@ void test_scalar_rmm_rounding() {
     TEST_ASSERT((result.fp_wb_data & UINT64_C(0xFFFFFFFF)) == UINT32_C(0x4B800001));
     TEST_ASSERT((fcsr & isa::FflagsBit::Nx) != 0);
 
-    fcsr = 0;
-    result = execute(0x69, 4, 0, 2, 16777217);  // FCVT.D.L
-    TEST_ASSERT(result.fp_wb_data == std::bit_cast<uint64_t>(16777217.0));
-    TEST_ASSERT((fcsr & isa::FflagsBit::Nx) == 0);
-    fcsr = 0;
-    result = execute(0x69, 4, 0, 2, xlen::Register{9007199254740993ULL});
-    TEST_ASSERT(result.fp_wb_data == std::bit_cast<uint64_t>(9007199254740994.0));
-    TEST_ASSERT((fcsr & isa::FflagsBit::Nx) != 0);
+    if constexpr (xlen::kIsXLen64) {
+        fcsr = 0;
+        result = execute(0x69, 4, 0, 2, 16777217);  // FCVT.D.L
+        TEST_ASSERT(result.fp_wb_data == std::bit_cast<uint64_t>(16777217.0));
+        TEST_ASSERT((fcsr & isa::FflagsBit::Nx) == 0);
+        fcsr = 0;
+        result = execute(0x69, 4, 0, 2, static_cast<xlen::Register>(9007199254740993ULL));
+        TEST_ASSERT(result.fp_wb_data == std::bit_cast<uint64_t>(9007199254740994.0));
+        TEST_ASSERT((fcsr & isa::FflagsBit::Nx) != 0);
+    }
 
     fp[1] = boxed(UINT32_C(0x3F800001));
     fp[2] = boxed(UINT32_C(0x3F7FFFFE));
@@ -983,7 +985,8 @@ void test_supm_user_data_pointer_masking() {
         constexpr simrv::xlen::Register kValue = 0x0123456789ABCDEFULL;
         constexpr uint64_t kPmmMask = uint64_t{0x3} << 32U;
         constexpr uint64_t kPmmSeven = uint64_t{2} << 32U;
-        const simrv::xlen::VirtAddr tagged{kBase | (uint64_t{0x55} << 57U)};
+        const simrv::xlen::VirtAddr tagged{
+            static_cast<simrv::xlen::Word>(kBase | (uint64_t{0x55} << 57U))};
 
         state.priv = simrv::xlen::PrivilegeLevel::Machine;
         cpu.active_context().opcode = simrv::isa::Opcode::Store;
@@ -1108,6 +1111,60 @@ void test_sscofpmf_counter_overflow_and_filtering() {
         cpu.record_hpm_event(simrv::core::HpmEvent::Cycles);
         TEST_ASSERT((state.mip & kLcofip) != 0);
     }
+}
+
+void test_sscounterenw_allows_enabled_hpm_counters() {
+    simrv::core::Machine machine;
+    auto& cpu = machine.primary_hart();
+    constexpr simrv::xlen::CsrValue kHpmEnableBits =
+        (simrv::xlen::CsrValue{1} << 3U) | (simrv::xlen::CsrValue{1} << 31U);
+    constexpr simrv::xlen::CsrNumber kHpmcounter3{0xC03};
+    constexpr simrv::xlen::CsrValue kHpmRead = 0x000C03F3U;
+
+    TEST_ASSERT(cpu.csr_file.write(simrv::core::Csr::Mcounteren, kHpmEnableBits).has_value());
+    TEST_ASSERT(cpu.csr_file.write(simrv::core::Csr::Scounteren, kHpmEnableBits).has_value());
+    const auto mcounteren = cpu.csr_file.read(simrv::core::Csr::Mcounteren);
+    const auto scounteren = cpu.csr_file.read(simrv::core::Csr::Scounteren);
+    TEST_ASSERT(mcounteren.has_value() && *mcounteren == kHpmEnableBits);
+    TEST_ASSERT(scounteren.has_value() && *scounteren == kHpmEnableBits);
+    cpu.perf_counters.write_hpmcounter(3, kHpmRead);
+    cpu.state().mcounteren = 0;
+    cpu.state().scounteren = 0;
+
+    const auto decode_hpm_read = [&]() {
+        auto& context = cpu.active_context();
+        context = {};
+        context.ir = (static_cast<uint32_t>(kHpmcounter3.value()) << 20U) | (2U << 12U) |
+                     (5U << 7U) | 0x73U;  // csrrs x5, hpmcounter3, x0
+        context.ir_org = context.ir;
+        context.op_id = simrv::isa::OperationId::UNKNOWN;
+        cpu.run_decode_stage(machine);
+    };
+
+    cpu.state().priv = simrv::xlen::PrivilegeLevel::User;
+    decode_hpm_read();
+    const auto& denied = cpu.active_context();
+    TEST_ASSERT(denied.pending_exception == simrv::isa::ExceptionCode::IllegalInstruction);
+
+    cpu.state().mcounteren = simrv::xlen::CsrValue{1} << 3U;
+    cpu.state().scounteren = 0;
+    decode_hpm_read();
+    const auto& supervisor_enabled_only = cpu.active_context();
+    TEST_ASSERT(supervisor_enabled_only.pending_exception ==
+                simrv::isa::ExceptionCode::IllegalInstruction);
+
+    cpu.state().scounteren = simrv::xlen::CsrValue{1} << 3U;
+    decode_hpm_read();
+    const auto& user_enabled = cpu.active_context();
+    TEST_ASSERT(!user_enabled.pending_exception.has_value());
+    TEST_ASSERT(user_enabled.rcsr == kHpmRead);
+
+    cpu.state().priv = simrv::xlen::PrivilegeLevel::Supervisor;
+    cpu.state().scounteren = 0;
+    decode_hpm_read();
+    const auto& supervisor_enabled = cpu.active_context();
+    TEST_ASSERT(!supervisor_enabled.pending_exception.has_value());
+    TEST_ASSERT(supervisor_enabled.rcsr == kHpmRead);
 }
 
 void test_zcb_decompression() {
@@ -1550,6 +1607,9 @@ int main() {
     std::cout << "[RUN] test_sscofpmf_counter_overflow_and_filtering" << std::endl;
     test_sscofpmf_counter_overflow_and_filtering();
     std::cout << "[PASS] test_sscofpmf_counter_overflow_and_filtering" << std::endl;
+    std::cout << "[RUN] test_sscounterenw_allows_enabled_hpm_counters" << std::endl;
+    test_sscounterenw_allows_enabled_hpm_counters();
+    std::cout << "[PASS] test_sscounterenw_allows_enabled_hpm_counters" << std::endl;
 
     std::cout << "[RUN] test_zimop_decoder" << std::endl;
     test_zimop_decoder();
