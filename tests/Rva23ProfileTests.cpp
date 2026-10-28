@@ -5,20 +5,29 @@
  */
 #include <array>
 #include <cassert>
+#include <bit>
+#include <cmath>
 #include <cstring>
 #include <iostream>
 #include <vector>
 
 #include "simrv/cache/DCache.hpp"
+#include "simrv/cache/ICache.hpp"
+#include "simrv/cache/L2Cache.hpp"
+#include "simrv/cache/L3Cache.hpp"
 #include "simrv/core/Cpu.hpp"
 #include "simrv/core/Machine.hpp"
 #include "simrv/execute/ExecuteUnit.hpp"
+#include "simrv/isa/Common.hpp"
 #include "simrv/isa/IsaConfig.hpp"
+#include "simrv/isa/FpConversions.hpp"
 #include "simrv/isa/IsaTypes.hpp"
 #include "simrv/isa/OperationId.hpp"
 #include "simrv/memory/MemoryAccess.hpp"
 #include "simrv/memory/MemorySubsystem.hpp"
+#include "simrv/memory/ReservationTable.hpp"
 #include "simrv/pipeline/Decoder.hpp"
+#include "simrv/pipeline/RetirementEffects.hpp"
 #include "simrv/xlen/AddressTypes.hpp"
 #include "simrv/xlen/RegisterTypes.hpp"
 
@@ -63,6 +72,394 @@ void test_zicond_semantics() {
     const uint32_t czero_nez_insn =
         (0x07U << 25U) | (2U << 20U) | (1U << 15U) | (7U << 12U) | (3U << 7U) | 0x33U;
     TEST_ASSERT(simrv::pipeline::decoder(czero_nez_insn) == OperationId::CZERO_NEZ);
+}
+
+void test_zic64b_cache_geometry() {
+    TEST_ASSERT(simrv::cache::ICache::kLineBytes == 64);
+    TEST_ASSERT(simrv::cache::DCache::kLineBytes == 64);
+    TEST_ASSERT(simrv::cache::L2Cache::kLineBytes == 64);
+    TEST_ASSERT(simrv::cache::L3Cache::kLineBytes == 64);
+    TEST_ASSERT(simrv::cache::ICache::kLineShift == 6);
+    TEST_ASSERT(simrv::cache::DCache::kLineShift == 6);
+}
+
+void test_zicclsm_unaligned_main_memory() {
+    if constexpr (simrv::xlen::kIsXLen64) {
+        simrv::core::Machine machine;
+        std::vector<simrv::xlen::Byte> ram(1024 * 1024, simrv::xlen::Byte{0xA5});
+        machine.set_ram_for_testing(ram.data(), ram.size());
+        machine.memory().initialize_mmu();
+        auto& cpu = machine.primary_hart();
+        cpu.reset();
+
+        constexpr simrv::xlen::Address kBase = simrv::memory::kDramBaseAddress;
+        constexpr simrv::xlen::Register kValue = 0x0123456789ABCDEFULL;
+        const auto check_unaligned = [&](simrv::xlen::Address offset) {
+            cpu.active_context().pending_exception.reset();
+            cpu.active_context().opcode = simrv::isa::Opcode::Store;
+            simrv::memory::MemoryAccess::target_write(
+                machine.memory(), cpu, simrv::xlen::VirtAddr{kBase + offset}, kValue,
+                simrv::isa::Funct3::Sd);
+            TEST_ASSERT(!cpu.active_context().pending_exception.has_value());
+
+            cpu.active_context().pending_exception.reset();
+            cpu.active_context().opcode = simrv::isa::Opcode::Load;
+            const auto loaded = simrv::memory::MemoryAccess::target_read(
+                machine.memory(), cpu, simrv::xlen::VirtAddr{kBase + offset},
+                simrv::isa::Funct3::Ld);
+            TEST_ASSERT(!cpu.active_context().pending_exception.has_value());
+            TEST_ASSERT(loaded == kValue);
+        };
+
+        check_unaligned(0x1003);  // Misaligned within a cache block.
+        check_unaligned(0x103D);  // Crosses a 64-byte cache-block boundary.
+        check_unaligned(0x1FFD);  // Crosses a 4 KiB page boundary in main memory.
+    }
+}
+
+void test_za64rs_reservation_set() {
+    using simrv::memory::ReservationTable;
+    static_assert(ReservationTable::kReservationGranule == 64);
+
+    ReservationTable table;
+    constexpr simrv::xlen::Address kAddress = 0x8000103FULL;
+    table.set_reservation(0, kAddress);
+    TEST_ASSERT(table.check_reservation(0, 0x80001000ULL));
+    TEST_ASSERT(table.check_reservation(0, 0x8000103FULL));
+    TEST_ASSERT(!table.check_reservation(0, 0x80001040ULL));
+
+    table.invalidate_matching(0x80001000ULL, 1);
+    TEST_ASSERT(!table.check_reservation(0, kAddress));
+}
+
+void test_ziccamoa_main_memory_atomics() {
+    using simrv::isa::Funct3;
+    using simrv::isa::Funct5Amo;
+    using simrv::isa::Opcode;
+
+    std::vector<simrv::xlen::Byte> ram(1024 * 1024, simrv::xlen::Byte{0});
+    constexpr simrv::xlen::Address kBase = simrv::memory::kDramBaseAddress;
+    constexpr std::array<Funct5Amo, 9> kOps = {
+        Funct5Amo::Swap, Funct5Amo::Add, Funct5Amo::Xor, Funct5Amo::And, Funct5Amo::Or,
+        Funct5Amo::Min,  Funct5Amo::Max, Funct5Amo::Minu, Funct5Amo::Maxu};
+
+    const auto exercise = [&](uint32_t width_bytes, Funct3 funct3, uint64_t initial,
+                              uint64_t operand, const std::array<uint64_t, 9>& expected) {
+        simrv::core::Machine machine;
+        machine.set_ram_for_testing(ram.data(), ram.size());
+        machine.memory().initialize_mmu();
+        auto& cpu = machine.primary_hart();
+        cpu.reset();
+
+        for (size_t i = 0; i < kOps.size(); ++i) {
+            const auto address = kBase + 0x200 + (i * 16);
+            std::memcpy(ram.data() + 0x200 + (i * 16), &initial, width_bytes);
+            auto& ctx = cpu.active_context();
+            ctx = {};
+            ctx.opcode = Opcode::Amo;
+            ctx.funct5 = kOps[i];
+            ctx.funct3 = funct3;
+            ctx.mem_addr = address;
+            ctx.rrs1 = address;
+            ctx.rrs2 = operand;
+            cpu.run_memory_stage(machine);
+            TEST_ASSERT(!ctx.pending_exception.has_value());
+
+            ctx.opcode = Opcode::Load;
+            const auto observed = simrv::memory::MemoryAccess::target_read(
+                machine.memory(), cpu,
+                simrv::xlen::VirtAddr{static_cast<simrv::xlen::Register>(address)}, funct3);
+            TEST_ASSERT(!ctx.pending_exception.has_value());
+            const uint64_t width_mask = width_bytes == 4 ? UINT64_C(0xFFFFFFFF) : UINT64_MAX;
+            TEST_ASSERT((observed & width_mask) == (expected[i] & width_mask));
+        }
+    };
+
+    constexpr std::array<uint64_t, 9> kExpectedW = {
+        3, 0x80000004ULL, 0x80000002ULL, 1, 0x80000003ULL,
+        0x80000001ULL, 3, 3, 0x80000001ULL};
+    exercise(4, Funct3::Sw, 0x80000001ULL, 3, kExpectedW);
+
+    if constexpr (simrv::xlen::kIsXLen64) {
+        constexpr std::array<uint64_t, 9> kExpectedD = {
+            3, 0x8000000000000004ULL, 0x8000000000000002ULL, 1,
+            0x8000000000000003ULL, 0x8000000000000001ULL, 3, 3,
+            0x8000000000000001ULL};
+        exercise(8, Funct3::Sd, 0x8000000000000001ULL, 3, kExpectedD);
+    }
+}
+
+void test_zfa_scalar_instructions() {
+    using namespace simrv::isa;
+    const auto encode = [](uint32_t funct7, uint32_t rs2, uint32_t rs1, uint32_t rm,
+                           uint32_t rd) {
+        return (funct7 << 25U) | (rs2 << 20U) | (rs1 << 15U) | (rm << 12U) | (rd << 7U) |
+               0x53U;
+    };
+    TEST_ASSERT(simrv::pipeline::decoder(encode(0x78, 1, 16, 0, 1)) == OperationId::FLI_S);
+    TEST_ASSERT(simrv::pipeline::decoder(encode(0x79, 1, 1, 0, 1)) == OperationId::FLI_D);
+    TEST_ASSERT(simrv::pipeline::decoder(encode(0x14, 0, 2, 2, 1)) == OperationId::FMINM_S);
+    TEST_ASSERT(simrv::pipeline::decoder(encode(0x50, 0, 2, 4, 1)) == OperationId::FLEQ_S);
+    TEST_ASSERT(simrv::pipeline::decoder(encode(0x20, 4, 2, 0, 1)) == OperationId::FROUND_S);
+    TEST_ASSERT(simrv::pipeline::decoder(encode(0x20, 5, 2, 0, 1)) == OperationId::FROUNDNX_S);
+    TEST_ASSERT(simrv::pipeline::decoder(encode(0x15, 0, 2, 3, 1)) == OperationId::FMAXM_D);
+    TEST_ASSERT(simrv::pipeline::decoder(encode(0x51, 0, 2, 5, 1)) == OperationId::FLTQ_D);
+    TEST_ASSERT(simrv::pipeline::decoder(encode(0x21, 5, 2, 0, 1)) == OperationId::FROUNDNX_D);
+    TEST_ASSERT(simrv::pipeline::decoder(encode(0x61, 8, 2, 1, 1)) == OperationId::FCVTMOD_W_D);
+    TEST_ASSERT(required_misa_extensions(OperationId::FLI_S) == misa_extension_bit(IsaExtension::F));
+    TEST_ASSERT(required_misa_extensions(OperationId::FCVTMOD_W_D) ==
+                (misa_extension_bit(IsaExtension::F) | misa_extension_bit(IsaExtension::D)));
+
+    std::array<simrv::xlen::FloatingRegister, 32> fp{};
+    simrv::xlen::CsrValue fcsr = 0;
+    const auto execute = [&](uint32_t funct7, uint32_t rs2, uint32_t rs1, uint32_t rm,
+                             uint32_t rs2_reg = 0) {
+        const uint32_t encoded_rs2 = (funct7 == 0x78 || funct7 == 0x79 || funct7 == 0x20 ||
+                                      funct7 == 0x21 || funct7 == 0x61)
+                                         ? rs2
+                                         : rs2_reg;
+        return simrv::execute::ExecuteUnit::opFp(
+            funct7, static_cast<Funct3>(rm), simrv::xlen::to_fp_reg_id(rs1),
+            simrv::xlen::to_fp_reg_id(encoded_rs2), 0, fp.data(), fcsr);
+    };
+    auto result = execute(0x78, 1, 16, 0);
+    TEST_ASSERT(result.fp_wb_enable && result.fp_wb_data ==
+                (static_cast<uint64_t>(simrv::xlen::kF32BoxerBits) | UINT32_C(0x3F800000)));
+    TEST_ASSERT(fcsr == 0);  // FLI never raises floating-point flags.
+    result = execute(0x78, 1, 1, 0);
+    TEST_ASSERT((result.fp_wb_data & UINT64_C(0xFFFFFFFF)) == UINT32_C(0x00800000));
+    result = execute(0x79, 1, 1, 0);
+    TEST_ASSERT(result.fp_wb_data == UINT64_C(0x0010000000000000));
+
+    fp[2] = UINT64_C(0x7FF8000000001234);
+    fp[3] = std::bit_cast<uint64_t>(1.0);
+    result = execute(0x15, 0, 2, 3, 3);
+    TEST_ASSERT(result.fp_wb_enable && result.fp_wb_data == simrv::xlen::kF64Qnan);
+    fcsr = 0;
+    result = execute(0x51, 0, 2, 5, 3);
+    TEST_ASSERT(result.int_wb_enable && result.int_wb_data == 0 && (fcsr & FflagsBit::Nv) == 0);
+
+    fp[2] = static_cast<uint64_t>(simrv::xlen::kF32BoxerBits) | UINT32_C(0x7FC12345);
+    fp[3] = static_cast<uint64_t>(simrv::xlen::kF32BoxerBits) | UINT32_C(0x3F800000);
+    fcsr = 0;
+    result = execute(0x14, 0, 2, 2, 3);
+    TEST_ASSERT(result.fp_wb_enable && result.fp_wb_data ==
+                (static_cast<uint64_t>(simrv::xlen::kF32BoxerBits) | UINT32_C(0x7FC00000)));
+    TEST_ASSERT((fcsr & FflagsBit::Nv) == 0);
+    fp[2] = static_cast<uint64_t>(simrv::xlen::kF32BoxerBits) | UINT32_C(0x3F000000);
+    result = execute(0x14, 0, 2, 2, 3);
+    TEST_ASSERT((result.fp_wb_data & UINT64_C(0xFFFFFFFF)) == UINT32_C(0x3F000000));
+
+    fp[2] = static_cast<uint64_t>(simrv::xlen::kF32BoxerBits) | UINT32_C(0x7FC12345);
+    fcsr = 0;
+    result = execute(0x50, 0, 2, 4, 3);
+    TEST_ASSERT(result.int_wb_enable && result.int_wb_data == 0);
+    TEST_ASSERT((fcsr & FflagsBit::Nv) == 0);
+
+    fp[2] = static_cast<uint64_t>(simrv::xlen::kF32BoxerBits) | UINT32_C(0x40200000); // 2.5
+    result = execute(0x20, 4, 2, 4);
+    TEST_ASSERT(result.fp_wb_enable &&
+                (result.fp_wb_data & UINT64_C(0xFFFFFFFF)) == UINT32_C(0x40400000));
+    TEST_ASSERT((fcsr & (FflagsBit::Nv | FflagsBit::Nx)) == 0);
+    fp[2] = static_cast<uint64_t>(simrv::xlen::kF32BoxerBits) | UINT32_C(0x40200000); // 2.5
+    fcsr = 0;
+    result = execute(0x20, 5, 2, 0);
+    TEST_ASSERT((result.fp_wb_data & UINT64_C(0xFFFFFFFF)) == UINT32_C(0x40000000));
+    TEST_ASSERT((fcsr & FflagsBit::Nx) != 0);
+    fp[2] = std::bit_cast<uint64_t>(1.1);
+    fcsr = 0;
+    result = execute(0x21, 5, 2, 0);
+    TEST_ASSERT(result.fp_wb_enable && result.fp_wb_data == std::bit_cast<uint64_t>(1.0));
+    TEST_ASSERT((fcsr & FflagsBit::Nx) != 0);
+    fp[2] = std::bit_cast<uint64_t>(4.75);
+    fcsr = 0;
+    result = execute(0x61, 8, 2, 1);
+    TEST_ASSERT(result.int_wb_enable && result.int_wb_data == 4);
+    TEST_ASSERT((fcsr & FflagsBit::Nx) != 0);
+    fp[2] = std::bit_cast<uint64_t>(4294967297.75);
+    fcsr = 0;
+    result = execute(0x61, 8, 2, 1);
+    TEST_ASSERT(result.int_wb_enable && result.int_wb_data == 1);
+    TEST_ASSERT((fcsr & FflagsBit::Nv) != 0);
+}
+
+void test_zfhmin_scalar_instructions() {
+    using namespace simrv::isa;
+    const auto encode_fp = [](uint32_t funct7, uint32_t rs2, uint32_t rs1, uint32_t rm,
+                              uint32_t rd) {
+        return (funct7 << 25U) | (rs2 << 20U) | (rs1 << 15U) | (rm << 12U) | (rd << 7U) |
+               0x53U;
+    };
+    TEST_ASSERT(simrv::pipeline::decoder((1U << 12U) | (1U << 7U) | 0x07U) == OperationId::FLH);
+    TEST_ASSERT(simrv::pipeline::decoder((2U << 20U) | (1U << 12U) | 0x27U) == OperationId::FSH);
+    TEST_ASSERT(simrv::pipeline::decoder(encode_fp(0x72, 0, 2, 0, 1)) == OperationId::FMV_X_H);
+    TEST_ASSERT(simrv::pipeline::decoder(encode_fp(0x7A, 0, 2, 0, 1)) == OperationId::FMV_H_X);
+    TEST_ASSERT(simrv::pipeline::decoder(encode_fp(0x22, 2, 2, 0, 1)) == OperationId::FCVT_S_H);
+    TEST_ASSERT(simrv::pipeline::decoder(encode_fp(0x26, 0, 2, 0, 1)) == OperationId::FCVT_H_S);
+    TEST_ASSERT(simrv::pipeline::decoder(encode_fp(0x21, 2, 2, 0, 1)) == OperationId::FCVT_D_H);
+    TEST_ASSERT(simrv::pipeline::decoder(encode_fp(0x25, 1, 2, 0, 1)) == OperationId::FCVT_H_D);
+    TEST_ASSERT(simrv::pipeline::decoder(encode_fp(0x02, 0, 2, 0, 1)) == OperationId::UNKNOWN);
+
+    std::array<simrv::xlen::FloatingRegister, 32> fp{};
+    simrv::xlen::CsrValue fcsr = 0;
+    const auto execute = [&](uint32_t funct7, uint32_t rm, uint32_t rs1, uint32_t rs2,
+                             simrv::xlen::Register int_source = 0) {
+        return simrv::execute::ExecuteUnit::opFp(
+            funct7, static_cast<Funct3>(rm), simrv::xlen::to_fp_reg_id(rs1),
+            simrv::xlen::to_fp_reg_id(rs2), int_source, fp.data(), fcsr);
+    };
+    fp[2] = ~simrv::xlen::FloatingRegister{0xFFFF} | UINT16_C(0x3C00);  // Half 1.0
+    auto result = execute(0x22, 0, 2, 2);
+    TEST_ASSERT(result.fp_wb_enable && result.fp_wb_data ==
+                (static_cast<uint64_t>(simrv::xlen::kF32BoxerBits) | UINT32_C(0x3F800000)));
+
+    fp[2] = static_cast<uint64_t>(simrv::xlen::kF32BoxerBits) | UINT32_C(0x3FC00000);  // 1.5
+    result = execute(0x26, 0, 2, 0);
+    TEST_ASSERT(result.fp_wb_enable &&
+                (result.fp_wb_data & UINT64_C(0xFFFF)) == UINT16_C(0x3E00));
+
+    fp[2] = static_cast<uint64_t>(simrv::xlen::kF32BoxerBits) | UINT32_C(0x3F801000);
+    fcsr = 0;
+    result = execute(0x26, 3, 2, 0);  // RUP
+    TEST_ASSERT((result.fp_wb_data & UINT64_C(0xFFFF)) == UINT16_C(0x3C01));
+    TEST_ASSERT((fcsr & simrv::isa::FflagsBit::Nx) != 0);
+
+    const double half_midpoint = 1.00048828125;
+    fp[2] = std::bit_cast<simrv::xlen::FloatingRegister>(
+        std::nextafter(half_midpoint, INFINITY));
+    fcsr = 0;
+    result = execute(0x25, 0, 2, 1);
+    TEST_ASSERT(result.fp_wb_enable &&
+                (result.fp_wb_data & UINT64_C(0xFFFF)) == UINT16_C(0x3C01));
+    TEST_ASSERT((fcsr & simrv::isa::FflagsBit::Nx) != 0);
+    fp[2] = ~simrv::xlen::FloatingRegister{0xFFFF} | UINT16_C(0x3E00);
+    result = execute(0x21, 0, 2, 2);
+    TEST_ASSERT(result.fp_wb_enable &&
+                result.fp_wb_data == std::bit_cast<simrv::xlen::FloatingRegister>(1.5));
+
+    result = execute(0x7A, 0, 0, 0, UINT64_C(0x1234FFFE));
+    TEST_ASSERT(result.fp_wb_enable &&
+                result.fp_wb_data == (~simrv::xlen::FloatingRegister{0xFFFF} | UINT16_C(0xFFFE)));
+    fp[2] = ~simrv::xlen::FloatingRegister{0xFFFF} | UINT16_C(0xFFFE);
+    result = execute(0x72, 0, 2, 0);
+    TEST_ASSERT(result.int_wb_enable &&
+                result.int_wb_data == static_cast<simrv::xlen::Register>(-2));
+
+    simrv::core::Machine machine;
+    std::vector<simrv::xlen::Byte> ram(1024 * 1024, simrv::xlen::Byte{0});
+    machine.set_ram_for_testing(ram.data(), ram.size());
+    machine.memory().initialize_mmu();
+    auto& cpu = machine.primary_hart();
+    cpu.reset();
+    const auto address = simrv::xlen::VirtAddr{simrv::memory::kDramBaseAddress + 0x200};
+    simrv::memory::MemoryAccess::storeFp(machine.memory(), cpu, address, fp[2], Funct3::Fsh);
+    TEST_ASSERT(!cpu.active_context().pending_exception.has_value());
+    const auto loaded = simrv::memory::MemoryAccess::loadFp(machine.memory(), cpu, address,
+                                                            Funct3::Flh);
+    TEST_ASSERT(!cpu.active_context().pending_exception.has_value());
+    TEST_ASSERT(loaded == fp[2]);
+}
+
+void test_binary16_narrowing_rounding_and_flags() {
+    using simrv::isa::RoundingMode;
+    using simrv::isa::fp::to_binary16;
+    constexpr float kMidpoint = std::bit_cast<float>(UINT32_C(0x3F801000));
+
+    auto converted = to_binary16(kMidpoint, RoundingMode::Rne);
+    TEST_ASSERT(converted.bits == UINT16_C(0x3C00));
+    TEST_ASSERT(converted.flags == static_cast<simrv::xlen::CsrValue>(simrv::isa::FflagsBit::Nx));
+    converted = to_binary16(kMidpoint, RoundingMode::Rmm);
+    TEST_ASSERT(converted.bits == UINT16_C(0x3C01));
+    converted = to_binary16(kMidpoint, RoundingMode::Rup);
+    TEST_ASSERT(converted.bits == UINT16_C(0x3C01));
+    converted = to_binary16(kMidpoint, RoundingMode::Rdn);
+    TEST_ASSERT(converted.bits == UINT16_C(0x3C00));
+    converted = to_binary16(-kMidpoint, RoundingMode::Rdn);
+    TEST_ASSERT(converted.bits == UINT16_C(0xBC01));
+    converted = to_binary16(-kMidpoint, RoundingMode::Rup);
+    TEST_ASSERT(converted.bits == UINT16_C(0xBC00));
+
+    converted = to_binary16(std::ldexp(1.0F, -25), RoundingMode::Rne);
+    TEST_ASSERT(converted.bits == 0);
+    TEST_ASSERT((converted.flags & (simrv::isa::FflagsBit::Uf | simrv::isa::FflagsBit::Nx)) ==
+                (simrv::isa::FflagsBit::Uf | simrv::isa::FflagsBit::Nx));
+    converted = to_binary16(std::ldexp(1.0F, -25), RoundingMode::Rmm);
+    TEST_ASSERT(converted.bits == 1);
+
+    converted = to_binary16(65520.0F, RoundingMode::Rne);
+    TEST_ASSERT(converted.bits == UINT16_C(0x7C00));
+    TEST_ASSERT((converted.flags & (simrv::isa::FflagsBit::Of | simrv::isa::FflagsBit::Nx)) ==
+                (simrv::isa::FflagsBit::Of | simrv::isa::FflagsBit::Nx));
+    converted = to_binary16(65520.0F, RoundingMode::Rtz);
+    TEST_ASSERT(converted.bits == UINT16_C(0x7BFF));
+
+    const double half_midpoint = 1.00048828125;
+    const double next_double = std::nextafter(half_midpoint, INFINITY);
+    converted = to_binary16(next_double, RoundingMode::Rne);
+    TEST_ASSERT(converted.bits == UINT16_C(0x3C01));
+}
+
+void test_zvfhmin_vector_conversions() {
+    simrv::core::Machine machine;
+    auto& cpu = machine.primary_hart();
+    cpu.reset();
+    cpu.state().misa = simrv::isa::kMisaDefault;
+    cpu.state().mstatus |= simrv::core::MstatusBit::Fs;
+    cpu.state().vtype = 1U << 3U;  // SEW=16, LMUL=1.
+    cpu.state().vl = 1;
+    cpu.state().vstart = 0;
+    cpu.state().fcsr = 0;
+
+    constexpr auto vd = static_cast<simrv::xlen::RegId>(4);
+    constexpr auto vs2 = static_cast<simrv::xlen::RegId>(2);
+    const auto ir = [](simrv::xlen::RegId rd, simrv::xlen::RegId rs2) {
+        return static_cast<simrv::xlen::Instruction>(
+            (std::to_underlying(rd) << 7U) | (std::to_underlying(rs2) << 20U) | (1U << 25U));
+    };
+    auto& source = cpu.state().regs.read_vector(simrv::xlen::to_vec_reg_id(vs2));
+    auto& dest = cpu.state().regs.read_vector(simrv::xlen::to_vec_reg_id(vd));
+
+    source.u16[0] = UINT16_C(0x3C00);
+    simrv::execute::ExecuteUnit::execute_vector(
+        cpu, machine.memory(), simrv::isa::OperationId::VFWCVT_F_F_V, ir(vd, vs2));
+    TEST_ASSERT(!cpu.active_context().pending_exception.has_value());
+    TEST_ASSERT(dest.u32[0] == UINT32_C(0x3F800000));
+
+    source.u32[0] = UINT32_C(0x3F801000);
+    cpu.state().fcsr = 0;
+    simrv::execute::ExecuteUnit::execute_vector(
+        cpu, machine.memory(), simrv::isa::OperationId::VFNCVT_F_F_W, ir(vd, vs2));
+    TEST_ASSERT(!cpu.active_context().pending_exception.has_value());
+    TEST_ASSERT(dest.u16[0] == UINT16_C(0x3C00));
+    TEST_ASSERT((cpu.state().fcsr & simrv::isa::FflagsBit::Nx) != 0);
+
+    cpu.state().fcsr = simrv::isa::RoundingMode::Rmm << 5U;
+    simrv::execute::ExecuteUnit::execute_vector(
+        cpu, machine.memory(), simrv::isa::OperationId::VFNCVT_F_F_W, ir(vd, vs2));
+    TEST_ASSERT(dest.u16[0] == UINT16_C(0x3C01));
+
+    cpu.active_context().pending_exception.reset();
+    simrv::execute::ExecuteUnit::execute_vector(cpu, machine.memory(),
+                                                simrv::isa::OperationId::VFADD_VV, ir(vd, vs2));
+    TEST_ASSERT(cpu.active_context().pending_exception ==
+                simrv::isa::ExceptionCode::IllegalInstruction);
+}
+
+void test_zihintntl_encodings() {
+    // NTL.P1/PALL/S1/ALL are base ADD HINTs that software may use before a memory access.
+    for (uint32_t rs2 = 2; rs2 <= 5; ++rs2) {
+        const uint32_t ntl = (rs2 << 20U) | 0x33U;  // ADD x0, x0, x[rs2]
+        TEST_ASSERT(simrv::pipeline::decoder(ntl) == simrv::isa::OperationId::ADD);
+
+        // C.NTL variants are C.ADD x0, x[rs2] in quadrant 2, funct3=100.
+        const uint16_t compressed = static_cast<uint16_t>(0x9002U | (rs2 << 2U));
+        const auto expanded = simrv::pipeline::decompressInstruction(compressed, true);
+        TEST_ASSERT(simrv::pipeline::decoder(expanded) == simrv::isa::OperationId::ADD);
+        const simrv::pipeline::Decoder decoded(expanded);
+        TEST_ASSERT(decoded.rd() == simrv::xlen::RegId::Zero);
+        TEST_ASSERT(decoded.rs1() == simrv::xlen::RegId::Zero);
+        TEST_ASSERT(std::to_underlying(decoded.rs2()) == rs2);
+    }
 }
 
 void test_cmo_decoder_and_predicates() {
@@ -118,6 +515,101 @@ void test_svinval_decoder() {
     // sfence.inval.ir -> funct12=0x181, rs1=0, funct3=0, rd=0, opcode=0x73
     const uint32_t sfence_inval_ir_insn = (0x181U << 20U) | 0x73U;
     TEST_ASSERT(simrv::pipeline::decoder(sfence_inval_ir_insn) == OperationId::SFENCE_INVAL_IR);
+}
+
+void test_zcmop_noop_decompression() {
+    // RVA23 requires Zcmop. C.MOP.n encodings are no-ops unless an extension redefines them;
+    // in particular they must not be mistaken for C.LUI rd, 0, which clobbers rd.
+    constexpr std::array<uint16_t, 8> kCmop{
+        0x6081U, 0x6181U, 0x6281U, 0x6381U, 0x6481U, 0x6581U, 0x6681U, 0x6781U};
+    for (const uint16_t compressed : kCmop) {
+        const auto expanded = simrv::pipeline::decompressInstruction(compressed, true);
+        TEST_ASSERT(expanded == 0x00000013U);  // addi x0, x0, 0
+        TEST_ASSERT(simrv::pipeline::decoder(expanded) == simrv::isa::OperationId::ADDI);
+    }
+}
+
+void test_zimop_decoder() {
+    constexpr std::array<uint32_t, 40> kMopMatches{
+        0x81c04073U, 0x81d04073U, 0x81e04073U, 0x81f04073U, 0x85c04073U, 0x85d04073U,
+        0x85e04073U, 0x85f04073U, 0x89c04073U, 0x89d04073U, 0x89e04073U, 0x89f04073U,
+        0x8dc04073U, 0x8dd04073U, 0x8de04073U, 0x8df04073U, 0xc1c04073U, 0xc1d04073U,
+        0xc1e04073U, 0xc1f04073U, 0xc5c04073U, 0xc5d04073U, 0xc5e04073U, 0xc5f04073U,
+        0xc9c04073U, 0xc9d04073U, 0xc9e04073U, 0xc9f04073U, 0xcdc04073U, 0xcdd04073U,
+        0xcde04073U, 0xcdf04073U, 0x82004073U, 0x86004073U, 0x8a004073U, 0x8e004073U,
+        0xc2004073U, 0xc6004073U, 0xca004073U, 0xce004073U};
+    for (size_t index = 0; index < kMopMatches.size(); ++index) {
+        const uint32_t encoded = kMopMatches[index] | (17U << 7U) | (9U << 15U) |
+                                 (index >= 32 ? (23U << 20U) : 0U);
+        TEST_ASSERT(simrv::pipeline::decoder(encoded) == simrv::isa::OperationId::MOP);
+    }
+    // Keep reserved SYSTEM encodings illegal; Zimop only claims its defined MOP spaces.
+    TEST_ASSERT(simrv::pipeline::decoder(0x80004073U) == simrv::isa::OperationId::UNKNOWN);
+
+    simrv::pipeline::PipelineContext context{};
+    context.opcode = simrv::isa::Opcode::System;
+    context.op_id = simrv::isa::OperationId::MOP;
+    context.rd = static_cast<simrv::xlen::RegId>(7);
+    context.wb_data = 0;
+    const auto effects = simrv::pipeline::build_writeback_effects(context);
+    TEST_ASSERT(effects.integer_write.enabled);
+    TEST_ASSERT(effects.integer_write.destination == static_cast<simrv::xlen::RegId>(7));
+    TEST_ASSERT(effects.integer_write.value == 0);
+}
+
+void test_zcb_decompression() {
+    struct Encoding {
+        uint16_t match;
+        simrv::isa::OperationId operation;
+    };
+    constexpr std::array<Encoding, 12> kZcbInstructions{{
+        {0x8000U, simrv::isa::OperationId::LBU},  {0x8440U, simrv::isa::OperationId::LH},
+        {0x8400U, simrv::isa::OperationId::LHU},  {0x9c41U, simrv::isa::OperationId::MUL},
+        {0x9c75U, simrv::isa::OperationId::XORI}, {0x8800U, simrv::isa::OperationId::SB},
+        {0x9c65U, simrv::isa::OperationId::SEXT_B},
+        {0x9c6dU, simrv::isa::OperationId::SEXT_H},
+        {0x8c00U, simrv::isa::OperationId::SH},   {0x9c61U, simrv::isa::OperationId::ANDI},
+        {0x9c69U, simrv::isa::OperationId::PACK}, {0x9c71U, simrv::isa::OperationId::ADD_UW},
+    }};
+    for (const auto& encoding : kZcbInstructions) {
+        // Select x9 for rd'/rs1' and x10 for rs2'; immediate bits are checked below
+        // on the byte/halfword memory encodings.
+        uint16_t compressed = encoding.match | (1U << 7U);
+        if (encoding.match == 0x8000U || encoding.match == 0x8440U ||
+            encoding.match == 0x8400U || encoding.match == 0x8800U ||
+            encoding.match == 0x8c00U || encoding.match == 0x9c41U) {
+            compressed |= 2U << 2U;
+        }
+        if (encoding.match == 0x8000U || encoding.match == 0x8800U) {
+            compressed |= (1U << 5U) | (1U << 6U);
+        } else if (encoding.match == 0x8440U || encoding.match == 0x8400U ||
+                   encoding.match == 0x8c00U) {
+            compressed |= 1U << 5U;
+        }
+        const auto expanded = simrv::pipeline::decompressInstruction(compressed, true);
+        const auto decoded_operation = simrv::pipeline::decoder(expanded);
+        if (decoded_operation != encoding.operation) {
+            std::cerr << "Zcb encoding " << encoding.match << " expanded to " << expanded
+                      << " and decoded as " << simrv::pipeline::operation_name(decoded_operation)
+                      << std::endl;
+        }
+        TEST_ASSERT(decoded_operation == encoding.operation);
+        const simrv::pipeline::Decoder decoded(expanded);
+        if (encoding.match == 0x8000U) {
+            TEST_ASSERT(decoded.imm_i() == 3);
+        }
+        if (encoding.match == 0x8800U) TEST_ASSERT(decoded.imm_s() == 3);
+        if (encoding.match == 0x8440U || encoding.match == 0x8400U) {
+            TEST_ASSERT(decoded.imm_i() == 2);
+        }
+        if (encoding.match == 0x8c00U) {
+            TEST_ASSERT(decoded.imm_s() == 2);
+        }
+    }
+
+    // ZCB's C.ZEXT.W encoding is only defined for RV64.
+    const auto rv32_zextw = simrv::pipeline::decompressInstruction(0x9c71U, false);
+    TEST_ASSERT(rv32_zextw == 0U);
 }
 
 void test_cbo_zero_execution() {
@@ -190,6 +682,37 @@ void test_profile_engine() {
 }  // namespace
 
 int main() {
+    std::cout << "[RUN] test_zihintntl_encodings" << std::endl;
+    test_zihintntl_encodings();
+    std::cout << "[PASS] test_zihintntl_encodings" << std::endl;
+
+    std::cout << "[RUN] test_zicclsm_unaligned_main_memory" << std::endl;
+    test_zicclsm_unaligned_main_memory();
+    std::cout << "[PASS] test_zicclsm_unaligned_main_memory" << std::endl;
+
+    std::cout << "[RUN] test_za64rs_reservation_set" << std::endl;
+    test_za64rs_reservation_set();
+    std::cout << "[PASS] test_za64rs_reservation_set" << std::endl;
+    std::cout << "[RUN] test_ziccamoa_main_memory_atomics" << std::endl;
+    test_ziccamoa_main_memory_atomics();
+    std::cout << "[PASS] test_ziccamoa_main_memory_atomics" << std::endl;
+    std::cout << "[RUN] test_zfa_scalar_instructions" << std::endl;
+    test_zfa_scalar_instructions();
+    std::cout << "[PASS] test_zfa_scalar_instructions" << std::endl;
+    std::cout << "[RUN] test_zfhmin_scalar_instructions" << std::endl;
+    test_zfhmin_scalar_instructions();
+    std::cout << "[PASS] test_zfhmin_scalar_instructions" << std::endl;
+    std::cout << "[RUN] test_binary16_narrowing_rounding_and_flags" << std::endl;
+    test_binary16_narrowing_rounding_and_flags();
+    std::cout << "[PASS] test_binary16_narrowing_rounding_and_flags" << std::endl;
+    std::cout << "[RUN] test_zvfhmin_vector_conversions" << std::endl;
+    test_zvfhmin_vector_conversions();
+    std::cout << "[PASS] test_zvfhmin_vector_conversions" << std::endl;
+
+    std::cout << "[RUN] test_zic64b_cache_geometry" << std::endl;
+    test_zic64b_cache_geometry();
+    std::cout << "[PASS] test_zic64b_cache_geometry" << std::endl;
+
     std::cout << "[RUN] test_zicond_semantics" << std::endl;
     test_zicond_semantics();
     std::cout << "[PASS] test_zicond_semantics" << std::endl;
@@ -201,6 +724,18 @@ int main() {
     std::cout << "[RUN] test_svinval_decoder" << std::endl;
     test_svinval_decoder();
     std::cout << "[PASS] test_svinval_decoder" << std::endl;
+
+    std::cout << "[RUN] test_zcmop_noop_decompression" << std::endl;
+    test_zcmop_noop_decompression();
+    std::cout << "[PASS] test_zcmop_noop_decompression" << std::endl;
+
+    std::cout << "[RUN] test_zimop_decoder" << std::endl;
+    test_zimop_decoder();
+    std::cout << "[PASS] test_zimop_decoder" << std::endl;
+
+    std::cout << "[RUN] test_zcb_decompression" << std::endl;
+    test_zcb_decompression();
+    std::cout << "[PASS] test_zcb_decompression" << std::endl;
 
     std::cout << "[RUN] test_cbo_zero_execution" << std::endl;
     test_cbo_zero_execution();

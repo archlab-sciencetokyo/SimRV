@@ -1091,7 +1091,7 @@ void test_machine_reset_clears_coherence_state_after_cache_reset() {
     machine.cpu.machine_ = &machine;
     machine.memory().initialize_mmu();
 
-    constexpr simrv::xlen::Address line = simrv::memory::kDramBaseAddress + 0x2a0;
+    constexpr simrv::xlen::Address line = simrv::memory::kDramBaseAddress + 0x280;
     constexpr uint32_t value = 0x76543210;
     auto& bus = machine.memory().system_bus();
     simrv::memory::TlChannelA acquire{};
@@ -1108,7 +1108,7 @@ void test_machine_reset_clears_coherence_state_after_cache_reset() {
     machine.cpu.dcache.insert(line, data.data(), simrv::memory::MesiState::Exclusive);
     check(machine.cpu.dcache.write(line, value, 2));
     bus.mark_modified(line, 0);
-    std::memcpy(ram.data() + 0x2a0, &value, sizeof(value));
+    std::memcpy(ram.data() + 0x280, &value, sizeof(value));
     check(bus.coherence_hub().get_directory_state(line).state ==
           simrv::memory::MesiState::Modified);
 
@@ -1117,7 +1117,7 @@ void test_machine_reset_clears_coherence_state_after_cache_reset() {
     check(machine.cpu.dcache.line_state(line) == simrv::memory::MesiState::Invalid);
     check(bus.coherence_hub().get_directory_state(line).state == simrv::memory::MesiState::Invalid);
     uint32_t backing_value = 0;
-    std::memcpy(&backing_value, ram.data() + 0x2a0, sizeof(backing_value));
+    std::memcpy(&backing_value, ram.data() + 0x280, sizeof(backing_value));
     check(backing_value == value);
     std::cout << "[PASS] test_machine_reset_clears_coherence_state_after_cache_reset\n";
 }
@@ -1166,7 +1166,7 @@ void test_cross_line_dma_write_invalidates_only_touched_lines() {
           simrv::memory::MesiState::Invalid);
     check(machine.cpu.dcache.line_state(first_line + 2 * simrv::memory::CoherenceHub::kLineBytes) ==
           simrv::memory::MesiState::Exclusive);
-    check(std::memcmp(ram.data() + 0x31c, replacement.data(), replacement.size()) == 0);
+    check(std::memcmp(ram.data() + 0x33c, replacement.data(), replacement.size()) == 0);
 
     const std::array<simrv::xlen::Byte, 8> out_of_range{};
     const auto final_bytes = ram.size() - 4;
@@ -1397,7 +1397,7 @@ void test_global_cycle_smp_pipeline_ordering() {
     const auto first = run();
     const auto second = run();
     check(first == second);
-    constexpr std::array<uint32_t, 2> expected = std::array<uint32_t, 2>{10, 11};
+    constexpr std::array<uint32_t, 2> expected = std::array<uint32_t, 2>{14, 15};
     if (first != expected) {
         std::cerr << "unexpected SMP retirement cycles: " << first[0] << ", " << first[1] << '\n';
     }
@@ -2050,12 +2050,12 @@ void test_cycle_kernel_golden_data_refill() {
     const auto three_cycles = run(simrv::pipeline::PipelineType::ThreeStage);
     // The interconnect owns refill timing. A cache hit completes in its memory stage, so the
     // configured one-cycle hit latency does not add a second pipeline delay.
-    if (five_cycles != 12 || three_cycles != 10) {
+    if (five_cycles != 16 || three_cycles != 14) {
         std::cerr << "unexpected data-refill cycles: " << five_cycles << ", " << three_cycles
                   << '\n';
     }
-    check(five_cycles == 12);
-    check(three_cycles == 10);
+    check(five_cycles == 16);
+    check(three_cycles == 14);
     std::cout << "[PASS] test_cycle_kernel_golden_data_refill\n";
 }
 
@@ -2304,8 +2304,8 @@ void test_cycle_kernel_golden_instruction_refill() {
 
     const auto five_stage = run(simrv::pipeline::PipelineType::FiveStage);
     const auto three_stage = run(simrv::pipeline::PipelineType::ThreeStage);
-    constexpr auto expected_five = 10u;
-    constexpr auto expected_three = 8u;
+    constexpr auto expected_five = 14u;
+    constexpr auto expected_three = 12u;
     if (five_stage != expected_five || three_stage != expected_three) {
         std::cerr << "unexpected coherent refill cycles: " << five_stage << ", " << three_stage
                   << '\n';

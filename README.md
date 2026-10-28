@@ -92,8 +92,10 @@ Launch `simrv` normally (or pass `--tui`) to explore an image with the interacti
 
 ### Host platform
 
-SimRV currently supports x86-64 Linux hosts. On Windows, use WSL2 with a supported Linux
-distribution; native Windows builds are not currently supported.
+Release packages target x86-64 Linux. Native macOS source builds have been compiled and smoke-tested
+on macOS 26 for both Apple silicon and Intel; macOS packages are not published yet, and host TAP
+networking and VirtIO-FS directory sharing are Linux-only. On Windows, use WSL2 with a supported
+Linux distribution; native Windows builds are not currently supported.
 
 ### Prerequisites
 

@@ -111,6 +111,7 @@ enum class MipBit : simrv::xlen::CsrValue {
     Seip = (1u << 9),
     Heip = (1u << 10),
     Meip = (1u << 11),
+    Lcofip = (1u << 13),
 };
 
 constexpr auto operator|(MipBit lhs, MipBit rhs) noexcept -> simrv::xlen::CsrValue {
@@ -179,7 +180,7 @@ constexpr auto operator!=(MipBit lhs, I rhs) noexcept -> bool {
 constexpr auto interrupt_implemented_mask(bool has_s) -> simrv::xlen::CsrValue {
     simrv::xlen::CsrValue mask = MipBit::Msip | MipBit::Mtip | MipBit::Meip;
     if (has_s) {
-        mask |= MipBit::Ssip | MipBit::Stip | MipBit::Seip;
+        mask |= MipBit::Ssip | MipBit::Stip | MipBit::Seip | MipBit::Lcofip;
     }
     return mask;
 }
@@ -191,12 +192,12 @@ constexpr auto interrupt_implemented_mask(bool has_s) -> simrv::xlen::CsrValue {
  * Sstc, M-mode may post SSIP, STIP, and the software component of SEIP.
  */
 constexpr auto mip_writable_mask(bool has_s) -> simrv::xlen::CsrValue {
-    return has_s ? (MipBit::Ssip | MipBit::Stip | MipBit::Seip) : 0;
+    return has_s ? (MipBit::Ssip | MipBit::Stip | MipBit::Seip | MipBit::Lcofip) : 0;
 }
 
 /** Supervisor interrupt delegation bits implemented by this platform. */
 constexpr auto mideleg_writable_mask(bool has_s) -> simrv::xlen::CsrValue {
-    return has_s ? (MipBit::Ssip | MipBit::Stip | MipBit::Seip) : 0;
+    return has_s ? (MipBit::Ssip | MipBit::Stip | MipBit::Seip | MipBit::Lcofip) : 0;
 }
 
 /**
@@ -610,6 +611,7 @@ enum class Csr : uint16_t {
     Sip = 0x144,
     Stimecmp = 0x14D,
     Stimecmph = 0x15D,
+    Scountovf = 0xDA0,
     Satp = 0x180,
     Mvendorid = 0xF11,
     Marchid = 0xF12,

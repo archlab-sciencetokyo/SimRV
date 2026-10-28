@@ -19,12 +19,13 @@ auto SmpTopologyConfig::validate() const -> std::expected<void, std::string> {
         if (!cache.enabled) return {};
         if (cache.capacity_bytes < cache.line_bytes * cache.associativity ||
             !std::has_single_bit(cache.capacity_bytes) ||
-            !std::has_single_bit(cache.associativity) || cache.line_bytes != 32 ||
+            !std::has_single_bit(cache.associativity) ||
+            (cache.line_bytes != 32 && cache.line_bytes != 64) ||
             cache.associativity > max_ways || cache.capacity_bytes > max_capacity ||
             !std::has_single_bit(cache.capacity_bytes / (cache.line_bytes * cache.associativity)) ||
             cache.capacity_bytes % (cache.line_bytes * cache.associativity) != 0) {
             return std::unexpected(std::format(
-                "{} cache geometry must use 32-byte lines, power-of-two sets/ways, and fit "
+                "{} cache geometry must use 32- or 64-byte lines, power-of-two sets/ways, and fit "
                 "within {} bytes",
                 name, max_capacity));
         }

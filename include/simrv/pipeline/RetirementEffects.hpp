@@ -43,6 +43,9 @@ struct WritebackEffects {
         (opcode == isa::Opcode::Amo && funct5 != isa::Funct5Amo::Sc)) {
         integer.value = context.mem_rdata;
         integer.enabled = true;
+    } else if (opcode == isa::Opcode::System && context.op_id == isa::OperationId::MOP) {
+        integer.value = context.wb_data;
+        integer.enabled = true;
     } else if (opcode == isa::Opcode::System && funct3 != isa::Funct3::Priv) {
         integer.value = context.rcsr;
         integer.enabled = true;

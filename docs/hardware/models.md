@@ -75,7 +75,7 @@ harts = 0, 1
 l2_enabled = true
 l2_capacity_bytes = 65536
 l2_associativity = 4
-l2_line_bytes = 32
+l2_line_bytes = 64
 l2_hit_latency = 8
 l2_miss_latency = 12
 
@@ -89,13 +89,13 @@ l2_associativity = 4
 enabled = true
 capacity_bytes = 524288
 associativity = 16
-line_bytes = 32
+line_bytes = 64
 hit_latency = 1
 miss_latency = 1
 ```
 
 Each hart has a private instruction and data L1. L2 is optional and shared by harts in the same
-cluster; L3 is an optional global shared cache. Cache geometry uses 32-byte coherent lines and
+cluster; L3 is an optional global shared cache. Cache geometry uses 64-byte coherent lines and
 power-of-two set and way counts. The current model uses one CPU model across all harts.
 
 The `single-threaded` mode advances harts and shared devices in deterministic global-cycle order.
@@ -349,7 +349,7 @@ response_latency = 1
 | :--- | :--- | :--- | :--- |
 | `capacity_bytes` | uint | `4096` | Total cache capacity in bytes (e.g. `16384` for 16 KiB). |
 | `associativity` | uint | `1` | Cache set associativity (`1` for direct-mapped, `2`, `4`, etc.). |
-| `line_bytes` | uint | `32` | Cache line width in bytes (must match bus width, standard 32 bytes). |
+| `line_bytes` | uint | `64` | Cache block width in bytes (RVA23 requires 64-byte blocks). |
 | `hit_latency` | uint | `1` | Cache access latency on hit in clock cycles. |
 | `miss_latency` | uint | `10` | Penalty added on cache miss during line fill request. |
 

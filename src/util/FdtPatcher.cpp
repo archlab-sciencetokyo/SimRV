@@ -229,20 +229,44 @@ auto patch_fdt(std::span<const uint8_t> blob, uint64_t dram_base, uint64_t dram_
                 set_prop(*c, "clock-frequency", std::move(clk_data));
             }
             std::vector<uint8_t> cbom_sz;
-            put32(cbom_sz, 32);
+            put32(cbom_sz, 64);
             set_prop(*c, "riscv,cbom-block-size", cbom_sz);
+            std::vector<uint8_t> cbop_sz;
+            put32(cbop_sz, 64);
+            set_prop(*c, "riscv,cbop-block-size", std::move(cbop_sz));
             std::vector<uint8_t> cboz_sz;
-            put32(cboz_sz, 32);
+            put32(cboz_sz, 64);
             set_prop(*c, "riscv,cboz-block-size", std::move(cboz_sz));
             auto* isa_ext_prop = prop(*c, "riscv,isa-extensions");
-            if (isa_ext_prop != nullptr && !isa_ext_prop->data.empty()) {
-                const std::string_view raw(reinterpret_cast<const char*>(isa_ext_prop->data.data()),
-                                           isa_ext_prop->data.size());
-                if (raw.find("zicond") == std::string_view::npos) {
-                    static constexpr std::string_view kRva23Exts[] = {
-                        "zicond",  "zicboz", "zicbom",  "zicbop",
-                        "svinval", "svpbmt", "svnapot", "sstc"};
-                    for (const auto ext : kRva23Exts) {
+            if (isa_ext_prop == nullptr) {
+                set_prop(*c, "riscv,isa-extensions", {});
+                isa_ext_prop = prop(*c, "riscv,isa-extensions");
+            }
+            if (isa_ext_prop != nullptr) {
+                // Advertise only supported additions; this is not the complete RVA23 set.
+                static constexpr std::string_view kSupportedGuestExts[] = {
+                    "zihintntl", "zic64b", "zicclsm", "za64rs", "ziccamoa", "zfhmin",
+                    "zvfhmin", "zfa", "zicond", "zicboz",
+                    "zicbom",    "zicbop", "svinval", "svpbmt", "svnapot", "sstc",
+                    "sscofpmf"};
+                for (const auto ext : kSupportedGuestExts) {
+                    bool present = false;
+                    size_t offset = 0;
+                    while (offset < isa_ext_prop->data.size()) {
+                        const auto remaining = isa_ext_prop->data.size() - offset;
+                        const auto* token = isa_ext_prop->data.data() + offset;
+                        const auto* terminator =
+                            static_cast<const uint8_t*>(std::memchr(token, 0, remaining));
+                        if (terminator == nullptr) break;
+                        const auto length = static_cast<size_t>(terminator - token);
+                        const auto* begin = reinterpret_cast<const char*>(token);
+                        if (std::string_view(begin, length) == ext) {
+                            present = true;
+                            break;
+                        }
+                        offset += length + 1;
+                    }
+                    if (!present) {
                         isa_ext_prop->data.insert(isa_ext_prop->data.end(), ext.begin(), ext.end());
                         isa_ext_prop->data.push_back('\0');
                     }

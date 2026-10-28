@@ -2,20 +2,50 @@
 
 SimRV targets the ratified RISC-V **RVA23 Profile** (`rva23s64` and `rva23u64`) as its primary 64-bit architectural profile. RVA23 is the project's primary ISA target; RV32 and narrower compatibility presets are also supported for dual-width validation and workloads. This is an implementation and verification target, not a claim of formal RISC-V International architectural certification. A release is considered verified only for behavior covered by the checked-in semantic tests, the Architectural Compatibility Test (ACT) test suite, the configured `riscv-tests` suites, vector tests, and Spike lockstep workloads run by the release gates.
 
+**The current implementation is not yet a complete RVA23S64 implementation.** Selecting the
+`rva23s64` profile names the intended target; it does not imply that every mandatory profile
+extension is implemented or advertised. In particular, the augmented hypervisor extension (Sha),
+pointer masking, and several scalar and vector extensions are not yet complete. The matrix below
+records implemented areas and the qualification gaps; full
+RVA23 remains the goal.
+
+CPU and SoC presets that do not implement Zic64b are outside Zic64b-specific checks; their
+configuration files remain unchanged. The RVA23 target uses 64-byte cache blocks
+throughout the coherent cache path and reports 64-byte CMO blocks. Runtime support for each
+preset's configured cache-line geometry remains a separate platform requirement.
+
 ## Architectural scope
 
 | Area | Implemented scope | Verification evidence |
 | --- | --- | --- |
-| Standard profiles | RVA23 (`rva23s64` default, `rva23u64`); RV32 compatibility profiles | RVA23 profile test suites and ACT test gate; RV32 ISA gates |
+| Standard profiles | RVA23S64 is the intended target; mandatory-extension coverage remains incomplete | Focused tests for selected RVA23 features; these are not a full profile-conformance result |
 | Base ISA | RV32I and RV64I | RV32/RV64 ISA gates, ACT suite, and Spike lockstep |
 | General-purpose extensions | M, A, F, D, C; see FP qualification note below | ISA gates, focused semantic tests, ACT suite, lockstep |
 | Bit manipulation | Zba, Zbb, Zbc, Zbs (`Zb*`) | Bitmanip ISA tests, ACT suite, and lockstep |
 | Conditional operations | Zicond (`czero.eqz`, `czero.nez`) | Core semantic, RVA23 profile gates, and ACT suite |
+| Compressed may-be-operations | Zcmop `C.MOP.n` encodings decode as architectural no-ops | RVA23 profile unit tests |
+| May-be-operations | Zimop MOP.R and MOP.RR encodings write zero to `rd` | RVA23 profile unit tests |
+| Additional compressed integer | Zcb's byte/halfword loads and stores, multiply, and bit-manipulation instructions | RVA23 compressed decode tests |
+| Non-temporal locality hints | Zihintntl NTL.P1/PALL/S1/ALL and C.NTL variants decode as ignorable HINTs | RVA23 hint-encoding tests |
 | Cache management | CMO (`cbo.clean`, `cbo.flush`, `cbo.inval`, `cbo.zero`, `prefetch.*`) | Core semantic, RVA23 profile gates, and ACT suite |
+| Cache-block size | Zic64b: 64-byte naturally aligned blocks across L1/L2/L3, coherence, and CMO; FDT advertises Zic64b and all CMO block sizes | Cache geometry, CMO, and FDT regression tests |
+| Misaligned main-memory accesses | Zicclsm loads and stores, including accesses spanning cache-block and page boundaries; FDT advertises Zicclsm | RVA23 main-memory alignment and FDT tests |
+| Reservation-set size | Za64rs uses naturally aligned 64-byte reservation sets; FDT advertises Za64rs | RVA23 reservation-set and FDT tests |
+| Main-memory AMOs | Ziccamoa: all Zaamo arithmetic and logical AMOs on main memory; FDT advertises Ziccamoa | RVA23 AMO integration tests across word and doubleword widths |
+| Minimal half precision | Zfhmin transfers, moves, and binary16 conversions; Zvfhmin widening/narrowing vector conversions at SEW=16; FDT advertises both | RVA23 scalar conversion, vector conversion, and FDT tests |
+| Additional scalar FP | Zfa RV64 instructions: FLI.S/D, FMINM/FMAXM, FLEQ/FLTQ, FROUND/FROUNDNX, and FCVTMOD.W.D; FDT advertises Zfa | RVA23 instruction decode, semantics, flags, and FDT tests |
 | TLB invalidation | Svinval (`sinval.vma`, `sfence.w.inval`, `sfence.inval.ir`) | Core semantic, RVA23 profile gates, and ACT suite |
 | Vector | Implemented subset of RISC-V Vector 1.0 (`V`), configurable VLEN | Vector regression suite and lockstep |
 | Privilege | M/S/U execution, traps, interrupts, and CSR access (Privileged ISA 1.13) | Core semantic, ACT suite, and Linux boot gates |
 | Address translation | Sv32 for RV32; Sv39 for RV64 with Page Directory Cache | MMU tests and Linux boot gates |
+
+RVA23S64 includes every RVA23U64 mandatory extension, plus Zifencei and the privileged
+requirements defined by RVA23S64. Those include Svnapot, Sstc, Sscofpmf, Ssnpm, Ssu64xl, and Sha
+(H plus the required state-enable, counter-enable, guest trap-value, and guest translation
+features). SimRV does not currently implement all of these requirements. The existing profile test
+name and default-profile selection are not evidence that this list is complete. See the [RVA23
+profile specification](https://github.com/riscv/riscv-profiles/blob/main/src/rva23-profile.adoc)
+for the normative mandatory-extension list.
 
 `G` includes I, M, A, F, D, Zicsr, and Zifencei. The `Zb` and `V` extensions above are additional
 extensions; they are not implied by `G`. MISA contains the single-letter extension bits only and
@@ -25,7 +55,7 @@ The `--isa gc` preset selects G plus C and does not implicitly enable B or V. Si
 extension preset is `gcv` (or `gc` for profiles without vector); RVA23 profile selection is the
 primary way to request the project's target architecture. XLEN-qualified forms
 such as `rv64gcv` and `rv64gc` are standard. Ratified Bitmanip sub-extensions (`zba`, `zbb`, `zbc`, `zbs`)
-are appended canonically (e.g. `rv64gcv_zba_zbb_zbc_zbs` or `rv64gc_zba_zbb_zbc_zbs`). Legacy draft shorthands such as `gcbv` and `rv64gcbv`
+are appended canonically (e.g. `rv64gcv_zba_zbb_zbc_zbs` or `rv64gc_zba_zbb_zbc_zbs`). Historical draft shorthands such as `gcbv` and `rv64gcbv`
 are rejected with diagnostic guidance. Naming the preset explicitly does not override the vector qualification limits below.
 
 For Vector 1.0, `vlenb` reflects the configured VLEN, `vstart` has enough writable bits for the
@@ -44,6 +74,20 @@ SimRV verifies its default 64-bit profile (`rva23s64`) against the RISC-V Archit
 - **Continuous Integration**: The `rva23-act` suite is registered as a required verification gate in release evidence generation and verified across dual-width CI runs.
 
 ## Known qualification gaps
+
+- Full RVA23S64 is not yet qualified. The following mandatory requirements remain incomplete or
+  need profile-level qualification:
+  - Unprivileged extensions: Zkt, Zvbb, Zvkt, Zawrs, and Supm.
+  - Memory requirements: the Ziccif and Ziccrse main-memory PMA guarantees.
+  - Supervisor profile requirements: Ssnpm pointer masking, Sscofpmf, Ssu64xl, and the augmented
+    hypervisor architecture Sha, including H, Ssstateen, and its required guest state and
+    translation behavior.
+
+
+  This list is a starting qualification checklist, not a claim that every other mandatory item
+  has passed conformance testing. See the [normative RVA23 profile specification](https://github.com/riscv/riscv-profiles/blob/main/src/rva23-profile.adoc)
+  and its mandatory requirements when closing each item. FDT advertisements describe SimRV's
+  present capabilities and must not be read as a declaration of complete RVA23 conformance.
 
 - Scalar and vector floating-point use the host floating-point environment for RNE, RTZ, RDN, and
   RUP. The architectural RMM (nearest, ties to maximum magnitude) mode currently falls back to host

@@ -1102,14 +1102,17 @@ void ExecuteUnitVector::execute_vector(core::CPU& cpu, memory::MemorySubsystem& 
     if (is_vector_fp(op_id)) {
         const bool has_f = isa::misa_has_extension(cpu.state().misa, isa::IsaExtension::F);
         const bool has_d = isa::misa_has_extension(cpu.state().misa, isa::IsaExtension::D);
+        const bool zvfhmin_conversion =
+            op_id == isa::OperationId::VFWCVT_F_F_V ||
+            op_id == isa::OperationId::VFNCVT_F_F_W;
         const bool scalar_fp_enabled =
             (sew == 32 && has_f && (!uses_wide_fp_element(op_id) || has_d)) ||
-            (sew == 64 && has_f && has_d);
+            (sew == 64 && has_f && has_d) || (sew == 16 && has_f && zvfhmin_conversion);
         const bool fs_enabled = (cpu.state().mstatus & core::MstatusBit::Fs) != 0;
         const isa::RoundingMode frm = isa::frm_rounding_mode(cpu.state().fcsr);
         if (!scalar_fp_enabled || !fs_enabled ||
             (is_vector_fp_arithmetic(op_id) && !isa::is_valid_rounding_mode(frm))) {
-            // SEW=16 vector FP belongs to Zvfh, which SimRV does not advertise.
+            // SEW=16 vector FP is limited to the two conversions in Zvfhmin.
             cpu.active_context().pending_exception = ExceptionCode::IllegalInstruction;
             cpu.active_context().pending_tval = ir;
             return;

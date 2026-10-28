@@ -25,7 +25,13 @@ void CPU::run_writeback_stage(Machine& machine) { writeback_registers(machine); 
 
 void CPU::writeback_registers(Machine& machine) {
     const auto effects = pipeline::build_writeback_effects(active_context());
-    e_icount += effects.increments_instruction_count;
+    account_retirement(effects.increments_instruction_count);
+    if (effects.increments_instruction_count != 0) {
+        record_hpm_event(HpmEvent::Instructions, effects.increments_instruction_count);
+        record_hpm_instruction_classes(active_context().op_id,
+                                       static_cast<Opcode>(active_context().opcode),
+                                       active_context().cinsn != 0);
+    }
     if (simrv::compiler::unlikely(machine.instruction_mix_enabled()) &&
         effects.increments_instruction_count != 0) {
         const auto op = active_context().op_id;
@@ -72,7 +78,7 @@ void CPU::commit_control_flow_and_traps([[maybe_unused]] Machine& machine) {
     const auto opcode = static_cast<Opcode>(ctx.opcode);
     const auto funct3 = static_cast<Funct3>(ctx.funct3);
 
-    if (!ctx.pending_exception.has_value() && opcode == Opcode::System) {
+    if (!ctx.pending_exception.has_value() && opcode == Opcode::System && ctx.op_id != MOP) {
         if (funct3 == Funct3::Priv) {
             switch (static_cast<Funct12Priv>(ctx.funct12)) {
                 case Funct12Priv::Uret: {

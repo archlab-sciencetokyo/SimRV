@@ -50,7 +50,7 @@
             reg = <0>;
             riscv,isa = "rv32imafdcbv";
             riscv,isa-base = "rv32i";
-            riscv,isa-extensions = "i", "m", "a", "f", "d", "c", "b", "v", "zicntr", "zicsr", "zifencei", "zihintpause";
+            riscv,isa-extensions = "i", "m", "a", "f", "d", "c", "b", "v", "zicntr", "zihpm", "zicsr", "zifencei", "zihintpause", "sscofpmf";
             mmu-type = "riscv,sv32";
             clock-frequency = <160000000>;
 
@@ -62,6 +62,39 @@
             };
         };
     };
+
+    // BEGIN GENERATED SIMRV HPM CATALOG
+    pmu {
+        compatible = "riscv,pmu";
+        /* Generic mappings are defined in HpmEventCatalog.def. */
+        riscv,event-to-mhpmevent =
+            <0x00006 0x00000000 0x00000009>;
+        riscv,event-to-mhpmcounters =
+            <0x00006 0x00006 0xfffffff8>;
+        /* Raw selector IDs map one-to-one to HPM counters 3..31. */
+        riscv,raw-event-to-mhpmcounters =
+            <0x00000000 0x00000001 0xffffffff 0xffffffff 0xfffffff8>,
+            <0x00000000 0x00000002 0xffffffff 0xffffffff 0xfffffff8>,
+            <0x00000000 0x00000003 0xffffffff 0xffffffff 0xfffffff8>,
+            <0x00000000 0x00000004 0xffffffff 0xffffffff 0xfffffff8>,
+            <0x00000000 0x00000005 0xffffffff 0xffffffff 0xfffffff8>,
+            <0x00000000 0x00000006 0xffffffff 0xffffffff 0xfffffff8>,
+            <0x00000000 0x00000007 0xffffffff 0xffffffff 0xfffffff8>,
+            <0x00000000 0x00000008 0xffffffff 0xffffffff 0xfffffff8>,
+            <0x00000000 0x00000009 0xffffffff 0xffffffff 0xfffffff8>,
+            <0x00000000 0x0000000a 0xffffffff 0xffffffff 0xfffffff8>,
+            <0x00000000 0x0000000b 0xffffffff 0xffffffff 0xfffffff8>,
+            <0x00000000 0x0000000c 0xffffffff 0xffffffff 0xfffffff8>,
+            <0x00000000 0x0000000d 0xffffffff 0xffffffff 0xfffffff8>,
+            <0x00000000 0x0000000e 0xffffffff 0xffffffff 0xfffffff8>,
+            <0x00000000 0x0000000f 0xffffffff 0xffffffff 0xfffffff8>,
+            <0x00000000 0x00000010 0xffffffff 0xffffffff 0xfffffff8>,
+            <0x00000000 0x00000011 0xffffffff 0xffffffff 0xfffffff8>,
+            <0x00000000 0x00000012 0xffffffff 0xffffffff 0xfffffff8>,
+            <0x00000000 0x00000013 0xffffffff 0xffffffff 0xfffffff8>,
+            <0x00000000 0x00000014 0xffffffff 0xffffffff 0xfffffff8>;
+    };
+    // END GENERATED SIMRV HPM CATALOG
 
     soc {
         #address-cells = <1>;

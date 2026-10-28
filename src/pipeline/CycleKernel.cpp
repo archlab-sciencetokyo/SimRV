@@ -448,6 +448,7 @@ void CPU::run_ca_pipeline_cycle(Machine& machine) {
                     const bool mispredict = dir_mispredict || target_mispredict;
 
                     if (mispredict) {
+                        record_hpm_event(HpmEvent::BranchMispredict);
                         branch_predictor.restore_speculation(execute->prediction);
                         flush_to(target);
                     }
@@ -533,6 +534,7 @@ void CPU::run_ca_pipeline_cycle(Machine& machine) {
                         const bool mispredict = dir_mispredict || target_mispredict;
 
                         if (mispredict) {
+                            record_hpm_event(HpmEvent::BranchMispredict);
                             branch_predictor.restore_speculation(decode->prediction);
                             // The resolving instruction itself occupies the combined ID/EX stage.
                             // Only the younger fetch-stage instruction is squashed.

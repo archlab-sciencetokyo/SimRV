@@ -1425,6 +1425,8 @@ SIMRV_ALWAYS_INLINE auto CPU::run_fast_baremetal_kernel(Machine& machine, uint32
 
                         const auto advance_sequential = [&]()
                                                             __attribute__((always_inline)) -> bool {
+                            record_hpm_instruction_classes(chained->op_id, chained->opcode(),
+                                                            chained->cinsn != 0);
                             next_pc += chained->op_len;
                             ++b;
                             if (simrv::compiler::unlikely(b >= batch_size)) {
@@ -1480,6 +1482,8 @@ SIMRV_ALWAYS_INLINE auto CPU::run_fast_baremetal_kernel(Machine& machine, uint32
                                 target_pc = static_cast<simrv::xlen::Register>(
                                     static_cast<int64_t>(static_cast<int32_t>(target_pc)));
                             }
+                            record_hpm_instruction_classes(chained->op_id, chained->opcode(),
+                                                            chained->cinsn != 0);
                             ++b;
                             commit_linear_segment(chained->cpc.raw() + chained->op_len);
                             next_pc = target_pc;
@@ -2237,7 +2241,9 @@ SIMRV_ALWAYS_INLINE auto CPU::run_fast_baremetal_kernel(Machine& machine, uint32
                         state_.pc = next_pc;
                         const uint32_t ops_executed = b - start_b;
                         cached_ops += ops_executed;
-                        e_icount += ops_executed;
+                        account_retirement(ops_executed);
+                        record_hpm_event(HpmEvent::Instructions, ops_executed);
+                        record_hpm_event(HpmEvent::Cycles, ops_executed);
                         e_ccount += compressed_count;
                         if (fallback_op != nullptr) {
                             execute_cached_op_fast<false, false>(machine, *fallback_op, ram);
@@ -2401,7 +2407,7 @@ void CPU::run_fast_baremetal_batch(Machine& machine, uint32_t batch_size,
     }
 
     if (cached_ops > 0) {
-        clint_mmio.mcycle += cached_ops;
+        account_arch_cycles(cached_ops);
         if (machine.clock_divider().advance_fast_cycles(cached_ops, clint_mmio.rtc_divider,
                                                         clint_mmio.mtime) > 0) {
             evaluate_timer_interrupt();
@@ -2419,7 +2425,7 @@ SIMRV_ALWAYS_INLINE auto CPU::run_fast_os_kernel(Machine& machine, uint32_t batc
 
     auto flush_clint_and_retired = [&]() {
         if (chunk_cycles > 0) {
-            clint_mmio.mcycle += chunk_cycles;
+            account_arch_cycles(chunk_cycles);
             if (machine.clock_divider().advance_fast_cycles(chunk_cycles, clint_mmio.rtc_divider,
                                                             clint_mmio.mtime) > 0) {
                 evaluate_timer_interrupt();
@@ -2468,11 +2474,13 @@ SIMRV_ALWAYS_INLINE auto CPU::run_fast_os_kernel(Machine& machine, uint32_t batc
                         if (simrv::compiler::unlikely((chunk_cycles + chain_size) >= 64)) {
                             cached_ops += chain_size;
                             chunk_cycles += chain_size;
-                            e_icount += chain_size;
+                            account_retirement(chain_size);
+                            record_hpm_event(HpmEvent::Instructions, chain_size);
+                            record_hpm_event(HpmEvent::Cycles, chain_size);
                             e_ccount += compressed_count;
                             chain_size = 0;
                             compressed_count = 0;
-                            clint_mmio.mcycle += chunk_cycles;
+                            account_arch_cycles(chunk_cycles);
                             if (simrv::compiler::unlikely(
                                     machine.clock_divider().advance_fast_cycles(
                                         chunk_cycles, clint_mmio.rtc_divider, clint_mmio.mtime) >
@@ -2497,6 +2505,8 @@ SIMRV_ALWAYS_INLINE auto CPU::run_fast_os_kernel(Machine& machine, uint32_t batc
                     };
 
                     const auto advance_sequential = [&]() __attribute__((always_inline)) -> bool {
+                        record_hpm_instruction_classes(chained->op_id, chained->opcode(),
+                                                        chained->cinsn != 0);
                         next_pc += chained->op_len;
                         ++chain_size;
                         compressed_count += (chained->op_len == 2);
@@ -2623,6 +2633,8 @@ SIMRV_ALWAYS_INLINE auto CPU::run_fast_os_kernel(Machine& machine, uint32_t batc
                                     state_.regs.write_xlen32(chained->rd, link_pc);
                                 }
                                 next_pc = target_pc;
+                                record_hpm_instruction_classes(chained->op_id, chained->opcode(),
+                                                                chained->cinsn != 0);
                                 if constexpr (simrv::xlen::kIsXLen64 && !kGuestXlen64) {
                                     next_pc = static_cast<simrv::xlen::Register>(
                                         static_cast<int64_t>(static_cast<int32_t>(next_pc)));
@@ -2672,6 +2684,8 @@ SIMRV_ALWAYS_INLINE auto CPU::run_fast_os_kernel(Machine& machine, uint32_t batc
                                     state_.regs.write_xlen32(chained->rd, link_pc);
                                 }
                                 next_pc = target_pc;
+                                record_hpm_instruction_classes(chained->op_id, chained->opcode(),
+                                                                chained->cinsn != 0);
                                 ++chain_size;
                                 compressed_count += (chained->op_len == 2);
                                 ++b;
@@ -2738,6 +2752,8 @@ SIMRV_ALWAYS_INLINE auto CPU::run_fast_os_kernel(Machine& machine, uint32_t batc
                                     static_cast<int64_t>(static_cast<int32_t>(target_pc)));
                             }
                             next_pc = target_pc;
+                            record_hpm_instruction_classes(chained->op_id, chained->opcode(),
+                                                            chained->cinsn != 0);
                             ++chain_size;
                             compressed_count += (chained->op_len == 2);
                             ++b;
@@ -2984,7 +3000,9 @@ SIMRV_ALWAYS_INLINE auto CPU::run_fast_os_kernel(Machine& machine, uint32_t batc
                     state_.pc = next_pc;
                     cached_ops += chain_size;
                     chunk_cycles += chain_size;
-                    e_icount += chain_size;
+                    account_retirement(chain_size);
+                    record_hpm_event(HpmEvent::Instructions, chain_size);
+                    record_hpm_event(HpmEvent::Cycles, chain_size);
                     e_ccount += compressed_count;
                     if (fallback_op != nullptr) {
                         execute_cached_op_fast<false, false>(machine, *fallback_op, ram);

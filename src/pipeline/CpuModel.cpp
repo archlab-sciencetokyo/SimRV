@@ -33,12 +33,11 @@ auto CpuModelConfig::validate() const -> std::expected<void, std::string> {
             return std::format(
                 "{} cache capacity, associativity, and line size must be powers of two", name);
         }
-        // The current coherent TileLink fabric transfers one 32-byte beat line.  Capacity
-        // and associativity are runtime-modelled; a wider fabric is a separate protocol
-        // change, not a cache-only setting.
-        if (cache.line_bytes != 32) {
+        // CPU model configurations that do not implement Zic64b may retain 32-byte geometry.
+        // The RVA23 default uses the 64-byte coherent block required by Zic64b.
+        if (cache.line_bytes != 32 && cache.line_bytes != 64) {
             return std::format(
-                "{} cache line size must be 32 bytes for the current coherent fabric", name);
+                "{} cache line size must be 32 or 64 bytes", name);
         }
         if (cache.associativity > 8 ||
             cache.capacity_bytes < cache.associativity * cache.line_bytes) {

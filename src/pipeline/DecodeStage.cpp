@@ -57,6 +57,14 @@ void CPU::fetch_operands(Machine& /*machine*/) {
     ctx.rrs1 = state_.regs.read(ctx.rs1);
     ctx.rrs2 = state_.regs.read(ctx.rs2);
 
+    if (ctx.op_id == isa::MOP) {
+        // MOPs have no source dependency until redefined by another extension.
+        ctx.rrs1 = 0;
+        ctx.rrs2 = 0;
+        ctx.rcsr = 0;
+        return;
+    }
+
     if (simrv::compiler::likely(opcode != Opcode::System)) {
         ctx.rcsr = 0;
         return;

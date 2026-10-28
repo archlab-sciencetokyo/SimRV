@@ -132,7 +132,12 @@ void CPU::execute_core(Machine& machine) {
             }
             break;
         case Opcode::System:
-            execute_system(machine);
+            if (ctx.op_id == MOP) {
+                ctx.tkn = false;
+                ctx.wb_data = 0;
+            } else {
+                execute_system(machine);
+            }
             break;
         case Opcode::Custom0:
             ctx.tkn = false;
@@ -339,7 +344,15 @@ void CPU::execute_fp(Machine& /*machine*/) {
         case Opcode::OpFp: {
             ctx.tkn = false;
             const isa::RoundingMode rm = isa::resolve_rounding_mode(ctx.funct3, state_.fcsr);
-            if (simrv::compiler::unlikely(!isa::is_valid_rounding_mode(rm))) {
+            const bool uses_rm =
+                (ctx.funct7 <= 0x0D && (ctx.funct7 & 0x03) <= 1) || ctx.funct7 == 0x2C ||
+                ctx.funct7 == 0x2D || ctx.funct7 == 0x22 || ctx.funct7 == 0x25 ||
+                ctx.funct7 == 0x26 || ctx.funct7 == 0x60 || ctx.funct7 == 0x68 ||
+                ctx.funct7 == 0x69 ||
+                ((ctx.funct7 == 0x20 || ctx.funct7 == 0x21) &&
+                 (std::to_underlying(ctx.rs2) == 1 || std::to_underlying(ctx.rs2) == 4 ||
+                  std::to_underlying(ctx.rs2) == 5));
+            if (simrv::compiler::unlikely(uses_rm && !isa::is_valid_rounding_mode(rm))) {
                 ctx.pending_exception = ExceptionCode::IllegalInstruction;
                 ctx.pending_tval = ctx.ir;
                 break;

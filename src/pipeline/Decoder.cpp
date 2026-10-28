@@ -1,5 +1,6 @@
 #include "simrv/pipeline/Decoder.hpp"
 
+#include <algorithm>
 #include <cstdio>
 #include <utility>
 
@@ -628,6 +629,18 @@ const std::array<std::string_view, static_cast<size_t>(isa::OperationIdCount)> O
     "SINVAL_VMA",
     "SFENCE_W_INVAL",
     "SFENCE_INVAL_IR",
+    "FLH",
+    "FSH",
+    "FMV_X_H",
+    "FMV_H_X",
+    "FCVT_S_H",
+    "FCVT_H_S",
+    "FCVT_D_H",
+    "FCVT_H_D",
+    "FLI_S", "FLI_D", "FMINM_S", "FMAXM_S", "FMINM_D", "FMAXM_D",
+    "FLEQ_S", "FLTQ_S", "FLEQ_D", "FLTQ_D", "FROUND_S", "FROUNDNX_S",
+    "FROUND_D", "FROUNDNX_D", "FCVTMOD_W_D",
+    "MOP",
     "UNKNOWN"};
 
 auto operation_name(isa::OperationId operation) noexcept -> std::string_view {
@@ -1034,10 +1047,14 @@ consteval auto generate_fp_single_table() {
     table.assign(0x04, 2, OperationId::FSGNJX_S);
     table.assign(0x05, 0, OperationId::FMIN_S);
     table.assign(0x05, 1, OperationId::FMAX_S);
+    table.assign(0x05, 2, OperationId::FMINM_S);
+    table.assign(0x05, 3, OperationId::FMAXM_S);
     table.assign_row(0x0B, OperationId::FSQRT_S);
     table.assign(0x14, 0, OperationId::FLE_S);
     table.assign(0x14, 1, OperationId::FLT_S);
     table.assign(0x14, 2, OperationId::FEQ_S);
+    table.assign(0x14, 4, OperationId::FLEQ_S);
+    table.assign(0x14, 5, OperationId::FLTQ_S);
     table.assign(0x1C, 0, OperationId::FMV_X_W);
     table.assign(0x1C, 1, OperationId::FCLASS_S);
     table.assign(0x1E, 0, OperationId::FMV_W_X);
@@ -1069,6 +1086,9 @@ auto decode_op_fp_single_fcvt(uint32_t f5, uint32_t rs2) -> OperationId {
 }
 
 auto decode_op_fp_single(uint32_t funct3, uint32_t f5, uint32_t rs2) -> OperationId {
+    if (f5 == 0x1E && rs2 == 1 && funct3 == 0) return OperationId::FLI_S;
+    if (f5 == 0x08 && (rs2 == 4 || rs2 == 5))
+        return rs2 == 4 ? OperationId::FROUND_S : OperationId::FROUNDNX_S;
     if (f5 == 0x08 || f5 == 0x18 || f5 == 0x1A) {
         return decode_op_fp_single_fcvt(f5, rs2);
     }
@@ -1089,10 +1109,14 @@ consteval auto generate_fp_double_table() {
     table.assign(0x04, 2, OperationId::FSGNJX_D);
     table.assign(0x05, 0, OperationId::FMIN_D);
     table.assign(0x05, 1, OperationId::FMAX_D);
+    table.assign(0x05, 2, OperationId::FMINM_D);
+    table.assign(0x05, 3, OperationId::FMAXM_D);
     table.assign_row(0x0B, OperationId::FSQRT_D);
     table.assign(0x14, 0, OperationId::FLE_D);
     table.assign(0x14, 1, OperationId::FLT_D);
     table.assign(0x14, 2, OperationId::FEQ_D);
+    table.assign(0x14, 4, OperationId::FLEQ_D);
+    table.assign(0x14, 5, OperationId::FLTQ_D);
     table.assign(0x1C, 0, OperationId::FMV_X_D);
     table.assign(0x1C, 1, OperationId::FCLASS_D);
     table.assign(0x1E, 0, OperationId::FMV_D_X);
@@ -1102,6 +1126,7 @@ consteval auto generate_fp_double_table() {
 constexpr auto kFpDoubleTable = generate_fp_double_table();
 
 auto decode_op_fp_double_fcvt(uint32_t funct3, uint32_t f5, uint32_t rs2) -> OperationId {
+    if (f5 == 0x18 && rs2 == 8 && funct3 == 1) return OperationId::FCVTMOD_W_D;
     switch (f5) {
         case 0x08:
             // Widening FCVT.D.S is exact and reserves the rm field as zero.
@@ -1125,6 +1150,9 @@ auto decode_op_fp_double_fcvt(uint32_t funct3, uint32_t f5, uint32_t rs2) -> Ope
 }
 
 auto decode_op_fp_double(uint32_t funct3, uint32_t f5, uint32_t rs2) -> OperationId {
+    if (f5 == 0x1E && rs2 == 1 && funct3 == 0) return OperationId::FLI_D;
+    if (f5 == 0x08 && (rs2 == 4 || rs2 == 5))
+        return rs2 == 4 ? OperationId::FROUND_D : OperationId::FROUNDNX_D;
     if (f5 == 0x08 || f5 == 0x18 || f5 == 0x1A) {
         return decode_op_fp_double_fcvt(funct3, f5, rs2);
     }
@@ -1141,7 +1169,15 @@ auto decode_op_fp(uint32_t funct3, uint32_t funct7, uint32_t rs2) -> OperationId
         return decode_op_fp_single(funct3, f5, rs2);
     }
     if (fmt == 1) {
+        if (f5 == 0x08 && rs2 == 2 && funct3 == 0) return OperationId::FCVT_D_H;
+        if (f5 == 0x09 && rs2 == 1) return OperationId::FCVT_H_D;
         return decode_op_fp_double(funct3, f5, rs2);
+    }
+    if (fmt == 2) {
+        if (f5 == 0x08 && rs2 == 2 && funct3 == 0) return OperationId::FCVT_S_H;
+        if (f5 == 0x09 && rs2 == 0) return OperationId::FCVT_H_S;
+        if (f5 == 0x1C && rs2 == 0 && funct3 == 0) return OperationId::FMV_X_H;
+        if (f5 == 0x1E && rs2 == 0 && funct3 == 0) return OperationId::FMV_H_X;
     }
     return OperationId::UNKNOWN;
 }
@@ -1580,6 +1616,7 @@ auto decode_ext_f_d(Opcode op, uint32_t funct3, uint32_t funct7, uint32_t rs2,
                     simrv::xlen::Instruction ir) -> OperationId {
     switch (op) {
         case Opcode::LoadFp: {
+            if (funct3 == 1) return OperationId::FLH;
             if (funct3 == 2) return OperationId::FLW;
             if (funct3 == 3) return OperationId::FLD;
             if ((ir & (1U << 28U)) != 0) return OperationId::UNKNOWN;
@@ -1645,6 +1682,7 @@ auto decode_ext_f_d(Opcode op, uint32_t funct3, uint32_t funct7, uint32_t rs2,
             return OperationId::UNKNOWN;
         }
         case Opcode::StoreFp: {
+            if (funct3 == 1) return OperationId::FSH;
             if (funct3 == 2) return OperationId::FSW;
             if (funct3 == 3) return OperationId::FSD;
             if ((ir & (1U << 28U)) != 0) return OperationId::UNKNOWN;
@@ -1965,6 +2003,26 @@ auto decoder(simrv::xlen::Instruction ir) -> OperationId {
     const auto funct3 = std::to_underlying(dec.funct3());
     const auto funct7 = dec.funct7();
 
+    // Zimop defines 32 MOP.R and 8 MOP.RR encodings. Until redefined by another
+    // extension, each writes zero to rd. Match only the specified funct/opcode fields;
+    // rd, rs1, and rs2 remain variable as required by the encoding.
+    if (op == Opcode::System && funct3 == 0x4U) {
+        static constexpr std::array<uint32_t, 40> kMopMatches{
+            0x81c04073U, 0x81d04073U, 0x81e04073U, 0x81f04073U, 0x85c04073U, 0x85d04073U,
+            0x85e04073U, 0x85f04073U, 0x89c04073U, 0x89d04073U, 0x89e04073U, 0x89f04073U,
+            0x8dc04073U, 0x8dd04073U, 0x8de04073U, 0x8df04073U, 0xc1c04073U, 0xc1d04073U,
+            0xc1e04073U, 0xc1f04073U, 0xc5c04073U, 0xc5d04073U, 0xc5e04073U, 0xc5f04073U,
+            0xc9c04073U, 0xc9d04073U, 0xc9e04073U, 0xc9f04073U, 0xcdc04073U, 0xcdd04073U,
+            0xcde04073U, 0xcdf04073U, 0x82004073U, 0x86004073U, 0x8a004073U, 0x8e004073U,
+            0xc2004073U, 0xc6004073U, 0xca004073U, 0xce004073U};
+        constexpr uint32_t kMopRMask = 0xfff0707fU;
+        constexpr uint32_t kMopRrMask = 0xfe00707fU;
+        for (size_t index = 0; index < kMopMatches.size(); ++index) {
+            const uint32_t mask = index < 32 ? kMopRMask : kMopRrMask;
+            if ((ir & mask) == kMopMatches[index]) return OperationId::MOP;
+        }
+    }
+
     if (op == Opcode::Amo) {
         return decode_ext_a(funct7, dec.funct3(), dec.rs2());
     }
@@ -1996,6 +2054,58 @@ auto decompressInstruction(simrv::xlen::Instruction ir, bool is_rv64) -> simrv::
     simrv::pipeline::Decoder dec(ir);
     if (!dec.is_compressed()) {
         return ir;
+    }
+
+    // Zcmop's C.MOP.n encodings occupy reserved C.LUI space. They are architectural
+    // no-ops unless a later extension redefines them, so expand them to C.NOP rather
+    // than treating them as the ordinary C.LUI rd, 0 encoding (which writes rd).
+    static constexpr std::array<simrv::xlen::Instruction, 8> kCmopEncodings{
+        0x6081U, 0x6181U, 0x6281U, 0x6381U, 0x6481U, 0x6581U, 0x6681U, 0x6781U};
+    if (std::ranges::find(kCmopEncodings, ir & 0xFFFFU) != kCmopEncodings.end()) {
+        return 0x00000013U;  // addi x0, x0, 0
+    }
+
+    // Zcb's extra compressed integer operations expand to ordinary integer loads,
+    // stores, and bit-manipulation instructions. Decode these before the base C
+    // quadrant handling, where the same encodings are otherwise reserved.
+    const uint32_t rd_prime = 8U + ((ir >> 2U) & 0x7U);
+    const uint32_t rs1_prime = 8U + ((ir >> 7U) & 0x7U);
+    const uint32_t rs2_prime = rd_prime;
+    if ((ir & 0xfc03U) == 0x8000U) {  // C.LBU
+        const uint32_t imm = (((ir >> 5U) & 1U) << 1U) | ((ir >> 6U) & 1U);
+        return make_i_type(0x03U, 0x4U, rd_prime, rs1_prime, imm);
+    }
+    if ((ir & 0xfc43U) == 0x8400U || (ir & 0xfc43U) == 0x8440U) {  // C.LHU / C.LH
+        const bool signed_load = (ir & 0x40U) != 0;
+        const uint32_t imm = ((ir >> 5U) & 1U) << 1U;
+        return make_i_type(0x03U, signed_load ? 0x1U : 0x5U, rd_prime, rs1_prime, imm);
+    }
+    if ((ir & 0xfc03U) == 0x8800U) {  // C.SB
+        const uint32_t imm = (((ir >> 5U) & 1U) << 1U) | ((ir >> 6U) & 1U);
+        return make_s_type(0x23U, 0x0U, rs1_prime, rs2_prime, imm);
+    }
+    if ((ir & 0xfc43U) == 0x8c00U) {  // C.SH
+        const uint32_t imm = ((ir >> 5U) & 1U) << 1U;
+        return make_s_type(0x23U, 0x1U, rs1_prime, rs2_prime, imm);
+    }
+    if ((ir & 0xfc63U) == 0x9c41U) {  // C.MUL
+        return make_r_type(0x33U, 0x0U, 0x01U, rd_prime, rd_prime, rs2_prime);
+    }
+    if ((ir & 0xfc7fU) == 0x9c75U) {  // C.NOT
+        return make_i_type(0x13U, 0x4U, rd_prime, rd_prime, 0xfffU);
+    }
+    if ((ir & 0xfc7fU) == 0x9c65U || (ir & 0xfc7fU) == 0x9c6dU) {  // C.SEXT.B / C.SEXT.H
+        const uint32_t imm = ((ir & 0x7fU) == 0x65U) ? 0x604U : 0x605U;
+        return make_i_type(0x13U, 0x1U, rd_prime, rd_prime, imm);
+    }
+    if ((ir & 0xfc7fU) == 0x9c61U) {  // C.ZEXT.B
+        return make_i_type(0x13U, 0x7U, rd_prime, rd_prime, 0xffU);
+    }
+    if ((ir & 0xfc7fU) == 0x9c69U) {  // C.ZEXT.H (PACK rd, rs1, x0)
+        return make_r_type(0x33U, 0x4U, 0x04U, rd_prime, rd_prime, 0U);
+    }
+    if ((ir & 0xfc7fU) == 0x9c71U && is_rv64) {  // C.ZEXT.W (ADD.UW rd, rs1, x0)
+        return make_r_type(0x3bU, 0x0U, 0x04U, rd_prime, rd_prime, 0U);
     }
 
     const uint32_t op = dec.c_op();

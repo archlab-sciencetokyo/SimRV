@@ -84,6 +84,9 @@ void CPU::reset() {
     dcache.flush();
     TLB_flush();
     e_icount = 0;
+    sbi_pmu_selector.fill(0);
+    sbi_pmu_configured.fill(false);
+    sbi_pmu_started.fill(false);
     e_ccount = 0;
     cycle_counter_start_delay_ = pipeline_sim.config.cycle_counter_start_delay;
     e_instmix.fill(0);

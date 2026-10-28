@@ -259,6 +259,9 @@ if(BUILD_TESTING)
   add_test(NAME release-tools
            COMMAND ${PYTHON_BIN} ${CMAKE_SOURCE_DIR}/tests/ReleaseToolTests.py)
   set_tests_properties(release-tools PROPERTIES LABELS "gate;regress;release")
+  add_test(NAME uefi-disk-image
+           COMMAND ${PYTHON_BIN} ${CMAKE_SOURCE_DIR}/tests/UefiDiskImageTests.py)
+  set_tests_properties(uefi-disk-image PROPERTIES LABELS "gate;regress;uefi")
   add_test(NAME ga-smoke
            COMMAND ${PYTHON_BIN} ${CMAKE_SOURCE_DIR}/scripts/ga_smoke.py --simrv
                    $<TARGET_FILE:SimRV>)

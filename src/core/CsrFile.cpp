@@ -195,6 +195,22 @@ auto CsrFile::read(simrv::xlen::CsrNumber addr) const
         case csr_addr(Csr::Scounteren):
             rcsr = cpu_.state().scounteren;
             break;
+        case csr_addr(Csr::Scountovf): {
+            if (!isa::misa_has_extension(cpu_.state().misa, isa::IsaExtension::S)) {
+                return std::unexpected(ExceptionCode::IllegalInstruction);
+            }
+            uint32_t overflow = cpu_.perf_counters.read_overflow_mask();
+            if (cpu_.state().priv != simrv::xlen::PrivilegeLevel::Machine) {
+                for (size_t counter = 3; counter < PerformanceCounters::kNumHpmCounters;
+                     ++counter) {
+                    if ((cpu_.state().mcounteren & (simrv::xlen::CsrValue{1} << counter)) == 0) {
+                        overflow &= ~(uint32_t{1} << counter);
+                    }
+                }
+            }
+            rcsr = overflow;
+            break;
+        }
         case csr_addr(Csr::Sscratch):
             rcsr = cpu_.state().sscratch;
             break;
@@ -300,7 +316,7 @@ auto CsrFile::read(simrv::xlen::CsrNumber addr) const
             break;
         case csr_addr(Csr::Minstret):
         case csr_addr(Csr::Instret):
-            rcsr = static_cast<simrv::xlen::CsrValue>(cpu_.e_icount);
+            rcsr = static_cast<simrv::xlen::CsrValue>(cpu_.state().minstret);
             break;
         case csr_addr(Csr::Time):
             rcsr = static_cast<simrv::xlen::CsrValue>(cpu_.clint_mmio.mtime);
@@ -314,7 +330,7 @@ auto CsrFile::read(simrv::xlen::CsrNumber addr) const
         case csr_addr(Csr::Minstreth):
         case csr_addr(Csr::Instreth):
             return require_rv32_counter().transform([this]() {
-                return static_cast<simrv::xlen::CsrValue>(cpu_.e_icount >> kHighWordShift);
+                return static_cast<simrv::xlen::CsrValue>(cpu_.state().minstret >> kHighWordShift);
             });
         case csr_addr(Csr::Timeh):
             return require_rv32_counter().transform([this]() {
@@ -391,8 +407,14 @@ auto CsrFile::read(simrv::xlen::CsrNumber addr) const
             }
             const auto a = addr.value();
             if (a >= 0x323U && a <= 0x33FU) {
-                rcsr = static_cast<simrv::xlen::CsrValue>(
-                    cpu_.perf_counters.read_hpmevent(a - 0x320U));
+                const auto value = cpu_.perf_counters.read_hpmevent(a - 0x320U);
+                rcsr = cpu_.state().regs.xlen == 32U ? static_cast<uint32_t>(value)
+                                                     : static_cast<simrv::xlen::CsrValue>(value);
+                break;
+            }
+            if (cpu_.state().regs.xlen == 32U && a >= 0x723U && a <= 0x73FU) {
+                rcsr = static_cast<simrv::xlen::CsrValue>(static_cast<uint32_t>(
+                    cpu_.perf_counters.read_hpmevent(a - 0x720U) >> kHighWordShift));
                 break;
             }
             if (a >= 0xB03U && a <= 0xB1FU) {
@@ -437,6 +459,7 @@ auto CsrFile::write(simrv::xlen::CsrNumber addr, simrv::xlen::CsrValue wdata)
             std::pair{MipBit::Mtip, simrv::xlen::TrapCause{7}},
             std::pair{MipBit::Seip, simrv::xlen::TrapCause{9}},
             std::pair{MipBit::Meip, simrv::xlen::TrapCause{11}},
+            std::pair{MipBit::Lcofip, simrv::xlen::TrapCause{13}},
         };
         for (const auto& [bit, code] : interrupt_bits) {
             const bool was_pending = (before & bit) != 0;
@@ -498,17 +521,17 @@ auto CsrFile::write(simrv::xlen::CsrNumber addr, simrv::xlen::CsrValue wdata)
                 });
         case csr_addr(Csr::Minstret):
             if (cpu_.state().regs.xlen == 32) {
-                cpu_.e_icount =
-                    (cpu_.e_icount & 0xFFFFFFFF00000000ULL) | static_cast<uint32_t>(wdata);
+                cpu_.state().minstret =
+                    (cpu_.state().minstret & 0xFFFFFFFF00000000ULL) | static_cast<uint32_t>(wdata);
             } else {
-                cpu_.e_icount = wdata;
+                cpu_.state().minstret = wdata;
             }
             break;
         case csr_addr(Csr::Minstreth):
             return require_rv32_counter().and_then([this,
                                                     wdata]() -> std::expected<void, ExceptionCode> {
-                cpu_.e_icount =
-                    (cpu_.e_icount & 0x00000000FFFFFFFFULL) | (static_cast<uint64_t>(wdata) << 32);
+                cpu_.state().minstret =
+                    (cpu_.state().minstret & 0x00000000FFFFFFFFULL) | (static_cast<uint64_t>(wdata) << 32);
                 return {};
             });
 
@@ -685,7 +708,8 @@ auto CsrFile::write(simrv::xlen::CsrNumber addr, simrv::xlen::CsrValue wdata)
             break;
         case csr_addr(Csr::Sip): {
             const simrv::xlen::CsrValue pending_before = cpu_.state().mip;
-            const simrv::xlen::CsrValue mask = MipBit::Ssip & cpu_.state().mideleg;
+            const simrv::xlen::CsrValue mask =
+                (MipBit::Ssip | MipBit::Lcofip) & cpu_.state().mideleg;
             cpu_.state().mip = (cpu_.state().mip & ~mask) | (wdata & mask);
             log_pending_changes(pending_before, "sip_csr");
             break;
@@ -796,7 +820,21 @@ auto CsrFile::write(simrv::xlen::CsrNumber addr, simrv::xlen::CsrValue wdata)
             }
             const auto a = addr.value();
             if (a >= 0x323U && a <= 0x33FU) {
-                cpu_.perf_counters.write_hpmevent(a - 0x320U, static_cast<uint64_t>(wdata));
+                const auto idx = a - 0x320U;
+                const auto value =
+                    cpu_.state().regs.xlen == 32U
+                        ? ((cpu_.perf_counters.read_hpmevent(idx) & 0xFFFFFFFF00000000ULL) |
+                           static_cast<uint32_t>(wdata))
+                        : static_cast<uint64_t>(wdata);
+                cpu_.perf_counters.write_hpmevent(idx, value);
+                break;
+            }
+            if (cpu_.state().regs.xlen == 32U && a >= 0x723U && a <= 0x73FU) {
+                const auto idx = a - 0x720U;
+                const auto value =
+                    (cpu_.perf_counters.read_hpmevent(idx) & 0x00000000FFFFFFFFULL) |
+                    (static_cast<uint64_t>(static_cast<uint32_t>(wdata)) << kHighWordShift);
+                cpu_.perf_counters.write_hpmevent(idx, value);
                 break;
             }
             if (a >= 0xB03U && a <= 0xB1FU) {

@@ -643,6 +643,33 @@ enum OperationId : uint16_t {
     SINVAL_VMA,
     SFENCE_W_INVAL,
     SFENCE_INVAL_IR,
+    /* Zfhmin (Minimal Half-Precision Floating Point) */
+    FLH,
+    FSH,
+    FMV_X_H,
+    FMV_H_X,
+    FCVT_S_H,
+    FCVT_H_S,
+    FCVT_D_H,
+    FCVT_H_D,
+    /* Zfa (Additional Floating-Point Instructions) */
+    FLI_S,
+    FLI_D,
+    FMINM_S,
+    FMAXM_S,
+    FMINM_D,
+    FMAXM_D,
+    FLEQ_S,
+    FLTQ_S,
+    FLEQ_D,
+    FLTQ_D,
+    FROUND_S,
+    FROUNDNX_S,
+    FROUND_D,
+    FROUNDNX_D,
+    FCVTMOD_W_D,
+    /* Zimop (May-Be-Operations) */
+    MOP,
     /* Others */
     UNKNOWN,
     OperationIdCount
@@ -706,6 +733,10 @@ constexpr OperationId kOpRangeVectorEnd = VWSLL_VI;
 
 [[nodiscard]] constexpr auto is_d_op(OperationId op_id) noexcept -> bool {
     return op_id >= kOpRangeRv32dBegin && op_id <= kOpRangeRv32dEnd;
+}
+
+[[nodiscard]] constexpr auto is_zfhmin_op(OperationId op_id) noexcept -> bool {
+    return op_id >= FLH && op_id <= FCVT_H_D;
 }
 
 [[nodiscard]] constexpr auto is_zb_op(OperationId op_id) noexcept -> bool {

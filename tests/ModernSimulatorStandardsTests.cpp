@@ -135,6 +135,48 @@ void test_sbi_version_and_rfence() {
     TEST_ASSERT(cpu.state().regs.read(simrv::xlen::RegId::A0) == 0);  // SBI_SUCCESS
 }
 
+void test_sbi_pmu_discovery_and_raw_counters() {
+    using simrv::xlen::RegId;
+    simrv::core::CPU cpu;
+    cpu.state().regs.write(RegId::A7, std::to_underlying(simrv::sbi::SbiExtId::Pmu));
+    const auto call = [&](simrv::xlen::Word fid) {
+        cpu.state().regs.write(RegId::A6, fid);
+        TEST_ASSERT(cpu.sbi.handle_ecall(simrv::isa::ExceptionCode::SupervisorEcall));
+        return std::pair{static_cast<simrv::xlen::SignedWord>(cpu.state().regs.read(RegId::A0)),
+                         cpu.state().regs.read(RegId::A1)};
+    };
+
+    TEST_ASSERT(call(0).second == 32);
+    cpu.state().regs.write(RegId::A0, 0);
+    TEST_ASSERT(call(1).second == (0xC00U | (63U << 12U)));
+    cpu.state().regs.write(RegId::A0, 1);
+    TEST_ASSERT(call(1).first == static_cast<simrv::xlen::SignedWord>(simrv::SbiError::InvalidParam));
+
+    // Configure SimRV raw selector 9 on programmable counter 3.
+    cpu.state().regs.write(RegId::A0, 3);
+    cpu.state().regs.write(RegId::A1, 1);
+    cpu.state().regs.write(RegId::A2, 0);
+    cpu.state().regs.write(RegId::A3, 0x30000);  // raw-event-v2, event code 0
+    cpu.state().regs.write(RegId::A4, 9);
+    const auto configured = call(2);
+    TEST_ASSERT(configured.first == 0 && configured.second == 3);
+    cpu.state().regs.write(RegId::A0, 3);
+    cpu.state().regs.write(RegId::A1, 1);
+    cpu.state().regs.write(RegId::A2, 1);  // set initial counter value
+    cpu.state().regs.write(RegId::A3, 40);
+    TEST_ASSERT(call(3).first == 0);
+    TEST_ASSERT(cpu.perf_counters.read_hpmcounter(3) == 40);
+    cpu.perf_counters.notify_event(simrv::core::HpmEvent::BranchMispredict);
+    TEST_ASSERT(cpu.perf_counters.read_hpmcounter(3) == 41);
+    cpu.state().regs.write(RegId::A0, 3);
+    cpu.state().regs.write(RegId::A1, 1);
+    cpu.state().regs.write(RegId::A2, 0);
+    TEST_ASSERT(call(4).first == 0);
+    cpu.perf_counters.notify_event(simrv::core::HpmEvent::BranchMispredict);
+    TEST_ASSERT(cpu.perf_counters.read_hpmcounter(3) == 41);
+
+}
+
 void test_platform_timing_conversions() {
     using namespace simrv::core::timing;
 
@@ -217,6 +259,7 @@ int main() {
     test_exception_priorities();
     test_svpbmt_svnapot();
     test_sbi_version_and_rfence();
+    test_sbi_pmu_discovery_and_raw_counters();
     test_platform_timing_conversions();
     test_simulation_stats();
     test_architectural_signature_dump();

@@ -24,9 +24,13 @@ namespace simrv::memory {
 
 namespace {
 template <typename Cache>
-void release_evicted_line(TileLinkBus& bus, Cache& cache, simrv::xlen::HartId hart, TlPort port) {
+void release_evicted_line(TileLinkBus& bus, Cache& cache, simrv::xlen::HartId hart, TlPort port,
+                          core::CPU& cpu) {
     const auto evicted = cache.take_last_eviction();
     if (!evicted.has_value()) return;
+    if (evicted->state == MesiState::Modified) {
+        cpu.record_hpm_event(core::HpmEvent::DCacheWriteback);
+    }
     TlChannelC release{};
     release.opcode =
         evicted->state == MesiState::Modified ? TlOpcodeC::ReleaseData : TlOpcodeC::Release;
@@ -275,7 +279,7 @@ auto MemoryAccess::target_read(MemorySubsystem& mem, core::CPU& cpu, simrv::xlen
                 return 0;
             }
             cpu.dcache.insert(completed_line, timed.line_data.data(), mesi_for(timed.payload.cap));
-            release_evicted_line(mem.system_bus(), cpu.dcache, cpu.hart_id(), TlPort::Data);
+            release_evicted_line(mem.system_bus(), cpu.dcache, cpu.hart_id(), TlPort::Data, cpu);
             TlChannelE ack{};
             ack.sink = timed.payload.sink;
             mem.system_bus().grant_ack(ack);
@@ -291,6 +295,7 @@ auto MemoryAccess::target_read(MemorySubsystem& mem, core::CPU& cpu, simrv::xlen
         if (cpu.dcache.read(addr, cached_data, funct3)) {
             return cached_data;
         }
+        cpu.record_hpm_event(core::HpmEvent::DCacheMiss);
 
         const simrv::xlen::Address line_base =
             addr & ~(static_cast<simrv::xlen::Address>(simrv::cache::DCache::kLineBytes - 1u));
@@ -325,7 +330,7 @@ auto MemoryAccess::target_read(MemorySubsystem& mem, core::CPU& cpu, simrv::xlen
         TlChannelD resp{};
         if (mem.system_bus().acquire_block(req, resp, line_data) && !resp.failed()) {
             cpu.dcache.insert(line_base, line_data.data(), mesi_for(resp.cap));
-            release_evicted_line(mem.system_bus(), cpu.dcache, cpu.hart_id(), TlPort::Data);
+            release_evicted_line(mem.system_bus(), cpu.dcache, cpu.hart_id(), TlPort::Data, cpu);
             TlChannelE ack{};
             ack.sink = resp.sink;
             mem.system_bus().grant_ack(ack);
@@ -363,6 +368,7 @@ auto MemoryAccess::target_read(MemorySubsystem& mem, core::CPU& cpu, simrv::xlen
         is_global = entry->global;
     } else {
         cpu.active_context().tlb_miss = true;
+        cpu.record_hpm_event(core::HpmEvent::DTlbMiss);
         auto translate_res =
             cpu.translate_stage_address(*cpu.machine_, v_addr, access_type, eff_priv, active_xlen,
                                         TlPort::Data, cpu.ca_state.data_walk);
@@ -548,7 +554,7 @@ void MemoryAccess::target_write(MemorySubsystem& mem, core::CPU& cpu, simrv::xle
             } else {
                 cpu.dcache.insert(completed_line, timed.line_data.data(),
                                   mesi_for(timed.payload.cap));
-                release_evicted_line(mem.system_bus(), cpu.dcache, cpu.hart_id(), TlPort::Data);
+                release_evicted_line(mem.system_bus(), cpu.dcache, cpu.hart_id(), TlPort::Data, cpu);
             }
             TlChannelE ack{};
             ack.sink = timed.payload.sink;
@@ -614,8 +620,12 @@ void MemoryAccess::target_write(MemorySubsystem& mem, core::CPU& cpu, simrv::xle
             if (is_sc && has_trunk && !check_sc_reservation(addr)) return;
 
             bool first_write = false;
+            const auto misses_before = cpu.dcache.miss_count();
             bool cache_write_completed = cpu.dcache.write(addr, data, funct3, &first_write);
             if (!cache_write_completed) {
+                const auto misses_after = cpu.dcache.miss_count();
+                if (misses_after != misses_before)
+                    cpu.record_hpm_event(core::HpmEvent::DCacheMiss, misses_after - misses_before);
                 // Not in Trunk state; acquire Trunk ownership via TL-C
                 const bool is_upgrade = (line_state == simrv::memory::MesiState::Shared);
                 TlChannelA req{};
@@ -659,7 +669,7 @@ void MemoryAccess::target_write(MemorySubsystem& mem, core::CPU& cpu, simrv::xle
                     if (mem.system_bus().acquire_block(req, resp, line_data) && !resp.failed()) {
                         cpu.dcache.insert(line_base, line_data.data(), mesi_for(resp.cap));
                         release_evicted_line(mem.system_bus(), cpu.dcache, cpu.hart_id(),
-                                             TlPort::Data);
+                                             TlPort::Data, cpu);
                         TlChannelE ack{};
                         ack.sink = resp.sink;
                         mem.system_bus().grant_ack(ack);
@@ -823,6 +833,7 @@ void MemoryAccess::target_write(MemorySubsystem& mem, core::CPU& cpu, simrv::xle
         is_global = entry->global;
     } else {
         cpu.active_context().tlb_miss = true;
+        cpu.record_hpm_event(core::HpmEvent::DTlbMiss);
         auto translate_res =
             cpu.translate_stage_address(*cpu.machine_, v_addr, PteAccess::Write, eff_priv,
                                         active_xlen, TlPort::Data, cpu.ca_state.data_walk);
@@ -881,7 +892,11 @@ auto MemoryAccess::loadInt(MemorySubsystem& mem, core::CPU& cpu, simrv::xlen::Vi
 auto MemoryAccess::loadFp(MemorySubsystem& mem, core::CPU& cpu, simrv::xlen::VirtAddr addr,
                           isa::Funct3 funct3) -> simrv::xlen::FloatingRegister {
     const auto f3 = funct3;
-    if (f3 == Funct3::Flw) {
+    if (f3 == Funct3::Flh) {
+        const auto half = target_read(mem, cpu, addr, Funct3::Lh);
+        return static_cast<simrv::xlen::FloatingRegister>(~uint64_t{0xFFFF}) |
+               static_cast<uint16_t>(half);
+    } else if (f3 == Funct3::Flw) {
         const simrv::xlen::Word lo = target_read(mem, cpu, addr, Funct3::Lw);
         return static_cast<uint64_t>(simrv::xlen::kF32BoxerBits) |
                static_cast<uint64_t>(lo & simrv::xlen::kLower32Mask);
@@ -906,7 +921,9 @@ void MemoryAccess::storeInt(MemorySubsystem& mem, core::CPU& cpu, simrv::xlen::V
 void MemoryAccess::storeFp(MemorySubsystem& mem, core::CPU& cpu, simrv::xlen::VirtAddr addr,
                            simrv::xlen::FloatingRegister data, isa::Funct3 funct3) {
     const auto f3 = funct3;
-    if (f3 == Funct3::Fsw) {
+    if (f3 == Funct3::Fsh) {
+        target_write(mem, cpu, addr, static_cast<uint16_t>(data), Funct3::Sh);
+    } else if (f3 == Funct3::Fsw) {
         target_write(
             mem, cpu, addr,
             static_cast<simrv::xlen::Word>(

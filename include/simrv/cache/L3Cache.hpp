@@ -11,9 +11,9 @@ namespace simrv::cache {
 
 /**
  * @class L3Cache
- * @brief Shared multi-hart Last-Level Cache (default 512 KiB, 32-byte lines, 16 ways).
+ * @brief Shared multi-hart Last-Level Cache (default 512 KiB, 64-byte lines, 16 ways).
  */
-class L3Cache : public BaseCache<16384, 32, 16> {
+class L3Cache : public BaseCache<8192, 64, 16> {
    public:
     L3Cache() = default;
 

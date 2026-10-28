@@ -2052,6 +2052,40 @@ void test_vector_floating_arithmetic() {
     cpu.state().vl = 1;
     cpu.state().vstart = 0;
     cpu.state().fcsr = 0;
+    cpu.state().vtype = 1U << 3U;  // SEW=16 for Zvfhmin conversions.
+    regs.read_vector(simrv::xlen::to_vec_reg_id(vs2)).u16[0] = UINT16_C(0x3C00);
+    simrv::execute::ExecuteUnit::execute_vector(
+        cpu, machine.memory(), simrv::isa::OperationId::VFWCVT_F_F_V,
+        vector_ir(vd, simrv::xlen::RegId::Zero, vs2));
+    expect(!cpu.active_context().pending_exception.has_value() &&
+               regs.read_vector(simrv::xlen::to_vec_reg_id(vd)).u32[0] == UINT32_C(0x3F800000),
+           "Zvfhmin vfwcvt.f.f.v widens binary16 1.0 to binary32");
+
+    regs.read_vector(simrv::xlen::to_vec_reg_id(vs2)).u32[0] = UINT32_C(0x3F801000);
+    simrv::execute::ExecuteUnit::execute_vector(
+        cpu, machine.memory(), simrv::isa::OperationId::VFNCVT_F_F_W,
+        vector_ir(vd, simrv::xlen::RegId::Zero, vs2));
+    expect(regs.read_vector(simrv::xlen::to_vec_reg_id(vd)).u16[0] == UINT16_C(0x3C00) &&
+               (cpu.state().fcsr & simrv::isa::FflagsBit::Nx) != 0,
+           "Zvfhmin vfncvt.f.f.w rounds a binary32 midpoint to even and accrues inexact");
+
+    cpu.state().fcsr = simrv::isa::RoundingMode::Rmm << 5U;
+    simrv::execute::ExecuteUnit::execute_vector(
+        cpu, machine.memory(), simrv::isa::OperationId::VFNCVT_F_F_W,
+        vector_ir(vd, simrv::xlen::RegId::Zero, vs2));
+    expect(regs.read_vector(simrv::xlen::to_vec_reg_id(vd)).u16[0] == UINT16_C(0x3C01),
+           "Zvfhmin vfncvt.f.f.w honors round-to-nearest-max-magnitude");
+
+    cpu.active_context().pending_exception.reset();
+    simrv::execute::ExecuteUnit::execute_vector(
+        cpu, machine.memory(), simrv::isa::OperationId::VFADD_VV,
+        vector_ir(vd, vs1, vs2));
+    expect(cpu.active_context().pending_exception == ExceptionCode::IllegalInstruction,
+           "Zvfhmin does not enable half-precision vector arithmetic");
+    cpu.active_context().pending_exception.reset();
+    cpu.state().vtype = 2U << 3U;  // Restore SEW=32 for the remaining V tests.
+    cpu.state().fcsr = 0;
+
     regs.read_vector(simrv::xlen::to_vec_reg_id(vs2)).f32[0] = 7.0F;
     regs.read_vector(simrv::xlen::to_vec_reg_id(vs1)).f32[0] = 2.0F;
     simrv::execute::ExecuteUnit::execute_vector(
@@ -3546,6 +3580,8 @@ void test_fdt_patcher() {
     const std::string bytes(patched->begin(), patched->end());
     expect(bytes.find("console=ttyS0 loglevel=7") != std::string::npos,
            "FDT patching preserves Linux boot arguments");
+    expect(bytes.find("zihintntl") != std::string::npos,
+           "FDT patching advertises implemented Zihintntl hint encodings");
     expect(bytes.find("memory@80000000") != std::string::npos,
            "FDT patching updates memory node unit address to configured DRAM base");
     expect(
@@ -3720,7 +3756,7 @@ void test_tilelink_c_protocol_checker() {
                        .size = kTlBlockSize,
                        .source = 9,
                        .hart = 0,
-                       .address = 0x80000020};
+                       .address = 0x80000040};
     expect(checker.accept_a(acquire).has_value(), "checker accepts one-block AcquireBlock");
     TlChannelD grant{.opcode = TlOpcodeD::GrantData,
                      .cap = TlCap::ToT,
@@ -3769,7 +3805,7 @@ void test_tilelink_c_protocol_checker() {
                            .report = TlReport::TtoN,
                            .size = kTlBlockSize,
                            .source = 12,
-                           .address = 0x80000060};
+                           .address = 0x80000080};
     expect(checker.accept_c(release_req).has_value(), "checker accepts valid ReleaseData");
     expect(checker.outstanding_releases() == 1, "checker tracks outstanding release");
     TlChannelD rel_ack{.opcode = TlOpcodeD::ReleaseAck, .size = kTlBlockSize, .source = 12};

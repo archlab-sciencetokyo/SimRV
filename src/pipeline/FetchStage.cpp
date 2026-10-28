@@ -207,6 +207,7 @@ void CPU::fetch_resolve_page_walk(Machine& machine, int state) {
     simrv::xlen::Word const w_vadr = (state == 1) ? state_.pc : state_.pc + 2;
     if (w_padr == simrv::xlen::kWordAllOnes) {
         ctx.tlb_miss = true;
+        record_hpm_event(HpmEvent::ITlbMiss);
         if constexpr (simrv::xlen::kIsXLen64) {
             if (simrv::compiler::unlikely(
                     !simrv::Mmu::is_canonical(w_vadr, state_.satp, state_.regs.xlen))) {
@@ -389,14 +390,20 @@ void CPU::fetch_read_instruction_word(Machine& machine) {
                                   (simrv::cache::ICache::kLineBytes - 4u));
         if (single_line) {
             uint32_t w_data = 0;
-            if (!refill_in_progress && icache.read(ctx.padr1.raw(), w_data)) {
-                trigger_prefetch(line_base);
-                if ((w_data & 0x3) != 0x3) {
-                    ctx.ir_org = w_data & 0xFFFF;
-                } else {
-                    ctx.ir_org = w_data;
+            if (!refill_in_progress) {
+                const auto misses_before = icache.miss_count();
+                if (icache.read(ctx.padr1.raw(), w_data)) {
+                    trigger_prefetch(line_base);
+                    if ((w_data & 0x3) != 0x3) {
+                        ctx.ir_org = w_data & 0xFFFF;
+                    } else {
+                        ctx.ir_org = w_data;
+                    }
+                    return;
                 }
-                return;
+                if (icache.miss_count() != misses_before)
+                    record_hpm_event(HpmEvent::ICacheMiss,
+                                     icache.miss_count() - misses_before);
             }
 
             if (machine.runtime_profile.is_cycle_mode()) {
@@ -499,9 +506,15 @@ void CPU::fetch_read_instruction_word(Machine& machine) {
                                               ca_state.instruction_fill.active &&
                                               ca_state.instruction_fill.line_base == h_line_base;
 
-            if (!h_refill_in_progress && icache.read16(paddr.raw(), h_data)) {
-                trigger_prefetch(h_line_base);
-                return h_data;
+            if (!h_refill_in_progress) {
+                const auto misses_before = icache.miss_count();
+                if (icache.read16(paddr.raw(), h_data)) {
+                    trigger_prefetch(h_line_base);
+                    return h_data;
+                }
+                if (icache.miss_count() != misses_before)
+                    record_hpm_event(HpmEvent::ICacheMiss,
+                                     icache.miss_count() - misses_before);
             }
 
             std::array<simrv::xlen::Byte, simrv::cache::ICache::kLineBytes> line_data{};
@@ -753,11 +766,7 @@ void CPU::decode_and_normalize_instruction(Machine& machine) {
 
     if (is_valid) {
         const auto op = opcode_of(w_ir_tmp);
-        const bool is_vector =
-            (op == Opcode::OpV) ||
-            ((op == Opcode::LoadFp || op == Opcode::StoreFp) &&
-             (funct3_of(w_ir_tmp) != Funct3::Fld && funct3_of(w_ir_tmp) != Funct3::Fsd &&
-              static_cast<uint8_t>(funct3_of(w_ir_tmp)) != 2));
+        const bool is_vector = isa::is_vector_op(op_id);
         const bool is_fp_op =
             !is_vector && ((op == Opcode::LoadFp) || (op == Opcode::StoreFp) ||
                            (op == Opcode::OpFp) || (op == Opcode::MAdd) || (op == Opcode::MSub) ||

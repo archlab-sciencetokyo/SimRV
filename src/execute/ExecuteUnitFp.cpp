@@ -5,6 +5,7 @@
 #include "simrv/execute/ExecuteUnitFp.hpp"
 
 #include <bit>
+#include <array>
 #include <cfenv>
 #include <cmath>
 #include <cstdint>
@@ -13,6 +14,8 @@
 
 #include "simrv/CompilerHints.hpp"
 #include "simrv/core/CsrTypes.hpp"
+#include "simrv/isa/FpConversions.hpp"
+#include "vector/VectorHelpers.hpp"
 #include "simrv/xlen/Constants.hpp"
 #include "simrv/xlen/RegisterTypes.hpp"
 
@@ -63,6 +66,19 @@ constexpr auto read_f64(const simrv::xlen::FloatingRegister* freg, simrv::xlen::
 constexpr auto write_f32_boxed(float v) -> simrv::xlen::FloatingRegister {
     return static_cast<simrv::xlen::FloatingRegister>(simrv::xlen::kF32BoxerBits) |
            static_cast<simrv::xlen::FloatingRegister>(f32_bits(v));
+}
+
+constexpr auto read_f16(const simrv::xlen::FloatingRegister* freg, simrv::xlen::Word idx)
+    -> uint16_t {
+    const auto val = freg[idx];
+    return (val & ~simrv::xlen::FloatingRegister{0xFFFF}) ==
+                   ~simrv::xlen::FloatingRegister{0xFFFF}
+               ? static_cast<uint16_t>(val)
+               : UINT16_C(0x7E00);
+}
+
+constexpr auto write_f16_boxed(uint16_t value) -> simrv::xlen::FloatingRegister {
+    return ~simrv::xlen::FloatingRegister{0xFFFF} | value;
 }
 
 // ============================================================================
@@ -205,6 +221,16 @@ class FpEnvironment {
         fcsr |= flags;
     }
 
+    static inline void raise_flags(simrv::xlen::CsrValue flags) noexcept {
+        uint32_t mxcsr_flags = 0;
+        if ((flags & FflagsBit::Nv) != 0) mxcsr_flags |= 0x01u;
+        if ((flags & FflagsBit::Dz) != 0) mxcsr_flags |= 0x04u;
+        if ((flags & FflagsBit::Of) != 0) mxcsr_flags |= 0x08u;
+        if ((flags & FflagsBit::Uf) != 0) mxcsr_flags |= 0x10u;
+        if ((flags & FflagsBit::Nx) != 0) mxcsr_flags |= 0x20u;
+        _mm_setcsr(_mm_getcsr() | mxcsr_flags);
+    }
+
     static inline void raise_invalid() noexcept { _mm_setcsr(_mm_getcsr() | 0x01u); }
 };
 #else
@@ -245,6 +271,16 @@ class FpEnvironment {
         if ((ex & FE_UNDERFLOW) != 0) flags |= FflagsBit::Uf;
         if ((ex & FE_INEXACT) != 0) flags |= FflagsBit::Nx;
         fcsr |= flags;
+    }
+
+    static inline void raise_flags(simrv::xlen::CsrValue flags) noexcept {
+        int exceptions = 0;
+        if ((flags & FflagsBit::Nv) != 0) exceptions |= FE_INVALID;
+        if ((flags & FflagsBit::Dz) != 0) exceptions |= FE_DIVBYZERO;
+        if ((flags & FflagsBit::Of) != 0) exceptions |= FE_OVERFLOW;
+        if ((flags & FflagsBit::Uf) != 0) exceptions |= FE_UNDERFLOW;
+        if ((flags & FflagsBit::Nx) != 0) exceptions |= FE_INEXACT;
+        if (exceptions != 0) std::feraiseexcept(exceptions);
     }
 
     static inline void raise_invalid() noexcept { std::feraiseexcept(FE_INVALID); }
@@ -576,7 +612,14 @@ bool fp_exec_sgnj_minmax(FpExecResult& out, simrv::xlen::Word funct7, Funct3 fun
         FpEnvironment::clear_exceptions();
         const float a = read_f32(freg, rs1);
         const float b = read_f32(freg, rs2);
-        out.fp_wb_data = (funct3 == Funct3Fp::Max) ? fmax32_riscv(a, b) : fmin32_riscv(a, b);
+        if (funct3 == 2 || funct3 == 3) {
+            out.fp_wb_data = std::isnan(a) || std::isnan(b)
+                                 ? write_f32_boxed(f32_from_bits(simrv::xlen::kF32Qnan))
+                                 : (funct3 == 3 ? fmax32_riscv(a, b) : fmin32_riscv(a, b));
+            if (is_snan32(a) || is_snan32(b)) FpEnvironment::raise_invalid();
+        } else {
+            out.fp_wb_data = (funct3 == Funct3Fp::Max) ? fmax32_riscv(a, b) : fmin32_riscv(a, b);
+        }
         out.fp_wb_enable = true;
         FpEnvironment::accumulate_exceptions(fcsr);
         return true;
@@ -585,7 +628,14 @@ bool fp_exec_sgnj_minmax(FpExecResult& out, simrv::xlen::Word funct7, Funct3 fun
         FpEnvironment::clear_exceptions();
         const double a = read_f64(freg, rs1);
         const double b = read_f64(freg, rs2);
-        out.fp_wb_data = (funct3 == Funct3Fp::Max) ? fmax64_riscv(a, b) : fmin64_riscv(a, b);
+        if (funct3 == 2 || funct3 == 3) {
+            out.fp_wb_data = std::isnan(a) || std::isnan(b)
+                                 ? static_cast<simrv::xlen::FloatingRegister>(simrv::xlen::kF64Qnan)
+                                 : (funct3 == 3 ? fmax64_riscv(a, b) : fmin64_riscv(a, b));
+            if (is_snan64(a) || is_snan64(b)) FpEnvironment::raise_invalid();
+        } else {
+            out.fp_wb_data = (funct3 == Funct3Fp::Max) ? fmax64_riscv(a, b) : fmin64_riscv(a, b);
+        }
         out.fp_wb_enable = true;
         FpEnvironment::accumulate_exceptions(fcsr);
         return true;
@@ -596,6 +646,89 @@ bool fp_exec_sgnj_minmax(FpExecResult& out, simrv::xlen::Word funct7, Funct3 fun
 bool fp_exec_cvt(FpExecResult& out, simrv::xlen::Word funct7, simrv::xlen::Word rm,
                  simrv::xlen::Word rs1, simrv::xlen::Word rs2, simrv::xlen::Register rrs1,
                  const simrv::xlen::FloatingRegister* freg, simrv::xlen::CsrValue& fcsr) {
+    if ((funct7 == 0x20 || funct7 == 0x21) && (rs2 == 4 || rs2 == 5)) {
+        const bool is_d = funct7 == 0x21;
+        const bool signaling_nan = is_d ? is_snan64(read_f64(freg, rs1))
+                                        : is_snan32(read_f32(freg, rs1));
+        const double source = is_d ? read_f64(freg, rs1) : static_cast<double>(read_f32(freg, rs1));
+        const auto mode = resolve_rounding_mode(rm, fcsr);
+        FpEnvironment::set_rounding_mode(rm, fcsr);
+        const double rounded = std::isnan(source) || std::isinf(source) || source == 0.0
+                                   ? source
+                                   : mode == RoundingMode::Rtz ? std::trunc(source)
+                                   : mode == RoundingMode::Rdn ? std::floor(source)
+                                   : mode == RoundingMode::Rup ? std::ceil(source)
+                                   : mode == RoundingMode::Rmm ? std::round(source)
+                                                               : std::nearbyint(source);
+        FpEnvironment::clear_exceptions();
+        if (signaling_nan) FpEnvironment::raise_invalid();
+        if (rs2 == 5 && !std::isnan(source) && rounded != source)
+            FpEnvironment::raise_flags(std::to_underlying(simrv::isa::FflagsBit::Nx));
+        out.fp_wb_data = is_d ? f64_bits(rounded) : write_f32_boxed(static_cast<float>(rounded));
+        out.fp_wb_enable = true;
+        FpEnvironment::accumulate_exceptions(fcsr);
+        return true;
+    }
+    if (funct7 == 0x61 && rs2 == 8 && rm == 1) {
+        const double source = read_f64(freg, rs1);
+        const auto legacy = fcvt_to_int(source, 0, RoundingMode::Rtz, fcsr);
+        (void)legacy;
+        double reduced = std::isfinite(source) ? std::fmod(std::trunc(source), 4294967296.0) : 0.0;
+        if (reduced < 0.0) reduced += 4294967296.0;
+        const uint32_t low = static_cast<uint32_t>(reduced);
+        out.int_wb_data = static_cast<simrv::xlen::Register>(static_cast<int32_t>(low));
+        out.int_wb_enable = true;
+        return true;
+    }
+    if (funct7 == 0x22) {  // FCVT.S.H (exact widening conversion)
+        FpEnvironment::clear_exceptions();
+        const uint16_t raw = read_f16(freg, rs1);
+        const float src = simrv::execute::vector::fp16_to_fp32(raw);
+        if ((raw & UINT16_C(0x7C00)) == UINT16_C(0x7C00) &&
+            (raw & UINT16_C(0x03FF)) != 0 && (raw & UINT16_C(0x0200)) == 0) {
+            FpEnvironment::raise_invalid();
+        }
+        out.fp_wb_data = write_f32_boxed(std::isnan(src) ? f32_from_bits(simrv::xlen::kF32Qnan)
+                                                        : src);
+        out.fp_wb_enable = true;
+        FpEnvironment::accumulate_exceptions(fcsr);
+        return true;
+    }
+    if (funct7 == 0x26) {  // FCVT.H.S
+        const float src = read_f32(freg, rs1);
+        FpEnvironment::clear_exceptions();
+        const auto converted = isa::fp::to_binary16(src, resolve_rounding_mode(rm, fcsr));
+        FpEnvironment::raise_flags(converted.flags);
+        out.fp_wb_data = write_f16_boxed(converted.bits);
+        out.fp_wb_enable = true;
+        FpEnvironment::accumulate_exceptions(fcsr);
+        return true;
+    }
+    if (funct7 == 0x21) {  // FCVT.D.H (exact widening conversion)
+        FpEnvironment::clear_exceptions();
+        const uint16_t raw = read_f16(freg, rs1);
+        const float src = simrv::execute::vector::fp16_to_fp32(raw);
+        if ((raw & UINT16_C(0x7C00)) == UINT16_C(0x7C00) &&
+            (raw & UINT16_C(0x03FF)) != 0 && (raw & UINT16_C(0x0200)) == 0) {
+            FpEnvironment::raise_invalid();
+        }
+        out.fp_wb_data = std::isnan(src)
+                             ? static_cast<simrv::xlen::FloatingRegister>(simrv::xlen::kF64Qnan)
+                             : f64_bits(static_cast<double>(src));
+        out.fp_wb_enable = true;
+        FpEnvironment::accumulate_exceptions(fcsr);
+        return true;
+    }
+    if (funct7 == 0x25) {  // FCVT.H.D
+        const double src = read_f64(freg, rs1);
+        FpEnvironment::clear_exceptions();
+        const auto converted = isa::fp::to_binary16(src, resolve_rounding_mode(rm, fcsr));
+        FpEnvironment::raise_flags(converted.flags);
+        out.fp_wb_data = write_f16_boxed(converted.bits);
+        out.fp_wb_enable = true;
+        FpEnvironment::accumulate_exceptions(fcsr);
+        return true;
+    }
     if (funct7 == Funct7Fp::FcvtSD) {
         FpEnvironment::set_rounding_mode(rm, fcsr);
         FpEnvironment::clear_exceptions();
@@ -659,32 +792,34 @@ bool fp_exec_cmp(FpExecResult& out, simrv::xlen::Word funct7, Funct3 funct3, sim
             const float a = read_f32(freg, rs1);
             const float b = read_f32(freg, rs2);
             if (std::isnan(a) || std::isnan(b)) {
-                if (funct3 != Funct3Fp::Eq || is_snan32(a) || is_snan32(b)) {
+                const bool quiet_ordered = funct3 == 4 || funct3 == 5;
+                if ((!quiet_ordered && funct3 != Funct3Fp::Eq) || is_snan32(a) || is_snan32(b)) {
                     FpEnvironment::raise_invalid();
                 }
                 out.int_wb_data = 0;
             } else {
                 if (funct3 == Funct3Fp::Eq)
                     out.int_wb_data = static_cast<simrv::xlen::Register>(a == b);
-                if (funct3 == Funct3Fp::Lt)
+                if (funct3 == Funct3Fp::Lt || funct3 == 5)
                     out.int_wb_data = static_cast<simrv::xlen::Register>(a < b);
-                if (funct3 == Funct3Fp::Leq)
+                if (funct3 == Funct3Fp::Leq || funct3 == 4)
                     out.int_wb_data = static_cast<simrv::xlen::Register>(a <= b);
             }
         } else {
             const double a = read_f64(freg, rs1);
             const double b = read_f64(freg, rs2);
             if (std::isnan(a) || std::isnan(b)) {
-                if (funct3 != Funct3Fp::Eq || is_snan64(a) || is_snan64(b)) {
+                const bool quiet_ordered = funct3 == 4 || funct3 == 5;
+                if ((!quiet_ordered && funct3 != Funct3Fp::Eq) || is_snan64(a) || is_snan64(b)) {
                     FpEnvironment::raise_invalid();
                 }
                 out.int_wb_data = 0;
             } else {
                 if (funct3 == Funct3Fp::Eq)
                     out.int_wb_data = static_cast<simrv::xlen::Register>(a == b);
-                if (funct3 == Funct3Fp::Lt)
+                if (funct3 == Funct3Fp::Lt || funct3 == 5)
                     out.int_wb_data = static_cast<simrv::xlen::Register>(a < b);
-                if (funct3 == Funct3Fp::Leq)
+                if (funct3 == Funct3Fp::Leq || funct3 == 4)
                     out.int_wb_data = static_cast<simrv::xlen::Register>(a <= b);
             }
         }
@@ -696,8 +831,37 @@ bool fp_exec_cmp(FpExecResult& out, simrv::xlen::Word funct7, Funct3 funct3, sim
 }
 
 bool fp_exec_mv_class(FpExecResult& out, simrv::xlen::Word funct7, Funct3 funct3,
-                      simrv::xlen::Word rs1, simrv::xlen::Register rrs1,
+                      simrv::xlen::Word rs1, simrv::xlen::Word rs2, simrv::xlen::Register rrs1,
                       const simrv::xlen::FloatingRegister* freg) {
+    if ((funct7 == 0x78 || funct7 == 0x79) && rs2 == 1 && funct3 == 0) {
+        constexpr std::array<double, 32> kValues = {
+            -1.0, std::numeric_limits<double>::min(), 0x1p-16, 0x1p-15, 0x1p-8, 0x1p-7,
+            0.0625, 0.125, 0.25, 0.3125, 0.375, 0.4375, 0.5, 0.625, 0.75, 0.875,
+            1.0, 1.25, 1.5, 1.75, 2.0, 2.5, 3.0, 4.0, 8.0, 16.0, 128.0, 256.0,
+            32768.0, 65536.0, std::numeric_limits<double>::infinity(),
+            std::numeric_limits<double>::quiet_NaN()};
+        if (rs1 >= kValues.size()) return false;
+        if (funct7 == 0x78) {
+            const float value = rs1 == 1 ? std::numeric_limits<float>::min()
+                                         : static_cast<float>(kValues[rs1]);
+            out.fp_wb_data = write_f32_boxed(std::isnan(value) ? f32_from_bits(0x7fc00000U) : value);
+        } else {
+            out.fp_wb_data = rs1 == 31 ? simrv::xlen::kF64Qnan : f64_bits(kValues[rs1]);
+        }
+        out.fp_wb_enable = true;
+        return true;
+    }
+    if (funct7 == 0x72 && funct3 == Funct3Fp::FmvXW) {  // FMV.X.H
+        out.int_wb_data = static_cast<simrv::xlen::Register>(
+            static_cast<int16_t>(read_f16(freg, rs1)));
+        out.int_wb_enable = true;
+        return true;
+    }
+    if (funct7 == 0x7A && funct3 == Funct3Fp::FmvXW) {  // FMV.H.X
+        out.fp_wb_data = write_f16_boxed(static_cast<uint16_t>(rrs1));
+        out.fp_wb_enable = true;
+        return true;
+    }
     if (funct7 == Funct7Fp::FmvXW || funct7 == Funct7Fp::FmvXD) {
         const bool is_d = (funct7 == Funct7Fp::FmvXD);
         if (funct3 == Funct3Fp::FmvXW) {
@@ -741,7 +905,7 @@ auto ExecuteUnitFp::opFp(simrv::xlen::Funct7 funct7, Funct3 funct3, simrv::xlen:
     if (fp::fp_exec_sgnj_minmax(out, funct7, funct3, u_rs1, u_rs2, freg, fcsr)) return out;
     if (fp::fp_exec_cvt(out, funct7, rm, u_rs1, u_rs2, rrs1, freg, fcsr)) return out;
     if (fp::fp_exec_cmp(out, funct7, funct3, u_rs1, u_rs2, freg, fcsr)) return out;
-    if (fp::fp_exec_mv_class(out, funct7, funct3, u_rs1, rrs1, freg)) return out;
+    if (fp::fp_exec_mv_class(out, funct7, funct3, u_rs1, u_rs2, rrs1, freg)) return out;
 
     return out;
 }

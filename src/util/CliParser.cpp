@@ -462,6 +462,7 @@ auto parse_isa_preset(std::string_view value) -> std::expected<ParsedIsaPreset, 
                 if (supported_extension("svinval")) return 1ULL << 39;
                 if (supported_extension("svnapot")) return 1ULL << 40;
                 if (supported_extension("svpbmt")) return 1ULL << 41;
+                if (supported_extension("sscofpmf")) return 1ULL << 42;
 
                 return 0ULL;
             }();
@@ -1431,6 +1432,15 @@ auto parse_command_line(std::span<char* const> args) -> std::expected<ParseResul
         return std::unexpected("--trace-pc-range start must not exceed end");
     }
 
+    if (result.options.uefi_enabled) {
+        if (result.options.fn_uefi.empty())
+            return std::unexpected("--uefi requires a RISCV_VIRT_CODE.fd firmware image");
+        if (result.options.fn_memimg.empty())
+            return std::unexpected("UEFI requires -m <OpenSBI fw_dynamic.bin> for the M-mode boot stage");
+        if (result.options.fn_uefi_vars.empty())
+            return std::unexpected("UEFI requires --uefi-vars <writable VARS.fd working copy>");
+    }
+
     if (needs_memory_image(result)) {
         return std::unexpected("-m/--image <FILE> is required to load a memory image");
     }
@@ -1725,9 +1735,6 @@ auto apply_runtime_options(simrv::core::Machine* machine, const RuntimeOptions& 
 }
 
 auto needs_memory_image(const ParseResult& result) -> bool {
-    if (result.options.uefi_enabled && !result.options.fn_uefi.empty()) {
-        return false;
-    }
     return result.options.fn_memimg.empty() && !result.options.tuimode &&
            result.action != CliAction::ExplainInstruction && result.action != CliAction::ShowHelp &&
            result.action != CliAction::ShowVersion && result.action != CliAction::ShowLicense &&
@@ -1753,10 +1760,10 @@ auto cli_help_sections() -> const std::vector<HelpSection>& {
               {.option = "-b, --baremetal",
                .description = "Run a bare-metal application (default)."},
               {.option = "--os", .description = "Boot an operating system (Linux or RTOS)."},
-              {.option = "--uefi [CODE.fd]",
-               .description = "Boot via UEFI firmware (PFlash Bank 0 on virt-pcie profile)."},
+              {.option = "--uefi CODE.fd",
+               .description = "Load UEFI CODE in pflash; boot it through OpenSBI fw_dynamic (-m)."},
               {.option = "--uefi-vars <VARS.fd>",
-               .description = "Persistent NVRAM storage image for UEFI variables (PFlash Bank 1)."},
+               .description = "Writable copy of the UEFI VARS template for PFlash Bank 1."},
               {.option = "--auto-fdt",
                .description = "Synthesize compliant device tree directly into guest DRAM."},
               {.option = "--bootargs <ARGS>",

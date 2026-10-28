@@ -13,7 +13,7 @@
 
 namespace simrv::cache {
 
-class DCache : public BaseCache<1024, 32, 8> {
+class DCache : public BaseCache<512, 64, 8> {
    public:
     DCache() = default;
 

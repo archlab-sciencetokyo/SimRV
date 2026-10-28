@@ -202,6 +202,8 @@ consteval auto generate_operation_info() {
               exec_def, {.rd = b_int, .rs1 = b_int, .rs2 = b_int, .rs3 = b_none}, mem_atomic);
 
     // F Extension (Single-Precision Floating Point)
+    set_props({FLH}, exec_def, {.rd = b_fp, .rs1 = b_int, .rs2 = b_none, .rs3 = b_none}, mem_load);
+    set_props({FSH}, exec_def, {.rd = b_none, .rs1 = b_int, .rs2 = b_fp, .rs3 = b_none}, mem_store);
     set_props({FLW}, exec_def, {.rd = b_fp, .rs1 = b_int, .rs2 = b_none, .rs3 = b_none}, mem_load);
     set_props({FSW}, exec_def, {.rd = b_none, .rs1 = b_int, .rs2 = b_fp, .rs3 = b_none}, mem_store);
     set_props({FADD_S, FSUB_S, FMUL_S, FSGNJ_S, FSGNJN_S, FSGNJX_S, FMIN_S, FMAX_S}, exec_fpalu,
@@ -234,6 +236,28 @@ consteval auto generate_operation_info() {
               {.rd = b_fp, .rs1 = b_int, .rs2 = b_none, .rs3 = b_none});
     set_props({FCVT_S_D, FCVT_D_S}, exec_fpalu,
               {.rd = b_fp, .rs1 = b_fp, .rs2 = b_none, .rs3 = b_none});
+    set_props({FMV_X_H}, exec_fpalu,
+              {.rd = b_int, .rs1 = b_fp, .rs2 = b_none, .rs3 = b_none});
+    set_props({FMV_H_X}, exec_fpalu,
+              {.rd = b_fp, .rs1 = b_int, .rs2 = b_none, .rs3 = b_none});
+    set_props({FCVT_S_H, FCVT_H_S, FCVT_D_H, FCVT_H_D}, exec_fpalu,
+              {.rd = b_fp, .rs1 = b_fp, .rs2 = b_none, .rs3 = b_none});
+    set_props({FLI_S}, exec_fpalu, {.rd = b_fp, .rs1 = b_none, .rs2 = b_none, .rs3 = b_none});
+    set_props({FMINM_S, FMAXM_S}, exec_fpalu,
+              {.rd = b_fp, .rs1 = b_fp, .rs2 = b_fp, .rs3 = b_none});
+    set_props({FLEQ_S, FLTQ_S}, exec_fpalu,
+              {.rd = b_int, .rs1 = b_fp, .rs2 = b_fp, .rs3 = b_none});
+    set_props({FROUND_S, FROUNDNX_S}, exec_fpalu,
+              {.rd = b_fp, .rs1 = b_fp, .rs2 = b_none, .rs3 = b_none});
+    set_props({FLI_D}, exec_fpalu, {.rd = b_fp, .rs1 = b_none, .rs2 = b_none, .rs3 = b_none});
+    set_props({FMINM_D, FMAXM_D}, exec_fpalu,
+              {.rd = b_fp, .rs1 = b_fp, .rs2 = b_fp, .rs3 = b_none});
+    set_props({FLEQ_D, FLTQ_D}, exec_fpalu,
+              {.rd = b_int, .rs1 = b_fp, .rs2 = b_fp, .rs3 = b_none});
+    set_props({FROUND_D, FROUNDNX_D}, exec_fpalu,
+              {.rd = b_fp, .rs1 = b_fp, .rs2 = b_none, .rs3 = b_none});
+    set_props({FCVTMOD_W_D}, exec_fpalu,
+              {.rd = b_int, .rs1 = b_fp, .rs2 = b_none, .rs3 = b_none});
 
     // B Extension (Bit Manipulation)
     set_props({SH1ADD, SH2ADD, SH3ADD, SH1ADD_UW, SH2ADD_UW, SH3ADD_UW, ADD_UW, ANDN, ORN,

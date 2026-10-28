@@ -2,6 +2,7 @@
 #include <cmath>
 #include <limits>
 
+#include "simrv/isa/FpConversions.hpp"
 #include "VectorHelpers.hpp"
 #include "VectorSubunits.hpp"
 
@@ -1364,11 +1365,17 @@ void execute_vfwcvt(core::CPU& cpu, isa::OperationId op_id, simrv::xlen::RegId r
                           value, force_rtz, cpu.state().fcsr, flags));
             vector::set_group_element<WideRaw>(cpu.state().regs, rd, i, result);
         } else {
-            const auto value = int_to_float
-                                   ? (unsigned_int ? static_cast<typename WideE::Value>(sources[i])
-                                                   : static_cast<typename WideE::Value>(
-                                                         static_cast<NarrowSigned>(sources[i])))
-                                   : static_cast<typename WideE::Value>(NarrowE::value(sources[i]));
+            auto value = int_to_float
+                             ? (unsigned_int ? static_cast<typename WideE::Value>(sources[i])
+                                             : static_cast<typename WideE::Value>(
+                                                   static_cast<NarrowSigned>(sources[i])))
+                             : static_cast<typename WideE::Value>(NarrowE::value(sources[i]));
+            if constexpr (std::is_same_v<NarrowT, uint16_t> && std::is_same_v<WideT, float>) {
+                if (op_id == isa::OperationId::VFWCVT_F_F_V) {
+                    if (NarrowE::signaling_nan(sources[i])) flags |= isa::FflagsBit::Nv;
+                    value = canonicalize_nan(value);
+                }
+            }
             vector::set_group_element<WideRaw>(cpu.state().regs, rd, i,
                                                fp_result_raw<WideT>(value));
         }
@@ -1435,6 +1442,15 @@ void execute_vfncvt(core::CPU& cpu, isa::OperationId op_id, simrv::xlen::RegId r
             }
         } else {
             const auto value = WideE::value(sources[i]);
+            if constexpr (std::is_same_v<NarrowT, uint16_t> && std::is_same_v<WideT, float>) {
+                if (op_id == isa::OperationId::VFNCVT_F_F_W) {
+                    const auto converted = isa::fp::to_binary16(value, isa::frm_rounding_mode(
+                                                                           cpu.state().fcsr));
+                    flags |= converted.flags;
+                    vector::set_group_element<NarrowRaw>(cpu.state().regs, rd, i, converted.bits);
+                    continue;
+                }
+            }
             if (round_odd && std::isfinite(value)) {
                 const int saved_round = std::fegetround();
                 std::fesetround(FE_TOWARDZERO);

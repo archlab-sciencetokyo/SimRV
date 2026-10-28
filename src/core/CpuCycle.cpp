@@ -258,12 +258,15 @@ void CPU::execute_ca_cycle_stages(Machine& machine, simrv::xlen::Counter retired
         ca_pipeline.memory->tlb_miss || ca_pipeline.writeback->tlb_miss ||
         ca_state.instruction_fill.active || ca_state.data_transfer.active ||
         ca_state.instruction_walk.active || ca_state.data_walk.active ||
+        ca_state.waiting_for_interconnect ||
         simrv::compiler::unlikely(machine.trace().is_architecture_trace_enabled()) ||
         simrv::compiler::unlikely(record_snapshots);
 
     if (simrv::compiler::likely(!has_events_or_stalls)) {
         pipeline_sim.record_clean_cycle();
     } else {
+        if (ca_state.waiting_for_interconnect)
+            record_hpm_event(HpmEvent::InterconnectStall);
         const bool instruction_walk = ca_state.instruction_walk.active;
         const bool data_walk = ca_state.data_walk.active;
         const bool fetch_stalled = ca_pipeline.fetch->remaining_latency != 0 ||
@@ -277,6 +280,13 @@ void CPU::execute_ca_cycle_stages(Machine& machine, simrv::xlen::Counter retired
         const bool writeback_stalled =
             ca_pipeline.writeback->remaining_latency != 0 ||
             (three_stage && (ca_state.data_transfer.active || data_walk));
+        const bool any_stall = fetch_stalled || decode_stalled || execute_stalled ||
+                               memory_stalled || writeback_stalled ||
+                               ca_state.waiting_for_interconnect;
+        if (any_stall) record_hpm_event(HpmEvent::StallCycles);
+        if (ca_pipeline.data_hazard_stall) record_hpm_event(HpmEvent::DataHazardStall);
+        if (any_stall && !ca_pipeline.data_hazard_stall)
+            record_hpm_event(HpmEvent::StructuralStall);
         if (machine.trace().is_architecture_trace_enabled()) {
             std::array<simrv::core::PipelineStallRecord, 5> stall_storage{};
             size_t stall_count = 0;
@@ -459,6 +469,7 @@ SIMRV_ALWAYS_INLINE void CPU::tick_cycle_clock(Machine& machine, bool interrupt_
         --cycle_counter_start_delay_;
     } else {
         ++clint_mmio.mcycle;
+        record_hpm_event(HpmEvent::Cycles);
     }
     if (machine.runtime_profile.is_cycle_mode()) {
         if (interrupt_boundary) handle_cached_interrupts();
@@ -562,7 +573,8 @@ void CPU::run_cycle_baremetal_miss(Machine& machine) {
         raise_exception(static_cast<simrv::xlen::TrapCause>(cause), pipeline_context.pending_tval);
     }
 
-    clint_mmio.mcycle++;
+    account_arch_cycles();
+    record_hpm_event(HpmEvent::Cycles);
     if (machine.clock_divider().advance_ca_cycle(clint_mmio.rtc_divider, clint_mmio.mtime)) {
         evaluate_timer_interrupt();
     }
@@ -645,7 +657,8 @@ void CPU::run_cycle_baremetal(Machine& machine) {
             } else {
                 execute_cached_op_fast<false, false>(machine, *cached, machine.ram_view());
             }
-            clint_mmio.mcycle++;
+            account_arch_cycles();
+            record_hpm_event(HpmEvent::Cycles);
             if (machine.clock_divider().advance_ca_cycle(clint_mmio.rtc_divider,
                                                          clint_mmio.mtime)) {
                 evaluate_timer_interrupt();
@@ -756,6 +769,14 @@ void CPU::run_memory_stage_baremetal(Machine& machine) {
         if (simrv::compiler::likely(machine.memory_geometry().contains(addr, access_size))) {
             const auto f3 = ctx.funct3;
             switch (f3) {
+                case Funct3::Flh: {
+                    const auto half = simrv::memory::ram_read_fast(
+                        addr, static_cast<simrv::xlen::Instruction>(Funct3::Lhu),
+                        machine.ram_view());
+                    ctx.fp_mem_rdata = static_cast<uint64_t>(~uint64_t{0xFFFF}) |
+                                       static_cast<uint16_t>(half);
+                    break;
+                }
                 case Funct3::Flw: {
                     const simrv::xlen::Word lo = simrv::memory::ram_read_fast(
                         addr, static_cast<simrv::xlen::Instruction>(Funct3::Lw),
@@ -861,6 +882,11 @@ void CPU::run_memory_stage_baremetal(Machine& machine) {
                                     !is_tohost_addr(machine, addr))) {
             const auto f3 = ctx.funct3;
             switch (f3) {
+                case Funct3::Fsh:
+                    simrv::memory::ram_write_fast(
+                        addr, static_cast<simrv::xlen::Word>(ctx.fp_mem_wdata & 0xFFFFU),
+                        static_cast<simrv::xlen::Instruction>(Funct3::Sh), machine.ram_view());
+                    break;
                 case Funct3::Fsw:
                     simrv::memory::ram_write_fast(
                         addr,

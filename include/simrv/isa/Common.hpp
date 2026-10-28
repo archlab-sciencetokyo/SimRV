@@ -96,7 +96,8 @@ constexpr auto required_extension_for_instruction(simrv::xlen::Instruction ir, b
         case Opcode::StoreFp: {
             const auto f3 = funct3_of(ir);
             if (f3 == Funct3::Fld || f3 == Funct3::Fsd) return IsaExtension::D;
-            if (static_cast<uint8_t>(f3) == 2) return IsaExtension::F;
+            if (f3 == Funct3::Flh || f3 == Funct3::Fsh || static_cast<uint8_t>(f3) == 2)
+                return IsaExtension::F;
             return IsaExtension::V;
         }
         case Opcode::OpV:
@@ -158,6 +159,35 @@ constexpr auto required_misa_extensions(OperationId op_id, bool compressed = fal
     if (in_range(OperationId::FLD, OperationId::FCVT_D_LU)) {
         return compressed_requirement | misa_extension_bit(IsaExtension::F) |
                misa_extension_bit(IsaExtension::D);
+    }
+    if (in_range(OperationId::FLH, OperationId::FCVT_H_D)) {
+        const auto required = compressed_requirement | misa_extension_bit(IsaExtension::F);
+        if (op_id == OperationId::FCVT_D_H || op_id == OperationId::FCVT_H_D) {
+            return required | misa_extension_bit(IsaExtension::D);
+        }
+        return required;
+    }
+    switch (op_id) {
+        case OperationId::FLI_S:
+        case OperationId::FMINM_S:
+        case OperationId::FMAXM_S:
+        case OperationId::FLEQ_S:
+        case OperationId::FLTQ_S:
+        case OperationId::FROUND_S:
+        case OperationId::FROUNDNX_S:
+            return compressed_requirement | misa_extension_bit(IsaExtension::F);
+        case OperationId::FLI_D:
+        case OperationId::FMINM_D:
+        case OperationId::FMAXM_D:
+        case OperationId::FLEQ_D:
+        case OperationId::FLTQ_D:
+        case OperationId::FROUND_D:
+        case OperationId::FROUNDNX_D:
+        case OperationId::FCVTMOD_W_D:
+            return compressed_requirement | misa_extension_bit(IsaExtension::F) |
+                   misa_extension_bit(IsaExtension::D);
+        default:
+            break;
     }
     if (in_range(OperationId::SH1ADD, OperationId::PACKW)) {
         return compressed_requirement | misa_extension_bit(IsaExtension::B);

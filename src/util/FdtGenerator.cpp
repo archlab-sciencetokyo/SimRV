@@ -9,6 +9,7 @@
 #include <span>
 
 #include "simrv/core/PlatformMap.h"
+#include "simrv/core/HpmEventCatalog.hpp"
 #include "simrv/core/PlatformTiming.hpp"
 #include "simrv/core/SoCDeviceRegistry.hpp"
 #include "simrv/memory/Mmio.hpp"
@@ -186,8 +187,8 @@ auto generate_platform_fdt(const core::MachineConfig& config,
 
     // Root node
     fdt.begin_node("");
-    fdt.property_string("compatible", "riscv-virtio");
-    fdt.property_string("model", "riscv-virtio,qemu");
+    fdt.property_string("compatible", "simrv,virt");
+    fdt.property_string("model", "SimRV RISC-V Virtual Platform");
     fdt.property_u32("#address-cells", 2);
     fdt.property_u32("#size-cells", 2);
 
@@ -207,10 +208,14 @@ auto generate_platform_fdt(const core::MachineConfig& config,
     fdt.property_u32("#size-cells", 0);
     fdt.property_u32("timebase-frequency", timebase);
 
-    static constexpr std::string_view kRva23Exts[] = {
+    // This is the set SimRV currently implements and exposes to the guest, not the full set of
+    // extensions required by the RVA23 profiles. Keep the compliance gap explicit in
+    // docs/architecture/compliance.md until the remaining mandatory extensions are implemented.
+    static constexpr std::string_view kSupportedGuestExts[] = {
         "i",      "m",      "a",       "f",        "d",           "c",      "b",
-        "v",      "zicntr", "zicsr",   "zifencei", "zihintpause", "zicond", "zicboz",
-        "zicbom", "zicbop", "svinval", "svpbmt",   "svnapot",     "sstc",
+        "v",      "zicntr", "zihpm",  "zicsr",    "zifencei",   "zihintpause", "zihintntl",
+        "zic64b", "zicclsm", "za64rs", "ziccamoa", "zfhmin", "zvfhmin", "zfa", "zicond", "zicboz",
+        "zicbom", "zicbop", "svinval", "svpbmt",   "svnapot",     "sstc",   "sscofpmf",
     };
 
     for (uint32_t hart = 0; hart < num_harts; ++hart) {
@@ -221,9 +226,10 @@ auto generate_platform_fdt(const core::MachineConfig& config,
         fdt.property_string("status", "okay");
         fdt.property_u32("clock-frequency", clock_hz);
         fdt.property_string("riscv,isa-base", simrv::xlen::kIsXLen64 ? "rv64i" : "rv32i");
-        fdt.property_stringlist("riscv,isa-extensions", kRva23Exts);
-        fdt.property_u32("riscv,cbom-block-size", 32);
-        fdt.property_u32("riscv,cboz-block-size", 32);
+        fdt.property_stringlist("riscv,isa-extensions", kSupportedGuestExts);
+        fdt.property_u32("riscv,cbom-block-size", 64);
+        fdt.property_u32("riscv,cbop-block-size", 64);
+        fdt.property_u32("riscv,cboz-block-size", 64);
         fdt.property_string("mmu-type", simrv::xlen::kIsXLen64 ? "riscv,sv39" : "riscv,sv32");
 
         // CPU Interrupt Controller
@@ -238,6 +244,32 @@ auto generate_platform_fdt(const core::MachineConfig& config,
         fdt.end_node();  // cpu@hart
     }
     fdt.end_node();  // cpus
+
+    // PMU selector IDs and raw event support are kept in the HPM catalog. The only generic
+    // mapping advertised here is branch-misses, whose meaning matches selector 9.
+    fdt.begin_node("pmu");
+    fdt.property_string("compatible", "riscv,pmu");
+    std::vector<FdtCell> generic_selectors;
+    std::vector<FdtCell> generic_counter_ranges;
+    for (const auto& mapping : core::kSbiGenericHpmMappings) {
+        generic_selectors.insert(generic_selectors.end(),
+                                 {mapping.event_code, 0U, std::to_underlying(mapping.event)});
+        generic_counter_ranges.insert(generic_counter_ranges.end(),
+                                      {mapping.event_code, mapping.event_code, 0xfffffff8U});
+    }
+    fdt.property_array_u32("riscv,event-to-mhpmevent", generic_selectors);
+    fdt.property_array_u32("riscv,event-to-mhpmcounters", generic_counter_ranges);
+    std::vector<FdtCell> raw_events;
+    raw_events.reserve(core::kHpmEventCatalog.size() * 5);
+    for (const auto& event : core::kHpmEventCatalog) {
+        raw_events.push_back(0U);
+        raw_events.push_back(std::to_underlying(event.id));
+        raw_events.push_back(0xffffffffU);
+        raw_events.push_back(0xffffffffU);
+        raw_events.push_back(0xfffffff8U);
+    }
+    fdt.property_array_u32("riscv,raw-event-to-mhpmcounters", raw_events);
+    fdt.end_node();
 
     // /memory
     fdt.begin_node(std::format("memory@{:x}", dram_base));
@@ -262,18 +294,20 @@ auto generate_platform_fdt(const core::MachineConfig& config,
     fdt.end_node();
 
     // RTC
-    fdt.begin_node("rtc@101000");
+    fdt.begin_node("rtc@70000000");
     fdt.property_string("compatible", "google,goldfish-rtc");
-    fdt.property_reg("reg", 0x101000ULL, 0x1000ULL);
+    fdt.property_reg("reg", 0x70000000ULL, 0x1000ULL);
     fdt.property_phandle("interrupt-parent", 1U);
     fdt.property_u32("interrupts", 11U);
     fdt.end_node();
 
-    // Power (syscon)
-    fdt.begin_node("power@100000");
-    static constexpr std::string_view kPowerCompat[] = {"syscon-poweroff", "syscon"};
-    fdt.property_stringlist("compatible", kPowerCompat);
+    // SiFive test finisher, exposed as a syscon so Linux can resolve the
+    // separate syscon-poweroff and syscon-reboot nodes below.
+    fdt.begin_node("test@100000");
+    static constexpr std::string_view kTestCompat[] = {"sifive,test1", "sifive,test0", "syscon"};
+    fdt.property_stringlist("compatible", kTestCompat);
     fdt.property_reg("reg", 0x100000ULL, 0x1000ULL);
+    fdt.property_phandle("phandle", 2U);
     fdt.end_node();
 
     // CLINT
@@ -293,10 +327,11 @@ auto generate_platform_fdt(const core::MachineConfig& config,
 
     // PLIC
     fdt.begin_node("plic@50000000");
-    static constexpr std::string_view kPlicCompat[] = {"riscv,plic0", "sifive,plic-1.0.0"};
+    static constexpr std::string_view kPlicCompat[] = {"sifive,plic-1.0.0", "riscv,plic0"};
     fdt.property_stringlist("compatible", kPlicCompat);
-    fdt.property_reg("reg", 0x50000000ULL, 0x4000000ULL);
-    fdt.property_u32("riscv,ndev", 32);
+    fdt.property_reg("reg", 0x50000000ULL, 0x00400000ULL);
+    fdt.property_u32("#address-cells", 0);
+    fdt.property_u32("riscv,ndev", 31);
     fdt.property_empty("interrupt-controller");
     fdt.property_u32("#interrupt-cells", 1);
     fdt.property_phandle("phandle", 1U);
@@ -331,12 +366,19 @@ auto generate_platform_fdt(const core::MachineConfig& config,
         fdt.property_reg("reg", SIMRV_PLATFORM_PCIE_ECAM_BASE, SIMRV_PLATFORM_PCIE_ECAM_SIZE);
         fdt.property_u32("#address-cells", 3);
         fdt.property_u32("#size-cells", 2);
+        fdt.property_u32("#interrupt-cells", 1);
         fdt.property_array_u32("bus-range", {0, 255});
         // 32-bit MMIO aperture: flags=0x02000000 (32-bit non-prefetchable memory)
         // pci_addr=0x40000000, cpu_addr=0x40000000, size=0x10000000
         const FdtCell pci_ranges[] = {0x02000000U, 0x00000000U, 0x40000000U, 0x00000000U,
                                       0x40000000U, 0x00000000U, 0x10000000U};
         fdt.property_array_u32("ranges", pci_ranges);
+        fdt.property_phandle("interrupt-parent", 1U);
+        fdt.property_array_u32("interrupt-map-mask", {0xf800U, 0, 0, 0x7U});
+        fdt.property_array_u32("interrupt-map", {0x0800U, 0, 0, 1, 1, 17, 0x1000U, 0, 0, 1, 1, 18,
+                                                 0x1800U, 0, 0, 1, 1, 19, 0x2000U, 0, 0, 1, 1, 20,
+                                                 0x2800U, 0, 0, 1, 1, 21, 0x3000U, 0, 0, 1, 1, 22,
+                                                 0x3800U, 0, 0, 1, 1, 23});
         fdt.end_node();
     } else {
         // VirtIO MMIO slots for embedded / FPGA target
@@ -358,6 +400,21 @@ auto generate_platform_fdt(const core::MachineConfig& config,
     }
 
     fdt.end_node();  // /soc
+
+    fdt.begin_node("poweroff");
+    fdt.property_string("compatible", "syscon-poweroff");
+    fdt.property_phandle("regmap", 2U);
+    fdt.property_u32("offset", 0);
+    fdt.property_u32("value", 0x5555U);
+    fdt.end_node();
+
+    fdt.begin_node("reboot");
+    fdt.property_string("compatible", "syscon-reboot");
+    fdt.property_phandle("regmap", 2U);
+    fdt.property_u32("offset", 0);
+    fdt.property_u32("value", 0x7777U);
+    fdt.end_node();
+
     fdt.end_node();  // root
 
     return fdt.serialize();

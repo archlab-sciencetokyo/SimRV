@@ -40,6 +40,7 @@
 #include "simrv/pipeline/CycleTransition.hpp"
 #include "simrv/pipeline/PipelineContext.hpp"
 #include "simrv/pipeline/PipelineSim.hpp"
+#include "simrv/pipeline/OperationTraits.hpp"
 #include "simrv/pipeline/Scoreboard.hpp"
 #include "simrv/xlen/IdentifierTypes.hpp"
 
@@ -86,6 +87,7 @@ struct alignas(128) ArchState {
     simrv::xlen::CsrValue mcounteren{};     ///< Machine Counter Enable (controls user/supervisor
                                             ///< access to performance counters)
     simrv::xlen::CsrValue mcountinhibit{};  ///< Machine Counter Inhibit (mcountinhibit, 0x320)
+    simrv::xlen::Counter minstret{};        ///< Architectural retired-instruction counter
     simrv::xlen::CsrValue menvcfg{};        ///< Machine Environment Configuration (menvcfg, 0x30A)
     simrv::xlen::CsrValue menvcfgh{};  ///< Machine Environment Configuration High (RV32, 0x31A)
     simrv::xlen::CsrValue mseccfg{};   ///< Machine Security Configuration (Smepmp, 0x747)
@@ -792,11 +794,24 @@ class CPU {
     }
     SIMRV_ALWAYS_INLINE void pc_sign_extend() noexcept { state_.canonicalize_pc(); }
 
+    /// Internal retirement accounting is unconditional; the architectural minstret CSR obeys IR.
+    SIMRV_ALWAYS_INLINE void account_retirement(uint64_t count = 1) noexcept {
+        e_icount += count;
+        if ((state_.mcountinhibit & 4U) == 0) state_.minstret += count;
+    }
+
+    SIMRV_ALWAYS_INLINE void account_arch_cycles(uint64_t count = 1) noexcept {
+        if ((state_.mcountinhibit & 1U) == 0) clint_mmio.mcycle += count;
+    }
+
     /// Advance PC by op.len() and update instruction counters for straight ALU ops without
     /// branch/interrupt overhead.
     SIMRV_ALWAYS_INLINE void advance_cached_pc_alu(const CachedOp& op) {
         state_.pc += op.len();
-        e_icount++;
+        account_retirement();
+        record_hpm_event(HpmEvent::Instructions);
+        record_hpm_event(HpmEvent::Cycles);
+        record_hpm_instruction_classes(op.op_id, op.opcode(), op.cinsn != 0);
         e_ccount += (op.cinsn != 0);
     }
 
@@ -804,7 +819,10 @@ class CPU {
     /// The enclosing fast-execution kernel processes interrupts once after the instruction.
     SIMRV_ALWAYS_INLINE void advance_cached_pc(const CachedOp& op) {
         state_.pc += op.len();
-        e_icount++;
+        account_retirement();
+        record_hpm_event(HpmEvent::Instructions);
+        record_hpm_event(HpmEvent::Cycles);
+        record_hpm_instruction_classes(op.op_id, op.opcode(), op.cinsn != 0);
         e_ccount += (op.cinsn != 0);
         pc_sign_extend();
     }
@@ -814,7 +832,10 @@ class CPU {
     SIMRV_ALWAYS_INLINE void commit_cached_branch_target(const CachedOp& op,
                                                          simrv::xlen::VirtAddr target_pc) {
         state_.pc = target_pc.raw();
-        e_icount++;
+        account_retirement();
+        record_hpm_event(HpmEvent::Instructions);
+        record_hpm_event(HpmEvent::Cycles);
+        record_hpm_instruction_classes(op.op_id, op.opcode(), op.cinsn != 0);
         e_ccount += (op.cinsn != 0);
         pc_sign_extend();
     }
@@ -882,6 +903,43 @@ class CPU {
         }
     }
 
+    SIMRV_ALWAYS_INLINE void record_hpm_event(HpmEvent event, uint64_t count = 1) noexcept {
+        if (perf_counters.notify_event(event, count, static_cast<uint32_t>(state_.mcountinhibit),
+                                       state_.priv)) {
+            if (isa::misa_has_extension(state_.misa, isa::IsaExtension::S)) {
+                state_.mip |= MipBit::Lcofip;
+            }
+        }
+    }
+
+    /// Record instruction-class events at retirement/completion through programmable HPMs.
+    SIMRV_ALWAYS_INLINE void record_hpm_instruction_classes(isa::OperationId op,
+                                                            isa::Opcode opcode,
+                                                            bool compressed) noexcept {
+        if (simrv::compiler::unlikely(!perf_counters.has_instruction_class_listeners())) return;
+        using pipeline::operation::ControlFlowKind;
+        using pipeline::operation::ExecutionClass;
+        using pipeline::operation::MemoryAccessKind;
+        const auto info = pipeline::operation::info(op);
+        if (info.control == ControlFlowKind::Branch) record_hpm_event(HpmEvent::BranchInstruction);
+        if (info.memory == MemoryAccessKind::Load) record_hpm_event(HpmEvent::LoadInstruction);
+        if (info.memory == MemoryAccessKind::Store) record_hpm_event(HpmEvent::StoreInstruction);
+        if (info.execution_class == ExecutionClass::Multiply ||
+            info.execution_class == ExecutionClass::DivideOrRemainder)
+            record_hpm_event(HpmEvent::MulDivInstruction);
+        if (isa::is_f_op(op) || isa::is_d_op(op) || isa::is_zfhmin_op(op))
+            record_hpm_event(HpmEvent::FloatInstruction);
+        if (isa::is_vector_op(op)) record_hpm_event(HpmEvent::VectorInstruction);
+        if (compressed) record_hpm_event(HpmEvent::CompressedInstruction);
+        const bool integer_alu_opcode =
+            opcode == isa::Opcode::Op || opcode == isa::Opcode::OpImm ||
+            opcode == isa::Opcode::Op32 || opcode == isa::Opcode::OpImm32 ||
+            opcode == isa::Opcode::Lui || opcode == isa::Opcode::Auipc;
+        if (integer_alu_opcode && info.execution_class == ExecutionClass::Default &&
+            info.memory == MemoryAccessKind::None && info.control == ControlFlowKind::None)
+            record_hpm_event(HpmEvent::IntegerAluInstruction);
+    }
+
     Tlb tlb;
 
     simrv::device::Plic plic_mmio;
@@ -920,6 +978,9 @@ class CPU {
 
     // ========== Execution Metrics ==========
     simrv::xlen::Counter e_icount{0};   // Total instruction count
+    std::array<uint64_t, 32> sbi_pmu_selector{};
+    std::array<bool, 32> sbi_pmu_configured{};
+    std::array<bool, 32> sbi_pmu_started{};
     simrv::xlen::Counter e_ccount = 0;  // Compressed instructions executed
     simrv::xlen::LatencyCycles cycle_counter_start_delay_ = 0;
     simrv::xlen::CycleCount last_retire_cycle_{0};
