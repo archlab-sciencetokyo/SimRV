@@ -1048,9 +1048,28 @@ void ExecuteUnitVector::execute_vector(core::CPU& cpu, memory::MemorySubsystem& 
 
     // Decode immediate fields
     auto simm5 = static_cast<int32_t>((ir >> 15) & 0x1F);
+    const bool unsigned_immediate = [&] {
+        switch (op_id) {
+            case isa::OperationId::VSLIDEDOWN_VI:
+            case isa::OperationId::VSLIDEUP_VI:
+            case isa::OperationId::VRGATHER_VI:
+            case isa::OperationId::VSLL_VI:
+            case isa::OperationId::VSRL_VI:
+            case isa::OperationId::VSRA_VI:
+            case isa::OperationId::VSSRL_VI:
+            case isa::OperationId::VSSRA_VI:
+            case isa::OperationId::VNCLIP_WI:
+            case isa::OperationId::VNCLIPU_WI:
+            case isa::OperationId::VNSRL_WI:
+            case isa::OperationId::VNSRA_WI:
+                return true;
+            default:
+                return false;
+        }
+    }();
     if (op_id == isa::OperationId::VROR_VI) {
         simm5 |= static_cast<int32_t>((ir >> 26U) & 1U) << 5U;
-    } else if ((simm5 & 0x10) != 0) {
+    } else if (!unsigned_immediate && (simm5 & 0x10) != 0) {
         simm5 |= ~0x1F;
     }
 
