@@ -132,6 +132,10 @@ void CsrFile::setMstatus(simrv::xlen::CsrValue wdata) {
             auto legalized = static_cast<uint64_t>(wdata);
             if (mxl == 1U) {
                 legalized = (legalized & ~field_mask) | (uint64_t{1U} << shift);
+            } else if (shift == 32U && mxl == 2U) {
+                // The RV64 personality selects UXL=64 as its WARL value; it
+                // does not advertise the optional RV32 U-mode personality.
+                legalized = (legalized & ~field_mask) | (uint64_t{2U} << shift);
             } else if (requested != 1U && requested != 2U) {
                 legalized = (legalized & ~field_mask) |
                             (static_cast<uint64_t>(cpu_.state().mstatus) & field_mask);
