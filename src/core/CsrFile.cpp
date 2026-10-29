@@ -5,6 +5,7 @@
 #include "simrv/core/CsrFile.hpp"
 
 #include <array>
+#include <limits>
 #include <string_view>
 #include <utility>
 
@@ -24,6 +25,15 @@ namespace {
 constexpr unsigned kHighWordShift = 32;
 constexpr simrv::xlen::CsrValue kCounterEnableMask =
     static_cast<simrv::xlen::CsrValue>(0xFFFFFFFFU);
+// This RV64 hart model supports the architectural maximum of 63 guest external
+// interrupt files. Bit zero is reserved; on RV32 the CSR width naturally caps
+// the implemented guest interrupt IDs at 31.
+constexpr simrv::xlen::CsrValue kHgeieWritableMask =
+    std::numeric_limits<simrv::xlen::CsrValue>::max() & ~simrv::xlen::CsrValue{1};
+constexpr simrv::xlen::CsrValue kHstatusVgeinMask = simrv::xlen::CsrValue{0x3F} << 12U;
+constexpr simrv::xlen::CsrValue kVsSoftwareInterrupt = simrv::xlen::CsrValue{1} << 1U;
+constexpr simrv::xlen::CsrValue kHenvcfgWritableMask =
+    0xF1U | (simrv::xlen::CsrValue{0x3} << 32U);
 constexpr simrv::xlen::CsrValue kVsInterruptBits = (simrv::xlen::CsrValue{1} << 2U) |
                                                      (simrv::xlen::CsrValue{1} << 6U) |
                                                      (simrv::xlen::CsrValue{1} << 10U);
@@ -247,6 +257,7 @@ auto CsrFile::read(simrv::xlen::CsrNumber addr) const
                                           (simrv::xlen::CsrValue{1} << 8U) |
                                           (simrv::xlen::CsrValue{1} << 9U) |
                                           (simrv::xlen::CsrValue{1} << 6U) |
+                                          kHstatusVgeinMask |
                                           (simrv::xlen::CsrValue{1} << 20U) |
                                           (simrv::xlen::CsrValue{1} << 21U) |
                                           (simrv::xlen::CsrValue{1} << 22U));
@@ -282,7 +293,7 @@ auto CsrFile::read(simrv::xlen::CsrNumber addr) const
                     (simrv::xlen::CsrValue{1} << 10U));
             break;
         case csr_addr(Csr::Henvcfg):
-            rcsr = cpu_.state().henvcfg;
+            rcsr = cpu_.state().henvcfg & kHenvcfgWritableMask;
             break;
         case csr_addr(Csr::Htval):
             rcsr = cpu_.state().htval;
@@ -346,6 +357,9 @@ auto CsrFile::read(simrv::xlen::CsrNumber addr) const
             rcsr = cpu_.state().htimedelta;
             break;
         case csr_addr(Csr::Hgeie):
+            rcsr = cpu_.state().hgeie & kHgeieWritableMask;
+            break;
+        case csr_addr(Csr::Hgeip):
             rcsr = 0;  // GEILEN=0: no guest external interrupt sources.
             break;
         case csr_addr(Csr::Scountovf): {
@@ -846,6 +860,7 @@ auto CsrFile::write(simrv::xlen::CsrNumber addr, simrv::xlen::CsrValue wdata)
                                             (simrv::xlen::CsrValue{1} << 8U) |
                                             (simrv::xlen::CsrValue{1} << 9U) |
                                             (simrv::xlen::CsrValue{1} << 6U) |
+                                            kHstatusVgeinMask |
                                             (simrv::xlen::CsrValue{1} << 20U) |
                                             (simrv::xlen::CsrValue{1} << 21U) |
                                             (simrv::xlen::CsrValue{1} << 22U));
@@ -882,6 +897,10 @@ auto CsrFile::write(simrv::xlen::CsrNumber addr, simrv::xlen::CsrValue wdata)
                                          (simrv::xlen::CsrValue{1} << 10U));
             break;
         case csr_addr(Csr::Henvcfg):
+            wdata &= kHenvcfgWritableMask;
+            // CBIE=2 is reserved. Its WARL legalization may choose any legal
+            // value; SimRV resolves it to zero so bit-walks remain deterministic.
+            if (((wdata >> 4U) & 0x3U) == 0x2U) wdata &= ~(simrv::xlen::CsrValue{0x3} << 4U);
             if constexpr (simrv::xlen::kIsXLen64) {
                 constexpr simrv::xlen::CsrValue kPmmMask =
                     simrv::xlen::CsrValue{0x3} << 32U;
@@ -935,9 +954,9 @@ auto CsrFile::write(simrv::xlen::CsrNumber addr, simrv::xlen::CsrValue wdata)
             break;
         case csr_addr(Csr::Vsip):
             cpu_.state().vsip = (cpu_.state().vsip &
-                                 ~h_interrupts_to_vs(cpu_.state().hideleg)) |
+                                 ~kVsSoftwareInterrupt) |
                                 (wdata & h_interrupts_to_vs(cpu_.state().hideleg) &
-                                 kSupervisorInterruptBits);
+                                 kVsSoftwareInterrupt);
             break;
         case csr_addr(Csr::Vsatp): {
             const unsigned xlen = cpu_.state().regs.xlen;
@@ -1048,7 +1067,7 @@ auto CsrFile::write(simrv::xlen::CsrNumber addr, simrv::xlen::CsrValue wdata)
             cpu_.state().htimedelta = wdata;
             break;
         case csr_addr(Csr::Hgeie):
-            cpu_.state().hgeie = 0;
+            cpu_.state().hgeie = wdata & kHgeieWritableMask;
             break;
         case csr_addr(Csr::Mcountinhibit):
             cpu_.state().mcountinhibit = wdata & ~static_cast<simrv::xlen::CsrValue>(2);
@@ -1118,7 +1137,8 @@ auto CsrFile::write(simrv::xlen::CsrNumber addr, simrv::xlen::CsrValue wdata)
             break;
         case csr_addr(Csr::Sip): {
             if (cpu_.state().virt) {
-                const auto mask = h_interrupts_to_vs(cpu_.state().hideleg);
+                const auto mask = h_interrupts_to_vs(cpu_.state().hideleg) &
+                                  kVsSoftwareInterrupt;
                 cpu_.state().vsip = (cpu_.state().vsip & ~mask) | (wdata & mask);
                 break;
             }

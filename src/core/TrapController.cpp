@@ -451,6 +451,7 @@ auto TrapController::can_access_csr(simrv::xlen::PrivilegeLevel current_priv,
                        address == csr_num(Csr::Hcounteren).value() ||
                        address == csr_num(Csr::Htimedelta).value() ||
                        address == csr_num(Csr::Hgeie).value() ||
+                       address == csr_num(Csr::Hgeip).value() ||
                        address == csr_num(Csr::Henvcfg).value() ||
                        address == csr_num(Csr::Htval).value() ||
                        address == csr_num(Csr::Hip).value() ||

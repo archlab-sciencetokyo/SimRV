@@ -686,6 +686,7 @@ enum class Csr : uint16_t {
     Hie = 0x604,
     Hcounteren = 0x606,
     Hgeie = 0x607,
+    Hgeip = 0xE12,
     Henvcfg = 0x60A,
     Htimedelta = 0x605,
     Htval = 0x643,

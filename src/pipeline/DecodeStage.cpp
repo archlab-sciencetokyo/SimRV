@@ -21,6 +21,32 @@ inline void raise_decode_exception(pipeline::PipelineContext& ctx, ExceptionCode
     ctx.pending_exception = code;
     ctx.pending_tval = ctx.ir_org;
 }
+
+[[nodiscard]] constexpr auto is_implemented_supervisor_csr(uint16_t address) noexcept -> bool {
+    switch (address) {
+        case csr_addr(Csr::Sstatus):
+        case csr_addr(Csr::Sie):
+        case csr_addr(Csr::Stvec):
+        case csr_addr(Csr::Scounteren):
+        case csr_addr(Csr::Sscratch):
+        case csr_addr(Csr::Sepc):
+        case csr_addr(Csr::Scause):
+        case csr_addr(Csr::Stval):
+        case csr_addr(Csr::Sip):
+        case csr_addr(Csr::Satp):
+        case csr_addr(Csr::Senvcfg):
+        case csr_addr(Csr::Sstateen0):
+        case csr_addr(Csr::Sstateen1):
+        case csr_addr(Csr::Sstateen2):
+        case csr_addr(Csr::Sstateen3):
+        case csr_addr(Csr::Stimecmp):
+        case csr_addr(Csr::Stimecmph):
+        case csr_addr(Csr::Scountovf):
+            return true;
+        default:
+            return false;
+    }
+}
 }  // namespace
 
 // ==========================================
@@ -131,14 +157,34 @@ void CPU::fetch_operands(Machine& /*machine*/) {
         if (!TrapController::can_access_csr(state_.priv, state_.misa, w_csr_addr, is_write,
                                             state_.virt)) {
             const auto csr_address = w_csr_addr.value();
+            const bool virtual_supervisor_csr =
+                csr_address == csr_addr(Csr::Vsstatus) || csr_address == csr_addr(Csr::Vsie) ||
+                csr_address == csr_addr(Csr::Vstvec) ||
+                csr_address == csr_addr(Csr::Vsscratch) ||
+                csr_address == csr_addr(Csr::Vsepc) || csr_address == csr_addr(Csr::Vscause) ||
+                csr_address == csr_addr(Csr::Vstval) || csr_address == csr_addr(Csr::Vsip) ||
+                csr_address == csr_addr(Csr::Vsatp);
+            const bool virtual_hypervisor_csr =
+                csr_address == csr_addr(Csr::Hstatus) || csr_address == csr_addr(Csr::Hedeleg) ||
+                csr_address == csr_addr(Csr::Hideleg) || csr_address == csr_addr(Csr::Hie) ||
+                csr_address == csr_addr(Csr::Hcounteren) ||
+                csr_address == csr_addr(Csr::Htimedelta) ||
+                csr_address == csr_addr(Csr::Hgeie) ||
+                (csr_address == csr_addr(Csr::Hgeip) && !is_write) ||
+                csr_address == csr_addr(Csr::Henvcfg) || csr_address == csr_addr(Csr::Htval) ||
+                csr_address == csr_addr(Csr::Hip) || csr_address == csr_addr(Csr::Hvip) ||
+                csr_address == csr_addr(Csr::Htinst) || csr_address == csr_addr(Csr::Hgatp) ||
+                (csr_address >= 0x60CU && csr_address <= 0x60FU);
             const bool virtualization_fault =
                 state_.virt &&
-                ((state_.priv == kPrivUser && csr_address == csr_addr(Csr::Stval)) ||
+                ((state_.priv == kPrivUser &&
+                  isa::misa_has_extension(state_.misa, isa::IsaExtension::S) &&
+                  is_implemented_supervisor_csr(csr_address)) ||
                  (csr_address == csr_addr(Csr::Satp) &&
                   (state_.priv == kPrivUser ||
                    (state_.hstatus & (simrv::xlen::CsrValue{1} << 20U)) != 0)) ||
-                 (csr_address >= 0x600U && csr_address <= 0x6FFU) ||
-                 (csr_address >= 0x200U && csr_address <= 0x2FFU));
+                 (state_.priv < kPrivMachine &&
+                  (virtual_hypervisor_csr || virtual_supervisor_csr)));
             raise_decode_exception(ctx, virtualization_fault ? ExceptionCode::VirtualInstruction
                                                               : ExceptionCode::IllegalInstruction);
             return;

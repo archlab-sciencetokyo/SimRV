@@ -1356,6 +1356,19 @@ void test_sha_hideleg_warl_mask() {
     TEST_ASSERT(cpu.csr_file.write(simrv::core::Csr::Hstatus, kHstatusGva).has_value());
     auto hstatus = cpu.csr_file.read(simrv::core::Csr::Hstatus);
     TEST_ASSERT(hstatus.has_value() && (*hstatus & kHstatusGva) != 0);
+    constexpr simrv::xlen::CsrValue kHstatusVgein = simrv::xlen::CsrValue{0x2A} << 12U;
+    TEST_ASSERT(cpu.csr_file.write(simrv::core::Csr::Hstatus, kHstatusVgein).has_value());
+    hstatus = cpu.csr_file.read(simrv::core::Csr::Hstatus);
+    TEST_ASSERT(hstatus.has_value() &&
+                (*hstatus & (simrv::xlen::CsrValue{0x3F} << 12U)) == kHstatusVgein);
+    constexpr simrv::xlen::CsrValue kHgeie = ~simrv::xlen::CsrValue{1};
+    TEST_ASSERT(cpu.csr_file.write(simrv::core::Csr::Hgeie, ~simrv::xlen::CsrValue{0}).has_value());
+    const auto hgeie = cpu.csr_file.read(simrv::core::Csr::Hgeie);
+    TEST_ASSERT(hgeie.has_value() && *hgeie == kHgeie);
+    TEST_ASSERT(cpu.csr_file.write(simrv::core::Csr::Henvcfg,
+                                   ~simrv::xlen::CsrValue{0}).has_value());
+    const auto henvcfg = cpu.csr_file.read(simrv::core::Csr::Henvcfg);
+    TEST_ASSERT(henvcfg.has_value() && *henvcfg == 0xF1U);
     TEST_ASSERT(cpu.csr_file.write(simrv::core::Csr::Vsstatus, kStatusXsHighBit).has_value());
     const auto vsstatus = cpu.csr_file.read(simrv::core::Csr::Vsstatus);
     TEST_ASSERT(vsstatus.has_value() && (*vsstatus & kStatusXsHighBit) == 0);
@@ -1378,7 +1391,7 @@ void test_sha_hideleg_warl_mask() {
     TEST_ASSERT(cpu.csr_file.write(simrv::core::Csr::Sie, kSupervisorInterrupts).has_value());
     const auto vsie = cpu.csr_file.read(simrv::core::Csr::Sie);
     TEST_ASSERT(vsie.has_value() && *vsie == kSupervisorInterrupts);
-    TEST_ASSERT(cpu.csr_file.write(simrv::core::Csr::Sip, simrv::xlen::CsrValue{1} << 1U)
+    TEST_ASSERT(cpu.csr_file.write(simrv::core::Csr::Sip, kSupervisorInterrupts)
                     .has_value());
     const auto vsip = cpu.csr_file.read(simrv::core::Csr::Sip);
     TEST_ASSERT(vsip.has_value() && *vsip == (simrv::xlen::CsrValue{1} << 1U));
