@@ -593,7 +593,8 @@ void CPU::dispatch_pending_interrupts() {
             std::pair{simrv::xlen::Word{1} << 6U, simrv::xlen::Word{1} << 5U},
             std::pair{simrv::xlen::Word{1} << 10U, simrv::xlen::Word{1} << 9U},
         };
-        const auto pending_h = state_.hip | state_.hvip | vs_interrupts_to_h(state_.vsip);
+        const auto pending_h = state_.hip | state_.hvip | vs_interrupts_to_h(state_.vsip) |
+                               (state_.vstip_sstc ? (simrv::xlen::Word{1} << 6U) : 0U);
         for (const auto& [h_bit, vs_bit] : kVsInterrupts) {
             if ((pending_h & h_bit) == 0) continue;
             if (state_.virt && (state_.hideleg & h_bit) != 0) {

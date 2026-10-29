@@ -82,6 +82,7 @@ struct alignas(128) ArchState {
     bool stip_software{};  ///< M-mode software-posted component of writable mip.STIP.
     bool stip_timer{};     ///< Direct-SBI timer signal component of mip.STIP.
     bool stip_sstc{};      ///< Ratified Sstc stimecmp timer component of mip.STIP.
+    bool vstip_sstc{};     ///< Ratified Sstc vstimecmp timer component of hip.VSTIP.
     simrv::xlen::CsrValue
         medeleg{};  ///< Machine Exception Delegation (delegates trap handling to supervisor mode)
     simrv::xlen::CsrValue
@@ -103,6 +104,8 @@ struct alignas(128) ArchState {
     simrv::xlen::CsrValue senvcfg{};   ///< Supervisor Environment Configuration (0x10A)
     simrv::xlen::TimeBaseTicks stimecmp{
         UINT64_MAX};  ///< Supervisor Timer Compare (Sstc, 0x14D / 0x15D)
+    simrv::xlen::TimeBaseTicks vstimecmp{
+        UINT64_MAX};  ///< Virtual Supervisor Timer Compare (Sstc, 0x24D / 0x25D)
     simrv::xlen::CsrValue
         sepc{};  ///< Supervisor Exception Program Counter (returns address on SRET)
     simrv::xlen::TrapCause scause{};     ///< Supervisor Trap Cause

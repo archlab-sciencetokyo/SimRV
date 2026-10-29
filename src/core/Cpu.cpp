@@ -309,6 +309,9 @@ void CPU::evaluate_timer_interrupt() {
         stce = (state_.menvcfgh & (1UL << 31U)) != 0;
     }
     state_.stip_sstc = stce && (cur_mtime >= state_.stimecmp);
+    const bool vstce = (state_.henvcfg & (uint64_t{1} << 63U)) != 0;
+    const auto virtual_time = static_cast<uint64_t>(cur_mtime + state_.htimedelta);
+    state_.vstip_sstc = stce && vstce && (virtual_time >= state_.vstimecmp);
     state_.refresh_supervisor_pending();
     if (machine_ != nullptr) {
         const auto log_transition = [&](MipBit bit, simrv::xlen::TrapCause code,
@@ -348,6 +351,14 @@ void CPU::fast_forward_wfi(Machine& machine) {
     if (stce && state_.stimecmp != std::numeric_limits<simrv::xlen::Counter>::max() &&
         state_.stimecmp < next_deadline) {
         next_deadline = state_.stimecmp;
+    }
+    const bool vstce = (state_.henvcfg & (uint64_t{1} << 63U)) != 0;
+    if (stce && vstce && state_.vstimecmp != std::numeric_limits<simrv::xlen::Counter>::max()) {
+        const auto virtual_deadline =
+            static_cast<uint64_t>(state_.vstimecmp - state_.htimedelta);
+        if (virtual_deadline > cur_mtime && virtual_deadline < next_deadline) {
+            next_deadline = virtual_deadline;
+        }
     }
     if (next_deadline > cur_mtime &&
         next_deadline != std::numeric_limits<simrv::xlen::Counter>::max()) {

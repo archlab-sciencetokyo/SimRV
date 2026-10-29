@@ -39,8 +39,6 @@ inline void raise_decode_exception(pipeline::PipelineContext& ctx, ExceptionCode
         case csr_addr(Csr::Sstateen1):
         case csr_addr(Csr::Sstateen2):
         case csr_addr(Csr::Sstateen3):
-        case csr_addr(Csr::Stimecmp):
-        case csr_addr(Csr::Stimecmph):
         case csr_addr(Csr::Scountovf):
             return true;
         default:
@@ -163,7 +161,10 @@ void CPU::fetch_operands(Machine& /*machine*/) {
                 csr_address == csr_addr(Csr::Vsscratch) ||
                 csr_address == csr_addr(Csr::Vsepc) || csr_address == csr_addr(Csr::Vscause) ||
                 csr_address == csr_addr(Csr::Vstval) || csr_address == csr_addr(Csr::Vsip) ||
-                csr_address == csr_addr(Csr::Vsatp);
+                csr_address == csr_addr(Csr::Vsatp) ||
+                ((csr_address == csr_addr(Csr::Vstimecmp) ||
+                  (csr_address == csr_addr(Csr::Vstimecmph) && state_.regs.xlen == 32)) &&
+                 state_.priv == kPrivSupervisor);
             const bool virtual_hypervisor_csr =
                 csr_address == csr_addr(Csr::Hstatus) || csr_address == csr_addr(Csr::Hedeleg) ||
                 csr_address == csr_addr(Csr::Hideleg) || csr_address == csr_addr(Csr::Hie) ||

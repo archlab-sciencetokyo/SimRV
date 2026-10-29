@@ -651,6 +651,8 @@ enum class Csr : uint16_t {
     Sip = 0x144,
     Stimecmp = 0x14D,
     Stimecmph = 0x15D,
+    Vstimecmp = 0x24D,
+    Vstimecmph = 0x25D,
     Scountovf = 0xDA0,
     Satp = 0x180,
     Mvendorid = 0xF11,

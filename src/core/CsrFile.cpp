@@ -33,6 +33,9 @@ constexpr simrv::xlen::CsrValue kHgeieWritableMask =
 constexpr simrv::xlen::CsrValue kHstatusVgeinMask = simrv::xlen::CsrValue{0x3F} << 12U;
 constexpr simrv::xlen::CsrValue kVsSoftwareInterrupt = simrv::xlen::CsrValue{1} << 1U;
 constexpr simrv::xlen::CsrValue kHenvcfgWritableMask =
+    0xF1U | (simrv::xlen::CsrValue{0x3} << 32U) |
+    (simrv::xlen::CsrValue{1} << 63U);
+constexpr simrv::xlen::CsrValue kSenvcfgWritableMask =
     0xF1U | (simrv::xlen::CsrValue{0x3} << 32U);
 constexpr simrv::xlen::CsrValue kVsInterruptBits = (simrv::xlen::CsrValue{1} << 2U) |
                                                      (simrv::xlen::CsrValue{1} << 6U) |
@@ -281,7 +284,8 @@ auto CsrFile::read(simrv::xlen::CsrNumber addr) const
             break;
         case csr_addr(Csr::Hip):
             rcsr = (cpu_.state().hip | cpu_.state().hvip |
-                    vs_interrupts_to_h(cpu_.state().vsip)) &
+                    vs_interrupts_to_h(cpu_.state().vsip) |
+                    (cpu_.state().vstip_sstc ? (simrv::xlen::CsrValue{1} << 6U) : 0U)) &
                    ((simrv::xlen::CsrValue{1} << 2U) | (simrv::xlen::CsrValue{1} << 6U) |
                     (simrv::xlen::CsrValue{1} << 10U));
             break;
@@ -294,6 +298,9 @@ auto CsrFile::read(simrv::xlen::CsrNumber addr) const
             break;
         case csr_addr(Csr::Henvcfg):
             rcsr = cpu_.state().henvcfg & kHenvcfgWritableMask;
+            if ((cpu_.state().menvcfg & (simrv::xlen::CsrValue{1} << 63U)) == 0) {
+                rcsr &= ~(simrv::xlen::CsrValue{1} << 63U);
+            }
             break;
         case csr_addr(Csr::Htval):
             rcsr = cpu_.state().htval;
@@ -329,7 +336,10 @@ auto CsrFile::read(simrv::xlen::CsrNumber addr) const
             break;
         case csr_addr(Csr::Vsip):
             rcsr = (cpu_.state().vsip |
-                    h_interrupts_to_vs(cpu_.state().hip | cpu_.state().hvip)) &
+                    h_interrupts_to_vs(cpu_.state().hip | cpu_.state().hvip |
+                                       (cpu_.state().vstip_sstc
+                                            ? (simrv::xlen::CsrValue{1} << 6U)
+                                            : 0U))) &
                    h_interrupts_to_vs(cpu_.state().hideleg);
             break;
         case csr_addr(Csr::Vsatp):
@@ -395,7 +405,10 @@ auto CsrFile::read(simrv::xlen::CsrNumber addr) const
         case csr_addr(Csr::Sip):
             rcsr = cpu_.state().virt
                        ? ((cpu_.state().vsip |
-                           h_interrupts_to_vs(cpu_.state().hip | cpu_.state().hvip)) &
+                           h_interrupts_to_vs(cpu_.state().hip | cpu_.state().hvip |
+                                              (cpu_.state().vstip_sstc
+                                                   ? (simrv::xlen::CsrValue{1} << 6U)
+                                                   : 0U))) &
                           h_interrupts_to_vs(cpu_.state().hideleg))
                        : (cpu_.state().mip & cpu_.state().mideleg &
                           interrupt_implemented_mask(true));
@@ -404,9 +417,9 @@ auto CsrFile::read(simrv::xlen::CsrNumber addr) const
             rcsr = cpu_.state().virt ? cpu_.state().vsatp : cpu_.state().satp;
             break;
         case csr_addr(Csr::Senvcfg):
-            rcsr = cpu_.state().senvcfg;
+            rcsr = cpu_.state().senvcfg & kSenvcfgWritableMask;
             break;
-        case csr_addr(Csr::Stimecmp):
+        case csr_addr(Csr::Stimecmp): {
             if (cpu_.state().priv < simrv::xlen::PrivilegeLevel::Machine) {
                 if ((cpu_.state().mcounteren & (simrv::xlen::CsrValue{1} << 1U)) == 0) {
                     return std::unexpected(ExceptionCode::IllegalInstruction);
@@ -420,13 +433,33 @@ auto CsrFile::read(simrv::xlen::CsrNumber addr) const
                 if (!stce) {
                     return std::unexpected(ExceptionCode::IllegalInstruction);
                 }
+                if (cpu_.state().virt) {
+                    if ((cpu_.state().henvcfg & (simrv::xlen::CsrValue{1} << 63U)) == 0 ||
+                        (cpu_.state().hcounteren & (simrv::xlen::CsrValue{1} << 1U)) == 0) {
+                        return std::unexpected(ExceptionCode::VirtualInstruction);
+                    }
+                }
             }
+            const auto compare = cpu_.state().virt ? cpu_.state().vstimecmp
+                                                   : cpu_.state().stimecmp;
             if constexpr (simrv::xlen::kIsXLen64) {
-                rcsr = static_cast<simrv::xlen::CsrValue>(cpu_.state().stimecmp);
+                rcsr = static_cast<simrv::xlen::CsrValue>(compare);
             } else {
-                rcsr = static_cast<simrv::xlen::CsrValue>(cpu_.state().stimecmp & 0xFFFFFFFFULL);
+                rcsr = static_cast<simrv::xlen::CsrValue>(compare & 0xFFFFFFFFULL);
             }
             break;
+        }
+        case csr_addr(Csr::Vstimecmp):
+            if constexpr (simrv::xlen::kIsXLen64) {
+                rcsr = static_cast<simrv::xlen::CsrValue>(cpu_.state().vstimecmp);
+            } else {
+                rcsr = static_cast<simrv::xlen::CsrValue>(cpu_.state().vstimecmp & 0xFFFFFFFFULL);
+            }
+            break;
+        case csr_addr(Csr::Vstimecmph):
+            return require_rv32_counter().transform([this]() {
+                return static_cast<simrv::xlen::CsrValue>(cpu_.state().vstimecmp >> 32U);
+            });
         case csr_addr(Csr::Stimecmph):
             if (cpu_.state().priv < simrv::xlen::PrivilegeLevel::Machine) {
                 const bool stce = (cpu_.state().menvcfgh & (1UL << 31U)) != 0;
@@ -502,7 +535,8 @@ auto CsrFile::read(simrv::xlen::CsrNumber addr) const
             break;
         case csr_addr(Csr::Mip):
             rcsr = (cpu_.state().mip | cpu_.state().hip | cpu_.state().hvip |
-                    vs_interrupts_to_h(cpu_.state().vsip)) &
+                    vs_interrupts_to_h(cpu_.state().vsip) |
+                    (cpu_.state().vstip_sstc ? (simrv::xlen::CsrValue{1} << 6U) : 0U)) &
                    interrupt_implemented_mask(
                        isa::misa_has_extension(cpu_.state().misa, isa::IsaExtension::S),
                        isa::misa_has_extension(cpu_.state().misa, isa::IsaExtension::H));
@@ -901,6 +935,9 @@ auto CsrFile::write(simrv::xlen::CsrNumber addr, simrv::xlen::CsrValue wdata)
             break;
         case csr_addr(Csr::Henvcfg):
             wdata &= kHenvcfgWritableMask;
+            if ((cpu_.state().menvcfg & (simrv::xlen::CsrValue{1} << 63U)) == 0) {
+                wdata &= ~(simrv::xlen::CsrValue{1} << 63U);
+            }
             // CBIE=2 is reserved. Its WARL legalization may choose any legal
             // value; SimRV resolves it to zero so bit-walks remain deterministic.
             if (((wdata >> 4U) & 0x3U) == 0x2U) wdata &= ~(simrv::xlen::CsrValue{0x3} << 4U);
@@ -913,6 +950,7 @@ auto CsrFile::write(simrv::xlen::CsrNumber addr, simrv::xlen::CsrValue wdata)
                 if (!has_u || (pmm != 0U && pmm != 2U)) wdata &= ~kPmmMask;
             }
             cpu_.state().henvcfg = wdata;
+            cpu_.evaluate_timer_interrupt();
             break;
         case csr_addr(Csr::Htval):
             cpu_.state().htval = wdata;
@@ -1010,6 +1048,7 @@ auto CsrFile::write(simrv::xlen::CsrNumber addr, simrv::xlen::CsrValue wdata)
             }
             break;
         case csr_addr(Csr::Senvcfg): {
+            wdata &= kSenvcfgWritableMask;
             if constexpr (simrv::xlen::kIsXLen64) {
                 constexpr uint64_t kPmmMask = uint64_t{0x3} << 32U;
                 const bool has_u = isa::misa_has_extension(cpu_.state().misa, isa::IsaExtension::U);
@@ -1022,7 +1061,7 @@ auto CsrFile::write(simrv::xlen::CsrNumber addr, simrv::xlen::CsrValue wdata)
             cpu_.state().senvcfg = wdata;
             break;
         }
-        case csr_addr(Csr::Stimecmp):
+        case csr_addr(Csr::Stimecmp): {
             if (cpu_.state().priv < simrv::xlen::PrivilegeLevel::Machine) {
                 if ((cpu_.state().mcounteren & (simrv::xlen::CsrValue{1} << 1U)) == 0) {
                     return std::unexpected(ExceptionCode::IllegalInstruction);
@@ -1036,15 +1075,40 @@ auto CsrFile::write(simrv::xlen::CsrNumber addr, simrv::xlen::CsrValue wdata)
                 if (!stce) {
                     return std::unexpected(ExceptionCode::IllegalInstruction);
                 }
+                if (cpu_.state().virt) {
+                    if ((cpu_.state().henvcfg & (simrv::xlen::CsrValue{1} << 63U)) == 0 ||
+                        (cpu_.state().hcounteren & (simrv::xlen::CsrValue{1} << 1U)) == 0) {
+                        return std::unexpected(ExceptionCode::VirtualInstruction);
+                    }
+                }
             }
+            auto& compare = cpu_.state().virt ? cpu_.state().vstimecmp : cpu_.state().stimecmp;
             if (cpu_.state().regs.xlen == 32) {
-                cpu_.state().stimecmp =
-                    (cpu_.state().stimecmp & 0xFFFFFFFF00000000ULL) | static_cast<uint32_t>(wdata);
+                compare = (compare & 0xFFFFFFFF00000000ULL) | static_cast<uint32_t>(wdata);
             } else {
-                cpu_.state().stimecmp = wdata;
+                compare = wdata;
             }
             cpu_.evaluate_timer_interrupt();
             break;
+        }
+        case csr_addr(Csr::Vstimecmp):
+            if (cpu_.state().regs.xlen == 32) {
+                cpu_.state().vstimecmp = (cpu_.state().vstimecmp & 0xFFFFFFFF00000000ULL) |
+                                         static_cast<uint32_t>(wdata);
+            } else {
+                cpu_.state().vstimecmp = wdata;
+            }
+            cpu_.evaluate_timer_interrupt();
+            break;
+        case csr_addr(Csr::Vstimecmph):
+            return require_rv32_counter().and_then(
+                [this, wdata]() -> std::expected<void, ExceptionCode> {
+                    cpu_.state().vstimecmp =
+                        (cpu_.state().vstimecmp & 0x00000000FFFFFFFFULL) |
+                        (static_cast<uint64_t>(wdata) << 32U);
+                    cpu_.evaluate_timer_interrupt();
+                    return {};
+                });
         case csr_addr(Csr::Stimecmph):
             if (cpu_.state().priv < simrv::xlen::PrivilegeLevel::Machine) {
                 const bool stce = (cpu_.state().menvcfgh & (1UL << 31U)) != 0;
@@ -1089,6 +1153,9 @@ auto CsrFile::write(simrv::xlen::CsrNumber addr, simrv::xlen::CsrValue wdata)
             wdata = static_cast<simrv::xlen::CsrValue>(
                 static_cast<uint64_t>(wdata) & ~(uint64_t{1} << 61U));
             cpu_.state().menvcfg = wdata;
+            if ((wdata & (simrv::xlen::CsrValue{1} << 63U)) == 0) {
+                cpu_.state().henvcfg &= ~(simrv::xlen::CsrValue{1} << 63U);
+            }
             cpu_.evaluate_timer_interrupt();
             break;
         case csr_addr(Csr::Menvcfgh):
