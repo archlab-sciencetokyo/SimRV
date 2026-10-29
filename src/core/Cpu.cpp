@@ -403,8 +403,6 @@ void CPU::apply_pending_interrupt_lines(Machine& machine) {
         const bool asserted = (pending & (1U << (i + lines.size()))) != 0;
         if (i == 3)
             state_.stip_timer = asserted;
-        else if (i == 4)
-            state_.stip_software = asserted;
         else if (i == 5)
             state_.seip_external = asserted;
         else if (asserted)

@@ -239,6 +239,57 @@ auto Aplic::read32(simrv::xlen::Address offset) -> uint32_t {
 }
 
 void Aplic::write32(simrv::xlen::Address offset, uint32_t val) {
+    if (act_test_hooks_ && offset == 0x0004U && machine_ != nullptr) {
+        constexpr uint32_t kSetPending = uint32_t{1} << 31U;
+        const bool asserted = (val & kSetPending) != 0;
+        const uint32_t pending_bit = val & ~kSetPending;
+        if (std::has_single_bit(pending_bit)) {
+            const uint32_t cause = std::countr_zero(pending_bit);
+            auto trigger = [&](simrv::core::InterruptType type,
+                               simrv::xlen::PrivilegeLevel target_privilege) {
+                machine_->set_hart_irq(simrv::xlen::HartId{0}, type, target_privilege, asserted);
+            };
+            switch (cause) {
+                case 1:
+                    trigger(simrv::core::InterruptType::Software,
+                            simrv::xlen::PrivilegeLevel::Supervisor);
+                    return;
+                case 3:
+                    trigger(simrv::core::InterruptType::Software,
+                            simrv::xlen::PrivilegeLevel::Machine);
+                    return;
+                case 5:
+                    trigger(simrv::core::InterruptType::Timer,
+                            simrv::xlen::PrivilegeLevel::Supervisor);
+                    return;
+                case 7:
+                    trigger(simrv::core::InterruptType::Timer,
+                            simrv::xlen::PrivilegeLevel::Machine);
+                    return;
+                case 9:
+                    if (machine_->primary_hart().state().virt) {
+                        constexpr simrv::xlen::CsrValue kVsExternalPending =
+                            simrv::xlen::CsrValue{1} << 10U;
+                        auto& hvip = machine_->primary_hart().state().hvip;
+                        if (asserted) {
+                            hvip |= kVsExternalPending;
+                        } else {
+                            hvip &= ~kVsExternalPending;
+                        }
+                        return;
+                    }
+                    trigger(simrv::core::InterruptType::External,
+                            simrv::xlen::PrivilegeLevel::Supervisor);
+                    return;
+                case 11:
+                    trigger(simrv::core::InterruptType::External,
+                            simrv::xlen::PrivilegeLevel::Machine);
+                    return;
+                default:
+                    break;
+            }
+        }
+    }
     if (offset == 0x0000U) {
         domaincfg_ = val;
         update();

@@ -820,6 +820,10 @@ auto parse_mode_options(std::string_view arg, std::span<char* const> args, std::
         result.options.no_sbi = true;
         return true;
     }
+    if (option_id == "--act-test-hooks") {
+        result.options.act_test_hooks = true;
+        return true;
+    }
     if (option_id == "--ca") {
         result.options.execution_mode = RequestedExecutionMode::CycleAccurate;
         result.options.execution_mode_explicit = true;
@@ -1488,6 +1492,7 @@ auto RuntimeOptions::to_machine_config() const -> simrv::core::MachineConfig {
     cfg.memory.dram_size = (dram_size != 0 ? dram_size : default_dram_size);
 
     cfg.execution.appmode = appmode;
+    cfg.execution.act_test_hooks = act_test_hooks;
     cfg.execution.start_pc = start_pc;
     cfg.execution.fincnt = fincnt;
     cfg.execution.trace_begin = trace_begin;
@@ -1768,6 +1773,8 @@ auto cli_help_sections() -> const std::vector<HelpSection>& {
               {.option = "--os", .description = "Boot an operating system (Linux or RTOS)."},
               {.option = "--no-sbi",
                .description = "Deliver supervisor ECALLs to the guest machine trap handler."},
+              {.option = "--act-test-hooks",
+               .description = "Enable test-only ACT interrupt generator MMIO behavior."},
               {.option = "--uefi CODE.fd",
                .description = "Load UEFI CODE in pflash; boot it through OpenSBI fw_dynamic (-m)."},
               {.option = "--uefi-vars <VARS.fd>",

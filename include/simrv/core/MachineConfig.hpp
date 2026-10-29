@@ -49,6 +49,8 @@ struct ExecutionConfig {
     static constexpr uint32_t kMaxHarts = 16;
 
     bool appmode = true;
+    /// Enables ACT's test-only simple interrupt generator at its documented MMIO window.
+    bool act_test_hooks = false;
     bool ui_worker_threaded = false;
     uint32_t num_harts = 1;
     uint32_t smp_quantum = 100;

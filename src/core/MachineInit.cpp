@@ -391,6 +391,7 @@ auto Machine::initialize() -> std::expected<void, std::string> {
     runtime_->aplic_s = std::make_unique<simrv::device::Aplic>(
         this, simrv::device::Aplic::Privilege::Supervisor, simrv::mmio::kAplicSBaseAddress,
         simrv::mmio::kAplicSSize, runtime_->imsic_s.get());
+    runtime_->aplic_m->set_act_test_hooks(config.execution.act_test_hooks);
     PlatformBuilder::compose(*this);
     for (const auto& device : simrv::core::SoCDeviceRegistry::resolve(config.soc)) {
         if (device.enabled && device.kind == SoCDeviceKind::DummyMmio) {
