@@ -171,9 +171,12 @@ auto CsrFile::read(simrv::xlen::CsrNumber addr) const
     -> std::expected<simrv::xlen::CsrValue, ExceptionCode> {
     const uint16_t address = addr.value();
     constexpr uint64_t kStateenSuperEnable = uint64_t{1} << 63U;
+    constexpr uint64_t kStateenEnvCfgEnable = uint64_t{1} << 62U;
     if (address >= 0x30CU && address <= 0x30FU) {
-        return static_cast<simrv::xlen::CsrValue>(
-            cpu_.state().mstateen[address - 0x30CU] & kStateenSuperEnable);
+        const uint64_t mask = address == 0x30CU
+                                  ? (kStateenSuperEnable | kStateenEnvCfgEnable)
+                                  : kStateenSuperEnable;
+        return static_cast<simrv::xlen::CsrValue>(cpu_.state().mstateen[address - 0x30CU] & mask);
     }
     if (address >= 0x31CU && address <= 0x31FU) {
         if (cpu_.state().regs.xlen != 32) return std::unexpected(ExceptionCode::IllegalInstruction);
@@ -181,7 +184,6 @@ auto CsrFile::read(simrv::xlen::CsrNumber addr) const
     }
     if (address >= 0x10CU && address <= 0x10FU) {
         const size_t bank = address - 0x10CU;
-        const uint64_t supervisor_enable = uint64_t{1} << (cpu_.state().regs.xlen - 1U);
         if (cpu_.state().virt &&
             isa::misa_has_extension(cpu_.state().misa, isa::IsaExtension::H) &&
             (cpu_.state().hstateen[bank] & kStateenSuperEnable) == 0) {
@@ -191,7 +193,9 @@ auto CsrFile::read(simrv::xlen::CsrNumber addr) const
             (cpu_.state().mstateen[bank] & kStateenSuperEnable) == 0) {
             return std::unexpected(ExceptionCode::IllegalInstruction);
         }
-        return static_cast<simrv::xlen::CsrValue>(cpu_.state().sstateen[bank] & supervisor_enable);
+        // SimRV does not expose any subordinate-state controls through Sstateen yet.
+        // Those fields are reserved/read-only-zero in the active RVA23 ACT profile.
+        return simrv::xlen::CsrValue{0};
     }
     if (address >= 0x60CU && address <= 0x60FU) {
         const size_t bank = address - 0x60CU;
@@ -202,8 +206,9 @@ auto CsrFile::read(simrv::xlen::CsrNumber addr) const
             }
             return simrv::xlen::CsrValue{0};
         }
-        return static_cast<simrv::xlen::CsrValue>(cpu_.state().hstateen[bank] &
-                                                  kStateenSuperEnable);
+        const uint64_t mask = bank == 0U ? (kStateenSuperEnable | kStateenEnvCfgEnable)
+                                         : kStateenSuperEnable;
+        return static_cast<simrv::xlen::CsrValue>(cpu_.state().hstateen[bank] & mask);
     }
     if (address >= 0x71CU && address <= 0x71FU) {
         if (cpu_.state().regs.xlen != 32) return std::unexpected(ExceptionCode::IllegalInstruction);
@@ -303,6 +308,10 @@ auto CsrFile::read(simrv::xlen::CsrNumber addr) const
                     (simrv::xlen::CsrValue{1} << 10U));
             break;
         case csr_addr(Csr::Henvcfg):
+            if (cpu_.state().priv != simrv::xlen::PrivilegeLevel::Machine &&
+                (cpu_.state().mstateen[0] & kStateenEnvCfgEnable) == 0) {
+                return std::unexpected(ExceptionCode::IllegalInstruction);
+            }
             rcsr = cpu_.state().henvcfg & kHenvcfgWritableMask;
             if ((cpu_.state().menvcfg & (simrv::xlen::CsrValue{1} << 63U)) == 0) {
                 rcsr &= ~(simrv::xlen::CsrValue{1} << 63U);
@@ -424,6 +433,15 @@ auto CsrFile::read(simrv::xlen::CsrNumber addr) const
             rcsr = cpu_.state().virt ? cpu_.state().vsatp : cpu_.state().satp;
             break;
         case csr_addr(Csr::Senvcfg):
+            if (cpu_.state().virt &&
+                isa::misa_has_extension(cpu_.state().misa, isa::IsaExtension::H) &&
+                (cpu_.state().hstateen[0] & kStateenEnvCfgEnable) == 0) {
+                return std::unexpected(ExceptionCode::VirtualInstruction);
+            }
+            if (cpu_.state().priv != simrv::xlen::PrivilegeLevel::Machine &&
+                (cpu_.state().mstateen[0] & kStateenEnvCfgEnable) == 0) {
+                return std::unexpected(ExceptionCode::IllegalInstruction);
+            }
             rcsr = cpu_.state().senvcfg & kSenvcfgWritableMask;
             break;
         case csr_addr(Csr::Stimecmp): {
@@ -696,10 +714,13 @@ auto CsrFile::write(simrv::xlen::CsrNumber addr, simrv::xlen::CsrValue wdata)
     -> std::expected<void, ExceptionCode> {  // NOLINT(bugprone-easily-swappable-parameters)
     const uint16_t address = addr.value();
     constexpr uint64_t kStateenSuperEnable = uint64_t{1} << 63U;
+    constexpr uint64_t kStateenEnvCfgEnable = uint64_t{1} << 62U;
     if (address >= 0x30CU && address <= 0x30FU) {
         auto& value = cpu_.state().mstateen[address - 0x30CU];
-        value = (value & ~kStateenSuperEnable) |
-                (static_cast<uint64_t>(wdata) & kStateenSuperEnable);
+        const uint64_t mask = address == 0x30CU
+                                  ? (kStateenSuperEnable | kStateenEnvCfgEnable)
+                                  : kStateenSuperEnable;
+        value = (value & ~mask) | (static_cast<uint64_t>(wdata) & mask);
         return {};
     }
     if (address >= 0x31CU && address <= 0x31FU) {
@@ -711,7 +732,6 @@ auto CsrFile::write(simrv::xlen::CsrNumber addr, simrv::xlen::CsrValue wdata)
     }
     if (address >= 0x10CU && address <= 0x10FU) {
         const size_t bank = address - 0x10CU;
-        const uint64_t supervisor_enable = uint64_t{1} << (cpu_.state().regs.xlen - 1U);
         if (cpu_.state().virt &&
             isa::misa_has_extension(cpu_.state().misa, isa::IsaExtension::H) &&
             (cpu_.state().hstateen[bank] & kStateenSuperEnable) == 0) {
@@ -721,7 +741,7 @@ auto CsrFile::write(simrv::xlen::CsrNumber addr, simrv::xlen::CsrValue wdata)
             (cpu_.state().mstateen[bank] & kStateenSuperEnable) == 0) {
             return std::unexpected(ExceptionCode::IllegalInstruction);
         }
-        cpu_.state().sstateen[bank] = static_cast<uint64_t>(wdata) & supervisor_enable;
+        cpu_.state().sstateen[bank] = 0;
         return {};
     }
     if (address >= 0x60CU && address <= 0x60FU) {
@@ -734,8 +754,9 @@ auto CsrFile::write(simrv::xlen::CsrNumber addr, simrv::xlen::CsrValue wdata)
             return {};
         }
         auto& value = cpu_.state().hstateen[bank];
-        value = (value & ~kStateenSuperEnable) |
-                (static_cast<uint64_t>(wdata) & kStateenSuperEnable);
+        const uint64_t mask = bank == 0U ? (kStateenSuperEnable | kStateenEnvCfgEnable)
+                                         : kStateenSuperEnable;
+        value = (value & ~mask) | (static_cast<uint64_t>(wdata) & mask);
         return {};
     }
     if (address >= 0x71CU && address <= 0x71FU) {
@@ -941,6 +962,10 @@ auto CsrFile::write(simrv::xlen::CsrNumber addr, simrv::xlen::CsrValue wdata)
                                          (simrv::xlen::CsrValue{1} << 10U));
             break;
         case csr_addr(Csr::Henvcfg):
+            if (cpu_.state().priv != simrv::xlen::PrivilegeLevel::Machine &&
+                (cpu_.state().mstateen[0] & kStateenEnvCfgEnable) == 0) {
+                return std::unexpected(ExceptionCode::IllegalInstruction);
+            }
             wdata &= kHenvcfgWritableMask;
             if ((cpu_.state().menvcfg & (simrv::xlen::CsrValue{1} << 63U)) == 0) {
                 wdata &= ~(simrv::xlen::CsrValue{1} << 63U);
@@ -1056,6 +1081,15 @@ auto CsrFile::write(simrv::xlen::CsrNumber addr, simrv::xlen::CsrValue wdata)
             }
             break;
         case csr_addr(Csr::Senvcfg): {
+            if (cpu_.state().virt &&
+                isa::misa_has_extension(cpu_.state().misa, isa::IsaExtension::H) &&
+                (cpu_.state().hstateen[0] & kStateenEnvCfgEnable) == 0) {
+                return std::unexpected(ExceptionCode::VirtualInstruction);
+            }
+            if (cpu_.state().priv != simrv::xlen::PrivilegeLevel::Machine &&
+                (cpu_.state().mstateen[0] & kStateenEnvCfgEnable) == 0) {
+                return std::unexpected(ExceptionCode::IllegalInstruction);
+            }
             wdata &= kSenvcfgWritableMask;
             // CBIE=2 is reserved; choose the legal zero encoding.
             if (((wdata >> 4U) & 0x3U) == 0x2U) {
