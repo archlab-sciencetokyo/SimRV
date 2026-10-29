@@ -43,11 +43,13 @@ preset's configured cache-line geometry remains a separate platform requirement.
 | Vector data-independent latency | All implemented Zvkt-listed operations have operand-independent guest-cycle latency; FDT advertises Zvkt | Pipeline cycle tests across vector operand patterns and three- and five-stage models |
 | Data-independent latency | Implemented Zkt-listed instructions have operand-independent guest-cycle latency; DIV/REM are excluded as specified; Zkt is independent of scalar cryptography (`Zk`); FDT advertises Zkt | Pipeline tests for integer multiply and listed bit-manipulation operations across operand patterns in three- and five-stage models |
 | Lower-mode XLEN | RV64 U-mode supports UXL=64 through the `mstatus`/`sstatus` CSR path; RV64 FDT advertises Ssu64xl | RVA23 CSR WARL and FDT tests |
+| Supervisor timer interrupts | Sstc exposes `stimecmp` when M-mode enables STCE and asserts/deasserts supervisor timer pending from `mtime`; FDT advertises Sstc | Privilege-memory audit tests for XLEN-specific `stimecmp`, STCE access control, and timer transitions; FDT test |
 | Base counters and timers | Zicntr implements `cycle`, `time`, and `instret`; lower-mode reads obey the `mcounteren`/`scounteren` gates; FDT advertises Zicntr | RVA23 counter-value and U/S access tests; FDT tests |
 | Hardware performance counters | Zihpm counters 3–31 and event selectors are implemented; `mcounteren` and `scounteren` expose writable enables for implemented counters as required by Sscounterenw; FDT advertises Zihpm and Sscounterenw | HPM overflow/filtering tests and RVA23 S/U counter-enable access tests; FDT tests |
 | Counter overflow filtering | Sscofpmf implements M/S/U event filtering, counter inhibit, sticky overflow reporting, and delegated LCOFIP; FDT advertises Sscofpmf | RVA23 CSR, overflow, and interrupt-delegation tests |
 | User pointer masking | Ssnpm selects U-mode PMLEN=0 or PMLEN=7 through `senvcfg.PMM`; Supm is implied; RV64 FDT advertises both | RVA23 WARL and tagged physical load/store tests; FDT tests |
 | NAPOT translation contiguity | Svnapot maps aligned 64 KiB regions through level-0 PTEs for Sv39/Sv48/Sv57; invalid N encodings fault; FDT advertises Svnapot | Svnapot alias translation and reserved-encoding tests; FDT tests |
+| Hypervisor guest-stage translation core | Internal G-stage walker supports Sv39x4/Sv48x4/Sv57x4, superpages, permission checks, guest-page faults, and Svade A/D faults; architectural `hgatp` and VS/G-stage composition are not implemented | Hypervisor guest-physical walker tests |
 | Page-based memory types | Svpbmt decodes PMA/NC/IO leaf attributes and faults reserved PBMT encodings; NC/IO accesses bypass L1 data-cache paths and use coherent TileLink transfers; ordered execution and fences preserve IO and cross-attribute ordering; AMOs fault on non-PMA mappings without atomicity support; FDT advertises Svpbmt | Svpbmt PTE legality, uncached access, dirty-owner writeback, cache-bypass, non-PMA AMO-fault, and cycle-mode mixed-attribute fence-order tests |
 | Accessed/dirty tracking | Mandatory Svade behavior: guest accesses fault when a required PTE A/D bit is clear; unsupported Svadu `menvcfg.ADUE` is read-only zero; FDT advertises Svade | RVA23 CPU page-walk tests for load/store page faults, PTE preservation, and ADUE WARL behavior; FDT tests |
 | Supervisor trap entry | Sstvecd Direct mode stores any four-byte-aligned BASE; Sstvala records required delegated fault addresses and the faulting instruction for illegal-instruction exceptions; FDT advertises both | RVA23 supervisor trap tests for Direct vector WARL behavior and delegated fault values; FDT tests |
@@ -94,9 +96,11 @@ SimRV verifies its default 64-bit profile (`rva23s64`) against the RISC-V Archit
 
 - Full RVA23S64 is not yet qualified. The following mandatory requirements remain incomplete or
   need profile-level qualification:
-  - Sha is absent: H; Ssstateen (`sstateen0-3` and `hstateen0-3`); Shcounterenw; Shvstvala;
-    Shtvala; Shvstvecd; Shvsatpa; and Shgatpa. This includes guest trap values, writable guest
-    counter enables, guest supervisor translation, and second-stage SvNNx4 translation.
+  - Sha is incomplete: H; Ssstateen (`sstateen0-3` and `hstateen0-3`); Shcounterenw; Shvstvala;
+    Shtvala; Shvstvecd; Shvsatpa; and Shgatpa. The G-stage page-walk core supports Sv39x4,
+    Sv48x4, and Sv57x4, but `hgatp`, VS-stage translation composition, guest privilege modes,
+    guest trap values, and writable guest counter enables are not wired into architectural
+    execution.
 
   This list is a starting qualification checklist, not a claim that every other mandatory item
   has passed conformance testing. See the [normative RVA23 profile specification](https://github.com/riscv/riscv-profiles/blob/main/src/rva23-profile.adoc)

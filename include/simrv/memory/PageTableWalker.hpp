@@ -244,6 +244,11 @@ class PageTableWalker {
                             const core::ArchState* arch_state = nullptr) const
         -> std::expected<PageWalkResult, simrv::xlen::TrapCause>;
 
+    /** Translate a guest-physical address through an SvNNx4 hgatp G-stage page table. */
+    [[nodiscard]] auto walk_guest_physical(simrv::xlen::Address guest_address, PteAccess access,
+                                           simrv::xlen::Word hgatp, unsigned xlen) const
+        -> std::expected<PageWalkResult, simrv::xlen::TrapCause>;
+
     void flush_pdc() noexcept {
         if (++pdc_epoch_ == 0) {
             pdc_epoch_ = 1;

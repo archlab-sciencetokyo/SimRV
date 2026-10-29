@@ -125,10 +125,16 @@ auto trap_cause_name(simrv::xlen::TrapCause cause) -> std::string {
                 return "Environment call from M-mode";
             case ExceptionCode::FetchPageFault:
                 return "Instruction page fault";
+            case ExceptionCode::GuestInstructionPageFault:
+                return "Guest instruction page fault";
             case ExceptionCode::LoadPageFault:
                 return "Load page fault";
+            case ExceptionCode::GuestLoadPageFault:
+                return "Guest load page fault";
             case ExceptionCode::StorePageFault:
                 return "Store/AMO page fault";
+            case ExceptionCode::GuestStorePageFault:
+                return "Guest store/AMO page fault";
             case ExceptionCode::SoftwareCheck:
                 return "Software check / pointer checking";
             case ExceptionCode::HardwareError:

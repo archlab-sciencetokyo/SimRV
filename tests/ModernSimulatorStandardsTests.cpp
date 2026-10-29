@@ -109,6 +109,57 @@ void test_svpbmt_svnapot() {
     }
 }
 
+void test_hypervisor_sv39x4_guest_translation() {
+#if SIMRV_XLEN == 64
+    using simrv::memory::PteAccess;
+    constexpr simrv::xlen::Word kRoot = 0x4000;
+    constexpr simrv::xlen::Word kMiddle = 0x9000;
+    constexpr simrv::xlen::Word kLeaf = 0xA000;
+    constexpr simrv::xlen::Address kGuestAddress = 0x12345678;
+    constexpr simrv::xlen::Address kPhysicalPage = 0x70000;
+    std::array<simrv::xlen::Byte, 1U << 20U> backing{};
+    const auto store_pte = [&](simrv::xlen::Address address, uint64_t value) {
+        std::memcpy(backing.data() + address, &value, sizeof(value));
+    };
+    const auto load_pte = [&](simrv::xlen::Address address) {
+        uint64_t value = 0;
+        std::memcpy(&value, backing.data() + address, sizeof(value));
+        return value;
+    };
+    const auto root_index = (kGuestAddress >> 30U) & 0x7FFU;
+    const auto middle_index = (kGuestAddress >> 21U) & 0x1FFU;
+    const auto leaf_index = (kGuestAddress >> 12U) & 0x1FFU;
+    store_pte(kRoot + root_index * 8U, (uint64_t{9} << 10U) | 1U);
+    store_pte(kMiddle + middle_index * 8U, (uint64_t{10} << 10U) | 1U);
+    constexpr uint64_t kValidReadWriteAccessedDirty = 1U | 2U | 4U | 0x40U | 0x80U;
+    const auto leaf_address = kLeaf + leaf_index * 8U;
+    store_pte(leaf_address, ((kPhysicalPage >> 12U) << 10U) | kValidReadWriteAccessedDirty);
+
+    simrv::memory::PageTableWalker walker(backing.data(), 0, backing.size());
+    const simrv::xlen::Word hgatp = (uint64_t{8} << 60U) | (kRoot >> 12U);
+    const auto translated = walker.walk_guest_physical(kGuestAddress, PteAccess::Read, hgatp, 64);
+    TEST_ASSERT(translated.has_value());
+    TEST_ASSERT(translated->physical_address.raw() == kPhysicalPage + (kGuestAddress & 0xFFFU));
+
+    const auto write_translated =
+        walker.walk_guest_physical(kGuestAddress, PteAccess::Write, hgatp, 64);
+    TEST_ASSERT(write_translated.has_value());
+
+    store_pte(leaf_address, load_pte(leaf_address) & ~uint64_t{0x80});
+    const auto dirty_fault = walker.walk_guest_physical(kGuestAddress, PteAccess::Write, hgatp, 64);
+    TEST_ASSERT(!dirty_fault.has_value());
+    TEST_ASSERT(dirty_fault.error() == simrv::isa::ExceptionCode::GuestStorePageFault);
+
+    const auto out_of_range =
+        walker.walk_guest_physical(uint64_t{1} << 41U, PteAccess::Read, hgatp, 64);
+    TEST_ASSERT(!out_of_range.has_value());
+    TEST_ASSERT(out_of_range.error() == simrv::isa::ExceptionCode::GuestLoadPageFault);
+
+    const auto bare = walker.walk_guest_physical(kGuestAddress, PteAccess::Read, 0, 64);
+    TEST_ASSERT(bare.has_value() && bare->physical_address.raw() == kGuestAddress);
+#endif
+}
+
 void test_sbi_version_and_rfence() {
     TEST_ASSERT(simrv::sbi::kSbiSpecVersion_3_0 == 0x03000000U);
 
@@ -258,6 +309,7 @@ int main() {
     std::cout << "Running ModernSimulatorStandardsTests..." << std::endl;
     test_exception_priorities();
     test_svpbmt_svnapot();
+    test_hypervisor_sv39x4_guest_translation();
     test_sbi_version_and_rfence();
     test_sbi_pmu_discovery_and_raw_counters();
     test_platform_timing_conversions();
