@@ -49,12 +49,13 @@ preset's configured cache-line geometry remains a separate platform requirement.
 | State-enable CSR banks | `mstateen0-3`, `sstateen0-3`, and H-gated `hstateen0-3` storage is present; M/S enable bits gate CSR visibility, and `hstateen.SEO` controls guest access to `sstateen` CSRs with virtual-instruction faults | RVA23 state-enable CSR access, visibility, and guest SEO tests |
 | Hypervisor counter-enable CSR | H-gated `hcounteren` is writable for implemented counters and gates VS/VU counter reads with the required virtual-instruction behavior; S/U access also observes `scounteren` | RVA23 guest-counter-enable and counter-access tests |
 | Hypervisor CSR and return substrate | H/VS CSR state and access checks are present; `hgatp` accepts Bare and SvNNx4 modes, `vsatp` follows `satp` WARL modes, S CSR aliases select VS state in virtualization mode, MPV/MRET and SPV/SRET support guest returns, and synchronous traps can route to VS or HS. The RVA23S64 profile enables H; explicit ISA and CPU-model configurations retain their selected MISA | RVA23 H/VS CSR, guest return, and trap-routing tests |
+| Hypervisor virtual-machine memory instructions | `HLV.*`, `HLVX.HU/WU`, and `HSV.*` decode and execute with SPVP-selected VS/VU privilege, VS/G-stage translation, load/store fault classes, `GVA`/`htval` reporting, and Ssnpm pointer-mask selection; HLVX uses execute permission while reporting load faults | RVA23 H virtual load/store tests cover decode, VS/G translation, execute-only HLVX, stores, load-page-fault routing, and retirement/writeback |
 | Hypervisor interrupt routing | VS software/timer/external pending state, `hideleg`/`mideleg`, VS CSR aliases, and VS trap entry implement standard VS cause-number translation; guest external interrupt files are not implemented | RVA23 interrupt delegation WARL and VS trap-entry tests |
 | Hypervisor fault values | `vstval` is populated on delegated VS traps; `htval` records GPA >> 2 for guest-page faults from G-stage translation, including VS Bare accesses | RVA23 VS trap-value and Shtvala guest-physical fault-value tests |
 | Counter overflow filtering | Sscofpmf implements M/S/U event filtering, counter inhibit, sticky overflow reporting, and delegated LCOFIP; FDT advertises Sscofpmf | RVA23 CSR, overflow, and interrupt-delegation tests |
 | User pointer masking | Ssnpm selects U-mode PMLEN=0 or PMLEN=7 through `senvcfg.PMM`; Supm is implied; RV64 FDT advertises both | RVA23 WARL and tagged physical load/store tests; FDT tests |
 | NAPOT translation contiguity | Svnapot maps aligned 64 KiB regions through level-0 PTEs for Sv39/Sv48/Sv57; invalid N encodings fault; FDT advertises Svnapot | Svnapot alias translation and reserved-encoding tests; FDT tests |
-| Hypervisor guest-stage translation core | CPU fetch and data translation select `vsatp` in guest mode and compose VS-stage walks with G-stage translation through `hgatp`; guest VS Bare accesses also pass through G-stage. `HFENCE.VVMA` and `HFENCE.GVMA` invalidate local translation state. G-stage page-table reads are currently synchronous internal RAM reads, including in cycle mode | RVA23 CPU two-stage translation through `vsatp`, guest-physical walker, and HFENCE decode/privilege tests |
+| Hypervisor guest-stage translation core | CPU fetch and data translation select `vsatp` in guest mode and compose VS-stage walks with G-stage translation through `hgatp`; guest VS Bare accesses and HS HLV/HLVX/HSV accesses also pass through G-stage. `HFENCE.VVMA` and `HFENCE.GVMA` invalidate local translation state. G-stage page-table reads are currently synchronous internal RAM reads, including in cycle mode | RVA23 CPU two-stage translation through `vsatp`, H virtual-memory instruction, guest-physical walker, and HFENCE decode/privilege tests |
 | Page-based memory types | Svpbmt decodes PMA/NC/IO leaf attributes and faults reserved PBMT encodings; NC/IO accesses bypass L1 data-cache paths and use coherent TileLink transfers; ordered execution and fences preserve IO and cross-attribute ordering; AMOs fault on non-PMA mappings without atomicity support; FDT advertises Svpbmt | Svpbmt PTE legality, uncached access, dirty-owner writeback, cache-bypass, non-PMA AMO-fault, and cycle-mode mixed-attribute fence-order tests |
 | Accessed/dirty tracking | Mandatory Svade behavior: guest accesses fault when a required PTE A/D bit is clear; unsupported Svadu `menvcfg.ADUE` is read-only zero; FDT advertises Svade | RVA23 CPU page-walk tests for load/store page faults, PTE preservation, and ADUE WARL behavior; FDT tests |
 | Supervisor trap entry | Sstvecd Direct mode stores any four-byte-aligned BASE; Sstvala records required delegated fault addresses and the faulting instruction for illegal-instruction exceptions; FDT advertises both | RVA23 supervisor trap tests for Direct vector WARL behavior and delegated fault values; FDT tests |
@@ -101,19 +102,12 @@ SimRV verifies its default 64-bit profile (`rva23s64`) against the RISC-V Archit
 
 - Full RVA23S64 is not yet qualified. The following mandatory requirements remain incomplete or
   need profile-level qualification:
-  - Sha remains incomplete: `sstateen0-3` and `hstateen0-3` CSR storage and the `hstateen.SEO`
-    guest access gate are implemented, but complete state-enable behavior needs qualification;
-    guest counter gating is
-    implemented but needs broader profile-level qualification; guest external interrupt files
-    and complete H trap-value reporting remain incomplete. Shtvala now reports `htval` for
-    guest-page faults produced by G-stage walks. Shvstvala, Shvstvecd, Shvsatpa, and Shgatpa
-    have implementation paths and focused tests but still need profile-level qualification. The
-    G-stage page-walk core supports Sv39x4,
-    Sv48x4, and Sv57x4; `hgatp` and VS/G-stage translation composition now participate in
-    architectural translation, but G-stage page-table accesses are synchronous internal RAM
-    reads and complete trap-value reporting, full interrupt virtualization, and writable guest
-    counter access remain incomplete. `HFENCE.VVMA` and `HFENCE.GVMA` are decoded and execute as
-    conservative local translation flushes.
+  - Sha still needs full profile qualification. Focused implementation and tests now cover
+    state-enable CSR access, guest counter gating, guest trap values, `vsatp`/`hgatp` composition,
+    HFENCE instructions, and HLV/HLVX/HSV accesses. Guest external interrupt files are not
+    implemented; G-stage page-table reads are synchronous internal RAM reads, including in cycle
+    mode. Shvstvala, Shvstvecd, Shvsatpa, and Shgatpa have implementation paths and focused tests,
+    but require broader profile-level qualification.
 
   This list is a starting qualification checklist, not a claim that every other mandatory item
   has passed conformance testing. See the [normative RVA23 profile specification](https://github.com/riscv/riscv-profiles/blob/main/src/rva23-profile.adoc)

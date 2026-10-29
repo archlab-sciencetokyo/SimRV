@@ -879,6 +879,7 @@ class CPU {
 
     ArchState state_;
     ArchState prev_state_;
+    bool hypervisor_memory_access_active_ = false;
     // Six dirty bits followed by six value bits: MTIP, MSIP, MEIP, STIP, SSIP, SEIP.
     std::atomic<uint16_t> pending_interrupt_lines_{0};
     simrv::xlen::Counter next_register_trace_sequence_ = 0;
@@ -898,6 +899,10 @@ class CPU {
 
     [[nodiscard]] SIMRV_ALWAYS_INLINE constexpr auto effective_data_privilege() const noexcept
         -> simrv::xlen::PrivilegeLevel {
+        if (hypervisor_memory_access_active_) {
+            constexpr simrv::xlen::CsrValue kHstatusSpvp = simrv::xlen::CsrValue{1} << 8U;
+            return (state_.hstatus & kHstatusSpvp) != 0 ? kPrivSupervisor : kPrivUser;
+        }
         if (simrv::compiler::unlikely(state_.priv == kPrivMachine &&
                                       (state_.mstatus & MstatusBit::Mprv) != 0)) {
             return mstatus_mpp(state_.mstatus);
@@ -908,14 +913,22 @@ class CPU {
     /// SATP selected by the current virtualization mode for address translation.
     [[nodiscard]] SIMRV_ALWAYS_INLINE constexpr auto active_satp() const noexcept
         -> simrv::xlen::CsrValue {
-        return state_.virt ? state_.vsatp : state_.satp;
+        return (state_.virt || hypervisor_memory_access_active_) ? state_.vsatp : state_.satp;
     }
 
     /// Status fields used by VS-stage translation, with HS MXR applying to both stages.
     [[nodiscard]] SIMRV_ALWAYS_INLINE constexpr auto active_translation_status() const noexcept
         -> simrv::xlen::CsrValue {
-        return state_.virt ? (state_.vsstatus | (state_.mstatus & MstatusBit::Mxr))
-                           : state_.mstatus;
+        return (state_.virt || hypervisor_memory_access_active_)
+                   ? (state_.vsstatus | (state_.mstatus & MstatusBit::Mxr))
+                   : state_.mstatus;
+    }
+
+    [[nodiscard]] constexpr auto hypervisor_memory_access_active() const noexcept -> bool {
+        return hypervisor_memory_access_active_;
+    }
+    constexpr void set_hypervisor_memory_access_active(bool active) noexcept {
+        hypervisor_memory_access_active_ = active;
     }
 
     /**

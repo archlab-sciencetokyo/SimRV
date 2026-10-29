@@ -25,8 +25,10 @@ auto PageTableWalker::page_fault_for(PteAccess access) noexcept -> simrv::xlen::
     switch (access) {
         case PteAccess::Code:
             return to_trap_cause(ExceptionCode::FetchPageFault);
+        case PteAccess::ReadExecute:
         case PteAccess::Write:
-            return to_trap_cause(ExceptionCode::StorePageFault);
+            return to_trap_cause(access == PteAccess::Write ? ExceptionCode::StorePageFault
+                                                            : ExceptionCode::LoadPageFault);
         case PteAccess::Read:
         default:
             return to_trap_cause(ExceptionCode::LoadPageFault);
@@ -37,8 +39,10 @@ auto PageTableWalker::access_fault_for(PteAccess access) noexcept -> simrv::xlen
     switch (access) {
         case PteAccess::Code:
             return to_trap_cause(ExceptionCode::FaultFetch);
+        case PteAccess::ReadExecute:
         case PteAccess::Write:
-            return to_trap_cause(ExceptionCode::FaultStore);
+            return to_trap_cause(access == PteAccess::Write ? ExceptionCode::FaultStore
+                                                            : ExceptionCode::FaultLoad);
         case PteAccess::Read:
         default:
             return to_trap_cause(ExceptionCode::FaultLoad);
@@ -108,7 +112,9 @@ auto PageTableWalker::begin_walk(simrv::xlen::VirtAddr v_addr, PteAccess access,
     if (priv == kPrivMachine || !simrv::xlen::satp_translation_enabled(satp, xlen)) {
         state.physical_address = simrv::xlen::PhysAddr{v_addr.raw()};
         if (state.guest_stage_enabled && priv != kPrivMachine) {
-            auto translated = walk_guest_physical(v_addr.raw(), access, state.hgatp, xlen);
+            const bool mxr = arch_state != nullptr && (arch_state->mstatus & MstatusBit::Mxr) != 0;
+            auto translated =
+                walk_guest_physical(v_addr.raw(), access, state.hgatp, xlen, nullptr, mxr);
             if (!translated) {
                 state.guest_fault_address = v_addr.raw();
                 state.fault = translated.error();
@@ -247,8 +253,10 @@ void PageTableWalker::accept_pte(PageWalkState& state, simrv::xlen::Word pte) co
         (state.virtual_address.raw() & offset_mask) | ((ppn << 12) & ~offset_mask)};
     state.physical_address = stage_one_address;
     if (state.guest_stage_enabled) {
+        const bool mxr = state.arch_state != nullptr &&
+                         (state.arch_state->mstatus & MstatusBit::Mxr) != 0;
         auto translated = walk_guest_physical(stage_one_address.raw(), state.access, state.hgatp,
-                                              state.xlen, &state.guest_fault_address);
+                                              state.xlen, &state.guest_fault_address, mxr);
         if (!translated) {
             state.fault = translated.error();
             state.status = PageWalkStatus::Fault;
@@ -262,8 +270,13 @@ void PageTableWalker::accept_pte(PageWalkState& state, simrv::xlen::Word pte) co
                                                                 : (state.access == PteAccess::Write
                                                                        ? core::PmpAccessType::Write
                                                                        : core::PmpAccessType::Read);
-        if (!core::pmp::check_access(*state.arch_state, state.physical_address, 1, pmp_access,
-                                     state.privilege)) {
+        const bool pmp_allowed =
+            core::pmp::check_access(*state.arch_state, state.physical_address, 1, pmp_access,
+                                    state.privilege) &&
+            (state.access != PteAccess::ReadExecute ||
+             core::pmp::check_access(*state.arch_state, state.physical_address, 1,
+                                     core::PmpAccessType::Execute, state.privilege));
+        if (!pmp_allowed) {
             state.fault = access_fault_for(state.access);
             state.status = PageWalkStatus::Fault;
             return;
@@ -315,7 +328,7 @@ auto PageTableWalker::validate_pte_permissions(simrv::xlen::Word pte,
     const bool pte_u = view.user();
     // Supervisor access to user-only page (U=1)
     if (priv == kPrivSupervisor && pte_u) {
-        if (access == PteAccess::Code) {
+        if (access == PteAccess::Code || access == PteAccess::ReadExecute) {
             // Executing code from a U=1 page in Supervisor mode raises a Page Fault regardless of
             // SUM
             return false;
@@ -331,7 +344,11 @@ auto PageTableWalker::validate_pte_permissions(simrv::xlen::Word pte,
     }
 
     // Check access permissions
-    if (((permission_bits >> std::to_underlying(access)) & 1) == 0) {
+    const bool access_permitted =
+        access == PteAccess::ReadExecute
+            ? ((permission_bits & (1U << std::to_underlying(PteAccess::Code))) != 0)
+            : (((permission_bits >> std::to_underlying(access)) & 1) != 0);
+    if (!access_permitted) {
         return false;
     }
 
@@ -340,13 +357,15 @@ auto PageTableWalker::validate_pte_permissions(simrv::xlen::Word pte,
 
 auto PageTableWalker::walk_guest_physical(simrv::xlen::Address guest_address, PteAccess access,
                                           simrv::xlen::Word hgatp, unsigned xlen,
-                                          simrv::xlen::Address* fault_address) const
+                                          simrv::xlen::Address* fault_address, bool mxr) const
     -> std::expected<PageWalkResult, simrv::xlen::TrapCause> {
     const auto guest_page_fault = [access]() -> simrv::xlen::TrapCause {
         using simrv::isa::ExceptionCode;
         switch (access) {
             case PteAccess::Code:
                 return simrv::isa::to_trap_cause(ExceptionCode::GuestInstructionPageFault);
+            case PteAccess::ReadExecute:
+                return simrv::isa::to_trap_cause(ExceptionCode::GuestLoadPageFault);
             case PteAccess::Write:
                 return simrv::isa::to_trap_cause(ExceptionCode::GuestStorePageFault);
             case PteAccess::Read:
@@ -407,7 +426,15 @@ auto PageTableWalker::walk_guest_physical(simrv::xlen::Address guest_address, Pt
         }
 
         const simrv::xlen::Word rwx = (pte >> 1U) & 0x7U;
-        if (rwx == 0x2U || rwx == 0x6U || (rwx & (1U << std::to_underlying(access))) == 0) {
+        const bool read_allowed = (rwx & (1U << std::to_underlying(PteAccess::Read))) != 0 ||
+                                  (mxr &&
+                                   (rwx & (1U << std::to_underlying(PteAccess::Code))) != 0);
+        const bool permission_denied =
+            access == PteAccess::ReadExecute
+                ? (rwx & (1U << std::to_underlying(PteAccess::Code))) == 0
+                : (access == PteAccess::Read ? !read_allowed
+                                             : (rwx & (1U << std::to_underlying(access))) == 0);
+        if (rwx == 0x2U || rwx == 0x6U || permission_denied) {
             return guest_fault();
         }
         if (view.is_napot() && (level != 0 || !view.has_valid_napot_ppn_encoding())) {

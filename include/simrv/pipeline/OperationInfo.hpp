@@ -133,10 +133,14 @@ consteval auto generate_operation_info() {
     // Loads
     set_props({LB, LH, LW, LD, LBU, LHU, LWU}, exec_def,
               {.rd = b_int, .rs1 = b_int, .rs2 = b_none, .rs3 = b_none}, mem_load);
+    set_props({HLV_B, HLV_BU, HLV_H, HLV_HU, HLV_W, HLV_WU, HLV_D, HLVX_HU, HLVX_WU},
+              exec_def, {.rd = b_int, .rs1 = b_int, .rs2 = b_none, .rs3 = b_none}, mem_load);
 
     // Stores
     set_props({SB, SH, SW, SD}, exec_def, {.rd = b_none, .rs1 = b_int, .rs2 = b_int, .rs3 = b_none},
               mem_store);
+    set_props({HSV_B, HSV_H, HSV_W, HSV_D}, exec_def,
+              {.rd = b_none, .rs1 = b_int, .rs2 = b_int, .rs3 = b_none}, mem_store);
 
     // Integer ALU Immediate
     set_props({ADDI, SLTI, SLTIU, XORI, ORI, ANDI, SLLI, SRLI, SRAI, ADDIW, SLLIW, SRLIW, SRAIW},

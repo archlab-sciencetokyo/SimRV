@@ -65,6 +65,29 @@ void CPU::fetch_operands(Machine& /*machine*/) {
         return;
     }
 
+    if (isa::is_hypervisor_memory_op(ctx.op_id)) {
+        constexpr simrv::xlen::CsrValue kHstatusHu = simrv::xlen::CsrValue{1} << 9U;
+        if (!isa::misa_has_extension(state_.misa, isa::IsaExtension::H)) {
+            raise_decode_exception(ctx, ExceptionCode::IllegalInstruction);
+            return;
+        }
+        if (state_.virt) {
+            raise_decode_exception(ctx, ExceptionCode::VirtualInstruction);
+            return;
+        }
+        if (state_.priv == kPrivUser && (state_.hstatus & kHstatusHu) == 0) {
+            raise_decode_exception(ctx, ExceptionCode::IllegalInstruction);
+            return;
+        }
+        if (state_.priv != kPrivMachine && state_.priv != kPrivSupervisor &&
+            state_.priv != kPrivUser) {
+            raise_decode_exception(ctx, ExceptionCode::IllegalInstruction);
+            return;
+        }
+        ctx.rcsr = 0;
+        return;
+    }
+
     if (simrv::compiler::likely(opcode != Opcode::System)) {
         ctx.rcsr = 0;
         return;

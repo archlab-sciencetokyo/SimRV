@@ -23,20 +23,60 @@
 namespace simrv::memory {
 
 namespace {
+class HypervisorMemoryAccessScope {
+   public:
+    explicit HypervisorMemoryAccessScope(core::CPU& cpu) noexcept
+        : cpu_(cpu), previous_(cpu.hypervisor_memory_access_active()),
+          hypervisor_operation_(isa::is_hypervisor_memory_op(cpu.active_context().op_id)) {
+        if (hypervisor_operation_) {
+            if (!previous_) cpu_.active_context().hypervisor_memory_access_fault = false;
+            cpu_.set_hypervisor_memory_access_active(true);
+        }
+    }
+    ~HypervisorMemoryAccessScope() {
+        if (hypervisor_operation_ && cpu_.active_context().pending_exception.has_value()) {
+            cpu_.active_context().hypervisor_memory_access_fault = true;
+        }
+        cpu_.set_hypervisor_memory_access_active(previous_);
+    }
+
+   private:
+    core::CPU& cpu_;
+    bool previous_;
+    bool hypervisor_operation_;
+};
+
 [[nodiscard]] auto apply_user_pointer_mask(core::CPU& cpu, simrv::xlen::VirtAddr address,
                                            unsigned active_xlen) -> simrv::xlen::VirtAddr {
-    if (active_xlen != 64 || cpu.effective_data_privilege() != simrv::xlen::PrivilegeLevel::User)
-        return address;
-
+    const auto op = cpu.active_context().op_id;
+    const bool hypervisor_access = isa::is_hypervisor_memory_op(op);
+    if (active_xlen != 64 || isa::is_hlvx_op(op)) return address;
     constexpr uint64_t kPmmMask = uint64_t{0x3} << 32U;
-    const auto pmm = (static_cast<uint64_t>(cpu.state().senvcfg) & kPmmMask) >> 32U;
+    uint64_t pmm = 0;
+    if (hypervisor_access) {
+        constexpr simrv::xlen::CsrValue kSpvp = simrv::xlen::CsrValue{1} << 8U;
+        constexpr uint64_t kHupmmMask = uint64_t{0x3} << 48U;
+        if ((cpu.state().hstatus & kSpvp) != 0) {
+            pmm = (static_cast<uint64_t>(cpu.state().henvcfg) & kPmmMask) >> 32U;
+        } else if (cpu.state().priv == simrv::xlen::PrivilegeLevel::User) {
+            pmm = (static_cast<uint64_t>(cpu.state().hstatus) & kHupmmMask) >> 48U;
+        } else {
+            pmm = (static_cast<uint64_t>(cpu.state().senvcfg) & kPmmMask) >> 32U;
+        }
+    } else {
+        if (cpu.effective_data_privilege() != simrv::xlen::PrivilegeLevel::User) return address;
+        pmm = (static_cast<uint64_t>(cpu.state().senvcfg) & kPmmMask) >> 32U;
+    }
     if (pmm != 2U) return address;  // RVA23 requires PMLEN=0 and PMLEN=7.
 
     constexpr uint64_t kLow57Mask = (uint64_t{1} << 57U) - 1U;
     const uint64_t low = address.raw() & kLow57Mask;
-    const bool translated =
-        cpu.effective_data_privilege() != simrv::xlen::PrivilegeLevel::Machine &&
-        simrv::xlen::satp_mode(cpu.active_satp(), active_xlen) != 0;
+    const bool translated = hypervisor_access
+                                ? (simrv::xlen::satp_mode(cpu.state().vsatp, active_xlen) != 0 ||
+                                   simrv::xlen::satp_mode(cpu.state().hgatp, active_xlen) != 0)
+                                : (cpu.effective_data_privilege() !=
+                                       simrv::xlen::PrivilegeLevel::Machine &&
+                                   simrv::xlen::satp_mode(cpu.active_satp(), active_xlen) != 0);
     const uint64_t upper = translated && ((low >> 56U) & 1U) != 0 ? ~kLow57Mask : 0;
     return simrv::xlen::VirtAddr{static_cast<simrv::xlen::Word>(low | upper)};
 }
@@ -73,6 +113,7 @@ auto MemorySubsystem::memory_geometry() const noexcept -> const simrv::core::Mem
 
 auto MemoryAccess::target_read(MemorySubsystem& mem, core::CPU& cpu, simrv::xlen::VirtAddr v_addr,
                                isa::Funct3 funct3) -> simrv::xlen::Word {
+    HypervisorMemoryAccessScope hypervisor_scope(cpu);
     const auto& geometry = mem.memory_geometry();
     const unsigned active_xlen = cpu.effective_data_xlen();
     if (active_xlen == 32) v_addr &= 0xFFFFFFFFULL;
@@ -84,6 +125,8 @@ auto MemoryAccess::target_read(MemorySubsystem& mem, core::CPU& cpu, simrv::xlen
     const unsigned size_bytes = 1u << (std::to_underlying(funct3) & 0x3u);  // unchanged
     const bool is_amo = (static_cast<Opcode>(cpu.active_context().opcode) == Opcode::Amo);
     const bool is_lr = is_amo && (cpu.active_context().funct5 == Funct5Amo::Lr);
+    const bool hypervisor_access =
+        isa::is_hypervisor_memory_op(cpu.active_context().op_id);
     simrv::memory::PtePbmt pbmt = simrv::memory::PtePbmt::Pma;
 
     const bool crosses_page =
@@ -139,7 +182,7 @@ auto MemoryAccess::target_read(MemorySubsystem& mem, core::CPU& cpu, simrv::xlen
     const simrv::xlen::Word current_asid = simrv::xlen::satp_asid(active_satp, active_xlen);
     const bool translation_enabled =
         (eff_priv != kPrivMachine &&
-         simrv::xlen::satp_translation_enabled(active_satp, active_xlen));
+         (simrv::xlen::satp_translation_enabled(active_satp, active_xlen) || hypervisor_access));
 
     if constexpr (simrv::xlen::kIsXLen64) {
         if (translation_enabled) {
@@ -158,7 +201,8 @@ auto MemoryAccess::target_read(MemorySubsystem& mem, core::CPU& cpu, simrv::xlen
                              ? (core::PmpAccessType::Read | core::PmpAccessType::Write)
                              : core::PmpAccessType::Read;
 
-    if (cpu.machine_->runtime_profile.is_instruction_mode() && !crosses_page) {
+    if (cpu.machine_->runtime_profile.is_instruction_mode() && !crosses_page &&
+        !hypervisor_access) {
         if (!translation_enabled) {
             // Bypass soft TLB lookup if translation is disabled (direct DRAM access)
             const simrv::xlen::Address eff_vaddr = (simrv::xlen::kIsXLen64 && active_xlen == 32)
@@ -368,8 +412,7 @@ auto MemoryAccess::target_read(MemorySubsystem& mem, core::CPU& cpu, simrv::xlen
                                                : v_addr.raw();
 
     if (simrv::compiler::likely(!cpu.active_context().pending_exception.has_value()) &&
-        simrv::compiler::likely(eff_priv == kPrivMachine || !simrv::xlen::satp_translation_enabled(
-                                                                active_satp, active_xlen)) &&
+        simrv::compiler::likely(eff_priv == kPrivMachine || !translation_enabled) &&
         simrv::compiler::likely(geometry.contains(eff_vaddr, size_bytes))) {
         return issue_read(eff_vaddr);
     }
@@ -377,13 +420,15 @@ auto MemoryAccess::target_read(MemorySubsystem& mem, core::CPU& cpu, simrv::xlen
     simrv::xlen::Word rdata = 0;
     simrv::xlen::Address p_addr = 0;
     bool is_global = false;
-    const PteAccess access_type = (is_amo && !is_lr) ? PteAccess::Write : PteAccess::Read;
-    core::TLBEntry* entry = (is_amo && !is_lr)
+    const PteAccess access_type =
+        (is_amo && !is_lr) ? PteAccess::Write
+        : isa::is_hlvx_op(cpu.active_context().op_id) ? PteAccess::ReadExecute
+                                                       : PteAccess::Read;
+    core::TLBEntry* entry = hypervisor_access ? nullptr : (is_amo && !is_lr)
                                 ? cpu.tlb.lookup_data_w(v_addr.raw(), current_asid, eff_priv)
                                 : cpu.tlb.lookup_data_r(v_addr.raw(), current_asid, eff_priv);
 
-    if (eff_priv == kPrivMachine ||
-        !simrv::xlen::satp_translation_enabled(active_satp, active_xlen)) {
+    if (eff_priv == kPrivMachine || !translation_enabled) {
         p_addr = eff_vaddr;
     } else if (entry) {
         p_addr = entry->p_addr + (v_addr.raw() & simrv::memory::kPageMask);
@@ -402,9 +447,11 @@ auto MemoryAccess::target_read(MemorySubsystem& mem, core::CPU& cpu, simrv::xlen
                     p_addr = res.physical_address.raw();
                     is_global = res.global();
                     pbmt = simrv::memory::PteView{.raw = res.pte}.pbmt();
-                    cpu.tlb.insert_data_r(v_addr.raw(), p_addr, current_asid, eff_priv, is_global,
-                                          pbmt);
-                    if (is_amo && !is_lr) {
+                    if (!hypervisor_access) {
+                        cpu.tlb.insert_data_r(v_addr.raw(), p_addr, current_asid, eff_priv,
+                                              is_global, pbmt);
+                    }
+                    if (is_amo && !is_lr && !hypervisor_access) {
                         cpu.tlb.insert_data_w(v_addr.raw(), p_addr, current_asid, eff_priv,
                                               is_global, pbmt);
                     }
@@ -436,7 +483,7 @@ auto MemoryAccess::target_read(MemorySubsystem& mem, core::CPU& cpu, simrv::xlen
             cpu.active_context().pending_tval = v_addr.raw();
             return 0;
         }
-        if (pbmt == simrv::memory::PtePbmt::Pma &&
+        if (!hypervisor_access && pbmt == simrv::memory::PtePbmt::Pma &&
             cpu.machine_->runtime_profile.is_instruction_mode() && geometry.contains(p_addr)) {
             const simrv::xlen::Address vpn = v_addr.raw() >> 12;
             const size_t tlb_idx = core::CPU::soft_tlb_index(vpn);
@@ -467,6 +514,7 @@ auto MemoryAccess::target_read(MemorySubsystem& mem, core::CPU& cpu, simrv::xlen
 
 void MemoryAccess::target_write(MemorySubsystem& mem, core::CPU& cpu, simrv::xlen::VirtAddr v_addr,
                                 simrv::xlen::Word wdata, isa::Funct3 funct3) {
+    HypervisorMemoryAccessScope hypervisor_scope(cpu);
     const auto& geometry = mem.memory_geometry();
     const unsigned active_xlen = cpu.effective_data_xlen();
     if (active_xlen == 32) v_addr &= 0xFFFFFFFFULL;
@@ -490,6 +538,8 @@ void MemoryAccess::target_write(MemorySubsystem& mem, core::CPU& cpu, simrv::xle
                                      size_bytes) > simrv::cache::DCache::kLineBytes;
     const bool is_amo = (static_cast<Opcode>(cpu.active_context().opcode) == Opcode::Amo);
     const bool is_sc = is_amo && (cpu.active_context().funct5 == Funct5Amo::Sc);
+    const bool hypervisor_access =
+        isa::is_hypervisor_memory_op(cpu.active_context().op_id);
     simrv::memory::PtePbmt pbmt = simrv::memory::PtePbmt::Pma;
     if (simrv::compiler::unlikely((v_addr & (size_bytes - 1u)) != 0)) {
         if (is_amo) {
@@ -538,7 +588,7 @@ void MemoryAccess::target_write(MemorySubsystem& mem, core::CPU& cpu, simrv::xle
     const simrv::xlen::Word current_asid = simrv::xlen::satp_asid(active_satp, active_xlen);
     const bool translation_enabled =
         (eff_priv != kPrivMachine &&
-         simrv::xlen::satp_translation_enabled(active_satp, active_xlen));
+         (simrv::xlen::satp_translation_enabled(active_satp, active_xlen) || hypervisor_access));
 
     if constexpr (simrv::xlen::kIsXLen64) {
         if (translation_enabled) {
@@ -804,7 +854,8 @@ void MemoryAccess::target_write(MemorySubsystem& mem, core::CPU& cpu, simrv::xle
         }
     };
 
-    if (cpu.machine_->runtime_profile.is_instruction_mode() && !crosses_page && !is_sc) {
+    if (cpu.machine_->runtime_profile.is_instruction_mode() && !crosses_page && !is_sc &&
+        !hypervisor_access) {
         if (!translation_enabled) {
             // Bypass soft TLB lookup if translation is disabled (direct DRAM access)
             const simrv::xlen::Address eff_vaddr = (simrv::xlen::kIsXLen64 && active_xlen == 32)
@@ -848,8 +899,7 @@ void MemoryAccess::target_write(MemorySubsystem& mem, core::CPU& cpu, simrv::xle
                                                : v_addr.raw();
 
     if (simrv::compiler::likely(!cpu.active_context().pending_exception.has_value()) &&
-        simrv::compiler::likely(eff_priv == kPrivMachine || !simrv::xlen::satp_translation_enabled(
-                                                                active_satp, active_xlen)) &&
+        simrv::compiler::likely(eff_priv == kPrivMachine || !translation_enabled) &&
         simrv::compiler::likely(geometry.contains(eff_vaddr, size_bytes))) {
         if (simrv::compiler::unlikely(!core::pmp::check_access(
                 cpu.state(), eff_vaddr, size_bytes, core::PmpAccessType::Write, eff_priv))) {
@@ -863,10 +913,11 @@ void MemoryAccess::target_write(MemorySubsystem& mem, core::CPU& cpu, simrv::xle
 
     simrv::xlen::Address p_addr = 0;
     bool is_global = false;
-    core::TLBEntry* entry = cpu.tlb.lookup_data_w(v_addr.raw(), current_asid, eff_priv);
+    core::TLBEntry* entry = hypervisor_access
+                                ? nullptr
+                                : cpu.tlb.lookup_data_w(v_addr.raw(), current_asid, eff_priv);
 
-    if (eff_priv == kPrivMachine ||
-        !simrv::xlen::satp_translation_enabled(active_satp, active_xlen)) {
+    if (eff_priv == kPrivMachine || !translation_enabled) {
         p_addr = eff_vaddr;
     } else if (entry) {
         p_addr = entry->p_addr + (v_addr.raw() & simrv::memory::kPageMask);
@@ -885,8 +936,10 @@ void MemoryAccess::target_write(MemorySubsystem& mem, core::CPU& cpu, simrv::xle
                     p_addr = res.physical_address.raw();
                     is_global = res.global();
                     pbmt = simrv::memory::PteView{.raw = res.pte}.pbmt();
-                    cpu.tlb.insert_data_w(v_addr.raw(), p_addr, current_asid, eff_priv, is_global,
-                                          pbmt);
+                    if (!hypervisor_access) {
+                        cpu.tlb.insert_data_w(v_addr.raw(), p_addr, current_asid, eff_priv,
+                                              is_global, pbmt);
+                    }
                     return {};
                 })
                 .or_else([&](simrv::xlen::TrapCause error)
@@ -910,7 +963,7 @@ void MemoryAccess::target_write(MemorySubsystem& mem, core::CPU& cpu, simrv::xle
             cpu.active_context().pending_tval = v_addr.raw();
             return;
         }
-        if (pbmt == simrv::memory::PtePbmt::Pma &&
+        if (!hypervisor_access && pbmt == simrv::memory::PtePbmt::Pma &&
             cpu.machine_->runtime_profile.is_instruction_mode() && geometry.contains(p_addr)) {
             const simrv::xlen::Address vpn = v_addr.raw() >> 12;
             const size_t tlb_idx = core::CPU::soft_tlb_index(vpn);

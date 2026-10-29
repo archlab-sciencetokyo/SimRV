@@ -132,7 +132,10 @@ void CPU::execute_core(Machine& machine) {
             }
             break;
         case Opcode::System:
-            if (ctx.op_id == MOP) {
+            if (isa::is_hypervisor_memory_op(ctx.op_id)) {
+                ctx.tkn = false;
+                ctx.mem_addr = ctx.rrs1;
+            } else if (ctx.op_id == MOP) {
                 ctx.tkn = false;
                 ctx.wb_data = 0;
             } else {

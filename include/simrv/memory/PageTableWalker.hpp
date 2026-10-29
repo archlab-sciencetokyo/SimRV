@@ -139,7 +139,9 @@ struct PteView {
     }
 };
 
-enum class PteAccess : uint8_t { Read = 0, Write = 1, Code = 2 };
+// ReadExecute is used by HLVX: page-table translation requires execute permission,
+// while the resulting physical access remains a load and therefore reports load faults.
+enum class PteAccess : uint8_t { Read = 0, Write = 1, Code = 2, ReadExecute = 3 };
 
 enum class PageWalkStatus : uint8_t { ReadPte, WritePte, Complete, Fault };
 
@@ -252,7 +254,8 @@ class PageTableWalker {
     /** Translate a guest-physical address through an SvNNx4 hgatp G-stage page table. */
     [[nodiscard]] auto walk_guest_physical(simrv::xlen::Address guest_address, PteAccess access,
                                            simrv::xlen::Word hgatp, unsigned xlen,
-                                           simrv::xlen::Address* fault_address = nullptr) const
+                                           simrv::xlen::Address* fault_address = nullptr,
+                                           bool mxr = false) const
         -> std::expected<PageWalkResult, simrv::xlen::TrapCause>;
 
     void flush_pdc() noexcept {

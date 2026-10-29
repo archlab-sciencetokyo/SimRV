@@ -485,6 +485,10 @@ constexpr auto requires_rv64(OperationId op_id) -> bool {
         case OperationId::LD:
         case OperationId::LWU:
         case OperationId::SD:
+        case OperationId::HLV_WU:
+        case OperationId::HLV_D:
+        case OperationId::HLVX_WU:
+        case OperationId::HSV_D:
         case OperationId::ADDIW:
         case OperationId::SLLIW:
         case OperationId::SRLIW:

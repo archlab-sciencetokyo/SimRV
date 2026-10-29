@@ -80,6 +80,7 @@ void release_instruction_eviction(Machine& machine, CPU& cpu) {
 
 void CPU::run_fetch_stage(Machine& machine) {
     auto& ctx = active_context();
+    ctx.hypervisor_memory_access_fault = false;
     if (!check_fetch_alignment(state_, ctx)) return;
 
     const bool split_page =
@@ -264,12 +265,15 @@ auto CPU::translate_stage_address(Machine& machine, simrv::xlen::VirtAddr virtua
                                   simrv::pipeline::TimedPageWalkState& timed_walk)
     -> std::optional<std::expected<PageWalkResult, simrv::xlen::TrapCause>> {
     auto* mmu = machine.memory_.mmu();
+    const bool hypervisor_access = hypervisor_memory_access_active();
     if (machine.runtime_profile.is_instruction_mode()) {
         simrv::xlen::Address guest_fault_address = 0;
+        if (hypervisor_access) state_.virt = true;
         auto result = mmu->translate(virtual_address, access, privilege,
                                      active_translation_status(),
                                      active_satp(), active_xlen, false, &state_,
                                      &guest_fault_address);
+        if (hypervisor_access) state_.virt = false;
         active_context().pending_htval =
             result || !is_guest_page_fault(result.error()) ? 0 : guest_fault_address >> 2U;
         return result;
@@ -280,9 +284,11 @@ auto CPU::translate_stage_address(Machine& machine, simrv::xlen::VirtAddr virtua
         if (timed_walk.active && timed_walk.request_pending) {
             machine.memory_.system_bus().cancel_source(timed_walk.source);
         }
+        if (hypervisor_access) state_.virt = true;
         timed_walk.walk = mmu->begin_page_walk(virtual_address, access, privilege,
                                                active_translation_status(),
                                                active_satp(), active_xlen, false, &state_);
+        if (hypervisor_access) state_.virt = false;
         timed_walk.source = simrv::memory::make_tl_source(hart_id(), port);
         timed_walk.active = true;
         timed_walk.request_pending = false;
@@ -836,6 +842,7 @@ void CPU::run_fetch_stage_baremetal(Machine& machine) {
     ctx.sc_reservation_succeeded = false;
     ctx.mem_paddr = simrv::xlen::PhysAddr{0};
     ctx.memory_load_complete = false;
+    ctx.hypervisor_memory_access_fault = false;
     if (!check_fetch_alignment(state_, ctx)) return;
     ctx.cpc = state_.pc;
 

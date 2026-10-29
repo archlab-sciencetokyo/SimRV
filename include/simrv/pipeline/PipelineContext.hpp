@@ -47,6 +47,7 @@ struct PipelineContext : public DecodedInstruction {
     simrv::xlen::Register mem_rdata = 0;
     simrv::xlen::Register mem_wdata = 0;
     bool memory_load_complete = false;
+    bool hypervisor_memory_access_fault = false;
     bool sc_reservation_checked = false;
     bool sc_reservation_succeeded = false;
 

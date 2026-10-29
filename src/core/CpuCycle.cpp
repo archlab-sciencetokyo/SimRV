@@ -553,10 +553,12 @@ void CPU::run_cycle_baremetal_miss(Machine& machine) {
     std::unique_lock<std::shared_mutex> memory_write_lock;
     if (success && machine.is_smp_enabled() && machine.runtime_profile.is_instruction_mode()) {
         const auto opcode = static_cast<isa::Opcode>(pipeline_context.opcode);
-        if (opcode == isa::Opcode::Load || opcode == isa::Opcode::LoadFp) {
+        if (opcode == isa::Opcode::Load || opcode == isa::Opcode::LoadFp ||
+            isa::is_hlv_op(pipeline_context.op_id)) {
             memory_read_lock = std::shared_lock(machine.instruction_memory_mutex());
         } else if (opcode == isa::Opcode::Store || opcode == isa::Opcode::StoreFp ||
                    opcode == isa::Opcode::Amo || opcode == isa::Opcode::OpV ||
+                   isa::is_hsv_op(pipeline_context.op_id) ||
                    isa::is_cmo_op(pipeline_context.op_id)) {
             memory_write_lock = std::unique_lock(machine.instruction_memory_mutex());
         }
@@ -707,6 +709,10 @@ void CPU::run_cycle_baremetal(Machine& machine) {
 }
 
 void CPU::run_memory_stage_baremetal(Machine& machine) {
+    if (isa::is_hypervisor_memory_op(pipeline_context.op_id)) {
+        run_memory_stage(machine);
+        return;
+    }
     if (simrv::compiler::unlikely(machine.breakpoint_manager().has_any())) {
         run_memory_stage(machine);
         return;

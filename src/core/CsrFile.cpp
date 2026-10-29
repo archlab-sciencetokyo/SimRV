@@ -245,12 +245,14 @@ auto CsrFile::read(simrv::xlen::CsrNumber addr) const
         case csr_addr(Csr::Hstatus):
             rcsr = cpu_.state().hstatus & ((simrv::xlen::CsrValue{1} << 7U) |
                                           (simrv::xlen::CsrValue{1} << 8U) |
+                                          (simrv::xlen::CsrValue{1} << 9U) |
                                           (simrv::xlen::CsrValue{1} << 6U) |
                                           (simrv::xlen::CsrValue{1} << 20U) |
                                           (simrv::xlen::CsrValue{1} << 21U) |
                                           (simrv::xlen::CsrValue{1} << 22U));
             if constexpr (simrv::xlen::kIsXLen64) {
                 rcsr |= (cpu_.state().mstatus >> 2U) & (simrv::xlen::CsrValue{0x3} << 32U);
+                rcsr |= cpu_.state().hstatus & (simrv::xlen::CsrValue{0x3} << 48U);
             }
             break;
         case csr_addr(Csr::Hedeleg):
@@ -829,9 +831,19 @@ auto CsrFile::write(simrv::xlen::CsrNumber addr, simrv::xlen::CsrValue wdata)
         case csr_addr(Csr::Hstatus):
             cpu_.state().hstatus = wdata & ((simrv::xlen::CsrValue{1} << 7U) |
                                             (simrv::xlen::CsrValue{1} << 8U) |
+                                            (simrv::xlen::CsrValue{1} << 9U) |
                                             (simrv::xlen::CsrValue{1} << 20U) |
                                             (simrv::xlen::CsrValue{1} << 21U) |
                                             (simrv::xlen::CsrValue{1} << 22U));
+            if constexpr (simrv::xlen::kIsXLen64) {
+                constexpr simrv::xlen::CsrValue kHupmmMask =
+                    simrv::xlen::CsrValue{0x3} << 48U;
+                const auto hupmm = (wdata & kHupmmMask) >> 48U;
+                if (isa::misa_has_extension(cpu_.state().misa, isa::IsaExtension::U) &&
+                    hupmm == 2U) {
+                    cpu_.state().hstatus |= hupmm << 48U;
+                }
+            }
             break;
         case csr_addr(Csr::Hedeleg):
             cpu_.state().hedeleg = wdata & kMedelegWritableMask;
@@ -856,6 +868,14 @@ auto CsrFile::write(simrv::xlen::CsrNumber addr, simrv::xlen::CsrValue wdata)
                                          (simrv::xlen::CsrValue{1} << 10U));
             break;
         case csr_addr(Csr::Henvcfg):
+            if constexpr (simrv::xlen::kIsXLen64) {
+                constexpr simrv::xlen::CsrValue kPmmMask =
+                    simrv::xlen::CsrValue{0x3} << 32U;
+                const auto pmm = (wdata & kPmmMask) >> 32U;
+                const bool has_u =
+                    isa::misa_has_extension(cpu_.state().misa, isa::IsaExtension::U);
+                if (!has_u || (pmm != 0U && pmm != 2U)) wdata &= ~kPmmMask;
+            }
             cpu_.state().henvcfg = wdata;
             break;
         case csr_addr(Csr::Htval):

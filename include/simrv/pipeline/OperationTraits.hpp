@@ -239,8 +239,10 @@ inline constexpr auto kStaticOpTraitsTable = generate_static_op_traits();
                 dt.writes_int = false;
                 dt.is_mem_load = false;
             }
-            if (simrv::compiler::unlikely(opcode == isa::Opcode::System ||
-                                          opcode == isa::Opcode::MiscMem)) {
+            if (simrv::compiler::unlikely(
+                    (opcode == isa::Opcode::System &&
+                     !isa::is_hypervisor_memory_op(op_id)) ||
+                    opcode == isa::Opcode::MiscMem)) {
                 dt.is_serializing = true;
             }
             return dt;

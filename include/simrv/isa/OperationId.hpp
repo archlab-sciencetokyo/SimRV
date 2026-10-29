@@ -675,6 +675,20 @@ enum OperationId : uint16_t {
     /* Zawrs (Wait-on-Reservation-Set) */
     WRS_NTO,
     WRS_STO,
+    /* H virtual-machine explicit memory accesses */
+    HLV_B,
+    HLV_BU,
+    HLV_H,
+    HLV_HU,
+    HLV_W,
+    HLV_WU,
+    HLV_D,
+    HLVX_HU,
+    HLVX_WU,
+    HSV_B,
+    HSV_H,
+    HSV_W,
+    HSV_D,
     /* Others */
     ILLEGAL,
     OperationIdCount
@@ -795,5 +809,21 @@ constexpr OperationId kOpRangeVectorEnd = VWSLL_VI;
 
 /// @brief Unified count of all valid simulator operations
 constexpr size_t kOperationIdCount = static_cast<size_t>(OperationIdCount);
+
+[[nodiscard]] constexpr auto is_hlv_op(OperationId op) noexcept -> bool {
+    return op >= HLV_B && op <= HLVX_WU;
+}
+
+[[nodiscard]] constexpr auto is_hlvx_op(OperationId op) noexcept -> bool {
+    return op == HLVX_HU || op == HLVX_WU;
+}
+
+[[nodiscard]] constexpr auto is_hsv_op(OperationId op) noexcept -> bool {
+    return op >= HSV_B && op <= HSV_D;
+}
+
+[[nodiscard]] constexpr auto is_hypervisor_memory_op(OperationId op) noexcept -> bool {
+    return is_hlv_op(op) || is_hsv_op(op);
+}
 
 }  // namespace simrv::isa

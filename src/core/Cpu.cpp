@@ -63,6 +63,7 @@ void CPU::reset() {
     next_logical_issue_sequence_ = 0;
     state_ = ArchState{};
     prev_state_ = ArchState{};
+    hypervisor_memory_access_active_ = false;
     pipeline_context = simrv::pipeline::PipelineContext{};
     plic_mmio.reset();
     clint_mmio.reset();

@@ -645,6 +645,19 @@ const std::array<std::string_view, static_cast<size_t>(isa::OperationIdCount)> O
     "MOP",
     "WRS_NTO",
     "WRS_STO",
+    "HLV_B",
+    "HLV_BU",
+    "HLV_H",
+    "HLV_HU",
+    "HLV_W",
+    "HLV_WU",
+    "HLV_D",
+    "HLVX_HU",
+    "HLVX_WU",
+    "HSV_B",
+    "HSV_H",
+    "HSV_W",
+    "HSV_D",
     "ILLEGAL"};
 
 auto operation_name(isa::OperationId operation) noexcept -> std::string_view {
@@ -895,6 +908,25 @@ constexpr std::array<OperationId, 8> kSystemCsrTable = {
 constexpr auto decode_system_csr = decode_table<kSystemCsrTable>;
 
 auto decode_system(uint32_t funct3, uint32_t funct7, simrv::xlen::Instruction ir) -> OperationId {
+    if (funct3 == 4) {
+        const uint32_t f12 = ir >> 20U;
+        switch (f12) {
+            case 0x600: return OperationId::HLV_B;
+            case 0x601: return OperationId::HLV_BU;
+            case 0x640: return OperationId::HLV_H;
+            case 0x641: return OperationId::HLV_HU;
+            case 0x643: return OperationId::HLVX_HU;
+            case 0x680: return OperationId::HLV_W;
+            case 0x681: return OperationId::HLV_WU;
+            case 0x683: return OperationId::HLVX_WU;
+            case 0x6C0: return OperationId::HLV_D;
+            default: break;
+        }
+        if (funct7 == 0x31 && ((ir >> 7U) & 0x1FU) == 0) return OperationId::HSV_B;
+        if (funct7 == 0x33 && ((ir >> 7U) & 0x1FU) == 0) return OperationId::HSV_H;
+        if (funct7 == 0x35 && ((ir >> 7U) & 0x1FU) == 0) return OperationId::HSV_W;
+        if (funct7 == 0x37 && ((ir >> 7U) & 0x1FU) == 0) return OperationId::HSV_D;
+    }
     if (funct3 == 0) {
         return decode_system_priv(funct7, ir);
     }

@@ -1253,13 +1253,22 @@ void test_sha_state_enable_csrs() {
 
     constexpr simrv::xlen::CsrValue kHstatusSpvSpvp =
         (simrv::xlen::CsrValue{1} << 7U) | (simrv::xlen::CsrValue{1} << 8U) |
+        (simrv::xlen::CsrValue{1} << 9U) |
         (simrv::xlen::CsrValue{1} << 20U) | (simrv::xlen::CsrValue{1} << 21U) |
         (simrv::xlen::CsrValue{1} << 22U);
-    TEST_ASSERT(cpu.csr_file.write(simrv::core::Csr::Hstatus, kHstatusSpvSpvp).has_value());
+    constexpr simrv::xlen::CsrValue kHstatusHupmm = simrv::xlen::CsrValue{2} << 48U;
+    TEST_ASSERT(cpu.csr_file
+                    .write(simrv::core::Csr::Hstatus, kHstatusSpvSpvp | kHstatusHupmm)
+                    .has_value());
     const auto hstatus = cpu.csr_file.read(simrv::core::Csr::Hstatus);
     TEST_ASSERT(hstatus.has_value() && (*hstatus & kHstatusSpvSpvp) == kHstatusSpvSpvp);
+    TEST_ASSERT((*hstatus & kHstatusHupmm) == kHstatusHupmm);
     TEST_ASSERT((*hstatus & (simrv::xlen::CsrValue{0x3} << 32U)) ==
                 (simrv::xlen::CsrValue{2} << 32U));
+    constexpr simrv::xlen::CsrValue kHenvcfgPmm = simrv::xlen::CsrValue{2} << 32U;
+    TEST_ASSERT(cpu.csr_file.write(simrv::core::Csr::Henvcfg, kHenvcfgPmm).has_value());
+    const auto henvcfg = cpu.csr_file.read(simrv::core::Csr::Henvcfg);
+    TEST_ASSERT(henvcfg.has_value() && (*henvcfg & kHenvcfgPmm) == kHenvcfgPmm);
 
     constexpr uint64_t kHgatpSv39x4 = (uint64_t{8} << 60U) | 4U;
     TEST_ASSERT(cpu.csr_file.write(simrv::core::Csr::Hgatp, kHgatpSv39x4).has_value());
@@ -1354,6 +1363,174 @@ void test_sha_hfence_instructions() {
     TEST_ASSERT(!simrv::core::TrapController::can_execute_privileged_instruction(
         simrv::xlen::PrivilegeLevel::Supervisor, 0, 0,
         static_cast<simrv::xlen::Instruction>(simrv::isa::Funct12Priv::Ecall), gvma, 0, false));
+}
+
+void test_sha_hypervisor_virtual_load_store() {
+    using simrv::isa::OperationId;
+    using simrv::xlen::Address;
+    using simrv::xlen::Byte;
+    using simrv::xlen::CsrValue;
+    using simrv::xlen::Register;
+
+    const auto decode = [](uint32_t selector, uint32_t rd = 1, uint32_t rs1 = 2,
+                           uint32_t rs2 = 0) {
+        return (selector << 20U) | (rs2 << 20U) | (rs1 << 15U) | (4U << 12U) | (rd << 7U) |
+               0x73U;
+    };
+    TEST_ASSERT(simrv::pipeline::decoder(decode(0x600)) == OperationId::HLV_B);
+    TEST_ASSERT(simrv::pipeline::decoder(decode(0x601)) == OperationId::HLV_BU);
+    TEST_ASSERT(simrv::pipeline::decoder(decode(0x640)) == OperationId::HLV_H);
+    TEST_ASSERT(simrv::pipeline::decoder(decode(0x641)) == OperationId::HLV_HU);
+    TEST_ASSERT(simrv::pipeline::decoder(decode(0x643)) == OperationId::HLVX_HU);
+    TEST_ASSERT(simrv::pipeline::decoder(decode(0x680)) == OperationId::HLV_W);
+    TEST_ASSERT(simrv::pipeline::decoder(decode(0x681)) == OperationId::HLV_WU);
+    TEST_ASSERT(simrv::pipeline::decoder(decode(0x683)) == OperationId::HLVX_WU);
+    TEST_ASSERT(simrv::pipeline::decoder(decode(0x6C0)) == OperationId::HLV_D);
+
+    // The selector field includes rs2, so use the actual HSV encoding's funct7 and rd=0.
+    const auto hsv = [](uint32_t funct7, uint32_t rs1, uint32_t rs2) {
+        return (funct7 << 25U) | (rs2 << 20U) | (rs1 << 15U) | (4U << 12U) | 0x73U;
+    };
+    TEST_ASSERT(simrv::pipeline::decoder(hsv(0x31, 2, 3)) == OperationId::HSV_B);
+    TEST_ASSERT(simrv::pipeline::decoder(hsv(0x33, 2, 3)) == OperationId::HSV_H);
+    TEST_ASSERT(simrv::pipeline::decoder(hsv(0x35, 2, 3)) == OperationId::HSV_W);
+    TEST_ASSERT(simrv::pipeline::decoder(hsv(0x37, 2, 3)) == OperationId::HSV_D);
+    const auto hlv_traits = simrv::pipeline::operation::make_dependency_traits(
+        OperationId::HLV_W, simrv::isa::Opcode::System, simrv::xlen::RegId::T0, 0);
+    const auto hsv_traits = simrv::pipeline::operation::make_dependency_traits(
+        OperationId::HSV_W, simrv::isa::Opcode::System, simrv::xlen::RegId::Zero, 0);
+    TEST_ASSERT(hlv_traits.is_mem_load && hlv_traits.reads_rs1_int && hlv_traits.writes_int &&
+                !hlv_traits.is_serializing);
+    TEST_ASSERT(hsv_traits.is_mem_store && hsv_traits.reads_rs1_int && hsv_traits.reads_rs2_int &&
+                !hsv_traits.is_serializing);
+
+    if constexpr (simrv::xlen::kIsXLen64) {
+        simrv::core::Machine machine;
+        std::vector<Byte> ram(0x20000, Byte{0});
+        machine.set_ram_for_testing(ram.data(), ram.size());
+        machine.memory().initialize_mmu();
+        auto& cpu = machine.primary_hart();
+        cpu.reset();
+
+        const Address base = machine.memory_geometry().dram_base;
+        constexpr Address root = 0x1000;
+        constexpr Address middle = 0x2000;
+        constexpr Address leaf = 0x3000;
+        const Address g_root = base + 0x4000;
+        const Address g_middle = base + 0x5000;
+        constexpr Address virtual_address = 0x1234;
+        constexpr Address guest_physical_page = 0x9000;
+        constexpr uint64_t valid_table = std::to_underlying(simrv::PteFlag::V);
+        const auto put_pte = [&](Address address, uint64_t value) {
+            std::memcpy(ram.data() + (address - base), &value, sizeof(value));
+        };
+        const auto put_leaf = [&](uint64_t flags) {
+            put_pte(base + root, (uint64_t{2} << 10U) | valid_table);
+            put_pte(base + middle, (uint64_t{3} << 10U) | valid_table);
+            put_pte(base + leaf + 8U, ((guest_physical_page >> 12U) << 10U) | flags);
+        };
+        const uint64_t g_leaf_flags = std::to_underlying(simrv::PteFlag::V) |
+                                      std::to_underlying(simrv::PteFlag::R) |
+                                      std::to_underlying(simrv::PteFlag::W) |
+                                      std::to_underlying(simrv::PteFlag::X) |
+                                      std::to_underlying(simrv::PteFlag::A) |
+                                      std::to_underlying(simrv::PteFlag::D);
+        put_pte(g_root, ((g_middle >> 12U) << 10U) | valid_table);
+        put_pte(g_middle, ((base >> 12U) << 10U) | g_leaf_flags);
+        constexpr uint64_t v_a = std::to_underlying(simrv::PteFlag::V) |
+                                 std::to_underlying(simrv::PteFlag::A);
+        put_leaf(v_a | std::to_underlying(simrv::PteFlag::R) |
+                 std::to_underlying(simrv::PteFlag::W) |
+                 std::to_underlying(simrv::PteFlag::D));
+        constexpr Register payload = 0x09ABCDEFU;
+        std::memcpy(ram.data() + (base + guest_physical_page + 0x234 - base), &payload,
+                    sizeof(payload));
+
+        cpu.state().misa |= simrv::isa::misa_extension_bit(simrv::isa::IsaExtension::H);
+        cpu.state().priv = simrv::xlen::PrivilegeLevel::Supervisor;
+        cpu.state().virt = false;
+        cpu.state().vsatp = (uint64_t{8} << 60U) | (root >> 12U);
+        cpu.state().satp = 0;  // HS satp is deliberately Bare.
+        cpu.state().hgatp = (uint64_t{8} << 60U) | (g_root >> 12U);
+        cpu.state().hstatus |= CsrValue{1} << 8U; // SPVP=VS.
+
+        auto& ctx = cpu.active_context();
+        ctx.pending_exception.reset();
+        ctx.opcode = simrv::isa::Opcode::System;
+        ctx.op_id = OperationId::HLV_W;
+        const auto loaded = simrv::memory::MemoryAccess::target_read(
+            machine.memory(), cpu, simrv::xlen::VirtAddr{virtual_address}, simrv::isa::Funct3::Lw);
+        TEST_ASSERT(!ctx.pending_exception.has_value());
+        TEST_ASSERT(static_cast<Register>(loaded) == payload);
+        TEST_ASSERT(!cpu.state().virt);
+
+        cpu.state().henvcfg = CsrValue{2} << 32U;
+        ctx.op_id = OperationId::HLV_W;
+        ctx.pending_exception.reset();
+        const auto pointer_masked = simrv::memory::MemoryAccess::target_read(
+            machine.memory(), cpu, simrv::xlen::VirtAddr{0x5400000000001234ULL},
+            simrv::isa::Funct3::Lw);
+        TEST_ASSERT(!ctx.pending_exception.has_value());
+        TEST_ASSERT(static_cast<Register>(pointer_masked) == payload);
+        cpu.state().henvcfg = 0;
+
+        constexpr Register store_payload = 0x13579BDFU;
+        ctx.op_id = OperationId::HSV_W;
+        simrv::memory::MemoryAccess::target_write(
+            machine.memory(), cpu, simrv::xlen::VirtAddr{virtual_address}, store_payload,
+            simrv::isa::Funct3::Sw);
+        TEST_ASSERT(!ctx.pending_exception.has_value());
+        Register stored = 0;
+        std::memcpy(&stored, ram.data() + guest_physical_page + 0x234, sizeof(stored));
+        TEST_ASSERT(stored == store_payload);
+
+        // HLVX requires X rather than R in both translation stages and still performs a load.
+        put_leaf(v_a | std::to_underlying(simrv::PteFlag::X));
+        ctx.op_id = OperationId::HLVX_WU;
+        ctx.pending_exception.reset();
+        const auto execute_only = simrv::memory::MemoryAccess::target_read(
+            machine.memory(), cpu, simrv::xlen::VirtAddr{virtual_address}, simrv::isa::Funct3::Lwu);
+        TEST_ASSERT(!ctx.pending_exception.has_value());
+        TEST_ASSERT(static_cast<Register>(execute_only) == store_payload);
+
+        put_leaf(v_a | std::to_underlying(simrv::PteFlag::R));
+        ctx.pending_exception.reset();
+        (void)simrv::memory::MemoryAccess::target_read(
+            machine.memory(), cpu, simrv::xlen::VirtAddr{virtual_address}, simrv::isa::Funct3::Lwu);
+        TEST_ASSERT(ctx.pending_exception == simrv::isa::ExceptionCode::LoadPageFault);
+        const bool hlvx_fault_marker = ctx.hypervisor_memory_access_fault;
+        TEST_ASSERT(hlvx_fault_marker);
+
+        // Exercise the real cached/fallback instruction path, including decode, retirement, and
+        // writeback, rather than only calling the memory access helpers directly.
+        put_leaf(v_a | std::to_underlying(simrv::PteFlag::R) |
+                 std::to_underlying(simrv::PteFlag::W) |
+                 std::to_underlying(simrv::PteFlag::D));
+        const uint32_t hlv_w = (0x680U << 20U) | (6U << 15U) | (4U << 12U) | (5U << 7U) | 0x73U;
+        const uint32_t hsv_w = (0x35U << 25U) | (7U << 20U) | (6U << 15U) | (4U << 12U) | 0x73U;
+        std::memcpy(ram.data() + 0x8000, &hlv_w, sizeof(hlv_w));
+        std::memcpy(ram.data() + 0x8004, &hsv_w, sizeof(hsv_w));
+        cpu.state().pc = base + 0x8000;
+        cpu.state().regs.write(simrv::xlen::RegId::T1, virtual_address);
+        cpu.state().regs.write(simrv::xlen::RegId::T2, 0x2468ACE0U);
+        machine.runtime_profile.engine = simrv::core::ExecutionEngine::InstructionFast;
+        cpu.run_cycle(machine);
+        TEST_ASSERT(cpu.state().regs.read(simrv::xlen::RegId::T0) == store_payload);
+        cpu.run_cycle(machine);
+        std::memcpy(&stored, ram.data() + guest_physical_page + 0x234, sizeof(stored));
+        TEST_ASSERT(stored == 0x2468ACE0U);
+
+        cpu.state().medeleg |= CsrValue{1} << 13U;
+        ctx.hypervisor_memory_access_fault = hlvx_fault_marker;
+        simrv::core::TrapController::raise_exception(
+            cpu, std::to_underlying(simrv::isa::ExceptionCode::LoadPageFault), virtual_address);
+        constexpr CsrValue kSpv = CsrValue{1} << 7U;
+        constexpr CsrValue kSpvp = CsrValue{1} << 8U;
+        constexpr CsrValue kGva = CsrValue{1} << 6U;
+        TEST_ASSERT((cpu.state().hstatus & kSpv) == 0);
+        TEST_ASSERT((cpu.state().hstatus & kSpvp) != 0);
+        TEST_ASSERT((cpu.state().hstatus & kGva) != 0);
+    }
 }
 
 void test_sha_guest_return_transitions() {
@@ -2058,6 +2235,9 @@ int main() {
     std::cout << "[RUN] test_sha_hfence_instructions" << std::endl;
     test_sha_hfence_instructions();
     std::cout << "[PASS] test_sha_hfence_instructions" << std::endl;
+    std::cout << "[RUN] test_sha_hypervisor_virtual_load_store" << std::endl;
+    test_sha_hypervisor_virtual_load_store();
+    std::cout << "[PASS] test_sha_hypervisor_virtual_load_store" << std::endl;
     std::cout << "[RUN] test_sha_guest_return_transitions" << std::endl;
     test_sha_guest_return_transitions();
     std::cout << "[PASS] test_sha_guest_return_transitions" << std::endl;

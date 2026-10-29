@@ -273,9 +273,12 @@ void TrapController::raise_exception(CPU& cpu, simrv::xlen::TrapCause cause,
     }
 
     const bool guest_source = state.virt;
+    const bool hypervisor_memory_access =
+        cpu.active_context().hypervisor_memory_access_fault;
     const bool delegated = trap_delegated_to_supervisor(state, cause);
     const bool delegated_to_vs = delegated && trap_delegated_to_virtual_supervisor(state, cause);
-    const bool delegated_to_hs = delegated && guest_source && !delegated_to_vs;
+    const bool delegated_to_hs =
+        delegated && ((guest_source && !delegated_to_vs) || hypervisor_memory_access);
     const simrv::xlen::PrivilegeLevel target_mode = delegated ? kPrivSupervisor : kPrivMachine;
     const MstatusBit interrupt_enable = delegated && !delegated_to_vs ? MstatusBit::Sie
                                                                         : MstatusBit::Mie;
@@ -313,9 +316,15 @@ void TrapController::raise_exception(CPU& cpu, simrv::xlen::TrapCause cause,
         if (delegated_to_hs) {
             constexpr simrv::xlen::CsrValue kSpv = simrv::xlen::CsrValue{1} << 7U;
             constexpr simrv::xlen::CsrValue kSpvp = simrv::xlen::CsrValue{1} << 8U;
-            state.hstatus = (state.hstatus & ~(kSpv | kSpvp)) | kSpv |
-                            (source_mode == kPrivSupervisor ? kSpvp : 0);
-            if (trap_value_is_guest_virtual_address(cause)) {
+            if (hypervisor_memory_access) {
+                // An HLV/HLVX/HSV fault is reported to HS with SPV=0. SPVP describes
+                // the guest privilege selected for the explicit access and is preserved.
+                state.hstatus &= ~kSpv;
+            } else {
+                state.hstatus = (state.hstatus & ~(kSpv | kSpvp)) | kSpv |
+                                (source_mode == kPrivSupervisor ? kSpvp : 0);
+            }
+            if (hypervisor_memory_access || trap_value_is_guest_virtual_address(cause)) {
                 state.hstatus |= simrv::xlen::CsrValue{1} << 6U;
             } else {
                 state.hstatus &= ~(simrv::xlen::CsrValue{1} << 6U);
@@ -338,8 +347,9 @@ void TrapController::raise_exception(CPU& cpu, simrv::xlen::TrapCause cause,
         if (guest_source && isa::misa_has_extension(state.misa, isa::IsaExtension::H)) {
             state.mstatus |= MstatusBit::Mpv;
         }
-        if (guest_source && isa::misa_has_extension(state.misa, isa::IsaExtension::H) &&
-            trap_value_is_guest_virtual_address(cause)) {
+        if ((guest_source || hypervisor_memory_access) &&
+            isa::misa_has_extension(state.misa, isa::IsaExtension::H) &&
+            (hypervisor_memory_access || trap_value_is_guest_virtual_address(cause))) {
             state.mstatus |= MstatusBit::Gva;
         } else {
             state.mstatus &= ~MstatusBit::Gva;

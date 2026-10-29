@@ -559,6 +559,7 @@ auto CPU::execute_cached_fallback(Machine& machine) -> void {
     // Cached operations can fall back to the staged executor without passing
     // through fetch_stage. Start with a fresh memory-stage latch in that path too.
     pipeline_context.memory_load_complete = false;
+    pipeline_context.hypervisor_memory_access_fault = false;
     pipeline_context.sc_reservation_checked = false;
     pipeline_context.sc_reservation_succeeded = false;
     pipeline_context.mem_paddr = simrv::xlen::PhysAddr{0};
@@ -1075,10 +1076,12 @@ void CPU::execute_cached_op_fast(Machine& machine, CachedOp& op,
     std::unique_lock<std::shared_mutex> memory_write_lock;
     if (machine.is_smp_enabled() && machine.runtime_profile.is_instruction_mode()) {
         const auto opcode = op.opcode();
-        if (opcode == isa::Opcode::Load || opcode == isa::Opcode::LoadFp) {
+        if (opcode == isa::Opcode::Load || opcode == isa::Opcode::LoadFp ||
+            isa::is_hlv_op(op.op_id)) {
             memory_read_lock = std::shared_lock(machine.instruction_memory_mutex());
         } else if (opcode == isa::Opcode::Store || opcode == isa::Opcode::StoreFp ||
                    opcode == isa::Opcode::Amo || opcode == isa::Opcode::OpV ||
+                   isa::is_hsv_op(op.op_id) ||
                    isa::is_cmo_op(op.op_id)) {
             memory_write_lock = std::unique_lock(machine.instruction_memory_mutex());
         }
