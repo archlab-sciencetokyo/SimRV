@@ -245,6 +245,9 @@ auto MemoryAccess::target_read(MemorySubsystem& mem, core::CPU& cpu, simrv::xlen
         }
     }
 
+    const ExceptionCode read_access_fault = (is_amo && !is_lr)
+                                                ? ExceptionCode::FaultStore
+                                                : ExceptionCode::FaultLoad;
     auto issue_read = [&](simrv::xlen::Address addr) -> simrv::xlen::Word {
         cpu.active_context().mem_paddr = addr;
         if (pbmt == simrv::memory::PtePbmt::Pma &&
@@ -262,7 +265,7 @@ auto MemoryAccess::target_read(MemorySubsystem& mem, core::CPU& cpu, simrv::xlen
                 }
                 transfer.reset();
                 if (simrv::compiler::unlikely(timed.payload.failed())) {
-                    cpu.active_context().pending_exception = ExceptionCode::FaultLoad;
+                    cpu.active_context().pending_exception = read_access_fault;
                     cpu.active_context().pending_tval = v_addr.raw();
                     return 0;
                 }
@@ -288,7 +291,7 @@ auto MemoryAccess::target_read(MemorySubsystem& mem, core::CPU& cpu, simrv::xlen
             }
             if (!mem.system_bus().send_request(req)) {
                 cpu.ca_state.waiting_for_interconnect = false;
-                cpu.active_context().pending_exception = ExceptionCode::FaultLoad;
+                cpu.active_context().pending_exception = read_access_fault;
                 cpu.active_context().pending_tval = v_addr.raw();
                 return 0;
             }
@@ -303,7 +306,7 @@ auto MemoryAccess::target_read(MemorySubsystem& mem, core::CPU& cpu, simrv::xlen
             TlChannelD resp{};
             if (mem.system_bus().get_response(req.source, resp)) {
                 if (simrv::compiler::unlikely(resp.failed())) {
-                    cpu.active_context().pending_exception = ExceptionCode::FaultLoad;
+                    cpu.active_context().pending_exception = read_access_fault;
                     cpu.active_context().pending_tval = v_addr.raw();
                 }
                 simrv::xlen::Word rdata = resp.data;
@@ -313,7 +316,7 @@ auto MemoryAccess::target_read(MemorySubsystem& mem, core::CPU& cpu, simrv::xlen
                 }
                 return simrv::memory::extend_loaded_value(rdata, static_cast<uint8_t>(funct3));
             }
-            cpu.active_context().pending_exception = ExceptionCode::FaultLoad;
+            cpu.active_context().pending_exception = read_access_fault;
             cpu.active_context().pending_tval = v_addr.raw();
             return 0;
         }
@@ -340,7 +343,7 @@ auto MemoryAccess::target_read(MemorySubsystem& mem, core::CPU& cpu, simrv::xlen
             const simrv::xlen::Address completed_line = transfer.address;
             transfer.reset();
             if (timed.payload.failed() || !timed.has_line_data) {
-                cpu.active_context().pending_exception = ExceptionCode::FaultLoad;
+                cpu.active_context().pending_exception = read_access_fault;
                 cpu.active_context().pending_tval = v_addr.raw();
                 return 0;
             }
@@ -380,7 +383,7 @@ auto MemoryAccess::target_read(MemorySubsystem& mem, core::CPU& cpu, simrv::xlen
         if (cpu.machine_->runtime_profile.is_cycle_mode()) {
             if (!mem.system_bus().send_request(req)) {
                 cpu.ca_state.waiting_for_interconnect = false;
-                cpu.active_context().pending_exception = ExceptionCode::FaultLoad;
+                cpu.active_context().pending_exception = read_access_fault;
                 cpu.active_context().pending_tval = v_addr.raw();
                 return 0;
             }
@@ -402,7 +405,7 @@ auto MemoryAccess::target_read(MemorySubsystem& mem, core::CPU& cpu, simrv::xlen
             mem.system_bus().grant_ack(ack);
             return read_refill_data(line_data, line_base);
         }
-        cpu.active_context().pending_exception = ExceptionCode::FaultLoad;
+        cpu.active_context().pending_exception = read_access_fault;
         cpu.active_context().pending_tval = v_addr.raw();
         return 0;
     };

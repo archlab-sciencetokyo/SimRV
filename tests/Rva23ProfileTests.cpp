@@ -2016,6 +2016,15 @@ void test_svpbmt_noncacheable_and_io_accesses() {
                       simrv::isa::misa_extension_bit(simrv::isa::IsaExtension::U);
         state.initialize_lower_xlen_fields();
 
+        auto& amo_ctx = cpu.active_context();
+        amo_ctx = {};
+        amo_ctx.opcode = Opcode::Amo;
+        amo_ctx.funct5 = Funct5Amo::Add;
+        (void)simrv::memory::MemoryAccess::target_read(
+            machine.memory(), cpu, simrv::xlen::VirtAddr{UINT64_C(0xFFFFFFFFFFFFF000)},
+            Funct3::Ld);
+        TEST_ASSERT(amo_ctx.pending_exception == simrv::isa::ExceptionCode::FaultStore);
+
         constexpr simrv::xlen::Address kDram = simrv::memory::kDramBaseAddress;
         constexpr simrv::xlen::Address kRoot = kDram + 0x1000;
         constexpr simrv::xlen::Address kLevel1 = kDram + 0x2000;
