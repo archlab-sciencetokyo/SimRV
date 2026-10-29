@@ -52,7 +52,7 @@ preset's configured cache-line geometry remains a separate platform requirement.
 | Counter overflow filtering | Sscofpmf implements M/S/U event filtering, counter inhibit, sticky overflow reporting, and delegated LCOFIP; FDT advertises Sscofpmf | RVA23 CSR, overflow, and interrupt-delegation tests |
 | User pointer masking | Ssnpm selects U-mode PMLEN=0 or PMLEN=7 through `senvcfg.PMM`; Supm is implied; RV64 FDT advertises both | RVA23 WARL and tagged physical load/store tests; FDT tests |
 | NAPOT translation contiguity | Svnapot maps aligned 64 KiB regions through level-0 PTEs for Sv39/Sv48/Sv57; invalid N encodings fault; FDT advertises Svnapot | Svnapot alias translation and reserved-encoding tests; FDT tests |
-| Hypervisor guest-stage translation core | Internal G-stage walker supports Sv39x4/Sv48x4/Sv57x4, superpages, permission checks, guest-page faults, and Svade A/D faults; architectural `hgatp` and VS/G-stage composition are not implemented | Hypervisor guest-physical walker tests |
+| Hypervisor guest-stage translation core | G-stage translation now composes with VS-stage walks: VS PTE addresses and final guest physical addresses pass through `hgatp`; guest VS Bare accesses also pass through G-stage. G-stage page-table reads are currently synchronous internal RAM reads, including in cycle mode | Hypervisor guest-physical walker and two-stage translation integration tests |
 | Page-based memory types | Svpbmt decodes PMA/NC/IO leaf attributes and faults reserved PBMT encodings; NC/IO accesses bypass L1 data-cache paths and use coherent TileLink transfers; ordered execution and fences preserve IO and cross-attribute ordering; AMOs fault on non-PMA mappings without atomicity support; FDT advertises Svpbmt | Svpbmt PTE legality, uncached access, dirty-owner writeback, cache-bypass, non-PMA AMO-fault, and cycle-mode mixed-attribute fence-order tests |
 | Accessed/dirty tracking | Mandatory Svade behavior: guest accesses fault when a required PTE A/D bit is clear; unsupported Svadu `menvcfg.ADUE` is read-only zero; FDT advertises Svade | RVA23 CPU page-walk tests for load/store page faults, PTE preservation, and ADUE WARL behavior; FDT tests |
 | Supervisor trap entry | Sstvecd Direct mode stores any four-byte-aligned BASE; Sstvala records required delegated fault addresses and the faulting instruction for illegal-instruction exceptions; FDT advertises both | RVA23 supervisor trap tests for Direct vector WARL behavior and delegated fault values; FDT tests |
@@ -101,15 +101,16 @@ SimRV verifies its default 64-bit profile (`rva23s64`) against the RISC-V Archit
   need profile-level qualification:
   - Sha is incomplete: H-mode is not enabled by the RVA23 profile; guest entry/exit and trap
     routing are partial (MRET/SRET returns and basic synchronous routing exist, but interrupt
-    virtualization, full trap-value reporting, and guest memory translation are not connected);
+    virtualization and full trap-value reporting remain incomplete);
     complete Ssstateen enforcement
     (`sstateen0-3` and `hstateen0-3` CSR banks now exist, but VS/VU access behavior is not wired);
     Shcounterenw (`hcounteren` storage is implemented, but VS/VU counter access is not wired);
     Shvstvala;
     Shtvala; Shvstvecd; Shvsatpa; and Shgatpa. The G-stage page-walk core supports Sv39x4,
-    Sv48x4, and Sv57x4, but `hgatp`, VS-stage translation composition, guest privilege modes,
-    guest trap values, and writable guest counter enables are not wired into architectural
-    execution.
+    Sv48x4, and Sv57x4; `hgatp` and VS/G-stage translation composition now participate in
+    architectural translation, but G-stage page-table accesses are synchronous internal RAM
+    reads and guest trap values, full interrupt virtualization, and writable guest counter access
+    remain incomplete.
 
   This list is a starting qualification checklist, not a claim that every other mandatory item
   has passed conformance testing. See the [normative RVA23 profile specification](https://github.com/riscv/riscv-profiles/blob/main/src/rva23-profile.adoc)

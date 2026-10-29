@@ -19,6 +19,7 @@
 #include "simrv/debug/SymbolTable.hpp"
 #include "simrv/isa/TrapTypes.hpp"
 #include "simrv/memory/MemorySubsystem.hpp"
+#include "simrv/memory/Mmu.hpp"
 #include "simrv/memory/PageTableWalker.hpp"
 
 namespace {
@@ -157,6 +158,40 @@ void test_hypervisor_sv39x4_guest_translation() {
 
     const auto bare = walker.walk_guest_physical(kGuestAddress, PteAccess::Read, 0, 64);
     TEST_ASSERT(bare.has_value() && bare->physical_address.raw() == kGuestAddress);
+#endif
+}
+
+void test_sha_two_stage_translation_integration() {
+#if SIMRV_XLEN == 64
+    constexpr simrv::xlen::Address kGuestRoot = 0x1000;
+    constexpr simrv::xlen::Address kGuestMiddle = 0x2000;
+    constexpr simrv::xlen::Address kGuestLeaf = 0x3000;
+    constexpr simrv::xlen::Address kHRoot = 0x4000;
+    constexpr simrv::xlen::Address kHMiddle = 0x5000;
+    constexpr simrv::xlen::Address kGuestVa = 0x1234;
+    constexpr simrv::xlen::Address kGuestPa = 0x6000;
+    constexpr simrv::xlen::Address kHostBase = 0x200000;
+    std::array<simrv::xlen::Byte, 0x400000> backing{};
+    const auto put = [&](simrv::xlen::Address address, uint64_t value) {
+        std::memcpy(backing.data() + address, &value, sizeof(value));
+    };
+    put(kHRoot, (uint64_t{5} << 10U) | 1U);
+    put(kHMiddle, ((kHostBase >> 12U) << 10U) | 0xCFU);
+    put(kHostBase + kGuestRoot, (uint64_t{2} << 10U) | 1U);
+    put(kHostBase + kGuestMiddle, (uint64_t{3} << 10U) | 1U);
+    put(kHostBase + kGuestLeaf + 8U, ((kGuestPa >> 12U) << 10U) | 0xCFU);
+
+    simrv::core::ArchState state;
+    state.virt = true;
+    state.hgatp = (uint64_t{8} << 60U) | (kHRoot >> 12U);
+    constexpr simrv::xlen::Word kVsSatp = (uint64_t{8} << 60U) | (kGuestRoot >> 12U);
+    simrv::Mmu mmu(backing.data(), 0, backing.size());
+    const auto translated = mmu.translate(kGuestVa, simrv::PteAccess::Read,
+                                          simrv::xlen::PrivilegeLevel::Supervisor, 0, kVsSatp,
+                                          64, false, &state);
+    TEST_ASSERT(translated.has_value());
+    TEST_ASSERT(translated->physical_address.raw() == kHostBase + kGuestPa + (kGuestVa & 0xFFFU));
+    TEST_ASSERT(translated->pte == (((kGuestPa >> 12U) << 10U) | 0xCFU));
 #endif
 }
 
@@ -310,6 +345,7 @@ int main() {
     test_exception_priorities();
     test_svpbmt_svnapot();
     test_hypervisor_sv39x4_guest_translation();
+    test_sha_two_stage_translation_integration();
     test_sbi_version_and_rfence();
     test_sbi_pmu_discovery_and_raw_counters();
     test_platform_timing_conversions();

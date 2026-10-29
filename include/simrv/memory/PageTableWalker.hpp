@@ -159,6 +159,9 @@ struct PageWalkState {
     unsigned vpn_bits_per_level = 0;
     simrv::xlen::PageTableLevel level = -1;
     simrv::xlen::Word satp_root{0};
+    simrv::xlen::Word hgatp{0};
+    simrv::xlen::Address pte_guest_address{0};
+    bool guest_stage_enabled{false};
     bool update_access_bits = true;
     PageWalkStatus status = PageWalkStatus::Fault;
     const core::ArchState* arch_state = nullptr;

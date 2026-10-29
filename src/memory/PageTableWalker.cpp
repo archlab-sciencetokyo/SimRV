@@ -64,7 +64,18 @@ void PageTableWalker::select_next_pte(PageWalkState& state,
         (state.virtual_address.raw() >>
          (12 + state.level * static_cast<int>(state.vpn_bits_per_level))) &
         vpn_mask;
-    state.pte_address = table_address + vpn * state.pte_size;
+    state.pte_guest_address = (table_address + vpn * state.pte_size).raw();
+    state.pte_address = simrv::xlen::PhysAddr{state.pte_guest_address};
+    if (state.guest_stage_enabled) {
+        auto translated = walk_guest_physical(state.pte_guest_address, PteAccess::Read,
+                                              state.hgatp, state.xlen);
+        if (!translated) {
+            state.fault = translated.error();
+            state.status = PageWalkStatus::Fault;
+            return;
+        }
+        state.pte_address = translated->physical_address;
+    }
     // Implicit page table accesses evaluate under Supervisor privilege per RISC-V Privileged spec
     if (!pte_access_valid(state.pte_address, state.pte_size) ||
         (state.arch_state != nullptr &&
@@ -89,8 +100,20 @@ auto PageTableWalker::begin_walk(simrv::xlen::VirtAddr v_addr, PteAccess access,
                         .xlen = xlen,
                         .update_access_bits = update_access_bits,
                         .arch_state = arch_state};
+    if (arch_state != nullptr && arch_state->virt && xlen == 64) {
+        state.guest_stage_enabled = true;
+        state.hgatp = arch_state->hgatp;
+    }
     if (priv == kPrivMachine || !simrv::xlen::satp_translation_enabled(satp, xlen)) {
         state.physical_address = simrv::xlen::PhysAddr{v_addr.raw()};
+        if (state.guest_stage_enabled && priv != kPrivMachine) {
+            auto translated = walk_guest_physical(v_addr.raw(), access, state.hgatp, xlen);
+            if (!translated) {
+                state.fault = translated.error();
+                return state;
+            }
+            state.physical_address = translated->physical_address;
+        }
         state.status = PageWalkStatus::Complete;
         return state;
     }
@@ -218,8 +241,19 @@ void PageTableWalker::accept_pte(PageWalkState& state, simrv::xlen::Word pte) co
     }
     const unsigned offset_bits = 12 + state.level * state.vpn_bits_per_level;
     const simrv::xlen::Word offset_mask = (static_cast<simrv::xlen::Word>(1) << offset_bits) - 1;
-    state.physical_address = simrv::xlen::PhysAddr{(state.virtual_address.raw() & offset_mask) |
-                                                   ((ppn << 12) & ~offset_mask)};
+    const simrv::xlen::PhysAddr stage_one_address{
+        (state.virtual_address.raw() & offset_mask) | ((ppn << 12) & ~offset_mask)};
+    state.physical_address = stage_one_address;
+    if (state.guest_stage_enabled) {
+        auto translated = walk_guest_physical(stage_one_address.raw(), state.access, state.hgatp,
+                                              state.xlen);
+        if (!translated) {
+            state.fault = translated.error();
+            state.status = PageWalkStatus::Fault;
+            return;
+        }
+        state.physical_address = translated->physical_address;
+    }
 
     if (state.arch_state != nullptr) {
         const auto pmp_access = state.access == PteAccess::Code ? core::PmpAccessType::Execute
