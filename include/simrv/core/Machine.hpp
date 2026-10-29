@@ -138,6 +138,9 @@ struct TuiExecutionSnapshot {
  * image loading, device wiring, tracing, and run termination checks.
  */
 class Machine final : public core::IInterruptController {
+   public:
+    enum class TohostWriteKind : uint8_t { Full, LowWord, HighWord };
+
    private:
     class Runtime;
     struct PendingInputEvent {
@@ -309,6 +312,8 @@ class Machine final : public core::IInterruptController {
     void advance_ca_primary_cycle();
     /// Finalize cycle for tohost checks only.
     void finalize_cycle_tohost();
+    /// Publish an HTIF register write, preserving split 32-bit writes on RV64.
+    void publish_tohost_write(uint64_t value, TohostWriteKind kind) noexcept;
     /// Stop the simulation loop.
     void stop(StopReason reason = StopReason::ExternalStop);
     /// Get current atomic execution state.
@@ -389,6 +394,8 @@ class Machine final : public core::IInterruptController {
     void switch_execution_engine_sync(ExecutionEngine engine);
 
     std::atomic<uint64_t> tohost{0};  // Host communication register (always 64-bit for HTIF).
+    std::atomic<bool> tohost_low_word_pending_{false};
+    std::atomic<uint8_t> tohost_low_word_fallback_cycles_{0};
     std::atomic<bool> reboot_requested = false;  // Reboot requested flag.
     std::atomic<int> exit_code{0};               // Exit/status code of the simulation.
     std::atomic<bool> is_shutdown_ = false;      // System shutdown flag.

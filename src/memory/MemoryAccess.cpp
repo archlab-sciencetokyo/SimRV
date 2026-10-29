@@ -653,7 +653,7 @@ void MemoryAccess::target_write(MemorySubsystem& mem, core::CPU& cpu, simrv::xle
             (addr == cpu.machine_->isa_test_tohost() || (addr & 0x80000000ULL) != 0)) {
             if (!check_sc_reservation(addr)) return;
             if (funct3 == Funct3::Sw && (data == 0x00020000ULL || (data & 1ULL) != 0)) {
-                cpu.machine_->tohost = data;
+                cpu.machine_->publish_tohost_write(data, core::Machine::TohostWriteKind::Full);
             } else {
                 cpu.machine_->console_write(static_cast<char>(data & 0xFF));
             }
@@ -664,10 +664,11 @@ void MemoryAccess::target_write(MemorySubsystem& mem, core::CPU& cpu, simrv::xle
                                          ? (funct3 == Funct3::Sw || funct3 == Funct3::Sd)
                                          : (funct3 == Funct3::Sw);
         if (simrv::compiler::unlikely(is_tohost_write)) {
-            auto publish_host_write = [&](uint64_t value) {
+            auto publish_host_write = [&](uint64_t value, core::Machine::TohostWriteKind kind) {
                 if (cpu.machine_->runtime_profile.is_cycle_mode() &&
                     cpu.pipeline_sim.config.host_interface_latency != 0) {
                     cpu.ca_state.pending_host_value = value;
+                    cpu.ca_state.pending_host_write_kind = static_cast<uint8_t>(kind);
                     const auto phase_period = cpu.pipeline_sim.config.host_interface_phase_period;
                     const auto phase_delay =
                         phase_period == 0 ? 0 : cpu.pipeline_sim.cycle_count() % phase_period;
@@ -675,22 +676,28 @@ void MemoryAccess::target_write(MemorySubsystem& mem, core::CPU& cpu, simrv::xle
                         cpu.pipeline_sim.config.host_interface_latency + phase_delay - 1;
                     cpu.ca_state.host_write_pending = true;
                 } else {
-                    cpu.machine_->tohost = value;
+                    cpu.machine_->publish_tohost_write(value, kind);
                 }
             };
             const bool is_guest_xlen32 = (cpu.state().regs.xlen == 32) || !simrv::xlen::kIsXLen64;
             if (addr == cpu.machine_->isa_test_tohost() || addr == 0x80001000 ||
                 addr == 0x40008000) {
                 if (!check_sc_reservation(addr)) return;
-                publish_host_write(
-                    is_guest_xlen32
-                        ? ((cpu.machine_->tohost & 0xFFFFFFFF00000000ULL) | (data & 0xFFFFFFFFULL))
-                        : data);
-            } else if (is_guest_xlen32 && (addr == cpu.machine_->isa_test_tohost() + 4 ||
-                                           addr == 0x80001004 || addr == 0x40008004)) {
+                const bool low_word = funct3 == Funct3::Sw;
+                publish_host_write(low_word || is_guest_xlen32
+                                       ? ((cpu.machine_->tohost & 0xFFFFFFFF00000000ULL) |
+                                          (data & 0xFFFFFFFFULL))
+                                       : data,
+                                   low_word && !is_guest_xlen32
+                                       ? core::Machine::TohostWriteKind::LowWord
+                                            : core::Machine::TohostWriteKind::Full);
+            } else if (funct3 == Funct3::Sw &&
+                       (addr == cpu.machine_->isa_test_tohost() + 4 || addr == 0x80001004 ||
+                        addr == 0x40008004)) {
                 if (!check_sc_reservation(addr)) return;
                 publish_host_write((cpu.machine_->tohost & 0x00000000FFFFFFFFULL) |
-                                   (static_cast<uint64_t>(data & 0xFFFFFFFFULL) << 32));
+                                       (static_cast<uint64_t>(data & 0xFFFFFFFFULL) << 32),
+                                   core::Machine::TohostWriteKind::HighWord);
             }
         }
         if (pbmt == simrv::memory::PtePbmt::Pma &&

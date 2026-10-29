@@ -863,24 +863,28 @@ void CPU::run_memory_stage_baremetal(Machine& machine) {
                             ? (ctx.funct3 == Funct3::Sw || ctx.funct3 == Funct3::Sd)
                             : (ctx.funct3 == Funct3::Sw);
                     if (is_tohost_write) {
-                        machine.tohost.store(
-                            simrv::xlen::kIsXLen64
-                                ? ctx.mem_wdata
-                                : ((machine.tohost.load(std::memory_order_relaxed) &
-                                    0xFFFFFFFF00000000ULL) |
-                                   ctx.mem_wdata),
-                            std::memory_order_relaxed);
+                        const uint64_t previous = machine.tohost.load(std::memory_order_relaxed);
+                        const uint64_t value =
+                            ctx.funct3 == Funct3::Sw || !simrv::xlen::kIsXLen64
+                                ? ((previous & 0xFFFFFFFF00000000ULL) |
+                                   (ctx.mem_wdata & 0xFFFFFFFFULL))
+                                : ctx.mem_wdata;
+                        machine.publish_tohost_write(
+                            value, ctx.funct3 == Funct3::Sw && state_.regs.xlen != 32
+                                       ? Machine::TohostWriteKind::LowWord
+                                       : Machine::TohostWriteKind::Full);
                     }
-                } else if (simrv::compiler::unlikely(!simrv::xlen::kIsXLen64 &&
-                                                     (addr == machine.isa_test_tohost() + 4 ||
-                                                      addr == 0x80001004ULL ||
-                                                      addr == 0x40008004ULL))) {
+                } else if (simrv::compiler::unlikely(
+                               ctx.funct3 == Funct3::Sw &&
+                               (addr == machine.isa_test_tohost() + 4 ||
+                                addr == 0x80001004ULL || addr == 0x40008004ULL))) {
                     const bool is_tohost_write = (ctx.funct3 == Funct3::Sw);
                     if (is_tohost_write) {
-                        machine.tohost.store((machine.tohost.load(std::memory_order_relaxed) &
-                                              0x00000000FFFFFFFFULL) |
-                                                 (static_cast<uint64_t>(ctx.mem_wdata) << 32),
-                                             std::memory_order_relaxed);
+                        machine.publish_tohost_write(
+                            (machine.tohost.load(std::memory_order_relaxed) &
+                             0x00000000FFFFFFFFULL) |
+                                (static_cast<uint64_t>(ctx.mem_wdata) << 32),
+                            Machine::TohostWriteKind::HighWord);
                     }
                 }
             }

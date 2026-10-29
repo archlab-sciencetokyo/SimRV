@@ -1299,6 +1299,8 @@ void Machine::reset_state() {
         });
     }
     tohost = 0;
+    tohost_low_word_pending_.store(false, std::memory_order_relaxed);
+    tohost_low_word_fallback_cycles_.store(0, std::memory_order_relaxed);
     reboot_requested = false;
     exit_code = 0;
     is_shutdown_ = false;
@@ -1994,6 +1996,15 @@ void Machine::finalize_cycle_tohost() {
         return;
     }
 
+    if (tohost_low_word_pending_.load(std::memory_order_acquire)) {
+        const auto remaining = tohost_low_word_fallback_cycles_.load(std::memory_order_acquire);
+        if (remaining != 0) {
+            tohost_low_word_fallback_cycles_.fetch_sub(1, std::memory_order_acq_rel);
+            return;  // Give a paired upper-word SW time to complete.
+        }
+        tohost_low_word_pending_.store(false, std::memory_order_release);
+    }
+
     const bool is_guest_xlen32 = (primary_hart().state().regs.xlen == 32);
     const auto dev = static_cast<uint8_t>(tohost >> 56);
     const auto cmd = static_cast<uint8_t>(tohost >> 48);
@@ -2114,6 +2125,24 @@ void Machine::finalize_cycle_tohost() {
         stop(StopReason::TohostFail);
         tohost = 0;
         return;
+    }
+}
+
+void Machine::publish_tohost_write(uint64_t value, TohostWriteKind kind) noexcept {
+    tohost.store(value, std::memory_order_relaxed);
+    switch (kind) {
+        case TohostWriteKind::LowWord:
+            tohost_low_word_pending_.store(true, std::memory_order_release);
+            tohost_low_word_fallback_cycles_.store(4, std::memory_order_release);
+            break;
+        case TohostWriteKind::HighWord:
+        case TohostWriteKind::Full:
+            tohost_low_word_pending_.store(false, std::memory_order_release);
+            tohost_low_word_fallback_cycles_.store(0, std::memory_order_release);
+            break;
+    }
+    if (kind != TohostWriteKind::LowWord && is_running()) {
+        finalize_cycle_tohost();
     }
 }
 
