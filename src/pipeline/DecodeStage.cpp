@@ -174,7 +174,7 @@ void CPU::fetch_operands(Machine& /*machine*/) {
     if (simrv::compiler::unlikely(w_csr_addr == csr_addr(Csr::Fflags) ||
                                   w_csr_addr == csr_addr(Csr::Frm) ||
                                   w_csr_addr == csr_addr(Csr::Fcsr))) {
-        if ((state_.mstatus & MstatusBit::Fs) == 0) {
+        if (!state_.extension_state_enabled(MstatusBit::Fs)) {
             raise_decode_exception(ctx, ExceptionCode::IllegalInstruction);
             return;
         }

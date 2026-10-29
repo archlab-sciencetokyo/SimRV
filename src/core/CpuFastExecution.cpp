@@ -1108,7 +1108,8 @@ void CPU::execute_cached_op_fast(Machine& machine, CachedOp& op,
                                cached_opcode == isa::Opcode::MSub ||
                                cached_opcode == isa::Opcode::NMSub ||
                                cached_opcode == isa::Opcode::NMAdd;
-    if (simrv::compiler::unlikely(uses_fp_state && (state_.mstatus & MstatusBit::Fs) == 0)) {
+    if (simrv::compiler::unlikely(uses_fp_state &&
+                                 !state_.extension_state_enabled(MstatusBit::Fs))) {
         raise_exception(ExceptionCode::IllegalInstruction, op.ir);
         return;
     }
@@ -1247,7 +1248,7 @@ void CPU::execute_cached_op_fast(Machine& machine, CachedOp& op,
                     ? (static_cast<simrv::xlen::FloatingRegister>(simrv::xlen::kF32BoxerBits) |
                        (mem_rdata & 0xFFFFFFFFULL))
                     : mem_rdata);
-            state_.mstatus |= MstatusBit::Fs;
+            state_.mark_extension_dirty(MstatusBit::Fs);
             advance_cached_pc(op);
             return;
         }
@@ -1355,9 +1356,9 @@ void CPU::execute_cached_op_fast(Machine& machine, CachedOp& op,
                 state_.regs.fp_data_ptr(), state_.fcsr);
             if (res.fp_wb_enable) {
                 state_.regs.write_fp(simrv::xlen::to_fp_reg_id(op.rd), res.fp_wb_data);
-                state_.mstatus |= MstatusBit::Fs;
+                state_.mark_extension_dirty(MstatusBit::Fs);
             }
-            if (state_.fcsr != old_fcsr) state_.mstatus |= MstatusBit::Fs;
+            if (state_.fcsr != old_fcsr) state_.mark_extension_dirty(MstatusBit::Fs);
             advance_cached_pc(op);
             return;
         }
@@ -1381,9 +1382,9 @@ void CPU::execute_cached_op_fast(Machine& machine, CachedOp& op,
                 simrv::xlen::to_fp_reg_id(op.rs2), rrs1, state_.regs.fp_data_ptr(), state_.fcsr);
             if (res.fp_wb_enable) {
                 state_.regs.write_fp(simrv::xlen::to_fp_reg_id(op.rd), res.fp_wb_data);
-                state_.mstatus |= MstatusBit::Fs;
+                state_.mark_extension_dirty(MstatusBit::Fs);
             }
-            if (state_.fcsr != old_fcsr) state_.mstatus |= MstatusBit::Fs;
+            if (state_.fcsr != old_fcsr) state_.mark_extension_dirty(MstatusBit::Fs);
             advance_cached_pc(op);
             return;
         }
@@ -1398,7 +1399,7 @@ void CPU::execute_cached_op_fast(Machine& machine, CachedOp& op,
                     pipeline_context.pending_tval = 0;
                 }
                 execute::ExecuteUnit::execute_vector(*this, machine, op.op_id, op.ir);
-                state_.mstatus |= MstatusBit::Vs;
+                state_.mark_extension_dirty(MstatusBit::Vs);
                 if (pipeline_context.pending_exception.has_value()) {
                     raise_exception(
                         static_cast<simrv::xlen::TrapCause>(*pipeline_context.pending_exception),
@@ -2236,7 +2237,7 @@ SIMRV_ALWAYS_INLINE auto CPU::run_fast_baremetal_kernel(Machine& machine, uint32
                                                             : static_cast<
                                                                   simrv::xlen::FloatingRegister>(
                                                                   mem_rdata));
-                                                    state_.mstatus |= MstatusBit::Fs;
+                                                    state_.mark_extension_dirty(MstatusBit::Fs);
                                                     SIMRV_CHAIN_ADVANCE();
                                                 }
                                             }
@@ -2941,7 +2942,7 @@ SIMRV_ALWAYS_INLINE auto CPU::run_fast_os_kernel(Machine& machine, uint32_t batc
                                                         : static_cast<
                                                               simrv::xlen::FloatingRegister>(
                                                               mem_rdata));
-                                                state_.mstatus |= MstatusBit::Fs;
+                                                state_.mark_extension_dirty(MstatusBit::Fs);
                                                 if (advance_sequential()) {
                                                     continue;
                                                 }
@@ -2969,7 +2970,7 @@ SIMRV_ALWAYS_INLINE auto CPU::run_fast_os_kernel(Machine& machine, uint32_t batc
                                                         : static_cast<
                                                               simrv::xlen::FloatingRegister>(
                                                               mem_rdata));
-                                                state_.mstatus |= MstatusBit::Fs;
+                                                state_.mark_extension_dirty(MstatusBit::Fs);
                                                 if (advance_sequential()) {
                                                     continue;
                                                 }

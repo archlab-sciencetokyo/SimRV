@@ -40,7 +40,7 @@ void CPU::execute_core(Machine& machine) {
         // VS dirty tracking may be imprecise. Conservatively mark it Dirty
         // after dispatch because vector instructions can update registers,
         // vl/vtype/vstart/vxsat, or partial state before a restartable fault.
-        state_.mstatus |= MstatusBit::Vs;
+        state_.mark_extension_dirty(MstatusBit::Vs);
         return;
     }
 
@@ -346,7 +346,7 @@ void CPU::execute_fp(Machine& /*machine*/) {
                 simrv::xlen::to_fp_reg_id(ctx.rs2), rs3, static_cast<isa::RoundingMode>(ctx.funct3),
                 state_.regs.fp_data_ptr(), state_.fcsr);
             if (state_.fcsr != old_fcsr) {
-                state_.mstatus |= MstatusBit::Fs;
+                state_.mark_extension_dirty(MstatusBit::Fs);
             }
             ctx.fp_wb_data = fp.fp_wb_data;
             ctx.fp_wb_enable = fp.fp_wb_enable;
@@ -374,7 +374,7 @@ void CPU::execute_fp(Machine& /*machine*/) {
                                                        simrv::xlen::to_fp_reg_id(ctx.rs2), ctx.rrs1,
                                                        state_.regs.fp_data_ptr(), state_.fcsr);
             if (state_.fcsr != old_fcsr) {
-                state_.mstatus |= MstatusBit::Fs;
+                state_.mark_extension_dirty(MstatusBit::Fs);
             }
             ctx.wb_data = fp.int_wb_data;
             ctx.int_wb_from_fp = fp.int_wb_enable;

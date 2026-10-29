@@ -799,15 +799,18 @@ void CPU::decode_and_normalize_instruction(Machine& machine) {
                            (op == Opcode::OpFp) || (op == Opcode::MAdd) || (op == Opcode::MSub) ||
                            (op == Opcode::NMAdd) || (op == Opcode::NMSub));
         if (is_vector) {
-            if (simrv::compiler::unlikely((state_.mstatus & MstatusBit::Vs) == 0)) {
+            if (simrv::compiler::unlikely(
+                    !state_.extension_state_enabled(MstatusBit::Vs))) {
                 if (!machine.tui_enabled()) {
                     simrv::log::warn("[VS CHECK] VS is 0! mstatus=0x{:x}, Vs mask=0x{:x}",
-                                     state_.mstatus, std::to_underlying(MstatusBit::Vs));
+                                     state_.virt ? state_.vsstatus : state_.mstatus,
+                                     std::to_underlying(MstatusBit::Vs));
                 }
                 is_valid = false;
             }
         } else if (is_fp_op) {
-            if (simrv::compiler::unlikely((state_.mstatus & MstatusBit::Fs) == 0)) {
+            if (simrv::compiler::unlikely(
+                    !state_.extension_state_enabled(MstatusBit::Fs))) {
                 is_valid = false;
             }
         }

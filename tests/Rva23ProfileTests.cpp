@@ -1317,6 +1317,37 @@ void test_sha_state_enable_csrs() {
     TEST_ASSERT(!cpu.csr_file.write(simrv::core::Csr::Hstateen0, 0).has_value());
 }
 
+void test_sha_guest_extension_state() {
+    using simrv::core::Csr;
+    using simrv::core::CsrFile;
+    using simrv::core::MstatusBit;
+    using simrv::xlen::PrivilegeLevel;
+
+    simrv::core::CPU cpu;
+    auto& state = cpu.state();
+    state.misa |= simrv::isa::misa_extension_bit(simrv::isa::IsaExtension::H) |
+                  simrv::isa::misa_extension_bit(simrv::isa::IsaExtension::F) |
+                  simrv::isa::misa_extension_bit(simrv::isa::IsaExtension::V);
+    state.priv = PrivilegeLevel::Supervisor;
+    state.virt = true;
+    state.mstatus = (state.mstatus & ~(MstatusBit::Fs | MstatusBit::Vs)) |
+                    (simrv::xlen::CsrValue{1} << 13U) |
+                    (simrv::xlen::CsrValue{1} << 9U);  // FS=Clean, VS=Clean.
+    state.vsstatus = (simrv::xlen::CsrValue{1} << 13U) |
+                     (simrv::xlen::CsrValue{1} << 9U);  // FS=Clean, VS=Clean.
+
+    CsrFile csrs(cpu);
+    const auto fcsr_write = csrs.write(simrv::core::csr_num(Csr::Fcsr), 1);
+    TEST_ASSERT(fcsr_write.has_value());
+    TEST_ASSERT((state.vsstatus & MstatusBit::Fs) == MstatusBit::Fs);
+    TEST_ASSERT((state.mstatus & MstatusBit::Fs) == MstatusBit::Fs);
+
+    const auto vxsat_write = csrs.write(simrv::core::csr_num(Csr::Vxsat), 1);
+    TEST_ASSERT(vxsat_write.has_value());
+    TEST_ASSERT((state.vsstatus & MstatusBit::Vs) == MstatusBit::Vs);
+    TEST_ASSERT((state.mstatus & MstatusBit::Vs) == MstatusBit::Vs);
+}
+
 void test_sha_hideleg_warl_mask() {
     simrv::core::CPU cpu;
     cpu.state().misa |= simrv::isa::misa_extension_bit(simrv::isa::IsaExtension::H);
@@ -2250,6 +2281,9 @@ int main() {
     std::cout << "[RUN] test_sha_state_enable_csrs" << std::endl;
     test_sha_state_enable_csrs();
     std::cout << "[PASS] test_sha_state_enable_csrs" << std::endl;
+    std::cout << "[RUN] test_sha_guest_extension_state" << std::endl;
+    test_sha_guest_extension_state();
+    std::cout << "[PASS] test_sha_guest_extension_state" << std::endl;
     std::cout << "[RUN] test_sha_hideleg_warl_mask" << std::endl;
     test_sha_hideleg_warl_mask();
     std::cout << "[PASS] test_sha_hideleg_warl_mask" << std::endl;

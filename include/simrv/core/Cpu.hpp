@@ -267,6 +267,17 @@ struct alignas(128) ArchState {
      */
     constexpr void update_xlen() { regs.xlen = current_xlen(); }
 
+    /** Both status CSRs gate extension state while executing in VS/VU mode. */
+    [[nodiscard]] constexpr auto extension_state_enabled(MstatusBit field) const noexcept -> bool {
+        return (mstatus & field) != 0 && (!virt || (vsstatus & field) != 0);
+    }
+
+    /** Modifying guest extension state dirties both the HS and guest status fields. */
+    constexpr void mark_extension_dirty(MstatusBit field) noexcept {
+        mstatus |= field;
+        if (virt) vsstatus |= field;
+    }
+
     /**
      * @brief Initialize SXL/UXL consistently with the selected machine XLEN.
      *

@@ -33,12 +33,12 @@ constexpr simrv::xlen::CsrValue kSupervisorInterruptBits =
 
 [[nodiscard]] constexpr auto fp_accessible(const ArchState& state) noexcept -> bool {
     return isa::misa_has_extension(state.misa, isa::IsaExtension::F) &&
-           (state.mstatus & MstatusBit::Fs) != 0;
+           state.extension_state_enabled(MstatusBit::Fs);
 }
 
 [[nodiscard]] constexpr auto vector_accessible(const ArchState& state) noexcept -> bool {
     return isa::misa_has_extension(state.misa, isa::IsaExtension::V) &&
-           (state.mstatus & MstatusBit::Vs) != 0;
+           state.extension_state_enabled(MstatusBit::Vs);
 }
 
 [[nodiscard]] constexpr auto pack_pmpcfg(
@@ -781,7 +781,7 @@ auto CsrFile::write(simrv::xlen::CsrNumber addr, simrv::xlen::CsrValue wdata)
         case csr_addr(Csr::Fflags):
             return require_fp().and_then([this, wdata]() -> std::expected<void, ExceptionCode> {
                 cpu_.state().fcsr = (cpu_.state().fcsr & ~kFflagsMask) | (wdata & kFflagsMask);
-                cpu_.state().mstatus |= MstatusBit::Fs;
+                cpu_.state().mark_extension_dirty(MstatusBit::Fs);
 #if defined(__x86_64__) || defined(_M_X64)
                 _mm_setcsr(_mm_getcsr() & ~0x3fu);
 #endif
@@ -791,13 +791,13 @@ auto CsrFile::write(simrv::xlen::CsrNumber addr, simrv::xlen::CsrValue wdata)
             return require_fp().and_then([this, wdata]() -> std::expected<void, ExceptionCode> {
                 cpu_.state().fcsr = (cpu_.state().fcsr & ~(kFrmMask << kFrmShift)) |
                                     ((wdata & kFrmMask) << kFrmShift);
-                cpu_.state().mstatus |= MstatusBit::Fs;
+                cpu_.state().mark_extension_dirty(MstatusBit::Fs);
                 return {};
             });
         case csr_addr(Csr::Fcsr):
             return require_fp().and_then([this, wdata]() -> std::expected<void, ExceptionCode> {
                 cpu_.state().fcsr = wdata & kFcsrMask;
-                cpu_.state().mstatus |= MstatusBit::Fs;
+                cpu_.state().mark_extension_dirty(MstatusBit::Fs);
 #if defined(__x86_64__) || defined(_M_X64)
                 _mm_setcsr(_mm_getcsr() & ~0x3fu);
 #endif
@@ -806,38 +806,38 @@ auto CsrFile::write(simrv::xlen::CsrNumber addr, simrv::xlen::CsrValue wdata)
         case csr_addr(Csr::Vstart):
             return require_vector().and_then([this, wdata]() -> std::expected<void, ExceptionCode> {
                 cpu_.state().vstart = wdata & cpu_.state().regs.vstart_mask();
-                cpu_.state().mstatus |= MstatusBit::Vs;
+                cpu_.state().mark_extension_dirty(MstatusBit::Vs);
                 return {};
             });
         case csr_addr(Csr::Vxsat):
             return require_vector().and_then([this, wdata]() -> std::expected<void, ExceptionCode> {
                 cpu_.state().vxsat = wdata & 1;
-                cpu_.state().mstatus |= MstatusBit::Vs;
+                cpu_.state().mark_extension_dirty(MstatusBit::Vs);
                 return {};
             });
         case csr_addr(Csr::Vxrm):
             return require_vector().and_then([this, wdata]() -> std::expected<void, ExceptionCode> {
                 cpu_.state().vxrm = wdata & 3;
-                cpu_.state().mstatus |= MstatusBit::Vs;
+                cpu_.state().mark_extension_dirty(MstatusBit::Vs);
                 return {};
             });
         case csr_addr(Csr::Vcsr):
             return require_vector().and_then([this, wdata]() -> std::expected<void, ExceptionCode> {
                 cpu_.state().vxrm = (wdata >> 1) & 3;
                 cpu_.state().vxsat = wdata & 1;
-                cpu_.state().mstatus |= MstatusBit::Vs;
+                cpu_.state().mark_extension_dirty(MstatusBit::Vs);
                 return {};
             });
         case csr_addr(Csr::Vl):
             return require_vector().and_then([this, wdata]() -> std::expected<void, ExceptionCode> {
                 cpu_.state().vl = wdata;
-                cpu_.state().mstatus |= MstatusBit::Vs;
+                cpu_.state().mark_extension_dirty(MstatusBit::Vs);
                 return {};
             });
         case csr_addr(Csr::Vtype):
             return require_vector().and_then([this, wdata]() -> std::expected<void, ExceptionCode> {
                 cpu_.state().vtype = wdata;
-                cpu_.state().mstatus |= MstatusBit::Vs;
+                cpu_.state().mark_extension_dirty(MstatusBit::Vs);
                 return {};
             });
 

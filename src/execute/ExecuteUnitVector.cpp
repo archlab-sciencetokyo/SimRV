@@ -1108,7 +1108,7 @@ void ExecuteUnitVector::execute_vector(core::CPU& cpu, memory::MemorySubsystem& 
         const bool scalar_fp_enabled =
             (sew == 32 && has_f && (!uses_wide_fp_element(op_id) || has_d)) ||
             (sew == 64 && has_f && has_d) || (sew == 16 && has_f && zvfhmin_conversion);
-        const bool fs_enabled = (cpu.state().mstatus & core::MstatusBit::Fs) != 0;
+        const bool fs_enabled = cpu.state().extension_state_enabled(core::MstatusBit::Fs);
         const isa::RoundingMode frm = isa::frm_rounding_mode(cpu.state().fcsr);
         if (!scalar_fp_enabled || !fs_enabled ||
             (is_vector_fp_arithmetic(op_id) && !isa::is_valid_rounding_mode(frm))) {
@@ -1373,11 +1373,11 @@ void ExecuteUnitVector::execute_vector(core::CPU& cpu, memory::MemorySubsystem& 
     // Vector 1.0 requires every successfully completed vector instruction, including vset*vl*, to
     // reset vstart. Faulting vector memory operations leave the faulting element index for resume.
     if (!cpu.active_context().pending_exception.has_value()) {
-        cpu.state().mstatus |= core::MstatusBit::Vs;
+        cpu.state().mark_extension_dirty(core::MstatusBit::Vs);
         if (is_vector_fp(op_id)) {
             // Vector FP may update scalar FP registers or fflags. Setting FS Dirty
             // conservatively is permitted even when a particular result is exact.
-            cpu.state().mstatus |= core::MstatusBit::Fs;
+            cpu.state().mark_extension_dirty(core::MstatusBit::Fs);
         }
         cpu.state().vstart = 0;
     }

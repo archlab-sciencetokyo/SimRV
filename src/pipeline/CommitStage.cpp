@@ -47,7 +47,7 @@ void CPU::writeback_registers(Machine& machine) {
         }
         state_.regs.write_fp(effects.floating_write.destination, effects.floating_write.value);
     }
-    if (effects.marks_floating_point_dirty) state_.mstatus |= MstatusBit::Fs;
+    if (effects.marks_floating_point_dirty) state_.mark_extension_dirty(MstatusBit::Fs);
     if (effects.integer_write.enabled) {
         state_.regs.write_branchless(effects.integer_write.destination,
                                      effects.integer_write.value);
