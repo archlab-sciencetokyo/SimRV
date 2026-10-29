@@ -46,7 +46,7 @@ preset's configured cache-line geometry remains a separate platform requirement.
 | Supervisor timer interrupts | Sstc exposes `stimecmp` when M-mode enables STCE and asserts/deasserts supervisor timer pending from `mtime`; FDT advertises Sstc | Privilege-memory audit tests for XLEN-specific `stimecmp`, STCE access control, and timer transitions; FDT test |
 | Base counters and timers | Zicntr implements `cycle`, `time`, and `instret`; lower-mode reads obey the `mcounteren`/`scounteren` gates; FDT advertises Zicntr | RVA23 counter-value and U/S access tests; FDT tests |
 | Hardware performance counters | Zihpm counters 3–31 and event selectors are implemented; `mcounteren` and `scounteren` expose writable enables for implemented counters as required by Sscounterenw; FDT advertises Zihpm and Sscounterenw | HPM overflow/filtering tests and RVA23 S/U counter-enable access tests; FDT tests |
-| State-enable CSR banks | `mstateen0-3`, `sstateen0-3`, and H-gated `hstateen0-3` storage is present; implemented SE fields control lower-privilege visibility and unsupported state bits read as zero | RVA23 state-enable CSR access and visibility tests |
+| State-enable CSR banks | `mstateen0-3`, `sstateen0-3`, and H-gated `hstateen0-3` storage is present; M/S enable bits gate CSR visibility, and `hstateen.SEO` controls guest access to `sstateen` CSRs with virtual-instruction faults | RVA23 state-enable CSR access, visibility, and guest SEO tests |
 | Hypervisor counter-enable CSR | H-gated `hcounteren` is writable for implemented counters and gates VS/VU counter reads with the required virtual-instruction behavior; S/U access also observes `scounteren` | RVA23 guest-counter-enable and counter-access tests |
 | Hypervisor CSR and return substrate | H/VS CSR state and access checks are present; `hgatp` accepts Bare and SvNNx4 modes, `vsatp` follows `satp` WARL modes, S CSR aliases select VS state in virtualization mode, MPV/MRET and SPV/SRET support guest returns, and synchronous traps can route to VS or HS. The RVA23S64 profile enables H; explicit ISA and CPU-model configurations retain their selected MISA | RVA23 H/VS CSR, guest return, and trap-routing tests |
 | Hypervisor interrupt routing | VS software/timer/external pending state, `hideleg`/`mideleg`, VS CSR aliases, and VS trap entry implement standard VS cause-number translation; guest external interrupt files are not implemented | RVA23 interrupt delegation WARL and VS trap-entry tests |
@@ -101,8 +101,9 @@ SimRV verifies its default 64-bit profile (`rva23s64`) against the RISC-V Archit
 
 - Full RVA23S64 is not yet qualified. The following mandatory requirements remain incomplete or
   need profile-level qualification:
-  - Sha remains incomplete: `sstateen0-3` and `hstateen0-3` CSR storage exists, but complete
-    state-enable visibility and VS/VU behavior need qualification; guest counter gating is
+  - Sha remains incomplete: `sstateen0-3` and `hstateen0-3` CSR storage and the `hstateen.SEO`
+    guest access gate are implemented, but complete state-enable behavior needs qualification;
+    guest counter gating is
     implemented but needs broader profile-level qualification; guest external interrupt files
     and complete H trap-value reporting remain incomplete. Shtvala now reports `htval` for
     guest-page faults produced by G-stage walks. Shvstvala, Shvstvecd, Shvsatpa, and Shgatpa

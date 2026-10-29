@@ -163,6 +163,11 @@ auto CsrFile::read(simrv::xlen::CsrNumber addr) const
     if (address >= 0x10CU && address <= 0x10FU) {
         const size_t bank = address - 0x10CU;
         const uint64_t supervisor_enable = uint64_t{1} << (cpu_.state().regs.xlen - 1U);
+        if (cpu_.state().virt &&
+            isa::misa_has_extension(cpu_.state().misa, isa::IsaExtension::H) &&
+            (cpu_.state().hstateen[bank] & kStateenSuperEnable) == 0) {
+            return std::unexpected(ExceptionCode::VirtualInstruction);
+        }
         if (cpu_.state().priv != simrv::xlen::PrivilegeLevel::Machine &&
             (cpu_.state().mstateen[bank] & kStateenSuperEnable) == 0) {
             return std::unexpected(ExceptionCode::IllegalInstruction);
@@ -634,6 +639,11 @@ auto CsrFile::write(simrv::xlen::CsrNumber addr, simrv::xlen::CsrValue wdata)
     if (address >= 0x10CU && address <= 0x10FU) {
         const size_t bank = address - 0x10CU;
         const uint64_t supervisor_enable = uint64_t{1} << (cpu_.state().regs.xlen - 1U);
+        if (cpu_.state().virt &&
+            isa::misa_has_extension(cpu_.state().misa, isa::IsaExtension::H) &&
+            (cpu_.state().hstateen[bank] & kStateenSuperEnable) == 0) {
+            return std::unexpected(ExceptionCode::VirtualInstruction);
+        }
         if (cpu_.state().priv != simrv::xlen::PrivilegeLevel::Machine &&
             (cpu_.state().mstateen[bank] & kStateenSuperEnable) == 0) {
             return std::unexpected(ExceptionCode::IllegalInstruction);

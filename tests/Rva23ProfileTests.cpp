@@ -1220,6 +1220,20 @@ void test_sha_state_enable_csrs() {
         cpu.state().priv, cpu.state().misa, hstateen_csr, false));
     TEST_ASSERT(simrv::core::TrapController::can_access_csr(
         cpu.state().priv, cpu.state().misa, hcounteren_csr, true));
+    cpu.state().mstateen[0] = kStateenSuperEnable;
+    cpu.state().hstateen[0] = 0;
+    cpu.state().virt = true;
+    auto guest_sstateen = cpu.csr_file.read(simrv::core::Csr::Sstateen0);
+    TEST_ASSERT(!guest_sstateen.has_value() &&
+                guest_sstateen.error() == simrv::isa::ExceptionCode::VirtualInstruction);
+    auto guest_sstateen_write =
+        cpu.csr_file.write(simrv::core::Csr::Sstateen0, kStateenSuperEnable);
+    TEST_ASSERT(!guest_sstateen_write.has_value() &&
+                guest_sstateen_write.error() == simrv::isa::ExceptionCode::VirtualInstruction);
+    cpu.state().hstateen[0] = kStateenSuperEnable;
+    guest_sstateen = cpu.csr_file.read(simrv::core::Csr::Sstateen0);
+    TEST_ASSERT(guest_sstateen.has_value() && *guest_sstateen == kStateenSuperEnable);
+    cpu.state().virt = false;
     constexpr simrv::xlen::CsrValue kGuestHpmEnableBits =
         (simrv::xlen::CsrValue{1} << 3U) | (simrv::xlen::CsrValue{1} << 31U);
     TEST_ASSERT(cpu.csr_file.write(simrv::core::Csr::Hcounteren, kGuestHpmEnableBits).has_value());
