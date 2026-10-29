@@ -1399,6 +1399,15 @@ void execute_vfwcvt(core::CPU& cpu, isa::OperationId op_id, simrv::xlen::RegId r
                           value, force_rtz, cpu.state().fcsr, flags));
             vector::set_group_element<WideRaw>(cpu.state().regs, rd, i, result);
         } else {
+            if (op_id == isa::OperationId::VFWCVT_F_F_V) {
+                const auto source = NarrowE::value(sources[i]);
+                if (std::isnan(source)) {
+                    if (NarrowE::signaling_nan(sources[i])) flags |= isa::FflagsBit::Nv;
+                    vector::set_group_element<WideRaw>(cpu.state().regs, rd, i,
+                                                       WideE::kCanonicalNan);
+                    continue;
+                }
+            }
             auto value = int_to_float
                              ? (unsigned_int ? static_cast<typename WideE::Value>(sources[i])
                                              : static_cast<typename WideE::Value>(
@@ -1478,6 +1487,12 @@ void execute_vfncvt(core::CPU& cpu, isa::OperationId op_id, simrv::xlen::RegId r
             const auto value = WideE::value(sources[i]);
             if constexpr (std::is_same_v<NarrowT, uint16_t> && std::is_same_v<WideT, float>) {
                 if (op_id == isa::OperationId::VFNCVT_F_F_W) {
+                    if (std::isnan(value)) {
+                        if (WideE::signaling_nan(sources[i])) flags |= isa::FflagsBit::Nv;
+                        vector::set_group_element<NarrowRaw>(cpu.state().regs, rd, i,
+                                                             NarrowE::kCanonicalNan);
+                        continue;
+                    }
                     const auto converted = isa::fp::to_binary16(value, isa::frm_rounding_mode(
                                                                            cpu.state().fcsr));
                     flags |= converted.flags;

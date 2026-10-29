@@ -1126,9 +1126,23 @@ void ExecuteUnitVector::execute_vector(core::CPU& cpu, memory::MemorySubsystem& 
         const bool zvfhmin_conversion =
             op_id == isa::OperationId::VFWCVT_F_F_V ||
             op_id == isa::OperationId::VFNCVT_F_F_W;
+        const bool sew16_fp32_integer_conversion =
+            op_id == isa::OperationId::VFWCVT_XU_F_V ||
+            op_id == isa::OperationId::VFWCVT_X_F_V ||
+            op_id == isa::OperationId::VFWCVT_F_XU_V ||
+            op_id == isa::OperationId::VFWCVT_F_X_V ||
+            op_id == isa::OperationId::VFWCVT_RTZ_XU_F_V ||
+            op_id == isa::OperationId::VFWCVT_RTZ_X_F_V ||
+            op_id == isa::OperationId::VFNCVT_XU_F_W ||
+            op_id == isa::OperationId::VFNCVT_X_F_W ||
+            op_id == isa::OperationId::VFNCVT_F_XU_W ||
+            op_id == isa::OperationId::VFNCVT_F_X_W ||
+            op_id == isa::OperationId::VFNCVT_RTZ_XU_F_W ||
+            op_id == isa::OperationId::VFNCVT_RTZ_X_F_W;
         const bool scalar_fp_enabled =
             (sew == 32 && has_f && (!uses_wide_fp_element(op_id) || has_d)) ||
-            (sew == 64 && has_f && has_d) || (sew == 16 && has_f && zvfhmin_conversion);
+            (sew == 64 && has_f && has_d) ||
+            (sew == 16 && has_f && (zvfhmin_conversion || sew16_fp32_integer_conversion));
         const bool fs_enabled = cpu.state().extension_state_enabled(core::MstatusBit::Fs);
         const isa::RoundingMode frm = isa::frm_rounding_mode(cpu.state().fcsr);
         if (!scalar_fp_enabled || !fs_enabled ||

@@ -447,10 +447,10 @@ void test_zfhmin_scalar_instructions() {
     TEST_ASSERT(simrv::pipeline::decoder((2U << 20U) | (1U << 12U) | 0x27U) == OperationId::FSH);
     TEST_ASSERT(simrv::pipeline::decoder(encode_fp(0x72, 0, 2, 0, 1)) == OperationId::FMV_X_H);
     TEST_ASSERT(simrv::pipeline::decoder(encode_fp(0x7A, 0, 2, 0, 1)) == OperationId::FMV_H_X);
-    TEST_ASSERT(simrv::pipeline::decoder(encode_fp(0x22, 2, 2, 0, 1)) == OperationId::FCVT_S_H);
-    TEST_ASSERT(simrv::pipeline::decoder(encode_fp(0x26, 0, 2, 0, 1)) == OperationId::FCVT_H_S);
+    TEST_ASSERT(simrv::pipeline::decoder(encode_fp(0x20, 2, 2, 0, 1)) == OperationId::FCVT_S_H);
+    TEST_ASSERT(simrv::pipeline::decoder(encode_fp(0x22, 0, 2, 0, 1)) == OperationId::FCVT_H_S);
     TEST_ASSERT(simrv::pipeline::decoder(encode_fp(0x21, 2, 2, 0, 1)) == OperationId::FCVT_D_H);
-    TEST_ASSERT(simrv::pipeline::decoder(encode_fp(0x25, 1, 2, 0, 1)) == OperationId::FCVT_H_D);
+    TEST_ASSERT(simrv::pipeline::decoder(encode_fp(0x22, 1, 2, 0, 1)) == OperationId::FCVT_H_D);
     TEST_ASSERT(simrv::pipeline::decoder(encode_fp(0x02, 0, 2, 0, 1)) == OperationId::ILLEGAL);
 
     std::array<simrv::xlen::FloatingRegister, 32> fp{};
@@ -462,18 +462,18 @@ void test_zfhmin_scalar_instructions() {
             simrv::xlen::to_fp_reg_id(rs2), int_source, fp.data(), fcsr);
     };
     fp[2] = ~simrv::xlen::FloatingRegister{0xFFFF} | UINT16_C(0x3C00);  // Half 1.0
-    auto result = execute(0x22, 0, 2, 2);
+    auto result = execute(0x20, 0, 2, 2);
     TEST_ASSERT(result.fp_wb_enable && result.fp_wb_data ==
                 (static_cast<uint64_t>(simrv::xlen::kF32BoxerBits) | UINT32_C(0x3F800000)));
 
     fp[2] = static_cast<uint64_t>(simrv::xlen::kF32BoxerBits) | UINT32_C(0x3FC00000);  // 1.5
-    result = execute(0x26, 0, 2, 0);
+    result = execute(0x22, 0, 2, 0);
     TEST_ASSERT(result.fp_wb_enable &&
                 (result.fp_wb_data & UINT64_C(0xFFFF)) == UINT16_C(0x3E00));
 
     fp[2] = static_cast<uint64_t>(simrv::xlen::kF32BoxerBits) | UINT32_C(0x3F801000);
     fcsr = 0;
-    result = execute(0x26, 3, 2, 0);  // RUP
+    result = execute(0x22, 3, 2, 0);  // RUP
     TEST_ASSERT((result.fp_wb_data & UINT64_C(0xFFFF)) == UINT16_C(0x3C01));
     TEST_ASSERT((fcsr & simrv::isa::FflagsBit::Nx) != 0);
 
@@ -481,7 +481,7 @@ void test_zfhmin_scalar_instructions() {
     fp[2] = std::bit_cast<simrv::xlen::FloatingRegister>(
         std::nextafter(half_midpoint, INFINITY));
     fcsr = 0;
-    result = execute(0x25, 0, 2, 1);
+    result = execute(0x22, 0, 2, 1);
     TEST_ASSERT(result.fp_wb_enable &&
                 (result.fp_wb_data & UINT64_C(0xFFFF)) == UINT16_C(0x3C01));
     TEST_ASSERT((fcsr & simrv::isa::FflagsBit::Nx) != 0);
