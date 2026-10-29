@@ -1101,14 +1101,14 @@ void MemoryAccess::execute_cmo(MemorySubsystem& mem, core::CPU& cpu, simrv::xlen
         }
     } else if (op == isa::OperationId::CBO_CLEAN || op == isa::OperationId::CBO_FLUSH) {
         if (eff_priv == kPrivUser) {
-            if ((cpu.state().senvcfg & (1ULL << 4)) == 0 ||
-                (cpu.state().menvcfg & (1ULL << 4)) == 0) {
+            if ((cpu.state().senvcfg & (1ULL << 6)) == 0 ||
+                (cpu.state().menvcfg & (1ULL << 6)) == 0) {
                 cpu.active_context().pending_exception = ExceptionCode::IllegalInstruction;
                 cpu.active_context().pending_tval = cpu.active_context().ir;
                 return;
             }
         } else if (eff_priv == kPrivSupervisor) {
-            if ((cpu.state().menvcfg & (1ULL << 4)) == 0) {
+            if ((cpu.state().menvcfg & (1ULL << 6)) == 0) {
                 cpu.active_context().pending_exception = ExceptionCode::IllegalInstruction;
                 cpu.active_context().pending_tval = cpu.active_context().ir;
                 return;
