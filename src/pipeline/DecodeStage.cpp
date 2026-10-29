@@ -135,6 +135,7 @@ void CPU::fetch_operands(Machine& /*machine*/) {
                   (state_.priv == kPrivUser ||
                    (state_.hstatus & (simrv::xlen::CsrValue{1} << 22U)) != 0)) ||
                  (funct12 == Funct12Priv::Wfi &&
+                  (state_.mstatus & MstatusBit::Tw) == 0 &&
                   (state_.priv == kPrivUser ||
                    (state_.hstatus & (simrv::xlen::CsrValue{1} << 21U)) != 0)) ||
                  ctx.funct7 == simrv::isa::Funct7Priv::HfenceVvma ||
