@@ -1570,10 +1570,10 @@ auto decode_ext_v_special(uint32_t f6, uint32_t funct3, simrv::xlen::Instruction
                 if (rs1_val == 6) return OperationId::VZEXT_VF2;
                 if (rs1_val == 4) return OperationId::VZEXT_VF4;
                 if (rs1_val == 2) return OperationId::VZEXT_VF8;
-                if (rs1_val == 8) return OperationId::VCLZ_V;
-                if (rs1_val == 9) return OperationId::VBREV8_V;
-                if (rs1_val == 10) return OperationId::VREV8_V;
-                if (rs1_val == 12) return OperationId::VBREV_V;
+                if (rs1_val == 8) return OperationId::VBREV8_V;
+                if (rs1_val == 9) return OperationId::VREV8_V;
+                if (rs1_val == 10) return OperationId::VBREV_V;
+                if (rs1_val == 12) return OperationId::VCLZ_V;
                 if (rs1_val == 13) return OperationId::VCTZ_V;
                 if (rs1_val == 14) return OperationId::VCPOP_V;
             }

@@ -1894,6 +1894,19 @@ void test_zcb_decompression() {
     TEST_ASSERT(rv32_zextw == 0U);
 }
 
+void test_zvbb_unary_decode() {
+    using simrv::isa::OperationId;
+    constexpr std::array<std::pair<uint32_t, OperationId>, 4> kUnaryInstructions{{
+        {0x4b052057U, OperationId::VBREV_V},
+        {0x4ad42057U, OperationId::VBREV8_V},
+        {0x4b24a057U, OperationId::VREV8_V},
+        {0x4be62057U, OperationId::VCLZ_V},
+    }};
+    for (const auto& [instruction, expected] : kUnaryInstructions) {
+        TEST_ASSERT(simrv::pipeline::decoder(instruction) == expected);
+    }
+}
+
 void test_cbo_zero_execution() {
     using namespace simrv::isa;
     using namespace simrv::core;
@@ -2320,6 +2333,10 @@ int main() {
     std::cout << "[RUN] test_zcb_decompression" << std::endl;
     test_zcb_decompression();
     std::cout << "[PASS] test_zcb_decompression" << std::endl;
+
+    std::cout << "[RUN] test_zvbb_unary_decode" << std::endl;
+    test_zvbb_unary_decode();
+    std::cout << "[PASS] test_zvbb_unary_decode" << std::endl;
 
     std::cout << "[RUN] test_cbo_zero_execution" << std::endl;
     test_cbo_zero_execution();
