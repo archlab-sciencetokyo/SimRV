@@ -1317,7 +1317,7 @@ consteval auto generate_vector_common_table() {
     table.assign_row(0x18, {{0, OperationId::VMSEQ_VV},
                             {4, OperationId::VMSEQ_VX},
                             {3, OperationId::VMSEQ_VI},
-                            {2, OperationId::VMNAND_MM},
+                            {2, OperationId::VMANDN_MM},
                             {1, OperationId::VMFEQ_VV},
                             {5, OperationId::VMFEQ_VF}});
     table.assign_row(0x19, {{0, OperationId::VMSNE_VV},
@@ -1328,7 +1328,7 @@ consteval auto generate_vector_common_table() {
                             {5, OperationId::VMFLE_VF}});
     table.assign_row(
         0x1A,
-        {{0, OperationId::VMSLTU_VV}, {4, OperationId::VMSLTU_VX}, {2, OperationId::VMANDN_MM}});
+        {{0, OperationId::VMSLTU_VV}, {4, OperationId::VMSLTU_VX}, {2, OperationId::VMOR_MM}});
     table.assign_row(0x1B, {{0, OperationId::VMSLT_VV},
                             {4, OperationId::VMSLT_VX},
                             {2, OperationId::VMXOR_MM},
@@ -1337,17 +1337,17 @@ consteval auto generate_vector_common_table() {
     table.assign_row(0x1C, {{0, OperationId::VMSLEU_VV},
                             {4, OperationId::VMSLEU_VX},
                             {3, OperationId::VMSLEU_VI},
-                            {2, OperationId::VMOR_MM},
+                            {2, OperationId::VMORN_MM},
                             {1, OperationId::VMFNE_VV},
                             {5, OperationId::VMFNE_VF}});
     table.assign_row(0x1D, {{0, OperationId::VMSLE_VV},
                             {4, OperationId::VMSLE_VX},
                             {3, OperationId::VMSLE_VI},
-                            {2, OperationId::VMNOR_MM},
+                            {2, OperationId::VMNAND_MM},
                             {5, OperationId::VMFGT_VF}});
     table.assign_row(
         0x1E,
-        {{4, OperationId::VMSGTU_VX}, {3, OperationId::VMSGTU_VI}, {2, OperationId::VMORN_MM}});
+        {{4, OperationId::VMSGTU_VX}, {3, OperationId::VMSGTU_VI}, {2, OperationId::VMNOR_MM}});
     table.assign_row(0x1F, {{4, OperationId::VMSGT_VX},
                             {3, OperationId::VMSGT_VI},
                             {2, OperationId::VMXNOR_MM},

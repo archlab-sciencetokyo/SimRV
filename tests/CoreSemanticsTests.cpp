@@ -3238,6 +3238,20 @@ void test_vector_decode_tables() {
     expect(
         simrv::pipeline::decoder(encode_op_v(0x27, 2, true)) == simrv::isa::OperationId::VMULH_VV,
         "vector table decodes signed high-half multiply");
+    constexpr std::array<std::pair<unsigned, simrv::isa::OperationId>, 8> kMaskLogical = {{
+        {0x18, simrv::isa::OperationId::VMANDN_MM},
+        {0x19, simrv::isa::OperationId::VMAND_MM},
+        {0x1A, simrv::isa::OperationId::VMOR_MM},
+        {0x1B, simrv::isa::OperationId::VMXOR_MM},
+        {0x1C, simrv::isa::OperationId::VMORN_MM},
+        {0x1D, simrv::isa::OperationId::VMNAND_MM},
+        {0x1E, simrv::isa::OperationId::VMNOR_MM},
+        {0x1F, simrv::isa::OperationId::VMXNOR_MM},
+    }};
+    for (const auto& [funct6, operation] : kMaskLogical) {
+        expect(simrv::pipeline::decoder(encode_op_v(funct6, 2, true)) == operation,
+               "vector mask logical funct6 encoding selects the specified operation");
+    }
     expect(
         simrv::pipeline::decoder(encode_op_v(0x01, 2, true)) == simrv::isa::OperationId::VREDAND_VS,
         "vector table decodes bitwise reductions alongside Zvbb entries");
