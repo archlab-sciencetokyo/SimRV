@@ -1288,7 +1288,9 @@ auto CsrFile::write(simrv::xlen::CsrNumber addr, simrv::xlen::CsrValue wdata)
                         ? ((cpu_.perf_counters.read_hpmevent(idx) & 0xFFFFFFFF00000000ULL) |
                            static_cast<uint32_t>(wdata))
                         : static_cast<uint64_t>(wdata);
-                cpu_.perf_counters.write_hpmevent(idx, value);
+                cpu_.perf_counters.write_hpmevent(
+                    idx, value,
+                    isa::misa_has_extension(cpu_.state().misa, isa::IsaExtension::H));
                 break;
             }
             if (cpu_.state().regs.xlen == 32U && a >= 0x723U && a <= 0x73FU) {
@@ -1296,7 +1298,9 @@ auto CsrFile::write(simrv::xlen::CsrNumber addr, simrv::xlen::CsrValue wdata)
                 const auto value =
                     (cpu_.perf_counters.read_hpmevent(idx) & 0x00000000FFFFFFFFULL) |
                     (static_cast<uint64_t>(static_cast<uint32_t>(wdata)) << kHighWordShift);
-                cpu_.perf_counters.write_hpmevent(idx, value);
+                cpu_.perf_counters.write_hpmevent(
+                    idx, value,
+                    isa::misa_has_extension(cpu_.state().misa, isa::IsaExtension::H));
                 break;
             }
             if (a >= 0xB03U && a <= 0xB1FU) {

@@ -53,7 +53,7 @@ class PerformanceCounters {
     /// Read an event selector CSR (mhpmevent3..31).
     [[nodiscard]] auto read_hpmevent(size_t index) const noexcept -> uint64_t;
     /// Write an event selector CSR (mhpmevent3..31).
-    void write_hpmevent(size_t index, uint64_t value) noexcept;
+    void write_hpmevent(size_t index, uint64_t value, bool has_hypervisor = true) noexcept;
 
     /// Read a 64-bit performance counter CSR (mhpmcounter3..31 / hpmcounter3..31).
     [[nodiscard]] auto read_hpmcounter(size_t index) const noexcept -> uint64_t;
@@ -74,12 +74,17 @@ class PerformanceCounters {
      */
     SIMRV_ALWAYS_INLINE auto notify_event(
         HpmEvent event, uint64_t count = 1, uint32_t mcountinhibit = 0,
-        simrv::xlen::PrivilegeLevel privilege = simrv::xlen::PrivilegeLevel::Machine) noexcept
+        simrv::xlen::PrivilegeLevel privilege = simrv::xlen::PrivilegeLevel::Machine,
+        bool virtualized = false) noexcept
         -> bool {
         const auto ev_idx = static_cast<size_t>(event);
         if (simrv::compiler::unlikely(ev_idx < static_cast<size_t>(HpmEvent::Count))) {
             uint32_t mask = event_listening_mask_[ev_idx] & ~mcountinhibit;
-            if (privilege == simrv::xlen::PrivilegeLevel::Machine)
+            if (virtualized && privilege == simrv::xlen::PrivilegeLevel::Supervisor)
+                mask &= ~virtual_supervisor_inhibit_mask_;
+            else if (virtualized && privilege == simrv::xlen::PrivilegeLevel::User)
+                mask &= ~virtual_user_inhibit_mask_;
+            else if (privilege == simrv::xlen::PrivilegeLevel::Machine)
                 mask &= ~machine_inhibit_mask_;
             else if (privilege == simrv::xlen::PrivilegeLevel::Supervisor)
                 mask &= ~supervisor_inhibit_mask_;
@@ -138,6 +143,8 @@ class PerformanceCounters {
     static constexpr uint64_t kMachineInhibit = uint64_t{1} << 62;
     static constexpr uint64_t kSupervisorInhibit = uint64_t{1} << 61;
     static constexpr uint64_t kUserInhibit = uint64_t{1} << 60;
+    static constexpr uint64_t kVirtualSupervisorInhibit = uint64_t{1} << 59;
+    static constexpr uint64_t kVirtualUserInhibit = uint64_t{1} << 58;
 
     void rebuild_listening_mask() noexcept;
 
@@ -147,6 +154,8 @@ class PerformanceCounters {
     uint32_t machine_inhibit_mask_{};
     uint32_t supervisor_inhibit_mask_{};
     uint32_t user_inhibit_mask_{};
+    uint32_t virtual_supervisor_inhibit_mask_{};
+    uint32_t virtual_user_inhibit_mask_{};
     bool instruction_class_listeners_{};
 
     std::array<simrv::xlen::Counter, isa::OperationIdCount> inst_mix_count_{};

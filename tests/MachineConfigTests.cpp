@@ -1133,6 +1133,33 @@ auto main() -> int {
             expect(perf.read_hpmcounter(3) == 100,
                    "Counter 3 suppressed when inhibited via mcountinhibit");
 
+            constexpr uint64_t kVsInhibit = uint64_t{1} << 59;
+            constexpr uint64_t kVuInhibit = uint64_t{1} << 58;
+            const auto instruction_event =
+                static_cast<uint64_t>(simrv::core::HpmEvent::Instructions);
+            perf.write_hpmevent(4, instruction_event | kVsInhibit);
+            expect(perf.read_hpmevent(4) == (instruction_event | kVsInhibit),
+                   "VS inhibit bit reads back when H is implemented");
+            perf.notify_event(simrv::core::HpmEvent::Instructions, 1, 0,
+                              simrv::xlen::PrivilegeLevel::Supervisor, true);
+            expect(perf.read_hpmcounter(4) == 0, "VS inhibit suppresses VS-mode events");
+            perf.notify_event(simrv::core::HpmEvent::Instructions, 1, 0,
+                              simrv::xlen::PrivilegeLevel::Supervisor, false);
+            expect(perf.read_hpmcounter(4) == 1,
+                   "VS inhibit does not suppress HS-mode events");
+
+            perf.write_hpmevent(5, instruction_event | kVuInhibit);
+            perf.notify_event(simrv::core::HpmEvent::Instructions, 1, 0,
+                              simrv::xlen::PrivilegeLevel::User, true);
+            expect(perf.read_hpmcounter(5) == 0, "VU inhibit suppresses VU-mode events");
+            perf.notify_event(simrv::core::HpmEvent::Instructions, 1, 0,
+                              simrv::xlen::PrivilegeLevel::User, false);
+            expect(perf.read_hpmcounter(5) == 1,
+                   "VU inhibit does not suppress U-mode events");
+            perf.write_hpmevent(6, instruction_event | kVuInhibit, false);
+            expect(perf.read_hpmevent(6) == instruction_event,
+                   "VS/VU inhibit bits are WARL zero without H");
+
             // Instruction retirement recording with latency and stalls
             perf.record_retire(simrv::isa::ADDI, 4);
             expect(perf.inst_count(simrv::isa::ADDI) == 1, "Instruction count for ADDI is 1");

@@ -983,7 +983,7 @@ class CPU {
 
     SIMRV_ALWAYS_INLINE void record_hpm_event(HpmEvent event, uint64_t count = 1) noexcept {
         if (perf_counters.notify_event(event, count, static_cast<uint32_t>(state_.mcountinhibit),
-                                       state_.priv)) {
+                                       state_.priv, state_.virt)) {
             if (isa::misa_has_extension(state_.misa, isa::IsaExtension::S)) {
                 state_.mip |= MipBit::Lcofip;
             }

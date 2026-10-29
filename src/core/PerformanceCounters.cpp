@@ -15,6 +15,8 @@ void PerformanceCounters::reset() noexcept {
     machine_inhibit_mask_ = 0;
     supervisor_inhibit_mask_ = 0;
     user_inhibit_mask_ = 0;
+    virtual_supervisor_inhibit_mask_ = 0;
+    virtual_user_inhibit_mask_ = 0;
     instruction_class_listeners_ = false;
     inst_mix_count_.fill(0);
     inst_mix_cycles_.fill(0);
@@ -26,10 +28,13 @@ auto PerformanceCounters::read_hpmevent(size_t index) const noexcept -> uint64_t
     return hpmevent_[index];
 }
 
-void PerformanceCounters::write_hpmevent(size_t index, uint64_t value) noexcept {
+void PerformanceCounters::write_hpmevent(size_t index, uint64_t value, bool has_hypervisor) noexcept {
     if (index < 3 || index >= kNumHpmCounters) return;
-    // SimRV implements M/S/U filtering. VS/VU and reserved fields are WARL zero.
-    constexpr uint64_t kImplemented = (uint64_t{0xF} << 60) | ((uint64_t{1} << 56) - 1);
+    // Sscofpmf defines VS/VU filtering when the H extension is implemented.
+    constexpr uint64_t kBaseImplemented = (uint64_t{0xF} << 60) | ((uint64_t{1} << 56) - 1);
+    constexpr uint64_t kVirtualInhibitMask = uint64_t{0x3} << 58;
+    const uint64_t kImplemented =
+        kBaseImplemented | (has_hypervisor ? kVirtualInhibitMask : uint64_t{0});
     hpmevent_[index] = value & kImplemented;
     rebuild_listening_mask();
 }
@@ -69,6 +74,8 @@ void PerformanceCounters::rebuild_listening_mask() noexcept {
     machine_inhibit_mask_ = 0;
     supervisor_inhibit_mask_ = 0;
     user_inhibit_mask_ = 0;
+    virtual_supervisor_inhibit_mask_ = 0;
+    virtual_user_inhibit_mask_ = 0;
     instruction_class_listeners_ = false;
     for (size_t i = 3; i < kNumHpmCounters; ++i) {
         const auto raw = hpmevent_[i];
@@ -82,6 +89,9 @@ void PerformanceCounters::rebuild_listening_mask() noexcept {
         if ((raw & (uint64_t{1} << 62)) != 0) machine_inhibit_mask_ |= (1U << i);
         if ((raw & (uint64_t{1} << 61)) != 0) supervisor_inhibit_mask_ |= (1U << i);
         if ((raw & (uint64_t{1} << 60)) != 0) user_inhibit_mask_ |= (1U << i);
+        if ((raw & kVirtualSupervisorInhibit) != 0)
+            virtual_supervisor_inhibit_mask_ |= (1U << i);
+        if ((raw & kVirtualUserInhibit) != 0) virtual_user_inhibit_mask_ |= (1U << i);
     }
 }
 
