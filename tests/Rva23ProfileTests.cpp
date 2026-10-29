@@ -1833,7 +1833,8 @@ void test_zcb_decompression() {
         {0x9c65U, simrv::isa::OperationId::SEXT_B},
         {0x9c6dU, simrv::isa::OperationId::SEXT_H},
         {0x8c00U, simrv::isa::OperationId::SH},   {0x9c61U, simrv::isa::OperationId::ANDI},
-        {0x9c69U, simrv::isa::OperationId::PACK}, {0x9c71U, simrv::isa::OperationId::ADD_UW},
+        {0x9c69U, simrv::isa::OperationId::PACKW},
+        {0x9c71U, simrv::isa::OperationId::ADD_UW},
     }};
     for (const auto& encoding : kZcbInstructions) {
         // Select x9 for rd'/rs1' and x10 for rs2'; immediate bits are checked below
@@ -1872,6 +1873,9 @@ void test_zcb_decompression() {
         }
         if (encoding.match == 0x9c41U) {
             TEST_ASSERT(decoded.rs2() == simrv::xlen::RegId::A0);
+        }
+        if (encoding.match == 0x9c69U || encoding.match == 0x9c71U) {
+            TEST_ASSERT(decoded.rs2() == simrv::xlen::RegId::Zero);
         }
         if (encoding.match == 0x8000U) {
             TEST_ASSERT(decoded.imm_i() == 3);

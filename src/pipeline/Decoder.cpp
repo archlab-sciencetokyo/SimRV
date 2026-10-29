@@ -2150,7 +2150,8 @@ auto decompressInstruction(simrv::xlen::Instruction ir, bool is_rv64) -> simrv::
         return make_i_type(0x13U, 0x7U, rs1_prime, rs1_prime, 0xffU);
     }
     if ((ir & 0xfc7fU) == 0x9c69U) {  // C.ZEXT.H (PACK rd, rs1, x0)
-        return make_r_type(0x33U, 0x4U, 0x04U, rs1_prime, rs1_prime, 0U);
+        return make_r_type(is_rv64 ? 0x3bU : 0x33U, 0x4U, 0x04U, rs1_prime, rs1_prime,
+                           0U);
     }
     if ((ir & 0xfc7fU) == 0x9c71U && is_rv64) {  // C.ZEXT.W (ADD.UW rd, rs1, x0)
         return make_r_type(0x3bU, 0x0U, 0x04U, rs1_prime, rs1_prime, 0U);
