@@ -408,6 +408,9 @@ auto CsrFile::read(simrv::xlen::CsrNumber addr) const
             break;
         case csr_addr(Csr::Stimecmp):
             if (cpu_.state().priv < simrv::xlen::PrivilegeLevel::Machine) {
+                if ((cpu_.state().mcounteren & (simrv::xlen::CsrValue{1} << 1U)) == 0) {
+                    return std::unexpected(ExceptionCode::IllegalInstruction);
+                }
                 bool stce = false;
                 if constexpr (simrv::xlen::kIsXLen64) {
                     stce = (cpu_.state().menvcfg & (1ULL << 63U)) != 0;
@@ -1021,6 +1024,9 @@ auto CsrFile::write(simrv::xlen::CsrNumber addr, simrv::xlen::CsrValue wdata)
         }
         case csr_addr(Csr::Stimecmp):
             if (cpu_.state().priv < simrv::xlen::PrivilegeLevel::Machine) {
+                if ((cpu_.state().mcounteren & (simrv::xlen::CsrValue{1} << 1U)) == 0) {
+                    return std::unexpected(ExceptionCode::IllegalInstruction);
+                }
                 bool stce = false;
                 if constexpr (simrv::xlen::kIsXLen64) {
                     stce = (cpu_.state().menvcfg & (1ULL << 63U)) != 0;
