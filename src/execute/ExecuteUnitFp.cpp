@@ -935,6 +935,101 @@ auto ExecuteUnitFp::opFp(simrv::xlen::Funct7 funct7, Funct3 funct3, simrv::xlen:
     const auto u_rs1 = std::to_underlying(rs1);
     const auto u_rs2 = std::to_underlying(rs2);
 
+    // Zfa FROUND instructions share the FCVT.S.D / FCVT.D.S encodings and
+    // distinguish themselves with rs2=4 or 5.
+    if ((funct7 == Funct7Fp::FcvtSD || funct7 == Funct7Fp::FcvtDS) &&
+        (u_rs2 == 4U || u_rs2 == 5U)) {
+        const bool is_double = funct7 == Funct7Fp::FcvtDS;
+        const bool raises_inexact = u_rs2 == 5U;
+        const auto effective_rm = resolve_rounding_mode(rm, fcsr);
+        FpEnvironment::clear_exceptions();
+
+        const auto round_to_integral = [effective_rm](auto bits, unsigned fraction_bits,
+                                                       unsigned exponent_bits, int bias) {
+            using UInt = decltype(bits);
+            constexpr unsigned kWidth = sizeof(UInt) * 8U;
+            const UInt sign_mask = UInt{1} << (kWidth - 1U);
+            const UInt exponent_mask = (UInt{1} << exponent_bits) - UInt{1};
+            const UInt encoded_exponent = (bits >> fraction_bits) & exponent_mask;
+            const bool negative = (bits & sign_mask) != 0;
+            if (encoded_exponent == exponent_mask) return bits;
+
+            const int exponent = static_cast<int>(encoded_exponent) - bias;
+            if (exponent >= static_cast<int>(fraction_bits)) return bits;
+            const UInt sign = bits & sign_mask;
+            const UInt magnitude = bits & ~sign_mask;
+            const auto should_increment = [effective_rm, negative](bool above_half,
+                                                                   bool exactly_half,
+                                                                   bool odd) {
+                switch (effective_rm) {
+                    case RoundingMode::Rdn: return negative;
+                    case RoundingMode::Rup: return !negative;
+                    case RoundingMode::Rmm: return above_half || exactly_half;
+                    case RoundingMode::Rne: return above_half || (exactly_half && odd);
+                    case RoundingMode::Rtz: return false;
+                    default: return false;
+                }
+            };
+
+            if (exponent < 0) {
+                const UInt half = static_cast<UInt>(bias - 1) << fraction_bits;
+                const bool above_half = magnitude > half;
+                const bool exactly_half = magnitude == half;
+                const bool increment = should_increment(above_half, exactly_half, false);
+                return sign | (increment ? (static_cast<UInt>(bias) << fraction_bits) : UInt{0});
+            }
+
+            const unsigned discarded_bits = fraction_bits - static_cast<unsigned>(exponent);
+            const UInt discarded_mask = (UInt{1} << discarded_bits) - UInt{1};
+            const UInt discarded = magnitude & discarded_mask;
+            if (discarded == 0) return bits;
+            const UInt halfway = UInt{1} << (discarded_bits - 1U);
+            const UInt truncated = magnitude & ~discarded_mask;
+            const bool increment = should_increment(discarded > halfway, discarded == halfway,
+                                                   ((truncated >> discarded_bits) & UInt{1}) != 0);
+            return sign | (truncated + (increment ? (UInt{1} << discarded_bits) : UInt{0}));
+        };
+
+        if (is_double) {
+            const double source = read_f64(freg, u_rs1);
+            const uint64_t source_bits = f64_bits(source);
+            constexpr uint64_t kF64EncodedExpMask =
+                simrv::xlen::kF64ExpMask << simrv::xlen::kF64ExpShift;
+            const bool source_is_nan = (source_bits & kF64EncodedExpMask) ==
+                                           kF64EncodedExpMask &&
+                                       (source_bits & simrv::xlen::kF64FracMask) != 0;
+            if (source_is_nan) {
+                if (is_snan64(source)) FpEnvironment::raise_invalid();
+                out.fp_wb_data = simrv::xlen::kF64Qnan;
+            } else {
+                const uint64_t rounded_bits = round_to_integral(source_bits, 52U, 11U, 1023);
+                out.fp_wb_data = rounded_bits;
+                if (raises_inexact && rounded_bits != source_bits)
+                    FpEnvironment::raise_flags(std::to_underlying(FflagsBit::Nx));
+            }
+        } else {
+            const float source = read_f32(freg, u_rs1);
+            const uint32_t source_bits = f32_bits(source);
+            constexpr uint32_t kF32EncodedExpMask =
+                simrv::xlen::kF32ExpMask << simrv::xlen::kF32ExpShift;
+            const bool source_is_nan = (source_bits & kF32EncodedExpMask) ==
+                                           kF32EncodedExpMask &&
+                                       (source_bits & simrv::xlen::kF32FracMask) != 0;
+            if (source_is_nan) {
+                if (is_snan32(source)) FpEnvironment::raise_invalid();
+                out.fp_wb_data = write_f32_boxed(f32_from_bits(simrv::xlen::kF32Qnan));
+            } else {
+                const uint32_t rounded_bits = round_to_integral(source_bits, 23U, 8U, 127);
+                out.fp_wb_data = simrv::xlen::kF32BoxerBits | rounded_bits;
+                if (raises_inexact && rounded_bits != source_bits)
+                    FpEnvironment::raise_flags(std::to_underlying(FflagsBit::Nx));
+            }
+        }
+        out.fp_wb_enable = true;
+        FpEnvironment::accumulate_exceptions(fcsr);
+        return out;
+    }
+
     if (fp::fp_exec_add_sub(out, funct7, rm, u_rs1, u_rs2, freg, fcsr)) return out;
     if (fp::fp_exec_mul_div_sqrt(out, funct7, rm, u_rs1, u_rs2, freg, fcsr)) return out;
     if (fp::fp_exec_sgnj_minmax(out, funct7, funct3, u_rs1, u_rs2, freg, fcsr)) return out;
