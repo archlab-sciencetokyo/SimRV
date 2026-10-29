@@ -108,16 +108,19 @@ void CPU::fetch_operands(Machine& /*machine*/) {
             const bool virtual_instruction =
                 state_.virt &&
                 ((funct12 == Funct12Priv::Sret &&
-                  (state_.hstatus & (simrv::xlen::CsrValue{1} << 22U)) != 0) ||
+                  (state_.priv == kPrivUser ||
+                   (state_.hstatus & (simrv::xlen::CsrValue{1} << 22U)) != 0)) ||
                  (funct12 == Funct12Priv::Wfi &&
-                  (state_.hstatus & (simrv::xlen::CsrValue{1} << 21U)) != 0) ||
+                  (state_.priv == kPrivUser ||
+                   (state_.hstatus & (simrv::xlen::CsrValue{1} << 21U)) != 0)) ||
                  ctx.funct7 == simrv::isa::Funct7Priv::HfenceVvma ||
                  ctx.funct7 == simrv::isa::Funct7Priv::HfenceGvma ||
                  ((ctx.funct7 == simrv::isa::Funct7Priv::SfenceVma ||
                    ctx.funct7 == simrv::isa::Funct7Priv::SinvalVma ||
                    funct12 == Funct12Priv::SfenceWInval ||
                    funct12 == Funct12Priv::SfenceInvalIr) &&
-                  (state_.hstatus & (simrv::xlen::CsrValue{1} << 20U)) != 0));
+                  (state_.priv == kPrivUser ||
+                   (state_.hstatus & (simrv::xlen::CsrValue{1} << 20U)) != 0)));
             raise_decode_exception(ctx, virtual_instruction ? ExceptionCode::VirtualInstruction
                                                             : ExceptionCode::IllegalInstruction);
             return;
@@ -129,10 +132,13 @@ void CPU::fetch_operands(Machine& /*machine*/) {
                                             state_.virt)) {
             const auto csr_address = w_csr_addr.value();
             const bool virtualization_fault =
-                state_.virt && (csr_address == csr_addr(Csr::Satp)
-                                    ? (state_.hstatus & (simrv::xlen::CsrValue{1} << 20U)) != 0
-                                    : (csr_address >= 0x600U && csr_address <= 0x6FFU) ||
-                                          (csr_address >= 0x200U && csr_address <= 0x2FFU));
+                state_.virt &&
+                ((state_.priv == kPrivUser && csr_address == csr_addr(Csr::Stval)) ||
+                 (csr_address == csr_addr(Csr::Satp) &&
+                  (state_.priv == kPrivUser ||
+                   (state_.hstatus & (simrv::xlen::CsrValue{1} << 20U)) != 0)) ||
+                 (csr_address >= 0x600U && csr_address <= 0x6FFU) ||
+                 (csr_address >= 0x200U && csr_address <= 0x2FFU));
             raise_decode_exception(ctx, virtualization_fault ? ExceptionCode::VirtualInstruction
                                                               : ExceptionCode::IllegalInstruction);
             return;
