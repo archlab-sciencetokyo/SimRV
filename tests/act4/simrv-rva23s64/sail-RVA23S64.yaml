@@ -78,6 +78,7 @@ implemented_extensions:
   - { name: Svpbmt, version: "= 1.0.0" }
   - { name: Sha, version: "= 1.0.0" }
   - { name: H, version: "= 1.0.0" }
+  - { name: Smstateen, version: "= 1.0.0" }
   - { name: Ssstateen, version: "= 1.0.0" }
   - { name: Shcounterenw, version: "= 1.0.0" }
   - { name: Shvstvala, version: "= 1.0.0" }
