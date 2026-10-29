@@ -3160,6 +3160,21 @@ void test_fp_decode_legality() {
            "FCVT.D.S accepts its specified rm=000 encoding");
     expect(simrv::pipeline::decoder(encode_op_fp(0x21U, 1, 0)) == simrv::isa::OperationId::ILLEGAL,
            "FCVT.D.S rejects a nonzero reserved rm field");
+    expect(simrv::pipeline::decoder(encode_op_fp(0x20U, 0, 2)) ==
+               simrv::isa::OperationId::FCVT_S_H,
+           "FCVT.S.H uses the single-precision destination format encoding");
+    expect(simrv::pipeline::decoder(encode_op_fp(0x21U, 0, 2)) ==
+               simrv::isa::OperationId::FCVT_D_H,
+           "FCVT.D.H uses the double-precision destination format encoding");
+    expect(simrv::pipeline::decoder(encode_op_fp(0x22U, 0, 0)) ==
+               simrv::isa::OperationId::FCVT_H_S,
+           "FCVT.H.S uses the half-precision destination format encoding");
+    expect(simrv::pipeline::decoder(encode_op_fp(0x22U, 0, 1)) ==
+               simrv::isa::OperationId::FCVT_H_D,
+           "FCVT.H.D uses the half-precision destination format encoding");
+    expect(simrv::pipeline::decoder(encode_op_fp(0x72U, 0, 0)) ==
+               simrv::isa::OperationId::FMV_X_H,
+           "FMV.X.H decodes independently of arithmetic NaN boxing");
     expect(simrv::isa::required_extension_for_instruction(encode_op_fp(0x20U, 0, 1), false) ==
                simrv::isa::IsaExtension::D,
            "FCVT.S.D requires the D extension despite its single destination format");

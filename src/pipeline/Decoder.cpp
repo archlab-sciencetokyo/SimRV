@@ -1214,16 +1214,16 @@ auto decode_op_fp(uint32_t funct3, uint32_t funct7, uint32_t rs2) -> OperationId
     const uint32_t fmt = funct7 & 0x03;
     const uint32_t f5 = funct7 >> 2;
     if (fmt == 0) {
+        if (f5 == 0x08 && rs2 == 2 && funct3 == 0) return OperationId::FCVT_S_H;
         return decode_op_fp_single(funct3, f5, rs2);
     }
     if (fmt == 1) {
         if (f5 == 0x08 && rs2 == 2 && funct3 == 0) return OperationId::FCVT_D_H;
-        if (f5 == 0x09 && rs2 == 1) return OperationId::FCVT_H_D;
         return decode_op_fp_double(funct3, f5, rs2);
     }
     if (fmt == 2) {
-        if (f5 == 0x08 && rs2 == 2 && funct3 == 0) return OperationId::FCVT_S_H;
-        if (f5 == 0x09 && rs2 == 0) return OperationId::FCVT_H_S;
+        if (f5 == 0x08 && rs2 == 0) return OperationId::FCVT_H_S;
+        if (f5 == 0x08 && rs2 == 1) return OperationId::FCVT_H_D;
         if (f5 == 0x1C && rs2 == 0 && funct3 == 0) return OperationId::FMV_X_H;
         if (f5 == 0x1E && rs2 == 0 && funct3 == 0) return OperationId::FMV_H_X;
     }

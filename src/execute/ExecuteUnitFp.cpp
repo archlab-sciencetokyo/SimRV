@@ -704,7 +704,7 @@ bool fp_exec_cvt(FpExecResult& out, simrv::xlen::Word funct7, simrv::xlen::Word 
         out.int_wb_enable = true;
         return true;
     }
-    if (funct7 == 0x22) {  // FCVT.S.H (exact widening conversion)
+    if (funct7 == 0x20 && rs2 == 2) {  // FCVT.S.H (exact widening conversion)
         FpEnvironment::clear_exceptions();
         const uint16_t raw = read_f16(freg, rs1);
         const float src = simrv::execute::vector::fp16_to_fp32(raw);
@@ -718,17 +718,18 @@ bool fp_exec_cvt(FpExecResult& out, simrv::xlen::Word funct7, simrv::xlen::Word 
         FpEnvironment::accumulate_exceptions(fcsr);
         return true;
     }
-    if (funct7 == 0x26) {  // FCVT.H.S
+    if (funct7 == 0x22 && rs2 == 0) {  // FCVT.H.S
         const float src = read_f32(freg, rs1);
         FpEnvironment::clear_exceptions();
         const auto converted = isa::fp::to_binary16(src, resolve_rounding_mode(rm, fcsr));
         FpEnvironment::raise_flags(converted.flags);
-        out.fp_wb_data = write_f16_boxed(converted.bits);
+        const bool is_nan = (converted.bits & UINT16_C(0x7FFF)) > UINT16_C(0x7C00);
+        out.fp_wb_data = write_f16_boxed(is_nan ? UINT16_C(0x7E00) : converted.bits);
         out.fp_wb_enable = true;
         FpEnvironment::accumulate_exceptions(fcsr);
         return true;
     }
-    if (funct7 == 0x21) {  // FCVT.D.H (exact widening conversion)
+    if (funct7 == 0x21 && rs2 == 2) {  // FCVT.D.H (exact widening conversion)
         FpEnvironment::clear_exceptions();
         const uint16_t raw = read_f16(freg, rs1);
         const float src = simrv::execute::vector::fp16_to_fp32(raw);
@@ -743,12 +744,13 @@ bool fp_exec_cvt(FpExecResult& out, simrv::xlen::Word funct7, simrv::xlen::Word 
         FpEnvironment::accumulate_exceptions(fcsr);
         return true;
     }
-    if (funct7 == 0x25) {  // FCVT.H.D
+    if (funct7 == 0x22 && rs2 == 1) {  // FCVT.H.D
         const double src = read_f64(freg, rs1);
         FpEnvironment::clear_exceptions();
         const auto converted = isa::fp::to_binary16(src, resolve_rounding_mode(rm, fcsr));
         FpEnvironment::raise_flags(converted.flags);
-        out.fp_wb_data = write_f16_boxed(converted.bits);
+        const bool is_nan = (converted.bits & UINT16_C(0x7FFF)) > UINT16_C(0x7C00);
+        out.fp_wb_data = write_f16_boxed(is_nan ? UINT16_C(0x7E00) : converted.bits);
         out.fp_wb_enable = true;
         FpEnvironment::accumulate_exceptions(fcsr);
         return true;
@@ -888,7 +890,7 @@ bool fp_exec_mv_class(FpExecResult& out, simrv::xlen::Word funct7, Funct3 funct3
     }
     if (funct7 == 0x72 && funct3 == Funct3Fp::FmvXW) {  // FMV.X.H
         out.int_wb_data = static_cast<simrv::xlen::Register>(
-            static_cast<int16_t>(read_f16(freg, rs1)));
+            static_cast<int16_t>(static_cast<uint16_t>(freg[rs1])));
         out.int_wb_enable = true;
         return true;
     }
