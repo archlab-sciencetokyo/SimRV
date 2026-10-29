@@ -1640,6 +1640,10 @@ auto decode_ext_v(uint32_t funct3, uint32_t funct7, simrv::xlen::Instruction ir)
     const bool vm = (ir & (1u << 25)) != 0;
     const uint32_t f6 = funct7 >> 1;
 
+    // VROR.VI uses bit 26 as the sixth immediate bit, unlike the other vector
+    // encodings that treat it as part of funct6.
+    if (funct3 == 3 && (f6 == 0x14 || f6 == 0x15)) return OperationId::VROR_VI;
+
     // A small number of vector encodings use rs1/vs2 as a secondary opcode.
     if ((f6 == 0x10 && (funct3 == 1 || funct3 == 2 || funct3 == 5)) ||
         (f6 == 0x12 && (funct3 == 1 || funct3 == 2)) || (f6 == 0x14 && funct3 == 2) ||

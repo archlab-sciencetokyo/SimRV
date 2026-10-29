@@ -1048,7 +1048,9 @@ void ExecuteUnitVector::execute_vector(core::CPU& cpu, memory::MemorySubsystem& 
 
     // Decode immediate fields
     auto simm5 = static_cast<int32_t>((ir >> 15) & 0x1F);
-    if ((simm5 & 0x10) != 0) {
+    if (op_id == isa::OperationId::VROR_VI) {
+        simm5 |= static_cast<int32_t>((ir >> 26U) & 1U) << 5U;
+    } else if ((simm5 & 0x10) != 0) {
         simm5 |= ~0x1F;
     }
 

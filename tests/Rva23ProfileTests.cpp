@@ -1896,11 +1896,12 @@ void test_zcb_decompression() {
 
 void test_zvbb_unary_decode() {
     using simrv::isa::OperationId;
-    constexpr std::array<std::pair<uint32_t, OperationId>, 4> kUnaryInstructions{{
+    constexpr std::array<std::pair<uint32_t, OperationId>, 5> kUnaryInstructions{{
         {0x4b052057U, OperationId::VBREV_V},
         {0x4ad42057U, OperationId::VBREV8_V},
         {0x4b24a057U, OperationId::VREV8_V},
         {0x4be62057U, OperationId::VCLZ_V},
+        {0x5696b1d7U, OperationId::VROR_VI},
     }};
     for (const auto& [instruction, expected] : kUnaryInstructions) {
         TEST_ASSERT(simrv::pipeline::decoder(instruction) == expected);
