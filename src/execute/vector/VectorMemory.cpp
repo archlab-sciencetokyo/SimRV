@@ -51,6 +51,15 @@ namespace {
         return nullptr;
     }
 
+    // Pointer masking transforms each effective address after vector address
+    // generation. Bypass this range fast path for tagged addresses so the
+    // ordinary memory path can mask every element independently.
+    if (simrv::memory::MemoryAccess::mask_user_pointer(
+            cpu, simrv::xlen::VirtAddr{base_addr})
+            .raw() != base_addr) {
+        return nullptr;
+    }
+
     const unsigned active_xlen = cpu.effective_data_xlen();
     simrv::xlen::Address lookup_addr = base_addr;
     if (active_xlen == 32) lookup_addr &= 0xFFFFFFFFULL;
@@ -833,9 +842,7 @@ void execute_vector_memory(core::CPU& cpu, memory::MemorySubsystem& mem, isa::Op
                            simrv::xlen::RegId rd, simrv::xlen::RegId rs1, simrv::xlen::RegId rs2,
                            bool vm, uint32_t vl, uint32_t sew, uint32_t nfields,
                            uint32_t field_registers) {
-    const auto base_addr = memory::MemoryAccess::mask_user_pointer(
-                               cpu, simrv::xlen::VirtAddr{cpu.state().regs.read(rs1)})
-                               .raw();
+    const auto base_addr = cpu.state().regs.read(rs1);
     switch (op_id) {
         case isa::OperationId::VLE8_V:
             execute_vle<uint8_t>(cpu, mem, rd, base_addr, vm, vl, nfields,
