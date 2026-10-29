@@ -593,13 +593,17 @@ auto CPU::execute_cached_fallback(Machine& machine) -> void {
 void CPU::dispatch_pending_interrupts() {
     simrv::xlen::Word pending_interrupts = state_.mip & state_.mie;
     simrv::xlen::Word hypervisor_interrupt_candidates = 0;
+    simrv::xlen::Word virtual_interrupt_candidates = 0;
     if (isa::misa_has_extension(state_.misa, isa::IsaExtension::H)) {
         constexpr std::array<std::pair<simrv::xlen::Word, simrv::xlen::Word>, 3> kVsInterrupts = {
             std::pair{simrv::xlen::Word{1} << 2U, simrv::xlen::Word{1} << 1U},
             std::pair{simrv::xlen::Word{1} << 6U, simrv::xlen::Word{1} << 5U},
             std::pair{simrv::xlen::Word{1} << 10U, simrv::xlen::Word{1} << 9U},
         };
-        const auto pending_h = state_.hip | state_.hvip | vs_interrupts_to_h(state_.vsip) |
+        const auto pending_h = state_.hip | state_.hvip |
+                               state_.supervisor_guest_external_pending() |
+                               state_.selected_guest_external_pending() |
+                               vs_interrupts_to_h(state_.vsip) |
                                (state_.vstip_sstc ? (simrv::xlen::Word{1} << 6U) : 0U);
         for (const auto& [h_bit, vs_bit] : kVsInterrupts) {
             if ((pending_h & h_bit) == 0) continue;
@@ -607,7 +611,9 @@ void CPU::dispatch_pending_interrupts() {
                 const bool global_enabled =
                     state_.priv != kPrivSupervisor || (state_.vsstatus & MstatusBit::Sie) != 0;
                 if (global_enabled && (state_.vsie & vs_bit) != 0) {
-                    hypervisor_interrupt_candidates |= h_bit;
+                    // In VS mode the virtual supervisor interrupt is reported with
+                    // the supervisor cause number (for example, VSEI is cause 9).
+                    virtual_interrupt_candidates |= vs_bit;
                 }
             } else if ((state_.hie & h_bit) != 0 &&
                        (state_.priv < kPrivSupervisor || state_.virt ||
@@ -615,9 +621,16 @@ void CPU::dispatch_pending_interrupts() {
                 hypervisor_interrupt_candidates |= h_bit;
             }
         }
+        if ((pending_h & (simrv::xlen::Word{1} << 12U)) != 0 &&
+            (state_.hie & (simrv::xlen::Word{1} << 12U)) != 0 &&
+            (state_.priv < kPrivSupervisor || state_.virt ||
+             (state_.mstatus & MstatusBit::Sie) != 0)) {
+            hypervisor_interrupt_candidates |= simrv::xlen::Word{1} << 12U;
+        }
         pending_interrupts |= hypervisor_interrupt_candidates;
     }
-    if (simrv::compiler::unlikely(pending_interrupts != 0u)) {
+    if (simrv::compiler::unlikely(pending_interrupts != 0u ||
+                                  virtual_interrupt_candidates != 0u)) {
         simrv::xlen::Word enable_interrupts = 0;
         switch (state_.priv) {
             case kPrivMachine: {
@@ -645,6 +658,12 @@ void CPU::dispatch_pending_interrupts() {
         simrv::xlen::Word const mask = pending_interrupts & enable_interrupts;
         if (mask != 0u) {
             simrv::xlen::Word const irq_num = select_highest_priority_interrupt(mask);
+            raise_exception(kInterruptCauseBit | irq_num, 0);
+        } else if (virtual_interrupt_candidates != 0u) {
+            // Interrupts targeted at HS have priority over interrupts targeted at VS,
+            // regardless of the numeric cause priorities within either privilege level.
+            simrv::xlen::Word const irq_num =
+                select_highest_priority_interrupt(virtual_interrupt_candidates);
             raise_exception(kInterruptCauseBit | irq_num, 0);
         }
     }

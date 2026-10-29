@@ -239,6 +239,20 @@ auto Aplic::read32(simrv::xlen::Address offset) -> uint32_t {
 }
 
 void Aplic::write32(simrv::xlen::Address offset, uint32_t val) {
+    if (act_test_hooks_ && offset == 0x0008U && machine_ != nullptr) {
+        constexpr uint32_t kSetPending = uint32_t{1} << 31U;
+        const uint32_t guest_interrupt = val & ~kSetPending;
+        if (guest_interrupt > 0 && guest_interrupt < 64) {
+            const auto pending_bit = simrv::xlen::CsrValue{1} << guest_interrupt;
+            auto& hgeip = machine_->primary_hart().state().hgeip;
+            if ((val & kSetPending) != 0) {
+                hgeip |= pending_bit;
+            } else {
+                hgeip &= ~pending_bit;
+            }
+            return;
+        }
+    }
     if (act_test_hooks_ && offset == 0x0004U && machine_ != nullptr) {
         constexpr uint32_t kSetPending = uint32_t{1} << 31U;
         const bool asserted = (val & kSetPending) != 0;
@@ -267,17 +281,6 @@ void Aplic::write32(simrv::xlen::Address offset, uint32_t val) {
                             simrv::xlen::PrivilegeLevel::Machine);
                     return;
                 case 9:
-                    if (machine_->primary_hart().state().virt) {
-                        constexpr simrv::xlen::CsrValue kVsExternalPending =
-                            simrv::xlen::CsrValue{1} << 10U;
-                        auto& hvip = machine_->primary_hart().state().hvip;
-                        if (asserted) {
-                            hvip |= kVsExternalPending;
-                        } else {
-                            hvip &= ~kVsExternalPending;
-                        }
-                        return;
-                    }
                     trigger(simrv::core::InterruptType::External,
                             simrv::xlen::PrivilegeLevel::Supervisor);
                     return;

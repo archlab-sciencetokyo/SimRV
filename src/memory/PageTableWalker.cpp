@@ -192,6 +192,16 @@ void PageTableWalker::accept_pte(PageWalkState& state, simrv::xlen::Word pte) co
         state.status = PageWalkStatus::Fault;
         return;
     }
+    if (view.pbmt() != PtePbmt::Pma && state.arch_state != nullptr) {
+        constexpr simrv::xlen::CsrValue kPbmte = simrv::xlen::CsrValue{1} << 62U;
+        const auto envcfg = state.guest_stage_enabled ? state.arch_state->henvcfg
+                                                      : state.arch_state->menvcfg;
+        if ((envcfg & kPbmte) == 0) {
+            state.fault = page_fault_for(state.access);
+            state.status = PageWalkStatus::Fault;
+            return;
+        }
+    }
 
     if (view.is_table_pointer()) {
         if (view.is_napot() || view.pbmt() != PtePbmt::Pma ||

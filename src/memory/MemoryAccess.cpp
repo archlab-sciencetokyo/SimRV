@@ -1153,18 +1153,16 @@ void MemoryAccess::execute_cmo(MemorySubsystem& mem, core::CPU& cpu, simrv::xlen
         if constexpr (simrv::xlen::kIsXLen64) {
             if (!simrv::Mmu::is_canonical(simrv::xlen::VirtAddr{vaddr}, active_satp,
                                           active_xlen)) {
-                cpu.active_context().pending_exception =
-                    (op == isa::OperationId::CBO_ZERO || op == isa::OperationId::CBO_FLUSH)
-                        ? ExceptionCode::StorePageFault
-                        : ExceptionCode::LoadPageFault;
+                cpu.active_context().pending_exception = ExceptionCode::StorePageFault;
                 cpu.active_context().pending_tval = vaddr;
                 return;
             }
         }
+        // CBO management operations are permitted when either a load or store can
+        // access the block. Use Read for translation so read-only pages remain
+        // accessible; failures are still reported as store exceptions below.
         const PteAccess access_type =
-            (op == isa::OperationId::CBO_ZERO || op == isa::OperationId::CBO_FLUSH)
-                ? PteAccess::Write
-                : PteAccess::Read;
+            op == isa::OperationId::CBO_ZERO ? PteAccess::Write : PteAccess::Read;
         auto* entry = (access_type == PteAccess::Write)
                           ? cpu.tlb.lookup_data_w(vaddr, current_asid, eff_priv)
                           : cpu.tlb.lookup_data_r(vaddr, current_asid, eff_priv);
@@ -1187,7 +1185,16 @@ void MemoryAccess::execute_cmo(MemorySubsystem& mem, core::CPU& cpu, simrv::xlen
                 })
                 .or_else([&](simrv::xlen::TrapCause error)
                              -> std::expected<void, simrv::xlen::TrapCause> {
-                    cpu.active_context().pending_exception = to_exception_code(error);
+                    auto exception = to_exception_code(error);
+                    if (op != isa::OperationId::CBO_ZERO) {
+                        if (exception == ExceptionCode::LoadPageFault)
+                            exception = ExceptionCode::StorePageFault;
+                        else if (exception == ExceptionCode::GuestLoadPageFault)
+                            exception = ExceptionCode::GuestStorePageFault;
+                        else if (exception == ExceptionCode::FaultLoad)
+                            exception = ExceptionCode::FaultStore;
+                    }
+                    cpu.active_context().pending_exception = exception;
                     cpu.active_context().pending_tval = vaddr;
                     return {};
                 });
@@ -1197,13 +1204,10 @@ void MemoryAccess::execute_cmo(MemorySubsystem& mem, core::CPU& cpu, simrv::xlen
 
     // PMP verification
     const core::PmpAccessType pmp_access =
-        (op == isa::OperationId::CBO_ZERO || op == isa::OperationId::CBO_FLUSH)
-            ? core::PmpAccessType::Write
-            : core::PmpAccessType::Read;
+        op == isa::OperationId::CBO_ZERO ? core::PmpAccessType::Write
+                                         : core::PmpAccessType::Read;
     if (!core::pmp::check_access(cpu.state(), paddr, kLineSize, pmp_access, eff_priv)) {
-        cpu.active_context().pending_exception = (pmp_access == core::PmpAccessType::Write)
-                                                     ? ExceptionCode::FaultStore
-                                                     : ExceptionCode::FaultLoad;
+        cpu.active_context().pending_exception = ExceptionCode::FaultStore;
         cpu.active_context().pending_tval = vaddr;
         return;
     }

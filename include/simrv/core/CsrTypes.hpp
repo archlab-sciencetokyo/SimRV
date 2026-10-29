@@ -113,6 +113,7 @@ enum class MipBit : simrv::xlen::CsrValue {
     Seip = (1u << 9),
     Heip = (1u << 10),
     Meip = (1u << 11),
+    Sgeip = (1u << 12),
     Lcofip = (1u << 13),
 };
 
@@ -200,7 +201,7 @@ constexpr auto interrupt_implemented_mask(bool has_s, bool has_h = false)
         mask |= MipBit::Ssip | MipBit::Stip | MipBit::Seip | MipBit::Lcofip;
     }
     if (has_h) {
-        mask |= MipBit::Hsip | MipBit::Htip | MipBit::Heip;
+        mask |= MipBit::Hsip | MipBit::Htip | MipBit::Heip | MipBit::Sgeip;
     }
     return mask;
 }

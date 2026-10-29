@@ -116,6 +116,7 @@ struct alignas(128) ArchState {
     simrv::xlen::CsrValue hcounteren{};  ///< Hypervisor Counter Enable (0x606)
     simrv::xlen::CsrValue htimedelta{};  ///< Virtual time offset (0x605)
     simrv::xlen::CsrValue hgeie{};       ///< Guest external interrupt enable (0x607)
+    simrv::xlen::CsrValue hgeip{};       ///< Guest external interrupt pending (0xE12)
     std::array<uint64_t, 4> sstateen{};  ///< Supervisor State Enable banks (0x10C-10F)
     std::array<uint64_t, 4> hstateen{};  ///< Hypervisor State Enable banks (0x60C-60F)
 
@@ -139,6 +140,23 @@ struct alignas(128) ArchState {
     simrv::xlen::TrapCause vscause{};
     simrv::xlen::CsrValue vstval{};
     simrv::xlen::CsrValue vsatp{};
+
+    /** Pending external interrupt for the guest interrupt file selected by hstatus.VGEIN. */
+    [[nodiscard]] constexpr auto selected_guest_external_pending() const noexcept
+        -> simrv::xlen::CsrValue {
+        constexpr simrv::xlen::CsrValue kVgeinMask = simrv::xlen::CsrValue{0x3F} << 12U;
+        const auto vgein = (hstatus & kVgeinMask) >> 12U;
+        if (vgein == 0 || vgein >= sizeof(simrv::xlen::CsrValue) * 8U ||
+            ((hgeip & hgeie) & (simrv::xlen::CsrValue{1} << vgein)) == 0) {
+            return 0;
+        }
+        return simrv::xlen::CsrValue{1} << 10U;
+    }
+
+    [[nodiscard]] constexpr auto supervisor_guest_external_pending() const noexcept
+        -> simrv::xlen::CsrValue {
+        return (hgeip & hgeie) != 0 ? (simrv::xlen::CsrValue{1} << 12U) : 0;
+    }
 
     /* Floating-Point CSRs */
     simrv::xlen::CsrValue fcsr{};  ///< Floating-Point Control and Status register (rounding mode

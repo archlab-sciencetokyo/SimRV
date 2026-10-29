@@ -289,15 +289,18 @@ auto CsrFile::read(simrv::xlen::CsrNumber addr) const
                                            (simrv::xlen::CsrValue{1} << 10U));
             break;
         case csr_addr(Csr::Hie):
-            rcsr = cpu_.state().hie & ((simrv::xlen::CsrValue{1} << 2U) |
+            rcsr = cpu_.state().hie & ((simrv::xlen::CsrValue{1} << 12U) |
+                                           (simrv::xlen::CsrValue{1} << 2U) |
                                            (simrv::xlen::CsrValue{1} << 6U) |
                                            (simrv::xlen::CsrValue{1} << 10U));
             break;
         case csr_addr(Csr::Hip):
             rcsr = (cpu_.state().hip | cpu_.state().hvip |
+                    cpu_.state().supervisor_guest_external_pending() |
                     vs_interrupts_to_h(cpu_.state().vsip) |
+                    cpu_.state().selected_guest_external_pending() |
                     (cpu_.state().vstip_sstc ? (simrv::xlen::CsrValue{1} << 6U) : 0U)) &
-                   ((simrv::xlen::CsrValue{1} << 2U) | (simrv::xlen::CsrValue{1} << 6U) |
+                   ((simrv::xlen::CsrValue{1} << 12U) | (simrv::xlen::CsrValue{1} << 2U) | (simrv::xlen::CsrValue{1} << 6U) |
                     (simrv::xlen::CsrValue{1} << 10U));
             break;
         case csr_addr(Csr::Hvip):
@@ -352,6 +355,7 @@ auto CsrFile::read(simrv::xlen::CsrNumber addr) const
         case csr_addr(Csr::Vsip):
             rcsr = (cpu_.state().vsip |
                     h_interrupts_to_vs(cpu_.state().hip | cpu_.state().hvip |
+                                       cpu_.state().selected_guest_external_pending() |
                                        (cpu_.state().vstip_sstc
                                             ? (simrv::xlen::CsrValue{1} << 6U)
                                             : 0U))) &
@@ -386,7 +390,7 @@ auto CsrFile::read(simrv::xlen::CsrNumber addr) const
             rcsr = cpu_.state().hgeie & kHgeieWritableMask;
             break;
         case csr_addr(Csr::Hgeip):
-            rcsr = 0;  // GEILEN=0: no guest external interrupt sources.
+            rcsr = cpu_.state().hgeip & kHgeieWritableMask;
             break;
         case csr_addr(Csr::Scountovf): {
             if (!isa::misa_has_extension(cpu_.state().misa, isa::IsaExtension::S)) {
@@ -422,6 +426,7 @@ auto CsrFile::read(simrv::xlen::CsrNumber addr) const
             rcsr = cpu_.state().virt
                        ? ((cpu_.state().vsip |
                            h_interrupts_to_vs(cpu_.state().hip | cpu_.state().hvip |
+                                              cpu_.state().selected_guest_external_pending() |
                                               (cpu_.state().vstip_sstc
                                                    ? (simrv::xlen::CsrValue{1} << 6U)
                                                    : 0U))) &
@@ -509,7 +514,7 @@ auto CsrFile::read(simrv::xlen::CsrNumber addr) const
         case csr_addr(Csr::Mideleg):
             rcsr = cpu_.state().mideleg & mideleg_writable_mask(true);
             if (isa::misa_has_extension(cpu_.state().misa, isa::IsaExtension::H)) {
-                rcsr |= kVsInterruptBits;
+                rcsr |= kVsInterruptBits | (simrv::xlen::CsrValue{1} << 12U);
             }
             break;
         case csr_addr(Csr::Mie):
@@ -560,7 +565,9 @@ auto CsrFile::read(simrv::xlen::CsrNumber addr) const
             break;
         case csr_addr(Csr::Mip):
             rcsr = (cpu_.state().mip | cpu_.state().hip | cpu_.state().hvip |
+                    cpu_.state().supervisor_guest_external_pending() |
                     vs_interrupts_to_h(cpu_.state().vsip) |
+                    cpu_.state().selected_guest_external_pending() |
                     (cpu_.state().vstip_sstc ? (simrv::xlen::CsrValue{1} << 6U) : 0U)) &
                    interrupt_implemented_mask(
                        isa::misa_has_extension(cpu_.state().misa, isa::IsaExtension::S),
@@ -948,7 +955,8 @@ auto CsrFile::write(simrv::xlen::CsrNumber addr, simrv::xlen::CsrValue wdata)
                                             (simrv::xlen::CsrValue{1} << 10U));
             break;
         case csr_addr(Csr::Hie):
-            cpu_.state().hie = wdata & ((simrv::xlen::CsrValue{1} << 2U) |
+            cpu_.state().hie = wdata & ((simrv::xlen::CsrValue{1} << 12U) |
+                                            (simrv::xlen::CsrValue{1} << 2U) |
                                             (simrv::xlen::CsrValue{1} << 6U) |
                                             (simrv::xlen::CsrValue{1} << 10U));
             break;
