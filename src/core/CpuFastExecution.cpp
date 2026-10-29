@@ -621,6 +621,12 @@ void CPU::dispatch_pending_interrupts() {
                 hypervisor_interrupt_candidates |= h_bit;
             }
         }
+        if (state_.virt) {
+            // Interrupts delegated to HS but not to VS remain eligible while a
+            // guest is running. They take priority over interrupts delegated to VS.
+            hypervisor_interrupt_candidates |=
+                state_.mip & state_.mie & state_.mideleg & ~state_.hideleg;
+        }
         if ((pending_h & (simrv::xlen::Word{1} << 12U)) != 0 &&
             (state_.hie & (simrv::xlen::Word{1} << 12U)) != 0 &&
             (state_.priv < kPrivSupervisor || state_.virt ||
