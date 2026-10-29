@@ -603,6 +603,7 @@ enum class Csr : uint16_t {
     Sie = 0x104,
     Stvec = 0x105,
     Scounteren = 0x106,
+    Hcounteren = 0x606,
     Senvcfg = 0x10A,
     Sstateen0 = 0x10C,
     Sstateen1 = 0x10D,

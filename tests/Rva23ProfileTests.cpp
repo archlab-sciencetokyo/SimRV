@@ -1189,9 +1189,19 @@ void test_sha_state_enable_csrs() {
     const auto hstateen_csr = simrv::core::csr_num(simrv::core::Csr::Hstateen0);
     TEST_ASSERT(!simrv::core::TrapController::can_access_csr(
         cpu.state().priv, cpu.state().misa, hstateen_csr, false));
+    const auto hcounteren_csr = simrv::core::csr_num(simrv::core::Csr::Hcounteren);
+    TEST_ASSERT(!simrv::core::TrapController::can_access_csr(
+        cpu.state().priv, cpu.state().misa, hcounteren_csr, true));
     cpu.state().misa |= simrv::isa::misa_extension_bit(simrv::isa::IsaExtension::H);
     TEST_ASSERT(simrv::core::TrapController::can_access_csr(
         cpu.state().priv, cpu.state().misa, hstateen_csr, false));
+    TEST_ASSERT(simrv::core::TrapController::can_access_csr(
+        cpu.state().priv, cpu.state().misa, hcounteren_csr, true));
+    constexpr simrv::xlen::CsrValue kGuestHpmEnableBits =
+        (simrv::xlen::CsrValue{1} << 3U) | (simrv::xlen::CsrValue{1} << 31U);
+    TEST_ASSERT(cpu.csr_file.write(simrv::core::Csr::Hcounteren, kGuestHpmEnableBits).has_value());
+    const auto hcounteren = cpu.csr_file.read(simrv::core::Csr::Hcounteren);
+    TEST_ASSERT(hcounteren.has_value() && *hcounteren == kGuestHpmEnableBits);
 
     cpu.state().priv = simrv::xlen::PrivilegeLevel::Machine;
     cpu.state().mstateen[0] = kStateenSuperEnable;

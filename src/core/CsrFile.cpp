@@ -236,6 +236,9 @@ auto CsrFile::read(simrv::xlen::CsrNumber addr) const
         case csr_addr(Csr::Scounteren):
             rcsr = cpu_.state().scounteren;
             break;
+        case csr_addr(Csr::Hcounteren):
+            rcsr = cpu_.state().hcounteren & kCounterEnableMask;
+            break;
         case csr_addr(Csr::Scountovf): {
             if (!isa::misa_has_extension(cpu_.state().misa, isa::IsaExtension::S)) {
                 return std::unexpected(ExceptionCode::IllegalInstruction);
@@ -761,6 +764,9 @@ auto CsrFile::write(simrv::xlen::CsrNumber addr, simrv::xlen::CsrValue wdata)
             break;
         case csr_addr(Csr::Mcounteren):
             cpu_.state().mcounteren = wdata & kCounterEnableMask;
+            break;
+        case csr_addr(Csr::Hcounteren):
+            cpu_.state().hcounteren = wdata & kCounterEnableMask;
             break;
         case csr_addr(Csr::Mcountinhibit):
             cpu_.state().mcountinhibit = wdata & ~static_cast<simrv::xlen::CsrValue>(2);

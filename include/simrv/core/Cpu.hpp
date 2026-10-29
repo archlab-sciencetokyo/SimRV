@@ -108,6 +108,7 @@ struct alignas(128) ArchState {
     simrv::xlen::CsrValue satp{};        ///< Supervisor Address Translation and Protection (virtual
                                          ///< memory mode and page table base physical address)
     simrv::xlen::CsrValue scounteren{};  ///< Supervisor Counter Enable
+    simrv::xlen::CsrValue hcounteren{};  ///< Hypervisor Counter Enable (0x606)
     std::array<uint64_t, 4> sstateen{};  ///< Supervisor State Enable banks (0x10C-10F)
     std::array<uint64_t, 4> hstateen{};  ///< Hypervisor State Enable banks (0x60C-60F)
 
