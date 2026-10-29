@@ -164,6 +164,7 @@ struct PageWalkState {
     simrv::xlen::Word hgatp{0};
     simrv::xlen::Address pte_guest_address{0};
     simrv::xlen::Address guest_fault_address{0};
+    bool implicit_vs_stage_page_table_fault{false};
     bool guest_stage_enabled{false};
     bool update_access_bits = true;
     PageWalkStatus status = PageWalkStatus::Fault;
@@ -248,7 +249,8 @@ class PageTableWalker {
                             simrv::xlen::PrivilegeLevel priv, simrv::xlen::CsrValue mstatus,
                             simrv::xlen::Word satp, unsigned xlen, bool update_access_bits = true,
                             const core::ArchState* arch_state = nullptr,
-                            simrv::xlen::Address* guest_fault_address = nullptr) const
+                            simrv::xlen::Address* guest_fault_address = nullptr,
+                            bool* implicit_vs_stage_page_table_fault = nullptr) const
         -> std::expected<PageWalkResult, simrv::xlen::TrapCause>;
 
     /** Translate a guest-physical address through an SvNNx4 hgatp G-stage page table. */

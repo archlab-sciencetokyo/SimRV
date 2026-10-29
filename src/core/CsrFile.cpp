@@ -43,6 +43,8 @@ constexpr simrv::xlen::CsrValue kVsInterruptBits = (simrv::xlen::CsrValue{1} << 
 constexpr simrv::xlen::CsrValue kSupervisorInterruptBits =
     (simrv::xlen::CsrValue{1} << 1U) | (simrv::xlen::CsrValue{1} << 5U) |
     (simrv::xlen::CsrValue{1} << 9U);
+constexpr simrv::xlen::CsrValue kSupervisorInterruptEnableMask =
+    kSupervisorInterruptBits | (simrv::xlen::CsrValue{1} << 13U);
 
 [[nodiscard]] constexpr auto fp_accessible(const ArchState& state) noexcept -> bool {
     return isa::misa_has_extension(state.misa, isa::IsaExtension::F) &&
@@ -270,7 +272,7 @@ auto CsrFile::read(simrv::xlen::CsrNumber addr) const
             }
             break;
         case csr_addr(Csr::Hedeleg):
-            rcsr = cpu_.state().hedeleg & kMedelegWritableMask;
+            rcsr = cpu_.state().hedeleg & kHedelegWritableMask;
             break;
         case csr_addr(Csr::Hideleg):
             rcsr = cpu_.state().hideleg & ((simrv::xlen::CsrValue{1} << 2U) |
@@ -309,7 +311,7 @@ auto CsrFile::read(simrv::xlen::CsrNumber addr) const
             rcsr = cpu_.state().htinst;
             break;
         case csr_addr(Csr::Hgatp):
-            rcsr = cpu_.state().hgatp;
+            rcsr = cpu_.state().hgatp & kHgatpWritableMask;
             break;
 
         case csr_addr(Csr::Vsstatus):
@@ -350,6 +352,7 @@ auto CsrFile::read(simrv::xlen::CsrNumber addr) const
             rcsr = cpu_.state().virt
                        ? (cpu_.state().vsie & h_interrupts_to_vs(cpu_.state().hideleg))
                        : (cpu_.state().mie & cpu_.state().mideleg &
+                          kSupervisorInterruptEnableMask &
                           interrupt_implemented_mask(
                               true, isa::misa_has_extension(cpu_.state().misa,
                                                             isa::IsaExtension::H)));
@@ -912,7 +915,7 @@ auto CsrFile::write(simrv::xlen::CsrNumber addr, simrv::xlen::CsrValue wdata)
             }
             break;
         case csr_addr(Csr::Hedeleg):
-            cpu_.state().hedeleg = wdata & kMedelegWritableMask;
+            cpu_.state().hedeleg = wdata & kHedelegWritableMask;
             break;
         case csr_addr(Csr::Hideleg):
             cpu_.state().hideleg = wdata & ((simrv::xlen::CsrValue{1} << 2U) |
@@ -962,9 +965,10 @@ auto CsrFile::write(simrv::xlen::CsrNumber addr, simrv::xlen::CsrValue wdata)
             const auto mode = simrv::xlen::satp_mode(wdata, cpu_.state().regs.xlen);
             const bool supported = mode == 0 || (cpu_.state().regs.xlen == 64 &&
                                                   (mode == 8 || mode == 9 || mode == 10));
-            const bool root_aligned = mode == 0 || (wdata & 0x3U) == 0;
-            if (supported && root_aligned && cpu_.state().hgatp != wdata) {
-                cpu_.state().hgatp = wdata;
+            simrv::xlen::Word sanitized = wdata & kHgatpWritableMask;
+            if (mode != 0) sanitized &= ~simrv::xlen::Word{3};
+            if (supported && cpu_.state().hgatp != sanitized) {
+                cpu_.state().hgatp = sanitized;
                 cpu_.TLB_flush();
             }
             break;
@@ -1049,6 +1053,10 @@ auto CsrFile::write(simrv::xlen::CsrNumber addr, simrv::xlen::CsrValue wdata)
             break;
         case csr_addr(Csr::Senvcfg): {
             wdata &= kSenvcfgWritableMask;
+            // CBIE=2 is reserved; choose the legal zero encoding.
+            if (((wdata >> 4U) & 0x3U) == 0x2U) {
+                wdata &= ~(simrv::xlen::CsrValue{0x3} << 4U);
+            }
             if constexpr (simrv::xlen::kIsXLen64) {
                 constexpr uint64_t kPmmMask = uint64_t{0x3} << 32U;
                 const bool has_u = isa::misa_has_extension(cpu_.state().misa, isa::IsaExtension::U);
@@ -1143,6 +1151,10 @@ auto CsrFile::write(simrv::xlen::CsrNumber addr, simrv::xlen::CsrValue wdata)
             cpu_.state().mcountinhibit = wdata & ~static_cast<simrv::xlen::CsrValue>(2);
             break;
         case csr_addr(Csr::Menvcfg):
+            // CBIE=2 is reserved; choose the legal zero encoding.
+            if (((wdata >> 4U) & 0x3U) == 0x2U) {
+                wdata &= ~(simrv::xlen::CsrValue{0x3} << 4U);
+            }
             if constexpr (simrv::xlen::kIsXLen64) {
                 constexpr uint64_t kPmmMask = uint64_t{0x3} << 32U;
                 wdata = static_cast<simrv::xlen::CsrValue>(
@@ -1204,8 +1216,9 @@ auto CsrFile::write(simrv::xlen::CsrNumber addr, simrv::xlen::CsrValue wdata)
                 const auto mask = h_interrupts_to_vs(cpu_.state().hideleg);
                 cpu_.state().vsie = (cpu_.state().vsie & ~mask) | (wdata & mask);
             } else {
-                cpu_.state().mie =
-                    (cpu_.state().mie & ~cpu_.state().mideleg) | (wdata & cpu_.state().mideleg);
+                const auto mask =
+                    cpu_.state().mideleg & kSupervisorInterruptEnableMask;
+                cpu_.state().mie = (cpu_.state().mie & ~mask) | (wdata & mask);
             }
             break;
         case csr_addr(Csr::Sip): {

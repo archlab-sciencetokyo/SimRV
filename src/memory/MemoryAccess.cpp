@@ -143,7 +143,7 @@ auto MemoryAccess::target_read(MemorySubsystem& mem, core::CPU& cpu, simrv::xlen
     if (simrv::compiler::unlikely((v_addr & (size_bytes - 1u)) != 0)) {
         if (is_amo) {
             cpu.active_context().pending_exception =
-                (!is_lr) ? ExceptionCode::MisalignedStore : ExceptionCode::MisalignedLoad;
+                (!is_lr) ? ExceptionCode::FaultStore : ExceptionCode::FaultLoad;
             cpu.active_context().pending_tval = v_addr.raw();
             return 0;
         }
@@ -176,7 +176,6 @@ auto MemoryAccess::target_read(MemorySubsystem& mem, core::CPU& cpu, simrv::xlen
             simrv::xlen::Word byte_val = target_read(mem, cpu, byte_vaddr, isa::Funct3::Lbu);
             if (cpu.ca_state.waiting_for_interconnect) return 0;
             if (cpu.active_context().pending_exception.has_value()) {
-                cpu.active_context().pending_tval = v_addr.raw();
                 return 0;
             }
             result |= (byte_val & 0xFFULL) << (8 * b);
@@ -553,7 +552,7 @@ void MemoryAccess::target_write(MemorySubsystem& mem, core::CPU& cpu, simrv::xle
     simrv::memory::PtePbmt pbmt = simrv::memory::PtePbmt::Pma;
     if (simrv::compiler::unlikely((v_addr & (size_bytes - 1u)) != 0)) {
         if (is_amo) {
-            cpu.active_context().pending_exception = ExceptionCode::MisalignedStore;
+            cpu.active_context().pending_exception = ExceptionCode::FaultStore;
             cpu.active_context().pending_tval = v_addr.raw();
             return;
         }
@@ -586,7 +585,6 @@ void MemoryAccess::target_write(MemorySubsystem& mem, core::CPU& cpu, simrv::xle
             target_write(mem, cpu, byte_vaddr, byte_val, isa::Funct3::Sb);
             if (cpu.ca_state.waiting_for_interconnect) return;
             if (cpu.active_context().pending_exception.has_value()) {
-                cpu.active_context().pending_tval = v_addr.raw();
                 return;
             }
         }
@@ -975,6 +973,15 @@ void MemoryAccess::target_write(MemorySubsystem& mem, core::CPU& cpu, simrv::xle
             cpu.active_context().pending_tval = v_addr.raw();
             return;
         }
+        // SC must still raise an access fault for an inaccessible or non-memory
+        // target even when no LR reservation exists. Check target support before
+        // the reservation can turn the operation into an ordinary failed SC.
+        if (is_sc && (pbmt != simrv::memory::PtePbmt::Pma ||
+                      !geometry.contains(p_addr, size_bytes))) {
+            cpu.active_context().pending_exception = ExceptionCode::FaultStore;
+            cpu.active_context().pending_tval = v_addr.raw();
+            return;
+        }
         if (is_amo && pbmt != simrv::memory::PtePbmt::Pma) {
             cpu.active_context().pending_exception = ExceptionCode::FaultStore;
             cpu.active_context().pending_tval = v_addr.raw();
@@ -1079,14 +1086,14 @@ void MemoryAccess::execute_cmo(MemorySubsystem& mem, core::CPU& cpu, simrv::xlen
     // 1. Permission checks
     if (op == isa::OperationId::CBO_ZERO) {
         if (eff_priv == kPrivUser) {
-            if ((cpu.state().senvcfg & (1ULL << 6)) == 0 ||
-                (cpu.state().menvcfg & (1ULL << 6)) == 0) {
+            if ((cpu.state().senvcfg & (1ULL << 7)) == 0 ||
+                (cpu.state().menvcfg & (1ULL << 7)) == 0) {
                 cpu.active_context().pending_exception = ExceptionCode::IllegalInstruction;
                 cpu.active_context().pending_tval = cpu.active_context().ir;
                 return;
             }
         } else if (eff_priv == kPrivSupervisor) {
-            if ((cpu.state().menvcfg & (1ULL << 6)) == 0) {
+            if ((cpu.state().menvcfg & (1ULL << 7)) == 0) {
                 cpu.active_context().pending_exception = ExceptionCode::IllegalInstruction;
                 cpu.active_context().pending_tval = cpu.active_context().ir;
                 return;

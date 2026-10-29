@@ -759,7 +759,7 @@ void CPU::run_memory_stage_baremetal(Machine& machine) {
         }
     } else if (opcode == Opcode::Amo && funct5 != Funct5Amo::Sc) {
         if (simrv::compiler::unlikely(!isa::amo_address_aligned(addr, ctx.funct3))) {
-            ctx.pending_exception = ExceptionCode::MisalignedStore;
+                ctx.pending_exception = ExceptionCode::FaultStore;
             ctx.pending_tval = addr;
             return;
         }

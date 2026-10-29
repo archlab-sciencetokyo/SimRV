@@ -81,7 +81,8 @@ class Mmu {
         simrv::xlen::VirtAddr v_addr, PteAccess access, simrv::xlen::PrivilegeLevel priv,
         simrv::xlen::CsrValue mstatus, simrv::xlen::Word satp, unsigned xlen,
         bool update_access_bits = true, const core::ArchState* arch_state = nullptr,
-        simrv::xlen::Address* guest_fault_address = nullptr);
+        simrv::xlen::Address* guest_fault_address = nullptr,
+        bool* implicit_vs_stage_page_table_fault = nullptr);
 
     /// Start a walk without performing any implicit physical-memory access.
     [[nodiscard]] PageWalkState begin_page_walk(simrv::xlen::VirtAddr v_addr, PteAccess access,

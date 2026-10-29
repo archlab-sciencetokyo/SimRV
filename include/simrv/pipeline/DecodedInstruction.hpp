@@ -50,6 +50,7 @@ struct DecodedInstruction {
     simrv::xlen::CsrValue pending_tval =
         0;  ///< Trap value / faulting address for pending exception
     simrv::xlen::CsrValue pending_htval = 0;  ///< Guest physical address for a guest-page fault
+    simrv::xlen::CsrValue pending_htinst = 0; ///< Trap pseudoinstruction for an implicit VS walk fault
     std::optional<ExceptionCode>
         pending_exception;  ///< Pending exception code (if decode/fetch raised exception)
 

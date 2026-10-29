@@ -125,8 +125,8 @@ void CPU::execute_core(Machine& machine) {
             ctx.mem_addr = ctx.rrs1;
             if (!amo_address_aligned(ctx.mem_addr, ctx.funct3)) {
                 ctx.pending_exception = (ctx.funct5 == Funct5Amo::Lr)
-                                            ? ExceptionCode::MisalignedLoad
-                                            : ExceptionCode::MisalignedStore;
+                                            ? ExceptionCode::FaultLoad
+                                            : ExceptionCode::FaultStore;
                 ctx.pending_tval = ctx.mem_addr;
                 break;
             }

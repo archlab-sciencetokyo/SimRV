@@ -333,7 +333,7 @@ void TrapController::raise_exception(CPU& cpu, simrv::xlen::TrapCause cause,
                  exception == std::to_underlying(isa::ExceptionCode::GuestLoadPageFault) ||
                  exception == std::to_underlying(isa::ExceptionCode::GuestStorePageFault));
             state.htval = guest_page_fault ? cpu.active_context().pending_htval : 0;
-            state.htinst = 0;
+            state.htinst = guest_page_fault ? cpu.active_context().pending_htinst : 0;
             state.virt = false;
         }
     } else {
@@ -392,6 +392,7 @@ void TrapController::raise_exception(CPU& cpu, simrv::xlen::TrapCause cause,
     cpu.pipeline_context.pending_exception = std::nullopt;
     cpu.pipeline_context.pending_tval = 0;
     cpu.pipeline_context.pending_htval = 0;
+    cpu.pipeline_context.pending_htinst = 0;
 }
 
 auto TrapController::can_execute_privileged_instruction(simrv::xlen::PrivilegeLevel current_priv,

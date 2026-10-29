@@ -260,6 +260,14 @@ constexpr simrv::xlen::CsrValue kMstatusReadMask = ~simrv::xlen::CsrValue{0};
  * only exceptions that can originate below S-mode are exposed as delegatable.
  */
 constexpr simrv::xlen::CsrValue kMedelegWritableMask = static_cast<simrv::xlen::CsrValue>(0xB1FFu);
+constexpr simrv::xlen::CsrValue kHedelegWritableMask =
+    kMedelegWritableMask | (simrv::xlen::CsrValue{1} << 18U) |
+    (simrv::xlen::CsrValue{1} << 19U);
+constexpr simrv::xlen::CsrValue kHgatpModeMask = simrv::xlen::CsrValue{0xF} << 60U;
+constexpr simrv::xlen::CsrValue kHgatpVmidMask = simrv::xlen::CsrValue{0x3FFF} << 44U;
+constexpr simrv::xlen::CsrValue kHgatpPpnMask = (simrv::xlen::CsrValue{1} << 44U) - 1U;
+constexpr simrv::xlen::CsrValue kHgatpWritableMask =
+    kHgatpModeMask | kHgatpVmidMask | kHgatpPpnMask;
 constexpr simrv::xlen::CsrValue kFflagsMask = static_cast<simrv::xlen::CsrValue>(0x1fu);
 constexpr simrv::xlen::CsrValue kFrmMask = static_cast<simrv::xlen::CsrValue>(0x7u);
 constexpr simrv::xlen::CsrValue kFcsrMask = static_cast<simrv::xlen::CsrValue>(0xffu);

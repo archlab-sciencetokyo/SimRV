@@ -75,7 +75,21 @@ void PageTableWalker::select_next_pte(PageWalkState& state,
                                               state.hgatp, state.xlen,
                                               &state.guest_fault_address);
         if (!translated) {
+            state.implicit_vs_stage_page_table_fault = true;
             state.fault = translated.error();
+            // A G-stage fault while fetching a VS-stage PTE is reported using
+            // the access type that initiated the VS walk, even though the
+            // implicit PTE read itself is a load.
+            if (state.fault == simrv::isa::to_trap_cause(
+                                   simrv::isa::ExceptionCode::GuestLoadPageFault)) {
+                using simrv::isa::ExceptionCode;
+                const auto cause = state.access == PteAccess::Code
+                                       ? ExceptionCode::GuestInstructionPageFault
+                                       : (state.access == PteAccess::Write
+                                              ? ExceptionCode::GuestStorePageFault
+                                              : ExceptionCode::GuestLoadPageFault);
+                state.fault = simrv::isa::to_trap_cause(cause);
+            }
             state.status = PageWalkStatus::Fault;
             return;
         }
@@ -469,7 +483,8 @@ auto PageTableWalker::walk(simrv::xlen::VirtAddr v_addr, PteAccess access,
                            simrv::xlen::PrivilegeLevel priv, simrv::xlen::CsrValue mstatus,
                            simrv::xlen::Word satp, unsigned xlen, bool update_access_bits,
                            const core::ArchState* arch_state,
-                           simrv::xlen::Address* guest_fault_address) const
+                           simrv::xlen::Address* guest_fault_address,
+                           bool* implicit_vs_stage_page_table_fault) const
     -> std::expected<PageWalkResult, simrv::xlen::TrapCause> {
     auto state =
         begin_walk(v_addr, access, priv, mstatus, satp, xlen, update_access_bits, arch_state);
@@ -494,6 +509,9 @@ auto PageTableWalker::walk(simrv::xlen::VirtAddr v_addr, PteAccess access,
     }
     if (state.status == PageWalkStatus::Fault) {
         if (guest_fault_address != nullptr) *guest_fault_address = state.guest_fault_address;
+        if (implicit_vs_stage_page_table_fault != nullptr) {
+            *implicit_vs_stage_page_table_fault = state.implicit_vs_stage_page_table_fault;
+        }
         return std::unexpected(state.fault);
     }
     return PageWalkResult{.physical_address = state.physical_address, .pte = state.pte};
