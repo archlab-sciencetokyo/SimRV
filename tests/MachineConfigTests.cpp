@@ -820,6 +820,23 @@ auto main() -> int {
         expect(simrv::isa::misa_has_extension(machine.primary_hart().state().misa,
                                               simrv::isa::IsaExtension::B),
                "default Machine initial misa enables bitmanip extension (B)");
+        if constexpr (simrv::xlen::kIsXLen64) {
+            expect(simrv::isa::misa_has_extension(machine.primary_hart().state().misa,
+                                                  simrv::isa::IsaExtension::H),
+                   "default RVA23S64 profile enables the H extension");
+        }
+    }
+
+    if constexpr (simrv::xlen::kIsXLen64) {
+        simrv::core::MachineConfig user_profile_cfg{};
+        user_profile_cfg.execution.profile = simrv::isa::ArchitectureProfile::Rva23U64;
+        user_profile_cfg.tui.enabled = true;
+        simrv::core::Machine user_profile_machine(user_profile_cfg);
+        expect(user_profile_machine.initialize().has_value(),
+               "RVA23U64 profile machine initializes successfully");
+        expect(!simrv::isa::misa_has_extension(user_profile_machine.primary_hart().state().misa,
+                                               simrv::isa::IsaExtension::H),
+               "RVA23U64 profile does not enable the supervisor hypervisor extension");
     }
 
     {
@@ -839,6 +856,11 @@ auto main() -> int {
             expect(simrv::isa::misa_has_extension(machine.primary_hart().state().misa,
                                                   simrv::isa::IsaExtension::B),
                    "CLI-configured Machine initial misa enables bitmanip extension (B)");
+            if constexpr (simrv::xlen::kIsXLen64) {
+                expect(simrv::isa::misa_has_extension(machine.primary_hart().state().misa,
+                                                      simrv::isa::IsaExtension::H),
+                       "CLI default RVA23S64 profile enables the H extension");
+            }
         }
     }
 

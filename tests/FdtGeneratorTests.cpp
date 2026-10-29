@@ -111,6 +111,9 @@ void test_generate_platform_fdt_pcie() {
     cfg.memory.dram_base = 0x80000000ULL;
     cfg.memory.dram_size = 1024ULL * 1024ULL * 1024ULL;  // 1 GiB
     cfg.files.bootargs = "console=ttyS0 earlycon root=/dev/vda rw";
+    if constexpr (simrv::xlen::kIsXLen64) {
+        cfg.isa.isa_preset |= simrv::isa::misa_extension_bit(simrv::isa::IsaExtension::H);
+    }
 
     const auto blob = simrv::util::generate_platform_fdt(cfg, nullptr);
     expect(blob.size() >= 40, "Generated PCIe FDT has non-zero length");
@@ -123,6 +126,9 @@ void test_generate_platform_fdt_pcie() {
     expect(blob_contains_string(blob, "pci@30000000"), "PCIe ECAM node address present");
     expect(blob_contains_string(blob, "zihpm"), "Implemented HPM counter extension advertised");
     expect(blob_contains_string(blob, "zicntr"), "Base counters and timers advertised");
+    expect(blob_contains_string(blob, std::string_view{"\0h\0", 3}) ==
+               simrv::xlen::kIsXLen64,
+           "Hypervisor extension advertisement follows the hart ISA configuration");
     expect(blob_contains_string(blob, "zihintntl"), "Zihintntl extension advertised");
     expect(blob_contains_string(blob, "zic64b"), "Zic64b extension advertised");
     expect(blob_contains_string(blob, "zicclsm"), "Zicclsm extension advertised");

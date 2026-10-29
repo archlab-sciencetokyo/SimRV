@@ -587,6 +587,13 @@ auto Machine::initialize() -> std::expected<void, std::string> {
         if (is_32bit) {
             initial_misa = isa::misa_with_mxl(initial_misa, 32);
         }
+        const bool guest_xlen64 = ((initial_misa >> 62U) & 0x3U) == 0x2U;
+        if (!config.isa.misa_override && guest_xlen64 &&
+            config.execution.profile == isa::ArchitectureProfile::Rva23S64 &&
+            !config.cpu_model_config_override && !config.cpu_model_preset.has_value() &&
+            config.files.config_path.empty()) {
+            initial_misa |= isa::misa_extension_bit(isa::IsaExtension::H);
+        }
     }
     primary_hart().state().pc = resolved_start_pc_;
     primary_hart().state().regs.write(static_cast<simrv::xlen::RegId>(10), 0);  // a0 = hartid
