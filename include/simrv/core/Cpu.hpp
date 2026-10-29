@@ -229,10 +229,13 @@ struct alignas(128) ArchState {
             if (level == simrv::xlen::PrivilegeLevel::Machine) {
                 return 64;
             } else if (level == simrv::xlen::PrivilegeLevel::Supervisor) {
-                const unsigned sxl = (mstatus >> 34) & 3;
+                const auto status = virt ? hstatus : mstatus;
+                const unsigned shift = virt ? 32U : 34U;
+                const unsigned sxl = (status >> shift) & 3;
                 return (sxl == 1) ? 32 : 64;
             } else {  // User
-                const unsigned uxl = (mstatus >> 32) & 3;
+                const auto status = virt ? vsstatus : mstatus;
+                const unsigned uxl = (status >> 32) & 3;
                 return (uxl == 1) ? 32 : 64;
             }
         }
@@ -271,6 +274,7 @@ struct alignas(128) ArchState {
         const bool has_u = isa::misa_has_extension(misa, isa::IsaExtension::U);
         const bool has_f = isa::misa_has_extension(misa, isa::IsaExtension::F);
         const bool has_v = isa::misa_has_extension(misa, isa::IsaExtension::V);
+        const bool has_h = isa::misa_has_extension(misa, isa::IsaExtension::H);
         if constexpr (simrv::xlen::kIsXLen64) {
             constexpr uint64_t kLowerXlenMask = uint64_t{0xFU} << 32U;
             const auto mxl = static_cast<unsigned>((static_cast<uint64_t>(misa) >> 62U) & 0x3U);
@@ -279,9 +283,16 @@ struct alignas(128) ArchState {
                                      (has_u ? (lower_xlen << 32U) : 0U) |
                                      (has_s ? (lower_xlen << 34U) : 0U);
             mstatus = static_cast<simrv::xlen::CsrValue>(updated);
+            if (has_h) {
+                constexpr uint64_t kVsxlMask = uint64_t{0x3U} << 32U;
+                hstatus = static_cast<simrv::xlen::CsrValue>(
+                    (static_cast<uint64_t>(hstatus) & ~kVsxlMask) | (uint64_t{2U} << 32U));
+                vsstatus = static_cast<simrv::xlen::CsrValue>(
+                    (static_cast<uint64_t>(vsstatus) & ~kVsxlMask) | (uint64_t{2U} << 32U));
+            }
         }
         mstatus = mstatus_legalize_mpp(mstatus, has_s, has_u);
-        mstatus &= mstatus_writable_mask(has_s, has_u, has_f, has_v);
+        mstatus &= mstatus_writable_mask(has_s, has_u, has_f, has_v, has_h);
         update_xlen();
     }
 };

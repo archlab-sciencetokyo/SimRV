@@ -1203,11 +1203,26 @@ void test_sha_state_enable_csrs() {
     const auto hcounteren = cpu.csr_file.read(simrv::core::Csr::Hcounteren);
     TEST_ASSERT(hcounteren.has_value() && *hcounteren == kGuestHpmEnableBits);
 
+    cpu.state().mstatus |= simrv::core::MstatusBit::Gva;
+    TEST_ASSERT(cpu.csr_file.write(simrv::core::Csr::Mstatus, 0).has_value());
+    const auto mstatus = cpu.csr_file.read(simrv::core::Csr::Mstatus);
+    TEST_ASSERT(mstatus.has_value() && (*mstatus & simrv::core::kMstatusGva) != 0);
+    const auto medeleg = cpu.csr_file.read(simrv::core::Csr::Medeleg);
+    constexpr simrv::xlen::CsrValue kHDelegatedToHs =
+        (simrv::xlen::CsrValue{1} << 9U) | (simrv::xlen::CsrValue{1} << 20U) |
+        (simrv::xlen::CsrValue{1} << 21U) | (simrv::xlen::CsrValue{1} << 22U) |
+        (simrv::xlen::CsrValue{1} << 23U);
+    TEST_ASSERT(medeleg.has_value() && (*medeleg & kHDelegatedToHs) == kHDelegatedToHs);
+
     constexpr simrv::xlen::CsrValue kHstatusSpvSpvp =
-        (simrv::xlen::CsrValue{1} << 7U) | (simrv::xlen::CsrValue{1} << 8U);
+        (simrv::xlen::CsrValue{1} << 7U) | (simrv::xlen::CsrValue{1} << 8U) |
+        (simrv::xlen::CsrValue{1} << 20U) | (simrv::xlen::CsrValue{1} << 21U) |
+        (simrv::xlen::CsrValue{1} << 22U);
     TEST_ASSERT(cpu.csr_file.write(simrv::core::Csr::Hstatus, kHstatusSpvSpvp).has_value());
     const auto hstatus = cpu.csr_file.read(simrv::core::Csr::Hstatus);
-    TEST_ASSERT(hstatus.has_value() && *hstatus == kHstatusSpvSpvp);
+    TEST_ASSERT(hstatus.has_value() && (*hstatus & kHstatusSpvSpvp) == kHstatusSpvSpvp);
+    TEST_ASSERT((*hstatus & (simrv::xlen::CsrValue{0x3} << 32U)) ==
+                (simrv::xlen::CsrValue{2} << 32U));
 
     constexpr uint64_t kHgatpSv39x4 = (uint64_t{8} << 60U) | 4U;
     TEST_ASSERT(cpu.csr_file.write(simrv::core::Csr::Hgatp, kHgatpSv39x4).has_value());
@@ -1250,6 +1265,85 @@ void test_sha_state_enable_csrs() {
     hstateen = cpu.csr_file.read(simrv::core::Csr::Hstateen0);
     TEST_ASSERT(!hstateen.has_value());
     TEST_ASSERT(!cpu.csr_file.write(simrv::core::Csr::Hstateen0, 0).has_value());
+}
+
+void test_sha_guest_return_transitions() {
+    using simrv::core::MstatusBit;
+    using simrv::xlen::PrivilegeLevel;
+    const auto h_bit = simrv::isa::misa_extension_bit(simrv::isa::IsaExtension::H);
+
+    simrv::core::ArchState machine_state;
+    machine_state.misa |= h_bit;
+    machine_state.mstatus = simrv::core::mstatus_with_mpp(
+        machine_state.mstatus | MstatusBit::Mpv, PrivilegeLevel::Supervisor);
+    machine_state.mepc = 0x8000;
+    simrv::core::TrapController::mret(machine_state);
+    TEST_ASSERT(machine_state.virt);
+    TEST_ASSERT(machine_state.priv == PrivilegeLevel::Supervisor);
+    TEST_ASSERT(machine_state.pc == 0x8000);
+    TEST_ASSERT((machine_state.mstatus & MstatusBit::Mpv) == 0);
+
+    simrv::core::ArchState hs_state;
+    hs_state.misa |= h_bit;
+    hs_state.priv = PrivilegeLevel::Supervisor;
+    hs_state.hstatus = (simrv::xlen::CsrValue{1} << 7U) |
+                       (simrv::xlen::CsrValue{1} << 8U);
+    hs_state.sepc = 0x9000;
+    hs_state.vsepc = 0xA000;
+    simrv::core::TrapController::sret(hs_state);
+    TEST_ASSERT(hs_state.virt);
+    TEST_ASSERT(hs_state.priv == PrivilegeLevel::Supervisor);
+    TEST_ASSERT(hs_state.pc == 0x9000);
+    TEST_ASSERT((hs_state.hstatus & (simrv::xlen::CsrValue{1} << 7U)) == 0);
+
+    hs_state.vsstatus &= ~MstatusBit::Spp;
+    hs_state.vsepc = 0xB000;
+    simrv::core::TrapController::sret(hs_state);
+    TEST_ASSERT(hs_state.virt);
+    TEST_ASSERT(hs_state.priv == PrivilegeLevel::User);
+    TEST_ASSERT(hs_state.pc == 0xB000);
+}
+
+void test_sha_guest_exception_routing() {
+    const auto h_bit = simrv::isa::misa_extension_bit(simrv::isa::IsaExtension::H);
+    {
+        simrv::core::CPU cpu;
+        auto& state = cpu.state();
+        state.misa |= h_bit;
+        state.virt = true;
+        state.priv = simrv::xlen::PrivilegeLevel::Supervisor;
+        state.pc = 0x4000;
+        state.medeleg = simrv::xlen::CsrValue{1} <<
+                        std::to_underlying(simrv::isa::ExceptionCode::Breakpoint);
+        state.hedeleg = state.medeleg;
+        state.vstvec = 0x2000;
+        simrv::core::TrapController::raise_exception(
+            cpu, simrv::isa::to_trap_cause(simrv::isa::ExceptionCode::Breakpoint), 0x1234);
+        TEST_ASSERT(state.virt);
+        TEST_ASSERT(state.vscause == simrv::isa::ExceptionCode::Breakpoint);
+        TEST_ASSERT(state.vsepc == 0x4000);
+        TEST_ASSERT(state.vstval == 0x1234);
+        TEST_ASSERT(state.pc == 0x2000);
+    }
+    {
+        simrv::core::CPU cpu;
+        auto& state = cpu.state();
+        state.misa |= h_bit;
+        state.virt = true;
+        state.priv = simrv::xlen::PrivilegeLevel::Supervisor;
+        state.pc = 0x5000;
+        state.stvec = 0x3000;
+        simrv::core::TrapController::raise_exception(
+            cpu, simrv::isa::to_trap_cause(simrv::isa::ExceptionCode::VirtualInstruction),
+            0xDEADBEEF);
+        TEST_ASSERT(!state.virt);
+        TEST_ASSERT(state.priv == simrv::xlen::PrivilegeLevel::Supervisor);
+        TEST_ASSERT(state.scause == simrv::isa::ExceptionCode::VirtualInstruction);
+        TEST_ASSERT(state.sepc == 0x5000);
+        TEST_ASSERT((state.hstatus & (simrv::xlen::CsrValue{1} << 7U)) != 0);
+        TEST_ASSERT((state.hstatus & (simrv::xlen::CsrValue{1} << 8U)) != 0);
+        TEST_ASSERT(state.pc == 0x3000);
+    }
 }
 
 void test_zicntr_base_counter_values_and_access() {
@@ -1750,6 +1844,12 @@ int main() {
     std::cout << "[RUN] test_sha_state_enable_csrs" << std::endl;
     test_sha_state_enable_csrs();
     std::cout << "[PASS] test_sha_state_enable_csrs" << std::endl;
+    std::cout << "[RUN] test_sha_guest_return_transitions" << std::endl;
+    test_sha_guest_return_transitions();
+    std::cout << "[PASS] test_sha_guest_return_transitions" << std::endl;
+    std::cout << "[RUN] test_sha_guest_exception_routing" << std::endl;
+    test_sha_guest_exception_routing();
+    std::cout << "[PASS] test_sha_guest_exception_routing" << std::endl;
     std::cout << "[RUN] test_zicntr_base_counter_values_and_access" << std::endl;
     test_zicntr_base_counter_values_and_access();
     std::cout << "[PASS] test_zicntr_base_counter_values_and_access" << std::endl;

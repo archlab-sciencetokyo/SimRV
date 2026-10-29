@@ -28,6 +28,8 @@ enum class MstatusBit : simrv::xlen::CsrValue {
     Tvm = (1u << 20),
     Tw = (1u << 21),
     Tsr = (1u << 22),
+    Gva = static_cast<simrv::xlen::CsrValue>(uint64_t{1} << 38U),
+    Mpv = static_cast<simrv::xlen::CsrValue>(uint64_t{1} << 39U),
 };
 
 constexpr auto operator|(MstatusBit lhs, MstatusBit rhs) noexcept -> simrv::xlen::CsrValue {
@@ -218,12 +220,14 @@ constexpr simrv::xlen::CsrValue kMstatusMask =
     (MstatusBit::Sie | MstatusBit::Mie | MstatusBit::Spie | MstatusBit::Mpie | MstatusBit::Spp |
      MstatusBit::Mpp | MstatusBit::Fs | MstatusBit::Vs | MstatusBit::Mprv | MstatusBit::Sum |
      MstatusBit::Mxr | MstatusBit::Tvm | MstatusBit::Tw | MstatusBit::Tsr |
+     MstatusBit::Mpv |
      (simrv::xlen::kIsXLen64 ? (static_cast<simrv::xlen::CsrValue>(0xF) << 32) : 0));
 constexpr simrv::xlen::CsrValue kSstatusMask =
     (MstatusBit::Sie | MstatusBit::Spie | MstatusBit::Spp | MstatusBit::Fs | MstatusBit::Vs |
      MstatusBit::Xs | MstatusBit::Sum | MstatusBit::Mxr |
      (simrv::xlen::kIsXLen64 ? (static_cast<simrv::xlen::CsrValue>(0x3) << 32) : 0));
 constexpr simrv::xlen::CsrValue kMstatusFsDirty = std::to_underlying(MstatusBit::Fs);
+constexpr simrv::xlen::CsrValue kMstatusGva = std::to_underlying(MstatusBit::Gva);
 constexpr simrv::xlen::CsrValue kMstatusSd =
     static_cast<simrv::xlen::CsrValue>(simrv::xlen::Word{1} << (simrv::xlen::kXLenBits - 1u));
 /** sstatus fields implemented without the obsolete N-extension UIE/UPIE aliases. */
@@ -261,7 +265,8 @@ constexpr auto mstatus_with_sd(simrv::xlen::CsrValue mstatus) -> simrv::xlen::Cs
  * zero when neither the corresponding extension nor S-mode supplies that state.
  * SimRV chooses the permitted read-only-zero behavior for absent F and V state.
  */
-constexpr auto mstatus_writable_mask(bool has_s, bool has_u, bool has_f, bool has_v)
+constexpr auto mstatus_writable_mask(bool has_s, bool has_u, bool has_f, bool has_v,
+                                     bool has_h = false)
     -> simrv::xlen::CsrValue {
     simrv::xlen::CsrValue mask = kMstatusMask;
     if (!has_s) {
@@ -280,6 +285,7 @@ constexpr auto mstatus_writable_mask(bool has_s, bool has_u, bool has_f, bool ha
     if (!has_s && !has_u) mask &= ~MstatusBit::Tw;
     if (!has_f) mask &= ~MstatusBit::Fs;
     if (!has_v) mask &= ~MstatusBit::Vs;
+    if (!has_h) mask &= ~MstatusBit::Mpv;
     return mask;
 }
 

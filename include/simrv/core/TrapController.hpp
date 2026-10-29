@@ -78,7 +78,9 @@ class TrapController {
                                                    simrv::xlen::CsrValue misa,
                                                    simrv::xlen::CsrValue mstatus,
                                                    simrv::xlen::Instruction funct12,
-                                                   simrv::xlen::Word funct7) -> bool;
+                                                   simrv::xlen::Word funct7,
+                                                   simrv::xlen::CsrValue hstatus = 0,
+                                                   bool virtualization_mode = false) -> bool;
 
     /**
      * @brief Validates if the current privilege level has access to a specific CSR.
