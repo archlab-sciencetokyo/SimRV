@@ -28,7 +28,7 @@ def run_test(simrv: Path, elf: Path, timeout: float) -> dict[str, object]:
     started = time.monotonic()
     try:
         result = subprocess.run(
-            [str(simrv), "--cli", "--baremetal", "--no-sbi", "-m", str(elf)],
+            [str(simrv), "--cli", "--baremetal", "--no-sbi", "--vlen", "128", "-m", str(elf)],
             capture_output=True,
             text=True,
             encoding="utf-8",

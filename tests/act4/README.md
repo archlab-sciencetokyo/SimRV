@@ -24,6 +24,8 @@ python3 scripts/run_act4_tests.py \
   --jobs 12
 ```
 
-The generated suite and report belong under `build/` and are not committed.
+The generated Sail configuration fixes VLEN at 128 bits; the runner passes the
+same `--vlen 128` setting to SimRV. The generated suite and report belong under
+`build/` and are not committed.
 This test run is useful implementation evidence; it is not RISC-V
 certification.

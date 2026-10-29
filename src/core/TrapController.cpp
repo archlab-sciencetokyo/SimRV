@@ -45,7 +45,7 @@ auto trap_delegated_to_supervisor(const ArchState& state, simrv::xlen::TrapCause
     }
     if (state.virt && isa::misa_has_extension(state.misa, isa::IsaExtension::H) &&
         !trap_is_interrupt(cause) &&
-        (cause_code == 9U || (cause_code >= 20U && cause_code <= 23U))) {
+        (cause_code == 10U || (cause_code >= 20U && cause_code <= 23U))) {
         // VS ecall, guest-page-fault, and virtual-instruction traps are routed to HS-mode.
         return true;
     }
@@ -60,7 +60,7 @@ auto trap_delegated_to_virtual_supervisor(const ArchState& state,
     if (!state.virt || !isa::misa_has_extension(state.misa, isa::IsaExtension::H)) return false;
     const auto cause_code = static_cast<simrv::xlen::CsrValue>(trap_exception_code(cause));
     if (!trap_is_interrupt(cause) &&
-        (cause_code == 9U || (cause_code >= 20U && cause_code <= 23U))) {
+        (cause_code == 10U || (cause_code >= 20U && cause_code <= 23U))) {
         return false;
     }
     const simrv::xlen::CsrValue delegation =
@@ -222,13 +222,7 @@ void TrapController::mret(ArchState& state) {
 void TrapController::sret(ArchState& state) {
     const bool return_to_guest = !state.virt && (state.hstatus & (simrv::xlen::CsrValue{1} << 7U));
     simrv::xlen::CsrValue status = state.virt ? state.vsstatus : state.mstatus;
-    const simrv::xlen::PrivilegeLevel target_priv =
-        state.virt ? mstatus_spp(status)
-                   : (return_to_guest
-                          ? ((state.hstatus & (simrv::xlen::CsrValue{1} << 8U))
-                                 ? kPrivSupervisor
-                                 : kPrivUser)
-                          : mstatus_spp(status));
+    const simrv::xlen::PrivilegeLevel target_priv = mstatus_spp(status);
 
     restore_trap_interrupt_state(status, MstatusBit::Sie, MstatusBit::Spie);
     status = mstatus_with_spp(status, mstatus_spp_after_sret());
@@ -256,6 +250,10 @@ void TrapController::raise_exception(CPU& cpu, simrv::xlen::TrapCause cause,
     ArchState& state = cpu.state();
     const simrv::xlen::Address trap_pc = state.pc;
     const simrv::xlen::PrivilegeLevel source_mode = state.priv;
+    const simrv::xlen::CsrValue reported_tval =
+        !trap_is_interrupt(cause) && to_exception_code(cause) == isa::ExceptionCode::Breakpoint
+            ? trap_pc
+            : tval;
 
     if (cpu.machine_ != nullptr &&
         simrv::compiler::unlikely(cpu.machine_->trace().is_trap_log_enabled() ||
@@ -306,12 +304,12 @@ void TrapController::raise_exception(CPU& cpu, simrv::xlen::TrapCause cause,
                                   : cause_code;
         state.vscause = (cause & kInterruptCauseBit) | vs_cause;
         state.vsepc = trap_pc;
-        state.vstval = tval;
+        state.vstval = reported_tval;
         state.vsstatus = mstatus_with_spp(state.vsstatus, state.priv);
     } else if (delegated) {
         state.scause = cause;
         state.sepc = trap_pc;
-        state.stval = tval;
+        state.stval = reported_tval;
         state.mstatus = mstatus_with_spp(state.mstatus, state.priv);
         if (delegated_to_hs) {
             constexpr simrv::xlen::CsrValue kSpv = simrv::xlen::CsrValue{1} << 7U;
@@ -341,7 +339,7 @@ void TrapController::raise_exception(CPU& cpu, simrv::xlen::TrapCause cause,
     } else {
         state.mcause = cause;
         state.mepc = trap_pc;
-        state.mtval = tval;
+        state.mtval = reported_tval;
         if (isa::misa_has_extension(state.misa, isa::IsaExtension::H)) {
             const auto exception = trap_exception_code(cause);
             const bool guest_page_fault = !trap_is_interrupt(cause) &&

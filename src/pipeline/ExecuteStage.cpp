@@ -174,7 +174,7 @@ void CPU::execute_system(Machine& machine) {
     if (ctx.funct3 == Funct3::Priv) {
         switch (static_cast<Funct12Priv>(ctx.funct12)) {
             case Funct12Priv::Ecall:
-                ctx.pending_exception = ecall_for_privilege(state_.priv);
+                ctx.pending_exception = ecall_for_privilege(state_.priv, state_.virt);
                 ctx.wb_data_csr = std::to_underlying(*ctx.pending_exception);
                 break;
             case Funct12Priv::Ebreak: {

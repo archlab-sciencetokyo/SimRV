@@ -142,13 +142,15 @@ constexpr simrv::xlen::PrivilegeLevel kPrivUser = simrv::xlen::PrivilegeLevel::U
 constexpr simrv::xlen::PrivilegeLevel kPrivSupervisor = simrv::xlen::PrivilegeLevel::Supervisor;
 constexpr simrv::xlen::PrivilegeLevel kPrivMachine = simrv::xlen::PrivilegeLevel::Machine;
 
-[[nodiscard]] constexpr auto ecall_for_privilege(simrv::xlen::PrivilegeLevel priv) noexcept
+[[nodiscard]] constexpr auto ecall_for_privilege(simrv::xlen::PrivilegeLevel priv,
+                                                bool virtualization_mode = false) noexcept
     -> ExceptionCode {
     switch (priv) {
         case simrv::xlen::PrivilegeLevel::User:
             return ExceptionCode::UserEcall;
         case simrv::xlen::PrivilegeLevel::Supervisor:
-            return ExceptionCode::SupervisorEcall;
+            return virtualization_mode ? ExceptionCode::HypervisorEcall
+                                       : ExceptionCode::SupervisorEcall;
         case simrv::xlen::PrivilegeLevel::Machine:
         default:
             return ExceptionCode::MachineEcall;

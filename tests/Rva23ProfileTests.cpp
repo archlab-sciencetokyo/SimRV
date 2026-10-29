@@ -797,7 +797,8 @@ void test_sstvecd_and_sstvala_supervisor_traps() {
 
     constexpr simrv::xlen::CsrValue kTrapValue = 0x12345678;
     constexpr std::array causes = {
-        simrv::isa::ExceptionCode::MisalignedFetch,    simrv::isa::ExceptionCode::FaultFetch,
+        simrv::isa::ExceptionCode::Breakpoint,        simrv::isa::ExceptionCode::MisalignedFetch,
+        simrv::isa::ExceptionCode::FaultFetch,
         simrv::isa::ExceptionCode::MisalignedLoad,     simrv::isa::ExceptionCode::FaultLoad,
         simrv::isa::ExceptionCode::MisalignedStore,    simrv::isa::ExceptionCode::FaultStore,
         simrv::isa::ExceptionCode::IllegalInstruction, simrv::isa::ExceptionCode::FetchPageFault,
@@ -817,7 +818,10 @@ void test_sstvecd_and_sstvala_supervisor_traps() {
         cpu.raise_exception(cause, kTrapValue);
         TEST_ASSERT(cpu.state().priv == simrv::xlen::PrivilegeLevel::Supervisor);
         TEST_ASSERT(cpu.state().pc == kVectorBase);
-        TEST_ASSERT(cpu.state().stval == kTrapValue);
+        const auto expected_tval = cause == simrv::isa::ExceptionCode::Breakpoint
+                                       ? simrv::xlen::CsrValue{0x2000}
+                                       : kTrapValue;
+        TEST_ASSERT(cpu.state().stval == expected_tval);
     }
 }
 
@@ -1554,6 +1558,7 @@ void test_sha_guest_return_transitions() {
     hs_state.priv = PrivilegeLevel::Supervisor;
     hs_state.hstatus = (simrv::xlen::CsrValue{1} << 7U) |
                        (simrv::xlen::CsrValue{1} << 8U);
+    hs_state.mstatus = simrv::core::mstatus_with_spp(hs_state.mstatus, PrivilegeLevel::Supervisor);
     hs_state.sepc = 0x9000;
     hs_state.vsepc = 0xA000;
     simrv::core::TrapController::sret(hs_state);
@@ -1562,7 +1567,9 @@ void test_sha_guest_return_transitions() {
     TEST_ASSERT(hs_state.pc == 0x9000);
     TEST_ASSERT((hs_state.hstatus & (simrv::xlen::CsrValue{1} << 7U)) == 0);
 
-    hs_state.vsstatus &= ~MstatusBit::Spp;
+    // HS SRET uses HS sstatus.SPP for the return privilege. SPVP records the guest
+    // privilege for HLV/HSV and must not override the SRET destination.
+    hs_state.mstatus = simrv::core::mstatus_with_spp(hs_state.mstatus, PrivilegeLevel::User);
     hs_state.vsepc = 0xB000;
     simrv::core::TrapController::sret(hs_state);
     TEST_ASSERT(hs_state.virt);
@@ -1588,7 +1595,7 @@ void test_sha_guest_exception_routing() {
         TEST_ASSERT(state.virt);
         TEST_ASSERT(state.vscause == simrv::isa::ExceptionCode::Breakpoint);
         TEST_ASSERT(state.vsepc == 0x4000);
-        TEST_ASSERT(state.vstval == 0x1234);
+        TEST_ASSERT(state.vstval == 0x4000);
         TEST_ASSERT(state.pc == 0x2000);
     }
     {
@@ -1821,6 +1828,20 @@ void test_zcb_decompression() {
         }
         TEST_ASSERT(decoded_operation == encoding.operation);
         const simrv::pipeline::Decoder decoded(expanded);
+        if (encoding.match == 0x8000U || encoding.match == 0x8440U ||
+            encoding.match == 0x8400U) {
+            TEST_ASSERT(decoded.rd() == simrv::xlen::RegId::A0);
+            TEST_ASSERT(decoded.rs1() == simrv::xlen::RegId::S1);
+        } else if (encoding.match == 0x8800U || encoding.match == 0x8c00U) {
+            TEST_ASSERT(decoded.rs1() == simrv::xlen::RegId::S1);
+            TEST_ASSERT(decoded.rs2() == simrv::xlen::RegId::A0);
+        } else {
+            TEST_ASSERT(decoded.rd() == simrv::xlen::RegId::S1);
+            TEST_ASSERT(decoded.rs1() == simrv::xlen::RegId::S1);
+        }
+        if (encoding.match == 0x9c41U) {
+            TEST_ASSERT(decoded.rs2() == simrv::xlen::RegId::A0);
+        }
         if (encoding.match == 0x8000U) {
             TEST_ASSERT(decoded.imm_i() == 3);
         }

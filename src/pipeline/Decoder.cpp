@@ -2137,23 +2137,23 @@ auto decompressInstruction(simrv::xlen::Instruction ir, bool is_rv64) -> simrv::
         return make_s_type(0x23U, 0x1U, rs1_prime, rs2_prime, imm);
     }
     if ((ir & 0xfc63U) == 0x9c41U) {  // C.MUL
-        return make_r_type(0x33U, 0x0U, 0x01U, rd_prime, rd_prime, rs2_prime);
+        return make_r_type(0x33U, 0x0U, 0x01U, rs1_prime, rs1_prime, rd_prime);
     }
     if ((ir & 0xfc7fU) == 0x9c75U) {  // C.NOT
-        return make_i_type(0x13U, 0x4U, rd_prime, rd_prime, 0xfffU);
+        return make_i_type(0x13U, 0x4U, rs1_prime, rs1_prime, 0xfffU);
     }
     if ((ir & 0xfc7fU) == 0x9c65U || (ir & 0xfc7fU) == 0x9c6dU) {  // C.SEXT.B / C.SEXT.H
         const uint32_t imm = ((ir & 0x7fU) == 0x65U) ? 0x604U : 0x605U;
-        return make_i_type(0x13U, 0x1U, rd_prime, rd_prime, imm);
+        return make_i_type(0x13U, 0x1U, rs1_prime, rs1_prime, imm);
     }
     if ((ir & 0xfc7fU) == 0x9c61U) {  // C.ZEXT.B
-        return make_i_type(0x13U, 0x7U, rd_prime, rd_prime, 0xffU);
+        return make_i_type(0x13U, 0x7U, rs1_prime, rs1_prime, 0xffU);
     }
     if ((ir & 0xfc7fU) == 0x9c69U) {  // C.ZEXT.H (PACK rd, rs1, x0)
-        return make_r_type(0x33U, 0x4U, 0x04U, rd_prime, rd_prime, 0U);
+        return make_r_type(0x33U, 0x4U, 0x04U, rs1_prime, rs1_prime, 0U);
     }
     if ((ir & 0xfc7fU) == 0x9c71U && is_rv64) {  // C.ZEXT.W (ADD.UW rd, rs1, x0)
-        return make_r_type(0x3bU, 0x0U, 0x04U, rd_prime, rd_prime, 0U);
+        return make_r_type(0x3bU, 0x0U, 0x04U, rs1_prime, rs1_prime, 0U);
     }
 
     const uint32_t op = dec.c_op();
