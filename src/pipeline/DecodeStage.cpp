@@ -88,6 +88,8 @@ void CPU::fetch_operands(Machine& /*machine*/) {
                   (state_.hstatus & (simrv::xlen::CsrValue{1} << 22U)) != 0) ||
                  (funct12 == Funct12Priv::Wfi &&
                   (state_.hstatus & (simrv::xlen::CsrValue{1} << 21U)) != 0) ||
+                 ctx.funct7 == simrv::isa::Funct7Priv::HfenceVvma ||
+                 ctx.funct7 == simrv::isa::Funct7Priv::HfenceGvma ||
                  ((ctx.funct7 == simrv::isa::Funct7Priv::SfenceVma ||
                    ctx.funct7 == simrv::isa::Funct7Priv::SinvalVma ||
                    funct12 == Funct12Priv::SfenceWInval ||

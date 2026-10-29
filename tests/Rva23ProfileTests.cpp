@@ -1331,6 +1331,31 @@ void test_sha_hideleg_warl_mask() {
     TEST_ASSERT(vsip.has_value() && *vsip == (simrv::xlen::CsrValue{1} << 1U));
 }
 
+void test_sha_hfence_instructions() {
+    constexpr uint32_t kHfenceVvma = (0x11U << 25U) | 0x73U;
+    constexpr uint32_t kHfenceGvma = (0x31U << 25U) | 0x73U;
+    TEST_ASSERT(simrv::pipeline::decoder(kHfenceVvma) == simrv::isa::OperationId::HFENCE_VVMA);
+    TEST_ASSERT(simrv::pipeline::decoder(kHfenceGvma) == simrv::isa::OperationId::HFENCE_GVMA);
+
+    const auto h_bit = simrv::isa::misa_extension_bit(simrv::isa::IsaExtension::H);
+    const auto vvma = static_cast<simrv::xlen::Instruction>(
+        simrv::isa::Funct7Priv::HfenceVvma);
+    const auto gvma = static_cast<simrv::xlen::Instruction>(
+        simrv::isa::Funct7Priv::HfenceGvma);
+    TEST_ASSERT(simrv::core::TrapController::can_execute_privileged_instruction(
+        simrv::xlen::PrivilegeLevel::Supervisor, h_bit, 0,
+        static_cast<simrv::xlen::Instruction>(simrv::isa::Funct12Priv::Ecall), vvma, 0, false));
+    TEST_ASSERT(simrv::core::TrapController::can_execute_privileged_instruction(
+        simrv::xlen::PrivilegeLevel::Supervisor, h_bit, 0,
+        static_cast<simrv::xlen::Instruction>(simrv::isa::Funct12Priv::Ecall), gvma, 0, false));
+    TEST_ASSERT(!simrv::core::TrapController::can_execute_privileged_instruction(
+        simrv::xlen::PrivilegeLevel::Supervisor, h_bit, 0,
+        static_cast<simrv::xlen::Instruction>(simrv::isa::Funct12Priv::Ecall), vvma, 0, true));
+    TEST_ASSERT(!simrv::core::TrapController::can_execute_privileged_instruction(
+        simrv::xlen::PrivilegeLevel::Supervisor, 0, 0,
+        static_cast<simrv::xlen::Instruction>(simrv::isa::Funct12Priv::Ecall), gvma, 0, false));
+}
+
 void test_sha_guest_return_transitions() {
     using simrv::core::MstatusBit;
     using simrv::xlen::PrivilegeLevel;
@@ -1978,6 +2003,9 @@ int main() {
     std::cout << "[RUN] test_sha_hideleg_warl_mask" << std::endl;
     test_sha_hideleg_warl_mask();
     std::cout << "[PASS] test_sha_hideleg_warl_mask" << std::endl;
+    std::cout << "[RUN] test_sha_hfence_instructions" << std::endl;
+    test_sha_hfence_instructions();
+    std::cout << "[PASS] test_sha_hfence_instructions" << std::endl;
     std::cout << "[RUN] test_sha_guest_return_transitions" << std::endl;
     test_sha_guest_return_transitions();
     std::cout << "[PASS] test_sha_guest_return_transitions" << std::endl;

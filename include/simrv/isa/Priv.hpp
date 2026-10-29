@@ -35,6 +35,8 @@ enum class Funct7Priv : uint8_t {
     SfenceVma = 0x09,  ///< Supervisor Memory-Management Fence (SFENCE.VMA, invalidates page table
                        ///< TLB entries)
     SinvalVma = 0x0B,  ///< Svinval SINVAL.VMA
+    HfenceVvma = 0x11,  ///< Hypervisor VS-stage address-translation fence
+    HfenceGvma = 0x31,  ///< Hypervisor G-stage address-translation fence
 };
 
 template <std::integral I>

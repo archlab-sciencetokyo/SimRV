@@ -78,6 +78,8 @@ const std::array<std::string_view, static_cast<size_t>(isa::OperationIdCount)> O
     "MRET",
     "WFI",
     "SFENCE_VMA",
+    "HFENCE_VVMA",
+    "HFENCE_GVMA",
     "MUL",
     "MULH",
     "MULHSU",
@@ -876,6 +878,10 @@ auto decode_system_priv(uint32_t funct7, simrv::xlen::Instruction ir) -> Operati
             // SFENCE.VMA uses rs1/rs2 operands but reserves rd=x0.
             if (funct7 == 0x09 && rd_is_zero) return OperationId::SFENCE_VMA;
             if (funct7 == 0x0B && rd_is_zero) return OperationId::SINVAL_VMA;
+            if (funct7 == 0x11 && rd_is_zero && ((ir >> 12U) & 0x7U) == 0)
+                return OperationId::HFENCE_VVMA;
+            if (funct7 == 0x31 && rd_is_zero && ((ir >> 12U) & 0x7U) == 0)
+                return OperationId::HFENCE_GVMA;
             break;
     }
     return OperationId::ILLEGAL;

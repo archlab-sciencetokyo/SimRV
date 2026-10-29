@@ -402,6 +402,11 @@ auto TrapController::can_execute_privileged_instruction(simrv::xlen::PrivilegeLe
                !(current_priv == kPrivSupervisor && !virtualization_mode &&
                  (mstatus & MstatusBit::Tw) != 0);
     }
+    if (funct7 == isa::Funct7Priv::HfenceVvma || funct7 == isa::Funct7Priv::HfenceGvma) {
+        return misa_has_extension(misa, isa::IsaExtension::H) &&
+               (current_priv == kPrivMachine ||
+                (current_priv == kPrivSupervisor && !virtualization_mode));
+    }
     if (funct7 == isa::Funct7Priv::SfenceVma || funct7 == isa::Funct7Priv::SinvalVma ||
         funct12 == isa::Funct12Priv::SfenceWInval || funct12 == isa::Funct12Priv::SfenceInvalIr) {
         return misa_has_extension(misa, isa::IsaExtension::S) && current_priv >= kPrivSupervisor &&

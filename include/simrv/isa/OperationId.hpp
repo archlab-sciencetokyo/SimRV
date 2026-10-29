@@ -76,6 +76,8 @@ enum OperationId : uint16_t {
     MRET,
     WFI,
     SFENCE_VMA,
+    HFENCE_VVMA,
+    HFENCE_GVMA,
     /* RV32M */
     MUL,
     MULH,
@@ -686,7 +688,7 @@ constexpr OperationId kOpRangeRv32iEnd = CSRRCI;
 /// @brief Start of privileged instruction IDs
 constexpr OperationId kOpRangePrivBegin = URET;
 /// @brief End of privileged instruction IDs
-constexpr OperationId kOpRangePrivEnd = SFENCE_VMA;
+constexpr OperationId kOpRangePrivEnd = HFENCE_GVMA;
 
 /// @brief Start of RV32M/RV64M multiply-divide instruction IDs
 constexpr OperationId kOpRangeRv32mBegin = MUL;

@@ -296,6 +296,8 @@ void CPU::execute_system(Machine& machine) {
             default:
                 if (ctx.funct7 == static_cast<simrv::xlen::Instruction>(Funct7Priv::SfenceVma) ||
                     ctx.funct7 == static_cast<simrv::xlen::Instruction>(Funct7Priv::SinvalVma) ||
+                    ctx.funct7 == static_cast<simrv::xlen::Instruction>(Funct7Priv::HfenceVvma) ||
+                    ctx.funct7 == static_cast<simrv::xlen::Instruction>(Funct7Priv::HfenceGvma) ||
                     static_cast<Funct12Priv>(ctx.funct12) == Funct12Priv::SfenceWInval ||
                     static_cast<Funct12Priv>(ctx.funct12) == Funct12Priv::SfenceInvalIr) {
                     ctx.tkn = false;
