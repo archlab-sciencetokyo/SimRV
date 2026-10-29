@@ -87,8 +87,15 @@ void CPU::fetch_operands(Machine& /*machine*/) {
     } else {
         const bool is_write =
             ((static_cast<uint8_t>(funct3) & 0x3u) == 0x1u) || (std::to_underlying(ctx.rs1) != 0);
-        if (!TrapController::can_access_csr(state_.priv, state_.misa, w_csr_addr, is_write)) {
-            raise_decode_exception(ctx, ExceptionCode::IllegalInstruction);
+        if (!TrapController::can_access_csr(state_.priv, state_.misa, w_csr_addr, is_write,
+                                            state_.virt)) {
+            const auto csr_address = w_csr_addr.value();
+            const bool virtualization_fault = state_.virt &&
+                                              (csr_address == 0x600U ||
+                                               (csr_address >= 0x600U && csr_address <= 0x6FFU) ||
+                                               (csr_address >= 0x200U && csr_address <= 0x2FFU));
+            raise_decode_exception(ctx, virtualization_fault ? ExceptionCode::VirtualInstruction
+                                                              : ExceptionCode::IllegalInstruction);
             return;
         }
         if (w_csr_addr == csr_addr(Csr::Satp) && state_.priv == kPrivSupervisor &&

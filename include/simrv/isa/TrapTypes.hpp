@@ -46,6 +46,7 @@ enum class ExceptionCode : uint8_t {
     StorePageFault = 0xf,
     GuestInstructionPageFault = 0x14,
     GuestLoadPageFault = 0x15,
+    VirtualInstruction = 0x16,
     GuestStorePageFault = 0x17,
     SoftwareCheck = 0x12,  ///< Software check / pointer checking (cause 18, Privileged ISA 1.13)
     HardwareError = 0x13,  ///< Hardware error (cause 19, Privileged ISA 1.13)
@@ -165,6 +166,7 @@ constexpr simrv::xlen::PrivilegeLevel kPrivMachine = simrv::xlen::PrivilegeLevel
         case ExceptionCode::GuestInstructionPageFault:
             return 2;
         case ExceptionCode::IllegalInstruction:
+        case ExceptionCode::VirtualInstruction:
             return 3;
         case ExceptionCode::Breakpoint:
         case ExceptionCode::UserEcall:

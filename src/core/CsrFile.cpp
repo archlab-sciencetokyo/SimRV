@@ -227,11 +227,79 @@ auto CsrFile::read(simrv::xlen::CsrNumber addr) const
                 return static_cast<simrv::xlen::CsrValue>(cpu_.state().regs.vlen_bytes());
             });
 
+        case csr_addr(Csr::Hstatus):
+            rcsr = cpu_.state().hstatus & ((simrv::xlen::CsrValue{1} << 7U) |
+                                          (simrv::xlen::CsrValue{1} << 8U) |
+                                          (simrv::xlen::CsrValue{1} << 6U));
+            break;
+        case csr_addr(Csr::Hedeleg):
+            rcsr = cpu_.state().hedeleg & kMedelegWritableMask;
+            break;
+        case csr_addr(Csr::Hideleg):
+            rcsr = cpu_.state().hideleg & ((simrv::xlen::CsrValue{1} << 2U) |
+                                           (simrv::xlen::CsrValue{1} << 6U) |
+                                           (simrv::xlen::CsrValue{1} << 10U));
+            break;
+        case csr_addr(Csr::Hie):
+            rcsr = cpu_.state().hie & cpu_.state().hideleg;
+            break;
+        case csr_addr(Csr::Hip):
+            rcsr = cpu_.state().hip & cpu_.state().hideleg;
+            break;
+        case csr_addr(Csr::Hvip):
+            rcsr = cpu_.state().hvip & ((simrv::xlen::CsrValue{1} << 2U) |
+                                        (simrv::xlen::CsrValue{1} << 6U) |
+                                        (simrv::xlen::CsrValue{1} << 10U));
+            break;
+        case csr_addr(Csr::Henvcfg):
+            rcsr = cpu_.state().henvcfg;
+            break;
+        case csr_addr(Csr::Htval):
+            rcsr = cpu_.state().htval;
+            break;
+        case csr_addr(Csr::Htinst):
+            rcsr = cpu_.state().htinst;
+            break;
+        case csr_addr(Csr::Hgatp):
+            rcsr = cpu_.state().hgatp;
+            break;
+
+        case csr_addr(Csr::Vsstatus):
+            rcsr = mstatus_read_value(cpu_.state().vsstatus, kMstatusSstatusReadMask,
+                                      cpu_.state().regs.xlen);
+            break;
+        case csr_addr(Csr::Vsie):
+            rcsr = cpu_.state().vsie & cpu_.state().hideleg;
+            break;
+        case csr_addr(Csr::Vstvec):
+            rcsr = cpu_.state().vstvec;
+            break;
+        case csr_addr(Csr::Vsscratch):
+            rcsr = cpu_.state().vsscratch;
+            break;
+        case csr_addr(Csr::Vsepc):
+            rcsr = isa::epc_read_value(cpu_.state().vsepc, cpu_.state().misa);
+            break;
+        case csr_addr(Csr::Vscause):
+            rcsr = cause_read_value(cpu_.state().vscause, cpu_.state().regs.xlen);
+            break;
+        case csr_addr(Csr::Vstval):
+            rcsr = cpu_.state().vstval;
+            break;
+        case csr_addr(Csr::Vsip):
+            rcsr = cpu_.state().vsip & cpu_.state().hideleg;
+            break;
+        case csr_addr(Csr::Vsatp):
+            rcsr = cpu_.state().vsatp;
+            break;
+
         case csr_addr(Csr::Sie):
-            rcsr = cpu_.state().mie & cpu_.state().mideleg & interrupt_implemented_mask(true);
+            rcsr = cpu_.state().virt
+                       ? (cpu_.state().vsie & cpu_.state().hideleg)
+                       : (cpu_.state().mie & cpu_.state().mideleg & interrupt_implemented_mask(true));
             break;
         case csr_addr(Csr::Stvec):
-            rcsr = cpu_.state().stvec;
+            rcsr = cpu_.state().virt ? cpu_.state().vstvec : cpu_.state().stvec;
             break;
         case csr_addr(Csr::Scounteren):
             rcsr = cpu_.state().scounteren;
@@ -256,22 +324,26 @@ auto CsrFile::read(simrv::xlen::CsrNumber addr) const
             break;
         }
         case csr_addr(Csr::Sscratch):
-            rcsr = cpu_.state().sscratch;
+            rcsr = cpu_.state().virt ? cpu_.state().vsscratch : cpu_.state().sscratch;
             break;
         case csr_addr(Csr::Sepc):
-            rcsr = isa::epc_read_value(cpu_.state().sepc, cpu_.state().misa);
+            rcsr = isa::epc_read_value(cpu_.state().virt ? cpu_.state().vsepc : cpu_.state().sepc,
+                                       cpu_.state().misa);
             break;
         case csr_addr(Csr::Scause):
-            rcsr = cause_read_value(cpu_.state().scause, cpu_.state().regs.xlen);
+            rcsr = cause_read_value(cpu_.state().virt ? cpu_.state().vscause : cpu_.state().scause,
+                                    cpu_.state().regs.xlen);
             break;
         case csr_addr(Csr::Stval):
-            rcsr = cpu_.state().stval;
+            rcsr = cpu_.state().virt ? cpu_.state().vstval : cpu_.state().stval;
             break;
         case csr_addr(Csr::Sip):
-            rcsr = cpu_.state().mip & cpu_.state().mideleg & interrupt_implemented_mask(true);
+            rcsr = cpu_.state().virt
+                       ? (cpu_.state().vsip & cpu_.state().hideleg)
+                       : (cpu_.state().mip & cpu_.state().mideleg & interrupt_implemented_mask(true));
             break;
         case csr_addr(Csr::Satp):
-            rcsr = cpu_.state().satp;
+            rcsr = cpu_.state().virt ? cpu_.state().vsatp : cpu_.state().satp;
             break;
         case csr_addr(Csr::Senvcfg):
             rcsr = cpu_.state().senvcfg;
@@ -385,7 +457,10 @@ auto CsrFile::read(simrv::xlen::CsrNumber addr) const
             });
 
         case csr_addr(Csr::Sstatus):
-            rcsr = getMstatus(kMstatusSstatusReadMask);
+            rcsr = cpu_.state().virt
+                       ? mstatus_read_value(cpu_.state().vsstatus, kMstatusSstatusReadMask,
+                                            cpu_.state().regs.xlen)
+                       : getMstatus(kMstatusSstatusReadMask);
             break;
         case csr_addr(Csr::Mstatus):
             rcsr = getMstatus(kMstatusReadMask);
@@ -693,23 +768,123 @@ auto CsrFile::write(simrv::xlen::CsrNumber addr, simrv::xlen::CsrValue wdata)
                 return {};
             });
 
+        case csr_addr(Csr::Hstatus):
+            cpu_.state().hstatus = wdata & ((simrv::xlen::CsrValue{1} << 7U) |
+                                            (simrv::xlen::CsrValue{1} << 8U));
+            break;
+        case csr_addr(Csr::Hedeleg):
+            cpu_.state().hedeleg = wdata & kMedelegWritableMask;
+            break;
+        case csr_addr(Csr::Hideleg):
+            cpu_.state().hideleg = wdata & ((simrv::xlen::CsrValue{1} << 2U) |
+                                            (simrv::xlen::CsrValue{1} << 6U) |
+                                            (simrv::xlen::CsrValue{1} << 10U));
+            break;
+        case csr_addr(Csr::Hie):
+            cpu_.state().hie = wdata & cpu_.state().hideleg;
+            break;
+        case csr_addr(Csr::Hip):
+            cpu_.state().hip = wdata & cpu_.state().hideleg;
+            break;
+        case csr_addr(Csr::Hvip):
+            cpu_.state().hvip = wdata & ((simrv::xlen::CsrValue{1} << 2U) |
+                                         (simrv::xlen::CsrValue{1} << 6U) |
+                                         (simrv::xlen::CsrValue{1} << 10U));
+            break;
+        case csr_addr(Csr::Henvcfg):
+            cpu_.state().henvcfg = wdata;
+            break;
+        case csr_addr(Csr::Htval):
+            cpu_.state().htval = wdata;
+            break;
+        case csr_addr(Csr::Htinst):
+            cpu_.state().htinst = wdata;
+            break;
+        case csr_addr(Csr::Hgatp): {
+            const auto mode = simrv::xlen::satp_mode(wdata, cpu_.state().regs.xlen);
+            const bool supported = mode == 0 || (cpu_.state().regs.xlen == 64 &&
+                                                  (mode == 8 || mode == 9 || mode == 10));
+            const bool root_aligned = mode == 0 || (wdata & 0x3U) == 0;
+            if (supported && root_aligned && cpu_.state().hgatp != wdata) {
+                cpu_.state().hgatp = wdata;
+                cpu_.TLB_flush();
+            }
+            break;
+        }
+
+        case csr_addr(Csr::Vsstatus):
+            cpu_.state().vsstatus =
+                (cpu_.state().vsstatus & ~kSstatusMask) | (wdata & kSstatusMask);
+            break;
+        case csr_addr(Csr::Vsie):
+            cpu_.state().vsie = wdata & cpu_.state().hideleg;
+            break;
+        case csr_addr(Csr::Vstvec):
+            cpu_.state().vstvec = wdata & ~static_cast<simrv::xlen::CsrValue>(2);
+            break;
+        case csr_addr(Csr::Vsscratch):
+            cpu_.state().vsscratch = wdata;
+            break;
+        case csr_addr(Csr::Vsepc):
+            cpu_.state().vsepc = wdata & ~static_cast<simrv::xlen::CsrValue>(1);
+            break;
+        case csr_addr(Csr::Vscause):
+            cpu_.state().vscause = cause_write_value(wdata, cpu_.state().regs.xlen);
+            break;
+        case csr_addr(Csr::Vstval):
+            cpu_.state().vstval = wdata;
+            break;
+        case csr_addr(Csr::Vsip):
+            cpu_.state().vsip = (cpu_.state().vsip & ~cpu_.state().hideleg) |
+                                (wdata & cpu_.state().hideleg);
+            break;
+        case csr_addr(Csr::Vsatp): {
+            const unsigned xlen = cpu_.state().regs.xlen;
+            const simrv::xlen::Word mode = simrv::xlen::satp_mode(wdata, xlen);
+            if (simrv::xlen::satp_mode_supported(mode, xlen) && cpu_.state().vsatp != wdata) {
+                cpu_.state().vsatp = wdata;
+                cpu_.TLB_flush();
+            }
+            break;
+        }
+
         case csr_addr(Csr::Stvec):
-            cpu_.state().stvec = wdata & ~static_cast<simrv::xlen::CsrValue>(2);
+            if (cpu_.state().virt) {
+                cpu_.state().vstvec = wdata & ~static_cast<simrv::xlen::CsrValue>(2);
+            } else {
+                cpu_.state().stvec = wdata & ~static_cast<simrv::xlen::CsrValue>(2);
+            }
             break;
         case csr_addr(Csr::Scounteren):
             cpu_.state().scounteren = wdata & kCounterEnableMask;
             break;
         case csr_addr(Csr::Sscratch):
-            cpu_.state().sscratch = wdata;
+            if (cpu_.state().virt) {
+                cpu_.state().vsscratch = wdata;
+            } else {
+                cpu_.state().sscratch = wdata;
+            }
             break;
         case csr_addr(Csr::Sepc):
-            cpu_.state().sepc = wdata & ~1;
+            if (cpu_.state().virt) {
+                cpu_.state().vsepc = wdata & ~static_cast<simrv::xlen::CsrValue>(1);
+            } else {
+                cpu_.state().sepc = wdata & ~static_cast<simrv::xlen::CsrValue>(1);
+            }
             break;
         case csr_addr(Csr::Scause):
-            cpu_.state().scause = cause_write_value(wdata, cpu_.state().regs.xlen);
+            if (cpu_.state().virt) {
+                cpu_.state().vscause = cause_write_value(wdata, cpu_.state().regs.xlen);
+            } else {
+                cpu_.state().scause = cause_write_value(wdata, cpu_.state().regs.xlen);
+            }
             break;
         case csr_addr(Csr::Stval):
-            cpu_.state().stval = wdata;
+            if (cpu_.state().virt) {
+                cpu_.state().vstval = wdata;
+            } else {
+                cpu_.state().stval = wdata;
+            }
             break;
         case csr_addr(Csr::Senvcfg): {
             if constexpr (simrv::xlen::kIsXLen64) {
@@ -820,10 +995,20 @@ auto CsrFile::write(simrv::xlen::CsrNumber addr, simrv::xlen::CsrValue wdata)
             break;
 
         case csr_addr(Csr::Sie):
-            cpu_.state().mie =
-                (cpu_.state().mie & ~cpu_.state().mideleg) | (wdata & cpu_.state().mideleg);
+            if (cpu_.state().virt) {
+                cpu_.state().vsie =
+                    (cpu_.state().vsie & ~cpu_.state().hideleg) | (wdata & cpu_.state().hideleg);
+            } else {
+                cpu_.state().mie =
+                    (cpu_.state().mie & ~cpu_.state().mideleg) | (wdata & cpu_.state().mideleg);
+            }
             break;
         case csr_addr(Csr::Sip): {
+            if (cpu_.state().virt) {
+                const auto mask = cpu_.state().hideleg;
+                cpu_.state().vsip = (cpu_.state().vsip & ~mask) | (wdata & mask);
+                break;
+            }
             const simrv::xlen::CsrValue pending_before = cpu_.state().mip;
             const simrv::xlen::CsrValue mask =
                 (MipBit::Ssip | MipBit::Lcofip) & cpu_.state().mideleg;
@@ -857,6 +1042,13 @@ auto CsrFile::write(simrv::xlen::CsrNumber addr, simrv::xlen::CsrValue wdata)
             const unsigned xlen = cpu_.state().regs.xlen;
             const simrv::xlen::Word mode = simrv::xlen::satp_mode(wdata, xlen);
             if (simrv::xlen::satp_mode_supported(mode, xlen)) {
+                if (cpu_.state().virt) {
+                    if (cpu_.state().vsatp != wdata) {
+                        cpu_.state().vsatp = wdata;
+                        cpu_.TLB_flush();
+                    }
+                    break;
+                }
                 if (cpu_.state().satp != wdata) {
                     cpu_.state().satp = wdata;
                     cpu_.TLB_flush_satp();
@@ -873,7 +1065,12 @@ auto CsrFile::write(simrv::xlen::CsrNumber addr, simrv::xlen::CsrValue wdata)
             setMstatus(wdata);
             break;
         case csr_addr(Csr::Sstatus):
-            setMstatus((cpu_.state().mstatus & ~kSstatusMask) | (wdata & kSstatusMask));
+            if (cpu_.state().virt) {
+                cpu_.state().vsstatus = (cpu_.state().vsstatus & ~kSstatusMask) |
+                                        (wdata & kSstatusMask);
+            } else {
+                setMstatus((cpu_.state().mstatus & ~kSstatusMask) | (wdata & kSstatusMask));
+            }
             break;
 
         case csr_addr(Csr::Tselect):

@@ -93,7 +93,8 @@ class TrapController {
      * @return true if access is permitted, false if it triggers an illegal instruction exception.
      */
     static auto can_access_csr(simrv::xlen::PrivilegeLevel current_priv, simrv::xlen::CsrValue misa,
-                               simrv::xlen::CsrNumber csr_addr, bool is_write) -> bool;
+                               simrv::xlen::CsrNumber csr_addr, bool is_write,
+                               bool virtualization_mode = false) -> bool;
 };
 
 }  // namespace simrv::core

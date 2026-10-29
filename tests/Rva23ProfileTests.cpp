@@ -1203,6 +1203,43 @@ void test_sha_state_enable_csrs() {
     const auto hcounteren = cpu.csr_file.read(simrv::core::Csr::Hcounteren);
     TEST_ASSERT(hcounteren.has_value() && *hcounteren == kGuestHpmEnableBits);
 
+    constexpr simrv::xlen::CsrValue kHstatusSpvSpvp =
+        (simrv::xlen::CsrValue{1} << 7U) | (simrv::xlen::CsrValue{1} << 8U);
+    TEST_ASSERT(cpu.csr_file.write(simrv::core::Csr::Hstatus, kHstatusSpvSpvp).has_value());
+    const auto hstatus = cpu.csr_file.read(simrv::core::Csr::Hstatus);
+    TEST_ASSERT(hstatus.has_value() && *hstatus == kHstatusSpvSpvp);
+
+    constexpr uint64_t kHgatpSv39x4 = (uint64_t{8} << 60U) | 4U;
+    TEST_ASSERT(cpu.csr_file.write(simrv::core::Csr::Hgatp, kHgatpSv39x4).has_value());
+    auto hgatp = cpu.csr_file.read(simrv::core::Csr::Hgatp);
+    TEST_ASSERT(hgatp.has_value() && *hgatp == kHgatpSv39x4);
+    TEST_ASSERT(cpu.csr_file.write(simrv::core::Csr::Hgatp, kHgatpSv39x4 | 1U).has_value());
+    hgatp = cpu.csr_file.read(simrv::core::Csr::Hgatp);
+    TEST_ASSERT(hgatp.has_value() && *hgatp == kHgatpSv39x4);
+
+    const auto vsatp_csr = simrv::core::csr_num(simrv::core::Csr::Vsatp);
+    TEST_ASSERT(simrv::core::TrapController::can_access_csr(
+        cpu.state().priv, cpu.state().misa, vsatp_csr, true));
+    TEST_ASSERT(!simrv::core::TrapController::can_access_csr(
+        cpu.state().priv, cpu.state().misa, vsatp_csr, true, true));
+    cpu.state().virt = true;
+    cpu.state().priv = simrv::xlen::PrivilegeLevel::Supervisor;
+    TEST_ASSERT(cpu.csr_file.write(simrv::core::Csr::Stvec, 0x1237).has_value());
+    auto stvec = cpu.csr_file.read(simrv::core::Csr::Stvec);
+    TEST_ASSERT(stvec.has_value() && *stvec == 0x1235);
+    auto vstvec = cpu.csr_file.read(simrv::core::Csr::Vstvec);
+    TEST_ASSERT(vstvec.has_value() && *vstvec == *stvec);
+    constexpr simrv::xlen::CsrValue kVsStatusValue = simrv::core::MstatusBit::Spie |
+                                                     simrv::core::MstatusBit::Spp;
+    TEST_ASSERT(cpu.csr_file.write(simrv::core::Csr::Sstatus, kVsStatusValue).has_value());
+    const auto sstatus = cpu.csr_file.read(simrv::core::Csr::Sstatus);
+    TEST_ASSERT(sstatus.has_value() && (*sstatus & kVsStatusValue) == kVsStatusValue);
+    constexpr uint64_t kVsSatpSv39 = (uint64_t{8} << 60U) | 0x123U;
+    TEST_ASSERT(cpu.csr_file.write(simrv::core::Csr::Satp, kVsSatpSv39).has_value());
+    const auto vsatp = cpu.csr_file.read(simrv::core::Csr::Vsatp);
+    TEST_ASSERT(vsatp.has_value() && *vsatp == kVsSatpSv39);
+    cpu.state().virt = false;
+
     cpu.state().priv = simrv::xlen::PrivilegeLevel::Machine;
     cpu.state().mstateen[0] = kStateenSuperEnable;
     TEST_ASSERT(cpu.csr_file.write(simrv::core::Csr::Hstateen0, kStateenSuperEnable).has_value());

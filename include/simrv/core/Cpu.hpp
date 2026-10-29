@@ -112,6 +112,27 @@ struct alignas(128) ArchState {
     std::array<uint64_t, 4> sstateen{};  ///< Supervisor State Enable banks (0x10C-10F)
     std::array<uint64_t, 4> hstateen{};  ///< Hypervisor State Enable banks (0x60C-60F)
 
+    /* Hypervisor and Virtual Supervisor CSRs */
+    simrv::xlen::CsrValue hstatus{};
+    simrv::xlen::CsrValue hedeleg{};
+    simrv::xlen::CsrValue hideleg{};
+    simrv::xlen::CsrValue hie{};
+    simrv::xlen::CsrValue hip{};
+    simrv::xlen::CsrValue hvip{};
+    simrv::xlen::CsrValue henvcfg{};
+    simrv::xlen::CsrValue htval{};
+    simrv::xlen::CsrValue htinst{};
+    simrv::xlen::CsrValue hgatp{};
+    simrv::xlen::CsrValue vsstatus{};
+    simrv::xlen::CsrValue vsie{};
+    simrv::xlen::CsrValue vsip{};
+    simrv::xlen::CsrValue vstvec{};
+    simrv::xlen::CsrValue vsscratch{};
+    simrv::xlen::CsrValue vsepc{};
+    simrv::xlen::TrapCause vscause{};
+    simrv::xlen::CsrValue vstval{};
+    simrv::xlen::CsrValue vsatp{};
+
     /* Floating-Point CSRs */
     simrv::xlen::CsrValue fcsr{};  ///< Floating-Point Control and Status register (rounding mode
                                    ///< and cumulative exception flags)
@@ -127,6 +148,7 @@ struct alignas(128) ArchState {
         vtype{};  ///< Vector Type (contains element width VSEW, vector group multiplier LMUL, etc.)
 
     simrv::xlen::PrivilegeLevel priv = kPrivMachine;  ///< Current processor privilege level
+    bool virt{};  ///< H-extension virtualization mode (VS/VU when set)
 
     simrv::xlen::Address load_res{};     ///< Active memory physical address reservation for
                                          ///< Load-Reserved / Store-Conditional (LR/SC)

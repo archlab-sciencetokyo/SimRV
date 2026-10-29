@@ -107,6 +107,8 @@ auto trap_cause_name(simrv::xlen::TrapCause cause) -> std::string {
                 return "Instruction access fault";
             case ExceptionCode::IllegalInstruction:
                 return "Illegal instruction";
+            case ExceptionCode::VirtualInstruction:
+                return "Virtual instruction";
             case ExceptionCode::Breakpoint:
                 return "Breakpoint";
             case ExceptionCode::MisalignedLoad:
@@ -279,13 +281,26 @@ auto TrapController::can_execute_privileged_instruction(simrv::xlen::PrivilegeLe
 
 auto TrapController::can_access_csr(simrv::xlen::PrivilegeLevel current_priv,
                                     simrv::xlen::CsrValue misa, simrv::xlen::CsrNumber csr_addr,
-                                    bool is_write) -> bool {
+                                    bool is_write, bool virtualization_mode) -> bool {
     // Debug CSRs require architectural Debug Mode, which the guest execution
     // engine does not implement. M-mode also cannot override CSR nonexistence.
     const auto address = csr_addr.value();
-    if (address == csr_num(Csr::Hcounteren).value() ||
-        (address >= 0x60CU && address <= 0x60FU)) {
+    const bool h_csr = address == csr_num(Csr::Hstatus).value() ||
+                       address == csr_num(Csr::Hedeleg).value() ||
+                       address == csr_num(Csr::Hideleg).value() ||
+                       address == csr_num(Csr::Hie).value() ||
+                       address == csr_num(Csr::Hcounteren).value() ||
+                       address == csr_num(Csr::Henvcfg).value() ||
+                       address == csr_num(Csr::Htval).value() ||
+                       address == csr_num(Csr::Hip).value() ||
+                       address == csr_num(Csr::Hvip).value() ||
+                       address == csr_num(Csr::Htinst).value() ||
+                       address == csr_num(Csr::Hgatp).value() ||
+                       (address >= 0x60CU && address <= 0x60FU);
+    const bool vs_csr = address >= 0x200U && address <= 0x2FFU;
+    if (h_csr || vs_csr) {
         if (!isa::misa_has_extension(misa, isa::IsaExtension::H)) return false;
+        if (virtualization_mode && current_priv < kPrivMachine) return false;
         if (current_priv < kPrivSupervisor) return false;
         return !is_write || !csr_addr.is_read_only();
     }
