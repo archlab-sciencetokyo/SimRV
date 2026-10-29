@@ -135,8 +135,8 @@ auto CPU::try_fast_load([[maybe_unused]] Machine& machine, simrv::xlen::Address 
     const unsigned size_bytes = access_size_for_funct3(funct3);
 
     if (simrv::compiler::likely(eff_priv != kPrivMachine &&
-                                simrv::xlen::satp_translation_enabled(state_.satp, active_xlen))) {
-        const simrv::xlen::Word current_asid = simrv::xlen::satp_asid(state_.satp, active_xlen);
+                                simrv::xlen::satp_translation_enabled(active_satp(), active_xlen))) {
+        const simrv::xlen::Word current_asid = simrv::xlen::satp_asid(active_satp(), active_xlen);
         const simrv::xlen::Address vpn = mem_addr >> 12;
         const size_t tlb_idx = soft_tlb_index(vpn);
         const auto& entry = soft_tlb_read[tlb_idx];
@@ -230,8 +230,8 @@ auto CPU::try_fast_store(Machine& machine, simrv::xlen::Address mem_addr, isa::F
     const unsigned size_bytes = access_size_for_funct3(funct3);
 
     if (simrv::compiler::likely(eff_priv != kPrivMachine &&
-                                simrv::xlen::satp_translation_enabled(state_.satp, active_xlen))) {
-        const simrv::xlen::Word current_asid = simrv::xlen::satp_asid(state_.satp, active_xlen);
+                                simrv::xlen::satp_translation_enabled(active_satp(), active_xlen))) {
+        const simrv::xlen::Word current_asid = simrv::xlen::satp_asid(active_satp(), active_xlen);
         const simrv::xlen::Address vpn = mem_addr >> 12;
         const size_t tlb_idx = soft_tlb_index(vpn);
         const auto& entry = soft_tlb_write[tlb_idx];
@@ -361,8 +361,8 @@ SIMRV_ALWAYS_INLINE auto CPU::execute_cached_load(Machine& machine, CachedOp& op
         const unsigned page_offset = lookup_addr & 0xFFFu;
         if (simrv::compiler::likely(
                 (lookup_addr & align_mask) == 0 && page_offset + size_bytes <= 4096u &&
-                simrv::xlen::satp_translation_enabled(state_.satp, active_xlen))) {
-            const simrv::xlen::Word current_asid = simrv::xlen::satp_asid(state_.satp, active_xlen);
+                simrv::xlen::satp_translation_enabled(active_satp(), active_xlen))) {
+            const simrv::xlen::Word current_asid = simrv::xlen::satp_asid(active_satp(), active_xlen);
             const simrv::xlen::Address vpn = lookup_addr >> 12;
             const size_t tlb_idx = soft_tlb_index(vpn);
             const auto& entry = soft_tlb_read[tlb_idx];
@@ -473,8 +473,8 @@ SIMRV_ALWAYS_INLINE auto CPU::execute_cached_store(Machine& machine, CachedOp& o
         const unsigned page_offset = lookup_addr & 0xFFFu;
         if (simrv::compiler::likely(
                 (lookup_addr & kAlignMask) == 0 && page_offset + size_bytes <= 4096u &&
-                simrv::xlen::satp_translation_enabled(state_.satp, active_xlen))) {
-            const simrv::xlen::Word current_asid = simrv::xlen::satp_asid(state_.satp, active_xlen);
+                simrv::xlen::satp_translation_enabled(active_satp(), active_xlen))) {
+            const simrv::xlen::Word current_asid = simrv::xlen::satp_asid(active_satp(), active_xlen);
             const simrv::xlen::Address vpn = lookup_addr >> 12;
             const size_t tlb_idx = soft_tlb_index(vpn);
             const auto& entry = soft_tlb_write[tlb_idx];
@@ -1192,9 +1192,9 @@ void CPU::execute_cached_op_fast(Machine& machine, CachedOp& op,
                 const unsigned page_offset = lookup_addr & 0xFFFu;
                 if (simrv::compiler::likely(
                         (lookup_addr & align_mask) == 0 && page_offset + size_bytes <= 4096u &&
-                        simrv::xlen::satp_translation_enabled(state_.satp, active_xlen))) {
+                        simrv::xlen::satp_translation_enabled(active_satp(), active_xlen))) {
                     const simrv::xlen::Word current_asid =
-                        simrv::xlen::satp_asid(state_.satp, active_xlen);
+                        simrv::xlen::satp_asid(active_satp(), active_xlen);
                     const simrv::xlen::Address vpn = lookup_addr >> 12;
                     const size_t tlb_idx = soft_tlb_index(vpn);
                     const auto& entry = soft_tlb_read[tlb_idx];
@@ -1272,9 +1272,9 @@ void CPU::execute_cached_op_fast(Machine& machine, CachedOp& op,
                 const unsigned page_offset = lookup_addr & 0xFFFu;
                 if (simrv::compiler::likely(
                         (lookup_addr & align_mask) == 0 && page_offset + size_bytes <= 4096u &&
-                        simrv::xlen::satp_translation_enabled(state_.satp, active_xlen))) {
+                        simrv::xlen::satp_translation_enabled(active_satp(), active_xlen))) {
                     const simrv::xlen::Word current_asid =
-                        simrv::xlen::satp_asid(state_.satp, active_xlen);
+                        simrv::xlen::satp_asid(active_satp(), active_xlen);
                     const simrv::xlen::Address vpn = lookup_addr >> 12;
                     const size_t tlb_idx = soft_tlb_index(vpn);
                     const auto& entry = soft_tlb_write[tlb_idx];
@@ -2504,9 +2504,9 @@ SIMRV_ALWAYS_INLINE auto CPU::run_fast_os_kernel(Machine& machine, uint32_t batc
                     const unsigned active_xlen = state_.xlen_for_privilege(eff_priv);
                     const bool satp_en =
                         (eff_priv != kPrivMachine) &&
-                        simrv::xlen::satp_translation_enabled(state_.satp, active_xlen);
+                        simrv::xlen::satp_translation_enabled(active_satp(), active_xlen);
                     const simrv::xlen::Word current_asid =
-                        satp_en ? simrv::xlen::satp_asid(state_.satp, active_xlen) : 0;
+                        satp_en ? simrv::xlen::satp_asid(active_satp(), active_xlen) : 0;
                     const bool fast_m_ram =
                         (state_.priv == kPrivMachine && (state_.mstatus & MstatusBit::Mprv) == 0 &&
                          !state_.has_locked_pmp);

@@ -905,6 +905,19 @@ class CPU {
         return state_.priv;
     }
 
+    /// SATP selected by the current virtualization mode for address translation.
+    [[nodiscard]] SIMRV_ALWAYS_INLINE constexpr auto active_satp() const noexcept
+        -> simrv::xlen::CsrValue {
+        return state_.virt ? state_.vsatp : state_.satp;
+    }
+
+    /// Status fields used by VS-stage translation, with HS MXR applying to both stages.
+    [[nodiscard]] SIMRV_ALWAYS_INLINE constexpr auto active_translation_status() const noexcept
+        -> simrv::xlen::CsrValue {
+        return state_.virt ? (state_.vsstatus | (state_.mstatus & MstatusBit::Mxr))
+                           : state_.mstatus;
+    }
+
     /**
      * @brief XLEN governing explicit loads/stores, including MPRV/MPP.
      *

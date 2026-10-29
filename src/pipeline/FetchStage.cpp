@@ -86,7 +86,7 @@ void CPU::run_fetch_stage(Machine& machine) {
         ((state_.pc & ~simrv::memory::kPageMask) != ((state_.pc + 2) & ~simrv::memory::kPageMask));
     const bool translation_enabled =
         state_.priv != kPrivMachine &&
-        simrv::xlen::satp_translation_enabled(state_.satp, state_.regs.xlen);
+        simrv::xlen::satp_translation_enabled(active_satp(), state_.regs.xlen);
 
     fetch_address_translate(machine);
 
@@ -141,14 +141,14 @@ void CPU::fetch_address_translate(Machine& machine) {
     ctx.cpc = state_.pc;
 
     if (state_.priv == kPrivMachine ||
-        !simrv::xlen::satp_translation_enabled(state_.satp, state_.regs.xlen)) {
+        !simrv::xlen::satp_translation_enabled(active_satp(), state_.regs.xlen)) {
         w_padr1 = (state_.regs.xlen == 32) ? (w_vadr1 & 0xFFFFFFFFULL) : w_vadr1;
         w_padr2 = (state_.regs.xlen == 32) ? (w_vadr2 & 0xFFFFFFFFULL) : w_vadr2;
     } else {
         const bool split_page =
             ((w_vadr1 & ~simrv::memory::kPageMask) != (w_vadr2 & ~simrv::memory::kPageMask));
         const simrv::xlen::Word current_asid =
-            simrv::xlen::satp_asid(state_.satp, state_.regs.xlen);
+            simrv::xlen::satp_asid(active_satp(), state_.regs.xlen);
 
         const simrv::xlen::Address vpn1 = w_vadr1 >> 12;
         const size_t tlb_idx1 = core::CPU::soft_tlb_index(vpn1);
@@ -217,7 +217,7 @@ void CPU::fetch_resolve_page_walk(Machine& machine, int state) {
         record_hpm_event(HpmEvent::ITlbMiss);
         if constexpr (simrv::xlen::kIsXLen64) {
             if (simrv::compiler::unlikely(
-                    !simrv::Mmu::is_canonical(w_vadr, state_.satp, state_.regs.xlen))) {
+                    !simrv::Mmu::is_canonical(w_vadr, active_satp(), state_.regs.xlen))) {
                 ctx.pending_exception = ExceptionCode::FetchPageFault;
                 ctx.pending_tval = w_vadr;
                 return;
@@ -233,7 +233,7 @@ void CPU::fetch_resolve_page_walk(Machine& machine, int state) {
                 .and_then([&](PageWalkResult res) -> std::expected<void, simrv::xlen::TrapCause> {
                     w_padr = res.physical_address;
                     const simrv::xlen::Word asid =
-                        simrv::xlen::satp_asid(state_.satp, state_.regs.xlen);
+                        simrv::xlen::satp_asid(active_satp(), state_.regs.xlen);
                     tlb.insert_inst_r(w_vadr, w_padr.raw(), asid, state_.priv, res.global());
                     const simrv::xlen::Address vpn = w_vadr >> 12;
                     const simrv::xlen::PhysAddr page_base = w_padr & ~simrv::memory::kPageMask;
@@ -266,8 +266,9 @@ auto CPU::translate_stage_address(Machine& machine, simrv::xlen::VirtAddr virtua
     auto* mmu = machine.memory_.mmu();
     if (machine.runtime_profile.is_instruction_mode()) {
         simrv::xlen::Address guest_fault_address = 0;
-        auto result = mmu->translate(virtual_address, access, privilege, state_.mstatus,
-                                     state_.satp, active_xlen, false, &state_,
+        auto result = mmu->translate(virtual_address, access, privilege,
+                                     active_translation_status(),
+                                     active_satp(), active_xlen, false, &state_,
                                      &guest_fault_address);
         active_context().pending_htval =
             result || !is_guest_page_fault(result.error()) ? 0 : guest_fault_address >> 2U;
@@ -279,8 +280,9 @@ auto CPU::translate_stage_address(Machine& machine, simrv::xlen::VirtAddr virtua
         if (timed_walk.active && timed_walk.request_pending) {
             machine.memory_.system_bus().cancel_source(timed_walk.source);
         }
-        timed_walk.walk = mmu->begin_page_walk(virtual_address, access, privilege, state_.mstatus,
-                                               state_.satp, active_xlen, false, &state_);
+        timed_walk.walk = mmu->begin_page_walk(virtual_address, access, privilege,
+                                               active_translation_status(),
+                                               active_satp(), active_xlen, false, &state_);
         timed_walk.source = simrv::memory::make_tl_source(hart_id(), port);
         timed_walk.active = true;
         timed_walk.request_pending = false;
@@ -659,7 +661,7 @@ void CPU::fetch_read_instruction_word(Machine& machine) {
         if (!dec_temp.is_compressed()) {
             const bool translation_enabled =
                 state_.priv != kPrivMachine &&
-                simrv::xlen::satp_translation_enabled(state_.satp, state_.regs.xlen);
+                simrv::xlen::satp_translation_enabled(active_satp(), state_.regs.xlen);
             if (translation_enabled && ctx.padr2 == simrv::xlen::kWordAllOnes) {
                 fetch_resolve_page_walk(machine, 2);
             }
@@ -873,7 +875,7 @@ void CPU::run_fetch_stage_baremetal(Machine& machine) {
                                  ((state_.pc + 2) & ~simrv::memory::kPageMask));
         const bool translation_enabled =
             state_.priv != kPrivMachine &&
-            simrv::xlen::satp_translation_enabled(state_.satp, state_.regs.xlen);
+            simrv::xlen::satp_translation_enabled(active_satp(), state_.regs.xlen);
 
         fetch_address_translate(machine);
 

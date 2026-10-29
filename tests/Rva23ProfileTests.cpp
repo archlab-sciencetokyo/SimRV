@@ -1502,6 +1502,58 @@ void test_sha_shtvala_guest_physical_fault_value() {
     }
 }
 
+void test_sha_two_stage_cpu_translation_uses_vsatp() {
+    if constexpr (simrv::xlen::kIsXLen64) {
+        simrv::core::Machine machine;
+        std::vector<simrv::xlen::Byte> ram(0x400000, simrv::xlen::Byte{0});
+        machine.set_ram_for_testing(ram.data(), ram.size());
+        machine.memory().initialize_mmu();
+        auto& cpu = machine.primary_hart();
+        constexpr simrv::xlen::Address kVsRoot = 0x1000;
+        constexpr simrv::xlen::Address kVsMiddle = 0x2000;
+        constexpr simrv::xlen::Address kVsLeaf = 0x3000;
+        constexpr simrv::xlen::Address kGuestVa = 0x1234;
+        constexpr simrv::xlen::Address kGuestPa = 0x6000;
+        const simrv::xlen::Address kDramBase = machine.memory_geometry().dram_base;
+        const simrv::xlen::Address kGRoot = kDramBase + 0x4000;
+        const simrv::xlen::Address kGMiddle = kDramBase + 0x5000;
+        const simrv::xlen::Address kHostBase = kDramBase + 0x200000;
+        constexpr uint64_t kValidTable = std::to_underlying(simrv::PteFlag::V);
+        constexpr uint64_t kLeafFlags = std::to_underlying(simrv::PteFlag::V) |
+                                        std::to_underlying(simrv::PteFlag::R) |
+                                        std::to_underlying(simrv::PteFlag::W) |
+                                        std::to_underlying(simrv::PteFlag::X) |
+                                        std::to_underlying(simrv::PteFlag::A) |
+                                        std::to_underlying(simrv::PteFlag::D);
+        const auto put = [&](simrv::xlen::Address address, uint64_t pte) {
+            std::memcpy(ram.data() + (address - kDramBase), &pte, sizeof(pte));
+        };
+
+        // G-stage maps the first 2 MiB of GPA space to a distinct HPA range.
+        put(kGRoot, ((kGMiddle >> 12U) << 10U) | kValidTable);
+        put(kGMiddle, ((kHostBase >> 12U) << 10U) | kLeafFlags);
+        // VS-stage page tables live in GPA space and map the test VA to a different GPA.
+        put(kHostBase + kVsRoot, (uint64_t{2} << 10U) | kValidTable);
+        put(kHostBase + kVsMiddle, (uint64_t{3} << 10U) | kValidTable);
+        put(kHostBase + kVsLeaf + 8U, ((kGuestPa >> 12U) << 10U) | kLeafFlags);
+
+        cpu.state().misa |= simrv::isa::misa_extension_bit(simrv::isa::IsaExtension::H);
+        cpu.state().virt = true;
+        cpu.state().priv = simrv::xlen::PrivilegeLevel::Supervisor;
+        cpu.state().satp = 0;
+        cpu.state().vsatp = (uint64_t{8} << 60U) | (kVsRoot >> 12U);
+        cpu.state().hgatp = (uint64_t{8} << 60U) | (kGRoot >> 12U);
+
+        auto translated = cpu.translate_stage_address(
+            machine, simrv::xlen::VirtAddr{kGuestVa}, simrv::PteAccess::Read,
+            simrv::xlen::PrivilegeLevel::Supervisor, 64, simrv::memory::TlPort::Data,
+            cpu.ca_state.data_walk);
+        TEST_ASSERT(translated.has_value() && translated->has_value());
+        TEST_ASSERT(translated->value().physical_address.raw() ==
+                    kHostBase + kGuestPa + (kGuestVa & 0xFFFU));
+    }
+}
+
 void test_zicntr_base_counter_values_and_access() {
     simrv::core::Machine machine;
     auto& cpu = machine.primary_hart();
@@ -2015,6 +2067,9 @@ int main() {
     std::cout << "[RUN] test_sha_shtvala_guest_physical_fault_value" << std::endl;
     test_sha_shtvala_guest_physical_fault_value();
     std::cout << "[PASS] test_sha_shtvala_guest_physical_fault_value" << std::endl;
+    std::cout << "[RUN] test_sha_two_stage_cpu_translation_uses_vsatp" << std::endl;
+    test_sha_two_stage_cpu_translation_uses_vsatp();
+    std::cout << "[PASS] test_sha_two_stage_cpu_translation_uses_vsatp" << std::endl;
     std::cout << "[RUN] test_zicntr_base_counter_values_and_access" << std::endl;
     test_zicntr_base_counter_values_and_access();
     std::cout << "[PASS] test_zicntr_base_counter_values_and_access" << std::endl;

@@ -36,7 +36,7 @@ namespace {
     const uint64_t low = address.raw() & kLow57Mask;
     const bool translated =
         cpu.effective_data_privilege() != simrv::xlen::PrivilegeLevel::Machine &&
-        simrv::xlen::satp_mode(cpu.state().satp, active_xlen) != 0;
+        simrv::xlen::satp_mode(cpu.active_satp(), active_xlen) != 0;
     const uint64_t upper = translated && ((low >> 56U) & 1U) != 0 ? ~kLow57Mask : 0;
     return simrv::xlen::VirtAddr{static_cast<simrv::xlen::Word>(low | upper)};
 }
@@ -135,15 +135,16 @@ auto MemoryAccess::target_read(MemorySubsystem& mem, core::CPU& cpu, simrv::xlen
     }
 
     const simrv::xlen::PrivilegeLevel eff_priv = cpu.effective_data_privilege();
-    const simrv::xlen::Word current_asid = simrv::xlen::satp_asid(cpu.state().satp, active_xlen);
+    const simrv::xlen::Word active_satp = cpu.active_satp();
+    const simrv::xlen::Word current_asid = simrv::xlen::satp_asid(active_satp, active_xlen);
     const bool translation_enabled =
         (eff_priv != kPrivMachine &&
-         simrv::xlen::satp_translation_enabled(cpu.state().satp, active_xlen));
+         simrv::xlen::satp_translation_enabled(active_satp, active_xlen));
 
     if constexpr (simrv::xlen::kIsXLen64) {
         if (translation_enabled) {
             if (simrv::compiler::unlikely(
-                    !simrv::Mmu::is_canonical(v_addr, cpu.state().satp, active_xlen))) {
+                    !simrv::Mmu::is_canonical(v_addr, active_satp, active_xlen))) {
                 cpu.active_context().pending_exception = (is_amo && !is_lr)
                                                              ? ExceptionCode::StorePageFault
                                                              : ExceptionCode::LoadPageFault;
@@ -368,7 +369,7 @@ auto MemoryAccess::target_read(MemorySubsystem& mem, core::CPU& cpu, simrv::xlen
 
     if (simrv::compiler::likely(!cpu.active_context().pending_exception.has_value()) &&
         simrv::compiler::likely(eff_priv == kPrivMachine || !simrv::xlen::satp_translation_enabled(
-                                                                cpu.state().satp, active_xlen)) &&
+                                                                active_satp, active_xlen)) &&
         simrv::compiler::likely(geometry.contains(eff_vaddr, size_bytes))) {
         return issue_read(eff_vaddr);
     }
@@ -382,7 +383,7 @@ auto MemoryAccess::target_read(MemorySubsystem& mem, core::CPU& cpu, simrv::xlen
                                 : cpu.tlb.lookup_data_r(v_addr.raw(), current_asid, eff_priv);
 
     if (eff_priv == kPrivMachine ||
-        !simrv::xlen::satp_translation_enabled(cpu.state().satp, active_xlen)) {
+        !simrv::xlen::satp_translation_enabled(active_satp, active_xlen)) {
         p_addr = eff_vaddr;
     } else if (entry) {
         p_addr = entry->p_addr + (v_addr.raw() & simrv::memory::kPageMask);
@@ -533,15 +534,16 @@ void MemoryAccess::target_write(MemorySubsystem& mem, core::CPU& cpu, simrv::xle
     }
 
     const simrv::xlen::PrivilegeLevel eff_priv = cpu.effective_data_privilege();
-    const simrv::xlen::Word current_asid = simrv::xlen::satp_asid(cpu.state().satp, active_xlen);
+    const simrv::xlen::Word active_satp = cpu.active_satp();
+    const simrv::xlen::Word current_asid = simrv::xlen::satp_asid(active_satp, active_xlen);
     const bool translation_enabled =
         (eff_priv != kPrivMachine &&
-         simrv::xlen::satp_translation_enabled(cpu.state().satp, active_xlen));
+         simrv::xlen::satp_translation_enabled(active_satp, active_xlen));
 
     if constexpr (simrv::xlen::kIsXLen64) {
         if (translation_enabled) {
             if (simrv::compiler::unlikely(
-                    !simrv::Mmu::is_canonical(v_addr, cpu.state().satp, active_xlen))) {
+                    !simrv::Mmu::is_canonical(v_addr, active_satp, active_xlen))) {
                 cpu.active_context().pending_exception = ExceptionCode::StorePageFault;
                 cpu.active_context().pending_tval = v_addr.raw();
                 return;
@@ -847,7 +849,7 @@ void MemoryAccess::target_write(MemorySubsystem& mem, core::CPU& cpu, simrv::xle
 
     if (simrv::compiler::likely(!cpu.active_context().pending_exception.has_value()) &&
         simrv::compiler::likely(eff_priv == kPrivMachine || !simrv::xlen::satp_translation_enabled(
-                                                                cpu.state().satp, active_xlen)) &&
+                                                                active_satp, active_xlen)) &&
         simrv::compiler::likely(geometry.contains(eff_vaddr, size_bytes))) {
         if (simrv::compiler::unlikely(!core::pmp::check_access(
                 cpu.state(), eff_vaddr, size_bytes, core::PmpAccessType::Write, eff_priv))) {
@@ -864,7 +866,7 @@ void MemoryAccess::target_write(MemorySubsystem& mem, core::CPU& cpu, simrv::xle
     core::TLBEntry* entry = cpu.tlb.lookup_data_w(v_addr.raw(), current_asid, eff_priv);
 
     if (eff_priv == kPrivMachine ||
-        !simrv::xlen::satp_translation_enabled(cpu.state().satp, active_xlen)) {
+        !simrv::xlen::satp_translation_enabled(active_satp, active_xlen)) {
         p_addr = eff_vaddr;
     } else if (entry) {
         p_addr = entry->p_addr + (v_addr.raw() & simrv::memory::kPageMask);
@@ -1053,15 +1055,16 @@ void MemoryAccess::execute_cmo(MemorySubsystem& mem, core::CPU& cpu, simrv::xlen
 
     constexpr simrv::xlen::Address kLineSize = simrv::cache::DCache::kLineBytes;
     const simrv::xlen::Address vaddr = addr.raw() & ~(kLineSize - 1u);
-    const simrv::xlen::Word current_asid = simrv::xlen::satp_asid(cpu.state().satp, active_xlen);
+    const simrv::xlen::Word active_satp = cpu.active_satp();
+    const simrv::xlen::Word current_asid = simrv::xlen::satp_asid(active_satp, active_xlen);
     const bool translation_enabled =
         (eff_priv != kPrivMachine &&
-         simrv::xlen::satp_translation_enabled(cpu.state().satp, active_xlen));
+         simrv::xlen::satp_translation_enabled(active_satp, active_xlen));
 
     simrv::xlen::Address paddr = vaddr;
     if (translation_enabled) {
         if constexpr (simrv::xlen::kIsXLen64) {
-            if (!simrv::Mmu::is_canonical(simrv::xlen::VirtAddr{vaddr}, cpu.state().satp,
+            if (!simrv::Mmu::is_canonical(simrv::xlen::VirtAddr{vaddr}, active_satp,
                                           active_xlen)) {
                 cpu.active_context().pending_exception =
                     (op == isa::OperationId::CBO_ZERO || op == isa::OperationId::CBO_FLUSH)

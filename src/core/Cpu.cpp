@@ -112,7 +112,7 @@ void CPU::TLB_flush() {
 
 void CPU::TLB_flush_satp() {
     const auto current_asid =
-        static_cast<::Asid>(simrv::xlen::satp_asid(state_.satp, state_.regs.xlen));
+        static_cast<::Asid>(simrv::xlen::satp_asid(active_satp(), state_.regs.xlen));
     tlb.flush_selective(core::TlbFlushFilter{.vaddr = std::nullopt, .asid = current_asid});
     decode_cache.flush_user();
     soft_tlb_flush();
