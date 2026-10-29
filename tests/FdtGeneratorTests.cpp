@@ -122,6 +122,7 @@ void test_generate_platform_fdt_pcie() {
     expect(blob_contains_string(blob, "flash@20000000"), "PFlash node address present");
     expect(blob_contains_string(blob, "pci@30000000"), "PCIe ECAM node address present");
     expect(blob_contains_string(blob, "zihpm"), "Implemented HPM counter extension advertised");
+    expect(blob_contains_string(blob, "zicntr"), "Base counters and timers advertised");
     expect(blob_contains_string(blob, "zihintntl"), "Zihintntl extension advertised");
     expect(blob_contains_string(blob, "zic64b"), "Zic64b extension advertised");
     expect(blob_contains_string(blob, "zicclsm"), "Zicclsm extension advertised");

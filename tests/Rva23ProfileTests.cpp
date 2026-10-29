@@ -1167,6 +1167,58 @@ void test_sscounterenw_allows_enabled_hpm_counters() {
     TEST_ASSERT(supervisor_enabled.rcsr == kHpmRead);
 }
 
+void test_zicntr_base_counter_values_and_access() {
+    simrv::core::Machine machine;
+    auto& cpu = machine.primary_hart();
+    constexpr simrv::xlen::CsrNumber kCycle{0xC00};
+    constexpr simrv::xlen::CsrNumber kTime{0xC01};
+    constexpr simrv::xlen::CsrNumber kInstret{0xC02};
+    constexpr simrv::xlen::CsrValue kCycleEnable = 1U;
+
+    cpu.clint_mmio.mcycle = 0x1234;
+    cpu.clint_mmio.mtime = 0x5678;
+    cpu.state().minstret = 0x9ABC;
+    const auto cycle = cpu.csr_file.read(kCycle);
+    const auto time = cpu.csr_file.read(kTime);
+    const auto instret = cpu.csr_file.read(kInstret);
+    TEST_ASSERT(cycle.has_value() && *cycle == 0x1234);
+    TEST_ASSERT(time.has_value() && *time == 0x5678);
+    TEST_ASSERT(instret.has_value() && *instret == 0x9ABC);
+
+    const auto decode_cycle_read = [&]() {
+        auto& context = cpu.active_context();
+        context = {};
+        context.ir = (static_cast<uint32_t>(kCycle.value()) << 20U) | (2U << 12U) | (5U << 7U) |
+                     0x73U;  // csrrs x5, cycle, x0
+        context.ir_org = context.ir;
+        context.op_id = simrv::isa::OperationId::UNKNOWN;
+        cpu.run_decode_stage(machine);
+    };
+
+    cpu.state().priv = simrv::xlen::PrivilegeLevel::User;
+    cpu.state().mcounteren = 0;
+    cpu.state().scounteren = 0;
+    decode_cycle_read();
+    TEST_ASSERT(cpu.active_context().pending_exception ==
+                simrv::isa::ExceptionCode::IllegalInstruction);
+
+    cpu.state().mcounteren = kCycleEnable;
+    decode_cycle_read();
+    TEST_ASSERT(cpu.active_context().pending_exception ==
+                simrv::isa::ExceptionCode::IllegalInstruction);
+
+    cpu.state().scounteren = kCycleEnable;
+    decode_cycle_read();
+    TEST_ASSERT(!cpu.active_context().pending_exception.has_value());
+    TEST_ASSERT(cpu.active_context().rcsr == 0x1234);
+
+    cpu.state().priv = simrv::xlen::PrivilegeLevel::Supervisor;
+    cpu.state().scounteren = 0;
+    decode_cycle_read();
+    TEST_ASSERT(!cpu.active_context().pending_exception.has_value());
+    TEST_ASSERT(cpu.active_context().rcsr == 0x1234);
+}
+
 void test_zcb_decompression() {
     struct Encoding {
         uint16_t match;
@@ -1610,6 +1662,9 @@ int main() {
     std::cout << "[RUN] test_sscounterenw_allows_enabled_hpm_counters" << std::endl;
     test_sscounterenw_allows_enabled_hpm_counters();
     std::cout << "[PASS] test_sscounterenw_allows_enabled_hpm_counters" << std::endl;
+    std::cout << "[RUN] test_zicntr_base_counter_values_and_access" << std::endl;
+    test_zicntr_base_counter_values_and_access();
+    std::cout << "[PASS] test_zicntr_base_counter_values_and_access" << std::endl;
 
     std::cout << "[RUN] test_zimop_decoder" << std::endl;
     test_zimop_decoder();
