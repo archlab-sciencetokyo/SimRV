@@ -46,6 +46,7 @@ preset's configured cache-line geometry remains a separate platform requirement.
 | Supervisor timer interrupts | Sstc exposes `stimecmp` when M-mode enables STCE and asserts/deasserts supervisor timer pending from `mtime`; FDT advertises Sstc | Privilege-memory audit tests for XLEN-specific `stimecmp`, STCE access control, and timer transitions; FDT test |
 | Base counters and timers | Zicntr implements `cycle`, `time`, and `instret`; lower-mode reads obey the `mcounteren`/`scounteren` gates; FDT advertises Zicntr | RVA23 counter-value and U/S access tests; FDT tests |
 | Hardware performance counters | Zihpm counters 3–31 and event selectors are implemented; `mcounteren` and `scounteren` expose writable enables for implemented counters as required by Sscounterenw; FDT advertises Zihpm and Sscounterenw | HPM overflow/filtering tests and RVA23 S/U counter-enable access tests; FDT tests |
+| State-enable CSR banks | `mstateen0-3`, `sstateen0-3`, and H-gated `hstateen0-3` storage is present; implemented SE fields control lower-privilege visibility and unsupported state bits read as zero | RVA23 state-enable CSR access and visibility tests |
 | Counter overflow filtering | Sscofpmf implements M/S/U event filtering, counter inhibit, sticky overflow reporting, and delegated LCOFIP; FDT advertises Sscofpmf | RVA23 CSR, overflow, and interrupt-delegation tests |
 | User pointer masking | Ssnpm selects U-mode PMLEN=0 or PMLEN=7 through `senvcfg.PMM`; Supm is implied; RV64 FDT advertises both | RVA23 WARL and tagged physical load/store tests; FDT tests |
 | NAPOT translation contiguity | Svnapot maps aligned 64 KiB regions through level-0 PTEs for Sv39/Sv48/Sv57; invalid N encodings fault; FDT advertises Svnapot | Svnapot alias translation and reserved-encoding tests; FDT tests |
@@ -96,7 +97,9 @@ SimRV verifies its default 64-bit profile (`rva23s64`) against the RISC-V Archit
 
 - Full RVA23S64 is not yet qualified. The following mandatory requirements remain incomplete or
   need profile-level qualification:
-  - Sha is incomplete: H; Ssstateen (`sstateen0-3` and `hstateen0-3`); Shcounterenw; Shvstvala;
+  - Sha is incomplete: architectural H-mode and guest transitions; complete Ssstateen enforcement
+    (`sstateen0-3` and `hstateen0-3` CSR banks now exist, but VS/VU access behavior is not wired);
+    Shcounterenw; Shvstvala;
     Shtvala; Shvstvecd; Shvsatpa; and Shgatpa. The G-stage page-walk core supports Sv39x4,
     Sv48x4, and Sv57x4, but `hgatp`, VS-stage translation composition, guest privilege modes,
     guest trap values, and writable guest counter enables are not wired into architectural

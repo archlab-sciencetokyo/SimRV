@@ -1167,6 +1167,44 @@ void test_sscounterenw_allows_enabled_hpm_counters() {
     TEST_ASSERT(supervisor_enabled.rcsr == kHpmRead);
 }
 
+void test_sha_state_enable_csrs() {
+    simrv::core::Machine machine;
+    auto& cpu = machine.primary_hart();
+    constexpr uint64_t kStateenSuperEnable = uint64_t{1} << 63U;
+
+    TEST_ASSERT(cpu.csr_file.write(simrv::core::Csr::Mstateen0, kStateenSuperEnable).has_value());
+    auto mstateen = cpu.csr_file.read(simrv::core::Csr::Mstateen0);
+    TEST_ASSERT(mstateen.has_value() && *mstateen == kStateenSuperEnable);
+    TEST_ASSERT(cpu.csr_file.write(simrv::core::Csr::Sstateen0, kStateenSuperEnable).has_value());
+    auto sstateen = cpu.csr_file.read(simrv::core::Csr::Sstateen0);
+    TEST_ASSERT(sstateen.has_value() && *sstateen == kStateenSuperEnable);
+
+    cpu.state().mstateen[0] = 0;
+    cpu.state().priv = simrv::xlen::PrivilegeLevel::Supervisor;
+    sstateen = cpu.csr_file.read(simrv::core::Csr::Sstateen0);
+    TEST_ASSERT(!sstateen.has_value());
+    TEST_ASSERT(!cpu.csr_file.write(simrv::core::Csr::Sstateen0, kStateenSuperEnable).has_value());
+    TEST_ASSERT(cpu.state().sstateen[0] == kStateenSuperEnable);
+
+    const auto hstateen_csr = simrv::core::csr_num(simrv::core::Csr::Hstateen0);
+    TEST_ASSERT(!simrv::core::TrapController::can_access_csr(
+        cpu.state().priv, cpu.state().misa, hstateen_csr, false));
+    cpu.state().misa |= simrv::isa::misa_extension_bit(simrv::isa::IsaExtension::H);
+    TEST_ASSERT(simrv::core::TrapController::can_access_csr(
+        cpu.state().priv, cpu.state().misa, hstateen_csr, false));
+
+    cpu.state().priv = simrv::xlen::PrivilegeLevel::Machine;
+    cpu.state().mstateen[0] = kStateenSuperEnable;
+    TEST_ASSERT(cpu.csr_file.write(simrv::core::Csr::Hstateen0, kStateenSuperEnable).has_value());
+    auto hstateen = cpu.csr_file.read(simrv::core::Csr::Hstateen0);
+    TEST_ASSERT(hstateen.has_value() && *hstateen == kStateenSuperEnable);
+    cpu.state().mstateen[0] = 0;
+    cpu.state().priv = simrv::xlen::PrivilegeLevel::Supervisor;
+    hstateen = cpu.csr_file.read(simrv::core::Csr::Hstateen0);
+    TEST_ASSERT(!hstateen.has_value());
+    TEST_ASSERT(!cpu.csr_file.write(simrv::core::Csr::Hstateen0, 0).has_value());
+}
+
 void test_zicntr_base_counter_values_and_access() {
     simrv::core::Machine machine;
     auto& cpu = machine.primary_hart();
@@ -1662,6 +1700,9 @@ int main() {
     std::cout << "[RUN] test_sscounterenw_allows_enabled_hpm_counters" << std::endl;
     test_sscounterenw_allows_enabled_hpm_counters();
     std::cout << "[PASS] test_sscounterenw_allows_enabled_hpm_counters" << std::endl;
+    std::cout << "[RUN] test_sha_state_enable_csrs" << std::endl;
+    test_sha_state_enable_csrs();
+    std::cout << "[PASS] test_sha_state_enable_csrs" << std::endl;
     std::cout << "[RUN] test_zicntr_base_counter_values_and_access" << std::endl;
     test_zicntr_base_counter_values_and_access();
     std::cout << "[PASS] test_zicntr_base_counter_values_and_access" << std::endl;

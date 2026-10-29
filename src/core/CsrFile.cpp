@@ -140,6 +140,46 @@ void CsrFile::setMstatus(simrv::xlen::CsrValue wdata) {
 
 auto CsrFile::read(simrv::xlen::CsrNumber addr) const
     -> std::expected<simrv::xlen::CsrValue, ExceptionCode> {
+    const uint16_t address = addr.value();
+    constexpr uint64_t kStateenSuperEnable = uint64_t{1} << 63U;
+    if (address >= 0x30CU && address <= 0x30FU) {
+        return static_cast<simrv::xlen::CsrValue>(
+            cpu_.state().mstateen[address - 0x30CU] & kStateenSuperEnable);
+    }
+    if (address >= 0x31CU && address <= 0x31FU) {
+        if (cpu_.state().regs.xlen != 32) return std::unexpected(ExceptionCode::IllegalInstruction);
+        return static_cast<simrv::xlen::CsrValue>(cpu_.state().mstateen[address - 0x31CU] >> 32U);
+    }
+    if (address >= 0x10CU && address <= 0x10FU) {
+        const size_t bank = address - 0x10CU;
+        const uint64_t supervisor_enable = uint64_t{1} << (cpu_.state().regs.xlen - 1U);
+        if (cpu_.state().priv != simrv::xlen::PrivilegeLevel::Machine &&
+            (cpu_.state().mstateen[bank] & kStateenSuperEnable) == 0) {
+            return std::unexpected(ExceptionCode::IllegalInstruction);
+        }
+        return static_cast<simrv::xlen::CsrValue>(cpu_.state().sstateen[bank] & supervisor_enable);
+    }
+    if (address >= 0x60CU && address <= 0x60FU) {
+        const size_t bank = address - 0x60CU;
+        if (cpu_.state().priv != simrv::xlen::PrivilegeLevel::Machine &&
+            (cpu_.state().mstateen[bank] & kStateenSuperEnable) == 0) {
+            if (isa::misa_has_extension(cpu_.state().misa, isa::IsaExtension::H)) {
+                return std::unexpected(ExceptionCode::IllegalInstruction);
+            }
+            return simrv::xlen::CsrValue{0};
+        }
+        return static_cast<simrv::xlen::CsrValue>(cpu_.state().hstateen[bank] &
+                                                  kStateenSuperEnable);
+    }
+    if (address >= 0x71CU && address <= 0x71FU) {
+        if (cpu_.state().regs.xlen != 32) return std::unexpected(ExceptionCode::IllegalInstruction);
+        const size_t bank = address - 0x71CU;
+        if ((cpu_.state().mstateen[bank] & kStateenSuperEnable) == 0) {
+            return simrv::xlen::CsrValue{0};
+        }
+        return static_cast<simrv::xlen::CsrValue>(cpu_.state().hstateen[bank] >> 32U);
+    }
+
     auto require_fp = [this]() -> std::expected<void, ExceptionCode> {
         if (!fp_accessible(cpu_.state())) {
             return std::unexpected(ExceptionCode::IllegalInstruction);
@@ -451,6 +491,55 @@ auto CsrFile::read(simrv::xlen::CsrNumber addr) const
 
 auto CsrFile::write(simrv::xlen::CsrNumber addr, simrv::xlen::CsrValue wdata)
     -> std::expected<void, ExceptionCode> {  // NOLINT(bugprone-easily-swappable-parameters)
+    const uint16_t address = addr.value();
+    constexpr uint64_t kStateenSuperEnable = uint64_t{1} << 63U;
+    if (address >= 0x30CU && address <= 0x30FU) {
+        auto& value = cpu_.state().mstateen[address - 0x30CU];
+        value = (value & ~kStateenSuperEnable) |
+                (static_cast<uint64_t>(wdata) & kStateenSuperEnable);
+        return {};
+    }
+    if (address >= 0x31CU && address <= 0x31FU) {
+        if (cpu_.state().regs.xlen != 32) return std::unexpected(ExceptionCode::IllegalInstruction);
+        auto& value = cpu_.state().mstateen[address - 0x31CU];
+        value = (value & 0xFFFFFFFFULL) | (static_cast<uint64_t>(wdata) << 32U);
+        value &= kStateenSuperEnable;
+        return {};
+    }
+    if (address >= 0x10CU && address <= 0x10FU) {
+        const size_t bank = address - 0x10CU;
+        const uint64_t supervisor_enable = uint64_t{1} << (cpu_.state().regs.xlen - 1U);
+        if (cpu_.state().priv != simrv::xlen::PrivilegeLevel::Machine &&
+            (cpu_.state().mstateen[bank] & kStateenSuperEnable) == 0) {
+            return std::unexpected(ExceptionCode::IllegalInstruction);
+        }
+        cpu_.state().sstateen[bank] = static_cast<uint64_t>(wdata) & supervisor_enable;
+        return {};
+    }
+    if (address >= 0x60CU && address <= 0x60FU) {
+        const size_t bank = address - 0x60CU;
+        if (cpu_.state().priv != simrv::xlen::PrivilegeLevel::Machine &&
+            (cpu_.state().mstateen[bank] & kStateenSuperEnable) == 0) {
+            if (isa::misa_has_extension(cpu_.state().misa, isa::IsaExtension::H)) {
+                return std::unexpected(ExceptionCode::IllegalInstruction);
+            }
+            return {};
+        }
+        auto& value = cpu_.state().hstateen[bank];
+        value = (value & ~kStateenSuperEnable) |
+                (static_cast<uint64_t>(wdata) & kStateenSuperEnable);
+        return {};
+    }
+    if (address >= 0x71CU && address <= 0x71FU) {
+        if (cpu_.state().regs.xlen != 32) return std::unexpected(ExceptionCode::IllegalInstruction);
+        const size_t bank = address - 0x71CU;
+        if ((cpu_.state().mstateen[bank] & kStateenSuperEnable) == 0) return {};
+        auto& value = cpu_.state().hstateen[bank];
+        value = (value & 0xFFFFFFFFULL) | (static_cast<uint64_t>(wdata) << 32U);
+        value &= kStateenSuperEnable;
+        return {};
+    }
+
     const bool has_s = isa::misa_has_extension(cpu_.state().misa, isa::IsaExtension::S);
     const simrv::xlen::CsrValue interrupt_mask = interrupt_implemented_mask(has_s);
     const auto log_pending_changes = [this](simrv::xlen::CsrValue before, std::string_view source) {

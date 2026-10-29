@@ -282,6 +282,12 @@ auto TrapController::can_access_csr(simrv::xlen::PrivilegeLevel current_priv,
                                     bool is_write) -> bool {
     // Debug CSRs require architectural Debug Mode, which the guest execution
     // engine does not implement. M-mode also cannot override CSR nonexistence.
+    const auto address = csr_addr.value();
+    if (address >= 0x60CU && address <= 0x60FU) {
+        if (!isa::misa_has_extension(misa, isa::IsaExtension::H)) return false;
+        if (current_priv < kPrivSupervisor) return false;
+        return !is_write || !csr_addr.is_read_only();
+    }
     return csr_access_permitted(current_priv, isa::misa_has_extension(misa, isa::IsaExtension::S),
                                 isa::misa_has_extension(misa, isa::IsaExtension::U), csr_addr,
                                 is_write);

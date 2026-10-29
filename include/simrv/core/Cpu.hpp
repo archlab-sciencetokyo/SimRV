@@ -87,6 +87,7 @@ struct alignas(128) ArchState {
     simrv::xlen::CsrValue mcounteren{};     ///< Machine Counter Enable (controls user/supervisor
                                             ///< access to performance counters)
     simrv::xlen::CsrValue mcountinhibit{};  ///< Machine Counter Inhibit (mcountinhibit, 0x320)
+    std::array<uint64_t, 4> mstateen{};     ///< Machine State Enable banks (0x30C-30F)
     simrv::xlen::Counter minstret{};        ///< Architectural retired-instruction counter
     simrv::xlen::CsrValue menvcfg{};        ///< Machine Environment Configuration (menvcfg, 0x30A)
     simrv::xlen::CsrValue menvcfgh{};  ///< Machine Environment Configuration High (RV32, 0x31A)
@@ -107,6 +108,8 @@ struct alignas(128) ArchState {
     simrv::xlen::CsrValue satp{};        ///< Supervisor Address Translation and Protection (virtual
                                          ///< memory mode and page table base physical address)
     simrv::xlen::CsrValue scounteren{};  ///< Supervisor Counter Enable
+    std::array<uint64_t, 4> sstateen{};  ///< Supervisor State Enable banks (0x10C-10F)
+    std::array<uint64_t, 4> hstateen{};  ///< Hypervisor State Enable banks (0x60C-60F)
 
     /* Floating-Point CSRs */
     simrv::xlen::CsrValue fcsr{};  ///< Floating-Point Control and Status register (rounding mode
