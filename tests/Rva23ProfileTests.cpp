@@ -1965,6 +1965,21 @@ void test_cbo_zero_execution() {
     // Verify byte right after block is still 0xAA
     TEST_ASSERT(ram_ptr[kLineBytes] == static_cast<simrv::xlen::Byte>(0xAA));
 
+    // User pointer masking applies to cache-block operations as well as loads/stores.
+    std::memset(machine.ram_view().unchecked_ptr(target_paddr), 0xAA, kLineBytes);
+    cpu.state().misa |= misa_extension_bit(IsaExtension::U);
+    cpu.state().priv = kPrivUser;
+    cpu.state().senvcfg = (uint64_t{2} << 32U) | (uint64_t{1} << 6U);
+    cpu.state().menvcfg |= uint64_t{1} << 6U;
+    simrv::memory::MemoryAccess::execute_cmo(
+        machine.memory(), cpu,
+        simrv::xlen::VirtAddr{target_paddr ^ (simrv::xlen::Address{1} << 63U)},
+        OperationId::CBO_ZERO);
+    TEST_ASSERT(!cpu.active_context().pending_exception.has_value());
+    for (size_t i = 0; i < kLineBytes; ++i) {
+        TEST_ASSERT(ram_ptr[i] == static_cast<simrv::xlen::Byte>(0));
+    }
+
     // Test permission check: if menvcfg.CBZE = 0, supervisor cbo.zero must trap
     cpu.state().priv = kPrivSupervisor;
     cpu.state().menvcfg &= ~(1ULL << 6);  // Clear CBZE

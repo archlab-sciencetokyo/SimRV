@@ -111,6 +111,13 @@ auto MemorySubsystem::memory_geometry() const noexcept -> const simrv::core::Mem
     return machine_.configuration().memory;
 }
 
+auto MemoryAccess::mask_user_pointer(core::CPU& cpu, simrv::xlen::VirtAddr address)
+    -> simrv::xlen::VirtAddr {
+    const unsigned active_xlen = cpu.effective_data_xlen();
+    if (active_xlen == 32) address &= 0xFFFFFFFFULL;
+    return apply_user_pointer_mask(cpu, address, active_xlen);
+}
+
 auto MemoryAccess::target_read(MemorySubsystem& mem, core::CPU& cpu, simrv::xlen::VirtAddr v_addr,
                                isa::Funct3 funct3) -> simrv::xlen::Word {
     HypervisorMemoryAccessScope hypervisor_scope(cpu);
@@ -1067,6 +1074,7 @@ void MemoryAccess::execute_cmo(MemorySubsystem& mem, core::CPU& cpu, simrv::xlen
                                isa::OperationId op) {
     const auto eff_priv = cpu.effective_data_privilege();
     const unsigned active_xlen = cpu.effective_data_xlen();
+    addr = apply_user_pointer_mask(cpu, addr, active_xlen);
 
     // 1. Permission checks
     if (op == isa::OperationId::CBO_ZERO) {
