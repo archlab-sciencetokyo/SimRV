@@ -40,6 +40,26 @@ auto host_exceptions_to_fflags(int exceptions) -> simrv::xlen::CsrValue {
     return flags;
 }
 
+auto is_fp_to_integer_conversion(isa::OperationId op_id) -> bool {
+    switch (op_id) {
+        case isa::OperationId::VFCVT_XU_F_V:
+        case isa::OperationId::VFCVT_X_F_V:
+        case isa::OperationId::VFCVT_RTZ_XU_F_V:
+        case isa::OperationId::VFCVT_RTZ_X_F_V:
+        case isa::OperationId::VFWCVT_XU_F_V:
+        case isa::OperationId::VFWCVT_X_F_V:
+        case isa::OperationId::VFWCVT_RTZ_XU_F_V:
+        case isa::OperationId::VFWCVT_RTZ_X_F_V:
+        case isa::OperationId::VFNCVT_XU_F_W:
+        case isa::OperationId::VFNCVT_X_F_W:
+        case isa::OperationId::VFNCVT_RTZ_XU_F_W:
+        case isa::OperationId::VFNCVT_RTZ_X_F_W:
+            return true;
+        default:
+            return false;
+    }
+}
+
 auto frm_to_host_round(simrv::xlen::CsrValue fcsr) -> int {
     switch (isa::frm_rounding_mode(fcsr)) {
         case isa::RoundingMode::Rtz:
@@ -1752,8 +1772,10 @@ void execute_vector_float(core::CPU& cpu, isa::OperationId op_id, simrv::xlen::R
             break;
     }
 
-    cpu.state().fcsr |=
-        software_flags | host_exceptions_to_fflags(std::fetestexcept(FE_ALL_EXCEPT));
+    const auto host_flags = is_fp_to_integer_conversion(op_id)
+                                ? simrv::xlen::CsrValue{0}
+                                : host_exceptions_to_fflags(std::fetestexcept(FE_ALL_EXCEPT));
+    cpu.state().fcsr |= software_flags | host_flags;
     std::fesetround(old_round);
 }
 
