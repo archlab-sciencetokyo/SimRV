@@ -37,6 +37,12 @@ auto trap_delegated_to_supervisor(const ArchState& state, simrv::xlen::TrapCause
         return false;
     }
     const auto cause_code = static_cast<simrv::xlen::CsrValue>(trap_exception_code(cause));
+    if (trap_is_interrupt(cause) &&
+        isa::misa_has_extension(state.misa, isa::IsaExtension::H) &&
+        (cause_code == 2U || cause_code == 6U || cause_code == 10U)) {
+        // VS-level interrupts are always delegated past M-mode to HS-mode.
+        return true;
+    }
     if (state.virt && isa::misa_has_extension(state.misa, isa::IsaExtension::H) &&
         !trap_is_interrupt(cause) &&
         (cause_code == 9U || (cause_code >= 20U && cause_code <= 23U))) {
@@ -279,12 +285,23 @@ void TrapController::raise_exception(CPU& cpu, simrv::xlen::TrapCause cause,
     const simrv::xlen::CsrValue trap_vector =
         delegated_to_vs ? state.vstvec : (delegated ? state.stvec : state.mtvec);
     if (delegated_to_vs) {
-        stack_trap_interrupt_state(state, MstatusBit::Sie, MstatusBit::Spie);
+        auto& status = state.vsstatus;
+        if ((status & MstatusBit::Sie) != 0) {
+            status |= MstatusBit::Spie;
+        } else {
+            status &= ~static_cast<simrv::xlen::CsrValue>(MstatusBit::Spie);
+        }
+        status &= ~static_cast<simrv::xlen::CsrValue>(MstatusBit::Sie);
     } else {
         stack_trap_interrupt_state(state, interrupt_enable, previous_interrupt_enable);
     }
     if (delegated_to_vs) {
-        state.vscause = cause;
+        const auto cause_code = trap_exception_code(cause);
+        const auto vs_cause = trap_is_interrupt(cause) &&
+                                      (cause_code == 2U || cause_code == 6U || cause_code == 10U)
+                                  ? (cause_code - 1U)
+                                  : cause_code;
+        state.vscause = (cause & kInterruptCauseBit) | vs_cause;
         state.vsepc = trap_pc;
         state.vstval = tval;
         state.vsstatus = mstatus_with_spp(state.vsstatus, state.priv);

@@ -24,6 +24,12 @@ namespace {
 constexpr unsigned kHighWordShift = 32;
 constexpr simrv::xlen::CsrValue kCounterEnableMask =
     static_cast<simrv::xlen::CsrValue>(0xFFFFFFFFU);
+constexpr simrv::xlen::CsrValue kVsInterruptBits = (simrv::xlen::CsrValue{1} << 2U) |
+                                                     (simrv::xlen::CsrValue{1} << 6U) |
+                                                     (simrv::xlen::CsrValue{1} << 10U);
+constexpr simrv::xlen::CsrValue kSupervisorInterruptBits =
+    (simrv::xlen::CsrValue{1} << 1U) | (simrv::xlen::CsrValue{1} << 5U) |
+    (simrv::xlen::CsrValue{1} << 9U);
 
 [[nodiscard]] constexpr auto fp_accessible(const ArchState& state) noexcept -> bool {
     return isa::misa_has_extension(state.misa, isa::IsaExtension::F) &&
@@ -256,14 +262,17 @@ auto CsrFile::read(simrv::xlen::CsrNumber addr) const
                                            (simrv::xlen::CsrValue{1} << 10U));
             break;
         case csr_addr(Csr::Hip):
-            rcsr = (cpu_.state().hip | cpu_.state().hvip) &
+            rcsr = (cpu_.state().hip | cpu_.state().hvip |
+                    vs_interrupts_to_h(cpu_.state().vsip)) &
                    ((simrv::xlen::CsrValue{1} << 2U) | (simrv::xlen::CsrValue{1} << 6U) |
                     (simrv::xlen::CsrValue{1} << 10U));
             break;
         case csr_addr(Csr::Hvip):
-            rcsr = cpu_.state().hvip & ((simrv::xlen::CsrValue{1} << 2U) |
-                                        (simrv::xlen::CsrValue{1} << 6U) |
-                                        (simrv::xlen::CsrValue{1} << 10U));
+            rcsr = (cpu_.state().hvip |
+                    (vs_interrupts_to_h(cpu_.state().vsip) &
+                     std::to_underlying(MipBit::Hsip))) &
+                   ((simrv::xlen::CsrValue{1} << 2U) | (simrv::xlen::CsrValue{1} << 6U) |
+                    (simrv::xlen::CsrValue{1} << 10U));
             break;
         case csr_addr(Csr::Henvcfg):
             rcsr = cpu_.state().henvcfg;
@@ -283,7 +292,7 @@ auto CsrFile::read(simrv::xlen::CsrNumber addr) const
                                       cpu_.state().regs.xlen);
             break;
         case csr_addr(Csr::Vsie):
-            rcsr = cpu_.state().vsie & cpu_.state().hideleg;
+            rcsr = cpu_.state().vsie & h_interrupts_to_vs(cpu_.state().hideleg);
             break;
         case csr_addr(Csr::Vstvec):
             rcsr = cpu_.state().vstvec;
@@ -301,7 +310,9 @@ auto CsrFile::read(simrv::xlen::CsrNumber addr) const
             rcsr = cpu_.state().vstval;
             break;
         case csr_addr(Csr::Vsip):
-            rcsr = cpu_.state().vsip & cpu_.state().hideleg;
+            rcsr = (cpu_.state().vsip |
+                    h_interrupts_to_vs(cpu_.state().hip | cpu_.state().hvip)) &
+                   h_interrupts_to_vs(cpu_.state().hideleg);
             break;
         case csr_addr(Csr::Vsatp):
             rcsr = cpu_.state().vsatp;
@@ -309,8 +320,11 @@ auto CsrFile::read(simrv::xlen::CsrNumber addr) const
 
         case csr_addr(Csr::Sie):
             rcsr = cpu_.state().virt
-                       ? (cpu_.state().vsie & cpu_.state().hideleg)
-                       : (cpu_.state().mie & cpu_.state().mideleg & interrupt_implemented_mask(true));
+                       ? (cpu_.state().vsie & h_interrupts_to_vs(cpu_.state().hideleg))
+                       : (cpu_.state().mie & cpu_.state().mideleg &
+                          interrupt_implemented_mask(
+                              true, isa::misa_has_extension(cpu_.state().misa,
+                                                            isa::IsaExtension::H)));
             break;
         case csr_addr(Csr::Stvec):
             rcsr = cpu_.state().virt ? cpu_.state().vstvec : cpu_.state().stvec;
@@ -353,8 +367,11 @@ auto CsrFile::read(simrv::xlen::CsrNumber addr) const
             break;
         case csr_addr(Csr::Sip):
             rcsr = cpu_.state().virt
-                       ? (cpu_.state().vsip & cpu_.state().hideleg)
-                       : (cpu_.state().mip & cpu_.state().mideleg & interrupt_implemented_mask(true));
+                       ? ((cpu_.state().vsip |
+                           h_interrupts_to_vs(cpu_.state().hip | cpu_.state().hvip)) &
+                          h_interrupts_to_vs(cpu_.state().hideleg))
+                       : (cpu_.state().mip & cpu_.state().mideleg &
+                          interrupt_implemented_mask(true));
             break;
         case csr_addr(Csr::Satp):
             rcsr = cpu_.state().virt ? cpu_.state().vsatp : cpu_.state().satp;
@@ -404,10 +421,15 @@ auto CsrFile::read(simrv::xlen::CsrNumber addr) const
             break;
         case csr_addr(Csr::Mideleg):
             rcsr = cpu_.state().mideleg & mideleg_writable_mask(true);
+            if (isa::misa_has_extension(cpu_.state().misa, isa::IsaExtension::H)) {
+                rcsr |= kVsInterruptBits;
+            }
             break;
         case csr_addr(Csr::Mie):
             rcsr = cpu_.state().mie & interrupt_implemented_mask(isa::misa_has_extension(
-                                          cpu_.state().misa, isa::IsaExtension::S));
+                                          cpu_.state().misa, isa::IsaExtension::S),
+                                      isa::misa_has_extension(cpu_.state().misa,
+                                                              isa::IsaExtension::H));
             break;
         case csr_addr(Csr::Mtvec):
             rcsr = cpu_.state().mtvec;
@@ -444,8 +466,11 @@ auto CsrFile::read(simrv::xlen::CsrNumber addr) const
             rcsr = cpu_.state().mtval;
             break;
         case csr_addr(Csr::Mip):
-            rcsr = cpu_.state().mip & interrupt_implemented_mask(isa::misa_has_extension(
-                                          cpu_.state().misa, isa::IsaExtension::S));
+            rcsr = (cpu_.state().mip | cpu_.state().hip | cpu_.state().hvip |
+                    vs_interrupts_to_h(cpu_.state().vsip)) &
+                   interrupt_implemented_mask(
+                       isa::misa_has_extension(cpu_.state().misa, isa::IsaExtension::S),
+                       isa::misa_has_extension(cpu_.state().misa, isa::IsaExtension::H));
             break;
         case csr_addr(Csr::Misa):
             rcsr = isa::misa_with_mxl(cpu_.state().misa, cpu_.state().regs.xlen);
@@ -641,7 +666,8 @@ auto CsrFile::write(simrv::xlen::CsrNumber addr, simrv::xlen::CsrValue wdata)
     }
 
     const bool has_s = isa::misa_has_extension(cpu_.state().misa, isa::IsaExtension::S);
-    const simrv::xlen::CsrValue interrupt_mask = interrupt_implemented_mask(has_s);
+    const bool has_h = isa::misa_has_extension(cpu_.state().misa, isa::IsaExtension::H);
+    const simrv::xlen::CsrValue interrupt_mask = interrupt_implemented_mask(has_s, has_h);
     const auto log_pending_changes = [this](simrv::xlen::CsrValue before, std::string_view source) {
         if (cpu_.machine_ == nullptr) return;
         constexpr std::array interrupt_bits = {
@@ -811,9 +837,8 @@ auto CsrFile::write(simrv::xlen::CsrNumber addr, simrv::xlen::CsrValue wdata)
                                             (simrv::xlen::CsrValue{1} << 10U));
             break;
         case csr_addr(Csr::Hip):
-            cpu_.state().hip = wdata & ((simrv::xlen::CsrValue{1} << 2U) |
-                                        (simrv::xlen::CsrValue{1} << 6U) |
-                                        (simrv::xlen::CsrValue{1} << 10U));
+            cpu_.state().hvip = (cpu_.state().hvip & ~std::to_underlying(MipBit::Hsip)) |
+                                (wdata & std::to_underlying(MipBit::Hsip));
             break;
         case csr_addr(Csr::Hvip):
             cpu_.state().hvip = wdata & ((simrv::xlen::CsrValue{1} << 2U) |
@@ -846,7 +871,8 @@ auto CsrFile::write(simrv::xlen::CsrNumber addr, simrv::xlen::CsrValue wdata)
                 (cpu_.state().vsstatus & ~kSstatusMask) | (wdata & kSstatusMask);
             break;
         case csr_addr(Csr::Vsie):
-            cpu_.state().vsie = wdata & cpu_.state().hideleg;
+            cpu_.state().vsie = wdata & h_interrupts_to_vs(cpu_.state().hideleg) &
+                                kSupervisorInterruptBits;
             break;
         case csr_addr(Csr::Vstvec):
             cpu_.state().vstvec = wdata & ~static_cast<simrv::xlen::CsrValue>(2);
@@ -864,8 +890,10 @@ auto CsrFile::write(simrv::xlen::CsrNumber addr, simrv::xlen::CsrValue wdata)
             cpu_.state().vstval = wdata;
             break;
         case csr_addr(Csr::Vsip):
-            cpu_.state().vsip = (cpu_.state().vsip & ~cpu_.state().hideleg) |
-                                (wdata & cpu_.state().hideleg);
+            cpu_.state().vsip = (cpu_.state().vsip &
+                                 ~h_interrupts_to_vs(cpu_.state().hideleg)) |
+                                (wdata & h_interrupts_to_vs(cpu_.state().hideleg) &
+                                 kSupervisorInterruptBits);
             break;
         case csr_addr(Csr::Vsatp): {
             const unsigned xlen = cpu_.state().regs.xlen;
@@ -1025,8 +1053,8 @@ auto CsrFile::write(simrv::xlen::CsrNumber addr, simrv::xlen::CsrValue wdata)
 
         case csr_addr(Csr::Sie):
             if (cpu_.state().virt) {
-                cpu_.state().vsie =
-                    (cpu_.state().vsie & ~cpu_.state().hideleg) | (wdata & cpu_.state().hideleg);
+                const auto mask = h_interrupts_to_vs(cpu_.state().hideleg);
+                cpu_.state().vsie = (cpu_.state().vsie & ~mask) | (wdata & mask);
             } else {
                 cpu_.state().mie =
                     (cpu_.state().mie & ~cpu_.state().mideleg) | (wdata & cpu_.state().mideleg);
@@ -1034,7 +1062,7 @@ auto CsrFile::write(simrv::xlen::CsrNumber addr, simrv::xlen::CsrValue wdata)
             break;
         case csr_addr(Csr::Sip): {
             if (cpu_.state().virt) {
-                const auto mask = cpu_.state().hideleg;
+                const auto mask = h_interrupts_to_vs(cpu_.state().hideleg);
                 cpu_.state().vsip = (cpu_.state().vsip & ~mask) | (wdata & mask);
                 break;
             }
@@ -1057,16 +1085,23 @@ auto CsrFile::write(simrv::xlen::CsrNumber addr, simrv::xlen::CsrValue wdata)
             break;
         case csr_addr(Csr::Mideleg):
             cpu_.state().mideleg = wdata & mideleg_writable_mask(has_s);
+            if (isa::misa_has_extension(cpu_.state().misa, isa::IsaExtension::H)) {
+                cpu_.state().mideleg |= kVsInterruptBits;
+            }
             break;
         case csr_addr(Csr::Mie):
             cpu_.state().mie = wdata & interrupt_mask;
             break;
         case csr_addr(Csr::Mip): {
             const simrv::xlen::CsrValue pending_before = cpu_.state().mip;
-            const simrv::xlen::CsrValue writable = mip_writable_mask(has_s);
+            const simrv::xlen::CsrValue writable = mip_writable_mask(has_s, has_h);
             const simrv::xlen::CsrValue sourced = MipBit::Seip | MipBit::Stip;
             const simrv::xlen::CsrValue ordinary = writable & ~sourced;
             cpu_.state().mip = (cpu_.state().mip & ~ordinary) | (wdata & ordinary);
+            if (has_h) {
+                cpu_.state().hvip = (cpu_.state().hvip & ~std::to_underlying(MipBit::Hsip)) |
+                                    (wdata & std::to_underlying(MipBit::Hsip));
+            }
             cpu_.state().seip_software = (wdata & writable & MipBit::Seip) != 0;
             cpu_.state().stip_software = (wdata & writable & MipBit::Stip) != 0;
             cpu_.state().refresh_supervisor_pending();

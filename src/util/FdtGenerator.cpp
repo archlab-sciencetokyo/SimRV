@@ -229,6 +229,9 @@ auto generate_platform_fdt(const core::MachineConfig& config,
         guest_extensions.emplace_back("ssnpm");
         guest_extensions.emplace_back("supm");
     }
+    if (simrv::isa::misa_has_extension(config.isa.isa_preset, simrv::isa::IsaExtension::H)) {
+        guest_extensions.emplace_back("h");
+    }
 
     for (uint32_t hart = 0; hart < num_harts; ++hart) {
         fdt.begin_node(std::format("cpu@{}", hart));

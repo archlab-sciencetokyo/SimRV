@@ -126,37 +126,6 @@ void CPU::commit_control_flow_and_traps([[maybe_unused]] Machine& machine) {
         }
     }
 
-    simrv::xlen::Word const pending_interrupts = state_.mip & state_.mie;
-    simrv::xlen::Word enable_interrupts = 0;
-    simrv::xlen::Word mask = 0;
-    simrv::xlen::Word irq_num = 32;
-    if (simrv::compiler::unlikely(pending_interrupts != 0u)) {
-        switch (state_.priv) {
-            case kPrivMachine: {
-                if ((state_.mstatus & MstatusBit::Mie) != 0u) {
-                    enable_interrupts = ~state_.mideleg;
-                }
-                break;
-            }
-            case kPrivSupervisor: {
-                enable_interrupts = ~state_.mideleg;
-                if ((state_.mstatus & MstatusBit::Sie) != 0u) {
-                    enable_interrupts |= state_.mideleg;
-                }
-                break;
-            }
-            case kPrivUser: {
-                enable_interrupts = ~0;
-                break;
-            }
-            default:
-                break;
-        }
-        mask = pending_interrupts & enable_interrupts;
-        if (mask != 0) {
-            irq_num = select_highest_priority_interrupt(mask);
-        }
-    }
     if (ctx.pending_exception.has_value()) {
         state_.pc = ctx.cpc.raw();
         raise_exception(std::to_underlying(*ctx.pending_exception), ctx.pending_tval);
@@ -178,9 +147,7 @@ void CPU::commit_control_flow_and_traps([[maybe_unused]] Machine& machine) {
             state_.pc = static_cast<simrv::xlen::Register>(
                 static_cast<int64_t>(static_cast<int32_t>(state_.pc)));
         }
-        if (mask != 0) {
-            raise_exception(kInterruptCauseBit | irq_num, 0);
-        }
+        dispatch_pending_interrupts();
     }
 }
 

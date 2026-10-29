@@ -116,6 +116,20 @@ enum class MipBit : simrv::xlen::CsrValue {
     Lcofip = (1u << 13),
 };
 
+[[nodiscard]] constexpr auto vs_interrupts_to_h(simrv::xlen::CsrValue value) noexcept
+    -> simrv::xlen::CsrValue {
+    return ((value & (simrv::xlen::CsrValue{1} << 1U)) << 1U) |
+           ((value & (simrv::xlen::CsrValue{1} << 5U)) << 1U) |
+           ((value & (simrv::xlen::CsrValue{1} << 9U)) << 1U);
+}
+
+[[nodiscard]] constexpr auto h_interrupts_to_vs(simrv::xlen::CsrValue value) noexcept
+    -> simrv::xlen::CsrValue {
+    return ((value & (simrv::xlen::CsrValue{1} << 2U)) >> 1U) |
+           ((value & (simrv::xlen::CsrValue{1} << 6U)) >> 1U) |
+           ((value & (simrv::xlen::CsrValue{1} << 10U)) >> 1U);
+}
+
 constexpr auto operator|(MipBit lhs, MipBit rhs) noexcept -> simrv::xlen::CsrValue {
     return std::to_underlying(lhs) | std::to_underlying(rhs);
 }
@@ -179,10 +193,14 @@ constexpr auto operator!=(MipBit lhs, I rhs) noexcept -> bool {
 }
 
 /** Standard interrupt bits implemented by the SimRV single-hart platform. */
-constexpr auto interrupt_implemented_mask(bool has_s) -> simrv::xlen::CsrValue {
+constexpr auto interrupt_implemented_mask(bool has_s, bool has_h = false)
+    -> simrv::xlen::CsrValue {
     simrv::xlen::CsrValue mask = MipBit::Msip | MipBit::Mtip | MipBit::Meip;
     if (has_s) {
         mask |= MipBit::Ssip | MipBit::Stip | MipBit::Seip | MipBit::Lcofip;
+    }
+    if (has_h) {
+        mask |= MipBit::Hsip | MipBit::Htip | MipBit::Heip;
     }
     return mask;
 }
@@ -193,8 +211,11 @@ constexpr auto interrupt_implemented_mask(bool has_s) -> simrv::xlen::CsrValue {
  * MSIP, MTIP, and MEIP are read-only signals sourced by CLINT/PLIC. Without
  * Sstc, M-mode may post SSIP, STIP, and the software component of SEIP.
  */
-constexpr auto mip_writable_mask(bool has_s) -> simrv::xlen::CsrValue {
-    return has_s ? (MipBit::Ssip | MipBit::Stip | MipBit::Seip | MipBit::Lcofip) : 0;
+constexpr auto mip_writable_mask(bool has_s, bool has_h = false) -> simrv::xlen::CsrValue {
+    simrv::xlen::CsrValue mask =
+        has_s ? (MipBit::Ssip | MipBit::Stip | MipBit::Seip | MipBit::Lcofip) : 0;
+    if (has_h) mask |= MipBit::Hsip;
+    return mask;
 }
 
 /** Supervisor interrupt delegation bits implemented by this platform. */

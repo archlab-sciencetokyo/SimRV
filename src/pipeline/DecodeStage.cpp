@@ -129,11 +129,17 @@ void CPU::fetch_operands(Machine& /*machine*/) {
                 (w_csr_addr >= 0xC80 && w_csr_addr <= 0xC9F)) {
                 const simrv::xlen::Word counter_bit = 1u << (w_csr_addr & 0x1Fu);
                 bool access_denied = (state_.mcounteren & counter_bit) == 0;
-                if (state_.priv == kPrivUser) {
-                    access_denied = access_denied || ((state_.scounteren & counter_bit) == 0);
-                }
                 if (access_denied) {
                     raise_decode_exception(ctx, ExceptionCode::IllegalInstruction);
+                    return;
+                }
+                if (state_.virt && (state_.hcounteren & counter_bit) == 0) {
+                    raise_decode_exception(ctx, ExceptionCode::VirtualInstruction);
+                    return;
+                }
+                if (state_.priv == kPrivUser && (state_.scounteren & counter_bit) == 0) {
+                    raise_decode_exception(ctx, state_.virt ? ExceptionCode::VirtualInstruction
+                                                            : ExceptionCode::IllegalInstruction);
                     return;
                 }
             }

@@ -1165,6 +1165,29 @@ void test_sscounterenw_allows_enabled_hpm_counters() {
     const auto& supervisor_enabled = cpu.active_context();
     TEST_ASSERT(!supervisor_enabled.pending_exception.has_value());
     TEST_ASSERT(supervisor_enabled.rcsr == kHpmRead);
+
+    cpu.state().misa |= simrv::isa::misa_extension_bit(simrv::isa::IsaExtension::H);
+    cpu.state().virt = true;
+    cpu.state().priv = simrv::xlen::PrivilegeLevel::Supervisor;
+    cpu.state().hcounteren = 0;
+    decode_hpm_read();
+    TEST_ASSERT(cpu.active_context().pending_exception ==
+                simrv::isa::ExceptionCode::VirtualInstruction);
+
+    cpu.state().hcounteren = simrv::xlen::CsrValue{1} << 3U;
+    decode_hpm_read();
+    TEST_ASSERT(!cpu.active_context().pending_exception.has_value());
+
+    cpu.state().priv = simrv::xlen::PrivilegeLevel::User;
+    cpu.state().scounteren = 0;
+    decode_hpm_read();
+    TEST_ASSERT(cpu.active_context().pending_exception ==
+                simrv::isa::ExceptionCode::VirtualInstruction);
+
+    cpu.state().mcounteren = 0;
+    decode_hpm_read();
+    TEST_ASSERT(cpu.active_context().pending_exception ==
+                simrv::isa::ExceptionCode::IllegalInstruction);
 }
 
 void test_sha_state_enable_csrs() {
@@ -1277,6 +1300,21 @@ void test_sha_hideleg_warl_mask() {
     const auto hideleg = cpu.csr_file.read(simrv::core::Csr::Hideleg);
     TEST_ASSERT(hideleg.has_value() && *hideleg == kExpected);
     TEST_ASSERT(cpu.state().hideleg == kExpected);
+    TEST_ASSERT(cpu.csr_file.write(simrv::core::Csr::Mideleg, 0).has_value());
+    const auto mideleg = cpu.csr_file.read(simrv::core::Csr::Mideleg);
+    TEST_ASSERT(mideleg.has_value() && *mideleg == kExpected);
+
+    cpu.state().virt = true;
+    constexpr simrv::xlen::CsrValue kSupervisorInterrupts =
+        (simrv::xlen::CsrValue{1} << 1U) | (simrv::xlen::CsrValue{1} << 5U) |
+        (simrv::xlen::CsrValue{1} << 9U);
+    TEST_ASSERT(cpu.csr_file.write(simrv::core::Csr::Sie, kSupervisorInterrupts).has_value());
+    const auto vsie = cpu.csr_file.read(simrv::core::Csr::Sie);
+    TEST_ASSERT(vsie.has_value() && *vsie == kSupervisorInterrupts);
+    TEST_ASSERT(cpu.csr_file.write(simrv::core::Csr::Sip, simrv::xlen::CsrValue{1} << 1U)
+                    .has_value());
+    const auto vsip = cpu.csr_file.read(simrv::core::Csr::Sip);
+    TEST_ASSERT(vsip.has_value() && *vsip == (simrv::xlen::CsrValue{1} << 1U));
 }
 
 void test_sha_guest_return_transitions() {
@@ -1355,6 +1393,25 @@ void test_sha_guest_exception_routing() {
         TEST_ASSERT((state.hstatus & (simrv::xlen::CsrValue{1} << 7U)) != 0);
         TEST_ASSERT((state.hstatus & (simrv::xlen::CsrValue{1} << 8U)) != 0);
         TEST_ASSERT(state.pc == 0x3000);
+    }
+    {
+        simrv::core::CPU cpu;
+        auto& state = cpu.state();
+        state.misa |= h_bit;
+        state.virt = true;
+        state.priv = simrv::xlen::PrivilegeLevel::Supervisor;
+        state.pc = 0x6000;
+        state.mideleg |= simrv::xlen::CsrValue{1} << 2U;
+        state.hideleg |= simrv::xlen::CsrValue{1} << 2U;
+        state.vsstatus |= simrv::core::MstatusBit::Sie;
+        state.vstvec = 0x7000;
+        simrv::core::TrapController::raise_exception(
+            cpu, simrv::isa::kInterruptCauseBit | 2U, 0);
+        TEST_ASSERT(state.virt);
+        TEST_ASSERT(state.vscause == (simrv::isa::kInterruptCauseBit | 1U));
+        TEST_ASSERT((state.vsstatus & simrv::core::MstatusBit::Sie) == 0);
+        TEST_ASSERT((state.vsstatus & simrv::core::MstatusBit::Spie) != 0);
+        TEST_ASSERT(state.pc == 0x7000);
     }
 }
 

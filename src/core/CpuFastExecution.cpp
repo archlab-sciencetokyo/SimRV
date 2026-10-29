@@ -5,6 +5,7 @@
 #include <array>
 #include <limits>
 #include <shared_mutex>
+#include <utility>
 
 #include "CpuExecutionHelpers.hpp"
 #include "simrv/CompilerHints.hpp"
@@ -583,7 +584,31 @@ auto CPU::execute_cached_fallback(Machine& machine) -> void {
 }
 
 void CPU::dispatch_pending_interrupts() {
-    simrv::xlen::Word const pending_interrupts = state_.mip & state_.mie;
+    simrv::xlen::Word pending_interrupts = state_.mip & state_.mie;
+    simrv::xlen::Word hypervisor_interrupt_candidates = 0;
+    if (isa::misa_has_extension(state_.misa, isa::IsaExtension::H)) {
+        constexpr std::array<std::pair<simrv::xlen::Word, simrv::xlen::Word>, 3> kVsInterrupts = {
+            std::pair{simrv::xlen::Word{1} << 2U, simrv::xlen::Word{1} << 1U},
+            std::pair{simrv::xlen::Word{1} << 6U, simrv::xlen::Word{1} << 5U},
+            std::pair{simrv::xlen::Word{1} << 10U, simrv::xlen::Word{1} << 9U},
+        };
+        const auto pending_h = state_.hip | state_.hvip | vs_interrupts_to_h(state_.vsip);
+        for (const auto& [h_bit, vs_bit] : kVsInterrupts) {
+            if ((pending_h & h_bit) == 0) continue;
+            if (state_.virt && (state_.hideleg & h_bit) != 0) {
+                const bool global_enabled =
+                    state_.priv != kPrivSupervisor || (state_.vsstatus & MstatusBit::Sie) != 0;
+                if (global_enabled && (state_.vsie & vs_bit) != 0) {
+                    hypervisor_interrupt_candidates |= h_bit;
+                }
+            } else if ((state_.hie & h_bit) != 0 &&
+                       (state_.priv < kPrivSupervisor || state_.virt ||
+                        (state_.mstatus & MstatusBit::Sie) != 0)) {
+                hypervisor_interrupt_candidates |= h_bit;
+            }
+        }
+        pending_interrupts |= hypervisor_interrupt_candidates;
+    }
     if (simrv::compiler::unlikely(pending_interrupts != 0u)) {
         simrv::xlen::Word enable_interrupts = 0;
         switch (state_.priv) {
@@ -595,7 +620,9 @@ void CPU::dispatch_pending_interrupts() {
             }
             case kPrivSupervisor: {
                 enable_interrupts = ~state_.mideleg;
-                if ((state_.mstatus & MstatusBit::Sie) != 0u) {
+                if (state_.virt) {
+                    enable_interrupts |= hypervisor_interrupt_candidates;
+                } else if ((state_.mstatus & MstatusBit::Sie) != 0u) {
                     enable_interrupts |= state_.mideleg;
                 }
                 break;
