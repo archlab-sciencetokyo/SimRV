@@ -166,8 +166,25 @@ void CPU::execute_core(Machine& machine) {
 void CPU::execute_system(Machine& machine) {
     auto& ctx = active_context();
     if (ctx.op_id == isa::OperationId::WRS_NTO || ctx.op_id == isa::OperationId::WRS_STO) {
-        // SimRV does not model low-power waits. Zawrs permits a stalled instruction to complete
-        // early for any reason, so both wait-on-reservation-set instructions retire immediately.
+        // A WRS.NTO with an active reservation can remain stalled until its bounded
+        // timeout. If TW/VTW prevents that wait, it traps. With no reservation, the
+        // instruction can complete immediately; WRS.STO also has a short timeout and
+        // does not use TW/VTW.
+        if (ctx.op_id == isa::OperationId::WRS_NTO && state_.lr_reservation_active &&
+            state_.priv < kPrivMachine) {
+            const bool timeout_wait = (state_.mstatus & MstatusBit::Tw) != 0;
+            const bool virtual_timeout_trap =
+                !timeout_wait && state_.virt &&
+                (state_.hstatus & (simrv::xlen::CsrValue{1} << 21U)) != 0;
+            const bool timeout_trap = timeout_wait || virtual_timeout_trap;
+            if (timeout_trap) {
+                ctx.pending_exception = virtual_timeout_trap ? ExceptionCode::VirtualInstruction
+                                                              : ExceptionCode::IllegalInstruction;
+                ctx.pending_tval = ctx.ir;
+                ctx.tkn = false;
+                return;
+            }
+        }
         ctx.tkn = false;
         return;
     }
