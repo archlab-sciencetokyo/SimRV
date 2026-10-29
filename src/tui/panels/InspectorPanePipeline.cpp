@@ -994,7 +994,7 @@ auto InspectorPane::render_pipeline_timeline(const simrv::core::CPU& cpu, int lo
     struct InstRef {
         uint64_t inst_id = 0;
         simrv::xlen::Register pc = 0;
-        isa::OperationId op_id = isa::OperationId::UNKNOWN;
+        isa::OperationId op_id = isa::OperationId::ILLEGAL;
 
         auto operator==(const InstRef& o) const -> bool {
             return (inst_id != 0 && o.inst_id != 0) ? (inst_id == o.inst_id) : (pc == o.pc);
@@ -1141,7 +1141,7 @@ auto InspectorPane::get_pipeline_pc_at_row(int logical_row) const -> simrv::xlen
         struct InstRef {
             uint64_t inst_id = 0;
             simrv::xlen::Register pc = 0;
-            isa::OperationId op_id = isa::OperationId::UNKNOWN;
+            isa::OperationId op_id = isa::OperationId::ILLEGAL;
             auto operator==(const InstRef& o) const -> bool {
                 return (inst_id != 0 && o.inst_id != 0) ? (inst_id == o.inst_id) : (pc == o.pc);
             }

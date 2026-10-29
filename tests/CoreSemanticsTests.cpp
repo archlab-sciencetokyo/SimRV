@@ -981,7 +981,7 @@ void test_vector_exception_propagation_and_status() {
 
     constexpr simrv::xlen::Instruction kUnhandledVector = 0x02000057;
     simrv::execute::ExecuteUnit::execute_vector(cpu, machine.memory(),
-                                                simrv::isa::OperationId::UNKNOWN, kUnhandledVector);
+                                                simrv::isa::OperationId::ILLEGAL, kUnhandledVector);
     expect(cpu.active_context().pending_exception == ExceptionCode::IllegalInstruction,
            "an unhandled vector operation traps instead of retiring as a no-op");
     expect(cpu.active_context().pending_tval == kUnhandledVector,
@@ -3115,11 +3115,11 @@ void test_atomic_decode_legality() {
                simrv::isa::OperationId::LR_W,
            "LR.W with rs2=x0 is a legal encoding");
     expect(simrv::pipeline::decoder(encode_amo(simrv::isa::Funct5Amo::Lr, 2, 1)) ==
-               simrv::isa::OperationId::UNKNOWN,
+               simrv::isa::OperationId::ILLEGAL,
            "LR.W with nonzero rs2 is reserved");
     const auto decoded_lr_d = simrv::pipeline::decoder(encode_amo(simrv::isa::Funct5Amo::Lr, 3, 0));
     expect(decoded_lr_d == (simrv::xlen::kIsXLen64 ? simrv::isa::OperationId::LR_D
-                                                   : simrv::isa::OperationId::UNKNOWN),
+                                                   : simrv::isa::OperationId::ILLEGAL),
            "LR.D is legal only for RV64");
 }
 
@@ -3134,9 +3134,9 @@ void test_fp_decode_legality() {
 
     expect(simrv::pipeline::decoder(encode_op_fp(0x2CU, 0, 0)) == simrv::isa::OperationId::FSQRT_S,
            "FSQRT.S requires and accepts rs2=x0");
-    expect(simrv::pipeline::decoder(encode_op_fp(0x2CU, 0, 1)) == simrv::isa::OperationId::UNKNOWN,
+    expect(simrv::pipeline::decoder(encode_op_fp(0x2CU, 0, 1)) == simrv::isa::OperationId::ILLEGAL,
            "FSQRT.S with nonzero rs2 is reserved");
-    expect(simrv::pipeline::decoder(encode_op_fp(0x70U, 1, 1)) == simrv::isa::OperationId::UNKNOWN,
+    expect(simrv::pipeline::decoder(encode_op_fp(0x70U, 1, 1)) == simrv::isa::OperationId::ILLEGAL,
            "FCLASS.S with nonzero rs2 is reserved");
     constexpr std::array<unsigned, 4> kFmaOpcodes = {0x43U, 0x47U, 0x4BU, 0x4FU};
     constexpr std::array<std::array<simrv::isa::OperationId, 2>, 4> kFmaOperations = {{
@@ -3153,12 +3153,12 @@ void test_fp_decode_legality() {
         }
     }
     expect(
-        simrv::pipeline::decoder(encode_fma(kFmaOpcodes[0], 2)) == simrv::isa::OperationId::UNKNOWN,
+        simrv::pipeline::decoder(encode_fma(kFmaOpcodes[0], 2)) == simrv::isa::OperationId::ILLEGAL,
         "reserved fused-operation formats do not alias single precision");
 
     expect(simrv::pipeline::decoder(encode_op_fp(0x21U, 0, 0)) == simrv::isa::OperationId::FCVT_D_S,
            "FCVT.D.S accepts its specified rm=000 encoding");
-    expect(simrv::pipeline::decoder(encode_op_fp(0x21U, 1, 0)) == simrv::isa::OperationId::UNKNOWN,
+    expect(simrv::pipeline::decoder(encode_op_fp(0x21U, 1, 0)) == simrv::isa::OperationId::ILLEGAL,
            "FCVT.D.S rejects a nonzero reserved rm field");
     expect(simrv::isa::required_extension_for_instruction(encode_op_fp(0x20U, 0, 1), false) ==
                simrv::isa::IsaExtension::D,
@@ -3166,7 +3166,7 @@ void test_fp_decode_legality() {
 
     const auto fcvt_l_s = simrv::pipeline::decoder(encode_op_fp(0x60U, 0, 2));
     expect(fcvt_l_s == (simrv::xlen::kIsXLen64 ? simrv::isa::OperationId::FCVT_L_S
-                                               : simrv::isa::OperationId::UNKNOWN),
+                                               : simrv::isa::OperationId::ILLEGAL),
            "64-bit integer FP conversions exist only on RV64");
 }
 
@@ -3195,13 +3195,13 @@ void test_vector_decode_tables() {
                simrv::isa::OperationId::VLE32FF_V,
            "vector memory decoder preserves nf for fault-only-first segment loads");
     expect(simrv::pipeline::decoder(encode_vector_memory(false, 0, 11, false)) ==
-               simrv::isa::OperationId::UNKNOWN,
+               simrv::isa::OperationId::ILLEGAL,
            "vector memory decoder rejects masked mask-load encodings");
     expect(simrv::pipeline::decoder(encode_vector_memory(false, 0, 0) | (1U << 28U)) ==
-               simrv::isa::OperationId::UNKNOWN,
+               simrv::isa::OperationId::ILLEGAL,
            "vector memory decoder rejects reserved nonzero mew encodings");
     expect(simrv::pipeline::decoder(encode_vector_memory(false, 0, 8, false)) ==
-               simrv::isa::OperationId::UNKNOWN,
+               simrv::isa::OperationId::ILLEGAL,
            "whole-register vector loads require vm=1");
     const auto indexed64_load = encode_vector_memory(false, 7, 2) | (1U << 26U);
     const auto indexed64_store = encode_vector_memory(true, 7, 2) | (1U << 26U);
@@ -3210,8 +3210,8 @@ void test_vector_decode_tables() {
                    simrv::pipeline::decoder(indexed64_store) == simrv::isa::OperationId::VSUXEI64_V,
                "RV64 decodes 64-bit indexed vector memory operations");
     } else {
-        expect(simrv::pipeline::decoder(indexed64_load) == simrv::isa::OperationId::UNKNOWN &&
-                   simrv::pipeline::decoder(indexed64_store) == simrv::isa::OperationId::UNKNOWN,
+        expect(simrv::pipeline::decoder(indexed64_load) == simrv::isa::OperationId::ILLEGAL &&
+                   simrv::pipeline::decoder(indexed64_store) == simrv::isa::OperationId::ILLEGAL,
                "RV32 rejects 64-bit indexed vector memory encodings");
     }
 
@@ -3281,7 +3281,7 @@ void test_vector_decode_tables() {
                simrv::isa::OperationId::VFCVT_RTZ_X_F_V,
            "vector special decoder accepts vfcvt.rtz.x.f.v");
     expect(
-        simrv::pipeline::decoder(encode_op_v(0x12, 1, true, 4)) == simrv::isa::OperationId::UNKNOWN,
+        simrv::pipeline::decoder(encode_op_v(0x12, 1, true, 4)) == simrv::isa::OperationId::ILLEGAL,
         "vector special decoder rejects reserved same-width conversion selectors");
     expect(simrv::pipeline::decoder(encode_op_v(0x12, 1, true, 8)) ==
                simrv::isa::OperationId::VFWCVT_XU_F_V,
@@ -3296,20 +3296,20 @@ void test_vector_decode_tables() {
                simrv::isa::OperationId::VFNCVT_RTZ_X_F_W,
            "vector special decoder accepts the final narrowing conversion selector");
     expect(
-        simrv::pipeline::decoder(encode_op_v(0x13, 1, true, 1)) == simrv::isa::OperationId::UNKNOWN,
+        simrv::pipeline::decoder(encode_op_v(0x13, 1, true, 1)) == simrv::isa::OperationId::ILLEGAL,
         "vector special decoder rejects vfsqrt.v with reserved nonzero vs1");
     expect(simrv::pipeline::decoder(encode_op_v(0x17, 5, true, 1, 0)) ==
                simrv::isa::OperationId::VFMV_V_F,
            "vector special decoder accepts vfmv.v.f with vs2=v0");
     expect(simrv::pipeline::decoder(encode_op_v(0x17, 5, true, 1, 2)) ==
-               simrv::isa::OperationId::UNKNOWN,
+               simrv::isa::OperationId::ILLEGAL,
            "vector special decoder rejects vfmv.v.f with a nonzero vs2 field");
     for (const auto funct3 : {0U, 3U, 4U}) {
         expect(simrv::pipeline::decoder(encode_op_v(0x17, funct3, true, 1, 0)) !=
-                   simrv::isa::OperationId::UNKNOWN,
+                   simrv::isa::OperationId::ILLEGAL,
                "vector move decoder accepts the reserved-zero vs2 encoding");
         expect(simrv::pipeline::decoder(encode_op_v(0x17, funct3, true, 1, 2)) ==
-                   simrv::isa::OperationId::UNKNOWN,
+                   simrv::isa::OperationId::ILLEGAL,
                "vector move decoder rejects a nonzero vs2 field");
     }
     expect(
@@ -3328,9 +3328,9 @@ void test_vector_decode_tables() {
         simrv::pipeline::decoder(encode_op_v(0x06, 5, true)) == simrv::isa::OperationId::VFMAX_VF,
         "vector table decodes scalar floating-point maximum");
     expect(
-        simrv::pipeline::decoder(encode_op_v(0x0B, 1, true)) == simrv::isa::OperationId::UNKNOWN &&
+        simrv::pipeline::decoder(encode_op_v(0x0B, 1, true)) == simrv::isa::OperationId::ILLEGAL &&
             simrv::pipeline::decoder(encode_op_v(0x0D, 5, true)) ==
-                simrv::isa::OperationId::UNKNOWN,
+                simrv::isa::OperationId::ILLEGAL,
         "vector decoder rejects the former nonstandard min/max encodings");
     expect(simrv::pipeline::decoder(encode_op_v(0x01, 1, true)) ==
                simrv::isa::OperationId::VFREDUSUM_VS,
@@ -3405,22 +3405,22 @@ void test_vector_decode_tables() {
                simrv::isa::OperationId::VCPOP_M,
            "secondary rs1 vector encoding remains explicit");
     expect(simrv::pipeline::decoder(encode_op_v(0x10, 2, true, 31)) ==
-               simrv::isa::OperationId::UNKNOWN,
+               simrv::isa::OperationId::ILLEGAL,
            "reserved secondary vector encoding remains unknown");
     constexpr std::array<simrv::isa::OperationId, 8> kWholeRegisterMoves = {
         simrv::isa::OperationId::VMV1R_V, simrv::isa::OperationId::VMV2R_V,
-        simrv::isa::OperationId::UNKNOWN, simrv::isa::OperationId::VMV4R_V,
-        simrv::isa::OperationId::UNKNOWN, simrv::isa::OperationId::UNKNOWN,
-        simrv::isa::OperationId::UNKNOWN, simrv::isa::OperationId::VMV8R_V};
+        simrv::isa::OperationId::ILLEGAL, simrv::isa::OperationId::VMV4R_V,
+        simrv::isa::OperationId::ILLEGAL, simrv::isa::OperationId::ILLEGAL,
+        simrv::isa::OperationId::ILLEGAL, simrv::isa::OperationId::VMV8R_V};
     for (unsigned simm5 = 0; simm5 < kWholeRegisterMoves.size(); ++simm5) {
         expect(simrv::pipeline::decoder(encode_op_v(0x27, 3, true, simm5)) ==
                    kWholeRegisterMoves[simm5],
                "whole-register vector move accepts only legal register group sizes");
         expect(simrv::pipeline::decoder(encode_op_v(0x27, 3, false, simm5)) ==
-                   simrv::isa::OperationId::UNKNOWN,
+                   simrv::isa::OperationId::ILLEGAL,
                "masked whole-register vector moves are reserved");
     }
-    expect(simrv::pipeline::decoder(encode_op_v(0x08, 0, true)) == simrv::isa::OperationId::UNKNOWN,
+    expect(simrv::pipeline::decoder(encode_op_v(0x08, 0, true)) == simrv::isa::OperationId::ILLEGAL,
            "unassigned vector table entries decode as unknown");
 }
 
@@ -3432,20 +3432,20 @@ void test_privileged_decode_legality() {
 
     expect(simrv::pipeline::decoder(encode_priv(0x302, 0, 0)) == simrv::isa::OperationId::MRET,
            "MRET accepts its canonical rd=x0, rs1=x0 encoding");
-    expect(simrv::pipeline::decoder(encode_priv(0x302, 1, 0)) == simrv::isa::OperationId::UNKNOWN,
+    expect(simrv::pipeline::decoder(encode_priv(0x302, 1, 0)) == simrv::isa::OperationId::ILLEGAL,
            "MRET rejects reserved nonzero rd");
-    expect(simrv::pipeline::decoder(encode_priv(0x105, 0, 1)) == simrv::isa::OperationId::UNKNOWN,
+    expect(simrv::pipeline::decoder(encode_priv(0x105, 0, 1)) == simrv::isa::OperationId::ILLEGAL,
            "WFI rejects reserved nonzero rs1");
-    expect(simrv::pipeline::decoder(encode_priv(0x000, 1, 0)) == simrv::isa::OperationId::UNKNOWN,
+    expect(simrv::pipeline::decoder(encode_priv(0x000, 1, 0)) == simrv::isa::OperationId::ILLEGAL,
            "ECALL rejects reserved nonzero rd");
-    expect(simrv::pipeline::decoder(encode_priv(0x002, 0, 0)) == simrv::isa::OperationId::UNKNOWN,
+    expect(simrv::pipeline::decoder(encode_priv(0x002, 0, 0)) == simrv::isa::OperationId::ILLEGAL,
            "legacy draft-N URET remains illegal when N is not implemented");
 
     constexpr simrv::xlen::Instruction kSfenceVma =
         (0x09U << 25U) | (2U << 20U) | (1U << 15U) | kSystemOpcode;
     expect(simrv::pipeline::decoder(kSfenceVma) == simrv::isa::OperationId::SFENCE_VMA,
            "SFENCE.VMA permits nonzero address and ASID operands");
-    expect(simrv::pipeline::decoder(kSfenceVma | (1U << 7U)) == simrv::isa::OperationId::UNKNOWN,
+    expect(simrv::pipeline::decoder(kSfenceVma | (1U << 7U)) == simrv::isa::OperationId::ILLEGAL,
            "SFENCE.VMA rejects reserved nonzero rd");
 }
 

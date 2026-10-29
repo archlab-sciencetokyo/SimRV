@@ -674,7 +674,7 @@ enum OperationId : uint16_t {
     WRS_NTO,
     WRS_STO,
     /* Others */
-    UNKNOWN,
+    ILLEGAL,
     OperationIdCount
 };
 

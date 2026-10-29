@@ -60,7 +60,7 @@ void release_instruction_eviction(Machine& machine, CPU& cpu) {
         ctx.pending_exception = ExceptionCode::MisalignedFetch;
         ctx.pending_tval = state.pc;
         ctx.ir = isa::kNop32;
-        ctx.op_id = isa::UNKNOWN;
+        ctx.op_id = isa::ILLEGAL;
         return false;
     }
     return true;
@@ -732,7 +732,7 @@ void CPU::decode_and_normalize_instruction(Machine& machine) {
             is_valid = false;
         }
     }
-    if (simrv::compiler::unlikely(op_id == isa::UNKNOWN)) {
+    if (simrv::compiler::unlikely(op_id == isa::ILLEGAL)) {
         if (!machine.tui_enabled()) {
             simrv::log::warn("[DECODER] Unknown instruction: PC=0x{:x}, HEX=0x{:x}", state_.pc,
                              w_ir_tmp);
@@ -801,7 +801,7 @@ void CPU::decode_and_normalize_instruction(Machine& machine) {
         ctx.pending_exception = ExceptionCode::IllegalInstruction;
         ctx.pending_tval = ctx.ir_org;
         ctx.ir = isa::kNop32;
-        ctx.op_id = isa::UNKNOWN;
+        ctx.op_id = isa::ILLEGAL;
         ctx.cinsn = w_compressed ? 1U : 0U;
         ctx.opcode = static_cast<Opcode>(0);
         ctx.rd = simrv::xlen::RegId::Zero;
@@ -845,7 +845,7 @@ void CPU::run_fetch_stage_baremetal(Machine& machine) {
                 ctx.pending_exception = ExceptionCode::FaultFetch;
                 ctx.pending_tval = state_.pc + 2;
                 ctx.ir = isa::kNop32;
-                ctx.op_id = isa::UNKNOWN;
+                ctx.op_id = isa::ILLEGAL;
                 return;
             }
             const uint16_t h2 = simrv::memory::ram_read_fast(

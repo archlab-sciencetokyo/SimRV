@@ -368,7 +368,7 @@ constexpr auto rv32e_register_operands_valid(bool writes_int, simrv::xlen::RegId
  * @return True if the destination register is floating-point, false otherwise.
  */
 constexpr auto is_destination_fp(Opcode opcode, OperationId op_id) -> bool {
-    if (op_id != OperationId::UNKNOWN) {
+    if (op_id != OperationId::ILLEGAL) {
         return simrv::pipeline::operation::writes_float(op_id);
     }
     return opcode == Opcode::LoadFp || opcode == Opcode::MAdd || opcode == Opcode::MSub ||
@@ -382,7 +382,7 @@ constexpr auto is_destination_fp(Opcode opcode, OperationId op_id) -> bool {
  * @return True if rs1 is a floating-point register, false otherwise.
  */
 constexpr auto is_rs1_fp(Opcode opcode, OperationId op_id) -> bool {
-    if (op_id != OperationId::UNKNOWN) {
+    if (op_id != OperationId::ILLEGAL) {
         return simrv::pipeline::operation::is_rs1_fp(op_id);
     }
     return opcode == Opcode::OpFp || opcode == Opcode::MAdd || opcode == Opcode::MSub ||
@@ -396,7 +396,7 @@ constexpr auto is_rs1_fp(Opcode opcode, OperationId op_id) -> bool {
  * @return True if rs2 is a floating-point register, false otherwise.
  */
 constexpr auto is_rs2_fp(Opcode opcode, OperationId op_id) -> bool {
-    if (op_id != OperationId::UNKNOWN) {
+    if (op_id != OperationId::ILLEGAL) {
         return simrv::pipeline::operation::is_rs2_fp(op_id);
     }
     return opcode == Opcode::StoreFp || opcode == Opcode::OpFp || opcode == Opcode::MAdd ||

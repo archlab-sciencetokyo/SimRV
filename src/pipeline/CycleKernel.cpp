@@ -652,7 +652,7 @@ void CPU::run_ca_pipeline_cycle(Machine& machine) {
             pipe.frontend_blocked = true;
         } else {
             if (simrv::compiler::unlikely(fetch->context.opcode == static_cast<isa::Opcode>(0) &&
-                                          fetch->context.op_id == isa::UNKNOWN)) {
+                                          fetch->context.op_id == isa::ILLEGAL)) {
                 decode_fields(machine);
             }
             fetch->serializing = fetch->context.traits.is_serializing;

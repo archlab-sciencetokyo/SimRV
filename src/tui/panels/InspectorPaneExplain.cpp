@@ -406,7 +406,7 @@ auto format_instruction_assembly(const simrv::pipeline::PipelineContext& ctx, In
                                  std::string_view mnemonic, const std::string& rd_name,
                                  const std::string& rs1_name, const std::string& rs2_name)
     -> std::string {
-    if (ctx.op_id == UNKNOWN) {
+    if (ctx.op_id == ILLEGAL) {
         return "unknown / illegal instruction";
     }
     if (ctx.opcode == Opcode::OpV) {

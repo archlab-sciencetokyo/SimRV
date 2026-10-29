@@ -37,7 +37,7 @@ void CPU::decode_fields(Machine& /*machine*/) {
     if (simrv::compiler::unlikely(ctx.pending_exception.has_value())) {
         return;
     }
-    if (ctx.opcode != static_cast<Opcode>(0) || ctx.op_id != isa::UNKNOWN) {
+    if (ctx.opcode != static_cast<Opcode>(0) || ctx.op_id != isa::ILLEGAL) {
         return;
     }
 

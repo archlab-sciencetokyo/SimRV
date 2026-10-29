@@ -172,7 +172,7 @@ struct CachedOp {
     int32_t imm = 0;
     simrv::xlen::Instruction ir = 0;
     uint16_t cinsn = 0;
-    isa::OperationId op_id = isa::UNKNOWN;
+    isa::OperationId op_id = isa::ILLEGAL;
     uint16_t next_seq_idx = kInvalidSeqIndex;
     uint16_t target_idx = kInvalidSeqIndex;
     simrv::xlen::RegId rd = simrv::xlen::RegId::Zero;
@@ -382,14 +382,14 @@ struct CachedOp {
                           !decoded.traits.is_cfu && !decoded.traits.writes_vec &&
                           !decoded.traits.writes_fp && !decoded.traits.reads_rs1_fp &&
                           !decoded.traits.reads_rs2_fp && !decoded.traits.reads_rs3_fp &&
-                          !decoded.pending_exception.has_value() && decoded.op_id != isa::UNKNOWN;
+                          !decoded.pending_exception.has_value() && decoded.op_id != isa::ILLEGAL;
         is_straight_mem = (decoded.traits.is_mem_load || decoded.traits.is_mem_store) &&
                           !decoded.traits.is_control && !decoded.traits.is_serializing &&
                           !decoded.traits.is_cfu && !decoded.traits.writes_vec &&
                           !decoded.traits.writes_fp && !decoded.traits.reads_rs1_fp &&
                           !decoded.traits.reads_rs2_fp && !decoded.traits.reads_rs3_fp &&
                           decoded.opcode != isa::Opcode::Amo &&
-                          !decoded.pending_exception.has_value() && decoded.op_id != isa::UNKNOWN;
+                          !decoded.pending_exception.has_value() && decoded.op_id != isa::ILLEGAL;
         const auto alu_op = is_straight_alu ? classify_fast_alu(decoded.op_id) : FastOp::Other;
         const auto br_kind = !decoded.pending_exception.has_value() ? classify_branch(decoded.op_id)
                                                                     : BranchKind::None;

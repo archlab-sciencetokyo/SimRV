@@ -231,7 +231,7 @@ inline constexpr auto kStaticOpTraitsTable = generate_static_op_traits();
                                                     simrv::xlen::RegId rd,
                                                     isa::Funct5Amo funct5) noexcept
     -> DependencyTraits {
-    if (simrv::compiler::likely(op_id != isa::UNKNOWN)) {
+    if (simrv::compiler::likely(op_id != isa::ILLEGAL)) {
         const auto idx = static_cast<size_t>(op_id);
         if (simrv::compiler::likely(idx < kStaticOpTraitsTable.size())) {
             DependencyTraits dt = kStaticOpTraitsTable[idx];

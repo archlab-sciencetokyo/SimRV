@@ -2135,7 +2135,7 @@ auto get_operand_hazard_info(OperationId op_id, InstFormat fmt, Opcode op) -> Ha
         case SRET:
         case MRET:
         case SFENCE_VMA:
-        case UNKNOWN:
+        case ILLEGAL:
             info.writes_rd = false;
             break;
         default:
@@ -2190,7 +2190,7 @@ auto get_operand_hazard_info(OperationId op_id, InstFormat fmt, Opcode op) -> Ha
         case CSRRWI:
         case CSRRSI:
         case CSRRCI:
-        case UNKNOWN:
+        case ILLEGAL:
             info.reads_rs1 = false;
             break;
         default:
@@ -2224,7 +2224,7 @@ auto get_operand_hazard_info(OperationId op_id, InstFormat fmt, Opcode op) -> Ha
         fmt == InstFormat::R4) {
         info.reads_rs2 = true;
     }
-    if (op_id == UNKNOWN) {
+    if (op_id == ILLEGAL) {
         info.reads_rs2 = false;
     }
 
@@ -2622,7 +2622,7 @@ void explain_instruction(uint32_t raw_inst) {
     auto const [mnemonic, desc] = get_description(op_id);
 
     std::println("{}Decoded Instruction Detail:{}", c(kBold), c(kReset));
-    if (op_id != UNKNOWN) {
+    if (op_id != ILLEGAL) {
         std::println("  Assembly Mnemonic: {}{}{}", c(kBoldFgBrightGreen), mnemonic, c(kReset));
 
         // Format Assembly Representation
@@ -2671,7 +2671,7 @@ void explain_instruction(uint32_t raw_inst) {
         explain_datapath_diagram(op_id, fmt, op, use_color);
 
     } else {
-        std::println("  Mnemonic         : {}UNKNOWN / RESERVED{}", c(kBoldFgRed), c(kReset));
+        std::println("  Mnemonic         : {}ILLEGAL / RESERVED{}", c(kBoldFgRed), c(kReset));
         std::println(
             "  This opcode is either reserved, or part of an unsupported custom extension.");
     }

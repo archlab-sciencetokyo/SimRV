@@ -451,7 +451,7 @@ void test_zfhmin_scalar_instructions() {
     TEST_ASSERT(simrv::pipeline::decoder(encode_fp(0x26, 0, 2, 0, 1)) == OperationId::FCVT_H_S);
     TEST_ASSERT(simrv::pipeline::decoder(encode_fp(0x21, 2, 2, 0, 1)) == OperationId::FCVT_D_H);
     TEST_ASSERT(simrv::pipeline::decoder(encode_fp(0x25, 1, 2, 0, 1)) == OperationId::FCVT_H_D);
-    TEST_ASSERT(simrv::pipeline::decoder(encode_fp(0x02, 0, 2, 0, 1)) == OperationId::UNKNOWN);
+    TEST_ASSERT(simrv::pipeline::decoder(encode_fp(0x02, 0, 2, 0, 1)) == OperationId::ILLEGAL);
 
     std::array<simrv::xlen::FloatingRegister, 32> fp{};
     simrv::xlen::CsrValue fcsr = 0;
@@ -903,7 +903,7 @@ void test_zimop_decoder() {
         TEST_ASSERT(simrv::pipeline::decoder(encoded) == simrv::isa::OperationId::MOP);
     }
     // Keep reserved SYSTEM encodings illegal; Zimop only claims its defined MOP spaces.
-    TEST_ASSERT(simrv::pipeline::decoder(0x80004073U) == simrv::isa::OperationId::UNKNOWN);
+    TEST_ASSERT(simrv::pipeline::decoder(0x80004073U) == simrv::isa::OperationId::ILLEGAL);
 
     simrv::pipeline::PipelineContext context{};
     context.opcode = simrv::isa::Opcode::System;
@@ -923,8 +923,8 @@ void test_zawrs_instructions() {
     TEST_ASSERT(simrv::pipeline::decoder(kWrsNto) == OperationId::WRS_NTO);
     TEST_ASSERT(simrv::pipeline::decoder(kWrsSto) == OperationId::WRS_STO);
     TEST_ASSERT(required_misa_extensions(OperationId::WRS_NTO) == misa_extension_bit(IsaExtension::A));
-    TEST_ASSERT(simrv::pipeline::decoder(kWrsNto | (1U << 15U)) == OperationId::UNKNOWN);
-    TEST_ASSERT(simrv::pipeline::decoder(kWrsSto | (1U << 7U)) == OperationId::UNKNOWN);
+    TEST_ASSERT(simrv::pipeline::decoder(kWrsNto | (1U << 15U)) == OperationId::ILLEGAL);
+    TEST_ASSERT(simrv::pipeline::decoder(kWrsSto | (1U << 7U)) == OperationId::ILLEGAL);
 
     for (const auto priv : {simrv::xlen::PrivilegeLevel::User,
                             simrv::xlen::PrivilegeLevel::Supervisor,
@@ -1137,7 +1137,7 @@ void test_sscounterenw_allows_enabled_hpm_counters() {
         context.ir = (static_cast<uint32_t>(kHpmcounter3.value()) << 20U) | (2U << 12U) |
                      (5U << 7U) | 0x73U;  // csrrs x5, hpmcounter3, x0
         context.ir_org = context.ir;
-        context.op_id = simrv::isa::OperationId::UNKNOWN;
+        context.op_id = simrv::isa::OperationId::ILLEGAL;
         cpu.run_decode_stage(machine);
     };
 
@@ -1191,7 +1191,7 @@ void test_zicntr_base_counter_values_and_access() {
         context.ir = (static_cast<uint32_t>(kCycle.value()) << 20U) | (2U << 12U) | (5U << 7U) |
                      0x73U;  // csrrs x5, cycle, x0
         context.ir_org = context.ir;
-        context.op_id = simrv::isa::OperationId::UNKNOWN;
+        context.op_id = simrv::isa::OperationId::ILLEGAL;
         cpu.run_decode_stage(machine);
     };
 

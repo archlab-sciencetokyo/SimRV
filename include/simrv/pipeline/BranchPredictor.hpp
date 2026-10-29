@@ -111,7 +111,7 @@ struct BranchFeedback {
     bool actual_taken = false;
     simrv::xlen::Address actual_target = 0;
     isa::Opcode opcode = static_cast<isa::Opcode>(0);
-    isa::OperationId op_id = isa::OperationId::UNKNOWN;
+    isa::OperationId op_id = isa::OperationId::ILLEGAL;
     simrv::xlen::RegId rd = static_cast<simrv::xlen::RegId>(0);
     simrv::xlen::RegId rs1 = static_cast<simrv::xlen::RegId>(0);
     const BranchPrediction& prediction = kDefaultBranchPrediction;
