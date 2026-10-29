@@ -49,6 +49,7 @@ struct DecodedInstruction {
     simrv::xlen::ImmValue imm = 0;  ///< Sign-extended immediate value
     simrv::xlen::CsrValue pending_tval =
         0;  ///< Trap value / faulting address for pending exception
+    simrv::xlen::CsrValue pending_htval = 0;  ///< Guest physical address for a guest-page fault
     std::optional<ExceptionCode>
         pending_exception;  ///< Pending exception code (if decode/fetch raised exception)
 

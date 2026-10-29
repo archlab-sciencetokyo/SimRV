@@ -68,7 +68,8 @@ void PageTableWalker::select_next_pte(PageWalkState& state,
     state.pte_address = simrv::xlen::PhysAddr{state.pte_guest_address};
     if (state.guest_stage_enabled) {
         auto translated = walk_guest_physical(state.pte_guest_address, PteAccess::Read,
-                                              state.hgatp, state.xlen);
+                                              state.hgatp, state.xlen,
+                                              &state.guest_fault_address);
         if (!translated) {
             state.fault = translated.error();
             state.status = PageWalkStatus::Fault;
@@ -109,6 +110,7 @@ auto PageTableWalker::begin_walk(simrv::xlen::VirtAddr v_addr, PteAccess access,
         if (state.guest_stage_enabled && priv != kPrivMachine) {
             auto translated = walk_guest_physical(v_addr.raw(), access, state.hgatp, xlen);
             if (!translated) {
+                state.guest_fault_address = v_addr.raw();
                 state.fault = translated.error();
                 return state;
             }
@@ -246,7 +248,7 @@ void PageTableWalker::accept_pte(PageWalkState& state, simrv::xlen::Word pte) co
     state.physical_address = stage_one_address;
     if (state.guest_stage_enabled) {
         auto translated = walk_guest_physical(stage_one_address.raw(), state.access, state.hgatp,
-                                              state.xlen);
+                                              state.xlen, &state.guest_fault_address);
         if (!translated) {
             state.fault = translated.error();
             state.status = PageWalkStatus::Fault;
@@ -337,7 +339,8 @@ auto PageTableWalker::validate_pte_permissions(simrv::xlen::Word pte,
 }
 
 auto PageTableWalker::walk_guest_physical(simrv::xlen::Address guest_address, PteAccess access,
-                                          simrv::xlen::Word hgatp, unsigned xlen) const
+                                          simrv::xlen::Word hgatp, unsigned xlen,
+                                          simrv::xlen::Address* fault_address) const
     -> std::expected<PageWalkResult, simrv::xlen::TrapCause> {
     const auto guest_page_fault = [access]() -> simrv::xlen::TrapCause {
         using simrv::isa::ExceptionCode;
@@ -351,12 +354,16 @@ auto PageTableWalker::walk_guest_physical(simrv::xlen::Address guest_address, Pt
                 return simrv::isa::to_trap_cause(ExceptionCode::GuestLoadPageFault);
         }
     };
+    const auto guest_fault = [fault_address, guest_address, &guest_page_fault]() {
+        if (fault_address != nullptr) *fault_address = guest_address;
+        return std::unexpected(guest_page_fault());
+    };
     const simrv::xlen::Word mode = simrv::xlen::satp_mode(hgatp, xlen);
     if (mode == 0) {
         return PageWalkResult{.physical_address = simrv::xlen::PhysAddr{guest_address}, .pte = 0};
     }
     if (xlen != 64 || (mode != 8 && mode != 9 && mode != 10)) {
-        return std::unexpected(guest_page_fault());
+        return guest_fault();
     }
 
     // SvNNx4 adds two GPA bits to the root-level VPN, so the root table has 2048 entries and
@@ -364,11 +371,11 @@ auto PageTableWalker::walk_guest_physical(simrv::xlen::Address guest_address, Pt
     const unsigned levels = mode == 8 ? 3U : (mode == 9 ? 4U : 5U);
     const unsigned guest_address_bits = 12U + 9U * (levels - 1U) + 11U;
     if ((guest_address >> guest_address_bits) != 0) {
-        return std::unexpected(guest_page_fault());
+        return guest_fault();
     }
     const simrv::xlen::Word root_ppn = (hgatp >> 0U) & ((uint64_t{1} << 44U) - 1U);
     if ((root_ppn & 0x3U) != 0) {
-        return std::unexpected(guest_page_fault());
+        return guest_fault();
     }
     simrv::xlen::Word table_address = root_ppn << 12U;
     simrv::xlen::Word leaf_pte = 0;
@@ -387,12 +394,12 @@ auto PageTableWalker::walk_guest_physical(simrv::xlen::Address guest_address, Pt
             pte_ptr, static_cast<simrv::xlen::Instruction>(Funct3::Ld));
         const PteView view{.raw = pte};
         if (!view.valid() || view.has_reserved_bits(8) || view.is_reserved_encoding()) {
-            return std::unexpected(guest_page_fault());
+            return guest_fault();
         }
         if (view.is_table_pointer()) {
             if (view.is_napot() || view.pbmt() != PtePbmt::Pma ||
                 view.table_pointer_has_reserved_bits() || level == 0) {
-                return std::unexpected(guest_page_fault());
+                return guest_fault();
             }
             table_address = view.ppn() << 12U;
             --level;
@@ -401,22 +408,22 @@ auto PageTableWalker::walk_guest_physical(simrv::xlen::Address guest_address, Pt
 
         const simrv::xlen::Word rwx = (pte >> 1U) & 0x7U;
         if (rwx == 0x2U || rwx == 0x6U || (rwx & (1U << std::to_underlying(access))) == 0) {
-            return std::unexpected(guest_page_fault());
+            return guest_fault();
         }
         if (view.is_napot() && (level != 0 || !view.has_valid_napot_ppn_encoding())) {
-            return std::unexpected(guest_page_fault());
+            return guest_fault();
         }
         const unsigned page_ppn_bits = 9U * static_cast<unsigned>(level);
         const simrv::xlen::Word low_ppn_mask =
             page_ppn_bits == 0 ? 0 : (simrv::xlen::Word{1} << page_ppn_bits) - 1U;
         simrv::xlen::Word ppn = view.ppn();
         if ((ppn & low_ppn_mask) != 0) {
-            return std::unexpected(guest_page_fault());
+            return guest_fault();
         }
         if (!view.accessed() || (access == PteAccess::Write && !view.dirty())) {
             // RVA23 requires Svade and does not advertise Svadu, so guest-stage A/D faults
             // remain software-managed and are reported as guest-page faults.
-            return std::unexpected(guest_page_fault());
+            return guest_fault();
         }
         if (view.is_napot()) {
             const simrv::xlen::Word vpn0 = (guest_address >> 12U) & 0xFU;
@@ -434,7 +441,8 @@ auto PageTableWalker::walk_guest_physical(simrv::xlen::Address guest_address, Pt
 auto PageTableWalker::walk(simrv::xlen::VirtAddr v_addr, PteAccess access,
                            simrv::xlen::PrivilegeLevel priv, simrv::xlen::CsrValue mstatus,
                            simrv::xlen::Word satp, unsigned xlen, bool update_access_bits,
-                           const core::ArchState* arch_state) const
+                           const core::ArchState* arch_state,
+                           simrv::xlen::Address* guest_fault_address) const
     -> std::expected<PageWalkResult, simrv::xlen::TrapCause> {
     auto state =
         begin_walk(v_addr, access, priv, mstatus, satp, xlen, update_access_bits, arch_state);
@@ -458,6 +466,7 @@ auto PageTableWalker::walk(simrv::xlen::VirtAddr v_addr, PteAccess access,
         }
     }
     if (state.status == PageWalkStatus::Fault) {
+        if (guest_fault_address != nullptr) *guest_fault_address = state.guest_fault_address;
         return std::unexpected(state.fault);
     }
     return PageWalkResult{.physical_address = state.physical_address, .pte = state.pte};

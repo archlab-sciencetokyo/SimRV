@@ -34,6 +34,12 @@ namespace simrv::core {
 using namespace simrv::isa;
 
 namespace {
+[[nodiscard]] inline auto is_guest_page_fault(simrv::xlen::TrapCause cause) noexcept -> bool {
+    return cause == to_trap_cause(ExceptionCode::GuestInstructionPageFault) ||
+           cause == to_trap_cause(ExceptionCode::GuestLoadPageFault) ||
+           cause == to_trap_cause(ExceptionCode::GuestStorePageFault);
+}
+
 void release_instruction_eviction(Machine& machine, CPU& cpu) {
     const auto evicted = cpu.icache.take_last_eviction();
     if (!evicted.has_value()) return;
@@ -259,8 +265,13 @@ auto CPU::translate_stage_address(Machine& machine, simrv::xlen::VirtAddr virtua
     -> std::optional<std::expected<PageWalkResult, simrv::xlen::TrapCause>> {
     auto* mmu = machine.memory_.mmu();
     if (machine.runtime_profile.is_instruction_mode()) {
-        return mmu->translate(virtual_address, access, privilege, state_.mstatus, state_.satp,
-                              active_xlen, false, &state_);
+        simrv::xlen::Address guest_fault_address = 0;
+        auto result = mmu->translate(virtual_address, access, privilege, state_.mstatus,
+                                     state_.satp, active_xlen, false, &state_,
+                                     &guest_fault_address);
+        active_context().pending_htval =
+            result || !is_guest_page_fault(result.error()) ? 0 : guest_fault_address >> 2U;
+        return result;
     }
 
     if (!timed_walk.active || timed_walk.walk.virtual_address != virtual_address ||
@@ -293,12 +304,15 @@ auto CPU::translate_stage_address(Machine& machine, simrv::xlen::VirtAddr virtua
     }
 
     if (walk.status == PageWalkStatus::Complete) {
+        active_context().pending_htval = 0;
         const PageWalkResult result{.physical_address = walk.physical_address, .pte = walk.pte};
         timed_walk.reset();
         return std::expected<PageWalkResult, simrv::xlen::TrapCause>{result};
     }
     if (walk.status == PageWalkStatus::Fault) {
         const simrv::xlen::TrapCause fault = walk.fault;
+        active_context().pending_htval =
+            is_guest_page_fault(fault) ? walk.guest_fault_address >> 2U : 0;
         timed_walk.reset();
         return std::expected<PageWalkResult, simrv::xlen::TrapCause>{std::unexpected(fault)};
     }

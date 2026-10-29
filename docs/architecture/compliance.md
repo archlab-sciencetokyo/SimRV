@@ -50,6 +50,7 @@ preset's configured cache-line geometry remains a separate platform requirement.
 | Hypervisor counter-enable CSR | H-gated `hcounteren` is writable for implemented counters and gates VS/VU counter reads with the required virtual-instruction behavior; S/U access also observes `scounteren` | RVA23 guest-counter-enable and counter-access tests |
 | Hypervisor CSR and return substrate | H/VS CSR state and access checks are present; `hgatp` accepts Bare and SvNNx4 modes, `vsatp` follows `satp` WARL modes, S CSR aliases select VS state in virtualization mode, MPV/MRET and SPV/SRET support guest returns, and synchronous traps can route to VS or HS. The RVA23S64 profile enables H; explicit ISA and CPU-model configurations retain their selected MISA | RVA23 H/VS CSR, guest return, and trap-routing tests |
 | Hypervisor interrupt routing | VS software/timer/external pending state, `hideleg`/`mideleg`, VS CSR aliases, and VS trap entry implement standard VS cause-number translation; guest external interrupt files are not implemented | RVA23 interrupt delegation WARL and VS trap-entry tests |
+| Hypervisor fault values | `vstval` is populated on delegated VS traps; `htval` records GPA >> 2 for guest-page faults from G-stage translation, including VS Bare accesses | RVA23 VS trap-value and Shtvala guest-physical fault-value tests |
 | Counter overflow filtering | Sscofpmf implements M/S/U event filtering, counter inhibit, sticky overflow reporting, and delegated LCOFIP; FDT advertises Sscofpmf | RVA23 CSR, overflow, and interrupt-delegation tests |
 | User pointer masking | Ssnpm selects U-mode PMLEN=0 or PMLEN=7 through `senvcfg.PMM`; Supm is implied; RV64 FDT advertises both | RVA23 WARL and tagged physical load/store tests; FDT tests |
 | NAPOT translation contiguity | Svnapot maps aligned 64 KiB regions through level-0 PTEs for Sv39/Sv48/Sv57; invalid N encodings fault; FDT advertises Svnapot | Svnapot alias translation and reserved-encoding tests; FDT tests |
@@ -100,16 +101,13 @@ SimRV verifies its default 64-bit profile (`rva23s64`) against the RISC-V Archit
 
 - Full RVA23S64 is not yet qualified. The following mandatory requirements remain incomplete or
   need profile-level qualification:
-  - Sha is incomplete: H is enabled by the RVA23S64 profile, but guest entry/exit and trap
-    routing are partial (MRET/SRET returns, synchronous routing, and the three standard VS
-    interrupts are connected; guest external interrupt files and full trap-value reporting remain
-    incomplete);
-    complete Ssstateen enforcement
-    (`sstateen0-3` and `hstateen0-3` CSR banks now exist, but VS/VU access behavior is not wired);
-    Shcounterenw (`hcounteren` and VS/VU counter access gating are implemented but need broader
-    profile-level qualification);
-    Shvstvala;
-    Shtvala; Shvstvecd; Shvsatpa; and Shgatpa. The G-stage page-walk core supports Sv39x4,
+  - Sha remains incomplete: `sstateen0-3` and `hstateen0-3` CSR storage exists, but complete
+    state-enable visibility and VS/VU behavior need qualification; guest counter gating is
+    implemented but needs broader profile-level qualification; guest external interrupt files
+    and complete H trap-value reporting remain incomplete. Shtvala now reports `htval` for
+    guest-page faults produced by G-stage walks. Shvstvala, Shvstvecd, Shvsatpa, and Shgatpa
+    have implementation paths and focused tests but still need profile-level qualification. The
+    G-stage page-walk core supports Sv39x4,
     Sv48x4, and Sv57x4; `hgatp` and VS/G-stage translation composition now participate in
     architectural translation, but G-stage page-table accesses are synchronous internal RAM
     reads and guest trap values, full interrupt virtualization, and writable guest counter access

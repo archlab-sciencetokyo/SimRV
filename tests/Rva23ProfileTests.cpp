@@ -1413,6 +1413,54 @@ void test_sha_guest_exception_routing() {
         TEST_ASSERT((state.vsstatus & simrv::core::MstatusBit::Spie) != 0);
         TEST_ASSERT(state.pc == 0x7000);
     }
+    {
+        simrv::core::CPU cpu;
+        auto& state = cpu.state();
+        state.misa |= h_bit;
+        state.virt = true;
+        state.priv = simrv::xlen::PrivilegeLevel::Supervisor;
+        state.pc = 0x8000;
+        state.medeleg = simrv::xlen::CsrValue{1} << 21U;
+        state.stvec = 0x9000;
+        cpu.active_context().pending_htval = 0x12345678U >> 2U;
+        simrv::core::TrapController::raise_exception(
+            cpu, simrv::isa::to_trap_cause(simrv::isa::ExceptionCode::GuestLoadPageFault),
+            0xABCDEF);
+        TEST_ASSERT(!state.virt);
+        TEST_ASSERT(state.htval == (0x12345678U >> 2U));
+    }
+}
+
+void test_sha_shtvala_guest_physical_fault_value() {
+    if constexpr (simrv::xlen::kIsXLen64) {
+        simrv::core::Machine machine;
+        std::vector<simrv::xlen::Byte> ram(0x10000, simrv::xlen::Byte{0});
+        machine.set_ram_for_testing(ram.data(), ram.size());
+        machine.memory().initialize_mmu();
+        auto& cpu = machine.primary_hart();
+        cpu.state().misa |= simrv::isa::misa_extension_bit(simrv::isa::IsaExtension::H);
+        cpu.state().virt = true;
+        cpu.state().priv = simrv::xlen::PrivilegeLevel::Supervisor;
+        cpu.state().satp = 0;  // VS Bare still receives the required G-stage translation.
+        constexpr simrv::xlen::Address kRoot = 0x1000;
+        constexpr simrv::xlen::Address kGuestPhysical = 0x4000;
+        cpu.state().hgatp = (uint64_t{8} << 60U) | (kRoot >> 12U);
+
+        auto translated = cpu.translate_stage_address(
+            machine, simrv::xlen::VirtAddr{kGuestPhysical}, simrv::PteAccess::Read,
+            simrv::xlen::PrivilegeLevel::Supervisor, 64, simrv::memory::TlPort::Data,
+            cpu.ca_state.data_walk);
+        TEST_ASSERT(translated.has_value() && !translated->has_value());
+        TEST_ASSERT(translated->error() == std::to_underlying(
+                    simrv::isa::ExceptionCode::GuestLoadPageFault));
+        TEST_ASSERT(cpu.active_context().pending_htval == (kGuestPhysical >> 2U));
+
+        cpu.state().mepc = 0;
+        cpu.state().medeleg = simrv::xlen::CsrValue{1} << 21U;
+        cpu.state().stvec = 0x8000;
+        simrv::core::TrapController::raise_exception(cpu, translated->error(), kGuestPhysical);
+        TEST_ASSERT(cpu.state().htval == (kGuestPhysical >> 2U));
+    }
 }
 
 void test_zicntr_base_counter_values_and_access() {
@@ -1922,6 +1970,9 @@ int main() {
     std::cout << "[RUN] test_sha_guest_exception_routing" << std::endl;
     test_sha_guest_exception_routing();
     std::cout << "[PASS] test_sha_guest_exception_routing" << std::endl;
+    std::cout << "[RUN] test_sha_shtvala_guest_physical_fault_value" << std::endl;
+    test_sha_shtvala_guest_physical_fault_value();
+    std::cout << "[PASS] test_sha_shtvala_guest_physical_fault_value" << std::endl;
     std::cout << "[RUN] test_zicntr_base_counter_values_and_access" << std::endl;
     test_zicntr_base_counter_values_and_access();
     std::cout << "[PASS] test_zicntr_base_counter_values_and_access" << std::endl;
