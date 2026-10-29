@@ -1267,6 +1267,18 @@ void test_sha_state_enable_csrs() {
     TEST_ASSERT(!cpu.csr_file.write(simrv::core::Csr::Hstateen0, 0).has_value());
 }
 
+void test_sha_hideleg_warl_mask() {
+    simrv::core::CPU cpu;
+    cpu.state().misa |= simrv::isa::misa_extension_bit(simrv::isa::IsaExtension::H);
+    constexpr simrv::xlen::CsrValue kExpected = (simrv::xlen::CsrValue{1} << 2U) |
+                                                 (simrv::xlen::CsrValue{1} << 6U) |
+                                                 (simrv::xlen::CsrValue{1} << 10U);
+    TEST_ASSERT(cpu.csr_file.write(simrv::core::Csr::Hideleg, ~simrv::xlen::CsrValue{0}).has_value());
+    const auto hideleg = cpu.csr_file.read(simrv::core::Csr::Hideleg);
+    TEST_ASSERT(hideleg.has_value() && *hideleg == kExpected);
+    TEST_ASSERT(cpu.state().hideleg == kExpected);
+}
+
 void test_sha_guest_return_transitions() {
     using simrv::core::MstatusBit;
     using simrv::xlen::PrivilegeLevel;
@@ -1844,6 +1856,9 @@ int main() {
     std::cout << "[RUN] test_sha_state_enable_csrs" << std::endl;
     test_sha_state_enable_csrs();
     std::cout << "[PASS] test_sha_state_enable_csrs" << std::endl;
+    std::cout << "[RUN] test_sha_hideleg_warl_mask" << std::endl;
+    test_sha_hideleg_warl_mask();
+    std::cout << "[PASS] test_sha_hideleg_warl_mask" << std::endl;
     std::cout << "[RUN] test_sha_guest_return_transitions" << std::endl;
     test_sha_guest_return_transitions();
     std::cout << "[PASS] test_sha_guest_return_transitions" << std::endl;

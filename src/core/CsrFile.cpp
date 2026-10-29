@@ -246,9 +246,9 @@ auto CsrFile::read(simrv::xlen::CsrNumber addr) const
             rcsr = cpu_.state().hedeleg & kMedelegWritableMask;
             break;
         case csr_addr(Csr::Hideleg):
-            rcsr = cpu_.state().hideleg & ((simrv::xlen::CsrValue{1} << 1U) |
-                                           (simrv::xlen::CsrValue{1} << 5U) |
-                                           (simrv::xlen::CsrValue{1} << 9U));
+            rcsr = cpu_.state().hideleg & ((simrv::xlen::CsrValue{1} << 2U) |
+                                           (simrv::xlen::CsrValue{1} << 6U) |
+                                           (simrv::xlen::CsrValue{1} << 10U));
             break;
         case csr_addr(Csr::Hie):
             rcsr = cpu_.state().hie & ((simrv::xlen::CsrValue{1} << 2U) |
@@ -801,9 +801,9 @@ auto CsrFile::write(simrv::xlen::CsrNumber addr, simrv::xlen::CsrValue wdata)
             cpu_.state().hedeleg = wdata & kMedelegWritableMask;
             break;
         case csr_addr(Csr::Hideleg):
-            cpu_.state().hideleg = wdata & ((simrv::xlen::CsrValue{1} << 1U) |
-                                            (simrv::xlen::CsrValue{1} << 5U) |
-                                            (simrv::xlen::CsrValue{1} << 9U));
+            cpu_.state().hideleg = wdata & ((simrv::xlen::CsrValue{1} << 2U) |
+                                            (simrv::xlen::CsrValue{1} << 6U) |
+                                            (simrv::xlen::CsrValue{1} << 10U));
             break;
         case csr_addr(Csr::Hie):
             cpu_.state().hie = wdata & ((simrv::xlen::CsrValue{1} << 2U) |
