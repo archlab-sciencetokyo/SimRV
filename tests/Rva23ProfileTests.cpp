@@ -922,7 +922,7 @@ void test_zimop_decoder() {
 
 void test_zawrs_instructions() {
     using namespace simrv::isa;
-    constexpr uint32_t kWrsNto = (0x09DU << 20U) | 0x73U;
+    constexpr uint32_t kWrsNto = (0x00DU << 20U) | 0x73U;
     constexpr uint32_t kWrsSto = (0x01DU << 20U) | 0x73U;
     TEST_ASSERT(simrv::pipeline::decoder(kWrsNto) == OperationId::WRS_NTO);
     TEST_ASSERT(simrv::pipeline::decoder(kWrsSto) == OperationId::WRS_STO);
@@ -934,7 +934,7 @@ void test_zawrs_instructions() {
                             simrv::xlen::PrivilegeLevel::Supervisor,
                             simrv::xlen::PrivilegeLevel::Machine}) {
         TEST_ASSERT(simrv::core::TrapController::can_execute_privileged_instruction(
-            priv, 0, 0, 0x09D, 0));
+            priv, 0, 0, 0x00D, 0));
         TEST_ASSERT(simrv::core::TrapController::can_execute_privileged_instruction(
             priv, 0, 0, 0x01D, 0));
     }

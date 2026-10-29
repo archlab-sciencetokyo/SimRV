@@ -874,7 +874,7 @@ auto decode_system_priv(uint32_t funct7, simrv::xlen::Instruction ir) -> Operati
             return (rd_is_zero && rs1_is_zero) ? OperationId::MRET : OperationId::ILLEGAL;
         case 0x105:
             return (rd_is_zero && rs1_is_zero) ? OperationId::WFI : OperationId::ILLEGAL;
-        case 0x09D:
+        case 0x00D:
             return (rd_is_zero && rs1_is_zero && ((ir >> 12U) & 0x7U) == 0)
                        ? OperationId::WRS_NTO
                        : OperationId::ILLEGAL;
