@@ -245,7 +245,7 @@ constexpr simrv::xlen::CsrValue kMstatusMask =
      (simrv::xlen::kIsXLen64 ? (static_cast<simrv::xlen::CsrValue>(0xF) << 32) : 0));
 constexpr simrv::xlen::CsrValue kSstatusMask =
     (MstatusBit::Sie | MstatusBit::Spie | MstatusBit::Spp | MstatusBit::Fs | MstatusBit::Vs |
-     MstatusBit::Xs | MstatusBit::Sum | MstatusBit::Mxr |
+     MstatusBit::Sum | MstatusBit::Mxr |
      (simrv::xlen::kIsXLen64 ? (static_cast<simrv::xlen::CsrValue>(0x3) << 32) : 0));
 constexpr simrv::xlen::CsrValue kMstatusFsDirty = std::to_underlying(MstatusBit::Fs);
 constexpr simrv::xlen::CsrValue kMstatusGva = std::to_underlying(MstatusBit::Gva);

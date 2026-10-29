@@ -1351,6 +1351,15 @@ void test_sha_guest_extension_state() {
 void test_sha_hideleg_warl_mask() {
     simrv::core::CPU cpu;
     cpu.state().misa |= simrv::isa::misa_extension_bit(simrv::isa::IsaExtension::H);
+    constexpr simrv::xlen::CsrValue kHstatusGva = simrv::xlen::CsrValue{1} << 6U;
+    constexpr simrv::xlen::CsrValue kStatusXsHighBit = simrv::xlen::CsrValue{1} << 15U;
+    TEST_ASSERT(cpu.csr_file.write(simrv::core::Csr::Hstatus, kHstatusGva).has_value());
+    auto hstatus = cpu.csr_file.read(simrv::core::Csr::Hstatus);
+    TEST_ASSERT(hstatus.has_value() && (*hstatus & kHstatusGva) != 0);
+    TEST_ASSERT(cpu.csr_file.write(simrv::core::Csr::Vsstatus, kStatusXsHighBit).has_value());
+    const auto vsstatus = cpu.csr_file.read(simrv::core::Csr::Vsstatus);
+    TEST_ASSERT(vsstatus.has_value() && (*vsstatus & kStatusXsHighBit) == 0);
+
     constexpr simrv::xlen::CsrValue kExpected = (simrv::xlen::CsrValue{1} << 2U) |
                                                  (simrv::xlen::CsrValue{1} << 6U) |
                                                  (simrv::xlen::CsrValue{1} << 10U);

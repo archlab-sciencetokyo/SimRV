@@ -845,6 +845,7 @@ auto CsrFile::write(simrv::xlen::CsrNumber addr, simrv::xlen::CsrValue wdata)
             cpu_.state().hstatus = wdata & ((simrv::xlen::CsrValue{1} << 7U) |
                                             (simrv::xlen::CsrValue{1} << 8U) |
                                             (simrv::xlen::CsrValue{1} << 9U) |
+                                            (simrv::xlen::CsrValue{1} << 6U) |
                                             (simrv::xlen::CsrValue{1} << 20U) |
                                             (simrv::xlen::CsrValue{1} << 21U) |
                                             (simrv::xlen::CsrValue{1} << 22U));
