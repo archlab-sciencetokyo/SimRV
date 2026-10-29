@@ -36,7 +36,9 @@ enum class Funct7Priv : uint8_t {
                        ///< TLB entries)
     SinvalVma = 0x0B,  ///< Svinval SINVAL.VMA
     HfenceVvma = 0x11,  ///< Hypervisor VS-stage address-translation fence
+    HinvalVvma = 0x13,  ///< Svinval hypervisor VS-stage address-translation invalidate
     HfenceGvma = 0x31,  ///< Hypervisor G-stage address-translation fence
+    HinvalGvma = 0x33,  ///< Svinval hypervisor G-stage address-translation invalidate
 };
 
 template <std::integral I>

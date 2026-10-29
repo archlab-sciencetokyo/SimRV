@@ -114,8 +114,11 @@ void CPU::commit_control_flow_and_traps([[maybe_unused]] Machine& machine) {
                                   static_cast<simrv::xlen::Word>(ctx.rrs2));
                     } else if (ctx.funct7 ==
                                    static_cast<simrv::xlen::Instruction>(Funct7Priv::HfenceVvma) ||
+                               ctx.funct7 == static_cast<simrv::xlen::Instruction>(Funct7Priv::HinvalVvma) ||
                                ctx.funct7 == static_cast<simrv::xlen::Instruction>(
-                                                 Funct7Priv::HfenceGvma)) {
+                                                 Funct7Priv::HfenceGvma) ||
+                               ctx.funct7 == static_cast<simrv::xlen::Instruction>(
+                                                 Funct7Priv::HinvalGvma)) {
                         TLB_flush();
                     }
                     break;

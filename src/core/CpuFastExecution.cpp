@@ -332,7 +332,10 @@ SIMRV_ALWAYS_INLINE auto CPU::execute_cached_load(Machine& machine, CachedOp& op
             return isa::Funct3::Lwu;
     }();
     constexpr unsigned kSizeBytes = 1u << (std::to_underlying(kFunct3) & 0x3u);
-    simrv::xlen::Address const mem_addr = rrs1 + op.imm;
+    simrv::xlen::Address mem_addr = rrs1 + op.imm;
+    mem_addr = simrv::memory::MemoryAccess::mask_user_pointer(
+                   *this, simrv::xlen::VirtAddr{mem_addr})
+                   .raw();
     if (simrv::compiler::unlikely(machine.tui_enabled() || machine.branch_trace_enabled())) {
         pipeline_context.mem_addr = mem_addr;
     }
@@ -439,7 +442,10 @@ SIMRV_ALWAYS_INLINE auto CPU::execute_cached_store(Machine& machine, CachedOp& o
     }();
     constexpr unsigned kSizeBytes = 1u << (std::to_underlying(kFunct3) & 0x3u);
     constexpr simrv::xlen::Address kAlignMask = kSizeBytes - 1u;
-    simrv::xlen::Address const mem_addr = rrs1 + op.imm;
+    simrv::xlen::Address mem_addr = rrs1 + op.imm;
+    mem_addr = simrv::memory::MemoryAccess::mask_user_pointer(
+                   *this, simrv::xlen::VirtAddr{mem_addr})
+                   .raw();
     if (simrv::compiler::unlikely(machine.tui_enabled() || machine.branch_trace_enabled())) {
         pipeline_context.mem_addr = mem_addr;
     }
@@ -1179,7 +1185,10 @@ void CPU::execute_cached_op_fast(Machine& machine, CachedOp& op,
         // ---- FP Loads ----
         case isa::FLW:
         case isa::FLD: {
-            simrv::xlen::Address const mem_addr = rrs1 + op.imm;
+            simrv::xlen::Address mem_addr = rrs1 + op.imm;
+            mem_addr = simrv::memory::MemoryAccess::mask_user_pointer(
+                           *this, simrv::xlen::VirtAddr{mem_addr})
+                           .raw();
             simrv::xlen::FloatingRegister mem_rdata = 0;
             const unsigned size_bytes = op.mem_size;
             const simrv::xlen::Address align_mask = op.align_mask();
@@ -1256,7 +1265,10 @@ void CPU::execute_cached_op_fast(Machine& machine, CachedOp& op,
         // ---- FP Stores ----
         case isa::FSW:
         case isa::FSD: {
-            simrv::xlen::Address const mem_addr = rrs1 + op.imm;
+            simrv::xlen::Address mem_addr = rrs1 + op.imm;
+            mem_addr = simrv::memory::MemoryAccess::mask_user_pointer(
+                           *this, simrv::xlen::VirtAddr{mem_addr})
+                           .raw();
             simrv::xlen::FloatingRegister const fp_data =
                 state_.regs.read_fp(simrv::xlen::to_fp_reg_id(op.rs2));
             const unsigned size_bytes = op.mem_size;

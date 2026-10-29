@@ -420,13 +420,17 @@ auto TrapController::can_execute_privileged_instruction(simrv::xlen::PrivilegeLe
                !(current_priv == kPrivSupervisor && !virtualization_mode &&
                  (mstatus & MstatusBit::Tw) != 0);
     }
-    if (funct7 == isa::Funct7Priv::HfenceVvma || funct7 == isa::Funct7Priv::HfenceGvma) {
+    if (funct7 == isa::Funct7Priv::HfenceVvma || funct7 == isa::Funct7Priv::HinvalVvma ||
+        funct7 == isa::Funct7Priv::HfenceGvma || funct7 == isa::Funct7Priv::HinvalGvma) {
         return misa_has_extension(misa, isa::IsaExtension::H) &&
                (current_priv == kPrivMachine ||
                 (current_priv == kPrivSupervisor && !virtualization_mode));
     }
-    if (funct7 == isa::Funct7Priv::SfenceVma || funct7 == isa::Funct7Priv::SinvalVma ||
-        funct12 == isa::Funct12Priv::SfenceWInval || funct12 == isa::Funct12Priv::SfenceInvalIr) {
+    if (funct12 == isa::Funct12Priv::SfenceWInval ||
+        funct12 == isa::Funct12Priv::SfenceInvalIr) {
+        return misa_has_extension(misa, isa::IsaExtension::S) && current_priv >= kPrivSupervisor;
+    }
+    if (funct7 == isa::Funct7Priv::SfenceVma || funct7 == isa::Funct7Priv::SinvalVma) {
         return misa_has_extension(misa, isa::IsaExtension::S) && current_priv >= kPrivSupervisor &&
                !(virtualization_mode && (hstatus & (simrv::xlen::CsrValue{1} << 20U)) != 0) &&
                !(current_priv == kPrivSupervisor && !virtualization_mode &&

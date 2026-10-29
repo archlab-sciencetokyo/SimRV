@@ -645,6 +645,8 @@ enum OperationId : uint16_t {
     SINVAL_VMA,
     SFENCE_W_INVAL,
     SFENCE_INVAL_IR,
+    HINVAL_VVMA,
+    HINVAL_GVMA,
     /* Zfhmin (Minimal Half-Precision Floating Point) */
     FLH,
     FSH,
@@ -804,7 +806,7 @@ constexpr OperationId kOpRangeVectorEnd = VWSLL_VI;
 }
 
 [[nodiscard]] constexpr auto is_svinval_op(OperationId op_id) noexcept -> bool {
-    return op_id >= SINVAL_VMA && op_id <= SFENCE_INVAL_IR;
+    return op_id >= SINVAL_VMA && op_id <= HINVAL_GVMA;
 }
 
 /// @brief Unified count of all valid simulator operations

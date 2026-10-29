@@ -25,6 +25,15 @@ namespace {
     core::CPU& cpu, simrv::xlen::Address base_addr, uint32_t total_bytes, bool is_write,
     simrv::xlen::Address* physical_address = nullptr) -> simrv::xlen::Byte* {
     if (total_bytes == 0 || cpu.machine_ == nullptr) return nullptr;
+    // The element-wise vector memory path applies pointer masking in
+    // MemoryAccess::target_read/target_write. A contiguous direct-RAM access
+    // would bypass that transform, and masking only the base is not equivalent
+    // when address arithmetic crosses the PMLEN boundary. Keep the fast path
+    // for already-canonical pointers and fall back for tagged pointers.
+    if (simrv::memory::MemoryAccess::mask_user_pointer(
+            cpu, simrv::xlen::VirtAddr{base_addr}).raw() != base_addr) {
+        return nullptr;
+    }
     auto& machine = *cpu.machine_;
     if (simrv::compiler::unlikely(machine.breakpoint_manager().has_any())) {
         return nullptr;

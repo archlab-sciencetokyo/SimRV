@@ -138,11 +138,14 @@ void CPU::fetch_operands(Machine& /*machine*/) {
                   (state_.priv == kPrivUser ||
                    (state_.hstatus & (simrv::xlen::CsrValue{1} << 21U)) != 0)) ||
                  ctx.funct7 == simrv::isa::Funct7Priv::HfenceVvma ||
+                 ctx.funct7 == simrv::isa::Funct7Priv::HinvalVvma ||
                  ctx.funct7 == simrv::isa::Funct7Priv::HfenceGvma ||
-                 ((ctx.funct7 == simrv::isa::Funct7Priv::SfenceVma ||
-                   ctx.funct7 == simrv::isa::Funct7Priv::SinvalVma ||
-                   funct12 == Funct12Priv::SfenceWInval ||
+                 ctx.funct7 == simrv::isa::Funct7Priv::HinvalGvma ||
+                 ((funct12 == Funct12Priv::SfenceWInval ||
                    funct12 == Funct12Priv::SfenceInvalIr) &&
+                  state_.priv == kPrivUser) ||
+                 ((ctx.funct7 == simrv::isa::Funct7Priv::SfenceVma ||
+                   ctx.funct7 == simrv::isa::Funct7Priv::SinvalVma) &&
                   (state_.priv == kPrivUser ||
                    (state_.hstatus & (simrv::xlen::CsrValue{1} << 20U)) != 0)));
             raise_decode_exception(ctx, virtual_instruction ? ExceptionCode::VirtualInstruction

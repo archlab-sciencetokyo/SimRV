@@ -69,6 +69,15 @@ class HypervisorMemoryAccessScope {
     }
     if (pmm != 2U) return address;  // RVA23 requires PMLEN=0 and PMLEN=7.
 
+    // MXR disables pointer masking at the effective privilege level, even if
+    // address translation is in Bare mode. Virtual accesses also include the
+    // VS-stage MXR bit, and HLV/HSV accesses use the same effective status.
+    const simrv::xlen::CsrValue mxr =
+        cpu.state().mstatus |
+        ((cpu.state().virt || hypervisor_access) ? cpu.state().vsstatus
+                                                 : simrv::xlen::CsrValue{0});
+    if ((mxr & simrv::core::MstatusBit::Mxr) != 0) return address;
+
     constexpr uint64_t kLow57Mask = (uint64_t{1} << 57U) - 1U;
     const uint64_t low = address.raw() & kLow57Mask;
     const bool translated = hypervisor_access

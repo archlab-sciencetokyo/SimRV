@@ -631,6 +631,8 @@ const std::array<std::string_view, static_cast<size_t>(isa::OperationIdCount)> O
     "SINVAL_VMA",
     "SFENCE_W_INVAL",
     "SFENCE_INVAL_IR",
+    "HINVAL_VVMA",
+    "HINVAL_GVMA",
     "FLH",
     "FSH",
     "FMV_X_H",
@@ -893,8 +895,12 @@ auto decode_system_priv(uint32_t funct7, simrv::xlen::Instruction ir) -> Operati
             if (funct7 == 0x0B && rd_is_zero) return OperationId::SINVAL_VMA;
             if (funct7 == 0x11 && rd_is_zero && ((ir >> 12U) & 0x7U) == 0)
                 return OperationId::HFENCE_VVMA;
+            if (funct7 == 0x13 && rd_is_zero && ((ir >> 12U) & 0x7U) == 0)
+                return OperationId::HINVAL_VVMA;
             if (funct7 == 0x31 && rd_is_zero && ((ir >> 12U) & 0x7U) == 0)
                 return OperationId::HFENCE_GVMA;
+            if (funct7 == 0x33 && rd_is_zero && ((ir >> 12U) & 0x7U) == 0)
+                return OperationId::HINVAL_GVMA;
             break;
     }
     return OperationId::ILLEGAL;

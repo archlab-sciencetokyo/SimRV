@@ -195,6 +195,9 @@ consteval auto generate_operation_info() {
     set_props({HFENCE_VVMA, HFENCE_GVMA}, exec_def,
               {.rd = b_none, .rs1 = b_int, .rs2 = b_int, .rs3 = b_none}, mem_none, ctrl_none,
               side_sys);
+    set_props({HINVAL_VVMA, HINVAL_GVMA}, exec_def,
+              {.rd = b_none, .rs1 = b_int, .rs2 = b_int, .rs3 = b_none}, mem_none, ctrl_none,
+              side_sys);
 
     // M Extension (Multiply / Divide)
     set_props({MUL, MULH, MULHSU, MULHU, MULW}, exec_mul,
