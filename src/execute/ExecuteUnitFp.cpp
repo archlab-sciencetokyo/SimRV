@@ -448,6 +448,8 @@ auto ExecuteUnitFp::fusedFp(Opcode opcode, FpFmt fmt, simrv::xlen::FpRegId rs1,
                             const simrv::xlen::FloatingRegister* freg, simrv::xlen::CsrValue& fcsr)
     -> FpExecResult {
     FpExecResult out;
+    const auto effective_rm = resolve_rounding_mode(std::to_underlying(rm), fcsr);
+    const bool use_rmm = effective_rm == RoundingMode::Rmm;
     FpEnvironment::set_rounding_mode(std::to_underlying(rm), fcsr);
     FpEnvironment::clear_exceptions();
     const auto u_rs1 = std::to_underlying(rs1);
@@ -460,16 +462,16 @@ auto ExecuteUnitFp::fusedFp(Opcode opcode, FpFmt fmt, simrv::xlen::FpRegId rs1,
         float value = 0.0F;
         switch (opcode) {
             case Opcode::MAdd:
-                value = rm == RoundingMode::Rmm ? rmm::fma(a, b, c) : __builtin_fmaf(a, b, c);
+                value = use_rmm ? rmm::fma(a, b, c) : __builtin_fmaf(a, b, c);
                 break;
             case Opcode::MSub:
-                value = rm == RoundingMode::Rmm ? rmm::fma(a, b, -c) : __builtin_fmaf(a, b, -c);
+                value = use_rmm ? rmm::fma(a, b, -c) : __builtin_fmaf(a, b, -c);
                 break;
             case Opcode::NMAdd:
-                value = -(rm == RoundingMode::Rmm ? rmm::fma(a, b, c) : __builtin_fmaf(a, b, c));
+                value = use_rmm ? rmm::fma(-a, b, -c) : __builtin_fmaf(-a, b, -c);
                 break;
             case Opcode::NMSub:
-                value = -(rm == RoundingMode::Rmm ? rmm::fma(a, b, -c) : __builtin_fmaf(a, b, -c));
+                value = use_rmm ? rmm::fma(-a, b, c) : __builtin_fmaf(-a, b, c);
                 break;
             default:
                 break;
@@ -486,16 +488,16 @@ auto ExecuteUnitFp::fusedFp(Opcode opcode, FpFmt fmt, simrv::xlen::FpRegId rs1,
         double value = 0.0;
         switch (opcode) {
             case Opcode::MAdd:
-                value = rm == RoundingMode::Rmm ? rmm::fma(a, b, c) : __builtin_fma(a, b, c);
+                value = use_rmm ? rmm::fma(a, b, c) : __builtin_fma(a, b, c);
                 break;
             case Opcode::MSub:
-                value = rm == RoundingMode::Rmm ? rmm::fma(a, b, -c) : __builtin_fma(a, b, -c);
+                value = use_rmm ? rmm::fma(a, b, -c) : __builtin_fma(a, b, -c);
                 break;
             case Opcode::NMAdd:
-                value = -(rm == RoundingMode::Rmm ? rmm::fma(a, b, c) : __builtin_fma(a, b, c));
+                value = use_rmm ? rmm::fma(-a, b, -c) : __builtin_fma(-a, b, -c);
                 break;
             case Opcode::NMSub:
-                value = -(rm == RoundingMode::Rmm ? rmm::fma(a, b, -c) : __builtin_fma(a, b, -c));
+                value = use_rmm ? rmm::fma(-a, b, c) : __builtin_fma(-a, b, c);
                 break;
             default:
                 break;
