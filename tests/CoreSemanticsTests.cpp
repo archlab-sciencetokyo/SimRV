@@ -3628,8 +3628,8 @@ void test_smp_reservation_table() {
     table.set_reservation(0, 0x80001000);
     expect(table.may_have_reservations(), "Setting LR marks possible reservations");
     expect(table.check_reservation(0, 0x80001000), "Hart 0 holds reservation at 0x80001000");
-    expect(table.check_reservation(0, 0x80001020),
-           "Hart 0 holds reservation within same 64-byte granule");
+    expect(!table.check_reservation(0, 0x80001008),
+           "Hart 0 does not hold reservation in the next eight-byte set");
     expect(!table.check_reservation(0, 0x80001040),
            "Hart 0 does not hold reservation in different granule");
     expect(!table.check_reservation(1, 0x80001000), "Hart 1 does not hold Hart 0's reservation");
@@ -3638,11 +3638,17 @@ void test_smp_reservation_table() {
     expect(table.check_reservation(0, 0x80001000),
            "Store from Hart 0 does not invalidate its own reservation before SC");
 
-    table.invalidate_matching(0x80001010, 1);
+    table.invalidate_matching(0x80001004, 1);
     expect(!table.check_reservation(0, 0x80001000),
            "Store from Hart 1 invalidates Hart 0's reservation");
     expect(!table.check_and_clear_reservation(0, 0x80001000),
            "SC on invalidated reservation fails");
+
+    table.set_reservation(0, 0x80001000);
+    expect(!table.check_and_clear_reservation(0, 0x80001008),
+           "SC to a different reservation set fails");
+    expect(!table.check_reservation(0, 0x80001000),
+           "Failed SC clears the previous reservation");
 
     table.set_reservation(0, 0x80002000);
     table.set_reservation(1, 0x80003000);
@@ -3656,10 +3662,10 @@ void test_smp_reservation_table() {
            "clear_all invalidates all active reservations");
 
     table.set_reservation(0, 0x80004000);
-    table.set_reservation(1, 0x80004040);
+    table.set_reservation(1, 0x80004008);
     table.set_reservation(2, 0x80004000);
-    table.invalidate_range(0x8000403C, 8, 2);
-    expect(!table.check_reservation(0, 0x80004000) && !table.check_reservation(1, 0x80004040) &&
+    table.invalidate_range(0x80004004, 8, 2);
+    expect(!table.check_reservation(0, 0x80004000) && !table.check_reservation(1, 0x80004008) &&
                table.check_reservation(2, 0x80004000),
            "A physical write spanning two reservation granules invalidates other harts only");
 }
