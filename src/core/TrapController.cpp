@@ -342,6 +342,15 @@ void TrapController::raise_exception(CPU& cpu, simrv::xlen::TrapCause cause,
         state.mcause = cause;
         state.mepc = trap_pc;
         state.mtval = tval;
+        if (isa::misa_has_extension(state.misa, isa::IsaExtension::H)) {
+            const auto exception = trap_exception_code(cause);
+            const bool guest_page_fault = !trap_is_interrupt(cause) &&
+                (exception == std::to_underlying(isa::ExceptionCode::GuestInstructionPageFault) ||
+                 exception == std::to_underlying(isa::ExceptionCode::GuestLoadPageFault) ||
+                 exception == std::to_underlying(isa::ExceptionCode::GuestStorePageFault));
+            state.mtval2 = guest_page_fault ? (cpu.active_context().pending_htval >> 2U) : 0;
+            state.mtinst = 0;
+        }
         state.mstatus = mstatus_with_mpp(state.mstatus, source_mode);
         state.mstatus &= ~MstatusBit::Mpv;
         if (guest_source && isa::misa_has_extension(state.misa, isa::IsaExtension::H)) {
@@ -433,11 +442,17 @@ auto TrapController::can_access_csr(simrv::xlen::PrivilegeLevel current_priv,
     // Debug CSRs require architectural Debug Mode, which the guest execution
     // engine does not implement. M-mode also cannot override CSR nonexistence.
     const auto address = csr_addr.value();
+    if ((address == csr_num(Csr::Mtinst).value() || address == csr_num(Csr::Mtval2).value()) &&
+        !isa::misa_has_extension(misa, isa::IsaExtension::H)) {
+        return false;
+    }
     const bool h_csr = address == csr_num(Csr::Hstatus).value() ||
                        address == csr_num(Csr::Hedeleg).value() ||
                        address == csr_num(Csr::Hideleg).value() ||
                        address == csr_num(Csr::Hie).value() ||
                        address == csr_num(Csr::Hcounteren).value() ||
+                       address == csr_num(Csr::Htimedelta).value() ||
+                       address == csr_num(Csr::Hgeie).value() ||
                        address == csr_num(Csr::Henvcfg).value() ||
                        address == csr_num(Csr::Htval).value() ||
                        address == csr_num(Csr::Hip).value() ||

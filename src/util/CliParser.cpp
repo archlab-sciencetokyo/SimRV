@@ -816,6 +816,10 @@ auto parse_mode_options(std::string_view arg, std::span<char* const> args, std::
         result.options.appmode = false;
         return true;
     }
+    if (option_id == "--no-sbi") {
+        result.options.no_sbi = true;
+        return true;
+    }
     if (option_id == "--ca") {
         result.options.execution_mode = RequestedExecutionMode::CycleAccurate;
         result.options.execution_mode_explicit = true;
@@ -1537,6 +1541,7 @@ auto RuntimeOptions::to_machine_config() const -> simrv::core::MachineConfig {
     cfg.debug.checkpoint_dir = checkpoint_dir;
 
     cfg.isa.isatest_tohost = isatest_tohost;
+    cfg.execution.profile = profile;
     cfg.isa.isa_preset = isa_preset_bits(effective_isa_preset(*this));
     if (has_zb_extensions || (!misa_override && !cpu_model_preset.has_value())) {
         cfg.isa.isa_preset |= simrv::isa::misa_extension_bit(simrv::isa::IsaExtension::B);
@@ -1721,7 +1726,8 @@ auto apply_runtime_options(simrv::core::Machine* machine, const RuntimeOptions& 
     // payloads identify themselves with the opensbi-linux-payload name.
     const bool is_fw_payload = (options.fn_memimg.find("fw_payload") != std::string::npos ||
                                 options.fn_memimg.find("opensbi") != std::string::npos);
-    const bool opensbi_active = options.use_opensbi || !options.fn_dvtree.empty() || is_fw_payload;
+    const bool opensbi_active =
+        options.no_sbi || options.use_opensbi || !options.fn_dvtree.empty() || is_fw_payload;
     for (size_t h = 0; h < machine->num_harts(); ++h) {
         machine->hart(h).use_opensbi = opensbi_active;
     }
@@ -1760,6 +1766,8 @@ auto cli_help_sections() -> const std::vector<HelpSection>& {
               {.option = "-b, --baremetal",
                .description = "Run a bare-metal application (default)."},
               {.option = "--os", .description = "Boot an operating system (Linux or RTOS)."},
+              {.option = "--no-sbi",
+               .description = "Deliver supervisor ECALLs to the guest machine trap handler."},
               {.option = "--uefi CODE.fd",
                .description = "Load UEFI CODE in pflash; boot it through OpenSBI fw_dynamic (-m)."},
               {.option = "--uefi-vars <VARS.fd>",

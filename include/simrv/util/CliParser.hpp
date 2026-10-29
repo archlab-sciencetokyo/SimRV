@@ -96,6 +96,7 @@ struct RuntimeOptions {
     bool bp_trace = false;
     bool trace_enabled = false;
     bool use_opensbi = false;
+    bool no_sbi = false;
     RequestedExecutionMode execution_mode = RequestedExecutionMode::Fast;
     bool execution_mode_explicit = false;
     bool high_contrast = false;

@@ -685,7 +685,9 @@ enum class Csr : uint16_t {
     Hideleg = 0x603,
     Hie = 0x604,
     Hcounteren = 0x606,
+    Hgeie = 0x607,
     Henvcfg = 0x60A,
+    Htimedelta = 0x605,
     Htval = 0x643,
     Hip = 0x644,
     Hvip = 0x645,
@@ -696,6 +698,8 @@ enum class Csr : uint16_t {
     Mcause = 0x342,
     Mtval = 0x343,
     Mip = 0x344,
+    Mtinst = 0x34A,
+    Mtval2 = 0x34B,
     Mseccfg = 0x747,
     Mseccfgh = 0x757,
     Tselect = 0x7A0,
@@ -733,6 +737,8 @@ inline constexpr simrv::xlen::CsrNumber kMepc{0x341};
 inline constexpr simrv::xlen::CsrNumber kMcause{0x342};
 inline constexpr simrv::xlen::CsrNumber kMtval{0x343};
 inline constexpr simrv::xlen::CsrNumber kMip{0x344};
+inline constexpr simrv::xlen::CsrNumber kMtinst{0x34A};
+inline constexpr simrv::xlen::CsrNumber kMtval2{0x34B};
 
 inline constexpr simrv::xlen::CsrNumber kSstatus{0x100};
 inline constexpr simrv::xlen::CsrNumber kSie{0x104};

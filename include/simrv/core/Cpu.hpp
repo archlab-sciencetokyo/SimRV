@@ -67,6 +67,8 @@ struct alignas(128) ArchState {
         mcause{};  ///< Machine Trap Cause (interrupt vs exception and exact code)
     simrv::xlen::CsrValue
         mtval{};  ///< Machine Trap Value (holds faulting addresses or instruction bytes)
+    simrv::xlen::CsrValue mtinst{};  ///< Machine Trap Instruction (H extension)
+    simrv::xlen::CsrValue mtval2{};  ///< Machine Second Trap Value (H extension)
     simrv::xlen::CsrValue mhartid{};  ///< Machine Hardware Thread ID (processor core identifier)
     simrv::xlen::CsrValue misa = isa::kMisaDefault;  ///< Machine ISA and extensions descriptor
     simrv::xlen::Word fetch_align_mask =
@@ -109,6 +111,8 @@ struct alignas(128) ArchState {
                                          ///< memory mode and page table base physical address)
     simrv::xlen::CsrValue scounteren{};  ///< Supervisor Counter Enable
     simrv::xlen::CsrValue hcounteren{};  ///< Hypervisor Counter Enable (0x606)
+    simrv::xlen::CsrValue htimedelta{};  ///< Virtual time offset (0x605)
+    simrv::xlen::CsrValue hgeie{};       ///< Guest external interrupt enable (0x607)
     std::array<uint64_t, 4> sstateen{};  ///< Supervisor State Enable banks (0x10C-10F)
     std::array<uint64_t, 4> hstateen{};  ///< Hypervisor State Enable banks (0x60C-60F)
 

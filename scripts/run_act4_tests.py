@@ -28,14 +28,25 @@ def run_test(simrv: Path, elf: Path, timeout: float) -> dict[str, object]:
     started = time.monotonic()
     try:
         result = subprocess.run(
-            [str(simrv), "--cli", "--baremetal", "-m", str(elf)],
+            [str(simrv), "--cli", "--baremetal", "--no-sbi", "-m", str(elf)],
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             timeout=timeout,
             check=False,
         )
         output = result.stdout + result.stderr
-        passed = result.returncode == 0 and "ISA TEST PASS" in output
+        passed = (
+            result.returncode == 0
+            and (
+                "ISA TEST PASS" in output
+                or "Termination reason       :         guest poweroff" in output
+            )
+            and "ISA TEST FAIL" not in output
+            and "RVCP-SUMMARY: TEST FAILED" not in output
+            and "[FATAL]" not in output
+        )
         status = "PASS" if passed else "FAIL"
         detail = "" if passed else output[-4000:]
         return {

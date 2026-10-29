@@ -1246,10 +1246,10 @@ void test_sha_state_enable_csrs() {
     TEST_ASSERT(mstatus.has_value() && (*mstatus & simrv::core::kMstatusGva) != 0);
     const auto medeleg = cpu.csr_file.read(simrv::core::Csr::Medeleg);
     constexpr simrv::xlen::CsrValue kHDelegatedToHs =
-        (simrv::xlen::CsrValue{1} << 9U) | (simrv::xlen::CsrValue{1} << 20U) |
-        (simrv::xlen::CsrValue{1} << 21U) | (simrv::xlen::CsrValue{1} << 22U) |
-        (simrv::xlen::CsrValue{1} << 23U);
+        (simrv::xlen::CsrValue{1} << 20U) | (simrv::xlen::CsrValue{1} << 21U) |
+        (simrv::xlen::CsrValue{1} << 22U) | (simrv::xlen::CsrValue{1} << 23U);
     TEST_ASSERT(medeleg.has_value() && (*medeleg & kHDelegatedToHs) == kHDelegatedToHs);
+    TEST_ASSERT(medeleg.has_value() && (*medeleg & (simrv::xlen::CsrValue{1} << 9U)) == 0);
 
     constexpr simrv::xlen::CsrValue kHstatusSpvSpvp =
         (simrv::xlen::CsrValue{1} << 7U) | (simrv::xlen::CsrValue{1} << 8U) |

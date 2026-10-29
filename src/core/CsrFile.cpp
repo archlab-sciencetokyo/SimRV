@@ -342,6 +342,12 @@ auto CsrFile::read(simrv::xlen::CsrNumber addr) const
         case csr_addr(Csr::Hcounteren):
             rcsr = cpu_.state().hcounteren & kCounterEnableMask;
             break;
+        case csr_addr(Csr::Htimedelta):
+            rcsr = cpu_.state().htimedelta;
+            break;
+        case csr_addr(Csr::Hgeie):
+            rcsr = 0;  // GEILEN=0: no guest external interrupt sources.
+            break;
         case csr_addr(Csr::Scountovf): {
             if (!isa::misa_has_extension(cpu_.state().misa, isa::IsaExtension::S)) {
                 return std::unexpected(ExceptionCode::IllegalInstruction);
@@ -418,8 +424,7 @@ auto CsrFile::read(simrv::xlen::CsrNumber addr) const
         case csr_addr(Csr::Medeleg):
             rcsr = cpu_.state().medeleg & kMedelegWritableMask;
             if (isa::misa_has_extension(cpu_.state().misa, isa::IsaExtension::H)) {
-                constexpr auto kHDelegatedToHs = (simrv::xlen::CsrValue{1} << 9U) |
-                                                 (simrv::xlen::CsrValue{1} << 20U) |
+                constexpr auto kHDelegatedToHs = (simrv::xlen::CsrValue{1} << 20U) |
                                                  (simrv::xlen::CsrValue{1} << 21U) |
                                                  (simrv::xlen::CsrValue{1} << 22U) |
                                                  (simrv::xlen::CsrValue{1} << 23U);
@@ -472,6 +477,12 @@ auto CsrFile::read(simrv::xlen::CsrNumber addr) const
         case csr_addr(Csr::Mtval):
             rcsr = cpu_.state().mtval;
             break;
+        case csr_addr(Csr::Mtinst):
+            rcsr = cpu_.state().mtinst;
+            break;
+        case csr_addr(Csr::Mtval2):
+            rcsr = cpu_.state().mtval2;
+            break;
         case csr_addr(Csr::Mip):
             rcsr = (cpu_.state().mip | cpu_.state().hip | cpu_.state().hvip |
                     vs_interrupts_to_h(cpu_.state().vsip)) &
@@ -492,7 +503,9 @@ auto CsrFile::read(simrv::xlen::CsrNumber addr) const
             rcsr = static_cast<simrv::xlen::CsrValue>(cpu_.state().minstret);
             break;
         case csr_addr(Csr::Time):
-            rcsr = static_cast<simrv::xlen::CsrValue>(cpu_.clint_mmio.mtime);
+            rcsr = static_cast<simrv::xlen::CsrValue>(
+                cpu_.clint_mmio.mtime +
+                (cpu_.state().virt ? cpu_.state().htimedelta : simrv::xlen::CsrValue{0}));
             break;
 
         case csr_addr(Csr::Mcycleh):
@@ -1030,6 +1043,12 @@ auto CsrFile::write(simrv::xlen::CsrNumber addr, simrv::xlen::CsrValue wdata)
         case csr_addr(Csr::Hcounteren):
             cpu_.state().hcounteren = wdata & kCounterEnableMask;
             break;
+        case csr_addr(Csr::Htimedelta):
+            cpu_.state().htimedelta = wdata;
+            break;
+        case csr_addr(Csr::Hgeie):
+            cpu_.state().hgeie = 0;
+            break;
         case csr_addr(Csr::Mcountinhibit):
             cpu_.state().mcountinhibit = wdata & ~static_cast<simrv::xlen::CsrValue>(2);
             break;
@@ -1080,6 +1099,12 @@ auto CsrFile::write(simrv::xlen::CsrNumber addr, simrv::xlen::CsrValue wdata)
         case csr_addr(Csr::Mtval):
             cpu_.state().mtval = wdata;
             break;
+        case csr_addr(Csr::Mtinst):
+            cpu_.state().mtinst = wdata;
+            break;
+        case csr_addr(Csr::Mtval2):
+            cpu_.state().mtval2 = wdata;
+            break;
 
         case csr_addr(Csr::Sie):
             if (cpu_.state().virt) {
@@ -1106,8 +1131,9 @@ auto CsrFile::write(simrv::xlen::CsrNumber addr, simrv::xlen::CsrValue wdata)
         case csr_addr(Csr::Medeleg):
             cpu_.state().medeleg = wdata & kMedelegWritableMask;
             if (isa::misa_has_extension(cpu_.state().misa, isa::IsaExtension::H)) {
-                cpu_.state().medeleg |= (simrv::xlen::CsrValue{1} << 9U) |
-                                        (simrv::xlen::CsrValue{1} << 20U) |
+                // S-mode ECALL must remain in M-mode for the SBI/T-SBI boundary.
+                // H adds mandatory delegation for virtual-instruction and guest-page faults.
+                cpu_.state().medeleg |= (simrv::xlen::CsrValue{1} << 20U) |
                                         (simrv::xlen::CsrValue{1} << 21U) |
                                         (simrv::xlen::CsrValue{1} << 22U) |
                                         (simrv::xlen::CsrValue{1} << 23U);

@@ -103,7 +103,9 @@ void CPU::run_ca_pipeline_cycle(Machine& machine) {
         if (ca_state.host_write_remaining > 0) {
             --ca_state.host_write_remaining;
         } else {
-            machine.tohost = ca_state.pending_host_value;
+            machine.publish_tohost_write(
+                ca_state.pending_host_value,
+                static_cast<Machine::TohostWriteKind>(ca_state.pending_host_write_kind));
             ca_state.host_write_pending = false;
         }
         return;
