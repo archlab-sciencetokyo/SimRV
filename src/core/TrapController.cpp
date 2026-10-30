@@ -327,6 +327,9 @@ void TrapController::raise_exception(CPU& cpu, simrv::xlen::TrapCause cause,
             } else {
                 state.hstatus &= ~(simrv::xlen::CsrValue{1} << 6U);
             }
+            state.virt = false;
+        }
+        if (isa::misa_has_extension(state.misa, isa::IsaExtension::H)) {
             const auto exception = trap_exception_code(cause);
             const bool guest_page_fault = !trap_is_interrupt(cause) &&
                 (exception == std::to_underlying(isa::ExceptionCode::GuestInstructionPageFault) ||
@@ -334,7 +337,6 @@ void TrapController::raise_exception(CPU& cpu, simrv::xlen::TrapCause cause,
                  exception == std::to_underlying(isa::ExceptionCode::GuestStorePageFault));
             state.htval = guest_page_fault ? cpu.active_context().pending_htval : 0;
             state.htinst = guest_page_fault ? cpu.active_context().pending_htinst : 0;
-            state.virt = false;
         }
     } else {
         state.mcause = cause;
