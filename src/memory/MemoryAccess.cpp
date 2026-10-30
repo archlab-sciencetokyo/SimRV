@@ -1088,6 +1088,11 @@ void MemoryAccess::storeFp(MemorySubsystem& mem, core::CPU& cpu, simrv::xlen::Vi
 
 void MemoryAccess::execute_cmo(MemorySubsystem& mem, core::CPU& cpu, simrv::xlen::VirtAddr addr,
                                isa::OperationId op) {
+    if (op == isa::OperationId::PREFETCH_I || op == isa::OperationId::PREFETCH_R ||
+        op == isa::OperationId::PREFETCH_W) {
+        return;
+    }
+
     const auto eff_priv = cpu.effective_data_privilege();
     const unsigned active_xlen = cpu.effective_data_xlen();
     addr = apply_user_pointer_mask(cpu, addr, active_xlen);
