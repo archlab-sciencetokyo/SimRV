@@ -98,6 +98,19 @@ SimRV verifies its default 64-bit profile (`rva23s64`) against the RISC-V Archit
 - **RVA23 Mandatory Extensions**: Automated regression suites verify Zicond, CMO, Svinval, Bitmanip (`zba`, `zbb`, `zbs`), and profile CSR configurations against golden architectural signatures.
 - **Continuous Integration**: The `rva23-act` suite is registered as a required verification gate in release evidence generation and verified across dual-width CI runs.
 
+The full upstream ACT4 RVA23S64 ELF suite was run with VLEN=128 and 12 jobs: **3138/3188 passed**.
+The 50 remaining failures are two expectation conflicts with the ratified specifications:
+
+- 42 `ExceptionsVx-*` checks expect successful vector instructions to leave a nonzero `vstart`.
+  Vector 1.0 requires vector instructions to reset `vstart` to zero when execution completes.
+- 8 `InterruptsS_priority_{sie,sip}_{S,U,VS,VU}` checks expect VSEI to outrank SEI when both are
+  pending for HS-mode. H 1.0 specifies SEI above VSEI in the HS interrupt priority order.
+
+These checks remain failures in the raw ACT result; SimRV preserves the specified behavior. This
+run is evidence for the tested behaviors, not a claim of ACT-clean or complete RVA23 conformance.
+The source suite revision is the `tests/riscv-arch-test` submodule revision. Run instructions are
+in [`tests/act4/README.md`](../../tests/act4/README.md).
+
 ## Known qualification gaps
 
 - Full RVA23S64 is not yet qualified. The following mandatory requirements remain incomplete or
@@ -108,6 +121,10 @@ SimRV verifies its default 64-bit profile (`rva23s64`) against the RISC-V Archit
     implemented; G-stage page-table reads are synchronous internal RAM reads, including in cycle
     mode. Shvstvala, Shvstvecd, Shvsatpa, and Shgatpa have implementation paths and focused tests,
     but require broader profile-level qualification.
+
+  - The 50 full-suite ACT failures documented above are audited expectation conflicts. They must
+    not be treated as architectural defects in SimRV unless a corrected ACT test or later ratified
+    specification demonstrates an implementation error.
 
   This list is a starting qualification checklist, not a claim that every other mandatory item
   has passed conformance testing. See the [normative RVA23 profile specification](https://github.com/riscv/riscv-profiles/blob/main/src/rva23-profile.adoc)

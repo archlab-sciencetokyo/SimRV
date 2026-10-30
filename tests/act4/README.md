@@ -27,5 +27,15 @@ python3 scripts/run_act4_tests.py \
 The generated Sail configuration fixes VLEN at 128 bits; the runner passes the
 same `--vlen 128` setting to SimRV. The generated suite and report belong under
 `build/` and are not committed.
+
+In the current full-suite run, SimRV passes 3138 of 3188 ELFs. The remaining
+50 checks are audited conflicts with the ratified specs: 42 vector tests expect
+successful instructions to retain nonzero `vstart` (Vector 1.0 requires it to
+clear), and 8 interrupt tests expect VSEI above SEI for HS-mode (H 1.0 specifies
+SEI above VSEI). The runner intentionally reports these as failures; do not
+change architectural behavior to satisfy those expectations. See
+[`docs/architecture/compliance.md`](../../docs/architecture/compliance.md) for
+qualification scope and status.
+
 This test run is useful implementation evidence; it is not RISC-V
 certification.
