@@ -213,17 +213,17 @@ void CPU::fetch_resolve_page_walk(Machine& machine, int state) {
     simrv::xlen::PhysAddr w_padr = (state == 1) ? ctx.padr1 : ctx.padr2;
     simrv::xlen::PhysAddr* r_padr = (state == 1) ? &ctx.padr1 : &ctx.padr2;
     simrv::xlen::Word const w_vadr = (state == 1) ? state_.pc : state_.pc + 2;
+    if constexpr (simrv::xlen::kIsXLen64) {
+        if (simrv::compiler::unlikely(
+                !simrv::Mmu::is_canonical(w_vadr, active_satp(), state_.regs.xlen))) {
+            ctx.pending_exception = ExceptionCode::FetchPageFault;
+            ctx.pending_tval = w_vadr;
+            return;
+        }
+    }
     if (w_padr == simrv::xlen::kWordAllOnes) {
         ctx.tlb_miss = true;
         record_hpm_event(HpmEvent::ITlbMiss);
-        if constexpr (simrv::xlen::kIsXLen64) {
-            if (simrv::compiler::unlikely(
-                    !simrv::Mmu::is_canonical(w_vadr, active_satp(), state_.regs.xlen))) {
-                ctx.pending_exception = ExceptionCode::FetchPageFault;
-                ctx.pending_tval = w_vadr;
-                return;
-            }
-        }
 
         auto translate_res = translate_stage_address(
             machine, simrv::xlen::VirtAddr{w_vadr}, PteAccess::Code, state_.priv, state_.regs.xlen,
