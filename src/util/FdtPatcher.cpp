@@ -247,10 +247,26 @@ auto patch_fdt(std::span<const uint8_t> blob, uint64_t dram_base, uint64_t dram_
             if (isa_ext_prop != nullptr) {
                 // Advertise only supported additions; this is not the complete RVA23 set.
                 static constexpr std::string_view kSupportedGuestExts[] = {
-                    "zihintntl", "zkt",    "zvbb",   "zvkt",   "zic64b", "zicclsm", "za64rs", "ziccamoa", "zfhmin",
+                    "zihintntl", "zkt",    "zvbb",   "zvkb",   "zvkt",   "zic64b", "zicclsm", "za64rs", "ziccamoa", "zfhmin",
                     "zvfhmin", "zfa", "zicond", "zicboz",
                     "zicbom",    "zicbop", "zawrs",   "svinval", "svpbmt", "svnapot", "sstc",
                     "sscofpmf", "ziccrse", "ziccif", "ssu64xl", "ssnpm", "supm"};
+                const auto has_extension = [&](std::string_view extension) {
+                    size_t offset = 0;
+                    while (offset < isa_ext_prop->data.size()) {
+                        const auto remaining = isa_ext_prop->data.size() - offset;
+                        const auto* token = isa_ext_prop->data.data() + offset;
+                        const auto* terminator =
+                            static_cast<const uint8_t*>(std::memchr(token, 0, remaining));
+                        if (terminator == nullptr) break;
+                        const auto length = static_cast<size_t>(terminator - token);
+                        const auto* begin = reinterpret_cast<const char*>(token);
+                        if (std::string_view(begin, length) == extension) return true;
+                        offset += length + 1;
+                    }
+                    return false;
+                };
+                const bool has_hypervisor = has_extension("h");
                 for (const auto ext : kSupportedGuestExts) {
                     if ((ext == "ssu64xl" || ext == "ssnpm" || ext == "supm") &&
                         !simrv::xlen::kIsXLen64)
@@ -272,6 +288,16 @@ auto patch_fdt(std::span<const uint8_t> blob, uint64_t dram_base, uint64_t dram_
                         offset += length + 1;
                     }
                     if (!present) {
+                        isa_ext_prop->data.insert(isa_ext_prop->data.end(), ext.begin(), ext.end());
+                        isa_ext_prop->data.push_back('\0');
+                    }
+                }
+                if (has_hypervisor) {
+                    static constexpr std::string_view kShaExtensions[] = {
+                        "ssstateen", "shcounterenw", "shvstvala", "shtvala",
+                        "shvstvecd", "shvsatpa", "shgatpa"};
+                    for (const auto ext : kShaExtensions) {
+                        if (has_extension(ext)) continue;
                         isa_ext_prop->data.insert(isa_ext_prop->data.end(), ext.begin(), ext.end());
                         isa_ext_prop->data.push_back('\0');
                     }

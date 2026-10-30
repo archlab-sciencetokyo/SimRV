@@ -139,6 +139,7 @@ void test_generate_platform_fdt_pcie() {
     expect(blob_contains_string(blob, "zfa"), "Zfa scalar floating-point extensions advertised");
     expect(blob_contains_string(blob, "zawrs"), "Zawrs wait-on-reservation-set advertised");
     expect(blob_contains_string(blob, "zvbb"), "Zvbb vector bit-manipulation advertised");
+    expect(blob_contains_string(blob, "zvkb"), "Zvkb vector bit-manipulation advertised");
     expect(blob_contains_string(blob, "zvkt"), "Zvkt vector data-independent latency advertised");
     expect(blob_contains_string(blob, "zkt"), "Zkt data-independent latency advertised");
     expect(blob_contains_string(blob, "svade"), "Svade page-fault behavior advertised");
@@ -147,6 +148,11 @@ void test_generate_platform_fdt_pcie() {
            "Sscounterenw HPM counter enables advertised");
     expect(blob_contains_string(blob, "sstvala"), "Sstvala supervisor trap values advertised");
     expect(blob_contains_string(blob, "sstvecd"), "Sstvecd direct trap vectors advertised");
+    for (const auto extension : {"ssstateen", "shcounterenw", "shvstvala", "shtvala",
+                                 "shvstvecd", "shvsatpa", "shgatpa"}) {
+        expect(blob_contains_string(blob, extension) == simrv::xlen::kIsXLen64,
+               std::string(extension) + " Sha component advertisement follows H support");
+    }
     expect(blob_contains_string(blob, "sscofpmf"),
            "Sscofpmf overflow interrupt support advertised");
     expect(blob_contains_string(blob, "ziccrse"), "Ziccrse main-memory support advertised");
@@ -193,7 +199,7 @@ void test_patch_fdt_advertises_zihintntl_and_64_byte_cmo() {
     fdt.property_u32("#size-cells", 0);
     fdt.begin_node("cpu@0");
     fdt.property_u32("reg", 0);
-    constexpr std::array<std::string_view, 1> isa_extensions{"i"};
+    constexpr std::array<std::string_view, 2> isa_extensions{"i", "h"};
     fdt.property_stringlist("riscv,isa-extensions", isa_extensions);
     fdt.end_node();
     fdt.end_node();
@@ -214,7 +220,15 @@ void test_patch_fdt_advertises_zihintntl_and_64_byte_cmo() {
                blob_contains_string(*patched, "zfa") &&
                blob_contains_string(*patched, "zawrs") &&
                blob_contains_string(*patched, "zvbb") &&
+               blob_contains_string(*patched, "zvkb") &&
                blob_contains_string(*patched, "zvkt") &&
+               blob_contains_string(*patched, "ssstateen") &&
+               blob_contains_string(*patched, "shcounterenw") &&
+               blob_contains_string(*patched, "shvstvala") &&
+               blob_contains_string(*patched, "shtvala") &&
+               blob_contains_string(*patched, "shvstvecd") &&
+               blob_contains_string(*patched, "shvsatpa") &&
+               blob_contains_string(*patched, "shgatpa") &&
                blob_contains_string(*patched, "zkt") &&
                blob_contains_string(*patched, "sscofpmf") &&
                blob_contains_string(*patched, "ziccrse") &&

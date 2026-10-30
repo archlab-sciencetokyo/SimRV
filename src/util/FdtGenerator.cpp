@@ -229,8 +229,20 @@ auto generate_platform_fdt(const core::MachineConfig& config,
         guest_extensions.emplace_back("ssnpm");
         guest_extensions.emplace_back("supm");
     }
+    const bool has_vector = simrv::isa::misa_has_extension(
+        config.isa.isa_preset, simrv::isa::IsaExtension::V);
+    const bool has_bitmanip = simrv::isa::misa_has_extension(
+        config.isa.isa_preset, simrv::isa::IsaExtension::B);
+    if (has_vector && has_bitmanip) guest_extensions.emplace_back("zvkb");
     if (simrv::isa::misa_has_extension(config.isa.isa_preset, simrv::isa::IsaExtension::H)) {
         guest_extensions.emplace_back("h");
+        guest_extensions.emplace_back("ssstateen");
+        guest_extensions.emplace_back("shcounterenw");
+        guest_extensions.emplace_back("shvstvala");
+        guest_extensions.emplace_back("shtvala");
+        guest_extensions.emplace_back("shvstvecd");
+        guest_extensions.emplace_back("shvsatpa");
+        guest_extensions.emplace_back("shgatpa");
     }
 
     for (uint32_t hart = 0; hart < num_harts; ++hart) {
