@@ -18,6 +18,7 @@
 #include "simrv/core/TrapController.hpp"
 #include "simrv/debug/BreakpointManager.hpp"
 #include "simrv/debug/SymbolTable.hpp"
+#include "simrv/explain/InstructionExplainer.hpp"
 #include "simrv/isa/Common.hpp"
 #include "simrv/memory/MemorySubsystem.hpp"
 #include "simrv/memory/MemoryUtil.hpp"
@@ -51,7 +52,6 @@
 #include "simrv/tui/panels/StatusBar.hpp"
 #include "simrv/tui/panels/TerminalPane.hpp"
 #include "simrv/util/CliParser.hpp"
-#include "simrv/util/InstructionExplainer.hpp"
 
 namespace simrv::tui {
 struct TuiTestAccess {
@@ -148,7 +148,11 @@ struct TuiTestAccess {
         return tui.handle_alt_key(key, byte);
     }
     static auto selection(const Tui& tui) -> const SelectionState& { return tui.selection_; }
-    static void set_sixel_supported(Tui& tui, bool s) { tui.sixel_supported_ = s; }
+    static void set_sixel_supported(Tui& tui, bool s) {
+        tui.sixel_supported_ = s;
+        tui.kitty_graphics_supported_ = false;
+        tui.modal_.set_display_graphics_supported(s);
+    }
     static void set_sixel_rendered(Tui& tui, bool rendered) { tui.sixel_rendered_ = rendered; }
     static auto sixel_framebuffer_signature(const Tui& tui) -> uint64_t {
         return tui.sixel_framebuffer_signature_;
@@ -635,10 +639,10 @@ void test_sysconfig_modal_modes() {
 
     // Test SMP configuration in SettingsModal
     SettingsDraft settings_draft;
-    SettingsModal::adjust_setting(settings_draft, 2, 1);
+    SettingsModal::adjust_setting(settings_draft, 3, 1);
     expect(settings_draft.density_mode == simrv::tui::framework::DensityMode::Compact,
            "Settings modal can select compact panel density");
-    SettingsModal::adjust_setting(settings_draft, 2, 1);
+    SettingsModal::adjust_setting(settings_draft, 3, 1);
     expect(settings_draft.density_mode == simrv::tui::framework::DensityMode::Comfortable,
            "Settings modal cycles panel density choices");
     settings_draft.num_harts = 1;
@@ -646,17 +650,17 @@ void test_sysconfig_modal_modes() {
     settings_draft.smp_multi_threaded = false;
     int s_cursor = 0;
 
-    SettingsModal::move_cursor(s_cursor, 3);
+    SettingsModal::move_cursor(s_cursor, 4);
     expect(s_cursor == 3, "Settings modal advances cursor to active SMP Hart Count");
 
-    SettingsModal::adjust_setting(settings_draft, 3, 3);
+    SettingsModal::adjust_setting(settings_draft, 4, 3);
     expect(settings_draft.num_harts == 4, "Settings modal adjusts SMP active core count");
 
-    SettingsModal::adjust_setting(settings_draft, 4, 1);
+    SettingsModal::adjust_setting(settings_draft, 5, 1);
     expect(settings_draft.smp_multi_threaded == true,
            "Settings modal toggles the SMP execution mode");
 
-    SettingsModal::adjust_setting(settings_draft, 5, 1);
+    SettingsModal::adjust_setting(settings_draft, 6, 1);
     expect(settings_draft.smp_quantum == 2500, "Settings modal advances SMP quantum level");
 
     simrv::core::Machine settings_machine;
@@ -2385,49 +2389,49 @@ void test_instruction_explainer_is_side_effect_free() {
 
 void test_instruction_explainer_and_csr_metadata() {
     // 1. CSR metadata queries
-    auto satp_details = simrv::util::get_csr_details(0x180);
+    auto satp_details = simrv::explain::get_csr_details(0x180);
     expect(satp_details.has_value() && satp_details->name == "satp", "satp metadata is resolved");
     expect(satp_details->min_privilege == simrv::xlen::PrivilegeLevel::Supervisor,
            "satp requires Supervisor privilege");
     expect(!satp_details->read_only, "satp is read-write");
 
-    auto vstart_details = simrv::util::get_csr_details(0x008);
+    auto vstart_details = simrv::explain::get_csr_details(0x008);
     expect(vstart_details.has_value() && vstart_details->name == "vstart",
            "vstart metadata is resolved");
     expect(vstart_details->extension == "Vector", "vstart belongs to Vector extension");
 
-    auto stimecmp_details = simrv::util::get_csr_details(0x14D);
+    auto stimecmp_details = simrv::explain::get_csr_details(0x14D);
     expect(stimecmp_details.has_value() && stimecmp_details->name == "stimecmp",
            "stimecmp metadata is resolved");
     expect(stimecmp_details->extension == "Sstc", "stimecmp belongs to Sstc extension");
 
-    auto mseccfg_details = simrv::util::get_csr_details(0x747);
+    auto mseccfg_details = simrv::explain::get_csr_details(0x747);
     expect(mseccfg_details.has_value() && mseccfg_details->name == "mseccfg",
            "mseccfg metadata is resolved");
     expect(mseccfg_details->extension == "Smepmp", "mseccfg belongs to Smepmp extension");
 
-    auto pmpcfg0_details = simrv::util::get_csr_details(0x3A0);
+    auto pmpcfg0_details = simrv::explain::get_csr_details(0x3A0);
     expect(pmpcfg0_details.has_value() && pmpcfg0_details->name == "pmpcfg0",
            "pmpcfg0 metadata is resolved");
 
     // 2. Vector and CFU operation details
-    auto vmv_desc = simrv::util::get_operation_details(simrv::isa::OperationId::VMV1R_V);
+    auto vmv_desc = simrv::explain::get_operation_details(simrv::isa::OperationId::VMV1R_V);
     expect(vmv_desc.first == "VMV1R.V" && !vmv_desc.second.contains("UNKNOWN"),
            "VMV1R.V has dedicated pedagogical description");
 
-    auto vadc_desc = simrv::util::get_operation_details(simrv::isa::OperationId::VADC_VVM);
+    auto vadc_desc = simrv::explain::get_operation_details(simrv::isa::OperationId::VADC_VVM);
     expect(vadc_desc.first == "VADC.VVM" && !vadc_desc.second.contains("UNKNOWN"),
            "VADC.VVM has dedicated pedagogical description");
 
-    auto cfu_desc = simrv::util::get_operation_details(simrv::isa::OperationId::CFU);
+    auto cfu_desc = simrv::explain::get_operation_details(simrv::isa::OperationId::CFU);
     expect(cfu_desc.first == "CFU", "CFU mnemonic is resolved");
 
     // 3. Extension classifications
-    expect(simrv::util::get_isa_extension_name(simrv::isa::OperationId::VCLMUL_VV) == "Zvbc",
+    expect(simrv::explain::get_isa_extension_name(simrv::isa::OperationId::VCLMUL_VV) == "Zvbc",
            "VCLMUL.VV classifies as Zvbc");
-    expect(simrv::util::get_isa_extension_name(simrv::isa::OperationId::VANDN_VV) == "Zvbb",
+    expect(simrv::explain::get_isa_extension_name(simrv::isa::OperationId::VANDN_VV) == "Zvbb",
            "VANDN.VV classifies as Zvbb");
-    expect(simrv::util::get_isa_extension_name(simrv::isa::OperationId::CFU) == "Custom",
+    expect(simrv::explain::get_isa_extension_name(simrv::isa::OperationId::CFU) == "Custom",
            "CFU classifies as Custom");
 
     // 4. Trap cause naming updates (Privileged 1.13)
@@ -2445,7 +2449,7 @@ void test_instruction_explainer_and_csr_metadata() {
     expect(simrv::isa::is_cfu_op(simrv::isa::OperationId::CFU),
            "CFU operation identifies as CFU op");
 
-    auto cfu_details = simrv::util::get_cfu_details(0x05, 4);
+    auto cfu_details = simrv::explain::get_cfu_details(0x05, 4);
     expect(cfu_details.name == "CFU" && cfu_details.funct3 == 4 && cfu_details.funct7 == 0x05,
            "CFU details structure carries correct metadata");
     expect(cfu_details.description.contains("custom function 4"),
@@ -3753,7 +3757,7 @@ void test_sixel_display_modal_clearing() {
     // Initial render establishing clean baseline
     tui.render(true);
 
-    // 1. Switching to Sixel Display from ToolPickerModal
+    // 1. Switching to Guest Display from ToolPickerModal
     tui.open_tool_picker(1);
     tui.render(true);
     expect(tui.is_modal_active(), "tool picker modal is active");
@@ -3761,17 +3765,17 @@ void test_sixel_display_modal_clearing() {
     bool has_tool_picker_text = false;
     for (const auto& line : TuiTestAccess::last_screen_lines(tui)) {
         if (line.find("Assign a tool to Column 2") != std::string::npos ||
-            line.find("Sixel Display") != std::string::npos) {
+            line.find("Guest Display") != std::string::npos) {
             has_tool_picker_text = true;
             break;
         }
     }
     expect(has_tool_picker_text, "rendered lines contain tool picker modal text while active");
 
-    // Submit Sixel Display via accelerator 'y'
+    // Submit Guest Display via accelerator 'y'
     expect(TuiTestAccess::handle_modal_key(tui, static_cast<uint8_t>('y'), TuiKey::y),
            "display accelerator handled");
-    expect(!tui.is_modal_active(), "modal closed after selecting Sixel Display");
+    expect(!tui.is_modal_active(), "modal closed after selecting Guest Display");
     expect(tui.get_workbench_slots()[1].page == TuiRegPage::DISPLAY, "slot 1 is now DISPLAY");
 
     // Render frame after modal close
@@ -3785,7 +3789,7 @@ void test_sixel_display_modal_clearing() {
                "tool picker category header cleared when switching to sixel display");
     }
 
-    // 2. Opening and closing a modal while Sixel Display is already active
+    // 2. Opening and closing a modal while Guest Display is already active
     tui.open_modal(ModalType::Help);
     tui.render(true);
     expect(tui.is_modal_active(), "help modal is active on top of sixel display");
@@ -3854,7 +3858,7 @@ void test_sixel_fluid_framebuffer_updates() {
     TuiTestAccess::set_sixel_supported(tui, true);
     tui.apply_layout_preset(LayoutPreset::GeneralDebug);
 
-    // Assign Sixel Display to Column 2
+    // Assign Guest Display to Column 2
     tui.open_tool_picker(1);
     expect(TuiTestAccess::handle_modal_key(tui, static_cast<uint8_t>('y'), TuiKey::y),
            "display accelerator selects DISPLAY");
@@ -4215,7 +4219,7 @@ void test_sixel_display_resolution_adaptation_and_size_warning() {
     const auto& unsupp_lines = TuiTestAccess::last_screen_lines(tui);
     bool found_unsupported = false;
     for (const auto& line : unsupp_lines) {
-        if (line.find("Sixel graphics unsupported") != std::string::npos) {
+        if (line.find("Terminal graphics unsupported") != std::string::npos) {
             found_unsupported = true;
             break;
         }
@@ -4230,7 +4234,7 @@ void test_sixel_display_resolution_adaptation_and_size_warning() {
     bool found_warning_in_normal = false;
     for (const auto& line : normal_lines) {
         if (line.find("Display space too small") != std::string::npos ||
-            line.find("Sixel graphics unsupported") != std::string::npos) {
+            line.find("Terminal graphics unsupported") != std::string::npos) {
             found_warning_in_normal = true;
             break;
         }

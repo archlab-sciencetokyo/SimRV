@@ -18,6 +18,7 @@
 #include "simrv/core/Cpu.hpp"
 #include "simrv/core/Machine.hpp"
 #include "simrv/debug/SymbolTable.hpp"
+#include "simrv/explain/InstructionExplainer.hpp"
 #include "simrv/isa/Common.hpp"
 #include "simrv/isa/TrapTypes.hpp"
 #include "simrv/pipeline/Decoder.hpp"
@@ -25,7 +26,6 @@
 #include "simrv/pipeline/PipelineSim.hpp"
 #include "simrv/tui/TuiTheme.hpp"
 #include "simrv/tui/panels/InspectorPane.hpp"
-#include "simrv/util/InstructionExplainer.hpp"
 #include "simrv/xlen/AddressTypes.hpp"
 #include "simrv/xlen/RegisterTypes.hpp"
 
@@ -151,18 +151,18 @@ auto get_computation_desc(const simrv::pipeline::PipelineContext& ctx, int width
             return std::format(" {}Computation : {}[{}{}] → {}\033[0m", kThemeText, kThemeMint,
                                reg1, offset_str, hex_val(ctx.mem_rdata));
         }
-        return std::format(" {}Computation : {}Memory[{} + {}] → {}\033[0m", kThemeText, kThemeMint,
-                           hex_val(ctx.rrs1), ctx.imm, hex_val(ctx.mem_rdata));
+        return std::format(" {}Computation : {}Memory[{} + {}] → {}\033[0m", kThemeText,
+                           kThemeMint, hex_val(ctx.rrs1), ctx.imm, hex_val(ctx.mem_rdata));
     }
     if (is_store_opcode(opc)) {
         if (framework::active_render_context().density == framework::Density::Compact ||
             width < 68) {
             std::string offset_str = (ctx.imm != 0) ? std::format(" + {}", ctx.imm) : "";
-            return std::format(" {}Computation : {}{} ({}) → [{}{}]\033[0m", kThemeText, kThemeMint,
-                               reg2, hex_val(ctx.rrs2), reg1, offset_str);
+            return std::format(" {}Computation : {}{} ({}) → [{}{}]\033[0m", kThemeText,
+                               kThemeMint, reg2, hex_val(ctx.rrs2), reg1, offset_str);
         }
-        return std::format(" {}Computation : {}{} → Memory[{} + {}]\033[0m", kThemeText, kThemeMint,
-                           hex_val(ctx.rrs2), hex_val(ctx.rrs1), ctx.imm);
+        return std::format(" {}Computation : {}{} → Memory[{} + {}]\033[0m", kThemeText,
+                           kThemeMint, hex_val(ctx.rrs2), hex_val(ctx.rrs1), ctx.imm);
     }
     if (is_branch_opcode(opc)) {
         if (framework::active_render_context().density == framework::Density::Compact ||
@@ -688,7 +688,7 @@ auto InspectorPane::render_pipeline_stages_functional_low_part1(const simrv::cor
 
     // Get operation info for labels
     const std::string_view op_name = simrv::pipeline::operation_name(ctx.op_id);
-    auto isa_ext = simrv::util::get_isa_extension_name(ctx.op_id);
+    auto isa_ext = simrv::explain::get_isa_extension_name(ctx.op_id);
     InstFormat const fmt = simrv::isa::get_instruction_format(ctx.opcode);
     bool const is_compressed = (ctx.ir_org & 0x3) != 0x3;
 
@@ -818,8 +818,9 @@ auto InspectorPane::render_pipeline_stages_functional_low_part2(const simrv::cor
         case 11: {
             std::string branch_str =
                 is_branch_opcode(ctx.opcode)
-                    ? (ctx.tkn ? std::format("{}Yes → {}\033[0m", kThemePeach, hex_val(ctx.jmp_pc))
-                               : std::format("{}No (fall through)\033[0m", kThemeMint))
+                    ? (ctx.tkn
+                           ? std::format("{}Yes → {}\033[0m", kThemePeach, hex_val(ctx.jmp_pc))
+                           : std::format("{}No (fall through)\033[0m", kThemeMint))
                     : "No";
             std::string jump_str = (ctx.opcode == Opcode::Jal || ctx.opcode == Opcode::Jalr)
                                        ? hex_val(ctx.jmp_pc)
@@ -895,7 +896,7 @@ auto InspectorPane::render_pipeline_stages_functional_high(const simrv::core::CP
             bool const is_csr = (ctx.op_id >= CSRRW && ctx.op_id <= CSRRCI);
             if (is_csr) {
                 uint32_t csr_addr = ctx.imm & 0xFFF;
-                std::string csr_nm = simrv::util::csr_name(csr_addr);
+                std::string csr_nm = simrv::explain::csr_name(csr_addr);
                 return render_pair("CSR Target", std::format("{} (0x{:03X})", csr_nm, csr_addr),
                                    kThemeVal, "CSR Read", hex_val(ctx.rcsr), kThemeVal, col_width,
                                    right_width, 10);
@@ -933,22 +934,23 @@ auto InspectorPane::render_pipeline_stages_functional_high(const simrv::core::CP
                     width);
             }
             if (pipeline::operation::is_store(ctx.op_id)) {
-                return format_to_width(std::format(" \033[90mMemory:\033[0m Store to {} ← Data: {}",
-                                                   hex_val(ctx.mem_addr), hex_val(ctx.mem_wdata)),
-                                       width);
+                return format_to_width(
+                    std::format(" \033[90mMemory:\033[0m Store to {} ↝ Data: {}",
+                                hex_val(ctx.mem_addr), hex_val(ctx.mem_wdata)),
+                    width);
             }
             return format_to_width(" \033[90mMemory: None (ALU/Register-only)\033[0m", width);
         }
         case 22: {
             if (pipeline::operation::writes_integer(ctx.op_id) &&
                 ctx.rd != simrv::xlen::RegId::Zero) {
-                return format_to_width(std::format(" \033[90mCommit:\033[0m Writeback {} ← {} "
+                return format_to_width(std::format(" \033[90mCommit:\033[0m Writeback {} ↝ {} "
                                                    "\033[38;5;158m[Committed]\033[0m",
                                                    reg_name(ctx.rd), hex_val(ctx.wb_data)),
                                        width);
             }
             if (pipeline::operation::writes_float(ctx.op_id)) {
-                return format_to_width(std::format(" \033[90mCommit:\033[0m Writeback {} ← {} "
+                return format_to_width(std::format(" \033[90mCommit:\033[0m Writeback {} ↝ {} "
                                                    "\033[38;5;158m[Committed]\033[0m",
                                                    fp_reg_name(ctx.rd), hex_val(ctx.wb_data)),
                                        width);

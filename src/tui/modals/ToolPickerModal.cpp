@@ -16,7 +16,8 @@
 
 namespace simrv::tui::modals {
 
-auto ToolPickerModal::make_filter(const simrv::core::Machine& machine, size_t hart) -> ToolFilter {
+auto ToolPickerModal::make_filter(const simrv::core::Machine& machine, size_t hart,
+                                  bool display_graphics_supported) -> ToolFilter {
     const bool cycle_mode = machine.runtime_profile.is_cycle_mode();
     uint64_t misa = 0;
     if (machine.num_harts() > 0) {
@@ -25,7 +26,10 @@ auto ToolPickerModal::make_filter(const simrv::core::Machine& machine, size_t ha
     }
     const bool has_fp = (misa & ((1ULL << ('f' - 'a')) | (1ULL << ('d' - 'a')))) != 0;
     const bool has_vector = (misa & (1ULL << ('v' - 'a'))) != 0;
-    return ToolFilter{.cycle_accurate = cycle_mode, .has_fp = has_fp, .has_vector = has_vector};
+    return ToolFilter{.cycle_accurate = cycle_mode,
+                      .has_fp = has_fp,
+                      .has_vector = has_vector,
+                      .display_graphics_supported = display_graphics_supported};
 }
 
 auto ToolPickerModal::all_tools(ToolFilter filter) -> std::vector<ToolEntry> {

@@ -126,6 +126,7 @@ void test_generate_platform_fdt_pcie() {
     expect(blob_contains_string(blob, "pci@30000000"), "PCIe ECAM node address present");
     expect(blob_contains_string(blob, "zihpm"), "Implemented HPM counter extension advertised");
     expect(blob_contains_string(blob, "zicntr"), "Base counters and timers advertised");
+    expect(blob_contains_string(blob, "sstc"), "Supervisor timer extension advertised");
     expect(blob_contains_string(blob, std::string_view{"\0h\0", 3}) ==
                simrv::xlen::kIsXLen64,
            "Hypervisor extension advertisement follows the hart ISA configuration");

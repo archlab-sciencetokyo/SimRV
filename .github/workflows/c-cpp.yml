@@ -38,7 +38,7 @@ jobs:
         changed_files="$(git diff --name-only "$BASE_SHA" "$HEAD_SHA" -- \
           . \
           ':(exclude)docs/**' \
-          ':(exclude)mkdocs.yml' \
+          ':(exclude)zensical.yml' \
           ':(exclude)pyproject.toml' \
           ':(exclude)uv.lock' \
           ':(exclude).github/workflows/c-cpp.yml' \

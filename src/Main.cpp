@@ -222,10 +222,16 @@ auto print_doctor() -> int {
 
     std::println("SimRV environment diagnostics");
     std::println("  version          : {}", simrv::buildinfo::kVersion);
-    std::println("  host             : Linux x86-64 expected for release binaries");
+#if defined(__APPLE__)
+    std::println("  host             : macOS source-build target; release packages target Linux x86-64");
+#elif defined(__linux__)
+    std::println("  host             : Linux (release packages target x86-64)");
+#else
+    std::println("  host             : unsupported native host (use Linux or macOS)");
+#endif
     std::println("  interactive TTY  : {}", tty ? "yes" : "no (use --cli for pipes)");
     std::println("  TERM             : {}", term_value.empty() ? "(unset)" : term_value);
-    std::println("  Sixel hint       : {}",
+    std::println("  Sixel environment : {}",
                  sixel ? "detected" : "not detected (text TUI remains available)");
     std::println("  mouse protocol   : SGR-pixel mode requested by interactive TUI");
     std::println(

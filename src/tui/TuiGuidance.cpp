@@ -7,9 +7,9 @@
 #include <format>
 
 #include "simrv/core/TrapController.hpp"
+#include "simrv/explain/InstructionExplainer.hpp"
 #include "simrv/pipeline/Decoder.hpp"
 #include "simrv/pipeline/OperationTraits.hpp"
-#include "simrv/util/InstructionExplainer.hpp"
 
 namespace simrv::tui {
 
@@ -221,9 +221,9 @@ auto guidance_for_context(const GuidanceContext& context) -> PageGuidance {
         guidance.next_hint = "Step into the trap handler.";
         guidance.glossary_topic = 5;
     } else if (context.is_csr_op) {
-        auto details = simrv::util::get_csr_details(context.csr_address);
+        auto details = simrv::explain::get_csr_details(context.csr_address);
         std::string csr_nm =
-            details ? std::string(details->name) : simrv::util::csr_name(context.csr_address);
+        details ? std::string(details->name) : simrv::explain::csr_name(context.csr_address);
         guidance.title = std::format("CSR Access: {}", csr_nm);
         guidance.meaning =
             details ? std::format("Accessing {} ({}).", csr_nm, details->description)

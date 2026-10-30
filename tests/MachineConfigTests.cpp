@@ -102,6 +102,18 @@ auto main() -> int {
         expect(!check_isa("rv" + xlen + "gc_zicntr_zicntr").has_value(),
                "CLI rejects duplicate extension names");
     }
+    {
+        std::array<std::string, 5> args_str = {"SimRV", "--profile", "rva23u64", "-m", "guest.elf"};
+        std::array<char*, 5> args{};
+        for (size_t i = 0; i < args_str.size(); ++i) args[i] = args_str[i].data();
+        const auto parsed = simrv::util::parse_command_line(args);
+        expect(parsed.has_value(), "CLI accepts RVA23U64 profile selection");
+        if (parsed) {
+            const auto cfg = parsed->options.to_machine_config();
+            expect(cfg.execution.profile == simrv::isa::ArchitectureProfile::Rva23U64,
+                   "selected ISA profile is preserved in machine configuration");
+        }
+    }
     expect(simrv::log::parse_format("text") == simrv::log::Format::Text,
            "text diagnostic format is accepted");
     expect(simrv::log::parse_format("JSON") == simrv::log::Format::Json,

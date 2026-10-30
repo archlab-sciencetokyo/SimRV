@@ -93,7 +93,8 @@ void TuiModal::open(ModalType type, InspectorPane* inspector_pane, uint64_t step
                 std::make_unique<modals::GlossaryModal>(glossary_topic_, glossary_scroll_);
             break;
         case ModalType::Settings:
-            modals::SettingsModal::open(settings_draft_, machine_, density_mode_);
+            modals::SettingsModal::open(settings_draft_, machine_, density_mode_,
+                                        get_active_theme_style());
             active_modal_impl_ =
                 std::make_unique<modals::SettingsModal>(this, &machine_, settings_draft_);
             break;
@@ -347,7 +348,7 @@ auto TuiModal::remove_bp_at_cursor(
 }
 
 auto TuiModal::tool_filter() const -> modals::ToolFilter {
-    return modals::ToolPickerModal::make_filter(machine_, selected_hart_);
+    return modals::ToolPickerModal::make_filter(machine_, selected_hart_, display_graphics_supported_);
 }
 
 void TuiModal::open_tool_picker(int slot_idx, TuiRegPage current_page, int num_slots) {
@@ -475,11 +476,12 @@ void TuiModal::close() {
     path_completion_preview_.clear();
 }
 
-auto TuiModal::submit(InspectorPane* inspector_pane, std::atomic<uint64_t>& step_delay_us,
-                      const std::function<void(TuiRegPage)>& set_reg_page_cb,
-                      const std::function<void(const std::string&)>& set_status_override_cb,
-                      const std::function<void()>& on_speed_changed_cb,
-                      const std::function<void(framework::DensityMode)>& on_density_changed_cb)
+auto TuiModal::submit(
+    InspectorPane* inspector_pane, std::atomic<uint64_t>& step_delay_us,
+    const std::function<void(TuiRegPage)>& set_reg_page_cb,
+    const std::function<void(const std::string&)>& set_status_override_cb,
+    const std::function<void()>& on_speed_changed_cb,
+    const std::function<void(framework::DensityMode, TuiThemeStyle)>& on_presentation_changed_cb)
     -> bool {
     (void)set_status_override_cb;
     bool result = false;
@@ -546,13 +548,16 @@ auto TuiModal::submit(InspectorPane* inspector_pane, std::atomic<uint64_t>& step
             }
             break;
         case ModalType::Settings: {
-            if (on_density_changed_cb) on_density_changed_cb(settings_draft_.density_mode);
             result = modals::SettingsModal::submit(
                 settings_draft_, machine_, set_reg_page_cb,
                 [this](simrv::core::MachineConfig next, SysConfigDraft, bool cycle_accurate) {
                     open_reconfiguration_confirm(std::move(next), "Machine settings changed",
                                                  cycle_accurate);
                 });
+            if (on_presentation_changed_cb) {
+                on_presentation_changed_cb(settings_draft_.density_mode,
+                                           settings_draft_.theme_style);
+            }
             if (result) {
                 open_notice("SETTINGS SAVED",
                             "Simulator & SMP settings saved and applied successfully.", false);

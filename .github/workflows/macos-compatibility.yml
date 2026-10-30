@@ -1,8 +1,8 @@
-name: macOS Compatibility Probe
+name: macOS Build and Smoke Test
 
 on:
   push:
-    branches: [test/macos]
+    branches: [test/macos, release/3.0.0-rc.17]
   workflow_dispatch:
 
 permissions:

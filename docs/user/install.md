@@ -1,16 +1,46 @@
 # Install SimRV
 
-SimRV publishes one Linux x86-64 simulator build. The installed `simrv` executable runs RV64
+SimRV publishes Linux x86-64 simulator builds. The installed `simrv` executable runs RV64
 guests and provides RV32 guest compatibility. Native RV32 builds remain a source-level validation
 target and are not distributed separately.
 
-The supported host platform is x86-64 Linux. Windows users should run SimRV inside
+Release packages target x86-64 Linux. Native macOS source builds have been compiled and smoke-tested
+on macOS 26 for Apple silicon and Intel; macOS packages are not published yet. Host TAP networking
+and VirtIO-FS directory sharing are Linux-only. Windows users should run SimRV inside
 [WSL2](https://learn.microsoft.com/windows/wsl/) with a supported Linux distribution; native
 Windows builds are not currently supported.
 
 Download the newest package bundle or portable archive from
 [GitHub Releases](https://github.com/archlab-sciencetokyo/SimRV/releases). Beta releases are marked
 as prereleases.
+
+## Build from source on macOS
+
+The macOS build is an experimental source-build target, validated on macOS 26 with GCC 16 on both
+Apple silicon and Intel. The compatibility workflow also runs `simrv --help` as a startup smoke
+test. It does not qualify every TUI feature or provide a macOS installer. Its successful CI runs
+publish architecture-specific test binaries as workflow artifacts; those are not release packages.
+
+Install the build tools with Homebrew, then configure and build using the same compiler settings as
+the compatibility job:
+
+```bash
+brew install cmake ninja gcc
+cmake -S . -B build/macos -G Ninja \
+  -DCMAKE_BUILD_TYPE=Debug \
+  -DCMAKE_C_COMPILER=gcc-16 \
+  -DCMAKE_CXX_COMPILER=g++-16 \
+  -DSIMRV_XLEN=64 \
+  -DSIMRV_ALLOW_UNQUALIFIED_TOOLCHAIN=ON \
+  -DSIMRV_ENABLE_LTO=OFF
+cmake --build build/macos --target SimRV --parallel 2
+build/macos/SimRV --help
+```
+
+The [macOS compatibility workflow](https://github.com/archlab-sciencetokyo/SimRV/actions/workflows/macos-compatibility.yml)
+uploads separate `arm64` and `x86_64` artifacts after a successful build and smoke test. Graphical
+guest display uses Kitty graphics when detected, then SIXEL when available; support depends on the
+terminal emulator, not just the host OS. The TUI falls back to text when neither is available.
 
 ## Portable archive
 

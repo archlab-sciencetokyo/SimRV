@@ -12,10 +12,11 @@ simrv --doctor
 simrv --isa-info
 ```
 
-`--doctor` reports whether the process has an interactive terminal and whether the environment
-gives the TUI a Sixel hint. A missing Sixel terminal is not an error: the text TUI remains
-supported. `--isa-info` is the authoritative user-facing summary of the qualified ISA and the
-explicitly unqualified areas.
+`--doctor` reports whether the process has an interactive terminal and the host platform. Its
+SIXEL environment hint is advisory; the interactive TUI checks for Kitty graphics and SIXEL before
+offering its display tool. A terminal without either protocol can still use the text TUI.
+`--isa-info` is the authoritative user-facing summary of the qualified ISA and the explicitly
+unqualified areas.
 
 ## Run the golden bare-metal path
 
@@ -27,7 +28,7 @@ simrv --cli --baremetal -m examples/hello/build-rv64/hello.elf
 The guest writes to the simulated UART and exits through `tohost`. For a graphical Linux image,
 use the Linux image instructions and verify the Alpine/JWM desktop with VirtIO GPU, input, sound,
 and networking enabled. Sixel display rendering is an optional host presentation layer; guest
-framebuffer behavior is validated independently.
+framebuffer behavior is validated independently of terminal graphics rendering.
 
 ## Export a compatible SoC description
 

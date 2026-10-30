@@ -17,8 +17,8 @@ OPENSBI_VER="1.9"
 BUSYBOX_VER="1.38.0"
 ALPINE_VER="3.24.2"
 ALPINE_MIRROR="${SIMRV_ALPINE_MIRROR:-}"
-BUILDROOT_VER="2025.02.18"
-BUILDROOT_DEFAULT_SHA256="e38ad1df6ea0479fff6419a87a64535d02131674d463be154a763ef725b55321"
+BUILDROOT_VER="2026.08.1"
+BUILDROOT_DEFAULT_SHA256="34fb7bea8a213ffde39cc02e61703391560f26e0850f03138c722d0b09880f2b"
 BUILDROOT_SHA256=""
 if [[ -f "$VERSION_FILE" ]]; then
     while IFS='=' read -r component version; do
@@ -188,7 +188,7 @@ while [[ $# -gt 0 ]]; do
             echo "  --opensbi-version <ver>         OpenSBI version (default: 1.9)"
             echo "  --busybox-version <ver>         BusyBox version (default: 1.38.0)"
             echo "  --alpine-version <ver>          Alpine minirootfs version (default: 3.24.2)"
-            echo "  --buildroot-version <ver>       Buildroot version (default: 2025.02.18 LTS)"
+            echo "  --buildroot-version <ver>       Buildroot version (default: 2026.08.1)"
             echo "  --buildroot-sha256 <hash>       Required with non-default Buildroot version"
             echo "  --check-updates                 Compare pinned versions with upstream releases and exit"
             echo "  --update-versions               Review, save, and build with upstream versions"
@@ -197,7 +197,7 @@ while [[ $# -gt 0 ]]; do
             echo "  --reuse-kernel                  Reuse a published kernel when its inputs match"
             echo "  --cross-compile <prefix>        Cross compiler prefix"
             echo "  --rootfs <alpine|buildroot>     Root filesystem implementation (default: alpine)"
-            echo "  --profile <gui|fpga|debug>      Linux deployment profile (default: gui)"
+            echo "  --profile <gui|fpga|debug|uefi> Linux deployment profile (default: gui)"
             echo "  --dram-size-mb <mb>             DTB DRAM size (default: 512)"
             echo "  --alpine-mirror <url>           Alpine mirror base URL (default follows version)"
             echo "  --verbose                       Show full make/compiler command output"
@@ -263,15 +263,15 @@ if (( CHECK_UPDATES || UPDATE_VERSIONS )); then
             exit 1
         fi
         if [[ "$component" == "buildroot_stable" ]]; then
-            print_info "Buildroot latest stable: ${version} (the saved pin follows the LTS series)."
+            if version_is_newer "$version" "$BUILDROOT_VER"; then
+                print_info "Buildroot stable update available: ${BUILDROOT_VER} -> ${version}; update the pin and verified archive SHA-256 together."
+            else
+                printf 'Buildroot stable pin: %s\n' "$BUILDROOT_VER"
+            fi
             continue
         fi
         if [[ "$component" == "buildroot_lts" ]]; then
-            if version_is_newer "$version" "$BUILDROOT_VER"; then
-                print_info "Buildroot LTS update available: ${BUILDROOT_VER} -> ${version}; set it manually with --buildroot-sha256 to verify the archive."
-            else
-                printf 'Up to date:       %-12s %s\n' "$component" "$BUILDROOT_VER"
-            fi
+            print_info "Buildroot LTS line: ${version} (the saved pin follows the stable line)."
             continue
         fi
         case "$component" in
@@ -359,9 +359,9 @@ for version in "$LINUX_VER" "$OPENSBI_VER" "$BUSYBOX_VER" "$ALPINE_VER" "$BUILDR
         exit 1
     fi
 done
-if [[ "$ROOTFS_VARIANT" == "buildroot" ]]; then
+if [[ "$ROOTFS_VARIANT" == "buildroot" || "$PROFILE" == "uefi" ]]; then
     if [[ -z "$BUILDROOT_SHA256" ]]; then
-        if [[ "$BUILDROOT_VER" == "2025.02.18" ]]; then
+        if [[ "$BUILDROOT_VER" == "2026.08.1" ]]; then
             BUILDROOT_SHA256="$BUILDROOT_DEFAULT_SHA256"
         else
             print_error "--buildroot-sha256 is required when selecting a non-default Buildroot version."
@@ -426,27 +426,49 @@ make() {
     return "$make_status"
 }
 
+# Keep noisy third-party setup/build tools quiet in normal mode, but retain a
+# complete transcript and print it whenever the command fails. --verbose keeps
+# the direct output for interactive diagnosis.
+run_logged_stage() {
+    local log_file="$1"
+    shift
+    if [[ "$VERBOSE" == "1" ]]; then
+        "$@"
+        return
+    fi
+    local status=0
+    "$@" >"$log_file" 2>&1 || status=$?
+    if (( status != 0 )); then
+        cat "$log_file" >&2
+    fi
+    return "$status"
+}
+
 if [[ "$ROOTFS_VARIANT" != "alpine" && "$ROOTFS_VARIANT" != "buildroot" ]]; then
     print_error "Unsupported rootfs '$ROOTFS_VARIANT' (expected alpine or buildroot)."
     exit 1
 fi
-if [[ "$PROFILE" != "gui" && "$PROFILE" != "fpga" && "$PROFILE" != "debug" ]]; then
-    print_error "Unsupported profile '$PROFILE' (expected gui, fpga, or debug)."
+if [[ "$PROFILE" != "gui" && "$PROFILE" != "fpga" && "$PROFILE" != "debug" && "$PROFILE" != "uefi" ]]; then
+    print_error "Unsupported profile '$PROFILE' (expected gui, fpga, debug, or uefi)."
     exit 1
 fi
 if [[ "$ROOTFS_VARIANT" == "buildroot" && "$PROFILE" != "fpga" ]]; then
     print_error "Buildroot currently provides the headless fpga profile; use --profile fpga."
     exit 1
 fi
-if [[ "$PROFILE" == "debug" && "$ROOTFS_VARIANT" != "alpine" ]]; then
-    print_error "The debug profile currently extends the Alpine GUI image; use --rootfs alpine."
+if [[ ( "$PROFILE" == "debug" || "$PROFILE" == "uefi" ) && "$ROOTFS_VARIANT" != "alpine" ]]; then
+    print_error "The $PROFILE profile requires Alpine; use --rootfs alpine."
+    exit 1
+fi
+if [[ "$PROFILE" == "uefi" && "$ARCH" != "rv64" ]]; then
+    print_error "The UEFI profile currently targets rv64 (BOOTRISCV64.EFI)."
     exit 1
 fi
 if ! [[ "$DRAM_SIZE_MB" =~ ^[0-9]+$ ]] || (( DRAM_SIZE_MB < 128 )); then
     print_error "--dram-size-mb must be an integer of at least 128."
     exit 1
 fi
-if [[ "$ROOTFS_VARIANT" == "buildroot" ]]; then
+if [[ "$ROOTFS_VARIANT" == "buildroot" || "$PROFILE" == "uefi" ]]; then
     ROOTFS_LABEL="simrv-root"
     if ! perl -MExtUtils::MakeMaker -e 1 >/dev/null 2>&1; then
         print_error "Buildroot requires Perl ExtUtils::MakeMaker (install perl-devel/perl-ExtUtils-MakeMaker)."
@@ -556,7 +578,7 @@ else
     fi
 fi
 
-if [[ "$ROOTFS_VARIANT" == "buildroot" ]]; then
+if [[ "$ROOTFS_VARIANT" == "buildroot" || "$PROFILE" == "uefi" ]]; then
     if [[ ! -f "buildroot-${BUILDROOT_VER}.tar.xz" ]]; then
         print_step "Downloading Buildroot ${BUILDROOT_VER}..."
         wget -q --show-progress --tries=3 -O "buildroot-${BUILDROOT_VER}.tar.xz" \
@@ -598,7 +620,7 @@ if [[ ( "$XLEN" == "32" || "$ROOTFS_VARIANT" == "buildroot" ) && ! -d "busybox-$
     print_step "Extracting BusyBox..."
     tar -xf "$BUILD_DIR/sources/busybox-${BUSYBOX_VER}.tar.bz2"
 fi
-if [[ "$ROOTFS_VARIANT" == "buildroot" && ! -d "buildroot-${BUILDROOT_VER}" ]]; then
+if [[ ( "$ROOTFS_VARIANT" == "buildroot" || "$PROFILE" == "uefi" ) && ! -d "buildroot-${BUILDROOT_VER}" ]]; then
     print_step "Extracting Buildroot..."
     tar -xf "$BUILD_DIR/sources/buildroot-${BUILDROOT_VER}.tar.xz"
 fi
@@ -891,6 +913,19 @@ make ARCH=riscv CROSS_COMPILE="$CROSS_COMPILE" "$LINUX_DEFCONFIG"
 ./scripts/config --enable CONFIG_FB
 ./scripts/config --enable CONFIG_FB_SIMPLE
 ./scripts/config --enable CONFIG_FRAMEBUFFER_CONSOLE
+./scripts/config --enable CONFIG_PERF_EVENTS
+./scripts/config --enable CONFIG_RISCV_PMU
+./scripts/config --enable CONFIG_RISCV_PMU_SBI
+
+if [[ "$PROFILE" == "uefi" ]]; then
+    ./scripts/config --enable CONFIG_EFI
+    ./scripts/config --enable CONFIG_EFI_STUB
+    ./scripts/config --enable CONFIG_EFI_PARTITION
+    ./scripts/config --enable CONFIG_CMDLINE_BOOL
+    ./scripts/config --set-str CONFIG_CMDLINE \
+        "console=ttyS0,115200 earlycon=uart8250,mmio,0x10000000,115200n8 root=LABEL=${ROOTFS_LABEL} rootfstype=ext4 rootwait rw loglevel=7"
+    ./scripts/config --enable CONFIG_CMDLINE_FORCE
+fi
 
 # High-speed boot optimizations: disable heavy debug features, RAID6 benchmarks, and unused subsystems
 ./scripts/config --disable CONFIG_SLUB_DEBUG
@@ -939,6 +974,25 @@ fi
 # Always resolve new configs non-interactively to prevent prompt hangs
 make ARCH=riscv CROSS_COMPILE="$CROSS_COMPILE" olddefconfig
 
+for required_config in CONFIG_PERF_EVENTS CONFIG_RISCV_PMU CONFIG_RISCV_PMU_SBI; do
+    if ! grep -q "^${required_config}=y$" .config; then
+        print_error "Linux config did not enable ${required_config}; SBI HPM/perf support would be unavailable."
+        exit 1
+    fi
+done
+if [[ "$PROFILE" == "uefi" ]]; then
+    for required_config in CONFIG_EFI CONFIG_EFI_STUB CONFIG_CMDLINE_FORCE; do
+        if ! grep -q "^${required_config}=y$" .config; then
+            print_error "Linux config did not enable ${required_config}; UEFI boot image cannot be produced."
+            exit 1
+        fi
+    done
+    if ! grep -q '^CONFIG_CMDLINE="console=ttyS0,115200 earlycon=uart8250,mmio,0x10000000,115200n8 root=LABEL=simrv-root' .config; then
+        print_error "Linux config did not retain the UEFI rootfs command line."
+        exit 1
+    fi
+fi
+
 if [[ "$PROFILE" != "debug" ]] && grep -q '^CONFIG_PRINTK_CALLER=y$' .config; then
     print_error "Normal image profile unexpectedly enables CONFIG_PRINTK_CALLER."
     exit 1
@@ -968,6 +1022,10 @@ if [[ "$REUSE_KERNEL" != "1" ]]; then
     print_step "Compiling/linking Linux Kernel v${LINUX_VER}..."
     make ARCH=riscv CROSS_COMPILE="$CROSS_COMPILE" -j"$JOBS" vmlinux
 fi
+if [[ "$PROFILE" == "uefi" ]]; then
+    make ARCH=riscv CROSS_COMPILE="$CROSS_COMPILE" -j"$JOBS" Image
+    cp "$LINUX_BUILD/arch/riscv/boot/Image" "$IMAGES_DIR/uefi-kernel.efi"
+fi
 
 # Objcopy to bin format
 "${CROSS_COMPILE}objcopy" -O binary vmlinux "$BUILD_DIR/vmlinux_${ARCH}.bin"
@@ -985,6 +1043,7 @@ rm -rf "$OPENSBI_BUILD/build"
 # Compile the virt-compatible DTB from the selected memory and rootfs
 # contract. Keep the checked-in templates readable while making the published
 # artifact match the simulator/FPGA memory map.
+python3 "$SCRIPT_DIR/generate_hpm_catalog.py" --check
 DRAM_BYTES=$((DRAM_SIZE_MB * 1024 * 1024))
 DRAM_HEX=$(printf '0x%x' "$DRAM_BYTES")
 GENERATED_DTS="$BUILD_DIR/virt-rv${XLEN}-${ROOTFS_VARIANT}-${PROFILE}.dts"
@@ -1014,14 +1073,15 @@ fi
 
 print_step "Compiling OpenSBI v${OPENSBI_VER} (FW_PAYLOAD)..."
 
-make PLATFORM=generic CROSS_COMPILE="$CROSS_COMPILE" \
-     "CC=${CROSS_COMPILE}gcc -march=${M_ARCH} -mabi=${M_ABI}" \
-     PLATFORM_RISCV_XLEN="$XLEN" \
-     FW_PAYLOAD_PATH="$BUILD_DIR/vmlinux_${ARCH}.bin" \
-     FW_PAYLOAD_FDT_PATH="$IMAGES_DIR/devicetree.dtb" \
-     FW_TEXT_START=0x80000000 \
-     FW_PAYLOAD_FDT_ADDR=0x8FF00000 \
-     -j"$JOBS"
+run_logged_stage "$BUILD_DIR/opensbi-fw-payload.log" make \
+    PLATFORM=generic CROSS_COMPILE="$CROSS_COMPILE" \
+    "CC=${CROSS_COMPILE}gcc -march=${M_ARCH} -mabi=${M_ABI}" \
+    PLATFORM_RISCV_XLEN="$XLEN" \
+    FW_PAYLOAD_PATH="$BUILD_DIR/vmlinux_${ARCH}.bin" \
+    FW_PAYLOAD_FDT_PATH="$IMAGES_DIR/devicetree.dtb" \
+    FW_TEXT_START=0x80000000 \
+    FW_PAYLOAD_FDT_ADDR=0x8FF00000 \
+    -j"$JOBS"
 
 
 
@@ -1037,10 +1097,11 @@ cp "$BUILD_DIR/Image_${ARCH}" "$IMAGES_DIR/Image"
 # responsible for supplying the next-stage address and DTB to this artifact;
 # opensbi-linux-payload.elf remains the self-contained SimRV convenience image.
 if [[ ! -f "$OPENSBI_BUILD/build/platform/generic/firmware/fw_dynamic.bin" ]]; then
-    make PLATFORM=generic CROSS_COMPILE="$CROSS_COMPILE" \
-         "CC=${CROSS_COMPILE}gcc -march=${M_ARCH} -mabi=${M_ABI}" \
-         PLATFORM_RISCV_XLEN="$XLEN" FW_DYNAMIC=y FW_TEXT_START=0x80000000 \
-         -j"$JOBS"
+    run_logged_stage "$BUILD_DIR/opensbi-fw-dynamic.log" make \
+        PLATFORM=generic CROSS_COMPILE="$CROSS_COMPILE" \
+        "CC=${CROSS_COMPILE}gcc -march=${M_ARCH} -mabi=${M_ABI}" \
+        PLATFORM_RISCV_XLEN="$XLEN" FW_DYNAMIC=y FW_TEXT_START=0x80000000 \
+        -j"$JOBS"
 fi
 cp "$OPENSBI_BUILD/build/platform/generic/firmware/fw_dynamic.bin" "$IMAGES_DIR/opensbi-dynamic.bin"
 
@@ -1064,6 +1125,12 @@ export SIMRV_LINUX_MEM_IMG="\$IMAGES_DIR/opensbi-linux-payload.elf"
 export SIMRV_LINUX_DISK_IMG="\$IMAGES_DIR/rootfs.img"
 export SIMRV_LINUX_DTB="\$IMAGES_DIR/devicetree.dtb"
 export SIMRV_LINUX_IMAGE="\$IMAGES_DIR/Image"
+if [ -f "\$IMAGES_DIR/uefi-disk.img" ]; then
+    export SIMRV_UEFI_DISK_IMG="\$IMAGES_DIR/uefi-disk.img"
+    export SIMRV_UEFI_KERNEL="\$IMAGES_DIR/uefi-kernel.efi"
+    export SIMRV_UEFI_CODE="\$IMAGES_DIR/RISCV_VIRT_CODE.fd"
+    export SIMRV_UEFI_VARS_TEMPLATE="\$IMAGES_DIR/RISCV_VIRT_VARS.fd"
+fi
 export SIMRV_LINUX_OPENSBI="\$IMAGES_DIR/opensbi-dynamic.bin"
 export SIMRV_LINUX_PROFILE="${PROFILE}"
 export SIMRV_LINUX_ROOTFS="${ROOTFS_VARIANT}"
@@ -1202,11 +1269,11 @@ chmod 1777 /tmp/.X11-unix /tmp/.ICE-unix
 # The Alpine minirootfs is intentionally small and does not include the X11
 # desktop packages. Install them lazily on the first networked boot so a clean
 # image and a rebuilt image have the same GUI behavior.
-if [ ! -x /usr/bin/xinit ] || [ ! -x /usr/bin/htop ]; then
-    echo "[JWM] Installing X11 desktop packages on first boot..." > /dev/ttyS0
+if [ ! -x /usr/bin/xinit ] || [ ! -x /usr/bin/htop ] || ! command -v setup-alpine >/dev/null 2>&1; then
+    echo "[JWM] Installing X11 desktop and Alpine setup packages on first boot..." > /dev/ttyS0
     if ! apk add --no-cache xorg-server xinit jwm xterm xf86-video-fbdev \
         xf86-input-evdev font-misc-misc font-dejavu links-graphics bsd-games htop \
-        gnuchess > /tmp/simrv-apk.log 2>&1; then
+        gnuchess alpine-conf > /tmp/simrv-apk.log 2>&1; then
         echo "[JWM] X11 package installation failed; see /tmp/simrv-apk.log" > /dev/ttyS0
         sed -n '1,24p' /tmp/simrv-apk.log > /dev/ttyS0 2>/dev/null || true
         exit 1
@@ -1425,18 +1492,30 @@ EOF
     fi
     if [[ -x "$qemu_riscv64" && -x "$ROOTFS_DISK_DIR/sbin/apk" ]]; then
         print_step "Bundling Alpine X11/JWM packages into the root disk..."
+        apk_log="$BUILD_DIR/alpine-apk-bundle.log"
         set +e
-        "$qemu_riscv64" -L "$ROOTFS_DISK_DIR" "$ROOTFS_DISK_DIR/sbin/apk" \
-            --root "$ROOTFS_DISK_DIR" --no-cache --no-scripts add \
-            xorg-server xinit jwm xterm xf86-video-fbdev xf86-input-evdev \
-            font-misc-misc font-dejavu links-graphics bsd-games gnuchess htop
-        apk_status=$?
+        if [[ "$VERBOSE" == "1" ]]; then
+            "$qemu_riscv64" -L "$ROOTFS_DISK_DIR" "$ROOTFS_DISK_DIR/sbin/apk" \
+                --root "$ROOTFS_DISK_DIR" --no-cache --no-scripts add \
+                xorg-server xinit jwm xterm xf86-video-fbdev xf86-input-evdev \
+                font-misc-misc font-dejavu links-graphics bsd-games gnuchess htop \
+                alpine-conf
+        else
+            "$qemu_riscv64" -L "$ROOTFS_DISK_DIR" "$ROOTFS_DISK_DIR/sbin/apk" \
+                --root "$ROOTFS_DISK_DIR" --no-cache --no-scripts add \
+                xorg-server xinit jwm xterm xf86-video-fbdev xf86-input-evdev \
+                font-misc-misc font-dejavu links-graphics bsd-games gnuchess htop \
+                alpine-conf \
+                >"$apk_log" 2>&1
+        fi
         set -e
         if [[ -x "$ROOTFS_DISK_DIR/usr/bin/xinit" &&
               -x "$ROOTFS_DISK_DIR/usr/libexec/Xorg" &&
               -x "$ROOTFS_DISK_DIR/usr/bin/jwm" &&
-              -x "$ROOTFS_DISK_DIR/usr/bin/htop" ]]; then
-            print_info "X11/JWM package files bundled (apk status ${apk_status})."
+              -x "$ROOTFS_DISK_DIR/usr/bin/htop" &&
+              ( -x "$ROOTFS_DISK_DIR/sbin/setup-alpine" ||
+                -x "$ROOTFS_DISK_DIR/usr/sbin/setup-alpine" ) ]]; then
+            print_info "X11/JWM package files bundled."
             sed -i 's/Sans-12:bold/DejaVu Sans-12:bold/g; s/>Sans-12</>DejaVu Sans-12</g' \
                 "$ROOTFS_DISK_DIR/etc/system.jwmrc"
             sed -i 's/<TrayButton label="JWM">root:1<\//<TrayButton label="SimRV">root:1<\//; s/<Background type="solid">#111111<\//<Background type="gradient">#21152b:#071622<\//' "$ROOTFS_DISK_DIR/etc/system.jwmrc"
@@ -1456,6 +1535,10 @@ EOF
             </Menu>' "$ROOTFS_DISK_DIR/etc/system.jwmrc"
         else
             print_info "X11 bundle unavailable; retaining first-boot APK fallback."
+            if [[ "$VERBOSE" != "1" && -s "$apk_log" ]]; then
+                print_info "APK output (also saved to $apk_log):"
+                cat "$apk_log"
+            fi
         fi
     else
         print_info "RISC-V QEMU unavailable; retaining first-boot APK fallback."
@@ -1477,6 +1560,49 @@ EOF
         /usr/sbin/dd if=/dev/zero of="$IMAGES_DIR/rootfs.img" bs=1M count=1 status=none
     tune2fs -L "$ROOTFS_LABEL" "$IMAGES_DIR/rootfs.img" >/dev/null 2>&1 || true
   fi
+fi
+
+if [[ "$PROFILE" == "uefi" ]]; then
+    BUILDROOT_SOURCE="$BUILD_DIR/buildroot-${BUILDROOT_VER}"
+    EDK2_OUTPUT="$BUILD_DIR/buildroot-output-uefi-rv64-${BUILDROOT_VER}"
+    EDK2_CONFIG="$ROOT_DIR/configs/buildroot/simrv-fpga/rv64_defconfig"
+    print_step "Building pinned EDK2 RISC-V virt firmware through Buildroot..."
+    mkdir -p "$EDK2_OUTPUT"
+    cp "$EDK2_CONFIG" "$EDK2_OUTPUT/.config"
+    make -C "$BUILDROOT_SOURCE" O="$EDK2_OUTPUT" \
+        BR2_EXTERNAL="$ROOT_DIR/configs/buildroot/simrv-fpga" olddefconfig >/dev/null
+    "$BUILDROOT_SOURCE/utils/config" --file "$EDK2_OUTPUT/.config" \
+        --enable BR2_TARGET_EDK2 --enable BR2_TARGET_EDK2_PLATFORM_OVMF_RISCV
+    make -C "$BUILDROOT_SOURCE" O="$EDK2_OUTPUT" \
+        BR2_EXTERNAL="$ROOT_DIR/configs/buildroot/simrv-fpga" olddefconfig >/dev/null
+    make -C "$BUILDROOT_SOURCE" O="$EDK2_OUTPUT" \
+        BR2_EXTERNAL="$ROOT_DIR/configs/buildroot/simrv-fpga" edk2-extract
+    EDK2_SOURCE_DIR=$(find "$EDK2_OUTPUT/build" -maxdepth 1 -type d \
+        -name 'edk2-edk2-*' -print -quit)
+    if [[ -z "$EDK2_SOURCE_DIR" ]]; then
+        print_error "Unable to locate the extracted EDK2 source tree."
+        exit 1
+    fi
+    python3 "$SCRIPT_DIR/patch_buildroot_edk2_hostflags.py" \
+        "$BUILDROOT_SOURCE" "$EDK2_SOURCE_DIR"
+    make -C "$BUILDROOT_SOURCE" O="$EDK2_OUTPUT" \
+        BR2_EXTERNAL="$ROOT_DIR/configs/buildroot/simrv-fpga" -j"$JOBS" edk2
+    for firmware in RISCV_VIRT_CODE.fd RISCV_VIRT_VARS.fd; do
+        if [[ ! -s "$EDK2_OUTPUT/images/$firmware" ]]; then
+            print_error "Buildroot did not produce $firmware"
+            exit 1
+        fi
+        if (( $(stat -c '%s' "$EDK2_OUTPUT/images/$firmware") > 32 * 1024 * 1024 )); then
+            print_error "$firmware exceeds the 32 MiB SimRV pflash device"
+            exit 1
+        fi
+        cp "$EDK2_OUTPUT/images/$firmware" "$IMAGES_DIR/$firmware"
+    done
+    cmp -s "$EDK2_OUTPUT/images/RISCV_VIRT_VARS.fd" "$IMAGES_DIR/RISCV_VIRT_VARS.fd" || exit 1
+    python3 "$SCRIPT_DIR/create_uefi_disk.py" \
+        --kernel "$IMAGES_DIR/uefi-kernel.efi" \
+        --rootfs "$IMAGES_DIR/rootfs.img" \
+        --output "$IMAGES_DIR/uefi-disk.img"
 fi
 
 BOOTARGS=$(sed -n 's/.*bootargs = "\([^"]*\)".*/\1/p' "$GENERATED_DTS")
@@ -1514,7 +1640,7 @@ fi
     printf '  "debug_features": %s,\n' "$DEBUG_FEATURES"
     echo '  "artifacts": {'
     first=1
-    for artifact in opensbi-linux-payload.elf opensbi-dynamic.bin Image vmlinux devicetree.dtb rootfs.img; do
+    for artifact in opensbi-linux-payload.elf opensbi-dynamic.bin Image uefi-kernel.efi uefi-disk.img RISCV_VIRT_CODE.fd RISCV_VIRT_VARS.fd vmlinux devicetree.dtb rootfs.img; do
         if [[ -f "$IMAGES_DIR/$artifact" ]]; then
             [[ "$first" -eq 1 ]] || echo ','
             printf '    "%s": "%s"' "$artifact" "$(sha256sum "$IMAGES_DIR/$artifact" | cut -d' ' -f1)"

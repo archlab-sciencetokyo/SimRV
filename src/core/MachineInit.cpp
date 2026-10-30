@@ -617,16 +617,18 @@ auto Machine::initialize() -> std::expected<void, std::string> {
     if (config.files.uefi_enabled) {
         if (!config.files.uefi_code_path.empty() && runtime_->pflash0) {
             if (!runtime_->pflash0->load_image(config.files.uefi_code_path)) {
-                simrv::log::warn("failed to load UEFI code image from {}",
-                                 config.files.uefi_code_path);
+                return std::unexpected("failed to load UEFI code image from " +
+                                       config.files.uefi_code_path);
             }
         }
         if (!config.files.uefi_vars_path.empty() && runtime_->pflash1) {
-            runtime_->pflash1->load_image(config.files.uefi_vars_path);
+            if (!runtime_->pflash1->load_image(config.files.uefi_vars_path)) {
+                return std::unexpected("failed to load UEFI variables image from " +
+                                       config.files.uefi_vars_path);
+            }
             runtime_->pflash1->set_backing_file(config.files.uefi_vars_path);
         }
-        set_resolved_boot_state(SIMRV_PLATFORM_PFLASH0_BASE, std::nullopt);
-        primary_hart().state().pc = SIMRV_PLATFORM_PFLASH0_BASE;
+        primary_hart().use_opensbi = true;
     }
 
     if (!config.files.binary_path.empty()) {
@@ -641,10 +643,6 @@ auto Machine::initialize() -> std::expected<void, std::string> {
     }
 
     resolve_start_pc_and_dram_base(*this, symbol_table());
-    if (config.files.uefi_enabled) {
-        set_resolved_boot_state(SIMRV_PLATFORM_PFLASH0_BASE, std::nullopt);
-        primary_hart().state().pc = SIMRV_PLATFORM_PFLASH0_BASE;
-    }
 
     runtime_->secondary_harts.clear();
     if (config.execution.num_harts > 1) {
@@ -746,6 +744,28 @@ auto Machine::initialize() -> std::expected<void, std::string> {
             return std::unexpected("device-tree region is outside DRAM");
         std::memcpy(initialized_ram.unchecked_ptr(dtb_address), final_blob.data(),
                     final_blob.size());
+
+        if (config.files.uefi_enabled) {
+            // OpenSBI FW_DYNAMIC reads this six-word structure from a2, then enters the S-mode
+            // EDK2 volume at SimRV's PFlash0 base with the generated FDT still in a1.
+            constexpr uint64_t kFwDynamicMagic = 0x4942534f;
+            constexpr uint64_t kFwDynamicVersion = 2;
+            constexpr uint64_t kFwDynamicModeSupervisor = 1;
+            constexpr uint64_t kNoPreferredHart = UINT64_MAX;
+            const simrv::xlen::Address fw_info_address =
+                initialized_ram.base() + dtb_offset - 4096;
+            constexpr std::array<uint64_t, 6> fw_info = {
+                kFwDynamicMagic, kFwDynamicVersion, SIMRV_PLATFORM_PFLASH0_BASE,
+                kFwDynamicModeSupervisor, 0, kNoPreferredHart};
+            if (!initialized_ram.contains(fw_info_address, sizeof(fw_info))) {
+                return std::unexpected("OpenSBI FW_DYNAMIC info does not fit in guest DRAM");
+            }
+            std::memcpy(initialized_ram.unchecked_ptr(fw_info_address), fw_info.data(),
+                        sizeof(fw_info));
+            primary_hart().state().regs.write(
+                simrv::xlen::RegId::A2, static_cast<simrv::xlen::Register>(fw_info_address));
+            primary_hart().use_opensbi = true;
+        }
     }
 
     if (config.files.disk_enabled) {

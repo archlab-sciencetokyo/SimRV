@@ -23,6 +23,7 @@
 #include <cstring>
 #include <filesystem>
 #include <format>
+#include <span>
 #include <string>
 #include <thread>
 
@@ -57,7 +58,26 @@ namespace simrv::tui {
 
 namespace {
 constexpr uint32_t kTuiTargetFps = 60;
+constexpr size_t kKittyGraphicsChunkSize = 4096;
+
+[[nodiscard]] auto base64_encode(std::span<const uint8_t> bytes) -> std::string {
+    constexpr std::string_view alphabet =
+        "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    std::string encoded;
+    encoded.reserve(((bytes.size() + 2) / 3) * 4);
+    for (size_t i = 0; i < bytes.size(); i += 3) {
+        const uint32_t a = bytes[i];
+        const uint32_t b = i + 1 < bytes.size() ? bytes[i + 1] : 0;
+        const uint32_t c = i + 2 < bytes.size() ? bytes[i + 2] : 0;
+        const uint32_t value = (a << 16) | (b << 8) | c;
+        encoded += alphabet[(value >> 18) & 0x3f];
+        encoded += alphabet[(value >> 12) & 0x3f];
+        encoded += i + 1 < bytes.size() ? alphabet[(value >> 6) & 0x3f] : '=';
+        encoded += i + 2 < bytes.size() ? alphabet[value & 0x3f] : '=';
+    }
+    return encoded;
 }
+}  // namespace
 
 static struct termios
     g_saved_termios;                  // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
@@ -411,7 +431,8 @@ void Tui::initialize() {
     // Keep mouse reports in terminal cells: pixel mode depends on terminal-specific pixel
     // metrics and can shift every TUI hit target when those metrics differ from the renderer.
     constexpr std::string_view terminal_queries =
-        "\033]22;?pointer\033\\\033]22;?__current__\033\\\033[14t\033[16t\033[c";
+        "\033]22;?pointer\033\\\033]22;?__current__\033\\\033[14t\033[16t\033[c"
+        "\033_Gi=31,s=1,v=1,a=q,t=d,f=24;AAAA\033\\";
     write_all(STDOUT_FILENO, terminal_queries);
 
     // Read the response from stdin in raw mode with 100ms timeout
@@ -430,10 +451,14 @@ void Tui::initialize() {
                 resp.push_back(query_ch);
                 const auto cell_reply = resp.find("\033[6;");
                 const auto da1_reply = resp.find("\033[?");
+                const auto kitty_reply = resp.find("\033_Gi=31;");
+                const bool kitty_reply_complete =
+                    kitty_reply != std::string::npos &&
+                    resp.find("\033\\", kitty_reply) != std::string::npos;
                 if (cell_reply != std::string::npos &&
                     resp.find('t', cell_reply) != std::string::npos &&
                     da1_reply != std::string::npos &&
-                    resp.find('c', da1_reply) != std::string::npos) {
+                    resp.find('c', da1_reply) != std::string::npos && kitty_reply_complete) {
                     break;
                 }
             }
@@ -511,7 +536,7 @@ void Tui::initialize() {
     if (term_prog &&
         (std::string_view(term_prog) == "wezterm" || std::string_view(term_prog) == "foot" ||
          std::string_view(term_prog) == "mlterm" || std::string_view(term_prog) == "yaft" ||
-         std::string_view(term_prog) == "ghostty")) {
+         std::string_view(term_prog) == "contour")) {
         env_sixel = true;
     }
 
@@ -540,6 +565,15 @@ void Tui::initialize() {
     }
 
     sixel_supported_ = env_sixel || da1_sixel;
+    const auto kitty_reply = resp.find("\033_Gi=31;");
+    const auto kitty_reply_end =
+        kitty_reply == std::string::npos ? std::string::npos : resp.find("\033\\", kitty_reply);
+    kitty_graphics_supported_ =
+        kitty_reply_end != std::string::npos &&
+        std::string_view(resp).substr(kitty_reply + 8, kitty_reply_end - kitty_reply - 8) == "OK";
+    kitty_image_id_ = static_cast<uint32_t>(::getpid());
+    if (kitty_image_id_ == 0) kitty_image_id_ = 1;
+    modal_.set_display_graphics_supported(is_display_graphics_supported());
 
     // OSC 22 is optional. Only send shape changes after an explicit positive reply.
     osc22_pointer_supported_ = resp.find("\033]22;1\033\\") != std::string::npos ||
@@ -1169,6 +1203,73 @@ void Tui::render_draw_sixel(int panel_x, int display_width, int display_rows,
     update_cmds += "\033\\\033[r\033[?80l";
 }
 
+void Tui::render_draw_kitty(int panel_x, int display_width, int display_rows,
+                            std::string& update_cmds) {
+    const int body_rows = std::max(1, display_rows - 1);
+    if (modal_.is_active() || display_width < kMinDisplayWidth || body_rows < kMinDisplayBodyRows)
+        return;
+
+    const auto fb = machine_.framebuffer_view();
+    const int source_width = static_cast<int>(machine_.framebuffer_width());
+    const int source_height = static_cast<int>(machine_.framebuffer_height());
+    if (fb.data() == nullptr || source_width <= 0 || source_height <= 0) return;
+    const size_t source_bytes = static_cast<size_t>(source_width) * source_height * 4;
+    if (fb.size() < source_bytes) return;
+
+    const int cell_width = std::max(1, cell_width_px_);
+    const int cell_height = std::max(1, cell_height_px_);
+    const auto [fit_width, fit_height] = compute_sixel_dimensions(
+        display_width, body_rows, cell_width, cell_height, source_width, source_height);
+    int image_width = source_width;
+    int image_height = source_height;
+    if (fit_width < source_width || fit_height < source_height) {
+        const int divisor = std::max({2, (source_width + fit_width - 1) / fit_width,
+                                      (source_height + fit_height - 1) / fit_height});
+        image_width = std::max(1, source_width / divisor);
+        image_height = std::max(1, source_height / divisor);
+    }
+    const int image_cols =
+        std::clamp((image_width + cell_width - 1) / cell_width, 1, display_width);
+    const int image_rows = std::clamp((image_height + cell_height - 1) / cell_height, 1, body_rows);
+    const int x_offset = std::max(0, (display_width - image_cols) / 2);
+    const int y_offset = std::max(0, (body_rows - image_rows) / 2);
+
+    // Kitty images live outside the text grid. Delete this process's previous image before
+    // replacing it so framebuffer updates never accumulate terminal-side placements.
+    update_cmds += std::format("\033_Ga=d,d=I,i={}\033\\", kitty_image_id_);
+
+    const auto* source = reinterpret_cast<const uint8_t*>(fb.data());
+    std::vector<uint8_t> rgb(static_cast<size_t>(image_width) * image_height * 3);
+    for (int y = 0; y < image_height; ++y) {
+        const int source_y = std::min(source_height - 1, y * source_height / image_height);
+        for (int x = 0; x < image_width; ++x) {
+            const int source_x = std::min(source_width - 1, x * source_width / image_width);
+            const auto* pixel =
+                source + (static_cast<size_t>(source_y) * source_width + source_x) * 4;
+            const size_t target = (static_cast<size_t>(y) * image_width + x) * 3;
+            rgb[target] = pixel[2];
+            rgb[target + 1] = pixel[1];
+            rgb[target + 2] = pixel[0];
+        }
+    }
+    const std::string encoded = base64_encode(std::span<const uint8_t>(rgb));
+    update_cmds += std::format("\033[{};{}H", 5 + y_offset, panel_x + x_offset);
+    for (size_t offset = 0; offset < encoded.size(); offset += kKittyGraphicsChunkSize) {
+        const size_t length = std::min(kKittyGraphicsChunkSize, encoded.size() - offset);
+        const bool first = offset == 0;
+        const bool more = offset + length < encoded.size();
+        if (first) {
+            update_cmds +=
+                std::format("\033_Ga=T,f=24,s={},v={},i={},c={},r={},C=1,m={};", image_width,
+                            image_height, kitty_image_id_, image_cols, image_rows, more ? 1 : 0);
+        } else {
+            update_cmds += std::format("\033_Gm={};", more ? 1 : 0);
+        }
+        update_cmds.append(encoded, offset, length);
+        update_cmds += "\033\\";
+    }
+}
+
 auto Tui::render_framebuffer_row(int row, int width, int rows) const -> std::string {
     const auto fb = machine_.framebuffer_view();
     const int source_width = static_cast<int>(machine_.framebuffer_width());
@@ -1343,7 +1444,7 @@ void Tui::handle_display_mouse(int x, int y, int b, size_t col_idx, int term_wid
 }
 
 void Tui::enable_display_pixel_mouse() {
-    if (display_mouse_pixel_mode_ || !sixel_supported_ || !sixel_rendered_) return;
+    if (display_mouse_pixel_mode_ || !is_display_graphics_supported() || !sixel_rendered_) return;
     write_all(STDOUT_FILENO, "\033[?1016h");
     display_mouse_pixel_mode_ = true;
 }
@@ -1479,10 +1580,10 @@ void Tui::render(bool force) {
     const bool display_too_small =
         has_display && (display_col < col_widths.count) &&
         (col_widths.widths[display_col] < kMinDisplayWidth || num_rows - 1 < kMinDisplayBodyRows);
-    const bool draw_sixel =
-        sixel_supported_ && has_display && !display_too_small && !modal_.is_active();
+    const bool draw_display_graphics =
+        is_display_graphics_supported() && has_display && !display_too_small && !modal_.is_active();
     uint64_t framebuffer_signature = 0;
-    if (draw_sixel) {
+    if (draw_display_graphics) {
         const auto fb = machine_.framebuffer_view();
         if (fb.data() != nullptr && fb.size() >= sizeof(uint64_t)) {
             constexpr uint64_t fnv_offset = 1469598103934665603ULL;
@@ -1493,22 +1594,20 @@ void Tui::render(bool force) {
             uint64_t h2 = fnv_prime;
             for (size_t i = 0; i < n64; i += 2) {
                 h1 = (h1 ^ p64[i]) * fnv_prime;
-                h2 = (h2 ^ p64[i + 1]) * fnv_offset;
+                if (i + 1 < n64) h2 = (h2 ^ p64[i + 1]) * fnv_offset;
             }
             framebuffer_signature = h1 ^ (h2 * 31ULL);
         }
     }
-    const bool sixel_geometry_changed =
-        draw_sixel && sixel_rendered_ &&
+    const bool display_graphics_geometry_changed =
+        draw_display_graphics && sixel_rendered_ &&
         (sixel_column_ != display_col || sixel_panel_width_ != col_widths.widths[display_col] ||
          sixel_panel_rows_ != num_rows);
-    // A sixel graphic is a terminal-side object, not a character-grid cell.  Re-emitting it
-    // on every ordinary render appends another graphic and can make terminals scroll the TUI
-    // away.  Only emit a new object when it first becomes visible or its panel geometry
-    // changes.
-    const bool sixel_needs_draw =
-        draw_sixel && (!sixel_rendered_ || sixel_geometry_changed ||
-                       framebuffer_signature != sixel_framebuffer_signature_);
+    // Terminal graphics live outside the character grid. Re-emit only when the framebuffer
+    // changes or the display panel geometry changes.
+    const bool display_graphics_needs_draw =
+        draw_display_graphics && (!sixel_rendered_ || display_graphics_geometry_changed ||
+                                  framebuffer_signature != sixel_framebuffer_signature_);
     int display_panel_x = 2;
     if (has_display) {
         for (size_t c = 0; c < display_col && c < col_widths.count; ++c)
@@ -1584,11 +1683,11 @@ void Tui::render(bool force) {
                         }
                         return std::string(static_cast<size_t>(std::max(0, width)), ' ');
                     }
-                    if (!sixel_supported_) {
+                    if (!is_display_graphics_supported()) {
                         const std::string_view unsupp_text =
-                            (width >= 30)   ? "[ Sixel graphics unsupported ]"
-                            : (width >= 21) ? "[ Sixel unsupported ]"
-                                            : "[ No Sixel ]";
+                            (width >= 34)   ? "[ Terminal graphics unsupported ]"
+                            : (width >= 22) ? "[ Graphics unsupported ]"
+                                            : "[ No graphics ]";
                         const int mid_row = total_content_rows / 2;
                         if (body_row == mid_row) {
                             return center_pane_text(std::format("\033[33m{}\033[0m", unsupp_text),
@@ -1630,8 +1729,8 @@ void Tui::render(bool force) {
     const bool modal_closed = modal_active_last_frame_ && !modal_.is_active();
     modal_active_last_frame_ = modal_.is_active();
     const bool clear_sixel =
-        sixel_rendered_ && (!draw_sixel || resized || full_screen_redraw_requested_ ||
-                            geometry_changed || sixel_geometry_changed);
+        sixel_rendered_ && (!draw_display_graphics || resized || full_screen_redraw_requested_ ||
+                            geometry_changed || display_graphics_geometry_changed);
     const bool is_full_redraw =
         geometry_changed || resized || full_screen_redraw_requested_ || clear_sixel || modal_closed;
     full_screen_redraw_requested_ = false;
@@ -1691,10 +1790,10 @@ void Tui::render(bool force) {
         for (size_t i = 0; i < new_lines.size(); ++i) {
             if (new_lines[i] != last_screen_lines_[i]) {
                 any_line_changed = true;
-                const bool preserve_sixel = draw_sixel && sixel_rendered_ && !sixel_needs_draw &&
-                                            !modal_.is_active() && i >= 4 &&
-                                            i < 4 + static_cast<size_t>(num_rows);
-                if (preserve_sixel) {
+                const bool preserve_display_graphic =
+                    draw_display_graphics && sixel_rendered_ && !display_graphics_needs_draw &&
+                    !modal_.is_active() && i >= 4 && i < 4 + static_cast<size_t>(num_rows);
+                if (preserve_display_graphic) {
                     // Keep the display column's image-bearing cells untouched, but continue
                     // updating the inspector and neighboring columns on the same screen row.
                     update_cmds +=
@@ -1720,9 +1819,15 @@ void Tui::render(bool force) {
     int target_cursor_y = -1;
     bool target_cursor_visible = false;
 
-    if (sixel_needs_draw && has_display && display_col < col_widths.count &&
+    if (display_graphics_needs_draw && has_display && display_col < col_widths.count &&
         col_widths.widths[display_col] > 0) {
-        render_draw_sixel(display_panel_x, col_widths.widths[display_col], num_rows, update_cmds);
+        if (kitty_graphics_supported_) {
+            render_draw_kitty(display_panel_x, col_widths.widths[display_col], num_rows,
+                              update_cmds);
+        } else {
+            render_draw_sixel(display_panel_x, col_widths.widths[display_col], num_rows,
+                              update_cmds);
+        }
     }
     if (has_console && console_col < col_widths.count && !modal_.is_active()) {
         size_t const c_idx = console_col;
@@ -1780,12 +1885,15 @@ void Tui::render(bool force) {
 
     std::string clear_graphic;
     if (clear_sixel) {
-        // Sixel graphics live in a terminal-side layer. Explicitly overwrite the old
-        // placement with reset spaces before drawing a modal or the normal TUI again.
+        // Terminal graphics live outside the text grid. Delete Kitty's retained image and
+        // overwrite the former display area before drawing a modal or regular panel content.
         // Keep this as a standalone VT write: Windows Terminal may retain the image
         // layer when the erase is bundled inside synchronized output or an alt-screen
         // reset sequence.
-        clear_graphic = "\033[0m\033[?7l";
+        if (kitty_graphics_supported_) {
+            clear_graphic = std::format("\033_Ga=d,d=I,i={}\033\\", kitty_image_id_);
+        }
+        clear_graphic += "\033[0m\033[?7l";
         for (int row = 5; row < 4 + sixel_panel_rows_; ++row) {
             clear_graphic +=
                 std::format("\033[0m\033[{};{}H{}", row, sixel_panel_x_,
@@ -1794,9 +1902,10 @@ void Tui::render(bool force) {
         clear_graphic += "\033[0m\033[?7h";
     }
 
-    const bool clean_panel_before_first_sixel =
-        draw_sixel && (!sixel_rendered_ || sixel_geometry_changed || is_full_redraw);
-    if (clean_panel_before_first_sixel && has_display && display_col < col_widths.count &&
+    const bool clean_panel_before_first_graphic =
+        draw_display_graphics &&
+        (!sixel_rendered_ || display_graphics_geometry_changed || is_full_redraw);
+    if (clean_panel_before_first_graphic && has_display && display_col < col_widths.count &&
         num_rows > 0 && col_widths.widths[display_col] > 0) {
         clear_graphic += "\033[0m\033[?7l";
         const int display_width = std::max(0, col_widths.widths[display_col]);
@@ -1815,8 +1924,8 @@ void Tui::render(bool force) {
     frame_output += update_cmds;
     frame_output += "\033[?2026l";
     write_all(STDOUT_FILENO, frame_output);
-    sixel_rendered_ = draw_sixel;
-    if (draw_sixel) {
+    sixel_rendered_ = draw_display_graphics;
+    if (draw_display_graphics) {
         sixel_column_ = display_col;
         sixel_panel_width_ = col_widths.widths[display_col];
         sixel_panel_rows_ = num_rows;

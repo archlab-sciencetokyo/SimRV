@@ -514,8 +514,8 @@ simrv --os \
 - `-D <rootfs.img>`: Ext4 root filesystem image (attached as `/dev/vda` via VirtIO Block). Guest
   writes use a temporary overlay and are discarded when SimRV exits; the source image is unchanged.
 - `--virtiofs <DIR>`: Expose a selected host directory to Linux guests through VirtIO-FS. Guest
-  writes are immediately visible in that host directory; see
-  [Linux and Buildroot](linux.md#share-a-host-directory-with-virtio-fs).
+  writes are immediately visible in that host directory. This host-directory backend is Linux-only;
+  see [Linux and Buildroot](linux.md#share-a-host-directory-with-virtio-fs).
 - `--smp <N>`: Number of active SMP harts (default is 1). The supplied DTB must contain at least
   that many CPU nodes.
 - `--dtb <virt.dtb>`: Required Device Tree Blob for Linux boots. It can also come from

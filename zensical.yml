@@ -109,6 +109,7 @@ nav:
       - ISA Compliance & Boundaries: architecture/compliance.md
   - Hardware & Models:
       - Microarchitectural Models & Tuning: hardware/models.md
+      - HPM Counters & Telemetry Events: hardware/hpm.md
       - Extending CPU Presets and MMIO Platforms: hardware/extending-platforms.md
       - RTL Parity Verification: hardware/rtl_parity.md
       - Custom Extensions & CFU: hardware/extensions.md

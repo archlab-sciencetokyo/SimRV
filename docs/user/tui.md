@@ -54,6 +54,13 @@ The interface is structured into three primary sections:
    - **`Memory & Stack`**: Hex memory dump and stack frame unwind view.
 3. **Right Guest Terminal**: Interactive virtual terminal connected directly to the guest platform's 16550A UART (`ttyS0`), VirtIO console, or Sixel graphical framebuffer.
 
+Guest framebuffer display is separate from the host terminal. SimRV prefers the Kitty graphics
+protocol when the terminal answers its capability query, then falls back to SIXEL when detected.
+The **Guest Display** tool appears in the tool picker only when one of those protocols is
+available. A display panel already saved in a layout shows a text notice if neither is detected.
+Terminal graphics support varies by emulator on every host OS, including macOS; the rest of the TUI
+remains available without it.
+
 ### Slow execution mode
 
 At configured execution frequencies of 60 Hz or slower, visible pipeline and detailed register,
@@ -100,6 +107,7 @@ The TUI provides responsive hotkeys for simulation control and state inspection:
 | **`O`** | Load | Open the binary, disk, or CPU model workflow. |
 | **`Ctrl-O`** (in a load modal) | Browse | Open the file picker for the active load workflow. |
 | **`F2`** / **`,`** | Settings | Open simulator settings. |
+| **`T`** | Cycle Theme | Cycle Modern Unicode, Classic ANSI, and Sakura Pastel themes. |
 | **`Ctrl-F`** / **`/`** | Search Console | Search UART terminal history (available when paused). |
 | **`n`** / **`N`** | Next / Prev Match | Move to the next or previous search match in console scrollback. |
 | **`Esc`** | Cancel / Close | Close active modal dialog or cancel active search query. |
@@ -117,6 +125,16 @@ The Settings modal includes **Panel Density** with three choices:
 - **Comfortable** keeps the fuller labels and spacing wherever the available panel size allows.
 
 Density changes presentation only. Values remain available in compact panels by scrolling, and the guest console text is not rewritten. The choice is saved with the other TUI preferences; preference files created before this setting default to Auto.
+
+The same **General / UI** tab also contains **Theme** and **High Contrast Colors**. These three
+presentation choices are saved when you apply Settings; **T** remains a shortcut for cycling the
+theme. Machine settings such as hart count, memory size, and platform devices are applied through
+machine reconfiguration and may require a restart.
+
+The **Settings** modal groups controls into **General / UI**, **MISA Extensions**, and
+**Microarchitecture**. General / UI includes execution precision and presentation preferences;
+MISA controls which guest ISA extensions are enabled, while Microarchitecture configures the CPU
+model. Changes that require machine reconfiguration ask before restarting the guest.
 
 ---
 

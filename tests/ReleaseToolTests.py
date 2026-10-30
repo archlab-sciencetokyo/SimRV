@@ -110,7 +110,7 @@ class ReleaseToolTests(unittest.TestCase):
 
     def test_documentation_workflow_publishes_stable_and_development(self):
         workflow = (ROOT / ".github/workflows/docs.yml").read_text()
-        docs_config = (ROOT / "mkdocs.yml").read_text()
+        docs_config = (ROOT / "zensical.yml").read_text()
         override = (ROOT / "docs/overrides/main.html").read_text()
         installation = (ROOT / "docs/user/install.md").read_text()
         self.assertIn("ref: main", workflow)
@@ -122,7 +122,7 @@ class ReleaseToolTests(unittest.TestCase):
         self.assertIn("'uv.lock'", workflow)
         self.assertIn("lycheeverse/lychee-action@v2", workflow)
         self.assertIn("zensical build --strict", workflow)
-        self.assertNotIn("mkdocs build", workflow)
+        self.assertIn("--config-file zensical.yml", workflow)
         self.assertIn('SIMRV_DOCS_CHANNEL="stable"', workflow)
         self.assertIn('SIMRV_DOCS_CHANNEL="development"', workflow)
         self.assertIn("actions/deploy-pages@v4", workflow)

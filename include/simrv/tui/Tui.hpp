@@ -198,9 +198,10 @@ class Tui : public core::ITelemetrySink, public core::IConsoleSink {
             inspector_pane_.get(), step_delay_us_, [this](TuiRegPage page) { set_reg_page(page); },
             [this](const std::string& status) { set_status_override(status); },
             [this]() { reset_speed_history(); },
-            [this](framework::DensityMode mode) {
+            [this](framework::DensityMode mode, TuiThemeStyle theme) {
                 density_mode_ = mode;
                 modal_.set_density_mode(mode);
+                set_theme_style(theme);
                 save_preferences();
             });
         full_screen_redraw_requested_ = true;
@@ -344,6 +345,9 @@ class Tui : public core::ITelemetrySink, public core::IConsoleSink {
     int cached_num_rows_ = 20;
     [[nodiscard]] auto get_terminal_pane_start_line(int num_rows) const -> int;
     [[nodiscard]] auto is_sixel_supported() const -> bool { return sixel_supported_; }
+    [[nodiscard]] auto is_display_graphics_supported() const -> bool {
+        return sixel_supported_ || kitty_graphics_supported_;
+    }
 
     int user_inspector_width_{-1};
     framework::ColumnWidthOverrides user_column_widths_ = framework::kNoColumnWidthOverrides;
@@ -357,6 +361,8 @@ class Tui : public core::ITelemetrySink, public core::IConsoleSink {
     int cell_width_px_ = 8;
     int cell_height_px_ = 16;
     bool sixel_supported_{false};
+    bool kitty_graphics_supported_{false};
+    uint32_t kitty_image_id_{1};
     bool osc22_pointer_supported_{false};
     bool pointer_is_clickable_{false};
     std::string prior_pointer_shape_{"default"};
@@ -503,6 +509,8 @@ class Tui : public core::ITelemetrySink, public core::IConsoleSink {
                             int frame_content_rows, TuiRightPanelMode panel_mode);
     [[nodiscard]] auto render_framebuffer_row(int row, int width, int rows) const -> std::string;
     void render_draw_sixel(int display_x, int display_width, int display_rows,
+                           std::string& update_cmds);
+    void render_draw_kitty(int display_x, int display_width, int display_rows,
                            std::string& update_cmds);
     [[nodiscard]] auto display_coords_to_fb(int x, int y, size_t col_idx, int term_width,
                                             int term_height) const
