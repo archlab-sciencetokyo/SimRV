@@ -1002,6 +1002,7 @@ void test_supm_user_data_pointer_masking() {
         TEST_ASSERT(!cpu.active_context().pending_exception.has_value());
 
         state.priv = simrv::xlen::PrivilegeLevel::Supervisor;
+        state.mstateen[0] |= uint64_t{1} << 62U;  // Permit S-mode senvcfg accesses.
         const auto invalid_pmm = cpu.csr_file.write(
             simrv::xlen::CsrNumber{0x10A}, static_cast<simrv::xlen::CsrValue>(uint64_t{1} << 32U));
         TEST_ASSERT(invalid_pmm.has_value());
@@ -1205,14 +1206,16 @@ void test_sha_state_enable_csrs() {
     TEST_ASSERT(mstateen.has_value() && *mstateen == kStateenSuperEnable);
     TEST_ASSERT(cpu.csr_file.write(simrv::core::Csr::Sstateen0, kStateenSuperEnable).has_value());
     auto sstateen = cpu.csr_file.read(simrv::core::Csr::Sstateen0);
-    TEST_ASSERT(sstateen.has_value() && *sstateen == kStateenSuperEnable);
+    // SE0 (bit 63) gates access to sstateen0 in mstateen0/hstateen0; it is
+    // reserved in sstateen0 and therefore reads as zero and ignores writes.
+    TEST_ASSERT(sstateen.has_value() && *sstateen == 0);
 
     cpu.state().mstateen[0] = 0;
     cpu.state().priv = simrv::xlen::PrivilegeLevel::Supervisor;
     sstateen = cpu.csr_file.read(simrv::core::Csr::Sstateen0);
     TEST_ASSERT(!sstateen.has_value());
     TEST_ASSERT(!cpu.csr_file.write(simrv::core::Csr::Sstateen0, kStateenSuperEnable).has_value());
-    TEST_ASSERT(cpu.state().sstateen[0] == kStateenSuperEnable);
+    TEST_ASSERT(cpu.state().sstateen[0] == 0);
 
     const auto hstateen_csr = simrv::core::csr_num(simrv::core::Csr::Hstateen0);
     TEST_ASSERT(!simrv::core::TrapController::can_access_csr(
@@ -1237,7 +1240,7 @@ void test_sha_state_enable_csrs() {
                 guest_sstateen_write.error() == simrv::isa::ExceptionCode::VirtualInstruction);
     cpu.state().hstateen[0] = kStateenSuperEnable;
     guest_sstateen = cpu.csr_file.read(simrv::core::Csr::Sstateen0);
-    TEST_ASSERT(guest_sstateen.has_value() && *guest_sstateen == kStateenSuperEnable);
+    TEST_ASSERT(guest_sstateen.has_value() && *guest_sstateen == 0);
     cpu.state().virt = false;
     constexpr simrv::xlen::CsrValue kGuestHpmEnableBits =
         (simrv::xlen::CsrValue{1} << 3U) | (simrv::xlen::CsrValue{1} << 31U);
@@ -1271,6 +1274,7 @@ void test_sha_state_enable_csrs() {
     TEST_ASSERT((*hstatus & (simrv::xlen::CsrValue{0x3} << 32U)) ==
                 (simrv::xlen::CsrValue{2} << 32U));
     constexpr simrv::xlen::CsrValue kHenvcfgPmm = simrv::xlen::CsrValue{2} << 32U;
+    cpu.state().mstateen[0] |= uint64_t{1} << 62U;
     TEST_ASSERT(cpu.csr_file.write(simrv::core::Csr::Henvcfg, kHenvcfgPmm).has_value());
     const auto henvcfg = cpu.csr_file.read(simrv::core::Csr::Henvcfg);
     TEST_ASSERT(henvcfg.has_value() && (*henvcfg & kHenvcfgPmm) == kHenvcfgPmm);
@@ -1383,7 +1387,8 @@ void test_sha_hideleg_warl_mask() {
     TEST_ASSERT(cpu.state().hideleg == kExpected);
     TEST_ASSERT(cpu.csr_file.write(simrv::core::Csr::Mideleg, 0).has_value());
     const auto mideleg = cpu.csr_file.read(simrv::core::Csr::Mideleg);
-    TEST_ASSERT(mideleg.has_value() && *mideleg == kExpected);
+    TEST_ASSERT(mideleg.has_value() &&
+                *mideleg == (kExpected | (simrv::xlen::CsrValue{1} << 12U)));
 
     cpu.state().virt = true;
     constexpr simrv::xlen::CsrValue kSupervisorInterrupts =
@@ -1965,12 +1970,25 @@ void test_cbo_zero_execution() {
     // Verify byte right after block is still 0xAA
     TEST_ASSERT(ram_ptr[kLineBytes] == static_cast<simrv::xlen::Byte>(0xAA));
 
+    // Cache-block prefetches are non-faulting hints, including for inaccessible addresses.
+    cpu.active_context().pending_exception.reset();
+    simrv::memory::MemoryAccess::execute_cmo(
+        machine.memory(), cpu, simrv::xlen::VirtAddr{0x1000000000ULL}, OperationId::PREFETCH_R);
+    TEST_ASSERT(!cpu.active_context().pending_exception.has_value());
+
+    // A real cache-block operation to an inaccessible physical block raises a store access fault.
+    simrv::memory::MemoryAccess::execute_cmo(
+        machine.memory(), cpu, simrv::xlen::VirtAddr{0x1000000000ULL}, OperationId::CBO_ZERO);
+    TEST_ASSERT(cpu.active_context().pending_exception == ExceptionCode::FaultStore);
+    cpu.active_context().pending_exception.reset();
+
     // User pointer masking applies to cache-block operations as well as loads/stores.
     std::memset(machine.ram_view().unchecked_ptr(target_paddr), 0xAA, kLineBytes);
     cpu.state().misa |= misa_extension_bit(IsaExtension::U);
     cpu.state().priv = kPrivUser;
-    cpu.state().senvcfg = (uint64_t{2} << 32U) | (uint64_t{1} << 6U);
-    cpu.state().menvcfg |= uint64_t{1} << 6U;
+    cpu.state().senvcfg = (uint64_t{2} << 32U) | (uint64_t{1} << 6U) |
+                          (uint64_t{1} << 7U);
+    cpu.state().menvcfg |= (uint64_t{1} << 6U) | (uint64_t{1} << 7U);
     simrv::memory::MemoryAccess::execute_cmo(
         machine.memory(), cpu,
         simrv::xlen::VirtAddr{target_paddr ^ (simrv::xlen::Address{1} << 63U)},
@@ -1982,7 +2000,7 @@ void test_cbo_zero_execution() {
 
     // Test permission check: if menvcfg.CBZE = 0, supervisor cbo.zero must trap
     cpu.state().priv = kPrivSupervisor;
-    cpu.state().menvcfg &= ~(1ULL << 6);  // Clear CBZE
+    cpu.state().menvcfg &= ~(1ULL << 7);  // Clear CBZE
     simrv::memory::MemoryAccess::execute_cmo(
         machine.memory(), cpu, simrv::xlen::VirtAddr{target_paddr}, OperationId::CBO_ZERO);
     TEST_ASSERT(cpu.active_context().pending_exception == ExceptionCode::IllegalInstruction);
@@ -2030,6 +2048,7 @@ void test_svpbmt_noncacheable_and_io_accesses() {
         state.misa |= simrv::isa::misa_extension_bit(simrv::isa::IsaExtension::S) |
                       simrv::isa::misa_extension_bit(simrv::isa::IsaExtension::U);
         state.initialize_lower_xlen_fields();
+        state.menvcfg |= uint64_t{1} << 62U;  // Enable Svpbmt PTE memory-type interpretation.
 
         auto& amo_ctx = cpu.active_context();
         amo_ctx = {};
