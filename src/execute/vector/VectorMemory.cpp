@@ -25,6 +25,10 @@ namespace {
     core::CPU& cpu, simrv::xlen::Address base_addr, uint32_t total_bytes, bool is_write,
     simrv::xlen::Address* physical_address = nullptr) -> simrv::xlen::Byte* {
     if (total_bytes == 0 || cpu.machine_ == nullptr) return nullptr;
+    // The contiguous host-pointer path cannot preserve per-element translation
+    // and privilege checks for vector accesses. Lower-privilege accesses must
+    // go through MemoryAccess for every element.
+    if (cpu.effective_data_privilege() != kPrivMachine) return nullptr;
     // The element-wise vector memory path applies pointer masking in
     // MemoryAccess::target_read/target_write. A contiguous direct-RAM access
     // would bypass that transform, and masking only the base is not equivalent

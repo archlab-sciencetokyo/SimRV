@@ -717,9 +717,11 @@ void CPU::run_memory_stage_baremetal(Machine& machine) {
         run_memory_stage(machine);
         return;
     }
-    // The specialized direct-RAM stage does not implement PMP checks. Preserve the full
-    // memory-stage path whenever locked PMP entries make machine-mode accesses restrictive.
-    if (simrv::compiler::unlikely(state_.has_locked_pmp)) {
+    // The specialized direct-RAM stage bypasses address translation and does not implement
+    // lower-privilege PMP checks. Use the full memory path outside M-mode, where translation,
+    // page permissions, and PMP can all affect whether a RAM access is permitted.
+    if (simrv::compiler::unlikely(state_.has_locked_pmp ||
+                                  effective_data_privilege() != kPrivMachine)) {
         run_memory_stage(machine);
         return;
     }
