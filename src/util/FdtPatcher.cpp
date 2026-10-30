@@ -5,6 +5,7 @@
 #include <cstring>
 #include <format>
 #include <map>
+#include <optional>
 #include <set>
 #include <stdexcept>
 #include <string_view>
@@ -128,7 +129,112 @@ auto is_memory(Node& n) -> bool {
            std::string_view(reinterpret_cast<const char*>(type->data.data()), type->data.size())
                .starts_with("memory");
 }
+auto misa_extension_for_letter(char letter) -> std::optional<unsigned> {
+    switch (letter) {
+        case 'a':
+            return 0;
+        case 'b':
+            return 1;
+        case 'c':
+            return 2;
+        case 'd':
+            return 3;
+        case 'f':
+            return 5;
+        case 'h':
+            return 7;
+        case 'i':
+            return 8;
+        case 'm':
+            return 12;
+        case 's':
+            return 18;
+        case 'u':
+            return 20;
+        case 'v':
+            return 21;
+        default:
+            return std::nullopt;
+    }
+}
 }  // namespace
+
+auto validate_fdt_isa(std::span<const uint8_t> blob, uint64_t selected_misa)
+    -> std::expected<void, std::string> {
+    try {
+        if (blob.size() < 40 || be32(blob, 0) != kMagic)
+            return std::unexpected("invalid device tree header");
+        const auto total = be32(blob, 4), struct_off = be32(blob, 8), strings_off = be32(blob, 12),
+                   version = be32(blob, 20);
+        if (total > blob.size() || total < 40 || struct_off >= total || strings_off >= total ||
+            version < 17)
+            return std::unexpected("unsupported or truncated device tree");
+        const auto struct_size = be32(blob, 36), strings_size = be32(blob, 32);
+        if (struct_off + struct_size > total || strings_off + strings_size > total)
+            return std::unexpected("invalid device tree block sizes");
+        Parser parser{blob.subspan(struct_off, struct_size),
+                      blob.subspan(strings_off, strings_size)};
+        const auto root = parser.node();
+        const Node* cpus = nullptr;
+        for (const auto& node : root.children) {
+            if (node.name == "cpus") {
+                cpus = &node;
+                break;
+            }
+        }
+        if (cpus == nullptr) return {};
+        for (const auto& cpu : cpus->children) {
+            if (!cpu.name.starts_with("cpu@")) continue;
+            const auto check_letter = [&](char letter) -> std::expected<void, std::string> {
+                if (const auto bit = misa_extension_for_letter(letter);
+                    bit && (selected_misa & (uint64_t{1} << *bit)) == 0) {
+                    return std::unexpected(std::format(
+                        "CPU node '/cpus/{}' advertises ISA extension '{}' that is disabled "
+                        "in the selected ISA",
+                        cpu.name, letter));
+                }
+                return {};
+            };
+            const auto* legacy_isa = prop(cpu, "riscv,isa");
+            if (legacy_isa != nullptr) {
+                const std::string_view isa(reinterpret_cast<const char*>(legacy_isa->data.data()),
+                                           legacy_isa->data.size());
+                if (isa.starts_with("rv64") && ((selected_misa >> 62U) & 3U) != 2U)
+                    return std::unexpected(std::format(
+                        "CPU node '/cpus/{}' requires RV64 but the selected ISA is RV32",
+                        cpu.name));
+                size_t pos = isa.starts_with("rv32") || isa.starts_with("rv64") ? 4 : 0;
+                while (pos < isa.size() && isa[pos] >= 'a' && isa[pos] <= 'z') {
+                    if (isa[pos] == 'g') {
+                        for (const char implied : std::string_view("imafd"))
+                            if (auto result = check_letter(implied); !result) return result;
+                    } else if (auto result = check_letter(isa[pos]); !result) {
+                        return result;
+                    }
+                    ++pos;
+                }
+            }
+            const auto* extensions = prop(cpu, "riscv,isa-extensions");
+            if (extensions == nullptr) continue;
+            size_t offset = 0;
+            while (offset < extensions->data.size()) {
+                const auto end = std::find(extensions->data.begin() + offset,
+                                           extensions->data.end(), uint8_t{0});
+                if (end == extensions->data.end())
+                    return std::unexpected("unterminated riscv,isa-extensions property");
+                const auto length = static_cast<size_t>(end - (extensions->data.begin() + offset));
+                if (length == 1) {
+                    const char letter = static_cast<char>(extensions->data[offset]);
+                    if (auto result = check_letter(letter); !result) return result;
+                }
+                offset += length + 1;
+            }
+        }
+        return {};
+    } catch (const std::exception& error) {
+        return std::unexpected(std::format("invalid device tree: {}", error.what()));
+    }
+}
 
 auto patch_fdt(std::span<const uint8_t> blob, uint64_t dram_base, uint64_t dram_size,
                uint32_t num_harts, FdtFramebufferInfo* out_fb, uint64_t timebase_hz,
@@ -247,10 +353,10 @@ auto patch_fdt(std::span<const uint8_t> blob, uint64_t dram_base, uint64_t dram_
             if (isa_ext_prop != nullptr) {
                 // Advertise only supported additions; this is not the complete RVA23 set.
                 static constexpr std::string_view kSupportedGuestExts[] = {
-                    "zihintntl", "zkt",    "zvbb",   "zvkt",   "zimop",  "zic64b", "zicclsm", "za64rs", "ziccamoa", "zfhmin",
-                    "zvfhmin", "zfa", "zicond", "zicboz",
-                    "zicbom",    "zicbop", "zawrs",   "svinval", "svpbmt", "svnapot", "sstc",
-                    "sscofpmf", "ziccrse", "ziccif", "ssu64xl", "ssnpm", "supm"};
+                    "zihintntl", "zkt",      "zvbb",   "zvkt",    "zimop",  "zic64b",  "zicclsm",
+                    "za64rs",    "ziccamoa", "zfhmin", "zvfhmin", "zfa",    "zicond",  "zicboz",
+                    "zicbom",    "zicbop",   "zawrs",  "svinval", "svpbmt", "svnapot", "sstc",
+                    "sscofpmf",  "ziccrse",  "ziccif", "ssu64xl", "ssnpm",  "supm"};
                 const auto has_extension = [&](std::string_view extension) {
                     size_t offset = 0;
                     while (offset < isa_ext_prop->data.size()) {
@@ -323,7 +429,7 @@ auto patch_fdt(std::span<const uint8_t> blob, uint64_t dram_base, uint64_t dram_
                 if (has_hypervisor) {
                     static constexpr std::string_view kShaExtensions[] = {
                         "ssstateen", "shcounterenw", "shvstvala", "shtvala",
-                        "shvstvecd", "shvsatpa", "shgatpa"};
+                        "shvstvecd", "shvsatpa",     "shgatpa"};
                     for (const auto ext : kShaExtensions) append_extension(ext);
                 }
             }

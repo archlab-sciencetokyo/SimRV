@@ -38,9 +38,9 @@
 #include "simrv/memory/RamView.hpp"
 #include "simrv/pipeline/CpuModel.hpp"
 #include "simrv/pipeline/CycleTransition.hpp"
+#include "simrv/pipeline/OperationTraits.hpp"
 #include "simrv/pipeline/PipelineContext.hpp"
 #include "simrv/pipeline/PipelineSim.hpp"
-#include "simrv/pipeline/OperationTraits.hpp"
 #include "simrv/pipeline/Scoreboard.hpp"
 #include "simrv/xlen/IdentifierTypes.hpp"
 
@@ -67,8 +67,8 @@ struct alignas(128) ArchState {
         mcause{};  ///< Machine Trap Cause (interrupt vs exception and exact code)
     simrv::xlen::CsrValue
         mtval{};  ///< Machine Trap Value (holds faulting addresses or instruction bytes)
-    simrv::xlen::CsrValue mtinst{};  ///< Machine Trap Instruction (H extension)
-    simrv::xlen::CsrValue mtval2{};  ///< Machine Second Trap Value (H extension)
+    simrv::xlen::CsrValue mtinst{};   ///< Machine Trap Instruction (H extension)
+    simrv::xlen::CsrValue mtval2{};   ///< Machine Second Trap Value (H extension)
     simrv::xlen::CsrValue mhartid{};  ///< Machine Hardware Thread ID (processor core identifier)
     simrv::xlen::CsrValue misa = isa::kMisaDefault;  ///< Machine ISA and extensions descriptor
     simrv::xlen::Word fetch_align_mask =
@@ -685,7 +685,7 @@ class CPU {
     template <bool kCopyContext, bool kInstMix, bool kDeferAluCommit>
     SIMRV_ALWAYS_INLINE auto execute_cached_alu_fast(CachedOp& op) -> bool;
 
-    template <bool kCopyContext, bool kInstMix, bool kPollPause>
+    template <bool kCopyContext, bool kInstMix, bool kPollPause, int kHpmClassMode>
     SIMRV_ALWAYS_INLINE auto run_fast_baremetal_kernel(Machine& machine, uint32_t batch_size,
                                                        const simrv::memory::RamView& ram)
         -> uint32_t;
@@ -699,7 +699,7 @@ class CPU {
     void run_fast_baremetal_batch(Machine& machine, uint32_t batch_size,
                                   const FastBatchPolicy& policy);
 
-    template <bool kCopyContext, bool kInstMix, bool kPollPause>
+    template <bool kCopyContext, bool kInstMix, bool kPollPause, int kHpmClassMode>
     SIMRV_ALWAYS_INLINE auto run_fast_os_kernel(Machine& machine, uint32_t batch_size,
                                                 const simrv::memory::RamView& ram) -> uint32_t;
 
@@ -1012,10 +1012,20 @@ class CPU {
     }
 
     /// Record instruction-class events at retirement/completion through programmable HPMs.
-    SIMRV_ALWAYS_INLINE void record_hpm_instruction_classes(isa::OperationId op,
-                                                            isa::Opcode opcode,
+    SIMRV_ALWAYS_INLINE void record_hpm_instruction_classes(isa::OperationId op, isa::Opcode opcode,
                                                             bool compressed) noexcept {
-        if (simrv::compiler::unlikely(!perf_counters.has_instruction_class_listeners())) return;
+        if (simrv::compiler::unlikely(perf_counters.has_instruction_class_listeners())) {
+            record_hpm_instruction_classes<true>(op, opcode, compressed);
+        }
+    }
+
+    template <int kEventMode>
+    SIMRV_ALWAYS_INLINE void record_hpm_instruction_classes(isa::OperationId op, isa::Opcode opcode,
+                                                            bool compressed) noexcept {
+        if constexpr (kEventMode == 0) return;
+        if constexpr (kEventMode == 2) {
+            if (simrv::compiler::unlikely(!perf_counters.has_instruction_class_listeners())) return;
+        }
         using pipeline::operation::ControlFlowKind;
         using pipeline::operation::ExecutionClass;
         using pipeline::operation::MemoryAccessKind;
@@ -1030,10 +1040,10 @@ class CPU {
             record_hpm_event(HpmEvent::FloatInstruction);
         if (isa::is_vector_op(op)) record_hpm_event(HpmEvent::VectorInstruction);
         if (compressed) record_hpm_event(HpmEvent::CompressedInstruction);
-        const bool integer_alu_opcode =
-            opcode == isa::Opcode::Op || opcode == isa::Opcode::OpImm ||
-            opcode == isa::Opcode::Op32 || opcode == isa::Opcode::OpImm32 ||
-            opcode == isa::Opcode::Lui || opcode == isa::Opcode::Auipc;
+        const bool integer_alu_opcode = opcode == isa::Opcode::Op || opcode == isa::Opcode::OpImm ||
+                                        opcode == isa::Opcode::Op32 ||
+                                        opcode == isa::Opcode::OpImm32 ||
+                                        opcode == isa::Opcode::Lui || opcode == isa::Opcode::Auipc;
         if (integer_alu_opcode && info.execution_class == ExecutionClass::Default &&
             info.memory == MemoryAccessKind::None && info.control == ControlFlowKind::None)
             record_hpm_event(HpmEvent::IntegerAluInstruction);
@@ -1076,7 +1086,7 @@ class CPU {
     bool wfi_quiescent_{false};
 
     // ========== Execution Metrics ==========
-    simrv::xlen::Counter e_icount{0};   // Total instruction count
+    simrv::xlen::Counter e_icount{0};  // Total instruction count
     std::array<uint64_t, 32> sbi_pmu_selector{};
     std::array<bool, 32> sbi_pmu_configured{};
     std::array<bool, 32> sbi_pmu_started{};

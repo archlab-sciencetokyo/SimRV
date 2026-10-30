@@ -4,13 +4,14 @@
  */
 #include "simrv/util/FdtGenerator.hpp"
 
+#include <algorithm>
 #include <cstring>
 #include <format>
 #include <iterator>
 #include <span>
 
-#include "simrv/core/PlatformMap.h"
 #include "simrv/core/HpmEventCatalog.hpp"
+#include "simrv/core/PlatformMap.h"
 #include "simrv/core/PlatformTiming.hpp"
 #include "simrv/core/SoCDeviceRegistry.hpp"
 #include "simrv/memory/Mmio.hpp"
@@ -214,25 +215,72 @@ auto generate_platform_fdt(const core::MachineConfig& config,
     // extensions required by the RVA23 profiles. Keep the compliance gap explicit in
     // docs/architecture/compliance.md until the remaining mandatory extensions are implemented.
     static constexpr std::string_view kSupportedGuestExts[] = {
-        "i",      "m",      "a",       "f",        "d",           "c",      "b",
-        "v",      "zvbb",   "zvkt",   "zicntr", "zihpm",    "zicsr",      "zifencei", "zihintpause",
-        "zihintntl", "zkt",
-        "zic64b", "zicclsm", "za64rs", "ziccamoa", "zfhmin", "zvfhmin", "zfa", "zicond", "zicboz",
-        "zicbom", "zicbop", "zawrs",   "svinval", "svpbmt", "svnapot", "svade",
-        "ssccptr", "sscofpmf", "sscounterenw", "sstc", "sstvala", "sstvecd", "ziccrse",
-        "ziccif",
+        "i",       "m",        "a",           "f",         "d",        "c",
+        "b",       "v",        "zvbb",        "zvkt",      "zicntr",   "zihpm",
+        "zicsr",   "zifencei", "zihintpause", "zihintntl", "zkt",      "zic64b",
+        "zicclsm", "za64rs",   "ziccamoa",    "zfhmin",    "zvfhmin",  "zfa",
+        "zicond",  "zicboz",   "zicbom",      "zicbop",    "zawrs",    "svinval",
+        "svpbmt",  "svnapot",  "svade",       "ssccptr",   "sscofpmf", "sscounterenw",
+        "sstc",    "sstvala",  "sstvecd",     "ziccrse",   "ziccif",
     };
     std::vector<std::string_view> guest_extensions(std::begin(kSupportedGuestExts),
                                                    std::end(kSupportedGuestExts));
+    if (config.isa.misa_override) {
+        // An explicit ISA preset may intentionally be narrower than the build's default
+        // architecture profile. Do not advertise optional extensions that the preset omits.
+        static constexpr std::string_view kExplicitIsaExtensions[] = {
+            "i", "m", "a",      "f",     "d",     "c",        "b",
+            "v", "h", "zicntr", "zihpm", "zicsr", "zifencei", "zihintpause"};
+        std::erase_if(guest_extensions, [&](std::string_view extension) {
+            return std::find(std::begin(kExplicitIsaExtensions), std::end(kExplicitIsaExtensions),
+                             extension) == std::end(kExplicitIsaExtensions);
+        });
+        std::erase_if(guest_extensions, [&](std::string_view extension) {
+            if (extension.size() != 1) return false;
+            simrv::isa::IsaExtension misa_extension{};
+            switch (extension.front()) {
+                case 'a':
+                    misa_extension = simrv::isa::IsaExtension::A;
+                    break;
+                case 'b':
+                    misa_extension = simrv::isa::IsaExtension::B;
+                    break;
+                case 'c':
+                    misa_extension = simrv::isa::IsaExtension::C;
+                    break;
+                case 'd':
+                    misa_extension = simrv::isa::IsaExtension::D;
+                    break;
+                case 'f':
+                    misa_extension = simrv::isa::IsaExtension::F;
+                    break;
+                case 'h':
+                    misa_extension = simrv::isa::IsaExtension::H;
+                    break;
+                case 'i':
+                    misa_extension = simrv::isa::IsaExtension::I;
+                    break;
+                case 'm':
+                    misa_extension = simrv::isa::IsaExtension::M;
+                    break;
+                case 'v':
+                    misa_extension = simrv::isa::IsaExtension::V;
+                    break;
+                default:
+                    return false;
+            }
+            return !simrv::isa::misa_has_extension(config.isa.isa_preset, misa_extension);
+        });
+    }
     if constexpr (simrv::xlen::kIsXLen64) {
         guest_extensions.emplace_back("ssu64xl");
         guest_extensions.emplace_back("ssnpm");
         guest_extensions.emplace_back("supm");
     }
-    const bool has_vector = simrv::isa::misa_has_extension(
-        config.isa.isa_preset, simrv::isa::IsaExtension::V);
-    const bool has_bitmanip = simrv::isa::misa_has_extension(
-        config.isa.isa_preset, simrv::isa::IsaExtension::B);
+    const bool has_vector =
+        simrv::isa::misa_has_extension(config.isa.isa_preset, simrv::isa::IsaExtension::V);
+    const bool has_bitmanip =
+        simrv::isa::misa_has_extension(config.isa.isa_preset, simrv::isa::IsaExtension::B);
     if (has_vector && has_bitmanip) guest_extensions.emplace_back("zvkb");
     if (simrv::isa::misa_has_extension(config.isa.isa_preset, simrv::isa::IsaExtension::M)) {
         guest_extensions.emplace_back("zmmul");
@@ -248,8 +296,8 @@ auto generate_platform_fdt(const core::MachineConfig& config,
         guest_extensions.emplace_back("zbb");
         guest_extensions.emplace_back("zbs");
     }
-    const bool has_compressed = simrv::isa::misa_has_extension(
-        config.isa.isa_preset, simrv::isa::IsaExtension::C);
+    const bool has_compressed =
+        simrv::isa::misa_has_extension(config.isa.isa_preset, simrv::isa::IsaExtension::C);
     if (has_compressed) {
         guest_extensions.emplace_back("zca");
         guest_extensions.emplace_back("zcb");

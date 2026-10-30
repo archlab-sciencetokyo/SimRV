@@ -3,7 +3,10 @@
 #include <cstring>
 #include <fstream>
 #include <iterator>
+#include <optional>
+#include <span>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "MachineRuntime.hpp"
@@ -38,11 +41,218 @@ namespace {
 
 using util::elf::Elf32_Ehdr;
 using util::elf::Elf32_Phdr;
+using util::elf::Elf32_Shdr;
 using util::elf::Elf64_Ehdr;
 using util::elf::Elf64_Phdr;
+using util::elf::Elf64_Shdr;
 using util::elf::kClass32;
 using util::elf::kClass64;
 using util::elf::kLoadSegment;
+
+auto read_le32(std::span<const uint8_t> bytes, size_t offset) -> uint32_t {
+    return uint32_t{bytes[offset]} | (uint32_t{bytes[offset + 1]} << 8U) |
+           (uint32_t{bytes[offset + 2]} << 16U) | (uint32_t{bytes[offset + 3]} << 24U);
+}
+
+auto read_uleb128(std::span<const uint8_t> bytes, size_t& offset) -> std::optional<uint32_t> {
+    uint32_t value = 0;
+    unsigned shift = 0;
+    while (offset < bytes.size() && shift < 32) {
+        const uint8_t byte = bytes[offset++];
+        value |= uint32_t{byte & 0x7fU} << shift;
+        if ((byte & 0x80U) == 0) return value;
+        shift += 7;
+    }
+    return std::nullopt;
+}
+
+auto isa_letter_bit(char letter) -> std::optional<unsigned> {
+    switch (letter) {
+        case 'a':
+            return 0;
+        case 'b':
+            return 1;
+        case 'c':
+            return 2;
+        case 'd':
+            return 3;
+        case 'f':
+            return 5;
+        case 'h':
+            return 7;
+        case 'i':
+            return 8;
+        case 'm':
+            return 12;
+        case 's':
+            return 18;
+        case 'u':
+            return 20;
+        case 'v':
+            return 21;
+        default:
+            return std::nullopt;
+    }
+}
+
+auto validate_elf_isa(const std::string& path, uint64_t selected_misa)
+    -> std::expected<void, std::string> {
+    std::ifstream input(path, std::ios::binary | std::ios::ate);
+    if (!input) return {};
+    const auto file_size = static_cast<size_t>(input.tellg());
+    if (file_size < sizeof(Elf64_Ehdr)) return {};
+    input.seekg(0);
+    std::array<uint8_t, sizeof(Elf64_Ehdr)> header{};
+    if (!input.read(reinterpret_cast<char*>(header.data()), header.size()) || header[0] != 0x7f ||
+        header[1] != 'E' || header[2] != 'L' || header[3] != 'F' || header[5] != 1) {
+        return {};
+    }
+    const bool elf64 = header[4] == kClass64;
+    if (!elf64 && header[4] != kClass32) return {};
+    const size_t shoff_offset = elf64 ? 40 : 32;
+    const uint64_t shoff = elf64 ? read_le32(header, shoff_offset) |
+                                       (uint64_t{read_le32(header, shoff_offset + 4)} << 32U)
+                                 : read_le32(header, shoff_offset);
+    const size_t shentsize_offset = elf64 ? 58 : 46;
+    const size_t shnum_offset = elf64 ? 60 : 48;
+    const uint16_t shentsize = static_cast<uint16_t>(header[shentsize_offset]) |
+                               (static_cast<uint16_t>(header[shentsize_offset + 1]) << 8U);
+    const uint16_t shnum = static_cast<uint16_t>(header[shnum_offset]) |
+                           (static_cast<uint16_t>(header[shnum_offset + 1]) << 8U);
+    const size_t expected_shentsize = elf64 ? sizeof(Elf64_Shdr) : sizeof(Elf32_Shdr);
+    if (shnum == 0 || shentsize != expected_shentsize || shoff > file_size ||
+        static_cast<uint64_t>(shnum) * shentsize > file_size - shoff)
+        return {};
+
+    for (uint16_t i = 0; i < shnum; ++i) {
+        input.seekg(static_cast<std::streamoff>(shoff + uint64_t{i} * shentsize));
+        std::array<uint8_t, sizeof(Elf64_Shdr)> section{};
+        if (!input.read(reinterpret_cast<char*>(section.data()), expected_shentsize)) return {};
+        const uint32_t type = read_le32(section, 4);
+        if (type != 0x70000003U) continue;  // SHT_RISCV_ATTRIBUTES
+        const uint64_t offset =
+            elf64 ? read_le32(section, 24) | (uint64_t{read_le32(section, 28)} << 32U)
+                  : read_le32(section, 16);
+        const uint64_t size =
+            elf64 ? read_le32(section, 32) | (uint64_t{read_le32(section, 36)} << 32U)
+                  : read_le32(section, 20);
+        if (offset > file_size || size > file_size - offset || size > 16 * 1024 * 1024) return {};
+        std::vector<uint8_t> attributes(static_cast<size_t>(size));
+        input.seekg(static_cast<std::streamoff>(offset));
+        if (!input.read(reinterpret_cast<char*>(attributes.data()),
+                        static_cast<std::streamsize>(attributes.size())) ||
+            attributes.empty() || attributes[0] != 'A')
+            return {};
+
+        size_t pos = 1;
+        while (pos + 4 <= attributes.size()) {
+            const auto subsection_size = read_le32(attributes, pos);
+            if (subsection_size < 5 || subsection_size > attributes.size() - pos) break;
+            const size_t subsection_end = pos + subsection_size;
+            size_t vendor_end = pos + 4;
+            while (vendor_end < subsection_end && attributes[vendor_end] != 0) ++vendor_end;
+            if (vendor_end == subsection_end) break;
+            const std::string_view vendor(
+                reinterpret_cast<const char*>(attributes.data() + pos + 4), vendor_end - (pos + 4));
+            size_t cursor = vendor_end + 1;
+            if (vendor == "riscv") {
+                while (cursor < subsection_end) {
+                    const size_t subsubsection_start = cursor;
+                    const auto tag = read_uleb128(attributes, cursor);
+                    if (!tag || cursor + 4 > subsection_end) break;
+                    const auto length = read_le32(attributes, cursor);
+                    cursor += 4;
+                    if (length < cursor - subsubsection_start ||
+                        length > subsection_end - subsubsection_start)
+                        break;
+                    const size_t attr_end = subsubsection_start + length;
+                    if (*tag == 1) {  // file attributes subsection
+                        while (cursor < attr_end) {
+                            const auto attr_tag = read_uleb128(attributes, cursor);
+                            if (!attr_tag) break;
+                            if (*attr_tag == 5) {  // Tag_RISCV_arch (NUL-terminated string)
+                                size_t end = cursor;
+                                while (end < attr_end && attributes[end] != 0) ++end;
+                                if (end == attr_end) break;
+                                const std::string_view arch(
+                                    reinterpret_cast<const char*>(attributes.data() + cursor),
+                                    end - cursor);
+                                const bool needs_rv64 = arch.starts_with("rv64");
+                                if (needs_rv64 && ((selected_misa >> 62U) & 3U) != 2U) {
+                                    return std::unexpected(std::format(
+                                        "ELF image '{}' requires RV64 but the selected ISA is RV32",
+                                        path));
+                                }
+                                auto check_letter =
+                                    [&](char letter) -> std::expected<void, std::string> {
+                                    if (const auto bit = isa_letter_bit(letter);
+                                        bit && (selected_misa & (uint64_t{1} << *bit)) == 0) {
+                                        return std::unexpected(std::format(
+                                            "ELF image '{}' was compiled for ISA '{}' and requires "
+                                            "extension '{}', which is disabled in the selected "
+                                            "ISA configuration",
+                                            path, arch, letter));
+                                    }
+                                    return {};
+                                };
+                                size_t token_start = 0;
+                                bool first_token = true;
+                                while (token_start < arch.size()) {
+                                    const size_t token_end = arch.find('_', token_start);
+                                    const auto token =
+                                        arch.substr(token_start, token_end == std::string_view::npos
+                                                                     ? arch.size() - token_start
+                                                                     : token_end - token_start);
+                                    if (first_token) {
+                                        size_t pos =
+                                            token.starts_with("rv32") || token.starts_with("rv64")
+                                                ? 4
+                                                : 0;
+                                        while (pos < token.size() && token[pos] >= 'a' &&
+                                               token[pos] <= 'z') {
+                                            if (token[pos] == 'g') {
+                                                for (const char implied : std::string_view("imafd"))
+                                                    if (auto result = check_letter(implied);
+                                                        !result)
+                                                        return result;
+                                            } else if (auto result = check_letter(token[pos]);
+                                                       !result) {
+                                                return result;
+                                            }
+                                            ++pos;
+                                        }
+                                        first_token = false;
+                                    } else if (token.size() > 1 && token[0] >= 'a' &&
+                                               token[0] <= 'z' && token[0] != 'z' &&
+                                               token[0] != 's' && token[0] != 'x') {
+                                        if (auto result = check_letter(token[0]); !result)
+                                            return result;
+                                    }
+                                    if (token_end == std::string_view::npos) break;
+                                    token_start = token_end + 1;
+                                }
+                                return {};
+                            }
+                            if (*attr_tag == 4 || *attr_tag == 6 || *attr_tag == 10 ||
+                                *attr_tag == 12) {
+                                if (!read_uleb128(
+                                        std::span<const uint8_t>(attributes).first(attr_end),
+                                        cursor))
+                                    break;
+                            } else {
+                                break;
+                            }
+                        }
+                    }
+                    cursor = attr_end;
+                }
+            }
+            pos = subsection_end;
+        }
+        break;
+    }
+    return {};
+}
 
 void apply_cpu_model_dram_defaults(MachineConfig& config, const std::string& model_name) {
     const bool low_dram_model = model_name == "cfu-provingground" || model_name == "rvproc";
@@ -632,6 +842,10 @@ auto Machine::initialize() -> std::expected<void, std::string> {
     }
 
     if (!config.files.binary_path.empty()) {
+        if (auto compatible = validate_elf_isa(config.files.binary_path, initial_misa);
+            !compatible) {
+            return std::unexpected(compatible.error());
+        }
         load_image_into_ram(config.files.binary_path, ram_view(), "memory", tui_enabled(), this);
         symbol_table().load_from_elf(
             config.debug.spike_elf.empty() ? config.files.binary_path : config.debug.spike_elf,
@@ -717,6 +931,11 @@ auto Machine::initialize() -> std::expected<void, std::string> {
                 return std::unexpected("cannot open device tree: " + config.files.dvtree_path);
             std::vector<uint8_t> input_blob{std::istreambuf_iterator<char>(input),
                                             std::istreambuf_iterator<char>()};
+            if (auto compatible = simrv::util::validate_fdt_isa(input_blob, initial_misa);
+                !compatible) {
+                return std::unexpected(std::format("device tree '{}' is incompatible: {}",
+                                                   config.files.dvtree_path, compatible.error()));
+            }
             auto patched =
                 simrv::util::patch_fdt(input_blob, config.memory.dram_base, effective_dram_size,
                                        config.execution.num_harts, &fb_info,
@@ -752,18 +971,20 @@ auto Machine::initialize() -> std::expected<void, std::string> {
             constexpr uint64_t kFwDynamicVersion = 2;
             constexpr uint64_t kFwDynamicModeSupervisor = 1;
             constexpr uint64_t kNoPreferredHart = UINT64_MAX;
-            const simrv::xlen::Address fw_info_address =
-                initialized_ram.base() + dtb_offset - 4096;
-            constexpr std::array<uint64_t, 6> fw_info = {
-                kFwDynamicMagic, kFwDynamicVersion, SIMRV_PLATFORM_PFLASH0_BASE,
-                kFwDynamicModeSupervisor, 0, kNoPreferredHart};
+            const simrv::xlen::Address fw_info_address = initialized_ram.base() + dtb_offset - 4096;
+            constexpr std::array<uint64_t, 6> fw_info = {kFwDynamicMagic,
+                                                         kFwDynamicVersion,
+                                                         SIMRV_PLATFORM_PFLASH0_BASE,
+                                                         kFwDynamicModeSupervisor,
+                                                         0,
+                                                         kNoPreferredHart};
             if (!initialized_ram.contains(fw_info_address, sizeof(fw_info))) {
                 return std::unexpected("OpenSBI FW_DYNAMIC info does not fit in guest DRAM");
             }
             std::memcpy(initialized_ram.unchecked_ptr(fw_info_address), fw_info.data(),
                         sizeof(fw_info));
-            primary_hart().state().regs.write(
-                simrv::xlen::RegId::A2, static_cast<simrv::xlen::Register>(fw_info_address));
+            primary_hart().state().regs.write(simrv::xlen::RegId::A2,
+                                              static_cast<simrv::xlen::Register>(fw_info_address));
             primary_hart().use_opensbi = true;
         }
     }

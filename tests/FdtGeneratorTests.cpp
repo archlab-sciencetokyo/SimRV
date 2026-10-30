@@ -13,6 +13,7 @@
 #include <vector>
 
 #include "simrv/core/MachineConfig.hpp"
+#include "simrv/isa/IsaConfig.hpp"
 #include "simrv/util/FdtGenerator.hpp"
 #include "simrv/xlen/ScalarTypes.hpp"
 #include "simrv/util/FdtPatcher.hpp"
@@ -213,6 +214,10 @@ void test_patch_fdt_advertises_zihintntl_and_64_byte_cmo() {
     fdt.end_node();
 
     const auto original = fdt.serialize();
+    const auto incompatible_isa = simrv::util::validate_fdt_isa(
+        original, simrv::isa::isa_preset_bits(simrv::isa::IsaPreset::GC));
+    expect(!incompatible_isa && incompatible_isa.error().find("extension 'b'") != std::string::npos,
+           "FDT ISA validation rejects base extensions disabled by the selected ISA");
     const auto patched = simrv::util::patch_fdt(original, 0x80000000ULL, 0x10000000ULL, 1);
     expect(patched.has_value(), "minimal FDT patches successfully for Zihintntl check");
     if (!patched) return;
@@ -292,6 +297,24 @@ void test_generate_platform_fdt_mmio() {
     expect(!blob_contains_string(blob, "cfi-flash"), "PFlash absent on MMIO profile");
 }
 
+void test_explicit_gc_fdt_does_not_advertise_rva23_extensions() {
+    simrv::core::MachineConfig cfg{};
+    cfg.isa.misa_override = true;
+    cfg.isa.isa_preset = simrv::isa::isa_preset_bits(simrv::isa::IsaPreset::GC);
+
+    const auto blob = simrv::util::generate_platform_fdt(cfg, nullptr);
+    const auto compatible_isa = simrv::util::validate_fdt_isa(blob, cfg.isa.isa_preset);
+    expect(compatible_isa.has_value(), "explicit RV64GC FDT matches its selected ISA");
+    const std::string_view view(reinterpret_cast<const char*>(blob.data()), blob.size());
+    expect(view.find(std::string_view("\0v\0", 3)) == std::string_view::npos,
+           "explicit RV64GC FDT does not advertise vector support");
+    expect(view.find("zicond") == std::string_view::npos,
+           "explicit RV64GC FDT does not advertise RVA23 optional extensions");
+    expect(blob_contains_string(blob, "zicntr") && blob_contains_string(blob, "zicsr") &&
+               blob_contains_string(blob, "zifencei"),
+           "explicit RV64GC FDT retains its baseline unprivileged extensions");
+}
+
 }  // namespace
 
 auto main() -> int {
@@ -299,6 +322,7 @@ auto main() -> int {
     test_generate_platform_fdt_pcie();
     test_patch_fdt_advertises_zihintntl_and_64_byte_cmo();
     test_generate_platform_fdt_mmio();
+    test_explicit_gc_fdt_does_not_advertise_rva23_extensions();
 
     if (failures != 0) {
         std::cerr << failures << " assertion(s) failed.\n";
