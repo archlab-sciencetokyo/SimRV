@@ -155,9 +155,25 @@ void TuiModal::open_file_picker() {
     file_picker_return_input_ = input_;
     path_completion_preview_.clear();
     const std::filesystem::path typed(input_);
-    file_picker_directory_ = typed.has_parent_path() ? typed.parent_path() : ".";
-    if (file_picker_directory_.empty()) file_picker_directory_ = ".";
-    file_picker_filter_ = typed.filename().string();
+    std::error_code directory_error;
+    const bool typed_is_directory = !typed.empty() && std::filesystem::is_directory(typed,
+                                                                                     directory_error);
+    const bool has_trailing_separator = !input_.empty() &&
+                                        input_.back() == std::filesystem::path::preferred_separator;
+    const bool navigate_into_typed_path = typed_is_directory || has_trailing_separator;
+    const auto typed_parent = navigate_into_typed_path
+                                  ? typed
+                                  : (typed.has_parent_path() ? typed.parent_path()
+                                                             : std::filesystem::path("."));
+    std::error_code path_error;
+    file_picker_directory_ = std::filesystem::absolute(typed_parent, path_error);
+    if (path_error) file_picker_directory_ = std::filesystem::current_path();
+    file_picker_directory_ = file_picker_directory_.lexically_normal();
+    if (file_picker_directory_ != file_picker_directory_.root_path() &&
+        file_picker_directory_.filename().empty()) {
+        file_picker_directory_ = file_picker_directory_.parent_path();
+    }
+    file_picker_filter_ = navigate_into_typed_path ? std::string{} : typed.filename().string();
     file_picker_select_directory_ = load_buildroot_mode_;
     active_modal_ = ModalType::LoadFilePicker;
     active_modal_impl_ = std::make_unique<modals::FilePickerModal>(*this);
@@ -188,7 +204,8 @@ void TuiModal::refresh_file_picker() {
         if (ld != rd) return ld;
         return left.filename().string() < right.filename().string();
     });
-    if (file_picker_filter_.empty()) {
+    if (file_picker_filter_.empty() &&
+        file_picker_directory_ != file_picker_directory_.root_path()) {
         file_picker_entries_.insert(file_picker_entries_.begin(),
                                     (file_picker_directory_ / "..").lexically_normal());
     }
@@ -217,7 +234,7 @@ void TuiModal::accept_file_picker_entry() {
         return;
     }
     if (file_picker_select_directory_ && selected == fs::path(".")) {
-        input_ = file_picker_directory_.string();
+        input_ = file_picker_directory_.lexically_normal().string();
         active_modal_ = file_picker_return_modal_;
         active_modal_impl_ = std::make_unique<modals::LoadModal>(
             this, &machine_, active_modal_, input_, load_appmode_, load_buildroot_mode_,
@@ -226,7 +243,7 @@ void TuiModal::accept_file_picker_entry() {
         return;
     }
     if (file_picker_select_directory_ && selected == file_picker_directory_) {
-        input_ = selected.string();
+        input_ = selected.lexically_normal().string();
         active_modal_ = file_picker_return_modal_;
         active_modal_impl_ = std::make_unique<modals::LoadModal>(
             this, &machine_, active_modal_, input_, load_appmode_, load_buildroot_mode_,
@@ -242,7 +259,9 @@ void TuiModal::accept_file_picker_entry() {
         refresh_file_picker();
         return;
     }
-    input_ = selected.string();
+    std::error_code absolute_error;
+    auto absolute_selected = fs::absolute(selected, absolute_error);
+    input_ = (absolute_error ? selected : absolute_selected).lexically_normal().string();
     active_modal_ = file_picker_return_modal_;
     active_modal_impl_ = std::make_unique<modals::LoadModal>(
         this, &machine_, active_modal_, input_, load_appmode_, load_buildroot_mode_,

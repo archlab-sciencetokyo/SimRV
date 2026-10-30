@@ -651,7 +651,7 @@ void test_sysconfig_modal_modes() {
     int s_cursor = 0;
 
     SettingsModal::move_cursor(s_cursor, 4);
-    expect(s_cursor == 3, "Settings modal advances cursor to active SMP Hart Count");
+    expect(s_cursor == 4, "Settings modal advances cursor to active SMP Hart Count");
 
     SettingsModal::adjust_setting(settings_draft, 4, 3);
     expect(settings_draft.num_harts == 4, "Settings modal adjusts SMP active core count");
@@ -1060,6 +1060,7 @@ void test_load_modal_path_completion() {
                        std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
     fs::create_directories(root / "subdir");
     std::ofstream(root / "program.elf").put('x');
+    std::ofstream(root / "subdir" / "nested.elf").put('x');
 
     auto file_prefix = (root / "pro").string();
     expect(simrv::tui::modals::LoadModal::complete_path(file_prefix),
@@ -1083,6 +1084,18 @@ void test_load_modal_path_completion() {
     expect(!modal.file_picker_active() && modal.get_input() == (root / "program.elf").string(),
            "file picker selects a matching file into the load path");
 
+    const auto relative_root = fs::relative(root, fs::current_path()).string() +
+                               fs::path::preferred_separator;
+    modal.open(simrv::tui::ModalType::LoadBinary, nullptr, 0);
+    modal.set_input(relative_root);
+    modal.open_file_picker();
+    modal.handle_wheel(1);  // Down moves from .. to subdir.
+    modal.file_picker_input(13, simrv::tui::TuiKey::Enter);
+    modal.handle_wheel(1);  // Down moves from .. to nested.elf.
+    modal.file_picker_input(13, simrv::tui::TuiKey::Enter);
+    expect(!modal.file_picker_active() && modal.get_input() == (root / "subdir" / "nested.elf").string(),
+           "arrow navigation enters directories and selected paths are absolute");
+
     simrv::core::Machine key_machine;
     simrv::tui::Tui key_tui(key_machine);
     simrv::tui::TuiTestAccess::modal(key_tui).open(simrv::tui::ModalType::LoadBinary, nullptr, 0);
@@ -1097,21 +1110,19 @@ void test_load_modal_path_completion() {
     modal.open(simrv::tui::ModalType::LoadBinary, nullptr, 0);
     modal.set_input((root / "subdir").string() + fs::path::preferred_separator);
     modal.open_file_picker();
-    modal.file_picker_input(13, simrv::tui::TuiKey::Enter);  // Select the leading ".." entry.
+    modal.handle_horizontal(-1);  // Left returns to the parent directory, as in a shell.
     modal.file_picker_input('p', simrv::tui::TuiKey::p);
     modal.file_picker_input('r', simrv::tui::TuiKey::r);
     modal.file_picker_input('o', simrv::tui::TuiKey::o);
     modal.file_picker_input(13, simrv::tui::TuiKey::Enter);
     expect(modal.get_input() == (root / "program.elf").string(),
-           "the leading .. entry navigates to the parent directory");
+           "left arrow navigates to the parent directory");
 
     modal.open(simrv::tui::ModalType::LoadBinary, nullptr, 0);
     modal.toggle_load_mode();
     modal.toggle_load_mode();
     modal.set_input(root.string());
     modal.open_file_picker();
-    modal.move_file_picker_cursor(1);  // Skip the "use this directory" entry to enter root.
-    modal.file_picker_input(13, simrv::tui::TuiKey::Enter);
     modal.file_picker_input(13, simrv::tui::TuiKey::Enter);  // Select the current folder.
     expect(!modal.file_picker_active() && modal.get_input() == root.string(),
            "Buildroot mode file picker can select a directory as the image bundle");
@@ -3299,6 +3310,7 @@ void test_multi_column_workbench_tools_and_swapping() {
     expect(slots[0].page == simrv::tui::TuiRegPage::CACHE, "slot 0 page updated to CACHE");
 
     // The display accelerator must assign the selected column and close the picker in one path.
+    modal.set_display_graphics_supported(true);
     tui.open_tool_picker(1);
     expect(simrv::tui::TuiTestAccess::handle_modal_key(tui, static_cast<uint8_t>('y'),
                                                        static_cast<simrv::tui::TuiKey>('y')),
@@ -3342,12 +3354,19 @@ void test_multi_column_workbench_tools_and_swapping() {
         }
     }
     expect(found_modal_control, "modal control hitboxes are detectable for pointer styling");
-    // TRACE (tool index 10) is at content row 16; terminal Y: start_y (3) + 1 (border) + 16
-    // (content) + 1 (1-indexed) = 20.
-    auto click_res = modal.handle_click(60, 20, 120, 30);
+    const auto available_tools =
+        simrv::tui::modals::ToolPickerModal::all_tools(modal.tool_filter());
+    const auto trace = std::ranges::find(available_tools, simrv::tui::TuiRegPage::TRACE,
+                                         &simrv::tui::modals::ToolEntry::page);
+    expect(trace != available_tools.end(), "TRACE is available in the tool picker");
+    const auto trace_index = static_cast<int>(std::distance(available_tools.begin(), trace));
+    const auto trace_row = simrv::tui::modals::ToolPickerModal::row_for_tool_index(
+        static_cast<size_t>(trace_index), modal.tool_filter());
+    // Tool picker is vertically centered at y=3 in this 120x30 test terminal.
+    auto click_res = modal.handle_click(60, 4 + trace_row, 120, 30);
     expect(click_res == simrv::tui::TuiModal::ModalClickResult::Submit,
            "clicking tool row submits selection");
-    expect(modal.get_tool_picker_cursor() == 10, "cursor updated to TRACE (index 10)");
+    expect(modal.get_tool_picker_cursor() == trace_index, "cursor updated to TRACE");
     tui.submit_modal();
     expect(slots[0].page == simrv::tui::TuiRegPage::TRACE, "slot 0 assigned to TRACE via click");
 

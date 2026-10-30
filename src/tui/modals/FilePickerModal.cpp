@@ -19,7 +19,7 @@ void FilePickerModal::render_content(std::vector<std::string>& content_rows, int
     if (!host_) return;
     content_rows.push_back(std::format("Directory: {}", host_->file_picker_directory_.string()));
     content_rows.push_back(
-        std::format("Filter: {}_  \033[2m(Type to filter, Backspace: edit, Esc: back)\033[0m",
+        std::format("Filter: {}_  \033[2m(Type to filter; arrows navigate, Enter opens, Esc returns)\033[0m",
                     host_->file_picker_filter_));
     content_rows.push_back("");
     if (host_->file_picker_entries_.empty()) {
@@ -61,6 +61,41 @@ auto FilePickerModal::handle_key(uint8_t byte, TuiKey key) -> framework::ModalAc
     if (!host_) return framework::ModalAction::Continue;
     host_->file_picker_input(byte, key);
     return framework::ModalAction::Continue;
+}
+
+void FilePickerModal::handle_wheel(int delta) {
+    if (host_) host_->move_file_picker_cursor(delta);
+}
+
+auto FilePickerModal::handle_horizontal(int delta) -> bool {
+    if (!host_ || delta == 0) return false;
+    if (delta < 0) {
+        auto& directory = host_->file_picker_directory_;
+        const auto parent = directory.parent_path();
+        if (!parent.empty() && parent != directory) {
+            directory = parent.lexically_normal();
+            host_->file_picker_filter_.clear();
+            host_->file_picker_cursor_ = 0;
+            host_->refresh_file_picker();
+        }
+        return true;
+    }
+
+    const auto& entries = host_->file_picker_entries_;
+    if (entries.empty()) return true;
+    const auto& selected = entries[static_cast<size_t>(host_->file_picker_cursor_)];
+    if (selected == (host_->file_picker_directory_ / "..").lexically_normal()) {
+        handle_horizontal(-1);
+        return true;
+    }
+    std::error_code error;
+    if (std::filesystem::is_directory(selected, error) && !error) {
+        host_->file_picker_directory_ = selected.lexically_normal();
+        host_->file_picker_filter_.clear();
+        host_->file_picker_cursor_ = 0;
+        host_->refresh_file_picker();
+    }
+    return true;
 }
 
 auto FilePickerModal::handle_control_click(int /*content_row*/, size_t /*action_index*/)
