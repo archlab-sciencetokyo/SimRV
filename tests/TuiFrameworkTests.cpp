@@ -1,3 +1,4 @@
+#include <array>
 #include <chrono>
 #include <cmath>
 #include <cstdint>
@@ -11,9 +12,11 @@
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <utility>
 
 #include "simrv/core/Cpu.hpp"
 #include "simrv/core/CpuConfigParser.hpp"
+#include "simrv/core/Logger.hpp"
 #include "simrv/core/Machine.hpp"
 #include "simrv/core/TrapController.hpp"
 #include "simrv/debug/BreakpointManager.hpp"
@@ -4423,7 +4426,24 @@ void test_rc15_features() {
     using namespace simrv::tui;
     using namespace simrv::tui::modals;
 
-    // 1. LogModal functionality
+    // 1. Severity colors use the standard ANSI palette for terminal theme compatibility.
+    constexpr std::array<std::pair<simrv::log::Level, std::string_view>, 5> severity_colors = {{
+        {simrv::log::Level::Trace, "\033[90m"},
+        {simrv::log::Level::Debug, "\033[1;35m"},
+        {simrv::log::Level::Info, "\033[1;36m"},
+        {simrv::log::Level::Warn, "\033[1;33m"},
+        {simrv::log::Level::Error, "\033[1;31m"},
+    }};
+    for (const auto& [level, color] : severity_colors) {
+        expect(simrv::log::standard_ansi_color(level) == color,
+               "log severity uses the standard 16-color ANSI palette");
+        const auto formatted = simrv::log::format_tui_message(level, "palette check");
+        expect(formatted.find(color) != std::string::npos &&
+                   formatted.find("38;5;") == std::string::npos,
+               "TUI log messages avoid theme-specific 256-color shades");
+    }
+
+    // 2. LogModal functionality
     LogBuffer log_buffer;
     log_buffer.push(simrv::log::Level::Info, "Standard informational log message");
     log_buffer.push(simrv::log::Level::Warn, "A warning to pay attention to");
@@ -4458,7 +4478,7 @@ void test_rc15_features() {
     modal.render(rows, add_row, log_buffer, 30, 80);
     expect(!rows.empty(), "LogModal renders rows");
 
-    // 2. KeyAction verification for [d] and [L]
+    // 3. KeyAction verification for [d] and [L]
     const auto& dump_binding = Keybindings::get(KeyAction::DumpMemory);
     expect(dump_binding.primary_char == 'd' && dump_binding.alt_char == 'D',
            "DumpMemory is bound to 'd'/'D'");

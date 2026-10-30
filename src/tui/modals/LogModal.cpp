@@ -9,8 +9,8 @@
 #include <format>
 #include <string_view>
 
+#include "simrv/core/Logger.hpp"
 #include "simrv/tui/LogBuffer.hpp"
-#include "simrv/tui/TuiTheme.hpp"
 
 namespace simrv::tui::modals {
 
@@ -203,29 +203,42 @@ void LogModal::render([[maybe_unused]] std::vector<std::string>& content_rows,
     const int visible_lines = std::max(6, term_height - 10);
 
     // Filter toolbar line
-    std::string opt_all =
-        (!min_level_.has_value()) ? "\033[1;7;32m [a] ALL \033[0m" : "\033[37m[a] All\033[0m";
-    std::string opt_info = (min_level_ == simrv::log::Level::Info)
-                               ? "\033[1;7;36m [i] INFO+ \033[0m"
-                               : "\033[36m[i] Info\033[0m";
-    std::string opt_warn = (min_level_ == simrv::log::Level::Warn)
-                               ? "\033[1;7;33m [w] WARN+ \033[0m"
-                               : "\033[33m[w] Warn\033[0m";
-    std::string opt_err = (min_level_ == simrv::log::Level::Error)
-                              ? "\033[1;7;31m [e] ERROR \033[0m"
-                              : "\033[31m[e] Error\033[0m";
-    std::string follow_badge =
-        follow_tail_ ? "\033[1;32m[f] Follow: ON\033[0m" : "\033[33m[f] Follow: OFF\033[0m";
+    auto filter_badge = [](std::string_view color, std::string_view text, bool selected) {
+        if (selected) return std::format("\033[1;7m {} \033[0m", text);
+        return std::format("{}{}\033[0m", color, text);
+    };
+    const std::string opt_all = filter_badge("\033[39m", "[a] ALL", !min_level_.has_value());
+    const std::string opt_info = filter_badge(
+        simrv::log::standard_ansi_color(simrv::log::Level::Info), "[i] INFO+",
+        min_level_ == simrv::log::Level::Info);
+    const std::string opt_warn = filter_badge(
+        simrv::log::standard_ansi_color(simrv::log::Level::Warn), "[w] WARN+",
+        min_level_ == simrv::log::Level::Warn);
+    const std::string opt_err = filter_badge(
+        simrv::log::standard_ansi_color(simrv::log::Level::Error), "[e] ERROR",
+        min_level_ == simrv::log::Level::Error);
+    const std::string follow_badge = follow_tail_
+                                         ? std::format("{}[f] Follow: ON\033[0m",
+                                                       simrv::log::standard_ansi_color(
+                                                           simrv::log::Level::Info))
+                                         : std::format("{}[f] Follow: OFF\033[0m",
+                                                       simrv::log::standard_ansi_color(
+                                                           simrv::log::Level::Warn));
 
     std::string stats_badge;
     if (log_buffer.error_count() > 0) {
-        stats_badge += std::format("\033[1;31m{} ✖\033[0m ", log_buffer.error_count());
+        stats_badge += std::format("{}{} ✖\033[0m ",
+                                   simrv::log::standard_ansi_color(simrv::log::Level::Error),
+                                   log_buffer.error_count());
     }
     if (log_buffer.warn_count() > 0) {
-        stats_badge += std::format("\033[1;33m{} ⚠\033[0m", log_buffer.warn_count());
+        stats_badge += std::format("{}{} ⚠\033[0m",
+                                   simrv::log::standard_ansi_color(simrv::log::Level::Warn),
+                                   log_buffer.warn_count());
     }
     if (stats_badge.empty()) {
-        stats_badge = "\033[32m0 err\033[0m";
+        stats_badge = std::format("{}0 err\033[0m",
+                                  simrv::log::standard_ansi_color(simrv::log::Level::Info));
     }
 
     add_row(std::format(" {}  {}  {}  {}  │  {}  │  {}", opt_all, opt_info, opt_warn, opt_err,
