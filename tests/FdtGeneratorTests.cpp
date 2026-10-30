@@ -141,6 +141,11 @@ void test_generate_platform_fdt_pcie() {
     expect(blob_contains_string(blob, "zvbb"), "Zvbb vector bit-manipulation advertised");
     expect(blob_contains_string(blob, "zvkb"), "Zvkb vector bit-manipulation advertised");
     expect(blob_contains_string(blob, "zvkt"), "Zvkt vector data-independent latency advertised");
+    for (const auto extension : {"zmmul", "zimop", "zaamo", "zalrsc", "zba", "zbb", "zbs",
+                                 "zca", "zcb", "zcd", "zcmop"}) {
+        expect(blob_contains_string(blob, extension),
+               std::string(extension) + " mandatory RVA23 extension advertised");
+    }
     expect(blob_contains_string(blob, "zkt"), "Zkt data-independent latency advertised");
     expect(blob_contains_string(blob, "svade"), "Svade page-fault behavior advertised");
     expect(blob_contains_string(blob, "ssccptr"), "Ssccptr page-table reads advertised");
@@ -199,7 +204,8 @@ void test_patch_fdt_advertises_zihintntl_and_64_byte_cmo() {
     fdt.property_u32("#size-cells", 0);
     fdt.begin_node("cpu@0");
     fdt.property_u32("reg", 0);
-    constexpr std::array<std::string_view, 2> isa_extensions{"i", "h"};
+    constexpr std::array<std::string_view, 9> isa_extensions{"i", "m", "a", "f", "d",
+                                                               "c", "b", "v", "h"};
     fdt.property_stringlist("riscv,isa-extensions", isa_extensions);
     fdt.end_node();
     fdt.end_node();
@@ -222,6 +228,17 @@ void test_patch_fdt_advertises_zihintntl_and_64_byte_cmo() {
                blob_contains_string(*patched, "zvbb") &&
                blob_contains_string(*patched, "zvkb") &&
                blob_contains_string(*patched, "zvkt") &&
+               blob_contains_string(*patched, "zmmul") &&
+               blob_contains_string(*patched, "zimop") &&
+               blob_contains_string(*patched, "zaamo") &&
+               blob_contains_string(*patched, "zalrsc") &&
+               blob_contains_string(*patched, "zba") &&
+               blob_contains_string(*patched, "zbb") &&
+               blob_contains_string(*patched, "zbs") &&
+               blob_contains_string(*patched, "zca") &&
+               blob_contains_string(*patched, "zcb") &&
+               blob_contains_string(*patched, "zcd") &&
+               blob_contains_string(*patched, "zcmop") &&
                blob_contains_string(*patched, "ssstateen") &&
                blob_contains_string(*patched, "shcounterenw") &&
                blob_contains_string(*patched, "shvstvala") &&

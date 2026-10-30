@@ -234,6 +234,29 @@ auto generate_platform_fdt(const core::MachineConfig& config,
     const bool has_bitmanip = simrv::isa::misa_has_extension(
         config.isa.isa_preset, simrv::isa::IsaExtension::B);
     if (has_vector && has_bitmanip) guest_extensions.emplace_back("zvkb");
+    if (simrv::isa::misa_has_extension(config.isa.isa_preset, simrv::isa::IsaExtension::M)) {
+        guest_extensions.emplace_back("zmmul");
+        guest_extensions.emplace_back("zimop");
+    }
+    if (simrv::isa::misa_has_extension(config.isa.isa_preset, simrv::isa::IsaExtension::A)) {
+        guest_extensions.emplace_back("zaamo");
+        guest_extensions.emplace_back("zalrsc");
+    }
+    if (has_bitmanip) {
+        guest_extensions.emplace_back("zba");
+        guest_extensions.emplace_back("zbb");
+        guest_extensions.emplace_back("zbs");
+    }
+    const bool has_compressed = simrv::isa::misa_has_extension(
+        config.isa.isa_preset, simrv::isa::IsaExtension::C);
+    if (has_compressed) {
+        guest_extensions.emplace_back("zca");
+        guest_extensions.emplace_back("zcb");
+        guest_extensions.emplace_back("zcmop");
+        if (simrv::isa::misa_has_extension(config.isa.isa_preset, simrv::isa::IsaExtension::D)) {
+            guest_extensions.emplace_back("zcd");
+        }
+    }
     if (simrv::isa::misa_has_extension(config.isa.isa_preset, simrv::isa::IsaExtension::H)) {
         guest_extensions.emplace_back("h");
         guest_extensions.emplace_back("ssstateen");

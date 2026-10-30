@@ -247,7 +247,7 @@ auto patch_fdt(std::span<const uint8_t> blob, uint64_t dram_base, uint64_t dram_
             if (isa_ext_prop != nullptr) {
                 // Advertise only supported additions; this is not the complete RVA23 set.
                 static constexpr std::string_view kSupportedGuestExts[] = {
-                    "zihintntl", "zkt",    "zvbb",   "zvkb",   "zvkt",   "zic64b", "zicclsm", "za64rs", "ziccamoa", "zfhmin",
+                    "zihintntl", "zkt",    "zvbb",   "zvkt",   "zimop",  "zic64b", "zicclsm", "za64rs", "ziccamoa", "zfhmin",
                     "zvfhmin", "zfa", "zicond", "zicboz",
                     "zicbom",    "zicbop", "zawrs",   "svinval", "svpbmt", "svnapot", "sstc",
                     "sscofpmf", "ziccrse", "ziccif", "ssu64xl", "ssnpm", "supm"};
@@ -266,7 +266,17 @@ auto patch_fdt(std::span<const uint8_t> blob, uint64_t dram_base, uint64_t dram_
                     }
                     return false;
                 };
+                const auto append_extension = [&](std::string_view extension) {
+                    if (has_extension(extension)) return;
+                    isa_ext_prop->data.insert(isa_ext_prop->data.end(), extension.begin(),
+                                              extension.end());
+                    isa_ext_prop->data.push_back('\0');
+                };
                 const bool has_hypervisor = has_extension("h");
+                const bool has_vector = has_extension("v");
+                const bool has_bitmanip = has_extension("b") || has_extension("zba") ||
+                                          has_extension("zbb") || has_extension("zbs");
+                const bool has_compressed = has_extension("c") || has_extension("zca");
                 for (const auto ext : kSupportedGuestExts) {
                     if ((ext == "ssu64xl" || ext == "ssnpm" || ext == "supm") &&
                         !simrv::xlen::kIsXLen64)
@@ -292,15 +302,28 @@ auto patch_fdt(std::span<const uint8_t> blob, uint64_t dram_base, uint64_t dram_
                         isa_ext_prop->data.push_back('\0');
                     }
                 }
+                if (has_extension("m")) append_extension("zmmul");
+                if (has_extension("a")) {
+                    append_extension("zaamo");
+                    append_extension("zalrsc");
+                }
+                if (has_bitmanip) {
+                    append_extension("zba");
+                    append_extension("zbb");
+                    append_extension("zbs");
+                }
+                if (has_compressed) {
+                    append_extension("zca");
+                    append_extension("zcb");
+                    append_extension("zcmop");
+                    if (has_extension("d")) append_extension("zcd");
+                }
+                if (has_vector && has_bitmanip) append_extension("zvkb");
                 if (has_hypervisor) {
                     static constexpr std::string_view kShaExtensions[] = {
                         "ssstateen", "shcounterenw", "shvstvala", "shtvala",
                         "shvstvecd", "shvsatpa", "shgatpa"};
-                    for (const auto ext : kShaExtensions) {
-                        if (has_extension(ext)) continue;
-                        isa_ext_prop->data.insert(isa_ext_prop->data.end(), ext.begin(), ext.end());
-                        isa_ext_prop->data.push_back('\0');
-                    }
+                    for (const auto ext : kShaExtensions) append_extension(ext);
                 }
             }
         }
