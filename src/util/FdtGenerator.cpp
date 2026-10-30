@@ -241,6 +241,7 @@ auto generate_platform_fdt(const core::MachineConfig& config,
     if (simrv::isa::misa_has_extension(config.isa.isa_preset, simrv::isa::IsaExtension::A)) {
         guest_extensions.emplace_back("zaamo");
         guest_extensions.emplace_back("zalrsc");
+        guest_extensions.emplace_back("za128rs");
     }
     if (has_bitmanip) {
         guest_extensions.emplace_back("zba");

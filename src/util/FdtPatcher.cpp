@@ -306,6 +306,7 @@ auto patch_fdt(std::span<const uint8_t> blob, uint64_t dram_base, uint64_t dram_
                 if (has_extension("a")) {
                     append_extension("zaamo");
                     append_extension("zalrsc");
+                    append_extension("za128rs");
                 }
                 if (has_bitmanip) {
                     append_extension("zba");

@@ -141,8 +141,8 @@ void test_generate_platform_fdt_pcie() {
     expect(blob_contains_string(blob, "zvbb"), "Zvbb vector bit-manipulation advertised");
     expect(blob_contains_string(blob, "zvkb"), "Zvkb vector bit-manipulation advertised");
     expect(blob_contains_string(blob, "zvkt"), "Zvkt vector data-independent latency advertised");
-    for (const auto extension : {"zmmul", "zimop", "zaamo", "zalrsc", "zba", "zbb", "zbs",
-                                 "zca", "zcb", "zcd", "zcmop"}) {
+    for (const auto extension : {"zmmul", "zimop", "zaamo", "zalrsc", "za128rs", "zba", "zbb",
+                                 "zbs", "zca", "zcb", "zcd", "zcmop"}) {
         expect(blob_contains_string(blob, extension),
                std::string(extension) + " mandatory RVA23 extension advertised");
     }
@@ -232,6 +232,7 @@ void test_patch_fdt_advertises_zihintntl_and_64_byte_cmo() {
                blob_contains_string(*patched, "zimop") &&
                blob_contains_string(*patched, "zaamo") &&
                blob_contains_string(*patched, "zalrsc") &&
+               blob_contains_string(*patched, "za128rs") &&
                blob_contains_string(*patched, "zba") &&
                blob_contains_string(*patched, "zbb") &&
                blob_contains_string(*patched, "zbs") &&
