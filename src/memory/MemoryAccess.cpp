@@ -1218,6 +1218,12 @@ void MemoryAccess::execute_cmo(MemorySubsystem& mem, core::CPU& cpu, simrv::xlen
     }
 
     const auto& geometry = mem.memory_geometry();
+    if (!geometry.contains(paddr, kLineSize)) {
+        cpu.active_context().pending_exception = ExceptionCode::FaultStore;
+        cpu.active_context().pending_tval = vaddr;
+        return;
+    }
+
     std::array<simrv::xlen::Byte, kLineSize> dirty_line{};
 
     if (op == isa::OperationId::CBO_ZERO) {
