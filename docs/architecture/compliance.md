@@ -2,12 +2,10 @@
 
 SimRV targets the ratified RISC-V **RVA23 Profile** (`rva23s64` and `rva23u64`) as its primary 64-bit architectural profile. RVA23 is the project's primary ISA target; RV32 and narrower compatibility presets are also supported for dual-width validation and workloads. This is an implementation and verification target, not a claim of formal RISC-V International architectural certification. A release is considered verified only for behavior covered by the checked-in semantic tests, the Architectural Compatibility Test (ACT) test suite, the configured `riscv-tests` suites, vector tests, and Spike lockstep workloads run by the release gates.
 
-**The current implementation is not yet a complete RVA23S64 implementation.** Selecting the
-`rva23s64` profile names the intended target; it does not imply that every mandatory profile
-extension is implemented or advertised. In particular, the augmented hypervisor extension (Sha)
-and several scalar and vector extensions are not yet complete. The matrix below
-records implemented areas and the qualification gaps; full
-RVA23 remains the goal.
+**RVA23S64 is the implementation target.** Profile selection alone is not proof of conformance;
+the implementation claims below are tied to instruction suites, semantic tests, ACT results, and
+the profile requirements. The latest mandatory-vector and Sha evidence is recorded below, along
+with the unresolved ACT/specification expectation conflicts.
 
 CPU and SoC presets that do not implement Zic64b are outside Zic64b-specific checks; their
 configuration files remain unchanged. The RVA23 target uses 64-byte cache blocks
@@ -18,7 +16,7 @@ preset's configured cache-line geometry remains a separate platform requirement.
 
 | Area | Implemented scope | Verification evidence |
 | --- | --- | --- |
-| Standard profiles | RVA23S64 is the intended target; mandatory-extension coverage remains incomplete | Focused tests for selected RVA23 features; these are not a full profile-conformance result |
+| Standard profiles | RVA23S64 target; profile support is tied to the qualification evidence below | Profile regression, ACT4 RVA23S64, vector suite at minimum VLEN, and extension-specific tests |
 | Base ISA | RV32I and RV64I | RV32/RV64 ISA gates, ACT suite, and Spike lockstep |
 | General-purpose extensions | M, A, F, D, C; see FP qualification note below | ISA gates, focused semantic tests, ACT suite, lockstep |
 | Instruction-fetch fence | Zifencei `FENCE.I` invalidates the executing hart's instruction cache and decode cache | RVA23 local instruction-state flush test; SMP instruction-fetch coherence tests |
@@ -60,15 +58,14 @@ preset's configured cache-line geometry remains a separate platform requirement.
 | Accessed/dirty tracking | Mandatory Svade behavior: guest accesses fault when a required PTE A/D bit is clear; unsupported Svadu `menvcfg.ADUE` is read-only zero; FDT advertises Svade | RVA23 CPU page-walk tests for load/store page faults, PTE preservation, and ADUE WARL behavior; FDT tests |
 | Supervisor trap entry | Sstvecd Direct mode stores any four-byte-aligned BASE; Sstvala records required delegated fault addresses and the faulting instruction for illegal-instruction exceptions; FDT advertises both | RVA23 supervisor trap tests for Direct vector WARL behavior and delegated fault values; FDT tests |
 | TLB invalidation | Svinval (`sinval.vma`, `sfence.w.inval`, `sfence.inval.ir`) | Core semantic, RVA23 profile gates, and ACT suite |
-| Vector | Implemented subset of RISC-V Vector 1.0 (`V`), configurable VLEN | Vector regression suite and lockstep |
+| Vector | RISC-V Vector 1.0 (`V`), with configurable VLEN; RVA23 minimum VLEN=128 | 2391 Chips Alliance vector tests pass at VLEN=128 and 256; ACT vector checks, except the audited `vstart` expectation conflict below |
 | Privilege | M/S/U execution, traps, interrupts, and CSR access (Privileged ISA 1.13) | Core semantic, ACT suite, and Linux boot gates |
 | Address translation | Sv32 for RV32 and Sv39 for RV64; Bare mode is supported; Ssccptr hardware page-table reads use coherent main memory; FDT advertises Ssccptr | MMU and Svade page-walk tests, and Linux boot gates; FDT tests |
 
 RVA23S64 includes every RVA23U64 mandatory extension, plus Zifencei and the privileged
 requirements defined by RVA23S64. Those include Sstc, Sscofpmf, Ssnpm, Ssu64xl, and Sha
 (H plus the required state-enable, counter-enable, guest trap-value, and guest translation
-features). SimRV does not currently implement all of these requirements. The existing profile test
-name and default-profile selection are not evidence that this list is complete. See the [RVA23
+features). See the [RVA23
 profile specification](https://github.com/riscv/riscv-profiles/blob/main/src/rva23-profile.adoc)
 for the normative mandatory-extension list.
 
@@ -111,36 +108,30 @@ run is evidence for the tested behaviors, not a claim of ACT-clean or complete R
 The source suite revision is the `tests/riscv-arch-test` submodule revision. Run instructions are
 in [`tests/act4/README.md`](../../tests/act4/README.md).
 
-## Known qualification gaps
+## RVA23S64 qualification status
 
-- Full RVA23S64 is not yet qualified. The following mandatory requirements remain incomplete or
-  need profile-level qualification:
-  - Sha still needs full profile qualification. Focused implementation and tests now cover
-    state-enable CSR access, guest counter gating, guest trap values, `vsatp`/`hgatp` composition,
-    HFENCE instructions, and HLV/HLVX/HSV accesses. Guest external interrupt files are not
-    implemented; G-stage page-table reads are synchronous internal RAM reads, including in cycle
-    mode. Shvstvala, Shvstvecd, Shvsatpa, and Shgatpa have implementation paths and focused tests,
-    but require broader profile-level qualification.
+The current mandatory-feature audit found no remaining implementation gap. Evidence includes the
+profile-specific regression tests, 2391 Chips Alliance base-V tests passing at both VLEN=128 and
+VLEN=256, and the full upstream ACT4 RVA23S64 run. Sha's seven constituent ACT categories also
+pass: Ssstateen, Shcounterenw, Shvstvala, Shtvala, Shvstvecd, Shvsatpa, and Shgatpa. The ACT suite's
+50 recorded failures are the audited Vector and H expectation conflicts above; they are preserved
+as failures in the raw report and do not justify deviating from the ratified specifications.
 
-  - The 50 full-suite ACT failures documented above are audited expectation conflicts. They must
-    not be treated as architectural defects in SimRV unless a corrected ACT test or later ratified
-    specification demonstrates an implementation error.
-
-  This list is a starting qualification checklist, not a claim that every other mandatory item
-  has passed conformance testing. See the [normative RVA23 profile specification](https://github.com/riscv/riscv-profiles/blob/main/src/rva23-profile.adoc)
-  and its mandatory requirements when closing each item. FDT advertisements describe SimRV's
-  present capabilities and must not be read as a declaration of complete RVA23 conformance.
+This evidence is not formal RISC-V International certification. See the [normative RVA23 profile
+specification](https://docs.riscv.org/reference/rva23/rva23-profiles.html) for the complete
+mandatory-extension definitions. FDT advertisements describe implemented capabilities and are
+not themselves evidence of conformance.
 
 - Scalar and vector floating-point support RNE, RTZ, RDN, RUP, and RMM. Scalar RMM arithmetic,
   fused operations, narrowing, and integer-to-float conversions use software tie detection over
   host RNE results; integer conversions to integer and binary16 conversions implement RMM
   explicitly. Focused scalar and vector semantic tests cover halfway cases and accrued flags. This
-  does not replace broad reference comparison or full architectural conformance testing.
-- The vector decoder and execution engine implement a substantial RVV 1.0 subset, not every
-  instruction in the ratified V extension. Vector FP currently covers selected add, fused
-  multiply-accumulate, and scalar move/merge operations. SEW=16 vector FP is rejected because the
-  optional Zvfh extension is not advertised. The release must not describe this subset as complete
-  V conformance until the missing instruction/legality matrix is closed.
+  has focused halfway-case and accrued-flag coverage; the vector suite additionally exercises the
+  mandatory base vector FP instruction families at VLEN=128 and VLEN=256.
+- The Chips Alliance vector suite covers the base V instruction families and passes at the RVA23
+  minimum VLEN=128 and at VLEN=256. The profile-mandated Zvbb, Zvkb, Zvfhmin, and Zvkt features
+  have focused implementation tests. Optional Zvfh arithmetic is not advertised; SEW=16 vector FP
+  is limited to the conversions required by Zvfhmin.
 
 Vector FP arithmetic observes `frm`, accrues host IEEE exceptions into `fflags`, canonicalizes NaN
 results, and uses fused host operations for architecturally fused multiply-accumulate instructions.

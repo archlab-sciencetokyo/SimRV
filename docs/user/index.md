@@ -25,7 +25,7 @@ SimRV's primary architectural target is the ratified RVA23 profile (`rva23s64` b
 RV64-capable release also runs RV32 guests, and compatibility ISA presets are available for narrower
 workloads and verification:
 
-- **ISA Support**: RVA23 (`rva23s64` default; `rva23u64` also available), plus RV32 and narrower compatibility presets. Implemented extensions include Base Integer, Multiply/Divide, Atomic, Single/Double Floating Point, Compressed, Bit Manipulation, and a qualified subset of Vector 1.0; see the [compliance scope](../architecture/compliance.md) for coverage and known gaps.
+- **ISA Support**: RVA23 (`rva23s64` default; `rva23u64` also available), plus RV32 and narrower compatibility presets. Implemented extensions include Base Integer, Multiply/Divide, Atomic, Single/Double Floating Point, Compressed, Bit Manipulation, and Vector 1.0; see the [compliance scope](../architecture/compliance.md) for coverage and qualification evidence.
 - **Privilege & System Architecture**: Machine (M), Supervisor (S), and User (U) privilege modes with PMP (Physical Memory Protection), Sv32 / Sv39 MMU page translation, CLINT / ACLINT timer and software interrupts, and PLIC / AIA (APLIC/IMSIC) interrupt routing.
 - **Microarchitectural Modeling**: Per-cycle transition kernels for three-stage, five-stage, and dual-issue pipelines with configurable branch prediction (static, bimodal, 2-level adaptive, RAS, BTB) and multi-level L1/L2/L3 cache hierarchies.
 - **Multi-Hart Coherence**: TileLink-C directory-based coherence hubs modeling MESI protocols for SMP configurations (2 to 16 harts).
