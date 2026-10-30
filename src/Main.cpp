@@ -34,10 +34,10 @@
 #include "simrv/core/Machine.hpp"
 #include "simrv/core/TelemetrySink.hpp"
 #include "simrv/core/Tracer.hpp"
+#include "simrv/explain/InstructionExplainer.hpp"
 #include "simrv/tui/Tui.hpp"
 #include "simrv/util/CliParser.hpp"
 #include "simrv/util/FormatUtil.hpp"
-#include "simrv/util/InstructionExplainer.hpp"
 #include "simrv/util/SoCManifest.hpp"
 #include "simrv/xlen/ScalarTypes.hpp"
 
@@ -334,7 +334,7 @@ auto main(int argc, char* argv[]) -> int {  // NOLINT(bugprone-exception-escape)
                 std::println("Full license: LICENSE; third-party notices: THIRD_PARTY_NOTICES.md");
                 std::exit(simrv::core::to_exit_code(simrv::core::HostExitCode::Success));
             case CliAction::ExplainInstruction:
-                simrv::util::explain_instruction(parsed->options.explain_inst_val);
+                simrv::explain::explain_instruction(parsed->options.explain_inst_val);
                 std::exit(simrv::core::to_exit_code(simrv::core::HostExitCode::Success));
             case CliAction::DumpCpuModel: {
                 simrv::pipeline::CpuModelConfig cfg{};

@@ -19,7 +19,7 @@ preset's configured cache-line geometry remains a separate platform requirement.
 | Standard profiles | RVA23S64 target; profile support is tied to the qualification evidence below | Profile regression, ACT4 RVA23S64, vector suite at minimum VLEN, and extension-specific tests |
 | Base ISA | RV32I and RV64I | RV32/RV64 ISA gates, ACT suite, and Spike lockstep |
 | General-purpose extensions | M, A, F, D, C; see FP qualification note below | ISA gates, focused semantic tests, ACT suite, lockstep |
-| Instruction-fetch fence | Zifencei `FENCE.I` invalidates the executing hart's instruction cache and decode cache | RVA23 local instruction-state flush test; SMP instruction-fetch coherence tests |
+| Instruction-fetch fence | Zifencei `FENCE.I` orders prior explicit memory accesses before later instruction fetches on the same hart; remote harts require their own synchronization | RVA23 local instruction-state flush test; SMP instruction-fetch coherence tests |
 | Bit manipulation | Zba, Zbb, Zbc, Zbs (`Zb*`) | Bitmanip ISA tests, ACT suite, and lockstep |
 | Conditional operations | Zicond (`czero.eqz`, `czero.nez`) | Core semantic, RVA23 profile gates, and ACT suite |
 | Compressed may-be-operations | Zcmop `C.MOP.n` encodings decode as architectural no-ops | RVA23 profile unit tests |
@@ -48,7 +48,7 @@ preset's configured cache-line geometry remains a separate platform requirement.
 | Hypervisor counter-enable CSR | H-gated `hcounteren` is writable for implemented counters and gates VS/VU counter reads with the required virtual-instruction behavior; S/U access also observes `scounteren` | RVA23 guest-counter-enable and counter-access tests |
 | Hypervisor CSR and return substrate | H/VS CSR state and access checks are present; `hgatp` accepts Bare and SvNNx4 modes, `vsatp` follows `satp` WARL modes, S CSR aliases select VS state in virtualization mode, MPV/MRET and SPV/SRET support guest returns, and synchronous traps can route to VS or HS. The RVA23S64 profile enables H; explicit ISA and CPU-model configurations retain their selected MISA | RVA23 H/VS CSR, guest return, and trap-routing tests |
 | Hypervisor virtual-machine memory instructions | `HLV.*`, `HLVX.HU/WU`, and `HSV.*` decode and execute with SPVP-selected VS/VU privilege, VS/G-stage translation, load/store fault classes, `GVA`/`htval` reporting, and Ssnpm pointer-mask selection; HLVX uses execute permission while reporting load faults | RVA23 H virtual load/store tests cover decode, VS/G translation, execute-only HLVX, stores, load-page-fault routing, and retirement/writeback |
-| Hypervisor interrupt routing | VS software/timer/external pending state, `hideleg`/`mideleg`, VS CSR aliases, and VS trap entry implement standard VS cause-number translation; guest external interrupt files are not implemented | RVA23 interrupt delegation WARL and VS trap-entry tests |
+| Hypervisor interrupt routing | VS software/timer/external pending state, `hideleg`/`mideleg`, VS CSR aliases, and VS trap entry implement standard VS cause-number translation; guest external interrupt files use the H-permitted `GEILEN=0` configuration | RVA23 interrupt delegation WARL and VS trap-entry tests |
 | Hypervisor fault values | `vstval` is populated on delegated VS traps; `htval` records GPA >> 2 for guest-page faults from G-stage translation, including VS Bare accesses | RVA23 VS trap-value and Shtvala guest-physical fault-value tests |
 | Counter overflow filtering | Sscofpmf implements M/S/U event filtering, counter inhibit, sticky overflow reporting, and delegated LCOFIP; FDT advertises Sscofpmf | RVA23 CSR, overflow, and interrupt-delegation tests |
 | User pointer masking | Ssnpm selects U-mode PMLEN=0 or PMLEN=7 through `senvcfg.PMM`; Supm is implied; RV64 FDT advertises both | RVA23 WARL and tagged physical load/store tests; FDT tests |
@@ -63,11 +63,21 @@ preset's configured cache-line geometry remains a separate platform requirement.
 | Address translation | Sv32 for RV32 and Sv39 for RV64; Bare mode is supported; Ssccptr hardware page-table reads use coherent main memory; FDT advertises Ssccptr | MMU and Svade page-walk tests, and Linux boot gates; FDT tests |
 
 RVA23S64 includes every RVA23U64 mandatory extension, plus Zifencei and the privileged
-requirements defined by RVA23S64. Those include Sstc, Sscofpmf, Ssnpm, Ssu64xl, and Sha
-(H plus the required state-enable, counter-enable, guest trap-value, and guest translation
-features). See the [RVA23
-profile specification](https://github.com/riscv/riscv-profiles/blob/main/src/rva23-profile.adoc)
-for the normative mandatory-extension list.
+requirements defined by RVA23S64. The profile's mandatory unprivileged set starts with the
+little-endian RV64I base, followed by M, A, F, D,
+C, B, Zicsr, Zicntr, Zihpm, Ziccif, Ziccrse, Ziccamoa, Zicclsm, Za64rs, Zihintpause, Zic64b,
+Zicbom, Zicbop, Zicboz, Zfhmin, Zkt, V, Zvfhmin, Zvbb, Zvkt, Zihintntl, Zicond, Zimop, Zcmop,
+Zcb, Zfa, Zawrs, and Supm. RVA23S64 additionally mandates Zifencei, Ss1p13, Svbare, Sv39,
+Svade, Ssccptr, Sstvecd, Sstvala, Sscounterenw, Svpbmt, Svinval, Svnapot, Sstc, Sscofpmf, Ssnpm,
+Ssu64xl, and Sha. Sha comprises H, Ssstateen, Shcounterenw, Shvstvala, Shtvala, Shvstvecd,
+Shvsatpa, and Shgatpa. The table above records SimRV's implementation and evidence for these
+requirements; the [ratified RVA23 v1.0 profile](https://docs.riscv.org/reference/rva23/v1.0/rva23-profiles.html)
+defines their normative behavior.
+
+RVA23 optional expansions are not part of the mandatory target. They include, among others,
+Sv48, Sv57, Zkr, Svadu, Sdtrig, Ssstrict, Svvptc, and Sspm on the supervisor side. In particular,
+the RVA23S64 profile does not require Ssstrict; its mandatory hypervisor and base profile
+requirements still apply.
 
 `G` includes I, M, A, F, D, Zicsr, and Zifencei. The `Zb` and `V` extensions above are additional
 extensions; they are not implied by `G`. MISA contains the single-letter extension bits only and
@@ -93,20 +103,22 @@ SimRV verifies its default 64-bit profile (`rva23s64`) against the RISC-V Archit
 
 - **Signature dumping**: Bare-metal execution supports `--signature <file>` or `+signature=<file>`, extracting memory between `begin_signature` (or `rvtest_sig_begin`) and `end_signature` (or `rvtest_sig_end`) to format-compliant hex output files.
 - **RVA23 Mandatory Extensions**: Automated regression suites verify Zicond, CMO, Svinval, Bitmanip (`zba`, `zbb`, `zbs`), and profile CSR configurations against golden architectural signatures.
-- **Continuous Integration**: The `rva23-act` suite is registered as a required verification gate in release evidence generation and verified across dual-width CI runs.
+- **Continuous Integration**: The `rva23-act` suite is registered as a required verification gate in RV64 release evidence generation. It is not an RV32 profile test; the RV32 CI matrix runs its own width-specific gates.
 
 The full upstream ACT4 RVA23S64 ELF suite was run with VLEN=128 and 12 jobs: **3138/3188 passed**.
 The 50 remaining failures are two expectation conflicts with the ratified specifications:
 
 - 42 `ExceptionsVx-*` checks expect successful vector instructions to leave a nonzero `vstart`.
-  Vector 1.0 requires vector instructions to reset `vstart` to zero when execution completes.
+  [Vector 1.0 requires all vector instructions to reset `vstart` to zero when execution
+  completes](https://docs.riscv.org/reference/isa/v20260120/unpriv/v-st-ext.html).
 - 8 `InterruptsS_priority_{sie,sip}_{S,U,VS,VU}` checks expect VSEI to outrank SEI when both are
-  pending for HS-mode. H 1.0 specifies SEI above VSEI in the HS interrupt priority order.
+  pending for HS-mode. [H 1.0 specifies SEI above VSEI for HS-mode destinations in the interrupt
+  priority order](https://docs.riscv.org/reference/isa/v20260120/priv/hypervisor.html).
 
 These checks remain failures in the raw ACT result; SimRV preserves the specified behavior. This
 run is evidence for the tested behaviors, not a claim of ACT-clean or complete RVA23 conformance.
-The source suite revision is the `tests/riscv-arch-test` submodule revision. Run instructions are
-in [`tests/act4/README.md`](../../tests/act4/README.md).
+The source suite revision is the `tests/riscv-arch-test` submodule revision. [ACT run instructions
+are maintained in the repository](https://github.com/archlab-sciencetokyo/SimRV/blob/dev/tests/act4/README.md).
 
 ## RVA23S64 qualification status
 
@@ -117,10 +129,10 @@ pass: Ssstateen, Shcounterenw, Shvstvala, Shtvala, Shvstvecd, Shvsatpa, and Shga
 50 recorded failures are the audited Vector and H expectation conflicts above; they are preserved
 as failures in the raw report and do not justify deviating from the ratified specifications.
 
-This evidence is not formal RISC-V International certification. See the [normative RVA23 profile
-specification](https://docs.riscv.org/reference/rva23/rva23-profiles.html) for the complete
-mandatory-extension definitions. FDT advertisements describe implemented capabilities and are
-not themselves evidence of conformance.
+This evidence is not formal RISC-V International certification. The table and exact mandatory
+inventory above follow the [ratified RVA23 v1.0 profile](https://docs.riscv.org/reference/rva23/v1.0/rva23-profiles.html).
+FDT advertisements describe implemented capabilities and are not themselves evidence of
+conformance.
 
 - Scalar and vector floating-point support RNE, RTZ, RDN, RUP, and RMM. Scalar RMM arithmetic,
   fused operations, narrowing, and integer-to-float conversions use software tie detection over
@@ -129,9 +141,10 @@ not themselves evidence of conformance.
   has focused halfway-case and accrued-flag coverage; the vector suite additionally exercises the
   mandatory base vector FP instruction families at VLEN=128 and VLEN=256.
 - The Chips Alliance vector suite covers the base V instruction families and passes at the RVA23
-  minimum VLEN=128 and at VLEN=256. The profile-mandated Zvbb, Zvkb, Zvfhmin, and Zvkt features
-  have focused implementation tests. Optional Zvfh arithmetic is not advertised; SEW=16 vector FP
-  is limited to the conversions required by Zvfhmin.
+  minimum VLEN=128 and at VLEN=256. The profile-mandated Zvbb, Zvfhmin, and Zvkt features have
+  focused implementation tests. Zvkb is not a separate RVA23 mandatory extension. Optional Zvfh
+  arithmetic is not advertised; SEW=16 vector FP is limited to the conversions required by
+  Zvfhmin.
 
 Vector FP arithmetic observes `frm`, accrues host IEEE exceptions into `fflags`, canonicalizes NaN
 results, and uses fused host operations for architecturally fused multiply-accumulate instructions.

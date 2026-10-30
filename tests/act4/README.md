@@ -30,10 +30,12 @@ same `--vlen 128` setting to SimRV. The generated suite and report belong under
 
 In the current full-suite run, SimRV passes 3138 of 3188 ELFs. The remaining
 50 checks are audited conflicts with the ratified specs: 42 vector tests expect
-successful instructions to retain nonzero `vstart` (Vector 1.0 requires it to
-clear), and 8 interrupt tests expect VSEI above SEI for HS-mode (H 1.0 specifies
-SEI above VSEI). The runner intentionally reports these as failures; do not
-change architectural behavior to satisfy those expectations. See
+successful instructions to retain nonzero `vstart` ([Vector 1.0 requires all
+vector instructions to clear it on completion](https://docs.riscv.org/reference/isa/v20260120/unpriv/v-st-ext.html)),
+and 8 interrupt tests expect VSEI above SEI for HS-mode ([H 1.0 orders SEI above
+VSEI for HS-mode destinations](https://docs.riscv.org/reference/isa/v20260120/priv/hypervisor.html)).
+The runner intentionally reports these as failures; do not change architectural
+behavior to satisfy those expectations. See
 [`docs/architecture/compliance.md`](../../docs/architecture/compliance.md) for
 qualification scope and status.
 

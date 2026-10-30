@@ -23,7 +23,11 @@ simrv_add_component(simrv-core
   CpuCycle.cpp
   CpuFastExecution.cpp
   ../util/CliParser.cpp
-  ../util/InstructionExplainer.cpp
+  ../explain/CsrCatalog.cpp
+  ../explain/ScalarSpecCatalog.cpp
+  ../explain/VectorSpecCatalog.cpp
+  ../explain/InstructionExplainer.cpp
+  ../explain/ExplainCliPrinter.cpp
 )
 set_source_files_properties(CpuFastExecution.cpp PROPERTIES COMPILE_OPTIONS "-fno-jump-tables")
 add_library(simrv::core ALIAS simrv-core)

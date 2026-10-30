@@ -68,6 +68,9 @@ if(BUILD_TESTING)
   simrv_add_runtime_test(
     simrv-operation-traits-tests tests/OperationTraitsTests.cpp
     operation-traits "gate;regress;pipeline")
+  simrv_add_runtime_test(
+    simrv-instruction-explainer-tests tests/InstructionExplainerTests.cpp
+    instruction-explainer "gate;regress;core")
   simrv_add_runtime_test(simrv-scoreboard-tests tests/ScoreboardTests.cpp
                          scoreboard-tests "gate;regress;pipeline")
   simrv_add_runtime_test(
