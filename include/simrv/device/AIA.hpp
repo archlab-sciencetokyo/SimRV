@@ -7,6 +7,7 @@
 #include <array>
 #include <cstdint>
 
+#include "simrv/core/PlatformTopology.hpp"
 #include "simrv/memory/MmioDevice.hpp"
 #include "simrv/xlen/IdentifierTypes.hpp"
 
@@ -25,7 +26,7 @@ namespace simrv::device {
  */
 class Imsic : public memory::MmioDevice {
    public:
-    static constexpr size_t kMaxHarts = 16;
+    static constexpr size_t kMaxHarts = core::topology::kMaxSimulatedHarts;
     static constexpr size_t kNumInterrupts = 64;  // 1..63
 
     enum class Privilege : uint8_t { Machine = 0, Supervisor = 1 };
@@ -87,6 +88,7 @@ class Aplic : public memory::MmioDevice {
     ~Aplic() override = default;
 
     void set_sink(simrv::core::IInterruptController* sink) noexcept { sink_ = sink; }
+    void set_act_test_hooks(bool enabled) noexcept { act_test_hooks_ = enabled; }
 
     [[nodiscard]] auto name() const -> const char* override {
         return priv_ == Privilege::Machine ? "aplic-m" : "aplic-s";
@@ -107,6 +109,7 @@ class Aplic : public memory::MmioDevice {
    private:
     simrv::core::IInterruptController* sink_{nullptr};
     Privilege priv_{Privilege::Machine};
+    bool act_test_hooks_{false};
     simrv::xlen::Address base_addr_{0};
     simrv::xlen::Address size_{0};
     Imsic* imsic_{nullptr};

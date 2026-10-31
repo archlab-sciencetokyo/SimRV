@@ -3,9 +3,11 @@
  * @brief Implementation of overlay-backed VirtIO block storage backend.
  */
 #include <fcntl.h>
+#if defined(__linux__)
 #include <linux/falloc.h>
-#include <sys/stat.h>
 #include <sys/syscall.h>
+#endif
+#include <sys/stat.h>
 #include <unistd.h>
 
 #include <algorithm>
@@ -164,7 +166,7 @@ auto BlockBackend::valid_range(uint64_t sector, uint32_t count) const -> bool {
 }
 
 auto BlockBackend::punch_overlay_hole(uint64_t offset, uint64_t bytes) const -> bool {
-#ifdef SYS_fallocate
+#if defined(__linux__) && defined(SYS_fallocate)
     return ::syscall(SYS_fallocate, overlay_fd_.get(), FALLOC_FL_PUNCH_HOLE | FALLOC_FL_KEEP_SIZE,
                      static_cast<off_t>(offset), static_cast<off_t>(bytes)) == 0;
 #else

@@ -59,6 +59,19 @@
     },
     "platform": { "enum": ["pcie", "mmio", "none"] },
     "device_policy": { "enum": ["implicit", "explicit"] },
+    "pcie": {
+      "type": "object",
+      "required": ["ecam_base", "ecam_size", "mmio_base", "mmio_size", "first_bus", "last_bus"],
+      "properties": {
+        "ecam_base": { "type": "integer", "minimum": 0 },
+        "ecam_size": { "type": "integer", "minimum": 0 },
+        "mmio_base": { "type": "integer", "minimum": 0 },
+        "mmio_size": { "type": "integer", "minimum": 0 },
+        "first_bus": { "type": "integer", "minimum": 0, "maximum": 255 },
+        "last_bus": { "type": "integer", "minimum": 0, "maximum": 255 }
+      },
+      "additionalProperties": false
+    },
     "memory": {
       "type": "object",
       "required": ["dram_base", "dram_size"],
@@ -89,6 +102,19 @@
           "base": { "type": "integer", "minimum": 0 },
           "size": { "type": "integer", "minimum": 0 },
           "irq": { "type": "integer", "minimum": 0 },
+          "clock_hz": { "type": "integer", "minimum": 1 },
+          "pci_bdf": {
+            "type": "array",
+            "prefixItems": [
+              { "type": "integer", "minimum": 0, "maximum": 255 },
+              { "type": "integer", "minimum": 0, "maximum": 31 },
+              { "type": "integer", "minimum": 0, "maximum": 7 }
+            ],
+            "items": false,
+            "minItems": 3,
+            "maxItems": 3
+          },
+          "pci_intx_source": { "type": "integer", "minimum": 1, "maximum": 31 },
           "compatible": { "type": "string" },
           "read_value": { "type": "integer", "minimum": 0, "maximum": 4294967295 },
           "mac_address": { "type": "string", "pattern": "^[0-9a-fA-F]{2}(:[0-9a-fA-F]{2}){5}$" },

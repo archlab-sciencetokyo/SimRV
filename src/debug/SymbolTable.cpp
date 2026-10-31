@@ -4,9 +4,9 @@
  */
 #include "simrv/debug/SymbolTable.hpp"
 
-#include <elf.h>
-
+#include <algorithm>
 #include <array>
+#include <cstdint>
 #include <filesystem>
 #include <format>
 #include <fstream>
@@ -15,10 +15,26 @@
 #include <vector>
 
 #include "simrv/core/Logger.hpp"
+#include "simrv/util/ElfTypes.hpp"
 
 namespace simrv::debug {
 
 namespace {
+
+constexpr size_t kElfIdentSize = 16;
+constexpr std::array<uint8_t, 4> kElfMagic = {0x7f, 'E', 'L', 'F'};
+using util::elf::Elf32_Ehdr;
+using util::elf::Elf32_Shdr;
+using util::elf::Elf32_Sym;
+using util::elf::Elf64_Ehdr;
+using util::elf::Elf64_Shdr;
+using util::elf::Elf64_Sym;
+using util::elf::kClass32;
+using util::elf::kClass64;
+using util::elf::kSymbolFunction;
+using util::elf::kSymbolNotype;
+using util::elf::kSymbolObject;
+using util::elf::kSymbolTable;
 
 template <typename Ehdr, typename Shdr, typename Sym, typename StTypeFunc>
 auto parse_elf_symbols(std::ifstream& fs, std::map<simrv::xlen::Address, std::string>& out_symbols,
@@ -42,7 +58,7 @@ auto parse_elf_symbols(std::ifstream& fs, std::map<simrv::xlen::Address, std::st
     int symtab_idx = -1;
     int strtab_idx = -1;
     for (int i = 0; std::cmp_less(i, ehdr.e_shnum); ++i) {
-        if (shdrs[i].sh_type == SHT_SYMTAB) {
+        if (shdrs[i].sh_type == kSymbolTable) {
             symtab_idx = i;
             strtab_idx = static_cast<int>(shdrs[i].sh_link);
         }
@@ -65,13 +81,16 @@ auto parse_elf_symbols(std::ifstream& fs, std::map<simrv::xlen::Address, std::st
             const auto type = get_type(sym.st_info);
             if (sym.st_name != 0 && static_cast<size_t>(sym.st_name) < strtab.size() &&
                 sym.st_value != 0 &&
-                (type == STT_FUNC || type == STT_OBJECT || type == STT_NOTYPE)) {
+                (type == kSymbolFunction || type == kSymbolObject || type == kSymbolNotype)) {
                 std::string name = &strtab[sym.st_name];
-                const bool runtime_essential = name == "_start" || name == "tohost";
+                const bool runtime_essential =
+                    name == "_start" || name == "tohost" || name == "begin_signature" ||
+                    name == "end_signature" || name == "rvtest_sig_begin" ||
+                    name == "rvtest_sig_end";
                 if (!name.empty() && name.find('$') == std::string::npos &&
                     (mode == SymbolLoadMode::FullDebug || runtime_essential)) {
                     out_symbols[sym.st_value] = name;
-                    if (type == STT_FUNC) {
+                    if (type == kSymbolFunction) {
                         out_functions[sym.st_value] = ElfFunctionSymbol{
                             .name = std::move(name),
                             .size = static_cast<simrv::xlen::Address>(sym.st_size)};
@@ -104,8 +123,7 @@ auto SymbolTable::load_from_elf(const std::string& elf_path, bool clear_existing
         if (!test_fs.is_open()) return false;
         std::array<char, 4> magic{};
         if (!test_fs.read(magic.data(), 4)) return false;
-        return (magic[0] == ELFMAG0 && magic[1] == ELFMAG1 && magic[2] == ELFMAG2 &&
-                magic[3] == ELFMAG3);
+        return std::equal(magic.begin(), magic.end(), kElfMagic.begin());
     };
 
     if (!is_valid_elf(path_to_load)) {
@@ -133,35 +151,32 @@ auto SymbolTable::load_from_elf(const std::string& elf_path, bool clear_existing
     }
 
     // Read ELF identity
-    std::array<char, EI_NIDENT> ident{};
-    if (!fs.read(ident.data(), EI_NIDENT)) {
+    std::array<uint8_t, kElfIdentSize> ident{};
+    if (!fs.read(reinterpret_cast<char*>(ident.data()), ident.size())) {
         return false;
     }
 
     // Check magic
-    if (ident[EI_MAG0] != ELFMAG0 || ident[EI_MAG1] != ELFMAG1 || ident[EI_MAG2] != ELFMAG2 ||
-        ident[EI_MAG3] != ELFMAG3) {
+    if (!std::equal(kElfMagic.begin(), kElfMagic.end(), ident.begin())) {
         return false;
     }
 
-    const auto elf_class = static_cast<uint8_t>(ident[EI_CLASS]);
-    if (elf_class != ELFCLASS32 && elf_class != ELFCLASS64) {
+    const auto elf_class = ident[4];
+    if (elf_class != kClass32 && elf_class != kClass64) {
         return false;
     }
 
     fs.seekg(0, std::ios::beg);
 
     std::optional<simrv::xlen::Address> ep;
-    if (elf_class == ELFCLASS32) {
+    if (elf_class == kClass32) {
         if (!parse_elf_symbols<Elf32_Ehdr, Elf32_Shdr, Elf32_Sym>(
-                fs, symbols_, functions_, ep, [](auto info) { return ELF32_ST_TYPE(info); },
-                mode)) {
+                fs, symbols_, functions_, ep, [](auto info) { return info & 0x0fU; }, mode)) {
             return false;
         }
     } else {
         if (!parse_elf_symbols<Elf64_Ehdr, Elf64_Shdr, Elf64_Sym>(
-                fs, symbols_, functions_, ep, [](auto info) { return ELF64_ST_TYPE(info); },
-                mode)) {
+                fs, symbols_, functions_, ep, [](auto info) { return info & 0x0fU; }, mode)) {
             return false;
         }
     }
@@ -178,19 +193,19 @@ auto SymbolTable::load_from_elf(const std::string& elf_path, bool clear_existing
             if (kpath != path_to_load && is_valid_elf(kpath)) {
                 std::ifstream kfs(kpath, std::ios::binary);
                 if (kfs.is_open()) {
-                    std::array<char, EI_NIDENT> kident{};
-                    if (kfs.read(kident.data(), EI_NIDENT)) {
-                        const auto k_class = static_cast<uint8_t>(kident[EI_CLASS]);
+                    std::array<uint8_t, kElfIdentSize> kident{};
+                    if (kfs.read(reinterpret_cast<char*>(kident.data()), kident.size())) {
+                        const auto k_class = kident[4];
                         kfs.seekg(0, std::ios::beg);
                         std::optional<simrv::xlen::Address> kep;
-                        if (k_class == ELFCLASS32) {
+                        if (k_class == kClass32) {
                             (void)parse_elf_symbols<Elf32_Ehdr, Elf32_Shdr, Elf32_Sym>(
                                 kfs, symbols_, functions_, kep,
-                                [](auto info) { return ELF32_ST_TYPE(info); }, mode);
-                        } else if (k_class == ELFCLASS64) {
+                                [](auto info) { return info & 0x0fU; }, mode);
+                        } else if (k_class == kClass64) {
                             (void)parse_elf_symbols<Elf64_Ehdr, Elf64_Shdr, Elf64_Sym>(
                                 kfs, symbols_, functions_, kep,
-                                [](auto info) { return ELF64_ST_TYPE(info); }, mode);
+                                [](auto info) { return info & 0x0fU; }, mode);
                         }
                     }
                 }

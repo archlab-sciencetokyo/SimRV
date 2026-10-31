@@ -14,7 +14,7 @@
 namespace simrv::pipeline {
 
 struct InstructionFillState {
-    static constexpr size_t kLineBytes = 32;
+    static constexpr size_t kLineBytes = 64;
     simrv::xlen::PhysAddr line_base{0};
     uint32_t next_offset = 0;
     simrv::memory::TlSourceId source = 0;
@@ -26,7 +26,7 @@ struct InstructionFillState {
 };
 
 struct InstructionPrefetchState {
-    static constexpr size_t kLineBytes = 32;
+    static constexpr size_t kLineBytes = 64;
     simrv::xlen::PhysAddr line_base{0};
     simrv::memory::TlSourceId source = 0;
     bool active = false;
@@ -69,6 +69,7 @@ struct HartCycleState {
     TimedPageWalkState instruction_walk{};
     TimedPageWalkState data_walk{};
     uint64_t pending_host_value = 0;
+    uint8_t pending_host_write_kind = 0;
     simrv::xlen::LatencyCycles host_write_remaining = 0;
     bool host_write_pending = false;
 
@@ -87,6 +88,7 @@ struct HartCycleState {
         instruction_walk.reset();
         data_walk.reset();
         pending_host_value = 0;
+        pending_host_write_kind = 0;
         host_write_remaining = 0;
         host_write_pending = false;
     }

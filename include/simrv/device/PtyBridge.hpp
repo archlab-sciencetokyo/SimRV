@@ -8,7 +8,11 @@
 #pragma once
 
 #include <fcntl.h>
+#if defined(__APPLE__)
+#include <util.h>
+#else
 #include <pty.h>
+#endif
 #include <sys/types.h>
 #include <termios.h>
 #include <unistd.h>

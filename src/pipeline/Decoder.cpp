@@ -1,5 +1,6 @@
 #include "simrv/pipeline/Decoder.hpp"
 
+#include <algorithm>
 #include <cstdio>
 #include <utility>
 
@@ -77,6 +78,8 @@ const std::array<std::string_view, static_cast<size_t>(isa::OperationIdCount)> O
     "MRET",
     "WFI",
     "SFENCE_VMA",
+    "HFENCE_VVMA",
+    "HFENCE_GVMA",
     "MUL",
     "MULH",
     "MULHSU",
@@ -628,7 +631,48 @@ const std::array<std::string_view, static_cast<size_t>(isa::OperationIdCount)> O
     "SINVAL_VMA",
     "SFENCE_W_INVAL",
     "SFENCE_INVAL_IR",
-    "UNKNOWN"};
+    "HINVAL_VVMA",
+    "HINVAL_GVMA",
+    "FLH",
+    "FSH",
+    "FMV_X_H",
+    "FMV_H_X",
+    "FCVT_S_H",
+    "FCVT_H_S",
+    "FCVT_D_H",
+    "FCVT_H_D",
+    "FLI_S",
+    "FLI_D",
+    "FMINM_S",
+    "FMAXM_S",
+    "FMINM_D",
+    "FMAXM_D",
+    "FLEQ_S",
+    "FLTQ_S",
+    "FLEQ_D",
+    "FLTQ_D",
+    "FROUND_S",
+    "FROUNDNX_S",
+    "FROUND_D",
+    "FROUNDNX_D",
+    "FCVTMOD_W_D",
+    "MOP",
+    "WRS_NTO",
+    "WRS_STO",
+    "HLV_B",
+    "HLV_BU",
+    "HLV_H",
+    "HLV_HU",
+    "HLV_W",
+    "HLV_WU",
+    "HLV_D",
+    "HLVX_HU",
+    "HLVX_WU",
+    "HSV_B",
+    "HSV_H",
+    "HSV_W",
+    "HSV_D",
+    "ILLEGAL"};
 
 auto operation_name(isa::OperationId operation) noexcept -> std::string_view {
     const auto index = static_cast<std::size_t>(operation);
@@ -639,28 +683,28 @@ namespace {
 
 template <const auto& Table>
 [[nodiscard]] constexpr auto decode_table(uint32_t index) noexcept -> OperationId {
-    return index < Table.size() ? Table[index] : OperationId::UNKNOWN;
+    return index < Table.size() ? Table[index] : OperationId::ILLEGAL;
 }
 
 constexpr std::array<OperationId, 8> kBranchTable = {
-    OperationId::BEQ, OperationId::BNE, OperationId::UNKNOWN, OperationId::UNKNOWN,
+    OperationId::BEQ, OperationId::BNE, OperationId::ILLEGAL, OperationId::ILLEGAL,
     OperationId::BLT, OperationId::BGE, OperationId::BLTU,    OperationId::BGEU};
 
 constexpr std::array<OperationId, 8> kLoadTable = {
     OperationId::LB,  OperationId::LH,  OperationId::LW,  OperationId::LD,
-    OperationId::LBU, OperationId::LHU, OperationId::LWU, OperationId::UNKNOWN};
+    OperationId::LBU, OperationId::LHU, OperationId::LWU, OperationId::ILLEGAL};
 
 constexpr std::array<OperationId, 8> kStoreTable = {
     OperationId::SB,      OperationId::SH,      OperationId::SW,      OperationId::SD,
-    OperationId::UNKNOWN, OperationId::UNKNOWN, OperationId::UNKNOWN, OperationId::UNKNOWN};
+    OperationId::ILLEGAL, OperationId::ILLEGAL, OperationId::ILLEGAL, OperationId::ILLEGAL};
 
 constexpr auto decode_branch = decode_table<kBranchTable>;
 constexpr auto decode_load = decode_table<kLoadTable>;
 constexpr auto decode_store = decode_table<kStoreTable>;
 
 constexpr std::array<OperationId, 8> kOpImmBaseTable = {
-    OperationId::ADDI, OperationId::UNKNOWN, OperationId::SLTI, OperationId::SLTIU,
-    OperationId::XORI, OperationId::UNKNOWN, OperationId::ORI,  OperationId::ANDI,
+    OperationId::ADDI, OperationId::ILLEGAL, OperationId::SLTI, OperationId::SLTIU,
+    OperationId::XORI, OperationId::ILLEGAL, OperationId::ORI,  OperationId::ANDI,
 };
 
 [[nodiscard]] constexpr auto decode_op_imm(uint32_t funct3, uint32_t funct7,
@@ -672,7 +716,7 @@ constexpr std::array<OperationId, 8> kOpImmBaseTable = {
         if (f5 == 0x01) return OperationId::PREFETCH_R;
         if (f5 == 0x03) return OperationId::PREFETCH_W;
     }
-    if (funct3 < kOpImmBaseTable.size() && kOpImmBaseTable[funct3] != OperationId::UNKNOWN) {
+    if (funct3 < kOpImmBaseTable.size() && kOpImmBaseTable[funct3] != OperationId::ILLEGAL) {
         return kOpImmBaseTable[funct3];
     }
     const uint32_t imm12 = ir >> 20;
@@ -687,7 +731,7 @@ constexpr std::array<OperationId, 8> kOpImmBaseTable = {
         if (imm6 == 0x12) return OperationId::BCLRI;
         if (imm6 == 0x1A) return OperationId::BINVI;
         if (funct7 == 0x00 || funct7 == 0x01) return OperationId::SLLI;
-        return OperationId::UNKNOWN;
+        return OperationId::ILLEGAL;
     }
     if (funct3 == 5) {
         if (imm12 == 0x287) return OperationId::ORC_B;
@@ -696,13 +740,13 @@ constexpr std::array<OperationId, 8> kOpImmBaseTable = {
         if (imm6 == 0x12) return OperationId::BEXTI;
         if (funct7 == 0x00 || funct7 == 0x01) return OperationId::SRLI;
         if (funct7 == 0x20 || funct7 == 0x21) return OperationId::SRAI;
-        return OperationId::UNKNOWN;
+        return OperationId::ILLEGAL;
     }
-    return OperationId::UNKNOWN;
+    return OperationId::ILLEGAL;
 }
 
 consteval auto generate_op_standard_table() {
-    DecodeTable<OperationId, 8, 128, OperationId::UNKNOWN> table;
+    DecodeTable<OperationId, 8, 128, OperationId::ILLEGAL> table;
     // funct3 = 0
     table.assign(0, 0x00, OperationId::ADD);
     table.assign(0, 0x20, OperationId::SUB);
@@ -761,7 +805,7 @@ constexpr auto kOpStandardTable = generate_op_standard_table();
     if (funct3 < 8 && funct7 < 128) {
         return kOpStandardTable.lookup(funct3, funct7);
     }
-    return OperationId::UNKNOWN;
+    return OperationId::ILLEGAL;
 }
 
 auto decode_op_imm32(uint32_t funct3, uint32_t funct7, simrv::xlen::Instruction ir) -> OperationId {
@@ -776,19 +820,19 @@ auto decode_op_imm32(uint32_t funct3, uint32_t funct7, simrv::xlen::Instruction 
             if (imm12 == 0x602) return OperationId::CPOPW;
             if (imm6 == 0x02) return OperationId::SLLI_UW;
             if (funct7 == 0x00) return OperationId::SLLIW;
-            return OperationId::UNKNOWN;
+            return OperationId::ILLEGAL;
         case 5:
             if (imm6 == 0x18) return OperationId::RORIW;
             if (funct7 == 0x00) return OperationId::SRLIW;
             if (funct7 == 0x20) return OperationId::SRAIW;
-            return OperationId::UNKNOWN;
+            return OperationId::ILLEGAL;
         default:
-            return OperationId::UNKNOWN;
+            return OperationId::ILLEGAL;
     }
 }
 
 consteval auto generate_op32_standard_table() {
-    DecodeTable<OperationId, 8, 128, OperationId::UNKNOWN> table;
+    DecodeTable<OperationId, 8, 128, OperationId::ILLEGAL> table;
     // funct3 = 0
     table.assign(0, 0x00, OperationId::ADDW);
     table.assign(0, 0x04, OperationId::ADD_UW);
@@ -823,7 +867,7 @@ constexpr auto kOp32StandardTable = generate_op32_standard_table();
     if (funct3 < 8 && funct7 < 128) {
         return kOp32StandardTable.lookup(funct3, funct7);
     }
-    return OperationId::UNKNOWN;
+    return OperationId::ILLEGAL;
 }
 
 auto decode_system_priv(uint32_t funct7, simrv::xlen::Instruction ir) -> OperationId {
@@ -832,40 +876,83 @@ auto decode_system_priv(uint32_t funct7, simrv::xlen::Instruction ir) -> Operati
     const bool rs1_is_zero = ((ir >> 15U) & 0x1FU) == 0;
     switch (f12) {
         case 0x000:
-            return (rd_is_zero && rs1_is_zero) ? OperationId::ECALL : OperationId::UNKNOWN;
+            return (rd_is_zero && rs1_is_zero) ? OperationId::ECALL : OperationId::ILLEGAL;
         case 0x001:
-            return (rd_is_zero && rs1_is_zero) ? OperationId::EBREAK : OperationId::UNKNOWN;
+            return (rd_is_zero && rs1_is_zero) ? OperationId::EBREAK : OperationId::ILLEGAL;
         case 0x002:
             // URET belonged to the abandoned draft N extension.
-            return OperationId::UNKNOWN;
+            return OperationId::ILLEGAL;
         case 0x102:
-            return (rd_is_zero && rs1_is_zero) ? OperationId::SRET : OperationId::UNKNOWN;
+            return (rd_is_zero && rs1_is_zero) ? OperationId::SRET : OperationId::ILLEGAL;
         case 0x302:
-            return (rd_is_zero && rs1_is_zero) ? OperationId::MRET : OperationId::UNKNOWN;
+            return (rd_is_zero && rs1_is_zero) ? OperationId::MRET : OperationId::ILLEGAL;
         case 0x105:
-            return (rd_is_zero && rs1_is_zero) ? OperationId::WFI : OperationId::UNKNOWN;
+            return (rd_is_zero && rs1_is_zero) ? OperationId::WFI : OperationId::ILLEGAL;
+        case 0x00D:
+            return (rd_is_zero && rs1_is_zero && ((ir >> 12U) & 0x7U) == 0) ? OperationId::WRS_NTO
+                                                                            : OperationId::ILLEGAL;
+        case 0x01D:
+            return (rd_is_zero && rs1_is_zero && ((ir >> 12U) & 0x7U) == 0) ? OperationId::WRS_STO
+                                                                            : OperationId::ILLEGAL;
         case 0x180:
-            return (rd_is_zero && rs1_is_zero) ? OperationId::SFENCE_W_INVAL : OperationId::UNKNOWN;
+            return (rd_is_zero && rs1_is_zero) ? OperationId::SFENCE_W_INVAL : OperationId::ILLEGAL;
         case 0x181:
             return (rd_is_zero && rs1_is_zero) ? OperationId::SFENCE_INVAL_IR
-                                               : OperationId::UNKNOWN;
+                                               : OperationId::ILLEGAL;
         default:
             // SFENCE.VMA uses rs1/rs2 operands but reserves rd=x0.
             if (funct7 == 0x09 && rd_is_zero) return OperationId::SFENCE_VMA;
             if (funct7 == 0x0B && rd_is_zero) return OperationId::SINVAL_VMA;
+            if (funct7 == 0x11 && rd_is_zero && ((ir >> 12U) & 0x7U) == 0)
+                return OperationId::HFENCE_VVMA;
+            if (funct7 == 0x13 && rd_is_zero && ((ir >> 12U) & 0x7U) == 0)
+                return OperationId::HINVAL_VVMA;
+            if (funct7 == 0x31 && rd_is_zero && ((ir >> 12U) & 0x7U) == 0)
+                return OperationId::HFENCE_GVMA;
+            if (funct7 == 0x33 && rd_is_zero && ((ir >> 12U) & 0x7U) == 0)
+                return OperationId::HINVAL_GVMA;
             break;
     }
-    return OperationId::UNKNOWN;
+    return OperationId::ILLEGAL;
 }
 
 constexpr std::array<OperationId, 8> kSystemCsrTable = {
-    OperationId::UNKNOWN, OperationId::CSRRW,  OperationId::CSRRS,  OperationId::CSRRC,
-    OperationId::UNKNOWN, OperationId::CSRRWI, OperationId::CSRRSI, OperationId::CSRRCI,
+    OperationId::ILLEGAL, OperationId::CSRRW,  OperationId::CSRRS,  OperationId::CSRRC,
+    OperationId::ILLEGAL, OperationId::CSRRWI, OperationId::CSRRSI, OperationId::CSRRCI,
 };
 
 constexpr auto decode_system_csr = decode_table<kSystemCsrTable>;
 
 auto decode_system(uint32_t funct3, uint32_t funct7, simrv::xlen::Instruction ir) -> OperationId {
+    if (funct3 == 4) {
+        const uint32_t f12 = ir >> 20U;
+        switch (f12) {
+            case 0x600:
+                return OperationId::HLV_B;
+            case 0x601:
+                return OperationId::HLV_BU;
+            case 0x640:
+                return OperationId::HLV_H;
+            case 0x641:
+                return OperationId::HLV_HU;
+            case 0x643:
+                return OperationId::HLVX_HU;
+            case 0x680:
+                return OperationId::HLV_W;
+            case 0x681:
+                return OperationId::HLV_WU;
+            case 0x683:
+                return OperationId::HLVX_WU;
+            case 0x6C0:
+                return OperationId::HLV_D;
+            default:
+                break;
+        }
+        if (funct7 == 0x31 && ((ir >> 7U) & 0x1FU) == 0) return OperationId::HSV_B;
+        if (funct7 == 0x33 && ((ir >> 7U) & 0x1FU) == 0) return OperationId::HSV_H;
+        if (funct7 == 0x35 && ((ir >> 7U) & 0x1FU) == 0) return OperationId::HSV_W;
+        if (funct7 == 0x37 && ((ir >> 7U) & 0x1FU) == 0) return OperationId::HSV_D;
+    }
     if (funct3 == 0) {
         return decode_system_priv(funct7, ir);
     }
@@ -895,7 +982,7 @@ auto decode_misc_mem(uint32_t funct3, simrv::xlen::Instruction ir) -> OperationI
                 break;
         }
     }
-    return OperationId::UNKNOWN;
+    return OperationId::ILLEGAL;
 }
 
 auto decode_ext_i(Opcode op, uint32_t funct3, uint32_t funct7, simrv::xlen::Instruction ir)
@@ -928,7 +1015,7 @@ auto decode_ext_i(Opcode op, uint32_t funct3, uint32_t funct7, simrv::xlen::Inst
         case Opcode::System:
             return decode_system(funct3, funct7, ir);
         default:
-            return OperationId::UNKNOWN;
+            return OperationId::ILLEGAL;
     }
 }
 
@@ -937,7 +1024,7 @@ constexpr std::array<OperationId, 8> kMTable = {
     OperationId::DIV, OperationId::DIVU, OperationId::REM,    OperationId::REMU};
 
 constexpr std::array<OperationId, 8> kMTable32 = {
-    OperationId::MULW, OperationId::UNKNOWN, OperationId::UNKNOWN, OperationId::UNKNOWN,
+    OperationId::MULW, OperationId::ILLEGAL, OperationId::ILLEGAL, OperationId::ILLEGAL,
     OperationId::DIVW, OperationId::DIVUW,   OperationId::REMW,    OperationId::REMUW};
 
 constexpr auto decode_ext_m_op = decode_table<kMTable>;
@@ -951,7 +1038,7 @@ constexpr auto decode_ext_m_op32 = decode_table<kMTable32>;
 }
 
 consteval auto generate_amo_table() {
-    DecodeTable<OperationId, 2, 32, OperationId::UNKNOWN> table;
+    DecodeTable<OperationId, 2, 32, OperationId::ILLEGAL> table;
     // funct3 == 2 (32-bit AMO*W)
     table.assign(0, 0x00, OperationId::AMOADD_W);
     table.assign(0, 0x01, OperationId::AMOSWAP_W);
@@ -986,22 +1073,22 @@ constexpr auto kAmoTable = generate_amo_table();
 [[nodiscard]] constexpr auto decode_ext_a(simrv::xlen::Funct7 funct7, isa::Funct3 funct3,
                                           simrv::xlen::RegId rs2) noexcept -> OperationId {
     if (!isa::amo_width_supported(funct3)) {
-        return OperationId::UNKNOWN;
+        return OperationId::ILLEGAL;
     }
     const auto funct5 = static_cast<isa::Funct5Amo>(funct7 >> 2);
     // LR.W/LR.D reserve rs2=0; nonzero rs2 is a reserved instruction encoding.
     if (funct5 == isa::Funct5Amo::Lr && rs2 != simrv::xlen::RegId::Zero) {
-        return OperationId::UNKNOWN;
+        return OperationId::ILLEGAL;
     }
     const auto funct5_idx = std::to_underlying(funct5);
     if (funct5_idx < 32) {
         return kAmoTable.lookup(std::to_underlying(funct3) - 2, funct5_idx);
     }
-    return OperationId::UNKNOWN;
+    return OperationId::ILLEGAL;
 }
 
 consteval auto generate_fma_table() {
-    DecodeTable<OperationId, 128, 2, OperationId::UNKNOWN> table;
+    DecodeTable<OperationId, 128, 2, OperationId::ILLEGAL> table;
     table.assign(std::to_underlying(Opcode::MAdd), 0, OperationId::FMADD_S);
     table.assign(std::to_underlying(Opcode::MAdd), 1, OperationId::FMADD_D);
     table.assign(std::to_underlying(Opcode::MSub), 0, OperationId::FMSUB_S);
@@ -1018,13 +1105,13 @@ constexpr auto kFmaTable = generate_fma_table();
 [[nodiscard]] constexpr auto decode_fma(Opcode op, uint32_t funct7) noexcept -> OperationId {
     const uint32_t fmt = funct7 & 0x03;
     if (fmt > 1) {
-        return OperationId::UNKNOWN;
+        return OperationId::ILLEGAL;
     }
     return kFmaTable.lookup(std::to_underlying(op), fmt);
 }
 
 consteval auto generate_fp_single_table() {
-    DecodeTable<OperationId, 32, 8, OperationId::UNKNOWN> table;
+    DecodeTable<OperationId, 32, 8, OperationId::ILLEGAL> table;
     table.assign_row(0x00, OperationId::FADD_S);
     table.assign_row(0x01, OperationId::FSUB_S);
     table.assign_row(0x02, OperationId::FMUL_S);
@@ -1034,10 +1121,14 @@ consteval auto generate_fp_single_table() {
     table.assign(0x04, 2, OperationId::FSGNJX_S);
     table.assign(0x05, 0, OperationId::FMIN_S);
     table.assign(0x05, 1, OperationId::FMAX_S);
+    table.assign(0x05, 2, OperationId::FMINM_S);
+    table.assign(0x05, 3, OperationId::FMAXM_S);
     table.assign_row(0x0B, OperationId::FSQRT_S);
     table.assign(0x14, 0, OperationId::FLE_S);
     table.assign(0x14, 1, OperationId::FLT_S);
     table.assign(0x14, 2, OperationId::FEQ_S);
+    table.assign(0x14, 4, OperationId::FLEQ_S);
+    table.assign(0x14, 5, OperationId::FLTQ_S);
     table.assign(0x1C, 0, OperationId::FMV_X_W);
     table.assign(0x1C, 1, OperationId::FCLASS_S);
     table.assign(0x1E, 0, OperationId::FMV_W_X);
@@ -1049,7 +1140,7 @@ constexpr auto kFpSingleTable = generate_fp_single_table();
 auto decode_op_fp_single_fcvt(uint32_t f5, uint32_t rs2) -> OperationId {
     switch (f5) {
         case 0x08:
-            return (rs2 == 1) ? OperationId::FCVT_S_D : OperationId::UNKNOWN;
+            return (rs2 == 1) ? OperationId::FCVT_S_D : OperationId::ILLEGAL;
         case 0x18:
             if (rs2 == 0) return OperationId::FCVT_W_S;
             if (rs2 == 1) return OperationId::FCVT_WU_S;
@@ -1065,21 +1156,24 @@ auto decode_op_fp_single_fcvt(uint32_t f5, uint32_t rs2) -> OperationId {
         default:
             break;
     }
-    return OperationId::UNKNOWN;
+    return OperationId::ILLEGAL;
 }
 
 auto decode_op_fp_single(uint32_t funct3, uint32_t f5, uint32_t rs2) -> OperationId {
+    if (f5 == 0x1E && rs2 == 1 && funct3 == 0) return OperationId::FLI_S;
+    if (f5 == 0x08 && (rs2 == 4 || rs2 == 5))
+        return rs2 == 4 ? OperationId::FROUND_S : OperationId::FROUNDNX_S;
     if (f5 == 0x08 || f5 == 0x18 || f5 == 0x1A) {
         return decode_op_fp_single_fcvt(f5, rs2);
     }
     if ((f5 == 0x0B || f5 == 0x1C || f5 == 0x1E) && rs2 != 0) {
-        return OperationId::UNKNOWN;
+        return OperationId::ILLEGAL;
     }
     return kFpSingleTable.lookup(f5, funct3);
 }
 
 consteval auto generate_fp_double_table() {
-    DecodeTable<OperationId, 32, 8, OperationId::UNKNOWN> table;
+    DecodeTable<OperationId, 32, 8, OperationId::ILLEGAL> table;
     table.assign_row(0x00, OperationId::FADD_D);
     table.assign_row(0x01, OperationId::FSUB_D);
     table.assign_row(0x02, OperationId::FMUL_D);
@@ -1089,10 +1183,14 @@ consteval auto generate_fp_double_table() {
     table.assign(0x04, 2, OperationId::FSGNJX_D);
     table.assign(0x05, 0, OperationId::FMIN_D);
     table.assign(0x05, 1, OperationId::FMAX_D);
+    table.assign(0x05, 2, OperationId::FMINM_D);
+    table.assign(0x05, 3, OperationId::FMAXM_D);
     table.assign_row(0x0B, OperationId::FSQRT_D);
     table.assign(0x14, 0, OperationId::FLE_D);
     table.assign(0x14, 1, OperationId::FLT_D);
     table.assign(0x14, 2, OperationId::FEQ_D);
+    table.assign(0x14, 4, OperationId::FLEQ_D);
+    table.assign(0x14, 5, OperationId::FLTQ_D);
     table.assign(0x1C, 0, OperationId::FMV_X_D);
     table.assign(0x1C, 1, OperationId::FCLASS_D);
     table.assign(0x1E, 0, OperationId::FMV_D_X);
@@ -1102,10 +1200,11 @@ consteval auto generate_fp_double_table() {
 constexpr auto kFpDoubleTable = generate_fp_double_table();
 
 auto decode_op_fp_double_fcvt(uint32_t funct3, uint32_t f5, uint32_t rs2) -> OperationId {
+    if (f5 == 0x18 && rs2 == 8 && funct3 == 1) return OperationId::FCVTMOD_W_D;
     switch (f5) {
         case 0x08:
             // Widening FCVT.D.S is exact and reserves the rm field as zero.
-            return (rs2 == 0 && funct3 == 0) ? OperationId::FCVT_D_S : OperationId::UNKNOWN;
+            return (rs2 == 0 && funct3 == 0) ? OperationId::FCVT_D_S : OperationId::ILLEGAL;
         case 0x18:
             if (rs2 == 0) return OperationId::FCVT_W_D;
             if (rs2 == 1) return OperationId::FCVT_WU_D;
@@ -1121,15 +1220,18 @@ auto decode_op_fp_double_fcvt(uint32_t funct3, uint32_t f5, uint32_t rs2) -> Ope
         default:
             break;
     }
-    return OperationId::UNKNOWN;
+    return OperationId::ILLEGAL;
 }
 
 auto decode_op_fp_double(uint32_t funct3, uint32_t f5, uint32_t rs2) -> OperationId {
+    if (f5 == 0x1E && rs2 == 1 && funct3 == 0) return OperationId::FLI_D;
+    if (f5 == 0x08 && (rs2 == 4 || rs2 == 5))
+        return rs2 == 4 ? OperationId::FROUND_D : OperationId::FROUNDNX_D;
     if (f5 == 0x08 || f5 == 0x18 || f5 == 0x1A) {
         return decode_op_fp_double_fcvt(funct3, f5, rs2);
     }
     if ((f5 == 0x0B || f5 == 0x1C || f5 == 0x1E) && rs2 != 0) {
-        return OperationId::UNKNOWN;
+        return OperationId::ILLEGAL;
     }
     return kFpDoubleTable.lookup(f5, funct3);
 }
@@ -1138,18 +1240,26 @@ auto decode_op_fp(uint32_t funct3, uint32_t funct7, uint32_t rs2) -> OperationId
     const uint32_t fmt = funct7 & 0x03;
     const uint32_t f5 = funct7 >> 2;
     if (fmt == 0) {
+        if (f5 == 0x08 && rs2 == 2 && funct3 == 0) return OperationId::FCVT_S_H;
         return decode_op_fp_single(funct3, f5, rs2);
     }
     if (fmt == 1) {
+        if (f5 == 0x08 && rs2 == 2 && funct3 == 0) return OperationId::FCVT_D_H;
         return decode_op_fp_double(funct3, f5, rs2);
     }
-    return OperationId::UNKNOWN;
+    if (fmt == 2) {
+        if (f5 == 0x08 && rs2 == 0) return OperationId::FCVT_H_S;
+        if (f5 == 0x08 && rs2 == 1) return OperationId::FCVT_H_D;
+        if (f5 == 0x1C && rs2 == 0 && funct3 == 0) return OperationId::FMV_X_H;
+        if (f5 == 0x1E && rs2 == 0 && funct3 == 0) return OperationId::FMV_H_X;
+    }
+    return OperationId::ILLEGAL;
 }
 
 namespace {
 
 consteval auto generate_vector_common_table() {
-    DecodeTable<OperationId, 64, 8, OperationId::UNKNOWN> table;
+    DecodeTable<OperationId, 64, 8, OperationId::ILLEGAL> table;
     table.assign_row(0x00, {{0, OperationId::VADD_VV},
                             {4, OperationId::VADD_VX},
                             {3, OperationId::VADD_VI},
@@ -1233,7 +1343,7 @@ consteval auto generate_vector_common_table() {
     table.assign_row(0x18, {{0, OperationId::VMSEQ_VV},
                             {4, OperationId::VMSEQ_VX},
                             {3, OperationId::VMSEQ_VI},
-                            {2, OperationId::VMNAND_MM},
+                            {2, OperationId::VMANDN_MM},
                             {1, OperationId::VMFEQ_VV},
                             {5, OperationId::VMFEQ_VF}});
     table.assign_row(0x19, {{0, OperationId::VMSNE_VV},
@@ -1244,7 +1354,7 @@ consteval auto generate_vector_common_table() {
                             {5, OperationId::VMFLE_VF}});
     table.assign_row(
         0x1A,
-        {{0, OperationId::VMSLTU_VV}, {4, OperationId::VMSLTU_VX}, {2, OperationId::VMANDN_MM}});
+        {{0, OperationId::VMSLTU_VV}, {4, OperationId::VMSLTU_VX}, {2, OperationId::VMOR_MM}});
     table.assign_row(0x1B, {{0, OperationId::VMSLT_VV},
                             {4, OperationId::VMSLT_VX},
                             {2, OperationId::VMXOR_MM},
@@ -1253,17 +1363,17 @@ consteval auto generate_vector_common_table() {
     table.assign_row(0x1C, {{0, OperationId::VMSLEU_VV},
                             {4, OperationId::VMSLEU_VX},
                             {3, OperationId::VMSLEU_VI},
-                            {2, OperationId::VMOR_MM},
+                            {2, OperationId::VMORN_MM},
                             {1, OperationId::VMFNE_VV},
                             {5, OperationId::VMFNE_VF}});
     table.assign_row(0x1D, {{0, OperationId::VMSLE_VV},
                             {4, OperationId::VMSLE_VX},
                             {3, OperationId::VMSLE_VI},
-                            {2, OperationId::VMNOR_MM},
+                            {2, OperationId::VMNAND_MM},
                             {5, OperationId::VMFGT_VF}});
     table.assign_row(
         0x1E,
-        {{4, OperationId::VMSGTU_VX}, {3, OperationId::VMSGTU_VI}, {2, OperationId::VMORN_MM}});
+        {{4, OperationId::VMSGTU_VX}, {3, OperationId::VMSGTU_VI}, {2, OperationId::VMNOR_MM}});
     table.assign_row(0x1F, {{4, OperationId::VMSGT_VX},
                             {3, OperationId::VMSGT_VI},
                             {2, OperationId::VMXNOR_MM},
@@ -1407,7 +1517,7 @@ consteval auto generate_vector_common_table() {
 }
 
 consteval auto generate_vector_mask_table(bool vm) {
-    DecodeTable<OperationId, 64, 8, OperationId::UNKNOWN> table;
+    DecodeTable<OperationId, 64, 8, OperationId::ILLEGAL> table;
     if (vm) {
         table.assign_row(
             0x11,
@@ -1486,10 +1596,10 @@ auto decode_ext_v_special(uint32_t f6, uint32_t funct3, simrv::xlen::Instruction
                 if (rs1_val == 6) return OperationId::VZEXT_VF2;
                 if (rs1_val == 4) return OperationId::VZEXT_VF4;
                 if (rs1_val == 2) return OperationId::VZEXT_VF8;
-                if (rs1_val == 8) return OperationId::VCLZ_V;
-                if (rs1_val == 9) return OperationId::VBREV8_V;
-                if (rs1_val == 10) return OperationId::VREV8_V;
-                if (rs1_val == 12) return OperationId::VBREV_V;
+                if (rs1_val == 8) return OperationId::VBREV8_V;
+                if (rs1_val == 9) return OperationId::VREV8_V;
+                if (rs1_val == 10) return OperationId::VBREV_V;
+                if (rs1_val == 12) return OperationId::VCLZ_V;
                 if (rs1_val == 13) return OperationId::VCTZ_V;
                 if (rs1_val == 14) return OperationId::VCPOP_V;
             }
@@ -1519,7 +1629,7 @@ auto decode_ext_v_special(uint32_t f6, uint32_t funct3, simrv::xlen::Instruction
         default:
             break;
     }
-    return OperationId::UNKNOWN;
+    return OperationId::ILLEGAL;
 }
 
 auto decode_vector_whole_register_move(simrv::xlen::Instruction ir) -> OperationId {
@@ -1533,7 +1643,7 @@ auto decode_vector_whole_register_move(simrv::xlen::Instruction ir) -> Operation
         case 7:
             return OperationId::VMV8R_V;
         default:
-            return OperationId::UNKNOWN;
+            return OperationId::ILLEGAL;
     }
 }
 
@@ -1550,11 +1660,15 @@ auto decode_ext_v(uint32_t funct3, uint32_t funct7, simrv::xlen::Instruction ir)
         if (funct7 == 0x40) {
             return OperationId::VSETVL;
         }
-        return OperationId::UNKNOWN;
+        return OperationId::ILLEGAL;
     }
 
     const bool vm = (ir & (1u << 25)) != 0;
     const uint32_t f6 = funct7 >> 1;
+
+    // VROR.VI uses bit 26 as the sixth immediate bit, unlike the other vector
+    // encodings that treat it as part of funct6.
+    if (funct3 == 3 && (f6 == 0x14 || f6 == 0x15)) return OperationId::VROR_VI;
 
     // A small number of vector encodings use rs1/vs2 as a secondary opcode.
     if ((f6 == 0x10 && (funct3 == 1 || funct3 == 2 || funct3 == 5)) ||
@@ -1563,16 +1677,16 @@ auto decode_ext_v(uint32_t funct3, uint32_t funct7, simrv::xlen::Instruction ir)
         return decode_ext_v_special(f6, funct3, ir);
     }
     if (f6 == 0x27 && funct3 == 3) {
-        return vm ? decode_vector_whole_register_move(ir) : OperationId::UNKNOWN;
+        return vm ? decode_vector_whole_register_move(ir) : OperationId::ILLEGAL;
     }
 
     const auto mask_dependent = (vm ? kVectorUnmaskedTable : kVectorMaskedTable).lookup(f6, funct3);
     if ((mask_dependent == OperationId::VMV_V_V || mask_dependent == OperationId::VMV_V_X ||
          mask_dependent == OperationId::VMV_V_I) &&
         ((ir >> 20U) & 0x1FU) != 0) {
-        return OperationId::UNKNOWN;
+        return OperationId::ILLEGAL;
     }
-    return mask_dependent != OperationId::UNKNOWN ? mask_dependent
+    return mask_dependent != OperationId::ILLEGAL ? mask_dependent
                                                   : kVectorCommonTable.lookup(f6, funct3);
 }
 
@@ -1580,9 +1694,10 @@ auto decode_ext_f_d(Opcode op, uint32_t funct3, uint32_t funct7, uint32_t rs2,
                     simrv::xlen::Instruction ir) -> OperationId {
     switch (op) {
         case Opcode::LoadFp: {
+            if (funct3 == 1) return OperationId::FLH;
             if (funct3 == 2) return OperationId::FLW;
             if (funct3 == 3) return OperationId::FLD;
-            if ((ir & (1U << 28U)) != 0) return OperationId::UNKNOWN;
+            if ((ir & (1U << 28U)) != 0) return OperationId::ILLEGAL;
             uint32_t mop = (ir >> 26) & 3;
             if (mop == 0) {
                 uint32_t lumop = (ir >> 20) & 0x1F;
@@ -1642,12 +1757,13 @@ auto decode_ext_f_d(Opcode op, uint32_t funct3, uint32_t funct7, uint32_t rs2,
                 if (funct3 == 6) return OperationId::VLOXEI32_V;
                 if (funct3 == 7) return OperationId::VLOXEI64_V;
             }
-            return OperationId::UNKNOWN;
+            return OperationId::ILLEGAL;
         }
         case Opcode::StoreFp: {
+            if (funct3 == 1) return OperationId::FSH;
             if (funct3 == 2) return OperationId::FSW;
             if (funct3 == 3) return OperationId::FSD;
-            if ((ir & (1U << 28U)) != 0) return OperationId::UNKNOWN;
+            if ((ir & (1U << 28U)) != 0) return OperationId::ILLEGAL;
             uint32_t mop = (ir >> 26) & 3;
             if (mop == 0) {
                 uint32_t sumop = (ir >> 20) & 0x1F;
@@ -1684,7 +1800,7 @@ auto decode_ext_f_d(Opcode op, uint32_t funct3, uint32_t funct7, uint32_t rs2,
                 if (funct3 == 6) return OperationId::VSOXEI32_V;
                 if (funct3 == 7) return OperationId::VSOXEI64_V;
             }
-            return OperationId::UNKNOWN;
+            return OperationId::ILLEGAL;
         }
         case Opcode::MAdd:
         case Opcode::MSub:
@@ -1694,7 +1810,7 @@ auto decode_ext_f_d(Opcode op, uint32_t funct3, uint32_t funct7, uint32_t rs2,
         case Opcode::OpFp:
             return decode_op_fp(funct3, funct7, rs2);
         default:
-            return OperationId::UNKNOWN;
+            return OperationId::ILLEGAL;
     }
 }
 
@@ -1965,6 +2081,26 @@ auto decoder(simrv::xlen::Instruction ir) -> OperationId {
     const auto funct3 = std::to_underlying(dec.funct3());
     const auto funct7 = dec.funct7();
 
+    // Zimop defines 32 MOP.R and 8 MOP.RR encodings. Until redefined by another
+    // extension, each writes zero to rd. Match only the specified funct/opcode fields;
+    // rd, rs1, and rs2 remain variable as required by the encoding.
+    if (op == Opcode::System && funct3 == 0x4U) {
+        static constexpr std::array<uint32_t, 40> kMopMatches{
+            0x81c04073U, 0x81d04073U, 0x81e04073U, 0x81f04073U, 0x85c04073U, 0x85d04073U,
+            0x85e04073U, 0x85f04073U, 0x89c04073U, 0x89d04073U, 0x89e04073U, 0x89f04073U,
+            0x8dc04073U, 0x8dd04073U, 0x8de04073U, 0x8df04073U, 0xc1c04073U, 0xc1d04073U,
+            0xc1e04073U, 0xc1f04073U, 0xc5c04073U, 0xc5d04073U, 0xc5e04073U, 0xc5f04073U,
+            0xc9c04073U, 0xc9d04073U, 0xc9e04073U, 0xc9f04073U, 0xcdc04073U, 0xcdd04073U,
+            0xcde04073U, 0xcdf04073U, 0x82004073U, 0x86004073U, 0x8a004073U, 0x8e004073U,
+            0xc2004073U, 0xc6004073U, 0xca004073U, 0xce004073U};
+        constexpr uint32_t kMopRMask = 0xfff0707fU;
+        constexpr uint32_t kMopRrMask = 0xfe00707fU;
+        for (size_t index = 0; index < kMopMatches.size(); ++index) {
+            const uint32_t mask = index < 32 ? kMopRMask : kMopRrMask;
+            if ((ir & mask) == kMopMatches[index]) return OperationId::MOP;
+        }
+    }
+
     if (op == Opcode::Amo) {
         return decode_ext_a(funct7, dec.funct3(), dec.rs2());
     }
@@ -1974,7 +2110,7 @@ auto decoder(simrv::xlen::Instruction ir) -> OperationId {
             decode_ext_f_d(op, funct3, funct7, std::to_underlying(dec.rs2()), ir);
         if constexpr (!simrv::xlen::kIsXLen64) {
             if (isa::requires_rv64(decoded)) {
-                return OperationId::UNKNOWN;
+                return OperationId::ILLEGAL;
             }
         }
         return decoded;
@@ -1996,6 +2132,58 @@ auto decompressInstruction(simrv::xlen::Instruction ir, bool is_rv64) -> simrv::
     simrv::pipeline::Decoder dec(ir);
     if (!dec.is_compressed()) {
         return ir;
+    }
+
+    // Zcmop's C.MOP.n encodings occupy reserved C.LUI space. They are architectural
+    // no-ops unless a later extension redefines them, so expand them to C.NOP rather
+    // than treating them as the ordinary C.LUI rd, 0 encoding (which writes rd).
+    static constexpr std::array<simrv::xlen::Instruction, 8> kCmopEncodings{
+        0x6081U, 0x6181U, 0x6281U, 0x6381U, 0x6481U, 0x6581U, 0x6681U, 0x6781U};
+    if (std::ranges::find(kCmopEncodings, ir & 0xFFFFU) != kCmopEncodings.end()) {
+        return 0x00000013U;  // addi x0, x0, 0
+    }
+
+    // Zcb's extra compressed integer operations expand to ordinary integer loads,
+    // stores, and bit-manipulation instructions. Decode these before the base C
+    // quadrant handling, where the same encodings are otherwise reserved.
+    const uint32_t rd_prime = 8U + ((ir >> 2U) & 0x7U);
+    const uint32_t rs1_prime = 8U + ((ir >> 7U) & 0x7U);
+    const uint32_t rs2_prime = rd_prime;
+    if ((ir & 0xfc03U) == 0x8000U) {  // C.LBU
+        const uint32_t imm = (((ir >> 5U) & 1U) << 1U) | ((ir >> 6U) & 1U);
+        return make_i_type(0x03U, 0x4U, rd_prime, rs1_prime, imm);
+    }
+    if ((ir & 0xfc43U) == 0x8400U || (ir & 0xfc43U) == 0x8440U) {  // C.LHU / C.LH
+        const bool signed_load = (ir & 0x40U) != 0;
+        const uint32_t imm = ((ir >> 5U) & 1U) << 1U;
+        return make_i_type(0x03U, signed_load ? 0x1U : 0x5U, rd_prime, rs1_prime, imm);
+    }
+    if ((ir & 0xfc03U) == 0x8800U) {  // C.SB
+        const uint32_t imm = (((ir >> 5U) & 1U) << 1U) | ((ir >> 6U) & 1U);
+        return make_s_type(0x23U, 0x0U, rs1_prime, rs2_prime, imm);
+    }
+    if ((ir & 0xfc43U) == 0x8c00U) {  // C.SH
+        const uint32_t imm = ((ir >> 5U) & 1U) << 1U;
+        return make_s_type(0x23U, 0x1U, rs1_prime, rs2_prime, imm);
+    }
+    if ((ir & 0xfc63U) == 0x9c41U) {  // C.MUL
+        return make_r_type(0x33U, 0x0U, 0x01U, rs1_prime, rs1_prime, rd_prime);
+    }
+    if ((ir & 0xfc7fU) == 0x9c75U) {  // C.NOT
+        return make_i_type(0x13U, 0x4U, rs1_prime, rs1_prime, 0xfffU);
+    }
+    if ((ir & 0xfc7fU) == 0x9c65U || (ir & 0xfc7fU) == 0x9c6dU) {  // C.SEXT.B / C.SEXT.H
+        const uint32_t imm = ((ir & 0x7fU) == 0x65U) ? 0x604U : 0x605U;
+        return make_i_type(0x13U, 0x1U, rs1_prime, rs1_prime, imm);
+    }
+    if ((ir & 0xfc7fU) == 0x9c61U) {  // C.ZEXT.B
+        return make_i_type(0x13U, 0x7U, rs1_prime, rs1_prime, 0xffU);
+    }
+    if ((ir & 0xfc7fU) == 0x9c69U) {  // C.ZEXT.H (PACK rd, rs1, x0)
+        return make_r_type(is_rv64 ? 0x3bU : 0x33U, 0x4U, 0x04U, rs1_prime, rs1_prime, 0U);
+    }
+    if ((ir & 0xfc7fU) == 0x9c71U && is_rv64) {  // C.ZEXT.W (ADD.UW rd, rs1, x0)
+        return make_r_type(0x3bU, 0x0U, 0x04U, rs1_prime, rs1_prime, 0U);
     }
 
     const uint32_t op = dec.c_op();

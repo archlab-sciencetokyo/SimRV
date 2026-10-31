@@ -1,11 +1,12 @@
-#include <elf.h>
-
 #include <array>
 #include <cstdlib>
 #include <cstring>
 #include <fstream>
 #include <iterator>
+#include <optional>
+#include <span>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "MachineRuntime.hpp"
@@ -29,6 +30,7 @@
 #include "simrv/device/Rtc.hpp"
 #include "simrv/device/Uart.hpp"
 #include "simrv/device/pci/PcieRootComplex.hpp"
+#include "simrv/util/ElfTypes.hpp"
 #include "simrv/util/FdtGenerator.hpp"
 #include "simrv/util/FdtPatcher.hpp"
 #include "simrv/xlen/RegisterTypes.hpp"
@@ -36,6 +38,221 @@
 namespace simrv::core {
 
 namespace {
+
+using util::elf::Elf32_Ehdr;
+using util::elf::Elf32_Phdr;
+using util::elf::Elf32_Shdr;
+using util::elf::Elf64_Ehdr;
+using util::elf::Elf64_Phdr;
+using util::elf::Elf64_Shdr;
+using util::elf::kClass32;
+using util::elf::kClass64;
+using util::elf::kLoadSegment;
+
+auto read_le32(std::span<const uint8_t> bytes, size_t offset) -> uint32_t {
+    return uint32_t{bytes[offset]} | (uint32_t{bytes[offset + 1]} << 8U) |
+           (uint32_t{bytes[offset + 2]} << 16U) | (uint32_t{bytes[offset + 3]} << 24U);
+}
+
+auto read_uleb128(std::span<const uint8_t> bytes, size_t& offset) -> std::optional<uint32_t> {
+    uint32_t value = 0;
+    unsigned shift = 0;
+    while (offset < bytes.size() && shift < 32) {
+        const uint8_t byte = bytes[offset++];
+        value |= uint32_t{byte & 0x7fU} << shift;
+        if ((byte & 0x80U) == 0) return value;
+        shift += 7;
+    }
+    return std::nullopt;
+}
+
+auto isa_letter_bit(char letter) -> std::optional<unsigned> {
+    switch (letter) {
+        case 'a':
+            return 0;
+        case 'b':
+            return 1;
+        case 'c':
+            return 2;
+        case 'd':
+            return 3;
+        case 'f':
+            return 5;
+        case 'h':
+            return 7;
+        case 'i':
+            return 8;
+        case 'm':
+            return 12;
+        case 's':
+            return 18;
+        case 'u':
+            return 20;
+        case 'v':
+            return 21;
+        default:
+            return std::nullopt;
+    }
+}
+
+auto validate_elf_isa(const std::string& path, uint64_t selected_misa)
+    -> std::expected<void, std::string> {
+    std::ifstream input(path, std::ios::binary | std::ios::ate);
+    if (!input) return {};
+    const auto file_size = static_cast<size_t>(input.tellg());
+    if (file_size < sizeof(Elf64_Ehdr)) return {};
+    input.seekg(0);
+    std::array<uint8_t, sizeof(Elf64_Ehdr)> header{};
+    if (!input.read(reinterpret_cast<char*>(header.data()), header.size()) || header[0] != 0x7f ||
+        header[1] != 'E' || header[2] != 'L' || header[3] != 'F' || header[5] != 1) {
+        return {};
+    }
+    const bool elf64 = header[4] == kClass64;
+    if (!elf64 && header[4] != kClass32) return {};
+    const size_t shoff_offset = elf64 ? 40 : 32;
+    const uint64_t shoff = elf64 ? read_le32(header, shoff_offset) |
+                                       (uint64_t{read_le32(header, shoff_offset + 4)} << 32U)
+                                 : read_le32(header, shoff_offset);
+    const size_t shentsize_offset = elf64 ? 58 : 46;
+    const size_t shnum_offset = elf64 ? 60 : 48;
+    const uint16_t shentsize = static_cast<uint16_t>(header[shentsize_offset]) |
+                               (static_cast<uint16_t>(header[shentsize_offset + 1]) << 8U);
+    const uint16_t shnum = static_cast<uint16_t>(header[shnum_offset]) |
+                           (static_cast<uint16_t>(header[shnum_offset + 1]) << 8U);
+    const size_t expected_shentsize = elf64 ? sizeof(Elf64_Shdr) : sizeof(Elf32_Shdr);
+    if (shnum == 0 || shentsize != expected_shentsize || shoff > file_size ||
+        static_cast<uint64_t>(shnum) * shentsize > file_size - shoff)
+        return {};
+
+    for (uint16_t i = 0; i < shnum; ++i) {
+        input.seekg(static_cast<std::streamoff>(shoff + uint64_t{i} * shentsize));
+        std::array<uint8_t, sizeof(Elf64_Shdr)> section{};
+        if (!input.read(reinterpret_cast<char*>(section.data()), expected_shentsize)) return {};
+        const uint32_t type = read_le32(section, 4);
+        if (type != 0x70000003U) continue;  // SHT_RISCV_ATTRIBUTES
+        const uint64_t offset =
+            elf64 ? read_le32(section, 24) | (uint64_t{read_le32(section, 28)} << 32U)
+                  : read_le32(section, 16);
+        const uint64_t size =
+            elf64 ? read_le32(section, 32) | (uint64_t{read_le32(section, 36)} << 32U)
+                  : read_le32(section, 20);
+        if (offset > file_size || size > file_size - offset || size > 16 * 1024 * 1024) return {};
+        std::vector<uint8_t> attributes(static_cast<size_t>(size));
+        input.seekg(static_cast<std::streamoff>(offset));
+        if (!input.read(reinterpret_cast<char*>(attributes.data()),
+                        static_cast<std::streamsize>(attributes.size())) ||
+            attributes.empty() || attributes[0] != 'A')
+            return {};
+
+        size_t pos = 1;
+        while (pos + 4 <= attributes.size()) {
+            const auto subsection_size = read_le32(attributes, pos);
+            if (subsection_size < 5 || subsection_size > attributes.size() - pos) break;
+            const size_t subsection_end = pos + subsection_size;
+            size_t vendor_end = pos + 4;
+            while (vendor_end < subsection_end && attributes[vendor_end] != 0) ++vendor_end;
+            if (vendor_end == subsection_end) break;
+            const std::string_view vendor(
+                reinterpret_cast<const char*>(attributes.data() + pos + 4), vendor_end - (pos + 4));
+            size_t cursor = vendor_end + 1;
+            if (vendor == "riscv") {
+                while (cursor < subsection_end) {
+                    const size_t subsubsection_start = cursor;
+                    const auto tag = read_uleb128(attributes, cursor);
+                    if (!tag || cursor + 4 > subsection_end) break;
+                    const auto length = read_le32(attributes, cursor);
+                    cursor += 4;
+                    if (length < cursor - subsubsection_start ||
+                        length > subsection_end - subsubsection_start)
+                        break;
+                    const size_t attr_end = subsubsection_start + length;
+                    if (*tag == 1) {  // file attributes subsection
+                        while (cursor < attr_end) {
+                            const auto attr_tag = read_uleb128(attributes, cursor);
+                            if (!attr_tag) break;
+                            if (*attr_tag == 5) {  // Tag_RISCV_arch (NUL-terminated string)
+                                size_t end = cursor;
+                                while (end < attr_end && attributes[end] != 0) ++end;
+                                if (end == attr_end) break;
+                                const std::string_view arch(
+                                    reinterpret_cast<const char*>(attributes.data() + cursor),
+                                    end - cursor);
+                                const bool needs_rv64 = arch.starts_with("rv64");
+                                if (needs_rv64 && ((selected_misa >> 62U) & 3U) != 2U) {
+                                    return std::unexpected(std::format(
+                                        "ELF image '{}' requires RV64 but the selected ISA is RV32",
+                                        path));
+                                }
+                                auto check_letter =
+                                    [&](char letter) -> std::expected<void, std::string> {
+                                    if (const auto bit = isa_letter_bit(letter);
+                                        bit && (selected_misa & (uint64_t{1} << *bit)) == 0) {
+                                        return std::unexpected(std::format(
+                                            "ELF image '{}' was compiled for ISA '{}' and requires "
+                                            "extension '{}', which is disabled in the selected "
+                                            "ISA configuration",
+                                            path, arch, letter));
+                                    }
+                                    return {};
+                                };
+                                size_t token_start = 0;
+                                bool first_token = true;
+                                while (token_start < arch.size()) {
+                                    const size_t token_end = arch.find('_', token_start);
+                                    const auto token =
+                                        arch.substr(token_start, token_end == std::string_view::npos
+                                                                     ? arch.size() - token_start
+                                                                     : token_end - token_start);
+                                    if (first_token) {
+                                        size_t pos =
+                                            token.starts_with("rv32") || token.starts_with("rv64")
+                                                ? 4
+                                                : 0;
+                                        while (pos < token.size() && token[pos] >= 'a' &&
+                                               token[pos] <= 'z') {
+                                            if (token[pos] == 'g') {
+                                                for (const char implied : std::string_view("imafd"))
+                                                    if (auto result = check_letter(implied);
+                                                        !result)
+                                                        return result;
+                                            } else if (auto result = check_letter(token[pos]);
+                                                       !result) {
+                                                return result;
+                                            }
+                                            ++pos;
+                                        }
+                                        first_token = false;
+                                    } else if (token.size() > 1 && token[0] >= 'a' &&
+                                               token[0] <= 'z' && token[0] != 'z' &&
+                                               token[0] != 's' && token[0] != 'x') {
+                                        if (auto result = check_letter(token[0]); !result)
+                                            return result;
+                                    }
+                                    if (token_end == std::string_view::npos) break;
+                                    token_start = token_end + 1;
+                                }
+                                return {};
+                            }
+                            if (*attr_tag == 4 || *attr_tag == 6 || *attr_tag == 10 ||
+                                *attr_tag == 12) {
+                                if (!read_uleb128(
+                                        std::span<const uint8_t>(attributes).first(attr_end),
+                                        cursor))
+                                    break;
+                            } else {
+                                break;
+                            }
+                        }
+                    }
+                    cursor = attr_end;
+                }
+            }
+            pos = subsection_end;
+        }
+        break;
+    }
+    return {};
+}
 
 void apply_cpu_model_dram_defaults(MachineConfig& config, const std::string& model_name) {
     const bool low_dram_model = model_name == "cfu-provingground" || model_name == "rvproc";
@@ -138,7 +355,7 @@ void load_image_into_ram(std::string& file_path, simrv::memory::RamView ram_view
 
             const char class_byte = ident[4];
             auto load_segment = [&](const auto& phdr) {
-                if (phdr.p_type != PT_LOAD || phdr.p_filesz == 0) return;
+                if (phdr.p_type != kLoadSegment || phdr.p_filesz == 0) return;
                 const simrv::xlen::Address paddr = phdr.p_paddr != 0 ? phdr.p_paddr : phdr.p_vaddr;
                 const simrv::xlen::Address dram_base = ram_view.base();
                 simrv::xlen::Address dest_offset = 0;
@@ -168,7 +385,7 @@ void load_image_into_ram(std::string& file_path, simrv::memory::RamView ram_view
                 }
             };
 
-            if (class_byte == 1) {  // 32-bit ELF
+            if (class_byte == kClass32) {
                 Elf32_Ehdr ehdr{};
                 if (in.read(reinterpret_cast<char*>(&ehdr),
                             sizeof(ehdr))) {  // NOLINT(cppcoreguidelines-pro-type-reinterpret-cast)
@@ -185,7 +402,7 @@ void load_image_into_ram(std::string& file_path, simrv::memory::RamView ram_view
                         }
                     }
                 }
-            } else if (class_byte == 2) {  // 64-bit ELF
+            } else if (class_byte == kClass64) {
                 Elf64_Ehdr ehdr{};
                 if (in.read(reinterpret_cast<char*>(&ehdr),
                             sizeof(ehdr))) {  // NOLINT(cppcoreguidelines-pro-type-reinterpret-cast)
@@ -343,12 +560,22 @@ auto Machine::initialize() -> std::expected<void, std::string> {
         }
     }
 
-    runtime_->rtc = std::make_unique<simrv::Rtc>(*this);
-    runtime_->uart = std::make_unique<simrv::device::Uart>(*this);
-    runtime_->power = std::make_unique<simrv::device::PowerMmio>(*this);
-    if (!runtime_->dma_controller) {
-        runtime_->dma_controller = std::make_unique<simrv::device::DmaController>(this);
-    }
+    const auto device_descriptor = [this](SoCDeviceKind kind) {
+        return SoCDeviceRegistry::descriptor(config.soc, kind).value_or(soc_device_default(kind));
+    };
+    const auto rtc_config = device_descriptor(SoCDeviceKind::Rtc);
+    const auto uart_config = device_descriptor(SoCDeviceKind::Uart);
+    const auto power_config = device_descriptor(SoCDeviceKind::Power);
+    const auto dma_config = device_descriptor(SoCDeviceKind::DmaController);
+    runtime_->rtc =
+        std::make_unique<simrv::Rtc>(*this, rtc_config.base, rtc_config.size, rtc_config.irq);
+    runtime_->uart = std::make_unique<simrv::device::Uart>(
+        *this, uart_config.base, uart_config.size, uart_config.irq, uart_config.clock_hz,
+        config.execution.cpu_clock_hz);
+    runtime_->power =
+        std::make_unique<simrv::device::PowerMmio>(*this, power_config.base, power_config.size);
+    runtime_->dma_controller = std::make_unique<simrv::device::DmaController>(
+        this, dma_config.base, dma_config.size, dma_config.irq);
     if (!runtime_->axi_bridge) {
         runtime_->axi_bridge =
             std::make_unique<simrv::memory::Axi4Bridge>(this, primary_hart().cpu_model_config.axi);
@@ -370,20 +597,39 @@ auto Machine::initialize() -> std::expected<void, std::string> {
 
     memory().initialize_mmu();
 
-    runtime_->aclint_mtimer = std::make_unique<simrv::device::AclintMtimer>(this);
-    runtime_->aclint_mswi = std::make_unique<simrv::device::AclintMswi>(this);
+    const auto mtimer_config = device_descriptor(SoCDeviceKind::AclintMtimer);
+    const auto mswi_config = device_descriptor(SoCDeviceKind::AclintMswi);
+    runtime_->aclint_mtimer =
+        std::make_unique<simrv::device::AclintMtimer>(this, mtimer_config.base, mtimer_config.size);
+    runtime_->aclint_mswi =
+        std::make_unique<simrv::device::AclintMswi>(this, mswi_config.base, mswi_config.size);
+    const auto plic_config = device_descriptor(SoCDeviceKind::Plic);
+    const auto clint_config = device_descriptor(SoCDeviceKind::Clint);
+    for (size_t hart = 0; hart < num_harts(); ++hart) {
+        auto& cpu = this->hart(hart);
+        cpu.plic_mmio.configure_address_map(plic_config.base, plic_config.size);
+        cpu.clint_mmio.configure_address_map(clint_config.base, clint_config.size);
+    }
+    const auto imsic_config = device_descriptor(SoCDeviceKind::Imsic);
+    const auto default_imsic_config = soc_device_default(SoCDeviceKind::Imsic);
+    const auto* imsic_s_region = imsic_config.find_region("supervisor");
+    if (imsic_s_region == nullptr) imsic_s_region = default_imsic_config.find_region("supervisor");
     runtime_->imsic_m = std::make_unique<simrv::device::Imsic>(
-        this, simrv::device::Imsic::Privilege::Machine, simrv::mmio::kImsicMBaseAddress,
-        simrv::mmio::kImsicMSize);
-    runtime_->imsic_s = std::make_unique<simrv::device::Imsic>(
-        this, simrv::device::Imsic::Privilege::Supervisor, simrv::mmio::kImsicSBaseAddress,
-        simrv::mmio::kImsicSSize);
+        this, simrv::device::Imsic::Privilege::Machine, imsic_config.base, imsic_config.size);
+    runtime_->imsic_s =
+        std::make_unique<simrv::device::Imsic>(this, simrv::device::Imsic::Privilege::Supervisor,
+                                               imsic_s_region->base, imsic_s_region->size);
+    const auto aplic_config = device_descriptor(SoCDeviceKind::Aplic);
+    const auto default_aplic_config = soc_device_default(SoCDeviceKind::Aplic);
+    const auto* aplic_s_region = aplic_config.find_region("supervisor");
+    if (aplic_s_region == nullptr) aplic_s_region = default_aplic_config.find_region("supervisor");
     runtime_->aplic_m = std::make_unique<simrv::device::Aplic>(
-        this, simrv::device::Aplic::Privilege::Machine, simrv::mmio::kAplicMBaseAddress,
-        simrv::mmio::kAplicMSize, runtime_->imsic_m.get());
+        this, simrv::device::Aplic::Privilege::Machine, aplic_config.base, aplic_config.size,
+        runtime_->imsic_m.get());
     runtime_->aplic_s = std::make_unique<simrv::device::Aplic>(
-        this, simrv::device::Aplic::Privilege::Supervisor, simrv::mmio::kAplicSBaseAddress,
-        simrv::mmio::kAplicSSize, runtime_->imsic_s.get());
+        this, simrv::device::Aplic::Privilege::Supervisor, aplic_s_region->base,
+        aplic_s_region->size, runtime_->imsic_s.get());
+    runtime_->aplic_m->set_act_test_hooks(config.execution.act_test_hooks);
     PlatformBuilder::compose(*this);
     for (const auto& device : simrv::core::SoCDeviceRegistry::resolve(config.soc)) {
         if (device.enabled && device.kind == SoCDeviceKind::DummyMmio) {
@@ -545,7 +791,7 @@ auto Machine::initialize() -> std::expected<void, std::string> {
                     if (file.read(header.data(), 5)) {
                         if (header[0] == 0x7f && header[1] == 'E' && header[2] == 'L' &&
                             header[3] == 'F') {
-                            if (header[4] == 1) {  // ELFCLASS32
+                            if (header[4] == kClass32) {
                                 is_32bit = true;
                             }
                         }
@@ -580,6 +826,13 @@ auto Machine::initialize() -> std::expected<void, std::string> {
         if (is_32bit) {
             initial_misa = isa::misa_with_mxl(initial_misa, 32);
         }
+        const bool guest_xlen64 = ((static_cast<uint64_t>(initial_misa) >> 62U) & 0x3U) == 0x2U;
+        if (!config.isa.misa_override && guest_xlen64 &&
+            config.execution.profile == isa::ArchitectureProfile::Rva23S64 &&
+            !config.cpu_model_config_override && !config.cpu_model_preset.has_value() &&
+            config.files.config_path.empty()) {
+            initial_misa |= isa::misa_extension_bit(isa::IsaExtension::H);
+        }
     }
     primary_hart().state().pc = resolved_start_pc_;
     primary_hart().state().regs.write(static_cast<simrv::xlen::RegId>(10), 0);  // a0 = hartid
@@ -602,19 +855,25 @@ auto Machine::initialize() -> std::expected<void, std::string> {
     if (config.files.uefi_enabled) {
         if (!config.files.uefi_code_path.empty() && runtime_->pflash0) {
             if (!runtime_->pflash0->load_image(config.files.uefi_code_path)) {
-                simrv::log::warn("failed to load UEFI code image from {}",
-                                 config.files.uefi_code_path);
+                return std::unexpected("failed to load UEFI code image from " +
+                                       config.files.uefi_code_path);
             }
         }
         if (!config.files.uefi_vars_path.empty() && runtime_->pflash1) {
-            runtime_->pflash1->load_image(config.files.uefi_vars_path);
+            if (!runtime_->pflash1->load_image(config.files.uefi_vars_path)) {
+                return std::unexpected("failed to load UEFI variables image from " +
+                                       config.files.uefi_vars_path);
+            }
             runtime_->pflash1->set_backing_file(config.files.uefi_vars_path);
         }
-        set_resolved_boot_state(SIMRV_PLATFORM_PFLASH0_BASE, std::nullopt);
-        primary_hart().state().pc = SIMRV_PLATFORM_PFLASH0_BASE;
+        primary_hart().use_opensbi = true;
     }
 
     if (!config.files.binary_path.empty()) {
+        if (auto compatible = validate_elf_isa(config.files.binary_path, initial_misa);
+            !compatible) {
+            return std::unexpected(compatible.error());
+        }
         load_image_into_ram(config.files.binary_path, ram_view(), "memory", tui_enabled(), this);
         symbol_table().load_from_elf(
             config.debug.spike_elf.empty() ? config.files.binary_path : config.debug.spike_elf,
@@ -626,10 +885,6 @@ auto Machine::initialize() -> std::expected<void, std::string> {
     }
 
     resolve_start_pc_and_dram_base(*this, symbol_table());
-    if (config.files.uefi_enabled) {
-        set_resolved_boot_state(SIMRV_PLATFORM_PFLASH0_BASE, std::nullopt);
-        primary_hart().state().pc = SIMRV_PLATFORM_PFLASH0_BASE;
-    }
 
     runtime_->secondary_harts.clear();
     if (config.execution.num_harts > 1) {
@@ -704,6 +959,11 @@ auto Machine::initialize() -> std::expected<void, std::string> {
                 return std::unexpected("cannot open device tree: " + config.files.dvtree_path);
             std::vector<uint8_t> input_blob{std::istreambuf_iterator<char>(input),
                                             std::istreambuf_iterator<char>()};
+            if (auto compatible = simrv::util::validate_fdt_isa(input_blob, initial_misa);
+                !compatible) {
+                return std::unexpected(std::format("device tree '{}' is incompatible: {}",
+                                                   config.files.dvtree_path, compatible.error()));
+            }
             auto patched =
                 simrv::util::patch_fdt(input_blob, config.memory.dram_base, effective_dram_size,
                                        config.execution.num_harts, &fb_info,
@@ -731,6 +991,30 @@ auto Machine::initialize() -> std::expected<void, std::string> {
             return std::unexpected("device-tree region is outside DRAM");
         std::memcpy(initialized_ram.unchecked_ptr(dtb_address), final_blob.data(),
                     final_blob.size());
+
+        if (config.files.uefi_enabled) {
+            // OpenSBI FW_DYNAMIC reads this six-word structure from a2, then enters the S-mode
+            // EDK2 volume at SimRV's PFlash0 base with the generated FDT still in a1.
+            constexpr uint64_t kFwDynamicMagic = 0x4942534f;
+            constexpr uint64_t kFwDynamicVersion = 2;
+            constexpr uint64_t kFwDynamicModeSupervisor = 1;
+            constexpr uint64_t kNoPreferredHart = UINT64_MAX;
+            const simrv::xlen::Address fw_info_address = initialized_ram.base() + dtb_offset - 4096;
+            constexpr std::array<uint64_t, 6> fw_info = {kFwDynamicMagic,
+                                                         kFwDynamicVersion,
+                                                         SIMRV_PLATFORM_PFLASH0_BASE,
+                                                         kFwDynamicModeSupervisor,
+                                                         0,
+                                                         kNoPreferredHart};
+            if (!initialized_ram.contains(fw_info_address, sizeof(fw_info))) {
+                return std::unexpected("OpenSBI FW_DYNAMIC info does not fit in guest DRAM");
+            }
+            std::memcpy(initialized_ram.unchecked_ptr(fw_info_address), fw_info.data(),
+                        sizeof(fw_info));
+            primary_hart().state().regs.write(simrv::xlen::RegId::A2,
+                                              static_cast<simrv::xlen::Register>(fw_info_address));
+            primary_hart().use_opensbi = true;
+        }
     }
 
     if (config.files.disk_enabled) {

@@ -113,10 +113,13 @@ void PFlash::handle_command(simrv::xlen::Address offset, uint32_t value) {
         if (cmd == 0xD0) {
             // Confirm block erase
             const simrv::xlen::Address block_base = offset & ~(sector_size_ - 1u);
-            const size_t erase_len =
-                std::min(static_cast<size_t>(sector_size_), storage_.size() - block_base);
-            std::memset(storage_.data() + block_base, 0xFF, erase_len);
-            dirty_ = true;
+            if (block_base < storage_.size()) {
+                const size_t erase_start = static_cast<size_t>(block_base);
+                const size_t erase_len =
+                    std::min(static_cast<size_t>(sector_size_), storage_.size() - erase_start);
+                std::memset(storage_.data() + erase_start, 0xFF, erase_len);
+                dirty_ = true;
+            }
         }
         mode_ = PFlashMode::ReadStatus;
         return;

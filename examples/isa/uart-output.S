@@ -2,6 +2,7 @@
 .equ UART_THR,  0
 .equ UART_LSR,  5
 .equ UART_THRE, 0x20
+.equ UART_TEMT, 0x40
 
 .section .text.init
 .global _start
@@ -16,7 +17,7 @@ _start:
 checkpoint_before_output:
 next_character:
     lbu     a0, 0(s0)
-    beqz    a0, done
+    beqz    a0, wait_for_uart_empty
     call    putchar
     addi    s0, s0, 1
     j       next_character
@@ -31,6 +32,11 @@ wait_for_uart:
     ret
 
 checkpoint_after_output:
+wait_for_uart_empty:
+    li      t0, UART_BASE
+    lbu     t1, UART_LSR(t0)
+    andi    t1, t1, UART_TEMT
+    beqz    t1, wait_for_uart_empty
     nop
 done:
     j       done

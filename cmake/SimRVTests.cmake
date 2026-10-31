@@ -48,6 +48,7 @@ if(BUILD_TESTING)
   # registry.
   simrv_add_runtime_test(simrv-tui-tests tests/TuiFrameworkTests.cpp
                          tui-framework "gate;regress;tui")
+  set_tests_properties(tui-framework PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
   if(SIMRV_ENABLE_TSAN)
     set_property(
       TEST tui-framework
@@ -67,6 +68,9 @@ if(BUILD_TESTING)
   simrv_add_runtime_test(
     simrv-operation-traits-tests tests/OperationTraitsTests.cpp
     operation-traits "gate;regress;pipeline")
+  simrv_add_runtime_test(
+    simrv-instruction-explainer-tests tests/InstructionExplainerTests.cpp
+    instruction-explainer "gate;regress;core")
   simrv_add_runtime_test(simrv-scoreboard-tests tests/ScoreboardTests.cpp
                          scoreboard-tests "gate;regress;pipeline")
   simrv_add_runtime_test(
@@ -163,15 +167,10 @@ if(BUILD_TESTING)
     simrv-fdt-generator-tests tests/FdtGeneratorTests.cpp
     fdt-generator "gate;regress;core;fdt;platform")
 
-  # Architectural equivalence is a first-class native gate.  The fixture
+  # Architectural equivalence is a first-class native gate. The fixture
   # deliberately exercises functional execution and both CA pipelines while
   # excluding cache/cycle/UI observations.
-  add_executable(simrv-semantic-equivalence-tests tests/ModernPlatformTests.cpp)
-  set_property(GLOBAL APPEND PROPERTY SIMRV_NATIVE_TEST_TARGETS
-                                      simrv-semantic-equivalence-tests)
-  target_link_libraries(simrv-semantic-equivalence-tests PRIVATE simrv-runtime)
-  simrv_configure_native_test(simrv-semantic-equivalence-tests)
-  add_test(NAME semantic-equivalence COMMAND simrv-semantic-equivalence-tests
+  add_test(NAME semantic-equivalence COMMAND simrv-modern-platform-tests
                                              --semantic-equivalence)
   set_tests_properties(semantic-equivalence
                        PROPERTIES LABELS "gate;semantic;equivalence")
@@ -263,6 +262,12 @@ if(BUILD_TESTING)
   add_test(NAME release-tools
            COMMAND ${PYTHON_BIN} ${CMAKE_SOURCE_DIR}/tests/ReleaseToolTests.py)
   set_tests_properties(release-tools PROPERTIES LABELS "gate;regress;release")
+  add_test(NAME guest-capability-templates
+           COMMAND ${PYTHON_BIN} ${CMAKE_SOURCE_DIR}/scripts/sync_guest_capabilities.py --check)
+  set_tests_properties(guest-capability-templates PROPERTIES LABELS "gate;regress;fdt")
+  add_test(NAME uefi-disk-image
+           COMMAND ${PYTHON_BIN} ${CMAKE_SOURCE_DIR}/tests/UefiDiskImageTests.py)
+  set_tests_properties(uefi-disk-image PROPERTIES LABELS "gate;regress;uefi")
   add_test(NAME ga-smoke
            COMMAND ${PYTHON_BIN} ${CMAKE_SOURCE_DIR}/scripts/ga_smoke.py --simrv
                    $<TARGET_FILE:SimRV>)
@@ -278,35 +283,54 @@ if(BUILD_TESTING)
   set_tests_properties(mission-tools PROPERTIES LABELS "regress;tui")
 
   # End-to-End (E2E) 4-tier testing suites
+  # The UART completion scenarios advance simulated cycles until the transmitter drains.
+  # Keep suite-level limits long enough for the full fixtures under ASan/UBSan builds.
   add_test(NAME e2e-tier1-features
            COMMAND ${PYTHON_BIN} ${CMAKE_SOURCE_DIR}/tests/RunE2ETests.py
                    --simrv $<TARGET_FILE:SimRV> --tier 1)
   set_tests_properties(e2e-tier1-features
-                       PROPERTIES LABELS "regress;e2e;e2e-tier1" TIMEOUT 60)
+                       PROPERTIES LABELS "regress;e2e;e2e-tier1" TIMEOUT 300)
 
   add_test(NAME e2e-tier2-boundaries
            COMMAND ${PYTHON_BIN} ${CMAKE_SOURCE_DIR}/tests/RunE2ETests.py
                    --simrv $<TARGET_FILE:SimRV> --tier 2)
   set_tests_properties(e2e-tier2-boundaries
-                       PROPERTIES LABELS "regress;e2e;e2e-tier2" TIMEOUT 30)
+                       PROPERTIES LABELS "regress;e2e;e2e-tier2" TIMEOUT 120)
 
   add_test(NAME e2e-tier3-combinations
            COMMAND ${PYTHON_BIN} ${CMAKE_SOURCE_DIR}/tests/RunE2ETests.py
                    --simrv $<TARGET_FILE:SimRV> --tier 3)
   set_tests_properties(e2e-tier3-combinations
-                       PROPERTIES LABELS "regress;e2e;e2e-tier3" TIMEOUT 30)
+                       PROPERTIES LABELS "regress;e2e;e2e-tier3" TIMEOUT 120)
 
   add_test(NAME e2e-tier4-scenarios
            COMMAND ${PYTHON_BIN} ${CMAKE_SOURCE_DIR}/tests/RunE2ETests.py
                    --simrv $<TARGET_FILE:SimRV> --tier 4)
   set_tests_properties(e2e-tier4-scenarios
-                       PROPERTIES LABELS "regress;e2e;e2e-tier4" TIMEOUT 30)
+                       PROPERTIES LABELS "regress;e2e;e2e-tier4" TIMEOUT 120)
 
   add_test(NAME e2e-all-tiers
            COMMAND ${PYTHON_BIN} ${CMAKE_SOURCE_DIR}/tests/RunE2ETests.py
                    --simrv $<TARGET_FILE:SimRV> --tier all)
   set_tests_properties(e2e-all-tiers
-                       PROPERTIES LABELS "regress;e2e;e2e-all" TIMEOUT 120)
+                       PROPERTIES LABELS "e2e;e2e-all" TIMEOUT 120)
+
+  # RVA23 Architectural Compatibility Tests (ACT)
+  if(SIMRV_XLEN STREQUAL "64")
+    add_test(NAME rva23-act
+             COMMAND ${PYTHON_BIN} ${CMAKE_SOURCE_DIR}/scripts/run_act_tests.py
+                     --simrv $<TARGET_FILE:SimRV>
+                     --xlen ${SIMRV_XLEN}
+                     --work-dir ${CMAKE_CURRENT_BINARY_DIR}/act-qualification)
+    set_tests_properties(rva23-act
+                         PROPERTIES LABELS "gate;regress;rva23;act;profile" TIMEOUT 45)
+  endif()
+
+  add_test(NAME act-runner-tests
+           COMMAND ${PYTHON_BIN} -m unittest tests/ActRunnerTests.py
+           WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+  set_tests_properties(act-runner-tests
+                       PROPERTIES LABELS "gate;regress;act;tool" TIMEOUT 15)
 
   # Optional App/Linux smoke tests
   if(DEFINED ENV{SIMRV_APP_IMG})

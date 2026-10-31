@@ -27,7 +27,7 @@ struct GuidanceContext {
     TuiRegPage page = TuiRegPage::GPR;
     bool cycle_accurate = false;
     bool instruction_valid = false;
-    isa::OperationId operation = isa::OperationId::UNKNOWN;
+    isa::OperationId operation = isa::OperationId::ILLEGAL;
     uint8_t destination = 0;
     uint64_t cache_misses = 0;
     uint64_t data_hazard_stalls = 0;

@@ -16,6 +16,7 @@
 #include "simrv/core/Logger.hpp"
 #include "simrv/core/MachineConfig.hpp"
 #include "simrv/tui/TuiKey.hpp"
+#include "simrv/tui/TuiTheme.hpp"
 #include "simrv/tui/TuiTypes.hpp"
 #include "simrv/tui/framework/Modal.hpp"
 #include "simrv/tui/framework/Types.hpp"
@@ -101,6 +102,7 @@ struct SettingsDraft {
     // Tab 0: General / UI
     bool cycle_accurate = false;
     bool high_contrast = false;
+    TuiThemeStyle theme_style = TuiThemeStyle::ModernUnicode;
     framework::DensityMode density_mode = framework::DensityMode::Auto;
     bool use_mix = false;
     bool bp_trace = false;
@@ -124,6 +126,9 @@ struct SettingsDraft {
 class TuiModal {
    public:
     explicit TuiModal(simrv::core::Machine& machine);
+    void set_display_graphics_supported(bool supported) noexcept {
+        display_graphics_supported_ = supported;
+    }
     void set_density_mode(framework::DensityMode mode) noexcept { density_mode_ = mode; }
     [[nodiscard]] auto density_mode() const noexcept -> framework::DensityMode {
         return density_mode_;
@@ -162,8 +167,8 @@ class TuiModal {
                 const std::function<void(TuiRegPage)>& set_reg_page_cb,
                 const std::function<void(const std::string&)>& set_status_override_cb,
                 const std::function<void()>& on_speed_changed_cb,
-                const std::function<void(framework::DensityMode)>& on_density_changed_cb = {})
-        -> bool;
+                const std::function<void(framework::DensityMode, TuiThemeStyle)>&
+                    on_presentation_changed_cb = {}) -> bool;
 
     void push_char(char c) {
         input_.push_back(c);
@@ -296,6 +301,7 @@ class TuiModal {
     int bp_cursor_ = 0;
     SettingsDraft settings_draft_;
     framework::DensityMode density_mode_ = framework::DensityMode::Auto;
+    bool display_graphics_supported_ = false;
     SettingsDraft pending_platform_draft_;
     std::optional<simrv::core::MachineConfig> pending_reconfiguration_;
     std::optional<bool> pending_cycle_accurate_;

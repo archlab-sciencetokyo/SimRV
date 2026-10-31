@@ -74,6 +74,9 @@ class SymbolTable {
     [[nodiscard]] auto entry_point() const -> std::optional<simrv::xlen::Address> {
         return entry_point_;
     }
+    void add_symbol_for_testing(simrv::xlen::Address addr, std::string name) {
+        symbols_[addr] = std::move(name);
+    }
 
    private:
     std::map<simrv::xlen::Address, std::string> symbols_;

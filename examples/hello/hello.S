@@ -3,6 +3,9 @@
 .type _start, @function
 
 .equ UART_TX, 0x10000000
+.equ UART_LSR, 0x10000005
+.equ UART_LSR_THRE, 0x20
+.equ UART_LSR_TEMT, 0x40
 .equ TOHOST,  0x80001000
 
 _start:
@@ -12,6 +15,12 @@ _start:
     call print_counting
     call print_parity
     call print_sum_result
+
+wait_for_uart_empty:
+    li t0, UART_LSR
+    lbu t1, 0(t0)
+    andi t1, t1, UART_LSR_TEMT
+    beqz t1, wait_for_uart_empty
 
     li t0, TOHOST
     li t1, 1
@@ -28,6 +37,11 @@ print_string:
 print_string_loop:
     lbu t1, 0(t0)
     beqz t1, print_string_done
+    li t2, UART_LSR
+print_string_wait_tx_ready:
+    lbu t3, 0(t2)
+    andi t3, t3, UART_LSR_THRE
+    beqz t3, print_string_wait_tx_ready
     li t2, UART_TX
     sb t1, 0(t2)
     addi t0, t0, 1
@@ -39,6 +53,11 @@ print_string_done:
 .global print_char
 .type print_char, @function
 print_char:
+    li t2, UART_LSR
+print_char_wait_tx_ready:
+    lbu t3, 0(t2)
+    andi t3, t3, UART_LSR_THRE
+    beqz t3, print_char_wait_tx_ready
     li t2, UART_TX
     sb a0, 0(t2)
     ret

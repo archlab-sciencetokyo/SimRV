@@ -5,3 +5,7 @@ conventional BusyBox init/getty, DHCP, fstab, and identity files needed for a
 small virt-compatible FPGA Linux baseline. The Alpine profile remains the
 supported JWM/X11 GUI image. The rootfs uses Buildroot's pinned internal musl
 toolchain, so its output is not affected by the host's cross-compiler version.
+
+Guest shutdown and reboot use BusyBox's standard `poweroff` and `reboot` commands
+through the Linux/OpenSBI reset path. This profile does not install a SimRV-specific
+`/dev/mem` control utility or a custom terminal game binary.

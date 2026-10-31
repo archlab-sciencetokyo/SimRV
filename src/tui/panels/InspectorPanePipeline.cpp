@@ -18,6 +18,7 @@
 #include "simrv/core/Cpu.hpp"
 #include "simrv/core/Machine.hpp"
 #include "simrv/debug/SymbolTable.hpp"
+#include "simrv/explain/InstructionExplainer.hpp"
 #include "simrv/isa/Common.hpp"
 #include "simrv/isa/TrapTypes.hpp"
 #include "simrv/pipeline/Decoder.hpp"
@@ -25,7 +26,6 @@
 #include "simrv/pipeline/PipelineSim.hpp"
 #include "simrv/tui/TuiTheme.hpp"
 #include "simrv/tui/panels/InspectorPane.hpp"
-#include "simrv/util/InstructionExplainer.hpp"
 #include "simrv/xlen/AddressTypes.hpp"
 #include "simrv/xlen/RegisterTypes.hpp"
 
@@ -688,7 +688,7 @@ auto InspectorPane::render_pipeline_stages_functional_low_part1(const simrv::cor
 
     // Get operation info for labels
     const std::string_view op_name = simrv::pipeline::operation_name(ctx.op_id);
-    auto isa_ext = simrv::util::get_isa_extension_name(ctx.op_id);
+    auto isa_ext = simrv::explain::get_isa_extension_name(ctx.op_id);
     InstFormat const fmt = simrv::isa::get_instruction_format(ctx.opcode);
     bool const is_compressed = (ctx.ir_org & 0x3) != 0x3;
 
@@ -703,34 +703,8 @@ auto InspectorPane::render_pipeline_stages_functional_low_part1(const simrv::cor
             std::string pc_str = sym.empty() ? hex_val(ctx.cpc.raw())
                                              : std::format("{} <{}>", hex_val(ctx.cpc.raw()), sym);
 
-            // Build assembly string from operation name
-            bool is_dst_fp = simrv::isa::is_destination_fp(ctx.opcode, ctx.op_id);
-            bool is_rs1_fp = simrv::isa::is_rs1_fp(ctx.opcode, ctx.op_id);
-            bool is_rs2_fp = simrv::isa::is_rs2_fp(ctx.opcode, ctx.op_id);
-            std::string rd_n = is_dst_fp ? fp_reg_name(ctx.rd) : reg_name(ctx.rd);
-            std::string rs1_n = is_rs1_fp ? fp_reg_name(ctx.rs1) : reg_name(ctx.rs1);
-            std::string rs2_n = is_rs2_fp ? fp_reg_name(ctx.rs2) : reg_name(ctx.rs2);
-
-            // Simple assembly representation
-            std::string asm_str = std::string(op_name);
-            if (fmt == InstFormat::R) {
-                asm_str = std::format("{} {}, {}, {}", op_name, rd_n, rs1_n, rs2_n);
-            } else if (fmt == InstFormat::I) {
-                if (is_load_opcode(ctx.opcode)) {
-                    asm_str = std::format("{} {}, {}({})", op_name, rd_n, ctx.imm, rs1_n);
-                } else {
-                    asm_str = std::format("{} {}, {}, {}", op_name, rd_n, rs1_n, ctx.imm);
-                }
-            } else if (fmt == InstFormat::S) {
-                asm_str = std::format("{} {}, {}({})", op_name, rs2_n, ctx.imm, rs1_n);
-            } else if (fmt == InstFormat::B) {
-                asm_str = std::format("{} {}, {}, {}", op_name, rs1_n, rs2_n, ctx.imm);
-            } else if (fmt == InstFormat::U) {
-                asm_str =
-                    std::format("{} {}, 0x{:X}", op_name, rd_n, static_cast<uint32_t>(ctx.imm));
-            } else if (fmt == InstFormat::J) {
-                asm_str = std::format("jal {}, {}", rd_n, ctx.imm);
-            }
+            std::string asm_str = simrv::explain::format_instruction_assembly(
+                ctx.ir_org, ctx.cpc.raw(), cpu.state().current_xlen());
 
             return render_pair("PC", pc_str, kThemeMint, "Asm", asm_str, kThemePeach, col_width,
                                right_width, 10);
@@ -763,8 +737,9 @@ auto InspectorPane::render_pipeline_stages_functional_low_part1(const simrv::cor
             return section_line("ID  Decode & Operand Read", width);
         case 7: {
             std::string op_str = std::format("{} ({})", op_name, isa_ext);
-            bool is_dst_fp = simrv::isa::is_destination_fp(ctx.opcode, ctx.op_id);
-            std::string dst_str = (fmt == InstFormat::S || fmt == InstFormat::B)
+            bool is_dst_fp = pipeline::operation::writes_float(ctx.op_id);
+            bool has_dest = pipeline::operation::writes_rd(ctx.op_id);
+            std::string dst_str = !has_dest
                                       ? "(none — no dest)"
                                       : (is_dst_fp ? fp_reg_name(ctx.rd) : reg_with_x(ctx.rd));
             return render_pair("Operation", op_str, kThemeVal, "Dest Reg", dst_str, kThemeMint,
@@ -841,11 +816,8 @@ auto InspectorPane::render_pipeline_stages_functional_low_part2(const simrv::cor
         case 14:
             return section_line("WB  Write-Back", width);
         case 15: {
-            bool is_dst_fp = simrv::isa::is_destination_fp(ctx.opcode, ctx.op_id);
-            InstFormat wr_fmt = simrv::isa::get_instruction_format(ctx.opcode);
-            bool has_dest =
-                (wr_fmt == InstFormat::R || wr_fmt == InstFormat::I || wr_fmt == InstFormat::U ||
-                 wr_fmt == InstFormat::J || wr_fmt == InstFormat::R4);
+            bool is_dst_fp = pipeline::operation::writes_float(ctx.op_id);
+            bool has_dest = pipeline::operation::writes_rd(ctx.op_id);
             std::string dst_str =
                 has_dest ? (is_dst_fp ? fp_reg_name(ctx.rd) : reg_with_x(ctx.rd)) : "(none)";
             std::string result_str = has_dest ? hex_val(ctx.wb_data) : "—";
@@ -870,19 +842,13 @@ auto InspectorPane::render_pipeline_stages_functional_high(const simrv::core::CP
     switch (logical_row) {
         case 16: {
             if (ctx.pending_exception.has_value()) {
-                static constexpr std::array<const char*, 16> kCauseNames = {
-                    "Inst Addr Misaligned",  "Inst Access Fault",
-                    "Illegal Instruction",   "Breakpoint",
-                    "Load Addr Misaligned",  "Load Access Fault",
-                    "Store Addr Misaligned", "Store Access Fault",
-                    "Env Call (U-Mode)",     "Env Call (S-Mode)",
-                    "Reserved (10)",         "Env Call (M-Mode)",
-                    "Inst Page Fault",       "Load Page Fault",
-                    "Reserved (14)",         "Store Page Fault"};
-                auto cause = static_cast<uint64_t>(*ctx.pending_exception);
-                std::string cause_name = (cause < kCauseNames.size())
-                                             ? kCauseNames.at(cause)
-                                             : std::format("Exception ({})", cause);
+                const auto cause = simrv::isa::to_trap_cause(*ctx.pending_exception);
+                const std::string canonical_name = simrv::core::trap_cause_name(cause);
+                std::string cause_name =
+                    canonical_name != "Unknown Trap"
+                        ? std::string(canonical_name)
+                        : std::format("Exception ({})",
+                                      static_cast<uint64_t>(*ctx.pending_exception));
                 return render_pair("Exception", cause_name, kThemePeach, "Trap Value",
                                    hex_val(ctx.pending_tval), kThemeVal, col_width, right_width,
                                    10);
@@ -895,7 +861,7 @@ auto InspectorPane::render_pipeline_stages_functional_high(const simrv::core::CP
             bool const is_csr = (ctx.op_id >= CSRRW && ctx.op_id <= CSRRCI);
             if (is_csr) {
                 uint32_t csr_addr = ctx.imm & 0xFFF;
-                std::string csr_nm = simrv::util::csr_name(csr_addr);
+                std::string csr_nm = simrv::explain::csr_name(csr_addr);
                 return render_pair("CSR Target", std::format("{} (0x{:03X})", csr_nm, csr_addr),
                                    kThemeVal, "CSR Read", hex_val(ctx.rcsr), kThemeVal, col_width,
                                    right_width, 10);
@@ -933,7 +899,7 @@ auto InspectorPane::render_pipeline_stages_functional_high(const simrv::core::CP
                     width);
             }
             if (pipeline::operation::is_store(ctx.op_id)) {
-                return format_to_width(std::format(" \033[90mMemory:\033[0m Store to {} ← Data: {}",
+                return format_to_width(std::format(" \033[90mMemory:\033[0m Store to {} ↝ Data: {}",
                                                    hex_val(ctx.mem_addr), hex_val(ctx.mem_wdata)),
                                        width);
             }
@@ -942,13 +908,13 @@ auto InspectorPane::render_pipeline_stages_functional_high(const simrv::core::CP
         case 22: {
             if (pipeline::operation::writes_integer(ctx.op_id) &&
                 ctx.rd != simrv::xlen::RegId::Zero) {
-                return format_to_width(std::format(" \033[90mCommit:\033[0m Writeback {} ← {} "
+                return format_to_width(std::format(" \033[90mCommit:\033[0m Writeback {} ↝ {} "
                                                    "\033[38;5;158m[Committed]\033[0m",
                                                    reg_name(ctx.rd), hex_val(ctx.wb_data)),
                                        width);
             }
             if (pipeline::operation::writes_float(ctx.op_id)) {
-                return format_to_width(std::format(" \033[90mCommit:\033[0m Writeback {} ← {} "
+                return format_to_width(std::format(" \033[90mCommit:\033[0m Writeback {} ↝ {} "
                                                    "\033[38;5;158m[Committed]\033[0m",
                                                    fp_reg_name(ctx.rd), hex_val(ctx.wb_data)),
                                        width);
@@ -994,7 +960,7 @@ auto InspectorPane::render_pipeline_timeline(const simrv::core::CPU& cpu, int lo
     struct InstRef {
         uint64_t inst_id = 0;
         simrv::xlen::Register pc = 0;
-        isa::OperationId op_id = isa::OperationId::UNKNOWN;
+        isa::OperationId op_id = isa::OperationId::ILLEGAL;
 
         auto operator==(const InstRef& o) const -> bool {
             return (inst_id != 0 && o.inst_id != 0) ? (inst_id == o.inst_id) : (pc == o.pc);
@@ -1141,7 +1107,7 @@ auto InspectorPane::get_pipeline_pc_at_row(int logical_row) const -> simrv::xlen
         struct InstRef {
             uint64_t inst_id = 0;
             simrv::xlen::Register pc = 0;
-            isa::OperationId op_id = isa::OperationId::UNKNOWN;
+            isa::OperationId op_id = isa::OperationId::ILLEGAL;
             auto operator==(const InstRef& o) const -> bool {
                 return (inst_id != 0 && o.inst_id != 0) ? (inst_id == o.inst_id) : (pc == o.pc);
             }

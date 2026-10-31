@@ -37,7 +37,7 @@ class E2ETier3CombinationTests(unittest.TestCase):
 
     def test_comb_1_rv64_smp_baremetal(self) -> None:
         """Combination 1: RV64 Architecture × Multi-Hart SMP (smp=2) × Baremetal Execution."""
-        res = run_simrv(self.simrv64, ["--cli", "--baremetal", "-m", str(self.hello64), "--smp", "2", "--steps", "2500"])
+        res = run_simrv(self.simrv64, ["--cli", "--baremetal", "-m", str(self.hello64), "--smp", "2", "--steps", "10000000"])
         self.assertEqual(res.returncode, 0, res.stderr)
         self.assertIn("Run configuration: RV64", res.stdout)
         self.assertIn("2 hart(s)", res.stdout)
@@ -47,7 +47,7 @@ class E2ETier3CombinationTests(unittest.TestCase):
         """Combination 2: RV64 Binary × RV32 Guest Personality × Fast Mode Execution."""
         res = run_simrv(
             self.simrv64,
-            ["--cli", "--baremetal", "-m", str(self.hello32), "--isa", "rv32gc", "--mode", "fast", "--steps", "1500"],
+            ["--cli", "--baremetal", "-m", str(self.hello32), "--isa", "rv32gc", "--mode", "fast", "--steps", "10000000"],
         )
         self.assertEqual(res.returncode, 0, res.stderr)
         self.assertIn("instruction-fast execution", res.stdout)
@@ -92,7 +92,7 @@ class E2ETier3CombinationTests(unittest.TestCase):
                 "-D",
                 str(dummy_disk),
                 "--steps",
-                "500",
+                "10000000",
             ]
             if self.dtb.is_file():
                 cmd.extend(["-f", str(self.dtb)])

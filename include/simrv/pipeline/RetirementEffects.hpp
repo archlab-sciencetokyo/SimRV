@@ -39,9 +39,12 @@ struct WritebackEffects {
 
     auto& integer = effects.integer_write;
     integer.destination = context.rd;
-    if (opcode == isa::Opcode::Load ||
+    if (opcode == isa::Opcode::Load || isa::is_hlv_op(context.op_id) ||
         (opcode == isa::Opcode::Amo && funct5 != isa::Funct5Amo::Sc)) {
         integer.value = context.mem_rdata;
+        integer.enabled = true;
+    } else if (opcode == isa::Opcode::System && context.op_id == isa::OperationId::MOP) {
+        integer.value = context.wb_data;
         integer.enabled = true;
     } else if (opcode == isa::Opcode::System && funct3 != isa::Funct3::Priv) {
         integer.value = context.rcsr;

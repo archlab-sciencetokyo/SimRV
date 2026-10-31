@@ -16,10 +16,15 @@ namespace simrv::device {
 // AclintMtimer Implementation
 // =========================================================================
 
-AclintMtimer::AclintMtimer(simrv::core::Machine* machine) : memory::MmioDevice(machine) { reset(); }
+AclintMtimer::AclintMtimer(simrv::core::Machine* machine, simrv::xlen::Address base,
+                           simrv::xlen::Address size)
+    : memory::MmioDevice(machine), base_(base), size_(size) {
+    reset();
+}
 
-AclintMtimer::AclintMtimer(simrv::core::IInterruptController* sink, simrv::core::Machine* machine)
-    : memory::MmioDevice(machine), sink_(sink) {
+AclintMtimer::AclintMtimer(simrv::core::IInterruptController* sink, simrv::core::Machine* machine,
+                           simrv::xlen::Address base, simrv::xlen::Address size)
+    : memory::MmioDevice(machine), sink_(sink), base_(base), size_(size) {
     reset();
 }
 
@@ -126,10 +131,15 @@ void AclintMtimer::tick() {
 // AclintMswi Implementation
 // =========================================================================
 
-AclintMswi::AclintMswi(simrv::core::Machine* machine) : memory::MmioDevice(machine) { reset(); }
+AclintMswi::AclintMswi(simrv::core::Machine* machine, simrv::xlen::Address base,
+                       simrv::xlen::Address size)
+    : memory::MmioDevice(machine), base_(base), size_(size) {
+    reset();
+}
 
-AclintMswi::AclintMswi(simrv::core::IInterruptController* sink, simrv::core::Machine* machine)
-    : memory::MmioDevice(machine), sink_(sink) {
+AclintMswi::AclintMswi(simrv::core::IInterruptController* sink, simrv::core::Machine* machine,
+                       simrv::xlen::Address base, simrv::xlen::Address size)
+    : memory::MmioDevice(machine), sink_(sink), base_(base), size_(size) {
     reset();
 }
 

@@ -12,10 +12,10 @@
 #include "simrv/debug/GdbStub.hpp"
 
 #include <arpa/inet.h>
+#include <fcntl.h>
 #include <netinet/in.h>
 #include <netinet/tcp.h>
 #include <poll.h>
-#include <sys/eventfd.h>
 #include <sys/socket.h>
 #include <unistd.h>
 
@@ -41,6 +41,29 @@
 namespace simrv::debug {
 
 namespace {
+
+constexpr int kGdbSocketType =
+#ifdef SOCK_CLOEXEC
+    SOCK_STREAM | SOCK_CLOEXEC;
+#else
+    SOCK_STREAM;
+#endif
+
+constexpr int kGdbSendFlags =
+#ifdef MSG_NOSIGNAL
+    MSG_NOSIGNAL;
+#else
+    0;
+#endif
+
+void configure_socket(int fd) noexcept {
+    const int flags = ::fcntl(fd, F_GETFD, 0);
+    if (flags >= 0) static_cast<void>(::fcntl(fd, F_SETFD, flags | FD_CLOEXEC));
+#ifdef SO_NOSIGPIPE
+    int enabled = 1;
+    static_cast<void>(::setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &enabled, sizeof(enabled)));
+#endif
+}
 auto valid_hex(std::string_view text) -> bool {
     return !text.empty() && std::ranges::all_of(text, [](char c) {
         return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F');
@@ -93,17 +116,12 @@ void invalidate_debug_state(simrv::core::Machine& machine, simrv::core::CPU& cpu
 // Construction / destruction
 // ---------------------------------------------------------------------------
 
-GdbStub::GdbStub(uint16_t port)
-    : listen_fd_(::socket(AF_INET, SOCK_STREAM | SOCK_CLOEXEC, 0)),
-      wake_fd_(::eventfd(0, EFD_CLOEXEC | EFD_NONBLOCK)),
-      port_(port) {
+GdbStub::GdbStub(uint16_t port) : listen_fd_(::socket(AF_INET, kGdbSocketType, 0)), port_(port) {
     if (listen_fd_.get() < 0) {
         throw std::runtime_error(std::format("GdbStub: socket() failed: {}", std::strerror(errno)));
     }
-    if (wake_fd_.get() < 0) {
-        throw std::runtime_error(
-            std::format("GdbStub: eventfd() failed: {}", std::strerror(errno)));
-    }
+    configure_socket(listen_fd_.get());
+    if (!wake_fd_.open()) throw std::runtime_error("GdbStub: cannot create wake channel");
 
     int opt = 1;
     ::setsockopt(listen_fd_.get(), SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
@@ -163,21 +181,13 @@ void GdbStub::stop() {
     simrv::log::info("GDB server shut down");
 }
 
-void GdbStub::signal_worker() noexcept {
-    const uint64_t one = 1;
-    const ssize_t ignored = ::write(wake_fd_.get(), &one, sizeof(one));
-    static_cast<void>(ignored);
-}
+void GdbStub::signal_worker() noexcept { wake_fd_.signal(); }
 
-void GdbStub::drain_worker_signal() noexcept {
-    uint64_t value = 0;
-    while (::read(wake_fd_.get(), &value, sizeof(value)) == sizeof(value)) {
-    }
-}
+void GdbStub::drain_worker_signal() noexcept { wake_fd_.drain(); }
 
 auto GdbStub::wait_for_client(const std::stop_token& stop_token) -> bool {
     pollfd fds[2]{{.fd = listen_fd_.get(), .events = POLLIN, .revents = 0},
-                  {.fd = wake_fd_.get(), .events = POLLIN, .revents = 0}};
+                  {.fd = wake_fd_.fd(), .events = POLLIN, .revents = 0}};
     while (running_.load(std::memory_order_acquire) && !stop_token.stop_requested()) {
         const int ready = ::poll(fds, 2, -1);
         if (ready < 0) {
@@ -199,6 +209,7 @@ auto GdbStub::wait_for_client(const std::stop_token& stop_token) -> bool {
             if (errno == EINTR) continue;
             return false;
         }
+        configure_socket(conn_fd_.get());
         int opt = 1;
         ::setsockopt(conn_fd_.get(), IPPROTO_TCP, TCP_NODELAY, &opt, sizeof(opt));
 
@@ -237,7 +248,7 @@ auto GdbStub::recv_char() -> int {
     char c = 0;
     while (running_.load(std::memory_order_acquire)) {
         pollfd fds[2]{{.fd = conn_fd_.get(), .events = POLLIN, .revents = 0},
-                      {.fd = wake_fd_.get(), .events = POLLIN, .revents = 0}};
+                      {.fd = wake_fd_.fd(), .events = POLLIN, .revents = 0}};
         if (::poll(fds, 2, -1) < 0) {
             if (errno == EINTR) continue;
             return -1;
@@ -336,7 +347,7 @@ auto GdbStub::checksum(const std::string& data) -> uint8_t {
 auto GdbStub::send_raw(const std::string& s) -> bool {
     std::size_t sent = 0;
     while (sent < s.size()) {
-        const ssize_t n = ::send(conn_fd_.get(), s.data() + sent, s.size() - sent, MSG_NOSIGNAL);
+        const ssize_t n = ::send(conn_fd_.get(), s.data() + sent, s.size() - sent, kGdbSendFlags);
         if (n < 0 && errno == EINTR) continue;
         if (n <= 0) {
             return false;

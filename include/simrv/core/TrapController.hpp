@@ -5,15 +5,30 @@
  */
 #pragma once
 
+#include <optional>
 #include <string>
 
+#include "simrv/isa/OperationId.hpp"
 #include "simrv/isa/TrapTypes.hpp"
+#include "simrv/xlen/IdentifierTypes.hpp"
 #include "simrv/xlen/ScalarTypes.hpp"
 
 namespace simrv::core {
 
 class CPU;
 struct ArchState;
+
+/**
+ * @brief Architectural state transitions produced by an MRET or SRET instruction.
+ */
+struct TrapReturnState {
+    simrv::xlen::Address target_pc{0};
+    simrv::xlen::PrivilegeLevel target_priv{simrv::xlen::PrivilegeLevel::Machine};
+    bool target_virtualization{false};
+    simrv::xlen::CsrValue next_mstatus{0};
+    simrv::xlen::CsrValue next_vsstatus{0};
+    simrv::xlen::CsrValue next_hstatus{0};
+};
 
 /**
  * @brief Return human-readable name of a RISC-V trap cause (interrupt or exception).
@@ -26,6 +41,18 @@ struct ArchState;
  */
 class TrapController {
    public:
+    /**
+     * @brief Computes the side-effect-free target PC, privilege, virtualization mode, and status
+     * CSR updates for a Machine-mode trap return (MRET).
+     */
+    [[nodiscard]] static auto predict_mret(const ArchState& state) noexcept -> TrapReturnState;
+
+    /**
+     * @brief Computes the side-effect-free target PC, privilege, virtualization mode, and status
+     * CSR updates for a Supervisor-mode trap return (SRET).
+     */
+    [[nodiscard]] static auto predict_sret(const ArchState& state) noexcept -> TrapReturnState;
+
     /**
      * @brief Executes Machine-mode trap return (MRET).
      *
@@ -61,6 +88,26 @@ class TrapController {
     static void raise_exception(CPU& cpu, simrv::xlen::TrapCause cause, simrv::xlen::CsrValue tval);
 
     /**
+     * @brief Evaluates whether executing a privileged system instruction, hypervisor memory access,
+     * or WRS.NTO raises an IllegalInstruction or VirtualInstruction exception in the given state.
+     */
+    [[nodiscard]] static auto check_privileged_instruction(const ArchState& state,
+                                                           simrv::isa::OperationId op_id,
+                                                           simrv::xlen::Instruction ir) noexcept
+        -> std::optional<simrv::isa::ExceptionCode>;
+
+    /**
+     * @brief Evaluates whether reading or writing a CSR raises an IllegalInstruction or
+     * VirtualInstruction exception under the given architectural state (including privilege,
+     * virtualization, TVM/VTVM, counter enables, FS/VS state enables, Smstateen/Ssstateen, and
+     * Sstc).
+     */
+    [[nodiscard]] static auto check_csr_access(const ArchState& state,
+                                               simrv::xlen::CsrNumber csr_number,
+                                               bool is_write) noexcept
+        -> std::optional<simrv::isa::ExceptionCode>;
+
+    /**
      * @brief Validates if the current privilege level is sufficient to execute a given privileged
      * instruction.
      *
@@ -74,11 +121,10 @@ class TrapController {
      * @param funct7 The 7-bit function field (used for SFENCE.VMA).
      * @return true if the instruction is allowed under current privilege, false otherwise.
      */
-    static auto can_execute_privileged_instruction(simrv::xlen::PrivilegeLevel current_priv,
-                                                   simrv::xlen::CsrValue misa,
-                                                   simrv::xlen::CsrValue mstatus,
-                                                   simrv::xlen::Instruction funct12,
-                                                   simrv::xlen::Word funct7) -> bool;
+    static auto can_execute_privileged_instruction(
+        simrv::xlen::PrivilegeLevel current_priv, simrv::xlen::CsrValue misa,
+        simrv::xlen::CsrValue mstatus, simrv::xlen::Instruction funct12, simrv::xlen::Word funct7,
+        simrv::xlen::CsrValue hstatus = 0, bool virtualization_mode = false) -> bool;
 
     /**
      * @brief Validates if the current privilege level has access to a specific CSR.
@@ -93,7 +139,8 @@ class TrapController {
      * @return true if access is permitted, false if it triggers an illegal instruction exception.
      */
     static auto can_access_csr(simrv::xlen::PrivilegeLevel current_priv, simrv::xlen::CsrValue misa,
-                               simrv::xlen::CsrNumber csr_addr, bool is_write) -> bool;
+                               simrv::xlen::CsrNumber csr_addr, bool is_write,
+                               bool virtualization_mode = false) -> bool;
 };
 
 }  // namespace simrv::core

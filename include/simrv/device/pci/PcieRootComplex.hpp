@@ -9,6 +9,7 @@
 #include <memory>
 #include <vector>
 
+#include "simrv/core/SoCConfig.hpp"
 #include "simrv/device/AIA.hpp"
 #include "simrv/device/pci/PciDevice.hpp"
 #include "simrv/device/pci/PciTypes.hpp"
@@ -23,17 +24,22 @@ namespace simrv::device {
 
 class PcieRootComplex {
    public:
-    static constexpr simrv::xlen::Address kEcamBaseAddress = 0x30000000ULL;
-    static constexpr simrv::xlen::Address kEcamSize = 0x10000000ULL;  // 256MB ECAM space
+    static constexpr simrv::xlen::Address kEcamBaseAddress =
+        static_cast<simrv::xlen::Address>(SIMRV_PLATFORM_PCIE_ECAM_BASE);
+    static constexpr simrv::xlen::Address kEcamSize =
+        static_cast<simrv::xlen::Address>(SIMRV_PLATFORM_PCIE_ECAM_SIZE);
 
-    static constexpr simrv::xlen::Address kMmioBaseAddress = 0x40000000ULL;
-    static constexpr simrv::xlen::Address kMmioSize = 0x10000000ULL;  // 256MB MMIO window
+    static constexpr simrv::xlen::Address kMmioBaseAddress =
+        static_cast<simrv::xlen::Address>(SIMRV_PLATFORM_PCIE_WINDOW_BASE);
+    static constexpr simrv::xlen::Address kMmioSize =
+        static_cast<simrv::xlen::Address>(SIMRV_PLATFORM_PCIE_WINDOW_SIZE);
 
     PcieRootComplex(simrv::core::Machine* machine, Aplic* aplic_s = nullptr,
-                    Imsic* imsic_s = nullptr);
+                    Imsic* imsic_s = nullptr, simrv::core::PcieHostConfig config = {});
     ~PcieRootComplex() = default;
 
-    auto attach_device(PciBdf bdf, std::shared_ptr<PciDevice> device) -> bool;
+    auto attach_device(PciBdf bdf, std::shared_ptr<PciDevice> device, uint32_t intx_source = 0)
+        -> bool;
     auto attach_device(PciBusNumber bus, PciDeviceNumber dev, PciFunctionNumber func,
                        std::shared_ptr<PciDevice> device) -> bool {
         return attach_device(PciBdf{.bus = bus, .dev = dev, .func = func}, std::move(device));
@@ -80,9 +86,11 @@ class PcieRootComplex {
         explicit EcamNode(PcieRootComplex* rc) : rc_(rc) {}
         [[nodiscard]] auto name() const -> const char* override { return "pcie-ecam"; }
         [[nodiscard]] auto base_address() const -> simrv::xlen::Address override {
-            return kEcamBaseAddress;
+            return rc_->config_.ecam_base;
         }
-        [[nodiscard]] auto size() const -> simrv::xlen::Address override { return kEcamSize; }
+        [[nodiscard]] auto size() const -> simrv::xlen::Address override {
+            return rc_->config_.ecam_size;
+        }
         auto handle_request(const memory::TlChannelA& req, memory::TlChannelD& resp)
             -> bool override;
 
@@ -95,9 +103,11 @@ class PcieRootComplex {
         explicit MmioNode(PcieRootComplex* rc) : rc_(rc) {}
         [[nodiscard]] auto name() const -> const char* override { return "pcie-mmio"; }
         [[nodiscard]] auto base_address() const -> simrv::xlen::Address override {
-            return kMmioBaseAddress;
+            return rc_->config_.mmio_base;
         }
-        [[nodiscard]] auto size() const -> simrv::xlen::Address override { return kMmioSize; }
+        [[nodiscard]] auto size() const -> simrv::xlen::Address override {
+            return rc_->config_.mmio_size;
+        }
         auto handle_request(const memory::TlChannelA& req, memory::TlChannelD& resp)
             -> bool override;
 
@@ -114,6 +124,13 @@ class PcieRootComplex {
     simrv::core::Machine* machine_;
     Aplic* aplic_s_;
     Imsic* imsic_s_;
+    simrv::core::PcieHostConfig config_;
+
+    struct IntxRoute {
+        PciBdf bdf;
+        uint32_t source;
+    };
+    std::vector<IntxRoute> intx_routes_;
 
     EcamNode ecam_node_{this};
     MmioNode mmio_node_{this};

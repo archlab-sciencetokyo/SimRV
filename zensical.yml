@@ -109,10 +109,12 @@ nav:
       - ISA Compliance & Boundaries: architecture/compliance.md
   - Hardware & Models:
       - Microarchitectural Models & Tuning: hardware/models.md
+      - HPM Counters & Telemetry Events: hardware/hpm.md
       - Extending CPU Presets and MMIO Platforms: hardware/extending-platforms.md
       - RTL Parity Verification: hardware/rtl_parity.md
       - Custom Extensions & CFU: hardware/extensions.md
   - Development & Contributing:
       - Developer Guide & Standards: development/contributing.md
+      - Runtime Model Formalization Audit: development/runtime-model-hardcodes.md
       - Version Migration (2.x to 3.0): development/migration.md
       - Performance Roadmap: development/performance-roadmap.md

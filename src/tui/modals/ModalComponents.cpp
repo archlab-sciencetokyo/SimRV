@@ -5,6 +5,7 @@
 #include "simrv/tui/modals/ModalComponents.hpp"
 
 #include <algorithm>
+#include <cctype>
 #include <format>
 
 #include "simrv/tui/framework/Components.hpp"
@@ -14,12 +15,28 @@ namespace simrv::tui::modals {
 namespace {
 
 constexpr std::string_view kControlRowMarker = "\033[0;0m";
+constexpr std::string_view kControlGroupMarker = "\033[0;0m\033[0;0m";
 
 [[nodiscard]] auto unbox_key(std::string_view key) -> std::string_view {
     if (key.size() >= 2 && key.front() == '[' && key.back() == ']') {
         return key.substr(1, key.size() - 2);
     }
     return key;
+}
+
+[[nodiscard]] auto capitalize_key_tokens(std::string_view key) -> std::string {
+    std::string result(key);
+    for (std::size_t i = 0; i < result.size(); ++i) {
+        const bool starts_token = i == 0 || result[i - 1] == '/' ||
+                                  std::isspace(static_cast<unsigned char>(result[i - 1])) != 0;
+        const bool ends_token = i + 1 == result.size() || result[i + 1] == '/' ||
+                                std::isspace(static_cast<unsigned char>(result[i + 1])) != 0;
+        if (starts_token && ends_token &&
+            std::isalpha(static_cast<unsigned char>(result[i])) != 0) {
+            result[i] = static_cast<char>(std::toupper(static_cast<unsigned char>(result[i])));
+        }
+    }
+    return result;
 }
 
 [[nodiscard]] auto unbox_value(std::string_view value) -> std::string {
@@ -87,7 +104,7 @@ auto get_modal_metadata(ModalType type, bool is_notice_error, std::string_view n
         case ModalType::LogViewer:
             return {.title = " SIMULATOR LOG VIEWER [L] ", .is_wide = true};
         case ModalType::MissionObjective:
-            return {.title = " MISSION OBJECTIVE [F12] ", .is_wide = true};
+            return {.title = " LESSON TASKS / GUIDE [F12] ", .is_wide = true};
         case ModalType::None:
         default:
             return {.title = "", .is_wide = false};
@@ -96,10 +113,8 @@ auto get_modal_metadata(ModalType type, bool is_notice_error, std::string_view n
 
 auto format_action_hint(std::string_view key, std::string_view action, std::string_view color)
     -> std::string {
-    if (framework::active_render_context().density == framework::Density::Compact)
-        return std::format("{}[{}]\033[0m {}{}\033[0m", color, unbox_key(key), kThemeMuted, action);
-    return std::format("\033[1;7m{} {} \033[0m {}{}\033[0m", color, unbox_key(key), kThemeMuted,
-                       action);
+    return std::format("\033[1;7m{} {} \033[0m {}{}\033[0m", color,
+                       capitalize_key_tokens(unbox_key(key)), kThemeMuted, action);
 }
 
 auto build_modal_footer(std::span<const ModalActionHint> hints) -> std::string {
@@ -113,6 +128,7 @@ auto build_modal_footer(std::span<const ModalActionHint> hints) -> std::string {
     for (size_t i = 0; i < hints.size(); ++i) {
         if (i > 0) {
             out += std::format("{}{}\033[0m", kThemeMuted, sep);
+            out += kControlGroupMarker;
         }
         out += format_action_hint(hints[i].key, hints[i].action, hints[i].color);
     }
@@ -156,6 +172,9 @@ auto layout_modal_control_row(std::string row, int inner_width) -> framework::Re
     int const row_width = get_display_width(row);
     const bool compact = framework::active_render_context().density == framework::Density::Compact;
     int const left = compact ? 0 : std::max(0, (inner_width - row_width) / 2);
+    const std::string_view separator = compact ? " " : " · ";
+    const int separator_width = static_cast<int>(separator.size());
+    const int right = std::max(0, inner_width - row_width - left);
 
     framework::RenderedControl result;
     result.text = framework::align_row({.text = std::move(row),
@@ -167,39 +186,29 @@ auto layout_modal_control_row(std::string row, int inner_width) -> framework::Re
                       .text;
     result.width = inner_width;
 
-    // Action groups are separated by a three-cell themed midpoint. Their measured spans include
-    // both the filled keycap and its label, matching the visual click affordance.
-    std::string plain;
-    bool escape = false;
-    bool csi = false;
-    for (char ch : result.text) {
-        if (ch == '\033') {
-            escape = true;
-            csi = false;
-        } else if (escape) {
-            if (!csi && ch == '[')
-                csi = true;
-            else if (!csi || (ch >= '@' && ch <= '~'))
-                escape = csi = false;
-        } else {
-            plain.push_back(ch);
-        }
-    }
-    const std::string_view separator = compact ? " " : " · ";
-    while (!plain.empty() && plain.back() == ' ') plain.pop_back();
-    int start = left;
-    auto byte_start = static_cast<std::size_t>(left);
+    // The invisible group marker avoids confusing spaces inside padded keycaps or compound
+    // labels with the visible action separator.
+    std::size_t segment_start = 0;
+    int span_start = left;
     std::size_t index = 0;
-    while (byte_start < plain.size()) {
-        auto const end = plain.find(separator, byte_start);
-        std::string_view const group = std::string_view(plain).substr(
-            byte_start, end == std::string::npos ? std::string::npos : end - byte_start);
-        int const group_width = get_display_width(group);
-        result.spans.push_back(
-            {.start = start, .width = group_width, .id = std::to_string(index++)});
-        if (end == std::string::npos) break;
-        start += group_width + static_cast<int>(separator.size());
-        byte_start = end + separator.size();
+    while (segment_start <= result.text.size()) {
+        const auto marker_pos = result.text.find(kControlGroupMarker, segment_start);
+        const bool has_next = marker_pos != std::string::npos;
+        const auto segment_end = has_next ? marker_pos : result.text.size();
+        int segment_width = get_display_width(
+            std::string_view(result.text).substr(segment_start, segment_end - segment_start));
+        if (index == 0) segment_width = std::max(0, segment_width - left);
+        if (has_next) segment_width = std::max(0, segment_width - separator_width);
+        if (!has_next) segment_width = std::max(0, segment_width - right);
+        if (segment_width > 0 && span_start < inner_width) {
+            const int visible_width = std::min(segment_width, inner_width - span_start);
+            result.spans.push_back(
+                {.start = span_start, .width = visible_width, .id = std::to_string(index)});
+        }
+        if (!has_next) break;
+        span_start += segment_width + separator_width;
+        segment_start = marker_pos + kControlGroupMarker.size();
+        ++index;
     }
     return result;
 }

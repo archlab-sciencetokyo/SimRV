@@ -39,17 +39,10 @@
 
 #include "simrv/core/Cpu.hpp"
 #include "simrv/core/Logger.hpp"
+#include "simrv/isa/RegisterNames.hpp"
 #include "simrv/xlen/RegisterTypes.hpp"
 
 namespace simrv::debug {
-
-namespace {
-// ABI register names for prettier output
-constexpr std::array<const char*, 32> kAbiNames = {
-    "zero", "ra", "sp", "gp", "tp",  "t0",  "t1", "t2", "s0", "s1", "a0",
-    "a1",   "a2", "a3", "a4", "a5",  "a6",  "a7", "s2", "s3", "s4", "s5",
-    "s6",   "s7", "s8", "s9", "s10", "s11", "t3", "t4", "t5", "t6"};
-}  // namespace
 
 // ---------------------------------------------------------------------------
 // Constructor / Destructor
@@ -265,7 +258,7 @@ auto SpikeLockstep::parse_commit_line(const std::string& line, SpikeCommitRecord
     } else {
         // ABI name
         for (int k = 0; k < 32; ++k) {
-            if (reg_name == kAbiNames.at(static_cast<std::size_t>(k))) {
+            if (reg_name == simrv::isa::kGprAbiNames.at(static_cast<std::size_t>(k))) {
                 reg_idx = k;
                 break;
             }
@@ -384,8 +377,8 @@ void SpikeLockstep::print_divergence(uint64_t icount, simrv::xlen::Address simrv
             static_cast<uint32_t>(simrv_state.regs.read(static_cast<simrv::xlen::RegId>(r)));
         const auto spike_val = static_cast<uint32_t>(spike_rec.gpr.at(r));
         if (simrv_val != spike_val) {
-            simrv::log::error("  {}:  SimRV=0x{:08x}  Spike=0x{:08x}", kAbiNames.at(r), simrv_val,
-                              spike_val);
+            simrv::log::error("  {}:  SimRV=0x{:08x}  Spike=0x{:08x}",
+                              simrv::isa::kGprAbiNames.at(r), simrv_val, spike_val);
         }
     }
 }

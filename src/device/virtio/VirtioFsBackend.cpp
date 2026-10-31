@@ -1,6 +1,8 @@
 /** @file VirtioFsBackend.cpp */
 #include "simrv/device/virtio/VirtioFsBackend.hpp"
 
+#if defined(__linux__)
+
 #include <dirent.h>
 #include <fcntl.h>
 #include <linux/fuse.h>
@@ -784,3 +786,23 @@ auto VirtioFsBackend::process(std::span<const std::byte> request) -> std::vector
 }
 
 }  // namespace simrv::device::virtio
+
+#else
+
+#include <utility>
+
+namespace simrv::device::virtio {
+
+VirtioFsBackend::VirtioFsBackend(std::string tag) : tag_(std::move(tag)) {}
+VirtioFsBackend::~VirtioFsBackend() = default;
+
+auto VirtioFsBackend::set_shared_directory(const std::filesystem::path&) -> bool { return false; }
+
+auto VirtioFsBackend::process(std::span<const std::byte>) -> std::vector<std::byte> { return {}; }
+
+void VirtioFsBackend::process_queue(QueueState&, const DmaRead&, const DmaWrite&,
+                                    const Interrupt&) {}
+
+}  // namespace simrv::device::virtio
+
+#endif  // defined(__linux__)

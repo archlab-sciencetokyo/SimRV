@@ -885,7 +885,7 @@ inline auto parse_cpu_config_stream(std::istream& stream, simrv::pipeline::CpuMo
 
 /** Parse the platform portion of a combined CPU/SoC preset file. */
 inline auto parse_soc_config_stream(std::istream& stream, simrv::core::SoCConfig& config) -> bool {
-    enum class Section { Global, Soc, Memory, Boot, Device, Smp, SmpCluster, SmpL3 };
+    enum class Section { Global, Soc, Pcie, Memory, Boot, Device, Smp, SmpCluster, SmpL3 };
     Section section = Section::Global;
     simrv::core::SoCDeviceConfig* device = nullptr;
     simrv::core::SmpClusterConfig* cluster = nullptr;
@@ -910,6 +910,8 @@ inline auto parse_soc_config_stream(std::istream& stream, simrv::core::SoCConfig
                 return false;
             } else if (detail::iequals(name, "soc")) {
                 section = Section::Soc;
+            } else if (detail::iequals(name, "pcie")) {
+                section = Section::Pcie;
             } else if (detail::iequals(name, "memory")) {
                 section = Section::Memory;
             } else if (detail::iequals(name, "boot")) {
@@ -1084,6 +1086,22 @@ inline auto parse_soc_config_stream(std::istream& stream, simrv::core::SoCConfig
                     config.disable_unlisted_devices = *parsed;
                 }
             }
+        } else if (section == Section::Pcie) {
+            if (const auto parsed = detail::parse_scaled_u64(value)) {
+                if (key == "ecam_base")
+                    config.pcie.ecam_base = *parsed;
+                else if (key == "ecam_size")
+                    config.pcie.ecam_size = *parsed;
+                else if (key == "mmio_base")
+                    config.pcie.mmio_base = *parsed;
+                else if (key == "mmio_size")
+                    config.pcie.mmio_size = *parsed;
+                else if (key == "first_bus" || key == "last_bus") {
+                    if (*parsed > std::numeric_limits<uint8_t>::max()) return false;
+                    auto& bus = key == "first_bus" ? config.pcie.first_bus : config.pcie.last_bus;
+                    bus = static_cast<uint8_t>(*parsed);
+                }
+            }
         } else if (section == Section::Memory) {
             if (const auto parsed = detail::parse_scaled_u64(value)) {
                 if (key == "dram_base" || key == "base")
@@ -1127,7 +1145,21 @@ inline auto parse_soc_config_stream(std::istream& stream, simrv::core::SoCConfig
                     device->irq = static_cast<uint32_t>(*parsed);
                 else if (key == "read_value" && *parsed <= std::numeric_limits<uint32_t>::max())
                     device->read_value = static_cast<uint32_t>(*parsed);
-                else if (key == "mac_address" && *parsed <= 0xffffffffffffULL) {
+                else if (key == "clock_hz")
+                    device->clock_hz = *parsed;
+                else if (key == "pci_bus") {
+                    if (*parsed > std::numeric_limits<uint8_t>::max()) return false;
+                    device->pci_bus = static_cast<uint8_t>(*parsed);
+                } else if (key == "pci_slot") {
+                    if (*parsed > 31) return false;
+                    device->pci_slot = static_cast<uint8_t>(*parsed);
+                } else if (key == "pci_function") {
+                    if (*parsed > 7) return false;
+                    device->pci_function = static_cast<uint8_t>(*parsed);
+                } else if (key == "pci_intx_source") {
+                    if (*parsed > std::numeric_limits<uint32_t>::max()) return false;
+                    device->pci_intx_source = static_cast<uint32_t>(*parsed);
+                } else if (key == "mac_address" && *parsed <= 0xffffffffffffULL) {
                     for (size_t i = 0; i < device->mac_address.size(); ++i) {
                         const auto shift = static_cast<unsigned>((5 - i) * 8);
                         device->mac_address[i] = static_cast<uint8_t>(*parsed >> shift);

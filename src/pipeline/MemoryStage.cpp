@@ -25,6 +25,20 @@ void CPU::run_memory_stage(Machine& machine) {
     auto& ctx = active_context();
     const auto opcode = static_cast<Opcode>(ctx.opcode);
 
+    if (isa::is_hlv_op(ctx.op_id)) {
+        if (!ctx.memory_load_complete) {
+            memory_load_phase(machine);
+            if (ca_state.waiting_for_interconnect || ctx.pending_exception.has_value()) return;
+            ctx.memory_load_complete = true;
+        }
+        return;
+    }
+    if (isa::is_hsv_op(ctx.op_id)) {
+        ctx.mem_wdata = ctx.rrs2;
+        memory_store_phase(machine);
+        return;
+    }
+
     if (isa::is_cmo_op(ctx.op_id)) {
         simrv::memory::MemoryAccess::execute_cmo(machine.memory_, *this, ctx.mem_addr, ctx.op_id);
         return;
@@ -71,9 +85,12 @@ void CPU::memory_load_phase(Machine& machine) {
     const auto opcode = static_cast<Opcode>(ctx.opcode);
     const auto funct5 = ctx.funct5;
 
-    if (opcode == Opcode::Load || (opcode == Opcode::Amo && funct5 != Funct5Amo::Sc)) {
-        ctx.mem_rdata =
-            simrv::memory::MemoryAccess::loadInt(machine.memory_, *this, ctx.mem_addr, ctx.funct3);
+    if (opcode == Opcode::Load || isa::is_hlv_op(ctx.op_id) ||
+        (opcode == Opcode::Amo && funct5 != Funct5Amo::Sc)) {
+        const auto access_funct3 =
+            pipeline::operation::effective_memory_funct3(ctx.op_id, ctx.funct3);
+        ctx.mem_rdata = simrv::memory::MemoryAccess::loadInt(machine.memory_, *this, ctx.mem_addr,
+                                                             access_funct3);
     }
 
     if (opcode == Opcode::LoadFp) {
@@ -114,10 +131,13 @@ void CPU::memory_store_phase(Machine& machine) {
     const auto opcode = static_cast<Opcode>(ctx.opcode);
     const auto funct5 = ctx.funct5;
 
-    if ((opcode == Opcode::Store) || (opcode == Opcode::Amo && funct5 == Funct5Amo::Sc) ||
+    if ((opcode == Opcode::Store) || isa::is_hsv_op(ctx.op_id) ||
+        (opcode == Opcode::Amo && funct5 == Funct5Amo::Sc) ||
         (opcode == Opcode::Amo && funct5 != Funct5Amo::Lr && funct5 != Funct5Amo::Sc)) {
+        const auto access_funct3 =
+            pipeline::operation::effective_memory_funct3(ctx.op_id, ctx.funct3);
         simrv::memory::MemoryAccess::storeInt(machine.memory_, *this, ctx.mem_addr, ctx.mem_wdata,
-                                              ctx.funct3);
+                                              access_funct3);
     }
 
     if (opcode == Opcode::StoreFp) {

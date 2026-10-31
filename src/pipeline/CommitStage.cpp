@@ -25,7 +25,13 @@ void CPU::run_writeback_stage(Machine& machine) { writeback_registers(machine); 
 
 void CPU::writeback_registers(Machine& machine) {
     const auto effects = pipeline::build_writeback_effects(active_context());
-    e_icount += effects.increments_instruction_count;
+    account_retirement(effects.increments_instruction_count);
+    if (effects.increments_instruction_count != 0) {
+        record_hpm_event(HpmEvent::Instructions, effects.increments_instruction_count);
+        record_hpm_instruction_classes(active_context().op_id,
+                                       static_cast<Opcode>(active_context().opcode),
+                                       active_context().cinsn != 0);
+    }
     if (simrv::compiler::unlikely(machine.instruction_mix_enabled()) &&
         effects.increments_instruction_count != 0) {
         const auto op = active_context().op_id;
@@ -41,7 +47,7 @@ void CPU::writeback_registers(Machine& machine) {
         }
         state_.regs.write_fp(effects.floating_write.destination, effects.floating_write.value);
     }
-    if (effects.marks_floating_point_dirty) state_.mstatus |= MstatusBit::Fs;
+    if (effects.marks_floating_point_dirty) state_.mark_extension_dirty(MstatusBit::Fs);
     if (effects.integer_write.enabled) {
         state_.regs.write_branchless(effects.integer_write.destination,
                                      effects.integer_write.value);
@@ -72,7 +78,8 @@ void CPU::commit_control_flow_and_traps([[maybe_unused]] Machine& machine) {
     const auto opcode = static_cast<Opcode>(ctx.opcode);
     const auto funct3 = static_cast<Funct3>(ctx.funct3);
 
-    if (!ctx.pending_exception.has_value() && opcode == Opcode::System) {
+    if (!ctx.pending_exception.has_value() && opcode == Opcode::System && ctx.op_id != MOP &&
+        !isa::is_hypervisor_memory_op(ctx.op_id)) {
         if (funct3 == Funct3::Priv) {
             switch (static_cast<Funct12Priv>(ctx.funct12)) {
                 case Funct12Priv::Uret: {
@@ -105,6 +112,15 @@ void CPU::commit_control_flow_and_traps([[maybe_unused]] Machine& machine) {
                         const bool match_all_asid = (std::to_underlying(ctx.rs2) == 0);
                         TLB_flush(match_all_vaddr, ctx.rrs1, match_all_asid,
                                   static_cast<simrv::xlen::Word>(ctx.rrs2));
+                    } else if (ctx.funct7 ==
+                                   static_cast<simrv::xlen::Instruction>(Funct7Priv::HfenceVvma) ||
+                               ctx.funct7 ==
+                                   static_cast<simrv::xlen::Instruction>(Funct7Priv::HinvalVvma) ||
+                               ctx.funct7 ==
+                                   static_cast<simrv::xlen::Instruction>(Funct7Priv::HfenceGvma) ||
+                               ctx.funct7 ==
+                                   static_cast<simrv::xlen::Instruction>(Funct7Priv::HinvalGvma)) {
+                        TLB_flush();
                     }
                     break;
             }
@@ -120,37 +136,6 @@ void CPU::commit_control_flow_and_traps([[maybe_unused]] Machine& machine) {
         }
     }
 
-    simrv::xlen::Word const pending_interrupts = state_.mip & state_.mie;
-    simrv::xlen::Word enable_interrupts = 0;
-    simrv::xlen::Word mask = 0;
-    simrv::xlen::Word irq_num = 32;
-    if (simrv::compiler::unlikely(pending_interrupts != 0u)) {
-        switch (state_.priv) {
-            case kPrivMachine: {
-                if ((state_.mstatus & MstatusBit::Mie) != 0u) {
-                    enable_interrupts = ~state_.mideleg;
-                }
-                break;
-            }
-            case kPrivSupervisor: {
-                enable_interrupts = ~state_.mideleg;
-                if ((state_.mstatus & MstatusBit::Sie) != 0u) {
-                    enable_interrupts |= state_.mideleg;
-                }
-                break;
-            }
-            case kPrivUser: {
-                enable_interrupts = ~0;
-                break;
-            }
-            default:
-                break;
-        }
-        mask = pending_interrupts & enable_interrupts;
-        if (mask != 0) {
-            irq_num = select_highest_priority_interrupt(mask);
-        }
-    }
     if (ctx.pending_exception.has_value()) {
         state_.pc = ctx.cpc.raw();
         raise_exception(std::to_underlying(*ctx.pending_exception), ctx.pending_tval);
@@ -172,9 +157,7 @@ void CPU::commit_control_flow_and_traps([[maybe_unused]] Machine& machine) {
             state_.pc = static_cast<simrv::xlen::Register>(
                 static_cast<int64_t>(static_cast<int32_t>(state_.pc)));
         }
-        if (mask != 0) {
-            raise_exception(kInterruptCauseBit | irq_num, 0);
-        }
+        dispatch_pending_interrupts();
     }
 }
 

@@ -26,7 +26,7 @@
 
 namespace simrv::cache {
 
-template <uint32_t NumLines = 64, uint32_t LineBytes = 32, uint32_t Ways = 4>
+template <uint32_t NumLines = 32, uint32_t LineBytes = 64, uint32_t Ways = 4>
 class BaseCache {
    public:
     static constexpr uint32_t kNumLines = NumLines;
@@ -51,7 +51,7 @@ class BaseCache {
         std::array<uint8_t, 13> padding{};      ///< Explicit padding (offset 19..32)
         alignas(16)
             std::array<simrv::xlen::Byte, kLineBytes> data{};  ///< 16-byte aligned payload buffer
-                                                               ///< (32 bytes, offset 32..64)
+                                                               ///< Payload starts at offset 32.
     };
 
     struct EvictedLine {

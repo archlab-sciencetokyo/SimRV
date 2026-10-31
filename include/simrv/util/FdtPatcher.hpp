@@ -4,6 +4,7 @@
 #include <expected>
 #include <span>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace simrv::util {
@@ -15,6 +16,10 @@ struct FdtFramebufferInfo {
     uint64_t base = 0;
     uint64_t size = 0;
 };
+
+/** Reject CPU ISA extensions advertised by an FDT when they are disabled in the selected MISA. */
+auto validate_fdt_isa(std::span<const uint8_t> blob, uint64_t selected_misa)
+    -> std::expected<void, std::string>;
 
 /** Patch a supplied flattened device tree to match the active SimRV RAM and hart count. */
 auto patch_fdt(std::span<const uint8_t> blob, uint64_t dram_base, uint64_t dram_size,

@@ -35,7 +35,7 @@ jobs:
       - name: Install build tools
         run: |
           dnf update -y
-          dnf install -y git cmake ninja-build gcc gcc-c++ clang-tools-extra wget tar xz autoconf make which rpm-build rpmlint
+          dnf install -y git cmake ninja-build gcc gcc-c++ clang-tools-extra wget tar xz autoconf make which
 
       - name: Fetch and compile riscv-tests
         run: |
@@ -113,25 +113,60 @@ jobs:
           echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
           echo "asset_base=${ASSET_BASE}" >> "$GITHUB_OUTPUT"
 
-      - name: Build CPack RPM packages
-        if: matrix.arch == 'rv64'
+  rpm-packages:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    permissions:
+      contents: read
+    container:
+      # UBI 9 keeps the glibc baseline at 2.34 while GCC Toolset 15 supplies
+      # the C++23 library needed by SimRV. The executable statically links the
+      # toolset C++ runtime so users do not need GCC Toolset installed.
+      image: registry.access.redhat.com/ubi9/ubi:9
+    steps:
+      - name: Install build tools
         shell: bash
         run: |
           set -euo pipefail
-          MAJOR="${{ steps.names.outputs.simrv_version }}"
-          MAJOR="${MAJOR%%.*}"
-          if (( MAJOR < 3 )); then
-            echo "Native packages begin with SimRV 3.0"
-            exit 0
-          fi
+          dnf install -y gcc-toolset-15-gcc gcc-toolset-15-gcc-c++ \
+            git make python3-pip rpm-build rpmlint findutils binutils
+          python3 -m pip install --break-system-packages cmake==4.3.0 ninja
+          echo "/opt/rh/gcc-toolset-15/root/usr/bin" >> "$GITHUB_PATH"
+          echo "CC=/opt/rh/gcc-toolset-15/root/usr/bin/gcc" >> "$GITHUB_ENV"
+          echo "CXX=/opt/rh/gcc-toolset-15/root/usr/bin/g++" >> "$GITHUB_ENV"
+      - uses: actions/checkout@v6
+      - name: Validate release tag
+        id: names
+        shell: bash
+        run: |
+          set -euo pipefail
+          SIMRV_VERSION="$(sed -nE 's/^set\(SIMRV_VERSION "([^"]+)"\)$/\1/p' CMakeLists.txt | head -n 1)"
+          test "${GITHUB_REF_NAME}" = "v${SIMRV_VERSION}"
+          test "${SIMRV_VERSION%%.*}" -ge 3
+          echo "simrv_version=${SIMRV_VERSION}" >> "$GITHUB_OUTPUT"
+          echo "asset_base=SimRV-linux-x86_64-v${SIMRV_VERSION}" >> "$GITHUB_OUTPUT"
+      - name: Configure and build RHEL 9 baseline
+        shell: bash
+        run: |
+          set -euo pipefail
+          cmake --preset rv64-release \
+            -DCMAKE_C_COMPILER="$CC" -DCMAKE_CXX_COMPILER="$CXX" \
+            -DSIMRV_ALLOW_UNQUALIFIED_TOOLCHAIN=ON \
+            -DSIMRV_X86_64_V3_BASELINE=OFF \
+            -DCMAKE_EXE_LINKER_FLAGS="-static-libgcc -static-libstdc++"
+          cmake --build --preset rv64-release --parallel 2
+          ! readelf -d build/rv64-release/simrv | grep -Eq 'libstdc\+\+|libgcc_s'
+          max_glibc="$(readelf --version-info build/rv64-release/simrv \
+            | sed -nE 's/.*Name: GLIBC_([0-9.]+).*/\1/p' | sort -V | tail -n 1)"
+          test -n "$max_glibc"
+          test "$(printf '%s\n' "$max_glibc" 2.34 | sort -V | tail -n 1)" = 2.34
+          ctest --test-dir build/rv64-release --output-on-failure -R package-install-consumer
+      - name: Build and validate RPM packages
+        shell: bash
+        run: |
+          set -euo pipefail
           mkdir -p packages
-          cpack --config build/${{ matrix.arch }}-release/CPackConfig.cmake -G RPM -B packages
-
-      - name: Validate native package contents
-        if: matrix.arch == 'rv64'
-        shell: bash
-        run: |
-          set -euo pipefail
+          cpack --config build/rv64-release/CPackConfig.cmake -G RPM -B packages
           mapfile -t rpms < <(find packages -maxdepth 1 -name '*.rpm' -type f | sort)
           test "${#rpms[@]}" -eq 4
           for package in "${rpms[@]}"; do rpm -qpl "$package" >/dev/null; done
@@ -143,15 +178,12 @@ jobs:
           grep -q '/include/simrv/core/MachineConfig.hpp$' packages/development-rpm-contents.txt
           grep -q '/libsimrv-runtime.a$' packages/development-rpm-contents.txt
           grep -q '/cmake/SimRV/SimRVConfig.cmake$' packages/development-rpm-contents.txt
-          if grep -Eq '/include/simrv/|/libsimrv-runtime\.a$|/cmake/SimRV/' packages/runtime-rpm-contents.txt; then
-            echo "Runtime RPM unexpectedly contains SDK files" >&2
+          if rpm -qp --requires "$runtime_rpm" | grep -Eq 'libstdc\+\+|libgcc_s|GLIBCXX'; then
+            echo "Runtime RPM unexpectedly requires the GCC Toolset C++ runtime" >&2
             exit 1
           fi
-          if grep -q 'simrv-benchmark' packages/runtime-rpm-contents.txt; then
-            echo "Runtime RPM unexpectedly contains benchmark tooling" >&2
-            exit 1
-          fi
-          rpm -qp --requires "$development_rpm" | grep -Fx "simrv = $(rpm -qp --qf '%{VERSION}-%{RELEASE}' "$runtime_rpm")"
+          rpm -qp --requires "$development_rpm" | grep -Fx \
+            "simrv = $(rpm -qp --qf '%{VERSION}-%{RELEASE}' "$runtime_rpm")"
           rpmlint --rpmlintrc packaging/simrv.rpmlintrc packages/*.rpm
           dnf install -y packages/*.rpm
           simrv --version | grep -F "${{ steps.names.outputs.simrv_version }}"
@@ -164,14 +196,10 @@ jobs:
             echo "simrv-devel remained installed after removal" >&2
             exit 1
           fi
-
-      - name: Upload workflow artifacts
-        if: matrix.arch == 'rv64'
-        uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@v7
         with:
           name: ${{ steps.names.outputs.asset_base }}-rpm
-          path: |
-            packages/*.rpm
+          path: packages/*.rpm
           retention-days: 14
 
   portable-musl:
@@ -242,14 +270,25 @@ jobs:
     permissions:
       contents: write
     container:
-      image: gcc:16
+      # Build against Noble's glibc baseline. GCC 15 provides std::flat_map and
+      # std::flat_set; static C++ runtime linkage keeps the package runnable on
+      # stock Noble without requiring the toolchain PPA at runtime.
+      image: ubuntu:24.04
     steps:
-      - uses: actions/checkout@v6
       - name: Install package build tools
+        shell: bash
         run: |
+          set -euo pipefail
           apt-get update
-          apt-get install -y --no-install-recommends python3 python3-pip dpkg-dev xz-utils lintian
+          apt-get install -y --no-install-recommends git software-properties-common \
+            make binutils python3 python3-pip dpkg-dev xz-utils lintian
+          add-apt-repository -y ppa:ubuntu-toolchain-r/test
+          apt-get update
+          apt-get install -y --no-install-recommends gcc-15 g++-15
           python3 -m pip install --break-system-packages cmake==4.3.0 ninja
+          echo "CC=gcc-15" >> "$GITHUB_ENV"
+          echo "CXX=g++-15" >> "$GITHUB_ENV"
+      - uses: actions/checkout@v6
       - name: Validate release tag
         id: names
         shell: bash
@@ -264,8 +303,20 @@ jobs:
       - name: Configure and build
         run: |
           cmake --preset rv64-release \
-            -DCMAKE_C_COMPILER=gcc -DCMAKE_CXX_COMPILER=g++
+            -DCMAKE_C_COMPILER="$CC" -DCMAKE_CXX_COMPILER="$CXX" \
+            -DSIMRV_ALLOW_UNQUALIFIED_TOOLCHAIN=ON \
+            -DSIMRV_X86_64_V3_BASELINE=OFF \
+            -DCMAKE_EXE_LINKER_FLAGS="-static-libgcc -static-libstdc++"
           cmake --build --preset rv64-release --parallel 2
+          max_glibc="$(readelf --version-info build/rv64-release/simrv \
+            | sed -nE 's/.*Name: GLIBC_([0-9.]+).*/\1/p' | sort -V | tail -n 1)"
+          test -n "$max_glibc"
+          test "$(printf '%s\n' "$max_glibc" 2.39 | sort -V | tail -n 1)" = 2.39
+          ! readelf -d build/rv64-release/simrv | grep -Eq 'libstdc\+\+|libgcc_s'
+          if readelf --version-info build/rv64-release/simrv | grep -q 'Name: GLIBCXX_'; then
+            echo "Ubuntu DEB runtime unexpectedly depends on a dynamic libstdc++ symbol" >&2
+            exit 1
+          fi
       - name: Validate install tree
         run: ctest --test-dir build/rv64-release --output-on-failure -R package-install-consumer
       - name: Build and validate DEB packages
@@ -273,7 +324,8 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p packages
-          cpack --config build/rv64-release/CPackConfig.cmake -G DEB -B packages
+          cpack --config build/rv64-release/CPackConfig.cmake \
+            -D CPACK_DEBIAN_RUNTIME_PACKAGE_DEPENDS=libc6 -G DEB -B packages
           mapfile -t debs < <(find packages -maxdepth 1 -name '*.deb' -type f | sort)
           test "${#debs[@]}" -eq 4
           for package in "${debs[@]}"; do dpkg-deb --contents "$package" >/dev/null; done
@@ -291,6 +343,10 @@ jobs:
           fi
           dpkg-deb --field "$runtime_deb" Depends > packages/runtime-deb-depends.txt
           grep -q 'libc6' packages/runtime-deb-depends.txt
+          if grep -Eq 'libgcc-s1|libstdc\+\+6' packages/runtime-deb-depends.txt; then
+            echo "Runtime DEB unexpectedly depends on the C++ compiler runtime" >&2
+            exit 1
+          fi
           runtime_version="$(dpkg-deb --field "$runtime_deb" Version)"
           dpkg-deb --field "$development_deb" Depends | grep -F "simrv (= ${runtime_version})"
           if grep -q 'simrv-benchmark' packages/runtime-deb-contents.txt; then
@@ -320,7 +376,7 @@ jobs:
           retention-days: 14
 
   package-distro-matrix:
-    needs: [build-and-upload, debian-packages, portable-musl]
+    needs: [build-and-upload, rpm-packages, debian-packages, portable-musl]
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
@@ -331,6 +387,10 @@ jobs:
         include:
           - image: fedora:44
             family: rpm
+          - image: rockylinux:9
+            family: rpm
+          - image: ubuntu:24.04
+            family: deb
           - image: debian:sid
             family: deb
           - image: fedora:40
@@ -382,7 +442,7 @@ jobs:
           fi
 
   publish-release:
-    needs: [build-and-upload, debian-packages, portable-musl, package-distro-matrix]
+    needs: [build-and-upload, rpm-packages, debian-packages, portable-musl, package-distro-matrix]
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:

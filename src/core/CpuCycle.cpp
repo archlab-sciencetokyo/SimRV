@@ -4,6 +4,7 @@
  */
 #include <array>
 #include <atomic>
+#include <shared_mutex>
 #include <string_view>
 
 #include "CpuExecutionHelpers.hpp"
@@ -258,12 +259,14 @@ void CPU::execute_ca_cycle_stages(Machine& machine, simrv::xlen::Counter retired
         ca_pipeline.memory->tlb_miss || ca_pipeline.writeback->tlb_miss ||
         ca_state.instruction_fill.active || ca_state.data_transfer.active ||
         ca_state.instruction_walk.active || ca_state.data_walk.active ||
+        ca_state.waiting_for_interconnect ||
         simrv::compiler::unlikely(machine.trace().is_architecture_trace_enabled()) ||
         simrv::compiler::unlikely(record_snapshots);
 
     if (simrv::compiler::likely(!has_events_or_stalls)) {
         pipeline_sim.record_clean_cycle();
     } else {
+        if (ca_state.waiting_for_interconnect) record_hpm_event(HpmEvent::InterconnectStall);
         const bool instruction_walk = ca_state.instruction_walk.active;
         const bool data_walk = ca_state.data_walk.active;
         const bool fetch_stalled = ca_pipeline.fetch->remaining_latency != 0 ||
@@ -277,6 +280,13 @@ void CPU::execute_ca_cycle_stages(Machine& machine, simrv::xlen::Counter retired
         const bool writeback_stalled =
             ca_pipeline.writeback->remaining_latency != 0 ||
             (three_stage && (ca_state.data_transfer.active || data_walk));
+        const bool any_stall = fetch_stalled || decode_stalled || execute_stalled ||
+                               memory_stalled || writeback_stalled ||
+                               ca_state.waiting_for_interconnect;
+        if (any_stall) record_hpm_event(HpmEvent::StallCycles);
+        if (ca_pipeline.data_hazard_stall) record_hpm_event(HpmEvent::DataHazardStall);
+        if (any_stall && !ca_pipeline.data_hazard_stall)
+            record_hpm_event(HpmEvent::StructuralStall);
         if (machine.trace().is_architecture_trace_enabled()) {
             std::array<simrv::core::PipelineStallRecord, 5> stall_storage{};
             size_t stall_count = 0;
@@ -455,10 +465,14 @@ void CPU::advance_ca_cycle(Machine& machine) {
 }
 
 SIMRV_ALWAYS_INLINE void CPU::tick_cycle_clock(Machine& machine, bool interrupt_boundary) {
+    if (state_.mhartid == 0) {
+        if (auto* uart = machine.uart_device(); uart != nullptr) uart->advance_cycles(1);
+    }
     if (cycle_counter_start_delay_ != 0) {
         --cycle_counter_start_delay_;
     } else {
         ++clint_mmio.mcycle;
+        record_hpm_event(HpmEvent::Cycles);
     }
     if (machine.runtime_profile.is_cycle_mode()) {
         if (interrupt_boundary) handle_cached_interrupts();
@@ -537,6 +551,21 @@ void CPU::run_cycle_baremetal_miss(Machine& machine) {
     run_fetch_stage_baremetal(machine);
     const bool success = !pipeline_context.pending_exception.has_value() && decode_stage(machine);
 
+    std::shared_lock<std::shared_mutex> memory_read_lock;
+    std::unique_lock<std::shared_mutex> memory_write_lock;
+    if (success && machine.is_smp_enabled() && machine.runtime_profile.is_instruction_mode()) {
+        const auto opcode = static_cast<isa::Opcode>(pipeline_context.opcode);
+        if (opcode == isa::Opcode::Load || opcode == isa::Opcode::LoadFp ||
+            isa::is_hlv_op(pipeline_context.op_id)) {
+            memory_read_lock = std::shared_lock(machine.instruction_memory_mutex());
+        } else if (opcode == isa::Opcode::Store || opcode == isa::Opcode::StoreFp ||
+                   opcode == isa::Opcode::Amo || opcode == isa::Opcode::OpV ||
+                   isa::is_hsv_op(pipeline_context.op_id) ||
+                   isa::is_cmo_op(pipeline_context.op_id)) {
+            memory_write_lock = std::unique_lock(machine.instruction_memory_mutex());
+        }
+    }
+
     if (success && !pipeline_context.pending_exception.has_value()) {
         CachedOp op;
         op.copy_from(pipeline_context);
@@ -562,7 +591,11 @@ void CPU::run_cycle_baremetal_miss(Machine& machine) {
         raise_exception(static_cast<simrv::xlen::TrapCause>(cause), pipeline_context.pending_tval);
     }
 
-    clint_mmio.mcycle++;
+    account_arch_cycles();
+    record_hpm_event(HpmEvent::Cycles);
+    if (state_.mhartid == 0) {
+        if (auto* uart = machine.uart_device(); uart != nullptr) uart->advance_cycles(1);
+    }
     if (machine.clock_divider().advance_ca_cycle(clint_mmio.rtc_divider, clint_mmio.mtime)) {
         evaluate_timer_interrupt();
     }
@@ -645,7 +678,11 @@ void CPU::run_cycle_baremetal(Machine& machine) {
             } else {
                 execute_cached_op_fast<false, false>(machine, *cached, machine.ram_view());
             }
-            clint_mmio.mcycle++;
+            account_arch_cycles();
+            record_hpm_event(HpmEvent::Cycles);
+            if (state_.mhartid == 0) {
+                if (auto* uart = machine.uart_device(); uart != nullptr) uart->advance_cycles(1);
+            }
             if (machine.clock_divider().advance_ca_cycle(clint_mmio.rtc_divider,
                                                          clint_mmio.mtime)) {
                 evaluate_timer_interrupt();
@@ -680,13 +717,19 @@ void CPU::run_cycle_baremetal(Machine& machine) {
 }
 
 void CPU::run_memory_stage_baremetal(Machine& machine) {
+    if (isa::is_hypervisor_memory_op(pipeline_context.op_id)) {
+        run_memory_stage(machine);
+        return;
+    }
     if (simrv::compiler::unlikely(machine.breakpoint_manager().has_any())) {
         run_memory_stage(machine);
         return;
     }
-    // The specialized direct-RAM stage does not implement PMP checks. Preserve the full
-    // memory-stage path whenever locked PMP entries make machine-mode accesses restrictive.
-    if (simrv::compiler::unlikely(state_.has_locked_pmp)) {
+    // The specialized direct-RAM stage bypasses address translation and does not implement
+    // lower-privilege PMP checks. Use the full memory path outside M-mode, where translation,
+    // page permissions, and PMP can all affect whether a RAM access is permitted.
+    if (simrv::compiler::unlikely(state_.has_locked_pmp ||
+                                  effective_data_privilege() != kPrivMachine)) {
         run_memory_stage(machine);
         return;
     }
@@ -696,6 +739,11 @@ void CPU::run_memory_stage_baremetal(Machine& machine) {
     }
 
     if (is_vector_op(ctx.op_id)) {
+        return;
+    }
+
+    if (isa::is_cmo_op(ctx.op_id)) {
+        simrv::memory::MemoryAccess::execute_cmo(machine.memory_, *this, ctx.mem_addr, ctx.op_id);
         return;
     }
 
@@ -721,7 +769,7 @@ void CPU::run_memory_stage_baremetal(Machine& machine) {
         }
     } else if (opcode == Opcode::Amo && funct5 != Funct5Amo::Sc) {
         if (simrv::compiler::unlikely(!isa::amo_address_aligned(addr, ctx.funct3))) {
-            ctx.pending_exception = ExceptionCode::MisalignedStore;
+            ctx.pending_exception = ExceptionCode::FaultStore;
             ctx.pending_tval = addr;
             return;
         }
@@ -751,6 +799,14 @@ void CPU::run_memory_stage_baremetal(Machine& machine) {
         if (simrv::compiler::likely(machine.memory_geometry().contains(addr, access_size))) {
             const auto f3 = ctx.funct3;
             switch (f3) {
+                case Funct3::Flh: {
+                    const auto half = simrv::memory::ram_read_fast(
+                        addr, static_cast<simrv::xlen::Instruction>(Funct3::Lhu),
+                        machine.ram_view());
+                    ctx.fp_mem_rdata =
+                        static_cast<uint64_t>(~uint64_t{0xFFFF}) | static_cast<uint16_t>(half);
+                    break;
+                }
                 case Funct3::Flw: {
                     const simrv::xlen::Word lo = simrv::memory::ram_read_fast(
                         addr, static_cast<simrv::xlen::Instruction>(Funct3::Lw),
@@ -817,24 +873,27 @@ void CPU::run_memory_stage_baremetal(Machine& machine) {
                             ? (ctx.funct3 == Funct3::Sw || ctx.funct3 == Funct3::Sd)
                             : (ctx.funct3 == Funct3::Sw);
                     if (is_tohost_write) {
-                        machine.tohost.store(
-                            simrv::xlen::kIsXLen64
-                                ? ctx.mem_wdata
-                                : ((machine.tohost.load(std::memory_order_relaxed) &
-                                    0xFFFFFFFF00000000ULL) |
-                                   ctx.mem_wdata),
-                            std::memory_order_relaxed);
+                        const uint64_t previous = machine.tohost.load(std::memory_order_relaxed);
+                        const uint64_t value = ctx.funct3 == Funct3::Sw || !simrv::xlen::kIsXLen64
+                                                   ? ((previous & 0xFFFFFFFF00000000ULL) |
+                                                      (ctx.mem_wdata & 0xFFFFFFFFULL))
+                                                   : ctx.mem_wdata;
+                        machine.publish_tohost_write(
+                            value, ctx.funct3 == Funct3::Sw && state_.regs.xlen != 32
+                                       ? Machine::TohostWriteKind::LowWord
+                                       : Machine::TohostWriteKind::Full);
                     }
-                } else if (simrv::compiler::unlikely(!simrv::xlen::kIsXLen64 &&
+                } else if (simrv::compiler::unlikely(ctx.funct3 == Funct3::Sw &&
                                                      (addr == machine.isa_test_tohost() + 4 ||
                                                       addr == 0x80001004ULL ||
                                                       addr == 0x40008004ULL))) {
                     const bool is_tohost_write = (ctx.funct3 == Funct3::Sw);
                     if (is_tohost_write) {
-                        machine.tohost.store((machine.tohost.load(std::memory_order_relaxed) &
-                                              0x00000000FFFFFFFFULL) |
-                                                 (static_cast<uint64_t>(ctx.mem_wdata) << 32),
-                                             std::memory_order_relaxed);
+                        machine.publish_tohost_write(
+                            (machine.tohost.load(std::memory_order_relaxed) &
+                             0x00000000FFFFFFFFULL) |
+                                (static_cast<uint64_t>(ctx.mem_wdata) << 32),
+                            Machine::TohostWriteKind::HighWord);
                     }
                 }
             }
@@ -856,6 +915,11 @@ void CPU::run_memory_stage_baremetal(Machine& machine) {
                                     !is_tohost_addr(machine, addr))) {
             const auto f3 = ctx.funct3;
             switch (f3) {
+                case Funct3::Fsh:
+                    simrv::memory::ram_write_fast(
+                        addr, static_cast<simrv::xlen::Word>(ctx.fp_mem_wdata & 0xFFFFU),
+                        static_cast<simrv::xlen::Instruction>(Funct3::Sh), machine.ram_view());
+                    break;
                 case Funct3::Fsw:
                     simrv::memory::ram_write_fast(
                         addr,
@@ -917,6 +981,10 @@ auto CPU::fetch_stage(Machine& machine, simrv::xlen::Address pc) -> bool {
     // before decoding the next instruction so cache misses still perform loads.
     if (!machine.runtime_profile.is_cycle_mode()) {
         context.memory_load_complete = false;
+        machine.memory_.system_bus().cancel_source(
+            simrv::memory::make_tl_source(hart_id(), simrv::memory::TlPort::Instruction));
+        machine.memory_.system_bus().cancel_source(
+            simrv::memory::make_tl_source(hart_id(), simrv::memory::TlPort::Data));
     }
 
     run_fetch_stage(machine);

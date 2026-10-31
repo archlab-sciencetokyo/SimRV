@@ -44,6 +44,7 @@ struct RuntimeOptions {
     std::string fn_summary;
     std::string fn_events;
     std::string fn_uart_transcript;
+    std::string fn_signature;
     std::string fn_archtrace;
     std::string trace_dir = "trace";
     uint8_t trace_level = 3;
@@ -95,6 +96,8 @@ struct RuntimeOptions {
     bool bp_trace = false;
     bool trace_enabled = false;
     bool use_opensbi = false;
+    bool no_sbi = false;
+    bool act_test_hooks = false;
     RequestedExecutionMode execution_mode = RequestedExecutionMode::Fast;
     bool execution_mode_explicit = false;
     bool high_contrast = false;

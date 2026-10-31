@@ -1,7 +1,8 @@
 # Building Linux Images for SimRV
 
-This guide explains how to build RISC-V RV32GC (or RV64GC) Linux kernel and rootfs
-images for SimRV testing. The default RV64 image builder also provisions a reproducible Alpine
+This guide explains how to build RISC-V Linux kernel and rootfs images for SimRV's
+RVA23-targeted RV64 system and its supported RV32 compatibility configurations. The default
+RV64 image builder also provisions a reproducible Alpine
 Linux graphical path using Xorg, JWM, VirtIO framebuffer/input, a terminal, and small
 offline-friendly demo applications.
 
@@ -43,12 +44,36 @@ building them from source.
 # Optional alternate Alpine mirror (also settable via SIMRV_ALPINE_MIRROR)
 ./scripts/build-linux-image.sh --alpine-mirror https://dl-5.alpinelinux.org/alpine
 
+# Alpine Linux with a RISC-V EFI-stub kernel and GPT disk with an EFI System Partition
+./scripts/build-linux-image.sh --arch rv64 --rootfs alpine --profile uefi
+
 # Show full make/compiler commands when diagnosing a failed build
 ./scripts/build-linux-image.sh --verbose
 
 # Reuse the published kernel if its architecture, profile, initramfs, and config match
 ./scripts/build-linux-image.sh --reuse-kernel
 ```
+
+The UEFI profile builds the pinned EDK2 RISC-V virt firmware and publishes
+`RISCV_VIRT_CODE.fd`, a pristine `RISCV_VIRT_VARS.fd` template, `uefi-kernel.efi`, and
+`uefi-disk.img` under `linux-images/rv64/alpine-uefi/`. The disk contains a FAT32 EFI System
+Partition with `EFI/BOOT/BOOTRISCV64.EFI` and the Alpine root filesystem as a second GPT
+partition. `setup.sh` exports the firmware, kernel, and disk paths.
+
+The boot chain is OpenSBI in M-mode, EDK2 in S-mode from PFlash0 (`0x20000000`), then the EFI-stub
+Linux kernel. Copy the VARS template to a writable working file before starting; EDK2 persists
+firmware changes to that copy:
+
+```bash
+cp "$SIMRV_UEFI_VARS_TEMPLATE" ./simrv-uefi-vars.fd
+simrv --uefi "$SIMRV_UEFI_CODE" --uefi-vars ./simrv-uefi-vars.fd \
+  -m "$SIMRV_LINUX_OPENSBI" -D "$SIMRV_UEFI_DISK_IMG" --cli
+```
+
+The simulator passes the generated FDT in `a1` and an OpenSBI FW_DYNAMIC structure in `a2`. OpenSBI
+then enters EDK2 at the configured flash base in S-mode. The UEFI images fit SimRV's two 32 MiB
+pflash devices; the firmware VARS template remains unchanged by booting from the copied working
+file.
 
 With `--reuse-kernel`, the builder preserves the existing Linux build tree while checking the
 published image manifest and kernel hash. It skips the kernel compile only when the architecture,
@@ -65,11 +90,11 @@ example:
     --alpine-version 3.24.2
 ```
 
-The current defaults are Linux 7.2.10, OpenSBI 1.9, BusyBox 1.38.0, Alpine 3.24.2, and Buildroot
-2025.02.18. Buildroot stays on its long-term-support series by default. When selecting another
-Buildroot release, pass its archive SHA-256 as `--buildroot-sha256` as well; the script verifies
-the archive before extracting it. Source archives are cached by version, so switching versions
-keeps the previously downloaded sources available.
+The current defaults are Linux 7.3, OpenSBI 1.9, BusyBox 1.38.0, Alpine 3.24.3, and Buildroot
+2026.08.1. This follows Buildroot's latest stable line and supplies the newer EDK2 RISC-V firmware
+integration. When selecting another Buildroot release, pass its archive SHA-256 as
+`--buildroot-sha256` as well; the script verifies the archive before extracting it. Source archives
+are cached by version, so switching versions keeps the previously downloaded sources available.
 
 Check upstream versions without starting a build:
 
@@ -80,9 +105,9 @@ Check upstream versions without starting a build:
 To review and save available upstream versions to `scripts/linux-versions.conf`, then build using
 them, run `--update-versions`. It asks for confirmation first. Add `--prune-old-sources` to offer
 an additional confirmation before deleting cached source archives and trees for replaced versions.
-`--yes` accepts both prompts for unattended use. Buildroot checks both its LTS and stable lines,
-but a new LTS pin must be selected manually with `--buildroot-version` and a verified
-`--buildroot-sha256` before it can be saved.
+`--yes` accepts both prompts for unattended use. Buildroot's stable and LTS releases are reported
+separately. A Buildroot pin change must be made with its verified archive SHA-256 in
+`scripts/build-linux-image.sh` and `scripts/linux-versions.conf` together.
 
 This will:
 
@@ -241,6 +266,11 @@ the guest serial console; guest graphics are independent of Sixel presentation.
 The Alpine simulator image intentionally has an empty root password so serial login and privilege
 tests work out of the box. Set a board-specific password or key-based policy before using an image
 on shared or production FPGA hardware.
+
+The guest image includes Alpine's `alpine-conf` package, which provides `setup-alpine` and related
+system setup tools for image administration. The SimRV image is already configured for its virtual
+hardware, so these tools are available on demand and are not run automatically during image build or
+guest startup.
 
 For TAP networking, run `simrv_linux_setup_network` after sourcing the generated `setup.sh`, or run
 `sudo scripts/setup-simrv-tap.sh` before launching the guest. It configures the
@@ -444,7 +474,7 @@ linux-build/
 ├── sources/
 │   ├── linux-7.2.10.tar.xz
 │   ├── opensbi-1.9.tar.gz
-│   └── buildroot-2025.02.18.tar.xz  # Buildroot profile only
+│   └── buildroot-2026.08.1.tar.xz   # Buildroot profiles
 ├── linux-7.2.10/              # shared extracted kernel source/build tree
 │   └── vmlinux
 ├── initramfs-rv64/             # generated per architecture

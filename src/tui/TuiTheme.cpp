@@ -27,7 +27,7 @@ const char* g_theme_sky =
 const char* g_theme_pink =
     kAdaptivePink;  // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 const char* g_theme_modal_bg =
-    "\033[40m";  // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
+    kAdaptiveModalBg;  // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 
 std::array<const char*, 16> g_theme_palette =
     kHighContrastPalette;  // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
@@ -196,7 +196,7 @@ void apply_theme_palette() {
             g_theme_coral = kAdaptiveCoral;
             g_theme_sky = kAdaptiveSky;
             g_theme_pink = kAdaptivePink;
-            g_theme_modal_bg = "\033[40m";
+            g_theme_modal_bg = kAdaptiveModalBg;
             g_theme_palette = kHighContrastPalette;
             g_theme_bg_palette = kHighContrastBgPalette;
             break;

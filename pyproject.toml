@@ -8,7 +8,6 @@ dependencies = []
 [dependency-groups]
 docs = [
   "zensical==0.0.68; python_version >= '3.11'",
-  "mike @ git+https://github.com/squidfunk/mike.git ; python_version >= '3.11'",
   "pymdown-extensions>=11,<12",
 ]
 dev = [

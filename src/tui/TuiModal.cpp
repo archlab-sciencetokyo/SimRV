@@ -93,7 +93,8 @@ void TuiModal::open(ModalType type, InspectorPane* inspector_pane, uint64_t step
                 std::make_unique<modals::GlossaryModal>(glossary_topic_, glossary_scroll_);
             break;
         case ModalType::Settings:
-            modals::SettingsModal::open(settings_draft_, machine_, density_mode_);
+            modals::SettingsModal::open(settings_draft_, machine_, density_mode_,
+                                        get_active_theme_style());
             active_modal_impl_ =
                 std::make_unique<modals::SettingsModal>(this, &machine_, settings_draft_);
             break;
@@ -154,9 +155,25 @@ void TuiModal::open_file_picker() {
     file_picker_return_input_ = input_;
     path_completion_preview_.clear();
     const std::filesystem::path typed(input_);
-    file_picker_directory_ = typed.has_parent_path() ? typed.parent_path() : ".";
-    if (file_picker_directory_.empty()) file_picker_directory_ = ".";
-    file_picker_filter_ = typed.filename().string();
+    std::error_code directory_error;
+    const bool typed_is_directory =
+        !typed.empty() && std::filesystem::is_directory(typed, directory_error);
+    const bool has_trailing_separator =
+        !input_.empty() && input_.back() == std::filesystem::path::preferred_separator;
+    const bool navigate_into_typed_path = typed_is_directory || has_trailing_separator;
+    const auto typed_parent =
+        navigate_into_typed_path
+            ? typed
+            : (typed.has_parent_path() ? typed.parent_path() : std::filesystem::path("."));
+    std::error_code path_error;
+    file_picker_directory_ = std::filesystem::absolute(typed_parent, path_error);
+    if (path_error) file_picker_directory_ = std::filesystem::current_path();
+    file_picker_directory_ = file_picker_directory_.lexically_normal();
+    if (file_picker_directory_ != file_picker_directory_.root_path() &&
+        file_picker_directory_.filename().empty()) {
+        file_picker_directory_ = file_picker_directory_.parent_path();
+    }
+    file_picker_filter_ = navigate_into_typed_path ? std::string{} : typed.filename().string();
     file_picker_select_directory_ = load_buildroot_mode_;
     active_modal_ = ModalType::LoadFilePicker;
     active_modal_impl_ = std::make_unique<modals::FilePickerModal>(*this);
@@ -187,7 +204,8 @@ void TuiModal::refresh_file_picker() {
         if (ld != rd) return ld;
         return left.filename().string() < right.filename().string();
     });
-    if (file_picker_filter_.empty()) {
+    if (file_picker_filter_.empty() &&
+        file_picker_directory_ != file_picker_directory_.root_path()) {
         file_picker_entries_.insert(file_picker_entries_.begin(),
                                     (file_picker_directory_ / "..").lexically_normal());
     }
@@ -216,7 +234,7 @@ void TuiModal::accept_file_picker_entry() {
         return;
     }
     if (file_picker_select_directory_ && selected == fs::path(".")) {
-        input_ = file_picker_directory_.string();
+        input_ = file_picker_directory_.lexically_normal().string();
         active_modal_ = file_picker_return_modal_;
         active_modal_impl_ = std::make_unique<modals::LoadModal>(
             this, &machine_, active_modal_, input_, load_appmode_, load_buildroot_mode_,
@@ -225,7 +243,7 @@ void TuiModal::accept_file_picker_entry() {
         return;
     }
     if (file_picker_select_directory_ && selected == file_picker_directory_) {
-        input_ = selected.string();
+        input_ = selected.lexically_normal().string();
         active_modal_ = file_picker_return_modal_;
         active_modal_impl_ = std::make_unique<modals::LoadModal>(
             this, &machine_, active_modal_, input_, load_appmode_, load_buildroot_mode_,
@@ -241,7 +259,9 @@ void TuiModal::accept_file_picker_entry() {
         refresh_file_picker();
         return;
     }
-    input_ = selected.string();
+    std::error_code absolute_error;
+    auto absolute_selected = fs::absolute(selected, absolute_error);
+    input_ = (absolute_error ? selected : absolute_selected).lexically_normal().string();
     active_modal_ = file_picker_return_modal_;
     active_modal_impl_ = std::make_unique<modals::LoadModal>(
         this, &machine_, active_modal_, input_, load_appmode_, load_buildroot_mode_,
@@ -347,7 +367,8 @@ auto TuiModal::remove_bp_at_cursor(
 }
 
 auto TuiModal::tool_filter() const -> modals::ToolFilter {
-    return modals::ToolPickerModal::make_filter(machine_, selected_hart_);
+    return modals::ToolPickerModal::make_filter(machine_, selected_hart_,
+                                                display_graphics_supported_);
 }
 
 void TuiModal::open_tool_picker(int slot_idx, TuiRegPage current_page, int num_slots) {
@@ -475,11 +496,12 @@ void TuiModal::close() {
     path_completion_preview_.clear();
 }
 
-auto TuiModal::submit(InspectorPane* inspector_pane, std::atomic<uint64_t>& step_delay_us,
-                      const std::function<void(TuiRegPage)>& set_reg_page_cb,
-                      const std::function<void(const std::string&)>& set_status_override_cb,
-                      const std::function<void()>& on_speed_changed_cb,
-                      const std::function<void(framework::DensityMode)>& on_density_changed_cb)
+auto TuiModal::submit(
+    InspectorPane* inspector_pane, std::atomic<uint64_t>& step_delay_us,
+    const std::function<void(TuiRegPage)>& set_reg_page_cb,
+    const std::function<void(const std::string&)>& set_status_override_cb,
+    const std::function<void()>& on_speed_changed_cb,
+    const std::function<void(framework::DensityMode, TuiThemeStyle)>& on_presentation_changed_cb)
     -> bool {
     (void)set_status_override_cb;
     bool result = false;
@@ -546,13 +568,16 @@ auto TuiModal::submit(InspectorPane* inspector_pane, std::atomic<uint64_t>& step
             }
             break;
         case ModalType::Settings: {
-            if (on_density_changed_cb) on_density_changed_cb(settings_draft_.density_mode);
             result = modals::SettingsModal::submit(
                 settings_draft_, machine_, set_reg_page_cb,
                 [this](simrv::core::MachineConfig next, SysConfigDraft, bool cycle_accurate) {
                     open_reconfiguration_confirm(std::move(next), "Machine settings changed",
                                                  cycle_accurate);
                 });
+            if (on_presentation_changed_cb) {
+                on_presentation_changed_cb(settings_draft_.density_mode,
+                                           settings_draft_.theme_style);
+            }
             if (result) {
                 open_notice("SETTINGS SAVED",
                             "Simulator & SMP settings saved and applied successfully.", false);
@@ -889,7 +914,10 @@ void TuiModal::render_overlay(std::vector<std::string>& lines, int term_width,
                                                modal_available_height)});
 
     const auto meta = modals::get_modal_metadata(active_modal_, notice_is_error_, notice_title_);
-    const int maximum_width = term_width - 4;
+    constexpr int kMissionObjectiveMaxWidth = 100;
+    const int maximum_width = std::min(term_width - 4, active_modal_ == ModalType::MissionObjective
+                                                           ? kMissionObjectiveMaxWidth
+                                                           : term_width - 4);
     const int provisional_width = maximum_width;
     if (provisional_width < 35) return;
 

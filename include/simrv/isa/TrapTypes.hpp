@@ -44,6 +44,10 @@ enum class ExceptionCode : uint8_t {
     FetchPageFault = 0xc,
     LoadPageFault = 0xd,
     StorePageFault = 0xf,
+    GuestInstructionPageFault = 0x14,
+    GuestLoadPageFault = 0x15,
+    VirtualInstruction = 0x16,
+    GuestStorePageFault = 0x17,
     SoftwareCheck = 0x12,  ///< Software check / pointer checking (cause 18, Privileged ISA 1.13)
     HardwareError = 0x13,  ///< Hardware error (cause 19, Privileged ISA 1.13)
 };
@@ -138,13 +142,15 @@ constexpr simrv::xlen::PrivilegeLevel kPrivUser = simrv::xlen::PrivilegeLevel::U
 constexpr simrv::xlen::PrivilegeLevel kPrivSupervisor = simrv::xlen::PrivilegeLevel::Supervisor;
 constexpr simrv::xlen::PrivilegeLevel kPrivMachine = simrv::xlen::PrivilegeLevel::Machine;
 
-[[nodiscard]] constexpr auto ecall_for_privilege(simrv::xlen::PrivilegeLevel priv) noexcept
+[[nodiscard]] constexpr auto ecall_for_privilege(simrv::xlen::PrivilegeLevel priv,
+                                                 bool virtualization_mode = false) noexcept
     -> ExceptionCode {
     switch (priv) {
         case simrv::xlen::PrivilegeLevel::User:
             return ExceptionCode::UserEcall;
         case simrv::xlen::PrivilegeLevel::Supervisor:
-            return ExceptionCode::SupervisorEcall;
+            return virtualization_mode ? ExceptionCode::HypervisorEcall
+                                       : ExceptionCode::SupervisorEcall;
         case simrv::xlen::PrivilegeLevel::Machine:
         default:
             return ExceptionCode::MachineEcall;
@@ -159,8 +165,10 @@ constexpr simrv::xlen::PrivilegeLevel kPrivMachine = simrv::xlen::PrivilegeLevel
             return 1;
         case ExceptionCode::FaultFetch:
         case ExceptionCode::FetchPageFault:
+        case ExceptionCode::GuestInstructionPageFault:
             return 2;
         case ExceptionCode::IllegalInstruction:
+        case ExceptionCode::VirtualInstruction:
             return 3;
         case ExceptionCode::Breakpoint:
         case ExceptionCode::UserEcall:
@@ -173,8 +181,10 @@ constexpr simrv::xlen::PrivilegeLevel kPrivMachine = simrv::xlen::PrivilegeLevel
             return 5;
         case ExceptionCode::FaultStore:
         case ExceptionCode::StorePageFault:
+        case ExceptionCode::GuestStorePageFault:
         case ExceptionCode::FaultLoad:
         case ExceptionCode::LoadPageFault:
+        case ExceptionCode::GuestLoadPageFault:
             return 6;
         case ExceptionCode::SoftwareCheck:
         case ExceptionCode::HardwareError:

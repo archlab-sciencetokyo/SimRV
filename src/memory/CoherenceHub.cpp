@@ -70,14 +70,14 @@ void CoherenceHub::invalidate_shared_caches(LineAddress line_base) {
 void CoherenceHub::update_dir_entry(LineAddress line_base, const DirectoryEntry& entry) {
     const LineAddress aligned_addr = line_base & ~(static_cast<LineAddress>(kLineBytes - 1u));
     directory_[aligned_addr] = entry;
-    const size_t idx = (aligned_addr >> 5) & kFastCacheMask;
+    const size_t idx = (aligned_addr >> 6) & kFastCacheMask;
     fast_cache_[idx] = FastCacheEntry{.line_base = aligned_addr, .entry = entry};
 }
 
 void CoherenceHub::erase_dir_entry(LineAddress line_base) {
     const LineAddress aligned_addr = line_base & ~(static_cast<LineAddress>(kLineBytes - 1u));
     directory_.erase(aligned_addr);
-    const size_t idx = (aligned_addr >> 5) & kFastCacheMask;
+    const size_t idx = (aligned_addr >> 6) & kFastCacheMask;
     if (fast_cache_[idx].line_base == aligned_addr) {
         fast_cache_[idx].line_base = ~LineAddress{0};
     }
@@ -85,7 +85,7 @@ void CoherenceHub::erase_dir_entry(LineAddress line_base) {
 
 auto CoherenceHub::lookup_dir_entry(LineAddress line_base, DirectoryEntry& out_entry) -> bool {
     const LineAddress aligned_addr = line_base & ~(static_cast<LineAddress>(kLineBytes - 1u));
-    const size_t idx = (aligned_addr >> 5) & kFastCacheMask;
+    const size_t idx = (aligned_addr >> 6) & kFastCacheMask;
     if (fast_cache_[idx].line_base == aligned_addr) {
         out_entry = fast_cache_[idx].entry;
         return true;
@@ -101,7 +101,7 @@ auto CoherenceHub::lookup_dir_entry(LineAddress line_base, DirectoryEntry& out_e
 
 auto CoherenceHub::get_directory_state(LineAddress line_base) const -> DirectoryEntry {
     const LineAddress aligned_addr = line_base & ~(static_cast<LineAddress>(kLineBytes - 1u));
-    const size_t idx = (aligned_addr >> 5) & kFastCacheMask;
+    const size_t idx = (aligned_addr >> 6) & kFastCacheMask;
     if (fast_cache_[idx].line_base == aligned_addr) {
         return fast_cache_[idx].entry;
     }
@@ -146,6 +146,7 @@ void CoherenceHub::probe_hart_dcache(simrv::xlen::HartId hart_id, const TlChanne
         stats_.probe_count++;
         if (probe_resp.opcode == TlOpcodeC::ProbeAckData) {
             stats_.writeback_count++;
+            target_cpu.record_hpm_event(core::HpmEvent::DCacheWriteback);
         }
     }
     machine_.memory().system_bus().record_transaction(

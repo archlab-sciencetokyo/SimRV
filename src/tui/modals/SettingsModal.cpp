@@ -20,6 +20,21 @@
 #include "simrv/tui/modals/SystemConfigModal.hpp"
 
 namespace simrv::tui::modals {
+namespace {
+
+auto theme_style_label(TuiThemeStyle style) -> const char* {
+    switch (style) {
+        case TuiThemeStyle::ClassicAnsi:
+            return "Classic ANSI";
+        case TuiThemeStyle::SakuraPastel:
+            return "Sakura Pastel";
+        case TuiThemeStyle::ModernUnicode:
+        default:
+            return "Modern Unicode";
+    }
+}
+
+}  // namespace
 
 void SettingsModal::render_content(std::vector<std::string>& content_rows, int /*width*/,
                                    int /*height*/) {
@@ -148,7 +163,7 @@ auto SettingsModal::handle_click(framework::ScreenCoord local_pt) -> framework::
 }
 
 void SettingsModal::open(SettingsDraft& draft, const simrv::core::Machine& machine,
-                         framework::DensityMode density_mode) {
+                         framework::DensityMode density_mode, TuiThemeStyle theme_style) {
     draft.active_tab = 0;
     draft.tab_cursor[0] = 0;
     draft.tab_cursor[1] = 0;
@@ -157,6 +172,7 @@ void SettingsModal::open(SettingsDraft& draft, const simrv::core::Machine& machi
     // Tab 0: General
     draft.cycle_accurate = machine.runtime_profile.is_cycle_mode();
     draft.high_contrast = machine.high_contrast_enabled();
+    draft.theme_style = theme_style;
     draft.density_mode = density_mode;
     draft.use_mix = machine.instruction_mix_enabled();
     draft.bp_trace = machine.branch_trace_enabled();
@@ -188,7 +204,7 @@ void SettingsModal::set_tab(SettingsDraft& draft, uint8_t tab) { draft.active_ta
 void SettingsModal::move_cursor(SettingsDraft& draft, int delta) {
     switch (draft.active_tab) {
         case 0: {
-            constexpr int kNumSettings = 14;
+            constexpr int kNumSettings = static_cast<int>(kGeneralSettingDescriptors.size());
             draft.tab_cursor[0] = (draft.tab_cursor[0] + delta + kNumSettings) % kNumSettings;
             break;
         }
@@ -204,7 +220,7 @@ void SettingsModal::move_cursor(SettingsDraft& draft, int delta) {
 }
 
 void SettingsModal::move_cursor(int& cursor, int delta) {
-    constexpr int kNumSettings = 14;
+    constexpr int kNumSettings = static_cast<int>(kGeneralSettingDescriptors.size());
     cursor = (cursor + delta + kNumSettings) % kNumSettings;
 }
 
@@ -228,31 +244,41 @@ void SettingsModal::adjust_setting(SettingsDraft& draft, int dir,
                                    const simrv::core::Machine* machine) {
     switch (draft.active_tab) {
         case 0: {
-            int const index = draft.tab_cursor[0];
-            switch (index) {
-                case 0:
+            const int index = draft.tab_cursor[0];
+            const auto setting =
+                index >= 0 && static_cast<size_t>(index) < kGeneralSettingDescriptors.size()
+                    ? kGeneralSettingDescriptors[static_cast<size_t>(index)].setting
+                    : GeneralSetting::Count;
+            switch (setting) {
+                case GeneralSetting::ExecutionPrecision:
                     draft.cycle_accurate = !draft.cycle_accurate;
                     draft.sys_config.cycle_accurate = draft.cycle_accurate;
                     break;
-                case 1:
+                case GeneralSetting::HighContrastColors:
                     draft.high_contrast = !draft.high_contrast;
                     break;
-                case 2: {
+                case GeneralSetting::ThemeStyle: {
+                    const int current = static_cast<int>(draft.theme_style);
+                    const int next = (current + (dir >= 0 ? 1 : 2)) % 3;
+                    draft.theme_style = static_cast<TuiThemeStyle>(next);
+                    break;
+                }
+                case GeneralSetting::PanelDensity: {
                     const auto current = std::to_underlying(draft.density_mode);
                     const auto next = static_cast<int>(current) + (dir >= 0 ? 1 : 2);
                     draft.density_mode = static_cast<framework::DensityMode>(next % 3);
                     break;
                 }
-                case 3: {  // Active SMP Hart Count
+                case GeneralSetting::HartCount: {
                     int v = static_cast<int>(draft.num_harts) + dir;
                     draft.num_harts = static_cast<uint32_t>(std::clamp(
                         v, 1, static_cast<int>(simrv::core::ExecutionConfig::kMaxHarts)));
                     break;
                 }
-                case 4:  // SMP Execution Mode
+                case GeneralSetting::SmpExecutionMode:
                     draft.smp_multi_threaded = !draft.smp_multi_threaded;
                     break;
-                case 5: {  // SMP Scheduler Quantum (insns/slice)
+                case GeneralSetting::SmpQuantum: {
                     static constexpr std::array<uint32_t, 12> kQuantumLevels = {
                         10, 25, 50, 100, 250, 500, 1000, 2500, 5000, 10000, 50000, 100000};
                     size_t curr = 6;  // default 1000
@@ -273,10 +299,10 @@ void SettingsModal::adjust_setting(SettingsDraft& draft, int dir,
                     }
                     break;
                 }
-                case 6:  // Platform Profile (0: PCIe, 1: MMIO)
+                case GeneralSetting::PlatformBus:
                     draft.platform_profile = static_cast<uint8_t>((draft.platform_profile + 1) % 2);
                     break;
-                case 7: {  // Physical RAM Capacity (MB)
+                case GeneralSetting::DramSize: {
                     static constexpr std::array<uint64_t, 8> kRamSizes = {32,  64,   128,  256,
                                                                           512, 1024, 2048, 4096};
                     size_t curr_idx = 3;  // default 256
@@ -294,7 +320,7 @@ void SettingsModal::adjust_setting(SettingsDraft& draft, int dir,
                     draft.dram_size_mb = kRamSizes[curr_idx];
                     break;
                 }
-                case 8:  // VirtIO Network Backend
+                case GeneralSetting::NetworkMode:
                     if (draft.net_mode == "user")
                         draft.net_mode = (dir > 0) ? "tap" : "none";
                     else if (draft.net_mode == "tap")
@@ -304,25 +330,25 @@ void SettingsModal::adjust_setting(SettingsDraft& draft, int dir,
                     else
                         draft.net_mode = (dir > 0) ? "user" : "socket";
                     break;
-                case 9:
+                case GeneralSetting::SpikeLockstep:
                     if (machine && machine->spike_binary().empty()) break;
                     draft.lockstep_mode = !draft.lockstep_mode;
                     break;
-                case 10:
+                case GeneralSetting::BranchPredictionLog:
                     if (!draft.cycle_accurate) break;
                     draft.bp_trace = !draft.bp_trace;
                     break;
-                case 11:
+                case GeneralSetting::InstructionMixLog:
                     draft.use_mix = !draft.use_mix;
                     break;
-                case 12:
+                case GeneralSetting::TrapLog:
                     draft.traplog_mode = !draft.traplog_mode;
                     break;
-                case 13:
+                case GeneralSetting::DeviceLog:
                     if (machine && machine->appmode_enabled()) break;
                     draft.dlog_mode = !draft.dlog_mode;
                     break;
-                default:
+                case GeneralSetting::Count:
                     break;
             }
             break;
@@ -472,8 +498,10 @@ void SettingsModal::render(std::vector<std::string>& content_rows,
 
     if (draft.active_tab == 0) {
         add_row_cb(
-            std::format("{}Use \033[1m[↑/↓]\033[0m to navigate, \033[1m[←/→/Space]\033[0m to "
-                        "toggle/adjust, \033[1m[Tab/1-3]\033[0m to switch tabs:\033[0m",
+            std::format("{}[↑/↓] Move  [←/→/Space] Change  [Tab/1-3] Tabs:\033[0m", kThemeMuted));
+        add_row_cb(
+            std::format("{}Theme, contrast, and density save on Apply. Machine changes may need a "
+                        "restart.\033[0m",
                         kThemeMuted));
         add_row_cb("");
 
@@ -502,80 +530,50 @@ void SettingsModal::render(std::vector<std::string>& content_rows,
             std::format("\033[1;36m[{} MB (0x{:08x}–0x{:08x})]\033[0m", draft.dram_size_mb,
                         dram_base, dram_base + (draft.dram_size_mb * 1024ULL * 1024ULL) - 1);
 
-        struct ItemInfo {
-            const char* name;
-            std::string val;
+        const std::array<std::string, kGeneralSettingDescriptors.size()> values = {
+            draft.cycle_accurate ? "\033[1;36m[Cycle-Accurate (CA)]\033[0m"
+                                 : "\033[1;32m[Instruction-Accurate (IA)]\033[0m",
+            draft.high_contrast ? "\033[1;33m[High Contrast B&W]\033[0m"
+                                : "\033[1;34m[Adaptive / Terminal Colors]\033[0m",
+            std::format("\033[1;36m[{}]\033[0m", theme_style_label(draft.theme_style)),
+            draft.density_mode == framework::DensityMode::Compact ? "\033[1;36m[Compact]\033[0m"
+            : draft.density_mode == framework::DensityMode::Comfortable
+                ? "\033[1;32m[Comfortable]\033[0m"
+                : "\033[1;33m[Auto]\033[0m",
+            std::format("\033[1;32m[{} Core{}]\033[0m", draft.num_harts,
+                        draft.num_harts > 1 ? "s" : ""),
+            draft.smp_multi_threaded ? "\033[1;36m[Multi-Threaded]\033[0m"
+                                     : "\033[1;33m[Single-Threaded]\033[0m",
+            std::format("\033[1;36m[{} insns/slice]\033[0m", draft.smp_quantum),
+            profile_str,
+            ram_str,
+            net_str,
+            lockstep_disabled
+                ? "\033[90m[OFF (Requires --spike-bin)]\033[0m"
+                : (draft.lockstep_mode ? "\033[1;32m[ON]\033[0m" : "\033[90m[OFF]\033[0m"),
+            bp_disabled ? "\033[90m[OFF (Requires CA mode)]\033[0m"
+                        : (draft.bp_trace ? "\033[1;32m[ON (<trace-dir>/bpred.txt)]\033[0m"
+                                          : "\033[90m[OFF]\033[0m"),
+            draft.use_mix ? "\033[1;32m[ON (<trace-dir>/instmix.txt)]\033[0m"
+                          : "\033[90m[OFF]\033[0m",
+            draft.traplog_mode ? "\033[1;32m[ON (<trace-dir>/traplog.txt)]\033[0m"
+                               : "\033[90m[OFF]\033[0m",
+            dlog_disabled ? "\033[90m[OFF (Disabled in App Mode)]\033[0m"
+                          : (draft.dlog_mode ? "\033[1;32m[ON (<trace-dir>/dlog.txt)]\033[0m"
+                                             : "\033[90m[OFF]\033[0m"),
         };
 
-        const auto settings = std::to_array<ItemInfo>({
-            {.name = "Simulation Precision",
-             .val = draft.cycle_accurate ? "\033[1;36m[Cycle-Accurate (CA)]\033[0m"
-                                         : "\033[1;32m[Instruction-Accurate (IA)]\033[0m"},
-            {.name = "Color Theme / Contrast",
-             .val = draft.high_contrast ? "\033[1;33m[High Contrast B&W]\033[0m"
-                                        : "\033[1;34m[Adaptive / Terminal Colors]\033[0m"},
-            {.name = "Panel Density",
-             .val = draft.density_mode == framework::DensityMode::Compact
-                        ? "\033[1;36m[Compact]\033[0m"
-                    : draft.density_mode == framework::DensityMode::Comfortable
-                        ? "\033[1;32m[Comfortable]\033[0m"
-                        : "\033[1;33m[Auto]\033[0m"},
-            {.name = "Active SMP Hart Count",
-             .val = std::format("\033[1;32m[{} Core{}]\033[0m", draft.num_harts,
-                                draft.num_harts > 1 ? "s" : "")},
-            {.name = "SMP Execution Mode",
-             .val = draft.smp_multi_threaded ? "\033[1;36m[Multi-Threaded]\033[0m"
-                                             : "\033[1;33m[Single-Threaded]\033[0m"},
-            {.name = "SMP Scheduler Quantum",
-             .val = std::format("\033[1;36m[{} insns/slice]\033[0m", draft.smp_quantum)},
-            {.name = "Platform Bus Topology", .val = profile_str},
-            {.name = "Physical RAM Capacity", .val = ram_str},
-            {.name = "Virtual Network Mode", .val = net_str},
-            {.name = "Spike Lockstep Compare",
-             .val = lockstep_disabled
-                        ? "\033[90m[OFF (Requires --spike-bin)]\033[0m"
-                        : (draft.lockstep_mode ? "\033[1;32m[ON]\033[0m" : "\033[90m[OFF]\033[0m")},
-            {.name = "Branch Prediction Log",
-             .val = bp_disabled ? "\033[90m[OFF (Requires CA mode)]\033[0m"
-                                : (draft.bp_trace ? "\033[1;32m[ON (<trace-dir>/bpred.txt)]\033[0m"
-                                                  : "\033[90m[OFF]\033[0m")},
-            {.name = "Instruction Mix Summary",
-             .val = draft.use_mix ? "\033[1;32m[ON (<trace-dir>/instmix.txt)]\033[0m"
-                                  : "\033[90m[OFF]\033[0m"},
-            {.name = "Architectural Trap Log",
-             .val = draft.traplog_mode ? "\033[1;32m[ON (<trace-dir>/traplog.txt)]\033[0m"
-                                       : "\033[90m[OFF]\033[0m"},
-            {.name = "Device MMIO Access Log",
-             .val = dlog_disabled
-                        ? "\033[90m[OFF (Disabled in App Mode)]\033[0m"
-                        : (draft.dlog_mode ? "\033[1;32m[ON (<trace-dir>/dlog.txt)]\033[0m"
-                                           : "\033[90m[OFF]\033[0m")},
-        });
-
         int const cursor = draft.tab_cursor[0];
-        for (std::size_t i = 0; i < settings.size(); ++i) {
-            if (i == 0) {
-                add_row_cb(build_section_divider("Simulation Engine & Visualization"));
-            } else if (i == 5) {
-                add_row_cb("");
-                add_row_cb(build_section_divider("Symmetric Multiprocessing (SMP) Configuration"));
-            } else if (i == 8) {
-                add_row_cb("");
-                add_row_cb(build_section_divider("Platform Profile & Peripheral Devices"));
-            } else if (i == 11) {
-                add_row_cb("");
-                add_row_cb(build_section_divider("External Integrations"));
-            } else if (i == 12) {
-                add_row_cb("");
-                add_row_cb(build_section_divider("Traces & Logging (Creates Text Files)"));
-            } else if (i == 13) {
-                add_row_cb("");
-                add_row_cb(build_section_divider("Presentation"));
+        for (std::size_t i = 0; i < kGeneralSettingDescriptors.size(); ++i) {
+            const auto& descriptor = kGeneralSettingDescriptors[i];
+            if (!descriptor.section.empty()) {
+                if (i != 0) add_row_cb("");
+                add_row_cb(build_section_divider(descriptor.section));
             }
             const bool is_sel = (static_cast<int>(i) == cursor);
             const int label_width =
                 framework::active_render_context().density == framework::Density::Compact ? 20 : 29;
-            add_row_cb(build_menu_item_row(settings[i].name, settings[i].val, is_sel, label_width));
+            add_row_cb(build_menu_item_row(descriptor.label, values[i], is_sel, label_width));
         }
     } else if (draft.active_tab == 1) {
         add_row_cb(

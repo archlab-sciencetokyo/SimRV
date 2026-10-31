@@ -76,6 +76,8 @@ enum OperationId : uint16_t {
     MRET,
     WFI,
     SFENCE_VMA,
+    HFENCE_VVMA,
+    HFENCE_GVMA,
     /* RV32M */
     MUL,
     MULH,
@@ -643,8 +645,54 @@ enum OperationId : uint16_t {
     SINVAL_VMA,
     SFENCE_W_INVAL,
     SFENCE_INVAL_IR,
+    HINVAL_VVMA,
+    HINVAL_GVMA,
+    /* Zfhmin (Minimal Half-Precision Floating Point) */
+    FLH,
+    FSH,
+    FMV_X_H,
+    FMV_H_X,
+    FCVT_S_H,
+    FCVT_H_S,
+    FCVT_D_H,
+    FCVT_H_D,
+    /* Zfa (Additional Floating-Point Instructions) */
+    FLI_S,
+    FLI_D,
+    FMINM_S,
+    FMAXM_S,
+    FMINM_D,
+    FMAXM_D,
+    FLEQ_S,
+    FLTQ_S,
+    FLEQ_D,
+    FLTQ_D,
+    FROUND_S,
+    FROUNDNX_S,
+    FROUND_D,
+    FROUNDNX_D,
+    FCVTMOD_W_D,
+    /* Zimop (May-Be-Operations) */
+    MOP,
+    /* Zawrs (Wait-on-Reservation-Set) */
+    WRS_NTO,
+    WRS_STO,
+    /* H virtual-machine explicit memory accesses */
+    HLV_B,
+    HLV_BU,
+    HLV_H,
+    HLV_HU,
+    HLV_W,
+    HLV_WU,
+    HLV_D,
+    HLVX_HU,
+    HLVX_WU,
+    HSV_B,
+    HSV_H,
+    HSV_W,
+    HSV_D,
     /* Others */
-    UNKNOWN,
+    ILLEGAL,
     OperationIdCount
 };
 
@@ -656,7 +704,7 @@ constexpr OperationId kOpRangeRv32iEnd = CSRRCI;
 /// @brief Start of privileged instruction IDs
 constexpr OperationId kOpRangePrivBegin = URET;
 /// @brief End of privileged instruction IDs
-constexpr OperationId kOpRangePrivEnd = SFENCE_VMA;
+constexpr OperationId kOpRangePrivEnd = HFENCE_GVMA;
 
 /// @brief Start of RV32M/RV64M multiply-divide instruction IDs
 constexpr OperationId kOpRangeRv32mBegin = MUL;
@@ -701,11 +749,40 @@ constexpr OperationId kOpRangeVectorEnd = VWSLL_VI;
 }
 
 [[nodiscard]] constexpr auto is_f_op(OperationId op_id) noexcept -> bool {
-    return op_id >= kOpRangeRv32fBegin && op_id <= kOpRangeRv32fEnd;
+    if (op_id >= kOpRangeRv32fBegin && op_id <= kOpRangeRv32fEnd) return true;
+    switch (op_id) {
+        case FLI_S:
+        case FMINM_S:
+        case FMAXM_S:
+        case FLEQ_S:
+        case FLTQ_S:
+        case FROUND_S:
+        case FROUNDNX_S:
+            return true;
+        default:
+            return false;
+    }
 }
 
 [[nodiscard]] constexpr auto is_d_op(OperationId op_id) noexcept -> bool {
-    return op_id >= kOpRangeRv32dBegin && op_id <= kOpRangeRv32dEnd;
+    if (op_id >= kOpRangeRv32dBegin && op_id <= kOpRangeRv32dEnd) return true;
+    switch (op_id) {
+        case FLI_D:
+        case FMINM_D:
+        case FMAXM_D:
+        case FLEQ_D:
+        case FLTQ_D:
+        case FROUND_D:
+        case FROUNDNX_D:
+        case FCVTMOD_W_D:
+            return true;
+        default:
+            return false;
+    }
+}
+
+[[nodiscard]] constexpr auto is_zfhmin_op(OperationId op_id) noexcept -> bool {
+    return op_id >= FLH && op_id <= FCVT_H_D;
 }
 
 [[nodiscard]] constexpr auto is_zb_op(OperationId op_id) noexcept -> bool {
@@ -729,10 +806,26 @@ constexpr OperationId kOpRangeVectorEnd = VWSLL_VI;
 }
 
 [[nodiscard]] constexpr auto is_svinval_op(OperationId op_id) noexcept -> bool {
-    return op_id >= SINVAL_VMA && op_id <= SFENCE_INVAL_IR;
+    return op_id >= SINVAL_VMA && op_id <= HINVAL_GVMA;
 }
 
 /// @brief Unified count of all valid simulator operations
 constexpr size_t kOperationIdCount = static_cast<size_t>(OperationIdCount);
+
+[[nodiscard]] constexpr auto is_hlv_op(OperationId op) noexcept -> bool {
+    return op >= HLV_B && op <= HLVX_WU;
+}
+
+[[nodiscard]] constexpr auto is_hlvx_op(OperationId op) noexcept -> bool {
+    return op == HLVX_HU || op == HLVX_WU;
+}
+
+[[nodiscard]] constexpr auto is_hsv_op(OperationId op) noexcept -> bool {
+    return op >= HSV_B && op <= HSV_D;
+}
+
+[[nodiscard]] constexpr auto is_hypervisor_memory_op(OperationId op) noexcept -> bool {
+    return is_hlv_op(op) || is_hsv_op(op);
+}
 
 }  // namespace simrv::isa

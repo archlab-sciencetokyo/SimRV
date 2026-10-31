@@ -49,7 +49,8 @@ and discarded when SimRV exits; the source image is unchanged.
 .TP
 .B \-\-virtiofs \fIdirectory\fR
 Expose an existing host directory to Linux guests through VirtIO-FS. Guest writes go directly to
-the selected directory and persist after SimRV exits.
+the selected directory and persist after SimRV exits. Host-directory sharing is available on Linux
+hosts only.
 .TP
 .B \-f, \-\-fdt, \-\-dtb \fIfile\fR
 Load the required device tree for Linux boot. If omitted, SimRV reads
@@ -86,6 +87,7 @@ Select a complete platform preset (\fBvirt-pcie\fR, \fBvirt-mmio\fR, or \fBrvcom
 .TP
 .B \-\-net=\fIbackend\fR
 Select the VirtIO network backend: \fBuser\fR, \fBtap\fR, \fBsocket\fR, or \fBnone\fR.
+The host TAP backend is available on Linux only.
 .TP
 .B \-\-dump-soc-manifest=\fIpreset|file\fR [\fIoutput\fR]
 Write the normalized SoC registry as JSON for a built-in preset or platform configuration file. Pass \fB\-\fR or omit output to stream JSON to stdout.

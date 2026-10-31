@@ -11,6 +11,7 @@
 
 namespace simrv::core {
 
+struct ArchState;
 class CPU;
 
 /**
@@ -20,6 +21,13 @@ class CPU;
 class CsrFile {
    public:
     explicit CsrFile(CPU& cpu) : cpu_(cpu) {}
+
+    [[nodiscard]] static auto compute_mstatus(const ArchState& state,
+                                              simrv::xlen::CsrValue mask) noexcept
+        -> simrv::xlen::CsrValue;
+    [[nodiscard]] static auto read_from_state(const ArchState& state, simrv::xlen::CsrNumber csr,
+                                              const CPU* cpu = nullptr)
+        -> std::expected<simrv::xlen::CsrValue, ExceptionCode>;
 
     [[nodiscard]] auto getMstatus(simrv::xlen::CsrValue mask) const -> simrv::xlen::CsrValue;
     void setMstatus(simrv::xlen::CsrValue wdata);

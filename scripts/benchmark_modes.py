@@ -95,8 +95,11 @@ def run_session(cmd, timeout, columns=160, rows=48, tui=False, boot=False):
                 now = time.monotonic()
                 if b"Linux version" in plain:
                     milestones.setdefault("kernel", now)
-                if b"~ #" in plain and not shell_command_sent:
+                if b"Welcome to SimRV Linux Boot" in plain and not shell_command_sent:
                     milestones["shell"] = now
+                    # This rootfs runs BusyBox directly from init and does not guarantee a
+                    # particular interactive prompt. Queue a command after its welcome banner;
+                    # completion still requires the shell to echo the sentinel.
                     os.write(master, b'echo __SIMRV_BENCH_"OK__"\r')
                     shell_command_sent = True
                 if b"__SIMRV_BENCH_OK__" in plain:
@@ -113,6 +116,13 @@ def run_session(cmd, timeout, columns=160, rows=48, tui=False, boot=False):
             proc.wait(timeout=2)
         if proc.returncode != 0:
             raise RuntimeError(f"command failed ({proc.returncode}): {' '.join(cmd)}")
+        if boot and "command" not in milestones:
+            plain = ANSI_RE.sub(b"", bytes(output)).decode("utf-8", "replace")
+            diagnostic = plain[-2000:].strip()
+            raise RuntimeError(
+                "Linux boot did not reach the shell completion command; "
+                f"last output:\n{diagnostic}"
+            )
         if "ready" not in events or "resumed" not in events:
             raise RuntimeError("missing simulator-ready/resume acknowledgement")
         if not boot and "stopped" not in events:
@@ -221,7 +231,7 @@ def main():
     args = parser.parse_args()
     if args.boot:
         args.os = True
-        args.limit = 10000000000
+        args.limit = 100000000000
     if args.os and not args.disk:
         parser.error("--disk is required with --os")
     if args.os and not args.dtb:

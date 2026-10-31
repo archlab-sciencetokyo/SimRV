@@ -1,0 +1,46 @@
+name: macOS Build and Smoke Test
+
+on:
+  push:
+    branches: [test/macos, release/3.0.0-rc.17]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build (${{ matrix.arch }})
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-26
+            arch: arm64
+          - runner: macos-26-intel
+            arch: x86_64
+    steps:
+      - uses: actions/checkout@v6
+      - name: Install build tools
+        run: brew install cmake ninja gcc
+      - name: Configure native macOS build
+        run: |
+          cmake -S . -B build/macos -G Ninja \
+            -DCMAKE_BUILD_TYPE=Debug \
+            -DCMAKE_C_COMPILER=gcc-16 \
+            -DCMAKE_CXX_COMPILER=g++-16 \
+            -DSIMRV_XLEN=64 \
+            -DSIMRV_ALLOW_UNQUALIFIED_TOOLCHAIN=ON \
+            -DSIMRV_ENABLE_LTO=OFF
+      - name: Build simulator
+        run: cmake --build build/macos --target SimRV --parallel 2
+      - name: Smoke test simulator
+        run: build/macos/SimRV --help
+      - name: Upload simulator binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: simrv-macos-${{ matrix.arch }}
+          path: build/macos/SimRV
+          if-no-files-found: error

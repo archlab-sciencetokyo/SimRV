@@ -1,8 +1,8 @@
 {
   "$schema": "schemas/release-manifest.schema.json",
   "schema_version": 2,
-  "version": "3.0.0-rc.16",
-  "release_tag": "v3.0.0-rc.16",
+  "version": "3.0.0-rc.17",
+  "release_tag": "v3.0.0-rc.17",
   "host_support": {
     "os": "Linux",
     "architecture": "x86_64",
@@ -13,9 +13,11 @@
   },
   "package_support": {
     "rpm": [
+      "Rocky Linux 9",
       "Fedora 44"
     ],
     "deb": [
+      "Ubuntu 24.04",
       "Debian sid"
     ],
     "portable_static": [
@@ -40,6 +42,12 @@
     "riscv_tests": {
       "url": "https://github.com/riscv-software-src/riscv-tests.git",
       "revision": "933a897d8631773f385d45938facc466dddc7514",
+      "license": "BSD-3-Clause",
+      "redistribute": false
+    },
+    "act_tests": {
+      "url": "https://github.com/riscv-non-isa/riscv-arch-test.git",
+      "revision": "v3.0.0",
       "license": "BSD-3-Clause",
       "redistribute": false
     },
@@ -93,6 +101,18 @@
       "ctest_label": "isa",
       "arches": [
         32,
+        64
+      ],
+      "compilers": [
+        "gcc",
+        "clang"
+      ],
+      "allow_skip": false
+    },
+    {
+      "id": "rva23-act",
+      "ctest_label": "rva23",
+      "arches": [
         64
       ],
       "compilers": [
@@ -174,8 +194,8 @@
     ]
   },
   "artifacts": [
-    "SimRV-linux-x86_64-v3.0.0-rc.16.tar.gz",
-    "SimRV-rpm-packages-v3.0.0-rc.16.tar.gz",
-    "SimRV-deb-packages-v3.0.0-rc.16.tar.gz"
+    "SimRV-linux-x86_64-v3.0.0-rc.17.tar.gz",
+    "SimRV-rpm-packages-v3.0.0-rc.17.tar.gz",
+    "SimRV-deb-packages-v3.0.0-rc.17.tar.gz"
   ]
 }

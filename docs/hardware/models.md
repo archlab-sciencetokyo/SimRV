@@ -22,6 +22,9 @@ When simulated Linux or OpenSBI boots, SimRV's dynamic device tree patcher (`sim
 - `/cpus/timebase-frequency`: dynamically patched to the active `--timebase-hz`.
 - `/cpus/cpu@*/clock-frequency`: dynamically patched to the active `--cpu-clock`.
 
+These FDT properties are 32-bit values. Configuration rejects CPU or timebase frequencies above
+`UINT32_MAX` rather than allowing the guest-visible value to wrap.
+
 This allows guest operating systems (Linux, Zephyr, FreeRTOS) to automatically calculate accurate BogoMIPS, delay loops (`udelay`), and timer interrupt deadlines matching the simulated hardware. Pipeline, cache, interconnect, and host-interface latency settings remain expressed in CPU clock cycles; absolute execution time is `cycles / cpu_clock_hz`, while guest timer delays are `mtime_ticks / timebase_hz`.
 
 This physical conversion is hardware-meaningful only in `--mode cycle-accurate`, and only to the extent that the selected model's cycle latencies match the target RTL or processor. Fast and detailed modes use one virtual cycle per instruction step to keep counters and guest timers deterministic; their reported virtual time must not be treated as a hardware performance prediction. `minstret` remains a retired-instruction count in all modes.
@@ -60,7 +63,18 @@ platform metadata and `[device.<kind>]` for device entries, including `[device.u
 with `device_policy = "explicit"` registers only the devices listed in its file; presets that omit
 that policy retain their existing implicit platform devices.
 
+`[device.uart] clock_hz` sets the UART input clock. It defaults to 3,686,400 Hz. The UART resets
+to 115200 8N1 with a divisor derived from that clock, and generated guest device trees report both
+`clock-frequency` and the resulting `current-speed`. Serial frames complete at deterministic
+simulated CPU-cycle boundaries; individual wire bits are not modeled. With the reset-disabled
+single-byte FIFO, guest examples poll THRE before each transmit write and TEMT before signaling
+completion, allowing output to drain within the modeled cycle stream.
+
 ### SMP and shared cache topology
+
+The modeled per-hart interrupt controllers support at most 16 harts. This fixed implementation
+capacity is shared by machine validation, CLINT, ACLINT, AIA, and PLIC storage. The PLIC allocates
+machine and supervisor contexts for each supported hart.
 
 SoC profiles can describe homogeneous hart groups and their shared cache hierarchy. For example:
 
@@ -75,7 +89,7 @@ harts = 0, 1
 l2_enabled = true
 l2_capacity_bytes = 65536
 l2_associativity = 4
-l2_line_bytes = 32
+l2_line_bytes = 64
 l2_hit_latency = 8
 l2_miss_latency = 12
 
@@ -89,13 +103,13 @@ l2_associativity = 4
 enabled = true
 capacity_bytes = 524288
 associativity = 16
-line_bytes = 32
+line_bytes = 64
 hit_latency = 1
 miss_latency = 1
 ```
 
 Each hart has a private instruction and data L1. L2 is optional and shared by harts in the same
-cluster; L3 is an optional global shared cache. Cache geometry uses 32-byte coherent lines and
+cluster; L3 is an optional global shared cache. Cache geometry uses 64-byte coherent lines and
 power-of-two set and way counts. The current model uses one CPU model across all harts.
 
 The `single-threaded` mode advances harts and shared devices in deterministic global-cycle order.
@@ -105,6 +119,34 @@ and per-hart issue order. The synchronization quantum groups global cycles into 
 turns; it does not let one hart advance simulated time ahead of another. Cross-hart interrupts and
 hart lifecycle changes take effect at the destination hart's next execution boundary. Active hart
 count can be overridden via `--harts`.
+
+### PCIe host and endpoint topology
+
+PCIe host windows and endpoint topology can be configured separately from each endpoint's MMIO
+descriptor. The following section relocates ECAM and the BAR aperture, exposes buses 0 through 4,
+and moves the block endpoint to `00:09.2` with PLIC source 30:
+
+```ini
+[pcie]
+ecam_base = 0x34000000
+ecam_size = 5M
+mmio_base = 0x44000000
+mmio_size = 16M
+first_bus = 0
+last_bus = 4
+
+[device.virtio-block]
+pci_bus = 0
+pci_slot = 9
+pci_function = 2
+pci_intx_source = 30
+```
+
+The default `virt-pcie` map keeps ECAM at `0x30000000`, the BAR aperture at `0x40000000`, buses
+0–255, and VirtIO endpoints in slots 1–8. PCI MMIO uses identity translation between PCI and CPU
+addresses. The PLIC implements source IDs 1–31 (source 0 is reserved); generated device trees
+report that same source count, and configured PLIC IRQs and PCIe INTx sources must fit the range.
+Configured PCIe BDFs must be unique.
 
 Device-specific SoC entries use `[device.<kind>]` sections. Supported kinds include `uart`,
 `rtc`, `dma`, `virtio-block`, `virtio-console`, `virtio-rng`, `virtio-gpu`, `virtio-input`,
@@ -349,7 +391,7 @@ response_latency = 1
 | :--- | :--- | :--- | :--- |
 | `capacity_bytes` | uint | `4096` | Total cache capacity in bytes (e.g. `16384` for 16 KiB). |
 | `associativity` | uint | `1` | Cache set associativity (`1` for direct-mapped, `2`, `4`, etc.). |
-| `line_bytes` | uint | `32` | Cache line width in bytes (must match bus width, standard 32 bytes). |
+| `line_bytes` | uint | `64` | Cache block width in bytes (RVA23 requires 64-byte blocks). |
 | `hit_latency` | uint | `1` | Cache access latency on hit in clock cycles. |
 | `miss_latency` | uint | `10` | Penalty added on cache miss during line fill request. |
 

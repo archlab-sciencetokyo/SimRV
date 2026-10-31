@@ -912,7 +912,9 @@ void test_software_mmio_interrupt_bus_completion_fixture() {
     g_retirement_indexes.push_back(fixture_dir / "retire.index.jsonl");
     machine.trace().init_architecture_trace(path.string());
     machine.runtime_profile.engine = ExecutionEngine::InstructionObservable;
-    for (size_t cycle = 0; cycle < 32 && machine.tohost.load() == 0; ++cycle) {
+    // The test tohost address is backed by RAM here. Its value is consumed as an HTIF
+    // command at the end of the cycle, so run a fixed number of cycles through completion.
+    for (size_t cycle = 0; cycle < 5; ++cycle) {
         cpu.run_cycle(machine);
     }
     machine.trace().flush_all();
@@ -920,6 +922,7 @@ void test_software_mmio_interrupt_bus_completion_fixture() {
     const auto devices = read_trace(sibling_path(path, "devices.jsonl"));
     const auto interrupts = read_trace(sibling_path(path, "interrupts.jsonl"));
     const auto bus = read_trace(sibling_path(path, "bus.jsonl"));
+    const auto memory = read_trace(sibling_path(path, "memory.jsonl"));
     const auto has_event = [](const auto& lines, std::string_view event) {
         return std::any_of(lines.begin(), lines.end(), [event](const auto& line) {
             return line.find(std::format("\"event\":\"{}\"", event)) != std::string::npos;
@@ -940,7 +943,10 @@ void test_software_mmio_interrupt_bus_completion_fixture() {
                line.find("\"response_data\"") != std::string::npos &&
                line.find("\"denied\":false") != std::string::npos;
     });
-    if (machine.tohost.load() != 1 || !has_event(devices, "mmio_write") ||
+    const bool completion_store = std::any_of(memory.begin(), memory.end(), [](const auto& line) {
+        return line.find("\"effective_address\":\"0x80001000\"") != std::string::npos;
+    });
+    if (!completion_store || !has_event(devices, "mmio_write") ||
         std::none_of(devices.begin(), devices.end(),
                      [](const auto& line) {
                          return line.find("\"event\":\"mmio_write\"") != std::string::npos &&

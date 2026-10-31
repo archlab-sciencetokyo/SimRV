@@ -4,6 +4,8 @@
  */
 #pragma once
 
+#include <cstdint>
+
 #include "simrv/xlen/IdentifierTypes.hpp"
 
 namespace simrv::core {
@@ -28,6 +30,8 @@ enum class MstatusBit : simrv::xlen::CsrValue {
     Tvm = (1u << 20),
     Tw = (1u << 21),
     Tsr = (1u << 22),
+    Gva = static_cast<simrv::xlen::CsrValue>(uint64_t{1} << 38U),
+    Mpv = static_cast<simrv::xlen::CsrValue>(uint64_t{1} << 39U),
 };
 
 constexpr auto operator|(MstatusBit lhs, MstatusBit rhs) noexcept -> simrv::xlen::CsrValue {
@@ -111,7 +115,23 @@ enum class MipBit : simrv::xlen::CsrValue {
     Seip = (1u << 9),
     Heip = (1u << 10),
     Meip = (1u << 11),
+    Sgeip = (1u << 12),
+    Lcofip = (1u << 13),
 };
+
+[[nodiscard]] constexpr auto vs_interrupts_to_h(simrv::xlen::CsrValue value) noexcept
+    -> simrv::xlen::CsrValue {
+    return ((value & (simrv::xlen::CsrValue{1} << 1U)) << 1U) |
+           ((value & (simrv::xlen::CsrValue{1} << 5U)) << 1U) |
+           ((value & (simrv::xlen::CsrValue{1} << 9U)) << 1U);
+}
+
+[[nodiscard]] constexpr auto h_interrupts_to_vs(simrv::xlen::CsrValue value) noexcept
+    -> simrv::xlen::CsrValue {
+    return ((value & (simrv::xlen::CsrValue{1} << 2U)) >> 1U) |
+           ((value & (simrv::xlen::CsrValue{1} << 6U)) >> 1U) |
+           ((value & (simrv::xlen::CsrValue{1} << 10U)) >> 1U);
+}
 
 constexpr auto operator|(MipBit lhs, MipBit rhs) noexcept -> simrv::xlen::CsrValue {
     return std::to_underlying(lhs) | std::to_underlying(rhs);
@@ -176,10 +196,13 @@ constexpr auto operator!=(MipBit lhs, I rhs) noexcept -> bool {
 }
 
 /** Standard interrupt bits implemented by the SimRV single-hart platform. */
-constexpr auto interrupt_implemented_mask(bool has_s) -> simrv::xlen::CsrValue {
+constexpr auto interrupt_implemented_mask(bool has_s, bool has_h = false) -> simrv::xlen::CsrValue {
     simrv::xlen::CsrValue mask = MipBit::Msip | MipBit::Mtip | MipBit::Meip;
     if (has_s) {
-        mask |= MipBit::Ssip | MipBit::Stip | MipBit::Seip;
+        mask |= MipBit::Ssip | MipBit::Stip | MipBit::Seip | MipBit::Lcofip;
+    }
+    if (has_h) {
+        mask |= MipBit::Hsip | MipBit::Htip | MipBit::Heip | MipBit::Sgeip;
     }
     return mask;
 }
@@ -190,13 +213,16 @@ constexpr auto interrupt_implemented_mask(bool has_s) -> simrv::xlen::CsrValue {
  * MSIP, MTIP, and MEIP are read-only signals sourced by CLINT/PLIC. Without
  * Sstc, M-mode may post SSIP, STIP, and the software component of SEIP.
  */
-constexpr auto mip_writable_mask(bool has_s) -> simrv::xlen::CsrValue {
-    return has_s ? (MipBit::Ssip | MipBit::Stip | MipBit::Seip) : 0;
+constexpr auto mip_writable_mask(bool has_s, bool has_h = false) -> simrv::xlen::CsrValue {
+    simrv::xlen::CsrValue mask =
+        has_s ? (MipBit::Ssip | MipBit::Stip | MipBit::Seip | MipBit::Lcofip) : 0;
+    if (has_h) mask |= MipBit::Hsip;
+    return mask;
 }
 
 /** Supervisor interrupt delegation bits implemented by this platform. */
 constexpr auto mideleg_writable_mask(bool has_s) -> simrv::xlen::CsrValue {
-    return has_s ? (MipBit::Ssip | MipBit::Stip | MipBit::Seip) : 0;
+    return has_s ? (MipBit::Ssip | MipBit::Stip | MipBit::Seip | MipBit::Lcofip) : 0;
 }
 
 /**
@@ -216,13 +242,14 @@ constexpr auto mip_rmw_base(simrv::xlen::CsrValue visible_mip, bool seip_softwar
 constexpr simrv::xlen::CsrValue kMstatusMask =
     (MstatusBit::Sie | MstatusBit::Mie | MstatusBit::Spie | MstatusBit::Mpie | MstatusBit::Spp |
      MstatusBit::Mpp | MstatusBit::Fs | MstatusBit::Vs | MstatusBit::Mprv | MstatusBit::Sum |
-     MstatusBit::Mxr | MstatusBit::Tvm | MstatusBit::Tw | MstatusBit::Tsr |
+     MstatusBit::Mxr | MstatusBit::Tvm | MstatusBit::Tw | MstatusBit::Tsr | MstatusBit::Mpv |
      (simrv::xlen::kIsXLen64 ? (static_cast<simrv::xlen::CsrValue>(0xF) << 32) : 0));
 constexpr simrv::xlen::CsrValue kSstatusMask =
     (MstatusBit::Sie | MstatusBit::Spie | MstatusBit::Spp | MstatusBit::Fs | MstatusBit::Vs |
-     MstatusBit::Xs | MstatusBit::Sum | MstatusBit::Mxr |
+     MstatusBit::Sum | MstatusBit::Mxr |
      (simrv::xlen::kIsXLen64 ? (static_cast<simrv::xlen::CsrValue>(0x3) << 32) : 0));
 constexpr simrv::xlen::CsrValue kMstatusFsDirty = std::to_underlying(MstatusBit::Fs);
+constexpr simrv::xlen::CsrValue kMstatusGva = std::to_underlying(MstatusBit::Gva);
 constexpr simrv::xlen::CsrValue kMstatusSd =
     static_cast<simrv::xlen::CsrValue>(simrv::xlen::Word{1} << (simrv::xlen::kXLenBits - 1u));
 /** sstatus fields implemented without the obsolete N-extension UIE/UPIE aliases. */
@@ -234,6 +261,14 @@ constexpr simrv::xlen::CsrValue kMstatusReadMask = ~simrv::xlen::CsrValue{0};
  * only exceptions that can originate below S-mode are exposed as delegatable.
  */
 constexpr simrv::xlen::CsrValue kMedelegWritableMask = static_cast<simrv::xlen::CsrValue>(0xB1FFu);
+constexpr simrv::xlen::CsrValue kHedelegWritableMask =
+    kMedelegWritableMask | (simrv::xlen::CsrValue{1} << 18U) | (simrv::xlen::CsrValue{1} << 19U);
+// HGATP's address format is always 64-bit, even in an RV32 host build where
+// these constants are not used by the implemented guest profile.
+constexpr uint64_t kHgatpModeMask = uint64_t{0xF} << 60U;
+constexpr uint64_t kHgatpVmidMask = uint64_t{0x3FFF} << 44U;
+constexpr uint64_t kHgatpPpnMask = (uint64_t{1} << 44U) - 1U;
+constexpr uint64_t kHgatpWritableMask = kHgatpModeMask | kHgatpVmidMask | kHgatpPpnMask;
 constexpr simrv::xlen::CsrValue kFflagsMask = static_cast<simrv::xlen::CsrValue>(0x1fu);
 constexpr simrv::xlen::CsrValue kFrmMask = static_cast<simrv::xlen::CsrValue>(0x7u);
 constexpr simrv::xlen::CsrValue kFcsrMask = static_cast<simrv::xlen::CsrValue>(0xffu);
@@ -260,8 +295,8 @@ constexpr auto mstatus_with_sd(simrv::xlen::CsrValue mstatus) -> simrv::xlen::Cs
  * zero when neither the corresponding extension nor S-mode supplies that state.
  * SimRV chooses the permitted read-only-zero behavior for absent F and V state.
  */
-constexpr auto mstatus_writable_mask(bool has_s, bool has_u, bool has_f, bool has_v)
-    -> simrv::xlen::CsrValue {
+constexpr auto mstatus_writable_mask(bool has_s, bool has_u, bool has_f, bool has_v,
+                                     bool has_h = false) -> simrv::xlen::CsrValue {
     simrv::xlen::CsrValue mask = kMstatusMask;
     if (!has_s) {
         mask &= ~(MstatusBit::Sie | MstatusBit::Spie | MstatusBit::Spp | MstatusBit::Sum |
@@ -279,6 +314,7 @@ constexpr auto mstatus_writable_mask(bool has_s, bool has_u, bool has_f, bool ha
     if (!has_s && !has_u) mask &= ~MstatusBit::Tw;
     if (!has_f) mask &= ~MstatusBit::Fs;
     if (!has_v) mask &= ~MstatusBit::Vs;
+    if (!has_h) mask &= ~MstatusBit::Mpv;
     return mask;
 }
 
@@ -603,6 +639,19 @@ enum class Csr : uint16_t {
     Stvec = 0x105,
     Scounteren = 0x106,
     Senvcfg = 0x10A,
+    Sstateen0 = 0x10C,
+    Sstateen1 = 0x10D,
+    Sstateen2 = 0x10E,
+    Sstateen3 = 0x10F,
+    Vsstatus = 0x200,
+    Vsie = 0x204,
+    Vstvec = 0x205,
+    Vsscratch = 0x240,
+    Vsepc = 0x241,
+    Vscause = 0x242,
+    Vstval = 0x243,
+    Vsip = 0x244,
+    Vsatp = 0x280,
     Sscratch = 0x140,
     Sepc = 0x141,
     Scause = 0x142,
@@ -610,6 +659,9 @@ enum class Csr : uint16_t {
     Sip = 0x144,
     Stimecmp = 0x14D,
     Stimecmph = 0x15D,
+    Vstimecmp = 0x24D,
+    Vstimecmph = 0x25D,
+    Scountovf = 0xDA0,
     Satp = 0x180,
     Mvendorid = 0xF11,
     Marchid = 0xF12,
@@ -624,13 +676,41 @@ enum class Csr : uint16_t {
     Mtvec = 0x305,
     Mcounteren = 0x306,
     Menvcfg = 0x30A,
+    Mstateen0 = 0x30C,
+    Mstateen1 = 0x30D,
+    Mstateen2 = 0x30E,
+    Mstateen3 = 0x30F,
     Mcountinhibit = 0x320,
     Menvcfgh = 0x31A,
+    Mstateen0h = 0x31C,
+    Mstateen1h = 0x31D,
+    Mstateen2h = 0x31E,
+    Mstateen3h = 0x31F,
+    Hstateen0 = 0x60C,
+    Hstateen1 = 0x60D,
+    Hstateen2 = 0x60E,
+    Hstateen3 = 0x60F,
+    Hstatus = 0x600,
+    Hedeleg = 0x602,
+    Hideleg = 0x603,
+    Hie = 0x604,
+    Hcounteren = 0x606,
+    Hgeie = 0x607,
+    Hgeip = 0xE12,
+    Henvcfg = 0x60A,
+    Htimedelta = 0x605,
+    Htval = 0x643,
+    Hip = 0x644,
+    Hvip = 0x645,
+    Htinst = 0x64A,
+    Hgatp = 0x680,
     Mscratch = 0x340,
     Mepc = 0x341,
     Mcause = 0x342,
     Mtval = 0x343,
     Mip = 0x344,
+    Mtinst = 0x34A,
+    Mtval2 = 0x34B,
     Mseccfg = 0x747,
     Mseccfgh = 0x757,
     Tselect = 0x7A0,
@@ -668,6 +748,8 @@ inline constexpr simrv::xlen::CsrNumber kMepc{0x341};
 inline constexpr simrv::xlen::CsrNumber kMcause{0x342};
 inline constexpr simrv::xlen::CsrNumber kMtval{0x343};
 inline constexpr simrv::xlen::CsrNumber kMip{0x344};
+inline constexpr simrv::xlen::CsrNumber kMtinst{0x34A};
+inline constexpr simrv::xlen::CsrNumber kMtval2{0x34B};
 
 inline constexpr simrv::xlen::CsrNumber kSstatus{0x100};
 inline constexpr simrv::xlen::CsrNumber kSie{0x104};

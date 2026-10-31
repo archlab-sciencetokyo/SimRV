@@ -4,7 +4,9 @@
  */
 #include "simrv/execute/ExecuteUnitFp.hpp"
 
+#include <array>
 #include <bit>
+#include <cfenv>
 #include <cmath>
 #include <cstdint>
 #include <functional>
@@ -12,8 +14,11 @@
 
 #include "simrv/CompilerHints.hpp"
 #include "simrv/core/CsrTypes.hpp"
+#include "simrv/execute/RoundingRmm.hpp"
+#include "simrv/isa/FpConversions.hpp"
 #include "simrv/xlen/Constants.hpp"
 #include "simrv/xlen/RegisterTypes.hpp"
+#include "vector/VectorHelpers.hpp"
 
 #if defined(__x86_64__) || defined(_M_X64)
 #include <immintrin.h>
@@ -62,6 +67,18 @@ constexpr auto read_f64(const simrv::xlen::FloatingRegister* freg, simrv::xlen::
 constexpr auto write_f32_boxed(float v) -> simrv::xlen::FloatingRegister {
     return static_cast<simrv::xlen::FloatingRegister>(simrv::xlen::kF32BoxerBits) |
            static_cast<simrv::xlen::FloatingRegister>(f32_bits(v));
+}
+
+constexpr auto read_f16(const simrv::xlen::FloatingRegister* freg, simrv::xlen::Word idx)
+    -> uint16_t {
+    const auto val = freg[idx];
+    return (val & ~simrv::xlen::FloatingRegister{0xFFFF}) == ~simrv::xlen::FloatingRegister{0xFFFF}
+               ? static_cast<uint16_t>(val)
+               : UINT16_C(0x7E00);
+}
+
+constexpr auto write_f16_boxed(uint16_t value) -> simrv::xlen::FloatingRegister {
+    return ~simrv::xlen::FloatingRegister{0xFFFF} | value;
 }
 
 // ============================================================================
@@ -204,6 +221,16 @@ class FpEnvironment {
         fcsr |= flags;
     }
 
+    static inline void raise_flags(simrv::xlen::CsrValue flags) noexcept {
+        uint32_t mxcsr_flags = 0;
+        if ((flags & FflagsBit::Nv) != 0) mxcsr_flags |= 0x01u;
+        if ((flags & FflagsBit::Dz) != 0) mxcsr_flags |= 0x04u;
+        if ((flags & FflagsBit::Of) != 0) mxcsr_flags |= 0x08u;
+        if ((flags & FflagsBit::Uf) != 0) mxcsr_flags |= 0x10u;
+        if ((flags & FflagsBit::Nx) != 0) mxcsr_flags |= 0x20u;
+        _mm_setcsr(_mm_getcsr() | mxcsr_flags);
+    }
+
     static inline void raise_invalid() noexcept { _mm_setcsr(_mm_getcsr() | 0x01u); }
 };
 #else
@@ -244,6 +271,16 @@ class FpEnvironment {
         if ((ex & FE_UNDERFLOW) != 0) flags |= FflagsBit::Uf;
         if ((ex & FE_INEXACT) != 0) flags |= FflagsBit::Nx;
         fcsr |= flags;
+    }
+
+    static inline void raise_flags(simrv::xlen::CsrValue flags) noexcept {
+        int exceptions = 0;
+        if ((flags & FflagsBit::Nv) != 0) exceptions |= FE_INVALID;
+        if ((flags & FflagsBit::Dz) != 0) exceptions |= FE_DIVBYZERO;
+        if ((flags & FflagsBit::Of) != 0) exceptions |= FE_OVERFLOW;
+        if ((flags & FflagsBit::Uf) != 0) exceptions |= FE_UNDERFLOW;
+        if ((flags & FflagsBit::Nx) != 0) exceptions |= FE_INEXACT;
+        if (exceptions != 0) std::feraiseexcept(exceptions);
     }
 
     static inline void raise_invalid() noexcept { std::feraiseexcept(FE_INVALID); }
@@ -410,6 +447,8 @@ auto ExecuteUnitFp::fusedFp(Opcode opcode, FpFmt fmt, simrv::xlen::FpRegId rs1,
                             const simrv::xlen::FloatingRegister* freg, simrv::xlen::CsrValue& fcsr)
     -> FpExecResult {
     FpExecResult out;
+    const auto effective_rm = resolve_rounding_mode(std::to_underlying(rm), fcsr);
+    const bool use_rmm = effective_rm == RoundingMode::Rmm;
     FpEnvironment::set_rounding_mode(std::to_underlying(rm), fcsr);
     FpEnvironment::clear_exceptions();
     const auto u_rs1 = std::to_underlying(rs1);
@@ -422,16 +461,16 @@ auto ExecuteUnitFp::fusedFp(Opcode opcode, FpFmt fmt, simrv::xlen::FpRegId rs1,
         float value = 0.0F;
         switch (opcode) {
             case Opcode::MAdd:
-                value = __builtin_fmaf(a, b, c);
+                value = use_rmm ? rmm::fma(a, b, c) : __builtin_fmaf(a, b, c);
                 break;
             case Opcode::MSub:
-                value = __builtin_fmaf(a, b, -c);
+                value = use_rmm ? rmm::fma(a, b, -c) : __builtin_fmaf(a, b, -c);
                 break;
             case Opcode::NMAdd:
-                value = -__builtin_fmaf(a, b, c);
+                value = use_rmm ? rmm::fma(-a, b, -c) : __builtin_fmaf(-a, b, -c);
                 break;
             case Opcode::NMSub:
-                value = -__builtin_fmaf(a, b, -c);
+                value = use_rmm ? rmm::fma(-a, b, c) : __builtin_fmaf(-a, b, c);
                 break;
             default:
                 break;
@@ -448,16 +487,16 @@ auto ExecuteUnitFp::fusedFp(Opcode opcode, FpFmt fmt, simrv::xlen::FpRegId rs1,
         double value = 0.0;
         switch (opcode) {
             case Opcode::MAdd:
-                value = __builtin_fma(a, b, c);
+                value = use_rmm ? rmm::fma(a, b, c) : __builtin_fma(a, b, c);
                 break;
             case Opcode::MSub:
-                value = __builtin_fma(a, b, -c);
+                value = use_rmm ? rmm::fma(a, b, -c) : __builtin_fma(a, b, -c);
                 break;
             case Opcode::NMAdd:
-                value = -__builtin_fma(a, b, c);
+                value = use_rmm ? rmm::fma(-a, b, -c) : __builtin_fma(-a, b, -c);
                 break;
             case Opcode::NMSub:
-                value = -__builtin_fma(a, b, -c);
+                value = use_rmm ? rmm::fma(-a, b, c) : __builtin_fma(-a, b, c);
                 break;
             default:
                 break;
@@ -511,33 +550,54 @@ inline auto fp_exec_unary(FpExecResult& out, simrv::xlen::Word rm, simrv::xlen::
 bool fp_exec_add_sub(FpExecResult& out, simrv::xlen::Word funct7, simrv::xlen::Word rm,
                      simrv::xlen::Word rs1, simrv::xlen::Word rs2,
                      const simrv::xlen::FloatingRegister* freg, simrv::xlen::CsrValue& fcsr) {
+    const bool rmm_mode = resolve_rounding_mode(rm, fcsr) == RoundingMode::Rmm;
     if (funct7 == Funct7Fp::FaddS)
-        return fp_exec_binary<float>(out, rm, rs1, rs2, freg, fcsr, std::plus<float>{});
+        return fp_exec_binary<float>(out, rm, rs1, rs2, freg, fcsr, [=](float a, float b) {
+            return rmm_mode ? rmm::add(a, b) : a + b;
+        });
     if (funct7 == Funct7Fp::FaddD)
-        return fp_exec_binary<double>(out, rm, rs1, rs2, freg, fcsr, std::plus<double>{});
+        return fp_exec_binary<double>(out, rm, rs1, rs2, freg, fcsr, [=](double a, double b) {
+            return rmm_mode ? rmm::add(a, b) : a + b;
+        });
     if (funct7 == Funct7Fp::FsubS)
-        return fp_exec_binary<float>(out, rm, rs1, rs2, freg, fcsr, std::minus<float>{});
+        return fp_exec_binary<float>(out, rm, rs1, rs2, freg, fcsr, [=](float a, float b) {
+            return rmm_mode ? rmm::sub(a, b) : a - b;
+        });
     if (funct7 == Funct7Fp::FsubD)
-        return fp_exec_binary<double>(out, rm, rs1, rs2, freg, fcsr, std::minus<double>{});
+        return fp_exec_binary<double>(out, rm, rs1, rs2, freg, fcsr, [=](double a, double b) {
+            return rmm_mode ? rmm::sub(a, b) : a - b;
+        });
     return false;
 }
 
 bool fp_exec_mul_div_sqrt(FpExecResult& out, simrv::xlen::Word funct7, simrv::xlen::Word rm,
                           simrv::xlen::Word rs1, simrv::xlen::Word rs2,
                           const simrv::xlen::FloatingRegister* freg, simrv::xlen::CsrValue& fcsr) {
+    const bool rmm_mode = resolve_rounding_mode(rm, fcsr) == RoundingMode::Rmm;
     if (funct7 == Funct7Fp::FmulS)
-        return fp_exec_binary<float>(out, rm, rs1, rs2, freg, fcsr, std::multiplies<float>{});
+        return fp_exec_binary<float>(out, rm, rs1, rs2, freg, fcsr, [=](float a, float b) {
+            return rmm_mode ? rmm::mul(a, b) : a * b;
+        });
     if (funct7 == Funct7Fp::FmulD)
-        return fp_exec_binary<double>(out, rm, rs1, rs2, freg, fcsr, std::multiplies<double>{});
+        return fp_exec_binary<double>(out, rm, rs1, rs2, freg, fcsr, [=](double a, double b) {
+            return rmm_mode ? rmm::mul(a, b) : a * b;
+        });
     if (funct7 == Funct7Fp::FdivS)
-        return fp_exec_binary<float>(out, rm, rs1, rs2, freg, fcsr, std::divides<float>{});
+        return fp_exec_binary<float>(out, rm, rs1, rs2, freg, fcsr, [=](float a, float b) {
+            return rmm_mode ? rmm::div(a, b) : a / b;
+        });
     if (funct7 == Funct7Fp::FdivD)
-        return fp_exec_binary<double>(out, rm, rs1, rs2, freg, fcsr, std::divides<double>{});
+        return fp_exec_binary<double>(out, rm, rs1, rs2, freg, fcsr, [=](double a, double b) {
+            return rmm_mode ? rmm::div(a, b) : a / b;
+        });
     if (funct7 == Funct7Fp::FsqrtS)
-        return fp_exec_unary<float>(out, rm, rs1, freg, fcsr, [](float x) { return std::sqrt(x); });
+        return fp_exec_unary<float>(out, rm, rs1, freg, fcsr, [=](float x) {
+            return rmm_mode ? rmm::sqrt(x) : std::sqrt(x);
+        });
     if (funct7 == Funct7Fp::FsqrtD)
-        return fp_exec_unary<double>(out, rm, rs1, freg, fcsr,
-                                     [](double x) { return std::sqrt(x); });
+        return fp_exec_unary<double>(out, rm, rs1, freg, fcsr, [=](double x) {
+            return rmm_mode ? rmm::sqrt(x) : std::sqrt(x);
+        });
     return false;
 }
 
@@ -575,7 +635,14 @@ bool fp_exec_sgnj_minmax(FpExecResult& out, simrv::xlen::Word funct7, Funct3 fun
         FpEnvironment::clear_exceptions();
         const float a = read_f32(freg, rs1);
         const float b = read_f32(freg, rs2);
-        out.fp_wb_data = (funct3 == Funct3Fp::Max) ? fmax32_riscv(a, b) : fmin32_riscv(a, b);
+        if (funct3 == 2 || funct3 == 3) {
+            out.fp_wb_data = std::isnan(a) || std::isnan(b)
+                                 ? write_f32_boxed(f32_from_bits(simrv::xlen::kF32Qnan))
+                                 : (funct3 == 3 ? fmax32_riscv(a, b) : fmin32_riscv(a, b));
+            if (is_snan32(a) || is_snan32(b)) FpEnvironment::raise_invalid();
+        } else {
+            out.fp_wb_data = (funct3 == Funct3Fp::Max) ? fmax32_riscv(a, b) : fmin32_riscv(a, b);
+        }
         out.fp_wb_enable = true;
         FpEnvironment::accumulate_exceptions(fcsr);
         return true;
@@ -584,7 +651,14 @@ bool fp_exec_sgnj_minmax(FpExecResult& out, simrv::xlen::Word funct7, Funct3 fun
         FpEnvironment::clear_exceptions();
         const double a = read_f64(freg, rs1);
         const double b = read_f64(freg, rs2);
-        out.fp_wb_data = (funct3 == Funct3Fp::Max) ? fmax64_riscv(a, b) : fmin64_riscv(a, b);
+        if (funct3 == 2 || funct3 == 3) {
+            out.fp_wb_data = std::isnan(a) || std::isnan(b)
+                                 ? static_cast<simrv::xlen::FloatingRegister>(simrv::xlen::kF64Qnan)
+                                 : (funct3 == 3 ? fmax64_riscv(a, b) : fmin64_riscv(a, b));
+            if (is_snan64(a) || is_snan64(b)) FpEnvironment::raise_invalid();
+        } else {
+            out.fp_wb_data = (funct3 == Funct3Fp::Max) ? fmax64_riscv(a, b) : fmin64_riscv(a, b);
+        }
         out.fp_wb_enable = true;
         FpEnvironment::accumulate_exceptions(fcsr);
         return true;
@@ -595,13 +669,100 @@ bool fp_exec_sgnj_minmax(FpExecResult& out, simrv::xlen::Word funct7, Funct3 fun
 bool fp_exec_cvt(FpExecResult& out, simrv::xlen::Word funct7, simrv::xlen::Word rm,
                  simrv::xlen::Word rs1, simrv::xlen::Word rs2, simrv::xlen::Register rrs1,
                  const simrv::xlen::FloatingRegister* freg, simrv::xlen::CsrValue& fcsr) {
+    if ((funct7 == 0x20 || funct7 == 0x21) && (rs2 == 4 || rs2 == 5)) {
+        const bool is_d = funct7 == 0x21;
+        const bool signaling_nan =
+            is_d ? is_snan64(read_f64(freg, rs1)) : is_snan32(read_f32(freg, rs1));
+        const double source = is_d ? read_f64(freg, rs1) : static_cast<double>(read_f32(freg, rs1));
+        const auto mode = resolve_rounding_mode(rm, fcsr);
+        FpEnvironment::set_rounding_mode(rm, fcsr);
+        const double rounded = std::isnan(source) || std::isinf(source) || source == 0.0 ? source
+                               : mode == RoundingMode::Rtz ? std::trunc(source)
+                               : mode == RoundingMode::Rdn ? std::floor(source)
+                               : mode == RoundingMode::Rup ? std::ceil(source)
+                               : mode == RoundingMode::Rmm ? std::round(source)
+                                                           : std::nearbyint(source);
+        FpEnvironment::clear_exceptions();
+        if (signaling_nan) FpEnvironment::raise_invalid();
+        if (rs2 == 5 && !std::isnan(source) && rounded != source)
+            FpEnvironment::raise_flags(std::to_underlying(simrv::isa::FflagsBit::Nx));
+        out.fp_wb_data = is_d ? f64_bits(rounded) : write_f32_boxed(static_cast<float>(rounded));
+        out.fp_wb_enable = true;
+        FpEnvironment::accumulate_exceptions(fcsr);
+        return true;
+    }
+    if (funct7 == 0x61 && rs2 == 8 && rm == 1) {
+        const double source = read_f64(freg, rs1);
+        const auto legacy = fcvt_to_int(source, 0, RoundingMode::Rtz, fcsr);
+        (void)legacy;
+        double reduced = std::isfinite(source) ? std::fmod(std::trunc(source), 4294967296.0) : 0.0;
+        if (reduced < 0.0) reduced += 4294967296.0;
+        const uint32_t low = static_cast<uint32_t>(reduced);
+        out.int_wb_data = static_cast<simrv::xlen::Register>(static_cast<int32_t>(low));
+        out.int_wb_enable = true;
+        return true;
+    }
+    if (funct7 == 0x20 && rs2 == 2) {  // FCVT.S.H (exact widening conversion)
+        FpEnvironment::clear_exceptions();
+        const uint16_t raw = read_f16(freg, rs1);
+        const float src = simrv::execute::vector::fp16_to_fp32(raw);
+        if ((raw & UINT16_C(0x7C00)) == UINT16_C(0x7C00) && (raw & UINT16_C(0x03FF)) != 0 &&
+            (raw & UINT16_C(0x0200)) == 0) {
+            FpEnvironment::raise_invalid();
+        }
+        out.fp_wb_data =
+            write_f32_boxed(std::isnan(src) ? f32_from_bits(simrv::xlen::kF32Qnan) : src);
+        out.fp_wb_enable = true;
+        FpEnvironment::accumulate_exceptions(fcsr);
+        return true;
+    }
+    if (funct7 == 0x22 && rs2 == 0) {  // FCVT.H.S
+        const float src = read_f32(freg, rs1);
+        FpEnvironment::clear_exceptions();
+        const auto converted = isa::fp::to_binary16(src, resolve_rounding_mode(rm, fcsr));
+        FpEnvironment::raise_flags(converted.flags);
+        const bool is_nan = (converted.bits & UINT16_C(0x7FFF)) > UINT16_C(0x7C00);
+        out.fp_wb_data = write_f16_boxed(is_nan ? UINT16_C(0x7E00) : converted.bits);
+        out.fp_wb_enable = true;
+        FpEnvironment::accumulate_exceptions(fcsr);
+        return true;
+    }
+    if (funct7 == 0x21 && rs2 == 2) {  // FCVT.D.H (exact widening conversion)
+        FpEnvironment::clear_exceptions();
+        const uint16_t raw = read_f16(freg, rs1);
+        const float src = simrv::execute::vector::fp16_to_fp32(raw);
+        if ((raw & UINT16_C(0x7C00)) == UINT16_C(0x7C00) && (raw & UINT16_C(0x03FF)) != 0 &&
+            (raw & UINT16_C(0x0200)) == 0) {
+            FpEnvironment::raise_invalid();
+        }
+        out.fp_wb_data = std::isnan(src)
+                             ? static_cast<simrv::xlen::FloatingRegister>(simrv::xlen::kF64Qnan)
+                             : f64_bits(static_cast<double>(src));
+        out.fp_wb_enable = true;
+        FpEnvironment::accumulate_exceptions(fcsr);
+        return true;
+    }
+    if (funct7 == 0x22 && rs2 == 1) {  // FCVT.H.D
+        const double src = read_f64(freg, rs1);
+        FpEnvironment::clear_exceptions();
+        const auto converted = isa::fp::to_binary16(src, resolve_rounding_mode(rm, fcsr));
+        FpEnvironment::raise_flags(converted.flags);
+        const bool is_nan = (converted.bits & UINT16_C(0x7FFF)) > UINT16_C(0x7C00);
+        out.fp_wb_data = write_f16_boxed(is_nan ? UINT16_C(0x7E00) : converted.bits);
+        out.fp_wb_enable = true;
+        FpEnvironment::accumulate_exceptions(fcsr);
+        return true;
+    }
     if (funct7 == Funct7Fp::FcvtSD) {
+        const auto mode = resolve_rounding_mode(rm, fcsr);
         FpEnvironment::set_rounding_mode(rm, fcsr);
         FpEnvironment::clear_exceptions();
         const double src = read_f64(freg, rs1);
         if (is_snan64(src)) FpEnvironment::raise_invalid();
+        const float converted =
+            mode == RoundingMode::Rmm ? rmm::narrow_f32(src) : static_cast<float>(src);
         out.fp_wb_data = std::isnan(src) ? write_f32_boxed(f32_from_bits(simrv::xlen::kF32Qnan))
-                                         : write_f32_boxed(static_cast<float>(src));
+                                         : write_f32_boxed(converted);
         out.fp_wb_enable = true;
         FpEnvironment::accumulate_exceptions(fcsr);
         return true;
@@ -630,17 +791,25 @@ bool fp_exec_cvt(FpExecResult& out, simrv::xlen::Word funct7, simrv::xlen::Word 
         const bool is_d = (funct7 == Funct7Fp::FcvtDW);
         FpEnvironment::set_rounding_mode(rm, fcsr);
         FpEnvironment::clear_exceptions();
-        double val = 0;
+        const bool rmm_mode = resolve_rounding_mode(rm, fcsr) == RoundingMode::Rmm;
+        double val64 = 0;
+        float val32 = 0;
+        const auto convert_integer = [&](auto value) {
+            if (is_d)
+                val64 = rmm_mode ? rmm::from_integer_f64(value) : static_cast<double>(value);
+            else
+                val32 = rmm_mode ? rmm::from_integer_f32(value) : static_cast<float>(value);
+        };
         if (rs2 == 0)
-            val = static_cast<double>(static_cast<int32_t>(rrs1));
+            convert_integer(static_cast<int32_t>(rrs1));
         else if (rs2 == 1)
-            val = static_cast<double>(static_cast<uint32_t>(rrs1));
+            convert_integer(static_cast<uint32_t>(rrs1));
         else if (rs2 == 2)
-            val = static_cast<double>(static_cast<int64_t>(rrs1));
+            convert_integer(static_cast<int64_t>(rrs1));
         else if (rs2 == 3)
-            val = static_cast<double>(static_cast<uint64_t>(rrs1));
+            convert_integer(static_cast<uint64_t>(rrs1));
 
-        out.fp_wb_data = is_d ? f64_bits(val) : write_f32_boxed(static_cast<float>(val));
+        out.fp_wb_data = is_d ? f64_bits(val64) : write_f32_boxed(val32);
         out.fp_wb_enable = true;
         FpEnvironment::accumulate_exceptions(fcsr);
         return true;
@@ -658,32 +827,34 @@ bool fp_exec_cmp(FpExecResult& out, simrv::xlen::Word funct7, Funct3 funct3, sim
             const float a = read_f32(freg, rs1);
             const float b = read_f32(freg, rs2);
             if (std::isnan(a) || std::isnan(b)) {
-                if (funct3 != Funct3Fp::Eq || is_snan32(a) || is_snan32(b)) {
+                const bool quiet_ordered = funct3 == 4 || funct3 == 5;
+                if ((!quiet_ordered && funct3 != Funct3Fp::Eq) || is_snan32(a) || is_snan32(b)) {
                     FpEnvironment::raise_invalid();
                 }
                 out.int_wb_data = 0;
             } else {
                 if (funct3 == Funct3Fp::Eq)
                     out.int_wb_data = static_cast<simrv::xlen::Register>(a == b);
-                if (funct3 == Funct3Fp::Lt)
+                if (funct3 == Funct3Fp::Lt || funct3 == 5)
                     out.int_wb_data = static_cast<simrv::xlen::Register>(a < b);
-                if (funct3 == Funct3Fp::Leq)
+                if (funct3 == Funct3Fp::Leq || funct3 == 4)
                     out.int_wb_data = static_cast<simrv::xlen::Register>(a <= b);
             }
         } else {
             const double a = read_f64(freg, rs1);
             const double b = read_f64(freg, rs2);
             if (std::isnan(a) || std::isnan(b)) {
-                if (funct3 != Funct3Fp::Eq || is_snan64(a) || is_snan64(b)) {
+                const bool quiet_ordered = funct3 == 4 || funct3 == 5;
+                if ((!quiet_ordered && funct3 != Funct3Fp::Eq) || is_snan64(a) || is_snan64(b)) {
                     FpEnvironment::raise_invalid();
                 }
                 out.int_wb_data = 0;
             } else {
                 if (funct3 == Funct3Fp::Eq)
                     out.int_wb_data = static_cast<simrv::xlen::Register>(a == b);
-                if (funct3 == Funct3Fp::Lt)
+                if (funct3 == Funct3Fp::Lt || funct3 == 5)
                     out.int_wb_data = static_cast<simrv::xlen::Register>(a < b);
-                if (funct3 == Funct3Fp::Leq)
+                if (funct3 == Funct3Fp::Leq || funct3 == 4)
                     out.int_wb_data = static_cast<simrv::xlen::Register>(a <= b);
             }
         }
@@ -695,8 +866,64 @@ bool fp_exec_cmp(FpExecResult& out, simrv::xlen::Word funct7, Funct3 funct3, sim
 }
 
 bool fp_exec_mv_class(FpExecResult& out, simrv::xlen::Word funct7, Funct3 funct3,
-                      simrv::xlen::Word rs1, simrv::xlen::Register rrs1,
+                      simrv::xlen::Word rs1, simrv::xlen::Word rs2, simrv::xlen::Register rrs1,
                       const simrv::xlen::FloatingRegister* freg) {
+    if ((funct7 == 0x78 || funct7 == 0x79) && rs2 == 1 && funct3 == 0) {
+        constexpr std::array<double, 32> kValues = {-1.0,
+                                                    std::numeric_limits<double>::min(),
+                                                    0x1p-16,
+                                                    0x1p-15,
+                                                    0x1p-8,
+                                                    0x1p-7,
+                                                    0.0625,
+                                                    0.125,
+                                                    0.25,
+                                                    0.3125,
+                                                    0.375,
+                                                    0.4375,
+                                                    0.5,
+                                                    0.625,
+                                                    0.75,
+                                                    0.875,
+                                                    1.0,
+                                                    1.25,
+                                                    1.5,
+                                                    1.75,
+                                                    2.0,
+                                                    2.5,
+                                                    3.0,
+                                                    4.0,
+                                                    8.0,
+                                                    16.0,
+                                                    128.0,
+                                                    256.0,
+                                                    32768.0,
+                                                    65536.0,
+                                                    std::numeric_limits<double>::infinity(),
+                                                    std::numeric_limits<double>::quiet_NaN()};
+        if (rs1 >= kValues.size()) return false;
+        if (funct7 == 0x78) {
+            const float value =
+                rs1 == 1 ? std::numeric_limits<float>::min() : static_cast<float>(kValues[rs1]);
+            out.fp_wb_data =
+                write_f32_boxed(std::isnan(value) ? f32_from_bits(0x7fc00000U) : value);
+        } else {
+            out.fp_wb_data = rs1 == 31 ? simrv::xlen::kF64Qnan : f64_bits(kValues[rs1]);
+        }
+        out.fp_wb_enable = true;
+        return true;
+    }
+    if (funct7 == 0x72 && funct3 == Funct3Fp::FmvXW) {  // FMV.X.H
+        out.int_wb_data = static_cast<simrv::xlen::Register>(
+            static_cast<int16_t>(static_cast<uint16_t>(freg[rs1])));
+        out.int_wb_enable = true;
+        return true;
+    }
+    if (funct7 == 0x7A && funct3 == Funct3Fp::FmvXW) {  // FMV.H.X
+        out.fp_wb_data = write_f16_boxed(static_cast<uint16_t>(rrs1));
+        out.fp_wb_enable = true;
+        return true;
+    }
     if (funct7 == Funct7Fp::FmvXW || funct7 == Funct7Fp::FmvXD) {
         const bool is_d = (funct7 == Funct7Fp::FmvXD);
         if (funct3 == Funct3Fp::FmvXW) {
@@ -735,12 +962,110 @@ auto ExecuteUnitFp::opFp(simrv::xlen::Funct7 funct7, Funct3 funct3, simrv::xlen:
     const auto u_rs1 = std::to_underlying(rs1);
     const auto u_rs2 = std::to_underlying(rs2);
 
+    // Zfa FROUND instructions share the FCVT.S.D / FCVT.D.S encodings and
+    // distinguish themselves with rs2=4 or 5.
+    if ((funct7 == Funct7Fp::FcvtSD || funct7 == Funct7Fp::FcvtDS) &&
+        (u_rs2 == 4U || u_rs2 == 5U)) {
+        const bool is_double = funct7 == Funct7Fp::FcvtDS;
+        const bool raises_inexact = u_rs2 == 5U;
+        const auto effective_rm = resolve_rounding_mode(rm, fcsr);
+        FpEnvironment::clear_exceptions();
+
+        const auto round_to_integral = [effective_rm](auto bits, unsigned fraction_bits,
+                                                      unsigned exponent_bits, int bias) {
+            using UInt = decltype(bits);
+            constexpr unsigned kWidth = sizeof(UInt) * 8U;
+            const UInt sign_mask = UInt{1} << (kWidth - 1U);
+            const UInt exponent_mask = (UInt{1} << exponent_bits) - UInt{1};
+            const UInt encoded_exponent = (bits >> fraction_bits) & exponent_mask;
+            const bool negative = (bits & sign_mask) != 0;
+            if (encoded_exponent == exponent_mask) return bits;
+
+            const int exponent = static_cast<int>(encoded_exponent) - bias;
+            if (exponent >= static_cast<int>(fraction_bits)) return bits;
+            const UInt sign = bits & sign_mask;
+            const UInt magnitude = bits & ~sign_mask;
+            const auto should_increment = [effective_rm, negative](bool above_half,
+                                                                   bool exactly_half, bool odd) {
+                switch (effective_rm) {
+                    case RoundingMode::Rdn:
+                        return negative;
+                    case RoundingMode::Rup:
+                        return !negative;
+                    case RoundingMode::Rmm:
+                        return above_half || exactly_half;
+                    case RoundingMode::Rne:
+                        return above_half || (exactly_half && odd);
+                    case RoundingMode::Rtz:
+                        return false;
+                    default:
+                        return false;
+                }
+            };
+
+            if (exponent < 0) {
+                const UInt half = static_cast<UInt>(bias - 1) << fraction_bits;
+                const bool above_half = magnitude > half;
+                const bool exactly_half = magnitude == half;
+                const bool increment = should_increment(above_half, exactly_half, false);
+                return sign | (increment ? (static_cast<UInt>(bias) << fraction_bits) : UInt{0});
+            }
+
+            const unsigned discarded_bits = fraction_bits - static_cast<unsigned>(exponent);
+            const UInt discarded_mask = (UInt{1} << discarded_bits) - UInt{1};
+            const UInt discarded = magnitude & discarded_mask;
+            if (discarded == 0) return bits;
+            const UInt halfway = UInt{1} << (discarded_bits - 1U);
+            const UInt truncated = magnitude & ~discarded_mask;
+            const bool increment = should_increment(discarded > halfway, discarded == halfway,
+                                                    ((truncated >> discarded_bits) & UInt{1}) != 0);
+            return sign | (truncated + (increment ? (UInt{1} << discarded_bits) : UInt{0}));
+        };
+
+        if (is_double) {
+            const double source = read_f64(freg, u_rs1);
+            const uint64_t source_bits = f64_bits(source);
+            constexpr uint64_t kF64EncodedExpMask = simrv::xlen::kF64ExpMask
+                                                    << simrv::xlen::kF64ExpShift;
+            const bool source_is_nan = (source_bits & kF64EncodedExpMask) == kF64EncodedExpMask &&
+                                       (source_bits & simrv::xlen::kF64FracMask) != 0;
+            if (source_is_nan) {
+                if (is_snan64(source)) FpEnvironment::raise_invalid();
+                out.fp_wb_data = simrv::xlen::kF64Qnan;
+            } else {
+                const uint64_t rounded_bits = round_to_integral(source_bits, 52U, 11U, 1023);
+                out.fp_wb_data = rounded_bits;
+                if (raises_inexact && rounded_bits != source_bits)
+                    FpEnvironment::raise_flags(std::to_underlying(FflagsBit::Nx));
+            }
+        } else {
+            const float source = read_f32(freg, u_rs1);
+            const uint32_t source_bits = f32_bits(source);
+            constexpr uint32_t kF32EncodedExpMask = simrv::xlen::kF32ExpMask
+                                                    << simrv::xlen::kF32ExpShift;
+            const bool source_is_nan = (source_bits & kF32EncodedExpMask) == kF32EncodedExpMask &&
+                                       (source_bits & simrv::xlen::kF32FracMask) != 0;
+            if (source_is_nan) {
+                if (is_snan32(source)) FpEnvironment::raise_invalid();
+                out.fp_wb_data = write_f32_boxed(f32_from_bits(simrv::xlen::kF32Qnan));
+            } else {
+                const uint32_t rounded_bits = round_to_integral(source_bits, 23U, 8U, 127);
+                out.fp_wb_data = simrv::xlen::kF32BoxerBits | rounded_bits;
+                if (raises_inexact && rounded_bits != source_bits)
+                    FpEnvironment::raise_flags(std::to_underlying(FflagsBit::Nx));
+            }
+        }
+        out.fp_wb_enable = true;
+        FpEnvironment::accumulate_exceptions(fcsr);
+        return out;
+    }
+
     if (fp::fp_exec_add_sub(out, funct7, rm, u_rs1, u_rs2, freg, fcsr)) return out;
     if (fp::fp_exec_mul_div_sqrt(out, funct7, rm, u_rs1, u_rs2, freg, fcsr)) return out;
     if (fp::fp_exec_sgnj_minmax(out, funct7, funct3, u_rs1, u_rs2, freg, fcsr)) return out;
     if (fp::fp_exec_cvt(out, funct7, rm, u_rs1, u_rs2, rrs1, freg, fcsr)) return out;
     if (fp::fp_exec_cmp(out, funct7, funct3, u_rs1, u_rs2, freg, fcsr)) return out;
-    if (fp::fp_exec_mv_class(out, funct7, funct3, u_rs1, rrs1, freg)) return out;
+    if (fp::fp_exec_mv_class(out, funct7, funct3, u_rs1, u_rs2, rrs1, freg)) return out;
 
     return out;
 }

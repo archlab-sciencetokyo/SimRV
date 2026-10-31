@@ -4,14 +4,20 @@
  */
 #include "simrv/util/FdtGenerator.hpp"
 
+#include <algorithm>
 #include <cstring>
 #include <format>
+#include <iterator>
 #include <span>
 
+#include "simrv/core/GuestCapabilityCatalog.hpp"
+#include "simrv/core/HpmEventCatalog.hpp"
 #include "simrv/core/PlatformMap.h"
 #include "simrv/core/PlatformTiming.hpp"
 #include "simrv/core/SoCDeviceRegistry.hpp"
+#include "simrv/device/UartTiming.hpp"
 #include "simrv/memory/Mmio.hpp"
+#include "simrv/xlen/ScalarTypes.hpp"
 
 namespace simrv::util {
 
@@ -186,19 +192,34 @@ auto generate_platform_fdt(const core::MachineConfig& config,
 
     // Root node
     fdt.begin_node("");
-    fdt.property_string("compatible", "riscv-virtio");
-    fdt.property_string("model", "riscv-virtio,qemu");
+    fdt.property_string("compatible", "simrv,virt");
+    fdt.property_string("model", "SimRV RISC-V Virtual Platform");
     fdt.property_u32("#address-cells", 2);
     fdt.property_u32("#size-cells", 2);
 
     // /chosen
     fdt.begin_node("chosen");
-    const std::string bootargs =
-        !config.files.bootargs.empty()
-            ? config.files.bootargs
-            : "console=ttyS0 earlycon=uart8250,mmio,0x10000000 root=/dev/vda rw";
+    const auto devices = core::SoCDeviceRegistry::resolve(config.soc);
+    const auto find_device = [&devices](core::SoCDeviceKind kind) -> const core::SoCDeviceConfig* {
+        const auto found = std::ranges::find_if(
+            devices, [kind](const auto& item) { return item.kind == kind && item.enabled; });
+        return found == devices.end() ? nullptr : &*found;
+    };
+    const auto* uart = find_device(core::SoCDeviceKind::Uart);
+    std::string bootargs = config.files.bootargs;
+    if (bootargs.empty()) {
+        bootargs = uart == nullptr
+                       ? "root=/dev/vda rw"
+                       : std::format("console=ttyS0 earlycon=uart8250,mmio,{:#x} root=/dev/vda rw",
+                                     static_cast<uint64_t>(uart->base));
+    }
     fdt.property_string("bootargs", bootargs);
-    fdt.property_string("stdout-path", "/soc/uart@10000000:115200");
+    if (uart != nullptr) {
+        const uint32_t baud = simrv::device::uart_baud_rate(
+            uart->clock_hz, simrv::device::uart_reset_divisor(uart->clock_hz));
+        fdt.property_string("stdout-path", std::format("/soc/uart@{:x}:{}",
+                                                       static_cast<uint64_t>(uart->base), baud));
+    }
     fdt.end_node();
 
     // /cpus
@@ -207,11 +228,106 @@ auto generate_platform_fdt(const core::MachineConfig& config,
     fdt.property_u32("#size-cells", 0);
     fdt.property_u32("timebase-frequency", timebase);
 
-    static constexpr std::string_view kRva23Exts[] = {
-        "i",      "m",      "a",       "f",        "d",           "c",      "b",
-        "v",      "zicntr", "zicsr",   "zifencei", "zihintpause", "zicond", "zicboz",
-        "zicbom", "zicbop", "svinval", "svpbmt",   "svnapot",     "sstc",
-    };
+    // This is the set SimRV currently implements and exposes to the guest, not the full set of
+    // extensions required by the RVA23 profiles. Keep the compliance gap explicit in
+    // docs/architecture/compliance.md until the remaining mandatory extensions are implemented.
+    std::vector<std::string_view> guest_extensions(core::kBaseGuestExtensions.begin(),
+                                                   core::kBaseGuestExtensions.end());
+    guest_extensions.insert(guest_extensions.end(), core::kPatchableGuestExtensions.begin(),
+                            core::kPatchableGuestExtensions.end());
+    if (config.isa.misa_override) {
+        // An explicit ISA preset may intentionally be narrower than the build's default
+        // architecture profile. Do not advertise optional extensions that the preset omits.
+        static constexpr std::string_view kExplicitIsaExtensions[] = {
+            "i", "m", "a",      "f",     "d",     "c",        "b",
+            "v", "h", "zicntr", "zihpm", "zicsr", "zifencei", "zihintpause"};
+        std::erase_if(guest_extensions, [&](std::string_view extension) {
+            return std::find(std::begin(kExplicitIsaExtensions), std::end(kExplicitIsaExtensions),
+                             extension) == std::end(kExplicitIsaExtensions);
+        });
+        std::erase_if(guest_extensions, [&](std::string_view extension) {
+            if (extension.size() != 1) return false;
+            simrv::isa::IsaExtension misa_extension{};
+            switch (extension.front()) {
+                case 'a':
+                    misa_extension = simrv::isa::IsaExtension::A;
+                    break;
+                case 'b':
+                    misa_extension = simrv::isa::IsaExtension::B;
+                    break;
+                case 'c':
+                    misa_extension = simrv::isa::IsaExtension::C;
+                    break;
+                case 'd':
+                    misa_extension = simrv::isa::IsaExtension::D;
+                    break;
+                case 'f':
+                    misa_extension = simrv::isa::IsaExtension::F;
+                    break;
+                case 'h':
+                    misa_extension = simrv::isa::IsaExtension::H;
+                    break;
+                case 'i':
+                    misa_extension = simrv::isa::IsaExtension::I;
+                    break;
+                case 'm':
+                    misa_extension = simrv::isa::IsaExtension::M;
+                    break;
+                case 'v':
+                    misa_extension = simrv::isa::IsaExtension::V;
+                    break;
+                default:
+                    return false;
+            }
+            return !simrv::isa::misa_has_extension(config.isa.isa_preset, misa_extension);
+        });
+    }
+    if constexpr (simrv::xlen::kIsXLen64) {
+        // Present in the shared optional capability catalog.
+    } else {
+        std::erase_if(guest_extensions, [](std::string_view ext) {
+            return ext == "ssu64xl" || ext == "ssnpm" || ext == "supm";
+        });
+    }
+    const bool has_vector =
+        simrv::isa::misa_has_extension(config.isa.isa_preset, simrv::isa::IsaExtension::V);
+    const bool has_bitmanip =
+        simrv::isa::misa_has_extension(config.isa.isa_preset, simrv::isa::IsaExtension::B);
+    if (has_vector && has_bitmanip) guest_extensions.emplace_back("zvkb");
+    if (simrv::isa::misa_has_extension(config.isa.isa_preset, simrv::isa::IsaExtension::M)) {
+        guest_extensions.emplace_back("zmmul");
+        guest_extensions.emplace_back("zimop");
+    }
+    if (simrv::isa::misa_has_extension(config.isa.isa_preset, simrv::isa::IsaExtension::A)) {
+        guest_extensions.emplace_back("zaamo");
+        guest_extensions.emplace_back("zalrsc");
+        guest_extensions.emplace_back("za128rs");
+    }
+    if (has_bitmanip) {
+        guest_extensions.emplace_back("zba");
+        guest_extensions.emplace_back("zbb");
+        guest_extensions.emplace_back("zbs");
+    }
+    const bool has_compressed =
+        simrv::isa::misa_has_extension(config.isa.isa_preset, simrv::isa::IsaExtension::C);
+    if (has_compressed) {
+        guest_extensions.emplace_back("zca");
+        guest_extensions.emplace_back("zcb");
+        guest_extensions.emplace_back("zcmop");
+        if (simrv::isa::misa_has_extension(config.isa.isa_preset, simrv::isa::IsaExtension::D)) {
+            guest_extensions.emplace_back("zcd");
+        }
+    }
+    if (simrv::isa::misa_has_extension(config.isa.isa_preset, simrv::isa::IsaExtension::H)) {
+        guest_extensions.emplace_back("h");
+        guest_extensions.emplace_back("ssstateen");
+        guest_extensions.emplace_back("shcounterenw");
+        guest_extensions.emplace_back("shvstvala");
+        guest_extensions.emplace_back("shtvala");
+        guest_extensions.emplace_back("shvstvecd");
+        guest_extensions.emplace_back("shvsatpa");
+        guest_extensions.emplace_back("shgatpa");
+    }
 
     for (uint32_t hart = 0; hart < num_harts; ++hart) {
         fdt.begin_node(std::format("cpu@{}", hart));
@@ -221,9 +337,10 @@ auto generate_platform_fdt(const core::MachineConfig& config,
         fdt.property_string("status", "okay");
         fdt.property_u32("clock-frequency", clock_hz);
         fdt.property_string("riscv,isa-base", simrv::xlen::kIsXLen64 ? "rv64i" : "rv32i");
-        fdt.property_stringlist("riscv,isa-extensions", kRva23Exts);
-        fdt.property_u32("riscv,cbom-block-size", 32);
-        fdt.property_u32("riscv,cboz-block-size", 32);
+        fdt.property_stringlist("riscv,isa-extensions", guest_extensions);
+        fdt.property_u32("riscv,cbom-block-size", core::kGuestCacheBlockBytes);
+        fdt.property_u32("riscv,cbop-block-size", core::kGuestCacheBlockBytes);
+        fdt.property_u32("riscv,cboz-block-size", core::kGuestCacheBlockBytes);
         fdt.property_string("mmu-type", simrv::xlen::kIsXLen64 ? "riscv,sv39" : "riscv,sv32");
 
         // CPU Interrupt Controller
@@ -239,6 +356,32 @@ auto generate_platform_fdt(const core::MachineConfig& config,
     }
     fdt.end_node();  // cpus
 
+    // PMU selector IDs and raw event support are kept in the HPM catalog. The only generic
+    // mapping advertised here is branch-misses, whose meaning matches selector 9.
+    fdt.begin_node("pmu");
+    fdt.property_string("compatible", "riscv,pmu");
+    std::vector<FdtCell> generic_selectors;
+    std::vector<FdtCell> generic_counter_ranges;
+    for (const auto& mapping : core::kSbiGenericHpmMappings) {
+        generic_selectors.insert(generic_selectors.end(),
+                                 {mapping.event_code, 0U, std::to_underlying(mapping.event)});
+        generic_counter_ranges.insert(generic_counter_ranges.end(),
+                                      {mapping.event_code, mapping.event_code, 0xfffffff8U});
+    }
+    fdt.property_array_u32("riscv,event-to-mhpmevent", generic_selectors);
+    fdt.property_array_u32("riscv,event-to-mhpmcounters", generic_counter_ranges);
+    std::vector<FdtCell> raw_events;
+    raw_events.reserve(core::kHpmEventCatalog.size() * 5);
+    for (const auto& event : core::kHpmEventCatalog) {
+        raw_events.push_back(0U);
+        raw_events.push_back(std::to_underlying(event.id));
+        raw_events.push_back(0xffffffffU);
+        raw_events.push_back(0xffffffffU);
+        raw_events.push_back(0xfffffff8U);
+    }
+    fdt.property_array_u32("riscv,raw-event-to-mhpmcounters", raw_events);
+    fdt.end_node();
+
     // /memory
     fdt.begin_node(std::format("memory@{:x}", dram_base));
     fdt.property_string("device_type", "memory");
@@ -252,112 +395,204 @@ auto generate_platform_fdt(const core::MachineConfig& config,
     fdt.property_string("compatible", "simple-bus");
     fdt.property_empty("ranges");
 
-    // UART
-    fdt.begin_node("uart@10000000");
-    fdt.property_string("compatible", "ns16550a");
-    fdt.property_reg("reg", 0x10000000ULL, 0x100ULL);
-    fdt.property_u32("clock-frequency", 3686400);
-    fdt.property_phandle("interrupt-parent", 1U);  // PLIC phandle
-    fdt.property_u32("interrupts", 10U);
-    fdt.end_node();
-
-    // RTC
-    fdt.begin_node("rtc@101000");
-    fdt.property_string("compatible", "google,goldfish-rtc");
-    fdt.property_reg("reg", 0x101000ULL, 0x1000ULL);
-    fdt.property_phandle("interrupt-parent", 1U);
-    fdt.property_u32("interrupts", 11U);
-    fdt.end_node();
-
-    // Power (syscon)
-    fdt.begin_node("power@100000");
-    static constexpr std::string_view kPowerCompat[] = {"syscon-poweroff", "syscon"};
-    fdt.property_stringlist("compatible", kPowerCompat);
-    fdt.property_reg("reg", 0x100000ULL, 0x1000ULL);
-    fdt.end_node();
-
-    // CLINT
-    fdt.begin_node("clint@60000000");
-    static constexpr std::string_view kClintCompat[] = {"riscv,clint0", "sifive,clint0"};
-    fdt.property_stringlist("compatible", kClintCompat);
-    fdt.property_reg("reg", 0x60000000ULL, 0x10000ULL);
-    std::vector<FdtCell> clint_irqs;
-    for (uint32_t hart = 0; hart < num_harts; ++hart) {
-        clint_irqs.push_back(100U + hart);  // cpu phandle
-        clint_irqs.push_back(3U);           // M-software IRQ
-        clint_irqs.push_back(100U + hart);
-        clint_irqs.push_back(7U);  // M-timer IRQ
+    const auto* plic = find_device(core::SoCDeviceKind::Plic);
+    const auto add_irq = [&fdt, plic](const core::SoCDeviceConfig& device) {
+        if (plic != nullptr && device.irq != 0) {
+            fdt.property_phandle("interrupt-parent", 1U);
+            fdt.property_u32("interrupts", device.irq);
+        }
+    };
+    if (uart != nullptr) {
+        fdt.begin_node(std::format("uart@{:x}", static_cast<uint64_t>(uart->base)));
+        fdt.property_string("compatible", "ns16550a");
+        fdt.property_reg("reg", uart->base, uart->size);
+        const uint32_t uart_clock = static_cast<uint32_t>(uart->clock_hz);
+        const uint32_t baud = simrv::device::uart_baud_rate(
+            uart->clock_hz, simrv::device::uart_reset_divisor(uart->clock_hz));
+        fdt.property_u32("clock-frequency", uart_clock);
+        fdt.property_u32("current-speed", baud);
+        add_irq(*uart);
+        fdt.end_node();
     }
-    fdt.property_array_u32("interrupts-extended", clint_irqs);
-    fdt.end_node();
+
+    if (const auto* rtc = find_device(core::SoCDeviceKind::Rtc); rtc != nullptr) {
+        fdt.begin_node(std::format("rtc@{:x}", static_cast<uint64_t>(rtc->base)));
+        fdt.property_string("compatible", "google,goldfish-rtc");
+        fdt.property_reg("reg", rtc->base, rtc->size);
+        add_irq(*rtc);
+        fdt.end_node();
+    }
+
+    const auto* power = find_device(core::SoCDeviceKind::Power);
+    if (power != nullptr) {
+        // SiFive test finisher, exposed as a syscon for Linux poweroff/reboot.
+        fdt.begin_node(std::format("test@{:x}", static_cast<uint64_t>(power->base)));
+        static constexpr std::string_view kTestCompat[] = {"sifive,test1", "sifive,test0",
+                                                           "syscon"};
+        fdt.property_stringlist("compatible", kTestCompat);
+        fdt.property_reg("reg", power->base, power->size);
+        fdt.property_phandle("phandle", 2U);
+        fdt.end_node();
+    }
+
+    // The legacy CLINT node is represented only when that device is in the SoC model.
+    if (const auto* clint = find_device(core::SoCDeviceKind::Clint); clint != nullptr) {
+        fdt.begin_node(std::format("clint@{:x}", static_cast<uint64_t>(clint->base)));
+        static constexpr std::string_view kClintCompat[] = {"riscv,clint0", "sifive,clint0"};
+        fdt.property_stringlist("compatible", kClintCompat);
+        fdt.property_reg("reg", clint->base, clint->size);
+        std::vector<FdtCell> clint_irqs;
+        for (uint32_t hart = 0; hart < num_harts; ++hart) {
+            clint_irqs.push_back(100U + hart);  // cpu phandle
+            clint_irqs.push_back(3U);           // M-software IRQ
+            clint_irqs.push_back(100U + hart);
+            clint_irqs.push_back(7U);  // M-timer IRQ
+        }
+        fdt.property_array_u32("interrupts-extended", clint_irqs);
+        fdt.end_node();
+    }
 
     // PLIC
-    fdt.begin_node("plic@50000000");
-    static constexpr std::string_view kPlicCompat[] = {"riscv,plic0", "sifive,plic-1.0.0"};
-    fdt.property_stringlist("compatible", kPlicCompat);
-    fdt.property_reg("reg", 0x50000000ULL, 0x4000000ULL);
-    fdt.property_u32("riscv,ndev", 32);
-    fdt.property_empty("interrupt-controller");
-    fdt.property_u32("#interrupt-cells", 1);
-    fdt.property_phandle("phandle", 1U);
-    std::vector<FdtCell> plic_irqs;
-    for (uint32_t hart = 0; hart < num_harts; ++hart) {
-        plic_irqs.push_back(100U + hart);
-        plic_irqs.push_back(11U);  // M-external IRQ
-        plic_irqs.push_back(100U + hart);
-        plic_irqs.push_back(9U);  // S-external IRQ
+    if (plic != nullptr) {
+        fdt.begin_node(std::format("plic@{:x}", static_cast<uint64_t>(plic->base)));
+        static constexpr std::string_view kPlicCompat[] = {"sifive,plic-1.0.0", "riscv,plic0"};
+        fdt.property_stringlist("compatible", kPlicCompat);
+        fdt.property_reg("reg", plic->base, plic->size);
+        fdt.property_u32("#address-cells", 0);
+        fdt.property_u32("riscv,ndev", core::kPlicSourceCount);
+        fdt.property_empty("interrupt-controller");
+        fdt.property_u32("#interrupt-cells", 1);
+        fdt.property_phandle("phandle", 1U);
+        std::vector<FdtCell> plic_irqs;
+        for (uint32_t hart = 0; hart < num_harts; ++hart) {
+            plic_irqs.push_back(100U + hart);
+            plic_irqs.push_back(11U);
+            plic_irqs.push_back(100U + hart);
+            plic_irqs.push_back(9U);
+        }
+        fdt.property_array_u32("interrupts-extended", plic_irqs);
+        fdt.end_node();
     }
-    fdt.property_array_u32("interrupts-extended", plic_irqs);
-    fdt.end_node();
 
-    const bool pflash_enabled =
-        config.files.uefi_enabled ||
-        core::SoCDeviceRegistry::enabled(config.soc, core::SoCDeviceKind::PFlash);
+    const auto* pflash = find_device(core::SoCDeviceKind::PFlash);
+    const bool pflash_enabled = config.files.uefi_enabled || pflash != nullptr;
     if (is_pcie && pflash_enabled) {
         // Parallel NOR Flash (PFlash)
-        fdt.begin_node("flash@20000000");
-        fdt.property_string("compatible", "cfi-flash");
-        fdt.property_array_u64("reg", {SIMRV_PLATFORM_PFLASH0_BASE, SIMRV_PLATFORM_PFLASH0_SIZE,
-                                       SIMRV_PLATFORM_PFLASH1_BASE, SIMRV_PLATFORM_PFLASH1_SIZE});
+        const auto flash0 =
+            pflash == nullptr ? core::soc_device_default(core::SoCDeviceKind::PFlash) : *pflash;
+        fdt.begin_node(std::format("flash@{:x}", static_cast<uint64_t>(flash0.base)));
+        fdt.property_string("compatible",
+                            flash0.compatible.empty() ? "cfi-flash" : flash0.compatible);
+        std::vector<uint64_t> flash_regs{static_cast<uint64_t>(flash0.base),
+                                         static_cast<uint64_t>(flash0.size)};
+        for (const auto& region : flash0.regions) {
+            flash_regs.push_back(static_cast<uint64_t>(region.base));
+            flash_regs.push_back(static_cast<uint64_t>(region.size));
+        }
+        fdt.property_array_u64("reg", flash_regs);
         fdt.property_u32("bank-width", 2);
         fdt.end_node();
     }
 
     if (is_pcie) {
+        const auto& pcie = config.soc.pcie;
         // PCIe ECAM Controller
-        fdt.begin_node("pci@30000000");
+        fdt.begin_node(std::format("pci@{:x}", static_cast<uint64_t>(pcie.ecam_base)));
         fdt.property_string("compatible", "pci-host-ecam-generic");
         fdt.property_string("device_type", "pci");
-        fdt.property_reg("reg", SIMRV_PLATFORM_PCIE_ECAM_BASE, SIMRV_PLATFORM_PCIE_ECAM_SIZE);
+        fdt.property_reg("reg", pcie.ecam_base, pcie.ecam_size);
         fdt.property_u32("#address-cells", 3);
         fdt.property_u32("#size-cells", 2);
-        fdt.property_array_u32("bus-range", {0, 255});
-        // 32-bit MMIO aperture: flags=0x02000000 (32-bit non-prefetchable memory)
-        // pci_addr=0x40000000, cpu_addr=0x40000000, size=0x10000000
-        const FdtCell pci_ranges[] = {0x02000000U, 0x00000000U, 0x40000000U, 0x00000000U,
-                                      0x40000000U, 0x00000000U, 0x10000000U};
-        fdt.property_array_u32("ranges", pci_ranges);
-        fdt.end_node();
-    } else {
-        // VirtIO MMIO slots for embedded / FPGA target
-        static constexpr struct {
-            simrv::xlen::Address addr;
-            uint32_t irq;
-        } kVirtioSlots[] = {
-            {0x10001000ULL, 1}, {0x10002000ULL, 2}, {0x10003000ULL, 3}, {0x10004000ULL, 4},
-            {0x10005000ULL, 5}, {0x10006000ULL, 6}, {0x10007000ULL, 7}, {0x10008000ULL, 8},
+        fdt.property_u32("#interrupt-cells", 1);
+        fdt.property_array_u32("bus-range", {pcie.first_bus, pcie.last_bus});
+        const auto mmio_end = static_cast<uint64_t>(pcie.mmio_base) + pcie.mmio_size;
+        const FdtCell pci_memory_type = mmio_end > (uint64_t{1} << 32U) ? 0x03000000U : 0x02000000U;
+        const FdtCell pci_ranges[] = {
+            pci_memory_type,
+            static_cast<FdtCell>(static_cast<uint64_t>(pcie.mmio_base) >> 32U),
+            static_cast<FdtCell>(pcie.mmio_base),
+            static_cast<FdtCell>(static_cast<uint64_t>(pcie.mmio_base) >> 32U),
+            static_cast<FdtCell>(pcie.mmio_base),
+            static_cast<FdtCell>(static_cast<uint64_t>(pcie.mmio_size) >> 32U),
+            static_cast<FdtCell>(pcie.mmio_size),
         };
-        for (const auto& slot : kVirtioSlots) {
-            fdt.begin_node(std::format("virtio@{:x}", slot.addr));
+        fdt.property_array_u32("ranges", pci_ranges);
+        if (plic != nullptr) {
+            static constexpr core::SoCDeviceKind kPciKinds[] = {
+                core::SoCDeviceKind::VirtioMmioBlock, core::SoCDeviceKind::VirtioMmioConsole,
+                core::SoCDeviceKind::VirtioMmioRng,   core::SoCDeviceKind::VirtioMmioGpu,
+                core::SoCDeviceKind::VirtioMmioInput, core::SoCDeviceKind::VirtioMmioSound,
+                core::SoCDeviceKind::VirtioMmioNet,   core::SoCDeviceKind::VirtioMmioFs,
+            };
+            std::vector<FdtCell> interrupt_map;
+            for (const auto kind : kPciKinds) {
+                const auto* endpoint = find_device(kind);
+                if (endpoint == nullptr) continue;
+                const FdtCell bdf =
+                    (static_cast<FdtCell>(endpoint->pci_bus.value_or(0)) << 16U) |
+                    (static_cast<FdtCell>(endpoint->pci_slot.value_or(0)) << 11U) |
+                    (static_cast<FdtCell>(endpoint->pci_function.value_or(0)) << 8U);
+                interrupt_map.insert(interrupt_map.end(),
+                                     {bdf, 0, 0, 1, 1, endpoint->pci_intx_source.value_or(0)});
+            }
+            if (!interrupt_map.empty()) {
+                fdt.property_phandle("interrupt-parent", 1U);
+                fdt.property_array_u32("interrupt-map-mask", {0x00ffff00U, 0, 0, 0x7U});
+                fdt.property_array_u32("interrupt-map", interrupt_map);
+            }
+        }
+        fdt.end_node();
+    } else if (config.platform_profile == core::PlatformProfile::Mmio) {
+        // VirtIO MMIO slots for embedded / FPGA target
+        static constexpr core::SoCDeviceKind kVirtioKinds[] = {
+            core::SoCDeviceKind::VirtioMmioBlock, core::SoCDeviceKind::VirtioMmioConsole,
+            core::SoCDeviceKind::VirtioMmioRng,   core::SoCDeviceKind::VirtioMmioGpu,
+            core::SoCDeviceKind::VirtioMmioInput, core::SoCDeviceKind::VirtioMmioSound,
+            core::SoCDeviceKind::VirtioMmioNet,   core::SoCDeviceKind::VirtioMmioFs,
+        };
+        for (const auto kind : kVirtioKinds) {
+            const auto* slot = find_device(kind);
+            if (slot == nullptr) continue;
+            fdt.begin_node(std::format("virtio@{:x}", static_cast<uint64_t>(slot->base)));
             fdt.property_string("compatible", "virtio,mmio");
-            fdt.property_reg("reg", slot.addr, 0x1000ULL);
-            fdt.property_phandle("interrupt-parent", 1U);
-            fdt.property_u32("interrupts", slot.irq);
+            fdt.property_reg("reg", slot->base, slot->size);
+            add_irq(*slot);
             fdt.end_node();
         }
     }
 
+    // Descriptive custom and dummy windows are useful to guest discovery tools when a compatible
+    // string is available. A custom factory is optional: without one, runtime uses a dummy MMIO.
+    for (const auto& custom : devices) {
+        if (custom.kind != core::SoCDeviceKind::CustomMmio &&
+            custom.kind != core::SoCDeviceKind::DummyMmio)
+            continue;
+        if (custom.compatible.empty()) continue;
+        fdt.begin_node(std::format("{}@{:x}", custom.name, static_cast<uint64_t>(custom.base)));
+        fdt.property_string("compatible", custom.compatible);
+        fdt.property_reg("reg", custom.base, custom.size);
+        add_irq(custom);
+        fdt.end_node();
+    }
+
     fdt.end_node();  // /soc
+
+    if (power != nullptr) {
+        fdt.begin_node("poweroff");
+        fdt.property_string("compatible", "syscon-poweroff");
+        fdt.property_phandle("regmap", 2U);
+        fdt.property_u32("offset", 0);
+        fdt.property_u32("value", 0x5555U);
+        fdt.end_node();
+
+        fdt.begin_node("reboot");
+        fdt.property_string("compatible", "syscon-reboot");
+        fdt.property_phandle("regmap", 2U);
+        fdt.property_u32("offset", 0);
+        fdt.property_u32("value", 0x7777U);
+        fdt.end_node();
+    }
+
     fdt.end_node();  // root
 
     return fdt.serialize();

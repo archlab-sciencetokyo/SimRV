@@ -10,6 +10,7 @@
 #include <memory>
 #include <mutex>
 #include <optional>
+#include <shared_mutex>
 #include <span>
 #include <string>
 #include <unordered_map>
@@ -137,6 +138,9 @@ struct TuiExecutionSnapshot {
  * image loading, device wiring, tracing, and run termination checks.
  */
 class Machine final : public core::IInterruptController {
+   public:
+    enum class TohostWriteKind : uint8_t { Full, LowWord, HighWord };
+
    private:
     class Runtime;
     struct PendingInputEvent {
@@ -150,6 +154,7 @@ class Machine final : public core::IInterruptController {
     };
 
     std::unique_ptr<Runtime> runtime_;
+    std::shared_mutex instruction_memory_mutex_;
     Tracer* tracer_raw_{nullptr};
     simrv::debug::BreakpointManager* breakpoint_manager_raw_{nullptr};
     std::unique_ptr<simrv::device::PlatformDeviceRegistry> device_registry_;
@@ -274,6 +279,9 @@ class Machine final : public core::IInterruptController {
         -> std::expected<void, std::string>;
     [[nodiscard]] auto load_checkpoint(const std::string& filepath)
         -> std::expected<void, std::string>;
+    /// Dump the memory range between begin_signature and end_signature symbols to an ACT signature
+    /// file.
+    [[nodiscard]] auto dump_signature(const std::string& filepath) const -> bool;
     struct LoadedMemorySegment {
         simrv::xlen::Address paddr = 0;
         size_t size = 0;
@@ -304,6 +312,8 @@ class Machine final : public core::IInterruptController {
     void advance_ca_primary_cycle();
     /// Finalize cycle for tohost checks only.
     void finalize_cycle_tohost();
+    /// Publish an HTIF register write, preserving split 32-bit writes on RV64.
+    void publish_tohost_write(uint64_t value, TohostWriteKind kind) noexcept;
     /// Stop the simulation loop.
     void stop(StopReason reason = StopReason::ExternalStop);
     /// Get current atomic execution state.
@@ -384,6 +394,8 @@ class Machine final : public core::IInterruptController {
     void switch_execution_engine_sync(ExecutionEngine engine);
 
     std::atomic<uint64_t> tohost{0};  // Host communication register (always 64-bit for HTIF).
+    std::atomic<bool> tohost_low_word_pending_{false};
+    std::atomic<uint8_t> tohost_low_word_fallback_cycles_{0};
     std::atomic<bool> reboot_requested = false;  // Reboot requested flag.
     std::atomic<int> exit_code{0};               // Exit/status code of the simulation.
     std::atomic<bool> is_shutdown_ = false;      // System shutdown flag.
@@ -423,6 +435,9 @@ class Machine final : public core::IInterruptController {
     [[nodiscard]] auto ram_data() noexcept -> simrv::xlen::Byte*;
     [[nodiscard]] auto ram_data() const noexcept -> const simrv::xlen::Byte*;
     [[nodiscard]] auto ram_view() const noexcept -> simrv::memory::RamView;
+    [[nodiscard]] auto instruction_memory_mutex() noexcept -> std::shared_mutex& {
+        return instruction_memory_mutex_;
+    }
     [[nodiscard]] auto framebuffer_view() const noexcept -> simrv::memory::RamView;
     [[nodiscard]] auto framebuffer_geometry() const noexcept -> const FramebufferConfig& {
         return framebuffer_geometry_;
