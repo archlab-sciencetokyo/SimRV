@@ -843,7 +843,7 @@ auto InspectorPane::render_pipeline_stages_functional_high(const simrv::core::CP
         case 16: {
             if (ctx.pending_exception.has_value()) {
                 const auto cause = simrv::isa::to_trap_cause(*ctx.pending_exception);
-                const std::string_view canonical_name = simrv::core::trap_cause_name(cause);
+                const std::string canonical_name = simrv::core::trap_cause_name(cause);
                 std::string cause_name =
                     canonical_name != "Unknown Trap"
                         ? std::string(canonical_name)

@@ -283,29 +283,31 @@ if(BUILD_TESTING)
   set_tests_properties(mission-tools PROPERTIES LABELS "regress;tui")
 
   # End-to-End (E2E) 4-tier testing suites
+  # The UART completion scenarios advance simulated cycles until the transmitter drains.
+  # Keep suite-level limits long enough for the full fixtures under ASan/UBSan builds.
   add_test(NAME e2e-tier1-features
            COMMAND ${PYTHON_BIN} ${CMAKE_SOURCE_DIR}/tests/RunE2ETests.py
                    --simrv $<TARGET_FILE:SimRV> --tier 1)
   set_tests_properties(e2e-tier1-features
-                       PROPERTIES LABELS "regress;e2e;e2e-tier1" TIMEOUT 60)
+                       PROPERTIES LABELS "regress;e2e;e2e-tier1" TIMEOUT 300)
 
   add_test(NAME e2e-tier2-boundaries
            COMMAND ${PYTHON_BIN} ${CMAKE_SOURCE_DIR}/tests/RunE2ETests.py
                    --simrv $<TARGET_FILE:SimRV> --tier 2)
   set_tests_properties(e2e-tier2-boundaries
-                       PROPERTIES LABELS "regress;e2e;e2e-tier2" TIMEOUT 30)
+                       PROPERTIES LABELS "regress;e2e;e2e-tier2" TIMEOUT 120)
 
   add_test(NAME e2e-tier3-combinations
            COMMAND ${PYTHON_BIN} ${CMAKE_SOURCE_DIR}/tests/RunE2ETests.py
                    --simrv $<TARGET_FILE:SimRV> --tier 3)
   set_tests_properties(e2e-tier3-combinations
-                       PROPERTIES LABELS "regress;e2e;e2e-tier3" TIMEOUT 30)
+                       PROPERTIES LABELS "regress;e2e;e2e-tier3" TIMEOUT 120)
 
   add_test(NAME e2e-tier4-scenarios
            COMMAND ${PYTHON_BIN} ${CMAKE_SOURCE_DIR}/tests/RunE2ETests.py
                    --simrv $<TARGET_FILE:SimRV> --tier 4)
   set_tests_properties(e2e-tier4-scenarios
-                       PROPERTIES LABELS "regress;e2e;e2e-tier4" TIMEOUT 30)
+                       PROPERTIES LABELS "regress;e2e;e2e-tier4" TIMEOUT 120)
 
   add_test(NAME e2e-all-tiers
            COMMAND ${PYTHON_BIN} ${CMAKE_SOURCE_DIR}/tests/RunE2ETests.py
