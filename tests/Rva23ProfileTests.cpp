@@ -213,7 +213,7 @@ void test_ziccrse_eventual_lr_sc_success() {
     hart1.state().pc = kCode;
     hart0.state().regs.write(simrv::xlen::RegId::A0, kAddress + 4);
     hart1.state().regs.write(simrv::xlen::RegId::A0, kAddress + 4);
-    const auto done = [kCode](const simrv::core::CPU& cpu) { return cpu.state().pc == kCode + 16; };
+    const auto done = [](const simrv::core::CPU& cpu) { return cpu.state().pc == kCode + 16; };
     for (unsigned steps = 0; steps < 32 && (!done(hart0) || !done(hart1)); ++steps) {
         if (!done(hart0)) hart0.run_cycle_baremetal(machine);
         if (!done(hart1)) hart1.run_cycle_baremetal(machine);
