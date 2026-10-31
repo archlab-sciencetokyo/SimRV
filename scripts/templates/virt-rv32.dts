@@ -50,7 +50,10 @@
             reg = <0>;
             riscv,isa = "rv32imafdcbv";
             riscv,isa-base = "rv32i";
-            riscv,isa-extensions = "i", "m", "a", "f", "d", "c", "b", "v", "zvbb", "zvkt", "zkt", "zicntr", "zihpm", "zicsr", "zifencei", "zihintpause", "zawrs", "sscofpmf", "ziccrse", "ziccif";
+            riscv,isa-extensions = "i", "m", "a", "f", "d", "c", "b", "v", "zicntr", "zihpm", "zicsr", "zifencei", "zihintpause", "zihintntl", "zkt", "zvbb", "zvkt", "zimop", "zic64b", "zicclsm", "za64rs", "ziccamoa", "zfhmin", "zvfhmin", "zfa", "zicond", "zicboz", "zicbom", "zicbop", "zawrs", "svinval", "svpbmt", "svnapot", "sstc", "sscofpmf", "ziccrse", "ziccif", "svade", "ssccptr", "sscounterenw", "sstvala", "sstvecd", "zmmul", "zaamo", "zalrsc", "za128rs", "zba", "zbb", "zbs", "zca", "zcb", "zcmop";
+            riscv,cbom-block-size = <64>;
+            riscv,cbop-block-size = <64>;
+            riscv,cboz-block-size = <64>;
             mmu-type = "riscv,sv32";
             clock-frequency = <160000000>;
 

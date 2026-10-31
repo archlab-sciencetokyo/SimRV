@@ -15,6 +15,7 @@
 #include <utility>
 #include <vector>
 
+#include "simrv/core/InterruptTopology.hpp"
 #include "simrv/core/PlatformMap.h"
 #include "simrv/xlen/ScalarTypes.hpp"
 
@@ -115,6 +116,11 @@ struct SoCDeviceConfig {
     std::string compatible;
     uint32_t read_value = 0;
     std::array<uint8_t, 6> mac_address{0x52, 0x54, 0x00, 0x12, 0x34, 0x56};
+    uint64_t clock_hz = 0;
+    std::optional<uint8_t> pci_bus;
+    std::optional<uint8_t> pci_slot;
+    std::optional<uint8_t> pci_function;
+    std::optional<uint32_t> pci_intx_source;
 
     SoCDeviceConfig() = default;
     SoCDeviceConfig(SoCDeviceKind device_kind, std::string device_name,
@@ -132,13 +138,23 @@ struct SoCDeviceConfig {
           regions(std::move(device_regions)),
           compatible(std::move(device_compatible)),
           read_value(device_read_value),
-          mac_address(device_mac) {}
+          mac_address(device_mac),
+          clock_hz(device_kind == SoCDeviceKind::Uart ? SIMRV_PLATFORM_UART_CLOCK_HZ : 0) {}
 
     [[nodiscard]] auto find_region(std::string_view region_name) const -> const SoCDeviceRegion* {
         const auto it = std::ranges::find_if(
             regions, [region_name](const auto& region) { return region.name == region_name; });
         return it == regions.end() ? nullptr : &*it;
     }
+};
+
+struct PcieHostConfig {
+    simrv::xlen::Address ecam_base = SIMRV_PLATFORM_PCIE_ECAM_BASE;
+    simrv::xlen::Address ecam_size = SIMRV_PLATFORM_PCIE_ECAM_SIZE;
+    simrv::xlen::Address mmio_base = SIMRV_PLATFORM_PCIE_WINDOW_BASE;
+    simrv::xlen::Address mmio_size = SIMRV_PLATFORM_PCIE_WINDOW_SIZE;
+    uint8_t first_bus = 0;
+    uint8_t last_bus = 255;
 };
 
 enum class SmpMode : uint8_t {
@@ -229,49 +245,77 @@ struct SmpTopologyConfig {
     return std::nullopt;
 }
 
+[[nodiscard]] inline auto soc_pci_device_default(SoCDeviceKind kind, std::string name,
+                                                 simrv::xlen::Address base,
+                                                 simrv::xlen::Address size, uint32_t mmio_irq,
+                                                 uint8_t slot, uint32_t intx_source)
+    -> SoCDeviceConfig {
+    SoCDeviceConfig device{kind, std::move(name), base, size, mmio_irq};
+    device.pci_slot = slot;
+    device.pci_intx_source = intx_source;
+    return device;
+}
+
 [[nodiscard]] inline auto soc_device_default(SoCDeviceKind kind) -> SoCDeviceConfig {
     switch (kind) {
-        case SoCDeviceKind::Uart:
-            return {kind, "uart0", SIMRV_PLATFORM_UART_BASE, SIMRV_PLATFORM_UART_SIZE, 10};
+        case SoCDeviceKind::Uart: {
+            SoCDeviceConfig device{kind, "uart0", SIMRV_PLATFORM_UART_BASE,
+                                   SIMRV_PLATFORM_UART_SIZE, 3};
+            device.clock_hz = SIMRV_PLATFORM_UART_CLOCK_HZ;
+            return device;
+        }
         case SoCDeviceKind::Rtc:
             return {kind, "rtc0", 0x70000000, 0x1000, 11};
         case SoCDeviceKind::Power:
             return {kind, "power0", 0x00100000, 0x1000, 0};
         case SoCDeviceKind::AclintMtimer:
-            return {kind, "timer0", 0x60000000, 0x4000, 7};
+            return {kind, "timer0", 0x02000000, 0x00010000, 7};
         case SoCDeviceKind::AclintMswi:
-            return {kind, "mswi0", 0x60000000, 0x4000, 3};
+            return {kind, "mswi0", 0x02010000, 0x00010000, 3};
         case SoCDeviceKind::Imsic:
-            return {kind, "imsic0", 0x24000000, 0x100000, 0};
+            return {kind,
+                    "imsic0",
+                    0x24000000,
+                    0x00010000,
+                    0,
+                    true,
+                    {{.name = "supervisor", .base = 0x28000000, .size = 0x00010000}}};
         case SoCDeviceKind::Aplic:
-            return {kind, "aplic0", 0x0c000000, 0x400000, 0};
+            return {kind,
+                    "aplic0",
+                    0x0c000000,
+                    0x00004000,
+                    0,
+                    true,
+                    {{.name = "supervisor", .base = 0x0d000000, .size = 0x00004000}}};
         case SoCDeviceKind::Plic:
             return {kind, "plic0", 0x50000000, 0x4000000, 0};
         case SoCDeviceKind::Clint:
             return {kind, "clint0", 0x60000000, 0xc0000, 0};
         case SoCDeviceKind::VirtioMmioBlock:
-            return {kind, "disk0", SIMRV_PLATFORM_VIRTIO_BLOCK_BASE,
-                    SIMRV_PLATFORM_VIRTIO_SLOT_SIZE, 2};
+            return soc_pci_device_default(kind, "disk0", SIMRV_PLATFORM_VIRTIO_BLOCK_BASE,
+                                          SIMRV_PLATFORM_VIRTIO_SLOT_SIZE, 2, 1, 17);
         case SoCDeviceKind::VirtioMmioConsole:
-            return {kind, "console0", SIMRV_PLATFORM_VIRTIO_CONSOLE_BASE,
-                    SIMRV_PLATFORM_VIRTIO_SLOT_SIZE, 1};
+            return soc_pci_device_default(kind, "console0", SIMRV_PLATFORM_VIRTIO_CONSOLE_BASE,
+                                          SIMRV_PLATFORM_VIRTIO_SLOT_SIZE, 1, 2, 18);
         case SoCDeviceKind::VirtioMmioRng:
-            return {kind, "rng0", SIMRV_PLATFORM_VIRTIO_RNG_BASE, SIMRV_PLATFORM_VIRTIO_SLOT_SIZE,
-                    4};
+            return soc_pci_device_default(kind, "rng0", SIMRV_PLATFORM_VIRTIO_RNG_BASE,
+                                          SIMRV_PLATFORM_VIRTIO_SLOT_SIZE, 4, 3, 19);
         case SoCDeviceKind::VirtioMmioGpu:
-            return {kind, "gpu0", SIMRV_PLATFORM_VIRTIO_GPU_BASE, SIMRV_PLATFORM_VIRTIO_SLOT_SIZE,
-                    5};
+            return soc_pci_device_default(kind, "gpu0", SIMRV_PLATFORM_VIRTIO_GPU_BASE,
+                                          SIMRV_PLATFORM_VIRTIO_SLOT_SIZE, 5, 4, 20);
         case SoCDeviceKind::VirtioMmioInput:
-            return {kind, "input0", SIMRV_PLATFORM_VIRTIO_INPUT_BASE,
-                    SIMRV_PLATFORM_VIRTIO_SLOT_SIZE, 6};
+            return soc_pci_device_default(kind, "input0", SIMRV_PLATFORM_VIRTIO_INPUT_BASE,
+                                          SIMRV_PLATFORM_VIRTIO_SLOT_SIZE, 6, 5, 21);
         case SoCDeviceKind::VirtioMmioSound:
-            return {kind, "sound0", SIMRV_PLATFORM_VIRTIO_SOUND_BASE,
-                    SIMRV_PLATFORM_VIRTIO_SLOT_SIZE, 7};
+            return soc_pci_device_default(kind, "sound0", SIMRV_PLATFORM_VIRTIO_SOUND_BASE,
+                                          SIMRV_PLATFORM_VIRTIO_SLOT_SIZE, 7, 6, 22);
         case SoCDeviceKind::VirtioMmioNet:
-            return {kind, "net0", SIMRV_PLATFORM_VIRTIO_NET_BASE, SIMRV_PLATFORM_VIRTIO_SLOT_SIZE,
-                    8};
+            return soc_pci_device_default(kind, "net0", SIMRV_PLATFORM_VIRTIO_NET_BASE,
+                                          SIMRV_PLATFORM_VIRTIO_SLOT_SIZE, 8, 7, 23);
         case SoCDeviceKind::VirtioMmioFs:
-            return {kind, "fs0", SIMRV_PLATFORM_VIRTIO_FS_BASE, SIMRV_PLATFORM_VIRTIO_SLOT_SIZE, 9};
+            return soc_pci_device_default(kind, "fs0", SIMRV_PLATFORM_VIRTIO_FS_BASE,
+                                          SIMRV_PLATFORM_VIRTIO_SLOT_SIZE, 9, 8, 24);
         case SoCDeviceKind::DmaController:
             return {kind, "dma0", SIMRV_PLATFORM_DMA_BASE, SIMRV_PLATFORM_DMA_SIZE,
                     SIMRV_PLATFORM_DMA_IRQ};
@@ -314,6 +358,7 @@ struct SoCConfig {
     bool enable_pcie = true;
     bool enable_mmio = false;
     bool disable_unlisted_devices = false;
+    PcieHostConfig pcie{};
     std::optional<simrv::xlen::Address> dram_base;
     std::optional<simrv::xlen::Address> dram_size;
     std::optional<simrv::xlen::Address> reset_pc;
@@ -390,6 +435,29 @@ struct SoCConfig {
             std::string_view name;
         };
         std::vector<Region> regions;
+        if (enable_pcie) {
+            constexpr simrv::xlen::Address kEcamBusBytes = 1U << 20U;
+            const auto range_valid = [](simrv::xlen::Address base, simrv::xlen::Address size) {
+                return base != 0 && size != 0 && base <= ~simrv::xlen::Address{0} - size;
+            };
+            if (!range_valid(pcie.ecam_base, pcie.ecam_size) ||
+                !range_valid(pcie.mmio_base, pcie.mmio_size)) {
+                return std::unexpected("PCIe host has an invalid ECAM or MMIO range");
+            }
+            if (pcie.first_bus > pcie.last_bus) {
+                return std::unexpected("PCIe first bus must not exceed last bus");
+            }
+            const auto bus_count = static_cast<simrv::xlen::Address>(pcie.last_bus) -
+                                   static_cast<simrv::xlen::Address>(pcie.first_bus) + 1;
+            if (bus_count > ~simrv::xlen::Address{0} / kEcamBusBytes ||
+                pcie.ecam_size < bus_count * kEcamBusBytes) {
+                return std::unexpected("PCIe ECAM range is too small for its bus range");
+            }
+            regions.push_back(
+                {.base = pcie.ecam_base, .size = pcie.ecam_size, .name = "pcie-ecam"});
+            regions.push_back(
+                {.base = pcie.mmio_base, .size = pcie.mmio_size, .name = "pcie-mmio"});
+        }
         std::vector<std::string_view> names;
         for (size_t i = 0; i < devices.size(); ++i) {
             const auto& device = devices[i];
@@ -406,6 +474,10 @@ struct SoCConfig {
             if ((device.kind == SoCDeviceKind::ResetControl && device.size != 4) ||
                 (device.kind == SoCDeviceKind::RingBufferEthernet && device.size < 28)) {
                 return std::unexpected("Platform extension has an unsupported MMIO window size");
+            }
+            if (device.kind == SoCDeviceKind::Uart &&
+                (device.clock_hz == 0 || device.clock_hz > std::numeric_limits<uint32_t>::max())) {
+                return std::unexpected("UART clock frequency must fit a nonzero FDT value");
             }
             regions.push_back({.base = device.base, .size = device.size, .name = device.name});
             if (device.kind == SoCDeviceKind::DummyMmio && device.compatible.empty()) {
@@ -428,12 +500,65 @@ struct SoCConfig {
                         "Ring-buffer Ethernet requires power-of-two RX/TX regions");
                 }
             }
+            const bool pci_endpoint = device.kind == SoCDeviceKind::VirtioMmioBlock ||
+                                      device.kind == SoCDeviceKind::VirtioMmioConsole ||
+                                      device.kind == SoCDeviceKind::VirtioMmioRng ||
+                                      device.kind == SoCDeviceKind::VirtioMmioGpu ||
+                                      device.kind == SoCDeviceKind::VirtioMmioInput ||
+                                      device.kind == SoCDeviceKind::VirtioMmioSound ||
+                                      device.kind == SoCDeviceKind::VirtioMmioNet ||
+                                      device.kind == SoCDeviceKind::VirtioMmioFs;
+            if ((!pci_endpoint || !enable_pcie) && device.irq > kPlicSourceCount) {
+                return std::unexpected("PLIC-routed device IRQ must be in the range 0.." +
+                                       std::to_string(kPlicSourceCount));
+            }
             for (const auto& extra : device.regions) {
                 if (extra.size == 0 || extra.base > ~simrv::xlen::Address{0} - extra.size) {
                     return std::unexpected("SoC device has an invalid auxiliary region: '" +
                                            extra.name + "'");
                 }
                 regions.push_back({.base = extra.base, .size = extra.size, .name = extra.name});
+            }
+        }
+        if (enable_pcie) {
+            constexpr std::array pci_kinds = {
+                SoCDeviceKind::VirtioMmioBlock, SoCDeviceKind::VirtioMmioConsole,
+                SoCDeviceKind::VirtioMmioRng,   SoCDeviceKind::VirtioMmioGpu,
+                SoCDeviceKind::VirtioMmioInput, SoCDeviceKind::VirtioMmioSound,
+                SoCDeviceKind::VirtioMmioNet,   SoCDeviceKind::VirtioMmioFs};
+            std::vector<std::array<uint8_t, 3>> bdfs;
+            for (const auto kind : pci_kinds) {
+                const auto configured = std::ranges::find_if(
+                    devices, [kind](const auto& item) { return item.kind == kind; });
+                const bool selected = configured == devices.end()
+                                          ? !disable_unlisted_devices
+                                          : configured->enabled || !disable_unlisted_devices;
+                if (!selected) continue;
+                auto endpoint = configured != devices.end() && configured->enabled
+                                    ? *configured
+                                    : soc_device_default(kind);
+                const auto defaults = soc_device_default(kind);
+                endpoint.pci_bus = endpoint.pci_bus.value_or(defaults.pci_bus.value_or(0));
+                endpoint.pci_slot = endpoint.pci_slot.value_or(defaults.pci_slot.value_or(0));
+                endpoint.pci_function =
+                    endpoint.pci_function.value_or(defaults.pci_function.value_or(0));
+                endpoint.pci_intx_source =
+                    endpoint.pci_intx_source.value_or(defaults.pci_intx_source.value_or(0));
+                if (*endpoint.pci_bus < pcie.first_bus || *endpoint.pci_bus > pcie.last_bus ||
+                    *endpoint.pci_slot > 31 || *endpoint.pci_function > 7) {
+                    return std::unexpected("PCI endpoint BDF is outside the configured topology");
+                }
+                if (*endpoint.pci_intx_source == 0 ||
+                    *endpoint.pci_intx_source > kPlicSourceCount) {
+                    return std::unexpected("PCI endpoint INTx source must be in the range 1.." +
+                                           std::to_string(kPlicSourceCount));
+                }
+                const std::array<uint8_t, 3> bdf{*endpoint.pci_bus, *endpoint.pci_slot,
+                                                 *endpoint.pci_function};
+                if (std::ranges::find(bdfs, bdf) != bdfs.end()) {
+                    return std::unexpected("PCI endpoint BDFs must be unique");
+                }
+                bdfs.push_back(bdf);
             }
         }
         if (dram_base.has_value() && dram_size.has_value()) {

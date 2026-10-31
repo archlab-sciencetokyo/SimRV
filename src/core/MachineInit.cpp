@@ -560,12 +560,22 @@ auto Machine::initialize() -> std::expected<void, std::string> {
         }
     }
 
-    runtime_->rtc = std::make_unique<simrv::Rtc>(*this);
-    runtime_->uart = std::make_unique<simrv::device::Uart>(*this);
-    runtime_->power = std::make_unique<simrv::device::PowerMmio>(*this);
-    if (!runtime_->dma_controller) {
-        runtime_->dma_controller = std::make_unique<simrv::device::DmaController>(this);
-    }
+    const auto device_descriptor = [this](SoCDeviceKind kind) {
+        return SoCDeviceRegistry::descriptor(config.soc, kind).value_or(soc_device_default(kind));
+    };
+    const auto rtc_config = device_descriptor(SoCDeviceKind::Rtc);
+    const auto uart_config = device_descriptor(SoCDeviceKind::Uart);
+    const auto power_config = device_descriptor(SoCDeviceKind::Power);
+    const auto dma_config = device_descriptor(SoCDeviceKind::DmaController);
+    runtime_->rtc =
+        std::make_unique<simrv::Rtc>(*this, rtc_config.base, rtc_config.size, rtc_config.irq);
+    runtime_->uart = std::make_unique<simrv::device::Uart>(
+        *this, uart_config.base, uart_config.size, uart_config.irq, uart_config.clock_hz,
+        config.execution.cpu_clock_hz);
+    runtime_->power =
+        std::make_unique<simrv::device::PowerMmio>(*this, power_config.base, power_config.size);
+    runtime_->dma_controller = std::make_unique<simrv::device::DmaController>(
+        this, dma_config.base, dma_config.size, dma_config.irq);
     if (!runtime_->axi_bridge) {
         runtime_->axi_bridge =
             std::make_unique<simrv::memory::Axi4Bridge>(this, primary_hart().cpu_model_config.axi);
@@ -587,20 +597,38 @@ auto Machine::initialize() -> std::expected<void, std::string> {
 
     memory().initialize_mmu();
 
-    runtime_->aclint_mtimer = std::make_unique<simrv::device::AclintMtimer>(this);
-    runtime_->aclint_mswi = std::make_unique<simrv::device::AclintMswi>(this);
+    const auto mtimer_config = device_descriptor(SoCDeviceKind::AclintMtimer);
+    const auto mswi_config = device_descriptor(SoCDeviceKind::AclintMswi);
+    runtime_->aclint_mtimer =
+        std::make_unique<simrv::device::AclintMtimer>(this, mtimer_config.base, mtimer_config.size);
+    runtime_->aclint_mswi =
+        std::make_unique<simrv::device::AclintMswi>(this, mswi_config.base, mswi_config.size);
+    const auto plic_config = device_descriptor(SoCDeviceKind::Plic);
+    const auto clint_config = device_descriptor(SoCDeviceKind::Clint);
+    for (size_t hart = 0; hart < num_harts(); ++hart) {
+        auto& cpu = this->hart(hart);
+        cpu.plic_mmio.configure_address_map(plic_config.base, plic_config.size);
+        cpu.clint_mmio.configure_address_map(clint_config.base, clint_config.size);
+    }
+    const auto imsic_config = device_descriptor(SoCDeviceKind::Imsic);
+    const auto default_imsic_config = soc_device_default(SoCDeviceKind::Imsic);
+    const auto* imsic_s_region = imsic_config.find_region("supervisor");
+    if (imsic_s_region == nullptr) imsic_s_region = default_imsic_config.find_region("supervisor");
     runtime_->imsic_m = std::make_unique<simrv::device::Imsic>(
-        this, simrv::device::Imsic::Privilege::Machine, simrv::mmio::kImsicMBaseAddress,
-        simrv::mmio::kImsicMSize);
-    runtime_->imsic_s = std::make_unique<simrv::device::Imsic>(
-        this, simrv::device::Imsic::Privilege::Supervisor, simrv::mmio::kImsicSBaseAddress,
-        simrv::mmio::kImsicSSize);
+        this, simrv::device::Imsic::Privilege::Machine, imsic_config.base, imsic_config.size);
+    runtime_->imsic_s =
+        std::make_unique<simrv::device::Imsic>(this, simrv::device::Imsic::Privilege::Supervisor,
+                                               imsic_s_region->base, imsic_s_region->size);
+    const auto aplic_config = device_descriptor(SoCDeviceKind::Aplic);
+    const auto default_aplic_config = soc_device_default(SoCDeviceKind::Aplic);
+    const auto* aplic_s_region = aplic_config.find_region("supervisor");
+    if (aplic_s_region == nullptr) aplic_s_region = default_aplic_config.find_region("supervisor");
     runtime_->aplic_m = std::make_unique<simrv::device::Aplic>(
-        this, simrv::device::Aplic::Privilege::Machine, simrv::mmio::kAplicMBaseAddress,
-        simrv::mmio::kAplicMSize, runtime_->imsic_m.get());
+        this, simrv::device::Aplic::Privilege::Machine, aplic_config.base, aplic_config.size,
+        runtime_->imsic_m.get());
     runtime_->aplic_s = std::make_unique<simrv::device::Aplic>(
-        this, simrv::device::Aplic::Privilege::Supervisor, simrv::mmio::kAplicSBaseAddress,
-        simrv::mmio::kAplicSSize, runtime_->imsic_s.get());
+        this, simrv::device::Aplic::Privilege::Supervisor, aplic_s_region->base,
+        aplic_s_region->size, runtime_->imsic_s.get());
     runtime_->aplic_m->set_act_test_hooks(config.execution.act_test_hooks);
     PlatformBuilder::compose(*this);
     for (const auto& device : simrv::core::SoCDeviceRegistry::resolve(config.soc)) {
@@ -798,7 +826,7 @@ auto Machine::initialize() -> std::expected<void, std::string> {
         if (is_32bit) {
             initial_misa = isa::misa_with_mxl(initial_misa, 32);
         }
-        const bool guest_xlen64 = ((initial_misa >> 62U) & 0x3U) == 0x2U;
+        const bool guest_xlen64 = ((static_cast<uint64_t>(initial_misa) >> 62U) & 0x3U) == 0x2U;
         if (!config.isa.misa_override && guest_xlen64 &&
             config.execution.profile == isa::ArchitectureProfile::Rva23S64 &&
             !config.cpu_model_config_override && !config.cpu_model_preset.has_value() &&

@@ -10,6 +10,7 @@
 #include <stdexcept>
 #include <string_view>
 
+#include "simrv/core/GuestCapabilityCatalog.hpp"
 #include "simrv/xlen/ScalarTypes.hpp"
 
 namespace simrv::util {
@@ -337,13 +338,13 @@ auto patch_fdt(std::span<const uint8_t> blob, uint64_t dram_base, uint64_t dram_
                 set_prop(*c, "clock-frequency", std::move(clk_data));
             }
             std::vector<uint8_t> cbom_sz;
-            put32(cbom_sz, 64);
+            put32(cbom_sz, core::kGuestCacheBlockBytes);
             set_prop(*c, "riscv,cbom-block-size", cbom_sz);
             std::vector<uint8_t> cbop_sz;
-            put32(cbop_sz, 64);
+            put32(cbop_sz, core::kGuestCacheBlockBytes);
             set_prop(*c, "riscv,cbop-block-size", std::move(cbop_sz));
             std::vector<uint8_t> cboz_sz;
-            put32(cboz_sz, 64);
+            put32(cboz_sz, core::kGuestCacheBlockBytes);
             set_prop(*c, "riscv,cboz-block-size", std::move(cboz_sz));
             auto* isa_ext_prop = prop(*c, "riscv,isa-extensions");
             if (isa_ext_prop == nullptr) {
@@ -352,11 +353,6 @@ auto patch_fdt(std::span<const uint8_t> blob, uint64_t dram_base, uint64_t dram_
             }
             if (isa_ext_prop != nullptr) {
                 // Advertise only supported additions; this is not the complete RVA23 set.
-                static constexpr std::string_view kSupportedGuestExts[] = {
-                    "zihintntl", "zkt",      "zvbb",   "zvkt",    "zimop",  "zic64b",  "zicclsm",
-                    "za64rs",    "ziccamoa", "zfhmin", "zvfhmin", "zfa",    "zicond",  "zicboz",
-                    "zicbom",    "zicbop",   "zawrs",  "svinval", "svpbmt", "svnapot", "sstc",
-                    "sscofpmf",  "ziccrse",  "ziccif", "ssu64xl", "ssnpm",  "supm"};
                 const auto has_extension = [&](std::string_view extension) {
                     size_t offset = 0;
                     while (offset < isa_ext_prop->data.size()) {
@@ -383,7 +379,7 @@ auto patch_fdt(std::span<const uint8_t> blob, uint64_t dram_base, uint64_t dram_
                 const bool has_bitmanip = has_extension("b") || has_extension("zba") ||
                                           has_extension("zbb") || has_extension("zbs");
                 const bool has_compressed = has_extension("c") || has_extension("zca");
-                for (const auto ext : kSupportedGuestExts) {
+                for (const auto ext : core::kPatchableGuestExtensions) {
                     if ((ext == "ssu64xl" || ext == "ssnpm" || ext == "supm") &&
                         !simrv::xlen::kIsXLen64)
                         continue;

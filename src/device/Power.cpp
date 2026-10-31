@@ -11,7 +11,9 @@
 
 namespace simrv::device {
 
-PowerMmio::PowerMmio(simrv::core::Machine& machine) : machine_(machine) {}
+PowerMmio::PowerMmio(simrv::core::Machine& machine, simrv::xlen::Address base,
+                     simrv::xlen::Address size)
+    : machine_(machine), base_(base), size_(size) {}
 
 auto PowerMmio::handle_request(const memory::TlChannelA& req, memory::TlChannelD& resp) -> bool {
     resp.denied = false;
@@ -22,7 +24,7 @@ auto PowerMmio::handle_request(const memory::TlChannelA& req, memory::TlChannelD
                            req.opcode == memory::TlOpcodeA::PutPartialData);
 
     if (is_write) {
-        const simrv::xlen::Address offset = (req.address - kBaseAddress).raw();
+        const simrv::xlen::Address offset = (req.address - base_).raw();
         // The finisher has a single 32-bit register at offset 0
         if (offset == 0 && req.size == 2) {
             const simrv::xlen::Word wdata = req.data;
@@ -71,7 +73,7 @@ auto PowerMmio::handle_request(const memory::TlChannelA& req, memory::TlChannelD
             resp.denied = true;
         }
     } else if (req.opcode == memory::TlOpcodeA::Get) {
-        const simrv::xlen::Address offset = (req.address - kBaseAddress).raw();
+        const simrv::xlen::Address offset = (req.address - base_).raw();
         if (offset == 0 && req.size == 2) {
             // Read from test register always returns 0
             resp.data = 0;

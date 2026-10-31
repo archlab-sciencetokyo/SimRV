@@ -13,8 +13,15 @@
 #include "simrv/core/MachineConfig.hpp"
 #include "simrv/core/PlatformTiming.hpp"
 #include "simrv/core/Telemetry.hpp"
+#include "simrv/device/Uart.hpp"
+#include "simrv/device/pci/PcieRootComplex.hpp"
+#include "simrv/device/virtio/VirtioCore.hpp"
+#include "simrv/memory/MemorySubsystem.hpp"
+#include "simrv/memory/Mmio.hpp"
+#include "simrv/memory/MmioRouter.hpp"
 #include "simrv/util/CliParser.hpp"
 #include "simrv/util/FormatUtil.hpp"
+#include "simrv/util/SoCManifest.hpp"
 
 namespace {
 
@@ -839,6 +846,221 @@ auto main() -> int {
         }
     }
 
+    {
+        using simrv::core::SoCDeviceKind;
+        simrv::core::MachineConfig cfg{};
+        cfg.tui.enabled = true;
+        cfg.platform_profile = simrv::core::PlatformProfile::None;
+        cfg.soc.disable_unlisted_devices = true;
+        auto uart = simrv::core::soc_device_default(SoCDeviceKind::Uart);
+        uart.base = 0x10010000;
+        uart.irq = 5;
+        auto rtc = simrv::core::soc_device_default(SoCDeviceKind::Rtc);
+        rtc.base = 0x10011000;
+        auto power = simrv::core::soc_device_default(SoCDeviceKind::Power);
+        power.base = 0x10012000;
+        auto dma = simrv::core::soc_device_default(SoCDeviceKind::DmaController);
+        dma.base = 0x10013000;
+        auto plic = simrv::core::soc_device_default(SoCDeviceKind::Plic);
+        plic.base = 0x50010000;
+        auto clint = simrv::core::soc_device_default(SoCDeviceKind::Clint);
+        clint.base = 0x60010000;
+        auto mtimer = simrv::core::soc_device_default(SoCDeviceKind::AclintMtimer);
+        mtimer.base = 0x02020000;
+        auto mswi = simrv::core::soc_device_default(SoCDeviceKind::AclintMswi);
+        mswi.base = 0x02030000;
+        auto imsic = simrv::core::soc_device_default(SoCDeviceKind::Imsic);
+        imsic.base = 0x24010000;
+        imsic.regions.front().base = 0x28010000;
+        auto aplic = simrv::core::soc_device_default(SoCDeviceKind::Aplic);
+        aplic.base = 0x0c010000;
+        aplic.regions.front().base = 0x0d010000;
+        cfg.soc.devices = {uart, rtc, power, dma, plic, clint, mtimer, mswi, imsic, aplic};
+
+        simrv::core::Machine machine(cfg);
+        expect(machine.initialize().has_value(), "machine accepts relocated built-in devices");
+        const auto& router = machine.memory().system_bus().router();
+        for (const auto& device : cfg.soc.devices) {
+            auto* runtime_device = router.resolve_device(device.base);
+            expect(runtime_device != nullptr,
+                   "relocated device is registered at its configured base");
+            if (runtime_device != nullptr) {
+                expect(runtime_device->base_address() == device.base &&
+                           runtime_device->size() == device.size,
+                       "runtime device range matches configured descriptor");
+            }
+        }
+        expect(router.resolve_device(imsic.regions.front().base) != nullptr &&
+                   router.resolve_device(aplic.regions.front().base) != nullptr,
+               "supervisor AIA windows follow their configured auxiliary regions");
+
+        auto* runtime_uart = router.resolve_device(uart.base);
+        if (runtime_uart != nullptr) {
+            simrv::memory::TlChannelA enable_rx_irq{};
+            enable_rx_irq.opcode = simrv::memory::TlOpcodeA::PutFullData;
+            enable_rx_irq.address = uart.base + simrv::mmio::kUartRegIerDlm;
+            enable_rx_irq.size = 0;
+            enable_rx_irq.data = 1;
+            simrv::memory::TlChannelD response{};
+            expect(runtime_uart->handle_request(enable_rx_irq, response),
+                   "relocated UART handles requests relative to its configured base");
+            machine.mutable_uart_for_testing()->push_rx_byte('x');
+            machine.mutable_uart_for_testing()->advance_cycles(20'000);
+            machine.mutable_uart_for_testing()->service_interrupts();
+            expect((machine.primary_hart().plic_mmio.plic_pending[0] & (1U << uart.irq)) != 0,
+                   "relocated UART raises its configured PLIC source");
+        }
+        auto& plic_controller = machine.primary_hart().plic_mmio;
+        plic_controller.set_irq(simrv::core::kPlicSourceCount, true);
+        expect((plic_controller.plic_pending[0] & (1U << simrv::core::kPlicSourceCount)) != 0,
+               "PLIC runtime accepts its highest implemented source");
+        const auto pending_at_limit = plic_controller.plic_pending[0];
+        plic_controller.set_irq(simrv::core::kPlicSourceCount + 1, true);
+        expect(plic_controller.plic_pending[0] == pending_at_limit,
+               "PLIC runtime ignores sources above its implemented limit");
+    }
+
+    {
+        using simrv::core::SoCDeviceKind;
+        auto soc = simrv::core::SoCConfig::virt_pcie();
+        std::istringstream input{
+            "[pcie]\n"
+            "ecam_base = 0x34000000\n"
+            "ecam_size = 5M\n"
+            "mmio_base = 0x44000000\n"
+            "mmio_size = 16M\n"
+            "first_bus = 0\n"
+            "last_bus = 4\n"
+            "[device.virtio-block]\n"
+            "pci_bus = 0\n"
+            "pci_slot = 9\n"
+            "pci_function = 2\n"
+            "pci_intx_source = 30\n"};
+        expect(simrv::core::parse_soc_config_stream(input, soc),
+               "PCIe host and endpoint topology parse from SoC configuration");
+        const auto* endpoint = soc.find(SoCDeviceKind::VirtioMmioBlock);
+        expect(endpoint != nullptr && endpoint->pci_slot == 9 && endpoint->pci_function == 2 &&
+                   endpoint->pci_intx_source == 30,
+               "PCI endpoint descriptor stores configured BDF and INTx source");
+        expect(soc.validate().has_value(), "custom PCIe topology validates");
+        std::ostringstream manifest;
+        expect(simrv::util::serialize_soc_manifest(soc, manifest) &&
+                   manifest.str().find("\"ecam_base\": 872415232") != std::string::npos &&
+                   manifest.str().find("\"pci_bdf\": [0, 9, 2]") != std::string::npos &&
+                   manifest.str().find("\"pci_intx_source\": 30") != std::string::npos,
+               "SoC manifest records PCIe host and endpoint topology");
+
+        auto invalid = simrv::core::SoCConfig::virt_pcie();
+        invalid.pcie.ecam_size = 1U << 20U;
+        expect(!invalid.validate(), "PCIe validation rejects insufficient ECAM capacity");
+        invalid = simrv::core::SoCConfig::virt_pcie();
+        invalid.pcie.ecam_base = ~simrv::xlen::Address{0} - 0x100;
+        invalid.pcie.ecam_size = 0x200;
+        expect(!invalid.validate(), "PCIe validation rejects overflowing host ranges");
+        invalid = simrv::core::SoCConfig::virt_pcie();
+        invalid.disable_unlisted_devices = true;
+        auto duplicate = simrv::core::soc_device_default(SoCDeviceKind::VirtioMmioBlock);
+        duplicate.pci_slot = 2;
+        auto duplicate_console = simrv::core::soc_device_default(SoCDeviceKind::VirtioMmioConsole);
+        duplicate_console.pci_slot = 2;
+        invalid.devices = {duplicate, duplicate_console};
+        expect(!invalid.validate(), "PCIe validation rejects duplicate endpoint BDFs");
+        invalid = simrv::core::SoCConfig::virt_pcie();
+        invalid.disable_unlisted_devices = true;
+        auto bad_irq = simrv::core::soc_device_default(SoCDeviceKind::VirtioMmioBlock);
+        bad_irq.pci_intx_source = 32;
+        invalid.devices = {bad_irq};
+        expect(!invalid.validate(), "PCIe validation rejects out-of-range INTx sources");
+
+        auto boundary_irq = simrv::core::SoCConfig::virt_mmio();
+        auto uart = simrv::core::soc_device_default(SoCDeviceKind::Uart);
+        uart.irq = simrv::core::kPlicSourceCount;
+        boundary_irq.devices.push_back(uart);
+        expect(boundary_irq.validate().has_value(), "PLIC source 31 is accepted by SoC validation");
+        boundary_irq.devices.back().irq = simrv::core::kPlicSourceCount + 1;
+        expect(!boundary_irq.validate(), "PLIC source 32 is rejected by SoC validation");
+
+        auto boundary_pci = simrv::core::SoCConfig::virt_pcie();
+        boundary_pci.disable_unlisted_devices = true;
+        auto pci_block = simrv::core::soc_device_default(SoCDeviceKind::VirtioMmioBlock);
+        pci_block.pci_intx_source = simrv::core::kPlicSourceCount;
+        boundary_pci.devices = {pci_block};
+        expect(boundary_pci.validate().has_value(),
+               "PCIe INTx source 31 is accepted by SoC validation");
+    }
+
+    {
+        using simrv::core::SoCDeviceKind;
+        simrv::core::MachineConfig cfg{};
+        cfg.tui.enabled = true;
+        cfg.soc.disable_unlisted_devices = true;
+        cfg.soc.pcie.ecam_base = 0x34000000;
+        cfg.soc.pcie.ecam_size = 1U << 20U;
+        cfg.soc.pcie.first_bus = 4;
+        cfg.soc.pcie.last_bus = 4;
+        cfg.soc.pcie.mmio_base = 0x44000000;
+        cfg.soc.pcie.mmio_size = 16U << 20U;
+        auto block = simrv::core::soc_device_default(SoCDeviceKind::VirtioMmioBlock);
+        block.pci_bus = 4;
+        block.pci_slot = 9;
+        block.pci_function = 2;
+        block.pci_intx_source = 30;
+        cfg.soc.devices = {simrv::core::soc_device_default(SoCDeviceKind::Plic), block};
+        simrv::core::Machine machine(cfg);
+        expect(machine.initialize().has_value(), "machine accepts relocated PCIe topology");
+        const auto& router = machine.memory().system_bus().router();
+        auto* ecam_node = router.resolve_device(cfg.soc.pcie.ecam_base);
+        auto* mmio_node = router.resolve_device(cfg.soc.pcie.mmio_base);
+        expect(ecam_node != nullptr && ecam_node->base_address() == cfg.soc.pcie.ecam_base &&
+                   ecam_node->size() == cfg.soc.pcie.ecam_size,
+               "relocated ECAM window is registered on the system bus");
+        expect(mmio_node != nullptr && mmio_node->base_address() == cfg.soc.pcie.mmio_base &&
+                   mmio_node->size() == cfg.soc.pcie.mmio_size,
+               "relocated PCIe MMIO window is registered on the system bus");
+        constexpr simrv::xlen::Address config_offset = (9U << 15U) | (2U << 12U);
+        if (machine.pcie_root() != nullptr) {
+            machine.pcie_root()->ecam_write(config_offset + 0x10, 0x44001000U, 4);
+        }
+        if (ecam_node != nullptr && mmio_node != nullptr) {
+            simrv::memory::TlChannelA request{};
+            simrv::memory::TlChannelD response{};
+            request.opcode = simrv::memory::TlOpcodeA::Get;
+            request.size = 2;
+            request.address = cfg.soc.pcie.ecam_base + config_offset;
+            expect(ecam_node->handle_request(request, response) &&
+                       (response.data & 0xffffU) == 0x1af4U,
+                   "system-bus ECAM node serves the configured endpoint BDF");
+            request.opcode = simrv::memory::TlOpcodeA::PutFullData;
+            request.address = cfg.soc.pcie.mmio_base + 0x1000;
+            request.data = 1;
+            expect(mmio_node->handle_request(request, response),
+                   "system-bus PCIe MMIO node accepts a feature-selector write");
+            request.opcode = simrv::memory::TlOpcodeA::Get;
+            request.address = cfg.soc.pcie.mmio_base + 0x1004;
+            const bool mmio_read_ok = mmio_node->handle_request(request, response);
+            expect(
+                mmio_read_ok && response.data == simrv::device::virtio::kVirtioFVersion1FeatureWord,
+                "system-bus PCIe MMIO node routes into the configured aperture");
+        }
+        if (machine.pcie_root() != nullptr) {
+            const auto id = machine.pcie_root()->ecam_read(config_offset, 4);
+            expect((id & 0xffffU) == 0x1af4U, "configured PCI endpoint is discoverable at its BDF");
+            machine.pcie_root()->mmio_write(0x44001000, 1, 4);
+            const auto bar_count = machine.pcie_root()->active_bar_count();
+            const auto feature_word = machine.pcie_root()->mmio_read(0x44001004, 4);
+            expect(bar_count == 1 &&
+                       feature_word == simrv::device::virtio::kVirtioFVersion1FeatureWord,
+                   "configured PCI BAR is routed through relocated MMIO aperture");
+            if (auto* endpoint = machine.pcie_root()->get_device(4, 9, 2)) {
+                endpoint->trigger_irq();
+                expect((machine.primary_hart().plic_mmio.plic_pending[0] & (1U << 30U)) != 0,
+                       "configured PCI endpoint asserts its configured INTx source");
+            } else {
+                expect(false, "configured PCI endpoint is attached to the root complex");
+            }
+        }
+    }
+
     if constexpr (simrv::xlen::kIsXLen64) {
         simrv::core::MachineConfig user_profile_cfg{};
         user_profile_cfg.execution.profile = simrv::isa::ArchitectureProfile::Rva23U64;
@@ -1157,8 +1379,7 @@ auto main() -> int {
             expect(perf.read_hpmcounter(4) == 0, "VS inhibit suppresses VS-mode events");
             perf.notify_event(simrv::core::HpmEvent::Instructions, 1, 0,
                               simrv::xlen::PrivilegeLevel::Supervisor, false);
-            expect(perf.read_hpmcounter(4) == 1,
-                   "VS inhibit does not suppress HS-mode events");
+            expect(perf.read_hpmcounter(4) == 1, "VS inhibit does not suppress HS-mode events");
 
             perf.write_hpmevent(5, instruction_event | kVuInhibit);
             perf.notify_event(simrv::core::HpmEvent::Instructions, 1, 0,
@@ -1166,8 +1387,7 @@ auto main() -> int {
             expect(perf.read_hpmcounter(5) == 0, "VU inhibit suppresses VU-mode events");
             perf.notify_event(simrv::core::HpmEvent::Instructions, 1, 0,
                               simrv::xlen::PrivilegeLevel::User, false);
-            expect(perf.read_hpmcounter(5) == 1,
-                   "VU inhibit does not suppress U-mode events");
+            expect(perf.read_hpmcounter(5) == 1, "VU inhibit does not suppress U-mode events");
             perf.write_hpmevent(6, instruction_event | kVuInhibit, false);
             expect(perf.read_hpmevent(6) == instruction_event,
                    "VS/VU inhibit bits are WARL zero without H");
@@ -1178,6 +1398,24 @@ auto main() -> int {
             expect(perf.inst_cycles(simrv::isa::ADDI) == 4, "Cumulative cycles for ADDI is 4");
             expect(perf.inst_stalls(simrv::isa::ADDI) == 3, "Stall cycles for ADDI is 3");
         }
+    }
+
+    {
+        std::istringstream uart_config(
+            "[soc]\nname = \"uart-clock-test\"\ndram_base = 0x80000000\n"
+            "dram_size = 0x10000000\n[device.uart]\nclock_hz = 1843200\n");
+        simrv::core::SoCConfig soc{};
+        expect(simrv::core::parse_soc_config_stream(uart_config, soc),
+               "SoC parser accepts a configured UART input clock");
+        const auto uart = std::ranges::find_if(soc.devices, [](const auto& device) {
+            return device.kind == simrv::core::SoCDeviceKind::Uart;
+        });
+        expect(uart != soc.devices.end() && uart->clock_hz == 1'843'200,
+               "normalized UART descriptor retains its input clock");
+        std::ostringstream manifest;
+        expect(simrv::util::serialize_soc_manifest(soc, manifest) &&
+                   manifest.str().find("\"clock_hz\": 1843200") != std::string::npos,
+               "SoC manifest emits the UART input clock");
     }
 
     return failures == 0 ? EXIT_SUCCESS : EXIT_FAILURE;

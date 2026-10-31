@@ -37,16 +37,20 @@ class Clint : public memory::TileLinkNode {
     static constexpr size_t kMaxClintHarts = 16;
 
     [[nodiscard]] auto name() const -> const char* final { return "clint"; }
-    [[nodiscard]] auto base_address() const -> simrv::xlen::Address final { return kBaseAddress; }
-    [[nodiscard]] auto size() const -> simrv::xlen::Address final { return kSize; }
+    [[nodiscard]] auto base_address() const -> simrv::xlen::Address final { return base_address_; }
+    [[nodiscard]] auto size() const -> simrv::xlen::Address final { return size_; }
+    void configure_address_map(simrv::xlen::Address base, simrv::xlen::Address size) noexcept {
+        base_address_ = base;
+        size_ = size;
+    }
     void reset() final;
     auto handle_request(const memory::TlChannelA& req, memory::TlChannelD& resp) -> bool final;
 
-    [[nodiscard]] constexpr auto contains(simrv::xlen::Address addr) const -> bool {
-        return addr >= kBaseAddress && addr < (kBaseAddress + kSize);
+    [[nodiscard]] auto contains(simrv::xlen::Address addr) const -> bool {
+        return addr >= base_address_ && addr - base_address_ < size_;
     }
-    [[nodiscard]] constexpr auto offset(simrv::xlen::Address addr) const -> simrv::xlen::Address {
-        return addr - kBaseAddress;
+    [[nodiscard]] auto offset(simrv::xlen::Address addr) const -> simrv::xlen::Address {
+        return addr - base_address_;
     }
 
     [[nodiscard]] auto mmio_read(simrv::xlen::Address offset) const -> simrv::xlen::Word;
@@ -63,6 +67,8 @@ class Clint : public memory::TileLinkNode {
    private:
     core::IInterruptController* sink_{nullptr};
     core::CPU* cpu_{nullptr};
+    simrv::xlen::Address base_address_ = kBaseAddress;
+    simrv::xlen::Address size_ = kSize;
 };
 
 }  // namespace simrv::device

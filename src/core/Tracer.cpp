@@ -531,7 +531,10 @@ void Tracer::init_architecture_trace(const std::string& path) {
         "\"appmode\":{},\"engine\":{},\"pipeline\":{},\"platform_profile\":{},"
         "\"cpu_model_preset\":{},\"branch_predictor\":{},\"smp_quantum\":{},"
         "\"smp_mode\":{},\"soc\":{},\"soc_cpu_model\":{},"
-        "\"soc_pcie\":{},\"soc_mmio\":{},\"soc_disable_unlisted\":{},"
+        "\"soc_pcie\":{{\"ecam_base\":\"0x{:x}\",\"ecam_size\":\"0x{:x}\","
+        "\"mmio_base\":\"0x{:x}\",\"mmio_size\":\"0x{:x}\","
+        "\"first_bus\":{},\"last_bus\":{}}},\"soc_mmio\":{},"
+        "\"soc_disable_unlisted\":{},"
         "\"trace_level\":{},\"trace_events\":{},\"trace_function\":{},"
         "\"trace_device\":{},\"trace_hart\":{},"
         "\"trace_pc_start\":{},\"trace_pc_end\":{},"
@@ -556,7 +559,13 @@ void Tracer::init_architecture_trace(const std::string& path) {
                            SmpMode::SingleThreaded
                        ? "single-threaded"
                        : "multi-threaded"),
-        json_quote(config.soc.name), json_quote(config.soc.cpu_model), config.soc.enable_pcie,
+        json_quote(config.soc.name), json_quote(config.soc.cpu_model),
+        static_cast<uint64_t>(config.soc.pcie.ecam_base),
+        static_cast<uint64_t>(config.soc.pcie.ecam_size),
+        static_cast<uint64_t>(config.soc.pcie.mmio_base),
+        static_cast<uint64_t>(config.soc.pcie.mmio_size),
+        static_cast<unsigned>(config.soc.pcie.first_bus),
+        static_cast<unsigned>(config.soc.pcie.last_bus), config.soc.enable_pcie,
         config.soc.enable_mmio, config.soc.disable_unlisted_devices, config.debug.trace_level,
         json_quote(config.debug.trace_events), json_quote(config.debug.trace_function),
         json_quote(config.debug.trace_device),
@@ -582,10 +591,15 @@ void Tracer::init_architecture_trace(const std::string& path) {
         first_device = false;
         configuration_material += std::format(
             "{{\"kind\":{},\"name\":{},\"base\":\"0x{:x}\","
-            "\"size\":\"0x{:x}\",\"irq\":{},\"enabled\":{}}}",
+            "\"size\":\"0x{:x}\",\"irq\":{},\"enabled\":{},"
+            "\"pci_bus\":{},\"pci_slot\":{},\"pci_function\":{},"
+            "\"pci_intx_source\":{}}}",
             json_quote(soc_device_kind_name(device.kind)), json_quote(device.name),
             static_cast<uint64_t>(device.base), static_cast<uint64_t>(device.size), device.irq,
-            device.enabled);
+            device.enabled, device.pci_bus ? std::to_string(*device.pci_bus) : std::string("null"),
+            device.pci_slot ? std::to_string(*device.pci_slot) : std::string("null"),
+            device.pci_function ? std::to_string(*device.pci_function) : std::string("null"),
+            device.pci_intx_source ? std::to_string(*device.pci_intx_source) : std::string("null"));
     }
     configuration_material += "]}";
     trace_configuration_sha256_ = simrv::util::sha256(configuration_material);

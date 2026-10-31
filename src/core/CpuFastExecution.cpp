@@ -2551,6 +2551,10 @@ void CPU::run_fast_baremetal_batch(Machine& machine, uint32_t batch_size,
 
     if (cached_ops > 0) {
         account_arch_cycles(cached_ops);
+        if (state_.mhartid == 0) {
+            if (auto* uart = machine.uart_device(); uart != nullptr)
+                uart->advance_cycles(cached_ops);
+        }
         if (machine.clock_divider().advance_fast_cycles(cached_ops, clint_mmio.rtc_divider,
                                                         clint_mmio.mtime) > 0) {
             evaluate_timer_interrupt();
@@ -2569,6 +2573,10 @@ SIMRV_ALWAYS_INLINE auto CPU::run_fast_os_kernel(Machine& machine, uint32_t batc
     auto flush_clint_and_retired = [&]() {
         if (chunk_cycles > 0) {
             account_arch_cycles(chunk_cycles);
+            if (state_.mhartid == 0) {
+                if (auto* uart = machine.uart_device(); uart != nullptr)
+                    uart->advance_cycles(chunk_cycles);
+            }
             if (machine.clock_divider().advance_fast_cycles(chunk_cycles, clint_mmio.rtc_divider,
                                                             clint_mmio.mtime) > 0) {
                 evaluate_timer_interrupt();
@@ -2624,6 +2632,10 @@ SIMRV_ALWAYS_INLINE auto CPU::run_fast_os_kernel(Machine& machine, uint32_t batc
                             chain_size = 0;
                             compressed_count = 0;
                             account_arch_cycles(chunk_cycles);
+                            if (state_.mhartid == 0) {
+                                if (auto* uart = machine.uart_device(); uart != nullptr)
+                                    uart->advance_cycles(chunk_cycles);
+                            }
                             if (simrv::compiler::unlikely(
                                     machine.clock_divider().advance_fast_cycles(
                                         chunk_cycles, clint_mmio.rtc_divider, clint_mmio.mtime) >

@@ -17,6 +17,8 @@
 #include <cstring>
 #include <iostream>
 #include <memory>
+#include <source_location>
+#include <string>
 #include <thread>
 #include <vector>
 
@@ -25,6 +27,7 @@
 #include "simrv/core/Machine.hpp"
 #include "simrv/core/PlatformTiming.hpp"
 #include "simrv/core/RuntimeProfile.hpp"
+#include "simrv/core/TelemetrySink.hpp"
 #include "simrv/device/AIA.hpp"
 #include "simrv/device/Aclint.hpp"
 #include "simrv/device/DmaController.hpp"
@@ -435,12 +438,13 @@ void test_tui_uart_input_irq_publication() {
     uart.push_rx_byte('x');
     constexpr simrv::xlen::Word kUartIrqMask = static_cast<simrv::xlen::Word>(1) << 3;
     check((machine.cpu.plic_mmio.plic_pending[0] & kUartIrqMask) == 0);
+    uart.advance_cycles(20'000);
     uart.service_interrupts();
     check((machine.cpu.plic_mmio.plic_pending[0] & kUartIrqMask) != 0);
-    std::cout << "[PASS] test_tui_uart_input_irq_publication\n";
+    std::cout << "[PASS] test_tui_uart_input_frame_irq_publication\n";
 }
 
-void test_ia_tui_uart_input_is_immediate() {
+void test_ia_tui_uart_input_waits_for_frame() {
     const auto check = [](bool condition) {
         if (!condition) std::abort();
     };
@@ -461,9 +465,63 @@ void test_ia_tui_uart_input_is_immediate() {
     machine.mutable_uart_for_testing()->push_rx_byte('i');
     constexpr simrv::xlen::Word kUartIrqMask = static_cast<simrv::xlen::Word>(1) << 3;
     check((machine.cpu.plic_mmio.plic_pending[0] & kUartIrqMask) == 0);
+    machine.mutable_uart_for_testing()->advance_cycles(20'000);
     machine.finalize_for_testing();
     check((machine.cpu.plic_mmio.plic_pending[0] & kUartIrqMask) != 0);
-    std::cout << "[PASS] test_ia_tui_uart_input_is_immediate\n";
+    std::cout << "[PASS] test_ia_tui_uart_input_waits_for_frame\n";
+}
+
+void test_uart_frame_timing_fifo_and_overrun() {
+    const auto check = [](bool condition) {
+        if (!condition) std::abort();
+    };
+    ConcreteMachine machine;
+    machine.cpu.reset();
+    struct ConsoleCapture final : simrv::core::IConsoleSink {
+        std::string output;
+        void handle_char_write(char ch) override { output.push_back(ch); }
+    };
+    auto capture = std::make_shared<ConsoleCapture>();
+    machine.set_console_sink(capture);
+    simrv::device::Uart uart(machine);
+    const auto write = [&](simrv::xlen::Address reg, simrv::xlen::Word value) {
+        simrv::memory::TlChannelA request{};
+        request.opcode = simrv::memory::TlOpcodeA::PutFullData;
+        request.address = simrv::mmio::kUartBaseAddress + reg;
+        request.size = 0;
+        request.data = value;
+        simrv::memory::TlChannelD response{};
+        check(uart.handle_request(request, response));
+    };
+    const auto read = [&](simrv::xlen::Address reg) {
+        simrv::memory::TlChannelA request{};
+        request.opcode = simrv::memory::TlOpcodeA::Get;
+        request.address = simrv::mmio::kUartBaseAddress + reg;
+        request.size = 0;
+        simrv::memory::TlChannelD response{};
+        check(uart.handle_request(request, response));
+        return response.data;
+    };
+
+    write(simrv::mmio::kUartRegRbrThrDll, 't');
+    check((read(simrv::mmio::kUartRegLsr) & 0x60U) == 0x20U);
+    uart.advance_cycles(13'888);
+    check((read(simrv::mmio::kUartRegLsr) & 0x40U) == 0);
+    uart.advance_cycles(1);
+    check((read(simrv::mmio::kUartRegLsr) & 0x60U) == 0x60U);
+    check(capture->output == "t");
+
+    write(simrv::mmio::kUartRegIirFcr, 1);
+    write(simrv::mmio::kUartRegIerDlm, 5);
+    for (uint8_t byte = 0; byte < 17; ++byte) uart.push_rx_byte(byte);
+    uart.advance_cycles(17 * 13'889);
+    check((read(simrv::mmio::kUartRegIirFcr) & 0x0fU) == 0x06U);
+    check((read(simrv::mmio::kUartRegLsr) & 0x03U) == 0x03U);
+    constexpr simrv::xlen::Word kUartIrqMask = simrv::xlen::Word{1} << 3;
+    check((machine.cpu.plic_mmio.plic_pending[0] & kUartIrqMask) != 0);
+    for (uint32_t i = 0; i < 16; ++i) (void)read(simrv::mmio::kUartRegRbrThrDll);
+    check((read(simrv::mmio::kUartRegLsr) & 0x01U) == 0);
+    std::cout << "[PASS] test_uart_frame_timing_fifo_and_overrun\n";
 }
 
 void test_os_sampled_fast_batch_eligibility() {
@@ -587,8 +645,12 @@ void test_timed_interconnect_cancellation() {
 }
 
 void test_timed_page_walk_transitions() {
-    const auto check = [](bool condition) {
-        if (!condition) std::abort();
+    const auto check = [](bool condition,
+                          std::source_location where = std::source_location::current()) {
+        if (!condition) {
+            std::cerr << "test_timed_page_walk_transitions failed at " << where.line() << '\n';
+            std::abort();
+        }
     };
     ConcreteMachine machine;
     std::vector<simrv::xlen::Byte> ram(1024 * 1024, simrv::xlen::Byte{0});
@@ -629,18 +691,12 @@ void test_timed_page_walk_transitions() {
     result = machine.cpu.translate_stage_address(machine, physical, simrv::PteAccess::Code,
                                                  kPrivSupervisor, simrv::xlen::kXLenBits,
                                                  simrv::memory::TlPort::Instruction, walk);
-    check(!result.has_value());  // Accessed-bit update is a distinct timed write.
-    check(machine.memory().system_bus().pending_requests() == 1);
-
-    machine.memory().system_bus().advance_cycle();
-    machine.cpu.ca_state.waiting_for_interconnect = false;
-    result = machine.cpu.translate_stage_address(machine, physical, simrv::PteAccess::Code,
-                                                 kPrivSupervisor, simrv::xlen::kXLenBits,
-                                                 simrv::memory::TlPort::Instruction, walk);
-    check(result.has_value() && result->has_value() && **result == physical);
-    check(!walk.active);
+    check(result.has_value() && !result->has_value() &&
+          result->error() == static_cast<simrv::xlen::TrapCause>(ExceptionCode::FetchPageFault));
+    check(machine.memory().system_bus().pending_requests() == 0);
+    check(!walk.active);  // SimRV exposes Svade and faults when software has not set A.
     std::memcpy(&pte, ram.data() + (pte_address - physical), sizeof(pte));
-    check((pte & simrv::PteFlag::A) != 0);
+    check((pte & simrv::PteFlag::A) == 0);
 
     // A different, unmapped top-level entry faults after exactly one physical read.
     constexpr simrv::xlen::Address unmapped =
@@ -4043,7 +4099,8 @@ int main(int argc, char** argv) {
     test_virtio_sound_negotiation_and_playback();
     test_axi4_bridge_and_tracer();
     test_tui_uart_input_irq_publication();
-    test_ia_tui_uart_input_is_immediate();
+    test_ia_tui_uart_input_waits_for_frame();
+    test_uart_frame_timing_fifo_and_overrun();
     test_os_sampled_fast_batch_eligibility();
     test_timed_interconnect_ordering();
     test_timed_interconnect_cancellation();

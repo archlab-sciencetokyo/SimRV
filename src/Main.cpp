@@ -223,7 +223,8 @@ auto print_doctor() -> int {
     std::println("SimRV environment diagnostics");
     std::println("  version          : {}", simrv::buildinfo::kVersion);
 #if defined(__APPLE__)
-    std::println("  host             : macOS source-build target; release packages target Linux x86-64");
+    std::println(
+        "  host             : macOS source-build target; release packages target Linux x86-64");
 #elif defined(__linux__)
     std::println("  host             : Linux (release packages target x86-64)");
 #else

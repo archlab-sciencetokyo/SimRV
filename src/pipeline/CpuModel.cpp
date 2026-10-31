@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <bit>
 #include <format>
+#include <utility>
 
 namespace simrv::pipeline {
 
@@ -36,8 +37,7 @@ auto CpuModelConfig::validate() const -> std::expected<void, std::string> {
         // CPU model configurations that do not implement Zic64b may retain 32-byte geometry.
         // The RVA23 default uses the 64-byte coherent block required by Zic64b.
         if (cache.line_bytes != 32 && cache.line_bytes != 64) {
-            return std::format(
-                "{} cache line size must be 32 or 64 bytes", name);
+            return std::format("{} cache line size must be 32 or 64 bytes", name);
         }
         if (cache.associativity > 8 ||
             cache.capacity_bytes < cache.associativity * cache.line_bytes) {
@@ -88,8 +88,8 @@ auto CpuModelConfig::validate() const -> std::expected<void, std::string> {
         return std::unexpected(
             "interconnect request and response latency must be at least one cycle");
     }
-    if (const auto cfu_result = cfu.validate(); !cfu_result) {
-        return std::unexpected(cfu_result.error());
+    if (auto cfu_result = cfu.validate(); !cfu_result) {
+        return std::unexpected(std::move(cfu_result.error()));
     }
     return {};
 }

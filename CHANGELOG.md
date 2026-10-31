@@ -627,10 +627,8 @@ OS lifecycle control, MMIO safety, and TUI/UART stability ahead of v2.0.0.
 - Unaligned guest RAM accesses no longer rely on undefined host pointer casts, and framebuffer
   accesses are checked across their complete width.
 - Bare-metal fast batches honor instruction limits exactly and stop promptly after a halt request.
-- Generated Linux images include a root-only `simrv-power` `/dev/mem` helper for direct poweroff,
-  reboot, crash, and simulator-exit requests when the normal OS lifecycle path is unavailable.
-  Its SimRV-specific `exit` request terminates the monitor as well as guest execution, while
-  poweroff retains the shut-down machine for TUI inspection.
+- Linux guests use standard OpenSBI reset services and operating-system lifecycle commands for
+  clean poweroff and reboot; no SimRV-specific `/dev/mem` helper is installed in the root filesystem.
 
 ## [v2.0.0-rc.8] — 2026-08-08
 

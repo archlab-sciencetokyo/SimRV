@@ -43,7 +43,7 @@ class E2ETier4ScenarioTests(unittest.TestCase):
         """
         res = run_simrv(
             self.simrv64,
-            ["--cli", "--baremetal", "-m", str(self.hello64), "--steps", "2000"],
+            ["--cli", "--baremetal", "-m", str(self.hello64), "--steps", "500000"],
         )
         self.assertEqual(res.returncode, 0, res.stderr)
         self.assertIn("Hello from SimRV!", res.stdout)
@@ -151,7 +151,7 @@ class E2ETier4ScenarioTests(unittest.TestCase):
                     "--summary",
                     str(summary_path),
                     "--steps",
-                    "908",
+                    "500000",
                 ],
             )
             self.assertEqual(res.returncode, 0, res.stderr)

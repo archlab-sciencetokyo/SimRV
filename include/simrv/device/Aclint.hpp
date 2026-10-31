@@ -31,18 +31,20 @@ class AclintMtimer : public memory::MmioDevice {
     static constexpr simrv::xlen::Address kSize = mmio::kAclintMtimerSize;
     static constexpr size_t kMaxHarts = 16;
 
-    explicit AclintMtimer(simrv::core::Machine* machine = nullptr);
+    explicit AclintMtimer(simrv::core::Machine* machine = nullptr,
+                          simrv::xlen::Address base = kBaseAddress,
+                          simrv::xlen::Address size = kSize);
     explicit AclintMtimer(simrv::core::IInterruptController* sink,
-                          simrv::core::Machine* machine = nullptr);
+                          simrv::core::Machine* machine = nullptr,
+                          simrv::xlen::Address base = kBaseAddress,
+                          simrv::xlen::Address size = kSize);
     ~AclintMtimer() override = default;
 
     void set_sink(simrv::core::IInterruptController* sink) noexcept { sink_ = sink; }
 
     [[nodiscard]] auto name() const -> const char* override { return "aclint-mtimer"; }
-    [[nodiscard]] auto base_address() const -> simrv::xlen::Address override {
-        return kBaseAddress;
-    }
-    [[nodiscard]] auto size() const -> simrv::xlen::Address override { return kSize; }
+    [[nodiscard]] auto base_address() const -> simrv::xlen::Address override { return base_; }
+    [[nodiscard]] auto size() const -> simrv::xlen::Address override { return size_; }
     void reset() override;
 
     [[nodiscard]] auto read32(simrv::xlen::Address offset) -> uint32_t override;
@@ -56,6 +58,8 @@ class AclintMtimer : public memory::MmioDevice {
 
    private:
     simrv::core::IInterruptController* sink_{nullptr};
+    simrv::xlen::Address base_;
+    simrv::xlen::Address size_;
     simrv::xlen::Counter mtime_{0};
     std::array<std::atomic<simrv::xlen::Counter>, kMaxHarts> mtimecmp_{};
 };
@@ -70,18 +74,20 @@ class AclintMswi : public memory::MmioDevice {
     static constexpr simrv::xlen::Address kSize = mmio::kAclintMswiSize;
     static constexpr size_t kMaxHarts = 16;
 
-    explicit AclintMswi(simrv::core::Machine* machine = nullptr);
+    explicit AclintMswi(simrv::core::Machine* machine = nullptr,
+                        simrv::xlen::Address base = kBaseAddress,
+                        simrv::xlen::Address size = kSize);
     explicit AclintMswi(simrv::core::IInterruptController* sink,
-                        simrv::core::Machine* machine = nullptr);
+                        simrv::core::Machine* machine = nullptr,
+                        simrv::xlen::Address base = kBaseAddress,
+                        simrv::xlen::Address size = kSize);
     ~AclintMswi() override = default;
 
     void set_sink(simrv::core::IInterruptController* sink) noexcept { sink_ = sink; }
 
     [[nodiscard]] auto name() const -> const char* override { return "aclint-mswi"; }
-    [[nodiscard]] auto base_address() const -> simrv::xlen::Address override {
-        return kBaseAddress;
-    }
-    [[nodiscard]] auto size() const -> simrv::xlen::Address override { return kSize; }
+    [[nodiscard]] auto base_address() const -> simrv::xlen::Address override { return base_; }
+    [[nodiscard]] auto size() const -> simrv::xlen::Address override { return size_; }
     void reset() override;
 
     [[nodiscard]] auto read32(simrv::xlen::Address offset) -> uint32_t override;
@@ -89,6 +95,8 @@ class AclintMswi : public memory::MmioDevice {
 
    private:
     simrv::core::IInterruptController* sink_{nullptr};
+    simrv::xlen::Address base_;
+    simrv::xlen::Address size_;
     std::array<std::atomic<uint32_t>, kMaxHarts> msip_{};
 };
 

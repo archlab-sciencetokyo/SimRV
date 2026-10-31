@@ -50,9 +50,10 @@
             reg = <0>;
             riscv,isa = "rv64imafdcbv";
             riscv,isa-base = "rv64i";
-            riscv,isa-extensions = "i", "m", "a", "f", "d", "c", "b", "v", "zvbb", "zvkt", "zkt", "zicntr", "zihpm", "zicsr", "zifencei", "zihintpause", "zicond", "zicboz", "zicbom", "zicbop", "zawrs", "svinval", "svpbmt", "svnapot", "sstc", "sscofpmf", "ziccrse", "ziccif", "ssu64xl", "ssnpm", "supm";
-            riscv,cbom-block-size = <32>;
-            riscv,cboz-block-size = <32>;
+            riscv,isa-extensions = "i", "m", "a", "f", "d", "c", "b", "v", "zicntr", "zihpm", "zicsr", "zifencei", "zihintpause", "zihintntl", "zkt", "zvbb", "zvkt", "zimop", "zic64b", "zicclsm", "za64rs", "ziccamoa", "zfhmin", "zvfhmin", "zfa", "zicond", "zicboz", "zicbom", "zicbop", "zawrs", "svinval", "svpbmt", "svnapot", "sstc", "sscofpmf", "ziccrse", "ziccif", "ssu64xl", "ssnpm", "supm", "svade", "ssccptr", "sscounterenw", "sstvala", "sstvecd", "zmmul", "zaamo", "zalrsc", "za128rs", "zba", "zbb", "zbs", "zca", "zcb", "zcmop", "zcd";
+            riscv,cbom-block-size = <64>;
+            riscv,cbop-block-size = <64>;
+            riscv,cboz-block-size = <64>;
             mmu-type = "riscv,sv39";
             clock-frequency = <160000000>;
 

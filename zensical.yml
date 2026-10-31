@@ -115,5 +115,6 @@ nav:
       - Custom Extensions & CFU: hardware/extensions.md
   - Development & Contributing:
       - Developer Guide & Standards: development/contributing.md
+      - Runtime Model Formalization Audit: development/runtime-model-hardcodes.md
       - Version Migration (2.x to 3.0): development/migration.md
       - Performance Roadmap: development/performance-roadmap.md

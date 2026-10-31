@@ -8,6 +8,7 @@
 #include <cstdint>
 #include <optional>
 
+#include "simrv/core/InterruptTopology.hpp"
 #include "simrv/memory/Mmio.hpp"
 #include "simrv/memory/TileLinkNode.hpp"
 #include "simrv/xlen/ScalarTypes.hpp"
@@ -34,19 +35,24 @@ class Plic : public memory::TileLinkNode {
 
     static constexpr simrv::xlen::Address kBaseAddress = simrv::mmio::kPlicBaseAddress;
     static constexpr simrv::xlen::Address kSize = simrv::mmio::kPlicSize;
+    static constexpr uint32_t kNumSources = core::kPlicSourceCount;
     static constexpr size_t kMaxPlicContexts = 32;
 
     [[nodiscard]] auto name() const -> const char* final { return "plic"; }
-    [[nodiscard]] auto base_address() const -> simrv::xlen::Address final { return kBaseAddress; }
-    [[nodiscard]] auto size() const -> simrv::xlen::Address final { return kSize; }
+    [[nodiscard]] auto base_address() const -> simrv::xlen::Address final { return base_address_; }
+    [[nodiscard]] auto size() const -> simrv::xlen::Address final { return size_; }
+    void configure_address_map(simrv::xlen::Address base, simrv::xlen::Address size) noexcept {
+        base_address_ = base;
+        size_ = size;
+    }
     void reset() final;
     auto handle_request(const memory::TlChannelA& req, memory::TlChannelD& resp) -> bool final;
 
-    [[nodiscard]] constexpr auto contains(simrv::xlen::Address addr) const -> bool {
-        return addr >= kBaseAddress && addr < (kBaseAddress + kSize);
+    [[nodiscard]] auto contains(simrv::xlen::Address addr) const -> bool {
+        return addr >= base_address_ && addr - base_address_ < size_;
     }
-    [[nodiscard]] constexpr auto offset(simrv::xlen::Address addr) const -> simrv::xlen::Address {
-        return addr - kBaseAddress;
+    [[nodiscard]] auto offset(simrv::xlen::Address addr) const -> simrv::xlen::Address {
+        return addr - base_address_;
     }
 
     auto mmio_read(simrv::xlen::Address offset) -> simrv::xlen::Word;
@@ -70,6 +76,8 @@ class Plic : public memory::TileLinkNode {
    private:
     core::IInterruptController* sink_{nullptr};
     core::CPU* cpu_{nullptr};
+    simrv::xlen::Address base_address_ = kBaseAddress;
+    simrv::xlen::Address size_ = kSize;
     [[nodiscard]] auto get_context_for_offset(simrv::xlen::Address offset) const
         -> std::optional<simrv::xlen::PlicContextId>;
 };

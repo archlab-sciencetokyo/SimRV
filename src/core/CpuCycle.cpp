@@ -266,8 +266,7 @@ void CPU::execute_ca_cycle_stages(Machine& machine, simrv::xlen::Counter retired
     if (simrv::compiler::likely(!has_events_or_stalls)) {
         pipeline_sim.record_clean_cycle();
     } else {
-        if (ca_state.waiting_for_interconnect)
-            record_hpm_event(HpmEvent::InterconnectStall);
+        if (ca_state.waiting_for_interconnect) record_hpm_event(HpmEvent::InterconnectStall);
         const bool instruction_walk = ca_state.instruction_walk.active;
         const bool data_walk = ca_state.data_walk.active;
         const bool fetch_stalled = ca_pipeline.fetch->remaining_latency != 0 ||
@@ -466,6 +465,9 @@ void CPU::advance_ca_cycle(Machine& machine) {
 }
 
 SIMRV_ALWAYS_INLINE void CPU::tick_cycle_clock(Machine& machine, bool interrupt_boundary) {
+    if (state_.mhartid == 0) {
+        if (auto* uart = machine.uart_device(); uart != nullptr) uart->advance_cycles(1);
+    }
     if (cycle_counter_start_delay_ != 0) {
         --cycle_counter_start_delay_;
     } else {
@@ -761,7 +763,7 @@ void CPU::run_memory_stage_baremetal(Machine& machine) {
         }
     } else if (opcode == Opcode::Amo && funct5 != Funct5Amo::Sc) {
         if (simrv::compiler::unlikely(!isa::amo_address_aligned(addr, ctx.funct3))) {
-                ctx.pending_exception = ExceptionCode::FaultStore;
+            ctx.pending_exception = ExceptionCode::FaultStore;
             ctx.pending_tval = addr;
             return;
         }
@@ -795,8 +797,8 @@ void CPU::run_memory_stage_baremetal(Machine& machine) {
                     const auto half = simrv::memory::ram_read_fast(
                         addr, static_cast<simrv::xlen::Instruction>(Funct3::Lhu),
                         machine.ram_view());
-                    ctx.fp_mem_rdata = static_cast<uint64_t>(~uint64_t{0xFFFF}) |
-                                       static_cast<uint16_t>(half);
+                    ctx.fp_mem_rdata =
+                        static_cast<uint64_t>(~uint64_t{0xFFFF}) | static_cast<uint16_t>(half);
                     break;
                 }
                 case Funct3::Flw: {
@@ -866,20 +868,19 @@ void CPU::run_memory_stage_baremetal(Machine& machine) {
                             : (ctx.funct3 == Funct3::Sw);
                     if (is_tohost_write) {
                         const uint64_t previous = machine.tohost.load(std::memory_order_relaxed);
-                        const uint64_t value =
-                            ctx.funct3 == Funct3::Sw || !simrv::xlen::kIsXLen64
-                                ? ((previous & 0xFFFFFFFF00000000ULL) |
-                                   (ctx.mem_wdata & 0xFFFFFFFFULL))
-                                : ctx.mem_wdata;
+                        const uint64_t value = ctx.funct3 == Funct3::Sw || !simrv::xlen::kIsXLen64
+                                                   ? ((previous & 0xFFFFFFFF00000000ULL) |
+                                                      (ctx.mem_wdata & 0xFFFFFFFFULL))
+                                                   : ctx.mem_wdata;
                         machine.publish_tohost_write(
                             value, ctx.funct3 == Funct3::Sw && state_.regs.xlen != 32
                                        ? Machine::TohostWriteKind::LowWord
                                        : Machine::TohostWriteKind::Full);
                     }
-                } else if (simrv::compiler::unlikely(
-                               ctx.funct3 == Funct3::Sw &&
-                               (addr == machine.isa_test_tohost() + 4 ||
-                                addr == 0x80001004ULL || addr == 0x40008004ULL))) {
+                } else if (simrv::compiler::unlikely(ctx.funct3 == Funct3::Sw &&
+                                                     (addr == machine.isa_test_tohost() + 4 ||
+                                                      addr == 0x80001004ULL ||
+                                                      addr == 0x40008004ULL))) {
                     const bool is_tohost_write = (ctx.funct3 == Funct3::Sw);
                     if (is_tohost_write) {
                         machine.publish_tohost_write(

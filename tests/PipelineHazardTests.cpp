@@ -3,8 +3,8 @@
  * @brief Regression tests for integer forwarding, FP conservative hazard stalls, FMA rs3
  * dependencies, and cross-bank conversions.
  */
-#include <cstdlib>
 #include <array>
+#include <cstdlib>
 #include <cstring>
 #include <iostream>
 #include <vector>
@@ -238,18 +238,18 @@ void test_cycle_kernel_bit_for_bit_hazard_stall_counters() {
 void test_zkt_fixed_instruction_latency() {
     using simrv::pipeline::operation::ExecutionClass;
     constexpr std::array zkt_ops{
-        OperationId::LUI,     OperationId::AUIPC, OperationId::ADDI,   OperationId::SLTI,
-        OperationId::SLTIU,   OperationId::XORI,  OperationId::ORI,    OperationId::ANDI,
-        OperationId::SLLI,    OperationId::SRLI,  OperationId::SRAI,   OperationId::ADD,
-        OperationId::SUB,     OperationId::SLL,   OperationId::SLT,    OperationId::SLTU,
-        OperationId::XOR,     OperationId::SRL,   OperationId::SRA,    OperationId::OR,
-        OperationId::AND,     OperationId::ADDIW, OperationId::SLLIW,  OperationId::SRLIW,
-        OperationId::SRAIW,   OperationId::ADDW,  OperationId::SUBW,   OperationId::SLLW,
-        OperationId::SRLW,    OperationId::SRAW,  OperationId::MUL,    OperationId::MULH,
-        OperationId::MULHSU,  OperationId::MULHU, OperationId::MULW,   OperationId::ANDN,
-        OperationId::ORN,     OperationId::XNOR,  OperationId::ROL,    OperationId::ROR,
-        OperationId::RORI,    OperationId::ROLW,  OperationId::RORW,   OperationId::RORIW,
-        OperationId::CLMUL,   OperationId::CLMULH, OperationId::PACK,  OperationId::PACKW,
+        OperationId::LUI,    OperationId::AUIPC,  OperationId::ADDI,  OperationId::SLTI,
+        OperationId::SLTIU,  OperationId::XORI,   OperationId::ORI,   OperationId::ANDI,
+        OperationId::SLLI,   OperationId::SRLI,   OperationId::SRAI,  OperationId::ADD,
+        OperationId::SUB,    OperationId::SLL,    OperationId::SLT,   OperationId::SLTU,
+        OperationId::XOR,    OperationId::SRL,    OperationId::SRA,   OperationId::OR,
+        OperationId::AND,    OperationId::ADDIW,  OperationId::SLLIW, OperationId::SRLIW,
+        OperationId::SRAIW,  OperationId::ADDW,   OperationId::SUBW,  OperationId::SLLW,
+        OperationId::SRLW,   OperationId::SRAW,   OperationId::MUL,   OperationId::MULH,
+        OperationId::MULHSU, OperationId::MULHU,  OperationId::MULW,  OperationId::ANDN,
+        OperationId::ORN,    OperationId::XNOR,   OperationId::ROL,   OperationId::ROR,
+        OperationId::RORI,   OperationId::ROLW,   OperationId::RORW,  OperationId::RORIW,
+        OperationId::CLMUL,  OperationId::CLMULH, OperationId::PACK,  OperationId::PACKW,
         OperationId::REV8,
     };
     for (const auto op : zkt_ops) {
@@ -267,24 +267,23 @@ void test_zkt_fixed_instruction_latency() {
         constexpr uint32_t rd = 3;
         constexpr uint32_t rs1 = 1;
         constexpr uint32_t rs2 = 2;
-        return static_cast<simrv::xlen::Instruction>((funct7 << 25U) | (rs2 << 20U) |
-                                                      (rs1 << 15U) | (funct3 << 12U) |
-                                                      (rd << 7U) | opcode);
+        return static_cast<simrv::xlen::Instruction>((funct7 << 25U) | (rs2 << 20U) | (rs1 << 15U) |
+                                                     (funct3 << 12U) | (rd << 7U) | opcode);
     };
     constexpr std::array<simrv::xlen::Register, 3> operand_patterns{
         0,
         ~simrv::xlen::Register{0},
-        UINT64_C(0x8000000000000001),
+        static_cast<simrv::xlen::Register>(UINT64_C(0x8000000000000001)),
     };
     const std::array zkt_bitmanip_ops{
-        encode_r(0x05, 0x1),  // clmul
-        encode_r(0x05, 0x3),  // clmulh
-        encode_r(0x20, 0x7),  // andn
-        encode_r(0x20, 0x6),  // orn
-        encode_r(0x20, 0x4),  // xnor
-        encode_r(0x30, 0x1),  // rol
-        encode_r(0x30, 0x5),  // ror
-        encode_r(0x04, 0x4),  // pack
+        encode_r(0x05, 0x1),        // clmul
+        encode_r(0x05, 0x3),        // clmulh
+        encode_r(0x20, 0x7),        // andn
+        encode_r(0x20, 0x6),        // orn
+        encode_r(0x20, 0x4),        // xnor
+        encode_r(0x30, 0x1),        // rol
+        encode_r(0x30, 0x5),        // ror
+        encode_r(0x04, 0x4),        // pack
         encode_r(0x04, 0x4, 0x3b),  // packw
     };
     const auto run_one = [&](simrv::xlen::Instruction instruction, simrv::xlen::Register lhs,
@@ -319,17 +318,15 @@ void test_zkt_fixed_instruction_latency() {
         return cycles;
     };
 
-    for (const auto type : {simrv::pipeline::PipelineType::ThreeStage,
-                            simrv::pipeline::PipelineType::FiveStage}) {
-        TEST_CHECK(run_one(add, 0, 0, type) ==
-                   run_one(add, ~simrv::xlen::Register{0}, simrv::xlen::Register{0x55555555U},
-                           type));
-        TEST_CHECK(run_one(mul, 0, 0, type) ==
-                   run_one(mul, ~simrv::xlen::Register{0}, simrv::xlen::Register{0x55555555U},
-                           type));
+    for (const auto type :
+         {simrv::pipeline::PipelineType::ThreeStage, simrv::pipeline::PipelineType::FiveStage}) {
+        TEST_CHECK(run_one(add, 0, 0, type) == run_one(add, ~simrv::xlen::Register{0},
+                                                       simrv::xlen::Register{0x55555555U}, type));
+        TEST_CHECK(run_one(mul, 0, 0, type) == run_one(mul, ~simrv::xlen::Register{0},
+                                                       simrv::xlen::Register{0x55555555U}, type));
         for (const auto instruction : zkt_bitmanip_ops) {
-            const auto expected_cycles = run_one(instruction, operand_patterns[0],
-                                                 operand_patterns[0], type);
+            const auto expected_cycles =
+                run_one(instruction, operand_patterns[0], operand_patterns[0], type);
             for (const auto lhs : operand_patterns) {
                 for (const auto rhs : operand_patterns) {
                     TEST_CHECK(run_one(instruction, lhs, rhs, type) == expected_cycles);
@@ -342,12 +339,10 @@ void test_zkt_fixed_instruction_latency() {
 void test_zvkt_vector_latency() {
     using simrv::pipeline::operation::ExecutionClass;
     constexpr std::array zvkt_ops{
-        OperationId::VANDN_VV, OperationId::VANDN_VX, OperationId::VROL_VV,
-        OperationId::VROL_VX, OperationId::VROR_VV,  OperationId::VROR_VX,
-        OperationId::VROR_VI, OperationId::VCLZ_V,   OperationId::VCTZ_V,
-        OperationId::VCPOP_V,  OperationId::VBREV_V,  OperationId::VBREV8_V,
-        OperationId::VREV8_V,  OperationId::VWSLL_VV, OperationId::VWSLL_VX,
-        OperationId::VWSLL_VI,
+        OperationId::VANDN_VV, OperationId::VANDN_VX, OperationId::VROL_VV,  OperationId::VROL_VX,
+        OperationId::VROR_VV,  OperationId::VROR_VX,  OperationId::VROR_VI,  OperationId::VCLZ_V,
+        OperationId::VCTZ_V,   OperationId::VCPOP_V,  OperationId::VBREV_V,  OperationId::VBREV8_V,
+        OperationId::VREV8_V,  OperationId::VWSLL_VV, OperationId::VWSLL_VX, OperationId::VWSLL_VI,
     };
     for (const auto op : zvkt_ops) {
         TEST_CHECK(simrv::pipeline::operation::info(op).execution_class == ExecutionClass::Default);
@@ -356,8 +351,7 @@ void test_zvkt_vector_latency() {
     constexpr simrv::xlen::Instruction kVandnVv =
         (1U << 26U) | (1U << 25U) | (6U << 20U) | (4U << 15U) | (2U << 7U) | 0x57U;
     constexpr simrv::xlen::Instruction kVclzV =
-        (0x12U << 26U) | (1U << 25U) | (6U << 20U) | (8U << 15U) | (2U << 12U) |
-        (2U << 7U) | 0x57U;
+        (0x12U << 26U) | (1U << 25U) | (6U << 20U) | (8U << 15U) | (2U << 12U) | (2U << 7U) | 0x57U;
     TEST_CHECK(simrv::pipeline::decoder(kVandnVv) == OperationId::VANDN_VV);
     TEST_CHECK(simrv::pipeline::decoder(kVclzV) == OperationId::VCLZ_V);
 
@@ -398,8 +392,8 @@ void test_zvkt_vector_latency() {
         return cycles;
     };
 
-    for (const auto type : {simrv::pipeline::PipelineType::ThreeStage,
-                            simrv::pipeline::PipelineType::FiveStage}) {
+    for (const auto type :
+         {simrv::pipeline::PipelineType::ThreeStage, simrv::pipeline::PipelineType::FiveStage}) {
         TEST_CHECK(run_vector(kVandnVv, 0, type) == run_vector(kVandnVv, 0xA5, type));
         TEST_CHECK(run_vector(kVclzV, 0, type) == run_vector(kVclzV, 0xA5, type));
     }

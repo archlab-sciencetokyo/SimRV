@@ -1432,8 +1432,7 @@ void Machine::prewarm_bram_caches() {
             }
 
             constexpr simrv::xlen::Address kDLineBytes = simrv::cache::DCache::kLineBytes;
-            const simrv::xlen::Address dmem_base =
-                ram.contains(0x10000000ULL, kDLineBytes) ? 0x10000000ULL : dram_base;
+            const simrv::xlen::Address dmem_base = dram_base;
             const simrv::xlen::Address d_end = dmem_base + cpu.dcache.capacity_bytes();
             for (simrv::xlen::Address addr = dmem_base; addr < d_end; addr += kDLineBytes) {
                 if (ram.contains(addr, kDLineBytes)) {

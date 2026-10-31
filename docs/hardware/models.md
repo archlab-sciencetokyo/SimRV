@@ -60,6 +60,11 @@ platform metadata and `[device.<kind>]` for device entries, including `[device.u
 with `device_policy = "explicit"` registers only the devices listed in its file; presets that omit
 that policy retain their existing implicit platform devices.
 
+`[device.uart] clock_hz` sets the UART input clock. It defaults to 3,686,400 Hz. The UART resets
+to 115200 8N1 with a divisor derived from that clock, and generated guest device trees report both
+`clock-frequency` and the resulting `current-speed`. Serial frames complete at deterministic
+simulated CPU-cycle boundaries; individual wire bits are not modeled.
+
 ### SMP and shared cache topology
 
 SoC profiles can describe homogeneous hart groups and their shared cache hierarchy. For example:
@@ -105,6 +110,34 @@ and per-hart issue order. The synchronization quantum groups global cycles into 
 turns; it does not let one hart advance simulated time ahead of another. Cross-hart interrupts and
 hart lifecycle changes take effect at the destination hart's next execution boundary. Active hart
 count can be overridden via `--harts`.
+
+### PCIe host and endpoint topology
+
+PCIe host windows and endpoint topology can be configured separately from each endpoint's MMIO
+descriptor. The following section relocates ECAM and the BAR aperture, exposes buses 0 through 4,
+and moves the block endpoint to `00:09.2` with PLIC source 30:
+
+```ini
+[pcie]
+ecam_base = 0x34000000
+ecam_size = 5M
+mmio_base = 0x44000000
+mmio_size = 16M
+first_bus = 0
+last_bus = 4
+
+[device.virtio-block]
+pci_bus = 0
+pci_slot = 9
+pci_function = 2
+pci_intx_source = 30
+```
+
+The default `virt-pcie` map keeps ECAM at `0x30000000`, the BAR aperture at `0x40000000`, buses
+0–255, and VirtIO endpoints in slots 1–8. PCI MMIO uses identity translation between PCI and CPU
+addresses. The PLIC implements source IDs 1–31 (source 0 is reserved); generated device trees
+report that same source count, and configured PLIC IRQs and PCIe INTx sources must fit the range.
+Configured PCIe BDFs must be unique.
 
 Device-specific SoC entries use `[device.<kind>]` sections. Supported kinds include `uart`,
 `rtc`, `dma`, `virtio-block`, `virtio-console`, `virtio-rng`, `virtio-gpu`, `virtio-input`,

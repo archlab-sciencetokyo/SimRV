@@ -4,6 +4,8 @@
  */
 #pragma once
 
+#include <cstdint>
+
 #include "simrv/xlen/IdentifierTypes.hpp"
 
 namespace simrv::core {
@@ -194,8 +196,7 @@ constexpr auto operator!=(MipBit lhs, I rhs) noexcept -> bool {
 }
 
 /** Standard interrupt bits implemented by the SimRV single-hart platform. */
-constexpr auto interrupt_implemented_mask(bool has_s, bool has_h = false)
-    -> simrv::xlen::CsrValue {
+constexpr auto interrupt_implemented_mask(bool has_s, bool has_h = false) -> simrv::xlen::CsrValue {
     simrv::xlen::CsrValue mask = MipBit::Msip | MipBit::Mtip | MipBit::Meip;
     if (has_s) {
         mask |= MipBit::Ssip | MipBit::Stip | MipBit::Seip | MipBit::Lcofip;
@@ -241,8 +242,7 @@ constexpr auto mip_rmw_base(simrv::xlen::CsrValue visible_mip, bool seip_softwar
 constexpr simrv::xlen::CsrValue kMstatusMask =
     (MstatusBit::Sie | MstatusBit::Mie | MstatusBit::Spie | MstatusBit::Mpie | MstatusBit::Spp |
      MstatusBit::Mpp | MstatusBit::Fs | MstatusBit::Vs | MstatusBit::Mprv | MstatusBit::Sum |
-     MstatusBit::Mxr | MstatusBit::Tvm | MstatusBit::Tw | MstatusBit::Tsr |
-     MstatusBit::Mpv |
+     MstatusBit::Mxr | MstatusBit::Tvm | MstatusBit::Tw | MstatusBit::Tsr | MstatusBit::Mpv |
      (simrv::xlen::kIsXLen64 ? (static_cast<simrv::xlen::CsrValue>(0xF) << 32) : 0));
 constexpr simrv::xlen::CsrValue kSstatusMask =
     (MstatusBit::Sie | MstatusBit::Spie | MstatusBit::Spp | MstatusBit::Fs | MstatusBit::Vs |
@@ -262,13 +262,13 @@ constexpr simrv::xlen::CsrValue kMstatusReadMask = ~simrv::xlen::CsrValue{0};
  */
 constexpr simrv::xlen::CsrValue kMedelegWritableMask = static_cast<simrv::xlen::CsrValue>(0xB1FFu);
 constexpr simrv::xlen::CsrValue kHedelegWritableMask =
-    kMedelegWritableMask | (simrv::xlen::CsrValue{1} << 18U) |
-    (simrv::xlen::CsrValue{1} << 19U);
-constexpr simrv::xlen::CsrValue kHgatpModeMask = simrv::xlen::CsrValue{0xF} << 60U;
-constexpr simrv::xlen::CsrValue kHgatpVmidMask = simrv::xlen::CsrValue{0x3FFF} << 44U;
-constexpr simrv::xlen::CsrValue kHgatpPpnMask = (simrv::xlen::CsrValue{1} << 44U) - 1U;
-constexpr simrv::xlen::CsrValue kHgatpWritableMask =
-    kHgatpModeMask | kHgatpVmidMask | kHgatpPpnMask;
+    kMedelegWritableMask | (simrv::xlen::CsrValue{1} << 18U) | (simrv::xlen::CsrValue{1} << 19U);
+// HGATP's address format is always 64-bit, even in an RV32 host build where
+// these constants are not used by the implemented guest profile.
+constexpr uint64_t kHgatpModeMask = uint64_t{0xF} << 60U;
+constexpr uint64_t kHgatpVmidMask = uint64_t{0x3FFF} << 44U;
+constexpr uint64_t kHgatpPpnMask = (uint64_t{1} << 44U) - 1U;
+constexpr uint64_t kHgatpWritableMask = kHgatpModeMask | kHgatpVmidMask | kHgatpPpnMask;
 constexpr simrv::xlen::CsrValue kFflagsMask = static_cast<simrv::xlen::CsrValue>(0x1fu);
 constexpr simrv::xlen::CsrValue kFrmMask = static_cast<simrv::xlen::CsrValue>(0x7u);
 constexpr simrv::xlen::CsrValue kFcsrMask = static_cast<simrv::xlen::CsrValue>(0xffu);
@@ -296,8 +296,7 @@ constexpr auto mstatus_with_sd(simrv::xlen::CsrValue mstatus) -> simrv::xlen::Cs
  * SimRV chooses the permitted read-only-zero behavior for absent F and V state.
  */
 constexpr auto mstatus_writable_mask(bool has_s, bool has_u, bool has_f, bool has_v,
-                                     bool has_h = false)
-    -> simrv::xlen::CsrValue {
+                                     bool has_h = false) -> simrv::xlen::CsrValue {
     simrv::xlen::CsrValue mask = kMstatusMask;
     if (!has_s) {
         mask &= ~(MstatusBit::Sie | MstatusBit::Spie | MstatusBit::Spp | MstatusBit::Sum |

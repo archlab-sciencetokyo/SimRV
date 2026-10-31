@@ -148,8 +148,9 @@ inline constexpr auto uart_reg_word(simrv::xlen::Address raw) -> simrv::xlen::Ad
     }
 }
 
-inline auto uart_reg(simrv::xlen::Address p_addr, int8_t& reg_shift_mode) -> simrv::xlen::Address {
-    const simrv::xlen::Address raw = p_addr - kUartBaseAddress;
+inline auto uart_reg(simrv::xlen::Address p_addr, int8_t& reg_shift_mode,
+                     simrv::xlen::Address base = kUartBaseAddress) -> simrv::xlen::Address {
+    const simrv::xlen::Address raw = p_addr - base;
     if (reg_shift_mode < 0) {
         if (raw == static_cast<simrv::xlen::Address>(0x01U) ||
             raw == static_cast<simrv::xlen::Address>(0x02U) ||

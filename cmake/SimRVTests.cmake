@@ -262,6 +262,9 @@ if(BUILD_TESTING)
   add_test(NAME release-tools
            COMMAND ${PYTHON_BIN} ${CMAKE_SOURCE_DIR}/tests/ReleaseToolTests.py)
   set_tests_properties(release-tools PROPERTIES LABELS "gate;regress;release")
+  add_test(NAME guest-capability-templates
+           COMMAND ${PYTHON_BIN} ${CMAKE_SOURCE_DIR}/scripts/sync_guest_capabilities.py --check)
+  set_tests_properties(guest-capability-templates PROPERTIES LABELS "gate;regress;fdt")
   add_test(NAME uefi-disk-image
            COMMAND ${PYTHON_BIN} ${CMAKE_SOURCE_DIR}/tests/UefiDiskImageTests.py)
   set_tests_properties(uefi-disk-image PROPERTIES LABELS "gate;regress;uefi")

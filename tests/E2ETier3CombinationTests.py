@@ -47,7 +47,7 @@ class E2ETier3CombinationTests(unittest.TestCase):
         """Combination 2: RV64 Binary × RV32 Guest Personality × Fast Mode Execution."""
         res = run_simrv(
             self.simrv64,
-            ["--cli", "--baremetal", "-m", str(self.hello32), "--isa", "rv32gc", "--mode", "fast", "--steps", "1500"],
+            ["--cli", "--baremetal", "-m", str(self.hello32), "--isa", "rv32gc", "--mode", "fast", "--steps", "500000"],
         )
         self.assertEqual(res.returncode, 0, res.stderr)
         self.assertIn("instruction-fast execution", res.stdout)
@@ -92,7 +92,7 @@ class E2ETier3CombinationTests(unittest.TestCase):
                 "-D",
                 str(dummy_disk),
                 "--steps",
-                "500",
+                "500000",
             ]
             if self.dtb.is_file():
                 cmd.extend(["-f", str(self.dtb)])
