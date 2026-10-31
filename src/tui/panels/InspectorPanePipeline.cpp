@@ -151,18 +151,18 @@ auto get_computation_desc(const simrv::pipeline::PipelineContext& ctx, int width
             return std::format(" {}Computation : {}[{}{}] → {}\033[0m", kThemeText, kThemeMint,
                                reg1, offset_str, hex_val(ctx.mem_rdata));
         }
-        return std::format(" {}Computation : {}Memory[{} + {}] → {}\033[0m", kThemeText,
-                           kThemeMint, hex_val(ctx.rrs1), ctx.imm, hex_val(ctx.mem_rdata));
+        return std::format(" {}Computation : {}Memory[{} + {}] → {}\033[0m", kThemeText, kThemeMint,
+                           hex_val(ctx.rrs1), ctx.imm, hex_val(ctx.mem_rdata));
     }
     if (is_store_opcode(opc)) {
         if (framework::active_render_context().density == framework::Density::Compact ||
             width < 68) {
             std::string offset_str = (ctx.imm != 0) ? std::format(" + {}", ctx.imm) : "";
-            return std::format(" {}Computation : {}{} ({}) → [{}{}]\033[0m", kThemeText,
-                               kThemeMint, reg2, hex_val(ctx.rrs2), reg1, offset_str);
+            return std::format(" {}Computation : {}{} ({}) → [{}{}]\033[0m", kThemeText, kThemeMint,
+                               reg2, hex_val(ctx.rrs2), reg1, offset_str);
         }
-        return std::format(" {}Computation : {}{} → Memory[{} + {}]\033[0m", kThemeText,
-                           kThemeMint, hex_val(ctx.rrs2), hex_val(ctx.rrs1), ctx.imm);
+        return std::format(" {}Computation : {}{} → Memory[{} + {}]\033[0m", kThemeText, kThemeMint,
+                           hex_val(ctx.rrs2), hex_val(ctx.rrs1), ctx.imm);
     }
     if (is_branch_opcode(opc)) {
         if (framework::active_render_context().density == framework::Density::Compact ||
@@ -703,34 +703,8 @@ auto InspectorPane::render_pipeline_stages_functional_low_part1(const simrv::cor
             std::string pc_str = sym.empty() ? hex_val(ctx.cpc.raw())
                                              : std::format("{} <{}>", hex_val(ctx.cpc.raw()), sym);
 
-            // Build assembly string from operation name
-            bool is_dst_fp = simrv::isa::is_destination_fp(ctx.opcode, ctx.op_id);
-            bool is_rs1_fp = simrv::isa::is_rs1_fp(ctx.opcode, ctx.op_id);
-            bool is_rs2_fp = simrv::isa::is_rs2_fp(ctx.opcode, ctx.op_id);
-            std::string rd_n = is_dst_fp ? fp_reg_name(ctx.rd) : reg_name(ctx.rd);
-            std::string rs1_n = is_rs1_fp ? fp_reg_name(ctx.rs1) : reg_name(ctx.rs1);
-            std::string rs2_n = is_rs2_fp ? fp_reg_name(ctx.rs2) : reg_name(ctx.rs2);
-
-            // Simple assembly representation
-            std::string asm_str = std::string(op_name);
-            if (fmt == InstFormat::R) {
-                asm_str = std::format("{} {}, {}, {}", op_name, rd_n, rs1_n, rs2_n);
-            } else if (fmt == InstFormat::I) {
-                if (is_load_opcode(ctx.opcode)) {
-                    asm_str = std::format("{} {}, {}({})", op_name, rd_n, ctx.imm, rs1_n);
-                } else {
-                    asm_str = std::format("{} {}, {}, {}", op_name, rd_n, rs1_n, ctx.imm);
-                }
-            } else if (fmt == InstFormat::S) {
-                asm_str = std::format("{} {}, {}({})", op_name, rs2_n, ctx.imm, rs1_n);
-            } else if (fmt == InstFormat::B) {
-                asm_str = std::format("{} {}, {}, {}", op_name, rs1_n, rs2_n, ctx.imm);
-            } else if (fmt == InstFormat::U) {
-                asm_str =
-                    std::format("{} {}, 0x{:X}", op_name, rd_n, static_cast<uint32_t>(ctx.imm));
-            } else if (fmt == InstFormat::J) {
-                asm_str = std::format("jal {}, {}", rd_n, ctx.imm);
-            }
+            std::string asm_str = simrv::explain::format_instruction_assembly(
+                ctx.ir_org, ctx.cpc.raw(), cpu.state().current_xlen());
 
             return render_pair("PC", pc_str, kThemeMint, "Asm", asm_str, kThemePeach, col_width,
                                right_width, 10);
@@ -763,8 +737,9 @@ auto InspectorPane::render_pipeline_stages_functional_low_part1(const simrv::cor
             return section_line("ID  Decode & Operand Read", width);
         case 7: {
             std::string op_str = std::format("{} ({})", op_name, isa_ext);
-            bool is_dst_fp = simrv::isa::is_destination_fp(ctx.opcode, ctx.op_id);
-            std::string dst_str = (fmt == InstFormat::S || fmt == InstFormat::B)
+            bool is_dst_fp = pipeline::operation::writes_float(ctx.op_id);
+            bool has_dest = pipeline::operation::writes_rd(ctx.op_id);
+            std::string dst_str = !has_dest
                                       ? "(none — no dest)"
                                       : (is_dst_fp ? fp_reg_name(ctx.rd) : reg_with_x(ctx.rd));
             return render_pair("Operation", op_str, kThemeVal, "Dest Reg", dst_str, kThemeMint,
@@ -818,9 +793,8 @@ auto InspectorPane::render_pipeline_stages_functional_low_part2(const simrv::cor
         case 11: {
             std::string branch_str =
                 is_branch_opcode(ctx.opcode)
-                    ? (ctx.tkn
-                           ? std::format("{}Yes → {}\033[0m", kThemePeach, hex_val(ctx.jmp_pc))
-                           : std::format("{}No (fall through)\033[0m", kThemeMint))
+                    ? (ctx.tkn ? std::format("{}Yes → {}\033[0m", kThemePeach, hex_val(ctx.jmp_pc))
+                               : std::format("{}No (fall through)\033[0m", kThemeMint))
                     : "No";
             std::string jump_str = (ctx.opcode == Opcode::Jal || ctx.opcode == Opcode::Jalr)
                                        ? hex_val(ctx.jmp_pc)
@@ -842,11 +816,8 @@ auto InspectorPane::render_pipeline_stages_functional_low_part2(const simrv::cor
         case 14:
             return section_line("WB  Write-Back", width);
         case 15: {
-            bool is_dst_fp = simrv::isa::is_destination_fp(ctx.opcode, ctx.op_id);
-            InstFormat wr_fmt = simrv::isa::get_instruction_format(ctx.opcode);
-            bool has_dest =
-                (wr_fmt == InstFormat::R || wr_fmt == InstFormat::I || wr_fmt == InstFormat::U ||
-                 wr_fmt == InstFormat::J || wr_fmt == InstFormat::R4);
+            bool is_dst_fp = pipeline::operation::writes_float(ctx.op_id);
+            bool has_dest = pipeline::operation::writes_rd(ctx.op_id);
             std::string dst_str =
                 has_dest ? (is_dst_fp ? fp_reg_name(ctx.rd) : reg_with_x(ctx.rd)) : "(none)";
             std::string result_str = has_dest ? hex_val(ctx.wb_data) : "—";
@@ -871,19 +842,13 @@ auto InspectorPane::render_pipeline_stages_functional_high(const simrv::core::CP
     switch (logical_row) {
         case 16: {
             if (ctx.pending_exception.has_value()) {
-                static constexpr std::array<const char*, 16> kCauseNames = {
-                    "Inst Addr Misaligned",  "Inst Access Fault",
-                    "Illegal Instruction",   "Breakpoint",
-                    "Load Addr Misaligned",  "Load Access Fault",
-                    "Store Addr Misaligned", "Store Access Fault",
-                    "Env Call (U-Mode)",     "Env Call (S-Mode)",
-                    "Reserved (10)",         "Env Call (M-Mode)",
-                    "Inst Page Fault",       "Load Page Fault",
-                    "Reserved (14)",         "Store Page Fault"};
-                auto cause = static_cast<uint64_t>(*ctx.pending_exception);
-                std::string cause_name = (cause < kCauseNames.size())
-                                             ? kCauseNames.at(cause)
-                                             : std::format("Exception ({})", cause);
+                const auto cause = simrv::isa::to_trap_cause(*ctx.pending_exception);
+                const std::string_view canonical_name = simrv::core::trap_cause_name(cause);
+                std::string cause_name =
+                    canonical_name != "Unknown Trap"
+                        ? std::string(canonical_name)
+                        : std::format("Exception ({})",
+                                      static_cast<uint64_t>(*ctx.pending_exception));
                 return render_pair("Exception", cause_name, kThemePeach, "Trap Value",
                                    hex_val(ctx.pending_tval), kThemeVal, col_width, right_width,
                                    10);
@@ -934,10 +899,9 @@ auto InspectorPane::render_pipeline_stages_functional_high(const simrv::core::CP
                     width);
             }
             if (pipeline::operation::is_store(ctx.op_id)) {
-                return format_to_width(
-                    std::format(" \033[90mMemory:\033[0m Store to {} ↝ Data: {}",
-                                hex_val(ctx.mem_addr), hex_val(ctx.mem_wdata)),
-                    width);
+                return format_to_width(std::format(" \033[90mMemory:\033[0m Store to {} ↝ Data: {}",
+                                                   hex_val(ctx.mem_addr), hex_val(ctx.mem_wdata)),
+                                       width);
             }
             return format_to_width(" \033[90mMemory: None (ALU/Register-only)\033[0m", width);
         }

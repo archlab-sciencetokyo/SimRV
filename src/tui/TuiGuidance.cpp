@@ -223,7 +223,7 @@ auto guidance_for_context(const GuidanceContext& context) -> PageGuidance {
     } else if (context.is_csr_op) {
         auto details = simrv::explain::get_csr_details(context.csr_address);
         std::string csr_nm =
-        details ? std::string(details->name) : simrv::explain::csr_name(context.csr_address);
+            details ? std::string(details->name) : simrv::explain::csr_name(context.csr_address);
         guidance.title = std::format("CSR Access: {}", csr_nm);
         guidance.meaning =
             details ? std::format("Accessing {} ({}).", csr_nm, details->description)

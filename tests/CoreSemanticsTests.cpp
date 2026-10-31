@@ -1650,8 +1650,8 @@ void test_zvbb_integer_semantics() {
     constexpr auto vs2 = static_cast<simrv::xlen::RegId>(6);
     const auto instruction = [](auto dst, auto src1, auto src2) {
         return static_cast<simrv::xlen::Instruction>(
-            (1U << 25U) | (std::to_underlying(src2) << 20U) |
-            (std::to_underlying(src1) << 15U) | (std::to_underlying(dst) << 7U) | 0x57U);
+            (1U << 25U) | (std::to_underlying(src2) << 20U) | (std::to_underlying(src1) << 15U) |
+            (std::to_underlying(dst) << 7U) | 0x57U);
     };
     auto& a = regs.read_vector(simrv::xlen::to_vec_reg_id(vs2));
     auto& b = regs.read_vector(simrv::xlen::to_vec_reg_id(vs1));
@@ -1664,13 +1664,12 @@ void test_zvbb_integer_semantics() {
     const auto run = [&](simrv::isa::OperationId op) {
         cpu.active_context().pending_exception.reset();
         simrv::execute::ExecuteUnit::execute_vector(cpu, machine.memory(), op,
-                                                     instruction(vd, vs1, vs2));
+                                                    instruction(vd, vs1, vs2));
         expect(!cpu.active_context().pending_exception.has_value(),
                "implemented Zvbb instruction executes legally at SEW=8");
     };
     run(simrv::isa::OperationId::VANDN_VV);
-    expect(d.u8[0] == 0x80 && d.u8[1] == 0,
-           "Zvbb vandn computes vs2 AND NOT vs1");
+    expect(d.u8[0] == 0x80 && d.u8[1] == 0, "Zvbb vandn computes vs2 AND NOT vs1");
     run(simrv::isa::OperationId::VROL_VV);
     expect(d.u8[0] == 0x03 && d.u8[1] == 0,
            "Zvbb vector rotate-left uses each element's low shift bits");
@@ -1678,23 +1677,18 @@ void test_zvbb_integer_semantics() {
     expect(d.u8[0] == 0xC0 && d.u8[1] == 0,
            "Zvbb vector rotate-right handles element-width wraparound");
     run(simrv::isa::OperationId::VCLZ_V);
-    expect(d.u8[0] == 0 && d.u8[1] == 8,
-           "Zvbb clz handles high-bit and zero operands");
+    expect(d.u8[0] == 0 && d.u8[1] == 8, "Zvbb clz handles high-bit and zero operands");
     run(simrv::isa::OperationId::VCTZ_V);
-    expect(d.u8[0] == 0 && d.u8[1] == 8,
-           "Zvbb ctz handles odd and zero operands");
+    expect(d.u8[0] == 0 && d.u8[1] == 8, "Zvbb ctz handles odd and zero operands");
     run(simrv::isa::OperationId::VCPOP_V);
-    expect(d.u8[0] == 2 && d.u8[1] == 0,
-           "Zvbb population count handles sparse and zero operands");
+    expect(d.u8[0] == 2 && d.u8[1] == 0, "Zvbb population count handles sparse and zero operands");
     run(simrv::isa::OperationId::VBREV_V);
     expect(d.u8[0] == 0x81 && d.u8[1] == 0,
            "Zvbb bit reverse is defined across the complete element width");
     run(simrv::isa::OperationId::VBREV8_V);
-    expect(d.u8[0] == 0x81 && d.u8[1] == 0,
-           "Zvbb byte bit reverse handles byte elements");
+    expect(d.u8[0] == 0x81 && d.u8[1] == 0, "Zvbb byte bit reverse handles byte elements");
     run(simrv::isa::OperationId::VREV8_V);
-    expect(d.u8[0] == 0x81 && d.u8[1] == 0,
-           "Zvbb byte reverse is an identity for byte elements");
+    expect(d.u8[0] == 0x81 && d.u8[1] == 0, "Zvbb byte reverse is an identity for byte elements");
 
     cpu.state().vl = 1;
     run(simrv::isa::OperationId::VWSLL_VV);
@@ -2122,32 +2116,31 @@ void test_vector_floating_arithmetic() {
     cpu.state().fcsr = 0;
     cpu.state().vtype = 1U << 3U;  // SEW=16 for Zvfhmin conversions.
     regs.read_vector(simrv::xlen::to_vec_reg_id(vs2)).u16[0] = UINT16_C(0x3C00);
-    simrv::execute::ExecuteUnit::execute_vector(
-        cpu, machine.memory(), simrv::isa::OperationId::VFWCVT_F_F_V,
-        vector_ir(vd, simrv::xlen::RegId::Zero, vs2));
+    simrv::execute::ExecuteUnit::execute_vector(cpu, machine.memory(),
+                                                simrv::isa::OperationId::VFWCVT_F_F_V,
+                                                vector_ir(vd, simrv::xlen::RegId::Zero, vs2));
     expect(!cpu.active_context().pending_exception.has_value() &&
                regs.read_vector(simrv::xlen::to_vec_reg_id(vd)).u32[0] == UINT32_C(0x3F800000),
            "Zvfhmin vfwcvt.f.f.v widens binary16 1.0 to binary32");
 
     regs.read_vector(simrv::xlen::to_vec_reg_id(vs2)).u32[0] = UINT32_C(0x3F801000);
-    simrv::execute::ExecuteUnit::execute_vector(
-        cpu, machine.memory(), simrv::isa::OperationId::VFNCVT_F_F_W,
-        vector_ir(vd, simrv::xlen::RegId::Zero, vs2));
+    simrv::execute::ExecuteUnit::execute_vector(cpu, machine.memory(),
+                                                simrv::isa::OperationId::VFNCVT_F_F_W,
+                                                vector_ir(vd, simrv::xlen::RegId::Zero, vs2));
     expect(regs.read_vector(simrv::xlen::to_vec_reg_id(vd)).u16[0] == UINT16_C(0x3C00) &&
                (cpu.state().fcsr & simrv::isa::FflagsBit::Nx) != 0,
            "Zvfhmin vfncvt.f.f.w rounds a binary32 midpoint to even and accrues inexact");
 
     cpu.state().fcsr = simrv::isa::RoundingMode::Rmm << 5U;
-    simrv::execute::ExecuteUnit::execute_vector(
-        cpu, machine.memory(), simrv::isa::OperationId::VFNCVT_F_F_W,
-        vector_ir(vd, simrv::xlen::RegId::Zero, vs2));
+    simrv::execute::ExecuteUnit::execute_vector(cpu, machine.memory(),
+                                                simrv::isa::OperationId::VFNCVT_F_F_W,
+                                                vector_ir(vd, simrv::xlen::RegId::Zero, vs2));
     expect(regs.read_vector(simrv::xlen::to_vec_reg_id(vd)).u16[0] == UINT16_C(0x3C01),
            "Zvfhmin vfncvt.f.f.w honors round-to-nearest-max-magnitude");
 
     cpu.active_context().pending_exception.reset();
     simrv::execute::ExecuteUnit::execute_vector(
-        cpu, machine.memory(), simrv::isa::OperationId::VFADD_VV,
-        vector_ir(vd, vs1, vs2));
+        cpu, machine.memory(), simrv::isa::OperationId::VFADD_VV, vector_ir(vd, vs1, vs2));
     expect(cpu.active_context().pending_exception == ExceptionCode::IllegalInstruction,
            "Zvfhmin does not enable half-precision vector arithmetic");
     cpu.active_context().pending_exception.reset();
@@ -2995,10 +2988,10 @@ void test_sv39_reserved_pte_bits() {
         write_pte(kRoot, ((kLevel1 >> 12U) << 10U) | kValid | (uint64_t{1} << 61U));
         const auto reserved_nonleaf_pbmt =
             mmu.translate(kVirtual, simrv::PteAccess::Read, kPrivSupervisor, 0, kSatp, 64, false);
-        expect(!reserved_nonleaf_pbmt.has_value() &&
-                   reserved_nonleaf_pbmt.error() ==
-                       std::to_underlying(ExceptionCode::LoadPageFault),
-               "Svpbmt faults when a non-leaf PTE sets PBMT bits");
+        expect(
+            !reserved_nonleaf_pbmt.has_value() &&
+                reserved_nonleaf_pbmt.error() == std::to_underlying(ExceptionCode::LoadPageFault),
+            "Svpbmt faults when a non-leaf PTE sets PBMT bits");
 
         write_pte(kRoot, ((kLevel1 >> 12U) << 10U) | kValid);
         write_pte(kLevel0 + 8, ((kPhysical >> 12U) << 10U) | kLeafFlags | (uint64_t{1} << 61U));
@@ -3019,19 +3012,18 @@ void test_svnapot_64k_translation() {
         constexpr simrv::xlen::Address kLevel0 = 0x3000;
         constexpr simrv::xlen::Address kVirtualBase = 0x40000;
         constexpr simrv::xlen::Address kPhysicalBase = 0x10000;
-        constexpr simrv::xlen::Word kValidReadAccessed =
-            std::to_underlying(simrv::PteFlag::V) | std::to_underlying(simrv::PteFlag::R) |
-            std::to_underlying(simrv::PteFlag::A);
+        constexpr simrv::xlen::Word kValidReadAccessed = std::to_underlying(simrv::PteFlag::V) |
+                                                         std::to_underlying(simrv::PteFlag::R) |
+                                                         std::to_underlying(simrv::PteFlag::A);
         constexpr simrv::xlen::Word kNapot = uint64_t{1} << 63U;
-        const auto write_pte = [ram_view](simrv::xlen::Address address,
-                                          simrv::xlen::Word pte) {
+        const auto write_pte = [ram_view](simrv::xlen::Address address, simrv::xlen::Word pte) {
             simrv::memory::ram_write_fast(
                 address, pte, static_cast<simrv::xlen::Instruction>(simrv::isa::Funct3::Sd),
                 ram_view);
         };
 
-        const simrv::xlen::Word napot_leaf = (((kPhysicalBase >> 12U) | 0x8U) << 10U) |
-                                             kValidReadAccessed | kNapot;
+        const simrv::xlen::Word napot_leaf =
+            (((kPhysicalBase >> 12U) | 0x8U) << 10U) | kValidReadAccessed | kNapot;
         constexpr simrv::xlen::Address kLevel2 = 0x4000;
         constexpr simrv::xlen::Address kLevel3 = 0x5000;
         const auto pointer = [](simrv::xlen::Address address) {
@@ -3045,19 +3037,16 @@ void test_svnapot_64k_translation() {
             if (mode >= 10U) write_pte(kLevel2, pointer(kLevel3));
 
             // NAPOT mappings replicate the PTE across all sixteen 4 KiB entries in the range.
-            const auto first_leaf_address =
-                leaf_table + ((kVirtualBase >> 12U) & 0x1F0U) * 8U;
+            const auto first_leaf_address = leaf_table + ((kVirtualBase >> 12U) & 0x1F0U) * 8U;
             for (simrv::xlen::Address entry = 0; entry < 16; ++entry) {
                 write_pte(first_leaf_address + entry * 8U, napot_leaf);
             }
 
-            const simrv::xlen::Word satp =
-                static_cast<simrv::xlen::Word>((static_cast<uint64_t>(mode) << 60U) |
-                                               (kRoot >> 12U));
+            const simrv::xlen::Word satp = static_cast<simrv::xlen::Word>(
+                (static_cast<uint64_t>(mode) << 60U) | (kRoot >> 12U));
             simrv::Mmu mmu(ram.data(), 0, ram.size());
             for (simrv::xlen::Address page = 0; page < 16; ++page) {
-                const simrv::xlen::Address virtual_address =
-                    kVirtualBase + page * 0x1000U + 0xABC;
+                const simrv::xlen::Address virtual_address = kVirtualBase + page * 0x1000U + 0xABC;
                 const simrv::xlen::Address expected = kPhysicalBase + page * 0x1000U + 0xABC;
                 const auto translated = mmu.translate(virtual_address, simrv::PteAccess::Read,
                                                       kPrivSupervisor, 0, satp, 64, false);
@@ -3066,21 +3055,19 @@ void test_svnapot_64k_translation() {
             }
 
             if (mode == 8U) {
-                write_pte(first_leaf_address, ((kPhysicalBase >> 12U | 0x4U) << 10U) |
-                                                 kValidReadAccessed | kNapot);
+                write_pte(first_leaf_address,
+                          ((kPhysicalBase >> 12U | 0x4U) << 10U) | kValidReadAccessed | kNapot);
                 const auto bad_ppn = mmu.translate(kVirtualBase, simrv::PteAccess::Read,
                                                    kPrivSupervisor, 0, satp, 64, false);
                 expect(!bad_ppn.has_value() &&
-                           bad_ppn.error() ==
-                               std::to_underlying(ExceptionCode::LoadPageFault),
+                           bad_ppn.error() == std::to_underlying(ExceptionCode::LoadPageFault),
                        "Svnapot faults on reserved PPN encodings");
 
                 write_pte(kLevel1, ((kPhysicalBase >> 12U) << 10U) | kValidReadAccessed | kNapot);
                 const auto bad_level = mmu.translate(kVirtualBase, simrv::PteAccess::Read,
                                                      kPrivSupervisor, 0, satp, 64, false);
                 expect(!bad_level.has_value() &&
-                           bad_level.error() ==
-                               std::to_underlying(ExceptionCode::LoadPageFault),
+                           bad_level.error() == std::to_underlying(ExceptionCode::LoadPageFault),
                        "Svnapot faults when N is set on a superpage-level leaf");
             }
         }
@@ -3160,20 +3147,15 @@ void test_fp_decode_legality() {
            "FCVT.D.S accepts its specified rm=000 encoding");
     expect(simrv::pipeline::decoder(encode_op_fp(0x21U, 1, 0)) == simrv::isa::OperationId::ILLEGAL,
            "FCVT.D.S rejects a nonzero reserved rm field");
-    expect(simrv::pipeline::decoder(encode_op_fp(0x20U, 0, 2)) ==
-               simrv::isa::OperationId::FCVT_S_H,
+    expect(simrv::pipeline::decoder(encode_op_fp(0x20U, 0, 2)) == simrv::isa::OperationId::FCVT_S_H,
            "FCVT.S.H uses the single-precision destination format encoding");
-    expect(simrv::pipeline::decoder(encode_op_fp(0x21U, 0, 2)) ==
-               simrv::isa::OperationId::FCVT_D_H,
+    expect(simrv::pipeline::decoder(encode_op_fp(0x21U, 0, 2)) == simrv::isa::OperationId::FCVT_D_H,
            "FCVT.D.H uses the double-precision destination format encoding");
-    expect(simrv::pipeline::decoder(encode_op_fp(0x22U, 0, 0)) ==
-               simrv::isa::OperationId::FCVT_H_S,
+    expect(simrv::pipeline::decoder(encode_op_fp(0x22U, 0, 0)) == simrv::isa::OperationId::FCVT_H_S,
            "FCVT.H.S uses the half-precision destination format encoding");
-    expect(simrv::pipeline::decoder(encode_op_fp(0x22U, 0, 1)) ==
-               simrv::isa::OperationId::FCVT_H_D,
+    expect(simrv::pipeline::decoder(encode_op_fp(0x22U, 0, 1)) == simrv::isa::OperationId::FCVT_H_D,
            "FCVT.H.D uses the half-precision destination format encoding");
-    expect(simrv::pipeline::decoder(encode_op_fp(0x72U, 0, 0)) ==
-               simrv::isa::OperationId::FMV_X_H,
+    expect(simrv::pipeline::decoder(encode_op_fp(0x72U, 0, 0)) == simrv::isa::OperationId::FMV_X_H,
            "FMV.X.H decodes independently of arithmetic NaN boxing");
     expect(simrv::isa::required_extension_for_instruction(encode_op_fp(0x20U, 0, 1), false) ==
                simrv::isa::IsaExtension::D,
@@ -3647,8 +3629,7 @@ void test_smp_reservation_table() {
     table.set_reservation(0, 0x80001000);
     expect(!table.check_and_clear_reservation(0, 0x80001008),
            "SC to a different reservation set fails");
-    expect(!table.check_reservation(0, 0x80001000),
-           "Failed SC clears the previous reservation");
+    expect(!table.check_reservation(0, 0x80001000), "Failed SC clears the previous reservation");
 
     table.set_reservation(0, 0x80002000);
     table.set_reservation(1, 0x80003000);

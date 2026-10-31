@@ -1444,7 +1444,8 @@ auto parse_command_line(std::span<char* const> args) -> std::expected<ParseResul
         if (result.options.fn_uefi.empty())
             return std::unexpected("--uefi requires a RISCV_VIRT_CODE.fd firmware image");
         if (result.options.fn_memimg.empty())
-            return std::unexpected("UEFI requires -m <OpenSBI fw_dynamic.bin> for the M-mode boot stage");
+            return std::unexpected(
+                "UEFI requires -m <OpenSBI fw_dynamic.bin> for the M-mode boot stage");
         if (result.options.fn_uefi_vars.empty())
             return std::unexpected("UEFI requires --uefi-vars <writable VARS.fd working copy>");
     }

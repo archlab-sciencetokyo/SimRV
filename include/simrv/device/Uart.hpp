@@ -11,6 +11,7 @@
 #include <thread>
 
 #include "simrv/core/PlatformMap.h"
+#include "simrv/core/PlatformTiming.hpp"
 #include "simrv/device/PtyBridge.hpp"
 #include "simrv/memory/Mmio.hpp"
 #include "simrv/memory/TileLinkNode.hpp"
@@ -32,7 +33,7 @@ class Uart : public memory::TileLinkNode {
                   simrv::xlen::Address base = simrv::mmio::kUartBaseAddress,
                   simrv::xlen::Address size = simrv::mmio::kUartSize, uint32_t irq = 3,
                   uint64_t clock_hz = SIMRV_PLATFORM_UART_CLOCK_HZ,
-                  uint64_t cpu_clock_hz = 160'000'000);
+                  uint64_t cpu_clock_hz = simrv::core::timing::kCpuClockHz);
     ~Uart() override;
     [[nodiscard]] auto name() const -> const char* override { return "uart"; }
     [[nodiscard]] auto base_address() const -> simrv::xlen::Address override { return base_; }
@@ -50,6 +51,9 @@ class Uart : public memory::TileLinkNode {
     void push_rx_byte(uint8_t byte);
     /// Advance serial transmit and receive state by simulated CPU cycles.
     void advance_cycles(uint64_t cycles);
+    [[nodiscard]] auto has_active_transfer() const noexcept -> bool {
+        return tx_shift_active_ || rx_shift_active_ || !tx_fifo_.empty();
+    }
 
     /// Open a POSIX PTY for this UART. Returns false if openpty fails.
     [[nodiscard]] auto start_pty() -> bool;

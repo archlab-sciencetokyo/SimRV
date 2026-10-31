@@ -156,15 +156,15 @@ void TuiModal::open_file_picker() {
     path_completion_preview_.clear();
     const std::filesystem::path typed(input_);
     std::error_code directory_error;
-    const bool typed_is_directory = !typed.empty() && std::filesystem::is_directory(typed,
-                                                                                     directory_error);
-    const bool has_trailing_separator = !input_.empty() &&
-                                        input_.back() == std::filesystem::path::preferred_separator;
+    const bool typed_is_directory =
+        !typed.empty() && std::filesystem::is_directory(typed, directory_error);
+    const bool has_trailing_separator =
+        !input_.empty() && input_.back() == std::filesystem::path::preferred_separator;
     const bool navigate_into_typed_path = typed_is_directory || has_trailing_separator;
-    const auto typed_parent = navigate_into_typed_path
-                                  ? typed
-                                  : (typed.has_parent_path() ? typed.parent_path()
-                                                             : std::filesystem::path("."));
+    const auto typed_parent =
+        navigate_into_typed_path
+            ? typed
+            : (typed.has_parent_path() ? typed.parent_path() : std::filesystem::path("."));
     std::error_code path_error;
     file_picker_directory_ = std::filesystem::absolute(typed_parent, path_error);
     if (path_error) file_picker_directory_ = std::filesystem::current_path();
@@ -367,7 +367,8 @@ auto TuiModal::remove_bp_at_cursor(
 }
 
 auto TuiModal::tool_filter() const -> modals::ToolFilter {
-    return modals::ToolPickerModal::make_filter(machine_, selected_hart_, display_graphics_supported_);
+    return modals::ToolPickerModal::make_filter(machine_, selected_hart_,
+                                                display_graphics_supported_);
 }
 
 void TuiModal::open_tool_picker(int slot_idx, TuiRegPage current_page, int num_slots) {

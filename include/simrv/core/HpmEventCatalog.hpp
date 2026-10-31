@@ -21,7 +21,7 @@ inline constexpr std::array<HpmEventDescriptor, static_cast<std::size_t>(HpmEven
 #include "simrv/core/HpmEventCatalog.def"
 #undef SIMRV_HPM_GENERIC_EVENT
 #undef SIMRV_HPM_EVENT
-}};
+    }};
 
 struct SbiGenericHpmMapping {
     uint32_t event_code;

@@ -47,7 +47,7 @@ Uart::Uart(simrv::core::Machine& machine, simrv::xlen::Address base, simrv::xlen
       size_(size),
       irq_(irq),
       clock_hz_(clock_hz != 0 ? clock_hz : SIMRV_PLATFORM_UART_CLOCK_HZ),
-      cpu_clock_hz_(cpu_clock_hz != 0 ? cpu_clock_hz : 160'000'000) {
+      cpu_clock_hz_(cpu_clock_hz != 0 ? cpu_clock_hz : simrv::core::timing::kCpuClockHz) {
     const auto initial = uart_reset_divisor(clock_hz_);
     uart_dll_ = static_cast<uint8_t>(initial & 0xffU);
     uart_dlm_ = static_cast<uint8_t>(initial >> 8U);

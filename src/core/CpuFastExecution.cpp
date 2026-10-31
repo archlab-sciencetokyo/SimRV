@@ -1493,6 +1493,7 @@ SIMRV_ALWAYS_INLINE auto CPU::run_fast_baremetal_kernel(Machine& machine, uint32
                                                         const simrv::memory::RamView& ram)
     -> uint32_t {
     uint32_t cached_ops = 0;
+    uint32_t flushed_uart_ops = 0;
     simrv::xlen::Counter last_flushed_icount = e_icount;
     const auto tohost_addr = machine.isa_test_tohost();
     uint32_t b = 0;
@@ -2347,6 +2348,16 @@ SIMRV_ALWAYS_INLINE auto CPU::run_fast_baremetal_kernel(Machine& machine, uint32
                         record_hpm_event(HpmEvent::Cycles, ops_executed);
                         e_ccount += compressed_count;
                         if (fallback_op != nullptr) {
+                            if (state_.mhartid == 0) {
+                                if (auto* uart = machine.uart_device();
+                                    uart != nullptr && uart->has_active_transfer()) {
+                                    const uint32_t unushed = cached_ops - flushed_uart_ops;
+                                    if (unushed > 0) {
+                                        uart->advance_cycles(unushed);
+                                        flushed_uart_ops = cached_ops;
+                                    }
+                                }
+                            }
                             const bool is_csr = is_csr_instruction(fallback_op->op_id);
                             execute_cached_op_fast<false, false>(machine, *fallback_op, ram);
                             ++cached_ops;
@@ -2442,6 +2453,16 @@ SIMRV_ALWAYS_INLINE auto CPU::run_fast_baremetal_kernel(Machine& machine, uint32
                     }
                 }
             } else {
+                if (state_.mhartid == 0) {
+                    if (auto* uart = machine.uart_device();
+                        uart != nullptr && uart->has_active_transfer()) {
+                        const uint32_t unushed = cached_ops - flushed_uart_ops;
+                        if (unushed > 0) {
+                            uart->advance_cycles(unushed);
+                            flushed_uart_ops = cached_ops;
+                        }
+                    }
+                }
                 if (cached->has_fast_alu()) {
                     execute_cached_alu_fast<kCopyContext, kInstMix, false>(*cached);
                 } else {
@@ -2471,6 +2492,16 @@ SIMRV_ALWAYS_INLINE auto CPU::run_fast_baremetal_kernel(Machine& machine, uint32
             }
             handle_cached_interrupts();
         } else {
+            if (state_.mhartid == 0) {
+                if (auto* uart = machine.uart_device();
+                    uart != nullptr && uart->has_active_transfer()) {
+                    const uint32_t unushed = cached_ops - flushed_uart_ops;
+                    if (unushed > 0) {
+                        uart->advance_cycles(unushed);
+                        flushed_uart_ops = cached_ops;
+                    }
+                }
+            }
             const auto delta = e_icount - last_flushed_icount;
             if (delta > 0) {
                 machine.record_retired_instructions(delta);
@@ -2499,6 +2530,11 @@ SIMRV_ALWAYS_INLINE auto CPU::run_fast_baremetal_kernel(Machine& machine, uint32
         }
     }
     handle_cached_interrupts();
+    if (state_.mhartid == 0 && cached_ops > flushed_uart_ops) {
+        if (auto* uart = machine.uart_device(); uart != nullptr) {
+            uart->advance_cycles(cached_ops - flushed_uart_ops);
+        }
+    }
     return cached_ops;
 }
 
@@ -2551,10 +2587,6 @@ void CPU::run_fast_baremetal_batch(Machine& machine, uint32_t batch_size,
 
     if (cached_ops > 0) {
         account_arch_cycles(cached_ops);
-        if (state_.mhartid == 0) {
-            if (auto* uart = machine.uart_device(); uart != nullptr)
-                uart->advance_cycles(cached_ops);
-        }
         if (machine.clock_divider().advance_fast_cycles(cached_ops, clint_mmio.rtc_divider,
                                                         clint_mmio.mtime) > 0) {
             evaluate_timer_interrupt();

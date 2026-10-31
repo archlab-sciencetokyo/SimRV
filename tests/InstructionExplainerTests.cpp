@@ -244,6 +244,199 @@ void test_state_grounded_memory_and_csr() {
            "U-mode mstatus access predicts IllegalInstruction trap");
 }
 
+void test_virtualization_privilege_and_extension_gating() {
+    using namespace simrv::explain;
+
+    simrv::core::Machine machine;
+    std::array<simrv::xlen::Byte, 65536> backing{};
+    machine.set_ram_for_testing(backing.data(), backing.size());
+    machine.memory().initialize_mmu();
+
+    auto& cpu = machine.primary_hart();
+    cpu.machine_ = &machine;
+    cpu.reset();
+    auto& st = cpu.state();
+    constexpr simrv::xlen::Address pc = simrv::memory::kDramBaseAddress;
+    st.pc = pc;
+    st.set_misa(st.misa | (simrv::xlen::CsrValue{1} << 7U));  // Enable H extension
+
+    // 1. SSTATUS read masks out M-mode-only bits (e.g. MPP=0x1800) and aliases vsstatus in VS-mode
+    constexpr uint32_t csrrs_sstatus = 0x100022F3U;  // csrrs x5, sstatus, x0
+    st.priv = simrv::xlen::PrivilegeLevel::Supervisor;
+    st.virt = false;
+    st.mstatus = 0x1800U | 0x0002U;  // MPP=3 (hidden in sstatus), SIE=1 (visible in sstatus)
+    st.vsstatus = 0x0020U;           // SPIE=1
+    const auto hs_sstatus = explain_in_state(st, pc, csrrs_sstatus, &cpu, &machine);
+    expect(hs_sstatus.csr.has_value() && hs_sstatus.csr->current_value.has_value(),
+           "HS-mode sstatus read succeeds");
+    expect((*hs_sstatus.csr->current_value & 0x1800U) == 0 &&
+               (*hs_sstatus.csr->current_value & 0x0002U) == 0x0002U,
+           "HS-mode sstatus masks out MPP while preserving SIE");
+
+    st.virt = true;
+    const auto vs_sstatus = explain_in_state(st, pc, csrrs_sstatus, &cpu, &machine);
+    expect(vs_sstatus.active_virtualization,
+           "InstructionExplanation records active_virtualization");
+    expect(vs_sstatus.csr.has_value() && vs_sstatus.csr->current_value.has_value() &&
+               (*vs_sstatus.csr->current_value & 0xFFU) == 0x20U,
+           "VS-mode sstatus read aliases vsstatus");
+
+    // 2. VS-mode ECALL predicts HypervisorEcall (cause 10)
+    constexpr uint32_t ecall_inst = 0x00000073U;
+    const auto vs_ecall = explain_in_state(st, pc, ecall_inst, &cpu, &machine);
+    expect(vs_ecall.predicted_effect.predicted_trap.has_value() &&
+               *vs_ecall.predicted_effect.predicted_trap ==
+                   simrv::isa::to_trap_cause(simrv::isa::ExceptionCode::HypervisorEcall),
+           "VS-mode ECALL predicts VirtualSupervisorEcall (cause 10)");
+
+    // 3. VS-mode SRET targets vsepc and traps with VirtualInstruction when hstatus.VTSR=1
+    constexpr uint32_t sret_inst = 0x10200073U;
+    st.sepc = pc + 0x200;
+    st.vsepc = pc + 0x400;
+    st.hstatus = 0;
+    const auto vs_sret_ok = explain_in_state(st, pc, sret_inst, &cpu, &machine);
+    expect(!vs_sret_ok.predicted_effect.predicted_trap.has_value(),
+           "VS-mode SRET with VTSR=0 does not trap");
+    expect(vs_sret_ok.predicted_effect.next_pc == pc + 0x400,
+           "VS-mode SRET predicts return to vsepc");
+
+    st.hstatus = simrv::xlen::CsrValue{1} << 22U;  // VTSR=1
+    const auto vs_sret_trap = explain_in_state(st, pc, sret_inst, &cpu, &machine);
+    expect(vs_sret_trap.predicted_effect.predicted_trap.has_value() &&
+               *vs_sret_trap.predicted_effect.predicted_trap ==
+                   simrv::isa::to_trap_cause(simrv::isa::ExceptionCode::VirtualInstruction),
+           "VS-mode SRET with hstatus.VTSR=1 predicts VirtualInstruction trap");
+
+    // 4. Extension context state gating: FP instruction when mstatus.FS == Off traps
+    constexpr uint32_t fadd_s_inst = 0x0020F1D3U;  // fadd.s f3, f1, f2
+    st.virt = false;
+    st.mstatus &= ~static_cast<simrv::xlen::CsrValue>(simrv::core::MstatusBit::Fs);
+    const auto fp_off = explain_in_state(st, pc, fadd_s_inst, &cpu, &machine);
+    expect(fp_off.predicted_effect.predicted_trap.has_value() &&
+               *fp_off.predicted_effect.predicted_trap ==
+                   simrv::isa::to_trap_cause(simrv::isa::ExceptionCode::IllegalInstruction),
+           "FADD.S when mstatus.FS=Off predicts IllegalInstruction");
+
+    st.mstatus |= static_cast<simrv::xlen::CsrValue>(1U << 13U);  // FS=Initial
+    const auto fp_on = explain_in_state(st, pc, fadd_s_inst, &cpu, &machine);
+    expect(!fp_on.predicted_effect.predicted_trap.has_value(),
+           "FADD.S when mstatus.FS=Initial does not trap");
+
+    // 5. Zimop MOP.R.0 writes 0 to rd and HLV.W formats canonical assembly cleanly
+    constexpr uint32_t mop_r_0 = 0x81C0C2F3U;  // mop.r.0 x5, x1
+    const auto mop_expl = explain_in_state(st, pc, mop_r_0, &cpu, &machine);
+    expect(mop_expl.op_id == simrv::isa::OperationId::MOP, "Decodes Zimop MOP");
+    expect(mop_expl.predicted_effect.predicted_reg_value.has_value() &&
+               *mop_expl.predicted_effect.predicted_reg_value == 0,
+           "MOP predicts 0 written to destination register");
+
+    constexpr uint32_t hlv_w_inst = 0x6800C2F3U;  // hlv.w x5, (x1)
+    const auto hlv_expl = explain_in_state(st, pc, hlv_w_inst, &cpu, &machine);
+    expect(hlv_expl.op_id == simrv::isa::OperationId::HLV_W, "Decodes HLV.W");
+    expect(hlv_expl.assembly.find("HLV.W") != std::string::npos &&
+               hlv_expl.assembly.find('(') != std::string::npos,
+           "HLV.W formats canonical memory operand syntax");
+    expect(hlv_expl.memory.has_value() && hlv_expl.memory->access_bytes == 4U &&
+               hlv_expl.memory->offset == 0,
+           "HLV.W MemoryDataflow uses 4-byte access size and 0 offset");
+}
+
+void test_sstc_and_stateen_csr_parity() {
+    using namespace simrv::explain;
+
+    simrv::core::Machine machine;
+    std::array<simrv::xlen::Byte, 65536> backing{};
+    machine.set_ram_for_testing(backing.data(), backing.size());
+    machine.memory().initialize_mmu();
+
+    auto& cpu = machine.primary_hart();
+    cpu.machine_ = &machine;
+    cpu.reset();
+    auto& st = cpu.state();
+    constexpr simrv::xlen::Address pc = simrv::memory::kDramBaseAddress;
+    st.pc = pc;
+    st.set_misa(st.misa | (simrv::xlen::CsrValue{1} << 7U));  // Enable H extension
+
+    // 1. Sstc: stimecmp (0x14D) in S-mode requires menvcfg.STCE (bit 63) and mcounteren.TM (bit 1)
+    constexpr uint32_t csrrs_stimecmp = 0x14D022F3U;  // csrrs x5, stimecmp, x0
+    st.priv = simrv::xlen::PrivilegeLevel::Supervisor;
+    st.virt = false;
+    st.menvcfg = 0;
+    st.mcounteren = 0;
+    st.stimecmp = 0x12345678ULL;
+    const auto stimecmp_blocked = explain_in_state(st, pc, csrrs_stimecmp, &cpu, &machine);
+    expect(stimecmp_blocked.predicted_effect.predicted_trap.has_value() &&
+               *stimecmp_blocked.predicted_effect.predicted_trap ==
+                   simrv::isa::to_trap_cause(simrv::isa::ExceptionCode::IllegalInstruction),
+           "S-mode stimecmp read without menvcfg.STCE/mcounteren.TM predicts IllegalInstruction");
+
+    if constexpr (simrv::xlen::kIsXLen64) {
+        st.menvcfg = simrv::xlen::CsrValue{1} << 63U;
+    } else {
+        st.menvcfgh = simrv::xlen::CsrValue{1} << 31U;
+    }
+    st.mcounteren = 0x2U;
+    const auto stimecmp_ok = explain_in_state(st, pc, csrrs_stimecmp, &cpu, &machine);
+    expect(!stimecmp_ok.predicted_effect.predicted_trap.has_value(),
+           "S-mode stimecmp read with STCE=1 and mcounteren.TM=1 succeeds");
+    expect(stimecmp_ok.csr.has_value() && stimecmp_ok.csr->current_value.has_value() &&
+               *stimecmp_ok.csr->current_value == 0x12345678ULL,
+           "stimecmp read_from_state returns live stimecmp value");
+
+    // In VS-mode, stimecmp aliases vstimecmp and requires henvcfg.STCE + hcounteren.TM on RV64
+    if constexpr (simrv::xlen::kIsXLen64) {
+        st.virt = true;
+        st.henvcfg = 0;
+        st.hcounteren = 0;
+        st.vstimecmp = 0x87654321ULL;
+        const auto vs_stimecmp_blocked = explain_in_state(st, pc, csrrs_stimecmp, &cpu, &machine);
+        expect(
+            vs_stimecmp_blocked.predicted_effect.predicted_trap.has_value() &&
+                *vs_stimecmp_blocked.predicted_effect.predicted_trap ==
+                    simrv::isa::to_trap_cause(simrv::isa::ExceptionCode::VirtualInstruction),
+            "VS-mode stimecmp read without henvcfg.STCE/hcounteren.TM predicts VirtualInstruction");
+
+        st.henvcfg = simrv::xlen::CsrValue{1} << 63U;
+        st.hcounteren = 0x2U;
+        const auto vs_stimecmp_ok = explain_in_state(st, pc, csrrs_stimecmp, &cpu, &machine);
+        expect(!vs_stimecmp_ok.predicted_effect.predicted_trap.has_value(),
+               "VS-mode stimecmp read with henvcfg.STCE=1 and hcounteren.TM=1 succeeds");
+        expect(vs_stimecmp_ok.csr.has_value() && vs_stimecmp_ok.csr->current_value.has_value() &&
+                   *vs_stimecmp_ok.csr->current_value == 0x87654321ULL,
+               "VS-mode stimecmp aliases vstimecmp");
+    }
+
+    // 2. Smstateen/Ssstateen: sstateen0 (0x10C) and senvcfg (0x10A) gated by mstateen0 / hstateen0
+    constexpr uint32_t csrrs_sstateen0 = 0x10C022F3U;  // csrrs x5, sstateen0, x0
+    constexpr uint32_t csrrs_senvcfg = 0x10A022F3U;    // csrrs x5, senvcfg, x0
+    st.virt = false;
+    st.mstateen[0] = 0;
+    const auto hs_sstateen_blocked = explain_in_state(st, pc, csrrs_sstateen0, &cpu, &machine);
+    expect(hs_sstateen_blocked.predicted_effect.predicted_trap.has_value() &&
+               *hs_sstateen_blocked.predicted_effect.predicted_trap ==
+                   simrv::isa::to_trap_cause(simrv::isa::ExceptionCode::IllegalInstruction),
+           "HS-mode sstateen0 read when mstateen0.SE0=0 predicts IllegalInstruction");
+
+    const auto hs_senvcfg_blocked = explain_in_state(st, pc, csrrs_senvcfg, &cpu, &machine);
+    expect(hs_senvcfg_blocked.predicted_effect.predicted_trap.has_value() &&
+               *hs_senvcfg_blocked.predicted_effect.predicted_trap ==
+                   simrv::isa::to_trap_cause(simrv::isa::ExceptionCode::IllegalInstruction),
+           "HS-mode senvcfg read when mstateen0.ENVCFG=0 predicts IllegalInstruction");
+
+    st.mstateen[0] = (uint64_t{1} << 63U) | (uint64_t{1} << 62U);
+    st.hstateen[0] = 0;
+    st.virt = true;
+    const auto vs_sstateen_blocked = explain_in_state(st, pc, csrrs_sstateen0, &cpu, &machine);
+    expect(vs_sstateen_blocked.predicted_effect.predicted_trap.has_value() &&
+               *vs_sstateen_blocked.predicted_effect.predicted_trap ==
+                   simrv::isa::to_trap_cause(simrv::isa::ExceptionCode::VirtualInstruction),
+           "VS-mode sstateen0 read when hstateen0.SE0=0 predicts VirtualInstruction");
+
+    // 3. format_instruction_assembly helper matches explain_static assembly
+    expect(format_instruction_assembly(0x02A10093U, pc) == explain_static(0x02A10093U, pc).assembly,
+           "format_instruction_assembly matches explain_static");
+}
+
 }  // namespace
 
 auto main() -> int {
@@ -251,5 +444,7 @@ auto main() -> int {
     test_static_and_compressed_explanation();
     test_state_grounded_alu_and_branch();
     test_state_grounded_memory_and_csr();
+    test_virtualization_privilege_and_extension_gating();
+    test_sstc_and_stateen_csr_parity();
     return 0;
 }

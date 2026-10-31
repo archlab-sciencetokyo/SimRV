@@ -72,8 +72,7 @@ constexpr auto write_f32_boxed(float v) -> simrv::xlen::FloatingRegister {
 constexpr auto read_f16(const simrv::xlen::FloatingRegister* freg, simrv::xlen::Word idx)
     -> uint16_t {
     const auto val = freg[idx];
-    return (val & ~simrv::xlen::FloatingRegister{0xFFFF}) ==
-                   ~simrv::xlen::FloatingRegister{0xFFFF}
+    return (val & ~simrv::xlen::FloatingRegister{0xFFFF}) == ~simrv::xlen::FloatingRegister{0xFFFF}
                ? static_cast<uint16_t>(val)
                : UINT16_C(0x7E00);
 }
@@ -672,18 +671,17 @@ bool fp_exec_cvt(FpExecResult& out, simrv::xlen::Word funct7, simrv::xlen::Word 
                  const simrv::xlen::FloatingRegister* freg, simrv::xlen::CsrValue& fcsr) {
     if ((funct7 == 0x20 || funct7 == 0x21) && (rs2 == 4 || rs2 == 5)) {
         const bool is_d = funct7 == 0x21;
-        const bool signaling_nan = is_d ? is_snan64(read_f64(freg, rs1))
-                                        : is_snan32(read_f32(freg, rs1));
+        const bool signaling_nan =
+            is_d ? is_snan64(read_f64(freg, rs1)) : is_snan32(read_f32(freg, rs1));
         const double source = is_d ? read_f64(freg, rs1) : static_cast<double>(read_f32(freg, rs1));
         const auto mode = resolve_rounding_mode(rm, fcsr);
         FpEnvironment::set_rounding_mode(rm, fcsr);
-        const double rounded = std::isnan(source) || std::isinf(source) || source == 0.0
-                                   ? source
-                                   : mode == RoundingMode::Rtz ? std::trunc(source)
-                                   : mode == RoundingMode::Rdn ? std::floor(source)
-                                   : mode == RoundingMode::Rup ? std::ceil(source)
-                                   : mode == RoundingMode::Rmm ? std::round(source)
-                                                               : std::nearbyint(source);
+        const double rounded = std::isnan(source) || std::isinf(source) || source == 0.0 ? source
+                               : mode == RoundingMode::Rtz ? std::trunc(source)
+                               : mode == RoundingMode::Rdn ? std::floor(source)
+                               : mode == RoundingMode::Rup ? std::ceil(source)
+                               : mode == RoundingMode::Rmm ? std::round(source)
+                                                           : std::nearbyint(source);
         FpEnvironment::clear_exceptions();
         if (signaling_nan) FpEnvironment::raise_invalid();
         if (rs2 == 5 && !std::isnan(source) && rounded != source)
@@ -708,12 +706,12 @@ bool fp_exec_cvt(FpExecResult& out, simrv::xlen::Word funct7, simrv::xlen::Word 
         FpEnvironment::clear_exceptions();
         const uint16_t raw = read_f16(freg, rs1);
         const float src = simrv::execute::vector::fp16_to_fp32(raw);
-        if ((raw & UINT16_C(0x7C00)) == UINT16_C(0x7C00) &&
-            (raw & UINT16_C(0x03FF)) != 0 && (raw & UINT16_C(0x0200)) == 0) {
+        if ((raw & UINT16_C(0x7C00)) == UINT16_C(0x7C00) && (raw & UINT16_C(0x03FF)) != 0 &&
+            (raw & UINT16_C(0x0200)) == 0) {
             FpEnvironment::raise_invalid();
         }
-        out.fp_wb_data = write_f32_boxed(std::isnan(src) ? f32_from_bits(simrv::xlen::kF32Qnan)
-                                                        : src);
+        out.fp_wb_data =
+            write_f32_boxed(std::isnan(src) ? f32_from_bits(simrv::xlen::kF32Qnan) : src);
         out.fp_wb_enable = true;
         FpEnvironment::accumulate_exceptions(fcsr);
         return true;
@@ -733,8 +731,8 @@ bool fp_exec_cvt(FpExecResult& out, simrv::xlen::Word funct7, simrv::xlen::Word 
         FpEnvironment::clear_exceptions();
         const uint16_t raw = read_f16(freg, rs1);
         const float src = simrv::execute::vector::fp16_to_fp32(raw);
-        if ((raw & UINT16_C(0x7C00)) == UINT16_C(0x7C00) &&
-            (raw & UINT16_C(0x03FF)) != 0 && (raw & UINT16_C(0x0200)) == 0) {
+        if ((raw & UINT16_C(0x7C00)) == UINT16_C(0x7C00) && (raw & UINT16_C(0x03FF)) != 0 &&
+            (raw & UINT16_C(0x0200)) == 0) {
             FpEnvironment::raise_invalid();
         }
         out.fp_wb_data = std::isnan(src)
@@ -871,17 +869,44 @@ bool fp_exec_mv_class(FpExecResult& out, simrv::xlen::Word funct7, Funct3 funct3
                       simrv::xlen::Word rs1, simrv::xlen::Word rs2, simrv::xlen::Register rrs1,
                       const simrv::xlen::FloatingRegister* freg) {
     if ((funct7 == 0x78 || funct7 == 0x79) && rs2 == 1 && funct3 == 0) {
-        constexpr std::array<double, 32> kValues = {
-            -1.0, std::numeric_limits<double>::min(), 0x1p-16, 0x1p-15, 0x1p-8, 0x1p-7,
-            0.0625, 0.125, 0.25, 0.3125, 0.375, 0.4375, 0.5, 0.625, 0.75, 0.875,
-            1.0, 1.25, 1.5, 1.75, 2.0, 2.5, 3.0, 4.0, 8.0, 16.0, 128.0, 256.0,
-            32768.0, 65536.0, std::numeric_limits<double>::infinity(),
-            std::numeric_limits<double>::quiet_NaN()};
+        constexpr std::array<double, 32> kValues = {-1.0,
+                                                    std::numeric_limits<double>::min(),
+                                                    0x1p-16,
+                                                    0x1p-15,
+                                                    0x1p-8,
+                                                    0x1p-7,
+                                                    0.0625,
+                                                    0.125,
+                                                    0.25,
+                                                    0.3125,
+                                                    0.375,
+                                                    0.4375,
+                                                    0.5,
+                                                    0.625,
+                                                    0.75,
+                                                    0.875,
+                                                    1.0,
+                                                    1.25,
+                                                    1.5,
+                                                    1.75,
+                                                    2.0,
+                                                    2.5,
+                                                    3.0,
+                                                    4.0,
+                                                    8.0,
+                                                    16.0,
+                                                    128.0,
+                                                    256.0,
+                                                    32768.0,
+                                                    65536.0,
+                                                    std::numeric_limits<double>::infinity(),
+                                                    std::numeric_limits<double>::quiet_NaN()};
         if (rs1 >= kValues.size()) return false;
         if (funct7 == 0x78) {
-            const float value = rs1 == 1 ? std::numeric_limits<float>::min()
-                                         : static_cast<float>(kValues[rs1]);
-            out.fp_wb_data = write_f32_boxed(std::isnan(value) ? f32_from_bits(0x7fc00000U) : value);
+            const float value =
+                rs1 == 1 ? std::numeric_limits<float>::min() : static_cast<float>(kValues[rs1]);
+            out.fp_wb_data =
+                write_f32_boxed(std::isnan(value) ? f32_from_bits(0x7fc00000U) : value);
         } else {
             out.fp_wb_data = rs1 == 31 ? simrv::xlen::kF64Qnan : f64_bits(kValues[rs1]);
         }
@@ -947,7 +972,7 @@ auto ExecuteUnitFp::opFp(simrv::xlen::Funct7 funct7, Funct3 funct3, simrv::xlen:
         FpEnvironment::clear_exceptions();
 
         const auto round_to_integral = [effective_rm](auto bits, unsigned fraction_bits,
-                                                       unsigned exponent_bits, int bias) {
+                                                      unsigned exponent_bits, int bias) {
             using UInt = decltype(bits);
             constexpr unsigned kWidth = sizeof(UInt) * 8U;
             const UInt sign_mask = UInt{1} << (kWidth - 1U);
@@ -961,15 +986,20 @@ auto ExecuteUnitFp::opFp(simrv::xlen::Funct7 funct7, Funct3 funct3, simrv::xlen:
             const UInt sign = bits & sign_mask;
             const UInt magnitude = bits & ~sign_mask;
             const auto should_increment = [effective_rm, negative](bool above_half,
-                                                                   bool exactly_half,
-                                                                   bool odd) {
+                                                                   bool exactly_half, bool odd) {
                 switch (effective_rm) {
-                    case RoundingMode::Rdn: return negative;
-                    case RoundingMode::Rup: return !negative;
-                    case RoundingMode::Rmm: return above_half || exactly_half;
-                    case RoundingMode::Rne: return above_half || (exactly_half && odd);
-                    case RoundingMode::Rtz: return false;
-                    default: return false;
+                    case RoundingMode::Rdn:
+                        return negative;
+                    case RoundingMode::Rup:
+                        return !negative;
+                    case RoundingMode::Rmm:
+                        return above_half || exactly_half;
+                    case RoundingMode::Rne:
+                        return above_half || (exactly_half && odd);
+                    case RoundingMode::Rtz:
+                        return false;
+                    default:
+                        return false;
                 }
             };
 
@@ -988,17 +1018,16 @@ auto ExecuteUnitFp::opFp(simrv::xlen::Funct7 funct7, Funct3 funct3, simrv::xlen:
             const UInt halfway = UInt{1} << (discarded_bits - 1U);
             const UInt truncated = magnitude & ~discarded_mask;
             const bool increment = should_increment(discarded > halfway, discarded == halfway,
-                                                   ((truncated >> discarded_bits) & UInt{1}) != 0);
+                                                    ((truncated >> discarded_bits) & UInt{1}) != 0);
             return sign | (truncated + (increment ? (UInt{1} << discarded_bits) : UInt{0}));
         };
 
         if (is_double) {
             const double source = read_f64(freg, u_rs1);
             const uint64_t source_bits = f64_bits(source);
-            constexpr uint64_t kF64EncodedExpMask =
-                simrv::xlen::kF64ExpMask << simrv::xlen::kF64ExpShift;
-            const bool source_is_nan = (source_bits & kF64EncodedExpMask) ==
-                                           kF64EncodedExpMask &&
+            constexpr uint64_t kF64EncodedExpMask = simrv::xlen::kF64ExpMask
+                                                    << simrv::xlen::kF64ExpShift;
+            const bool source_is_nan = (source_bits & kF64EncodedExpMask) == kF64EncodedExpMask &&
                                        (source_bits & simrv::xlen::kF64FracMask) != 0;
             if (source_is_nan) {
                 if (is_snan64(source)) FpEnvironment::raise_invalid();
@@ -1012,10 +1041,9 @@ auto ExecuteUnitFp::opFp(simrv::xlen::Funct7 funct7, Funct3 funct3, simrv::xlen:
         } else {
             const float source = read_f32(freg, u_rs1);
             const uint32_t source_bits = f32_bits(source);
-            constexpr uint32_t kF32EncodedExpMask =
-                simrv::xlen::kF32ExpMask << simrv::xlen::kF32ExpShift;
-            const bool source_is_nan = (source_bits & kF32EncodedExpMask) ==
-                                           kF32EncodedExpMask &&
+            constexpr uint32_t kF32EncodedExpMask = simrv::xlen::kF32ExpMask
+                                                    << simrv::xlen::kF32ExpShift;
+            const bool source_is_nan = (source_bits & kF32EncodedExpMask) == kF32EncodedExpMask &&
                                        (source_bits & simrv::xlen::kF32FracMask) != 0;
             if (source_is_nan) {
                 if (is_snan32(source)) FpEnvironment::raise_invalid();

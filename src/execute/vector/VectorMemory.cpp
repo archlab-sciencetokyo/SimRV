@@ -34,8 +34,8 @@ namespace {
     // would bypass that transform, and masking only the base is not equivalent
     // when address arithmetic crosses the PMLEN boundary. Keep the fast path
     // for already-canonical pointers and fall back for tagged pointers.
-    if (simrv::memory::MemoryAccess::mask_user_pointer(
-            cpu, simrv::xlen::VirtAddr{base_addr}).raw() != base_addr) {
+    if (simrv::memory::MemoryAccess::mask_user_pointer(cpu, simrv::xlen::VirtAddr{base_addr})
+            .raw() != base_addr) {
         return nullptr;
     }
     auto& machine = *cpu.machine_;
@@ -67,8 +67,7 @@ namespace {
     // Pointer masking transforms each effective address after vector address
     // generation. Bypass this range fast path for tagged addresses so the
     // ordinary memory path can mask every element independently.
-    if (simrv::memory::MemoryAccess::mask_user_pointer(
-            cpu, simrv::xlen::VirtAddr{base_addr})
+    if (simrv::memory::MemoryAccess::mask_user_pointer(cpu, simrv::xlen::VirtAddr{base_addr})
             .raw() != base_addr) {
         return nullptr;
     }
@@ -858,142 +857,134 @@ void execute_vector_memory(core::CPU& cpu, memory::MemorySubsystem& mem, isa::Op
     const auto base_addr = cpu.state().regs.read(rs1);
     switch (op_id) {
         case isa::OperationId::VLE8_V:
-            execute_vle<uint8_t>(cpu, mem, rd, base_addr, vm, vl, nfields,
-                                 field_registers, isa::Funct3::Lbu);
+            execute_vle<uint8_t>(cpu, mem, rd, base_addr, vm, vl, nfields, field_registers,
+                                 isa::Funct3::Lbu);
             break;
         case isa::OperationId::VLE16_V:
-            execute_vle<uint16_t>(cpu, mem, rd, base_addr, vm, vl, nfields,
-                                  field_registers, isa::Funct3::Lhu);
+            execute_vle<uint16_t>(cpu, mem, rd, base_addr, vm, vl, nfields, field_registers,
+                                  isa::Funct3::Lhu);
             break;
         case isa::OperationId::VLE32_V:
-            execute_vle<uint32_t>(cpu, mem, rd, base_addr, vm, vl, nfields,
-                                  field_registers, isa::Funct3::Lw);
+            execute_vle<uint32_t>(cpu, mem, rd, base_addr, vm, vl, nfields, field_registers,
+                                  isa::Funct3::Lw);
             break;
         case isa::OperationId::VLE64_V:
-            execute_vle<uint64_t>(cpu, mem, rd, base_addr, vm, vl, nfields,
-                                  field_registers, isa::Funct3::Ld);
+            execute_vle<uint64_t>(cpu, mem, rd, base_addr, vm, vl, nfields, field_registers,
+                                  isa::Funct3::Ld);
             break;
         case isa::OperationId::VLE8FF_V:
-            execute_vle<uint8_t>(cpu, mem, rd, base_addr, vm, vl, nfields,
-                                 field_registers, isa::Funct3::Lbu, true);
+            execute_vle<uint8_t>(cpu, mem, rd, base_addr, vm, vl, nfields, field_registers,
+                                 isa::Funct3::Lbu, true);
             break;
         case isa::OperationId::VLE16FF_V:
-            execute_vle<uint16_t>(cpu, mem, rd, base_addr, vm, vl, nfields,
-                                  field_registers, isa::Funct3::Lhu, true);
+            execute_vle<uint16_t>(cpu, mem, rd, base_addr, vm, vl, nfields, field_registers,
+                                  isa::Funct3::Lhu, true);
             break;
         case isa::OperationId::VLE32FF_V:
-            execute_vle<uint32_t>(cpu, mem, rd, base_addr, vm, vl, nfields,
-                                  field_registers, isa::Funct3::Lw, true);
+            execute_vle<uint32_t>(cpu, mem, rd, base_addr, vm, vl, nfields, field_registers,
+                                  isa::Funct3::Lw, true);
             break;
         case isa::OperationId::VLE64FF_V:
-            execute_vle<uint64_t>(cpu, mem, rd, base_addr, vm, vl, nfields,
-                                  field_registers, isa::Funct3::Ld, true);
+            execute_vle<uint64_t>(cpu, mem, rd, base_addr, vm, vl, nfields, field_registers,
+                                  isa::Funct3::Ld, true);
             break;
         case isa::OperationId::VLM_V:
             execute_vlm(cpu, mem, rd, base_addr, vl);
             break;
         case isa::OperationId::VSE8_V:
-            execute_vse<uint8_t>(cpu, mem, rd, base_addr, vm, vl, nfields,
-                                 field_registers, isa::Funct3::Sb);
+            execute_vse<uint8_t>(cpu, mem, rd, base_addr, vm, vl, nfields, field_registers,
+                                 isa::Funct3::Sb);
             break;
         case isa::OperationId::VSE16_V:
-            execute_vse<uint16_t>(cpu, mem, rd, base_addr, vm, vl, nfields,
-                                  field_registers, isa::Funct3::Sh);
+            execute_vse<uint16_t>(cpu, mem, rd, base_addr, vm, vl, nfields, field_registers,
+                                  isa::Funct3::Sh);
             break;
         case isa::OperationId::VSE32_V:
-            execute_vse<uint32_t>(cpu, mem, rd, base_addr, vm, vl, nfields,
-                                  field_registers, isa::Funct3::Sw);
+            execute_vse<uint32_t>(cpu, mem, rd, base_addr, vm, vl, nfields, field_registers,
+                                  isa::Funct3::Sw);
             break;
         case isa::OperationId::VSE64_V:
-            execute_vse<uint64_t>(cpu, mem, rd, base_addr, vm, vl, nfields,
-                                  field_registers, isa::Funct3::Sd);
+            execute_vse<uint64_t>(cpu, mem, rd, base_addr, vm, vl, nfields, field_registers,
+                                  isa::Funct3::Sd);
             break;
         case isa::OperationId::VSM_V:
             execute_vsm(cpu, mem, rd, base_addr, vl);
             break;
 
         case isa::OperationId::VLSE8_V:
-            execute_vlse<uint8_t>(cpu, mem, rd, base_addr,
-                                  cpu.state().regs.read(rs2), vm, vl, nfields, field_registers,
-                                  isa::Funct3::Lbu);
+            execute_vlse<uint8_t>(cpu, mem, rd, base_addr, cpu.state().regs.read(rs2), vm, vl,
+                                  nfields, field_registers, isa::Funct3::Lbu);
             break;
         case isa::OperationId::VLSE16_V:
-            execute_vlse<uint16_t>(cpu, mem, rd, base_addr,
-                                   cpu.state().regs.read(rs2), vm, vl, nfields, field_registers,
-                                   isa::Funct3::Lhu);
+            execute_vlse<uint16_t>(cpu, mem, rd, base_addr, cpu.state().regs.read(rs2), vm, vl,
+                                   nfields, field_registers, isa::Funct3::Lhu);
             break;
         case isa::OperationId::VLSE32_V:
-            execute_vlse<uint32_t>(cpu, mem, rd, base_addr,
-                                   cpu.state().regs.read(rs2), vm, vl, nfields, field_registers,
-                                   isa::Funct3::Lw);
+            execute_vlse<uint32_t>(cpu, mem, rd, base_addr, cpu.state().regs.read(rs2), vm, vl,
+                                   nfields, field_registers, isa::Funct3::Lw);
             break;
         case isa::OperationId::VLSE64_V:
-            execute_vlse<uint64_t>(cpu, mem, rd, base_addr,
-                                   cpu.state().regs.read(rs2), vm, vl, nfields, field_registers,
-                                   isa::Funct3::Ld);
+            execute_vlse<uint64_t>(cpu, mem, rd, base_addr, cpu.state().regs.read(rs2), vm, vl,
+                                   nfields, field_registers, isa::Funct3::Ld);
             break;
 
         case isa::OperationId::VSSE8_V:
-            execute_vsse<uint8_t>(cpu, mem, rd, base_addr,
-                                  cpu.state().regs.read(rs2), vm, vl, nfields, field_registers,
-                                  isa::Funct3::Sb);
+            execute_vsse<uint8_t>(cpu, mem, rd, base_addr, cpu.state().regs.read(rs2), vm, vl,
+                                  nfields, field_registers, isa::Funct3::Sb);
             break;
         case isa::OperationId::VSSE16_V:
-            execute_vsse<uint16_t>(cpu, mem, rd, base_addr,
-                                   cpu.state().regs.read(rs2), vm, vl, nfields, field_registers,
-                                   isa::Funct3::Sh);
+            execute_vsse<uint16_t>(cpu, mem, rd, base_addr, cpu.state().regs.read(rs2), vm, vl,
+                                   nfields, field_registers, isa::Funct3::Sh);
             break;
         case isa::OperationId::VSSE32_V:
-            execute_vsse<uint32_t>(cpu, mem, rd, base_addr,
-                                   cpu.state().regs.read(rs2), vm, vl, nfields, field_registers,
-                                   isa::Funct3::Sw);
+            execute_vsse<uint32_t>(cpu, mem, rd, base_addr, cpu.state().regs.read(rs2), vm, vl,
+                                   nfields, field_registers, isa::Funct3::Sw);
             break;
         case isa::OperationId::VSSE64_V:
-            execute_vsse<uint64_t>(cpu, mem, rd, base_addr,
-                                   cpu.state().regs.read(rs2), vm, vl, nfields, field_registers,
-                                   isa::Funct3::Sd);
+            execute_vsse<uint64_t>(cpu, mem, rd, base_addr, cpu.state().regs.read(rs2), vm, vl,
+                                   nfields, field_registers, isa::Funct3::Sd);
             break;
 
         case isa::OperationId::VLUXEI8_V:
         case isa::OperationId::VLOXEI8_V:
-            dispatch_vluxei<uint8_t>(cpu, mem, rd, base_addr, rs2, vm, vl, sew,
-                                     nfields, field_registers);
+            dispatch_vluxei<uint8_t>(cpu, mem, rd, base_addr, rs2, vm, vl, sew, nfields,
+                                     field_registers);
             break;
         case isa::OperationId::VLUXEI16_V:
         case isa::OperationId::VLOXEI16_V:
-            dispatch_vluxei<uint16_t>(cpu, mem, rd, base_addr, rs2, vm, vl, sew,
-                                      nfields, field_registers);
+            dispatch_vluxei<uint16_t>(cpu, mem, rd, base_addr, rs2, vm, vl, sew, nfields,
+                                      field_registers);
             break;
         case isa::OperationId::VLUXEI32_V:
         case isa::OperationId::VLOXEI32_V:
-            dispatch_vluxei<uint32_t>(cpu, mem, rd, base_addr, rs2, vm, vl, sew,
-                                      nfields, field_registers);
+            dispatch_vluxei<uint32_t>(cpu, mem, rd, base_addr, rs2, vm, vl, sew, nfields,
+                                      field_registers);
             break;
         case isa::OperationId::VLUXEI64_V:
         case isa::OperationId::VLOXEI64_V:
-            dispatch_vluxei<uint64_t>(cpu, mem, rd, base_addr, rs2, vm, vl, sew,
-                                      nfields, field_registers);
+            dispatch_vluxei<uint64_t>(cpu, mem, rd, base_addr, rs2, vm, vl, sew, nfields,
+                                      field_registers);
             break;
 
         case isa::OperationId::VSUXEI8_V:
         case isa::OperationId::VSOXEI8_V:
-            dispatch_vsuxei<uint8_t>(cpu, mem, rd, base_addr, rs2, vm, vl, sew,
-                                     nfields, field_registers);
+            dispatch_vsuxei<uint8_t>(cpu, mem, rd, base_addr, rs2, vm, vl, sew, nfields,
+                                     field_registers);
             break;
         case isa::OperationId::VSUXEI16_V:
         case isa::OperationId::VSOXEI16_V:
-            dispatch_vsuxei<uint16_t>(cpu, mem, rd, base_addr, rs2, vm, vl, sew,
-                                      nfields, field_registers);
+            dispatch_vsuxei<uint16_t>(cpu, mem, rd, base_addr, rs2, vm, vl, sew, nfields,
+                                      field_registers);
             break;
         case isa::OperationId::VSUXEI32_V:
         case isa::OperationId::VSOXEI32_V:
-            dispatch_vsuxei<uint32_t>(cpu, mem, rd, base_addr, rs2, vm, vl, sew,
-                                      nfields, field_registers);
+            dispatch_vsuxei<uint32_t>(cpu, mem, rd, base_addr, rs2, vm, vl, sew, nfields,
+                                      field_registers);
             break;
         case isa::OperationId::VSUXEI64_V:
         case isa::OperationId::VSOXEI64_V:
-            dispatch_vsuxei<uint64_t>(cpu, mem, rd, base_addr, rs2, vm, vl, sew,
-                                      nfields, field_registers);
+            dispatch_vsuxei<uint64_t>(cpu, mem, rd, base_addr, rs2, vm, vl, sew, nfields,
+                                      field_registers);
             break;
 
         // Whole loads

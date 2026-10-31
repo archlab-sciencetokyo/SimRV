@@ -8,6 +8,7 @@
 #include <atomic>
 #include <cstdint>
 
+#include "simrv/core/PlatformTopology.hpp"
 #include "simrv/memory/Mmio.hpp"
 #include "simrv/memory/MmioDevice.hpp"
 #include "simrv/xlen/ScalarTypes.hpp"
@@ -29,7 +30,7 @@ class AclintMtimer : public memory::MmioDevice {
    public:
     static constexpr simrv::xlen::Address kBaseAddress = mmio::kAclintMtimerBaseAddress;
     static constexpr simrv::xlen::Address kSize = mmio::kAclintMtimerSize;
-    static constexpr size_t kMaxHarts = 16;
+    static constexpr size_t kMaxHarts = core::topology::kMaxSimulatedHarts;
 
     explicit AclintMtimer(simrv::core::Machine* machine = nullptr,
                           simrv::xlen::Address base = kBaseAddress,
@@ -72,7 +73,7 @@ class AclintMswi : public memory::MmioDevice {
    public:
     static constexpr simrv::xlen::Address kBaseAddress = mmio::kAclintMswiBaseAddress;
     static constexpr simrv::xlen::Address kSize = mmio::kAclintMswiSize;
-    static constexpr size_t kMaxHarts = 16;
+    static constexpr size_t kMaxHarts = core::topology::kMaxSimulatedHarts;
 
     explicit AclintMswi(simrv::core::Machine* machine = nullptr,
                         simrv::xlen::Address base = kBaseAddress,

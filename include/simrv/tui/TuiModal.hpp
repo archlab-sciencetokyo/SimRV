@@ -126,7 +126,9 @@ struct SettingsDraft {
 class TuiModal {
    public:
     explicit TuiModal(simrv::core::Machine& machine);
-    void set_display_graphics_supported(bool supported) noexcept { display_graphics_supported_ = supported; }
+    void set_display_graphics_supported(bool supported) noexcept {
+        display_graphics_supported_ = supported;
+    }
     void set_density_mode(framework::DensityMode mode) noexcept { density_mode_ = mode; }
     [[nodiscard]] auto density_mode() const noexcept -> framework::DensityMode {
         return density_mode_;

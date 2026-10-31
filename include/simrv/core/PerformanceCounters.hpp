@@ -75,8 +75,7 @@ class PerformanceCounters {
     SIMRV_ALWAYS_INLINE auto notify_event(
         HpmEvent event, uint64_t count = 1, uint32_t mcountinhibit = 0,
         simrv::xlen::PrivilegeLevel privilege = simrv::xlen::PrivilegeLevel::Machine,
-        bool virtualized = false) noexcept
-        -> bool {
+        bool virtualized = false) noexcept -> bool {
         const auto ev_idx = static_cast<size_t>(event);
         if (simrv::compiler::unlikely(ev_idx < static_cast<size_t>(HpmEvent::Count))) {
             uint32_t mask = event_listening_mask_[ev_idx] & ~mcountinhibit;

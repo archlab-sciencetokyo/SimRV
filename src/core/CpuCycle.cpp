@@ -593,6 +593,9 @@ void CPU::run_cycle_baremetal_miss(Machine& machine) {
 
     account_arch_cycles();
     record_hpm_event(HpmEvent::Cycles);
+    if (state_.mhartid == 0) {
+        if (auto* uart = machine.uart_device(); uart != nullptr) uart->advance_cycles(1);
+    }
     if (machine.clock_divider().advance_ca_cycle(clint_mmio.rtc_divider, clint_mmio.mtime)) {
         evaluate_timer_interrupt();
     }
@@ -677,6 +680,9 @@ void CPU::run_cycle_baremetal(Machine& machine) {
             }
             account_arch_cycles();
             record_hpm_event(HpmEvent::Cycles);
+            if (state_.mhartid == 0) {
+                if (auto* uart = machine.uart_device(); uart != nullptr) uart->advance_cycles(1);
+            }
             if (machine.clock_divider().advance_ca_cycle(clint_mmio.rtc_divider,
                                                          clint_mmio.mtime)) {
                 evaluate_timer_interrupt();
@@ -975,6 +981,10 @@ auto CPU::fetch_stage(Machine& machine, simrv::xlen::Address pc) -> bool {
     // before decoding the next instruction so cache misses still perform loads.
     if (!machine.runtime_profile.is_cycle_mode()) {
         context.memory_load_complete = false;
+        machine.memory_.system_bus().cancel_source(
+            simrv::memory::make_tl_source(hart_id(), simrv::memory::TlPort::Instruction));
+        machine.memory_.system_bus().cancel_source(
+            simrv::memory::make_tl_source(hart_id(), simrv::memory::TlPort::Data));
     }
 
     run_fetch_stage(machine);

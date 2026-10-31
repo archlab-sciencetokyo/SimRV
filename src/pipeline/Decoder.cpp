@@ -641,9 +641,21 @@ const std::array<std::string_view, static_cast<size_t>(isa::OperationIdCount)> O
     "FCVT_H_S",
     "FCVT_D_H",
     "FCVT_H_D",
-    "FLI_S", "FLI_D", "FMINM_S", "FMAXM_S", "FMINM_D", "FMAXM_D",
-    "FLEQ_S", "FLTQ_S", "FLEQ_D", "FLTQ_D", "FROUND_S", "FROUNDNX_S",
-    "FROUND_D", "FROUNDNX_D", "FCVTMOD_W_D",
+    "FLI_S",
+    "FLI_D",
+    "FMINM_S",
+    "FMAXM_S",
+    "FMINM_D",
+    "FMAXM_D",
+    "FLEQ_S",
+    "FLTQ_S",
+    "FLEQ_D",
+    "FLTQ_D",
+    "FROUND_S",
+    "FROUNDNX_S",
+    "FROUND_D",
+    "FROUNDNX_D",
+    "FCVTMOD_W_D",
     "MOP",
     "WRS_NTO",
     "WRS_STO",
@@ -877,13 +889,11 @@ auto decode_system_priv(uint32_t funct7, simrv::xlen::Instruction ir) -> Operati
         case 0x105:
             return (rd_is_zero && rs1_is_zero) ? OperationId::WFI : OperationId::ILLEGAL;
         case 0x00D:
-            return (rd_is_zero && rs1_is_zero && ((ir >> 12U) & 0x7U) == 0)
-                       ? OperationId::WRS_NTO
-                       : OperationId::ILLEGAL;
+            return (rd_is_zero && rs1_is_zero && ((ir >> 12U) & 0x7U) == 0) ? OperationId::WRS_NTO
+                                                                            : OperationId::ILLEGAL;
         case 0x01D:
-            return (rd_is_zero && rs1_is_zero && ((ir >> 12U) & 0x7U) == 0)
-                       ? OperationId::WRS_STO
-                       : OperationId::ILLEGAL;
+            return (rd_is_zero && rs1_is_zero && ((ir >> 12U) & 0x7U) == 0) ? OperationId::WRS_STO
+                                                                            : OperationId::ILLEGAL;
         case 0x180:
             return (rd_is_zero && rs1_is_zero) ? OperationId::SFENCE_W_INVAL : OperationId::ILLEGAL;
         case 0x181:
@@ -917,16 +927,26 @@ auto decode_system(uint32_t funct3, uint32_t funct7, simrv::xlen::Instruction ir
     if (funct3 == 4) {
         const uint32_t f12 = ir >> 20U;
         switch (f12) {
-            case 0x600: return OperationId::HLV_B;
-            case 0x601: return OperationId::HLV_BU;
-            case 0x640: return OperationId::HLV_H;
-            case 0x641: return OperationId::HLV_HU;
-            case 0x643: return OperationId::HLVX_HU;
-            case 0x680: return OperationId::HLV_W;
-            case 0x681: return OperationId::HLV_WU;
-            case 0x683: return OperationId::HLVX_WU;
-            case 0x6C0: return OperationId::HLV_D;
-            default: break;
+            case 0x600:
+                return OperationId::HLV_B;
+            case 0x601:
+                return OperationId::HLV_BU;
+            case 0x640:
+                return OperationId::HLV_H;
+            case 0x641:
+                return OperationId::HLV_HU;
+            case 0x643:
+                return OperationId::HLVX_HU;
+            case 0x680:
+                return OperationId::HLV_W;
+            case 0x681:
+                return OperationId::HLV_WU;
+            case 0x683:
+                return OperationId::HLVX_WU;
+            case 0x6C0:
+                return OperationId::HLV_D;
+            default:
+                break;
         }
         if (funct7 == 0x31 && ((ir >> 7U) & 0x1FU) == 0) return OperationId::HSV_B;
         if (funct7 == 0x33 && ((ir >> 7U) & 0x1FU) == 0) return OperationId::HSV_H;
@@ -2160,8 +2180,7 @@ auto decompressInstruction(simrv::xlen::Instruction ir, bool is_rv64) -> simrv::
         return make_i_type(0x13U, 0x7U, rs1_prime, rs1_prime, 0xffU);
     }
     if ((ir & 0xfc7fU) == 0x9c69U) {  // C.ZEXT.H (PACK rd, rs1, x0)
-        return make_r_type(is_rv64 ? 0x3bU : 0x33U, 0x4U, 0x04U, rs1_prime, rs1_prime,
-                           0U);
+        return make_r_type(is_rv64 ? 0x3bU : 0x33U, 0x4U, 0x04U, rs1_prime, rs1_prime, 0U);
     }
     if ((ir & 0xfc7fU) == 0x9c71U && is_rv64) {  // C.ZEXT.W (ADD.UW rd, rs1, x0)
         return make_r_type(0x3bU, 0x0U, 0x04U, rs1_prime, rs1_prime, 0U);

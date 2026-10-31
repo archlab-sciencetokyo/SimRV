@@ -8,6 +8,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <iostream>
+#include <limits>
 #include <optional>
 #include <span>
 #include <string>
@@ -300,6 +301,16 @@ void test_patch_fdt_advertises_zihintntl_and_64_byte_cmo() {
         original, simrv::isa::isa_preset_bits(simrv::isa::IsaPreset::GC));
     expect(!incompatible_isa && incompatible_isa.error().find("extension 'b'") != std::string::npos,
            "FDT ISA validation rejects base extensions disabled by the selected ISA");
+    const auto invalid_timebase = simrv::util::patch_fdt(original, 0x80000000ULL, 0x10000000ULL, 1,
+                                                         nullptr, uint64_t{1} << 32U);
+    expect(!invalid_timebase &&
+               invalid_timebase.error().find("timebase frequency") != std::string::npos,
+           "FDT patching rejects timebase frequencies wider than its u32 property");
+    const auto invalid_cpu_clock =
+        simrv::util::patch_fdt(original, 0x80000000ULL, 0x10000000ULL, 1, nullptr, 0,
+                               static_cast<uint64_t>(std::numeric_limits<uint32_t>::max()) + 1U);
+    expect(!invalid_cpu_clock && invalid_cpu_clock.error().find("CPU clock") != std::string::npos,
+           "FDT patching rejects CPU frequencies wider than its u32 property");
     const auto patched = simrv::util::patch_fdt(original, 0x80000000ULL, 0x10000000ULL, 1);
     expect(patched.has_value(), "minimal FDT patches successfully for Zihintntl check");
     if (!patched) return;

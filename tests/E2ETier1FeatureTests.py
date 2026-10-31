@@ -298,7 +298,7 @@ class E2ETier1FeatureTests(unittest.TestCase):
         """Verify UART transcript capture decoupled from host console."""
         with tempfile.TemporaryDirectory() as tmp:
             transcript = pathlib.Path(tmp) / "uart.txt"
-            res = run_simrv(self.simrv64, ["--cli", "--baremetal", "-m", str(self.hello64), "--uart-transcript", str(transcript), "--steps", "500000"])
+            res = run_simrv(self.simrv64, ["--cli", "--baremetal", "-m", str(self.hello64), "--uart-transcript", str(transcript), "--steps", "10000000"])
             self.assertEqual(res.returncode, 0, res.stderr)
             self.assertTrue(transcript.is_file())
             content = transcript.read_text()
@@ -357,7 +357,7 @@ class E2ETier1FeatureTests(unittest.TestCase):
 
     def test_f2_3_interrupt_priority_masking(self) -> None:
         """Verify interrupt priority and masking stability under long runs."""
-        res = run_simrv(self.simrv64, ["--cli", "--baremetal", "-m", str(self.hello64), "--steps", "500000"])
+        res = run_simrv(self.simrv64, ["--cli", "--baremetal", "-m", str(self.hello64), "--steps", "10000000"])
         self.assertEqual(res.returncode, 0, res.stderr)
         self.assertIn("guest tohost pass", res.stdout)
 
@@ -737,7 +737,7 @@ class E2ETier1FeatureTests(unittest.TestCase):
 
     def test_f5_1_rv64_baremetal_execution(self) -> None:
         """Verify complete baremetal execution to tohost on RV64."""
-        res = run_simrv(self.simrv64, ["--cli", "--baremetal", "-m", str(self.hello64), "--steps", "500000"])
+        res = run_simrv(self.simrv64, ["--cli", "--baremetal", "-m", str(self.hello64), "--steps", "10000000"])
         self.assertEqual(res.returncode, 0, res.stderr)
         self.assertIn("guest tohost pass", res.stdout)
 
@@ -771,13 +771,13 @@ class E2ETier1FeatureTests(unittest.TestCase):
 
     def test_f5_2_rv64_hosted_rv32_personality(self) -> None:
         """Verify RV64 binary executing RV32 guest personality."""
-        res = run_simrv(self.simrv64, ["--cli", "--baremetal", "-m", str(self.hello32), "--isa", "rv32gc", "--steps", "500000"])
+        res = run_simrv(self.simrv64, ["--cli", "--baremetal", "-m", str(self.hello32), "--isa", "rv32gc", "--steps", "10000000"])
         self.assertEqual(res.returncode, 0, res.stderr)
         self.assertIn("guest tohost pass", res.stdout)
 
     def test_f5_2_rv32_word_wrap(self) -> None:
         """Verify 32-bit execution termination on native RV32."""
-        res = run_simrv(self.simrv32, ["--cli", "--baremetal", "-m", str(self.hello32), "--steps", "500000"])
+        res = run_simrv(self.simrv32, ["--cli", "--baremetal", "-m", str(self.hello32), "--steps", "10000000"])
         self.assertEqual(res.returncode, 0, res.stderr)
         self.assertIn("guest tohost pass", res.stdout)
 

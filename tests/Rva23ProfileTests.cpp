@@ -4,9 +4,9 @@
  * profile engine.
  */
 #include <array>
-#include <cassert>
-#include <bit>
 #include <atomic>
+#include <bit>
+#include <cassert>
 #include <cmath>
 #include <cstring>
 #include <iostream>
@@ -23,8 +23,8 @@
 #include "simrv/core/Machine.hpp"
 #include "simrv/execute/ExecuteUnit.hpp"
 #include "simrv/isa/Common.hpp"
-#include "simrv/isa/IsaConfig.hpp"
 #include "simrv/isa/FpConversions.hpp"
+#include "simrv/isa/IsaConfig.hpp"
 #include "simrv/isa/IsaTypes.hpp"
 #include "simrv/isa/OperationId.hpp"
 #include "simrv/memory/MemoryAccess.hpp"
@@ -102,9 +102,9 @@ void test_zicclsm_unaligned_main_memory() {
         const auto check_unaligned = [&](simrv::xlen::Address offset) {
             cpu.active_context().pending_exception.reset();
             cpu.active_context().opcode = simrv::isa::Opcode::Store;
-            simrv::memory::MemoryAccess::target_write(
-                machine.memory(), cpu, simrv::xlen::VirtAddr{kBase + offset}, kValue,
-                simrv::isa::Funct3::Sd);
+            simrv::memory::MemoryAccess::target_write(machine.memory(), cpu,
+                                                      simrv::xlen::VirtAddr{kBase + offset}, kValue,
+                                                      simrv::isa::Funct3::Sd);
             TEST_ASSERT(!cpu.active_context().pending_exception.has_value());
 
             cpu.active_context().pending_exception.reset();
@@ -203,8 +203,7 @@ void test_ziccrse_eventual_lr_sc_success() {
         return (funct5 << 27U) | (rs2 << 20U) | (10U << 15U) | (2U << 12U) | (rd << 7U) | 0x2FU;
     };
     constexpr uint32_t kAddiT0T0One = 0x00128293U;
-    constexpr uint32_t kBneT1ZeroMinus12 =
-        0xFE031AE3U;  // bne t1, zero, -12
+    constexpr uint32_t kBneT1ZeroMinus12 = 0xFE031AE3U;  // bne t1, zero, -12
     const std::array<uint32_t, 4> loop = {amo(2, 0, 5), kAddiT0T0One, amo(3, 5, 6),
                                           kBneT1ZeroMinus12};
     std::memcpy(ram.data() + 0x100, loop.data(), sizeof(loop));
@@ -291,9 +290,9 @@ void test_ziccamoa_main_memory_atomics() {
 
     std::vector<simrv::xlen::Byte> ram(1024 * 1024, simrv::xlen::Byte{0});
     constexpr simrv::xlen::Address kBase = simrv::memory::kDramBaseAddress;
-    constexpr std::array<Funct5Amo, 9> kOps = {
-        Funct5Amo::Swap, Funct5Amo::Add, Funct5Amo::Xor, Funct5Amo::And, Funct5Amo::Or,
-        Funct5Amo::Min,  Funct5Amo::Max, Funct5Amo::Minu, Funct5Amo::Maxu};
+    constexpr std::array<Funct5Amo, 9> kOps = {Funct5Amo::Swap, Funct5Amo::Add,  Funct5Amo::Xor,
+                                               Funct5Amo::And,  Funct5Amo::Or,   Funct5Amo::Min,
+                                               Funct5Amo::Max,  Funct5Amo::Minu, Funct5Amo::Maxu};
 
     const auto exercise = [&](uint32_t width_bytes, Funct3 funct3, uint64_t initial,
                               uint64_t operand, const std::array<uint64_t, 9>& expected) {
@@ -328,25 +327,27 @@ void test_ziccamoa_main_memory_atomics() {
     };
 
     constexpr std::array<uint64_t, 9> kExpectedW = {
-        3, 0x80000004ULL, 0x80000002ULL, 1, 0x80000003ULL,
-        0x80000001ULL, 3, 3, 0x80000001ULL};
+        3, 0x80000004ULL, 0x80000002ULL, 1, 0x80000003ULL, 0x80000001ULL, 3, 3, 0x80000001ULL};
     exercise(4, Funct3::Sw, 0x80000001ULL, 3, kExpectedW);
 
     if constexpr (simrv::xlen::kIsXLen64) {
-        constexpr std::array<uint64_t, 9> kExpectedD = {
-            3, 0x8000000000000004ULL, 0x8000000000000002ULL, 1,
-            0x8000000000000003ULL, 0x8000000000000001ULL, 3, 3,
-            0x8000000000000001ULL};
+        constexpr std::array<uint64_t, 9> kExpectedD = {3,
+                                                        0x8000000000000004ULL,
+                                                        0x8000000000000002ULL,
+                                                        1,
+                                                        0x8000000000000003ULL,
+                                                        0x8000000000000001ULL,
+                                                        3,
+                                                        3,
+                                                        0x8000000000000001ULL};
         exercise(8, Funct3::Sd, 0x8000000000000001ULL, 3, kExpectedD);
     }
 }
 
 void test_zfa_scalar_instructions() {
     using namespace simrv::isa;
-    const auto encode = [](uint32_t funct7, uint32_t rs2, uint32_t rs1, uint32_t rm,
-                           uint32_t rd) {
-        return (funct7 << 25U) | (rs2 << 20U) | (rs1 << 15U) | (rm << 12U) | (rd << 7U) |
-               0x53U;
+    const auto encode = [](uint32_t funct7, uint32_t rs2, uint32_t rs1, uint32_t rm, uint32_t rd) {
+        return (funct7 << 25U) | (rs2 << 20U) | (rs1 << 15U) | (rm << 12U) | (rd << 7U) | 0x53U;
     };
     TEST_ASSERT(simrv::pipeline::decoder(encode(0x78, 1, 16, 0, 1)) == OperationId::FLI_S);
     TEST_ASSERT(simrv::pipeline::decoder(encode(0x79, 1, 1, 0, 1)) == OperationId::FLI_D);
@@ -358,7 +359,8 @@ void test_zfa_scalar_instructions() {
     TEST_ASSERT(simrv::pipeline::decoder(encode(0x51, 0, 2, 5, 1)) == OperationId::FLTQ_D);
     TEST_ASSERT(simrv::pipeline::decoder(encode(0x21, 5, 2, 0, 1)) == OperationId::FROUNDNX_D);
     TEST_ASSERT(simrv::pipeline::decoder(encode(0x61, 8, 2, 1, 1)) == OperationId::FCVTMOD_W_D);
-    TEST_ASSERT(required_misa_extensions(OperationId::FLI_S) == misa_extension_bit(IsaExtension::F));
+    TEST_ASSERT(required_misa_extensions(OperationId::FLI_S) ==
+                misa_extension_bit(IsaExtension::F));
     TEST_ASSERT(required_misa_extensions(OperationId::FCVTMOD_W_D) ==
                 (misa_extension_bit(IsaExtension::F) | misa_extension_bit(IsaExtension::D)));
     TEST_ASSERT(is_f_op(OperationId::FROUNDNX_S));
@@ -368,17 +370,18 @@ void test_zfa_scalar_instructions() {
     simrv::xlen::CsrValue fcsr = 0;
     const auto execute = [&](uint32_t funct7, uint32_t rs2, uint32_t rs1, uint32_t rm,
                              uint32_t rs2_reg = 0) {
-        const uint32_t encoded_rs2 = (funct7 == 0x78 || funct7 == 0x79 || funct7 == 0x20 ||
-                                      funct7 == 0x21 || funct7 == 0x61)
-                                         ? rs2
-                                         : rs2_reg;
+        const uint32_t encoded_rs2 =
+            (funct7 == 0x78 || funct7 == 0x79 || funct7 == 0x20 || funct7 == 0x21 || funct7 == 0x61)
+                ? rs2
+                : rs2_reg;
         return simrv::execute::ExecuteUnit::opFp(
             funct7, static_cast<Funct3>(rm), simrv::xlen::to_fp_reg_id(rs1),
             simrv::xlen::to_fp_reg_id(encoded_rs2), 0, fp.data(), fcsr);
     };
     auto result = execute(0x78, 1, 16, 0);
-    TEST_ASSERT(result.fp_wb_enable && result.fp_wb_data ==
-                (static_cast<uint64_t>(simrv::xlen::kF32BoxerBits) | UINT32_C(0x3F800000)));
+    TEST_ASSERT(result.fp_wb_enable &&
+                result.fp_wb_data ==
+                    (static_cast<uint64_t>(simrv::xlen::kF32BoxerBits) | UINT32_C(0x3F800000)));
     TEST_ASSERT(fcsr == 0);  // FLI never raises floating-point flags.
     result = execute(0x78, 1, 1, 0);
     TEST_ASSERT((result.fp_wb_data & UINT64_C(0xFFFFFFFF)) == UINT32_C(0x00800000));
@@ -397,8 +400,9 @@ void test_zfa_scalar_instructions() {
     fp[3] = static_cast<uint64_t>(simrv::xlen::kF32BoxerBits) | UINT32_C(0x3F800000);
     fcsr = 0;
     result = execute(0x14, 0, 2, 2, 3);
-    TEST_ASSERT(result.fp_wb_enable && result.fp_wb_data ==
-                (static_cast<uint64_t>(simrv::xlen::kF32BoxerBits) | UINT32_C(0x7FC00000)));
+    TEST_ASSERT(result.fp_wb_enable &&
+                result.fp_wb_data ==
+                    (static_cast<uint64_t>(simrv::xlen::kF32BoxerBits) | UINT32_C(0x7FC00000)));
     TEST_ASSERT((fcsr & FflagsBit::Nv) == 0);
     fp[2] = static_cast<uint64_t>(simrv::xlen::kF32BoxerBits) | UINT32_C(0x3F000000);
     result = execute(0x14, 0, 2, 2, 3);
@@ -410,12 +414,12 @@ void test_zfa_scalar_instructions() {
     TEST_ASSERT(result.int_wb_enable && result.int_wb_data == 0);
     TEST_ASSERT((fcsr & FflagsBit::Nv) == 0);
 
-    fp[2] = static_cast<uint64_t>(simrv::xlen::kF32BoxerBits) | UINT32_C(0x40200000); // 2.5
+    fp[2] = static_cast<uint64_t>(simrv::xlen::kF32BoxerBits) | UINT32_C(0x40200000);  // 2.5
     result = execute(0x20, 4, 2, 4);
     TEST_ASSERT(result.fp_wb_enable &&
                 (result.fp_wb_data & UINT64_C(0xFFFFFFFF)) == UINT32_C(0x40400000));
     TEST_ASSERT((fcsr & (FflagsBit::Nv | FflagsBit::Nx)) == 0);
-    fp[2] = static_cast<uint64_t>(simrv::xlen::kF32BoxerBits) | UINT32_C(0x40200000); // 2.5
+    fp[2] = static_cast<uint64_t>(simrv::xlen::kF32BoxerBits) | UINT32_C(0x40200000);  // 2.5
     fcsr = 0;
     result = execute(0x20, 5, 2, 0);
     TEST_ASSERT((result.fp_wb_data & UINT64_C(0xFFFFFFFF)) == UINT32_C(0x40000000));
@@ -441,8 +445,7 @@ void test_zfhmin_scalar_instructions() {
     using namespace simrv::isa;
     const auto encode_fp = [](uint32_t funct7, uint32_t rs2, uint32_t rs1, uint32_t rm,
                               uint32_t rd) {
-        return (funct7 << 25U) | (rs2 << 20U) | (rs1 << 15U) | (rm << 12U) | (rd << 7U) |
-               0x53U;
+        return (funct7 << 25U) | (rs2 << 20U) | (rs1 << 15U) | (rm << 12U) | (rd << 7U) | 0x53U;
     };
     TEST_ASSERT(simrv::pipeline::decoder((1U << 12U) | (1U << 7U) | 0x07U) == OperationId::FLH);
     TEST_ASSERT(simrv::pipeline::decoder((2U << 20U) | (1U << 12U) | 0x27U) == OperationId::FSH);
@@ -464,13 +467,13 @@ void test_zfhmin_scalar_instructions() {
     };
     fp[2] = ~simrv::xlen::FloatingRegister{0xFFFF} | UINT16_C(0x3C00);  // Half 1.0
     auto result = execute(0x20, 0, 2, 2);
-    TEST_ASSERT(result.fp_wb_enable && result.fp_wb_data ==
-                (static_cast<uint64_t>(simrv::xlen::kF32BoxerBits) | UINT32_C(0x3F800000)));
+    TEST_ASSERT(result.fp_wb_enable &&
+                result.fp_wb_data ==
+                    (static_cast<uint64_t>(simrv::xlen::kF32BoxerBits) | UINT32_C(0x3F800000)));
 
     fp[2] = static_cast<uint64_t>(simrv::xlen::kF32BoxerBits) | UINT32_C(0x3FC00000);  // 1.5
     result = execute(0x22, 0, 2, 0);
-    TEST_ASSERT(result.fp_wb_enable &&
-                (result.fp_wb_data & UINT64_C(0xFFFF)) == UINT16_C(0x3E00));
+    TEST_ASSERT(result.fp_wb_enable && (result.fp_wb_data & UINT64_C(0xFFFF)) == UINT16_C(0x3E00));
 
     fp[2] = static_cast<uint64_t>(simrv::xlen::kF32BoxerBits) | UINT32_C(0x3F801000);
     fcsr = 0;
@@ -479,12 +482,10 @@ void test_zfhmin_scalar_instructions() {
     TEST_ASSERT((fcsr & simrv::isa::FflagsBit::Nx) != 0);
 
     const double half_midpoint = 1.00048828125;
-    fp[2] = std::bit_cast<simrv::xlen::FloatingRegister>(
-        std::nextafter(half_midpoint, INFINITY));
+    fp[2] = std::bit_cast<simrv::xlen::FloatingRegister>(std::nextafter(half_midpoint, INFINITY));
     fcsr = 0;
     result = execute(0x22, 0, 2, 1);
-    TEST_ASSERT(result.fp_wb_enable &&
-                (result.fp_wb_data & UINT64_C(0xFFFF)) == UINT16_C(0x3C01));
+    TEST_ASSERT(result.fp_wb_enable && (result.fp_wb_data & UINT64_C(0xFFFF)) == UINT16_C(0x3C01));
     TEST_ASSERT((fcsr & simrv::isa::FflagsBit::Nx) != 0);
     fp[2] = ~simrv::xlen::FloatingRegister{0xFFFF} | UINT16_C(0x3E00);
     result = execute(0x21, 0, 2, 2);
@@ -508,8 +509,8 @@ void test_zfhmin_scalar_instructions() {
     const auto address = simrv::xlen::VirtAddr{simrv::memory::kDramBaseAddress + 0x200};
     simrv::memory::MemoryAccess::storeFp(machine.memory(), cpu, address, fp[2], Funct3::Fsh);
     TEST_ASSERT(!cpu.active_context().pending_exception.has_value());
-    const auto loaded = simrv::memory::MemoryAccess::loadFp(machine.memory(), cpu, address,
-                                                            Funct3::Flh);
+    const auto loaded =
+        simrv::memory::MemoryAccess::loadFp(machine.memory(), cpu, address, Funct3::Flh);
     TEST_ASSERT(!cpu.active_context().pending_exception.has_value());
     TEST_ASSERT(loaded == fp[2]);
 }
@@ -635,22 +636,22 @@ void test_zvfhmin_vector_conversions() {
     auto& dest = cpu.state().regs.read_vector(simrv::xlen::to_vec_reg_id(vd));
 
     source.u16[0] = UINT16_C(0x3C00);
-    simrv::execute::ExecuteUnit::execute_vector(
-        cpu, machine.memory(), simrv::isa::OperationId::VFWCVT_F_F_V, ir(vd, vs2));
+    simrv::execute::ExecuteUnit::execute_vector(cpu, machine.memory(),
+                                                simrv::isa::OperationId::VFWCVT_F_F_V, ir(vd, vs2));
     TEST_ASSERT(!cpu.active_context().pending_exception.has_value());
     TEST_ASSERT(dest.u32[0] == UINT32_C(0x3F800000));
 
     source.u32[0] = UINT32_C(0x3F801000);
     cpu.state().fcsr = 0;
-    simrv::execute::ExecuteUnit::execute_vector(
-        cpu, machine.memory(), simrv::isa::OperationId::VFNCVT_F_F_W, ir(vd, vs2));
+    simrv::execute::ExecuteUnit::execute_vector(cpu, machine.memory(),
+                                                simrv::isa::OperationId::VFNCVT_F_F_W, ir(vd, vs2));
     TEST_ASSERT(!cpu.active_context().pending_exception.has_value());
     TEST_ASSERT(dest.u16[0] == UINT16_C(0x3C00));
     TEST_ASSERT((cpu.state().fcsr & simrv::isa::FflagsBit::Nx) != 0);
 
     cpu.state().fcsr = simrv::isa::RoundingMode::Rmm << 5U;
-    simrv::execute::ExecuteUnit::execute_vector(
-        cpu, machine.memory(), simrv::isa::OperationId::VFNCVT_F_F_W, ir(vd, vs2));
+    simrv::execute::ExecuteUnit::execute_vector(cpu, machine.memory(),
+                                                simrv::isa::OperationId::VFNCVT_F_F_W, ir(vd, vs2));
     TEST_ASSERT(dest.u16[0] == UINT16_C(0x3C01));
 
     cpu.active_context().pending_exception.reset();
@@ -752,8 +753,7 @@ void test_svade_faults_on_clear_accessed_and_dirty_bits() {
             simrv::xlen::PrivilegeLevel::Supervisor, 64, simrv::memory::TlPort::Data,
             cpu.ca_state.data_walk);
         TEST_ASSERT(load.has_value() && !load->has_value());
-        TEST_ASSERT(load->error() ==
-                    std::to_underlying(simrv::isa::ExceptionCode::LoadPageFault));
+        TEST_ASSERT(load->error() == std::to_underlying(simrv::isa::ExceptionCode::LoadPageFault));
         TEST_ASSERT(read_pte(leaf_address) == leaf_without_ad);
 
         auto fetch = cpu.translate_stage_address(
@@ -798,12 +798,12 @@ void test_sstvecd_and_sstvala_supervisor_traps() {
 
     constexpr simrv::xlen::CsrValue kTrapValue = 0x12345678;
     constexpr std::array causes = {
-        simrv::isa::ExceptionCode::Breakpoint,        simrv::isa::ExceptionCode::MisalignedFetch,
-        simrv::isa::ExceptionCode::FaultFetch,
-        simrv::isa::ExceptionCode::MisalignedLoad,     simrv::isa::ExceptionCode::FaultLoad,
-        simrv::isa::ExceptionCode::MisalignedStore,    simrv::isa::ExceptionCode::FaultStore,
-        simrv::isa::ExceptionCode::IllegalInstruction, simrv::isa::ExceptionCode::FetchPageFault,
-        simrv::isa::ExceptionCode::LoadPageFault,      simrv::isa::ExceptionCode::StorePageFault,
+        simrv::isa::ExceptionCode::Breakpoint,     simrv::isa::ExceptionCode::MisalignedFetch,
+        simrv::isa::ExceptionCode::FaultFetch,     simrv::isa::ExceptionCode::MisalignedLoad,
+        simrv::isa::ExceptionCode::FaultLoad,      simrv::isa::ExceptionCode::MisalignedStore,
+        simrv::isa::ExceptionCode::FaultStore,     simrv::isa::ExceptionCode::IllegalInstruction,
+        simrv::isa::ExceptionCode::FetchPageFault, simrv::isa::ExceptionCode::LoadPageFault,
+        simrv::isa::ExceptionCode::StorePageFault,
     };
     simrv::xlen::CsrValue delegation = 0;
     for (const auto cause : causes) {
@@ -884,8 +884,8 @@ void test_svinval_decoder() {
 void test_zcmop_noop_decompression() {
     // RVA23 requires Zcmop. C.MOP.n encodings are no-ops unless an extension redefines them;
     // in particular they must not be mistaken for C.LUI rd, 0, which clobbers rd.
-    constexpr std::array<uint16_t, 8> kCmop{
-        0x6081U, 0x6181U, 0x6281U, 0x6381U, 0x6481U, 0x6581U, 0x6681U, 0x6781U};
+    constexpr std::array<uint16_t, 8> kCmop{0x6081U, 0x6181U, 0x6281U, 0x6381U,
+                                            0x6481U, 0x6581U, 0x6681U, 0x6781U};
     for (const uint16_t compressed : kCmop) {
         const auto expanded = simrv::pipeline::decompressInstruction(compressed, true);
         TEST_ASSERT(expanded == 0x00000013U);  // addi x0, x0, 0
@@ -895,16 +895,15 @@ void test_zcmop_noop_decompression() {
 
 void test_zimop_decoder() {
     constexpr std::array<uint32_t, 40> kMopMatches{
-        0x81c04073U, 0x81d04073U, 0x81e04073U, 0x81f04073U, 0x85c04073U, 0x85d04073U,
-        0x85e04073U, 0x85f04073U, 0x89c04073U, 0x89d04073U, 0x89e04073U, 0x89f04073U,
-        0x8dc04073U, 0x8dd04073U, 0x8de04073U, 0x8df04073U, 0xc1c04073U, 0xc1d04073U,
-        0xc1e04073U, 0xc1f04073U, 0xc5c04073U, 0xc5d04073U, 0xc5e04073U, 0xc5f04073U,
-        0xc9c04073U, 0xc9d04073U, 0xc9e04073U, 0xc9f04073U, 0xcdc04073U, 0xcdd04073U,
-        0xcde04073U, 0xcdf04073U, 0x82004073U, 0x86004073U, 0x8a004073U, 0x8e004073U,
-        0xc2004073U, 0xc6004073U, 0xca004073U, 0xce004073U};
+        0x81c04073U, 0x81d04073U, 0x81e04073U, 0x81f04073U, 0x85c04073U, 0x85d04073U, 0x85e04073U,
+        0x85f04073U, 0x89c04073U, 0x89d04073U, 0x89e04073U, 0x89f04073U, 0x8dc04073U, 0x8dd04073U,
+        0x8de04073U, 0x8df04073U, 0xc1c04073U, 0xc1d04073U, 0xc1e04073U, 0xc1f04073U, 0xc5c04073U,
+        0xc5d04073U, 0xc5e04073U, 0xc5f04073U, 0xc9c04073U, 0xc9d04073U, 0xc9e04073U, 0xc9f04073U,
+        0xcdc04073U, 0xcdd04073U, 0xcde04073U, 0xcdf04073U, 0x82004073U, 0x86004073U, 0x8a004073U,
+        0x8e004073U, 0xc2004073U, 0xc6004073U, 0xca004073U, 0xce004073U};
     for (size_t index = 0; index < kMopMatches.size(); ++index) {
-        const uint32_t encoded = kMopMatches[index] | (17U << 7U) | (9U << 15U) |
-                                 (index >= 32 ? (23U << 20U) : 0U);
+        const uint32_t encoded =
+            kMopMatches[index] | (17U << 7U) | (9U << 15U) | (index >= 32 ? (23U << 20U) : 0U);
         TEST_ASSERT(simrv::pipeline::decoder(encoded) == simrv::isa::OperationId::MOP);
     }
     // Keep reserved SYSTEM encodings illegal; Zimop only claims its defined MOP spaces.
@@ -927,17 +926,18 @@ void test_zawrs_instructions() {
     constexpr uint32_t kWrsSto = (0x01DU << 20U) | 0x73U;
     TEST_ASSERT(simrv::pipeline::decoder(kWrsNto) == OperationId::WRS_NTO);
     TEST_ASSERT(simrv::pipeline::decoder(kWrsSto) == OperationId::WRS_STO);
-    TEST_ASSERT(required_misa_extensions(OperationId::WRS_NTO) == misa_extension_bit(IsaExtension::A));
+    TEST_ASSERT(required_misa_extensions(OperationId::WRS_NTO) ==
+                misa_extension_bit(IsaExtension::A));
     TEST_ASSERT(simrv::pipeline::decoder(kWrsNto | (1U << 15U)) == OperationId::ILLEGAL);
     TEST_ASSERT(simrv::pipeline::decoder(kWrsSto | (1U << 7U)) == OperationId::ILLEGAL);
 
-    for (const auto priv : {simrv::xlen::PrivilegeLevel::User,
-                            simrv::xlen::PrivilegeLevel::Supervisor,
-                            simrv::xlen::PrivilegeLevel::Machine}) {
-        TEST_ASSERT(simrv::core::TrapController::can_execute_privileged_instruction(
-            priv, 0, 0, 0x00D, 0));
-        TEST_ASSERT(simrv::core::TrapController::can_execute_privileged_instruction(
-            priv, 0, 0, 0x01D, 0));
+    for (const auto priv :
+         {simrv::xlen::PrivilegeLevel::User, simrv::xlen::PrivilegeLevel::Supervisor,
+          simrv::xlen::PrivilegeLevel::Machine}) {
+        TEST_ASSERT(
+            simrv::core::TrapController::can_execute_privileged_instruction(priv, 0, 0, 0x00D, 0));
+        TEST_ASSERT(
+            simrv::core::TrapController::can_execute_privileged_instruction(priv, 0, 0, 0x01D, 0));
     }
 
     simrv::pipeline::PipelineContext context{};
@@ -963,8 +963,8 @@ void test_ssu64xl_user_xlen_csr() {
         const uint64_t requested =
             (static_cast<uint64_t>(cpu.state().mstatus) & ~(kUxlMask | kSxlMask)) |
             (uint64_t{2} << 32U) | (uint64_t{2} << 34U);
-        const auto write = cpu.csr_file.write(
-            simrv::xlen::CsrNumber{0x300}, static_cast<simrv::xlen::CsrValue>(requested));
+        const auto write = cpu.csr_file.write(simrv::xlen::CsrNumber{0x300},
+                                              static_cast<simrv::xlen::CsrValue>(requested));
         TEST_ASSERT(write.has_value());
         const auto status = cpu.csr_file.read(simrv::xlen::CsrNumber{0x100});
         TEST_ASSERT(status.has_value());
@@ -996,9 +996,8 @@ void test_supm_user_data_pointer_masking() {
         state.priv = simrv::xlen::PrivilegeLevel::Machine;
         cpu.active_context().opcode = simrv::isa::Opcode::Store;
         cpu.active_context().pending_exception.reset();
-        simrv::memory::MemoryAccess::target_write(machine.memory(), cpu,
-                                                  simrv::xlen::VirtAddr{kBase}, kValue,
-                                                  simrv::isa::Funct3::Sd);
+        simrv::memory::MemoryAccess::target_write(
+            machine.memory(), cpu, simrv::xlen::VirtAddr{kBase}, kValue, simrv::isa::Funct3::Sd);
         TEST_ASSERT(!cpu.active_context().pending_exception.has_value());
 
         state.priv = simrv::xlen::PrivilegeLevel::Supervisor;
@@ -1016,16 +1015,16 @@ void test_supm_user_data_pointer_masking() {
         TEST_ASSERT(cpu.active_context().pending_exception.has_value());
 
         state.priv = simrv::xlen::PrivilegeLevel::Supervisor;
-        const auto enable_pmm = cpu.csr_file.write(
-            simrv::xlen::CsrNumber{0x10A}, static_cast<simrv::xlen::CsrValue>(kPmmSeven));
+        const auto enable_pmm = cpu.csr_file.write(simrv::xlen::CsrNumber{0x10A},
+                                                   static_cast<simrv::xlen::CsrValue>(kPmmSeven));
         TEST_ASSERT(enable_pmm.has_value());
         TEST_ASSERT((static_cast<uint64_t>(state.senvcfg) & kPmmMask) == kPmmSeven);
 
         state.priv = simrv::xlen::PrivilegeLevel::User;
         cpu.active_context().opcode = simrv::isa::Opcode::Load;
         cpu.active_context().pending_exception.reset();
-        const auto loaded = simrv::memory::MemoryAccess::target_read(
-            machine.memory(), cpu, tagged, simrv::isa::Funct3::Ld);
+        const auto loaded = simrv::memory::MemoryAccess::target_read(machine.memory(), cpu, tagged,
+                                                                     simrv::isa::Funct3::Ld);
         TEST_ASSERT(!cpu.active_context().pending_exception.has_value());
         TEST_ASSERT(loaded == kValue);
 
@@ -1200,13 +1199,39 @@ void test_sha_state_enable_csrs() {
     simrv::core::Machine machine;
     auto& cpu = machine.primary_hart();
     constexpr uint64_t kStateenSuperEnable = uint64_t{1} << 63U;
+    const auto read_stateen =
+        [&cpu](simrv::core::Csr low_csr,
+               simrv::core::Csr high_csr) -> std::expected<uint64_t, simrv::isa::ExceptionCode> {
+        const auto low = cpu.csr_file.read(low_csr);
+        if (!low) return std::unexpected(low.error());
+        uint64_t value = *low;
+        if constexpr (!simrv::xlen::kIsXLen64) {
+            const auto high = cpu.csr_file.read(high_csr);
+            if (!high) return std::unexpected(high.error());
+            value |= static_cast<uint64_t>(*high) << 32U;
+        }
+        return value;
+    };
+    const auto write_stateen =
+        [&cpu](simrv::core::Csr low_csr, simrv::core::Csr high_csr,
+               uint64_t value) -> std::expected<void, simrv::isa::ExceptionCode> {
+        auto result = cpu.csr_file.write(low_csr, static_cast<simrv::xlen::CsrValue>(value));
+        if (!result) return result;
+        if constexpr (!simrv::xlen::kIsXLen64) {
+            return cpu.csr_file.write(high_csr, static_cast<simrv::xlen::CsrValue>(value >> 32U));
+        }
+        return {};
+    };
 
-    TEST_ASSERT(cpu.csr_file.write(simrv::core::Csr::Mstateen0, kStateenSuperEnable).has_value());
-    auto mstateen = cpu.csr_file.read(simrv::core::Csr::Mstateen0);
+    TEST_ASSERT(write_stateen(simrv::core::Csr::Mstateen0, simrv::core::Csr::Mstateen0h,
+                              kStateenSuperEnable)
+                    .has_value());
+    auto mstateen = read_stateen(simrv::core::Csr::Mstateen0, simrv::core::Csr::Mstateen0h);
     TEST_ASSERT(mstateen.has_value() && *mstateen == kStateenSuperEnable);
-    TEST_ASSERT(cpu.csr_file.write(simrv::core::Csr::Sstateen0, kStateenSuperEnable).has_value());
+    TEST_ASSERT(
+        cpu.csr_file.write(simrv::core::Csr::Sstateen0, simrv::xlen::CsrValue{1}).has_value());
     auto sstateen = cpu.csr_file.read(simrv::core::Csr::Sstateen0);
-    // SE0 (bit 63) gates access to sstateen0 in mstateen0/hstateen0; it is
+    // SE0 (the top bit) gates access to sstateen0 in mstateen0/hstateen0; it is
     // reserved in sstateen0 and therefore reads as zero and ignores writes.
     TEST_ASSERT(sstateen.has_value() && *sstateen == 0);
 
@@ -1214,20 +1239,21 @@ void test_sha_state_enable_csrs() {
     cpu.state().priv = simrv::xlen::PrivilegeLevel::Supervisor;
     sstateen = cpu.csr_file.read(simrv::core::Csr::Sstateen0);
     TEST_ASSERT(!sstateen.has_value());
-    TEST_ASSERT(!cpu.csr_file.write(simrv::core::Csr::Sstateen0, kStateenSuperEnable).has_value());
+    TEST_ASSERT(
+        !cpu.csr_file.write(simrv::core::Csr::Sstateen0, simrv::xlen::CsrValue{1}).has_value());
     TEST_ASSERT(cpu.state().sstateen[0] == 0);
 
     const auto hstateen_csr = simrv::core::csr_num(simrv::core::Csr::Hstateen0);
-    TEST_ASSERT(!simrv::core::TrapController::can_access_csr(
-        cpu.state().priv, cpu.state().misa, hstateen_csr, false));
+    TEST_ASSERT(!simrv::core::TrapController::can_access_csr(cpu.state().priv, cpu.state().misa,
+                                                             hstateen_csr, false));
     const auto hcounteren_csr = simrv::core::csr_num(simrv::core::Csr::Hcounteren);
-    TEST_ASSERT(!simrv::core::TrapController::can_access_csr(
-        cpu.state().priv, cpu.state().misa, hcounteren_csr, true));
+    TEST_ASSERT(!simrv::core::TrapController::can_access_csr(cpu.state().priv, cpu.state().misa,
+                                                             hcounteren_csr, true));
     cpu.state().misa |= simrv::isa::misa_extension_bit(simrv::isa::IsaExtension::H);
-    TEST_ASSERT(simrv::core::TrapController::can_access_csr(
-        cpu.state().priv, cpu.state().misa, hstateen_csr, false));
-    TEST_ASSERT(simrv::core::TrapController::can_access_csr(
-        cpu.state().priv, cpu.state().misa, hcounteren_csr, true));
+    TEST_ASSERT(simrv::core::TrapController::can_access_csr(cpu.state().priv, cpu.state().misa,
+                                                            hstateen_csr, false));
+    TEST_ASSERT(simrv::core::TrapController::can_access_csr(cpu.state().priv, cpu.state().misa,
+                                                            hcounteren_csr, true));
     cpu.state().mstateen[0] = kStateenSuperEnable;
     cpu.state().hstateen[0] = 0;
     cpu.state().virt = true;
@@ -1235,7 +1261,7 @@ void test_sha_state_enable_csrs() {
     TEST_ASSERT(!guest_sstateen.has_value() &&
                 guest_sstateen.error() == simrv::isa::ExceptionCode::VirtualInstruction);
     auto guest_sstateen_write =
-        cpu.csr_file.write(simrv::core::Csr::Sstateen0, kStateenSuperEnable);
+        cpu.csr_file.write(simrv::core::Csr::Sstateen0, simrv::xlen::CsrValue{1});
     TEST_ASSERT(!guest_sstateen_write.has_value() &&
                 guest_sstateen_write.error() == simrv::isa::ExceptionCode::VirtualInstruction);
     cpu.state().hstateen[0] = kStateenSuperEnable;
@@ -1248,10 +1274,12 @@ void test_sha_state_enable_csrs() {
     const auto hcounteren = cpu.csr_file.read(simrv::core::Csr::Hcounteren);
     TEST_ASSERT(hcounteren.has_value() && *hcounteren == kGuestHpmEnableBits);
 
+#if SIMRV_XLEN == 64
     cpu.state().mstatus |= simrv::core::MstatusBit::Gva;
     TEST_ASSERT(cpu.csr_file.write(simrv::core::Csr::Mstatus, 0).has_value());
     const auto mstatus = cpu.csr_file.read(simrv::core::Csr::Mstatus);
     TEST_ASSERT(mstatus.has_value() && (*mstatus & simrv::core::kMstatusGva) != 0);
+#endif
     const auto medeleg = cpu.csr_file.read(simrv::core::Csr::Medeleg);
     constexpr simrv::xlen::CsrValue kHDelegatedToHs =
         (simrv::xlen::CsrValue{1} << 20U) | (simrv::xlen::CsrValue{1} << 21U) |
@@ -1259,15 +1287,14 @@ void test_sha_state_enable_csrs() {
     TEST_ASSERT(medeleg.has_value() && (*medeleg & kHDelegatedToHs) == kHDelegatedToHs);
     TEST_ASSERT(medeleg.has_value() && (*medeleg & (simrv::xlen::CsrValue{1} << 9U)) == 0);
 
+#if SIMRV_XLEN == 64
     constexpr simrv::xlen::CsrValue kHstatusSpvSpvp =
         (simrv::xlen::CsrValue{1} << 7U) | (simrv::xlen::CsrValue{1} << 8U) |
-        (simrv::xlen::CsrValue{1} << 9U) |
-        (simrv::xlen::CsrValue{1} << 20U) | (simrv::xlen::CsrValue{1} << 21U) |
-        (simrv::xlen::CsrValue{1} << 22U);
+        (simrv::xlen::CsrValue{1} << 9U) | (simrv::xlen::CsrValue{1} << 20U) |
+        (simrv::xlen::CsrValue{1} << 21U) | (simrv::xlen::CsrValue{1} << 22U);
     constexpr simrv::xlen::CsrValue kHstatusHupmm = simrv::xlen::CsrValue{2} << 48U;
-    TEST_ASSERT(cpu.csr_file
-                    .write(simrv::core::Csr::Hstatus, kHstatusSpvSpvp | kHstatusHupmm)
-                    .has_value());
+    TEST_ASSERT(
+        cpu.csr_file.write(simrv::core::Csr::Hstatus, kHstatusSpvSpvp | kHstatusHupmm).has_value());
     const auto hstatus = cpu.csr_file.read(simrv::core::Csr::Hstatus);
     TEST_ASSERT(hstatus.has_value() && (*hstatus & kHstatusSpvSpvp) == kHstatusSpvSpvp);
     TEST_ASSERT((*hstatus & kHstatusHupmm) == kHstatusHupmm);
@@ -1278,7 +1305,9 @@ void test_sha_state_enable_csrs() {
     TEST_ASSERT(cpu.csr_file.write(simrv::core::Csr::Henvcfg, kHenvcfgPmm).has_value());
     const auto henvcfg = cpu.csr_file.read(simrv::core::Csr::Henvcfg);
     TEST_ASSERT(henvcfg.has_value() && (*henvcfg & kHenvcfgPmm) == kHenvcfgPmm);
+#endif
 
+#if SIMRV_XLEN == 64
     constexpr uint64_t kHgatpSv39x4 = (uint64_t{8} << 60U) | 4U;
     TEST_ASSERT(cpu.csr_file.write(simrv::core::Csr::Hgatp, kHgatpSv39x4).has_value());
     auto hgatp = cpu.csr_file.read(simrv::core::Csr::Hgatp);
@@ -1288,10 +1317,10 @@ void test_sha_state_enable_csrs() {
     TEST_ASSERT(hgatp.has_value() && *hgatp == kHgatpSv39x4);
 
     const auto vsatp_csr = simrv::core::csr_num(simrv::core::Csr::Vsatp);
-    TEST_ASSERT(simrv::core::TrapController::can_access_csr(
-        cpu.state().priv, cpu.state().misa, vsatp_csr, true));
-    TEST_ASSERT(!simrv::core::TrapController::can_access_csr(
-        cpu.state().priv, cpu.state().misa, vsatp_csr, true, true));
+    TEST_ASSERT(simrv::core::TrapController::can_access_csr(cpu.state().priv, cpu.state().misa,
+                                                            vsatp_csr, true));
+    TEST_ASSERT(!simrv::core::TrapController::can_access_csr(cpu.state().priv, cpu.state().misa,
+                                                             vsatp_csr, true, true));
     cpu.state().virt = true;
     cpu.state().priv = simrv::xlen::PrivilegeLevel::Supervisor;
     TEST_ASSERT(cpu.csr_file.write(simrv::core::Csr::Stvec, 0x1237).has_value());
@@ -1299,8 +1328,8 @@ void test_sha_state_enable_csrs() {
     TEST_ASSERT(stvec.has_value() && *stvec == 0x1235);
     auto vstvec = cpu.csr_file.read(simrv::core::Csr::Vstvec);
     TEST_ASSERT(vstvec.has_value() && *vstvec == *stvec);
-    constexpr simrv::xlen::CsrValue kVsStatusValue = simrv::core::MstatusBit::Spie |
-                                                     simrv::core::MstatusBit::Spp;
+    constexpr simrv::xlen::CsrValue kVsStatusValue =
+        simrv::core::MstatusBit::Spie | simrv::core::MstatusBit::Spp;
     TEST_ASSERT(cpu.csr_file.write(simrv::core::Csr::Sstatus, kVsStatusValue).has_value());
     const auto sstatus = cpu.csr_file.read(simrv::core::Csr::Sstatus);
     TEST_ASSERT(sstatus.has_value() && (*sstatus & kVsStatusValue) == kVsStatusValue);
@@ -1320,6 +1349,7 @@ void test_sha_state_enable_csrs() {
     hstateen = cpu.csr_file.read(simrv::core::Csr::Hstateen0);
     TEST_ASSERT(!hstateen.has_value());
     TEST_ASSERT(!cpu.csr_file.write(simrv::core::Csr::Hstateen0, 0).has_value());
+#endif
 }
 
 void test_sha_guest_extension_state() {
@@ -1370,8 +1400,8 @@ void test_sha_hideleg_warl_mask() {
     TEST_ASSERT(cpu.csr_file.write(simrv::core::Csr::Hgeie, ~simrv::xlen::CsrValue{0}).has_value());
     const auto hgeie = cpu.csr_file.read(simrv::core::Csr::Hgeie);
     TEST_ASSERT(hgeie.has_value() && *hgeie == kHgeie);
-    TEST_ASSERT(cpu.csr_file.write(simrv::core::Csr::Henvcfg,
-                                   ~simrv::xlen::CsrValue{0}).has_value());
+    TEST_ASSERT(
+        cpu.csr_file.write(simrv::core::Csr::Henvcfg, ~simrv::xlen::CsrValue{0}).has_value());
     const auto henvcfg = cpu.csr_file.read(simrv::core::Csr::Henvcfg);
     TEST_ASSERT(henvcfg.has_value() && *henvcfg == 0xF1U);
     TEST_ASSERT(cpu.csr_file.write(simrv::core::Csr::Vsstatus, kStatusXsHighBit).has_value());
@@ -1379,26 +1409,25 @@ void test_sha_hideleg_warl_mask() {
     TEST_ASSERT(vsstatus.has_value() && (*vsstatus & kStatusXsHighBit) == 0);
 
     constexpr simrv::xlen::CsrValue kExpected = (simrv::xlen::CsrValue{1} << 2U) |
-                                                 (simrv::xlen::CsrValue{1} << 6U) |
-                                                 (simrv::xlen::CsrValue{1} << 10U);
-    TEST_ASSERT(cpu.csr_file.write(simrv::core::Csr::Hideleg, ~simrv::xlen::CsrValue{0}).has_value());
+                                                (simrv::xlen::CsrValue{1} << 6U) |
+                                                (simrv::xlen::CsrValue{1} << 10U);
+    TEST_ASSERT(
+        cpu.csr_file.write(simrv::core::Csr::Hideleg, ~simrv::xlen::CsrValue{0}).has_value());
     const auto hideleg = cpu.csr_file.read(simrv::core::Csr::Hideleg);
     TEST_ASSERT(hideleg.has_value() && *hideleg == kExpected);
     TEST_ASSERT(cpu.state().hideleg == kExpected);
     TEST_ASSERT(cpu.csr_file.write(simrv::core::Csr::Mideleg, 0).has_value());
     const auto mideleg = cpu.csr_file.read(simrv::core::Csr::Mideleg);
-    TEST_ASSERT(mideleg.has_value() &&
-                *mideleg == (kExpected | (simrv::xlen::CsrValue{1} << 12U)));
+    TEST_ASSERT(mideleg.has_value() && *mideleg == (kExpected | (simrv::xlen::CsrValue{1} << 12U)));
 
     cpu.state().virt = true;
-    constexpr simrv::xlen::CsrValue kSupervisorInterrupts =
-        (simrv::xlen::CsrValue{1} << 1U) | (simrv::xlen::CsrValue{1} << 5U) |
-        (simrv::xlen::CsrValue{1} << 9U);
+    constexpr simrv::xlen::CsrValue kSupervisorInterrupts = (simrv::xlen::CsrValue{1} << 1U) |
+                                                            (simrv::xlen::CsrValue{1} << 5U) |
+                                                            (simrv::xlen::CsrValue{1} << 9U);
     TEST_ASSERT(cpu.csr_file.write(simrv::core::Csr::Sie, kSupervisorInterrupts).has_value());
     const auto vsie = cpu.csr_file.read(simrv::core::Csr::Sie);
     TEST_ASSERT(vsie.has_value() && *vsie == kSupervisorInterrupts);
-    TEST_ASSERT(cpu.csr_file.write(simrv::core::Csr::Sip, kSupervisorInterrupts)
-                    .has_value());
+    TEST_ASSERT(cpu.csr_file.write(simrv::core::Csr::Sip, kSupervisorInterrupts).has_value());
     const auto vsip = cpu.csr_file.read(simrv::core::Csr::Sip);
     TEST_ASSERT(vsip.has_value() && *vsip == (simrv::xlen::CsrValue{1} << 1U));
 }
@@ -1410,10 +1439,8 @@ void test_sha_hfence_instructions() {
     TEST_ASSERT(simrv::pipeline::decoder(kHfenceGvma) == simrv::isa::OperationId::HFENCE_GVMA);
 
     const auto h_bit = simrv::isa::misa_extension_bit(simrv::isa::IsaExtension::H);
-    const auto vvma = static_cast<simrv::xlen::Instruction>(
-        simrv::isa::Funct7Priv::HfenceVvma);
-    const auto gvma = static_cast<simrv::xlen::Instruction>(
-        simrv::isa::Funct7Priv::HfenceGvma);
+    const auto vvma = static_cast<simrv::xlen::Instruction>(simrv::isa::Funct7Priv::HfenceVvma);
+    const auto gvma = static_cast<simrv::xlen::Instruction>(simrv::isa::Funct7Priv::HfenceGvma);
     TEST_ASSERT(simrv::core::TrapController::can_execute_privileged_instruction(
         simrv::xlen::PrivilegeLevel::Supervisor, h_bit, 0,
         static_cast<simrv::xlen::Instruction>(simrv::isa::Funct12Priv::Ecall), vvma, 0, false));
@@ -1435,10 +1462,8 @@ void test_sha_hypervisor_virtual_load_store() {
     using simrv::xlen::CsrValue;
     using simrv::xlen::Register;
 
-    const auto decode = [](uint32_t selector, uint32_t rd = 1, uint32_t rs1 = 2,
-                           uint32_t rs2 = 0) {
-        return (selector << 20U) | (rs2 << 20U) | (rs1 << 15U) | (4U << 12U) | (rd << 7U) |
-               0x73U;
+    const auto decode = [](uint32_t selector, uint32_t rd = 1, uint32_t rs1 = 2, uint32_t rs2 = 0) {
+        return (selector << 20U) | (rs2 << 20U) | (rs1 << 15U) | (4U << 12U) | (rd << 7U) | 0x73U;
     };
     TEST_ASSERT(simrv::pipeline::decoder(decode(0x600)) == OperationId::HLV_B);
     TEST_ASSERT(simrv::pipeline::decoder(decode(0x601)) == OperationId::HLV_BU);
@@ -1467,7 +1492,8 @@ void test_sha_hypervisor_virtual_load_store() {
     TEST_ASSERT(hsv_traits.is_mem_store && hsv_traits.reads_rs1_int && hsv_traits.reads_rs2_int &&
                 !hsv_traits.is_serializing);
 
-    if constexpr (simrv::xlen::kIsXLen64) {
+#if SIMRV_XLEN == 64
+    {
         simrv::core::Machine machine;
         std::vector<Byte> ram(0x20000, Byte{0});
         machine.set_ram_for_testing(ram.data(), ram.size());
@@ -1492,19 +1518,16 @@ void test_sha_hypervisor_virtual_load_store() {
             put_pte(base + middle, (uint64_t{3} << 10U) | valid_table);
             put_pte(base + leaf + 8U, ((guest_physical_page >> 12U) << 10U) | flags);
         };
-        const uint64_t g_leaf_flags = std::to_underlying(simrv::PteFlag::V) |
-                                      std::to_underlying(simrv::PteFlag::R) |
-                                      std::to_underlying(simrv::PteFlag::W) |
-                                      std::to_underlying(simrv::PteFlag::X) |
-                                      std::to_underlying(simrv::PteFlag::A) |
-                                      std::to_underlying(simrv::PteFlag::D);
+        const uint64_t g_leaf_flags =
+            std::to_underlying(simrv::PteFlag::V) | std::to_underlying(simrv::PteFlag::R) |
+            std::to_underlying(simrv::PteFlag::W) | std::to_underlying(simrv::PteFlag::X) |
+            std::to_underlying(simrv::PteFlag::A) | std::to_underlying(simrv::PteFlag::D);
         put_pte(g_root, ((g_middle >> 12U) << 10U) | valid_table);
         put_pte(g_middle, ((base >> 12U) << 10U) | g_leaf_flags);
-        constexpr uint64_t v_a = std::to_underlying(simrv::PteFlag::V) |
-                                 std::to_underlying(simrv::PteFlag::A);
+        constexpr uint64_t v_a =
+            std::to_underlying(simrv::PteFlag::V) | std::to_underlying(simrv::PteFlag::A);
         put_leaf(v_a | std::to_underlying(simrv::PteFlag::R) |
-                 std::to_underlying(simrv::PteFlag::W) |
-                 std::to_underlying(simrv::PteFlag::D));
+                 std::to_underlying(simrv::PteFlag::W) | std::to_underlying(simrv::PteFlag::D));
         constexpr Register payload = 0x09ABCDEFU;
         std::memcpy(ram.data() + (base + guest_physical_page + 0x234 - base), &payload,
                     sizeof(payload));
@@ -1515,7 +1538,7 @@ void test_sha_hypervisor_virtual_load_store() {
         cpu.state().vsatp = (uint64_t{8} << 60U) | (root >> 12U);
         cpu.state().satp = 0;  // HS satp is deliberately Bare.
         cpu.state().hgatp = (uint64_t{8} << 60U) | (g_root >> 12U);
-        cpu.state().hstatus |= CsrValue{1} << 8U; // SPVP=VS.
+        cpu.state().hstatus |= CsrValue{1} << 8U;  // SPVP=VS.
 
         auto& ctx = cpu.active_context();
         ctx.pending_exception.reset();
@@ -1539,9 +1562,9 @@ void test_sha_hypervisor_virtual_load_store() {
 
         constexpr Register store_payload = 0x13579BDFU;
         ctx.op_id = OperationId::HSV_W;
-        simrv::memory::MemoryAccess::target_write(
-            machine.memory(), cpu, simrv::xlen::VirtAddr{virtual_address}, store_payload,
-            simrv::isa::Funct3::Sw);
+        simrv::memory::MemoryAccess::target_write(machine.memory(), cpu,
+                                                  simrv::xlen::VirtAddr{virtual_address},
+                                                  store_payload, simrv::isa::Funct3::Sw);
         TEST_ASSERT(!ctx.pending_exception.has_value());
         Register stored = 0;
         std::memcpy(&stored, ram.data() + guest_physical_page + 0x234, sizeof(stored));
@@ -1567,8 +1590,7 @@ void test_sha_hypervisor_virtual_load_store() {
         // Exercise the real cached/fallback instruction path, including decode, retirement, and
         // writeback, rather than only calling the memory access helpers directly.
         put_leaf(v_a | std::to_underlying(simrv::PteFlag::R) |
-                 std::to_underlying(simrv::PteFlag::W) |
-                 std::to_underlying(simrv::PteFlag::D));
+                 std::to_underlying(simrv::PteFlag::W) | std::to_underlying(simrv::PteFlag::D));
         const uint32_t hlv_w = (0x680U << 20U) | (6U << 15U) | (4U << 12U) | (5U << 7U) | 0x73U;
         const uint32_t hsv_w = (0x35U << 25U) | (7U << 20U) | (6U << 15U) | (4U << 12U) | 0x73U;
         std::memcpy(ram.data() + 0x8000, &hlv_w, sizeof(hlv_w));
@@ -1594,17 +1616,18 @@ void test_sha_hypervisor_virtual_load_store() {
         TEST_ASSERT((cpu.state().hstatus & kSpvp) != 0);
         TEST_ASSERT((cpu.state().hstatus & kGva) != 0);
     }
+#endif
 }
 
-void test_sha_guest_return_transitions() {
+[[maybe_unused]] void test_sha_guest_return_transitions() {
     using simrv::core::MstatusBit;
     using simrv::xlen::PrivilegeLevel;
     const auto h_bit = simrv::isa::misa_extension_bit(simrv::isa::IsaExtension::H);
 
     simrv::core::ArchState machine_state;
     machine_state.misa |= h_bit;
-    machine_state.mstatus = simrv::core::mstatus_with_mpp(
-        machine_state.mstatus | MstatusBit::Mpv, PrivilegeLevel::Supervisor);
+    machine_state.mstatus = simrv::core::mstatus_with_mpp(machine_state.mstatus | MstatusBit::Mpv,
+                                                          PrivilegeLevel::Supervisor);
     machine_state.mepc = 0x8000;
     simrv::core::TrapController::mret(machine_state);
     TEST_ASSERT(machine_state.virt);
@@ -1615,8 +1638,7 @@ void test_sha_guest_return_transitions() {
     simrv::core::ArchState hs_state;
     hs_state.misa |= h_bit;
     hs_state.priv = PrivilegeLevel::Supervisor;
-    hs_state.hstatus = (simrv::xlen::CsrValue{1} << 7U) |
-                       (simrv::xlen::CsrValue{1} << 8U);
+    hs_state.hstatus = (simrv::xlen::CsrValue{1} << 7U) | (simrv::xlen::CsrValue{1} << 8U);
     hs_state.mstatus = simrv::core::mstatus_with_spp(hs_state.mstatus, PrivilegeLevel::Supervisor);
     hs_state.sepc = 0x9000;
     hs_state.vsepc = 0xA000;
@@ -1645,8 +1667,8 @@ void test_sha_guest_exception_routing() {
         state.virt = true;
         state.priv = simrv::xlen::PrivilegeLevel::Supervisor;
         state.pc = 0x4000;
-        state.medeleg = simrv::xlen::CsrValue{1} <<
-                        std::to_underlying(simrv::isa::ExceptionCode::Breakpoint);
+        state.medeleg = simrv::xlen::CsrValue{1}
+                        << std::to_underlying(simrv::isa::ExceptionCode::Breakpoint);
         state.hedeleg = state.medeleg;
         state.vstvec = 0x2000;
         simrv::core::TrapController::raise_exception(
@@ -1687,8 +1709,7 @@ void test_sha_guest_exception_routing() {
         state.hideleg |= simrv::xlen::CsrValue{1} << 2U;
         state.vsstatus |= simrv::core::MstatusBit::Sie;
         state.vstvec = 0x7000;
-        simrv::core::TrapController::raise_exception(
-            cpu, simrv::isa::kInterruptCauseBit | 2U, 0);
+        simrv::core::TrapController::raise_exception(cpu, simrv::isa::kInterruptCauseBit | 2U, 0);
         TEST_ASSERT(state.virt);
         TEST_ASSERT(state.vscause == (simrv::isa::kInterruptCauseBit | 1U));
         TEST_ASSERT((state.vsstatus & simrv::core::MstatusBit::Sie) == 0);
@@ -1733,8 +1754,8 @@ void test_sha_shtvala_guest_physical_fault_value() {
             simrv::xlen::PrivilegeLevel::Supervisor, 64, simrv::memory::TlPort::Data,
             cpu.ca_state.data_walk);
         TEST_ASSERT(translated.has_value() && !translated->has_value());
-        TEST_ASSERT(translated->error() == std::to_underlying(
-                    simrv::isa::ExceptionCode::GuestLoadPageFault));
+        TEST_ASSERT(translated->error() ==
+                    std::to_underlying(simrv::isa::ExceptionCode::GuestLoadPageFault));
         TEST_ASSERT(cpu.active_context().pending_htval == (kGuestPhysical >> 2U));
 
         cpu.state().mepc = 0;
@@ -1762,12 +1783,10 @@ void test_sha_two_stage_cpu_translation_uses_vsatp() {
         const simrv::xlen::Address kGMiddle = kDramBase + 0x5000;
         const simrv::xlen::Address kHostBase = kDramBase + 0x200000;
         constexpr uint64_t kValidTable = std::to_underlying(simrv::PteFlag::V);
-        constexpr uint64_t kLeafFlags = std::to_underlying(simrv::PteFlag::V) |
-                                        std::to_underlying(simrv::PteFlag::R) |
-                                        std::to_underlying(simrv::PteFlag::W) |
-                                        std::to_underlying(simrv::PteFlag::X) |
-                                        std::to_underlying(simrv::PteFlag::A) |
-                                        std::to_underlying(simrv::PteFlag::D);
+        constexpr uint64_t kLeafFlags =
+            std::to_underlying(simrv::PteFlag::V) | std::to_underlying(simrv::PteFlag::R) |
+            std::to_underlying(simrv::PteFlag::W) | std::to_underlying(simrv::PteFlag::X) |
+            std::to_underlying(simrv::PteFlag::A) | std::to_underlying(simrv::PteFlag::D);
         const auto put = [&](simrv::xlen::Address address, uint64_t pte) {
             std::memcpy(ram.data() + (address - kDramBase), &pte, sizeof(pte));
         };
@@ -1855,12 +1874,16 @@ void test_zcb_decompression() {
         simrv::isa::OperationId operation;
     };
     constexpr std::array<Encoding, 12> kZcbInstructions{{
-        {0x8000U, simrv::isa::OperationId::LBU},  {0x8440U, simrv::isa::OperationId::LH},
-        {0x8400U, simrv::isa::OperationId::LHU},  {0x9c41U, simrv::isa::OperationId::MUL},
-        {0x9c75U, simrv::isa::OperationId::XORI}, {0x8800U, simrv::isa::OperationId::SB},
+        {0x8000U, simrv::isa::OperationId::LBU},
+        {0x8440U, simrv::isa::OperationId::LH},
+        {0x8400U, simrv::isa::OperationId::LHU},
+        {0x9c41U, simrv::isa::OperationId::MUL},
+        {0x9c75U, simrv::isa::OperationId::XORI},
+        {0x8800U, simrv::isa::OperationId::SB},
         {0x9c65U, simrv::isa::OperationId::SEXT_B},
         {0x9c6dU, simrv::isa::OperationId::SEXT_H},
-        {0x8c00U, simrv::isa::OperationId::SH},   {0x9c61U, simrv::isa::OperationId::ANDI},
+        {0x8c00U, simrv::isa::OperationId::SH},
+        {0x9c61U, simrv::isa::OperationId::ANDI},
         {0x9c69U, simrv::isa::OperationId::PACKW},
         {0x9c71U, simrv::isa::OperationId::ADD_UW},
     }};
@@ -1868,9 +1891,8 @@ void test_zcb_decompression() {
         // Select x9 for rd'/rs1' and x10 for rs2'; immediate bits are checked below
         // on the byte/halfword memory encodings.
         uint16_t compressed = encoding.match | (1U << 7U);
-        if (encoding.match == 0x8000U || encoding.match == 0x8440U ||
-            encoding.match == 0x8400U || encoding.match == 0x8800U ||
-            encoding.match == 0x8c00U || encoding.match == 0x9c41U) {
+        if (encoding.match == 0x8000U || encoding.match == 0x8440U || encoding.match == 0x8400U ||
+            encoding.match == 0x8800U || encoding.match == 0x8c00U || encoding.match == 0x9c41U) {
             compressed |= 2U << 2U;
         }
         if (encoding.match == 0x8000U || encoding.match == 0x8800U) {
@@ -1888,8 +1910,7 @@ void test_zcb_decompression() {
         }
         TEST_ASSERT(decoded_operation == encoding.operation);
         const simrv::pipeline::Decoder decoded(expanded);
-        if (encoding.match == 0x8000U || encoding.match == 0x8440U ||
-            encoding.match == 0x8400U) {
+        if (encoding.match == 0x8000U || encoding.match == 0x8440U || encoding.match == 0x8400U) {
             TEST_ASSERT(decoded.rd() == simrv::xlen::RegId::A0);
             TEST_ASSERT(decoded.rs1() == simrv::xlen::RegId::S1);
         } else if (encoding.match == 0x8800U || encoding.match == 0x8c00U) {
@@ -1972,13 +1993,15 @@ void test_cbo_zero_execution() {
 
     // Cache-block prefetches are non-faulting hints, including for inaccessible addresses.
     cpu.active_context().pending_exception.reset();
+    constexpr auto kUnmappedAddress =
+        std::numeric_limits<simrv::xlen::Address>::max() & ~simrv::xlen::Address{0xFFF};
     simrv::memory::MemoryAccess::execute_cmo(
-        machine.memory(), cpu, simrv::xlen::VirtAddr{0x1000000000ULL}, OperationId::PREFETCH_R);
+        machine.memory(), cpu, simrv::xlen::VirtAddr{kUnmappedAddress}, OperationId::PREFETCH_R);
     TEST_ASSERT(!cpu.active_context().pending_exception.has_value());
 
     // A real cache-block operation to an inaccessible physical block raises a store access fault.
     simrv::memory::MemoryAccess::execute_cmo(
-        machine.memory(), cpu, simrv::xlen::VirtAddr{0x1000000000ULL}, OperationId::CBO_ZERO);
+        machine.memory(), cpu, simrv::xlen::VirtAddr{kUnmappedAddress}, OperationId::CBO_ZERO);
     TEST_ASSERT(cpu.active_context().pending_exception == ExceptionCode::FaultStore);
     cpu.active_context().pending_exception.reset();
 
@@ -1986,9 +2009,12 @@ void test_cbo_zero_execution() {
     std::memset(machine.ram_view().unchecked_ptr(target_paddr), 0xAA, kLineBytes);
     cpu.state().misa |= misa_extension_bit(IsaExtension::U);
     cpu.state().priv = kPrivUser;
-    cpu.state().senvcfg = (uint64_t{2} << 32U) | (uint64_t{1} << 6U) |
-                          (uint64_t{1} << 7U);
+    cpu.state().senvcfg = (simrv::xlen::CsrValue{1} << 6U) | (simrv::xlen::CsrValue{1} << 7U);
+#if SIMRV_XLEN == 64
+    cpu.state().senvcfg |= simrv::xlen::CsrValue{2} << 32U;
+#endif
     cpu.state().menvcfg |= (uint64_t{1} << 6U) | (uint64_t{1} << 7U);
+#if SIMRV_XLEN == 64
     simrv::memory::MemoryAccess::execute_cmo(
         machine.memory(), cpu,
         simrv::xlen::VirtAddr{target_paddr ^ (simrv::xlen::Address{1} << 63U)},
@@ -1997,6 +2023,7 @@ void test_cbo_zero_execution() {
     for (size_t i = 0; i < kLineBytes; ++i) {
         TEST_ASSERT(ram_ptr[i] == static_cast<simrv::xlen::Byte>(0));
     }
+#endif
 
     // Test permission check: if menvcfg.CBZE = 0, supervisor cbo.zero must trap
     cpu.state().priv = kPrivSupervisor;
@@ -2031,8 +2058,9 @@ void test_profile_engine() {
     }
 }
 
-void test_svpbmt_noncacheable_and_io_accesses() {
-    if constexpr (simrv::xlen::kIsXLen64) {
+[[maybe_unused]] void test_svpbmt_noncacheable_and_io_accesses() {
+#if SIMRV_XLEN == 64
+    {
         using simrv::isa::Funct3;
         using simrv::isa::Funct5Amo;
         using simrv::isa::Opcode;
@@ -2055,8 +2083,7 @@ void test_svpbmt_noncacheable_and_io_accesses() {
         amo_ctx.opcode = Opcode::Amo;
         amo_ctx.funct5 = Funct5Amo::Add;
         (void)simrv::memory::MemoryAccess::target_read(
-            machine.memory(), cpu, simrv::xlen::VirtAddr{UINT64_C(0xFFFFFFFFFFFFF000)},
-            Funct3::Ld);
+            machine.memory(), cpu, simrv::xlen::VirtAddr{UINT64_C(0xFFFFFFFFFFFFF000)}, Funct3::Ld);
         TEST_ASSERT(amo_ctx.pending_exception == simrv::isa::ExceptionCode::FaultStore);
 
         constexpr simrv::xlen::Address kDram = simrv::memory::kDramBaseAddress;
@@ -2120,9 +2147,8 @@ void test_svpbmt_noncacheable_and_io_accesses() {
         ctx.opcode = Opcode::Store;
         constexpr uint64_t kNcStore = UINT64_C(0x1122334455667788);
         const auto writes_before = machine.memory().system_bus().write_count();
-        simrv::memory::MemoryAccess::target_write(machine.memory(), cpu,
-                                                  simrv::xlen::VirtAddr{kVirtual}, kNcStore,
-                                                  Funct3::Sd);
+        simrv::memory::MemoryAccess::target_write(
+            machine.memory(), cpu, simrv::xlen::VirtAddr{kVirtual}, kNcStore, Funct3::Sd);
         TEST_ASSERT(!ctx.pending_exception.has_value());
         TEST_ASSERT(machine.memory().system_bus().write_count() > writes_before);
         TEST_ASSERT(cpu.dcache.line_state(line_base) == simrv::memory::MesiState::Invalid);
@@ -2134,8 +2160,8 @@ void test_svpbmt_noncacheable_and_io_accesses() {
         ctx.opcode = Opcode::Amo;
         ctx.funct5 = Funct5Amo::Add;
         const auto nc_amo_reads_before = machine.memory().system_bus().read_count();
-        (void)simrv::memory::MemoryAccess::target_read(
-            machine.memory(), cpu, simrv::xlen::VirtAddr{kVirtual}, Funct3::Ld);
+        (void)simrv::memory::MemoryAccess::target_read(machine.memory(), cpu,
+                                                       simrv::xlen::VirtAddr{kVirtual}, Funct3::Ld);
         TEST_ASSERT(ctx.pending_exception == simrv::isa::ExceptionCode::FaultStore);
         TEST_ASSERT(machine.memory().system_bus().read_count() == nc_amo_reads_before);
 
@@ -2156,9 +2182,8 @@ void test_svpbmt_noncacheable_and_io_accesses() {
         ctx.opcode = Opcode::Store;
         constexpr uint64_t kIoStore = UINT64_C(0x8877665544332211);
         const auto io_writes_before = machine.memory().system_bus().write_count();
-        simrv::memory::MemoryAccess::target_write(machine.memory(), cpu,
-                                                  simrv::xlen::VirtAddr{kVirtual}, kIoStore,
-                                                  Funct3::Sd);
+        simrv::memory::MemoryAccess::target_write(
+            machine.memory(), cpu, simrv::xlen::VirtAddr{kVirtual}, kIoStore, Funct3::Sd);
         TEST_ASSERT(!ctx.pending_exception.has_value());
         TEST_ASSERT(machine.memory().system_bus().write_count() > io_writes_before);
         std::memcpy(&ram_value, ram.data() + (kPhysical - kDram), sizeof(ram_value));
@@ -2168,8 +2193,8 @@ void test_svpbmt_noncacheable_and_io_accesses() {
         ctx.opcode = Opcode::Amo;
         ctx.funct5 = Funct5Amo::Lr;
         const auto io_amo_reads_before = machine.memory().system_bus().read_count();
-        (void)simrv::memory::MemoryAccess::target_read(
-            machine.memory(), cpu, simrv::xlen::VirtAddr{kVirtual}, Funct3::Ld);
+        (void)simrv::memory::MemoryAccess::target_read(machine.memory(), cpu,
+                                                       simrv::xlen::VirtAddr{kVirtual}, Funct3::Ld);
         TEST_ASSERT(ctx.pending_exception == simrv::isa::ExceptionCode::FaultLoad);
         TEST_ASSERT(machine.memory().system_bus().read_count() == io_amo_reads_before);
 
@@ -2177,16 +2202,17 @@ void test_svpbmt_noncacheable_and_io_accesses() {
         ctx.opcode = Opcode::Amo;
         ctx.funct5 = Funct5Amo::Sc;
         const auto io_amo_writes_before = machine.memory().system_bus().write_count();
-        simrv::memory::MemoryAccess::target_write(machine.memory(), cpu,
-                                                  simrv::xlen::VirtAddr{kVirtual}, kIoStore,
-                                                  Funct3::Sd);
+        simrv::memory::MemoryAccess::target_write(
+            machine.memory(), cpu, simrv::xlen::VirtAddr{kVirtual}, kIoStore, Funct3::Sd);
         TEST_ASSERT(ctx.pending_exception == simrv::isa::ExceptionCode::FaultStore);
         TEST_ASSERT(machine.memory().system_bus().write_count() == io_amo_writes_before);
     }
+#endif
 }
 
-void test_svpbmt_io_access_ordering() {
-    if constexpr (simrv::xlen::kIsXLen64) {
+[[maybe_unused]] void test_svpbmt_io_access_ordering() {
+#if SIMRV_XLEN == 64
+    {
         using simrv::xlen::PrivilegeLevel;
 
         simrv::core::Machine machine;
@@ -2263,6 +2289,7 @@ void test_svpbmt_io_access_ordering() {
         TEST_ASSERT(cpu.tlb.lookup_data_w(kIoVirtual, 0, PrivilegeLevel::Supervisor)->pbmt ==
                     simrv::memory::PtePbmt::Io);
     }
+#endif
 }
 
 }  // namespace
@@ -2299,12 +2326,14 @@ int main() {
     std::cout << "[RUN] test_ziccif_atomic_instruction_fetch_under_smp_store" << std::endl;
     test_ziccif_atomic_instruction_fetch_under_smp_store();
     std::cout << "[PASS] test_ziccif_atomic_instruction_fetch_under_smp_store" << std::endl;
+#if SIMRV_XLEN == 64
     std::cout << "[RUN] test_svpbmt_noncacheable_and_io_accesses" << std::endl;
     test_svpbmt_noncacheable_and_io_accesses();
     std::cout << "[PASS] test_svpbmt_noncacheable_and_io_accesses" << std::endl;
     std::cout << "[RUN] test_svpbmt_io_access_ordering" << std::endl;
     test_svpbmt_io_access_ordering();
     std::cout << "[PASS] test_svpbmt_io_access_ordering" << std::endl;
+#endif
     std::cout << "[RUN] test_ziccamoa_main_memory_atomics" << std::endl;
     test_ziccamoa_main_memory_atomics();
     std::cout << "[PASS] test_ziccamoa_main_memory_atomics" << std::endl;
@@ -2377,9 +2406,11 @@ int main() {
     std::cout << "[RUN] test_sha_hypervisor_virtual_load_store" << std::endl;
     test_sha_hypervisor_virtual_load_store();
     std::cout << "[PASS] test_sha_hypervisor_virtual_load_store" << std::endl;
+#if SIMRV_XLEN == 64
     std::cout << "[RUN] test_sha_guest_return_transitions" << std::endl;
     test_sha_guest_return_transitions();
     std::cout << "[PASS] test_sha_guest_return_transitions" << std::endl;
+#endif
     std::cout << "[RUN] test_sha_guest_exception_routing" << std::endl;
     test_sha_guest_exception_routing();
     std::cout << "[PASS] test_sha_guest_exception_routing" << std::endl;

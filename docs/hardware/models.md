@@ -22,6 +22,9 @@ When simulated Linux or OpenSBI boots, SimRV's dynamic device tree patcher (`sim
 - `/cpus/timebase-frequency`: dynamically patched to the active `--timebase-hz`.
 - `/cpus/cpu@*/clock-frequency`: dynamically patched to the active `--cpu-clock`.
 
+These FDT properties are 32-bit values. Configuration rejects CPU or timebase frequencies above
+`UINT32_MAX` rather than allowing the guest-visible value to wrap.
+
 This allows guest operating systems (Linux, Zephyr, FreeRTOS) to automatically calculate accurate BogoMIPS, delay loops (`udelay`), and timer interrupt deadlines matching the simulated hardware. Pipeline, cache, interconnect, and host-interface latency settings remain expressed in CPU clock cycles; absolute execution time is `cycles / cpu_clock_hz`, while guest timer delays are `mtime_ticks / timebase_hz`.
 
 This physical conversion is hardware-meaningful only in `--mode cycle-accurate`, and only to the extent that the selected model's cycle latencies match the target RTL or processor. Fast and detailed modes use one virtual cycle per instruction step to keep counters and guest timers deterministic; their reported virtual time must not be treated as a hardware performance prediction. `minstret` remains a retired-instruction count in all modes.
@@ -63,9 +66,15 @@ that policy retain their existing implicit platform devices.
 `[device.uart] clock_hz` sets the UART input clock. It defaults to 3,686,400 Hz. The UART resets
 to 115200 8N1 with a divisor derived from that clock, and generated guest device trees report both
 `clock-frequency` and the resulting `current-speed`. Serial frames complete at deterministic
-simulated CPU-cycle boundaries; individual wire bits are not modeled.
+simulated CPU-cycle boundaries; individual wire bits are not modeled. With the reset-disabled
+single-byte FIFO, guest examples poll THRE before each transmit write and TEMT before signaling
+completion, allowing output to drain within the modeled cycle stream.
 
 ### SMP and shared cache topology
+
+The modeled per-hart interrupt controllers support at most 16 harts. This fixed implementation
+capacity is shared by machine validation, CLINT, ACLINT, AIA, and PLIC storage. The PLIC allocates
+machine and supervisor contexts for each supported hart.
 
 SoC profiles can describe homogeneous hart groups and their shared cache hierarchy. For example:
 

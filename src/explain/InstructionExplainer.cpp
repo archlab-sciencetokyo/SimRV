@@ -26,6 +26,7 @@
 #include "simrv/debug/SymbolTable.hpp"
 #include "simrv/execute/ExecuteUnitInt.hpp"
 #include "simrv/isa/Common.hpp"
+#include "simrv/isa/Priv.hpp"
 #include "simrv/isa/RegisterNames.hpp"
 #include "simrv/isa/VectorTypes.hpp"
 #include "simrv/memory/MemoryUtil.hpp"
@@ -142,17 +143,11 @@ auto build_bitfields(InstFormat fmt, uint32_t ir_org) -> std::vector<BitFieldEnt
 auto is_unary_float_op(OperationId op_id) -> bool {
     return op_id == FSQRT_S || op_id == FSQRT_D || op_id == FCLASS_S || op_id == FCLASS_D ||
            op_id == FMV_X_W || op_id == FMV_X_D || op_id == FMV_W_X || op_id == FMV_D_X ||
+           op_id == FMV_X_H || op_id == FMV_H_X || op_id == FCVT_S_H || op_id == FCVT_H_S ||
+           op_id == FCVT_D_H || op_id == FCVT_H_D || op_id == FROUND_S || op_id == FROUNDNX_S ||
+           op_id == FROUND_D || op_id == FROUNDNX_D || op_id == FCVTMOD_W_D ||
            (op_id >= FCVT_W_S && op_id <= FCVT_LU_S) || (op_id >= FCVT_W_D && op_id <= FCVT_LU_D) ||
            (op_id >= FCVT_S_W && op_id <= FCVT_S_LU) || (op_id >= FCVT_D_W && op_id <= FCVT_D_LU);
-}
-
-auto is_shift_imm_op(OperationId op_id) -> bool {
-    return op_id == SLLI || op_id == SRLI || op_id == SRAI || op_id == SLLIW || op_id == SRLIW ||
-           op_id == SRAIW;
-}
-
-auto is_csr_imm_op(OperationId op_id) -> bool {
-    return op_id == CSRRWI || op_id == CSRRSI || op_id == CSRRCI;
 }
 
 auto format_vector_assembly(OperationId op_id, std::string_view mnemonic, simrv::xlen::RegId rd_id,
@@ -236,8 +231,9 @@ auto format_canonical_assembly(const InstructionExplanation& expl, const std::st
                                       expl.rs2.reg_id, expl.imm);
     }
     if (fmt == InstFormat::R) {
-        if (op_id == SFENCE_VMA) {
-            return std::format("sfence.vma {}, {}", rs1_abi, rs2_abi);
+        if (op_id == SFENCE_VMA || op_id == SINVAL_VMA || op_id == HFENCE_VVMA ||
+            op_id == HFENCE_GVMA || op_id == HINVAL_VVMA || op_id == HINVAL_GVMA) {
+            return std::format("{} {}, {}", mnemonic, rs1_abi, rs2_abi);
         }
         if ((op_id >= LR_W && op_id <= SC_W) || (op_id >= LR_D && op_id <= SC_D)) {
             if (op_id == LR_W) return std::format("lr.w {}, ({})", rd_abi, rs1_abi);
@@ -248,6 +244,9 @@ auto format_canonical_assembly(const InstructionExplanation& expl, const std::st
         if ((op_id >= AMOSWAP_W && op_id <= AMOMAXU_W) ||
             (op_id >= AMOSWAP_D && op_id <= AMOMAXU_D)) {
             return std::format("{}.aqrl {}, {}, ({})", mnemonic, rd_abi, rs2_abi, rs1_abi);
+        }
+        if (op_id == FLI_S || op_id == FLI_D) {
+            return std::format("{} {}, {}", mnemonic, rd_abi, std::to_underlying(expl.rs1.reg_id));
         }
         if (is_unary_float_op(op_id)) {
             return std::format("{} {}, {}", mnemonic, rd_abi, rs1_abi);
@@ -260,6 +259,18 @@ auto format_canonical_assembly(const InstructionExplanation& expl, const std::st
         return std::format("{} {}, {}, {}", mnemonic, rd_abi, rs1_abi, rs2_abi);
     }
     if (fmt == InstFormat::I) {
+        if (simrv::isa::is_hlv_op(op_id)) {
+            return std::format("{} {}, ({})", mnemonic, rd_abi, rs1_abi);
+        }
+        if (simrv::isa::is_hsv_op(op_id)) {
+            return std::format("{} {}, ({})", mnemonic, rs2_abi, rs1_abi);
+        }
+        if (simrv::isa::is_cmo_op(op_id)) {
+            return std::format("{} ({})", mnemonic, rs1_abi);
+        }
+        if (op_id == MOP) {
+            return std::format("mop {}, {}", rd_abi, rs1_abi);
+        }
         if (is_load(op_id)) {
             return std::format("{} {}, {}({})", mnemonic, rd_abi, expl.imm, rs1_abi);
         }
@@ -268,19 +279,20 @@ auto format_canonical_assembly(const InstructionExplanation& expl, const std::st
         }
         if (info(op_id).side_effects & SideEffectFlags::Csr) {
             std::string csr_str = csr_name(static_cast<uint32_t>(expl.imm) & 0xFFFU);
-            if (is_csr_imm_op(op_id)) {
+            if (is_csr_imm(op_id)) {
                 return std::format("{} {}, {}, {}", mnemonic, rd_abi, csr_str,
                                    std::to_underlying(expl.rs1.reg_id));
             }
             return std::format("{} {}, {}, {}", mnemonic, rd_abi, csr_str, rs1_abi);
         }
         if (op_id == ECALL || op_id == EBREAK || op_id == URET || op_id == SRET || op_id == MRET ||
-            op_id == WFI) {
+            op_id == WFI || op_id == SFENCE_W_INVAL || op_id == SFENCE_INVAL_IR ||
+            op_id == WRS_NTO || op_id == WRS_STO) {
             return std::string(mnemonic);
         }
         if (op_id == FENCE) return "fence";
         if (op_id == FENCE_I) return "fence.i";
-        if (is_shift_imm_op(op_id)) {
+        if (is_shift_imm(op_id)) {
             uint32_t shamt = static_cast<uint32_t>(expl.imm) & 0x3FU;
             return std::format("{} {}, {}, {}", mnemonic, rd_abi, rs1_abi, shamt);
         }
@@ -355,96 +367,6 @@ auto build_microarch_profile(OperationId op_id) -> MicroarchProfile {
     if (writes_rd(op_id)) prof.hazard_tags.emplace_back("RAW Hazard Producer");
 
     return prof;
-}
-
-auto read_csr_side_effect_free(const simrv::core::ArchState& st, uint32_t csr_addr)
-    -> std::optional<simrv::xlen::CsrValue> {
-    switch (csr_addr) {
-        case 0x001:
-            return st.fcsr & 0x1FU;
-        case 0x002:
-            return (st.fcsr >> 5U) & 0x7U;
-        case 0x003:
-            return st.fcsr & 0xFFU;
-        case 0x008:
-            return st.vstart;
-        case 0x009:
-            return st.vxsat;
-        case 0x00A:
-            return st.vxrm;
-        case 0x00F:
-            return (st.vxrm << 1U) | st.vxsat;
-        case 0xC20:
-            return st.vl;
-        case 0xC21:
-            return st.vtype;
-        case 0xC22:
-            return static_cast<simrv::xlen::CsrValue>(st.regs.vlen_bytes());
-        case 0x100:
-            return st.mstatus;
-        case 0x104:
-            return st.mie & st.mideleg;
-        case 0x105:
-            return st.stvec;
-        case 0x106:
-            return st.scounteren;
-        case 0x10A:
-            return st.senvcfg;
-        case 0x140:
-            return st.sscratch;
-        case 0x141:
-            return st.sepc;
-        case 0x142:
-            return static_cast<simrv::xlen::CsrValue>(st.scause);
-        case 0x143:
-            return st.stval;
-        case 0x144:
-            return st.mip & st.mideleg;
-        case 0x14D:
-            return static_cast<simrv::xlen::CsrValue>(st.stimecmp);
-        case 0x180:
-            return st.satp;
-        case 0x300:
-            return st.mstatus;
-        case 0x301:
-            return st.misa;
-        case 0x302:
-            return st.medeleg;
-        case 0x303:
-            return st.mideleg;
-        case 0x304:
-            return st.mie;
-        case 0x305:
-            return st.mtvec;
-        case 0x306:
-            return st.mcounteren;
-        case 0x30A:
-            return st.menvcfg;
-        case 0x320:
-            return st.mcountinhibit;
-        case 0x340:
-            return st.mscratch;
-        case 0x341:
-            return st.mepc;
-        case 0x342:
-            return static_cast<simrv::xlen::CsrValue>(st.mcause);
-        case 0x343:
-            return st.mtval;
-        case 0x344:
-            return st.mip;
-        case 0x747:
-            return st.mseccfg;
-        case 0xF14:
-            return st.mhartid;
-        case 0xB02:
-        case 0xC02:
-            return static_cast<simrv::xlen::CsrValue>(st.minstret);
-        default:
-            if (csr_addr >= 0x3B0 && csr_addr <= 0x3BF) {
-                return st.pmpaddr[csr_addr - 0x3B0];
-            }
-            return std::nullopt;
-    }
 }
 
 auto translate_for_inspection(const simrv::core::ArchState& st, const simrv::core::CPU* cpu,
@@ -533,21 +455,6 @@ auto vlmul_name(Vlmul lmul) -> std::string {
     }
 }
 
-auto is_w_alu_op(OperationId op_id) -> bool {
-    return op_id == ADDW || op_id == ADDIW || op_id == SUBW || op_id == SLLW || op_id == SLLIW ||
-           op_id == SRLW || op_id == SRLIW || op_id == SRAW || op_id == SRAIW || op_id == MULW ||
-           op_id == DIVW || op_id == DIVUW || op_id == REMW || op_id == REMUW || op_id == ADD_UW ||
-           op_id == SLLI_UW || op_id == SH1ADD_UW || op_id == SH2ADD_UW || op_id == SH3ADD_UW ||
-           op_id == CLZW || op_id == CTZW || op_id == CPOPW || op_id == ROLW || op_id == RORW ||
-           op_id == RORIW || op_id == PACKW;
-}
-
-auto is_pure_int_alu_op(OperationId op_id) -> bool {
-    return (op_id >= ADDI && op_id <= SRA) || (op_id >= ADDIW && op_id <= SRAW) ||
-           (op_id >= MUL && op_id <= REMUW) || (op_id >= SH1ADD && op_id <= PACKW) ||
-           op_id == CZERO_EQZ || op_id == CZERO_NEZ;
-}
-
 auto build_explanation_impl(uint32_t raw_inst, simrv::xlen::Address pc, unsigned active_xlen,
                             const simrv::core::ArchState* st, const simrv::core::CPU* cpu,
                             const simrv::core::Machine* machine) -> InstructionExplanation {
@@ -561,6 +468,7 @@ auto build_explanation_impl(uint32_t raw_inst, simrv::xlen::Address pc, unsigned
     expl.is_compressed = (raw_inst & 0x3U) != 0x3U;
     expl.active_xlen = active_xlen;
     expl.active_privilege = (st != nullptr) ? st->priv : simrv::xlen::PrivilegeLevel::Machine;
+    expl.active_virtualization = (st != nullptr) ? st->virt : false;
     expl.state_grounded = (st != nullptr);
 
     if (expl.is_compressed) {
@@ -658,24 +566,16 @@ auto build_explanation_impl(uint32_t raw_inst, simrv::xlen::Address pc, unsigned
     if (is_memory(expl.op_id)) {
         MemoryDataflow mem{};
         mem.base_address = expl.rs1.raw_value;
-        mem.offset = is_atomic(expl.op_id) ? 0 : expl.imm;
+        const bool zero_offset_mem = is_atomic(expl.op_id) ||
+                                     simrv::isa::is_hypervisor_memory_op(expl.op_id) ||
+                                     simrv::isa::is_cmo_op(expl.op_id);
+        mem.offset = zero_offset_mem ? 0 : expl.imm;
         mem.effective_vaddr = mem.base_address + static_cast<simrv::xlen::Address>(mem.offset);
         if (active_xlen == 32) {
             mem.effective_vaddr &= 0xFFFFFFFFULL;
         }
         mem.kind = info(expl.op_id).memory;
-        const uint32_t f3 = std::to_underlying(expl.funct3);
-        if (expl.opcode == Opcode::OpV) {
-            if (expl.op_id >= VLE8_V && expl.op_id <= VLE64_V) {
-                mem.access_bytes = 1U << (expl.op_id - VLE8_V);
-            } else if (expl.op_id >= VSE8_V && expl.op_id <= VSE64_V) {
-                mem.access_bytes = 1U << (expl.op_id - VSE8_V);
-            } else {
-                mem.access_bytes = 1U << (f3 & 0x3U);
-            }
-        } else {
-            mem.access_bytes = 1U << (f3 & 0x3U);
-        }
+        mem.access_bytes = memory_access_bytes(expl.op_id, expl.funct3);
         mem.is_aligned =
             (mem.access_bytes <= 1U) || ((mem.effective_vaddr & (mem.access_bytes - 1U)) == 0);
         mem.translation_enabled = (st->priv != simrv::xlen::PrivilegeLevel::Machine) &&
@@ -751,15 +651,22 @@ auto build_explanation_impl(uint32_t raw_inst, simrv::xlen::Address pc, unsigned
                             rel_op, expl.rs2.name, expl.rs2.formatted_value,
                             ctrl.condition_met ? "TAKEN" : "NOT TAKEN");
         } else if (expl.op_id == MRET) {
-            ctrl.target_pc = st->mepc;
+            const auto ret = simrv::core::TrapController::predict_mret(*st);
+            ctrl.target_pc = ret.target_pc;
             ctrl.is_conditional = false;
             ctrl.condition_met = true;
             ctrl.condition_relation = "return from M-mode trap (mepc)";
+            expl.predicted_effect.next_privilege = ret.target_priv;
+            expl.predicted_effect.next_virtualization = ret.target_virtualization;
         } else if (expl.op_id == SRET) {
-            ctrl.target_pc = st->sepc;
+            const auto ret = simrv::core::TrapController::predict_sret(*st);
+            ctrl.target_pc = ret.target_pc;
             ctrl.is_conditional = false;
             ctrl.condition_met = true;
-            ctrl.condition_relation = "return from S-mode trap (sepc)";
+            ctrl.condition_relation =
+                st->virt ? "return from VS-mode trap (vsepc)" : "return from S-mode trap (sepc)";
+            expl.predicted_effect.next_privilege = ret.target_priv;
+            expl.predicted_effect.next_virtualization = ret.target_virtualization;
         }
         if (active_xlen == 32) {
             ctrl.target_pc &= 0xFFFFFFFFULL;
@@ -774,6 +681,7 @@ auto build_explanation_impl(uint32_t raw_inst, simrv::xlen::Address pc, unsigned
         CsrDataflow csr_df{};
         csr_df.address = static_cast<uint32_t>(expl.imm) & 0xFFFU;
         csr_df.active_privilege = st->priv;
+        csr_df.active_virtualization = st->virt;
         if (auto details = get_csr_details(csr_df.address)) {
             csr_df.metadata = *details;
         } else {
@@ -782,12 +690,20 @@ auto build_explanation_impl(uint32_t raw_inst, simrv::xlen::Address pc, unsigned
                 static_cast<simrv::xlen::PrivilegeLevel>((csr_df.address >> 8U) & 0x3U);
             csr_df.metadata.read_only = ((csr_df.address >> 10U) & 0x3U) == 0x3U;
         }
-        csr_df.privilege_permitted =
-            std::to_underlying(st->priv) >= std::to_underlying(csr_df.metadata.min_privilege);
         const uint32_t rs1_or_uimm = std::to_underlying(expl.rs1.reg_id);
         csr_df.attempts_write = (expl.op_id == CSRRW || expl.op_id == CSRRWI) || (rs1_or_uimm != 0);
         csr_df.write_permitted = !(csr_df.attempts_write && csr_df.metadata.read_only);
-        csr_df.current_value = read_csr_side_effect_free(*st, csr_df.address);
+        const auto csr_num = simrv::xlen::CsrNumber{static_cast<uint16_t>(csr_df.address)};
+        csr_df.access_exception =
+            simrv::core::TrapController::check_csr_access(*st, csr_num, csr_df.attempts_write);
+        csr_df.privilege_permitted =
+            !csr_df.access_exception.has_value() &&
+            std::to_underlying(st->priv) >= std::to_underlying(csr_df.metadata.min_privilege);
+        const simrv::core::CPU* bound_cpu = (cpu != nullptr && &cpu->state() == st) ? cpu : nullptr;
+        if (const auto csr_val = simrv::core::CsrFile::read_from_state(*st, csr_num, bound_cpu);
+            csr_val.has_value()) {
+            csr_df.current_value = *csr_val;
+        }
         if (csr_df.current_value.has_value() && csr_df.privilege_permitted &&
             csr_df.write_permitted) {
             auto wval = simrv::execute::ExecuteUnitInt::csrWriteValue(
@@ -813,26 +729,62 @@ auto build_explanation_impl(uint32_t raw_inst, simrv::xlen::Address pc, unsigned
     }
 
     // 5. Evaluate Predicted Post-State Delta (Writeback & Trap)
+    const bool is_vector = simrv::isa::is_vector_op(expl.op_id);
+    const bool is_fp_op =
+        !is_vector && ((expl.opcode == Opcode::LoadFp) || (expl.opcode == Opcode::StoreFp) ||
+                       (expl.opcode == Opcode::OpFp) || (expl.opcode == Opcode::MAdd) ||
+                       (expl.opcode == Opcode::MSub) || (expl.opcode == Opcode::NMAdd) ||
+                       (expl.opcode == Opcode::NMSub));
+    const auto priv_exc = simrv::core::TrapController::check_privileged_instruction(
+        *st, expl.op_id, expl.canonical_bits);
+
     if (expl.op_id == ILLEGAL) {
         expl.predicted_effect.predicted_trap =
             simrv::isa::to_trap_cause(simrv::isa::ExceptionCode::IllegalInstruction);
         expl.predicted_effect.predicted_tval = expl.raw_bits;
+    } else if (priv_exc.has_value()) {
+        expl.predicted_effect.predicted_trap = simrv::isa::to_trap_cause(*priv_exc);
+        expl.predicted_effect.predicted_tval = expl.raw_bits;
+    } else if (is_vector &&
+               (!simrv::isa::misa_has_extension(st->misa, simrv::isa::IsaExtension::V) ||
+                !st->extension_state_enabled(simrv::core::MstatusBit::Vs))) {
+        expl.predicted_effect.predicted_trap =
+            simrv::isa::to_trap_cause(simrv::isa::ExceptionCode::IllegalInstruction);
+        expl.predicted_effect.predicted_tval = expl.raw_bits;
+    } else if (is_fp_op &&
+               (!simrv::isa::misa_has_extension(st->misa, simrv::isa::IsaExtension::F) ||
+                !st->extension_state_enabled(simrv::core::MstatusBit::Fs))) {
+        expl.predicted_effect.predicted_trap =
+            simrv::isa::to_trap_cause(simrv::isa::ExceptionCode::IllegalInstruction);
+        expl.predicted_effect.predicted_tval = expl.raw_bits;
     } else if (expl.op_id == ECALL) {
-        const auto code = (st->priv == simrv::xlen::PrivilegeLevel::User)
-                              ? simrv::isa::ExceptionCode::UserEcall
-                              : ((st->priv == simrv::xlen::PrivilegeLevel::Supervisor)
-                                     ? simrv::isa::ExceptionCode::SupervisorEcall
-                                     : simrv::isa::ExceptionCode::MachineEcall);
+        const auto code = simrv::isa::ecall_for_privilege(st->priv, st->virt);
         expl.predicted_effect.predicted_trap = simrv::isa::to_trap_cause(code);
     } else if (expl.op_id == EBREAK) {
         expl.predicted_effect.predicted_trap =
             simrv::isa::to_trap_cause(simrv::isa::ExceptionCode::Breakpoint);
         expl.predicted_effect.predicted_tval = pc;
     } else if (expl.csr.has_value() &&
-               (!expl.csr->privilege_permitted || !expl.csr->write_permitted)) {
-        expl.predicted_effect.predicted_trap =
-            simrv::isa::to_trap_cause(simrv::isa::ExceptionCode::IllegalInstruction);
+               (expl.csr->access_exception.has_value() || !expl.csr->privilege_permitted ||
+                !expl.csr->write_permitted)) {
+        const auto exc =
+            expl.csr->access_exception.value_or(simrv::isa::ExceptionCode::IllegalInstruction);
+        expl.predicted_effect.predicted_trap = simrv::isa::to_trap_cause(exc);
         expl.predicted_effect.predicted_tval = expl.raw_bits;
+    } else if (expl.control.has_value() && expl.control->condition_met) {
+        const bool has_c = simrv::isa::misa_has_extension(st->misa, simrv::isa::IsaExtension::C);
+        const simrv::xlen::Word align_mask = has_c ? 1U : 3U;
+        if ((expl.control->target_pc & align_mask) != 0) {
+            expl.predicted_effect.predicted_trap =
+                simrv::isa::to_trap_cause(simrv::isa::ExceptionCode::MisalignedFetch);
+            expl.predicted_effect.predicted_tval = expl.control->target_pc;
+        }
+    } else if (expl.memory.has_value() && is_atomic(expl.op_id) && !expl.memory->is_aligned) {
+        const auto code = (expl.op_id == LR_W || expl.op_id == LR_D)
+                              ? simrv::isa::ExceptionCode::FaultLoad
+                              : simrv::isa::ExceptionCode::FaultStore;
+        expl.predicted_effect.predicted_trap = simrv::isa::to_trap_cause(code);
+        expl.predicted_effect.predicted_tval = expl.memory->effective_vaddr;
     } else if (expl.memory.has_value() && !expl.memory->pmp_permitted) {
         const auto code = (expl.memory->kind == MemoryAccessKind::Load)
                               ? simrv::isa::ExceptionCode::FaultLoad
@@ -842,7 +794,7 @@ auto build_explanation_impl(uint32_t raw_inst, simrv::xlen::Address pc, unsigned
     }
 
     if (!expl.predicted_effect.predicted_trap.has_value() && rdb == RegBank::Integer) {
-        if (std::to_underlying(expl.rd.reg_id) == 0) {
+        if (std::to_underlying(expl.rd.reg_id) == 0 || expl.op_id == MOP) {
             expl.predicted_effect.predicted_reg_value = 0;
         } else if (expl.op_id == LUI) {
             expl.predicted_effect.predicted_reg_value =
@@ -854,11 +806,11 @@ auto build_explanation_impl(uint32_t raw_inst, simrv::xlen::Address pc, unsigned
             expl.predicted_effect.predicted_reg_value = pc + step_bytes;
         } else if (expl.csr.has_value() && expl.csr->current_value.has_value()) {
             expl.predicted_effect.predicted_reg_value = *expl.csr->current_value;
-        } else if (is_pure_int_alu_op(expl.op_id)) {
+        } else if (is_pure_int_alu(expl.op_id)) {
             const simrv::xlen::Register rhs = has_imm_field(expl.format)
                                                   ? static_cast<simrv::xlen::Register>(expl.imm)
                                                   : expl.rs2.raw_value;
-            if (is_w_alu_op(expl.op_id)) {
+            if (is_word_alu(expl.op_id)) {
                 expl.predicted_effect.predicted_reg_value =
                     simrv::execute::ExecuteUnitInt::aluIntW(expl.rs1.raw_value, rhs, expl.op_id);
             } else {
@@ -916,6 +868,11 @@ auto build_explanation_impl(uint32_t raw_inst, simrv::xlen::Address pc, unsigned
 }
 
 }  // namespace
+
+auto format_instruction_assembly(uint32_t raw_inst, simrv::xlen::Address pc, unsigned xlen)
+    -> std::string {
+    return explain_static(raw_inst, pc, xlen).assembly;
+}
 
 auto explain_static(uint32_t raw_inst, simrv::xlen::Address pc, unsigned xlen)
     -> InstructionExplanation {

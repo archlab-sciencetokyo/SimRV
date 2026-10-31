@@ -76,11 +76,10 @@ auto render_visual_bitfields(const InstructionExplanation& expl, int width)
         return rows;
     }
     for (const auto& bf : expl.bitfields) {
-        rows.push_back(
-            format_to_width(std::format(" {}{:<16} [{:02}:{:02}]  {}{:0{}b}\033[0m", kThemeText,
-                                        bf.label, bf.high_bit, bf.low_bit, kThemeVal, bf.value,
-                                        bf.bit_count),
-                            width));
+        rows.push_back(format_to_width(
+            std::format(" {}{:<16} [{:02}:{:02}]  {}{:0{}b}\033[0m", kThemeText, bf.label,
+                        bf.high_bit, bf.low_bit, kThemeVal, bf.value, bf.bit_count),
+            width));
     }
     return rows;
 }
@@ -96,12 +95,13 @@ auto render_field_decoded_values(const InstructionExplanation& expl, int width)
     -> std::vector<std::string> {
     using simrv::pipeline::operation::RegBank;
     std::vector<std::string> rows;
-    rows.push_back(format_to_width(std::format("  opcode : 0x{:02X} ({:07b})",
-                                               std::to_underlying(expl.opcode),
-                                               std::to_underlying(expl.opcode)),
-                                   width));
+    rows.push_back(
+        format_to_width(std::format("  opcode : 0x{:02X} ({:07b})", std::to_underlying(expl.opcode),
+                                    std::to_underlying(expl.opcode)),
+                        width));
 
-    auto format_operand_field = [&](std::string_view label, const simrv::explain::OperandState& op) {
+    auto format_operand_field = [&](std::string_view label,
+                                    const simrv::explain::OperandState& op) {
         if (!op.present) return;
         if (op.bank == RegBank::Vector) {
             rows.push_back(format_to_width(std::format("  {:<6} : {}", label, op.name), width));
@@ -119,10 +119,10 @@ auto render_field_decoded_values(const InstructionExplanation& expl, int width)
     }
 
     if (has_funct3(expl.format)) {
-        rows.push_back(format_to_width(std::format("  funct3 : 0x{:X} ({:03b})",
-                                                   std::to_underlying(expl.funct3),
-                                                   std::to_underlying(expl.funct3)),
-                                       width));
+        rows.push_back(format_to_width(
+            std::format("  funct3 : 0x{:X} ({:03b})", std::to_underlying(expl.funct3),
+                        std::to_underlying(expl.funct3)),
+            width));
     }
     if (has_funct7(expl.format)) {
         uint32_t const f7 = static_cast<uint32_t>(expl.funct7) & 0x7FU;
@@ -171,29 +171,27 @@ auto render_dataflow_breakdown(const InstructionExplanation& expl, int width)
                                             expl.rd.formatted_value)
                               : "None (No rd)";
 
-    rows.push_back(
-        format_to_width(std::format("  {}Operand 1   : {}{}\033[0m", kThemeText, kThemeSky, op1_str),
-                        width));
-    rows.push_back(
-        format_to_width(std::format("  {}Operand 2   : {}{}\033[0m", kThemeText, kThemeSky, op2_str),
-                        width));
+    rows.push_back(format_to_width(
+        std::format("  {}Operand 1   : {}{}\033[0m", kThemeText, kThemeSky, op1_str), width));
+    rows.push_back(format_to_width(
+        std::format("  {}Operand 2   : {}{}\033[0m", kThemeText, kThemeSky, op2_str), width));
     rows.push_back(format_to_width(
         std::format("  {}Destination : {}{}\033[0m", kThemeText, kThemeMint, dst_str), width));
 
     if (!expl.predicted_effect.effect_equation.empty()) {
-        rows.push_back(format_to_width(
-            std::format("  {}Predicted WB: {}{}\033[0m", kThemeText, kThemeMint,
-                        expl.predicted_effect.effect_equation),
-            width));
+        rows.push_back(
+            format_to_width(std::format("  {}Predicted WB: {}{}\033[0m", kThemeText, kThemeMint,
+                                        expl.predicted_effect.effect_equation),
+                            width));
     }
 
     if (expl.memory.has_value()) {
         const auto& mem = *expl.memory;
-        rows.push_back(format_to_width(
-            std::format("  {}Effective Addr: {}0x{:0{}x}\033[0m = {} + {}", kThemeText, kThemeSky,
-                        mem.effective_vaddr, simrv::xlen::kXLenHexDigits, expl.rs1.name,
-                        mem.offset),
-            width));
+        rows.push_back(
+            format_to_width(std::format("  {}Effective Addr: {}0x{:0{}x}\033[0m = {} + {}",
+                                        kThemeText, kThemeSky, mem.effective_vaddr,
+                                        simrv::xlen::kXLenHexDigits, expl.rs1.name, mem.offset),
+                            width));
         if (mem.effective_paddr.has_value()) {
             rows.push_back(format_to_width(
                 std::format(
@@ -205,15 +203,14 @@ auto render_dataflow_breakdown(const InstructionExplanation& expl, int width)
     }
     if (expl.control.has_value()) {
         const auto& ctrl = *expl.control;
-        rows.push_back(format_to_width(
-            std::format("  {}Control Target: {}0x{:0{}x}\033[0m", kThemeText, kThemeSky,
-                        ctrl.target_pc, simrv::xlen::kXLenHexDigits),
-            width));
+        rows.push_back(
+            format_to_width(std::format("  {}Control Target: {}0x{:0{}x}\033[0m", kThemeText,
+                                        kThemeSky, ctrl.target_pc, simrv::xlen::kXLenHexDigits),
+                            width));
         if (ctrl.is_conditional && !ctrl.condition_relation.empty()) {
-            rows.push_back(format_to_width(
-                std::format("  {}Branch Eval : {}{}\033[0m", kThemeText, kThemeMint,
-                            ctrl.condition_relation),
-                width));
+            rows.push_back(format_to_width(std::format("  {}Branch Eval : {}{}\033[0m", kThemeText,
+                                                       kThemeMint, ctrl.condition_relation),
+                                           width));
         }
     }
 
@@ -272,10 +269,10 @@ auto render_microarchitectural_profile(const InstructionExplanation& expl, int w
             w));
     }
 
-    rows.push_back(format_to_width(
-        std::format("  {}Unit Class : {}{}\033[0m ({})", kThemeText, kThemeSky,
-                    expl.microarch.unit_class, expl.microarch.latency_note),
-        w));
+    rows.push_back(
+        format_to_width(std::format("  {}Unit Class : {}{}\033[0m ({})", kThemeText, kThemeSky,
+                                    expl.microarch.unit_class, expl.microarch.latency_note),
+                        w));
 
     if (!expl.microarch.hazard_tags.empty()) {
         std::string tags;
@@ -413,15 +410,13 @@ auto InspectorPane::get_explain_rows(int width) -> std::vector<std::string> {
         format_to_width(std::format("  {}Format : {}{}\033[0m", kThemeText, kThemeVal,
                                     simrv::isa::get_instruction_format_name(expl.format)),
                         width));
-    explain_rows.push_back(
-        format_to_width(std::format("  {}ISA Ext: {}{}\033[0m", kThemeText, kThemeMint,
-                                    expl.spec.reference.extension),
-                        width));
+    explain_rows.push_back(format_to_width(std::format("  {}ISA Ext: {}{}\033[0m", kThemeText,
+                                                       kThemeMint, expl.spec.reference.extension),
+                                           width));
     if (!expl.spec.reference.formula.empty()) {
-        explain_rows.push_back(
-            format_to_width(std::format("  {}Formula: {}{}\033[0m", kThemeText, kThemeSky,
-                                        expl.spec.reference.formula),
-                            width));
+        explain_rows.push_back(format_to_width(std::format("  {}Formula: {}{}\033[0m", kThemeText,
+                                                           kThemeSky, expl.spec.reference.formula),
+                                               width));
     }
     explain_rows.push_back(format_to_width("", width));
 
@@ -444,10 +439,10 @@ auto InspectorPane::get_explain_rows(int width) -> std::vector<std::string> {
         const auto& vec = *expl.vector;
         explain_rows.push_back(section_line("Vector Configuration (RVV 1.0)", width));
         if (vec.vill) {
-            explain_rows.push_back(format_to_width(
-                std::format("  {}vtype  : {}ILL (Illegal Configuration)\033[0m", kThemeText,
-                            kThemePeach),
-                width));
+            explain_rows.push_back(
+                format_to_width(std::format("  {}vtype  : {}ILL (Illegal Configuration)\033[0m",
+                                            kThemeText, kThemePeach),
+                                width));
         } else {
             explain_rows.push_back(format_to_width(
                 std::format("  {}SEW    : {}e{}\033[0m   {}LMUL: {}m{}\033[0m   {}VL: {}{}\033[0m",
@@ -455,20 +450,20 @@ auto InspectorPane::get_explain_rows(int width) -> std::vector<std::string> {
                             vec.vlmul_str, kThemeText, kThemeVal, vec.vl),
                 width));
         }
-        explain_rows.push_back(format_to_width(
-            std::format("  {}Mask   : {}{}\033[0m", kThemeText, kThemePeach,
-                        vec.unmasked ? "Unmasked (vm=1)" : "Masked by v0.t (vm=0)"),
-            width));
+        explain_rows.push_back(
+            format_to_width(std::format("  {}Mask   : {}{}\033[0m", kThemeText, kThemePeach,
+                                        vec.unmasked ? "Unmasked (vm=1)" : "Masked by v0.t (vm=0)"),
+                            width));
         explain_rows.push_back(format_to_width("", width));
     }
 
     if (expl.csr.has_value()) {
         const auto& csr_df = *expl.csr;
         explain_rows.push_back(section_line("Target CSR Architectural Profile", width));
-        explain_rows.push_back(format_to_width(
-            std::format("  {}CSR Name    : {}{} (0x{:03X})\033[0m", kThemeText, kThemePeach,
-                        csr_df.metadata.name, csr_df.address),
-            width));
+        explain_rows.push_back(
+            format_to_width(std::format("  {}CSR Name    : {}{} (0x{:03X})\033[0m", kThemeText,
+                                        kThemePeach, csr_df.metadata.name, csr_df.address),
+                            width));
         std::string priv_req =
             (csr_df.metadata.min_privilege == simrv::xlen::PrivilegeLevel::Machine)
                 ? "Machine (M)"
@@ -519,17 +514,17 @@ auto InspectorPane::get_explain_rows(int width) -> std::vector<std::string> {
         explain_rows.push_back(format_to_width(
             std::format("  {}CFU Opcode  : {}custom-0 (0x0B)\033[0m", kThemeText, kThemePeach),
             width));
-        explain_rows.push_back(format_to_width(
-            std::format("  {}Function ID : {}func{} (funct3 = 0b{:03b})\033[0m", kThemeText,
-                        kThemeMint, f3, f3),
-            width));
-        explain_rows.push_back(format_to_width(
-            std::format("  {}Sub-Opcode  : {}0x{:02X} (funct7 = 0b{:07b})\033[0m", kThemeText,
-                        kThemeMint, f7, f7),
-            width));
-        std::string backend_str =
-            has_plugin ? std::format("Dynamic Plugin ({})", cfu_unit.plugin_path())
-                       : "Built-in Model (rvproc_cfu / bitwise OR)";
+        explain_rows.push_back(
+            format_to_width(std::format("  {}Function ID : {}func{} (funct3 = 0b{:03b})\033[0m",
+                                        kThemeText, kThemeMint, f3, f3),
+                            width));
+        explain_rows.push_back(
+            format_to_width(std::format("  {}Sub-Opcode  : {}0x{:02X} (funct7 = 0b{:07b})\033[0m",
+                                        kThemeText, kThemeMint, f7, f7),
+                            width));
+        std::string backend_str = has_plugin
+                                      ? std::format("Dynamic Plugin ({})", cfu_unit.plugin_path())
+                                      : "Built-in Model (rvproc_cfu / bitwise OR)";
         explain_rows.push_back(format_to_width(
             std::format("  {}Backend     : {}{}\033[0m", kThemeText, kThemeVal, backend_str),
             width));
@@ -561,10 +556,10 @@ auto InspectorPane::get_explain_rows(int width) -> std::vector<std::string> {
     for (const auto& line : wrapped) {
         explain_rows.push_back(format_to_width("  " + line, width));
     }
-    explain_rows.push_back(format_to_width(
-        std::format("  {}Spec Source : {}{} — {}\033[0m", kThemeText, kThemeMuted,
-                    expl.spec.reference.document, expl.spec.reference.section),
-        width));
+    explain_rows.push_back(
+        format_to_width(std::format("  {}Spec Source : {}{} — {}\033[0m", kThemeText, kThemeMuted,
+                                    expl.spec.reference.document, expl.spec.reference.section),
+                        width));
 
     const auto& ctx = cpu.pipeline_context;
     const bool has_trap = expl.predicted_effect.predicted_trap.has_value() ||
@@ -587,14 +582,14 @@ auto InspectorPane::get_explain_rows(int width) -> std::vector<std::string> {
 
         std::string cause_name =
             simrv::core::trap_cause_name(static_cast<simrv::xlen::TrapCause>(cause));
-        explain_rows.push_back(format_to_width(
-            std::format("  {}Cause      : {}{} (0x{:X})\033[0m", kThemeText, kThemePeach,
-                        cause_name, cause),
-            width));
-        explain_rows.push_back(format_to_width(
-            std::format("  {}Target VAddr: {}0x{:0{}x}\033[0m", kThemeText, kThemeVal, tval,
-                        simrv::xlen::kXLenHexDigits),
-            width));
+        explain_rows.push_back(
+            format_to_width(std::format("  {}Cause      : {}{} (0x{:X})\033[0m", kThemeText,
+                                        kThemePeach, cause_name, cause),
+                            width));
+        explain_rows.push_back(
+            format_to_width(std::format("  {}Target VAddr: {}0x{:0{}x}\033[0m", kThemeText,
+                                        kThemeVal, tval, simrv::xlen::kXLenHexDigits),
+                            width));
         std::string priv_str =
             (st.priv == simrv::xlen::PrivilegeLevel::Machine)
                 ? "Machine (M)"

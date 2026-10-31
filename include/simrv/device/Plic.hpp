@@ -9,6 +9,7 @@
 #include <optional>
 
 #include "simrv/core/InterruptTopology.hpp"
+#include "simrv/core/PlatformTopology.hpp"
 #include "simrv/memory/Mmio.hpp"
 #include "simrv/memory/TileLinkNode.hpp"
 #include "simrv/xlen/ScalarTypes.hpp"
@@ -36,7 +37,7 @@ class Plic : public memory::TileLinkNode {
     static constexpr simrv::xlen::Address kBaseAddress = simrv::mmio::kPlicBaseAddress;
     static constexpr simrv::xlen::Address kSize = simrv::mmio::kPlicSize;
     static constexpr uint32_t kNumSources = core::kPlicSourceCount;
-    static constexpr size_t kMaxPlicContexts = 32;
+    static constexpr size_t kMaxPlicContexts = core::topology::kMaxPlicContexts;
 
     [[nodiscard]] auto name() const -> const char* final { return "plic"; }
     [[nodiscard]] auto base_address() const -> simrv::xlen::Address final { return base_address_; }

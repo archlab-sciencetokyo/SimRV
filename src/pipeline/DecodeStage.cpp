@@ -21,30 +21,6 @@ inline void raise_decode_exception(pipeline::PipelineContext& ctx, ExceptionCode
     ctx.pending_exception = code;
     ctx.pending_tval = ctx.ir_org;
 }
-
-[[nodiscard]] constexpr auto is_implemented_supervisor_csr(uint16_t address) noexcept -> bool {
-    switch (address) {
-        case csr_addr(Csr::Sstatus):
-        case csr_addr(Csr::Sie):
-        case csr_addr(Csr::Stvec):
-        case csr_addr(Csr::Scounteren):
-        case csr_addr(Csr::Sscratch):
-        case csr_addr(Csr::Sepc):
-        case csr_addr(Csr::Scause):
-        case csr_addr(Csr::Stval):
-        case csr_addr(Csr::Sip):
-        case csr_addr(Csr::Satp):
-        case csr_addr(Csr::Senvcfg):
-        case csr_addr(Csr::Sstateen0):
-        case csr_addr(Csr::Sstateen1):
-        case csr_addr(Csr::Sstateen2):
-        case csr_addr(Csr::Sstateen3):
-        case csr_addr(Csr::Scountovf):
-            return true;
-        default:
-            return false;
-    }
-}
 }  // namespace
 
 // ==========================================
@@ -90,22 +66,9 @@ void CPU::fetch_operands(Machine& /*machine*/) {
     }
 
     if (isa::is_hypervisor_memory_op(ctx.op_id)) {
-        constexpr simrv::xlen::CsrValue kHstatusHu = simrv::xlen::CsrValue{1} << 9U;
-        if (!isa::misa_has_extension(state_.misa, isa::IsaExtension::H)) {
-            raise_decode_exception(ctx, ExceptionCode::IllegalInstruction);
-            return;
-        }
-        if (state_.virt) {
-            raise_decode_exception(ctx, ExceptionCode::VirtualInstruction);
-            return;
-        }
-        if (state_.priv == kPrivUser && (state_.hstatus & kHstatusHu) == 0) {
-            raise_decode_exception(ctx, ExceptionCode::IllegalInstruction);
-            return;
-        }
-        if (state_.priv != kPrivMachine && state_.priv != kPrivSupervisor &&
-            state_.priv != kPrivUser) {
-            raise_decode_exception(ctx, ExceptionCode::IllegalInstruction);
+        if (const auto exc =
+                TrapController::check_privileged_instruction(state_, ctx.op_id, ctx.ir)) {
+            raise_decode_exception(ctx, *exc);
             return;
         }
         ctx.rcsr = 0;
@@ -126,113 +89,16 @@ void CPU::fetch_operands(Machine& /*machine*/) {
                                           : simrv::xlen::CsrNumber{0};
 
     if (funct3 == Funct3::Priv) {
-        if (!TrapController::can_execute_privileged_instruction(
-                state_.priv, state_.misa, state_.mstatus, funct12, ctx.funct7, state_.hstatus,
-                state_.virt)) {
-            const bool virtual_instruction =
-                state_.virt &&
-                ((funct12 == Funct12Priv::Sret &&
-                  (state_.priv == kPrivUser ||
-                   (state_.hstatus & (simrv::xlen::CsrValue{1} << 22U)) != 0)) ||
-                 (funct12 == Funct12Priv::Wfi &&
-                  (state_.mstatus & MstatusBit::Tw) == 0 &&
-                  (state_.priv == kPrivUser ||
-                   (state_.hstatus & (simrv::xlen::CsrValue{1} << 21U)) != 0)) ||
-                 ctx.funct7 == simrv::isa::Funct7Priv::HfenceVvma ||
-                 ctx.funct7 == simrv::isa::Funct7Priv::HinvalVvma ||
-                 ctx.funct7 == simrv::isa::Funct7Priv::HfenceGvma ||
-                 ctx.funct7 == simrv::isa::Funct7Priv::HinvalGvma ||
-                 ((funct12 == Funct12Priv::SfenceWInval ||
-                   funct12 == Funct12Priv::SfenceInvalIr) &&
-                  state_.priv == kPrivUser) ||
-                 ((ctx.funct7 == simrv::isa::Funct7Priv::SfenceVma ||
-                   ctx.funct7 == simrv::isa::Funct7Priv::SinvalVma) &&
-                  (state_.priv == kPrivUser ||
-                   (state_.hstatus & (simrv::xlen::CsrValue{1} << 20U)) != 0)));
-            raise_decode_exception(ctx, virtual_instruction ? ExceptionCode::VirtualInstruction
-                                                            : ExceptionCode::IllegalInstruction);
+        if (const auto exc =
+                TrapController::check_privileged_instruction(state_, ctx.op_id, ctx.ir)) {
+            raise_decode_exception(ctx, *exc);
             return;
         }
     } else {
         const bool is_write =
             ((static_cast<uint8_t>(funct3) & 0x3u) == 0x1u) || (std::to_underlying(ctx.rs1) != 0);
-        if (!TrapController::can_access_csr(state_.priv, state_.misa, w_csr_addr, is_write,
-                                            state_.virt)) {
-            const auto csr_address = w_csr_addr.value();
-            const bool virtual_supervisor_csr =
-                csr_address == csr_addr(Csr::Vsstatus) || csr_address == csr_addr(Csr::Vsie) ||
-                csr_address == csr_addr(Csr::Vstvec) ||
-                csr_address == csr_addr(Csr::Vsscratch) ||
-                csr_address == csr_addr(Csr::Vsepc) || csr_address == csr_addr(Csr::Vscause) ||
-                csr_address == csr_addr(Csr::Vstval) || csr_address == csr_addr(Csr::Vsip) ||
-                csr_address == csr_addr(Csr::Vsatp) ||
-                ((csr_address == csr_addr(Csr::Vstimecmp) ||
-                  (csr_address == csr_addr(Csr::Vstimecmph) && state_.regs.xlen == 32)) &&
-                 state_.priv == kPrivSupervisor);
-            const bool virtual_hypervisor_csr =
-                csr_address == csr_addr(Csr::Hstatus) || csr_address == csr_addr(Csr::Hedeleg) ||
-                csr_address == csr_addr(Csr::Hideleg) || csr_address == csr_addr(Csr::Hie) ||
-                csr_address == csr_addr(Csr::Hcounteren) ||
-                csr_address == csr_addr(Csr::Htimedelta) ||
-                csr_address == csr_addr(Csr::Hgeie) ||
-                (csr_address == csr_addr(Csr::Hgeip) && !is_write) ||
-                csr_address == csr_addr(Csr::Henvcfg) || csr_address == csr_addr(Csr::Htval) ||
-                csr_address == csr_addr(Csr::Hip) || csr_address == csr_addr(Csr::Hvip) ||
-                csr_address == csr_addr(Csr::Htinst) || csr_address == csr_addr(Csr::Hgatp) ||
-                (csr_address >= 0x60CU && csr_address <= 0x60FU);
-            const bool virtualization_fault =
-                state_.virt &&
-                ((state_.priv == kPrivUser &&
-                  isa::misa_has_extension(state_.misa, isa::IsaExtension::S) &&
-                  is_implemented_supervisor_csr(csr_address)) ||
-                 (csr_address == csr_addr(Csr::Satp) &&
-                  (state_.priv == kPrivUser ||
-                   (state_.hstatus & (simrv::xlen::CsrValue{1} << 20U)) != 0)) ||
-                 (state_.priv < kPrivMachine &&
-                  (virtual_hypervisor_csr || virtual_supervisor_csr)));
-            raise_decode_exception(ctx, virtualization_fault ? ExceptionCode::VirtualInstruction
-                                                              : ExceptionCode::IllegalInstruction);
-            return;
-        }
-        if (w_csr_addr == csr_addr(Csr::Satp)) {
-            if (state_.virt && (state_.hstatus & (simrv::xlen::CsrValue{1} << 20U)) != 0) {
-                raise_decode_exception(ctx, ExceptionCode::VirtualInstruction);
-                return;
-            }
-            if (!state_.virt && state_.priv == kPrivSupervisor &&
-                (state_.mstatus & MstatusBit::Tvm) != 0) {
-                raise_decode_exception(ctx, ExceptionCode::IllegalInstruction);
-                return;
-            }
-        }
-
-        if (state_.priv < kPrivMachine) {
-            if ((w_csr_addr >= 0xC00 && w_csr_addr <= 0xC1F) ||
-                (w_csr_addr >= 0xC80 && w_csr_addr <= 0xC9F)) {
-                const simrv::xlen::Word counter_bit = 1u << (w_csr_addr & 0x1Fu);
-                bool access_denied = (state_.mcounteren & counter_bit) == 0;
-                if (access_denied) {
-                    raise_decode_exception(ctx, ExceptionCode::IllegalInstruction);
-                    return;
-                }
-                if (state_.virt && (state_.hcounteren & counter_bit) == 0) {
-                    raise_decode_exception(ctx, ExceptionCode::VirtualInstruction);
-                    return;
-                }
-                if (state_.priv == kPrivUser && (state_.scounteren & counter_bit) == 0) {
-                    raise_decode_exception(ctx, state_.virt ? ExceptionCode::VirtualInstruction
-                                                            : ExceptionCode::IllegalInstruction);
-                    return;
-                }
-            }
-        }
-    }
-
-    if (simrv::compiler::unlikely(w_csr_addr == csr_addr(Csr::Fflags) ||
-                                  w_csr_addr == csr_addr(Csr::Frm) ||
-                                  w_csr_addr == csr_addr(Csr::Fcsr))) {
-        if (!state_.extension_state_enabled(MstatusBit::Fs)) {
-            raise_decode_exception(ctx, ExceptionCode::IllegalInstruction);
+        if (const auto exc = TrapController::check_csr_access(state_, w_csr_addr, is_write)) {
+            raise_decode_exception(ctx, *exc);
             return;
         }
     }

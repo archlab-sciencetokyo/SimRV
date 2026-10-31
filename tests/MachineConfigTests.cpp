@@ -3,6 +3,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <limits>
 #include <sstream>
 #include <vector>
 
@@ -13,6 +14,10 @@
 #include "simrv/core/MachineConfig.hpp"
 #include "simrv/core/PlatformTiming.hpp"
 #include "simrv/core/Telemetry.hpp"
+#include "simrv/device/AIA.hpp"
+#include "simrv/device/Aclint.hpp"
+#include "simrv/device/Clint.hpp"
+#include "simrv/device/Plic.hpp"
 #include "simrv/device/Uart.hpp"
 #include "simrv/device/pci/PcieRootComplex.hpp"
 #include "simrv/device/virtio/VirtioCore.hpp"
@@ -26,6 +31,15 @@
 namespace {
 
 auto failures = 0;
+
+static_assert(simrv::core::ExecutionConfig::kMaxHarts == simrv::core::topology::kMaxSimulatedHarts);
+static_assert(simrv::device::Clint::kMaxClintHarts == simrv::core::topology::kMaxSimulatedHarts);
+static_assert(simrv::device::AclintMtimer::kMaxHarts == simrv::core::topology::kMaxSimulatedHarts);
+static_assert(simrv::device::AclintMswi::kMaxHarts == simrv::core::topology::kMaxSimulatedHarts);
+static_assert(simrv::device::Imsic::kMaxHarts == simrv::core::topology::kMaxSimulatedHarts);
+static_assert(simrv::device::Plic::kMaxPlicContexts ==
+              simrv::core::topology::kMaxSimulatedHarts *
+                  simrv::core::topology::kPlicContextsPerHart);
 
 void expect(bool condition, const char* message) {
     if (!condition) {
@@ -1288,6 +1302,25 @@ auto main() -> int {
         bad_cfg.execution.timebase_hz = 100'000'000ULL;
         expect(!bad_cfg.validate().has_value(),
                "timebase > cpu_clock is rejected by config validation");
+
+        bad_cfg = {};
+        bad_cfg.execution.cpu_clock_hz = std::numeric_limits<uint32_t>::max();
+        bad_cfg.execution.timebase_hz = std::numeric_limits<uint32_t>::max();
+        expect(bad_cfg.validate().has_value(),
+               "CPU and timebase frequencies at the FDT u32 boundary are accepted");
+        bad_cfg.execution.cpu_clock_hz =
+            static_cast<uint64_t>(std::numeric_limits<uint32_t>::max()) + 1U;
+        bad_cfg.execution.timebase_hz = simrv::core::timing::kTimebaseHz;
+        expect(!bad_cfg.validate().has_value(),
+               "CPU frequency above the FDT u32 boundary is rejected");
+        bad_cfg.execution.cpu_clock_hz =
+            static_cast<uint64_t>(std::numeric_limits<uint32_t>::max()) + 1U;
+        bad_cfg.execution.timebase_hz =
+            static_cast<uint64_t>(std::numeric_limits<uint32_t>::max()) + 1U;
+        const auto invalid_timebase = bad_cfg.validate();
+        expect(!invalid_timebase.has_value() &&
+                   invalid_timebase.error().contains("timebase-frequency"),
+               "timebase frequency above the FDT u32 boundary is rejected precisely");
 
         // DeterministicClockDivider unit verification: exact divider
         {

@@ -1265,7 +1265,8 @@ void Tracer::log_architecture_retirement(const CPU& cpu,
             }
         }
 
-        const unsigned width = 1u << (std::to_underlying(retiring_context.funct3) & 0x3u);
+        const unsigned width = pipeline::operation::memory_access_bytes(retiring_context.op_id,
+                                                                        retiring_context.funct3);
         std::string_view region = "unresolved";
         std::string_view component;
         if (physical_address) {

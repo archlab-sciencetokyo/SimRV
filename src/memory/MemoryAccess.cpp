@@ -26,7 +26,8 @@ namespace {
 class HypervisorMemoryAccessScope {
    public:
     explicit HypervisorMemoryAccessScope(core::CPU& cpu) noexcept
-        : cpu_(cpu), previous_(cpu.hypervisor_memory_access_active()),
+        : cpu_(cpu),
+          previous_(cpu.hypervisor_memory_access_active()),
           hypervisor_operation_(isa::is_hypervisor_memory_op(cpu.active_context().op_id)) {
         if (hypervisor_operation_) {
             if (!previous_) cpu_.active_context().hypervisor_memory_access_fault = false;
@@ -74,18 +75,17 @@ class HypervisorMemoryAccessScope {
     // VS-stage MXR bit, and HLV/HSV accesses use the same effective status.
     const simrv::xlen::CsrValue mxr =
         cpu.state().mstatus |
-        ((cpu.state().virt || hypervisor_access) ? cpu.state().vsstatus
-                                                 : simrv::xlen::CsrValue{0});
+        ((cpu.state().virt || hypervisor_access) ? cpu.state().vsstatus : simrv::xlen::CsrValue{0});
     if ((mxr & simrv::core::MstatusBit::Mxr) != 0) return address;
 
     constexpr uint64_t kLow57Mask = (uint64_t{1} << 57U) - 1U;
     const uint64_t low = address.raw() & kLow57Mask;
-    const bool translated = hypervisor_access
-                                ? (simrv::xlen::satp_mode(cpu.state().vsatp, active_xlen) != 0 ||
-                                   simrv::xlen::satp_mode(cpu.state().hgatp, active_xlen) != 0)
-                                : (cpu.effective_data_privilege() !=
-                                       simrv::xlen::PrivilegeLevel::Machine &&
-                                   simrv::xlen::satp_mode(cpu.active_satp(), active_xlen) != 0);
+    const bool translated =
+        hypervisor_access
+            ? (simrv::xlen::satp_mode(cpu.state().vsatp, active_xlen) != 0 ||
+               simrv::xlen::satp_mode(cpu.state().hgatp, active_xlen) != 0)
+            : (cpu.effective_data_privilege() != simrv::xlen::PrivilegeLevel::Machine &&
+               simrv::xlen::satp_mode(cpu.active_satp(), active_xlen) != 0);
     const uint64_t upper = translated && ((low >> 56U) & 1U) != 0 ? ~kLow57Mask : 0;
     return simrv::xlen::VirtAddr{static_cast<simrv::xlen::Word>(low | upper)};
 }
@@ -141,8 +141,7 @@ auto MemoryAccess::target_read(MemorySubsystem& mem, core::CPU& cpu, simrv::xlen
     const unsigned size_bytes = 1u << (std::to_underlying(funct3) & 0x3u);  // unchanged
     const bool is_amo = (static_cast<Opcode>(cpu.active_context().opcode) == Opcode::Amo);
     const bool is_lr = is_amo && (cpu.active_context().funct5 == Funct5Amo::Lr);
-    const bool hypervisor_access =
-        isa::is_hypervisor_memory_op(cpu.active_context().op_id);
+    const bool hypervisor_access = isa::is_hypervisor_memory_op(cpu.active_context().op_id);
     simrv::memory::PtePbmt pbmt = simrv::memory::PtePbmt::Pma;
 
     const bool crosses_page =
@@ -260,9 +259,8 @@ auto MemoryAccess::target_read(MemorySubsystem& mem, core::CPU& cpu, simrv::xlen
         }
     }
 
-    const ExceptionCode read_access_fault = (is_amo && !is_lr)
-                                                ? ExceptionCode::FaultStore
-                                                : ExceptionCode::FaultLoad;
+    const ExceptionCode read_access_fault =
+        (is_amo && !is_lr) ? ExceptionCode::FaultStore : ExceptionCode::FaultLoad;
     auto issue_read = [&](simrv::xlen::Address addr) -> simrv::xlen::Word {
         cpu.active_context().mem_paddr = addr;
         if (pbmt == simrv::memory::PtePbmt::Pma &&
@@ -438,11 +436,12 @@ auto MemoryAccess::target_read(MemorySubsystem& mem, core::CPU& cpu, simrv::xlen
     simrv::xlen::Word rdata = 0;
     simrv::xlen::Address p_addr = 0;
     bool is_global = false;
-    const PteAccess access_type =
-        (is_amo && !is_lr) ? PteAccess::Write
-        : isa::is_hlvx_op(cpu.active_context().op_id) ? PteAccess::ReadExecute
-                                                       : PteAccess::Read;
-    core::TLBEntry* entry = hypervisor_access ? nullptr : (is_amo && !is_lr)
+    const PteAccess access_type = (is_amo && !is_lr) ? PteAccess::Write
+                                  : isa::is_hlvx_op(cpu.active_context().op_id)
+                                      ? PteAccess::ReadExecute
+                                      : PteAccess::Read;
+    core::TLBEntry* entry = hypervisor_access ? nullptr
+                            : (is_amo && !is_lr)
                                 ? cpu.tlb.lookup_data_w(v_addr.raw(), current_asid, eff_priv)
                                 : cpu.tlb.lookup_data_r(v_addr.raw(), current_asid, eff_priv);
 
@@ -556,8 +555,7 @@ void MemoryAccess::target_write(MemorySubsystem& mem, core::CPU& cpu, simrv::xle
                                      size_bytes) > simrv::cache::DCache::kLineBytes;
     const bool is_amo = (static_cast<Opcode>(cpu.active_context().opcode) == Opcode::Amo);
     const bool is_sc = is_amo && (cpu.active_context().funct5 == Funct5Amo::Sc);
-    const bool hypervisor_access =
-        isa::is_hypervisor_memory_op(cpu.active_context().op_id);
+    const bool hypervisor_access = isa::is_hypervisor_memory_op(cpu.active_context().op_id);
     simrv::memory::PtePbmt pbmt = simrv::memory::PtePbmt::Pma;
     if (simrv::compiler::unlikely((v_addr & (size_bytes - 1u)) != 0)) {
         if (is_amo) {
@@ -660,7 +658,8 @@ void MemoryAccess::target_write(MemorySubsystem& mem, core::CPU& cpu, simrv::xle
             } else {
                 cpu.dcache.insert(completed_line, timed.line_data.data(),
                                   mesi_for(timed.payload.cap));
-                release_evicted_line(mem.system_bus(), cpu.dcache, cpu.hart_id(), TlPort::Data, cpu);
+                release_evicted_line(mem.system_bus(), cpu.dcache, cpu.hart_id(), TlPort::Data,
+                                     cpu);
             }
             TlChannelE ack{};
             ack.sink = timed.payload.sink;
@@ -701,16 +700,14 @@ void MemoryAccess::target_write(MemorySubsystem& mem, core::CPU& cpu, simrv::xle
                 addr == 0x40008000) {
                 if (!check_sc_reservation(addr)) return;
                 const bool low_word = funct3 == Funct3::Sw;
-                publish_host_write(low_word || is_guest_xlen32
-                                       ? ((cpu.machine_->tohost & 0xFFFFFFFF00000000ULL) |
-                                          (data & 0xFFFFFFFFULL))
-                                       : data,
-                                   low_word && !is_guest_xlen32
-                                       ? core::Machine::TohostWriteKind::LowWord
-                                            : core::Machine::TohostWriteKind::Full);
-            } else if (funct3 == Funct3::Sw &&
-                       (addr == cpu.machine_->isa_test_tohost() + 4 || addr == 0x80001004 ||
-                        addr == 0x40008004)) {
+                publish_host_write(
+                    low_word || is_guest_xlen32
+                        ? ((cpu.machine_->tohost & 0xFFFFFFFF00000000ULL) | (data & 0xFFFFFFFFULL))
+                        : data,
+                    low_word && !is_guest_xlen32 ? core::Machine::TohostWriteKind::LowWord
+                                                 : core::Machine::TohostWriteKind::Full);
+            } else if (funct3 == Funct3::Sw && (addr == cpu.machine_->isa_test_tohost() + 4 ||
+                                                addr == 0x80001004 || addr == 0x40008004)) {
                 if (!check_sc_reservation(addr)) return;
                 publish_host_write((cpu.machine_->tohost & 0x00000000FFFFFFFFULL) |
                                        (static_cast<uint64_t>(data & 0xFFFFFFFFULL) << 32),
@@ -937,9 +934,8 @@ void MemoryAccess::target_write(MemorySubsystem& mem, core::CPU& cpu, simrv::xle
 
     simrv::xlen::Address p_addr = 0;
     bool is_global = false;
-    core::TLBEntry* entry = hypervisor_access
-                                ? nullptr
-                                : cpu.tlb.lookup_data_w(v_addr.raw(), current_asid, eff_priv);
+    core::TLBEntry* entry =
+        hypervisor_access ? nullptr : cpu.tlb.lookup_data_w(v_addr.raw(), current_asid, eff_priv);
 
     if (eff_priv == kPrivMachine || !translation_enabled) {
         p_addr = eff_vaddr;
@@ -985,8 +981,8 @@ void MemoryAccess::target_write(MemorySubsystem& mem, core::CPU& cpu, simrv::xle
         // SC must still raise an access fault for an inaccessible or non-memory
         // target even when no LR reservation exists. Check target support before
         // the reservation can turn the operation into an ordinary failed SC.
-        if (is_sc && (pbmt != simrv::memory::PtePbmt::Pma ||
-                      !geometry.contains(p_addr, size_bytes))) {
+        if (is_sc &&
+            (pbmt != simrv::memory::PtePbmt::Pma || !geometry.contains(p_addr, size_bytes))) {
             cpu.active_context().pending_exception = ExceptionCode::FaultStore;
             cpu.active_context().pending_tval = v_addr.raw();
             return;
@@ -1156,8 +1152,7 @@ void MemoryAccess::execute_cmo(MemorySubsystem& mem, core::CPU& cpu, simrv::xlen
     simrv::xlen::Address paddr = vaddr;
     if (translation_enabled) {
         if constexpr (simrv::xlen::kIsXLen64) {
-            if (!simrv::Mmu::is_canonical(simrv::xlen::VirtAddr{vaddr}, active_satp,
-                                          active_xlen)) {
+            if (!simrv::Mmu::is_canonical(simrv::xlen::VirtAddr{vaddr}, active_satp, active_xlen)) {
                 cpu.active_context().pending_exception = ExceptionCode::StorePageFault;
                 cpu.active_context().pending_tval = vaddr;
                 return;
@@ -1209,8 +1204,7 @@ void MemoryAccess::execute_cmo(MemorySubsystem& mem, core::CPU& cpu, simrv::xlen
 
     // PMP verification
     const core::PmpAccessType pmp_access =
-        op == isa::OperationId::CBO_ZERO ? core::PmpAccessType::Write
-                                         : core::PmpAccessType::Read;
+        op == isa::OperationId::CBO_ZERO ? core::PmpAccessType::Write : core::PmpAccessType::Read;
     if (!core::pmp::check_access(cpu.state(), paddr, kLineSize, pmp_access, eff_priv)) {
         cpu.active_context().pending_exception = ExceptionCode::FaultStore;
         cpu.active_context().pending_tval = vaddr;

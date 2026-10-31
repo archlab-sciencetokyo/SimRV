@@ -1087,8 +1087,8 @@ void test_load_modal_path_completion() {
     expect(!modal.file_picker_active() && modal.get_input() == (root / "program.elf").string(),
            "file picker selects a matching file into the load path");
 
-    const auto relative_root = fs::relative(root, fs::current_path()).string() +
-                               fs::path::preferred_separator;
+    const auto relative_root =
+        fs::relative(root, fs::current_path()).string() + fs::path::preferred_separator;
     modal.open(simrv::tui::ModalType::LoadBinary, nullptr, 0);
     modal.set_input(relative_root);
     modal.open_file_picker();
@@ -1096,7 +1096,8 @@ void test_load_modal_path_completion() {
     modal.file_picker_input(13, simrv::tui::TuiKey::Enter);
     modal.handle_wheel(1);  // Down moves from .. to nested.elf.
     modal.file_picker_input(13, simrv::tui::TuiKey::Enter);
-    expect(!modal.file_picker_active() && modal.get_input() == (root / "subdir" / "nested.elf").string(),
+    expect(!modal.file_picker_active() &&
+               modal.get_input() == (root / "subdir" / "nested.elf").string(),
            "arrow navigation enters directories and selected paths are absolute");
 
     simrv::core::Machine key_machine;

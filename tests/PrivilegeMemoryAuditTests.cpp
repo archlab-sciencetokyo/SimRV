@@ -460,10 +460,15 @@ void test_ratified_privilege_csrs() {
     expect(mseccfg_val.has_value() && *mseccfg_val == 0x7,
            "Sticky bits MML/MMWP/RLB in mseccfg remain set after writing 0");
 
-    expect(cpu.csr_file.write(Csr::Menvcfg, 0x123).has_value(), "Write to menvcfg succeeds");
+    expect(cpu.csr_file.write(Csr::Menvcfg, 0x113).has_value(), "Write to menvcfg succeeds");
     auto menvcfg_val = cpu.csr_file.read(Csr::Menvcfg);
-    expect(menvcfg_val.has_value() && *menvcfg_val == 0x123,
+    expect(menvcfg_val.has_value() && *menvcfg_val == 0x113,
            "Read from menvcfg returns written value");
+    expect(cpu.csr_file.write(Csr::Menvcfg, 0x123).has_value(),
+           "Write with reserved CBIE encoding succeeds");
+    menvcfg_val = cpu.csr_file.read(Csr::Menvcfg);
+    expect(menvcfg_val.has_value() && *menvcfg_val == 0x103,
+           "Read from menvcfg masks reserved CBIE encoding");
 
     expect(cpu.csr_file.write(Csr::Senvcfg, 0x456).has_value(), "Write to senvcfg succeeds");
     auto senvcfg_val = cpu.csr_file.read(Csr::Senvcfg);
@@ -539,8 +544,7 @@ void test_ratified_privilege_csrs() {
            "Machine mode enables Sstc for virtual supervisor mode");
     expect((cpu.csr_file.read(Csr::Henvcfg).value_or(0) & kStce) != 0,
            "henvcfg.STCE reads back when menvcfg.STCE is set");
-    expect(cpu.csr_file.write(Csr::Vstimecmp, 1005).has_value(),
-           "HS mode writes vstimecmp");
+    expect(cpu.csr_file.write(Csr::Vstimecmp, 1005).has_value(), "HS mode writes vstimecmp");
     cpu.state().htimedelta = 5;
     cpu.clint_mmio.mtime.store(1000ULL, std::memory_order_relaxed);
     cpu.evaluate_timer_interrupt();
@@ -557,8 +561,7 @@ void test_ratified_privilege_csrs() {
     expect(cpu.state().vstimecmp == 2000,
            "VS-mode stimecmp write updates the virtual compare value");
     cpu.state().priv = PrivilegeLevel::Machine;
-    expect(cpu.csr_file.write(Csr::Henvcfg, 0).has_value(),
-           "Machine mode disables virtual Sstc");
+    expect(cpu.csr_file.write(Csr::Henvcfg, 0).has_value(), "Machine mode disables virtual Sstc");
     cpu.state().priv = PrivilegeLevel::Supervisor;
     const auto disabled_vstimecmp = cpu.csr_file.read(Csr::Stimecmp);
     expect(!disabled_vstimecmp.has_value() &&

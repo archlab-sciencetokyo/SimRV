@@ -1493,8 +1493,8 @@ void execute_vfncvt(core::CPU& cpu, isa::OperationId op_id, simrv::xlen::RegId r
                                                              NarrowE::kCanonicalNan);
                         continue;
                     }
-                    const auto converted = isa::fp::to_binary16(value, isa::frm_rounding_mode(
-                                                                           cpu.state().fcsr));
+                    const auto converted =
+                        isa::fp::to_binary16(value, isa::frm_rounding_mode(cpu.state().fcsr));
                     flags |= converted.flags;
                     vector::set_group_element<NarrowRaw>(cpu.state().regs, rd, i, converted.bits);
                     continue;

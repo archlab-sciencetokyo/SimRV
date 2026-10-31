@@ -14,27 +14,6 @@ namespace simrv::core {
 
 using namespace simrv::isa;
 
-namespace {
-[[nodiscard]] auto hypervisor_access_funct3(OperationId op) noexcept -> Funct3 {
-    switch (op) {
-        case OperationId::HLV_B: return Funct3::Lb;
-        case OperationId::HLV_BU: return Funct3::Lbu;
-        case OperationId::HLV_H: return Funct3::Lh;
-        case OperationId::HLV_HU:
-        case OperationId::HLVX_HU: return Funct3::Lhu;
-        case OperationId::HLV_W: return Funct3::Lw;
-        case OperationId::HLV_WU:
-        case OperationId::HLVX_WU: return Funct3::Lwu;
-        case OperationId::HLV_D:
-        case OperationId::HSV_D: return Funct3::Ld;
-        case OperationId::HSV_B: return Funct3::Sb;
-        case OperationId::HSV_H: return Funct3::Sh;
-        case OperationId::HSV_W: return Funct3::Sw;
-        default: return Funct3::Lb;
-    }
-}
-}  // namespace
-
 // ==========================================
 // MEM (Memory) Stage
 // ==========================================
@@ -108,9 +87,8 @@ void CPU::memory_load_phase(Machine& machine) {
 
     if (opcode == Opcode::Load || isa::is_hlv_op(ctx.op_id) ||
         (opcode == Opcode::Amo && funct5 != Funct5Amo::Sc)) {
-        const auto access_funct3 = isa::is_hlv_op(ctx.op_id)
-                                       ? hypervisor_access_funct3(ctx.op_id)
-                                       : ctx.funct3;
+        const auto access_funct3 =
+            pipeline::operation::effective_memory_funct3(ctx.op_id, ctx.funct3);
         ctx.mem_rdata = simrv::memory::MemoryAccess::loadInt(machine.memory_, *this, ctx.mem_addr,
                                                              access_funct3);
     }
@@ -156,9 +134,8 @@ void CPU::memory_store_phase(Machine& machine) {
     if ((opcode == Opcode::Store) || isa::is_hsv_op(ctx.op_id) ||
         (opcode == Opcode::Amo && funct5 == Funct5Amo::Sc) ||
         (opcode == Opcode::Amo && funct5 != Funct5Amo::Lr && funct5 != Funct5Amo::Sc)) {
-        const auto access_funct3 = isa::is_hsv_op(ctx.op_id)
-                                       ? hypervisor_access_funct3(ctx.op_id)
-                                       : ctx.funct3;
+        const auto access_funct3 =
+            pipeline::operation::effective_memory_funct3(ctx.op_id, ctx.funct3);
         simrv::memory::MemoryAccess::storeInt(machine.memory_, *this, ctx.mem_addr, ctx.mem_wdata,
                                               access_funct3);
     }

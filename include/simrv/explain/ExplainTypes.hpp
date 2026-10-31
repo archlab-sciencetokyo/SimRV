@@ -137,9 +137,11 @@ struct CsrDataflow {
     uint32_t address = 0;
     CsrDetails metadata{};
     simrv::xlen::PrivilegeLevel active_privilege = simrv::xlen::PrivilegeLevel::Machine;
+    bool active_virtualization = false;
     bool privilege_permitted = true;
     bool attempts_write = false;
     bool write_permitted = true;
+    std::optional<simrv::isa::ExceptionCode> access_exception;
     std::optional<simrv::xlen::CsrValue> current_value;
     std::optional<simrv::xlen::CsrValue> predicted_write_value;
 };
@@ -161,6 +163,8 @@ struct VectorDataflow {
  */
 struct PredictedStateEffect {
     simrv::xlen::Address next_pc{0};
+    std::optional<simrv::xlen::PrivilegeLevel> next_privilege;
+    std::optional<bool> next_virtualization;
     std::optional<simrv::xlen::RegId> written_reg;
     simrv::pipeline::operation::RegBank written_bank{simrv::pipeline::operation::RegBank::None};
     std::string written_reg_name;
@@ -192,6 +196,7 @@ struct InstructionExplanation {
     uint32_t canonical_bits = 0;
     unsigned active_xlen = simrv::xlen::kXLenBits;
     simrv::xlen::PrivilegeLevel active_privilege = simrv::xlen::PrivilegeLevel::Machine;
+    bool active_virtualization = false;
     bool state_grounded = false;
 
     simrv::isa::InstFormat format{simrv::isa::InstFormat::Unknown};

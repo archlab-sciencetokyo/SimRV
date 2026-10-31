@@ -18,9 +18,9 @@ void FilePickerModal::render_content(std::vector<std::string>& content_rows, int
                                      int /*height*/) {
     if (!host_) return;
     content_rows.push_back(std::format("Directory: {}", host_->file_picker_directory_.string()));
-    content_rows.push_back(
-        std::format("Filter: {}_  \033[2m(Type to filter; arrows navigate, Enter opens, Esc returns)\033[0m",
-                    host_->file_picker_filter_));
+    content_rows.push_back(std::format(
+        "Filter: {}_  \033[2m(Type to filter; arrows navigate, Enter opens, Esc returns)\033[0m",
+        host_->file_picker_filter_));
     content_rows.push_back("");
     if (host_->file_picker_entries_.empty()) {
         content_rows.push_back("No matching files or directories");

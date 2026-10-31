@@ -4,6 +4,7 @@
 #include <array>
 #include <cstring>
 #include <format>
+#include <limits>
 #include <map>
 #include <optional>
 #include <set>
@@ -240,6 +241,12 @@ auto validate_fdt_isa(std::span<const uint8_t> blob, uint64_t selected_misa)
 auto patch_fdt(std::span<const uint8_t> blob, uint64_t dram_base, uint64_t dram_size,
                uint32_t num_harts, FdtFramebufferInfo* out_fb, uint64_t timebase_hz,
                uint64_t cpu_clock_hz) -> std::expected<std::vector<uint8_t>, std::string> {
+    if (timebase_hz > std::numeric_limits<uint32_t>::max()) {
+        return std::unexpected("timebase frequency does not fit the FDT 32-bit property");
+    }
+    if (cpu_clock_hz > std::numeric_limits<uint32_t>::max()) {
+        return std::unexpected("CPU clock frequency does not fit the FDT 32-bit property");
+    }
     try {
         if (blob.size() < 40 || be32(blob, 0) != kMagic)
             return std::unexpected("invalid device tree header");

@@ -350,8 +350,8 @@ void test_zvkt_vector_latency() {
 
     constexpr simrv::xlen::Instruction kVandnVv =
         (1U << 26U) | (1U << 25U) | (6U << 20U) | (4U << 15U) | (2U << 7U) | 0x57U;
-    constexpr simrv::xlen::Instruction kVclzV =
-        (0x12U << 26U) | (1U << 25U) | (6U << 20U) | (8U << 15U) | (2U << 12U) | (2U << 7U) | 0x57U;
+    constexpr simrv::xlen::Instruction kVclzV = (0x12U << 26U) | (1U << 25U) | (6U << 20U) |
+                                                (12U << 15U) | (2U << 12U) | (2U << 7U) | 0x57U;
     TEST_CHECK(simrv::pipeline::decoder(kVandnVv) == OperationId::VANDN_VV);
     TEST_CHECK(simrv::pipeline::decoder(kVclzV) == OperationId::VCLZ_V);
 

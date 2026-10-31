@@ -112,14 +112,23 @@ auto make_inspection_report(const simrv::core::Machine& machine, size_t hart,
     const auto spec =
         simrv::explain::get_operation_spec(expl_opt ? expl_opt->op_id : context.op_id);
     out << "  \"selected_hart\": " << selected_hart << ",\n";
-    out << "  \"instruction\": {\"pc\": " << quoted(hex_value(state.pc))
-    << ", \"raw\": "
-    << quoted(std::format("0x{:08x}", expl_opt ? expl_opt->raw_bits : context.ir_org))
-    << ", \"operation\": "
-    << quoted(simrv::pipeline::operation_name(expl_opt ? expl_opt->op_id : context.op_id))
-    << ", \"mnemonic\": " << quoted(spec.mnemonic)
-    << ", \"extension\": " << quoted(spec.reference.extension)
-    << ", \"spec_section\": " << quoted(spec.reference.section) << "},\n";
+    out << "  \"instruction\": {\"pc\": " << quoted(hex_value(state.pc)) << ", \"raw\": "
+        << quoted(std::format("0x{:08x}", expl_opt ? expl_opt->raw_bits : context.ir_org))
+        << ", \"operation\": "
+        << quoted(simrv::pipeline::operation_name(expl_opt ? expl_opt->op_id : context.op_id))
+        << ", \"mnemonic\": " << quoted(spec.mnemonic)
+        << ", \"assembly\": " << quoted(expl_opt ? expl_opt->assembly : std::string(spec.mnemonic))
+        << ", \"extension\": " << quoted(spec.reference.extension)
+        << ", \"spec_section\": " << quoted(spec.reference.section)
+        << ", \"formula\": " << quoted(spec.reference.formula) << ", \"predicted_next_pc\": "
+        << quoted(hex_value(expl_opt ? expl_opt->predicted_effect.next_pc : state.pc))
+        << ", \"predicted_writeback\": "
+        << quoted(expl_opt ? expl_opt->predicted_effect.effect_equation : std::string{})
+        << ", \"predicted_trap\": "
+        << (expl_opt && expl_opt->predicted_effect.predicted_trap.has_value()
+                ? quoted(std::string_view(hex_value(*expl_opt->predicted_effect.predicted_trap)))
+                : "null")
+        << "},\n";
     out << "  \"architectural_state\": {\n";
     out << "    \"privilege\": " << quoted(privilege_name(state.priv)) << ",\n";
     out << "    \"gpr\": [";

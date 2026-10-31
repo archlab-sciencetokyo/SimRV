@@ -28,7 +28,8 @@ auto PerformanceCounters::read_hpmevent(size_t index) const noexcept -> uint64_t
     return hpmevent_[index];
 }
 
-void PerformanceCounters::write_hpmevent(size_t index, uint64_t value, bool has_hypervisor) noexcept {
+void PerformanceCounters::write_hpmevent(size_t index, uint64_t value,
+                                         bool has_hypervisor) noexcept {
     if (index < 3 || index >= kNumHpmCounters) return;
     // Sscofpmf defines VS/VU filtering when the H extension is implemented.
     constexpr uint64_t kBaseImplemented = (uint64_t{0xF} << 60) | ((uint64_t{1} << 56) - 1);
@@ -89,8 +90,7 @@ void PerformanceCounters::rebuild_listening_mask() noexcept {
         if ((raw & (uint64_t{1} << 62)) != 0) machine_inhibit_mask_ |= (1U << i);
         if ((raw & (uint64_t{1} << 61)) != 0) supervisor_inhibit_mask_ |= (1U << i);
         if ((raw & (uint64_t{1} << 60)) != 0) user_inhibit_mask_ |= (1U << i);
-        if ((raw & kVirtualSupervisorInhibit) != 0)
-            virtual_supervisor_inhibit_mask_ |= (1U << i);
+        if ((raw & kVirtualSupervisorInhibit) != 0) virtual_supervisor_inhibit_mask_ |= (1U << i);
         if ((raw & kVirtualUserInhibit) != 0) virtual_user_inhibit_mask_ |= (1U << i);
     }
 }

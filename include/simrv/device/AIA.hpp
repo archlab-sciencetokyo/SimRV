@@ -7,6 +7,7 @@
 #include <array>
 #include <cstdint>
 
+#include "simrv/core/PlatformTopology.hpp"
 #include "simrv/memory/MmioDevice.hpp"
 #include "simrv/xlen/IdentifierTypes.hpp"
 
@@ -25,7 +26,7 @@ namespace simrv::device {
  */
 class Imsic : public memory::MmioDevice {
    public:
-    static constexpr size_t kMaxHarts = 16;
+    static constexpr size_t kMaxHarts = core::topology::kMaxSimulatedHarts;
     static constexpr size_t kNumInterrupts = 64;  // 1..63
 
     enum class Privilege : uint8_t { Machine = 0, Supervisor = 1 };

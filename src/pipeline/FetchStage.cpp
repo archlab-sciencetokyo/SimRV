@@ -270,10 +270,9 @@ auto CPU::translate_stage_address(Machine& machine, simrv::xlen::VirtAddr virtua
         simrv::xlen::Address guest_fault_address = 0;
         bool implicit_vs_stage_page_table_fault = false;
         if (hypervisor_access) state_.virt = true;
-        auto result = mmu->translate(virtual_address, access, privilege,
-                                     active_translation_status(),
-                                     active_satp(), active_xlen, false, &state_,
-                                     &guest_fault_address, &implicit_vs_stage_page_table_fault);
+        auto result = mmu->translate(
+            virtual_address, access, privilege, active_translation_status(), active_satp(),
+            active_xlen, false, &state_, &guest_fault_address, &implicit_vs_stage_page_table_fault);
         if (hypervisor_access) state_.virt = false;
         active_context().pending_htval =
             result || !is_guest_page_fault(result.error()) ? 0 : guest_fault_address >> 2U;
@@ -290,9 +289,9 @@ auto CPU::translate_stage_address(Machine& machine, simrv::xlen::VirtAddr virtua
             machine.memory_.system_bus().cancel_source(timed_walk.source);
         }
         if (hypervisor_access) state_.virt = true;
-        timed_walk.walk = mmu->begin_page_walk(virtual_address, access, privilege,
-                                               active_translation_status(),
-                                               active_satp(), active_xlen, false, &state_);
+        timed_walk.walk =
+            mmu->begin_page_walk(virtual_address, access, privilege, active_translation_status(),
+                                 active_satp(), active_xlen, false, &state_);
         if (hypervisor_access) state_.virt = false;
         timed_walk.source = simrv::memory::make_tl_source(hart_id(), port);
         timed_walk.active = true;
@@ -437,8 +436,7 @@ void CPU::fetch_read_instruction_word(Machine& machine) {
                     return;
                 }
                 if (icache.miss_count() != misses_before)
-                    record_hpm_event(HpmEvent::ICacheMiss,
-                                     icache.miss_count() - misses_before);
+                    record_hpm_event(HpmEvent::ICacheMiss, icache.miss_count() - misses_before);
             }
 
             if (machine.runtime_profile.is_cycle_mode()) {
@@ -548,8 +546,7 @@ void CPU::fetch_read_instruction_word(Machine& machine) {
                     return h_data;
                 }
                 if (icache.miss_count() != misses_before)
-                    record_hpm_event(HpmEvent::ICacheMiss,
-                                     icache.miss_count() - misses_before);
+                    record_hpm_event(HpmEvent::ICacheMiss, icache.miss_count() - misses_before);
             }
 
             std::array<simrv::xlen::Byte, simrv::cache::ICache::kLineBytes> line_data{};
@@ -807,8 +804,7 @@ void CPU::decode_and_normalize_instruction(Machine& machine) {
                            (op == Opcode::OpFp) || (op == Opcode::MAdd) || (op == Opcode::MSub) ||
                            (op == Opcode::NMAdd) || (op == Opcode::NMSub));
         if (is_vector) {
-            if (simrv::compiler::unlikely(
-                    !state_.extension_state_enabled(MstatusBit::Vs))) {
+            if (simrv::compiler::unlikely(!state_.extension_state_enabled(MstatusBit::Vs))) {
                 if (!machine.tui_enabled()) {
                     simrv::log::warn("[VS CHECK] VS is 0! mstatus=0x{:x}, Vs mask=0x{:x}",
                                      state_.virt ? state_.vsstatus : state_.mstatus,
@@ -817,8 +813,7 @@ void CPU::decode_and_normalize_instruction(Machine& machine) {
                 is_valid = false;
             }
         } else if (is_fp_op) {
-            if (simrv::compiler::unlikely(
-                    !state_.extension_state_enabled(MstatusBit::Fs))) {
+            if (simrv::compiler::unlikely(!state_.extension_state_enabled(MstatusBit::Fs))) {
                 is_valid = false;
             }
         }

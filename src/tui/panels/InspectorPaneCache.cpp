@@ -333,9 +333,8 @@ auto InspectorPane::render_cache_stats(const simrv::core::CPU& cpu, int logical_
         }
         case 15: {
             bool is_ic = (cache_inspect_type_ == 0);
-            const auto& cache = is_ic
-                                    ? static_cast<const simrv::cache::BaseCache<512, 64, 8>&>(ic)
-                                    : static_cast<const simrv::cache::BaseCache<512, 64, 8>&>(dc);
+            const auto& cache = is_ic ? static_cast<const simrv::cache::BaseCache<512, 64, 8>&>(ic)
+                                      : static_cast<const simrv::cache::BaseCache<512, 64, 8>&>(dc);
             simrv::xlen::Address ev_tag = cache.last_evicted_tag();
             std::string ev_str =
                 (ev_tag == ~simrv::xlen::Address{0}) ? "None" : std::format("0x{:016x}", ev_tag);

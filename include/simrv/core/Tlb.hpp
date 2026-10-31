@@ -28,8 +28,8 @@ struct alignas(32) TLBEntry {
     simrv::xlen::PrivilegeLevel priv =
         simrv::xlen::PrivilegeLevel::User;  ///< Architectural privilege level (1 byte)
     simrv::memory::PtePbmt pbmt = simrv::memory::PtePbmt::Pma;  ///< Translated memory type
-    bool valid{false};                      ///< Entry validity flag (1 byte)
-    bool global{false};                     ///< Global page mapping flag (1 byte)
+    bool valid{false};                                          ///< Entry validity flag (1 byte)
+    bool global{false};  ///< Global page mapping flag (1 byte)
 };
 
 /**

@@ -14,8 +14,7 @@ namespace simrv {
 auto Mmu::translate(simrv::xlen::VirtAddr v_addr, PteAccess access,
                     simrv::xlen::PrivilegeLevel priv, simrv::xlen::CsrValue mstatus,
                     simrv::xlen::Word satp, unsigned xlen, bool update_access_bits,
-                    const core::ArchState* arch_state,
-                    simrv::xlen::Address* guest_fault_address,
+                    const core::ArchState* arch_state, simrv::xlen::Address* guest_fault_address,
                     bool* implicit_vs_stage_page_table_fault)
     -> std::expected<PageWalkResult, simrv::xlen::TrapCause> {
     // Machine mode bypasses translation. For VS/VU, even a Bare vsatp still requires

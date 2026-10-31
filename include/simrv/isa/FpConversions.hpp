@@ -62,10 +62,10 @@ template <typename UInt, unsigned FracBits, unsigned ExpBits, int Bias>
         const bool to_infinity = rm == RoundingMode::Rne || rm == RoundingMode::Rmm ||
                                  (rm == RoundingMode::Rup && !sign) ||
                                  (rm == RoundingMode::Rdn && sign);
-        return {static_cast<uint16_t>(half_sign | (to_infinity ? UINT16_C(0x7C00)
-                                                               : UINT16_C(0x7BFF))),
-                static_cast<simrv::xlen::CsrValue>(FflagsBit::Of) |
-                    static_cast<simrv::xlen::CsrValue>(FflagsBit::Nx)};
+        return {
+            static_cast<uint16_t>(half_sign | (to_infinity ? UINT16_C(0x7C00) : UINT16_C(0x7BFF))),
+            static_cast<simrv::xlen::CsrValue>(FflagsBit::Of) |
+                static_cast<simrv::xlen::CsrValue>(FflagsBit::Nx)};
     }
 
     if (exponent >= -14) {
@@ -83,15 +83,14 @@ template <typename UInt, unsigned FracBits, unsigned ExpBits, int Bias>
             const bool to_infinity = rm == RoundingMode::Rne || rm == RoundingMode::Rmm ||
                                      (rm == RoundingMode::Rup && !sign) ||
                                      (rm == RoundingMode::Rdn && sign);
-            return {static_cast<uint16_t>(half_sign | (to_infinity ? UINT16_C(0x7C00)
-                                                                   : UINT16_C(0x7BFF))),
+            return {static_cast<uint16_t>(half_sign |
+                                          (to_infinity ? UINT16_C(0x7C00) : UINT16_C(0x7BFF))),
                     static_cast<simrv::xlen::CsrValue>(FflagsBit::Of) |
                         static_cast<simrv::xlen::CsrValue>(FflagsBit::Nx)};
         }
-        const uint16_t result = static_cast<uint16_t>(half_sign |
-                                                     (static_cast<uint16_t>(result_exponent + 15)
-                                                      << 10) |
-                                                     (static_cast<uint16_t>(quotient) & 0x3FF));
+        const uint16_t result =
+            static_cast<uint16_t>(half_sign | (static_cast<uint16_t>(result_exponent + 15) << 10) |
+                                  (static_cast<uint16_t>(quotient) & 0x3FF));
         return {result, inexact ? static_cast<simrv::xlen::CsrValue>(FflagsBit::Nx) : 0};
     }
 

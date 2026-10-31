@@ -354,8 +354,7 @@ void CPU::fast_forward_wfi(Machine& machine) {
     }
     const bool vstce = (state_.henvcfg & (uint64_t{1} << 63U)) != 0;
     if (stce && vstce && state_.vstimecmp != std::numeric_limits<simrv::xlen::Counter>::max()) {
-        const auto virtual_deadline =
-            static_cast<uint64_t>(state_.vstimecmp - state_.htimedelta);
+        const auto virtual_deadline = static_cast<uint64_t>(state_.vstimecmp - state_.htimedelta);
         if (virtual_deadline > cur_mtime && virtual_deadline < next_deadline) {
             next_deadline = virtual_deadline;
         }

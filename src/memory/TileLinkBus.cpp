@@ -243,15 +243,13 @@ void TileLinkBus::process_request(const TimedRequest& request) {
                 (machine_.primary_hart().state().regs.xlen == 32) || !simrv::xlen::kIsXLen64;
             if (req.address == machine_.isa_test_tohost() || req.address == 0x80001000 ||
                 req.address == 0x40008000) {
-                const bool low_word =
-                    funct3 == static_cast<simrv::xlen::Instruction>(Funct3::Sw);
+                const bool low_word = funct3 == static_cast<simrv::xlen::Instruction>(Funct3::Sw);
                 machine_.publish_tohost_write(
                     low_word || is_guest_xlen32
                         ? ((machine_.tohost & 0xFFFFFFFF00000000ULL) | (req.data & 0xFFFFFFFFULL))
                         : req.data,
-                    low_word && !is_guest_xlen32
-                        ? core::Machine::TohostWriteKind::LowWord
-                             : core::Machine::TohostWriteKind::Full);
+                    low_word && !is_guest_xlen32 ? core::Machine::TohostWriteKind::LowWord
+                                                 : core::Machine::TohostWriteKind::Full);
             } else if (funct3 == static_cast<simrv::xlen::Instruction>(Funct3::Sw) &&
                        (req.address == machine_.isa_test_tohost() + 4 ||
                         req.address == 0x80001004 || req.address == 0x40008004)) {

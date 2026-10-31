@@ -208,37 +208,35 @@ void LogModal::render([[maybe_unused]] std::vector<std::string>& content_rows,
         return std::format("{}{}\033[0m", color, text);
     };
     const std::string opt_all = filter_badge("\033[39m", "[a] ALL", !min_level_.has_value());
-    const std::string opt_info = filter_badge(
-        simrv::log::standard_ansi_color(simrv::log::Level::Info), "[i] INFO+",
-        min_level_ == simrv::log::Level::Info);
-    const std::string opt_warn = filter_badge(
-        simrv::log::standard_ansi_color(simrv::log::Level::Warn), "[w] WARN+",
-        min_level_ == simrv::log::Level::Warn);
-    const std::string opt_err = filter_badge(
-        simrv::log::standard_ansi_color(simrv::log::Level::Error), "[e] ERROR",
-        min_level_ == simrv::log::Level::Error);
-    const std::string follow_badge = follow_tail_
-                                         ? std::format("{}[f] Follow: ON\033[0m",
-                                                       simrv::log::standard_ansi_color(
-                                                           simrv::log::Level::Info))
-                                         : std::format("{}[f] Follow: OFF\033[0m",
-                                                       simrv::log::standard_ansi_color(
-                                                           simrv::log::Level::Warn));
+    const std::string opt_info =
+        filter_badge(simrv::log::standard_ansi_color(simrv::log::Level::Info), "[i] INFO+",
+                     min_level_ == simrv::log::Level::Info);
+    const std::string opt_warn =
+        filter_badge(simrv::log::standard_ansi_color(simrv::log::Level::Warn), "[w] WARN+",
+                     min_level_ == simrv::log::Level::Warn);
+    const std::string opt_err =
+        filter_badge(simrv::log::standard_ansi_color(simrv::log::Level::Error), "[e] ERROR",
+                     min_level_ == simrv::log::Level::Error);
+    const std::string follow_badge =
+        follow_tail_ ? std::format("{}[f] Follow: ON\033[0m",
+                                   simrv::log::standard_ansi_color(simrv::log::Level::Info))
+                     : std::format("{}[f] Follow: OFF\033[0m",
+                                   simrv::log::standard_ansi_color(simrv::log::Level::Warn));
 
     std::string stats_badge;
     if (log_buffer.error_count() > 0) {
-        stats_badge += std::format("{}{} ✖\033[0m ",
-                                   simrv::log::standard_ansi_color(simrv::log::Level::Error),
-                                   log_buffer.error_count());
+        stats_badge +=
+            std::format("{}{} ✖\033[0m ", simrv::log::standard_ansi_color(simrv::log::Level::Error),
+                        log_buffer.error_count());
     }
     if (log_buffer.warn_count() > 0) {
-        stats_badge += std::format("{}{} ⚠\033[0m",
-                                   simrv::log::standard_ansi_color(simrv::log::Level::Warn),
-                                   log_buffer.warn_count());
+        stats_badge +=
+            std::format("{}{} ⚠\033[0m", simrv::log::standard_ansi_color(simrv::log::Level::Warn),
+                        log_buffer.warn_count());
     }
     if (stats_badge.empty()) {
-        stats_badge = std::format("{}0 err\033[0m",
-                                  simrv::log::standard_ansi_color(simrv::log::Level::Info));
+        stats_badge =
+            std::format("{}0 err\033[0m", simrv::log::standard_ansi_color(simrv::log::Level::Info));
     }
 
     add_row(std::format(" {}  {}  {}  {}  │  {}  │  {}", opt_all, opt_info, opt_warn, opt_err,

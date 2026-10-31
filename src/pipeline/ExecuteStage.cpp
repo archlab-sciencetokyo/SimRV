@@ -124,9 +124,8 @@ void CPU::execute_core(Machine& machine) {
             ctx.tkn = false;
             ctx.mem_addr = ctx.rrs1;
             if (!amo_address_aligned(ctx.mem_addr, ctx.funct3)) {
-                ctx.pending_exception = (ctx.funct5 == Funct5Amo::Lr)
-                                            ? ExceptionCode::FaultLoad
-                                            : ExceptionCode::FaultStore;
+                ctx.pending_exception = (ctx.funct5 == Funct5Amo::Lr) ? ExceptionCode::FaultLoad
+                                                                      : ExceptionCode::FaultStore;
                 ctx.pending_tval = ctx.mem_addr;
                 break;
             }
@@ -166,24 +165,12 @@ void CPU::execute_core(Machine& machine) {
 void CPU::execute_system(Machine& machine) {
     auto& ctx = active_context();
     if (ctx.op_id == isa::OperationId::WRS_NTO || ctx.op_id == isa::OperationId::WRS_STO) {
-        // A WRS.NTO with an active reservation can remain stalled until its bounded
-        // timeout. If TW/VTW prevents that wait, it traps. With no reservation, the
-        // instruction can complete immediately; WRS.STO also has a short timeout and
-        // does not use TW/VTW.
-        if (ctx.op_id == isa::OperationId::WRS_NTO && state_.lr_reservation_active &&
-            state_.priv < kPrivMachine) {
-            const bool timeout_wait = (state_.mstatus & MstatusBit::Tw) != 0;
-            const bool virtual_timeout_trap =
-                !timeout_wait && state_.virt &&
-                (state_.hstatus & (simrv::xlen::CsrValue{1} << 21U)) != 0;
-            const bool timeout_trap = timeout_wait || virtual_timeout_trap;
-            if (timeout_trap) {
-                ctx.pending_exception = virtual_timeout_trap ? ExceptionCode::VirtualInstruction
-                                                              : ExceptionCode::IllegalInstruction;
-                ctx.pending_tval = ctx.ir;
-                ctx.tkn = false;
-                return;
-            }
+        if (const auto exc =
+                TrapController::check_privileged_instruction(state_, ctx.op_id, ctx.ir)) {
+            ctx.pending_exception = *exc;
+            ctx.pending_tval = ctx.ir;
+            ctx.tkn = false;
+            return;
         }
         ctx.tkn = false;
         return;

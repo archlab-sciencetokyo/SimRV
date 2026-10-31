@@ -9,6 +9,7 @@
 #include <cstdint>
 #include <limits>
 
+#include "simrv/core/PlatformTopology.hpp"
 #include "simrv/memory/Mmio.hpp"
 #include "simrv/memory/TileLinkNode.hpp"
 #include "simrv/xlen/ScalarTypes.hpp"
@@ -34,7 +35,7 @@ class Clint : public memory::TileLinkNode {
 
     static constexpr simrv::xlen::Address kBaseAddress = simrv::mmio::kClintBaseAddress;
     static constexpr simrv::xlen::Address kSize = simrv::mmio::kClintSize;
-    static constexpr size_t kMaxClintHarts = 16;
+    static constexpr size_t kMaxClintHarts = core::topology::kMaxSimulatedHarts;
 
     [[nodiscard]] auto name() const -> const char* final { return "clint"; }
     [[nodiscard]] auto base_address() const -> simrv::xlen::Address final { return base_address_; }

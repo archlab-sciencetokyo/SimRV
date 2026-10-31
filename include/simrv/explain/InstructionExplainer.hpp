@@ -91,6 +91,13 @@ void explain_instruction(uint32_t raw_inst);
 [[nodiscard]] auto get_isa_extension_name(isa::OperationId op_id) -> std::string_view;
 
 /**
+ * @brief Format a raw 32-bit or 16-bit compressed instruction into its canonical assembly string.
+ */
+[[nodiscard]] auto format_instruction_assembly(uint32_t raw_inst, simrv::xlen::Address pc = 0,
+                                               unsigned xlen = simrv::xlen::kXLenBits)
+    -> std::string;
+
+/**
  * @brief Build a formal InstructionExplanation from a raw instruction word without live state.
  */
 [[nodiscard]] auto explain_static(uint32_t raw_inst, simrv::xlen::Address pc = 0,

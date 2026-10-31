@@ -1124,19 +1124,14 @@ void ExecuteUnitVector::execute_vector(core::CPU& cpu, memory::MemorySubsystem& 
         const bool has_f = isa::misa_has_extension(cpu.state().misa, isa::IsaExtension::F);
         const bool has_d = isa::misa_has_extension(cpu.state().misa, isa::IsaExtension::D);
         const bool zvfhmin_conversion =
-            op_id == isa::OperationId::VFWCVT_F_F_V ||
-            op_id == isa::OperationId::VFNCVT_F_F_W;
+            op_id == isa::OperationId::VFWCVT_F_F_V || op_id == isa::OperationId::VFNCVT_F_F_W;
         const bool sew16_fp32_integer_conversion =
-            op_id == isa::OperationId::VFWCVT_XU_F_V ||
-            op_id == isa::OperationId::VFWCVT_X_F_V ||
-            op_id == isa::OperationId::VFWCVT_F_XU_V ||
-            op_id == isa::OperationId::VFWCVT_F_X_V ||
+            op_id == isa::OperationId::VFWCVT_XU_F_V || op_id == isa::OperationId::VFWCVT_X_F_V ||
+            op_id == isa::OperationId::VFWCVT_F_XU_V || op_id == isa::OperationId::VFWCVT_F_X_V ||
             op_id == isa::OperationId::VFWCVT_RTZ_XU_F_V ||
             op_id == isa::OperationId::VFWCVT_RTZ_X_F_V ||
-            op_id == isa::OperationId::VFNCVT_XU_F_W ||
-            op_id == isa::OperationId::VFNCVT_X_F_W ||
-            op_id == isa::OperationId::VFNCVT_F_XU_W ||
-            op_id == isa::OperationId::VFNCVT_F_X_W ||
+            op_id == isa::OperationId::VFNCVT_XU_F_W || op_id == isa::OperationId::VFNCVT_X_F_W ||
+            op_id == isa::OperationId::VFNCVT_F_XU_W || op_id == isa::OperationId::VFNCVT_F_X_W ||
             op_id == isa::OperationId::VFNCVT_RTZ_XU_F_W ||
             op_id == isa::OperationId::VFNCVT_RTZ_X_F_W;
         const bool scalar_fp_enabled =

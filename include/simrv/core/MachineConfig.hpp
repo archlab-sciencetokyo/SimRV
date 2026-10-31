@@ -15,6 +15,7 @@
 #include <utility>
 
 #include "simrv/core/PlatformTiming.hpp"
+#include "simrv/core/PlatformTopology.hpp"
 #include "simrv/core/SoCConfig.hpp"
 #include "simrv/core/SoCDeviceRegistry.hpp"
 #include "simrv/isa/IsaConfig.hpp"
@@ -46,7 +47,7 @@ struct MemoryGeometry {
 
 struct ExecutionConfig {
     // ACLINT and AIA allocate one interrupt file per simulated hart.
-    static constexpr uint32_t kMaxHarts = 16;
+    static constexpr uint32_t kMaxHarts = topology::kMaxSimulatedHarts;
 
     bool appmode = true;
     /// Enables ACT's test-only simple interrupt generator at its documented MMIO window.
@@ -190,7 +191,8 @@ struct MachineConfig {
             }
         }
         if (execution.num_harts == 0 || execution.num_harts > ExecutionConfig::kMaxHarts) {
-            return std::unexpected("hart count must be between 1 and 16");
+            return std::unexpected("hart count must be between 1 and " +
+                                   std::to_string(ExecutionConfig::kMaxHarts));
         }
         if (execution.smp_quantum == 0) {
             return std::unexpected("SMP quantum must be non-zero");
@@ -248,6 +250,14 @@ struct MachineConfig {
         }
         if (execution.timebase_hz > execution.cpu_clock_hz) {
             return std::unexpected("timebase frequency cannot exceed CPU clock frequency");
+        }
+        if (execution.timebase_hz > std::numeric_limits<uint32_t>::max()) {
+            return std::unexpected(
+                "timebase frequency must fit the FDT 32-bit timebase-frequency property");
+        }
+        if (execution.cpu_clock_hz > std::numeric_limits<uint32_t>::max()) {
+            return std::unexpected(
+                "CPU clock frequency must fit the FDT 32-bit clock-frequency property");
         }
         return {};
     }
