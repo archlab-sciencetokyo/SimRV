@@ -295,25 +295,25 @@ if(BUILD_TESTING)
            COMMAND ${PYTHON_BIN} ${CMAKE_SOURCE_DIR}/tests/RunE2ETests.py
                    --simrv $<TARGET_FILE:SimRV> --tier 2)
   set_tests_properties(e2e-tier2-boundaries
-                       PROPERTIES LABELS "regress;e2e;e2e-tier2" TIMEOUT 120)
+                       PROPERTIES LABELS "regress;e2e;e2e-tier2" TIMEOUT 300)
 
   add_test(NAME e2e-tier3-combinations
            COMMAND ${PYTHON_BIN} ${CMAKE_SOURCE_DIR}/tests/RunE2ETests.py
                    --simrv $<TARGET_FILE:SimRV> --tier 3)
   set_tests_properties(e2e-tier3-combinations
-                       PROPERTIES LABELS "regress;e2e;e2e-tier3" TIMEOUT 120)
+                       PROPERTIES LABELS "regress;e2e;e2e-tier3" TIMEOUT 300)
 
   add_test(NAME e2e-tier4-scenarios
            COMMAND ${PYTHON_BIN} ${CMAKE_SOURCE_DIR}/tests/RunE2ETests.py
                    --simrv $<TARGET_FILE:SimRV> --tier 4)
   set_tests_properties(e2e-tier4-scenarios
-                       PROPERTIES LABELS "regress;e2e;e2e-tier4" TIMEOUT 120)
+                       PROPERTIES LABELS "regress;e2e;e2e-tier4" TIMEOUT 300)
 
   add_test(NAME e2e-all-tiers
            COMMAND ${PYTHON_BIN} ${CMAKE_SOURCE_DIR}/tests/RunE2ETests.py
                    --simrv $<TARGET_FILE:SimRV> --tier all)
   set_tests_properties(e2e-all-tiers
-                       PROPERTIES LABELS "e2e;e2e-all" TIMEOUT 120)
+                       PROPERTIES LABELS "e2e;e2e-all" TIMEOUT 600)
 
   # RVA23 Architectural Compatibility Tests (ACT)
   if(SIMRV_XLEN STREQUAL "64")

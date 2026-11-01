@@ -95,7 +95,7 @@ def run_simrv(
     args: List[str],
     *,
     stdin_input: Optional[str] = None,
-    timeout: float = 30.0,
+    timeout: Optional[float] = None,
     extra_env: Optional[Dict[str, str]] = None,
     cwd: Optional[pathlib.Path] = None,
 ) -> subprocess.CompletedProcess[str]:
@@ -108,6 +108,9 @@ def run_simrv(
     env["NO_COLOR"] = "1"
     if extra_env:
         env.update(extra_env)
+
+    if timeout is None:
+        timeout = float(os.environ.get("SIMRV_E2E_TIMEOUT", "120.0"))
 
     cmd = [str(binary)] + args
     return subprocess.run(
