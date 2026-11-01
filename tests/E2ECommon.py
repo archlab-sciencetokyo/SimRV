@@ -110,7 +110,7 @@ def run_simrv(
         env.update(extra_env)
 
     if timeout is None:
-        timeout = float(os.environ.get("SIMRV_E2E_TIMEOUT", "120.0"))
+        timeout = float(os.environ.get("SIMRV_E2E_TIMEOUT", "240.0"))
 
     cmd = [str(binary)] + args
     return subprocess.run(

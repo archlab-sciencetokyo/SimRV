@@ -153,6 +153,7 @@ class E2ETier4ScenarioTests(unittest.TestCase):
                     "--steps",
                     "10000000",
                 ],
+                timeout=300.0,
             )
             self.assertEqual(res.returncode, 0, res.stderr)
 

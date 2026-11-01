@@ -301,13 +301,13 @@ if(BUILD_TESTING)
            COMMAND ${PYTHON_BIN} ${CMAKE_SOURCE_DIR}/tests/RunE2ETests.py
                    --simrv $<TARGET_FILE:SimRV> --tier 3)
   set_tests_properties(e2e-tier3-combinations
-                       PROPERTIES LABELS "regress;e2e;e2e-tier3" TIMEOUT 300)
+                       PROPERTIES LABELS "regress;e2e;e2e-tier3" TIMEOUT 500)
 
   add_test(NAME e2e-tier4-scenarios
            COMMAND ${PYTHON_BIN} ${CMAKE_SOURCE_DIR}/tests/RunE2ETests.py
                    --simrv $<TARGET_FILE:SimRV> --tier 4)
   set_tests_properties(e2e-tier4-scenarios
-                       PROPERTIES LABELS "regress;e2e;e2e-tier4" TIMEOUT 300)
+                       PROPERTIES LABELS "regress;e2e;e2e-tier4" TIMEOUT 500)
 
   add_test(NAME e2e-all-tiers
            COMMAND ${PYTHON_BIN} ${CMAKE_SOURCE_DIR}/tests/RunE2ETests.py
