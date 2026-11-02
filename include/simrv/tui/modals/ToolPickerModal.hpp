@@ -22,11 +22,13 @@ struct ToolFilter {
     bool cycle_accurate = true;
     bool has_fp = true;
     bool has_vector = true;
+    bool display_graphics_supported = true;
 
     [[nodiscard]] constexpr auto is_available(const TuiPageInfo& info) const noexcept -> bool {
         if (info.cycle_accurate_only && !cycle_accurate) return false;
         if (info.floating_point_only && !has_fp) return false;
         if (info.vector_only && !has_vector) return false;
+        if (info.page == TuiRegPage::DISPLAY && !display_graphics_supported) return false;
         return true;
     }
 };
@@ -75,8 +77,8 @@ class ToolPickerModal : public framework::IModal {
         return true;
     }
 
-    [[nodiscard]] static auto make_filter(const simrv::core::Machine& machine, size_t hart = 0)
-        -> ToolFilter;
+    [[nodiscard]] static auto make_filter(const simrv::core::Machine& machine, size_t hart = 0,
+                                          bool display_graphics_supported = true) -> ToolFilter;
     [[nodiscard]] static auto all_tools(ToolFilter filter = {}) -> std::vector<ToolEntry>;
     [[nodiscard]] static auto find_by_accelerator(char c, ToolFilter filter = {})
         -> std::optional<TuiRegPage>;

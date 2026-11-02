@@ -191,20 +191,25 @@ variable length):
 
 ## 5. Instruction Explainer Integration
 
-SimRV's interactive educational explainer (`InstructionExplainer`) shows per-instruction
-descriptions in the TUI EXPLAIN pane and via `--explain-inst` CLI. Ensure new instructions
-appear correctly:
+SimRV's formal architectural explainer (`simrv::explain`) evaluates instructions statically and
+against live `ArchState` in the TUI EXPLAIN pane and via `--explain` CLI. Ensure new instructions
+appear with full specification provenance. Check whether an instruction is mandatory or optional
+for SimRV's target in the [RVA23 compliance scope](../architecture/compliance.md), and cite the
+ratified manual section for its actual defining extension; support in SimRV does not make an
+optional extension mandatory in RVA23.
 
-1. **Mnemonic and Assembly Rep:** Add entries to `InstructionExplainer::get_mnemonic()`
-   and `get_assembly_repr()` in
-   [`src/util/InstructionExplainer.cpp`](https://github.com/archlab-sciencetokyo/SimRV/blob/dev/src/util/InstructionExplainer.cpp).
+1. **Mnemonic, Normative Description, and Formula:** Add entries to `get_description()`,
+   `get_spec_formula()`, and `get_spec_section()` in
+   [`src/explain/ScalarSpecCatalog.cpp`](https://github.com/archlab-sciencetokyo/SimRV/blob/dev/src/explain/ScalarSpecCatalog.cpp),
+   citing *The RISC-V Instruction Set Manual* (Document Version `20260120`).
 
-2. **Description:** Add a short educational description to `get_description()`.
-   Include the ISA extension name in the description so users can identify which
-   extension an instruction belongs to.
+2. **Extension Classification:** Update `get_isa_extension_name()` so `get_operation_spec()`
+   associates the instruction with its ratified extension and specification chapter.
 
-3. **Format:** Set the correct `InstructionFormat` (R, I, S, B, U, J, R4, CR, CI,
-   CSS, CIW, CL, CS, CB, CJ) returned by `get_format()`.
+3. **Format & Operand Traits:** Ensure `get_instruction_format()` and `OperationInfo` operand
+   register banks (`rd_bank`, `rs1_bank`, `rs2_bank`, `rs3_bank`) are populated so
+   `explain_static()`, `explain_in_state()`, and `explain_at_pc()` resolve live operand values and
+   post-state effects automatically.
 
 ---
 

@@ -25,7 +25,8 @@ This directory contains development, benchmarking, release verification, and Lin
 - **`release_evidence.py`**: Captures machine-readable evidence metadata for CI gates and qualification manifests.
 ### 3. Linux Kernel, Rootfs & Integration
 
-- **`build-linux-image.sh`**: Multi-stage compiler for OpenSBI, Linux kernel, and BusyBox/Alpine rootfs images. Includes storage management flags (`--clean-build`, `--clean-old-kernels`).
+- **`build-linux-image.sh`**: Multi-stage compiler for OpenSBI, Linux kernel, and BusyBox/Alpine rootfs images, including the RV64 Alpine UEFI disk profile. Includes storage management flags (`--clean-build`, `--clean-old-kernels`).
+- **`create_uefi_disk.py`**: Creates a GPT disk with a FAT32 RISC-V EFI System Partition and an optional Linux rootfs partition.
 - **`test_linux_pty.py`**: Automated headless pseudo-terminal interaction tests verifying guest login, shell commands, and poweroff lifecycles.
 - **`ga_smoke.py`**: Distribution-independent release smoke check for versioning, capability discovery,
   environment diagnostics, SoC manifest compatibility, and an optional guest run.

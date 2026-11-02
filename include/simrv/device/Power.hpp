@@ -31,22 +31,23 @@ enum class PowerCommand : simrv::xlen::Word {
 class PowerMmio : public memory::TileLinkNode {
    public:
     /// Construct a Power MMIO device instance.
-    explicit PowerMmio(simrv::core::Machine& machine);
+    explicit PowerMmio(simrv::core::Machine& machine, simrv::xlen::Address base = kBaseAddress,
+                       simrv::xlen::Address size = kSize);
 
     static constexpr simrv::xlen::Address kBaseAddress =
         static_cast<simrv::xlen::Address>(0x00100000u);
     static constexpr simrv::xlen::Address kSize = static_cast<simrv::xlen::Address>(0x00001000u);
 
     [[nodiscard]] auto name() const -> const char* override { return "power"; }
-    [[nodiscard]] auto base_address() const -> simrv::xlen::Address override {
-        return kBaseAddress;
-    }
-    [[nodiscard]] auto size() const -> simrv::xlen::Address override { return kSize; }
+    [[nodiscard]] auto base_address() const -> simrv::xlen::Address override { return base_; }
+    [[nodiscard]] auto size() const -> simrv::xlen::Address override { return size_; }
 
     auto handle_request(const memory::TlChannelA& req, memory::TlChannelD& resp) -> bool override;
 
    private:
     simrv::core::Machine& machine_;
+    simrv::xlen::Address base_;
+    simrv::xlen::Address size_;
 };
 
 }  // namespace simrv::device

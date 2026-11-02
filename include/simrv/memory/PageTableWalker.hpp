@@ -125,6 +125,9 @@ struct PteView {
     [[nodiscard]] constexpr auto is_napot() const noexcept -> bool {
         return ((static_cast<uint64_t>(raw) >> 63U) & 0x1U) != 0;
     }
+    [[nodiscard]] constexpr auto has_valid_napot_ppn_encoding() const noexcept -> bool {
+        return (ppn() & 0xFU) == 0x8U;
+    }
     [[nodiscard]] constexpr auto has_reserved_bits(unsigned pte_size) const noexcept -> bool {
         if (pte_size == 8) {
             constexpr uint64_t kReservedMask = (0x7FULL << 54U);
@@ -136,7 +139,9 @@ struct PteView {
     }
 };
 
-enum class PteAccess : uint8_t { Read = 0, Write = 1, Code = 2 };
+// ReadExecute is used by HLVX: page-table translation requires execute permission,
+// while the resulting physical access remains a load and therefore reports load faults.
+enum class PteAccess : uint8_t { Read = 0, Write = 1, Code = 2, ReadExecute = 3 };
 
 enum class PageWalkStatus : uint8_t { ReadPte, WritePte, Complete, Fault };
 
@@ -156,6 +161,11 @@ struct PageWalkState {
     unsigned vpn_bits_per_level = 0;
     simrv::xlen::PageTableLevel level = -1;
     simrv::xlen::Word satp_root{0};
+    simrv::xlen::Word hgatp{0};
+    simrv::xlen::Address pte_guest_address{0};
+    simrv::xlen::Address guest_fault_address{0};
+    bool implicit_vs_stage_page_table_fault{false};
+    bool guest_stage_enabled{false};
     bool update_access_bits = true;
     PageWalkStatus status = PageWalkStatus::Fault;
     const core::ArchState* arch_state = nullptr;
@@ -238,7 +248,16 @@ class PageTableWalker {
     [[nodiscard]] auto walk(simrv::xlen::VirtAddr v_addr, PteAccess access,
                             simrv::xlen::PrivilegeLevel priv, simrv::xlen::CsrValue mstatus,
                             simrv::xlen::Word satp, unsigned xlen, bool update_access_bits = true,
-                            const core::ArchState* arch_state = nullptr) const
+                            const core::ArchState* arch_state = nullptr,
+                            simrv::xlen::Address* guest_fault_address = nullptr,
+                            bool* implicit_vs_stage_page_table_fault = nullptr) const
+        -> std::expected<PageWalkResult, simrv::xlen::TrapCause>;
+
+    /** Translate a guest-physical address through an SvNNx4 hgatp G-stage page table. */
+    [[nodiscard]] auto walk_guest_physical(simrv::xlen::Address guest_address, PteAccess access,
+                                           simrv::xlen::Word hgatp, unsigned xlen,
+                                           simrv::xlen::Address* fault_address = nullptr,
+                                           bool mxr = false) const
         -> std::expected<PageWalkResult, simrv::xlen::TrapCause>;
 
     void flush_pdc() noexcept {

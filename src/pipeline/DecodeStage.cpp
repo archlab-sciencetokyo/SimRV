@@ -37,7 +37,7 @@ void CPU::decode_fields(Machine& /*machine*/) {
     if (simrv::compiler::unlikely(ctx.pending_exception.has_value())) {
         return;
     }
-    if (ctx.opcode != static_cast<Opcode>(0) || ctx.op_id != isa::UNKNOWN) {
+    if (ctx.opcode != static_cast<Opcode>(0) || ctx.op_id != isa::ILLEGAL) {
         return;
     }
 
@@ -57,6 +57,24 @@ void CPU::fetch_operands(Machine& /*machine*/) {
     ctx.rrs1 = state_.regs.read(ctx.rs1);
     ctx.rrs2 = state_.regs.read(ctx.rs2);
 
+    if (ctx.op_id == isa::MOP) {
+        // MOPs have no source dependency until redefined by another extension.
+        ctx.rrs1 = 0;
+        ctx.rrs2 = 0;
+        ctx.rcsr = 0;
+        return;
+    }
+
+    if (isa::is_hypervisor_memory_op(ctx.op_id)) {
+        if (const auto exc =
+                TrapController::check_privileged_instruction(state_, ctx.op_id, ctx.ir)) {
+            raise_decode_exception(ctx, *exc);
+            return;
+        }
+        ctx.rcsr = 0;
+        return;
+    }
+
     if (simrv::compiler::likely(opcode != Opcode::System)) {
         ctx.rcsr = 0;
         return;
@@ -71,45 +89,16 @@ void CPU::fetch_operands(Machine& /*machine*/) {
                                           : simrv::xlen::CsrNumber{0};
 
     if (funct3 == Funct3::Priv) {
-        if (!TrapController::can_execute_privileged_instruction(
-                state_.priv, state_.misa, state_.mstatus, funct12, ctx.funct7)) {
-            raise_decode_exception(ctx, ExceptionCode::IllegalInstruction);
+        if (const auto exc =
+                TrapController::check_privileged_instruction(state_, ctx.op_id, ctx.ir)) {
+            raise_decode_exception(ctx, *exc);
             return;
         }
     } else {
         const bool is_write =
             ((static_cast<uint8_t>(funct3) & 0x3u) == 0x1u) || (std::to_underlying(ctx.rs1) != 0);
-        if (!TrapController::can_access_csr(state_.priv, state_.misa, w_csr_addr, is_write)) {
-            raise_decode_exception(ctx, ExceptionCode::IllegalInstruction);
-            return;
-        }
-        if (w_csr_addr == csr_addr(Csr::Satp) && state_.priv == kPrivSupervisor &&
-            (state_.mstatus & MstatusBit::Tvm) != 0) {
-            raise_decode_exception(ctx, ExceptionCode::IllegalInstruction);
-            return;
-        }
-
-        if (state_.priv < kPrivMachine) {
-            if ((w_csr_addr >= 0xC00 && w_csr_addr <= 0xC1F) ||
-                (w_csr_addr >= 0xC80 && w_csr_addr <= 0xC9F)) {
-                const simrv::xlen::Word counter_bit = 1u << (w_csr_addr & 0x1Fu);
-                bool access_denied = (state_.mcounteren & counter_bit) == 0;
-                if (state_.priv == kPrivUser) {
-                    access_denied = access_denied || ((state_.scounteren & counter_bit) == 0);
-                }
-                if (access_denied) {
-                    raise_decode_exception(ctx, ExceptionCode::IllegalInstruction);
-                    return;
-                }
-            }
-        }
-    }
-
-    if (simrv::compiler::unlikely(w_csr_addr == csr_addr(Csr::Fflags) ||
-                                  w_csr_addr == csr_addr(Csr::Frm) ||
-                                  w_csr_addr == csr_addr(Csr::Fcsr))) {
-        if ((state_.mstatus & MstatusBit::Fs) == 0) {
-            raise_decode_exception(ctx, ExceptionCode::IllegalInstruction);
+        if (const auto exc = TrapController::check_csr_access(state_, w_csr_addr, is_write)) {
+            raise_decode_exception(ctx, *exc);
             return;
         }
     }

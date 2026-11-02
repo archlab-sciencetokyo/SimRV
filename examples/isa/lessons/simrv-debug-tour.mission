@@ -1,0 +1,78 @@
+# SimRV classroom mission format, version 1.
+[mission]
+version = "1"
+id = "simrv-debug-tour"
+program = "simrv-debug-tour.elf"
+description = "Test report: three loop passes should leave `a1=3`, but the supplied program produces `a1=6`. This is a guest-program bug; use SimRV to find the instruction that causes it."
+goal = "Locate the faulty update in `debug_loop` and explain it using the PC, Trace, and Registers."
+speed_hz = "30"
+
+[step]
+id = "read-the-workbench"
+title = "Start with the failure"
+learn = "The test expects `a1=3` after three loop passes, but observes `a1=6`. Find the update that doubles the total."
+prompt = "Hide Tasks with `Enter` to see Trace and Registers.\n\nPress `F6` one instruction at a time until the header reaches `debug_loop`. Watch `a0` become 3 and `a1` become 0.\n\nTrace shows the current instruction; Registers shows its inputs. Use `F5` only if you want to run directly to `debug_loop`. Reopen Tasks with `F12`."
+hint = "At `debug_loop`, Trace should point to `beq a0, zero, debug_result`. The register `a0` holds the remaining loop count."
+why = "We know the program's result is wrong; these panels will help locate the instruction and state that cause it."
+view = "trace"
+panels = "trace,registers"
+
+[checkpoint]
+label = "debug_loop"
+after_step = 1
+message = "Setup is complete: a0 is 3, a1 is 0, and the PC points to the loop's beq in Trace."
+
+[step]
+id = "single-step"
+title = "Follow the branch"
+learn = "`F6` runs exactly one CPU instruction, so you can compare the instruction with the state change it causes."
+prompt = "At `debug_loop`, Trace shows `beq` and Registers shows `a0=3`, so the branch is not taken.\n\nPress `F6` once. The PC should move to `debug_accumulate`. Check the header and current Trace row.\n\nReopen Tasks with `F12`."
+hint = "`beq` branches only when `a0` equals zero. Here `a0` is 3, so execution falls through."
+why = "Watching the PC move after one branch tells you whether the program took the branch or continued to the next instruction."
+view = "trace"
+panels = "trace,registers"
+
+[checkpoint]
+label = "debug_accumulate"
+after_step = 2
+message = "The branch was not taken. The next instruction is debug_accumulate, where the total changes."
+
+[step]
+id = "watch-register"
+title = "Catch the wrong update"
+learn = "A register watchpoint stops execution when the chosen register changes."
+prompt = "Hide Tasks with `Enter`, then press `W`. In Set Watchpoint, enter `a1` and confirm with `Enter`. The watchpoint will stop when that register changes.\n\nPress `F6` once to execute the accumulator instruction. Check the new value in Registers and the instruction in Trace.\n\nReopen Tasks with `F12`. Then use `F5` to run to the loop back-edge checkpoint."
+hint = "The first update changes `a1` from 0 to 2. The intended increment is 1, so this is evidence of the bug."
+why = "A watchpoint stops at the moment the suspicious value changes, making it easier to connect the new value to its instruction."
+view = "registers"
+panels = "registers,trace"
+
+[checkpoint]
+label = "debug_loop_backedge"
+after_step = 3
+message = "One iteration finished. a1 is now 2; the loop returns to debug_loop for the next pass."
+
+[step]
+id = "set-breakpoint"
+title = "Stop at the final result"
+learn = "A PC breakpoint pauses at a chosen address or symbol; a mission checkpoint is a separate lesson stop."
+prompt = "Hide Tasks with `Enter`, then press `M` to open the point manager. Select the watchpoint on `a1` with `Up/Down`, remove it with `Enter`, and close the manager with `Esc`.\n\nPress `:` to set a PC breakpoint. Enter `debug_result` and confirm. Press `F5`; your breakpoint stops execution before the lesson checkpoint.\n\nCompare `a1` in Registers with the stopped instruction in Trace. Reopen Tasks with `F12`, then press `F5` to continue to `debug_done`."
+hint = "`debug_result` is reached just before `debug_done`, so the manual breakpoint should stop first."
+why = "Removing the watchpoint avoids repeated stops. The symbol breakpoint demonstrates choosing a precise place to inspect; the lesson checkpoint records guided progress."
+view = "trace"
+panels = "trace,registers"
+
+[checkpoint]
+label = "debug_done"
+after_step = 4
+message = "The loop finished. a1 is stable at 6, confirming the test report's observed result."
+
+[step]
+id = "explain-the-bug"
+title = "Explain the bug"
+learn = "A useful diagnosis connects expected and actual values to the instruction that produced the difference."
+prompt = "At `debug_done`, Registers should show `a1=6`; the test expected 3. Find the accumulator update in Trace.\n\nExplain how its immediate causes the mismatch. The instruction adds 2 on each of three passes; adding 1 each time would produce 3."
+hint = "Three passes of `+2` produce 6. Three passes of `+1` produce the expected 3."
+why = "The PC and Trace identify where the update happens; Registers shows its result. Together they support a specific, checkable explanation."
+view = "explain"
+panels = "explain,trace,registers"

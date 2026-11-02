@@ -1048,7 +1048,28 @@ void ExecuteUnitVector::execute_vector(core::CPU& cpu, memory::MemorySubsystem& 
 
     // Decode immediate fields
     auto simm5 = static_cast<int32_t>((ir >> 15) & 0x1F);
-    if ((simm5 & 0x10) != 0) {
+    const bool unsigned_immediate = [&] {
+        switch (op_id) {
+            case isa::OperationId::VSLIDEDOWN_VI:
+            case isa::OperationId::VSLIDEUP_VI:
+            case isa::OperationId::VRGATHER_VI:
+            case isa::OperationId::VSLL_VI:
+            case isa::OperationId::VSRL_VI:
+            case isa::OperationId::VSRA_VI:
+            case isa::OperationId::VSSRL_VI:
+            case isa::OperationId::VSSRA_VI:
+            case isa::OperationId::VNCLIP_WI:
+            case isa::OperationId::VNCLIPU_WI:
+            case isa::OperationId::VNSRL_WI:
+            case isa::OperationId::VNSRA_WI:
+                return true;
+            default:
+                return false;
+        }
+    }();
+    if (op_id == isa::OperationId::VROR_VI) {
+        simm5 |= static_cast<int32_t>((ir >> 26U) & 1U) << 5U;
+    } else if (!unsigned_immediate && (simm5 & 0x10) != 0) {
         simm5 |= ~0x1F;
     }
 
@@ -1102,14 +1123,26 @@ void ExecuteUnitVector::execute_vector(core::CPU& cpu, memory::MemorySubsystem& 
     if (is_vector_fp(op_id)) {
         const bool has_f = isa::misa_has_extension(cpu.state().misa, isa::IsaExtension::F);
         const bool has_d = isa::misa_has_extension(cpu.state().misa, isa::IsaExtension::D);
+        const bool zvfhmin_conversion =
+            op_id == isa::OperationId::VFWCVT_F_F_V || op_id == isa::OperationId::VFNCVT_F_F_W;
+        const bool sew16_fp32_integer_conversion =
+            op_id == isa::OperationId::VFWCVT_XU_F_V || op_id == isa::OperationId::VFWCVT_X_F_V ||
+            op_id == isa::OperationId::VFWCVT_F_XU_V || op_id == isa::OperationId::VFWCVT_F_X_V ||
+            op_id == isa::OperationId::VFWCVT_RTZ_XU_F_V ||
+            op_id == isa::OperationId::VFWCVT_RTZ_X_F_V ||
+            op_id == isa::OperationId::VFNCVT_XU_F_W || op_id == isa::OperationId::VFNCVT_X_F_W ||
+            op_id == isa::OperationId::VFNCVT_F_XU_W || op_id == isa::OperationId::VFNCVT_F_X_W ||
+            op_id == isa::OperationId::VFNCVT_RTZ_XU_F_W ||
+            op_id == isa::OperationId::VFNCVT_RTZ_X_F_W;
         const bool scalar_fp_enabled =
             (sew == 32 && has_f && (!uses_wide_fp_element(op_id) || has_d)) ||
-            (sew == 64 && has_f && has_d);
-        const bool fs_enabled = (cpu.state().mstatus & core::MstatusBit::Fs) != 0;
+            (sew == 64 && has_f && has_d) ||
+            (sew == 16 && has_f && (zvfhmin_conversion || sew16_fp32_integer_conversion));
+        const bool fs_enabled = cpu.state().extension_state_enabled(core::MstatusBit::Fs);
         const isa::RoundingMode frm = isa::frm_rounding_mode(cpu.state().fcsr);
         if (!scalar_fp_enabled || !fs_enabled ||
             (is_vector_fp_arithmetic(op_id) && !isa::is_valid_rounding_mode(frm))) {
-            // SEW=16 vector FP belongs to Zvfh, which SimRV does not advertise.
+            // SEW=16 vector FP is limited to the two conversions in Zvfhmin.
             cpu.active_context().pending_exception = ExceptionCode::IllegalInstruction;
             cpu.active_context().pending_tval = ir;
             return;
@@ -1370,11 +1403,11 @@ void ExecuteUnitVector::execute_vector(core::CPU& cpu, memory::MemorySubsystem& 
     // Vector 1.0 requires every successfully completed vector instruction, including vset*vl*, to
     // reset vstart. Faulting vector memory operations leave the faulting element index for resume.
     if (!cpu.active_context().pending_exception.has_value()) {
-        cpu.state().mstatus |= core::MstatusBit::Vs;
+        cpu.state().mark_extension_dirty(core::MstatusBit::Vs);
         if (is_vector_fp(op_id)) {
             // Vector FP may update scalar FP registers or fflags. Setting FS Dirty
             // conservatively is permitted even when a particular result is exact.
-            cpu.state().mstatus |= core::MstatusBit::Fs;
+            cpu.state().mark_extension_dirty(core::MstatusBit::Fs);
         }
         cpu.state().vstart = 0;
     }

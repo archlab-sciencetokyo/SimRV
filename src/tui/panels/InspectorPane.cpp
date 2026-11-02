@@ -174,11 +174,9 @@ void InspectorPane::set_page(TuiRegPage page) {
 }
 
 void InspectorPane::set_selected_hart(size_t hart) {
-    if (machine_.num_harts() > 0) {
-        selected_hart_ = hart % machine_.num_harts();
-    } else {
-        selected_hart_ = 0;
-    }
+    const size_t next_hart = machine_.num_harts() > 0 ? hart % machine_.num_harts() : 0;
+    if (selected_hart_ == next_hart) return;
+    selected_hart_ = next_hart;
     for (auto& rows : cached_page_rows_) {
         rows.fill("");
     }
@@ -600,7 +598,7 @@ auto InspectorPane::active_drawers(int width, int total_rows, bool is_secondary)
     if (mission_drawer) {
         drawers.add({.id = TuiDrawerId::Mission,
                      .name = "Mission Guidance",
-                     .height = 2,
+                     .height = 5,
                      .render_row = [this](int row, int drawer_width) {
                          return const_cast<InspectorPane*>(this)->render_mission_bottom_row(
                              row, drawer_width);
@@ -637,38 +635,42 @@ auto InspectorPane::render_mission_bottom_row(int row_idx, int width) -> std::st
     const auto guidance = mission.guidance();
     if (!guidance) return format_to_width("", width);
     const auto cp = mission.checkpoint_progress();
-    if (row_idx == 0) {
-        if (mission.completed()) {
-            return section_line(
-                std::format("Mission Complete ({}/{} checkpoints) · [r] Restart · [F12] Summary",
-                            mission.reached_checkpoint_count(), mission.checkpoint_count()),
-                width);
-        }
-        const auto step_num = mission.step() + 1;
-        const auto total_steps = mission.step_count();
-        if (cp && cp->reached) {
-            return section_line(std::format("Mission {}/{}: {} · ✓ {} · [n] Next [F12] Guide",
-                                            step_num, total_steps, guidance->title, cp->symbol),
-                                width);
-        }
-        if (cp) {
-            return section_line(std::format("Mission {}/{}: {} · → {} · [F5] Run [F12] Guide",
-                                            step_num, total_steps, guidance->title, cp->symbol),
-                                width);
-        }
-        return section_line(std::format("Mission {}/{}: {} · [n] Next [F12] Guide", step_num,
-                                        total_steps, guidance->title),
-                            width);
-    }
-    if (mission.completed()) {
-        return format_to_width(std::format(" {}✓ {}\033[0m", kThemeMint, guidance->prompt), width);
-    }
-    if (cp && cp->reached && !cp->message.empty()) {
-        return format_to_width(std::format(" {}✓ {}\033[0m {}— press [n] for next step\033[0m",
-                                           kThemeMint, cp->message, kThemeSky),
+    if (row_idx == 0)
+        return section_line(mission.completed() ? "[F12] Lesson Summary" : "[F12] Tasks", width);
+    if (row_idx == 1) {
+        return format_to_width(std::format(" Step {}/{} · {}", mission.step() + 1,
+                                           mission.step_count(), guidance->title),
                                width);
     }
-    return format_to_width(std::format(" {}Task:\033[0m {}", kThemeSky, guidance->prompt), width);
+    if (row_idx == 2) {
+        std::string summary = guidance->learn.empty() ? guidance->title : guidance->learn;
+        const auto sentence_end = summary.find_first_of(";.");
+        if (sentence_end != std::string::npos) summary.resize(sentence_end);
+        const int summary_width = std::max(1, width - 9);
+        if (framework::display_width(summary) > summary_width)
+            summary = framework::crop_columns(summary, 0, summary_width - 1) + "…";
+        return format_to_width(std::format(" Focus: {}", summary), width);
+    }
+    if (row_idx == 3) {
+        if (mission.completed()) {
+            return format_to_width(
+                std::format(" Checkpoints: {}/{} reached", mission.reached_checkpoint_count(),
+                            mission.checkpoint_count()),
+                width);
+        }
+        if (!cp) return format_to_width(" No checkpoint for this step", width);
+        return format_to_width(cp->reached ? std::format(" Checkpoint reached · {}", cp->symbol)
+                                           : std::format(" Checkpoint waiting · {} · after step {}",
+                                                         cp->symbol, cp->after_step),
+                               width);
+    }
+    if (mission.completed()) return format_to_width(" Controls: [R] Restart · [Q/F10] Exit", width);
+    if (cp && !cp->reached) {
+        if (mission.can_advance_step())
+            return format_to_width(" Controls: [N] Next · [F5] Run", width);
+        return format_to_width(" Controls: [F5] Run · [F6] Step", width);
+    }
+    return format_to_width(" Controls: [N] Next step", width);
 }
 
 auto InspectorPane::render_log_bottom_row(int row_idx, int num_rows, int width) -> std::string {

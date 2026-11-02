@@ -18,6 +18,7 @@
 
 #include "simrv/debug/DebugTypes.hpp"
 #include "simrv/util/UniqueFd.hpp"
+#include "simrv/util/WakeupFd.hpp"
 #include "simrv/xlen/IdentifierTypes.hpp"
 
 namespace simrv::core {
@@ -90,7 +91,7 @@ class GdbStub {
     };
 
     util::UniqueFd listen_fd_;
-    util::UniqueFd wake_fd_;
+    util::WakeupFd wake_fd_;
     util::UniqueFd conn_fd_;
     uint16_t port_ = 0;
     std::atomic<int> connected_fd_{-1};

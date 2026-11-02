@@ -24,8 +24,8 @@ namespace simrv::memory {
  */
 class ReservationTable {
    public:
-    /// Default reservation granule: 64-byte aligned block (covers standard cache lines).
-    static constexpr simrv::xlen::Address kReservationGranule = 64;
+    /// SimRV uses the minimum naturally aligned reservation set (eight bytes on RV64).
+    static constexpr simrv::xlen::Address kReservationGranule = 8;
     static constexpr simrv::xlen::Address kReservationGranuleMask = ~(kReservationGranule - 1);
 
     ReservationTable() = default;
@@ -78,21 +78,19 @@ class ReservationTable {
         if (it == reservations_.end() || !it->second.valid) {
             return false;
         }
-        if (it->second.address == (addr & kReservationGranuleMask)) {
-            it->second.valid = false;
-            bool any_valid = false;
-            for (const auto& [h, ent] : reservations_) {
-                if (ent.valid) {
-                    any_valid = true;
-                    break;
-                }
+        const bool success = it->second.address == (addr & kReservationGranuleMask);
+        // Every SC attempt consumes the hart's reservation, including a failed
+        // attempt whose address does not match the reserved set.
+        it->second.valid = false;
+        bool any_valid = false;
+        for (const auto& [h, ent] : reservations_) {
+            if (ent.valid) {
+                any_valid = true;
+                break;
             }
-            if (!any_valid) {
-                may_have_reservations_.store(false, std::memory_order_release);
-            }
-            return true;
         }
-        return false;
+        if (!any_valid) may_have_reservations_.store(false, std::memory_order_release);
+        return success;
     }
 
     /**

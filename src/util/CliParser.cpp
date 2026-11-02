@@ -462,6 +462,7 @@ auto parse_isa_preset(std::string_view value) -> std::expected<ParsedIsaPreset, 
                 if (supported_extension("svinval")) return 1ULL << 39;
                 if (supported_extension("svnapot")) return 1ULL << 40;
                 if (supported_extension("svpbmt")) return 1ULL << 41;
+                if (supported_extension("sscofpmf")) return 1ULL << 42;
 
                 return 0ULL;
             }();
@@ -550,6 +551,15 @@ auto parse_file_options(std::string_view arg, std::span<char* const> args, std::
         options.fn_dskimg = std::string(*value);
         options.use_disk = true;
         options.appmode = false;
+        return true;
+    }
+    if (option_id == "--signature") {
+        auto value = next_argument(args, i, arg);
+        if (!value) return std::unexpected(value.error());
+        if (value->empty() || *value == "-") {
+            return std::unexpected("--signature requires a writable file path");
+        }
+        options.fn_signature = std::string(*value);
         return true;
     }
     if (option_id == "--virtiofs") {
@@ -804,6 +814,14 @@ auto parse_mode_options(std::string_view arg, std::span<char* const> args, std::
     }
     if (option_id == "--os") {
         result.options.appmode = false;
+        return true;
+    }
+    if (option_id == "--no-sbi") {
+        result.options.no_sbi = true;
+        return true;
+    }
+    if (option_id == "--act-test-hooks") {
+        result.options.act_test_hooks = true;
         return true;
     }
     if (option_id == "--ca") {
@@ -1317,6 +1335,10 @@ auto parse_command_line(std::span<char* const> args) -> std::expected<ParseResul
 
     for (std::size_t i = 1; i < expanded_span.size(); ++i) {
         std::string_view const arg = expanded_span[i];
+        if (arg.starts_with("+signature=")) {
+            result.options.fn_signature = std::string(arg.substr(11));
+            continue;
+        }
         const std::string_view option_id = cli_option_id(arg);
         if (option_id == "--help") {
             result.action = CliAction::ShowHelp;
@@ -1418,6 +1440,16 @@ auto parse_command_line(std::span<char* const> args) -> std::expected<ParseResul
         return std::unexpected("--trace-pc-range start must not exceed end");
     }
 
+    if (result.options.uefi_enabled) {
+        if (result.options.fn_uefi.empty())
+            return std::unexpected("--uefi requires a RISCV_VIRT_CODE.fd firmware image");
+        if (result.options.fn_memimg.empty())
+            return std::unexpected(
+                "UEFI requires -m <OpenSBI fw_dynamic.bin> for the M-mode boot stage");
+        if (result.options.fn_uefi_vars.empty())
+            return std::unexpected("UEFI requires --uefi-vars <writable VARS.fd working copy>");
+    }
+
     if (needs_memory_image(result)) {
         return std::unexpected("-m/--image <FILE> is required to load a memory image");
     }
@@ -1461,6 +1493,7 @@ auto RuntimeOptions::to_machine_config() const -> simrv::core::MachineConfig {
     cfg.memory.dram_size = (dram_size != 0 ? dram_size : default_dram_size);
 
     cfg.execution.appmode = appmode;
+    cfg.execution.act_test_hooks = act_test_hooks;
     cfg.execution.start_pc = start_pc;
     cfg.execution.fincnt = fincnt;
     cfg.execution.trace_begin = trace_begin;
@@ -1514,6 +1547,7 @@ auto RuntimeOptions::to_machine_config() const -> simrv::core::MachineConfig {
     cfg.debug.checkpoint_dir = checkpoint_dir;
 
     cfg.isa.isatest_tohost = isatest_tohost;
+    cfg.execution.profile = profile;
     cfg.isa.isa_preset = isa_preset_bits(effective_isa_preset(*this));
     if (has_zb_extensions || (!misa_override && !cpu_model_preset.has_value())) {
         cfg.isa.isa_preset |= simrv::isa::misa_extension_bit(simrv::isa::IsaExtension::B);
@@ -1698,7 +1732,8 @@ auto apply_runtime_options(simrv::core::Machine* machine, const RuntimeOptions& 
     // payloads identify themselves with the opensbi-linux-payload name.
     const bool is_fw_payload = (options.fn_memimg.find("fw_payload") != std::string::npos ||
                                 options.fn_memimg.find("opensbi") != std::string::npos);
-    const bool opensbi_active = options.use_opensbi || !options.fn_dvtree.empty() || is_fw_payload;
+    const bool opensbi_active =
+        options.no_sbi || options.use_opensbi || !options.fn_dvtree.empty() || is_fw_payload;
     for (size_t h = 0; h < machine->num_harts(); ++h) {
         machine->hart(h).use_opensbi = opensbi_active;
     }
@@ -1712,9 +1747,6 @@ auto apply_runtime_options(simrv::core::Machine* machine, const RuntimeOptions& 
 }
 
 auto needs_memory_image(const ParseResult& result) -> bool {
-    if (result.options.uefi_enabled && !result.options.fn_uefi.empty()) {
-        return false;
-    }
     return result.options.fn_memimg.empty() && !result.options.tuimode &&
            result.action != CliAction::ExplainInstruction && result.action != CliAction::ShowHelp &&
            result.action != CliAction::ShowVersion && result.action != CliAction::ShowLicense &&
@@ -1740,10 +1772,14 @@ auto cli_help_sections() -> const std::vector<HelpSection>& {
               {.option = "-b, --baremetal",
                .description = "Run a bare-metal application (default)."},
               {.option = "--os", .description = "Boot an operating system (Linux or RTOS)."},
-              {.option = "--uefi [CODE.fd]",
-               .description = "Boot via UEFI firmware (PFlash Bank 0 on virt-pcie profile)."},
+              {.option = "--no-sbi",
+               .description = "Deliver supervisor ECALLs to the guest machine trap handler."},
+              {.option = "--act-test-hooks",
+               .description = "Enable test-only ACT interrupt generator MMIO behavior."},
+              {.option = "--uefi CODE.fd",
+               .description = "Load UEFI CODE in pflash; boot it through OpenSBI fw_dynamic (-m)."},
               {.option = "--uefi-vars <VARS.fd>",
-               .description = "Persistent NVRAM storage image for UEFI variables (PFlash Bank 1)."},
+               .description = "Writable copy of the UEFI VARS template for PFlash Bank 1."},
               {.option = "--auto-fdt",
                .description = "Synthesize compliant device tree directly into guest DRAM."},
               {.option = "--bootargs <ARGS>",
@@ -1908,6 +1944,9 @@ auto cli_help_sections() -> const std::vector<HelpSection>& {
              {{.option = "-H, --tohost-addr <ADDR>",
                .description = "Set the tohost address used for test termination.",
                .hidden_aliases = {"--tohost"}},
+              {.option = "--signature <FILE>",
+               .description = "Dump architectural test signature on exit.",
+               .hidden_aliases = {"+signature="}},
               {.option = "--explain-inst <HEX>",
                .description = "Disassemble and explain a 32-bit instruction.",
                .hidden_aliases = {"--explain"}},

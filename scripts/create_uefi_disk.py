@@ -17,7 +17,10 @@ def create_fat32_esp(kernel_path: str, esp_size_mb: int = 64) -> bytes:
         kernel_data = f.read()
 
     bytes_per_sector = 512
-    sectors_per_cluster = 8  # 4 KiB clusters
+    # Keep the 64 MiB ESP above FAT32's minimum cluster-count threshold.
+    # Larger clusters would leave fewer than 65,525 data clusters and make
+    # this volume invalid FAT32 despite the BPB type label.
+    sectors_per_cluster = 1  # 512-byte clusters; 64 MiB yields > 65,525 clusters
     cluster_size = bytes_per_sector * sectors_per_cluster
     reserved_sectors = 32
     num_fats = 2
@@ -34,7 +37,7 @@ def create_fat32_esp(kernel_path: str, esp_size_mb: int = 64) -> bytes:
 
     # Boot Sector (BPB)
     struct.pack_into(
-        "<3s8sHBHBHHBHHIIIIHHIHH12sBBBI11s8s",
+        "<3s8sHBHBHHBHHHIIIHHIHH12sBBBI11s8s",
         volume,
         0,
         b"\xeb\x58\x90",  # jmpBoot
@@ -140,34 +143,33 @@ def create_fat32_esp(kernel_path: str, esp_size_mb: int = 64) -> bytes:
     volume[boot_dir_offset : boot_dir_offset + 32] = pack_dirent(b".          ", 0x10, 4, 0)
     volume[boot_dir_offset + 32 : boot_dir_offset + 64] = pack_dirent(b"..         ", 0x10, 3, 0)
 
-    # 8.3 short name for BOOTRISCV64.EFI: "BOOTRI~1EFI"
-    # To support direct discovery, write "BOOTRISCV64.EFI" using VFAT long filename (LFN) + short name
-    # LFN Entry 1: "BOOTRISCV64.EFI"
-    lfn1 = bytearray(32)
-    lfn1[0] = 0x41  # Sequence 1 | 0x40 (Last LFN)
-    # Name chars 1-5: B O O T R
-    name1 = "BOOTR".encode("utf-16le")
-    lfn1[1:11] = name1
-    lfn1[11] = 0x0F  # LFN attribute
-    lfn1[12] = 0x00  # type
-    # Checksum of short name b"BOOTRI~1EFI"
+    # 8.3 alias plus two VFAT LFN entries for BOOTRISCV64.EFI (15 UTF-16 units).
     short_name = b"BOOTRI~1EFI"
     chk = 0
     for b in short_name:
         chk = (((chk & 1) << 7) + (chk >> 1) + b) & 0xFF
-    lfn1[13] = chk
-    # Name chars 6-11: I S C V 6 4
-    name2 = "ISCV64".encode("utf-16le")
-    lfn1[14:26] = name2
-    lfn1[26:28] = b"\x00\x00"
-    # Name chars 12-13: . E (and F I in next)
-    name3 = ".efi".encode("utf-16le") + b"\x00\x00\xff\xff"
-    lfn1[28:32] = name3[0:4]
 
-    volume[boot_dir_offset + 64 : boot_dir_offset + 96] = lfn1
+    def pack_lfn_entry(sequence: int, chars: str, last: bool) -> bytes:
+        entry = bytearray(32)
+        entry[0] = sequence | (0x40 if last else 0)
+        entry[11] = 0x0F
+        entry[12] = 0
+        entry[13] = chk
+        entry[26:28] = b"\x00\x00"
+        encoded = chars.encode("utf-16le")
+        encoded += b"\x00\x00" if len(chars) < 13 else b""
+        encoded = encoded.ljust(26, b"\xff")
+        entry[1:11] = encoded[0:10]
+        entry[14:26] = encoded[10:22]
+        entry[28:32] = encoded[22:26]
+        return bytes(entry)
+
+    # VFAT stores the highest sequence number first in the directory.
+    volume[boot_dir_offset + 64 : boot_dir_offset + 96] = pack_lfn_entry(2, "FI", True)
+    volume[boot_dir_offset + 96 : boot_dir_offset + 128] = pack_lfn_entry(1, "BOOTRISCV64.E", False)
 
     # Short name entry
-    volume[boot_dir_offset + 96 : boot_dir_offset + 128] = pack_dirent(short_name, 0x20, 5, kernel_len)
+    volume[boot_dir_offset + 128 : boot_dir_offset + 160] = pack_dirent(short_name, 0x20, 5, kernel_len)
 
     # Copy Kernel data into clusters 5..N
     kernel_start = cluster_offset(5)
@@ -185,21 +187,27 @@ def create_uefi_disk(output_img: str, kernel_path: str, rootfs_path: str | None 
     start_lba_p1 = 2048  # 1 MiB alignment
     end_lba_p1 = start_lba_p1 + esp_sectors - 1
 
-    rootfs_data = b""
-    if rootfs_path and os.path.exists(rootfs_path):
-        with open(rootfs_path, "rb") as f:
-            rootfs_data = f.read()
-
-    rootfs_sectors = (len(rootfs_data) + sector_size - 1) // sector_size if rootfs_data else 0
+    rootfs_size = os.path.getsize(rootfs_path) if rootfs_path and os.path.exists(rootfs_path) else 0
+    rootfs_sectors = (rootfs_size + sector_size - 1) // sector_size if rootfs_size else 0
     start_lba_p2 = end_lba_p1 + 2048
     end_lba_p2 = start_lba_p2 + rootfs_sectors - 1 if rootfs_sectors > 0 else 0
 
     total_sectors = (end_lba_p2 if rootfs_sectors > 0 else end_lba_p1) + 2048
 
-    disk = bytearray(total_sectors * sector_size)
+    # Write a sparse disk image so a multi-gigabyte ext4 root disk does not
+    # require a second full-sized Python allocation.
+    disk_size = total_sectors * sector_size
+    with open(output_img, "wb") as output:
+        output.truncate(disk_size)
+
+    def write_at(offset: int, data: bytes) -> None:
+        with open(output_img, "r+b") as output:
+            output.seek(offset)
+            output.write(data)
 
     # 1. Protective MBR at LBA 0
-    disk[446 : 446 + 16] = struct.pack(
+    mbr = bytearray(sector_size)
+    mbr[446 : 446 + 16] = struct.pack(
         "<BBBBBBBBII",
         0x00,  # Boot indicator
         0x00,
@@ -212,8 +220,8 @@ def create_uefi_disk(output_img: str, kernel_path: str, rootfs_path: str | None 
         1,  # Starting LBA
         min(0xFFFFFFFF, total_sectors - 1),
     )
-    disk[510] = 0x55
-    disk[511] = 0xAA
+    mbr[510] = 0x55
+    mbr[511] = 0xAA
 
     # 2. GPT Partition Entries at LBA 2..33
     entries = bytearray(128 * 128)
@@ -277,12 +285,12 @@ def create_uefi_disk(output_img: str, kernel_path: str, rootfs_path: str | None 
     header_crc = zlib.crc32(gpt_header)
     struct.pack_into("<I", gpt_header, 16, header_crc)
 
-    disk[1 * sector_size : 1 * sector_size + 92] = gpt_header
-    disk[2 * sector_size : 2 * sector_size + len(entries)] = entries
+    write_at(sector_size, gpt_header)
+    write_at(2 * sector_size, entries)
 
     # 4. Backup GPT Entries and Header at end of disk
     backup_entries_lba = total_sectors - 33
-    disk[backup_entries_lba * sector_size : backup_entries_lba * sector_size + len(entries)] = entries
+    write_at(backup_entries_lba * sector_size, entries)
 
     backup_gpt_header = bytearray(gpt_header)
     struct.pack_into("<Q", backup_gpt_header, 24, total_sectors - 1)  # MyLBA
@@ -292,23 +300,23 @@ def create_uefi_disk(output_img: str, kernel_path: str, rootfs_path: str | None 
     backup_header_crc = zlib.crc32(backup_gpt_header)
     struct.pack_into("<I", backup_gpt_header, 16, backup_header_crc)
 
-    disk[(total_sectors - 1) * sector_size : (total_sectors - 1) * sector_size + 92] = backup_gpt_header
+    write_at((total_sectors - 1) * sector_size, backup_gpt_header)
     p1_byte_offset = start_lba_p1 * sector_size
-    disk[p1_byte_offset : p1_byte_offset + len(esp_data)] = esp_data
+    write_at(0, mbr)
+    write_at(p1_byte_offset, esp_data)
 
     # Copy RootFS payload if provided
     if rootfs_sectors > 0:
         p2_byte_offset = start_lba_p2 * sector_size
-        disk[p2_byte_offset : p2_byte_offset + len(rootfs_data)] = rootfs_data
+        with open(rootfs_path, "rb") as source, open(output_img, "r+b") as output:
+            output.seek(p2_byte_offset)
+            while chunk := source.read(1024 * 1024):
+                output.write(chunk)
 
-    # Write output file
-    with open(output_img, "wb") as f:
-        f.write(disk)
-
-    print(f"Created UEFI GPT disk image: {output_img} ({len(disk) // (1024 * 1024)} MiB)")
+    print(f"Created UEFI GPT disk image: {output_img} ({disk_size // (1024 * 1024)} MiB)")
     print(f"  ESP Partition: LBA {start_lba_p1}..{end_lba_p1} (64 MiB FAT32)")
     if rootfs_sectors > 0:
-        print(f"  RootFS Partition: LBA {start_lba_p2}..{end_lba_p2} ({len(rootfs_data) // (1024 * 1024)} MiB)")
+        print(f"  RootFS Partition: LBA {start_lba_p2}..{end_lba_p2} ({rootfs_size // (1024 * 1024)} MiB)")
 
 
 if __name__ == "__main__":

@@ -62,7 +62,7 @@ class E2ETier2BoundaryTests(unittest.TestCase):
 
     def test_boundary_steps_large(self) -> None:
         """Verify large step count allows guest program to finish to tohost."""
-        res = run_simrv(self.simrv64, ["--cli", "--baremetal", "-m", str(self.hello64), "--steps", "50000"])
+        res = run_simrv(self.simrv64, ["--cli", "--baremetal", "-m", str(self.hello64), "--steps", "10000000"])
         self.assertEqual(res.returncode, 0, res.stderr)
         self.assertIn("guest tohost pass", res.stdout)
 

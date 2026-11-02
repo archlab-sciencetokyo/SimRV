@@ -145,6 +145,14 @@ auto serialize_soc_manifest(const simrv::core::SoCConfig& config, std::ostream& 
     out << "  \"platform\": " << quoted(platform_name(config)) << ",\n";
     out << "  \"device_policy\": "
         << quoted(config.disable_unlisted_devices ? "explicit" : "implicit") << ",\n";
+    out << "  \"pcie\": {\n";
+    out << "    \"ecam_base\": " << config.pcie.ecam_base << ",\n";
+    out << "    \"ecam_size\": " << config.pcie.ecam_size << ",\n";
+    out << "    \"mmio_base\": " << config.pcie.mmio_base << ",\n";
+    out << "    \"mmio_size\": " << config.pcie.mmio_size << ",\n";
+    out << "    \"first_bus\": " << static_cast<unsigned>(config.pcie.first_bus) << ",\n";
+    out << "    \"last_bus\": " << static_cast<unsigned>(config.pcie.last_bus) << "\n";
+    out << "  },\n";
     out << "  \"memory\": {\n";
     out << "    \"dram_base\": " << (config.dram_base.value_or(0)) << ",\n";
     out << "    \"dram_size\": " << (config.dram_size.value_or(0)) << "\n";
@@ -166,6 +174,15 @@ auto serialize_soc_manifest(const simrv::core::SoCConfig& config, std::ostream& 
         out << "      \"base\": " << device.base << ",\n";
         out << "      \"size\": " << device.size << ",\n";
         out << "      \"irq\": " << device.irq << ",\n";
+        if (device.kind == simrv::core::SoCDeviceKind::Uart) {
+            out << "      \"clock_hz\": " << device.clock_hz << ",\n";
+        }
+        if (transport_name(config, device.kind) == "pci") {
+            out << "      \"pci_bdf\": [" << static_cast<unsigned>(device.pci_bus.value_or(0))
+                << ", " << static_cast<unsigned>(device.pci_slot.value_or(0)) << ", "
+                << static_cast<unsigned>(device.pci_function.value_or(0)) << "],\n";
+            out << "      \"pci_intx_source\": " << device.pci_intx_source.value_or(0) << ",\n";
+        }
         if (device.kind == simrv::core::SoCDeviceKind::DummyMmio ||
             device.kind == simrv::core::SoCDeviceKind::CustomMmio) {
             out << "      \"compatible\": " << quoted(device.compatible) << ",\n";

@@ -54,6 +54,13 @@ The interface is structured into three primary sections:
    - **`Memory & Stack`**: Hex memory dump and stack frame unwind view.
 3. **Right Guest Terminal**: Interactive virtual terminal connected directly to the guest platform's 16550A UART (`ttyS0`), VirtIO console, or Sixel graphical framebuffer.
 
+Guest framebuffer display is separate from the host terminal. SimRV prefers the Kitty graphics
+protocol when the terminal answers its capability query, then falls back to SIXEL when detected.
+The **Guest Display** tool appears in the tool picker only when one of those protocols is
+available. A display panel already saved in a layout shows a text notice if neither is detected.
+Terminal graphics support varies by emulator on every host OS, including macOS; the rest of the TUI
+remains available without it.
+
 ### Slow execution mode
 
 At configured execution frequencies of 60 Hz or slower, visible pipeline and detailed register,
@@ -72,12 +79,12 @@ The TUI provides responsive hotkeys for simulation control and state inspection:
 
 | Key | Action | Description |
 | :--- | :--- | :--- |
-| **`Ctrl-P`** / **`F5`** / **`c`** | Run / Pause | Toggle between continuous execution and paused inspection. |
-| **`s`** / **`F6`** | Step Instruction | Execute exactly one instruction machine-wide across all harts. |
+| **`Ctrl-P`** / **`F5`** / **`C`** | Run / Pause | Toggle between continuous execution and paused inspection. |
+| **`S`** / **`F6`** | Step Instruction | Execute exactly one instruction machine-wide across all harts. |
 | **`Ctrl-R`** | Reboot | Reset architectural state, reload images, and restart simulation. |
-| **`Ctrl-Q`** / **`F10`** / **`q`** | Quit | Exit SimRV cleanly and restore host terminal attributes. |
-| **`f`** | Set Frequency | Set the requested simulation frequency. |
-| **`v`** | Toggle Precision | Switch between IA and CA execution modes. |
+| **`Ctrl-Q`** / **`F10`** / **`Q`** | Quit | Exit SimRV cleanly and restore host terminal attributes. |
+| **`F`** | Set Frequency | Set the requested simulation frequency. |
+| **`V`** | Toggle Precision | Switch between IA and CA execution modes. |
 
 ### Navigation & Focus
 
@@ -97,13 +104,14 @@ The TUI provides responsive hotkeys for simulation control and state inspection:
 
 | Key | Action | Description |
 | :--- | :--- | :--- |
-| **`o`** | Load | Open the binary, disk, or CPU model workflow. |
+| **`O`** | Load | Open the binary, disk, or CPU model workflow. |
 | **`Ctrl-O`** (in a load modal) | Browse | Open the file picker for the active load workflow. |
 | **`F2`** / **`,`** | Settings | Open simulator settings. |
+| **`T`** | Cycle Theme | Cycle Modern Unicode, Classic ANSI, and Sakura Pastel themes. |
 | **`Ctrl-F`** / **`/`** | Search Console | Search UART terminal history (available when paused). |
 | **`n`** / **`N`** | Next / Prev Match | Move to the next or previous search match in console scrollback. |
 | **`Esc`** | Cancel / Close | Close active modal dialog or cancel active search query. |
-| **`F1`** / **`h`** | Help | Open the keyboard shortcut reference. |
+| **`F1`** / **`H`** | Help | Open the keyboard shortcut reference. |
 | **`F9`** / **`?`** | Glossary | Open the architectural glossary. |
 
 ---
@@ -117,6 +125,16 @@ The Settings modal includes **Panel Density** with three choices:
 - **Comfortable** keeps the fuller labels and spacing wherever the available panel size allows.
 
 Density changes presentation only. Values remain available in compact panels by scrolling, and the guest console text is not rewritten. The choice is saved with the other TUI preferences; preference files created before this setting default to Auto.
+
+The same **General / UI** tab also contains **Theme** and **High Contrast Colors**. These three
+presentation choices are saved when you apply Settings; **T** remains a shortcut for cycling the
+theme. Machine settings such as hart count, memory size, and platform devices are applied through
+machine reconfiguration and may require a restart.
+
+The **Settings** modal groups controls into **General / UI**, **MISA Extensions**, and
+**Microarchitecture**. General / UI includes execution precision and presentation preferences;
+MISA controls which guest ISA extensions are enabled, while Microarchitecture configures the CPU
+model. Changes that require machine reconfiguration ask before restarting the guest.
 
 ---
 
@@ -153,7 +171,7 @@ simrv --mission examples/isa/lessons/control-flow-calls.mission -m control-flow-
 ```
 
 - **Structured Missions (`--mission`)**: Load instructional steps and independent named checkpoints that focus relevant inspector panels. See the [Instructor Guide](classroom.md#5-instructor-guide-authoring-deploying-classroom-missions).
-- **Mission Controls**: The modal keeps the student view focused on the lesson goal, current learning target, task, checkpoint state, and one next action. Press `F12` to open or reopen it. `F5` runs to the named checkpoint, even when its boundary is a later instruction; reaching it records progress without moving the instruction cursor. `F5` never advances an instruction and is blocked once the checkpoint is reached. Press `Space` / `n` in the modal to advance instructions; an unreached checkpoint only blocks crossing its `after_step` boundary. `F6` single-steps, `p` reviews the previous instruction, and `y` cycles hidden → hint → `why`. `Enter` / `Esc` hide the modal and `d` dismisses the mission. Outside the modal, `Space` retains its simulator step action. Completion shows reached/total checkpoint counts; TAs can export checkpoint evidence with `x` from the paused workbench.
+- **Mission Controls**: The modal keeps the student view focused on the lesson goal, current learning target, task, checkpoint state, and controls available in that state. Press `F12` to open or reopen Lesson Tasks / Guide. `F5` runs to the named checkpoint, even when its boundary follows a later lesson step; reaching it records progress without moving the lesson-step cursor. `F5` never advances a lesson step and is blocked once the checkpoint is reached. Press `Space` / `N` in Lesson Tasks / Guide to advance steps; an unreached checkpoint blocks only its own boundary, and the modal shows Next when advancing is allowed. `P` returns to the previous lesson step if you advance by mistake; it does not rewind guest execution. Use `R` to restart guest execution. `F6` single-steps a CPU instruction, and `Y` cycles hidden → hint → `why`. `Enter` / `Esc` hide Lesson Tasks and `z` dismisses the mission. Outside the modal, `Space` retains its simulator step action. Completion shows reached/total checkpoint counts; TAs can export checkpoint evidence with `X` from the paused workbench.
 - **Architecture Glossary**: Press `?` to open the educational glossary jump-linked to the architectural concept represented by the active inspector view (e.g., pipeline hazard interlocks, cache associativity, or virtual memory translation).
 
 ---

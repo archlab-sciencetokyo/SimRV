@@ -51,8 +51,12 @@ SUBSYSTEM_CONFIGS: Dict[str, Dict[str, Any]] = {
         "description": "Sv32/Sv39/Sv48 MMU, TileLink bus interconnect & memory hierarchy",
         "paths": ["src/memory", "include/simrv/memory", "include/simrv/cache"],
     },
+    "explain": {
+        "description": "Formal instruction explainer, state-grounded evaluation & ISA spec references",
+        "paths": ["src/explain", "include/simrv/explain"],
+    },
     "util": {
-        "description": "Instruction explainer routines, CLI parser & system helpers",
+        "description": "FDT generator/patcher, SoC manifest, CLI parser & system helpers",
         "paths": ["src/util", "include/simrv/util"],
     },
 }

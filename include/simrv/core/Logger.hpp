@@ -66,6 +66,9 @@ void set_tui_structured_callback(StructuredLogCallback cb);
                                       std::chrono::steady_clock::time_point timestamp =
                                           std::chrono::steady_clock::now()) -> std::string;
 
+/// ANSI 16-color foreground for a severity, selected to remain legible with terminal palettes.
+[[nodiscard]] auto standard_ansi_color(Level level) noexcept -> std::string_view;
+
 /// Mirror all subsequent log records to a timestamped UTF-8 developer log.
 [[nodiscard]] auto set_log_file(std::string_view path) -> bool;
 void close_log_file();

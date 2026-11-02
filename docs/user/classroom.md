@@ -1,7 +1,8 @@
 # RISC-V Student Reference Manual & SimRV Educational Guide
 
 This document serves as a comprehensive reference manual for students learning
-RISC-V computer architecture (specifically RV32GC / RV64GC) and utilizing the
+RISC-V computer architecture, using SimRV's RVA23 target profile and its RV32/RV64
+compatibility modes, and utilizing the
 educational features of **SimRV**.
 
 ---
@@ -195,8 +196,8 @@ Description (Behavior):
    ./build/rv32-release/simrv --tui --baremetal -m program.elf
    ```
 
-2. The simulation starts paused (`[PAUSED]`). Press `c` to unpause and run continuously, or press `s` / `Space` to single-step instructions.
-3. Press `l` to cycle tool views, `r` to cycle register views, or `e` to open the instruction explainer.
+2. The simulation starts paused (`[PAUSED]`). Press `C` to unpause and run continuously, or press `S` / `Space` to single-step instructions.
+3. Press `L` to cycle tool views, `R` to cycle register views, or `E` to open the instruction explainer.
 4. The EXPLAIN pane displays:
    - Current PC and symbolic function name.
    - Instruction hex value and disassembled mnemonic.
@@ -210,29 +211,29 @@ Description (Behavior):
 
 | Key | Context | Action |
 | :--- | :--- | :--- |
-| `F1` / `h` | All / Paused | Open Help & Keybindings reference modal |
+| `F1` / `H` | All / Paused | Open Help & Keybindings reference modal |
 | `F2` / `,` / `Alt-S` | Paused | Open Simulator Settings modal (Mode, SMP, Scheduler, Diagnostics) |
-| `F3` / `r` / `Alt-R` | Paused | Cycle register tabs (GPR / FPR / VEC / CSR) |
+| `F3` | Paused | Cycle register tabs (GPR / FPR / VEC / CSR) |
 | `F4` | All | Open Workbench Layout Presets modal |
-| `F5` / `c` / `Ctrl-P` | Paused / Running | Run / Pause simulation loop |
-| `F6` / `s` / `Space` | Paused | Single-step one instruction |
+| `F5` / `C` / `Ctrl-P` | Paused / Running | Run / Pause simulation loop |
+| `F6` / `S` / `Space` | Paused | Single-step one instruction |
 | `F7` | Paused | Switch active inspector to Trace & Execution page |
-| `F8` / `k` | Paused | Toggle PC breakpoint at current PC |
+| `F8` / `K` | Paused | Toggle PC breakpoint at current PC |
 | `F9` / `?` | Paused | Open Architecture Glossary modal at active topic |
-| `F10` / `q` / `Ctrl-Q` | All | Cleanly terminate simulation |
-| `F12` | Classroom mission | Open or reopen the current instruction modal |
+| `F10` / `Q` / `Ctrl-Q` | All | Cleanly terminate simulation |
+| `F12` | Classroom mission | Open or reopen Lesson Tasks / Guide for the current lesson step |
 | `Alt-1` .. `Alt-4` | All | Apply Workbench Layout Presets directly (1..4) |
-| `l` / `Alt-L` | Paused | Cycle left inspector tool tabs (Pipe / Cache / BP / Hazard / TLB / Bus / IO / Stats) |
-| `o` / `Alt-O` | Paused | Open Binary & Disk Image Loader modal |
+| `F11` | Paused | Cycle left inspector tool tabs (Pipe / Cache / BP / Hazard / TLB / Bus / IO / Stats) |
+| `O` / `Alt-O` | Paused | Open Binary & Disk Image Loader modal |
 | `Alt-M` | Paused | Open MISA CSR / Extensions Configuration modal |
-| `y` | Paused | Open Cycle-Accurate Microarchitecture & Cache Config modal |
-| `i` | Paused | Open Memory Inspector modal |
-| `m` | Paused | Open Breakpoints & Watchpoints Management modal |
+| `Y` | Paused | Open Cycle-Accurate Microarchitecture & Cache Config modal |
+| `I` | Paused | Open Memory Inspector modal |
+| `M` | Paused | Open Breakpoints & Watchpoints Management modal |
 | `Enter` | Mission modal | Hide the modal and return to the workbench |
-| `Space` | Mission modal | Advance to the next instruction, unless an unreached checkpoint blocks it |
+| `Space` | Lesson Guide | Advance to the next lesson step, unless an unreached checkpoint blocks it |
 | `Ctrl-L` | Paused | Show / hide the compact simulator log drawer |
-| `e` | Paused | Open / close the current instruction explanation |
-| `x` | Paused | Export the configured inspection report |
+| `E` | Paused | Open / close the current instruction explanation |
+| `X` | Paused | Export the configured inspection report |
 | `Tab` | All | Focus next workbench column / right pane |
 | `Ctrl-R` | All | Soft-reboot guest simulation |
 
@@ -319,7 +320,12 @@ glossary = "0"
 | `glossary` | string (int) | (Optional) Topic index in the Architecture Glossary (`[F9]`) relevant to this concept. |
 | `speed_hz` | string (int) | (Optional) Execution frequency for this step. Overrides the mission default until the next step. `0` selects maximum speed. |
 
-The **Set Speed** modal (`f`) shows the current frequency and explains the inspector behavior:
+The Lesson Tasks / Guide uses colored labels to separate the scenario, goal, learning target, task,
+checkpoint, and next action. In `description`, `goal`, and step text, wrap register names, symbols,
+instructions, or key names in backticks for inline emphasis; use `**bold**` for a short phrase you
+want students to notice. Both are optional and remain readable as plain text in the mission file.
+
+The **Set Speed** modal (`F`) shows the current frequency and explains the inspector behavior:
 at 60 Hz or slower, detailed values remain visible; above 60 Hz, only fast-changing detail is
 replaced by a running indicator while sampled counters continue updating. Mission speed is applied
 when the mission starts, restarts, and advances to a step with a speed setting.
@@ -345,11 +351,18 @@ message = "The loop reached its back edge. Compare this PC with the earlier iter
 
 ### How Missions Progress in Class
 
-1. **Read one instruction:** The modal shows the lesson goal, the current learning target, and one task. Use **y** to reveal a hint, then the explanation if needed.
-2. **Run and inspect:** Press **F5** to run to the named checkpoint shown in the modal, or **F6** to single-step. When the modal is hidden (and the primary Inspector column is at least 56 columns wide by 15 rows high), a compact 2-line **Mission Drawer** at the bottom of the primary Inspector panel keeps the active step title, checkpoint status, and `Task:` prompt visible alongside live registers and trace. Reaching a checkpoint pauses execution, updates the drawer with the checkpoint message, and records the checkpoint without moving the instruction cursor. If the checkpoint belongs to a later step, the modal says it was reached early.
-3. **Continue the lesson:** Press **Space** or **n** in the modal (or **n** on the workbench) to move through instructions. You can read earlier instructions after reaching a checkpoint early, but cannot advance past its `after_step` boundary before it is reached. F5 never advances an instruction.
-4. **Review and finish:** Press **F12** to reopen the current instruction and **p** to review the previous one. Completion shows reached/total checkpoint counts and leaves the workbench available for review. To save TA evidence, press **x** while paused with an inspection report output path configured. The report records the lesson ID, completion status, step and checkpoint counts, and reached checkpoint symbols in encounter order, without identity or grades.
+1. **Read one lesson step:** Lesson Tasks / Guide shows the lesson scenario and goal, the current learning target, and one task. Use **Y** to reveal a hint, then the explanation if needed. “Lesson step” means teaching guidance; “instruction” means a CPU instruction shown in the simulator.
+2. **Run and inspect:** Press **F5** to run to the named checkpoint shown in Lesson Tasks / Guide, or **F6** to single-step. When the modal is hidden (and the primary Inspector column is at least 56 columns wide by 15 rows high), a compact 5-line **Mission Drawer** at the bottom of the primary Inspector panel shows the **F12 Tasks** shortcut, step title, short focus summary, checkpoint state, and available controls alongside live registers and trace. Open Lesson Tasks / Guide for the full task, hint, and rationale. Reaching a checkpoint pauses execution and records it without moving the lesson-step cursor. If the checkpoint belongs to a later step, the task panel says it was reached early.
+3. **Continue the lesson:** Press **Space** or **N** in Lesson Tasks / Guide (or **N** on the workbench) to move through lesson steps. You can read earlier steps after reaching a checkpoint early, but cannot advance past its `after_step` boundary before it is reached. F5 never advances a lesson step.
+4. **Review and finish:** Press **F12** to reopen lesson Tasks for the current lesson step and **P** to review the previous step. Completion pauses guest execution and shows reached/total checkpoint counts; the final state stays available for review. **F5** and **F6** cannot run past the end. Use **R** to restart or **Q** to exit. To save TA evidence, press **X** while paused with an inspection report output path configured. The report records the lesson ID, completion status, step and checkpoint counts, and reached checkpoint symbols in encounter order, without identity or grades.
 5. **Workbenches per Step:** `panels` can configure the entire one-to-four panel workbench for a step. If omitted, SimRV focuses or selects the single `view` page.
+
+### Managing Breakpoints and Watchpoints
+
+- Press **W** to add a register or memory watchpoint. Enter a register such as `a1`, then press **Enter**. Execution pauses when that value changes.
+- Press **:** to add a PC breakpoint by address or symbol. Enter a symbol such as `debug_result`, then press **Enter**. **F5** runs to it.
+- Press **M** to review active points. **Up/Down** or the mouse wheel selects an entry; **Enter** or **Backspace** removes the selected entry. The list labels lesson checkpoints separately from user breakpoints.
+- Inside the manager, **A** opens the PC breakpoint form and **W** opens the watchpoint form. **C** clears breakpoints and watchpoints, including lesson checkpoints; hardware triggers are unaffected.
 
 When the terminal is too narrow or short for a requested layout, the status line reports the
 required and current window size. The panel layout remains selected and will fit automatically
@@ -360,17 +373,17 @@ panels; the minimum terminal height is 10 rows.
 
 | Key | Action |
 | :--- | :--- |
-| **`F5`** | Run to the checkpoint named in the modal (automatically hides the modal). It does not advance the instruction and is blocked after that checkpoint is reached. |
+| **`F5`** | Run to the checkpoint named in Tasks / Guide (automatically hides the modal). It does not advance the lesson step and is blocked after that checkpoint is reached. |
 | **`F6`** | Single-step one instruction (automatically hides the mission modal if open). |
-| **`n` / `Space`** | Advance the instruction cursor in the modal. Progress cannot cross an unreached checkpoint boundary; outside the modal, `n` advances and `Space` single-steps the CPU. |
-| **`p`** | Return to the previous mission step for review. |
-| **`F12`** | Open or reopen the current instruction modal. |
-| **`y`** | Cycle from hidden to the short hint to the full `why`; without `hint`, toggle `why`. |
+| **`N` / `Space`** | Advance to the next lesson step in Tasks / Guide. The modal offers this only when the current checkpoint boundary allows it. Outside the modal, `N` advances the lesson step and `Space` single-steps the CPU. |
+| **`P`** | Return to the previous lesson step to review or undo a mistaken lesson-step advance. This does not rewind guest execution. |
+| **`F12`** | Open or reopen Lesson Tasks / Guide for the current lesson step. The header keeps the step and checkpoint state visible while temporary notices appear. |
+| **`Y`** | Cycle from hidden to the short hint to the full `why`; without `hint`, toggle `why`. |
 | **`Enter` / `Esc`** | Hide the modal and return to the workbench without advancing. |
 | **`Ctrl-L`** | Show / hide the compact simulator log drawer. |
-| **`r`** | Reset guest state to the entry point and restart the mission from step 1. |
-| **`d`** | Dismiss the active mission and continue in free exploration. |
-| **`q` / `F10`** (completed lesson) | Exit SimRV after reviewing the final workbench. |
+| **`R`** | Reset guest state to the entry point and restart the mission from step 1. |
+| **`z`** | Dismiss the active mission and continue in free exploration. |
+| **`Q` / `F10`** (completed lesson) | Exit SimRV after reviewing the final workbench. |
 
 ### Creating and Checking a Mission
 
@@ -506,7 +519,7 @@ message = "The function returned. Verify a0 and sp before reviewing the trace."
 
 #### Step 4: TA Checkpoint Evidence
 
-When a student explicitly exports the paused inspection report with `x`, it includes the mission
+When a student explicitly exports the paused inspection report with `X`, it includes the mission
 identifier, completion state, current/total step counts, total checkpoint count, and reached
 checkpoint symbols in encounter order. The mission section contains no student identity or grading
 data. Checkpoints show which named program markers were reached; they do not certify that a student

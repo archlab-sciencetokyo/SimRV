@@ -20,7 +20,7 @@ struct PipelineReg {
     simrv::xlen::RegId rd = static_cast<simrv::xlen::RegId>(0);
     simrv::xlen::RegId rs1 = static_cast<simrv::xlen::RegId>(0);
     simrv::xlen::RegId rs2 = static_cast<simrv::xlen::RegId>(0);
-    isa::OperationId op_id = isa::OperationId::UNKNOWN;
+    isa::OperationId op_id = isa::OperationId::ILLEGAL;
     bool writes_reg = false;
     uint32_t rd_mask = 0;
     bool writes_fp_reg = false;
@@ -46,7 +46,7 @@ struct PipelineInstruction {
     simrv::xlen::RegId rd = static_cast<simrv::xlen::RegId>(0);
     simrv::xlen::RegId rs1 = static_cast<simrv::xlen::RegId>(0);
     simrv::xlen::RegId rs2 = static_cast<simrv::xlen::RegId>(0);
-    isa::OperationId op_id = isa::OperationId::UNKNOWN;
+    isa::OperationId op_id = isa::OperationId::ILLEGAL;
     bool branched = false;
     bool is_branch = false;
     bool is_jump = false;
@@ -119,7 +119,7 @@ struct PipelineCycleSnapshot {
     struct StageInfo {
         simrv::xlen::InstructionId inst_id = 0;
         simrv::xlen::Register pc = 0;
-        isa::OperationId op_id = isa::OperationId::UNKNOWN;
+        isa::OperationId op_id = isa::OperationId::ILLEGAL;
         bool valid = false;
         bool stalled = false;
     };

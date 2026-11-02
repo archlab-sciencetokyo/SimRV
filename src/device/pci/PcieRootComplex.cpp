@@ -12,15 +12,20 @@
 
 namespace simrv::device {
 
-PcieRootComplex::PcieRootComplex(simrv::core::Machine* machine, Aplic* aplic_s, Imsic* imsic_s)
-    : machine_(machine), aplic_s_(aplic_s), imsic_s_(imsic_s) {}
+PcieRootComplex::PcieRootComplex(simrv::core::Machine* machine, Aplic* aplic_s, Imsic* imsic_s,
+                                 simrv::core::PcieHostConfig config)
+    : machine_(machine), aplic_s_(aplic_s), imsic_s_(imsic_s), config_(config) {}
 
-auto PcieRootComplex::attach_device(PciBdf bdf, std::shared_ptr<PciDevice> device) -> bool {
+auto PcieRootComplex::attach_device(PciBdf bdf, std::shared_ptr<PciDevice> device,
+                                    uint32_t intx_source) -> bool {
     if (!device) return false;
+    if (get_device(bdf) != nullptr) return false;
     device->set_root_complex(this, bdf);
     if (bdf.bus == 0 && bdf.dev < kMaxSlots && bdf.func == 0) {
         devices_by_slot_[bdf.dev] = device.get();
     }
+    intx_routes_.push_back(
+        {.bdf = bdf, .source = intx_source != 0 ? intx_source : 16U + (bdf.dev % 8U)});
     owned_devices_.push_back(device);
     rebuild_bar_mappings();
     return true;
@@ -46,8 +51,9 @@ void PcieRootComplex::rebuild_bar_mappings() {
         for (uint8_t i = 0; i < 6; ++i) {
             const simrv::xlen::Address size = dev->bar_size(i);
             const simrv::xlen::Address base = dev->bar_base(i);
-            if (size > 0 && base != 0 && base >= kMmioBaseAddress &&
-                (base + size) <= (kMmioBaseAddress + kMmioSize)) {
+            if (size > 0 && base != 0 && base >= config_.mmio_base &&
+                base <= ~simrv::xlen::Address{0} - size &&
+                (base + size) <= (config_.mmio_base + config_.mmio_size)) {
                 active_bars_.push_back(BarMapping{
                     .base = base,
                     .end = base + size,
@@ -64,7 +70,10 @@ void PcieRootComplex::rebuild_bar_mappings() {
 }
 
 auto PcieRootComplex::ecam_read(simrv::xlen::Address offset, PciAccessBytes size) -> PciConfigData {
-    const auto bus = static_cast<PciBusNumber>((offset >> 20) & 0xFF);
+    const auto bus_offset = offset >> 20;
+    const auto bus_count = static_cast<uint64_t>(config_.last_bus) - config_.first_bus + 1;
+    if (bus_offset >= bus_count) return 0xFFFFFFFFU;
+    const auto bus = static_cast<PciBusNumber>(config_.first_bus + bus_offset);
     const auto dev = static_cast<PciDeviceNumber>((offset >> 15) & 0x1F);
     const auto func = static_cast<PciFunctionNumber>((offset >> 12) & 0x07);
     const auto reg_offset = static_cast<PciConfigOffset>(offset & 0xFFF);
@@ -76,7 +85,10 @@ auto PcieRootComplex::ecam_read(simrv::xlen::Address offset, PciAccessBytes size
 
 void PcieRootComplex::ecam_write(simrv::xlen::Address offset, PciConfigData val,
                                  PciAccessBytes size) {
-    const auto bus = static_cast<PciBusNumber>((offset >> 20) & 0xFF);
+    const auto bus_offset = offset >> 20;
+    const auto bus_count = static_cast<uint64_t>(config_.last_bus) - config_.first_bus + 1;
+    if (bus_offset >= bus_count) return;
+    const auto bus = static_cast<PciBusNumber>(config_.first_bus + bus_offset);
     const auto dev = static_cast<PciDeviceNumber>((offset >> 15) & 0x1F);
     const auto func = static_cast<PciFunctionNumber>((offset >> 12) & 0x07);
     const auto reg_offset = static_cast<PciConfigOffset>(offset & 0xFFF);
@@ -88,7 +100,8 @@ void PcieRootComplex::ecam_write(simrv::xlen::Address offset, PciConfigData val,
 }
 
 auto PcieRootComplex::mmio_read(simrv::xlen::Address addr, PciAccessBytes size) -> PciMmioData {
-    if (active_bars_.empty() || addr < kMmioBaseAddress || addr >= kMmioBaseAddress + kMmioSize) {
+    if (active_bars_.empty() || addr < config_.mmio_base ||
+        addr >= config_.mmio_base + config_.mmio_size) {
         return 0;
     }
 
@@ -129,7 +142,8 @@ auto PcieRootComplex::mmio_read(simrv::xlen::Address addr, PciAccessBytes size) 
 }
 
 void PcieRootComplex::mmio_write(simrv::xlen::Address addr, PciMmioData val, PciAccessBytes size) {
-    if (active_bars_.empty() || addr < kMmioBaseAddress || addr >= kMmioBaseAddress + kMmioSize) {
+    if (active_bars_.empty() || addr < config_.mmio_base ||
+        addr >= config_.mmio_base + config_.mmio_size) {
         return;
     }
 
@@ -172,7 +186,10 @@ void PcieRootComplex::mmio_write(simrv::xlen::Address addr, PciMmioData val, Pci
 }
 
 void PcieRootComplex::assert_device_irq(PciBdf bdf) {
-    const simrv::xlen::InterruptSourceId irq_source = 16 + (bdf.dev % 8);
+    const auto route =
+        std::ranges::find_if(intx_routes_, [bdf](const auto& entry) { return entry.bdf == bdf; });
+    const simrv::xlen::InterruptSourceId irq_source =
+        route == intx_routes_.end() ? 16 + (bdf.dev % 8) : route->source;
 
     if (aplic_s_ != nullptr) {
         aplic_s_->set_irq(irq_source, true);
@@ -183,7 +200,10 @@ void PcieRootComplex::assert_device_irq(PciBdf bdf) {
 }
 
 void PcieRootComplex::deassert_device_irq(PciBdf bdf) {
-    const simrv::xlen::InterruptSourceId irq_source = 16 + (bdf.dev % 8);
+    const auto route =
+        std::ranges::find_if(intx_routes_, [bdf](const auto& entry) { return entry.bdf == bdf; });
+    const simrv::xlen::InterruptSourceId irq_source =
+        route == intx_routes_.end() ? 16 + (bdf.dev % 8) : route->source;
 
     if (aplic_s_ != nullptr) {
         aplic_s_->set_irq(irq_source, false);
@@ -212,7 +232,7 @@ void PcieRootComplex::send_msi(PciBdf bdf, simrv::xlen::Address addr, uint32_t m
 
 auto PcieRootComplex::EcamNode::handle_request(const memory::TlChannelA& req,
                                                memory::TlChannelD& resp) -> bool {
-    const simrv::xlen::Address offset = (req.address - kEcamBaseAddress).raw();
+    const simrv::xlen::Address offset = (req.address - rc_->config_.ecam_base).raw();
     const bool is_write = (req.opcode == memory::TlOpcodeA::PutFullData ||
                            req.opcode == memory::TlOpcodeA::PutPartialData);
 

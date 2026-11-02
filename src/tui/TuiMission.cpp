@@ -145,6 +145,7 @@ auto MissionProgress::load(std::string_view mission_path) -> bool {
     };
 
     std::string line;
+    std::vector<std::string> section_keys;
     while (std::getline(input, line)) {
         ++line_number;
         const auto text = trim(line);
@@ -157,12 +158,18 @@ auto MissionProgress::load(std::string_view mission_path) -> bool {
             step_open = section == Section::Step;
             checkpoint_open = section == Section::Checkpoint;
             step_has_view = false;
+            section_keys.clear();
             continue;
         }
         const auto equals = text.find('=');
         if (equals == std::string_view::npos) return fail("expected key = \"value\"");
         const auto key = trim(text.substr(0, equals));
         auto raw_value = trim(text.substr(equals + 1));
+        const auto canonical_key =
+            section == Section::Step && key == "label" ? std::string_view("id") : key;
+        if (std::ranges::find(section_keys, canonical_key) != section_keys.end())
+            return fail("duplicate key");
+        section_keys.emplace_back(canonical_key);
         std::optional<std::string> value = unquote(raw_value);
         if (!value && section == Section::Checkpoint && key == "after_step")
             value = std::string(raw_value);
@@ -262,8 +269,8 @@ auto MissionProgress::load(std::string_view mission_path) -> bool {
         }
     }
     if (!finish_step() || !finish_checkpoint()) return false;
-    if (!saw_version || expected_program_.empty() || steps_.empty()) {
-        detail_ = "[mission] requires version and program, followed by at least one [step].";
+    if (!saw_version || lesson_id_.empty() || expected_program_.empty() || steps_.empty()) {
+        detail_ = "[mission] requires version, id, and program, followed by at least one [step].";
         return false;
     }
     for (size_t i = 0; i < checkpoints_.size(); ++i) {

@@ -31,7 +31,7 @@ enum class CpuModelPreset : uint8_t {
 struct L1CacheConfig {
     uint32_t capacity_bytes = 4096;
     uint32_t associativity = 2;
-    uint32_t line_bytes = 32;
+    uint32_t line_bytes = 64;
     simrv::xlen::LatencyCycles hit_latency = 1;
     simrv::xlen::LatencyCycles miss_latency = 12;
 };

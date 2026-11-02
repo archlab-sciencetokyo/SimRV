@@ -1837,7 +1837,7 @@ bool execute_vector_int_widening_arith(core::CPU& cpu, isa::OperationId op_id,
                 execute_vwmul_vv<uint16_t, uint8_t>(cpu, rd, rs1, rs2, vm, vl);
             else if (sew == 16)
                 execute_vwmul_vv<uint32_t, uint16_t>(cpu, rd, rs1, rs2, vm, vl);
-            else if (sew == 64)
+            else
                 execute_vwmul_vv<uint64_t, uint32_t>(cpu, rd, rs1, rs2, vm, vl);
             return true;
         case isa::OperationId::VWMULU_VX:
@@ -1845,7 +1845,7 @@ bool execute_vector_int_widening_arith(core::CPU& cpu, isa::OperationId op_id,
                 execute_vwmul_vx<uint16_t, uint8_t>(cpu, rd, rs1_val, rs2, vm, vl);
             else if (sew == 16)
                 execute_vwmul_vx<uint32_t, uint16_t>(cpu, rd, rs1_val, rs2, vm, vl);
-            else if (sew == 64)
+            else
                 execute_vwmul_vx<uint64_t, uint32_t>(cpu, rd, rs1_val, rs2, vm, vl);
             return true;
 
@@ -1854,7 +1854,7 @@ bool execute_vector_int_widening_arith(core::CPU& cpu, isa::OperationId op_id,
                 execute_vwmulsu_vv<int16_t, int8_t, uint8_t>(cpu, rd, rs1, rs2, vm, vl);
             else if (sew == 16)
                 execute_vwmulsu_vv<int32_t, int16_t, uint16_t>(cpu, rd, rs1, rs2, vm, vl);
-            else if (sew == 64)
+            else
                 execute_vwmulsu_vv<int64_t, int32_t, uint32_t>(cpu, rd, rs1, rs2, vm, vl);
             return true;
         case isa::OperationId::VWMULSU_VX:
@@ -1862,7 +1862,7 @@ bool execute_vector_int_widening_arith(core::CPU& cpu, isa::OperationId op_id,
                 execute_vwmulsu_vx<int16_t, int8_t, uint8_t>(cpu, rd, rs1_val, rs2, vm, vl);
             else if (sew == 16)
                 execute_vwmulsu_vx<int32_t, int16_t, uint16_t>(cpu, rd, rs1_val, rs2, vm, vl);
-            else if (sew == 64)
+            else
                 execute_vwmulsu_vx<int64_t, int32_t, uint32_t>(cpu, rd, rs1_val, rs2, vm, vl);
             return true;
 

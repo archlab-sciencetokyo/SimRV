@@ -4,10 +4,15 @@
 #include <array>
 #include <cstring>
 #include <format>
+#include <limits>
 #include <map>
+#include <optional>
 #include <set>
 #include <stdexcept>
 #include <string_view>
+
+#include "simrv/core/GuestCapabilityCatalog.hpp"
+#include "simrv/xlen/ScalarTypes.hpp"
 
 namespace simrv::util {
 namespace {
@@ -126,11 +131,122 @@ auto is_memory(Node& n) -> bool {
            std::string_view(reinterpret_cast<const char*>(type->data.data()), type->data.size())
                .starts_with("memory");
 }
+auto misa_extension_for_letter(char letter) -> std::optional<unsigned> {
+    switch (letter) {
+        case 'a':
+            return 0;
+        case 'b':
+            return 1;
+        case 'c':
+            return 2;
+        case 'd':
+            return 3;
+        case 'f':
+            return 5;
+        case 'h':
+            return 7;
+        case 'i':
+            return 8;
+        case 'm':
+            return 12;
+        case 's':
+            return 18;
+        case 'u':
+            return 20;
+        case 'v':
+            return 21;
+        default:
+            return std::nullopt;
+    }
+}
 }  // namespace
+
+auto validate_fdt_isa(std::span<const uint8_t> blob, uint64_t selected_misa)
+    -> std::expected<void, std::string> {
+    try {
+        if (blob.size() < 40 || be32(blob, 0) != kMagic)
+            return std::unexpected("invalid device tree header");
+        const auto total = be32(blob, 4), struct_off = be32(blob, 8), strings_off = be32(blob, 12),
+                   version = be32(blob, 20);
+        if (total > blob.size() || total < 40 || struct_off >= total || strings_off >= total ||
+            version < 17)
+            return std::unexpected("unsupported or truncated device tree");
+        const auto struct_size = be32(blob, 36), strings_size = be32(blob, 32);
+        if (struct_off + struct_size > total || strings_off + strings_size > total)
+            return std::unexpected("invalid device tree block sizes");
+        Parser parser{blob.subspan(struct_off, struct_size),
+                      blob.subspan(strings_off, strings_size)};
+        const auto root = parser.node();
+        const Node* cpus = nullptr;
+        for (const auto& node : root.children) {
+            if (node.name == "cpus") {
+                cpus = &node;
+                break;
+            }
+        }
+        if (cpus == nullptr) return {};
+        for (const auto& cpu : cpus->children) {
+            if (!cpu.name.starts_with("cpu@")) continue;
+            const auto check_letter = [&](char letter) -> std::expected<void, std::string> {
+                if (const auto bit = misa_extension_for_letter(letter);
+                    bit && (selected_misa & (uint64_t{1} << *bit)) == 0) {
+                    return std::unexpected(std::format(
+                        "CPU node '/cpus/{}' advertises ISA extension '{}' that is disabled "
+                        "in the selected ISA",
+                        cpu.name, letter));
+                }
+                return {};
+            };
+            const auto* legacy_isa = prop(cpu, "riscv,isa");
+            if (legacy_isa != nullptr) {
+                const std::string_view isa(reinterpret_cast<const char*>(legacy_isa->data.data()),
+                                           legacy_isa->data.size());
+                if (isa.starts_with("rv64") && ((selected_misa >> 62U) & 3U) != 2U)
+                    return std::unexpected(std::format(
+                        "CPU node '/cpus/{}' requires RV64 but the selected ISA is RV32",
+                        cpu.name));
+                size_t pos = isa.starts_with("rv32") || isa.starts_with("rv64") ? 4 : 0;
+                while (pos < isa.size() && isa[pos] >= 'a' && isa[pos] <= 'z') {
+                    if (isa[pos] == 'g') {
+                        for (const char implied : std::string_view("imafd"))
+                            if (auto result = check_letter(implied); !result) return result;
+                    } else if (auto result = check_letter(isa[pos]); !result) {
+                        return result;
+                    }
+                    ++pos;
+                }
+            }
+            const auto* extensions = prop(cpu, "riscv,isa-extensions");
+            if (extensions == nullptr) continue;
+            size_t offset = 0;
+            while (offset < extensions->data.size()) {
+                const auto end = std::find(extensions->data.begin() + offset,
+                                           extensions->data.end(), uint8_t{0});
+                if (end == extensions->data.end())
+                    return std::unexpected("unterminated riscv,isa-extensions property");
+                const auto length = static_cast<size_t>(end - (extensions->data.begin() + offset));
+                if (length == 1) {
+                    const char letter = static_cast<char>(extensions->data[offset]);
+                    if (auto result = check_letter(letter); !result) return result;
+                }
+                offset += length + 1;
+            }
+        }
+        return {};
+    } catch (const std::exception& error) {
+        return std::unexpected(std::format("invalid device tree: {}", error.what()));
+    }
+}
 
 auto patch_fdt(std::span<const uint8_t> blob, uint64_t dram_base, uint64_t dram_size,
                uint32_t num_harts, FdtFramebufferInfo* out_fb, uint64_t timebase_hz,
                uint64_t cpu_clock_hz) -> std::expected<std::vector<uint8_t>, std::string> {
+    if (timebase_hz > std::numeric_limits<uint32_t>::max()) {
+        return std::unexpected("timebase frequency does not fit the FDT 32-bit property");
+    }
+    if (cpu_clock_hz > std::numeric_limits<uint32_t>::max()) {
+        return std::unexpected("CPU clock frequency does not fit the FDT 32-bit property");
+    }
     try {
         if (blob.size() < 40 || be32(blob, 0) != kMagic)
             return std::unexpected("invalid device tree header");
@@ -229,23 +345,95 @@ auto patch_fdt(std::span<const uint8_t> blob, uint64_t dram_base, uint64_t dram_
                 set_prop(*c, "clock-frequency", std::move(clk_data));
             }
             std::vector<uint8_t> cbom_sz;
-            put32(cbom_sz, 32);
+            put32(cbom_sz, core::kGuestCacheBlockBytes);
             set_prop(*c, "riscv,cbom-block-size", cbom_sz);
+            std::vector<uint8_t> cbop_sz;
+            put32(cbop_sz, core::kGuestCacheBlockBytes);
+            set_prop(*c, "riscv,cbop-block-size", std::move(cbop_sz));
             std::vector<uint8_t> cboz_sz;
-            put32(cboz_sz, 32);
+            put32(cboz_sz, core::kGuestCacheBlockBytes);
             set_prop(*c, "riscv,cboz-block-size", std::move(cboz_sz));
             auto* isa_ext_prop = prop(*c, "riscv,isa-extensions");
-            if (isa_ext_prop != nullptr && !isa_ext_prop->data.empty()) {
-                const std::string_view raw(reinterpret_cast<const char*>(isa_ext_prop->data.data()),
-                                           isa_ext_prop->data.size());
-                if (raw.find("zicond") == std::string_view::npos) {
-                    static constexpr std::string_view kRva23Exts[] = {
-                        "zicond",  "zicboz", "zicbom",  "zicbop",
-                        "svinval", "svpbmt", "svnapot", "sstc"};
-                    for (const auto ext : kRva23Exts) {
+            if (isa_ext_prop == nullptr) {
+                set_prop(*c, "riscv,isa-extensions", {});
+                isa_ext_prop = prop(*c, "riscv,isa-extensions");
+            }
+            if (isa_ext_prop != nullptr) {
+                // Advertise only supported additions; this is not the complete RVA23 set.
+                const auto has_extension = [&](std::string_view extension) {
+                    size_t offset = 0;
+                    while (offset < isa_ext_prop->data.size()) {
+                        const auto remaining = isa_ext_prop->data.size() - offset;
+                        const auto* token = isa_ext_prop->data.data() + offset;
+                        const auto* terminator =
+                            static_cast<const uint8_t*>(std::memchr(token, 0, remaining));
+                        if (terminator == nullptr) break;
+                        const auto length = static_cast<size_t>(terminator - token);
+                        const auto* begin = reinterpret_cast<const char*>(token);
+                        if (std::string_view(begin, length) == extension) return true;
+                        offset += length + 1;
+                    }
+                    return false;
+                };
+                const auto append_extension = [&](std::string_view extension) {
+                    if (has_extension(extension)) return;
+                    isa_ext_prop->data.insert(isa_ext_prop->data.end(), extension.begin(),
+                                              extension.end());
+                    isa_ext_prop->data.push_back('\0');
+                };
+                const bool has_hypervisor = has_extension("h");
+                const bool has_vector = has_extension("v");
+                const bool has_bitmanip = has_extension("b") || has_extension("zba") ||
+                                          has_extension("zbb") || has_extension("zbs");
+                const bool has_compressed = has_extension("c") || has_extension("zca");
+                for (const auto ext : core::kPatchableGuestExtensions) {
+                    if ((ext == "ssu64xl" || ext == "ssnpm" || ext == "supm") &&
+                        !simrv::xlen::kIsXLen64)
+                        continue;
+                    bool present = false;
+                    size_t offset = 0;
+                    while (offset < isa_ext_prop->data.size()) {
+                        const auto remaining = isa_ext_prop->data.size() - offset;
+                        const auto* token = isa_ext_prop->data.data() + offset;
+                        const auto* terminator =
+                            static_cast<const uint8_t*>(std::memchr(token, 0, remaining));
+                        if (terminator == nullptr) break;
+                        const auto length = static_cast<size_t>(terminator - token);
+                        const auto* begin = reinterpret_cast<const char*>(token);
+                        if (std::string_view(begin, length) == ext) {
+                            present = true;
+                            break;
+                        }
+                        offset += length + 1;
+                    }
+                    if (!present) {
                         isa_ext_prop->data.insert(isa_ext_prop->data.end(), ext.begin(), ext.end());
                         isa_ext_prop->data.push_back('\0');
                     }
+                }
+                if (has_extension("m")) append_extension("zmmul");
+                if (has_extension("a")) {
+                    append_extension("zaamo");
+                    append_extension("zalrsc");
+                    append_extension("za128rs");
+                }
+                if (has_bitmanip) {
+                    append_extension("zba");
+                    append_extension("zbb");
+                    append_extension("zbs");
+                }
+                if (has_compressed) {
+                    append_extension("zca");
+                    append_extension("zcb");
+                    append_extension("zcmop");
+                    if (has_extension("d")) append_extension("zcd");
+                }
+                if (has_vector && has_bitmanip) append_extension("zvkb");
+                if (has_hypervisor) {
+                    static constexpr std::string_view kShaExtensions[] = {
+                        "ssstateen", "shcounterenw", "shvstvala", "shtvala",
+                        "shvstvecd", "shvsatpa",     "shgatpa"};
+                    for (const auto ext : kShaExtensions) append_extension(ext);
                 }
             }
         }

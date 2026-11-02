@@ -1,6 +1,6 @@
 /**
  * @file TerminalPane.hpp
- * @brief OOP Widget for TUI guest terminal pane (Guest console / Sixel display).
+ * @brief OOP Widget for TUI guest terminal pane (Guest console / graphical display).
  */
 #pragma once
 

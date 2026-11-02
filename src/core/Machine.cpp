@@ -307,6 +307,56 @@ auto Machine::framebuffer_view() const noexcept -> simrv::memory::RamView {
     return {ram.unchecked_ptr(base), base, size};
 }
 
+auto Machine::dump_signature(const std::string& filepath) const -> bool {
+    if (filepath.empty()) {
+        return false;
+    }
+    const auto& syms = symbol_table();
+    const auto begin_opt = syms.lookup_name("begin_signature").or_else([&] {
+        return syms.lookup_name("rvtest_sig_begin");
+    });
+    const auto end_opt = syms.lookup_name("end_signature").or_else([&] {
+        return syms.lookup_name("rvtest_sig_end");
+    });
+    if (!begin_opt || !end_opt) {
+        simrv::log::warn(
+            "Signature dumping requested but begin_signature/end_signature symbols not found");
+        return false;
+    }
+    if (*begin_opt >= *end_opt) {
+        simrv::log::warn("Invalid signature address range: begin=0x{:x} end=0x{:x}", *begin_opt,
+                         *end_opt);
+        return false;
+    }
+
+    std::ofstream out(filepath, std::ios::trunc);
+    if (!out) {
+        simrv::log::error("Cannot open signature output file: {}", filepath);
+        return false;
+    }
+
+    const auto len = static_cast<size_t>(*end_opt - *begin_opt);
+    std::vector<uint8_t> buffer(len, 0);
+    auto& mem = const_cast<Machine*>(this)->memory();
+    if (!mem.dma_read(*begin_opt, buffer.data(), len)) {
+        simrv::log::error("Failed to read signature range from memory: 0x{:x} - 0x{:x}", *begin_opt,
+                          *end_opt);
+        return false;
+    }
+
+    for (size_t i = 0; i < len; i += 4) {
+        uint32_t word = 0;
+        for (size_t b = 0; b < 4 && (i + b) < len; ++b) {
+            word |= static_cast<uint32_t>(buffer[i + b]) << (b * 8);
+        }
+        std::print(out, "{:08x}\n", word);
+    }
+    out.flush();
+    simrv::log::info("Wrote architectural test signature to {} ({} words)", filepath,
+                     (len + 3) / 4);
+    return true;
+}
+
 auto Machine::save_checkpoint(const std::string& filepath) const
     -> std::expected<void, std::string> {
     const auto ram = ram_view();
@@ -1249,6 +1299,8 @@ void Machine::reset_state() {
         });
     }
     tohost = 0;
+    tohost_low_word_pending_.store(false, std::memory_order_relaxed);
+    tohost_low_word_fallback_cycles_.store(0, std::memory_order_relaxed);
     reboot_requested = false;
     exit_code = 0;
     is_shutdown_ = false;
@@ -1380,8 +1432,7 @@ void Machine::prewarm_bram_caches() {
             }
 
             constexpr simrv::xlen::Address kDLineBytes = simrv::cache::DCache::kLineBytes;
-            const simrv::xlen::Address dmem_base =
-                ram.contains(0x10000000ULL, kDLineBytes) ? 0x10000000ULL : dram_base;
+            const simrv::xlen::Address dmem_base = dram_base;
             const simrv::xlen::Address d_end = dmem_base + cpu.dcache.capacity_bytes();
             for (simrv::xlen::Address addr = dmem_base; addr < d_end; addr += kDLineBytes) {
                 if (ram.contains(addr, kDLineBytes)) {
@@ -1944,6 +1995,15 @@ void Machine::finalize_cycle_tohost() {
         return;
     }
 
+    if (tohost_low_word_pending_.load(std::memory_order_acquire)) {
+        const auto remaining = tohost_low_word_fallback_cycles_.load(std::memory_order_acquire);
+        if (remaining != 0) {
+            tohost_low_word_fallback_cycles_.fetch_sub(1, std::memory_order_acq_rel);
+            return;  // Give a paired upper-word SW time to complete.
+        }
+        tohost_low_word_pending_.store(false, std::memory_order_release);
+    }
+
     const bool is_guest_xlen32 = (primary_hart().state().regs.xlen == 32);
     const auto dev = static_cast<uint8_t>(tohost >> 56);
     const auto cmd = static_cast<uint8_t>(tohost >> 48);
@@ -2064,6 +2124,24 @@ void Machine::finalize_cycle_tohost() {
         stop(StopReason::TohostFail);
         tohost = 0;
         return;
+    }
+}
+
+void Machine::publish_tohost_write(uint64_t value, TohostWriteKind kind) noexcept {
+    tohost.store(value, std::memory_order_relaxed);
+    switch (kind) {
+        case TohostWriteKind::LowWord:
+            tohost_low_word_pending_.store(true, std::memory_order_release);
+            tohost_low_word_fallback_cycles_.store(4, std::memory_order_release);
+            break;
+        case TohostWriteKind::HighWord:
+        case TohostWriteKind::Full:
+            tohost_low_word_pending_.store(false, std::memory_order_release);
+            tohost_low_word_fallback_cycles_.store(0, std::memory_order_release);
+            break;
+    }
+    if (kind != TohostWriteKind::LowWord && is_running()) {
+        finalize_cycle_tohost();
     }
 }
 

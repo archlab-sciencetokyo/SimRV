@@ -103,7 +103,9 @@ void CPU::run_ca_pipeline_cycle(Machine& machine) {
         if (ca_state.host_write_remaining > 0) {
             --ca_state.host_write_remaining;
         } else {
-            machine.tohost = ca_state.pending_host_value;
+            machine.publish_tohost_write(
+                ca_state.pending_host_value,
+                static_cast<Machine::TohostWriteKind>(ca_state.pending_host_write_kind));
             ca_state.host_write_pending = false;
         }
         return;
@@ -448,6 +450,7 @@ void CPU::run_ca_pipeline_cycle(Machine& machine) {
                     const bool mispredict = dir_mispredict || target_mispredict;
 
                     if (mispredict) {
+                        record_hpm_event(HpmEvent::BranchMispredict);
                         branch_predictor.restore_speculation(execute->prediction);
                         flush_to(target);
                     }
@@ -533,6 +536,7 @@ void CPU::run_ca_pipeline_cycle(Machine& machine) {
                         const bool mispredict = dir_mispredict || target_mispredict;
 
                         if (mispredict) {
+                            record_hpm_event(HpmEvent::BranchMispredict);
                             branch_predictor.restore_speculation(decode->prediction);
                             // The resolving instruction itself occupies the combined ID/EX stage.
                             // Only the younger fetch-stage instruction is squashed.
@@ -650,7 +654,7 @@ void CPU::run_ca_pipeline_cycle(Machine& machine) {
             pipe.frontend_blocked = true;
         } else {
             if (simrv::compiler::unlikely(fetch->context.opcode == static_cast<isa::Opcode>(0) &&
-                                          fetch->context.op_id == isa::UNKNOWN)) {
+                                          fetch->context.op_id == isa::ILLEGAL)) {
                 decode_fields(machine);
             }
             fetch->serializing = fetch->context.traits.is_serializing;

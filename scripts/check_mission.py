@@ -13,7 +13,7 @@ import tempfile
 from pathlib import Path
 
 MISSION_KEYS = {"version", "id", "program", "description", "goal", "speed_hz"}
-STEP_KEYS = {"id", "title", "prompt", "learn", "hint", "why", "view", "panels", "glossary", "speed_hz"}
+STEP_KEYS = {"id", "label", "title", "prompt", "learn", "hint", "why", "view", "panels", "glossary", "speed_hz"}
 REQUIRED_STEP_KEYS = {"id", "title", "prompt", "why"}
 CHECKPOINT_KEYS = {"label", "after_step", "message"}
 VIEWS = {"explain", "registers", "stack", "trace"}
@@ -66,9 +66,10 @@ def parse_mission(path: Path) -> tuple[dict[str, str], list[dict[str, str]], lis
         allowed = MISSION_KEYS if section == "mission" else STEP_KEYS if section == "step" else CHECKPOINT_KEYS
         if key not in allowed:
             raise ValueError(f"line {line_number}: unknown [{section}] key {key!r}")
-        if key in current:
+        canonical_key = "id" if section == "step" and key == "label" else key
+        if canonical_key in current:
             raise ValueError(f"line {line_number}: duplicate key {key!r}")
-        current[key] = value
+        current[canonical_key] = value
 
     for key in ("version", "id", "program"):
         if not mission.get(key):

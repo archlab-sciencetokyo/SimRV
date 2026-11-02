@@ -73,15 +73,16 @@ inline constexpr const char* kContrastSky = "\033[1;36m";     // Bold Cyan
 inline constexpr const char* kContrastPink = "\033[1;35m";    // Bold Magenta
 
 // Adaptive Theme Colors (static constants using theme-adaptive ANSI colors)
-inline constexpr const char* kAdaptiveBorder = "\033[34m";       // Standard Blue
-inline constexpr const char* kAdaptiveText = "\033[39m";         // Default foreground
-inline constexpr const char* kAdaptiveVal = "\033[36m";          // Standard Cyan
-inline constexpr const char* kAdaptiveMuted = "\033[38;5;246m";  // Light Slate Gray (high-contrast)
-inline constexpr const char* kAdaptiveMint = "\033[32m";         // Standard Green
-inline constexpr const char* kAdaptivePeach = "\033[33m";        // Standard Yellow
-inline constexpr const char* kAdaptiveCoral = "\033[31m";        // Standard Red
-inline constexpr const char* kAdaptiveSky = "\033[36m";          // Standard Cyan
-inline constexpr const char* kAdaptivePink = "\033[35m";         // Standard Magenta
+inline constexpr const char* kAdaptiveBorder = "\033[34m";   // Standard Blue
+inline constexpr const char* kAdaptiveText = "\033[39m";     // Default foreground
+inline constexpr const char* kAdaptiveVal = "\033[36m";      // Standard Cyan
+inline constexpr const char* kAdaptiveMuted = "\033[90m";    // Terminal-palette bright black/gray
+inline constexpr const char* kAdaptiveMint = "\033[32m";     // Standard Green
+inline constexpr const char* kAdaptivePeach = "\033[33m";    // Standard Yellow
+inline constexpr const char* kAdaptiveCoral = "\033[31m";    // Standard Red
+inline constexpr const char* kAdaptiveSky = "\033[36m";      // Standard Cyan
+inline constexpr const char* kAdaptivePink = "\033[35m";     // Standard Magenta
+inline constexpr const char* kAdaptiveModalBg = "\033[49m";  // Use terminal background
 
 // Classic ANSI Theme Colors (Pure standard 8-color ANSI)
 inline constexpr const char* kClassicAnsiBorder = "\033[37m";  // Standard White

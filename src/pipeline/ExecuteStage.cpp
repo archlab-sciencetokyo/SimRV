@@ -40,7 +40,7 @@ void CPU::execute_core(Machine& machine) {
         // VS dirty tracking may be imprecise. Conservatively mark it Dirty
         // after dispatch because vector instructions can update registers,
         // vl/vtype/vstart/vxsat, or partial state before a restartable fault.
-        state_.mstatus |= MstatusBit::Vs;
+        state_.mark_extension_dirty(MstatusBit::Vs);
         return;
     }
 
@@ -124,15 +124,22 @@ void CPU::execute_core(Machine& machine) {
             ctx.tkn = false;
             ctx.mem_addr = ctx.rrs1;
             if (!amo_address_aligned(ctx.mem_addr, ctx.funct3)) {
-                ctx.pending_exception = (ctx.funct5 == Funct5Amo::Lr)
-                                            ? ExceptionCode::MisalignedLoad
-                                            : ExceptionCode::MisalignedStore;
+                ctx.pending_exception = (ctx.funct5 == Funct5Amo::Lr) ? ExceptionCode::FaultLoad
+                                                                      : ExceptionCode::FaultStore;
                 ctx.pending_tval = ctx.mem_addr;
                 break;
             }
             break;
         case Opcode::System:
-            execute_system(machine);
+            if (isa::is_hypervisor_memory_op(ctx.op_id)) {
+                ctx.tkn = false;
+                ctx.mem_addr = ctx.rrs1;
+            } else if (ctx.op_id == MOP) {
+                ctx.tkn = false;
+                ctx.wb_data = 0;
+            } else {
+                execute_system(machine);
+            }
             break;
         case Opcode::Custom0:
             ctx.tkn = false;
@@ -157,10 +164,21 @@ void CPU::execute_core(Machine& machine) {
 
 void CPU::execute_system(Machine& machine) {
     auto& ctx = active_context();
+    if (ctx.op_id == isa::OperationId::WRS_NTO || ctx.op_id == isa::OperationId::WRS_STO) {
+        if (const auto exc =
+                TrapController::check_privileged_instruction(state_, ctx.op_id, ctx.ir)) {
+            ctx.pending_exception = *exc;
+            ctx.pending_tval = ctx.ir;
+            ctx.tkn = false;
+            return;
+        }
+        ctx.tkn = false;
+        return;
+    }
     if (ctx.funct3 == Funct3::Priv) {
         switch (static_cast<Funct12Priv>(ctx.funct12)) {
             case Funct12Priv::Ecall:
-                ctx.pending_exception = ecall_for_privilege(state_.priv);
+                ctx.pending_exception = ecall_for_privilege(state_.priv, state_.virt);
                 ctx.wb_data_csr = std::to_underlying(*ctx.pending_exception);
                 break;
             case Funct12Priv::Ebreak: {
@@ -285,6 +303,10 @@ void CPU::execute_system(Machine& machine) {
             default:
                 if (ctx.funct7 == static_cast<simrv::xlen::Instruction>(Funct7Priv::SfenceVma) ||
                     ctx.funct7 == static_cast<simrv::xlen::Instruction>(Funct7Priv::SinvalVma) ||
+                    ctx.funct7 == static_cast<simrv::xlen::Instruction>(Funct7Priv::HfenceVvma) ||
+                    ctx.funct7 == static_cast<simrv::xlen::Instruction>(Funct7Priv::HinvalVvma) ||
+                    ctx.funct7 == static_cast<simrv::xlen::Instruction>(Funct7Priv::HfenceGvma) ||
+                    ctx.funct7 == static_cast<simrv::xlen::Instruction>(Funct7Priv::HinvalGvma) ||
                     static_cast<Funct12Priv>(ctx.funct12) == Funct12Priv::SfenceWInval ||
                     static_cast<Funct12Priv>(ctx.funct12) == Funct12Priv::SfenceInvalIr) {
                     ctx.tkn = false;
@@ -330,7 +352,7 @@ void CPU::execute_fp(Machine& /*machine*/) {
                 simrv::xlen::to_fp_reg_id(ctx.rs2), rs3, static_cast<isa::RoundingMode>(ctx.funct3),
                 state_.regs.fp_data_ptr(), state_.fcsr);
             if (state_.fcsr != old_fcsr) {
-                state_.mstatus |= MstatusBit::Fs;
+                state_.mark_extension_dirty(MstatusBit::Fs);
             }
             ctx.fp_wb_data = fp.fp_wb_data;
             ctx.fp_wb_enable = fp.fp_wb_enable;
@@ -339,7 +361,15 @@ void CPU::execute_fp(Machine& /*machine*/) {
         case Opcode::OpFp: {
             ctx.tkn = false;
             const isa::RoundingMode rm = isa::resolve_rounding_mode(ctx.funct3, state_.fcsr);
-            if (simrv::compiler::unlikely(!isa::is_valid_rounding_mode(rm))) {
+            const bool uses_rm =
+                (ctx.funct7 <= 0x0D && (ctx.funct7 & 0x03) <= 1) || ctx.funct7 == 0x2C ||
+                ctx.funct7 == 0x2D || ctx.funct7 == 0x22 || ctx.funct7 == 0x25 ||
+                ctx.funct7 == 0x26 || ctx.funct7 == 0x60 || ctx.funct7 == 0x68 ||
+                ctx.funct7 == 0x69 ||
+                ((ctx.funct7 == 0x20 || ctx.funct7 == 0x21) &&
+                 (std::to_underlying(ctx.rs2) == 1 || std::to_underlying(ctx.rs2) == 4 ||
+                  std::to_underlying(ctx.rs2) == 5));
+            if (simrv::compiler::unlikely(uses_rm && !isa::is_valid_rounding_mode(rm))) {
                 ctx.pending_exception = ExceptionCode::IllegalInstruction;
                 ctx.pending_tval = ctx.ir;
                 break;
@@ -350,7 +380,7 @@ void CPU::execute_fp(Machine& /*machine*/) {
                                                        simrv::xlen::to_fp_reg_id(ctx.rs2), ctx.rrs1,
                                                        state_.regs.fp_data_ptr(), state_.fcsr);
             if (state_.fcsr != old_fcsr) {
-                state_.mstatus |= MstatusBit::Fs;
+                state_.mark_extension_dirty(MstatusBit::Fs);
             }
             ctx.wb_data = fp.int_wb_data;
             ctx.int_wb_from_fp = fp.int_wb_enable;

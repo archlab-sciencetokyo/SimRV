@@ -26,6 +26,8 @@ class FilePickerModal : public framework::IModal {
 
     void render_content(std::vector<std::string>& content_rows, int width, int height) override;
     auto handle_key(uint8_t byte, TuiKey key) -> framework::ModalAction override;
+    void handle_wheel(int delta) override;
+    auto handle_horizontal(int delta) -> bool override;
     auto handle_control_click(int content_row, size_t action_index)
         -> framework::ModalAction override;
     auto handle_click(framework::ScreenCoord local_pt) -> framework::ModalAction override;

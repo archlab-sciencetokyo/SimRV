@@ -19,6 +19,7 @@ enum class IsaExtension : uint8_t {
     C = 2,   ///< Compressed Instructions extension
     D = 3,   ///< Double-Precision Floating-Point extension
     F = 5,   ///< Single-Precision Floating-Point extension
+    H = 7,   ///< Hypervisor extension
     I = 8,   ///< Base Integer Instruction Set extension
     M = 12,  ///< Integer Multiply/Divide extension
     S = 18,  ///< Supervisor Privilege Level support

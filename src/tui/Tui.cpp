@@ -5,7 +5,6 @@
 #include "simrv/tui/Tui.hpp"
 
 #include <poll.h>
-#include <sys/eventfd.h>
 #include <sys/ioctl.h>
 #include <sys/select.h>
 #include <termios.h>
@@ -24,6 +23,7 @@
 #include <cstring>
 #include <filesystem>
 #include <format>
+#include <span>
 #include <string>
 #include <thread>
 
@@ -58,7 +58,26 @@ namespace simrv::tui {
 
 namespace {
 constexpr uint32_t kTuiTargetFps = 60;
+constexpr size_t kKittyGraphicsChunkSize = 4096;
+
+[[nodiscard]] auto base64_encode(std::span<const uint8_t> bytes) -> std::string {
+    constexpr std::string_view alphabet =
+        "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    std::string encoded;
+    encoded.reserve(((bytes.size() + 2) / 3) * 4);
+    for (size_t i = 0; i < bytes.size(); i += 3) {
+        const uint32_t a = bytes[i];
+        const uint32_t b = i + 1 < bytes.size() ? bytes[i + 1] : 0;
+        const uint32_t c = i + 2 < bytes.size() ? bytes[i + 2] : 0;
+        const uint32_t value = (a << 16) | (b << 8) | c;
+        encoded += alphabet[(value >> 18) & 0x3f];
+        encoded += alphabet[(value >> 12) & 0x3f];
+        encoded += i + 1 < bytes.size() ? alphabet[(value >> 6) & 0x3f] : '=';
+        encoded += i + 2 < bytes.size() ? alphabet[value & 0x3f] : '=';
+    }
+    return encoded;
 }
+}  // namespace
 
 static struct termios
     g_saved_termios;                  // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
@@ -309,6 +328,10 @@ void Tui::refresh_mission_layout_notice() {
 }
 
 void Tui::set_paused(bool p) {
+    if (!p && mission_execution_stopped_) {
+        set_mission_execution_stopped_notice();
+        return;
+    }
     if (!p && machine_.is_shutdown_) {
         modal_.open_notice("SYSTEM SHUTDOWN",
                            "Target system has shutdown.\n\nPlease reboot [Ctrl-R], load a binary "
@@ -329,8 +352,12 @@ void Tui::set_paused(bool p) {
         p ? simrv::core::ExecutionState::Paused : simrv::core::ExecutionState::Running;
     if (cur_paused != p || cur_machine_state != target_machine_state) {
         paused_.store(p, std::memory_order_release);
+        if (inspector_pane_) inspector_pane_->set_paused(p);
         if (!p) {
             clear_status_override();
+            // Keep the state from before this run as the comparison baseline so changed
+            // registers remain highlighted when execution pauses at a breakpoint/checkpoint.
+            update_cache();
             last_runtime_tick_ = std::chrono::steady_clock::now();
             last_speed_update_ = std::chrono::steady_clock::now();
             last_icount_ = total_snapshot_instruction_count();
@@ -346,6 +373,10 @@ void Tui::set_paused(bool p) {
         update_trace_active_cache();
         trigger_immediate_render();
     }
+}
+
+void Tui::set_mission_execution_stopped_notice() {
+    set_status_override("Lesson complete. Guest execution is stopped for review.");
 }
 
 void Tui::initialize() {
@@ -400,7 +431,8 @@ void Tui::initialize() {
     // Keep mouse reports in terminal cells: pixel mode depends on terminal-specific pixel
     // metrics and can shift every TUI hit target when those metrics differ from the renderer.
     constexpr std::string_view terminal_queries =
-        "\033]22;?pointer\033\\\033]22;?__current__\033\\\033[14t\033[16t\033[c";
+        "\033]22;?pointer\033\\\033]22;?__current__\033\\\033[14t\033[16t\033[c"
+        "\033_Gi=31,s=1,v=1,a=q,t=d,f=24;AAAA\033\\";
     write_all(STDOUT_FILENO, terminal_queries);
 
     // Read the response from stdin in raw mode with 100ms timeout
@@ -419,10 +451,14 @@ void Tui::initialize() {
                 resp.push_back(query_ch);
                 const auto cell_reply = resp.find("\033[6;");
                 const auto da1_reply = resp.find("\033[?");
+                const auto kitty_reply = resp.find("\033_Gi=31;");
+                const bool kitty_reply_complete =
+                    kitty_reply != std::string::npos &&
+                    resp.find("\033\\", kitty_reply) != std::string::npos;
                 if (cell_reply != std::string::npos &&
                     resp.find('t', cell_reply) != std::string::npos &&
                     da1_reply != std::string::npos &&
-                    resp.find('c', da1_reply) != std::string::npos) {
+                    resp.find('c', da1_reply) != std::string::npos && kitty_reply_complete) {
                     break;
                 }
             }
@@ -500,7 +536,7 @@ void Tui::initialize() {
     if (term_prog &&
         (std::string_view(term_prog) == "wezterm" || std::string_view(term_prog) == "foot" ||
          std::string_view(term_prog) == "mlterm" || std::string_view(term_prog) == "yaft" ||
-         std::string_view(term_prog) == "ghostty")) {
+         std::string_view(term_prog) == "contour")) {
         env_sixel = true;
     }
 
@@ -529,6 +565,15 @@ void Tui::initialize() {
     }
 
     sixel_supported_ = env_sixel || da1_sixel;
+    const auto kitty_reply = resp.find("\033_Gi=31;");
+    const auto kitty_reply_end =
+        kitty_reply == std::string::npos ? std::string::npos : resp.find("\033\\", kitty_reply);
+    kitty_graphics_supported_ =
+        kitty_reply_end != std::string::npos &&
+        std::string_view(resp).substr(kitty_reply + 8, kitty_reply_end - kitty_reply - 8) == "OK";
+    kitty_image_id_ = static_cast<uint32_t>(::getpid());
+    if (kitty_image_id_ == 0) kitty_image_id_ = 1;
+    modal_.set_display_graphics_supported(is_display_graphics_supported());
 
     // OSC 22 is optional. Only send shape changes after an explicit positive reply.
     osc22_pointer_supported_ = resp.find("\033]22;1\033\\") != std::string::npos ||
@@ -651,8 +696,7 @@ void Tui::start_ui_thread() {
     if (ui_running_.load(std::memory_order_relaxed)) {
         return;
     }
-    ui_wake_.reset(eventfd(0, EFD_NONBLOCK | EFD_CLOEXEC));
-    if (!ui_wake_) throw std::runtime_error("cannot create TUI wake descriptor");
+    if (!ui_wake_.open()) throw std::runtime_error("cannot create TUI wake channel");
     machine_.request_tui_sample();
     ui_running_.store(true, std::memory_order_release);
     ui_thread_ =
@@ -677,8 +721,7 @@ void Tui::stop_ui_thread() {
 
 void Tui::trigger_immediate_render() {
     if (!render_requested_.exchange(true, std::memory_order_acq_rel) && ui_wake_) {
-        const uint64_t one = 1;
-        (void)::write(ui_wake_.get(), &one, sizeof(one));
+        ui_wake_.signal();
     }
 }
 
@@ -697,7 +740,6 @@ void Tui::ui_render_loop(const std::stop_token& stop_token) {
                 next_sample = now + interval;
             }
             const bool force = full_render_requested_.exchange(false, std::memory_order_acq_rel);
-            if (is_paused() && (force || g_resized)) update_cache();
             render(force);
             const auto deadline = is_paused() && !frame_dirty_
                                       ? now + std::chrono::milliseconds(200)
@@ -707,11 +749,10 @@ void Tui::ui_render_loop(const std::stop_token& stop_token) {
                                          deadline - std::chrono::steady_clock::now())
                                          .count()));
             pollfd fds[] = {{.fd = STDIN_FILENO, .events = POLLIN, .revents = 0},
-                            {.fd = ui_wake_.get(), .events = POLLIN, .revents = 0}};
+                            {.fd = ui_wake_.fd(), .events = POLLIN, .revents = 0}};
             (void)::poll(fds, 2, timeout);
             if (fds[1].revents & POLLIN) {
-                uint64_t pending;
-                (void)::read(ui_wake_.get(), &pending, sizeof(pending));
+                ui_wake_.drain();
             }
         } catch (const std::exception& e) {
             simrv::log::error("TUI render loop exception: {}", e.what());
@@ -1162,6 +1203,73 @@ void Tui::render_draw_sixel(int panel_x, int display_width, int display_rows,
     update_cmds += "\033\\\033[r\033[?80l";
 }
 
+void Tui::render_draw_kitty(int panel_x, int display_width, int display_rows,
+                            std::string& update_cmds) {
+    const int body_rows = std::max(1, display_rows - 1);
+    if (modal_.is_active() || display_width < kMinDisplayWidth || body_rows < kMinDisplayBodyRows)
+        return;
+
+    const auto fb = machine_.framebuffer_view();
+    const int source_width = static_cast<int>(machine_.framebuffer_width());
+    const int source_height = static_cast<int>(machine_.framebuffer_height());
+    if (fb.data() == nullptr || source_width <= 0 || source_height <= 0) return;
+    const size_t source_bytes = static_cast<size_t>(source_width) * source_height * 4;
+    if (fb.size() < source_bytes) return;
+
+    const int cell_width = std::max(1, cell_width_px_);
+    const int cell_height = std::max(1, cell_height_px_);
+    const auto [fit_width, fit_height] = compute_sixel_dimensions(
+        display_width, body_rows, cell_width, cell_height, source_width, source_height);
+    int image_width = source_width;
+    int image_height = source_height;
+    if (fit_width < source_width || fit_height < source_height) {
+        const int divisor = std::max({2, (source_width + fit_width - 1) / fit_width,
+                                      (source_height + fit_height - 1) / fit_height});
+        image_width = std::max(1, source_width / divisor);
+        image_height = std::max(1, source_height / divisor);
+    }
+    const int image_cols =
+        std::clamp((image_width + cell_width - 1) / cell_width, 1, display_width);
+    const int image_rows = std::clamp((image_height + cell_height - 1) / cell_height, 1, body_rows);
+    const int x_offset = std::max(0, (display_width - image_cols) / 2);
+    const int y_offset = std::max(0, (body_rows - image_rows) / 2);
+
+    // Kitty images live outside the text grid. Delete this process's previous image before
+    // replacing it so framebuffer updates never accumulate terminal-side placements.
+    update_cmds += std::format("\033_Ga=d,d=I,i={}\033\\", kitty_image_id_);
+
+    const auto* source = reinterpret_cast<const uint8_t*>(fb.data());
+    std::vector<uint8_t> rgb(static_cast<size_t>(image_width) * image_height * 3);
+    for (int y = 0; y < image_height; ++y) {
+        const int source_y = std::min(source_height - 1, y * source_height / image_height);
+        for (int x = 0; x < image_width; ++x) {
+            const int source_x = std::min(source_width - 1, x * source_width / image_width);
+            const auto* pixel =
+                source + (static_cast<size_t>(source_y) * source_width + source_x) * 4;
+            const size_t target = (static_cast<size_t>(y) * image_width + x) * 3;
+            rgb[target] = pixel[2];
+            rgb[target + 1] = pixel[1];
+            rgb[target + 2] = pixel[0];
+        }
+    }
+    const std::string encoded = base64_encode(std::span<const uint8_t>(rgb));
+    update_cmds += std::format("\033[{};{}H", 5 + y_offset, panel_x + x_offset);
+    for (size_t offset = 0; offset < encoded.size(); offset += kKittyGraphicsChunkSize) {
+        const size_t length = std::min(kKittyGraphicsChunkSize, encoded.size() - offset);
+        const bool first = offset == 0;
+        const bool more = offset + length < encoded.size();
+        if (first) {
+            update_cmds +=
+                std::format("\033_Ga=T,f=24,s={},v={},i={},c={},r={},C=1,m={};", image_width,
+                            image_height, kitty_image_id_, image_cols, image_rows, more ? 1 : 0);
+        } else {
+            update_cmds += std::format("\033_Gm={};", more ? 1 : 0);
+        }
+        update_cmds.append(encoded, offset, length);
+        update_cmds += "\033\\";
+    }
+}
+
 auto Tui::render_framebuffer_row(int row, int width, int rows) const -> std::string {
     const auto fb = machine_.framebuffer_view();
     const int source_width = static_cast<int>(machine_.framebuffer_width());
@@ -1336,7 +1444,7 @@ void Tui::handle_display_mouse(int x, int y, int b, size_t col_idx, int term_wid
 }
 
 void Tui::enable_display_pixel_mouse() {
-    if (display_mouse_pixel_mode_ || !sixel_supported_ || !sixel_rendered_) return;
+    if (display_mouse_pixel_mode_ || !is_display_graphics_supported() || !sixel_rendered_) return;
     write_all(STDOUT_FILENO, "\033[?1016h");
     display_mouse_pixel_mode_ = true;
 }
@@ -1360,13 +1468,11 @@ void Tui::render(bool force) {
             const auto symbol = progress ? std::string_view(progress->symbol) : std::string_view{};
             const auto msg = progress ? std::string_view(progress->message) : std::string_view{};
             if (!msg.empty()) {
-                set_status_override(std::format(
-                    "Checkpoint '{}' after step {} reached: {}  [n] Next step  [F12] Objective",
-                    symbol, progress->after_step, msg));
+                set_status_override(std::format("Checkpoint '{}' after step {} reached: {}", symbol,
+                                                progress->after_step, msg));
             } else if (!symbol.empty()) {
                 set_status_override(
-                    std::format("Checkpoint '{}' after step {} reached. Inspect workbench, then "
-                                "press [n] Next step or [F12] Objective.",
+                    std::format("Checkpoint '{}' after step {} reached. Review the workbench.",
                                 symbol, progress ? progress->after_step : mission_.step() + 1));
             }
         }
@@ -1474,10 +1580,10 @@ void Tui::render(bool force) {
     const bool display_too_small =
         has_display && (display_col < col_widths.count) &&
         (col_widths.widths[display_col] < kMinDisplayWidth || num_rows - 1 < kMinDisplayBodyRows);
-    const bool draw_sixel =
-        sixel_supported_ && has_display && !display_too_small && !modal_.is_active();
+    const bool draw_display_graphics =
+        is_display_graphics_supported() && has_display && !display_too_small && !modal_.is_active();
     uint64_t framebuffer_signature = 0;
-    if (draw_sixel) {
+    if (draw_display_graphics) {
         const auto fb = machine_.framebuffer_view();
         if (fb.data() != nullptr && fb.size() >= sizeof(uint64_t)) {
             constexpr uint64_t fnv_offset = 1469598103934665603ULL;
@@ -1488,22 +1594,20 @@ void Tui::render(bool force) {
             uint64_t h2 = fnv_prime;
             for (size_t i = 0; i < n64; i += 2) {
                 h1 = (h1 ^ p64[i]) * fnv_prime;
-                h2 = (h2 ^ p64[i + 1]) * fnv_offset;
+                if (i + 1 < n64) h2 = (h2 ^ p64[i + 1]) * fnv_offset;
             }
             framebuffer_signature = h1 ^ (h2 * 31ULL);
         }
     }
-    const bool sixel_geometry_changed =
-        draw_sixel && sixel_rendered_ &&
+    const bool display_graphics_geometry_changed =
+        draw_display_graphics && sixel_rendered_ &&
         (sixel_column_ != display_col || sixel_panel_width_ != col_widths.widths[display_col] ||
          sixel_panel_rows_ != num_rows);
-    // A sixel graphic is a terminal-side object, not a character-grid cell.  Re-emitting it
-    // on every ordinary render appends another graphic and can make terminals scroll the TUI
-    // away.  Only emit a new object when it first becomes visible or its panel geometry
-    // changes.
-    const bool sixel_needs_draw =
-        draw_sixel && (!sixel_rendered_ || sixel_geometry_changed ||
-                       framebuffer_signature != sixel_framebuffer_signature_);
+    // Terminal graphics live outside the character grid. Re-emit only when the framebuffer
+    // changes or the display panel geometry changes.
+    const bool display_graphics_needs_draw =
+        draw_display_graphics && (!sixel_rendered_ || display_graphics_geometry_changed ||
+                                  framebuffer_signature != sixel_framebuffer_signature_);
     int display_panel_x = 2;
     if (has_display) {
         for (size_t c = 0; c < display_col && c < col_widths.count; ++c)
@@ -1579,11 +1683,11 @@ void Tui::render(bool force) {
                         }
                         return std::string(static_cast<size_t>(std::max(0, width)), ' ');
                     }
-                    if (!sixel_supported_) {
+                    if (!is_display_graphics_supported()) {
                         const std::string_view unsupp_text =
-                            (width >= 30)   ? "[ Sixel graphics unsupported ]"
-                            : (width >= 21) ? "[ Sixel unsupported ]"
-                                            : "[ No Sixel ]";
+                            (width >= 34)   ? "[ Terminal graphics unsupported ]"
+                            : (width >= 22) ? "[ Graphics unsupported ]"
+                                            : "[ No graphics ]";
                         const int mid_row = total_content_rows / 2;
                         if (body_row == mid_row) {
                             return center_pane_text(std::format("\033[33m{}\033[0m", unsupp_text),
@@ -1625,8 +1729,8 @@ void Tui::render(bool force) {
     const bool modal_closed = modal_active_last_frame_ && !modal_.is_active();
     modal_active_last_frame_ = modal_.is_active();
     const bool clear_sixel =
-        sixel_rendered_ && (!draw_sixel || resized || full_screen_redraw_requested_ ||
-                            geometry_changed || sixel_geometry_changed);
+        sixel_rendered_ && (!draw_display_graphics || resized || full_screen_redraw_requested_ ||
+                            geometry_changed || display_graphics_geometry_changed);
     const bool is_full_redraw =
         geometry_changed || resized || full_screen_redraw_requested_ || clear_sixel || modal_closed;
     full_screen_redraw_requested_ = false;
@@ -1686,10 +1790,10 @@ void Tui::render(bool force) {
         for (size_t i = 0; i < new_lines.size(); ++i) {
             if (new_lines[i] != last_screen_lines_[i]) {
                 any_line_changed = true;
-                const bool preserve_sixel = draw_sixel && sixel_rendered_ && !sixel_needs_draw &&
-                                            !modal_.is_active() && i >= 4 &&
-                                            i < 4 + static_cast<size_t>(num_rows);
-                if (preserve_sixel) {
+                const bool preserve_display_graphic =
+                    draw_display_graphics && sixel_rendered_ && !display_graphics_needs_draw &&
+                    !modal_.is_active() && i >= 4 && i < 4 + static_cast<size_t>(num_rows);
+                if (preserve_display_graphic) {
                     // Keep the display column's image-bearing cells untouched, but continue
                     // updating the inspector and neighboring columns on the same screen row.
                     update_cmds +=
@@ -1715,9 +1819,15 @@ void Tui::render(bool force) {
     int target_cursor_y = -1;
     bool target_cursor_visible = false;
 
-    if (sixel_needs_draw && has_display && display_col < col_widths.count &&
+    if (display_graphics_needs_draw && has_display && display_col < col_widths.count &&
         col_widths.widths[display_col] > 0) {
-        render_draw_sixel(display_panel_x, col_widths.widths[display_col], num_rows, update_cmds);
+        if (kitty_graphics_supported_) {
+            render_draw_kitty(display_panel_x, col_widths.widths[display_col], num_rows,
+                              update_cmds);
+        } else {
+            render_draw_sixel(display_panel_x, col_widths.widths[display_col], num_rows,
+                              update_cmds);
+        }
     }
     if (has_console && console_col < col_widths.count && !modal_.is_active()) {
         size_t const c_idx = console_col;
@@ -1775,12 +1885,15 @@ void Tui::render(bool force) {
 
     std::string clear_graphic;
     if (clear_sixel) {
-        // Sixel graphics live in a terminal-side layer. Explicitly overwrite the old
-        // placement with reset spaces before drawing a modal or the normal TUI again.
+        // Terminal graphics live outside the text grid. Delete Kitty's retained image and
+        // overwrite the former display area before drawing a modal or regular panel content.
         // Keep this as a standalone VT write: Windows Terminal may retain the image
         // layer when the erase is bundled inside synchronized output or an alt-screen
         // reset sequence.
-        clear_graphic = "\033[0m\033[?7l";
+        if (kitty_graphics_supported_) {
+            clear_graphic = std::format("\033_Ga=d,d=I,i={}\033\\", kitty_image_id_);
+        }
+        clear_graphic += "\033[0m\033[?7l";
         for (int row = 5; row < 4 + sixel_panel_rows_; ++row) {
             clear_graphic +=
                 std::format("\033[0m\033[{};{}H{}", row, sixel_panel_x_,
@@ -1789,9 +1902,10 @@ void Tui::render(bool force) {
         clear_graphic += "\033[0m\033[?7h";
     }
 
-    const bool clean_panel_before_first_sixel =
-        draw_sixel && (!sixel_rendered_ || sixel_geometry_changed || is_full_redraw);
-    if (clean_panel_before_first_sixel && has_display && display_col < col_widths.count &&
+    const bool clean_panel_before_first_graphic =
+        draw_display_graphics &&
+        (!sixel_rendered_ || display_graphics_geometry_changed || is_full_redraw);
+    if (clean_panel_before_first_graphic && has_display && display_col < col_widths.count &&
         num_rows > 0 && col_widths.widths[display_col] > 0) {
         clear_graphic += "\033[0m\033[?7l";
         const int display_width = std::max(0, col_widths.widths[display_col]);
@@ -1810,8 +1924,8 @@ void Tui::render(bool force) {
     frame_output += update_cmds;
     frame_output += "\033[?2026l";
     write_all(STDOUT_FILENO, frame_output);
-    sixel_rendered_ = draw_sixel;
-    if (draw_sixel) {
+    sixel_rendered_ = draw_display_graphics;
+    if (draw_display_graphics) {
         sixel_column_ = display_col;
         sixel_panel_width_ = col_widths.widths[display_col];
         sixel_panel_rows_ = num_rows;
@@ -3184,7 +3298,11 @@ auto Tui::handle_modal_keyboard_input(uint8_t byte, TuiKey key) -> bool {
             return true;
         }
         if (key == TuiKey::F5) {
-            if (mission_.completed()) return true;
+            if (mission_execution_stopped_) {
+                set_mission_execution_stopped_notice();
+                render(true);
+                return true;
+            }
             if (mission_.checkpoint_reached()) {
                 set_status_override(
                     "Checkpoint reached. Press Space or n for the next instruction.");
@@ -3206,7 +3324,11 @@ auto Tui::handle_modal_keyboard_input(uint8_t byte, TuiKey key) -> bool {
             return true;
         }
         if (key == TuiKey::F6) {
-            if (mission_.completed()) return true;
+            if (mission_execution_stopped_) {
+                set_mission_execution_stopped_notice();
+                render(true);
+                return true;
+            }
             close_modal();
             execute_footer_action(TuiFooterAction::Step);
             return true;
@@ -3406,11 +3528,13 @@ auto Tui::handle_normal_keyboard_input(uint8_t byte, TuiKey key) -> void {
             return;
         }
         if (*action == KeyAction::RunPause &&
-            (mission_.completed() || mission_.checkpoint_reached())) {
-            set_status_override(
-                mission_.completed()
-                    ? "Mission complete. Review, restart with r, or exit with q."
-                    : "Checkpoint reached. Press n for the next instruction before running again.");
+            (mission_execution_stopped_ || mission_.checkpoint_reached())) {
+            if (mission_execution_stopped_) {
+                set_mission_execution_stopped_notice();
+                render(true);
+                return;
+            }
+            set_status_override("Checkpoint reached. Review the lesson step before running again.");
             render(true);
             return;
         }
@@ -3498,13 +3622,11 @@ void Tui::observe_current_pc_symbol() {
             const auto symbol = progress ? std::string_view(progress->symbol) : std::string_view{};
             const auto msg = progress ? std::string_view(progress->message) : std::string_view{};
             if (!msg.empty()) {
-                set_status_override(std::format(
-                    "Checkpoint '{}' after step {} reached: {}  [n] Next step  [F12] Objective",
-                    symbol, progress->after_step, msg));
+                set_status_override(std::format("Checkpoint '{}' after step {} reached: {}", symbol,
+                                                progress->after_step, msg));
             } else if (!symbol.empty()) {
                 set_status_override(
-                    std::format("Checkpoint '{}' after step {} reached. Inspect workbench, then "
-                                "press [n] Next step or [F12] Objective.",
+                    std::format("Checkpoint '{}' after step {} reached. Review the workbench.",
                                 symbol, progress ? progress->after_step : mission_.step() + 1));
             }
         }
@@ -3519,11 +3641,15 @@ auto Tui::advance_mission_step() -> bool {
         observe_current_pc_symbol();
         mission_revision_seen_ = mission_.revision();
         if (mission_.completed()) {
+            // Keep the completed guest frozen for review. Run and step actions are also
+            // guarded below, so keyboard shortcuts cannot execute past the lesson ending.
+            set_paused(true);
+            mission_execution_stopped_ = true;
             apply_mission_guidance_layout();
-            set_status_override("Mission complete. Review the result, or restart with r.");
+            set_mission_execution_stopped_notice();
         } else if (mission_.guidance()) {
             apply_mission_guidance_layout();
-            set_status_override("Next instruction. Checkpoint status follows the guest program.");
+            set_status_override("Next lesson step. Checkpoint status follows the guest program.");
         }
         return true;
     }
@@ -3559,7 +3685,6 @@ void Tui::clear_trace_buffers() {
 void Tui::pause_loop() {
     observe_current_pc_symbol();
     set_paused(true);
-    update_cache();
     render(true);
 }
 
@@ -3588,6 +3713,7 @@ void Tui::restart_mission() {
         }
     }
     mission_.restart();
+    mission_execution_stopped_ = false;
     apply_mission_speed();
     sync_mission_checkpoint();
     observe_current_pc_symbol();
@@ -3601,7 +3727,10 @@ void Tui::restart_mission() {
 void Tui::execute_header_action(HeaderHitResult hit) {
     switch (hit.action) {
         case HeaderAction::RunPause:
-            if (machine_.is_shutdown_) {
+            if (mission_execution_stopped_) {
+                set_mission_execution_stopped_notice();
+                render(true);
+            } else if (machine_.is_shutdown_) {
                 machine_.request_reboot();
             } else if (paused_) {
                 unpause_loop();
@@ -3628,7 +3757,12 @@ void Tui::execute_header_action(HeaderHitResult hit) {
             open_tool_picker(focused_slot_index_);
             break;
         case HeaderAction::ToggleAttached:
-            toggle_run_state();
+            if (mission_execution_stopped_) {
+                set_mission_execution_stopped_notice();
+                render(true);
+            } else {
+                toggle_run_state();
+            }
             break;
         case HeaderAction::SetSpeed:
             open_modal(ModalType::SetSpeed);
@@ -3658,7 +3792,10 @@ void Tui::execute_footer_action(TuiFooterAction action) {
             machine_.request_reboot();
             break;
         case TuiFooterAction::Step:
-            if (machine_.is_shutdown_) {
+            if (mission_execution_stopped_) {
+                set_mission_execution_stopped_notice();
+                render(true);
+            } else if (machine_.is_shutdown_) {
                 modal_.open_notice("SYSTEM SHUTDOWN",
                                    "Target system has shutdown.\n\nPlease reboot [Ctrl-R], load a "
                                    "binary [o], or quit [q].",
@@ -3672,14 +3809,18 @@ void Tui::execute_footer_action(TuiFooterAction action) {
                 render(true);
             } else {
                 if (!is_paused()) pause_loop();
+                // Compare the step's result to the exact state immediately before it.
+                update_cache();
                 machine_.step_sync();
                 observe_current_pc_symbol();
-                update_cache();
                 render(true);
             }
             break;
         case TuiFooterAction::RunPause:
-            if (machine_.is_shutdown_) {
+            if (mission_execution_stopped_) {
+                set_mission_execution_stopped_notice();
+                render(true);
+            } else if (machine_.is_shutdown_) {
                 modal_.open_notice("SYSTEM SHUTDOWN",
                                    "Target system has shutdown.\n\nPlease reboot [Ctrl-R], load a "
                                    "binary [o], or quit [q].",

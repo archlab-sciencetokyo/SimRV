@@ -4,6 +4,8 @@
  */
 #include <array>
 #include <limits>
+#include <shared_mutex>
+#include <utility>
 
 #include "CpuExecutionHelpers.hpp"
 #include "simrv/CompilerHints.hpp"
@@ -25,6 +27,12 @@
 
 namespace simrv::core {
 using isa::Funct3;
+
+namespace {
+[[nodiscard]] constexpr auto is_csr_instruction(isa::OperationId op) noexcept -> bool {
+    return op >= isa::CSRRW && op <= isa::CSRRCI;
+}
+}  // namespace
 
 SIMRV_ALWAYS_INLINE void CPU::execute_cached_jal(CachedOp& op) {
     simrv::xlen::Register const next_pc = state_.pc + op.len();
@@ -132,9 +140,9 @@ auto CPU::try_fast_load([[maybe_unused]] Machine& machine, simrv::xlen::Address 
     if (active_xlen == 32) mem_addr &= 0xFFFFFFFFULL;
     const unsigned size_bytes = access_size_for_funct3(funct3);
 
-    if (simrv::compiler::likely(eff_priv != kPrivMachine &&
-                                simrv::xlen::satp_translation_enabled(state_.satp, active_xlen))) {
-        const simrv::xlen::Word current_asid = simrv::xlen::satp_asid(state_.satp, active_xlen);
+    if (simrv::compiler::likely(eff_priv != kPrivMachine && simrv::xlen::satp_translation_enabled(
+                                                                active_satp(), active_xlen))) {
+        const simrv::xlen::Word current_asid = simrv::xlen::satp_asid(active_satp(), active_xlen);
         const simrv::xlen::Address vpn = mem_addr >> 12;
         const size_t tlb_idx = soft_tlb_index(vpn);
         const auto& entry = soft_tlb_read[tlb_idx];
@@ -159,7 +167,8 @@ auto CPU::try_fast_load([[maybe_unused]] Machine& machine, simrv::xlen::Address 
             return false;
         }
         TLBEntry* tlb_e = tlb.lookup_data_r(mem_addr, current_asid, eff_priv);
-        if (simrv::compiler::likely(tlb_e != nullptr)) {
+        if (simrv::compiler::likely(tlb_e != nullptr &&
+                                    tlb_e->pbmt == simrv::memory::PtePbmt::Pma)) {
             simrv::xlen::Address const paddr = tlb_e->p_addr + (mem_addr & 0xFFF);
             if (simrv::compiler::unlikely(!core::pmp::check_access(
                     state_, paddr, size_bytes, core::PmpAccessType::Read, eff_priv))) {
@@ -226,9 +235,9 @@ auto CPU::try_fast_store(Machine& machine, simrv::xlen::Address mem_addr, isa::F
     if (active_xlen == 32) mem_addr &= 0xFFFFFFFFULL;
     const unsigned size_bytes = access_size_for_funct3(funct3);
 
-    if (simrv::compiler::likely(eff_priv != kPrivMachine &&
-                                simrv::xlen::satp_translation_enabled(state_.satp, active_xlen))) {
-        const simrv::xlen::Word current_asid = simrv::xlen::satp_asid(state_.satp, active_xlen);
+    if (simrv::compiler::likely(eff_priv != kPrivMachine && simrv::xlen::satp_translation_enabled(
+                                                                active_satp(), active_xlen))) {
+        const simrv::xlen::Word current_asid = simrv::xlen::satp_asid(active_satp(), active_xlen);
         const simrv::xlen::Address vpn = mem_addr >> 12;
         const size_t tlb_idx = soft_tlb_index(vpn);
         const auto& entry = soft_tlb_write[tlb_idx];
@@ -258,7 +267,8 @@ auto CPU::try_fast_store(Machine& machine, simrv::xlen::Address mem_addr, isa::F
             return false;
         }
         TLBEntry* tlb_e = tlb.lookup_data_w(mem_addr, current_asid, eff_priv);
-        if (simrv::compiler::likely(tlb_e != nullptr)) {
+        if (simrv::compiler::likely(tlb_e != nullptr &&
+                                    tlb_e->pbmt == simrv::memory::PtePbmt::Pma)) {
             simrv::xlen::Address const paddr = tlb_e->p_addr + (mem_addr & 0xFFF);
             if (simrv::compiler::unlikely(is_tohost_addr(machine, paddr))) {
                 return false;
@@ -328,7 +338,10 @@ SIMRV_ALWAYS_INLINE auto CPU::execute_cached_load(Machine& machine, CachedOp& op
             return isa::Funct3::Lwu;
     }();
     constexpr unsigned kSizeBytes = 1u << (std::to_underlying(kFunct3) & 0x3u);
-    simrv::xlen::Address const mem_addr = rrs1 + op.imm;
+    simrv::xlen::Address mem_addr = rrs1 + op.imm;
+    mem_addr =
+        simrv::memory::MemoryAccess::mask_user_pointer(*this, simrv::xlen::VirtAddr{mem_addr})
+            .raw();
     if (simrv::compiler::unlikely(machine.tui_enabled() || machine.branch_trace_enabled())) {
         pipeline_context.mem_addr = mem_addr;
     }
@@ -357,8 +370,9 @@ SIMRV_ALWAYS_INLINE auto CPU::execute_cached_load(Machine& machine, CachedOp& op
         const unsigned page_offset = lookup_addr & 0xFFFu;
         if (simrv::compiler::likely(
                 (lookup_addr & align_mask) == 0 && page_offset + size_bytes <= 4096u &&
-                simrv::xlen::satp_translation_enabled(state_.satp, active_xlen))) {
-            const simrv::xlen::Word current_asid = simrv::xlen::satp_asid(state_.satp, active_xlen);
+                simrv::xlen::satp_translation_enabled(active_satp(), active_xlen))) {
+            const simrv::xlen::Word current_asid =
+                simrv::xlen::satp_asid(active_satp(), active_xlen);
             const simrv::xlen::Address vpn = lookup_addr >> 12;
             const size_t tlb_idx = soft_tlb_index(vpn);
             const auto& entry = soft_tlb_read[tlb_idx];
@@ -371,7 +385,8 @@ SIMRV_ALWAYS_INLINE auto CPU::execute_cached_load(Machine& machine, CachedOp& op
                     return true;
                 }
             } else if (TLBEntry* tlb_e = tlb.lookup_data_r(lookup_addr, current_asid, eff_priv);
-                       simrv::compiler::likely(tlb_e != nullptr)) {
+                       simrv::compiler::likely(tlb_e != nullptr &&
+                                               tlb_e->pbmt == simrv::memory::PtePbmt::Pma)) {
                 const simrv::xlen::Address paddr = tlb_e->p_addr + page_offset;
                 if (simrv::compiler::likely(state_.num_active_pmp == 0 ||
                                             core::pmp::check_access(state_, paddr, size_bytes,
@@ -434,7 +449,10 @@ SIMRV_ALWAYS_INLINE auto CPU::execute_cached_store(Machine& machine, CachedOp& o
     }();
     constexpr unsigned kSizeBytes = 1u << (std::to_underlying(kFunct3) & 0x3u);
     constexpr simrv::xlen::Address kAlignMask = kSizeBytes - 1u;
-    simrv::xlen::Address const mem_addr = rrs1 + op.imm;
+    simrv::xlen::Address mem_addr = rrs1 + op.imm;
+    mem_addr =
+        simrv::memory::MemoryAccess::mask_user_pointer(*this, simrv::xlen::VirtAddr{mem_addr})
+            .raw();
     if (simrv::compiler::unlikely(machine.tui_enabled() || machine.branch_trace_enabled())) {
         pipeline_context.mem_addr = mem_addr;
     }
@@ -468,8 +486,9 @@ SIMRV_ALWAYS_INLINE auto CPU::execute_cached_store(Machine& machine, CachedOp& o
         const unsigned page_offset = lookup_addr & 0xFFFu;
         if (simrv::compiler::likely(
                 (lookup_addr & kAlignMask) == 0 && page_offset + size_bytes <= 4096u &&
-                simrv::xlen::satp_translation_enabled(state_.satp, active_xlen))) {
-            const simrv::xlen::Word current_asid = simrv::xlen::satp_asid(state_.satp, active_xlen);
+                simrv::xlen::satp_translation_enabled(active_satp(), active_xlen))) {
+            const simrv::xlen::Word current_asid =
+                simrv::xlen::satp_asid(active_satp(), active_xlen);
             const simrv::xlen::Address vpn = lookup_addr >> 12;
             const size_t tlb_idx = soft_tlb_index(vpn);
             const auto& entry = soft_tlb_write[tlb_idx];
@@ -491,7 +510,8 @@ SIMRV_ALWAYS_INLINE auto CPU::execute_cached_store(Machine& machine, CachedOp& o
                     return true;
                 }
             } else if (TLBEntry* tlb_e = tlb.lookup_data_w(lookup_addr, current_asid, eff_priv);
-                       simrv::compiler::likely(tlb_e != nullptr)) {
+                       simrv::compiler::likely(tlb_e != nullptr &&
+                                               tlb_e->pbmt == simrv::memory::PtePbmt::Pma)) {
                 const simrv::xlen::Address paddr = tlb_e->p_addr + page_offset;
                 if (simrv::compiler::likely(
                         (state_.num_active_pmp == 0 ||
@@ -553,6 +573,7 @@ auto CPU::execute_cached_fallback(Machine& machine) -> void {
     // Cached operations can fall back to the staged executor without passing
     // through fetch_stage. Start with a fresh memory-stage latch in that path too.
     pipeline_context.memory_load_complete = false;
+    pipeline_context.hypervisor_memory_access_fault = false;
     pipeline_context.sc_reservation_checked = false;
     pipeline_context.sc_reservation_succeeded = false;
     pipeline_context.mem_paddr = simrv::xlen::PhysAddr{0};
@@ -578,8 +599,49 @@ auto CPU::execute_cached_fallback(Machine& machine) -> void {
 }
 
 void CPU::dispatch_pending_interrupts() {
-    simrv::xlen::Word const pending_interrupts = state_.mip & state_.mie;
-    if (simrv::compiler::unlikely(pending_interrupts != 0u)) {
+    simrv::xlen::Word pending_interrupts = state_.mip & state_.mie;
+    simrv::xlen::Word hypervisor_interrupt_candidates = 0;
+    simrv::xlen::Word virtual_interrupt_candidates = 0;
+    if (isa::misa_has_extension(state_.misa, isa::IsaExtension::H)) {
+        constexpr std::array<std::pair<simrv::xlen::Word, simrv::xlen::Word>, 3> kVsInterrupts = {
+            std::pair{simrv::xlen::Word{1} << 2U, simrv::xlen::Word{1} << 1U},
+            std::pair{simrv::xlen::Word{1} << 6U, simrv::xlen::Word{1} << 5U},
+            std::pair{simrv::xlen::Word{1} << 10U, simrv::xlen::Word{1} << 9U},
+        };
+        const auto pending_h =
+            state_.hip | state_.hvip | state_.supervisor_guest_external_pending() |
+            state_.selected_guest_external_pending() | vs_interrupts_to_h(state_.vsip) |
+            (state_.vstip_sstc ? (simrv::xlen::Word{1} << 6U) : 0U);
+        for (const auto& [h_bit, vs_bit] : kVsInterrupts) {
+            if ((pending_h & h_bit) == 0) continue;
+            if (state_.virt && (state_.hideleg & h_bit) != 0) {
+                const bool global_enabled =
+                    state_.priv != kPrivSupervisor || (state_.vsstatus & MstatusBit::Sie) != 0;
+                if (global_enabled && (state_.vsie & vs_bit) != 0) {
+                    // In VS mode the virtual supervisor interrupt is reported with
+                    // the supervisor cause number (for example, VSEI is cause 9).
+                    virtual_interrupt_candidates |= vs_bit;
+                }
+            } else if ((state_.hie & h_bit) != 0 && (state_.priv < kPrivSupervisor || state_.virt ||
+                                                     (state_.mstatus & MstatusBit::Sie) != 0)) {
+                hypervisor_interrupt_candidates |= h_bit;
+            }
+        }
+        if (state_.virt) {
+            // Interrupts delegated to HS but not to VS remain eligible while a
+            // guest is running. They take priority over interrupts delegated to VS.
+            hypervisor_interrupt_candidates |=
+                state_.mip & state_.mie & state_.mideleg & ~state_.hideleg;
+        }
+        if ((pending_h & (simrv::xlen::Word{1} << 12U)) != 0 &&
+            (state_.hie & (simrv::xlen::Word{1} << 12U)) != 0 &&
+            (state_.priv < kPrivSupervisor || state_.virt ||
+             (state_.mstatus & MstatusBit::Sie) != 0)) {
+            hypervisor_interrupt_candidates |= simrv::xlen::Word{1} << 12U;
+        }
+        pending_interrupts |= hypervisor_interrupt_candidates;
+    }
+    if (simrv::compiler::unlikely(pending_interrupts != 0u || virtual_interrupt_candidates != 0u)) {
         simrv::xlen::Word enable_interrupts = 0;
         switch (state_.priv) {
             case kPrivMachine: {
@@ -590,7 +652,9 @@ void CPU::dispatch_pending_interrupts() {
             }
             case kPrivSupervisor: {
                 enable_interrupts = ~state_.mideleg;
-                if ((state_.mstatus & MstatusBit::Sie) != 0u) {
+                if (state_.virt) {
+                    enable_interrupts |= hypervisor_interrupt_candidates;
+                } else if ((state_.mstatus & MstatusBit::Sie) != 0u) {
                     enable_interrupts |= state_.mideleg;
                 }
                 break;
@@ -605,6 +669,12 @@ void CPU::dispatch_pending_interrupts() {
         simrv::xlen::Word const mask = pending_interrupts & enable_interrupts;
         if (mask != 0u) {
             simrv::xlen::Word const irq_num = select_highest_priority_interrupt(mask);
+            raise_exception(kInterruptCauseBit | irq_num, 0);
+        } else if (virtual_interrupt_candidates != 0u) {
+            // Interrupts targeted at HS have priority over interrupts targeted at VS,
+            // regardless of the numeric cause priorities within either privilege level.
+            simrv::xlen::Word const irq_num =
+                select_highest_priority_interrupt(virtual_interrupt_candidates);
             raise_exception(kInterruptCauseBit | irq_num, 0);
         }
     }
@@ -1039,6 +1109,20 @@ void CPU::execute_cached_op_fast(Machine& machine, CachedOp& op,
         return;
     }
 
+    std::shared_lock<std::shared_mutex> memory_read_lock;
+    std::unique_lock<std::shared_mutex> memory_write_lock;
+    if (machine.is_smp_enabled() && machine.runtime_profile.is_instruction_mode()) {
+        const auto opcode = op.opcode();
+        if (opcode == isa::Opcode::Load || opcode == isa::Opcode::LoadFp ||
+            isa::is_hlv_op(op.op_id)) {
+            memory_read_lock = std::shared_lock(machine.instruction_memory_mutex());
+        } else if (opcode == isa::Opcode::Store || opcode == isa::Opcode::StoreFp ||
+                   opcode == isa::Opcode::Amo || opcode == isa::Opcode::OpV ||
+                   isa::is_hsv_op(op.op_id) || isa::is_cmo_op(op.op_id)) {
+            memory_write_lock = std::unique_lock(machine.instruction_memory_mutex());
+        }
+    }
+
     if constexpr (kCopyContext) {
         op.copy_to(pipeline_context);
         pipeline_context.tlb_miss = false;
@@ -1052,6 +1136,17 @@ void CPU::execute_cached_op_fast(Machine& machine, CachedOp& op,
 
     // Control, memory, and uncommon instructions retain their precise cached/fallback paths.
     const simrv::xlen::Register rrs1 = state_.regs.read(op.rs1);
+    const auto cached_opcode = op.opcode();
+    const bool uses_fp_state =
+        cached_opcode == isa::Opcode::LoadFp || cached_opcode == isa::Opcode::StoreFp ||
+        cached_opcode == isa::Opcode::OpFp || cached_opcode == isa::Opcode::MAdd ||
+        cached_opcode == isa::Opcode::MSub || cached_opcode == isa::Opcode::NMSub ||
+        cached_opcode == isa::Opcode::NMAdd;
+    if (simrv::compiler::unlikely(uses_fp_state &&
+                                  !state_.extension_state_enabled(MstatusBit::Fs))) {
+        raise_exception(ExceptionCode::IllegalInstruction, op.ir);
+        return;
+    }
     switch (op.op_id) {
         // ---- Branches: handle internally, then return ----
         case isa::BEQ:
@@ -1117,7 +1212,10 @@ void CPU::execute_cached_op_fast(Machine& machine, CachedOp& op,
         // ---- FP Loads ----
         case isa::FLW:
         case isa::FLD: {
-            simrv::xlen::Address const mem_addr = rrs1 + op.imm;
+            simrv::xlen::Address mem_addr = rrs1 + op.imm;
+            mem_addr = simrv::memory::MemoryAccess::mask_user_pointer(
+                           *this, simrv::xlen::VirtAddr{mem_addr})
+                           .raw();
             simrv::xlen::FloatingRegister mem_rdata = 0;
             const unsigned size_bytes = op.mem_size;
             const simrv::xlen::Address align_mask = op.align_mask();
@@ -1147,9 +1245,9 @@ void CPU::execute_cached_op_fast(Machine& machine, CachedOp& op,
                 const unsigned page_offset = lookup_addr & 0xFFFu;
                 if (simrv::compiler::likely(
                         (lookup_addr & align_mask) == 0 && page_offset + size_bytes <= 4096u &&
-                        simrv::xlen::satp_translation_enabled(state_.satp, active_xlen))) {
+                        simrv::xlen::satp_translation_enabled(active_satp(), active_xlen))) {
                     const simrv::xlen::Word current_asid =
-                        simrv::xlen::satp_asid(state_.satp, active_xlen);
+                        simrv::xlen::satp_asid(active_satp(), active_xlen);
                     const simrv::xlen::Address vpn = lookup_addr >> 12;
                     const size_t tlb_idx = soft_tlb_index(vpn);
                     const auto& entry = soft_tlb_read[tlb_idx];
@@ -1187,14 +1285,17 @@ void CPU::execute_cached_op_fast(Machine& machine, CachedOp& op,
                     ? (static_cast<simrv::xlen::FloatingRegister>(simrv::xlen::kF32BoxerBits) |
                        (mem_rdata & 0xFFFFFFFFULL))
                     : mem_rdata);
-            state_.mstatus |= MstatusBit::Fs;
+            state_.mark_extension_dirty(MstatusBit::Fs);
             advance_cached_pc(op);
             return;
         }
         // ---- FP Stores ----
         case isa::FSW:
         case isa::FSD: {
-            simrv::xlen::Address const mem_addr = rrs1 + op.imm;
+            simrv::xlen::Address mem_addr = rrs1 + op.imm;
+            mem_addr = simrv::memory::MemoryAccess::mask_user_pointer(
+                           *this, simrv::xlen::VirtAddr{mem_addr})
+                           .raw();
             simrv::xlen::FloatingRegister const fp_data =
                 state_.regs.read_fp(simrv::xlen::to_fp_reg_id(op.rs2));
             const unsigned size_bytes = op.mem_size;
@@ -1227,9 +1328,9 @@ void CPU::execute_cached_op_fast(Machine& machine, CachedOp& op,
                 const unsigned page_offset = lookup_addr & 0xFFFu;
                 if (simrv::compiler::likely(
                         (lookup_addr & align_mask) == 0 && page_offset + size_bytes <= 4096u &&
-                        simrv::xlen::satp_translation_enabled(state_.satp, active_xlen))) {
+                        simrv::xlen::satp_translation_enabled(active_satp(), active_xlen))) {
                     const simrv::xlen::Word current_asid =
-                        simrv::xlen::satp_asid(state_.satp, active_xlen);
+                        simrv::xlen::satp_asid(active_satp(), active_xlen);
                     const simrv::xlen::Address vpn = lookup_addr >> 12;
                     const size_t tlb_idx = soft_tlb_index(vpn);
                     const auto& entry = soft_tlb_write[tlb_idx];
@@ -1295,9 +1396,9 @@ void CPU::execute_cached_op_fast(Machine& machine, CachedOp& op,
                 state_.regs.fp_data_ptr(), state_.fcsr);
             if (res.fp_wb_enable) {
                 state_.regs.write_fp(simrv::xlen::to_fp_reg_id(op.rd), res.fp_wb_data);
-                state_.mstatus |= MstatusBit::Fs;
+                state_.mark_extension_dirty(MstatusBit::Fs);
             }
-            if (state_.fcsr != old_fcsr) state_.mstatus |= MstatusBit::Fs;
+            if (state_.fcsr != old_fcsr) state_.mark_extension_dirty(MstatusBit::Fs);
             advance_cached_pc(op);
             return;
         }
@@ -1321,9 +1422,9 @@ void CPU::execute_cached_op_fast(Machine& machine, CachedOp& op,
                 simrv::xlen::to_fp_reg_id(op.rs2), rrs1, state_.regs.fp_data_ptr(), state_.fcsr);
             if (res.fp_wb_enable) {
                 state_.regs.write_fp(simrv::xlen::to_fp_reg_id(op.rd), res.fp_wb_data);
-                state_.mstatus |= MstatusBit::Fs;
+                state_.mark_extension_dirty(MstatusBit::Fs);
             }
-            if (state_.fcsr != old_fcsr) state_.mstatus |= MstatusBit::Fs;
+            if (state_.fcsr != old_fcsr) state_.mark_extension_dirty(MstatusBit::Fs);
             advance_cached_pc(op);
             return;
         }
@@ -1338,7 +1439,7 @@ void CPU::execute_cached_op_fast(Machine& machine, CachedOp& op,
                     pipeline_context.pending_tval = 0;
                 }
                 execute::ExecuteUnit::execute_vector(*this, machine, op.op_id, op.ir);
-                state_.mstatus |= MstatusBit::Vs;
+                state_.mark_extension_dirty(MstatusBit::Vs);
                 if (pipeline_context.pending_exception.has_value()) {
                     raise_exception(
                         static_cast<simrv::xlen::TrapCause>(*pipeline_context.pending_exception),
@@ -1387,11 +1488,12 @@ auto CPU::resolve_branch_target_baremetal(CachedOp* chained,
     return nullptr;
 }
 
-template <bool kCopyContext, bool kInstMix, bool kPollPause>
+template <bool kCopyContext, bool kInstMix, bool kPollPause, int kHpmClassMode>
 SIMRV_ALWAYS_INLINE auto CPU::run_fast_baremetal_kernel(Machine& machine, uint32_t batch_size,
                                                         const simrv::memory::RamView& ram)
     -> uint32_t {
     uint32_t cached_ops = 0;
+    uint32_t flushed_uart_ops = 0;
     simrv::xlen::Counter last_flushed_icount = e_icount;
     const auto tohost_addr = machine.isa_test_tohost();
     uint32_t b = 0;
@@ -1425,6 +1527,8 @@ SIMRV_ALWAYS_INLINE auto CPU::run_fast_baremetal_kernel(Machine& machine, uint32
 
                         const auto advance_sequential = [&]()
                                                             __attribute__((always_inline)) -> bool {
+                            record_hpm_instruction_classes<kHpmClassMode>(
+                                chained->op_id, chained->opcode(), chained->cinsn != 0);
                             next_pc += chained->op_len;
                             ++b;
                             if (simrv::compiler::unlikely(b >= batch_size)) {
@@ -1480,6 +1584,8 @@ SIMRV_ALWAYS_INLINE auto CPU::run_fast_baremetal_kernel(Machine& machine, uint32
                                 target_pc = static_cast<simrv::xlen::Register>(
                                     static_cast<int64_t>(static_cast<int32_t>(target_pc)));
                             }
+                            record_hpm_instruction_classes<kHpmClassMode>(
+                                chained->op_id, chained->opcode(), chained->cinsn != 0);
                             ++b;
                             commit_linear_segment(chained->cpc.raw() + chained->op_len);
                             next_pc = target_pc;
@@ -2172,7 +2278,7 @@ SIMRV_ALWAYS_INLINE auto CPU::run_fast_baremetal_kernel(Machine& machine, uint32
                                                             : static_cast<
                                                                   simrv::xlen::FloatingRegister>(
                                                                   mem_rdata));
-                                                    state_.mstatus |= MstatusBit::Fs;
+                                                    state_.mark_extension_dirty(MstatusBit::Fs);
                                                     SIMRV_CHAIN_ADVANCE();
                                                 }
                                             }
@@ -2237,12 +2343,32 @@ SIMRV_ALWAYS_INLINE auto CPU::run_fast_baremetal_kernel(Machine& machine, uint32
                         state_.pc = next_pc;
                         const uint32_t ops_executed = b - start_b;
                         cached_ops += ops_executed;
-                        e_icount += ops_executed;
+                        account_retirement(ops_executed);
+                        record_hpm_event(HpmEvent::Instructions, ops_executed);
+                        record_hpm_event(HpmEvent::Cycles, ops_executed);
                         e_ccount += compressed_count;
                         if (fallback_op != nullptr) {
+                            if (state_.mhartid == 0) {
+                                if (auto* uart = machine.uart_device();
+                                    uart != nullptr && uart->has_active_transfer()) {
+                                    const uint32_t unushed = cached_ops - flushed_uart_ops;
+                                    if (unushed > 0) {
+                                        uart->advance_cycles(unushed);
+                                        flushed_uart_ops = cached_ops;
+                                    }
+                                }
+                            }
+                            const bool is_csr = is_csr_instruction(fallback_op->op_id);
                             execute_cached_op_fast<false, false>(machine, *fallback_op, ram);
                             ++cached_ops;
                             ++b;
+                            if constexpr (kHpmClassMode != 2) {
+                                if (is_csr && perf_counters.has_instruction_class_listeners() !=
+                                                  (kHpmClassMode == 1)) {
+                                    // End this batch so the next dispatch uses the new HPM mode.
+                                    b = batch_size;
+                                }
+                            }
                         }
                     };
 #undef SIMRV_CHAIN_ADVANCE
@@ -2256,9 +2382,31 @@ SIMRV_ALWAYS_INLINE auto CPU::run_fast_baremetal_kernel(Machine& machine, uint32
                 // a single instruction and return to the precise interrupt boundary instead of
                 // branching on the same pending bit after every operation in the chain.
                 if (simrv::compiler::unlikely((state_.mip & state_.mie) != 0u)) {
+                    const bool is_csr = is_csr_instruction(cached->op_id);
                     execute_cached_op_fast<false, false>(machine, *cached, ram);
                     ++cached_ops;
                     ++b;
+                    if constexpr (kHpmClassMode != 2) {
+                        if (is_csr && perf_counters.has_instruction_class_listeners() !=
+                                          (kHpmClassMode == 1)) {
+                            b = batch_size;
+                        }
+                    }
+                } else if (simrv::compiler::unlikely(
+                               multi_hart && machine.runtime_profile.is_instruction_mode())) {
+                    // Fast chains execute memory operations inline. Keep SMP instruction-mode
+                    // operations on the individually synchronized path so stores cannot race
+                    // an instruction fetch of the same naturally aligned word.
+                    const bool is_csr = is_csr_instruction(cached->op_id);
+                    execute_cached_op_fast<false, false>(machine, *cached, ram);
+                    ++cached_ops;
+                    ++b;
+                    if constexpr (kHpmClassMode != 2) {
+                        if (is_csr && perf_counters.has_instruction_class_listeners() !=
+                                          (kHpmClassMode == 1)) {
+                            b = batch_size;
+                        }
+                    }
                 } else if constexpr (simrv::xlen::kIsXLen64) {
                     if (simrv::compiler::likely(state_.regs.xlen == 64)) {
                         if (simrv::compiler::likely(fast_m_ram)) {
@@ -2305,6 +2453,16 @@ SIMRV_ALWAYS_INLINE auto CPU::run_fast_baremetal_kernel(Machine& machine, uint32
                     }
                 }
             } else {
+                if (state_.mhartid == 0) {
+                    if (auto* uart = machine.uart_device();
+                        uart != nullptr && uart->has_active_transfer()) {
+                        const uint32_t unushed = cached_ops - flushed_uart_ops;
+                        if (unushed > 0) {
+                            uart->advance_cycles(unushed);
+                            flushed_uart_ops = cached_ops;
+                        }
+                    }
+                }
                 if (cached->has_fast_alu()) {
                     execute_cached_alu_fast<kCopyContext, kInstMix, false>(*cached);
                 } else {
@@ -2334,6 +2492,16 @@ SIMRV_ALWAYS_INLINE auto CPU::run_fast_baremetal_kernel(Machine& machine, uint32
             }
             handle_cached_interrupts();
         } else {
+            if (state_.mhartid == 0) {
+                if (auto* uart = machine.uart_device();
+                    uart != nullptr && uart->has_active_transfer()) {
+                    const uint32_t unushed = cached_ops - flushed_uart_ops;
+                    if (unushed > 0) {
+                        uart->advance_cycles(unushed);
+                        flushed_uart_ops = cached_ops;
+                    }
+                }
+            }
             const auto delta = e_icount - last_flushed_icount;
             if (delta > 0) {
                 machine.record_retired_instructions(delta);
@@ -2362,6 +2530,11 @@ SIMRV_ALWAYS_INLINE auto CPU::run_fast_baremetal_kernel(Machine& machine, uint32
         }
     }
     handle_cached_interrupts();
+    if (state_.mhartid == 0 && cached_ops > flushed_uart_ops) {
+        if (auto* uart = machine.uart_device(); uart != nullptr) {
+            uart->advance_cycles(cached_ops - flushed_uart_ops);
+        }
+    }
     return cached_ops;
 }
 
@@ -2383,25 +2556,37 @@ void CPU::run_fast_baremetal_batch(Machine& machine, uint32_t batch_size,
     const auto ram = machine.ram_view();
     uint32_t cached_ops = 0;
     if (simrv::compiler::likely(!policy.copy_pipeline_context && !policy.collect_instruction_mix)) {
-        cached_ops = policy.poll_pause
-                         ? run_fast_baremetal_kernel<false, false, true>(machine, batch_size, ram)
-                         : run_fast_baremetal_kernel<false, false, false>(machine, batch_size, ram);
+        const auto run_kernel = [&]<int kHpmClassMode>() {
+            cached_ops = policy.poll_pause
+                             ? run_fast_baremetal_kernel<false, false, true, kHpmClassMode>(
+                                   machine, batch_size, ram)
+                             : run_fast_baremetal_kernel<false, false, false, kHpmClassMode>(
+                                   machine, batch_size, ram);
+        };
+        if (perf_counters.has_instruction_class_listeners()) {
+            run_kernel.template operator()<1>();
+        } else {
+            run_kernel.template operator()<0>();
+        }
     } else if (policy.copy_pipeline_context && policy.collect_instruction_mix) {
-        cached_ops = policy.poll_pause
-                         ? run_fast_baremetal_kernel<true, true, true>(machine, batch_size, ram)
-                         : run_fast_baremetal_kernel<true, true, false>(machine, batch_size, ram);
+        cached_ops =
+            policy.poll_pause
+                ? run_fast_baremetal_kernel<true, true, true, 2>(machine, batch_size, ram)
+                : run_fast_baremetal_kernel<true, true, false, 2>(machine, batch_size, ram);
     } else if (policy.copy_pipeline_context) {
-        cached_ops = policy.poll_pause
-                         ? run_fast_baremetal_kernel<true, false, true>(machine, batch_size, ram)
-                         : run_fast_baremetal_kernel<true, false, false>(machine, batch_size, ram);
+        cached_ops =
+            policy.poll_pause
+                ? run_fast_baremetal_kernel<true, false, true, 2>(machine, batch_size, ram)
+                : run_fast_baremetal_kernel<true, false, false, 2>(machine, batch_size, ram);
     } else {
-        cached_ops = policy.poll_pause
-                         ? run_fast_baremetal_kernel<false, true, true>(machine, batch_size, ram)
-                         : run_fast_baremetal_kernel<false, true, false>(machine, batch_size, ram);
+        cached_ops =
+            policy.poll_pause
+                ? run_fast_baremetal_kernel<false, true, true, 2>(machine, batch_size, ram)
+                : run_fast_baremetal_kernel<false, true, false, 2>(machine, batch_size, ram);
     }
 
     if (cached_ops > 0) {
-        clint_mmio.mcycle += cached_ops;
+        account_arch_cycles(cached_ops);
         if (machine.clock_divider().advance_fast_cycles(cached_ops, clint_mmio.rtc_divider,
                                                         clint_mmio.mtime) > 0) {
             evaluate_timer_interrupt();
@@ -2409,7 +2594,7 @@ void CPU::run_fast_baremetal_batch(Machine& machine, uint32_t batch_size,
     }
 }
 
-template <bool kCopyContext, bool kInstMix, bool kPollPause>
+template <bool kCopyContext, bool kInstMix, bool kPollPause, int kHpmClassMode>
 SIMRV_ALWAYS_INLINE auto CPU::run_fast_os_kernel(Machine& machine, uint32_t batch_size,
                                                  const simrv::memory::RamView& ram) -> uint32_t {
     uint32_t cached_ops = 0;
@@ -2419,7 +2604,11 @@ SIMRV_ALWAYS_INLINE auto CPU::run_fast_os_kernel(Machine& machine, uint32_t batc
 
     auto flush_clint_and_retired = [&]() {
         if (chunk_cycles > 0) {
-            clint_mmio.mcycle += chunk_cycles;
+            account_arch_cycles(chunk_cycles);
+            if (state_.mhartid == 0) {
+                if (auto* uart = machine.uart_device(); uart != nullptr)
+                    uart->advance_cycles(chunk_cycles);
+            }
             if (machine.clock_divider().advance_fast_cycles(chunk_cycles, clint_mmio.rtc_divider,
                                                             clint_mmio.mtime) > 0) {
                 evaluate_timer_interrupt();
@@ -2445,9 +2634,9 @@ SIMRV_ALWAYS_INLINE auto CPU::run_fast_os_kernel(Machine& machine, uint32_t batc
                     const unsigned active_xlen = state_.xlen_for_privilege(eff_priv);
                     const bool satp_en =
                         (eff_priv != kPrivMachine) &&
-                        simrv::xlen::satp_translation_enabled(state_.satp, active_xlen);
+                        simrv::xlen::satp_translation_enabled(active_satp(), active_xlen);
                     const simrv::xlen::Word current_asid =
-                        satp_en ? simrv::xlen::satp_asid(state_.satp, active_xlen) : 0;
+                        satp_en ? simrv::xlen::satp_asid(active_satp(), active_xlen) : 0;
                     const bool fast_m_ram =
                         (state_.priv == kPrivMachine && (state_.mstatus & MstatusBit::Mprv) == 0 &&
                          !state_.has_locked_pmp);
@@ -2468,11 +2657,17 @@ SIMRV_ALWAYS_INLINE auto CPU::run_fast_os_kernel(Machine& machine, uint32_t batc
                         if (simrv::compiler::unlikely((chunk_cycles + chain_size) >= 64)) {
                             cached_ops += chain_size;
                             chunk_cycles += chain_size;
-                            e_icount += chain_size;
+                            account_retirement(chain_size);
+                            record_hpm_event(HpmEvent::Instructions, chain_size);
+                            record_hpm_event(HpmEvent::Cycles, chain_size);
                             e_ccount += compressed_count;
                             chain_size = 0;
                             compressed_count = 0;
-                            clint_mmio.mcycle += chunk_cycles;
+                            account_arch_cycles(chunk_cycles);
+                            if (state_.mhartid == 0) {
+                                if (auto* uart = machine.uart_device(); uart != nullptr)
+                                    uart->advance_cycles(chunk_cycles);
+                            }
                             if (simrv::compiler::unlikely(
                                     machine.clock_divider().advance_fast_cycles(
                                         chunk_cycles, clint_mmio.rtc_divider, clint_mmio.mtime) >
@@ -2497,6 +2692,8 @@ SIMRV_ALWAYS_INLINE auto CPU::run_fast_os_kernel(Machine& machine, uint32_t batc
                     };
 
                     const auto advance_sequential = [&]() __attribute__((always_inline)) -> bool {
+                        record_hpm_instruction_classes<kHpmClassMode>(
+                            chained->op_id, chained->opcode(), chained->cinsn != 0);
                         next_pc += chained->op_len;
                         ++chain_size;
                         compressed_count += (chained->op_len == 2);
@@ -2623,6 +2820,8 @@ SIMRV_ALWAYS_INLINE auto CPU::run_fast_os_kernel(Machine& machine, uint32_t batc
                                     state_.regs.write_xlen32(chained->rd, link_pc);
                                 }
                                 next_pc = target_pc;
+                                record_hpm_instruction_classes<kHpmClassMode>(
+                                    chained->op_id, chained->opcode(), chained->cinsn != 0);
                                 if constexpr (simrv::xlen::kIsXLen64 && !kGuestXlen64) {
                                     next_pc = static_cast<simrv::xlen::Register>(
                                         static_cast<int64_t>(static_cast<int32_t>(next_pc)));
@@ -2672,6 +2871,8 @@ SIMRV_ALWAYS_INLINE auto CPU::run_fast_os_kernel(Machine& machine, uint32_t batc
                                     state_.regs.write_xlen32(chained->rd, link_pc);
                                 }
                                 next_pc = target_pc;
+                                record_hpm_instruction_classes<kHpmClassMode>(
+                                    chained->op_id, chained->opcode(), chained->cinsn != 0);
                                 ++chain_size;
                                 compressed_count += (chained->op_len == 2);
                                 ++b;
@@ -2738,6 +2939,8 @@ SIMRV_ALWAYS_INLINE auto CPU::run_fast_os_kernel(Machine& machine, uint32_t batc
                                     static_cast<int64_t>(static_cast<int32_t>(target_pc)));
                             }
                             next_pc = target_pc;
+                            record_hpm_instruction_classes<kHpmClassMode>(
+                                chained->op_id, chained->opcode(), chained->cinsn != 0);
                             ++chain_size;
                             compressed_count += (chained->op_len == 2);
                             ++b;
@@ -2857,7 +3060,7 @@ SIMRV_ALWAYS_INLINE auto CPU::run_fast_os_kernel(Machine& machine, uint32_t batc
                                                         : static_cast<
                                                               simrv::xlen::FloatingRegister>(
                                                               mem_rdata));
-                                                state_.mstatus |= MstatusBit::Fs;
+                                                state_.mark_extension_dirty(MstatusBit::Fs);
                                                 if (advance_sequential()) {
                                                     continue;
                                                 }
@@ -2885,7 +3088,7 @@ SIMRV_ALWAYS_INLINE auto CPU::run_fast_os_kernel(Machine& machine, uint32_t batc
                                                         : static_cast<
                                                               simrv::xlen::FloatingRegister>(
                                                               mem_rdata));
-                                                state_.mstatus |= MstatusBit::Fs;
+                                                state_.mark_extension_dirty(MstatusBit::Fs);
                                                 if (advance_sequential()) {
                                                     continue;
                                                 }
@@ -2984,13 +3187,22 @@ SIMRV_ALWAYS_INLINE auto CPU::run_fast_os_kernel(Machine& machine, uint32_t batc
                     state_.pc = next_pc;
                     cached_ops += chain_size;
                     chunk_cycles += chain_size;
-                    e_icount += chain_size;
+                    account_retirement(chain_size);
+                    record_hpm_event(HpmEvent::Instructions, chain_size);
+                    record_hpm_event(HpmEvent::Cycles, chain_size);
                     e_ccount += compressed_count;
                     if (fallback_op != nullptr) {
+                        const bool is_csr = is_csr_instruction(fallback_op->op_id);
                         execute_cached_op_fast<false, false>(machine, *fallback_op, ram);
                         ++cached_ops;
                         ++chunk_cycles;
                         ++b;
+                        if constexpr (kHpmClassMode != 2) {
+                            if (is_csr && perf_counters.has_instruction_class_listeners() !=
+                                              (kHpmClassMode == 1)) {
+                                b = batch_size;
+                            }
+                        }
                     }
                 };
                 if constexpr (simrv::xlen::kIsXLen64) {
@@ -3080,28 +3292,35 @@ void CPU::run_fast_os_batch(Machine& machine, uint32_t batch_size, const FastBat
 
     const auto ram = machine.ram_view();
     if (simrv::compiler::likely(!policy.copy_pipeline_context && !policy.collect_instruction_mix)) {
-        if (policy.poll_pause) {
-            run_fast_os_kernel<false, false, true>(machine, batch_size, ram);
+        const auto run_kernel = [&]<int kHpmClassMode>() {
+            if (policy.poll_pause) {
+                run_fast_os_kernel<false, false, true, kHpmClassMode>(machine, batch_size, ram);
+            } else {
+                run_fast_os_kernel<false, false, false, kHpmClassMode>(machine, batch_size, ram);
+            }
+        };
+        if (perf_counters.has_instruction_class_listeners()) {
+            run_kernel.template operator()<1>();
         } else {
-            run_fast_os_kernel<false, false, false>(machine, batch_size, ram);
+            run_kernel.template operator()<0>();
         }
     } else if (policy.copy_pipeline_context && policy.collect_instruction_mix) {
         if (policy.poll_pause) {
-            run_fast_os_kernel<true, true, true>(machine, batch_size, ram);
+            run_fast_os_kernel<true, true, true, 2>(machine, batch_size, ram);
         } else {
-            run_fast_os_kernel<true, true, false>(machine, batch_size, ram);
+            run_fast_os_kernel<true, true, false, 2>(machine, batch_size, ram);
         }
     } else if (policy.copy_pipeline_context) {
         if (policy.poll_pause) {
-            run_fast_os_kernel<true, false, true>(machine, batch_size, ram);
+            run_fast_os_kernel<true, false, true, 2>(machine, batch_size, ram);
         } else {
-            run_fast_os_kernel<true, false, false>(machine, batch_size, ram);
+            run_fast_os_kernel<true, false, false, 2>(machine, batch_size, ram);
         }
     } else {
         if (policy.poll_pause) {
-            run_fast_os_kernel<false, true, true>(machine, batch_size, ram);
+            run_fast_os_kernel<false, true, true, 2>(machine, batch_size, ram);
         } else {
-            run_fast_os_kernel<false, true, false>(machine, batch_size, ram);
+            run_fast_os_kernel<false, true, false, 2>(machine, batch_size, ram);
         }
     }
 }
@@ -3114,49 +3333,4 @@ template void CPU::execute_cached_op_fast<false, true>(Machine&, CachedOp&,
                                                        const simrv::memory::RamView&);
 template void CPU::execute_cached_op_fast<true, true>(Machine&, CachedOp&,
                                                       const simrv::memory::RamView&);
-template auto CPU::run_fast_baremetal_kernel<false, false, false>(Machine&, uint32_t,
-                                                                  const simrv::memory::RamView&)
-    -> uint32_t;
-template auto CPU::run_fast_baremetal_kernel<false, false, true>(Machine&, uint32_t,
-                                                                 const simrv::memory::RamView&)
-    -> uint32_t;
-template auto CPU::run_fast_baremetal_kernel<true, false, false>(Machine&, uint32_t,
-                                                                 const simrv::memory::RamView&)
-    -> uint32_t;
-template auto CPU::run_fast_baremetal_kernel<true, false, true>(Machine&, uint32_t,
-                                                                const simrv::memory::RamView&)
-    -> uint32_t;
-template auto CPU::run_fast_baremetal_kernel<false, true, false>(Machine&, uint32_t,
-                                                                 const simrv::memory::RamView&)
-    -> uint32_t;
-template auto CPU::run_fast_baremetal_kernel<false, true, true>(Machine&, uint32_t,
-                                                                const simrv::memory::RamView&)
-    -> uint32_t;
-template auto CPU::run_fast_baremetal_kernel<true, true, false>(Machine&, uint32_t,
-                                                                const simrv::memory::RamView&)
-    -> uint32_t;
-template auto CPU::run_fast_baremetal_kernel<true, true, true>(Machine&, uint32_t,
-                                                               const simrv::memory::RamView&)
-    -> uint32_t;
-template auto CPU::run_fast_os_kernel<false, false, false>(Machine&, uint32_t,
-                                                           const simrv::memory::RamView&)
-    -> uint32_t;
-template auto CPU::run_fast_os_kernel<false, false, true>(Machine&, uint32_t,
-                                                          const simrv::memory::RamView&)
-    -> uint32_t;
-template auto CPU::run_fast_os_kernel<true, false, false>(Machine&, uint32_t,
-                                                          const simrv::memory::RamView&)
-    -> uint32_t;
-template auto CPU::run_fast_os_kernel<true, false, true>(Machine&, uint32_t,
-                                                         const simrv::memory::RamView&) -> uint32_t;
-template auto CPU::run_fast_os_kernel<false, true, false>(Machine&, uint32_t,
-                                                          const simrv::memory::RamView&)
-    -> uint32_t;
-template auto CPU::run_fast_os_kernel<false, true, true>(Machine&, uint32_t,
-                                                         const simrv::memory::RamView&) -> uint32_t;
-template auto CPU::run_fast_os_kernel<true, true, false>(Machine&, uint32_t,
-                                                         const simrv::memory::RamView&) -> uint32_t;
-template auto CPU::run_fast_os_kernel<true, true, true>(Machine&, uint32_t,
-                                                        const simrv::memory::RamView&) -> uint32_t;
-
 }  // namespace simrv::core

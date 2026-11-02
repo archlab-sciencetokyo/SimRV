@@ -135,6 +135,58 @@ namespace simrv::pipeline::operation {
     return info(op).side_effects != SideEffectFlags::None;
 }
 
+[[nodiscard]] constexpr auto required_misa_mask(isa::OperationId op) noexcept
+    -> simrv::xlen::CsrValue {
+    return info(op).required_misa;
+}
+
+[[nodiscard]] constexpr auto requires_rv64(isa::OperationId op) noexcept -> bool {
+    return info(op).rv64_only;
+}
+
+[[nodiscard]] constexpr auto effective_memory_funct3(isa::OperationId op,
+                                                     isa::Funct3 funct3) noexcept -> isa::Funct3 {
+    const auto inf = info(op);
+    return inf.has_fixed_mem_funct3 ? inf.mem_funct3 : funct3;
+}
+
+[[nodiscard]] constexpr auto memory_access_bytes(isa::OperationId op, isa::Funct3 funct3) noexcept
+    -> uint32_t {
+    const auto static_bytes = info(op).mem_access_bytes;
+    if (static_bytes != 0) {
+        return static_bytes;
+    }
+    return 1U << (std::to_underlying(funct3) & 0x3U);
+}
+
+[[nodiscard]] constexpr auto is_word_alu(isa::OperationId op_id) noexcept -> bool {
+    using enum isa::OperationId;
+    return op_id == ADDW || op_id == ADDIW || op_id == SUBW || op_id == SLLW || op_id == SLLIW ||
+           op_id == SRLW || op_id == SRLIW || op_id == SRAW || op_id == SRAIW || op_id == MULW ||
+           op_id == DIVW || op_id == DIVUW || op_id == REMW || op_id == REMUW || op_id == ADD_UW ||
+           op_id == SLLI_UW || op_id == SH1ADD_UW || op_id == SH2ADD_UW || op_id == SH3ADD_UW ||
+           op_id == CLZW || op_id == CTZW || op_id == CPOPW || op_id == ROLW || op_id == RORW ||
+           op_id == RORIW || op_id == PACKW;
+}
+
+[[nodiscard]] constexpr auto is_pure_int_alu(isa::OperationId op_id) noexcept -> bool {
+    using enum isa::OperationId;
+    return (op_id >= ADDI && op_id <= SRA) || (op_id >= ADDIW && op_id <= SRAW) ||
+           (op_id >= MUL && op_id <= REMUW) || (op_id >= SH1ADD && op_id <= PACKW) ||
+           op_id == CZERO_EQZ || op_id == CZERO_NEZ;
+}
+
+[[nodiscard]] constexpr auto is_shift_imm(isa::OperationId op_id) noexcept -> bool {
+    using enum isa::OperationId;
+    return op_id == SLLI || op_id == SRLI || op_id == SRAI || op_id == SLLIW || op_id == SRLIW ||
+           op_id == SRAIW;
+}
+
+[[nodiscard]] constexpr auto is_csr_imm(isa::OperationId op_id) noexcept -> bool {
+    using enum isa::OperationId;
+    return op_id == CSRRWI || op_id == CSRRSI || op_id == CSRRCI;
+}
+
 // Opcode-level query fallbacks for raw opcodes
 [[nodiscard]] constexpr auto is_load(isa::Opcode opcode) noexcept -> bool {
     return opcode == isa::Opcode::Load || opcode == isa::Opcode::LoadFp;
@@ -231,7 +283,7 @@ inline constexpr auto kStaticOpTraitsTable = generate_static_op_traits();
                                                     simrv::xlen::RegId rd,
                                                     isa::Funct5Amo funct5) noexcept
     -> DependencyTraits {
-    if (simrv::compiler::likely(op_id != isa::UNKNOWN)) {
+    if (simrv::compiler::likely(op_id != isa::ILLEGAL)) {
         const auto idx = static_cast<size_t>(op_id);
         if (simrv::compiler::likely(idx < kStaticOpTraitsTable.size())) {
             DependencyTraits dt = kStaticOpTraitsTable[idx];
@@ -239,8 +291,9 @@ inline constexpr auto kStaticOpTraitsTable = generate_static_op_traits();
                 dt.writes_int = false;
                 dt.is_mem_load = false;
             }
-            if (simrv::compiler::unlikely(opcode == isa::Opcode::System ||
-                                          opcode == isa::Opcode::MiscMem)) {
+            if (simrv::compiler::unlikely(
+                    (opcode == isa::Opcode::System && !isa::is_hypervisor_memory_op(op_id)) ||
+                    opcode == isa::Opcode::MiscMem)) {
                 dt.is_serializing = true;
             }
             return dt;

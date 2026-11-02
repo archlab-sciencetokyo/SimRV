@@ -93,6 +93,7 @@ function(simrv_configure_native_test target)
   if(CMAKE_VERSION VERSION_GREATER_EQUAL "4.2")
     set_property(TARGET ${target} PROPERTY SKIP_LINTING ON)
   endif()
+  set_property(TARGET ${target} PROPERTY INTERPROCEDURAL_OPTIMIZATION OFF)
 endfunction()
 
 function(simrv_add_component target)

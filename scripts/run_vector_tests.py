@@ -50,6 +50,7 @@ def compile_and_run_test(test_ctx):
     simrv = test_ctx["simrv"]
     work_dir = test_ctx["work_dir"]
     xlen = test_ctx["xlen"]
+    vlen = test_ctx["vlen"]
 
     elf_file = os.path.join(work_dir, f"{test_name}.elf")
     bin_file = os.path.join(work_dir, f"{test_name}.bin")
@@ -98,6 +99,7 @@ def compile_and_run_test(test_ctx):
     sim_cmd = [
         simrv,
         "--cli",
+        "--vlen", str(vlen),
         "-m", bin_file,
         "-e", "2000000",
         "-b",
@@ -203,6 +205,7 @@ def main():
             "simrv": args.simrv,
             "work_dir": run_dir,
             "xlen": args.xlen,
+            "vlen": args.vlen,
             "vector_tests_dir": vector_tests_dir,
         })
 

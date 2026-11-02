@@ -177,32 +177,29 @@ void emit_log(Level level, FILE* stream, std::string_view ansi_color, std::strin
 
 }  // namespace
 
-auto format_tui_message(Level level, std::string_view message,
-                        std::chrono::steady_clock::time_point timestamp) -> std::string {
-    std::string_view severity_color;
+auto standard_ansi_color(Level level) noexcept -> std::string_view {
     switch (level) {
         case Level::Trace:
-            severity_color = "\033[38;5;244m";
-            break;
+            return "\033[90m";  // Bright black / gray from the terminal's 16-color palette.
         case Level::Debug:
-            severity_color = "\033[38;5;141m";
-            break;
+            return "\033[1;35m";  // Bold magenta.
         case Level::Info:
-            severity_color = "\033[36m";
-            break;
+            return "\033[1;36m";  // Bold cyan.
         case Level::Warn:
-            severity_color = "\033[93m";
-            break;
+            return "\033[1;33m";  // Bold yellow.
         case Level::Error:
-            severity_color = "\033[91m";
-            break;
+            return "\033[1;31m";  // Bold red.
         case Level::Off:
-            return "";
+            return "\033[39m";  // Terminal-default foreground.
     }
+    return "\033[39m";
+}
 
+auto format_tui_message(Level level, std::string_view message,
+                        std::chrono::steady_clock::time_point timestamp) -> std::string {
     const double elapsed = std::chrono::duration<double>(timestamp - g_log_epoch).count();
-    return std::format("\033[38;5;244m[+{:.1f}s]\033[0m {}[{}]\033[0m {}\n", elapsed,
-                       severity_color, level_name(level), message);
+    return std::format("\033[90m[+{:.1f}s]\033[0m {}[{}]\033[0m {}\n", elapsed,
+                       standard_ansi_color(level), level_name(level), message);
 }
 
 auto parse_level(std::string_view str) noexcept -> std::optional<Level> {
@@ -320,23 +317,23 @@ void close_log_file() {
 }
 
 void print_trace(const std::string& msg) {
-    emit_log(Level::Trace, stdout, "\033[38;5;244m", "TRACE", msg);
+    emit_log(Level::Trace, stdout, standard_ansi_color(Level::Trace), "TRACE", msg);
 }
 
 void print_debug(const std::string& msg) {
-    emit_log(Level::Debug, stdout, "\033[38;5;141m", "DEBUG", msg);
+    emit_log(Level::Debug, stdout, standard_ansi_color(Level::Debug), "DEBUG", msg);
 }
 
 void print_info(const std::string& msg) {
-    emit_log(Level::Info, stdout, "\033[38;5;117m", "INFO", msg);
+    emit_log(Level::Info, stdout, standard_ansi_color(Level::Info), "INFO", msg);
 }
 
 void print_warn(const std::string& msg) {
-    emit_log(Level::Warn, stderr, "\033[38;5;223m", "WARN", msg);
+    emit_log(Level::Warn, stderr, standard_ansi_color(Level::Warn), "WARN", msg);
 }
 
 void print_error(const std::string& msg) {
-    emit_log(Level::Error, stderr, "\033[1;38;5;210m", "ERROR", msg);
+    emit_log(Level::Error, stderr, standard_ansi_color(Level::Error), "ERROR", msg);
 }
 
 }  // namespace simrv::log

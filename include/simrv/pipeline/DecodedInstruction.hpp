@@ -49,6 +49,9 @@ struct DecodedInstruction {
     simrv::xlen::ImmValue imm = 0;  ///< Sign-extended immediate value
     simrv::xlen::CsrValue pending_tval =
         0;  ///< Trap value / faulting address for pending exception
+    simrv::xlen::CsrValue pending_htval = 0;  ///< Guest physical address for a guest-page fault
+    simrv::xlen::CsrValue pending_htinst =
+        0;  ///< Trap pseudoinstruction for an implicit VS walk fault
     std::optional<ExceptionCode>
         pending_exception;  ///< Pending exception code (if decode/fetch raised exception)
 
@@ -56,7 +59,7 @@ struct DecodedInstruction {
     simrv::xlen::Instruction ir_org =
         0;  ///< Original uncompressed 16-bit or 32-bit instruction word
     simrv::xlen::Instruction cinsn = 0;     ///< Compressed instruction indicator (non-zero for RVC)
-    isa::OperationId op_id = isa::UNKNOWN;  ///< Internal operation identifier
+    isa::OperationId op_id = isa::ILLEGAL;  ///< Internal operation identifier
     simrv::xlen::Funct7 funct7 = 0;         ///< R-type 7-bit function code
     simrv::xlen::Funct12 funct12 = 0;       ///< System/I-type 12-bit function code
 

@@ -16,8 +16,8 @@ namespace simrv::core {
  * Resolves preset defaults and explicit device policy into a single device view.
  *
  * The registry deliberately contains only declarative information. Runtime device
- * factories and SoC manifest generation can consume the same view without
- * duplicating policy decisions. Linux device trees are supplied by the user.
+ * factories, SoC manifest generation, and auto-generated Linux device trees consume
+ * the same view without duplicating device enablement policy decisions.
  */
 class SoCDeviceRegistry final {
    public:
@@ -59,8 +59,14 @@ class SoCDeviceRegistry final {
     [[nodiscard]] static auto descriptor(const SoCConfig& config, SoCDeviceKind kind)
         -> std::optional<SoCDeviceConfig> {
         if (!enabled(config, kind)) return std::nullopt;
-        if (const auto* configured = config.find(kind)) return *configured;
-        return soc_device_default(kind);
+        auto device = config.find(kind) != nullptr ? *config.find(kind) : soc_device_default(kind);
+        const auto defaults = soc_device_default(kind);
+        device.pci_bus = device.pci_bus.value_or(defaults.pci_bus.value_or(0));
+        device.pci_slot = device.pci_slot.value_or(defaults.pci_slot.value_or(0));
+        device.pci_function = device.pci_function.value_or(defaults.pci_function.value_or(0));
+        device.pci_intx_source =
+            device.pci_intx_source.value_or(defaults.pci_intx_source.value_or(0));
+        return device;
     }
 
     [[nodiscard]] static auto resolve(const SoCConfig& config) -> std::vector<SoCDeviceConfig> {

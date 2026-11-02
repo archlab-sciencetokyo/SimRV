@@ -8,6 +8,7 @@
 #include <array>
 #include <functional>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "simrv/core/MachineConfig.hpp"
@@ -24,21 +25,70 @@ class TuiModal;
 
 namespace simrv::tui::modals {
 
-constexpr std::array<int, 14> kGeneralSettingRows = {5,  6,  7,  8,  9,  12, 13,
-                                                     14, 17, 18, 19, 22, 25, 28};
-constexpr int kGeneralSettingsContentRows = 29;
+enum class GeneralSetting : size_t {
+    ExecutionPrecision,
+    HighContrastColors,
+    ThemeStyle,
+    PanelDensity,
+    HartCount,
+    SmpExecutionMode,
+    SmpQuantum,
+    PlatformBus,
+    DramSize,
+    NetworkMode,
+    SpikeLockstep,
+    BranchPredictionLog,
+    InstructionMixLog,
+    TrapLog,
+    DeviceLog,
+    Count,
+};
+
+struct GeneralSettingDescriptor {
+    GeneralSetting setting;
+    int row;
+    std::string_view label;
+    std::string_view section;
+};
+
+inline constexpr std::array<GeneralSettingDescriptor, static_cast<size_t>(GeneralSetting::Count)>
+    kGeneralSettingDescriptors = {{
+        {GeneralSetting::ExecutionPrecision, 6, "Simulation Precision", "Execution & Presentation"},
+        {GeneralSetting::HighContrastColors, 7, "High Contrast Colors", ""},
+        {GeneralSetting::ThemeStyle, 8, "Theme", ""},
+        {GeneralSetting::PanelDensity, 9, "Panel Density", ""},
+        {GeneralSetting::HartCount, 12, "Active SMP Hart Count", "Symmetric Multiprocessing"},
+        {GeneralSetting::SmpExecutionMode, 13, "SMP Execution Mode", ""},
+        {GeneralSetting::SmpQuantum, 14, "SMP Scheduler Quantum", ""},
+        {GeneralSetting::PlatformBus, 17, "Platform Bus Topology", "Platform & Peripherals"},
+        {GeneralSetting::DramSize, 18, "Physical RAM Capacity", ""},
+        {GeneralSetting::NetworkMode, 19, "Virtual Network Mode", ""},
+        {GeneralSetting::SpikeLockstep, 22, "Spike Lockstep Compare", "External Integrations"},
+        {GeneralSetting::BranchPredictionLog, 25, "Branch Prediction Log", "Traces & Logging"},
+        {GeneralSetting::InstructionMixLog, 26, "Instruction Mix Summary", ""},
+        {GeneralSetting::TrapLog, 27, "Architectural Trap Log", ""},
+        {GeneralSetting::DeviceLog, 28, "Device MMIO Access Log", ""},
+    }};
+static_assert([] {
+    for (size_t index = 0; index < kGeneralSettingDescriptors.size(); ++index) {
+        if (static_cast<size_t>(kGeneralSettingDescriptors[index].setting) != index) return false;
+    }
+    return true;
+}());
+constexpr int kGeneralSettingsContentRows = kGeneralSettingDescriptors.back().row + 1;
 
 [[nodiscard]] constexpr inline auto general_setting_row(int item) noexcept -> int {
-    return (item >= 0 && static_cast<size_t>(item) < kGeneralSettingRows.size())
-               ? kGeneralSettingRows[static_cast<size_t>(item)]
+    return (item >= 0 && static_cast<size_t>(item) < kGeneralSettingDescriptors.size())
+               ? kGeneralSettingDescriptors[static_cast<size_t>(item)].row
                : 0;
 }
 
 [[nodiscard]] inline auto general_setting_at_row(int row) noexcept -> int {
-    const auto it = std::ranges::find(kGeneralSettingRows, row);
-    return it == kGeneralSettingRows.end()
+    const auto it =
+        std::ranges::find(kGeneralSettingDescriptors, row, &GeneralSettingDescriptor::row);
+    return it == kGeneralSettingDescriptors.end()
                ? -1
-               : static_cast<int>(std::distance(kGeneralSettingRows.begin(), it));
+               : static_cast<int>(std::distance(kGeneralSettingDescriptors.begin(), it));
 }
 
 class SettingsModal : public framework::IModal {
@@ -71,7 +121,8 @@ class SettingsModal : public framework::IModal {
     }
 
     static void open(SettingsDraft& draft, const simrv::core::Machine& machine,
-                     framework::DensityMode density_mode = framework::DensityMode::Auto);
+                     framework::DensityMode density_mode = framework::DensityMode::Auto,
+                     TuiThemeStyle theme_style = TuiThemeStyle::ModernUnicode);
     static void move_cursor(SettingsDraft& draft, int delta);
     static void move_cursor(int& cursor, int delta);
     static void cycle_tab(SettingsDraft& draft, int delta = 1);

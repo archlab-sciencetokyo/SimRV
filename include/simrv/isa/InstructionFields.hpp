@@ -89,8 +89,10 @@ enum class Funct3 : uint8_t {
     /* Floating-Point Load/Store sizes (aliases of Lw/Ld, Sw/Sd) */
     Flw = 0x2,  ///< Floating-Point Load Word
     Fld = 0x3,  ///< Floating-Point Load Doubleword
+    Flh = 0x1,  ///< Floating-Point Load Halfword
     Fsw = 0x2,  ///< Floating-Point Store Word
     Fsd = 0x3,  ///< Floating-Point Store Doubleword
+    Fsh = 0x1,  ///< Floating-Point Store Halfword
 
     /* Branch Opcodes (Branch) */
     Beq = 0x0,   ///< Branch if Equal

@@ -1,16 +1,46 @@
 # Install SimRV
 
-SimRV publishes one Linux x86-64 simulator build. The installed `simrv` executable runs RV64
+SimRV publishes Linux x86-64 simulator builds. The installed `simrv` executable runs RV64
 guests and provides RV32 guest compatibility. Native RV32 builds remain a source-level validation
 target and are not distributed separately.
 
-The supported host platform is x86-64 Linux. Windows users should run SimRV inside
+Release packages target x86-64 Linux. Native macOS source builds have been compiled and smoke-tested
+on macOS 26 for Apple silicon and Intel; macOS packages are not published yet. Host TAP networking
+and VirtIO-FS directory sharing are Linux-only. Windows users should run SimRV inside
 [WSL2](https://learn.microsoft.com/windows/wsl/) with a supported Linux distribution; native
 Windows builds are not currently supported.
 
 Download the newest package bundle or portable archive from
 [GitHub Releases](https://github.com/archlab-sciencetokyo/SimRV/releases). Beta releases are marked
 as prereleases.
+
+## Build from source on macOS
+
+The macOS build is an experimental source-build target, validated on macOS 26 with GCC 16 on both
+Apple silicon and Intel. The compatibility workflow also runs `simrv --help` as a startup smoke
+test. It does not qualify every TUI feature or provide a macOS installer. Its successful CI runs
+publish architecture-specific test binaries as workflow artifacts; those are not release packages.
+
+Install the build tools with Homebrew, then configure and build using the same compiler settings as
+the compatibility job:
+
+```bash
+brew install cmake ninja gcc
+cmake -S . -B build/macos -G Ninja \
+  -DCMAKE_BUILD_TYPE=Debug \
+  -DCMAKE_C_COMPILER=gcc-16 \
+  -DCMAKE_CXX_COMPILER=g++-16 \
+  -DSIMRV_XLEN=64 \
+  -DSIMRV_ALLOW_UNQUALIFIED_TOOLCHAIN=ON \
+  -DSIMRV_ENABLE_LTO=OFF
+cmake --build build/macos --target SimRV --parallel 2
+build/macos/SimRV --help
+```
+
+The [macOS compatibility workflow](https://github.com/archlab-sciencetokyo/SimRV/actions/workflows/macos-compatibility.yml)
+uploads separate `arm64` and `x86_64` artifacts after a successful build and smoke test. Graphical
+guest display uses Kitty graphics when detected, then SIXEL when available; support depends on the
+terminal emulator, not just the host OS. The TUI falls back to text when neither is available.
 
 ## Portable archive
 
@@ -26,6 +56,18 @@ simrv --version
 ```
 
 This is the recommended option for older distributions, containers, and compute servers.
+
+For a per-user install without administrator rights, extract it under `~/.local` instead:
+
+```bash
+mkdir -p "$HOME/.local"
+tar -xzf SimRV-linux-x86_64-vVERSION.tar.gz \
+  --strip-components=1 -C "$HOME/.local"
+"$HOME/.local/bin/simrv" --version
+```
+
+Add `~/.local/bin` to `PATH` if it is not already there. The archive does not register with the
+system package manager; native `.deb` and `.rpm` installs normally need administrator rights.
 
 Remove the installed files using the archive's file list, or replace them by extracting a newer
 archive at the same prefix. Use a native package when managed upgrades and removal matter.
@@ -78,9 +120,9 @@ sudo apt install ./simrv-deb/simrv_*_amd64.deb ./simrv-deb/simrv-devel_*_amd64.d
 
 The native `simrv-devel` package contains SimRV's public C++ headers, the static runtime library,
 and the CMake package that exports `SimRV::runtime`. It is optional and is not part of the portable
-TGZ. Native SDK packages are qualified on Debian sid and Fedora 44; the SDK expects a C++23-capable
-compiler with a standard library ABI compatible with the host package. Source installs also
-provide the CMake package and do not require a native development package.
+TGZ. Native SDK packages are qualified on Ubuntu 24.04 and RHEL 9-compatible systems; the SDK
+expects a C++23-capable compiler. Source installs also provide the CMake package and do not require
+a native development package.
 
 Link the exported target from a CMake project:
 
@@ -108,8 +150,8 @@ Native packages are qualified in release CI on the following x86-64 distribution
 
 | Package | Tested distributions | Notes |
 | --- | --- | --- |
-| RPM | Fedora 44 (the release-build baseline) | Install with `dnf`; older RPM distributions should use the static TGZ unless their glibc/libstdc++ ABI is newer enough. |
-| DEB | Debian sid (the release-build baseline) | Install with `apt`; older Debian/Ubuntu releases should use the static TGZ. |
+| RPM | Rocky Linux 9 and Fedora 44 | Built against the RHEL 9 glibc baseline; the simulator statically links its C++ runtime. |
+| DEB | Ubuntu 24.04 and Debian sid | Built against Ubuntu 24.04; the simulator statically links its C++ runtime. |
 | Static TGZ | Fedora 40, Ubuntu 22.04/24.04, Debian 12/13, and newer x86-64 Linux | Does not require glibc, libstdc++, or TOML runtime packages. |
 
 The native packages are tested rather than promised for every derivative. Use the static TGZ when a

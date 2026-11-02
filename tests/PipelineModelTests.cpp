@@ -111,7 +111,7 @@ void test_cpu_model_presets_and_validation() {
     TEST_CHECK(performance.instruction_cache.associativity == 4);
 
     auto invalid = balanced;
-    invalid.data_cache.line_bytes = 64;
+    invalid.data_cache.line_bytes = 16;
     TEST_CHECK(!invalid.validate().has_value());
     invalid = balanced;
     invalid.instruction_cache.capacity_bytes = 3072;
@@ -122,15 +122,15 @@ void test_cpu_model_presets_and_validation() {
 }
 
 void test_runtime_cache_geometry() {
-    simrv::cache::BaseCache<512, 32, 8> cache;
+    simrv::cache::BaseCache<256, 64, 8> cache;
     TEST_CHECK(cache.configure(2048, 1));
     TEST_CHECK(cache.capacity_bytes() == 2048);
     TEST_CHECK(cache.associativity() == 1);
-    TEST_CHECK(cache.set_count() == 64);
+    TEST_CHECK(cache.set_count() == 32);
     TEST_CHECK(cache.configure(16384, 4));
     TEST_CHECK(cache.capacity_bytes() == 16384);
     TEST_CHECK(cache.associativity() == 4);
-    TEST_CHECK(cache.set_count() == 128);
+    TEST_CHECK(cache.set_count() == 64);
     TEST_CHECK(!cache.configure(4096, 3));
     TEST_CHECK(!cache.configure(32768, 4));
 }

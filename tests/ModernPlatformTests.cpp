@@ -17,6 +17,8 @@
 #include <cstring>
 #include <iostream>
 #include <memory>
+#include <source_location>
+#include <string>
 #include <thread>
 #include <vector>
 
@@ -25,6 +27,7 @@
 #include "simrv/core/Machine.hpp"
 #include "simrv/core/PlatformTiming.hpp"
 #include "simrv/core/RuntimeProfile.hpp"
+#include "simrv/core/TelemetrySink.hpp"
 #include "simrv/device/AIA.hpp"
 #include "simrv/device/Aclint.hpp"
 #include "simrv/device/DmaController.hpp"
@@ -435,12 +438,13 @@ void test_tui_uart_input_irq_publication() {
     uart.push_rx_byte('x');
     constexpr simrv::xlen::Word kUartIrqMask = static_cast<simrv::xlen::Word>(1) << 3;
     check((machine.cpu.plic_mmio.plic_pending[0] & kUartIrqMask) == 0);
+    uart.advance_cycles(20'000);
     uart.service_interrupts();
     check((machine.cpu.plic_mmio.plic_pending[0] & kUartIrqMask) != 0);
-    std::cout << "[PASS] test_tui_uart_input_irq_publication\n";
+    std::cout << "[PASS] test_tui_uart_input_frame_irq_publication\n";
 }
 
-void test_ia_tui_uart_input_is_immediate() {
+void test_ia_tui_uart_input_waits_for_frame() {
     const auto check = [](bool condition) {
         if (!condition) std::abort();
     };
@@ -461,9 +465,63 @@ void test_ia_tui_uart_input_is_immediate() {
     machine.mutable_uart_for_testing()->push_rx_byte('i');
     constexpr simrv::xlen::Word kUartIrqMask = static_cast<simrv::xlen::Word>(1) << 3;
     check((machine.cpu.plic_mmio.plic_pending[0] & kUartIrqMask) == 0);
+    machine.mutable_uart_for_testing()->advance_cycles(20'000);
     machine.finalize_for_testing();
     check((machine.cpu.plic_mmio.plic_pending[0] & kUartIrqMask) != 0);
-    std::cout << "[PASS] test_ia_tui_uart_input_is_immediate\n";
+    std::cout << "[PASS] test_ia_tui_uart_input_waits_for_frame\n";
+}
+
+void test_uart_frame_timing_fifo_and_overrun() {
+    const auto check = [](bool condition) {
+        if (!condition) std::abort();
+    };
+    ConcreteMachine machine;
+    machine.cpu.reset();
+    struct ConsoleCapture final : simrv::core::IConsoleSink {
+        std::string output;
+        void handle_char_write(char ch) override { output.push_back(ch); }
+    };
+    auto capture = std::make_shared<ConsoleCapture>();
+    machine.set_console_sink(capture);
+    simrv::device::Uart uart(machine);
+    const auto write = [&](simrv::xlen::Address reg, simrv::xlen::Word value) {
+        simrv::memory::TlChannelA request{};
+        request.opcode = simrv::memory::TlOpcodeA::PutFullData;
+        request.address = simrv::mmio::kUartBaseAddress + reg;
+        request.size = 0;
+        request.data = value;
+        simrv::memory::TlChannelD response{};
+        check(uart.handle_request(request, response));
+    };
+    const auto read = [&](simrv::xlen::Address reg) {
+        simrv::memory::TlChannelA request{};
+        request.opcode = simrv::memory::TlOpcodeA::Get;
+        request.address = simrv::mmio::kUartBaseAddress + reg;
+        request.size = 0;
+        simrv::memory::TlChannelD response{};
+        check(uart.handle_request(request, response));
+        return response.data;
+    };
+
+    write(simrv::mmio::kUartRegRbrThrDll, 't');
+    check((read(simrv::mmio::kUartRegLsr) & 0x60U) == 0x20U);
+    uart.advance_cycles(13'888);
+    check((read(simrv::mmio::kUartRegLsr) & 0x40U) == 0);
+    uart.advance_cycles(1);
+    check((read(simrv::mmio::kUartRegLsr) & 0x60U) == 0x60U);
+    check(capture->output == "t");
+
+    write(simrv::mmio::kUartRegIirFcr, 1);
+    write(simrv::mmio::kUartRegIerDlm, 5);
+    for (uint8_t byte = 0; byte < 17; ++byte) uart.push_rx_byte(byte);
+    uart.advance_cycles(17 * 13'889);
+    check((read(simrv::mmio::kUartRegIirFcr) & 0x0fU) == 0x06U);
+    check((read(simrv::mmio::kUartRegLsr) & 0x03U) == 0x03U);
+    constexpr simrv::xlen::Word kUartIrqMask = simrv::xlen::Word{1} << 3;
+    check((machine.cpu.plic_mmio.plic_pending[0] & kUartIrqMask) != 0);
+    for (uint32_t i = 0; i < 16; ++i) (void)read(simrv::mmio::kUartRegRbrThrDll);
+    check((read(simrv::mmio::kUartRegLsr) & 0x01U) == 0);
+    std::cout << "[PASS] test_uart_frame_timing_fifo_and_overrun\n";
 }
 
 void test_os_sampled_fast_batch_eligibility() {
@@ -587,8 +645,12 @@ void test_timed_interconnect_cancellation() {
 }
 
 void test_timed_page_walk_transitions() {
-    const auto check = [](bool condition) {
-        if (!condition) std::abort();
+    const auto check = [](bool condition,
+                          std::source_location where = std::source_location::current()) {
+        if (!condition) {
+            std::cerr << "test_timed_page_walk_transitions failed at " << where.line() << '\n';
+            std::abort();
+        }
     };
     ConcreteMachine machine;
     std::vector<simrv::xlen::Byte> ram(1024 * 1024, simrv::xlen::Byte{0});
@@ -629,18 +691,12 @@ void test_timed_page_walk_transitions() {
     result = machine.cpu.translate_stage_address(machine, physical, simrv::PteAccess::Code,
                                                  kPrivSupervisor, simrv::xlen::kXLenBits,
                                                  simrv::memory::TlPort::Instruction, walk);
-    check(!result.has_value());  // Accessed-bit update is a distinct timed write.
-    check(machine.memory().system_bus().pending_requests() == 1);
-
-    machine.memory().system_bus().advance_cycle();
-    machine.cpu.ca_state.waiting_for_interconnect = false;
-    result = machine.cpu.translate_stage_address(machine, physical, simrv::PteAccess::Code,
-                                                 kPrivSupervisor, simrv::xlen::kXLenBits,
-                                                 simrv::memory::TlPort::Instruction, walk);
-    check(result.has_value() && result->has_value() && **result == physical);
-    check(!walk.active);
+    check(result.has_value() && !result->has_value() &&
+          result->error() == static_cast<simrv::xlen::TrapCause>(ExceptionCode::FetchPageFault));
+    check(machine.memory().system_bus().pending_requests() == 0);
+    check(!walk.active);  // SimRV exposes Svade and faults when software has not set A.
     std::memcpy(&pte, ram.data() + (pte_address - physical), sizeof(pte));
-    check((pte & simrv::PteFlag::A) != 0);
+    check((pte & simrv::PteFlag::A) == 0);
 
     // A different, unmapped top-level entry faults after exactly one physical read.
     constexpr simrv::xlen::Address unmapped =
@@ -1091,7 +1147,7 @@ void test_machine_reset_clears_coherence_state_after_cache_reset() {
     machine.cpu.machine_ = &machine;
     machine.memory().initialize_mmu();
 
-    constexpr simrv::xlen::Address line = simrv::memory::kDramBaseAddress + 0x2a0;
+    constexpr simrv::xlen::Address line = simrv::memory::kDramBaseAddress + 0x280;
     constexpr uint32_t value = 0x76543210;
     auto& bus = machine.memory().system_bus();
     simrv::memory::TlChannelA acquire{};
@@ -1108,7 +1164,7 @@ void test_machine_reset_clears_coherence_state_after_cache_reset() {
     machine.cpu.dcache.insert(line, data.data(), simrv::memory::MesiState::Exclusive);
     check(machine.cpu.dcache.write(line, value, 2));
     bus.mark_modified(line, 0);
-    std::memcpy(ram.data() + 0x2a0, &value, sizeof(value));
+    std::memcpy(ram.data() + 0x280, &value, sizeof(value));
     check(bus.coherence_hub().get_directory_state(line).state ==
           simrv::memory::MesiState::Modified);
 
@@ -1117,7 +1173,7 @@ void test_machine_reset_clears_coherence_state_after_cache_reset() {
     check(machine.cpu.dcache.line_state(line) == simrv::memory::MesiState::Invalid);
     check(bus.coherence_hub().get_directory_state(line).state == simrv::memory::MesiState::Invalid);
     uint32_t backing_value = 0;
-    std::memcpy(&backing_value, ram.data() + 0x2a0, sizeof(backing_value));
+    std::memcpy(&backing_value, ram.data() + 0x280, sizeof(backing_value));
     check(backing_value == value);
     std::cout << "[PASS] test_machine_reset_clears_coherence_state_after_cache_reset\n";
 }
@@ -1166,7 +1222,7 @@ void test_cross_line_dma_write_invalidates_only_touched_lines() {
           simrv::memory::MesiState::Invalid);
     check(machine.cpu.dcache.line_state(first_line + 2 * simrv::memory::CoherenceHub::kLineBytes) ==
           simrv::memory::MesiState::Exclusive);
-    check(std::memcmp(ram.data() + 0x31c, replacement.data(), replacement.size()) == 0);
+    check(std::memcmp(ram.data() + 0x33c, replacement.data(), replacement.size()) == 0);
 
     const std::array<simrv::xlen::Byte, 8> out_of_range{};
     const auto final_bytes = ram.size() - 4;
@@ -1397,7 +1453,7 @@ void test_global_cycle_smp_pipeline_ordering() {
     const auto first = run();
     const auto second = run();
     check(first == second);
-    constexpr std::array<uint32_t, 2> expected = std::array<uint32_t, 2>{10, 11};
+    constexpr std::array<uint32_t, 2> expected = std::array<uint32_t, 2>{14, 15};
     if (first != expected) {
         std::cerr << "unexpected SMP retirement cycles: " << first[0] << ", " << first[1] << '\n';
     }
@@ -2050,12 +2106,12 @@ void test_cycle_kernel_golden_data_refill() {
     const auto three_cycles = run(simrv::pipeline::PipelineType::ThreeStage);
     // The interconnect owns refill timing. A cache hit completes in its memory stage, so the
     // configured one-cycle hit latency does not add a second pipeline delay.
-    if (five_cycles != 12 || three_cycles != 10) {
+    if (five_cycles != 16 || three_cycles != 14) {
         std::cerr << "unexpected data-refill cycles: " << five_cycles << ", " << three_cycles
                   << '\n';
     }
-    check(five_cycles == 12);
-    check(three_cycles == 10);
+    check(five_cycles == 16);
+    check(three_cycles == 14);
     std::cout << "[PASS] test_cycle_kernel_golden_data_refill\n";
 }
 
@@ -2304,8 +2360,8 @@ void test_cycle_kernel_golden_instruction_refill() {
 
     const auto five_stage = run(simrv::pipeline::PipelineType::FiveStage);
     const auto three_stage = run(simrv::pipeline::PipelineType::ThreeStage);
-    constexpr auto expected_five = 10u;
-    constexpr auto expected_three = 8u;
+    constexpr auto expected_five = 14u;
+    constexpr auto expected_three = 12u;
     if (five_stage != expected_five || three_stage != expected_three) {
         std::cerr << "unexpected coherent refill cycles: " << five_stage << ", " << three_stage
                   << '\n';
@@ -4043,7 +4099,8 @@ int main(int argc, char** argv) {
     test_virtio_sound_negotiation_and_playback();
     test_axi4_bridge_and_tracer();
     test_tui_uart_input_irq_publication();
-    test_ia_tui_uart_input_is_immediate();
+    test_ia_tui_uart_input_waits_for_frame();
+    test_uart_frame_timing_fifo_and_overrun();
     test_os_sampled_fast_batch_eligibility();
     test_timed_interconnect_ordering();
     test_timed_interconnect_cancellation();

@@ -2,16 +2,24 @@
  * @file ModernSimulatorStandardsTests.cpp
  * @brief Regression tests for Privileged ISA 1.13, SBI v3.0, timing domains, and simulation stats.
  */
+#include <array>
 #include <cassert>
+#include <cstring>
+#include <filesystem>
+#include <fstream>
 #include <iostream>
 #include <string>
+#include <vector>
 
 #include "simrv/core/Cpu.hpp"
 #include "simrv/core/Machine.hpp"
 #include "simrv/core/PlatformTiming.hpp"
 #include "simrv/core/SbiTypes.hpp"
 #include "simrv/core/SimulationStats.hpp"
+#include "simrv/debug/SymbolTable.hpp"
 #include "simrv/isa/TrapTypes.hpp"
+#include "simrv/memory/MemorySubsystem.hpp"
+#include "simrv/memory/Mmu.hpp"
 #include "simrv/memory/PageTableWalker.hpp"
 
 namespace {
@@ -102,6 +110,91 @@ void test_svpbmt_svnapot() {
     }
 }
 
+void test_hypervisor_sv39x4_guest_translation() {
+#if SIMRV_XLEN == 64
+    using simrv::memory::PteAccess;
+    constexpr simrv::xlen::Word kRoot = 0x4000;
+    constexpr simrv::xlen::Word kMiddle = 0x9000;
+    constexpr simrv::xlen::Word kLeaf = 0xA000;
+    constexpr simrv::xlen::Address kGuestAddress = 0x12345678;
+    constexpr simrv::xlen::Address kPhysicalPage = 0x70000;
+    std::array<simrv::xlen::Byte, 1U << 20U> backing{};
+    const auto store_pte = [&](simrv::xlen::Address address, uint64_t value) {
+        std::memcpy(backing.data() + address, &value, sizeof(value));
+    };
+    const auto load_pte = [&](simrv::xlen::Address address) {
+        uint64_t value = 0;
+        std::memcpy(&value, backing.data() + address, sizeof(value));
+        return value;
+    };
+    const auto root_index = (kGuestAddress >> 30U) & 0x7FFU;
+    const auto middle_index = (kGuestAddress >> 21U) & 0x1FFU;
+    const auto leaf_index = (kGuestAddress >> 12U) & 0x1FFU;
+    store_pte(kRoot + root_index * 8U, (uint64_t{9} << 10U) | 1U);
+    store_pte(kMiddle + middle_index * 8U, (uint64_t{10} << 10U) | 1U);
+    constexpr uint64_t kValidReadWriteAccessedDirty = 1U | 2U | 4U | 0x40U | 0x80U;
+    const auto leaf_address = kLeaf + leaf_index * 8U;
+    store_pte(leaf_address, ((kPhysicalPage >> 12U) << 10U) | kValidReadWriteAccessedDirty);
+
+    simrv::memory::PageTableWalker walker(backing.data(), 0, backing.size());
+    const simrv::xlen::Word hgatp = (uint64_t{8} << 60U) | (kRoot >> 12U);
+    const auto translated = walker.walk_guest_physical(kGuestAddress, PteAccess::Read, hgatp, 64);
+    TEST_ASSERT(translated.has_value());
+    TEST_ASSERT(translated->physical_address.raw() == kPhysicalPage + (kGuestAddress & 0xFFFU));
+
+    const auto write_translated =
+        walker.walk_guest_physical(kGuestAddress, PteAccess::Write, hgatp, 64);
+    TEST_ASSERT(write_translated.has_value());
+
+    store_pte(leaf_address, load_pte(leaf_address) & ~uint64_t{0x80});
+    const auto dirty_fault = walker.walk_guest_physical(kGuestAddress, PteAccess::Write, hgatp, 64);
+    TEST_ASSERT(!dirty_fault.has_value());
+    TEST_ASSERT(dirty_fault.error() == simrv::isa::ExceptionCode::GuestStorePageFault);
+
+    const auto out_of_range =
+        walker.walk_guest_physical(uint64_t{1} << 41U, PteAccess::Read, hgatp, 64);
+    TEST_ASSERT(!out_of_range.has_value());
+    TEST_ASSERT(out_of_range.error() == simrv::isa::ExceptionCode::GuestLoadPageFault);
+
+    const auto bare = walker.walk_guest_physical(kGuestAddress, PteAccess::Read, 0, 64);
+    TEST_ASSERT(bare.has_value() && bare->physical_address.raw() == kGuestAddress);
+#endif
+}
+
+void test_sha_two_stage_translation_integration() {
+#if SIMRV_XLEN == 64
+    constexpr simrv::xlen::Address kGuestRoot = 0x1000;
+    constexpr simrv::xlen::Address kGuestMiddle = 0x2000;
+    constexpr simrv::xlen::Address kGuestLeaf = 0x3000;
+    constexpr simrv::xlen::Address kHRoot = 0x4000;
+    constexpr simrv::xlen::Address kHMiddle = 0x5000;
+    constexpr simrv::xlen::Address kGuestVa = 0x1234;
+    constexpr simrv::xlen::Address kGuestPa = 0x6000;
+    constexpr simrv::xlen::Address kHostBase = 0x200000;
+    std::array<simrv::xlen::Byte, 0x400000> backing{};
+    const auto put = [&](simrv::xlen::Address address, uint64_t value) {
+        std::memcpy(backing.data() + address, &value, sizeof(value));
+    };
+    put(kHRoot, (uint64_t{5} << 10U) | 1U);
+    put(kHMiddle, ((kHostBase >> 12U) << 10U) | 0xCFU);
+    put(kHostBase + kGuestRoot, (uint64_t{2} << 10U) | 1U);
+    put(kHostBase + kGuestMiddle, (uint64_t{3} << 10U) | 1U);
+    put(kHostBase + kGuestLeaf + 8U, ((kGuestPa >> 12U) << 10U) | 0xCFU);
+
+    simrv::core::ArchState state;
+    state.virt = true;
+    state.hgatp = (uint64_t{8} << 60U) | (kHRoot >> 12U);
+    constexpr simrv::xlen::Word kVsSatp = (uint64_t{8} << 60U) | (kGuestRoot >> 12U);
+    simrv::Mmu mmu(backing.data(), 0, backing.size());
+    const auto translated =
+        mmu.translate(kGuestVa, simrv::PteAccess::Read, simrv::xlen::PrivilegeLevel::Supervisor, 0,
+                      kVsSatp, 64, false, &state);
+    TEST_ASSERT(translated.has_value());
+    TEST_ASSERT(translated->physical_address.raw() == kHostBase + kGuestPa + (kGuestVa & 0xFFFU));
+    TEST_ASSERT(translated->pte == (((kGuestPa >> 12U) << 10U) | 0xCFU));
+#endif
+}
+
 void test_sbi_version_and_rfence() {
     TEST_ASSERT(simrv::sbi::kSbiSpecVersion_3_0 == 0x03000000U);
 
@@ -126,6 +219,49 @@ void test_sbi_version_and_rfence() {
     const bool rfence_handled = cpu.sbi.handle_ecall(simrv::isa::ExceptionCode::SupervisorEcall);
     TEST_ASSERT(rfence_handled);
     TEST_ASSERT(cpu.state().regs.read(simrv::xlen::RegId::A0) == 0);  // SBI_SUCCESS
+}
+
+void test_sbi_pmu_discovery_and_raw_counters() {
+    using simrv::xlen::RegId;
+    simrv::core::CPU cpu;
+    cpu.state().regs.write(RegId::A7, std::to_underlying(simrv::sbi::SbiExtId::Pmu));
+    const auto call = [&](simrv::xlen::Word fid) {
+        cpu.state().regs.write(RegId::A6, fid);
+        TEST_ASSERT(cpu.sbi.handle_ecall(simrv::isa::ExceptionCode::SupervisorEcall));
+        return std::pair{static_cast<simrv::xlen::SignedWord>(cpu.state().regs.read(RegId::A0)),
+                         cpu.state().regs.read(RegId::A1)};
+    };
+
+    TEST_ASSERT(call(0).second == 32);
+    cpu.state().regs.write(RegId::A0, 0);
+    TEST_ASSERT(call(1).second == (0xC00U | (63U << 12U)));
+    cpu.state().regs.write(RegId::A0, 1);
+    TEST_ASSERT(call(1).first ==
+                static_cast<simrv::xlen::SignedWord>(simrv::SbiError::InvalidParam));
+
+    // Configure SimRV raw selector 9 on programmable counter 3.
+    cpu.state().regs.write(RegId::A0, 3);
+    cpu.state().regs.write(RegId::A1, 1);
+    cpu.state().regs.write(RegId::A2, 0);
+    cpu.state().regs.write(RegId::A3, 0x30000);  // raw-event-v2, event code 0
+    cpu.state().regs.write(RegId::A4, 9);
+    const auto configured = call(2);
+    TEST_ASSERT(configured.first == 0 && configured.second == 3);
+    cpu.state().regs.write(RegId::A0, 3);
+    cpu.state().regs.write(RegId::A1, 1);
+    cpu.state().regs.write(RegId::A2, 1);  // set initial counter value
+    cpu.state().regs.write(RegId::A3, 40);
+    cpu.state().regs.write(RegId::A4, 0);  // high word of the RV32 initial value
+    TEST_ASSERT(call(3).first == 0);
+    TEST_ASSERT(cpu.perf_counters.read_hpmcounter(3) == 40);
+    cpu.perf_counters.notify_event(simrv::core::HpmEvent::BranchMispredict);
+    TEST_ASSERT(cpu.perf_counters.read_hpmcounter(3) == 41);
+    cpu.state().regs.write(RegId::A0, 3);
+    cpu.state().regs.write(RegId::A1, 1);
+    cpu.state().regs.write(RegId::A2, 0);
+    TEST_ASSERT(call(4).first == 0);
+    cpu.perf_counters.notify_event(simrv::core::HpmEvent::BranchMispredict);
+    TEST_ASSERT(cpu.perf_counters.read_hpmcounter(3) == 41);
 }
 
 void test_platform_timing_conversions() {
@@ -161,15 +297,61 @@ void test_simulation_stats() {
     TEST_ASSERT(text_str.find("=== SimRV Simulation Statistics ===") != std::string::npos);
 }
 
+void test_architectural_signature_dump() {
+    simrv::core::Machine machine;
+    std::array<simrv::xlen::Byte, 4096> backing{};
+    machine.set_ram_for_testing(backing.data(), backing.size());
+    machine.memory().initialize_mmu();
+
+    const std::string sig_path = "/tmp/simrv_test_signature.sig";
+
+    // 1. Missing symbols fails cleanly
+    TEST_ASSERT(!machine.dump_signature(sig_path));
+
+    // 2. Add signature symbols
+    const simrv::xlen::Address begin_sig = 0x80000100;
+    const simrv::xlen::Address end_sig = 0x80000110;  // 16 bytes = 4 words
+    machine.symbol_table().add_symbol_for_testing(begin_sig, "begin_signature");
+    machine.symbol_table().add_symbol_for_testing(end_sig, "end_signature");
+
+    // Populate RAM at begin_sig (offset 0x100 within DRAM base 0x80000000)
+    const uint32_t words[4] = {0x12345678, 0xdeadbeef, 0x00000001, 0xaabbccdd};
+    std::memcpy(backing.data() + 0x100, words, sizeof(words));
+
+    // Dump signature
+    TEST_ASSERT(machine.dump_signature(sig_path));
+
+    // Read back and verify format
+    std::ifstream in(sig_path);
+    TEST_ASSERT(in.is_open());
+    std::string line;
+    std::vector<std::string> lines;
+    while (std::getline(in, line)) {
+        if (!line.empty()) lines.push_back(line);
+    }
+    in.close();
+    std::filesystem::remove(sig_path);
+
+    TEST_ASSERT(lines.size() == 4);
+    TEST_ASSERT(lines[0] == "12345678");
+    TEST_ASSERT(lines[1] == "deadbeef");
+    TEST_ASSERT(lines[2] == "00000001");
+    TEST_ASSERT(lines[3] == "aabbccdd");
+}
+
 }  // namespace
 
 int main() {
     std::cout << "Running ModernSimulatorStandardsTests..." << std::endl;
     test_exception_priorities();
     test_svpbmt_svnapot();
+    test_hypervisor_sv39x4_guest_translation();
+    test_sha_two_stage_translation_integration();
     test_sbi_version_and_rfence();
+    test_sbi_pmu_discovery_and_raw_counters();
     test_platform_timing_conversions();
     test_simulation_stats();
+    test_architectural_signature_dump();
     std::cout << "All ModernSimulatorStandardsTests passed successfully!" << std::endl;
     return 0;
 }

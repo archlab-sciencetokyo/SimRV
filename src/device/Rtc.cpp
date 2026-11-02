@@ -10,7 +10,11 @@
 
 namespace simrv {
 
-Rtc::Rtc(simrv::core::Machine& machine) : machine_(machine) { sync_with_system_time(); }
+Rtc::Rtc(simrv::core::Machine& machine, simrv::xlen::Address base, simrv::xlen::Address size,
+         uint32_t irq)
+    : machine_(machine), base_(base), size_(size), irq_(irq) {
+    sync_with_system_time();
+}
 
 void Rtc::sync_with_system_time() {
     base_epoch_ns_ = static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(
@@ -27,7 +31,7 @@ void Rtc::evaluate_alarm() {
         const uint64_t rtc_ns = current_time_ns();
         if (rtc_ns >= alarm_time_) {
             alarm_status_ = true;
-            machine_.set_platform_irq(static_cast<int>(kRtcIrq), true);
+            machine_.set_platform_irq(static_cast<int>(irq_), true);
         }
     }
 }
@@ -40,7 +44,7 @@ auto Rtc::handle_request(const memory::TlChannelA& req, memory::TlChannelD& resp
 
     const bool is_write = (req.opcode == memory::TlOpcodeA::PutFullData ||
                            req.opcode == memory::TlOpcodeA::PutPartialData);
-    const simrv::xlen::Address offset = (req.address - kBaseAddress).raw();
+    const simrv::xlen::Address offset = (req.address - base_).raw();
 
     if (!is_write) {
         switch (offset) {
@@ -90,11 +94,11 @@ auto Rtc::handle_request(const memory::TlChannelA& req, memory::TlChannelD& resp
             case 0x14:  // CLEAR_ALARM
                 alarm_enabled_ = false;
                 alarm_status_ = false;
-                machine_.set_platform_irq(static_cast<int>(kRtcIrq), false);
+                machine_.set_platform_irq(static_cast<int>(irq_), false);
                 break;
             case 0x1c:  // CLEAR_INTERRUPT
                 alarm_status_ = false;
-                machine_.set_platform_irq(static_cast<int>(kRtcIrq), false);
+                machine_.set_platform_irq(static_cast<int>(irq_), false);
                 break;
             default:
                 break;

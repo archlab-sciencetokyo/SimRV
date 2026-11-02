@@ -35,6 +35,11 @@ int main() {
     auto const wrapped = wrap_text("\033[31m界界界\033[0m", 4, 1);
     expect(wrapped.size() == 2 && display_width(wrapped[0]) == 4 && display_width(wrapped[1]) == 4,
            "wrapping preserves ANSI and complete wide UTF-8 glyphs");
+    auto const word_wrapped = wrap_text("Registers show its inputs.", 18, 2);
+    expect(word_wrapped.size() == 2 && word_wrapped[0].find("its") != std::string::npos &&
+               word_wrapped[0].find("it\033[0m") == std::string::npos &&
+               word_wrapped[1].find("inputs.") != std::string::npos,
+           "prose wraps between words while retaining continuation indentation");
 
     std::vector<Action> actions = {{.id = "apply", .key = "Enter", .label = "Apply"},
                                    {.id = "cancel", .key = "Esc", .label = "Cancel"}};

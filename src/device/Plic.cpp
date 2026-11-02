@@ -21,7 +21,7 @@ namespace {
     if (ctx >= Plic::kMaxPlicContexts) return 0;
     simrv::xlen::Word max_prio = 0;
     int claim_id = 0;
-    for (int i : std::views::iota(1, 32)) {
+    for (int i : std::views::iota(1, static_cast<int>(Plic::kNumSources + 1))) {
         const auto idx = static_cast<std::size_t>(i);
         if ((plic.plic_pending[0] & (1u << i)) != 0 &&
             (plic.plic_enables[ctx][0] & (1u << i)) != 0) {
@@ -76,7 +76,7 @@ void Plic::update_mip() {
 }
 
 void Plic::set_irq(simrv::xlen::IrqNumber irq_num, int state_val) {
-    if (irq_num == 0 || irq_num >= 32) return;
+    if (irq_num == 0 || irq_num > Plic::kNumSources) return;
     const simrv::xlen::Word mask = static_cast<simrv::xlen::Word>(1) << irq_num;
     if (state_val != 0) {
         plic_pending[0] |= mask;

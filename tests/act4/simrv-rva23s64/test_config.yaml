@@ -1,0 +1,7 @@
+name: simrv-rva23s64
+compiler_exe: riscv64-linux-gnu-gcc
+objdump_exe: riscv64-linux-gnu-objdump
+ref_model_exe: sail_riscv_sim
+udb_config: sail-RVA23S64.yaml
+linker_script: link.ld
+dut_include_dir: . # Directory containing DUT specific rvmodel_macros.h header

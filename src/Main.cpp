@@ -34,10 +34,10 @@
 #include "simrv/core/Machine.hpp"
 #include "simrv/core/TelemetrySink.hpp"
 #include "simrv/core/Tracer.hpp"
+#include "simrv/explain/InstructionExplainer.hpp"
 #include "simrv/tui/Tui.hpp"
 #include "simrv/util/CliParser.hpp"
 #include "simrv/util/FormatUtil.hpp"
-#include "simrv/util/InstructionExplainer.hpp"
 #include "simrv/util/SoCManifest.hpp"
 #include "simrv/xlen/ScalarTypes.hpp"
 
@@ -222,10 +222,17 @@ auto print_doctor() -> int {
 
     std::println("SimRV environment diagnostics");
     std::println("  version          : {}", simrv::buildinfo::kVersion);
-    std::println("  host             : Linux x86-64 expected for release binaries");
+#if defined(__APPLE__)
+    std::println(
+        "  host             : macOS source-build target; release packages target Linux x86-64");
+#elif defined(__linux__)
+    std::println("  host             : Linux (release packages target x86-64)");
+#else
+    std::println("  host             : unsupported native host (use Linux or macOS)");
+#endif
     std::println("  interactive TTY  : {}", tty ? "yes" : "no (use --cli for pipes)");
     std::println("  TERM             : {}", term_value.empty() ? "(unset)" : term_value);
-    std::println("  Sixel hint       : {}",
+    std::println("  Sixel environment : {}",
                  sixel ? "detected" : "not detected (text TUI remains available)");
     std::println("  mouse protocol   : SGR-pixel mode requested by interactive TUI");
     std::println(
@@ -334,7 +341,7 @@ auto main(int argc, char* argv[]) -> int {  // NOLINT(bugprone-exception-escape)
                 std::println("Full license: LICENSE; third-party notices: THIRD_PARTY_NOTICES.md");
                 std::exit(simrv::core::to_exit_code(simrv::core::HostExitCode::Success));
             case CliAction::ExplainInstruction:
-                simrv::util::explain_instruction(parsed->options.explain_inst_val);
+                simrv::explain::explain_instruction(parsed->options.explain_inst_val);
                 std::exit(simrv::core::to_exit_code(simrv::core::HostExitCode::Success));
             case CliAction::DumpCpuModel: {
                 simrv::pipeline::CpuModelConfig cfg{};
@@ -683,6 +690,15 @@ auto main(int argc, char* argv[]) -> int {  // NOLINT(bugprone-exception-escape)
                 !sim_machine->trace().write_summary_json(parsed->options.fn_summary)) {
                 simrv::log::error("Cannot write execution summary to {}",
                                   parsed->options.fn_summary);
+                if (final_exit_code == 0) {
+                    final_exit_code =
+                        simrv::core::to_exit_code(simrv::core::HostExitCode::GeneralError);
+                }
+            }
+            if (!parsed->options.fn_signature.empty() &&
+                !sim_machine->dump_signature(parsed->options.fn_signature)) {
+                simrv::log::error("Cannot write architectural signature to {}",
+                                  parsed->options.fn_signature);
                 if (final_exit_code == 0) {
                     final_exit_code =
                         simrv::core::to_exit_code(simrv::core::HostExitCode::GeneralError);

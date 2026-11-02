@@ -114,7 +114,7 @@ void execute_vector_config(core::CPU& cpu, isa::OperationId op_id, simrv::xlen::
     cpu.state().vstart = 0;
     cpu.state().regs.write(rd, new_vl);
 
-    cpu.state().mstatus |= core::MstatusBit::Vs;
+    cpu.state().mark_extension_dirty(core::MstatusBit::Vs);
 }
 
 }  // namespace simrv::execute::vector

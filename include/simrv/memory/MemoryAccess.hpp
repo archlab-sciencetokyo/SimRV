@@ -21,6 +21,9 @@ class MemorySubsystem;
  */
 class MemoryAccess {
    public:
+    static auto mask_user_pointer(core::CPU& cpu, simrv::xlen::VirtAddr address)
+        -> simrv::xlen::VirtAddr;
+
     static auto target_read(MemorySubsystem& mem, core::CPU& cpu, simrv::xlen::VirtAddr v_addr,
                             isa::Funct3 funct3) -> simrv::xlen::Word;
     static void target_write(MemorySubsystem& mem, core::CPU& cpu, simrv::xlen::VirtAddr v_addr,

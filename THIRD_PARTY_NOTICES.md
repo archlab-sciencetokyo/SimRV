@@ -9,3 +9,16 @@ test suites are likewise caller-supplied and are not redistributed.
 
 Project-authored source and release artifacts are licensed under the MIT License;
 see `LICENSE`.
+
+## Architectural Specification Attribution
+
+Normative instruction descriptions, CSR definitions, operational formulas, and chapter/section
+references in `simrv::explain` (`include/simrv/explain/`, `src/explain/`) are adapted from and
+cite the official ratified RISC-V International specifications (licensed under the Creative Commons
+Attribution 4.0 International License, CC-BY-4.0):
+
+- *The RISC-V Instruction Set Manual, Volume I: Unprivileged Architecture*, Document Version
+  `20260120` (January 2026), Editors Andrew Waterman and Krste Asanović, RISC-V International.
+- *The RISC-V Instruction Set Manual, Volume II: Privileged Architecture*, Document Version
+  `20260120` (January 2026), Editors Andrew Waterman, Krste Asanović, and John Hauser, RISC-V
+  International.

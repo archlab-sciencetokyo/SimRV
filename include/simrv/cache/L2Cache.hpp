@@ -11,9 +11,9 @@ namespace simrv::cache {
 
 /**
  * @class L2Cache
- * @brief Intermediate unified Level-2 Cache (default 64 KiB, 32-byte lines, 8 ways).
+ * @brief Intermediate unified Level-2 Cache (default 64 KiB, 64-byte lines, 8 ways).
  */
-class L2Cache : public BaseCache<2048, 32, 8> {
+class L2Cache : public BaseCache<1024, 64, 8> {
    public:
     L2Cache() = default;
 

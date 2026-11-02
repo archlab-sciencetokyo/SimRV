@@ -5,7 +5,7 @@ on:
     branches: [main, dev, 'release/**']
     paths:
       - 'docs/**'
-      - 'mkdocs.yml'
+      - 'zensical.yml'
       - 'pyproject.toml'
       - 'uv.lock'
       - '.github/workflows/docs.yml'
@@ -13,7 +13,7 @@ on:
     branches: [main, dev]
     paths:
       - 'docs/**'
-      - 'mkdocs.yml'
+      - 'zensical.yml'
       - 'pyproject.toml'
       - 'uv.lock'
       - '.github/workflows/docs.yml'
@@ -50,7 +50,7 @@ jobs:
       - name: Build documentation site with Zensical
         env:
           SIMRV_DOCS_CHANNEL: development
-        run: uv run --frozen zensical build --strict
+        run: uv run --frozen zensical build --strict --config-file zensical.yml
 
       - name: Check documentation links
         uses: lycheeverse/lychee-action@v2
@@ -103,12 +103,12 @@ jobs:
             SIMRV_DOCS_SITE_DIR="$GITHUB_WORKSPACE/docs-main/site" \
             SIMRV_DOCS_EDIT_URI="edit/main/docs/" \
             SIMRV_DOCS_CHANNEL="stable" \
-            docs-dev/.venv/bin/zensical build --strict --config-file docs-main/mkdocs.yml
+            docs-dev/.venv/bin/zensical build --strict --config-file docs-main/zensical.yml
           SIMRV_DOCS_SITE_URL="https://archlab-sciencetokyo.github.io/SimRV/dev/" \
             SIMRV_DOCS_SITE_DIR="$GITHUB_WORKSPACE/docs-dev/site" \
             SIMRV_DOCS_EDIT_URI="edit/dev/docs/" \
             SIMRV_DOCS_CHANNEL="development" \
-            docs-dev/.venv/bin/zensical build --strict --config-file docs-dev/mkdocs.yml
+            docs-dev/.venv/bin/zensical build --strict --config-file docs-dev/zensical.yml
           cp -a docs-main/site site/stable
           cp -a docs-dev/site site/dev
           cp -a site/stable site/latest

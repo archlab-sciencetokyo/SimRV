@@ -25,8 +25,9 @@ using CoherenceSharersMask = uint64_t;
 
 inline constexpr uint8_t kTlBeatBytes = 8;
 inline constexpr uint8_t kTlBeatSize = 3;
-inline constexpr uint8_t kTlBlockBytes = 32;
-inline constexpr uint8_t kTlBlockSize = 5;
+inline constexpr uint8_t kTlBlockBytes = 64;
+inline constexpr uint8_t kTlBlockSize = 6;
+static_assert((uint8_t{1} << kTlBlockSize) == kTlBlockBytes);
 
 enum class TlPermission : uint8_t { None, Branch, Trunk };
 enum class MesiState : uint8_t { Invalid, Shared, Exclusive, Modified };
