@@ -3,7 +3,18 @@
 All notable changes to SimRV are documented here.
 Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [v3.0.0-rc.17] — unreleased
+## [v3.0.0-rc.18] — unreleased
+
+- Formalized PLIC physical input level tracking across all interrupt sources, eliminating hardcoded IRQ assumptions on completion.
+- Added dynamic PLIC priority and threshold arbitration re-evaluation upon register MMIO writes.
+- Formalized APLIC direct-mode interrupt de-assertion and delivery lifecycle.
+- Added ACLINT 32-bit MMIO timer word writes (0x7ff8/0x7ffc) and multi-hart timer interrupt re-evaluation.
+- Paced UART cycle advance in fast OS kernel batch execution to eliminate tight polling stalls.
+- Unified multi-hart CLINT/ACLINT `mtime` single-timebase synchronization across fast execution paths.
+- Enforced illegal instruction exceptions on write attempts to architecturally read-only CSRs.
+- Enforced physical memory protection (PMP) on Hypervisor G-stage intermediate PTE fetches.
+
+## [v3.0.0-rc.17] — 2026-11-02
 
 - Integrated RVA23 profile qualification through RISC-V Architectural Compatibility Tests (ACT).
 - Added architectural signature dumping (`--signature <file>`) for ACT conformance evaluation.
