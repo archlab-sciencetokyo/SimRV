@@ -2,7 +2,7 @@ name: macOS Build and Smoke Test
 
 on:
   push:
-    branches: [test/macos, release/3.0.0-rc.17]
+    branches: [test/macos, dev, 'release/**']
   workflow_dispatch:
 
 permissions:

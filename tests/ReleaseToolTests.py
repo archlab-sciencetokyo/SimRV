@@ -70,7 +70,7 @@ class ReleaseToolTests(unittest.TestCase):
         self.assertNotIn("rpm-packages/rv64", workflow)
         self.assertIn("repodata/repomd.xml", workflow)
         self.assertIn("rpm-packages:", workflow)
-        self.assertIn("registry.access.redhat.com/ubi9/ubi:9", workflow)
+        self.assertIn("registry.access.redhat.com/ubi9/ubi:latest", workflow)
         self.assertIn("ppa:ubuntu-toolchain-r/test", workflow)
         self.assertIn("-static-libgcc -static-libstdc++", workflow)
         self.assertIn("rpmlint --rpmlintrc packaging/simrv.rpmlintrc packages/*.rpm", workflow)
