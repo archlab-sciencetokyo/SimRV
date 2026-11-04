@@ -261,6 +261,10 @@ add_subdirectory(src/tui)
 # Runtime is the composition target and must be declared after all component
 # object targets.
 add_subdirectory(src/core)
+option(SIMRV_BUILD_PLUGINS "Build dynamic external device plugins" ON)
+if(SIMRV_BUILD_PLUGINS)
+  add_subdirectory(plugins)
+endif()
 
 add_executable(SimRV src/Main.cpp)
 add_executable(SimRV::cli ALIAS SimRV)

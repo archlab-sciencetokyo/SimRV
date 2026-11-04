@@ -9,6 +9,7 @@
 #include <utility>
 
 #include "simrv/core/Logger.hpp"
+#include "simrv/device/ExternalDevicePlugin.hpp"
 
 namespace simrv::execute {
 
@@ -47,6 +48,9 @@ auto CfuUnit::load_plugin(std::string_view path) -> bool {
     }
 
     std::string path_str(path);
+    if (auto resolved = simrv::device::resolve_device_plugin_path(path)) {
+        path_str = *resolved;
+    }
     void* handle = dlopen(path_str.c_str(), RTLD_NOW | RTLD_LOCAL);
     if (handle == nullptr) {
         simrv::log::error("Failed to load CFU plugin '{}': {}", path, dlerror());
@@ -64,6 +68,13 @@ auto CfuUnit::load_plugin(std::string_view path) -> bool {
     const SimRvCfuPlugin* plugin = init_fn();
     if (plugin == nullptr || plugin->execute == nullptr) {
         simrv::log::error("CFU plugin '{}' returned invalid plugin descriptor", path);
+        dlclose(handle);
+        return false;
+    }
+
+    if (plugin->api_version != SIMRV_CFU_PLUGIN_API_VERSION) {
+        simrv::log::error("CFU plugin '{}' has incompatible API version {} (expected {})", path,
+                          plugin->api_version, SIMRV_CFU_PLUGIN_API_VERSION);
         dlclose(handle);
         return false;
     }

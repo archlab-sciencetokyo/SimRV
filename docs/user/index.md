@@ -125,6 +125,8 @@ simrv -m program.elf
 | `--ia` | Select fast instruction-accurate simulation mode. |
 | `-s, -e, --steps <N>` | Evaluate machine-wide instruction limit across all harts before stopping. |
 | `--config <preset \| file>` | Select a platform preset (`virt-pcie`, `virt-mmio`, `rvcomp`) or custom configuration file. |
+| `--plugin <name\|file.so>[=args]` | Attach an external MMIO device simulation plugin (e.g. `mmc=disk.img`, `ethernet`). |
+| `--cfu-plugin <file.so>` | Load a dynamic Custom Function Unit (CFU) accelerator plugin for `custom-0`. |
 | `--cpu-preset <preset>` | Select a built-in CPU model preset (`tiny`, `balanced`, `performance`). |
 | `--validate-config <file>` | Validate and lint a CPU model or SoC platform configuration file. |
 | `--isa <string>` | Select a supported base ISA preset; recognized ratified Z extensions may be listed with optional supported versions. |

@@ -94,6 +94,17 @@ Run SimRV with the compiled accelerator plugin:
 simrv --cfu-plugin=./libcfu_custom.so --cpu-preset=cfu-provingground target_program.elf
 ```
 
+### Dual Extension Architecture: CFU vs. External Device Plugins
+
+SimRV follows a unified plugin philosophy across both execution pipeline and SoC bus domains:
+
+| Extension Type | CLI Flag | Target Subsystem | C ABI Entry Point | C Descriptor Struct | Primary Use Case |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| **CFU Plugin** | `--cfu-plugin=<lib.so>` | Execute Stage (`custom-0`) | `simrv_cfu_init` | `SimRvCfuPlugin` | Tightly-coupled instruction accelerators (SIMD, Galois field, crypto, TPU ALU) |
+| **Device Plugin** | `--plugin <name>[=args]` | TileLink Interconnect / Memory | `simrv_device_plugin_init` | `SimRvExternalDevice` | Loosely-coupled peripherals (MMC, Ethernet, reset controller, FPGA MMIO) |
+
+Both plugin interfaces use stable, versioned C ABIs loaded at runtime without modifying or rebuilding the core simulator. For complete documentation on authoring and auto-discovering memory-mapped external device plugins, see [Extending Platforms: Dynamic External Device Plugins](extending-platforms.md#dynamic-external-device-plugins-c-abi).
+
 ---
 
 ## 1. Register the Extension and Opcodes

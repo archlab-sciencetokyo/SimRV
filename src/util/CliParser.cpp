@@ -778,6 +778,12 @@ auto parse_file_options(std::string_view arg, std::span<char* const> args, std::
         options.fn_cfu_plugin = std::string(*value);
         return true;
     }
+    if (option_id == "--device-plugin" || option_id == "--plugin") {
+        auto value = next_argument(args, i, arg);
+        if (!value) return std::unexpected(value.error());
+        options.device_plugins.push_back(std::string(*value));
+        return true;
+    }
     if (option_id == "--bram-prewarm") {
         options.bram_prewarm = true;
         return true;
@@ -1758,6 +1764,7 @@ auto RuntimeOptions::to_machine_config() const -> simrv::core::MachineConfig {
     cfg.files.dvtree_path = fn_dvtree;
     cfg.files.config_path = fn_config;
     cfg.files.cfu_plugin_path = fn_cfu_plugin;
+    cfg.files.device_plugins = device_plugins;
     cfg.files.uefi_code_path = fn_uefi;
     cfg.files.uefi_vars_path = fn_uefi_vars;
     cfg.files.uefi_enabled = uefi_enabled;
@@ -1770,12 +1777,6 @@ auto RuntimeOptions::to_machine_config() const -> simrv::core::MachineConfig {
     cfg.bht_entries = bht_size;
     cfg.btb_entries = btb_size;
     cfg.ras_entries = ras_size;
-    if (bram_prewarm.has_value()) {
-        cfg.bram_prewarm = *bram_prewarm;
-    } else if (fn_config.find("cfu-provingground") != std::string::npos ||
-               fn_config.find("rvproc") != std::string::npos) {
-        cfg.bram_prewarm = true;
-    }
 
     cfg.network.mode = net_mode;
     if (const auto preset = simrv::core::SoCConfig::preset(config_target)) {
@@ -1789,7 +1790,18 @@ auto RuntimeOptions::to_machine_config() const -> simrv::core::MachineConfig {
                 cfg.isa.isa_preset = simrv::isa::isa_preset_bits(model.isa_preset);
                 cfg.isa.misa_override = true;
             }
+            if (model.mmio_console_redirect) {
+                cfg.mmio_console_redirect = true;
+            }
+            if (model.bram_prewarm) {
+                cfg.bram_prewarm = true;
+            }
         }
+    }
+    if (cfg.soc.mmio_console_redirect) cfg.mmio_console_redirect = true;
+    if (cfg.soc.bram_prewarm) cfg.bram_prewarm = true;
+    if (bram_prewarm.has_value()) {
+        cfg.bram_prewarm = *bram_prewarm;
     }
     if (cfg.soc.dram_base.has_value()) cfg.memory.dram_base = *cfg.soc.dram_base;
     if (dram_size == 0 && cfg.soc.dram_size.has_value()) {
@@ -2059,6 +2071,8 @@ auto cli_help_sections() -> const std::vector<HelpSection>& {
                .description = "Validate a CPU model or platform configuration file."},
               {.option = "--cfu-plugin <LIB.SO>",
                .description = "Load a dynamic custom function unit plugin."},
+              {.option = "--plugin, --device-plugin <NAME|SO>[=ARGS]",
+               .description = "Load external MMIO device plugin (e.g. mmc=disk.img)."},
               {.option = "--bram-prewarm / --no-bram-prewarm",
                .description = "Control ELF cache prewarming for BRAM parity."}}},
         {.title = "Logging and tracing",

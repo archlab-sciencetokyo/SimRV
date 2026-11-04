@@ -120,6 +120,7 @@ struct FilesConfig {
     std::string dvtree_path;
     std::string config_path;
     std::string cfu_plugin_path;
+    std::vector<std::string> device_plugins;
     std::string uefi_code_path;
     std::string uefi_vars_path;
     bool uefi_enabled = false;
@@ -131,16 +132,24 @@ struct NetworkConfig {
     std::string mode = "user";
 };
 
+enum class FramebufferFormat : uint8_t {
+    A8R8G8B8 = 0,
+    R5G6B5 = 1,
+};
+
 struct FramebufferConfig {
     uint32_t width = 800;
     uint32_t height = 600;
     simrv::xlen::Address base = 0x84000000ULL;
+    uint32_t stride = 0;
+    uint32_t bpp = 4;
+    FramebufferFormat format = FramebufferFormat::A8R8G8B8;
 
     [[nodiscard]] constexpr auto size_bytes() const noexcept -> size_t {
-        return static_cast<size_t>(width) * height * 4;
+        return static_cast<size_t>(width) * height * (bpp != 0 ? bpp : 4);
     }
     [[nodiscard]] constexpr auto stride_bytes() const noexcept -> size_t {
-        return static_cast<size_t>(width) * 4;
+        return stride != 0 ? stride : (static_cast<size_t>(width) * (bpp != 0 ? bpp : 4));
     }
 };
 
@@ -161,6 +170,7 @@ struct MachineConfig {
     uint32_t btb_entries = 0;
     uint32_t ras_entries = 0;
     bool bram_prewarm = false;
+    bool mmio_console_redirect = false;
     PlatformProfile platform_profile = PlatformProfile::Pcie;
     SoCConfig soc = SoCConfig::virt_pcie();
 

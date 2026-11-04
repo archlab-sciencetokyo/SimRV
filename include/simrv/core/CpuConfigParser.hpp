@@ -872,6 +872,14 @@ inline auto parse_cpu_config_stream(std::istream& stream, simrv::pipeline::CpuMo
                 if (const auto b = detail::parse_bool(val_str); b.has_value()) {
                     config.enable_idle_spans = *b;
                 }
+            } else if (key == "mmio_console_redirect" || key == "console_redirect") {
+                if (const auto b = detail::parse_bool(val_str); b.has_value()) {
+                    config.mmio_console_redirect = *b;
+                }
+            } else if (key == "bram_prewarm") {
+                if (const auto b = detail::parse_bool(val_str); b.has_value()) {
+                    config.bram_prewarm = *b;
+                }
             } else {
                 simrv::log::warn("Unknown CPU config key: {}", key);
             }
@@ -885,7 +893,7 @@ inline auto parse_cpu_config_stream(std::istream& stream, simrv::pipeline::CpuMo
 
 /** Parse the platform portion of a combined CPU/SoC preset file. */
 inline auto parse_soc_config_stream(std::istream& stream, simrv::core::SoCConfig& config) -> bool {
-    enum class Section { Global, Soc, Pcie, Memory, Boot, Device, Smp, SmpCluster, SmpL3 };
+    enum class Section { Global, Soc, Pcie, Memory, Boot, Device, Smp, SmpCluster, SmpL3, Plugins };
     Section section = Section::Global;
     simrv::core::SoCDeviceConfig* device = nullptr;
     simrv::core::SmpClusterConfig* cluster = nullptr;
@@ -910,6 +918,8 @@ inline auto parse_soc_config_stream(std::istream& stream, simrv::core::SoCConfig
                 return false;
             } else if (detail::iequals(name, "soc")) {
                 section = Section::Soc;
+            } else if (detail::iequals(name, "plugins")) {
+                section = Section::Plugins;
             } else if (detail::iequals(name, "pcie")) {
                 section = Section::Pcie;
             } else if (detail::iequals(name, "memory")) {
@@ -1085,6 +1095,14 @@ inline auto parse_soc_config_stream(std::istream& stream, simrv::core::SoCConfig
                 if (const auto parsed = detail::parse_bool(value)) {
                     config.disable_unlisted_devices = *parsed;
                 }
+            } else if (key == "mmio_console_redirect" || key == "console_redirect") {
+                if (const auto parsed = detail::parse_bool(value)) {
+                    config.mmio_console_redirect = *parsed;
+                }
+            } else if (key == "bram_prewarm") {
+                if (const auto parsed = detail::parse_bool(value)) {
+                    config.bram_prewarm = *parsed;
+                }
             }
         } else if (section == Section::Pcie) {
             if (const auto parsed = detail::parse_scaled_u64(value)) {
@@ -1108,6 +1126,10 @@ inline auto parse_soc_config_stream(std::istream& stream, simrv::core::SoCConfig
                     config.dram_base = *parsed;
                 else if (key == "dram_size" || key == "size")
                     config.dram_size = *parsed;
+            } else if (key == "bram_prewarm") {
+                if (const auto parsed = detail::parse_bool(value)) {
+                    config.bram_prewarm = *parsed;
+                }
             }
         } else if (section == Section::Boot) {
             if (const auto parsed = detail::parse_scaled_u64(value)) {
@@ -1169,7 +1191,25 @@ inline auto parse_soc_config_stream(std::istream& stream, simrv::core::SoCConfig
                 device->compatible = std::string(value);
             } else if (key == "name") {
                 device->name = std::string(value);
+            } else if (key == "plugin") {
+                std::string clean_val = std::string(value);
+                if (clean_val.size() >= 2 && clean_val.front() == '"' && clean_val.back() == '"') {
+                    clean_val = clean_val.substr(1, clean_val.size() - 2);
+                }
+                config.plugins.push_back(clean_val);
             }
+        } else if (section == Section::Plugins) {
+            std::string plugin_spec;
+            if (value.empty() || value == "\"\"" || value == "true") {
+                plugin_spec = std::string(key);
+            } else {
+                std::string clean_val = std::string(value);
+                if (clean_val.size() >= 2 && clean_val.front() == '"' && clean_val.back() == '"') {
+                    clean_val = clean_val.substr(1, clean_val.size() - 2);
+                }
+                plugin_spec = std::string(key) + "=" + clean_val;
+            }
+            config.plugins.push_back(plugin_spec);
         }
     }
     return true;

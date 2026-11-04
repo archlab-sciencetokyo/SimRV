@@ -64,6 +64,7 @@ class Uart : public memory::TileLinkNode {
     [[nodiscard]] auto pty() -> PtyBridge& { return pty_; }
     [[nodiscard]] auto pty() const -> const PtyBridge& { return pty_; }
     void flush_tx_buffer() noexcept;
+    void drain_tx_fifo() noexcept;
 
    private:
     simrv::core::Machine& machine_;

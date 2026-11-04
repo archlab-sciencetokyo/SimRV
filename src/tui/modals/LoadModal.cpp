@@ -172,7 +172,7 @@ void LoadModal::open(ModalType type, std::string& input, bool& load_appmode,
         input = machine.disk_path();
     } else if (type == ModalType::LoadCpuConfig) {
         const auto& path = machine.primary_hart().cpu_model_config.name;
-        input = path.empty() ? "configs/models/rvcomp.cfg" : path;
+        input = path.empty() ? "balanced" : path;
     }
 }
 
@@ -340,7 +340,7 @@ void LoadModal::render(ModalType type, std::vector<std::string>& content_rows,
     } else if (type == ModalType::LoadCpuConfig) {
         build_text_input_rows(content_rows,
                               "Enter CPU model filepath (.cfg) or preset name:", input,
-                              "e.g. configs/models/rvcomp.cfg, cfu-provingground, balanced");
+                              "e.g. balanced, performance, tiny, or path/to/model.cfg");
         content_rows.push_back(std::format("  {}[Tab] Complete path\033[0m", kThemeMuted));
         append_completion_preview();
         content_rows.push_back(std::format("  {}[Ctrl-O] Browse files\033[0m", kThemeMuted));

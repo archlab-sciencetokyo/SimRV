@@ -554,6 +554,11 @@ auto CsrFile::read_from_state(const ArchState& state, simrv::xlen::CsrNumber add
             break;
         case csr_addr(Csr::Misa):
             rcsr = isa::misa_with_mxl(state.misa, active_xlen);
+            if (active_xlen == 32) {
+                // In 32-bit execution mode, MISA bits [31:30] hold MXL=1 (RV32)
+                rcsr =
+                    (rcsr & ~(simrv::xlen::CsrValue{3} << 30)) | (simrv::xlen::CsrValue{1} << 30);
+            }
             break;
 
         case csr_addr(Csr::Mcycle):

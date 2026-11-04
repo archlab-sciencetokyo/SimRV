@@ -8,6 +8,7 @@ simrv_add_component(simrv-platform
   Power.cpp
   ResetControlMmio.cpp
   RingBufferEthernetMmio.cpp
+  ExternalDevicePlugin.cpp
   DummyMmio.cpp
   DmaController.cpp
   pflash/PFlash.cpp

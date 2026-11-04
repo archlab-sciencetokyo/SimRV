@@ -141,7 +141,7 @@ void TuiModal::open_load_cpu_config() {
     rendered_box_width_ = 0;
     path_completion_preview_.clear();
     const auto& name = machine_.primary_hart().cpu_model_config.name;
-    input_ = name.empty() ? "configs/models/rvcomp.cfg" : name;
+    input_ = name.empty() ? "balanced" : name;
     active_modal_impl_ = std::make_unique<modals::LoadModal>(
         this, &machine_, active_modal_, input_, load_appmode_, load_buildroot_mode_,
         staged_binary_path_, path_completion_preview_);

@@ -208,6 +208,122 @@ than constructed as simple base nodes. Follow the nearest existing device implem
 verify transport discovery as well as MMIO access. Do not assign a standard VirtIO register layout
 to custom RTL hardware just to make it discoverable.
 
+## Dynamic External Device Plugins (C ABI)
+
+While architectural peripherals (CLINT, PLIC, AIA, 16550 UART, VirtIO) are built into SimRV core, board-specific, experimental, or custom hardware blocks should be modeled as **dynamic external device plugins**. Similar to how Custom Function Unit (CFU) plugins extend the instruction execution pipeline (`--cfu-plugin`), external device plugins attach memory-mapped peripherals to the TileLink interconnect (`--plugin`) without modifying or recompiling the simulator core.
+
+### The External Device C ABI
+
+Plugins interface with SimRV through the versioned C ABI declared in [`include/simrv/device/ExternalDevice.h`](https://github.com/archlab-sciencetokyo/SimRV/blob/dev/include/simrv/device/ExternalDevice.h):
+
+```c
+// my_device.c
+#include <stdint.h>
+#include <stdlib.h>
+#include "simrv/device/ExternalDevice.h"
+
+struct DeviceState {
+    const SimRvHostServices* services;
+    uint32_t register_val;
+};
+
+static int my_init(void** out_ctx, const char* args) {
+    struct DeviceState* st = malloc(sizeof(struct DeviceState));
+    st->services = NULL;
+    st->register_val = 0;
+    *out_ctx = st;
+    return 0;
+}
+
+static void my_reset(void* ctx) {
+    struct DeviceState* st = (struct DeviceState*)ctx;
+    st->register_val = 0;
+}
+
+static int my_read(void* ctx, uint64_t offset, uint32_t size, uint64_t* out_val) {
+    struct DeviceState* st = (struct DeviceState*)ctx;
+    if (offset == 0) {
+        *out_val = st->register_val;
+        return 0;
+    }
+    *out_val = 0;
+    return 0;
+}
+
+static int my_write(void* ctx, uint64_t offset, uint32_t size, uint64_t val) {
+    struct DeviceState* st = (struct DeviceState*)ctx;
+    if (offset == 0) {
+        st->register_val = (uint32_t)val;
+        // Example: assert platform IRQ 2 when high bit is set
+        if (st->services && st->services->set_irq) {
+            st->services->set_irq(st->services->host_ctx, 2, (val & 0x80000000) != 0);
+        }
+    }
+    return 0;
+}
+
+static void my_destroy(void* ctx) {
+    free(ctx);
+}
+
+static void my_set_services(void* ctx, const SimRvHostServices* services) {
+    struct DeviceState* st = (struct DeviceState*)ctx;
+    st->services = services;
+}
+
+static const SimRvExternalDevice kDescriptor = {
+    .api_version = SIMRV_EXTERNAL_DEVICE_API_VERSION,
+    .name = "my-device",
+    .compatible = "vendor,my-device",
+    .default_base = 0x20000000ULL,
+    .default_size = 0x1000ULL,
+    .init = my_init,
+    .reset = my_reset,
+    .read = my_read,
+    .write = my_write,
+    .destroy = my_destroy,
+    .set_host_services = my_set_services,
+};
+
+const SimRvExternalDevice* simrv_device_plugin_init(void) {
+    return &kDescriptor;
+}
+```
+
+### Compiling Plugins
+
+Compile the plugin into a position-independent shared object (`.so`):
+
+```bash
+# GCC
+gcc -O3 -shared -fPIC -Iinclude -o libsimrv-mydevice.so my_device.c
+
+# Clang
+clang -O3 -shared -fPIC -Iinclude -o libsimrv-mydevice.so my_device.c
+```
+
+### Loading and Auto-Discovery
+
+SimRV provides multiple seamless ways to load plugins:
+
+1. **Short CLI Flag with Logical Name**:
+   ```bash
+   simrv --plugin mydevice=image.bin ...
+   ```
+   SimRV automatically searches `./plugins/`, `<bindir>/plugins/`, `<bindir>/`, and `$SIMRV_PLUGIN_PATH`, matching `libsimrv-<name>.so`, `lib<name>.so`, or direct file paths.
+
+2. **Devicetree Compatible Auto-Discovery**:
+   When guest device trees declare custom `/soc` nodes (such as `compatible = "vendor,my-device"`), SimRV automatically searches the plugin directories for a plugin matching the compatible string and attaches it without manual flags.
+
+3. **Platform Configuration (`.cfg`) Declaration**:
+   Declare plugins directly in model configurations:
+   ```ini
+   [plugins]
+   mydevice = "image.bin"
+   ```
+
+---
+
 ## Validation checklist
 
 - Confirm the CPU model parses and passes its supported XLEN/ISA checks.
