@@ -96,6 +96,19 @@
             }
         },
         {
+            "name": "rv64-gcc-release",
+            "displayName": "RV64 GCC Native-Host Release (Ninja)",
+            "inherits": "simrv-base",
+            "binaryDir": "${sourceDir}/build/rv64-gcc-release",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Release",
+                "CMAKE_C_COMPILER": "gcc",
+                "CMAKE_CXX_COMPILER": "g++",
+                "SIMRV_XLEN": "64",
+                "SIMRV_NATIVE_HOST_OPTIMIZATIONS": "ON"
+            }
+        },
+        {
             "name": "rv64-asan",
             "displayName": "RV64 ASAN (Ninja)",
             "inherits": "simrv-rv64-sanitizer",
@@ -160,6 +173,11 @@
         {
             "name": "rv64-native-release",
             "configurePreset": "rv64-native-release",
+            "inherits": "simrv-build-base"
+        },
+        {
+            "name": "rv64-gcc-release",
+            "configurePreset": "rv64-gcc-release",
             "inherits": "simrv-build-base"
         },
         {

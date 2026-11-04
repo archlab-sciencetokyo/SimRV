@@ -187,6 +187,11 @@ class RegisterFile {
         return freg_.data();
     }
 
+    [[nodiscard]] SIMRV_ALWAYS_INLINE constexpr auto* gpr_data() noexcept { return reg_.data(); }
+    [[nodiscard]] SIMRV_ALWAYS_INLINE constexpr const auto* gpr_data() const noexcept {
+        return reg_.data();
+    }
+
    private:
     friend class CPU;
 

@@ -604,6 +604,14 @@ auto CsrFile::read_from_state(const ArchState& state, simrv::xlen::CsrNumber add
         case csr_addr(Csr::Mstatus):
             rcsr = compute_mstatus(state, kMstatusReadMask);
             break;
+        case csr_addr(Csr::Mstatush):
+            return require_rv32_counter().transform([&state]() -> simrv::xlen::CsrValue {
+                if constexpr (simrv::xlen::kIsXLen64) {
+                    return static_cast<simrv::xlen::CsrValue>(state.mstatus >> 32U);
+                } else {
+                    return state.mstatush;
+                }
+            });
 
         case csr_addr(Csr::Mvendorid):
         case csr_addr(Csr::Marchid):
@@ -1329,6 +1337,21 @@ auto CsrFile::write(simrv::xlen::CsrNumber addr, simrv::xlen::CsrValue wdata)
         case csr_addr(Csr::Mstatus):
             setMstatus(wdata);
             break;
+        case csr_addr(Csr::Mstatush):
+            return require_rv32_counter().and_then(
+                [this, wdata]() -> std::expected<void, ExceptionCode> {
+                    if constexpr (simrv::xlen::kIsXLen64) {
+                        const uint64_t lower =
+                            static_cast<uint64_t>(cpu_.state().mstatus) & 0xFFFFFFFFULL;
+                        const uint64_t upper = static_cast<uint64_t>(wdata) << 32U;
+                        setMstatus(static_cast<simrv::xlen::CsrValue>(lower | upper));
+                    } else {
+                        constexpr simrv::xlen::CsrValue kMstatushWritableMask =
+                            (1U << 4U) | (1U << 5U) | (1U << 6U) | (1U << 7U) | (1U << 10U);
+                        cpu_.state().mstatush = wdata & kMstatushWritableMask;
+                    }
+                    return {};
+                });
         case csr_addr(Csr::Sstatus):
             if (cpu_.state().virt) {
                 cpu_.state().vsstatus =

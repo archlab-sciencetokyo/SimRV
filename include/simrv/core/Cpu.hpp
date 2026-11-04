@@ -58,6 +58,7 @@ struct alignas(128) ArchState {
     /* Machine Mode CSRs */
     simrv::xlen::CsrValue
         mstatus{};  ///< Machine Status (tracks processor mode, interrupt states, extension states)
+    simrv::xlen::CsrValue mstatush{};  ///< Machine Status High (RV32, 0x310)
     simrv::xlen::CsrValue
         mtvec{};  ///< Machine Trap-Vector Base-Address (address of machine mode trap handler)
     simrv::xlen::CsrValue

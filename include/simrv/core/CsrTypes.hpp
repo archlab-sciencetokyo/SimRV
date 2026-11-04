@@ -669,6 +669,7 @@ enum class Csr : uint16_t {
     Mhartid = 0xF14,
     Mconfigptr = 0xF15,
     Mstatus = 0x300,
+    Mstatush = 0x310,
     Misa = 0x301,
     Medeleg = 0x302,
     Mideleg = 0x303,
