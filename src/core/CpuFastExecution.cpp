@@ -2587,8 +2587,15 @@ void CPU::run_fast_baremetal_batch(Machine& machine, uint32_t batch_size,
 
     if (cached_ops > 0) {
         account_arch_cycles(cached_ops);
-        if (machine.clock_divider().advance_fast_cycles(cached_ops, clint_mmio.rtc_divider,
-                                                        clint_mmio.mtime) > 0) {
+        if (state_.mhartid == 0) {
+            if (machine.clock_divider().advance_fast_cycles(cached_ops, clint_mmio.rtc_divider,
+                                                            clint_mmio.mtime) > 0) {
+                evaluate_timer_interrupt();
+            }
+        } else {
+            clint_mmio.mtime.store(
+                machine.primary_hart().clint_mmio.mtime.load(std::memory_order_relaxed),
+                std::memory_order_relaxed);
             evaluate_timer_interrupt();
         }
     }
@@ -2608,9 +2615,15 @@ SIMRV_ALWAYS_INLINE auto CPU::run_fast_os_kernel(Machine& machine, uint32_t batc
             if (state_.mhartid == 0) {
                 if (auto* uart = machine.uart_device(); uart != nullptr)
                     uart->advance_cycles(chunk_cycles);
-            }
-            if (machine.clock_divider().advance_fast_cycles(chunk_cycles, clint_mmio.rtc_divider,
-                                                            clint_mmio.mtime) > 0) {
+                if (machine.clock_divider().advance_fast_cycles(
+                        chunk_cycles, clint_mmio.rtc_divider, clint_mmio.mtime) > 0) {
+                    evaluate_timer_interrupt();
+                    handle_cached_interrupts();
+                }
+            } else {
+                clint_mmio.mtime.store(
+                    machine.primary_hart().clint_mmio.mtime.load(std::memory_order_relaxed),
+                    std::memory_order_relaxed);
                 evaluate_timer_interrupt();
                 handle_cached_interrupts();
             }
@@ -2654,7 +2667,12 @@ SIMRV_ALWAYS_INLINE auto CPU::run_fast_os_kernel(Machine& machine, uint32_t batc
                             simrv::compiler::unlikely((state_.mip & state_.mie) != 0u)) {
                             return true;
                         }
-                        if (simrv::compiler::unlikely((chunk_cycles + chain_size) >= 64)) {
+                        const bool uart_transfer_pending =
+                            state_.mhartid == 0 && (chunk_cycles + chain_size) >= 4 &&
+                            machine.uart_device() != nullptr &&
+                            machine.uart_device()->has_active_transfer();
+                        if (simrv::compiler::unlikely((chunk_cycles + chain_size) >= 64 ||
+                                                      uart_transfer_pending)) {
                             cached_ops += chain_size;
                             chunk_cycles += chain_size;
                             account_retirement(chain_size);
@@ -2667,11 +2685,16 @@ SIMRV_ALWAYS_INLINE auto CPU::run_fast_os_kernel(Machine& machine, uint32_t batc
                             if (state_.mhartid == 0) {
                                 if (auto* uart = machine.uart_device(); uart != nullptr)
                                     uart->advance_cycles(chunk_cycles);
-                            }
-                            if (simrv::compiler::unlikely(
-                                    machine.clock_divider().advance_fast_cycles(
-                                        chunk_cycles, clint_mmio.rtc_divider, clint_mmio.mtime) >
-                                    0)) {
+                                if (simrv::compiler::unlikely(
+                                        machine.clock_divider().advance_fast_cycles(
+                                            chunk_cycles, clint_mmio.rtc_divider,
+                                            clint_mmio.mtime) > 0)) {
+                                    evaluate_timer_interrupt();
+                                }
+                            } else {
+                                clint_mmio.mtime.store(machine.primary_hart().clint_mmio.mtime.load(
+                                                           std::memory_order_relaxed),
+                                                       std::memory_order_relaxed);
                                 evaluate_timer_interrupt();
                             }
                             chunk_cycles = 0;
@@ -3192,6 +3215,9 @@ SIMRV_ALWAYS_INLINE auto CPU::run_fast_os_kernel(Machine& machine, uint32_t batc
                     record_hpm_event(HpmEvent::Cycles, chain_size);
                     e_ccount += compressed_count;
                     if (fallback_op != nullptr) {
+                        if (chunk_cycles > 0) {
+                            flush_clint_and_retired();
+                        }
                         const bool is_csr = is_csr_instruction(fallback_op->op_id);
                         execute_cached_op_fast<false, false>(machine, *fallback_op, ram);
                         ++cached_ops;
@@ -3247,7 +3273,10 @@ SIMRV_ALWAYS_INLINE auto CPU::run_fast_os_kernel(Machine& machine, uint32_t batc
             }
             handle_cached_interrupts();
 
-            if (simrv::compiler::unlikely(chunk_cycles >= 64)) {
+            const bool uart_transfer_pending = state_.mhartid == 0 && chunk_cycles >= 4 &&
+                                               machine.uart_device() != nullptr &&
+                                               machine.uart_device()->has_active_transfer();
+            if (simrv::compiler::unlikely(chunk_cycles >= 64 || uart_transfer_pending)) {
                 flush_clint_and_retired();
             }
         } else {

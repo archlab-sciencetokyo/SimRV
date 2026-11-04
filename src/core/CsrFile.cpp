@@ -564,11 +564,15 @@ auto CsrFile::read_from_state(const ArchState& state, simrv::xlen::CsrNumber add
         case csr_addr(Csr::Instret):
             rcsr = static_cast<simrv::xlen::CsrValue>(state.minstret);
             break;
-        case csr_addr(Csr::Time):
+        case csr_addr(Csr::Time): {
+            const uint64_t mtime =
+                (cpu != nullptr && cpu->machine_ != nullptr)
+                    ? cpu->machine_->platform_time()
+                    : (cpu != nullptr ? cpu->clint_mmio.mtime.load(std::memory_order_relaxed) : 0U);
             rcsr = static_cast<simrv::xlen::CsrValue>(
-                (cpu != nullptr ? cpu->clint_mmio.mtime.load(std::memory_order_relaxed) : 0U) +
-                (state.virt ? state.htimedelta : simrv::xlen::CsrValue{0}));
+                mtime + (state.virt ? state.htimedelta : simrv::xlen::CsrValue{0}));
             break;
+        }
 
         case csr_addr(Csr::Mcycleh):
         case csr_addr(Csr::Cycleh):
@@ -582,9 +586,13 @@ auto CsrFile::read_from_state(const ArchState& state, simrv::xlen::CsrNumber add
                 return static_cast<simrv::xlen::CsrValue>(state.minstret >> kHighWordShift);
             });
         case csr_addr(Csr::Timeh):
-            return require_rv32_counter().transform([cpu]() {
+            return require_rv32_counter().transform([cpu, &state]() {
                 const uint64_t mtime =
-                    cpu != nullptr ? cpu->clint_mmio.mtime.load(std::memory_order_relaxed) : 0U;
+                    ((cpu != nullptr && cpu->machine_ != nullptr)
+                         ? cpu->machine_->platform_time()
+                         : (cpu != nullptr ? cpu->clint_mmio.mtime.load(std::memory_order_relaxed)
+                                           : 0U)) +
+                    (state.virt ? state.htimedelta : simrv::xlen::CsrValue{0});
                 return static_cast<simrv::xlen::CsrValue>(mtime >> kHighWordShift);
             });
 
@@ -710,6 +718,9 @@ auto CsrFile::read(simrv::xlen::CsrNumber addr) const
 
 auto CsrFile::write(simrv::xlen::CsrNumber addr, simrv::xlen::CsrValue wdata)
     -> std::expected<void, ExceptionCode> {  // NOLINT(bugprone-easily-swappable-parameters)
+    if (addr.is_read_only()) {
+        return std::unexpected(ExceptionCode::IllegalInstruction);
+    }
     const uint16_t address = addr.value();
     constexpr uint64_t kStateenSuperEnable = uint64_t{1} << 63U;
     constexpr uint64_t kStateenEnvCfgEnable = uint64_t{1} << 62U;
@@ -812,13 +823,6 @@ auto CsrFile::write(simrv::xlen::CsrNumber addr, simrv::xlen::CsrValue wdata)
     };
 
     switch (addr.value()) {
-        case csr_addr(Csr::Mvendorid):
-        case csr_addr(Csr::Marchid):
-        case csr_addr(Csr::Mimpid):
-        case csr_addr(Csr::Mconfigptr):
-        case csr_addr(Csr::Mhartid):
-        case csr_addr(Csr::Time):
-        case csr_addr(Csr::Timeh):
         case csr_addr(Csr::Misa):
             break;
 
