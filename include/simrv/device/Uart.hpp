@@ -48,6 +48,7 @@ class Uart : public memory::TileLinkNode {
     void stop_input_thread();
     [[nodiscard]] auto is_input_thread_running() const -> bool { return input_thread_.joinable(); }
     [[nodiscard]] auto is_interrupt_pending() const -> bool;
+    [[nodiscard]] auto irq_number() const noexcept -> uint32_t { return irq_; }
     void push_rx_byte(uint8_t byte);
     /// Advance serial transmit and receive state by simulated CPU cycles.
     void advance_cycles(uint64_t cycles);

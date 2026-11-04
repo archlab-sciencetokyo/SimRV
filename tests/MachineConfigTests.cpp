@@ -928,10 +928,72 @@ auto main() -> int {
         plic_controller.set_irq(simrv::core::kPlicSourceCount, true);
         expect((plic_controller.plic_pending[0] & (1U << simrv::core::kPlicSourceCount)) != 0,
                "PLIC runtime accepts its highest implemented source");
+        expect(plic_controller.is_irq_asserted(simrv::core::kPlicSourceCount),
+               "PLIC tracks physical line state as asserted");
         const auto pending_at_limit = plic_controller.plic_pending[0];
         plic_controller.set_irq(simrv::core::kPlicSourceCount + 1, true);
         expect(plic_controller.plic_pending[0] == pending_at_limit,
                "PLIC runtime ignores sources above its implemented limit");
+
+        // Verify generic level-sensitive re-assertion upon completion (Finding 1)
+        constexpr uint32_t kLevelTestIrq = 7;
+        plic_controller.plic_priorities[kLevelTestIrq] = 1;
+        plic_controller.plic_enables[0][0] = (1U << kLevelTestIrq);
+        plic_controller.set_irq(kLevelTestIrq, true);
+        expect((plic_controller.plic_pending[0] & (1U << kLevelTestIrq)) != 0,
+               "PLIC pending set on level-assert");
+        // Claim on context 0 (offset 0x200004)
+        const auto claim_id = plic_controller.mmio_read(0x200004);
+        expect(claim_id == kLevelTestIrq, "PLIC claim returns active IRQ source");
+        expect((plic_controller.plic_pending[0] & (1U << kLevelTestIrq)) == 0,
+               "PLIC pending cleared on claim");
+        expect(plic_controller.is_irq_asserted(kLevelTestIrq),
+               "PLIC still tracks physical line active while claimed");
+        // Complete without dropping line -> must re-assert pending
+        plic_controller.mmio_write(0x200004, kLevelTestIrq);
+        expect((plic_controller.plic_pending[0] & (1U << kLevelTestIrq)) != 0,
+               "PLIC re-asserts pending on complete when level remains high");
+        // Claim again while pending is re-asserted
+        const auto claim_id2 = plic_controller.mmio_read(0x200004);
+        expect(claim_id2 == kLevelTestIrq, "Second claim retrieves re-asserted IRQ");
+        expect((plic_controller.plic_pending[0] & (1U << kLevelTestIrq)) == 0,
+               "PLIC pending cleared on second claim");
+        // Now drop line while claimed, then complete -> must stay clear
+        plic_controller.set_irq(kLevelTestIrq, false);
+        expect(!plic_controller.is_irq_asserted(kLevelTestIrq), "PLIC line dropped");
+        plic_controller.mmio_write(0x200004, kLevelTestIrq);
+        expect((plic_controller.plic_pending[0] & (1U << kLevelTestIrq)) == 0,
+               "PLIC pending stays clear after complete when level is low");
+        const auto claim_id3 = plic_controller.mmio_read(0x200004);
+        expect(claim_id3 == 0, "No pending interrupt after completion with level low");
+
+        // Verify dynamic arbitration re-evaluation upon priority/threshold MMIO write
+        constexpr uint32_t kDynIrq = 8;
+        plic_controller.mmio_write(0x200000, 5);            // Threshold = 5
+        plic_controller.mmio_write(kDynIrq * 4, 3);         // Priority = 3
+        plic_controller.mmio_write(0x2000, 1U << kDynIrq);  // Enable IRQ 8
+        plic_controller.set_irq(kDynIrq, true);
+        machine.primary_hart().apply_pending_interrupt_lines(machine);
+        expect((machine.primary_hart().state().mip & simrv::core::MipBit::Meip) == 0,
+               "MEIP suppressed when priority (3) <= threshold (5)");
+
+        // Lower threshold via MMIO -> must dynamically trigger update_mip
+        plic_controller.mmio_write(0x200000, 2);  // Threshold = 2 < Priority (3)
+        machine.primary_hart().apply_pending_interrupt_lines(machine);
+        expect((machine.primary_hart().state().mip & simrv::core::MipBit::Meip) != 0,
+               "MEIP immediately asserts when threshold lowered below pending priority");
+
+        // Raise threshold via MMIO -> must dynamically suppress MEIP
+        plic_controller.mmio_write(0x200000, 4);  // Threshold = 4 > Priority (3)
+        machine.primary_hart().apply_pending_interrupt_lines(machine);
+        expect((machine.primary_hart().state().mip & simrv::core::MipBit::Meip) == 0,
+               "MEIP immediately suppresses when threshold raised above pending priority");
+
+        // Clean up
+        plic_controller.set_irq(kDynIrq, false);
+        plic_controller.mmio_write(0x200000, 0);        // Restore threshold to 0
+        plic_controller.mmio_write(0x200004, kDynIrq);  // Complete
+        machine.primary_hart().apply_pending_interrupt_lines(machine);
     }
 
     {

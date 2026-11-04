@@ -2746,6 +2746,19 @@ void test_aclint() {
     mtimer.write64(0x4000, 200);
     machine.cpu.apply_pending_interrupt_lines(machine);
     assert((machine.cpu.state().mip & simrv::core::MipBit::Mtip) == 0);
+
+    // MTIMER 32-bit MMIO word write test to ACLINT 0x7ff8 / 0x7ffc
+    mtimer.write32(0x7ff8, 250);
+    mtimer.write32(0x7ffc, 0);
+    machine.cpu.apply_pending_interrupt_lines(machine);
+    assert((machine.cpu.state().mip & simrv::core::MipBit::Mtip) != 0);
+    assert(mtimer.read32(0x7ff8) == 250);
+    assert(mtimer.read32(0x7ffc) == 0);
+
+    // Lower mtime below mtimecmp via 32-bit write
+    mtimer.write32(0x7ff8, 50);
+    machine.cpu.apply_pending_interrupt_lines(machine);
+    assert((machine.cpu.state().mip & simrv::core::MipBit::Mtip) == 0);
     std::cout << "[PASS] test_aclint\n";
 }
 
@@ -2766,6 +2779,23 @@ void test_aia_aplic_and_imsic() {
     machine.cpu.apply_pending_interrupt_lines(machine);
 
     assert((machine.cpu.state().mip & simrv::core::MipBit::Seip) != 0);
+
+    // Direct mode de-assertion when source is dropped and cleared
+    aplic_s.set_irq(1, false);
+    aplic_s.write32(0x1d00, 1U << 1);  // in_clrip (clear source 1)
+    machine.cpu.apply_pending_interrupt_lines(machine);
+    assert((machine.cpu.state().mip & simrv::core::MipBit::Seip) == 0);
+
+    // Re-assert source 1 then verify global delivery disable (IE=0) de-asserts
+    aplic_s.set_irq(1, true);
+    machine.cpu.apply_pending_interrupt_lines(machine);
+    assert((machine.cpu.state().mip & simrv::core::MipBit::Seip) != 0);
+    aplic_s.write32(0x0000, 0x000);  // IE=0
+    machine.cpu.apply_pending_interrupt_lines(machine);
+    assert((machine.cpu.state().mip & simrv::core::MipBit::Seip) == 0);
+    aplic_s.write32(0x0000, 0x100);  // Restore IE=1
+    aplic_s.set_irq(1, false);
+    aplic_s.write32(0x1d00, 1U << 1);  // Clean pending
 
     // MSI delivery via IMSIC testing
     imsic_s.csr_write(0, 0x70, 1);        // eidelivery = 1

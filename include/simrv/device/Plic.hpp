@@ -62,9 +62,15 @@ class Plic : public memory::TileLinkNode {
     void update_mip();
     void set_irq(simrv::xlen::IrqNumber irq_num, int state_val);
     void set_irq(simrv::xlen::IrqNumber irq_num, bool active) { set_irq(irq_num, active ? 1 : 0); }
+    [[nodiscard]] auto is_irq_asserted(simrv::xlen::IrqNumber irq) const noexcept -> bool {
+        return irq <= kNumSources && input_levels_[irq];
+    }
 
     // Pending interrupts (1 bit per IRQ). Index 0 holds IRQs 0-31, etc.
     std::array<simrv::xlen::Word, 32> plic_pending{};
+
+    // Physical wire level tracking for level-sensitive interrupt lines (sources 1..kNumSources).
+    std::array<bool, kNumSources + 1> input_levels_{};
 
     // Backing storage for PLIC registers to support OpenSBI drivers
     std::array<simrv::xlen::InterruptPriority, 1024> plic_priorities{};
