@@ -100,6 +100,7 @@ class Uart : public memory::TileLinkNode {
     mutable std::mutex rx_mutex_;
     std::thread input_thread_;
     std::atomic<bool> input_thread_stop_{false};
+    int wake_pipe_[2]{-1, -1};
 
     PtyBridge pty_;
     std::thread pty_reader_thread_;

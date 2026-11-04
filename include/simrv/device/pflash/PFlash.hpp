@@ -72,10 +72,17 @@ class PFlash final : public memory::MmioDevice {
     void sync();
 
     /// Direct host buffer access (for pre-loading or memory inspection).
-    [[nodiscard]] auto data() noexcept -> uint8_t* { return storage_.data(); }
-    [[nodiscard]] auto data() const noexcept -> const uint8_t* { return storage_.data(); }
+    [[nodiscard]] auto data() noexcept -> uint8_t* {
+        ensure_storage();
+        return storage_.data();
+    }
+    [[nodiscard]] auto data() const noexcept -> const uint8_t* {
+        const_cast<PFlash*>(this)->ensure_storage();
+        return storage_.data();
+    }
 
    private:
+    void ensure_storage();
     [[nodiscard]] auto read_cfi(simrv::xlen::Address offset) const -> uint8_t;
     void handle_command(simrv::xlen::Address offset, uint32_t value);
 

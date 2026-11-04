@@ -4,6 +4,7 @@
  */
 #include "simrv/device/Uart.hpp"
 
+#include <fcntl.h>
 #include <sys/select.h>
 #include <unistd.h>
 
@@ -62,6 +63,13 @@ Uart::~Uart() {
 void Uart::start_input_thread() {
     if (machine_.tui_enabled()) return;
     if (::isatty(STDIN_FILENO) && !simrv::util::owns_interactive_terminal()) return;
+    if (input_thread_.joinable()) return;
+#if defined(__unix__) || defined(__APPLE__)
+    if (wake_pipe_[0] < 0 && ::pipe(wake_pipe_) == 0) {
+        int flags = ::fcntl(wake_pipe_[1], F_GETFL, 0);
+        if (flags >= 0) ::fcntl(wake_pipe_[1], F_SETFL, flags | O_NONBLOCK);
+    }
+#endif
     input_thread_stop_.store(false, std::memory_order_relaxed);
     input_thread_ = std::thread([this] {
         while (!input_thread_stop_.load(std::memory_order_relaxed)) {
@@ -69,7 +77,16 @@ void Uart::start_input_thread() {
             timeval timeout{0, 20000};
             FD_ZERO(&read_fds);
             FD_SET(STDIN_FILENO, &read_fds);
-            if (::select(STDIN_FILENO + 1, &read_fds, nullptr, nullptr, &timeout) <= 0) continue;
+            int max_fd = STDIN_FILENO;
+            if (wake_pipe_[0] >= 0) {
+                FD_SET(wake_pipe_[0], &read_fds);
+                max_fd = std::max(max_fd, wake_pipe_[0]);
+            }
+            if (::select(max_fd + 1, &read_fds, nullptr, nullptr, &timeout) <= 0) continue;
+            if (wake_pipe_[0] >= 0 && FD_ISSET(wake_pipe_[0], &read_fds)) {
+                return;
+            }
+            if (!FD_ISSET(STDIN_FILENO, &read_fds)) continue;
             uint8_t byte = 0;
             const auto count = ::read(STDIN_FILENO, &byte, 1);
             if (count == 0) return;
@@ -88,7 +105,19 @@ void Uart::start_input_thread() {
 
 void Uart::stop_input_thread() {
     input_thread_stop_.store(true, std::memory_order_relaxed);
+    if (wake_pipe_[1] >= 0) {
+        const char c = 1;
+        (void)::write(wake_pipe_[1], &c, 1);
+    }
     if (input_thread_.joinable()) input_thread_.join();
+    if (wake_pipe_[0] >= 0) {
+        ::close(wake_pipe_[0]);
+        wake_pipe_[0] = -1;
+    }
+    if (wake_pipe_[1] >= 0) {
+        ::close(wake_pipe_[1]);
+        wake_pipe_[1] = -1;
+    }
 }
 
 auto Uart::start_pty() -> bool {
