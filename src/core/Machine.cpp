@@ -1356,6 +1356,7 @@ void Machine::switch_execution_engine_sync(ExecutionEngine engine) {
         } else {
             cpu.pipeline_sim.config.record_snapshots = false;
             cpu.decode_cache.flush();
+            cpu.block_cache.flush();
         }
     }
 

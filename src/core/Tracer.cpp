@@ -1753,8 +1753,7 @@ void Tracer::print_summary() {
     const auto kips = icount * 1000UL / etime;
     const double mips = static_cast<double>(icount) / static_cast<double>(etime);
     if (mips >= 1.0) {
-        simrv::log::info("Simulation speed         : {:>12.2f} MIPS ({}/s)", mips,
-                         format_with_commas(kips * 1000));
+        simrv::log::info("Simulation speed         : {:>12.2f} MIPS", mips);
     } else {
         simrv::log::info("Simulation speed         : {:>12} KIPS", format_with_commas(kips));
     }

@@ -101,6 +101,7 @@ void CPU::reset() {
 void CPU::TLB_flush() {
     tlb.flush();
     decode_cache.flush();
+    block_cache.flush();
     if (!machine_ || machine_->runtime_profile.is_cycle_mode()) {
         icache.flush();
         instruction_cache_timing.flush();
@@ -114,6 +115,7 @@ void CPU::TLB_flush_satp() {
         static_cast<::Asid>(simrv::xlen::satp_asid(active_satp(), state_.regs.xlen));
     tlb.flush_selective(core::TlbFlushFilter{.vaddr = std::nullopt, .asid = current_asid});
     decode_cache.flush_user();
+    block_cache.flush();
     soft_tlb_flush();
     if (machine_ != nullptr && machine_->memory().mmu() != nullptr) {
         machine_->memory().mmu()->flush_pdc();
@@ -136,6 +138,7 @@ void CPU::TLB_flush(const core::TlbFlushFilter& filter) {
     } else {
         decode_cache.flush();
     }
+    block_cache.flush();
     soft_tlb_flush_selective(filter);
     if (machine_ != nullptr && machine_->memory().mmu() != nullptr) {
         machine_->memory().mmu()->flush_pdc();

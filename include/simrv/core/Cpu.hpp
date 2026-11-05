@@ -15,6 +15,7 @@
 #include "simrv/cache/DCache.hpp"
 #include "simrv/cache/ICache.hpp"
 #include "simrv/cache/TimingCache.hpp"
+#include "simrv/core/BlockCache.hpp"
 #include "simrv/core/CsrFile.hpp"
 #include "simrv/core/CsrTypes.hpp"
 #include "simrv/core/DecodeCache.hpp"
@@ -1077,6 +1078,7 @@ class CPU {
     simrv::pipeline::HartCycleState ca_state{};
     simrv::pipeline::HartPipelineState ca_pipeline{};
     DecodeCache decode_cache;
+    BlockCache block_cache;
     uint8_t cached_decode_context_{0xFF};
     alignas(64) std::array<SoftTlbEntry, 2048> soft_tlb_read{};
     alignas(64) std::array<SoftTlbEntry, 2048> soft_tlb_write{};

@@ -156,6 +156,7 @@ auto Sbi::handle_rfence(simrv::xlen::Word func_id) -> bool {
         if (fid == RfenceFid::RemoteFenceI) {
             target_cpu.icache.flush();
             target_cpu.decode_cache.flush();
+            target_cpu.block_cache.flush();
         } else if (fid == RfenceFid::RemoteSfenceVma || fid == RfenceFid::RemoteSfenceVmaAsid) {
             const simrv::xlen::Address start_addr = cpu_.state().regs.read(simrv::xlen::RegId::A2);
             const simrv::xlen::Address size = cpu_.state().regs.read(simrv::xlen::RegId::A3);

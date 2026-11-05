@@ -22,6 +22,7 @@ simrv_add_component(simrv-core
   Cpu.cpp
   CpuCycle.cpp
   CpuFastExecution.cpp
+  BlockCache.cpp
   ../util/CliParser.cpp
   ../explain/CsrCatalog.cpp
   ../explain/ScalarSpecCatalog.cpp
