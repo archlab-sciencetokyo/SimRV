@@ -306,7 +306,8 @@ inline auto parse_cpu_config_stream(std::istream& stream, simrv::pipeline::CpuMo
         MemoryMetadata,
         BootMetadata,
         DeviceMetadata,
-        SmpMetadata
+        SmpMetadata,
+        PluginsMetadata
     };
     Section current_section = Section::Global;
 
@@ -372,6 +373,8 @@ inline auto parse_cpu_config_stream(std::istream& stream, simrv::pipeline::CpuMo
                 current_section = Section::DeviceMetadata;
             } else if (sec_name.starts_with("smp")) {
                 current_section = Section::SmpMetadata;
+            } else if (detail::iequals(sec_name, "plugins")) {
+                current_section = Section::PluginsMetadata;
             } else {
                 simrv::log::warn("Unknown CPU config section: [{}]", sec_name);
             }
@@ -390,7 +393,8 @@ inline auto parse_cpu_config_stream(std::istream& stream, simrv::pipeline::CpuMo
         // combined preset file valid when it is consumed as a CPU model.
         if (current_section == Section::SocMetadata || current_section == Section::MemoryMetadata ||
             current_section == Section::BootMetadata ||
-            current_section == Section::DeviceMetadata || current_section == Section::SmpMetadata) {
+            current_section == Section::DeviceMetadata || current_section == Section::SmpMetadata ||
+            current_section == Section::PluginsMetadata) {
             continue;
         }
 
@@ -1202,6 +1206,12 @@ inline auto parse_soc_config_stream(std::istream& stream, simrv::core::SoCConfig
             std::string plugin_spec;
             if (value.empty() || value == "\"\"" || value == "true") {
                 plugin_spec = std::string(key);
+            } else if (key == "device" || key == "plugin") {
+                std::string clean_val = std::string(value);
+                if (clean_val.size() >= 2 && clean_val.front() == '"' && clean_val.back() == '"') {
+                    clean_val = clean_val.substr(1, clean_val.size() - 2);
+                }
+                plugin_spec = clean_val;
             } else {
                 std::string clean_val = std::string(value);
                 if (clean_val.size() >= 2 && clean_val.front() == '"' && clean_val.back() == '"') {
