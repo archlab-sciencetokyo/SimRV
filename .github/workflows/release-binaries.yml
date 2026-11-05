@@ -130,7 +130,8 @@ jobs:
           set -euo pipefail
           dnf install -y gcc-toolset-15-gcc gcc-toolset-15-gcc-c++ \
             git make python3-pip rpm-build rpmlint findutils binutils
-          python3 -m pip install --break-system-packages cmake==4.3.0 ninja
+          python3 -m pip install cmake==4.3.0 ninja || \
+            python3 -m pip install --break-system-packages cmake==4.3.0 ninja
           echo "/opt/rh/gcc-toolset-15/root/usr/bin" >> "$GITHUB_PATH"
           echo "CC=/opt/rh/gcc-toolset-15/root/usr/bin/gcc" >> "$GITHUB_ENV"
           echo "CXX=/opt/rh/gcc-toolset-15/root/usr/bin/g++" >> "$GITHUB_ENV"
@@ -285,7 +286,8 @@ jobs:
           add-apt-repository -y ppa:ubuntu-toolchain-r/test
           apt-get update
           apt-get install -y --no-install-recommends gcc-15 g++-15
-          python3 -m pip install --break-system-packages cmake==4.3.0 ninja
+          python3 -m pip install cmake==4.3.0 ninja || \
+            python3 -m pip install --break-system-packages cmake==4.3.0 ninja
           echo "CC=gcc-15" >> "$GITHUB_ENV"
           echo "CXX=g++-15" >> "$GITHUB_ENV"
       - uses: actions/checkout@v6
