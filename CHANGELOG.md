@@ -3,6 +3,15 @@
 All notable changes to SimRV are documented here.
 Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v3.0.0-rc.19] — 2026-11-05
+
+- Optimized fast execution instruction dispatch by flattening multi-level nested ALU conditionals into a compiler-optimized flat jump table across all FastOp kinds.
+- Unified partitioned fast dispatch switches into a single contiguous fast-path switch, eliminating cascaded branch ladders and instruction categorization overhead.
+- Removed `-fno-jump-tables` compile override on `CpuFastExecution.cpp`, restoring direct indirect jump table generation in GCC and Clang.
+- Improved CoreMark execution throughput by +26.7% (+95 MIPS), achieving 450.6 MIPS in fast baremetal execution mode.
+- Fixed Linux package packaging by assigning plugin runtime libraries to the `Tools` component to prevent dynamic shared library dependencies from leaking into the core `simrv.deb` runtime package.
+- Added `gcc-toolset-15-libstdc++-devel` to Rocky Linux / UBI9 release workflow to ensure complete static libstdc++ linkage for RPM distributions.
+
 ## [v3.0.0-rc.18] — 2026-11-04
 
 - Implemented dynamic External Device Plugin C ABI (`SimRvExternalDevice`, `SimRvHostServices`), decoupling model-specific MMIO peripherals (`rvcomp-mmc`, `rvcomp-reset`, `rvcomp-ethernet`) from SimRV core into modular plugins.
