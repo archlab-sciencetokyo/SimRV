@@ -3,7 +3,7 @@ cmake_minimum_required(VERSION 3.31...4.3)
 # Keep the release version authoritative here. The project() version is derived
 # from it so CMake, BuildInfo, CPack, release tooling, and citation checks use
 # the same source value.
-set(SIMRV_VERSION "3.0.0-rc.17")
+set(SIMRV_VERSION "3.0.0-rc.18")
 string(REGEX REPLACE "-.*$" "" SIMRV_PROJECT_VERSION "${SIMRV_VERSION}")
 
 project(
@@ -261,6 +261,10 @@ add_subdirectory(src/tui)
 # Runtime is the composition target and must be declared after all component
 # object targets.
 add_subdirectory(src/core)
+option(SIMRV_BUILD_PLUGINS "Build dynamic external device plugins" ON)
+if(SIMRV_BUILD_PLUGINS)
+  add_subdirectory(plugins)
+endif()
 
 add_executable(SimRV src/Main.cpp)
 add_executable(SimRV::cli ALIAS SimRV)

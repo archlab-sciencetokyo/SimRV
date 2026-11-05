@@ -41,7 +41,6 @@ jobs:
           ':(exclude)zensical.yml' \
           ':(exclude)pyproject.toml' \
           ':(exclude)uv.lock' \
-          ':(exclude).github/workflows/c-cpp.yml' \
           ':(exclude).github/workflows/docs.yml')"
         if [[ -n "$changed_files" ]]; then
           echo "cpp=true" >> "$GITHUB_OUTPUT"
@@ -71,20 +70,36 @@ jobs:
         dnf update -y
         dnf install -y git cmake ninja-build gcc gcc-c++ clang clang-tools-extra wget tar xz autoconf make which golang
 
-    - name: Fetch and compile riscv-tests
+    - name: Cache RISC-V GCC toolchain
+      id: cache-toolchain
+      uses: actions/cache@v4
+      with:
+        path: /opt/riscv
+        key: riscv-toolchain-15.2.0-1
+
+    - name: Download toolchain if cache miss
+      if: steps.cache-toolchain.outputs.cache-hit != 'true'
       run: |
-        # Download and extract prebuilt xPack RISC-V GCC toolchain
         wget -q https://github.com/xpack-dev-tools/riscv-none-elf-gcc-xpack/releases/download/v15.2.0-1/xpack-riscv-none-elf-gcc-15.2.0-1-linux-x64.tar.gz -O /tmp/riscv-toolchain.tar.gz
         mkdir -p /opt/riscv
         tar -xzf /tmp/riscv-toolchain.tar.gz -C /opt/riscv --strip-components=1
-        
-        # Add toolchain bin directory to GITHUB_PATH for subsequent steps
-        echo "/opt/riscv/bin" >> $GITHUB_PATH
-        
-        # Expose in current execution path
-        export PATH="/opt/riscv/bin:$PATH"
+        rm -f /tmp/riscv-toolchain.tar.gz
 
-        # Clone and build riscv-tests
+    - name: Add toolchain to path
+      run: |
+        echo "/opt/riscv/bin" >> "$GITHUB_PATH"
+
+    - name: Cache compiled riscv-tests
+      id: cache-riscv-tests
+      uses: actions/cache@v4
+      with:
+        path: ${{ runner.temp }}/riscv-tests
+        key: riscv-tests-${{ env.RISCV_TESTS_REVISION }}-${{ matrix.arch }}
+
+    - name: Fetch and compile riscv-tests
+      if: steps.cache-riscv-tests.outputs.cache-hit != 'true'
+      run: |
+        export PATH="/opt/riscv/bin:$PATH"
         git clone https://github.com/riscv-software-src/riscv-tests.git "$RUNNER_TEMP/riscv-tests"
         cd "$RUNNER_TEMP/riscv-tests"
         git checkout --detach "$RISCV_TESTS_REVISION"

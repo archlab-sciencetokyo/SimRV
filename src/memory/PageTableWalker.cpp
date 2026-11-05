@@ -71,8 +71,9 @@ void PageTableWalker::select_next_pte(PageWalkState& state,
     state.pte_guest_address = (table_address + vpn * state.pte_size).raw();
     state.pte_address = simrv::xlen::PhysAddr{state.pte_guest_address};
     if (state.guest_stage_enabled) {
-        auto translated = walk_guest_physical(state.pte_guest_address, PteAccess::Read, state.hgatp,
-                                              state.xlen, &state.guest_fault_address);
+        auto translated =
+            walk_guest_physical(state.pte_guest_address, PteAccess::Read, state.hgatp, state.xlen,
+                                &state.guest_fault_address, false, state.arch_state);
         if (!translated) {
             state.implicit_vs_stage_page_table_fault = true;
             state.fault = translated.error();
@@ -126,8 +127,8 @@ auto PageTableWalker::begin_walk(simrv::xlen::VirtAddr v_addr, PteAccess access,
         state.physical_address = simrv::xlen::PhysAddr{v_addr.raw()};
         if (state.guest_stage_enabled && priv != kPrivMachine) {
             const bool mxr = arch_state != nullptr && (arch_state->mstatus & MstatusBit::Mxr) != 0;
-            auto translated =
-                walk_guest_physical(v_addr.raw(), access, state.hgatp, xlen, nullptr, mxr);
+            auto translated = walk_guest_physical(v_addr.raw(), access, state.hgatp, xlen, nullptr,
+                                                  mxr, state.arch_state);
             if (!translated) {
                 state.guest_fault_address = v_addr.raw();
                 state.fault = translated.error();
@@ -160,7 +161,7 @@ auto PageTableWalker::begin_walk(simrv::xlen::VirtAddr v_addr, PteAccess access,
         static_cast<simrv::xlen::Word>(simrv::xlen::satp_root_ppn(satp, xlen) << 12)};
     state.satp_root = root.raw();
 
-    if (xlen == 64 && mode == 8) {
+    if (!state.guest_stage_enabled && xlen == 64 && mode == 8) {
         // Sv39 Page Directory Cache lookup: 2 MiB region (VPN[2..1], bits 38:21)
         const simrv::xlen::Word vpn_prefix = (v_addr.raw() >> 21) & 0x3FFFFU;
         const size_t pdc_idx = (vpn_prefix ^ (vpn_prefix >> 8)) & (kPdcSize - 1);
@@ -217,7 +218,8 @@ void PageTableWalker::accept_pte(PageWalkState& state, simrv::xlen::Word pte) co
             static_cast<simrv::xlen::Word>(((pte >> kPteShift) & ppn_mask) << 12)};
 
         // Cache the Level-0 table address in the Page Directory Cache for Sv39 walks
-        if (state.xlen == 64 && state.level == 0 && state.vpn_bits_per_level == 9) {
+        if (!state.guest_stage_enabled && state.xlen == 64 && state.level == 0 &&
+            state.vpn_bits_per_level == 9) {
             const simrv::xlen::Word vpn_prefix = (state.virtual_address.raw() >> 21) & 0x3FFFFU;
             const size_t pdc_idx = (vpn_prefix ^ (vpn_prefix >> 8)) & (kPdcSize - 1);
             pdc_[pdc_idx] = PdcEntry{.satp_root = state.satp_root,
@@ -278,8 +280,9 @@ void PageTableWalker::accept_pte(PageWalkState& state, simrv::xlen::Word pte) co
     if (state.guest_stage_enabled) {
         const bool mxr =
             state.arch_state != nullptr && (state.arch_state->mstatus & MstatusBit::Mxr) != 0;
-        auto translated = walk_guest_physical(stage_one_address.raw(), state.access, state.hgatp,
-                                              state.xlen, &state.guest_fault_address, mxr);
+        auto translated =
+            walk_guest_physical(stage_one_address.raw(), state.access, state.hgatp, state.xlen,
+                                &state.guest_fault_address, mxr, state.arch_state);
         if (!translated) {
             state.fault = translated.error();
             state.status = PageWalkStatus::Fault;
@@ -380,7 +383,8 @@ auto PageTableWalker::validate_pte_permissions(simrv::xlen::Word pte,
 
 auto PageTableWalker::walk_guest_physical(simrv::xlen::Address guest_address, PteAccess access,
                                           simrv::xlen::Word hgatp, unsigned xlen,
-                                          simrv::xlen::Address* fault_address, bool mxr) const
+                                          simrv::xlen::Address* fault_address, bool mxr,
+                                          const core::ArchState* arch_state) const
     -> std::expected<PageWalkResult, simrv::xlen::TrapCause> {
     const auto guest_page_fault = [access]() -> simrv::xlen::TrapCause {
         using simrv::isa::ExceptionCode;
@@ -428,7 +432,11 @@ auto PageTableWalker::walk_guest_physical(simrv::xlen::Address guest_address, Pt
         const simrv::xlen::Word index_mask = (simrv::xlen::Word{1} << index_bits) - 1U;
         const simrv::xlen::Word index = (guest_address >> shift) & index_mask;
         const simrv::xlen::Word pte_address = table_address + index * sizeof(uint64_t);
-        if (!ram_.contains(pte_address, sizeof(uint64_t))) {
+        if (!ram_.contains(pte_address, sizeof(uint64_t)) ||
+            (arch_state != nullptr &&
+             !core::pmp::check_access(*arch_state, pte_address, sizeof(uint64_t),
+                                      core::PmpAccessType::Read,
+                                      simrv::xlen::PrivilegeLevel::Supervisor))) {
             return std::unexpected(access_fault_for(access));
         }
         const auto* pte_ptr = ram_.unchecked_ptr(pte_address);

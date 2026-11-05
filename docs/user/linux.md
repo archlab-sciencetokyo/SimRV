@@ -528,10 +528,10 @@ Describes the simulated hardware to Linux. Includes:
 - PLIC interrupt controller
 - CLINT timer
 
-> [!NOTE]
-> The published DTB and simulator must use the same DRAM size. The builder defaults to 512 MB,
-> matching the Linux boot memory floor; use `--dram-size-mb` and the corresponding simulator
-> `--dram-size` option when targeting a different FPGA memory map.
+!!! note "DRAM Size Alignment"
+    The published DTB and simulator must use the same DRAM size. The builder defaults to 512 MB,
+    matching the Linux boot memory floor; use `--dram-size-mb` and the corresponding simulator
+    `--dram-size` option when targeting a different FPGA memory map.
 
 ---
 

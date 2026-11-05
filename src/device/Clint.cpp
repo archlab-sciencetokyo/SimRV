@@ -209,21 +209,31 @@ void Clint::mmio_write(simrv::xlen::Address offset, simrv::xlen::Word wdata) {
         }
         return;
     }
-    if (offset == kClintMtimeOffset) {
+    if (offset == kClintMtimeOffset || offset == 0x7ff8) {
         supervisor_timer.store(false, std::memory_order_release);
         const simrv::xlen::Counter cur = mtime.load(std::memory_order_relaxed);
         mtime.store((cur & ~kWord32Mask) | wdata_64, std::memory_order_release);
         if (cpu_ != nullptr) {
             cpu_->evaluate_timer_interrupt();
+            if (cpu_->machine_ != nullptr) {
+                for (size_t hart = 1; hart < cpu_->machine_->num_harts(); ++hart) {
+                    cpu_->machine_->hart(hart).evaluate_timer_interrupt();
+                }
+            }
         }
         return;
     }
-    if (offset == kClintMtimeOffset + 4) {
+    if (offset == kClintMtimeOffset + 4 || offset == 0x7ff8 + 4) {
         supervisor_timer.store(false, std::memory_order_release);
         const simrv::xlen::Counter cur = mtime.load(std::memory_order_relaxed);
         mtime.store((cur & kWord32Mask) | (wdata_64 << kWord32Shift), std::memory_order_release);
         if (cpu_ != nullptr) {
             cpu_->evaluate_timer_interrupt();
+            if (cpu_->machine_ != nullptr) {
+                for (size_t hart = 1; hart < cpu_->machine_->num_harts(); ++hart) {
+                    cpu_->machine_->hart(hart).evaluate_timer_interrupt();
+                }
+            }
         }
         return;
     }

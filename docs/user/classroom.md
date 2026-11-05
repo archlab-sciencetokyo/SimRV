@@ -35,14 +35,13 @@ a 32-bit value; in RV64 each holds a 64-bit value.
 | **`x18` – `x27`** | `s2` – `s11` | Saved Registers 2–11 | Callee |
 | **`x28` – `x31`** | `t3` – `t6` | Temporary Registers 3–6 | Caller |
 
-> [!NOTE]
->
-> - **Caller-saved** registers (`ra`, `t0`–`t6`, `a0`–`a7`) can be overwritten by
->   a called function. The caller must save them on the stack before any call if
->   they are needed afterward.
-> - **Callee-saved** registers (`sp`, `s0`–`s11`) must be preserved by a called
->   function. If the callee modifies them, it must restore their original values
->   before returning.
+!!! note "Register Preservation Convention"
+    - **Caller-saved** registers (`ra`, `t0`–`t6`, `a0`–`a7`) can be overwritten by
+      a called function. The caller must save them on the stack before any call if
+      they are needed afterward.
+    - **Callee-saved** registers (`sp`, `s0`–`s11`) must be preserved by a called
+      function. If the callee modifies them, it must restore their original values
+      before returning.
 
 ### Floating-Point Registers (FPRs)
 

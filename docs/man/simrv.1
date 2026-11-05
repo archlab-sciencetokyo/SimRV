@@ -132,6 +132,9 @@ Validate and lint a CPU model or unified SoC platform configuration.
 .TP
 .B \-\-cfu-plugin=\fIfile.so\fR
 Load a dynamic custom function-unit plugin.
+.TP
+.B \-\-plugin=\fIname|file.so\fR[\fB=\fIargs\fR], \-\-device-plugin=\fI...\fR
+Load a dynamic external MMIO device simulation plugin. Supports logical names (e.g. \fBmmc=disk.img\fR) resolved via standard plugin search paths or explicit shared libraries.
 .SH LOGGING, TRACING, AND PROFILING
 .TP
 .B \-q, \-\-quiet

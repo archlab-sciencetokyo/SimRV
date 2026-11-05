@@ -122,7 +122,7 @@ jobs:
       # UBI 9 keeps the glibc baseline at 2.34 while GCC Toolset 15 supplies
       # the C++23 library needed by SimRV. The executable statically links the
       # toolset C++ runtime so users do not need GCC Toolset installed.
-      image: registry.access.redhat.com/ubi9/ubi:9
+      image: registry.access.redhat.com/ubi9/ubi:latest
     steps:
       - name: Install build tools
         shell: bash

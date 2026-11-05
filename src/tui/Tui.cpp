@@ -1050,6 +1050,9 @@ void Tui::render_draw_sixel(int panel_x, int display_width, int display_rows,
     update_cmds += kSixelPaletteHeader;
 
     const auto* fb_bytes = reinterpret_cast<const uint8_t*>(fb.data());
+    const auto& fb_geom = machine_.framebuffer_geometry();
+    const uint32_t bpp = fb_geom.bpp != 0 ? fb_geom.bpp : 4;
+    const uint32_t stride = fb_geom.stride != 0 ? fb_geom.stride : (source_width * bpp);
     const bool same_dims = (width == source_width && height == source_height);
     if (!same_dims) {
         if (sixel_src_x_offset_.size() != static_cast<size_t>(width) ||
@@ -1057,7 +1060,7 @@ void Tui::render_draw_sixel(int panel_x, int display_width, int display_rows,
             sixel_cached_source_width_ = source_width;
             sixel_src_x_offset_.resize(width);
             for (int x = 0; x < width; ++x) {
-                sixel_src_x_offset_[x] = std::min(source_width - 1, x * source_width / width) * 4;
+                sixel_src_x_offset_[x] = std::min(source_width - 1, x * source_width / width) * bpp;
             }
         }
     }
@@ -1093,10 +1096,9 @@ void Tui::render_draw_sixel(int panel_x, int display_width, int display_rows,
 
         uint64_t strip_hash = 1469598103934665603ULL;
         if (same_dims) {
-            const auto* p64 = reinterpret_cast<const uint64_t*>(
-                fb_bytes + static_cast<size_t>(y * source_width * 4));
-            const size_t num_words =
-                static_cast<size_t>(max_bits * source_width * 4) / sizeof(uint64_t);
+            const auto* p64 =
+                reinterpret_cast<const uint64_t*>(fb_bytes + static_cast<size_t>(y) * stride);
+            const size_t num_words = static_cast<size_t>(max_bits * stride) / sizeof(uint64_t);
             for (size_t w = 0; w < num_words; ++w) {
                 strip_hash = (strip_hash ^ p64[w]) * 1099511628211ULL;
             }
@@ -1104,9 +1106,8 @@ void Tui::render_draw_sixel(int panel_x, int display_width, int display_rows,
             for (int bit = 0; bit < max_bits; ++bit) {
                 const int src_y = std::min(source_height - 1, (y + bit) * source_height / height);
                 const auto* p64 = reinterpret_cast<const uint64_t*>(
-                    fb_bytes + static_cast<size_t>(src_y * source_width * 4));
-                const size_t words_per_row =
-                    static_cast<size_t>(source_width * 4) / sizeof(uint64_t);
+                    fb_bytes + static_cast<size_t>(src_y) * stride);
+                const size_t words_per_row = static_cast<size_t>(stride) / sizeof(uint64_t);
                 for (size_t w = 0; w < words_per_row; ++w) {
                     strip_hash = (strip_hash ^ p64[w]) * 1099511628211ULL;
                 }
@@ -1119,17 +1120,29 @@ void Tui::render_draw_sixel(int panel_x, int display_width, int display_rows,
             continue;
         }
 
+        auto get_sixel_color = [bpp](const uint8_t* p) -> uint8_t {
+            if (bpp == 2) {
+                const uint16_t v = static_cast<uint16_t>(p[0]) | (static_cast<uint16_t>(p[1]) << 8);
+                const uint8_t r = static_cast<uint8_t>(((v >> 11) & 0x1f) * 255 / 31);
+                const uint8_t g = static_cast<uint8_t>(((v >> 5) & 0x3f) * 255 / 63);
+                const uint8_t b = static_cast<uint8_t>((v & 0x1f) * 255 / 31);
+                return static_cast<uint8_t>((kColorLut[r] * 36) + (kColorLut[g] * 6) +
+                                            kColorLut[b]);
+            }
+            return static_cast<uint8_t>((kColorLut[p[2]] * 36) + (kColorLut[p[1]] * 6) +
+                                        kColorLut[p[0]]);
+        };
+
         std::array<const uint8_t*, 6> row_ptrs;
         if (same_dims) {
             for (int bit = 0; bit < max_bits; ++bit) {
-                row_ptrs[bit] = fb_bytes + static_cast<size_t>((y + bit) * source_width * 4);
+                row_ptrs[bit] = fb_bytes + static_cast<size_t>((y + bit)) * stride;
             }
             for (int x = 0; x < width; ++x) {
-                const int x4 = x * 4;
+                const int x_bpp = x * static_cast<int>(bpp);
                 for (int bit = 0; bit < max_bits; ++bit) {
-                    const auto* p = row_ptrs[bit] + x4;
-                    const auto c = static_cast<uint8_t>((kColorLut[p[2]] * 36) +
-                                                        (kColorLut[p[1]] * 6) + kColorLut[p[0]]);
+                    const auto* p = row_ptrs[bit] + x_bpp;
+                    const auto c = get_sixel_color(p);
                     if (last_x_for_color[c] < 0) {
                         present_colors.push_back(c);
                     }
@@ -1140,14 +1153,13 @@ void Tui::render_draw_sixel(int panel_x, int display_width, int display_rows,
         } else {
             for (int bit = 0; bit < max_bits; ++bit) {
                 const int src_y = std::min(source_height - 1, (y + bit) * source_height / height);
-                row_ptrs[bit] = fb_bytes + static_cast<size_t>(src_y * source_width * 4);
+                row_ptrs[bit] = fb_bytes + static_cast<size_t>(src_y) * stride;
             }
             for (int x = 0; x < width; ++x) {
                 const int x_off = sixel_src_x_offset_[x];
                 for (int bit = 0; bit < max_bits; ++bit) {
                     const auto* p = row_ptrs[bit] + x_off;
-                    const auto c = static_cast<uint8_t>((kColorLut[p[2]] * 36) +
-                                                        (kColorLut[p[1]] * 6) + kColorLut[p[0]]);
+                    const auto c = get_sixel_color(p);
                     if (last_x_for_color[c] < 0) {
                         present_colors.push_back(c);
                     }
@@ -1239,17 +1251,28 @@ void Tui::render_draw_kitty(int panel_x, int display_width, int display_rows,
     update_cmds += std::format("\033_Ga=d,d=I,i={}\033\\", kitty_image_id_);
 
     const auto* source = reinterpret_cast<const uint8_t*>(fb.data());
+    const auto& fb_geom = machine_.framebuffer_geometry();
+    const uint32_t bpp = fb_geom.bpp != 0 ? fb_geom.bpp : 4;
+    const uint32_t stride = fb_geom.stride != 0 ? fb_geom.stride : (source_width * bpp);
     std::vector<uint8_t> rgb(static_cast<size_t>(image_width) * image_height * 3);
     for (int y = 0; y < image_height; ++y) {
         const int source_y = std::min(source_height - 1, y * source_height / image_height);
+        const auto* row_bytes = source + static_cast<size_t>(source_y) * stride;
         for (int x = 0; x < image_width; ++x) {
             const int source_x = std::min(source_width - 1, x * source_width / image_width);
-            const auto* pixel =
-                source + (static_cast<size_t>(source_y) * source_width + source_x) * 4;
             const size_t target = (static_cast<size_t>(y) * image_width + x) * 3;
-            rgb[target] = pixel[2];
-            rgb[target + 1] = pixel[1];
-            rgb[target + 2] = pixel[0];
+            if (bpp == 2) {
+                const auto* p = row_bytes + source_x * 2;
+                const uint16_t v = static_cast<uint16_t>(p[0]) | (static_cast<uint16_t>(p[1]) << 8);
+                rgb[target] = static_cast<uint8_t>(((v >> 11) & 0x1f) * 255 / 31);
+                rgb[target + 1] = static_cast<uint8_t>(((v >> 5) & 0x3f) * 255 / 63);
+                rgb[target + 2] = static_cast<uint8_t>((v & 0x1f) * 255 / 31);
+            } else {
+                const auto* pixel = row_bytes + source_x * 4;
+                rgb[target] = pixel[2];
+                rgb[target + 1] = pixel[1];
+                rgb[target + 2] = pixel[0];
+            }
         }
     }
     const std::string encoded = base64_encode(std::span<const uint8_t>(rgb));
@@ -1277,28 +1300,52 @@ auto Tui::render_framebuffer_row(int row, int width, int rows) const -> std::str
     if (fb.data() == nullptr || width <= 0 || rows <= 0)
         return std::string(std::max(0, width), ' ');
 
+    const auto& fb_geom = machine_.framebuffer_geometry();
+    const uint32_t bpp = fb_geom.bpp != 0 ? fb_geom.bpp : 4;
+    const uint32_t stride = fb_geom.stride != 0 ? fb_geom.stride : (source_width * bpp);
+
     const int pixel_width = std::max(1, width);
     const int pixel_height = std::max(2, rows * 2);
     const int top = std::clamp(row * 2, 0, pixel_height - 1);
     const int bottom = std::min(pixel_height - 1, top + 1);
     const int source_top = std::min(source_height - 1, top * source_height / pixel_height);
     const int source_bottom = std::min(source_height - 1, bottom * source_height / pixel_height);
-    const auto* row_top = fb.unchecked_ptr(
-        fb.base() + static_cast<simrv::xlen::Address>(source_top * source_width * 4));
-    const auto* row_bottom = fb.unchecked_ptr(
-        fb.base() + static_cast<simrv::xlen::Address>(source_bottom * source_width * 4));
+    const auto* row_top =
+        fb.unchecked_ptr(fb.base() + static_cast<simrv::xlen::Address>(source_top * stride));
+    const auto* row_bottom =
+        fb.unchecked_ptr(fb.base() + static_cast<simrv::xlen::Address>(source_bottom * stride));
 
     std::string result;
     result.reserve(static_cast<size_t>(width) * 32);
     for (int x = 0; x < width; ++x) {
         const int source_x = std::min(source_width - 1, x * source_width / pixel_width);
-        const auto* p_top = row_top + static_cast<size_t>(source_x * 4);
-        const auto* p_bottom = row_bottom + static_cast<size_t>(source_x * 4);
-        result += std::format(
-            "\033[38;2;{};{};{}m\033[48;2;{};{};{}m▀", std::to_integer<uint8_t>(p_top[2]),
-            std::to_integer<uint8_t>(p_top[1]), std::to_integer<uint8_t>(p_top[0]),
-            std::to_integer<uint8_t>(p_bottom[2]), std::to_integer<uint8_t>(p_bottom[1]),
-            std::to_integer<uint8_t>(p_bottom[0]));
+        uint8_t top_r = 0, top_g = 0, top_b = 0;
+        uint8_t bot_r = 0, bot_g = 0, bot_b = 0;
+        if (bpp == 2) {
+            const auto* p_top = reinterpret_cast<const uint8_t*>(row_top) + source_x * 2;
+            const auto* p_bot = reinterpret_cast<const uint8_t*>(row_bottom) + source_x * 2;
+            const uint16_t v_top =
+                static_cast<uint16_t>(p_top[0]) | (static_cast<uint16_t>(p_top[1]) << 8);
+            const uint16_t v_bot =
+                static_cast<uint16_t>(p_bot[0]) | (static_cast<uint16_t>(p_bot[1]) << 8);
+            top_r = static_cast<uint8_t>(((v_top >> 11) & 0x1f) * 255 / 31);
+            top_g = static_cast<uint8_t>(((v_top >> 5) & 0x3f) * 255 / 63);
+            top_b = static_cast<uint8_t>((v_top & 0x1f) * 255 / 31);
+            bot_r = static_cast<uint8_t>(((v_bot >> 11) & 0x1f) * 255 / 31);
+            bot_g = static_cast<uint8_t>(((v_bot >> 5) & 0x3f) * 255 / 63);
+            bot_b = static_cast<uint8_t>((v_bot & 0x1f) * 255 / 31);
+        } else {
+            const auto* p_top = row_top + static_cast<size_t>(source_x * 4);
+            const auto* p_bottom = row_bottom + static_cast<size_t>(source_x * 4);
+            top_r = std::to_integer<uint8_t>(p_top[2]);
+            top_g = std::to_integer<uint8_t>(p_top[1]);
+            top_b = std::to_integer<uint8_t>(p_top[0]);
+            bot_r = std::to_integer<uint8_t>(p_bottom[2]);
+            bot_g = std::to_integer<uint8_t>(p_bottom[1]);
+            bot_b = std::to_integer<uint8_t>(p_bottom[0]);
+        }
+        result += std::format("\033[38;2;{};{};{}m\033[48;2;{};{};{}m▀", top_r, top_g, top_b, bot_r,
+                              bot_g, bot_b);
     }
     result += "\033[0m";
     return result;

@@ -21,10 +21,15 @@ PFlash::PFlash(core::Machine& machine, simrv::xlen::Address base, simrv::xlen::A
       size_(size),
       sector_size_(sector_size),
       read_only_(read_only),
-      name_(std::move(name)),
-      storage_(size, 0xFF) {}
+      name_(std::move(name)) {}
 
 PFlash::~PFlash() { sync(); }
+
+void PFlash::ensure_storage() {
+    if (storage_.empty() && size_ > 0) {
+        storage_.assign(static_cast<size_t>(size_), 0xFF);
+    }
+}
 
 auto PFlash::load_image(const std::filesystem::path& path) -> bool {
     std::ifstream file(path, std::ios::binary | std::ios::ate);
@@ -33,13 +38,14 @@ auto PFlash::load_image(const std::filesystem::path& path) -> bool {
     }
     const auto file_size = static_cast<size_t>(file.tellg());
     file.seekg(0, std::ios::beg);
+    ensure_storage();
     const size_t bytes_to_read = std::min(static_cast<size_t>(size_), file_size);
     file.read(reinterpret_cast<char*>(storage_.data()), bytes_to_read);
     return true;
 }
 
 void PFlash::sync() {
-    if (!dirty_ || backing_path_.empty() || read_only_) {
+    if (!dirty_ || backing_path_.empty() || read_only_ || storage_.empty()) {
         return;
     }
     std::ofstream out(backing_path_, std::ios::binary | std::ios::trunc);
@@ -101,7 +107,8 @@ void PFlash::handle_command(simrv::xlen::Address offset, uint32_t value) {
     const uint8_t cmd = static_cast<uint8_t>(value & 0xFF);
 
     if (mode_ == PFlashMode::ProgramPending) {
-        if (offset < storage_.size()) {
+        if (offset < size_) {
+            ensure_storage();
             storage_[offset] = static_cast<uint8_t>(value);
             dirty_ = true;
         }
@@ -113,7 +120,8 @@ void PFlash::handle_command(simrv::xlen::Address offset, uint32_t value) {
         if (cmd == 0xD0) {
             // Confirm block erase
             const simrv::xlen::Address block_base = offset & ~(sector_size_ - 1u);
-            if (block_base < storage_.size()) {
+            if (block_base < size_) {
+                ensure_storage();
                 const size_t erase_start = static_cast<size_t>(block_base);
                 const size_t erase_len =
                     std::min(static_cast<size_t>(sector_size_), storage_.size() - erase_start);
@@ -154,12 +162,12 @@ void PFlash::handle_command(simrv::xlen::Address offset, uint32_t value) {
 }
 
 auto PFlash::read8(simrv::memory::MmioOffset offset) -> simrv::memory::MmioData8 {
-    if (offset >= storage_.size()) {
+    if (offset >= size_) {
         return 0;
     }
     switch (mode_) {
         case PFlashMode::ReadArray:
-            return storage_[offset];
+            return storage_.empty() ? 0xFF : storage_[offset];
         case PFlashMode::CfiQuery:
             return read_cfi(offset);
         case PFlashMode::ReadStatus:
@@ -169,15 +177,16 @@ auto PFlash::read8(simrv::memory::MmioOffset offset) -> simrv::memory::MmioData8
             if (offset == 1) return 0x18;  // JEDEC Device ID
             return 0x00;
         default:
-            return storage_[offset];
+            return storage_.empty() ? 0xFF : storage_[offset];
     }
 }
 
 auto PFlash::read16(simrv::memory::MmioOffset offset) -> simrv::memory::MmioData16 {
-    if (offset + 1 >= storage_.size()) {
+    if (offset + 1 >= size_) {
         return 0;
     }
     if (mode_ == PFlashMode::ReadArray) {
+        if (storage_.empty()) return 0xFFFF;
         return static_cast<uint16_t>(storage_[offset]) |
                (static_cast<uint16_t>(storage_[offset + 1]) << 8);
     }
@@ -185,10 +194,11 @@ auto PFlash::read16(simrv::memory::MmioOffset offset) -> simrv::memory::MmioData
 }
 
 auto PFlash::read32(simrv::memory::MmioOffset offset) -> simrv::memory::MmioData32 {
-    if (offset + 3 >= storage_.size()) {
+    if (offset + 3 >= size_) {
         return 0;
     }
     if (mode_ == PFlashMode::ReadArray) {
+        if (storage_.empty()) return 0xFFFFFFFF;
         uint32_t val = 0;
         std::memcpy(&val, storage_.data() + offset, sizeof(val));
         return val;
@@ -198,10 +208,11 @@ auto PFlash::read32(simrv::memory::MmioOffset offset) -> simrv::memory::MmioData
 }
 
 auto PFlash::read64(simrv::memory::MmioOffset offset) -> simrv::memory::MmioData64 {
-    if (offset + 7 >= storage_.size()) {
+    if (offset + 7 >= size_) {
         return 0;
     }
     if (mode_ == PFlashMode::ReadArray) {
+        if (storage_.empty()) return 0xFFFFFFFFFFFFFFFFULL;
         uint64_t val = 0;
         std::memcpy(&val, storage_.data() + offset, sizeof(val));
         return val;
@@ -216,7 +227,8 @@ void PFlash::write8(simrv::memory::MmioOffset offset, simrv::memory::MmioData8 v
 
 void PFlash::write16(simrv::memory::MmioOffset offset, simrv::memory::MmioData16 val) {
     if (mode_ == PFlashMode::ProgramPending) {
-        if (offset + 1 < storage_.size()) {
+        if (offset + 1 < size_) {
+            ensure_storage();
             storage_[offset] = static_cast<uint8_t>(val & 0xFF);
             storage_[offset + 1] = static_cast<uint8_t>((val >> 8) & 0xFF);
             dirty_ = true;
@@ -229,7 +241,8 @@ void PFlash::write16(simrv::memory::MmioOffset offset, simrv::memory::MmioData16
 
 void PFlash::write32(simrv::memory::MmioOffset offset, simrv::memory::MmioData32 val) {
     if (mode_ == PFlashMode::ProgramPending) {
-        if (offset + 3 < storage_.size()) {
+        if (offset + 3 < size_) {
+            ensure_storage();
             std::memcpy(storage_.data() + offset, &val, sizeof(val));
             dirty_ = true;
         }
@@ -241,7 +254,8 @@ void PFlash::write32(simrv::memory::MmioOffset offset, simrv::memory::MmioData32
 
 void PFlash::write64(simrv::memory::MmioOffset offset, simrv::memory::MmioData64 val) {
     if (mode_ == PFlashMode::ProgramPending) {
-        if (offset + 7 < storage_.size()) {
+        if (offset + 7 < size_) {
+            ensure_storage();
             std::memcpy(storage_.data() + offset, &val, sizeof(val));
             dirty_ = true;
         }

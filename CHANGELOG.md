@@ -3,7 +3,25 @@
 All notable changes to SimRV are documented here.
 Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [v3.0.0-rc.17] — unreleased
+## [v3.0.0-rc.18] — 2026-11-04
+
+- Implemented dynamic External Device Plugin C ABI (`SimRvExternalDevice`, `SimRvHostServices`), decoupling model-specific MMIO peripherals (`rvcomp-mmc`, `rvcomp-reset`, `rvcomp-ethernet`) from SimRV core into modular plugins.
+- Decoupled custom hardware models (`cfu-provingground`, `rvproc`, `rvcomp`), replacing core hardcodes with modular plugins (`plugins/cfu-provingground`, `plugins/rvcomp-*`) and declarative configuration flags (`mmio_console_redirect`, `bram_prewarm`).
+- Added CMake options `SIMRV_BUILD_PLUGINS`, `SIMRV_BUILD_RVCOMP_PLUGINS`, and `SIMRV_BUILD_CFU_PLUGINS` to allow standalone generic builds without any bundled hardware plugins.
+- Added automatic Devicetree compatible plugin auto-discovery and multi-directory search resolution (`--plugin <name>[=args]` and `.cfg` `[plugins]` support).
+- Corrected 32-bit architectural personality CSR MISA read on RV64 implementations to reflect MXL bit 30, preventing illegal instruction traps during 32-bit firmware and kernel boot.
+- Unified dual extension model across pipeline custom function units (`--cfu-plugin`, `custom-0`) and interconnect memory-mapped peripheral plugins (`--plugin`).
+- Audited documentation and Zensical assets, adding GitHub-style alert callout compatibility and normalizing Material admonitions.
+- Formalized PLIC physical input level tracking across all interrupt sources, eliminating hardcoded IRQ assumptions on completion.
+- Added dynamic PLIC priority and threshold arbitration re-evaluation upon register MMIO writes.
+- Formalized APLIC direct-mode interrupt de-assertion and delivery lifecycle.
+- Added ACLINT 32-bit MMIO timer word writes (0x7ff8/0x7ffc) and multi-hart timer interrupt re-evaluation.
+- Paced UART cycle advance in fast OS kernel batch execution to eliminate tight polling stalls.
+- Unified multi-hart CLINT/ACLINT `mtime` single-timebase synchronization across fast execution paths.
+- Enforced illegal instruction exceptions on write attempts to architecturally read-only CSRs.
+- Enforced physical memory protection (PMP) on Hypervisor G-stage intermediate PTE fetches.
+
+## [v3.0.0-rc.17] — 2026-11-02
 
 - Integrated RVA23 profile qualification through RISC-V Architectural Compatibility Tests (ACT).
 - Added architectural signature dumping (`--signature <file>`) for ACT conformance evaluation.

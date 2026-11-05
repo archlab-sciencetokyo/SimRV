@@ -528,7 +528,7 @@ class E2ETier1FeatureTests(unittest.TestCase):
         """Verify test files follow PascalCase *Tests.cpp and *Tests.py convention."""
         tests_dir = ROOT / "tests"
         for p in tests_dir.glob("*.cpp"):
-            if p.name != "TestCfuPlugin.cpp":
+            if p.name not in ("TestCfuPlugin.cpp", "TestDevicePlugin.cpp"):
                 self.assertTrue(p.name.endswith("Tests.cpp"), f"Non-conforming test file: {p.name}")
 
     def test_f3_4_ctest_label_coverage(self) -> None:

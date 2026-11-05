@@ -77,6 +77,7 @@ void Plic::update_mip() {
 
 void Plic::set_irq(simrv::xlen::IrqNumber irq_num, int state_val) {
     if (irq_num == 0 || irq_num > Plic::kNumSources) return;
+    input_levels_[irq_num] = (state_val != 0);
     const simrv::xlen::Word mask = static_cast<simrv::xlen::Word>(1) << irq_num;
     if (state_val != 0) {
         plic_pending[0] |= mask;
@@ -88,6 +89,7 @@ void Plic::set_irq(simrv::xlen::IrqNumber irq_num, int state_val) {
 
 void Plic::reset() {
     plic_pending.fill(0);
+    input_levels_.fill(false);
     plic_priorities.fill(0);
     for (auto& enables : plic_enables) enables.fill(0);
     plic_threshold.fill(0);
@@ -149,27 +151,40 @@ auto Plic::mmio_read(simrv::xlen::Address offset) -> simrv::xlen::Word {
 void Plic::mmio_write(simrv::xlen::Address offset, simrv::xlen::Word wdata) {
     if (offset < 0x1000) {
         // Source zero means "no interrupt" and is not configurable.
-        if (offset != 0)
+        if (offset != 0) {
             plic_priorities[offset / 4] = static_cast<simrv::xlen::InterruptPriority>(wdata);
+            update_mip();
+        }
     } else if (offset >= 0x2000 && offset < 0x2000 + (kMaxPlicContexts * 0x80)) {
         const auto ctx = (offset - 0x2000) / 0x80;
         const auto word = ((offset - 0x2000) % 0x80) / 4;
         plic_enables[ctx][word] = (word == 0) ? (wdata & ~simrv::xlen::Word{1}) : wdata;
+        update_mip();
     } else {
         if (const auto context = get_context_for_offset(offset)) {
             const auto ctx_idx = static_cast<std::size_t>(*context);
             simrv::xlen::Address ctx_base = 0x200000 + (*context * 0x1000);
             if (offset == ctx_base) {
                 plic_threshold[ctx_idx] = static_cast<simrv::xlen::InterruptPriority>(wdata);
+                update_mip();
             } else if (offset == ctx_base + 4) {
                 // Complete: indicates the handler has finished with the IRQ
                 if (plic_claim[ctx_idx] == static_cast<simrv::xlen::InterruptSourceId>(wdata) &&
                     wdata != 0) {
                     plic_claim[ctx_idx] = 0;
-                    if (cpu_ != nullptr && cpu_->machine_ != nullptr && wdata == 3 &&
-                        cpu_->machine_->uart_device() != nullptr &&
-                        cpu_->machine_->uart_device()->is_interrupt_pending()) {
-                        set_irq(static_cast<simrv::xlen::IrqNumber>(wdata), 1);
+                    const auto src = static_cast<size_t>(wdata);
+                    if (src <= kNumSources) {
+                        bool still_asserted = input_levels_[src];
+                        if (cpu_ != nullptr && cpu_->machine_ != nullptr) {
+                            if (auto* uart = cpu_->machine_->uart_device();
+                                uart != nullptr && uart->irq_number() == src) {
+                                still_asserted = still_asserted || uart->is_interrupt_pending();
+                            }
+                        }
+                        if (still_asserted) {
+                            input_levels_[src] = true;
+                            plic_pending[0] |= (static_cast<simrv::xlen::Word>(1) << src);
+                        }
                     }
                 }
             }

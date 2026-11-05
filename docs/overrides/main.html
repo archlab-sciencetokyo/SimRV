@@ -5,3 +5,42 @@
     You are reading development documentation. Features and commands may differ from the latest release.
   {% endif %}
 {% endblock %}
+
+{% block scripts %}
+  {{ super() }}
+  <script>
+    document.addEventListener("DOMContentLoaded", function() {
+      // Automatic compatibility shim for GitHub-style blockquote alerts
+      var alertMap = {
+        "[!NOTE]": { type: "note", title: "Note" },
+        "[!TIP]": { type: "tip", title: "Tip" },
+        "[!IMPORTANT]": { type: "important", title: "Important" },
+        "[!WARNING]": { type: "warning", title: "Warning" },
+        "[!CAUTION]": { type: "danger", title: "Caution" }
+      };
+      var quotes = document.querySelectorAll(".md-typeset blockquote");
+      quotes.forEach(function(bq) {
+        var firstP = bq.querySelector("p");
+        if (!firstP) return;
+        var rawText = firstP.textContent.trim();
+        for (var prefix in alertMap) {
+          if (rawText.indexOf(prefix) === 0) {
+            var meta = alertMap[prefix];
+            var adm = document.createElement("div");
+            adm.className = "admonition " + meta.type;
+            var title = document.createElement("p");
+            title.className = "admonition-title";
+            title.textContent = meta.title;
+            adm.appendChild(title);
+            firstP.innerHTML = firstP.innerHTML.replace(prefix, "").trim();
+            while (bq.firstChild) {
+              adm.appendChild(bq.firstChild);
+            }
+            bq.parentNode.replaceChild(adm, bq);
+            break;
+          }
+        }
+      });
+    });
+  </script>
+{% endblock %}

@@ -19,6 +19,7 @@ uint32_t test_cfu_execute(uint32_t funct7, uint32_t funct3, uint32_t src1, uint3
 void test_cfu_reset() {}
 
 const simrv::execute::SimRvCfuPlugin kPlugin = {
+    .api_version = SIMRV_CFU_PLUGIN_API_VERSION,
     .execute = test_cfu_execute,
     .reset = test_cfu_reset,
 };

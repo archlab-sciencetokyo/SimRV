@@ -151,7 +151,7 @@ class E2ETier4ScenarioTests(unittest.TestCase):
                     "--summary",
                     str(summary_path),
                     "--steps",
-                    "10000000",
+                    os.environ.get("SIMRV_SCENARIO_STEPS", "10000000"),
                 ],
                 timeout=300.0,
             )

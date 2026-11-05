@@ -36,6 +36,7 @@ namespace simrv::execute {
  * }
  *
  * static const struct SimRvCfuPlugin kPlugin = {
+ *     .api_version = SIMRV_CFU_PLUGIN_API_VERSION,
  *     .execute = my_cfu_execute,
  *     .reset = my_cfu_reset,
  * };
@@ -57,9 +58,12 @@ namespace simrv::execute {
  * simrv --cfu-plugin=./libcfu_custom.so guest.elf
  * ```
  */
+#define SIMRV_CFU_PLUGIN_API_VERSION 1
+
 extern "C" {
 
 struct SimRvCfuPlugin {
+    uint32_t api_version; /**< Must be SIMRV_CFU_PLUGIN_API_VERSION (1) */
     uint32_t (*execute)(uint32_t funct7, uint32_t funct3, uint32_t src1, uint32_t src2,
                         uint32_t* latency_cycles);
     void (*reset)();

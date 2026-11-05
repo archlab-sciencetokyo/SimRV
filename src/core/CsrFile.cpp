@@ -554,6 +554,11 @@ auto CsrFile::read_from_state(const ArchState& state, simrv::xlen::CsrNumber add
             break;
         case csr_addr(Csr::Misa):
             rcsr = isa::misa_with_mxl(state.misa, active_xlen);
+            if (active_xlen == 32) {
+                // In 32-bit execution mode, MISA bits [31:30] hold MXL=1 (RV32)
+                rcsr =
+                    (rcsr & ~(simrv::xlen::CsrValue{3} << 30)) | (simrv::xlen::CsrValue{1} << 30);
+            }
             break;
 
         case csr_addr(Csr::Mcycle):
@@ -564,11 +569,15 @@ auto CsrFile::read_from_state(const ArchState& state, simrv::xlen::CsrNumber add
         case csr_addr(Csr::Instret):
             rcsr = static_cast<simrv::xlen::CsrValue>(state.minstret);
             break;
-        case csr_addr(Csr::Time):
+        case csr_addr(Csr::Time): {
+            const uint64_t mtime =
+                (cpu != nullptr && cpu->machine_ != nullptr)
+                    ? cpu->machine_->platform_time()
+                    : (cpu != nullptr ? cpu->clint_mmio.mtime.load(std::memory_order_relaxed) : 0U);
             rcsr = static_cast<simrv::xlen::CsrValue>(
-                (cpu != nullptr ? cpu->clint_mmio.mtime.load(std::memory_order_relaxed) : 0U) +
-                (state.virt ? state.htimedelta : simrv::xlen::CsrValue{0}));
+                mtime + (state.virt ? state.htimedelta : simrv::xlen::CsrValue{0}));
             break;
+        }
 
         case csr_addr(Csr::Mcycleh):
         case csr_addr(Csr::Cycleh):
@@ -582,9 +591,13 @@ auto CsrFile::read_from_state(const ArchState& state, simrv::xlen::CsrNumber add
                 return static_cast<simrv::xlen::CsrValue>(state.minstret >> kHighWordShift);
             });
         case csr_addr(Csr::Timeh):
-            return require_rv32_counter().transform([cpu]() {
+            return require_rv32_counter().transform([cpu, &state]() {
                 const uint64_t mtime =
-                    cpu != nullptr ? cpu->clint_mmio.mtime.load(std::memory_order_relaxed) : 0U;
+                    ((cpu != nullptr && cpu->machine_ != nullptr)
+                         ? cpu->machine_->platform_time()
+                         : (cpu != nullptr ? cpu->clint_mmio.mtime.load(std::memory_order_relaxed)
+                                           : 0U)) +
+                    (state.virt ? state.htimedelta : simrv::xlen::CsrValue{0});
                 return static_cast<simrv::xlen::CsrValue>(mtime >> kHighWordShift);
             });
 
@@ -596,6 +609,14 @@ auto CsrFile::read_from_state(const ArchState& state, simrv::xlen::CsrNumber add
         case csr_addr(Csr::Mstatus):
             rcsr = compute_mstatus(state, kMstatusReadMask);
             break;
+        case csr_addr(Csr::Mstatush):
+            return require_rv32_counter().transform([&state]() -> simrv::xlen::CsrValue {
+                if constexpr (simrv::xlen::kIsXLen64) {
+                    return static_cast<simrv::xlen::CsrValue>(state.mstatus >> 32U);
+                } else {
+                    return state.mstatush;
+                }
+            });
 
         case csr_addr(Csr::Mvendorid):
         case csr_addr(Csr::Marchid):
@@ -710,6 +731,9 @@ auto CsrFile::read(simrv::xlen::CsrNumber addr) const
 
 auto CsrFile::write(simrv::xlen::CsrNumber addr, simrv::xlen::CsrValue wdata)
     -> std::expected<void, ExceptionCode> {  // NOLINT(bugprone-easily-swappable-parameters)
+    if (addr.is_read_only()) {
+        return std::unexpected(ExceptionCode::IllegalInstruction);
+    }
     const uint16_t address = addr.value();
     constexpr uint64_t kStateenSuperEnable = uint64_t{1} << 63U;
     constexpr uint64_t kStateenEnvCfgEnable = uint64_t{1} << 62U;
@@ -812,13 +836,6 @@ auto CsrFile::write(simrv::xlen::CsrNumber addr, simrv::xlen::CsrValue wdata)
     };
 
     switch (addr.value()) {
-        case csr_addr(Csr::Mvendorid):
-        case csr_addr(Csr::Marchid):
-        case csr_addr(Csr::Mimpid):
-        case csr_addr(Csr::Mconfigptr):
-        case csr_addr(Csr::Mhartid):
-        case csr_addr(Csr::Time):
-        case csr_addr(Csr::Timeh):
         case csr_addr(Csr::Misa):
             break;
 
@@ -1325,6 +1342,21 @@ auto CsrFile::write(simrv::xlen::CsrNumber addr, simrv::xlen::CsrValue wdata)
         case csr_addr(Csr::Mstatus):
             setMstatus(wdata);
             break;
+        case csr_addr(Csr::Mstatush):
+            return require_rv32_counter().and_then(
+                [this, wdata]() -> std::expected<void, ExceptionCode> {
+                    if constexpr (simrv::xlen::kIsXLen64) {
+                        const uint64_t lower =
+                            static_cast<uint64_t>(cpu_.state().mstatus) & 0xFFFFFFFFULL;
+                        const uint64_t upper = static_cast<uint64_t>(wdata) << 32U;
+                        setMstatus(static_cast<simrv::xlen::CsrValue>(lower | upper));
+                    } else {
+                        constexpr simrv::xlen::CsrValue kMstatushWritableMask =
+                            (1U << 4U) | (1U << 5U) | (1U << 6U) | (1U << 7U) | (1U << 10U);
+                        cpu_.state().mstatush = wdata & kMstatushWritableMask;
+                    }
+                    return {};
+                });
         case csr_addr(Csr::Sstatus):
             if (cpu_.state().virt) {
                 cpu_.state().vsstatus =

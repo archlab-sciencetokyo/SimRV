@@ -24,6 +24,7 @@
 #include "simrv/device/AIA.hpp"
 #include "simrv/device/Aclint.hpp"
 #include "simrv/device/DmaController.hpp"
+#include "simrv/device/ExternalDevicePlugin.hpp"
 #include "simrv/device/PlatformDeviceRegistry.hpp"
 #include "simrv/device/Power.hpp"
 #include "simrv/device/ResetControlMmio.hpp"
@@ -254,31 +255,24 @@ auto validate_elf_isa(const std::string& path, uint64_t selected_misa)
     return {};
 }
 
-void apply_cpu_model_dram_defaults(MachineConfig& config, const std::string& model_name) {
-    const bool low_dram_model = model_name == "cfu-provingground" || model_name == "rvproc";
-    const bool rvcomp_model = model_name == "rvcomp";
-    if (!low_dram_model && !rvcomp_model) return;
-
-    if (low_dram_model) {
+void apply_cpu_model_dram_defaults(MachineConfig& config,
+                                   const simrv::pipeline::CpuModelConfig& model) {
+    if (model.mmio_console_redirect) {
         config.memory.dram_base = 0;
-    } else if (!config.soc.dram_base.has_value()) {
-        config.memory.dram_base = simrv::memory::kDramBaseAddress;
-    }
-
-    constexpr auto kMinimumDramSize = simrv::xlen::Address{512} * 1024 * 1024;
-    if (!config.soc.dram_size.has_value() && config.memory.dram_size < kMinimumDramSize) {
-        config.memory.dram_size = kMinimumDramSize;
     }
 }
 
 void apply_cpu_model_runtime_config(Machine& machine, MachineConfig& config,
                                     const simrv::pipeline::CpuModelConfig& model) {
     machine.primary_hart().apply_cpu_model_config(model);
+    if (config.mmio_console_redirect) {
+        machine.primary_hart().cpu_model_config.mmio_console_redirect = true;
+    }
     const auto& timing = model.interconnect;
     machine.memory().system_bus().configure_timing(
         timing.request_latency, timing.response_latency, timing.data_request_latency,
         timing.data_response_latency, timing.startup_data_response_latency);
-    apply_cpu_model_dram_defaults(config, model.name);
+    apply_cpu_model_dram_defaults(config, model);
 }
 
 void resolve_start_pc_and_dram_base(simrv::core::Machine& machine,
@@ -287,9 +281,9 @@ void resolve_start_pc_and_dram_base(simrv::core::Machine& machine,
     if (start_pc == simrv::boot::kStartPc || start_pc == 0) {
         simrv::xlen::Address entry = symbols.entry_point().value_or(
             symbols.lookup_name("_start").value_or(simrv::boot::kStartPc));
-        if (entry < simrv::memory::kDramBaseAddress &&
-            !machine.primary_hart().cpu_model_config.is_provingground_or_rvproc) {
-            entry += simrv::memory::kDramBaseAddress;
+        const simrv::xlen::Address dram_base = machine.ram_view().base();
+        if (dram_base != 0 && entry < dram_base) {
+            entry += dram_base;
         }
         start_pc = entry;
     }
@@ -551,10 +545,30 @@ auto Machine::initialize() -> std::expected<void, std::string> {
         apply_cpu_model_runtime_config(*this, config, *config.cpu_model_config_override);
     }
     std::string cfu_plugin_path = config.files.cfu_plugin_path;
+    const bool explicit_cfu_cli = !cfu_plugin_path.empty();
     if (cfu_plugin_path.empty()) cfu_plugin_path = primary_hart().cpu_model_config.cfu.plugin;
     if (!cfu_plugin_path.empty()) {
         if (!primary_hart().cfu_unit.load_plugin(cfu_plugin_path)) {
-            const std::string err = "Failed to load CFU plugin: " + cfu_plugin_path;
+            if (explicit_cfu_cli) {
+                const std::string err = "Failed to load CFU plugin: " + cfu_plugin_path;
+                simrv::log::error("{}", err);
+                return std::unexpected(err);
+            }
+            simrv::log::warn("Optional CFU plugin '{}' not found; falling back to built-in model",
+                             cfu_plugin_path);
+        }
+    }
+
+    for (const auto& dev_plugin : config.files.device_plugins) {
+        if (!simrv::device::load_external_device_plugin(dev_plugin, device_registry())) {
+            const std::string err = "Failed to load external device plugin: " + dev_plugin;
+            simrv::log::error("{}", err);
+            return std::unexpected(err);
+        }
+    }
+    for (const auto& dev_plugin : config.soc.plugins) {
+        if (!simrv::device::load_external_device_plugin(dev_plugin, device_registry())) {
+            const std::string err = "Failed to load SoC external device plugin: " + dev_plugin;
             simrv::log::error("{}", err);
             return std::unexpected(err);
         }
@@ -964,12 +978,49 @@ auto Machine::initialize() -> std::expected<void, std::string> {
                 return std::unexpected(std::format("device tree '{}' is incompatible: {}",
                                                    config.files.dvtree_path, compatible.error()));
             }
-            auto patched =
-                simrv::util::patch_fdt(input_blob, config.memory.dram_base, effective_dram_size,
-                                       config.execution.num_harts, &fb_info,
-                                       config.execution.timebase_hz, config.execution.cpu_clock_hz);
+            std::vector<simrv::util::FdtCustomDevice> fdt_devices;
+            auto patched = simrv::util::patch_fdt(input_blob, config.memory.dram_base,
+                                                  effective_dram_size, config.execution.num_harts,
+                                                  &fb_info, config.execution.timebase_hz,
+                                                  config.execution.cpu_clock_hz, &fdt_devices);
             if (!patched) return std::unexpected(patched.error());
             final_blob = std::move(*patched);
+            for (const auto& dev : fdt_devices) {
+                SoCDeviceConfig custom_cfg{};
+                custom_cfg.kind = SoCDeviceKind::CustomMmio;
+                custom_cfg.name = dev.name;
+                custom_cfg.compatible = dev.compatible;
+                custom_cfg.base = dev.base;
+                custom_cfg.size = dev.size;
+                custom_cfg.enabled = true;
+                auto extension = device_registry().create_mmio(*this, custom_cfg);
+                if (!extension && !dev.compatible.empty()) {
+                    std::string default_args;
+                    if (!config.files.disk_path.empty()) {
+                        default_args = config.files.disk_path;
+                    } else if (config.files.binary_path.ends_with(".img") ||
+                               config.files.binary_path.ends_with(".raw") ||
+                               config.files.binary_path.ends_with(".ext4") ||
+                               config.files.binary_path.ends_with(".bin")) {
+                        default_args = config.files.binary_path;
+                    }
+                    if (simrv::device::autodiscover_external_device_plugin(
+                            dev.compatible, default_args, device_registry())) {
+                        extension = device_registry().create_mmio(*this, custom_cfg);
+                    }
+                }
+                if (extension) {
+                    if (memory().system_bus().add_node(extension.get())) {
+                        runtime_->extension_mmios.push_back(std::move(extension));
+                    }
+                } else {
+                    auto dummy =
+                        std::make_unique<simrv::device::DummyMmio>(dev.name, dev.base, dev.size, 0);
+                    if (memory().system_bus().add_node(dummy.get())) {
+                        runtime_->dummy_mmios.push_back(std::move(dummy));
+                    }
+                }
+            }
         }
 
         if (dtb_offset >= effective_dram_size)
@@ -978,6 +1029,12 @@ auto Machine::initialize() -> std::expected<void, std::string> {
         if (fb_info.width > 0 && fb_info.height > 0) {
             framebuffer_geometry_.width = fb_info.width;
             framebuffer_geometry_.height = fb_info.height;
+            framebuffer_geometry_.stride = fb_info.stride;
+            framebuffer_geometry_.bpp = fb_info.bpp;
+            framebuffer_geometry_.format =
+                (fb_info.format == simrv::util::FdtFramebufferFormat::R5G6B5)
+                    ? FramebufferFormat::R5G6B5
+                    : FramebufferFormat::A8R8G8B8;
             if (fb_info.base != 0) {
                 framebuffer_geometry_.base = fb_info.base;
             }

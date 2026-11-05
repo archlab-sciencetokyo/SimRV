@@ -257,7 +257,8 @@ class PageTableWalker {
     [[nodiscard]] auto walk_guest_physical(simrv::xlen::Address guest_address, PteAccess access,
                                            simrv::xlen::Word hgatp, unsigned xlen,
                                            simrv::xlen::Address* fault_address = nullptr,
-                                           bool mxr = false) const
+                                           bool mxr = false,
+                                           const core::ArchState* arch_state = nullptr) const
         -> std::expected<PageWalkResult, simrv::xlen::TrapCause>;
 
     void flush_pdc() noexcept {

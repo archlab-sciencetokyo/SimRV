@@ -48,6 +48,7 @@ class Uart : public memory::TileLinkNode {
     void stop_input_thread();
     [[nodiscard]] auto is_input_thread_running() const -> bool { return input_thread_.joinable(); }
     [[nodiscard]] auto is_interrupt_pending() const -> bool;
+    [[nodiscard]] auto irq_number() const noexcept -> uint32_t { return irq_; }
     void push_rx_byte(uint8_t byte);
     /// Advance serial transmit and receive state by simulated CPU cycles.
     void advance_cycles(uint64_t cycles);
@@ -63,6 +64,7 @@ class Uart : public memory::TileLinkNode {
     [[nodiscard]] auto pty() -> PtyBridge& { return pty_; }
     [[nodiscard]] auto pty() const -> const PtyBridge& { return pty_; }
     void flush_tx_buffer() noexcept;
+    void drain_tx_fifo() noexcept;
 
    private:
     simrv::core::Machine& machine_;
@@ -99,6 +101,7 @@ class Uart : public memory::TileLinkNode {
     mutable std::mutex rx_mutex_;
     std::thread input_thread_;
     std::atomic<bool> input_thread_stop_{false};
+    int wake_pipe_[2]{-1, -1};
 
     PtyBridge pty_;
     std::thread pty_reader_thread_;

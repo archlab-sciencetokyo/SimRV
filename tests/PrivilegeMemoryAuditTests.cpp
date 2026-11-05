@@ -570,6 +570,105 @@ void test_ratified_privilege_csrs() {
 #endif
 }
 
+// 13. Read-only CSR write attempts raise an Illegal Instruction exception (Finding 4)
+void test_read_only_csr_write_rejection() {
+    using simrv::core::Csr;
+    using simrv::isa::ExceptionCode;
+    using simrv::xlen::PrivilegeLevel;
+
+    simrv::core::CPU cpu{};
+    cpu.state().priv = PrivilegeLevel::Machine;
+
+    const auto check_ro = [&](Csr csr, const char* name) {
+        const auto res = cpu.csr_file.write(csr, 0x12345678);
+        expect(!res.has_value() && res.error() == ExceptionCode::IllegalInstruction,
+               std::string("Write to read-only CSR ") + name + " must raise IllegalInstruction");
+    };
+
+    check_ro(Csr::Mvendorid, "mvendorid");
+    check_ro(Csr::Marchid, "marchid");
+    check_ro(Csr::Mimpid, "mimpid");
+    check_ro(Csr::Mhartid, "mhartid");
+    check_ro(Csr::Time, "time");
+    check_ro(Csr::Cycle, "cycle");
+    check_ro(Csr::Instret, "instret");
+#if SIMRV_XLEN == 32
+    check_ro(Csr::Timeh, "timeh");
+    check_ro(Csr::Cycleh, "cycleh");
+    check_ro(Csr::Instreth, "instreth");
+#endif
+
+    // Writable WARL CSRs like MISA accept writes without raising an exception
+    expect(cpu.csr_file.write(Csr::Misa, 0).has_value(),
+           "Write to writable WARL CSR misa does not raise exception");
+}
+
+// 14. Sv39 Page Directory Cache (PDC) must not cache or bypass two-stage guest translations
+void test_pdc_guest_stage_isolation() {
+#if SIMRV_XLEN == 64
+    using simrv::core::ArchState;
+    using simrv::memory::PageTableWalker;
+    using simrv::memory::PteAccess;
+    using simrv::memory::RamView;
+    using simrv::xlen::Byte;
+    using simrv::xlen::PrivilegeLevel;
+    using simrv::xlen::VirtAddr;
+    PageTableWalker walker{};
+    std::array<Byte, 4096> dummy_backing{};
+    walker.set_ram_view(RamView(dummy_backing.data(), 0x80000000ULL, 0x10000000ULL));
+
+    // First walk: guest_stage_enabled = true (VS-stage walk via arch_state.virt = true)
+    ArchState guest_arch{};
+    guest_arch.virt = true;
+    guest_arch.priv = PrivilegeLevel::Supervisor;
+
+    const uint64_t fake_satp = (8ULL << 60U) | (0x80000000ULL >> 12U);
+    const VirtAddr vaddr{0x10000000ULL};
+    auto state_guest = walker.begin_walk(vaddr, PteAccess::Read, PrivilegeLevel::Supervisor, 0,
+                                         fake_satp, 64, true, &guest_arch);
+    expect(state_guest.level == 2, "Sv39 begin_walk begins at level 2");
+    expect(state_guest.guest_stage_enabled, "VS-mode sets guest_stage_enabled");
+
+    // Feed level 2 table pointer (pointing to GPA)
+    const uint64_t table_ptr_pte = ((0x80001000ULL >> 12U) << 10U) | 0x01U;  // V=1, R=W=X=0
+    walker.accept_pte(state_guest, table_ptr_pte);
+    expect(state_guest.level == 1, "Level 2 advances to level 1");
+
+    // Feed level 1 table pointer (pointing to GPA level 0 table)
+    const uint64_t table_ptr_pte0 = ((0x80002000ULL >> 12U) << 10U) | 0x01U;
+    walker.accept_pte(state_guest, table_ptr_pte0);
+    expect(state_guest.level == 0, "Level 1 advances to level 0");
+
+    // Start a second walk for the same address in VS-mode:
+    // It must NOT hit the PDC (must start at level 2, not skip to level 0)
+    auto state_guest2 = walker.begin_walk(vaddr, PteAccess::Read, PrivilegeLevel::Supervisor, 0,
+                                          fake_satp, 64, true, &guest_arch);
+    expect(state_guest2.level == 2, "Second guest walk starts at level 2 without PDC bypass");
+
+    // Now do a host walk with virt = false
+    ArchState host_arch{};
+    host_arch.virt = false;
+    host_arch.priv = PrivilegeLevel::Supervisor;
+    auto state_host = walker.begin_walk(vaddr, PteAccess::Read, PrivilegeLevel::Supervisor, 0,
+                                        fake_satp, 64, true, &host_arch);
+    expect(state_host.level == 2, "Host walk starts at level 2");
+    expect(!state_host.guest_stage_enabled, "Host walk has guest_stage_enabled = false");
+    walker.accept_pte(state_host, table_ptr_pte);
+    walker.accept_pte(state_host, table_ptr_pte0);
+    expect(state_host.level == 0, "Host walk reaches level 0 and caches in PDC");
+
+    // Subsequent host walk should hit PDC and start directly at level 0
+    auto state_host_cached = walker.begin_walk(vaddr, PteAccess::Read, PrivilegeLevel::Supervisor,
+                                               0, fake_satp, 64, true, &host_arch);
+    expect(state_host_cached.level == 0, "Subsequent host walk hits PDC directly at level 0");
+
+    // But a guest walk must STILL NOT hit PDC even after host cached it
+    auto state_guest3 = walker.begin_walk(vaddr, PteAccess::Read, PrivilegeLevel::Supervisor, 0,
+                                          fake_satp, 64, true, &guest_arch);
+    expect(state_guest3.level == 2, "Guest walk never hits PDC even when host entry exists");
+#endif
+}
+
 }  // namespace
 
 auto main() -> int {
@@ -586,6 +685,8 @@ auto main() -> int {
     test_strong_typing_and_operators();
     test_sret_spp_reset_semantics();
     test_ratified_privilege_csrs();
+    test_read_only_csr_write_rejection();
+    test_pdc_guest_stage_isolation();
 
     if (failures != 0) {
         std::cerr << failures << " test(s) failed.\n";

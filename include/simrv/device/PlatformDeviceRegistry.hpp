@@ -51,8 +51,9 @@ class PlatformDeviceRegistry final {
             }
         }
         auto device = factory(machine, config);
-        if (device == nullptr || device->base_address() != config.base ||
-            device->size() != config.size || std::string_view(device->name()) != config.name) {
+        if (device == nullptr || (config.base != 0 && device->base_address() != config.base) ||
+            (config.size != 0 && device->size() != config.size) ||
+            (!config.name.empty() && std::string_view(device->name()) != config.name)) {
             return {};
         }
         return device;

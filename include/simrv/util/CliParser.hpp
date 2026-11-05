@@ -124,6 +124,7 @@ struct RuntimeOptions {
     std::string soc_manifest_preset;
     std::string soc_manifest_output;
     std::string fn_cfu_plugin;
+    std::vector<std::string> device_plugins;
     std::optional<bool> bram_prewarm;
     uint64_t step_delay_us = 0;
     uint32_t explain_inst_val = 0;

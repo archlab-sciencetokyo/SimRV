@@ -4,6 +4,7 @@
  */
 #include "simrv/device/Uart.hpp"
 
+#include <fcntl.h>
 #include <sys/select.h>
 #include <unistd.h>
 
@@ -62,6 +63,13 @@ Uart::~Uart() {
 void Uart::start_input_thread() {
     if (machine_.tui_enabled()) return;
     if (::isatty(STDIN_FILENO) && !simrv::util::owns_interactive_terminal()) return;
+    if (input_thread_.joinable()) return;
+#if defined(__unix__) || defined(__APPLE__)
+    if (wake_pipe_[0] < 0 && ::pipe(wake_pipe_) == 0) {
+        int flags = ::fcntl(wake_pipe_[1], F_GETFL, 0);
+        if (flags >= 0) ::fcntl(wake_pipe_[1], F_SETFL, flags | O_NONBLOCK);
+    }
+#endif
     input_thread_stop_.store(false, std::memory_order_relaxed);
     input_thread_ = std::thread([this] {
         while (!input_thread_stop_.load(std::memory_order_relaxed)) {
@@ -69,7 +77,16 @@ void Uart::start_input_thread() {
             timeval timeout{0, 20000};
             FD_ZERO(&read_fds);
             FD_SET(STDIN_FILENO, &read_fds);
-            if (::select(STDIN_FILENO + 1, &read_fds, nullptr, nullptr, &timeout) <= 0) continue;
+            int max_fd = STDIN_FILENO;
+            if (wake_pipe_[0] >= 0) {
+                FD_SET(wake_pipe_[0], &read_fds);
+                max_fd = std::max(max_fd, wake_pipe_[0]);
+            }
+            if (::select(max_fd + 1, &read_fds, nullptr, nullptr, &timeout) <= 0) continue;
+            if (wake_pipe_[0] >= 0 && FD_ISSET(wake_pipe_[0], &read_fds)) {
+                return;
+            }
+            if (!FD_ISSET(STDIN_FILENO, &read_fds)) continue;
             uint8_t byte = 0;
             const auto count = ::read(STDIN_FILENO, &byte, 1);
             if (count == 0) return;
@@ -88,7 +105,19 @@ void Uart::start_input_thread() {
 
 void Uart::stop_input_thread() {
     input_thread_stop_.store(true, std::memory_order_relaxed);
+    if (wake_pipe_[1] >= 0) {
+        const char c = 1;
+        (void)::write(wake_pipe_[1], &c, 1);
+    }
     if (input_thread_.joinable()) input_thread_.join();
+    if (wake_pipe_[0] >= 0) {
+        ::close(wake_pipe_[0]);
+        wake_pipe_[0] = -1;
+    }
+    if (wake_pipe_[1] >= 0) {
+        ::close(wake_pipe_[1]);
+        wake_pipe_[1] = -1;
+    }
 }
 
 auto Uart::start_pty() -> bool {
@@ -119,6 +148,30 @@ void Uart::flush_tx_buffer() noexcept {
     else if (!machine_.console_sink())
         (void)::write(STDOUT_FILENO, tx_buffer_.data(), tx_buffer_len_);
     tx_buffer_len_ = 0;
+}
+
+void Uart::drain_tx_fifo() noexcept {
+    if (tx_shift_active_) {
+        const auto ch = tx_shift_byte_;
+        if (machine_.console_sink())
+            machine_.console_sink()->handle_char_write(static_cast<char>(ch));
+        if (pty_.is_open() || !machine_.console_sink()) {
+            tx_buffer_[tx_buffer_len_++] = ch;
+            if (ch == '\n' || tx_buffer_len_ == tx_buffer_.size()) flush_tx_buffer();
+        }
+        tx_shift_active_ = false;
+    }
+    while (!tx_fifo_.empty()) {
+        const auto ch = tx_fifo_.front();
+        tx_fifo_.pop_front();
+        if (machine_.console_sink())
+            machine_.console_sink()->handle_char_write(static_cast<char>(ch));
+        if (pty_.is_open() || !machine_.console_sink()) {
+            tx_buffer_[tx_buffer_len_++] = ch;
+            if (ch == '\n' || tx_buffer_len_ == tx_buffer_.size()) flush_tx_buffer();
+        }
+    }
+    tx_irq_pending_ = true;
 }
 
 void Uart::stop_pty() {
@@ -203,7 +256,15 @@ void Uart::advance_cycles(uint64_t cycles) {
 auto Uart::handle_request(const memory::TlChannelA& req, memory::TlChannelD& resp) -> bool {
     const auto reg = simrv::mmio::uart_reg(req.address.raw(), uart_reg_shift_, base_);
     if (reg == simrv::mmio::kUartRegInvalid) {
-        if (req.opcode == memory::TlOpcodeA::Get) resp.data = 0;
+        if (req.opcode == memory::TlOpcodeA::Get) {
+            const auto offset = req.address.raw() - base_;
+            if (offset == 8) {
+                std::scoped_lock lock(rx_mutex_);
+                resp.data = rx_fifo_.empty() ? 1 : 0;
+            } else {
+                resp.data = 0;
+            }
+        }
         return true;
     }
     const bool dlab = (uart_lcr_ & simrv::mmio::kUartLcrDlabMask) != 0;
@@ -277,6 +338,11 @@ auto Uart::handle_request(const memory::TlChannelA& req, memory::TlChannelD& res
                         tx_phase_ = 0;
                     } else if (tx_fifo_.size() < capacity) {
                         tx_fifo_.push_back(value);
+                    } else {
+                        drain_tx_fifo();
+                        tx_shift_active_ = true;
+                        tx_shift_byte_ = value;
+                        tx_phase_ = 0;
                     }
                     tx_irq_pending_ = tx_fifo_.empty();
                 }

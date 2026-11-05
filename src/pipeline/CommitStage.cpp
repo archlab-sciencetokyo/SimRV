@@ -86,21 +86,23 @@ void CPU::commit_control_flow_and_traps([[maybe_unused]] Machine& machine) {
                     break;
                 }
                 case Funct12Priv::Sret: {
+                    sret();
+                    ctx.jmp_pc = state_.pc;
                     if (!xret_target_aligned(state_, ctx.jmp_pc)) {
                         ctx.pending_exception = ExceptionCode::MisalignedFetch;
                         ctx.pending_tval = ctx.jmp_pc.raw();
                         break;
                     }
-                    sret();
                     break;
                 }
                 case Funct12Priv::Mret: {
+                    mret();
+                    ctx.jmp_pc = state_.pc;
                     if (!xret_target_aligned(state_, ctx.jmp_pc)) {
                         ctx.pending_exception = ExceptionCode::MisalignedFetch;
                         ctx.pending_tval = ctx.jmp_pc.raw();
                         break;
                     }
-                    mret();
                     break;
                 }
                 default:

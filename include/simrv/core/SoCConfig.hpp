@@ -9,6 +9,7 @@
 #include <bit>
 #include <cstdint>
 #include <expected>
+#include <limits>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -365,6 +366,9 @@ struct SoCConfig {
     std::optional<simrv::xlen::Address> tohost;
     SmpTopologyConfig smp{};
     std::vector<SoCDeviceConfig> devices;
+    std::vector<std::string> plugins{};
+    bool mmio_console_redirect = false;
+    bool bram_prewarm = false;
 
     [[nodiscard]] static auto virt_pcie() -> SoCConfig {
         return {.name = "virt-pcie",

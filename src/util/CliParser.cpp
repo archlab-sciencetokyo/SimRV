@@ -56,35 +56,118 @@ struct HelpSection {
 [[nodiscard]] auto cli_short_flag_takes_argument(char c) -> bool;
 
 auto parse_scaled_u64(std::string_view num, uint64_t& out) -> bool {
+    while (!num.empty() && std::isspace(static_cast<unsigned char>(num.front()))) {
+        num.remove_prefix(1);
+    }
+    while (!num.empty() && std::isspace(static_cast<unsigned char>(num.back()))) {
+        num.remove_suffix(1);
+    }
     if (num.empty()) {
         return false;
     }
 
     uint64_t multiplier = 1;
-    const char last = static_cast<char>(std::tolower(static_cast<unsigned char>(num.back())));
-    if (last == 'k') {
-        multiplier = 1000ULL;
-        num.remove_suffix(1);
-    } else if (last == 'm') {
-        multiplier = 1000000ULL;
-        num.remove_suffix(1);
-    } else if (last == 'g') {
-        multiplier = 1000000000ULL;
-        num.remove_suffix(1);
+    std::string lower;
+    lower.reserve(num.size());
+    for (char c : num) {
+        lower.push_back(static_cast<char>(std::tolower(static_cast<unsigned char>(c))));
     }
 
-    if (num.empty()) {
+    std::string_view s = lower;
+    if (s.ends_with("kib")) {
+        multiplier = 1024ULL;
+        s.remove_suffix(3);
+    } else if (s.ends_with("mib")) {
+        multiplier = 1024ULL * 1024ULL;
+        s.remove_suffix(3);
+    } else if (s.ends_with("gib")) {
+        multiplier = 1024ULL * 1024ULL * 1024ULL;
+        s.remove_suffix(3);
+    } else if (s.ends_with("tib")) {
+        multiplier = 1024ULL * 1024ULL * 1024ULL * 1024ULL;
+        s.remove_suffix(3);
+    } else if (s.ends_with("pib")) {
+        multiplier = 1024ULL * 1024ULL * 1024ULL * 1024ULL * 1024ULL;
+        s.remove_suffix(3);
+    } else if (s.ends_with("ki")) {
+        multiplier = 1024ULL;
+        s.remove_suffix(2);
+    } else if (s.ends_with("mi")) {
+        multiplier = 1024ULL * 1024ULL;
+        s.remove_suffix(2);
+    } else if (s.ends_with("gi")) {
+        multiplier = 1024ULL * 1024ULL * 1024ULL;
+        s.remove_suffix(2);
+    } else if (s.ends_with("ti")) {
+        multiplier = 1024ULL * 1024ULL * 1024ULL * 1024ULL;
+        s.remove_suffix(2);
+    } else if (s.ends_with("pi")) {
+        multiplier = 1024ULL * 1024ULL * 1024ULL * 1024ULL * 1024ULL;
+        s.remove_suffix(2);
+    } else if (s.ends_with("kb")) {
+        multiplier = 1000ULL;
+        s.remove_suffix(2);
+    } else if (s.ends_with("mb")) {
+        multiplier = 1000000ULL;
+        s.remove_suffix(2);
+    } else if (s.ends_with("gb")) {
+        multiplier = 1000000000ULL;
+        s.remove_suffix(2);
+    } else if (s.ends_with("tb")) {
+        multiplier = 1000000000000ULL;
+        s.remove_suffix(2);
+    } else if (s.ends_with("pb")) {
+        multiplier = 1000000000000000ULL;
+        s.remove_suffix(2);
+    } else if (s.ends_with('b') && s.size() > 1 &&
+               std::isdigit(static_cast<unsigned char>(s[s.size() - 2]))) {
+        multiplier = 1ULL;
+        s.remove_suffix(1);
+    } else if (s.ends_with('k')) {
+        multiplier = 1000ULL;
+        s.remove_suffix(1);
+    } else if (s.ends_with('m')) {
+        multiplier = 1000000ULL;
+        s.remove_suffix(1);
+    } else if (s.ends_with('g')) {
+        multiplier = 1000000000ULL;
+        s.remove_suffix(1);
+    } else if (s.ends_with('t')) {
+        multiplier = 1000000000000ULL;
+        s.remove_suffix(1);
+    } else if (s.ends_with('p')) {
+        multiplier = 1000000000000000ULL;
+        s.remove_suffix(1);
+    } else if (s.ends_with('e')) {
+        multiplier = 1000000000000000000ULL;
+        s.remove_suffix(1);
+    }
+
+    if (s.empty()) {
+        return false;
+    }
+
+    int base = 10;
+    if (s.starts_with("0x")) {
+        base = 16;
+        s.remove_prefix(2);
+    } else if (s.starts_with('0') && s.size() > 1) {
+        base = 8;
+        s.remove_prefix(1);
+    }
+
+    if (s.empty()) {
         return false;
     }
 
     uint64_t value = 0;
-    const char* begin = num.data();
-    const char* end = num.data() + num.size();
-    const auto result = std::from_chars(begin, end, value);
+    const char* begin = s.data();
+    const char* end = s.data() + s.size();
+    const auto result = std::from_chars(begin, end, value, base);
     if (result.ec != std::errc{} || result.ptr != end) {
         return false;
     }
-    if (value > std::numeric_limits<uint64_t>::max() / multiplier) {
+    if (multiplier > 0 && value > std::numeric_limits<uint64_t>::max() / multiplier) {
         return false;
     }
     out = value * multiplier;
@@ -92,13 +175,66 @@ auto parse_scaled_u64(std::string_view num, uint64_t& out) -> bool {
 }
 
 auto parse_frequency_hz(std::string_view num, uint64_t& out) -> bool {
+    while (!num.empty() && std::isspace(static_cast<unsigned char>(num.front()))) {
+        num.remove_prefix(1);
+    }
+    while (!num.empty() && std::isspace(static_cast<unsigned char>(num.back()))) {
+        num.remove_suffix(1);
+    }
     if (num.empty()) {
         return false;
     }
-    if (num.ends_with("hz") || num.ends_with("Hz") || num.ends_with("HZ")) {
-        num.remove_suffix(2);
+    std::string lower;
+    lower.reserve(num.size());
+    for (char c : num) {
+        lower.push_back(static_cast<char>(std::tolower(static_cast<unsigned char>(c))));
     }
-    return parse_scaled_u64(num, out);
+    std::string_view s = lower;
+    if (s.ends_with("hz")) {
+        s.remove_suffix(2);
+    }
+    return parse_scaled_u64(s, out);
+}
+
+auto parse_time_us(std::string_view num, uint64_t& out) -> bool {
+    while (!num.empty() && std::isspace(static_cast<unsigned char>(num.front()))) {
+        num.remove_prefix(1);
+    }
+    while (!num.empty() && std::isspace(static_cast<unsigned char>(num.back()))) {
+        num.remove_suffix(1);
+    }
+    if (num.empty()) {
+        return false;
+    }
+    std::string lower;
+    lower.reserve(num.size());
+    for (char c : num) {
+        lower.push_back(static_cast<char>(std::tolower(static_cast<unsigned char>(c))));
+    }
+    std::string_view s = lower;
+    uint64_t multiplier = 1;
+    if (s.ends_with("us")) {
+        multiplier = 1ULL;
+        s.remove_suffix(2);
+    } else if (s.ends_with("ms")) {
+        multiplier = 1000ULL;
+        s.remove_suffix(2);
+    } else if (s.ends_with('s') && s.size() > 1 &&
+               std::isdigit(static_cast<unsigned char>(s[s.size() - 2]))) {
+        multiplier = 1000000ULL;
+        s.remove_suffix(1);
+    } else if (s.ends_with("ns")) {
+        s.remove_suffix(2);
+    }
+    uint64_t val = 0;
+    if (!parse_scaled_u64(s, val)) {
+        return false;
+    }
+    if (multiplier > 0 && val > std::numeric_limits<uint64_t>::max() / multiplier) {
+        return false;
+    }
+    out = val * multiplier;
+    return true;
 }
 
 auto parse_u64_base0(std::string_view num, uint64_t& out) -> bool {
@@ -642,6 +778,12 @@ auto parse_file_options(std::string_view arg, std::span<char* const> args, std::
         options.fn_cfu_plugin = std::string(*value);
         return true;
     }
+    if (option_id == "--device-plugin" || option_id == "--plugin") {
+        auto value = next_argument(args, i, arg);
+        if (!value) return std::unexpected(value.error());
+        options.device_plugins.push_back(std::string(*value));
+        return true;
+    }
     if (option_id == "--bram-prewarm") {
         options.bram_prewarm = true;
         return true;
@@ -744,6 +886,15 @@ auto parse_execution_options(std::string_view arg, std::span<char* const> args, 
         options.explicit_realtime_mode = true;
         return true;
     }
+    if (option_id == "--wfi-as-nop") {
+        return true;
+    }
+    if (option_id == "--blocksz" || option_id == "--ic" || option_id == "--dc" ||
+        option_id == "--l2") {
+        auto value = next_argument(args, i, arg);
+        if (!value) return std::unexpected(value.error());
+        return true;
+    }
     if (option_id == "--cpu-clock") {
         auto value = next_argument(args, i, arg);
         if (!value) return std::unexpected(value.error());
@@ -806,6 +957,25 @@ auto parse_mode_options(std::string_view arg, std::span<char* const> args, std::
                 std::format("VLEN must be a power of 2 between 128 and 1024 (got: {})", val));
         }
         result.options.vlen = val;
+        return true;
+    }
+    if (option_id == "--varch") {
+        auto value = next_argument(args, i, "--varch");
+        if (!value) return std::unexpected(value.error());
+        std::string_view val = *value;
+        const auto vlen_pos = val.find("vlen:");
+        if (vlen_pos != std::string_view::npos) {
+            val.remove_prefix(vlen_pos + 5);
+            uint32_t parsed_vlen = 0;
+            if (parse_u32_base0(val.substr(0, val.find(',')), parsed_vlen)) {
+                result.options.vlen = parsed_vlen;
+            }
+        }
+        return true;
+    }
+    if (option_id == "--priv") {
+        auto value = next_argument(args, i, "--priv");
+        if (!value) return std::unexpected(value.error());
         return true;
     }
     if (option_id == "--baremetal") {
@@ -1240,7 +1410,7 @@ auto parse_debug_cosrv_options(std::string_view arg, std::span<char* const> args
         auto value = next_argument(args, i, std::string(arg));
         if (!value) return std::unexpected(value.error());
         uint64_t delay_val = 0;
-        if (!parse_scaled_u64(*value, delay_val)) {
+        if (!parse_time_us(*value, delay_val)) {
             return std::unexpected(std::format("invalid step delay value for {}", arg));
         }
         options.step_delay_us = delay_val;
@@ -1256,6 +1426,12 @@ auto parse_debug_cosrv_options(std::string_view arg, std::span<char* const> args
         auto value = next_argument(args, i, "--spike-elf");
         if (!value) return std::unexpected(value.error());
         options.spike_elf = std::string(*value);
+        return true;
+    }
+    if (arg.starts_with("--dm-") || arg.starts_with("--dmi-") || arg == "--halted") {
+        if (i + 1 < args.size() && !std::string_view(args[i + 1]).starts_with('-')) {
+            ++i;
+        }
         return true;
     }
     return false;
@@ -1277,6 +1453,15 @@ auto expand_short_flags(const std::vector<std::string>& original_args) -> std::v
         if (arg == "-smp") {
             expanded.push_back(arg);
             continue;
+        }
+        // Handle --option=value syntax: split into "--option" and "value"
+        if (arg.starts_with("--")) {
+            const auto eq = arg.find('=');
+            if (eq != std::string::npos) {
+                expanded.push_back(arg.substr(0, eq));
+                expanded.push_back(arg.substr(eq + 1));
+                continue;
+            }
         }
         if (arg.starts_with('-') && !arg.starts_with("--") && arg.size() > 2) {
             if (std::isdigit(static_cast<unsigned char>(arg[1]))) {
@@ -1385,6 +1570,19 @@ auto parse_command_line(std::span<char* const> args) -> std::expected<ParseResul
         auto res_debug = parse_debug_cosrv_options(arg, expanded_span, i, result.options);
         if (!res_debug) return std::unexpected(res_debug.error());
         if (*res_debug) continue;
+
+        // Positional target program image (Spike compatibility)
+        if (!arg.starts_with('-')) {
+            if (result.options.fn_memimg.empty()) {
+                result.options.fn_memimg = std::string(arg);
+                continue;
+            }
+            if (!result.options.bootargs.empty()) {
+                result.options.bootargs += " ";
+            }
+            result.options.bootargs += arg;
+            continue;
+        }
 
         return std::unexpected(std::format("unknown option '{}'", arg));
     }
@@ -1566,6 +1764,7 @@ auto RuntimeOptions::to_machine_config() const -> simrv::core::MachineConfig {
     cfg.files.dvtree_path = fn_dvtree;
     cfg.files.config_path = fn_config;
     cfg.files.cfu_plugin_path = fn_cfu_plugin;
+    cfg.files.device_plugins = device_plugins;
     cfg.files.uefi_code_path = fn_uefi;
     cfg.files.uefi_vars_path = fn_uefi_vars;
     cfg.files.uefi_enabled = uefi_enabled;
@@ -1578,12 +1777,6 @@ auto RuntimeOptions::to_machine_config() const -> simrv::core::MachineConfig {
     cfg.bht_entries = bht_size;
     cfg.btb_entries = btb_size;
     cfg.ras_entries = ras_size;
-    if (bram_prewarm.has_value()) {
-        cfg.bram_prewarm = *bram_prewarm;
-    } else if (fn_config.find("cfu-provingground") != std::string::npos ||
-               fn_config.find("rvproc") != std::string::npos) {
-        cfg.bram_prewarm = true;
-    }
 
     cfg.network.mode = net_mode;
     if (const auto preset = simrv::core::SoCConfig::preset(config_target)) {
@@ -1597,7 +1790,18 @@ auto RuntimeOptions::to_machine_config() const -> simrv::core::MachineConfig {
                 cfg.isa.isa_preset = simrv::isa::isa_preset_bits(model.isa_preset);
                 cfg.isa.misa_override = true;
             }
+            if (model.mmio_console_redirect) {
+                cfg.mmio_console_redirect = true;
+            }
+            if (model.bram_prewarm) {
+                cfg.bram_prewarm = true;
+            }
         }
+    }
+    if (cfg.soc.mmio_console_redirect) cfg.mmio_console_redirect = true;
+    if (cfg.soc.bram_prewarm) cfg.bram_prewarm = true;
+    if (bram_prewarm.has_value()) {
+        cfg.bram_prewarm = *bram_prewarm;
     }
     if (cfg.soc.dram_base.has_value()) cfg.memory.dram_base = *cfg.soc.dram_base;
     if (dram_size == 0 && cfg.soc.dram_size.has_value()) {
@@ -1797,76 +2001,80 @@ auto cli_help_sections() -> const std::vector<HelpSection>& {
                .description = "Linux device tree (required; patched for configured RAM and harts; "
                               "defaults to SIMRV_LINUX_DTB)."}}},
         {.title = "Architecture and hardware",
-         .entries = {{.option = "-j, --harts, --smp <N>",
-                      .description = "Override the SoC profile hart count (1–16).",
-                      .hidden_aliases = {"-smp", "--cores", "--num-harts"}},
-                     {.option = "--dram-size, --ram-size <SIZE>",
-                      .description = "Set DRAM size (for example, 128M or 2G).",
-                      .hidden_aliases = {"--memory-size", "--mem-size"}},
-                     {.option = "--isa <ISA>",
-                      .description = "Select a RISC-V ISA profile such as rv32gc or rv64gc."},
-                     {.option = "--profile <PROFILE>",
-                      .description =
-                          "Select formal architecture profile (rva23, rva23s64, rva22, legacy)."},
-                     {.option = "--vlen <BITS>",
-                      .description = "Set vector register length (128–1024; default: 256)."},
-                     {.option = "--config <PRESET | FILE>",
-                      .description =
-                          "Select platform preset (virt-pcie, virt-mmio, rvcomp) or file path.",
-                      .accepts_equals_value = true},
-                     {.option = "--dump-soc-manifest <PRESET> [FILE]",
-                      .description = "Export the normalized SoC registry as JSON."},
-                     {.option = "--net <BACKEND>",
-                      .description =
-                          "Select the VirtIO network backend: user, tap, socket, or none."}}},
+         .entries =
+             {{.option = "-j, --harts, --smp <N>",
+               .description = "Override the SoC profile hart count (1–16; default: 1 hart).",
+               .hidden_aliases = {"-smp", "--cores", "--num-harts"}},
+              {.option = "--dram-size, --ram-size <SIZE>",
+               .description = "Set DRAM size (for example, 128MB, 2GB, 256MiB; default: 256 MiB).",
+               .hidden_aliases = {"--memory-size", "--mem-size"}},
+              {.option = "--isa <ISA>",
+               .description = "Select a RISC-V ISA profile such as rv32gc or rv64gc."},
+              {.option = "--profile <PROFILE>",
+               .description =
+                   "Select formal architecture profile (rva23, rva23s64, rva22, legacy)."},
+              {.option = "--vlen <BITS>",
+               .description = "Set vector register length (128–1024 bits; default: 256 bits)."},
+              {.option = "--config <PRESET | FILE>",
+               .description = "Select platform preset (virt-pcie, virt-mmio, rvcomp) or file path.",
+               .accepts_equals_value = true},
+              {.option = "--dump-soc-manifest <PRESET> [FILE]",
+               .description = "Export the normalized SoC registry as JSON."},
+              {.option = "--net <BACKEND>",
+               .description = "Select the VirtIO network backend: user, tap, socket, or none."}}},
         {.title = "Execution and pipeline",
-         .entries = {{.option = "-s, -e, --steps <N>",
-                      .description = "Stop after N instructions retire across all harts.",
-                      .hidden_aliases = {"--max-steps", "--instructions", "--insts"}},
-                     {.option = "-t, -l, --timer <N>",
-                      .description = "Raise a CLINT timer interrupt after N cycles."},
-                     {.option = "--cpu-clock, --clock-hz <FREQ>",
-                      .description = "Set CPU clock frequency (e.g. 100MHz, 160MHz, 1GHz).",
-                      .hidden_aliases = {"--clock"}},
-                     {.option = "--timebase-hz <FREQ>",
-                      .description = "Set RTC timebase frequency (e.g. 10MHz, 32768Hz).",
-                      .hidden_aliases = {"--timebase"}},
-                     {.option = "-R, --realtime",
-                      .description = "Throttle execution to host real time (1:1)."},
-                     {.option = "--no-realtime",
-                      .description = "Disable real-time pacing and run at maximum speed."},
-                     {.option = "--mode <MODE>",
-                      .description = "Select fast, detailed, or cycle-accurate execution."},
-                     {.option = "--pipeline <TYPE>",
-                      .description = "Select the CA pipeline: 3stage or 5stage (default)."},
-                     {.option = "--no-forwarding", .description = "Disable operand forwarding."},
-                     {.option = "--early-out-div",
-                      .description = "Enable realistic data-dependent early-out division latency."},
-                     {.option = "--bpred <TYPE>",
-                      .description =
-                          "Select none, static, bimodal, gshare, or tournament prediction.",
-                      .hidden_aliases = {"--bpred-type"}},
-                     {.option = "--bht-size <N>",
-                      .description = "Set branch history table entries.",
-                      .hidden_aliases = {"--bht-entries"}},
-                     {.option = "--btb-size <N>",
-                      .description = "Set branch target buffer entries.",
-                      .hidden_aliases = {"--btb-entries"}},
-                     {.option = "--ras-size <N>",
-                      .description = "Set return address stack entries.",
-                      .hidden_aliases = {"--ras-entries"}},
-                     {.option = "--cpu-preset <PRESET>",
-                      .description = "Select tiny, balanced, performance, or a model file."},
-                     {.option = "--dump-cpu-model <MODEL> [FILE]",
-                      .description = "Write a CPU model configuration."},
-                     {.option = "--scaffold-cpu-model [FILE]",
-                      .description = "Generate a starter CPU model configuration."},
-                     {.option = "--validate-config, --validate-cpu-config <FILE>",
-                      .description = "Validate a CPU model or platform configuration file."},
-                     {.option = "--cfu-plugin <LIB.SO>",
-                      .description = "Load a dynamic custom function unit plugin."},
-                     {.option = "--bram-prewarm / --no-bram-prewarm",
-                      .description = "Control ELF cache prewarming for BRAM parity."}}},
+         .entries =
+             {{.option = "-s, -e, --steps <N>",
+               .description = "Stop after N instructions retire across all harts (instructions; "
+                              "default: unlimited).",
+               .hidden_aliases = {"--max-steps", "--instructions", "--insts"}},
+              {.option = "-t, -l, --timer <N>",
+               .description =
+                   "Raise a CLINT timer interrupt after N cycles (cycles; default: disabled)."},
+              {.option = "--cpu-clock, --clock-hz <FREQ>",
+               .description = "Set CPU clock frequency (e.g. 100MHz, 1GHz; default: 100 MHz).",
+               .hidden_aliases = {"--clock"}},
+              {.option = "--timebase-hz <FREQ>",
+               .description = "Set RTC timebase frequency (e.g. 10MHz, 32768Hz; default: 10 MHz).",
+               .hidden_aliases = {"--timebase"}},
+              {.option = "-R, --realtime",
+               .description = "Throttle execution to host real time (1:1).",
+               .hidden_aliases = {"--real-time-clint"}},
+              {.option = "--no-realtime",
+               .description = "Disable real-time pacing and run at maximum speed."},
+              {.option = "--mode <MODE>",
+               .description = "Select fast, detailed, or cycle-accurate execution."},
+              {.option = "--pipeline <TYPE>",
+               .description = "Select the CA pipeline: 3stage or 5stage (default: 5stage)."},
+              {.option = "--no-forwarding", .description = "Disable operand forwarding."},
+              {.option = "--early-out-div",
+               .description = "Enable realistic data-dependent early-out division latency."},
+              {.option = "--bpred <TYPE>",
+               .description = "Select none, static, bimodal, gshare, or tournament prediction.",
+               .hidden_aliases = {"--bpred-type"}},
+              {.option = "--bht-size <N>",
+               .description = "Set branch history table entries.",
+               .hidden_aliases = {"--bht-entries"}},
+              {.option = "--btb-size <N>",
+               .description = "Set branch target buffer entries.",
+               .hidden_aliases = {"--btb-entries"}},
+              {.option = "--ras-size <N>",
+               .description = "Set return address stack entries.",
+               .hidden_aliases = {"--ras-entries"}},
+              {.option = "--cpu-preset <PRESET>",
+               .description = "Select tiny, balanced, performance, or a model file."},
+              {.option = "--dump-cpu-model <MODEL> [FILE]",
+               .description = "Write a CPU model configuration."},
+              {.option = "--scaffold-cpu-model [FILE]",
+               .description = "Generate a starter CPU model configuration."},
+              {.option = "--validate-config, --validate-cpu-config <FILE>",
+               .description = "Validate a CPU model or platform configuration file."},
+              {.option = "--cfu-plugin <LIB.SO>",
+               .description = "Load a dynamic custom function unit plugin."},
+              {.option = "--plugin, --device-plugin <NAME|SO>[=ARGS]",
+               .description = "Load external MMIO device plugin (e.g. mmc=disk.img)."},
+              {.option = "--bram-prewarm / --no-bram-prewarm",
+               .description = "Control ELF cache prewarming for BRAM parity."}}},
         {.title = "Logging and tracing",
          .entries =
              {{.option = "--log-level <LEVEL>",
@@ -1876,7 +2084,8 @@ auto cli_help_sections() -> const std::vector<HelpSection>& {
               {.option = "-q, --quiet", .description = "Suppress informational startup logs."},
               {.option = "-v, --verbose", .description = "Enable debug diagnostics."},
               {.option = "--log-file <FILE>",
-               .description = "Mirror timestamped diagnostics to a file."},
+               .description = "Mirror timestamped diagnostics to a file.",
+               .hidden_aliases = {"--log"}},
               {.option = "--log-stderr",
                .description = "Route simulator diagnostic logs to stderr instead of stdout."},
               {.option = "--trace-dir <DIR>",
@@ -1888,7 +2097,8 @@ auto cli_help_sections() -> const std::vector<HelpSection>& {
               {.option = "--arch-trace <FILE>",
                .description = "Write JSONL architectural retirement and profile events.",
                .hidden_aliases = {"--architecture-trace"}},
-              {.option = "--trace-level <0-4>", .description = "Limit architectural event detail."},
+              {.option = "--trace-level <0-4>",
+               .description = "Limit architectural event detail (0–4; default: 3)."},
               {.option = "--trace-register-writes",
                .description = "Emit opt-in FP and vector register writes."},
               {.option = "--trace-events <LIST>",
@@ -1904,7 +2114,9 @@ auto cli_help_sections() -> const std::vector<HelpSection>& {
                .description = "Set the inclusive end of the trace cycle window."},
               {.option = "--trace-pc-range <START-END>",
                .description = "Filter architectural trace events by inclusive PC range."},
-              {.option = "--trace", .description = "Record a full architectural text trace."},
+              {.option = "--trace",
+               .description = "Record a full architectural text trace.",
+               .hidden_aliases = {"--log-commits"}},
               {.option = "-r, --trace-range <BEGIN> <END>",
                .description = "Record text trace snapshots within an inclusive mtime range."},
               {.option = "--trace-bpred", .description = "Record branch prediction events."},
@@ -1919,7 +2131,8 @@ auto cli_help_sections() -> const std::vector<HelpSection>& {
                    "Load a lesson mission and enable classroom guidance (interactive TUI)."},
               {.option = "--high-contrast", .description = "Enable the high-contrast TUI palette."},
               {.option = "--step-delay <US>",
-               .description = "Pause execution for US microseconds per cycle/step.",
+               .description =
+                   "Pause execution for US microseconds per cycle/step (µs; default: 0 µs).",
                .hidden_aliases = {"--speed"}},
               {.option = "--inspection-output <FILE>",
                .description = "Write paused-state TUI inspection reports."},
@@ -1936,13 +2149,15 @@ auto cli_help_sections() -> const std::vector<HelpSection>& {
                .description = "Resume from an architectural checkpoint.",
                .hidden_aliases = {"--checkpoint-in"}},
               {.option = "--checkpoint-every <CYCLES>",
-               .description = "Write periodic architectural checkpoints."},
+               .description =
+                   "Write periodic architectural checkpoints (cycles; default: disabled)."},
               {.option = "--checkpoint-dir <DIR>",
                .description = "Set the periodic checkpoint output directory."}}},
         {.title = "Debugging and information",
          .entries =
              {{.option = "-H, --tohost-addr <ADDR>",
-               .description = "Set the tohost address used for test termination.",
+               .description =
+                   "Set the tohost address used for test termination (default: 0x80001000).",
                .hidden_aliases = {"--tohost"}},
               {.option = "--signature <FILE>",
                .description = "Dump architectural test signature on exit.",
@@ -1965,13 +2180,30 @@ auto cli_help_sections() -> const std::vector<HelpSection>& {
               {.option = "--license", .description = "Display the license and copyright notice."},
               {.option = "-h, --help", .description = "Show this help."}}},
         {.title = "",
-         .entries = {{.option = "--no-bram-prewarm",
-                      .description = "",
-                      .show_in_help = false,
-                      .id = "--no-bram-prewarm"},
-                     {.option = "--ca", .description = "", .show_in_help = false},
-                     {.option = "--ia", .description = "", .show_in_help = false},
-                     {.option = "--trace-pc", .description = "", .show_in_help = false}}}};
+         .entries = {
+             {.option = "--no-bram-prewarm",
+              .description = "",
+              .show_in_help = false,
+              .id = "--no-bram-prewarm"},
+             {.option = "--ca", .description = "", .show_in_help = false},
+             {.option = "--ia", .description = "", .show_in_help = false},
+             {.option = "--trace-pc", .description = "", .show_in_help = false},
+             {.option = "--wfi-as-nop",
+              .description = "",
+              .show_in_help = false,
+              .id = "--wfi-as-nop"},
+             {.option = "--varch <VARCH>",
+              .description = "",
+              .show_in_help = false,
+              .id = "--varch"},
+             {.option = "--priv <PRIV>", .description = "", .show_in_help = false, .id = "--priv"},
+             {.option = "--blocksz <SIZE>",
+              .description = "",
+              .show_in_help = false,
+              .id = "--blocksz"},
+             {.option = "--ic <CONFIG>", .description = "", .show_in_help = false, .id = "--ic"},
+             {.option = "--dc <CONFIG>", .description = "", .show_in_help = false, .id = "--dc"},
+             {.option = "--l2 <CONFIG>", .description = "", .show_in_help = false, .id = "--l2"}}}};
     return sections;
 }
 #pragma GCC diagnostic pop
@@ -2121,7 +2353,8 @@ auto cli_short_flag_takes_argument(char c) -> bool {
         std::println(stdout);
     }
     std::print(stdout,
-               "{}Numeric values accept scaled suffixes:{} k/K (10³), m/M (10⁶), g/G (10⁹).\n\n",
+               "{}Numeric values accept scaled suffixes:{} k/K (10³), m/M (10⁶), g/G (10⁹), "
+               "t/T (10¹²), p/P (10¹⁵), as well as binary Ki/Mi/Gi/Ti/Pi (2¹⁰, 2²⁰, ...).\n\n",
                style(kBold), style(kReset));
     std::print(stdout, "{}Examples{}\n", style(kBoldFgBrightBlue), style(kReset));
     std::print(stdout, "  {} -m img/hello.bin -b\n", executable);

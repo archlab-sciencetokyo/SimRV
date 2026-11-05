@@ -240,7 +240,8 @@ auto validate_fdt_isa(std::span<const uint8_t> blob, uint64_t selected_misa)
 
 auto patch_fdt(std::span<const uint8_t> blob, uint64_t dram_base, uint64_t dram_size,
                uint32_t num_harts, FdtFramebufferInfo* out_fb, uint64_t timebase_hz,
-               uint64_t cpu_clock_hz) -> std::expected<std::vector<uint8_t>, std::string> {
+               uint64_t cpu_clock_hz, std::vector<FdtCustomDevice>* out_devices)
+    -> std::expected<std::vector<uint8_t>, std::string> {
     if (timebase_hz > std::numeric_limits<uint32_t>::max()) {
         return std::unexpected("timebase frequency does not fit the FDT 32-bit property");
     }
@@ -270,9 +271,25 @@ auto patch_fdt(std::span<const uint8_t> blob, uint64_t dram_base, uint64_t dram_
                     const auto* hp = prop(c, "height");
                     const auto* sp = prop(c, "stride");
                     const auto* rp = prop(c, "reg");
+                    const auto* fp = prop(c, "format");
                     if (wp != nullptr && wp->data.size() >= 4) out_fb->width = be32(wp->data, 0);
                     if (hp != nullptr && hp->data.size() >= 4) out_fb->height = be32(hp->data, 0);
                     if (sp != nullptr && sp->data.size() >= 4) out_fb->stride = be32(sp->data, 0);
+                    std::string_view fmt_str;
+                    if (fp != nullptr && !fp->data.empty()) {
+                        fmt_str = std::string_view(reinterpret_cast<const char*>(fp->data.data()));
+                        if (!fmt_str.empty() && fmt_str.back() == '\0') {
+                            fmt_str.remove_suffix(1);
+                        }
+                    }
+                    if (fmt_str == "r5g6b5" || (out_fb->stride != 0 && out_fb->width != 0 &&
+                                                out_fb->stride / out_fb->width == 2)) {
+                        out_fb->bpp = 2;
+                        out_fb->format = FdtFramebufferFormat::R5G6B5;
+                    } else {
+                        out_fb->bpp = 4;
+                        out_fb->format = FdtFramebufferFormat::A8R8G8B8;
+                    }
                     if (rp != nullptr && rp->data.size() >= 4) {
                         const auto ac = cells(root, "#address-cells", 2);
                         const auto sc = cells(root, "#size-cells", 1);
@@ -285,6 +302,42 @@ auto patch_fdt(std::span<const uint8_t> blob, uint64_t dram_base, uint64_t dram_
                         }
                     }
                     break;
+                }
+            }
+        }
+        if (out_devices != nullptr) {
+            out_devices->clear();
+            const auto ac = cells(root, "#address-cells", 2);
+            const auto sc = cells(root, "#size-cells", 1);
+            for (const auto& c : root.children) {
+                if (c.name == "soc" || c.name.starts_with("soc@")) {
+                    const auto soc_ac = cells(c, "#address-cells", ac);
+                    const auto soc_sc = cells(c, "#size-cells", sc);
+                    for (const auto& dev_node : c.children) {
+                        const auto* comp = prop(dev_node, "compatible");
+                        const auto* rp = prop(dev_node, "reg");
+                        const auto* st = prop(dev_node, "status");
+                        if (st != nullptr && !st->data.empty() &&
+                            std::string_view(reinterpret_cast<const char*>(st->data.data())) ==
+                                "disabled") {
+                            continue;
+                        }
+                        if (rp != nullptr && rp->data.size() >= (soc_ac + soc_sc) * 4) {
+                            FdtCustomDevice dev{};
+                            dev.name = dev_node.name;
+                            if (comp != nullptr && !comp->data.empty()) {
+                                dev.compatible = reinterpret_cast<const char*>(comp->data.data());
+                            }
+                            if (soc_ac == 2) {
+                                dev.base = be64(rp->data, 0);
+                                dev.size = (soc_sc == 2) ? be64(rp->data, 8) : be32(rp->data, 8);
+                            } else {
+                                dev.base = be32(rp->data, 0);
+                                dev.size = (soc_sc == 2) ? be64(rp->data, 4) : be32(rp->data, 4);
+                            }
+                            out_devices->push_back(std::move(dev));
+                        }
+                    }
                 }
             }
         }

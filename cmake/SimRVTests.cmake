@@ -136,6 +136,11 @@ if(BUILD_TESTING)
                              PRIVATE "${PROJECT_SOURCE_DIR}/include")
   simrv_apply_options(test-cfu-plugin)
 
+  add_library(test-device-plugin SHARED tests/TestDevicePlugin.cpp)
+  target_include_directories(test-device-plugin
+                             PRIVATE "${PROJECT_SOURCE_DIR}/include")
+  simrv_apply_options(test-device-plugin)
+
   simrv_add_runtime_test(
     simrv-cfu-provingground-tests tests/CfuProvingGroundTests.cpp
     cfu-provingground "gate;regress;pipeline;cfu")

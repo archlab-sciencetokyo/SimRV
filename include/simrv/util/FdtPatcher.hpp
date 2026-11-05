@@ -9,10 +9,24 @@
 
 namespace simrv::util {
 
+enum class FdtFramebufferFormat : uint8_t {
+    A8R8G8B8 = 0,
+    R5G6B5 = 1,
+};
+
 struct FdtFramebufferInfo {
     uint32_t width = 0;
     uint32_t height = 0;
     uint32_t stride = 0;
+    uint64_t base = 0;
+    uint64_t size = 0;
+    FdtFramebufferFormat format = FdtFramebufferFormat::A8R8G8B8;
+    uint32_t bpp = 4;
+};
+
+struct FdtCustomDevice {
+    std::string name;
+    std::string compatible;
     uint64_t base = 0;
     uint64_t size = 0;
 };
@@ -24,6 +38,7 @@ auto validate_fdt_isa(std::span<const uint8_t> blob, uint64_t selected_misa)
 /** Patch a supplied flattened device tree to match the active SimRV RAM and hart count. */
 auto patch_fdt(std::span<const uint8_t> blob, uint64_t dram_base, uint64_t dram_size,
                uint32_t num_harts, FdtFramebufferInfo* out_fb = nullptr, uint64_t timebase_hz = 0,
-               uint64_t cpu_clock_hz = 0) -> std::expected<std::vector<uint8_t>, std::string>;
+               uint64_t cpu_clock_hz = 0, std::vector<FdtCustomDevice>* out_devices = nullptr)
+    -> std::expected<std::vector<uint8_t>, std::string>;
 
 }  // namespace simrv::util
