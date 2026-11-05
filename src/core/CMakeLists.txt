@@ -29,7 +29,6 @@ simrv_add_component(simrv-core
   ../explain/InstructionExplainer.cpp
   ../explain/ExplainCliPrinter.cpp
 )
-set_source_files_properties(CpuFastExecution.cpp PROPERTIES COMPILE_OPTIONS "-fno-jump-tables")
 add_library(simrv::core ALIAS simrv-core)
 
 add_library(simrv-runtime STATIC
