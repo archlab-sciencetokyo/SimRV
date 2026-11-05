@@ -11,7 +11,7 @@ if(SIMRV_BUILD_RVCOMP_PLUGINS)
 
   install(TARGETS simrv-mmc simrv-reset simrv-ethernet
     LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}/simrv/plugins
-    COMPONENT Runtime)
+    COMPONENT Tools)
 endif()
 
 if(SIMRV_BUILD_CFU_PLUGINS)
@@ -19,7 +19,7 @@ if(SIMRV_BUILD_CFU_PLUGINS)
 
   install(TARGETS simrv-cfu-provingground
     LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}/simrv/plugins
-    COMPONENT Runtime)
+    COMPONENT Tools)
 endif()
 
 
