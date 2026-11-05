@@ -3213,14 +3213,12 @@ SIMRV_ALWAYS_INLINE auto CPU::run_fast_os_kernel(Machine& machine, uint32_t batc
                 if (machine.clock_divider().advance_fast_cycles(
                         chunk_cycles, clint_mmio.rtc_divider, clint_mmio.mtime) > 0) {
                     evaluate_timer_interrupt();
-                    handle_cached_interrupts();
                 }
             } else {
                 clint_mmio.mtime.store(
                     machine.primary_hart().clint_mmio.mtime.load(std::memory_order_relaxed),
                     std::memory_order_relaxed);
                 evaluate_timer_interrupt();
-                handle_cached_interrupts();
             }
             chunk_cycles = 0;
         }
@@ -3896,6 +3894,7 @@ SIMRV_ALWAYS_INLINE auto CPU::run_fast_os_kernel(Machine& machine, uint32_t batc
             state_.canonicalize_pc();
         }
     }
+    handle_cached_interrupts();
     return cached_ops;
 }
 
