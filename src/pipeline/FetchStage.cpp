@@ -157,9 +157,10 @@ void CPU::fetch_address_translate(Machine& machine) {
         if (simrv::compiler::likely(se1.matches(vpn1, current_asid, state_.priv, soft_tlb_epoch))) {
             w_padr1 = (se1.paddr_base + (w_vadr1 & simrv::memory::kPageMask)).raw();
         } else {
-            TLBEntry* tlb_e1 = tlb.lookup_inst_r(w_vadr1, current_asid, state_.priv);
+            TLBEntry* tlb_e1 =
+                tlb.lookup_inst_r(simrv::xlen::VirtAddr{w_vadr1}, current_asid, state_.priv);
             if (tlb_e1) {
-                w_padr1 = tlb_e1->p_addr + (w_vadr1 & simrv::memory::kPageMask);
+                w_padr1 = (tlb_e1->p_addr + (w_vadr1 & simrv::memory::kPageMask)).raw();
                 simrv::xlen::Byte* const host_base =
                     (machine.ram_view().contains(tlb_e1->p_addr, 4096) &&
                      (state_.num_active_pmp == 0 ||
@@ -184,9 +185,10 @@ void CPU::fetch_address_translate(Machine& machine) {
                     se2.matches(vpn2, current_asid, state_.priv, soft_tlb_epoch))) {
                 w_padr2 = (se2.paddr_base + (w_vadr2 & simrv::memory::kPageMask)).raw();
             } else {
-                TLBEntry* tlb_e2 = tlb.lookup_inst_r(w_vadr2, current_asid, state_.priv);
+                TLBEntry* tlb_e2 =
+                    tlb.lookup_inst_r(simrv::xlen::VirtAddr{w_vadr2}, current_asid, state_.priv);
                 if (tlb_e2) {
-                    w_padr2 = tlb_e2->p_addr + (w_vadr2 & simrv::memory::kPageMask);
+                    w_padr2 = (tlb_e2->p_addr + (w_vadr2 & simrv::memory::kPageMask)).raw();
                     simrv::xlen::Byte* const host_base =
                         (machine.ram_view().contains(tlb_e2->p_addr, 4096) &&
                          (state_.num_active_pmp == 0 ||
@@ -235,7 +237,8 @@ void CPU::fetch_resolve_page_walk(Machine& machine, int state) {
                     w_padr = res.physical_address;
                     const simrv::xlen::Word asid =
                         simrv::xlen::satp_asid(active_satp(), state_.regs.xlen);
-                    tlb.insert_inst_r(w_vadr, w_padr.raw(), asid, state_.priv, res.global());
+                    tlb.insert_inst_r(simrv::xlen::VirtAddr{w_vadr}, w_padr, asid, state_.priv,
+                                      res.global());
                     const simrv::xlen::Address vpn = w_vadr >> 12;
                     const simrv::xlen::PhysAddr page_base = w_padr & ~simrv::memory::kPageMask;
                     simrv::xlen::Byte* const host_base =
@@ -400,7 +403,7 @@ void CPU::fetch_read_instruction_word(Machine& machine) {
                 const simrv::xlen::PhysAddr next_line = base + simrv::cache::ICache::kLineBytes;
                 if (machine.memory_geometry().contains(next_line.raw(),
                                                        simrv::cache::ICache::kLineBytes) &&
-                    icache.line_state(next_line.raw()) == simrv::memory::MesiState::Invalid) {
+                    icache.line_state(next_line) == simrv::memory::MesiState::Invalid) {
                     simrv::memory::TlChannelA pf_req{};
                     pf_req.opcode = simrv::memory::TlOpcodeA::Intent;
                     pf_req.intent = simrv::memory::TlIntent::PrefetchRead;
@@ -426,7 +429,7 @@ void CPU::fetch_read_instruction_word(Machine& machine) {
             uint32_t w_data = 0;
             if (!refill_in_progress) {
                 const auto misses_before = icache.miss_count();
-                if (icache.read(ctx.padr1.raw(), w_data)) {
+                if (icache.read(ctx.padr1, w_data)) {
                     trigger_prefetch(line_base);
                     if ((w_data & 0x3) != 0x3) {
                         ctx.ir_org = w_data & 0xFFFF;
@@ -464,7 +467,7 @@ void CPU::fetch_read_instruction_word(Machine& machine) {
                         fill.reset();
                         return;
                     }
-                    icache.insert(line_base.raw(), timed.line_data.data(),
+                    icache.insert(line_base, timed.line_data.data(),
                                   simrv::memory::mesi_for(timed.payload.cap));
                     release_instruction_eviction(machine, *this);
                     machine.memory_.system_bus().grant_ack(
@@ -517,7 +520,7 @@ void CPU::fetch_read_instruction_word(Machine& machine) {
                 ctx.pending_tval = state_.pc;
                 return;
             }
-            icache.insert(line_base.raw(), line_data.data(), simrv::memory::mesi_for(resp.cap));
+            icache.insert(line_base, line_data.data(), simrv::memory::mesi_for(resp.cap));
             release_instruction_eviction(machine, *this);
             machine.memory_.system_bus().grant_ack(simrv::memory::TlChannelE{.sink = resp.sink});
             const auto byte_offset = static_cast<size_t>(ctx.padr1.raw() - line_base.raw());
@@ -541,7 +544,7 @@ void CPU::fetch_read_instruction_word(Machine& machine) {
 
             if (!h_refill_in_progress) {
                 const auto misses_before = icache.miss_count();
-                if (icache.read16(paddr.raw(), h_data)) {
+                if (icache.read16(paddr, h_data)) {
                     trigger_prefetch(h_line_base);
                     return h_data;
                 }
@@ -575,7 +578,7 @@ void CPU::fetch_read_instruction_word(Machine& machine) {
                         fill.reset();
                         return std::nullopt;
                     }
-                    icache.insert(h_line_base.raw(), timed.line_data.data(),
+                    icache.insert(h_line_base, timed.line_data.data(),
                                   simrv::memory::mesi_for(timed.payload.cap));
                     release_instruction_eviction(machine, *this);
                     machine.memory_.system_bus().grant_ack(
@@ -622,7 +625,7 @@ void CPU::fetch_read_instruction_word(Machine& machine) {
                 ctx.pending_tval = vaddr;
                 return std::nullopt;
             }
-            icache.insert(h_line_base.raw(), line_data.data(), simrv::memory::mesi_for(resp.cap));
+            icache.insert(h_line_base, line_data.data(), simrv::memory::mesi_for(resp.cap));
             release_instruction_eviction(machine, *this);
             machine.memory_.system_bus().grant_ack(simrv::memory::TlChannelE{.sink = resp.sink});
             const auto byte_offset = static_cast<size_t>(paddr.raw() - h_line_base.raw());

@@ -895,7 +895,7 @@ auto main() -> int {
         expect(machine.initialize().has_value(), "machine accepts relocated built-in devices");
         const auto& router = machine.memory().system_bus().router();
         for (const auto& device : cfg.soc.devices) {
-            auto* runtime_device = router.resolve_device(device.base);
+            auto* runtime_device = router.resolve_device(simrv::xlen::PhysAddr{device.base});
             expect(runtime_device != nullptr,
                    "relocated device is registered at its configured base");
             if (runtime_device != nullptr) {
@@ -904,11 +904,12 @@ auto main() -> int {
                        "runtime device range matches configured descriptor");
             }
         }
-        expect(router.resolve_device(imsic.regions.front().base) != nullptr &&
-                   router.resolve_device(aplic.regions.front().base) != nullptr,
-               "supervisor AIA windows follow their configured auxiliary regions");
+        expect(
+            router.resolve_device(simrv::xlen::PhysAddr{imsic.regions.front().base}) != nullptr &&
+                router.resolve_device(simrv::xlen::PhysAddr{aplic.regions.front().base}) != nullptr,
+            "supervisor AIA windows follow their configured auxiliary regions");
 
-        auto* runtime_uart = router.resolve_device(uart.base);
+        auto* runtime_uart = router.resolve_device(simrv::xlen::PhysAddr{uart.base});
         if (runtime_uart != nullptr) {
             simrv::memory::TlChannelA enable_rx_irq{};
             enable_rx_irq.opcode = simrv::memory::TlOpcodeA::PutFullData;
@@ -1085,8 +1086,8 @@ auto main() -> int {
         simrv::core::Machine machine(cfg);
         expect(machine.initialize().has_value(), "machine accepts relocated PCIe topology");
         const auto& router = machine.memory().system_bus().router();
-        auto* ecam_node = router.resolve_device(cfg.soc.pcie.ecam_base);
-        auto* mmio_node = router.resolve_device(cfg.soc.pcie.mmio_base);
+        auto* ecam_node = router.resolve_device(simrv::xlen::PhysAddr{cfg.soc.pcie.ecam_base});
+        auto* mmio_node = router.resolve_device(simrv::xlen::PhysAddr{cfg.soc.pcie.mmio_base});
         expect(ecam_node != nullptr && ecam_node->base_address() == cfg.soc.pcie.ecam_base &&
                    ecam_node->size() == cfg.soc.pcie.ecam_size,
                "relocated ECAM window is registered on the system bus");

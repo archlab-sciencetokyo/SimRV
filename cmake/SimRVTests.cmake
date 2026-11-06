@@ -72,7 +72,7 @@ if(BUILD_TESTING)
     simrv-instruction-explainer-tests tests/InstructionExplainerTests.cpp
     instruction-explainer "gate;regress;core")
   simrv_add_runtime_test(simrv-scoreboard-tests tests/ScoreboardTests.cpp
-                         scoreboard-tests "gate;regress;pipeline")
+                         scoreboard "gate;regress;pipeline")
   simrv_add_runtime_test(
     simrv-pipeline-hazard-tests tests/PipelineHazardTests.cpp pipeline-hazards
     "gate;regress;pipeline")
@@ -121,36 +121,45 @@ if(BUILD_TESTING)
                          "gate;regress;debug;thread")
   set_tests_properties(gdb-stub PROPERTIES TIMEOUT 30)
   simrv_add_runtime_test(
-    simrv-modern-platform-tests tests/ModernPlatformTests.cpp modern-platform
+    simrv-platform-integration-tests tests/ModernPlatformTests.cpp platform-integration
     "gate;regress;semantic;device;mmio;pcie;aia")
   simrv_add_runtime_test(simrv-trace-tests tests/TraceTests.cpp architectural-trace
                          "gate;regress;core;trace")
   if(SIMRV_ENABLE_TSAN)
     set_property(
-      TEST modern-platform
+      TEST platform-integration
       APPEND
       PROPERTY LABELS thread)
   endif()
-  add_library(test-cfu-plugin SHARED tests/TestCfuPlugin.cpp)
-  target_include_directories(test-cfu-plugin
-                             PRIVATE "${PROJECT_SOURCE_DIR}/include")
-  simrv_apply_options(test-cfu-plugin)
+  function(simrv_add_test_plugin target output_name source)
+    add_library(${target} SHARED ${source})
+    set_target_properties(${target} PROPERTIES OUTPUT_NAME ${output_name})
+    target_include_directories(${target} PRIVATE "${PROJECT_SOURCE_DIR}/include")
+    simrv_apply_options(${target})
+  endfunction()
 
-  add_library(test-device-plugin SHARED tests/TestDevicePlugin.cpp)
-  target_include_directories(test-device-plugin
-                             PRIVATE "${PROJECT_SOURCE_DIR}/include")
-  simrv_apply_options(test-device-plugin)
+  simrv_add_test_plugin(simrv-test-cfu-plugin test-cfu-plugin tests/TestCfuPlugin.cpp)
+  simrv_add_test_plugin(simrv-test-mmc-plugin test-device-plugin tests/TestDevicePlugin.cpp)
+  simrv_add_test_plugin(simrv-test-serial-plugin test-serial-plugin tests/TestSerialPlugin.cpp)
 
   simrv_add_runtime_test(
     simrv-cfu-provingground-tests tests/CfuProvingGroundTests.cpp
     cfu-provingground "gate;regress;pipeline;cfu")
   target_compile_definitions(
     simrv-cfu-provingground-tests
-    PRIVATE TEST_CFU_PLUGIN_PATH="$<TARGET_FILE:test-cfu-plugin>")
-  add_dependencies(simrv-cfu-provingground-tests test-cfu-plugin)
+    PRIVATE TEST_CFU_PLUGIN_PATH="$<TARGET_FILE:simrv-test-cfu-plugin>")
+  add_dependencies(simrv-cfu-provingground-tests simrv-test-cfu-plugin)
 
   simrv_add_runtime_test(simrv-rvcomp-tests tests/RvCompTests.cpp rvcomp
                          "gate;regress;pipeline;rvcomp")
+  simrv_add_runtime_test(simrv-device-plugin-tests tests/DevicePluginTests.cpp device-plugins
+                         "gate;regress;device;plugin")
+  target_compile_definitions(simrv-device-plugin-tests PRIVATE
+                             TEST_SERIAL_PLUGIN_PATH="$<TARGET_FILE:simrv-test-serial-plugin>")
+  add_dependencies(simrv-device-plugin-tests simrv-test-serial-plugin)
+  if(TARGET simrv-mmc)
+    add_dependencies(simrv-rvcomp-tests simrv-mmc)
+  endif()
 
   simrv_add_runtime_test(
     simrv-cpu-model-loader-tests tests/CpuModelLoaderTests.cpp cpu-model-loader
@@ -175,7 +184,7 @@ if(BUILD_TESTING)
   # Architectural equivalence is a first-class native gate. The fixture
   # deliberately exercises functional execution and both CA pipelines while
   # excluding cache/cycle/UI observations.
-  add_test(NAME semantic-equivalence COMMAND simrv-modern-platform-tests
+  add_test(NAME semantic-equivalence COMMAND simrv-platform-integration-tests
                                              --semantic-equivalence)
   set_tests_properties(semantic-equivalence
                        PROPERTIES LABELS "gate;semantic;equivalence")

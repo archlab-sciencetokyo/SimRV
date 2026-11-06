@@ -249,14 +249,16 @@ Tui::Tui(simrv::core::Machine& machine) : machine_(machine), modal_(machine) {
 Tui::~Tui() {
     shutdown();
     if (mission_breakpoint_addr_)
-        machine_.breakpoint_manager().remove_pc_breakpoint(*mission_breakpoint_addr_,
-                                                           simrv::debug::BreakpointOwner::Mission);
+        machine_.breakpoint_manager().remove_pc_breakpoint(
+            simrv::xlen::VirtAddr{*mission_breakpoint_addr_},
+            simrv::debug::BreakpointOwner::Mission);
 }
 
 void Tui::sync_mission_checkpoint() {
     if (mission_breakpoint_addr_) {
-        machine_.breakpoint_manager().remove_pc_breakpoint(*mission_breakpoint_addr_,
-                                                           simrv::debug::BreakpointOwner::Mission);
+        machine_.breakpoint_manager().remove_pc_breakpoint(
+            simrv::xlen::VirtAddr{*mission_breakpoint_addr_},
+            simrv::debug::BreakpointOwner::Mission);
         mission_breakpoint_addr_.reset();
     }
     const auto progress = mission_.checkpoint_progress();
@@ -269,7 +271,7 @@ void Tui::sync_mission_checkpoint() {
             "instructor to load the matching program file.");
         return;
     }
-    machine_.breakpoint_manager().add_pc_breakpoint(*address,
+    machine_.breakpoint_manager().add_pc_breakpoint(simrv::xlen::VirtAddr{*address},
                                                     simrv::debug::BreakpointOwner::Mission);
     mission_breakpoint_addr_ = *address;
 }
@@ -3899,12 +3901,12 @@ void Tui::execute_footer_action(TuiFooterAction action) {
             break;
         case TuiFooterAction::TogglePcBreakpoint: {
             simrv::xlen::Address pc = machine_.primary_hart().state().pc;
-            if (machine_.breakpoint_manager().has_pc_breakpoint(pc)) {
-                machine_.breakpoint_manager().remove_pc_breakpoint(pc);
+            if (machine_.breakpoint_manager().has_pc_breakpoint(simrv::xlen::VirtAddr{pc})) {
+                machine_.breakpoint_manager().remove_pc_breakpoint(simrv::xlen::VirtAddr{pc});
                 modal_.open_notice("BREAKPOINT REMOVED",
                                    std::format("Removed PC breakpoint at 0x{:08x}", pc), false);
             } else {
-                machine_.breakpoint_manager().add_pc_breakpoint(pc);
+                machine_.breakpoint_manager().add_pc_breakpoint(simrv::xlen::VirtAddr{pc});
                 modal_.open_notice("BREAKPOINT CREATED",
                                    std::format("PC breakpoint set at 0x{:08x}", pc), false);
             }

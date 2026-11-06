@@ -52,9 +52,22 @@ class MmioRouter {
      */
     void clear();
 
+    /**
+     * @brief Check whether any part of the address range [base, base + size) is already mapped.
+     * @param base Start byte address.
+     * @param size Size in bytes.
+     * @return true if any portion overlaps an existing device. Ambiguous sparse overlaps larger
+     * than 4096 bytes are conservatively reported as mapped.
+     */
+    [[nodiscard]] auto is_range_mapped(simrv::xlen::PhysAddr base, simrv::xlen::Address size) const
+        -> bool;
+
+    template <std::integral I>
+    auto is_range_mapped(I, simrv::xlen::Address) const -> bool = delete;
+
     struct DeviceEntry {
-        simrv::xlen::Address base = 0;
-        simrv::xlen::Address end = 0;
+        simrv::xlen::PhysAddr base{};
+        simrv::xlen::PhysAddr end{};
         TileLinkNode* node = nullptr;
         simrv::xlen::Address alignment = 1;
         bool is_read_only = false;
@@ -65,14 +78,12 @@ class MmioRouter {
      * @param addr Target byte address.
      * @return Pointer to target TileLinkNode if found, nullptr otherwise.
      */
-    [[nodiscard]] auto resolve_device(simrv::xlen::Address addr) const -> TileLinkNode*;
-    [[nodiscard]] auto resolve_entry(simrv::xlen::Address addr) const -> const DeviceEntry*;
-    [[nodiscard]] auto resolve_device(simrv::xlen::PhysAddr paddr) const -> TileLinkNode* {
-        return resolve_device(paddr.raw());
-    }
-    [[nodiscard]] auto resolve_entry(simrv::xlen::PhysAddr paddr) const -> const DeviceEntry* {
-        return resolve_entry(paddr.raw());
-    }
+    [[nodiscard]] auto resolve_device(simrv::xlen::PhysAddr addr) const -> TileLinkNode*;
+    [[nodiscard]] auto resolve_entry(simrv::xlen::PhysAddr addr) const -> const DeviceEntry*;
+    template <std::integral I>
+    auto resolve_device(I) const -> TileLinkNode* = delete;
+    template <std::integral I>
+    auto resolve_entry(I) const -> const DeviceEntry* = delete;
 
     /**
      * @brief Search for a device node by string name.

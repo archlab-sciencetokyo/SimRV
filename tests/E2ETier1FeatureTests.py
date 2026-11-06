@@ -513,7 +513,7 @@ class E2ETier1FeatureTests(unittest.TestCase):
         )
         self.assertEqual(res.returncode, 0, res.stderr)
         self.assertIn("core-semantics", res.stdout)
-        self.assertIn("modern-platform", res.stdout)
+        self.assertIn("platform-integration", res.stdout)
 
     def test_f3_4_no_orphaned_pyc(self) -> None:
         """Verify no .pyc files are tracked in git index."""

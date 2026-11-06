@@ -4,6 +4,7 @@
  */
 
 #include <algorithm>
+#include <cstddef>
 #include <cstdint>
 #include <cstdlib>
 #include <filesystem>
@@ -11,6 +12,7 @@
 #include <iostream>
 #include <sstream>
 #include <string_view>
+#include <type_traits>
 
 #include "simrv/core/Cpu.hpp"
 #include "simrv/core/CpuConfigParser.hpp"
@@ -18,6 +20,7 @@
 #include "simrv/core/MachineConfig.hpp"
 #include "simrv/core/SoCDeviceRegistry.hpp"
 #include "simrv/device/DummyMmio.hpp"
+#include "simrv/device/ExternalDevicePlugin.hpp"
 #include "simrv/device/PlatformDeviceRegistry.hpp"
 #include "simrv/device/ResetControlMmio.hpp"
 #include "simrv/device/RingBufferEthernetMmio.hpp"
@@ -38,6 +41,17 @@
         }                                                                                 \
     } while (0)
 
+static_assert(SIMRV_EXTERNAL_DEVICE_API_VERSION == 1);
+static_assert(std::is_standard_layout_v<SimRvExternalDevice>);
+static_assert(std::is_standard_layout_v<SimRvHostServices>);
+static_assert(std::is_trivially_copyable_v<SimRvExternalDevice>);
+static_assert(offsetof(SimRvExternalDevice, api_version) == 0);
+static_assert(sizeof(void*) != 8 ||
+              (sizeof(SimRvExternalDevice) == 88 && sizeof(SimRvHostServices) == 32 &&
+               offsetof(SimRvExternalDevice, default_base) == 24 &&
+               offsetof(SimRvExternalDevice, init) == 40 &&
+               offsetof(SimRvExternalDevice, set_host_services) == 80));
+
 using simrv::isa::IsaPreset;
 using simrv::pipeline::BranchPredictorType;
 using simrv::pipeline::CpuModelPreset;
@@ -49,7 +63,9 @@ class TestCustomMmio final : public simrv::memory::MmioDevice {
     explicit TestCustomMmio(const simrv::core::SoCDeviceConfig& config)
         : name_(config.name), base_(config.base), size_(config.size) {}
     [[nodiscard]] auto name() const -> const char* override { return name_.c_str(); }
-    [[nodiscard]] auto base_address() const -> simrv::xlen::Address override { return base_; }
+    [[nodiscard]] auto base_address() const -> simrv::xlen::PhysAddr override {
+        return simrv::xlen::PhysAddr{base_};
+    }
     [[nodiscard]] auto size() const -> simrv::xlen::Address override { return size_; }
     [[nodiscard]] auto read32(simrv::xlen::Address) -> uint32_t override { return 0x51a7; }
 
@@ -377,6 +393,101 @@ void test_dummy_mmio_behavior() {
     TEST_CHECK(device.read32(0) == 0x12345678);
 }
 
+void test_rvcomp_mmc_plugin_and_device() {
+    std::cout << "[Test] RVComp MMC external plugin and block device...\n";
+    simrv::core::Machine machine(simrv::core::MachineConfig{
+        .soc = simrv::core::SoCConfig::rvcomp(),
+    });
+
+    // 1. Full disk image test (with 32 MiB prefix and ext4 magic at 32 MiB + 0x438)
+    const auto full_image_path =
+        std::filesystem::temp_directory_path() / "simrv-rvcomp-mmc-full.img";
+    {
+        std::ofstream img(full_image_path, std::ios::binary | std::ios::trunc);
+        img.seekp(0x2000000ULL + 65536ULL - 1);
+        img.put('\0');
+        img.seekp(0x2000000ULL + 0x438ULL);
+        const uint16_t magic = 0xef53;
+        img.write(reinterpret_cast<const char*>(&magic), sizeof(magic));
+        img.seekp(0x2000000ULL);
+        const uint32_t payload = 0x11223344U;
+        img.write(reinterpret_cast<const char*>(&payload), sizeof(payload));
+    }
+
+    TEST_CHECK(simrv::device::autodiscover_external_device_plugin(
+        "isct,rvcomp-mmc", full_image_path.string(), machine.device_registry()));
+
+    simrv::core::SoCDeviceConfig full_cfg{};
+    full_cfg.kind = simrv::core::SoCDeviceKind::CustomMmio;
+    full_cfg.name = "rvcomp-mmc";
+    full_cfg.compatible = "isct,rvcomp-mmc";
+    full_cfg.base = 0xa0000000;
+    full_cfg.size = 0x2000;
+    full_cfg.enabled = true;
+
+    auto full_dev = machine.device_registry().create_mmio(machine, full_cfg);
+    TEST_CHECK(full_dev != nullptr);
+    TEST_CHECK(full_dev->base_address() == 0xa0000000);
+    TEST_CHECK(full_dev->size() == 0x2000);
+
+    // Guest driver requests partition block index 8192 (0x2000 = 32 MiB / 4096)
+    full_dev->write32(0, 8192);
+    TEST_CHECK(full_dev->read32(0) == 8192);
+    TEST_CHECK(full_dev->read32(0x1000) == 0x11223344U);
+
+    full_dev->write32(0x1000, 0x55667788U);
+    full_dev->write32(0, 8193);
+
+    {
+        std::ifstream img(full_image_path, std::ios::binary);
+        img.seekg(0x2000000ULL);
+        uint32_t readback = 0;
+        img.read(reinterpret_cast<char*>(&readback), sizeof(readback));
+        TEST_CHECK(readback == 0x55667788U);
+    }
+    full_dev.reset();
+    std::error_code ec;
+    std::filesystem::remove(full_image_path, ec);
+
+    // 2. Raw partition image test (< 32 MiB, where 8192 maps to block 0)
+    const auto raw_image_path = std::filesystem::temp_directory_path() / "simrv-rvcomp-mmc-raw.img";
+    {
+        std::ofstream img(raw_image_path, std::ios::binary | std::ios::trunc);
+        img.seekp(65536 - 1);
+        img.put('\0');
+        img.seekp(0x438);
+        const uint16_t magic = 0xef53;
+        img.write(reinterpret_cast<const char*>(&magic), sizeof(magic));
+        img.seekp(0);
+        const uint32_t payload = 0xaabbccddU;
+        img.write(reinterpret_cast<const char*>(&payload), sizeof(payload));
+    }
+
+    simrv::core::Machine raw_machine(simrv::core::MachineConfig{
+        .soc = simrv::core::SoCConfig::rvcomp(),
+    });
+    TEST_CHECK(simrv::device::autodiscover_external_device_plugin(
+        "isct,rvcomp-mmc", raw_image_path.string(), raw_machine.device_registry()));
+
+    auto raw_dev = raw_machine.device_registry().create_mmio(raw_machine, full_cfg);
+    TEST_CHECK(raw_dev != nullptr);
+    raw_dev->write32(0, 8192);
+    TEST_CHECK(raw_dev->read32(0x1000) == 0xaabbccddU);
+
+    raw_dev->write32(0x1000, 0x12344321U);
+    raw_dev->write32(0, 8193);
+
+    {
+        std::ifstream img(raw_image_path, std::ios::binary);
+        img.seekg(0);
+        uint32_t readback = 0;
+        img.read(reinterpret_cast<char*>(&readback), sizeof(readback));
+        TEST_CHECK(readback == 0x12344321U);
+    }
+    raw_dev.reset();
+    std::filesystem::remove(raw_image_path, ec);
+}
+
 int main() {
     test_timing_front_cache();
     std::cout << "=== Running RVComp Profile Tests ===" << std::endl;
@@ -386,6 +497,7 @@ int main() {
     test_soc_manifest_export();
     test_rvcomp_reset_and_ethernet_extensions();
     test_dummy_mmio_behavior();
+    test_rvcomp_mmc_plugin_and_device();
     std::cout << "All RVComp profile tests passed successfully." << std::endl;
     return 0;
 }

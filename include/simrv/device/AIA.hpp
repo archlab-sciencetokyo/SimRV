@@ -40,7 +40,9 @@ class Imsic : public memory::MmioDevice {
     [[nodiscard]] auto name() const -> const char* override {
         return priv_ == Privilege::Machine ? "imsic-m" : "imsic-s";
     }
-    [[nodiscard]] auto base_address() const -> simrv::xlen::Address override { return base_addr_; }
+    [[nodiscard]] auto base_address() const -> simrv::xlen::PhysAddr override {
+        return simrv::xlen::PhysAddr{base_addr_};
+    }
     [[nodiscard]] auto size() const -> simrv::xlen::Address override { return size_; }
     void reset() override;
 
@@ -93,7 +95,9 @@ class Aplic : public memory::MmioDevice {
     [[nodiscard]] auto name() const -> const char* override {
         return priv_ == Privilege::Machine ? "aplic-m" : "aplic-s";
     }
-    [[nodiscard]] auto base_address() const -> simrv::xlen::Address override { return base_addr_; }
+    [[nodiscard]] auto base_address() const -> simrv::xlen::PhysAddr override {
+        return simrv::xlen::PhysAddr{base_addr_};
+    }
     [[nodiscard]] auto size() const -> simrv::xlen::Address override { return size_; }
     void reset() override;
 

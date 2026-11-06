@@ -18,7 +18,7 @@ namespace simrv::memory {
 
 CoherenceHub::CoherenceHub(simrv::core::Machine& machine) : machine_(machine) {
     for (auto& entry : fast_cache_) {
-        entry.line_base = ~LineAddress{0};
+        entry.line_base = simrv::xlen::PhysAddr{~LineAddress{0}};
     }
 }
 
@@ -63,23 +63,24 @@ auto CoherenceHub::shared_l2_for_hart(uint32_t hart) noexcept -> simrv::cache::L
 
 void CoherenceHub::invalidate_shared_caches(LineAddress line_base) {
     const auto aligned = line_base & ~(static_cast<LineAddress>(kLineBytes - 1u));
-    if (l3_enabled_) l3_cache_.invalidate_line(aligned);
-    for (auto& cache : l2_caches_) cache->cache.invalidate_line(aligned);
+    if (l3_enabled_) l3_cache_.invalidate_line(simrv::xlen::PhysAddr{aligned});
+    for (auto& cache : l2_caches_) cache->cache.invalidate_line(simrv::xlen::PhysAddr{aligned});
 }
 
 void CoherenceHub::update_dir_entry(LineAddress line_base, const DirectoryEntry& entry) {
     const LineAddress aligned_addr = line_base & ~(static_cast<LineAddress>(kLineBytes - 1u));
-    directory_[aligned_addr] = entry;
+    directory_[simrv::xlen::PhysAddr{aligned_addr}] = entry;
     const size_t idx = (aligned_addr >> 6) & kFastCacheMask;
-    fast_cache_[idx] = FastCacheEntry{.line_base = aligned_addr, .entry = entry};
+    fast_cache_[idx] =
+        FastCacheEntry{.line_base = simrv::xlen::PhysAddr{aligned_addr}, .entry = entry};
 }
 
 void CoherenceHub::erase_dir_entry(LineAddress line_base) {
     const LineAddress aligned_addr = line_base & ~(static_cast<LineAddress>(kLineBytes - 1u));
-    directory_.erase(aligned_addr);
+    directory_.erase(simrv::xlen::PhysAddr{aligned_addr});
     const size_t idx = (aligned_addr >> 6) & kFastCacheMask;
     if (fast_cache_[idx].line_base == aligned_addr) {
-        fast_cache_[idx].line_base = ~LineAddress{0};
+        fast_cache_[idx].line_base = simrv::xlen::PhysAddr{~LineAddress{0}};
     }
 }
 
@@ -90,22 +91,23 @@ auto CoherenceHub::lookup_dir_entry(LineAddress line_base, DirectoryEntry& out_e
         out_entry = fast_cache_[idx].entry;
         return true;
     }
-    auto it = directory_.find(aligned_addr);
+    auto it = directory_.find(simrv::xlen::PhysAddr{aligned_addr});
     if (it != directory_.end()) {
         out_entry = it->second;
-        fast_cache_[idx] = FastCacheEntry{.line_base = aligned_addr, .entry = it->second};
+        fast_cache_[idx] =
+            FastCacheEntry{.line_base = simrv::xlen::PhysAddr{aligned_addr}, .entry = it->second};
         return true;
     }
     return false;
 }
 
-auto CoherenceHub::get_directory_state(LineAddress line_base) const -> DirectoryEntry {
-    const LineAddress aligned_addr = line_base & ~(static_cast<LineAddress>(kLineBytes - 1u));
+auto CoherenceHub::get_directory_state(simrv::xlen::PhysAddr address) const -> DirectoryEntry {
+    const LineAddress aligned_addr = address.raw() & ~(static_cast<LineAddress>(kLineBytes - 1u));
     const size_t idx = (aligned_addr >> 6) & kFastCacheMask;
     if (fast_cache_[idx].line_base == aligned_addr) {
         return fast_cache_[idx].entry;
     }
-    auto it = directory_.find(aligned_addr);
+    auto it = directory_.find(simrv::xlen::PhysAddr{aligned_addr});
     if (it != directory_.end()) {
         return it->second;
     }
@@ -117,16 +119,17 @@ auto CoherenceHub::validate_directory() const -> std::expected<void, std::string
         const bool has_owner = entry.owner_hart.has_value();
         const unsigned sharers = std::popcount(entry.sharers_mask);
         if (entry.state == MesiState::Invalid || entry.sharers_mask == 0) {
-            return std::unexpected(std::format("invalid live directory entry at {:#x}", address));
+            return std::unexpected(
+                std::format("invalid live directory entry at {:#x}", address.raw()));
         }
         if (entry.state == MesiState::Shared && has_owner) {
-            return std::unexpected(std::format("shared line has an owner at {:#x}", address));
+            return std::unexpected(std::format("shared line has an owner at {:#x}", address.raw()));
         }
         if ((entry.state == MesiState::Exclusive || entry.state == MesiState::Modified) &&
             (!has_owner || sharers != 1 ||
              (entry.sharers_mask & (uint64_t{1} << *entry.owner_hart)) == 0)) {
             return std::unexpected(
-                std::format("Trunk line lacks its unique owner at {:#x}", address));
+                std::format("Trunk line lacks its unique owner at {:#x}", address.raw()));
         }
     }
     return {};
@@ -168,9 +171,9 @@ void CoherenceHub::probe_hart_icache(simrv::xlen::HartId hart_id, const TlChanne
     }
 }
 
-void CoherenceHub::invalidate_line_broadcast(LineAddress line_base,
+void CoherenceHub::invalidate_line_broadcast(simrv::xlen::PhysAddr address,
                                              simrv::xlen::HartId initiator_hart) {
-    const LineAddress aligned_addr = line_base & ~(static_cast<LineAddress>(kLineBytes - 1u));
+    const LineAddress aligned_addr = address.raw() & ~(static_cast<LineAddress>(kLineBytes - 1u));
     TlChannelB probe_req{};
     probe_req.opcode = TlOpcodeB::ProbeBlock;
     probe_req.cap = TlCap::ToN;
@@ -186,13 +189,14 @@ void CoherenceHub::invalidate_line_broadcast(LineAddress line_base,
         }
     }
 
-    machine_.memory_.reservation_table().invalidate_matching(aligned_addr, initiator_hart);
+    // A block write affects every reservation granule, including the initiating hart.
+    machine_.memory_.reservation_table().invalidate_range(aligned_addr, kLineBytes);
     invalidate_shared_caches(aligned_addr);
     erase_dir_entry(aligned_addr);
 }
 
-void CoherenceHub::invalidate_line_external(LineAddress line_base) {
-    const LineAddress aligned_addr = line_base & ~(static_cast<LineAddress>(kLineBytes - 1u));
+void CoherenceHub::invalidate_line_external(simrv::xlen::PhysAddr address) {
+    const LineAddress aligned_addr = address.raw() & ~(static_cast<LineAddress>(kLineBytes - 1u));
     DirectoryEntry dir_entry{};
     const bool is_tracked = lookup_dir_entry(aligned_addr, dir_entry);
 
@@ -226,8 +230,9 @@ void CoherenceHub::invalidate_line_external(LineAddress line_base) {
     erase_dir_entry(aligned_addr);
 }
 
-void CoherenceHub::register_preloaded_line(LineAddress line_base, simrv::xlen::HartId hart) {
-    const LineAddress aligned_addr = line_base & ~(static_cast<LineAddress>(kLineBytes - 1u));
+void CoherenceHub::register_preloaded_line(simrv::xlen::PhysAddr address,
+                                           simrv::xlen::HartId hart) {
+    const LineAddress aligned_addr = address.raw() & ~(static_cast<LineAddress>(kLineBytes - 1u));
     if (hart >= machine_.num_harts()) return;
     DirectoryEntry entry{};
     if (lookup_dir_entry(aligned_addr, entry) && entry.state != MesiState::Shared) return;
@@ -318,9 +323,12 @@ auto CoherenceHub::handle_acquire(const TlChannelA& req, TlChannelD& resp,
             if (probe_resp.opcode == TlOpcodeC::ProbeAckData) {
                 std::memcpy(line_buffer.data(), dirty.data(), kLineBytes);
                 data_fetched_from_owner = true;
-                if (l3_enabled_) l3_cache_.write_line(line_base, line_buffer, MesiState::Exclusive);
+                if (l3_enabled_)
+                    l3_cache_.write_line(simrv::xlen::PhysAddr{line_base}, line_buffer,
+                                         MesiState::Exclusive);
                 if (auto* l2 = l2_cache_for_hart(req.hart.val)) {
-                    l2->cache.write_line(line_base, line_buffer, MesiState::Exclusive);
+                    l2->cache.write_line(simrv::xlen::PhysAddr{line_base}, line_buffer,
+                                         MesiState::Exclusive);
                     service_latency = l2->config.miss_latency;
                 }
                 const auto geometry = machine_.memory_geometry();
@@ -378,12 +386,13 @@ auto CoherenceHub::handle_acquire(const TlChannelA& req, TlChannelD& resp,
 
     if (!data_fetched_from_owner) {
         auto* l2 = l2_cache_for_hart(req.hart.val);
-        if (l2 != nullptr && l2->cache.read_line(line_base, line_buffer)) {
+        if (l2 != nullptr && l2->cache.read_line(simrv::xlen::PhysAddr{line_base}, line_buffer)) {
             service_latency = l2->config.hit_latency;
         } else {
             uint32_t lower_latency = 1;
             MesiState l3_state = MesiState::Invalid;
-            if (l3_enabled_ && l3_cache_.lookup_line(line_base, line_buffer, l3_state)) {
+            if (l3_enabled_ &&
+                l3_cache_.lookup_line(simrv::xlen::PhysAddr{line_base}, line_buffer, l3_state)) {
                 lower_latency = topology_.l3.hit_latency;
             } else {
                 const auto geometry = machine_.memory_geometry();
@@ -394,10 +403,13 @@ auto CoherenceHub::handle_acquire(const TlChannelA& req, TlChannelD& resp,
                     std::ranges::fill(line_buffer, static_cast<simrv::xlen::Byte>(0));
                 }
                 lower_latency = topology_.l3.enabled ? topology_.l3.miss_latency : 1;
-                if (l3_enabled_) l3_cache_.write_line(line_base, line_buffer, MesiState::Exclusive);
+                if (l3_enabled_)
+                    l3_cache_.write_line(simrv::xlen::PhysAddr{line_base}, line_buffer,
+                                         MesiState::Exclusive);
             }
             if (l2 != nullptr) {
-                l2->cache.write_line(line_base, line_buffer, MesiState::Exclusive);
+                l2->cache.write_line(simrv::xlen::PhysAddr{line_base}, line_buffer,
+                                     MesiState::Exclusive);
                 service_latency = l2->config.miss_latency + lower_latency - 1;
             } else {
                 service_latency = lower_latency;
@@ -430,17 +442,20 @@ auto CoherenceHub::handle_intent(const TlChannelA& req, TlChannelD& resp) -> boo
     // Warm L3 cache if not present for valid memory addresses
     std::array<simrv::xlen::Byte, kLineBytes> line_buf{};
     MesiState l3_state = MesiState::Invalid;
-    if (!l3_enabled_ || !l3_cache_.lookup_line(line_base, line_buf, l3_state)) {
+    if (!l3_enabled_ ||
+        !l3_cache_.lookup_line(simrv::xlen::PhysAddr{line_base}, line_buf, l3_state)) {
         auto* dram_ptr = machine_.ram_data();
         const auto geometry = machine_.memory_geometry();
         if (dram_ptr != nullptr && geometry.contains(line_base, kLineBytes)) {
             const simrv::xlen::Address offset = line_base - geometry.dram_base;
             std::memcpy(line_buf.data(), dram_ptr + offset, kLineBytes);
-            if (l3_enabled_) l3_cache_.write_line(line_base, line_buf, MesiState::Exclusive);
+            if (l3_enabled_)
+                l3_cache_.write_line(simrv::xlen::PhysAddr{line_base}, line_buf,
+                                     MesiState::Exclusive);
         }
     }
     if (auto* l2 = l2_cache_for_hart(req.hart.val))
-        l2->cache.write_line(line_base, line_buf, MesiState::Exclusive);
+        l2->cache.write_line(simrv::xlen::PhysAddr{line_base}, line_buf, MesiState::Exclusive);
 
     resp.opcode = TlOpcodeD::HintAck;
     resp.size = req.size;
@@ -459,9 +474,12 @@ auto CoherenceHub::handle_release(const TlChannelC& req, TlChannelD& resp,
     stats_.release_count++;
 
     if (req.opcode == TlOpcodeC::ReleaseData && release_data != nullptr) {
-        if (l3_enabled_) l3_cache_.write_line(line_base, *release_data, MesiState::Exclusive);
+        if (l3_enabled_)
+            l3_cache_.write_line(simrv::xlen::PhysAddr{line_base}, *release_data,
+                                 MesiState::Exclusive);
         if (auto* l2 = l2_cache_for_hart(req.hart.val))
-            l2->cache.write_line(line_base, *release_data, MesiState::Exclusive);
+            l2->cache.write_line(simrv::xlen::PhysAddr{line_base}, *release_data,
+                                 MesiState::Exclusive);
         auto* dram_ptr = machine_.ram_data();
         const auto geometry = machine_.memory_geometry();
         if (dram_ptr != nullptr && geometry.contains(line_base, kLineBytes)) {
@@ -476,8 +494,9 @@ auto CoherenceHub::handle_release(const TlChannelC& req, TlChannelD& resp,
         dir_entry.sharers_mask &= ~(uint64_t{1} << req.hart);
         if (req.hart < machine_.num_harts()) {
             const auto& hart = machine_.hart(req.hart);
-            const bool other_copy = hart.icache.line_state(line_base) != MesiState::Invalid ||
-                                    hart.dcache.line_state(line_base) != MesiState::Invalid;
+            const bool other_copy =
+                hart.icache.line_state(simrv::xlen::PhysAddr{line_base}) != MesiState::Invalid ||
+                hart.dcache.line_state(simrv::xlen::PhysAddr{line_base}) != MesiState::Invalid;
             if (other_copy) dir_entry.sharers_mask |= (uint64_t{1} << req.hart);
         }
         if (dir_entry.sharers_mask == 0) {
@@ -507,8 +526,8 @@ auto CoherenceHub::allocate_sink() -> TlSinkId {
 
 void CoherenceHub::process_grant_ack(const TlChannelE& ack) { pending_grants_.erase(ack.sink); }
 
-void CoherenceHub::mark_modified(LineAddress line_base, simrv::xlen::HartId hart) {
-    line_base &= ~(static_cast<LineAddress>(kLineBytes - 1u));
+void CoherenceHub::mark_modified(simrv::xlen::PhysAddr address, simrv::xlen::HartId hart) {
+    const LineAddress line_base = address.raw() & ~(static_cast<LineAddress>(kLineBytes - 1u));
     DirectoryEntry entry{};
     if (!lookup_dir_entry(line_base, entry) || !entry.owner_hart.has_value() ||
         *entry.owner_hart != hart || permission_for(entry.state) != TlPermission::Trunk) {

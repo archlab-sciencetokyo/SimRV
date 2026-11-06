@@ -70,7 +70,9 @@ auto read_trace(const std::filesystem::path& path) -> std::vector<std::string> {
 class TraceTestNode final : public simrv::memory::TileLinkNode {
    public:
     [[nodiscard]] auto name() const -> const char* override { return "trace-test-device"; }
-    [[nodiscard]] auto base_address() const -> simrv::xlen::Address override { return 0x50000000; }
+    [[nodiscard]] auto base_address() const -> simrv::xlen::PhysAddr override {
+        return simrv::xlen::PhysAddr{0x50000000};
+    }
     [[nodiscard]] auto size() const -> simrv::xlen::Address override { return 0x1000; }
     auto handle_request(const simrv::memory::TlChannelA&, simrv::memory::TlChannelD& response)
         -> bool override {
@@ -656,7 +658,7 @@ void test_retired_memory_events_and_address_classification() {
     store.opcode = simrv::isa::Opcode::Store;
     store.op_id = simrv::isa::SW;
     store.funct3 = simrv::isa::Funct3::Sw;
-    store.mem_addr = device.base_address();
+    store.mem_addr = device.base_address().raw();
     store.mem_wdata = 0x89abcdef;
     machine.primary_hart().clint_mmio.mcycle = 12;
     machine.trace().log_architecture_retirement(machine.primary_hart(), store);
@@ -696,14 +698,14 @@ void test_precise_memory_fault_event() {
     context.opcode = simrv::isa::Opcode::Store;
     context.op_id = simrv::isa::SW;
     context.funct3 = simrv::isa::Funct3::Sw;
-    context.mem_addr = device.base_address();
+    context.mem_addr = device.base_address().raw();
     context.mem_wdata = 0xfeedcafe;
     if (!machine.memory().system_bus().router().register_device(&device)) std::abort();
 
     const auto path = trace_path("memory-fault");
     machine.trace().init_architecture_trace(path.string());
     cpu.raise_exception(static_cast<simrv::xlen::TrapCause>(ExceptionCode::FaultStore),
-                        device.base_address());
+                        device.base_address().raw());
     machine.trace().flush_all();
 
     const auto events = read_trace(sibling_path(path, "memory.jsonl"));

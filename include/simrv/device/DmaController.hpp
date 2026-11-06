@@ -69,8 +69,8 @@ class DmaController : public memory::MmioDevice {
     ~DmaController() override = default;
 
     [[nodiscard]] auto name() const -> const char* override { return "dma-controller"; }
-    [[nodiscard]] auto base_address() const -> simrv::xlen::Address override {
-        return base_address_;
+    [[nodiscard]] auto base_address() const -> simrv::xlen::PhysAddr override {
+        return simrv::xlen::PhysAddr{base_address_};
     }
     [[nodiscard]] auto size() const -> simrv::xlen::Address override { return size_; }
 

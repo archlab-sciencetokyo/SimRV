@@ -22,6 +22,7 @@
 #include "simrv/core/Sbi.hpp"
 #include "simrv/execute/ExecuteUnit.hpp"
 #include "simrv/isa/Common.hpp"
+#include "simrv/memory/MemoryAccess.hpp"
 #include "simrv/memory/MemorySubsystem.hpp"
 #include "simrv/memory/MemoryUtil.hpp"
 #include "simrv/memory/MmioRouter.hpp"
@@ -37,6 +38,121 @@ namespace {
 
 auto failures = 0;
 
+template <typename Address>
+concept MmioRoutable = requires(const simrv::memory::MmioRouter& router, Address address) {
+    router.resolve_device(address);
+};
+
+static_assert(MmioRoutable<simrv::xlen::PhysAddr>);
+static_assert(!MmioRoutable<simrv::xlen::VirtAddr>);
+static_assert(!MmioRoutable<simrv::xlen::Address>);
+
+template <typename Address>
+concept MmioRangeAddress = requires(const simrv::memory::MmioRouter& router, Address address) {
+    router.is_range_mapped(address, 1);
+};
+
+static_assert(MmioRangeAddress<simrv::xlen::PhysAddr>);
+static_assert(!MmioRangeAddress<simrv::xlen::VirtAddr>);
+static_assert(!MmioRangeAddress<simrv::xlen::Address>);
+
+template <typename Address>
+concept DeviceOwnershipAddress =
+    requires(const simrv::memory::TileLinkNode& node, Address address) { node.contains(address); };
+
+static_assert(DeviceOwnershipAddress<simrv::xlen::PhysAddr>);
+static_assert(!DeviceOwnershipAddress<simrv::xlen::VirtAddr>);
+static_assert(!DeviceOwnershipAddress<simrv::xlen::Address>);
+static_assert(
+    std::same_as<decltype(std::declval<const simrv::memory::TileLinkNode&>().base_address()),
+                 simrv::xlen::PhysAddr>);
+static_assert(
+    std::same_as<decltype(simrv::memory::MmioRouter::DeviceEntry::base), simrv::xlen::PhysAddr>);
+static_assert(
+    std::same_as<decltype(simrv::memory::MmioRouter::DeviceEntry::end), simrv::xlen::PhysAddr>);
+
+template <typename Address>
+concept DmaAddress = requires(simrv::memory::MemorySubsystem& memory, Address address, void* dst) {
+    memory.dma_read(address, dst, 1);
+};
+
+static_assert(DmaAddress<simrv::xlen::PhysAddr>);
+static_assert(!DmaAddress<simrv::xlen::VirtAddr>);
+static_assert(!DmaAddress<simrv::xlen::Address>);
+
+template <typename Address>
+concept InstructionCacheAddress =
+    requires(simrv::cache::ICache& cache, Address address, uint32_t& word, uint16_t& halfword) {
+        cache.read(address, word);
+        cache.read16(address, halfword);
+    };
+
+static_assert(InstructionCacheAddress<simrv::xlen::PhysAddr>);
+static_assert(!InstructionCacheAddress<simrv::xlen::VirtAddr>);
+static_assert(!InstructionCacheAddress<simrv::xlen::Address>);
+
+template <typename Address, typename Operation>
+concept DataCacheAccess = requires(simrv::cache::DCache& cache, Address address,
+                                   simrv::xlen::Word& data, Operation operation) {
+    cache.read(address, data, operation);
+    cache.write(address, data, operation);
+    cache.zero_line(address);
+};
+
+static_assert(DataCacheAccess<simrv::xlen::PhysAddr, simrv::isa::Funct3>);
+static_assert(!DataCacheAccess<simrv::xlen::VirtAddr, simrv::isa::Funct3>);
+static_assert(!DataCacheAccess<simrv::xlen::Address, simrv::isa::Funct3>);
+static_assert(!DataCacheAccess<simrv::xlen::PhysAddr, simrv::xlen::Instruction>);
+
+template <typename Address>
+concept CacheLineAddress =
+    requires(simrv::cache::DCache& cache, Address address, const simrv::xlen::Byte* line) {
+        cache.insert(address, line);
+        cache.line_state(address);
+        cache.probe_line(address, simrv::memory::MesiState::Invalid);
+        cache.upgrade_line_state(address, simrv::memory::MesiState::Exclusive);
+    };
+
+static_assert(CacheLineAddress<simrv::xlen::PhysAddr>);
+static_assert(!CacheLineAddress<simrv::xlen::VirtAddr>);
+static_assert(!CacheLineAddress<simrv::xlen::Address>);
+static_assert(std::same_as<simrv::memory::CacheTag, simrv::xlen::PhysAddr>);
+static_assert(sizeof(simrv::cache::DCache::CacheLine) == 128);
+static_assert(
+    std::same_as<decltype(simrv::cache::DCache::EvictedLine::address), simrv::xlen::PhysAddr>);
+
+template <typename Address>
+concept SharedCacheAddress =
+    requires(simrv::cache::L2Cache& l2, simrv::cache::L3Cache& l3, Address address,
+             std::array<simrv::xlen::Byte, 64>& line, simrv::memory::MesiState& state) {
+        l2.read_line(address, line);
+        l2.write_line(address, line);
+        l3.lookup_line(address, line, state);
+        l3.invalidate_line(address);
+    };
+
+static_assert(SharedCacheAddress<simrv::xlen::PhysAddr>);
+static_assert(!SharedCacheAddress<simrv::xlen::VirtAddr>);
+static_assert(!SharedCacheAddress<simrv::xlen::Address>);
+
+template <typename V, typename P>
+concept TlbInsertable = requires(simrv::core::Tlb& tlb, V virt, P phys) {
+    tlb.insert_data_r(virt, phys, Asid{}, simrv::xlen::PrivilegeLevel::Supervisor);
+};
+
+template <typename V>
+concept TlbLookupable = requires(simrv::core::Tlb& tlb, V virt) {
+    tlb.lookup_data_r(virt, Asid{}, simrv::xlen::PrivilegeLevel::Supervisor);
+};
+
+static_assert(TlbInsertable<simrv::xlen::VirtAddr, simrv::xlen::PhysAddr>);
+static_assert(!TlbInsertable<simrv::xlen::PhysAddr, simrv::xlen::VirtAddr>);
+static_assert(!TlbInsertable<simrv::xlen::Address, simrv::xlen::PhysAddr>);
+static_assert(!TlbInsertable<simrv::xlen::VirtAddr, simrv::xlen::Address>);
+static_assert(TlbLookupable<simrv::xlen::VirtAddr>);
+static_assert(!TlbLookupable<simrv::xlen::PhysAddr>);
+static_assert(!TlbLookupable<simrv::xlen::Address>);
+
 void expect(bool condition, const std::string& message) {
     if (!condition) {
         std::cerr << "FAIL: " << message << '\n';
@@ -50,7 +166,9 @@ class TestNode final : public simrv::memory::TileLinkNode {
         : base_(base), size_(size), name_(name) {}
 
     [[nodiscard]] auto name() const -> const char* override { return name_; }
-    [[nodiscard]] auto base_address() const -> simrv::xlen::Address override { return base_; }
+    [[nodiscard]] auto base_address() const -> simrv::xlen::PhysAddr override {
+        return simrv::xlen::PhysAddr{base_};
+    }
     [[nodiscard]] auto size() const -> simrv::xlen::Address override { return size_; }
     auto handle_request(const simrv::memory::TlChannelA& req, simrv::memory::TlChannelD& resp)
         -> bool override {
@@ -69,17 +187,72 @@ class TestNode final : public simrv::memory::TileLinkNode {
 
 class NodeWithHole final : public simrv::memory::TileLinkNode {
    public:
+    using TileLinkNode::contains;
     [[nodiscard]] auto name() const -> const char* override { return "node-with-hole"; }
-    [[nodiscard]] auto base_address() const -> simrv::xlen::Address override { return 0x4000; }
+    [[nodiscard]] auto base_address() const -> simrv::xlen::PhysAddr override {
+        return simrv::xlen::PhysAddr{0x4000};
+    }
     [[nodiscard]] auto size() const -> simrv::xlen::Address override { return 0x100; }
-    [[nodiscard]] auto contains(simrv::xlen::Address address) const -> bool override {
+    [[nodiscard]] auto contains(simrv::xlen::PhysAddr physical_address) const -> bool override {
+        const auto address = physical_address.raw();
         return address >= 0x4000 && address < 0x4100 && !(address >= 0x4010 && address < 0x4020);
+    }
+    auto handle_request(const simrv::memory::TlChannelA&, simrv::memory::TlChannelD&)
+        -> bool override {
+        ++requests_;
+        return true;
+    }
+    [[nodiscard]] auto requests() const -> unsigned { return requests_; }
+
+   private:
+    unsigned requests_ = 0;
+};
+
+class NodeWithPinHole final : public simrv::memory::TileLinkNode {
+   public:
+    using TileLinkNode::contains;
+    [[nodiscard]] auto name() const -> const char* override { return "node-with-pin-hole"; }
+    [[nodiscard]] auto base_address() const -> simrv::xlen::PhysAddr override {
+        return simrv::xlen::PhysAddr{0x5000};
+    }
+    [[nodiscard]] auto size() const -> simrv::xlen::Address override { return 0x100; }
+    [[nodiscard]] auto contains(simrv::xlen::PhysAddr physical_address) const -> bool override {
+        const auto address = physical_address.raw();
+        return address >= 0x5000 && address < 0x5100 && address != 0x5003;
+    }
+    auto handle_request(const simrv::memory::TlChannelA&, simrv::memory::TlChannelD&)
+        -> bool override {
+        ++requests;
+        return true;
+    }
+    unsigned requests = 0;
+};
+
+class NodeWithWideHole final : public simrv::memory::TileLinkNode {
+   public:
+    using TileLinkNode::contains;
+    [[nodiscard]] auto name() const -> const char* override { return "node-with-wide-hole"; }
+    [[nodiscard]] auto base_address() const -> simrv::xlen::PhysAddr override {
+        return simrv::xlen::PhysAddr{0x6000};
+    }
+    [[nodiscard]] auto size() const -> simrv::xlen::Address override { return 0x4000; }
+    [[nodiscard]] auto contains(simrv::xlen::PhysAddr physical_address) const -> bool override {
+        const auto address = physical_address.raw();
+        return address == 0x6000;
     }
     auto handle_request(const simrv::memory::TlChannelA&, simrv::memory::TlChannelD&)
         -> bool override {
         return true;
     }
 };
+
+template <typename Node, typename Address>
+concept ConcreteDeviceOwnershipAddress =
+    requires(const Node& node, Address address) { node.contains(address); };
+
+static_assert(ConcreteDeviceOwnershipAddress<NodeWithHole, simrv::xlen::PhysAddr>);
+static_assert(!ConcreteDeviceOwnershipAddress<NodeWithHole, simrv::xlen::Address>);
+static_assert(!ConcreteDeviceOwnershipAddress<NodeWithHole, simrv::xlen::VirtAddr>);
 
 void test_unaligned_host_access() {
     std::array<simrv::xlen::Byte, 16> bytes{};
@@ -679,7 +852,7 @@ void test_selective_tlb_and_decode_cache_flush() {
     expect(cpu.decode_cache.lookup(copB.cpc) != nullptr, "decode cache B is valid before flush");
 
     // Perform selective flush for Page A (match_all_vaddr = false, match_all_asid = true)
-    cpu.TLB_flush(false, kPageA, true, 0);
+    cpu.TLB_flush(false, simrv::xlen::VirtAddr{kPageA}, true, 0);
     // Page A should be invalidated in soft TLB and decode cache
     expect(!cpu.soft_tlb_read[idxA].valid(cpu.soft_tlb_epoch),
            "selective flush invalidates soft TLB read A");
@@ -718,13 +891,15 @@ void test_tlb_and_decode_cache_deduplication() {
     const auto set = simrv::core::Tlb::calc_set(kVaddr);
 
     // Initial insert into empty set -> uses way 0
-    tlb.insert_data_r(kVaddr, kPaddr1, 0, simrv::xlen::PrivilegeLevel::Supervisor);
+    tlb.insert_data_r(simrv::xlen::VirtAddr{kVaddr}, simrv::xlen::PhysAddr{kPaddr1}, 0,
+                      simrv::xlen::PrivilegeLevel::Supervisor);
     expect(tlb.data_r[set][0].valid && tlb.data_r[set][0].p_addr == kPaddr1,
            "initial TLB insert populates first way");
     expect(!tlb.data_r[set][1].valid, "second way remains empty");
 
     // Re-inserting the same vpage updates in place, preserving second way empty
-    tlb.insert_data_r(kVaddr, kPaddr2, 0, simrv::xlen::PrivilegeLevel::Supervisor);
+    tlb.insert_data_r(simrv::xlen::VirtAddr{kVaddr}, simrv::xlen::PhysAddr{kPaddr2}, 0,
+                      simrv::xlen::PrivilegeLevel::Supervisor);
     expect(tlb.data_r[set][0].valid && tlb.data_r[set][0].p_addr == kPaddr2,
            "duplicate TLB insert updates in place without allocating new way");
     expect(!tlb.data_r[set][1].valid, "second way remains empty after re-insert");
@@ -792,16 +967,80 @@ void test_mmio_ranges() {
     TestNode adjacent(0x1200, 0x100, "adjacent");
     TestNode empty(0x3000, 0, "empty");
     TestNode wrapping(std::numeric_limits<simrv::xlen::Address>::max() - 1, 4, "wrapping");
+    TestNode near_end(std::numeric_limits<simrv::xlen::Address>::max() - 16, 16, "near-end");
     NodeWithHole node_with_hole;
+    NodeWithPinHole node_with_pin_hole;
+    NodeWithWideHole node_with_wide_hole;
     TestNode hole_device(0x4010, 0x10, "hole-device");
 
+    expect(inner.contains(simrv::xlen::PhysAddr{0x1100}) &&
+               !inner.contains(simrv::xlen::PhysAddr{0x1200}),
+           "default device ownership includes its base and excludes its end");
     expect(router.register_device(&inner), "valid MMIO node registers");
     expect(!router.register_device(&containing), "containing MMIO overlap is rejected");
     expect(router.register_device(&adjacent), "adjacent MMIO ranges do not overlap");
     expect(!router.register_device(&empty), "empty MMIO range is rejected");
     expect(!router.register_device(&wrapping), "wrapping MMIO range is rejected");
+    expect(router.register_device(&near_end),
+           "non-wrapping range near the address limit registers");
     expect(router.register_device(&node_with_hole), "a node with a reserved subrange registers");
     expect(router.register_device(&hole_device), "a device can occupy another node's address hole");
+    expect(router.is_range_mapped(simrv::xlen::PhysAddr{0x1100}, 0x100),
+           "is_range_mapped matches registered inner range");
+    expect(router.is_range_mapped(simrv::xlen::PhysAddr{0x1120}, 0x10),
+           "is_range_mapped matches registered subrange");
+    expect(!router.is_range_mapped(simrv::xlen::PhysAddr{0x2000}, 0x100),
+           "is_range_mapped returns false for unmapped range");
+
+    simrv::memory::TlChannelA hole_request{};
+    hole_request.opcode = simrv::memory::TlOpcodeA::Get;
+    hole_request.address = 0x4000;
+    hole_request.size = 0;
+    simrv::memory::TlChannelD hole_response{};
+    expect(router.route_request(hole_request, hole_response) && !hole_response.denied,
+           "outer node access warms the router shortcut");
+    hole_request.address = 0x4010;
+    hole_response = {};
+    expect(router.route_request(hole_request, hole_response) && !hole_response.denied &&
+               hole_device.requests() == 1,
+           "warmed router resolves a hole to the device that owns it");
+    const auto outer_calls = node_with_hole.requests();
+    const auto inner_calls = hole_device.requests();
+    hole_request.address = 0x400f;
+    hole_request.size = 1;
+    hole_response = {};
+    expect(router.route_request(hole_request, hole_response) && hole_response.denied,
+           "an access crossing into a hole is denied");
+    expect(node_with_hole.requests() == outer_calls && hole_device.requests() == inner_calls,
+           "an access crossing device ownership is not delivered");
+    expect(router.unregister_device(&hole_device), "hole device unregisters");
+    expect(router.resolve_device(simrv::xlen::PhysAddr{0x4010}) == nullptr,
+           "an unoccupied hole is unmapped");
+    expect(!router.is_range_mapped(simrv::xlen::PhysAddr{0x4010}, 0x10),
+           "range queries recognize an unoccupied hole");
+    expect(router.is_range_mapped(simrv::xlen::PhysAddr{0x400f}, 2),
+           "range queries recognize an owned byte adjacent to a hole");
+    expect(router.register_device(&node_with_wide_hole), "a node with a wide hole registers");
+    expect(!router.is_range_mapped(simrv::xlen::PhysAddr{0x6100}, 4096),
+           "a sparse overlap at the scan limit is checked exactly");
+    expect(router.is_range_mapped(simrv::xlen::PhysAddr{0x6100}, 4097),
+           "an ambiguous sparse overlap beyond the scan limit is conservative");
+    expect(router.register_device(&node_with_pin_hole), "a node with a one-byte hole registers");
+    hole_request.address = 0x5000;
+    hole_request.size = 3;  // eight bytes; the first and last bytes are owned
+    hole_response = {};
+    expect(router.route_request(hole_request, hole_response) && hole_response.denied &&
+               node_with_pin_hole.requests == 0,
+           "a transfer is rejected when an interior byte falls in a hole");
+
+    simrv::memory::TlChannelA limit_request{};
+    limit_request.opcode = simrv::memory::TlOpcodeA::Get;
+    limit_request.address = std::numeric_limits<simrv::xlen::Address>::max() - 7;
+    limit_request.size = 3;
+    simrv::memory::TlChannelD limit_response{};
+    expect(router.route_request(limit_request, limit_response) && limit_response.denied &&
+               near_end.requests() == 0,
+           "a request extending past the address limit is denied without wrapping");
 
     simrv::memory::TlChannelA request{};
     request.opcode = simrv::memory::TlOpcodeA::Get;
@@ -1370,6 +1609,128 @@ void test_vector_mask_and_fault_only_first_memory() {
     }
 }
 
+void test_compact_block_immediates() {
+    static_assert(std::same_as<decltype(simrv::core::CompactOp::rd), simrv::xlen::RegId>);
+    static_assert(std::same_as<decltype(simrv::core::CompactOp::rs1), simrv::xlen::RegId>);
+    static_assert(std::same_as<decltype(simrv::core::CompactOp::rs2), simrv::xlen::RegId>);
+    static_assert(sizeof(simrv::core::CompactOp) == 16);
+    simrv::core::Machine machine;
+    auto& cpu = machine.hart(0);
+    cpu.sync_decode_context();
+    cpu.decode_cache.flush();
+    cpu.state().pc = 0x1000;
+    cpu.state().regs.write(simrv::xlen::RegId::A0, 2);
+    auto add = [&](simrv::xlen::Address pc, simrv::isa::OperationId id, int32_t imm) {
+        simrv::pipeline::DecodedInstruction decoded{};
+        decoded.cpc = simrv::xlen::VirtAddr{pc};
+        decoded.op_id = id;
+        decoded.opcode =
+            id == simrv::isa::ADDIW ? simrv::isa::Opcode::OpImm32 : simrv::isa::Opcode::OpImm;
+        decoded.ir = static_cast<simrv::xlen::Instruction>(decoded.opcode);
+        decoded.rd = simrv::xlen::RegId::A0;
+        decoded.rs1 = simrv::xlen::RegId::A0;
+        decoded.imm = imm;
+        decoded.traits.reads_rs1_int = true;
+        decoded.traits.writes_int = true;
+        simrv::core::CachedOp op{};
+        op.copy_from(decoded);
+        cpu.decode_cache.insert(decoded.cpc, op);
+    };
+    add(0x1000, simrv::isa::ADDI, 3);
+    add(0x1004, simrv::isa::ORI, 8);
+    add(0x1008, simrv::isa::XORI, 4);
+    if constexpr (simrv::xlen::kIsXLen64) {
+        add(0x100c, simrv::isa::ADDIW, -2);
+    }
+    cpu.run_fast_baremetal_batch(machine, simrv::xlen::kIsXLen64 ? 4 : 3, {});
+    expect(cpu.state().regs.read(simrv::xlen::RegId::A0) == (simrv::xlen::kIsXLen64 ? 7 : 9),
+           "compact blocks apply immediates for unified ALU operations");
+    cpu.state().pc = 0x1000;
+    cpu.state().regs.write(simrv::xlen::RegId::A0, 2);
+    const auto retired_before = cpu.e_icount;
+    cpu.run_fast_baremetal_batch(machine, 1, {});
+    expect(cpu.e_icount == retired_before + 1 && cpu.state().pc == 0x1004 &&
+               cpu.state().regs.read(simrv::xlen::RegId::A0) == 5,
+           "a cached block does not exceed the remaining instruction budget");
+    if constexpr (simrv::xlen::kIsXLen64) {
+        cpu.state().pc = 0x1100;
+        cpu.state().regs.write(simrv::xlen::RegId::A0, 0x7fffffff);
+        cpu.state().regs.write(simrv::xlen::RegId::A1, 2);
+        simrv::pipeline::DecodedInstruction decoded{};
+        decoded.cpc = simrv::xlen::VirtAddr{0x1100};
+        decoded.op_id = simrv::isa::MULW;
+        decoded.opcode = simrv::isa::Opcode::Op32;
+        decoded.ir = static_cast<simrv::xlen::Instruction>(decoded.opcode);
+        decoded.rd = simrv::xlen::RegId::A0;
+        decoded.rs1 = simrv::xlen::RegId::A0;
+        decoded.rs2 = simrv::xlen::RegId::A1;
+        decoded.traits.reads_rs1_int = true;
+        decoded.traits.reads_rs2_int = true;
+        decoded.traits.writes_int = true;
+        simrv::core::CachedOp op{};
+        op.copy_from(decoded);
+        cpu.decode_cache.insert(decoded.cpc, op);
+        cpu.run_fast_baremetal_batch(machine, 1, {});
+        expect(
+            cpu.state().regs.read(simrv::xlen::RegId::A0) == static_cast<simrv::xlen::Register>(-2),
+            "compact MULW wraps the low word and sign extends it");
+    }
+}
+
+void test_cached_store_legacy_tohost() {
+    simrv::core::Machine machine;
+    std::array<simrv::xlen::Byte, 8192> backing{};
+    machine.set_ram_for_testing(backing.data(), backing.size());
+    machine.memory().initialize_mmu();
+    machine.set_resolved_boot_state(0, simrv::xlen::Address{0x80001800});
+    auto& cpu = machine.hart(0);
+    cpu.cpu_model_config.mmio_console_redirect = true;
+    expect(!machine.execute_fast_batch_for_testing(0),
+           "console redirection disables fast instruction batching");
+    cpu.cpu_model_config.mmio_console_redirect = false;
+    cpu.state().regs.write(simrv::xlen::RegId::A1, 0x80001000);
+    cpu.state().regs.write(simrv::xlen::RegId::A2, 1);
+    simrv::pipeline::DecodedInstruction decoded{};
+    decoded.ir = 0x00c5a023;  // sw a2, 0(a1)
+    decoded.op_id = simrv::isa::SW;
+    decoded.opcode = simrv::isa::Opcode::Store;
+    decoded.rs1 = simrv::xlen::RegId::A1;
+    decoded.rs2 = simrv::xlen::RegId::A2;
+    decoded.funct3 = simrv::isa::Funct3::Sw;
+    decoded.traits.reads_rs1_int = true;
+    decoded.traits.reads_rs2_int = true;
+    decoded.traits.is_mem_store = true;
+    simrv::core::CachedOp op{};
+    op.copy_from(decoded);
+    cpu.execute_cached_op_fast<false, false>(machine, op, machine.ram_view());
+    expect(machine.tohost == 1 ||
+               machine.stop_reason() == simrv::core::Machine::StopReason::TohostPass,
+           "cached store publishes the legacy tohost address even with a custom address");
+
+    simrv::core::Machine translated;
+    std::array<simrv::xlen::Byte, 8192> translated_backing{};
+    translated.set_ram_for_testing(translated_backing.data(), translated_backing.size());
+    translated.memory().initialize_mmu();
+    translated.set_resolved_boot_state(0, simrv::xlen::Address{0x80001800});
+    auto& translated_cpu = translated.hart(0);
+    translated_cpu.state().priv = simrv::xlen::PrivilegeLevel::Supervisor;
+    if constexpr (simrv::xlen::kIsXLen64) {
+        translated_cpu.state().satp = static_cast<simrv::xlen::Word>(uint64_t{8} << 60);
+    } else {
+        translated_cpu.state().satp = static_cast<simrv::xlen::Word>(uint64_t{1} << 31);
+    }
+    constexpr simrv::xlen::Address virtual_address = 0x20000;
+    constexpr simrv::xlen::Address vpn = virtual_address >> 12;
+    translated_cpu.soft_tlb_write[simrv::core::CPU::soft_tlb_index(vpn)].set(
+        vpn, 0, simrv::xlen::PrivilegeLevel::Supervisor, translated_cpu.soft_tlb_epoch, 0x80001000,
+        translated_backing.data() + 4096, false);
+    simrv::memory::MemoryAccess::storeInt(translated.memory(), translated_cpu, virtual_address, 1,
+                                          simrv::isa::Funct3::Sw);
+    expect(translated.tohost == 1 ||
+               translated.stop_reason() == simrv::core::Machine::StopReason::TohostPass,
+           "soft TLB store publishes a translated legacy tohost write");
+}
+
 void test_vector_bulk_memory_operations() {
     simrv::core::Machine machine;
     std::array<simrv::xlen::Byte, 8192> backing{};
@@ -1498,6 +1859,89 @@ void test_vector_bulk_memory_operations() {
     for (uint32_t i = 0; i < 8; ++i) {
         expect(ram.data()[0x400 + i * 2] == simrv::xlen::Byte{static_cast<uint8_t>(0x30 + i)},
                "strided vsse8 stores elements using direct DRAM fast-path");
+    }
+
+    // Bulk copies must retain the per-element trigger and store reservation semantics.
+    auto& csr = cpu.csr_file;
+    const auto type_header =
+        static_cast<simrv::xlen::CsrValue>(uint64_t{2} << (regs.xlen == 64 ? 60U : 28U));
+    (void)csr.write(csr_addr(simrv::core::Csr::Tselect), 0);
+    (void)csr.write(csr_addr(simrv::core::Csr::Tdata1), type_header | (1U << 6U) | 3U);
+    (void)csr.write(csr_addr(simrv::core::Csr::Tdata2), ram.base() + 0x403);
+    expect(!machine.execute_fast_batch_for_testing(0),
+           "active architectural triggers disable fast instruction batching");
+    cpu.pipeline_context.opcode = simrv::isa::Opcode::Load;
+    cpu.pipeline_context.funct3 = simrv::isa::Funct3::Lbu;
+    cpu.pipeline_context.mem_addr = ram.base() + 0x403;
+    cpu.run_memory_stage_baremetal(machine);
+    expect(cpu.active_context().pending_exception == ExceptionCode::Breakpoint,
+           "bare-metal scalar memory stage observes load triggers");
+    cpu.active_context().pending_exception.reset();
+    cpu.pipeline_context.opcode = simrv::isa::Opcode::Store;
+    cpu.pipeline_context.funct3 = simrv::isa::Funct3::Sb;
+    cpu.run_memory_stage_baremetal(machine);
+    expect(cpu.active_context().pending_exception == ExceptionCode::Breakpoint,
+           "bare-metal scalar memory stage observes store triggers");
+    cpu.active_context().pending_exception.reset();
+    regs.write(base_reg, ram.base() + 0x400);
+    cpu.state().vl = 8;
+    cpu.state().vstart = 0;
+    simrv::execute::ExecuteUnit::execute_vector(
+        cpu, machine.memory(), simrv::isa::OperationId::VLE8_V, memory_ir(vd, base_reg));
+    expect(cpu.active_context().pending_exception == ExceptionCode::Breakpoint &&
+               cpu.active_context().pending_tval == ram.base() + 0x403 && cpu.state().vstart == 3,
+           "bulk vector load falls back at the triggering element");
+    cpu.active_context().pending_exception.reset();
+    cpu.state().vstart = 0;
+    simrv::execute::ExecuteUnit::execute_vector(
+        cpu, machine.memory(), simrv::isa::OperationId::VSE8_V, memory_ir(vd, base_reg));
+    expect(cpu.active_context().pending_exception == ExceptionCode::Breakpoint &&
+               cpu.active_context().pending_tval == ram.base() + 0x403 && cpu.state().vstart == 3,
+           "bulk vector store falls back at the triggering element");
+    cpu.active_context().pending_exception.reset();
+    (void)csr.write(csr_addr(simrv::core::Csr::Tdata1), 0);
+    cpu.state().vstart = 0;
+    cpu.state().lr_reservation_active = true;
+    simrv::execute::ExecuteUnit::execute_vector(cpu, machine.memory(),
+                                                simrv::isa::OperationId::VSSE8_V,
+                                                strided_ir(vd, base_reg, stride_reg));
+    expect(!cpu.state().lr_reservation_active,
+           "strided vector store clears the issuing hart's reservation");
+    auto secondary = std::make_unique<simrv::core::CPU>();
+    secondary->machine_ = &machine;
+    machine.test_secondary_harts().push_back(std::move(secondary));
+    auto& reservations = machine.memory().reservation_table();
+    reservations.set_reservation(simrv::xlen::HartId{1}, ram.base() + 0x400);
+    cpu.state().vstart = 0;
+    simrv::execute::ExecuteUnit::execute_vector(cpu, machine.memory(),
+                                                simrv::isa::OperationId::VSSE8_V,
+                                                strided_ir(vd, base_reg, stride_reg));
+    expect(!reservations.check_reservation(simrv::xlen::HartId{1}, ram.base() + 0x400),
+           "strided vector store invalidates another hart's overlapping reservation");
+
+    if constexpr (!simrv::xlen::kIsXLen64) {
+        cpu.state().vtype = 3U << 3U;
+        cpu.state().vl = 2;
+        cpu.state().vstart = 0;
+        regs.write(stride_reg, 9);
+        simrv::execute::ExecuteUnit::execute_vector(cpu, machine.memory(),
+                                                    simrv::isa::OperationId::VLSE64_V,
+                                                    strided_ir(vd, base_reg, stride_reg));
+        expect(cpu.active_context().pending_exception == ExceptionCode::MisalignedLoad &&
+                   cpu.state().vstart == 1 &&
+                   cpu.active_context().pending_tval == ram.base() + 0x409,
+               "RV32 strided 64-bit load traps at the first misaligned element");
+        cpu.active_context().pending_exception.reset();
+        cpu.state().vstart = 0;
+        simrv::execute::ExecuteUnit::execute_vector(cpu, machine.memory(),
+                                                    simrv::isa::OperationId::VSSE64_V,
+                                                    strided_ir(vd, base_reg, stride_reg));
+        expect(cpu.active_context().pending_exception == ExceptionCode::MisalignedStore &&
+                   cpu.state().vstart == 1 &&
+                   cpu.active_context().pending_tval == ram.base() + 0x409,
+               "RV32 strided 64-bit store traps at the first misaligned element");
+        cpu.active_context().pending_exception.reset();
+        cpu.state().vtype = 0;
     }
 
     // 6. Vector unmasked batch reduction (VREDSUM_VS)
@@ -3856,21 +4300,57 @@ void test_tilelink_c_coherence_semantics() {
     sample_data[3] = static_cast<simrv::xlen::Byte>(0xDD);
 
     const simrv::xlen::Address test_addr = 0x80002000;
-    dcache.insert(test_addr, sample_data.data(), simrv::memory::MesiState::Shared);
+    dcache.insert(simrv::xlen::PhysAddr{test_addr}, sample_data.data(),
+                  simrv::memory::MesiState::Shared);
     expect(!dcache.last_access_was_hit() && dcache.hit_count() == 0,
            "cache insertion preserves miss accounting and highlight state");
 
     simrv::xlen::Word read_val = 0;
-    expect(dcache.read(test_addr, read_val, 2), "D-Cache read hits in Branch state");
+    expect(dcache.read(simrv::xlen::PhysAddr{test_addr}, read_val, simrv::isa::Funct3::Lw),
+           "D-Cache read hits in Branch state");
     expect((read_val & 0xFFFFFFFFU) == 0xDDCCBBAAU, "D-Cache read returned expected data");
 
     // Write in Branch state should return false (requiring AcquirePerm upgrade)
-    expect(!dcache.write(test_addr, 0x12345678, 2),
+    expect(!dcache.write(simrv::xlen::PhysAddr{test_addr}, 0x12345678, simrv::isa::Funct3::Sw),
            "D-Cache write misses in Branch state (upgrade required)");
 
     // Insert in Trunk state (exclusive/modified)
-    dcache.insert(test_addr, sample_data.data(), simrv::memory::MesiState::Exclusive);
-    expect(dcache.write(test_addr, 0x12345678, 2), "D-Cache write hits in Trunk state");
+    dcache.insert(simrv::xlen::PhysAddr{test_addr}, sample_data.data(),
+                  simrv::memory::MesiState::Exclusive);
+    bool first_write = false;
+    expect(dcache.write(simrv::xlen::PhysAddr{test_addr}, 0x12345678, simrv::isa::Funct3::Sw,
+                        &first_write) &&
+               first_write,
+           "D-Cache first write changes Exclusive to Modified");
+    first_write = true;
+    expect(dcache.write(simrv::xlen::PhysAddr{test_addr}, 0x12345678, simrv::isa::Funct3::Sw,
+                        &first_write) &&
+               !first_write,
+           "D-Cache later writes retain Modified state");
+    const auto dcache_misses_before = dcache.miss_count();
+    expect(!dcache.read(simrv::xlen::PhysAddr{test_addr + 62}, read_val, simrv::isa::Funct3::Lw),
+           "D-Cache cross-line read misses");
+    expect(!dcache.write(simrv::xlen::PhysAddr{test_addr + 62}, 0x12345678, simrv::isa::Funct3::Sw),
+           "D-Cache cross-line write misses");
+    expect(dcache.miss_count() == dcache_misses_before + 2,
+           "D-Cache counts each cross-line access as one miss");
+    if constexpr (!simrv::xlen::kIsXLen64) {
+        const auto misses_before_oversized = dcache.miss_count();
+        const auto read_before = read_val;
+        first_write = true;
+        expect(!dcache.read(simrv::xlen::PhysAddr{test_addr}, read_val, simrv::isa::Funct3::Ld),
+               "native RV32 D-Cache rejects an oversized read");
+        expect(read_val == read_before, "oversized read leaves its output untouched");
+        expect(!dcache.write(simrv::xlen::PhysAddr{test_addr}, 0, simrv::isa::Funct3::Sd,
+                             &first_write),
+               "native RV32 D-Cache rejects an oversized write");
+        expect(first_write, "oversized write leaves the first-write flag untouched");
+        expect(dcache.miss_count() == misses_before_oversized + 2,
+               "oversized accesses each count as a miss");
+        expect(dcache.read(simrv::xlen::PhysAddr{test_addr}, read_val, simrv::isa::Funct3::Lw) &&
+                   read_val == 0x12345678,
+               "oversized write leaves the cached line unchanged");
+    }
 
     // Probe with invalidation (target: None)
     simrv::memory::TlChannelB probe_req{};
@@ -3884,10 +4364,12 @@ void test_tilelink_c_coherence_semantics() {
            "D-Cache probe hits and handles request");
     expect(probe_resp.opcode == simrv::memory::TlOpcodeC::ProbeAckData,
            "Dirty line returns ProbeAckData");
-    expect(!dcache.read(test_addr, read_val, 2), "D-Cache line is invalid after probe to None");
+    expect(!dcache.read(simrv::xlen::PhysAddr{test_addr}, read_val, simrv::isa::Funct3::Lw),
+           "D-Cache line is invalid after probe to None");
 
     // Test MESI Trunk -> Branch downgrade probe with dirty writeback
-    dcache.insert(test_addr, sample_data.data(), simrv::memory::MesiState::Modified);
+    dcache.insert(simrv::xlen::PhysAddr{test_addr}, sample_data.data(),
+                  simrv::memory::MesiState::Modified);
     simrv::memory::TlChannelB downgrade_req{};
     downgrade_req.opcode = simrv::memory::TlOpcodeB::ProbeBlock;
     downgrade_req.cap = simrv::memory::TlCap::ToB;
@@ -3899,16 +4381,31 @@ void test_tilelink_c_coherence_semantics() {
            "D-Cache probe handles Branch downgrade");
     expect(downgrade_resp.opcode == simrv::memory::TlOpcodeC::ProbeAckData,
            "Dirty line returns ProbeAckData on downgrade");
-    expect(dcache.read(test_addr, read_val, 2),
+    expect(dcache.read(simrv::xlen::PhysAddr{test_addr}, read_val, simrv::isa::Funct3::Lw),
            "D-Cache line is still valid for reads in Branch state");
 
     // Test I-Cache probe invalidation
-    icache.insert(test_addr, sample_data.data(), simrv::memory::MesiState::Shared);
+    icache.insert(simrv::xlen::PhysAddr{test_addr}, sample_data.data(),
+                  simrv::memory::MesiState::Shared);
     uint32_t inst_val = 0;
-    expect(icache.read(test_addr, inst_val), "I-Cache read hits on inserted line");
+    expect(icache.read(simrv::xlen::PhysAddr{test_addr}, inst_val),
+           "I-Cache read hits on inserted line");
+    uint16_t halfword = 0;
+    expect(icache.read16(simrv::xlen::PhysAddr{test_addr}, halfword) && halfword == 0xBBAA,
+           "I-Cache halfword read returns the same bytes as word read");
+    expect(icache.read16(simrv::xlen::PhysAddr{test_addr + 62}, halfword),
+           "I-Cache halfword at the last in-line offset hits");
+    const auto misses_before_cross_line = icache.miss_count();
+    expect(!icache.read(simrv::xlen::PhysAddr{test_addr + 62}, inst_val),
+           "I-Cache word crossing a line misses");
+    expect(!icache.read16(simrv::xlen::PhysAddr{test_addr + 63}, halfword),
+           "I-Cache halfword crossing a line misses");
+    expect(icache.miss_count() == misses_before_cross_line + 2,
+           "cross-line I-Cache misses are counted once each");
     simrv::memory::TlChannelC ic_resp{};
     expect(icache.handle_probe(probe_req, ic_resp), "I-Cache probe hits and handles request");
-    expect(!icache.read(test_addr, inst_val), "I-Cache line is invalid after probe to None");
+    expect(!icache.read(simrv::xlen::PhysAddr{test_addr}, inst_val),
+           "I-Cache line is invalid after probe to None");
 }
 
 void test_tilelink_c_protocol_checker() {
@@ -4008,6 +4505,15 @@ void test_strong_semantic_types() {
     static_assert(sizeof(simrv::xlen::VirtAddr) == sizeof(simrv::xlen::Word));
     static_assert(sizeof(simrv::xlen::HartId) == sizeof(uint32_t));
     static_assert(sizeof(simrv::xlen::CsrNumber) == sizeof(uint16_t));
+    static_assert(std::same_as<decltype(simrv::core::TlbFlushFilter::vaddr),
+                               std::optional<simrv::xlen::VirtAddr>>);
+    static_assert(!std::is_assignable_v<decltype(simrv::core::TlbFlushFilter::vaddr)&,
+                                        simrv::xlen::PhysAddr>);
+    static_assert(std::same_as<decltype(simrv::core::TLBEntry::v_addr), simrv::xlen::VirtAddr>);
+    static_assert(std::same_as<decltype(simrv::core::TLBEntry::p_addr), simrv::xlen::PhysAddr>);
+    static_assert(sizeof(simrv::core::TLBEntry) == 32);
+    static_assert(!std::is_assignable_v<simrv::xlen::PhysAddr&, simrv::xlen::VirtAddr>);
+    static_assert(!std::is_assignable_v<simrv::xlen::VirtAddr&, simrv::xlen::PhysAddr>);
     static_assert(simrv::xlen::StrongAddress<simrv::xlen::PhysAddr>);
     static_assert(simrv::xlen::StrongAddress<simrv::xlen::VirtAddr>);
     static_assert(!simrv::xlen::StrongAddress<simrv::xlen::Word>);
@@ -4083,10 +4589,12 @@ void test_cache_hierarchy_semantics() {
 
     const simrv::xlen::Address test_addr = 0x80002000;
     std::array<simrv::xlen::Byte, simrv::cache::L2Cache::kLineBytes> read_buf{};
-    expect(!l2.read_line(test_addr, read_buf), "L2 read misses on empty cache");
+    expect(!l2.read_line(simrv::xlen::PhysAddr{test_addr}, read_buf),
+           "L2 read misses on empty cache");
 
-    l2.write_line(test_addr, fill_data, simrv::memory::MesiState::Exclusive);
-    expect(l2.read_line(test_addr, read_buf), "L2 read hits after line insertion");
+    l2.write_line(simrv::xlen::PhysAddr{test_addr}, fill_data, simrv::memory::MesiState::Exclusive);
+    expect(l2.read_line(simrv::xlen::PhysAddr{test_addr}, read_buf),
+           "L2 read hits after line insertion");
     expect(read_buf[0] == static_cast<simrv::xlen::Byte>(0xAA),
            "L2 read data matches written payload");
     expect(read_buf[31] == static_cast<simrv::xlen::Byte>(0x55), "L2 read data matches tail byte");
@@ -4094,15 +4602,18 @@ void test_cache_hierarchy_semantics() {
     // Test L3 Cache (LLC)
     simrv::cache::L3Cache l3{};
     simrv::memory::MesiState state = simrv::memory::MesiState::Invalid;
-    expect(!l3.lookup_line(test_addr, read_buf, state), "L3 lookup misses on empty cache");
+    expect(!l3.lookup_line(simrv::xlen::PhysAddr{test_addr}, read_buf, state),
+           "L3 lookup misses on empty cache");
 
-    l3.write_line(test_addr, fill_data, simrv::memory::MesiState::Modified);
-    expect(l3.lookup_line(test_addr, read_buf, state), "L3 lookup hits after write_line");
+    l3.write_line(simrv::xlen::PhysAddr{test_addr}, fill_data, simrv::memory::MesiState::Modified);
+    expect(l3.lookup_line(simrv::xlen::PhysAddr{test_addr}, read_buf, state),
+           "L3 lookup hits after write_line");
     expect(state == simrv::memory::MesiState::Modified, "L3 line state matches written state");
     expect(read_buf[0] == static_cast<simrv::xlen::Byte>(0xAA), "L3 line payload preserved");
 
-    l3.invalidate_line(test_addr);
-    expect(!l3.lookup_line(test_addr, read_buf, state), "L3 lookup misses after invalidation");
+    l3.invalidate_line(simrv::xlen::PhysAddr{test_addr});
+    expect(!l3.lookup_line(simrv::xlen::PhysAddr{test_addr}, read_buf, state),
+           "L3 lookup misses after invalidation");
 
     // Test Hardware Data Prefetcher in DCache
     simrv::cache::DCache dcache{};
@@ -4273,6 +4784,8 @@ int main() {
     test_vector_exception_propagation_and_status();
     test_vector_compute_register_group_legality();
     test_vector_mask_and_fault_only_first_memory();
+    test_compact_block_immediates();
+    test_cached_store_legacy_tohost();
     test_vector_bulk_memory_operations();
     test_vector_integer_remainder_and_reverse_subtract();
     test_zvbb_integer_semantics();

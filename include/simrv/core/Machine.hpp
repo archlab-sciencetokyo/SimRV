@@ -44,6 +44,7 @@ class ExecuteUnit;
 
 namespace simrv::device {
 class Uart;
+class SerialDevice;
 class PowerMmio;
 class DmaController;
 class AclintMtimer;
@@ -469,8 +470,8 @@ class Machine final : public core::IInterruptController {
     [[nodiscard]] auto platform_time() const noexcept -> uint64_t;
     [[nodiscard]] auto rtc_device() noexcept -> simrv::Rtc*;
     [[nodiscard]] auto rtc_device() const noexcept -> const simrv::Rtc*;
-    [[nodiscard]] auto uart_device() noexcept -> simrv::device::Uart*;
-    [[nodiscard]] auto uart_device() const noexcept -> const simrv::device::Uart*;
+    [[nodiscard]] auto uart_device() noexcept -> simrv::device::SerialDevice*;
+    [[nodiscard]] auto uart_device() const noexcept -> const simrv::device::SerialDevice*;
     [[nodiscard]] auto dma_controller() noexcept -> simrv::device::DmaController*;
     [[nodiscard]] auto dma_controller() const noexcept -> const simrv::device::DmaController*;
     [[nodiscard]] auto axi_bridge() noexcept -> simrv::memory::Axi4Bridge*;
@@ -565,7 +566,7 @@ class Machine final : public core::IInterruptController {
     void add_hart_for_testing(std::unique_ptr<CPU> hart);
     [[nodiscard]] auto test_secondary_harts() noexcept
         -> std::vector<std::unique_ptr<simrv::core::CPU>>&;
-    [[nodiscard]] auto mutable_uart_for_testing() noexcept -> std::unique_ptr<simrv::device::Uart>&;
+    [[nodiscard]] auto mutable_uart_for_testing() noexcept -> std::unique_ptr<simrv::device::SerialDevice>&;
     void finalize_for_testing() { finalize_runner_cycle(); }
     void execute_cycle_for_testing() { execute_runner_cycle(); }
     [[nodiscard]] auto execute_fast_batch_for_testing(uint32_t batch_size) -> bool {

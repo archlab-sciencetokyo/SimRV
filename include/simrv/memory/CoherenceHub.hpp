@@ -5,6 +5,7 @@
 #pragma once
 
 #include <array>
+#include <concepts>
 #include <cstdint>
 #include <expected>
 #include <memory>
@@ -19,6 +20,7 @@
 #include "simrv/cache/L3Cache.hpp"
 #include "simrv/core/SoCConfig.hpp"
 #include "simrv/memory/Bus.hpp"
+#include "simrv/xlen/Hash.hpp"
 #include "simrv/xlen/IdentifierTypes.hpp"
 
 namespace simrv::core {
@@ -65,15 +67,16 @@ class CoherenceHub {
     void process_grant_ack(const TlChannelE& ack);
 
     /// Notify the directory when a Trunk holder performs its first write (E -> M).
-    void mark_modified(LineAddress line_base, simrv::xlen::HartId hart);
+    void mark_modified(simrv::xlen::PhysAddr line_base, simrv::xlen::HartId hart);
 
-    void invalidate_line_broadcast(LineAddress line_base, simrv::xlen::HartId initiator_hart);
+    void invalidate_line_broadcast(simrv::xlen::PhysAddr line_base,
+                                   simrv::xlen::HartId initiator_hart);
 
     /// Invalidate every cached copy before a coherent implicit/DMA memory write.
-    void invalidate_line_external(LineAddress line_base);
+    void invalidate_line_external(simrv::xlen::PhysAddr line_base);
 
     /// Register a clean line populated directly during machine startup prewarming.
-    void register_preloaded_line(LineAddress line_base, simrv::xlen::HartId hart);
+    void register_preloaded_line(simrv::xlen::PhysAddr line_base, simrv::xlen::HartId hart);
 
     [[nodiscard]] auto stats() const -> const CoherenceStats& { return stats_; }
     void reset_stats() { stats_ = {}; }
@@ -85,13 +88,23 @@ class CoherenceHub {
     [[nodiscard]] auto shared_l2_for_hart(uint32_t hart) noexcept -> simrv::cache::L2Cache*;
     [[nodiscard]] auto shared_l3_enabled() const noexcept -> bool { return l3_enabled_; }
 
-    [[nodiscard]] auto get_directory_state(LineAddress line_base) const -> DirectoryEntry;
+    [[nodiscard]] auto get_directory_state(simrv::xlen::PhysAddr line_base) const -> DirectoryEntry;
     [[nodiscard]] auto validate_directory() const -> std::expected<void, std::string>;
+    template <std::integral I, typename... Args>
+    void mark_modified(I, Args&&...) = delete;
+    template <std::integral I, typename... Args>
+    void invalidate_line_broadcast(I, Args&&...) = delete;
+    template <std::integral I>
+    void invalidate_line_external(I) = delete;
+    template <std::integral I, typename... Args>
+    void register_preloaded_line(I, Args&&...) = delete;
+    template <std::integral I>
+    auto get_directory_state(I) const = delete;
     void clear();
 
    private:
     struct FastCacheEntry {
-        LineAddress line_base = ~LineAddress{0};
+        simrv::xlen::PhysAddr line_base{~simrv::xlen::Address{0}};
         DirectoryEntry entry{};
     };
 
@@ -109,7 +122,7 @@ class CoherenceHub {
     std::vector<std::unique_ptr<ClusterCache>> l2_caches_;
     simrv::core::SmpTopologyConfig topology_{};
     bool l3_enabled_ = true;
-    std::unordered_map<LineAddress, DirectoryEntry> directory_;
+    std::unordered_map<simrv::xlen::PhysAddr, DirectoryEntry> directory_;
     std::array<FastCacheEntry, kFastCacheEntries> fast_cache_{};
     CoherenceStats stats_{};
     TlSinkId next_sink_ = 1;

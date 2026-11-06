@@ -74,7 +74,7 @@ struct TuiTestAccess {
     static void set_execution_paused(Tui& tui, bool paused) { tui.set_paused(paused); }
     static void update_tui(Tui& tui) { tui.update(); }
     static void set_mission_breakpoint(Tui& tui, simrv::xlen::Address address) {
-        tui.machine_.breakpoint_manager().add_pc_breakpoint(address,
+        tui.machine_.breakpoint_manager().add_pc_breakpoint(simrv::xlen::VirtAddr{address},
                                                             simrv::debug::BreakpointOwner::Mission);
         tui.mission_breakpoint_addr_ = address;
     }

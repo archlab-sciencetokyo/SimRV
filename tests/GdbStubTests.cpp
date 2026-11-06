@@ -241,39 +241,84 @@ static auto decode_monitor_response(std::string_view response) -> std::string {
 // Test: sw_breakpoint state is empty on construction (no network)
 // ---------------------------------------------------------------------------
 
+template <typename Address>
+concept WatchpointAddress = requires(simrv::debug::BreakpointManager& manager, Address addr) {
+    manager.add_watchpoint(addr);
+    manager.check_mem_write(addr, 4);
+};
+
+static_assert(WatchpointAddress<simrv::xlen::VirtAddr>);
+static_assert(!WatchpointAddress<simrv::xlen::PhysAddr>);
+static_assert(!WatchpointAddress<simrv::xlen::Address>);
+
+template <typename Address>
+concept BreakpointAddress = requires(simrv::debug::BreakpointManager& manager, Address addr) {
+    manager.add_pc_breakpoint(addr);
+    manager.has_pc_breakpoint(addr);
+    manager.check_pc(addr);
+};
+
+static_assert(BreakpointAddress<simrv::xlen::VirtAddr>);
+static_assert(!BreakpointAddress<simrv::xlen::PhysAddr>);
+static_assert(!BreakpointAddress<simrv::xlen::Address>);
+
 static void test_breakpoint_ownership() {
     simrv::debug::BreakpointManager manager;
     constexpr simrv::xlen::Address address = static_cast<simrv::xlen::Address>(0x80000000ULL);
-    manager.add_pc_breakpoint(address, simrv::debug::BreakpointOwner::Tui);
-    manager.add_pc_breakpoint(address, simrv::debug::BreakpointOwner::Gdb);
+    manager.add_pc_breakpoint(simrv::xlen::VirtAddr{address}, simrv::debug::BreakpointOwner::Tui);
+    manager.add_pc_breakpoint(simrv::xlen::VirtAddr{address}, simrv::debug::BreakpointOwner::Gdb);
     EXPECT_EQ(manager.get_pc_breakpoint_records().size(), 2U);
     const auto first_id = manager.get_pc_breakpoint_records().front().id;
-    manager.add_pc_breakpoint(address, simrv::debug::BreakpointOwner::Tui);
+    manager.add_pc_breakpoint(simrv::xlen::VirtAddr{address}, simrv::debug::BreakpointOwner::Tui);
     EXPECT_EQ(manager.get_pc_breakpoint_records().front().id, first_id);
-    manager.remove_pc_breakpoint(address, simrv::debug::BreakpointOwner::Gdb);
-    EXPECT_TRUE(manager.has_pc_breakpoint(address));
+    manager.remove_pc_breakpoint(simrv::xlen::VirtAddr{address},
+                                 simrv::debug::BreakpointOwner::Gdb);
+    EXPECT_TRUE(manager.has_pc_breakpoint(simrv::xlen::VirtAddr{address}));
     manager.clear_owner(simrv::debug::BreakpointOwner::Tui);
-    EXPECT_TRUE(!manager.has_pc_breakpoint(address));
+    EXPECT_TRUE(!manager.has_pc_breakpoint(simrv::xlen::VirtAddr{address}));
     constexpr simrv::xlen::Address lesson_address =
         static_cast<simrv::xlen::Address>(0x80000004ULL);
-    manager.add_pc_breakpoint(lesson_address, simrv::debug::BreakpointOwner::Tui);
-    manager.add_pc_breakpoint(lesson_address, simrv::debug::BreakpointOwner::Mission);
-    manager.remove_pc_breakpoint(lesson_address, simrv::debug::BreakpointOwner::Tui);
-    EXPECT_TRUE(manager.has_pc_breakpoint(lesson_address));
+    manager.add_pc_breakpoint(simrv::xlen::VirtAddr{lesson_address},
+                              simrv::debug::BreakpointOwner::Tui);
+    manager.add_pc_breakpoint(simrv::xlen::VirtAddr{lesson_address},
+                              simrv::debug::BreakpointOwner::Mission);
+    manager.remove_pc_breakpoint(simrv::xlen::VirtAddr{lesson_address},
+                                 simrv::debug::BreakpointOwner::Tui);
+    EXPECT_TRUE(manager.has_pc_breakpoint(simrv::xlen::VirtAddr{lesson_address}));
     EXPECT_EQ(manager.get_pc_breakpoint_records().size(), 1U);
     EXPECT_EQ(manager.get_pc_breakpoint_records().front().owner,
               simrv::debug::BreakpointOwner::Mission);
-    manager.remove_pc_breakpoint(lesson_address, simrv::debug::BreakpointOwner::Mission);
-    EXPECT_TRUE(!manager.has_pc_breakpoint(lesson_address));
-    manager.add_watchpoint(address, 4, simrv::debug::WatchType::Write, "tui");
+    manager.remove_pc_breakpoint(simrv::xlen::VirtAddr{lesson_address},
+                                 simrv::debug::BreakpointOwner::Mission);
+    EXPECT_TRUE(!manager.has_pc_breakpoint(simrv::xlen::VirtAddr{lesson_address}));
+    manager.add_watchpoint(simrv::xlen::VirtAddr{address}, 4, simrv::debug::WatchType::Write,
+                           "tui");
     const auto tui_id = manager.get_watchpoints().front().id;
-    manager.add_watchpoint(address, 4, simrv::debug::WatchType::Write, "gdb",
+    manager.add_watchpoint(simrv::xlen::VirtAddr{address}, 4, simrv::debug::WatchType::Write, "gdb",
                            simrv::debug::BreakpointOwner::Gdb);
-    manager.add_watchpoint(address, 4, simrv::debug::WatchType::Read, "gdb",
+    manager.add_watchpoint(simrv::xlen::VirtAddr{address}, 4, simrv::debug::WatchType::Read, "gdb",
                            simrv::debug::BreakpointOwner::Gdb);
     manager.clear_owner(simrv::debug::BreakpointOwner::Gdb);
     EXPECT_EQ(manager.get_watchpoints().size(), 1U);
     EXPECT_EQ(manager.get_watchpoints().front().id, tui_id);
+    EXPECT_TRUE(manager.check_mem_write(simrv::xlen::VirtAddr{address + 3}, 1).has_value());
+    EXPECT_TRUE(!manager.check_mem_write(simrv::xlen::VirtAddr{address + 4}, 1).has_value());
+    EXPECT_TRUE(!manager.check_mem_read(simrv::xlen::VirtAddr{address}, 4).has_value());
+    manager.add_watchpoint(simrv::xlen::VirtAddr{address + 16}, 4, simrv::debug::WatchType::Read);
+    const auto read_hit = manager.check_mem_read(simrv::xlen::VirtAddr{address + 16}, 4);
+    EXPECT_TRUE(read_hit.has_value());
+    EXPECT_TRUE(!manager.check_mem_write(simrv::xlen::VirtAddr{address + 16}, 4).has_value());
+    manager.add_watchpoint(simrv::xlen::VirtAddr{address + 32}, 4, simrv::debug::WatchType::Access,
+                           "both");
+    const auto access_read = manager.check_mem_read(simrv::xlen::VirtAddr{address + 32}, 4);
+    const auto access_write = manager.check_mem_write(simrv::xlen::VirtAddr{address + 32}, 4);
+    EXPECT_TRUE(access_read.has_value() && access_write.has_value());
+    if (access_read && access_write) {
+        EXPECT_EQ(access_read->watch_type, simrv::debug::WatchType::Access);
+        EXPECT_EQ(access_write->watch_type, simrv::debug::WatchType::Access);
+        EXPECT_TRUE(access_read->description.find("(Read)") != std::string::npos);
+        EXPECT_TRUE(access_write->description.find("(Write)") != std::string::npos);
+    }
 }
 
 static void test_packet_framing_and_malformed_input() {
@@ -530,10 +575,10 @@ static void test_logical_breakpoints_and_watchpoints() {
     *ram.unchecked_ptr(base) = static_cast<simrv::xlen::Byte>(0x13);
 
     EXPECT_EQ(client.transact(std::format("Z0,{:x},4", base)), std::string("OK"));
-    EXPECT_TRUE(h.machine.breakpoint_manager().has_pc_breakpoint(base));
+    EXPECT_TRUE(h.machine.breakpoint_manager().has_pc_breakpoint(simrv::xlen::VirtAddr{base}));
     EXPECT_EQ(static_cast<uint8_t>(*ram.unchecked_ptr(base)), uint8_t{0x13});
     EXPECT_EQ(client.transact(std::format("Z1,{:x},4", base + 4)), std::string("OK"));
-    EXPECT_TRUE(h.machine.breakpoint_manager().has_pc_breakpoint(base + 4));
+    EXPECT_TRUE(h.machine.breakpoint_manager().has_pc_breakpoint(simrv::xlen::VirtAddr{base + 4}));
     EXPECT_EQ(client.transact(std::format("Z2,{:x},4", base + 8)), std::string("OK"));
     EXPECT_EQ(client.transact(std::format("Z3,{:x},4", base + 16)), std::string("OK"));
     EXPECT_EQ(client.transact(std::format("Z4,{:x},4", base + 24)), std::string("OK"));
@@ -549,9 +594,9 @@ static void test_logical_breakpoints_and_watchpoints() {
                 std::string::npos);
 
     EXPECT_EQ(client.transact(std::format("z0,{:x},4", base)), std::string("OK"));
-    EXPECT_TRUE(!h.machine.breakpoint_manager().has_pc_breakpoint(base));
+    EXPECT_TRUE(!h.machine.breakpoint_manager().has_pc_breakpoint(simrv::xlen::VirtAddr{base}));
     EXPECT_EQ(client.transact(std::format("z1,{:x},4", base + 4)), std::string("OK"));
-    EXPECT_TRUE(!h.machine.breakpoint_manager().has_pc_breakpoint(base + 4));
+    EXPECT_TRUE(!h.machine.breakpoint_manager().has_pc_breakpoint(simrv::xlen::VirtAddr{base + 4}));
     EXPECT_EQ(client.transact(std::format("z2,{:x},4", base + 8)), std::string("OK"));
     EXPECT_EQ(h.machine.breakpoint_manager().get_watchpoints().size(), 2U);
 }
@@ -568,7 +613,7 @@ static void test_detach_and_reconnect_cleanup() {
         EXPECT_EQ(client.transact(std::format("Z0,{:x},4", bp)), std::string("OK"));
         EXPECT_EQ(client.transact("D"), std::string("OK"));
     }
-    EXPECT_TRUE(!h.machine.breakpoint_manager().has_pc_breakpoint(bp));
+    EXPECT_TRUE(!h.machine.breakpoint_manager().has_pc_breakpoint(simrv::xlen::VirtAddr{bp}));
     EXPECT_EQ(h.machine.execution_state(), simrv::core::ExecutionState::Running);
 
     {

@@ -174,7 +174,7 @@ auto Sbi::handle_rfence(simrv::xlen::Word func_id) -> bool {
             } else {
                 for (simrv::xlen::Address addr = start_addr; addr < start_addr + size;
                      addr += 4096) {
-                    target_cpu.TLB_flush(core::TlbFlushFilter{.vaddr = addr, .asid = filter_asid});
+                    target_cpu.TLB_flush(core::TlbFlushFilter{.vaddr = simrv::xlen::VirtAddr{addr}, .asid = filter_asid});
                 }
             }
         }

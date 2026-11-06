@@ -380,11 +380,11 @@ auto translate_for_inspection(const simrv::core::ArchState& st, const simrv::cor
     if (cpu == nullptr) return std::nullopt;
     const simrv::xlen::Word asid = simrv::xlen::satp_asid(st.satp, active_xlen);
     const simrv::core::TLBEntry* entry =
-        is_fetch ? cpu->tlb.peek_inst_r(vaddr, asid, st.priv)
-                 : (is_write ? cpu->tlb.peek_data_w(vaddr, asid, st.priv)
-                             : cpu->tlb.peek_data_r(vaddr, asid, st.priv));
+        is_fetch ? cpu->tlb.peek_inst_r(simrv::xlen::VirtAddr{vaddr}, asid, st.priv)
+                 : (is_write ? cpu->tlb.peek_data_w(simrv::xlen::VirtAddr{vaddr}, asid, st.priv)
+                             : cpu->tlb.peek_data_r(simrv::xlen::VirtAddr{vaddr}, asid, st.priv));
     if (entry == nullptr) return std::nullopt;
-    return entry->p_addr | (vaddr & simrv::memory::kPageMask);
+    return (entry->p_addr | (vaddr & simrv::memory::kPageMask)).raw();
 }
 
 auto get_abi_reg_name(simrv::xlen::RegId reg, simrv::pipeline::operation::RegBank bank)

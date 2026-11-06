@@ -84,12 +84,12 @@ void VirtioPciDevice::add_pci_cap(uint8_t cap_type, PciBarIndex bar, PciBarOffse
 
 auto VirtioPciDevice::dma_read(simrv::xlen::Address paddr, void* dst, size_t len) -> bool {
     if (!root_complex_ || !root_complex_->machine()) return false;
-    return root_complex_->machine()->memory().dma_read(paddr, dst, len);
+    return root_complex_->machine()->memory().dma_read(simrv::xlen::PhysAddr{paddr}, dst, len);
 }
 
 auto VirtioPciDevice::dma_write(simrv::xlen::Address paddr, const void* src, size_t len) -> bool {
     if (!root_complex_ || !root_complex_->machine()) return false;
-    return root_complex_->machine()->memory().dma_write(paddr, src, len);
+    return root_complex_->machine()->memory().dma_write(simrv::xlen::PhysAddr{paddr}, src, len);
 }
 
 void VirtioPciDevice::trigger_irq() {

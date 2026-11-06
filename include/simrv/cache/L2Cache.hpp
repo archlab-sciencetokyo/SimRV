@@ -17,10 +17,10 @@ class L2Cache : public BaseCache<1024, 64, 8> {
    public:
     L2Cache() = default;
 
-    [[nodiscard]] auto read_line(simrv::xlen::Address line_base,
+    [[nodiscard]] auto read_line(simrv::xlen::PhysAddr line_base,
                                  std::array<simrv::xlen::Byte, kLineBytes>& out_data) -> bool {
-        const uint32_t set_idx = get_set_index(line_base);
-        const simrv::xlen::Address tag = get_tag(line_base);
+        const uint32_t set_idx = get_set_index(line_base.raw());
+        const auto tag = get_tag(line_base.raw());
         last_accessed_set_ = set_idx;
 
         const auto [w, cache_line] = find_matching_line(set_idx, tag);
@@ -39,15 +39,21 @@ class L2Cache : public BaseCache<1024, 64, 8> {
         return false;
     }
 
-    void write_line(simrv::xlen::Address line_base,
+    void write_line(simrv::xlen::PhysAddr line_base,
                     const std::array<simrv::xlen::Byte, kLineBytes>& in_data,
                     simrv::memory::MesiState state = simrv::memory::MesiState::Exclusive) {
         insert(line_base, in_data.data(), state);
     }
 
-    void invalidate_line(simrv::xlen::Address line_base) {
+    void invalidate_line(simrv::xlen::PhysAddr line_base) {
         (void)probe_line(line_base, simrv::memory::MesiState::Invalid);
     }
+    template <std::integral I, typename... Args>
+    auto read_line(I, Args&&...) = delete;
+    template <std::integral I, typename... Args>
+    void write_line(I, Args&&...) = delete;
+    template <std::integral I>
+    void invalidate_line(I) = delete;
 };
 
 }  // namespace simrv::cache

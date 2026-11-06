@@ -401,10 +401,11 @@ void Tracer::refresh_runtime_trace_metadata() {
         if (device == nullptr) continue;
         if (!first_device) trace_enabled_devices_json_.push_back(',');
         first_device = false;
-        trace_enabled_devices_json_ += std::format(
-            "{{\"name\":{},\"base\":\"0x{:x}\",\"size\":\"0x{:x}\"}}",
-            json_quote(device->name() != nullptr ? device->name() : ""),
-            static_cast<uint64_t>(device->base_address()), static_cast<uint64_t>(device->size()));
+        trace_enabled_devices_json_ +=
+            std::format("{{\"name\":{},\"base\":\"0x{:x}\",\"size\":\"0x{:x}\"}}",
+                        json_quote(device->name() != nullptr ? device->name() : ""),
+                        static_cast<uint64_t>(device->base_address().raw()),
+                        static_cast<uint64_t>(device->size()));
     }
     trace_enabled_devices_json_.push_back(']');
     trace_configuration_sha256_ = simrv::util::sha256(
@@ -1020,12 +1021,12 @@ void Tracer::log_trap(simrv::xlen::Counter mtime, simrv::xlen::Counter cycle,
     const simrv::xlen::Address effective_address =
         cpu.effective_data_xlen() == 32 ? (context.mem_addr & 0xffffffffULL) : context.mem_addr;
     const auto access_privilege = cpu.effective_data_privilege();
-    std::optional<simrv::xlen::Address> physical_address;
+    std::optional<simrv::xlen::PhysAddr> physical_address;
     const bool translation_enabled =
         access_privilege != kPrivMachine &&
         simrv::xlen::satp_translation_enabled(state.satp, cpu.effective_data_xlen());
     if (!translation_enabled) {
-        physical_address = effective_address;
+        physical_address = simrv::xlen::PhysAddr{effective_address};
     } else {
         const auto asid =
             static_cast<Asid>(simrv::xlen::satp_asid(state.satp, cpu.effective_data_xlen()));
@@ -1034,14 +1035,16 @@ void Tracer::log_trap(simrv::xlen::Counter mtime, simrv::xlen::Counter cycle,
         const auto& soft_tlb =
             memory_write_fault ? cpu.soft_tlb_write[tlb_index] : cpu.soft_tlb_read[tlb_index];
         if (soft_tlb.matches(vpn, asid, access_privilege, cpu.soft_tlb_epoch)) {
-            physical_address =
-                soft_tlb.paddr_base.raw() | (effective_address & simrv::memory::kPageMask);
+            physical_address = soft_tlb.paddr_base | (effective_address & simrv::memory::kPageMask);
         } else {
-            const auto* entry =
-                memory_write_fault ? cpu.tlb.peek_data_w(effective_address, asid, access_privilege)
-                                   : cpu.tlb.peek_data_r(effective_address, asid, access_privilege);
+            const auto* entry = memory_write_fault
+                                    ? cpu.tlb.peek_data_w(simrv::xlen::VirtAddr{effective_address},
+                                                          asid, access_privilege)
+                                    : cpu.tlb.peek_data_r(simrv::xlen::VirtAddr{effective_address},
+                                                          asid, access_privilege);
             if (entry != nullptr) {
-                physical_address = entry->p_addr | (effective_address & simrv::memory::kPageMask);
+                physical_address = simrv::xlen::PhysAddr{
+                    entry->p_addr | (effective_address & simrv::memory::kPageMask)};
             }
         }
     }
@@ -1079,7 +1082,7 @@ void Tracer::log_trap(simrv::xlen::Counter mtime, simrv::xlen::Counter cycle,
                  component.empty() ? "" : std::format("\"component\":{},", json_quote(component)),
                  static_cast<uint64_t>(effective_address),
                  physical_address ? std::format("\"physical_address\":\"0x{:x}\",",
-                                                static_cast<uint64_t>(*physical_address))
+                                                static_cast<uint64_t>(physical_address->raw()))
                                   : "",
                  region, memory_write_fault ? "write" : "read",
                  json_quote(pipeline::operation_name(context.op_id)), width, value_json,
@@ -1236,12 +1239,12 @@ void Tracer::log_architecture_retirement(const CPU& cpu,
             cpu.effective_data_xlen() == 32 ? (retiring_context.mem_addr & 0xffffffffULL)
                                             : retiring_context.mem_addr;
         const auto access_privilege = cpu.effective_data_privilege();
-        std::optional<simrv::xlen::Address> physical_address;
+        std::optional<simrv::xlen::PhysAddr> physical_address;
         const bool translation_enabled =
             access_privilege != kPrivMachine &&
             simrv::xlen::satp_translation_enabled(state.satp, cpu.effective_data_xlen());
         if (!translation_enabled) {
-            physical_address = effective_address;
+            physical_address = simrv::xlen::PhysAddr{effective_address};
         } else {
             const auto asid =
                 static_cast<Asid>(simrv::xlen::satp_asid(state.satp, cpu.effective_data_xlen()));
@@ -1252,15 +1255,17 @@ void Tracer::log_architecture_retirement(const CPU& cpu,
                                        : cpu.soft_tlb_read[tlb_index];
             if (soft_tlb.matches(vpn, asid, access_privilege, cpu.soft_tlb_epoch)) {
                 physical_address =
-                    soft_tlb.paddr_base.raw() | (effective_address & simrv::memory::kPageMask);
+                    soft_tlb.paddr_base | (effective_address & simrv::memory::kPageMask);
             } else {
                 const auto* entry =
                     memory_kind == pipeline::operation::MemoryAccessKind::Store
-                        ? cpu.tlb.peek_data_w(effective_address, asid, access_privilege)
-                        : cpu.tlb.peek_data_r(effective_address, asid, access_privilege);
+                        ? cpu.tlb.peek_data_w(simrv::xlen::VirtAddr{effective_address}, asid,
+                                              access_privilege)
+                        : cpu.tlb.peek_data_r(simrv::xlen::VirtAddr{effective_address}, asid,
+                                              access_privilege);
                 if (entry != nullptr) {
-                    physical_address =
-                        entry->p_addr | (effective_address & simrv::memory::kPageMask);
+                    physical_address = simrv::xlen::PhysAddr{
+                        entry->p_addr | (effective_address & simrv::memory::kPageMask)};
                 }
             }
         }
@@ -1306,7 +1311,7 @@ void Tracer::log_architecture_retirement(const CPU& cpu,
                                       : std::format("\"component\":{},", json_quote(component)),
                     static_cast<uint64_t>(effective_address),
                     physical_address ? std::format("\"physical_address\":\"0x{:x}\",",
-                                                   static_cast<uint64_t>(*physical_address))
+                                                   static_cast<uint64_t>(physical_address->raw()))
                                      : "",
                     region, json_quote(pipeline::operation_name(retiring_context.op_id)), width,
                     read_value, write_value);
@@ -1327,7 +1332,7 @@ void Tracer::log_architecture_retirement(const CPU& cpu,
                                       : std::format("\"component\":{},", json_quote(component)),
                     static_cast<uint64_t>(effective_address),
                     physical_address ? std::format("\"physical_address\":\"0x{:x}\",",
-                                                   static_cast<uint64_t>(*physical_address))
+                                                   static_cast<uint64_t>(physical_address->raw()))
                                      : "",
                     region, is_load ? "read" : (is_store ? "write" : "access"),
                     json_quote(pipeline::operation_name(retiring_context.op_id)), width,

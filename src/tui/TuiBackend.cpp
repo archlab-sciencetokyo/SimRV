@@ -170,13 +170,13 @@ void LocalTuiBackend::execute(core::Machine& machine, BackendRequest request,
                         break;
                     }
                     if (request.command == BackendCommand::AddBreakpoint)
-                        machine.breakpoint_manager().add_pc_breakpoint(
-                            static_cast<simrv::xlen::Address>(request.address));
+                        machine.breakpoint_manager().add_pc_breakpoint(simrv::xlen::VirtAddr{
+                            static_cast<simrv::xlen::Address>(request.address)});
                     if (request.command == BackendCommand::RemoveBreakpoint)
-                        machine.breakpoint_manager().remove_pc_breakpoint(
-                            static_cast<simrv::xlen::Address>(request.address));
+                        machine.breakpoint_manager().remove_pc_breakpoint(simrv::xlen::VirtAddr{
+                            static_cast<simrv::xlen::Address>(request.address)});
                     for (auto address : machine.breakpoint_manager().get_pc_breakpoints())
-                        reply.text += std::format("{:016x}\n", address);
+                        reply.text += std::format("{:016x}\n", address.raw());
                     if (reply.text.empty()) reply.text = "No breakpoints";
                     break;
                 case BackendCommand::Reboot:

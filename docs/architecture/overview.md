@@ -98,15 +98,48 @@ In `--mode fast` (Instruction-Accurate), single-hart OS kernels and baremetal ap
 
 - **Batched Retirement & Telemetry**: Eliminates per-instruction atomic operations on machine-wide retirement
   counters, synchronizing only at chunk, decode miss, or batch boundaries.
-- **CLINT Chunking**: Virtual counters (`mcycle`, `mtime`, and timer interrupt evaluations) update in
-  64-instruction chunks during tight loops, preventing timer evaluation overhead on every single instruction.
+- **Clock Accounting**: The OS engine flushes virtual clock and retirement accounting at bounded
+  chunk and fallback boundaries; the bare-metal engine accounts cached cycles at its batch boundary.
 - **Inlined Cached Helpers**: Load, store, branch, and jump operations inline directly into the opcode dispatcher
   without function call frames.
-- **Automatic Debug Fallback**: Fast batching is governed by `Machine::fast_batch_policy()`. The moment any
-  breakpoint or watchpoint is registered (`breakpoints.has_any()`), lockstep testing is engaged, instruction tracing
-  is active, or the user is single-stepping (`is_stepping()` or `step_delay_us != 0`), fast-batching immediately
-  disengages. Execution automatically reverts to the cycle-by-cycle engine (`CPU::run_cycle`), guaranteeing
-  100% single-instruction hit precision, accurate watchpoint diffing, and fine-grained TUI animation.
+- **Batch Eligibility**: `Machine::fast_batch_policy()` declines batching for SMP, stepping,
+  lockstep, branch tracing, breakpoints or watchpoints, architectural triggers, and an active TUI
+  trace or step delay, and the CFU console redirect model.
+  The scheduler otherwise services controls and publishes batch-level state at its boundaries.
+
+Fast shortcuts must preserve the effects of their general paths. Cached execution must stop or
+fall back at control, trap, and observation boundaries. Direct RAM access requires a valid range
+and the applicable translation and protection checks; stores must preserve `tohost`, triggers,
+and reservation effects. Vector bulk access falls back when an element needs individual checks.
+Fetch shortcuts still check execute permission before decoding. Cache MRU lookup verifies the tag,
+valid bit, and coherence state before returning a line. Typed device accesses retain their device
+and bus side effects. MMIO routing checks device ownership even for MRU hits and rejects a transfer
+if any addressed byte falls outside the selected device. Device registration and range queries
+scan ambiguous sparse overlaps up to 4096 bytes and conservatively report larger ambiguous overlaps
+as occupied. The decode cache uses 64-byte-aligned sets; this is a layout choice, not a claim that
+every supported host has a 64-byte cache line.
+
+MMIO routing and DMA APIs accept `simrv::xlen::PhysAddr`. C++ callers must explicitly construct
+physical addresses from platform configuration or translate virtual addresses before routing or
+DMA. `TileLinkNode::base_address()` returns `PhysAddr`, and `contains()` takes `PhysAddr`; C++ device
+implementations must update their overrides. An override of `contains()` should also declare
+`using TileLinkNode::contains;` so the base class's deleted raw-integer overload stays visible. The C
+plugin ABI retains its existing scalar fields; the plugin adapter constructs a physical address
+when importing a base address. TLB lookup, inspection, and selective flush filters require
+`VirtAddr`, while insertion requires both `VirtAddr` and `PhysAddr`. Full TLB entries keep virtual
+and physical pages in their respective types.
+
+Instruction-cache reads, data-cache accesses, cache-line insertion and probes, shared-cache line
+operations, and the coherence directory use `PhysAddr`. Cache tags and eviction addresses represent
+aligned physical line bases. Data-cache accesses also use the typed `Funct3` operation; callers
+must convert raw decoded fields explicitly. Coherence inputs are aligned to the cache line before
+lookup or invalidation. A data-cache access wider than native `Word` misses;
+RV32 floating-point and vector paths split wider accesses into word operations. Cache-block zero
+discards the initiating cached copy when removing its directory entry and invalidates reservations
+throughout the block. DMA writes invalidate reservations over their actual byte range.
+
+Compact execution keeps integer register operands as `RegId` until indexing the register file;
+its on-disk and plugin interfaces are not affected by that internal representation.
 
 ## Multi-Hart SMP & TileLink-C Coherence
 
@@ -121,6 +154,10 @@ deterministic instruction mode, harts advance in round-robin order within each s
 MT-SMP may retire a small number of additional instructions while workers observe the stop request.
 
 ## Debugger ownership and synchronization
+
+Debugger instruction breakpoints and memory watchpoints use virtual addresses; memory watchpoints
+match effective addresses before translation. Their C++ interfaces require `VirtAddr`; GDB and TUI
+adapters explicitly convert the addresses they parse.
 
 The TUI and GDB are mutually exclusive frontends over machine-owned debug primitives. TUI debug
 actions are always available; GDB runs its blocking TCP accept/read loop on one `std::jthread` and

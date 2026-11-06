@@ -201,11 +201,13 @@ void test_tlb_global_mappings() {
     constexpr Asid kAsid2 = 2;
 
     // Insert a global data translation under ASID 1
-    tlb.insert_data_r(kVaddr, kPaddr, kAsid1, simrv::xlen::PrivilegeLevel::Supervisor,
+    tlb.insert_data_r(simrv::xlen::VirtAddr{kVaddr}, simrv::xlen::PhysAddr{kPaddr}, kAsid1,
+                      simrv::xlen::PrivilegeLevel::Supervisor,
                       /*global=*/true);
 
     // 1. Hit under different ASID (ASID 2)
-    auto* hit = tlb.lookup_data_r(kVaddr, kAsid2, simrv::xlen::PrivilegeLevel::Supervisor);
+    auto* hit = tlb.lookup_data_r(simrv::xlen::VirtAddr{kVaddr}, kAsid2,
+                                  simrv::xlen::PrivilegeLevel::Supervisor);
     expect(hit != nullptr, "TLB global entry hits under different ASID");
     if (hit) {
         expect(hit->global, "TLB entry global flag is set");
@@ -214,17 +216,20 @@ void test_tlb_global_mappings() {
 
     // 2. SFENCE.VMA with ASID=1 must NOT flush global entries
     tlb.flush_selective(simrv::core::TlbFlushFilter{.vaddr = std::nullopt, .asid = kAsid1});
-    expect(tlb.lookup_data_r(kVaddr, kAsid2, simrv::xlen::PrivilegeLevel::Supervisor) != nullptr,
+    expect(tlb.lookup_data_r(simrv::xlen::VirtAddr{kVaddr}, kAsid2,
+                             simrv::xlen::PrivilegeLevel::Supervisor) != nullptr,
            "ASID-filtered TLB flush preserves global entry");
 
     // 3. SFENCE.VMA with vaddr and ASID=1 must NOT flush global entries
-    tlb.flush_selective(simrv::core::TlbFlushFilter{.vaddr = kVaddr, .asid = kAsid1});
-    expect(tlb.lookup_data_r(kVaddr, kAsid2, simrv::xlen::PrivilegeLevel::Supervisor) != nullptr,
+    tlb.flush_selective(simrv::core::TlbFlushFilter{.vaddr = simrv::xlen::VirtAddr{kVaddr}, .asid = kAsid1});
+    expect(tlb.lookup_data_r(simrv::xlen::VirtAddr{kVaddr}, kAsid2,
+                             simrv::xlen::PrivilegeLevel::Supervisor) != nullptr,
            "Page-specific ASID-filtered TLB flush preserves global entry");
 
     // 4. SFENCE.VMA with vaddr and NO ASID flushes global entry
-    tlb.flush_selective(simrv::core::TlbFlushFilter{.vaddr = kVaddr, .asid = std::nullopt});
-    expect(tlb.lookup_data_r(kVaddr, kAsid2, simrv::xlen::PrivilegeLevel::Supervisor) == nullptr,
+    tlb.flush_selective(simrv::core::TlbFlushFilter{.vaddr = simrv::xlen::VirtAddr{kVaddr}, .asid = std::nullopt});
+    expect(tlb.lookup_data_r(simrv::xlen::VirtAddr{kVaddr}, kAsid2,
+                             simrv::xlen::PrivilegeLevel::Supervisor) == nullptr,
            "Global vaddr flush invalidates global TLB entry");
 }
 
@@ -254,14 +259,14 @@ void test_soft_tlb_global_mappings() {
            "ASID-filtered soft TLB flush preserves global entry");
 
     // 3. Page-specific ASID flush preserves global entry
-    cpu.soft_tlb_flush_selective(simrv::core::TlbFlushFilter{.vaddr = kVaddr, .asid = kAsid1});
+    cpu.soft_tlb_flush_selective(simrv::core::TlbFlushFilter{.vaddr = simrv::xlen::VirtAddr{kVaddr}, .asid = kAsid1});
     expect(cpu.soft_tlb_read[idx].matches(kVpn, kAsid2, simrv::xlen::PrivilegeLevel::Supervisor,
                                           cpu.soft_tlb_epoch),
            "Page-specific ASID-filtered soft TLB flush preserves global entry");
 
     // 4. Page-specific flush without ASID invalidates global entry
     cpu.soft_tlb_flush_selective(
-        simrv::core::TlbFlushFilter{.vaddr = kVaddr, .asid = std::nullopt});
+        simrv::core::TlbFlushFilter{.vaddr = simrv::xlen::VirtAddr{kVaddr}, .asid = std::nullopt});
     expect(!cpu.soft_tlb_read[idx].matches(kVpn, kAsid2, simrv::xlen::PrivilegeLevel::Supervisor,
                                            cpu.soft_tlb_epoch),
            "Page-specific flush without ASID invalidates soft TLB global entry");

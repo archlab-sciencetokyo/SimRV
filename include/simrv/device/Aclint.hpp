@@ -44,7 +44,9 @@ class AclintMtimer : public memory::MmioDevice {
     void set_sink(simrv::core::IInterruptController* sink) noexcept { sink_ = sink; }
 
     [[nodiscard]] auto name() const -> const char* override { return "aclint-mtimer"; }
-    [[nodiscard]] auto base_address() const -> simrv::xlen::Address override { return base_; }
+    [[nodiscard]] auto base_address() const -> simrv::xlen::PhysAddr override {
+        return simrv::xlen::PhysAddr{base_};
+    }
     [[nodiscard]] auto size() const -> simrv::xlen::Address override { return size_; }
     void reset() override;
 
@@ -87,7 +89,9 @@ class AclintMswi : public memory::MmioDevice {
     void set_sink(simrv::core::IInterruptController* sink) noexcept { sink_ = sink; }
 
     [[nodiscard]] auto name() const -> const char* override { return "aclint-mswi"; }
-    [[nodiscard]] auto base_address() const -> simrv::xlen::Address override { return base_; }
+    [[nodiscard]] auto base_address() const -> simrv::xlen::PhysAddr override {
+        return simrv::xlen::PhysAddr{base_};
+    }
     [[nodiscard]] auto size() const -> simrv::xlen::Address override { return size_; }
     void reset() override;
 

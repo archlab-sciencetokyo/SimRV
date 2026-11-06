@@ -33,9 +33,11 @@ if(BUILD_TESTING)
     SIMRV_NATIVE_TEST_TARGETS
     GLOBAL
     PROPERTY SIMRV_NATIVE_TEST_TARGETS)
+  add_custom_target(simrv-native-tests)
   if(SIMRV_NATIVE_TEST_TARGETS)
-    add_dependencies(integration-gate ${SIMRV_NATIVE_TEST_TARGETS})
+    add_dependencies(simrv-native-tests ${SIMRV_NATIVE_TEST_TARGETS})
   endif()
+  add_dependencies(integration-gate simrv-native-tests)
 endif()
 
 if(SIMRV_ENABLE_TOOLING)

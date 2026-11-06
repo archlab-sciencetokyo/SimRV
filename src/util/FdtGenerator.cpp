@@ -206,19 +206,25 @@ auto generate_platform_fdt(const core::MachineConfig& config,
         return found == devices.end() ? nullptr : &*found;
     };
     const auto* uart = find_device(core::SoCDeviceKind::Uart);
+    const bool standard_uart = uart != nullptr &&
+        (uart->compatible.empty() || uart->compatible == "ns16550a" ||
+         uart->compatible == "ns16550");
     std::string bootargs = config.files.bootargs;
     if (bootargs.empty()) {
-        bootargs = uart == nullptr
+        bootargs = !standard_uart
                        ? "root=/dev/vda rw"
                        : std::format("console=ttyS0 earlycon=uart8250,mmio,{:#x} root=/dev/vda rw",
                                      static_cast<uint64_t>(uart->base));
     }
     fdt.property_string("bootargs", bootargs);
-    if (uart != nullptr) {
+    if (standard_uart) {
         const uint32_t baud = simrv::device::uart_baud_rate(
             uart->clock_hz, simrv::device::uart_reset_divisor(uart->clock_hz));
         fdt.property_string("stdout-path", std::format("/soc/uart@{:x}:{}",
                                                        static_cast<uint64_t>(uart->base), baud));
+    } else if (uart != nullptr) {
+        fdt.property_string("stdout-path", std::format("/soc/uart@{:x}",
+                                                       static_cast<uint64_t>(uart->base)));
     }
     fdt.end_node();
 
@@ -404,32 +410,42 @@ auto generate_platform_fdt(const core::MachineConfig& config,
     };
     if (uart != nullptr) {
         fdt.begin_node(std::format("uart@{:x}", static_cast<uint64_t>(uart->base)));
-        fdt.property_string("compatible", "ns16550a");
+        fdt.property_string("compatible", uart->compatible.empty() ? "ns16550a"
+                                                                     : uart->compatible);
         fdt.property_reg("reg", uart->base, uart->size);
         const uint32_t uart_clock = static_cast<uint32_t>(uart->clock_hz);
-        const uint32_t baud = simrv::device::uart_baud_rate(
-            uart->clock_hz, simrv::device::uart_reset_divisor(uart->clock_hz));
         fdt.property_u32("clock-frequency", uart_clock);
-        fdt.property_u32("current-speed", baud);
+        if (standard_uart) {
+            const uint32_t baud = simrv::device::uart_baud_rate(
+                uart->clock_hz, simrv::device::uart_reset_divisor(uart->clock_hz));
+            fdt.property_u32("current-speed", baud);
+        }
         add_irq(*uart);
         fdt.end_node();
     }
 
     if (const auto* rtc = find_device(core::SoCDeviceKind::Rtc); rtc != nullptr) {
         fdt.begin_node(std::format("rtc@{:x}", static_cast<uint64_t>(rtc->base)));
-        fdt.property_string("compatible", "google,goldfish-rtc");
+        fdt.property_string("compatible", rtc->compatible.empty() ? "google,goldfish-rtc"
+                                                                    : rtc->compatible);
         fdt.property_reg("reg", rtc->base, rtc->size);
         add_irq(*rtc);
         fdt.end_node();
     }
 
     const auto* power = find_device(core::SoCDeviceKind::Power);
+    const bool standard_power = power != nullptr &&
+        (power->compatible.empty() || power->compatible == "sifive,test1" ||
+         power->compatible == "sifive,test0");
     if (power != nullptr) {
         // SiFive test finisher, exposed as a syscon for Linux poweroff/reboot.
         fdt.begin_node(std::format("test@{:x}", static_cast<uint64_t>(power->base)));
         static constexpr std::string_view kTestCompat[] = {"sifive,test1", "sifive,test0",
                                                            "syscon"};
-        fdt.property_stringlist("compatible", kTestCompat);
+        if (standard_power)
+            fdt.property_stringlist("compatible", kTestCompat);
+        else
+            fdt.property_string("compatible", power->compatible);
         fdt.property_reg("reg", power->base, power->size);
         fdt.property_phandle("phandle", 2U);
         fdt.end_node();
@@ -577,7 +593,7 @@ auto generate_platform_fdt(const core::MachineConfig& config,
 
     fdt.end_node();  // /soc
 
-    if (power != nullptr) {
+    if (standard_power) {
         fdt.begin_node("poweroff");
         fdt.property_string("compatible", "syscon-poweroff");
         fdt.property_phandle("regmap", 2U);

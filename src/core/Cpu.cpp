@@ -134,7 +134,7 @@ void CPU::flush_data_tlb() {
 void CPU::TLB_flush(const core::TlbFlushFilter& filter) {
     tlb.flush_selective(filter);
     if (filter.vaddr) {
-        decode_cache.flush_page(*filter.vaddr & ~simrv::xlen::Address{0xFFF});
+        decode_cache.flush_page(filter.vaddr->raw() & ~simrv::xlen::Address{0xFFF});
     } else {
         decode_cache.flush();
     }
@@ -166,10 +166,10 @@ void CPU::soft_tlb_flush_selective(const core::TlbFlushFilter& filter) {
         return;
     }
     if (filter.vaddr) {
-        const simrv::xlen::Address vpn = *filter.vaddr >> 12;
+        const simrv::xlen::Address vpn = filter.vaddr->raw() >> 12;
         const size_t tlb_idx = soft_tlb_index(vpn);
         auto invalidate_if_match = [&](SoftTlbEntry& entry) {
-            if (entry.valid(soft_tlb_epoch)) {
+            if (entry.tag != SoftTlbEntry::kInvalidTag) {
                 const uint64_t entry_vpn = (entry.tag >> 18) & 0xFFFFFFFFFFULL;
                 if (entry_vpn == (vpn & 0xFFFFFFFFFFULL)) {
                     if (filter.asid) {
@@ -189,7 +189,7 @@ void CPU::soft_tlb_flush_selective(const core::TlbFlushFilter& filter) {
     }
     if (filter.asid) {
         auto invalidate_asid = [&](SoftTlbEntry& entry) {
-            if (entry.valid(soft_tlb_epoch) && !entry.global) {
+            if (entry.tag != SoftTlbEntry::kInvalidTag && !entry.global) {
                 const uint64_t entry_asid = (entry.tag >> 2) & 0xFFFFu;
                 if (entry_asid == *filter.asid) {
                     entry.invalidate();

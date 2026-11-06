@@ -3,6 +3,15 @@
 All notable changes to SimRV are documented here.
 Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+- Correct MMIO routing through cached entries and overlapping device windows with holes; reject accesses that cross a device boundary.
+- Prevent native RV32 data-cache reads and writes wider than `Word` from copying past their stack buffers; the cache reports a miss for these unsupported direct requests.
+- Correct cache-block zeroing and DMA writes to invalidate affected LR/SC reservations; discard the initiating cached line when zeroing removes its coherence-directory entry.
+- Strengthen the C++ interfaces for translation, cache, coherence, debugger, MMIO, and DMA addresses. The C plugin ABI is unchanged.
+- Allow serial-capable C plugins to replace the configured UART, and compatible MMIO plugins to replace standalone power and RTC devices. Keep plugin host services owned by each device instance and report plugin MMIO errors to the guest.
+- Add RVComp MMC plugin support and device-tree boot-argument updates; buffer startup diagnostics while the TUI initializes.
+
 ## [v3.0.0-rc.19] — 2026-11-05
 
 - Optimized fast execution instruction dispatch by flattening multi-level nested ALU conditionals into a compiler-optimized flat jump table across all FastOp kinds.
@@ -376,7 +385,7 @@ improves installation and versioned documentation for lab and artifact users.
 
 - Consolidated CPack TGZ, RPM, and DEB outputs around the public `simrv` command.
 - Added package dependency manifests, clean-install validation, and package linting.
-- Published stable and development MkDocs trees together on GitHub Pages, with installation
+- Published stable and development documentation trees together on GitHub Pages, with installation
   guidance for portable archives and native packages.
 - Retained native RV32 qualification and hosted RV32 guest coverage as strict-width checks.
 

@@ -40,7 +40,9 @@ class Plic : public memory::TileLinkNode {
     static constexpr size_t kMaxPlicContexts = core::topology::kMaxPlicContexts;
 
     [[nodiscard]] auto name() const -> const char* final { return "plic"; }
-    [[nodiscard]] auto base_address() const -> simrv::xlen::Address final { return base_address_; }
+    [[nodiscard]] auto base_address() const -> simrv::xlen::PhysAddr final {
+        return simrv::xlen::PhysAddr{base_address_};
+    }
     [[nodiscard]] auto size() const -> simrv::xlen::Address final { return size_; }
     void configure_address_map(simrv::xlen::Address base, simrv::xlen::Address size) noexcept {
         base_address_ = base;
@@ -49,9 +51,12 @@ class Plic : public memory::TileLinkNode {
     void reset() final;
     auto handle_request(const memory::TlChannelA& req, memory::TlChannelD& resp) -> bool final;
 
-    [[nodiscard]] auto contains(simrv::xlen::Address addr) const -> bool {
+    using TileLinkNode::contains;
+    [[nodiscard]] auto contains(simrv::xlen::PhysAddr address) const -> bool override {
+        const auto addr = address.raw();
         return addr >= base_address_ && addr - base_address_ < size_;
     }
+
     [[nodiscard]] auto offset(simrv::xlen::Address addr) const -> simrv::xlen::Address {
         return addr - base_address_;
     }

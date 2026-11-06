@@ -3,6 +3,7 @@
  * @brief Cached instruction execution and optimized memory access paths.
  */
 #include <array>
+#include <cstring>
 #include <limits>
 #include <shared_mutex>
 #include <utility>
@@ -10,6 +11,7 @@
 #include "CpuExecutionHelpers.hpp"
 #include "simrv/CompilerHints.hpp"
 #include "simrv/core/Cpu.hpp"
+#include "simrv/core/Logger.hpp"
 #include "simrv/core/Machine.hpp"
 #include "simrv/core/PlatformTiming.hpp"
 #include "simrv/core/Pmp.hpp"
@@ -38,6 +40,10 @@ SIMRV_ALWAYS_INLINE void CPU::execute_cached_jal(CachedOp& op) {
     simrv::xlen::Register const next_pc = state_.pc + op.len();
     pipeline_context.tkn = true;
     pipeline_context.jmp_pc = simrv::xlen::VirtAddr{state_.pc + op.imm};
+    if (state_.regs.xlen == 32) {
+        pipeline_context.jmp_pc = simrv::xlen::VirtAddr{static_cast<simrv::xlen::Register>(
+            static_cast<int64_t>(static_cast<int32_t>(pipeline_context.jmp_pc.raw())))};
+    }
     if (simrv::compiler::unlikely((pipeline_context.jmp_pc & state_.fetch_align_mask) != 0)) {
         raise_exception(ExceptionCode::MisalignedFetch, pipeline_context.jmp_pc.raw());
         return;
@@ -68,17 +74,44 @@ SIMRV_ALWAYS_INLINE void CPU::execute_cached_branch(CachedOp& op, simrv::xlen::R
                                                     simrv::xlen::Register rrs2) {
     static_assert(kBranchOp == isa::BEQ || kBranchOp == isa::BNE || kBranchOp == isa::BLT ||
                   kBranchOp == isa::BGE || kBranchOp == isa::BLTU || kBranchOp == isa::BGEU);
+    if ((state_.pc & 0xFFFFFFFF) == 0xc020b294) {
+        simrv::log::warn("DEBUG CACHED_BRANCH: pc=0x{:x}, rrs1=0x{:016x}, rrs2=0x{:016x}", state_.pc, rrs1, rrs2);
+    }
     bool tkn;
     if constexpr (kBranchOp == isa::BEQ) {
-        tkn = rrs1 == rrs2;
+        if constexpr (!simrv::xlen::kIsXLen64) {
+            tkn = rrs1 == rrs2;
+        } else if (simrv::compiler::likely(state_.regs.xlen == 32)) {
+            tkn = static_cast<uint32_t>(rrs1) == static_cast<uint32_t>(rrs2);
+        } else {
+            tkn = rrs1 == rrs2;
+        }
     } else if constexpr (kBranchOp == isa::BNE) {
-        tkn = rrs1 != rrs2;
+        if constexpr (!simrv::xlen::kIsXLen64) {
+            tkn = rrs1 != rrs2;
+        } else if (simrv::compiler::likely(state_.regs.xlen == 32)) {
+            tkn = static_cast<uint32_t>(rrs1) != static_cast<uint32_t>(rrs2);
+        } else {
+            tkn = rrs1 != rrs2;
+        }
     } else if constexpr (kBranchOp == isa::BLT) {
-        tkn =
-            static_cast<simrv::xlen::SignedWord>(rrs1) < static_cast<simrv::xlen::SignedWord>(rrs2);
+        if constexpr (!simrv::xlen::kIsXLen64) {
+            tkn = static_cast<int32_t>(rrs1) < static_cast<int32_t>(rrs2);
+        } else if (simrv::compiler::likely(state_.regs.xlen == 32)) {
+            tkn = static_cast<int32_t>(rrs1) < static_cast<int32_t>(rrs2);
+        } else {
+            tkn = static_cast<simrv::xlen::SignedWord>(rrs1) <
+                  static_cast<simrv::xlen::SignedWord>(rrs2);
+        }
     } else if constexpr (kBranchOp == isa::BGE) {
-        tkn = static_cast<simrv::xlen::SignedWord>(rrs1) >=
-              static_cast<simrv::xlen::SignedWord>(rrs2);
+        if constexpr (!simrv::xlen::kIsXLen64) {
+            tkn = static_cast<int32_t>(rrs1) >= static_cast<int32_t>(rrs2);
+        } else if (simrv::compiler::likely(state_.regs.xlen == 32)) {
+            tkn = static_cast<int32_t>(rrs1) >= static_cast<int32_t>(rrs2);
+        } else {
+            tkn = static_cast<simrv::xlen::SignedWord>(rrs1) >=
+                  static_cast<simrv::xlen::SignedWord>(rrs2);
+        }
     } else if constexpr (kBranchOp == isa::BLTU) {
         if constexpr (!simrv::xlen::kIsXLen64) {
             tkn = static_cast<uint32_t>(rrs1) < static_cast<uint32_t>(rrs2);
@@ -96,8 +129,12 @@ SIMRV_ALWAYS_INLINE void CPU::execute_cached_branch(CachedOp& op, simrv::xlen::R
             tkn = rrs1 >= rrs2;
         }
     }
-    simrv::xlen::VirtAddr const target_pc = tkn ? simrv::xlen::VirtAddr{state_.pc + op.imm}
-                                                : simrv::xlen::VirtAddr{state_.pc + op.len()};
+    simrv::xlen::VirtAddr target_pc = tkn ? simrv::xlen::VirtAddr{state_.pc + op.imm}
+                                          : simrv::xlen::VirtAddr{state_.pc + op.len()};
+    if (state_.regs.xlen == 32) {
+        target_pc = simrv::xlen::VirtAddr{static_cast<simrv::xlen::Register>(
+            static_cast<int64_t>(static_cast<int32_t>(target_pc.raw())))};
+    }
     if constexpr (kCopyContext) {
         pipeline_context.tkn = tkn;
         pipeline_context.jmp_pc = target_pc;
@@ -166,15 +203,16 @@ auto CPU::try_fast_load([[maybe_unused]] Machine& machine, simrv::xlen::Address 
             }
             return false;
         }
-        TLBEntry* tlb_e = tlb.lookup_data_r(mem_addr, current_asid, eff_priv);
+        TLBEntry* tlb_e =
+            tlb.lookup_data_r(simrv::xlen::VirtAddr{mem_addr}, current_asid, eff_priv);
         if (simrv::compiler::likely(tlb_e != nullptr &&
                                     tlb_e->pbmt == simrv::memory::PtePbmt::Pma)) {
-            simrv::xlen::Address const paddr = tlb_e->p_addr + (mem_addr & 0xFFF);
+            simrv::xlen::Address const paddr = (tlb_e->p_addr + (mem_addr & 0xFFF)).raw();
             if (simrv::compiler::unlikely(!core::pmp::check_access(
                     state_, paddr, size_bytes, core::PmpAccessType::Read, eff_priv))) {
                 return false;
             }
-            simrv::xlen::Address const ppage = tlb_e->p_addr;
+            simrv::xlen::Address const ppage = tlb_e->p_addr.raw();
             simrv::xlen::Byte* host_base =
                 (ram.contains(ppage, 4096) &&
                  (state_.num_active_pmp == 0 ||
@@ -266,10 +304,11 @@ auto CPU::try_fast_store(Machine& machine, simrv::xlen::Address mem_addr, isa::F
             }
             return false;
         }
-        TLBEntry* tlb_e = tlb.lookup_data_w(mem_addr, current_asid, eff_priv);
+        TLBEntry* tlb_e =
+            tlb.lookup_data_w(simrv::xlen::VirtAddr{mem_addr}, current_asid, eff_priv);
         if (simrv::compiler::likely(tlb_e != nullptr &&
                                     tlb_e->pbmt == simrv::memory::PtePbmt::Pma)) {
-            simrv::xlen::Address const paddr = tlb_e->p_addr + (mem_addr & 0xFFF);
+            simrv::xlen::Address const paddr = (tlb_e->p_addr + (mem_addr & 0xFFF)).raw();
             if (simrv::compiler::unlikely(is_tohost_addr(machine, paddr))) {
                 return false;
             }
@@ -277,7 +316,7 @@ auto CPU::try_fast_store(Machine& machine, simrv::xlen::Address mem_addr, isa::F
                     state_, paddr, size_bytes, core::PmpAccessType::Write, eff_priv))) {
                 return false;
             }
-            simrv::xlen::Address const ppage = tlb_e->p_addr;
+            simrv::xlen::Address const ppage = tlb_e->p_addr.raw();
             simrv::xlen::Byte* host_base =
                 (ram.contains(ppage, 4096) &&
                  (state_.num_active_pmp == 0 ||
@@ -384,15 +423,16 @@ SIMRV_ALWAYS_INLINE auto CPU::execute_cached_load(Machine& machine, CachedOp& op
                     advance_cached_pc(op);
                     return true;
                 }
-            } else if (TLBEntry* tlb_e = tlb.lookup_data_r(lookup_addr, current_asid, eff_priv);
+            } else if (TLBEntry* tlb_e = tlb.lookup_data_r(simrv::xlen::VirtAddr{lookup_addr},
+                                                           current_asid, eff_priv);
                        simrv::compiler::likely(tlb_e != nullptr &&
                                                tlb_e->pbmt == simrv::memory::PtePbmt::Pma)) {
-                const simrv::xlen::Address paddr = tlb_e->p_addr + page_offset;
+                const simrv::xlen::Address paddr = (tlb_e->p_addr + page_offset).raw();
                 if (simrv::compiler::likely(state_.num_active_pmp == 0 ||
                                             core::pmp::check_access(state_, paddr, size_bytes,
                                                                     core::PmpAccessType::Read,
                                                                     eff_priv))) {
-                    const simrv::xlen::Address ppage = tlb_e->p_addr;
+                    const simrv::xlen::Address ppage = tlb_e->p_addr.raw();
                     simrv::xlen::Byte* const host_base =
                         (ram.contains(ppage, 4096) &&
                          (state_.num_active_pmp == 0 ||
@@ -509,16 +549,17 @@ SIMRV_ALWAYS_INLINE auto CPU::execute_cached_store(Machine& machine, CachedOp& o
                     advance_cached_pc(op);
                     return true;
                 }
-            } else if (TLBEntry* tlb_e = tlb.lookup_data_w(lookup_addr, current_asid, eff_priv);
+            } else if (TLBEntry* tlb_e = tlb.lookup_data_w(simrv::xlen::VirtAddr{lookup_addr},
+                                                           current_asid, eff_priv);
                        simrv::compiler::likely(tlb_e != nullptr &&
                                                tlb_e->pbmt == simrv::memory::PtePbmt::Pma)) {
-                const simrv::xlen::Address paddr = tlb_e->p_addr + page_offset;
+                const simrv::xlen::Address paddr = (tlb_e->p_addr + page_offset).raw();
                 if (simrv::compiler::likely(
                         (state_.num_active_pmp == 0 ||
                          core::pmp::check_access(state_, paddr, size_bytes,
                                                  core::PmpAccessType::Write, eff_priv)) &&
                         !is_tohost_addr(machine, paddr))) {
-                    const simrv::xlen::Address ppage = tlb_e->p_addr;
+                    const simrv::xlen::Address ppage = tlb_e->p_addr.raw();
                     simrv::xlen::Byte* const host_base =
                         (ram.contains(ppage, 4096) &&
                          (state_.num_active_pmp == 0 ||
@@ -801,9 +842,13 @@ SIMRV_ALWAYS_INLINE auto CPU::execute_cached_alu_fast_xlen(CachedOp& op, FastOp 
         }
         case FastOp::Slt: {
             const simrv::xlen::Register rrs2 = state_.regs.read(op.rs2);
-            wb_data =
-                static_cast<simrv::xlen::Register>(static_cast<simrv::xlen::SignedWord>(rrs1) <
-                                                   static_cast<simrv::xlen::SignedWord>(rrs2));
+            if constexpr (kGuestXlen64) {
+                wb_data = static_cast<simrv::xlen::Register>(
+                    static_cast<int64_t>(rrs1) < static_cast<int64_t>(rrs2));
+            } else {
+                wb_data = static_cast<simrv::xlen::Register>(
+                    static_cast<int32_t>(rrs1) < static_cast<int32_t>(rrs2));
+            }
             break;
         }
         case FastOp::Sltu: {
@@ -817,9 +862,13 @@ SIMRV_ALWAYS_INLINE auto CPU::execute_cached_alu_fast_xlen(CachedOp& op, FastOp 
             break;
         }
         case FastOp::Slti:
-            wb_data =
-                static_cast<simrv::xlen::Register>(static_cast<simrv::xlen::SignedWord>(rrs1) <
-                                                   static_cast<simrv::xlen::SignedWord>(op.imm));
+            if constexpr (kGuestXlen64) {
+                wb_data = static_cast<simrv::xlen::Register>(
+                    static_cast<int64_t>(rrs1) < static_cast<int64_t>(op.imm));
+            } else {
+                wb_data = static_cast<simrv::xlen::Register>(
+                    static_cast<int32_t>(rrs1) < static_cast<int32_t>(op.imm));
+            }
             break;
         case FastOp::Sltiu:
             if constexpr (kGuestXlen64) {
@@ -1489,6 +1538,8 @@ SIMRV_ALWAYS_INLINE auto CPU::run_fast_baremetal_kernel(Machine& machine, uint32
     const auto tohost_addr = machine.isa_test_tohost();
     uint32_t b = 0;
     while (b < batch_size) {
+        // A CSR or cache miss may have enabled a trigger during this batch.
+        if (simrv::compiler::unlikely(state_.has_active_triggers)) break;
         auto* cached = decode_cache.lookup_aligned(state_.pc);
         if (simrv::compiler::likely(cached != nullptr)) {
             if constexpr (!kCopyContext && !kInstMix) {
@@ -1621,7 +1672,8 @@ SIMRV_ALWAYS_INLINE auto CPU::run_fast_baremetal_kernel(Machine& machine, uint32
                                                                     (ram_size - sizeof(T)) &&
                                                                 (mem_addr & AlignMask) == 0)) {
                                         const auto* const host_ptr = ram_data + mem_offset;
-                                        const auto val = *reinterpret_cast<const T*>(host_ptr);
+                                        T val;
+                                        std::memcpy(&val, host_ptr, sizeof(val));
                                         if constexpr (std::is_signed_v<SignedExtT> &&
                                                       sizeof(T) < sizeof(simrv::xlen::Register)) {
                                             write_rd(op->rd,
@@ -1659,8 +1711,9 @@ SIMRV_ALWAYS_INLINE auto CPU::run_fast_baremetal_kernel(Machine& machine, uint32
                                             (mem_addr & AlignMask) == 0 &&
                                             !is_tohost_addr_fast(tohost_addr, mem_addr))) {
                                         auto* const host_ptr = ram_data + mem_offset;
-                                        *reinterpret_cast<T*>(host_ptr) =
+                                        const T val =
                                             static_cast<T>(gpr[std::to_underlying(op->rs2)]);
+                                        std::memcpy(host_ptr, &val, sizeof(val));
                                         state_.lr_reservation_active = false;
                                         if constexpr (kMultiHart) {
                                             if (simrv::compiler::unlikely(
@@ -1678,22 +1731,23 @@ SIMRV_ALWAYS_INLINE auto CPU::run_fast_baremetal_kernel(Machine& machine, uint32
                             return false;
                         };
 
-                        const auto write_rd_idx = [&](uint8_t rd,
+                        const auto write_rd_idx = [&](simrv::xlen::RegId rd,
                                                       simrv::xlen::Register val) noexcept {
                             if constexpr (simrv::xlen::kIsXLen64) {
                                 if constexpr (kGuestXlen64) {
-                                    gpr[rd] = val;
+                                    gpr[std::to_underlying(rd)] = val;
                                 } else {
-                                    gpr[rd] = static_cast<int64_t>(static_cast<int32_t>(val));
+                                    gpr[std::to_underlying(rd)] =
+                                        static_cast<int64_t>(static_cast<int32_t>(val));
                                 }
                             } else {
-                                gpr[rd] = val;
+                                gpr[std::to_underlying(rd)] = val;
                             }
                         };
 
                         const auto calc_mem_addr_cop =
                             [&](const CompactOp& op) noexcept -> simrv::xlen::Address {
-                            simrv::xlen::Address addr = gpr[op.rs1] + op.imm;
+                            simrv::xlen::Address addr = gpr[std::to_underlying(op.rs1)] + op.imm;
                             if constexpr (simrv::xlen::kIsXLen64 && !kGuestXlen64) {
                                 addr &= 0xFFFFFFFFULL;
                             }
@@ -1716,7 +1770,8 @@ SIMRV_ALWAYS_INLINE auto CPU::run_fast_baremetal_kernel(Machine& machine, uint32
                                                                     (ram_size - sizeof(T)) &&
                                                                 (mem_addr & AlignMask) == 0)) {
                                         const auto* const host_ptr = ram_data + mem_offset;
-                                        const auto val = *reinterpret_cast<const T*>(host_ptr);
+                                        T val;
+                                        std::memcpy(&val, host_ptr, sizeof(val));
                                         if constexpr (std::is_signed_v<SignedExtT> &&
                                                       sizeof(T) < sizeof(simrv::xlen::Register)) {
                                             write_rd_idx(op.rd,
@@ -1751,8 +1806,9 @@ SIMRV_ALWAYS_INLINE auto CPU::run_fast_baremetal_kernel(Machine& machine, uint32
                                             (mem_addr & AlignMask) == 0 &&
                                             !is_tohost_addr_fast(tohost_addr, mem_addr))) {
                                         auto* const host_ptr = ram_data + mem_offset;
-                                        *reinterpret_cast<T*>(host_ptr) =
-                                            static_cast<T>(gpr[op.rs2]);
+                                        const T val =
+                                            static_cast<T>(gpr[std::to_underlying(op.rs2)]);
+                                        std::memcpy(host_ptr, &val, sizeof(val));
                                         if (simrv::compiler::unlikely(
                                                 state_.lr_reservation_active)) {
                                             state_.lr_reservation_active = false;
@@ -1778,96 +1834,124 @@ SIMRV_ALWAYS_INLINE auto CPU::run_fast_baremetal_kernel(Machine& machine, uint32
                                                           always_inline)) {
                             switch (cop.fast_op) {
                                 case FastOp::Add: {
-                                    write_rd_idx(cop.rd, gpr[cop.rs1] + gpr[cop.rs2]);
+                                    write_rd_idx(cop.rd, gpr[std::to_underlying(cop.rs1)] +
+                                                             gpr[std::to_underlying(cop.rs2)] +
+                                                             cop.imm);
                                     break;
                                 }
                                 case FastOp::Addi: {
-                                    write_rd_idx(cop.rd, gpr[cop.rs1] + cop.imm);
+                                    write_rd_idx(cop.rd,
+                                                 gpr[std::to_underlying(cop.rs1)] + cop.imm);
                                     break;
                                 }
                                 case FastOp::Addw: {
 #if SIMRV_XLEN == 64
-                                    gpr[cop.rd] = static_cast<int64_t>(
-                                        static_cast<int32_t>(gpr[cop.rs1] + gpr[cop.rs2]));
+                                    gpr[std::to_underlying(cop.rd)] =
+                                        static_cast<int64_t>(static_cast<int32_t>(
+                                            gpr[std::to_underlying(cop.rs1)] +
+                                            gpr[std::to_underlying(cop.rs2)] + cop.imm));
 #else
-                                    write_rd_idx(cop.rd, gpr[cop.rs1] + gpr[cop.rs2]);
+                                    write_rd_idx(cop.rd, gpr[std::to_underlying(cop.rs1)] +
+                                                             gpr[std::to_underlying(cop.rs2)] +
+                                                             cop.imm);
 #endif
                                     break;
                                 }
                                 case FastOp::Addiw: {
 #if SIMRV_XLEN == 64
-                                    gpr[cop.rd] = static_cast<int64_t>(
-                                        static_cast<int32_t>(gpr[cop.rs1] + cop.imm));
+                                    gpr[std::to_underlying(cop.rd)] =
+                                        static_cast<int64_t>(static_cast<int32_t>(
+                                            gpr[std::to_underlying(cop.rs1)] + cop.imm));
 #else
-                                    write_rd_idx(cop.rd, gpr[cop.rs1] + cop.imm);
+                                    write_rd_idx(cop.rd,
+                                                 gpr[std::to_underlying(cop.rs1)] + cop.imm);
 #endif
                                     break;
                                 }
                                 case FastOp::Sub: {
-                                    write_rd_idx(cop.rd, gpr[cop.rs1] - gpr[cop.rs2]);
+                                    write_rd_idx(cop.rd, gpr[std::to_underlying(cop.rs1)] -
+                                                             gpr[std::to_underlying(cop.rs2)]);
                                     break;
                                 }
                                 case FastOp::Subw: {
 #if SIMRV_XLEN == 64
-                                    gpr[cop.rd] = static_cast<int64_t>(
-                                        static_cast<int32_t>(gpr[cop.rs1] - gpr[cop.rs2]));
+                                    gpr[std::to_underlying(cop.rd)] = static_cast<int64_t>(
+                                        static_cast<int32_t>(gpr[std::to_underlying(cop.rs1)] -
+                                                             gpr[std::to_underlying(cop.rs2)]));
 #else
-                                    write_rd_idx(cop.rd, gpr[cop.rs1] - gpr[cop.rs2]);
+                                    write_rd_idx(cop.rd, gpr[std::to_underlying(cop.rs1)] -
+                                                             gpr[std::to_underlying(cop.rs2)]);
 #endif
                                     break;
                                 }
                                 case FastOp::Slli: {
                                     constexpr simrv::xlen::Register shift_mask =
                                         kGuestXlen64 ? 0x3f : 0x1f;
-                                    write_rd_idx(cop.rd, gpr[cop.rs1] << (cop.imm & shift_mask));
+                                    write_rd_idx(cop.rd, gpr[std::to_underlying(cop.rs1)]
+                                                             << (cop.imm & shift_mask));
                                     break;
                                 }
                                 case FastOp::Srli: {
                                     if constexpr (kGuestXlen64) {
-                                        write_rd_idx(cop.rd, gpr[cop.rs1] >> (cop.imm & 0x3f));
+                                        write_rd_idx(cop.rd, gpr[std::to_underlying(cop.rs1)] >>
+                                                                 (cop.imm & 0x3f));
                                     } else {
-                                        write_rd_idx(cop.rd, static_cast<uint32_t>(gpr[cop.rs1]) >>
-                                                                 (cop.imm & 0x1f));
+                                        write_rd_idx(cop.rd,
+                                                     static_cast<uint32_t>(
+                                                         gpr[std::to_underlying(cop.rs1)]) >>
+                                                         (cop.imm & 0x1f));
                                     }
                                     break;
                                 }
                                 case FastOp::Srai: {
                                     if constexpr (kGuestXlen64) {
-                                        write_rd_idx(cop.rd, static_cast<int64_t>(gpr[cop.rs1]) >>
-                                                                 (cop.imm & 0x3f));
+                                        write_rd_idx(cop.rd,
+                                                     static_cast<int64_t>(
+                                                         gpr[std::to_underlying(cop.rs1)]) >>
+                                                         (cop.imm & 0x3f));
                                     } else {
-                                        write_rd_idx(cop.rd, static_cast<int32_t>(gpr[cop.rs1]) >>
-                                                                 (cop.imm & 0x1f));
+                                        write_rd_idx(cop.rd,
+                                                     static_cast<int32_t>(
+                                                         gpr[std::to_underlying(cop.rs1)]) >>
+                                                         (cop.imm & 0x1f));
                                     }
                                     break;
                                 }
                                 case FastOp::And: {
-                                    write_rd_idx(cop.rd, gpr[cop.rs1] & gpr[cop.rs2]);
+                                    write_rd_idx(cop.rd, gpr[std::to_underlying(cop.rs1)] &
+                                                             gpr[std::to_underlying(cop.rs2)]);
                                     break;
                                 }
                                 case FastOp::Andi: {
-                                    write_rd_idx(cop.rd, gpr[cop.rs1] & cop.imm);
+                                    write_rd_idx(cop.rd,
+                                                 gpr[std::to_underlying(cop.rs1)] & cop.imm);
                                     break;
                                 }
                                 case FastOp::Or: {
-                                    write_rd_idx(cop.rd, gpr[cop.rs1] | gpr[cop.rs2]);
+                                    write_rd_idx(cop.rd, gpr[std::to_underlying(cop.rs1)] |
+                                                             gpr[std::to_underlying(cop.rs2)] |
+                                                             cop.imm);
                                     break;
                                 }
                                 case FastOp::Ori: {
-                                    write_rd_idx(cop.rd, gpr[cop.rs1] | cop.imm);
+                                    write_rd_idx(cop.rd,
+                                                 gpr[std::to_underlying(cop.rs1)] | cop.imm);
                                     break;
                                 }
                                 case FastOp::Xor: {
-                                    write_rd_idx(cop.rd, gpr[cop.rs1] ^ gpr[cop.rs2]);
+                                    write_rd_idx(cop.rd, gpr[std::to_underlying(cop.rs1)] ^
+                                                             gpr[std::to_underlying(cop.rs2)] ^
+                                                             cop.imm);
                                     break;
                                 }
                                 case FastOp::Xori: {
-                                    write_rd_idx(cop.rd, gpr[cop.rs1] ^ cop.imm);
+                                    write_rd_idx(cop.rd,
+                                                 gpr[std::to_underlying(cop.rs1)] ^ cop.imm);
                                     break;
                                 }
                                 case FastOp::Slt: {
-                                    const auto rrs1 = gpr[cop.rs1];
-                                    const auto rrs2 = gpr[cop.rs2];
+                                    const auto rrs1 = gpr[std::to_underlying(cop.rs1)];
+                                    const auto rrs2 = gpr[std::to_underlying(cop.rs2)];
                                     if constexpr (kGuestXlen64) {
                                         write_rd_idx(cop.rd, static_cast<int64_t>(rrs1) <
                                                                      static_cast<int64_t>(rrs2)
@@ -1882,8 +1966,8 @@ SIMRV_ALWAYS_INLINE auto CPU::run_fast_baremetal_kernel(Machine& machine, uint32
                                     break;
                                 }
                                 case FastOp::Sltu: {
-                                    const auto rrs1 = gpr[cop.rs1];
-                                    const auto rrs2 = gpr[cop.rs2];
+                                    const auto rrs1 = gpr[std::to_underlying(cop.rs1)];
+                                    const auto rrs2 = gpr[std::to_underlying(cop.rs2)];
                                     if constexpr (kGuestXlen64) {
                                         write_rd_idx(cop.rd, rrs1 < rrs2 ? 1 : 0);
                                     } else {
@@ -1895,7 +1979,7 @@ SIMRV_ALWAYS_INLINE auto CPU::run_fast_baremetal_kernel(Machine& machine, uint32
                                     break;
                                 }
                                 case FastOp::Slti: {
-                                    const auto rrs1 = gpr[cop.rs1];
+                                    const auto rrs1 = gpr[std::to_underlying(cop.rs1)];
                                     if constexpr (kGuestXlen64) {
                                         write_rd_idx(cop.rd, static_cast<int64_t>(rrs1) <
                                                                      static_cast<int64_t>(cop.imm)
@@ -1910,7 +1994,7 @@ SIMRV_ALWAYS_INLINE auto CPU::run_fast_baremetal_kernel(Machine& machine, uint32
                                     break;
                                 }
                                 case FastOp::Sltiu: {
-                                    const auto rrs1 = gpr[cop.rs1];
+                                    const auto rrs1 = gpr[std::to_underlying(cop.rs1)];
                                     if constexpr (kGuestXlen64) {
                                         write_rd_idx(cop.rd,
                                                      rrs1 < static_cast<uint64_t>(cop.imm) ? 1 : 0);
@@ -1928,31 +2012,33 @@ SIMRV_ALWAYS_INLINE auto CPU::run_fast_baremetal_kernel(Machine& machine, uint32
                                     break;
                                 }
                                 case FastOp::Mul: {
-                                    const auto rrs1 = gpr[cop.rs1];
-                                    const auto rrs2 = gpr[cop.rs2];
+                                    const auto rrs1 = gpr[std::to_underlying(cop.rs1)];
+                                    const auto rrs2 = gpr[std::to_underlying(cop.rs2)];
                                     write_rd_idx(cop.rd, rrs1 * rrs2);
                                     break;
                                 }
                                 case FastOp::Mulw: {
 #if SIMRV_XLEN == 64
-                                    const auto rrs1 = gpr[cop.rs1];
-                                    const int32_t lhs = static_cast<int32_t>(rrs1);
-                                    const int32_t rhs = static_cast<int32_t>(gpr[cop.rs2]);
-                                    gpr[cop.rd] = static_cast<int64_t>(lhs * rhs);
+                                    const auto rrs1 = gpr[std::to_underlying(cop.rs1)];
+                                    const uint32_t lhs = static_cast<uint32_t>(rrs1);
+                                    const uint32_t rhs =
+                                        static_cast<uint32_t>(gpr[std::to_underlying(cop.rs2)]);
+                                    gpr[std::to_underlying(cop.rd)] =
+                                        static_cast<int64_t>(static_cast<int32_t>(lhs * rhs));
 #else
-                                    const auto rrs1 = gpr[cop.rs1];
-                                    write_rd_idx(cop.rd, rrs1 * gpr[cop.rs2]);
+                                    const auto rrs1 = gpr[std::to_underlying(cop.rs1)];
+                                    write_rd_idx(cop.rd, rrs1 * gpr[std::to_underlying(cop.rs2)]);
 #endif
                                     break;
                                 }
                                 case FastOp::Slliw: {
 #if SIMRV_XLEN == 64
-                                    const auto rrs1 = gpr[cop.rs1];
+                                    const auto rrs1 = gpr[std::to_underlying(cop.rs1)];
                                     const uint32_t lhs = static_cast<uint32_t>(rrs1);
-                                    gpr[cop.rd] = static_cast<int64_t>(
+                                    gpr[std::to_underlying(cop.rd)] = static_cast<int64_t>(
                                         static_cast<int32_t>(lhs << (cop.imm & 0x1f)));
 #else
-                                    const auto rrs1 = gpr[cop.rs1];
+                                    const auto rrs1 = gpr[std::to_underlying(cop.rs1)];
                                     write_rd_idx(cop.rd, static_cast<uint32_t>(rrs1)
                                                              << (cop.imm & 0x1f));
 #endif
@@ -1960,12 +2046,12 @@ SIMRV_ALWAYS_INLINE auto CPU::run_fast_baremetal_kernel(Machine& machine, uint32
                                 }
                                 case FastOp::Srliw: {
 #if SIMRV_XLEN == 64
-                                    const auto rrs1 = gpr[cop.rs1];
+                                    const auto rrs1 = gpr[std::to_underlying(cop.rs1)];
                                     const uint32_t lhs = static_cast<uint32_t>(rrs1);
-                                    gpr[cop.rd] = static_cast<int64_t>(
+                                    gpr[std::to_underlying(cop.rd)] = static_cast<int64_t>(
                                         static_cast<int32_t>(lhs >> (cop.imm & 0x1f)));
 #else
-                                    const auto rrs1 = gpr[cop.rs1];
+                                    const auto rrs1 = gpr[std::to_underlying(cop.rs1)];
                                     write_rd_idx(cop.rd,
                                                  static_cast<uint32_t>(rrs1) >> (cop.imm & 0x1f));
 #endif
@@ -1973,11 +2059,12 @@ SIMRV_ALWAYS_INLINE auto CPU::run_fast_baremetal_kernel(Machine& machine, uint32
                                 }
                                 case FastOp::Sraiw: {
 #if SIMRV_XLEN == 64
-                                    const auto rrs1 = gpr[cop.rs1];
+                                    const auto rrs1 = gpr[std::to_underlying(cop.rs1)];
                                     const int32_t lhs = static_cast<int32_t>(rrs1);
-                                    gpr[cop.rd] = static_cast<int64_t>(lhs >> (cop.imm & 0x1f));
+                                    gpr[std::to_underlying(cop.rd)] =
+                                        static_cast<int64_t>(lhs >> (cop.imm & 0x1f));
 #else
-                                    const auto rrs1 = gpr[cop.rs1];
+                                    const auto rrs1 = gpr[std::to_underlying(cop.rs1)];
                                     write_rd_idx(cop.rd,
                                                  static_cast<int32_t>(rrs1) >> (cop.imm & 0x1f));
 #endif
@@ -2005,9 +2092,9 @@ SIMRV_ALWAYS_INLINE auto CPU::run_fast_baremetal_kernel(Machine& machine, uint32
                                 case FastOp::Bitmanip: {
                                     CachedOp temp_op{};
                                     temp_op.fast_op = cop.fast_op;
-                                    temp_op.rd = static_cast<simrv::xlen::RegId>(cop.rd);
-                                    temp_op.rs1 = static_cast<simrv::xlen::RegId>(cop.rs1);
-                                    temp_op.rs2 = static_cast<simrv::xlen::RegId>(cop.rs2);
+                                    temp_op.rd = cop.rd;
+                                    temp_op.rs1 = cop.rs1;
+                                    temp_op.rs2 = cop.rs2;
                                     temp_op.imm = cop.imm;
                                     execute_cached_alu_fast_xlen<kGuestXlen64, false, false, true>(
                                         temp_op, cop.fast_op);
@@ -2023,8 +2110,20 @@ SIMRV_ALWAYS_INLINE auto CPU::run_fast_baremetal_kernel(Machine& machine, uint32
                             cur_bb = block_cache.build_block(next_pc, decode_cache);
                         }
 
+                        // A block must fit the remaining instruction budget. The scalar chain
+                        // below handles a partial block without overshooting the batch limit.
+                        if (cur_bb != nullptr && cur_bb->num_guest_ops > batch_size - b) {
+                            cur_bb = nullptr;
+                        }
+
                         if (cur_bb != nullptr) {
                             while (cur_bb != nullptr) {
+                                if (simrv::compiler::unlikely(cur_bb->num_guest_ops >
+                                                              batch_size - b)) {
+                                    seg_start_pc = next_pc;
+                                    seg_start_b = b;
+                                    goto chain_exit;
+                                }
                                 const uint32_t num_ops = cur_bb->num_ops;
                                 const uint32_t non_branch_ops = cur_bb->non_branch_ops;
                                 uint32_t i = 0;
@@ -2158,24 +2257,34 @@ SIMRV_ALWAYS_INLINE auto CPU::run_fast_baremetal_kernel(Machine& machine, uint32
 
                                     switch (cur_bb->term_op) {
                                         case FastOp::Bne: {
-                                            taken = (gpr[term->rs1] != gpr[term->rs2]);
+                                            const auto rrs1 = gpr[std::to_underlying(term->rs1)];
+                                            const auto rrs2 = gpr[std::to_underlying(term->rs2)];
+                                            taken = kGuestXlen64
+                                                        ? (rrs1 != rrs2)
+                                                        : (static_cast<uint32_t>(rrs1) !=
+                                                           static_cast<uint32_t>(rrs2));
                                             break;
                                         }
                                         case FastOp::Beq: {
-                                            taken = (gpr[term->rs1] == gpr[term->rs2]);
+                                            const auto rrs1 = gpr[std::to_underlying(term->rs1)];
+                                            const auto rrs2 = gpr[std::to_underlying(term->rs2)];
+                                            taken = kGuestXlen64
+                                                        ? (rrs1 == rrs2)
+                                                        : (static_cast<uint32_t>(rrs1) ==
+                                                           static_cast<uint32_t>(rrs2));
                                             break;
                                         }
                                         case FastOp::Bgeu: {
-                                            const auto rrs1 = gpr[term->rs1];
-                                            const auto rrs2 = gpr[term->rs2];
+                                            const auto rrs1 = gpr[std::to_underlying(term->rs1)];
+                                            const auto rrs2 = gpr[std::to_underlying(term->rs2)];
                                             taken = kGuestXlen64 ? (rrs1 >= rrs2)
                                                                  : (static_cast<uint32_t>(rrs1) >=
                                                                     static_cast<uint32_t>(rrs2));
                                             break;
                                         }
                                         case FastOp::Bge: {
-                                            const auto rrs1 = gpr[term->rs1];
-                                            const auto rrs2 = gpr[term->rs2];
+                                            const auto rrs1 = gpr[std::to_underlying(term->rs1)];
+                                            const auto rrs2 = gpr[std::to_underlying(term->rs2)];
                                             taken = kGuestXlen64 ? (static_cast<int64_t>(rrs1) >=
                                                                     static_cast<int64_t>(rrs2))
                                                                  : (static_cast<int32_t>(rrs1) >=
@@ -2183,16 +2292,16 @@ SIMRV_ALWAYS_INLINE auto CPU::run_fast_baremetal_kernel(Machine& machine, uint32
                                             break;
                                         }
                                         case FastOp::Bltu: {
-                                            const auto rrs1 = gpr[term->rs1];
-                                            const auto rrs2 = gpr[term->rs2];
+                                            const auto rrs1 = gpr[std::to_underlying(term->rs1)];
+                                            const auto rrs2 = gpr[std::to_underlying(term->rs2)];
                                             taken = kGuestXlen64 ? (rrs1 < rrs2)
                                                                  : (static_cast<uint32_t>(rrs1) <
                                                                     static_cast<uint32_t>(rrs2));
                                             break;
                                         }
                                         case FastOp::Blt: {
-                                            const auto rrs1 = gpr[term->rs1];
-                                            const auto rrs2 = gpr[term->rs2];
+                                            const auto rrs1 = gpr[std::to_underlying(term->rs1)];
+                                            const auto rrs2 = gpr[std::to_underlying(term->rs2)];
                                             taken = kGuestXlen64 ? (static_cast<int64_t>(rrs1) <
                                                                     static_cast<int64_t>(rrs2))
                                                                  : (static_cast<int32_t>(rrs1) <
@@ -2206,7 +2315,7 @@ SIMRV_ALWAYS_INLINE auto CPU::run_fast_baremetal_kernel(Machine& machine, uint32
                                         }
                                         case FastOp::Jalr: {
                                             taken = true;
-                                            const auto rrs1 = gpr[term->rs1];
+                                            const auto rrs1 = gpr[std::to_underlying(term->rs1)];
                                             auto target_pc = (rrs1 + term->imm) &
                                                              ~static_cast<simrv::xlen::Register>(1);
                                             if constexpr (simrv::xlen::kIsXLen64 && !kGuestXlen64) {
@@ -2224,9 +2333,13 @@ SIMRV_ALWAYS_INLINE auto CPU::run_fast_baremetal_kernel(Machine& machine, uint32
                                             goto branch_done;
                                         }
                                         case FastOp::Branch: {
-                                            const auto rrs1 = gpr[term->rs1];
-                                            const auto rrs2 = gpr[term->rs2];
-                                            const bool is_eq = (rrs1 == rrs2);
+                                            const auto rrs1 = gpr[std::to_underlying(term->rs1)];
+                                            const auto rrs2 = gpr[std::to_underlying(term->rs2)];
+                                            const bool is_eq =
+                                                kGuestXlen64
+                                                    ? (rrs1 == rrs2)
+                                                    : (static_cast<uint32_t>(rrs1) ==
+                                                       static_cast<uint32_t>(rrs2));
                                             if (cur_bb->branch_kind == BranchKind::Bne) {
                                                 taken = !is_eq;
                                             } else if (cur_bb->branch_kind == BranchKind::Beq) {
@@ -2477,8 +2590,14 @@ SIMRV_ALWAYS_INLINE auto CPU::run_fast_baremetal_kernel(Machine& machine, uint32
                                 }
 
                                 case FastOp::Bne: {
-                                    if (state_.regs.read(chained->rs1) !=
-                                        state_.regs.read(chained->rs2)) {
+                                    const auto r1 = state_.regs.read(chained->rs1);
+                                    const auto r2 = state_.regs.read(chained->rs2);
+                                    const bool tkn =
+                                        kGuestXlen64
+                                            ? (r1 != r2)
+                                            : (static_cast<uint32_t>(r1) !=
+                                               static_cast<uint32_t>(r2));
+                                    if (tkn) {
                                         const simrv::xlen::Register target_pc =
                                             static_cast<simrv::xlen::Register>(chained->cpc.raw() +
                                                                                chained->imm);
@@ -2491,8 +2610,14 @@ SIMRV_ALWAYS_INLINE auto CPU::run_fast_baremetal_kernel(Machine& machine, uint32
                                     break;
                                 }
                                 case FastOp::Beq: {
-                                    if (state_.regs.read(chained->rs1) ==
-                                        state_.regs.read(chained->rs2)) {
+                                    const auto r1 = state_.regs.read(chained->rs1);
+                                    const auto r2 = state_.regs.read(chained->rs2);
+                                    const bool tkn =
+                                        kGuestXlen64
+                                            ? (r1 == r2)
+                                            : (static_cast<uint32_t>(r1) ==
+                                               static_cast<uint32_t>(r2));
+                                    if (tkn) {
                                         const simrv::xlen::Register target_pc =
                                             static_cast<simrv::xlen::Register>(chained->cpc.raw() +
                                                                                chained->imm);
@@ -2563,8 +2688,13 @@ SIMRV_ALWAYS_INLINE auto CPU::run_fast_baremetal_kernel(Machine& machine, uint32
                                         state_.regs.read(chained->rs1);
                                     const simrv::xlen::Register rrs2 =
                                         state_.regs.read(chained->rs2);
-                                    if (static_cast<simrv::xlen::SignedWord>(rrs1) >=
-                                        static_cast<simrv::xlen::SignedWord>(rrs2)) {
+                                    const bool tkn =
+                                        kGuestXlen64
+                                            ? (static_cast<int64_t>(rrs1) >=
+                                               static_cast<int64_t>(rrs2))
+                                            : (static_cast<int32_t>(rrs1) >=
+                                               static_cast<int32_t>(rrs2));
+                                    if (tkn) {
                                         const simrv::xlen::Register target_pc =
                                             static_cast<simrv::xlen::Register>(chained->cpc.raw() +
                                                                                chained->imm);
@@ -2605,8 +2735,13 @@ SIMRV_ALWAYS_INLINE auto CPU::run_fast_baremetal_kernel(Machine& machine, uint32
                                         state_.regs.read(chained->rs1);
                                     const simrv::xlen::Register rrs2 =
                                         state_.regs.read(chained->rs2);
-                                    if (static_cast<simrv::xlen::SignedWord>(rrs1) <
-                                        static_cast<simrv::xlen::SignedWord>(rrs2)) {
+                                    const bool tkn =
+                                        kGuestXlen64
+                                            ? (static_cast<int64_t>(rrs1) <
+                                               static_cast<int64_t>(rrs2))
+                                            : (static_cast<int32_t>(rrs1) <
+                                               static_cast<int32_t>(rrs2));
+                                    if (tkn) {
                                         const simrv::xlen::Register target_pc =
                                             static_cast<simrv::xlen::Register>(chained->cpc.raw() +
                                                                                chained->imm);
@@ -2795,7 +2930,11 @@ SIMRV_ALWAYS_INLINE auto CPU::run_fast_baremetal_kernel(Machine& machine, uint32
                                         state_.regs.read(chained->rs1);
                                     const simrv::xlen::Register rrs2 =
                                         state_.regs.read(chained->rs2);
-                                    const bool is_eq = (rrs1 == rrs2);
+                                    const bool is_eq =
+                                        kGuestXlen64
+                                            ? (rrs1 == rrs2)
+                                            : (static_cast<uint32_t>(rrs1) ==
+                                               static_cast<uint32_t>(rrs2));
                                     bool tkn = false;
                                     if (chained->branch_kind == BranchKind::Bne) {
                                         tkn = !is_eq;
@@ -2809,8 +2948,13 @@ SIMRV_ALWAYS_INLINE auto CPU::run_fast_baremetal_kernel(Machine& machine, uint32
                                                    static_cast<uint32_t>(rrs2));
                                         }
                                     } else if (chained->branch_kind == BranchKind::Bge) {
-                                        tkn = static_cast<simrv::xlen::SignedWord>(rrs1) >=
-                                              static_cast<simrv::xlen::SignedWord>(rrs2);
+                                        if constexpr (kGuestXlen64) {
+                                            tkn = static_cast<int64_t>(rrs1) >=
+                                                  static_cast<int64_t>(rrs2);
+                                        } else {
+                                            tkn = static_cast<int32_t>(rrs1) >=
+                                                  static_cast<int32_t>(rrs2);
+                                        }
                                     } else if (chained->branch_kind == BranchKind::Bltu) {
                                         if constexpr (kGuestXlen64) {
                                             tkn = (rrs1 < rrs2);
@@ -2819,8 +2963,13 @@ SIMRV_ALWAYS_INLINE auto CPU::run_fast_baremetal_kernel(Machine& machine, uint32
                                                    static_cast<uint32_t>(rrs2));
                                         }
                                     } else {
-                                        tkn = static_cast<simrv::xlen::SignedWord>(rrs1) <
-                                              static_cast<simrv::xlen::SignedWord>(rrs2);
+                                        if constexpr (kGuestXlen64) {
+                                            tkn = static_cast<int64_t>(rrs1) <
+                                                  static_cast<int64_t>(rrs2);
+                                        } else {
+                                            tkn = static_cast<int32_t>(rrs1) <
+                                                  static_cast<int32_t>(rrs2);
+                                        }
                                     }
                                     if (!tkn) {
                                         break;
@@ -3231,6 +3380,7 @@ SIMRV_ALWAYS_INLINE auto CPU::run_fast_os_kernel(Machine& machine, uint32_t batc
 
     uint32_t b = 0;
     while (b < batch_size) {
+        if (simrv::compiler::unlikely(state_.has_active_triggers)) break;
         auto* cached = decode_cache.lookup_aligned(state_.pc);
         if (simrv::compiler::likely(cached != nullptr)) {
             if constexpr (!kCopyContext && !kInstMix) {
@@ -3510,7 +3660,15 @@ SIMRV_ALWAYS_INLINE auto CPU::run_fast_os_kernel(Machine& machine, uint32_t batc
                             }
                             const simrv::xlen::Register rrs1 = state_.regs.read(chained->rs1);
                             const simrv::xlen::Register rrs2 = state_.regs.read(chained->rs2);
-                            const bool is_eq = (rrs1 == rrs2);
+                            if ((chained->cpc.raw() & 0xFFFFFFFF) == 0xc020b294) {
+                                simrv::log::warn("DEBUG BNE: cpc=0x{:x}, rs1={}, rs2={}, rrs1=0x{:016x}, rrs2=0x{:016x}, chain_size={}, b={}",
+                                                 chained->cpc.raw(), std::to_underlying(chained->rs1),
+                                                 std::to_underlying(chained->rs2), rrs1, rrs2, chain_size, b);
+                            }
+                            const bool is_eq =
+                                kGuestXlen64 ? (rrs1 == rrs2)
+                                             : (static_cast<uint32_t>(rrs1) ==
+                                                static_cast<uint32_t>(rrs2));
                             bool tkn = false;
                             if (chained->branch_kind == BranchKind::Bne) {
                                 tkn = !is_eq;
@@ -3524,8 +3682,11 @@ SIMRV_ALWAYS_INLINE auto CPU::run_fast_os_kernel(Machine& machine, uint32_t batc
                                            static_cast<uint32_t>(rrs2));
                                 }
                             } else if (chained->branch_kind == BranchKind::Bge) {
-                                tkn = static_cast<simrv::xlen::SignedWord>(rrs1) >=
-                                      static_cast<simrv::xlen::SignedWord>(rrs2);
+                                if constexpr (kGuestXlen64) {
+                                    tkn = static_cast<int64_t>(rrs1) >= static_cast<int64_t>(rrs2);
+                                } else {
+                                    tkn = static_cast<int32_t>(rrs1) >= static_cast<int32_t>(rrs2);
+                                }
                             } else if (chained->branch_kind == BranchKind::Bltu) {
                                 if constexpr (kGuestXlen64) {
                                     tkn = (rrs1 < rrs2);
@@ -3534,8 +3695,11 @@ SIMRV_ALWAYS_INLINE auto CPU::run_fast_os_kernel(Machine& machine, uint32_t batc
                                         (static_cast<uint32_t>(rrs1) < static_cast<uint32_t>(rrs2));
                                 }
                             } else {
-                                tkn = static_cast<simrv::xlen::SignedWord>(rrs1) <
-                                      static_cast<simrv::xlen::SignedWord>(rrs2);
+                                if constexpr (kGuestXlen64) {
+                                    tkn = static_cast<int64_t>(rrs1) < static_cast<int64_t>(rrs2);
+                                } else {
+                                    tkn = static_cast<int32_t>(rrs1) < static_cast<int32_t>(rrs2);
+                                }
                             }
                             if (!tkn) {
                                 if (advance_sequential()) {

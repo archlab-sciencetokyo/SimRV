@@ -92,7 +92,7 @@ auto TileLinkBus::send_request(const TlChannelA& req) -> bool {
                                        machine_.configuration().debug.trace_level >= 4;
     const auto current_cycle = cycle_.load(std::memory_order_relaxed);
     if (capture_trace_context) {
-        const auto* target = router_.resolve_device(req.address.raw());
+        const auto* target = router_.resolve_device(req.address);
         trace_context = {
             .sequence = next_sequence_,
             .request_cycle = current_cycle,
@@ -209,7 +209,7 @@ void TileLinkBus::process_request(const TimedRequest& request) {
         resp.opcode = TlOpcodeD::AccessAckData;
         if (machine_.memory_geometry().contains(req.address.raw(), transfer_bytes) &&
             machine_.ram_data() != nullptr) {
-            coherence_hub_.invalidate_line_external(req.address.raw());
+            coherence_hub_.invalidate_line_external(req.address);
             resp.data =
                 simrv::memory::ram_read_fast(req.address.raw(), funct3, machine_.ram_view());
             ++read_count_;
@@ -221,7 +221,7 @@ void TileLinkBus::process_request(const TimedRequest& request) {
         resp.opcode = TlOpcodeD::AccessAckData;
         if (machine_.memory_geometry().contains(req.address.raw(), transfer_bytes) &&
             machine_.ram_data() != nullptr) {
-            coherence_hub_.invalidate_line_external(req.address.raw());
+            coherence_hub_.invalidate_line_external(req.address);
             const simrv::xlen::Word previous =
                 simrv::memory::ram_read_fast(req.address.raw(), funct3, machine_.ram_view());
             resp.data = previous;
@@ -262,7 +262,7 @@ void TileLinkBus::process_request(const TimedRequest& request) {
 
         if (machine_.memory_geometry().contains(req.address.raw(), transfer_bytes) &&
             machine_.ram_data() != nullptr) {
-            coherence_hub_.invalidate_line_external(req.address.raw());
+            coherence_hub_.invalidate_line_external(req.address);
             if (req.opcode == TlOpcodeA::PutPartialData) {
                 auto* destination = machine_.ram_view().unchecked_ptr(req.address.raw());
                 const auto lane_base =
@@ -334,7 +334,7 @@ void TileLinkBus::process_request(const TimedRequest& request) {
     const bool capture_trace_context = machine_.trace().is_architecture_trace_enabled() &&
                                        machine_.configuration().debug.trace_level >= 4;
     if (capture_trace_context) {
-        const auto* target = router_.resolve_device(req.address.raw());
+        const auto* target = router_.resolve_device(req.address);
         response_context = {
             .sequence = request.sequence,
             .request_cycle = request.submitted_cycle,
@@ -513,7 +513,7 @@ auto TileLinkBus::release_line(const TlChannelC& req, TlChannelD& resp,
     return handled;
 }
 
-void TileLinkBus::mark_modified(simrv::xlen::Address line_base, simrv::xlen::HartId hart) {
+void TileLinkBus::mark_modified(simrv::xlen::PhysAddr line_base, simrv::xlen::HartId hart) {
     SmpLockGuard lock(bus_mutex_, is_smp_enabled());
     coherence_hub_.mark_modified(line_base, hart);
 }

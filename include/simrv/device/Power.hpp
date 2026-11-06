@@ -39,7 +39,9 @@ class PowerMmio : public memory::TileLinkNode {
     static constexpr simrv::xlen::Address kSize = static_cast<simrv::xlen::Address>(0x00001000u);
 
     [[nodiscard]] auto name() const -> const char* override { return "power"; }
-    [[nodiscard]] auto base_address() const -> simrv::xlen::Address override { return base_; }
+    [[nodiscard]] auto base_address() const -> simrv::xlen::PhysAddr override {
+        return simrv::xlen::PhysAddr{base_};
+    }
     [[nodiscard]] auto size() const -> simrv::xlen::Address override { return size_; }
 
     auto handle_request(const memory::TlChannelA& req, memory::TlChannelD& resp) -> bool override;

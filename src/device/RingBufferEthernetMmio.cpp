@@ -20,7 +20,9 @@ class RingBufferEthernetMmio::Window final : public memory::MmioDevice {
           label_(std::move(label)) {}
 
     [[nodiscard]] auto name() const -> const char* override { return label_.c_str(); }
-    [[nodiscard]] auto base_address() const -> simrv::xlen::Address override { return base_; }
+    [[nodiscard]] auto base_address() const -> simrv::xlen::PhysAddr override {
+        return simrv::xlen::PhysAddr{base_};
+    }
     [[nodiscard]] auto size() const -> simrv::xlen::Address override { return size_; }
     [[nodiscard]] auto read32(simrv::xlen::Address offset) -> uint32_t override {
         if (kind_ == Kind::Csr) return owner_.read_csr(offset);

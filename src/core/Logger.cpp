@@ -136,19 +136,8 @@ void emit_log(Level level, FILE* stream, std::string_view ansi_color, std::strin
             structured_callback = g_tui_structured_callback;
             callback = g_tui_callback;
         } else if (g_tui_mode) {
-            if (level >= Level::Warn) {
-                // Before the TUI owns the terminal, make actionable diagnostics visible without
-                // printing routine startup/shutdown chatter or buffering an invisible error.
-                if (simrv::util::terminal_color_enabled(STDERR_FILENO)) {
-                    std::println(stderr, "{}{}\033[0m", ansi_color, msg);
-                } else {
-                    std::println(stderr, "[{}] {}", plain_tag, msg);
-                }
-                std::fflush(stderr);
-            } else {
-                if (g_startup_logs.size() == kStartupLogLimit) g_startup_logs.pop_front();
-                g_startup_logs.push_back({.level = level, .message = msg, .timestamp = timestamp});
-            }
+            if (g_startup_logs.size() == kStartupLogLimit) g_startup_logs.pop_front();
+            g_startup_logs.push_back({.level = level, .message = msg, .timestamp = timestamp});
             return;
         } else {
             FILE* const out_stream =
@@ -255,9 +244,39 @@ auto get_log_to_stderr() noexcept -> bool {
     return g_log_to_stderr.load(std::memory_order_relaxed);
 }
 
+void flush_startup_logs() {
+    std::deque<PendingLog> pending;
+    {
+        std::scoped_lock lock(g_log_mutex);
+        pending.swap(g_startup_logs);
+    }
+    for (const auto& entry : pending) {
+        if (entry.level >= Level::Warn) {
+            if (simrv::util::terminal_color_enabled(STDERR_FILENO)) {
+                std::println(stderr, "{}{}\033[0m", standard_ansi_color(entry.level),
+                             entry.message);
+            } else {
+                std::println(stderr, "[{}] {}", level_name(entry.level), entry.message);
+            }
+        }
+    }
+    if (!pending.empty()) {
+        std::fflush(stderr);
+    }
+}
+
 void set_tui_mode(bool enable) {
-    std::scoped_lock lock(g_log_mutex);
-    g_tui_mode = enable;
+    bool flush = false;
+    {
+        std::scoped_lock lock(g_log_mutex);
+        g_tui_mode = enable;
+        if (!enable && !g_tui_callback && !g_tui_structured_callback) {
+            flush = true;
+        }
+    }
+    if (flush) {
+        flush_startup_logs();
+    }
 }
 
 void set_tui_callback(LogCallback cb) {

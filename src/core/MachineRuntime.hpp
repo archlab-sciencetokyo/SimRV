@@ -150,7 +150,7 @@ class Machine::Runtime {
 
     RamStorage ram;
     std::unique_ptr<simrv::Rtc> rtc;
-    std::unique_ptr<simrv::device::Uart> uart;
+    std::unique_ptr<simrv::device::SerialDevice> uart;
     std::unique_ptr<simrv::device::PowerMmio> power;
     std::unique_ptr<simrv::device::RingBufferEthernetMmio> ring_buffer_ethernet;
     std::vector<std::unique_ptr<simrv::device::DummyMmio>> dummy_mmios;

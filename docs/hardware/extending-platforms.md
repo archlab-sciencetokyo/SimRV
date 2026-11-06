@@ -216,6 +216,26 @@ While architectural peripherals (CLINT, PLIC, AIA, 16550 UART, VirtIO) are built
 
 Plugins interface with SimRV through the versioned C ABI declared in [`include/simrv/device/ExternalDevice.h`](https://github.com/archlab-sciencetokyo/SimRV/blob/dev/include/simrv/device/ExternalDevice.h):
 
+To replace the configured UART, a plugin may additionally export
+`simrv_serial_plugin_init`, returning the versioned descriptor declared in
+`simrv/device/ExternalSerialDevice.h`. Set the UART device's `compatible` to the plugin's
+compatible string and load the plugin normally. The simulator selects the serial implementation
+instead of the built-in 16550 and routes terminal input, PTY traffic, MMIO and cycle callbacks to
+it. The optional serial descriptor does not change the existing `SimRvExternalDevice` or
+`SimRvHostServices` layouts; existing plugins continue to use the original ABI.
+
+`receive_byte` can run on an input thread concurrently with MMIO and cycle callbacks; the plugin
+must synchronize its state. `advance_cycles` and `service_interrupts` run on the simulation thread.
+Serial output uses `SimRvSerialHostServices::write_byte` on that thread. Both host-service tables
+remain valid through the device's destroy callback. The serial capability is required for UART
+replacement; an ordinary MMIO plugin alone cannot receive console input. The configured interrupt
+number is available in the serial host-service table.
+
+An ordinary MMIO plugin can also replace the standalone power or RTC device when its compatible
+string matches the configured device. Other built-in devices are not generally replaceable yet:
+timers, interrupt controllers, DMA and VirtIO have additional simulator-owned state or transports.
+Custom MMIO devices may still be added independently of those built-ins.
+
 ```c
 // my_device.c
 #include <stdint.h>

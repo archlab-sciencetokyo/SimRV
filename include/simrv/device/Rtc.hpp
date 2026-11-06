@@ -33,7 +33,9 @@ class Rtc : public memory::TileLinkNode {
     static constexpr uint32_t kRtcIrq = 11;
 
     [[nodiscard]] auto name() const -> const char* override { return "rtc"; }
-    [[nodiscard]] auto base_address() const -> simrv::xlen::Address override { return base_; }
+    [[nodiscard]] auto base_address() const -> simrv::xlen::PhysAddr override {
+        return simrv::xlen::PhysAddr{base_};
+    }
     [[nodiscard]] auto size() const -> simrv::xlen::Address override { return size_; }
 
     auto handle_request(const memory::TlChannelA& req, memory::TlChannelD& resp) -> bool override;

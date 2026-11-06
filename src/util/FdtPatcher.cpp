@@ -19,13 +19,13 @@ namespace {
 constexpr uint32_t kMagic = 0xd00dfeed;
 constexpr uint32_t kBeginNode = 1, kEndNode = 2, kProp = 3, kNop = 4, kEnd = 9;
 struct Prop {
-    std::string name;
-    std::vector<uint8_t> data;
+    std::string name{};
+    std::vector<uint8_t> data{};
 };
 struct Node {
-    std::string name;
-    std::vector<Prop> props;
-    std::vector<Node> children;
+    std::string name{};
+    std::vector<Prop> props{};
+    std::vector<Node> children{};
 };
 auto be32(std::span<const uint8_t> b, size_t p) -> uint32_t {
     return (uint32_t{b[p]} << 24) | (uint32_t{b[p + 1]} << 16) | (uint32_t{b[p + 2]} << 8) |
@@ -240,8 +240,8 @@ auto validate_fdt_isa(std::span<const uint8_t> blob, uint64_t selected_misa)
 
 auto patch_fdt(std::span<const uint8_t> blob, uint64_t dram_base, uint64_t dram_size,
                uint32_t num_harts, FdtFramebufferInfo* out_fb, uint64_t timebase_hz,
-               uint64_t cpu_clock_hz, std::vector<FdtCustomDevice>* out_devices)
-    -> std::expected<std::vector<uint8_t>, std::string> {
+               uint64_t cpu_clock_hz, std::vector<FdtCustomDevice>* out_devices,
+               std::string_view bootargs) -> std::expected<std::vector<uint8_t>, std::string> {
     if (timebase_hz > std::numeric_limits<uint32_t>::max()) {
         return std::unexpected("timebase frequency does not fit the FDT 32-bit property");
     }
@@ -263,6 +263,16 @@ auto patch_fdt(std::span<const uint8_t> blob, uint64_t dram_base, uint64_t dram_
         Parser parser{blob.subspan(struct_off, struct_size),
                       blob.subspan(strings_off, strings_size)};
         auto root = parser.node();
+        if (!bootargs.empty()) {
+            auto* chosen = child(root, "chosen");
+            if (chosen == nullptr) {
+                root.children.push_back(Node{.name = "chosen", .props = {}, .children = {}});
+                chosen = &root.children.back();
+            }
+            std::vector<uint8_t> ba(bootargs.begin(), bootargs.end());
+            ba.push_back('\0');
+            set_prop(*chosen, "bootargs", std::move(ba));
+        }
         if (out_fb != nullptr) {
             *out_fb = {};
             for (const auto& c : root.children) {

@@ -593,6 +593,7 @@ auto main(int argc, char* argv[]) -> int {  // NOLINT(bugprone-exception-escape)
 
         const auto init_result = sim_machine->initialize();
         if (!init_result) {
+            simrv::log::set_tui_mode(false);
             simrv::log::error("Machine initialization failed: {}", init_result.error());
             if (event_stream) {
                 event_stream << "{\"schema_version\":2,\"event\":\"failed\",\"timestamp\":\""
@@ -649,6 +650,7 @@ auto main(int argc, char* argv[]) -> int {  // NOLINT(bugprone-exception-escape)
             if (sim_thread.joinable()) {
                 sim_thread.join();
             }
+            simrv::log::set_tui_mode(false);
         } else {
             g_active_cli_machine.store(sim_machine.get(), std::memory_order_release);
             sim_machine->run();

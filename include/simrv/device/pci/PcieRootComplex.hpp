@@ -85,8 +85,8 @@ class PcieRootComplex {
        public:
         explicit EcamNode(PcieRootComplex* rc) : rc_(rc) {}
         [[nodiscard]] auto name() const -> const char* override { return "pcie-ecam"; }
-        [[nodiscard]] auto base_address() const -> simrv::xlen::Address override {
-            return rc_->config_.ecam_base;
+        [[nodiscard]] auto base_address() const -> simrv::xlen::PhysAddr override {
+            return simrv::xlen::PhysAddr{rc_->config_.ecam_base};
         }
         [[nodiscard]] auto size() const -> simrv::xlen::Address override {
             return rc_->config_.ecam_size;
@@ -102,8 +102,8 @@ class PcieRootComplex {
        public:
         explicit MmioNode(PcieRootComplex* rc) : rc_(rc) {}
         [[nodiscard]] auto name() const -> const char* override { return "pcie-mmio"; }
-        [[nodiscard]] auto base_address() const -> simrv::xlen::Address override {
-            return rc_->config_.mmio_base;
+        [[nodiscard]] auto base_address() const -> simrv::xlen::PhysAddr override {
+            return simrv::xlen::PhysAddr{rc_->config_.mmio_base};
         }
         [[nodiscard]] auto size() const -> simrv::xlen::Address override {
             return rc_->config_.mmio_size;

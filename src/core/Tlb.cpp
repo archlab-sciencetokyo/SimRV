@@ -29,8 +29,8 @@ void Tlb::flush_selective(const TlbFlushFilter& filter) {
     }
 
     if (filter.vaddr) {
-        const auto set = calc_set(*filter.vaddr);
-        const simrv::xlen::Address vpage = calc_vpage(*filter.vaddr);
+        const auto set = calc_set(filter.vaddr->raw());
+        const simrv::xlen::Address vpage = calc_vpage(filter.vaddr->raw());
         auto clear_match = [&](TLBEntry& entry) {
             if (entry.valid && entry.v_addr == vpage) {
                 if (filter.asid) {

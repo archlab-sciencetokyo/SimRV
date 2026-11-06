@@ -13,7 +13,9 @@ class DummyMmio final : public memory::MmioDevice {
               uint32_t read_value);
 
     [[nodiscard]] auto name() const -> const char* override { return name_.c_str(); }
-    [[nodiscard]] auto base_address() const -> simrv::xlen::Address override { return base_; }
+    [[nodiscard]] auto base_address() const -> simrv::xlen::PhysAddr override {
+        return simrv::xlen::PhysAddr{base_};
+    }
     [[nodiscard]] auto size() const -> simrv::xlen::Address override { return size_; }
     [[nodiscard]] auto read32(simrv::xlen::Address /*offset*/) -> uint32_t override {
         return read_value_;

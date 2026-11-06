@@ -4,8 +4,10 @@
  */
 #include "simrv/memory/MmioDevice.hpp"
 
+#include <concepts>
 #include <cstdint>
 #include <cstring>
+#include <limits>
 #include <span>
 
 #include "simrv/core/Machine.hpp"
@@ -15,20 +17,35 @@
 
 namespace simrv::memory {
 
+namespace {
+template <typename T>
+concept NarrowMmioValue = std::same_as<T, uint8_t> || std::same_as<T, uint16_t>;
+
+template <NarrowMmioValue T>
+[[nodiscard]] auto read_narrow(MmioDevice& device, MmioOffset offset) -> T {
+    const auto aligned = offset & ~MmioOffset{3};
+    const auto shift = static_cast<unsigned>((offset & (4u - sizeof(T))) * 8u);
+    return static_cast<T>(device.read32(aligned) >> shift);
+}
+
+template <NarrowMmioValue T>
+void write_narrow(MmioDevice& device, MmioOffset offset, T value) {
+    const auto aligned = offset & ~MmioOffset{3};
+    const auto shift = static_cast<unsigned>((offset & (4u - sizeof(T))) * 8u);
+    const auto mask = static_cast<uint32_t>(std::numeric_limits<T>::max()) << shift;
+    const auto previous = device.read32(aligned);
+    device.write32(aligned, (previous & ~mask) | (static_cast<uint32_t>(value) << shift));
+}
+}  // namespace
+
 MmioDevice::MmioDevice(simrv::core::Machine* machine) : machine_(machine) {}
 
 auto MmioDevice::read8(simrv::xlen::Address offset) -> uint8_t {
-    const simrv::xlen::Address aligned = offset & ~simrv::xlen::Address{3};
-    const uint32_t val32 = read32(aligned);
-    const auto shift = static_cast<unsigned>((offset & simrv::xlen::Address{3}) * 8);
-    return static_cast<uint8_t>((val32 >> shift) & 0xffU);
+    return read_narrow<uint8_t>(*this, offset);
 }
 
 auto MmioDevice::read16(simrv::xlen::Address offset) -> uint16_t {
-    const simrv::xlen::Address aligned = offset & ~simrv::xlen::Address{3};
-    const uint32_t val32 = read32(aligned);
-    const auto shift = static_cast<unsigned>((offset & simrv::xlen::Address{2}) * 8);
-    return static_cast<uint16_t>((val32 >> shift) & 0xffffU);
+    return read_narrow<uint16_t>(*this, offset);
 }
 
 auto MmioDevice::read32(simrv::xlen::Address /*offset*/) -> uint32_t { return 0; }
@@ -40,21 +57,11 @@ auto MmioDevice::read64(simrv::xlen::Address offset) -> uint64_t {
 }
 
 void MmioDevice::write8(simrv::xlen::Address offset, uint8_t val) {
-    const simrv::xlen::Address aligned = offset & ~simrv::xlen::Address{3};
-    uint32_t val32 = read32(aligned);
-    const auto shift = static_cast<unsigned>((offset & simrv::xlen::Address{3}) * 8);
-    const uint32_t mask = ~(0xffU << shift);
-    val32 = (val32 & mask) | (static_cast<uint32_t>(val) << shift);
-    write32(aligned, val32);
+    write_narrow(*this, offset, val);
 }
 
 void MmioDevice::write16(simrv::xlen::Address offset, uint16_t val) {
-    const simrv::xlen::Address aligned = offset & ~simrv::xlen::Address{3};
-    uint32_t val32 = read32(aligned);
-    const auto shift = static_cast<unsigned>((offset & simrv::xlen::Address{2}) * 8);
-    const uint32_t mask = ~(0xffffU << shift);
-    val32 = (val32 & mask) | (static_cast<uint32_t>(val) << shift);
-    write32(aligned, val32);
+    write_narrow(*this, offset, val);
 }
 
 void MmioDevice::write32(simrv::xlen::Address /*offset*/, uint32_t /*val*/) {}
@@ -65,7 +72,7 @@ void MmioDevice::write64(simrv::xlen::Address offset, uint64_t val) {
 }
 
 auto MmioDevice::handle_request(const TlChannelA& req, TlChannelD& resp) -> bool {
-    const simrv::xlen::Address offset = (req.address - base_address()).raw();
+    const simrv::xlen::Address offset = req.address.raw() - base_address().raw();
     resp.source = req.source;
     resp.size = req.size;
     resp.denied = false;
@@ -116,14 +123,14 @@ auto MmioDevice::handle_request(const TlChannelA& req, TlChannelD& resp) -> bool
     return true;
 }
 
-auto MmioDevice::dma_read(simrv::xlen::Address paddr, std::span<uint8_t> dst) -> bool {
+auto MmioDevice::dma_read(simrv::xlen::PhysAddr paddr, std::span<uint8_t> dst) -> bool {
     if (machine_ == nullptr || dst.empty()) {
         return false;
     }
     return machine_->memory().dma_read(paddr, dst.data(), dst.size());
 }
 
-auto MmioDevice::dma_write(simrv::xlen::Address paddr, std::span<const uint8_t> src) -> bool {
+auto MmioDevice::dma_write(simrv::xlen::PhysAddr paddr, std::span<const uint8_t> src) -> bool {
     if (machine_ == nullptr || src.empty()) {
         return false;
     }

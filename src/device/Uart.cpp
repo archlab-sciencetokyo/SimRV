@@ -150,26 +150,25 @@ void Uart::flush_tx_buffer() noexcept {
     tx_buffer_len_ = 0;
 }
 
+void Uart::write_host_byte(uint8_t ch) {
+    if (machine_.console_sink())
+        machine_.console_sink()->handle_char_write(static_cast<char>(ch));
+    if (pty_.is_open() || !machine_.console_sink()) {
+        tx_buffer_[tx_buffer_len_++] = ch;
+        if (ch == '\n' || tx_buffer_len_ == tx_buffer_.size()) flush_tx_buffer();
+    }
+}
+
 void Uart::drain_tx_fifo() noexcept {
     if (tx_shift_active_) {
         const auto ch = tx_shift_byte_;
-        if (machine_.console_sink())
-            machine_.console_sink()->handle_char_write(static_cast<char>(ch));
-        if (pty_.is_open() || !machine_.console_sink()) {
-            tx_buffer_[tx_buffer_len_++] = ch;
-            if (ch == '\n' || tx_buffer_len_ == tx_buffer_.size()) flush_tx_buffer();
-        }
+        write_host_byte(ch);
         tx_shift_active_ = false;
     }
     while (!tx_fifo_.empty()) {
         const auto ch = tx_fifo_.front();
         tx_fifo_.pop_front();
-        if (machine_.console_sink())
-            machine_.console_sink()->handle_char_write(static_cast<char>(ch));
-        if (pty_.is_open() || !machine_.console_sink()) {
-            tx_buffer_[tx_buffer_len_++] = ch;
-            if (ch == '\n' || tx_buffer_len_ == tx_buffer_.size()) flush_tx_buffer();
-        }
+        write_host_byte(ch);
     }
     tx_irq_pending_ = true;
 }
@@ -209,12 +208,7 @@ void Uart::advance_cycles(uint64_t cycles) {
             continue;
         }
         const auto ch = tx_shift_byte_;
-        if (machine_.console_sink())
-            machine_.console_sink()->handle_char_write(static_cast<char>(ch));
-        if (pty_.is_open() || !machine_.console_sink()) {
-            tx_buffer_[tx_buffer_len_++] = ch;
-            if (ch == '\n' || tx_buffer_len_ == tx_buffer_.size()) flush_tx_buffer();
-        }
+        write_host_byte(ch);
         tx_shift_active_ = false;
         if (tx_fifo_.empty()) tx_irq_pending_ = true;
         tx_completed = true;
@@ -256,17 +250,10 @@ void Uart::advance_cycles(uint64_t cycles) {
 auto Uart::handle_request(const memory::TlChannelA& req, memory::TlChannelD& resp) -> bool {
     const auto reg = simrv::mmio::uart_reg(req.address.raw(), uart_reg_shift_, base_);
     if (reg == simrv::mmio::kUartRegInvalid) {
-        if (req.opcode == memory::TlOpcodeA::Get) {
-            const auto offset = req.address.raw() - base_;
-            if (offset == 8) {
-                std::scoped_lock lock(rx_mutex_);
-                resp.data = rx_fifo_.empty() ? 1 : 0;
-            } else {
-                resp.data = 0;
-            }
-        }
+        if (req.opcode == memory::TlOpcodeA::Get) resp.data = 0;
         return true;
     }
+
     const bool dlab = (uart_lcr_ & simrv::mmio::kUartLcrDlabMask) != 0;
     if (req.opcode == memory::TlOpcodeA::Get) {
         switch (reg) {

@@ -106,7 +106,9 @@ class TileLinkBus : public Bus {
         -> bool;
 
     /// Publish a successful L1 store while holding the shared coherence lock in MT-SMP mode.
-    void mark_modified(simrv::xlen::Address line_base, simrv::xlen::HartId hart);
+    void mark_modified(simrv::xlen::PhysAddr line_base, simrv::xlen::HartId hart);
+    template <std::integral I, typename... Args>
+    void mark_modified(I, Args&&...) = delete;
 
     void grant_ack(const TlChannelE& ack);
 

@@ -270,7 +270,8 @@ void test_ziccif_atomic_instruction_fetch_under_smp_store() {
 
     bool saw_a = false;
     bool saw_b = false;
-    for (unsigned i = 0; i < 100'000 && !writer_done.load(std::memory_order_acquire); ++i) {
+    for (unsigned i = 0;
+         i < 500'000 && (!writer_done.load(std::memory_order_acquire) || !saw_b || !saw_a); ++i) {
         TEST_ASSERT(fetcher.fetch_stage(machine, kTarget));
         const auto fetched = fetcher.active_context().ir_org;
         TEST_ASSERT(fetched == kInstructionA || fetched == kInstructionB);
@@ -689,9 +690,9 @@ void test_zifencei_flushes_local_instruction_state() {
     auto& cpu = machine.primary_hart();
     constexpr simrv::xlen::Address kLineAddress = 0x1000;
     std::array<simrv::xlen::Byte, 64> line{};
-    cpu.icache.insert(kLineAddress, line.data());
+    cpu.icache.insert(simrv::xlen::PhysAddr{kLineAddress}, line.data());
     uint32_t cached_word = 0;
-    TEST_ASSERT(cpu.icache.read(kLineAddress, cached_word));
+    TEST_ASSERT(cpu.icache.read(simrv::xlen::PhysAddr{kLineAddress}, cached_word));
 
     simrv::pipeline::DecodedInstruction decoded{};
     decoded.cpc = simrv::xlen::VirtAddr{kLineAddress};
@@ -710,7 +711,7 @@ void test_zifencei_flushes_local_instruction_state() {
     TEST_ASSERT(cpu.execute_stage(machine));
 
     uint32_t instruction = 0;
-    TEST_ASSERT(!cpu.icache.read(kLineAddress, instruction));
+    TEST_ASSERT(!cpu.icache.read(simrv::xlen::PhysAddr{kLineAddress}, instruction));
     TEST_ASSERT(cpu.decode_cache.lookup(decoded.cpc) == nullptr);
 }
 
@@ -732,11 +733,13 @@ void test_svade_faults_on_clear_accessed_and_dirty_bits() {
                                           std::to_underlying(simrv::PteFlag::W) |
                                           std::to_underlying(simrv::PteFlag::X);
         const auto write_pte = [&](simrv::xlen::Address address, uint64_t pte) {
-            TEST_ASSERT(machine.memory().dma_write(address, &pte, sizeof(pte)));
+            TEST_ASSERT(
+                machine.memory().dma_write(simrv::xlen::PhysAddr{address}, &pte, sizeof(pte)));
         };
         const auto read_pte = [&](simrv::xlen::Address address) {
             uint64_t pte = 0;
-            TEST_ASSERT(machine.memory().dma_read(address, &pte, sizeof(pte)));
+            TEST_ASSERT(
+                machine.memory().dma_read(simrv::xlen::PhysAddr{address}, &pte, sizeof(pte)));
             return pte;
         };
 
@@ -2122,11 +2125,13 @@ void test_profile_engine() {
         std::array<simrv::xlen::Byte, simrv::memory::CoherenceHub::kLineBytes> acquired_line{};
         TEST_ASSERT(bus.acquire_block(acquire, grant, acquired_line));
         bus.grant_ack(simrv::memory::TlChannelE{.sink = grant.sink});
-        cpu.dcache.insert(line_base, acquired_line.data(), simrv::memory::MesiState::Exclusive);
+        cpu.dcache.insert(simrv::xlen::PhysAddr{line_base}, acquired_line.data(),
+                          simrv::memory::MesiState::Exclusive);
         for (size_t i = 0; i < dirty_line.size(); ++i) {
-            TEST_ASSERT(cpu.dcache.write(line_base + i, 0xA5U, Funct3::Sb));
+            TEST_ASSERT(cpu.dcache.write(simrv::xlen::PhysAddr{line_base + i}, 0xA5U, Funct3::Sb));
         }
-        machine.memory().system_bus().mark_modified(line_base, cpu.hart_id());
+        machine.memory().system_bus().mark_modified(simrv::xlen::PhysAddr{line_base},
+                                                    cpu.hart_id());
 
         auto& ctx = cpu.active_context();
         ctx = {};
@@ -2139,8 +2144,10 @@ void test_profile_engine() {
         TEST_ASSERT(loaded == kDirtyValue);
         TEST_ASSERT(machine.memory().system_bus().read_count() > reads_before);
         TEST_ASSERT(cpu.dcache.miss_count() == misses_before);
-        TEST_ASSERT(cpu.dcache.line_state(line_base) == simrv::memory::MesiState::Invalid);
-        const auto* read_entry = cpu.tlb.lookup_data_r(kVirtual, 0, PrivilegeLevel::Supervisor);
+        TEST_ASSERT(cpu.dcache.line_state(simrv::xlen::PhysAddr{line_base}) ==
+                    simrv::memory::MesiState::Invalid);
+        const auto* read_entry =
+            cpu.tlb.lookup_data_r(simrv::xlen::VirtAddr{kVirtual}, 0, PrivilegeLevel::Supervisor);
         TEST_ASSERT(read_entry != nullptr && read_entry->pbmt == simrv::PtePbmt::NonCacheable);
 
         ctx = {};
@@ -2151,7 +2158,8 @@ void test_profile_engine() {
             machine.memory(), cpu, simrv::xlen::VirtAddr{kVirtual}, kNcStore, Funct3::Sd);
         TEST_ASSERT(!ctx.pending_exception.has_value());
         TEST_ASSERT(machine.memory().system_bus().write_count() > writes_before);
-        TEST_ASSERT(cpu.dcache.line_state(line_base) == simrv::memory::MesiState::Invalid);
+        TEST_ASSERT(cpu.dcache.line_state(simrv::xlen::PhysAddr{line_base}) ==
+                    simrv::memory::MesiState::Invalid);
         uint64_t ram_value = 0;
         std::memcpy(&ram_value, ram.data() + (kPhysical - kDram), sizeof(ram_value));
         TEST_ASSERT(ram_value == kNcStore);
@@ -2175,7 +2183,8 @@ void test_profile_engine() {
         TEST_ASSERT(!ctx.pending_exception.has_value());
         TEST_ASSERT(io_loaded == kNcStore);
         TEST_ASSERT(machine.memory().system_bus().read_count() > io_reads_before);
-        read_entry = cpu.tlb.lookup_data_r(kVirtual, 0, PrivilegeLevel::Supervisor);
+        read_entry =
+            cpu.tlb.lookup_data_r(simrv::xlen::VirtAddr{kVirtual}, 0, PrivilegeLevel::Supervisor);
         TEST_ASSERT(read_entry != nullptr && read_entry->pbmt == simrv::PtePbmt::Io);
 
         ctx = {};
@@ -2253,12 +2262,15 @@ void test_profile_engine() {
         std::memcpy(ram.data(), kProgram.data(), sizeof(kProgram));
         std::array<simrv::xlen::Byte, simrv::cache::ICache::kLineBytes> instruction_line{};
         std::memcpy(instruction_line.data(), kProgram.data(), sizeof(kProgram));
-        cpu.icache.insert(kDram, instruction_line.data(), simrv::memory::MesiState::Exclusive);
+        cpu.icache.insert(simrv::xlen::PhysAddr{kDram}, instruction_line.data(),
+                          simrv::memory::MesiState::Exclusive);
 
-        cpu.tlb.insert_inst_r(kCodeVirtual, kDram, 0, PrivilegeLevel::Supervisor);
-        cpu.tlb.insert_data_w(kIoVirtual, kIoPhysical, 0, PrivilegeLevel::Supervisor, false,
-                              simrv::memory::PtePbmt::Io);
-        cpu.tlb.insert_data_w(kPmaVirtual, kPmaPhysical, 0, PrivilegeLevel::Supervisor);
+        cpu.tlb.insert_inst_r(simrv::xlen::VirtAddr{kCodeVirtual}, simrv::xlen::PhysAddr{kDram}, 0,
+                              PrivilegeLevel::Supervisor);
+        cpu.tlb.insert_data_w(simrv::xlen::VirtAddr{kIoVirtual}, simrv::xlen::PhysAddr{kIoPhysical},
+                              0, PrivilegeLevel::Supervisor, false, simrv::memory::PtePbmt::Io);
+        cpu.tlb.insert_data_w(simrv::xlen::VirtAddr{kPmaVirtual},
+                              simrv::xlen::PhysAddr{kPmaPhysical}, 0, PrivilegeLevel::Supervisor);
 
         for (unsigned cycle = 0; cpu.e_icount < 5 && cycle < 256; ++cycle) {
             cpu.run_cycle(machine);
@@ -2286,8 +2298,9 @@ void test_profile_engine() {
         }
         TEST_ASSERT(first_io_store < pma_store);
         TEST_ASSERT(pma_store < second_io_store);
-        TEST_ASSERT(cpu.tlb.lookup_data_w(kIoVirtual, 0, PrivilegeLevel::Supervisor)->pbmt ==
-                    simrv::memory::PtePbmt::Io);
+        TEST_ASSERT(
+            cpu.tlb.lookup_data_w(simrv::xlen::VirtAddr{kIoVirtual}, 0, PrivilegeLevel::Supervisor)
+                ->pbmt == simrv::memory::PtePbmt::Io);
     }
 #endif
 }

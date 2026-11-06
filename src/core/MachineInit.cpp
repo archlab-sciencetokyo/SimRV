@@ -583,13 +583,50 @@ auto Machine::initialize() -> std::expected<void, std::string> {
     const auto dma_config = device_descriptor(SoCDeviceKind::DmaController);
     runtime_->rtc =
         std::make_unique<simrv::Rtc>(*this, rtc_config.base, rtc_config.size, rtc_config.irq);
-    runtime_->uart = std::make_unique<simrv::device::Uart>(
-        *this, uart_config.base, uart_config.size, uart_config.irq, uart_config.clock_hz,
-        config.execution.cpu_clock_hz);
+    if (uart_config.enabled && device_registry().has_serial_compatible(uart_config.compatible)) {
+        runtime_->uart = device_registry().create_serial(*this, uart_config);
+        if (!runtime_->uart) {
+            return std::unexpected("Failed to create configured serial device: " +
+                                   uart_config.compatible);
+        }
+    } else {
+        if (uart_config.enabled && !uart_config.compatible.empty() &&
+            uart_config.compatible != "ns16550a" &&
+            uart_config.compatible != "ns16550") {
+            return std::unexpected("No serial plugin registered for compatible: " +
+                                   uart_config.compatible);
+        }
+        runtime_->uart = std::make_unique<simrv::device::Uart>(
+            *this, uart_config.base, uart_config.size, uart_config.irq, uart_config.clock_hz,
+            config.execution.cpu_clock_hz);
+    }
     runtime_->power =
         std::make_unique<simrv::device::PowerMmio>(*this, power_config.base, power_config.size);
     runtime_->dma_controller = std::make_unique<simrv::device::DmaController>(
         this, dma_config.base, dma_config.size, dma_config.irq);
+    // Standalone MMIO devices have no additional execution-engine ownership. A matching
+    // compatible selects the registered implementation; a failed factory must not silently
+    // fall back to a different device.
+    const auto replace_standalone_mmio = [&](const auto& device, auto& builtin) {
+        if (!device.enabled) return true;
+        if (!device_registry().has_mmio_compatible(device.compatible)) {
+            return device.compatible.empty() ||
+                   (device.kind == SoCDeviceKind::Rtc &&
+                    device.compatible == "google,goldfish-rtc") ||
+                   (device.kind == SoCDeviceKind::Power &&
+                    (device.compatible == "sifive,test1" ||
+                     device.compatible == "sifive,test0"));
+        }
+        auto replacement = device_registry().create_mmio(*this, device);
+        if (!replacement) return false;
+        builtin.reset();
+        runtime_->extension_mmios.push_back(std::move(replacement));
+        return true;
+    };
+    if (!replace_standalone_mmio(rtc_config, runtime_->rtc) ||
+        !replace_standalone_mmio(power_config, runtime_->power)) {
+        return std::unexpected("Failed to create configured standalone MMIO replacement");
+    }
     if (!runtime_->axi_bridge) {
         runtime_->axi_bridge =
             std::make_unique<simrv::memory::Axi4Bridge>(this, primary_hart().cpu_model_config.axi);
@@ -979,13 +1016,18 @@ auto Machine::initialize() -> std::expected<void, std::string> {
                                                    config.files.dvtree_path, compatible.error()));
             }
             std::vector<simrv::util::FdtCustomDevice> fdt_devices;
-            auto patched = simrv::util::patch_fdt(input_blob, config.memory.dram_base,
-                                                  effective_dram_size, config.execution.num_harts,
-                                                  &fb_info, config.execution.timebase_hz,
-                                                  config.execution.cpu_clock_hz, &fdt_devices);
+            auto patched = simrv::util::patch_fdt(
+                input_blob, config.memory.dram_base, effective_dram_size,
+                config.execution.num_harts, &fb_info, config.execution.timebase_hz,
+                config.execution.cpu_clock_hz, &fdt_devices, config.files.bootargs);
             if (!patched) return std::unexpected(patched.error());
             final_blob = std::move(*patched);
             for (const auto& dev : fdt_devices) {
+                if (memory().system_bus().router().is_range_mapped(
+                        simrv::xlen::PhysAddr{static_cast<simrv::xlen::Address>(dev.base)},
+                        dev.size)) {
+                    continue;
+                }
                 SoCDeviceConfig custom_cfg{};
                 custom_cfg.kind = SoCDeviceKind::CustomMmio;
                 custom_cfg.name = dev.name;

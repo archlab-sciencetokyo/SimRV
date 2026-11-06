@@ -639,7 +639,8 @@ auto GdbStub::cmd_write_memory(const std::string& pkt, simrv::core::Machine& mac
             static_cast<uint8_t>((hd(pkt.at(hex_off)) << 4) | hd(pkt.at(hex_off + 1)));
         bytes.push_back(static_cast<simrv::xlen::Byte>(byte_val));
     }
-    if (bytes.size() != len || !machine.memory().dma_write(addr, bytes.data(), bytes.size()))
+    if (bytes.size() != len ||
+        !machine.memory().dma_write(simrv::xlen::PhysAddr{addr}, bytes.data(), bytes.size()))
         return "E01";
     for (size_t hart = 0; hart < machine.num_harts(); ++hart) {
         invalidate_debug_state(machine, machine.hart(hart));
@@ -666,9 +667,9 @@ auto GdbStub::cmd_breakpoint(const std::string& pkt, simrv::core::Machine& machi
     if (*type == std::to_underlying(GdbBreakpointType::Software) ||
         *type == std::to_underlying(GdbBreakpointType::Hardware)) {
         if (insert)
-            breakpoints.add_pc_breakpoint(addr, BreakpointOwner::Gdb);
+            breakpoints.add_pc_breakpoint(simrv::xlen::VirtAddr{addr}, BreakpointOwner::Gdb);
         else
-            breakpoints.remove_pc_breakpoint(addr, BreakpointOwner::Gdb);
+            breakpoints.remove_pc_breakpoint(simrv::xlen::VirtAddr{addr}, BreakpointOwner::Gdb);
         return "OK";
     }
 
@@ -687,9 +688,11 @@ auto GdbStub::cmd_breakpoint(const std::string& pkt, simrv::core::Machine& machi
             return "";
     }
     if (insert)
-        breakpoints.add_watchpoint(addr, *length, watch, "gdb", BreakpointOwner::Gdb);
+        breakpoints.add_watchpoint(simrv::xlen::VirtAddr{addr}, *length, watch, "gdb",
+                                   BreakpointOwner::Gdb);
     else
-        breakpoints.remove_watchpoint(addr, *length, watch, BreakpointOwner::Gdb);
+        breakpoints.remove_watchpoint(simrv::xlen::VirtAddr{addr}, *length, watch,
+                                      BreakpointOwner::Gdb);
     return "OK";
 }
 
@@ -848,7 +851,8 @@ auto GdbStub::cmd_monitor(std::string_view command, simrv::core::Machine& machin
         if (records.empty()) return "No instruction breakpoints.\n";
         std::string response;
         for (const auto& breakpoint : records) {
-            response += std::format("breakpoint {}: 0x{:x}\n", breakpoint.id, breakpoint.addr);
+            response +=
+                std::format("breakpoint {}: 0x{:x}\n", breakpoint.id, breakpoint.addr.raw());
         }
         return response;
     }
@@ -861,7 +865,7 @@ auto GdbStub::cmd_monitor(std::string_view command, simrv::core::Machine& machin
                               : watchpoint.type == WatchType::Access ? "access"
                                                                      : "write";
             response += std::format("watchpoint {}: 0x{:x}, {} byte(s), {}\n", watchpoint.id,
-                                    watchpoint.addr, watchpoint.size, type);
+                                    watchpoint.addr.raw(), watchpoint.size, type);
         }
         return response;
     }

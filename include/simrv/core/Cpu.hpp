@@ -369,14 +369,13 @@ struct alignas(32) SoftTlbEntry {
                                                              simrv::xlen::PrivilegeLevel priv,
                                                              uint32_t current_epoch) const noexcept
         -> bool {
-        if (simrv::compiler::likely(epoch == current_epoch)) {
+        if (simrv::compiler::likely(epoch == current_epoch && tag != kInvalidTag)) {
             const uint64_t expected_tag = make_tag(vpn, asid, priv);
             if (simrv::compiler::likely(tag == expected_tag)) return true;
             return simrv::compiler::unlikely(global) &&
                    ((tag & ~uint64_t{0x3FFFCULL}) == make_tag(vpn, 0, priv));
         }
-        return simrv::compiler::unlikely(global && tag != kInvalidTag) &&
-               ((tag & ~uint64_t{0x3FFFCULL}) == make_tag(vpn, 0, priv));
+        return false;
     }
 
     [[nodiscard]] SIMRV_ALWAYS_INLINE bool has_host_ptr() const noexcept { return has_host; }
@@ -485,7 +484,7 @@ class CPU {
      * @brief Selectively flushes TLB entries matching virtual address and/or Address Space
      * Identifier (ASID).
      */
-    inline void TLB_flush(bool match_all_vaddr, simrv::xlen::Address vaddr, bool match_all_asid,
+    inline void TLB_flush(bool match_all_vaddr, simrv::xlen::VirtAddr vaddr, bool match_all_asid,
                           simrv::xlen::Word asid) {
         TLB_flush(core::TlbFlushFilter{
             .vaddr = match_all_vaddr ? std::nullopt : std::make_optional(vaddr),

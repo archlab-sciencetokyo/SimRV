@@ -14,7 +14,7 @@ auto DCache::handle_probe(const simrv::memory::TlChannelB& req, simrv::memory::T
     const simrv::xlen::Address line_base =
         (req.address & ~(static_cast<simrv::xlen::Address>(kLineBytes - 1u))).raw();
     const uint32_t set_idx = get_set_index(line_base);
-    const simrv::xlen::Address tag = get_tag(line_base);
+    const auto tag = get_tag(line_base);
 
     for (uint32_t w = 0; w < associativity(); ++w) {
         auto& cache_line = line(set_idx, w);

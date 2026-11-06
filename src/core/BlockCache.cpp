@@ -43,11 +43,9 @@ auto BlockCache::build_block(simrv::xlen::Register pc, DecodeCache& decode_cache
         auto& cop = bb.ops[bb.num_ops++];
         cop.imm = cur->imm;
         cop.fast_op = cur->fast_op;
-        cop.rd = (cur->rd == simrv::xlen::RegId::Zero)
-                     ? 32
-                     : static_cast<uint8_t>(std::to_underlying(cur->rd));
-        cop.rs1 = static_cast<uint8_t>(std::to_underlying(cur->rs1));
-        cop.rs2 = static_cast<uint8_t>(std::to_underlying(cur->rs2));
+        cop.rd = (cur->rd == simrv::xlen::RegId::Zero) ? simrv::xlen::RegId::Discard : cur->rd;
+        cop.rs1 = cur->rs1;
+        cop.rs2 = cur->rs2;
         cop.op_len = cur->op_len;
         cop.is_compressed = cur->is_compressed() ? 1 : 0;
 
@@ -55,7 +53,7 @@ auto BlockCache::build_block(simrv::xlen::Register pc, DecodeCache& decode_cache
         if (cop.fast_op == FastOp::Auipc) {
             cop.fast_op = FastOp::Lui;
             cop.imm = static_cast<simrv::xlen::Register>(cur->cpc.raw() + cur->imm);
-        } else if (cop.fast_op == FastOp::Addi && cop.rs1 == 0) {
+        } else if (cop.fast_op == FastOp::Addi && cop.rs1 == simrv::xlen::RegId::Zero) {
             // Optimization: 'li rd, imm' (addi rd, x0, imm) -> direct immediate write (0 registers
             // read)
             cop.fast_op = FastOp::Lui;

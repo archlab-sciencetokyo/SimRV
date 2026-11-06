@@ -8,13 +8,15 @@
 #include <cstdint>
 #include <deque>
 #include <mutex>
+#include <optional>
+#include <string_view>
 #include <thread>
 
 #include "simrv/core/PlatformMap.h"
 #include "simrv/core/PlatformTiming.hpp"
 #include "simrv/device/PtyBridge.hpp"
 #include "simrv/memory/Mmio.hpp"
-#include "simrv/memory/TileLinkNode.hpp"
+#include "simrv/device/SerialDevice.hpp"
 #include "simrv/xlen/ScalarTypes.hpp"
 
 namespace simrv::core {
@@ -27,7 +29,7 @@ class Tui;
 
 namespace simrv::device {
 
-class Uart : public memory::TileLinkNode {
+class Uart : public SerialDevice {
    public:
     explicit Uart(simrv::core::Machine& machine,
                   simrv::xlen::Address base = simrv::mmio::kUartBaseAddress,
@@ -36,7 +38,9 @@ class Uart : public memory::TileLinkNode {
                   uint64_t cpu_clock_hz = simrv::core::timing::kCpuClockHz);
     ~Uart() override;
     [[nodiscard]] auto name() const -> const char* override { return "uart"; }
-    [[nodiscard]] auto base_address() const -> simrv::xlen::Address override { return base_; }
+    [[nodiscard]] auto base_address() const -> simrv::xlen::PhysAddr override {
+        return simrv::xlen::PhysAddr{base_};
+    }
     [[nodiscard]] auto size() const -> simrv::xlen::Address override { return size_; }
     auto handle_request(const memory::TlChannelA& req, memory::TlChannelD& resp) -> bool override;
 
@@ -49,7 +53,9 @@ class Uart : public memory::TileLinkNode {
     [[nodiscard]] auto is_input_thread_running() const -> bool { return input_thread_.joinable(); }
     [[nodiscard]] auto is_interrupt_pending() const -> bool;
     [[nodiscard]] auto irq_number() const noexcept -> uint32_t { return irq_; }
-    void push_rx_byte(uint8_t byte);
+    void push_rx_byte(uint8_t byte) override;
+    /// Emit a byte through the configured console and PTY. Call on the simulation thread.
+    void write_host_byte(uint8_t byte);
     /// Advance serial transmit and receive state by simulated CPU cycles.
     void advance_cycles(uint64_t cycles);
     [[nodiscard]] auto has_active_transfer() const noexcept -> bool {

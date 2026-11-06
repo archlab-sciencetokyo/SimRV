@@ -39,7 +39,13 @@ namespace {
         return nullptr;
     }
     auto& machine = *cpu.machine_;
-    if (simrv::compiler::unlikely(machine.breakpoint_manager().has_any())) {
+    // Direct copies must not bypass per-element triggers or store reservation effects.
+    const bool store_needs_checks =
+        is_write &&
+        (cpu.cpu_model_config.mmio_console_redirect || cpu.state().lr_reservation_active ||
+         (machine.num_harts() > 1 && machine.memory().reservation_table().may_have_reservations()));
+    if (simrv::compiler::unlikely(machine.breakpoint_manager().has_any() ||
+                                  cpu.state().has_active_triggers || store_needs_checks)) {
         return nullptr;
     }
     const bool single_page = ((base_addr >> 12) == ((base_addr + total_bytes - 1) >> 12));
@@ -569,7 +575,9 @@ void execute_vlse(core::CPU& cpu, simrv::memory::MemorySubsystem& mem, simrv::xl
         static_cast<std::make_signed_t<simrv::xlen::Register>>(stride_reg_val));
 
     // Direct host DRAM fast-path when strided span resides within a single physical page
-    if (stride >= 0 && cpu.state().vstart == 0 && !cpu.state().has_active_triggers) {
+    if (stride >= 0 && stride <= 4096 && cpu.state().vstart == 0 &&
+        (simrv::xlen::kIsXLen64 || sizeof(T) != 8 ||
+         ((base_addr | static_cast<uint64_t>(stride)) & 7u) == 0)) {
         const uint64_t total_span = static_cast<uint64_t>(vl - 1) * static_cast<uint64_t>(stride) +
                                     static_cast<uint64_t>(nfields) * sizeof(T);
         if (total_span <= 4096u) {
@@ -643,7 +651,9 @@ void execute_vsse(core::CPU& cpu, simrv::memory::MemorySubsystem& mem, simrv::xl
         static_cast<std::make_signed_t<simrv::xlen::Register>>(stride_reg_val));
 
     // Direct host DRAM fast-path when strided span resides within a single physical page
-    if (stride >= 0 && cpu.state().vstart == 0 && !cpu.state().has_active_triggers) {
+    if (stride >= 0 && stride <= 4096 && cpu.state().vstart == 0 &&
+        (simrv::xlen::kIsXLen64 || sizeof(T) != 8 ||
+         ((base_addr | static_cast<uint64_t>(stride)) & 7u) == 0)) {
         const uint64_t total_span = static_cast<uint64_t>(vl - 1) * static_cast<uint64_t>(stride) +
                                     static_cast<uint64_t>(nfields) * sizeof(T);
         if (total_span <= 4096u) {

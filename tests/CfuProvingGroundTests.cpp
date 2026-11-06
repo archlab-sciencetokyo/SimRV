@@ -217,7 +217,8 @@ void test_cfu_pipeline_hazard_timing() {
         std::array<simrv::xlen::Byte, simrv::cache::ICache::kLineBytes> line{};
         std::memcpy(line.data(), program_dependent.data(), sizeof(program_dependent));
         std::memcpy(ram.data(), program_dependent.data(), sizeof(program_dependent));
-        cpu.icache.insert(pc, line.data(), simrv::memory::MesiState::Exclusive);
+        cpu.icache.insert(simrv::xlen::PhysAddr{pc}, line.data(),
+                          simrv::memory::MesiState::Exclusive);
         cpu.state().pc = pc;
 
         uint32_t cycles = 0;
@@ -269,7 +270,8 @@ void test_cfu_pipeline_hazard_timing() {
         std::array<simrv::xlen::Byte, simrv::cache::ICache::kLineBytes> line{};
         std::memcpy(line.data(), program_independent.data(), sizeof(program_independent));
         std::memcpy(ram.data(), program_independent.data(), sizeof(program_independent));
-        cpu.icache.insert(pc, line.data(), simrv::memory::MesiState::Exclusive);
+        cpu.icache.insert(simrv::xlen::PhysAddr{pc}, line.data(),
+                          simrv::memory::MesiState::Exclusive);
         cpu.state().pc = pc;
 
         uint32_t cycles = 0;
@@ -372,14 +374,14 @@ void test_bram_prewarm_and_cli() {
 
         // Verify ICache hit on the prewarmed code line
         uint32_t fetched_inst = 0;
-        TEST_CHECK(cpu.icache.read(code_addr, fetched_inst));
+        TEST_CHECK(cpu.icache.read(simrv::xlen::PhysAddr{code_addr}, fetched_inst));
         TEST_CHECK(fetched_inst == test_prog[0]);
         TEST_CHECK(cpu.icache.miss_count() == 0);
 
         // Verify DCache hit on the prewarmed data line
         simrv::xlen::Word read_data = 0;
-        TEST_CHECK(cpu.dcache.read(data_addr, read_data,
-                                   static_cast<simrv::xlen::Instruction>(simrv::isa::Funct3::Lw)));
+        TEST_CHECK(
+            cpu.dcache.read(simrv::xlen::PhysAddr{data_addr}, read_data, simrv::isa::Funct3::Lw));
         TEST_CHECK(static_cast<uint32_t>(read_data) == data_val);
         TEST_CHECK(cpu.dcache.miss_count() == 0);
     }

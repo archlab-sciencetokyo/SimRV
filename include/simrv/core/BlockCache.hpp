@@ -25,11 +25,11 @@ static constexpr size_t kBlockSetMask = kNumBlockSets - 1;
 struct alignas(8) CompactOp {
     simrv::xlen::Register imm{0};   ///< 64-bit immediate or precomputed AUIPC / branch target
     FastOp fast_op{FastOp::Other};  ///< FastOp tag
-    uint8_t rd{0};                  ///< Destination register index (0..32, 32 = discard)
-    uint8_t rs1{0};                 ///< Source 1 register index (0..32)
-    uint8_t rs2{0};                 ///< Source 2 register index (0..32)
-    uint8_t op_len{4};              ///< Guest instruction length in bytes (2 or 4)
-    uint8_t is_compressed{0};       ///< 1 if compressed 16-bit instruction, else 0
+    simrv::xlen::RegId rd{simrv::xlen::RegId::Zero};   ///< Destination or discard register
+    simrv::xlen::RegId rs1{simrv::xlen::RegId::Zero};  ///< Integer source 1
+    simrv::xlen::RegId rs2{simrv::xlen::RegId::Zero};  ///< Integer source 2
+    uint8_t op_len{4};         ///< Guest instruction length in bytes (2 or 4)
+    uint8_t is_compressed{0};  ///< 1 if compressed 16-bit instruction, else 0
     uint16_t pad{0};
 };
 static_assert(sizeof(CompactOp) == 16);

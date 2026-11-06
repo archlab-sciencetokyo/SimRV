@@ -269,7 +269,7 @@ auto Machine::test_secondary_harts() noexcept -> std::vector<std::unique_ptr<sim
     return runtime_->secondary_harts;
 }
 
-auto Machine::mutable_uart_for_testing() noexcept -> std::unique_ptr<simrv::device::Uart>& {
+auto Machine::mutable_uart_for_testing() noexcept -> std::unique_ptr<simrv::device::SerialDevice>& {
     return runtime_->uart;
 }
 
@@ -338,7 +338,7 @@ auto Machine::dump_signature(const std::string& filepath) const -> bool {
     const auto len = static_cast<size_t>(*end_opt - *begin_opt);
     std::vector<uint8_t> buffer(len, 0);
     auto& mem = const_cast<Machine*>(this)->memory();
-    if (!mem.dma_read(*begin_opt, buffer.data(), len)) {
+    if (!mem.dma_read(simrv::xlen::PhysAddr{*begin_opt}, buffer.data(), len)) {
         simrv::log::error("Failed to read signature range from memory: 0x{:x} - 0x{:x}", *begin_opt,
                           *end_opt);
         return false;
@@ -568,9 +568,9 @@ auto Machine::rtc_device() noexcept -> simrv::Rtc* { return runtime_->rtc.get();
 
 auto Machine::rtc_device() const noexcept -> const simrv::Rtc* { return runtime_->rtc.get(); }
 
-auto Machine::uart_device() noexcept -> simrv::device::Uart* { return runtime_->uart.get(); }
+auto Machine::uart_device() noexcept -> simrv::device::SerialDevice* { return runtime_->uart.get(); }
 
-auto Machine::uart_device() const noexcept -> const simrv::device::Uart* {
+auto Machine::uart_device() const noexcept -> const simrv::device::SerialDevice* {
     return runtime_->uart.get();
 }
 
@@ -865,8 +865,14 @@ void Machine::finalize_runner_cycle() {
 
 auto Machine::fast_batch_policy() const -> std::optional<FastBatchPolicy> {
     if (!runtime_profile.allows_fast_batch() || is_stepping() || lockstep_enabled() ||
-        branch_trace_enabled() || breakpoint_manager().has_any() || is_smp_enabled()) {
+        branch_trace_enabled() || breakpoint_manager().has_any() || is_smp_enabled() ||
+        primary_hart().state().has_active_triggers ||
+        primary_hart().cpu_model_config.mmio_console_redirect) {
         return std::nullopt;
+    }
+    for (const auto& hart : runtime_->secondary_harts) {
+        if (hart->state().has_active_triggers || hart->cpu_model_config.mmio_console_redirect)
+            return std::nullopt;
     }
     if (tui_enabled() && (!telemetry_sink_ || telemetry_sink_->is_trace_active() ||
                           telemetry_sink_->step_delay_us() != 0)) {
@@ -1393,10 +1399,10 @@ void Machine::prewarm_bram_caches() {
                     }
                     for (simrv::xlen::Address addr = start; addr < end; addr += kLineBytes) {
                         if (ram.contains(addr, kLineBytes)) {
-                            cpu.icache.insert(addr, ram.unchecked_ptr(addr),
+                            cpu.icache.insert(simrv::xlen::PhysAddr{addr}, ram.unchecked_ptr(addr),
                                               simrv::memory::MesiState::Shared);
                             memory().system_bus().coherence_hub().register_preloaded_line(
-                                addr, cpu.hart_id());
+                                simrv::xlen::PhysAddr{addr}, cpu.hart_id());
                         }
                     }
                 } else {
@@ -1410,10 +1416,10 @@ void Machine::prewarm_bram_caches() {
                     }
                     for (simrv::xlen::Address addr = start; addr < end; addr += kLineBytes) {
                         if (ram.contains(addr, kLineBytes)) {
-                            cpu.dcache.insert(addr, ram.unchecked_ptr(addr),
+                            cpu.dcache.insert(simrv::xlen::PhysAddr{addr}, ram.unchecked_ptr(addr),
                                               simrv::memory::MesiState::Shared);
                             memory().system_bus().coherence_hub().register_preloaded_line(
-                                addr, cpu.hart_id());
+                                simrv::xlen::PhysAddr{addr}, cpu.hart_id());
                         }
                     }
                 }
@@ -1425,10 +1431,10 @@ void Machine::prewarm_bram_caches() {
             const simrv::xlen::Address i_end = dram_base + cpu.icache.capacity_bytes();
             for (simrv::xlen::Address addr = dram_base; addr < i_end; addr += kILineBytes) {
                 if (ram.contains(addr, kILineBytes)) {
-                    cpu.icache.insert(addr, ram.unchecked_ptr(addr),
+                    cpu.icache.insert(simrv::xlen::PhysAddr{addr}, ram.unchecked_ptr(addr),
                                       simrv::memory::MesiState::Shared);
-                    memory().system_bus().coherence_hub().register_preloaded_line(addr,
-                                                                                  cpu.hart_id());
+                    memory().system_bus().coherence_hub().register_preloaded_line(
+                        simrv::xlen::PhysAddr{addr}, cpu.hart_id());
                 }
             }
 
@@ -1437,10 +1443,10 @@ void Machine::prewarm_bram_caches() {
             const simrv::xlen::Address d_end = dmem_base + cpu.dcache.capacity_bytes();
             for (simrv::xlen::Address addr = dmem_base; addr < d_end; addr += kDLineBytes) {
                 if (ram.contains(addr, kDLineBytes)) {
-                    cpu.dcache.insert(addr, ram.unchecked_ptr(addr),
+                    cpu.dcache.insert(simrv::xlen::PhysAddr{addr}, ram.unchecked_ptr(addr),
                                       simrv::memory::MesiState::Shared);
-                    memory().system_bus().coherence_hub().register_preloaded_line(addr,
-                                                                                  cpu.hart_id());
+                    memory().system_bus().coherence_hub().register_preloaded_line(
+                        simrv::xlen::PhysAddr{addr}, cpu.hart_id());
                 }
             }
         }
@@ -2072,9 +2078,11 @@ void Machine::finalize_cycle_tohost() {
                     uint64_t resp = arg2;
                     std::memcpy(ram.unchecked_ptr(fromhost_addr), &resp, sizeof(resp));
                     for (size_t i = 0; i < num_harts(); ++i) {
-                        hart(i).dcache.probe_line(fromhost_addr, simrv::memory::MesiState::Invalid);
+                        hart(i).dcache.probe_line(simrv::xlen::PhysAddr{fromhost_addr},
+                                                  simrv::memory::MesiState::Invalid);
                     }
-                    memory_.system_bus().coherence_hub().invalidate_line_external(fromhost_addr);
+                    memory_.system_bus().coherence_hub().invalidate_line_external(
+                        simrv::xlen::PhysAddr{fromhost_addr});
                     tohost = 0;
                     return;
                 } else if (syscall_num == 93) {  // SYS_exit

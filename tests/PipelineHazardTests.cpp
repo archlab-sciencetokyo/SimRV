@@ -192,7 +192,8 @@ void test_cycle_kernel_bit_for_bit_hazard_stall_counters() {
         std::array<simrv::xlen::Byte, simrv::cache::ICache::kLineBytes> line{};
         std::memcpy(line.data(), program.data(), sizeof(program));
         std::memcpy(ram.data(), program.data(), sizeof(program));
-        cpu.icache.insert(pc, line.data(), simrv::memory::MesiState::Exclusive);
+        cpu.icache.insert(simrv::xlen::PhysAddr{pc}, line.data(),
+                          simrv::memory::MesiState::Exclusive);
         cpu.state().pc = pc;
 
         uint32_t cycles = 0;
@@ -303,7 +304,8 @@ void test_zkt_fixed_instruction_latency() {
         std::memcpy(ram.data(), program.data(), sizeof(program));
         std::array<simrv::xlen::Byte, simrv::cache::ICache::kLineBytes> line{};
         std::memcpy(line.data(), program.data(), sizeof(program));
-        cpu.icache.insert(pc, line.data(), simrv::memory::MesiState::Exclusive);
+        cpu.icache.insert(simrv::xlen::PhysAddr{pc}, line.data(),
+                          simrv::memory::MesiState::Exclusive);
         cpu.state().pc = pc;
         cpu.state().regs.write(simrv::xlen::RegId::Ra, lhs);
         cpu.state().regs.write(simrv::xlen::RegId::Sp, rhs);
@@ -379,7 +381,8 @@ void test_zvkt_vector_latency() {
         std::memcpy(ram.data(), program.data(), sizeof(program));
         std::array<simrv::xlen::Byte, simrv::cache::ICache::kLineBytes> line{};
         std::memcpy(line.data(), program.data(), sizeof(program));
-        cpu.icache.insert(pc, line.data(), simrv::memory::MesiState::Exclusive);
+        cpu.icache.insert(simrv::xlen::PhysAddr{pc}, line.data(),
+                          simrv::memory::MesiState::Exclusive);
         cpu.state().pc = pc;
 
         uint32_t cycles = 0;
@@ -430,7 +433,8 @@ void test_cycle_kernel_fp_hazard_stall_counters() {
         std::array<simrv::xlen::Byte, simrv::cache::ICache::kLineBytes> line{};
         std::memcpy(line.data(), program.data(), sizeof(program));
         std::memcpy(ram.data(), program.data(), sizeof(program));
-        cpu.icache.insert(pc, line.data(), simrv::memory::MesiState::Exclusive);
+        cpu.icache.insert(simrv::xlen::PhysAddr{pc}, line.data(),
+                          simrv::memory::MesiState::Exclusive);
         cpu.state().pc = pc;
 
         uint32_t cycles = 0;

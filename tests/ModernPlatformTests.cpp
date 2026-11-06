@@ -62,26 +62,53 @@
 
 namespace {
 
+template <typename Address>
+concept DmaReadable = requires(simrv::memory::MmioDevice& device, Address address,
+                               std::span<uint8_t> bytes) { device.dma_read(address, bytes); };
+
+static_assert(DmaReadable<simrv::xlen::PhysAddr>);
+static_assert(!DmaReadable<simrv::xlen::VirtAddr>);
+static_assert(!DmaReadable<simrv::xlen::Address>);
+
+template <typename Address>
+concept CoherenceAddress = requires(simrv::memory::CoherenceHub& hub, Address address) {
+    hub.get_directory_state(address);
+    hub.invalidate_line_external(address);
+    hub.mark_modified(address, simrv::xlen::HartId{0});
+};
+
+static_assert(CoherenceAddress<simrv::xlen::PhysAddr>);
+static_assert(!CoherenceAddress<simrv::xlen::VirtAddr>);
+static_assert(!CoherenceAddress<simrv::xlen::Address>);
+
 class DummyDevice : public simrv::memory::MmioDevice {
    public:
     explicit DummyDevice(simrv::core::Machine* m) : simrv::memory::MmioDevice(m) {}
     [[nodiscard]] auto name() const -> const char* override { return "dummy"; }
-    [[nodiscard]] auto base_address() const -> simrv::xlen::Address override { return 0x1000U; }
+    [[nodiscard]] auto base_address() const -> simrv::xlen::PhysAddr override {
+        return simrv::xlen::PhysAddr{0x1000U};
+    }
     [[nodiscard]] auto size() const -> simrv::xlen::Address override { return 0x100U; }
 
     [[nodiscard]] auto read32(simrv::xlen::Address offset) -> uint32_t override {
+        ++reads_;
         return static_cast<uint32_t>(0xABCD0000U + offset);
     }
     void write32(simrv::xlen::Address offset, uint32_t val) override {
+        ++writes_;
         last_val_ = val + static_cast<uint32_t>(offset);
     }
     uint32_t last_val_{0};
+    unsigned reads_{0};
+    unsigned writes_{0};
 };
 
 class CorruptResponseNode : public simrv::memory::TileLinkNode {
    public:
     [[nodiscard]] auto name() const -> const char* override { return "corrupt-response"; }
-    [[nodiscard]] auto base_address() const -> simrv::xlen::Address override { return 0x3000U; }
+    [[nodiscard]] auto base_address() const -> simrv::xlen::PhysAddr override {
+        return simrv::xlen::PhysAddr{0x3000U};
+    }
     [[nodiscard]] auto size() const -> simrv::xlen::Address override { return 0x100U; }
     auto handle_request(const simrv::memory::TlChannelA& request,
                         simrv::memory::TlChannelD& response) -> bool override {
@@ -177,14 +204,27 @@ void test_mmio_device_and_dma() {
     assert(dev.read32(0x04) == 0xABCD0004U);
     assert(dev.read8(0x04) == 0x04U);
     assert(dev.read16(0x04) == 0x0004U);
+    const auto check = [](bool condition) {
+        if (!condition) std::abort();
+    };
+    check(dev.read8(0x06) == 0xCDU);
+    check(dev.read16(0x06) == 0xABCDU);
+    dev.reads_ = 0;
+    dev.writes_ = 0;
+    dev.write8(0x05, 0x12U);
+    check(dev.last_val_ == 0xABCD1208U && dev.reads_ == 1 && dev.writes_ == 1);
+    dev.reads_ = 0;
+    dev.writes_ = 0;
+    dev.write16(0x06, 0x5678U);
+    check(dev.last_val_ == 0x56780008U && dev.reads_ == 1 && dev.writes_ == 1);
 
     // Test DMA
     std::vector<uint8_t> src = {0x11, 0x22, 0x33, 0x44};
-    assert(dev.dma_write(simrv::memory::kDramBaseAddress + 0x100, src));
+    check(dev.dma_write(simrv::xlen::PhysAddr{simrv::memory::kDramBaseAddress + 0x100}, src));
 
     std::vector<uint8_t> dst(4, 0);
-    assert(dev.dma_read(simrv::memory::kDramBaseAddress + 0x100, dst));
-    assert(dst == src);
+    check(dev.dma_read(simrv::xlen::PhysAddr{simrv::memory::kDramBaseAddress + 0x100}, dst));
+    check(dst == src);
     std::cout << "[PASS] test_mmio_device_and_dma\n";
 }
 
@@ -764,7 +804,8 @@ void test_cycle_kernel_golden_translated_fetch() {
         std::memcpy(ram.data(), &instruction, sizeof(instruction));
         std::array<simrv::xlen::Byte, simrv::cache::ICache::kLineBytes> line{};
         std::memcpy(line.data(), &instruction, sizeof(instruction));
-        machine.cpu.icache.insert(pc, line.data(), simrv::memory::MesiState::Exclusive);
+        machine.cpu.icache.insert(simrv::xlen::PhysAddr{pc}, line.data(),
+                                  simrv::memory::MesiState::Exclusive);
 
         const simrv::xlen::Word root_ppn = root >> 12;
         if constexpr (simrv::xlen::kIsXLen64) {
@@ -826,12 +867,14 @@ void test_cycle_kernel_golden_translated_load() {
         std::memcpy(ram.data(), program.data(), sizeof(program));
         std::array<simrv::xlen::Byte, simrv::cache::ICache::kLineBytes> instruction_line{};
         std::memcpy(instruction_line.data(), program.data(), sizeof(program));
-        machine.cpu.icache.insert(pc, instruction_line.data(), simrv::memory::MesiState::Exclusive);
+        machine.cpu.icache.insert(simrv::xlen::PhysAddr{pc}, instruction_line.data(),
+                                  simrv::memory::MesiState::Exclusive);
         constexpr uint32_t value = 73;
         std::memcpy(ram.data() + 0x100, &value, sizeof(value));
         std::array<simrv::xlen::Byte, simrv::cache::DCache::kLineBytes> data_line{};
         std::memcpy(data_line.data(), &value, sizeof(value));
-        machine.cpu.dcache.insert(data_address, data_line.data(), simrv::memory::MesiState::Shared);
+        machine.cpu.dcache.insert(simrv::xlen::PhysAddr{data_address}, data_line.data(),
+                                  simrv::memory::MesiState::Shared);
 
         const simrv::xlen::Word root_ppn = root >> 12;
         if constexpr (simrv::xlen::kIsXLen64) {
@@ -850,7 +893,8 @@ void test_cycle_kernel_golden_translated_load() {
         std::memcpy(ram.data() + (pte_address - pc), &pte, sizeof(pte));
         machine.cpu.state().priv = kPrivSupervisor;
         machine.cpu.state().pc = pc;
-        machine.cpu.tlb.insert_inst_r(pc, pc, 0, kPrivSupervisor);
+        machine.cpu.tlb.insert_inst_r(simrv::xlen::VirtAddr{pc}, simrv::xlen::PhysAddr{pc}, 0,
+                                      kPrivSupervisor);
 
         uint32_t cycles = 0;
         while (machine.cpu.e_icount < 3 && cycles < 32) {
@@ -914,7 +958,7 @@ void test_timed_smp_coherence_ordering() {
     check(response.has_line_data);
     check(std::to_integer<uint8_t>(response.line_data[0]) == 0x5a);
     bus.grant_ack(simrv::memory::TlChannelE{.sink = response.payload.sink});
-    machine.hart(0).dcache.insert(line, response.line_data.data(),
+    machine.hart(0).dcache.insert(simrv::xlen::PhysAddr{line}, response.line_data.data(),
                                   simrv::memory::MesiState::Exclusive);
 
     simrv::memory::TlChannelA reader = owner;
@@ -930,7 +974,7 @@ void test_timed_smp_coherence_ordering() {
     }
     check(response.has_line_data);
 
-    const auto directory = bus.coherence_hub().get_directory_state(line);
+    const auto directory = bus.coherence_hub().get_directory_state(simrv::xlen::PhysAddr{line});
     check(directory.state == simrv::memory::MesiState::Shared);
     check(directory.sharers_mask == 0b11U);
     check(bus.coherence_hub().validate_directory().has_value());
@@ -988,7 +1032,8 @@ void test_memory_access_fails_closed_when_request_is_rejected() {
     check(ram[0x181] == simrv::xlen::Byte{0x56});
     check(ram[0x182] == simrv::xlen::Byte{0x34});
     check(ram[0x183] == simrv::xlen::Byte{0x12});
-    check(hart.dcache.line_state(address) == simrv::memory::MesiState::Invalid);
+    check(hart.dcache.line_state(simrv::xlen::PhysAddr{address}) ==
+          simrv::memory::MesiState::Invalid);
     bus.cancel_source(source);
 
     const simrv::xlen::VirtAddr unmapped{0x1000};
@@ -1022,7 +1067,7 @@ void test_memory_access_fails_closed_when_request_is_rejected() {
 
     CorruptResponseNode corrupt_node;
     check(bus.add_node(&corrupt_node));
-    const simrv::xlen::VirtAddr corrupt_address{corrupt_node.base_address()};
+    const simrv::xlen::VirtAddr corrupt_address{corrupt_node.base_address().raw()};
     hart.ca_state.data_transfer.reset();
     hart.ca_state.waiting_for_interconnect = false;
     hart.active_context().pending_exception.reset();
@@ -1080,10 +1125,11 @@ void test_modified_line_does_not_refill_stale_shared_data() {
     std::array<simrv::xlen::Byte, simrv::memory::CoherenceHub::kLineBytes> data{};
     check(bus.acquire_block(acquire, response, data));
     bus.grant_ack(simrv::memory::TlChannelE{.sink = response.sink});
-    machine.cpu.dcache.insert(line, data.data(), simrv::memory::MesiState::Exclusive);
+    machine.cpu.dcache.insert(simrv::xlen::PhysAddr{line}, data.data(),
+                              simrv::memory::MesiState::Exclusive);
 
-    check(machine.cpu.dcache.write(line, updated, 2));
-    bus.mark_modified(line, 0);
+    check(machine.cpu.dcache.write(simrv::xlen::PhysAddr{line}, updated, simrv::isa::Funct3::Sw));
+    bus.mark_modified(simrv::xlen::PhysAddr{line}, 0);
     std::memcpy(ram.data() + 0x180, &updated, sizeof(updated));
 
     // Model an L1 eviction whose write-through value is already in DRAM. The directory still
@@ -1132,7 +1178,7 @@ void test_release_data_writes_back_without_directory_entry() {
 
     std::array<simrv::xlen::Byte, simrv::memory::CoherenceHub::kLineBytes> cached{};
     simrv::memory::MesiState state = simrv::memory::MesiState::Invalid;
-    check(bus.coherence_hub().l3_cache().lookup_line(line, cached, state));
+    check(bus.coherence_hub().l3_cache().lookup_line(simrv::xlen::PhysAddr{line}, cached, state));
     check(cached == released);
     std::cout << "[PASS] test_release_data_writes_back_without_directory_entry\n";
 }
@@ -1161,17 +1207,38 @@ void test_machine_reset_clears_coherence_state_after_cache_reset() {
     std::array<simrv::xlen::Byte, simrv::memory::CoherenceHub::kLineBytes> data{};
     check(bus.acquire_block(acquire, response, data));
     bus.grant_ack(simrv::memory::TlChannelE{.sink = response.sink});
-    machine.cpu.dcache.insert(line, data.data(), simrv::memory::MesiState::Exclusive);
-    check(machine.cpu.dcache.write(line, value, 2));
-    bus.mark_modified(line, 0);
+    machine.cpu.dcache.insert(simrv::xlen::PhysAddr{line}, data.data(),
+                              simrv::memory::MesiState::Exclusive);
+    check(machine.cpu.dcache.write(simrv::xlen::PhysAddr{line}, value, simrv::isa::Funct3::Sw));
+    bus.mark_modified(simrv::xlen::PhysAddr{line}, 0);
     std::memcpy(ram.data() + 0x280, &value, sizeof(value));
-    check(bus.coherence_hub().get_directory_state(line).state ==
+    check(bus.coherence_hub().get_directory_state(simrv::xlen::PhysAddr{line}).state ==
+          simrv::memory::MesiState::Modified);
+    check(bus.coherence_hub().get_directory_state(simrv::xlen::PhysAddr{line + 63}).state ==
+          simrv::memory::MesiState::Modified);
+    check(bus.coherence_hub().get_directory_state(simrv::xlen::PhysAddr{line + 64}).state ==
+          simrv::memory::MesiState::Invalid);
+
+    // The direct-mapped directory shortcut must fall back to the map on a tag collision.
+    constexpr simrv::xlen::Address colliding_line = line + 1024 * 64;
+    auto& hub = bus.coherence_hub();
+    hub.register_preloaded_line(simrv::xlen::PhysAddr{colliding_line}, simrv::xlen::HartId{0});
+    check(hub.get_directory_state(simrv::xlen::PhysAddr{colliding_line}).state ==
+          simrv::memory::MesiState::Shared);
+    check(hub.get_directory_state(simrv::xlen::PhysAddr{line}).state ==
+          simrv::memory::MesiState::Modified);
+    hub.invalidate_line_external(simrv::xlen::PhysAddr{colliding_line + 1});
+    check(hub.get_directory_state(simrv::xlen::PhysAddr{colliding_line}).state ==
+          simrv::memory::MesiState::Invalid);
+    check(hub.get_directory_state(simrv::xlen::PhysAddr{line}).state ==
           simrv::memory::MesiState::Modified);
 
     machine.reset_state();
 
-    check(machine.cpu.dcache.line_state(line) == simrv::memory::MesiState::Invalid);
-    check(bus.coherence_hub().get_directory_state(line).state == simrv::memory::MesiState::Invalid);
+    check(machine.cpu.dcache.line_state(simrv::xlen::PhysAddr{line}) ==
+          simrv::memory::MesiState::Invalid);
+    check(bus.coherence_hub().get_directory_state(simrv::xlen::PhysAddr{line}).state ==
+          simrv::memory::MesiState::Invalid);
     uint32_t backing_value = 0;
     std::memcpy(&backing_value, ram.data() + 0x280, sizeof(backing_value));
     check(backing_value == value);
@@ -1208,7 +1275,7 @@ void test_cross_line_dma_write_invalidates_only_touched_lines() {
         std::array<simrv::xlen::Byte, simrv::memory::CoherenceHub::kLineBytes> data{};
         check(bus.acquire_block(acquire, response, data));
         bus.grant_ack(simrv::memory::TlChannelE{.sink = response.sink});
-        machine.cpu.dcache.insert(acquire.address.raw(), data.data(),
+        machine.cpu.dcache.insert(acquire.address, data.data(),
                                   simrv::memory::mesi_for(response.cap));
     }
 
@@ -1216,17 +1283,22 @@ void test_cross_line_dma_write_invalidates_only_touched_lines() {
         simrv::xlen::Byte{1}, simrv::xlen::Byte{2}, simrv::xlen::Byte{3}, simrv::xlen::Byte{4},
         simrv::xlen::Byte{5}, simrv::xlen::Byte{6}, simrv::xlen::Byte{7}, simrv::xlen::Byte{8}};
     const auto write_address = first_line + simrv::memory::CoherenceHub::kLineBytes - 4;
-    check(machine.memory().dma_write(write_address, replacement.data(), replacement.size()));
-    check(machine.cpu.dcache.line_state(first_line) == simrv::memory::MesiState::Invalid);
-    check(machine.cpu.dcache.line_state(first_line + simrv::memory::CoherenceHub::kLineBytes) ==
+    check(machine.memory().dma_write(simrv::xlen::PhysAddr{write_address}, replacement.data(),
+                                     replacement.size()));
+    check(machine.cpu.dcache.line_state(simrv::xlen::PhysAddr{first_line}) ==
           simrv::memory::MesiState::Invalid);
-    check(machine.cpu.dcache.line_state(first_line + 2 * simrv::memory::CoherenceHub::kLineBytes) ==
+    check(machine.cpu.dcache.line_state(
+              simrv::xlen::PhysAddr{first_line + simrv::memory::CoherenceHub::kLineBytes}) ==
+          simrv::memory::MesiState::Invalid);
+    check(machine.cpu.dcache.line_state(
+              simrv::xlen::PhysAddr{first_line + 2 * simrv::memory::CoherenceHub::kLineBytes}) ==
           simrv::memory::MesiState::Exclusive);
     check(std::memcmp(ram.data() + 0x33c, replacement.data(), replacement.size()) == 0);
 
     const std::array<simrv::xlen::Byte, 8> out_of_range{};
     const auto final_bytes = ram.size() - 4;
-    check(!machine.memory().dma_write(simrv::memory::kDramBaseAddress + final_bytes,
+    check(!machine.memory().dma_write(simrv::xlen::PhysAddr{static_cast<simrv::xlen::Address>(
+                                          simrv::memory::kDramBaseAddress + final_bytes)},
                                       out_of_range.data(), out_of_range.size()));
     std::cout << "[PASS] test_cross_line_dma_write_invalidates_only_touched_lines\n";
 }
@@ -1271,11 +1343,108 @@ void test_profiled_shared_cache_clusters() {
     std::array<simrv::xlen::Byte, simrv::memory::CoherenceHub::kLineBytes> source{};
     std::array<simrv::xlen::Byte, simrv::memory::CoherenceHub::kLineBytes> result{};
     source[0] = simrv::xlen::Byte{0x5a};
-    hart0_l2->write_line(line, source);
-    check(hart1_l2->read_line(line, result) && result[0] == simrv::xlen::Byte{0x5a});
-    hub.invalidate_line_external(line);
-    check(!hart0_l2->read_line(line, result) && !hart2_l2->read_line(line, result));
+    hart0_l2->write_line(simrv::xlen::PhysAddr{line}, source);
+    check(hart1_l2->read_line(simrv::xlen::PhysAddr{line}, result) &&
+          result[0] == simrv::xlen::Byte{0x5a});
+    hub.invalidate_line_external(simrv::xlen::PhysAddr{line});
+    check(!hart0_l2->read_line(simrv::xlen::PhysAddr{line}, result) &&
+          !hart2_l2->read_line(simrv::xlen::PhysAddr{line}, result));
     std::cout << "[PASS] test_profiled_shared_cache_clusters\n";
+}
+
+void test_cbo_zero_invalidates_cached_copies_and_reservations() {
+    const auto check = [](bool condition) {
+        if (!condition) std::abort();
+    };
+    ConcreteMachine machine;
+    std::vector<simrv::xlen::Byte> ram(1024 * 1024, simrv::xlen::Byte{0x5a});
+    machine.set_ram_for_testing(ram.data(), ram.size());
+    machine.cpu.machine_ = &machine;
+    machine.cpu.reset();
+    auto secondary = std::make_unique<simrv::core::CPU>();
+    secondary->machine_ = &machine;
+    secondary->state().mhartid = 1;
+    machine.secondary_harts_.push_back(std::move(secondary));
+    auto third = std::make_unique<simrv::core::CPU>();
+    third->machine_ = &machine;
+    third->state().mhartid = 2;
+    machine.secondary_harts_.push_back(std::move(third));
+    machine.memory().initialize_mmu();
+
+    constexpr simrv::xlen::Address line = simrv::memory::kDramBaseAddress + 0x400;
+    auto& bus = machine.memory().system_bus();
+    simrv::memory::TlChannelA request{};
+    request.opcode = simrv::memory::TlOpcodeA::AcquireBlock;
+    request.grow = simrv::memory::TlGrow::NtoB;
+    request.source = 20;
+    request.hart = 0;
+    request.address = line;
+    request.size = simrv::memory::kTlBlockSize;
+    simrv::memory::TlChannelD response{};
+    std::array<simrv::xlen::Byte, simrv::memory::CoherenceHub::kLineBytes> data{};
+    check(bus.acquire_block(request, response, data));
+    bus.grant_ack(simrv::memory::TlChannelE{.sink = response.sink});
+    machine.cpu.dcache.insert(simrv::xlen::PhysAddr{line}, data.data(),
+                              simrv::memory::mesi_for(response.cap));
+
+    auto& reservations = machine.memory().reservation_table();
+    reservations.set_reservation(simrv::xlen::HartId{0}, line + 8);
+    reservations.set_reservation(simrv::xlen::HartId{1}, line + 40);
+    reservations.set_reservation(simrv::xlen::HartId{2}, line + 64);
+    machine.cpu.state().lr_reservation_active = true;
+    simrv::memory::MemoryAccess::execute_cmo(machine.memory(), machine.cpu,
+                                             simrv::xlen::VirtAddr{line + 16},
+                                             simrv::isa::OperationId::CBO_ZERO);
+    check(!machine.cpu.active_context().pending_exception.has_value());
+    check(machine.cpu.dcache.line_state(simrv::xlen::PhysAddr{line}) ==
+          simrv::memory::MesiState::Invalid);
+    check(bus.coherence_hub().get_directory_state(simrv::xlen::PhysAddr{line}).state ==
+          simrv::memory::MesiState::Invalid);
+    check(!machine.cpu.state().lr_reservation_active);
+    check(!reservations.check_reservation(simrv::xlen::HartId{0}, line + 8));
+    check(!reservations.check_reservation(simrv::xlen::HartId{1}, line + 40));
+    check(reservations.check_reservation(simrv::xlen::HartId{2}, line + 64));
+    check(std::ranges::all_of(std::span(ram).subspan(0x400, data.size()),
+                              [](auto value) { return value == simrv::xlen::Byte{0}; }));
+
+    request.source = 21;
+    request.hart = 1;
+    request.grow = simrv::memory::TlGrow::NtoT;
+    check(bus.acquire_block(request, response, data));
+    bus.grant_ack(simrv::memory::TlChannelE{.sink = response.sink});
+    machine.hart(1).dcache.insert(simrv::xlen::PhysAddr{line}, data.data(),
+                                  simrv::memory::mesi_for(response.cap));
+    check(machine.hart(1).dcache.write(simrv::xlen::PhysAddr{line}, 0x11223344,
+                                       simrv::isa::Funct3::Sw));
+    simrv::xlen::Word cached = 0;
+    check(!machine.cpu.dcache.read(simrv::xlen::PhysAddr{line}, cached, simrv::isa::Funct3::Lw));
+}
+
+void test_dma_write_invalidates_reservations_in_all_modes() {
+    const auto check = [](bool condition) {
+        if (!condition) std::abort();
+    };
+    for (auto engine :
+         {simrv::core::ExecutionEngine::InstructionFast, simrv::core::ExecutionEngine::CycleFast}) {
+        ConcreteMachine machine;
+        std::vector<simrv::xlen::Byte> ram(4096, simrv::xlen::Byte{0});
+        machine.set_ram_for_testing(ram.data(), ram.size());
+        machine.runtime_profile.engine = engine;
+        auto& reservations = machine.memory().reservation_table();
+        constexpr simrv::xlen::Address base = simrv::memory::kDramBaseAddress + 0x100;
+        reservations.set_reservation(simrv::xlen::HartId{0}, base + 8);
+        reservations.set_reservation(simrv::xlen::HartId{1}, base + 24);
+        const std::array<simrv::xlen::Byte, 16> data{};
+        check(
+            machine.memory().dma_write(simrv::xlen::PhysAddr{base + 12}, data.data(), data.size()));
+        check(!reservations.check_reservation(simrv::xlen::HartId{0}, base + 8));
+        check(!reservations.check_reservation(simrv::xlen::HartId{1}, base + 24));
+        reservations.set_reservation(simrv::xlen::HartId{0}, base + 8);
+        check(!machine.memory().dma_write(
+            simrv::xlen::PhysAddr{simrv::memory::kDramBaseAddress + 4092}, data.data(),
+            data.size()));
+        check(reservations.check_reservation(simrv::xlen::HartId{0}, base + 8));
+    }
 }
 
 void test_tilelink_c_acquire_perm_upgrade() {
@@ -1309,7 +1478,8 @@ void test_tilelink_c_acquire_perm_upgrade() {
     std::array<simrv::xlen::Byte, simrv::memory::CoherenceHub::kLineBytes> data0{};
     check(bus.acquire_block(acq0, resp0, data0));
     bus.grant_ack(simrv::memory::TlChannelE{.sink = resp0.sink});
-    machine.hart(0).dcache.insert(line, data0.data(), simrv::memory::MesiState::Shared);
+    machine.hart(0).dcache.insert(simrv::xlen::PhysAddr{line}, data0.data(),
+                                  simrv::memory::MesiState::Shared);
 
     // Hart 1 acquires line as Branch (Shared)
     simrv::memory::TlChannelA acq1 = acq0;
@@ -1319,10 +1489,11 @@ void test_tilelink_c_acquire_perm_upgrade() {
     std::array<simrv::xlen::Byte, simrv::memory::CoherenceHub::kLineBytes> data1{};
     check(bus.acquire_block(acq1, resp1, data1));
     bus.grant_ack(simrv::memory::TlChannelE{.sink = resp1.sink});
-    machine.hart(1).dcache.insert(line, data1.data(), simrv::memory::MesiState::Shared);
+    machine.hart(1).dcache.insert(simrv::xlen::PhysAddr{line}, data1.data(),
+                                  simrv::memory::MesiState::Shared);
 
     // Verify directory state: Shared, sharers = 0b11
-    auto dir = bus.coherence_hub().get_directory_state(line);
+    auto dir = bus.coherence_hub().get_directory_state(simrv::xlen::PhysAddr{line});
     check(dir.state == simrv::memory::MesiState::Shared);
     check(dir.sharers_mask == 0b11U);
 
@@ -1340,15 +1511,18 @@ void test_tilelink_c_acquire_perm_upgrade() {
     check(upg_resp.cap == simrv::memory::TlCap::ToT);
     bus.grant_ack(simrv::memory::TlChannelE{.sink = upg_resp.sink});
 
-    check(machine.hart(0).dcache.upgrade_line_state(line, simrv::memory::MesiState::Exclusive));
-    check(machine.hart(0).dcache.write(line, 0xcafebeef, 2));
-    bus.mark_modified(line, 0);
+    check(machine.hart(0).dcache.upgrade_line_state(simrv::xlen::PhysAddr{line},
+                                                    simrv::memory::MesiState::Exclusive));
+    check(machine.hart(0).dcache.write(simrv::xlen::PhysAddr{line}, 0xcafebeef,
+                                       simrv::isa::Funct3::Sw));
+    bus.mark_modified(simrv::xlen::PhysAddr{line}, 0);
 
     // Hart 1 should have been probed and invalidated by CoherenceHub during AcquirePerm
-    check(machine.hart(1).dcache.line_state(line) == simrv::memory::MesiState::Invalid);
+    check(machine.hart(1).dcache.line_state(simrv::xlen::PhysAddr{line}) ==
+          simrv::memory::MesiState::Invalid);
 
     // Verify directory state: Exclusive / Modified, sole sharer Hart 0
-    dir = bus.coherence_hub().get_directory_state(line);
+    dir = bus.coherence_hub().get_directory_state(simrv::xlen::PhysAddr{line});
     check(dir.state == simrv::memory::MesiState::Modified);
     check(dir.sharers_mask == 0b01U);
     check(dir.owner_hart.has_value() && *dir.owner_hart == 0);
@@ -1392,7 +1566,8 @@ void test_tilelink_c_prefetch_intent() {
     // Verify L3 cache now has line cached
     std::array<simrv::xlen::Byte, simrv::memory::CoherenceHub::kLineBytes> l3_buf{};
     simrv::memory::MesiState l3_state = simrv::memory::MesiState::Invalid;
-    check(bus.coherence_hub().l3_cache().lookup_line(line, l3_buf, l3_state));
+    check(
+        bus.coherence_hub().l3_cache().lookup_line(simrv::xlen::PhysAddr{line}, l3_buf, l3_state));
     uint32_t l3_val = 0;
     std::memcpy(&l3_val, l3_buf.data(), sizeof(l3_val));
     check(l3_val == val);
@@ -1796,7 +1971,8 @@ void test_cycle_kernel_golden_forwarding() {
         std::array<simrv::xlen::Byte, simrv::cache::ICache::kLineBytes> line{};
         std::memcpy(line.data(), program.data(), sizeof(program));
         std::memcpy(ram.data(), program.data(), sizeof(program));
-        machine.cpu.icache.insert(pc, line.data(), simrv::memory::MesiState::Exclusive);
+        machine.cpu.icache.insert(simrv::xlen::PhysAddr{pc}, line.data(),
+                                  simrv::memory::MesiState::Exclusive);
         machine.cpu.state().pc = pc;
 
         uint32_t cycles = 0;
@@ -1917,13 +2093,15 @@ void test_cycle_kernel_golden_load_use() {
         std::array<simrv::xlen::Byte, simrv::cache::ICache::kLineBytes> instruction_line{};
         std::memcpy(instruction_line.data(), program.data(), sizeof(program));
         std::memcpy(ram.data(), program.data(), sizeof(program));
-        machine.cpu.icache.insert(pc, instruction_line.data(), simrv::memory::MesiState::Exclusive);
+        machine.cpu.icache.insert(simrv::xlen::PhysAddr{pc}, instruction_line.data(),
+                                  simrv::memory::MesiState::Exclusive);
 
         std::array<simrv::xlen::Byte, simrv::cache::DCache::kLineBytes> data_line{};
         constexpr uint32_t value = 21;
         std::memcpy(data_line.data(), &value, sizeof(value));
         std::memcpy(ram.data() + 0x100, &value, sizeof(value));
-        machine.cpu.dcache.insert(data_address, data_line.data(), simrv::memory::MesiState::Shared);
+        machine.cpu.dcache.insert(simrv::xlen::PhysAddr{data_address}, data_line.data(),
+                                  simrv::memory::MesiState::Shared);
         machine.cpu.state().pc = pc;
 
         uint32_t cycles = 0;
@@ -2085,7 +2263,8 @@ void test_cycle_kernel_golden_data_refill() {
         std::memcpy(ram.data(), program.data(), sizeof(program));
         constexpr uint32_t value = 37;
         std::memcpy(ram.data() + 0x100, &value, sizeof(value));
-        machine.cpu.icache.insert(pc, instruction_line.data(), simrv::memory::MesiState::Exclusive);
+        machine.cpu.icache.insert(simrv::xlen::PhysAddr{pc}, instruction_line.data(),
+                                  simrv::memory::MesiState::Exclusive);
         machine.cpu.state().pc = pc;
 
         uint32_t cycles = 0;
@@ -2139,7 +2318,8 @@ void test_cycle_kernel_golden_fence_serialization() {
         std::array<simrv::xlen::Byte, simrv::cache::ICache::kLineBytes> line{};
         std::memcpy(line.data(), program.data(), sizeof(program));
         std::memcpy(ram.data(), program.data(), sizeof(program));
-        machine.cpu.icache.insert(pc, line.data(), simrv::memory::MesiState::Exclusive);
+        machine.cpu.icache.insert(simrv::xlen::PhysAddr{pc}, line.data(),
+                                  simrv::memory::MesiState::Exclusive);
         machine.cpu.state().pc = pc;
 
         uint32_t cycles = 0;
@@ -2259,7 +2439,8 @@ void test_cycle_kernel_golden_multicycle_execute() {
         std::array<simrv::xlen::Byte, simrv::cache::ICache::kLineBytes> line{};
         std::memcpy(line.data(), program.data(), sizeof(program));
         std::memcpy(ram.data(), program.data(), sizeof(program));
-        machine.cpu.icache.insert(pc, line.data(), simrv::memory::MesiState::Exclusive);
+        machine.cpu.icache.insert(simrv::xlen::PhysAddr{pc}, line.data(),
+                                  simrv::memory::MesiState::Exclusive);
         machine.cpu.state().pc = pc;
 
         uint32_t cycles = 0;
@@ -2305,7 +2486,8 @@ void test_cycle_kernel_golden_branch_recovery() {
         std::array<simrv::xlen::Byte, simrv::cache::ICache::kLineBytes> line{};
         std::memcpy(line.data(), program.data(), sizeof(program));
         std::memcpy(ram.data(), program.data(), sizeof(program));
-        machine.cpu.icache.insert(pc, line.data(), simrv::memory::MesiState::Exclusive);
+        machine.cpu.icache.insert(simrv::xlen::PhysAddr{pc}, line.data(),
+                                  simrv::memory::MesiState::Exclusive);
         machine.cpu.state().pc = pc;
 
         uint32_t cycles = 0;
@@ -2397,7 +2579,8 @@ void test_cycle_kernel_golden_precise_trap() {
         std::array<simrv::xlen::Byte, simrv::cache::ICache::kLineBytes> line{};
         std::memcpy(line.data(), program.data(), sizeof(program));
         std::memcpy(ram.data(), program.data(), sizeof(program));
-        machine.cpu.icache.insert(pc, line.data(), simrv::memory::MesiState::Exclusive);
+        machine.cpu.icache.insert(simrv::xlen::PhysAddr{pc}, line.data(),
+                                  simrv::memory::MesiState::Exclusive);
         machine.cpu.state().pc = pc;
         machine.cpu.state().mtvec = handler;
 
@@ -2447,7 +2630,8 @@ void test_cycle_kernel_golden_interrupt_boundary() {
         std::array<simrv::xlen::Byte, simrv::cache::ICache::kLineBytes> line{};
         std::memcpy(line.data(), program.data(), sizeof(program));
         std::memcpy(ram.data(), program.data(), sizeof(program));
-        machine.cpu.icache.insert(pc, line.data(), simrv::memory::MesiState::Exclusive);
+        machine.cpu.icache.insert(simrv::xlen::PhysAddr{pc}, line.data(),
+                                  simrv::memory::MesiState::Exclusive);
         machine.cpu.state().pc = pc;
         machine.cpu.state().mtvec = handler;
         machine.cpu.state().mstatus |= simrv::core::MstatusBit::Mie;
@@ -2515,7 +2699,8 @@ void test_cycle_policy_architectural_equivalence() {
         std::array<simrv::xlen::Byte, simrv::cache::ICache::kLineBytes> instruction_line{};
         std::memcpy(instruction_line.data(), program.data(), sizeof(program));
         std::memcpy(ram.data(), program.data(), sizeof(program));
-        machine.cpu.icache.insert(pc, instruction_line.data(), simrv::memory::MesiState::Exclusive);
+        machine.cpu.icache.insert(simrv::xlen::PhysAddr{pc}, instruction_line.data(),
+                                  simrv::memory::MesiState::Exclusive);
         machine.cpu.state().pc = pc;
 
         uint32_t guard = 0;
@@ -2525,9 +2710,8 @@ void test_cycle_policy_architectural_equivalence() {
         }
         simrv::xlen::Word memory_value = 0;
         if (simrv::core::is_cycle_engine(engine)) {
-            check(machine.cpu.dcache.read(
-                data_address, memory_value,
-                static_cast<simrv::xlen::Instruction>(simrv::isa::Funct3::Lw)));
+            check(machine.cpu.dcache.read(simrv::xlen::PhysAddr{data_address}, memory_value,
+                                          simrv::isa::Funct3::Lw));
         } else {
             std::memcpy(&memory_value, ram.data() + 0x100, sizeof(memory_value));
         }
@@ -2626,10 +2810,13 @@ void test_dynamic_mode_switching_cache_behavior() {
     machine.switch_execution_engine(simrv::core::ExecutionEngine::CycleObservable);
     check(machine.runtime_profile.is_cycle_mode());
     check(machine.cpu.pipeline_sim.config.record_snapshots);
-    check(machine.cpu.icache.line_state(pc) == simrv::memory::MesiState::Shared);
-    check(machine.cpu.dcache.line_state(data_address) == simrv::memory::MesiState::Shared);
+    check(machine.cpu.icache.line_state(simrv::xlen::PhysAddr{pc}) ==
+          simrv::memory::MesiState::Shared);
+    check(machine.cpu.dcache.line_state(simrv::xlen::PhysAddr{data_address}) ==
+          simrv::memory::MesiState::Shared);
     const auto prewarmed_data_dir =
-        machine.memory().system_bus().coherence_hub().get_directory_state(data_address);
+        machine.memory().system_bus().coherence_hub().get_directory_state(
+            simrv::xlen::PhysAddr{data_address});
     check(prewarmed_data_dir.state == simrv::memory::MesiState::Shared);
     check(prewarmed_data_dir.sharers_mask == 1);
 
@@ -2645,8 +2832,8 @@ void test_dynamic_mode_switching_cache_behavior() {
     check(machine.cpu.dcache.hit_count() + machine.cpu.dcache.miss_count() > 0);
 
     simrv::xlen::Word mem_val = 0;
-    check(machine.cpu.dcache.read(data_address, mem_val,
-                                  static_cast<simrv::xlen::Instruction>(simrv::isa::Funct3::Lw)));
+    check(machine.cpu.dcache.read(simrv::xlen::PhysAddr{data_address}, mem_val,
+                                  simrv::isa::Funct3::Lw));
     check(mem_val == 42);
 
     // Switch dynamically back to InstructionFast without reload
@@ -3272,12 +3459,14 @@ void test_sbi_multihart_rfence() {
     // Insert TLB entry in Hart 1 and Hart 2
     constexpr simrv::xlen::Address vaddr = 0x80004000;
     constexpr simrv::xlen::Address paddr = 0x80008000;
-    machine.hart(1).tlb.insert_inst_r(vaddr, paddr, 0, simrv::xlen::PrivilegeLevel::Supervisor);
-    machine.hart(2).tlb.insert_inst_r(vaddr, paddr, 0, simrv::xlen::PrivilegeLevel::Supervisor);
-    check(machine.hart(1).tlb.lookup_inst_r(vaddr, 0, simrv::xlen::PrivilegeLevel::Supervisor) !=
-          nullptr);
-    check(machine.hart(2).tlb.lookup_inst_r(vaddr, 0, simrv::xlen::PrivilegeLevel::Supervisor) !=
-          nullptr);
+    machine.hart(1).tlb.insert_inst_r(simrv::xlen::VirtAddr{vaddr}, simrv::xlen::PhysAddr{paddr}, 0,
+                                      simrv::xlen::PrivilegeLevel::Supervisor);
+    machine.hart(2).tlb.insert_inst_r(simrv::xlen::VirtAddr{vaddr}, simrv::xlen::PhysAddr{paddr}, 0,
+                                      simrv::xlen::PrivilegeLevel::Supervisor);
+    check(machine.hart(1).tlb.lookup_inst_r(simrv::xlen::VirtAddr{vaddr}, 0,
+                                            simrv::xlen::PrivilegeLevel::Supervisor) != nullptr);
+    check(machine.hart(2).tlb.lookup_inst_r(simrv::xlen::VirtAddr{vaddr}, 0,
+                                            simrv::xlen::PrivilegeLevel::Supervisor) != nullptr);
 
     // Broadcast RemoteSfenceVma from Hart 0 targeting Hart 1 and Hart 2 (mask = 0b110, base = 0)
     machine.cpu.state().regs.write(simrv::xlen::RegId::A0, 0b110);       // hart_mask
@@ -3288,10 +3477,10 @@ void test_sbi_multihart_rfence() {
     check(machine.cpu.state().regs.read(simrv::xlen::RegId::A0) == 0);  // SbiError::Success
 
     // Verify secondary harts had TLB flushed
-    check(machine.hart(1).tlb.lookup_inst_r(vaddr, 0, simrv::xlen::PrivilegeLevel::Supervisor) ==
-          nullptr);
-    check(machine.hart(2).tlb.lookup_inst_r(vaddr, 0, simrv::xlen::PrivilegeLevel::Supervisor) ==
-          nullptr);
+    check(machine.hart(1).tlb.lookup_inst_r(simrv::xlen::VirtAddr{vaddr}, 0,
+                                            simrv::xlen::PrivilegeLevel::Supervisor) == nullptr);
+    check(machine.hart(2).tlb.lookup_inst_r(simrv::xlen::VirtAddr{vaddr}, 0,
+                                            simrv::xlen::PrivilegeLevel::Supervisor) == nullptr);
 
     // Test RemoteFenceI with base == -1 (all harts broadcast)
     machine.cpu.state().regs.write(simrv::xlen::RegId::A0, 0);  // ignored when base is -1
@@ -3378,8 +3567,10 @@ void test_ia_multihart_lr_sc_coherence() {
                                               physical_page, host_page);
         hart_ref.soft_tlb_write[tlb_index].set(vpn, 0, kPrivSupervisor, hart_ref.soft_tlb_epoch,
                                                physical_page, host_page);
-        hart_ref.tlb.insert_data_r(vaddr, physical_page, 0, kPrivSupervisor);
-        hart_ref.tlb.insert_data_w(vaddr, physical_page, 0, kPrivSupervisor);
+        hart_ref.tlb.insert_data_r(simrv::xlen::VirtAddr{vaddr},
+                                   simrv::xlen::PhysAddr{physical_page}, 0, kPrivSupervisor);
+        hart_ref.tlb.insert_data_w(simrv::xlen::VirtAddr{vaddr},
+                                   simrv::xlen::PhysAddr{physical_page}, 0, kPrivSupervisor);
     };
 
     // 1. Hart 0 executes LR.W
@@ -4142,6 +4333,8 @@ int main(int argc, char** argv) {
     test_machine_reset_clears_coherence_state_after_cache_reset();
     test_cross_line_dma_write_invalidates_only_touched_lines();
     test_profiled_shared_cache_clusters();
+    test_cbo_zero_invalidates_cached_copies_and_reservations();
+    test_dma_write_invalidates_reservations_in_all_modes();
     test_tilelink_c_acquire_perm_upgrade();
     test_tilelink_c_prefetch_intent();
     test_global_cycle_smp_pipeline_ordering();

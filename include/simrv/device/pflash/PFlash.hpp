@@ -46,7 +46,9 @@ class PFlash final : public memory::MmioDevice {
     ~PFlash() override;
 
     [[nodiscard]] auto name() const -> const char* override { return name_.c_str(); }
-    [[nodiscard]] auto base_address() const -> simrv::xlen::Address override { return base_; }
+    [[nodiscard]] auto base_address() const -> simrv::xlen::PhysAddr override {
+        return simrv::xlen::PhysAddr{base_};
+    }
     [[nodiscard]] auto size() const -> simrv::xlen::Address override { return size_; }
 
     [[nodiscard]] auto read8(simrv::memory::MmioOffset offset) -> simrv::memory::MmioData8 override;

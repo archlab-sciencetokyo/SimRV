@@ -76,8 +76,8 @@ auto InspectorPane::render_tlb_stats(const simrv::core::CPU& cpu, int logical_ro
                 active_entries.push_back(RenderTlbEntry{.type = "ITLB",
                                                         .set = set,
                                                         .way = way,
-                                                        .vaddr = ie.v_addr,
-                                                        .paddr = ie.p_addr,
+                                                        .vaddr = ie.v_addr.raw(),
+                                                        .paddr = ie.p_addr.raw(),
                                                         .asid = ie.asid,
                                                         .priv_str = priv_to_str(ie.priv)});
             }
@@ -86,8 +86,8 @@ auto InspectorPane::render_tlb_stats(const simrv::core::CPU& cpu, int logical_ro
                 active_entries.push_back(RenderTlbEntry{.type = "DTLB-R",
                                                         .set = set,
                                                         .way = way,
-                                                        .vaddr = dr.v_addr,
-                                                        .paddr = dr.p_addr,
+                                                        .vaddr = dr.v_addr.raw(),
+                                                        .paddr = dr.p_addr.raw(),
                                                         .asid = dr.asid,
                                                         .priv_str = priv_to_str(dr.priv)});
             }
@@ -96,8 +96,8 @@ auto InspectorPane::render_tlb_stats(const simrv::core::CPU& cpu, int logical_ro
                 active_entries.push_back(RenderTlbEntry{.type = "DTLB-W",
                                                         .set = set,
                                                         .way = way,
-                                                        .vaddr = dw.v_addr,
-                                                        .paddr = dw.p_addr,
+                                                        .vaddr = dw.v_addr.raw(),
+                                                        .paddr = dw.p_addr.raw(),
                                                         .asid = dw.asid,
                                                         .priv_str = priv_to_str(dw.priv)});
             }
