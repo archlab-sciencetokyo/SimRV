@@ -80,6 +80,12 @@ instructions with three warmups and ten measured runs per binary on CPU 0. Media
 separate batches and do not establish a speedup. An earlier run overlapped an RV32 link and had
 CV above 10%, so it was discarded.
 
+For the page-walker address changes, an Alpine Linux boot without a disk used a 25 million
+instruction limit, three warmups and ten interleaved runs on one pinned x86 CPU. Median times
+were 0.577742 seconds (0.82% CV) before and 0.578195 seconds (0.63% CV) after. The before binary
+also predates the preceding page-walk fault-state cleanup. Executable sizes were 42,206,752 and
+42,206,712 bytes. The 0.08% difference does not establish a performance change.
+
 The branch result is too noisy to establish a speedup. The MMIO loop retained the same bus and
 cache counts. The initial baseline executable is no longer available, so an identical-binary
 comparison against the final tree remains outstanding. ARM hardware and usable host performance

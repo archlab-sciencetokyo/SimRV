@@ -172,6 +172,8 @@ after the new engine is installed, so no worker remains parked on the previous e
 The G-stage page-table walker accepts `GuestPhysAddr`, which denotes a VS-stage result. It returns
 a host `PhysAddr`; guest fault addresses retain the guest-physical type until conversion to an
 architectural scalar value for trap reporting.
+VS-stage table roots and next-level pointers also remain `GuestPhysAddr` until the G-stage walk
+returns; the page-directory cache holds host-physical table addresses only for non-virtualized walks.
 
 Compact execution keeps integer register operands as `RegId` until indexing the register file;
 its on-disk and plugin interfaces are not affected by that internal representation.

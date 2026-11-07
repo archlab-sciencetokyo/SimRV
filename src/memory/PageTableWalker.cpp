@@ -60,16 +60,14 @@ void PageTableWalker::accept_write(PageWalkState& state) noexcept {
     }
 }
 
-void PageTableWalker::select_next_pte(PageWalkState& state,
-                                      simrv::xlen::PhysAddr table_address) const {
+void PageTableWalker::select_next_pte(PageWalkState& state, GuestPhysAddr table_address) const {
     const simrv::xlen::Word vpn_mask =
         (static_cast<simrv::xlen::Word>(1) << state.vpn_bits_per_level) - 1;
     const simrv::xlen::Word vpn =
         (state.virtual_address.raw() >>
          (12 + state.level * static_cast<int>(state.vpn_bits_per_level))) &
         vpn_mask;
-    const auto pte_address = table_address + vpn * state.pte_size;
-    state.pte_guest_address = GuestPhysAddr{pte_address.raw()};
+    state.pte_guest_address = GuestPhysAddr{table_address.raw() + vpn * state.pte_size};
     if (state.guest_stage_enabled) {
         auto translated =
             walk_guest_physical(state.pte_guest_address, PteAccess::Read, state.hgatp, state.xlen,
@@ -95,7 +93,7 @@ void PageTableWalker::select_next_pte(PageWalkState& state,
         }
         state.pte_address = translated->physical_address;
     } else {
-        state.pte_address = pte_address;
+        state.pte_address = simrv::xlen::PhysAddr{state.pte_guest_address.raw()};
     }
     // Implicit page table accesses evaluate under Supervisor privilege per RISC-V Privileged spec
     if (!pte_access_valid(state.pte_address, state.pte_size) ||
@@ -160,7 +158,7 @@ auto PageTableWalker::begin_walk(simrv::xlen::VirtAddr v_addr, PteAccess access,
         return state;
     }
     state.level = levels - 1;
-    const simrv::xlen::PhysAddr root = simrv::xlen::PhysAddr{
+    const GuestPhysAddr root{
         static_cast<simrv::xlen::Word>(simrv::xlen::satp_root_ppn(satp, xlen) << 12)};
     state.satp_root = root.raw();
 
@@ -172,7 +170,7 @@ auto PageTableWalker::begin_walk(simrv::xlen::VirtAddr v_addr, PteAccess access,
         if (entry.epoch == pdc_epoch_ && entry.satp_root == state.satp_root &&
             entry.vpn_prefix == vpn_prefix) {
             state.level = 0;
-            select_next_pte(state, entry.table_address);
+            select_next_pte(state, GuestPhysAddr{entry.table_address.raw()});
             return state;
         }
     }
@@ -217,7 +215,7 @@ void PageTableWalker::accept_pte(PageWalkState& state, simrv::xlen::Word pte) co
         const simrv::xlen::Word ppn_mask =
             state.pte_size == 8 ? static_cast<simrv::xlen::Word>((uint64_t{1} << 44) - 1)
                                 : static_cast<simrv::xlen::Word>((uint32_t{1} << 22) - 1);
-        const simrv::xlen::PhysAddr next_table = simrv::xlen::PhysAddr{
+        const GuestPhysAddr next_table{
             static_cast<simrv::xlen::Word>(((pte >> kPteShift) & ppn_mask) << 12)};
 
         // Cache the Level-0 table address in the Page Directory Cache for Sv39 walks
@@ -227,7 +225,7 @@ void PageTableWalker::accept_pte(PageWalkState& state, simrv::xlen::Word pte) co
             const size_t pdc_idx = (vpn_prefix ^ (vpn_prefix >> 8)) & (kPdcSize - 1);
             pdc_[pdc_idx] = PdcEntry{.satp_root = state.satp_root,
                                      .vpn_prefix = vpn_prefix,
-                                     .table_address = next_table,
+                                     .table_address = simrv::xlen::PhysAddr{next_table.raw()},
                                      .epoch = pdc_epoch_};
         }
 

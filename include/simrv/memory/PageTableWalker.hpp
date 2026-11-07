@@ -297,7 +297,7 @@ class PageTableWalker {
                                                 simrv::xlen::PrivilegeLevel priv,
                                                 simrv::xlen::CsrValue mstatus) const noexcept
         -> bool;
-    void select_next_pte(PageWalkState& state, simrv::xlen::PhysAddr table_address) const;
+    void select_next_pte(PageWalkState& state, GuestPhysAddr table_address) const;
 
     static constexpr simrv::xlen::Word kPteShift = 10;
 };
