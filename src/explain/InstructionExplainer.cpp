@@ -589,8 +589,8 @@ auto build_explanation_impl(uint32_t raw_inst, simrv::xlen::Address pc, unsigned
         if (mem.effective_paddr.has_value()) {
             const auto pmp_access =
                 is_write ? simrv::core::PmpAccessType::Write : simrv::core::PmpAccessType::Read;
-            mem.pmp_permitted = simrv::core::pmp::check_access(*st, *mem.effective_paddr,
-                                                               mem.access_bytes, pmp_access);
+            mem.pmp_permitted = simrv::core::pmp::check_access(
+                *st, simrv::xlen::PhysAddr{*mem.effective_paddr}, mem.access_bytes, pmp_access);
             if (mem.pmp_permitted && machine != nullptr && mem.access_bytes <= 8U &&
                 machine->ram_view().contains(*mem.effective_paddr, mem.access_bytes)) {
                 uint64_t raw_mem = 0;
@@ -903,7 +903,7 @@ auto explain_at_pc(const simrv::core::Machine& machine, size_t hart_index,
         if (!paddr.has_value()) {
             return std::nullopt;
         }
-        if (!simrv::core::pmp::check_access(st, *paddr, sizeof(uint16_t),
+        if (!simrv::core::pmp::check_access(st, simrv::xlen::PhysAddr{*paddr}, sizeof(uint16_t),
                                             simrv::core::PmpAccessType::Execute)) {
             return std::nullopt;
         }

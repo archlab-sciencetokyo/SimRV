@@ -57,8 +57,9 @@ namespace {
         if (simrv::compiler::likely(machine.memory_geometry().contains(base_addr, total_bytes) &&
                                     machine.ram_view().contains(base_addr, total_bytes))) {
             const auto acc_type = is_write ? core::PmpAccessType::Write : core::PmpAccessType::Read;
-            if (simrv::compiler::likely(core::pmp::check_access(cpu.state(), base_addr, total_bytes,
-                                                                acc_type, kPrivMachine))) {
+            if (simrv::compiler::likely(
+                    core::pmp::check_access(cpu.state(), simrv::xlen::PhysAddr{base_addr},
+                                            total_bytes, acc_type, kPrivMachine))) {
                 if (is_write &&
                     simrv::compiler::unlikely(is_tohost_addr_range(cpu, base_addr, total_bytes))) {
                     return nullptr;
@@ -92,7 +93,8 @@ namespace {
                 const auto paddr = physical.raw();
                 if (simrv::compiler::unlikely(cpu.state().num_active_pmp > 0) &&
                     simrv::compiler::unlikely(!core::pmp::check_access(
-                        cpu.state(), paddr, total_bytes, core::PmpAccessType::Write, eff_priv))) {
+                        cpu.state(), simrv::xlen::PhysAddr{paddr}, total_bytes,
+                        core::PmpAccessType::Write, eff_priv))) {
                     return nullptr;
                 }
                 if (simrv::compiler::likely(entry.has_host_ptr())) {
@@ -110,7 +112,8 @@ namespace {
                 const simrv::xlen::Address paddr = (entry.paddr_base + page_offset).raw();
                 if (simrv::compiler::unlikely(cpu.state().num_active_pmp > 0) &&
                     simrv::compiler::unlikely(!core::pmp::check_access(
-                        cpu.state(), paddr, total_bytes, core::PmpAccessType::Read, eff_priv))) {
+                        cpu.state(), simrv::xlen::PhysAddr{paddr}, total_bytes,
+                        core::PmpAccessType::Read, eff_priv))) {
                     return nullptr;
                 }
                 if (simrv::compiler::likely(entry.has_host_ptr())) {
@@ -122,9 +125,9 @@ namespace {
         if (simrv::compiler::likely(machine.memory_geometry().contains(lookup_addr, total_bytes) &&
                                     machine.ram_view().contains(lookup_addr, total_bytes))) {
             const auto acc_type = is_write ? core::PmpAccessType::Write : core::PmpAccessType::Read;
-            if (simrv::compiler::likely(core::pmp::check_access(cpu.state(), lookup_addr,
-                                                                total_bytes, acc_type,
-                                                                cpu.effective_data_privilege()))) {
+            if (simrv::compiler::likely(core::pmp::check_access(
+                    cpu.state(), simrv::xlen::PhysAddr{lookup_addr}, total_bytes, acc_type,
+                    cpu.effective_data_privilege()))) {
                 if (is_write && simrv::compiler::unlikely(
                                     is_tohost_addr_range(cpu, lookup_addr, total_bytes))) {
                     return nullptr;

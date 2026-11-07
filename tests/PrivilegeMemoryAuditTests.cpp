@@ -43,14 +43,18 @@ void test_pmp_rv32_2gb_napot_wrap() {
 
     // In RV32, base (0x80000000) + size (0x80000000) would wrap to 0 if evaluated as uint32_t.
     // With 64-bit bounds, it covers [0x80000000, 0x100000000).
-    expect(simrv::core::pmp::check_access(state, 0x80000000, 4, simrv::core::PmpAccessType::Read),
+    expect(simrv::core::pmp::check_access(state, simrv::xlen::PhysAddr{0x80000000}, 4,
+                                          simrv::core::PmpAccessType::Read),
            "PMP NAPOT 2GB: Read at base (0x80000000) matches and succeeds");
-    expect(simrv::core::pmp::check_access(state, 0x80001000, 4, simrv::core::PmpAccessType::Write),
+    expect(simrv::core::pmp::check_access(state, simrv::xlen::PhysAddr{0x80001000}, 4,
+                                          simrv::core::PmpAccessType::Write),
            "PMP NAPOT 2GB: Write in middle of 2GB range succeeds");
     expect(
-        simrv::core::pmp::check_access(state, 0xFFFFFFFC, 4, simrv::core::PmpAccessType::Execute),
+        simrv::core::pmp::check_access(state, simrv::xlen::PhysAddr{0xFFFFFFFC}, 4,
+                                       simrv::core::PmpAccessType::Execute),
         "PMP NAPOT 2GB: Execute at end of 32-bit address space (0xFFFFFFFC) succeeds without wrap");
-    expect(!simrv::core::pmp::check_access(state, 0x7FFFFFFC, 4, simrv::core::PmpAccessType::Read),
+    expect(!simrv::core::pmp::check_access(state, simrv::xlen::PhysAddr{0x7FFFFFFC}, 4,
+                                           simrv::core::PmpAccessType::Read),
            "PMP NAPOT 2GB: Access outside 2GB region (0x7FFFFFFC) is denied in S-mode");
 }
 
@@ -68,14 +72,16 @@ void test_pmp_mprv_only_in_m_mode() {
 
     // Since state.priv is Supervisor (not Machine), MPRV must be ignored.
     // The access should evaluate as Supervisor (permitted) rather than MPP (User, denied).
-    expect(simrv::core::pmp::check_access(state, 0x80001000, 4, simrv::core::PmpAccessType::Read),
+    expect(simrv::core::pmp::check_access(state, simrv::xlen::PhysAddr{0x80001000}, 4,
+                                          simrv::core::PmpAccessType::Read),
            "MPRV is ignored outside Machine mode; S-mode access uses S-mode privilege");
 
     // Switch to Machine mode with MPRV=1, MPP=User:
     state.priv = simrv::xlen::PrivilegeLevel::Machine;
     // With MPRV=1 in Machine mode, data access effective privilege becomes MPP (User).
     // User mode access outside permitted regions (or without user permission) must fail:
-    expect(!simrv::core::pmp::check_access(state, 0x80001000, 4, simrv::core::PmpAccessType::Write),
+    expect(!simrv::core::pmp::check_access(state, simrv::xlen::PhysAddr{0x80001000}, 4,
+                                           simrv::core::PmpAccessType::Write),
            "MPRV in M-mode enforces MPP (User) and denies ungranted write");
 }
 
@@ -221,13 +227,15 @@ void test_tlb_global_mappings() {
            "ASID-filtered TLB flush preserves global entry");
 
     // 3. SFENCE.VMA with vaddr and ASID=1 must NOT flush global entries
-    tlb.flush_selective(simrv::core::TlbFlushFilter{.vaddr = simrv::xlen::VirtAddr{kVaddr}, .asid = kAsid1});
+    tlb.flush_selective(
+        simrv::core::TlbFlushFilter{.vaddr = simrv::xlen::VirtAddr{kVaddr}, .asid = kAsid1});
     expect(tlb.lookup_data_r(simrv::xlen::VirtAddr{kVaddr}, kAsid2,
                              simrv::xlen::PrivilegeLevel::Supervisor) != nullptr,
            "Page-specific ASID-filtered TLB flush preserves global entry");
 
     // 4. SFENCE.VMA with vaddr and NO ASID flushes global entry
-    tlb.flush_selective(simrv::core::TlbFlushFilter{.vaddr = simrv::xlen::VirtAddr{kVaddr}, .asid = std::nullopt});
+    tlb.flush_selective(
+        simrv::core::TlbFlushFilter{.vaddr = simrv::xlen::VirtAddr{kVaddr}, .asid = std::nullopt});
     expect(tlb.lookup_data_r(simrv::xlen::VirtAddr{kVaddr}, kAsid2,
                              simrv::xlen::PrivilegeLevel::Supervisor) == nullptr,
            "Global vaddr flush invalidates global TLB entry");
@@ -259,7 +267,8 @@ void test_soft_tlb_global_mappings() {
            "ASID-filtered soft TLB flush preserves global entry");
 
     // 3. Page-specific ASID flush preserves global entry
-    cpu.soft_tlb_flush_selective(simrv::core::TlbFlushFilter{.vaddr = simrv::xlen::VirtAddr{kVaddr}, .asid = kAsid1});
+    cpu.soft_tlb_flush_selective(
+        simrv::core::TlbFlushFilter{.vaddr = simrv::xlen::VirtAddr{kVaddr}, .asid = kAsid1});
     expect(cpu.soft_tlb_read[idx].matches(kVpn, kAsid2, simrv::xlen::PrivilegeLevel::Supervisor,
                                           cpu.soft_tlb_epoch),
            "Page-specific ASID-filtered soft TLB flush preserves global entry");

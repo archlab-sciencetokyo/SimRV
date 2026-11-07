@@ -223,8 +223,9 @@ auto MemoryAccess::target_read(MemorySubsystem& mem, core::CPU& cpu, simrv::xlen
                                                        ? (v_addr.raw() & 0xFFFFFFFFULL)
                                                        : v_addr.raw();
             if (simrv::compiler::likely(geometry.contains(eff_vaddr, size_bytes))) {
-                if (simrv::compiler::unlikely(!core::pmp::check_access(
-                        cpu.state(), eff_vaddr, size_bytes, pmp_req, eff_priv))) {
+                if (simrv::compiler::unlikely(
+                        !core::pmp::check_access(cpu.state(), simrv::xlen::PhysAddr{eff_vaddr},
+                                                 size_bytes, pmp_req, eff_priv))) {
                     cpu.active_context().pending_exception =
                         (is_amo && !is_lr) ? ExceptionCode::FaultStore : ExceptionCode::FaultLoad;
                     cpu.active_context().pending_tval = v_addr.raw();
@@ -245,8 +246,9 @@ auto MemoryAccess::target_read(MemorySubsystem& mem, core::CPU& cpu, simrv::xlen
                     return simrv::memory::host_read_fast(entry.host_ptr(v_addr.raw()), funct3);
                 }
                 if (simrv::compiler::likely(geometry.contains(paddr, size_bytes))) {
-                    if (simrv::compiler::unlikely(!core::pmp::check_access(
-                            cpu.state(), paddr, size_bytes, pmp_req, eff_priv))) {
+                    if (simrv::compiler::unlikely(
+                            !core::pmp::check_access(cpu.state(), simrv::xlen::PhysAddr{paddr},
+                                                     size_bytes, pmp_req, eff_priv))) {
                         cpu.active_context().pending_exception = (is_amo && !is_lr)
                                                                      ? ExceptionCode::FaultStore
                                                                      : ExceptionCode::FaultLoad;
@@ -489,8 +491,8 @@ auto MemoryAccess::target_read(MemorySubsystem& mem, core::CPU& cpu, simrv::xlen
         const auto pmp_slow_req = (is_amo && !is_lr)
                                       ? (core::PmpAccessType::Read | core::PmpAccessType::Write)
                                       : core::PmpAccessType::Read;
-        if (simrv::compiler::unlikely(!core::pmp::check_access(cpu.state(), p_addr, size_bytes,
-                                                               pmp_slow_req, eff_priv))) {
+        if (simrv::compiler::unlikely(!core::pmp::check_access(
+                cpu.state(), simrv::xlen::PhysAddr{p_addr}, size_bytes, pmp_slow_req, eff_priv))) {
             cpu.active_context().pending_exception =
                 (is_amo && !is_lr) ? ExceptionCode::FaultStore : ExceptionCode::FaultLoad;
             cpu.active_context().pending_tval = v_addr.raw();
@@ -510,8 +512,8 @@ auto MemoryAccess::target_read(MemorySubsystem& mem, core::CPU& cpu, simrv::xlen
             simrv::xlen::Byte* host_base =
                 (cpu.machine_->ram_view().contains(ppage, 4096) &&
                  (cpu.state().num_active_pmp == 0 ||
-                  core::pmp::check_access(cpu.state(), ppage, 4096, core::PmpAccessType::Read,
-                                          eff_priv)))
+                  core::pmp::check_access(cpu.state(), simrv::xlen::PhysAddr{ppage}, 4096,
+                                          core::PmpAccessType::Read, eff_priv)))
                     ? cpu.machine_->ram_view().unchecked_ptr(ppage)
                     : nullptr;
             cpu.soft_tlb_read[tlb_idx].set(
@@ -623,7 +625,8 @@ void MemoryAccess::target_write(MemorySubsystem& mem, core::CPU& cpu, simrv::xle
         if (!is_sc || ctx.sc_reservation_checked) return true;
 
         ctx.sc_reservation_checked = true;
-        bool success = mem.reservation_table().check_and_clear_reservation(cpu.hart_id(), simrv::xlen::PhysAddr{addr});
+        bool success = mem.reservation_table().check_and_clear_reservation(
+            cpu.hart_id(), simrv::xlen::PhysAddr{addr});
         if (success && cpu.machine_->lockstep() && cpu.machine_->lockstep()->is_running()) {
             const auto lockstep_success = cpu.machine_->lockstep()->determine_sc_success();
             if (lockstep_success.has_value() && !lockstep_success.value()) success = false;
@@ -918,7 +921,8 @@ void MemoryAccess::target_write(MemorySubsystem& mem, core::CPU& cpu, simrv::xle
                     return;
                 }
                 if (simrv::compiler::unlikely(!core::pmp::check_access(
-                        cpu.state(), paddr, size_bytes, core::PmpAccessType::Write, eff_priv))) {
+                        cpu.state(), simrv::xlen::PhysAddr{paddr}, size_bytes,
+                        core::PmpAccessType::Write, eff_priv))) {
                     cpu.active_context().pending_exception = ExceptionCode::FaultStore;
                     cpu.active_context().pending_tval = v_addr.raw();
                     return;
@@ -945,8 +949,9 @@ void MemoryAccess::target_write(MemorySubsystem& mem, core::CPU& cpu, simrv::xle
     if (simrv::compiler::likely(!cpu.active_context().pending_exception.has_value()) &&
         simrv::compiler::likely(eff_priv == kPrivMachine || !translation_enabled) &&
         simrv::compiler::likely(geometry.contains(eff_vaddr, size_bytes))) {
-        if (simrv::compiler::unlikely(!core::pmp::check_access(
-                cpu.state(), eff_vaddr, size_bytes, core::PmpAccessType::Write, eff_priv))) {
+        if (simrv::compiler::unlikely(
+                !core::pmp::check_access(cpu.state(), simrv::xlen::PhysAddr{eff_vaddr}, size_bytes,
+                                         core::PmpAccessType::Write, eff_priv))) {
             cpu.active_context().pending_exception = ExceptionCode::FaultStore;
             cpu.active_context().pending_tval = v_addr.raw();
             return;
@@ -995,8 +1000,9 @@ void MemoryAccess::target_write(MemorySubsystem& mem, core::CPU& cpu, simrv::xle
     }
 
     if (!cpu.active_context().pending_exception.has_value()) {
-        if (simrv::compiler::unlikely(!core::pmp::check_access(
-                cpu.state(), p_addr, size_bytes, core::PmpAccessType::Write, eff_priv))) {
+        if (simrv::compiler::unlikely(
+                !core::pmp::check_access(cpu.state(), simrv::xlen::PhysAddr{p_addr}, size_bytes,
+                                         core::PmpAccessType::Write, eff_priv))) {
             cpu.active_context().pending_exception = ExceptionCode::FaultStore;
             cpu.active_context().pending_tval = v_addr.raw();
             return;
@@ -1023,8 +1029,8 @@ void MemoryAccess::target_write(MemorySubsystem& mem, core::CPU& cpu, simrv::xle
             simrv::xlen::Byte* host_base =
                 (cpu.machine_->ram_view().contains(ppage, 4096) &&
                  (cpu.state().num_active_pmp == 0 ||
-                  core::pmp::check_access(cpu.state(), ppage, 4096, core::PmpAccessType::Write,
-                                          eff_priv)))
+                  core::pmp::check_access(cpu.state(), simrv::xlen::PhysAddr{ppage}, 4096,
+                                          core::PmpAccessType::Write, eff_priv)))
                     ? cpu.machine_->ram_view().unchecked_ptr(ppage)
                     : nullptr;
             cpu.soft_tlb_write[tlb_idx].set(
@@ -1233,7 +1239,8 @@ void MemoryAccess::execute_cmo(MemorySubsystem& mem, core::CPU& cpu, simrv::xlen
     // PMP verification
     const core::PmpAccessType pmp_access =
         op == isa::OperationId::CBO_ZERO ? core::PmpAccessType::Write : core::PmpAccessType::Read;
-    if (!core::pmp::check_access(cpu.state(), paddr, kLineSize, pmp_access, eff_priv)) {
+    if (!core::pmp::check_access(cpu.state(), simrv::xlen::PhysAddr{paddr}, kLineSize, pmp_access,
+                                 eff_priv)) {
         cpu.active_context().pending_exception = ExceptionCode::FaultStore;
         cpu.active_context().pending_tval = vaddr;
         return;

@@ -143,6 +143,8 @@ for the measurements and their limitations.
 MMIO routing and DMA APIs accept `simrv::xlen::PhysAddr`. C++ callers must explicitly construct
 physical addresses from platform configuration or translate virtual addresses before routing or
 DMA. Loaded segment records used for cache prewarming also require `PhysAddr`.
+PMP access checks require `PhysAddr`; callers must translate virtual addresses before protection
+checks, including page-table accesses.
 `TileLinkNode::base_address()` returns `PhysAddr`, and `contains()` takes `PhysAddr`; C++ device
 implementations must update their overrides. An override of `contains()` should also declare
 `using TileLinkNode::contains;` so the base class's deleted raw-integer overload stays visible. The C

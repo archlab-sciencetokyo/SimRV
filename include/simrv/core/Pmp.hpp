@@ -154,7 +154,7 @@ struct PmpConfigEntry {
 }
 
 SIMRV_ALWAYS_INLINE auto check_access(
-    const ArchState& state, simrv::xlen::Address paddr, size_t size, PmpAccessType access,
+    const ArchState& state, simrv::xlen::PhysAddr paddr, size_t size, PmpAccessType access,
     std::optional<simrv::xlen::PrivilegeLevel> priv_override = std::nullopt) -> bool {
     if (simrv::compiler::likely(state.num_active_pmp == 0)) {
         return true;
@@ -172,7 +172,7 @@ SIMRV_ALWAYS_INLINE auto check_access(
         return true;
     }
 
-    const auto req_start = static_cast<uint64_t>(paddr);
+    const auto req_start = static_cast<uint64_t>(paddr.raw());
     if (size == 0 || size > UINT64_MAX - req_start) {
         return false;
     }
@@ -207,11 +207,8 @@ SIMRV_ALWAYS_INLINE auto check_access(
     return effective_priv == simrv::xlen::PrivilegeLevel::Machine;
 }
 
-SIMRV_ALWAYS_INLINE auto check_access(
-    const ArchState& state, simrv::xlen::PhysAddr paddr, size_t size, PmpAccessType access,
-    std::optional<simrv::xlen::PrivilegeLevel> priv_override = std::nullopt) -> bool {
-    return check_access(state, paddr.raw(), size, access, priv_override);
-}
+auto check_access(const ArchState&, simrv::xlen::Address, size_t, PmpAccessType,
+                  std::optional<simrv::xlen::PrivilegeLevel> = std::nullopt) -> bool = delete;
 
 }  // namespace pmp
 

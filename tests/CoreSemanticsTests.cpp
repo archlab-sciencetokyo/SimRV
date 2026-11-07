@@ -972,7 +972,8 @@ void test_runtime_ram_view() {
 
     constexpr auto kLastPhysical = std::numeric_limits<simrv::xlen::Address>::max();
     const simrv::memory::RamView wrapping_view(bytes.data(), kLastPhysical - 3, 8);
-    expect(!wrapping_view.has_nonwrapping_range(), "a wrapping RAM mapping is not fast-path eligible");
+    expect(!wrapping_view.has_nonwrapping_range(),
+           "a wrapping RAM mapping is not fast-path eligible");
     expect(wrapping_view.contains(kLastPhysical - 1, 2),
            "a range ending at the last physical address remains valid");
     expect(!wrapping_view.contains(kLastPhysical, 2) &&
@@ -1948,7 +1949,8 @@ void test_vector_bulk_memory_operations() {
     simrv::execute::ExecuteUnit::execute_vector(cpu, machine.memory(),
                                                 simrv::isa::OperationId::VSSE8_V,
                                                 strided_ir(vd, base_reg, stride_reg));
-    expect(!reservations.check_reservation(simrv::xlen::HartId{1}, simrv::xlen::PhysAddr{ram.base() + 0x400}),
+    expect(!reservations.check_reservation(simrv::xlen::HartId{1},
+                                           simrv::xlen::PhysAddr{ram.base() + 0x400}),
            "strided vector store invalidates another hart's overlapping reservation");
 
     if constexpr (!simrv::xlen::kIsXLen64) {
@@ -4085,12 +4087,14 @@ void test_smp_reservation_table() {
 
     table.set_reservation(0, simrv::xlen::PhysAddr{0x80001000});
     expect(table.may_have_reservations(), "Setting LR marks possible reservations");
-    expect(table.check_reservation(0, simrv::xlen::PhysAddr{0x80001000}), "Hart 0 holds reservation at 0x80001000");
+    expect(table.check_reservation(0, simrv::xlen::PhysAddr{0x80001000}),
+           "Hart 0 holds reservation at 0x80001000");
     expect(!table.check_reservation(0, simrv::xlen::PhysAddr{0x80001008}),
            "Hart 0 does not hold reservation in the next eight-byte set");
     expect(!table.check_reservation(0, simrv::xlen::PhysAddr{0x80001040}),
            "Hart 0 does not hold reservation in different granule");
-    expect(!table.check_reservation(1, simrv::xlen::PhysAddr{0x80001000}), "Hart 1 does not hold Hart 0's reservation");
+    expect(!table.check_reservation(1, simrv::xlen::PhysAddr{0x80001000}),
+           "Hart 1 does not hold Hart 0's reservation");
 
     table.invalidate_matching(simrv::xlen::PhysAddr{0x80001000}, 0);
     expect(table.check_reservation(0, simrv::xlen::PhysAddr{0x80001000}),
@@ -4105,13 +4109,17 @@ void test_smp_reservation_table() {
     table.set_reservation(0, simrv::xlen::PhysAddr{0x80001000});
     expect(!table.check_and_clear_reservation(0, simrv::xlen::PhysAddr{0x80001008}),
            "SC to a different reservation set fails");
-    expect(!table.check_reservation(0, simrv::xlen::PhysAddr{0x80001000}), "Failed SC clears the previous reservation");
+    expect(!table.check_reservation(0, simrv::xlen::PhysAddr{0x80001000}),
+           "Failed SC clears the previous reservation");
 
     table.set_reservation(0, simrv::xlen::PhysAddr{0x80002000});
     table.set_reservation(1, simrv::xlen::PhysAddr{0x80003000});
-    expect(table.check_and_clear_reservation(0, simrv::xlen::PhysAddr{0x80002000}), "SC on valid reservation succeeds");
-    expect(!table.check_reservation(0, simrv::xlen::PhysAddr{0x80002000}), "Reservation is cleared after successful SC");
-    expect(table.check_reservation(1, simrv::xlen::PhysAddr{0x80003000}), "Hart 1's reservation remains intact");
+    expect(table.check_and_clear_reservation(0, simrv::xlen::PhysAddr{0x80002000}),
+           "SC on valid reservation succeeds");
+    expect(!table.check_reservation(0, simrv::xlen::PhysAddr{0x80002000}),
+           "Reservation is cleared after successful SC");
+    expect(table.check_reservation(1, simrv::xlen::PhysAddr{0x80003000}),
+           "Hart 1's reservation remains intact");
 
     table.clear_all();
     expect(!table.may_have_reservations(), "clear_all restores the lock-free empty state");
@@ -4122,7 +4130,8 @@ void test_smp_reservation_table() {
     table.set_reservation(1, simrv::xlen::PhysAddr{0x80004008});
     table.set_reservation(2, simrv::xlen::PhysAddr{0x80004000});
     table.invalidate_range(simrv::xlen::PhysAddr{0x80004004}, 8, 2);
-    expect(!table.check_reservation(0, simrv::xlen::PhysAddr{0x80004000}) && !table.check_reservation(1, simrv::xlen::PhysAddr{0x80004008}) &&
+    expect(!table.check_reservation(0, simrv::xlen::PhysAddr{0x80004000}) &&
+               !table.check_reservation(1, simrv::xlen::PhysAddr{0x80004008}) &&
                table.check_reservation(2, simrv::xlen::PhysAddr{0x80004000}),
            "A physical write spanning two reservation granules invalidates other harts only");
 
@@ -4131,9 +4140,11 @@ void test_smp_reservation_table() {
     table.set_reservation(0, simrv::xlen::PhysAddr{kLastAddress});
     table.set_reservation(1, simrv::xlen::PhysAddr{0});
     table.invalidate_range(simrv::xlen::PhysAddr{kLastAddress - 3}, 0);
-    expect(table.check_reservation(0, simrv::xlen::PhysAddr{kLastAddress}), "An empty write preserves reservations");
+    expect(table.check_reservation(0, simrv::xlen::PhysAddr{kLastAddress}),
+           "An empty write preserves reservations");
     table.invalidate_range(simrv::xlen::PhysAddr{kLastAddress - 3}, 16);
-    expect(!table.check_reservation(0, simrv::xlen::PhysAddr{kLastAddress}) && table.check_reservation(1, simrv::xlen::PhysAddr{0}),
+    expect(!table.check_reservation(0, simrv::xlen::PhysAddr{kLastAddress}) &&
+               table.check_reservation(1, simrv::xlen::PhysAddr{0}),
            "A range beyond the physical address limit saturates without wrapping");
 
     if constexpr (sizeof(size_t) > sizeof(simrv::xlen::Address)) {
@@ -4302,7 +4313,8 @@ void test_pmp_semantics() {
     state.priv = simrv::xlen::PrivilegeLevel::Supervisor;
 
     // By default, no PMP entries are active, so S-mode accesses pass
-    expect(simrv::core::pmp::check_access(state, 0x80000000, 4, simrv::core::PmpAccessType::Read),
+    expect(simrv::core::pmp::check_access(state, simrv::xlen::PhysAddr{0x80000000}, 4,
+                                          simrv::core::PmpAccessType::Read),
            "Default empty PMP allows S-mode read access");
 
     // Configure PMP entry 0: NAPOT 64KB region at 0x80000000 with R/W (no X)
@@ -4313,19 +4325,23 @@ void test_pmp_semantics() {
         simrv::core::pmp::kPmpModeNapot | simrv::core::pmp::kPmpR | simrv::core::pmp::kPmpW;
     state.refresh_pmp_status();
 
-    expect(simrv::core::pmp::check_access(state, 0x80001000, 4, simrv::core::PmpAccessType::Read),
+    expect(simrv::core::pmp::check_access(state, simrv::xlen::PhysAddr{0x80001000}, 4,
+                                          simrv::core::PmpAccessType::Read),
            "PMP entry 0 permits read within NAPOT range");
-    expect(simrv::core::pmp::check_access(state, 0x80001000, 4, simrv::core::PmpAccessType::Write),
+    expect(simrv::core::pmp::check_access(state, simrv::xlen::PhysAddr{0x80001000}, 4,
+                                          simrv::core::PmpAccessType::Write),
            "PMP entry 0 permits write within NAPOT range");
-    expect(
-        !simrv::core::pmp::check_access(state, 0x80001000, 4, simrv::core::PmpAccessType::Execute),
-        "PMP entry 0 denies execute without X flag");
-    expect(!simrv::core::pmp::check_access(state, 0x80020000, 4, simrv::core::PmpAccessType::Read),
+    expect(!simrv::core::pmp::check_access(state, simrv::xlen::PhysAddr{0x80001000}, 4,
+                                           simrv::core::PmpAccessType::Execute),
+           "PMP entry 0 denies execute without X flag");
+    expect(!simrv::core::pmp::check_access(state, simrv::xlen::PhysAddr{0x80020000}, 4,
+                                           simrv::core::PmpAccessType::Read),
            "PMP access outside configured regions is denied in S-mode");
 
     // M-mode accesses bypass unlocked PMP entries
     state.priv = simrv::xlen::PrivilegeLevel::Machine;
-    expect(simrv::core::pmp::check_access(state, 0x80020000, 4, simrv::core::PmpAccessType::Read),
+    expect(simrv::core::pmp::check_access(state, simrv::xlen::PhysAddr{0x80020000}, 4,
+                                          simrv::core::PmpAccessType::Read),
            "M-mode bypasses unlocked PMP entries");
 
     simrv::core::Machine machine;

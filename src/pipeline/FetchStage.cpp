@@ -164,7 +164,7 @@ void CPU::fetch_address_translate(Machine& machine) {
                 simrv::xlen::Byte* const host_base =
                     (machine.ram_view().contains(tlb_e1->p_addr, 4096) &&
                      (state_.num_active_pmp == 0 ||
-                      core::pmp::check_access(state_, tlb_e1->p_addr, 4096,
+                      core::pmp::check_access(state_, simrv::xlen::PhysAddr{tlb_e1->p_addr}, 4096,
                                               core::PmpAccessType::Execute, state_.priv)))
                         ? machine.ram_view().unchecked_ptr(tlb_e1->p_addr)
                         : nullptr;
@@ -192,8 +192,8 @@ void CPU::fetch_address_translate(Machine& machine) {
                     simrv::xlen::Byte* const host_base =
                         (machine.ram_view().contains(tlb_e2->p_addr, 4096) &&
                          (state_.num_active_pmp == 0 ||
-                          core::pmp::check_access(state_, tlb_e2->p_addr, 4096,
-                                                  core::PmpAccessType::Execute, state_.priv)))
+                          core::pmp::check_access(state_, simrv::xlen::PhysAddr{tlb_e2->p_addr},
+                                                  4096, core::PmpAccessType::Execute, state_.priv)))
                             ? machine.ram_view().unchecked_ptr(tlb_e2->p_addr)
                             : nullptr;
                     soft_tlb_inst[tlb_idx2].set(vpn2, current_asid, state_.priv, soft_tlb_epoch,
@@ -244,7 +244,7 @@ void CPU::fetch_resolve_page_walk(Machine& machine, int state) {
                     simrv::xlen::Byte* const host_base =
                         (machine.ram_view().contains(page_base, 4096) &&
                          (state_.num_active_pmp == 0 ||
-                          core::pmp::check_access(state_, page_base, 4096,
+                          core::pmp::check_access(state_, simrv::xlen::PhysAddr{page_base}, 4096,
                                                   core::PmpAccessType::Execute, state_.priv)))
                             ? machine.ram_view().unchecked_ptr(page_base)
                             : nullptr;
@@ -719,9 +719,9 @@ void CPU::decode_and_normalize_instruction(Machine& machine) {
     // Instruction fetch shortcuts can read DRAM without going through MemoryAccess. Apply
     // execute permissions here for both the physical and translated fetch paths before the
     // instruction is decoded or admitted to the decode cache.
-    if (simrv::compiler::unlikely(
-            !core::pmp::check_access(state_, ctx.padr1.raw(), sizeof(uint16_t),
-                                     core::PmpAccessType::Execute, state_.priv))) {
+    if (simrv::compiler::unlikely(!core::pmp::check_access(
+            state_, simrv::xlen::PhysAddr{ctx.padr1.raw()}, sizeof(uint16_t),
+            core::PmpAccessType::Execute, state_.priv))) {
         ctx.pending_exception = ExceptionCode::FaultFetch;
         ctx.pending_tval = state_.pc;
         ctx.ir = isa::kNop32;
@@ -729,8 +729,9 @@ void CPU::decode_and_normalize_instruction(Machine& machine) {
     }
     if (simrv::compiler::unlikely(
             (ctx.ir_org & 0x3u) == 0x3u &&
-            !core::pmp::check_access(state_, ctx.padr2.raw(), sizeof(uint16_t),
-                                     core::PmpAccessType::Execute, state_.priv))) {
+            !core::pmp::check_access(state_, simrv::xlen::PhysAddr{ctx.padr2.raw()},
+                                     sizeof(uint16_t), core::PmpAccessType::Execute,
+                                     state_.priv))) {
         ctx.pending_exception = ExceptionCode::FaultFetch;
         ctx.pending_tval = state_.pc;
         ctx.ir = isa::kNop32;

@@ -74,6 +74,12 @@ The same binaries were also run on the Alpine Linux boot workload without a disk
 wall times were 0.733139 seconds (1.67% CV) before and 0.718217 seconds (1.66% CV) after. The
 small difference does not establish a speedup.
 
+For the typed PMP interface, the same x86 benchmark workflow ran `memory.elf` for 100 million
+instructions with three warmups and ten measured runs per binary on CPU 0. Median times were
+0.1360 seconds (2.93% CV) before and 0.1341 seconds (2.94% CV) after. The two series ran in
+separate batches and do not establish a speedup. An earlier run overlapped an RV32 link and had
+CV above 10%, so it was discarded.
+
 The branch result is too noisy to establish a speedup. The MMIO loop retained the same bus and
 cache counts. The initial baseline executable is no longer available, so an identical-binary
 comparison against the final tree remains outstanding. ARM hardware and usable host performance

@@ -98,8 +98,8 @@ void PageTableWalker::select_next_pte(PageWalkState& state,
     // Implicit page table accesses evaluate under Supervisor privilege per RISC-V Privileged spec
     if (!pte_access_valid(state.pte_address, state.pte_size) ||
         (state.arch_state != nullptr &&
-         !core::pmp::check_access(*state.arch_state, state.pte_address, state.pte_size,
-                                  core::PmpAccessType::Read,
+         !core::pmp::check_access(*state.arch_state, simrv::xlen::PhysAddr{state.pte_address},
+                                  state.pte_size, core::PmpAccessType::Read,
                                   simrv::xlen::PrivilegeLevel::Supervisor))) {
         fail_access(state);
         return;
@@ -280,8 +280,8 @@ void PageTableWalker::accept_pte(PageWalkState& state, simrv::xlen::Word pte) co
         const bool mxr =
             state.arch_state != nullptr && (state.arch_state->mstatus & MstatusBit::Mxr) != 0;
         auto translated =
-            walk_guest_physical(GuestPhysAddr{stage_one_address}, state.access, state.hgatp, state.xlen,
-                                &state.guest_fault_address, mxr, state.arch_state);
+            walk_guest_physical(GuestPhysAddr{stage_one_address}, state.access, state.hgatp,
+                                state.xlen, &state.guest_fault_address, mxr, state.arch_state);
         if (!translated) {
             state.fault = translated.error();
             state.status = PageWalkStatus::Fault;
@@ -298,10 +298,12 @@ void PageTableWalker::accept_pte(PageWalkState& state, simrv::xlen::Word pte) co
                                                                        ? core::PmpAccessType::Write
                                                                        : core::PmpAccessType::Read);
         const bool pmp_allowed =
-            core::pmp::check_access(*state.arch_state, state.physical_address, 1, pmp_access,
+            core::pmp::check_access(*state.arch_state,
+                                    simrv::xlen::PhysAddr{state.physical_address}, 1, pmp_access,
                                     state.privilege) &&
             (state.access != PteAccess::ReadExecute ||
-             core::pmp::check_access(*state.arch_state, state.physical_address, 1,
+             core::pmp::check_access(*state.arch_state,
+                                     simrv::xlen::PhysAddr{state.physical_address}, 1,
                                      core::PmpAccessType::Execute, state.privilege));
         if (!pmp_allowed) {
             state.fault = access_fault_for(state.access);
@@ -324,8 +326,8 @@ void PageTableWalker::accept_pte(PageWalkState& state, simrv::xlen::Word pte) co
     }
     if (updated != pte) {
         if (state.arch_state != nullptr &&
-            !core::pmp::check_access(*state.arch_state, state.pte_address, state.pte_size,
-                                     core::PmpAccessType::Write,
+            !core::pmp::check_access(*state.arch_state, simrv::xlen::PhysAddr{state.pte_address},
+                                     state.pte_size, core::PmpAccessType::Write,
                                      simrv::xlen::PrivilegeLevel::Supervisor)) {
             fail_access(state);
             return;
@@ -436,8 +438,8 @@ auto PageTableWalker::walk_guest_physical(GuestPhysAddr guest_physical, PteAcces
         const simrv::xlen::Word pte_address = table_address + index * sizeof(uint64_t);
         if (!ram_.contains(pte_address, sizeof(uint64_t)) ||
             (arch_state != nullptr &&
-             !core::pmp::check_access(*arch_state, pte_address, sizeof(uint64_t),
-                                      core::PmpAccessType::Read,
+             !core::pmp::check_access(*arch_state, simrv::xlen::PhysAddr{pte_address},
+                                      sizeof(uint64_t), core::PmpAccessType::Read,
                                       simrv::xlen::PrivilegeLevel::Supervisor))) {
             return std::unexpected(access_fault_for(access));
         }
@@ -500,8 +502,7 @@ auto PageTableWalker::walk_guest_physical(GuestPhysAddr guest_physical, PteAcces
 auto PageTableWalker::walk(simrv::xlen::VirtAddr v_addr, PteAccess access,
                            simrv::xlen::PrivilegeLevel priv, simrv::xlen::CsrValue mstatus,
                            simrv::xlen::Word satp, unsigned xlen, bool update_access_bits,
-                           const core::ArchState* arch_state,
-                           GuestPhysAddr* guest_fault_address,
+                           const core::ArchState* arch_state, GuestPhysAddr* guest_fault_address,
                            bool* implicit_vs_stage_page_table_fault) const
     -> std::expected<PageWalkResult, simrv::xlen::TrapCause> {
     auto state =
