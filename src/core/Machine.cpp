@@ -1428,70 +1428,41 @@ void Machine::prewarm_bram_caches() {
 
     for (size_t h = 0; h < num_harts(); ++h) {
         auto& cpu = hart(h);
+        const auto prewarm = [&]<typename Cache>(Cache& cache, simrv::xlen::PhysAddr address,
+                                                size_t size, bool align_segment) {
+            constexpr simrv::xlen::Address kLineBytes = Cache::kLineBytes;
+            const simrv::xlen::Address start =
+                align_segment ? address.raw() & ~(kLineBytes - 1u) : address.raw();
+            simrv::xlen::Address end = align_segment
+                                           ? (address.raw() + size + kLineBytes - 1u) &
+                                                 ~(kLineBytes - 1u)
+                                           : start + cache.capacity_bytes();
+            if (align_segment && end > start + cache.capacity_bytes()) {
+                end = start + cache.capacity_bytes();
+            }
+            for (simrv::xlen::Address addr = start; addr < end; addr += kLineBytes) {
+                const simrv::xlen::PhysAddr physical{addr};
+                if (ram.contains(physical, kLineBytes)) {
+                    cache.insert(physical, ram.unchecked_ptr(physical),
+                                 simrv::memory::MesiState::Shared);
+                    memory().system_bus().coherence_hub().register_preloaded_line(physical,
+                                                                                 cpu.hart_id());
+                }
+            }
+        };
 
         if (!loaded_segments_.empty()) {
             for (const auto& seg : loaded_segments_) {
                 if (seg.is_executable) {
-                    constexpr simrv::xlen::Address kLineBytes = simrv::cache::ICache::kLineBytes;
-                    const simrv::xlen::Address start = seg.paddr.raw() & ~(kLineBytes - 1u);
-                    simrv::xlen::Address end =
-                        (seg.paddr.raw() + seg.size + kLineBytes - 1u) & ~(kLineBytes - 1u);
-                    const size_t max_bytes = cpu.icache.capacity_bytes();
-                    if (end > start + max_bytes) {
-                        end = start + max_bytes;
-                    }
-                    for (simrv::xlen::Address addr = start; addr < end; addr += kLineBytes) {
-                        if (ram.contains(addr, kLineBytes)) {
-                            cpu.icache.insert(simrv::xlen::PhysAddr{addr}, ram.unchecked_ptr(addr),
-                                              simrv::memory::MesiState::Shared);
-                            memory().system_bus().coherence_hub().register_preloaded_line(
-                                simrv::xlen::PhysAddr{addr}, cpu.hart_id());
-                        }
-                    }
+                    prewarm(cpu.icache, seg.paddr, seg.size, true);
                 } else {
-                    constexpr simrv::xlen::Address kLineBytes = simrv::cache::DCache::kLineBytes;
-                    const simrv::xlen::Address start = seg.paddr.raw() & ~(kLineBytes - 1u);
-                    simrv::xlen::Address end =
-                        (seg.paddr.raw() + seg.size + kLineBytes - 1u) & ~(kLineBytes - 1u);
-                    const size_t max_bytes = cpu.dcache.capacity_bytes();
-                    if (end > start + max_bytes) {
-                        end = start + max_bytes;
-                    }
-                    for (simrv::xlen::Address addr = start; addr < end; addr += kLineBytes) {
-                        if (ram.contains(addr, kLineBytes)) {
-                            cpu.dcache.insert(simrv::xlen::PhysAddr{addr}, ram.unchecked_ptr(addr),
-                                              simrv::memory::MesiState::Shared);
-                            memory().system_bus().coherence_hub().register_preloaded_line(
-                                simrv::xlen::PhysAddr{addr}, cpu.hart_id());
-                        }
-                    }
+                    prewarm(cpu.dcache, seg.paddr, seg.size, true);
                 }
             }
         } else {
             // Fallback: pre-warm IMEM range into ICache and DMEM range into DCache
-            const simrv::xlen::Address dram_base = ram.base();
-            constexpr simrv::xlen::Address kILineBytes = simrv::cache::ICache::kLineBytes;
-            const simrv::xlen::Address i_end = dram_base + cpu.icache.capacity_bytes();
-            for (simrv::xlen::Address addr = dram_base; addr < i_end; addr += kILineBytes) {
-                if (ram.contains(addr, kILineBytes)) {
-                    cpu.icache.insert(simrv::xlen::PhysAddr{addr}, ram.unchecked_ptr(addr),
-                                      simrv::memory::MesiState::Shared);
-                    memory().system_bus().coherence_hub().register_preloaded_line(
-                        simrv::xlen::PhysAddr{addr}, cpu.hart_id());
-                }
-            }
-
-            constexpr simrv::xlen::Address kDLineBytes = simrv::cache::DCache::kLineBytes;
-            const simrv::xlen::Address dmem_base = dram_base;
-            const simrv::xlen::Address d_end = dmem_base + cpu.dcache.capacity_bytes();
-            for (simrv::xlen::Address addr = dmem_base; addr < d_end; addr += kDLineBytes) {
-                if (ram.contains(addr, kDLineBytes)) {
-                    cpu.dcache.insert(simrv::xlen::PhysAddr{addr}, ram.unchecked_ptr(addr),
-                                      simrv::memory::MesiState::Shared);
-                    memory().system_bus().coherence_hub().register_preloaded_line(
-                        simrv::xlen::PhysAddr{addr}, cpu.hart_id());
-                }
-            }
+            prewarm(cpu.icache, simrv::xlen::PhysAddr{ram.base()}, 0, false);
+            prewarm(cpu.dcache, simrv::xlen::PhysAddr{ram.base()}, 0, false);
         }
     }
 }

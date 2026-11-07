@@ -385,6 +385,20 @@ void test_bram_prewarm_and_cli() {
         TEST_CHECK(static_cast<uint32_t>(read_data) == data_val);
         TEST_CHECK(cpu.dcache.miss_count() == 0);
     }
+
+    // With no segment metadata, both caches prewarm from the start of RAM.
+    {
+        simrv::core::Machine machine;
+        std::vector<simrv::xlen::Byte> ram(1024 * 1024, simrv::xlen::Byte{0});
+        machine.set_ram_for_testing(ram.data(), ram.size());
+        auto& cpu = machine.primary_hart();
+        cpu.machine_ = &machine;
+        cpu.reset();
+        machine.prewarm_bram_caches();
+        const simrv::xlen::PhysAddr base{machine.memory_geometry().dram_base};
+        TEST_CHECK(cpu.icache.line_state(base) == simrv::memory::MesiState::Shared);
+        TEST_CHECK(cpu.dcache.line_state(base) == simrv::memory::MesiState::Shared);
+    }
 }
 
 }  // namespace
