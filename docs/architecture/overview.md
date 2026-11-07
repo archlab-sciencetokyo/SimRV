@@ -123,9 +123,27 @@ Checked RAM lookups reject addresses below the mapping and accesses that wrap th
 space. The unchecked fast lookup is used only with non-null, nonwrapping RAM and an access size no
 larger than the mapping; other configurations take the checked fallback.
 
+#### Audit evidence and remaining coverage
+
+The following findings describe guest correctness, rather than security severity:
+
+| Finding | Severity | Evidence and resolution |
+| --- | --- | --- |
+| A reservation invalidation range could truncate on native RV32. | High | The reservation table now accepts a host-sized length and saturates at the physical address limit. `CoreSemanticsTests` covers ranges exceeding the guest address width. |
+| A wrapping RAM mapping could make an unchecked host pointer lookup invalid. | High | Fast lookup now requires a nonwrapping mapping; checked lookups reject wrapped accesses. `CoreSemanticsTests` covers the boundary. |
+| Cycle-mode workers could fail to acknowledge an in-flight cycle during a pause or engine change. | High | Workers complete the cycle barrier before parking, and engine changes restart workers. The multi-hart regression tests exercise pause and switching. |
+| The RVComp guest uses a serial register layout different from the built-in UART, producing spurious NUL output. | Medium | The model selects an external UART plugin with the expected status registers; `RvCompTests` exercises transmit, receive, and interrupt behavior. The plugin transmits immediately and is not a cycle-accurate UART model. |
+
+These checks document reviewed paths, not a proof that every first-party shortcut has been
+inventoried. In particular, full architecture-suite and performance comparisons against the
+original starting tree remain incomplete; ARM hardware and usable host performance counters were
+unavailable. See [strong typing and performance](../development/strong-typing-performance.md)
+for the measurements and their limitations.
+
 MMIO routing and DMA APIs accept `simrv::xlen::PhysAddr`. C++ callers must explicitly construct
 physical addresses from platform configuration or translate virtual addresses before routing or
-DMA. `TileLinkNode::base_address()` returns `PhysAddr`, and `contains()` takes `PhysAddr`; C++ device
+DMA. Loaded segment records used for cache prewarming also require `PhysAddr`.
+`TileLinkNode::base_address()` returns `PhysAddr`, and `contains()` takes `PhysAddr`; C++ device
 implementations must update their overrides. An override of `contains()` should also declare
 `using TileLinkNode::contains;` so the base class's deleted raw-integer overload stays visible. The C
 plugin ABI retains its existing scalar fields; the plugin adapter constructs a physical address

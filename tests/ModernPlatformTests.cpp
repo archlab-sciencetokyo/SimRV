@@ -2840,8 +2840,9 @@ void test_dynamic_mode_switching_cache_behavior() {
         0xffdff06f,  // jal   x0, -4 (repeat cached WFI)
     };
     std::memcpy(ram.data(), program.data(), sizeof(program));
-    machine.record_loaded_segment(pc, sizeof(program), true);
-    machine.record_loaded_segment(data_address, simrv::memory::CoherenceHub::kLineBytes, false);
+    machine.record_loaded_segment(simrv::xlen::PhysAddr{pc}, sizeof(program), true);
+    machine.record_loaded_segment(simrv::xlen::PhysAddr{data_address},
+                                  simrv::memory::CoherenceHub::kLineBytes, false);
     machine.cpu.state().pc = pc;
 
     // Step 2 instructions in fast functional mode

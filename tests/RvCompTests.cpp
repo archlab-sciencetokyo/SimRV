@@ -419,11 +419,17 @@ void test_rvcomp_uart_plugin() {
     simrv::memory::TlChannelD response{};
     request.size = 0;
     request.opcode = simrv::memory::TlOpcodeA::Get;
+    request.address = simrv::xlen::PhysAddr{0x10000004};
+    TEST_CHECK(uart->handle_request(request, response) && !response.denied && response.data == 0);
+    request.opcode = simrv::memory::TlOpcodeA::PutFullData;
+    TEST_CHECK(uart->handle_request(request, response) && response.denied);
+    request.opcode = simrv::memory::TlOpcodeA::Get;
     request.address = simrv::xlen::PhysAddr{0x10000008};
     TEST_CHECK(uart->handle_request(request, response) && !response.denied && response.data == 1);
     uart->push_rx_byte('A');
     uart->service_interrupts();
     TEST_CHECK(uart->is_interrupt_pending());
+    TEST_CHECK((machine.primary_hart().plic_mmio.plic_pending[0] & (1U << 1)) != 0);
     TEST_CHECK(uart->handle_request(request, response) && !response.denied && response.data == 0);
     request.address = simrv::xlen::PhysAddr{0x10000000};
     TEST_CHECK(uart->handle_request(request, response) && !response.denied && response.data == 'A');
@@ -431,6 +437,7 @@ void test_rvcomp_uart_plugin() {
     TEST_CHECK(uart->handle_request(request, response) && !response.denied && response.data == 1);
     uart->service_interrupts();
     TEST_CHECK(!uart->is_interrupt_pending());
+    TEST_CHECK((machine.primary_hart().plic_mmio.plic_pending[0] & (1U << 1)) == 0);
 
     uart->push_rx_byte(0);
     TEST_CHECK(uart->handle_request(request, response) && response.data == 0);

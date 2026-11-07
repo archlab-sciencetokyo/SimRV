@@ -23,7 +23,7 @@ namespace {
 
 [[nodiscard]] auto get_direct_host_memory_for_range(
     core::CPU& cpu, simrv::xlen::Address base_addr, uint32_t total_bytes, bool is_write,
-    simrv::xlen::Address* physical_address = nullptr) -> simrv::xlen::Byte* {
+    simrv::xlen::PhysAddr* physical_address = nullptr) -> simrv::xlen::Byte* {
     if (total_bytes == 0 || cpu.machine_ == nullptr) return nullptr;
     // The contiguous host-pointer path cannot preserve per-element translation
     // and privilege checks for vector accesses. Lower-privilege accesses must
@@ -63,18 +63,11 @@ namespace {
                     simrv::compiler::unlikely(is_tohost_addr_range(cpu, base_addr, total_bytes))) {
                     return nullptr;
                 }
-                if (physical_address != nullptr) *physical_address = base_addr;
+                if (physical_address != nullptr)
+                    *physical_address = simrv::xlen::PhysAddr{base_addr};
                 return machine.ram_view().unchecked_ptr(base_addr);
             }
         }
-        return nullptr;
-    }
-
-    // Pointer masking transforms each effective address after vector address
-    // generation. Bypass this range fast path for tagged addresses so the
-    // ordinary memory path can mask every element independently.
-    if (simrv::memory::MemoryAccess::mask_user_pointer(cpu, simrv::xlen::VirtAddr{base_addr})
-            .raw() != base_addr) {
         return nullptr;
     }
 
@@ -95,7 +88,8 @@ namespace {
             const auto& entry = cpu.soft_tlb_write[tlb_idx];
             if (simrv::compiler::likely(
                     entry.matches(vpn, current_asid, eff_priv, cpu.soft_tlb_epoch))) {
-                const simrv::xlen::Address paddr = (entry.paddr_base + page_offset).raw();
+                const simrv::xlen::PhysAddr physical = entry.paddr_base + page_offset;
+                const auto paddr = physical.raw();
                 if (simrv::compiler::unlikely(cpu.state().num_active_pmp > 0) &&
                     simrv::compiler::unlikely(!core::pmp::check_access(
                         cpu.state(), paddr, total_bytes, core::PmpAccessType::Write, eff_priv))) {
@@ -105,7 +99,7 @@ namespace {
                     if (simrv::compiler::unlikely(is_tohost_addr_range(cpu, paddr, total_bytes))) {
                         return nullptr;
                     }
-                    if (physical_address != nullptr) *physical_address = paddr;
+                    if (physical_address != nullptr) *physical_address = physical;
                     return entry.host_ptr(lookup_addr);
                 }
             }
@@ -135,7 +129,8 @@ namespace {
                                     is_tohost_addr_range(cpu, lookup_addr, total_bytes))) {
                     return nullptr;
                 }
-                if (physical_address != nullptr) *physical_address = lookup_addr;
+                if (physical_address != nullptr)
+                    *physical_address = simrv::xlen::PhysAddr{lookup_addr};
                 return machine.ram_view().unchecked_ptr(lookup_addr);
             }
         }
@@ -245,7 +240,7 @@ void execute_vs_whole(core::CPU& cpu, simrv::memory::MemorySubsystem& mem, simrv
             const uint32_t page_offset = cur_addr & 0xFFFu;
             const uint32_t page_remain_bytes = 4096u - page_offset;
             const uint32_t chunk_bytes = std::min(total_bytes - byte_idx, page_remain_bytes);
-            simrv::xlen::Address physical_address = 0;
+            simrv::xlen::PhysAddr physical_address{};
             simrv::xlen::Byte* host_dst = get_direct_host_memory_for_range(
                 cpu, cur_addr, chunk_bytes, true, &physical_address);
             if (host_dst == nullptr) {
@@ -269,8 +264,8 @@ void execute_vs_whole(core::CPU& cpu, simrv::memory::MemorySubsystem& mem, simrv
             if (simrv::compiler::unlikely(cpu.machine_ != nullptr &&
                                           mem.reservation_table().may_have_reservations() &&
                                           cpu.machine_->num_harts() > 1)) {
-                mem.reservation_table().invalidate_range(simrv::xlen::PhysAddr{physical_address},
-                                                         chunk_bytes, cpu.hart_id());
+                mem.reservation_table().invalidate_range(physical_address, chunk_bytes,
+                                                         cpu.hart_id());
             }
             byte_idx += chunk_bytes;
         }
@@ -431,7 +426,7 @@ void execute_vsm(core::CPU& cpu, simrv::memory::MemorySubsystem& mem, simrv::xle
                  simrv::xlen::Register base_addr, uint32_t vl) {
     const uint32_t evl = (vl + 7) / 8;
     if (cpu.state().vstart == 0 && evl > 0) {
-        simrv::xlen::Address physical_address = 0;
+        simrv::xlen::PhysAddr physical_address{};
         simrv::xlen::Byte* host_dst =
             get_direct_host_memory_for_range(cpu, base_addr, evl, true, &physical_address);
         if (host_dst != nullptr) {
@@ -441,8 +436,7 @@ void execute_vsm(core::CPU& cpu, simrv::memory::MemorySubsystem& mem, simrv::xle
             if (simrv::compiler::unlikely(cpu.machine_ != nullptr &&
                                           mem.reservation_table().may_have_reservations() &&
                                           cpu.machine_->num_harts() > 1)) {
-                mem.reservation_table().invalidate_range(simrv::xlen::PhysAddr{physical_address},
-                                                         evl, cpu.hart_id());
+                mem.reservation_table().invalidate_range(physical_address, evl, cpu.hart_id());
             }
             return;
         }
@@ -483,7 +477,7 @@ void execute_vse(core::CPU& cpu, simrv::memory::MemorySubsystem& mem, simrv::xle
             }
             const uint32_t chunk_elems = std::min(vl - elem_idx, page_remain_elems);
             const uint32_t chunk_bytes = chunk_elems * sizeof(T);
-            simrv::xlen::Address physical_address = 0;
+            simrv::xlen::PhysAddr physical_address{};
             simrv::xlen::Byte* host_dst = get_direct_host_memory_for_range(
                 cpu, cur_addr, chunk_bytes, true, &physical_address);
             if (host_dst == nullptr) {
@@ -508,8 +502,8 @@ void execute_vse(core::CPU& cpu, simrv::memory::MemorySubsystem& mem, simrv::xle
             if (simrv::compiler::unlikely(cpu.machine_ != nullptr &&
                                           mem.reservation_table().may_have_reservations() &&
                                           cpu.machine_->num_harts() > 1)) {
-                mem.reservation_table().invalidate_range(simrv::xlen::PhysAddr{physical_address},
-                                                         chunk_bytes, cpu.hart_id());
+                mem.reservation_table().invalidate_range(physical_address, chunk_bytes,
+                                                         cpu.hart_id());
             }
             elem_idx += chunk_elems;
         }

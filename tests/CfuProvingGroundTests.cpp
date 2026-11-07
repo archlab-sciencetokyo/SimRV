@@ -367,8 +367,8 @@ void test_bram_prewarm_and_cli() {
                     sizeof(data_val));
 
         machine.clear_loaded_segments();
-        machine.record_loaded_segment(code_addr, sizeof(test_prog), true);
-        machine.record_loaded_segment(data_addr, sizeof(data_val), false);
+        machine.record_loaded_segment(simrv::xlen::PhysAddr{code_addr}, sizeof(test_prog), true);
+        machine.record_loaded_segment(simrv::xlen::PhysAddr{data_addr}, sizeof(data_val), false);
 
         machine.prewarm_bram_caches();
 

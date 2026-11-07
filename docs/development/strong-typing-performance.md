@@ -52,6 +52,28 @@ x86 CPU. Median wall time was 0.128999 seconds before (2.24% CV) and 0.127323 se
 (1.13% CV); both retired 100 million instructions and reported 100,000,001 simulated cycles. This
 comparison does not establish a speedup. The before and after samples ran in separate batches.
 
+A later intermediate comparison used the retained binary from before the RAM-boundary fix and
+the current working-tree RV64 release binary. On the same x86 host, `scripts/benchmark.py` ran
+three warmups and ten measured runs per binary, pinned to CPU 0, with ISA
+`rv64gc_zicsr_zifencei_zicntr` and a 100 million instruction limit. Median seconds (CV) were:
+
+| Workload | Before | After |
+| --- | ---: | ---: |
+| Compute | 0.1636 (3.55%) | 0.1556 (3.62%) |
+| Branch | 0.1814 (3.19%) | 0.1772 (1.80%) |
+| Memory | 0.1532 (1.64%) | 0.1539 (4.52%) |
+
+Each run reported 100 million instructions and 100,000,001 simulated cycles. The binaries were
+42,165,504 and 42,208,944 bytes, with SHA-256 prefixes `5f6d0ca313c1` and `766e2a6a421f`.
+Samples ran in separate batches, so these results do not establish small speedups. This is not
+the original migration baseline. The reports are
+`/tmp/simrv-intermediate-{compute,branch,memory}-{before,after}.json` when retained locally.
+
+The same binaries were also run on the Alpine Linux boot workload without a disk, with a
+25 million instruction limit, three warmups and ten interleaved runs on one pinned CPU. Median
+wall times were 0.733139 seconds (1.67% CV) before and 0.718217 seconds (1.66% CV) after. The
+small difference does not establish a speedup.
+
 The branch result is too noisy to establish a speedup. The MMIO loop retained the same bus and
 cache counts. The initial baseline executable is no longer available, so an identical-binary
 comparison against the final tree remains outstanding. ARM hardware and usable host performance

@@ -1433,9 +1433,9 @@ void Machine::prewarm_bram_caches() {
             for (const auto& seg : loaded_segments_) {
                 if (seg.is_executable) {
                     constexpr simrv::xlen::Address kLineBytes = simrv::cache::ICache::kLineBytes;
-                    const simrv::xlen::Address start = seg.paddr & ~(kLineBytes - 1u);
+                    const simrv::xlen::Address start = seg.paddr.raw() & ~(kLineBytes - 1u);
                     simrv::xlen::Address end =
-                        (seg.paddr + seg.size + kLineBytes - 1u) & ~(kLineBytes - 1u);
+                        (seg.paddr.raw() + seg.size + kLineBytes - 1u) & ~(kLineBytes - 1u);
                     const size_t max_bytes = cpu.icache.capacity_bytes();
                     if (end > start + max_bytes) {
                         end = start + max_bytes;
@@ -1450,9 +1450,9 @@ void Machine::prewarm_bram_caches() {
                     }
                 } else {
                     constexpr simrv::xlen::Address kLineBytes = simrv::cache::DCache::kLineBytes;
-                    const simrv::xlen::Address start = seg.paddr & ~(kLineBytes - 1u);
+                    const simrv::xlen::Address start = seg.paddr.raw() & ~(kLineBytes - 1u);
                     simrv::xlen::Address end =
-                        (seg.paddr + seg.size + kLineBytes - 1u) & ~(kLineBytes - 1u);
+                        (seg.paddr.raw() + seg.size + kLineBytes - 1u) & ~(kLineBytes - 1u);
                     const size_t max_bytes = cpu.dcache.capacity_bytes();
                     if (end > start + max_bytes) {
                         end = start + max_bytes;

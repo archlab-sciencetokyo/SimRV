@@ -206,6 +206,10 @@ if(BUILD_TESTING)
   add_test(NAME cli-doctor COMMAND $<TARGET_FILE:SimRV> --doctor)
   set_tests_properties(cli-doctor PROPERTIES PASS_REGULAR_EXPRESSION "SimRV environment diagnostics"
                                              LABELS "gate;regress;cli;release")
+  add_test(NAME cli-doctor-graphics
+           COMMAND ${PYTHON_BIN} ${CMAKE_SOURCE_DIR}/tests/DoctorGraphicsTests.py
+                   $<TARGET_FILE:SimRV>)
+  set_tests_properties(cli-doctor-graphics PROPERTIES LABELS "gate;regress;cli;tui")
   add_test(NAME cli-summary-rejects-stdout COMMAND $<TARGET_FILE:SimRV> --summary -)
   set_tests_properties(
     cli-summary-rejects-stdout

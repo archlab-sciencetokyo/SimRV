@@ -285,13 +285,14 @@ class Machine final : public core::IInterruptController {
     /// file.
     [[nodiscard]] auto dump_signature(const std::string& filepath) const -> bool;
     struct LoadedMemorySegment {
-        simrv::xlen::Address paddr = 0;
+        simrv::xlen::PhysAddr paddr{};
         size_t size = 0;
         bool is_executable = false;
     };
-    void record_loaded_segment(simrv::xlen::Address paddr, size_t size, bool is_executable) {
+    void record_loaded_segment(simrv::xlen::PhysAddr paddr, size_t size, bool is_executable) {
         loaded_segments_.push_back({.paddr = paddr, .size = size, .is_executable = is_executable});
     }
+    void record_loaded_segment(simrv::xlen::Address, size_t, bool) = delete;
     void clear_loaded_segments() noexcept { loaded_segments_.clear(); }
     [[nodiscard]] auto loaded_segments() const noexcept -> const std::vector<LoadedMemorySegment>& {
         return loaded_segments_;

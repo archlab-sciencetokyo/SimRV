@@ -369,7 +369,8 @@ void load_image_into_ram(std::string& file_path, simrv::memory::RamView ram_view
                     loaded_segment = true;
                     if (machine != nullptr) {
                         const bool is_exec = (phdr.p_flags & 0x1) != 0;
-                        machine->record_loaded_segment(paddr, phdr.p_memsz, is_exec);
+                        machine->record_loaded_segment(simrv::xlen::PhysAddr{dram_base + dest_offset},
+                                                       phdr.p_memsz, is_exec);
                     }
                     if (phdr.p_memsz > phdr.p_filesz && (dest_offset + phdr.p_filesz) < capacity) {
                         const size_t bss_bytes = std::min<size_t>(
@@ -426,8 +427,8 @@ void load_image_into_ram(std::string& file_path, simrv::memory::RamView ram_view
                 std::exit(EXIT_FAILURE);
             }
             if (machine != nullptr) {
-                machine->record_loaded_segment(ram_view.base(), std::min(file_size, capacity),
-                                               true);
+                machine->record_loaded_segment(simrv::xlen::PhysAddr{ram_view.base()},
+                                               std::min(file_size, capacity), true);
             }
         }
     } else {
@@ -443,7 +444,8 @@ void load_image_into_ram(std::string& file_path, simrv::memory::RamView ram_view
             std::exit(EXIT_FAILURE);
         }
         if (machine != nullptr) {
-            machine->record_loaded_segment(ram_view.base(), std::min(file_size, capacity), true);
+            machine->record_loaded_segment(simrv::xlen::PhysAddr{ram_view.base()},
+                                           std::min(file_size, capacity), true);
         }
     }
 }

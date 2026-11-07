@@ -25,6 +25,7 @@
 #include "simrv/memory/Mmio.hpp"
 #include "simrv/memory/MmioRouter.hpp"
 #include "simrv/util/CliParser.hpp"
+#include "simrv/util/ElfTypes.hpp"
 #include "simrv/util/FormatUtil.hpp"
 #include "simrv/util/SoCManifest.hpp"
 
@@ -843,6 +844,58 @@ auto main() -> int {
                "HostExitCode::ExecutionError is 5");
         expect(to_exit_code(HostExitCode::CheckpointError) == 6,
                "HostExitCode::CheckpointError is 6");
+    }
+
+    {
+        using namespace simrv::util::elf;
+        const auto path = std::filesystem::temp_directory_path() /
+                          ("simrv-offset-segment-" +
+                           std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()) +
+                           ".elf");
+        Elf32_Ehdr header{};
+        header.e_ident[0] = 0x7f;
+        header.e_ident[1] = 'E';
+        header.e_ident[2] = 'L';
+        header.e_ident[3] = 'F';
+        header.e_ident[4] = kClass32;
+        header.e_phoff = sizeof(header);
+        header.e_phentsize = sizeof(Elf32_Phdr);
+        header.e_phnum = 1;
+        Elf32_Phdr segment{};
+        segment.p_type = kLoadSegment;
+        segment.p_offset = sizeof(header) + sizeof(segment);
+        segment.p_paddr = 0x100;
+        segment.p_filesz = 4;
+        segment.p_memsz = 4;
+        segment.p_flags = 1;
+        {
+            std::ofstream out(path, std::ios::binary);
+            const uint32_t instruction = 0x00000013;
+            out.write(reinterpret_cast<const char*>(&header), sizeof(header));
+            out.write(reinterpret_cast<const char*>(&segment), sizeof(segment));
+            out.write(reinterpret_cast<const char*>(&instruction), sizeof(instruction));
+        }
+        simrv::core::MachineConfig cfg{};
+        cfg.tui.enabled = true;
+        cfg.files.binary_path = path.string();
+        simrv::core::Machine machine(cfg);
+        const auto initialized = machine.initialize();
+        expect(initialized.has_value(), "machine loads RAM-relative ELF segment");
+        if (initialized && !machine.loaded_segments().empty()) {
+            const auto actual = simrv::xlen::PhysAddr{machine.ram_view().base() + 0x100};
+            expect(machine.loaded_segments().front().paddr == actual,
+                   "prewarming records the physical destination of a RAM-relative segment");
+            expect(machine.ram_view().unchecked_ptr(actual)[0] == simrv::xlen::Byte{0x13},
+                   "RAM-relative ELF bytes are loaded at the recorded address");
+            machine.prewarm_bram_caches();
+            expect(machine.primary_hart().icache.line_state(actual) ==
+                       simrv::memory::MesiState::Shared,
+                   "cache prewarming uses the loaded segment's physical address");
+        } else {
+            expect(false, "loaded ELF segment is recorded");
+        }
+        std::error_code error;
+        std::filesystem::remove(path, error);
     }
 
     {

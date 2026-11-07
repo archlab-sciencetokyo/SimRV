@@ -531,16 +531,56 @@ void Tui::initialize() {
         }
     }
 
-    // 2. Sixel support query (DA1 \033[?...c) and environment checks
+    // 2. Sixel & Kitty support query and environment checks
     bool env_sixel = false;
+    bool env_kitty = false;
     const char* term_env = std::getenv("TERM");
+    const char* color_env = std::getenv("COLORTERM");
     const char* term_prog = std::getenv("TERM_PROGRAM");
+    const char* wt_session = std::getenv("WT_SESSION");
+    const char* kitty_pid = std::getenv("KITTY_PID");
+    const char* simrv_graphics = std::getenv("SIMRV_GRAPHICS");
+    const char* simrv_display = std::getenv("SIMRV_ENABLE_DISPLAY");
+
     if (term_env && std::string_view(term_env).contains("sixel")) env_sixel = true;
-    if (term_prog &&
-        (std::string_view(term_prog) == "wezterm" || std::string_view(term_prog) == "foot" ||
-         std::string_view(term_prog) == "mlterm" || std::string_view(term_prog) == "yaft" ||
-         std::string_view(term_prog) == "contour")) {
-        env_sixel = true;
+    if (color_env && std::string_view(color_env).contains("sixel")) env_sixel = true;
+    if (wt_session != nullptr) env_sixel = true;  // Windows Terminal 1.22+ supports Sixel
+
+    if (kitty_pid != nullptr || std::getenv("KITTY_WINDOW_ID") != nullptr ||
+        (term_env && std::string_view(term_env) == "xterm-kitty")) {
+        env_kitty = true;
+    }
+
+    if (term_prog) {
+        std::string prog_lower;
+        prog_lower.reserve(std::string_view(term_prog).size());
+        for (char ch : std::string_view(term_prog)) {
+            prog_lower.push_back(static_cast<char>(std::tolower(static_cast<unsigned char>(ch))));
+        }
+        if (prog_lower.contains("wezterm") || prog_lower.contains("foot") ||
+            prog_lower.contains("mlterm") || prog_lower.contains("yaft") ||
+            prog_lower.contains("contour") || prog_lower.contains("ghostty")) {
+            env_sixel = true;
+        }
+        if (prog_lower.contains("ghostty") || prog_lower.contains("wezterm")) {
+            env_kitty = true;
+        }
+    }
+
+    if (simrv_graphics != nullptr) {
+        std::string_view g(simrv_graphics);
+        if (g == "sixel") {
+            env_sixel = true;
+        } else if (g == "kitty") {
+            env_kitty = true;
+        } else if (g == "all" || g == "both" || g == "1" || g == "true") {
+            env_sixel = true;
+            env_kitty = true;
+        }
+    }
+    if (simrv_display != nullptr) {
+        std::string_view d(simrv_display);
+        if (d == "1" || d == "true") env_sixel = true;
     }
 
     bool da1_sixel = false;
@@ -571,9 +611,26 @@ void Tui::initialize() {
     const auto kitty_reply = resp.find("\033_Gi=31;");
     const auto kitty_reply_end =
         kitty_reply == std::string::npos ? std::string::npos : resp.find("\033\\", kitty_reply);
-    kitty_graphics_supported_ =
+    const bool query_kitty =
         kitty_reply_end != std::string::npos &&
         std::string_view(resp).substr(kitty_reply + 8, kitty_reply_end - kitty_reply - 8) == "OK";
+    kitty_graphics_supported_ = env_kitty || query_kitty;
+
+    // Explicit disable overrides all detection
+    if (simrv_graphics != nullptr) {
+        std::string_view g(simrv_graphics);
+        if (g == "none" || g == "0" || g == "false" || g == "off") {
+            sixel_supported_ = false;
+            kitty_graphics_supported_ = false;
+        }
+    }
+    if (simrv_display != nullptr) {
+        std::string_view d(simrv_display);
+        if (d == "0" || d == "false") {
+            sixel_supported_ = false;
+            kitty_graphics_supported_ = false;
+        }
+    }
     kitty_image_id_ = static_cast<uint32_t>(::getpid());
     if (kitty_image_id_ == 0) kitty_image_id_ = 1;
     modal_.set_display_graphics_supported(is_display_graphics_supported());

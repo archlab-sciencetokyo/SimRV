@@ -212,32 +212,161 @@ auto print_doctor() -> int {
     const char* term = std::getenv("TERM");
     const char* colorterm = std::getenv("COLORTERM");
     const char* term_program = std::getenv("TERM_PROGRAM");
+    const char* wt_session = std::getenv("WT_SESSION");
+    const char* kitty_pid = std::getenv("KITTY_PID");
+    const char* kitty_window = std::getenv("KITTY_WINDOW_ID");
+    const char* simrv_graphics = std::getenv("SIMRV_GRAPHICS");
+    const char* simrv_display = std::getenv("SIMRV_ENABLE_DISPLAY");
     const bool tty = ::isatty(STDIN_FILENO) != 0 && ::isatty(STDOUT_FILENO) != 0;
+
     const std::string_view term_value = term != nullptr ? term : "";
     const std::string_view color_value = colorterm != nullptr ? colorterm : "";
     const std::string_view program_value = term_program != nullptr ? term_program : "";
+
+    std::string prog_lower;
+    prog_lower.reserve(program_value.size());
+    for (char c : program_value) {
+        prog_lower.push_back(static_cast<char>(std::tolower(static_cast<unsigned char>(c))));
+    }
+
+    std::string detected_term;
+    if (wt_session != nullptr) {
+        detected_term = "Windows Terminal (WT_SESSION)";
+    } else if (kitty_pid != nullptr || kitty_window != nullptr || term_value == "xterm-kitty") {
+        detected_term = "Kitty (environment)";
+    } else if (prog_lower.contains("ghostty")) {
+        detected_term = "Ghostty";
+    } else if (prog_lower.contains("wezterm")) {
+        detected_term = "WezTerm";
+    } else if (prog_lower.contains("foot")) {
+        detected_term = "foot";
+    } else if (prog_lower.contains("contour")) {
+        detected_term = "Contour";
+    } else if (prog_lower.contains("vscode")) {
+        detected_term = "VS Code Terminal";
+    } else if (std::getenv("TMUX") != nullptr) {
+        detected_term = "tmux multiplexer";
+    } else if (!program_value.empty()) {
+        detected_term = std::string(program_value);
+    } else if (!term_value.empty()) {
+        detected_term = std::string(term_value);
+    } else {
+        detected_term = "unknown";
+    }
+
     const bool sixel = term_value.contains("sixel") || color_value.contains("sixel") ||
-                       program_value.contains("foot") || program_value.contains("contour") ||
-                       program_value.contains("WezTerm");
+                 prog_lower.contains("foot") || prog_lower.contains("contour") ||
+                 prog_lower.contains("wezterm") || prog_lower.contains("ghostty") ||
+                 prog_lower.contains("mlterm") || prog_lower.contains("yaft") ||
+                 (wt_session != nullptr);
+
+    const bool kitty = kitty_pid != nullptr || kitty_window != nullptr || term_value == "xterm-kitty" ||
+                 prog_lower.contains("ghostty") || prog_lower.contains("wezterm");
+    bool force_sixel = false;
+    bool force_kitty = false;
+    bool graphics_disabled = false;
+
+    if (simrv_graphics != nullptr) {
+        std::string_view g(simrv_graphics);
+        if (g == "sixel")
+            force_sixel = true;
+        else if (g == "kitty")
+            force_kitty = true;
+        else if (g == "all" || g == "both" || g == "1" || g == "true") {
+            force_sixel = true;
+            force_kitty = true;
+        }
+    }
+    if (simrv_display != nullptr) {
+        std::string_view d(simrv_display);
+        if (d == "1" || d == "true")
+            force_sixel = true;
+        else if (d == "0" || d == "false") graphics_disabled = true;
+    }
+    if (simrv_graphics != nullptr) {
+        const std::string_view g(simrv_graphics);
+        if (g == "none" || g == "0" || g == "false" || g == "off") {
+            graphics_disabled = true;
+        }
+    }
+
+    std::string sixel_status;
+    if (graphics_disabled) {
+        sixel_status = "disabled by override";
+    } else if (force_sixel) {
+        sixel_status = "enabled by override (terminal support not verified)";
+    } else if (sixel) {
+        if (wt_session != nullptr) {
+            sixel_status = "detected (Windows Terminal 1.22+ supports Sixel)";
+        } else if (term_value.contains("sixel") || color_value.contains("sixel")) {
+            sixel_status = "detected (advertised in TERM/COLORTERM)";
+        } else if (!detected_term.empty()) {
+            sixel_status = std::format("detected (supported by {})", detected_term);
+        } else {
+            sixel_status = "detected";
+        }
+    } else {
+        sixel_status = "not detected in environment (runtime probe queries terminal via DA1)";
+    }
+
+    std::string kitty_status;
+    if (graphics_disabled) {
+        kitty_status = "disabled by override";
+    } else if (force_kitty) {
+        kitty_status = "enabled by override (terminal support not verified)";
+    } else if (kitty) {
+        kitty_status = std::format("detected (supported by {})", detected_term);
+    } else {
+        kitty_status = "not detected in environment (runtime probe queries terminal via APC)";
+    }
+
+#if defined(__linux__)
+    constexpr std::string_view host_os = "Linux";
+#elif defined(__APPLE__)
+    constexpr std::string_view host_os = "macOS";
+#elif defined(_WIN32)
+    constexpr std::string_view host_os = "Windows";
+#elif defined(__FreeBSD__)
+    constexpr std::string_view host_os = "FreeBSD";
+#else
+    constexpr std::string_view host_os = "Unix";
+#endif
+
+#if defined(__x86_64__) || defined(_M_X64)
+    constexpr std::string_view host_arch = "x86-64";
+#elif defined(__aarch64__) || defined(_M_ARM64)
+    constexpr std::string_view host_arch = "aarch64";
+#elif defined(__riscv) && (__riscv_xlen == 64)
+    constexpr std::string_view host_arch = "riscv64";
+#elif defined(__riscv) && (__riscv_xlen == 32)
+    constexpr std::string_view host_arch = "riscv32";
+#elif defined(__i386__) || defined(_M_IX86)
+    constexpr std::string_view host_arch = "x86-32";
+#else
+    constexpr std::string_view host_arch = "unknown";
+#endif
 
     std::println("SimRV environment diagnostics");
-    std::println("  version          : {}", simrv::buildinfo::kVersion);
-#if defined(__APPLE__)
+    std::println("  version          : {} (RV{} build target)", simrv::buildinfo::kVersion,
+                 simrv::xlen::kXLenBits);
+    std::println("  host             : {} ({})", host_os, host_arch);
+    std::println("  interactive TTY  : {}",
+                 tty ? "yes (stdin & stdout connected to a terminal)"
+                     : "no (piped or background; use --cli for headless runs)");
+    std::println("  terminal         : {} (TERM={}, COLORTERM={})", detected_term,
+                 term_value.empty() ? "(unset)" : term_value,
+                 color_value.empty() ? "(unset)" : color_value);
+    std::println("  Sixel graphics   : {}", sixel_status);
+    std::println("  Kitty graphics   : {}", kitty_status);
+    if (simrv_graphics != nullptr || simrv_display != nullptr) {
+        std::println("  graphics override: SIMRV_GRAPHICS={}, SIMRV_ENABLE_DISPLAY={}",
+                     simrv_graphics != nullptr ? simrv_graphics : "(unset)",
+                     simrv_display != nullptr ? simrv_display : "(unset)");
+    }
+    std::println("  mouse protocol   : SGR-pixel mode (1006/1016) requested by interactive TUI");
     std::println(
-        "  host             : macOS source-build target; release packages target Linux x86-64");
-#elif defined(__linux__)
-    std::println("  host             : Linux (release packages target x86-64)");
-#else
-    std::println("  host             : unsupported native host (use Linux or macOS)");
-#endif
-    std::println("  interactive TTY  : {}", tty ? "yes" : "no (use --cli for pipes)");
-    std::println("  TERM             : {}", term_value.empty() ? "(unset)" : term_value);
-    std::println("  Sixel environment : {}",
-                 sixel ? "detected" : "not detected (text TUI remains available)");
-    std::println("  mouse protocol   : SGR-pixel mode requested by interactive TUI");
-    std::println(
-        "  package runtime  : use the static musl archive outside the tested native package "
-        "matrix");
+        "  framebuffer TUI  : streaming via Sixel or Kitty when detected; text TUI always "
+        "available");
     return 0;
 }
 
