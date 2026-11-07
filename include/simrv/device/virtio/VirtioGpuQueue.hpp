@@ -22,7 +22,7 @@ struct VirtioGpuResp {
 template <typename DmaRead, typename DmaWrite, typename NotifyComplete>
 void process_gpu_queue(QueueState& q, DmaRead&& dma_read, DmaWrite&& dma_write,
                        NotifyComplete&& notify_complete) {
-    if (q.ready == 0 || q.driver_addr == 0 || q.device_addr == 0 || q.desc_addr == 0) return;
+    if (!q.usable()) return;
 
     uint16_t avail_idx = 0;
     if (!dma_read(q.driver_addr + 2, &avail_idx, sizeof(avail_idx))) return;
@@ -34,6 +34,7 @@ void process_gpu_queue(QueueState& q, DmaRead&& dma_read, DmaWrite&& dma_write,
         if (!dma_read(q.driver_addr + 4 + ring_idx * 2, &head_desc_idx, sizeof(head_desc_idx)))
             break;
 
+        if (head_desc_idx >= q.num) break;
         VirtqDesc desc0{};
         if (!dma_read(q.desc_addr + head_desc_idx * sizeof(VirtqDesc), &desc0, sizeof(desc0)))
             break;
@@ -41,7 +42,8 @@ void process_gpu_queue(QueueState& q, DmaRead&& dma_read, DmaWrite&& dma_write,
         uint32_t written = 0;
         if ((desc0.flags & kVirtqDescFNext) != 0) {
             VirtqDesc desc1{};
-            if (dma_read(q.desc_addr + desc0.next * sizeof(VirtqDesc), &desc1, sizeof(desc1))) {
+            if (desc0.next < q.num &&
+                dma_read(q.desc_addr + desc0.next * sizeof(VirtqDesc), &desc1, sizeof(desc1))) {
                 VirtioGpuResp resp{};
                 if (desc1.len >= sizeof(resp)) {
                     (void)dma_write(desc1.addr, &resp, sizeof(resp));

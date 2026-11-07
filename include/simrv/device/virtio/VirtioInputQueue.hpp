@@ -12,10 +12,7 @@ namespace simrv::device::virtio {
 template <typename DmaRead, typename DmaWrite, typename TriggerIrq>
 void process_input_event_queue(QueueState& queue, InputBackend& backend, DmaRead&& dma_read,
                                DmaWrite&& dma_write, TriggerIrq&& trigger_irq) {
-    if (queue.ready == 0 || queue.driver_addr == 0 || queue.device_addr == 0 ||
-        queue.desc_addr == 0) {
-        return;
-    }
+    if (!queue.usable()) return;
 
     std::scoped_lock lock(backend.event_mutex);
     if (backend.event_queue.empty()) return;
@@ -32,6 +29,7 @@ void process_input_event_queue(QueueState& queue, InputBackend& backend, DmaRead
             break;
         }
 
+        if (head_desc_idx >= queue.num) break;
         VirtqDesc desc{};
         if (!dma_read(queue.desc_addr + head_desc_idx * sizeof(desc), &desc, sizeof(desc))) break;
         if (desc.len < sizeof(VirtioInputEvent)) break;

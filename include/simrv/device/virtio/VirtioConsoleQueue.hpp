@@ -15,9 +15,7 @@ namespace simrv::device::virtio {
 template <typename DmaRead, typename DmaWrite, typename TriggerIrq>
 void process_console_queue(uint32_t q_idx, QueueState& q, ConsoleBackend& backend,
                            DmaRead&& dma_read, DmaWrite&& dma_write, TriggerIrq&& trigger_irq) {
-    if (q.ready == 0 || q.driver_addr == 0 || q.device_addr == 0 || q.desc_addr == 0) {
-        return;
-    }
+    if (!q.usable()) return;
 
     uint16_t avail_idx = 0;
     if (!dma_read(q.driver_addr + 2, &avail_idx, sizeof(avail_idx))) {
@@ -34,6 +32,7 @@ void process_console_queue(uint32_t q_idx, QueueState& q, ConsoleBackend& backen
                 break;
             }
 
+            if (head_desc_idx >= q.num) break;
             VirtqDesc desc{};
             if (!dma_read(q.desc_addr + head_desc_idx * sizeof(VirtqDesc), &desc, sizeof(desc))) {
                 break;
@@ -66,6 +65,7 @@ void process_console_queue(uint32_t q_idx, QueueState& q, ConsoleBackend& backen
                 break;
             }
 
+            if (head_desc_idx >= q.num) break;
             VirtqDesc desc{};
             if (!dma_read(q.desc_addr + head_desc_idx * sizeof(VirtqDesc), &desc, sizeof(desc))) {
                 break;

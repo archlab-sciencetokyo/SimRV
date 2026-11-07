@@ -88,6 +88,19 @@ struct QueueState {
     uint64_t driver_addr{0};
     uint64_t device_addr{0};
     VirtioQueueIndex last_avail_idx{0};
+
+    /// The split-ring metadata must fit in the 64-bit transport address space.
+    [[nodiscard]] constexpr auto usable() const noexcept -> bool {
+        if (ready == 0 || num == 0 || num > num_max || desc_addr == 0 || driver_addr == 0 ||
+            device_addr == 0)
+            return false;
+        const auto fits = [](uint64_t base, uint64_t bytes) {
+            return bytes - 1 <= std::numeric_limits<uint64_t>::max() - base;
+        };
+        return fits(desc_addr, uint64_t{num} * sizeof(VirtqDesc)) &&
+               fits(driver_addr, 4 + uint64_t{num} * sizeof(uint16_t)) &&
+               fits(device_addr, 4 + uint64_t{num} * sizeof(VirtqUsedElem));
+    }
 };
 
 // -----------------------------------------------------------------------------

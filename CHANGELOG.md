@@ -8,6 +8,7 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Fix MMIO routing for overlapping device windows with holes and reject accesses that cross device boundaries.
 - Fix reservation invalidation for cache-block zeroing, DMA writes, and oversized writes in native RV32.
 - Reject VirtIO DMA addresses that exceed the native guest physical-address width instead of aliasing low RAM.
+- Reject invalid VirtIO queue sizes, overflowing ring ranges, and out-of-range descriptor indices.
 - Fix unsupported wide direct data-cache accesses in native RV32.
 - Strengthen C++ address interfaces for translation, caches, debugging, MMIO, and DMA. The C plugin ABI remains compatible.
 - Allow serial plugins to replace the configured UART and compatible MMIO plugins to replace standalone power and RTC devices. Plugin MMIO errors now reach the guest.

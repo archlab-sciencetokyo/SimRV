@@ -17,7 +17,7 @@ template <typename DmaRead, typename DmaWrite, typename ScheduleDeferred, typena
 void process_block_queue(QueueState& q, BlockBackend& backend, std::vector<std::byte>& io_buffer,
                          bool defer_completion, DmaRead&& dma_read, DmaWrite&& dma_write,
                          ScheduleDeferred&& schedule_deferred, NotifyComplete&& notify_complete) {
-    if (q.ready == 0 || q.driver_addr == 0 || q.device_addr == 0 || q.desc_addr == 0) return;
+    if (!q.usable()) return;
 
     uint16_t avail_idx = 0;
     if (!dma_read(q.driver_addr + 2, &avail_idx, sizeof(avail_idx))) return;
@@ -29,6 +29,7 @@ void process_block_queue(QueueState& q, BlockBackend& backend, std::vector<std::
         if (!dma_read(q.driver_addr + 4 + ring_idx * 2, &head_desc_idx, sizeof(head_desc_idx)))
             break;
 
+        if (head_desc_idx >= q.num) break;
         VirtqDesc desc0{};
         if (!dma_read(q.desc_addr + head_desc_idx * sizeof(VirtqDesc), &desc0, sizeof(desc0)))
             break;
@@ -47,7 +48,8 @@ void process_block_queue(QueueState& q, BlockBackend& backend, std::vector<std::
         uint8_t request_status = 2;  // VIRTIO_BLK_S_UNSUPP
         if ((desc0.flags & kVirtqDescFNext) != 0) {
             VirtqDesc desc1{};
-            if (dma_read(q.desc_addr + desc0.next * sizeof(VirtqDesc), &desc1, sizeof(desc1))) {
+            if (desc0.next < q.num &&
+                dma_read(q.desc_addr + desc0.next * sizeof(VirtqDesc), &desc1, sizeof(desc1))) {
                 uint64_t status_addr = 0;
                 uint32_t data_written = 0;
                 bool status_descriptor_valid = false;
@@ -104,7 +106,8 @@ void process_block_queue(QueueState& q, BlockBackend& backend, std::vector<std::
 
                 if (hdr.type != 4 && (desc1.flags & kVirtqDescFNext) != 0) {
                     VirtqDesc desc2{};
-                    if (dma_read(q.desc_addr + desc1.next * sizeof(VirtqDesc), &desc2,
+                    if (desc1.next < q.num &&
+                        dma_read(q.desc_addr + desc1.next * sizeof(VirtqDesc), &desc2,
                                  sizeof(desc2))) {
                         status_addr = desc2.addr;
                         status_descriptor_valid =

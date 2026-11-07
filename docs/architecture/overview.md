@@ -146,6 +146,8 @@ physical addresses from platform configuration or translate virtual addresses be
 DMA. Loaded segment records used for cache prewarming also require `PhysAddr`.
 VirtIO descriptor and ring addresses remain 64-bit through the transport adapter; an address
 that does not fit the simulator's physical-address type is rejected before DMA.
+Queue processing requires a nonzero supported queue size, nonwrapping split-ring ranges, and
+descriptor indices within the configured table.
 PMP access checks require `PhysAddr`; callers must translate virtual addresses before protection
 checks, including page-table accesses.
 `TileLinkNode::base_address()` returns `PhysAddr`, and `contains()` takes `PhysAddr`; C++ device

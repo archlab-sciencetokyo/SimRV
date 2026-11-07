@@ -12,7 +12,7 @@ namespace simrv::device::virtio {
 void VirtioSoundBackend::process_controlq(QueueState& q, const DmaReadFn& dma_read,
                                           const DmaWriteFn& dma_write,
                                           const std::function<void()>& trigger_irq) {
-    if (q.ready == 0 || q.driver_addr == 0 || q.device_addr == 0 || q.desc_addr == 0) return;
+    if (!q.usable()) return;
 
     uint16_t avail_idx = 0;
     if (!dma_read(q.driver_addr + 2, &avail_idx, 2)) return;
@@ -23,6 +23,7 @@ void VirtioSoundBackend::process_controlq(QueueState& q, const DmaReadFn& dma_re
         uint16_t head_desc_idx = 0;
         if (!dma_read(q.driver_addr + 4 + ring_idx * 2, &head_desc_idx, 2)) break;
 
+        if (head_desc_idx >= q.num) break;
         VirtqDesc desc0{};
         if (!dma_read(q.desc_addr + head_desc_idx * sizeof(VirtqDesc), &desc0, sizeof(desc0)))
             break;
@@ -35,7 +36,8 @@ void VirtioSoundBackend::process_controlq(QueueState& q, const DmaReadFn& dma_re
         uint32_t written_len = 0;
         if ((desc0.flags & kVirtqDescFNext) != 0) {
             VirtqDesc desc1{};
-            if (dma_read(q.desc_addr + desc0.next * sizeof(VirtqDesc), &desc1, sizeof(desc1))) {
+            if (desc0.next < q.num &&
+                dma_read(q.desc_addr + desc0.next * sizeof(VirtqDesc), &desc1, sizeof(desc1))) {
                 switch (hdr.code) {
                     case kVirtioSndRJackInfo: {
                         VirtioSndJackInfo info{};
@@ -134,7 +136,7 @@ void VirtioSoundBackend::process_controlq(QueueState& q, const DmaReadFn& dma_re
 void VirtioSoundBackend::process_txq(QueueState& q, const DmaReadFn& dma_read,
                                      const DmaWriteFn& dma_write,
                                      const std::function<void()>& trigger_irq) {
-    if (q.ready == 0 || q.driver_addr == 0 || q.device_addr == 0 || q.desc_addr == 0) return;
+    if (!q.usable()) return;
 
     uint16_t avail_idx = 0;
     if (!dma_read(q.driver_addr + 2, &avail_idx, 2)) return;
@@ -152,7 +154,8 @@ void VirtioSoundBackend::process_txq(QueueState& q, const DmaReadFn& dma_read,
         uint32_t status_len = 0;
         bool is_first = true;
 
-        while (true) {
+        for (size_t n = 0; n < q.num; ++n) {
+            if (cur_desc_idx >= q.num) break;
             if (!dma_read(q.desc_addr + cur_desc_idx * sizeof(VirtqDesc), &desc, sizeof(desc))) {
                 break;
             }
@@ -163,7 +166,9 @@ void VirtioSoundBackend::process_txq(QueueState& q, const DmaReadFn& dma_read,
             } else {
                 if (is_first) {
                     is_first = false;
-                    if (desc.len > sizeof(VirtioSndPcmXfer)) {
+                    if (desc.len > sizeof(VirtioSndPcmXfer) &&
+                        desc.addr <= std::numeric_limits<uint64_t>::max() -
+                                         sizeof(VirtioSndPcmXfer)) {
                         const std::size_t sample_bytes = desc.len - sizeof(VirtioSndPcmXfer);
                         const std::size_t offset = pcm_data.size();
                         pcm_data.resize(offset + sample_bytes);
