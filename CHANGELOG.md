@@ -10,6 +10,7 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Fix unsupported wide direct data-cache accesses in native RV32.
 - Strengthen C++ address interfaces for translation, caches, debugging, MMIO, and DMA. The C plugin ABI remains compatible.
 - Allow serial plugins to replace the configured UART and compatible MMIO plugins to replace standalone power and RTC devices. Plugin MMIO errors now reach the guest.
+- Allow custom MMIO plugins to provide a framebuffer for the TUI.
 - Improve RVComp MMC support, device-tree boot arguments, and startup diagnostics in the TUI.
 
 ## [v3.0.0-rc.19] — 2026-11-05

@@ -16,6 +16,15 @@ struct ArchState;
 
 namespace simrv::memory {
 
+/// Address produced by VS-stage translation and consumed by G-stage translation.
+struct GuestPhysAddr {
+    explicit constexpr GuestPhysAddr(simrv::xlen::Address value = 0) noexcept : value_(value) {}
+    [[nodiscard]] constexpr auto raw() const noexcept -> simrv::xlen::Address { return value_; }
+
+   private:
+    simrv::xlen::Address value_;
+};
+
 using PteFlags = uint8_t;
 
 enum class PteFlag : PteFlags {
@@ -162,7 +171,7 @@ struct PageWalkState {
     simrv::xlen::PageTableLevel level = -1;
     simrv::xlen::Word satp_root{0};
     simrv::xlen::Word hgatp{0};
-    simrv::xlen::Address pte_guest_address{0};
+    GuestPhysAddr pte_guest_address{};
     simrv::xlen::Address guest_fault_address{0};
     bool implicit_vs_stage_page_table_fault{false};
     bool guest_stage_enabled{false};
@@ -254,7 +263,7 @@ class PageTableWalker {
         -> std::expected<PageWalkResult, simrv::xlen::TrapCause>;
 
     /** Translate a guest-physical address through an SvNNx4 hgatp G-stage page table. */
-    [[nodiscard]] auto walk_guest_physical(simrv::xlen::Address guest_address, PteAccess access,
+    [[nodiscard]] auto walk_guest_physical(GuestPhysAddr guest_address, PteAccess access,
                                            simrv::xlen::Word hgatp, unsigned xlen,
                                            simrv::xlen::Address* fault_address = nullptr,
                                            bool mxr = false,

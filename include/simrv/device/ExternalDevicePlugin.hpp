@@ -18,7 +18,7 @@ namespace simrv::device {
  * @class ExternalMmioDevice
  * @brief Adapts a C-ABI SimRvExternalDevice descriptor into a SimRV TileLink MmioDevice.
  */
-class ExternalMmioDevice final : public memory::MmioDevice {
+class ExternalMmioDevice : public memory::MmioDevice {
    public:
     ExternalMmioDevice(const SimRvExternalDevice* desc, void* ctx, std::string name,
                        simrv::xlen::PhysAddr base, simrv::xlen::Address size,

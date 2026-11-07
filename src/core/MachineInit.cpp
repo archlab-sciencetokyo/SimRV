@@ -736,6 +736,9 @@ auto Machine::initialize() -> std::expected<void, std::string> {
         if (!memory().system_bus().add_node(device.get())) {
             return std::unexpected("Failed to register custom MMIO device on system bus");
         }
+        if (auto* framebuffer = dynamic_cast<simrv::device::FramebufferDevice*>(device.get())) {
+            runtime_->framebuffer = framebuffer;
+        }
     }
 
     if (runtime_->pcie) {
@@ -1053,6 +1056,10 @@ auto Machine::initialize() -> std::expected<void, std::string> {
                 }
                 if (extension) {
                     if (memory().system_bus().add_node(extension.get())) {
+                        if (auto* framebuffer =
+                                dynamic_cast<simrv::device::FramebufferDevice*>(extension.get())) {
+                            runtime_->framebuffer = framebuffer;
+                        }
                         runtime_->extension_mmios.push_back(std::move(extension));
                     }
                 } else {

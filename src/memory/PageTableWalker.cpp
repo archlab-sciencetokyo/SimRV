@@ -68,8 +68,8 @@ void PageTableWalker::select_next_pte(PageWalkState& state,
         (state.virtual_address.raw() >>
          (12 + state.level * static_cast<int>(state.vpn_bits_per_level))) &
         vpn_mask;
-    state.pte_guest_address = (table_address + vpn * state.pte_size).raw();
-    state.pte_address = simrv::xlen::PhysAddr{state.pte_guest_address};
+    state.pte_guest_address = GuestPhysAddr{(table_address + vpn * state.pte_size).raw()};
+    state.pte_address = simrv::xlen::PhysAddr{state.pte_guest_address.raw()};
     if (state.guest_stage_enabled) {
         auto translated =
             walk_guest_physical(state.pte_guest_address, PteAccess::Read, state.hgatp, state.xlen,
@@ -127,8 +127,8 @@ auto PageTableWalker::begin_walk(simrv::xlen::VirtAddr v_addr, PteAccess access,
         state.physical_address = simrv::xlen::PhysAddr{v_addr.raw()};
         if (state.guest_stage_enabled && priv != kPrivMachine) {
             const bool mxr = arch_state != nullptr && (arch_state->mstatus & MstatusBit::Mxr) != 0;
-            auto translated = walk_guest_physical(v_addr.raw(), access, state.hgatp, xlen, nullptr,
-                                                  mxr, state.arch_state);
+            auto translated = walk_guest_physical(GuestPhysAddr{v_addr.raw()}, access, state.hgatp,
+                                                  xlen, nullptr, mxr, state.arch_state);
             if (!translated) {
                 state.guest_fault_address = v_addr.raw();
                 state.fault = translated.error();
@@ -274,14 +274,13 @@ void PageTableWalker::accept_pte(PageWalkState& state, simrv::xlen::Word pte) co
     }
     const unsigned offset_bits = 12 + state.level * state.vpn_bits_per_level;
     const simrv::xlen::Word offset_mask = (static_cast<simrv::xlen::Word>(1) << offset_bits) - 1;
-    const simrv::xlen::PhysAddr stage_one_address{(state.virtual_address.raw() & offset_mask) |
-                                                  ((ppn << 12) & ~offset_mask)};
-    state.physical_address = stage_one_address;
+    const simrv::xlen::Word stage_one_address =
+        (state.virtual_address.raw() & offset_mask) | ((ppn << 12) & ~offset_mask);
     if (state.guest_stage_enabled) {
         const bool mxr =
             state.arch_state != nullptr && (state.arch_state->mstatus & MstatusBit::Mxr) != 0;
         auto translated =
-            walk_guest_physical(stage_one_address.raw(), state.access, state.hgatp, state.xlen,
+            walk_guest_physical(GuestPhysAddr{stage_one_address}, state.access, state.hgatp, state.xlen,
                                 &state.guest_fault_address, mxr, state.arch_state);
         if (!translated) {
             state.fault = translated.error();
@@ -289,6 +288,8 @@ void PageTableWalker::accept_pte(PageWalkState& state, simrv::xlen::Word pte) co
             return;
         }
         state.physical_address = translated->physical_address;
+    } else {
+        state.physical_address = simrv::xlen::PhysAddr{stage_one_address};
     }
 
     if (state.arch_state != nullptr) {
@@ -381,11 +382,12 @@ auto PageTableWalker::validate_pte_permissions(simrv::xlen::Word pte,
     return true;
 }
 
-auto PageTableWalker::walk_guest_physical(simrv::xlen::Address guest_address, PteAccess access,
+auto PageTableWalker::walk_guest_physical(GuestPhysAddr guest_physical, PteAccess access,
                                           simrv::xlen::Word hgatp, unsigned xlen,
                                           simrv::xlen::Address* fault_address, bool mxr,
                                           const core::ArchState* arch_state) const
     -> std::expected<PageWalkResult, simrv::xlen::TrapCause> {
+    const auto guest_address = guest_physical.raw();
     const auto guest_page_fault = [access]() -> simrv::xlen::TrapCause {
         using simrv::isa::ExceptionCode;
         switch (access) {

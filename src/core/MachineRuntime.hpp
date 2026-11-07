@@ -23,6 +23,7 @@
 #include "simrv/device/Aclint.hpp"
 #include "simrv/device/DmaController.hpp"
 #include "simrv/device/DummyMmio.hpp"
+#include "simrv/device/FramebufferDevice.hpp"
 #include "simrv/device/Power.hpp"
 #include "simrv/device/RingBufferEthernetMmio.hpp"
 #include "simrv/device/Rtc.hpp"
@@ -151,6 +152,7 @@ class Machine::Runtime {
     RamStorage ram;
     std::unique_ptr<simrv::Rtc> rtc;
     std::unique_ptr<simrv::device::SerialDevice> uart;
+    simrv::device::FramebufferDevice* framebuffer = nullptr;  // Owned by extension_mmios.
     std::unique_ptr<simrv::device::PowerMmio> power;
     std::unique_ptr<simrv::device::RingBufferEthernetMmio> ring_buffer_ethernet;
     std::vector<std::unique_ptr<simrv::device::DummyMmio>> dummy_mmios;

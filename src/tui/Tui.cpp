@@ -32,6 +32,7 @@
 #include "simrv/core/Machine.hpp"
 #include "simrv/debug/BreakpointManager.hpp"
 #include "simrv/debug/SymbolTable.hpp"
+#include "simrv/device/FramebufferDevice.hpp"
 #include "simrv/device/Uart.hpp"
 #include "simrv/isa/Common.hpp"
 #include "simrv/pipeline/Decoder.hpp"
@@ -1098,20 +1099,22 @@ void Tui::render_draw_sixel(int panel_x, int display_width, int display_rows,
 
         uint64_t strip_hash = 1469598103934665603ULL;
         if (same_dims) {
-            const auto* p64 =
-                reinterpret_cast<const uint64_t*>(fb_bytes + static_cast<size_t>(y) * stride);
-            const size_t num_words = static_cast<size_t>(max_bits * stride) / sizeof(uint64_t);
+            const auto* bytes = fb_bytes + static_cast<size_t>(y) * stride;
+            const size_t num_words = static_cast<size_t>(max_bits) * stride / sizeof(uint64_t);
             for (size_t w = 0; w < num_words; ++w) {
-                strip_hash = (strip_hash ^ p64[w]) * 1099511628211ULL;
+                uint64_t word;
+                std::memcpy(&word, bytes + w * sizeof(word), sizeof(word));
+                strip_hash = (strip_hash ^ word) * 1099511628211ULL;
             }
         } else {
             for (int bit = 0; bit < max_bits; ++bit) {
                 const int src_y = std::min(source_height - 1, (y + bit) * source_height / height);
-                const auto* p64 = reinterpret_cast<const uint64_t*>(
-                    fb_bytes + static_cast<size_t>(src_y) * stride);
+                const auto* bytes = fb_bytes + static_cast<size_t>(src_y) * stride;
                 const size_t words_per_row = static_cast<size_t>(stride) / sizeof(uint64_t);
                 for (size_t w = 0; w < words_per_row; ++w) {
-                    strip_hash = (strip_hash ^ p64[w]) * 1099511628211ULL;
+                    uint64_t word;
+                    std::memcpy(&word, bytes + w * sizeof(word), sizeof(word));
+                    strip_hash = (strip_hash ^ word) * 1099511628211ULL;
                 }
             }
         }
@@ -1633,19 +1636,29 @@ void Tui::render(bool force) {
         is_display_graphics_supported() && has_display && !display_too_small && !modal_.is_active();
     uint64_t framebuffer_signature = 0;
     if (draw_display_graphics) {
-        const auto fb = machine_.framebuffer_view();
-        if (fb.data() != nullptr && fb.size() >= sizeof(uint64_t)) {
-            constexpr uint64_t fnv_offset = 1469598103934665603ULL;
-            constexpr uint64_t fnv_prime = 1099511628211ULL;
-            const auto* p64 = reinterpret_cast<const uint64_t*>(fb.data());
-            const size_t n64 = fb.size() / sizeof(uint64_t);
-            uint64_t h1 = fnv_offset;
-            uint64_t h2 = fnv_prime;
-            for (size_t i = 0; i < n64; i += 2) {
-                h1 = (h1 ^ p64[i]) * fnv_prime;
-                if (i + 1 < n64) h2 = (h2 ^ p64[i + 1]) * fnv_offset;
+        const auto* fb_dev = machine_.framebuffer_device();
+        const auto frame_id = fb_dev ? fb_dev->frame_id() : 0;
+        if (frame_id != 0) {
+            framebuffer_signature = frame_id;
+        } else {
+            const auto fb = machine_.framebuffer_view();
+            if (fb.data() != nullptr && fb.size() >= sizeof(uint64_t)) {
+                constexpr uint64_t fnv_offset = 1469598103934665603ULL;
+                constexpr uint64_t fnv_prime = 1099511628211ULL;
+                const size_t n64 = fb.size() / sizeof(uint64_t);
+                uint64_t h1 = fnv_offset;
+                uint64_t h2 = fnv_prime;
+                for (size_t i = 0; i < n64; i += 2) {
+                    uint64_t word = 0;
+                    std::memcpy(&word, fb.data() + i * sizeof(word), sizeof(word));
+                    h1 = (h1 ^ word) * fnv_prime;
+                    if (i + 1 < n64) {
+                        std::memcpy(&word, fb.data() + (i + 1) * sizeof(word), sizeof(word));
+                        h2 = (h2 ^ word) * fnv_offset;
+                    }
+                }
+                framebuffer_signature = h1 ^ (h2 * 31ULL);
             }
-            framebuffer_signature = h1 ^ (h2 * 31ULL);
         }
     }
     const bool display_graphics_geometry_changed =

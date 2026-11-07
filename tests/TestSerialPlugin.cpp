@@ -2,6 +2,7 @@
 #include <cstdint>
 
 #include "simrv/device/ExternalDevice.h"
+#include "simrv/device/ExternalFramebufferDevice.h"
 #include "simrv/device/ExternalSerialDevice.h"
 
 namespace {
@@ -10,6 +11,7 @@ struct Device {
     const SimRvSerialHostServices* serial{};
     const SimRvHostServices* host{};
     bool services_ready_at_reset{};
+    uint8_t pixels[4]{};
 };
 int init(void** out, const char*) {
     *out = new Device;
@@ -35,6 +37,8 @@ int read(void* ctx, uint64_t offset, uint32_t, uint64_t* out) {
 int write(void* ctx, uint64_t offset, uint32_t, uint64_t value) {
     auto* dev = static_cast<Device*>(ctx);
     if (offset == 0 && dev->serial) dev->serial->write_byte(dev->serial->host_ctx, value);
+    if (offset == 16) dev->pixels[0] = static_cast<uint8_t>(value);
+    if (offset == 20) dev->pixels[1] = static_cast<uint8_t>(value);
     return 0;
 }
 void serial_services(void* ctx, const SimRvSerialHostServices* services) {
@@ -71,6 +75,22 @@ const SimRvExternalSerialDevice serial{
     .has_active_transfer = nullptr,
     .is_interrupt_pending = pending,
 };
+const SimRvExternalFramebufferDevice framebuffer{
+    .api_version = SIMRV_EXTERNAL_FRAMEBUFFER_API_VERSION,
+    .get_info = [](void* ctx, SimRvFramebufferInfo* info) {
+        const uint32_t width = static_cast<Device*>(ctx)->pixels[1] ? 2 : 1;
+        *info = {width, 1, width * 4, 4, SIMRV_FB_FORMAT_A8R8G8B8};
+        return 0;
+    },
+    .get_buffer = [](void* ctx, size_t* size) -> const void* {
+        *size = 4;
+        return static_cast<Device*>(ctx)->pixels;
+    },
+    .get_frame_id = nullptr,
+};
 }  // namespace
 extern "C" const SimRvExternalDevice* simrv_device_plugin_init() { return &device; }
 extern "C" const SimRvExternalSerialDevice* simrv_serial_plugin_init() { return &serial; }
+extern "C" const SimRvExternalFramebufferDevice* simrv_framebuffer_plugin_init() {
+    return &framebuffer;
+}

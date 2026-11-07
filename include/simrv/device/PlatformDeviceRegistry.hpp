@@ -20,11 +20,11 @@ using CustomMmioFactory = std::function<std::unique_ptr<simrv::memory::MmioDevic
     simrv::core::Machine&, const simrv::core::SoCDeviceConfig&)>;
 using SerialDeviceFactory = std::function<std::unique_ptr<SerialDevice>(
     simrv::core::Machine&, const simrv::core::SoCDeviceConfig&)>;
-
 /** Per-machine factories for platform devices. Registry lifetime matches its Machine. */
 class PlatformDeviceRegistry final {
    public:
     /** Register a serial implementation selected by a device's compatible string. */
+
     auto register_serial_compatible(std::string compatible, SerialDeviceFactory factory) -> bool {
         if (compatible.empty() || !factory) return false;
         std::lock_guard lock(mutex_);
@@ -72,9 +72,10 @@ class PlatformDeviceRegistry final {
         if (compatible.empty() || !mmio) return false;
         std::lock_guard lock(mutex_);
         if (compatible_entries_.contains(compatible) ||
-            (serial && serial_entries_.contains(compatible))) return false;
+            (serial && serial_entries_.contains(compatible)))
+            return false;
         compatible_entries_.emplace(compatible, std::move(mmio));
-        if (serial) serial_entries_.emplace(std::move(compatible), std::move(serial));
+        if (serial) serial_entries_.emplace(compatible, std::move(serial));
         return true;
     }
 

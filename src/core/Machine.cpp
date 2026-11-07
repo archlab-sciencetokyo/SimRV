@@ -300,11 +300,42 @@ auto Machine::ram_view() const noexcept -> simrv::memory::RamView {
 }
 
 auto Machine::framebuffer_view() const noexcept -> simrv::memory::RamView {
+    if (runtime_ && runtime_->framebuffer) {
+        const auto data = runtime_->framebuffer->framebuffer_data();
+        const auto geom = runtime_->framebuffer->framebuffer_geometry();
+        const uint64_t row_bytes = uint64_t{geom.width} * geom.bpp;
+        const uint64_t stride = geom.stride != 0 ? geom.stride : row_bytes;
+        if (geom.width == 0 || geom.height == 0 ||
+            geom.width > static_cast<uint32_t>(std::numeric_limits<int>::max()) ||
+            geom.height > static_cast<uint32_t>(std::numeric_limits<int>::max()) ||
+            !((geom.bpp == 2 && geom.format == FramebufferFormat::R5G6B5) ||
+              (geom.bpp == 4 && geom.format == FramebufferFormat::A8R8G8B8)) ||
+            stride < row_bytes ||
+            stride * geom.height > data.size() ||
+            data.size() > std::numeric_limits<simrv::xlen::Address>::max()) return {};
+        return {const_cast<simrv::xlen::Byte*>(reinterpret_cast<const simrv::xlen::Byte*>(data.data())),
+                geom.base, static_cast<simrv::xlen::Address>(data.size())};
+    }
     const auto size = static_cast<simrv::xlen::Address>(framebuffer_geometry_.size_bytes());
     const auto base = framebuffer_geometry_.base;
     const auto ram = ram_view();
     if (!ram.contains(base, static_cast<std::size_t>(size))) return {};
     return {ram.unchecked_ptr(base), base, size};
+}
+
+auto Machine::framebuffer_geometry() const noexcept -> FramebufferConfig {
+    if (runtime_ && runtime_->framebuffer) {
+        return runtime_->framebuffer->framebuffer_geometry();
+    }
+    return framebuffer_geometry_;
+}
+
+auto Machine::framebuffer_width() const noexcept -> uint32_t {
+    return framebuffer_geometry().width;
+}
+
+auto Machine::framebuffer_height() const noexcept -> uint32_t {
+    return framebuffer_geometry().height;
 }
 
 auto Machine::dump_signature(const std::string& filepath) const -> bool {
@@ -572,6 +603,14 @@ auto Machine::uart_device() noexcept -> simrv::device::SerialDevice* { return ru
 
 auto Machine::uart_device() const noexcept -> const simrv::device::SerialDevice* {
     return runtime_->uart.get();
+}
+
+auto Machine::framebuffer_device() noexcept -> simrv::device::FramebufferDevice* {
+    return runtime_->framebuffer;
+}
+
+auto Machine::framebuffer_device() const noexcept -> const simrv::device::FramebufferDevice* {
+    return runtime_->framebuffer;
 }
 
 auto Machine::dma_controller() noexcept -> simrv::device::DmaController* {

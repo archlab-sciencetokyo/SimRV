@@ -28,6 +28,12 @@ elapsed time was 0.399677 seconds before (10.89% CV) and 0.401831 seconds after 
 same fixed-instruction stop policy. Variability exceeds the 5% investigation threshold, so this
 result cannot establish a small performance difference.
 
+After the guest-physical address and framebuffer-interface changes, a 25 million instruction
+Linux boot comparison used three warmups and ten interleaved runs per binary on one pinned CPU.
+The median was 0.617467 seconds before (12.04% CV) and 0.618443 seconds after (17.38% CV), a
+0.16% increase; the high variability makes small differences inconclusive. The RV64 executables
+were 42,153,712 and 42,166,104 bytes respectively. ARM hardware remained unavailable.
+
 The branch result is too noisy to establish a speedup. The MMIO loop retained the same bus and
 cache counts. The initial baseline executable is no longer available, so an identical-binary
 comparison against the final tree remains outstanding. ARM hardware and usable host performance

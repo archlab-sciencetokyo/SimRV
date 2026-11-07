@@ -236,6 +236,12 @@ string matches the configured device. Other built-in devices are not generally r
 timers, interrupt controllers, DMA and VirtIO have additional simulator-owned state or transports.
 Custom MMIO devices may still be added independently of those built-ins.
 
+A custom MMIO plugin can expose a display by exporting `simrv_framebuffer_plugin_init` and the
+versioned descriptor in `simrv/device/ExternalFramebufferDevice.h`. Its callbacks receive the
+same device context as MMIO. Keep the returned pixel buffer valid while the device exists and
+synchronize access with the simulation and display threads. The optional frame ID allows the TUI
+to avoid redrawing an unchanged frame; returning zero selects the normal framebuffer check.
+
 ```c
 // my_device.c
 #include <stdint.h>

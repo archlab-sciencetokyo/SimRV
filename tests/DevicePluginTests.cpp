@@ -9,6 +9,8 @@
 #include "simrv/core/MachineConfig.hpp"
 #include "simrv/core/TelemetrySink.hpp"
 #include "simrv/device/ExternalDevicePlugin.hpp"
+#include "simrv/device/ExternalFramebufferDevice.h"
+#include "simrv/device/FramebufferDevice.hpp"
 #include "simrv/device/ExternalSerialDevice.h"
 #include "simrv/device/SerialDevice.hpp"
 #include "simrv/memory/MemorySubsystem.hpp"
@@ -17,6 +19,7 @@
 static_assert(std::is_standard_layout_v<SimRvSerialHostServices>);
 static_assert(std::is_standard_layout_v<SimRvExternalSerialDevice>);
 static_assert(SIMRV_EXTERNAL_SERIAL_API_VERSION == 1);
+static_assert(std::is_standard_layout_v<SimRvExternalFramebufferDevice>);
 
 #define TEST_CHECK(condition)                           \
     do {                                                \
@@ -115,6 +118,44 @@ void test_mmio_plugin_replaces_standalone_builtin() {
     TEST_CHECK(replacement->read32(0) == 0xffffffffU);
 }
 
+void test_framebuffer_uses_mmio_device_context() {
+    simrv::core::Machine machine{};
+    simrv::device::PlatformDeviceRegistry registry;
+    TEST_CHECK(simrv::device::load_external_device_plugin(TEST_SERIAL_PLUGIN_PATH, registry));
+    simrv::core::SoCDeviceConfig config{};
+    config.compatible = "test,serial";
+    auto mmio = registry.create_mmio(machine, config);
+    TEST_CHECK(mmio != nullptr);
+    auto* framebuffer = dynamic_cast<simrv::device::FramebufferDevice*>(mmio.get());
+    TEST_CHECK(framebuffer != nullptr);
+    TEST_CHECK(framebuffer->framebuffer_data().size() == 4);
+    mmio->write8(16, 0x5a);
+    TEST_CHECK(framebuffer->framebuffer_data()[0] == 0x5a);
+
+    simrv::core::MachineConfig cfg{};
+    cfg.tui.enabled = true;
+    config.kind = simrv::core::SoCDeviceKind::CustomMmio;
+    config.name = "test-framebuffer";
+    config.base = 0x10010000;
+    config.size = 0x100;
+    config.enabled = true;
+    cfg.soc.devices.push_back(config);
+    cfg.files.device_plugins.push_back(TEST_SERIAL_PLUGIN_PATH);
+    simrv::core::Machine configured(cfg);
+    TEST_CHECK(configured.initialize().has_value());
+    auto* configured_fb = configured.framebuffer_device();
+    TEST_CHECK(configured_fb != nullptr);
+    auto* node = configured.memory().system_bus().router().resolve_device(
+        simrv::xlen::PhysAddr{config.base});
+    auto* configured_mmio = dynamic_cast<simrv::memory::MmioDevice*>(node);
+    TEST_CHECK(configured_mmio != nullptr);
+    configured_mmio->write8(16, 0xa5);
+    TEST_CHECK(configured_fb->framebuffer_data()[0] == 0xa5);
+    TEST_CHECK(configured.framebuffer_view().size() == 4);
+    configured_mmio->write8(20, 1);
+    TEST_CHECK(configured.framebuffer_view().data() == nullptr);
+}
+
 void test_replacement_creation_failure_is_not_silently_ignored() {
     simrv::core::MachineConfig cfg{};
     cfg.tui.enabled = true;
@@ -159,6 +200,7 @@ int main() {
     test_plugin_host_services_are_per_device();
     test_serial_plugin_replaces_builtin();
     test_mmio_plugin_replaces_standalone_builtin();
+    test_framebuffer_uses_mmio_device_context();
     test_replacement_creation_failure_is_not_silently_ignored();
     test_capability_registration_is_atomic();
     std::cout << "Device plugin tests passed\n";

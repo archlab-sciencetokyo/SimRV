@@ -143,6 +143,9 @@ discards the initiating cached copy when removing its directory entry and invali
 throughout the block. DMA writes invalidate reservations over their actual byte range.
 Reservation-table LR, SC, and invalidation operations also require `PhysAddr`; translation must
 be complete before recording or checking a reservation.
+The G-stage page-table walker accepts `GuestPhysAddr`, which denotes a VS-stage result. It returns
+a host `PhysAddr`; guest fault addresses are converted to architectural scalar values for trap
+reporting.
 
 Compact execution keeps integer register operands as `RegId` until indexing the register file;
 its on-disk and plugin interfaces are not affected by that internal representation.

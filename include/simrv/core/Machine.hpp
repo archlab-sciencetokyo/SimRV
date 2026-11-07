@@ -45,6 +45,7 @@ class ExecuteUnit;
 namespace simrv::device {
 class Uart;
 class SerialDevice;
+class FramebufferDevice;
 class PowerMmio;
 class DmaController;
 class AclintMtimer;
@@ -440,15 +441,9 @@ class Machine final : public core::IInterruptController {
         return instruction_memory_mutex_;
     }
     [[nodiscard]] auto framebuffer_view() const noexcept -> simrv::memory::RamView;
-    [[nodiscard]] auto framebuffer_geometry() const noexcept -> const FramebufferConfig& {
-        return framebuffer_geometry_;
-    }
-    [[nodiscard]] auto framebuffer_width() const noexcept -> uint32_t {
-        return framebuffer_geometry_.width;
-    }
-    [[nodiscard]] auto framebuffer_height() const noexcept -> uint32_t {
-        return framebuffer_geometry_.height;
-    }
+    [[nodiscard]] auto framebuffer_geometry() const noexcept -> FramebufferConfig;
+    [[nodiscard]] auto framebuffer_width() const noexcept -> uint32_t;
+    [[nodiscard]] auto framebuffer_height() const noexcept -> uint32_t;
     void set_framebuffer_resolution_for_testing(uint32_t width, uint32_t height) noexcept {
         framebuffer_geometry_.width = width;
         framebuffer_geometry_.height = height;
@@ -472,6 +467,8 @@ class Machine final : public core::IInterruptController {
     [[nodiscard]] auto rtc_device() const noexcept -> const simrv::Rtc*;
     [[nodiscard]] auto uart_device() noexcept -> simrv::device::SerialDevice*;
     [[nodiscard]] auto uart_device() const noexcept -> const simrv::device::SerialDevice*;
+    [[nodiscard]] auto framebuffer_device() noexcept -> simrv::device::FramebufferDevice*;
+    [[nodiscard]] auto framebuffer_device() const noexcept -> const simrv::device::FramebufferDevice*;
     [[nodiscard]] auto dma_controller() noexcept -> simrv::device::DmaController*;
     [[nodiscard]] auto dma_controller() const noexcept -> const simrv::device::DmaController*;
     [[nodiscard]] auto axi_bridge() noexcept -> simrv::memory::Axi4Bridge*;

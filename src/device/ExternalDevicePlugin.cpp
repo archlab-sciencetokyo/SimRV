@@ -12,7 +12,9 @@
 
 #include "simrv/core/Logger.hpp"
 #include "simrv/core/Machine.hpp"
+#include "simrv/device/ExternalFramebufferDevice.h"
 #include "simrv/device/ExternalSerialDevice.h"
+#include "simrv/device/FramebufferDevice.hpp"
 #include "simrv/device/Uart.hpp"
 
 namespace simrv::device {
@@ -66,6 +68,48 @@ class ExternalSerialAdapter final : public Uart {
     void* ctx_;
     SimRvSerialHostServices services_;
     ExternalMmioDevice mmio_;
+};
+
+class ExternalFramebufferAdapter final : public ExternalMmioDevice, public FramebufferDevice {
+   public:
+    ExternalFramebufferAdapter(const SimRvExternalDevice* dev,
+                               const SimRvExternalFramebufferDevice* fb, void* ctx,
+                               std::string name, simrv::xlen::PhysAddr base,
+                               simrv::xlen::Address size, simrv::core::Machine& machine)
+        : ExternalMmioDevice(dev, ctx, std::move(name), base, size, machine), fb_(fb), ctx_(ctx) {}
+
+    [[nodiscard]] auto framebuffer_geometry() const noexcept
+        -> simrv::core::FramebufferConfig override {
+        simrv::core::FramebufferConfig cfg{};
+        if (!fb_ || !fb_->get_info) return cfg;
+        SimRvFramebufferInfo info{};
+        if (fb_->get_info(ctx_, &info) != 0) return cfg;
+        cfg.width = info.width;
+        cfg.height = info.height;
+        cfg.stride = info.stride;
+        cfg.bpp = info.bpp;
+        cfg.format = (info.format == SIMRV_FB_FORMAT_R5G6B5)
+                         ? simrv::core::FramebufferFormat::R5G6B5
+                         : simrv::core::FramebufferFormat::A8R8G8B8;
+        return cfg;
+    }
+
+    [[nodiscard]] auto framebuffer_data() const noexcept
+        -> std::span<const uint8_t> override {
+        if (!fb_ || !fb_->get_buffer) return {};
+        size_t size = 0;
+        const void* ptr = fb_->get_buffer(ctx_, &size);
+        if (!ptr || size == 0) return {};
+        return {static_cast<const uint8_t*>(ptr), size};
+    }
+
+    [[nodiscard]] auto frame_id() const noexcept -> uint64_t override {
+        return (fb_ && fb_->get_frame_id) ? fb_->get_frame_id(ctx_) : 0;
+    }
+
+   private:
+    const SimRvExternalFramebufferDevice* fb_;
+    void* ctx_;
 };
 }  // namespace
 
@@ -311,6 +355,17 @@ auto load_external_device_plugin(std::string_view path_and_args, PlatformDeviceR
         dlclose(handle);
         return false;
     }
+
+    auto fb_init = reinterpret_cast<SimRvFramebufferPluginInitFn>(
+        dlsym(handle, "simrv_framebuffer_plugin_init"));
+    const SimRvExternalFramebufferDevice* fb = fb_init ? fb_init() : nullptr;
+    if (fb_init && (!fb || fb->api_version != SIMRV_EXTERNAL_FRAMEBUFFER_API_VERSION ||
+                    !fb->get_info || !fb->get_buffer || compatible.empty())) {
+        simrv::log::error("Plugin '{}' returned invalid framebuffer capability", path);
+        dlclose(handle);
+        return false;
+    }
+
     simrv::log::info("Loaded external device plugin '{}' ({}, compatible: '{}')", path, name,
                      compatible);
 
@@ -326,7 +381,7 @@ auto load_external_device_plugin(std::string_view path_and_args, PlatformDeviceR
         };
     }
 
-    auto factory = [dev, default_args = std::move(args), name](
+    auto factory = [dev, fb, default_args = std::move(args), name](
                        simrv::core::Machine& machine, const simrv::core::SoCDeviceConfig& config)
         -> std::unique_ptr<simrv::memory::MmioDevice> {
         void* ctx = nullptr;
@@ -349,9 +404,12 @@ auto load_external_device_plugin(std::string_view path_and_args, PlatformDeviceR
         const auto base = config.base != 0 ? config.base : dev->default_base;
         const auto size = config.size != 0 ? config.size : dev->default_size;
         const auto dev_name = !config.name.empty() ? config.name : name;
-        return std::make_unique<ExternalMmioDevice>(
-            dev, ctx, dev_name, simrv::xlen::PhysAddr{static_cast<simrv::xlen::Address>(base)},
-            size, machine);
+        const auto physical_base = simrv::xlen::PhysAddr{static_cast<simrv::xlen::Address>(base)};
+        if (fb) {
+            return std::make_unique<ExternalFramebufferAdapter>(
+                dev, fb, ctx, dev_name, physical_base, size, machine);
+        }
+        return std::make_unique<ExternalMmioDevice>(dev, ctx, dev_name, physical_base, size, machine);
     };
 
     const bool registered = !compatible.empty()

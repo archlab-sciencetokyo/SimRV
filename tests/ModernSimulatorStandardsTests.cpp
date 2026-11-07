@@ -24,6 +24,16 @@
 
 namespace {
 
+template <typename A>
+concept GuestWalkAddress = requires(simrv::memory::PageTableWalker& walker, A address) {
+    walker.walk_guest_physical(address, simrv::memory::PteAccess::Read, 0, 64);
+};
+static_assert(GuestWalkAddress<simrv::memory::GuestPhysAddr>);
+static_assert(!GuestWalkAddress<simrv::xlen::Address>);
+static_assert(!GuestWalkAddress<simrv::xlen::VirtAddr>);
+static_assert(!GuestWalkAddress<simrv::xlen::PhysAddr>);
+static_assert(sizeof(simrv::memory::GuestPhysAddr) == sizeof(simrv::xlen::Address));
+
 #define TEST_ASSERT(cond)                                                                    \
     do {                                                                                     \
         if (!(cond)) {                                                                       \
@@ -138,25 +148,28 @@ void test_hypervisor_sv39x4_guest_translation() {
 
     simrv::memory::PageTableWalker walker(backing.data(), 0, backing.size());
     const simrv::xlen::Word hgatp = (uint64_t{8} << 60U) | (kRoot >> 12U);
-    const auto translated = walker.walk_guest_physical(kGuestAddress, PteAccess::Read, hgatp, 64);
+    const auto translated = walker.walk_guest_physical(simrv::memory::GuestPhysAddr{kGuestAddress}, PteAccess::Read, hgatp, 64);
     TEST_ASSERT(translated.has_value());
     TEST_ASSERT(translated->physical_address.raw() == kPhysicalPage + (kGuestAddress & 0xFFFU));
 
     const auto write_translated =
-        walker.walk_guest_physical(kGuestAddress, PteAccess::Write, hgatp, 64);
+        walker.walk_guest_physical(simrv::memory::GuestPhysAddr{kGuestAddress}, PteAccess::Write, hgatp, 64);
     TEST_ASSERT(write_translated.has_value());
 
     store_pte(leaf_address, load_pte(leaf_address) & ~uint64_t{0x80});
-    const auto dirty_fault = walker.walk_guest_physical(kGuestAddress, PteAccess::Write, hgatp, 64);
+    const auto dirty_fault = walker.walk_guest_physical(simrv::memory::GuestPhysAddr{kGuestAddress}, PteAccess::Write, hgatp, 64);
     TEST_ASSERT(!dirty_fault.has_value());
     TEST_ASSERT(dirty_fault.error() == simrv::isa::ExceptionCode::GuestStorePageFault);
 
-    const auto out_of_range =
-        walker.walk_guest_physical(uint64_t{1} << 41U, PteAccess::Read, hgatp, 64);
+    simrv::xlen::Address fault_address = 0;
+    const auto out_of_range = walker.walk_guest_physical(
+        simrv::memory::GuestPhysAddr{uint64_t{1} << 41U}, PteAccess::Read, hgatp, 64,
+        &fault_address);
     TEST_ASSERT(!out_of_range.has_value());
     TEST_ASSERT(out_of_range.error() == simrv::isa::ExceptionCode::GuestLoadPageFault);
+    TEST_ASSERT(fault_address == (uint64_t{1} << 41U));
 
-    const auto bare = walker.walk_guest_physical(kGuestAddress, PteAccess::Read, 0, 64);
+    const auto bare = walker.walk_guest_physical(simrv::memory::GuestPhysAddr{kGuestAddress}, PteAccess::Read, 0, 64);
     TEST_ASSERT(bare.has_value() && bare->physical_address.raw() == kGuestAddress);
 #endif
 }
