@@ -7,6 +7,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <iostream>
+#include <limits>
 
 #include "simrv/cache/BaseCache.hpp"
 #include "simrv/cache/ICache.hpp"
@@ -398,6 +399,22 @@ void test_bram_prewarm_and_cli() {
         const simrv::xlen::PhysAddr base{machine.memory_geometry().dram_base};
         TEST_CHECK(cpu.icache.line_state(base) == simrv::memory::MesiState::Shared);
         TEST_CHECK(cpu.dcache.line_state(base) == simrv::memory::MesiState::Shared);
+    }
+
+    // Rounding a segment's end must not wrap and skip valid high-address lines.
+    {
+        simrv::core::MachineConfig config{};
+        config.memory.dram_base = std::numeric_limits<simrv::xlen::Address>::max() - 0xfff;
+        simrv::core::Machine machine(config);
+        std::vector<simrv::xlen::Byte> ram(0xfff, simrv::xlen::Byte{0});
+        machine.set_ram_for_testing(ram.data(), ram.size());
+        auto& cpu = machine.primary_hart();
+        cpu.machine_ = &machine;
+        cpu.reset();
+        const simrv::xlen::PhysAddr segment{config.memory.dram_base + 0xf80};
+        machine.record_loaded_segment(segment, 0x80, true);
+        machine.prewarm_bram_caches();
+        TEST_CHECK(cpu.icache.line_state(segment) == simrv::memory::MesiState::Shared);
     }
 }
 

@@ -1433,14 +1433,14 @@ void Machine::prewarm_bram_caches() {
             constexpr simrv::xlen::Address kLineBytes = Cache::kLineBytes;
             const simrv::xlen::Address start =
                 align_segment ? address.raw() & ~(kLineBytes - 1u) : address.raw();
-            simrv::xlen::Address end = align_segment
-                                           ? (address.raw() + size + kLineBytes - 1u) &
-                                                 ~(kLineBytes - 1u)
-                                           : start + cache.capacity_bytes();
-            if (align_segment && end > start + cache.capacity_bytes()) {
-                end = start + cache.capacity_bytes();
-            }
-            for (simrv::xlen::Address addr = start; addr < end; addr += kLineBytes) {
+            const size_t capacity = cache.capacity_bytes();
+            const size_t offset = align_segment ? address.raw() - start : 0;
+            const size_t bytes = !align_segment || offset >= capacity || size >= capacity - offset
+                                     ? capacity
+                                     : offset + size;
+            const size_t lines = bytes / kLineBytes + (bytes % kLineBytes != 0);
+            auto addr = start;
+            for (size_t line = 0; line < lines; ++line) {
                 const simrv::xlen::PhysAddr physical{addr};
                 if (ram.contains(physical, kLineBytes)) {
                     cache.insert(physical, ram.unchecked_ptr(physical),
@@ -1448,6 +1448,8 @@ void Machine::prewarm_bram_caches() {
                     memory().system_bus().coherence_hub().register_preloaded_line(physical,
                                                                                  cpu.hart_id());
                 }
+                if (addr > std::numeric_limits<simrv::xlen::Address>::max() - kLineBytes) break;
+                addr += kLineBytes;
             }
         };
 
