@@ -15,8 +15,8 @@
 #include "simrv/core/PlatformMap.h"
 #include "simrv/core/PlatformTiming.hpp"
 #include "simrv/device/PtyBridge.hpp"
-#include "simrv/memory/Mmio.hpp"
 #include "simrv/device/SerialDevice.hpp"
+#include "simrv/memory/Mmio.hpp"
 #include "simrv/xlen/ScalarTypes.hpp"
 
 namespace simrv::core {
@@ -47,25 +47,29 @@ class Uart : public SerialDevice {
     /// Consume a pending RX-state transition and publish it to the guest PLIC. Reader threads
     /// only enqueue bytes and mark the transition; interrupt-controller state stays owned by the
     /// simulation thread.
-    void service_interrupts();
-    void start_input_thread();
-    void stop_input_thread();
-    [[nodiscard]] auto is_input_thread_running() const -> bool { return input_thread_.joinable(); }
-    [[nodiscard]] auto is_interrupt_pending() const -> bool;
-    [[nodiscard]] auto irq_number() const noexcept -> uint32_t { return irq_; }
+    void service_interrupts() override;
+    void start_input_thread() override;
+    void stop_input_thread() override;
+    [[nodiscard]] auto is_input_thread_running() const -> bool override {
+        return input_thread_.joinable();
+    }
+    [[nodiscard]] auto is_interrupt_pending() const -> bool override;
+    [[nodiscard]] auto irq_number() const noexcept -> uint32_t override { return irq_; }
     void push_rx_byte(uint8_t byte) override;
     /// Emit a byte through the configured console and PTY. Call on the simulation thread.
     void write_host_byte(uint8_t byte);
     /// Advance serial transmit and receive state by simulated CPU cycles.
-    void advance_cycles(uint64_t cycles);
-    [[nodiscard]] auto has_active_transfer() const noexcept -> bool {
+    void advance_cycles(uint64_t cycles) override;
+    [[nodiscard]] auto has_active_transfer() const noexcept -> bool override {
         return tx_shift_active_ || rx_shift_active_ || !tx_fifo_.empty();
     }
 
     /// Open a POSIX PTY for this UART. Returns false if openpty fails.
-    [[nodiscard]] auto start_pty() -> bool;
-    void stop_pty();
-    [[nodiscard]] auto pty_slave_path() const -> const std::string& { return pty_.slave_path(); }
+    [[nodiscard]] auto start_pty() -> bool override;
+    void stop_pty() override;
+    [[nodiscard]] auto pty_slave_path() const -> const std::string& override {
+        return pty_.slave_path();
+    }
     [[nodiscard]] auto has_pty() const -> bool { return pty_.is_open(); }
     [[nodiscard]] auto pty() -> PtyBridge& { return pty_; }
     [[nodiscard]] auto pty() const -> const PtyBridge& { return pty_; }

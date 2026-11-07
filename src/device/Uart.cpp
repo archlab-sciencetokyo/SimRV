@@ -151,8 +151,7 @@ void Uart::flush_tx_buffer() noexcept {
 }
 
 void Uart::write_host_byte(uint8_t ch) {
-    if (machine_.console_sink())
-        machine_.console_sink()->handle_char_write(static_cast<char>(ch));
+    if (machine_.console_sink()) machine_.console_sink()->handle_char_write(static_cast<char>(ch));
     if (pty_.is_open() || !machine_.console_sink()) {
         tx_buffer_[tx_buffer_len_++] = ch;
         if (ch == '\n' || tx_buffer_len_ == tx_buffer_.size()) flush_tx_buffer();

@@ -109,7 +109,6 @@ void RunnerBase::wait_for_quiescence() { wait_for_worker_quiescence(workers_in_c
 
 void RunnerBase::stop_threads() {
     workers_running_.store(false, std::memory_order_release);
-    workers_sleeping_.store(0, std::memory_order_relaxed);
     cycle_generation_.fetch_add(1, std::memory_order_release);
     cycle_completed_.fetch_add(1, std::memory_order_release);
     cycle_generation_.notify_all();
@@ -141,9 +140,7 @@ void RunnerBase::synchronize_multithreaded_workers(Machine& machine) {
     const auto target = machine.runtime_->secondary_hart_count;
     cycle_completed_.store(0, std::memory_order_relaxed);
     cycle_generation_.fetch_add(1, std::memory_order_release);
-    if (simrv::compiler::unlikely(workers_sleeping_.load(std::memory_order_relaxed) > 0)) {
-        cycle_generation_.notify_all();
-    }
+    cycle_generation_.notify_all();
 
     constexpr uint32_t kSpinLimit = 1000;
     for (uint32_t spin = 0; spin < kSpinLimit; ++spin) {
@@ -955,7 +952,6 @@ void RunnerBase::start_threads(Machine& machine, bool baremetal) {
     stop_threads();
     machine_ = &machine;
     cycle_generation_.store(0, std::memory_order_relaxed);
-    workers_sleeping_.store(0, std::memory_order_relaxed);
     cycle_completed_.store(0, std::memory_order_relaxed);
     workers_running_.store(true, std::memory_order_release);
     const bool poll_debug_pause = machine.debugger_enabled() || machine.tui_enabled();
@@ -963,21 +959,25 @@ void RunnerBase::start_threads(Machine& machine, bool baremetal) {
         worker_threads_.emplace_back([&machine, this, i, baremetal,
                                       poll_debug_pause](const std::stop_token& stop_token) {
             auto& hart = *machine.runtime_->secondary_harts[i];
-            uint64_t observed_cycle_generation = 0;
+            uint32_t observed_cycle_generation = 0;
             const uint32_t worker_batch = std::max(1U, machine.config.execution.smp_quantum);
             while (!stop_token.stop_requested() && machine.is_running() &&
                    workers_running_.load(std::memory_order_relaxed)) {
-                if (hart.hart_status.load(std::memory_order_relaxed) != HartStatus::Started ||
-                    machine.execution_state() != ExecutionState::Running ||
-                    machine.breakpoint_manager().has_any() || machine.debug_pause_requested()) {
+                const auto should_park = [&] {
+                    // Cycle-mode workers must always wait for the next generation: a cycle
+                    // already in flight still needs an acknowledgement after pause or stop.
+                    return !machine.runtime_profile.is_cycle_mode() &&
+                        (hart.hart_status.load(std::memory_order_relaxed) != HartStatus::Started ||
+                         machine.execution_state() != ExecutionState::Running ||
+                         machine.breakpoint_manager().has_any() || machine.debug_pause_requested());
+                };
+                if (should_park()) {
                     const auto generation =
                         machine.control_event_generation_.load(std::memory_order_acquire);
                     if (!workers_running_.load(std::memory_order_acquire) ||
                         stop_token.stop_requested() || !machine.is_running())
                         break;
-                    if (hart.hart_status.load(std::memory_order_relaxed) != HartStatus::Started ||
-                        machine.execution_state() != ExecutionState::Running ||
-                        machine.breakpoint_manager().has_any() || machine.debug_pause_requested()) {
+                    if (should_park()) {
                         machine.control_event_generation_.wait(generation,
                                                                std::memory_order_relaxed);
                     }
@@ -985,23 +985,21 @@ void RunnerBase::start_threads(Machine& machine, bool baremetal) {
                 }
                 if (machine.runtime_profile.is_cycle_mode()) {
                     auto generation = cycle_generation_.load(std::memory_order_acquire);
-                    if (generation <= observed_cycle_generation) {
+                    if (generation == observed_cycle_generation) {
                         constexpr uint32_t kWorkerSpinLimit = 800;
                         for (uint32_t spin = 0; spin < kWorkerSpinLimit; ++spin) {
                             simrv::compiler::cpu_relax();
                             generation = cycle_generation_.load(std::memory_order_acquire);
-                            if (generation > observed_cycle_generation) break;
+                            if (generation != observed_cycle_generation) break;
                         }
                     }
-                    if (generation <= observed_cycle_generation) {
-                        workers_sleeping_.fetch_add(1, std::memory_order_relaxed);
-                        while (generation <= observed_cycle_generation &&
+                    if (generation == observed_cycle_generation) {
+                        while (generation == observed_cycle_generation &&
                                workers_running_.load(std::memory_order_acquire) &&
                                !stop_token.stop_requested()) {
                             cycle_generation_.wait(generation, std::memory_order_acquire);
                             generation = cycle_generation_.load(std::memory_order_acquire);
                         }
-                        workers_sleeping_.fetch_sub(1, std::memory_order_relaxed);
                     }
                     if (!workers_running_.load(std::memory_order_acquire) ||
                         stop_token.stop_requested()) {

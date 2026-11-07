@@ -67,9 +67,9 @@ class RunnerBase {
     void stop_threads();
 
     std::vector<std::jthread> worker_threads_;
-    alignas(64) std::atomic<uint64_t> cycle_generation_{0};
-    alignas(64) std::atomic<uint32_t> workers_sleeping_{0};
-    alignas(64) std::atomic<size_t> cycle_completed_{0};
+    // The primary waits for every worker each cycle, so a worker cannot miss an entire wrap.
+    alignas(64) std::atomic<uint32_t> cycle_generation_{0};
+    alignas(64) std::atomic<uint32_t> cycle_completed_{0};
     alignas(64) std::atomic<bool> workers_running_{false};
     std::atomic<uint32_t> workers_in_cycle_{0};
     Machine* machine_ = nullptr;

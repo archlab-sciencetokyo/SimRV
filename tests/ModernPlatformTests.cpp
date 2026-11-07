@@ -561,6 +561,19 @@ void test_uart_frame_timing_fifo_and_overrun() {
     check((machine.cpu.plic_mmio.plic_pending[0] & kUartIrqMask) != 0);
     for (uint32_t i = 0; i < 16; ++i) (void)read(simrv::mmio::kUartRegRbrThrDll);
     check((read(simrv::mmio::kUartRegLsr) & 0x01U) == 0);
+
+    // In a word-spaced 16550, offset 8 is the FIFO-control / interrupt-ID register.
+    simrv::device::Uart shifted_uart(machine);
+    simrv::memory::TlChannelA shifted_request{};
+    shifted_request.address = simrv::mmio::kUartBaseAddress + 8;
+    shifted_request.size = 2;
+    shifted_request.opcode = simrv::memory::TlOpcodeA::PutFullData;
+    shifted_request.data = 1;
+    simrv::memory::TlChannelD shifted_response{};
+    check(shifted_uart.handle_request(shifted_request, shifted_response));
+    shifted_request.opcode = simrv::memory::TlOpcodeA::Get;
+    check(shifted_uart.handle_request(shifted_request, shifted_response));
+    check((shifted_response.data & 0xc0U) == 0xc0U);
     std::cout << "[PASS] test_uart_frame_timing_fifo_and_overrun\n";
 }
 
@@ -1921,6 +1934,9 @@ void test_ca_mt_smp_pause_and_snapshots() {
     }
 
     machine.stop_runner_for_testing();
+    // A stopped hart must still acknowledge cycle barriers for the running harts.
+    machine.hart(kNumHarts - 1).hart_status.store(simrv::core::HartStatus::Stopped,
+                                                   std::memory_order_relaxed);
     machine.resume();
     machine.start_runner_for_testing();
     machine.request_tui_sample();
@@ -1932,6 +1948,8 @@ void test_ca_mt_smp_pause_and_snapshots() {
     }
     check(machine.tui_execution_snapshot(1).cycle_count > paused_cycles[1]);
     machine.stop_runner_for_testing();
+    machine.hart(kNumHarts - 1).hart_status.store(simrv::core::HartStatus::Started,
+                                                   std::memory_order_relaxed);
 
     machine.pause();
     std::array<simrv::xlen::Counter, kNumHarts> before_step{};
@@ -4343,7 +4361,8 @@ int main(int argc, char** argv) {
     test_global_cycle_timer_phase_ordering();
     test_ca_quantum_smp_batching();
     test_ca_quantum_single_hart_batching();
-    test_ca_mt_smp_pause_and_snapshots();
+    // Exercise the pause/cycle boundary repeatedly; either side can reach the barrier first.
+    for (int attempt = 0; attempt < 16; ++attempt) test_ca_mt_smp_pause_and_snapshots();
     test_cycle_kernel_golden_forwarding();
     test_tui_mode_sim_thread_multiple_step_sync();
     test_step_sync_timeout_and_shutdown();

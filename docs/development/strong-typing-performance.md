@@ -39,6 +39,13 @@ workload with three warmups and ten interleaved runs per binary on one pinned x8
 was 0.731287 seconds before (1.86% CV) and 0.730272 seconds after (1.74% CV), a 0.14% decrease.
 The binaries were 42,166,624 and 42,166,744 bytes respectively.
 
+For the multi-hart cycle barrier fix, a two-hart, multi-threaded cycle-accurate memory workload
+used a 500,000-instruction limit, two pinned x86 CPUs, three warmups and 30 interleaved runs per
+binary. The median was 0.291273 seconds before (15.14% CV) and 0.294423 seconds after (15.87% CV),
+a 1.08% increase. Each completed run retired 500,001 instructions. A prior shorter comparison
+timed out on the baseline, while 100 pinned runs of the updated binary completed. The high timing
+variability makes small performance differences inconclusive.
+
 The branch result is too noisy to establish a speedup. The MMIO loop retained the same bus and
 cache counts. The initial baseline executable is no longer available, so an identical-binary
 comparison against the final tree remains outstanding. ARM hardware and usable host performance

@@ -12,6 +12,7 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Allow serial plugins to replace the configured UART and compatible MMIO plugins to replace standalone power and RTC devices. Plugin MMIO errors now reach the guest.
 - Allow custom MMIO plugins to provide a framebuffer for the TUI.
 - Fix missed TUI display updates for small framebuffers and rows with trailing bytes.
+- Fix a multi-hart cycle-mode hang when pausing execution.
 - Improve RVComp MMC support, device-tree boot arguments, and startup diagnostics in the TUI.
 
 ## [v3.0.0-rc.19] — 2026-11-05
