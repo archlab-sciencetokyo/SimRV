@@ -4,9 +4,11 @@
  */
 
 #include <algorithm>
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -18,12 +20,14 @@
 #include "simrv/core/CpuConfigParser.hpp"
 #include "simrv/core/Machine.hpp"
 #include "simrv/core/MachineConfig.hpp"
+#include "simrv/core/TelemetrySink.hpp"
 #include "simrv/core/SoCDeviceRegistry.hpp"
 #include "simrv/device/DummyMmio.hpp"
 #include "simrv/device/ExternalDevicePlugin.hpp"
 #include "simrv/device/PlatformDeviceRegistry.hpp"
 #include "simrv/device/ResetControlMmio.hpp"
 #include "simrv/device/RingBufferEthernetMmio.hpp"
+#include "simrv/device/SerialDevice.hpp"
 #include "simrv/isa/Common.hpp"
 #include "simrv/isa/IsaTypes.hpp"
 #include "simrv/memory/MemorySubsystem.hpp"
@@ -213,6 +217,7 @@ void test_soc_metadata_parser() {
     TEST_CHECK(soc.disable_unlisted_devices);
     const auto* uart = soc.find(simrv::core::SoCDeviceKind::Uart);
     TEST_CHECK(uart != nullptr && uart->base == 0x10000000 && uart->size == 0x10 && uart->irq == 1);
+    TEST_CHECK(uart->compatible == "isct,rvcomp-uart");
     const auto* clint = soc.find(simrv::core::SoCDeviceKind::Clint);
     TEST_CHECK(clint != nullptr && clint->base == 0x02000000 && clint->size == 0x000c0000);
     const auto* plic = soc.find(simrv::core::SoCDeviceKind::Plic);
@@ -393,6 +398,69 @@ void test_dummy_mmio_behavior() {
     TEST_CHECK(device.read32(0) == 0x12345678);
 }
 
+#if defined(SIMRV_TEST_RVCOMP_UART)
+void test_rvcomp_uart_plugin() {
+    struct Capture final : simrv::core::IConsoleSink {
+        std::string output;
+        void handle_char_write(char ch) override { output.push_back(ch); }
+    };
+    simrv::core::MachineConfig config{};
+    config.soc = simrv::core::SoCConfig::rvcomp();
+    const auto path = simrv::core::resolve_cpu_model_path("rvcomp");
+    TEST_CHECK(path.has_value() && simrv::core::parse_soc_config(*path, config.soc));
+    config.tui.enabled = true;
+    simrv::core::Machine machine(config);
+    auto capture = std::make_shared<Capture>();
+    machine.set_console_sink(capture);
+    TEST_CHECK(machine.initialize().has_value());
+    auto* uart = machine.uart_device();
+    TEST_CHECK(uart != nullptr);
+    simrv::memory::TlChannelA request{};
+    simrv::memory::TlChannelD response{};
+    request.size = 0;
+    request.opcode = simrv::memory::TlOpcodeA::Get;
+    request.address = simrv::xlen::PhysAddr{0x10000008};
+    TEST_CHECK(uart->handle_request(request, response) && !response.denied && response.data == 1);
+    uart->push_rx_byte('A');
+    uart->service_interrupts();
+    TEST_CHECK(uart->is_interrupt_pending());
+    TEST_CHECK(uart->handle_request(request, response) && !response.denied && response.data == 0);
+    request.address = simrv::xlen::PhysAddr{0x10000000};
+    TEST_CHECK(uart->handle_request(request, response) && !response.denied && response.data == 'A');
+    request.address = simrv::xlen::PhysAddr{0x10000008};
+    TEST_CHECK(uart->handle_request(request, response) && !response.denied && response.data == 1);
+    uart->service_interrupts();
+    TEST_CHECK(!uart->is_interrupt_pending());
+
+    uart->push_rx_byte(0);
+    TEST_CHECK(uart->handle_request(request, response) && response.data == 0);
+    request.address = simrv::xlen::PhysAddr{0x10000000};
+    TEST_CHECK(uart->handle_request(request, response) && response.data == 0);
+    request.opcode = simrv::memory::TlOpcodeA::PutFullData;
+    request.data = 'Z';
+    TEST_CHECK(uart->handle_request(request, response) && !response.denied);
+    request.data = 0;
+    TEST_CHECK(uart->handle_request(request, response) && !response.denied);
+    TEST_CHECK(capture->output.size() == 2 && capture->output[0] == 'Z' && capture->output[1] == 0);
+
+    // RVComp firmware first probes TX-full, then polls RX-empty before echoing input.
+    constexpr std::array<simrv::xlen::Instruction, 7> guest = {
+        0x100002b7, 0x0042c303, 0x0082c303, 0xfe031ee3,
+        0x0002c303, 0x00628023, 0xff1ff06f,
+    };
+    uart->reset();
+    capture->output.clear();
+    std::memcpy(machine.ram_data(), guest.data(), sizeof(guest));
+    auto& cpu = machine.primary_hart();
+    cpu.state().pc = simrv::memory::kDramBaseAddress;
+    for (int i = 0; i < 1000; ++i) cpu.run_cycle(machine);
+    TEST_CHECK(capture->output.empty());
+    uart->push_rx_byte('Q');
+    for (int i = 0; i < 1000; ++i) cpu.run_cycle(machine);
+    TEST_CHECK(capture->output == "Q");
+}
+#endif
+
 void test_rvcomp_mmc_plugin_and_device() {
     std::cout << "[Test] RVComp MMC external plugin and block device...\n";
     simrv::core::Machine machine(simrv::core::MachineConfig{
@@ -497,6 +565,9 @@ int main() {
     test_soc_manifest_export();
     test_rvcomp_reset_and_ethernet_extensions();
     test_dummy_mmio_behavior();
+#if defined(SIMRV_TEST_RVCOMP_UART)
+    test_rvcomp_uart_plugin();
+#endif
     test_rvcomp_mmc_plugin_and_device();
     std::cout << "All RVComp profile tests passed successfully." << std::endl;
     return 0;

@@ -970,6 +970,20 @@ void test_runtime_ram_view() {
     expect(!ram.contains(std::numeric_limits<simrv::xlen::Address>::max(), 2),
            "runtime RAM view rejects ranges that overflow the address width");
 
+    constexpr auto kLastPhysical = std::numeric_limits<simrv::xlen::Address>::max();
+    const simrv::memory::RamView wrapping_view(bytes.data(), kLastPhysical - 3, 8);
+    expect(!wrapping_view.has_nonwrapping_range(), "a wrapping RAM mapping is not fast-path eligible");
+    expect(wrapping_view.contains(kLastPhysical - 1, 2),
+           "a range ending at the last physical address remains valid");
+    expect(!wrapping_view.contains(kLastPhysical, 2) &&
+               wrapping_view.try_get_ptr(kLastPhysical, 2) == nullptr,
+           "a RAM access cannot wrap beyond the physical address limit");
+    expect(!wrapping_view.contains(0, 1) && wrapping_view.try_get_ptr(0, 1) == nullptr,
+           "pointer lookup cannot wrap a below-base address into RAM");
+    expect(!simrv::memory::address_range_contains(kLastPhysical - 3, 8, kLastPhysical, 2),
+           "physical range checks reject accesses that cross the address-space limit");
+    expect(ram.has_nonwrapping_range(), "ordinary RAM mappings remain fast-path eligible");
+
     std::array<simrv::xlen::Byte, 8192> pages{};
     const simrv::memory::RamView page_view(pages.data(), kUpperDramBase, pages.size());
     expect(page_view.contains(kUpperDramBase + 4096, 4096),

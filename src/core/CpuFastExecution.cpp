@@ -3118,7 +3118,8 @@ SIMRV_ALWAYS_INLINE auto CPU::run_fast_baremetal_kernel(Machine& machine, uint32
                     };
                 const bool fast_m_ram =
                     (state_.priv == kPrivMachine && (state_.mstatus & MstatusBit::Mprv) == 0 &&
-                     !state_.has_locked_pmp && ram.data() != nullptr && ram.size() >= 8);
+                     !state_.has_locked_pmp && ram.data() != nullptr && ram.size() >= 8 &&
+                     ram.has_nonwrapping_range());
                 const bool multi_hart = machine.num_harts() > 1;
                 // Chain operations do not change MIP or MIE, and device interrupt lines are
                 // applied at the enclosing batch boundary. If one is already pending, execute

@@ -14,6 +14,8 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Fix missed TUI display updates for small framebuffers and rows with trailing bytes.
 - Fix a multi-hart cycle-mode hang when pausing execution.
 - Fix secondary harts stopping after switching execution modes in multi-threaded simulations.
+- Fix RAM view lookups that could wrap across the physical address limit.
+- Fix spurious NUL characters in the RVComp UART by using its serial device plugin.
 - Improve RVComp MMC support, device-tree boot arguments, and startup diagnostics in the TUI.
 
 ## [v3.0.0-rc.19] — 2026-11-05

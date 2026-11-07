@@ -119,6 +119,10 @@ scan ambiguous sparse overlaps up to 4096 bytes and conservatively report larger
 as occupied. The decode cache uses 64-byte-aligned sets; this is a layout choice, not a claim that
 every supported host has a 64-byte cache line.
 
+Checked RAM lookups reject addresses below the mapping and accesses that wrap the physical address
+space. The unchecked fast lookup is used only with non-null, nonwrapping RAM and an access size no
+larger than the mapping; other configurations take the checked fallback.
+
 MMIO routing and DMA APIs accept `simrv::xlen::PhysAddr`. C++ callers must explicitly construct
 physical addresses from platform configuration or translate virtual addresses before routing or
 DMA. `TileLinkNode::base_address()` returns `PhysAddr`, and `contains()` takes `PhysAddr`; C++ device

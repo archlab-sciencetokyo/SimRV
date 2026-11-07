@@ -160,6 +160,10 @@ if(BUILD_TESTING)
   if(TARGET simrv-mmc)
     add_dependencies(simrv-rvcomp-tests simrv-mmc)
   endif()
+  if(TARGET simrv-rvcomp-uart)
+    add_dependencies(simrv-rvcomp-tests simrv-rvcomp-uart simrv-reset)
+    target_compile_definitions(simrv-rvcomp-tests PRIVATE SIMRV_TEST_RVCOMP_UART=1)
+  endif()
 
   simrv_add_runtime_test(
     simrv-cpu-model-loader-tests tests/CpuModelLoaderTests.cpp cpu-model-loader

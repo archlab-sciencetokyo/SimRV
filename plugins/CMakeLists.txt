@@ -8,8 +8,9 @@ if(SIMRV_BUILD_RVCOMP_PLUGINS)
   add_subdirectory(rvcomp-mmc)
   add_subdirectory(rvcomp-reset)
   add_subdirectory(rvcomp-ethernet)
+  add_subdirectory(rvcomp-uart)
 
-  install(TARGETS simrv-mmc simrv-reset simrv-ethernet
+  install(TARGETS simrv-mmc simrv-reset simrv-ethernet simrv-rvcomp-uart
     LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}/simrv/plugins
     COMPONENT Tools)
 endif()

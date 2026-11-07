@@ -177,6 +177,12 @@ guest-visible register and ring-buffer behavior, while external packet transport
 serialization are not cycle-by-cycle RTL emulation. The RTL's broader
 address decode also contains these board resources:
 
+The RVComp preset loads the `rvcomp-uart` serial plugin for the board's data, TX-full, and
+RX-empty registers. This is a distinct register interface from the built-in 16550. The plugin
+delivers transmitted bytes to the host immediately; its serial timing is not cycle-accurate.
+An empty data-register read returns zero rather than stalling, so software should check RX-empty
+first. The plugin is installed with the optional tools component.
+
 !!! info "Decode map and modeled devices are different views"
     The table includes the RTL's decoded address regions, including resources SimRV does not
     allocate or emulate. In particular, the SD-backed RAM row is reference information only; it

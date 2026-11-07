@@ -46,6 +46,12 @@ a 1.08% increase. Each completed run retired 500,001 instructions. A prior short
 timed out on the baseline, while 100 pinned runs of the updated binary completed. The high timing
 variability makes small performance differences inconclusive.
 
+For the RAM range checks, the benchmark workflow ran the `memory.elf` workload for 100 million
+instructions in the RV64 release build, with three warmups and ten runs per binary on one pinned
+x86 CPU. Median wall time was 0.128999 seconds before (2.24% CV) and 0.127323 seconds after
+(1.13% CV); both retired 100 million instructions and reported 100,000,001 simulated cycles. This
+comparison does not establish a speedup. The before and after samples ran in separate batches.
+
 The branch result is too noisy to establish a speedup. The MMIO loop retained the same bus and
 cache counts. The initial baseline executable is no longer available, so an identical-binary
 comparison against the final tree remains outstanding. ARM hardware and usable host performance

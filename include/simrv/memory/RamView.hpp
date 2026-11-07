@@ -5,7 +5,9 @@
 #pragma once
 
 #include <cstddef>
+#include <limits>
 #include <span>
+#include <utility>
 
 #include "simrv/CompilerHints.hpp"
 #include "simrv/core/BuildConfig.hpp"
@@ -23,7 +25,8 @@ inline constexpr simrv::xlen::Address kDramSize =
 [[nodiscard]] SIMRV_ALWAYS_INLINE constexpr auto address_range_contains(
     simrv::xlen::Address base, simrv::xlen::Address extent, simrv::xlen::Address address,
     size_t size) noexcept -> bool {
-    return size != 0 && size <= extent && address >= base && address - base <= extent - size;
+    return size != 0 && size <= extent && address >= base && address - base <= extent - size &&
+           std::cmp_less_equal(size - 1, std::numeric_limits<simrv::xlen::Address>::max() - address);
 }
 
 /**
@@ -47,6 +50,10 @@ class RamView {
     [[nodiscard]] constexpr auto data() const noexcept -> simrv::xlen::Byte* { return data_; }
     [[nodiscard]] constexpr auto base() const noexcept -> simrv::xlen::Address { return base_; }
     [[nodiscard]] constexpr auto size() const noexcept -> simrv::xlen::Address { return size_; }
+    /// A fast lookup requires a nonempty mapping that does not wrap the physical address space.
+    [[nodiscard]] constexpr auto has_nonwrapping_range() const noexcept -> bool {
+        return size_ != 0 && size_ - 1 <= std::numeric_limits<simrv::xlen::Address>::max() - base_;
+    }
     [[nodiscard]] SIMRV_ALWAYS_INLINE auto host_offset() const noexcept -> uintptr_t {
         return reinterpret_cast<uintptr_t>(data_) - base_;
     }
@@ -57,7 +64,9 @@ class RamView {
                                                               size_t bytes = 1) const noexcept
         -> bool {
         return data_ != nullptr && address >= base_ && bytes <= size_ &&
-               (static_cast<simrv::xlen::Address>(address - base_) <= (size_ - bytes));
+               (static_cast<simrv::xlen::Address>(address - base_) <= (size_ - bytes)) &&
+               (bytes == 0 || std::cmp_less_equal(
+                   bytes - 1, std::numeric_limits<simrv::xlen::Address>::max() - address));
     }
     [[nodiscard]] SIMRV_ALWAYS_INLINE constexpr auto contains(simrv::xlen::PhysAddr address,
                                                               size_t bytes = 1) const noexcept
@@ -67,10 +76,8 @@ class RamView {
     [[nodiscard]] SIMRV_ALWAYS_INLINE constexpr auto try_get_ptr(simrv::xlen::Address address,
                                                                  size_t bytes = 1) const noexcept
         -> simrv::xlen::Byte* {
-        const auto offset = static_cast<simrv::xlen::Address>(address - base_);
-        if (simrv::compiler::likely(data_ != nullptr && offset <= (size_ - bytes) &&
-                                    bytes <= size_)) {
-            return data_ + offset;
+        if (simrv::compiler::likely(contains(address, bytes))) {
+            return data_ + (address - base_);
         }
         return nullptr;
     }
@@ -79,6 +86,7 @@ class RamView {
         -> simrv::xlen::Byte* {
         return try_get_ptr(address.raw(), bytes);
     }
+    /// Requires non-null storage, a nonwrapping mapping, and 0 < bytes <= size().
     [[nodiscard]] SIMRV_ALWAYS_INLINE constexpr auto try_get_ptr_fast(simrv::xlen::Address address,
                                                                       size_t bytes) const noexcept
         -> simrv::xlen::Byte* {
