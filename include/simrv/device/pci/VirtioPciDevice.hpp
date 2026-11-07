@@ -76,8 +76,8 @@ class VirtioPciDevice : public PciDevice, public virtio::IVirtioTransport {
         (void)size;
     }
 
-    auto dma_read(simrv::xlen::Address paddr, void* dst, size_t len) -> bool;
-    auto dma_write(simrv::xlen::Address paddr, const void* src, size_t len) -> bool;
+    auto dma_read(uint64_t paddr, void* dst, size_t len) -> bool;
+    auto dma_write(uint64_t paddr, const void* src, size_t len) -> bool;
 
     void add_pci_cap(uint8_t cap_type, PciBarIndex bar, PciBarOffset offset, PciBarSize length,
                      uint32_t notify_mult = 0);

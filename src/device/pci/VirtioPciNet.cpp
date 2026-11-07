@@ -115,10 +115,10 @@ void VirtioPciNet::on_queue_notify(virtio::VirtioQueueIndex queue_index) {
     const bool defer_completion = machine != nullptr && machine->runtime_profile.is_cycle_mode() &&
                                   machine->dma_engine().is_enabled();
 
-    auto dma_read_cb = [this](simrv::xlen::Address addr, void* buf, size_t size) {
+    auto dma_read_cb = [this](uint64_t addr, void* buf, size_t size) {
         return dma_read(addr, buf, size);
     };
-    auto dma_write_cb = [this](simrv::xlen::Address addr, const void* buf, size_t size) {
+    auto dma_write_cb = [this](uint64_t addr, const void* buf, size_t size) {
         return dma_write(addr, buf, size);
     };
     auto schedule_deferred = [this, machine, queue_index](size_t transfer_bytes,

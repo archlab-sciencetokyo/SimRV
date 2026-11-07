@@ -39,10 +39,10 @@ void VirtioMmioBlock::on_queue_notify(uint32_t q_idx) {
                                   machine_->runtime_profile.is_cycle_mode() &&
                                   machine_->dma_engine().is_enabled();
 
-    auto dma_read = [this](simrv::xlen::Address addr, void* buf, size_t size) {
+    auto dma_read = [this](uint64_t addr, void* buf, size_t size) {
         return dma_read_bytes(addr, reinterpret_cast<std::byte*>(buf), size);
     };
-    auto dma_write = [this](simrv::xlen::Address addr, const void* buf, size_t size) {
+    auto dma_write = [this](uint64_t addr, const void* buf, size_t size) {
         return dma_write_bytes(addr, reinterpret_cast<const std::byte*>(buf), size);
     };
     auto schedule_deferred = [this, q_idx](size_t transfer_bytes, uint16_t head_desc_idx,

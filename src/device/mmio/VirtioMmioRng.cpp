@@ -15,10 +15,10 @@ void VirtioMmioRng::on_queue_notify(uint32_t q_idx) {
     if (q_idx >= queues_.size()) return;
     virtio::process_rng_queue(
         queues_[q_idx], backend_,
-        [this](simrv::xlen::Address addr, void* buf, size_t len) {
+        [this](uint64_t addr, void* buf, size_t len) {
             return dma_read_bytes(addr, reinterpret_cast<std::byte*>(buf), len);
         },
-        [this](simrv::xlen::Address addr, const void* buf, size_t len) {
+        [this](uint64_t addr, const void* buf, size_t len) {
             return dma_write_bytes(addr, reinterpret_cast<const std::byte*>(buf), len);
         },
         [this]() { trigger_irq(); });

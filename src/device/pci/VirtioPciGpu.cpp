@@ -22,10 +22,10 @@ void VirtioPciGpu::on_queue_notify(virtio::VirtioQueueIndex queue_index) {
     if (queue_index >= queues_.size()) return;
     auto& q = queues_[queue_index];
 
-    auto dma_read_cb = [this](simrv::xlen::Address addr, void* buf, size_t size) {
+    auto dma_read_cb = [this](uint64_t addr, void* buf, size_t size) {
         return dma_read(addr, buf, size);
     };
-    auto dma_write_cb = [this](simrv::xlen::Address addr, const void* buf, size_t size) {
+    auto dma_write_cb = [this](uint64_t addr, const void* buf, size_t size) {
         return dma_write(addr, buf, size);
     };
     auto notify_complete = [this]() {

@@ -131,6 +131,7 @@ The following findings describe guest correctness, rather than security severity
 | --- | --- | --- |
 | A reservation invalidation range could truncate on native RV32. | High | The reservation table now accepts a host-sized length and saturates at the physical address limit. `CoreSemanticsTests` covers ranges exceeding the guest address width. |
 | A wrapping RAM mapping could make an unchecked host pointer lookup invalid. | High | Fast lookup now requires a nonwrapping mapping; checked lookups reject wrapped accesses. `CoreSemanticsTests` covers the boundary. |
+| VirtIO DMA addresses could be truncated to native RV32 width and alias low RAM. | High | MMIO and PCI transports reject unrepresentable addresses before conversion; platform integration tests cover direct DMA and queue-ring accesses. |
 | Cycle-mode workers could fail to acknowledge an in-flight cycle during a pause or engine change. | High | Workers complete the cycle barrier before parking, and engine changes restart workers. The multi-hart regression tests exercise pause and switching. |
 | The RVComp guest uses a serial register layout different from the built-in UART, producing spurious NUL output. | Medium | The model selects an external UART plugin with the expected status registers; `RvCompTests` exercises transmit, receive, and interrupt behavior. The plugin transmits immediately and is not a cycle-accurate UART model. |
 
@@ -143,6 +144,8 @@ for the measurements and their limitations.
 MMIO routing and DMA APIs accept `simrv::xlen::PhysAddr`. C++ callers must explicitly construct
 physical addresses from platform configuration or translate virtual addresses before routing or
 DMA. Loaded segment records used for cache prewarming also require `PhysAddr`.
+VirtIO descriptor and ring addresses remain 64-bit through the transport adapter; an address
+that does not fit the simulator's physical-address type is rejected before DMA.
 PMP access checks require `PhysAddr`; callers must translate virtual addresses before protection
 checks, including page-table accesses.
 `TileLinkNode::base_address()` returns `PhysAddr`, and `contains()` takes `PhysAddr`; C++ device

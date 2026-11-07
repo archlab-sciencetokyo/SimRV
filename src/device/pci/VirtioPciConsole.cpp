@@ -29,10 +29,10 @@ void VirtioPciConsole::on_queue_notify(virtio::VirtioQueueIndex queue_index) {
     if (queue_index >= queues_.size()) return;
     virtio::process_console_queue(
         queue_index, queues_[queue_index], backend_,
-        [this](simrv::xlen::Address addr, void* buf, size_t len) {
+        [this](uint64_t addr, void* buf, size_t len) {
             return dma_read(addr, buf, len);
         },
-        [this](simrv::xlen::Address addr, const void* buf, size_t len) {
+        [this](uint64_t addr, const void* buf, size_t len) {
             return dma_write(addr, buf, len);
         },
         [this]() {

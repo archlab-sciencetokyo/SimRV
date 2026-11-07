@@ -5,6 +5,7 @@
 #include "simrv/device/pci/VirtioPciDevice.hpp"
 
 #include <cstring>
+#include <utility>
 
 #include "simrv/core/Machine.hpp"
 #include "simrv/device/pci/PcieRootComplex.hpp"
@@ -82,14 +83,18 @@ void VirtioPciDevice::add_pci_cap(uint8_t cap_type, PciBarIndex bar, PciBarOffse
     next_cap_offset_ += cap_len;
 }
 
-auto VirtioPciDevice::dma_read(simrv::xlen::Address paddr, void* dst, size_t len) -> bool {
-    if (!root_complex_ || !root_complex_->machine()) return false;
-    return root_complex_->machine()->memory().dma_read(simrv::xlen::PhysAddr{paddr}, dst, len);
+auto VirtioPciDevice::dma_read(uint64_t paddr, void* dst, size_t len) -> bool {
+    if (!root_complex_ || !root_complex_->machine() || !std::in_range<simrv::xlen::Word>(paddr))
+        return false;
+    return root_complex_->machine()->memory().dma_read(
+        simrv::xlen::PhysAddr{static_cast<simrv::xlen::Word>(paddr)}, dst, len);
 }
 
-auto VirtioPciDevice::dma_write(simrv::xlen::Address paddr, const void* src, size_t len) -> bool {
-    if (!root_complex_ || !root_complex_->machine()) return false;
-    return root_complex_->machine()->memory().dma_write(simrv::xlen::PhysAddr{paddr}, src, len);
+auto VirtioPciDevice::dma_write(uint64_t paddr, const void* src, size_t len) -> bool {
+    if (!root_complex_ || !root_complex_->machine() || !std::in_range<simrv::xlen::Word>(paddr))
+        return false;
+    return root_complex_->machine()->memory().dma_write(
+        simrv::xlen::PhysAddr{static_cast<simrv::xlen::Word>(paddr)}, src, len);
 }
 
 void VirtioPciDevice::trigger_irq() {

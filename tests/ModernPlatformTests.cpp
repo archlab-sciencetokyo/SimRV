@@ -225,6 +225,57 @@ void test_mmio_device_and_dma() {
     std::vector<uint8_t> dst(4, 0);
     check(dev.dma_read(simrv::xlen::PhysAddr{simrv::memory::kDramBaseAddress + 0x100}, dst));
     check(dst == src);
+
+    // VirtIO descriptor addresses are 64-bit even in a native RV32 build.
+    // Reject an unrepresentable address instead of aliasing its low bits into RAM.
+    simrv::device::VirtioMmioRng mmio_rng(0x10003000, 4, &machine);
+    simrv::device::PcieRootComplex root(&machine);
+    auto pci_rng = std::make_shared<simrv::device::VirtioPciRng>();
+    check(root.attach_device(0, 3, 0, pci_rng));
+    auto& mmio_transport = static_cast<simrv::device::virtio::IVirtioTransport&>(mmio_rng);
+    auto& pci_transport = static_cast<simrv::device::virtio::IVirtioTransport&>(*pci_rng);
+    const uint64_t low = static_cast<uint64_t>(simrv::memory::kDramBaseAddress) + 0x100;
+    const uint64_t high = low | (uint64_t{1} << 32);
+    std::byte value{0x5a};
+    std::byte result{};
+    for (auto* transport : {&mmio_transport, &pci_transport}) {
+        check(transport->dma_write_bytes(low, &value, 1));
+        check(transport->dma_read_bytes(low, &result, 1));
+        check(result == value);
+        value = std::byte{0xa5};
+        check(!transport->dma_write_bytes(high, &value, 1));
+        check(!transport->dma_read_bytes(high, &result, 1));
+        check(transport->dma_read_bytes(low, &result, 1));
+        check(result == std::byte{0x5a});
+        value = std::byte{0x5a};
+    }
+
+    // A high driver-ring address must reach the transport without truncation.
+    const uint16_t avail_idx = 1;
+    std::memcpy(ram.data() + 0x202, &avail_idx, sizeof(avail_idx));
+    const auto base = static_cast<uint32_t>(simrv::memory::kDramBaseAddress);
+    mmio_rng.write32(0x38, 8);
+    mmio_rng.write32(0x80, base + 0x100);
+    mmio_rng.write32(0x90, base + 0x200);
+    mmio_rng.write32(0x94, 1);
+    mmio_rng.write32(0xa0, base + 0x300);
+    mmio_rng.write32(0x44, 1);
+    mmio_rng.write32(0x50, 0);
+    check(mmio_rng.get_queue_state(0)->last_avail_idx == 0);
+    pci_rng->bar_write(0, 0x18, 8, 2);
+    pci_rng->bar_write(0, 0x20, base + 0x100, 4);
+    pci_rng->bar_write(0, 0x28, base + 0x200, 4);
+    pci_rng->bar_write(0, 0x2c, 1, 4);
+    pci_rng->bar_write(0, 0x30, base + 0x300, 4);
+    pci_rng->bar_write(0, 0x1c, 1, 2);
+    pci_rng->bar_write(0, 0x100, 0, 2);
+    check(pci_rng->get_queue_state(0)->last_avail_idx == 0);
+    mmio_rng.write32(0x94, 0);
+    mmio_rng.write32(0x50, 0);
+    check(mmio_rng.get_queue_state(0)->last_avail_idx == 1);
+    pci_rng->bar_write(0, 0x2c, 0, 4);
+    pci_rng->bar_write(0, 0x100, 0, 2);
+    check(pci_rng->get_queue_state(0)->last_avail_idx == 1);
     std::cout << "[PASS] test_mmio_device_and_dma\n";
 }
 

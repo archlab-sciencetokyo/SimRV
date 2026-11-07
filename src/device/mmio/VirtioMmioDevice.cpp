@@ -6,6 +6,7 @@
 
 #include <cstring>
 #include <span>
+#include <utility>
 
 #include "simrv/core/Cpu.hpp"
 #include "simrv/core/Machine.hpp"
@@ -38,12 +39,14 @@ void VirtioMmioDevice::trigger_irq() {
 }
 
 auto VirtioMmioDevice::dma_read_bytes(uint64_t phys_addr, std::byte* dst, std::size_t len) -> bool {
+    if (!std::in_range<simrv::xlen::Word>(phys_addr)) return false;
     return dma_read(simrv::xlen::PhysAddr{static_cast<simrv::xlen::Word>(phys_addr)},
                     std::span<uint8_t>(reinterpret_cast<uint8_t*>(dst), len));
 }
 
 auto VirtioMmioDevice::dma_write_bytes(uint64_t phys_addr, const std::byte* src, std::size_t len)
     -> bool {
+    if (!std::in_range<simrv::xlen::Word>(phys_addr)) return false;
     return dma_write(simrv::xlen::PhysAddr{static_cast<simrv::xlen::Word>(phys_addr)},
                      std::span<const uint8_t>(reinterpret_cast<const uint8_t*>(src), len));
 }
