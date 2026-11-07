@@ -1388,9 +1388,9 @@ void test_cbo_zero_invalidates_cached_copies_and_reservations() {
                               simrv::memory::mesi_for(response.cap));
 
     auto& reservations = machine.memory().reservation_table();
-    reservations.set_reservation(simrv::xlen::HartId{0}, line + 8);
-    reservations.set_reservation(simrv::xlen::HartId{1}, line + 40);
-    reservations.set_reservation(simrv::xlen::HartId{2}, line + 64);
+    reservations.set_reservation(simrv::xlen::HartId{0}, simrv::xlen::PhysAddr{line + 8});
+    reservations.set_reservation(simrv::xlen::HartId{1}, simrv::xlen::PhysAddr{line + 40});
+    reservations.set_reservation(simrv::xlen::HartId{2}, simrv::xlen::PhysAddr{line + 64});
     machine.cpu.state().lr_reservation_active = true;
     simrv::memory::MemoryAccess::execute_cmo(machine.memory(), machine.cpu,
                                              simrv::xlen::VirtAddr{line + 16},
@@ -1401,9 +1401,9 @@ void test_cbo_zero_invalidates_cached_copies_and_reservations() {
     check(bus.coherence_hub().get_directory_state(simrv::xlen::PhysAddr{line}).state ==
           simrv::memory::MesiState::Invalid);
     check(!machine.cpu.state().lr_reservation_active);
-    check(!reservations.check_reservation(simrv::xlen::HartId{0}, line + 8));
-    check(!reservations.check_reservation(simrv::xlen::HartId{1}, line + 40));
-    check(reservations.check_reservation(simrv::xlen::HartId{2}, line + 64));
+    check(!reservations.check_reservation(simrv::xlen::HartId{0}, simrv::xlen::PhysAddr{line + 8}));
+    check(!reservations.check_reservation(simrv::xlen::HartId{1}, simrv::xlen::PhysAddr{line + 40}));
+    check(reservations.check_reservation(simrv::xlen::HartId{2}, simrv::xlen::PhysAddr{line + 64}));
     check(std::ranges::all_of(std::span(ram).subspan(0x400, data.size()),
                               [](auto value) { return value == simrv::xlen::Byte{0}; }));
 
@@ -1432,18 +1432,18 @@ void test_dma_write_invalidates_reservations_in_all_modes() {
         machine.runtime_profile.engine = engine;
         auto& reservations = machine.memory().reservation_table();
         constexpr simrv::xlen::Address base = simrv::memory::kDramBaseAddress + 0x100;
-        reservations.set_reservation(simrv::xlen::HartId{0}, base + 8);
-        reservations.set_reservation(simrv::xlen::HartId{1}, base + 24);
+        reservations.set_reservation(simrv::xlen::HartId{0}, simrv::xlen::PhysAddr{base + 8});
+        reservations.set_reservation(simrv::xlen::HartId{1}, simrv::xlen::PhysAddr{base + 24});
         const std::array<simrv::xlen::Byte, 16> data{};
         check(
             machine.memory().dma_write(simrv::xlen::PhysAddr{base + 12}, data.data(), data.size()));
-        check(!reservations.check_reservation(simrv::xlen::HartId{0}, base + 8));
-        check(!reservations.check_reservation(simrv::xlen::HartId{1}, base + 24));
-        reservations.set_reservation(simrv::xlen::HartId{0}, base + 8);
+        check(!reservations.check_reservation(simrv::xlen::HartId{0}, simrv::xlen::PhysAddr{base + 8}));
+        check(!reservations.check_reservation(simrv::xlen::HartId{1}, simrv::xlen::PhysAddr{base + 24}));
+        reservations.set_reservation(simrv::xlen::HartId{0}, simrv::xlen::PhysAddr{base + 8});
         check(!machine.memory().dma_write(
             simrv::xlen::PhysAddr{simrv::memory::kDramBaseAddress + 4092}, data.data(),
             data.size()));
-        check(reservations.check_reservation(simrv::xlen::HartId{0}, base + 8));
+        check(reservations.check_reservation(simrv::xlen::HartId{0}, simrv::xlen::PhysAddr{base + 8}));
     }
 }
 
@@ -3540,7 +3540,7 @@ void test_ia_multihart_lr_sc_coherence() {
     h0.pipeline_context.rrs1 = target_addr;
     h0.run_memory_stage(machine);
     check(h0.pipeline_context.mem_paddr.raw() == target_addr);
-    check(machine.memory().reservation_table().check_reservation(0, target_addr));
+    check(machine.memory().reservation_table().check_reservation(0, simrv::xlen::PhysAddr{target_addr}));
 
     h0.pipeline_context = {};
     h0.pipeline_context.opcode = simrv::isa::Opcode::Amo;
@@ -3586,7 +3586,7 @@ void test_ia_multihart_lr_sc_coherence() {
     h0.run_memory_stage(machine);
     check(h0.state().load_res == target_addr);
     check(h0.state().lr_reservation_active);
-    check(machine.memory().reservation_table().check_reservation(0, target_addr));
+    check(machine.memory().reservation_table().check_reservation(0, simrv::xlen::PhysAddr{target_addr}));
 
     // 2. Hart 1 performs a store to the same address in IA mode
     auto& h1 = machine.hart(1);
@@ -3600,7 +3600,7 @@ void test_ia_multihart_lr_sc_coherence() {
     h1.run_memory_stage(machine);
 
     // 3. Hart 0's reservation must now be invalidated
-    check(!machine.memory().reservation_table().check_reservation(0, target_addr));
+    check(!machine.memory().reservation_table().check_reservation(0, simrv::xlen::PhysAddr{target_addr}));
 
     // 4. Hart 0 attempts SC.W, which must fail
     h0.pipeline_context = {};

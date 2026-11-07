@@ -43,10 +43,10 @@ class ReservationTable {
      * @param hart Hart ID making the reservation.
      * @param addr Physical address loaded via LR.
      */
-    void set_reservation(simrv::xlen::HartId hart, simrv::xlen::Address addr) {
+    void set_reservation(simrv::xlen::HartId hart, simrv::xlen::PhysAddr addr) {
         const std::scoped_lock lock(mutex_);
         reservations_[hart] = ReservationEntry{
-            .address = addr & kReservationGranuleMask,
+            .address = addr.raw() & kReservationGranuleMask,
             .valid = true,
         };
         may_have_reservations_.store(true, std::memory_order_release);
@@ -58,14 +58,14 @@ class ReservationTable {
      * @param addr Physical address targeted by SC.
      * @return True if valid and matching, false otherwise.
      */
-    [[nodiscard]] auto check_reservation(simrv::xlen::HartId hart, simrv::xlen::Address addr) const
+    [[nodiscard]] auto check_reservation(simrv::xlen::HartId hart, simrv::xlen::PhysAddr addr) const
         -> bool {
         const std::scoped_lock lock(mutex_);
         auto it = reservations_.find(hart);
         if (it == reservations_.end() || !it->second.valid) {
             return false;
         }
-        return it->second.address == (addr & kReservationGranuleMask);
+        return it->second.address == (addr.raw() & kReservationGranuleMask);
     }
 
     /**
@@ -74,13 +74,13 @@ class ReservationTable {
      * @param addr Target physical address of SC.
      * @return True if reservation was valid and cleared successfully, false otherwise.
      */
-    auto check_and_clear_reservation(simrv::xlen::HartId hart, simrv::xlen::Address addr) -> bool {
+    auto check_and_clear_reservation(simrv::xlen::HartId hart, simrv::xlen::PhysAddr addr) -> bool {
         const std::scoped_lock lock(mutex_);
         auto it = reservations_.find(hart);
         if (it == reservations_.end() || !it->second.valid) {
             return false;
         }
-        const bool success = it->second.address == (addr & kReservationGranuleMask);
+        const bool success = it->second.address == (addr.raw() & kReservationGranuleMask);
         // Every SC attempt consumes the hart's reservation, including a failed
         // attempt whose address does not match the reserved set.
         it->second.valid = false;
@@ -101,11 +101,11 @@ class ReservationTable {
      * @param store_origin Optional Hart ID initiating the store. If provided,
      *                     reservations belonging to other Harts are invalidated.
      */
-    void invalidate_matching(simrv::xlen::Address addr,
+    void invalidate_matching(simrv::xlen::PhysAddr addr,
                              std::optional<simrv::xlen::HartId> store_origin = std::nullopt) {
         if (!may_have_reservations_.load(std::memory_order_acquire)) return;
         const std::scoped_lock lock(mutex_);
-        const simrv::xlen::Address granule_addr = addr & kReservationGranuleMask;
+        const simrv::xlen::Address granule_addr = addr.raw() & kReservationGranuleMask;
         bool any_valid = false;
         for (auto& [hart, entry] : reservations_) {
             if (store_origin.has_value() && hart == *store_origin) {
@@ -125,10 +125,6 @@ class ReservationTable {
         }
     }
 
-    void invalidate_matching(simrv::xlen::PhysAddr addr,
-                             std::optional<simrv::xlen::HartId> store_origin = std::nullopt) {
-        invalidate_matching(addr.raw(), store_origin);
-    }
 
     /**
      * @brief Invalidate reservations overlapping a physical byte range.
@@ -165,6 +161,12 @@ class ReservationTable {
 
     template <std::integral I>
     void invalidate_range(I, size_t, std::optional<simrv::xlen::HartId> = std::nullopt) = delete;
+
+    template <std::integral I> void set_reservation(simrv::xlen::HartId, I) = delete;
+    template <std::integral I> auto check_reservation(simrv::xlen::HartId, I) const -> bool = delete;
+    template <std::integral I> auto check_and_clear_reservation(simrv::xlen::HartId, I) -> bool = delete;
+    template <std::integral I>
+    void invalidate_matching(I, std::optional<simrv::xlen::HartId> = std::nullopt) = delete;
 
     /**
      * @brief Clear active reservation for a specific Hart.

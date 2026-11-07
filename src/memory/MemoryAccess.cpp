@@ -623,7 +623,7 @@ void MemoryAccess::target_write(MemorySubsystem& mem, core::CPU& cpu, simrv::xle
         if (!is_sc || ctx.sc_reservation_checked) return true;
 
         ctx.sc_reservation_checked = true;
-        bool success = mem.reservation_table().check_and_clear_reservation(cpu.hart_id(), addr);
+        bool success = mem.reservation_table().check_and_clear_reservation(cpu.hart_id(), simrv::xlen::PhysAddr{addr});
         if (success && cpu.machine_->lockstep() && cpu.machine_->lockstep()->is_running()) {
             const auto lockstep_success = cpu.machine_->lockstep()->determine_sc_success();
             if (lockstep_success.has_value() && !lockstep_success.value()) success = false;

@@ -21,6 +21,13 @@ ten measured runs. Values are median elapsed seconds; variability is the coeffic
 | Serial interface and subsequent changes, memory | 0.137802; 2.57% | 0.135065; 2.96% | -1.99% |
 | Serial interface and subsequent changes, Linux boot | 0.603079; 1.65% | 0.599469; 1.01% | -0.60% |
 
+For the physical-address reservation interface, an LR/SC loop with two harts and a 10 million
+instruction limit used three warmups and 20 interleaved runs per binary on one pinned CPU. Median
+elapsed time was 0.399677 seconds before (10.89% CV) and 0.401831 seconds after (10.63% CV), a
+0.54% increase. Both runs used the RV64 release build, `rv64gc_zicsr_zifencei_zicntr`, and the
+same fixed-instruction stop policy. Variability exceeds the 5% investigation threshold, so this
+result cannot establish a small performance difference.
+
 The branch result is too noisy to establish a speedup. The MMIO loop retained the same bus and
 cache counts. The initial baseline executable is no longer available, so an identical-binary
 comparison against the final tree remains outstanding. ARM hardware and usable host performance

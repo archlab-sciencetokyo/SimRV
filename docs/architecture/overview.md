@@ -141,6 +141,8 @@ lookup or invalidation. A data-cache access wider than native `Word` misses;
 RV32 floating-point and vector paths split wider accesses into word operations. Cache-block zero
 discards the initiating cached copy when removing its directory entry and invalidates reservations
 throughout the block. DMA writes invalidate reservations over their actual byte range.
+Reservation-table LR, SC, and invalidation operations also require `PhysAddr`; translation must
+be complete before recording or checking a reservation.
 
 Compact execution keeps integer register operands as `RegId` until indexing the register file;
 its on-disk and plugin interfaces are not affected by that internal representation.

@@ -226,7 +226,7 @@ void CoherenceHub::invalidate_line_external(simrv::xlen::PhysAddr address) {
             ++stats_.invalidation_count;
         }
     }
-    machine_.memory_.reservation_table().invalidate_matching(aligned_addr);
+    machine_.memory_.reservation_table().invalidate_matching(simrv::xlen::PhysAddr{aligned_addr});
     invalidate_shared_caches(aligned_addr);
     erase_dir_entry(aligned_addr);
 }
@@ -278,7 +278,7 @@ auto CoherenceHub::handle_acquire(const TlChannelA& req, TlChannelD& resp,
             }
         }
 
-        machine_.memory_.reservation_table().invalidate_matching(line_base, req.hart);
+        machine_.memory_.reservation_table().invalidate_matching(simrv::xlen::PhysAddr{line_base}, req.hart);
         invalidate_shared_caches(line_base);
 
         update_dir_entry(line_base, DirectoryEntry{
@@ -419,7 +419,7 @@ auto CoherenceHub::handle_acquire(const TlChannelA& req, TlChannelD& resp,
     }
 
     if (granted_cap == TlCap::ToT) {
-        machine_.memory_.reservation_table().invalidate_matching(line_base, req.hart);
+        machine_.memory_.reservation_table().invalidate_matching(simrv::xlen::PhysAddr{line_base}, req.hart);
     }
 
     update_dir_entry(line_base, dir_entry);

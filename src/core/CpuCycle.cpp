@@ -857,7 +857,7 @@ void CPU::run_memory_stage_baremetal(Machine& machine) {
     if (opcode == Opcode::Amo && funct5 == Funct5Amo::Lr) {
         state_.load_res = addr;
         state_.lr_reservation_active = true;
-        machine.memory_.reservation_table().set_reservation(hart_id(), addr);
+        machine.memory_.reservation_table().set_reservation(hart_id(), simrv::xlen::PhysAddr{addr});
     }
 
     // Prepare Store Data

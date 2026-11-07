@@ -160,6 +160,17 @@ static_assert(ReservationRangeAddress<simrv::xlen::PhysAddr>);
 static_assert(!ReservationRangeAddress<simrv::xlen::VirtAddr>);
 static_assert(!ReservationRangeAddress<simrv::xlen::Address>);
 
+template <typename A>
+concept ReservationAddress = requires(simrv::memory::ReservationTable& table, A addr) {
+    table.set_reservation(0, addr);
+    table.check_reservation(0, addr);
+    table.check_and_clear_reservation(0, addr);
+    table.invalidate_matching(addr);
+};
+static_assert(ReservationAddress<simrv::xlen::PhysAddr>);
+static_assert(!ReservationAddress<simrv::xlen::VirtAddr>);
+static_assert(!ReservationAddress<simrv::xlen::Address>);
+
 void expect(bool condition, const std::string& message) {
     if (!condition) {
         std::cerr << "FAIL: " << message << '\n';
@@ -1918,12 +1929,12 @@ void test_vector_bulk_memory_operations() {
     secondary->machine_ = &machine;
     machine.test_secondary_harts().push_back(std::move(secondary));
     auto& reservations = machine.memory().reservation_table();
-    reservations.set_reservation(simrv::xlen::HartId{1}, ram.base() + 0x400);
+    reservations.set_reservation(simrv::xlen::HartId{1}, simrv::xlen::PhysAddr{ram.base() + 0x400});
     cpu.state().vstart = 0;
     simrv::execute::ExecuteUnit::execute_vector(cpu, machine.memory(),
                                                 simrv::isa::OperationId::VSSE8_V,
                                                 strided_ir(vd, base_reg, stride_reg));
-    expect(!reservations.check_reservation(simrv::xlen::HartId{1}, ram.base() + 0x400),
+    expect(!reservations.check_reservation(simrv::xlen::HartId{1}, simrv::xlen::PhysAddr{ram.base() + 0x400}),
            "strided vector store invalidates another hart's overlapping reservation");
 
     if constexpr (!simrv::xlen::kIsXLen64) {
@@ -4058,65 +4069,65 @@ void test_smp_reservation_table() {
     simrv::memory::ReservationTable table;
     expect(!table.may_have_reservations(), "New reservation table has a lock-free empty state");
 
-    table.set_reservation(0, 0x80001000);
+    table.set_reservation(0, simrv::xlen::PhysAddr{0x80001000});
     expect(table.may_have_reservations(), "Setting LR marks possible reservations");
-    expect(table.check_reservation(0, 0x80001000), "Hart 0 holds reservation at 0x80001000");
-    expect(!table.check_reservation(0, 0x80001008),
+    expect(table.check_reservation(0, simrv::xlen::PhysAddr{0x80001000}), "Hart 0 holds reservation at 0x80001000");
+    expect(!table.check_reservation(0, simrv::xlen::PhysAddr{0x80001008}),
            "Hart 0 does not hold reservation in the next eight-byte set");
-    expect(!table.check_reservation(0, 0x80001040),
+    expect(!table.check_reservation(0, simrv::xlen::PhysAddr{0x80001040}),
            "Hart 0 does not hold reservation in different granule");
-    expect(!table.check_reservation(1, 0x80001000), "Hart 1 does not hold Hart 0's reservation");
+    expect(!table.check_reservation(1, simrv::xlen::PhysAddr{0x80001000}), "Hart 1 does not hold Hart 0's reservation");
 
-    table.invalidate_matching(0x80001000, 0);
-    expect(table.check_reservation(0, 0x80001000),
+    table.invalidate_matching(simrv::xlen::PhysAddr{0x80001000}, 0);
+    expect(table.check_reservation(0, simrv::xlen::PhysAddr{0x80001000}),
            "Store from Hart 0 does not invalidate its own reservation before SC");
 
-    table.invalidate_matching(0x80001004, 1);
-    expect(!table.check_reservation(0, 0x80001000),
+    table.invalidate_matching(simrv::xlen::PhysAddr{0x80001004}, 1);
+    expect(!table.check_reservation(0, simrv::xlen::PhysAddr{0x80001000}),
            "Store from Hart 1 invalidates Hart 0's reservation");
-    expect(!table.check_and_clear_reservation(0, 0x80001000),
+    expect(!table.check_and_clear_reservation(0, simrv::xlen::PhysAddr{0x80001000}),
            "SC on invalidated reservation fails");
 
-    table.set_reservation(0, 0x80001000);
-    expect(!table.check_and_clear_reservation(0, 0x80001008),
+    table.set_reservation(0, simrv::xlen::PhysAddr{0x80001000});
+    expect(!table.check_and_clear_reservation(0, simrv::xlen::PhysAddr{0x80001008}),
            "SC to a different reservation set fails");
-    expect(!table.check_reservation(0, 0x80001000), "Failed SC clears the previous reservation");
+    expect(!table.check_reservation(0, simrv::xlen::PhysAddr{0x80001000}), "Failed SC clears the previous reservation");
 
-    table.set_reservation(0, 0x80002000);
-    table.set_reservation(1, 0x80003000);
-    expect(table.check_and_clear_reservation(0, 0x80002000), "SC on valid reservation succeeds");
-    expect(!table.check_reservation(0, 0x80002000), "Reservation is cleared after successful SC");
-    expect(table.check_reservation(1, 0x80003000), "Hart 1's reservation remains intact");
+    table.set_reservation(0, simrv::xlen::PhysAddr{0x80002000});
+    table.set_reservation(1, simrv::xlen::PhysAddr{0x80003000});
+    expect(table.check_and_clear_reservation(0, simrv::xlen::PhysAddr{0x80002000}), "SC on valid reservation succeeds");
+    expect(!table.check_reservation(0, simrv::xlen::PhysAddr{0x80002000}), "Reservation is cleared after successful SC");
+    expect(table.check_reservation(1, simrv::xlen::PhysAddr{0x80003000}), "Hart 1's reservation remains intact");
 
     table.clear_all();
     expect(!table.may_have_reservations(), "clear_all restores the lock-free empty state");
-    expect(!table.check_reservation(1, 0x80003000),
+    expect(!table.check_reservation(1, simrv::xlen::PhysAddr{0x80003000}),
            "clear_all invalidates all active reservations");
 
-    table.set_reservation(0, 0x80004000);
-    table.set_reservation(1, 0x80004008);
-    table.set_reservation(2, 0x80004000);
+    table.set_reservation(0, simrv::xlen::PhysAddr{0x80004000});
+    table.set_reservation(1, simrv::xlen::PhysAddr{0x80004008});
+    table.set_reservation(2, simrv::xlen::PhysAddr{0x80004000});
     table.invalidate_range(simrv::xlen::PhysAddr{0x80004004}, 8, 2);
-    expect(!table.check_reservation(0, 0x80004000) && !table.check_reservation(1, 0x80004008) &&
-               table.check_reservation(2, 0x80004000),
+    expect(!table.check_reservation(0, simrv::xlen::PhysAddr{0x80004000}) && !table.check_reservation(1, simrv::xlen::PhysAddr{0x80004008}) &&
+               table.check_reservation(2, simrv::xlen::PhysAddr{0x80004000}),
            "A physical write spanning two reservation granules invalidates other harts only");
 
     table.clear_all();
     constexpr auto kLastAddress = std::numeric_limits<simrv::xlen::Address>::max();
-    table.set_reservation(0, kLastAddress);
-    table.set_reservation(1, 0);
+    table.set_reservation(0, simrv::xlen::PhysAddr{kLastAddress});
+    table.set_reservation(1, simrv::xlen::PhysAddr{0});
     table.invalidate_range(simrv::xlen::PhysAddr{kLastAddress - 3}, 0);
-    expect(table.check_reservation(0, kLastAddress), "An empty write preserves reservations");
+    expect(table.check_reservation(0, simrv::xlen::PhysAddr{kLastAddress}), "An empty write preserves reservations");
     table.invalidate_range(simrv::xlen::PhysAddr{kLastAddress - 3}, 16);
-    expect(!table.check_reservation(0, kLastAddress) && table.check_reservation(1, 0),
+    expect(!table.check_reservation(0, simrv::xlen::PhysAddr{kLastAddress}) && table.check_reservation(1, simrv::xlen::PhysAddr{0}),
            "A range beyond the physical address limit saturates without wrapping");
 
     if constexpr (sizeof(size_t) > sizeof(simrv::xlen::Address)) {
         table.clear_all();
-        table.set_reservation(0, 0x80004008);
+        table.set_reservation(0, simrv::xlen::PhysAddr{0x80004008});
         table.invalidate_range(simrv::xlen::PhysAddr{0x80004000},
                                static_cast<size_t>(uint64_t{1} << 32) + 1);
-        expect(!table.check_reservation(0, 0x80004008),
+        expect(!table.check_reservation(0, simrv::xlen::PhysAddr{0x80004008}),
                "A host-sized write larger than the guest address space invalidates its range");
     }
 }
