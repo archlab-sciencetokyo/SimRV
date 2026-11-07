@@ -3903,6 +3903,32 @@ void test_sixel_fluid_framebuffer_updates() {
     tui.render(true);
     expect(TuiTestAccess::sixel_framebuffer_signature(tui) == sig1,
            "unchanged framebuffer preserves signature");
+
+    machine.set_framebuffer_resolution_for_testing(1, 1);
+    tui.render(true);
+    const auto small_sig = TuiTestAccess::sixel_framebuffer_signature(tui);
+    std::string before_pixel;
+    TuiTestAccess::render_draw_sixel(tui, 2, 40, 20, before_pixel);
+    fb_bytes[2] = simrv::xlen::Byte{0xff};
+    tui.render(true);
+    expect(TuiTestAccess::sixel_framebuffer_signature(tui) != small_sig,
+           "a pixel change updates the signature of a framebuffer smaller than eight bytes");
+    std::string after_pixel;
+    TuiTestAccess::render_draw_sixel(tui, 2, 40, 20, after_pixel);
+    expect(after_pixel != before_pixel, "a small framebuffer pixel invalidates its cached sixel strip");
+
+    machine.set_framebuffer_resolution_for_testing(3, 1);
+    tui.render(true);
+    const auto odd_sig = TuiTestAccess::sixel_framebuffer_signature(tui);
+    std::string before_tail;
+    TuiTestAccess::render_draw_sixel(tui, 2, 40, 20, before_tail);
+    fb_bytes[10] = simrv::xlen::Byte{0xff};
+    tui.render(true);
+    expect(TuiTestAccess::sixel_framebuffer_signature(tui) != odd_sig,
+           "a trailing pixel updates an odd-width framebuffer signature");
+    std::string after_tail;
+    TuiTestAccess::render_draw_sixel(tui, 2, 40, 20, after_tail);
+    expect(after_tail != before_tail, "a trailing pixel invalidates its cached sixel strip");
 }
 
 void test_virtio_input_and_display_mouse() {

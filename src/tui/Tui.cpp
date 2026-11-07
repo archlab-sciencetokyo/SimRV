@@ -1106,6 +1106,10 @@ void Tui::render_draw_sixel(int panel_x, int display_width, int display_rows,
                 std::memcpy(&word, bytes + w * sizeof(word), sizeof(word));
                 strip_hash = (strip_hash ^ word) * 1099511628211ULL;
             }
+            const size_t byte_count = static_cast<size_t>(max_bits) * stride;
+            for (size_t i = num_words * sizeof(uint64_t); i < byte_count; ++i) {
+                strip_hash = (strip_hash ^ bytes[i]) * 1099511628211ULL;
+            }
         } else {
             for (int bit = 0; bit < max_bits; ++bit) {
                 const int src_y = std::min(source_height - 1, (y + bit) * source_height / height);
@@ -1115,6 +1119,9 @@ void Tui::render_draw_sixel(int panel_x, int display_width, int display_rows,
                     uint64_t word;
                     std::memcpy(&word, bytes + w * sizeof(word), sizeof(word));
                     strip_hash = (strip_hash ^ word) * 1099511628211ULL;
+                }
+                for (size_t i = words_per_row * sizeof(uint64_t); i < stride; ++i) {
+                    strip_hash = (strip_hash ^ bytes[i]) * 1099511628211ULL;
                 }
             }
         }
@@ -1642,7 +1649,7 @@ void Tui::render(bool force) {
             framebuffer_signature = frame_id;
         } else {
             const auto fb = machine_.framebuffer_view();
-            if (fb.data() != nullptr && fb.size() >= sizeof(uint64_t)) {
+            if (fb.data() != nullptr && fb.size() != 0) {
                 constexpr uint64_t fnv_offset = 1469598103934665603ULL;
                 constexpr uint64_t fnv_prime = 1099511628211ULL;
                 const size_t n64 = fb.size() / sizeof(uint64_t);
@@ -1656,6 +1663,9 @@ void Tui::render(bool force) {
                         std::memcpy(&word, fb.data() + (i + 1) * sizeof(word), sizeof(word));
                         h2 = (h2 ^ word) * fnv_offset;
                     }
+                }
+                for (size_t i = n64 * sizeof(uint64_t); i < fb.size(); ++i) {
+                    h1 = (h1 ^ std::to_integer<uint8_t>(fb.data()[i])) * fnv_prime;
                 }
                 framebuffer_signature = h1 ^ (h2 * 31ULL);
             }
