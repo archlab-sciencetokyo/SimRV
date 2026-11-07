@@ -143,6 +143,8 @@ discards the initiating cached copy when removing its directory entry and invali
 throughout the block. DMA writes invalidate reservations over their actual byte range.
 Reservation-table LR, SC, and invalidation operations also require `PhysAddr`; translation must
 be complete before recording or checking a reservation.
+When execution engines change, multi-hart workers stop before per-hart state is reset and restart
+after the new engine is installed, so no worker remains parked on the previous engine's barrier.
 The G-stage page-table walker accepts `GuestPhysAddr`, which denotes a VS-stage result. It returns
 a host `PhysAddr`; guest fault addresses retain the guest-physical type until conversion to an
 architectural scalar value for trap reporting.

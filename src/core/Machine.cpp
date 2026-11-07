@@ -1377,6 +1377,11 @@ void Machine::switch_execution_engine(ExecutionEngine engine) {
 void Machine::switch_execution_engine_sync(ExecutionEngine engine) {
     if (runtime_profile.engine == engine) return;
 
+    // Workers can be waiting on different synchronization primitives in each engine.
+    // Stop them before resetting per-hart state, then start them with the new policy.
+    const bool restart_runner = runner_started_.load(std::memory_order_acquire);
+    if (restart_runner) stop_runner();
+
     const bool to_cycle = is_cycle_engine(engine);
     for (size_t i = 0; i < num_harts(); ++i) {
         auto& cpu = hart(i);
@@ -1412,6 +1417,7 @@ void Machine::switch_execution_engine_sync(ExecutionEngine engine) {
 
     runtime_profile.engine = engine;
     publish_tui_execution_snapshot();
+    if (restart_runner) start_runner();
 
     simrv::log::info("Switched execution mode to {}", runtime_profile.execution_name());
 }

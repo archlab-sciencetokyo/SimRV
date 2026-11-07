@@ -13,6 +13,7 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Allow custom MMIO plugins to provide a framebuffer for the TUI.
 - Fix missed TUI display updates for small framebuffers and rows with trailing bytes.
 - Fix a multi-hart cycle-mode hang when pausing execution.
+- Fix secondary harts stopping after switching execution modes in multi-threaded simulations.
 - Improve RVComp MMC support, device-tree boot arguments, and startup diagnostics in the TUI.
 
 ## [v3.0.0-rc.19] — 2026-11-05

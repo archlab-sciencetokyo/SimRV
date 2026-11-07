@@ -1962,6 +1962,35 @@ void test_ca_mt_smp_pause_and_snapshots() {
         check(machine.hart(hart).clint_mmio.mcycle == before_step[hart] + 1);
     }
     machine.pause();
+
+    // Keep workers alive while switching engines, then verify secondary-hart progress.
+    machine.resume();
+    machine.start_runner_for_testing();
+    machine.execute_cycle_for_testing();
+    machine.pause();
+    const auto before_switch = machine.tui_execution_snapshot(1).instruction_count;
+    machine.switch_execution_engine(simrv::core::ExecutionEngine::InstructionFast);
+    machine.service_control_commands();
+    machine.resume();
+    const auto switch_deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+    do {
+        machine.request_tui_sample();
+        machine.execute_cycle_for_testing();
+        std::this_thread::yield();
+    } while (machine.tui_execution_snapshot(1).instruction_count == before_switch &&
+             std::chrono::steady_clock::now() < switch_deadline);
+    check(machine.tui_execution_snapshot(1).instruction_count > before_switch);
+
+    machine.pause();
+    machine.switch_execution_engine(simrv::core::ExecutionEngine::CycleFast);
+    machine.service_control_commands();
+    machine.resume();
+    const auto before_cycle = machine.tui_execution_snapshot(1).cycle_count;
+    machine.request_tui_sample();
+    machine.execute_cycle_for_testing();
+    machine.pause();
+    check(machine.tui_execution_snapshot(1).cycle_count > before_cycle);
+    machine.stop_runner_for_testing();
     std::cout << "[PASS] test_ca_mt_smp_pause_and_snapshots\n";
 }
 
