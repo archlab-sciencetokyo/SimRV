@@ -1752,6 +1752,22 @@ void test_sha_shtvala_guest_physical_fault_value() {
         constexpr simrv::xlen::Address kGuestPhysical = 0x4000;
         cpu.state().hgatp = (uint64_t{8} << 60U) | (kRoot >> 12U);
 
+        simrv::memory::PageTableWalker walker(machine.ram_view());
+        const auto bare_walk = walker.begin_walk(
+            simrv::xlen::VirtAddr{kGuestPhysical}, simrv::PteAccess::Read,
+            simrv::xlen::PrivilegeLevel::Supervisor, 0, 0, 64, true, &cpu.state());
+        TEST_ASSERT(bare_walk.status == simrv::memory::PageWalkStatus::Fault);
+        TEST_ASSERT(bare_walk.physical_address == simrv::xlen::PhysAddr{});
+        TEST_ASSERT(bare_walk.guest_fault_address.raw() == kGuestPhysical);
+
+        const auto vs_satp = static_cast<simrv::xlen::Word>((uint64_t{8} << 60U) | 2U);
+        const auto vs_walk = walker.begin_walk(
+            simrv::xlen::VirtAddr{kGuestPhysical}, simrv::PteAccess::Read,
+            simrv::xlen::PrivilegeLevel::Supervisor, 0, vs_satp, 64, true, &cpu.state());
+        TEST_ASSERT(vs_walk.status == simrv::memory::PageWalkStatus::Fault);
+        TEST_ASSERT(vs_walk.pte_guest_address.raw() == 0x2000);
+        TEST_ASSERT(vs_walk.pte_address == simrv::xlen::PhysAddr{});
+
         auto translated = cpu.translate_stage_address(
             machine, simrv::xlen::VirtAddr{kGuestPhysical}, simrv::PteAccess::Read,
             simrv::xlen::PrivilegeLevel::Supervisor, 64, simrv::memory::TlPort::Data,

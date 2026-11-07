@@ -164,7 +164,7 @@ void CPU::fetch_address_translate(Machine& machine) {
                 simrv::xlen::Byte* const host_base =
                     (machine.ram_view().contains(tlb_e1->p_addr, 4096) &&
                      (state_.num_active_pmp == 0 ||
-                      core::pmp::check_access(state_, simrv::xlen::PhysAddr{tlb_e1->p_addr}, 4096,
+                      core::pmp::check_access(state_, tlb_e1->p_addr, 4096,
                                               core::PmpAccessType::Execute, state_.priv)))
                         ? machine.ram_view().unchecked_ptr(tlb_e1->p_addr)
                         : nullptr;
@@ -192,7 +192,7 @@ void CPU::fetch_address_translate(Machine& machine) {
                     simrv::xlen::Byte* const host_base =
                         (machine.ram_view().contains(tlb_e2->p_addr, 4096) &&
                          (state_.num_active_pmp == 0 ||
-                          core::pmp::check_access(state_, simrv::xlen::PhysAddr{tlb_e2->p_addr},
+                          core::pmp::check_access(state_, tlb_e2->p_addr,
                                                   4096, core::PmpAccessType::Execute, state_.priv)))
                             ? machine.ram_view().unchecked_ptr(tlb_e2->p_addr)
                             : nullptr;
@@ -720,7 +720,7 @@ void CPU::decode_and_normalize_instruction(Machine& machine) {
     // execute permissions here for both the physical and translated fetch paths before the
     // instruction is decoded or admitted to the decode cache.
     if (simrv::compiler::unlikely(!core::pmp::check_access(
-            state_, simrv::xlen::PhysAddr{ctx.padr1.raw()}, sizeof(uint16_t),
+            state_, ctx.padr1, sizeof(uint16_t),
             core::PmpAccessType::Execute, state_.priv))) {
         ctx.pending_exception = ExceptionCode::FaultFetch;
         ctx.pending_tval = state_.pc;
@@ -729,7 +729,7 @@ void CPU::decode_and_normalize_instruction(Machine& machine) {
     }
     if (simrv::compiler::unlikely(
             (ctx.ir_org & 0x3u) == 0x3u &&
-            !core::pmp::check_access(state_, simrv::xlen::PhysAddr{ctx.padr2.raw()},
+            !core::pmp::check_access(state_, ctx.padr2,
                                      sizeof(uint16_t), core::PmpAccessType::Execute,
                                      state_.priv))) {
         ctx.pending_exception = ExceptionCode::FaultFetch;

@@ -68,8 +68,8 @@ void PageTableWalker::select_next_pte(PageWalkState& state,
         (state.virtual_address.raw() >>
          (12 + state.level * static_cast<int>(state.vpn_bits_per_level))) &
         vpn_mask;
-    state.pte_guest_address = GuestPhysAddr{(table_address + vpn * state.pte_size).raw()};
-    state.pte_address = simrv::xlen::PhysAddr{state.pte_guest_address.raw()};
+    const auto pte_address = table_address + vpn * state.pte_size;
+    state.pte_guest_address = GuestPhysAddr{pte_address.raw()};
     if (state.guest_stage_enabled) {
         auto translated =
             walk_guest_physical(state.pte_guest_address, PteAccess::Read, state.hgatp, state.xlen,
@@ -94,12 +94,14 @@ void PageTableWalker::select_next_pte(PageWalkState& state,
             return;
         }
         state.pte_address = translated->physical_address;
+    } else {
+        state.pte_address = pte_address;
     }
     // Implicit page table accesses evaluate under Supervisor privilege per RISC-V Privileged spec
     if (!pte_access_valid(state.pte_address, state.pte_size) ||
         (state.arch_state != nullptr &&
-         !core::pmp::check_access(*state.arch_state, simrv::xlen::PhysAddr{state.pte_address},
-                                  state.pte_size, core::PmpAccessType::Read,
+         !core::pmp::check_access(*state.arch_state, state.pte_address, state.pte_size,
+                                  core::PmpAccessType::Read,
                                   simrv::xlen::PrivilegeLevel::Supervisor))) {
         fail_access(state);
         return;
@@ -124,7 +126,6 @@ auto PageTableWalker::begin_walk(simrv::xlen::VirtAddr v_addr, PteAccess access,
         state.hgatp = arch_state->hgatp;
     }
     if (priv == kPrivMachine || !simrv::xlen::satp_translation_enabled(satp, xlen)) {
-        state.physical_address = simrv::xlen::PhysAddr{v_addr.raw()};
         if (state.guest_stage_enabled && priv != kPrivMachine) {
             const bool mxr = arch_state != nullptr && (arch_state->mstatus & MstatusBit::Mxr) != 0;
             auto translated = walk_guest_physical(GuestPhysAddr{v_addr.raw()}, access, state.hgatp,
@@ -135,6 +136,8 @@ auto PageTableWalker::begin_walk(simrv::xlen::VirtAddr v_addr, PteAccess access,
                 return state;
             }
             state.physical_address = translated->physical_address;
+        } else {
+            state.physical_address = simrv::xlen::PhysAddr{v_addr.raw()};
         }
         state.status = PageWalkStatus::Complete;
         return state;
@@ -298,12 +301,10 @@ void PageTableWalker::accept_pte(PageWalkState& state, simrv::xlen::Word pte) co
                                                                        ? core::PmpAccessType::Write
                                                                        : core::PmpAccessType::Read);
         const bool pmp_allowed =
-            core::pmp::check_access(*state.arch_state,
-                                    simrv::xlen::PhysAddr{state.physical_address}, 1, pmp_access,
+            core::pmp::check_access(*state.arch_state, state.physical_address, 1, pmp_access,
                                     state.privilege) &&
             (state.access != PteAccess::ReadExecute ||
-             core::pmp::check_access(*state.arch_state,
-                                     simrv::xlen::PhysAddr{state.physical_address}, 1,
+             core::pmp::check_access(*state.arch_state, state.physical_address, 1,
                                      core::PmpAccessType::Execute, state.privilege));
         if (!pmp_allowed) {
             state.fault = access_fault_for(state.access);
@@ -326,8 +327,8 @@ void PageTableWalker::accept_pte(PageWalkState& state, simrv::xlen::Word pte) co
     }
     if (updated != pte) {
         if (state.arch_state != nullptr &&
-            !core::pmp::check_access(*state.arch_state, simrv::xlen::PhysAddr{state.pte_address},
-                                     state.pte_size, core::PmpAccessType::Write,
+            !core::pmp::check_access(*state.arch_state, state.pte_address, state.pte_size,
+                                     core::PmpAccessType::Write,
                                      simrv::xlen::PrivilegeLevel::Supervisor)) {
             fail_access(state);
             return;
