@@ -11,7 +11,6 @@
 #include "CpuExecutionHelpers.hpp"
 #include "simrv/CompilerHints.hpp"
 #include "simrv/core/Cpu.hpp"
-#include "simrv/core/Logger.hpp"
 #include "simrv/core/Machine.hpp"
 #include "simrv/core/PlatformTiming.hpp"
 #include "simrv/core/Pmp.hpp"
@@ -74,9 +73,6 @@ SIMRV_ALWAYS_INLINE void CPU::execute_cached_branch(CachedOp& op, simrv::xlen::R
                                                     simrv::xlen::Register rrs2) {
     static_assert(kBranchOp == isa::BEQ || kBranchOp == isa::BNE || kBranchOp == isa::BLT ||
                   kBranchOp == isa::BGE || kBranchOp == isa::BLTU || kBranchOp == isa::BGEU);
-    if ((state_.pc & 0xFFFFFFFF) == 0xc020b294) {
-        simrv::log::warn("DEBUG CACHED_BRANCH: pc=0x{:x}, rrs1=0x{:016x}, rrs2=0x{:016x}", state_.pc, rrs1, rrs2);
-    }
     bool tkn;
     if constexpr (kBranchOp == isa::BEQ) {
         if constexpr (!simrv::xlen::kIsXLen64) {
@@ -512,8 +508,8 @@ SIMRV_ALWAYS_INLINE auto CPU::execute_cached_store(Machine& machine, CachedOp& o
             if (simrv::compiler::unlikely(
                     machine.memory_.reservation_table().may_have_reservations() &&
                     machine.num_harts() > 1)) {
-                machine.memory_.reservation_table().invalidate_range(phys_addr, size_bytes,
-                                                                     hart_id());
+                machine.memory_.reservation_table().invalidate_range(
+                    simrv::xlen::PhysAddr{phys_addr}, size_bytes, hart_id());
             }
             advance_cached_pc(op);
             return true;
@@ -543,8 +539,8 @@ SIMRV_ALWAYS_INLINE auto CPU::execute_cached_store(Machine& machine, CachedOp& o
                     if (simrv::compiler::unlikely(
                             machine.memory_.reservation_table().may_have_reservations() &&
                             machine.num_harts() > 1)) {
-                        machine.memory_.reservation_table().invalidate_range(paddr, size_bytes,
-                                                                             hart_id());
+                        machine.memory_.reservation_table().invalidate_range(
+                            simrv::xlen::PhysAddr{paddr}, size_bytes, hart_id());
                     }
                     advance_cached_pc(op);
                     return true;
@@ -577,8 +573,8 @@ SIMRV_ALWAYS_INLINE auto CPU::execute_cached_store(Machine& machine, CachedOp& o
                         if (simrv::compiler::unlikely(
                                 machine.memory_.reservation_table().may_have_reservations() &&
                                 machine.num_harts() > 1)) {
-                            machine.memory_.reservation_table().invalidate_range(paddr, size_bytes,
-                                                                                 hart_id());
+                            machine.memory_.reservation_table().invalidate_range(
+                                simrv::xlen::PhysAddr{paddr}, size_bytes, hart_id());
                         }
                         advance_cached_pc(op);
                         return true;
@@ -1720,8 +1716,9 @@ SIMRV_ALWAYS_INLINE auto CPU::run_fast_baremetal_kernel(Machine& machine, uint32
                                                     machine.memory_.reservation_table()
                                                         .may_have_reservations())) {
                                                 machine.memory_.reservation_table()
-                                                    .invalidate_range(mem_addr, sizeof(T),
-                                                                      hart_id());
+                                                    .invalidate_range(
+                                                        simrv::xlen::PhysAddr{mem_addr}, sizeof(T),
+                                                        hart_id());
                                             }
                                         }
                                         return true;
@@ -1818,8 +1815,9 @@ SIMRV_ALWAYS_INLINE auto CPU::run_fast_baremetal_kernel(Machine& machine, uint32
                                                     machine.memory_.reservation_table()
                                                         .may_have_reservations())) {
                                                 machine.memory_.reservation_table()
-                                                    .invalidate_range(mem_addr, sizeof(T),
-                                                                      hart_id());
+                                                    .invalidate_range(
+                                                        simrv::xlen::PhysAddr{mem_addr}, sizeof(T),
+                                                        hart_id());
                                             }
                                         }
                                         return true;
@@ -2885,8 +2883,9 @@ SIMRV_ALWAYS_INLINE auto CPU::run_fast_baremetal_kernel(Machine& machine, uint32
                                                         machine.memory_.reservation_table()
                                                             .may_have_reservations())) {
                                                     machine.memory_.reservation_table()
-                                                        .invalidate_range(mem_addr, size_bytes,
-                                                                          hart_id());
+                                                        .invalidate_range(
+                                                            simrv::xlen::PhysAddr{mem_addr},
+                                                            size_bytes, hart_id());
                                                 }
                                             }
                                             break;
@@ -3058,9 +3057,9 @@ SIMRV_ALWAYS_INLINE auto CPU::run_fast_baremetal_kernel(Machine& machine, uint32
                                                                 machine.memory_.reservation_table()
                                                                     .may_have_reservations())) {
                                                             machine.memory_.reservation_table()
-                                                                .invalidate_range(mem_addr,
-                                                                                  size_bytes,
-                                                                                  hart_id());
+                                                                .invalidate_range(
+                                                                    simrv::xlen::PhysAddr{mem_addr},
+                                                                    size_bytes, hart_id());
                                                         }
                                                     }
                                                     break;
@@ -3660,11 +3659,6 @@ SIMRV_ALWAYS_INLINE auto CPU::run_fast_os_kernel(Machine& machine, uint32_t batc
                             }
                             const simrv::xlen::Register rrs1 = state_.regs.read(chained->rs1);
                             const simrv::xlen::Register rrs2 = state_.regs.read(chained->rs2);
-                            if ((chained->cpc.raw() & 0xFFFFFFFF) == 0xc020b294) {
-                                simrv::log::warn("DEBUG BNE: cpc=0x{:x}, rs1={}, rs2={}, rrs1=0x{:016x}, rrs2=0x{:016x}, chain_size={}, b={}",
-                                                 chained->cpc.raw(), std::to_underlying(chained->rs1),
-                                                 std::to_underlying(chained->rs2), rrs1, rrs2, chain_size, b);
-                            }
                             const bool is_eq =
                                 kGuestXlen64 ? (rrs1 == rrs2)
                                              : (static_cast<uint32_t>(rrs1) ==
@@ -3770,7 +3764,8 @@ SIMRV_ALWAYS_INLINE auto CPU::run_fast_os_kernel(Machine& machine, uint32_t batc
                                             state_.lr_reservation_active = false;
                                             if (simrv::compiler::unlikely(check_reservations)) {
                                                 machine.memory_.reservation_table()
-                                                    .invalidate_range(paddr, size_bytes, hart_id());
+                                                    .invalidate_range(simrv::xlen::PhysAddr{paddr},
+                                                                      size_bytes, hart_id());
                                             }
                                             if (advance_sequential()) {
                                                 continue;
@@ -3788,7 +3783,8 @@ SIMRV_ALWAYS_INLINE auto CPU::run_fast_os_kernel(Machine& machine, uint32_t batc
                                         state_.lr_reservation_active = false;
                                         if (simrv::compiler::unlikely(check_reservations)) {
                                             machine.memory_.reservation_table().invalidate_range(
-                                                lookup_addr, size_bytes, hart_id());
+                                                simrv::xlen::PhysAddr{lookup_addr}, size_bytes,
+                                                hart_id());
                                         }
                                         if (advance_sequential()) {
                                             continue;
@@ -3918,8 +3914,9 @@ SIMRV_ALWAYS_INLINE auto CPU::run_fast_os_kernel(Machine& machine, uint32_t batc
                                                     if (simrv::compiler::unlikely(
                                                             check_reservations)) {
                                                         machine.memory_.reservation_table()
-                                                            .invalidate_range(paddr, size_bytes,
-                                                                              hart_id());
+                                                            .invalidate_range(
+                                                                simrv::xlen::PhysAddr{paddr},
+                                                                size_bytes, hart_id());
                                                     }
                                                     if (advance_sequential()) {
                                                         continue;
@@ -3943,8 +3940,9 @@ SIMRV_ALWAYS_INLINE auto CPU::run_fast_os_kernel(Machine& machine, uint32_t batc
                                                 state_.lr_reservation_active = false;
                                                 if (simrv::compiler::unlikely(check_reservations)) {
                                                     machine.memory_.reservation_table()
-                                                        .invalidate_range(lookup_addr, size_bytes,
-                                                                          hart_id());
+                                                        .invalidate_range(
+                                                            simrv::xlen::PhysAddr{lookup_addr},
+                                                            size_bytes, hart_id());
                                                 }
                                                 if (advance_sequential()) {
                                                     continue;

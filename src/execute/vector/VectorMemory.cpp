@@ -269,8 +269,8 @@ void execute_vs_whole(core::CPU& cpu, simrv::memory::MemorySubsystem& mem, simrv
             if (simrv::compiler::unlikely(cpu.machine_ != nullptr &&
                                           mem.reservation_table().may_have_reservations() &&
                                           cpu.machine_->num_harts() > 1)) {
-                mem.reservation_table().invalidate_range(physical_address, chunk_bytes,
-                                                         cpu.hart_id());
+                mem.reservation_table().invalidate_range(simrv::xlen::PhysAddr{physical_address},
+                                                         chunk_bytes, cpu.hart_id());
             }
             byte_idx += chunk_bytes;
         }
@@ -441,7 +441,8 @@ void execute_vsm(core::CPU& cpu, simrv::memory::MemorySubsystem& mem, simrv::xle
             if (simrv::compiler::unlikely(cpu.machine_ != nullptr &&
                                           mem.reservation_table().may_have_reservations() &&
                                           cpu.machine_->num_harts() > 1)) {
-                mem.reservation_table().invalidate_range(physical_address, evl, cpu.hart_id());
+                mem.reservation_table().invalidate_range(simrv::xlen::PhysAddr{physical_address},
+                                                         evl, cpu.hart_id());
             }
             return;
         }
@@ -507,8 +508,8 @@ void execute_vse(core::CPU& cpu, simrv::memory::MemorySubsystem& mem, simrv::xle
             if (simrv::compiler::unlikely(cpu.machine_ != nullptr &&
                                           mem.reservation_table().may_have_reservations() &&
                                           cpu.machine_->num_harts() > 1)) {
-                mem.reservation_table().invalidate_range(physical_address, chunk_bytes,
-                                                         cpu.hart_id());
+                mem.reservation_table().invalidate_range(simrv::xlen::PhysAddr{physical_address},
+                                                         chunk_bytes, cpu.hart_id());
             }
             elem_idx += chunk_elems;
         }

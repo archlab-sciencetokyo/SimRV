@@ -4,11 +4,13 @@
  */
 #pragma once
 #include <atomic>
+#include <concepts>
 #include <cstddef>
 #include <limits>
 #include <mutex>
 #include <optional>
 #include <unordered_map>
+#include <utility>
 
 #include "simrv/CompilerHints.hpp"
 #include "simrv/xlen/Hash.hpp"
@@ -134,15 +136,15 @@ class ReservationTable {
      * @param size Number of bytes written.
      * @param store_origin Optional Hart ID whose reservation remains valid.
      */
-    void invalidate_range(simrv::xlen::Address addr, size_t size,
+    void invalidate_range(simrv::xlen::PhysAddr address, size_t size,
                           std::optional<simrv::xlen::HartId> store_origin = std::nullopt) {
         if (size == 0 || !may_have_reservations_.load(std::memory_order_acquire)) return;
+        const auto addr = address.raw();
         const simrv::xlen::Address first_granule = addr & kReservationGranuleMask;
-        const auto extent = static_cast<simrv::xlen::Address>(size - 1);
         const simrv::xlen::Address last_byte =
-            extent > std::numeric_limits<simrv::xlen::Address>::max() - addr
+            std::cmp_greater(size - 1, std::numeric_limits<simrv::xlen::Address>::max() - addr)
                 ? std::numeric_limits<simrv::xlen::Address>::max()
-                : addr + extent;
+                : addr + static_cast<simrv::xlen::Address>(size - 1);
         const simrv::xlen::Address last_granule = last_byte & kReservationGranuleMask;
         const std::scoped_lock lock(mutex_);
         bool any_valid = false;
@@ -161,10 +163,8 @@ class ReservationTable {
         if (!any_valid) may_have_reservations_.store(false, std::memory_order_release);
     }
 
-    void invalidate_range(simrv::xlen::PhysAddr addr, size_t size,
-                          std::optional<simrv::xlen::HartId> store_origin = std::nullopt) {
-        invalidate_range(addr.raw(), size, store_origin);
-    }
+    template <std::integral I>
+    void invalidate_range(I, size_t, std::optional<simrv::xlen::HartId> = std::nullopt) = delete;
 
     /**
      * @brief Clear active reservation for a specific Hart.
@@ -198,7 +198,7 @@ class ReservationTable {
     }
 
     /// False guarantees that an ordinary store has no LR/SC reservation to invalidate. True is
-    /// deliberately conservative until reset, keeping the common no-LR workload lock-free.
+    /// conservative; updates may clear it when the last valid reservation is removed.
     [[nodiscard]] SIMRV_ALWAYS_INLINE auto may_have_reservations() const noexcept -> bool {
         return may_have_reservations_.load(std::memory_order_acquire);
     }

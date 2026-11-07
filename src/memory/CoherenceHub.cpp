@@ -190,7 +190,8 @@ void CoherenceHub::invalidate_line_broadcast(simrv::xlen::PhysAddr address,
     }
 
     // A block write affects every reservation granule, including the initiating hart.
-    machine_.memory_.reservation_table().invalidate_range(aligned_addr, kLineBytes);
+    machine_.memory_.reservation_table().invalidate_range(simrv::xlen::PhysAddr{aligned_addr},
+                                                          kLineBytes);
     invalidate_shared_caches(aligned_addr);
     erase_dir_entry(aligned_addr);
 }

@@ -129,6 +129,10 @@ when importing a base address. TLB lookup, inspection, and selective flush filte
 `VirtAddr`, while insertion requires both `VirtAddr` and `PhysAddr`. Full TLB entries keep virtual
 and physical pages in their respective types.
 
+Reservation-range invalidation takes a physical address and a host-sized byte count. An empty
+range changes nothing; a range extending beyond the guest physical-address representation saturates
+at its maximum address without wrapping or truncating the count.
+
 Instruction-cache reads, data-cache accesses, cache-line insertion and probes, shared-cache line
 operations, and the coherence directory use `PhysAddr`. Cache tags and eviction addresses represent
 aligned physical line bases. Data-cache accesses also use the typed `Funct3` operation; callers

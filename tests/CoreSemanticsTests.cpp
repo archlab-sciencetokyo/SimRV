@@ -153,6 +153,13 @@ static_assert(TlbLookupable<simrv::xlen::VirtAddr>);
 static_assert(!TlbLookupable<simrv::xlen::PhysAddr>);
 static_assert(!TlbLookupable<simrv::xlen::Address>);
 
+template <typename A>
+concept ReservationRangeAddress =
+    requires(simrv::memory::ReservationTable& table, A addr) { table.invalidate_range(addr, 8); };
+static_assert(ReservationRangeAddress<simrv::xlen::PhysAddr>);
+static_assert(!ReservationRangeAddress<simrv::xlen::VirtAddr>);
+static_assert(!ReservationRangeAddress<simrv::xlen::Address>);
+
 void expect(bool condition, const std::string& message) {
     if (!condition) {
         std::cerr << "FAIL: " << message << '\n';
@@ -4089,10 +4096,29 @@ void test_smp_reservation_table() {
     table.set_reservation(0, 0x80004000);
     table.set_reservation(1, 0x80004008);
     table.set_reservation(2, 0x80004000);
-    table.invalidate_range(0x80004004, 8, 2);
+    table.invalidate_range(simrv::xlen::PhysAddr{0x80004004}, 8, 2);
     expect(!table.check_reservation(0, 0x80004000) && !table.check_reservation(1, 0x80004008) &&
                table.check_reservation(2, 0x80004000),
            "A physical write spanning two reservation granules invalidates other harts only");
+
+    table.clear_all();
+    constexpr auto kLastAddress = std::numeric_limits<simrv::xlen::Address>::max();
+    table.set_reservation(0, kLastAddress);
+    table.set_reservation(1, 0);
+    table.invalidate_range(simrv::xlen::PhysAddr{kLastAddress - 3}, 0);
+    expect(table.check_reservation(0, kLastAddress), "An empty write preserves reservations");
+    table.invalidate_range(simrv::xlen::PhysAddr{kLastAddress - 3}, 16);
+    expect(!table.check_reservation(0, kLastAddress) && table.check_reservation(1, 0),
+           "A range beyond the physical address limit saturates without wrapping");
+
+    if constexpr (sizeof(size_t) > sizeof(simrv::xlen::Address)) {
+        table.clear_all();
+        table.set_reservation(0, 0x80004008);
+        table.invalidate_range(simrv::xlen::PhysAddr{0x80004000},
+                               static_cast<size_t>(uint64_t{1} << 32) + 1);
+        expect(!table.check_reservation(0, 0x80004008),
+               "A host-sized write larger than the guest address space invalidates its range");
+    }
 }
 
 void test_fdt_patcher() {

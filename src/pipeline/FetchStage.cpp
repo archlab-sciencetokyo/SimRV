@@ -764,8 +764,8 @@ void CPU::decode_and_normalize_instruction(Machine& machine) {
     }
     if (simrv::compiler::unlikely(op_id == isa::ILLEGAL)) {
         if (!machine.tui_enabled()) {
-            simrv::log::warn("[DECODER] Unknown instruction: PC=0x{:x}, HEX=0x{:x}", state_.pc,
-                             w_ir_tmp);
+            simrv::log::debug("[DECODER] Illegal instruction: PC=0x{:x}, HEX=0x{:x}", state_.pc,
+                              w_ir_tmp);
         }
         is_valid = false;
     }
@@ -809,9 +809,7 @@ void CPU::decode_and_normalize_instruction(Machine& machine) {
         if (is_vector) {
             if (simrv::compiler::unlikely(!state_.extension_state_enabled(MstatusBit::Vs))) {
                 if (!machine.tui_enabled()) {
-                    simrv::log::warn("[VS CHECK] VS is 0! mstatus=0x{:x}, Vs mask=0x{:x}",
-                                     state_.virt ? state_.vsstatus : state_.mstatus,
-                                     std::to_underlying(MstatusBit::Vs));
+                    simrv::log::debug("[DECODER] Vector state disabled at PC=0x{:x}", state_.pc);
                 }
                 is_valid = false;
             }
