@@ -130,7 +130,7 @@ auto PageTableWalker::begin_walk(simrv::xlen::VirtAddr v_addr, PteAccess access,
             auto translated = walk_guest_physical(GuestPhysAddr{v_addr.raw()}, access, state.hgatp,
                                                   xlen, nullptr, mxr, state.arch_state);
             if (!translated) {
-                state.guest_fault_address = v_addr.raw();
+                state.guest_fault_address = GuestPhysAddr{v_addr.raw()};
                 state.fault = translated.error();
                 return state;
             }
@@ -384,7 +384,7 @@ auto PageTableWalker::validate_pte_permissions(simrv::xlen::Word pte,
 
 auto PageTableWalker::walk_guest_physical(GuestPhysAddr guest_physical, PteAccess access,
                                           simrv::xlen::Word hgatp, unsigned xlen,
-                                          simrv::xlen::Address* fault_address, bool mxr,
+                                          GuestPhysAddr* fault_address, bool mxr,
                                           const core::ArchState* arch_state) const
     -> std::expected<PageWalkResult, simrv::xlen::TrapCause> {
     const auto guest_address = guest_physical.raw();
@@ -402,8 +402,8 @@ auto PageTableWalker::walk_guest_physical(GuestPhysAddr guest_physical, PteAcces
                 return simrv::isa::to_trap_cause(ExceptionCode::GuestLoadPageFault);
         }
     };
-    const auto guest_fault = [fault_address, guest_address, &guest_page_fault]() {
-        if (fault_address != nullptr) *fault_address = guest_address;
+    const auto guest_fault = [fault_address, guest_physical, &guest_page_fault]() {
+        if (fault_address != nullptr) *fault_address = guest_physical;
         return std::unexpected(guest_page_fault());
     };
     const simrv::xlen::Word mode = simrv::xlen::satp_mode(hgatp, xlen);
@@ -501,7 +501,7 @@ auto PageTableWalker::walk(simrv::xlen::VirtAddr v_addr, PteAccess access,
                            simrv::xlen::PrivilegeLevel priv, simrv::xlen::CsrValue mstatus,
                            simrv::xlen::Word satp, unsigned xlen, bool update_access_bits,
                            const core::ArchState* arch_state,
-                           simrv::xlen::Address* guest_fault_address,
+                           GuestPhysAddr* guest_fault_address,
                            bool* implicit_vs_stage_page_table_fault) const
     -> std::expected<PageWalkResult, simrv::xlen::TrapCause> {
     auto state =

@@ -270,7 +270,7 @@ auto CPU::translate_stage_address(Machine& machine, simrv::xlen::VirtAddr virtua
     auto* mmu = machine.memory_.mmu();
     const bool hypervisor_access = hypervisor_memory_access_active();
     if (machine.runtime_profile.is_instruction_mode()) {
-        simrv::xlen::Address guest_fault_address = 0;
+        simrv::memory::GuestPhysAddr guest_fault_address{};
         bool implicit_vs_stage_page_table_fault = false;
         if (hypervisor_access) state_.virt = true;
         auto result = mmu->translate(
@@ -278,7 +278,7 @@ auto CPU::translate_stage_address(Machine& machine, simrv::xlen::VirtAddr virtua
             active_xlen, false, &state_, &guest_fault_address, &implicit_vs_stage_page_table_fault);
         if (hypervisor_access) state_.virt = false;
         active_context().pending_htval =
-            result || !is_guest_page_fault(result.error()) ? 0 : guest_fault_address >> 2U;
+            result || !is_guest_page_fault(result.error()) ? 0 : guest_fault_address.raw() >> 2U;
         active_context().pending_htinst =
             !result && is_guest_page_fault(result.error()) && implicit_vs_stage_page_table_fault
                 ? 0x3000
@@ -328,7 +328,7 @@ auto CPU::translate_stage_address(Machine& machine, simrv::xlen::VirtAddr virtua
     if (walk.status == PageWalkStatus::Fault) {
         const simrv::xlen::TrapCause fault = walk.fault;
         active_context().pending_htval =
-            is_guest_page_fault(fault) ? walk.guest_fault_address >> 2U : 0;
+            is_guest_page_fault(fault) ? walk.guest_fault_address.raw() >> 2U : 0;
         active_context().pending_htinst =
             is_guest_page_fault(fault) && walk.implicit_vs_stage_page_table_fault ? 0x3000 : 0;
         timed_walk.reset();
