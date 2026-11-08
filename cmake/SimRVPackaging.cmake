@@ -4,7 +4,7 @@ include(CMakePackageConfigHelpers)
 set_target_properties(SimRV PROPERTIES EXPORT_NAME cli OUTPUT_NAME simrv)
 
 install(
-  TARGETS SimRV simrv-runtime
+  TARGETS SimRV simrv-runtime simrv-devel
   EXPORT SimRVTargets
   RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR} COMPONENT Runtime
   ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR} COMPONENT Development

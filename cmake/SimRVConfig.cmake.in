@@ -1,4 +1,12 @@
 @PACKAGE_INIT@
 
 include("${CMAKE_CURRENT_LIST_DIR}/SimRVTargets.cmake")
+
+if(TARGET SimRV::simrv-devel AND NOT TARGET SimRV::devel)
+  add_library(SimRV::devel ALIAS SimRV::simrv-devel)
+endif()
+
+set(SimRV_Runtime_FOUND 1)
+set(SimRV_Development_FOUND 1)
+
 check_required_components(SimRV)

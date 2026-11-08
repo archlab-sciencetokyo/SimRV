@@ -25,7 +25,9 @@ enum class CliAction : uint8_t {
     ExplainInstruction,
     DumpCpuModel,
     ExportSoCManifest,
-    ValidateCpuModel
+    ValidateCpuModel,
+    ScaffoldDevicePlugin,
+    ScaffoldCfuPlugin
 };
 enum class RequestedExecutionMode : uint8_t { Fast, Detailed, CycleAccurate };
 
@@ -123,6 +125,10 @@ struct RuntimeOptions {
     std::string dump_cpu_model_output;
     std::string soc_manifest_preset;
     std::string soc_manifest_output;
+    std::string scaffold_device_plugin_name;
+    std::string scaffold_device_plugin_output;
+    std::string scaffold_cfu_plugin_name;
+    std::string scaffold_cfu_plugin_output;
     std::string fn_cfu_plugin;
     std::vector<std::string> device_plugins;
     std::optional<bool> bram_prewarm;

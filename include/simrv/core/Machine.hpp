@@ -468,6 +468,8 @@ class Machine final : public core::IInterruptController {
     [[nodiscard]] auto rtc_device() const noexcept -> const simrv::Rtc*;
     [[nodiscard]] auto uart_device() noexcept -> simrv::device::SerialDevice*;
     [[nodiscard]] auto uart_device() const noexcept -> const simrv::device::SerialDevice*;
+    /// Advance simulation cycles for all registered platform/extension devices (UART, ticked MMIOs).
+    void advance_device_cycles(uint64_t cycles);
     [[nodiscard]] auto framebuffer_device() noexcept -> simrv::device::FramebufferDevice*;
     [[nodiscard]] auto framebuffer_device() const noexcept -> const simrv::device::FramebufferDevice*;
     [[nodiscard]] auto dma_controller() noexcept -> simrv::device::DmaController*;

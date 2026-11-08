@@ -48,12 +48,15 @@ void VirtioMmioBlock::on_queue_notify(uint32_t q_idx) {
     auto schedule_deferred = [this, q_idx](size_t transfer_bytes, uint16_t head_desc_idx,
                                            uint32_t total_written) {
         const auto current_cycle = machine_->memory().system_bus().cycle();
+        const auto generation = queues_[q_idx].generation;
         machine_->dma_engine().schedule_transfer(
             transfer_bytes, current_cycle,
-            [this, q_idx, head_desc_idx, total_written]() {
+            [this, q_idx, head_desc_idx, total_written, generation]() {
                 auto& q = queues_[q_idx];
+                if (q.generation != generation || !q.usable()) return;
                 uint16_t used_idx = 0;
-                dma_read_bytes(q.device_addr + 2, reinterpret_cast<std::byte*>(&used_idx), 2);
+                if (!dma_read_bytes(q.device_addr + 2, reinterpret_cast<std::byte*>(&used_idx), 2))
+                    return;
                 virtio::VirtqUsedElem elem{.id = head_desc_idx, .len = total_written};
                 dma_write_bytes(q.device_addr + 4 + (used_idx % q.num) * sizeof(elem),
                                 reinterpret_cast<std::byte*>(&elem), sizeof(elem));

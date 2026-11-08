@@ -8,6 +8,7 @@
 
 #include <cstdlib>
 #include <filesystem>
+#include <utility>
 #include <vector>
 
 #include "simrv/core/Logger.hpp"
@@ -16,6 +17,7 @@
 #include "simrv/device/ExternalSerialDevice.h"
 #include "simrv/device/FramebufferDevice.hpp"
 #include "simrv/device/Uart.hpp"
+#include "simrv/memory/MemorySubsystem.hpp"
 
 namespace simrv::device {
 
@@ -31,9 +33,10 @@ class ExternalSerialAdapter final : public Uart {
           ctx_(ctx),
           services_{.host_ctx = this,
                     .irq_number = config.irq,
-                    .write_byte = [](void* host, uint8_t byte) {
-                        static_cast<ExternalSerialAdapter*>(host)->write_host_byte(byte);
-                    }},
+                    .write_byte =
+                        [](void* host, uint8_t byte) {
+                            static_cast<ExternalSerialAdapter*>(host)->write_host_byte(byte);
+                        }},
           mmio_(dev, ctx, config.name, simrv::xlen::PhysAddr{config.base}, config.size, machine,
                 true) {
         if (serial_->set_serial_host_services) serial_->set_serial_host_services(ctx_, &services_);
@@ -50,8 +53,12 @@ class ExternalSerialAdapter final : public Uart {
     void push_rx_byte(uint8_t byte) override { serial_->receive_byte(ctx_, byte); }
     void advance_cycles(uint64_t cycles) override {
         if (cycles == 0) return;
+        mmio_.advance_cycles(cycles);
         if (serial_->advance_cycles) serial_->advance_cycles(ctx_, cycles);
         service_interrupts();
+    }
+    [[nodiscard]] auto requires_instruction_ticks() const noexcept -> bool override {
+        return mmio_.has_cycle_ticking();
     }
     void service_interrupts() override {
         if (serial_->service_interrupts) serial_->service_interrupts(ctx_);
@@ -94,8 +101,7 @@ class ExternalFramebufferAdapter final : public ExternalMmioDevice, public Frame
         return cfg;
     }
 
-    [[nodiscard]] auto framebuffer_data() const noexcept
-        -> std::span<const uint8_t> override {
+    [[nodiscard]] auto framebuffer_data() const noexcept -> std::span<const uint8_t> override {
         if (!fb_ || !fb_->get_buffer) return {};
         size_t size = 0;
         const void* ptr = fb_->get_buffer(ctx_, &size);
@@ -116,18 +122,58 @@ class ExternalFramebufferAdapter final : public ExternalMmioDevice, public Frame
 ExternalMmioDevice::ExternalMmioDevice(const SimRvExternalDevice* desc, void* ctx, std::string name,
                                        simrv::xlen::PhysAddr base, simrv::xlen::Address size,
                                        simrv::core::Machine& machine, bool defer_reset)
-    : desc_(desc), ctx_(ctx), name_(std::move(name)), base_(base), size_(size) {
+    : memory::MmioDevice(&machine),
+      desc_(desc),
+      ctx_(ctx),
+      name_(std::move(name)),
+      base_(base),
+      size_(size) {
     host_services_ = {
         .host_ctx = &machine,
-        .set_irq = [](void* m, uint32_t irq, int level) {
-            static_cast<simrv::core::Machine*>(m)->set_platform_irq(irq, level != 0);
+        .set_irq =
+            [](void* m, uint32_t irq, int level) {
+                static_cast<simrv::core::Machine*>(m)->set_platform_irq(irq, level != 0);
+            },
+        .request_reboot = [](void* m) { static_cast<simrv::core::Machine*>(m)->request_reboot(); },
+        .request_poweroff = [](void* m) { static_cast<simrv::core::Machine*>(m)->request_exit(0); },
+        .dma_read = [](void* m, uint64_t paddr, void* dst, size_t len) -> int {
+            auto* mach = static_cast<simrv::core::Machine*>(m);
+            if (!mach || !dst || len == 0 || !std::in_range<simrv::xlen::Address>(paddr))
+                return -1;
+            const auto phys = simrv::xlen::PhysAddr{static_cast<simrv::xlen::Address>(paddr)};
+            return mach->memory().dma_read(phys, dst, len) ? 0 : -1;
         },
-        .request_reboot = [](void* m) {
-            static_cast<simrv::core::Machine*>(m)->request_reboot();
+        .dma_write = [](void* m, uint64_t paddr, const void* src, size_t len) -> int {
+            auto* mach = static_cast<simrv::core::Machine*>(m);
+            if (!mach || !src || len == 0 || !std::in_range<simrv::xlen::Address>(paddr))
+                return -1;
+            const auto phys = simrv::xlen::PhysAddr{static_cast<simrv::xlen::Address>(paddr)};
+            return mach->memory().dma_write(phys, src, len) ? 0 : -1;
         },
-        .request_poweroff = [](void* m) {
-            static_cast<simrv::core::Machine*>(m)->request_exit(0);
+        .get_cycle_count = [](void* m) -> uint64_t {
+            auto* mach = static_cast<simrv::core::Machine*>(m);
+            return mach ? mach->memory().system_bus().cycle() : 0ULL;
         },
+        .log_msg =
+            [](void* /*m*/, int level, const char* msg) {
+                if (!msg) return;
+                switch (static_cast<SimRvLogLevel>(level)) {
+                    case SIMRV_LOG_TRACE:
+                    case SIMRV_LOG_DEBUG:
+                        simrv::log::debug("{}", msg);
+                        break;
+                    case SIMRV_LOG_INFO:
+                        simrv::log::info("{}", msg);
+                        break;
+                    case SIMRV_LOG_WARN:
+                        simrv::log::warn("{}", msg);
+                        break;
+                    case SIMRV_LOG_ERROR:
+                    default:
+                        simrv::log::error("{}", msg);
+                        break;
+                }
+            },
     };
     if (desc_ != nullptr && desc_->set_host_services != nullptr) {
         desc_->set_host_services(ctx_, &host_services_);
@@ -139,6 +185,18 @@ void ExternalMmioDevice::reset() {
     if (desc_ != nullptr && desc_->reset != nullptr) desc_->reset(ctx_);
 }
 
+void ExternalMmioDevice::advance_cycles(uint64_t cycles) {
+    if (desc_ != nullptr && desc_->api_version >= SIMRV_EXTERNAL_DEVICE_API_VERSION &&
+        desc_->advance_cycles != nullptr) {
+        desc_->advance_cycles(ctx_, cycles);
+    }
+}
+
+auto ExternalMmioDevice::has_cycle_ticking() const noexcept -> bool {
+    return desc_ != nullptr && desc_->api_version >= SIMRV_EXTERNAL_DEVICE_API_VERSION &&
+           desc_->advance_cycles != nullptr;
+}
+
 ExternalMmioDevice::~ExternalMmioDevice() {
     if (desc_ != nullptr && desc_->destroy != nullptr) {
         desc_->destroy(ctx_);
@@ -146,8 +204,8 @@ ExternalMmioDevice::~ExternalMmioDevice() {
     }
 }
 
-auto ExternalMmioDevice::handle_request(const memory::TlChannelA& req,
-                                        memory::TlChannelD& resp) -> bool {
+auto ExternalMmioDevice::handle_request(const memory::TlChannelA& req, memory::TlChannelD& resp)
+    -> bool {
     resp.source = req.source;
     resp.size = req.size;
     resp.denied = false;
@@ -337,17 +395,19 @@ auto load_external_device_plugin(std::string_view path_and_args, PlatformDeviceR
         return false;
     }
 
-    if (dev->api_version != SIMRV_EXTERNAL_DEVICE_API_VERSION) {
-        simrv::log::error("Plugin '{}' has incompatible API version {} (expected {})", path,
-                          dev->api_version, SIMRV_EXTERNAL_DEVICE_API_VERSION);
+    if (dev->api_version != SIMRV_EXTERNAL_DEVICE_API_VERSION &&
+        dev->api_version != SIMRV_EXTERNAL_DEVICE_API_VERSION_V1) {
+        simrv::log::error("Plugin '{}' has incompatible API version {} (expected {} or {})", path,
+                          dev->api_version, SIMRV_EXTERNAL_DEVICE_API_VERSION,
+                          SIMRV_EXTERNAL_DEVICE_API_VERSION_V1);
         dlclose(handle);
         return false;
     }
 
     const std::string compatible = dev->compatible != nullptr ? dev->compatible : "";
     const std::string name = dev->name != nullptr ? dev->name : "external-device";
-    auto serial_init = reinterpret_cast<SimRvSerialPluginInitFn>(
-        dlsym(handle, "simrv_serial_plugin_init"));
+    auto serial_init =
+        reinterpret_cast<SimRvSerialPluginInitFn>(dlsym(handle, "simrv_serial_plugin_init"));
     const SimRvExternalSerialDevice* serial = serial_init ? serial_init() : nullptr;
     if (serial_init && (!serial || serial->api_version != SIMRV_EXTERNAL_SERIAL_API_VERSION ||
                         !serial->receive_byte || compatible.empty())) {
@@ -371,10 +431,10 @@ auto load_external_device_plugin(std::string_view path_and_args, PlatformDeviceR
 
     SerialDeviceFactory serial_factory;
     if (serial) {
-        serial_factory = [dev, serial, default_args = args](
-                                  simrv::core::Machine& machine,
-                                  const simrv::core::SoCDeviceConfig& config)
-            -> std::unique_ptr<SerialDevice> {
+        serial_factory =
+            [dev, serial, default_args = args](
+                simrv::core::Machine& machine,
+                const simrv::core::SoCDeviceConfig& config) -> std::unique_ptr<SerialDevice> {
             void* ctx = nullptr;
             if (dev->init && dev->init(&ctx, default_args.c_str()) != 0) return {};
             return std::make_unique<ExternalSerialAdapter>(machine, config, dev, serial, ctx);
@@ -406,17 +466,18 @@ auto load_external_device_plugin(std::string_view path_and_args, PlatformDeviceR
         const auto dev_name = !config.name.empty() ? config.name : name;
         const auto physical_base = simrv::xlen::PhysAddr{static_cast<simrv::xlen::Address>(base)};
         if (fb) {
-            return std::make_unique<ExternalFramebufferAdapter>(
-                dev, fb, ctx, dev_name, physical_base, size, machine);
+            return std::make_unique<ExternalFramebufferAdapter>(dev, fb, ctx, dev_name,
+                                                                physical_base, size, machine);
         }
-        return std::make_unique<ExternalMmioDevice>(dev, ctx, dev_name, physical_base, size, machine);
+        return std::make_unique<ExternalMmioDevice>(dev, ctx, dev_name, physical_base, size,
+                                                    machine);
     };
 
     const bool registered = !compatible.empty()
-        ? registry.register_external_compatible(compatible, std::move(factory),
-                                                std::move(serial_factory))
-        : registry.register_mmio_device(simrv::core::SoCDeviceKind::CustomMmio,
-                                         std::move(factory));
+                                ? registry.register_external_compatible(
+                                      compatible, std::move(factory), std::move(serial_factory))
+                                : registry.register_mmio_device(
+                                      simrv::core::SoCDeviceKind::CustomMmio, std::move(factory));
     if (!registered) {
         simrv::log::error("Duplicate or invalid device plugin compatible '{}'", compatible);
         dlclose(handle);

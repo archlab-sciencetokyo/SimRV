@@ -741,6 +741,9 @@ auto Machine::initialize() -> std::expected<void, std::string> {
         if (auto* framebuffer = dynamic_cast<simrv::device::FramebufferDevice*>(device.get())) {
             runtime_->framebuffer = framebuffer;
         }
+        if (device->has_cycle_ticking()) {
+            runtime_->ticked_extension_mmios.push_back(device.get());
+        }
     }
 
     if (runtime_->pcie) {
@@ -1061,6 +1064,9 @@ auto Machine::initialize() -> std::expected<void, std::string> {
                         if (auto* framebuffer =
                                 dynamic_cast<simrv::device::FramebufferDevice*>(extension.get())) {
                             runtime_->framebuffer = framebuffer;
+                        }
+                        if (extension->has_cycle_ticking()) {
+                            runtime_->ticked_extension_mmios.push_back(extension.get());
                         }
                         runtime_->extension_mmios.push_back(std::move(extension));
                     }

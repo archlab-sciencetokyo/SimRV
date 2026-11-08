@@ -1202,6 +1202,30 @@ auto parse_tui_options(std::string_view arg, std::span<char* const> args, std::s
         }
         return true;
     }
+    if (option_id == "--scaffold-device-plugin") {
+        result.action = CliAction::ScaffoldDevicePlugin;
+        auto value = next_argument(args, i, arg);
+        if (!value) return std::unexpected(value.error());
+        result.options.scaffold_device_plugin_name = std::string(*value);
+        if (i + 1 < args.size() && args[i + 1] != nullptr && args[i + 1][0] != '\0' &&
+            (args[i + 1][0] != '-' || std::string_view(args[i + 1]) == "-")) {
+            ++i;
+            result.options.scaffold_device_plugin_output = args[i];
+        }
+        return true;
+    }
+    if (option_id == "--scaffold-cfu-plugin") {
+        result.action = CliAction::ScaffoldCfuPlugin;
+        auto value = next_argument(args, i, arg);
+        if (!value) return std::unexpected(value.error());
+        result.options.scaffold_cfu_plugin_name = std::string(*value);
+        if (i + 1 < args.size() && args[i + 1] != nullptr && args[i + 1][0] != '\0' &&
+            (args[i + 1][0] != '-' || std::string_view(args[i + 1]) == "-")) {
+            ++i;
+            result.options.scaffold_cfu_plugin_output = args[i];
+        }
+        return true;
+    }
     if (option_id == "--dump-soc-manifest") {
         result.action = CliAction::ExportSoCManifest;
         auto value = next_argument(args, i, arg);
@@ -1956,7 +1980,9 @@ auto needs_memory_image(const ParseResult& result) -> bool {
            result.action != CliAction::ShowVersion && result.action != CliAction::ShowLicense &&
            result.action != CliAction::DumpCpuModel &&
            result.action != CliAction::ExportSoCManifest &&
-           result.action != CliAction::ValidateCpuModel;
+           result.action != CliAction::ValidateCpuModel &&
+           result.action != CliAction::ScaffoldDevicePlugin &&
+           result.action != CliAction::ScaffoldCfuPlugin;
 }
 
 namespace {
@@ -2071,8 +2097,12 @@ auto cli_help_sections() -> const std::vector<HelpSection>& {
                .description = "Validate a CPU model or platform configuration file."},
               {.option = "--cfu-plugin <LIB.SO>",
                .description = "Load a dynamic custom function unit plugin."},
+              {.option = "--scaffold-cfu-plugin <NAME> [DIR|FILE]",
+               .description = "Generate a starter Custom Function Unit (CFU) plugin template."},
               {.option = "--plugin, --device-plugin <NAME|SO>[=ARGS]",
                .description = "Load external MMIO device plugin (e.g. mmc=disk.img)."},
+              {.option = "--scaffold-device-plugin <NAME> [DIR|FILE]",
+               .description = "Generate a starter external device plugin template."},
               {.option = "--bram-prewarm / --no-bram-prewarm",
                .description = "Control ELF cache prewarming for BRAM parity."}}},
         {.title = "Logging and tracing",

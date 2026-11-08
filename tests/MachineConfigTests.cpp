@@ -1,9 +1,11 @@
+#include <algorithm>
 #include <chrono>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
 #include <limits>
+#include <memory>
 #include <sstream>
 #include <vector>
 
@@ -1565,6 +1567,35 @@ auto main() -> int {
         expect(simrv::util::serialize_soc_manifest(soc, manifest) &&
                    manifest.str().find("\"clock_hz\": 1843200") != std::string::npos,
                "SoC manifest emits the UART input clock");
+    }
+
+    {
+        // Machine ownership and testing RAM lifecycle (consolidated from MachineOwnershipTests)
+        simrv::core::Machine machine;
+        expect(&machine.primary_hart() == &machine.hart(), "primary_hart matches hart(0)");
+
+        machine.add_hart_for_testing(std::make_unique<simrv::core::CPU>());
+        expect(machine.num_harts() == 2, "num_harts is 2 after add_hart_for_testing");
+        expect(&machine.hart(1) != &machine.primary_hart(), "hart(1) is distinct from primary_hart");
+
+        constexpr size_t kRamBytes = 4096;
+        expect(machine.allocate_ram_for_testing(kRamBytes), "allocate_ram_for_testing succeeds");
+        expect(machine.ram_data() != nullptr, "ram_data is non-null after allocation");
+        expect(std::all_of(machine.ram_data(), machine.ram_data() + kRamBytes,
+                           [](simrv::xlen::Byte byte) { return byte == simrv::xlen::Byte{0}; }),
+               "ram_data is zero-initialized");
+
+        machine.ram_data()[0] = simrv::xlen::Byte{0x5a};
+        expect(machine.ram_data()[0] == simrv::xlen::Byte{0x5a}, "ram_data mutation persists");
+        machine.release_ram_for_testing();
+        expect(machine.ram_data() == nullptr, "ram_data is null after release");
+
+        machine.primary_hart().state().pc = 0x80001234;
+        machine.primary_hart().e_icount = 42;
+        machine.publish_tui_execution_snapshot_for_testing();
+        const auto snapshot = machine.tui_execution_snapshot();
+        expect(snapshot.pc == 0x80001234 && snapshot.instruction_count == 42,
+               "snapshot matches execution state");
     }
 
     return failures == 0 ? EXIT_SUCCESS : EXIT_FAILURE;

@@ -88,6 +88,7 @@ struct QueueState {
     uint64_t driver_addr{0};
     uint64_t device_addr{0};
     VirtioQueueIndex last_avail_idx{0};
+    uint64_t generation{0};
 
     /// The split-ring metadata must fit in the 64-bit transport address space.
     [[nodiscard]] constexpr auto usable() const noexcept -> bool {

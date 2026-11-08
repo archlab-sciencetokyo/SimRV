@@ -175,6 +175,7 @@ const SimRvExternalDevice kDevice = {
     .write = mmc_write,
     .destroy = mmc_destroy,
     .set_host_services = nullptr,
+    .advance_cycles = nullptr,
 };
 
 }  // namespace

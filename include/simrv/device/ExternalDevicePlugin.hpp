@@ -27,9 +27,7 @@ class ExternalMmioDevice : public memory::MmioDevice {
     void reset() override;
 
     [[nodiscard]] auto name() const -> const char* override { return name_.c_str(); }
-    [[nodiscard]] auto base_address() const -> simrv::xlen::PhysAddr override {
-        return base_;
-    }
+    [[nodiscard]] auto base_address() const -> simrv::xlen::PhysAddr override { return base_; }
     [[nodiscard]] auto size() const -> simrv::xlen::Address override { return size_; }
     auto handle_request(const memory::TlChannelA& req, memory::TlChannelD& resp) -> bool override;
 
@@ -45,6 +43,9 @@ class ExternalMmioDevice : public memory::MmioDevice {
     void write16(simrv::memory::MmioOffset offset, simrv::memory::MmioData16 val) override;
     void write32(simrv::memory::MmioOffset offset, simrv::memory::MmioData32 val) override;
     void write64(simrv::memory::MmioOffset offset, simrv::memory::MmioData64 val) override;
+
+    void advance_cycles(uint64_t cycles) override;
+    [[nodiscard]] auto has_cycle_ticking() const noexcept -> bool override;
 
    private:
     SimRvHostServices host_services_{};

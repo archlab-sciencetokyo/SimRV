@@ -104,7 +104,9 @@ In `--mode fast` (Instruction-Accurate), single-hart OS kernels and baremetal ap
   without function call frames.
 - **Batch Eligibility**: `Machine::fast_batch_policy()` declines batching for SMP, stepping,
   lockstep, branch tracing, breakpoints or watchpoints, architectural triggers, and an active TUI
-  trace or step delay, and the CFU console redirect model.
+  trace or step delay, the CFU console redirect model, and registered extension devices that
+  require cycle ticks, including serial plugins with device-level tick callbacks. The latter use
+  the per-instruction path to observe instruction boundaries.
   The scheduler otherwise services controls and publishes batch-level state at its boundaries.
 
 Fast shortcuts must preserve the effects of their general paths. Cached execution must stop or
@@ -148,6 +150,8 @@ VirtIO descriptor and ring addresses remain 64-bit through the transport adapter
 that does not fit the simulator's physical-address type is rejected before DMA.
 Queue processing requires a nonzero supported queue size, nonwrapping split-ring ranges, and
 descriptor indices within the configured table.
+Deferred block and network completions are valid only for the queue configuration that scheduled
+them; resetting or reconfiguring that queue invalidates older completions.
 PMP access checks require `PhysAddr`; callers must translate virtual addresses before protection
 checks, including page-table accesses.
 `TileLinkNode::base_address()` returns `PhysAddr`, and `contains()` takes `PhysAddr`; C++ device

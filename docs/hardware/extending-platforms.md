@@ -24,6 +24,16 @@ simrv --dump-cpu-model balanced configs/models/my-core.cfg
 simrv --scaffold-cpu-model configs/models/my-core.cfg
 ```
 
+You can also scaffold starter device plugins and CFU plugins:
+
+```bash
+# Scaffold an external MMIO device plugin C project
+simrv --scaffold-device-plugin my_device ./my_device_plugin/
+
+# Scaffold a Custom Function Unit (CFU) plugin C project
+simrv --scaffold-cfu-plugin my_cfu ./my_cfu_plugin/
+```
+
 Edit the `[cpu]`, `[pipeline]`, cache, branch predictor, interconnect, and optional accelerator
 sections to describe the target. Use the parameter reference in [Microarchitectural Models &
 Tuning](models.md) for supported keys and units. Latencies are additional stall cycles after issue
@@ -226,6 +236,7 @@ it. The optional serial descriptor does not change the existing `SimRvExternalDe
 
 `receive_byte` can run on an input thread concurrently with MMIO and cycle callbacks; the plugin
 must synchronize its state. `advance_cycles` and `service_interrupts` run on the simulation thread.
+For a v2 serial plugin, both the device and serial `advance_cycles` callbacks are invoked if supplied.
 Serial output uses `SimRvSerialHostServices::write_byte` on that thread. Both host-service tables
 remain valid through the device's destroy callback. The serial capability is required for UART
 replacement; an ordinary MMIO plugin alone cannot receive console input. The configured interrupt
@@ -328,6 +339,19 @@ gcc -O3 -shared -fPIC -Iinclude -o libsimrv-mydevice.so my_device.c
 clang -O3 -shared -fPIC -Iinclude -o libsimrv-mydevice.so my_device.c
 ```
 
+### Advanced Device Capabilities (ABI v2)
+
+API version 2 (`SIMRV_EXTERNAL_DEVICE_API_VERSION = 2`) adds high-performance platform services and cycle ticking:
+
+- **Direct Memory Access (DMA)**: Plugins can act as bus masters using `services->dma_read` and `services->dma_write` to read or write physical RAM safely without CPU intervention.
+- **Cycle-Accurate Ticking**: Plugins providing `.advance_cycles = my_advance_cycles` are invoked each simulation cycle with the elapsed cycle delta, enabling hardware timers, PWMs, and coprocessors.
+- **Simulation Timebase Query**: `services->get_cycle_count(services->host_ctx)` retrieves the current total retired machine cycles.
+- **Structured Logging**: `services->log_msg(services->host_ctx, SIMRV_LOG_INFO, "message")` integrates directly with SimRV's unified logging subsystem (`simrv::log`).
+
+Runnable reference plugins are available in the repository:
+- `examples/plugins/timer/`: An interrupt-generating, cycle-ticking hardware timer.
+- `examples/plugins/dma_accel/`: A bus-mastering hardware accelerator performing DMA copy, byte inversion, and CRC-32 checksum calculations.
+
 ### Loading and Auto-Discovery
 
 SimRV provides multiple seamless ways to load plugins:
@@ -347,6 +371,86 @@ SimRV provides multiple seamless ways to load plugins:
    [plugins]
    mydevice = "image.bin"
    ```
+
+---
+
+## Custom Function Unit (CFU) Plugins & CFU-Proving-Ground Compatibility
+
+SimRV supports hardware accelerator instructions via the RISC-V Custom-0 (`0x0b`) opcode. Instructions are issued using the standard RISC-V R-type format:
+
+```text
+31      25 24   20 19   15 14  12 11    7 6      0
++---------+-------+-------+------+-------+-------+
+|  funct7 |  rs2  |  rs1  |funct3|  rd   | 0001011 |
++---------+-------+-------+------+-------+-------+
+```
+
+CFU behavior is dynamically extensible via shared library plugins loaded with `--cfu <path.so>`.
+
+### CFU-Proving-Ground & CFU-Playground Drop-In Compatibility
+
+SimRV provides **native drop-in compatibility** for plugins compiled for [CFU-Playground](https://github.com/google/cfu-playground) and CFU-Proving-Ground. If a shared library exports standard CFU functions without any SimRV headers:
+
+```c
+uint32_t cfu_op(int funct3, int funct7, uint32_t rs1, uint32_t rs2);
+void cfu_reset(void);
+```
+
+SimRV automatically detects `cfu_op` and `cfu_reset`, translates instruction operand order, and executes custom instructions with zero wrappers, boilerplate, or recompilation.
+
+### SimRV CFU Plugin ABI v2
+
+For simulators modeling 64-bit wide operations or variable cycle penalties, plugins export `simrv_cfu_init()` returning `SimRvCfuPlugin` declared in the pure C header [`include/simrv/execute/ExternalCfu.h`](https://github.com/archlab-sciencetokyo/SimRV/blob/dev/include/simrv/execute/ExternalCfu.h):
+
+```c
+#include "simrv/execute/ExternalCfu.h"
+
+static uint64_t my_exec64(uint32_t funct7, uint32_t funct3,
+                          uint64_t src1, uint64_t src2,
+                          uint32_t* latency_cycles) {
+    if (latency_cycles) *latency_cycles = (funct3 == 1) ? 3 : 1;
+    return src1 + src2;
+}
+
+static uint32_t my_query_latency(uint32_t funct7, uint32_t funct3) {
+    return (funct3 == 1) ? 3 : 1;
+}
+
+static const struct SimRvCfuPlugin kPlugin = {
+    .api_version = SIMRV_CFU_PLUGIN_API_VERSION,
+    .execute = NULL,
+    .reset = NULL,
+    .execute64 = my_exec64,
+    .query_latency = my_query_latency,
+    .name = "my-accel",
+};
+
+const struct SimRvCfuPlugin* simrv_cfu_init(void) {
+    return &kPlugin;
+}
+```
+
+- **`execute64`**: Evaluates custom instructions with native 64-bit integer registers and returns operation latency.
+- **`query_latency`**: Inspects instruction latency statically during pipeline hazard analysis without side effects.
+- If `query_latency` is absent, SimRV calls the available execute callback with zero operands to
+  obtain latency, as it does for v1 plugins. Provide `query_latency` when execution has side effects.
+- **`name`**: Identifies the CFU in simulation logs and performance reports.
+
+A complete reference SIMD CFU plugin is provided in `examples/plugins/cfu/`.
+
+### Development Package (`simrv-devel`) & CMake Integration
+
+When building custom MMIO device plugins or CFU plugins using CMake, projects require the `simrv-devel` package. It exports the lightweight `SimRV::simrv-devel` (or alias `SimRV::devel`) interface target, providing all C and C++ API headers without linking the static simulator runtime into the plugin `.so`:
+
+```cmake
+cmake_minimum_required(VERSION 3.20)
+project(my-plugin LANGUAGES C)
+
+find_package(SimRV 3.0 CONFIG REQUIRED COMPONENTS Development)
+
+add_library(my-plugin SHARED my_plugin.c)
+target_link_libraries(my-plugin PRIVATE SimRV::simrv-devel)
+```
 
 ---
 

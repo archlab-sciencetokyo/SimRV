@@ -41,7 +41,7 @@ if(BUILD_TESTING)
     target_link_libraries(${target} PRIVATE simrv-runtime)
     simrv_configure_native_test(${target})
     add_test(NAME ${test_name} COMMAND ${target})
-    set_tests_properties(${test_name} PROPERTIES LABELS "${labels}")
+    set_tests_properties(${test_name} PROPERTIES LABELS "${labels}" TIMEOUT 60)
   endfunction()
 
   # Fast, deterministic tests for the terminal parser, theme helpers, and key
@@ -66,39 +66,13 @@ if(BUILD_TESTING)
   set_tests_properties(tui-framework-core PROPERTIES LABELS "gate;regress;tui")
 
   simrv_add_runtime_test(
-    simrv-operation-traits-tests tests/OperationTraitsTests.cpp
-    operation-traits "gate;regress;pipeline")
-  simrv_add_runtime_test(
     simrv-instruction-explainer-tests tests/InstructionExplainerTests.cpp
     instruction-explainer "gate;regress;core")
-  simrv_add_runtime_test(simrv-scoreboard-tests tests/ScoreboardTests.cpp
-                         scoreboard "gate;regress;pipeline")
-  simrv_add_runtime_test(
-    simrv-pipeline-hazard-tests tests/PipelineHazardTests.cpp pipeline-hazards
-    "gate;regress;pipeline")
+  simrv_add_runtime_test(simrv-pipeline-tests tests/PipelineTests.cpp pipeline
+                         "gate;regress;pipeline;bpred")
   if(SIMRV_ENABLE_TSAN)
     set_property(
-      TEST pipeline-hazards
-      APPEND
-      PROPERTY LABELS "thread")
-  endif()
-
-  simrv_add_runtime_test(
-    simrv-pipeline-model-tests tests/PipelineModelTests.cpp pipeline-models
-    "gate;regress;pipeline")
-  if(SIMRV_ENABLE_TSAN)
-    set_property(
-      TEST pipeline-models
-      APPEND
-      PROPERTY LABELS "thread")
-  endif()
-
-  simrv_add_runtime_test(
-    simrv-branch-predictor-tests tests/BranchPredictorTests.cpp
-    branch-predictor "gate;regress;pipeline;bpred")
-  if(SIMRV_ENABLE_TSAN)
-    set_property(
-      TEST branch-predictor
+      TEST pipeline
       APPEND
       PROPERTY LABELS "thread")
   endif()
@@ -106,22 +80,16 @@ if(BUILD_TESTING)
   simrv_add_runtime_test(
     simrv-core-semantics-tests tests/CoreSemanticsTests.cpp core-semantics
     "gate;regress;memory;mmio")
-  simrv_add_runtime_test(simrv-pmp-tests tests/PmpTests.cpp pmp
-                         "gate;regress;core;memory;pmp")
-  simrv_add_runtime_test(simrv-privilege-audit-tests
-                         tests/PrivilegeMemoryAuditTests.cpp privilege-audit
-                         "gate;regress;core;memory;pmp")
+  simrv_add_runtime_test(simrv-memory-protection-tests tests/MemoryProtectionTests.cpp
+                         memory-protection "gate;regress;core;memory;pmp")
   simrv_add_runtime_test(
     simrv-machine-config-tests tests/MachineConfigTests.cpp machine-config
     "gate;regress;core;config")
-  simrv_add_runtime_test(
-    simrv-machine-ownership-tests tests/MachineOwnershipTests.cpp
-    machine-ownership "gate;regress;core;ownership")
   simrv_add_runtime_test(simrv-gdb-stub-tests tests/GdbStubTests.cpp gdb-stub
                          "gate;regress;debug;thread")
   set_tests_properties(gdb-stub PROPERTIES TIMEOUT 30)
   simrv_add_runtime_test(
-    simrv-platform-integration-tests tests/ModernPlatformTests.cpp platform-integration
+    simrv-platform-integration-tests tests/PlatformIntegrationTests.cpp platform-integration
     "gate;regress;semantic;device;mmio;pcie;aia")
   simrv_add_runtime_test(simrv-trace-tests tests/TraceTests.cpp architectural-trace
                          "gate;regress;core;trace")
@@ -139,30 +107,42 @@ if(BUILD_TESTING)
   endfunction()
 
   simrv_add_test_plugin(simrv-test-cfu-plugin test-cfu-plugin tests/TestCfuPlugin.cpp)
+  simrv_add_test_plugin(simrv-test-legacy-cfu-plugin test-legacy-cfu-plugin tests/TestLegacyCfuPlugin.c)
+  simrv_add_test_plugin(simrv-test-wide-cfu-plugin test-wide-cfu-plugin tests/TestWideCfuPlugin.c)
+  simrv_add_test_plugin(simrv-test-legacy-device-plugin test-legacy-device-plugin tests/TestLegacyDevicePlugin.c)
+  simrv_add_test_plugin(simrv-test-raw-cfu-plugin test-raw-cfu-plugin tests/TestRawCfuPlugin.c)
   simrv_add_test_plugin(simrv-test-mmc-plugin test-device-plugin tests/TestDevicePlugin.cpp)
   simrv_add_test_plugin(simrv-test-serial-plugin test-serial-plugin tests/TestSerialPlugin.cpp)
+  simrv_add_test_plugin(simrv-demo-timer demo-timer examples/plugins/timer/timer_plugin.c)
+  simrv_add_test_plugin(simrv-demo-dma-accel demo-dma-accel examples/plugins/dma_accel/dma_accel_plugin.c)
 
   simrv_add_runtime_test(
-    simrv-cfu-provingground-tests tests/CfuProvingGroundTests.cpp
-    cfu-provingground "gate;regress;pipeline;cfu")
+    simrv-cfu-integration-tests tests/CfuIntegrationTests.cpp
+    cfu-integration "gate;regress;pipeline;cfu")
   target_compile_definitions(
-    simrv-cfu-provingground-tests
-    PRIVATE TEST_CFU_PLUGIN_PATH="$<TARGET_FILE:simrv-test-cfu-plugin>")
-  add_dependencies(simrv-cfu-provingground-tests simrv-test-cfu-plugin)
+    simrv-cfu-integration-tests
+    PRIVATE TEST_CFU_PLUGIN_PATH="$<TARGET_FILE:simrv-test-cfu-plugin>"
+            TEST_LEGACY_CFU_PLUGIN_PATH="$<TARGET_FILE:simrv-test-legacy-cfu-plugin>"
+            TEST_WIDE_CFU_PLUGIN_PATH="$<TARGET_FILE:simrv-test-wide-cfu-plugin>"
+            TEST_RAW_CFU_PLUGIN_PATH="$<TARGET_FILE:simrv-test-raw-cfu-plugin>")
+  add_dependencies(simrv-cfu-integration-tests simrv-test-cfu-plugin simrv-test-raw-cfu-plugin simrv-test-legacy-cfu-plugin simrv-test-wide-cfu-plugin)
 
-  simrv_add_runtime_test(simrv-rvcomp-tests tests/RvCompTests.cpp rvcomp
+  simrv_add_runtime_test(simrv-microarchitecture-tests tests/MicroarchitectureTests.cpp microarchitecture
                          "gate;regress;pipeline;rvcomp")
   simrv_add_runtime_test(simrv-device-plugin-tests tests/DevicePluginTests.cpp device-plugins
                          "gate;regress;device;plugin")
   target_compile_definitions(simrv-device-plugin-tests PRIVATE
-                             TEST_SERIAL_PLUGIN_PATH="$<TARGET_FILE:simrv-test-serial-plugin>")
-  add_dependencies(simrv-device-plugin-tests simrv-test-serial-plugin)
+                             TEST_SERIAL_PLUGIN_PATH="$<TARGET_FILE:simrv-test-serial-plugin>"
+                             TEST_LEGACY_DEVICE_PLUGIN_PATH="$<TARGET_FILE:simrv-test-legacy-device-plugin>"
+                             TEST_TIMER_PLUGIN_PATH="$<TARGET_FILE:simrv-demo-timer>"
+                             TEST_DMA_PLUGIN_PATH="$<TARGET_FILE:simrv-demo-dma-accel>")
+  add_dependencies(simrv-device-plugin-tests simrv-test-serial-plugin simrv-demo-timer simrv-demo-dma-accel simrv-test-legacy-device-plugin)
   if(TARGET simrv-mmc)
-    add_dependencies(simrv-rvcomp-tests simrv-mmc)
+    add_dependencies(simrv-microarchitecture-tests simrv-mmc)
   endif()
   if(TARGET simrv-rvcomp-uart)
-    add_dependencies(simrv-rvcomp-tests simrv-rvcomp-uart simrv-reset)
-    target_compile_definitions(simrv-rvcomp-tests PRIVATE SIMRV_TEST_RVCOMP_UART=1)
+    add_dependencies(simrv-microarchitecture-tests simrv-rvcomp-uart simrv-reset)
+    target_compile_definitions(simrv-microarchitecture-tests PRIVATE SIMRV_TEST_RVCOMP_UART=1)
   endif()
 
   simrv_add_runtime_test(
@@ -170,8 +150,8 @@ if(BUILD_TESTING)
     "gate;regress;pipeline;model")
 
   simrv_add_runtime_test(
-    simrv-modern-simulator-standards-tests tests/ModernSimulatorStandardsTests.cpp
-    modern-standards "gate;regress;core;sbi;isa")
+    simrv-simulator-standards-tests tests/SimulatorStandardsTests.cpp
+    simulator-standards "gate;regress;core;sbi;isa")
 
   simrv_add_runtime_test(
     simrv-rva23-profile-tests tests/Rva23ProfileTests.cpp
@@ -255,27 +235,16 @@ if(BUILD_TESTING)
                "--gdb and --lockstep are mutually exclusive" LABELS
                "gate;regress;cli;debug")
 
-  foreach(
-    removed_debug_option IN
-    ITEMS --debug-mode
-          --debug
-          -d
-          -g
-          --port
-          -p
-          -M
-          -P
-          -w
-          -x)
-    string(MAKE_C_IDENTIFIER "${removed_debug_option}"
-                             removed_debug_test_suffix)
-    add_test(NAME "cli-removed-debug-option-${removed_debug_test_suffix}"
-             COMMAND $<TARGET_FILE:SimRV> "${removed_debug_option}")
-    set_tests_properties(
-      "cli-removed-debug-option-${removed_debug_test_suffix}"
-      PROPERTIES PASS_REGULAR_EXPRESSION "unknown option" LABELS
-                 "gate;regress;cli;debug")
-  endforeach()
+  add_test(NAME cli-removed-debug-options
+           COMMAND ${PYTHON_BIN} -c "
+import subprocess, sys
+simrv = sys.argv[1]
+for opt in ['--debug-mode', '--debug', '-d', '-g', '--port', '-p', '-M', '-P', '-w', '-x']:
+    res = subprocess.run([simrv, opt], capture_output=True, text=True)
+    if 'unknown option' not in res.stderr and 'unknown option' not in res.stdout:
+        sys.exit(f'Option {opt} was not rejected as unknown')
+" $<TARGET_FILE:SimRV>)
+  set_tests_properties(cli-removed-debug-options PROPERTIES LABELS "gate;regress;cli;debug" TIMEOUT 10)
 
   add_test(NAME release-metadata
            COMMAND ${PYTHON_BIN} ${CMAKE_SOURCE_DIR}/scripts/release_check.py)

@@ -286,12 +286,12 @@ class E2ETier2BoundaryTests(unittest.TestCase):
     # -------------------------------------------------------------------------
     def test_boundary_pmp_unit_suite(self) -> None:
         """Verify PMP unit test suite passes."""
-        res = subprocess.run(["ctest", "--test-dir", str(get_active_build_dir()), "-R", "^pmp$", "--output-on-failure"], capture_output=True, text=True, check=False)
+        res = subprocess.run(["ctest", "--test-dir", str(get_active_build_dir()), "-R", "^memory-protection$", "--output-on-failure"], capture_output=True, text=True, check=False)
         self.assertEqual(res.returncode, 0, res.stderr)
 
     def test_boundary_privilege_memory_audit(self) -> None:
         """Verify privilege and PMP memory audit test suite passes."""
-        res = subprocess.run(["ctest", "--test-dir", str(get_active_build_dir()), "-R", "^privilege-audit$", "--output-on-failure"], capture_output=True, text=True, check=False)
+        res = subprocess.run(["ctest", "--test-dir", str(get_active_build_dir()), "-R", "^memory-protection$", "--output-on-failure"], capture_output=True, text=True, check=False)
         self.assertEqual(res.returncode, 0, res.stderr)
 
     def test_boundary_lockstep_gdb_mutex(self) -> None:

@@ -1,5 +1,5 @@
 /**
- * @file ModernSimulatorStandardsTests.cpp
+ * @file SimulatorStandardsTests.cpp
  * @brief Regression tests for Privileged ISA 1.13, SBI v3.0, timing domains, and simulation stats.
  */
 #include <array>
@@ -11,6 +11,7 @@
 #include <string>
 #include <vector>
 
+#include "TestHelper.hpp"
 #include "simrv/core/Cpu.hpp"
 #include "simrv/core/Machine.hpp"
 #include "simrv/core/PlatformTiming.hpp"
@@ -43,14 +44,7 @@ static_assert(!GuestFaultAddress<simrv::xlen::Address>);
 static_assert(!GuestFaultAddress<simrv::xlen::PhysAddr>);
 static_assert(!GuestFaultAddress<simrv::xlen::VirtAddr>);
 
-#define TEST_ASSERT(cond)                                                                    \
-    do {                                                                                     \
-        if (!(cond)) {                                                                       \
-            std::cerr << "Assertion failed at " << __FILE__ << ":" << __LINE__ << ": " #cond \
-                      << std::endl;                                                          \
-            std::exit(1);                                                                    \
-        }                                                                                    \
-    } while (false)
+#define TEST_ASSERT(cond) TEST_CHECK(cond)
 
 void test_exception_priorities() {
     using namespace simrv::isa;

@@ -92,6 +92,12 @@ instruction limit, three warmups and ten interleaved runs on one pinned x86 CPU.
 predates the cache-prewarming changes. This workload does not exercise VirtIO disk traffic and
 the difference does not establish a speedup; a device-throughput comparison remains outstanding.
 
+For the precise-tick batch eligibility guard, `memory.elf` ran without a ticking plugin using
+the RV64 release build, a 100 million instruction limit, three warmups and ten measured runs per
+binary on one pinned x86 CPU. Median times were 0.1338 seconds (2.59% CV) before and 0.1359
+seconds (2.07% CV) after. The separate batches do not establish a small performance change. A
+ticking extension intentionally uses the per-instruction runner; its throughput is not measured.
+
 The branch result is too noisy to establish a speedup. The MMIO loop retained the same bus and
 cache counts. The initial baseline executable is no longer available, so an identical-binary
 comparison against the final tree remains outstanding. ARM hardware and usable host performance

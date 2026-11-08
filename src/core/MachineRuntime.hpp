@@ -157,6 +157,7 @@ class Machine::Runtime {
     std::unique_ptr<simrv::device::RingBufferEthernetMmio> ring_buffer_ethernet;
     std::vector<std::unique_ptr<simrv::device::DummyMmio>> dummy_mmios;
     std::vector<std::unique_ptr<simrv::memory::MmioDevice>> extension_mmios;
+    std::vector<simrv::memory::MmioDevice*> ticked_extension_mmios;
     std::unique_ptr<simrv::device::DmaController> dma_controller;
     std::unique_ptr<simrv::memory::Axi4Bridge> axi_bridge;
     std::unique_ptr<simrv::device::AclintMtimer> aclint_mtimer;

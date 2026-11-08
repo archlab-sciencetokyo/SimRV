@@ -602,6 +602,16 @@ auto Machine::uart_device() const noexcept -> const simrv::device::SerialDevice*
     return runtime_->uart.get();
 }
 
+void Machine::advance_device_cycles(uint64_t cycles) {
+    if (cycles == 0 || runtime_ == nullptr) return;
+    if (auto* uart = runtime_->uart.get(); uart != nullptr) {
+        uart->advance_cycles(cycles);
+    }
+    for (auto* dev : runtime_->ticked_extension_mmios) {
+        dev->advance_cycles(cycles);
+    }
+}
+
 auto Machine::framebuffer_device() noexcept -> simrv::device::FramebufferDevice* {
     return runtime_->framebuffer;
 }
@@ -900,7 +910,11 @@ void Machine::finalize_runner_cycle() {
 }
 
 auto Machine::fast_batch_policy() const -> std::optional<FastBatchPolicy> {
-    if (!runtime_profile.allows_fast_batch() || is_stepping() || lockstep_enabled() ||
+    // Ticking extension devices must observe each instruction boundary. The bare-metal
+    // batch engine only advances the built-in UART, so use the general runner for them.
+    if (!runtime_profile.allows_fast_batch() || !runtime_->ticked_extension_mmios.empty() ||
+        (runtime_->uart && runtime_->uart->requires_instruction_ticks()) ||
+        is_stepping() || lockstep_enabled() ||
         branch_trace_enabled() || breakpoint_manager().has_any() || is_smp_enabled() ||
         primary_hart().state().has_active_triggers ||
         primary_hart().cpu_model_config.mmio_console_redirect) {

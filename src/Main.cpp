@@ -38,6 +38,7 @@
 #include "simrv/tui/Tui.hpp"
 #include "simrv/util/CliParser.hpp"
 #include "simrv/util/FormatUtil.hpp"
+#include "simrv/util/Scaffolding.hpp"
 #include "simrv/util/SoCManifest.hpp"
 #include "simrv/xlen/ScalarTypes.hpp"
 
@@ -473,30 +474,9 @@ auto main(int argc, char* argv[]) -> int {  // NOLINT(bugprone-exception-escape)
                 simrv::explain::explain_instruction(parsed->options.explain_inst_val);
                 std::exit(simrv::core::to_exit_code(simrv::core::HostExitCode::Success));
             case CliAction::DumpCpuModel: {
-                simrv::pipeline::CpuModelConfig cfg{};
-                std::string target = parsed->options.dump_cpu_model_preset;
-                if (target.empty()) target = "balanced";
-                if (auto resolved = simrv::core::resolve_cpu_model_path(target)) {
-                    (void)simrv::core::load_cpu_config(*resolved, cfg);
-                } else if (auto p = simrv::pipeline::parse_cpu_model_preset(target)) {
-                    cfg = simrv::pipeline::make_cpu_model_preset(*p);
-                } else {
-                    cfg = simrv::pipeline::make_cpu_model_preset(
-                        simrv::pipeline::CpuModelPreset::Balanced);
-                }
-                if (!parsed->options.dump_cpu_model_output.empty() &&
-                    parsed->options.dump_cpu_model_output != "-") {
-                    if (!simrv::core::save_cpu_config(parsed->options.dump_cpu_model_output, cfg,
-                                                      target)) {
-                        simrv::log::error("Failed to write CPU model to {}",
-                                          parsed->options.dump_cpu_model_output);
-                        std::exit(
-                            simrv::core::to_exit_code(simrv::core::HostExitCode::GeneralError));
-                    }
-                    std::println("Wrote CPU model configuration to {}",
-                                 parsed->options.dump_cpu_model_output);
-                } else {
-                    simrv::core::serialize_cpu_config(cfg, std::cout, target);
+                if (!simrv::util::scaffold_cpu_model(parsed->options.dump_cpu_model_preset,
+                                                     parsed->options.dump_cpu_model_output)) {
+                    std::exit(simrv::core::to_exit_code(simrv::core::HostExitCode::GeneralError));
                 }
                 std::exit(simrv::core::to_exit_code(simrv::core::HostExitCode::Success));
             }
@@ -648,6 +628,21 @@ auto main(int argc, char* argv[]) -> int {  // NOLINT(bugprone-exception-escape)
                     "{}[VALID]{} Configuration is fully valid and compatible with this simulator.",
                     terminal_style(STDOUT_FILENO, "\033[1;32m"),
                     terminal_style(STDOUT_FILENO, "\033[0m"));
+                std::exit(simrv::core::to_exit_code(simrv::core::HostExitCode::Success));
+            }
+            case CliAction::ScaffoldDevicePlugin: {
+                if (!simrv::util::scaffold_device_plugin(
+                        parsed->options.scaffold_device_plugin_name,
+                        parsed->options.scaffold_device_plugin_output)) {
+                    std::exit(simrv::core::to_exit_code(simrv::core::HostExitCode::GeneralError));
+                }
+                std::exit(simrv::core::to_exit_code(simrv::core::HostExitCode::Success));
+            }
+            case CliAction::ScaffoldCfuPlugin: {
+                if (!simrv::util::scaffold_cfu_plugin(parsed->options.scaffold_cfu_plugin_name,
+                                                      parsed->options.scaffold_cfu_plugin_output)) {
+                    std::exit(simrv::core::to_exit_code(simrv::core::HostExitCode::GeneralError));
+                }
                 std::exit(simrv::core::to_exit_code(simrv::core::HostExitCode::Success));
             }
             case CliAction::Run:

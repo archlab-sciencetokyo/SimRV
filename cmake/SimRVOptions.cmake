@@ -65,6 +65,14 @@ if(CMAKE_SYSTEM_PROCESSOR MATCHES "^(x86_64|AMD64)$"
         "SIMRV_X86_64_V3_BASELINE is ON but the compiler rejects -march=x86-64-v3"
     )
   endif()
+elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "^(aarch64|arm64|ARM64)$"
+       AND CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang|AppleClang"
+       AND CMAKE_BUILD_TYPE STREQUAL "Release"
+       AND NOT SIMRV_NATIVE_HOST_OPTIMIZATIONS)
+  check_cxx_compiler_flag("-march=armv8-a" SIMRV_SUPPORTS_ARMV8_A)
+  if(SIMRV_SUPPORTS_ARMV8_A)
+    target_compile_options(simrv-project-options INTERFACE -march=armv8-a)
+  endif()
 endif()
 
 if(CMAKE_BUILD_TYPE STREQUAL "Release" AND SIMRV_NATIVE_HOST_OPTIMIZATIONS)

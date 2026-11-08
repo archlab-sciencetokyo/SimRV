@@ -57,12 +57,14 @@ void VirtioPciBlock::on_queue_notify(virtio::VirtioQueueIndex queue_index) {
                                                           uint16_t head_desc_idx,
                                                           uint32_t total_written) {
         const auto current_cycle = machine->memory().system_bus().cycle();
+        const auto generation = queues_[queue_index].generation;
         machine->dma_engine().schedule_transfer(
             transfer_bytes, current_cycle,
-            [this, queue_index, head_desc_idx, total_written]() {
+            [this, queue_index, head_desc_idx, total_written, generation]() {
                 auto& q = queues_[queue_index];
+                if (q.generation != generation || !q.usable()) return;
                 uint16_t used_idx = 0;
-                dma_read(q.device_addr + 2, &used_idx, 2);
+                if (!dma_read(q.device_addr + 2, &used_idx, 2)) return;
                 virtio::VirtqUsedElem elem{.id = head_desc_idx, .len = total_written};
                 dma_write(q.device_addr + 4 + (used_idx % q.num) * sizeof(elem), &elem,
                           sizeof(elem));

@@ -184,11 +184,13 @@ void VirtioMmioDevice::write32(simrv::xlen::Address offset, uint32_t value) {
             break;
         case 0x38:
             if (queue_sel_ < queues_.size()) {
+                ++queues_[queue_sel_].generation;
                 queues_[queue_sel_].num = static_cast<uint16_t>(value);
             }
             break;
         case 0x44:
             if (queue_sel_ < queues_.size()) {
+                ++queues_[queue_sel_].generation;
                 queues_[queue_sel_].ready = static_cast<uint16_t>(value);
             }
             break;
@@ -207,6 +209,7 @@ void VirtioMmioDevice::write32(simrv::xlen::Address offset, uint32_t value) {
             status_ = value;
             if (status_ == 0) {
                 for (auto& q : queues_) {
+                    ++q.generation;
                     q.ready = 0;
                     q.desc_addr = 0;
                     q.driver_addr = 0;
@@ -217,6 +220,7 @@ void VirtioMmioDevice::write32(simrv::xlen::Address offset, uint32_t value) {
             break;
         case 0x80:  // QueueDescLow
             if (queue_sel_ < queues_.size()) {
+                ++queues_[queue_sel_].generation;
                 queues_[queue_sel_].desc_addr =
                     (queues_[queue_sel_].desc_addr & 0xFFFFFFFF00000000ULL) |
                     (value & 0xFFFFFFFFULL);
@@ -224,6 +228,7 @@ void VirtioMmioDevice::write32(simrv::xlen::Address offset, uint32_t value) {
             break;
         case 0x84:  // QueueDescHigh
             if (queue_sel_ < queues_.size()) {
+                ++queues_[queue_sel_].generation;
                 queues_[queue_sel_].desc_addr =
                     (queues_[queue_sel_].desc_addr & 0x00000000FFFFFFFFULL) |
                     (static_cast<uint64_t>(value) << 32);
@@ -231,6 +236,7 @@ void VirtioMmioDevice::write32(simrv::xlen::Address offset, uint32_t value) {
             break;
         case 0x90:  // QueueDriverLow
             if (queue_sel_ < queues_.size()) {
+                ++queues_[queue_sel_].generation;
                 queues_[queue_sel_].driver_addr =
                     (queues_[queue_sel_].driver_addr & 0xFFFFFFFF00000000ULL) |
                     (value & 0xFFFFFFFFULL);
@@ -238,6 +244,7 @@ void VirtioMmioDevice::write32(simrv::xlen::Address offset, uint32_t value) {
             break;
         case 0x94:  // QueueDriverHigh
             if (queue_sel_ < queues_.size()) {
+                ++queues_[queue_sel_].generation;
                 queues_[queue_sel_].driver_addr =
                     (queues_[queue_sel_].driver_addr & 0x00000000FFFFFFFFULL) |
                     (static_cast<uint64_t>(value) << 32);
@@ -245,6 +252,7 @@ void VirtioMmioDevice::write32(simrv::xlen::Address offset, uint32_t value) {
             break;
         case 0xA0:  // QueueDeviceLow
             if (queue_sel_ < queues_.size()) {
+                ++queues_[queue_sel_].generation;
                 queues_[queue_sel_].device_addr =
                     (queues_[queue_sel_].device_addr & 0xFFFFFFFF00000000ULL) |
                     (value & 0xFFFFFFFFULL);
@@ -252,6 +260,7 @@ void VirtioMmioDevice::write32(simrv::xlen::Address offset, uint32_t value) {
             break;
         case 0xA4:  // QueueDeviceHigh
             if (queue_sel_ < queues_.size()) {
+                ++queues_[queue_sel_].generation;
                 queues_[queue_sel_].device_addr =
                     (queues_[queue_sel_].device_addr & 0x00000000FFFFFFFFULL) |
                     (static_cast<uint64_t>(value) << 32);

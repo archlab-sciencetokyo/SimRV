@@ -44,6 +44,10 @@ class MmioDevice : public TileLinkNode {
     // TileLink channel adaptation
     auto handle_request(const TlChannelA& req, TlChannelD& resp) -> bool override;
 
+    // Simulation cycle tick for periodic device state transitions
+    virtual void advance_cycles(uint64_t /*cycles*/) {}
+    [[nodiscard]] virtual auto has_cycle_ticking() const noexcept -> bool { return false; }
+
     // Guest physical memory DMA mastering
     auto dma_read(simrv::xlen::PhysAddr paddr, std::span<uint8_t> dst) -> bool;
     auto dma_write(simrv::xlen::PhysAddr paddr, std::span<const uint8_t> src) -> bool;

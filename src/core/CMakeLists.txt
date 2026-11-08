@@ -24,6 +24,7 @@ simrv_add_component(simrv-core
   CpuFastExecution.cpp
   BlockCache.cpp
   ../util/CliParser.cpp
+  ../util/Scaffolding.cpp
   ../explain/CsrCatalog.cpp
   ../explain/ScalarSpecCatalog.cpp
   ../explain/VectorSpecCatalog.cpp
@@ -61,3 +62,16 @@ set_property(TARGET simrv-runtime PROPERTY INTERFACE_LINK_LIBRARIES "")
 if(CMAKE_DL_LIBS)
   target_link_libraries(simrv-runtime INTERFACE ${CMAKE_DL_LIBS})
 endif()
+
+add_library(simrv-devel INTERFACE)
+add_library(simrv::devel ALIAS simrv-devel)
+add_library(SimRV::devel ALIAS simrv-devel)
+add_library(SimRV::simrv-devel ALIAS simrv-devel)
+target_include_directories(simrv-devel INTERFACE
+  $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/include>
+  $<BUILD_INTERFACE:${PROJECT_BINARY_DIR}/generated>
+  $<INSTALL_INTERFACE:include>
+)
+set_target_properties(simrv-devel PROPERTIES
+  EXPORT_NAME simrv-devel
+)

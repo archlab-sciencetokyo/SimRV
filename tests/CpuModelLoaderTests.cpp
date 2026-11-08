@@ -9,6 +9,7 @@
 #include <iostream>
 #include <sstream>
 
+#include "TestHelper.hpp"
 #include "simrv/core/CpuConfigParser.hpp"
 #include "simrv/execute/ExecuteUnit.hpp"
 #include "simrv/isa/Common.hpp"
@@ -16,15 +17,6 @@
 #include "simrv/isa/Zb.hpp"
 #include "simrv/isa/Zk.hpp"
 #include "simrv/pipeline/CpuModel.hpp"
-
-#define TEST_CHECK(cond)                                                                  \
-    do {                                                                                  \
-        if (!(cond)) {                                                                    \
-            std::cerr << "Assertion failed: " #cond " at " << __FILE__ << ":" << __LINE__ \
-                      << std::endl;                                                       \
-            std::exit(1);                                                                 \
-        }                                                                                 \
-    } while (0)
 
 using simrv::isa::IsaPreset;
 using simrv::pipeline::BranchPredictorType;

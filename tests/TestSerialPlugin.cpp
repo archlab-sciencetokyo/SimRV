@@ -11,6 +11,7 @@ struct Device {
     const SimRvSerialHostServices* serial{};
     const SimRvHostServices* host{};
     bool services_ready_at_reset{};
+    uint64_t mmio_cycles{};
     uint8_t pixels[4]{};
 };
 int init(void** out, const char*) {
@@ -21,12 +22,17 @@ void destroy(void* ctx) { delete static_cast<Device*>(ctx); }
 void reset(void* ctx) {
     auto* dev = static_cast<Device*>(ctx);
     dev->services_ready_at_reset = dev->serial && dev->host;
+    dev->mmio_cycles = 0;
 }
 int read(void* ctx, uint64_t offset, uint32_t, uint64_t* out) {
     auto* dev = static_cast<Device*>(ctx);
     if (offset == 8) return -1;
     if (offset == 12) {
         *out = 0x1234;
+        return 0;
+    }
+    if (offset == 24) {
+        *out = dev->mmio_cycles;
         return 0;
     }
     *out = offset == 0   ? static_cast<uint64_t>(dev->input.exchange(-1))
@@ -65,6 +71,9 @@ const SimRvExternalDevice device{
     .write = write,
     .destroy = destroy,
     .set_host_services = host_services,
+    .advance_cycles = [](void* ctx, uint64_t cycles) {
+        static_cast<Device*>(ctx)->mmio_cycles += cycles;
+    },
 };
 const SimRvExternalSerialDevice serial{
     .api_version = SIMRV_EXTERNAL_SERIAL_API_VERSION,

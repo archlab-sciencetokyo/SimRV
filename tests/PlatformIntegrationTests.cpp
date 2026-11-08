@@ -1,5 +1,5 @@
 /**
- * @file ModernPlatformTests.cpp
+ * @file PlatformIntegrationTests.cpp
  * @brief Unit tests for RISC-V AIA, ACLINT, PCIe ECAM, and VirtIO-PCI subsystems.
  */
 #include <fcntl.h>
@@ -308,6 +308,89 @@ void test_mmio_device_and_dma() {
     check(mmio_rng.get_queue_state(0)->last_avail_idx == 1);
     pci_rng->bar_write(0, 0x100, 0, 2);
     check(pci_rng->get_queue_state(0)->last_avail_idx == 1);
+
+    // A reset invalidates deferred completions, even if the same queue is restored.
+    machine.runtime_profile.engine = simrv::core::ExecutionEngine::CycleFast;
+    simrv::pipeline::DmaTimingConfig timing{};
+    timing.enabled = true;
+    timing.setup_latency = 10;
+    timing.bandwidth_bytes_per_cycle = 4;
+    machine.dma_engine().set_config(timing);
+    simrv::device::VirtioMmioBlock mmio_block(0x10001000, 2, &machine);
+    auto pci_block = std::make_shared<simrv::device::VirtioPciBlock>();
+    check(root.attach_device(0, 4, 0, pci_block));
+    const auto configure_mmio = [&] {
+        mmio_block.write32(0x38, 8);
+        mmio_block.write32(0x80, base + 0x400);
+        mmio_block.write32(0x90, base + 0x500);
+        mmio_block.write32(0xa0, base + 0x600);
+        mmio_block.write32(0x44, 1);
+    };
+    const auto configure_pci = [&] {
+        pci_block->bar_write(0, 0x18, 8, 2);
+        pci_block->bar_write(0, 0x20, base + 0x400, 4);
+        pci_block->bar_write(0, 0x28, base + 0x500, 4);
+        pci_block->bar_write(0, 0x30, base + 0x700, 4);
+        pci_block->bar_write(0, 0x1c, 1, 2);
+    };
+    std::memcpy(ram.data() + 0x502, &avail_idx, sizeof(avail_idx));
+    configure_mmio();
+    configure_pci();
+    mmio_block.write32(0x50, 0);
+    pci_block->bar_write(0, 0x100, 0, 2);
+    check(machine.dma_engine().pending_tasks() == 2);
+    mmio_block.write32(0x70, 0);
+    pci_block->reset();
+    configure_mmio();
+    configure_pci();
+    machine.dma_engine().advance_cycle(1000);
+    check(machine.dma_engine().pending_tasks() == 0);
+    check(ram[0x602] == std::byte{0} && ram[0x702] == std::byte{0});
+    check(mmio_block.isr_status() == 0 && pci_block->isr_status() == 0);
+    mmio_block.write32(0x50, 0);
+    pci_block->bar_write(0, 0x100, 0, 2);
+    check(machine.dma_engine().pending_tasks() == 2);
+    machine.dma_engine().advance_cycle(2000);
+    check(ram[0x602] == std::byte{1} && ram[0x702] == std::byte{1});
+    check(mmio_block.isr_status() != 0 && pci_block->isr_status() != 0);
+
+    simrv::device::VirtioMmioNet mmio_net(0x10007000, 8, &machine);
+    auto pci_net = std::make_shared<simrv::device::VirtioPciNet>();
+    check(root.attach_device(0, 5, 0, pci_net));
+    const auto configure_mmio_net = [&] {
+        mmio_net.write32(0x30, 1);
+        mmio_net.write32(0x38, 8);
+        mmio_net.write32(0x80, base + 0x400);
+        mmio_net.write32(0x90, base + 0x500);
+        mmio_net.write32(0xa0, base + 0x800);
+        mmio_net.write32(0x44, 1);
+    };
+    const auto configure_pci_net = [&] {
+        pci_net->bar_write(0, 0x16, 1, 2);
+        pci_net->bar_write(0, 0x18, 8, 2);
+        pci_net->bar_write(0, 0x20, base + 0x400, 4);
+        pci_net->bar_write(0, 0x28, base + 0x500, 4);
+        pci_net->bar_write(0, 0x30, base + 0x900, 4);
+        pci_net->bar_write(0, 0x1c, 1, 2);
+    };
+    configure_mmio_net();
+    configure_pci_net();
+    mmio_net.write32(0x50, 1);
+    pci_net->bar_write(0, 0x100, 1, 2);
+    check(machine.dma_engine().pending_tasks() == 2);
+    mmio_net.write32(0x70, 0);
+    pci_net->reset();
+    configure_mmio_net();
+    configure_pci_net();
+    machine.dma_engine().advance_cycle(3000);
+    check(ram[0x802] == std::byte{0} && ram[0x902] == std::byte{0});
+    check(mmio_net.isr_status() == 0 && pci_net->isr_status() == 0);
+    mmio_net.write32(0x50, 1);
+    pci_net->bar_write(0, 0x100, 1, 2);
+    check(machine.dma_engine().pending_tasks() == 2);
+    machine.dma_engine().advance_cycle(4000);
+    check(ram[0x802] == std::byte{1} && ram[0x902] == std::byte{1});
+    check(mmio_net.isr_status() != 0 && pci_net->isr_status() != 0);
     std::cout << "[PASS] test_mmio_device_and_dma\n";
 }
 

@@ -24,6 +24,8 @@ class SerialDevice : public simrv::memory::TileLinkNode {
     [[nodiscard]] virtual auto irq_number() const noexcept -> uint32_t = 0;
     virtual void push_rx_byte(uint8_t byte) = 0;
     virtual void advance_cycles(uint64_t cycles) = 0;
+    /// True when the device needs a callback at every instruction boundary.
+    [[nodiscard]] virtual auto requires_instruction_ticks() const noexcept -> bool { return false; }
     [[nodiscard]] virtual auto has_active_transfer() const noexcept -> bool = 0;
     [[nodiscard]] virtual auto start_pty() -> bool = 0;
     virtual void stop_pty() = 0;

@@ -473,7 +473,7 @@ void CPU::advance_ca_cycle(Machine& machine) {
 
 SIMRV_ALWAYS_INLINE void CPU::tick_cycle_clock(Machine& machine, bool interrupt_boundary) {
     if (state_.mhartid == 0) {
-        if (auto* uart = machine.uart_device(); uart != nullptr) uart->advance_cycles(1);
+        machine.advance_device_cycles(1);
     }
     if (cycle_counter_start_delay_ != 0) {
         --cycle_counter_start_delay_;
@@ -601,7 +601,7 @@ void CPU::run_cycle_baremetal_miss(Machine& machine) {
     account_arch_cycles();
     record_hpm_event(HpmEvent::Cycles);
     if (state_.mhartid == 0) {
-        if (auto* uart = machine.uart_device(); uart != nullptr) uart->advance_cycles(1);
+        machine.advance_device_cycles(1);
     }
     if (machine.clock_divider().advance_ca_cycle(clint_mmio.rtc_divider, clint_mmio.mtime)) {
         evaluate_timer_interrupt();
@@ -691,7 +691,7 @@ void CPU::run_cycle_baremetal(Machine& machine) {
             account_arch_cycles();
             record_hpm_event(HpmEvent::Cycles);
             if (state_.mhartid == 0) {
-                if (auto* uart = machine.uart_device(); uart != nullptr) uart->advance_cycles(1);
+                machine.advance_device_cycles(1);
             }
             if (machine.clock_divider().advance_ca_cycle(clint_mmio.rtc_divider,
                                                          clint_mmio.mtime)) {

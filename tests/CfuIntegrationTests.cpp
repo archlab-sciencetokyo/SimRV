@@ -1,6 +1,6 @@
 /**
- * @file CfuProvingGroundTests.cpp
- * @brief Unit and pipeline timing tests for CFU-ProvingGround preset and Custom Function Unit.
+ * @file CfuIntegrationTests.cpp
+ * @brief Unit, dynamic plugin, and pipeline timing tests for Custom Function Unit (CFU) integration.
  */
 #include <array>
 #include <cstdint>
@@ -8,7 +8,9 @@
 #include <cstring>
 #include <iostream>
 #include <limits>
+#include <string_view>
 
+#include "TestHelper.hpp"
 #include "simrv/cache/BaseCache.hpp"
 #include "simrv/cache/ICache.hpp"
 #include "simrv/core/Cpu.hpp"
@@ -26,14 +28,6 @@
 #include "simrv/pipeline/PipelineSim.hpp"
 #include "simrv/util/CliParser.hpp"
 #include "simrv/xlen/RegisterTypes.hpp"
-
-#define TEST_CHECK(expr)                                                                     \
-    do {                                                                                     \
-        if (!(expr)) {                                                                       \
-            std::cerr << "Assertion failed: " #expr " at " __FILE__ ":" << __LINE__ << "\n"; \
-            std::abort();                                                                    \
-        }                                                                                    \
-    } while (0)
 
 namespace {
 
@@ -178,6 +172,68 @@ void test_cfu_unit_plugin_loading() {
     // Reset should maintain plugin
     cfu.reset();
     TEST_CHECK(cfu.has_plugin());
+    TEST_CHECK(cfu.plugin_name() == "test-cfu");
+#endif
+}
+
+void test_cfu_abi_layout() {
+    std::cout << "[Test] CFU ABI layout and version invariants...\n";
+    using simrv::execute::SimRvCfuPlugin;
+    static_assert(offsetof(SimRvCfuPlugin, api_version) == 0, "api_version must be at offset 0");
+    static_assert(offsetof(SimRvCfuPlugin, execute) == sizeof(void*), "execute offset check");
+    static_assert(offsetof(SimRvCfuPlugin, reset) == 2 * sizeof(void*), "reset offset check");
+    static_assert(offsetof(SimRvCfuPlugin, execute64) == 3 * sizeof(void*),
+                  "execute64 offset check");
+    static_assert(offsetof(SimRvCfuPlugin, query_latency) == 4 * sizeof(void*),
+                  "query_latency offset check");
+    static_assert(offsetof(SimRvCfuPlugin, name) == 5 * sizeof(void*), "name offset check");
+    static_assert(SIMRV_CFU_PLUGIN_API_VERSION == 2, "API version must be 2");
+    static_assert(SIMRV_CFU_PLUGIN_API_VERSION_V1 == 1, "API version v1 must be 1");
+
+    CfuUnit legacy;
+    TEST_CHECK(legacy.load_plugin(TEST_LEGACY_CFU_PLUGIN_PATH));
+    TEST_CHECK(legacy.execute(3, 2, 0x12, 0x34) == (0x12 ^ 0x34 ^ 3 ^ 2));
+    TEST_CHECK(legacy.last_latency() == 3);
+    TEST_CHECK(legacy.query_latency(0, 0) == 3);
+    TEST_CHECK(legacy.plugin_name().empty());
+    legacy.reset();
+
+    CfuUnit wide;
+    TEST_CHECK(wide.load_plugin(TEST_WIDE_CFU_PLUGIN_PATH));
+    TEST_CHECK(wide.execute(0, 0, 0x1234, 0x00ff) == (0x1234 ^ 0x00ff));
+    TEST_CHECK(wide.last_latency() == 4);
+    TEST_CHECK(wide.query_latency(0, 0) == 4);
+    if constexpr (simrv::xlen::kIsXLen64) {
+        const auto high = static_cast<simrv::xlen::Register>(uint64_t{1} << 40);
+        TEST_CHECK(wide.execute(0, 0, high, 1) == (high ^ 1));
+    }
+}
+
+void test_cfu_provingground_raw_plugin() {
+    std::cout << "[Test] Raw CFU-Proving-Ground / CFU-Playground plugin compatibility...\n";
+#ifdef TEST_RAW_CFU_PLUGIN_PATH
+    CfuUnit cfu;
+    TEST_CHECK(cfu.load_plugin(TEST_RAW_CFU_PLUGIN_PATH));
+    TEST_CHECK(cfu.has_plugin());
+    TEST_CHECK(cfu.plugin_name() == "cfu-provingground-compat");
+
+    // funct3 = 0, funct7 = 4, rs1 = 20, rs2 = 10 -> (20 + 10) ^ 4 = 30 ^ 4 = 26
+    const auto res0 = cfu.execute(4, 0, 20, 10);
+    TEST_CHECK(res0 == 26);
+    TEST_CHECK(cfu.last_latency() == 1);
+    TEST_CHECK(cfu.query_latency(4, 0) == 1);
+
+    // funct3 = 1, funct7 = 5, rs1 = 6, rs2 = 7 -> (6 * 7) + 5 + 0 = 47
+    const auto res1 = cfu.execute(5, 1, 6, 7);
+    TEST_CHECK(res1 == 47);
+
+    // Call reset -> raw cfu_reset increments s_reset_calls
+    cfu.reset();
+    TEST_CHECK(cfu.has_plugin());
+
+    // Now funct3 = 1 -> (6 * 7) + 5 + 1 = 48
+    const auto res2 = cfu.execute(5, 1, 6, 7);
+    TEST_CHECK(res2 == 48);
 #endif
 }
 
@@ -422,10 +478,12 @@ void test_bram_prewarm_and_cli() {
 
 auto main() -> int {
     std::cout << "=== Running CFU-ProvingGround Tests ===\n";
+    test_cfu_abi_layout();
     test_cfu_provingground_profile();
     test_cfu_instruction_decode_and_traits();
     test_cfu_unit_default_execution();
     test_cfu_unit_plugin_loading();
+    test_cfu_provingground_raw_plugin();
     test_cfu_pipeline_hazard_timing();
     test_bram_prewarm_and_cli();
     std::cout << "=== All CFU-ProvingGround Tests Passed Successfully ===\n";

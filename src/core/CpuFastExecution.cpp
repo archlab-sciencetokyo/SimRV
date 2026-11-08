@@ -1248,6 +1248,15 @@ void CPU::execute_cached_op_fast(Machine& machine, CachedOp& op,
         case isa::SD:
             execute_cached_store<isa::SD>(machine, op, rrs1, state_.regs.read(op.rs2), ram);
             return;
+        // ---- Custom Function Unit (CFU) ----
+        case isa::OperationId::CFU: {
+            const auto rrs2 = state_.regs.read(op.rs2);
+            const auto res = cfu_unit.execute(static_cast<uint32_t>(op.funct7()),
+                                              static_cast<uint32_t>(op.funct3), rrs1, rrs2);
+            state_.regs.write(op.rd, res);
+            advance_cached_pc(op);
+            return;
+        }
         // ---- FP Loads ----
         case isa::FLW:
         case isa::FLD: {
@@ -3348,8 +3357,7 @@ SIMRV_ALWAYS_INLINE auto CPU::run_fast_os_kernel(Machine& machine, uint32_t batc
         if (chunk_cycles > 0) {
             account_arch_cycles(chunk_cycles);
             if (state_.mhartid == 0) {
-                if (auto* uart = machine.uart_device(); uart != nullptr)
-                    uart->advance_cycles(chunk_cycles);
+                machine.advance_device_cycles(chunk_cycles);
                 if (machine.clock_divider().advance_fast_cycles(
                         chunk_cycles, clint_mmio.rtc_divider, clint_mmio.mtime) > 0) {
                     evaluate_timer_interrupt();
@@ -3417,8 +3425,7 @@ SIMRV_ALWAYS_INLINE auto CPU::run_fast_os_kernel(Machine& machine, uint32_t batc
                             compressed_count = 0;
                             account_arch_cycles(chunk_cycles);
                             if (state_.mhartid == 0) {
-                                if (auto* uart = machine.uart_device(); uart != nullptr)
-                                    uart->advance_cycles(chunk_cycles);
+                                machine.advance_device_cycles(chunk_cycles);
                                 if (simrv::compiler::unlikely(
                                         machine.clock_divider().advance_fast_cycles(
                                             chunk_cycles, clint_mmio.rtc_divider,

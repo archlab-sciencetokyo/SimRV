@@ -1,6 +1,6 @@
 /**
- * @file RvCompTests.cpp
- * @brief Regression tests for RVComp cycle-accurate CPU model configuration and microarchitecture.
+ * @file MicroarchitectureTests.cpp
+ * @brief Regression tests for cycle-accurate CPU model configuration, timing front cache, and microarchitecture.
  */
 
 #include <algorithm>
@@ -16,12 +16,13 @@
 #include <string_view>
 #include <type_traits>
 
+#include "TestHelper.hpp"
 #include "simrv/core/Cpu.hpp"
 #include "simrv/core/CpuConfigParser.hpp"
 #include "simrv/core/Machine.hpp"
 #include "simrv/core/MachineConfig.hpp"
-#include "simrv/core/TelemetrySink.hpp"
 #include "simrv/core/SoCDeviceRegistry.hpp"
+#include "simrv/core/TelemetrySink.hpp"
 #include "simrv/device/DummyMmio.hpp"
 #include "simrv/device/ExternalDevicePlugin.hpp"
 #include "simrv/device/PlatformDeviceRegistry.hpp"
@@ -36,25 +37,18 @@
 #include "simrv/util/SoCManifest.hpp"
 #include "simrv/xlen/ScalarTypes.hpp"
 
-#define TEST_CHECK(cond)                                                                  \
-    do {                                                                                  \
-        if (!(cond)) {                                                                    \
-            std::cerr << "Assertion failed: " #cond " at " << __FILE__ << ":" << __LINE__ \
-                      << std::endl;                                                       \
-            std::exit(1);                                                                 \
-        }                                                                                 \
-    } while (0)
-
-static_assert(SIMRV_EXTERNAL_DEVICE_API_VERSION == 1);
+static_assert(SIMRV_EXTERNAL_DEVICE_API_VERSION == 2);
+static_assert(SIMRV_EXTERNAL_DEVICE_API_VERSION_V1 == 1);
 static_assert(std::is_standard_layout_v<SimRvExternalDevice>);
 static_assert(std::is_standard_layout_v<SimRvHostServices>);
 static_assert(std::is_trivially_copyable_v<SimRvExternalDevice>);
 static_assert(offsetof(SimRvExternalDevice, api_version) == 0);
 static_assert(sizeof(void*) != 8 ||
-              (sizeof(SimRvExternalDevice) == 88 && sizeof(SimRvHostServices) == 32 &&
+              (sizeof(SimRvExternalDevice) == 96 && sizeof(SimRvHostServices) == 64 &&
                offsetof(SimRvExternalDevice, default_base) == 24 &&
                offsetof(SimRvExternalDevice, init) == 40 &&
-               offsetof(SimRvExternalDevice, set_host_services) == 80));
+               offsetof(SimRvExternalDevice, set_host_services) == 80 &&
+               offsetof(SimRvExternalDevice, advance_cycles) == 88));
 
 using simrv::isa::IsaPreset;
 using simrv::pipeline::BranchPredictorType;
@@ -452,8 +446,7 @@ void test_rvcomp_uart_plugin() {
 
     // RVComp firmware first probes TX-full, then polls RX-empty before echoing input.
     constexpr std::array<simrv::xlen::Instruction, 7> guest = {
-        0x100002b7, 0x0042c303, 0x0082c303, 0xfe031ee3,
-        0x0002c303, 0x00628023, 0xff1ff06f,
+        0x100002b7, 0x0042c303, 0x0082c303, 0xfe031ee3, 0x0002c303, 0x00628023, 0xff1ff06f,
     };
     uart->reset();
     capture->output.clear();

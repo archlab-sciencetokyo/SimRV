@@ -613,7 +613,7 @@ class E2ETier1FeatureTests(unittest.TestCase):
     def test_f4_2_napot_alignment_computation(self) -> None:
         """Verify PMP unit test suite passes."""
         ctest_res = subprocess.run(
-            ["ctest", "--test-dir", str(get_active_build_dir()), "-R", "^pmp$", "--output-on-failure"],
+            ["ctest", "--test-dir", str(get_active_build_dir()), "-R", "^memory-protection$", "--output-on-failure"],
             capture_output=True,
             text=True,
             check=False,
@@ -805,7 +805,7 @@ class E2ETier1FeatureTests(unittest.TestCase):
 
     def test_f5_3_tests_formatting(self) -> None:
         """Verify test source files adhere to formatting standards."""
-        test_src = ROOT / "tests/OperationTraitsTests.cpp"
+        test_src = ROOT / "tests/PipelineTests.cpp"
         if test_src.is_file():
             res = subprocess.run(["clang-format", "--dry-run", "--Werror", str(test_src)], capture_output=True, text=True, check=False)
             self.assertEqual(res.returncode, 0, res.stderr)
