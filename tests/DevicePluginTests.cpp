@@ -106,10 +106,10 @@ void test_serial_plugin_replaces_builtin() {
 }
 
 void test_serial_plugin_device_ticks_in_fast_baremetal() {
-    const auto path = std::filesystem::temp_directory_path() /
-                      ("simrv-serial-guest-" +
-                       std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()) +
-                       ".bin");
+    const auto path =
+        std::filesystem::temp_directory_path() /
+        ("simrv-serial-guest-" +
+         std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()) + ".bin");
     {
         std::ofstream out(path, std::ios::binary);
         const uint32_t loop = 0x0000006f;  // jal x0, 0
@@ -291,8 +291,8 @@ void test_v2_host_services_dma_and_logging() {
     // A 64-bit plugin address must not truncate to an in-range native RV32 address.
     const uint64_t high_addr = ram_addr | (uint64_t{1} << 32);
     const uint8_t replacement = 0x42;
-    TEST_CHECK(dev_state.services->dma_write(dev_state.services->host_ctx, high_addr,
-                                             &replacement, sizeof(replacement)) != 0);
+    TEST_CHECK(dev_state.services->dma_write(dev_state.services->host_ctx, high_addr, &replacement,
+                                             sizeof(replacement)) != 0);
     TEST_CHECK(dev_state.services->dma_read(dev_state.services->host_ctx, high_addr,
                                             read_back.data(), read_back.size()) != 0);
     TEST_CHECK(dev_state.services->dma_read(dev_state.services->host_ctx, ram_addr,
@@ -362,7 +362,8 @@ void test_v1_compatibility() {
     TEST_CHECK(!mmio_dev.has_cycle_ticking());
 
     simrv::device::PlatformDeviceRegistry registry;
-    TEST_CHECK(simrv::device::load_external_device_plugin(TEST_LEGACY_DEVICE_PLUGIN_PATH, registry));
+    TEST_CHECK(
+        simrv::device::load_external_device_plugin(TEST_LEGACY_DEVICE_PLUGIN_PATH, registry));
     simrv::core::SoCDeviceConfig config{};
     config.compatible = "test,legacy-device";
     auto legacy = registry.create_mmio(machine, config);
@@ -420,10 +421,10 @@ void test_example_timer_plugin_integration() {
 }
 
 void test_timer_plugin_advances_in_fast_baremetal() {
-    const auto path = std::filesystem::temp_directory_path() /
-                      ("simrv-timer-guest-" +
-                       std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()) +
-                       ".bin");
+    const auto path =
+        std::filesystem::temp_directory_path() /
+        ("simrv-timer-guest-" +
+         std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()) + ".bin");
     {
         std::ofstream out(path, std::ios::binary);
         const uint32_t loop = 0x0000006f;  // jal x0, 0
@@ -445,8 +446,8 @@ void test_timer_plugin_advances_in_fast_baremetal() {
     cfg.files.device_plugins.push_back(TEST_TIMER_PLUGIN_PATH);
     simrv::core::Machine machine(cfg);
     TEST_CHECK(machine.initialize().has_value());
-    auto* node = machine.memory().system_bus().router().resolve_device(
-        simrv::xlen::PhysAddr{0x10030000});
+    auto* node =
+        machine.memory().system_bus().router().resolve_device(simrv::xlen::PhysAddr{0x10030000});
     auto* timer = dynamic_cast<simrv::memory::MmioDevice*>(node);
     TEST_CHECK(timer != nullptr);
     timer->write32(0x08, 1000);

@@ -850,10 +850,10 @@ auto main() -> int {
 
     {
         using namespace simrv::util::elf;
-        const auto path = std::filesystem::temp_directory_path() /
-                          ("simrv-offset-segment-" +
-                           std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()) +
-                           ".elf");
+        const auto path =
+            std::filesystem::temp_directory_path() /
+            ("simrv-offset-segment-" +
+             std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()) + ".elf");
         Elf32_Ehdr header{};
         header.e_ident[0] = 0x7f;
         header.e_ident[1] = 'E';
@@ -1377,12 +1377,14 @@ auto main() -> int {
     }
 
     {
-        for (const std::string_view removed_option : {"--server", "--listen-tui", "--attach"}) {
+        for (const std::string_view removed_option :
+             {"--server", "--listen-tui", "--attach", "--debug-mode", "--debug", "-d", "-g",
+              "--port", "-p", "-M", "-P", "-w", "-x"}) {
             std::array<std::string, 2> storage = {"SimRV", std::string(removed_option)};
             std::array<char*, 2> args = {storage[0].data(), storage[1].data()};
             const auto parsed = simrv::util::parse_command_line(args);
             expect(!parsed.has_value() && parsed.error().contains("unknown option"),
-                   "removed attach options are rejected as unknown options");
+                   "removed debug and attach options are rejected as unknown options");
         }
     }
 
@@ -1486,7 +1488,8 @@ auto main() -> int {
             const uint64_t fast_ticks = divider.advance_fast_cycles(100, rtc_fast, mtime_fast);
             expect(fast_ticks == 30, "advance_fast_cycles returns 30 fractional ticks");
             expect(mtime_fast.load() == mtime_ca.load(),
-                   "Deterministic equivalence: fast advancement matches CA cycle stepping exactly");
+                   "Deterministic equivalence: fast advancement matches CA cycle stepping "
+                   "exactly");
         }
 
         // RISC-V Hardware Performance Monitor (Zihpm) and PerformanceCounters verification
@@ -1576,7 +1579,8 @@ auto main() -> int {
 
         machine.add_hart_for_testing(std::make_unique<simrv::core::CPU>());
         expect(machine.num_harts() == 2, "num_harts is 2 after add_hart_for_testing");
-        expect(&machine.hart(1) != &machine.primary_hart(), "hart(1) is distinct from primary_hart");
+        expect(&machine.hart(1) != &machine.primary_hart(),
+               "hart(1) is distinct from primary_hart");
 
         constexpr size_t kRamBytes = 4096;
         expect(machine.allocate_ram_for_testing(kRamBytes), "allocate_ram_for_testing succeeds");
@@ -1596,6 +1600,85 @@ auto main() -> int {
         const auto snapshot = machine.tui_execution_snapshot();
         expect(snapshot.pc == 0x80001234 && snapshot.instruction_count == 42,
                "snapshot matches execution state");
+    }
+
+    {
+        // Modern CLI subcommand tests
+        std::array<std::string, 2> doctor_args_str = {"simrv", "doctor"};
+        std::array<char*, 2> doctor_args = {doctor_args_str[0].data(), doctor_args_str[1].data()};
+        auto parsed_doctor = simrv::util::parse_command_line(doctor_args);
+        expect(parsed_doctor.has_value() && parsed_doctor->action == simrv::util::CliAction::Doctor,
+               "doctor subcommand maps to CliAction::Doctor");
+
+        std::array<std::string, 3> completion_args_str = {"simrv", "completion", "zsh"};
+        std::array<char*, 3> completion_args = {completion_args_str[0].data(),
+                                                completion_args_str[1].data(),
+                                                completion_args_str[2].data()};
+        auto parsed_completion = simrv::util::parse_command_line(completion_args);
+        expect(parsed_completion.has_value() &&
+                   parsed_completion->action == simrv::util::CliAction::GenerateCompletion &&
+                   parsed_completion->options.completion_shell == "zsh",
+               "completion subcommand maps to CliAction::GenerateCompletion with requested "
+               "shell");
+        expect(simrv::util::generate_shell_completion("zsh").find("#compdef simrv") !=
+                   std::string::npos,
+               "generate_shell_completion produces valid zsh completion script");
+        expect(simrv::util::generate_shell_completion("bash").find("complete -F _simrv simrv") !=
+                   std::string::npos,
+               "generate_shell_completion produces valid bash completion script");
+        expect(simrv::util::generate_shell_completion("fish").find("complete -c simrv") !=
+                   std::string::npos,
+               "generate_shell_completion produces valid fish completion script");
+
+        std::array<std::string, 3> explain_args_str = {"simrv", "explain", "0x13"};
+        std::array<char*, 3> explain_args = {explain_args_str[0].data(), explain_args_str[1].data(),
+                                             explain_args_str[2].data()};
+        auto parsed_explain = simrv::util::parse_command_line(explain_args);
+        expect(parsed_explain.has_value() &&
+                   parsed_explain->action == simrv::util::CliAction::ExplainInstruction &&
+                   parsed_explain->options.explain_inst_val == 0x13,
+               "explain subcommand decodes hex instruction value");
+
+        std::array<std::string, 3> run_args_str = {"simrv", "run", "guest.elf"};
+        std::array<char*, 3> run_args = {run_args_str[0].data(), run_args_str[1].data(),
+                                         run_args_str[2].data()};
+        auto parsed_run = simrv::util::parse_command_line(run_args);
+        expect(parsed_run.has_value() && parsed_run->action == simrv::util::CliAction::Run &&
+                   parsed_run->options.fn_memimg == "guest.elf" &&
+                   parsed_run->options.explicit_cli_mode && !parsed_run->options.tuimode,
+               "run subcommand defaults to headless CLI execution");
+
+        std::array<std::string, 7> bench_args_str = {"simrv", "bench",     "guest.elf", "--runs",
+                                                     "12",    "--warmups", "3"};
+        std::array<char*, 7> bench_args = {bench_args_str[0].data(), bench_args_str[1].data(),
+                                           bench_args_str[2].data(), bench_args_str[3].data(),
+                                           bench_args_str[4].data(), bench_args_str[5].data(),
+                                           bench_args_str[6].data()};
+        auto parsed_bench = simrv::util::parse_command_line(bench_args);
+        expect(parsed_bench.has_value() &&
+                   parsed_bench->action == simrv::util::CliAction::RunBenchmark &&
+                   parsed_bench->options.fn_benchmark_elf == "guest.elf" &&
+                   parsed_bench->options.benchmark_runs == 12 &&
+                   parsed_bench->options.benchmark_warmups == 3,
+               "bench subcommand maps to CliAction::RunBenchmark with custom iteration count");
+
+        std::array<std::string, 4> config_args_str = {"simrv", "config", "validate", "virt-pcie"};
+        std::array<char*, 4> cfg_val_args = {config_args_str[0].data(), config_args_str[1].data(),
+                                             config_args_str[2].data(), config_args_str[3].data()};
+        auto parsed_config = simrv::util::parse_command_line(cfg_val_args);
+        expect(parsed_config.has_value() &&
+                   parsed_config->action == simrv::util::CliAction::ValidateCpuModel &&
+                   parsed_config->options.dump_cpu_model_preset == "virt-pcie",
+               "config validate subcommand maps to CliAction::ValidateCpuModel");
+
+        std::array<std::string, 4> scaffold_args_str = {"simrv", "scaffold", "cpu", "rv64gc"};
+        std::array<char*, 4> scaf_args = {scaffold_args_str[0].data(), scaffold_args_str[1].data(),
+                                          scaffold_args_str[2].data(), scaffold_args_str[3].data()};
+        auto parsed_scaffold = simrv::util::parse_command_line(scaf_args);
+        expect(parsed_scaffold.has_value() &&
+                   parsed_scaffold->action == simrv::util::CliAction::DumpCpuModel &&
+                   parsed_scaffold->options.dump_cpu_model_preset == "rv64gc",
+               "scaffold cpu subcommand maps to CliAction::DumpCpuModel");
     }
 
     return failures == 0 ? EXIT_SUCCESS : EXIT_FAILURE;

@@ -150,6 +150,6 @@ ctest --test-dir build/rv64-release --output-on-failure -L gate
 # RV32 gate
 ctest --test-dir build/rv32-release --output-on-failure -L gate
 
-# Release metadata conformance
-python3 scripts/release_check.py --binary build/rv64-release/simrv
+# Release metadata and packaging conformance
+ctest --test-dir build/rv64-release --output-on-failure -L release
 ```

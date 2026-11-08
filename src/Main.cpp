@@ -36,10 +36,14 @@
 #include "simrv/core/Tracer.hpp"
 #include "simrv/explain/InstructionExplainer.hpp"
 #include "simrv/tui/Tui.hpp"
+#include "simrv/util/BenchmarkRunner.hpp"
 #include "simrv/util/CliParser.hpp"
 #include "simrv/util/FormatUtil.hpp"
+#include "simrv/util/MissionTools.hpp"
 #include "simrv/util/Scaffolding.hpp"
 #include "simrv/util/SoCManifest.hpp"
+#include "simrv/util/ThirdPartyNotices.hpp"
+#include "simrv/util/UefiDiskGenerator.hpp"
 #include "simrv/xlen/ScalarTypes.hpp"
 
 using namespace simrv::util;
@@ -256,13 +260,14 @@ auto print_doctor() -> int {
     }
 
     const bool sixel = term_value.contains("sixel") || color_value.contains("sixel") ||
-                 prog_lower.contains("foot") || prog_lower.contains("contour") ||
-                 prog_lower.contains("wezterm") || prog_lower.contains("ghostty") ||
-                 prog_lower.contains("mlterm") || prog_lower.contains("yaft") ||
-                 (wt_session != nullptr);
+                       prog_lower.contains("foot") || prog_lower.contains("contour") ||
+                       prog_lower.contains("wezterm") || prog_lower.contains("ghostty") ||
+                       prog_lower.contains("mlterm") || prog_lower.contains("yaft") ||
+                       (wt_session != nullptr);
 
-    const bool kitty = kitty_pid != nullptr || kitty_window != nullptr || term_value == "xterm-kitty" ||
-                 prog_lower.contains("ghostty") || prog_lower.contains("wezterm");
+    const bool kitty = kitty_pid != nullptr || kitty_window != nullptr ||
+                       term_value == "xterm-kitty" || prog_lower.contains("ghostty") ||
+                       prog_lower.contains("wezterm");
     bool force_sixel = false;
     bool force_kitty = false;
     bool graphics_disabled = false;
@@ -282,7 +287,8 @@ auto print_doctor() -> int {
         std::string_view d(simrv_display);
         if (d == "1" || d == "true")
             force_sixel = true;
-        else if (d == "0" || d == "false") graphics_disabled = true;
+        else if (d == "0" || d == "false")
+            graphics_disabled = true;
     }
     if (simrv_graphics != nullptr) {
         const std::string_view g(simrv_graphics);
@@ -402,7 +408,7 @@ auto main(int argc, char* argv[]) -> int {  // NOLINT(bugprone-exception-escape)
     bool skip_banner = false;
     for (int i = 1; i < argc; ++i) {
         std::string_view const arg(argv[i]);
-        if (arg == "--cli" || arg == "-c") {
+        if (arg == "--cli" || arg == "-c" || arg == "run") {
             is_tui = false;
         } else if (arg == "--gdb") {
             is_tui = false;
@@ -410,7 +416,9 @@ auto main(int argc, char* argv[]) -> int {  // NOLINT(bugprone-exception-escape)
             is_tui = true;
         } else if (arg == "-h" || arg == "--help" || arg == "--version" || arg == "--license" ||
                    arg == "--isa-info" || arg == "--capabilities" || arg == "--doctor" ||
-                   arg == "--dump-soc-manifest") {
+                   arg == "--notices" || arg == "--third-party" || arg == "--check-mission" ||
+                   arg == "--create-mission" || arg == "--create-disk" ||
+                   arg == "--dump-soc-manifest" || arg == "completion" || arg == "--completion") {
             skip_banner = true;
         } else if (arg == "-q" || arg == "--quiet") {
             skip_banner = true;
@@ -468,8 +476,50 @@ auto main(int argc, char* argv[]) -> int {  // NOLINT(bugprone-exception-escape)
                 std::println("SimRV {} (RV{})", simrv::buildinfo::kVersion, simrv::xlen::kXLenBits);
                 std::println("Licensed under the MIT License.");
                 std::println("Copyright (c) 2024-2026 Lennart Trunk and ArchLab @ ScienceTokyo");
-                std::println("Full license: LICENSE; third-party notices: THIRD_PARTY_NOTICES.md");
+                std::println(
+                    "Full license: LICENSE; third-party notices: THIRD_PARTY_NOTICES.md (or run "
+                    "--notices)");
                 std::exit(simrv::core::to_exit_code(simrv::core::HostExitCode::Success));
+            case CliAction::ShowThirdPartyNotices:
+                simrv::util::print_third_party_notices();
+                std::exit(simrv::core::to_exit_code(simrv::core::HostExitCode::Success));
+            case CliAction::CheckMission: {
+                bool const ok =
+                    simrv::util::check_mission_file(parsed->options.fn_mission_check, true);
+                std::exit(
+                    simrv::core::to_exit_code(ok ? simrv::core::HostExitCode::Success
+                                                 : simrv::core::HostExitCode::ConfigurationError));
+            }
+            case CliAction::CreateMission: {
+                bool const ok =
+                    simrv::util::create_mission_scaffold(parsed->options.fn_mission_create);
+                std::exit(simrv::core::to_exit_code(ok ? simrv::core::HostExitCode::Success
+                                                       : simrv::core::HostExitCode::GeneralError));
+            }
+            case CliAction::CreateUefiDisk: {
+                std::string const kernel = !parsed->options.fn_uefi_disk_kernel.empty()
+                                               ? parsed->options.fn_uefi_disk_kernel
+                                               : parsed->options.fn_memimg;
+                std::string const rootfs = !parsed->options.fn_uefi_disk_rootfs.empty()
+                                               ? parsed->options.fn_uefi_disk_rootfs
+                                               : parsed->options.fn_dskimg;
+                if (parsed->options.fn_uefi_disk_out.empty() || kernel.empty()) {
+                    std::println(std::cerr,
+                                 "Error: --create-disk requires an output image and a kernel "
+                                 "payload (-m or --kernel)");
+                    std::exit(simrv::core::to_exit_code(simrv::core::HostExitCode::UsageError));
+                }
+                simrv::util::UefiDiskConfig disk_cfg{
+                    .output_image = parsed->options.fn_uefi_disk_out,
+                    .kernel_payload = kernel,
+                    .rootfs_payload = rootfs.empty() ? std::nullopt
+                                                     : std::optional{std::filesystem::path(rootfs)},
+                    .esp_size_mb = parsed->options.uefi_disk_size_mb,
+                };
+                bool const ok = simrv::util::generate_uefi_disk(disk_cfg);
+                std::exit(simrv::core::to_exit_code(ok ? simrv::core::HostExitCode::Success
+                                                       : simrv::core::HostExitCode::GeneralError));
+            }
             case CliAction::ExplainInstruction:
                 simrv::explain::explain_instruction(parsed->options.explain_inst_val);
                 std::exit(simrv::core::to_exit_code(simrv::core::HostExitCode::Success));
@@ -643,6 +693,16 @@ auto main(int argc, char* argv[]) -> int {  // NOLINT(bugprone-exception-escape)
                                                       parsed->options.scaffold_cfu_plugin_output)) {
                     std::exit(simrv::core::to_exit_code(simrv::core::HostExitCode::GeneralError));
                 }
+                std::exit(simrv::core::to_exit_code(simrv::core::HostExitCode::Success));
+            }
+            case CliAction::RunBenchmark: {
+                const int code = simrv::util::run_benchmark(parsed->options);
+                std::exit(code);
+            }
+            case CliAction::GenerateCompletion: {
+                std::string const script =
+                    simrv::util::generate_shell_completion(parsed->options.completion_shell);
+                std::print("{}", script);
                 std::exit(simrv::core::to_exit_code(simrv::core::HostExitCode::Success));
             }
             case CliAction::Run:

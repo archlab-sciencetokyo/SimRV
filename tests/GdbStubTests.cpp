@@ -20,37 +20,18 @@
 #include <string>
 #include <thread>
 
+#include "TestHelper.hpp"
 #include "simrv/core/Cpu.hpp"
 #include "simrv/core/Machine.hpp"
 #include "simrv/debug/BreakpointManager.hpp"
 #include "simrv/debug/GdbStub.hpp"
 
 // ---------------------------------------------------------------------------
-// Minimal test scaffolding
+// Test scaffolding using TestHelper
 // ---------------------------------------------------------------------------
 
-static int g_failed = 0;
-static int g_passed = 0;
-
-#define EXPECT_TRUE(cond)                                                       \
-    do {                                                                        \
-        if (!(cond)) {                                                          \
-            std::println(stderr, "FAIL [{}:{}] {}", __FILE__, __LINE__, #cond); \
-            ++g_failed;                                                         \
-        } else {                                                                \
-            ++g_passed;                                                         \
-        }                                                                       \
-    } while (false)
-
-#define EXPECT_EQ(a, b)                                                                \
-    do {                                                                               \
-        if ((a) != (b)) {                                                              \
-            std::println(stderr, "FAIL [{}:{}] {} != {}", __FILE__, __LINE__, #a, #b); \
-            ++g_failed;                                                                \
-        } else {                                                                       \
-            ++g_passed;                                                                \
-        }                                                                              \
-    } while (false)
+#define EXPECT_TRUE(cond) TEST_CHECK(cond)
+#define EXPECT_EQ(a, b) TEST_CHECK_EQ(a, b)
 
 // ---------------------------------------------------------------------------
 // RspClient - loopback TCP client for RSP protocol
@@ -737,6 +718,6 @@ int main() {
     test_shutdown_blocked_io();
     test_modeled_step_and_watchpoint();
 
-    std::println("{} passed, {} failed", g_passed, g_failed);
-    return g_failed == 0 ? 0 : 1;
+    std::println("{} failures", simrv::test::failures());
+    return simrv::test::failures() == 0 ? 0 : 1;
 }

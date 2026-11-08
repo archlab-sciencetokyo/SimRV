@@ -1867,82 +1867,31 @@ void Tui::render(bool force) {
     std::string update_cmds;
     update_cmds.reserve(static_cast<std::size_t>(term_width) * new_lines.size() / 2);
 
+    back_buffer_.load_from_lines(new_lines, term_width, static_cast<int>(new_lines.size()));
+    const bool preserve_display_graphic = draw_display_graphics && sixel_rendered_ &&
+                                          !display_graphics_needs_draw && !modal_.is_active();
+    if (preserve_display_graphic && display_col < col_widths.count) {
+        back_buffer_.mark_graphic_passthrough(framework::ScreenRect{
+            .origin = {.x = display_panel_x - 1, .y = 4},
+            .size = {.width = col_widths.widths[display_col], .height = num_rows}});
+    }
+
     if (is_full_redraw) {
         update_cmds += "\033[H";
-        for (size_t i = 0; i < new_lines.size(); ++i) {
-            update_cmds += std::format("\033[{};1H{}", i + 1, new_lines[i]);
-            render_stats_.lines_drawn++;
-        }
-        last_screen_lines_ = new_lines;
+        diff_engine_.emit_delta(back_buffer_, front_buffer_, update_cmds, true);
+        render_stats_.lines_drawn += new_lines.size();
         render_stats_.full_redraws++;
     } else {
-        bool any_line_changed = false;
-        auto ansi_slice = [](std::string_view line, int begin_col, int end_col) {
-            std::string result;
-            int column = 0;
-            for (size_t i = 0; i < line.size();) {
-                if (line[i] == '\033') {
-                    size_t end = i + 1;
-                    if (end < line.size() && line[end] == '[') {
-                        ++end;
-                        while (end < line.size() && !(line[end] >= '@' && line[end] <= '~')) ++end;
-                        if (end < line.size()) ++end;
-                    } else if (end < line.size()) {
-                        ++end;
-                    }
-                    if (column < end_col) result.append(line.substr(i, end - i));
-                    i = end;
-                    continue;
-                }
-
-                size_t bytes = 1;
-                const auto lead = static_cast<unsigned char>(line[i]);
-                if ((lead & 0xE0U) == 0xC0U)
-                    bytes = 2;
-                else if ((lead & 0xF0U) == 0xE0U)
-                    bytes = 3;
-                else if ((lead & 0xF8U) == 0xF0U)
-                    bytes = 4;
-                bytes = std::min(bytes, line.size() - i);
-                const int glyph_width = get_display_width(line.substr(i, bytes));
-                if (column >= begin_col && column < end_col) result.append(line.substr(i, bytes));
-                column += glyph_width;
-                i += bytes;
-                if (column >= end_col && begin_col == 0) break;
-            }
-            return result;
-        };
-
-        const int display_panel_begin = display_panel_x - 1;
-        const int display_panel_end = display_panel_begin + col_widths.widths[display_col];
-
-        for (size_t i = 0; i < new_lines.size(); ++i) {
-            if (new_lines[i] != last_screen_lines_[i]) {
-                any_line_changed = true;
-                const bool preserve_display_graphic =
-                    draw_display_graphics && sixel_rendered_ && !display_graphics_needs_draw &&
-                    !modal_.is_active() && i >= 4 && i < 4 + static_cast<size_t>(num_rows);
-                if (preserve_display_graphic) {
-                    // Keep the display column's image-bearing cells untouched, but continue
-                    // updating the inspector and neighboring columns on the same screen row.
-                    update_cmds +=
-                        std::format("\033[{};1H{}\033[{};{}H{}", i + 1,
-                                    ansi_slice(new_lines[i], 0, display_panel_begin), i + 1,
-                                    display_panel_end + 1,
-                                    ansi_slice(new_lines[i], display_panel_end, term_width));
-                } else {
-                    update_cmds += std::format("\033[{};1H{}", i + 1, new_lines[i]);
-                }
-                last_screen_lines_[i] = new_lines[i];
-                render_stats_.lines_drawn++;
-            } else {
-                render_stats_.lines_skipped++;
-            }
-        }
-        if (any_line_changed) {
+        const auto diff_stats =
+            diff_engine_.emit_delta(back_buffer_, front_buffer_, update_cmds, false);
+        if (diff_stats.rows_dirty > 0) {
             render_stats_.differential_redraws++;
         }
+        render_stats_.lines_drawn += diff_stats.rows_dirty;
+        render_stats_.lines_skipped += diff_stats.rows_clean;
     }
+    front_buffer_ = back_buffer_;
+    last_screen_lines_ = new_lines;
 
     int target_cursor_x = -1;
     int target_cursor_y = -1;

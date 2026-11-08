@@ -386,21 +386,16 @@ panels; the minimum terminal height is 10 rows.
 
 ### Creating and Checking a Mission
 
-Use the interactive wizard to create a starter lesson, then edit the generated text file as needed:
+Use the built-in subcommand to create a starter lesson template, then edit the generated text file as needed:
 
 ```bash
-python3 scripts/create_mission.py --output lessons/my-lesson.mission
+simrv --create-mission lessons/my-lesson.mission
 ```
 
-Check the mission structure before using it. If its declared ELF exists beside the mission file,
-the checker also verifies that every checkpoint label is present in the ELF symbol table. Use
-`--program <path>` to check a different ELF:
+Check the mission structure before using it. The checker validates steps, speed settings, panel layouts, checkpoint labels, and prints a formatted step preview:
 
 ```bash
-python3 scripts/check_mission.py lessons/my-lesson.mission
-python3 scripts/check_mission.py lessons/my-lesson.mission --program build/my-program.elf
-python3 scripts/check_mission.py lessons/my-lesson.mission --preview
-python3 scripts/check_mission.py lessons/my-lesson.mission --program build/my-program.elf --smoke-test
+simrv --check-mission lessons/my-lesson.mission
 ```
 
 The creator asks for an optional learning target on each step, then prints a grouped lesson-flow

@@ -3,8 +3,11 @@ simrv_add_component(simrv-tui-framework
   TuiFrameRenderer.cpp
   TuiTheme.cpp
   framework/ActionFooter.cpp
+  framework/Color.cpp
   framework/Components.cpp
+  framework/DirtyDiffEngine.cpp
   framework/Modal.cpp
+  framework/ScreenBuffer.cpp
   framework/ScrollView.cpp
   framework/TabBar.cpp
   framework/Text.cpp

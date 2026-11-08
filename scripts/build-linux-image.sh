@@ -243,12 +243,12 @@ check_upstream_versions() {
     UPSTREAM_JSON="$output"
 }
 version_is_newer() {
-    python3 - "$1" "$2" <<'PY'
-import re
-import sys
-parts = lambda value: tuple(int(part) for part in re.findall(r"\d+", value))
-sys.exit(0 if parts(sys.argv[1]) > parts(sys.argv[2]) else 1)
-PY
+    if [[ "$1" == "$2" ]]; then
+        return 1
+    fi
+    local lowest
+    lowest=$(printf '%s\n%s\n' "$1" "$2" | sort -V | head -n1)
+    [[ "$lowest" == "$2" ]]
 }
 
 if (( CHECK_UPDATES || UPDATE_VERSIONS )); then
@@ -832,8 +832,22 @@ nod /dev/random  0666 0 0 c 1 8
 nod /dev/mem     0600 0 0 c 1 1
 LISTEOF
 
-# Walk the initramfs dir and emit the rest of the manifest entries
-python3 "$SCRIPT_DIR/gen-initramfs-manifest.py" "$INITRAMFS_DIR" >> "$CPIO_LIST"
+# Walk the initramfs dir and emit the rest of the manifest entries in gen_init_cpio format
+(
+    cd "$INITRAMFS_DIR"
+    find . -mindepth 1 ! -path './dev*' | while IFS= read -r item; do
+        rel="${item#./}"
+        mode="$(stat -c %a "$item")"
+        if [[ -d "$item" ]]; then
+            echo "dir /$rel 0$mode 0 0"
+        elif [[ -L "$item" ]]; then
+            target="$(readlink "$item")"
+            echo "slink /$rel $target 0$mode 0 0"
+        elif [[ -f "$item" ]]; then
+            echo "file /$rel $INITRAMFS_DIR/$rel 0$mode 0 0"
+        fi
+    done
+) >> "$CPIO_LIST"
 
 if [[ -x "$GEN_INIT_CPIO_BIN" ]]; then
     print_step "Generating initramfs cpio via gen_init_cpio..."
@@ -1583,8 +1597,12 @@ if [[ "$PROFILE" == "uefi" ]]; then
         print_error "Unable to locate the extracted EDK2 source tree."
         exit 1
     fi
-    python3 "$SCRIPT_DIR/patch_buildroot_edk2_hostflags.py" \
-        "$BUILDROOT_SOURCE" "$EDK2_SOURCE_DIR"
+    # Patch host flags for GCC compatibility
+    sed -i 's/EXTRA_OPTFLAGS="$(HOST_CPPFLAGS)"/EXTRA_OPTFLAGS="$(HOST_CPPFLAGS) -std=gnu17 -Wno-unused-but-set-variable"/' \
+        "$BUILDROOT_SOURCE/boot/edk2/edk2.mk"
+    find "$EDK2_SOURCE_DIR/BaseTools/Source/C/VfrCompile/Pccts" -name makefile \
+        -exec sed -i '/^CFLAGS[[:space:]]*=/ { /-std=gnu17/! s/$/ -std=gnu17/ }' {} +
+
     make -C "$BUILDROOT_SOURCE" O="$EDK2_OUTPUT" \
         BR2_EXTERNAL="$ROOT_DIR/configs/buildroot/simrv-fpga" -j"$JOBS" edk2
     for firmware in RISCV_VIRT_CODE.fd RISCV_VIRT_VARS.fd; do
@@ -1599,10 +1617,19 @@ if [[ "$PROFILE" == "uefi" ]]; then
         cp "$EDK2_OUTPUT/images/$firmware" "$IMAGES_DIR/$firmware"
     done
     cmp -s "$EDK2_OUTPUT/images/RISCV_VIRT_VARS.fd" "$IMAGES_DIR/RISCV_VIRT_VARS.fd" || exit 1
-    python3 "$SCRIPT_DIR/create_uefi_disk.py" \
-        --kernel "$IMAGES_DIR/uefi-kernel.efi" \
-        --rootfs "$IMAGES_DIR/rootfs.img" \
-        --output "$IMAGES_DIR/uefi-disk.img"
+
+    SIMRV_CLI="${SIMRV_BIN:-$ROOT_DIR/build/rv64-release/simrv}"
+    if [[ ! -x "$SIMRV_CLI" && -x "$ROOT_DIR/build/rv32-release/simrv" ]]; then
+        SIMRV_CLI="$ROOT_DIR/build/rv32-release/simrv"
+    fi
+    if [[ -x "$SIMRV_CLI" ]]; then
+        "$SIMRV_CLI" --create-disk "$IMAGES_DIR/uefi-disk.img" \
+            -m "$IMAGES_DIR/uefi-kernel.efi" \
+            -D "$IMAGES_DIR/rootfs.img"
+    else
+        print_error "simrv binary not found (looked for $SIMRV_CLI) to generate UEFI disk image."
+        exit 1
+    fi
 fi
 
 BOOTARGS=$(sed -n 's/.*bootargs = "\([^"]*\)".*/\1/p' "$GENERATED_DTS")

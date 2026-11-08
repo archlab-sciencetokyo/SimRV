@@ -55,12 +55,13 @@ endif()
 if(NOT EXISTS "${install_root}/share/SimRV/SimRVBuildMetadata.json")
   message(FATAL_ERROR "Expected installed SimRV build metadata manifest")
 endif()
-foreach(completion IN ITEMS
-    share/bash-completion/completions/simrv
-    share/zsh/site-functions/_simrv
-    share/fish/vendor_completions.d/simrv.fish)
-  if(NOT EXISTS "${install_root}/${completion}")
-    message(FATAL_ERROR "Expected installed shell completion ${completion}")
+foreach(shell IN ITEMS bash zsh fish)
+  execute_process(
+    COMMAND "${install_root}/bin/simrv" completion ${shell}
+    RESULT_VARIABLE completion_result
+    OUTPUT_VARIABLE completion_output)
+  if(NOT completion_result EQUAL 0 OR completion_output STREQUAL "")
+    message(FATAL_ERROR "Installed simrv completion ${shell} failed: ${completion_result}")
   endif()
 endforeach()
 execute_process(

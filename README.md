@@ -179,8 +179,8 @@ Load custom or preset CPU microarchitecture models (see [CPU Models Guide](docs/
 # Load a predefined CPU model (searches configs/models/ or custom path)
 ./build/rv64-release/simrv -b -m img/hello.bin --mode cycle-accurate --cpu-preset rvcomp --cli
 
-# Generate a scaffold model configuration with the wizard
-python3 scripts/cpu_model_wizard.py --name my_core --template five-stage
+# Generate a starter model configuration
+./build/rv64-release/simrv --scaffold-cpu-model my_core.cfg
 ```
 
 Run Linux OS image with disk & devicetree:

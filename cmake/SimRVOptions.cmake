@@ -86,6 +86,17 @@ if(CMAKE_BUILD_TYPE STREQUAL "Release" AND SIMRV_NATIVE_HOST_OPTIMIZATIONS)
   endif()
 endif()
 
+option(SIMRV_STATIC_BINARIES "Link libgcc and libstdc++ statically" OFF)
+if(SIMRV_STATIC_BINARIES)
+  if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+    target_link_options(simrv-project-options INTERFACE -static-libgcc -static-libstdc++)
+  endif()
+endif()
+
+find_package(Boost 1.83 COMPONENTS headers REQUIRED)
+target_compile_definitions(simrv-project-options INTERFACE SIMRV_HAS_BOOST=1)
+target_link_libraries(simrv-project-options INTERFACE Boost::headers)
+
 function(simrv_apply_options target)
   target_link_libraries(${target} PRIVATE simrv-project-options)
   if(SIMRV_ENABLE_CLANG_TIDY)
@@ -97,6 +108,7 @@ function(simrv_configure_native_test target)
   simrv_apply_options(${target})
   target_include_directories(
     ${target} PRIVATE "${PROJECT_SOURCE_DIR}/include"
+                      "${PROJECT_SOURCE_DIR}/tests/third_party"
                       "${PROJECT_BINARY_DIR}/generated")
   if(CMAKE_VERSION VERSION_GREATER_EQUAL "4.2")
     set_property(TARGET ${target} PROPERTY SKIP_LINTING ON)

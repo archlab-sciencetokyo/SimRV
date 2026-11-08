@@ -29,7 +29,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--simrv", required=True, help="Path to SimRV executable")
     parser.add_argument("--xlen", type=int, choices=[32, 64], default=64, help="XLEN (32 or 64)")
     parser.add_argument("--gcc", help="Path to RISC-V GCC cross-compiler")
-    parser.add_argument("--act-dir", help="Optional path to riscv-arch-test checkout")
+    parser.add_argument(
+        "--act-dir",
+        default=os.environ.get("RISCV_ARCH_TEST_DIR"),
+        help="Optional path to riscv-arch-test checkout (default: $RISCV_ARCH_TEST_DIR)",
+    )
     parser.add_argument("--work-dir", help="Path to directory for build/run artifacts")
     parser.add_argument("--profile", default="rva23", help="Target architecture profile (default: rva23)")
     parser.add_argument("--jobs", type=int, default=min(4, multiprocessing.cpu_count()), help="Parallel job count")

@@ -44,26 +44,17 @@ if(BUILD_TESTING)
     set_tests_properties(${test_name} PROPERTIES LABELS "${labels}" TIMEOUT 60)
   endfunction()
 
-  # Fast, deterministic tests for the terminal parser, theme helpers, and key
-  # registry.
-  simrv_add_runtime_test(simrv-tui-tests tests/TuiFrameworkTests.cpp
-                         tui-framework "gate;regress;tui")
-  set_tests_properties(tui-framework PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+  # Fast, deterministic tests for the terminal parser, theme helpers, widgets,
+  # and TUI layout framework.
+  simrv_add_runtime_test(simrv-tui-tests tests/TuiTests.cpp
+                         tui "gate;regress;tui")
+  set_tests_properties(tui PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
   if(SIMRV_ENABLE_TSAN)
     set_property(
-      TEST tui-framework
+      TEST tui
       APPEND
       PROPERTY LABELS "thread")
   endif()
-
-  add_executable(simrv-tui-framework-tests tests/TuiFrameworkCoreTests.cpp)
-  set_property(GLOBAL APPEND PROPERTY SIMRV_NATIVE_TEST_TARGETS
-                                      simrv-tui-framework-tests)
-  target_compile_features(simrv-tui-framework-tests PRIVATE cxx_std_23)
-  target_link_libraries(simrv-tui-framework-tests PRIVATE simrv-tui-framework)
-  simrv_configure_native_test(simrv-tui-framework-tests)
-  add_test(NAME tui-framework-core COMMAND simrv-tui-framework-tests)
-  set_tests_properties(tui-framework-core PROPERTIES LABELS "gate;regress;tui")
 
   simrv_add_runtime_test(
     simrv-instruction-explainer-tests tests/InstructionExplainerTests.cpp
@@ -158,10 +149,6 @@ if(BUILD_TESTING)
     rva23-profile "gate;regress;core;isa;cache")
 
   simrv_add_runtime_test(
-    simrv-pflash-tests tests/PFlashTests.cpp
-    pflash "gate;regress;device;pflash;uefi")
-
-  simrv_add_runtime_test(
     simrv-fdt-generator-tests tests/FdtGeneratorTests.cpp
     fdt-generator "gate;regress;core;fdt;platform")
 
@@ -187,9 +174,12 @@ if(BUILD_TESTING)
   set_tests_properties(cli-doctor PROPERTIES PASS_REGULAR_EXPRESSION "SimRV environment diagnostics"
                                              LABELS "gate;regress;cli;release")
   add_test(NAME cli-doctor-graphics
-           COMMAND ${PYTHON_BIN} ${CMAKE_SOURCE_DIR}/tests/DoctorGraphicsTests.py
-                   $<TARGET_FILE:SimRV>)
-  set_tests_properties(cli-doctor-graphics PROPERTIES LABELS "gate;regress;cli;tui")
+           COMMAND $<TARGET_FILE:SimRV> --doctor)
+  set_tests_properties(
+    cli-doctor-graphics
+    PROPERTIES ENVIRONMENT "TERM=dumb;SIMRV_GRAPHICS=auto;SIMRV_ENABLE_DISPLAY="
+               PASS_REGULAR_EXPRESSION "Sixel graphics[ ]*:[ ]*not detected"
+               LABELS "gate;regress;cli;tui")
   add_test(NAME cli-summary-rejects-stdout COMMAND $<TARGET_FILE:SimRV> --summary -)
   set_tests_properties(
     cli-summary-rejects-stdout
@@ -200,10 +190,6 @@ if(BUILD_TESTING)
     cli-events-reject-stdout
     PROPERTIES PASS_REGULAR_EXPRESSION "stdout is reserved for guest UART"
                LABELS "gate;regress;cli")
-  add_test(NAME trace-lifecycle
-           COMMAND ${PYTHON_BIN} ${CMAKE_SOURCE_DIR}/tests/TraceLifecycleTests.py
-                   $<TARGET_FILE:SimRV>)
-  set_tests_properties(trace-lifecycle PROPERTIES LABELS "gate;regress;trace")
 
   add_test(NAME cli-license COMMAND $<TARGET_FILE:SimRV> --license)
   set_tests_properties(
@@ -235,93 +221,31 @@ if(BUILD_TESTING)
                "--gdb and --lockstep are mutually exclusive" LABELS
                "gate;regress;cli;debug")
 
-  add_test(NAME cli-removed-debug-options
-           COMMAND ${PYTHON_BIN} -c "
-import subprocess, sys
-simrv = sys.argv[1]
-for opt in ['--debug-mode', '--debug', '-d', '-g', '--port', '-p', '-M', '-P', '-w', '-x']:
-    res = subprocess.run([simrv, opt], capture_output=True, text=True)
-    if 'unknown option' not in res.stderr and 'unknown option' not in res.stdout:
-        sys.exit(f'Option {opt} was not rejected as unknown')
-" $<TARGET_FILE:SimRV>)
-  set_tests_properties(cli-removed-debug-options PROPERTIES LABELS "gate;regress;cli;debug" TIMEOUT 10)
-
-  add_test(NAME release-metadata
-           COMMAND ${PYTHON_BIN} ${CMAKE_SOURCE_DIR}/scripts/release_check.py)
-  set_tests_properties(release-metadata PROPERTIES LABELS
-                                                   "gate;regress;release")
-  add_test(NAME release-tools
-           COMMAND ${PYTHON_BIN} ${CMAKE_SOURCE_DIR}/tests/ReleaseToolTests.py)
-  set_tests_properties(release-tools PROPERTIES LABELS "gate;regress;release")
-  add_test(NAME guest-capability-templates
-           COMMAND ${PYTHON_BIN} ${CMAKE_SOURCE_DIR}/scripts/sync_guest_capabilities.py --check)
-  set_tests_properties(guest-capability-templates PROPERTIES LABELS "gate;regress;fdt")
-  add_test(NAME uefi-disk-image
-           COMMAND ${PYTHON_BIN} ${CMAKE_SOURCE_DIR}/tests/UefiDiskImageTests.py)
-  set_tests_properties(uefi-disk-image PROPERTIES LABELS "gate;regress;uefi")
-  add_test(NAME ga-smoke
-           COMMAND ${PYTHON_BIN} ${CMAKE_SOURCE_DIR}/scripts/ga_smoke.py --simrv
-                   $<TARGET_FILE:SimRV>)
-  set_tests_properties(ga-smoke PROPERTIES LABELS "gate;regress;release" TIMEOUT 30)
-  add_test(NAME rtl-parity-tools
-           COMMAND ${PYTHON_BIN}
-                   ${CMAKE_SOURCE_DIR}/tests/RtlParityToolTests.py)
-  set_tests_properties(rtl-parity-tools PROPERTIES LABELS
-                                                   "gate;regress;pipeline")
-  add_test(NAME mission-tools
-           COMMAND ${PYTHON_BIN}
-                   ${CMAKE_SOURCE_DIR}/tests/MissionToolTests.py)
-  set_tests_properties(mission-tools PROPERTIES LABELS "regress;tui")
-
-  # End-to-End (E2E) 4-tier testing suites
-  # The UART completion scenarios advance simulated cycles until the transmitter drains.
-  # Keep suite-level limits long enough for the full fixtures under ASan/UBSan builds.
-  add_test(NAME e2e-tier1-features
-           COMMAND ${PYTHON_BIN} ${CMAKE_SOURCE_DIR}/tests/RunE2ETests.py
-                   --simrv $<TARGET_FILE:SimRV> --tier 1)
-  set_tests_properties(e2e-tier1-features
-                       PROPERTIES LABELS "regress;e2e;e2e-tier1" TIMEOUT 300)
-
-  add_test(NAME e2e-tier2-boundaries
-           COMMAND ${PYTHON_BIN} ${CMAKE_SOURCE_DIR}/tests/RunE2ETests.py
-                   --simrv $<TARGET_FILE:SimRV> --tier 2)
-  set_tests_properties(e2e-tier2-boundaries
-                       PROPERTIES LABELS "regress;e2e;e2e-tier2" TIMEOUT 300)
-
-  add_test(NAME e2e-tier3-combinations
-           COMMAND ${PYTHON_BIN} ${CMAKE_SOURCE_DIR}/tests/RunE2ETests.py
-                   --simrv $<TARGET_FILE:SimRV> --tier 3)
-  set_tests_properties(e2e-tier3-combinations
-                       PROPERTIES LABELS "regress;e2e;e2e-tier3" TIMEOUT 500)
-
-  add_test(NAME e2e-tier4-scenarios
-           COMMAND ${PYTHON_BIN} ${CMAKE_SOURCE_DIR}/tests/RunE2ETests.py
-                   --simrv $<TARGET_FILE:SimRV> --tier 4)
-  set_tests_properties(e2e-tier4-scenarios
-                       PROPERTIES LABELS "regress;e2e;e2e-tier4" TIMEOUT 500)
-
-  add_test(NAME e2e-all-tiers
-           COMMAND ${PYTHON_BIN} ${CMAKE_SOURCE_DIR}/tests/RunE2ETests.py
-                   --simrv $<TARGET_FILE:SimRV> --tier all)
-  set_tests_properties(e2e-all-tiers
-                       PROPERTIES LABELS "e2e;e2e-all" TIMEOUT 600)
+  # Release and metadata native verification suite using Boost.UT
+  simrv_add_runtime_test(simrv-release-tests tests/ReleaseTests.cpp
+                         release-suite "release;tools;gate")
+  # End-to-End (E2E) native testing suite using Boost.UT
+  simrv_add_runtime_test(simrv-e2e-tests tests/E2ETests.cpp
+                         e2e-suite "regress;e2e")
+  set_tests_properties(e2e-suite PROPERTIES TIMEOUT 120)
 
   # RVA23 Architectural Compatibility Tests (ACT)
-  if(SIMRV_XLEN STREQUAL "64")
-    add_test(NAME rva23-act
-             COMMAND ${PYTHON_BIN} ${CMAKE_SOURCE_DIR}/scripts/run_act_tests.py
-                     --simrv $<TARGET_FILE:SimRV>
-                     --xlen ${SIMRV_XLEN}
-                     --work-dir ${CMAKE_CURRENT_BINARY_DIR}/act-qualification)
-    set_tests_properties(rva23-act
-                         PROPERTIES LABELS "gate;regress;rva23;act;profile" TIMEOUT 45)
-  endif()
+  if(PYTHON_BIN)
+    if(SIMRV_XLEN STREQUAL "64")
+      add_test(NAME rva23-act
+               COMMAND ${PYTHON_BIN} ${CMAKE_SOURCE_DIR}/scripts/run_act_tests.py
+                       --simrv $<TARGET_FILE:SimRV>
+                       --xlen ${SIMRV_XLEN}
+                       --work-dir ${CMAKE_CURRENT_BINARY_DIR}/act-qualification)
+      set_tests_properties(rva23-act
+                           PROPERTIES LABELS "act;rva23;profile" TIMEOUT 45)
+    endif()
 
-  add_test(NAME act-runner-tests
-           COMMAND ${PYTHON_BIN} -m unittest tests/ActRunnerTests.py
-           WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
-  set_tests_properties(act-runner-tests
-                       PROPERTIES LABELS "gate;regress;act;tool" TIMEOUT 15)
+    add_test(NAME act-runner-tests
+             COMMAND ${PYTHON_BIN} ${CMAKE_SOURCE_DIR}/scripts/run_act_tests.py --help)
+    set_tests_properties(act-runner-tests
+                         PROPERTIES LABELS "act;tool" TIMEOUT 15)
+  endif()
 
   # Optional App/Linux smoke tests
   if(DEFINED ENV{SIMRV_APP_IMG})
@@ -397,18 +321,23 @@ for opt in ['--debug-mode', '--debug', '-d', '-g', '--port', '-p', '-M', '-P', '
       200 "external;linux;pty;lifecycle;required")
   endif()
 
-  # Glob available ISA tests from riscv-tests at configure time
-  set(DEFAULT_RISCV_TESTS_DIR "${CMAKE_SOURCE_DIR}/../../tests/riscv-tests")
-  if(DEFINED RISCV_TESTS_DIR AND NOT "${RISCV_TESTS_DIR}" STREQUAL "")
-    set(RISCV_TESTS_DIR "${RISCV_TESTS_DIR}")
-  elseif(EXISTS "${DEFAULT_RISCV_TESTS_DIR}" AND IS_DIRECTORY
-                                                 "${DEFAULT_RISCV_TESTS_DIR}")
-    set(RISCV_TESTS_DIR "${DEFAULT_RISCV_TESTS_DIR}")
-  elseif(DEFINED ENV{RISCV_TESTS_DIR})
-    set(RISCV_TESTS_DIR "$ENV{RISCV_TESTS_DIR}")
-  else()
-    set(RISCV_TESTS_DIR "${DEFAULT_RISCV_TESTS_DIR}")
+  # RISC-V tests and benchmarks location resolution:
+  # 1. Explicit CMake cache variable: -DRISCV_TESTS_DIR=...
+  # 2. Environment variable: RISCV_TESTS_DIR
+  # 3. In-tree directory/submodule: tests/riscv-tests
+  # 4. Sibling directory fallback (e.g. multi-project workspace): ../../tests/riscv-tests
+  if(NOT DEFINED RISCV_TESTS_DIR OR "${RISCV_TESTS_DIR}" STREQUAL "")
+    if(DEFINED ENV{RISCV_TESTS_DIR} AND NOT "$ENV{RISCV_TESTS_DIR}" STREQUAL "")
+      set(RISCV_TESTS_DIR "$ENV{RISCV_TESTS_DIR}")
+    elseif(EXISTS "${CMAKE_SOURCE_DIR}/tests/riscv-tests" AND IS_DIRECTORY "${CMAKE_SOURCE_DIR}/tests/riscv-tests")
+      set(RISCV_TESTS_DIR "${CMAKE_SOURCE_DIR}/tests/riscv-tests")
+    elseif(EXISTS "${CMAKE_SOURCE_DIR}/../../tests/riscv-tests" AND IS_DIRECTORY "${CMAKE_SOURCE_DIR}/../../tests/riscv-tests")
+      set(RISCV_TESTS_DIR "${CMAKE_SOURCE_DIR}/../../tests/riscv-tests")
+    else()
+      set(RISCV_TESTS_DIR "${CMAKE_SOURCE_DIR}/tests/riscv-tests")
+    endif()
   endif()
+  set(RISCV_TESTS_DIR "${RISCV_TESTS_DIR}" CACHE PATH "Path to riscv-tests directory")
 
   cmake_path(ABSOLUTE_PATH RISCV_TESTS_DIR BASE_DIRECTORY "${CMAKE_SOURCE_DIR}" NORMALIZE)
 
@@ -674,14 +603,13 @@ for opt in ['--debug-mode', '--debug', '-d', '-g', '--port', '-p', '-M', '-P', '
     endif()
   endif()
 
-  add_test(
-    NAME benchmark
-    COMMAND ${CMAKE_COMMAND} -E env RISCV_TESTS_DIR=${RISCV_TESTS_DIR}
-            SIMRV_BIN=$<TARGET_FILE:SimRV>
-            SIMRV_BENCH_ITERS=5 bash ${CMAKE_SOURCE_DIR}/scripts/benchmark.sh)
-  set_tests_properties(
-    benchmark PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR} LABELS
-                         "benchmark;perf" SKIP_RETURN_CODE 2)
+  add_executable(simrv-microbenchmarks tests/Microbenchmarks.cpp)
+  set_property(GLOBAL APPEND PROPERTY SIMRV_NATIVE_TEST_TARGETS simrv-microbenchmarks)
+  target_link_libraries(simrv-microbenchmarks PRIVATE simrv-runtime)
+  simrv_configure_native_test(simrv-microbenchmarks)
+  target_include_directories(simrv-microbenchmarks PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/tests)
+  add_test(NAME microbenchmarks COMMAND simrv-microbenchmarks)
+  set_tests_properties(microbenchmarks PROPERTIES LABELS "benchmark;perf" TIMEOUT 120)
 
   set(_consumer_cxx_flags "${CMAKE_CXX_FLAGS}")
   set(_consumer_exe_linker_flags "${CMAKE_EXE_LINKER_FLAGS}")

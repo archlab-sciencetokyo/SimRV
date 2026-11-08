@@ -3915,7 +3915,8 @@ void test_sixel_fluid_framebuffer_updates() {
            "a pixel change updates the signature of a framebuffer smaller than eight bytes");
     std::string after_pixel;
     TuiTestAccess::render_draw_sixel(tui, 2, 40, 20, after_pixel);
-    expect(after_pixel != before_pixel, "a small framebuffer pixel invalidates its cached sixel strip");
+    expect(after_pixel != before_pixel,
+           "a small framebuffer pixel invalidates its cached sixel strip");
 
     machine.set_framebuffer_resolution_for_testing(3, 1);
     tui.render(true);
@@ -4933,6 +4934,228 @@ void test_modal_host_and_custom_dialog() {
     expect(!modal.is_active(), "modal is inactive after outside click");
 }
 
+void test_framework_core_components() {
+    using namespace simrv::tui::framework;
+
+    expect(display_width("A·界") == 4, "UTF-8 terminal-cell widths are measured");
+    expect(display_width("\033[31mred\033[0m") == 3, "ANSI controls have zero width");
+    expect(display_width(fit_to_width("abc", 8)) == 8, "fitting preserves requested width");
+    expect(display_width(crop_columns("0123456789", 3, 4)) == 4,
+           "horizontal cropping preserves viewport width");
+    expect(crop_columns("0123456789", 3, 4).find("3456") != std::string::npos,
+           "horizontal cropping selects requested columns");
+    auto const wrapped = wrap_text("\033[31m界界界\033[0m", 4, 1);
+    expect(wrapped.size() == 2 && display_width(wrapped[0]) == 4 && display_width(wrapped[1]) == 4,
+           "wrapping preserves ANSI and complete wide UTF-8 glyphs");
+    auto const word_wrapped = wrap_text("Registers show its inputs.", 18, 2);
+    expect(word_wrapped.size() == 2 && word_wrapped[0].find("its") != std::string::npos &&
+               word_wrapped[0].find("it\033[0m") == std::string::npos &&
+               word_wrapped[1].find("inputs.") != std::string::npos,
+           "prose wraps between words while retaining continuation indentation");
+
+    std::vector<Action> actions = {{.id = "apply", .key = "Enter", .label = "Apply"},
+                                   {.id = "cancel", .key = "Esc", .label = "Cancel"}};
+    auto const controls = action_row(actions, 60);
+    expect(display_width(controls.text) == 60, "control row fills its requested width");
+    expect(controls.spans.size() == 2 && controls.spans[0].contains(controls.spans[0].start),
+           "rendered controls expose reusable hit spans");
+    expect(controls.spans[0].start > 0, "control group is centered");
+
+    auto const theme = active_theme();
+    expect(!theme.color(Role::Accent).empty() && theme.glyphs.horiz != nullptr &&
+               !std::string_view(theme.glyphs.horiz).empty(),
+           "active theme exposes semantic colors and glyphs");
+    expect(display_width(scroll_indicator(2, 3, 40)) == 40,
+           "scroll indicators preserve their requested width");
+
+    std::vector<Row> modal_rows = {
+        {.text = "short"},
+        {.text = "controls", .alignment = HorizontalAlign::Center, .kind = RowKind::Controls}};
+    auto const modal = layout_modal("Title", modal_rows, 100, 24);
+    expect(modal.geometry.renderable && modal.geometry.width == 35,
+           "modal layout shrinks to its minimum useful content width");
+    expect(display_width(modal.rows[1].text) == modal.geometry.width - 2 &&
+               modal.rows[1].text.starts_with(' '),
+           "modal control rows center against resolved dynamic width");
+
+    simrv::tui::set_theme_style(simrv::tui::TuiThemeStyle::ClassicAnsi);
+    auto const classic = active_theme();
+    expect(std::string_view(classic.glyphs.horiz) == "-" &&
+               display_width(section_divider("Section", 24)) == 24,
+           "Classic ANSI supplies complete glyph and component fallbacks");
+
+    ScrollView sv(ScrollIndicatorMode::EmbeddedRows);
+    sv.set_geometry(100, 10, 80, 40);
+    expect(sv.can_scroll_down() && !sv.can_scroll_up(),
+           "scroll view starts at top with scroll down available");
+    expect(sv.can_scroll_right() && !sv.can_scroll_left(),
+           "scroll view starts at left with scroll right available");
+
+    sv.scroll_y(15);
+    expect(sv.offset_y() == 15 && sv.can_scroll_up(), "vertical scrolling advances offset");
+    sv.scroll_x(10);
+    expect(sv.offset_x() == 10 && sv.can_scroll_left(), "horizontal scrolling advances offset");
+
+    SubpanelBounds subpanel{.x = 4, .y = 6, .width = 20, .height = 8};
+    expect(subpanel.contains(4, 6) && subpanel.contains(23, 13) && !subpanel.contains(24, 13) &&
+               !subpanel.contains(23, 14),
+           "subpanel bounds use terminal-cell half-open hit testing");
+    expect(subpanel.clamp_x(99) == 23 && subpanel.clamp_y(0) == 6,
+           "subpanel bounds clamp pointer coordinates safely");
+
+    auto const top_row =
+        sv.render_row(0, 40, [](RowIndex r, ColumnIndex, int) { return std::format("row-{}", r); });
+    expect(display_width(top_row) == 40 && top_row.find("above") != std::string::npos,
+           "top row renders embedded scroll indicator when scrolled down");
+
+    auto const mid_row = sv.render_row(
+        1, 40, [](RowIndex r, ColumnIndex, int) { return std::format("content-row-{}", r); });
+    expect(display_width(mid_row) == 40 && mid_row.find("-16") != std::string::npos,
+           "middle row dispatches logical row offset to renderer with horizontal crop");
+
+    sv.reset_x();
+    auto const uncropped_row = sv.render_row(
+        1, 40, [](RowIndex r, ColumnIndex, int) { return std::format("content-row-{}", r); });
+    expect(display_width(uncropped_row) == 40 &&
+               uncropped_row.find("content-row-16") != std::string::npos,
+           "middle row dispatches logical row offset without horizontal crop");
+
+    sv.set_indicator_mode(ScrollIndicatorMode::HeaderSummary);
+    auto const summary = sv.header_summary("Trace");
+    expect(summary.find("above") != std::string::npos && summary.find("below") != std::string::npos,
+           "header summary formats scroll indicator with counts");
+    expect(summary.find("right") != std::string::npos,
+           "header summary formats horizontal remaining indicator");
+
+    sv.scroll_x(10);
+    auto const summary_2d = sv.header_summary("Trace");
+    expect(summary_2d.find("left") != std::string::npos &&
+               summary_2d.find("right") != std::string::npos,
+           "header summary formats both left and right horizontal indicators");
+
+    ScrollView hsv;
+    hsv.set_geometry(10, 5, 100, 20);
+    auto const current_thm = active_theme();
+    auto const at_start = hsv.format_horizontal_row("012345678901234567890123456789", 20);
+    expect(display_width(at_start) == 20 &&
+               at_start.find(current_thm.glyphs.arrow_right) != std::string::npos &&
+               at_start.find(current_thm.glyphs.arrow_left) == std::string::npos,
+           "horizontal row at start shows right indicator and no left indicator");
+
+    hsv.scroll_x(10);
+    auto const in_middle = hsv.format_horizontal_row("012345678901234567890123456789", 20);
+    expect(display_width(in_middle) == 20 &&
+               in_middle.find(current_thm.glyphs.arrow_right) != std::string::npos &&
+               in_middle.find(current_thm.glyphs.arrow_left) != std::string::npos,
+           "horizontal row in middle shows both left and right indicators");
+
+    simrv::tui::set_theme_style(simrv::tui::TuiThemeStyle::ModernUnicode);
+}
+
+void test_modern_screen_buffer_and_diff_engine() {
+    using namespace simrv::tui::framework;
+
+    // 1. Color tests
+    const auto rgb_col = Color::from_hex(0x388BFD);
+    expect(rgb_col.kind() == ColorKind::Rgb, "from_hex sets kind to Rgb");
+    expect(rgb_col.r() == 0x38 && rgb_col.g() == 0x8B && rgb_col.b() == 0xFD,
+           "from_hex extracts correct RGB components");
+    expect(rgb_col.to_fg_ansi(true) == "\033[38;2;56;139;253m",
+           "to_fg_ansi formats 24-bit TrueColor SGR escape");
+    expect(rgb_col.to_bg_ansi(true) == "\033[48;2;56;139;253m",
+           "to_bg_ansi formats 24-bit TrueColor SGR escape");
+
+    const auto a16 = Color::ansi16(4);
+    expect(a16.to_fg_ansi() == "\033[34m", "ansi16 fg produces standard 16-color ANSI");
+    expect(a16.to_bg_ansi() == "\033[44m", "ansi16 bg produces standard 16-color ANSI");
+
+    const auto a256 = Color::ansi256(218);
+    expect(a256.to_fg_ansi() == "\033[38;5;218m", "ansi256 fg formats 256-color ANSI");
+
+    // 2. ScreenCell and Style tests
+    Style style;
+    style = style.with_fg(rgb_col).with_bold(true);
+    expect(style.attr.bold == 1, "with_bold sets bold attribute");
+    expect(style.fg == rgb_col, "with_fg sets foreground color");
+    expect(!style.attr.is_none(), "attributes are not none when bold is set");
+
+    // 3. ScreenBuffer tests
+    ScreenBuffer buffer(40, 10);
+    expect(buffer.width() == 40 && buffer.height() == 10, "buffer dimensions initialized");
+    buffer.clear(style);
+    expect(buffer.cell(0, 0).style == style, "clear fills buffer with specified style");
+    expect(buffer.cell(39, 9).codepoint == U' ', "clear fills with spaces");
+
+    std::vector<std::string> lines = {"\033[1;32mTest\033[0m \033[34mLine\033[0m", "Plain text"};
+    buffer.load_from_lines(lines, 40, 10);
+    expect(buffer.cell(0, 0).codepoint == U'T', "load_from_lines extracts character");
+    expect(buffer.cell(0, 0).style.attr.bold == 1, "load_from_lines parses bold attribute");
+    expect(buffer.cell(5, 0).codepoint == U'L', "load_from_lines parses subsequent words");
+    expect(buffer.cell(0, 1).codepoint == U'P', "load_from_lines sets next line content");
+
+    // 4. Canvas tests
+    Canvas canvas = buffer.make_canvas();
+    canvas.draw_box(ScreenRect{.origin = {.x = 2, .y = 2}, .size = {.width = 10, .height = 5}},
+                    BoxBorderKind::Double);
+    expect(buffer.cell(2, 2).codepoint == U'╔', "Canvas draw_box top-left double border");
+    expect(buffer.cell(11, 2).codepoint == U'╗', "Canvas draw_box top-right double border");
+    expect(buffer.cell(2, 6).codepoint == U'╚', "Canvas draw_box bottom-left double border");
+    expect(buffer.cell(11, 6).codepoint == U'╝', "Canvas draw_box bottom-right double border");
+
+    canvas.draw_text(3, 3, "Hello", Style{}.with_fg(Color::ansi16(1)));
+    expect(buffer.cell(3, 3).codepoint == U'H', "draw_text writes codepoints to canvas");
+    expect(buffer.cell(3, 3).style.fg == Color::ansi16(1), "draw_text applies style");
+
+    // Subcanvas clipping
+    auto sub = canvas.sub_canvas(
+        ScreenRect{.origin = {.x = 0, .y = 0}, .size = {.width = 5, .height = 5}});
+    sub.draw_text(0, 0, "1234567890");
+    expect(buffer.cell(4, 0).codepoint == U'5', "sub_canvas draws within bounds");
+    expect(buffer.cell(5, 0).codepoint != U'6', "sub_canvas clips text outside bounds");
+
+    // 5. DirtyDiffEngine tests
+    ScreenBuffer prev_buf(40, 10);
+    prev_buf.load_from_lines(buffer.to_lines(), 40, 10);
+
+    DirtyDiffEngine diff_engine;
+    std::string out;
+    auto stats = diff_engine.emit_delta(buffer, prev_buf, out, false);
+    expect(stats.cells_dirty == 0 && stats.runs_emitted == 0,
+           "emit_delta produces 0 dirty cells when buffers are identical");
+
+    // Change single cell
+    buffer.set_cell(15, 3,
+                    ScreenCell{.codepoint = U'X', .style = Style{}.with_fg(Color::ansi16(2))});
+    out.clear();
+    stats = diff_engine.emit_delta(buffer, prev_buf, out, false);
+    expect(stats.cells_dirty == 1, "emit_delta detects exactly 1 dirty cell");
+    expect(stats.rows_dirty == 1, "emit_delta marks exactly 1 dirty row");
+    expect(stats.rows_clean == 9, "emit_delta marks remaining rows clean");
+    expect(out.find("X") != std::string::npos, "emit_delta output contains changed character");
+
+    // Graphic passthrough protection
+    buffer.mark_graphic_passthrough(
+        ScreenRect{.origin = {.x = 10, .y = 3}, .size = {.width = 10, .height = 1}});
+    out.clear();
+    stats = diff_engine.emit_delta(buffer, prev_buf, out, false);
+    expect(stats.cells_dirty == 0, "GraphicPassthrough cells are not emitted by DirtyDiffEngine");
+
+    // 6. Declarative Widget test
+    class TestStatusWidget : public Widget {
+       public:
+        void render(Canvas& c) override {
+            c.draw_text(0, 0, "Status: OK", Style{}.with_bold(true));
+        }
+    };
+
+    TestStatusWidget widget;
+    widget.layout(ScreenRect{.origin = {.x = 1, .y = 8}, .size = {.width = 20, .height = 1}});
+    auto widget_canvas = buffer.make_canvas(widget.bounds());
+    widget.render(widget_canvas);
+    expect(buffer.cell(1, 8).codepoint == U'S', "Widget renders onto ScreenBuffer canvas");
+    expect(buffer.cell(1, 8).style.attr.bold == 1, "Widget renders styled text");
+}
+
 }  // namespace
 
 int main() {
@@ -4991,6 +5214,8 @@ int main() {
     test_formalized_scroll_framework();
     test_formalized_framework_primitives();
     test_modal_host_and_custom_dialog();
+    test_framework_core_components();
+    test_modern_screen_buffer_and_diff_engine();
     if (failures != 0) return EXIT_FAILURE;
     std::cout << "TUI framework tests passed\n";
     return EXIT_SUCCESS;

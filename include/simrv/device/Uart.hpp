@@ -5,8 +5,8 @@
 #pragma once
 
 #include <atomic>
+#include <boost/circular_buffer.hpp>
 #include <cstdint>
-#include <deque>
 #include <mutex>
 #include <optional>
 #include <string_view>
@@ -100,13 +100,13 @@ class Uart : public SerialDevice {
     uint8_t tx_shift_byte_ = 0;
     bool rx_shift_active_ = false;
     uint8_t rx_shift_byte_ = 0;
-    std::deque<uint8_t> tx_fifo_;
-    std::deque<uint8_t> pending_rx_;
+    boost::circular_buffer<uint8_t> tx_fifo_{16};
+    boost::circular_buffer<uint8_t> pending_rx_{2048};
 
     std::array<uint8_t, 256> tx_buffer_{};
     size_t tx_buffer_len_ = 0;
 
-    std::deque<uint8_t> rx_fifo_;
+    boost::circular_buffer<uint8_t> rx_fifo_{16};
     std::atomic<bool> irq_update_pending_{false};
     mutable std::mutex rx_mutex_;
     std::thread input_thread_;

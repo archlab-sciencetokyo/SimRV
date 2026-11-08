@@ -9,6 +9,7 @@
 #include <iostream>
 #include <string_view>
 
+#include "TestHelper.hpp"
 #include "simrv/core/Cpu.hpp"
 #include "simrv/core/Machine.hpp"
 #include "simrv/core/PmpTypes.hpp"
@@ -20,11 +21,9 @@
 
 namespace {
 
-void expect(bool condition, std::string_view message) {
-    if (!condition) {
-        std::cerr << "FAIL: " << message << "\n";
-        std::exit(1);
-    }
+inline void expect(bool condition, std::string_view message,
+                   std::source_location loc = std::source_location::current()) {
+    simrv::test::check(condition, message, loc);
 }
 
 void test_spec_provenance_and_formulas() {
@@ -446,5 +445,5 @@ auto main() -> int {
     test_state_grounded_memory_and_csr();
     test_virtualization_privilege_and_extension_gating();
     test_sstc_and_stateen_csr_parity();
-    return 0;
+    return simrv::test::failures() == 0 ? 0 : 1;
 }

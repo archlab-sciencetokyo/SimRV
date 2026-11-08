@@ -15,6 +15,8 @@
 
 namespace simrv::test {
 
+inline auto failures() noexcept -> int { return 0; }
+
 inline void check(bool condition, std::string_view expr,
                   std::source_location loc = std::source_location::current()) {
     if (!condition) {
@@ -24,14 +26,23 @@ inline void check(bool condition, std::string_view expr,
     }
 }
 
+template <typename V>
+inline auto print_val(const V& val) {
+    if constexpr (std::is_enum_v<V>) {
+        return static_cast<std::underlying_type_t<V>>(val);
+    } else {
+        return val;
+    }
+}
+
 template <typename T, typename U>
 inline void check_eq(const T& actual, const U& expected, std::string_view expr_actual,
                      std::string_view expr_expected,
                      std::source_location loc = std::source_location::current()) {
     if (actual != expected) {
         std::cerr << "Assertion failed: " << expr_actual << " == " << expr_expected << "\n"
-                  << "  Expected: " << expected << "\n"
-                  << "  Actual:   " << actual << "\n"
+                  << "  Expected: " << print_val(expected) << "\n"
+                  << "  Actual:   " << print_val(actual) << "\n"
                   << "  At:       " << loc.file_name() << ":" << loc.line() << "\n";
         std::abort();
     }
@@ -43,7 +54,7 @@ inline void check_ne(const T& actual, const U& expected, std::string_view expr_a
                      std::source_location loc = std::source_location::current()) {
     if (actual == expected) {
         std::cerr << "Assertion failed: " << expr_actual << " != " << expr_expected << "\n"
-                  << "  Unexpected: " << actual << "\n"
+                  << "  Unexpected: " << print_val(actual) << "\n"
                   << "  At:         " << loc.file_name() << ":" << loc.line() << "\n";
         std::abort();
     }
@@ -51,7 +62,7 @@ inline void check_ne(const T& actual, const U& expected, std::string_view expr_a
 
 /// RAII helper for creating isolated temporary directories with guaranteed cleanup
 class ScopedTempDir {
-public:
+   public:
     explicit ScopedTempDir(std::string_view prefix = "simrv_test") {
         static std::mt19937_64 rng{std::random_device{}()};
         const auto id = rng();
@@ -79,7 +90,7 @@ public:
         return path_ / sub;
     }
 
-private:
+   private:
     std::filesystem::path path_;
 };
 

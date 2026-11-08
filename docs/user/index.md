@@ -45,7 +45,8 @@ For the portable archive and native RPM or DEB packages, start with the dedicate
 
 - Modern C++23 compiler: **Clang 22+** or **GCC 16+**
 - Build tools: **CMake 3.31+**, **Ninja**
-- Python: **Python 3.10+** (for utility tools and test suites)
+- C++ Libraries: **Boost 1.83+** (headers only)
+- Zero external runtime or test dependencies (Python is not required)
 
 ### Building from Source
 
@@ -164,9 +165,8 @@ clickable links in terminals (and plain paths when output is redirected). TUI mo
 automatically only when SimRV owns an interactive foreground terminal; it has no separate startup
 or shutdown banner. Warnings and errors remain visible in its message panel.
 
-Runtime installs also provide Bash, Zsh, and Fish completions for common options, enum values, and
-file/directory arguments. They are installed with the simulator, including in the portable runtime
-archive.
+SimRV provides built-in autocompletion script generation for Bash, Zsh, and Fish via
+`simrv completion [bash|zsh|fish]`.
 
 ### Automation summary
 

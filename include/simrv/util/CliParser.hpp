@@ -27,7 +27,13 @@ enum class CliAction : uint8_t {
     ExportSoCManifest,
     ValidateCpuModel,
     ScaffoldDevicePlugin,
-    ScaffoldCfuPlugin
+    ScaffoldCfuPlugin,
+    ShowThirdPartyNotices,
+    CheckMission,
+    CreateMission,
+    CreateUefiDisk,
+    RunBenchmark,
+    GenerateCompletion
 };
 enum class RequestedExecutionMode : uint8_t { Fast, Detailed, CycleAccurate };
 
@@ -129,6 +135,17 @@ struct RuntimeOptions {
     std::string scaffold_device_plugin_output;
     std::string scaffold_cfu_plugin_name;
     std::string scaffold_cfu_plugin_output;
+    std::string fn_mission_check;
+    std::string fn_mission_create;
+    std::string completion_shell;
+    std::string fn_benchmark_elf;
+    uint32_t benchmark_runs = 5;
+    uint32_t benchmark_warmups = 2;
+    std::string benchmark_json_out;
+    std::string fn_uefi_disk_kernel;
+    std::string fn_uefi_disk_out;
+    std::string fn_uefi_disk_rootfs;
+    uint32_t uefi_disk_size_mb = 64;
     std::string fn_cfu_plugin;
     std::vector<std::string> device_plugins;
     std::optional<bool> bram_prewarm;
@@ -165,5 +182,6 @@ auto apply_runtime_options(simrv::core::Machine* machine, const RuntimeOptions& 
     std::string_view msg, simrv::core::HostExitCode status = simrv::core::HostExitCode::UsageError)
     -> void;
 auto needs_memory_image(const ParseResult& result) -> bool;
+auto generate_shell_completion(std::string_view shell) -> std::string;
 
 }  // namespace simrv::util

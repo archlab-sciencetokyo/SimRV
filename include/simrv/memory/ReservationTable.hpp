@@ -4,12 +4,12 @@
  */
 #pragma once
 #include <atomic>
+#include <boost/container/flat_map.hpp>
 #include <concepts>
 #include <cstddef>
 #include <limits>
 #include <mutex>
 #include <optional>
-#include <unordered_map>
 #include <utility>
 
 #include "simrv/CompilerHints.hpp"
@@ -125,7 +125,6 @@ class ReservationTable {
         }
     }
 
-
     /**
      * @brief Invalidate reservations overlapping a physical byte range.
      * @param addr First physical byte written.
@@ -162,9 +161,12 @@ class ReservationTable {
     template <std::integral I>
     void invalidate_range(I, size_t, std::optional<simrv::xlen::HartId> = std::nullopt) = delete;
 
-    template <std::integral I> void set_reservation(simrv::xlen::HartId, I) = delete;
-    template <std::integral I> auto check_reservation(simrv::xlen::HartId, I) const -> bool = delete;
-    template <std::integral I> auto check_and_clear_reservation(simrv::xlen::HartId, I) -> bool = delete;
+    template <std::integral I>
+    void set_reservation(simrv::xlen::HartId, I) = delete;
+    template <std::integral I>
+    auto check_reservation(simrv::xlen::HartId, I) const -> bool = delete;
+    template <std::integral I>
+    auto check_and_clear_reservation(simrv::xlen::HartId, I) -> bool = delete;
     template <std::integral I>
     void invalidate_matching(I, std::optional<simrv::xlen::HartId> = std::nullopt) = delete;
 
@@ -212,7 +214,7 @@ class ReservationTable {
     };
 
     mutable std::mutex mutex_;
-    std::unordered_map<simrv::xlen::HartId, ReservationEntry> reservations_;
+    boost::container::flat_map<simrv::xlen::HartId, ReservationEntry> reservations_;
     std::atomic<bool> may_have_reservations_{false};
 };
 

@@ -1,6 +1,7 @@
 /**
  * @file MicroarchitectureTests.cpp
- * @brief Regression tests for cycle-accurate CPU model configuration, timing front cache, and microarchitecture.
+ * @brief Regression tests for cycle-accurate CPU model configuration, timing front cache, and
+ * microarchitecture.
  */
 
 #include <algorithm>

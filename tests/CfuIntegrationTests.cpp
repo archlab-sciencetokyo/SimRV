@@ -1,6 +1,7 @@
 /**
  * @file CfuIntegrationTests.cpp
- * @brief Unit, dynamic plugin, and pipeline timing tests for Custom Function Unit (CFU) integration.
+ * @brief Unit, dynamic plugin, and pipeline timing tests for Custom Function Unit (CFU)
+ * integration.
  */
 #include <array>
 #include <cstdint>

@@ -84,9 +84,7 @@ jobs:
         run: python3 scripts/ga_smoke.py --simrv build/${{ matrix.arch }}-release/simrv
 
       - name: Validate source release metadata
-        run: |
-          python3 scripts/release_check.py
-          python3 tests/ReleaseToolTests.py
+        run: ctest --test-dir build/${{ matrix.arch }}-release --output-on-failure -L release
 
       - name: Compute asset names
         id: names

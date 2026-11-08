@@ -163,8 +163,8 @@ distribution is outside this matrix or when package-manager integration is unava
 | --- | --- | --- |
 | `simrv` | Simulator, CPU model configs, user docs, example assembly/source, and classroom mission files | x86-64 Linux host; RV64 guests and RV32 guest compatibility |
 | `simrv-devel` | Public C++ headers, static runtime library, and `SimRV::runtime` CMake package | Optional native SDK; C++23 compiler and host-compatible C++ standard library |
-| `simrv-tools` | CPU model wizard, tuning and RTL parity utilities, and their Python support files | Requires Python 3; RTL parity also needs the selected external RTL/toolchain environment |
-| `simrv-benchmark` | Benchmark driver and experiment metadata helper | Requires Python 3 and separately prepared benchmark workloads |
+| `simrv-tools` | CPU model wizard, tuning, and architecture configuration utilities | Standalone utilities; RTL parity also needs the selected external RTL/toolchain environment |
+| `simrv-benchmark` | Native benchmark execution driver and experiment metadata tools | Standalone execution; requires separately prepared benchmark workloads |
 
 Packages do not include a RISC-V cross compiler, generated guest ELF files, Linux images, or
 external test suites. The example Makefiles build into `/tmp` by default; install a RISC-V ELF
@@ -220,20 +220,17 @@ revision, target XLEN, compiler, generator, host platform, and optional `SOURCE_
 for reproducible builds. Its schema is installed at
 `/usr/local/simrv/share/SimRV/schemas/simrv-build-metadata.schema.json`.
 
-Runtime installs also include Bash, Zsh, and Fish command completions under
-`/usr/local/simrv/share`. Native packages place them in the standard system completion paths and
-are normally discovered automatically. With a custom source prefix, point the shell at its
-completion directory; for example:
+SimRV provides dynamic shell autocompletion for Bash, Zsh, and Fish via `simrv completion`:
 
 ```bash
-# Bash, for the current shell (put this in ~/.bashrc to persist)
-source /usr/local/simrv/share/bash-completion/completions/simrv
+# Bash (add to ~/.bashrc for persistence):
+eval "$(simrv completion bash)"
 
-# Zsh, add to ~/.zshrc before compinit
-fpath=(/usr/local/simrv/share/zsh/site-functions $fpath)
+# Zsh (add to ~/.zshrc before compinit):
+eval "$(simrv completion zsh)"
 
-# Fish, for future shells
-set -Ua fish_complete_path /usr/local/simrv/share/fish/vendor_completions.d
+# Fish (run once to install for future sessions):
+simrv completion fish > ~/.config/fish/completions/simrv.fish
 ```
 
 Build `rv32-release` only when a native RV32 strict-width implementation is required for

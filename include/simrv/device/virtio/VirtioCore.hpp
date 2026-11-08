@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <array>
+#include <boost/circular_buffer.hpp>
 #include <cerrno>
 #include <cstddef>
 #include <cstdint>
@@ -164,7 +165,7 @@ class ConsoleBackend {
     [[nodiscard]] auto get_tx_data() const -> const std::vector<uint8_t>& { return tx_buffer_; }
 
    private:
-    std::deque<uint8_t> rx_fifo_;
+    boost::circular_buffer<uint8_t> rx_fifo_{256};
     std::vector<uint8_t> tx_buffer_;
 };
 

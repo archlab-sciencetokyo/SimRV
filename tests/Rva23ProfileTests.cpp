@@ -14,6 +14,7 @@
 #include <thread>
 #include <vector>
 
+#include "TestHelper.hpp"
 #include "simrv/cache/DCache.hpp"
 #include "simrv/cache/ICache.hpp"
 #include "simrv/cache/L2Cache.hpp"
@@ -38,14 +39,7 @@
 
 namespace {
 
-#define TEST_ASSERT(cond)                                                                    \
-    do {                                                                                     \
-        if (!(cond)) {                                                                       \
-            std::cerr << "Assertion failed at " << __FILE__ << ":" << __LINE__ << ": " #cond \
-                      << std::endl;                                                          \
-            std::exit(1);                                                                    \
-        }                                                                                    \
-    } while (false)
+#define TEST_ASSERT(cond) TEST_CHECK(cond)
 
 void test_zicond_semantics() {
     using namespace simrv::isa;
@@ -2474,5 +2468,5 @@ int main() {
     std::cout << "[PASS] test_profile_engine" << std::endl;
 
     std::cout << "\nAll RVA23 Profile unit tests passed successfully!\n";
-    return 0;
+    return simrv::test::failures() == 0 ? 0 : 1;
 }

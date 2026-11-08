@@ -25,6 +25,10 @@ simrv_add_component(simrv-core
   BlockCache.cpp
   ../util/CliParser.cpp
   ../util/Scaffolding.cpp
+  ../util/ThirdPartyNotices.cpp
+  ../util/UefiDiskGenerator.cpp
+  ../util/MissionTools.cpp
+  ../util/BenchmarkRunner.cpp
   ../explain/CsrCatalog.cpp
   ../explain/ScalarSpecCatalog.cpp
   ../explain/VectorSpecCatalog.cpp

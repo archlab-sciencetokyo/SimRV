@@ -22,6 +22,7 @@
 #include <thread>
 #include <vector>
 
+#include "TestHelper.hpp"
 #include "simrv/core/Cpu.hpp"
 #include "simrv/core/CsrTypes.hpp"
 #include "simrv/core/Machine.hpp"
@@ -47,6 +48,7 @@
 #include "simrv/device/pci/VirtioPciNet.hpp"
 #include "simrv/device/pci/VirtioPciRng.hpp"
 #include "simrv/device/pci/VirtioPciSound.hpp"
+#include "simrv/device/pflash/PFlash.hpp"
 #include "simrv/device/virtio/HostAudioSink.hpp"
 #include "simrv/device/virtio/VirtioCore.hpp"
 #include "simrv/device/virtio/VirtioSoundCore.hpp"
@@ -61,6 +63,13 @@
 #include "simrv/xlen/RegisterTypes.hpp"
 
 namespace {
+
+void check(bool condition, const char* message = "check assertion failed") {
+    if (!condition) {
+        std::cerr << message << '\n';
+        std::abort();
+    }
+}
 
 template <typename Address>
 concept DmaReadable = requires(simrv::memory::MmioDevice& device, Address address,
@@ -1581,7 +1590,8 @@ void test_cbo_zero_invalidates_cached_copies_and_reservations() {
           simrv::memory::MesiState::Invalid);
     check(!machine.cpu.state().lr_reservation_active);
     check(!reservations.check_reservation(simrv::xlen::HartId{0}, simrv::xlen::PhysAddr{line + 8}));
-    check(!reservations.check_reservation(simrv::xlen::HartId{1}, simrv::xlen::PhysAddr{line + 40}));
+    check(
+        !reservations.check_reservation(simrv::xlen::HartId{1}, simrv::xlen::PhysAddr{line + 40}));
     check(reservations.check_reservation(simrv::xlen::HartId{2}, simrv::xlen::PhysAddr{line + 64}));
     check(std::ranges::all_of(std::span(ram).subspan(0x400, data.size()),
                               [](auto value) { return value == simrv::xlen::Byte{0}; }));
@@ -1616,13 +1626,16 @@ void test_dma_write_invalidates_reservations_in_all_modes() {
         const std::array<simrv::xlen::Byte, 16> data{};
         check(
             machine.memory().dma_write(simrv::xlen::PhysAddr{base + 12}, data.data(), data.size()));
-        check(!reservations.check_reservation(simrv::xlen::HartId{0}, simrv::xlen::PhysAddr{base + 8}));
-        check(!reservations.check_reservation(simrv::xlen::HartId{1}, simrv::xlen::PhysAddr{base + 24}));
+        check(!reservations.check_reservation(simrv::xlen::HartId{0},
+                                              simrv::xlen::PhysAddr{base + 8}));
+        check(!reservations.check_reservation(simrv::xlen::HartId{1},
+                                              simrv::xlen::PhysAddr{base + 24}));
         reservations.set_reservation(simrv::xlen::HartId{0}, simrv::xlen::PhysAddr{base + 8});
         check(!machine.memory().dma_write(
             simrv::xlen::PhysAddr{simrv::memory::kDramBaseAddress + 4092}, data.data(),
             data.size()));
-        check(reservations.check_reservation(simrv::xlen::HartId{0}, simrv::xlen::PhysAddr{base + 8}));
+        check(reservations.check_reservation(simrv::xlen::HartId{0},
+                                             simrv::xlen::PhysAddr{base + 8}));
     }
 }
 
@@ -2101,8 +2114,8 @@ void test_ca_mt_smp_pause_and_snapshots() {
 
     machine.stop_runner_for_testing();
     // A stopped hart must still acknowledge cycle barriers for the running harts.
-    machine.hart(kNumHarts - 1).hart_status.store(simrv::core::HartStatus::Stopped,
-                                                   std::memory_order_relaxed);
+    machine.hart(kNumHarts - 1)
+        .hart_status.store(simrv::core::HartStatus::Stopped, std::memory_order_relaxed);
     machine.resume();
     machine.start_runner_for_testing();
     machine.request_tui_sample();
@@ -2114,8 +2127,8 @@ void test_ca_mt_smp_pause_and_snapshots() {
     }
     check(machine.tui_execution_snapshot(1).cycle_count > paused_cycles[1]);
     machine.stop_runner_for_testing();
-    machine.hart(kNumHarts - 1).hart_status.store(simrv::core::HartStatus::Started,
-                                                   std::memory_order_relaxed);
+    machine.hart(kNumHarts - 1)
+        .hart_status.store(simrv::core::HartStatus::Started, std::memory_order_relaxed);
 
     machine.pause();
     std::array<simrv::xlen::Counter, kNumHarts> before_step{};
@@ -3754,7 +3767,8 @@ void test_ia_multihart_lr_sc_coherence() {
     h0.pipeline_context.rrs1 = target_addr;
     h0.run_memory_stage(machine);
     check(h0.pipeline_context.mem_paddr.raw() == target_addr);
-    check(machine.memory().reservation_table().check_reservation(0, simrv::xlen::PhysAddr{target_addr}));
+    check(machine.memory().reservation_table().check_reservation(
+        0, simrv::xlen::PhysAddr{target_addr}));
 
     h0.pipeline_context = {};
     h0.pipeline_context.opcode = simrv::isa::Opcode::Amo;
@@ -3800,7 +3814,8 @@ void test_ia_multihart_lr_sc_coherence() {
     h0.run_memory_stage(machine);
     check(h0.state().load_res == target_addr);
     check(h0.state().lr_reservation_active);
-    check(machine.memory().reservation_table().check_reservation(0, simrv::xlen::PhysAddr{target_addr}));
+    check(machine.memory().reservation_table().check_reservation(
+        0, simrv::xlen::PhysAddr{target_addr}));
 
     // 2. Hart 1 performs a store to the same address in IA mode
     auto& h1 = machine.hart(1);
@@ -3814,7 +3829,8 @@ void test_ia_multihart_lr_sc_coherence() {
     h1.run_memory_stage(machine);
 
     // 3. Hart 0's reservation must now be invalidated
-    check(!machine.memory().reservation_table().check_reservation(0, simrv::xlen::PhysAddr{target_addr}));
+    check(!machine.memory().reservation_table().check_reservation(
+        0, simrv::xlen::PhysAddr{target_addr}));
 
     // 4. Hart 0 attempts SC.W, which must fail
     h0.pipeline_context = {};
@@ -4517,9 +4533,105 @@ void test_axi4_bridge_and_tracer() {
     std::cout << "[PASS] test_axi4_bridge_and_tracer\n";
 }
 
+void test_pflash_cfi_query() {
+    simrv::core::MachineConfig cfg{};
+    cfg.execution.appmode = true;
+    simrv::core::Machine machine{cfg};
+
+    constexpr uint32_t kSize = 32 * 1024 * 1024;
+    constexpr uint32_t kSectorSize = 64 * 1024;
+    simrv::device::PFlash pflash(machine, 0x20000000, kSize, kSectorSize, false, "pflash0");
+
+    check(pflash.read8(0x0) == 0xFF);
+    pflash.write8(0x0, 0x98);  // Enter CFI query mode
+
+    check(pflash.read8(0x10) == 'Q');
+    check(pflash.read8(0x11) == 'R');
+    check(pflash.read8(0x12) == 'Y');
+    check(pflash.read8(0x13) == 0x01);
+    check(pflash.read8(0x14) == 0x00);
+    check(pflash.read8(0x27) == 25);
+    check(pflash.read8(0x2C) == 0x01);
+
+    const uint32_t num_sectors = kSize / kSectorSize;
+    check(pflash.read8(0x2D) == static_cast<uint8_t>((num_sectors - 1) & 0xFF));
+    check(pflash.read8(0x2E) == static_cast<uint8_t>(((num_sectors - 1) >> 8) & 0xFF));
+
+    pflash.write8(0x0, 0xFF);  // Reset to read array
+    check(pflash.read8(0x10) == 0xFF);
+}
+
+void test_pflash_read_status_and_id() {
+    simrv::core::MachineConfig cfg{};
+    cfg.execution.appmode = true;
+    simrv::core::Machine machine{cfg};
+
+    simrv::device::PFlash pflash(machine, 0x20000000, 1024 * 1024, 64 * 1024, false, "pflash0");
+    pflash.write8(0x0, 0x70);
+    check(pflash.read8(0x0) == 0x80);
+
+    pflash.write8(0x0, 0x90);
+    check(pflash.read8(0x0) == 0x89);
+    check(pflash.read8(0x1) == 0x18);
+
+    pflash.write8(0x0, 0xFF);
+}
+
+void test_pflash_program_and_erase() {
+    simrv::core::MachineConfig cfg{};
+    cfg.execution.appmode = true;
+    simrv::core::Machine machine{cfg};
+
+    constexpr uint32_t kSize = 128 * 1024;
+    constexpr uint32_t kSectorSize = 64 * 1024;
+    simrv::device::PFlash pflash(machine, 0x20000000, kSize, kSectorSize, false, "pflash0");
+
+    pflash.write8(0x100, 0x40);
+    pflash.write8(0x100, 0xA5);
+    check((pflash.read8(0x100) & 0x80) != 0);
+
+    pflash.write8(0x0, 0xFF);
+    check(pflash.read8(0x100) == 0xA5);
+
+    pflash.write8(0x100, 0x20);
+    pflash.write8(0x100, 0xD0);
+    pflash.write8(0x0, 0xFF);
+    check(pflash.read8(0x100) == 0xFF);
+}
+
+void test_pflash_persistence() {
+    simrv::core::MachineConfig cfg{};
+    cfg.execution.appmode = true;
+    simrv::core::Machine machine{cfg};
+
+    simrv::test::ScopedTempDir temp_dir("simrv-pflash-persist");
+    const auto test_file = temp_dir.path() / "pflash_test.bin";
+
+    {
+        simrv::device::PFlash pflash(machine, 0x22000000, 64 * 1024, 64 * 1024, false, "pflash1");
+        pflash.set_backing_file(test_file);
+
+        pflash.write8(0x10, 0x40);
+        pflash.write8(0x10, 0x5A);
+        pflash.sync();
+    }
+
+    std::ifstream in(test_file, std::ios::binary);
+    check(in.is_open());
+    if (in.is_open()) {
+        std::vector<uint8_t> data(64 * 1024);
+        in.read(reinterpret_cast<char*>(data.data()), data.size());
+        check(data[0x10] == 0x5A);
+    }
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
+    test_pflash_cfi_query();
+    test_pflash_read_status_and_id();
+    test_pflash_program_and_erase();
+    test_pflash_persistence();
     if (argc == 2 && std::string_view(argv[1]) == "--semantic-equivalence") {
         test_cycle_policy_architectural_equivalence();
         test_instruction_policy_architectural_equivalence();

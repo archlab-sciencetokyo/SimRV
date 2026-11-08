@@ -105,15 +105,6 @@ install(
 
 install(FILES docs/man/simrv.1 DESTINATION ${CMAKE_INSTALL_MANDIR}/man1
         COMPONENT Runtime)
-install(FILES completions/bash/simrv
-        DESTINATION ${CMAKE_INSTALL_DATADIR}/bash-completion/completions
-        COMPONENT Runtime)
-install(FILES completions/zsh/_simrv
-        DESTINATION ${CMAKE_INSTALL_DATADIR}/zsh/site-functions
-        COMPONENT Runtime)
-install(FILES completions/fish/simrv.fish
-        DESTINATION ${CMAKE_INSTALL_DATADIR}/fish/vendor_completions.d
-        COMPONENT Runtime)
 
 configure_package_config_file(
   cmake/SimRVConfig.cmake.in "${CMAKE_CURRENT_BINARY_DIR}/SimRVConfig.cmake"
@@ -212,9 +203,9 @@ set(CPACK_DEBIAN_BENCHMARK_FILE_NAME
 set(CPACK_DEBIAN_DEVELOPMENT_FILE_NAME
     "simrv-devel_${CPACK_DEBIAN_PACKAGE_VERSION}_amd64.deb")
 set(CPACK_DEBIAN_TOOLS_PACKAGE_DEPENDS
-    "simrv (= ${CPACK_DEBIAN_PACKAGE_VERSION}), python3")
+    "simrv (= ${CPACK_DEBIAN_PACKAGE_VERSION})")
 set(CPACK_DEBIAN_BENCHMARK_PACKAGE_DEPENDS
-    "simrv (= ${CPACK_DEBIAN_PACKAGE_VERSION}), python3")
+    "simrv (= ${CPACK_DEBIAN_PACKAGE_VERSION})")
 set(CPACK_DEBIAN_DEVELOPMENT_PACKAGE_DEPENDS
     "simrv (= ${CPACK_DEBIAN_PACKAGE_VERSION})")
 
@@ -256,7 +247,7 @@ set(CPACK_RPM_DEVELOPMENT_FILE_NAME
 set(CPACK_RPM_TOOLS_PACKAGE_REQUIRES
     "simrv = ${CPACK_RPM_PACKAGE_VERSION}-${CPACK_RPM_PACKAGE_RELEASE}")
 set(CPACK_RPM_BENCHMARK_PACKAGE_REQUIRES
-    "simrv = ${CPACK_RPM_PACKAGE_VERSION}-${CPACK_RPM_PACKAGE_RELEASE}, python3")
+    "simrv = ${CPACK_RPM_PACKAGE_VERSION}-${CPACK_RPM_PACKAGE_RELEASE}")
 set(CPACK_RPM_DEVELOPMENT_PACKAGE_REQUIRES
     "simrv = ${CPACK_RPM_PACKAGE_VERSION}-${CPACK_RPM_PACKAGE_RELEASE}")
 # Reproducible archive metadata (CMP0206 in CMake 4.3+)

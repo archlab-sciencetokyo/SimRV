@@ -26,13 +26,6 @@ option(SIMRV_ENABLE_TOOLING
        "Enable release validation helpers" OFF)
 option(SIMRV_ENABLE_LINUX_TOOLS
        "Enable Linux image build and launch helper targets" OFF)
-if(BUILD_TESTING OR SIMRV_ENABLE_TOOLING)
-  find_package(
-    Python3
-    COMPONENTS Interpreter
-    REQUIRED)
-  set(PYTHON_BIN "${Python3_EXECUTABLE}")
-endif()
 
 set(SIMRV_GIT_BRANCH "unknown")
 set(SIMRV_GIT_SHA "unknown")
@@ -132,8 +125,17 @@ option(
 option(SIMRV_X86_64_V3_BASELINE
        "Use the x86-64-v3 ISA baseline for non-native x86-64 Release builds" ON)
 option(SIMRV_USE_LIBCXX "Use LLVM libc++ standard library with Clang" OFF)
+if(NOT DEFINED SIMRV_VECTOR_TESTS_DIR OR "${SIMRV_VECTOR_TESTS_DIR}" STREQUAL "")
+  if(DEFINED ENV{RISCV_VECTOR_TESTS_DIR} AND NOT "$ENV{RISCV_VECTOR_TESTS_DIR}" STREQUAL "")
+    set(SIMRV_VECTOR_TESTS_DIR "$ENV{RISCV_VECTOR_TESTS_DIR}")
+  elseif(DEFINED ENV{SIMRV_VECTOR_TESTS_DIR} AND NOT "$ENV{SIMRV_VECTOR_TESTS_DIR}" STREQUAL "")
+    set(SIMRV_VECTOR_TESTS_DIR "$ENV{SIMRV_VECTOR_TESTS_DIR}")
+  elseif(EXISTS "${CMAKE_SOURCE_DIR}/../../tests/riscv-vector-tests" AND IS_DIRECTORY "${CMAKE_SOURCE_DIR}/../../tests/riscv-vector-tests")
+    set(SIMRV_VECTOR_TESTS_DIR "${CMAKE_SOURCE_DIR}/../../tests/riscv-vector-tests")
+  endif()
+endif()
 set(SIMRV_VECTOR_TESTS_DIR
-    ""
+    "${SIMRV_VECTOR_TESTS_DIR}"
     CACHE PATH "Path to a built chipsalliance/riscv-vector-tests checkout")
 
 if(SIMRV_ENABLE_TSAN AND (SIMRV_ENABLE_ASAN OR SIMRV_ENABLE_UBSAN))

@@ -199,11 +199,7 @@ jobs:
       with:
         fetch-depth: 0
     - name: Install quality tools
-      run: dnf install -y git cmake ninja-build gcc gcc-c++ libasan libtsan libubsan clang clang-tools-extra python3
-    - name: Check release metadata
-      run: python3 scripts/release_check.py
-    - name: Test release tooling
-      run: python3 tests/ReleaseToolTests.py
+      run: dnf install -y git cmake ninja-build gcc gcc-c++ libasan libtsan libubsan clang clang-tools-extra
     - name: Check formatting
       shell: bash
       run: |

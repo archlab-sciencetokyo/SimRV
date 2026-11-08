@@ -117,7 +117,7 @@ The 50 remaining failures are two expectation conflicts with the ratified specif
 
 These checks remain failures in the raw ACT result; SimRV preserves the specified behavior. This
 run is evidence for the tested behaviors, not a claim of ACT-clean or complete RVA23 conformance.
-The source suite revision is the `tests/riscv-arch-test` submodule revision. [ACT run instructions
+The source suite revision is the `riscv-arch-test` suite (configured via `RISCV_ARCH_TEST_DIR`). [ACT run instructions
 are maintained in the repository](https://github.com/archlab-sciencetokyo/SimRV/blob/dev/tests/act4/README.md).
 
 ## RVA23S64 qualification status

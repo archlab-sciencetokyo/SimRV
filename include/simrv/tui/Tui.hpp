@@ -33,7 +33,9 @@
 #include "simrv/tui/TuiPreferences.hpp"
 #include "simrv/tui/TuiTypes.hpp"
 #include "simrv/tui/VirtualTerminal.hpp"
+#include "simrv/tui/framework/DirtyDiffEngine.hpp"
 #include "simrv/tui/framework/PointerRouter.hpp"
+#include "simrv/tui/framework/ScreenBuffer.hpp"
 #include "simrv/tui/framework/Subpanel.hpp"
 #include "simrv/tui/framework/Workbench.hpp"
 #include "simrv/util/WakeupFd.hpp"
@@ -394,6 +396,9 @@ class Tui : public core::ITelemetrySink, public core::IConsoleSink {
     int terminal_rows_count_ = 0;
     int terminal_rows_start_ = 0;
     std::vector<std::string> last_screen_lines_;
+    framework::ScreenBuffer front_buffer_{};
+    framework::ScreenBuffer back_buffer_{};
+    framework::DirtyDiffEngine diff_engine_{};
     std::atomic<bool> paused_{true};
     MissionProgress mission_;
     bool mission_execution_stopped_{false};

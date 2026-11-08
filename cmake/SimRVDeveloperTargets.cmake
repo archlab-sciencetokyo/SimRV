@@ -38,14 +38,20 @@ if(BUILD_TESTING)
     add_dependencies(simrv-native-tests ${SIMRV_NATIVE_TEST_TARGETS})
   endif()
   add_dependencies(integration-gate simrv-native-tests)
+  add_custom_target(
+    microbenchmarks
+    COMMAND $<TARGET_FILE:simrv-microbenchmarks>
+    DEPENDS simrv-microbenchmarks
+    WORKING_DIRECTORY "${PROJECT_SOURCE_DIR}"
+    COMMENT "Running SimRV subsystem microbenchmarks"
+    VERBATIM USES_TERMINAL)
 endif()
 
 if(SIMRV_ENABLE_TOOLING)
   add_custom_target(
     release-check
-    COMMAND "${PYTHON_BIN}" "${PROJECT_SOURCE_DIR}/scripts/release_check.py" --binary
-            $<TARGET_FILE:SimRV>
-    DEPENDS SimRV
+    COMMAND $<TARGET_FILE:simrv-release-tests>
+    DEPENDS simrv-release-tests
     WORKING_DIRECTORY "${PROJECT_SOURCE_DIR}"
     COMMENT "Validating SimRV release metadata and binary"
     VERBATIM)
