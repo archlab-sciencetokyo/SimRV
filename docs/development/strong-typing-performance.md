@@ -127,3 +127,13 @@ The slowdown therefore predates the later block-chaining changes, which improved
 relative to `4a2a3c0`; the individual earlier change responsible remains unknown. The intermediate
 binary was 43,319,256 bytes with SHA-256 prefix `b82cf11e688b`. The preceding revision
 `bc258a4` could not be built because its bit-manipulation functions were defined twice.
+
+A native C++ subprocess adapter compared the build immediately before the engine split
+(`9e183b7`) with `4a2a3c0` using the same branch guest, ISA and 100 million instruction limit.
+With five warmups and 30 interleaved samples pinned to x86 CPU 10, median wall times were
+0.141622 seconds (2.22% CV) and 0.180720 seconds (2.29% CV), respectively. Both binaries used
+GCC 16.2.1, `-O3 -DNDEBUG`, `-march=x86-64-v3`, and no LTO. This locates the regression in the
+engine-split interval, which also contains other correctness and execution changes; it does not
+identify the responsible instruction or justify reverting those changes. The pre-split binary was
+45,411,672 bytes with SHA-256 prefix `e5847d0acbc0`. Two attempts on CPU 0 had over 30% CV under
+host load and were discarded.
