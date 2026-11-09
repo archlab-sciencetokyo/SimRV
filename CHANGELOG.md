@@ -5,6 +5,9 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+- Accelerate bare-metal fallback execution dispatch with lock-free UART transfer state and cached floating-point environment updates.
+- Eliminate redundant companion symbol probing regressions during ELF loading and initialization.
+- Anchor simulation wall-clock start time immediately prior to execution to exclude host loading and terminal setup latency.
 - Use guest virtual addresses for C++ symbol lookups and ELF entry-point results.
 - Use guest virtual addresses for C++ Spike lockstep program counters.
 - Fix misaligned branch and jump exceptions in bare-metal fast execution when compressed instructions are disabled.
