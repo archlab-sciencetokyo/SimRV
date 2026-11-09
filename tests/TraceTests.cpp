@@ -45,6 +45,13 @@ concept SymbolLookupAddress = requires(const simrv::debug::SymbolTable& table, T
 static_assert(SymbolLookupAddress<simrv::xlen::VirtAddr>);
 static_assert(!SymbolLookupAddress<simrv::xlen::PhysAddr>);
 static_assert(!SymbolLookupAddress<simrv::xlen::Address>);
+template <typename T>
+concept SymbolInsertionAddress = requires(simrv::debug::SymbolTable& table, T address) {
+    table.add_symbol_for_testing(address, "symbol");
+};
+static_assert(SymbolInsertionAddress<simrv::xlen::VirtAddr>);
+static_assert(!SymbolInsertionAddress<simrv::xlen::PhysAddr>);
+static_assert(!SymbolInsertionAddress<simrv::xlen::Address>);
 static_assert(std::same_as<decltype(std::declval<const simrv::debug::SymbolTable&>().lookup_name(
                                std::declval<const std::string&>())),
                            std::optional<simrv::xlen::VirtAddr>>);

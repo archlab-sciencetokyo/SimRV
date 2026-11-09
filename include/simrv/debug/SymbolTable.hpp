@@ -76,16 +76,17 @@ class SymbolTable {
     [[nodiscard]] auto lookup_name(const std::string& name) const
         -> std::optional<simrv::xlen::VirtAddr>;
     [[nodiscard]] auto entry_point() const -> std::optional<simrv::xlen::VirtAddr> {
-        return entry_point_.transform([](auto addr) { return simrv::xlen::VirtAddr{addr}; });
+        return entry_point_;
     }
-    void add_symbol_for_testing(simrv::xlen::Address addr, std::string name) {
+    void add_symbol_for_testing(simrv::xlen::VirtAddr addr, std::string name) {
         symbols_[addr] = std::move(name);
     }
+    void add_symbol_for_testing(simrv::xlen::Address, std::string) = delete;
 
    private:
-    std::map<simrv::xlen::Address, std::string> symbols_;
-    std::map<simrv::xlen::Address, ElfFunctionSymbol> functions_;
-    std::optional<simrv::xlen::Address> entry_point_;
+    std::map<simrv::xlen::VirtAddr, std::string> symbols_;
+    std::map<simrv::xlen::VirtAddr, ElfFunctionSymbol> functions_;
+    std::optional<simrv::xlen::VirtAddr> entry_point_;
 };
 
 }  // namespace simrv::debug

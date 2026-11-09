@@ -37,14 +37,14 @@ using util::elf::kSymbolObject;
 using util::elf::kSymbolTable;
 
 template <typename Ehdr, typename Shdr, typename Sym, typename StTypeFunc>
-auto parse_elf_symbols(std::ifstream& fs, std::map<simrv::xlen::Address, std::string>& out_symbols,
-                       std::map<simrv::xlen::Address, ElfFunctionSymbol>& out_functions,
-                       std::optional<simrv::xlen::Address>& out_entry, StTypeFunc get_type,
+auto parse_elf_symbols(std::ifstream& fs, std::map<simrv::xlen::VirtAddr, std::string>& out_symbols,
+                       std::map<simrv::xlen::VirtAddr, ElfFunctionSymbol>& out_functions,
+                       std::optional<simrv::xlen::VirtAddr>& out_entry, StTypeFunc get_type,
                        SymbolLoadMode mode) -> bool {
     Ehdr ehdr{};
     if (!fs.read(reinterpret_cast<char*>(&ehdr), sizeof(ehdr)))
         return false;  // NOLINT(cppcoreguidelines-pro-type-reinterpret-cast)
-    out_entry = static_cast<simrv::xlen::Address>(ehdr.e_entry);
+    out_entry = simrv::xlen::VirtAddr{static_cast<simrv::xlen::Address>(ehdr.e_entry)};
 
     std::vector<Shdr> shdrs(ehdr.e_shnum);
     fs.seekg(static_cast<std::streamoff>(ehdr.e_shoff), std::ios::beg);
@@ -89,9 +89,11 @@ auto parse_elf_symbols(std::ifstream& fs, std::map<simrv::xlen::Address, std::st
                     name == "rvtest_sig_end";
                 if (!name.empty() && name.find('$') == std::string::npos &&
                     (mode == SymbolLoadMode::FullDebug || runtime_essential)) {
-                    out_symbols[sym.st_value] = name;
+                    const simrv::xlen::VirtAddr addr{
+                        static_cast<simrv::xlen::Address>(sym.st_value)};
+                    out_symbols[addr] = name;
                     if (type == kSymbolFunction) {
-                        out_functions[sym.st_value] = ElfFunctionSymbol{
+                        out_functions[addr] = ElfFunctionSymbol{
                             .name = std::move(name),
                             .size = static_cast<simrv::xlen::Address>(sym.st_size)};
                     }
@@ -168,7 +170,7 @@ auto SymbolTable::load_from_elf(const std::string& elf_path, bool clear_existing
 
     fs.seekg(0, std::ios::beg);
 
-    std::optional<simrv::xlen::Address> ep;
+    std::optional<simrv::xlen::VirtAddr> ep;
     if (elf_class == kClass32) {
         if (!parse_elf_symbols<Elf32_Ehdr, Elf32_Shdr, Elf32_Sym>(
                 fs, symbols_, functions_, ep, [](auto info) { return info & 0x0fU; }, mode)) {
@@ -197,7 +199,7 @@ auto SymbolTable::load_from_elf(const std::string& elf_path, bool clear_existing
                     if (kfs.read(reinterpret_cast<char*>(kident.data()), kident.size())) {
                         const auto k_class = kident[4];
                         kfs.seekg(0, std::ios::beg);
-                        std::optional<simrv::xlen::Address> kep;
+                        std::optional<simrv::xlen::VirtAddr> kep;
                         if (k_class == kClass32) {
                             (void)parse_elf_symbols<Elf32_Ehdr, Elf32_Shdr, Elf32_Sym>(
                                 kfs, symbols_, functions_, kep,
@@ -229,13 +231,13 @@ auto SymbolTable::lookup_symbol(simrv::xlen::VirtAddr address) const
         return std::nullopt;
     }
 
-    auto it = symbols_.upper_bound(addr);
+    auto it = symbols_.upper_bound(address);
     if (it == symbols_.begin()) {
         return std::nullopt;
     }
     --it;
 
-    const simrv::xlen::Address sym_addr = it->first;
+    const auto sym_addr = it->first.raw();
     const simrv::xlen::Address offset = addr - sym_addr;
     if (offset >= 0x2000) {  // Limit offset to prevent matching distant symbols
         return std::nullopt;
@@ -252,19 +254,19 @@ auto SymbolTable::lookup_function(simrv::xlen::VirtAddr address) const
     -> std::optional<FunctionLookupResult> {
     const auto addr = address.raw();
     if (functions_.empty()) return std::nullopt;
-    auto it = functions_.upper_bound(addr);
+    auto it = functions_.upper_bound(address);
     if (it == functions_.begin()) return std::nullopt;
     --it;
-    const simrv::xlen::Address offset = addr - it->first;
+    const simrv::xlen::Address offset = addr - it->first.raw();
     const auto next = std::next(it);
-    const simrv::xlen::Address next_function_start = next == functions_.end() ? 0 : next->first;
+    const simrv::xlen::Address next_function_start =
+        next == functions_.end() ? 0 : next->first.raw();
     if (it->second.size != 0 && offset >= it->second.size) return std::nullopt;
     if (it->second.size == 0 && (next == functions_.end() || addr >= next_function_start) &&
         offset != 0)
         return std::nullopt;
     if (next != functions_.end() && addr >= next_function_start) return std::nullopt;
-    return FunctionLookupResult{
-        .name = it->second.name, .base_addr = simrv::xlen::VirtAddr{it->first}, .offset = offset};
+    return FunctionLookupResult{.name = it->second.name, .base_addr = it->first, .offset = offset};
 }
 
 auto SymbolTable::lookup(simrv::xlen::VirtAddr addr) const -> std::string {
@@ -282,7 +284,7 @@ auto SymbolTable::lookup_name(const std::string& name) const
     -> std::optional<simrv::xlen::VirtAddr> {
     for (const auto& [addr, sym_name] : symbols_) {
         if (sym_name == name) {
-            return simrv::xlen::VirtAddr{addr};
+            return addr;
         }
     }
     return std::nullopt;

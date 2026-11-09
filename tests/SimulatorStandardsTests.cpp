@@ -330,8 +330,9 @@ void test_architectural_signature_dump() {
     // 2. Add signature symbols
     const simrv::xlen::Address begin_sig = 0x80000100;
     const simrv::xlen::Address end_sig = 0x80000110;  // 16 bytes = 4 words
-    machine.symbol_table().add_symbol_for_testing(begin_sig, "begin_signature");
-    machine.symbol_table().add_symbol_for_testing(end_sig, "end_signature");
+    machine.symbol_table().add_symbol_for_testing(simrv::xlen::VirtAddr{begin_sig},
+                                                  "begin_signature");
+    machine.symbol_table().add_symbol_for_testing(simrv::xlen::VirtAddr{end_sig}, "end_signature");
 
     // Populate RAM at begin_sig (offset 0x100 within DRAM base 0x80000000)
     const uint32_t words[4] = {0x12345678, 0xdeadbeef, 0x00000001, 0xaabbccdd};
