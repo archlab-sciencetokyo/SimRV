@@ -5,6 +5,11 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [v3.0.0-rc.19] — 2026-11-09
+
+- Separate fast execution into dedicated baremetal and OS engines with unified direct dispatch.
+- Fix RV32 guest compatibility on RV64 for selective TLB invalidation, SBI RFENCE, and SSTC `stimecmp` timer CSRs.
+- Filter 64-bit-only pointer-masking extensions in FDT generation for RV32 guests.
 - Fix MMIO routing for overlapping device windows with holes and reject accesses that cross device boundaries.
 - Fix reservation invalidation for cache-block zeroing, DMA writes, and oversized writes in native RV32.
 - Reject VirtIO DMA addresses that exceed the native guest physical-address width instead of aliasing low RAM.
@@ -22,9 +27,6 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Fix cache prewarming for ELF segments loaded at RAM-relative addresses or near the physical address limit.
 - Fix spurious NUL characters in the RVComp UART by using its serial device plugin.
 - Improve RVComp MMC support, device-tree boot arguments, and startup diagnostics in the TUI.
-
-## [v3.0.0-rc.19] — 2026-11-05
-
 - Improve bare-metal fast-execution throughput.
 - Fix Linux packages so optional plugin libraries are installed with the tools package.
 
