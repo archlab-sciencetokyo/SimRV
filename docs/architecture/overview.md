@@ -135,13 +135,19 @@ The following findings describe guest correctness, rather than security severity
 | A wrapping RAM mapping could make an unchecked host pointer lookup invalid. | High | Fast lookup now requires a nonwrapping mapping; checked lookups reject wrapped accesses. `CoreSemanticsTests` covers the boundary. |
 | VirtIO DMA addresses could be truncated to native RV32 width and alias low RAM. | High | MMIO and PCI transports reject unrepresentable addresses before conversion; platform integration tests cover direct DMA and queue-ring accesses. |
 | Cycle-mode workers could fail to acknowledge an in-flight cycle during a pause or engine change. | High | Workers complete the cycle barrier before parking, and engine changes restart workers. The multi-hart regression tests exercise pause and switching. |
-| The RVComp guest uses a serial register layout different from the built-in UART, producing spurious NUL output. | Medium | The model selects an external UART plugin with the expected status registers; `RvCompTests` exercises transmit, receive, and interrupt behavior. The plugin transmits immediately and is not a cycle-accurate UART model. |
+| The RVComp guest uses a serial register layout different from the built-in UART, producing spurious NUL output. | Medium | The model selects an external UART plugin with the expected status registers; `MicroarchitectureTests` exercises transmit, receive, and interrupt behavior. The plugin transmits immediately and is not a cycle-accurate UART model. |
+| A compact block could bypass misaligned taken-branch exceptions when compressed instructions were disabled. | High | Bare-metal fast execution falls back to scalar execution for IALIGN=32; `CoreSemanticsTests` checks jumps and branches on RV64, hosted RV32, and native RV32. |
+| A UART receive overrun in a later device tick could leave the line interrupt unpublished. | Medium | Overrun transitions now schedule an interrupt update; `PlatformIntegrationTests` exercises an overrun after a full FIFO was established in an earlier tick. |
 
 These checks document reviewed paths, not a proof that every first-party shortcut has been
 inventoried. In particular, full architecture-suite and performance comparisons against the
 original starting tree remain incomplete; ARM hardware and usable host performance counters were
 unavailable. See [strong typing and performance](../development/strong-typing-performance.md)
 for the measurements and their limitations.
+
+The strong-typing migration is also incomplete: symbol-table addresses, some trace and lockstep
+records, and TUI address entry points still use scalar address types. These are remaining C++
+interface boundaries to review; their presence does not by itself establish a guest-visible bug.
 
 MMIO routing and DMA APIs accept `simrv::xlen::PhysAddr`. C++ callers must explicitly construct
 physical addresses from platform configuration or translate virtual addresses before routing or
