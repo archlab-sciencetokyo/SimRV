@@ -103,3 +103,17 @@ cache counts. The initial baseline executable is no longer available, so an iden
 comparison against the final tree remains outstanding. ARM hardware and usable host performance
 counters were unavailable. The raw local reports and workload sources are in the ignored
 `benchmark_logs/strong-typing-2026-11-05/` directory when present; they are not release artifacts.
+
+A later x86 comparison used the retained pre-precise-tick-guard intermediate binary and the
+RV64 release binary at `1bc43ca`. Both ran the same bare-metal guest, ISA
+`rv64gc_zicsr_zifencei_zicntr`, and 100 million instruction limit on pinned CPU 0, with three
+warmups and ten interleaved samples. Compute medians were 0.116722 and 0.097635 seconds
+(CV 1.32% and 7.21%); branch medians were 0.141816 and 0.162783 seconds (1.31% and 2.64%);
+memory medians were 0.125828 and 0.118740 seconds (1.34% and 3.53%). A repeat of the branch
+workload with five warmups and 30 interleaved samples produced medians of 0.144493 and 0.159806
+seconds (2.57% and 3.25%), a 10.60% regression. The branch guest alternates a conditional branch
+in a short loop. These binaries differ in several execution and device changes, so the cause is
+not isolated; profiling or a controlled bisection is still needed. The compute result has high
+variability and should not be treated as a reliable speedup. The binaries were 42,718,352 and
+45,329,600 bytes, with SHA-256 prefixes `4987b5030cf7` and `da35e96dcd80`, respectively.
+This intermediate comparison does not replace the missing original baseline or ARM measurements.
