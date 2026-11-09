@@ -27,6 +27,7 @@ auto BlockCache::build_block(simrv::xlen::Register pc, DecodeCache& decode_cache
 
     CachedOp* cur = head_op;
     simrv::xlen::Register cur_pc = pc;
+    CachedOp* next_op = nullptr;
 
     while (bb.num_ops < kMaxBlockOps && cur != nullptr && cur->cpc == cur_pc) {
         const bool is_branch = is_branch_fast_op(cur->fast_op);
@@ -120,7 +121,7 @@ auto BlockCache::build_block(simrv::xlen::Register pc, DecodeCache& decode_cache
         }
 
         // Trace to next op in decode cache
-        CachedOp* next_op = nullptr;
+        next_op = nullptr;
         if (cur->next_seq_idx != kInvalidSeqIndex) {
             next_op = decode_cache.op_by_index(cur->next_seq_idx);
         }
@@ -146,6 +147,14 @@ auto BlockCache::build_block(simrv::xlen::Register pc, DecodeCache& decode_cache
     bb.non_branch_ops = bb.ends_with_branch ? (bb.num_ops - 1) : bb.num_ops;
 
     if (!bb.ends_with_branch) {
+        // If block formation stopped purely because the sequential successor was not yet
+        // decoded in DecodeCache, do not freeze a truncated stub into BlockCache.
+        // Returning nullptr allows the scalar engine to execute and populate DecodeCache
+        // so that the full basic block can be assembled on the next traversal.
+        if (next_op == nullptr && bb.num_ops < kMaxBlockOps) {
+            bb.invalidate();
+            return nullptr;
+        }
         bb.fallthrough_pc = cur_pc;
         bb.fallthrough_bb = lookup(bb.fallthrough_pc);
     }

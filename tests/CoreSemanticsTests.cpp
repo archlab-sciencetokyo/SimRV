@@ -1712,6 +1712,40 @@ void test_compact_block_immediates() {
     }
 }
 
+void test_fast_block_successor_cache_collision() {
+    constexpr simrv::xlen::Register start = 0x1000;
+    constexpr simrv::xlen::Register target = 0x5004;
+    static_assert(simrv::core::BlockCache::calc_set(start) ==
+                  simrv::core::BlockCache::calc_set(target));
+    simrv::core::Machine machine;
+    auto& cpu = machine.hart(0);
+    cpu.sync_decode_context();
+    cpu.decode_cache.flush();
+    cpu.state().pc = start;
+    auto insert = [&](simrv::xlen::Register pc, simrv::isa::OperationId id, int32_t imm) {
+        simrv::pipeline::DecodedInstruction decoded{};
+        decoded.cpc = simrv::xlen::VirtAddr{pc};
+        decoded.op_id = id;
+        decoded.opcode =
+            id == simrv::isa::JAL ? simrv::isa::Opcode::Jal : simrv::isa::Opcode::OpImm;
+        decoded.ir = static_cast<simrv::xlen::Instruction>(decoded.opcode);
+        decoded.rd = id == simrv::isa::JAL ? simrv::xlen::RegId::Zero : simrv::xlen::RegId::A0;
+        decoded.rs1 = simrv::xlen::RegId::A0;
+        decoded.imm = imm;
+        simrv::core::CachedOp op{};
+        op.copy_from(decoded);
+        cpu.decode_cache.insert(decoded.cpc, op);
+    };
+    insert(start, simrv::isa::ADDI, 1);
+    insert(start + 4, simrv::isa::JAL, static_cast<int32_t>(target - start - 4));
+    insert(target, simrv::isa::JAL, 0);
+    const auto before = cpu.e_icount;
+    cpu.run_fast_baremetal_batch(machine, 2, {});
+    expect(cpu.e_icount == before + 2 && cpu.state().pc == target &&
+               cpu.state().regs.read(simrv::xlen::RegId::A0) == 1,
+           "colliding successor preserves current block retirement and branch target");
+}
+
 void test_cached_store_legacy_tohost() {
     simrv::core::Machine machine;
     std::array<simrv::xlen::Byte, 8192> backing{};
@@ -4994,6 +5028,7 @@ int main() {
     test_vector_compute_register_group_legality();
     test_vector_mask_and_fault_only_first_memory();
     test_compact_block_immediates();
+    test_fast_block_successor_cache_collision();
     test_cached_store_legacy_tohost();
     test_vector_bulk_memory_operations();
     test_vector_integer_remainder_and_reverse_subtract();

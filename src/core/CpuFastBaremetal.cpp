@@ -81,6 +81,12 @@ SIMRV_ALWAYS_INLINE auto CPU::run_fast_baremetal_kernel(Machine& machine, uint32
                     simrv::xlen::Register seg_start_pc = next_pc;
                     uint32_t seg_start_b = local_b;
                     uint32_t compressed_count = 0;
+                    BasicBlock* cur_bb = nullptr;
+                    enum class BranchAction : uint8_t {
+                        Exit = 0,
+                        ContinueScalar = 1,
+                        EnterBlock = 2,
+                    };
 
                     const auto commit_linear_segment = [&](simrv::xlen::Register end_pc) noexcept {
                         const uint32_t seg_ops = local_b - seg_start_b;
@@ -142,32 +148,16 @@ SIMRV_ALWAYS_INLINE auto CPU::run_fast_baremetal_kernel(Machine& machine, uint32
                         }
                     };
 
-                    const auto commit_taken_branch = [&](simrv::xlen::Register target_pc)
-                                                         __attribute__((always_inline)) -> bool {
+                    const auto commit_taken_branch =
+                        [&](simrv::xlen::Register target_pc)
+                            __attribute__((always_inline)) -> BranchAction {
                         if constexpr (simrv::xlen::kIsXLen64 && !kGuestXlen64) {
                             target_pc = static_cast<simrv::xlen::Register>(
                                 static_cast<int64_t>(static_cast<int32_t>(target_pc)));
                         }
-                        auto* next_op = ops_base + chained->target_idx;
-                        if (simrv::compiler::likely(next_op->cpc.raw() == target_pc &&
-                                                    next_op->ctx == active_ctx)) {
-                            record_hpm_instruction_classes<kHpmClassMode>(
-                                chained->op_id, chained->opcode(), chained->cinsn != 0);
-                            ++local_b;
-                            commit_linear_segment(chained->cpc.raw() + chained->op_len);
-                            next_pc = target_pc;
-                            seg_start_pc = target_pc;
-                            seg_start_b = local_b;
-                            if (simrv::compiler::unlikely(local_b >= batch_size)) {
-                                return false;
-                            }
-                            chained = next_op;
-                            op_tag = chained->fast_op;
-                            return true;
-                        }
                         if (simrv::compiler::unlikely((target_pc & state_.fetch_align_mask) != 0)) {
                             fallback_op = chained;
-                            return false;
+                            return BranchAction::Exit;
                         }
                         record_hpm_instruction_classes<kHpmClassMode>(
                             chained->op_id, chained->opcode(), chained->cinsn != 0);
@@ -177,14 +167,30 @@ SIMRV_ALWAYS_INLINE auto CPU::run_fast_baremetal_kernel(Machine& machine, uint32
                         seg_start_pc = target_pc;
                         seg_start_b = local_b;
                         if (simrv::compiler::unlikely(local_b >= batch_size)) {
-                            return false;
+                            return BranchAction::Exit;
+                        }
+                        auto* target_bb = block_cache.lookup(target_pc);
+                        if (target_bb == nullptr) {
+                            target_bb = block_cache.build_block(target_pc, decode_cache);
+                        }
+                        if (target_bb != nullptr &&
+                            target_bb->num_guest_ops <= batch_size - local_b) {
+                            cur_bb = target_bb;
+                            return BranchAction::EnterBlock;
+                        }
+                        auto* next_op = ops_base + chained->target_idx;
+                        if (simrv::compiler::likely(next_op->cpc.raw() == target_pc &&
+                                                    next_op->ctx == active_ctx)) {
+                            chained = next_op;
+                            op_tag = chained->fast_op;
+                            return BranchAction::ContinueScalar;
                         }
                         chained = resolve_branch_target_baremetal(chained, next_pc);
                         if (simrv::compiler::unlikely(chained == nullptr)) {
-                            return false;
+                            return BranchAction::Exit;
                         }
                         op_tag = chained->fast_op;
-                        return true;
+                        return BranchAction::ContinueScalar;
                     };
 
                     const auto calc_mem_addr =
@@ -196,19 +202,16 @@ SIMRV_ALWAYS_INLINE auto CPU::run_fast_baremetal_kernel(Machine& machine, uint32
                         return addr;
                     };
 
-                    const auto try_fast_load = [&]<typename T, typename SignedExtT = T,
-                                                   size_t AlignMask = sizeof(T) - 1>(
-                                                   const CachedOp* op)
-                                                   __attribute__((always_inline))
-                                                       ->bool {
+                    const auto try_fast_load =
+                        [&]<typename T, typename SignedExtT = T>(const CachedOp* op)
+                            __attribute__((always_inline)) -> bool {
                         if constexpr (sizeof(T) == 8 &&
                                       (!simrv::xlen::kIsXLen64 || !kGuestXlen64)) {
                             return false;
                         } else {
                             const auto mem_addr = calc_mem_addr(op);
                             const auto mem_offset = mem_addr - ram_base;
-                            if (simrv::compiler::likely(mem_offset <= (ram_size - sizeof(T)) &&
-                                                        (mem_addr & AlignMask) == 0)) {
+                            if (simrv::compiler::likely(mem_offset <= (ram_size - sizeof(T)))) {
                                 const auto* const host_ptr = ram_data + mem_offset;
                                 T val;
                                 std::memcpy(&val, host_ptr, sizeof(val));
@@ -226,18 +229,15 @@ SIMRV_ALWAYS_INLINE auto CPU::run_fast_baremetal_kernel(Machine& machine, uint32
                         return false;
                     };
 
-                    const auto try_fast_store = [&]<typename T, size_t AlignMask = sizeof(T) - 1>(
-                                                    const CachedOp* op)
-                                                    __attribute__((always_inline))
-                                                        ->bool {
+                    const auto try_fast_store = [&]<typename T>(const CachedOp* op)
+                                                    __attribute__((always_inline)) -> bool {
                         if constexpr (sizeof(T) == 8 &&
                                       (!simrv::xlen::kIsXLen64 || !kGuestXlen64)) {
                             return false;
                         } else {
                             const auto mem_addr = calc_mem_addr(op);
                             const auto mem_offset = mem_addr - ram_base;
-                            if (simrv::compiler::likely(mem_offset <= (ram_size - sizeof(T)) &&
-                                                        (mem_addr & AlignMask) == 0)) {
+                            if (simrv::compiler::likely(mem_offset <= (ram_size - sizeof(T)))) {
                                 if constexpr (sizeof(T) >= 4) {
                                     if (simrv::compiler::unlikely(
                                             (mem_addr & tohost_reject_mask) == 0 &&
@@ -263,19 +263,16 @@ SIMRV_ALWAYS_INLINE auto CPU::run_fast_baremetal_kernel(Machine& machine, uint32
                         return addr;
                     };
 
-                    const auto try_fast_load_cop = [&]<typename T, typename SignedExtT = T,
-                                                       size_t AlignMask = sizeof(T) - 1>(
-                                                       const CompactOp& op)
-                                                       __attribute__((always_inline))
-                                                           ->bool {
+                    const auto try_fast_load_cop =
+                        [&]<typename T, typename SignedExtT = T>(const CompactOp& op)
+                            __attribute__((always_inline)) -> bool {
                         if constexpr (sizeof(T) == 8 &&
                                       (!simrv::xlen::kIsXLen64 || !kGuestXlen64)) {
                             return false;
                         } else {
                             const auto mem_addr = calc_mem_addr_cop(op);
                             const auto mem_offset = mem_addr - ram_base;
-                            if (simrv::compiler::likely(mem_offset <= (ram_size - sizeof(T)) &&
-                                                        (mem_addr & AlignMask) == 0)) {
+                            if (simrv::compiler::likely(mem_offset <= (ram_size - sizeof(T)))) {
                                 const auto* const host_ptr = ram_data + mem_offset;
                                 T val;
                                 std::memcpy(&val, host_ptr, sizeof(val));
@@ -293,20 +290,22 @@ SIMRV_ALWAYS_INLINE auto CPU::run_fast_baremetal_kernel(Machine& machine, uint32
                         return false;
                     };
 
-                    const auto
-                        try_fast_store_cop = [&]<typename T, size_t AlignMask = sizeof(T) - 1>(
-                                                 const CompactOp& op) __attribute__((always_inline))
-                                                 ->bool {
+                    const auto try_fast_store_cop = [&]<typename T>(const CompactOp& op)
+                                                        __attribute__((always_inline)) -> bool {
                         if constexpr (sizeof(T) == 8 &&
                                       (!simrv::xlen::kIsXLen64 || !kGuestXlen64)) {
                             return false;
                         } else {
                             const auto mem_addr = calc_mem_addr_cop(op);
                             const auto mem_offset = mem_addr - ram_base;
-                            if (simrv::compiler::likely(
-                                    mem_offset <= (ram_size - sizeof(T)) &&
-                                    (mem_addr & AlignMask) == 0 &&
-                                    !is_tohost_addr_fast(tohost_addr, mem_addr))) {
+                            if (simrv::compiler::likely(mem_offset <= (ram_size - sizeof(T)))) {
+                                if constexpr (sizeof(T) >= 4) {
+                                    if (simrv::compiler::unlikely(
+                                            (mem_addr & tohost_reject_mask) == 0 &&
+                                            is_tohost_addr_fast(tohost_addr, mem_addr))) {
+                                        return false;
+                                    }
+                                }
                                 auto* const host_ptr = ram_data + mem_offset;
                                 const T val = static_cast<T>(gpr[std::to_underlying(op.rs2)]);
                                 std::memcpy(host_ptr, &val, sizeof(val));
@@ -572,7 +571,49 @@ SIMRV_ALWAYS_INLINE auto CPU::run_fast_baremetal_kernel(Machine& machine, uint32
                         }
                     };
 
-                    BasicBlock* cur_bb = block_cache.lookup(next_pc);
+                    const auto execute_cop = [&](const CompactOp& cop,
+                                                 bool& fault) __attribute__((always_inline)) {
+                        switch (cop.fast_op) {
+                            case FastOp::Ld:
+                                fault = !try_fast_load_cop.template operator()<uint64_t>(cop);
+                                break;
+                            case FastOp::Lw:
+                                fault = !try_fast_load_cop.template operator()<int32_t>(cop);
+                                break;
+                            case FastOp::Lwu:
+                                fault = !try_fast_load_cop.template operator()<uint32_t>(cop);
+                                break;
+                            case FastOp::Lh:
+                                fault = !try_fast_load_cop.template operator()<int16_t>(cop);
+                                break;
+                            case FastOp::Lhu:
+                                fault = !try_fast_load_cop.template operator()<uint16_t>(cop);
+                                break;
+                            case FastOp::Lb:
+                                fault = !try_fast_load_cop.template operator()<int8_t>(cop);
+                                break;
+                            case FastOp::Lbu:
+                                fault = !try_fast_load_cop.template operator()<uint8_t>(cop);
+                                break;
+                            case FastOp::Sd:
+                                fault = !try_fast_store_cop.template operator()<uint64_t>(cop);
+                                break;
+                            case FastOp::Sw:
+                                fault = !try_fast_store_cop.template operator()<uint32_t>(cop);
+                                break;
+                            case FastOp::Sh:
+                                fault = !try_fast_store_cop.template operator()<uint16_t>(cop);
+                                break;
+                            case FastOp::Sb:
+                                fault = !try_fast_store_cop.template operator()<uint8_t>(cop);
+                                break;
+                            default:
+                                execute_pure_alu_cop(cop);
+                                break;
+                        }
+                    };
+
+                    cur_bb = block_cache.lookup(next_pc);
                     if (simrv::compiler::unlikely(cur_bb == nullptr)) {
                         cur_bb = block_cache.build_block(next_pc, decode_cache);
                     }
@@ -581,16 +622,143 @@ SIMRV_ALWAYS_INLINE auto CPU::run_fast_baremetal_kernel(Machine& machine, uint32
                     }
 
                     if (cur_bb != nullptr) {
+                    enter_block_loop:
                         while (cur_bb != nullptr) {
                             if (simrv::compiler::unlikely(cur_bb->num_guest_ops >
                                                           batch_size - local_b)) {
                                 seg_start_pc = next_pc;
                                 goto chain_exit;
                             }
+                            // A direct-mapped successor must not replace the block whose
+                            // metadata is still needed to retire this transition.
+                            const auto build_successor = [&](simrv::xlen::Register pc) noexcept {
+                                if (BlockCache::calc_set(pc) ==
+                                    BlockCache::calc_set(cur_bb->pc.raw())) {
+                                    return static_cast<BasicBlock*>(nullptr);
+                                }
+                                return block_cache.build_block(pc, decode_cache);
+                            };
                             const uint32_t num_ops = cur_bb->num_ops;
                             const uint32_t non_branch_ops = cur_bb->non_branch_ops;
+                            const auto* const term = &cur_bb->ops[num_ops - 1];
+                            BasicBlock* next_bb = nullptr;
                             uint32_t i = 0;
                             bool block_fault = false;
+
+                            if (cur_bb->is_self_loop) {
+                                const auto term_op = cur_bb->term_op;
+                                const auto rs1_idx = std::to_underlying(term->rs1);
+                                const auto rs2_idx = std::to_underlying(term->rs2);
+
+                                if (term_op == FastOp::Jal && !cur_bb->has_mem_op) {
+                                    const uint32_t remaining = batch_size - local_b;
+                                    const uint32_t loop_count = remaining / cur_bb->num_guest_ops;
+                                    for (uint32_t l = 0; l < loop_count; ++l) {
+                                        for (uint32_t k = 0; k < non_branch_ops; ++k) {
+                                            execute_pure_alu_cop(cur_bb->ops[k]);
+                                        }
+                                    }
+                                    local_b += loop_count * cur_bb->num_guest_ops;
+                                    compressed_count += loop_count * cur_bb->num_compressed;
+                                    next_pc = cur_bb->pc.raw();
+                                    next_bb = cur_bb;
+                                    goto block_transition;
+                                }
+
+                                while (local_b + cur_bb->num_guest_ops <= batch_size) {
+                                    bool mem_fault = false;
+                                    uint32_t mem_i = 0;
+                                    if (!cur_bb->has_mem_op) {
+                                        for (uint32_t k = 0; k < non_branch_ops; ++k) {
+                                            execute_pure_alu_cop(cur_bb->ops[k]);
+                                        }
+                                    } else {
+                                        for (; mem_i < non_branch_ops; ++mem_i) {
+                                            execute_cop(cur_bb->ops[mem_i], mem_fault);
+                                            if (simrv::compiler::unlikely(mem_fault)) break;
+                                        }
+                                    }
+                                    if (simrv::compiler::unlikely(mem_fault)) {
+                                        simrv::xlen::Register fault_pc = cur_bb->pc.raw();
+                                        for (uint32_t j = 0; j < mem_i; ++j) {
+                                            fault_pc += cur_bb->ops[j].op_len;
+                                        }
+                                        fallback_op = decode_cache.lookup_aligned(fault_pc);
+                                        next_pc = fault_pc;
+                                        local_b += mem_i;
+                                        seg_start_pc = next_pc;
+                                        goto chain_exit;
+                                    }
+                                    bool taken = false;
+                                    switch (term_op) {
+                                        case FastOp::Bne:
+                                            taken = (gpr[rs1_idx] != gpr[rs2_idx]);
+                                            break;
+                                        case FastOp::Beq:
+                                            taken = (gpr[rs1_idx] == gpr[rs2_idx]);
+                                            break;
+                                        case FastOp::Bgeu: {
+                                            const auto rrs1 = gpr[rs1_idx];
+                                            const auto rrs2 = gpr[rs2_idx];
+                                            taken = kGuestXlen64 ? (rrs1 >= rrs2)
+                                                                 : (static_cast<uint32_t>(rrs1) >=
+                                                                    static_cast<uint32_t>(rrs2));
+                                            break;
+                                        }
+                                        case FastOp::Bge: {
+                                            const auto rrs1 = gpr[rs1_idx];
+                                            const auto rrs2 = gpr[rs2_idx];
+                                            taken = kGuestXlen64 ? (static_cast<int64_t>(rrs1) >=
+                                                                    static_cast<int64_t>(rrs2))
+                                                                 : (static_cast<int32_t>(rrs1) >=
+                                                                    static_cast<int32_t>(rrs2));
+                                            break;
+                                        }
+                                        case FastOp::Bltu: {
+                                            const auto rrs1 = gpr[rs1_idx];
+                                            const auto rrs2 = gpr[rs2_idx];
+                                            taken = kGuestXlen64 ? (rrs1 < rrs2)
+                                                                 : (static_cast<uint32_t>(rrs1) <
+                                                                    static_cast<uint32_t>(rrs2));
+                                            break;
+                                        }
+                                        case FastOp::Blt: {
+                                            const auto rrs1 = gpr[rs1_idx];
+                                            const auto rrs2 = gpr[rs2_idx];
+                                            taken = kGuestXlen64 ? (static_cast<int64_t>(rrs1) <
+                                                                    static_cast<int64_t>(rrs2))
+                                                                 : (static_cast<int32_t>(rrs1) <
+                                                                    static_cast<int32_t>(rrs2));
+                                            break;
+                                        }
+                                        case FastOp::Jal:
+                                            taken = true;
+                                            write_rd(term->rd, cur_bb->fallthrough_pc);
+                                            break;
+                                        default:
+                                            break;
+                                    }
+                                    local_b += cur_bb->num_guest_ops;
+                                    compressed_count += cur_bb->num_compressed;
+                                    if (!taken) {
+                                        next_pc = cur_bb->fallthrough_pc;
+                                        next_bb = cur_bb->fallthrough_bb;
+                                        if (simrv::compiler::unlikely(next_bb == nullptr ||
+                                                                      next_bb->pc.raw() !=
+                                                                          next_pc)) {
+                                            next_bb = block_cache.lookup(next_pc);
+                                            if (next_bb == nullptr) {
+                                                next_bb = build_successor(next_pc);
+                                            }
+                                            cur_bb->fallthrough_bb = next_bb;
+                                        }
+                                        goto block_transition;
+                                    }
+                                }
+                                next_pc = cur_bb->pc.raw();
+                                next_bb = cur_bb;
+                                goto block_transition;
+                            }
 
                             if (!cur_bb->has_mem_op) {
                                 for (; i < non_branch_ops; ++i) {
@@ -598,90 +766,7 @@ SIMRV_ALWAYS_INLINE auto CPU::run_fast_baremetal_kernel(Machine& machine, uint32
                                 }
                             } else {
                                 for (; i < non_branch_ops; ++i) {
-                                    const auto& cop = cur_bb->ops[i];
-                                    if (is_alu_fast_op(cop.fast_op)) {
-                                        execute_pure_alu_cop(cop);
-                                        continue;
-                                    }
-                                    switch (cop.fast_op) {
-                                        case FastOp::Ld:
-                                            if (simrv::compiler::likely(
-                                                    try_fast_load_cop.template operator()<uint64_t>(
-                                                        cop)))
-                                                break;
-                                            block_fault = true;
-                                            break;
-                                        case FastOp::Lw:
-                                            if (simrv::compiler::likely(
-                                                    try_fast_load_cop.template operator()<int32_t>(
-                                                        cop)))
-                                                break;
-                                            block_fault = true;
-                                            break;
-                                        case FastOp::Lwu:
-                                            if (simrv::compiler::likely(
-                                                    try_fast_load_cop.template operator()<uint32_t>(
-                                                        cop)))
-                                                break;
-                                            block_fault = true;
-                                            break;
-                                        case FastOp::Lh:
-                                            if (simrv::compiler::likely(
-                                                    try_fast_load_cop.template operator()<int16_t>(
-                                                        cop)))
-                                                break;
-                                            block_fault = true;
-                                            break;
-                                        case FastOp::Lhu:
-                                            if (simrv::compiler::likely(
-                                                    try_fast_load_cop.template operator()<uint16_t>(
-                                                        cop)))
-                                                break;
-                                            block_fault = true;
-                                            break;
-                                        case FastOp::Lb:
-                                            if (simrv::compiler::likely(
-                                                    try_fast_load_cop.template operator()<int8_t>(
-                                                        cop)))
-                                                break;
-                                            block_fault = true;
-                                            break;
-                                        case FastOp::Lbu:
-                                            if (simrv::compiler::likely(
-                                                    try_fast_load_cop.template operator()<uint8_t>(
-                                                        cop)))
-                                                break;
-                                            block_fault = true;
-                                            break;
-                                        case FastOp::Sd:
-                                            if (simrv::compiler::likely(try_fast_store_cop.template
-                                                                        operator()<uint64_t>(cop)))
-                                                break;
-                                            block_fault = true;
-                                            break;
-                                        case FastOp::Sw:
-                                            if (simrv::compiler::likely(try_fast_store_cop.template
-                                                                        operator()<uint32_t>(cop)))
-                                                break;
-                                            block_fault = true;
-                                            break;
-                                        case FastOp::Sh:
-                                            if (simrv::compiler::likely(try_fast_store_cop.template
-                                                                        operator()<uint16_t>(cop)))
-                                                break;
-                                            block_fault = true;
-                                            break;
-                                        case FastOp::Sb:
-                                            if (simrv::compiler::likely(
-                                                    try_fast_store_cop.template operator()<uint8_t>(
-                                                        cop)))
-                                                break;
-                                            block_fault = true;
-                                            break;
-                                        default:
-                                            block_fault = true;
-                                            break;
-                                    }
+                                    execute_cop(cur_bb->ops[i], block_fault);
                                     if (simrv::compiler::unlikely(block_fault)) break;
                                 }
                             }
@@ -698,8 +783,7 @@ SIMRV_ALWAYS_INLINE auto CPU::run_fast_baremetal_kernel(Machine& machine, uint32
                                 goto chain_exit;
                             }
 
-                            const auto* const term = &cur_bb->ops[num_ops - 1];
-                            BasicBlock* next_bb = nullptr;
+                            next_bb = nullptr;
 
                             if (cur_bb->ends_with_branch) {
                                 bool taken = false;
@@ -762,10 +846,18 @@ SIMRV_ALWAYS_INLINE auto CPU::run_fast_baremetal_kernel(Machine& machine, uint32
                                         }
                                         write_rd(term->rd, cur_bb->fallthrough_pc);
                                         next_pc = target_pc;
-                                        next_bb = block_cache.lookup(next_pc);
-                                        if (simrv::compiler::unlikely(next_bb == nullptr)) {
-                                            next_bb =
-                                                block_cache.build_block(next_pc, decode_cache);
+                                        if (simrv::compiler::likely(
+                                                cur_bb->cached_jalr_target == target_pc &&
+                                                cur_bb->cached_jalr_bb != nullptr &&
+                                                cur_bb->cached_jalr_bb->pc.raw() == target_pc)) {
+                                            next_bb = cur_bb->cached_jalr_bb;
+                                        } else {
+                                            next_bb = block_cache.lookup(next_pc);
+                                            if (simrv::compiler::unlikely(next_bb == nullptr)) {
+                                                next_bb = build_successor(next_pc);
+                                            }
+                                            cur_bb->cached_jalr_target = target_pc;
+                                            cur_bb->cached_jalr_bb = next_bb;
                                         }
                                         goto block_branch_done;
                                     }
@@ -779,7 +871,7 @@ SIMRV_ALWAYS_INLINE auto CPU::run_fast_baremetal_kernel(Machine& machine, uint32
                                                               next_bb->pc.raw() != next_pc)) {
                                     next_bb = block_cache.lookup(next_pc);
                                     if (next_bb == nullptr) {
-                                        next_bb = block_cache.build_block(next_pc, decode_cache);
+                                        next_bb = build_successor(next_pc);
                                     }
                                     if (taken) {
                                         cur_bb->target_bb = next_bb;
@@ -794,22 +886,30 @@ SIMRV_ALWAYS_INLINE auto CPU::run_fast_baremetal_kernel(Machine& machine, uint32
                                                               next_bb->pc.raw() != next_pc)) {
                                     next_bb = block_cache.lookup(next_pc);
                                     if (next_bb == nullptr) {
-                                        next_bb = block_cache.build_block(next_pc, decode_cache);
+                                        next_bb = build_successor(next_pc);
                                     }
                                     cur_bb->fallthrough_bb = next_bb;
                                 }
                             }
                         block_branch_done:
                             compressed_count += cur_bb->num_compressed;
-                            seg_start_pc = next_pc;
                             local_b += cur_bb->num_guest_ops;
+                        block_transition:
+                            seg_start_pc = next_pc;
                             seg_start_b = local_b;
                             cur_bb = next_bb;
                             if (simrv::compiler::unlikely(local_b >= batch_size)) {
                                 goto chain_exit;
                             }
                         }
-                        goto chain_exit;
+                        if (simrv::compiler::unlikely(local_b >= batch_size)) {
+                            goto chain_exit;
+                        }
+                        chained = decode_cache.lookup_aligned(next_pc);
+                        if (simrv::compiler::unlikely(chained == nullptr)) {
+                            goto chain_exit;
+                        }
+                        op_tag = chained->fast_op;
                     }
 
                     while (true) {
@@ -1143,11 +1243,14 @@ SIMRV_ALWAYS_INLINE auto CPU::run_fast_baremetal_kernel(Machine& machine, uint32
                                     const simrv::xlen::Register target_pc =
                                         static_cast<simrv::xlen::Register>(chained->cpc.raw() +
                                                                            chained->imm);
-                                    if (simrv::compiler::unlikely(
-                                            !commit_taken_branch(target_pc))) {
-                                        goto chain_exit;
+                                    const auto action = commit_taken_branch(target_pc);
+                                    if (action == BranchAction::ContinueScalar) {
+                                        continue;
                                     }
-                                    continue;
+                                    if (action == BranchAction::EnterBlock) {
+                                        goto enter_block_loop;
+                                    }
+                                    goto chain_exit;
                                 }
                                 break;
                             }
@@ -1162,11 +1265,14 @@ SIMRV_ALWAYS_INLINE auto CPU::run_fast_baremetal_kernel(Machine& machine, uint32
                                     const simrv::xlen::Register target_pc =
                                         static_cast<simrv::xlen::Register>(chained->cpc.raw() +
                                                                            chained->imm);
-                                    if (simrv::compiler::unlikely(
-                                            !commit_taken_branch(target_pc))) {
-                                        goto chain_exit;
+                                    const auto action = commit_taken_branch(target_pc);
+                                    if (action == BranchAction::ContinueScalar) {
+                                        continue;
                                     }
-                                    continue;
+                                    if (action == BranchAction::EnterBlock) {
+                                        goto enter_block_loop;
+                                    }
+                                    goto chain_exit;
                                 }
                                 break;
                             }
@@ -1178,10 +1284,14 @@ SIMRV_ALWAYS_INLINE auto CPU::run_fast_baremetal_kernel(Machine& machine, uint32
                                 const simrv::xlen::Register target_pc =
                                     static_cast<simrv::xlen::Register>(chained->cpc.raw() +
                                                                        chained->imm);
-                                if (simrv::compiler::unlikely(!commit_taken_branch(target_pc))) {
-                                    goto chain_exit;
+                                const auto action = commit_taken_branch(target_pc);
+                                if (action == BranchAction::ContinueScalar) {
+                                    continue;
                                 }
-                                continue;
+                                if (action == BranchAction::EnterBlock) {
+                                    goto enter_block_loop;
+                                }
+                                goto chain_exit;
                             }
                             case FastOp::Bgeu: {
                                 const simrv::xlen::Register rrs1 =
@@ -1199,11 +1309,14 @@ SIMRV_ALWAYS_INLINE auto CPU::run_fast_baremetal_kernel(Machine& machine, uint32
                                     const simrv::xlen::Register target_pc =
                                         static_cast<simrv::xlen::Register>(chained->cpc.raw() +
                                                                            chained->imm);
-                                    if (simrv::compiler::unlikely(
-                                            !commit_taken_branch(target_pc))) {
-                                        goto chain_exit;
+                                    const auto action = commit_taken_branch(target_pc);
+                                    if (action == BranchAction::ContinueScalar) {
+                                        continue;
                                     }
-                                    continue;
+                                    if (action == BranchAction::EnterBlock) {
+                                        goto enter_block_loop;
+                                    }
+                                    goto chain_exit;
                                 }
                                 break;
                             }
@@ -1216,10 +1329,14 @@ SIMRV_ALWAYS_INLINE auto CPU::run_fast_baremetal_kernel(Machine& machine, uint32
                                     static_cast<simrv::xlen::Register>(chained->cpc.raw() +
                                                                        chained->op_len);
                                 write_rd(chained->rd, link_pc);
-                                if (simrv::compiler::unlikely(!commit_taken_branch(target_pc))) {
-                                    goto chain_exit;
+                                const auto action = commit_taken_branch(target_pc);
+                                if (action == BranchAction::ContinueScalar) {
+                                    continue;
                                 }
-                                continue;
+                                if (action == BranchAction::EnterBlock) {
+                                    goto enter_block_loop;
+                                }
+                                goto chain_exit;
                             }
                             case FastOp::Bge: {
                                 const simrv::xlen::Register rrs1 =
@@ -1235,11 +1352,14 @@ SIMRV_ALWAYS_INLINE auto CPU::run_fast_baremetal_kernel(Machine& machine, uint32
                                     const simrv::xlen::Register target_pc =
                                         static_cast<simrv::xlen::Register>(chained->cpc.raw() +
                                                                            chained->imm);
-                                    if (simrv::compiler::unlikely(
-                                            !commit_taken_branch(target_pc))) {
-                                        goto chain_exit;
+                                    const auto action = commit_taken_branch(target_pc);
+                                    if (action == BranchAction::ContinueScalar) {
+                                        continue;
                                     }
-                                    continue;
+                                    if (action == BranchAction::EnterBlock) {
+                                        goto enter_block_loop;
+                                    }
+                                    goto chain_exit;
                                 }
                                 break;
                             }
@@ -1259,11 +1379,14 @@ SIMRV_ALWAYS_INLINE auto CPU::run_fast_baremetal_kernel(Machine& machine, uint32
                                     const simrv::xlen::Register target_pc =
                                         static_cast<simrv::xlen::Register>(chained->cpc.raw() +
                                                                            chained->imm);
-                                    if (simrv::compiler::unlikely(
-                                            !commit_taken_branch(target_pc))) {
-                                        goto chain_exit;
+                                    const auto action = commit_taken_branch(target_pc);
+                                    if (action == BranchAction::ContinueScalar) {
+                                        continue;
                                     }
-                                    continue;
+                                    if (action == BranchAction::EnterBlock) {
+                                        goto enter_block_loop;
+                                    }
+                                    goto chain_exit;
                                 }
                                 break;
                             }
@@ -1280,11 +1403,14 @@ SIMRV_ALWAYS_INLINE auto CPU::run_fast_baremetal_kernel(Machine& machine, uint32
                                     const simrv::xlen::Register target_pc =
                                         static_cast<simrv::xlen::Register>(chained->cpc.raw() +
                                                                            chained->imm);
-                                    if (simrv::compiler::unlikely(
-                                            !commit_taken_branch(target_pc))) {
-                                        goto chain_exit;
+                                    const auto action = commit_taken_branch(target_pc);
+                                    if (action == BranchAction::ContinueScalar) {
+                                        continue;
                                     }
-                                    continue;
+                                    if (action == BranchAction::EnterBlock) {
+                                        goto enter_block_loop;
+                                    }
+                                    goto chain_exit;
                                 }
                                 break;
                             }

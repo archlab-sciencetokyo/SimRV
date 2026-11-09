@@ -15,7 +15,7 @@
 namespace simrv::core {
 
 static constexpr size_t kMaxBlockOps = 16;
-static constexpr size_t kNumBlockSets = 2048;
+static constexpr size_t kNumBlockSets = 4096;
 static constexpr size_t kBlockSetMask = kNumBlockSets - 1;
 
 /**
@@ -40,14 +40,16 @@ static_assert(sizeof(CompactOp) == 16);
  */
 struct alignas(64) BasicBlock {
     simrv::xlen::VirtAddr pc{~simrv::xlen::Register{0}};  ///< Tag: start virtual PC of block
-    BasicBlock* target_bb = nullptr;            ///< Direct pointer to taken branch target block
-    BasicBlock* fallthrough_bb = nullptr;       ///< Direct pointer to fallthrough block
-    simrv::xlen::Register target_pc = 0;        ///< Precomputed taken target PC
-    simrv::xlen::Register fallthrough_pc = 0;   ///< Precomputed fallthrough PC
-    uint16_t num_guest_ops = 0;                 ///< Architectural guest instruction count
-    uint16_t num_ops = 0;                       ///< Number of instructions (1..16)
-    uint16_t non_branch_ops = 0;                ///< Precomputed number of non-branch ops
-    uint16_t num_compressed = 0;                ///< Number of 16-bit compressed instructions
+    BasicBlock* target_bb = nullptr;               ///< Direct pointer to taken branch target block
+    BasicBlock* fallthrough_bb = nullptr;          ///< Direct pointer to fallthrough block
+    BasicBlock* cached_jalr_bb = nullptr;          ///< 1-entry cached JALR return/jump block
+    simrv::xlen::Register target_pc = 0;           ///< Precomputed taken target PC
+    simrv::xlen::Register fallthrough_pc = 0;      ///< Precomputed fallthrough PC
+    simrv::xlen::Register cached_jalr_target = 0;  ///< Last target PC for JALR terminal
+    uint16_t num_guest_ops = 0;                    ///< Architectural guest instruction count
+    uint16_t num_ops = 0;                          ///< Number of instructions (1..16)
+    uint16_t non_branch_ops = 0;                   ///< Precomputed number of non-branch ops
+    uint16_t num_compressed = 0;                   ///< Number of 16-bit compressed instructions
     uint16_t total_bytes = 0;                   ///< Total guest instruction bytes spanned by block
     FastOp term_op = FastOp::Other;             ///< FastOp tag of the terminal instruction
     BranchKind branch_kind = BranchKind::None;  ///< Branch kind for FastOp::Branch
@@ -67,8 +69,10 @@ struct alignas(64) BasicBlock {
         pc = simrv::xlen::VirtAddr{~simrv::xlen::Register{0}};
         target_bb = nullptr;
         fallthrough_bb = nullptr;
+        cached_jalr_bb = nullptr;
         target_pc = 0;
         fallthrough_pc = 0;
+        cached_jalr_target = 0;
         num_guest_ops = 0;
         num_ops = 0;
         non_branch_ops = 0;
@@ -81,7 +85,7 @@ struct alignas(64) BasicBlock {
         branch_kind = BranchKind::None;
     }
 };
-static_assert(sizeof(BasicBlock) <= 320);
+static_assert(sizeof(BasicBlock) <= 384);
 
 /**
  * @class BlockCache
@@ -108,7 +112,7 @@ class BlockCache {
 
     [[nodiscard]] SIMRV_ALWAYS_INLINE static constexpr auto calc_set(
         simrv::xlen::Register pc) noexcept -> size_t {
-        return (pc >> 1) & kBlockSetMask;
+        return ((pc >> 1) ^ (pc >> 13)) & kBlockSetMask;
     }
 
     [[nodiscard]] SIMRV_ALWAYS_INLINE auto lookup(simrv::xlen::Register pc) noexcept
