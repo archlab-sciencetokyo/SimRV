@@ -30,7 +30,7 @@ make -C "$ACT_DIR" \
   CERTIFICATE=RVA23 JOBS=12 \
   WORKDIR="$PWD/build/act4-rva23s64"
 
-python3 scripts/run_act4_tests.py \
+simrv-act \
   --simrv build/rv64-debug/simrv \
   --elf-dir build/act4-rva23s64/simrv-rva23s64/elfs \
   --report build/act4-rva23s64/simrv-rva23s64/simrv-report.json \

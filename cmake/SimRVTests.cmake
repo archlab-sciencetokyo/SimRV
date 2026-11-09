@@ -229,23 +229,20 @@ if(BUILD_TESTING)
                          e2e-suite "regress;e2e")
   set_tests_properties(e2e-suite PROPERTIES TIMEOUT 120)
 
-  # RVA23 Architectural Compatibility Tests (ACT)
-  if(PYTHON_BIN)
-    if(SIMRV_XLEN STREQUAL "64")
-      add_test(NAME rva23-act
-               COMMAND ${PYTHON_BIN} ${CMAKE_SOURCE_DIR}/scripts/run_act_tests.py
-                       --simrv $<TARGET_FILE:SimRV>
-                       --xlen ${SIMRV_XLEN}
-                       --work-dir ${CMAKE_CURRENT_BINARY_DIR}/act-qualification)
-      set_tests_properties(rva23-act
-                           PROPERTIES LABELS "act;rva23;profile" TIMEOUT 45)
-    endif()
-
-    add_test(NAME act-runner-tests
-             COMMAND ${PYTHON_BIN} ${CMAKE_SOURCE_DIR}/scripts/run_act_tests.py --help)
-    set_tests_properties(act-runner-tests
-                         PROPERTIES LABELS "act;tool" TIMEOUT 15)
+  # RVA23 Architectural Compatibility Tests (ACT4)
+  if(SIMRV_XLEN STREQUAL "64")
+    add_test(NAME rva23-act
+             COMMAND simrv-act
+                     --simrv $<TARGET_FILE:SimRV>
+                     --elf-dir ${CMAKE_CURRENT_BINARY_DIR}/act-qualification)
+    set_tests_properties(rva23-act
+                         PROPERTIES LABELS "act;rva23;profile" TIMEOUT 45)
   endif()
+
+  add_test(NAME act-runner-tests
+           COMMAND simrv-act --help)
+  set_tests_properties(act-runner-tests
+                       PROPERTIES LABELS "act;tool" TIMEOUT 15)
 
   # Optional App/Linux smoke tests
   if(DEFINED ENV{SIMRV_APP_IMG})
