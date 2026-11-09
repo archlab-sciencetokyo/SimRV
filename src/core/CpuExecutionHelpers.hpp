@@ -27,13 +27,17 @@ using isa::Opcode;
     return 1u << (static_cast<unsigned>(funct3) & 0x3u);
 }
 
-[[nodiscard]] SIMRV_ALWAYS_INLINE auto is_tohost_addr_fast(simrv::xlen::Address tohost,
-                                                           simrv::xlen::Address addr) noexcept
-    -> bool {
+[[nodiscard]] SIMRV_ALWAYS_INLINE constexpr auto is_tohost_addr_fast(
+    simrv::xlen::Address tohost, simrv::xlen::Address addr) noexcept -> bool {
     const auto masked = addr & ~simrv::xlen::Address{0x7ULL};
-    return simrv::compiler::unlikely(
-        (tohost != 0 && static_cast<simrv::xlen::Address>(addr - tohost) < 8u) ||
-        masked == 0x80001000ULL || masked == 0x40008000ULL);
+    if (simrv::compiler::unlikely(tohost != 0 &&
+                                  masked == (tohost & ~simrv::xlen::Address{0x7ULL}))) {
+        return true;
+    }
+    if (simrv::compiler::likely((masked & 0xFF8ULL) != 0)) {
+        return false;
+    }
+    return simrv::compiler::unlikely(masked == 0x80001000ULL || masked == 0x40008000ULL);
 }
 
 [[nodiscard]] SIMRV_ALWAYS_INLINE auto is_tohost_addr_fast(simrv::xlen::Address tohost,

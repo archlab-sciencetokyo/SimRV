@@ -307,11 +307,12 @@ auto Machine::framebuffer_view() const noexcept -> simrv::memory::RamView {
             geom.height > static_cast<uint32_t>(std::numeric_limits<int>::max()) ||
             !((geom.bpp == 2 && geom.format == FramebufferFormat::R5G6B5) ||
               (geom.bpp == 4 && geom.format == FramebufferFormat::A8R8G8B8)) ||
-            stride < row_bytes ||
-            stride * geom.height > data.size() ||
-            data.size() > std::numeric_limits<simrv::xlen::Address>::max()) return {};
-        return {const_cast<simrv::xlen::Byte*>(reinterpret_cast<const simrv::xlen::Byte*>(data.data())),
-                geom.base, static_cast<simrv::xlen::Address>(data.size())};
+            stride < row_bytes || stride * geom.height > data.size() ||
+            data.size() > std::numeric_limits<simrv::xlen::Address>::max())
+            return {};
+        return {
+            const_cast<simrv::xlen::Byte*>(reinterpret_cast<const simrv::xlen::Byte*>(data.data())),
+            geom.base, static_cast<simrv::xlen::Address>(data.size())};
     }
     const auto size = static_cast<simrv::xlen::Address>(framebuffer_geometry_.size_bytes());
     const auto base = framebuffer_geometry_.base;
@@ -596,7 +597,9 @@ auto Machine::rtc_device() noexcept -> simrv::Rtc* { return runtime_->rtc.get();
 
 auto Machine::rtc_device() const noexcept -> const simrv::Rtc* { return runtime_->rtc.get(); }
 
-auto Machine::uart_device() noexcept -> simrv::device::SerialDevice* { return runtime_->uart.get(); }
+auto Machine::uart_device() noexcept -> simrv::device::SerialDevice* {
+    return runtime_->uart.get();
+}
 
 auto Machine::uart_device() const noexcept -> const simrv::device::SerialDevice* {
     return runtime_->uart.get();
@@ -854,7 +857,8 @@ void Machine::publish_tui_execution_snapshot_for_hart(size_t hart_index) noexcep
     snapshot->hart = hart_index;
     snapshot->pc = source.state().pc;
     snapshot->cycle_count = source.clint_mmio.mcycle;
-    snapshot->instruction_count = source.e_icount;
+    snapshot->instruction_count =
+        source.state().minstret != 0 ? source.state().minstret : source.e_icount;
     snapshot->timer_ticks = primary_hart().clint_mmio.mtime.load(std::memory_order_relaxed);
     snapshot->privilege = source.state().priv;
     snapshot->ca_stats = source.pipeline_sim.get_stats();
@@ -913,10 +917,9 @@ auto Machine::fast_batch_policy() const -> std::optional<FastBatchPolicy> {
     // Ticking extension devices must observe each instruction boundary. The bare-metal
     // batch engine only advances the built-in UART, so use the general runner for them.
     if (!runtime_profile.allows_fast_batch() || !runtime_->ticked_extension_mmios.empty() ||
-        (runtime_->uart && runtime_->uart->requires_instruction_ticks()) ||
-        is_stepping() || lockstep_enabled() ||
-        branch_trace_enabled() || breakpoint_manager().has_any() || is_smp_enabled() ||
-        primary_hart().state().has_active_triggers ||
+        (runtime_->uart && runtime_->uart->requires_instruction_ticks()) || is_stepping() ||
+        lockstep_enabled() || branch_trace_enabled() || breakpoint_manager().has_any() ||
+        is_smp_enabled() || primary_hart().state().has_active_triggers ||
         primary_hart().cpu_model_config.mmio_console_redirect) {
         return std::nullopt;
     }
@@ -981,9 +984,11 @@ void RunnerBase::start_threads(Machine& machine, bool baremetal) {
                     // Cycle-mode workers must always wait for the next generation: a cycle
                     // already in flight still needs an acknowledgement after pause or stop.
                     return !machine.runtime_profile.is_cycle_mode() &&
-                        (hart.hart_status.load(std::memory_order_relaxed) != HartStatus::Started ||
-                         machine.execution_state() != ExecutionState::Running ||
-                         machine.breakpoint_manager().has_any() || machine.debug_pause_requested());
+                           (hart.hart_status.load(std::memory_order_relaxed) !=
+                                HartStatus::Started ||
+                            machine.execution_state() != ExecutionState::Running ||
+                            machine.breakpoint_manager().has_any() ||
+                            machine.debug_pause_requested());
                 };
                 if (should_park()) {
                     const auto generation =
@@ -1443,7 +1448,7 @@ void Machine::prewarm_bram_caches() {
     for (size_t h = 0; h < num_harts(); ++h) {
         auto& cpu = hart(h);
         const auto prewarm = [&]<typename Cache>(Cache& cache, simrv::xlen::PhysAddr address,
-                                                size_t size, bool align_segment) {
+                                                 size_t size, bool align_segment) {
             constexpr simrv::xlen::Address kLineBytes = Cache::kLineBytes;
             const simrv::xlen::Address start =
                 align_segment ? address.raw() & ~(kLineBytes - 1u) : address.raw();
@@ -1460,7 +1465,7 @@ void Machine::prewarm_bram_caches() {
                     cache.insert(physical, ram.unchecked_ptr(physical),
                                  simrv::memory::MesiState::Shared);
                     memory().system_bus().coherence_hub().register_preloaded_line(physical,
-                                                                                 cpu.hart_id());
+                                                                                  cpu.hart_id());
                 }
                 if (addr > std::numeric_limits<simrv::xlen::Address>::max() - kLineBytes) break;
                 addr += kLineBytes;
@@ -1720,6 +1725,8 @@ auto Machine::stop_reason_name(StopReason reason) noexcept -> std::string_view {
             return "lockstep divergence";
         case StopReason::UnhandledTrap:
             return "unhandled trap";
+        case StopReason::TrapLoop:
+            return "trap loop";
         case StopReason::ExternalStop:
             return "external/user stop";
     }

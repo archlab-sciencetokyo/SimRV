@@ -1667,8 +1667,9 @@ void Tracer::print_summary() {
     simrv::xlen::Counter icount = 0;
     simrv::xlen::Counter ccount = 0;
     for (size_t hart = 0; hart < machine_.num_harts(); ++hart) {
-        icount += machine_.hart(hart).e_icount;
-        ccount += machine_.hart(hart).e_ccount;
+        const auto& h = machine_.hart(hart);
+        icount += (h.state().minstret != 0 ? h.state().minstret : h.e_icount);
+        ccount += h.e_ccount;
     }
 
     const double cpi =

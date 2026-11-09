@@ -856,6 +856,7 @@ auto main(int argc, char* argv[]) -> int {  // NOLINT(bugprone-exception-escape)
             if (final_exit_code == 0) {
                 switch (sim_machine->stop_reason()) {
                     case simrv::core::Machine::StopReason::UnhandledTrap:
+                    case simrv::core::Machine::StopReason::TrapLoop:
                     case simrv::core::Machine::StopReason::LockstepDivergence:
                     case simrv::core::Machine::StopReason::GuestCrash:
                     case simrv::core::Machine::StopReason::TohostFail:

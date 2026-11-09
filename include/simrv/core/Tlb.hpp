@@ -26,6 +26,7 @@ namespace simrv::core {
 struct alignas(32) TLBEntry {
     simrv::xlen::VirtAddr v_addr{};  ///< Virtual page address
     simrv::xlen::PhysAddr p_addr{};  ///< Physical page address
+    uint32_t epoch{0};               ///< TLB generation epoch (4 bytes)
     Asid asid{};                     ///< Address Space Identifier (2 bytes)
     simrv::xlen::PrivilegeLevel priv =
         simrv::xlen::PrivilegeLevel::User;  ///< Architectural privilege level (1 byte)
@@ -69,6 +70,8 @@ class Tlb {
     alignas(64) std::array<uint8_t, kNumSets> inst_r_lru{};  ///< LRU bit per set for inst_r
     alignas(64) std::array<uint8_t, kNumSets> data_r_lru{};  ///< LRU bit per set for data_r
     alignas(64) std::array<uint8_t, kNumSets> data_w_lru{};  ///< LRU bit per set for data_w
+    uint32_t inst_epoch_{1};
+    uint32_t data_epoch_{1};
 
     /**
      * @brief Compute the TLB set index for a given virtual address with bit-mixed hashing.
@@ -121,16 +124,19 @@ class Tlb {
         -> TLBEntry* {
         auto& table = select_table_static<Kind>();
         auto& lru = select_lru_static<Kind>();
+        const uint32_t cur_epoch = select_epoch<Kind>();
         const auto set = calc_set(vaddr.raw());
         const simrv::xlen::Address vpage = calc_vpage(vaddr.raw());
         auto& set_entries = table[set];
         if (simrv::compiler::likely(set_entries[0].v_addr == vpage && set_entries[0].valid &&
+                                    set_entries[0].epoch == cur_epoch &&
                                     (set_entries[0].global || set_entries[0].asid == asid) &&
                                     set_entries[0].priv == priv)) {
             lru[set] = 1;
             return &set_entries[0];
         }
         if (set_entries[1].v_addr == vpage && set_entries[1].valid &&
+            set_entries[1].epoch == cur_epoch &&
             (set_entries[1].global || set_entries[1].asid == asid) && set_entries[1].priv == priv) {
             lru[set] = 0;
             return &set_entries[1];
@@ -156,10 +162,18 @@ class Tlb {
                        simrv::memory::PtePbmt pbmt = simrv::memory::PtePbmt::Pma) -> TLBEntry* {
         auto& table = select_table_static<Kind>();
         auto& lru = select_lru_static<Kind>();
+        const uint32_t cur_epoch = select_epoch<Kind>();
         const auto set = calc_set(vaddr.raw());
         const simrv::xlen::Address vpage = calc_vpage(vaddr.raw());
         const simrv::xlen::Address ppage = paddr.raw() & ~simrv::memory::kPageMask;
         auto& set_entries = table[set];
+
+        if (set_entries[0].epoch != cur_epoch) {
+            set_entries[0].valid = false;
+        }
+        if (set_entries[1].epoch != cur_epoch) {
+            set_entries[1].valid = false;
+        }
 
         if (set_entries[0].v_addr == vpage && set_entries[0].valid &&
             (global ? set_entries[0].global
@@ -168,6 +182,7 @@ class Tlb {
             set_entries[0].p_addr = simrv::xlen::PhysAddr{ppage};
             set_entries[0].global = global;
             set_entries[0].pbmt = pbmt;
+            set_entries[0].epoch = cur_epoch;
             lru[set] = 1;
             return &set_entries[0];
         }
@@ -178,6 +193,7 @@ class Tlb {
             set_entries[1].p_addr = simrv::xlen::PhysAddr{ppage};
             set_entries[1].global = global;
             set_entries[1].pbmt = pbmt;
+            set_entries[1].epoch = cur_epoch;
             lru[set] = 0;
             return &set_entries[1];
         }
@@ -186,6 +202,7 @@ class Tlb {
         auto& entry = set_entries[way];
         entry.v_addr = simrv::xlen::VirtAddr{vpage};
         entry.p_addr = simrv::xlen::PhysAddr{ppage};
+        entry.epoch = cur_epoch;
         entry.asid = asid;
         entry.priv = priv;
         entry.global = global;
@@ -202,11 +219,12 @@ class Tlb {
                                       simrv::xlen::PrivilegeLevel priv) const noexcept
         -> const TLBEntry* {
         const auto& table = select_table_static<Kind>();
+        const uint32_t cur_epoch = select_epoch<Kind>();
         const auto set = calc_set(vaddr.raw());
         const simrv::xlen::Address vpage = calc_vpage(vaddr.raw());
         for (const auto& entry : table[set]) {
-            if (entry.v_addr == vpage && entry.valid && (entry.global || entry.asid == asid) &&
-                entry.priv == priv) {
+            if (entry.v_addr == vpage && entry.valid && entry.epoch == cur_epoch &&
+                (entry.global || entry.asid == asid) && entry.priv == priv) {
                 return &entry;
             }
         }
@@ -325,6 +343,15 @@ class Tlb {
             return data_r_lru;
         } else {
             return data_w_lru;
+        }
+    }
+
+    template <TlbAccessKind Kind>
+    [[nodiscard]] constexpr auto select_epoch() const noexcept -> uint32_t {
+        if constexpr (Kind == TlbAccessKind::Instruction) {
+            return inst_epoch_;
+        } else {
+            return data_epoch_;
         }
     }
 };

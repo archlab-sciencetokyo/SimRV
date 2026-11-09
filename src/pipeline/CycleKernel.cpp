@@ -235,7 +235,7 @@ void CPU::run_ca_pipeline_cycle(Machine& machine) {
                                         !writeback->context.pending_exception.has_value() &&
                                         (state_.mip & state_.mie) == 0 &&
                                         !machine.instruction_mix_enabled())) {
-                ++e_icount;
+                account_retirement();
                 if (writeback->wb_valid) {
                     state_.regs.write_branchless(writeback->wb_dest, writeback->wb_val);
                 }

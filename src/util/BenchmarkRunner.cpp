@@ -300,13 +300,7 @@ auto run_benchmark(const RuntimeOptions& options) -> int {
                 icount += machine->hart(h).e_icount;
             }
         }
-        uint64_t ccount = 0;
-        for (size_t h = 0; h < machine->num_harts(); ++h) {
-            ccount += machine->hart(h).e_ccount;
-        }
-        if (ccount == 0) {
-            ccount = machine->primary_hart().clint_mmio.mcycle;
-        }
+        const uint64_t ccount = machine->primary_hart().clint_mmio.mcycle;
 
         const double mips = (wall_sec > 0.0) ? (static_cast<double>(icount) / wall_sec / 1e6) : 0.0;
         const double ipc =

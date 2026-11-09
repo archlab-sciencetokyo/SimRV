@@ -89,13 +89,21 @@ static_assert(sizeof(BasicBlock) <= 320);
  */
 class BlockCache {
    public:
-    BlockCache() noexcept { flush(); }
+    BlockCache() noexcept = default;
 
     void flush() noexcept {
+        if (!dirty_) {
+            return;
+        }
+        flush_all();
+    }
+
+    void flush_all() noexcept {
         for (auto& bb : blocks_) {
             bb.invalidate();
         }
         ++generation_;
+        dirty_ = false;
     }
 
     [[nodiscard]] SIMRV_ALWAYS_INLINE static constexpr auto calc_set(
@@ -133,6 +141,7 @@ class BlockCache {
    private:
     alignas(64) std::array<BasicBlock, kNumBlockSets> blocks_{};
     uint8_t generation_{0};
+    bool dirty_{false};
 };
 
 }  // namespace simrv::core

@@ -188,7 +188,7 @@ struct CachedOp {
     uint8_t op_len = 4;
     uint8_t next_victim : 1 = 0;
     uint8_t is_straight_mem : 1 = 0;
-    uint8_t reserved : 6 = 0;
+    uint8_t ctx : 6 = 0;
     [[nodiscard]] constexpr auto len() const noexcept -> uint8_t { return op_len; }
     [[nodiscard]] constexpr auto is_compressed() const noexcept -> bool { return op_len == 2u; }
     [[nodiscard]] constexpr auto align_mask() const noexcept -> uint8_t {
@@ -217,18 +217,21 @@ struct CachedOp {
         using enum FastOp;
         switch (op) {
             case isa::ADD:
-            case isa::ADDI:
                 return Add;
+            case isa::ADDI:
+                return Addi;
             case isa::SUB:
                 return Sub;
             case isa::AND:
                 return And;
             case isa::OR:
-            case isa::ORI:
                 return Or;
+            case isa::ORI:
+                return Ori;
             case isa::XOR:
-            case isa::XORI:
                 return Xor;
+            case isa::XORI:
+                return Xori;
             case isa::SLL:
                 return Sll;
             case isa::SRL:
@@ -277,8 +280,9 @@ struct CachedOp {
                 return Auipc;
 #if SIMRV_XLEN == 64
             case isa::ADDW:
-            case isa::ADDIW:
                 return Addw;
+            case isa::ADDIW:
+                return Addiw;
             case isa::SUBW:
                 return Subw;
             case isa::SLLW:
@@ -395,7 +399,8 @@ struct CachedOp {
                                                                     : BranchKind::None;
         branch_kind = br_kind;
         if (alu_op != FastOp::Other) {
-            fast_op = alu_op;
+            fast_op =
+                (alu_op == FastOp::Addi && rs1 == simrv::xlen::RegId::Zero) ? FastOp::Lui : alu_op;
             mem_size = 0;
             mem_class = FastMemClass::None;
             return;
@@ -562,10 +567,10 @@ class DecodeCache {
         }
     };
 
-    DecodeCache() noexcept { flush(); }
+    DecodeCache() noexcept { flush_all(); }
 
-    constexpr void set_active_context([[maybe_unused]] uint8_t ctx) noexcept {}
-    [[nodiscard]] constexpr auto active_context() const noexcept -> uint8_t { return 0; }
+    constexpr void set_active_context(uint8_t ctx) noexcept { active_ctx_ = ctx & 0x3Fu; }
+    [[nodiscard]] constexpr auto active_context() const noexcept -> uint8_t { return active_ctx_; }
 
     [[nodiscard]] SIMRV_ALWAYS_INLINE auto ops_data() noexcept -> CachedOp* {
         return &sets_[0].ways[0];
@@ -603,7 +608,14 @@ class DecodeCache {
     /**
      * @brief Invalidate all entries in the decode cache.
      */
-    void flush() {
+    void flush() noexcept {
+        if (!dirty_) {
+            return;
+        }
+        flush_all();
+    }
+
+    void flush_all() noexcept {
         for (auto& set : sets_) {
             set.ways[0].valid = 0;
             set.ways[0].next_seq_idx = kInvalidSeqIndex;
@@ -615,12 +627,19 @@ class DecodeCache {
             set.ways[1].cpc = simrv::xlen::VirtAddr{~simrv::xlen::Register{0}};
             set.set_next_victim(0);
         }
+        page_filter_.fill(0);
+        dirty_ = false;
     }
 
     /**
      * @brief Invalidate all entries in user space, preserving supervisor/kernel code.
      */
     void flush_user() noexcept {
+        if (!dirty_) {
+            return;
+        }
+        sets_[kSetMask].ways[0].next_seq_idx = kInvalidSeqIndex;
+        sets_[kSetMask].ways[1].next_seq_idx = kInvalidSeqIndex;
         for (auto& set : sets_) {
             for (auto& way : set.ways) {
                 if (way.valid) {
@@ -646,11 +665,20 @@ class DecodeCache {
      * @brief Invalidate all entries in the decode cache residing in a specific 4KB virtual page.
      * @param vpage 4KB-aligned virtual page address.
      */
-    void flush_page(simrv::xlen::Address vpage) {
+    void flush_page(simrv::xlen::Address vpage) noexcept {
+        if (!dirty_) {
+            return;
+        }
         const simrv::xlen::Address page_base = vpage & ~simrv::xlen::Address{0xFFF};
+        const auto vpn = page_base >> 12;
+        if (simrv::compiler::likely(!may_contain_page(vpn))) {
+            return;
+        }
         // With word-address indexing, a 4KB page spans 1024 cache sets (plus the preceding
         // halfword's set for a 32-bit instruction that straddles the page boundary).
         const size_t start_set = calc_set(page_base - 2);
+        sets_[start_set].ways[0].next_seq_idx = kInvalidSeqIndex;
+        sets_[start_set].ways[1].next_seq_idx = kInvalidSeqIndex;
         for (size_t i = 0; i <= 1024; ++i) {
             auto& set = sets_[(start_set + i) & kSetMask];
             if (set.ways[0].valid) {
@@ -700,10 +728,12 @@ class DecodeCache {
     [[nodiscard]] SIMRV_ALWAYS_INLINE auto lookup(simrv::xlen::Register pc) noexcept -> CachedOp* {
         const size_t set_idx = calc_set(pc);
         auto& set = sets_[set_idx];
-        if (simrv::compiler::likely(set.ways[0].cpc == pc && set.ways[0].valid)) {
+        const uint8_t ctx = active_ctx_;
+        if (simrv::compiler::likely(set.ways[0].cpc == pc && set.ways[0].ctx == ctx &&
+                                    set.ways[0].valid)) {
             return &set.ways[0];
         }
-        if (set.ways[1].cpc == pc && set.ways[1].valid) {
+        if (set.ways[1].cpc == pc && set.ways[1].ctx == ctx && set.ways[1].valid) {
             return &set.ways[1];
         }
         return nullptr;
@@ -729,10 +759,11 @@ class DecodeCache {
         }
         const size_t set_idx = calc_set(pc);
         auto& set = sets_[set_idx];
-        if (simrv::compiler::likely(set.ways[0].cpc == pc)) {
+        const uint8_t ctx = active_ctx_;
+        if (simrv::compiler::likely(set.ways[0].cpc == pc && set.ways[0].ctx == ctx)) {
             return &set.ways[0];
         }
-        if (set.ways[1].cpc == pc) {
+        if (set.ways[1].cpc == pc && set.ways[1].ctx == ctx) {
             return &set.ways[1];
         }
         return nullptr;
@@ -759,10 +790,11 @@ class DecodeCache {
     [[nodiscard]] SIMRV_ALWAYS_INLINE auto lookup_next_aligned(
         const CachedOp&, simrv::xlen::Register next_pc) noexcept -> CachedOp* {
         auto& set = sets_[calc_set(next_pc)];
-        if (simrv::compiler::likely(set.ways[0].cpc == next_pc)) {
+        const uint8_t ctx = active_ctx_;
+        if (simrv::compiler::likely(set.ways[0].cpc == next_pc && set.ways[0].ctx == ctx)) {
             return &set.ways[0];
         }
-        if (set.ways[1].cpc == next_pc) {
+        if (set.ways[1].cpc == next_pc && set.ways[1].ctx == ctx) {
             return &set.ways[1];
         }
         return nullptr;
@@ -777,10 +809,11 @@ class DecodeCache {
     [[nodiscard]] SIMRV_ALWAYS_INLINE auto lookup_target_aligned(
         const CachedOp&, simrv::xlen::Register target_pc) noexcept -> CachedOp* {
         auto& set = sets_[calc_set(target_pc)];
-        if (simrv::compiler::likely(set.ways[0].cpc == target_pc)) {
+        const uint8_t ctx = active_ctx_;
+        if (simrv::compiler::likely(set.ways[0].cpc == target_pc && set.ways[0].ctx == ctx)) {
             return &set.ways[0];
         }
-        if (set.ways[1].cpc == target_pc) {
+        if (set.ways[1].cpc == target_pc && set.ways[1].ctx == ctx) {
             return &set.ways[1];
         }
         return nullptr;
@@ -804,22 +837,23 @@ class DecodeCache {
     }
 
     /**
-     * @brief Look up the sequential successor in baremetal mode without hash arithmetic or context
-     * check.
+     * @brief Look up the sequential successor in baremetal mode without hash arithmetic.
      */
     [[nodiscard]] SIMRV_ALWAYS_INLINE auto lookup_sequential_baremetal(
         const CacheSet* candidate_set, simrv::xlen::Register next_pc) noexcept -> CachedOp* {
-        if (simrv::compiler::likely(candidate_set->ways[0].cpc == next_pc)) {
+        const uint8_t ctx = active_ctx_;
+        if (simrv::compiler::likely(candidate_set->ways[0].cpc == next_pc &&
+                                    candidate_set->ways[0].ctx == ctx)) {
             return const_cast<CachedOp*>(&candidate_set->ways[0]);
         }
-        if (candidate_set->ways[1].cpc == next_pc) {
+        if (candidate_set->ways[1].cpc == next_pc && candidate_set->ways[1].ctx == ctx) {
             return const_cast<CachedOp*>(&candidate_set->ways[1]);
         }
         return nullptr;
     }
 
     /**
-     * @brief Look up an aligned instruction in baremetal mode without context comparison.
+     * @brief Look up an aligned instruction in baremetal mode.
      */
     [[nodiscard]] SIMRV_ALWAYS_INLINE auto lookup_baremetal_aligned(
         simrv::xlen::Register pc) noexcept -> CachedOp* {
@@ -827,10 +861,11 @@ class DecodeCache {
             return nullptr;
         }
         auto& set = sets_[calc_set(pc)];
-        if (simrv::compiler::likely(set.ways[0].cpc == pc)) {
+        const uint8_t ctx = active_ctx_;
+        if (simrv::compiler::likely(set.ways[0].cpc == pc && set.ways[0].ctx == ctx)) {
             return &set.ways[0];
         }
-        if (set.ways[1].cpc == pc) {
+        if (set.ways[1].cpc == pc && set.ways[1].ctx == ctx) {
             return &set.ways[1];
         }
         return nullptr;
@@ -842,10 +877,12 @@ class DecodeCache {
      */
     [[nodiscard]] SIMRV_ALWAYS_INLINE auto lookup_sequential_aligned(
         const CacheSet* candidate_set, simrv::xlen::Register next_pc) noexcept -> CachedOp* {
-        if (simrv::compiler::likely(candidate_set->ways[0].cpc == next_pc)) {
+        const uint8_t ctx = active_ctx_;
+        if (simrv::compiler::likely(candidate_set->ways[0].cpc == next_pc &&
+                                    candidate_set->ways[0].ctx == ctx)) {
             return const_cast<CachedOp*>(&candidate_set->ways[0]);
         }
-        if (candidate_set->ways[1].cpc == next_pc) {
+        if (candidate_set->ways[1].cpc == next_pc && candidate_set->ways[1].ctx == ctx) {
             return const_cast<CachedOp*>(&candidate_set->ways[1]);
         }
         return nullptr;
@@ -857,6 +894,7 @@ class DecodeCache {
      * @param op Decoded instruction payload.
      */
     inline void insert(simrv::xlen::Register pc, const CachedOp& op) {
+        dirty_ = true;
         const size_t set_idx = calc_set(pc);
         auto& set = sets_[set_idx];
         uint8_t way = 0;
@@ -872,13 +910,35 @@ class DecodeCache {
             way = set.next_victim();
         }
         auto& entry = set.ways[way];
+        const auto entry_idx = index_of(&entry);
+        if (entry.valid) {
+            const auto old_pc = entry.cpc.raw();
+            auto& prev_set2 = sets_[calc_set(old_pc - 2)];
+            if (prev_set2.ways[0].next_seq_idx == entry_idx) {
+                prev_set2.ways[0].next_seq_idx = kInvalidSeqIndex;
+            }
+            if (prev_set2.ways[1].next_seq_idx == entry_idx) {
+                prev_set2.ways[1].next_seq_idx = kInvalidSeqIndex;
+            }
+            auto& prev_set4 = sets_[calc_set(old_pc - 4)];
+            if (prev_set4.ways[0].next_seq_idx == entry_idx) {
+                prev_set4.ways[0].next_seq_idx = kInvalidSeqIndex;
+            }
+            if (prev_set4.ways[1].next_seq_idx == entry_idx) {
+                prev_set4.ways[1].next_seq_idx = kInvalidSeqIndex;
+            }
+        }
         entry = op;
         entry.cpc = simrv::xlen::VirtAddr{pc};
         entry.valid = 1;
+        entry.ctx = active_ctx_;
         entry.next_seq_idx = kInvalidSeqIndex;
         entry.target_idx = kInvalidSeqIndex;
         entry.op_len = static_cast<uint8_t>(op.cinsn != 0 ? 2u : (op.op_len ? op.op_len : 4u));
         set.set_next_victim(static_cast<uint8_t>(1U - way));
+
+        mark_page(pc >> 12);
+        mark_page((pc + entry.op_len - 1) >> 12);
 
         // Pre-link sequential successor if already present in decode cache
         const auto next_pc = pc + entry.op_len;
@@ -898,7 +958,6 @@ class DecodeCache {
 
         // Backward link: check if predecessor instructions at pc - 2 or pc - 4 can link to this
         // entry
-        const auto entry_idx = index_of(&entry);
         if (pc >= 2) {
             if (auto* prev2 = lookup_aligned(pc - 2); prev2 != nullptr &&
                                                       prev2->cpc.raw() == (pc - 2) &&
@@ -917,7 +976,22 @@ class DecodeCache {
     inline void insert(simrv::xlen::VirtAddr pc, const CachedOp& op) { insert(pc.raw(), op); }
 
    private:
+    constexpr void mark_page(simrv::xlen::Address vpn) noexcept {
+        const size_t word_idx = static_cast<size_t>((vpn ^ (vpn >> 12)) & 63u);
+        const uint64_t bit_mask = uint64_t{1} << ((vpn ^ (vpn >> 6)) & 63u);
+        page_filter_[word_idx] |= bit_mask;
+    }
+
+    [[nodiscard]] constexpr auto may_contain_page(simrv::xlen::Address vpn) const noexcept -> bool {
+        const size_t word_idx = static_cast<size_t>((vpn ^ (vpn >> 12)) & 63u);
+        const uint64_t bit_mask = uint64_t{1} << ((vpn ^ (vpn >> 6)) & 63u);
+        return (page_filter_[word_idx] & bit_mask) != 0;
+    }
+
     std::array<CacheSet, kNumSets + 1> sets_{};
+    std::array<uint64_t, 64> page_filter_{};
+    uint8_t active_ctx_{0};
+    bool dirty_{false};
 };
 
 static_assert(sizeof(CachedOp) == (sizeof(simrv::xlen::Address) == 8 ? 32 : 28));

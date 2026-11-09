@@ -15,6 +15,7 @@ auto BlockCache::build_block(simrv::xlen::Register pc, DecodeCache& decode_cache
 
     auto& bb = blocks_[calc_set(pc)];
     bb.invalidate();
+    dirty_ = true;
     bb.pc = simrv::xlen::VirtAddr{pc};
     bb.num_guest_ops = 0;
     bb.num_ops = 0;

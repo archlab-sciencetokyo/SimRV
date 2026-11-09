@@ -107,6 +107,9 @@ void CPU::TLB_flush() {
         instruction_cache_timing.flush();
     }
     soft_tlb_flush();
+    if (machine_ != nullptr && machine_->memory().mmu() != nullptr) {
+        machine_->memory().mmu()->flush_pdc();
+    }
     sync_decode_context();
 }
 
@@ -117,31 +120,36 @@ void CPU::TLB_flush_satp() {
     decode_cache.flush_user();
     block_cache.flush();
     soft_tlb_flush();
-    if (machine_ != nullptr && machine_->memory().mmu() != nullptr) {
-        machine_->memory().mmu()->flush_pdc();
-    }
     sync_decode_context();
 }
 
 void CPU::flush_data_tlb() {
     tlb.flush_data();
     soft_tlb_flush();
-    if (machine_ != nullptr && machine_->memory().mmu() != nullptr) {
-        machine_->memory().mmu()->flush_pdc();
-    }
 }
 
 void CPU::TLB_flush(const core::TlbFlushFilter& filter) {
-    tlb.flush_selective(filter);
-    if (filter.vaddr) {
-        decode_cache.flush_page(filter.vaddr->raw() & ~simrv::xlen::Address{0xFFF});
+    core::TlbFlushFilter sanitized = filter;
+    if constexpr (simrv::xlen::kIsXLen64) {
+        if (state_.regs.xlen == 32 && sanitized.vaddr) {
+            sanitized.vaddr = simrv::xlen::VirtAddr{
+                static_cast<simrv::xlen::Address>(sanitized.vaddr->raw() & 0xFFFFFFFFULL)};
+        }
+    }
+    tlb.flush_selective(sanitized);
+    if (sanitized.vaddr) {
+        decode_cache.flush_page(sanitized.vaddr->raw() & ~simrv::xlen::Address{0xFFF});
     } else {
         decode_cache.flush();
     }
     block_cache.flush();
-    soft_tlb_flush_selective(filter);
+    soft_tlb_flush_selective(sanitized);
     if (machine_ != nullptr && machine_->memory().mmu() != nullptr) {
-        machine_->memory().mmu()->flush_pdc();
+        if (sanitized.vaddr) {
+            machine_->memory().mmu()->flush_pdc_vaddr(sanitized.vaddr->raw());
+        } else {
+            machine_->memory().mmu()->flush_pdc();
+        }
     }
 }
 
@@ -222,10 +230,13 @@ auto CPU::write_csr(simrv::xlen::CsrNumber addr, simrv::xlen::CsrValue wdata)
 }
 
 void CPU::mret() {
-    const auto old_privilege = state_.priv;
+    const auto old_virt = state_.virt;
+    const auto old_xlen = state_.regs.xlen;
     const auto old_mstatus = state_.mstatus;
     TrapController::mret(state_);
-    if (state_.priv != old_privilege || state_.mstatus != old_mstatus) {
+    if (simrv::compiler::unlikely(state_.virt != old_virt || state_.regs.xlen != old_xlen ||
+                                  (((old_mstatus | state_.mstatus) & MstatusBit::Mprv) != 0 &&
+                                   ((old_mstatus ^ state_.mstatus) & MstatusBit::Mpv) != 0))) {
         TLB_flush();
     } else {
         sync_decode_context();
@@ -233,10 +244,10 @@ void CPU::mret() {
 }
 
 void CPU::sret() {
-    const auto old_privilege = state_.priv;
-    const auto old_mstatus = state_.mstatus;
+    const auto old_virt = state_.virt;
+    const auto old_xlen = state_.regs.xlen;
     TrapController::sret(state_);
-    if (state_.priv != old_privilege || state_.mstatus != old_mstatus) {
+    if (simrv::compiler::unlikely(state_.virt != old_virt || state_.regs.xlen != old_xlen)) {
         TLB_flush();
     } else {
         sync_decode_context();
@@ -258,10 +269,13 @@ void CPU::plic_set_irq(simrv::xlen::IrqNumber irq_num, int state) {
 }
 
 void CPU::raise_exception(simrv::xlen::TrapCause cause, simrv::xlen::CsrValue tval) {
-    const auto old_privilege = state_.priv;
+    const auto old_virt = state_.virt;
+    const auto old_xlen = state_.regs.xlen;
     const auto old_mstatus = state_.mstatus;
     TrapController::raise_exception(*this, cause, tval);
-    if (state_.priv != old_privilege || state_.mstatus != old_mstatus) {
+    if (simrv::compiler::unlikely(state_.virt != old_virt || state_.regs.xlen != old_xlen ||
+                                  (((old_mstatus | state_.mstatus) & MstatusBit::Mprv) != 0 &&
+                                   ((old_mstatus ^ state_.mstatus) & MstatusBit::Mpv) != 0))) {
         TLB_flush();
     } else {
         sync_decode_context();

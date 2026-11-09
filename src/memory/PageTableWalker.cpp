@@ -169,7 +169,7 @@ auto PageTableWalker::begin_walk(simrv::xlen::VirtAddr v_addr, PteAccess access,
         const auto& entry = pdc_[pdc_idx];
         if (entry.epoch == pdc_epoch_ && entry.satp_root == state.satp_root &&
             entry.vpn_prefix == vpn_prefix) {
-            state.level = 0;
+            state.level = entry.target_level;
             select_next_pte(state, GuestPhysAddr{entry.table_address.raw()});
             return state;
         }
@@ -226,7 +226,8 @@ void PageTableWalker::accept_pte(PageWalkState& state, simrv::xlen::Word pte) co
             pdc_[pdc_idx] = PdcEntry{.satp_root = state.satp_root,
                                      .vpn_prefix = vpn_prefix,
                                      .table_address = simrv::xlen::PhysAddr{next_table.raw()},
-                                     .epoch = pdc_epoch_};
+                                     .epoch = pdc_epoch_,
+                                     .target_level = 0};
         }
 
         select_next_pte(state, next_table);
@@ -272,6 +273,17 @@ void PageTableWalker::accept_pte(PageWalkState& state, simrv::xlen::Word pte) co
         state.fault = page_fault_for(state.access);
         state.status = PageWalkStatus::Fault;
         return;
+    }
+    if (!state.guest_stage_enabled && state.xlen == 64 && state.level == 1 &&
+        state.vpn_bits_per_level == 9) {
+        const simrv::xlen::Word vpn_prefix = (state.virtual_address.raw() >> 21) & 0x3FFFFU;
+        const size_t pdc_idx = (vpn_prefix ^ (vpn_prefix >> 8)) & (kPdcSize - 1);
+        pdc_[pdc_idx] = PdcEntry{.satp_root = state.satp_root,
+                                 .vpn_prefix = vpn_prefix,
+                                 .table_address = simrv::xlen::PhysAddr{state.pte_address.raw() &
+                                                                        ~simrv::xlen::Word{0xFFF}},
+                                 .epoch = pdc_epoch_,
+                                 .target_level = 1};
     }
     const unsigned offset_bits = 12 + state.level * state.vpn_bits_per_level;
     const simrv::xlen::Word offset_mask = (static_cast<simrv::xlen::Word>(1) << offset_bits) - 1;

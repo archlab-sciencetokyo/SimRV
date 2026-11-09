@@ -174,6 +174,7 @@ class Machine final : public core::IInterruptController {
         GuestExit,
         LockstepDivergence,
         UnhandledTrap,
+        TrapLoop,
         ExternalStop,
     };
 
@@ -468,10 +469,12 @@ class Machine final : public core::IInterruptController {
     [[nodiscard]] auto rtc_device() const noexcept -> const simrv::Rtc*;
     [[nodiscard]] auto uart_device() noexcept -> simrv::device::SerialDevice*;
     [[nodiscard]] auto uart_device() const noexcept -> const simrv::device::SerialDevice*;
-    /// Advance simulation cycles for all registered platform/extension devices (UART, ticked MMIOs).
+    /// Advance simulation cycles for all registered platform/extension devices (UART, ticked
+    /// MMIOs).
     void advance_device_cycles(uint64_t cycles);
     [[nodiscard]] auto framebuffer_device() noexcept -> simrv::device::FramebufferDevice*;
-    [[nodiscard]] auto framebuffer_device() const noexcept -> const simrv::device::FramebufferDevice*;
+    [[nodiscard]] auto framebuffer_device() const noexcept
+        -> const simrv::device::FramebufferDevice*;
     [[nodiscard]] auto dma_controller() noexcept -> simrv::device::DmaController*;
     [[nodiscard]] auto dma_controller() const noexcept -> const simrv::device::DmaController*;
     [[nodiscard]] auto axi_bridge() noexcept -> simrv::memory::Axi4Bridge*;
@@ -566,7 +569,8 @@ class Machine final : public core::IInterruptController {
     void add_hart_for_testing(std::unique_ptr<CPU> hart);
     [[nodiscard]] auto test_secondary_harts() noexcept
         -> std::vector<std::unique_ptr<simrv::core::CPU>>&;
-    [[nodiscard]] auto mutable_uart_for_testing() noexcept -> std::unique_ptr<simrv::device::SerialDevice>&;
+    [[nodiscard]] auto mutable_uart_for_testing() noexcept
+        -> std::unique_ptr<simrv::device::SerialDevice>&;
     void finalize_for_testing() { finalize_runner_cycle(); }
     void execute_cycle_for_testing() { execute_runner_cycle(); }
     [[nodiscard]] auto execute_fast_batch_for_testing(uint32_t batch_size) -> bool {

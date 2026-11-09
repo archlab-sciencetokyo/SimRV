@@ -180,6 +180,7 @@ struct alignas(128) ArchState {
     simrv::xlen::Address load_res{};     ///< Active memory physical address reservation for
                                          ///< Load-Reserved / Store-Conditional (LR/SC)
     bool lr_reservation_active = false;  ///< Active reservation flag for LR/SC
+    uint32_t consecutive_traps = 0;      ///< Consecutive traps without instruction retirement
 
     /* Physical Memory Protection (PMP) */
     static constexpr size_t kNumPmpEntries = 16;
@@ -868,12 +869,6 @@ class CPU {
     }
     SIMRV_ALWAYS_INLINE void pc_sign_extend() noexcept { state_.canonicalize_pc(); }
 
-    /// Internal retirement accounting is unconditional; the architectural minstret CSR obeys IR.
-    SIMRV_ALWAYS_INLINE void account_retirement(uint64_t count = 1) noexcept {
-        e_icount += count;
-        if ((state_.mcountinhibit & 4U) == 0) state_.minstret += count;
-    }
-
     SIMRV_ALWAYS_INLINE void account_arch_cycles(uint64_t count = 1) noexcept {
         if ((state_.mcountinhibit & 1U) == 0) clint_mmio.mcycle += count;
     }
@@ -923,6 +918,14 @@ class CPU {
     simrv::xlen::Counter next_logical_issue_sequence_ = 0;
 
    public:
+    /// Account instruction retirement: clears consecutive traps, advances e_icount and
+    /// architectural minstret.
+    SIMRV_ALWAYS_INLINE void account_retirement(uint64_t count = 1) noexcept {
+        state_.consecutive_traps = 0;
+        e_icount += count;
+        if ((state_.mcountinhibit & 4U) == 0) state_.minstret += count;
+    }
+
     /// Zero-cost read-only access to architectural state for tracing/logging.
     [[nodiscard]] constexpr auto state() const -> const ArchState& { return state_; }
     /// Mutable access to architectural state for decoupled controllers.
@@ -980,19 +983,19 @@ class CPU {
     }
 
     /**
-     * @brief Computes an 8-bit architectural decode context tag encoding privilege, effective
-     * data privilege (MPRV/MPP), active XLEN, FS/VS enable state, and RVC alignment.
+     * @brief Computes a 6-bit architectural decode context tag encoding privilege, active
+     * instruction translation state, active XLEN, and FS/VS enable state.
      */
     [[nodiscard]] SIMRV_ALWAYS_INLINE constexpr auto compute_decode_context() const noexcept
         -> uint8_t {
         const uint8_t priv_bits = static_cast<uint8_t>(state_.priv) & 0x3u;
-        const uint8_t eff_priv_bits = static_cast<uint8_t>(effective_data_privilege()) & 0x3u;
-        const uint8_t xlen_bit = (state_.regs.xlen == 64) ? 0x10u : 0u;
-        const uint8_t fs_bit = ((state_.mstatus & MstatusBit::Fs) != 0) ? 0x20u : 0u;
-        const uint8_t vs_bit = ((state_.mstatus & MstatusBit::Vs) != 0) ? 0x40u : 0u;
-        const uint8_t rvc_bit = (state_.fetch_align_mask == 1u) ? 0x80u : 0u;
-        return static_cast<uint8_t>(priv_bits | (eff_priv_bits << 2u) | xlen_bit | fs_bit | vs_bit |
-                                    rvc_bit);
+        const bool satp_en = state_.priv != kPrivMachine &&
+                             simrv::xlen::satp_translation_enabled(active_satp(), state_.regs.xlen);
+        const uint8_t satp_bit = satp_en ? 0x04u : 0u;
+        const uint8_t xlen_bit = (state_.regs.xlen == 64) ? 0x08u : 0u;
+        const uint8_t fs_bit = state_.extension_state_enabled(MstatusBit::Fs) ? 0x10u : 0u;
+        const uint8_t vs_bit = state_.extension_state_enabled(MstatusBit::Vs) ? 0x20u : 0u;
+        return static_cast<uint8_t>(priv_bits | satp_bit | xlen_bit | fs_bit | vs_bit);
     }
 
     SIMRV_ALWAYS_INLINE void sync_decode_context() noexcept {
@@ -1000,6 +1003,7 @@ class CPU {
         if (simrv::compiler::unlikely(ctx != cached_decode_context_)) {
             cached_decode_context_ = ctx;
             decode_cache.set_active_context(ctx);
+            block_cache.flush();
         }
     }
 

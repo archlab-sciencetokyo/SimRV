@@ -20,6 +20,8 @@
 #include "simrv/core/Pmp.hpp"
 #include "simrv/core/RegisterFile.hpp"
 #include "simrv/core/Sbi.hpp"
+#include "simrv/core/TrapController.hpp"
+#include "simrv/core/TrapDescriptor.hpp"
 #include "simrv/execute/ExecuteUnit.hpp"
 #include "simrv/isa/Common.hpp"
 #include "simrv/memory/MemoryAccess.hpp"
@@ -444,8 +446,8 @@ void test_decode_cache_compact_round_robin() {
                   "CachedOp must preserve its RV64/RV32 cache-line footprint");
     static_assert(sizeof(simrv::core::DecodeCache::CacheSet) <= 64,
                   "CacheSet must match single 64-byte host cache line");
-    static_assert(sizeof(simrv::core::DecodeCache) <= 128 * 1024 + 64,
-                  "DecodeCache storage plus its aligned context byte must fit in 128KB");
+    static_assert(sizeof(simrv::core::DecodeCache) <= 128 * 1024 + 1024,
+                  "DecodeCache storage plus its filter and aligned context byte must fit in 129KB");
 
     // Fast memory precomputed attributes
     simrv::pipeline::DecodedInstruction load_inst{};
@@ -4827,9 +4829,149 @@ void test_sdtrig_memory_watchpoints() {
     expect(!cpu.state().has_active_triggers, "has_active_triggers cleared after cleaning up");
 }
 
+void test_formalized_trap_semantics() {
+    // 1. TrapDescriptor category classification
+    {
+        simrv::core::TrapDescriptor desc_irq{
+            .cause = simrv::isa::kInterruptCauseBit |
+                     static_cast<simrv::xlen::TrapCause>(simrv::isa::InterruptCode::MachineTimer),
+        };
+        expect(desc_irq.is_interrupt(), "TrapDescriptor identifies interrupts correctly");
+        expect(desc_irq.category() == simrv::core::TrapCategory::Interrupt,
+               "TrapDescriptor categorizes interrupts as TrapCategory::Interrupt");
+
+        simrv::core::TrapDescriptor desc_ecall{
+            .cause = static_cast<simrv::xlen::TrapCause>(simrv::isa::ExceptionCode::UserEcall),
+        };
+        expect(!desc_ecall.is_interrupt(), "TrapDescriptor user ecall is not an interrupt");
+        expect(desc_ecall.category() == simrv::core::TrapCategory::EnvironmentCall,
+               "TrapDescriptor categorizes ecall as TrapCategory::EnvironmentCall");
+
+        simrv::core::TrapDescriptor desc_bkpt{
+            .cause = static_cast<simrv::xlen::TrapCause>(simrv::isa::ExceptionCode::Breakpoint),
+        };
+        expect(desc_bkpt.category() == simrv::core::TrapCategory::Breakpoint,
+               "TrapDescriptor categorizes breakpoint as TrapCategory::Breakpoint");
+
+        simrv::core::TrapDescriptor desc_fetch_fault{
+            .cause = static_cast<simrv::xlen::TrapCause>(simrv::isa::ExceptionCode::FetchPageFault),
+        };
+        expect(desc_fetch_fault.category() == simrv::core::TrapCategory::InstructionFault,
+               "TrapDescriptor categorizes fetch page fault as InstructionFault");
+
+        simrv::core::TrapDescriptor desc_load_fault{
+            .cause = static_cast<simrv::xlen::TrapCause>(simrv::isa::ExceptionCode::LoadPageFault),
+        };
+        expect(desc_load_fault.category() == simrv::core::TrapCategory::DataFault,
+               "TrapDescriptor categorizes load page fault as DataFault");
+
+        simrv::core::TrapDescriptor desc_illegal{
+            .cause =
+                static_cast<simrv::xlen::TrapCause>(simrv::isa::ExceptionCode::IllegalInstruction),
+        };
+        expect(desc_illegal.category() == simrv::core::TrapCategory::IllegalInstruction,
+               "TrapDescriptor categorizes illegal instruction as IllegalInstruction");
+
+        simrv::core::TrapDescriptor desc_hw_err{
+            .cause = static_cast<simrv::xlen::TrapCause>(simrv::isa::ExceptionCode::HardwareError),
+        };
+        expect(desc_hw_err.is_fatal(), "TrapDescriptor hardware error is marked fatal");
+        expect(desc_hw_err.category() == simrv::core::TrapCategory::HardwareError,
+               "TrapDescriptor categorizes hardware error as HardwareError");
+    }
+
+    // 2. Trap dispatching, vector target, consecutive trap loop detection, and retirement
+    {
+        simrv::core::Machine machine;
+        std::array<simrv::xlen::Byte, 4096> backing{};
+        machine.set_ram_for_testing(backing.data(), backing.size());
+        machine.memory().initialize_mmu();
+
+        auto& cpu = machine.hart(simrv::xlen::HartId{0});
+        auto& state = cpu.state();
+
+        state.mtvec = 0x80000000;
+        state.pc = 0x1000;
+        state.priv = simrv::xlen::PrivilegeLevel::Machine;
+        state.consecutive_traps = 0;
+
+        simrv::core::TrapDescriptor desc{
+            .cause =
+                static_cast<simrv::xlen::TrapCause>(simrv::isa::ExceptionCode::IllegalInstruction),
+            .origin_pc = 0x1000,
+            .tval = 0xDEADBEEF,
+            .origin_priv = simrv::xlen::PrivilegeLevel::Machine,
+        };
+
+        // First trap dispatch
+        auto disp1 = simrv::core::TrapController::dispatch_trap(cpu, desc);
+        expect(disp1 == simrv::core::TrapDisposition::Delivered, "First trap is delivered");
+        expect(state.pc == 0x80000000, "Trap vectored PC to mtvec base");
+        expect(state.mepc == 0x1000, "mepc recorded origin PC");
+        expect(state.mcause == 2, "mcause recorded illegal instruction");
+        expect(state.mtval == 0xDEADBEEF, "mtval recorded tval");
+        expect(state.consecutive_traps == 1, "consecutive_traps incremented to 1");
+        expect(machine.stop_reason() == simrv::core::Machine::StopReason::Running,
+               "Machine is still running after first delivered trap");
+
+        // Second trap dispatch without retirement
+        desc.origin_pc = 0x80000000;
+        auto disp2 = simrv::core::TrapController::dispatch_trap(cpu, desc);
+        expect(disp2 == simrv::core::TrapDisposition::Delivered, "Second trap is delivered");
+        expect(state.consecutive_traps == 2, "consecutive_traps incremented to 2");
+        expect(machine.stop_reason() == simrv::core::Machine::StopReason::Running,
+               "Machine is still running after second trap");
+
+        // Instruction retirement resets consecutive_traps counter
+        cpu.account_retirement(1);
+        expect(state.consecutive_traps == 0,
+               "Instruction retirement resets consecutive_traps to 0");
+
+        // Test recursive trap loop detection (max_consecutive_traps = 3)
+        simrv::core::MachineConfig loop_cfg;
+        loop_cfg.execution.max_consecutive_traps = 3;
+        simrv::core::Machine loop_machine(loop_cfg);
+        loop_machine.set_ram_for_testing(backing.data(), backing.size());
+        loop_machine.memory().initialize_mmu();
+        auto& loop_cpu = loop_machine.hart(simrv::xlen::HartId{0});
+        loop_cpu.state().mtvec = 0x80000000;
+        loop_cpu.state().pc = 0x1000;
+        loop_cpu.state().priv = simrv::xlen::PrivilegeLevel::Machine;
+        loop_cpu.state().consecutive_traps = 0;
+
+        simrv::core::TrapController::dispatch_trap(loop_cpu, desc);  // trap 1
+        expect(loop_cpu.state().consecutive_traps == 1, "Trap loop test: count 1");
+        simrv::core::TrapController::dispatch_trap(loop_cpu, desc);  // trap 2
+        expect(loop_cpu.state().consecutive_traps == 2, "Trap loop test: count 2");
+
+        // Trap 3 reaches max_consecutive_traps (3) and halts
+        auto disp_loop = simrv::core::TrapController::dispatch_trap(loop_cpu, desc);  // trap 3
+        expect(disp_loop == simrv::core::TrapDisposition::Unrecoverable,
+               "Third consecutive trap without retirement is Unrecoverable");
+        expect(loop_machine.stop_reason() == simrv::core::Machine::StopReason::TrapLoop,
+               "Machine stopped with StopReason::TrapLoop");
+
+        // Test unrecoverable zero trap vector
+        simrv::core::Machine zero_vec_machine;
+        zero_vec_machine.set_ram_for_testing(backing.data(), backing.size());
+        zero_vec_machine.memory().initialize_mmu();
+        auto& cpu_zero = zero_vec_machine.hart(simrv::xlen::HartId{0});
+        cpu_zero.state().mtvec = 0;
+        cpu_zero.state().pc = 0x2000;
+        cpu_zero.state().priv = simrv::xlen::PrivilegeLevel::Machine;
+
+        auto disp_zero = simrv::core::TrapController::dispatch_trap(cpu_zero, desc);
+        expect(disp_zero == simrv::core::TrapDisposition::Unrecoverable,
+               "Zero mtvec dispatch is Unrecoverable");
+        expect(zero_vec_machine.stop_reason() == simrv::core::Machine::StopReason::UnhandledTrap,
+               "Zero mtvec stops machine with StopReason::UnhandledTrap");
+    }
+}
+
 }  // namespace
 
 int main() {
+    test_formalized_trap_semantics();
     test_strong_semantic_types();
     test_cache_hierarchy_semantics();
     test_sdtrig_trigger_registers();

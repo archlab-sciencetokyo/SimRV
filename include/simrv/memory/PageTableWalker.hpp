@@ -265,8 +265,7 @@ class PageTableWalker {
     /** Translate a guest-physical address through an SvNNx4 hgatp G-stage page table. */
     [[nodiscard]] auto walk_guest_physical(GuestPhysAddr guest_address, PteAccess access,
                                            simrv::xlen::Word hgatp, unsigned xlen,
-                                           GuestPhysAddr* fault_address = nullptr,
-                                           bool mxr = false,
+                                           GuestPhysAddr* fault_address = nullptr, bool mxr = false,
                                            const core::ArchState* arch_state = nullptr) const
         -> std::expected<PageWalkResult, simrv::xlen::TrapCause>;
 
@@ -277,12 +276,19 @@ class PageTableWalker {
         }
     }
 
+    void flush_pdc_vaddr(simrv::xlen::Address vaddr) noexcept {
+        const simrv::xlen::Word vpn_prefix = (vaddr >> 21) & 0x3FFFFU;
+        const size_t pdc_idx = (vpn_prefix ^ (vpn_prefix >> 8)) & (kPdcSize - 1);
+        pdc_[pdc_idx].epoch = 0;
+    }
+
    private:
     struct PdcEntry {
         simrv::xlen::Word satp_root{0};
         simrv::xlen::Word vpn_prefix{0};
         simrv::xlen::PhysAddr table_address{0};
         uint32_t epoch{0};
+        uint8_t target_level{0};
     };
 
     static constexpr size_t kPdcSize = 256;

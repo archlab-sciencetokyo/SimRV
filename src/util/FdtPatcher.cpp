@@ -449,9 +449,18 @@ auto patch_fdt(std::span<const uint8_t> blob, uint64_t dram_base, uint64_t dram_
                 const bool has_bitmanip = has_extension("b") || has_extension("zba") ||
                                           has_extension("zbb") || has_extension("zbs");
                 const bool has_compressed = has_extension("c") || has_extension("zca");
+                const auto* base_prop = prop(*c, "riscv,isa-base");
+                const auto* isa_prop = prop(*c, "riscv,isa");
+                const bool is_guest_rv32 =
+                    (base_prop != nullptr && !base_prop->data.empty() &&
+                     std::string_view(reinterpret_cast<const char*>(base_prop->data.data()))
+                         .starts_with("rv32")) ||
+                    (isa_prop != nullptr && !isa_prop->data.empty() &&
+                     std::string_view(reinterpret_cast<const char*>(isa_prop->data.data()))
+                         .starts_with("rv32"));
                 for (const auto ext : core::kPatchableGuestExtensions) {
                     if ((ext == "ssu64xl" || ext == "ssnpm" || ext == "supm") &&
-                        !simrv::xlen::kIsXLen64)
+                        (!simrv::xlen::kIsXLen64 || is_guest_rv32))
                         continue;
                     bool present = false;
                     size_t offset = 0;

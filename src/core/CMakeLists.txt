@@ -22,6 +22,8 @@ simrv_add_component(simrv-core
   Cpu.cpp
   CpuCycle.cpp
   CpuFastExecution.cpp
+  CpuFastBaremetal.cpp
+  CpuFastOs.cpp
   BlockCache.cpp
   ../util/CliParser.cpp
   ../util/Scaffolding.cpp

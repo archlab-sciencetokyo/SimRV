@@ -65,6 +65,7 @@ struct ExecutionConfig {
     bool realtime_pacing = false;
     uint64_t cpu_clock_hz = simrv::core::timing::kCpuClockHz;
     uint64_t timebase_hz = simrv::core::timing::kTimebaseHz;
+    uint32_t max_consecutive_traps = 3;  ///< Maximum recursive traps before halting as a trap loop
     simrv::isa::ArchitectureProfile profile = simrv::isa::kDefaultArchitectureProfile;
 };
 

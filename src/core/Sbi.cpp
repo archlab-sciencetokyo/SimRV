@@ -158,8 +158,14 @@ auto Sbi::handle_rfence(simrv::xlen::Word func_id) -> bool {
             target_cpu.decode_cache.flush();
             target_cpu.block_cache.flush();
         } else if (fid == RfenceFid::RemoteSfenceVma || fid == RfenceFid::RemoteSfenceVmaAsid) {
-            const simrv::xlen::Address start_addr = cpu_.state().regs.read(simrv::xlen::RegId::A2);
-            const simrv::xlen::Address size = cpu_.state().regs.read(simrv::xlen::RegId::A3);
+            simrv::xlen::Address start_addr = cpu_.state().regs.read(simrv::xlen::RegId::A2);
+            simrv::xlen::Address size = cpu_.state().regs.read(simrv::xlen::RegId::A3);
+            if constexpr (simrv::xlen::kIsXLen64) {
+                if (cpu_.state().regs.xlen == 32) {
+                    start_addr &= 0xFFFFFFFFULL;
+                    size &= 0xFFFFFFFFULL;
+                }
+            }
             const std::optional<Asid> filter_asid =
                 (fid == RfenceFid::RemoteSfenceVmaAsid)
                     ? std::make_optional(
@@ -167,14 +173,18 @@ auto Sbi::handle_rfence(simrv::xlen::Word func_id) -> bool {
                     : std::nullopt;
 
             constexpr simrv::xlen::Address kAllMask = ~static_cast<simrv::xlen::Address>(0);
-            if ((start_addr == 0 && size == 0) || size == kAllMask || size > (16 * 4096) ||
+            const bool is_all_mask =
+                (size == kAllMask) || (cpu_.state().regs.xlen == 32 &&
+                                       size == static_cast<simrv::xlen::Address>(0xFFFFFFFFULL));
+            if ((start_addr == 0 && size == 0) || is_all_mask || size > (16 * 4096) ||
                 (start_addr + size < start_addr)) {
                 target_cpu.TLB_flush(
                     core::TlbFlushFilter{.vaddr = std::nullopt, .asid = filter_asid});
             } else {
                 for (simrv::xlen::Address addr = start_addr; addr < start_addr + size;
                      addr += 4096) {
-                    target_cpu.TLB_flush(core::TlbFlushFilter{.vaddr = simrv::xlen::VirtAddr{addr}, .asid = filter_asid});
+                    target_cpu.TLB_flush(core::TlbFlushFilter{.vaddr = simrv::xlen::VirtAddr{addr},
+                                                              .asid = filter_asid});
                 }
             }
         }

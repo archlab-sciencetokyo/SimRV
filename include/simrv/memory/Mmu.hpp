@@ -42,6 +42,7 @@ class Mmu {
     [[nodiscard]] auto ram_view() const noexcept -> memory::RamView { return walker_.ram_view(); }
     void set_ram_view(memory::RamView ram) noexcept { walker_.set_ram_view(ram); }
     void flush_pdc() noexcept { walker_.flush_pdc(); }
+    void flush_pdc_vaddr(simrv::xlen::Address vaddr) noexcept { walker_.flush_pdc_vaddr(vaddr); }
 
     /**
      * @brief Perform a page walk using the active supported satp mode.
