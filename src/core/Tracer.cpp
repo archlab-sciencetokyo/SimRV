@@ -1786,7 +1786,9 @@ void Tracer::print_summary() {
     if (auto* uart = machine_.uart_device(); uart != nullptr) {
         uart->flush_tx_buffer();
     }
+    std::fflush(stdout);
 
+    std::println(stream);
     std::println(stream,
                  "{}┌── SimRV Execution Summary ─────────────────────────────────────────┐{}",
                  c_border, c_reset);
