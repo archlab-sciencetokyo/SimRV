@@ -3,7 +3,6 @@
  * @brief High-precision native microbenchmarks for SimRV architectural subsystems.
  */
 
-#define ANKERL_NANOBENCH_IMPLEMENT
 #include <array>
 #include <cstdint>
 #include <iostream>

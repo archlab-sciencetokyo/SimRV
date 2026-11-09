@@ -84,9 +84,9 @@ simrv --version
 ```
 
 Install `simrv-devel-*.rpm` to develop C++ applications against SimRV, `simrv-tools-*.rpm` for
-model and parity utilities, or `simrv-benchmark-*.rpm` for the benchmark driver. Upgrade by
+model, parity, and benchmark utilities, or `simrv-tests-*.rpm` for the compliance test runners. Upgrade by
 installing the corresponding packages from a newer bundle. Remove them with
-`sudo dnf remove simrv simrv-devel simrv-tools simrv-benchmark`.
+`sudo dnf remove simrv simrv-devel simrv-tools simrv-tests`.
 
 To install the runtime and SDK together from the downloaded bundle:
 
@@ -106,9 +106,9 @@ simrv --version
 ```
 
 The optional `simrv-devel` package provides the C++ SDK and depends on the matching `simrv`
-version. The tools and benchmark packages also depend on `simrv`. Install the needed `.deb` files
+version. The tools and test packages also depend on `simrv`. Install the needed `.deb` files
 with the same command. Upgrade from a newer bundle or remove packages with
-`sudo apt remove simrv simrv-devel simrv-tools simrv-benchmark`.
+`sudo apt remove simrv simrv-devel simrv-tools simrv-tests`.
 
 To install the runtime and SDK together from the downloaded bundle:
 
@@ -163,8 +163,8 @@ distribution is outside this matrix or when package-manager integration is unava
 | --- | --- | --- |
 | `simrv` | Simulator, CPU model configs, user docs, example assembly/source, and classroom mission files | x86-64 Linux host; RV64 guests and RV32 guest compatibility |
 | `simrv-devel` | Public C++ headers, static runtime library, and `SimRV::runtime` CMake package | Optional native SDK; C++23 compiler and host-compatible C++ standard library |
-| `simrv-tools` | CPU model wizard, tuning, and architecture configuration utilities | Standalone utilities; RTL parity also needs the selected external RTL/toolchain environment |
-| `simrv-benchmark` | Native benchmark execution driver and experiment metadata tools | Standalone execution; requires separately prepared benchmark workloads |
+| `simrv-tools` | CPU model wizard, tuning, RTL parity, and benchmarking suite | Standalone utilities; RTL parity also needs the selected external RTL/toolchain environment |
+| `simrv-tests` | Architectural compliance test drivers (ACT4 and Vector test runners) | Standalone test execution drivers; requires separately prepared test suites |
 
 Packages do not include a RISC-V cross compiler, generated guest ELF files, Linux images, or
 external test suites. The example Makefiles build into `/tmp` by default; install a RISC-V ELF

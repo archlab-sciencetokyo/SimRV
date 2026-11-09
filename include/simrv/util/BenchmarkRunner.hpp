@@ -6,6 +6,7 @@
 
 #include <chrono>
 #include <cstdint>
+#include <filesystem>
 #include <string>
 #include <vector>
 
@@ -56,10 +57,61 @@ struct BenchmarkReport {
 };
 
 /**
+ * @struct SpikeBenchmarkReport
+ * @brief Metrics recorded for Spike execution.
+ */
+struct SpikeBenchmarkReport {
+    std::string spike_path;
+    std::string elf_path;
+    uint32_t warmups = 0;
+    uint32_t runs = 0;
+    std::vector<std::chrono::nanoseconds> wall_times{};
+    BenchmarkStats wall_time_ms_stats{};
+    BenchmarkStats mips_stats{};
+    uint64_t retired_instructions = 0;
+    bool success = false;
+};
+
+/**
+ * @brief Auto-detect or locate Spike executable on host.
+ * @param hint User-supplied path or candidate name.
+ * @return Resolved executable path, or empty string if not found.
+ */
+auto find_spike_binary(const std::string& hint = "") -> std::string;
+
+/**
+ * @brief Resolve benchmark ELF from explicit path or benchmark suite names.
+ * @param name File path or short name (e.g. coremark, aha-mont, dhrystone).
+ * @return Resolved file path, or empty string if not found.
+ */
+auto resolve_benchmark_elf(const std::string& name) -> std::string;
+
+/**
  * @brief Run full-system benchmark iterations for an ELF binary.
  * @param options Runtime options configured from CLI arguments.
  * @return 0 on success, non-zero host exit code on failure.
  */
 auto run_benchmark(const RuntimeOptions& options) -> int;
+
+/**
+ * @brief Run Spike benchmark iterations for an ELF binary.
+ */
+auto run_spike_benchmark(const std::string& spike_bin, const std::string& elf_path, uint32_t runs,
+                         uint32_t warmups, uint64_t instruction_limit = 0,
+                         const std::string& isa = "", uint64_t fallback_icount = 0)
+    -> SpikeBenchmarkReport;
+
+/**
+ * @brief Print side-by-side comparative table between SimRV and Spike.
+ */
+void print_comparative_table(const BenchmarkReport& simrv_report,
+                             const SpikeBenchmarkReport& spike_report);
+
+/**
+ * @brief High-precision in-process microbenchmark runner using nanobench.
+ * @param options Runtime options configured from CLI arguments.
+ * @return 0 on success, non-zero host exit code on failure.
+ */
+auto run_nanobenchmark(const RuntimeOptions& options) -> int;
 
 }  // namespace simrv::util

@@ -72,14 +72,14 @@ if(NOT simulator_version_result EQUAL 0)
   message(FATAL_ERROR "Installed simrv --version failed: ${simulator_version_result}")
 endif()
 
-foreach(tool IN ITEMS simrv-cpu-wizard simrv-tune simrv-parity simrv-benchmark)
+foreach(tool IN ITEMS simrv-cpu-wizard simrv-tune simrv-parity simrv-benchmark simrv-act simrv-vector)
   if(NOT EXISTS "${install_root}/bin/${tool}")
     message(
       FATAL_ERROR "Expected installed tool ${tool} in ${install_root}/bin")
   endif()
 endforeach()
 
-foreach(tool IN ITEMS simrv-cpu-wizard simrv-tune simrv-parity simrv-benchmark)
+foreach(tool IN ITEMS simrv-cpu-wizard simrv-tune simrv-parity simrv-benchmark simrv-act simrv-vector)
   execute_process(
     COMMAND "${install_root}/bin/${tool}" --help
     RESULT_VARIABLE tool_help_result

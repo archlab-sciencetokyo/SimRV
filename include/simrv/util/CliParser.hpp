@@ -142,6 +142,10 @@ struct RuntimeOptions {
     uint32_t benchmark_runs = 5;
     uint32_t benchmark_warmups = 2;
     std::string benchmark_json_out;
+    std::string benchmark_spike_bin;
+    bool benchmark_nanobench = false;
+    std::string benchmark_suite;
+    std::string benchmark_isa_str;
     std::string fn_uefi_disk_kernel;
     std::string fn_uefi_disk_out;
     std::string fn_uefi_disk_rootfs;

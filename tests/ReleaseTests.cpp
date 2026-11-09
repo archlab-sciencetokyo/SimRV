@@ -114,9 +114,17 @@ int main() {
     "packaging_and_zero_python_dependencies"_test = [&] {
         const auto cmake_packaging = read_file_string(root / "cmake/SimRVPackaging.cmake");
         expect(!cmake_packaging.empty());
-        expect(cmake_packaging.find("CPACK_COMPONENTS_ALL Runtime Tools Benchmark Development") !=
+        expect(cmake_packaging.find("CPACK_COMPONENTS_ALL Runtime Tools Tests Development") !=
                std::string::npos);
         expect(cmake_packaging.find("SimRVBuildMetadata.json") != std::string::npos);
+        expect(cmake_packaging.find(R"(set(CPACK_DEBIAN_TESTS_PACKAGE_NAME "simrv-tests"))") !=
+               std::string::npos);
+        expect(cmake_packaging.find(R"(set(CPACK_RPM_TESTS_PACKAGE_NAME "simrv-tests"))") !=
+               std::string::npos);
+        expect(cmake_packaging.find(R"(set(CPACK_DEBIAN_TESTS_PACKAGE_NAME "simrv-tests"))") !=
+               std::string::npos);
+        expect(cmake_packaging.find(R"(set(CPACK_RPM_TESTS_PACKAGE_NAME "simrv-tests"))") !=
+               std::string::npos);
         expect(
             cmake_packaging.find(R"(set(CPACK_DEBIAN_DEVELOPMENT_PACKAGE_NAME "simrv-devel"))") !=
             std::string::npos);
