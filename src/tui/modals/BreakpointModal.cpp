@@ -178,7 +178,7 @@ auto BreakpointModal::submit(ModalType type, const std::string& input,
         } else {
             auto sym_opt = machine.symbol_table().lookup_name(input);
             if (sym_opt.has_value()) {
-                addr = *sym_opt;
+                addr = sym_opt->raw();
                 ok = true;
             }
         }
@@ -213,7 +213,7 @@ auto BreakpointModal::submit(ModalType type, const std::string& input,
         } else {
             auto sym_opt = machine.symbol_table().lookup_name(input);
             if (sym_opt.has_value()) {
-                addr = *sym_opt;
+                addr = sym_opt->raw();
                 ok = true;
             }
         }

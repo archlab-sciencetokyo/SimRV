@@ -1,5 +1,6 @@
 #include <algorithm>
 #include <array>
+#include <concepts>
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
@@ -11,6 +12,7 @@
 #include <memory>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 #if defined(__unix__) || defined(__APPLE__)
@@ -43,6 +45,11 @@ concept SymbolLookupAddress = requires(const simrv::debug::SymbolTable& table, T
 static_assert(SymbolLookupAddress<simrv::xlen::VirtAddr>);
 static_assert(!SymbolLookupAddress<simrv::xlen::PhysAddr>);
 static_assert(!SymbolLookupAddress<simrv::xlen::Address>);
+static_assert(std::same_as<decltype(std::declval<const simrv::debug::SymbolTable&>().lookup_name(
+                               std::declval<const std::string&>())),
+                           std::optional<simrv::xlen::VirtAddr>>);
+static_assert(std::same_as<decltype(std::declval<const simrv::debug::SymbolTable&>().entry_point()),
+                           std::optional<simrv::xlen::VirtAddr>>);
 
 constexpr simrv::xlen::Address kPc = simrv::memory::kDramBaseAddress;
 constexpr std::array<simrv::xlen::Instruction, 10> kProgram = {
@@ -630,7 +637,7 @@ void test_arch_trace_function_filter(std::string_view executable_path) {
     const auto calls = read_trace(sibling_path(path, "calls.jsonl"));
     if (calls.size() != 2 || calls.back().find("\"event\":\"call\"") == std::string::npos ||
         calls.back().find("\"function\":\"main\"") == std::string::npos ||
-        calls.back().find("\"source_pc\":\"0x" + std::format("{:x}", *main_pc) + "\"") ==
+        calls.back().find("\"source_pc\":\"0x" + std::format("{:x}", main_pc->raw()) + "\"") ==
             std::string::npos)
         std::abort();
 

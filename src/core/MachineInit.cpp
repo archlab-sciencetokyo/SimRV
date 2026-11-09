@@ -279,16 +279,20 @@ void resolve_start_pc_and_dram_base(simrv::core::Machine& machine,
                                     const simrv::debug::SymbolTable& symbols) {
     simrv::xlen::Address start_pc = machine.execution_config().start_pc;
     if (start_pc == simrv::boot::kStartPc || start_pc == 0) {
-        simrv::xlen::Address entry = symbols.entry_point().value_or(
-            symbols.lookup_name("_start").value_or(simrv::boot::kStartPc));
+        simrv::xlen::Address entry = symbols.entry_point()
+                                         .value_or(symbols.lookup_name("_start").value_or(
+                                             simrv::xlen::VirtAddr{simrv::boot::kStartPc}))
+                                         .raw();
         const simrv::xlen::Address dram_base = machine.ram_view().base();
         if (dram_base != 0 && entry < dram_base) {
             entry += dram_base;
         }
         start_pc = entry;
     }
-    machine.set_resolved_boot_state(start_pc, symbols.lookup_name("tohost").or_else(
-                                                  [&] { return symbols.lookup_name("_tohost"); }));
+    machine.set_resolved_boot_state(start_pc,
+                                    symbols.lookup_name("tohost")
+                                        .or_else([&] { return symbols.lookup_name("_tohost"); })
+                                        .transform([](auto addr) { return addr.raw(); }));
     machine.primary_hart().state().pc = machine.resolved_start_pc();
     if (machine.primary_hart().state().regs.xlen == 32) {
         machine.primary_hart().state().pc = static_cast<simrv::xlen::Register>(

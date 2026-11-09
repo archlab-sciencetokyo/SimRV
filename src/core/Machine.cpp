@@ -353,8 +353,8 @@ auto Machine::dump_signature(const std::string& filepath) const -> bool {
         return false;
     }
     if (*begin_opt >= *end_opt) {
-        simrv::log::warn("Invalid signature address range: begin=0x{:x} end=0x{:x}", *begin_opt,
-                         *end_opt);
+        simrv::log::warn("Invalid signature address range: begin=0x{:x} end=0x{:x}",
+                         begin_opt->raw(), end_opt->raw());
         return false;
     }
 
@@ -364,12 +364,12 @@ auto Machine::dump_signature(const std::string& filepath) const -> bool {
         return false;
     }
 
-    const auto len = static_cast<size_t>(*end_opt - *begin_opt);
+    const auto len = static_cast<size_t>(end_opt->raw() - begin_opt->raw());
     std::vector<uint8_t> buffer(len, 0);
     auto& mem = const_cast<Machine*>(this)->memory();
-    if (!mem.dma_read(simrv::xlen::PhysAddr{*begin_opt}, buffer.data(), len)) {
-        simrv::log::error("Failed to read signature range from memory: 0x{:x} - 0x{:x}", *begin_opt,
-                          *end_opt);
+    if (!mem.dma_read(simrv::xlen::PhysAddr{begin_opt->raw()}, buffer.data(), len)) {
+        simrv::log::error("Failed to read signature range from memory: 0x{:x} - 0x{:x}",
+                          begin_opt->raw(), end_opt->raw());
         return false;
     }
 

@@ -145,13 +145,15 @@ original starting tree remain incomplete; ARM hardware and usable host performan
 unavailable. See [strong typing and performance](../development/strong-typing-performance.md)
 for the measurements and their limitations.
 
-The strong-typing migration is also incomplete: symbol-table storage and name-lookup results,
-some trace and lockstep records, and TUI address entry points still use scalar address types.
+The strong-typing migration is also incomplete: symbol-table storage, some trace and lockstep
+records, and TUI address entry points still use scalar address types.
 These are remaining C++ interface boundaries to review; their presence does not by itself establish
 a guest-visible bug.
 
 Symbol and function lookups take `VirtAddr`; callers interpreting a raw address as an ELF virtual
-address must construct it explicitly. Symbol offsets remain scalar displacements.
+address must construct it explicitly. Symbol-name and ELF entry-point lookups also return
+`VirtAddr`, while symbol offsets remain scalar displacements. Legacy boot and signature paths
+explicitly extract raw values where they interpret ELF addresses as physical locations.
 
 MMIO routing and DMA APIs accept `simrv::xlen::PhysAddr`. C++ callers must explicitly construct
 physical addresses from platform configuration or translate virtual addresses before routing or

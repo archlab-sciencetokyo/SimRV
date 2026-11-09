@@ -272,9 +272,9 @@ void Tui::sync_mission_checkpoint() {
             "instructor to load the matching program file.");
         return;
     }
-    machine_.breakpoint_manager().add_pc_breakpoint(simrv::xlen::VirtAddr{*address},
+    machine_.breakpoint_manager().add_pc_breakpoint(*address,
                                                     simrv::debug::BreakpointOwner::Mission);
-    mission_breakpoint_addr_ = *address;
+    mission_breakpoint_addr_ = address->raw();
 }
 
 void Tui::apply_mission_guidance_layout() {

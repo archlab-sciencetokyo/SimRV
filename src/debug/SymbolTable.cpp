@@ -278,10 +278,10 @@ auto SymbolTable::lookup(simrv::xlen::VirtAddr addr) const -> std::string {
 }
 
 auto SymbolTable::lookup_name(const std::string& name) const
-    -> std::optional<simrv::xlen::Address> {
+    -> std::optional<simrv::xlen::VirtAddr> {
     for (const auto& [addr, sym_name] : symbols_) {
         if (sym_name == name) {
-            return addr;
+            return simrv::xlen::VirtAddr{addr};
         }
     }
     return std::nullopt;

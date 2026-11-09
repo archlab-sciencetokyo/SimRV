@@ -74,9 +74,9 @@ class SymbolTable {
     [[nodiscard]] auto lookup(simrv::xlen::VirtAddr addr) const -> std::string;
     auto lookup(simrv::xlen::Address) const -> std::string = delete;
     [[nodiscard]] auto lookup_name(const std::string& name) const
-        -> std::optional<simrv::xlen::Address>;
-    [[nodiscard]] auto entry_point() const -> std::optional<simrv::xlen::Address> {
-        return entry_point_;
+        -> std::optional<simrv::xlen::VirtAddr>;
+    [[nodiscard]] auto entry_point() const -> std::optional<simrv::xlen::VirtAddr> {
+        return entry_point_.transform([](auto addr) { return simrv::xlen::VirtAddr{addr}; });
     }
     void add_symbol_for_testing(simrv::xlen::Address addr, std::string name) {
         symbols_[addr] = std::move(name);
