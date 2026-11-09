@@ -260,10 +260,17 @@ class Machine final : public core::IInterruptController {
     [[nodiscard]] auto stage_reconfiguration(MachineConfig machine_config)
         -> std::expected<void, std::string>;
     [[nodiscard]] auto take_staged_reconfiguration() -> std::optional<MachineConfig>;
-    void set_start_time(std::chrono::steady_clock::time_point time) noexcept { start_time_ = time; }
+    void set_start_time(std::chrono::steady_clock::time_point time) noexcept {
+        start_time_ = time;
+        last_sample_time_ = time;
+        last_sample_instructions_ = retired_instruction_count();
+        peak_mips_ = 0.0;
+    }
     [[nodiscard]] auto start_time() const noexcept -> std::chrono::steady_clock::time_point {
         return start_time_;
     }
+    [[nodiscard]] auto peak_mips() const noexcept -> double { return peak_mips_; }
+    void sample_throughput() noexcept;
     /// Initialization-only derived boot state; image symbols never rewrite the input config.
     void set_resolved_boot_state(simrv::xlen::Address start_pc,
                                  std::optional<simrv::xlen::Address> tohost_address) noexcept;
@@ -414,6 +421,9 @@ class Machine final : public core::IInterruptController {
     void apply_configuration(MachineConfig machine_config);
     MachineConfig config{};
     std::chrono::steady_clock::time_point start_time_{};
+    std::chrono::steady_clock::time_point last_sample_time_{};
+    simrv::xlen::Counter last_sample_instructions_{0};
+    double peak_mips_{0.0};
     simrv::xlen::Address resolved_start_pc_ = 0;
     simrv::xlen::Address resolved_isatest_tohost_ = 0;
     FramebufferConfig framebuffer_geometry_{};

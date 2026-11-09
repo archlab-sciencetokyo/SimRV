@@ -8,6 +8,7 @@
 #include <sys/select.h>
 #include <unistd.h>
 
+#include <algorithm>
 #include <cerrno>
 
 #include "simrv/core/Machine.hpp"
@@ -21,6 +22,7 @@ constexpr uint8_t kIirNone = 0x01;
 constexpr uint8_t kIirTx = 0x02;
 constexpr uint8_t kIirRx = 0x04;
 constexpr uint8_t kIirLine = 0x06;
+constexpr uint8_t kIirTimeout = 0x0C;
 constexpr uint8_t kLsrDataReady = 0x01;
 constexpr uint8_t kLsrOverrun = 0x02;
 constexpr uint8_t kLsrThre = 0x20;
@@ -95,7 +97,7 @@ void Uart::start_input_thread() {
                 continue;
             }
             if (byte == 17) {
-                machine_.is_running_ = false;
+                machine_.stop(simrv::core::Machine::StopReason::ExternalStop);
                 return;
             }
             push_rx_byte(byte);
@@ -154,7 +156,10 @@ void Uart::write_host_byte(uint8_t ch) {
     if (machine_.console_sink()) machine_.console_sink()->handle_char_write(static_cast<char>(ch));
     if (pty_.is_open() || !machine_.console_sink()) {
         tx_buffer_[tx_buffer_len_++] = ch;
-        if (ch == '\n' || tx_buffer_len_ == tx_buffer_.size()) flush_tx_buffer();
+        if (ch == '\n' || tx_buffer_len_ == tx_buffer_.size() ||
+            (!machine_.tui_enabled() && !pty_.is_open())) {
+            flush_tx_buffer();
+        }
     }
 }
 
@@ -170,6 +175,7 @@ void Uart::drain_tx_fifo() noexcept {
         write_host_byte(ch);
     }
     tx_irq_pending_ = true;
+    flush_tx_buffer();
 }
 
 void Uart::stop_pty() {
@@ -242,8 +248,28 @@ void Uart::advance_cycles(uint64_t cycles) {
             }
         }
     }
+    {
+        std::scoped_lock lock(rx_mutex_);
+        if (rx_changed) {
+            rx_timeout_phase_ = 0;
+            rx_timeout_pending_ = false;
+        }
+        if (fcr_fifo_enabled_ && !rx_fifo_.empty() && !rx_timeout_pending_) {
+            const auto limit = frame_ticks * 4;
+            const auto elapsed = rx_changed ? rx_phase_ : cycles * clock_hz_;
+            rx_timeout_phase_ = std::min(rx_timeout_phase_, limit);
+            rx_timeout_phase_ += std::min(elapsed, limit - rx_timeout_phase_);
+            if (rx_timeout_phase_ >= limit) {
+                rx_timeout_pending_ = true;
+                irq_update_pending_.store(true, std::memory_order_release);
+            }
+        }
+    }
     if (tx_completed || rx_changed) irq_update_pending_.store(true, std::memory_order_release);
     service_interrupts();
+    if (tx_completed && tx_fifo_.empty() && !tx_shift_active_) {
+        flush_tx_buffer();
+    }
 }
 
 auto Uart::handle_request(const memory::TlChannelA& req, memory::TlChannelD& resp) -> bool {
@@ -263,6 +289,8 @@ auto Uart::handle_request(const memory::TlChannelA& req, memory::TlChannelD& res
                     std::scoped_lock lock(rx_mutex_);
                     resp.data = rx_fifo_.empty() ? 0 : rx_fifo_.front();
                     if (!rx_fifo_.empty()) rx_fifo_.pop_front();
+                    rx_timeout_phase_ = 0;
+                    rx_timeout_pending_ = false;
                     irq_update_pending_.store(true, std::memory_order_release);
                 }
                 break;
@@ -277,6 +305,8 @@ auto Uart::handle_request(const memory::TlChannelA& req, memory::TlChannelD& res
                     iir = kIirLine;
                 else if ((uart_ier_ & 0x01U) && rx_fifo_.size() >= fcr_trigger_level_)
                     iir = kIirRx;
+                else if ((uart_ier_ & 0x01U) && rx_timeout_pending_ && !rx_fifo_.empty())
+                    iir = kIirTimeout;
                 else if ((uart_ier_ & 0x02U) && tx_irq_pending_) {
                     iir = kIirTx;
                     tx_irq_pending_ = false;
@@ -343,12 +373,18 @@ auto Uart::handle_request(const memory::TlChannelA& req, memory::TlChannelD& res
                 break;
             case simrv::mmio::kUartRegIirFcr: {
                 fcr_fifo_enabled_ = (value & 1U) != 0;
+                if (!fcr_fifo_enabled_) {
+                    rx_timeout_phase_ = 0;
+                    rx_timeout_pending_ = false;
+                }
                 constexpr uint8_t kTriggerLevels[] = {1, 4, 8, 14};
                 fcr_trigger_level_ = fcr_fifo_enabled_ ? kTriggerLevels[(value >> 6U) & 3U] : 1;
                 if ((value & 2U) != 0) {
                     std::scoped_lock lock(rx_mutex_);
                     rx_fifo_.clear();
                     rx_overrun_ = false;
+                    rx_timeout_phase_ = 0;
+                    rx_timeout_pending_ = false;
                 }
                 if ((value & 4U) != 0) {
                     tx_fifo_.clear();
@@ -383,11 +419,18 @@ void Uart::push_rx_byte(uint8_t byte) {
     if (pending_rx_.size() < kPendingHostInputCapacity) pending_rx_.push_back(byte);
 }
 
+auto Uart::has_active_transfer() const noexcept -> bool {
+    std::scoped_lock lock(rx_mutex_);
+    return tx_shift_active_ || rx_shift_active_ || !tx_fifo_.empty() || !pending_rx_.empty() ||
+           (fcr_fifo_enabled_ && !rx_fifo_.empty() && !rx_timeout_pending_);
+}
+
 void Uart::service_interrupts() {
     if (!irq_update_pending_.exchange(false, std::memory_order_acq_rel)) return;
     std::scoped_lock lock(rx_mutex_);
     const bool line_irq = (uart_ier_ & 4U) && rx_overrun_;
-    const bool rx_irq = (uart_ier_ & 1U) && rx_fifo_.size() >= fcr_trigger_level_;
+    const bool rx_irq = (uart_ier_ & 1U) && (rx_fifo_.size() >= fcr_trigger_level_ ||
+                                             (rx_timeout_pending_ && !rx_fifo_.empty()));
     const bool tx_irq = (uart_ier_ & 2U) && tx_irq_pending_;
     machine_.set_platform_irq(static_cast<int>(irq_), line_irq || rx_irq || tx_irq);
 }
@@ -395,7 +438,8 @@ void Uart::service_interrupts() {
 auto Uart::is_interrupt_pending() const -> bool {
     std::scoped_lock lock(rx_mutex_);
     return ((uart_ier_ & 4U) && rx_overrun_) ||
-           ((uart_ier_ & 1U) && rx_fifo_.size() >= fcr_trigger_level_) ||
+           ((uart_ier_ & 1U) && (rx_fifo_.size() >= fcr_trigger_level_ ||
+                                 (rx_timeout_pending_ && !rx_fifo_.empty()))) ||
            ((uart_ier_ & 2U) && tx_irq_pending_);
 }
 }  // namespace simrv::device

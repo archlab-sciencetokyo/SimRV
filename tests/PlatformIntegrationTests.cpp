@@ -737,6 +737,19 @@ void test_uart_frame_timing_fifo_and_overrun() {
     for (uint32_t i = 0; i < 16; ++i) (void)read(simrv::mmio::kUartRegRbrThrDll);
     check((read(simrv::mmio::kUartRegLsr) & 0x01U) == 0);
 
+    // A FIFO below its trigger level raises a timeout only after four idle frames.
+    write(simrv::mmio::kUartRegIirFcr, 0x43);
+    write(simrv::mmio::kUartRegIerDlm, 1);
+    uart.push_rx_byte('r');
+    uart.advance_cycles(13'889);
+    check((read(simrv::mmio::kUartRegIirFcr) & 0x0fU) == 1);
+    uart.advance_cycles(4 * 13'888);
+    check((read(simrv::mmio::kUartRegIirFcr) & 0x0fU) == 1);
+    uart.advance_cycles(4);
+    check((read(simrv::mmio::kUartRegIirFcr) & 0x0fU) == 0x0c);
+    check(read(simrv::mmio::kUartRegRbrThrDll) == 'r');
+    check((read(simrv::mmio::kUartRegIirFcr) & 0x0fU) == 1);
+
     // In a word-spaced 16550, offset 8 is the FIFO-control / interrupt-ID register.
     simrv::device::Uart shifted_uart(machine);
     simrv::memory::TlChannelA shifted_request{};

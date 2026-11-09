@@ -841,6 +841,23 @@ void Machine::publish_tui_execution_snapshot() noexcept {
     }
 }
 
+void Machine::sample_throughput() noexcept {
+    const auto now = std::chrono::steady_clock::now();
+    const auto current_instructions = retired_instruction_count();
+    const auto elapsed_ns =
+        std::chrono::duration_cast<std::chrono::nanoseconds>(now - last_sample_time_).count();
+    if (elapsed_ns >= 1'000'000 && current_instructions > last_sample_instructions_) {
+        const auto d_inst = current_instructions - last_sample_instructions_;
+        const double mips =
+            (static_cast<double>(d_inst) * 1000.0) / static_cast<double>(elapsed_ns);
+        if (mips > peak_mips_) {
+            peak_mips_ = mips;
+        }
+        last_sample_time_ = now;
+        last_sample_instructions_ = current_instructions;
+    }
+}
+
 void Machine::publish_requested_tui_sample(size_t hart_index) noexcept {
     const auto requested = tui_sample_requested_.load(std::memory_order_acquire);
     if (hart_index >= num_harts() || hart_index >= tui_sample_published_.size() ||
@@ -1241,7 +1258,6 @@ void BaremetalRunner::finalize(Machine& machine) {
     if (simrv::compiler::unlikely(
             machine.config.execution.fincnt != std::numeric_limits<simrv::xlen::Counter>::max() &&
             machine.retired_instruction_count() >= machine.config.execution.fincnt)) {
-        simrv::log::info("finished by -e option");
         machine.stop(Machine::StopReason::InstructionLimit);
     }
     if (auto* uart = machine.uart_device(); uart) {
@@ -1289,10 +1305,10 @@ auto OsRunner::execute_fast_batch(Machine& machine, uint32_t batch_size) -> bool
             ? batch_size
             : std::min(batch_size, static_cast<uint32_t>(machine.config.execution.smp_quantum));
     cpu.run_fast_os_batch(machine, quantum, *policy);
-    // Functional TUI batches do not enter the per-cycle finalizer, so surface pending UART RX at
-    // the same explicit boundary that publishes the sampled UI snapshot.
-    if (auto* uart = machine.uart_device(); uart && machine.tui_enabled()) {
+    // Surface pending UART RX at the batch boundary.
+    if (auto* uart = machine.uart_device(); uart) {
         uart->service_interrupts();
+        uart->flush_tx_buffer();
     }
     return true;
 }
@@ -1318,7 +1334,6 @@ void OsRunner::finalize(Machine& machine) {
     if (simrv::compiler::unlikely(
             machine.config.execution.fincnt != std::numeric_limits<simrv::xlen::Counter>::max() &&
             machine.retired_instruction_count() >= machine.config.execution.fincnt)) {
-        simrv::log::info("finished by -e option");
         machine.stop(Machine::StopReason::InstructionLimit);
     }
     if (auto* uart = machine.uart_device();
@@ -1881,15 +1896,14 @@ void Machine::run() {
             if (simrv::compiler::unlikely(config.execution.fincnt !=
                                               std::numeric_limits<simrv::xlen::Counter>::max() &&
                                           retired_instruction_count() >= config.execution.fincnt)) {
-                simrv::log::info("finished by -e option");
                 stop_reason_ = StopReason::InstructionLimit;
                 is_running_ = false;
             }
-            if (auto* uart = uart_device();
-                !tui_enabled() && uart && !uart->is_input_thread_running()) {
+            if (auto* uart = uart_device(); !tui_enabled() && uart) {
                 uart->service_interrupts();
             }
             if (runtime_->gdb_stub) runtime_->gdb_stub->service_pending(*this);
+            sample_throughput();
             pace_realtime();
             continue;
         }
@@ -1897,6 +1911,9 @@ void Machine::run() {
         prepare_runner_cycle();
         execute_runner_cycle();
         finalize_runner_cycle();
+        if ((primary_hart().clint_mmio.mcycle & 0x3FF) == 0) {
+            sample_throughput();
+        }
 
         if (simrv::compiler::unlikely(tohost != 0)) {
             finalize_cycle_tohost();
@@ -1905,7 +1922,6 @@ void Machine::run() {
         if (simrv::compiler::unlikely(config.execution.fincnt !=
                                           std::numeric_limits<simrv::xlen::Counter>::max() &&
                                       retired_instruction_count() >= config.execution.fincnt)) {
-            simrv::log::info("finished by -e option");
             stop_reason_ = StopReason::InstructionLimit;
             is_running_ = false;
         }

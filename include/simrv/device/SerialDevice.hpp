@@ -29,6 +29,7 @@ class SerialDevice : public simrv::memory::TileLinkNode {
     [[nodiscard]] virtual auto has_active_transfer() const noexcept -> bool = 0;
     [[nodiscard]] virtual auto start_pty() -> bool = 0;
     virtual void stop_pty() = 0;
+    virtual void flush_tx_buffer() noexcept {}
     [[nodiscard]] virtual auto pty_slave_path() const -> const std::string& = 0;
 };
 

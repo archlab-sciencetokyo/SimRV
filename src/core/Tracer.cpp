@@ -39,6 +39,8 @@
 #include "simrv/core/Machine.hpp"
 #include "simrv/debug/SpikeLockstep.hpp"
 #include "simrv/debug/SymbolTable.hpp"
+#include "simrv/device/SerialDevice.hpp"
+#include "simrv/isa/IsaConfig.hpp"
 #include "simrv/isa/Priv.hpp"
 #include "simrv/memory/MemorySubsystem.hpp"
 #include "simrv/memory/MemoryUtil.hpp"
@@ -49,6 +51,7 @@
 #include "simrv/util/FormatUtil.hpp"
 #include "simrv/util/Sha256.hpp"
 #include "simrv/xlen/Constants.hpp"
+#include "simrv/xlen/Helpers.hpp"
 #include "simrv/xlen/IdentifierTypes.hpp"
 #include "simrv/xlen/RegisterTypes.hpp"
 
@@ -1655,6 +1658,85 @@ void Tracer::write_instruction_mix_report() {
         static_cast<simrv::xlen::Counter>(machine_.primary_hart().clint_mmio.mtime.load()));
 }
 
+namespace {
+
+auto visual_width(std::string_view s) -> size_t {
+    size_t width = 0;
+    bool in_esc = false;
+    for (size_t i = 0; i < s.length(); ++i) {
+        const auto c = static_cast<unsigned char>(s[i]);
+        if (c == '\033') {
+            in_esc = true;
+        } else if (in_esc) {
+            if ((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || c == '~') {
+                in_esc = false;
+            }
+        } else {
+            if ((c & 0x80) == 0) {
+                ++width;
+            } else if ((c & 0xE0) == 0xC0) {
+                ++width;
+                if (i + 1 < s.length()) ++i;
+            } else if ((c & 0xF0) == 0xE0) {
+                ++width;
+                if (i + 2 < s.length())
+                    i += 2;
+                else
+                    i = s.length();
+            } else if ((c & 0xF8) == 0xF0) {
+                ++width;
+                if (i + 3 < s.length())
+                    i += 3;
+                else
+                    i = s.length();
+            }
+        }
+    }
+    return width;
+}
+
+auto format_duration_adaptive(uint64_t microseconds) -> std::string {
+    if (microseconds < 1000) {
+        return std::format("{} µs", microseconds);
+    }
+    if (microseconds < 1000000) {
+        return std::format("{:.2f} ms", static_cast<double>(microseconds) / 1000.0);
+    }
+    return std::format("{:.3f} s", static_cast<double>(microseconds) / 1000000.0);
+}
+
+auto format_speed_value(double mips) -> std::string {
+    if (mips >= 1000.0) {
+        return std::format("{:.3f} GIPS", mips / 1000.0);
+    }
+    if (mips >= 1.0) {
+        return std::format("{:.2f} MIPS", mips);
+    }
+    const auto kips = static_cast<uint64_t>(mips * 1000.0);
+    return std::format("{} KIPS", simrv::util::format_with_commas(kips));
+}
+
+auto render_progress_bar(double percent, bool tty, std::string_view c_fill,
+                         std::string_view c_empty, std::string_view c_reset) -> std::string {
+    const int total_blocks = 10;
+    const int filled = std::clamp(static_cast<int>(std::round(percent / 10.0)), 0, total_blocks);
+    std::string bar = "[";
+    if (tty) {
+        bar += c_fill;
+        for (int i = 0; i < filled; ++i) bar += "█";
+        bar += c_empty;
+        for (int i = filled; i < total_blocks; ++i) bar += "░";
+        bar += c_reset;
+    } else {
+        for (int i = 0; i < filled; ++i) bar += "█";
+        for (int i = filled; i < total_blocks; ++i) bar += "░";
+    }
+    bar += "]";
+    return bar;
+}
+
+}  // namespace
+
 void Tracer::print_summary() {
     using simrv::util::format_scaled;
     using simrv::util::format_with_commas;
@@ -1678,92 +1760,185 @@ void Tracer::print_summary() {
         mcycle == 0 ? 0.0 : static_cast<double>(icount) / static_cast<double>(mcycle);
     const double comp_ratio =
         icount == 0 ? 0.0 : (static_cast<double>(ccount) * 100.0) / static_cast<double>(icount);
-    const double etime_sec = static_cast<double>(etime) / 1000000.0;
+    FILE* const stream = simrv::log::get_log_to_stderr() ? stderr : stdout;
+    const int fd = (stream == stderr) ? STDERR_FILENO : STDOUT_FILENO;
+    const bool tty = simrv::util::terminal_color_enabled(fd);
 
-    simrv::log::info("--------------------------------------------------");
-    simrv::log::info("                Execution Summary                 ");
-    simrv::log::info("--------------------------------------------------");
-    simrv::log::info("Simulation Engine        : {:>22}",
-                     machine_.runtime_profile.execution_name());
-    simrv::log::info("Termination reason       : {:>22}",
-                     Machine::stop_reason_name(machine_.stop_reason()));
-    simrv::log::info("Process exit status      : {:>22}", machine_.exit_code.load());
-    simrv::log::info("Target / harts           : {:>13} / {:<3}",
-                     std::format("RV{}", simrv::xlen::kXLenBits), machine_.num_harts());
-    if (machine_.runtime_profile.is_cycle_mode()) {
-        simrv::log::info("CA pipeline              : {:>22}",
-                         pipeline::pipeline_type_name(machine_.execution_config().pipeline_type));
+    const std::string_view c_border = tty ? "\033[1;36m" : "";
+    const std::string_view c_header = tty ? "\033[1;37m" : "";
+    const std::string_view c_green = tty ? "\033[1;32m" : "";
+    const std::string_view c_red = tty ? "\033[1;31m" : "";
+    const std::string_view c_yellow = tty ? "\033[1;33m" : "";
+    const std::string_view c_cyan = tty ? "\033[36m" : "";
+    const std::string_view c_dim = tty ? "\033[90m" : "";
+    const std::string_view c_reset = tty ? "\033[0m" : "";
+
+    auto row = [&](std::string_view content) {
+        const size_t vw = visual_width(content);
+        const size_t pad = (vw < 66) ? (66 - vw) : 0;
+        std::println(stream, "{}│{} {}{}{} │{}", c_border, c_reset, content, std::string(pad, ' '),
+                     c_border, c_reset);
+    };
+
+    auto empty_row = [&]() { row(""); };
+
+    std::fflush(stdout);
+    if (auto* uart = machine_.uart_device(); uart != nullptr) {
+        uart->flush_tx_buffer();
     }
-    simrv::log::info("Elapsed cycles (clocks)  : {:>12}  ({})", format_scaled(mcycle),
-                     format_with_commas(mcycle));
-    simrv::log::info("Executed instructions    : {:>12}  ({})", format_scaled(icount),
-                     format_with_commas(icount));
-    simrv::log::info("Final architectural PC   :   0x{:016x}", machine_.primary_hart().state().pc);
-    simrv::log::info("Fetched compressed insns : {:>12}  ({})  [{:.1f}%]", format_scaled(ccount),
-                     format_with_commas(ccount), comp_ratio);
-    simrv::log::info("Cycles Per Instr (CPI)   : {:>12.3f}", cpi);
-    simrv::log::info("Instrs Per Cycle (IPC)   : {:>12.3f}", ipc);
 
+    std::println(stream,
+                 "{}┌── SimRV Execution Summary ─────────────────────────────────────────┐{}",
+                 c_border, c_reset);
+
+    // Section 1: Simulation Status
+    row(std::format("{}Simulation Status{}", c_header, c_reset));
+    const std::string isa_str =
+        simrv::xlen::resolve_misa_string(machine_.primary_hart().state().misa);
+    const auto profile_str = to_profile_string(machine_.execution_config().profile);
+    std::string arch_desc = isa_str;
+    if (!profile_str.empty() && profile_str != "legacy" &&
+        !(isa_str.starts_with("RV32") && profile_str.ends_with("64"))) {
+        arch_desc += std::format(" ({})", profile_str);
+    }
+    row(std::format("  {:<22}: {} · {} hart(s)", "Target Architecture", arch_desc,
+                    machine_.num_harts()));
+    if (machine_.runtime_profile.is_cycle_mode()) {
+        row(std::format("  {:<22}: {} ({})", "Simulation Engine",
+                        machine_.runtime_profile.execution_name(),
+                        pipeline::pipeline_type_name(machine_.execution_config().pipeline_type)));
+    } else {
+        row(std::format("  {:<22}: {}", "Simulation Engine",
+                        machine_.runtime_profile.execution_name()));
+    }
+    row(std::format("  {:<22}: {}", "Termination Reason",
+                    Machine::stop_reason_name(machine_.stop_reason())));
+    const int exit_code = machine_.exit_code.load();
+    if (exit_code == 0) {
+        row(std::format("  {:<22}: {}0 (Success){}", "Exit Status", c_green, c_reset));
+    } else {
+        row(std::format("  {:<22}: {}{} (Failure){}", "Exit Status", c_red, exit_code, c_reset));
+    }
+
+    // Section 2: Performance & Throughput
+    empty_row();
+    row(std::format("{}Performance & Throughput{}", c_header, c_reset));
+    row(std::format("  {:<22}: {}  ({})", "Retired Instructions", format_scaled(icount),
+                    format_with_commas(icount)));
+    row(std::format("  {:<22}: {}  ({} clocks)", "Elapsed Cycles", format_scaled(mcycle),
+                    format_with_commas(mcycle)));
+    row(std::format("  {:<22}: {:.3f}  (IPC: {:.3f})", "Cycles Per Inst (CPI)", cpi, ipc));
+    const bool has_c =
+        (machine_.primary_hart().state().misa & (1ULL << ('c' - 'a'))) != 0 || ccount > 0;
+    if (has_c) {
+        const auto bar = render_progress_bar(comp_ratio, tty, c_cyan, c_dim, c_reset);
+        row(std::format("  {:<22}: {:>5.1f}%  {}  ({} insns)", "Compressed RVC Share", comp_ratio,
+                        bar, format_with_commas(ccount)));
+    }
+    row(std::format("  {:<22}: {}0x{:016x}{}", "Final Primary PC", c_yellow,
+                    machine_.primary_hart().state().pc, c_reset));
+    row(std::format("  {:<22}: {}", "Host Wall Time", format_duration_adaptive(etime)));
+
+    machine_.sample_throughput();
+    const double avg_mips =
+        (etime == 0) ? 0.0 : static_cast<double>(icount) / static_cast<double>(etime);
+    const double peak_mips = std::max(machine_.peak_mips(), avg_mips);
+    const std::string avg_str = format_speed_value(avg_mips);
+    const std::string peak_str = format_speed_value(peak_mips);
+    row(std::format("  {:<22}: {}{} avg{}  ({} peak)", "Simulation Speed", c_green, avg_str,
+                    c_reset, peak_str));
+
+    // Section 3: Multi-Hart Breakdown
     if (machine_.num_harts() > 1) {
+        empty_row();
+        row(std::format("{}Multi-Hart Core Breakdown{}", c_header, c_reset));
         for (size_t i = 0; i < machine_.num_harts(); ++i) {
             const auto& h = machine_.hart(i);
             const char* priv_str = (h.state().priv == simrv::xlen::PrivilegeLevel::Machine) ? "M"
                                    : (h.state().priv == simrv::xlen::PrivilegeLevel::Supervisor)
                                        ? "S"
                                        : "U";
-            simrv::log::info("Hart {:<2} [mode {:>1}, PC 0x{:016x}] Executed Insns : {:>12}  ({})",
-                             i, priv_str, h.state().pc, format_scaled(h.e_icount),
-                             format_with_commas(h.e_icount));
+            const double share = icount == 0 ? 0.0
+                                             : (static_cast<double>(h.e_icount) * 100.0) /
+                                                   static_cast<double>(icount);
+            row(std::format("  Hart {:<2} [{}-mode]  PC: {}0x{:016x}{}  {:>10} insns ({:4.1f}%)", i,
+                            priv_str, c_yellow, h.state().pc, c_reset, format_scaled(h.e_icount),
+                            share));
         }
     }
 
+    // Section 4: Microarchitecture & Pipeline / Memory (if cycle mode)
     if (machine_.runtime_profile.is_cycle_mode()) {
+        empty_row();
+        row(std::format("{}Microarchitecture & Pipeline{}", c_header, c_reset));
         const auto& ps = machine_.primary_hart().pipeline_sim;
-        double stall_pct = mcycle == 0 ? 0.0
-                                       : (static_cast<double>(ps.stall_cycles()) * 100.0) /
-                                             static_cast<double>(mcycle);
-        simrv::log::info("Total Stall/Bubble Cycles: {:>12}  [{:.1f}%]",
-                         format_with_commas(ps.stall_cycles()), stall_pct);
-        simrv::log::info(" - Data RAW Stalls       : {:>12}",
-                         format_with_commas(ps.data_hazard_stalls()));
-        simrv::log::info(" - Control Bubbles       : {:>12}",
-                         format_with_commas(ps.control_hazard_bubbles()));
-        simrv::log::info(" - ICache Miss Stalls    : {:>12}",
-                         format_with_commas(ps.icache_stalls()));
-        simrv::log::info(" - DCache Miss Stalls    : {:>12}",
-                         format_with_commas(ps.dcache_stalls()));
-        simrv::log::info(" - Page-walk Stalls      : {:>12}", format_with_commas(ps.tlb_stalls()));
-        simrv::log::info("L1I hits / misses        : {:>12} / {}",
-                         format_with_commas(machine_.primary_hart().icache.hit_count()),
-                         format_with_commas(machine_.primary_hart().icache.miss_count()));
-        simrv::log::info("L1D hits / misses        : {:>12} / {}",
-                         format_with_commas(machine_.primary_hart().dcache.hit_count()),
-                         format_with_commas(machine_.primary_hart().dcache.miss_count()));
+        const double stall_pct = mcycle == 0 ? 0.0
+                                             : (static_cast<double>(ps.stall_cycles()) * 100.0) /
+                                                   static_cast<double>(mcycle);
+        row(std::format("  {:<22}: {}  ({:.1f}% of clocks)", "Total Stall Cycles",
+                        format_with_commas(ps.stall_cycles()), stall_pct));
+        row(std::format("    · {:<20}: {}", "Data RAW Stalls",
+                        format_with_commas(ps.data_hazard_stalls())));
+        row(std::format("    · {:<20}: {}", "Control Bubbles",
+                        format_with_commas(ps.control_hazard_bubbles())));
+        row(std::format("    · {:<20}: {}", "I-Cache Miss",
+                        format_with_commas(ps.icache_stalls())));
+        row(std::format("    · {:<20}: {}", "D-Cache Miss",
+                        format_with_commas(ps.dcache_stalls())));
+        row(std::format("    · {:<20}: {}", "Page-Walk Stalls",
+                        format_with_commas(ps.tlb_stalls())));
+
+        empty_row();
+        row(std::format("{}Memory & Cache Subsystem{}", c_header, c_reset));
+        const auto ic_hits = machine_.primary_hart().icache.hit_count();
+        const auto ic_miss = machine_.primary_hart().icache.miss_count();
+        const auto ic_total = ic_hits + ic_miss;
+        const double ic_rate =
+            ic_total == 0 ? 0.0 : (static_cast<double>(ic_hits) * 100.0) / ic_total;
+        if (ic_total > 0) {
+            row(std::format("  {:<22}: {} hits / {} misses  ({:.1f}% hit rate)",
+                            "L1 Instruction Cache", format_with_commas(ic_hits),
+                            format_with_commas(ic_miss), ic_rate));
+        } else {
+            row(std::format("  {:<22}: 0 hits / 0 misses", "L1 Instruction Cache"));
+        }
+
+        const auto dc_hits = machine_.primary_hart().dcache.hit_count();
+        const auto dc_miss = machine_.primary_hart().dcache.miss_count();
+        const auto dc_total = dc_hits + dc_miss;
+        const double dc_rate =
+            dc_total == 0 ? 0.0 : (static_cast<double>(dc_hits) * 100.0) / dc_total;
+        if (dc_total > 0) {
+            row(std::format("  {:<22}: {} hits / {} misses  ({:.1f}% hit rate)", "L1 Data Cache",
+                            format_with_commas(dc_hits), format_with_commas(dc_miss), dc_rate));
+        } else {
+            row(std::format("  {:<22}: 0 hits / 0 misses", "L1 Data Cache"));
+        }
+
         const auto& bp_stats = machine_.primary_hart().branch_predictor.stats();
         if (bp_stats.direction_predictions > 0) {
-            simrv::log::info("Branch hits / misses     : {:>12} / {}",
-                             format_with_commas(bp_stats.direction_hits),
-                             format_with_commas(bp_stats.direction_misses));
+            const double bp_rate = (static_cast<double>(bp_stats.direction_hits) * 100.0) /
+                                   bp_stats.direction_predictions;
+            row(std::format("  {:<22}: {} hits / {} misses  ({:.1f}% accuracy)", "Branch Predictor",
+                            format_with_commas(bp_stats.direction_hits),
+                            format_with_commas(bp_stats.direction_misses), bp_rate));
         }
+
         const auto& bus = machine_.memory().system_bus();
-        simrv::log::info("Bus reads / writes       : {:>12} / {}",
-                         format_with_commas(bus.read_count()),
-                         format_with_commas(bus.write_count()));
-        simrv::log::info("Bus pending req / resp   : {:>12} / {}",
-                         format_with_commas(bus.pending_requests()),
-                         format_with_commas(bus.pending_responses()));
+        row(std::format("  {:<22}: {} reads / {} writes", "System Bus Activity",
+                        format_with_commas(bus.read_count()),
+                        format_with_commas(bus.write_count())));
+        if (bus.pending_requests() > 0 || bus.pending_responses() > 0) {
+            row(std::format("  {:<22}: {} req / {} resp", "Bus Pending",
+                            format_with_commas(bus.pending_requests()),
+                            format_with_commas(bus.pending_responses())));
+        }
     }
 
-    simrv::log::info("Elapsed time (real)      : {:>12.3f} sec", etime_sec);
-
-    const auto kips = icount * 1000UL / etime;
-    const double mips = static_cast<double>(icount) / static_cast<double>(etime);
-    if (mips >= 1.0) {
-        simrv::log::info("Simulation speed         : {:>12.2f} MIPS", mips);
-    } else {
-        simrv::log::info("Simulation speed         : {:>12} KIPS", format_with_commas(kips));
-    }
-    simrv::log::info("--------------------------------------------------");
+    std::println(stream,
+                 "{}└────────────────────────────────────────────────────────────────────┘{}",
+                 c_border, c_reset);
+    std::fflush(stream);
 
     if (machine_.instruction_mix_enabled()) {
         write_instruction_mix_report();
@@ -1788,6 +1963,12 @@ auto Tracer::write_summary_json(const std::string& path) -> bool {
     const auto& bus = machine_.memory().system_bus();
     const double cpi = retired == 0 ? 0.0 : static_cast<double>(cycles) / retired;
     const double ipc = cycles == 0 ? 0.0 : static_cast<double>(retired) / cycles;
+    const auto elapsed = std::chrono::duration_cast<std::chrono::microseconds>(
+                             std::chrono::steady_clock::now() - machine_.start_time())
+                             .count();
+    const double json_avg_mips =
+        elapsed == 0 ? 0.0 : static_cast<double>(retired) / static_cast<double>(elapsed);
+    const double json_peak_mips = std::max(machine_.peak_mips(), json_avg_mips);
 
     out << "{\n"
         << "  \"schema_version\": 1,\n"
@@ -1803,6 +1984,8 @@ auto Tracer::write_summary_json(const std::string& path) -> bool {
         << "  \"compressed_instructions\": " << compressed << ",\n"
         << "  \"cpi\": " << std::format("{:.9f}", cpi) << ",\n"
         << "  \"ipc\": " << std::format("{:.9f}", ipc) << ",\n"
+        << "  \"speed_mips_avg\": " << std::format("{:.3f}", json_avg_mips) << ",\n"
+        << "  \"speed_mips_peak\": " << std::format("{:.3f}", json_peak_mips) << ",\n"
         << "  \"performance\": {\n"
         << "    \"icache_hits\": " << cpu.icache.hit_count() << ",\n"
         << "    \"icache_misses\": " << cpu.icache.miss_count() << ",\n"

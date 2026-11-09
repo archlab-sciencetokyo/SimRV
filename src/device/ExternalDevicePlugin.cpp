@@ -55,6 +55,7 @@ class ExternalSerialAdapter final : public Uart {
         if (cycles == 0) return;
         mmio_.advance_cycles(cycles);
         if (serial_->advance_cycles) serial_->advance_cycles(ctx_, cycles);
+        flush_tx_buffer();
         service_interrupts();
     }
     [[nodiscard]] auto requires_instruction_ticks() const noexcept -> bool override {
@@ -138,15 +139,13 @@ ExternalMmioDevice::ExternalMmioDevice(const SimRvExternalDevice* desc, void* ct
         .request_poweroff = [](void* m) { static_cast<simrv::core::Machine*>(m)->request_exit(0); },
         .dma_read = [](void* m, uint64_t paddr, void* dst, size_t len) -> int {
             auto* mach = static_cast<simrv::core::Machine*>(m);
-            if (!mach || !dst || len == 0 || !std::in_range<simrv::xlen::Address>(paddr))
-                return -1;
+            if (!mach || !dst || len == 0 || !std::in_range<simrv::xlen::Address>(paddr)) return -1;
             const auto phys = simrv::xlen::PhysAddr{static_cast<simrv::xlen::Address>(paddr)};
             return mach->memory().dma_read(phys, dst, len) ? 0 : -1;
         },
         .dma_write = [](void* m, uint64_t paddr, const void* src, size_t len) -> int {
             auto* mach = static_cast<simrv::core::Machine*>(m);
-            if (!mach || !src || len == 0 || !std::in_range<simrv::xlen::Address>(paddr))
-                return -1;
+            if (!mach || !src || len == 0 || !std::in_range<simrv::xlen::Address>(paddr)) return -1;
             const auto phys = simrv::xlen::PhysAddr{static_cast<simrv::xlen::Address>(paddr)};
             return mach->memory().dma_write(phys, src, len) ? 0 : -1;
         },

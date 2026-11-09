@@ -60,9 +60,7 @@ class Uart : public SerialDevice {
     void write_host_byte(uint8_t byte);
     /// Advance serial transmit and receive state by simulated CPU cycles.
     void advance_cycles(uint64_t cycles) override;
-    [[nodiscard]] auto has_active_transfer() const noexcept -> bool override {
-        return tx_shift_active_ || rx_shift_active_ || !tx_fifo_.empty();
-    }
+    [[nodiscard]] auto has_active_transfer() const noexcept -> bool override;
 
     /// Open a POSIX PTY for this UART. Returns false if openpty fails.
     [[nodiscard]] auto start_pty() -> bool override;
@@ -73,7 +71,7 @@ class Uart : public SerialDevice {
     [[nodiscard]] auto has_pty() const -> bool { return pty_.is_open(); }
     [[nodiscard]] auto pty() -> PtyBridge& { return pty_; }
     [[nodiscard]] auto pty() const -> const PtyBridge& { return pty_; }
-    void flush_tx_buffer() noexcept;
+    void flush_tx_buffer() noexcept override;
     void drain_tx_fifo() noexcept;
 
    private:
@@ -96,6 +94,8 @@ class Uart : public SerialDevice {
     bool rx_overrun_ = false;
     uint64_t tx_phase_ = 0;
     uint64_t rx_phase_ = 0;
+    uint64_t rx_timeout_phase_ = 0;
+    bool rx_timeout_pending_ = false;
     bool tx_shift_active_ = false;
     uint8_t tx_shift_byte_ = 0;
     bool rx_shift_active_ = false;
