@@ -8,12 +8,8 @@ This directory contains development, benchmarking, release verification, and Lin
 
 ### 1. Benchmarking & Performance Diagnostics
 
-- **`benchmark.sh`**: Primary shell runner for fast single-binary runs and cycle-accurate benchmarking (`--ca`). Wraps `benchmark.py`.
-- **`benchmark.py`**: Unified publication benchmark framework and analysis tool:
-  - Default / `run`: Measures execution speed, Spike differential speedups, and host Linux `perf` events (`--perf`). It passes one explicit ISA contract to both simulators and runs to guest completion by default; `--limit` applies the same safety cap to both.
-  - `compare`: Compares two JSON benchmark reports, computing geometric mean changes and regressions against thresholds.
-  - `aggregate`: Aggregates multi-run and multi-host benchmark experiment JSON outputs into statistical summaries.
-  - `gdb`: Paired execution benchmarking comparing baseline CLI speed against remote GDB RSP step latency.
+- **`simrv-benchmark`** (Native C++): Native benchmarking and comparative analysis suite. Supports full-system instruction and cycle-accurate benchmarking, statistical aggregations (mean, median, standard deviation), and `compare` mode between baseline and candidate JSON runs.
+- **`benchmark.sh`**: Shell runner for quick execution and cycle-accurate benchmarking (`--ca`). Wraps native `simrv-benchmark`.
 - **`simrv-parity` & `simrv-tune`** (Native C++): Adapter-driven RTL/SimRV architectural and cycle-parity runner with dynamic `.so` plugin support (`include/simrv/rtl/ParityPlugin.h`). Built-in targets include `rvcomp` and `cfu-pg`. Auto-tunes CPU/SoC configurations against hardware traces.
 
 ### 2. Release Qualification & Verification (Native C++)

@@ -6,17 +6,13 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
 
-SIMRV_BIN="${SIMRV_BIN:-./build/rv64-release/simrv}"
-if [[ ! -x "$SIMRV_BIN" && -x "./build/rv32-release/simrv" ]]; then
-  SIMRV_BIN="./build/rv32-release/simrv"
+SIMRV_BENCH_BIN="${SIMRV_BENCH_BIN:-./build/rv64-release/simrv-benchmark}"
+if [[ ! -x "$SIMRV_BENCH_BIN" && -x "./build/rv32-release/simrv-benchmark" ]]; then
+  SIMRV_BENCH_BIN="./build/rv32-release/simrv-benchmark"
 fi
 
 BENCH_ITERS="${SIMRV_BENCH_ITERS:-5}"
-BENCH_LIMIT="${SIMRV_BENCH_LIMIT:-0}"
-BENCH_TIMEOUT="${SIMRV_BENCH_TIMEOUT:-30}"
 BENCH_TEST_NAME="${SIMRV_BENCH_TEST:-dhrystone}"
-BENCH_TOHOST_ADDR="${SIMRV_BENCH_TOHOST:-}"
-RISCV_TESTS_DIR="${RISCV_TESTS_DIR:-}"
 AFFINITY="${SIMRV_CA_BENCH_AFFINITY:-}"
 
 TEST_ARG="${SIMRV_BENCH_IMG:-$BENCH_TEST_NAME}"
@@ -28,7 +24,7 @@ runner=()
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --ca|--cycle-accurate)
-      extra_args+=(--simrv-arg=--mode --simrv-arg=cycle-accurate --compare-instruction)
+      extra_args+=(--ca)
       shift
       ;;
     --affinity)
@@ -36,8 +32,8 @@ while [[ $# -gt 0 ]]; do
       shift 2
       ;;
     -h|--help)
-      echo "Usage: $0 [options] [-- any benchmark.py options]"
-      echo "Wrapper for scripts/benchmark.py with sensible defaults and environment overrides."
+      echo "Usage: $0 [options] [ELF]"
+      echo "Wrapper for native simrv-benchmark with sensible defaults and environment overrides."
       echo ""
       echo "Options:"
       echo "  --ca, --cycle-accurate     Run in cycle-accurate microarchitecture mode"
@@ -45,12 +41,10 @@ while [[ $# -gt 0 ]]; do
       echo "  -h, --help                 Show this help message"
       echo ""
       echo "Environment Overrides:"
-      echo "  SIMRV_BIN                  Path to SimRV executable (default: auto-detected)"
+      echo "  SIMRV_BENCH_BIN            Path to simrv-benchmark executable"
       echo "  SIMRV_BENCH_TEST           Benchmark test name/path (default: dhrystone)"
       echo "  SIMRV_BENCH_ITERS          Number of runs (default: 5)"
-      echo "  SIMRV_BENCH_LIMIT          Symmetric instruction cap (default: 0, full completion)"
-      echo "  SIMRV_BENCH_TIMEOUT        Timeout in seconds (default: 30)"
-      echo "  SIMRV_CA_BENCH_PERF=1      Enable host Linux perf hardware counters"
+      echo "  SIMRV_CA_BENCH_AFFINITY    CPU core pinning for taskset"
       exit 0
       ;;
     *)
@@ -60,10 +54,6 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-if [[ "${SIMRV_CA_BENCH_PERF:-0}" == "1" ]]; then
-  extra_args+=(--perf)
-fi
-
 if [[ -n "$AFFINITY" ]]; then
   if ! command -v taskset >/dev/null 2>&1; then
     echo "Warning: taskset not available; ignoring affinity $AFFINITY" >&2
@@ -72,12 +62,7 @@ if [[ -n "$AFFINITY" ]]; then
   fi
 fi
 
-exec "${runner[@]}" python3 "$ROOT_DIR/scripts/benchmark.py" \
-  --simrv "$SIMRV_BIN" \
+exec "${runner[@]}" "$SIMRV_BENCH_BIN" \
   --runs "$BENCH_ITERS" \
-  --limit "$BENCH_LIMIT" \
-  --timeout "$BENCH_TIMEOUT" \
-  --test "$TEST_ARG" \
-  ${BENCH_TOHOST_ADDR:+--tohost "$BENCH_TOHOST_ADDR"} \
-  ${RISCV_TESTS_DIR:+--riscv-tests-dir "$RISCV_TESTS_DIR"} \
-  "${extra_args[@]}"
+  ${extra_args[@]+"${extra_args[@]}"} \
+  "$TEST_ARG"

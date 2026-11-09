@@ -95,10 +95,6 @@ if(NOT EXISTS "${install_root}/share/man/man1/simrv.1")
       "Expected installed man page at ${install_root}/share/man/man1/simrv.1")
 endif()
 
-if(NOT EXISTS "${install_root}/share/SimRV/scripts/experiment_metadata.py")
-  message(FATAL_ERROR "Expected installed benchmark support module")
-endif()
-
 file(GLOB installed_guides "${install_root}/share/doc/*/USER_GUIDE.md")
 if(NOT installed_guides)
   message(

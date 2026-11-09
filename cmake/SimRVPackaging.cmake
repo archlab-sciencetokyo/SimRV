@@ -38,7 +38,7 @@ install(
   COMPONENT Runtime)
 
 install(
-  TARGETS simrv-cpu-wizard simrv-parity
+  TARGETS simrv-cpu-wizard simrv-parity simrv-benchmark
   RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
   COMPONENT Tools)
 install(
@@ -50,14 +50,6 @@ install(
   FILES include/simrv/rtl/ParityPlugin.h include/simrv/rtl/ParityTarget.hpp
   DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/simrv/rtl
   COMPONENT Devel)
-install(
-  PROGRAMS scripts/benchmark.py
-  DESTINATION ${CMAKE_INSTALL_BINDIR}
-  RENAME simrv-benchmark
-  COMPONENT Benchmark)
-install(FILES scripts/experiment_metadata.py
-        DESTINATION ${CMAKE_INSTALL_DATADIR}/SimRV/scripts
-        COMPONENT Benchmark)
 
 install(
   DIRECTORY configs/models/
