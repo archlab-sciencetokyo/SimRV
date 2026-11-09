@@ -592,7 +592,7 @@ if(BUILD_TESTING)
       add_test(
         NAME vector-suite
         COMMAND
-          ${PYTHON_BIN} ${CMAKE_SOURCE_DIR}/scripts/run_vector_tests.py --simrv
+          $<TARGET_FILE:simrv-vector> --simrv
           $<TARGET_FILE:SimRV> --xlen ${SIMRV_XLEN} --gcc ${RISCV_GCC}
           --objcopy ${RISCV_OBJCOPY} --nm ${RISCV_NM} --work-dir
           ${CMAKE_CURRENT_BINARY_DIR}/vector-tests-gen --vector-tests-dir

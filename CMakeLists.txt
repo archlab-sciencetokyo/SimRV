@@ -306,6 +306,7 @@ simrv_add_tool(simrv-evidence src/tools/ReleaseEvidence.cpp)
 simrv_add_tool(simrv-check-artifacts src/tools/CheckLinuxArtifacts.cpp)
 simrv_add_tool(simrv-benchmark src/tools/BenchmarkTool.cpp)
 simrv_add_tool(simrv-act src/tools/ActRunner.cpp)
+simrv_add_tool(simrv-vector src/tools/VectorRunner.cpp)
 
 add_executable(simrv-parity
   src/tools/RtlParity.cpp

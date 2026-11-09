@@ -30,7 +30,7 @@ Release qualification and verification tools have been rewritten as fast native 
 
 ### 4. Code Quality & Extension Verification
 
-- **`run_vector_tests.py`**: Automated runner for the RISC-V Vector (RVV 1.0) compliance test suite.
+- **`simrv-vector`** (Native C++): Automated runner for the RISC-V Vector (RVV 1.0) compliance test suite. Compiles generated vector tests with RISC-V GCC, converts with objcopy, extracts tohost addresses, and runs parallel validation on SimRV.
 - **Native CLI Commands in SimRV**:
   - `simrv --check-mission <file>`: Validates mission fields, previews grouped lesson flow, and checks checkpoint symbols.
   - `simrv --create-mission <file>`: Scaffolds a new classroom guidance mission template.
