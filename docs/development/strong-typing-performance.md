@@ -117,3 +117,13 @@ not isolated; profiling or a controlled bisection is still needed. The compute r
 variability and should not be treated as a reliable speedup. The binaries were 42,718,352 and
 45,329,600 bytes, with SHA-256 prefixes `4987b5030cf7` and `da35e96dcd80`, respectively.
 This intermediate comparison does not replace the missing original baseline or ARM measurements.
+
+To narrow the branch result, revision `4a2a3c0` was built separately with GCC 16.2.1,
+`-O3 -DNDEBUG`, `-march=x86-64-v3`, and LTO disabled. With the same guest and stop policy,
+five warmups and 30 interleaved samples on CPU 0, the retained pre-guard binary and `4a2a3c0`
+had medians of 0.147311 and 0.184401 seconds (CV 3.77% and 2.22%). A separate interleaved run
+of `4a2a3c0` and `1bc43ca` produced 0.182681 and 0.161015 seconds (CV 2.40% and 1.50%).
+The slowdown therefore predates the later block-chaining changes, which improved this workload
+relative to `4a2a3c0`; the individual earlier change responsible remains unknown. The intermediate
+binary was 43,319,256 bytes with SHA-256 prefix `b82cf11e688b`. The preceding revision
+`bc258a4` could not be built because its bit-manipulation functions were defined twice.
