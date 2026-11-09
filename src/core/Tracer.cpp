@@ -1827,7 +1827,7 @@ void Tracer::print_summary() {
     row(std::format("{}Performance & Throughput{}", c_header, c_reset));
     row(std::format("  {:<22}: {}  ({})", "Retired Instructions", format_scaled(icount),
                     format_with_commas(icount)));
-    row(std::format("  {:<22}: {}  ({} clocks)", "Elapsed Cycles", format_scaled(mcycle),
+    row(std::format("  {:<22}: {}  ({})", "Elapsed Cycles", format_scaled(mcycle),
                     format_with_commas(mcycle)));
     row(std::format("  {:<22}: {:.3f}  (IPC: {:.3f})", "Cycles Per Inst (CPI)", cpi, ipc));
     const bool has_c =
@@ -1877,7 +1877,7 @@ void Tracer::print_summary() {
         const double stall_pct = mcycle == 0 ? 0.0
                                              : (static_cast<double>(ps.stall_cycles()) * 100.0) /
                                                    static_cast<double>(mcycle);
-        row(std::format("  {:<22}: {}  ({:.1f}% of clocks)", "Total Stall Cycles",
+        row(std::format("  {:<22}: {}  ({:.1f}% of cycles)", "Total Stall Cycles",
                         format_with_commas(ps.stall_cycles()), stall_pct));
         row(std::format("    · {:<20}: {}", "Data RAW Stalls",
                         format_with_commas(ps.data_hazard_stalls())));
