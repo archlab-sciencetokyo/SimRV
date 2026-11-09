@@ -3,8 +3,8 @@
 SimRV uses separate checks for architectural behavior and cycle timing. Spike
 lockstep compares committed instructions and architectural state; cycle-trace
 comparison checks timing behavior against a cycle-producing implementation or
-captured hardware trace. `scripts/evaluate_rtl_parity.py` is the current cycle
-parity runner. Its checked-in adapters use two example targets:
+captured hardware trace. `simrv-parity` is the native cycle
+parity runner with dynamic plugin support (`include/simrv/rtl/ParityPlugin.h`). Its checked-in adapters use two example targets:
 [ArchLab RVComp](https://github.com/archlab-sciencetokyo/RVComp), described in
 the paper [“Design and implementation of a high-performance RISC-V SoC for
 FPGAs with Linux support”](https://www.ieice.org/publications/ken/summary.php?contribution_id=138850&expandable=0&ken_id=R&lang=en&presen_date=2025-09-19&schedule_id=8813&society_cd=ESSNLS&year=2025),
@@ -13,16 +13,16 @@ described in [“CFU Proving Ground: a framework for efficiently utilizing custo
 instructions in RISC-V soft processors”](https://www.ieice.org/publications/ken/summary.php?contribution_id=137514&expandable=3&ken_id=DC&lang=en&presen_date=2025-06-10&schedule_id=8710&society_cd=ISS&year=2025):
 
 ```bash
-python3 scripts/evaluate_rtl_parity.py --list-targets
+simrv-parity --list-targets
 
-python3 scripts/evaluate_rtl_parity.py rvcomp \
+simrv-parity rvcomp \
   --rvcomp-dir /path/to/RVComp \
-  --simrv-bin build/rv32-release/simrv \
+  --simrv build/rv32-release/simrv \
   --trace-dir build/rvcomp_parity_traces
 
-python3 scripts/evaluate_rtl_parity.py cfu-pg \
+simrv-parity cfu-pg \
   --cfu-dir /path/to/CFU-Proving-Ground \
-  --simrv-bin build/rv32-release/simrv \
+  --simrv build/rv32-release/simrv \
   --trace-dir build/cfu_pg_parity_traces
 ```
 
@@ -30,8 +30,7 @@ Both adapters compile the same focused C benchmarks, run the target and SimRV,
 compare retirement traces, and emit JSON results. The target may be a hardware
 description simulator or another implementation that can provide the documented
 cycle trace. These targets demonstrate the adapter workflow; they are not
-requirements for using SimRV's general timing models or parity contract. The
-RVComp adapter retains detailed cache and IFU diagnostics in `evaluate_rvcomp.py`.
+requirements for using SimRV's general timing models or parity contract.
 
 !!! info "CFU Playground and CFU Proving Ground are separate projects"
     The checked-in `cfu-pg` adapter targets ArchLab's CFU Proving Ground above. Google's separate
@@ -41,11 +40,9 @@ RVComp adapter retains detailed cache and IFU diagnostics in `evaluate_rvcomp.py
     of this adapter. The generic adapter contract below applies to either project or another
     cycle-producing reference.
 
-The entry point is intentionally only a dispatcher. Target metadata lives in
-`scripts/rtl_parity/registry.py`, shared benchmarks and trace parsing live in
-`scripts/rtl_parity/common.py`, and target implementations live under
-`scripts/rtl_parity/targets/`. Adapters are imported lazily, so listing targets
-does not require any target's RTL checkout or build tools.
+Target metadata and registry live in `simrv::rtl::ParityRegistry` (`include/simrv/rtl/ParityTarget.hpp`),
+and external hardware targets can be compiled into shared libraries (`.so`) conforming to
+`include/simrv/rtl/ParityPlugin.h` and loaded at runtime via `--plugin <LIB.so>`.
 
 ## Cycle-reference adapter contract
 
@@ -89,12 +86,9 @@ still producing the same architectural sequence and total cycle count.
 
 ## Adding another cycle-producing reference
 
-1. Add a `TargetAdapter` record to `scripts/rtl_parity/registry.py`.
-2. Implement a module under `scripts/rtl_parity/targets/` exposing
-   `run(arguments) -> int` and an adapter-specific argument parser.
-3. Reuse `rtl_parity.common` for the benchmark corpus, toolchain discovery, and
-   retirement-trace comparison.
-4. Create a model under `configs/models/` and add focused regression tests.
+5. Either implement `simrv::rtl::ParityTarget` in C++ and register it via `simrv::rtl::ParityRegistry::instance().register_target()`, or export a dynamic plugin shared library (`.so`) implementing the C-ABI `simrv_rtl_plugin_init()` entrypoint defined in `include/simrv/rtl/ParityPlugin.h`.
+6. Reuse `simrv::rtl::get_embedded_benchmarks()`, `find_riscv_toolchain()`, and `compare_retirement_traces()`.
+7. Create a model configuration under `configs/models/` and calibrate it using `simrv-tune`.
 
 Keep source RTL checkouts read-only: copy or generate instrumented sources under
 `build/rtl_parity/<target>`. Prefer configurable timing, predictor, and cache

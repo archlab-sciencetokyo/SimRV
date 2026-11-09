@@ -14,11 +14,12 @@ This directory contains development, benchmarking, release verification, and Lin
   - `compare`: Compares two JSON benchmark reports, computing geometric mean changes and regressions against thresholds.
   - `aggregate`: Aggregates multi-run and multi-host benchmark experiment JSON outputs into statistical summaries.
   - `gdb`: Paired execution benchmarking comparing baseline CLI speed against remote GDB RSP step latency.
-- **`evaluate_rtl_parity.py`**: Adapter-driven RTL/SimRV architectural and cycle-parity runner. Reusable target adapters and trace utilities live in `rtl_parity/`.
+- **`simrv-parity` & `simrv-tune`** (Native C++): Adapter-driven RTL/SimRV architectural and cycle-parity runner with dynamic `.so` plugin support (`include/simrv/rtl/ParityPlugin.h`). Built-in targets include `rvcomp` and `cfu-pg`. Auto-tunes CPU/SoC configurations against hardware traces.
 
 ### 2. Release Qualification & Verification (Native C++)
 
 Release qualification and verification tools have been rewritten as fast native C++ utilities:
+
 - **`simrv-release-check`**: Validates release manifest constraints, dependency revisions, and binary version parity.
 - **`simrv-smoke`**: Distribution-independent GA smoke check for versioning, capability discovery, environment diagnostics, and SoC manifest compatibility.
 - **`simrv-evidence`**: Captures machine-readable evidence metadata for CI gates and qualification manifests.

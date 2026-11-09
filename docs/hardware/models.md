@@ -467,7 +467,7 @@ To calibrate SimRV to an external RTL core:
 3. **Verify via Evaluation Tooling**:
 
    ```bash
-   python3 scripts/evaluate_rvcomp.py --rvcomp-dir /path/to/RVComp \
+   simrv-parity rvcomp --rvcomp-dir /path/to/RVComp \
      --trace-dir build/rvcomp_traces
    ```
 
@@ -481,10 +481,10 @@ To calibrate SimRV to an external RTL core:
 
 4. **Automated Microarchitecture Calibration Optimizer**:
 
-   SimRV provides `scripts/tune_cpu_model.py` to systematically calibrate any CPU `.cfg` against Verilator RTL logs across an evaluation benchmark suite:
+   SimRV provides `simrv-tune` to systematically calibrate any CPU `.cfg` against Verilator RTL logs across an evaluation benchmark suite:
 
    ```bash
-   python3 scripts/tune_cpu_model.py --base-config configs/models/rvcomp.cfg --apply
+   simrv-tune rvcomp --config configs/models/rvcomp.cfg --apply
    ```
 
    The tuner performs multi-parameter coordinate descent across interconnect latencies, cache

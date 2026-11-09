@@ -305,6 +305,21 @@ simrv_add_tool(simrv-release-check src/tools/ReleaseCheck.cpp)
 simrv_add_tool(simrv-evidence src/tools/ReleaseEvidence.cpp)
 simrv_add_tool(simrv-check-artifacts src/tools/CheckLinuxArtifacts.cpp)
 
+add_executable(simrv-parity
+  src/tools/RtlParity.cpp
+  src/rtl/ParityRegistry.cpp
+  src/rtl/targets/RvcompTarget.cpp
+  src/rtl/targets/CfuPgTarget.cpp)
+target_include_directories(simrv-parity PRIVATE ${PROJECT_SOURCE_DIR}/include
+                                                ${PROJECT_BINARY_DIR}/generated)
+target_link_libraries(simrv-parity PRIVATE simrv-runtime ${CMAKE_DL_LIBS})
+simrv_apply_options(simrv-parity)
+add_executable(simrv-rtl-parity ALIAS simrv-parity)
+add_custom_target(simrv-tune ALL
+  COMMAND ${CMAKE_COMMAND} -E create_symlink $<TARGET_FILE_NAME:simrv-parity>
+          "${CMAKE_CURRENT_BINARY_DIR}/simrv-tune"
+  DEPENDS simrv-parity)
+
 check_cxx_compiler_flag("-frounding-math" COMPILER_SUPPORTS_FROUNDING_MATH)
 if(COMPILER_SUPPORTS_FROUNDING_MATH)
   # Only the host-FP execution units alter the floating-point environment.
