@@ -1840,6 +1840,7 @@ void Machine::run() {
     simrv::util::benchmark_event("ready", retired_instruction_count());
     if (!is_paused()) simrv::util::benchmark_event("resumed", retired_instruction_count());
     reset_realtime_anchor();
+    set_start_time(std::chrono::steady_clock::now());
     bool was_paused = false;
     while (is_running() &&
            execution_state_.load(std::memory_order_relaxed) != ExecutionState::Stopped) {

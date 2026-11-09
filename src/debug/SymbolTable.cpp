@@ -119,7 +119,6 @@ auto SymbolTable::load_from_elf(const std::string& elf_path, bool clear_existing
     }
     std::string path_to_load = elf_path;
 
-    // Helper to check if file has ELF magic
     auto is_valid_elf = [](const std::string& path) -> bool {
         std::ifstream test_fs(path, std::ios::binary);
         if (!test_fs.is_open()) return false;
@@ -128,7 +127,14 @@ auto SymbolTable::load_from_elf(const std::string& elf_path, bool clear_existing
         return std::equal(magic.begin(), magic.end(), kElfMagic.begin());
     };
 
-    if (!is_valid_elf(path_to_load)) {
+    std::ifstream fs(path_to_load, std::ios::binary);
+    std::array<uint8_t, kElfIdentSize> ident{};
+    const bool valid_direct = fs.is_open() &&
+                              fs.read(reinterpret_cast<char*>(ident.data()), ident.size()) &&
+                              std::equal(kElfMagic.begin(), kElfMagic.end(), ident.begin());
+
+    if (!valid_direct) {
+        if (fs.is_open()) fs.close();
         // Try to find a companion ELF file if elf_path is a raw binary
         bool found = false;
         if (path_to_load.find_last_of('.') != std::string::npos) {
@@ -145,22 +151,11 @@ auto SymbolTable::load_from_elf(const std::string& elf_path, bool clear_existing
         if (!found) {
             return false;
         }
-    }
-
-    std::ifstream fs(path_to_load, std::ios::binary);
-    if (!fs.is_open()) {
-        return false;
-    }
-
-    // Read ELF identity
-    std::array<uint8_t, kElfIdentSize> ident{};
-    if (!fs.read(reinterpret_cast<char*>(ident.data()), ident.size())) {
-        return false;
-    }
-
-    // Check magic
-    if (!std::equal(kElfMagic.begin(), kElfMagic.end(), ident.begin())) {
-        return false;
+        fs.open(path_to_load, std::ios::binary);
+        if (!fs.is_open() || !fs.read(reinterpret_cast<char*>(ident.data()), ident.size()) ||
+            !std::equal(kElfMagic.begin(), kElfMagic.end(), ident.begin())) {
+            return false;
+        }
     }
 
     const auto elf_class = ident[4];

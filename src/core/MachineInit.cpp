@@ -336,86 +336,76 @@ void load_image_into_ram(std::string& file_path, simrv::memory::RamView ram_view
     const auto file_size = static_cast<std::size_t>(in.tellg());
     in.seekg(0, std::ios::beg);
 
-    std::array<char, 4> magic{};
-    bool is_elf = false;
-    if (file_size >= 4 && in.read(magic.data(), 4)) {
-        if (magic[0] == 0x7f && magic[1] == 'E' && magic[2] == 'L' && magic[3] == 'F') {
-            is_elf = true;
-        }
-    }
-    in.seekg(0, std::ios::beg);
+    std::array<char, 16> ident{};
+    const bool is_elf = (file_size >= 16 && in.read(ident.data(), 16) && ident[0] == 0x7f &&
+                         ident[1] == 'E' && ident[2] == 'L' && ident[3] == 'F');
 
     if (is_elf) {
         bool loaded_segment = false;
-        std::array<char, 5> ident{};
-        if (in.read(ident.data(), 5)) {
-            in.seekg(0, std::ios::beg);
-
-            const char class_byte = ident[4];
-            auto load_segment = [&](const auto& phdr) {
-                if (phdr.p_type != kLoadSegment || phdr.p_filesz == 0) return;
-                const simrv::xlen::Address paddr = phdr.p_paddr != 0 ? phdr.p_paddr : phdr.p_vaddr;
-                const simrv::xlen::Address dram_base = ram_view.base();
-                simrv::xlen::Address dest_offset = 0;
-                if (paddr >= dram_base && (paddr - dram_base) < capacity) {
-                    dest_offset = paddr - dram_base;
-                } else if (paddr < capacity) {
-                    dest_offset = paddr;
-                } else {
-                    return;
-                }
-                const size_t copy_bytes = std::min<size_t>(phdr.p_filesz, capacity - dest_offset);
-                in.seekg(static_cast<std::streamoff>(phdr.p_offset), std::ios::beg);
-                if (in.read(
-                        reinterpret_cast<char*>(ram + dest_offset),
+        const char class_byte = ident[4];
+        in.seekg(0, std::ios::beg);
+        auto load_segment = [&](const auto& phdr) {
+            if (phdr.p_type != kLoadSegment || phdr.p_filesz == 0) return;
+            const simrv::xlen::Address paddr = phdr.p_paddr != 0 ? phdr.p_paddr : phdr.p_vaddr;
+            const simrv::xlen::Address dram_base = ram_view.base();
+            simrv::xlen::Address dest_offset = 0;
+            if (paddr >= dram_base && (paddr - dram_base) < capacity) {
+                dest_offset = paddr - dram_base;
+            } else if (paddr < capacity) {
+                dest_offset = paddr;
+            } else {
+                return;
+            }
+            const size_t copy_bytes = std::min<size_t>(phdr.p_filesz, capacity - dest_offset);
+            in.seekg(static_cast<std::streamoff>(phdr.p_offset), std::ios::beg);
+            if (in.read(reinterpret_cast<char*>(ram + dest_offset),
                         static_cast<std::streamsize>(
                             copy_bytes))) {  // NOLINT(cppcoreguidelines-pro-type-reinterpret-cast)
-                    loaded_segment = true;
-                    if (machine != nullptr) {
-                        const bool is_exec = (phdr.p_flags & 0x1) != 0;
-                        machine->record_loaded_segment(
-                            simrv::xlen::PhysAddr{dram_base + dest_offset}, phdr.p_memsz, is_exec);
-                    }
-                    if (phdr.p_memsz > phdr.p_filesz && (dest_offset + phdr.p_filesz) < capacity) {
-                        const size_t bss_bytes = std::min<size_t>(
-                            phdr.p_memsz - phdr.p_filesz, capacity - (dest_offset + phdr.p_filesz));
-                        std::memset(ram + dest_offset + phdr.p_filesz, 0, bss_bytes);
-                    }
+                loaded_segment = true;
+                if (machine != nullptr) {
+                    const bool is_exec = (phdr.p_flags & 0x1) != 0;
+                    machine->record_loaded_segment(simrv::xlen::PhysAddr{dram_base + dest_offset},
+                                                   phdr.p_memsz, is_exec);
                 }
-            };
+                if (phdr.p_memsz > phdr.p_filesz && (dest_offset + phdr.p_filesz) < capacity) {
+                    const size_t bss_bytes = std::min<size_t>(
+                        phdr.p_memsz - phdr.p_filesz, capacity - (dest_offset + phdr.p_filesz));
+                    std::memset(ram + dest_offset + phdr.p_filesz, 0, bss_bytes);
+                }
+            }
+        };
 
-            if (class_byte == kClass32) {
-                Elf32_Ehdr ehdr{};
-                if (in.read(reinterpret_cast<char*>(&ehdr),
-                            sizeof(ehdr))) {  // NOLINT(cppcoreguidelines-pro-type-reinterpret-cast)
-                    std::vector<Elf32_Phdr> phdrs(ehdr.e_phnum);
-                    in.seekg(ehdr.e_phoff, std::ios::beg);
-                    if (in.read(
-                            reinterpret_cast<char*>(phdrs.data()),
-                            static_cast<std::streamsize>(
-                                static_cast<size_t>(ehdr.e_phnum) *
-                                sizeof(
-                                    Elf32_Phdr)))) {  // NOLINT(cppcoreguidelines-pro-type-reinterpret-cast)
-                        for (const auto& phdr : phdrs) {
-                            load_segment(phdr);
-                        }
+        if (class_byte == kClass32) {
+            Elf32_Ehdr ehdr{};
+            if (in.read(reinterpret_cast<char*>(&ehdr),
+                        sizeof(ehdr))) {  // NOLINT(cppcoreguidelines-pro-type-reinterpret-cast)
+                std::vector<Elf32_Phdr> phdrs(ehdr.e_phnum);
+                in.seekg(ehdr.e_phoff, std::ios::beg);
+                if (in.read(
+                        reinterpret_cast<char*>(phdrs.data()),
+                        static_cast<std::streamsize>(
+                            static_cast<size_t>(ehdr.e_phnum) *
+                            sizeof(
+                                Elf32_Phdr)))) {  // NOLINT(cppcoreguidelines-pro-type-reinterpret-cast)
+                    for (const auto& phdr : phdrs) {
+                        load_segment(phdr);
                     }
                 }
-            } else if (class_byte == kClass64) {
-                Elf64_Ehdr ehdr{};
-                if (in.read(reinterpret_cast<char*>(&ehdr),
-                            sizeof(ehdr))) {  // NOLINT(cppcoreguidelines-pro-type-reinterpret-cast)
-                    std::vector<Elf64_Phdr> phdrs(ehdr.e_phnum);
-                    in.seekg(static_cast<std::streamoff>(ehdr.e_phoff), std::ios::beg);
-                    if (in.read(
-                            reinterpret_cast<char*>(phdrs.data()),
-                            static_cast<std::streamsize>(
-                                static_cast<size_t>(ehdr.e_phnum) *
-                                sizeof(
-                                    Elf64_Phdr)))) {  // NOLINT(cppcoreguidelines-pro-type-reinterpret-cast)
-                        for (const auto& phdr : phdrs) {
-                            load_segment(phdr);
-                        }
+            }
+        } else if (class_byte == kClass64) {
+            Elf64_Ehdr ehdr{};
+            if (in.read(reinterpret_cast<char*>(&ehdr),
+                        sizeof(ehdr))) {  // NOLINT(cppcoreguidelines-pro-type-reinterpret-cast)
+                std::vector<Elf64_Phdr> phdrs(ehdr.e_phnum);
+                in.seekg(static_cast<std::streamoff>(ehdr.e_phoff), std::ios::beg);
+                if (in.read(
+                        reinterpret_cast<char*>(phdrs.data()),
+                        static_cast<std::streamsize>(
+                            static_cast<size_t>(ehdr.e_phnum) *
+                            sizeof(
+                                Elf64_Phdr)))) {  // NOLINT(cppcoreguidelines-pro-type-reinterpret-cast)
+                    for (const auto& phdr : phdrs) {
+                        load_segment(phdr);
                     }
                 }
             }
@@ -441,6 +431,7 @@ void load_image_into_ram(std::string& file_path, simrv::memory::RamView ram_view
                               file_path, file_size, capacity);
             std::exit(EXIT_FAILURE);
         }
+        in.seekg(0, std::ios::beg);
         if (!in.read(reinterpret_cast<char*>(ram),
                      static_cast<std::streamsize>(
                          file_size))) {  // NOLINT(cppcoreguidelines-pro-type-reinterpret-cast)
@@ -844,6 +835,7 @@ auto Machine::initialize() -> std::expected<void, std::string> {
         if (config.isa.misa_override && config.isa.misa_xlen == 32) {
             is_32bit = true;
         } else if (!config.isa.misa_override || config.isa.misa_xlen == 0) {
+            bool is_elf = false;
             auto check_elf = [&](const std::string& path) -> void {
                 if (path.empty()) return;
                 std::ifstream file(path, std::ios::binary);
@@ -852,6 +844,7 @@ auto Machine::initialize() -> std::expected<void, std::string> {
                     if (file.read(header.data(), 5)) {
                         if (header[0] == 0x7f && header[1] == 'E' && header[2] == 'L' &&
                             header[3] == 'F') {
+                            is_elf = true;
                             if (header[4] == kClass32) {
                                 is_32bit = true;
                             }
@@ -861,7 +854,7 @@ auto Machine::initialize() -> std::expected<void, std::string> {
             };
             check_elf(config.files.binary_path);
             check_elf(config.debug.spike_elf);
-            if (!is_32bit && !config.files.binary_path.empty()) {
+            if (!is_32bit && !is_elf && !config.files.binary_path.empty()) {
                 std::string base_path = config.files.binary_path;
                 size_t last_dot = base_path.find_last_of('.');
                 size_t last_slash = base_path.find_last_of("/\\");
