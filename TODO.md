@@ -12,6 +12,9 @@ Target: `dev`
 - [x] Fix plugin package component placement (`COMPONENT Tools`) to prevent dynamic runtime shared library leaks into `simrv.deb`.
 - [x] Add `gcc-toolset-15-libstdc++-devel` to UBI9 RPM release workflow for static C++ runtime linkage.
 - [x] Validate dual-architecture release gates on RV64 (57/57 passed) and RV32 (56/56 passed).
+- [x] Modernize CLI execution summary with adaptive durations, visual progress bar, peak/average MIPS throughput, and conditional RVC share display.
+- [x] Unbuffer UART TX in CLI mode to ensure guest prompts display without delay.
+- [x] Eliminate legacy Python harnesses and rewrite compliance/benchmarking in native C++.
 - [x] Validate release metadata, schema consistency, and code formatting across codebase.
 - [ ] Hosted RV32 workflow qualification remains for CI. `lintian` and `rpmlint` were unavailable
       locally; DEB metadata and RPM package digests were checked with native package tools.

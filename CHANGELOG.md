@@ -8,6 +8,11 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [v3.0.0-rc.19] — 2026-11-09
 
 - Separate fast execution into dedicated baremetal and OS engines with unified direct dispatch.
+- Restore direct-chained basic block execution in the baremetal engine.
+- Modernize CLI execution summary with adaptive duration units, visual progress bars, peak/average MIPS tracking, and conditional RVC share display.
+- Flush UART buffers immediately in CLI mode so interactive guest prompts appear without latency.
+- Remove redundant termination logs prior to the execution summary box.
+- Retire legacy Python test and benchmark harnesses in favor of native C++ implementations (`simrv-benchmark`, `simrv-act`, `simrv-vector`, `simrv-parity`).
 - Fix RV32 guest compatibility on RV64 for selective TLB invalidation, SBI RFENCE, and SSTC `stimecmp` timer CSRs.
 - Filter 64-bit-only pointer-masking extensions in FDT generation for RV32 guests.
 - Fix MMIO routing for overlapping device windows with holes and reject accesses that cross device boundaries.
