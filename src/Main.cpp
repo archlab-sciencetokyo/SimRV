@@ -39,6 +39,7 @@
 #include "simrv/util/BenchmarkRunner.hpp"
 #include "simrv/util/CliParser.hpp"
 #include "simrv/util/FormatUtil.hpp"
+#include "simrv/util/HostCache.hpp"
 #include "simrv/util/MissionTools.hpp"
 #include "simrv/util/Scaffolding.hpp"
 #include "simrv/util/SoCManifest.hpp"
@@ -357,6 +358,16 @@ auto print_doctor() -> int {
     std::println("  version          : {} (RV{} build target)", simrv::buildinfo::kVersion,
                  simrv::xlen::kXLenBits);
     std::println("  host             : {} ({})", host_os, host_arch);
+    const auto cache_info = simrv::util::detect_host_cache_topology();
+    if (cache_info.detected) {
+        std::println(
+            "  host cache       : L1d {} KiB (line {} B), L1i {} KiB, L2 {} MiB, L3 {} MiB",
+            cache_info.l1d_bytes / 1024, cache_info.line_bytes, cache_info.l1i_bytes / 1024,
+            cache_info.l2_bytes / (1024 * 1024), cache_info.l3_bytes / (1024 * 1024));
+        std::println("  adaptive tuning  : fast quantum {} insns, block cache {} sets",
+                     cache_info.optimal_fast_batch_quantum(false),
+                     cache_info.optimal_block_cache_sets());
+    }
     std::println("  interactive TTY  : {}",
                  tty ? "yes (stdin & stdout connected to a terminal)"
                      : "no (piped or background; use --cli for headless runs)");

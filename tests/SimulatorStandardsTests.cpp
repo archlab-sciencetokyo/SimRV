@@ -22,6 +22,7 @@
 #include "simrv/memory/MemorySubsystem.hpp"
 #include "simrv/memory/Mmu.hpp"
 #include "simrv/memory/PageTableWalker.hpp"
+#include "simrv/util/HostCache.hpp"
 
 namespace {
 
@@ -359,6 +360,16 @@ void test_architectural_signature_dump() {
     TEST_ASSERT(lines[3] == "aabbccdd");
 }
 
+void test_host_cache_topology() {
+    const auto topo = simrv::util::detect_host_cache_topology();
+    TEST_ASSERT(topo.line_bytes >= 32);
+    TEST_ASSERT(topo.l1d_bytes >= 16 * 1024);
+    TEST_ASSERT(topo.l2_bytes >= 256 * 1024);
+    TEST_ASSERT(topo.optimal_fast_batch_quantum(true) == 2048);
+    TEST_ASSERT(topo.optimal_fast_batch_quantum(false) >= 65536);
+    TEST_ASSERT(topo.optimal_block_cache_sets() >= 1024);
+}
+
 }  // namespace
 
 int main() {
@@ -372,6 +383,7 @@ int main() {
     test_platform_timing_conversions();
     test_simulation_stats();
     test_architectural_signature_dump();
+    test_host_cache_topology();
     std::cout << "All ModernSimulatorStandardsTests passed successfully!" << std::endl;
     return 0;
 }

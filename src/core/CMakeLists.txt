@@ -31,6 +31,7 @@ simrv_add_component(simrv-core
   ../util/UefiDiskGenerator.cpp
   ../util/MissionTools.cpp
   ../util/BenchmarkRunner.cpp
+  ../util/HostCache.cpp
   ../explain/CsrCatalog.cpp
   ../explain/ScalarSpecCatalog.cpp
   ../explain/VectorSpecCatalog.cpp
