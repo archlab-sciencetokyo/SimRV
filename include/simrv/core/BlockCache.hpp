@@ -14,7 +14,7 @@
 
 namespace simrv::core {
 
-static constexpr size_t kMaxBlockOps = 16;
+static constexpr size_t kMaxBlockOps = 32;
 static constexpr size_t kNumBlockSets = 4096;
 static constexpr size_t kBlockSetMask = kNumBlockSets - 1;
 
@@ -85,7 +85,7 @@ struct alignas(64) BasicBlock {
         branch_kind = BranchKind::None;
     }
 };
-static_assert(sizeof(BasicBlock) <= 384);
+static_assert(sizeof(BasicBlock) <= 640);
 
 /**
  * @class BlockCache

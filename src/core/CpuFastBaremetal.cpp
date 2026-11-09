@@ -318,9 +318,42 @@ SIMRV_ALWAYS_INLINE auto CPU::run_fast_baremetal_kernel(Machine& machine, uint32
                         return false;
                     };
 
-                    const auto execute_pure_alu_cop = [&](const CompactOp& cop) __attribute__((
-                                                          always_inline)) {
+                    const auto execute_cop = [&](const CompactOp& cop,
+                                                 bool& fault) __attribute__((always_inline)) {
                         switch (cop.fast_op) {
+                            case FastOp::Ld:
+                                fault = !try_fast_load_cop.template operator()<uint64_t>(cop);
+                                break;
+                            case FastOp::Lw:
+                                fault = !try_fast_load_cop.template operator()<int32_t>(cop);
+                                break;
+                            case FastOp::Lwu:
+                                fault = !try_fast_load_cop.template operator()<uint32_t>(cop);
+                                break;
+                            case FastOp::Lh:
+                                fault = !try_fast_load_cop.template operator()<int16_t>(cop);
+                                break;
+                            case FastOp::Lhu:
+                                fault = !try_fast_load_cop.template operator()<uint16_t>(cop);
+                                break;
+                            case FastOp::Lb:
+                                fault = !try_fast_load_cop.template operator()<int8_t>(cop);
+                                break;
+                            case FastOp::Lbu:
+                                fault = !try_fast_load_cop.template operator()<uint8_t>(cop);
+                                break;
+                            case FastOp::Sd:
+                                fault = !try_fast_store_cop.template operator()<uint64_t>(cop);
+                                break;
+                            case FastOp::Sw:
+                                fault = !try_fast_store_cop.template operator()<uint32_t>(cop);
+                                break;
+                            case FastOp::Sh:
+                                fault = !try_fast_store_cop.template operator()<uint16_t>(cop);
+                                break;
+                            case FastOp::Sb:
+                                fault = !try_fast_store_cop.template operator()<uint8_t>(cop);
+                                break;
                             case FastOp::Add: {
                                 write_rd(cop.rd, gpr[std::to_underlying(cop.rs1)] +
                                                      gpr[std::to_underlying(cop.rs2)]);
@@ -539,9 +572,95 @@ SIMRV_ALWAYS_INLINE auto CPU::run_fast_baremetal_kernel(Machine& machine, uint32
 #endif
                                 break;
                             }
-                            case FastOp::Sll:
-                            case FastOp::Srl:
-                            case FastOp::Sra:
+                            case FastOp::Sll: {
+                                constexpr simrv::xlen::Register shift_mask =
+                                    kGuestXlen64 ? 0x3f : 0x1f;
+                                write_rd(cop.rd,
+                                         gpr[std::to_underlying(cop.rs1)]
+                                             << (gpr[std::to_underlying(cop.rs2)] & shift_mask));
+                                break;
+                            }
+                            case FastOp::Srl: {
+                                if constexpr (kGuestXlen64) {
+                                    write_rd(cop.rd, gpr[std::to_underlying(cop.rs1)] >>
+                                                         (gpr[std::to_underlying(cop.rs2)] & 0x3f));
+                                } else {
+                                    write_rd(cop.rd, static_cast<uint32_t>(
+                                                         gpr[std::to_underlying(cop.rs1)]) >>
+                                                         (gpr[std::to_underlying(cop.rs2)] & 0x1f));
+                                }
+                                break;
+                            }
+                            case FastOp::Sra: {
+                                if constexpr (kGuestXlen64) {
+                                    write_rd(cop.rd,
+                                             static_cast<simrv::xlen::Register>(
+                                                 static_cast<int64_t>(
+                                                     gpr[std::to_underlying(cop.rs1)]) >>
+                                                 (gpr[std::to_underlying(cop.rs2)] & 0x3f)));
+                                } else {
+                                    write_rd(cop.rd,
+                                             static_cast<simrv::xlen::Register>(
+                                                 static_cast<int32_t>(
+                                                     gpr[std::to_underlying(cop.rs1)]) >>
+                                                 (gpr[std::to_underlying(cop.rs2)] & 0x1f)));
+                                }
+                                break;
+                            }
+                            case FastOp::Sllw: {
+#if SIMRV_XLEN == 64
+                                const auto rrs1 = gpr[std::to_underlying(cop.rs1)];
+                                const uint32_t lhs = static_cast<uint32_t>(rrs1);
+                                const auto rrs2 = gpr[std::to_underlying(cop.rs2)];
+                                gpr[std::to_underlying(cop.rd)] = static_cast<int64_t>(
+                                    static_cast<int32_t>(lhs << (rrs2 & 0x1f)));
+#else
+                                const auto rrs1 = gpr[std::to_underlying(cop.rs1)];
+                                const auto rrs2 = gpr[std::to_underlying(cop.rs2)];
+                                write_rd(cop.rd, static_cast<uint32_t>(rrs1) << (rrs2 & 0x1f));
+#endif
+                                break;
+                            }
+                            case FastOp::Srlw: {
+#if SIMRV_XLEN == 64
+                                const auto rrs1 = gpr[std::to_underlying(cop.rs1)];
+                                const uint32_t lhs = static_cast<uint32_t>(rrs1);
+                                const auto rrs2 = gpr[std::to_underlying(cop.rs2)];
+                                gpr[std::to_underlying(cop.rd)] = static_cast<int64_t>(
+                                    static_cast<int32_t>(lhs >> (rrs2 & 0x1f)));
+#else
+                                const auto rrs1 = gpr[std::to_underlying(cop.rs1)];
+                                const auto rrs2 = gpr[std::to_underlying(cop.rs2)];
+                                write_rd(cop.rd, static_cast<uint32_t>(rrs1) >> (rrs2 & 0x1f));
+#endif
+                                break;
+                            }
+                            case FastOp::Sraw: {
+#if SIMRV_XLEN == 64
+                                const auto rrs1 = gpr[std::to_underlying(cop.rs1)];
+                                const int32_t lhs = static_cast<int32_t>(rrs1);
+                                const auto rrs2 = gpr[std::to_underlying(cop.rs2)];
+                                gpr[std::to_underlying(cop.rd)] =
+                                    static_cast<int64_t>(lhs >> (rrs2 & 0x1f));
+#else
+                                const auto rrs1 = gpr[std::to_underlying(cop.rs1)];
+                                const auto rrs2 = gpr[std::to_underlying(cop.rs2)];
+                                write_rd(cop.rd, static_cast<int32_t>(rrs1) >> (rrs2 & 0x1f));
+#endif
+                                break;
+                            }
+                            case FastOp::CzeroEqz: {
+                                write_rd(cop.rd, gpr[std::to_underlying(cop.rs2)] == 0
+                                                     ? 0
+                                                     : gpr[std::to_underlying(cop.rs1)]);
+                                break;
+                            }
+                            case FastOp::CzeroNez: {
+                                write_rd(cop.rd, gpr[std::to_underlying(cop.rs2)] != 0
+                                                     ? 0
+                                                     : gpr[std::to_underlying(cop.rs1)]);
+                                break;
+                            }
                             case FastOp::Mulh:
                             case FastOp::Mulhsu:
                             case FastOp::Mulhu:
@@ -549,11 +668,6 @@ SIMRV_ALWAYS_INLINE auto CPU::run_fast_baremetal_kernel(Machine& machine, uint32
                             case FastOp::Divu:
                             case FastOp::Rem:
                             case FastOp::Remu:
-                            case FastOp::CzeroEqz:
-                            case FastOp::CzeroNez:
-                            case FastOp::Sllw:
-                            case FastOp::Srlw:
-                            case FastOp::Sraw:
                             case FastOp::Divw:
                             case FastOp::Divuw:
                             case FastOp::Remw:
@@ -574,47 +688,11 @@ SIMRV_ALWAYS_INLINE auto CPU::run_fast_baremetal_kernel(Machine& machine, uint32
                         }
                     };
 
-                    const auto execute_cop = [&](const CompactOp& cop,
-                                                 bool& fault) __attribute__((always_inline)) {
-                        switch (cop.fast_op) {
-                            case FastOp::Ld:
-                                fault = !try_fast_load_cop.template operator()<uint64_t>(cop);
-                                break;
-                            case FastOp::Lw:
-                                fault = !try_fast_load_cop.template operator()<int32_t>(cop);
-                                break;
-                            case FastOp::Lwu:
-                                fault = !try_fast_load_cop.template operator()<uint32_t>(cop);
-                                break;
-                            case FastOp::Lh:
-                                fault = !try_fast_load_cop.template operator()<int16_t>(cop);
-                                break;
-                            case FastOp::Lhu:
-                                fault = !try_fast_load_cop.template operator()<uint16_t>(cop);
-                                break;
-                            case FastOp::Lb:
-                                fault = !try_fast_load_cop.template operator()<int8_t>(cop);
-                                break;
-                            case FastOp::Lbu:
-                                fault = !try_fast_load_cop.template operator()<uint8_t>(cop);
-                                break;
-                            case FastOp::Sd:
-                                fault = !try_fast_store_cop.template operator()<uint64_t>(cop);
-                                break;
-                            case FastOp::Sw:
-                                fault = !try_fast_store_cop.template operator()<uint32_t>(cop);
-                                break;
-                            case FastOp::Sh:
-                                fault = !try_fast_store_cop.template operator()<uint16_t>(cop);
-                                break;
-                            case FastOp::Sb:
-                                fault = !try_fast_store_cop.template operator()<uint8_t>(cop);
-                                break;
-                            default:
-                                execute_pure_alu_cop(cop);
-                                break;
-                        }
-                    };
+                    const auto execute_pure_alu_cop = [&](const CompactOp& cop)
+                                                          __attribute__((always_inline)) {
+                                                              bool unused_fault = false;
+                                                              execute_cop(cop, unused_fault);
+                                                          };
 
                     // Compact blocks assume halfword-aligned branch targets. With IALIGN=32,
                     // use scalar execution so misaligned taken branches trap precisely.
@@ -667,6 +745,53 @@ SIMRV_ALWAYS_INLINE auto CPU::run_fast_baremetal_kernel(Machine& machine, uint32
                                     }
                                     local_b += loop_count * cur_bb->num_guest_ops;
                                     compressed_count += loop_count * cur_bb->num_compressed;
+                                    next_pc = cur_bb->pc.raw();
+                                    next_bb = cur_bb;
+                                    goto block_transition;
+                                }
+
+                                if (term_op == FastOp::Bne) {
+                                    while (local_b + cur_bb->num_guest_ops <= batch_size) {
+                                        bool mem_fault = false;
+                                        uint32_t mem_i = 0;
+                                        if (!cur_bb->has_mem_op) {
+                                            for (uint32_t k = 0; k < non_branch_ops; ++k) {
+                                                execute_pure_alu_cop(cur_bb->ops[k]);
+                                            }
+                                        } else {
+                                            for (; mem_i < non_branch_ops; ++mem_i) {
+                                                execute_cop(cur_bb->ops[mem_i], mem_fault);
+                                                if (simrv::compiler::unlikely(mem_fault)) break;
+                                            }
+                                        }
+                                        if (simrv::compiler::unlikely(mem_fault)) {
+                                            simrv::xlen::Register fault_pc = cur_bb->pc.raw();
+                                            for (uint32_t j = 0; j < mem_i; ++j) {
+                                                fault_pc += cur_bb->ops[j].op_len;
+                                            }
+                                            fallback_op = decode_cache.lookup_aligned(fault_pc);
+                                            next_pc = fault_pc;
+                                            local_b += mem_i;
+                                            seg_start_pc = next_pc;
+                                            goto chain_exit;
+                                        }
+                                        local_b += cur_bb->num_guest_ops;
+                                        compressed_count += cur_bb->num_compressed;
+                                        if (gpr[rs1_idx] == gpr[rs2_idx]) {
+                                            next_pc = cur_bb->fallthrough_pc;
+                                            next_bb = cur_bb->fallthrough_bb;
+                                            if (simrv::compiler::unlikely(next_bb == nullptr ||
+                                                                          next_bb->pc.raw() !=
+                                                                              next_pc)) {
+                                                next_bb = block_cache.lookup(next_pc);
+                                                if (next_bb == nullptr) {
+                                                    next_bb = build_successor(next_pc);
+                                                }
+                                                cur_bb->fallthrough_bb = next_bb;
+                                            }
+                                            goto block_transition;
+                                        }
+                                    }
                                     next_pc = cur_bb->pc.raw();
                                     next_bb = cur_bb;
                                     goto block_transition;
