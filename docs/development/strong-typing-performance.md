@@ -143,3 +143,10 @@ An x86 experiment checked a cached decoded branch target before looking up a bas
 (CV 2.69% and 2.70%). The candidate also included a CLI summary formatting change, so this was
 not a perfectly isolated comparison. The difference was too small to justify changing dispatch;
 the experiment was discarded. A separate run on CPU 10 had CV above 24% and was discarded.
+
+The IALIGN=32 correctness fix was compared against the retained pre-fix RV64 binary on the
+compressed branch workload, using the native C++ subprocess adapter, five warmups and 30
+interleaved samples on x86 CPU 15. Median times were 0.162476 seconds (4.97% CV) before and
+0.157763 seconds (2.58% CV) after. The result shows no material regression on this workload;
+the variability and a concurrent CLI summary change prevent attributing the small difference to
+the guard. SHA-256 prefixes were `da35e96dcd80` and `802f2bb0b512`.

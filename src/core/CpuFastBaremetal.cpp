@@ -169,14 +169,16 @@ SIMRV_ALWAYS_INLINE auto CPU::run_fast_baremetal_kernel(Machine& machine, uint32
                         if (simrv::compiler::unlikely(local_b >= batch_size)) {
                             return BranchAction::Exit;
                         }
-                        auto* target_bb = block_cache.lookup(target_pc);
-                        if (target_bb == nullptr) {
-                            target_bb = block_cache.build_block(target_pc, decode_cache);
-                        }
-                        if (target_bb != nullptr &&
-                            target_bb->num_guest_ops <= batch_size - local_b) {
-                            cur_bb = target_bb;
-                            return BranchAction::EnterBlock;
+                        if (state_.fetch_align_mask == 1) {
+                            auto* target_bb = block_cache.lookup(target_pc);
+                            if (target_bb == nullptr) {
+                                target_bb = block_cache.build_block(target_pc, decode_cache);
+                            }
+                            if (target_bb != nullptr &&
+                                target_bb->num_guest_ops <= batch_size - local_b) {
+                                cur_bb = target_bb;
+                                return BranchAction::EnterBlock;
+                            }
                         }
                         auto* next_op = ops_base + chained->target_idx;
                         if (simrv::compiler::likely(next_op->cpc.raw() == target_pc &&
@@ -613,9 +615,13 @@ SIMRV_ALWAYS_INLINE auto CPU::run_fast_baremetal_kernel(Machine& machine, uint32
                         }
                     };
 
-                    cur_bb = block_cache.lookup(next_pc);
-                    if (simrv::compiler::unlikely(cur_bb == nullptr)) {
-                        cur_bb = block_cache.build_block(next_pc, decode_cache);
+                    // Compact blocks assume halfword-aligned branch targets. With IALIGN=32,
+                    // use scalar execution so misaligned taken branches trap precisely.
+                    if (state_.fetch_align_mask == 1) {
+                        cur_bb = block_cache.lookup(next_pc);
+                        if (simrv::compiler::unlikely(cur_bb == nullptr)) {
+                            cur_bb = block_cache.build_block(next_pc, decode_cache);
+                        }
                     }
                     if (cur_bb != nullptr && cur_bb->num_guest_ops > batch_size - local_b) {
                         cur_bb = nullptr;
@@ -1280,10 +1286,15 @@ SIMRV_ALWAYS_INLINE auto CPU::run_fast_baremetal_kernel(Machine& machine, uint32
                                 const simrv::xlen::Register link_pc =
                                     static_cast<simrv::xlen::Register>(chained->cpc.raw() +
                                                                        chained->op_len);
-                                write_rd(chained->rd, link_pc);
                                 const simrv::xlen::Register target_pc =
                                     static_cast<simrv::xlen::Register>(chained->cpc.raw() +
                                                                        chained->imm);
+                                if (simrv::compiler::unlikely(
+                                        (target_pc & state_.fetch_align_mask) != 0)) {
+                                    fallback_op = chained;
+                                    goto chain_exit;
+                                }
+                                write_rd(chained->rd, link_pc);
                                 const auto action = commit_taken_branch(target_pc);
                                 if (action == BranchAction::ContinueScalar) {
                                     continue;
@@ -1328,6 +1339,11 @@ SIMRV_ALWAYS_INLINE auto CPU::run_fast_baremetal_kernel(Machine& machine, uint32
                                 const simrv::xlen::Register link_pc =
                                     static_cast<simrv::xlen::Register>(chained->cpc.raw() +
                                                                        chained->op_len);
+                                if (simrv::compiler::unlikely(
+                                        (target_pc & state_.fetch_align_mask) != 0)) {
+                                    fallback_op = chained;
+                                    goto chain_exit;
+                                }
                                 write_rd(chained->rd, link_pc);
                                 const auto action = commit_taken_branch(target_pc);
                                 if (action == BranchAction::ContinueScalar) {

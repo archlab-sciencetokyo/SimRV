@@ -5,6 +5,8 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+- Fix misaligned branch and jump exceptions in bare-metal fast execution when compressed instructions are disabled.
+
 ## [v3.0.0-rc.19] — 2026-11-09
 
 - Separate fast execution into dedicated baremetal and OS engines with unified direct dispatch.

@@ -1746,6 +1746,51 @@ void test_fast_block_successor_cache_collision() {
            "colliding successor preserves current block retirement and branch target");
 }
 
+void test_fast_baremetal_misaligned_control_transfer() {
+    const auto run = [](simrv::isa::OperationId id, bool hosted_rv32) {
+        simrv::core::Machine machine;
+        auto& cpu = machine.hart(0);
+        auto& state = cpu.state();
+        if constexpr (simrv::xlen::kIsXLen64) {
+            if (hosted_rv32) {
+                state.misa = (state.misa & ~(simrv::xlen::CsrValue{3} << 62U)) |
+                             (simrv::xlen::CsrValue{1} << 62U);
+                state.initialize_lower_xlen_fields();
+            }
+        }
+        state.set_misa(state.misa & ~(simrv::xlen::CsrValue{1} << 2));
+        state.mtvec = 0x2000;
+        state.pc = 0x1000;
+        state.regs.write(simrv::xlen::RegId::A0, 0x1234);
+        state.regs.write(simrv::xlen::RegId::A1, 0x1002);
+        cpu.sync_decode_context();
+        cpu.decode_cache.flush();
+        simrv::pipeline::DecodedInstruction decoded{};
+        decoded.cpc = simrv::xlen::VirtAddr{0x1000};
+        decoded.op_id = id;
+        decoded.opcode = id == simrv::isa::JAL    ? simrv::isa::Opcode::Jal
+                         : id == simrv::isa::JALR ? simrv::isa::Opcode::Jalr
+                                                  : simrv::isa::Opcode::Branch;
+        decoded.ir = static_cast<simrv::xlen::Instruction>(decoded.opcode);
+        decoded.rd = simrv::xlen::RegId::A0;
+        decoded.rs1 = id == simrv::isa::JALR ? simrv::xlen::RegId::A1 : simrv::xlen::RegId::Zero;
+        decoded.rs2 = simrv::xlen::RegId::Zero;
+        decoded.imm = id == simrv::isa::JALR ? 0 : 2;
+        decoded.traits.is_control = true;
+        simrv::core::CachedOp op{};
+        op.copy_from(decoded);
+        cpu.decode_cache.insert(decoded.cpc, op);
+        cpu.run_fast_baremetal_batch(machine, 1, {});
+        expect(state.regs.read(simrv::xlen::RegId::A0) == 0x1234 && state.mepc == 0x1000 &&
+                   state.mcause == 0 && state.mtval == 0x1002,
+               "misaligned fast control transfer traps without writing the link register");
+    };
+    for (auto id : {simrv::isa::JAL, simrv::isa::JALR, simrv::isa::BEQ}) {
+        run(id, false);
+        if constexpr (simrv::xlen::kIsXLen64) run(id, true);
+    }
+}
+
 void test_cached_store_legacy_tohost() {
     simrv::core::Machine machine;
     std::array<simrv::xlen::Byte, 8192> backing{};
@@ -5029,6 +5074,7 @@ int main() {
     test_vector_mask_and_fault_only_first_memory();
     test_compact_block_immediates();
     test_fast_block_successor_cache_collision();
+    test_fast_baremetal_misaligned_control_transfer();
     test_cached_store_legacy_tohost();
     test_vector_bulk_memory_operations();
     test_vector_integer_remainder_and_reverse_subtract();
