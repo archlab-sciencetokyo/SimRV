@@ -20,14 +20,14 @@ enum class SymbolLoadMode : uint8_t { RuntimeEssentials, FullDebug };
  */
 struct SymbolLookupResult {
     std::string_view name;
-    simrv::xlen::Address base_addr = 0;
+    simrv::xlen::VirtAddr base_addr{};
     simrv::xlen::Address offset = 0;
     [[nodiscard]] constexpr auto is_exact() const noexcept -> bool { return offset == 0; }
 };
 
 struct FunctionLookupResult {
     std::string_view name;
-    simrv::xlen::Address base_addr = 0;
+    simrv::xlen::VirtAddr base_addr{};
     simrv::xlen::Address offset = 0;
 };
 

@@ -243,7 +243,7 @@ auto SymbolTable::lookup_symbol(simrv::xlen::VirtAddr address) const
 
     return SymbolLookupResult{
         .name = it->second,
-        .base_addr = sym_addr,
+        .base_addr = simrv::xlen::VirtAddr{sym_addr},
         .offset = offset,
     };
 }
@@ -263,7 +263,8 @@ auto SymbolTable::lookup_function(simrv::xlen::VirtAddr address) const
         offset != 0)
         return std::nullopt;
     if (next != functions_.end() && addr >= next_function_start) return std::nullopt;
-    return FunctionLookupResult{.name = it->second.name, .base_addr = it->first, .offset = offset};
+    return FunctionLookupResult{
+        .name = it->second.name, .base_addr = simrv::xlen::VirtAddr{it->first}, .offset = offset};
 }
 
 auto SymbolTable::lookup(simrv::xlen::VirtAddr addr) const -> std::string {

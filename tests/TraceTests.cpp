@@ -50,6 +50,10 @@ static_assert(std::same_as<decltype(std::declval<const simrv::debug::SymbolTable
                            std::optional<simrv::xlen::VirtAddr>>);
 static_assert(std::same_as<decltype(std::declval<const simrv::debug::SymbolTable&>().entry_point()),
                            std::optional<simrv::xlen::VirtAddr>>);
+static_assert(
+    std::same_as<decltype(simrv::debug::SymbolLookupResult::base_addr), simrv::xlen::VirtAddr>);
+static_assert(
+    std::same_as<decltype(simrv::debug::FunctionLookupResult::base_addr), simrv::xlen::VirtAddr>);
 
 constexpr simrv::xlen::Address kPc = simrv::memory::kDramBaseAddress;
 constexpr std::array<simrv::xlen::Instruction, 10> kProgram = {
@@ -1059,7 +1063,12 @@ void test_function_symbol_lookup(std::string_view executable_path) {
     const auto main_pc = symbols.lookup_name("main");
     if (!main_pc) std::abort();
     const auto main_function = symbols.lookup_function(simrv::xlen::VirtAddr{*main_pc});
-    if (!main_function || main_function->name != "main" || main_function->offset != 0) std::abort();
+    if (!main_function || main_function->name != "main" || main_function->offset != 0 ||
+        main_function->base_addr != *main_pc)
+        std::abort();
+    const auto main_symbol = symbols.lookup_symbol(*main_pc);
+    if (!main_symbol || main_symbol->base_addr != *main_pc || main_symbol->offset != 0)
+        std::abort();
     if (symbols
             .lookup_function(
                 simrv::xlen::VirtAddr{std::numeric_limits<simrv::xlen::Address>::max()})

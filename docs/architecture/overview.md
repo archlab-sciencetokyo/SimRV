@@ -151,9 +151,9 @@ These are remaining C++ interface boundaries to review; their presence does not 
 a guest-visible bug.
 
 Symbol and function lookups take `VirtAddr`; callers interpreting a raw address as an ELF virtual
-address must construct it explicitly. Symbol-name and ELF entry-point lookups also return
-`VirtAddr`, while symbol offsets remain scalar displacements. Legacy boot and signature paths
-explicitly extract raw values where they interpret ELF addresses as physical locations.
+address must construct it explicitly. Symbol and function bases, symbol-name results, and ELF
+entry points also use `VirtAddr`, while symbol offsets remain scalar displacements. Legacy boot and
+signature paths explicitly extract raw values where they interpret ELF addresses as physical locations.
 
 MMIO routing and DMA APIs accept `simrv::xlen::PhysAddr`. C++ callers must explicitly construct
 physical addresses from platform configuration or translate virtual addresses before routing or
