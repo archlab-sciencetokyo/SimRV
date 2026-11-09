@@ -22,13 +22,13 @@ namespace simrv::tui::modals {
 auto LoadModal::title() const -> std::string {
     if (type_ == ModalType::LoadBinary) return "Load Program Binary (ELF)";
     if (type_ == ModalType::LoadDiskImage) return "Load Disk Image";
-    if (type_ == ModalType::LoadCpuConfig) return "Load CPU Model Configuration";
-    if (type_ == ModalType::SaveCpuConfig) return "Save CPU Model Configuration";
+    if (type_ == ModalType::LoadCpuConfig) return "Load Configuration";
+    if (type_ == ModalType::SaveCpuConfig) return "Save Configuration";
     return "Load File";
     if (type_ == ModalType::LoadBinary) return " LOAD PROGRAM BINARY ";
     if (type_ == ModalType::LoadDiskImage) return " LOAD DISK IMAGE (Optional) ";
-    if (type_ == ModalType::LoadCpuConfig) return " LOAD CPU MODEL CONFIGURATION (.cfg) ";
-    if (type_ == ModalType::SaveCpuConfig) return " SAVE CPU MODEL CONFIGURATION (.cfg) ";
+    if (type_ == ModalType::LoadCpuConfig) return " LOAD CONFIGURATION (.cfg) ";
+    if (type_ == ModalType::SaveCpuConfig) return " SAVE CONFIGURATION (.cfg) ";
     return " SELECT FILE ";
 }
 
@@ -258,7 +258,7 @@ auto LoadModal::submit(ModalType type, const std::string& input, bool load_appmo
     } else if (type == ModalType::LoadCpuConfig) {
         if (input.empty()) {
             if (set_status_override_cb) {
-                set_status_override_cb("No CPU configuration path specified");
+                set_status_override_cb("No configuration path specified");
             }
             return false;
         }
@@ -339,7 +339,7 @@ void LoadModal::render(ModalType type, std::vector<std::string>& content_rows,
                                 {.key = "[Esc]", .action = "Skip Disk"}}));
     } else if (type == ModalType::LoadCpuConfig) {
         build_text_input_rows(content_rows,
-                              "Enter CPU model filepath (.cfg) or preset name:", input,
+                              "Enter configuration filepath (.cfg) or preset name:", input,
                               "e.g. balanced, performance, tiny, or path/to/model.cfg");
         content_rows.push_back(std::format("  {}[Tab] Complete path\033[0m", kThemeMuted));
         append_completion_preview();
@@ -351,7 +351,7 @@ void LoadModal::render(ModalType type, std::vector<std::string>& content_rows,
             std::format("  {}Built-in presets: tiny, balanced, performance\033[0m", kThemeMuted));
         content_rows.push_back("");
         content_rows.push_back(build_modal_footer(
-            {{.key = "[Enter]", .action = "Load Model"}, {.key = "[Esc]", .action = "Cancel"}}));
+            {{.key = "[Enter]", .action = "Load Config"}, {.key = "[Esc]", .action = "Cancel"}}));
     }
 }
 

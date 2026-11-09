@@ -174,10 +174,12 @@ int main() {
     "guest_capabilities_dts_templates"_test = [&] {
         const auto header =
             read_file_string(root / "include/simrv/core/GuestCapabilityCatalog.hpp");
+        const auto hpm_def = read_file_string(root / "include/simrv/core/HpmEventCatalog.def");
         const auto dts32 = read_file_string(root / "scripts/templates/virt-rv32.dts");
         const auto dts64 = read_file_string(root / "scripts/templates/virt-rv64.dts");
 
         expect(!header.empty());
+        expect(!hpm_def.empty());
         expect(!dts32.empty());
         expect(!dts64.empty());
 
@@ -185,6 +187,12 @@ int main() {
         expect(dts64.find("riscv,isa-extensions =") != std::string::npos);
         expect(dts64.find("cbom-block-size") != std::string::npos);
         expect(dts32.find("cbom-block-size") != std::string::npos);
+
+        // HPM PMU properties synchronized with HpmEventCatalog.def
+        expect(dts32.find("riscv,raw-event-to-mhpmcounters =") != std::string::npos);
+        expect(dts64.find("riscv,raw-event-to-mhpmcounters =") != std::string::npos);
+        expect(dts32.find("riscv,event-to-mhpmevent =") != std::string::npos);
+        expect(dts64.find("riscv,event-to-mhpmevent =") != std::string::npos);
     };
 
     return 0;

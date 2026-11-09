@@ -232,6 +232,22 @@ else()
       CACHE PATH "Path to reproducible Linux test images")
 endif()
 
+if(DEFINED ENV{SIMRV_GUEST_BUILD_DIR})
+  set(_SIMRV_DEFAULT_LINUX_BUILD_DIR "$ENV{SIMRV_GUEST_BUILD_DIR}")
+elseif(DEFINED ENV{SIMRV_LINUX_BUILD_DIR})
+  set(_SIMRV_DEFAULT_LINUX_BUILD_DIR "$ENV{SIMRV_LINUX_BUILD_DIR}")
+elseif(DEFINED ENV{SIMRV_LINUX_BUILDS_DIR})
+  set(_SIMRV_DEFAULT_LINUX_BUILD_DIR "$ENV{SIMRV_LINUX_BUILDS_DIR}")
+else()
+  set(_SIMRV_DEFAULT_LINUX_BUILD_DIR "${PROJECT_SOURCE_DIR}/linux-build")
+endif()
+set(SIMRV_LINUX_BUILD_DIR
+    "${_SIMRV_DEFAULT_LINUX_BUILD_DIR}"
+    CACHE PATH "Path to Linux and guest build artifacts")
+set(SIMRV_GUEST_BUILD_DIR
+    "${SIMRV_LINUX_BUILD_DIR}"
+    CACHE PATH "Alias path to guest build artifacts")
+
 set(SIMRV_DRAM_SIZE_MB
     "256"
     CACHE STRING "DRAM size in megabytes (must be power of 2)")
@@ -274,6 +290,20 @@ target_include_directories(SimRV PRIVATE ${PROJECT_SOURCE_DIR}/include
                                          ${PROJECT_BINARY_DIR}/generated)
 target_link_libraries(SimRV PRIVATE simrv-runtime)
 simrv_apply_options(SimRV)
+
+function(simrv_add_tool target source)
+  add_executable(${target} ${source})
+  target_include_directories(${target} PRIVATE ${PROJECT_SOURCE_DIR}/include
+                                              ${PROJECT_BINARY_DIR}/generated)
+  target_link_libraries(${target} PRIVATE simrv-runtime)
+  simrv_apply_options(${target})
+endfunction()
+
+simrv_add_tool(simrv-cpu-wizard src/tools/CpuWizard.cpp)
+simrv_add_tool(simrv-smoke src/tools/GaSmoke.cpp)
+simrv_add_tool(simrv-release-check src/tools/ReleaseCheck.cpp)
+simrv_add_tool(simrv-evidence src/tools/ReleaseEvidence.cpp)
+simrv_add_tool(simrv-check-artifacts src/tools/CheckLinuxArtifacts.cpp)
 
 check_cxx_compiler_flag("-frounding-math" COMPILER_SUPPORTS_FROUNDING_MATH)
 if(COMPILER_SUPPORTS_FROUNDING_MATH)

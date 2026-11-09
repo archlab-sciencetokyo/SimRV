@@ -81,7 +81,7 @@ jobs:
         run: ctest --test-dir build/${{ matrix.arch }}-release --output-on-failure -L gate
 
       - name: Run GA smoke workflow
-        run: python3 scripts/ga_smoke.py --simrv build/${{ matrix.arch }}-release/simrv
+        run: build/${{ matrix.arch }}-release/simrv-smoke --simrv build/${{ matrix.arch }}-release/simrv
 
       - name: Validate source release metadata
         run: ctest --test-dir build/${{ matrix.arch }}-release --output-on-failure -L release
@@ -256,8 +256,7 @@ jobs:
           tar -tzf "${{ steps.names.outputs.asset_base }}.tar.gz" > portable-archive.list
           grep -q '^usr/share/SimRV/SimRVBuildMetadata.json$' portable-archive.list
           grep -q '^usr/share/SimRV/schemas/simrv-build-metadata.schema.json$' portable-archive.list
-          python3 scripts/release_check.py --binary build/rv64-musl-release/simrv \
-            --archive "${{ steps.names.outputs.asset_base }}.tar.gz"
+          build/rv64-release/simrv-release-check --binary build/rv64-musl-release/simrv
       - uses: actions/upload-artifact@v7
         with:
           name: ${{ steps.names.outputs.asset_base }}

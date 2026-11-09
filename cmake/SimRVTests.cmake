@@ -271,9 +271,12 @@ if(BUILD_TESTING)
                                                "external;linux")
   endif()
 
+  simrv_add_runtime_test(simrv-linux-pty-tests tests/LinuxPtyTests.cpp
+                         test-linux-pty "linux;pty;interactive;manual")
+
   function(simrv_add_linux_pty_test name environment timeout labels)
     add_test(NAME "${name}"
-             COMMAND "${PYTHON_BIN}" "${CMAKE_SOURCE_DIR}/scripts/test_linux_pty.py")
+             COMMAND $<TARGET_FILE:simrv-linux-pty-tests>)
     set_tests_properties(
       "${name}"
       PROPERTIES ENVIRONMENT "${environment}" TIMEOUT "${timeout}"

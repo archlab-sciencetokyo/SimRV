@@ -374,6 +374,42 @@ auto print_doctor() -> int {
     std::println(
         "  framebuffer TUI  : streaming via Sixel or Kitty when detected; text TUI always "
         "available");
+
+    const char* guest_build = std::getenv("SIMRV_GUEST_BUILD_DIR");
+    if (!guest_build) guest_build = std::getenv("SIMRV_LINUX_BUILD_DIR");
+    if (!guest_build) guest_build = std::getenv("SIMRV_LINUX_BUILDS_DIR");
+
+    const char* guest_images = std::getenv("SIMRV_GUEST_IMAGES_DIR");
+    if (!guest_images) guest_images = std::getenv("SIMRV_LINUX_IMAGES_DIR");
+
+    std::error_code ec;
+    std::string build_status;
+    if (guest_build) {
+        build_status = std::filesystem::is_directory(guest_build, ec)
+                           ? std::format("{} (active)", guest_build)
+                           : std::format("{} (not found)", guest_build);
+    } else if (std::filesystem::is_directory("linux-build", ec)) {
+        build_status = "linux-build (auto-detected)";
+    } else {
+        build_status = "(unset; defaults to linux-build)";
+    }
+
+    std::string images_status;
+    if (guest_images) {
+        images_status = std::filesystem::is_directory(guest_images, ec)
+                            ? std::format("{} (active)", guest_images)
+                            : std::format("{} (not found)", guest_images);
+    } else if (std::filesystem::is_directory(
+                   std::format("linux-images/rv{}/alpine-gui", simrv::xlen::kXLenBits), ec)) {
+        images_status =
+            std::format("linux-images/rv{}/alpine-gui (auto-detected)", simrv::xlen::kXLenBits);
+    } else {
+        images_status = std::format("(unset; defaults to linux-images/rv{}/alpine-gui)",
+                                    simrv::xlen::kXLenBits);
+    }
+
+    std::println("  guest build dir  : {}", build_status);
+    std::println("  guest image dir  : {}", images_status);
     return 0;
 }
 

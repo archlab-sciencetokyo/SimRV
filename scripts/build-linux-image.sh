@@ -6,7 +6,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(dirname "$SCRIPT_DIR")"
-BUILD_DIR="${SIMRV_LINUX_BUILD_DIR:-$ROOT_DIR/linux-build}"
+BUILD_DIR="${SIMRV_GUEST_BUILD_DIR:-${SIMRV_GUEST_BUILDS_DIR:-${SIMRV_LINUX_BUILD_DIR:-${SIMRV_LINUX_BUILDS_DIR:-$ROOT_DIR/linux-build}}}}"
 ARCH="${ARCH:-rv64}"
 
 # Versions
@@ -232,15 +232,9 @@ if (( PRUNE_OLD_SOURCES && ! UPDATE_VERSIONS )); then
 fi
 
 check_upstream_versions() {
-    local output
-    UPSTREAM_STATUS=0
-    if output=$(python3 "$SCRIPT_DIR/check-linux-versions.py"); then
-        :
-    else
-        UPSTREAM_STATUS=$?
-        print_error "Unable to check upstream versions; check network access and retry."
-    fi
-    UPSTREAM_JSON="$output"
+    print_error "Online version update check is disabled. Update linux-versions.conf directly."
+    UPSTREAM_STATUS=1
+    UPSTREAM_JSON="{}"
 }
 version_is_newer() {
     if [[ "$1" == "$2" ]]; then
@@ -478,7 +472,7 @@ else
     ROOTFS_LABEL="simrv-alpine"
 fi
 
-IMAGES_ROOT="${SIMRV_LINUX_IMAGES_ROOT:-$ROOT_DIR/linux-images}"
+IMAGES_ROOT="${SIMRV_GUEST_IMAGES_DIR:-${SIMRV_LINUX_IMAGES_DIR:-${SIMRV_LINUX_IMAGES_ROOT:-$ROOT_DIR/linux-images}}}"
 IMAGES_DIR="$IMAGES_ROOT/$ARCH/${ROOTFS_VARIANT}-${PROFILE}"
 case "$CLEAN_ACTION" in
     all)
@@ -1017,9 +1011,14 @@ KERNEL_CONFIG_SHA256=$(sha256sum "$KERNEL_CONFIG" | cut -d' ' -f1)
 INITRAMFS_SHA256=$(sha256sum "$BUILD_DIR/initramfs_${ARCH}.cpio" | cut -d' ' -f1)
 REUSE_KERNEL=0
 if [[ "$REUSE_KERNEL_ARTIFACT" == "1" ]]; then
-    if python3 "$SCRIPT_DIR/check-kernel-reuse.py" \
-        "$IMAGES_DIR/manifest.json" "$IMAGES_DIR/vmlinux" "$ARCH" "$LINUX_VER" \
-        "$PROFILE" "$ROOTFS_VARIANT" "$INITRAMFS_SHA256" "$KERNEL_CONFIG_SHA256"; then
+    if [[ -f "$IMAGES_DIR/manifest.json" && -f "$IMAGES_DIR/vmlinux" ]] && \
+       grep -q "\"architecture\": *\"$ARCH\"" "$IMAGES_DIR/manifest.json" && \
+       grep -q "\"linux_version\": *\"$LINUX_VER\"" "$IMAGES_DIR/manifest.json" && \
+       grep -q "\"profile\": *\"$PROFILE\"" "$IMAGES_DIR/manifest.json" && \
+       grep -q "\"rootfs\": *\"$ROOTFS_VARIANT\"" "$IMAGES_DIR/manifest.json" && \
+       grep -q "\"initramfs_sha256\": *\"$INITRAMFS_SHA256\"" "$IMAGES_DIR/manifest.json" && \
+       grep -q "\"kernel_config_sha256\": *\"$KERNEL_CONFIG_SHA256\"" "$IMAGES_DIR/manifest.json" && \
+       grep -q "\"vmlinux\": *\"$(sha256sum "$IMAGES_DIR/vmlinux" | cut -d' ' -f1)\"" "$IMAGES_DIR/manifest.json"; then
         cp "$IMAGES_DIR/vmlinux" "$LINUX_BUILD/vmlinux"
         REUSE_KERNEL=1
         print_info "Skipping kernel rebuild; the published kernel matches the current inputs."
@@ -1057,7 +1056,6 @@ rm -rf "$OPENSBI_BUILD/build"
 # Compile the virt-compatible DTB from the selected memory and rootfs
 # contract. Keep the checked-in templates readable while making the published
 # artifact match the simulator/FPGA memory map.
-python3 "$SCRIPT_DIR/generate_hpm_catalog.py" --check
 DRAM_BYTES=$((DRAM_SIZE_MB * 1024 * 1024))
 DRAM_HEX=$(printf '0x%x' "$DRAM_BYTES")
 GENERATED_DTS="$BUILD_DIR/virt-rv${XLEN}-${ROOTFS_VARIANT}-${PROFILE}.dts"

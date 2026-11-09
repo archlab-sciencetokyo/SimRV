@@ -38,9 +38,8 @@ install(
   COMPONENT Runtime)
 
 install(
-  PROGRAMS scripts/cpu_model_wizard.py
-  DESTINATION ${CMAKE_INSTALL_BINDIR}
-  RENAME simrv-cpu-wizard
+  TARGETS simrv-cpu-wizard
+  RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
   COMPONENT Tools)
 install(
   PROGRAMS scripts/tune_cpu_model.py

@@ -96,7 +96,7 @@ GEMINI.md
 /paper/
 
 # Local tools directory
-tools/
+/tools/
 
 # Editor and OS artifacts
 *.swp

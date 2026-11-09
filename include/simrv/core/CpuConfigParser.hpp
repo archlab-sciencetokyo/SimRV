@@ -376,7 +376,7 @@ inline auto parse_cpu_config_stream(std::istream& stream, simrv::pipeline::CpuMo
             } else if (detail::iequals(sec_name, "plugins")) {
                 current_section = Section::PluginsMetadata;
             } else {
-                simrv::log::warn("Unknown CPU config section: [{}]", sec_name);
+                simrv::log::warn("Unknown config section: [{}]", sec_name);
             }
             continue;
         }
@@ -526,7 +526,7 @@ inline auto parse_cpu_config_stream(std::istream& stream, simrv::pipeline::CpuMo
             if (key == "pipeline_type" || (current_section == Section::Pipeline && key == "type")) {
                 const auto parsed = simrv::pipeline::parse_pipeline_type(val_str);
                 if (!parsed) {
-                    simrv::log::warn("Unsupported pipeline '{}' in CPU config", val_str);
+                    simrv::log::warn("Unsupported pipeline '{}' in configuration", val_str);
                     return false;
                 }
                 config.pipeline.pipeline_type = *parsed;
@@ -600,7 +600,7 @@ inline auto parse_cpu_config_stream(std::istream& stream, simrv::pipeline::CpuMo
                 (current_section == Section::BranchPredictor && key == "type")) {
                 const auto parsed = simrv::pipeline::parse_branch_predictor_type(val_str);
                 if (!parsed) {
-                    simrv::log::warn("Unsupported branch predictor '{}' in CPU config", val_str);
+                    simrv::log::warn("Unsupported branch predictor '{}' in configuration", val_str);
                     return false;
                 }
                 config.pipeline.branch_predictor.type = *parsed;
@@ -885,7 +885,7 @@ inline auto parse_cpu_config_stream(std::istream& stream, simrv::pipeline::CpuMo
                     config.bram_prewarm = *b;
                 }
             } else {
-                simrv::log::warn("Unknown CPU config key: {}", key);
+                simrv::log::warn("Unknown config key: {}", key);
             }
         } catch (const std::exception& e) {
             simrv::log::warn("Failed to parse value '{}' for key '{}': {}", val_str, key, e.what());
@@ -1312,7 +1312,7 @@ inline auto load_cpu_config_stream(std::istream& stream, simrv::pipeline::CpuMod
     }
     const auto valid = config.validate();
     if (!valid) {
-        simrv::log::warn("Invalid CPU configuration: {}", valid.error());
+        simrv::log::warn("Invalid configuration: {}", valid.error());
         return false;
     }
     return true;

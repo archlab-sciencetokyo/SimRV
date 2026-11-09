@@ -1953,6 +1953,25 @@ auto parse_command_line(std::span<char* const> args) -> std::expected<ParseResul
     if (result.options.explicit_cli_mode && result.options.explicit_tui_mode) {
         return std::unexpected("--cli and --tui are mutually exclusive");
     }
+    if (!result.options.appmode &&
+        (result.options.fn_memimg.empty() || result.options.fn_dvtree.empty())) {
+        if (auto auto_bundle = simrv::util::resolve_buildroot_image_bundle("")) {
+            if (result.options.fn_memimg.empty()) {
+                result.options.fn_memimg = auto_bundle->firmware.string();
+            }
+            if (result.options.fn_dvtree.empty()) {
+                result.options.fn_dvtree = auto_bundle->dtb.string();
+            }
+            if (result.options.fn_dskimg.empty() && !auto_bundle->rootfs.empty()) {
+                result.options.fn_dskimg = auto_bundle->rootfs.string();
+                result.options.use_disk = true;
+            }
+            if (!result.options.dram_size && auto_bundle->dram_size_bytes) {
+                result.options.dram_size = *auto_bundle->dram_size_bytes;
+            }
+            result.options.use_opensbi = true;
+        }
+    }
     if (result.options.fn_dvtree.empty()) {
         if (const char* env_dtb = std::getenv("SIMRV_LINUX_DTB"); env_dtb && *env_dtb) {
             result.options.fn_dvtree = env_dtb;
@@ -2891,7 +2910,7 @@ auto cli_short_flag_takes_argument(char c) -> bool {
         {"mission <check|create|FILE>", "Classroom student mission tools"},
         {"disk create <OUT.IMG>", "Create virtual disk images"},
         {"scaffold <cpu|device|cfu>", "Generate boilerplate for models and plugins"},
-        {"config <validate|export-soc>", "Validate or export SoC/CPU configurations"},
+        {"config <validate|export-soc>", "Validate or export system/SoC configurations"},
         {"explain <HEX>", "Decode and explain a RISC-V instruction word"},
         {"doctor", "Inspect environment, terminal, and capabilities"},
         {"completion <bash|zsh|fish>", "Generate shell autocompletion script"},

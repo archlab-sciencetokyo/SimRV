@@ -369,8 +369,8 @@ void load_image_into_ram(std::string& file_path, simrv::memory::RamView ram_view
                     loaded_segment = true;
                     if (machine != nullptr) {
                         const bool is_exec = (phdr.p_flags & 0x1) != 0;
-                        machine->record_loaded_segment(simrv::xlen::PhysAddr{dram_base + dest_offset},
-                                                       phdr.p_memsz, is_exec);
+                        machine->record_loaded_segment(
+                            simrv::xlen::PhysAddr{dram_base + dest_offset}, phdr.p_memsz, is_exec);
                     }
                     if (phdr.p_memsz > phdr.p_filesz && (dest_offset + phdr.p_filesz) < capacity) {
                         const size_t bss_bytes = std::min<size_t>(
@@ -537,7 +537,7 @@ auto Machine::initialize() -> std::expected<void, std::string> {
         auto model = primary_hart().cpu_model_config;
         if (!simrv::core::load_cpu_config(config.files.config_path, model)) {
             const std::string err =
-                "Failed to load CPU configuration file: " + config.files.config_path;
+                "Failed to load configuration file: " + config.files.config_path;
             simrv::log::error("{}", err);
             return std::unexpected(err);
         }
@@ -593,8 +593,7 @@ auto Machine::initialize() -> std::expected<void, std::string> {
         }
     } else {
         if (uart_config.enabled && !uart_config.compatible.empty() &&
-            uart_config.compatible != "ns16550a" &&
-            uart_config.compatible != "ns16550") {
+            uart_config.compatible != "ns16550a" && uart_config.compatible != "ns16550") {
             return std::unexpected("No serial plugin registered for compatible: " +
                                    uart_config.compatible);
         }
@@ -616,8 +615,7 @@ auto Machine::initialize() -> std::expected<void, std::string> {
                    (device.kind == SoCDeviceKind::Rtc &&
                     device.compatible == "google,goldfish-rtc") ||
                    (device.kind == SoCDeviceKind::Power &&
-                    (device.compatible == "sifive,test1" ||
-                     device.compatible == "sifive,test0"));
+                    (device.compatible == "sifive,test1" || device.compatible == "sifive,test0"));
         }
         auto replacement = device_registry().create_mmio(*this, device);
         if (!replacement) return false;

@@ -16,16 +16,19 @@ This directory contains development, benchmarking, release verification, and Lin
   - `gdb`: Paired execution benchmarking comparing baseline CLI speed against remote GDB RSP step latency.
 - **`evaluate_rtl_parity.py`**: Adapter-driven RTL/SimRV architectural and cycle-parity runner. Reusable target adapters and trace utilities live in `rtl_parity/`.
 
-### 2. Release Qualification
+### 2. Release Qualification & Verification (Native C++)
 
-- **`release_check.py`**: Verifies release manifest constraints, binary ELF headers, MISA extensions, and version parity.
-- **`release_evidence.py`**: Captures machine-readable evidence metadata for CI gates and qualification manifests.
+Release qualification and verification tools have been rewritten as fast native C++ utilities:
+- **`simrv-release-check`**: Validates release manifest constraints, dependency revisions, and binary version parity.
+- **`simrv-smoke`**: Distribution-independent GA smoke check for versioning, capability discovery, environment diagnostics, and SoC manifest compatibility.
+- **`simrv-evidence`**: Captures machine-readable evidence metadata for CI gates and qualification manifests.
+- **`simrv-check-artifacts`**: Validates published Linux kernel and rootfs profile bundles against manifest digests and filesystem contracts.
+- **`simrv-cpu-wizard`**: CLI wizard for scaffolding SimRV system and SoC configurations (.cfg).
+
 ### 3. Linux Kernel, Rootfs & Integration
 
-- **`build-linux-image.sh`**: Multi-stage compiler for OpenSBI, Linux kernel, and BusyBox/Alpine rootfs images, including the RV64 Alpine UEFI disk profile. Includes storage management flags (`--clean-build`, `--clean-old-kernels`). Disk generation is performed natively via `simrv --create-disk`.
-- **`test_linux_pty.py`**: Automated headless pseudo-terminal interaction tests verifying guest login, shell commands, and poweroff lifecycles.
-- **`ga_smoke.py`**: Distribution-independent release smoke check for versioning, capability discovery,
-  environment diagnostics, SoC manifest compatibility, and an optional guest run.
+- **`build-linux-image.sh`**: Multi-stage compiler for OpenSBI, Linux kernel, and BusyBox/Alpine rootfs images, including the RV64 Alpine UEFI disk profile. Supports `SIMRV_GUEST_BUILD_DIR` / `SIMRV_LINUX_BUILD_DIR` and `SIMRV_LINUX_IMAGES_DIR`.
+- **`setup-simrv-tap.sh`**: Helper script to configure TAP networking for guest simulation.
 - **`templates/`**: Device tree sources (`virt-rv64.dts`, `virt-rv32.dts`) and early boot payloads.
 
 ### 4. Code Quality & Extension Verification

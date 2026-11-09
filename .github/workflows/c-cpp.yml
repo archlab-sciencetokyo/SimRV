@@ -173,7 +173,7 @@ jobs:
           SUITES+=(--suite vector --suite package)
           DEPENDENCIES+=(--dependency vector_tests="${RUNNER_TEMP}/riscv-vector-tests")
         fi
-        python3 scripts/release_evidence.py \
+        build/${{ matrix.arch }}-release/simrv-evidence \
           --build-dir build/${{ matrix.arch }}-release \
           --arch ${{ matrix.arch == 'rv32' && '32' || '64' }} \
           --compiler ${{ matrix.compiler }} \
