@@ -5,6 +5,10 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+- Add host hardware cache topology discovery and adaptive simulation tuning diagnostics in `simrv doctor`.
+- Expand basic block coalescing capacity from 16 to 32 instructions to capture complete inner loop bodies in single blocks.
+- Unify basic block compact op execution into a single direct jump table to eliminate nested secondary switch overheads.
+- Specialize and hoist invariant branch exit conditions in tight self-loop kernels.
 - Accelerate bare-metal fallback execution dispatch with lock-free UART transfer state and cached floating-point environment updates.
 - Eliminate redundant companion symbol probing regressions during ELF loading and initialization.
 - Anchor simulation wall-clock start time immediately prior to execution to exclude host loading and terminal setup latency.
