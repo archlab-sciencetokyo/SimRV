@@ -137,3 +137,9 @@ engine-split interval, which also contains other correctness and execution chang
 identify the responsible instruction or justify reverting those changes. The pre-split binary was
 45,411,672 bytes with SHA-256 prefix `e5847d0acbc0`. Two attempts on CPU 0 had over 30% CV under
 host load and were discarded.
+
+An x86 experiment checked a cached decoded branch target before looking up a basic block. On CPU
+15, five warmups and 30 interleaved branch samples gave medians of 0.167503 and 0.165137 seconds
+(CV 2.69% and 2.70%). The candidate also included a CLI summary formatting change, so this was
+not a perfectly isolated comparison. The difference was too small to justify changing dispatch;
+the experiment was discarded. A separate run on CPU 10 had CV above 24% and was discarded.
