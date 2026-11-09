@@ -335,7 +335,7 @@ void MemoryModal::render([[maybe_unused]] std::vector<std::string>& content_rows
                                                 : std::format("\033[1;36m[VIRTUAL MMU]\033[0m");
 
     const auto target_addr = current_address();
-    std::string sym = machine.symbol_table().lookup(target_addr);
+    std::string sym = machine.symbol_table().lookup(simrv::xlen::VirtAddr{target_addr});
     std::string sym_str = sym.empty() ? "" : std::format(" <{}>", sym);
 
     std::string title_line =

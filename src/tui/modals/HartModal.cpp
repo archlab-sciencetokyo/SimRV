@@ -131,7 +131,7 @@ void HartModal::render(std::vector<std::string>& /*content_rows*/,
                                  ? std::format("0x{:016x}", st.pc)
                                  : std::format("0x{:08x}        ", static_cast<uint32_t>(st.pc));
 
-        std::string sym = machine.symbol_table().lookup(st.pc);
+        std::string sym = machine.symbol_table().lookup(simrv::xlen::VirtAddr{st.pc});
         if (sym.empty()) sym = "-";
         if (sym.size() > 18) sym = sym.substr(0, 15) + "...";
 

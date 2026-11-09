@@ -2972,7 +2972,7 @@ void Tui::record_instruction(simrv::xlen::Register pc, simrv::isa::Opcode opcode
                              simrv::xlen::Register rs1_val, uint8_t rs2,
                              simrv::xlen::Register rs2_val, int64_t imm, uint8_t hart) {
     if (mission_.enabled()) {
-        if (const auto symbol = machine_.symbol_table().lookup_symbol(pc);
+        if (const auto symbol = machine_.symbol_table().lookup_symbol(simrv::xlen::VirtAddr{pc});
             symbol && symbol->is_exact()) {
             mission_.observe_symbol(symbol->name);
         }
@@ -3132,7 +3132,7 @@ auto Tui::format_trace_record(const TraceRecord& rec) -> std::string {
     std::string side_effect;
     format_trace_inst(rec, op_name, rd_fp, rs1_fp, rs2_fp, inst_str, side_effect);
 
-    std::string sym = machine_.symbol_table().lookup(rec.pc);
+    std::string sym = machine_.symbol_table().lookup(simrv::xlen::VirtAddr{rec.pc});
     if (sym.empty()) {
         return side_effect.empty() ? std::format("{:#x}: {}", rec.pc, inst_str)
                                    : std::format("{:#x}: {} [{}]", rec.pc, inst_str, side_effect);
@@ -3688,7 +3688,7 @@ void Tui::observe_current_pc_symbol() {
         if (const auto progress = mission_.checkpoint_progress())
             mission_.observe_symbol(progress->symbol);
     }
-    if (const auto symbol = machine_.symbol_table().lookup_symbol(pc);
+    if (const auto symbol = machine_.symbol_table().lookup_symbol(simrv::xlen::VirtAddr{pc});
         symbol && symbol->is_exact()) {
         mission_.observe_symbol(symbol->name);
     }

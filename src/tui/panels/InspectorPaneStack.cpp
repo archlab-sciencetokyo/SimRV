@@ -104,7 +104,7 @@ auto InspectorPane::render_stack_frame(const simrv::core::CPU& cpu, int logical_
 
     if (logical_row == 0) {
         if (is_mem_watch) {
-            std::string sym = machine_.symbol_table().lookup(aligned_base);
+            std::string sym = machine_.symbol_table().lookup(simrv::xlen::VirtAddr{aligned_base});
             std::string title;
             if (!sym.empty() && width >= 56 &&
                 framework::active_render_context().density != framework::Density::Compact) {
@@ -210,7 +210,7 @@ auto InspectorPane::render_stack_frame(const simrv::core::CPU& cpu, int logical_
             }
 
             if (raw_val != 0) {
-                std::string sym = machine_.symbol_table().lookup(raw_val);
+                std::string sym = machine_.symbol_table().lookup(simrv::xlen::VirtAddr{raw_val});
                 if (!sym.empty()) {
                     sym_str = std::format(" <{}>", sym);
                 } else if (!is_mem_watch) {

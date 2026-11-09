@@ -377,7 +377,7 @@ void BreakpointModal::render(ModalType type, std::vector<std::string>& content_r
             for (auto pc : pc_bps) {
                 bool is_sel = (item_idx == bp_cursor);
                 std::string prefix = is_sel ? std::format("{}>\033[0m ", kThemeMint) : "  ";
-                std::string sym = machine->symbol_table().lookup(pc.raw());
+                std::string sym = machine->symbol_table().lookup(pc);
                 std::string sym_str = sym.empty() ? "" : std::format(" ({})", sym);
                 const auto& records = machine->breakpoint_manager().get_pc_breakpoint_records();
                 const bool mission_owned = std::ranges::any_of(records, [pc](const auto& record) {

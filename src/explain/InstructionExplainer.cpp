@@ -462,7 +462,7 @@ auto build_explanation_impl(uint32_t raw_inst, simrv::xlen::Address pc, unsigned
     InstructionExplanation expl{};
     expl.pc = pc;
     if (machine != nullptr) {
-        expl.symbol = machine->symbol_table().lookup(pc);
+        expl.symbol = machine->symbol_table().lookup(simrv::xlen::VirtAddr{pc});
     }
     expl.raw_bits = raw_inst;
     expl.is_compressed = (raw_inst & 0x3U) != 0x3U;

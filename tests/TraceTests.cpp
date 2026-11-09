@@ -34,6 +34,16 @@ namespace {
 using simrv::core::ExecutionEngine;
 using simrv::core::Machine;
 
+template <typename T>
+concept SymbolLookupAddress = requires(const simrv::debug::SymbolTable& table, T address) {
+    table.lookup_symbol(address);
+    table.lookup_function(address);
+    table.lookup(address);
+};
+static_assert(SymbolLookupAddress<simrv::xlen::VirtAddr>);
+static_assert(!SymbolLookupAddress<simrv::xlen::PhysAddr>);
+static_assert(!SymbolLookupAddress<simrv::xlen::Address>);
+
 constexpr simrv::xlen::Address kPc = simrv::memory::kDramBaseAddress;
 constexpr std::array<simrv::xlen::Instruction, 10> kProgram = {
     0x010000ef,  // jal  ra, 0x10 (direct call)
@@ -1041,9 +1051,12 @@ void test_function_symbol_lookup(std::string_view executable_path) {
     if (!symbols.load_from_elf(path)) std::abort();
     const auto main_pc = symbols.lookup_name("main");
     if (!main_pc) std::abort();
-    const auto main_function = symbols.lookup_function(*main_pc);
+    const auto main_function = symbols.lookup_function(simrv::xlen::VirtAddr{*main_pc});
     if (!main_function || main_function->name != "main" || main_function->offset != 0) std::abort();
-    if (symbols.lookup_function(std::numeric_limits<simrv::xlen::Address>::max()).has_value())
+    if (symbols
+            .lookup_function(
+                simrv::xlen::VirtAddr{std::numeric_limits<simrv::xlen::Address>::max()})
+            .has_value())
         std::abort();
 }
 }  // namespace

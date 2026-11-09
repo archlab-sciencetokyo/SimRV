@@ -8,7 +8,7 @@
 #include <optional>
 #include <string>
 
-#include "simrv/xlen/ScalarTypes.hpp"
+#include "simrv/xlen/AddressTypes.hpp"
 
 namespace simrv::debug {
 
@@ -56,11 +56,14 @@ class SymbolTable {
      * @param addr Memory address to lookup.
      * @return SymbolLookupResult if found within displacement threshold, std::nullopt otherwise.
      */
-    [[nodiscard]] auto lookup_symbol(simrv::xlen::Address addr) const
+    [[nodiscard]] auto lookup_symbol(simrv::xlen::VirtAddr addr) const
         -> std::optional<SymbolLookupResult>;
+    auto lookup_symbol(simrv::xlen::Address) const -> std::optional<SymbolLookupResult> = delete;
     /** Look up the containing ELF function without guessing from nearby data/label symbols. */
-    [[nodiscard]] auto lookup_function(simrv::xlen::Address addr) const
+    [[nodiscard]] auto lookup_function(simrv::xlen::VirtAddr addr) const
         -> std::optional<FunctionLookupResult>;
+    auto lookup_function(simrv::xlen::Address) const
+        -> std::optional<FunctionLookupResult> = delete;
 
     /**
      * @brief Look up a symbol name for a given address.
@@ -68,7 +71,8 @@ class SymbolTable {
      * @return Formatted string "symbol_name" or "symbol_name+0xoffset", or empty string if not
      * found.
      */
-    [[nodiscard]] auto lookup(simrv::xlen::Address addr) const -> std::string;
+    [[nodiscard]] auto lookup(simrv::xlen::VirtAddr addr) const -> std::string;
+    auto lookup(simrv::xlen::Address) const -> std::string = delete;
     [[nodiscard]] auto lookup_name(const std::string& name) const
         -> std::optional<simrv::xlen::Address>;
     [[nodiscard]] auto entry_point() const -> std::optional<simrv::xlen::Address> {

@@ -699,7 +699,7 @@ auto InspectorPane::render_pipeline_stages_functional_low_part1(const simrv::cor
         case 1: {
             // Resolve against the instruction being presented rather than the architectural PC,
             // which may already have advanced while the functional pipeline view is rendered.
-            std::string sym = machine_.symbol_table().lookup(ctx.cpc.raw());
+            std::string sym = machine_.symbol_table().lookup(ctx.cpc);
             std::string pc_str = sym.empty() ? hex_val(ctx.cpc.raw())
                                              : std::format("{} <{}>", hex_val(ctx.cpc.raw()), sym);
 

@@ -222,8 +222,9 @@ auto SymbolTable::load_from_elf(const std::string& elf_path, bool clear_existing
     return false;
 }
 
-auto SymbolTable::lookup_symbol(simrv::xlen::Address addr) const
+auto SymbolTable::lookup_symbol(simrv::xlen::VirtAddr address) const
     -> std::optional<SymbolLookupResult> {
+    const auto addr = address.raw();
     if (symbols_.empty()) {
         return std::nullopt;
     }
@@ -247,8 +248,9 @@ auto SymbolTable::lookup_symbol(simrv::xlen::Address addr) const
     };
 }
 
-auto SymbolTable::lookup_function(simrv::xlen::Address addr) const
+auto SymbolTable::lookup_function(simrv::xlen::VirtAddr address) const
     -> std::optional<FunctionLookupResult> {
+    const auto addr = address.raw();
     if (functions_.empty()) return std::nullopt;
     auto it = functions_.upper_bound(addr);
     if (it == functions_.begin()) return std::nullopt;
@@ -264,7 +266,7 @@ auto SymbolTable::lookup_function(simrv::xlen::Address addr) const
     return FunctionLookupResult{.name = it->second.name, .base_addr = it->first, .offset = offset};
 }
 
-auto SymbolTable::lookup(simrv::xlen::Address addr) const -> std::string {
+auto SymbolTable::lookup(simrv::xlen::VirtAddr addr) const -> std::string {
     const auto res = lookup_symbol(addr);
     if (!res) {
         return "";

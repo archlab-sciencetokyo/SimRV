@@ -349,7 +349,7 @@ auto json_string_array(const std::vector<std::string>& values) -> std::string {
 }
 
 auto event_function_field(const Machine& machine, simrv::xlen::Address pc) -> std::string {
-    const auto symbol = machine.symbol_table().lookup_function(pc);
+    const auto symbol = machine.symbol_table().lookup_function(simrv::xlen::VirtAddr{pc});
     return symbol ? std::format(",\"function\":{}", json_quote(symbol->name)) : "";
 }
 
@@ -433,7 +433,7 @@ auto Tracer::accepts_trace_event(std::string_view event, simrv::xlen::Counter cy
     if (!config.trace_device.empty() && component != config.trace_device) return false;
     if (!config.trace_function.empty()) {
         if (!pc) return false;
-        const auto symbol = machine_.symbol_table().lookup_function(*pc);
+        const auto symbol = machine_.symbol_table().lookup_function(simrv::xlen::VirtAddr{*pc});
         if (!symbol || symbol->name != config.trace_function) return false;
     }
     if (config.trace_hart &&

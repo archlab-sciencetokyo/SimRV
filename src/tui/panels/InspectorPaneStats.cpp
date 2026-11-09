@@ -270,7 +270,7 @@ auto InspectorPane::render_debug_state(int debug_row, int width) -> std::string 
         return section_line("Debug · Live", width);
     }
     if (debug_row == 1) {
-        std::string sym = machine_.symbol_table().lookup(st.pc);
+        std::string sym = machine_.symbol_table().lookup(simrv::xlen::VirtAddr{st.pc});
         // Keep the raw architectural PC separate from the ELF resolution.  The prior
         // <symbol> form hid the address and made an offset look like part of the symbol name.
         const bool resolved = !sym.empty();
