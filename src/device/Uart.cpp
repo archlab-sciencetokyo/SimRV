@@ -226,6 +226,7 @@ void Uart::advance_cycles(uint64_t cycles) {
     }
 
     bool rx_changed = false;
+    bool line_changed = false;
     while (true) {
         {
             std::scoped_lock lock(rx_mutex_);
@@ -240,9 +241,10 @@ void Uart::advance_cycles(uint64_t cycles) {
         rx_shift_active_ = false;
         {
             std::scoped_lock lock(rx_mutex_);
-            if (rx_fifo_.size() >= fifo_capacity(fcr_fifo_enabled_))
+            if (rx_fifo_.size() >= fifo_capacity(fcr_fifo_enabled_)) {
+                line_changed |= !rx_overrun_;
                 rx_overrun_ = true;
-            else {
+            } else {
                 rx_fifo_.push_back(rx_shift_byte_);
                 rx_changed = true;
             }
@@ -265,7 +267,8 @@ void Uart::advance_cycles(uint64_t cycles) {
             }
         }
     }
-    if (tx_completed || rx_changed) irq_update_pending_.store(true, std::memory_order_release);
+    if (tx_completed || rx_changed || line_changed)
+        irq_update_pending_.store(true, std::memory_order_release);
     service_interrupts();
     if (tx_completed && tx_fifo_.empty() && !tx_shift_active_) {
         flush_tx_buffer();

@@ -656,6 +656,23 @@ void test_tui_uart_input_irq_publication() {
     uart.advance_cycles(20'000);
     uart.service_interrupts();
     check((machine.cpu.plic_mmio.plic_pending[0] & kUartIrqMask) != 0);
+    // Filling the FIFO and overrunning it in separate advances must publish the line IRQ.
+    ConcreteMachine overrun_machine;
+    overrun_machine.cpu.reset();
+    simrv::device::Uart overrun_uart(overrun_machine);
+    auto request = enable_rx_irq;
+    request.address = simrv::mmio::kUartBaseAddress + simrv::mmio::kUartRegIirFcr;
+    request.data = 1;
+    check(overrun_uart.handle_request(request, response));
+    request.address = simrv::mmio::kUartBaseAddress + simrv::mmio::kUartRegIerDlm;
+    request.data = 4;
+    check(overrun_uart.handle_request(request, response));
+    for (int i = 0; i < 16; ++i) overrun_uart.push_rx_byte(static_cast<uint8_t>(i));
+    overrun_uart.advance_cycles(16 * 13'889);
+    check((overrun_machine.cpu.plic_mmio.plic_pending[0] & kUartIrqMask) == 0);
+    overrun_uart.push_rx_byte('x');
+    overrun_uart.advance_cycles(13'889);
+    check((overrun_machine.cpu.plic_mmio.plic_pending[0] & kUartIrqMask) != 0);
     std::cout << "[PASS] test_tui_uart_input_frame_irq_publication\n";
 }
 

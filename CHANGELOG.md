@@ -6,6 +6,7 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 - Fix misaligned branch and jump exceptions in bare-metal fast execution when compressed instructions are disabled.
+- Fix missing UART line interrupts when the receive FIFO overruns.
 
 ## [v3.0.0-rc.19] — 2026-11-09
 
