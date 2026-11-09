@@ -145,10 +145,14 @@ original starting tree remain incomplete; ARM hardware and usable host performan
 unavailable. See [strong typing and performance](../development/strong-typing-performance.md)
 for the measurements and their limitations.
 
-The strong-typing migration is also incomplete: some trace and lockstep records, and TUI address
-entry points, still use scalar address types.
+The strong-typing migration is also incomplete: some trace records and TUI address entry points
+still use scalar address types. Spike lockstep commit PCs use `VirtAddr`.
 These are remaining C++ interface boundaries to review; their presence does not by itself establish
 a guest-visible bug.
+
+The trace regression exercises lockstep parsing and comparison with a native commit-log fixture.
+The ISA tests labelled `lockstep` use bare-metal mode, while the comparison hook currently runs
+only in OS mode; a passing labelled ISA test therefore does not establish instruction comparison.
 
 Symbol and function lookups take `VirtAddr`; callers interpreting a raw address as an ELF virtual
 address must construct it explicitly. Symbol storage, function bases, symbol-name results, and ELF

@@ -6,6 +6,7 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 - Use guest virtual addresses for C++ symbol lookups and ELF entry-point results.
+- Use guest virtual addresses for C++ Spike lockstep program counters.
 - Fix misaligned branch and jump exceptions in bare-metal fast execution when compressed instructions are disabled.
 - Fix missing UART line interrupts when the receive FIFO overruns.
 

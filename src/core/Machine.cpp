@@ -1963,7 +1963,7 @@ void Machine::run() {
         if (!appmode_enabled() && runtime_->spike_lockstep &&
             runtime_->spike_lockstep->is_running()) {
             runtime_->spike_lockstep->compare_and_report(primary_hart().state(),
-                                                         primary_hart().pipeline_context.cpc.raw(),
+                                                         primary_hart().pipeline_context.cpc,
                                                          primary_hart().e_icount);
             if (runtime_->spike_lockstep->should_halt()) {
                 simrv::log::error("Lockstep: halting on divergence");

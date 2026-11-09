@@ -2,6 +2,7 @@
 #include <array>
 #include <concepts>
 #include <cstdint>
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
@@ -24,6 +25,7 @@
 #include "simrv/core/RuntimeProfile.hpp"
 #include "simrv/core/Tracer.hpp"
 #include "simrv/core/TrapController.hpp"
+#include "simrv/debug/SpikeLockstep.hpp"
 #include "simrv/debug/SymbolTable.hpp"
 #include "simrv/device/Aclint.hpp"
 #include "simrv/memory/MemorySubsystem.hpp"
@@ -52,6 +54,15 @@ concept SymbolInsertionAddress = requires(simrv::debug::SymbolTable& table, T ad
 static_assert(SymbolInsertionAddress<simrv::xlen::VirtAddr>);
 static_assert(!SymbolInsertionAddress<simrv::xlen::PhysAddr>);
 static_assert(!SymbolInsertionAddress<simrv::xlen::Address>);
+template <typename T>
+concept LockstepPc =
+    requires(simrv::debug::SpikeLockstep& lockstep, const simrv::core::ArchState& state, T pc) {
+        lockstep.compare_and_report(state, pc, uint64_t{1});
+    };
+static_assert(LockstepPc<simrv::xlen::VirtAddr>);
+static_assert(!LockstepPc<simrv::xlen::PhysAddr>);
+static_assert(!LockstepPc<simrv::xlen::Address>);
+static_assert(std::same_as<decltype(simrv::debug::SpikeCommitRecord::pc), simrv::xlen::VirtAddr>);
 static_assert(std::same_as<decltype(std::declval<const simrv::debug::SymbolTable&>().lookup_name(
                                std::declval<const std::string&>())),
                            std::optional<simrv::xlen::VirtAddr>>);
@@ -1082,11 +1093,32 @@ void test_function_symbol_lookup(std::string_view executable_path) {
             .has_value())
         std::abort();
 }
+
+void test_lockstep_virtual_pc(std::string_view executable_path) {
+    const auto path = std::filesystem::absolute(executable_path).string();
+    simrv::debug::SpikeLockstep lockstep(path, "", "", "", "rv64gc");
+    if (!lockstep.start()) std::abort();
+    Machine machine;
+    machine.primary_hart().state().regs.write(static_cast<simrv::xlen::RegId>(5), 2);
+    if (!lockstep.compare_and_report(machine.primary_hart().state(), simrv::xlen::VirtAddr{0x1000},
+                                     1) ||
+        !lockstep.compare_and_report(machine.primary_hart().state(), simrv::xlen::VirtAddr{0x1004},
+                                     2))
+        std::abort();
+}
 }  // namespace
 
 int main(int argc, char** argv) {
     if (argc < 1) std::abort();
+    if (argc > 1 && std::string_view(argv[1]) == "--isa=rv64gc") {
+        std::fputs(
+            "core   0: 3 0x00001000 (0x00000293) x5 0x00000002\n"
+            "core   0: 3 0x00001004 (0x00000013)\n",
+            stderr);
+        return 0;
+    }
     test_function_symbol_lookup(argv[0]);
+    test_lockstep_virtual_pc(argv[0]);
     test_retirement_context_and_call_trace();
     test_optional_fp_register_write_trace();
     test_retirement_index_offsets();

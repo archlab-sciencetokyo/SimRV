@@ -13,7 +13,7 @@
  *   SpikeLockstep lockstep("spike", mem_img, disk_img, dtb);
  *   lockstep.start();
  *   // after each committed instruction:
- *   lockstep.compare_and_report(cpu.state(), cpu.e_icount);
+ *   lockstep.compare_and_report(cpu.state(), cpu.pipeline_context.cpc, cpu.e_icount);
  */
 #pragma once
 
@@ -25,7 +25,7 @@
 #include <string>
 #include <vector>
 
-#include "simrv/xlen/ScalarTypes.hpp"
+#include "simrv/xlen/AddressTypes.hpp"
 
 namespace simrv::core {
 struct ArchState;
@@ -85,7 +85,7 @@ namespace simrv::debug {
  * @brief One instruction's committed effect as reported by Spike --log-commits.
  */
 struct SpikeCommitRecord {
-    simrv::xlen::Address pc{};                    ///< PC of retired instruction
+    simrv::xlen::VirtAddr pc{};                   ///< PC of retired instruction
     std::array<simrv::xlen::Register, 32> gpr{};  ///< Full GPR snapshot after retire
     std::array<bool, 32> gpr_valid{};             ///< True for registers written this insn
 };
@@ -149,8 +149,10 @@ class SpikeLockstep {
      * @param icount     Instruction count (for diagnostics).
      * @return true if states match, false on divergence.
      */
-    auto compare_and_report(const simrv::core::ArchState& state, simrv::xlen::Address current_pc,
+    auto compare_and_report(const simrv::core::ArchState& state, simrv::xlen::VirtAddr current_pc,
                             uint64_t icount) -> bool;
+    auto compare_and_report(const simrv::core::ArchState&, simrv::xlen::Address, uint64_t)
+        -> bool = delete;
 
     /** @return True if a divergence has been detected and simulation should halt. */
     [[nodiscard]] bool should_halt() const { return should_halt_; }
@@ -187,8 +189,8 @@ class SpikeLockstep {
         -> std::optional<SpikeCommitRecord>;
 
     /** Print a coloured divergence report. */
-    void print_divergence(uint64_t icount, simrv::xlen::Address simrv_pc,
-                          simrv::xlen::Address spike_pc, const simrv::core::ArchState& simrv_state,
+    void print_divergence(uint64_t icount, simrv::xlen::VirtAddr simrv_pc,
+                          simrv::xlen::VirtAddr spike_pc, const simrv::core::ArchState& simrv_state,
                           const SpikeCommitRecord& spike_rec);
 };
 
