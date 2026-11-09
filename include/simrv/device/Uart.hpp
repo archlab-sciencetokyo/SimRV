@@ -75,6 +75,8 @@ class Uart : public SerialDevice {
     void drain_tx_fifo() noexcept;
 
    private:
+    void update_active_transfer() noexcept;
+
     simrv::core::Machine& machine_;
     simrv::xlen::Address base_;
     simrv::xlen::Address size_;
@@ -108,6 +110,7 @@ class Uart : public SerialDevice {
 
     boost::circular_buffer<uint8_t> rx_fifo_{16};
     std::atomic<bool> irq_update_pending_{false};
+    std::atomic<bool> has_active_transfer_{false};
     mutable std::mutex rx_mutex_;
     std::thread input_thread_;
     std::atomic<bool> input_thread_stop_{false};

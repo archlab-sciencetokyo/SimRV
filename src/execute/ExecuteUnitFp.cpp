@@ -203,12 +203,45 @@ class FpEnvironment {
         }
 
         const uint32_t current_mxcsr = _mm_getcsr();
-        if ((current_mxcsr & 0x6000u) != mxcsr_rm) {
+        if (simrv::compiler::unlikely((current_mxcsr & 0x6000u) != mxcsr_rm)) {
             _mm_setcsr((current_mxcsr & ~0x6000u) | mxcsr_rm);
         }
     }
 
-    static inline void clear_exceptions() noexcept { _mm_setcsr(_mm_getcsr() & ~0x3fu); }
+    static inline void clear_exceptions() noexcept {
+        const uint32_t current_mxcsr = _mm_getcsr();
+        if (simrv::compiler::unlikely((current_mxcsr & 0x3fu) != 0)) {
+            _mm_setcsr(current_mxcsr & ~0x3fu);
+        }
+    }
+
+    static inline void prepare_rounding_and_exceptions(simrv::xlen::Word rm,
+                                                       simrv::xlen::CsrValue fcsr) noexcept {
+        const RoundingMode effective_rm = resolve_rounding_mode(rm, fcsr);
+        uint32_t mxcsr_rm = 0;
+        switch (effective_rm) {
+            case RoundingMode::Rne:
+                mxcsr_rm = 0x0000;
+                break;
+            case RoundingMode::Rdn:
+                mxcsr_rm = 0x2000;
+                break;
+            case RoundingMode::Rup:
+                mxcsr_rm = 0x4000;
+                break;
+            case RoundingMode::Rtz:
+                mxcsr_rm = 0x6000;
+                break;
+            default:
+                mxcsr_rm = 0x0000;
+                break;
+        }
+        const uint32_t current_mxcsr = _mm_getcsr();
+        const uint32_t target_mxcsr = (current_mxcsr & ~(0x6000u | 0x3fu)) | mxcsr_rm;
+        if (simrv::compiler::unlikely(current_mxcsr != target_mxcsr)) {
+            _mm_setcsr(target_mxcsr);
+        }
+    }
 
     static inline void accumulate_exceptions(simrv::xlen::CsrValue& fcsr) noexcept {
         const uint32_t mxcsr = _mm_getcsr();
@@ -261,6 +294,12 @@ class FpEnvironment {
     }
 
     static inline void clear_exceptions() noexcept { std::feclearexcept(FE_ALL_EXCEPT); }
+
+    static inline void prepare_rounding_and_exceptions(simrv::xlen::Word rm,
+                                                       simrv::xlen::CsrValue fcsr) noexcept {
+        set_rounding_mode(rm, fcsr);
+        clear_exceptions();
+    }
 
     static inline void accumulate_exceptions(simrv::xlen::CsrValue& fcsr) noexcept {
         const int ex = std::fetestexcept(FE_ALL_EXCEPT);
@@ -449,8 +488,7 @@ auto ExecuteUnitFp::fusedFp(Opcode opcode, FpFmt fmt, simrv::xlen::FpRegId rs1,
     FpExecResult out;
     const auto effective_rm = resolve_rounding_mode(std::to_underlying(rm), fcsr);
     const bool use_rmm = effective_rm == RoundingMode::Rmm;
-    FpEnvironment::set_rounding_mode(std::to_underlying(rm), fcsr);
-    FpEnvironment::clear_exceptions();
+    FpEnvironment::prepare_rounding_and_exceptions(std::to_underlying(rm), fcsr);
     const auto u_rs1 = std::to_underlying(rs1);
     const auto u_rs2 = std::to_underlying(rs2);
     const auto u_rs3 = std::to_underlying(rs3);
@@ -518,8 +556,7 @@ inline auto fp_exec_binary(FpExecResult& out, simrv::xlen::Word rm, simrv::xlen:
                            simrv::xlen::Word rs2, const simrv::xlen::FloatingRegister* freg,
                            simrv::xlen::CsrValue& fcsr, Op&& op) -> bool {
     using T = FpTraits<FloatT>;
-    FpEnvironment::set_rounding_mode(rm, fcsr);
-    FpEnvironment::clear_exceptions();
+    FpEnvironment::prepare_rounding_and_exceptions(rm, fcsr);
     FloatT result = op(T::read(freg, rs1), T::read(freg, rs2));
     if (simrv::compiler::unlikely(std::isnan(result))) {
         result = T::from_bits(T::kQnanBits);
@@ -535,8 +572,7 @@ inline auto fp_exec_unary(FpExecResult& out, simrv::xlen::Word rm, simrv::xlen::
                           const simrv::xlen::FloatingRegister* freg, simrv::xlen::CsrValue& fcsr,
                           Op&& op) -> bool {
     using T = FpTraits<FloatT>;
-    FpEnvironment::set_rounding_mode(rm, fcsr);
-    FpEnvironment::clear_exceptions();
+    FpEnvironment::prepare_rounding_and_exceptions(rm, fcsr);
     FloatT result = op(T::read(freg, rs1));
     if (simrv::compiler::unlikely(std::isnan(result))) {
         result = T::from_bits(T::kQnanBits);
@@ -675,14 +711,13 @@ bool fp_exec_cvt(FpExecResult& out, simrv::xlen::Word funct7, simrv::xlen::Word 
             is_d ? is_snan64(read_f64(freg, rs1)) : is_snan32(read_f32(freg, rs1));
         const double source = is_d ? read_f64(freg, rs1) : static_cast<double>(read_f32(freg, rs1));
         const auto mode = resolve_rounding_mode(rm, fcsr);
-        FpEnvironment::set_rounding_mode(rm, fcsr);
+        FpEnvironment::prepare_rounding_and_exceptions(rm, fcsr);
         const double rounded = std::isnan(source) || std::isinf(source) || source == 0.0 ? source
                                : mode == RoundingMode::Rtz ? std::trunc(source)
                                : mode == RoundingMode::Rdn ? std::floor(source)
                                : mode == RoundingMode::Rup ? std::ceil(source)
                                : mode == RoundingMode::Rmm ? std::round(source)
                                                            : std::nearbyint(source);
-        FpEnvironment::clear_exceptions();
         if (signaling_nan) FpEnvironment::raise_invalid();
         if (rs2 == 5 && !std::isnan(source) && rounded != source)
             FpEnvironment::raise_flags(std::to_underlying(simrv::isa::FflagsBit::Nx));
@@ -755,8 +790,7 @@ bool fp_exec_cvt(FpExecResult& out, simrv::xlen::Word funct7, simrv::xlen::Word 
     }
     if (funct7 == Funct7Fp::FcvtSD) {
         const auto mode = resolve_rounding_mode(rm, fcsr);
-        FpEnvironment::set_rounding_mode(rm, fcsr);
-        FpEnvironment::clear_exceptions();
+        FpEnvironment::prepare_rounding_and_exceptions(rm, fcsr);
         const double src = read_f64(freg, rs1);
         if (is_snan64(src)) FpEnvironment::raise_invalid();
         const float converted =
@@ -768,8 +802,7 @@ bool fp_exec_cvt(FpExecResult& out, simrv::xlen::Word funct7, simrv::xlen::Word 
         return true;
     }
     if (funct7 == Funct7Fp::FcvtDS) {
-        FpEnvironment::set_rounding_mode(rm, fcsr);
-        FpEnvironment::clear_exceptions();
+        FpEnvironment::prepare_rounding_and_exceptions(rm, fcsr);
         const float src = read_f32(freg, rs1);
         if (is_snan32(src)) FpEnvironment::raise_invalid();
         out.fp_wb_data = std::isnan(src)
@@ -789,8 +822,7 @@ bool fp_exec_cvt(FpExecResult& out, simrv::xlen::Word funct7, simrv::xlen::Word 
     }
     if (funct7 == Funct7Fp::FcvtSW || funct7 == Funct7Fp::FcvtDW) {
         const bool is_d = (funct7 == Funct7Fp::FcvtDW);
-        FpEnvironment::set_rounding_mode(rm, fcsr);
-        FpEnvironment::clear_exceptions();
+        FpEnvironment::prepare_rounding_and_exceptions(rm, fcsr);
         const bool rmm_mode = resolve_rounding_mode(rm, fcsr) == RoundingMode::Rmm;
         double val64 = 0;
         float val32 = 0;

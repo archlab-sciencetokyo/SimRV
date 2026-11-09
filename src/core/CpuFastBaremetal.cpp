@@ -53,6 +53,7 @@ template <bool kCopyContext, bool kInstMix, int kHpmClassMode>
 SIMRV_ALWAYS_INLINE auto CPU::run_fast_baremetal_kernel(Machine& machine, uint32_t batch_size,
                                                         const simrv::memory::RamView& ram,
                                                         bool poll_pause) -> uint32_t {
+    auto* const uart = (state_.mhartid == 0) ? machine.uart_device() : nullptr;
     uint32_t cached_ops = 0;
     uint32_t flushed_uart_ops = 0;
     simrv::xlen::Counter last_flushed_icount = e_icount;
@@ -1655,14 +1656,11 @@ SIMRV_ALWAYS_INLINE auto CPU::run_fast_baremetal_kernel(Machine& machine, uint32
                     record_hpm_event(HpmEvent::Instructions, ops_executed);
                     record_hpm_event(HpmEvent::Cycles, ops_executed);
                     if (fallback_op != nullptr) {
-                        if (state_.mhartid == 0) {
-                            if (auto* uart = machine.uart_device();
-                                uart != nullptr && uart->has_active_transfer()) {
-                                const uint32_t unushed = cached_ops - flushed_uart_ops;
-                                if (unushed > 0) {
-                                    uart->advance_cycles(unushed);
-                                    flushed_uart_ops = cached_ops;
-                                }
+                        if (uart != nullptr && uart->has_active_transfer()) {
+                            const uint32_t unushed = cached_ops - flushed_uart_ops;
+                            if (unushed > 0) {
+                                uart->advance_cycles(unushed);
+                                flushed_uart_ops = cached_ops;
                             }
                         }
                         const bool is_csr = is_csr_instruction(fallback_op->op_id);
@@ -1678,14 +1676,11 @@ SIMRV_ALWAYS_INLINE auto CPU::run_fast_baremetal_kernel(Machine& machine, uint32
                     }
                 }
             } else {
-                if (state_.mhartid == 0) {
-                    if (auto* uart = machine.uart_device();
-                        uart != nullptr && uart->has_active_transfer()) {
-                        const uint32_t unushed = cached_ops - flushed_uart_ops;
-                        if (unushed > 0) {
-                            uart->advance_cycles(unushed);
-                            flushed_uart_ops = cached_ops;
-                        }
+                if (uart != nullptr && uart->has_active_transfer()) {
+                    const uint32_t unushed = cached_ops - flushed_uart_ops;
+                    if (unushed > 0) {
+                        uart->advance_cycles(unushed);
+                        flushed_uart_ops = cached_ops;
                     }
                 }
                 if (cached->has_fast_alu()) {
@@ -1717,14 +1712,11 @@ SIMRV_ALWAYS_INLINE auto CPU::run_fast_baremetal_kernel(Machine& machine, uint32
             }
             handle_cached_interrupts();
         } else {
-            if (state_.mhartid == 0) {
-                if (auto* uart = machine.uart_device();
-                    uart != nullptr && uart->has_active_transfer()) {
-                    const uint32_t unushed = cached_ops - flushed_uart_ops;
-                    if (unushed > 0) {
-                        uart->advance_cycles(unushed);
-                        flushed_uart_ops = cached_ops;
-                    }
+            if (uart != nullptr && uart->has_active_transfer()) {
+                const uint32_t unushed = cached_ops - flushed_uart_ops;
+                if (unushed > 0) {
+                    uart->advance_cycles(unushed);
+                    flushed_uart_ops = cached_ops;
                 }
             }
             const auto delta = e_icount - last_flushed_icount;
@@ -1755,10 +1747,8 @@ SIMRV_ALWAYS_INLINE auto CPU::run_fast_baremetal_kernel(Machine& machine, uint32
         }
     }
     handle_cached_interrupts();
-    if (state_.mhartid == 0 && cached_ops > flushed_uart_ops) {
-        if (auto* uart = machine.uart_device(); uart != nullptr) {
-            uart->advance_cycles(cached_ops - flushed_uart_ops);
-        }
+    if (uart != nullptr && cached_ops > flushed_uart_ops) {
+        uart->advance_cycles(cached_ops - flushed_uart_ops);
     }
     return cached_ops;
 }

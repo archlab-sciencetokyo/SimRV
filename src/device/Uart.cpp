@@ -176,6 +176,7 @@ void Uart::drain_tx_fifo() noexcept {
     }
     tx_irq_pending_ = true;
     flush_tx_buffer();
+    update_active_transfer();
 }
 
 void Uart::stop_pty() {
@@ -273,6 +274,7 @@ void Uart::advance_cycles(uint64_t cycles) {
     if (tx_completed && tx_fifo_.empty() && !tx_shift_active_) {
         flush_tx_buffer();
     }
+    update_active_transfer();
 }
 
 auto Uart::handle_request(const memory::TlChannelA& req, memory::TlChannelD& resp) -> bool {
@@ -414,18 +416,26 @@ auto Uart::handle_request(const memory::TlChannelA& req, memory::TlChannelD& res
         irq_update_pending_.store(true, std::memory_order_release);
     }
     service_interrupts();
+    update_active_transfer();
     return true;
 }
 
 void Uart::push_rx_byte(uint8_t byte) {
     std::scoped_lock lock(rx_mutex_);
     if (pending_rx_.size() < kPendingHostInputCapacity) pending_rx_.push_back(byte);
+    has_active_transfer_.store(true, std::memory_order_release);
+}
+
+void Uart::update_active_transfer() noexcept {
+    std::scoped_lock lock(rx_mutex_);
+    const bool active = tx_shift_active_ || rx_shift_active_ || !tx_fifo_.empty() ||
+                        !pending_rx_.empty() ||
+                        (fcr_fifo_enabled_ && !rx_fifo_.empty() && !rx_timeout_pending_);
+    has_active_transfer_.store(active, std::memory_order_release);
 }
 
 auto Uart::has_active_transfer() const noexcept -> bool {
-    std::scoped_lock lock(rx_mutex_);
-    return tx_shift_active_ || rx_shift_active_ || !tx_fifo_.empty() || !pending_rx_.empty() ||
-           (fcr_fifo_enabled_ && !rx_fifo_.empty() && !rx_timeout_pending_);
+    return has_active_transfer_.load(std::memory_order_relaxed);
 }
 
 void Uart::service_interrupts() {
