@@ -67,9 +67,8 @@ SIMRV_ALWAYS_INLINE auto CPU::run_fast_baremetal_kernel(Machine& machine, uint32
         if (simrv::compiler::likely(cached != nullptr)) {
             if constexpr (!kCopyContext && !kInstMix) {
                 const auto execute_fast_chain =
-                    [this, &ram, batch_size, tohost_addr, tohost_reject_mask]<bool kGuestXlen64>(
-                        CachedOp* initial_op, uint32_t& b_ref)
-                        __attribute__((noinline)) -> CachedOp* {
+                    [&]<bool kGuestXlen64>(CachedOp* initial_op, uint32_t& b_ref)
+                        __attribute__((always_inline)) -> CachedOp* {
                     auto* const __restrict__ ram_data = ram.data();
                     const simrv::xlen::Address ram_base = ram.base();
                     const simrv::xlen::Address ram_size = ram.size();

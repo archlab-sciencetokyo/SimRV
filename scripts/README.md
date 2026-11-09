@@ -14,14 +14,11 @@ This directory contains development, benchmarking, release verification, and Lin
   - `compare`: Compares two JSON benchmark reports, computing geometric mean changes and regressions against thresholds.
   - `aggregate`: Aggregates multi-run and multi-host benchmark experiment JSON outputs into statistical summaries.
   - `gdb`: Paired execution benchmarking comparing baseline CLI speed against remote GDB RSP step latency.
-- **`benchmark_modes.py`**: Microarchitecture and simulation mode sweeps (`fast`, `detailed`, `cycle-accurate`, `three-stage`, `dual-issue`, `five-stage`).
 - **`evaluate_rtl_parity.py`**: Adapter-driven RTL/SimRV architectural and cycle-parity runner. Reusable target adapters and trace utilities live in `rtl_parity/`.
 
 ### 2. Release Qualification
 
-- **`release_gate.py`**: Complete local release qualification matrix running multi-compiler (GCC, Clang) and dual-architecture (RV32, RV64) clean gate builds.
 - **`release_check.py`**: Verifies release manifest constraints, binary ELF headers, MISA extensions, and version parity.
-- **`validate_schemas.py`**: Validates the checked-in release manifest against its JSON schema.
 - **`release_evidence.py`**: Captures machine-readable evidence metadata for CI gates and qualification manifests.
 ### 3. Linux Kernel, Rootfs & Integration
 
@@ -34,7 +31,6 @@ This directory contains development, benchmarking, release verification, and Lin
 ### 4. Code Quality & Extension Verification
 
 - **`run_vector_tests.py`**: Automated runner for the RISC-V Vector (RVV 1.0) compliance test suite.
-- **`code_metrics.py`**: Source code diagnostic analyzer tracking lines of code, cyclomatic complexity, and test ratios.
 - **Native CLI Commands in SimRV**:
   - `simrv --check-mission <file>`: Validates mission fields, previews grouped lesson flow, and checks checkpoint symbols.
   - `simrv --create-mission <file>`: Scaffolds a new classroom guidance mission template.

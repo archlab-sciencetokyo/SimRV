@@ -854,10 +854,12 @@ class CPU {
     SIMRV_ALWAYS_INLINE auto execute_cached_alu_fast_xlen(CachedOp& op, FastOp kind) -> bool;
     template <bool kGuestXlen64, bool kCopyContext, bool kInstMix, bool kDeferAluCommit>
     SIMRV_ALWAYS_INLINE auto execute_cached_alu_fast_xlen(CachedOp& op) -> bool;
-    SIMRV_ALWAYS_INLINE auto advance_sequential_miss_baremetal(
-        CachedOp* chained, simrv::xlen::Register next_pc) noexcept -> CachedOp*;
-    SIMRV_ALWAYS_INLINE auto resolve_branch_target_baremetal(
-        CachedOp* chained, simrv::xlen::Register target_pc) noexcept -> CachedOp*;
+    [[gnu::noinline]] auto advance_sequential_miss_baremetal(CachedOp* chained,
+                                                             simrv::xlen::Register next_pc) noexcept
+        -> CachedOp*;
+    [[gnu::noinline]] auto resolve_branch_target_baremetal(CachedOp* chained,
+                                                           simrv::xlen::Register target_pc) noexcept
+        -> CachedOp*;
     auto execute_cached_fallback(Machine& machine) -> void;
     auto dispatch_pending_interrupts() -> void;
     SIMRV_ALWAYS_INLINE auto handle_cached_interrupts() -> void {
