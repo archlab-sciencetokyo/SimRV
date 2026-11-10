@@ -118,7 +118,7 @@ enum class ExecutionState : uint32_t {
 /// Stable, inexpensive execution state consumed by the asynchronous TUI renderer.
 struct TuiExecutionSnapshot {
     size_t hart = 0;
-    simrv::xlen::Register pc = 0;
+    simrv::xlen::VirtAddr pc{};
     simrv::xlen::Counter cycle_count = 0;
     simrv::xlen::Counter instruction_count = 0;
     simrv::xlen::Counter timer_ticks = 0;

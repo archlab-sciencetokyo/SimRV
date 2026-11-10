@@ -35,6 +35,9 @@
 
 namespace {
 
+static_assert(std::same_as<decltype(simrv::core::TuiExecutionSnapshot::pc),
+                           simrv::xlen::VirtAddr>);
+
 static_assert(std::same_as<decltype(simrv::util::RuntimeOptions::trace_pc_start),
                            std::optional<simrv::xlen::VirtAddr>>);
 static_assert(std::same_as<decltype(simrv::core::DebugConfig::trace_pc_end),
