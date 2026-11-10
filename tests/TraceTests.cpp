@@ -63,6 +63,7 @@ static_assert(LockstepPc<simrv::xlen::VirtAddr>);
 static_assert(!LockstepPc<simrv::xlen::PhysAddr>);
 static_assert(!LockstepPc<simrv::xlen::Address>);
 static_assert(std::same_as<decltype(simrv::debug::SpikeCommitRecord::pc), simrv::xlen::VirtAddr>);
+static_assert(std::same_as<decltype(simrv::core::PipelineStallRecord::pc), simrv::xlen::VirtAddr>);
 static_assert(std::same_as<decltype(std::declval<const simrv::debug::SymbolTable&>().lookup_name(
                                std::declval<const std::string&>())),
                            std::optional<simrv::xlen::VirtAddr>>);
@@ -1023,8 +1024,10 @@ void test_cycle_accurate_pipeline_stall_events() {
     machine.primary_hart().clint_mmio.mcycle = 17;
     machine.trace().init_architecture_trace(path.string());
     const std::array stalls = {
-        simrv::core::PipelineStallRecord{"fetch", kPc, 3, "instruction_fill"},
-        simrv::core::PipelineStallRecord{"execute", kPc + 4, 0, "data_hazard"},
+        simrv::core::PipelineStallRecord{"fetch", simrv::xlen::VirtAddr{kPc}, 3,
+                                         "instruction_fill"},
+        simrv::core::PipelineStallRecord{"execute", simrv::xlen::VirtAddr{kPc + 4}, 0,
+                                         "data_hazard"},
     };
     machine.trace().log_pipeline_stalls(machine.primary_hart(), stalls);
     machine.trace().flush_all();

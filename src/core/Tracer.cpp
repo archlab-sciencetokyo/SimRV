@@ -922,7 +922,7 @@ void Tracer::log_pipeline_stalls(const CPU& cpu, std::span<const PipelineStallRe
     const auto& state = cpu.state();
     const auto cycle = cpu.clint_mmio.mcycle;
     if (!accepts_trace_event("pipeline_stall", cycle, static_cast<uint32_t>(state.mhartid),
-                             stalls.front().pc))
+                             stalls.front().pc.raw()))
         return;
     ConditionalTracerLock lock(mutex_, machine_.is_smp_enabled());
     std::println(fp_pipeline_,
@@ -937,7 +937,7 @@ void Tracer::log_pipeline_stalls(const CPU& cpu, std::span<const PipelineStallRe
                          result += std::format(
                              "{{\"stage\":{},\"pc\":\"0x{:x}\","
                              "\"remaining_cycles\":{},\"reason\":{}}}",
-                             json_quote(stall.stage), static_cast<uint64_t>(stall.pc),
+                             json_quote(stall.stage), static_cast<uint64_t>(stall.pc.raw()),
                              stall.remaining_cycles, json_quote(stall.reason));
                      }
                      return result;

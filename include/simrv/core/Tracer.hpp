@@ -19,6 +19,7 @@
 #include "simrv/CompilerHints.hpp"
 #include "simrv/isa/InstructionFields.hpp"
 #include "simrv/isa/TrapTypes.hpp"
+#include "simrv/xlen/AddressTypes.hpp"
 #include "simrv/xlen/IdentifierTypes.hpp"
 
 namespace simrv::pipeline {
@@ -53,7 +54,7 @@ struct BusTraceContext {
 
 struct PipelineStallRecord {
     std::string_view stage;
-    simrv::xlen::Address pc = 0;
+    simrv::xlen::VirtAddr pc{};
     uint32_t remaining_cycles = 0;
     std::string_view reason;
 };

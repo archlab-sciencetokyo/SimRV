@@ -300,7 +300,7 @@ void CPU::execute_ca_cycle_stages(Machine& machine, simrv::xlen::Counter retired
                                        std::string_view reason) {
                 if (!stalled) return;
                 stall_storage[stall_count++] = {.stage = stage,
-                                                .pc = slot.context.cpc.raw(),
+                                                .pc = slot.context.cpc,
                                                 .remaining_cycles = slot.remaining_latency,
                                                 .reason = reason};
             };

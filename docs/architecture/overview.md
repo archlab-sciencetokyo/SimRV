@@ -146,7 +146,8 @@ unavailable. See [strong typing and performance](../development/strong-typing-pe
 for the measurements and their limitations.
 
 The strong-typing migration is also incomplete: some trace records and TUI address entry points
-still use scalar address types. Spike lockstep commit PCs use `VirtAddr`.
+still use scalar address types. Spike lockstep commit PCs and pipeline-stall trace PCs use
+`VirtAddr`.
 These are remaining C++ interface boundaries to review; their presence does not by itself establish
 a guest-visible bug.
 
