@@ -164,6 +164,15 @@ static_assert(!TlbLookupable<simrv::xlen::PhysAddr>);
 static_assert(!TlbLookupable<simrv::xlen::Address>);
 
 template <typename A>
+concept DecodeCacheAddress = requires(simrv::core::DecodeCache& cache, A address) {
+    cache.lookup(address);
+    cache.lookup_aligned(address);
+    cache.insert(address, simrv::core::CachedOp{});
+};
+static_assert(DecodeCacheAddress<simrv::xlen::VirtAddr>);
+static_assert(!DecodeCacheAddress<simrv::xlen::PhysAddr>);
+
+template <typename A>
 concept ReservationRangeAddress =
     requires(simrv::memory::ReservationTable& table, A addr) { table.invalidate_range(addr, 8); };
 static_assert(ReservationRangeAddress<simrv::xlen::PhysAddr>);

@@ -711,10 +711,6 @@ class DecodeCache {
      * @param pc Program counter address.
      * @return Cache set index in range [0, kNumSets - 1].
      */
-    [[nodiscard]] static constexpr inline auto calc_set(simrv::xlen::Register pc) noexcept
-        -> size_t {
-        return (pc >> 2) & kSetMask;
-    }
     [[nodiscard]] static constexpr inline auto calc_set(simrv::xlen::VirtAddr pc) noexcept
         -> size_t {
         return (pc.raw() >> 2) & kSetMask;
@@ -725,7 +721,7 @@ class DecodeCache {
      * @param pc Program counter address.
      * @return Pointer to CachedOp if hit, or nullptr on miss.
      */
-    [[nodiscard]] SIMRV_ALWAYS_INLINE auto lookup(simrv::xlen::Register pc) noexcept -> CachedOp* {
+    [[nodiscard]] SIMRV_ALWAYS_INLINE auto lookup(simrv::xlen::VirtAddr pc) noexcept -> CachedOp* {
         const size_t set_idx = calc_set(pc);
         auto& set = sets_[set_idx];
         const uint8_t ctx = active_ctx_;
@@ -738,10 +734,6 @@ class DecodeCache {
         }
         return nullptr;
     }
-    [[nodiscard]] SIMRV_ALWAYS_INLINE auto lookup(simrv::xlen::VirtAddr pc) noexcept -> CachedOp* {
-        return lookup(pc.raw());
-    }
-
     /**
      * @brief Look up a decoded operation for a known-aligned architectural PC.
      * @param pc Instruction address, which must be 2-byte aligned.
@@ -750,10 +742,11 @@ class DecodeCache {
      * The all-ones invalid-entry tag is odd, so aligned PCs cannot match invalid entries. This
      * variant avoids reading the separate valid bit on the fast execution path.
      */
-    [[nodiscard]] SIMRV_ALWAYS_INLINE auto lookup_aligned(simrv::xlen::Register pc) noexcept
+    [[nodiscard]] SIMRV_ALWAYS_INLINE auto lookup_aligned(simrv::xlen::VirtAddr address) noexcept
         -> CachedOp* {
         // The invalid tag is odd, but a debugger can resume at any value. Let fetch handle the
         // all-ones address as a miss so its architecturally precise alignment trap is preserved.
+        const auto pc = address.raw();
         if (simrv::compiler::unlikely(pc == ~simrv::xlen::Register{0})) {
             return nullptr;
         }
@@ -769,11 +762,6 @@ class DecodeCache {
         return nullptr;
     }
 
-    [[nodiscard]] SIMRV_ALWAYS_INLINE auto lookup_aligned(simrv::xlen::VirtAddr pc) noexcept
-        -> CachedOp* {
-        return lookup_aligned(pc.raw());
-    }
-
     /**
      * @brief Look up the sequential successor using the predecessor's precomputed set index.
      * @param predecessor Cached operation whose successor index was recorded on insertion.
@@ -781,7 +769,7 @@ class DecodeCache {
      * @return Pointer to CachedOp if the expected successor is cached, or nullptr on a miss.
      */
     [[nodiscard]] SIMRV_ALWAYS_INLINE auto lookup_next(const CachedOp&,
-                                                       simrv::xlen::Register next_pc) noexcept
+                                                       simrv::xlen::VirtAddr next_pc) noexcept
         -> CachedOp* {
         return lookup(next_pc);
     }
@@ -793,7 +781,7 @@ class DecodeCache {
      * @return Pointer to CachedOp if hit, or nullptr on miss.
      */
     [[nodiscard]] SIMRV_ALWAYS_INLINE auto lookup_next_aligned(
-        const CachedOp&, simrv::xlen::Register next_pc) noexcept -> CachedOp* {
+        const CachedOp&, simrv::xlen::VirtAddr next_pc) noexcept -> CachedOp* {
         auto& set = sets_[calc_set(next_pc)];
         const uint8_t ctx = active_ctx_;
         if (simrv::compiler::likely(set.ways[0].cpc == next_pc && set.ways[0].ctx == ctx)) {
@@ -812,7 +800,7 @@ class DecodeCache {
      * @return Pointer to CachedOp if hit, or nullptr on miss.
      */
     [[nodiscard]] SIMRV_ALWAYS_INLINE auto lookup_target_aligned(
-        const CachedOp&, simrv::xlen::Register target_pc) noexcept -> CachedOp* {
+        const CachedOp&, simrv::xlen::VirtAddr target_pc) noexcept -> CachedOp* {
         auto& set = sets_[calc_set(target_pc)];
         const uint8_t ctx = active_ctx_;
         if (simrv::compiler::likely(set.ways[0].cpc == target_pc && set.ways[0].ctx == ctx)) {
@@ -845,7 +833,7 @@ class DecodeCache {
      * @brief Look up the sequential successor in baremetal mode without hash arithmetic.
      */
     [[nodiscard]] SIMRV_ALWAYS_INLINE auto lookup_sequential_baremetal(
-        const CacheSet* candidate_set, simrv::xlen::Register next_pc) noexcept -> CachedOp* {
+        const CacheSet* candidate_set, simrv::xlen::VirtAddr next_pc) noexcept -> CachedOp* {
         const uint8_t ctx = active_ctx_;
         if (simrv::compiler::likely(candidate_set->ways[0].cpc == next_pc &&
                                     candidate_set->ways[0].ctx == ctx)) {
@@ -861,8 +849,9 @@ class DecodeCache {
      * @brief Look up an aligned instruction in baremetal mode.
      */
     [[nodiscard]] SIMRV_ALWAYS_INLINE auto lookup_baremetal_aligned(
-        simrv::xlen::Register pc) noexcept -> CachedOp* {
-        if (simrv::compiler::unlikely(pc == ~simrv::xlen::Register{0})) {
+        simrv::xlen::VirtAddr pc) noexcept -> CachedOp* {
+        const auto raw_pc = pc.raw();
+        if (simrv::compiler::unlikely(raw_pc == ~simrv::xlen::Register{0})) {
             return nullptr;
         }
         auto& set = sets_[calc_set(pc)];
@@ -881,7 +870,7 @@ class DecodeCache {
      * context.
      */
     [[nodiscard]] SIMRV_ALWAYS_INLINE auto lookup_sequential_aligned(
-        const CacheSet* candidate_set, simrv::xlen::Register next_pc) noexcept -> CachedOp* {
+        const CacheSet* candidate_set, simrv::xlen::VirtAddr next_pc) noexcept -> CachedOp* {
         const uint8_t ctx = active_ctx_;
         if (simrv::compiler::likely(candidate_set->ways[0].cpc == next_pc &&
                                     candidate_set->ways[0].ctx == ctx)) {
@@ -898,7 +887,7 @@ class DecodeCache {
      * @param pc Program counter address.
      * @param op Decoded instruction payload.
      */
-    inline void insert(simrv::xlen::Register pc, const CachedOp& op) {
+    inline void insert(simrv::xlen::VirtAddr pc, const CachedOp& op) {
         dirty_ = true;
         const size_t set_idx = calc_set(pc);
         auto& set = sets_[set_idx];
@@ -918,14 +907,14 @@ class DecodeCache {
         const auto entry_idx = index_of(&entry);
         if (entry.valid) {
             const auto old_pc = entry.cpc.raw();
-            auto& prev_set2 = sets_[calc_set(old_pc - 2)];
+            auto& prev_set2 = sets_[calc_set(simrv::xlen::VirtAddr{old_pc - 2})];
             if (prev_set2.ways[0].next_seq_idx == entry_idx) {
                 prev_set2.ways[0].next_seq_idx = kInvalidSeqIndex;
             }
             if (prev_set2.ways[1].next_seq_idx == entry_idx) {
                 prev_set2.ways[1].next_seq_idx = kInvalidSeqIndex;
             }
-            auto& prev_set4 = sets_[calc_set(old_pc - 4)];
+            auto& prev_set4 = sets_[calc_set(simrv::xlen::VirtAddr{old_pc - 4})];
             if (prev_set4.ways[0].next_seq_idx == entry_idx) {
                 prev_set4.ways[0].next_seq_idx = kInvalidSeqIndex;
             }
@@ -934,7 +923,7 @@ class DecodeCache {
             }
         }
         entry = op;
-        entry.cpc = simrv::xlen::VirtAddr{pc};
+        entry.cpc = pc;
         entry.valid = 1;
         entry.ctx = active_ctx_;
         entry.next_seq_idx = kInvalidSeqIndex;
@@ -942,21 +931,21 @@ class DecodeCache {
         entry.op_len = static_cast<uint8_t>(op.cinsn != 0 ? 2u : (op.op_len ? op.op_len : 4u));
         set.set_next_victim(static_cast<uint8_t>(1U - way));
 
-        mark_page(pc >> 12);
-        mark_page((pc + entry.op_len - 1) >> 12);
+        mark_page(pc.raw() >> 12);
+        mark_page((pc + entry.op_len - 1).raw() >> 12);
 
         // Pre-link sequential successor if already present in decode cache
         const auto next_pc = pc + entry.op_len;
         if (const auto* next_op = lookup_aligned(next_pc);
-            next_op != nullptr && next_op->cpc.raw() == next_pc && next_op->valid) {
+            next_op != nullptr && next_op->cpc == next_pc && next_op->valid) {
             entry.next_seq_idx = index_of(next_op);
         }
 
         // Pre-link relative branch/jump target if already present in decode cache
         if (entry.branch_kind != BranchKind::None && entry.branch_kind != BranchKind::Jalr) {
-            const auto target_pc = static_cast<simrv::xlen::Register>(pc + entry.imm);
+            const auto target_pc = pc + entry.imm;
             if (const auto* target_op = lookup_aligned(target_pc);
-                target_op != nullptr && target_op->cpc.raw() == target_pc && target_op->valid) {
+                target_op != nullptr && target_op->cpc == target_pc && target_op->valid) {
                 entry.target_idx = index_of(target_op);
             }
         }
@@ -965,21 +954,19 @@ class DecodeCache {
         // entry
         if (pc >= 2) {
             if (auto* prev2 = lookup_aligned(pc - 2); prev2 != nullptr &&
-                                                      prev2->cpc.raw() == (pc - 2) &&
+                                                      prev2->cpc == (pc - 2) &&
                                                       prev2->valid && prev2->op_len == 2) {
                 prev2->next_seq_idx = entry_idx;
             }
         }
         if (pc >= 4) {
             if (auto* prev4 = lookup_aligned(pc - 4); prev4 != nullptr &&
-                                                      prev4->cpc.raw() == (pc - 4) &&
+                                                      prev4->cpc == (pc - 4) &&
                                                       prev4->valid && prev4->op_len == 4) {
                 prev4->next_seq_idx = entry_idx;
             }
         }
     }
-    inline void insert(simrv::xlen::VirtAddr pc, const CachedOp& op) { insert(pc.raw(), op); }
-
    private:
     constexpr void mark_page(simrv::xlen::Address vpn) noexcept {
         const size_t word_idx = static_cast<size_t>((vpn ^ (vpn >> 12)) & 63u);
