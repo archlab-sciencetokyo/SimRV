@@ -49,7 +49,7 @@ auto AddressModal::handle_click(framework::ScreenCoord local_pt) -> framework::M
 }
 
 void AddressModal::open(std::string& input, InspectorPane* inspector_pane) {
-    input = std::format("0x{:08x}", inspector_pane ? inspector_pane->get_inspect_addr() : 0);
+    input = std::format("0x{:08x}", inspector_pane ? inspector_pane->get_inspect_addr().raw() : 0);
 }
 
 auto AddressModal::submit(const std::string& input, simrv::core::Machine& machine,
@@ -84,7 +84,7 @@ auto AddressModal::submit(const std::string& input, simrv::core::Machine& machin
 
     if (ok) {
         if (inspector_pane) {
-            inspector_pane->set_inspect_addr(addr);
+            inspector_pane->set_inspect_addr(simrv::xlen::VirtAddr{addr});
         }
         set_status_override_cb(std::format("Inspecting address 0x{:08x}", addr));
         return true;

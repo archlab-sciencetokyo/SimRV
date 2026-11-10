@@ -3013,7 +3013,9 @@ void test_memory_inspector_and_custom_address() {
 
     // 2. Set custom address
     const simrv::xlen::Address target_addr = 0x80000000;
-    pane.set_inspect_addr(target_addr);
+    pane.set_inspect_addr(simrv::xlen::VirtAddr{target_addr});
+    expect(pane.get_inspect_addr() == simrv::xlen::VirtAddr{target_addr},
+           "custom memory inspect retains its virtual address");
     expect(pane.is_custom_memory_inspect(), "custom memory inspect is active");
     const std::string mem_title = strip_ansi(pane.render_row(2, width));
     expect(mem_title.find("Memory Watch") != std::string::npos,

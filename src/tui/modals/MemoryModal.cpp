@@ -130,7 +130,7 @@ void MemoryModal::open(simrv::xlen::Address initial_addr, simrv::core::Machine& 
                        InspectorPane* inspector_pane) {
     if (initial_addr == 0) {
         if (inspector_pane && inspector_pane->get_inspect_addr() != 0) {
-            initial_addr = inspector_pane->get_inspect_addr();
+            initial_addr = inspector_pane->get_inspect_addr().raw();
         } else if (machine.memory_geometry().dram_size > 0) {
             initial_addr = machine.memory_geometry().dram_base;
         } else {
@@ -262,7 +262,7 @@ auto MemoryModal::submit_input(
             cursor_byte_ = static_cast<int>(addr & 0xFULL);
             cursor_row_ = 0;
             if (inspector_pane) {
-                inspector_pane->set_inspect_addr(addr);
+                inspector_pane->set_inspect_addr(simrv::xlen::VirtAddr{addr});
             }
             set_status_override_cb(std::format("Memory Inspector jumped to 0x{:08x}", addr));
             mode_ = InputMode::Normal;

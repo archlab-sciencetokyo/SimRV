@@ -49,7 +49,7 @@ auto InspectorPane::render_stack_frame(const simrv::core::CPU& cpu, int logical_
     const unsigned int xlen = cpu.state().regs.xlen;
     const int word_size = static_cast<int>(xlen) / 8;
     const simrv::xlen::Register sp = cpu.state().regs.read(simrv::xlen::RegId::Sp);
-    const simrv::xlen::Register base_addr = is_mem_watch ? inspect_addr_ : sp;
+    const simrv::xlen::Register base_addr = is_mem_watch ? inspect_addr_.raw() : sp;
 
     // Check if the base address is valid and mapped in DRAM
     auto base_phys = translate_safe(cpu, simrv::xlen::VirtAddr{base_addr});
@@ -269,11 +269,11 @@ auto InspectorPane::render_stack_frame(const simrv::core::CPU& cpu, int logical_
 }
 
 auto InspectorPane::get_stack_addr_at_row(int logical_row) const
-    -> std::optional<simrv::xlen::Register> {
+    -> std::optional<simrv::xlen::VirtAddr> {
     if (page_ != TuiRegPage::STACK) return std::nullopt;
     const auto& st = current_cpu().state();
-    const simrv::xlen::Register base =
-        is_custom_memory_inspect() ? inspect_addr_ : st.regs.read(simrv::xlen::RegId::Sp);
+    const simrv::xlen::VirtAddr base = is_custom_memory_inspect()
+        ? inspect_addr_ : simrv::xlen::VirtAddr{st.regs.read(simrv::xlen::RegId::Sp)};
     if (base == 0) return std::nullopt;
     const int word_size = static_cast<int>(st.regs.xlen) / 8;
     if (logical_row >= 1 && logical_row <= 13) {

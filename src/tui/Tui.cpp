@@ -2099,7 +2099,7 @@ void Tui::handle_mouse_inspector(int x, int y, int b, bool multi_column, bool is
                 auto reg_val =
                     inspector_pane_->get_register_value_at_row(logical_row, x, target_width);
                 if (reg_val.has_value()) {
-                    inspector_pane_->set_inspect_addr(*reg_val);
+                    inspector_pane_->set_inspect_addr(simrv::xlen::VirtAddr{*reg_val});
                     open_modal(ModalType::InspectAddress);
                 }
             } else if (page == TuiRegPage::STACK) {
