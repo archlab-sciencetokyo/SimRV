@@ -211,9 +211,6 @@ class InspectorPane : public TuiWidget {
                                        int right_width) -> std::string;
     [[nodiscard]] auto render_stack_frame(const simrv::core::CPU& cpu, int logical_row,
                                           int col_width, int right_width) -> std::string;
-    [[nodiscard]] auto translate_safe(const simrv::core::CPU& cpu,
-                                      simrv::xlen::VirtAddr vaddr) const
-        -> std::optional<simrv::xlen::PhysAddr>;
     [[nodiscard]] auto render_pipeline_timeline(const simrv::core::CPU& cpu, int logical_row,
                                                 int width) -> std::string;
     [[nodiscard]] auto render_pipeline_stages_cycle_accurate(const simrv::core::CPU& cpu,

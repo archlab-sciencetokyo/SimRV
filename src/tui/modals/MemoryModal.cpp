@@ -10,6 +10,8 @@
 #include <cstring>
 #include <format>
 
+#include "../InspectionTranslation.hpp"
+
 #include "simrv/core/Cpu.hpp"
 #include "simrv/core/Machine.hpp"
 #include "simrv/debug/SymbolTable.hpp"
@@ -102,32 +104,6 @@ auto MemoryModal::handle_click(framework::ScreenCoord local_pt) -> framework::Mo
     handle_cell_click(content_row, local_pt.x, xlen);
     return framework::ModalAction::Continue;
 }
-
-namespace {
-
-auto translate_vaddr(const simrv::core::CPU& cpu, const simrv::core::Machine& machine,
-                     simrv::xlen::VirtAddr vaddr) -> std::optional<simrv::xlen::PhysAddr> {
-    const auto eff_priv = cpu.effective_data_privilege();
-    const bool translation_enabled =
-        (eff_priv != simrv::xlen::PrivilegeLevel::Machine &&
-         simrv::xlen::satp_translation_enabled(cpu.state().satp, cpu.state().regs.xlen));
-    if (!translation_enabled) {
-        if constexpr (sizeof(simrv::xlen::Word) > sizeof(uint32_t)) {
-            if (cpu.state().regs.xlen == 32) vaddr &= 0xFFFFFFFFULL;
-        }
-        return simrv::xlen::PhysAddr{vaddr.raw()};
-    }
-    auto* mmu = const_cast<Mmu*>(machine.memory().mmu());
-    auto res =
-        mmu->translate(vaddr, PteAccess::Read, eff_priv, cpu.state().mstatus, cpu.state().satp,
-                       cpu.state().regs.xlen, /*update_access_bits=*/false);
-    if (res.has_value()) {
-        return res.value();
-    }
-    return std::nullopt;
-}
-
-}  // namespace
 
 void MemoryModal::open(simrv::xlen::Address initial_addr, simrv::core::Machine& machine,
                        InspectorPane* inspector_pane) {
@@ -299,7 +275,7 @@ auto MemoryModal::submit_input(
         if (physical_mode_) {
             paddr_opt = simrv::xlen::PhysAddr{target_addr};
         } else {
-            paddr_opt = translate_vaddr(machine.primary_hart(), machine, simrv::xlen::VirtAddr{target_addr});
+            paddr_opt = translate_for_inspection(machine.primary_hart(), machine, simrv::xlen::VirtAddr{target_addr});
         }
 
         if (!paddr_opt || !machine.memory_geometry().contains(*paddr_opt)) {
@@ -357,7 +333,7 @@ void MemoryModal::render([[maybe_unused]] std::vector<std::string>& content_rows
         if (physical_mode_) {
             paddr_opt = simrv::xlen::PhysAddr{row_vaddr};
         } else {
-            paddr_opt = translate_vaddr(cpu, machine, simrv::xlen::VirtAddr{row_vaddr});
+            paddr_opt = translate_for_inspection(cpu, machine, simrv::xlen::VirtAddr{row_vaddr});
         }
 
         std::string addr_prefix =
@@ -408,7 +384,7 @@ void MemoryModal::render([[maybe_unused]] std::vector<std::string>& content_rows
     if (physical_mode_) {
         cur_paddr = simrv::xlen::PhysAddr{target_addr};
     } else {
-        cur_paddr = translate_vaddr(cpu, machine, simrv::xlen::VirtAddr{target_addr});
+        cur_paddr = translate_for_inspection(cpu, machine, simrv::xlen::VirtAddr{target_addr});
     }
 
     uint64_t val64 = 0;
