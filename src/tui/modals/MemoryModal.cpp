@@ -106,20 +106,23 @@ auto MemoryModal::handle_click(framework::ScreenCoord local_pt) -> framework::Mo
 namespace {
 
 auto translate_vaddr(const simrv::core::CPU& cpu, const simrv::core::Machine& machine,
-                     simrv::xlen::Address vaddr) -> std::optional<simrv::xlen::Address> {
+                     simrv::xlen::VirtAddr vaddr) -> std::optional<simrv::xlen::PhysAddr> {
     const auto eff_priv = cpu.effective_data_privilege();
     const bool translation_enabled =
         (eff_priv != simrv::xlen::PrivilegeLevel::Machine &&
          simrv::xlen::satp_translation_enabled(cpu.state().satp, cpu.state().regs.xlen));
     if (!translation_enabled) {
-        return (cpu.state().regs.xlen == 32) ? (vaddr & 0xFFFFFFFFULL) : vaddr;
+        if constexpr (sizeof(simrv::xlen::Word) > sizeof(uint32_t)) {
+            if (cpu.state().regs.xlen == 32) vaddr &= 0xFFFFFFFFULL;
+        }
+        return simrv::xlen::PhysAddr{vaddr.raw()};
     }
     auto* mmu = const_cast<Mmu*>(machine.memory().mmu());
     auto res =
         mmu->translate(vaddr, PteAccess::Read, eff_priv, cpu.state().mstatus, cpu.state().satp,
                        cpu.state().regs.xlen, /*update_access_bits=*/false);
     if (res.has_value()) {
-        return res.value().raw();
+        return res.value();
     }
     return std::nullopt;
 }
@@ -292,11 +295,11 @@ auto MemoryModal::submit_input(
         }
 
         const auto target_addr = current_address();
-        std::optional<simrv::xlen::Address> paddr_opt;
+        std::optional<simrv::xlen::PhysAddr> paddr_opt;
         if (physical_mode_) {
-            paddr_opt = target_addr;
+            paddr_opt = simrv::xlen::PhysAddr{target_addr};
         } else {
-            paddr_opt = translate_vaddr(machine.primary_hart(), machine, target_addr);
+            paddr_opt = translate_vaddr(machine.primary_hart(), machine, simrv::xlen::VirtAddr{target_addr});
         }
 
         if (!paddr_opt || !machine.memory_geometry().contains(*paddr_opt)) {
@@ -306,7 +309,7 @@ auto MemoryModal::submit_input(
             return false;
         }
 
-        auto* ptr = machine.ram_view().try_get_ptr(*paddr_opt, 1);
+        auto* ptr = machine.ram_view().try_get_ptr(paddr_opt->raw(), 1);
         if (ptr != nullptr) {
             *ptr = static_cast<std::byte>(byte_val);
             set_status_override_cb(
@@ -350,11 +353,11 @@ void MemoryModal::render([[maybe_unused]] std::vector<std::string>& content_rows
     constexpr int kRows = 10;
     for (int r = 0; r < kRows; ++r) {
         simrv::xlen::Address row_vaddr = base_address_ + static_cast<simrv::xlen::Address>(r * 16);
-        std::optional<simrv::xlen::Address> paddr_opt;
+        std::optional<simrv::xlen::PhysAddr> paddr_opt;
         if (physical_mode_) {
-            paddr_opt = row_vaddr;
+            paddr_opt = simrv::xlen::PhysAddr{row_vaddr};
         } else {
-            paddr_opt = translate_vaddr(cpu, machine, row_vaddr);
+            paddr_opt = translate_vaddr(cpu, machine, simrv::xlen::VirtAddr{row_vaddr});
         }
 
         std::string addr_prefix =
@@ -365,7 +368,7 @@ void MemoryModal::render([[maybe_unused]] std::vector<std::string>& content_rows
         std::string ascii_part;
 
         if (paddr_opt.has_value() && machine.memory_geometry().contains(*paddr_opt)) {
-            auto* dram_ptr = machine.ram_view().try_get_ptr(*paddr_opt, 16);
+            auto* dram_ptr = machine.ram_view().try_get_ptr(paddr_opt->raw(), 16);
             std::array<uint8_t, 16> row_bytes{};
             if (dram_ptr != nullptr) {
                 std::memcpy(row_bytes.data(), dram_ptr, 16);
@@ -401,16 +404,16 @@ void MemoryModal::render([[maybe_unused]] std::vector<std::string>& content_rows
     add_row("");
 
     // Multi-format word interpretation of focused address
-    std::optional<simrv::xlen::Address> cur_paddr;
+    std::optional<simrv::xlen::PhysAddr> cur_paddr;
     if (physical_mode_) {
-        cur_paddr = target_addr;
+        cur_paddr = simrv::xlen::PhysAddr{target_addr};
     } else {
-        cur_paddr = translate_vaddr(cpu, machine, target_addr);
+        cur_paddr = translate_vaddr(cpu, machine, simrv::xlen::VirtAddr{target_addr});
     }
 
     uint64_t val64 = 0;
     if (cur_paddr && machine.memory_geometry().contains(*cur_paddr)) {
-        auto* ptr = machine.ram_view().try_get_ptr(*cur_paddr, 8);
+        auto* ptr = machine.ram_view().try_get_ptr(cur_paddr->raw(), 8);
         if (ptr != nullptr) {
             std::memcpy(&val64, ptr, 8);
         }
