@@ -394,19 +394,19 @@ auto get_stage_desc(const simrv::pipeline::PipelineReg& reg, uint32_t stall_rem,
     return desc;
 }
 
-auto get_active_branch_pc(const simrv::pipeline::PipelineSim& ps) -> simrv::xlen::Register {
+auto get_active_branch_pc(const simrv::pipeline::PipelineSim& ps) -> simrv::xlen::VirtAddr {
     const auto& execute = ps.stage_reg(PipelineStage::Execute);
     if (execute.valid && (execute.is_branch || execute.is_jump)) {
-        return execute.pc;
+        return simrv::xlen::VirtAddr{execute.pc};
     }
     const auto& decode = ps.stage_reg(PipelineStage::Decode);
     if (decode.valid && (decode.is_branch || decode.is_jump)) {
-        return decode.pc;
+        return simrv::xlen::VirtAddr{decode.pc};
     }
     return 0;
 }
 
-auto get_bht_string(const simrv::pipeline::PipelineSim& /*ps*/, simrv::xlen::Register pc)
+auto get_bht_string(const simrv::pipeline::PipelineSim& /*ps*/, simrv::xlen::VirtAddr pc)
     -> std::string {
     if (pc == 0) {
         return "No active branch";
@@ -414,7 +414,7 @@ auto get_bht_string(const simrv::pipeline::PipelineSim& /*ps*/, simrv::xlen::Reg
     return "No prediction (resolved in execute)";
 }
 
-auto get_btb_string(const simrv::pipeline::PipelineSim& /*ps*/, simrv::xlen::Register pc)
+auto get_btb_string(const simrv::pipeline::PipelineSim& /*ps*/, simrv::xlen::VirtAddr pc)
     -> std::string {
     if (pc == 0) {
         return "No active branch";
@@ -664,14 +664,14 @@ auto InspectorPane::render_pipeline_stages_ca_pred(const simrv::core::CPU& cpu, 
         case 13:
             return section_line("Branch Prediction", width);
         case 14: {
-            simrv::xlen::Register pc = get_active_branch_pc(ps);
+            const auto pc = get_active_branch_pc(ps);
             std::string bht_str = get_bht_string(ps, pc);
             return format_to_width(std::format(" {}Branch History\033[0m : {}{}\033[0m", kThemeText,
                                                kThemeVal, bht_str),
                                    width);
         }
         case 15: {
-            simrv::xlen::Register pc = get_active_branch_pc(ps);
+            const auto pc = get_active_branch_pc(ps);
             std::string btb_str = get_btb_string(ps, pc);
             return format_to_width(std::format(" {}Target Buffer\033[0m  : {}{}\033[0m", kThemeText,
                                                kThemeVal, btb_str),
