@@ -248,7 +248,7 @@ auto BreakpointManager::check_pc(simrv::xlen::VirtAddr pc, simrv::xlen::HartId h
         return BreakpointHit{
             .reason = BreakpointHit::Reason::Breakpoint,
             .breakpoint_id = record != pc_breakpoint_records_.end() ? record->id : 0,
-            .addr = pc.raw(),
+            .location = pc,
             .description = std::format("Breakpoint hit at 0x{:08x}", pc.raw())};
     }
     return std::nullopt;
@@ -275,7 +275,7 @@ auto check_memory_watchpoints(const std::vector<Watchpoint>& watchpoints,
         const bool write = access == WatchType::Write;
         return BreakpointHit{
             .reason = BreakpointHit::Reason::Watchpoint,
-            .addr = vaddr.raw(),
+            .location = vaddr,
             .description =
                 std::format("Watchpoint ({}) hit at 0x{:08x} ({})", write ? "Write" : "Read",
                             vaddr.raw(), wp.label.empty() ? (write ? "write" : "read") : wp.label),
@@ -309,7 +309,8 @@ auto BreakpointManager::check_reg_changes(const simrv::core::ArchState& state,
                 if (old_val != new_val) {
                     return BreakpointHit{
                         .reason = BreakpointHit::Reason::Watchpoint,
-                        .addr = static_cast<simrv::xlen::Address>(wp.reg_index),
+                        .location =
+                            RegisterWatchLocation{.type = wp.reg_type, .index = wp.reg_index},
                         .description =
                             std::format("Register Watchpoint hit: {} changed from 0x{:x} to 0x{:x}",
                                         wp.reg_name.empty()
@@ -325,7 +326,8 @@ auto BreakpointManager::check_reg_changes(const simrv::core::ArchState& state,
                 if (old_val != new_val) {
                     return BreakpointHit{
                         .reason = BreakpointHit::Reason::Watchpoint,
-                        .addr = static_cast<simrv::xlen::Address>(wp.reg_index),
+                        .location =
+                            RegisterWatchLocation{.type = wp.reg_type, .index = wp.reg_index},
                         .description = std::format(
                             "Register Watchpoint hit: {} changed from 0x{:016x} to 0x{:016x}",
                             wp.reg_name.empty()
@@ -348,7 +350,8 @@ auto BreakpointManager::check_reg_changes(const simrv::core::ArchState& state,
                 if (vec_changed) {
                     return BreakpointHit{
                         .reason = BreakpointHit::Reason::Watchpoint,
-                        .addr = static_cast<simrv::xlen::Address>(wp.reg_index),
+                        .location =
+                            RegisterWatchLocation{.type = wp.reg_type, .index = wp.reg_index},
                         .description =
                             std::format("Register Watchpoint hit: {} (Vector) value modified",
                                         wp.reg_name.empty()
@@ -361,7 +364,7 @@ auto BreakpointManager::check_reg_changes(const simrv::core::ArchState& state,
                 if (prev_state.pc != state.pc) {
                     return BreakpointHit{
                         .reason = BreakpointHit::Reason::Watchpoint,
-                        .addr = state.pc,
+                        .location = simrv::xlen::VirtAddr{state.pc},
                         .description = std::format(
                             "Register Watchpoint hit: PC changed from 0x{:08x} to 0x{:08x}",
                             prev_state.pc, state.pc)};

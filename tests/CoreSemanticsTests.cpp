@@ -22,6 +22,7 @@
 #include "simrv/core/Sbi.hpp"
 #include "simrv/core/TrapController.hpp"
 #include "simrv/core/TrapDescriptor.hpp"
+#include "simrv/debug/BreakpointManager.hpp"
 #include "simrv/execute/ExecuteUnit.hpp"
 #include "simrv/isa/Common.hpp"
 #include "simrv/memory/MemoryAccess.hpp"
@@ -52,6 +53,9 @@ static_assert(
     std::same_as<decltype(simrv::core::TrapDescriptor::origin_pc), simrv::xlen::VirtAddr>);
 static_assert(
     std::same_as<decltype(simrv::core::TrapReturnState::target_pc), simrv::xlen::VirtAddr>);
+static_assert(
+    std::same_as<decltype(simrv::debug::BreakpointHit::location),
+                 std::variant<simrv::xlen::VirtAddr, simrv::debug::RegisterWatchLocation>>);
 
 template <typename Address>
 concept MmioRangeAddress = requires(const simrv::memory::MmioRouter& router, Address address) {
@@ -5051,9 +5055,43 @@ void test_formalized_trap_semantics() {
     }
 }
 
+void test_breakpoint_hit_locations() {
+    simrv::debug::BreakpointManager manager;
+    const simrv::xlen::VirtAddr pc{0x1000};
+    manager.add_pc_breakpoint(pc);
+    const auto breakpoint = manager.check_pc(pc);
+    expect(breakpoint && std::holds_alternative<simrv::xlen::VirtAddr>(breakpoint->location) &&
+               std::get<simrv::xlen::VirtAddr>(breakpoint->location) == pc,
+           "PC breakpoint hit retains a virtual location");
+
+    manager.add_watchpoint(simrv::xlen::VirtAddr{0x2000}, 4);
+    const auto memory_hit = manager.check_mem_write(simrv::xlen::VirtAddr{0x2001}, 1);
+    expect(memory_hit && std::holds_alternative<simrv::xlen::VirtAddr>(memory_hit->location) &&
+               std::get<simrv::xlen::VirtAddr>(memory_hit->location) == 0x2001,
+           "memory watchpoint hit retains the accessed virtual location");
+
+    manager.add_reg_watchpoint(simrv::debug::RegType::GPR, simrv::xlen::RegId::A0, "a0");
+    simrv::core::ArchState before{};
+    simrv::core::ArchState after{};
+    after.regs.write(simrv::xlen::RegId::A0, 42);
+    const auto register_hit = manager.check_reg_changes(after, before);
+    const auto* reg =
+        register_hit ? std::get_if<simrv::debug::RegisterWatchLocation>(&register_hit->location)
+                     : nullptr;
+    expect(reg && reg->type == simrv::debug::RegType::GPR && reg->index == simrv::xlen::RegId::A0,
+           "register watchpoint hit retains its register domain and identifier");
+    manager.clear_watchpoints();
+    manager.add_reg_watchpoint(simrv::debug::RegType::PC, simrv::xlen::RegId::Zero, "pc");
+    after.pc = 0x3000;
+    const auto pc_hit = manager.check_reg_changes(after, before);
+    expect(pc_hit && std::holds_alternative<simrv::xlen::VirtAddr>(pc_hit->location) &&
+               std::get<simrv::xlen::VirtAddr>(pc_hit->location) == 0x3000,
+           "PC watchpoint hit retains the new virtual PC");
+}
 }  // namespace
 
 int main() {
+    test_breakpoint_hit_locations();
     test_formalized_trap_semantics();
     test_strong_semantic_types();
     test_cache_hierarchy_semantics();

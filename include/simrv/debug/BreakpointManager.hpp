@@ -13,6 +13,7 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <variant>
 #include <vector>
 
 #include "simrv/CompilerHints.hpp"
@@ -60,11 +61,17 @@ struct Watchpoint {
     std::string label;
 };
 
+/// Register identity for a register watchpoint hit.
+struct RegisterWatchLocation {
+    RegType type;
+    simrv::xlen::RegId index;
+};
+
 /// Details of a triggered breakpoint or watchpoint hit.
 struct BreakpointHit {
     enum class Reason : uint8_t { Breakpoint, Watchpoint } reason;
     BreakpointId breakpoint_id = 0;
-    simrv::xlen::Address addr = 0;
+    std::variant<simrv::xlen::VirtAddr, RegisterWatchLocation> location{};
     std::string description;
     WatchType watch_type = WatchType::Write;
 };

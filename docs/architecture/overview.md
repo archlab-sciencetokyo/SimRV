@@ -152,6 +152,8 @@ Trace PC filter bounds use `VirtAddr` after command-line parsing; their serializ
 unchanged.
 Trap descriptors and predicted trap-return states also carry virtual PCs; trap values retain their
 separate cause-dependent representation.
+Breakpoint hits report `location` as either a virtual address or a register type and identifier;
+C++ callers should inspect the variant instead of interpreting a scalar as both domains.
 These are remaining C++ interface boundaries to review; their presence does not by itself establish
 a guest-visible bug.
 
