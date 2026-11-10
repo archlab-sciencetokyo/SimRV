@@ -135,7 +135,7 @@ auto render_field_decoded_values(const InstructionExplanation& expl, int width)
     }
     if (expl.control.has_value() &&
         (expl.format == InstFormat::B || expl.format == InstFormat::J)) {
-        rows.push_back(format_to_width(std::format("  target : 0x{:0{}x}", expl.control->target_pc,
+        rows.push_back(format_to_width(std::format("  target : 0x{:0{}x}", expl.control->target_pc.raw(),
                                                    simrv::xlen::kXLenHexDigits),
                                        width));
     }
@@ -205,7 +205,7 @@ auto render_dataflow_breakdown(const InstructionExplanation& expl, int width)
         const auto& ctrl = *expl.control;
         rows.push_back(
             format_to_width(std::format("  {}Control Target: {}0x{:0{}x}\033[0m", kThemeText,
-                                        kThemeSky, ctrl.target_pc, simrv::xlen::kXLenHexDigits),
+                                        kThemeSky, ctrl.target_pc.raw(), simrv::xlen::kXLenHexDigits),
                             width));
         if (ctrl.is_conditional && !ctrl.condition_relation.empty()) {
             rows.push_back(format_to_width(std::format("  {}Branch Eval : {}{}\033[0m", kThemeText,

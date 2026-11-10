@@ -546,7 +546,7 @@ auto build_explanation_impl(uint32_t raw_inst, simrv::xlen::Address pc, unsigned
         format_canonical_assembly(expl, expl.rd.name, expl.rs1.name, expl.rs2.name, expl.rs3.name);
 
     const simrv::xlen::Address step_bytes = expl.is_compressed ? 2U : 4U;
-    expl.predicted_effect.next_pc = pc + step_bytes;
+    expl.predicted_effect.next_pc = simrv::xlen::VirtAddr{pc + step_bytes};
     if (rdb != RegBank::None) {
         expl.predicted_effect.written_reg = expl.rd.reg_id;
         expl.predicted_effect.written_bank = rdb;
@@ -605,21 +605,22 @@ auto build_explanation_impl(uint32_t raw_inst, simrv::xlen::Address pc, unsigned
     // 2. Evaluate Control Flow
     if (is_control(expl.op_id) || expl.op_id == SRET || expl.op_id == MRET || expl.op_id == URET) {
         ControlDataflow ctrl{};
-        ctrl.fallthrough_pc = pc + step_bytes;
-        ctrl.link_pc = pc + step_bytes;
+        ctrl.fallthrough_pc = simrv::xlen::VirtAddr{pc + step_bytes};
+        ctrl.link_pc = simrv::xlen::VirtAddr{pc + step_bytes};
         if (expl.op_id == JALR) {
-            ctrl.target_pc = (expl.rs1.raw_value + static_cast<simrv::xlen::Address>(expl.imm)) &
-                             ~simrv::xlen::Address{1};
+            ctrl.target_pc = simrv::xlen::VirtAddr{
+                (expl.rs1.raw_value + static_cast<simrv::xlen::Address>(expl.imm)) &
+                ~simrv::xlen::Address{1}};
             ctrl.is_conditional = false;
             ctrl.condition_met = true;
             ctrl.condition_relation = "unconditional indirect jump";
         } else if (expl.op_id == JAL) {
-            ctrl.target_pc = pc + static_cast<simrv::xlen::Address>(expl.imm);
+            ctrl.target_pc = simrv::xlen::VirtAddr{pc + static_cast<simrv::xlen::Address>(expl.imm)};
             ctrl.is_conditional = false;
             ctrl.condition_met = true;
             ctrl.condition_relation = "unconditional relative jump";
         } else if (is_branch(expl.op_id)) {
-            ctrl.target_pc = pc + static_cast<simrv::xlen::Address>(expl.imm);
+            ctrl.target_pc = simrv::xlen::VirtAddr{pc + static_cast<simrv::xlen::Address>(expl.imm)};
             ctrl.is_conditional = true;
             ctrl.condition_met = simrv::execute::ExecuteUnitInt::branchTaken(
                 expl.rs1.raw_value, expl.rs2.raw_value, expl.funct3, active_xlen);
@@ -652,7 +653,7 @@ auto build_explanation_impl(uint32_t raw_inst, simrv::xlen::Address pc, unsigned
                             ctrl.condition_met ? "TAKEN" : "NOT TAKEN");
         } else if (expl.op_id == MRET) {
             const auto ret = simrv::core::TrapController::predict_mret(*st);
-            ctrl.target_pc = ret.target_pc.raw();
+            ctrl.target_pc = ret.target_pc;
             ctrl.is_conditional = false;
             ctrl.condition_met = true;
             ctrl.condition_relation = "return from M-mode trap (mepc)";
@@ -660,7 +661,7 @@ auto build_explanation_impl(uint32_t raw_inst, simrv::xlen::Address pc, unsigned
             expl.predicted_effect.next_virtualization = ret.target_virtualization;
         } else if (expl.op_id == SRET) {
             const auto ret = simrv::core::TrapController::predict_sret(*st);
-            ctrl.target_pc = ret.target_pc.raw();
+            ctrl.target_pc = ret.target_pc;
             ctrl.is_conditional = false;
             ctrl.condition_met = true;
             ctrl.condition_relation =
@@ -777,7 +778,7 @@ auto build_explanation_impl(uint32_t raw_inst, simrv::xlen::Address pc, unsigned
         if ((expl.control->target_pc & align_mask) != 0) {
             expl.predicted_effect.predicted_trap =
                 simrv::isa::to_trap_cause(simrv::isa::ExceptionCode::MisalignedFetch);
-            expl.predicted_effect.predicted_tval = expl.control->target_pc;
+            expl.predicted_effect.predicted_tval = expl.control->target_pc.raw();
         }
     } else if (expl.memory.has_value() && is_atomic(expl.op_id) && !expl.memory->is_aligned) {
         const auto code = (expl.op_id == LR_W || expl.op_id == LR_D)

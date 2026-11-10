@@ -3,6 +3,7 @@
  * @brief Semantic unit tests for the formal instruction explainer (simrv::explain).
  */
 #include <array>
+#include <concepts>
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
@@ -20,6 +21,11 @@
 #include "simrv/xlen/IdentifierTypes.hpp"
 
 namespace {
+
+static_assert(std::same_as<decltype(simrv::explain::ControlDataflow::target_pc), simrv::xlen::VirtAddr>);
+static_assert(std::same_as<decltype(simrv::explain::ControlDataflow::fallthrough_pc), simrv::xlen::VirtAddr>);
+static_assert(std::same_as<decltype(simrv::explain::ControlDataflow::link_pc), simrv::xlen::VirtAddr>);
+static_assert(std::same_as<decltype(simrv::explain::PredictedStateEffect::next_pc), simrv::xlen::VirtAddr>);
 
 inline void expect(bool condition, std::string_view message,
                    std::source_location loc = std::source_location::current()) {

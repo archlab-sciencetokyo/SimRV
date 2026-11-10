@@ -147,7 +147,7 @@ for the measurements and their limitations.
 
 The strong-typing migration is also incomplete: some trace records and TUI address entry points
 still use scalar address types. Spike lockstep commit PCs, pipeline-stall trace PCs, trap and SBI
-trace PCs, and TUI instruction telemetry PCs use `VirtAddr`.
+trace PCs, TUI instruction telemetry PCs, and predicted instruction-explainer PCs use `VirtAddr`.
 Trace PC filter bounds use `VirtAddr` after command-line parsing; their serialized values are
 unchanged.
 Trap descriptors and predicted trap-return states also carry virtual PCs; trap values retain their

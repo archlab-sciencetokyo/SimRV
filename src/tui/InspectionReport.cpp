@@ -121,7 +121,7 @@ auto make_inspection_report(const simrv::core::Machine& machine, size_t hart,
         << ", \"extension\": " << quoted(spec.reference.extension)
         << ", \"spec_section\": " << quoted(spec.reference.section)
         << ", \"formula\": " << quoted(spec.reference.formula) << ", \"predicted_next_pc\": "
-        << quoted(hex_value(expl_opt ? expl_opt->predicted_effect.next_pc : state.pc))
+        << quoted(hex_value(expl_opt ? expl_opt->predicted_effect.next_pc.raw() : state.pc))
         << ", \"predicted_writeback\": "
         << quoted(expl_opt ? expl_opt->predicted_effect.effect_equation : std::string{})
         << ", \"predicted_trap\": "
