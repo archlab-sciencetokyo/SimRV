@@ -138,7 +138,7 @@ void CPU::TLB_flush(const core::TlbFlushFilter& filter) {
     }
     tlb.flush_selective(sanitized);
     if (sanitized.vaddr) {
-        decode_cache.flush_page(sanitized.vaddr->raw() & ~simrv::xlen::Address{0xFFF});
+        decode_cache.flush_page(*sanitized.vaddr & ~simrv::xlen::Address{0xFFF});
     } else {
         decode_cache.flush();
     }
@@ -146,7 +146,7 @@ void CPU::TLB_flush(const core::TlbFlushFilter& filter) {
     soft_tlb_flush_selective(sanitized);
     if (machine_ != nullptr && machine_->memory().mmu() != nullptr) {
         if (sanitized.vaddr) {
-            machine_->memory().mmu()->flush_pdc_vaddr(sanitized.vaddr->raw());
+            machine_->memory().mmu()->flush_pdc_vaddr(*sanitized.vaddr);
         } else {
             machine_->memory().mmu()->flush_pdc();
         }

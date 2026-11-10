@@ -409,7 +409,7 @@ void test_decode_cache_compact_round_robin() {
     expect(sequential_cache.lookup_next(*sequential_predecessor, sequential_pc) ==
                sequential_cache.lookup(sequential_pc),
            "decode cache uses the predecessor's precomputed sequential set");
-    sequential_cache.flush_page(sequential_pc & ~simrv::xlen::Address{0xFFF});
+    sequential_cache.flush_page(simrv::xlen::VirtAddr{sequential_pc & ~simrv::xlen::Address{0xFFF}});
     expect(sequential_cache.lookup_next_aligned(*sequential_predecessor, sequential_pc) == nullptr,
            "aligned successor lookup observes page invalidation");
     expect(sequential_cache.lookup_next(*sequential_predecessor, sequential_pc) == nullptr,

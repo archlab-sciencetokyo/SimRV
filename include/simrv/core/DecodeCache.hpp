@@ -665,11 +665,11 @@ class DecodeCache {
      * @brief Invalidate all entries in the decode cache residing in a specific 4KB virtual page.
      * @param vpage 4KB-aligned virtual page address.
      */
-    void flush_page(simrv::xlen::Address vpage) noexcept {
+    void flush_page(simrv::xlen::VirtAddr vpage) noexcept {
         if (!dirty_) {
             return;
         }
-        const simrv::xlen::Address page_base = vpage & ~simrv::xlen::Address{0xFFF};
+        const simrv::xlen::Address page_base = vpage.raw() & ~simrv::xlen::Address{0xFFF};
         const auto vpn = page_base >> 12;
         if (simrv::compiler::likely(!may_contain_page(vpn))) {
             return;

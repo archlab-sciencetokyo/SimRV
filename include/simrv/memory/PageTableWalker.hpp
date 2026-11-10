@@ -276,8 +276,9 @@ class PageTableWalker {
         }
     }
 
-    void flush_pdc_vaddr(simrv::xlen::Address vaddr) noexcept {
-        const simrv::xlen::Word vpn_prefix = (vaddr >> 21) & 0x3FFFFU;
+    void flush_pdc_vaddr(simrv::xlen::VirtAddr vaddr) noexcept {
+        const auto raw_vaddr = vaddr.raw();
+        const simrv::xlen::Word vpn_prefix = (raw_vaddr >> 21) & 0x3FFFFU;
         const size_t pdc_idx = (vpn_prefix ^ (vpn_prefix >> 8)) & (kPdcSize - 1);
         pdc_[pdc_idx].epoch = 0;
     }
