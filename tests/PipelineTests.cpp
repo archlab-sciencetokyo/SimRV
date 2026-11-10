@@ -1566,6 +1566,7 @@ void test_pipeline_sim_wrapper() {
     sim.restore_state(saved);
     TEST_CHECK(sim.stage_reg(PipelineStage::Execute).pc == 0x1008);
     TEST_CHECK(sim.cycle_history().size() == 1);
+    TEST_CHECK(sim.cycle_history().at(0).f.pc == simrv::xlen::VirtAddr{0x1010});
 
     simrv::pipeline::PipelineSim fast;
     fast.config.record_snapshots = false;

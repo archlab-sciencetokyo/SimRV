@@ -959,7 +959,7 @@ auto InspectorPane::render_pipeline_timeline(const simrv::core::CPU& cpu, int lo
     // Collect unique instruction instances in this window chronologically.
     struct InstRef {
         uint64_t inst_id = 0;
-        simrv::xlen::Register pc = 0;
+        simrv::xlen::VirtAddr pc{};
         isa::OperationId op_id = isa::OperationId::ILLEGAL;
 
         auto operator==(const InstRef& o) const -> bool {
@@ -993,7 +993,7 @@ auto InspectorPane::render_pipeline_timeline(const simrv::core::CPU& cpu, int lo
     // Determine max PC width dynamically (10 for 8-digit hex e.g. 0x8000002a, 18 for full 64-bit)
     int max_pc_width = 10;
     for (auto const& ref : active_insts) {
-        if (hex_val(ref.pc).size() > 10) {
+        if (hex_val(ref.pc.raw()).size() > 10) {
             max_pc_width = 18;
         }
     }
@@ -1034,7 +1034,7 @@ auto InspectorPane::render_pipeline_timeline(const simrv::core::CPU& cpu, int lo
         const std::string_view op_mnem = simrv::pipeline::operation_name(inst.op_id);
         std::string mnem_5 =
             (op_mnem.size() > 5) ? std::string(op_mnem.substr(0, 5)) : std::string(op_mnem);
-        std::string pc_str = hex_val(inst.pc);
+        std::string pc_str = hex_val(inst.pc.raw());
         std::string line = std::format("  {:>{}} {:<5} |", pc_str, max_pc_width, mnem_5);
 
         const auto ptype = ps.config.pipeline_type;
@@ -1121,7 +1121,7 @@ auto InspectorPane::get_pipeline_pc_at_row(int logical_row) const -> simrv::xlen
             for (auto const* stage : stages) {
                 if (stage->valid && stage->pc != 0) {
                     InstRef ref{.inst_id = stage->inst_id,
-                                .pc = simrv::xlen::VirtAddr{stage->pc},
+                                .pc = stage->pc,
                                 .op_id = stage->op_id};
                     if (!std::ranges::contains(active_insts, ref)) {
                         active_insts.push_back(ref);

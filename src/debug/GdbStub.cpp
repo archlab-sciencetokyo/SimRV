@@ -903,7 +903,7 @@ auto GdbStub::cmd_monitor(std::string_view command, simrv::core::Machine& machin
 
         auto history_stage = [](const auto& stage) {
             if (!stage.valid) return std::string{"bubble"};
-            return std::format("0x{:x} {}{}", stage.pc,
+            return std::format("0x{:x} {}{}", stage.pc.raw(),
                                simrv::pipeline::operation_name(stage.op_id),
                                stage.stalled ? " (stalled)" : "");
         };

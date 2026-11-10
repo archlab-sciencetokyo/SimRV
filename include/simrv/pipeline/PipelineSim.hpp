@@ -6,6 +6,7 @@
 #include <simrv/isa/InstructionFields.hpp>
 #include <simrv/pipeline/CycleTransition.hpp>
 #include <simrv/pipeline/StageContracts.hpp>
+#include <simrv/xlen/AddressTypes.hpp>
 #include <simrv/xlen/RegisterTypes.hpp>
 #include <vector>
 
@@ -118,7 +119,7 @@ struct PipelineCycleSnapshot {
     simrv::xlen::CycleCount cycle = 0;
     struct StageInfo {
         simrv::xlen::InstructionId inst_id = 0;
-        simrv::xlen::Register pc = 0;
+        simrv::xlen::VirtAddr pc{};
         isa::OperationId op_id = isa::OperationId::ILLEGAL;
         bool valid = false;
         bool stalled = false;
