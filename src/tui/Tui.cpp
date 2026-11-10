@@ -3928,15 +3928,15 @@ void Tui::execute_footer_action(TuiFooterAction action) {
             open_modal(ModalType::SetWatchpoint);
             break;
         case TuiFooterAction::TogglePcBreakpoint: {
-            simrv::xlen::Address pc = machine_.primary_hart().state().pc;
-            if (machine_.breakpoint_manager().has_pc_breakpoint(simrv::xlen::VirtAddr{pc})) {
-                machine_.breakpoint_manager().remove_pc_breakpoint(simrv::xlen::VirtAddr{pc});
+            const simrv::xlen::VirtAddr pc{machine_.primary_hart().state().pc};
+            if (machine_.breakpoint_manager().has_pc_breakpoint(pc)) {
+                machine_.breakpoint_manager().remove_pc_breakpoint(pc);
                 modal_.open_notice("BREAKPOINT REMOVED",
-                                   std::format("Removed PC breakpoint at 0x{:08x}", pc), false);
+                                   std::format("Removed PC breakpoint at 0x{:08x}", pc.raw()), false);
             } else {
-                machine_.breakpoint_manager().add_pc_breakpoint(simrv::xlen::VirtAddr{pc});
+                machine_.breakpoint_manager().add_pc_breakpoint(pc);
                 modal_.open_notice("BREAKPOINT CREATED",
-                                   std::format("PC breakpoint set at 0x{:08x}", pc), false);
+                                   std::format("PC breakpoint set at 0x{:08x}", pc.raw()), false);
             }
             render(true);
             break;
