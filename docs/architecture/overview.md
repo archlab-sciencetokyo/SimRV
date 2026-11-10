@@ -151,6 +151,7 @@ trace PCs, TUI instruction telemetry PCs, and predicted instruction-explainer PC
 The explainer also distinguishes effective virtual addresses from translated physical addresses;
 its register base and offsets remain scalar arithmetic values.
 Its public explanation and disassembly entry points accept virtual PCs.
+Branch prediction feedback, BTB targets, and return-address stack entries also use `VirtAddr`.
 Trace PC filter bounds use `VirtAddr` after command-line parsing; their serialized values are
 unchanged.
 Trap descriptors and predicted trap-return states also carry virtual PCs; trap values retain their

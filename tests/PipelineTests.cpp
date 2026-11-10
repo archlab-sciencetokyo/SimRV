@@ -1,5 +1,6 @@
 // Consolidated test sections; each keeps its original checks and exit status.
 #include <array>
+#include <concepts>
 #include <cstdlib>
 #include <cstring>
 #include <iostream>
@@ -309,6 +310,7 @@ namespace {
 
 using simrv::isa::OperationId;
 using simrv::pipeline::DecodedInstruction;
+
 using simrv::pipeline::PipelineStage;
 using simrv::pipeline::Scoreboard;
 using namespace simrv::pipeline::operation;
@@ -497,6 +499,10 @@ using simrv::pipeline::BranchPredictor;
 using simrv::pipeline::BranchPredictorConfig;
 using simrv::pipeline::BranchPredictorType;
 using simrv::pipeline::DecodedInstruction;
+
+static_assert(std::same_as<decltype(BranchPrediction::predicted_target), simrv::xlen::VirtAddr>);
+static_assert(std::same_as<decltype(BranchFeedback::pc), simrv::xlen::VirtAddr>);
+static_assert(std::same_as<decltype(BranchFeedback::actual_target), simrv::xlen::VirtAddr>);
 
 void test_type_parsing() {
     TEST_CHECK(simrv::pipeline::parse_branch_predictor_type("none") ==

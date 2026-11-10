@@ -368,7 +368,8 @@ auto InspectorPane::render_hazard_stats(const simrv::core::CPU& cpu, int logical
                             kThemeText, kThemeMint),
                 width);
         }
-        uint8_t counter = cpu.branch_predictor.get_counter_for_pc(f_reg.pc);
+        uint8_t counter = cpu.branch_predictor.get_counter_for_pc(
+            simrv::xlen::VirtAddr{f_reg.pc});
         std::string gauge;
         switch (counter) {
             case 0:

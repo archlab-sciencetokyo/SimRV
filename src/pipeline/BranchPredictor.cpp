@@ -98,7 +98,7 @@ void BranchPredictor::reset() {
     stats_ = {};
 }
 
-auto BranchPredictor::ras_peek() const noexcept -> std::optional<simrv::xlen::Address> {
+auto BranchPredictor::ras_peek() const noexcept -> std::optional<simrv::xlen::VirtAddr> {
     if (ras_count_ == 0 || ras_.empty()) return std::nullopt;
     const size_t top = (ras_head_ + ras_.size() - 1) % ras_.size();
     return ras_[top];
