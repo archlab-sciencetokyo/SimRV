@@ -374,7 +374,7 @@ auto get_stage_desc(const simrv::pipeline::PipelineReg& reg, uint32_t stall_rem,
     }
 
     std::string desc = std::format("\033[1m{}{}\033[0m ({}{}{}){}", kThemeMint, op_name, kThemeSky,
-                                   compact_hex(reg.pc), "\033[0m", ops_info);
+                                   compact_hex(reg.pc.raw()), "\033[0m", ops_info);
     if (stall_rem > 0) {
         std::string tag = stall_type;
         if (tag == "I-Cache Miss")

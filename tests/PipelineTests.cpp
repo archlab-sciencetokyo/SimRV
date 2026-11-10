@@ -28,6 +28,11 @@
 #include "simrv/pipeline/Scoreboard.hpp"
 #include "simrv/xlen/RegisterTypes.hpp"
 
+static_assert(std::same_as<decltype(simrv::pipeline::PipelineInstruction::pc),
+                           simrv::xlen::VirtAddr>);
+static_assert(std::same_as<decltype(simrv::pipeline::PipelineReg::target_pc),
+                           simrv::xlen::VirtAddr>);
+
 namespace section_0 {
 /**
  * @file OperationTraitsTests.cpp

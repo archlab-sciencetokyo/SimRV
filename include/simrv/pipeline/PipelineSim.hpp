@@ -16,7 +16,7 @@ enum class ForwardSource : uint8_t { None = 0, Execute = 1, Memory = 2, Writebac
 
 struct PipelineReg {
     simrv::xlen::InstructionId inst_id = 0;
-    simrv::xlen::Register pc = 0;
+    simrv::xlen::VirtAddr pc{};
     isa::Opcode opcode = static_cast<isa::Opcode>(0);
     simrv::xlen::RegId rd = static_cast<simrv::xlen::RegId>(0);
     simrv::xlen::RegId rs1 = static_cast<simrv::xlen::RegId>(0);
@@ -36,13 +36,13 @@ struct PipelineReg {
     bool is_branch = false;
     bool is_jump = false;
     bool branched = false;
-    simrv::xlen::Register target_pc = 0;
+    simrv::xlen::VirtAddr target_pc{};
     bool control_resolved = false;
 };
 
 /// Immutable event submitted by the architectural engine to the cycle model.
 struct PipelineInstruction {
-    simrv::xlen::Register pc = 0;
+    simrv::xlen::VirtAddr pc{};
     isa::Opcode opcode = static_cast<isa::Opcode>(0);
     simrv::xlen::RegId rd = static_cast<simrv::xlen::RegId>(0);
     simrv::xlen::RegId rs1 = static_cast<simrv::xlen::RegId>(0);
@@ -54,7 +54,7 @@ struct PipelineInstruction {
     bool icache_miss = false;
     bool dcache_miss = false;
     bool tlb_miss = false;
-    simrv::xlen::Register target_pc = 0;
+    simrv::xlen::VirtAddr target_pc{};
 };
 
 struct PipelineStageEvent {
