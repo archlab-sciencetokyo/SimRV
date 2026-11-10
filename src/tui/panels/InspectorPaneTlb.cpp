@@ -49,8 +49,8 @@ auto InspectorPane::render_tlb_stats(const simrv::core::CPU& cpu, int logical_ro
         const char* type;
         size_t set;
         int way;
-        simrv::xlen::Address vaddr;
-        simrv::xlen::Address paddr;
+        simrv::xlen::VirtAddr vaddr;
+        simrv::xlen::PhysAddr paddr;
         Asid asid;
         const char* priv_str;
     };
@@ -76,8 +76,8 @@ auto InspectorPane::render_tlb_stats(const simrv::core::CPU& cpu, int logical_ro
                 active_entries.push_back(RenderTlbEntry{.type = "ITLB",
                                                         .set = set,
                                                         .way = way,
-                                                        .vaddr = ie.v_addr.raw(),
-                                                        .paddr = ie.p_addr.raw(),
+                                                        .vaddr = ie.v_addr,
+                                                        .paddr = ie.p_addr,
                                                         .asid = ie.asid,
                                                         .priv_str = priv_to_str(ie.priv)});
             }
@@ -86,8 +86,8 @@ auto InspectorPane::render_tlb_stats(const simrv::core::CPU& cpu, int logical_ro
                 active_entries.push_back(RenderTlbEntry{.type = "DTLB-R",
                                                         .set = set,
                                                         .way = way,
-                                                        .vaddr = dr.v_addr.raw(),
-                                                        .paddr = dr.p_addr.raw(),
+                                                        .vaddr = dr.v_addr,
+                                                        .paddr = dr.p_addr,
                                                         .asid = dr.asid,
                                                         .priv_str = priv_to_str(dr.priv)});
             }
@@ -96,8 +96,8 @@ auto InspectorPane::render_tlb_stats(const simrv::core::CPU& cpu, int logical_ro
                 active_entries.push_back(RenderTlbEntry{.type = "DTLB-W",
                                                         .set = set,
                                                         .way = way,
-                                                        .vaddr = dw.v_addr.raw(),
-                                                        .paddr = dw.p_addr.raw(),
+                                                        .vaddr = dw.v_addr,
+                                                        .paddr = dw.p_addr,
                                                         .asid = dw.asid,
                                                         .priv_str = priv_to_str(dw.priv)});
             }
@@ -153,8 +153,8 @@ auto InspectorPane::render_tlb_stats(const simrv::core::CPU& cpu, int logical_ro
     int entry_idx = logical_row - 3;
     if (entry_idx >= 0 && entry_idx < static_cast<int>(active_entries.size())) {
         const auto& e = active_entries[static_cast<size_t>(entry_idx)];
-        auto v_trunc = static_cast<uint32_t>(e.vaddr & 0xFFFFFFFFULL);
-        auto p_trunc = static_cast<uint32_t>(e.paddr & 0xFFFFFFFFULL);
+        auto v_trunc = static_cast<uint32_t>(e.vaddr.raw() & 0xFFFFFFFFULL);
+        auto p_trunc = static_cast<uint32_t>(e.paddr.raw() & 0xFFFFFFFFULL);
         if (framework::active_render_context().density == framework::Density::Compact ||
             width < 50) {
             return format_to_width(std::format("  \033[1m{:<6}\033[0m{:08x}➔{:08x} {}[{}]\033[0m",
