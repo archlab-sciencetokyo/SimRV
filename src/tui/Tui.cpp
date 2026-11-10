@@ -2087,7 +2087,7 @@ void Tui::handle_mouse_inspector(int x, int y, int b, bool multi_column, bool is
                     inspector_pane_->get_pipeline_pc_at_row(logical_row);
                 if (clicked_pc != 0) {
                     inspector_pane_->set_previous_page(TuiRegPage::PIPELINE);
-                    inspector_pane_->set_explain_pc(clicked_pc);
+                    inspector_pane_->set_explain_pc(simrv::xlen::VirtAddr{clicked_pc});
                     set_reg_page(TuiRegPage::EXPLAIN);
                 }
             } else if (page == TuiRegPage::EXPLAIN) {

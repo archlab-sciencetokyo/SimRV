@@ -2384,7 +2384,8 @@ void test_instruction_explainer_is_side_effect_free() {
 
     simrv::tui::InspectorPane pane(machine);
     pane.set_page(simrv::tui::TuiRegPage::EXPLAIN);
-    pane.set_explain_pc(pc);
+    pane.set_explain_pc(simrv::xlen::VirtAddr{pc});
+    expect(pane.get_explain_pc() == simrv::xlen::VirtAddr{pc}, "explainer retains selected virtual PC");
     pane.set_visible_rows(30);
     const auto rendered = pane.render_row(2, 80);
 

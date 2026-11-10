@@ -20,6 +20,7 @@
 #include "simrv/tui/TuiTypes.hpp"
 #include "simrv/tui/TuiWidget.hpp"
 #include "simrv/tui/framework/ScrollView.hpp"
+#include "simrv/xlen/AddressTypes.hpp"
 #include "simrv/xlen/ScalarTypes.hpp"
 
 namespace simrv::core {
@@ -112,8 +113,8 @@ class InspectorPane : public TuiWidget {
     [[nodiscard]] auto is_custom_memory_inspect() const noexcept -> bool {
         return inspect_addr_ != 0;
     }
-    void set_explain_pc(simrv::xlen::Register pc) { explain_pc_ = pc; }
-    [[nodiscard]] auto get_explain_pc() const -> simrv::xlen::Register { return explain_pc_; }
+    void set_explain_pc(simrv::xlen::VirtAddr pc) { explain_pc_ = pc; }
+    [[nodiscard]] auto get_explain_pc() const -> simrv::xlen::VirtAddr { return explain_pc_; }
     void set_trace_buffer(const std::vector<std::string>* trace_buf) { trace_buffer_ = trace_buf; }
     void set_log_lines(std::vector<std::string> log_lines) {
         log_lines_ = std::move(log_lines);
@@ -294,7 +295,7 @@ class InspectorPane : public TuiWidget {
 
     double active_runtime_ = 0.0;
     simrv::xlen::Register inspect_addr_ = 0;
-    simrv::xlen::Register explain_pc_ = 0;
+    simrv::xlen::VirtAddr explain_pc_{};
     const std::vector<std::string>* trace_buffer_ = nullptr;
     std::vector<std::string> log_lines_;
     int cache_inspect_type_ = 0;  // 0: ICache, 1: DCache

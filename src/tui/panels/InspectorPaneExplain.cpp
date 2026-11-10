@@ -312,9 +312,11 @@ auto InspectorPane::get_explain_rows(int width) -> std::vector<std::string> {
     auto& cpu = current_cpu();
     auto& st = cpu.state();
 
-    simrv::xlen::Register const target_pc = (explain_pc_ != 0) ? explain_pc_ : st.pc;
+    const simrv::xlen::VirtAddr target_pc =
+        (explain_pc_ != 0) ? explain_pc_ : simrv::xlen::VirtAddr{st.pc};
 
-    auto hex_addr = [](simrv::xlen::Register v) -> std::string {
+    auto hex_addr = [](simrv::xlen::VirtAddr address) -> std::string {
+        const auto v = address.raw();
         if constexpr (sizeof(simrv::xlen::Register) <= 4) {
             return std::format("0x{:08x}", v);
         } else {
@@ -346,8 +348,7 @@ auto InspectorPane::get_explain_rows(int width) -> std::vector<std::string> {
         return explain_rows;
     }
 
-    const auto expl_opt = simrv::explain::explain_at_pc(
-        machine_, selected_hart_, simrv::xlen::VirtAddr{target_pc});
+    const auto expl_opt = simrv::explain::explain_at_pc(machine_, selected_hart_, target_pc);
     if (!expl_opt.has_value()) {
         std::vector<std::string> explain_rows;
         explain_rows.push_back(section_line("Instruction Explainer", width));
