@@ -66,27 +66,27 @@ auto AddressModal::submit(const std::string& input, simrv::core::Machine& machin
         return true;
     }
 
-    simrv::xlen::Address addr = 0;
+    simrv::xlen::VirtAddr addr{};
     bool ok = false;
     if (input.starts_with("0x") || input.starts_with("0X")) {
-        auto result = std::from_chars(input.data() + 2, input.data() + input.size(), addr, 16);
+        auto result = std::from_chars(input.data() + 2, input.data() + input.size(), addr.val, 16);
         ok = (result.ec == std::errc{});
     } else if (std::all_of(input.begin(), input.end(), ::isxdigit)) {
-        auto result = std::from_chars(input.data(), input.data() + input.size(), addr, 16);
+        auto result = std::from_chars(input.data(), input.data() + input.size(), addr.val, 16);
         ok = (result.ec == std::errc{});
     } else {
         auto sym_opt = machine.symbol_table().lookup_name(input);
         if (sym_opt.has_value()) {
-            addr = sym_opt->raw();
+            addr = *sym_opt;
             ok = true;
         }
     }
 
     if (ok) {
         if (inspector_pane) {
-            inspector_pane->set_inspect_addr(simrv::xlen::VirtAddr{addr});
+            inspector_pane->set_inspect_addr(addr);
         }
-        set_status_override_cb(std::format("Inspecting address 0x{:08x}", addr));
+        set_status_override_cb(std::format("Inspecting address 0x{:08x}", addr.raw()));
         return true;
     }
 
