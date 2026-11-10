@@ -346,7 +346,8 @@ auto InspectorPane::get_explain_rows(int width) -> std::vector<std::string> {
         return explain_rows;
     }
 
-    const auto expl_opt = simrv::explain::explain_at_pc(machine_, selected_hart_, target_pc);
+    const auto expl_opt = simrv::explain::explain_at_pc(
+        machine_, selected_hart_, simrv::xlen::VirtAddr{target_pc});
     if (!expl_opt.has_value()) {
         std::vector<std::string> explain_rows;
         explain_rows.push_back(section_line("Instruction Explainer", width));

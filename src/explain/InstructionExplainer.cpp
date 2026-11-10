@@ -873,31 +873,31 @@ auto build_explanation_impl(uint32_t raw_inst, simrv::xlen::Address pc, unsigned
 
 }  // namespace
 
-auto format_instruction_assembly(uint32_t raw_inst, simrv::xlen::Address pc, unsigned xlen)
+auto format_instruction_assembly(uint32_t raw_inst, simrv::xlen::VirtAddr pc, unsigned xlen)
     -> std::string {
     return explain_static(raw_inst, pc, xlen).assembly;
 }
 
-auto explain_static(uint32_t raw_inst, simrv::xlen::Address pc, unsigned xlen)
+auto explain_static(uint32_t raw_inst, simrv::xlen::VirtAddr pc, unsigned xlen)
     -> InstructionExplanation {
-    return build_explanation_impl(raw_inst, pc, xlen, nullptr, nullptr, nullptr);
+    return build_explanation_impl(raw_inst, pc.raw(), xlen, nullptr, nullptr, nullptr);
 }
 
-auto explain_in_state(const simrv::core::ArchState& state, simrv::xlen::Address pc,
+auto explain_in_state(const simrv::core::ArchState& state, simrv::xlen::VirtAddr pc,
                       uint32_t raw_inst, const simrv::core::CPU* cpu,
                       const simrv::core::Machine* machine) -> InstructionExplanation {
-    return build_explanation_impl(raw_inst, pc, state.current_xlen(), &state, cpu, machine);
+    return build_explanation_impl(raw_inst, pc.raw(), state.current_xlen(), &state, cpu, machine);
 }
 
 auto explain_at_pc(const simrv::core::Machine& machine, size_t hart_index,
-                   std::optional<simrv::xlen::Address> override_pc)
+                   std::optional<simrv::xlen::VirtAddr> override_pc)
     -> std::optional<InstructionExplanation> {
     if (hart_index >= machine.num_harts()) {
         return std::nullopt;
     }
     const auto& cpu = machine.hart(hart_index);
     const auto& st = cpu.state();
-    const simrv::xlen::Address target_pc = override_pc.value_or(st.pc);
+    const simrv::xlen::VirtAddr target_pc = override_pc.value_or(simrv::xlen::VirtAddr{st.pc});
     if (target_pc == 0) {
         return std::nullopt;
     }

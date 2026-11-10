@@ -28,6 +28,8 @@ static_assert(std::same_as<decltype(simrv::explain::ControlDataflow::link_pc), s
 static_assert(std::same_as<decltype(simrv::explain::PredictedStateEffect::next_pc), simrv::xlen::VirtAddr>);
 static_assert(std::same_as<decltype(simrv::explain::MemoryDataflow::effective_vaddr), simrv::xlen::VirtAddr>);
 static_assert(std::same_as<decltype(simrv::explain::MemoryDataflow::effective_paddr), std::optional<simrv::xlen::PhysAddr>>);
+static_assert(!std::is_invocable_v<decltype(&simrv::explain::explain_static), uint32_t,
+                                   simrv::xlen::PhysAddr, unsigned>);
 
 inline void expect(bool condition, std::string_view message,
                    std::source_location loc = std::source_location::current()) {
