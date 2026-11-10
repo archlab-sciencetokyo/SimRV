@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <charconv>
+#include <cctype>
 #include <format>
 
 #include "simrv/core/Cpu.hpp"
@@ -18,6 +19,22 @@
 #include "simrv/tui/panels/InspectorPane.hpp"
 
 namespace simrv::tui::modals {
+
+namespace {
+
+auto parse_virtual_address(const std::string& input, const simrv::core::Machine& machine)
+    -> std::optional<simrv::xlen::VirtAddr> {
+    simrv::xlen::VirtAddr address{};
+    auto first = input.data();
+    auto last = first + input.size();
+    int base = 16;
+    if (input.starts_with("0x") || input.starts_with("0X")) first += 2;
+    const auto parsed = std::from_chars(first, last, address.val, base);
+    if (parsed.ec == std::errc{} && parsed.ptr == last) return address;
+    return machine.symbol_table().lookup_name(input);
+}
+
+}  // namespace
 
 auto BreakpointModal::title() const -> std::string {
     if (type_ == ModalType::SetBreakpoint) return "Set PC Breakpoint";
@@ -167,29 +184,14 @@ auto BreakpointModal::submit(ModalType type, const std::string& input,
     if (input.empty()) return false;
 
     if (type == ModalType::SetBreakpoint) {
-        simrv::xlen::Address addr = 0;
-        bool ok = false;
-        if (input.starts_with("0x") || input.starts_with("0X")) {
-            auto result = std::from_chars(input.data() + 2, input.data() + input.size(), addr, 16);
-            ok = (result.ec == std::errc{});
-        } else if (std::ranges::all_of(input, ::isxdigit)) {
-            auto result = std::from_chars(input.data(), input.data() + input.size(), addr, 16);
-            ok = (result.ec == std::errc{});
-        } else {
-            auto sym_opt = machine.symbol_table().lookup_name(input);
-            if (sym_opt.has_value()) {
-                addr = sym_opt->raw();
-                ok = true;
-            }
-        }
-
-        if (!ok) {
+        const auto address = parse_virtual_address(input, machine);
+        if (!address.has_value()) {
             set_status_override_cb(std::format("Symbol/address not found: {}", input));
             return false;
         }
 
-        machine.breakpoint_manager().add_pc_breakpoint(simrv::xlen::VirtAddr{addr});
-        set_status_override_cb(std::format("Breakpoint set at 0x{:08x}", addr));
+        machine.breakpoint_manager().add_pc_breakpoint(*address);
+        set_status_override_cb(std::format("Breakpoint set at 0x{:08x}", address->raw()));
         return true;
 
     } else if (type == ModalType::SetWatchpoint) {
@@ -202,30 +204,15 @@ auto BreakpointModal::submit(ModalType type, const std::string& input,
             return true;
         }
 
-        simrv::xlen::Address addr = 0;
-        bool ok = false;
-        if (input.starts_with("0x") || input.starts_with("0X")) {
-            auto result = std::from_chars(input.data() + 2, input.data() + input.size(), addr, 16);
-            ok = (result.ec == std::errc{});
-        } else if (std::ranges::all_of(input, ::isxdigit)) {
-            auto result = std::from_chars(input.data(), input.data() + input.size(), addr, 16);
-            ok = (result.ec == std::errc{});
-        } else {
-            auto sym_opt = machine.symbol_table().lookup_name(input);
-            if (sym_opt.has_value()) {
-                addr = sym_opt->raw();
-                ok = true;
-            }
-        }
-
-        if (!ok) {
+        const auto address = parse_virtual_address(input, machine);
+        if (!address.has_value()) {
             set_status_override_cb(std::format("Register, symbol or address not found: {}", input));
             return false;
         }
 
-        machine.breakpoint_manager().add_watchpoint(simrv::xlen::VirtAddr{addr}, 4,
+        machine.breakpoint_manager().add_watchpoint(*address, 4,
                                                     simrv::debug::WatchType::Write, "");
-        set_status_override_cb(std::format("Memory Write Watchpoint set at 0x{:08x}", addr));
+        set_status_override_cb(std::format("Memory Write Watchpoint set at 0x{:08x}", address->raw()));
         return true;
     }
     return false;
@@ -236,7 +223,7 @@ struct ActiveTriggerInfo {
     bool is_execute{};
     bool is_load{};
     bool is_store{};
-    simrv::xlen::Address addr{};
+    simrv::xlen::VirtAddr addr{};
 };
 
 auto get_active_triggers(const simrv::core::Machine& machine) -> std::vector<ActiveTriggerInfo> {
@@ -254,7 +241,7 @@ auto get_active_triggers(const simrv::core::Machine& machine) -> std::vector<Act
         info.is_execute = (t1 & (1U << 2U)) != 0;
         info.is_store = (t1 & (1U << 1U)) != 0;
         info.is_load = (t1 & (1U << 0U)) != 0;
-        info.addr = state.tdata2[i];
+        info.addr = simrv::xlen::VirtAddr{state.tdata2[i]};
         trigs.push_back(info);
     }
     return trigs;
@@ -417,7 +404,7 @@ void BreakpointModal::render(ModalType type, std::vector<std::string>& content_r
                                        ? "RW Watch"
                                        : (trig.is_store ? "Write Watch" : "Read Watch");
                 content_rows.push_back(std::format("{}Sdtrig #{} [{}]: \033[1;36m0x{:08x}\033[0m",
-                                                   prefix, trig.index, kind, trig.addr));
+                                                   prefix, trig.index, kind, trig.addr.raw()));
                 item_idx++;
             }
         }
