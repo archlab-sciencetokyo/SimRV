@@ -545,8 +545,8 @@ void test_arch_trace_event_hart_and_cycle_filters() {
     simrv::core::MachineConfig config;
     config.debug.trace_events = "ignored, call";
     config.debug.trace_hart = 1;
-    config.debug.trace_pc_start = kPc;
-    config.debug.trace_pc_end = kPc + 0x10;
+    config.debug.trace_pc_start = simrv::xlen::VirtAddr{kPc};
+    config.debug.trace_pc_end = simrv::xlen::VirtAddr{kPc + 0x10};
     config.debug.trace_after_cycle = 0;
     config.debug.trace_before_cycle = 100;
     Machine machine(config);

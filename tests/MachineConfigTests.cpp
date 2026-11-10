@@ -1,11 +1,13 @@
 #include <algorithm>
 #include <chrono>
+#include <concepts>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
 #include <limits>
 #include <memory>
+#include <optional>
 #include <sstream>
 #include <vector>
 
@@ -32,6 +34,11 @@
 #include "simrv/util/SoCManifest.hpp"
 
 namespace {
+
+static_assert(std::same_as<decltype(simrv::util::RuntimeOptions::trace_pc_start),
+                           std::optional<simrv::xlen::VirtAddr>>);
+static_assert(std::same_as<decltype(simrv::core::DebugConfig::trace_pc_end),
+                           std::optional<simrv::xlen::VirtAddr>>);
 
 auto failures = 0;
 
@@ -615,16 +622,16 @@ auto main() -> int {
                    parsed->options.trace_device == "uart0" && parsed->options.trace_hart == 1 &&
                    parsed->options.trace_after_cycle == 100 &&
                    parsed->options.trace_before_cycle == 200 &&
-                   parsed->options.trace_pc_start == 0x80000000 &&
-                   parsed->options.trace_pc_end == 0x80001000,
+                   parsed->options.trace_pc_start == simrv::xlen::VirtAddr{0x80000000} &&
+                   parsed->options.trace_pc_end == simrv::xlen::VirtAddr{0x80001000},
                "trace event, hart, PC, and inclusive cycle filters parse");
         if (parsed) {
             const auto cfg = parsed->options.to_machine_config();
             expect(cfg.debug.trace_events == "call, return" && cfg.debug.trace_function == "main" &&
                        cfg.debug.trace_device == "uart0" && cfg.debug.trace_hart == 1 &&
-                       cfg.debug.trace_pc_start == 0x80000000 &&
-                       cfg.debug.trace_pc_end == 0x80001000 && cfg.debug.trace_after_cycle == 100 &&
-                       cfg.debug.trace_before_cycle == 200,
+                       cfg.debug.trace_pc_start == simrv::xlen::VirtAddr{0x80000000} &&
+                       cfg.debug.trace_pc_end == simrv::xlen::VirtAddr{0x80001000} &&
+                       cfg.debug.trace_after_cycle == 100 && cfg.debug.trace_before_cycle == 200,
                    "trace filters project into machine configuration");
         }
     }

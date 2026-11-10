@@ -12,6 +12,7 @@
 #include "simrv/core/Logger.hpp"
 #include "simrv/core/Machine.hpp"
 #include "simrv/core/RuntimeProfile.hpp"
+#include "simrv/xlen/AddressTypes.hpp"
 
 namespace simrv::util {
 
@@ -61,8 +62,8 @@ struct RuntimeOptions {
     std::string trace_function;
     std::string trace_device;
     std::optional<uint32_t> trace_hart;
-    std::optional<simrv::xlen::Address> trace_pc_start;
-    std::optional<simrv::xlen::Address> trace_pc_end;
+    std::optional<simrv::xlen::VirtAddr> trace_pc_start;
+    std::optional<simrv::xlen::VirtAddr> trace_pc_end;
     std::optional<simrv::xlen::Counter> trace_after_cycle;
     std::optional<simrv::xlen::Counter> trace_before_cycle;
     std::string fn_save_checkpoint;

@@ -575,10 +575,12 @@ void Tracer::init_architecture_trace(const std::string& path) {
         json_quote(config.debug.trace_device),
         config.debug.trace_hart ? std::format("{}", *config.debug.trace_hart) : "null",
         config.debug.trace_pc_start
-            ? json_quote(std::format("0x{:x}", static_cast<uint64_t>(*config.debug.trace_pc_start)))
+            ? json_quote(
+                  std::format("0x{:x}", static_cast<uint64_t>(config.debug.trace_pc_start->raw())))
             : "null",
         config.debug.trace_pc_end
-            ? json_quote(std::format("0x{:x}", static_cast<uint64_t>(*config.debug.trace_pc_end)))
+            ? json_quote(
+                  std::format("0x{:x}", static_cast<uint64_t>(config.debug.trace_pc_end->raw())))
             : "null",
         config.debug.trace_after_cycle ? std::format("{}", *config.debug.trace_after_cycle)
                                        : "null",
@@ -1470,11 +1472,13 @@ void Tracer::write_trace_metadata(bool completed) {
             : "null",
         machine_.configuration().debug.trace_pc_start
             ? json_quote(std::format(
-                  "0x{:x}", static_cast<uint64_t>(*machine_.configuration().debug.trace_pc_start)))
+                  "0x{:x}",
+                  static_cast<uint64_t>(machine_.configuration().debug.trace_pc_start->raw())))
             : "null",
         machine_.configuration().debug.trace_pc_end
             ? json_quote(std::format(
-                  "0x{:x}", static_cast<uint64_t>(*machine_.configuration().debug.trace_pc_end)))
+                  "0x{:x}",
+                  static_cast<uint64_t>(machine_.configuration().debug.trace_pc_end->raw())))
             : "null",
         machine_.configuration().debug.trace_after_cycle
             ? std::format("{}", *machine_.configuration().debug.trace_after_cycle)

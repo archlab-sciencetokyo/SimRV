@@ -22,6 +22,7 @@
 #include "simrv/memory/MemoryUtil.hpp"
 #include "simrv/pipeline/CpuModel.hpp"
 #include "simrv/pipeline/PipelineSim.hpp"
+#include "simrv/xlen/AddressTypes.hpp"
 
 namespace simrv::core {
 
@@ -97,8 +98,8 @@ struct DebugConfig {
     std::string trace_function;
     std::string trace_device;
     std::optional<uint32_t> trace_hart;
-    std::optional<simrv::xlen::Address> trace_pc_start;
-    std::optional<simrv::xlen::Address> trace_pc_end;
+    std::optional<simrv::xlen::VirtAddr> trace_pc_start;
+    std::optional<simrv::xlen::VirtAddr> trace_pc_end;
     std::optional<simrv::xlen::Counter> trace_after_cycle;
     std::optional<simrv::xlen::Counter> trace_before_cycle;
     simrv::xlen::Counter checkpoint_every = 0;

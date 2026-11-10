@@ -279,8 +279,8 @@ auto parse_trace_pc_range(std::string_view range, RuntimeOptions& options) -> bo
     if (!parse_u64_base0(range.substr(0, separator), start) ||
         !parse_u64_base0(range.substr(separator + 1), end) || start > end)
         return false;
-    options.trace_pc_start = start;
-    options.trace_pc_end = end;
+    options.trace_pc_start = simrv::xlen::VirtAddr{static_cast<simrv::xlen::Address>(start)};
+    options.trace_pc_end = simrv::xlen::VirtAddr{static_cast<simrv::xlen::Address>(end)};
     return true;
 }
 
