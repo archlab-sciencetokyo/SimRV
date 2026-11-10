@@ -514,7 +514,7 @@ void Machine::maybe_save_periodic_checkpoint() {
                 metadata << std::format(
                     "{{\"hart\":{},\"pc\":\"0x{:x}\","
                     "\"privilege\":\"{}\",\"pending_interrupts\":\"0x{:x}\"}}",
-                    h, static_cast<uint64_t>(hart(h).state().pc),
+                    h, static_cast<uint64_t>(hart(h).state().pc.raw()),
                     hart(h).state().priv == simrv::xlen::PrivilegeLevel::User         ? "U"
                     : hart(h).state().priv == simrv::xlen::PrivilegeLevel::Supervisor ? "S"
                                                                                       : "M",
@@ -842,8 +842,11 @@ void Machine::publish_tui_execution_snapshot() noexcept {
 }
 
 void Machine::sample_throughput() noexcept {
-    const auto now = std::chrono::steady_clock::now();
     const auto current_instructions = retired_instruction_count();
+    if (simrv::compiler::likely(current_instructions - last_sample_instructions_ < 1'000'000)) {
+        return;
+    }
+    const auto now = std::chrono::steady_clock::now();
     const auto elapsed_ns =
         std::chrono::duration_cast<std::chrono::nanoseconds>(now - last_sample_time_).count();
     if (elapsed_ns >= 1'000'000 && current_instructions > last_sample_instructions_) {

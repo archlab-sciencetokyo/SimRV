@@ -119,7 +119,7 @@ void CPU::run_ca_pipeline_cycle(Machine& machine) {
         pipe.initialized = true;
     }
     if (simrv::compiler::unlikely(branch_predictor.has_registered_btb())) {
-        branch_predictor.latch_btb_read(simrv::xlen::VirtAddr{pipe.fetch_pc});
+        branch_predictor.latch_btb_read(pipe.fetch_pc);
     }
 
     auto run_with_context = [&](CycleInstructionSlot& slot, auto&& operation) -> bool {
@@ -134,7 +134,7 @@ void CPU::run_ca_pipeline_cycle(Machine& machine) {
     auto flush_to = [&](simrv::xlen::VirtAddr pc) {
         pipe.flush_younger();
         pipe.control_flush = true;
-        pipe.fetch_pc = pc.raw();
+        pipe.fetch_pc = pc;
         cancel_port(simrv::memory::TlPort::Instruction);
         ca_state.instruction_fill.reset();
         ca_state.instruction_prefetch.reset();
@@ -150,7 +150,7 @@ void CPU::run_ca_pipeline_cycle(Machine& machine) {
     auto trap_at_retirement = [&](CycleInstructionSlot& slot) {
         const auto cause = slot.context.pending_exception.value_or(ExceptionCode::MisalignedFetch);
         const auto tval = slot.context.pending_tval;
-        state_.pc = slot.context.cpc.raw();
+        state_.pc = slot.context.cpc;
         cancel_port(simrv::memory::TlPort::Instruction);
         cancel_port(simrv::memory::TlPort::Data);
         pipe.reset();
@@ -405,8 +405,8 @@ void CPU::run_ca_pipeline_cycle(Machine& machine) {
                         break;
                 }
                 if (!executed_fast) {
-                    const simrv::xlen::Register saved_pc = state_.pc;
-                    state_.pc = execute->context.cpc.raw();
+                    const auto saved_pc = state_.pc;
+                    state_.pc = execute->context.cpc;
                     (void)run_with_context(*execute, [&] { return execute_stage(machine); });
                     state_.pc = saved_pc;
                 }
@@ -426,8 +426,8 @@ void CPU::run_ca_pipeline_cycle(Machine& machine) {
 
                 if (simrv::compiler::unlikely(execute->context.traits.is_control ||
                                               execute->prediction.false_control_alias)) {
-                    const simrv::xlen::Address sequential =
-                        (execute->context.cpc + (execute->context.cinsn != 0u ? 2 : 4)).raw();
+                    const simrv::xlen::VirtAddr sequential =
+                        execute->context.cpc + (execute->context.cinsn != 0u ? 2 : 4);
                     const simrv::xlen::VirtAddr target =
                         execute->context.tkn ? execute->context.jmp_pc
                                              : simrv::xlen::VirtAddr{sequential};
@@ -543,7 +543,7 @@ void CPU::run_ca_pipeline_cycle(Machine& machine) {
                             // Only the younger fetch-stage instruction is squashed.
                             pipe.fetch->invalidate();
                             pipe.control_flush = true;
-                            pipe.fetch_pc = target.raw();
+                            pipe.fetch_pc = target;
                             cancel_port(simrv::memory::TlPort::Instruction);
                             ca_state.instruction_fill.reset();
                             ca_state.instruction_walk.reset();
@@ -634,7 +634,7 @@ void CPU::run_ca_pipeline_cycle(Machine& machine) {
     if (pipe.control_recovery_bubbles > 0) {
         --pipe.control_recovery_bubbles;
     } else if (!fetch->valid && !pipe.frontend_blocked) {
-        const simrv::xlen::Register committed_pc = state_.pc;
+        const auto committed_pc = state_.pc;
         state_.pc = pipe.fetch_pc;
         active_context_ = &fetch->context;
         const auto misses_before = icache.miss_count();
@@ -687,13 +687,13 @@ void CPU::run_ca_pipeline_cycle(Machine& machine) {
                 fetch->remaining_latency = cpu_model_config.instruction_cache.hit_latency - 1;
             }
             const simrv::xlen::Address width = fetch->context.cinsn != 0u ? 2 : 4;
-            const simrv::xlen::Address sequential = (fetch->context.cpc + width).raw();
+            const simrv::xlen::VirtAddr sequential = fetch->context.cpc + width;
 
             if (simrv::compiler::unlikely(fetch->context.traits.is_control ||
                                           branch_predictor.config().predict_non_control)) {
                 branch_predictor.predict(fetch->context.cpc, fetch->context, fetch->prediction);
                 if (fetch->prediction.predicted_taken && fetch->prediction.predicted_target != 0) {
-                    pipe.fetch_pc = fetch->prediction.predicted_target.raw();
+                    pipe.fetch_pc = fetch->prediction.predicted_target;
                     pipe.frontend_blocked = fetch->serializing;
                 } else if (fetch->context.opcode == isa::Opcode::Jalr &&
                            !fetch->prediction.btb_hit && !fetch->prediction.ras_hit) {

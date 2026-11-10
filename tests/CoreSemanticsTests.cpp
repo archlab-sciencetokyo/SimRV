@@ -144,6 +144,7 @@ concept SharedCacheAddress =
 static_assert(SharedCacheAddress<simrv::xlen::PhysAddr>);
 static_assert(!SharedCacheAddress<simrv::xlen::VirtAddr>);
 static_assert(!SharedCacheAddress<simrv::xlen::Address>);
+static_assert(std::same_as<decltype(simrv::core::ArchState::pc), simrv::xlen::VirtAddr>);
 
 template <typename V, typename P>
 concept TlbInsertable = requires(simrv::core::Tlb& tlb, V virt, P phys) {
@@ -621,7 +622,7 @@ void test_hosted_rv32_cached_shift_width() {
                                          simrv::isa::Funct3 funct3, uint32_t lhs, uint32_t rhs,
                                          uint32_t expected, const char* description) {
             simrv::pipeline::DecodedInstruction decoded{};
-            decoded.cpc = simrv::xlen::VirtAddr{state.pc};
+            decoded.cpc = state.pc;
             decoded.ir = ir;
             decoded.op_id = op_id;
             decoded.opcode = simrv::isa::Opcode::Op;

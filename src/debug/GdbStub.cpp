@@ -447,7 +447,7 @@ static auto read_gdb_reg(std::size_t idx, const simrv::core::CPU& cpu)
         return GdbStub::reg_to_hex(state.regs.read(static_cast<simrv::xlen::RegId>(idx)));
     }
     if (idx == 32) {
-        return GdbStub::reg_to_hex(state.pc);
+        return GdbStub::reg_to_hex(state.pc.raw());
     }
     if (idx >= 33 && idx < 65) {
         // FP registers: 64-bit, little-endian
@@ -467,7 +467,7 @@ static void write_gdb_reg(std::size_t idx, const std::string& hex, std::size_t h
         const simrv::xlen::Register val = GdbStub::hex_to_reg(hex, hex_off);
         state.regs.write(static_cast<simrv::xlen::RegId>(idx), val);
     } else if (idx == 32) {
-        state.pc = static_cast<simrv::xlen::Address>(GdbStub::hex_to_reg(hex, hex_off));
+        state.pc = simrv::xlen::VirtAddr{GdbStub::hex_to_reg(hex, hex_off)};
     } else if (idx >= 33 && idx < 65) {
         const uint64_t val = hex_to_fp(hex, hex_off);
         state.regs.write_fp(simrv::xlen::to_fp_reg_id(static_cast<simrv::xlen::RegId>(idx - 33)),
@@ -489,7 +489,7 @@ auto GdbStub::cmd_read_registers(simrv::core::Machine& machine) -> std::string {
         resp += reg_to_hex(state.regs.read(static_cast<simrv::xlen::RegId>(i)));
     }
     // pc (XLEN bytes, little-endian)
-    resp += reg_to_hex(state.pc);
+    resp += reg_to_hex(state.pc.raw());
     // f0-f31 (8 bytes each, little-endian)
     for (std::size_t i = 0; i < 32; ++i) {
         resp += fp_to_hex(
@@ -839,7 +839,8 @@ auto GdbStub::cmd_monitor(std::string_view command, simrv::core::Machine& machin
         for (size_t i = 0; i < machine.num_harts(); ++i) {
             const auto& hart = machine.hart(i);
             response += std::format(
-                "hart {}: pc=0x{:x} instructions={} status={}\n", i, hart.state().pc, hart.e_icount,
+                "hart {}: pc=0x{:x} instructions={} status={}\n", i, hart.state().pc.raw(),
+                hart.e_icount,
                 hart.hart_status.load(std::memory_order_relaxed) == simrv::core::HartStatus::Started
                     ? "started"
                     : "stopped");

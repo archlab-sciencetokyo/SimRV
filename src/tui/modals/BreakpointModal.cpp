@@ -171,7 +171,7 @@ void BreakpointModal::open(ModalType type, std::string& input, simrv::core::Mach
                            InspectorPane* inspector_pane) {
     input.clear();
     if (type == ModalType::SetBreakpoint) {
-        input = std::format("0x{:08x}", machine.primary_hart().state().pc);
+        input = std::format("0x{:08x}", machine.primary_hart().state().pc.raw());
     } else if (type == ModalType::SetWatchpoint) {
         input = std::format("0x{:08x}", inspector_pane ? inspector_pane->get_inspect_addr().raw() : 0);
     }

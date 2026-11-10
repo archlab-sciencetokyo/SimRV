@@ -112,7 +112,7 @@ auto make_inspection_report(const simrv::core::Machine& machine, size_t hart,
     const auto spec =
         simrv::explain::get_operation_spec(expl_opt ? expl_opt->op_id : context.op_id);
     out << "  \"selected_hart\": " << selected_hart << ",\n";
-    out << "  \"instruction\": {\"pc\": " << quoted(hex_value(state.pc)) << ", \"raw\": "
+    out << "  \"instruction\": {\"pc\": " << quoted(hex_value(state.pc.raw())) << ", \"raw\": "
         << quoted(std::format("0x{:08x}", expl_opt ? expl_opt->raw_bits : context.ir_org))
         << ", \"operation\": "
         << quoted(simrv::pipeline::operation_name(expl_opt ? expl_opt->op_id : context.op_id))
@@ -121,7 +121,7 @@ auto make_inspection_report(const simrv::core::Machine& machine, size_t hart,
         << ", \"extension\": " << quoted(spec.reference.extension)
         << ", \"spec_section\": " << quoted(spec.reference.section)
         << ", \"formula\": " << quoted(spec.reference.formula) << ", \"predicted_next_pc\": "
-        << quoted(hex_value(expl_opt ? expl_opt->predicted_effect.next_pc.raw() : state.pc))
+        << quoted(hex_value(expl_opt ? expl_opt->predicted_effect.next_pc.raw() : state.pc.raw()))
         << ", \"predicted_writeback\": "
         << quoted(expl_opt ? expl_opt->predicted_effect.effect_equation : std::string{})
         << ", \"predicted_trap\": "

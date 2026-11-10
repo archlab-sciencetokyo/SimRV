@@ -295,8 +295,7 @@ void resolve_start_pc_and_dram_base(simrv::core::Machine& machine,
                                         .transform([](auto addr) { return addr.raw(); }));
     machine.primary_hart().state().pc = machine.resolved_start_pc();
     if (machine.primary_hart().state().regs.xlen == 32) {
-        machine.primary_hart().state().pc = static_cast<simrv::xlen::Register>(
-            static_cast<int64_t>(static_cast<int32_t>(machine.primary_hart().state().pc)));
+        machine.primary_hart().state().canonicalize_pc();
     }
 }
 
@@ -900,8 +899,7 @@ auto Machine::initialize() -> std::expected<void, std::string> {
     primary_hart().state().regs.vlen = config.isa.vlen ? config.isa.vlen : 256;
     primary_hart().state().initialize_lower_xlen_fields();
     if (primary_hart().state().regs.xlen == 32) {
-        primary_hart().state().pc = static_cast<simrv::xlen::Register>(
-            static_cast<int64_t>(static_cast<int32_t>(primary_hart().state().pc)));
+        primary_hart().state().canonicalize_pc();
     }
     primary_hart().dcache.flush();
     primary_hart().TLB_flush();
@@ -972,8 +970,7 @@ auto Machine::initialize() -> std::expected<void, std::string> {
             }
             sec_cpu->state().pc = resolved_start_pc_;
             if (sec_cpu->state().regs.xlen == 32) {
-                sec_cpu->state().pc = static_cast<simrv::xlen::Register>(
-                    static_cast<int64_t>(static_cast<int32_t>(sec_cpu->state().pc)));
+                sec_cpu->state().canonicalize_pc();
             }
             sec_cpu->state().priv = kPrivMachine;
             sec_cpu->state().regs.write(static_cast<simrv::xlen::RegId>(10), i);

@@ -186,7 +186,7 @@ auto write_lifecycle_event(std::ofstream& out, const simrv::core::Machine& machi
     out << "{\"schema_version\":2,\"event\":\"" << lifecycle_event_name(kind)
         << "\",\"timestamp\":\"" << lifecycle_timestamp()
         << "\",\"cycle\":" << hart.clint_mmio.mcycle << ",\"hart\":0,\"pc\":\"0x" << std::hex
-        << hart.state().pc << std::dec << "\",\"mode\":\"" << privilege_mode(hart.state().priv)
+        << hart.state().pc.raw() << std::dec << "\",\"mode\":\"" << privilege_mode(hart.state().priv)
         << "\",\"payload\":{\"status\":\"" << (status == 0 ? "ok" : "failed")
         << "\",\"stop_reason\":\"" << simrv::core::Machine::stop_reason_name(machine.stop_reason())
         << "\",\"retired_instructions\":" << hart.e_icount

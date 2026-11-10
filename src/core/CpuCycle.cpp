@@ -144,16 +144,13 @@ void CPU::run_cycle(Machine& machine) {
     const simrv::xlen::Counter retired_before = e_icount;
     if (simrv::compiler::unlikely(machine.breakpoint_manager().has_any())) {
         prev_state_ = state_;
-        if (auto hit = machine.breakpoint_manager().check_pc(simrv::xlen::VirtAddr{state_.pc},
-                                                             hart_id(), e_icount)) {
+        if (auto hit = machine.breakpoint_manager().check_pc(state_.pc, hart_id(), e_icount)) {
             if (auto* stub = machine.debugger(); stub && stub->is_connected()) {
-                machine.breakpoint_manager().set_skip_once_pc(simrv::xlen::VirtAddr{state_.pc},
-                                                              hart_id(), e_icount);
+                machine.breakpoint_manager().set_skip_once_pc(state_.pc, hart_id(), e_icount);
                 machine.debug_halt(hart_id(), GdbSignal::SigTrap, "swbreak:;");
                 return;
             } else if (auto sink = machine.telemetry_sink_raw()) {
-                machine.breakpoint_manager().set_skip_once_pc(simrv::xlen::VirtAddr{state_.pc},
-                                                              hart_id(), e_icount);
+                machine.breakpoint_manager().set_skip_once_pc(state_.pc, hart_id(), e_icount);
                 sink->set_status_override(hit->description);
                 sink->pause_loop();
                 return;
@@ -161,7 +158,8 @@ void CPU::run_cycle(Machine& machine) {
         }
     }
     if (simrv::compiler::unlikely(state_.has_active_triggers && check_triggers_pc(state_.pc))) {
-        raise_exception(static_cast<simrv::xlen::TrapCause>(ExceptionCode::Breakpoint), state_.pc);
+        raise_exception(static_cast<simrv::xlen::TrapCause>(ExceptionCode::Breakpoint),
+                        state_.pc.raw());
         return;
     }
     if (machine.runtime_profile.is_cycle_mode()) {
@@ -411,7 +409,7 @@ void CPU::execute_ca_cycle_stages(Machine& machine, simrv::xlen::Counter retired
             simrv::memory::make_tl_source(hart_id(), simrv::memory::TlPort::Instruction));
         ca_pipeline.reset();
         ca_pipeline.initialized = true;
-        ca_pipeline.fetch_pc = state_.pc;
+        ca_pipeline.fetch_pc = state_.pc.raw();
         ca_state.instruction_fill.reset();
         ca_state.data_transfer.reset();
         ca_state.instruction_walk.reset();
@@ -439,17 +437,14 @@ void CPU::run_ca_cycle_fast(Machine& machine) {
     const simrv::xlen::Counter retired_before = e_icount;
     if (simrv::compiler::unlikely(machine.breakpoint_manager().has_any())) {
         prev_state_ = state_;
-        if (auto hit = machine.breakpoint_manager().check_pc(simrv::xlen::VirtAddr{state_.pc},
-                                                             hart_id(), e_icount)) {
+        if (auto hit = machine.breakpoint_manager().check_pc(state_.pc, hart_id(), e_icount)) {
             if (auto* stub = machine.debugger(); stub && stub->is_connected()) {
-                machine.breakpoint_manager().set_skip_once_pc(simrv::xlen::VirtAddr{state_.pc},
-                                                              hart_id(), e_icount);
+                machine.breakpoint_manager().set_skip_once_pc(state_.pc, hart_id(), e_icount);
                 machine.debug_halt(hart_id(), GdbSignal::SigTrap, "swbreak:;");
                 active_execution_cpu_ = previous_active_cpu;
                 return;
             } else if (auto sink = machine.telemetry_sink_raw()) {
-                machine.breakpoint_manager().set_skip_once_pc(simrv::xlen::VirtAddr{state_.pc},
-                                                              hart_id(), e_icount);
+                machine.breakpoint_manager().set_skip_once_pc(state_.pc, hart_id(), e_icount);
                 sink->set_status_override(hit->description);
                 sink->pause_loop();
                 active_execution_cpu_ = previous_active_cpu;
@@ -644,17 +639,15 @@ void CPU::run_cycle_baremetal(Machine& machine) {
     const simrv::xlen::Counter retired_before = e_icount;
     if (simrv::compiler::unlikely(machine.breakpoint_manager().has_any())) {
         prev_state_ = state_;
-        if (auto hit = machine.breakpoint_manager().check_pc(simrv::xlen::VirtAddr{state_.pc},
-                                                             hart_id(), e_icount)) {
+        if (auto hit = machine.breakpoint_manager().check_pc(state_.pc, hart_id(), e_icount)) {
             if (auto* stub = machine.debugger(); stub && stub->is_connected()) {
-                machine.breakpoint_manager().set_skip_once_pc(simrv::xlen::VirtAddr{state_.pc},
-                                                              hart_id(), e_icount);
+                machine.breakpoint_manager().set_skip_once_pc(state_.pc, hart_id(), e_icount);
                 machine.debug_halt(hart_id(), GdbSignal::SigTrap, "swbreak:;");
                 return;
             }
             if (auto sink = machine.telemetry_sink_raw()) {
                 machine.breakpoint_manager().set_skip_once_pc(
-                    simrv::xlen::VirtAddr{state_.pc},
+                    state_.pc,
                     simrv::xlen::HartId{static_cast<uint32_t>(state_.mhartid)}, e_icount);
                 sink->set_status_override(hit->description);
                 sink->pause_loop();
@@ -663,7 +656,8 @@ void CPU::run_cycle_baremetal(Machine& machine) {
         }
     }
     if (simrv::compiler::unlikely(state_.has_active_triggers && check_triggers_pc(state_.pc))) {
-        raise_exception(static_cast<simrv::xlen::TrapCause>(ExceptionCode::Breakpoint), state_.pc);
+        raise_exception(static_cast<simrv::xlen::TrapCause>(ExceptionCode::Breakpoint),
+                        state_.pc.raw());
         return;
     }
     pipeline_context.pending_exception = std::nullopt;
@@ -980,7 +974,7 @@ void CPU::run_memory_stage_baremetal(Machine& machine) {
     }
 }
 
-auto CPU::fetch_stage(Machine& machine, simrv::xlen::Address pc) -> bool {
+auto CPU::fetch_stage(Machine& machine, simrv::xlen::VirtAddr pc) -> bool {
     state_.pc = pc;
     auto& context = active_context();
     context.pending_exception = std::nullopt;

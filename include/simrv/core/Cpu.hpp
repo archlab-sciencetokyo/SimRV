@@ -53,7 +53,7 @@ class Machine;
  * @brief Groups all architectural registers and CSRs into a cohesive block.
  */
 struct alignas(128) ArchState {
-    simrv::xlen::Register pc{};  ///< Program Counter (instruction address pointer)
+    simrv::xlen::VirtAddr pc{};  ///< Architectural virtual program counter
     RegisterFile regs{};         ///< General-purpose integer, FP, and vector registers
 
     /* Machine Mode CSRs */
@@ -281,7 +281,7 @@ struct alignas(128) ArchState {
         if constexpr (simrv::xlen::kIsXLen64) {
             if (simrv::compiler::unlikely(regs.xlen == 32)) {
                 pc = static_cast<simrv::xlen::Register>(
-                    static_cast<int64_t>(static_cast<int32_t>(pc)));
+                    static_cast<int64_t>(static_cast<int32_t>(pc.raw())));
             }
         }
     }
@@ -363,6 +363,24 @@ struct alignas(32) SoftTlbEntry {
         -> uint64_t {
         return ((vpn & 0xFFFFFFFFFFULL) << 18) | ((asid & 0xFFFFu) << 2) |
                static_cast<uint64_t>(static_cast<uint8_t>(priv) & 0x3u);
+    }
+
+    [[nodiscard]] SIMRV_ALWAYS_INLINE static constexpr auto make_asid_priv_tag(
+        uint64_t asid, simrv::xlen::PrivilegeLevel priv) noexcept -> uint32_t {
+        return static_cast<uint32_t>(((asid & 0xFFFFu) << 2) |
+                                     static_cast<uint64_t>(static_cast<uint8_t>(priv) & 0x3u));
+    }
+
+    [[nodiscard]] SIMRV_ALWAYS_INLINE constexpr auto matches_fast(
+        simrv::xlen::VpnIndex vpn, uint32_t asid_priv_tag, uint32_t priv_tag,
+        uint32_t current_epoch) const noexcept -> bool {
+        if (simrv::compiler::likely(epoch == current_epoch && tag != kInvalidTag)) {
+            const uint64_t expected_tag = ((vpn & 0xFFFFFFFFFFULL) << 18) | asid_priv_tag;
+            if (simrv::compiler::likely(tag == expected_tag)) return true;
+            return simrv::compiler::unlikely(global) &&
+                   ((tag & ~uint64_t{0x3FFFCULL}) == (((vpn & 0xFFFFFFFFFFULL) << 18) | priv_tag));
+        }
+        return false;
     }
 
     [[nodiscard]] SIMRV_ALWAYS_INLINE constexpr auto matches(simrv::xlen::VpnIndex vpn,
@@ -527,7 +545,7 @@ class CPU {
     /**
      * @brief Checks if an instruction fetch PC matches any active Sdtrig execution trigger.
      */
-    [[nodiscard]] SIMRV_ALWAYS_INLINE auto check_triggers_pc(simrv::xlen::Address pc) const noexcept
+    [[nodiscard]] SIMRV_ALWAYS_INLINE auto check_triggers_pc(simrv::xlen::VirtAddr pc) const noexcept
         -> bool {
         if (!state_.has_active_triggers) return false;
         const unsigned xlen = state_.regs.xlen;
@@ -762,7 +780,7 @@ class CPU {
     /**
      * @brief Functional monadic Fetch stage (C++23 expected monadic structure).
      */
-    [[nodiscard]] auto fetch_stage(Machine& machine, simrv::xlen::Address pc) -> bool;
+    [[nodiscard]] auto fetch_stage(Machine& machine, simrv::xlen::VirtAddr pc) -> bool;
 
     /**
      * @brief Functional monadic Decode stage.
@@ -1082,6 +1100,33 @@ class CPU {
     simrv::pipeline::HartPipelineState ca_pipeline{};
     DecodeCache decode_cache;
     BlockCache block_cache;
+
+    struct RasEntry {
+        simrv::xlen::Register ret_pc{0};
+        BasicBlock* ret_bb{nullptr};
+    };
+    static constexpr size_t kRasCapacity = 16;
+    static constexpr size_t kRasMask = kRasCapacity - 1;
+    std::array<RasEntry, kRasCapacity> ras_{};
+    uint8_t ras_top_{0};
+
+    SIMRV_ALWAYS_INLINE void ras_push(simrv::xlen::Register ret_pc, BasicBlock* ret_bb) noexcept {
+        ras_top_ = (ras_top_ + 1) & kRasMask;
+        ras_[ras_top_] = {ret_pc, ret_bb};
+    }
+
+    [[nodiscard]] SIMRV_ALWAYS_INLINE auto ras_peek_match(simrv::xlen::Register target_pc) noexcept
+        -> BasicBlock* {
+        const auto& entry = ras_[ras_top_];
+        if (entry.ret_pc == target_pc && entry.ret_bb != nullptr &&
+            entry.ret_bb->pc.raw() == target_pc && entry.ret_bb->valid()) {
+            return entry.ret_bb;
+        }
+        return nullptr;
+    }
+
+    SIMRV_ALWAYS_INLINE void ras_pop() noexcept { ras_top_ = (ras_top_ - 1) & kRasMask; }
+
     uint8_t cached_decode_context_{0xFF};
     alignas(64) std::array<SoftTlbEntry, 2048> soft_tlb_read{};
     alignas(64) std::array<SoftTlbEntry, 2048> soft_tlb_write{};

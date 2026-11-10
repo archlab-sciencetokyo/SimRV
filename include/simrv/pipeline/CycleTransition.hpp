@@ -153,7 +153,7 @@ struct HartPipelineState {
     CycleInstructionSlot* memory = &storage_[3];
     CycleInstructionSlot* writeback = &storage_[4];
     CycleInstructionSlot* retired = &storage_[5];
-    simrv::xlen::Address fetch_pc = 0;
+    simrv::xlen::VirtAddr fetch_pc{};
     bool initialized = false;
     bool frontend_blocked = false;
     bool retired_this_cycle = false;

@@ -77,7 +77,7 @@ SIMRV_ALWAYS_INLINE auto CPU::run_fast_baremetal_kernel(Machine& machine, uint32
                     auto* const __restrict__ ops_base = decode_cache.ops_data();
                     auto* chained = initial_op;
                     CachedOp* fallback_op = nullptr;
-                    simrv::xlen::Register next_pc = state_.pc;
+                    simrv::xlen::Register next_pc = state_.pc.raw();
                     uint32_t local_b = b_ref;
                     simrv::xlen::Register seg_start_pc = next_pc;
                     uint32_t seg_start_b = local_b;
@@ -318,42 +318,111 @@ SIMRV_ALWAYS_INLINE auto CPU::run_fast_baremetal_kernel(Machine& machine, uint32
                         return false;
                     };
 
-                    const auto execute_cop = [&](const CompactOp& cop,
+                    const auto execute_cop = [&]<bool kHasMemOp>(
+                                                 const CompactOp& cop,
                                                  bool& fault) __attribute__((always_inline)) {
-                        switch (cop.fast_op) {
-                            case FastOp::Ld:
+                        if constexpr (kHasMemOp) {
+                            if (cop.fast_op == FastOp::Ld) {
                                 fault = !try_fast_load_cop.template operator()<uint64_t>(cop);
-                                break;
-                            case FastOp::Lw:
+                                return;
+                            }
+                            if (cop.fast_op == FastOp::Lw) {
                                 fault = !try_fast_load_cop.template operator()<int32_t>(cop);
-                                break;
-                            case FastOp::Lwu:
-                                fault = !try_fast_load_cop.template operator()<uint32_t>(cop);
-                                break;
-                            case FastOp::Lh:
-                                fault = !try_fast_load_cop.template operator()<int16_t>(cop);
-                                break;
-                            case FastOp::Lhu:
-                                fault = !try_fast_load_cop.template operator()<uint16_t>(cop);
-                                break;
-                            case FastOp::Lb:
-                                fault = !try_fast_load_cop.template operator()<int8_t>(cop);
-                                break;
-                            case FastOp::Lbu:
-                                fault = !try_fast_load_cop.template operator()<uint8_t>(cop);
-                                break;
-                            case FastOp::Sd:
+                                return;
+                            }
+                            if (cop.fast_op == FastOp::Sd) {
                                 fault = !try_fast_store_cop.template operator()<uint64_t>(cop);
-                                break;
-                            case FastOp::Sw:
+                                return;
+                            }
+                            if (cop.fast_op == FastOp::Sw) {
                                 fault = !try_fast_store_cop.template operator()<uint32_t>(cop);
-                                break;
-                            case FastOp::Sh:
-                                fault = !try_fast_store_cop.template operator()<uint16_t>(cop);
-                                break;
-                            case FastOp::Sb:
-                                fault = !try_fast_store_cop.template operator()<uint8_t>(cop);
-                                break;
+                                return;
+                            }
+                            switch (cop.fast_op) {
+                                case FastOp::Lwu:
+                                    fault = !try_fast_load_cop.template operator()<uint32_t>(cop);
+                                    return;
+                                case FastOp::Lh:
+                                    fault = !try_fast_load_cop.template operator()<int16_t>(cop);
+                                    return;
+                                case FastOp::Lhu:
+                                    fault = !try_fast_load_cop.template operator()<uint16_t>(cop);
+                                    return;
+                                case FastOp::Lb:
+                                    fault = !try_fast_load_cop.template operator()<int8_t>(cop);
+                                    return;
+                                case FastOp::Lbu:
+                                    fault = !try_fast_load_cop.template operator()<uint8_t>(cop);
+                                    return;
+                                case FastOp::Sh:
+                                    fault = !try_fast_store_cop.template operator()<uint16_t>(cop);
+                                    return;
+                                case FastOp::Sb:
+                                    fault = !try_fast_store_cop.template operator()<uint8_t>(cop);
+                                    return;
+                                default:
+                                    break;
+                            }
+                        }
+
+                        if (cop.fast_op == FastOp::Add) {
+                            write_rd(cop.rd, gpr[std::to_underlying(cop.rs1)] +
+                                                 gpr[std::to_underlying(cop.rs2)]);
+                            return;
+                        }
+                        if (cop.fast_op == FastOp::Addi) {
+                            write_rd(cop.rd, gpr[std::to_underlying(cop.rs1)] + cop.imm);
+                            return;
+                        }
+                        if (cop.fast_op == FastOp::Slli) {
+                            constexpr simrv::xlen::Register shift_mask = kGuestXlen64 ? 0x3f : 0x1f;
+                            write_rd(cop.rd,
+                                     gpr[std::to_underlying(cop.rs1)] << (cop.imm & shift_mask));
+                            return;
+                        }
+                        if (cop.fast_op == FastOp::Srli) {
+                            constexpr simrv::xlen::Register shift_mask = kGuestXlen64 ? 0x3f : 0x1f;
+                            write_rd(cop.rd,
+                                     gpr[std::to_underlying(cop.rs1)] >> (cop.imm & shift_mask));
+                            return;
+                        }
+                        if (cop.fast_op == FastOp::Addiw) {
+#if SIMRV_XLEN == 64
+                            gpr[std::to_underlying(cop.rd)] = static_cast<int64_t>(
+                                static_cast<int32_t>(gpr[std::to_underlying(cop.rs1)] + cop.imm));
+#else
+                            write_rd(cop.rd, gpr[std::to_underlying(cop.rs1)] + cop.imm);
+#endif
+                            return;
+                        }
+                        if (cop.fast_op == FastOp::Addw) {
+#if SIMRV_XLEN == 64
+                            gpr[std::to_underlying(cop.rd)] = static_cast<int64_t>(
+                                static_cast<int32_t>(gpr[std::to_underlying(cop.rs1)] +
+                                                     gpr[std::to_underlying(cop.rs2)]));
+#else
+                            write_rd(cop.rd, gpr[std::to_underlying(cop.rs1)] +
+                                                 gpr[std::to_underlying(cop.rs2)]);
+#endif
+                            return;
+                        }
+                        if (cop.fast_op == FastOp::Andi) {
+                            write_rd(cop.rd, gpr[std::to_underlying(cop.rs1)] & cop.imm);
+                            return;
+                        }
+                        if (cop.fast_op == FastOp::Mulw) {
+#if SIMRV_XLEN == 64
+                            gpr[std::to_underlying(cop.rd)] = static_cast<int64_t>(
+                                static_cast<int32_t>(gpr[std::to_underlying(cop.rs1)] *
+                                                     gpr[std::to_underlying(cop.rs2)]));
+#else
+                            write_rd(cop.rd, gpr[std::to_underlying(cop.rs1)] *
+                                                 gpr[std::to_underlying(cop.rs2)]);
+#endif
+                            return;
+                        }
+
+                        switch (cop.fast_op) {
                             case FastOp::Add: {
                                 write_rd(cop.rd, gpr[std::to_underlying(cop.rs1)] +
                                                      gpr[std::to_underlying(cop.rs2)]);
@@ -688,11 +757,11 @@ SIMRV_ALWAYS_INLINE auto CPU::run_fast_baremetal_kernel(Machine& machine, uint32
                         }
                     };
 
-                    const auto execute_pure_alu_cop = [&](const CompactOp& cop)
-                                                          __attribute__((always_inline)) {
-                                                              bool unused_fault = false;
-                                                              execute_cop(cop, unused_fault);
-                                                          };
+                    const auto execute_pure_alu_cop =
+                        [&](const CompactOp& cop) __attribute__((always_inline)) {
+                            bool unused_fault = false;
+                            execute_cop.template operator()<false>(cop, unused_fault);
+                        };
 
                     // Compact blocks assume halfword-aligned branch targets. With IALIGN=32,
                     // use scalar execution so misaligned taken branches trap precisely.
@@ -714,17 +783,13 @@ SIMRV_ALWAYS_INLINE auto CPU::run_fast_baremetal_kernel(Machine& machine, uint32
                                 seg_start_pc = next_pc;
                                 goto chain_exit;
                             }
-                            // A direct-mapped successor must not replace the block whose
-                            // metadata is still needed to retire this transition.
                             const auto build_successor = [&](simrv::xlen::Register pc) noexcept {
-                                if (BlockCache::calc_set(pc) ==
-                                    BlockCache::calc_set(cur_bb->pc.raw())) {
-                                    return static_cast<BasicBlock*>(nullptr);
-                                }
                                 return block_cache.build_block(pc, decode_cache);
                             };
                             const uint32_t num_ops = cur_bb->num_ops;
                             const uint32_t non_branch_ops = cur_bb->non_branch_ops;
+                            const uint32_t bb_guest_ops = cur_bb->num_guest_ops;
+                            const uint32_t bb_compressed = cur_bb->num_compressed;
                             const auto* const term = &cur_bb->ops[num_ops - 1];
                             BasicBlock* next_bb = nullptr;
                             uint32_t i = 0;
@@ -760,7 +825,8 @@ SIMRV_ALWAYS_INLINE auto CPU::run_fast_baremetal_kernel(Machine& machine, uint32
                                             }
                                         } else {
                                             for (; mem_i < non_branch_ops; ++mem_i) {
-                                                execute_cop(cur_bb->ops[mem_i], mem_fault);
+                                                execute_cop.template operator()<true>(
+                                                    cur_bb->ops[mem_i], mem_fault);
                                                 if (simrv::compiler::unlikely(mem_fault)) break;
                                             }
                                         }
@@ -806,7 +872,8 @@ SIMRV_ALWAYS_INLINE auto CPU::run_fast_baremetal_kernel(Machine& machine, uint32
                                         }
                                     } else {
                                         for (; mem_i < non_branch_ops; ++mem_i) {
-                                            execute_cop(cur_bb->ops[mem_i], mem_fault);
+                                            execute_cop.template operator()<true>(
+                                                cur_bb->ops[mem_i], mem_fault);
                                             if (simrv::compiler::unlikely(mem_fault)) break;
                                         }
                                     }
@@ -898,7 +965,8 @@ SIMRV_ALWAYS_INLINE auto CPU::run_fast_baremetal_kernel(Machine& machine, uint32
                                 }
                             } else {
                                 for (; i < non_branch_ops; ++i) {
-                                    execute_cop(cur_bb->ops[i], block_fault);
+                                    execute_cop.template operator()<true>(cur_bb->ops[i],
+                                                                          block_fault);
                                     if (simrv::compiler::unlikely(block_fault)) break;
                                 }
                             }
@@ -919,82 +987,115 @@ SIMRV_ALWAYS_INLINE auto CPU::run_fast_baremetal_kernel(Machine& machine, uint32
 
                             if (cur_bb->ends_with_branch) {
                                 bool taken = false;
-                                switch (cur_bb->term_op) {
-                                    case FastOp::Bne:
-                                        taken = (gpr[std::to_underlying(term->rs1)] !=
-                                                 gpr[std::to_underlying(term->rs2)]);
-                                        break;
-                                    case FastOp::Beq:
-                                        taken = (gpr[std::to_underlying(term->rs1)] ==
-                                                 gpr[std::to_underlying(term->rs2)]);
-                                        break;
-                                    case FastOp::Bgeu: {
-                                        const auto rrs1 = gpr[std::to_underlying(term->rs1)];
-                                        const auto rrs2 = gpr[std::to_underlying(term->rs2)];
-                                        taken = kGuestXlen64 ? (rrs1 >= rrs2)
-                                                             : (static_cast<uint32_t>(rrs1) >=
-                                                                static_cast<uint32_t>(rrs2));
-                                        break;
-                                    }
-                                    case FastOp::Bge: {
-                                        const auto rrs1 = gpr[std::to_underlying(term->rs1)];
-                                        const auto rrs2 = gpr[std::to_underlying(term->rs2)];
-                                        taken = kGuestXlen64 ? (static_cast<int64_t>(rrs1) >=
-                                                                static_cast<int64_t>(rrs2))
-                                                             : (static_cast<int32_t>(rrs1) >=
-                                                                static_cast<int32_t>(rrs2));
-                                        break;
-                                    }
-                                    case FastOp::Bltu: {
-                                        const auto rrs1 = gpr[std::to_underlying(term->rs1)];
-                                        const auto rrs2 = gpr[std::to_underlying(term->rs2)];
-                                        taken = kGuestXlen64 ? (rrs1 < rrs2)
-                                                             : (static_cast<uint32_t>(rrs1) <
-                                                                static_cast<uint32_t>(rrs2));
-                                        break;
-                                    }
-                                    case FastOp::Blt: {
-                                        const auto rrs1 = gpr[std::to_underlying(term->rs1)];
-                                        const auto rrs2 = gpr[std::to_underlying(term->rs2)];
-                                        taken = kGuestXlen64 ? (static_cast<int64_t>(rrs1) <
-                                                                static_cast<int64_t>(rrs2))
-                                                             : (static_cast<int32_t>(rrs1) <
-                                                                static_cast<int32_t>(rrs2));
-                                        break;
-                                    }
-                                    case FastOp::Jal:
-                                        taken = true;
-                                        write_rd(term->rd, cur_bb->fallthrough_pc);
-                                        break;
-                                    case FastOp::Jalr: {
-                                        taken = true;
-                                        const auto rrs1 = gpr[std::to_underlying(term->rs1)];
-                                        auto target_pc = (rrs1 + term->imm) &
-                                                         ~static_cast<simrv::xlen::Register>(1);
-                                        if constexpr (simrv::xlen::kIsXLen64 && !kGuestXlen64) {
-                                            target_pc = static_cast<simrv::xlen::Register>(
-                                                static_cast<int64_t>(
-                                                    static_cast<int32_t>(target_pc)));
+                                if (simrv::compiler::likely(cur_bb->term_op == FastOp::Bne)) {
+                                    taken = (gpr[std::to_underlying(term->rs1)] !=
+                                             gpr[std::to_underlying(term->rs2)]);
+                                } else if (cur_bb->term_op == FastOp::Beq) {
+                                    taken = (gpr[std::to_underlying(term->rs1)] ==
+                                             gpr[std::to_underlying(term->rs2)]);
+                                } else {
+                                    switch (cur_bb->term_op) {
+                                        case FastOp::Bgeu: {
+                                            const auto rrs1 = gpr[std::to_underlying(term->rs1)];
+                                            const auto rrs2 = gpr[std::to_underlying(term->rs2)];
+                                            taken = kGuestXlen64 ? (rrs1 >= rrs2)
+                                                                 : (static_cast<uint32_t>(rrs1) >=
+                                                                    static_cast<uint32_t>(rrs2));
+                                            break;
                                         }
-                                        write_rd(term->rd, cur_bb->fallthrough_pc);
-                                        next_pc = target_pc;
-                                        if (simrv::compiler::likely(
-                                                cur_bb->cached_jalr_target == target_pc &&
-                                                cur_bb->cached_jalr_bb != nullptr &&
-                                                cur_bb->cached_jalr_bb->pc.raw() == target_pc)) {
-                                            next_bb = cur_bb->cached_jalr_bb;
-                                        } else {
-                                            next_bb = block_cache.lookup(next_pc);
-                                            if (simrv::compiler::unlikely(next_bb == nullptr)) {
-                                                next_bb = build_successor(next_pc);
+                                        case FastOp::Bge: {
+                                            const auto rrs1 = gpr[std::to_underlying(term->rs1)];
+                                            const auto rrs2 = gpr[std::to_underlying(term->rs2)];
+                                            taken = kGuestXlen64 ? (static_cast<int64_t>(rrs1) >=
+                                                                    static_cast<int64_t>(rrs2))
+                                                                 : (static_cast<int32_t>(rrs1) >=
+                                                                    static_cast<int32_t>(rrs2));
+                                            break;
+                                        }
+                                        case FastOp::Bltu: {
+                                            const auto rrs1 = gpr[std::to_underlying(term->rs1)];
+                                            const auto rrs2 = gpr[std::to_underlying(term->rs2)];
+                                            taken = kGuestXlen64 ? (rrs1 < rrs2)
+                                                                 : (static_cast<uint32_t>(rrs1) <
+                                                                    static_cast<uint32_t>(rrs2));
+                                            break;
+                                        }
+                                        case FastOp::Blt: {
+                                            const auto rrs1 = gpr[std::to_underlying(term->rs1)];
+                                            const auto rrs2 = gpr[std::to_underlying(term->rs2)];
+                                            taken = kGuestXlen64 ? (static_cast<int64_t>(rrs1) <
+                                                                    static_cast<int64_t>(rrs2))
+                                                                 : (static_cast<int32_t>(rrs1) <
+                                                                    static_cast<int32_t>(rrs2));
+                                            break;
+                                        }
+                                        case FastOp::Jal: {
+                                            taken = true;
+                                            write_rd(term->rd, cur_bb->fallthrough_pc);
+                                            if (term->rd == simrv::xlen::RegId::Ra) {
+                                                if (simrv::compiler::unlikely(
+                                                        cur_bb->fallthrough_bb == nullptr)) {
+                                                    cur_bb->fallthrough_bb =
+                                                        block_cache.lookup(cur_bb->fallthrough_pc);
+                                                }
+                                                if (cur_bb->fallthrough_bb != nullptr) {
+                                                    ras_push(cur_bb->fallthrough_pc,
+                                                             cur_bb->fallthrough_bb);
+                                                }
                                             }
-                                            cur_bb->cached_jalr_target = target_pc;
-                                            cur_bb->cached_jalr_bb = next_bb;
+                                            break;
                                         }
-                                        goto block_branch_done;
+                                        case FastOp::Jalr: {
+                                            taken = true;
+                                            const auto rrs1 = gpr[std::to_underlying(term->rs1)];
+                                            auto target_pc = (rrs1 + term->imm) &
+                                                             ~static_cast<simrv::xlen::Register>(1);
+                                            if constexpr (simrv::xlen::kIsXLen64 && !kGuestXlen64) {
+                                                target_pc = static_cast<simrv::xlen::Register>(
+                                                    static_cast<int64_t>(
+                                                        static_cast<int32_t>(target_pc)));
+                                            }
+                                            write_rd(term->rd, cur_bb->fallthrough_pc);
+                                            next_pc = target_pc;
+                                            if (term->rs1 == simrv::xlen::RegId::Ra &&
+                                                term->rd == simrv::xlen::RegId::Discard) {
+                                                if (auto* ras_bb = ras_peek_match(target_pc);
+                                                    ras_bb != nullptr) {
+                                                    ras_pop();
+                                                    next_bb = ras_bb;
+                                                    goto block_branch_done;
+                                                }
+                                            }
+                                            if (term->rd == simrv::xlen::RegId::Ra) {
+                                                if (simrv::compiler::unlikely(
+                                                        cur_bb->fallthrough_bb == nullptr)) {
+                                                    cur_bb->fallthrough_bb =
+                                                        block_cache.lookup(cur_bb->fallthrough_pc);
+                                                }
+                                                if (cur_bb->fallthrough_bb != nullptr) {
+                                                    ras_push(cur_bb->fallthrough_pc,
+                                                             cur_bb->fallthrough_bb);
+                                                }
+                                            }
+                                            if (simrv::compiler::likely(
+                                                    cur_bb->cached_jalr_target == target_pc &&
+                                                    cur_bb->cached_jalr_bb != nullptr &&
+                                                    cur_bb->cached_jalr_bb->pc.raw() ==
+                                                        target_pc)) {
+                                                next_bb = cur_bb->cached_jalr_bb;
+                                            } else {
+                                                next_bb = block_cache.lookup(next_pc);
+                                                if (simrv::compiler::unlikely(next_bb == nullptr)) {
+                                                    next_bb = build_successor(next_pc);
+                                                }
+                                                cur_bb->cached_jalr_target = target_pc;
+                                                cur_bb->cached_jalr_bb = next_bb;
+                                            }
+                                            goto block_branch_done;
+                                        }
+                                        default:
+                                            break;
                                     }
-                                    default:
-                                        break;
                                 }
 
                                 next_pc = taken ? cur_bb->target_pc : cur_bb->fallthrough_pc;
@@ -1024,8 +1125,8 @@ SIMRV_ALWAYS_INLINE auto CPU::run_fast_baremetal_kernel(Machine& machine, uint32
                                 }
                             }
                         block_branch_done:
-                            compressed_count += cur_bb->num_compressed;
-                            local_b += cur_bb->num_guest_ops;
+                            compressed_count += bb_compressed;
+                            local_b += bb_guest_ops;
                         block_transition:
                             seg_start_pc = next_pc;
                             seg_start_b = local_b;
@@ -1421,6 +1522,9 @@ SIMRV_ALWAYS_INLINE auto CPU::run_fast_baremetal_kernel(Machine& machine, uint32
                                     goto chain_exit;
                                 }
                                 write_rd(chained->rd, link_pc);
+                                if (chained->rd == simrv::xlen::RegId::Ra) {
+                                    ras_push(link_pc, block_cache.lookup(link_pc));
+                                }
                                 const auto action = commit_taken_branch(target_pc);
                                 if (action == BranchAction::ContinueScalar) {
                                     continue;
@@ -1471,6 +1575,14 @@ SIMRV_ALWAYS_INLINE auto CPU::run_fast_baremetal_kernel(Machine& machine, uint32
                                     goto chain_exit;
                                 }
                                 write_rd(chained->rd, link_pc);
+                                if (chained->rs1 == simrv::xlen::RegId::Ra &&
+                                    (chained->rd == simrv::xlen::RegId::Zero ||
+                                     chained->rd == simrv::xlen::RegId::Discard)) {
+                                    ras_pop();
+                                }
+                                if (chained->rd == simrv::xlen::RegId::Ra) {
+                                    ras_push(link_pc, block_cache.lookup(link_pc));
+                                }
                                 const auto action = commit_taken_branch(target_pc);
                                 if (action == BranchAction::ContinueScalar) {
                                     continue;

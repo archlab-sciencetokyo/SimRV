@@ -146,14 +146,15 @@ unavailable. See [strong typing and performance](../development/strong-typing-pe
 for the measurements and their limitations.
 
 The strong-typing migration is also incomplete: some trace records and TUI address entry points
-still use scalar address types. Spike lockstep commit PCs, pipeline-stall trace PCs, trap and SBI
-trace PCs, TUI instruction telemetry PCs, and predicted instruction-explainer PCs use `VirtAddr`.
-The explainer also distinguishes effective virtual addresses from translated physical addresses;
-its register base and offsets remain scalar arithmetic values.
-Its public explanation and disassembly entry points accept virtual PCs.
-Branch prediction feedback, BTB targets, and return-address stack entries also use `VirtAddr`.
-Trace PC filter bounds use `VirtAddr` after command-line parsing; their serialized values are
-unchanged.
+still use scalar address types. The architectural PC, decode and block cache keys, pipeline stage
+records and fetch cursor, branch-trace API, and TUI execution snapshot use `VirtAddr`. Spike
+lockstep commit PCs, pipeline-stall trace PCs, trap and SBI trace PCs, TUI instruction telemetry
+PCs, and predicted instruction-explainer PCs also use `VirtAddr`.
+The explainer distinguishes effective virtual addresses from translated physical addresses; its
+register base and offsets remain scalar arithmetic values. Its public explanation and disassembly
+entry points accept virtual PCs. Branch prediction feedback, BTB targets, and return-address stack
+entries also use `VirtAddr`. Trace PC filter bounds use `VirtAddr` after command-line parsing; their
+serialized values are unchanged.
 Trap descriptors and predicted trap-return states also carry virtual PCs; trap values retain their
 separate cause-dependent representation.
 Breakpoint hits report `location` as either a virtual address or a register type and identifier;

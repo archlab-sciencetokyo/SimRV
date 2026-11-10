@@ -69,6 +69,9 @@ SIMRV_ALWAYS_INLINE auto CPU::run_fast_os_kernel(Machine& machine, uint32_t batc
                         simrv::xlen::satp_translation_enabled(active_satp(), active_xlen);
                     const simrv::xlen::Word current_asid =
                         satp_en ? simrv::xlen::satp_asid(active_satp(), active_xlen) : 0;
+                    const uint32_t asid_priv_tag =
+                        SoftTlbEntry::make_asid_priv_tag(current_asid, eff_priv);
+                    const uint32_t priv_tag = SoftTlbEntry::make_asid_priv_tag(0, eff_priv);
                     const bool fast_m_ram =
                         (state_.priv == kPrivMachine && (state_.mstatus & MstatusBit::Mprv) == 0 &&
                          !state_.has_locked_pmp);
@@ -77,7 +80,7 @@ SIMRV_ALWAYS_INLINE auto CPU::run_fast_os_kernel(Machine& machine, uint32_t batc
                         machine.num_harts() > 1;
                     auto* chained = cached;
                     CachedOp* fallback_op = nullptr;
-                    simrv::xlen::Register next_pc = state_.pc;
+                    simrv::xlen::Register next_pc = state_.pc.raw();
                     uint32_t chain_size = 0;
                     uint32_t compressed_count = 0;
 
@@ -89,7 +92,9 @@ SIMRV_ALWAYS_INLINE auto CPU::run_fast_os_kernel(Machine& machine, uint32_t batc
                         const bool uart_transfer_pending = uart_dev != nullptr &&
                                                            (chunk_cycles + chain_size) >= 4 &&
                                                            uart_dev->has_active_transfer();
-                        if (simrv::compiler::unlikely((chunk_cycles + chain_size) >= 64 ||
+                        const uint32_t sync_threshold = uart_transfer_pending ? 4 : 512;
+                        if (simrv::compiler::unlikely((chunk_cycles + chain_size) >=
+                                                          sync_threshold ||
                                                       uart_transfer_pending)) {
                             cached_ops += chain_size;
                             chunk_cycles += chain_size;
@@ -194,10 +199,10 @@ SIMRV_ALWAYS_INLINE auto CPU::run_fast_os_kernel(Machine& machine, uint32_t batc
                                     const size_t tlb_idx = soft_tlb_index(vpn);
                                     auto& entry = soft_tlb_read[tlb_idx];
                                     const simrv::xlen::Byte* host_ptr = nullptr;
-                                    if (simrv::compiler::likely(entry.matches(vpn, current_asid,
-                                                                              eff_priv,
-                                                                              soft_tlb_epoch) &&
-                                                                entry.has_host_ptr())) {
+                                    if (simrv::compiler::likely(
+                                            entry.matches_fast(vpn, asid_priv_tag, priv_tag,
+                                                               soft_tlb_epoch) &&
+                                            entry.has_host_ptr())) {
                                         host_ptr = entry.host_ptr(lookup_addr);
                                     } else if (TLBEntry* tlb_e = tlb.lookup_data_r(
                                                    simrv::xlen::VirtAddr{lookup_addr}, current_asid,
@@ -455,10 +460,10 @@ SIMRV_ALWAYS_INLINE auto CPU::run_fast_os_kernel(Machine& machine, uint32_t batc
                                     auto& entry = soft_tlb_write[tlb_idx];
                                     simrv::xlen::Byte* host_ptr = nullptr;
                                     simrv::xlen::Address paddr = 0;
-                                    if (simrv::compiler::likely(entry.matches(vpn, current_asid,
-                                                                              eff_priv,
-                                                                              soft_tlb_epoch) &&
-                                                                entry.has_host_ptr())) {
+                                    if (simrv::compiler::likely(
+                                            entry.matches_fast(vpn, asid_priv_tag, priv_tag,
+                                                               soft_tlb_epoch) &&
+                                            entry.has_host_ptr())) {
                                         paddr = (entry.paddr_base + page_offset).raw();
                                         host_ptr = entry.host_ptr(lookup_addr);
                                     } else if (TLBEntry* tlb_e = tlb.lookup_data_w(
@@ -545,8 +550,8 @@ SIMRV_ALWAYS_INLINE auto CPU::run_fast_os_kernel(Machine& machine, uint32_t batc
                                             const simrv::xlen::Address vpn = lookup_addr >> 12;
                                             const auto& entry = soft_tlb_read[soft_tlb_index(vpn)];
                                             if (simrv::compiler::likely(
-                                                    entry.matches(vpn, current_asid, eff_priv,
-                                                                  soft_tlb_epoch) &&
+                                                    entry.matches_fast(vpn, asid_priv_tag, priv_tag,
+                                                                       soft_tlb_epoch) &&
                                                     entry.has_host_ptr())) {
                                                 const simrv::xlen::Word mem_rdata =
                                                     simrv::memory::host_read_fast(
@@ -624,8 +629,8 @@ SIMRV_ALWAYS_INLINE auto CPU::run_fast_os_kernel(Machine& machine, uint32_t batc
                                             const simrv::xlen::Address vpn = lookup_addr >> 12;
                                             const auto& entry = soft_tlb_write[soft_tlb_index(vpn)];
                                             if (simrv::compiler::likely(
-                                                    entry.matches(vpn, current_asid, eff_priv,
-                                                                  soft_tlb_epoch) &&
+                                                    entry.matches_fast(vpn, asid_priv_tag, priv_tag,
+                                                                       soft_tlb_epoch) &&
                                                     entry.has_host_ptr())) {
                                                 const simrv::xlen::Address paddr =
                                                     (entry.paddr_base + page_offset).raw();

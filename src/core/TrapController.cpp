@@ -89,10 +89,11 @@ void restore_trap_interrupt_state(simrv::xlen::CsrValue& mstatus, MstatusBit int
     mstatus |= previous_interrupt_enable;
 }
 
-auto sign_extend_return_pc(const ArchState& state, simrv::xlen::Address pc) noexcept
-    -> simrv::xlen::Register {
+auto sign_extend_return_pc(const ArchState& state, simrv::xlen::VirtAddr pc) noexcept
+    -> simrv::xlen::VirtAddr {
     if (state.regs.xlen == 32) {
-        return static_cast<simrv::xlen::Register>(static_cast<int64_t>(static_cast<int32_t>(pc)));
+        return simrv::xlen::VirtAddr{static_cast<simrv::xlen::Register>(
+            static_cast<int64_t>(static_cast<int32_t>(pc.raw())))};
     }
     return pc;
 }
@@ -289,7 +290,7 @@ void TrapController::sret(ArchState& state) {
     state.virt = ret.target_virtualization;
     state.priv = ret.target_priv;
     state.update_xlen();
-    state.pc = sign_extend_return_pc(state, ret.target_pc.raw());
+    state.pc = sign_extend_return_pc(state, ret.target_pc);
     state.lr_reservation_active = false;
 }
 
@@ -422,8 +423,7 @@ auto TrapController::dispatch_trap(CPU& cpu, const TrapDescriptor& desc) -> Trap
     state.update_xlen();
     state.pc = calculate_trap_target(trap_vector, desc.cause);
     if (state.regs.xlen == 32) {
-        state.pc = static_cast<simrv::xlen::Register>(
-            static_cast<int64_t>(static_cast<int32_t>(state.pc)));
+        state.canonicalize_pc();
     }
 
     if (cpu.machine_ != nullptr) {
@@ -457,7 +457,7 @@ auto TrapController::dispatch_trap(CPU& cpu, const TrapDescriptor& desc) -> Trap
             "[FATAL] Unrecoverable trap loop detected! Origin PC: 0x{:x}, Trap Cause: {} (0x{:x}), "
             "Vector Target: 0x{:x}. (Consecutive traps without retirement: {}). Halting simulator.",
             static_cast<uint64_t>(trap_pc), trap_cause_name(desc.cause),
-            static_cast<uint64_t>(desc.cause), static_cast<uint64_t>(state.pc),
+            static_cast<uint64_t>(desc.cause), static_cast<uint64_t>(state.pc.raw()),
             state.consecutive_traps);
         if (cpu.machine_) {
             if (auto sink = cpu.machine_->telemetry_sink()) {
@@ -497,7 +497,7 @@ void TrapController::raise_exception(CPU& cpu, simrv::xlen::TrapCause cause,
                                      simrv::xlen::CsrValue tval) {
     const TrapDescriptor desc{
         .cause = cause,
-        .origin_pc = simrv::xlen::VirtAddr{cpu.state().pc},
+        .origin_pc = cpu.state().pc,
         .tval = tval,
         .htval = cpu.active_context().pending_htval,
         .htinst = cpu.active_context().pending_htinst,

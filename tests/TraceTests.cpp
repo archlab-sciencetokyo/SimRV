@@ -909,7 +909,7 @@ void test_interrupt_entry_and_return_events() {
 
     simrv::pipeline::PipelineContext return_context{};
     return_context.funct12 = 0x302;
-    return_context.cpc = simrv::xlen::VirtAddr{cpu.state().pc};
+    return_context.cpc = cpu.state().pc;
     cpu.state().pc = cpu.state().mepc;
     machine.trace().log_architecture_retirement(cpu, return_context);
     machine.trace().flush_all();

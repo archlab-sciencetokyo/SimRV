@@ -22,9 +22,9 @@ namespace simrv::core {
 using isa::Funct3;
 
 SIMRV_ALWAYS_INLINE void CPU::execute_cached_jal(CachedOp& op) {
-    simrv::xlen::Register const next_pc = state_.pc + op.len();
+    simrv::xlen::Register const next_pc = state_.pc.raw() + op.len();
     pipeline_context.tkn = true;
-    pipeline_context.jmp_pc = simrv::xlen::VirtAddr{state_.pc + op.imm};
+    pipeline_context.jmp_pc = state_.pc + op.imm;
     if (state_.regs.xlen == 32) {
         pipeline_context.jmp_pc = simrv::xlen::VirtAddr{static_cast<simrv::xlen::Register>(
             static_cast<int64_t>(static_cast<int32_t>(pipeline_context.jmp_pc.raw())))};
@@ -38,7 +38,7 @@ SIMRV_ALWAYS_INLINE void CPU::execute_cached_jal(CachedOp& op) {
 }
 
 SIMRV_ALWAYS_INLINE void CPU::execute_cached_jalr(CachedOp& op, simrv::xlen::Register rrs1) {
-    simrv::xlen::Register const next_pc = state_.pc + op.len();
+    simrv::xlen::Register const next_pc = state_.pc.raw() + op.len();
     pipeline_context.tkn = true;
     pipeline_context.jmp_pc =
         simrv::xlen::VirtAddr{(rrs1 + op.imm) & ~static_cast<simrv::xlen::Register>(1)};
@@ -111,8 +111,7 @@ SIMRV_ALWAYS_INLINE void CPU::execute_cached_branch(CachedOp& op, simrv::xlen::R
             tkn = rrs1 >= rrs2;
         }
     }
-    simrv::xlen::VirtAddr target_pc = tkn ? simrv::xlen::VirtAddr{state_.pc + op.imm}
-                                          : simrv::xlen::VirtAddr{state_.pc + op.len()};
+    simrv::xlen::VirtAddr target_pc = tkn ? state_.pc + op.imm : state_.pc + op.len();
     if (state_.regs.xlen == 32) {
         target_pc = simrv::xlen::VirtAddr{static_cast<simrv::xlen::Register>(
             static_cast<int64_t>(static_cast<int32_t>(target_pc.raw())))};

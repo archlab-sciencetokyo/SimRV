@@ -897,7 +897,7 @@ auto explain_at_pc(const simrv::core::Machine& machine, size_t hart_index,
     }
     const auto& cpu = machine.hart(hart_index);
     const auto& st = cpu.state();
-    const simrv::xlen::VirtAddr target_pc = override_pc.value_or(simrv::xlen::VirtAddr{st.pc});
+    const simrv::xlen::VirtAddr target_pc = override_pc.value_or(st.pc);
     if (target_pc == 0) {
         return std::nullopt;
     }

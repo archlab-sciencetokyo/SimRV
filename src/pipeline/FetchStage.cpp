@@ -64,7 +64,7 @@ void release_instruction_eviction(Machine& machine, CPU& cpu) {
     const simrv::xlen::Word alignment_mask = has_c ? 1u : 3u;
     if ((state.pc & alignment_mask) != 0) {
         ctx.pending_exception = ExceptionCode::MisalignedFetch;
-        ctx.pending_tval = state.pc;
+        ctx.pending_tval = state.pc.raw();
         ctx.ir = isa::kNop32;
         ctx.op_id = isa::ILLEGAL;
         return false;
@@ -136,8 +136,8 @@ void CPU::fetch_address_translate(Machine& machine) {
     auto& ctx = active_context();
     simrv::xlen::Word w_padr1 = simrv::xlen::kWordAllOnes;
     simrv::xlen::Word w_padr2 = simrv::xlen::kWordAllOnes;
-    simrv::xlen::Word const w_vadr1 = state_.pc;
-    simrv::xlen::Word const w_vadr2 = state_.pc + 2;
+    simrv::xlen::Word const w_vadr1 = state_.pc.raw();
+    simrv::xlen::Word const w_vadr2 = w_vadr1 + 2;
 
     ctx.cpc = state_.pc;
 
@@ -214,7 +214,7 @@ void CPU::fetch_resolve_page_walk(Machine& machine, int state) {
 
     simrv::xlen::PhysAddr w_padr = (state == 1) ? ctx.padr1 : ctx.padr2;
     simrv::xlen::PhysAddr* r_padr = (state == 1) ? &ctx.padr1 : &ctx.padr2;
-    simrv::xlen::Word const w_vadr = (state == 1) ? state_.pc : state_.pc + 2;
+    simrv::xlen::Word const w_vadr = state_.pc.raw() + (state == 1 ? 0 : 2);
     if constexpr (simrv::xlen::kIsXLen64) {
         if (simrv::compiler::unlikely(
                 !simrv::Mmu::is_canonical(w_vadr, active_satp(), state_.regs.xlen))) {
@@ -463,7 +463,7 @@ void CPU::fetch_read_instruction_word(Machine& machine) {
                     fill.request_pending = false;
                     if (timed.payload.failed() || !timed.has_line_data) {
                         ctx.pending_exception = ExceptionCode::FaultFetch;
-                        ctx.pending_tval = state_.pc;
+                        ctx.pending_tval = state_.pc.raw();
                         fill.reset();
                         return;
                     }
@@ -495,7 +495,7 @@ void CPU::fetch_read_instruction_word(Machine& machine) {
                 if (!machine.memory_.system_bus().send_request(req)) {
                     ca_state.waiting_for_interconnect = false;
                     ctx.pending_exception = ExceptionCode::FaultFetch;
-                    ctx.pending_tval = state_.pc;
+                    ctx.pending_tval = state_.pc.raw();
                     fill.reset();
                     return;
                 }
@@ -517,7 +517,7 @@ void CPU::fetch_read_instruction_word(Machine& machine) {
             if (!machine.memory_.system_bus().acquire_block(req, resp, line_data) ||
                 resp.failed()) {
                 ctx.pending_exception = ExceptionCode::FaultFetch;
-                ctx.pending_tval = state_.pc;
+                ctx.pending_tval = state_.pc.raw();
                 return;
             }
             icache.insert(line_base, line_data.data(), simrv::memory::mesi_for(resp.cap));
@@ -534,7 +534,7 @@ void CPU::fetch_read_instruction_word(Machine& machine) {
         }
 
         auto fetch_halfword = [&](simrv::xlen::PhysAddr paddr,
-                                  simrv::xlen::Address vaddr) -> std::optional<uint16_t> {
+                                  simrv::xlen::VirtAddr vaddr) -> std::optional<uint16_t> {
             uint16_t h_data = 0;
             const simrv::xlen::PhysAddr h_line_base =
                 paddr & ~(static_cast<simrv::xlen::Address>(simrv::cache::ICache::kLineBytes - 1u));
@@ -574,7 +574,7 @@ void CPU::fetch_read_instruction_word(Machine& machine) {
                     fill.request_pending = false;
                     if (timed.payload.failed() || !timed.has_line_data) {
                         ctx.pending_exception = ExceptionCode::FaultFetch;
-                        ctx.pending_tval = vaddr;
+                        ctx.pending_tval = vaddr.raw();
                         fill.reset();
                         return std::nullopt;
                     }
@@ -601,7 +601,7 @@ void CPU::fetch_read_instruction_word(Machine& machine) {
                 if (!machine.memory_.system_bus().send_request(req)) {
                     ca_state.waiting_for_interconnect = false;
                     ctx.pending_exception = ExceptionCode::FaultFetch;
-                    ctx.pending_tval = vaddr;
+                    ctx.pending_tval = vaddr.raw();
                     fill.reset();
                     return std::nullopt;
                 }
@@ -622,7 +622,7 @@ void CPU::fetch_read_instruction_word(Machine& machine) {
             if (!machine.memory_.system_bus().acquire_block(req, resp, line_data) ||
                 resp.failed()) {
                 ctx.pending_exception = ExceptionCode::FaultFetch;
-                ctx.pending_tval = vaddr;
+                ctx.pending_tval = vaddr.raw();
                 return std::nullopt;
             }
             icache.insert(h_line_base, line_data.data(), simrv::memory::mesi_for(resp.cap));
@@ -660,13 +660,13 @@ void CPU::fetch_read_instruction_word(Machine& machine) {
         if (!machine.memory_.system_bus().send_request(req_l)) {
             ca_state.waiting_for_interconnect = false;
             ctx.pending_exception = ExceptionCode::FaultFetch;
-            ctx.pending_tval = state_.pc;
+            ctx.pending_tval = state_.pc.raw();
             return;
         }
         simrv::memory::TlChannelD resp_l{};
         if (!machine.memory_.system_bus().get_response(req_l.source, resp_l) || resp_l.failed()) {
             ctx.pending_exception = ExceptionCode::FaultFetch;
-            ctx.pending_tval = state_.pc;
+            ctx.pending_tval = state_.pc.raw();
             return;
         }
         ir_l = resp_l.data;
@@ -691,14 +691,14 @@ void CPU::fetch_read_instruction_word(Machine& machine) {
                 if (!machine.memory_.system_bus().send_request(req_h)) {
                     ca_state.waiting_for_interconnect = false;
                     ctx.pending_exception = ExceptionCode::FaultFetch;
-                    ctx.pending_tval = state_.pc + 2;
+                    ctx.pending_tval = (state_.pc + 2).raw();
                     return;
                 }
                 simrv::memory::TlChannelD resp_h{};
                 if (!machine.memory_.system_bus().get_response(req_h.source, resp_h) ||
                     resp_h.failed()) {
                     ctx.pending_exception = ExceptionCode::FaultFetch;
-                    ctx.pending_tval = state_.pc + 2;
+                    ctx.pending_tval = (state_.pc + 2).raw();
                     return;
                 }
                 ir_h = resp_h.data;
@@ -723,7 +723,7 @@ void CPU::decode_and_normalize_instruction(Machine& machine) {
             state_, ctx.padr1, sizeof(uint16_t),
             core::PmpAccessType::Execute, state_.priv))) {
         ctx.pending_exception = ExceptionCode::FaultFetch;
-        ctx.pending_tval = state_.pc;
+        ctx.pending_tval = state_.pc.raw();
         ctx.ir = isa::kNop32;
         return;
     }
@@ -733,7 +733,7 @@ void CPU::decode_and_normalize_instruction(Machine& machine) {
                                      sizeof(uint16_t), core::PmpAccessType::Execute,
                                      state_.priv))) {
         ctx.pending_exception = ExceptionCode::FaultFetch;
-        ctx.pending_tval = state_.pc;
+        ctx.pending_tval = state_.pc.raw();
         ctx.ir = isa::kNop32;
         return;
     }
@@ -765,7 +765,7 @@ void CPU::decode_and_normalize_instruction(Machine& machine) {
     }
     if (simrv::compiler::unlikely(op_id == isa::ILLEGAL)) {
         if (!machine.tui_enabled()) {
-            simrv::log::debug("[DECODER] Illegal instruction: PC=0x{:x}, HEX=0x{:x}", state_.pc,
+                    simrv::log::debug("[DECODER] Illegal instruction: PC=0x{:x}, HEX=0x{:x}", state_.pc.raw(),
                               w_ir_tmp);
         }
         is_valid = false;
@@ -810,7 +810,7 @@ void CPU::decode_and_normalize_instruction(Machine& machine) {
         if (is_vector) {
             if (simrv::compiler::unlikely(!state_.extension_state_enabled(MstatusBit::Vs))) {
                 if (!machine.tui_enabled()) {
-                    simrv::log::debug("[DECODER] Vector state disabled at PC=0x{:x}", state_.pc);
+                    simrv::log::debug("[DECODER] Vector state disabled at PC=0x{:x}", state_.pc.raw());
                 }
                 is_valid = false;
             }
@@ -854,10 +854,15 @@ void CPU::run_fetch_stage_baremetal(Machine& machine) {
     if (!check_fetch_alignment(state_, ctx)) return;
     ctx.cpc = state_.pc;
 
-    ctx.padr1 = simrv::xlen::PhysAddr{static_cast<simrv::xlen::Word>(
-        (state_.regs.xlen == 32) ? (state_.pc & 0xFFFFFFFFULL) : state_.pc)};
-    ctx.padr2 = simrv::xlen::PhysAddr{static_cast<simrv::xlen::Word>(
-        (state_.regs.xlen == 32) ? ((state_.pc + 2) & 0xFFFFFFFFULL) : (state_.pc + 2))};
+    if constexpr (simrv::xlen::kIsXLen64) {
+        const simrv::xlen::Word address_mask =
+            state_.regs.xlen == 32 ? 0xFFFFFFFFULL : simrv::xlen::kWordAllOnes;
+        ctx.padr1 = simrv::xlen::PhysAddr{state_.pc.raw() & address_mask};
+        ctx.padr2 = simrv::xlen::PhysAddr{(state_.pc + 2).raw() & address_mask};
+    } else {
+        ctx.padr1 = simrv::xlen::PhysAddr{state_.pc.raw()};
+        ctx.padr2 = simrv::xlen::PhysAddr{(state_.pc + 2).raw()};
+    }
 
     // Fast path: DRAM physical fetch - valid only while the MMU has never been
     // enabled.  The latch is set once on the first satp write that activates
@@ -874,7 +879,7 @@ void CPU::run_fetch_stage_baremetal(Machine& machine) {
             if (simrv::compiler::unlikely(
                     !machine.memory_geometry().contains(ctx.padr2, sizeof(uint16_t)))) {
                 ctx.pending_exception = ExceptionCode::FaultFetch;
-                ctx.pending_tval = state_.pc + 2;
+                ctx.pending_tval = (state_.pc + 2).raw();
                 ctx.ir = isa::kNop32;
                 ctx.op_id = isa::ILLEGAL;
                 return;

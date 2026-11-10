@@ -364,10 +364,10 @@ auto BreakpointManager::check_reg_changes(const simrv::core::ArchState& state,
                 if (prev_state.pc != state.pc) {
                     return BreakpointHit{
                         .reason = BreakpointHit::Reason::Watchpoint,
-                        .location = simrv::xlen::VirtAddr{state.pc},
+                        .location = state.pc,
                         .description = std::format(
                             "Register Watchpoint hit: PC changed from 0x{:08x} to 0x{:08x}",
-                            prev_state.pc, state.pc)};
+                            prev_state.pc.raw(), state.pc.raw())};
                 }
                 break;
             }

@@ -313,7 +313,7 @@ auto InspectorPane::get_explain_rows(int width) -> std::vector<std::string> {
     auto& st = cpu.state();
 
     const simrv::xlen::VirtAddr target_pc =
-        (explain_pc_ != 0) ? explain_pc_ : simrv::xlen::VirtAddr{st.pc};
+        (explain_pc_ != 0) ? explain_pc_ : st.pc;
 
     auto hex_addr = [](simrv::xlen::VirtAddr address) -> std::string {
         const auto v = address.raw();

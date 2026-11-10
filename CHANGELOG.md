@@ -5,20 +5,10 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+- Improve bare-metal execution performance and throughput reporting.
 - Add host hardware cache topology discovery and adaptive simulation tuning diagnostics in `simrv doctor`.
-- Expand basic block coalescing capacity from 16 to 32 instructions to capture complete inner loop bodies in single blocks.
-- Unify basic block compact op execution into a single direct jump table to eliminate nested secondary switch overheads.
-- Specialize and hoist invariant branch exit conditions in tight self-loop kernels.
-- Accelerate bare-metal fallback execution dispatch with lock-free UART transfer state and cached floating-point environment updates.
-- Eliminate redundant companion symbol probing regressions during ELF loading and initialization.
-- Anchor simulation wall-clock start time immediately prior to execution to exclude host loading and terminal setup latency.
-- Use guest virtual addresses for C++ symbol lookups and ELF entry-point results.
-- Use guest virtual addresses for C++ Spike lockstep program counters.
-- Use guest virtual addresses for C++ pipeline-stall trace program counters.
-- Use guest virtual addresses for C++ instruction telemetry program counters.
-- Use guest virtual addresses for C++ trap and SBI trace program counters.
-- Use guest virtual addresses for C++ trap-origin and trap-return program counters.
-- Use guest virtual addresses for C++ trace PC filter bounds.
+- Reduce ELF loading and initialization overhead.
+- Use explicit virtual-address types across C++ execution, tracing, debugging, and symbol APIs.
 - Distinguish virtual addresses from register locations in C++ breakpoint-hit results.
 - Fix misaligned branch and jump exceptions in bare-metal fast execution when compressed instructions are disabled.
 - Fix missing UART line interrupts when the receive FIFO overruns.

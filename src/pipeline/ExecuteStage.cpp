@@ -183,14 +183,15 @@ void CPU::execute_system(Machine& machine) {
                 break;
             case Funct12Priv::Ebreak: {
                 bool semihost_handled = false;
-                const bool in_dram = machine.memory_geometry().contains(state_.pc - 4) &&
-                                     machine.memory_geometry().contains(state_.pc + 4);
+                const simrv::xlen::PhysAddr pc_paddr{state_.pc.raw()};
+                const bool in_dram = machine.memory_geometry().contains(pc_paddr - 4) &&
+                                     machine.memory_geometry().contains(pc_paddr + 4);
                 if (in_dram) {
                     const simrv::xlen::Word inst_prev = simrv::memory::ram_read_fast(
-                        state_.pc - 4, static_cast<simrv::xlen::Instruction>(Funct3::Lw),
+                        pc_paddr - 4, static_cast<simrv::xlen::Instruction>(Funct3::Lw),
                         machine.ram_view());
                     const simrv::xlen::Word inst_next = simrv::memory::ram_read_fast(
-                        state_.pc + 4, static_cast<simrv::xlen::Instruction>(Funct3::Lw),
+                        pc_paddr + 4, static_cast<simrv::xlen::Instruction>(Funct3::Lw),
                         machine.ram_view());
                     if (inst_prev == 0x01f01013 && inst_next == 0x40705013) {
                         semihost_handled = true;
@@ -269,7 +270,7 @@ void CPU::execute_system(Machine& machine) {
                         }
 
                         ctx.tkn = true;
-                        ctx.jmp_pc = simrv::xlen::VirtAddr{state_.pc + 8};
+                        ctx.jmp_pc = state_.pc + 8;
                     }
                 }
 

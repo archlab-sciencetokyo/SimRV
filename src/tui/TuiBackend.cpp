@@ -121,7 +121,7 @@ void LocalTuiBackend::execute(core::Machine& machine, BackendRequest request,
                     break;
                 case BackendCommand::Registers: {
                     const auto& state = machine.hart(request.hart).state();
-                    reply.text = std::format("hart {} PC {:016x}\n", request.hart, state.pc);
+                    reply.text = std::format("hart {} PC {:016x}\n", request.hart, state.pc.raw());
                     for (int r = 0; r < 32; ++r)
                         reply.text += std::format(
                             "x{:<2} {:016x}   f{:<2} {:016x}\n", r,

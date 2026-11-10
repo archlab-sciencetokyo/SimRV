@@ -266,7 +266,7 @@ void append_retirement_record(RetirementRecordBuilder& record, const CPU& cpu,
     record.append("\",\"operation\":\"");
     record.append(pipeline::operation_name(context.op_id));
     record.append("\",\"next_pc\":\"0x");
-    record.append_hex(static_cast<uint64_t>(state.pc));
+    record.append_hex(static_cast<uint64_t>(state.pc.raw()));
     record.append("\",\"privilege\":");
     record.append_decimal(std::to_underlying(state.priv));
     record.push_back('}');
@@ -794,7 +794,7 @@ void Tracer::log_architectural_trap_entry(const CPU& cpu, simrv::xlen::TrapCause
     const auto depth =
         std::ranges::count_if(frames, [](const TrapTraceFrame& frame) { return frame.interrupt; });
     if (!accepts_trace_event("interrupt_entry", cycle, static_cast<uint32_t>(hart),
-                             simrv::xlen::VirtAddr{state.pc}))
+                             state.pc))
         return;
     std::println(fp_interrupts,
                  "{{\"schema_version\":2,\"event\":\"interrupt_entry\","
@@ -806,8 +806,7 @@ void Tracer::log_architectural_trap_entry(const CPU& cpu, simrv::xlen::TrapCause
                  "\"tval\":\"0x{:x}\","
                  "\"source_mode\":\"{}\",\"nesting_depth\":{}}}}}",
                  trace_timestamp(), cpu.clint_mmio.mcycle, static_cast<unsigned>(state.mhartid),
-                 static_cast<uint64_t>(state.pc),
-                 event_function_field(machine_, simrv::xlen::VirtAddr{state.pc}),
+                 static_cast<uint64_t>(state.pc.raw()), event_function_field(machine_, state.pc),
                  privilege_mode(state.priv), static_cast<uint64_t>(trap_exception_code(cause)),
                  static_cast<uint64_t>(cause), trap_cause_name(cause),
                  state.priv == simrv::xlen::PrivilegeLevel::Supervisor ? "scause" : "mcause",
@@ -1394,7 +1393,8 @@ void Tracer::log_architecture_retirement(const CPU& cpu,
                     event_function_field(machine_, retiring_context.cpc),
                     privilege_mode(state.priv),
                     static_cast<uint64_t>(trap_exception_code(frame.cause)),
-                    static_cast<uint64_t>(frame.epc.raw()), static_cast<uint64_t>(state.pc), depth);
+                    static_cast<uint64_t>(frame.epc.raw()),
+                    static_cast<uint64_t>(state.pc.raw()), depth);
             }
         }
     }
@@ -1845,7 +1845,7 @@ void Tracer::print_summary() {
                         bar, format_with_commas(ccount)));
     }
     row(std::format("  {:<22}: {}0x{:016x}{}", "Final Primary PC", c_yellow,
-                    machine_.primary_hart().state().pc, c_reset));
+                    machine_.primary_hart().state().pc.raw(), c_reset));
     row(std::format("  {:<22}: {}", "Host Wall Time", format_duration_adaptive(etime)));
 
     machine_.sample_throughput();
@@ -1871,7 +1871,8 @@ void Tracer::print_summary() {
                                              : (static_cast<double>(h.e_icount) * 100.0) /
                                                    static_cast<double>(icount);
             row(std::format("  Hart {:<2} [{}-mode]  PC: {}0x{:016x}{}  {:>10} insns ({:4.1f}%)", i,
-                            priv_str, c_yellow, h.state().pc, c_reset, format_scaled(h.e_icount),
+                            priv_str, c_yellow, h.state().pc.raw(), c_reset,
+                            format_scaled(h.e_icount),
                             share));
         }
     }
@@ -1966,7 +1967,7 @@ auto Tracer::write_summary_json(const std::string& path) -> bool {
         compressed += machine_.hart(hart).e_ccount;
     }
     const auto cycles = machine_.primary_hart().clint_mmio.mcycle;
-    const auto pc = machine_.primary_hart().state().pc;
+    const auto pc = machine_.primary_hart().state().pc.raw();
     const auto& cpu = machine_.primary_hart();
     const auto& bp = cpu.branch_predictor.stats();
     const auto& bus = machine_.memory().system_bus();
@@ -2012,7 +2013,8 @@ auto Tracer::write_summary_json(const std::string& path) -> bool {
         const auto& cpu = machine_.hart(hart);
         const auto& hart_bp = cpu.branch_predictor.stats();
         out << "    {\"hart\": " << hart << ", \"retired_instructions\": " << cpu.e_icount
-            << ", \"compressed_instructions\": " << cpu.e_ccount << ", \"pc\": " << cpu.state().pc
+            << ", \"compressed_instructions\": " << cpu.e_ccount << ", \"pc\": "
+            << cpu.state().pc.raw()
             << ", \"cycles\": " << cpu.clint_mmio.mcycle
             << ", \"performance\": {\"icache_hits\": " << cpu.icache.hit_count()
             << ", \"icache_misses\": " << cpu.icache.miss_count()
@@ -2065,7 +2067,7 @@ void Tracer::write_trace_snapshot() {
                  static_cast<simrv::xlen::Counter>(cpu.clint_mmio.mtime),
                  static_cast<unsigned>(st.mhartid), static_cast<uint64_t>(context.cpc.raw()),
                  D_TRACE_HEX_WIDTH, static_cast<uint32_t>(context.ir), operation,
-                 static_cast<uint64_t>(st.pc), D_TRACE_HEX_WIDTH);
+                 static_cast<uint64_t>(st.pc.raw()), D_TRACE_HEX_WIDTH);
     for (unsigned row = 0; row < 8; ++row) {
         std::print(fp_trace, "  ");
         for (unsigned column = 0; column < 4; ++column) {

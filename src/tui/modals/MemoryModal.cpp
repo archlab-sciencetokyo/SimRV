@@ -221,7 +221,7 @@ auto MemoryModal::submit_input(
             addr = machine.primary_hart().state().regs.read(simrv::xlen::RegId::Sp);
             ok = true;
         } else if (input == "pc" || input == "PC") {
-            addr = machine.primary_hart().state().pc;
+            addr = machine.primary_hart().state().pc.raw();
             ok = true;
         } else if (input.starts_with("0x") || input.starts_with("0X")) {
             auto result = std::from_chars(input.data() + 2, input.data() + input.size(), addr, 16);
