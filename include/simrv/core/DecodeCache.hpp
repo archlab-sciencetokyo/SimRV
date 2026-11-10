@@ -769,6 +769,11 @@ class DecodeCache {
         return nullptr;
     }
 
+    [[nodiscard]] SIMRV_ALWAYS_INLINE auto lookup_aligned(simrv::xlen::VirtAddr pc) noexcept
+        -> CachedOp* {
+        return lookup_aligned(pc.raw());
+    }
+
     /**
      * @brief Look up the sequential successor using the predecessor's precomputed set index.
      * @param predecessor Cached operation whose successor index was recorded on insertion.

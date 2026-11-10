@@ -8,7 +8,7 @@ namespace simrv::core {
 
 auto BlockCache::build_block(simrv::xlen::VirtAddr pc, DecodeCache& decode_cache) noexcept
     -> BasicBlock* {
-    auto* head_op = decode_cache.lookup_aligned(pc.raw());
+    auto* head_op = decode_cache.lookup_aligned(pc);
     if (simrv::compiler::unlikely(head_op == nullptr)) {
         return nullptr;
     }
