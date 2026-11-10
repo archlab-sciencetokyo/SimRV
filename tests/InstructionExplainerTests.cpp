@@ -26,6 +26,8 @@ static_assert(std::same_as<decltype(simrv::explain::ControlDataflow::target_pc),
 static_assert(std::same_as<decltype(simrv::explain::ControlDataflow::fallthrough_pc), simrv::xlen::VirtAddr>);
 static_assert(std::same_as<decltype(simrv::explain::ControlDataflow::link_pc), simrv::xlen::VirtAddr>);
 static_assert(std::same_as<decltype(simrv::explain::PredictedStateEffect::next_pc), simrv::xlen::VirtAddr>);
+static_assert(std::same_as<decltype(simrv::explain::MemoryDataflow::effective_vaddr), simrv::xlen::VirtAddr>);
+static_assert(std::same_as<decltype(simrv::explain::MemoryDataflow::effective_paddr), std::optional<simrv::xlen::PhysAddr>>);
 
 inline void expect(bool condition, std::string_view message,
                    std::source_location loc = std::source_location::current()) {
@@ -215,6 +217,8 @@ void test_state_grounded_memory_and_csr() {
     expect(lw_expl.has_value(), "explain_at_pc succeeds for mapped DRAM instruction");
     expect(lw_expl->memory.has_value(), "LW populates MemoryDataflow");
     expect(lw_expl->memory->effective_vaddr == pc + 0x100, "LW effective_vaddr is base + 16");
+    expect(lw_expl->memory->effective_paddr == simrv::xlen::PhysAddr{pc + 0x100},
+           "LW physical address uses the untranslated machine-mode address");
     expect(lw_expl->memory->is_aligned, "LW at +0x100 is 4-byte aligned");
     expect(lw_expl->memory->pmp_permitted, "LW is permitted by default PMP");
     expect(lw_expl->memory->memory_preview_value.has_value() &&

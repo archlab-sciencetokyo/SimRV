@@ -370,21 +370,24 @@ auto build_microarch_profile(OperationId op_id) -> MicroarchProfile {
 }
 
 auto translate_for_inspection(const simrv::core::ArchState& st, const simrv::core::CPU* cpu,
-                              simrv::xlen::Address vaddr, bool is_fetch, bool is_write)
-    -> std::optional<simrv::xlen::Address> {
+                              simrv::xlen::VirtAddr vaddr, bool is_fetch, bool is_write)
+    -> std::optional<simrv::xlen::PhysAddr> {
     const auto active_xlen = st.current_xlen();
     if (st.priv == simrv::xlen::PrivilegeLevel::Machine ||
         !simrv::xlen::satp_translation_enabled(st.satp, active_xlen)) {
-        return active_xlen == 32 ? (vaddr & 0xFFFFFFFFULL) : vaddr;
+        if constexpr (sizeof(simrv::xlen::Word) > sizeof(uint32_t)) {
+            if (active_xlen == 32) vaddr &= 0xFFFFFFFFULL;
+        }
+        return simrv::xlen::PhysAddr{vaddr.raw()};
     }
     if (cpu == nullptr) return std::nullopt;
     const simrv::xlen::Word asid = simrv::xlen::satp_asid(st.satp, active_xlen);
     const simrv::core::TLBEntry* entry =
-        is_fetch ? cpu->tlb.peek_inst_r(simrv::xlen::VirtAddr{vaddr}, asid, st.priv)
-                 : (is_write ? cpu->tlb.peek_data_w(simrv::xlen::VirtAddr{vaddr}, asid, st.priv)
-                             : cpu->tlb.peek_data_r(simrv::xlen::VirtAddr{vaddr}, asid, st.priv));
+        is_fetch ? cpu->tlb.peek_inst_r(vaddr, asid, st.priv)
+                 : (is_write ? cpu->tlb.peek_data_w(vaddr, asid, st.priv)
+                             : cpu->tlb.peek_data_r(vaddr, asid, st.priv));
     if (entry == nullptr) return std::nullopt;
-    return (entry->p_addr | (vaddr & simrv::memory::kPageMask)).raw();
+    return entry->p_addr | (vaddr.raw() & simrv::memory::kPageMask);
 }
 
 auto get_abi_reg_name(simrv::xlen::RegId reg, simrv::pipeline::operation::RegBank bank)
@@ -570,7 +573,7 @@ auto build_explanation_impl(uint32_t raw_inst, simrv::xlen::Address pc, unsigned
                                      simrv::isa::is_hypervisor_memory_op(expl.op_id) ||
                                      simrv::isa::is_cmo_op(expl.op_id);
         mem.offset = zero_offset_mem ? 0 : expl.imm;
-        mem.effective_vaddr = mem.base_address + static_cast<simrv::xlen::Address>(mem.offset);
+        mem.effective_vaddr = simrv::xlen::VirtAddr{mem.base_address + static_cast<simrv::xlen::Address>(mem.offset)};
         if (active_xlen == 32) {
             mem.effective_vaddr &= 0xFFFFFFFFULL;
         }
@@ -590,11 +593,11 @@ auto build_explanation_impl(uint32_t raw_inst, simrv::xlen::Address pc, unsigned
             const auto pmp_access =
                 is_write ? simrv::core::PmpAccessType::Write : simrv::core::PmpAccessType::Read;
             mem.pmp_permitted = simrv::core::pmp::check_access(
-                *st, simrv::xlen::PhysAddr{*mem.effective_paddr}, mem.access_bytes, pmp_access);
+                *st, *mem.effective_paddr, mem.access_bytes, pmp_access);
             if (mem.pmp_permitted && machine != nullptr && mem.access_bytes <= 8U &&
-                machine->ram_view().contains(*mem.effective_paddr, mem.access_bytes)) {
+                machine->ram_view().contains(mem.effective_paddr->raw(), mem.access_bytes)) {
                 uint64_t raw_mem = 0;
-                std::memcpy(&raw_mem, machine->ram_view().unchecked_ptr(*mem.effective_paddr),
+                std::memcpy(&raw_mem, machine->ram_view().unchecked_ptr(mem.effective_paddr->raw()),
                             mem.access_bytes);
                 mem.memory_preview_value = raw_mem;
             }
@@ -785,13 +788,13 @@ auto build_explanation_impl(uint32_t raw_inst, simrv::xlen::Address pc, unsigned
                               ? simrv::isa::ExceptionCode::FaultLoad
                               : simrv::isa::ExceptionCode::FaultStore;
         expl.predicted_effect.predicted_trap = simrv::isa::to_trap_cause(code);
-        expl.predicted_effect.predicted_tval = expl.memory->effective_vaddr;
+        expl.predicted_effect.predicted_tval = expl.memory->effective_vaddr.raw();
     } else if (expl.memory.has_value() && !expl.memory->pmp_permitted) {
         const auto code = (expl.memory->kind == MemoryAccessKind::Load)
                               ? simrv::isa::ExceptionCode::FaultLoad
                               : simrv::isa::ExceptionCode::FaultStore;
         expl.predicted_effect.predicted_trap = simrv::isa::to_trap_cause(code);
-        expl.predicted_effect.predicted_tval = expl.memory->effective_vaddr;
+        expl.predicted_effect.predicted_tval = expl.memory->effective_vaddr.raw();
     }
 
     if (!expl.predicted_effect.predicted_trap.has_value() && rdb == RegBank::Integer) {
@@ -899,20 +902,20 @@ auto explain_at_pc(const simrv::core::Machine& machine, size_t hart_index,
         return std::nullopt;
     }
 
-    auto read_halfword = [&](simrv::xlen::Address vaddr) -> std::optional<uint16_t> {
+    auto read_halfword = [&](simrv::xlen::VirtAddr vaddr) -> std::optional<uint16_t> {
         const auto paddr = translate_for_inspection(st, &cpu, vaddr, true, false);
         if (!paddr.has_value()) {
             return std::nullopt;
         }
-        if (!simrv::core::pmp::check_access(st, simrv::xlen::PhysAddr{*paddr}, sizeof(uint16_t),
+        if (!simrv::core::pmp::check_access(st, *paddr, sizeof(uint16_t),
                                             simrv::core::PmpAccessType::Execute)) {
             return std::nullopt;
         }
-        if (!machine.ram_view().contains(*paddr, sizeof(uint16_t))) {
+        if (!machine.ram_view().contains(paddr->raw(), sizeof(uint16_t))) {
             return std::nullopt;
         }
         uint16_t value = 0;
-        std::memcpy(&value, machine.ram_view().unchecked_ptr(*paddr), sizeof(value));
+        std::memcpy(&value, machine.ram_view().unchecked_ptr(paddr->raw()), sizeof(value));
         return value;
     };
 

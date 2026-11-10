@@ -107,8 +107,8 @@ struct OperandState {
 struct MemoryDataflow {
     simrv::xlen::Address base_address{0};
     simrv::xlen::ImmValue offset{0};
-    simrv::xlen::Address effective_vaddr{0};
-    std::optional<simrv::xlen::Address> effective_paddr;
+    simrv::xlen::VirtAddr effective_vaddr{};
+    std::optional<simrv::xlen::PhysAddr> effective_paddr;
     unsigned access_bytes = 0;
     simrv::pipeline::operation::MemoryAccessKind kind{
         simrv::pipeline::operation::MemoryAccessKind::None};

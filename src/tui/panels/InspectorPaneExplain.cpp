@@ -189,14 +189,14 @@ auto render_dataflow_breakdown(const InstructionExplanation& expl, int width)
         const auto& mem = *expl.memory;
         rows.push_back(
             format_to_width(std::format("  {}Effective Addr: {}0x{:0{}x}\033[0m = {} + {}",
-                                        kThemeText, kThemeSky, mem.effective_vaddr,
+                                        kThemeText, kThemeSky, mem.effective_vaddr.raw(),
                                         simrv::xlen::kXLenHexDigits, expl.rs1.name, mem.offset),
                             width));
         if (mem.effective_paddr.has_value()) {
             rows.push_back(format_to_width(
                 std::format(
                     "  {}Phys Address  : {}0x{:0{}x}\033[0m ({}-byte, {}, PMP: {})", kThemeText,
-                    kThemeVal, *mem.effective_paddr, simrv::xlen::kXLenHexDigits, mem.access_bytes,
+                    kThemeVal, mem.effective_paddr->raw(), simrv::xlen::kXLenHexDigits, mem.access_bytes,
                     mem.is_aligned ? "aligned" : "misaligned", mem.pmp_permitted ? "OK" : "FAULT"),
                 width));
         }
