@@ -23,6 +23,7 @@
 #include "simrv/tui/modals/ToolPickerModal.hpp"
 #include "simrv/xlen/Helpers.hpp"
 #include "simrv/xlen/ScalarTypes.hpp"
+#include "simrv/xlen/AddressTypes.hpp"
 
 namespace simrv::core {
 class Machine;
@@ -237,7 +238,7 @@ class TuiModal {
     [[nodiscard]] auto tool_filter() const -> modals::ToolFilter;
     void set_selected_hart(size_t hart) { selected_hart_ = hart; }
 
-    void open_memory_dump(simrv::xlen::Address addr = 0, InspectorPane* inspector_pane = nullptr);
+    void open_memory_dump(simrv::xlen::VirtAddr addr = {}, InspectorPane* inspector_pane = nullptr);
     void open_log_viewer();
     void set_mission_progress(const MissionProgress* mission) { mission_ = mission; }
     void open_mission_objective();

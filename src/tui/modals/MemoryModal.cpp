@@ -105,19 +105,19 @@ auto MemoryModal::handle_click(framework::ScreenCoord local_pt) -> framework::Mo
     return framework::ModalAction::Continue;
 }
 
-void MemoryModal::open(simrv::xlen::Address initial_addr, simrv::core::Machine& machine,
+void MemoryModal::open(simrv::xlen::VirtAddr initial_addr, simrv::core::Machine& machine,
                        InspectorPane* inspector_pane) {
     if (initial_addr == 0) {
         if (inspector_pane && inspector_pane->get_inspect_addr() != 0) {
-            initial_addr = inspector_pane->get_inspect_addr().raw();
+            initial_addr = inspector_pane->get_inspect_addr();
         } else if (machine.memory_geometry().dram_size > 0) {
-            initial_addr = machine.memory_geometry().dram_base;
+            initial_addr = simrv::xlen::VirtAddr{machine.memory_geometry().dram_base};
         } else {
-            initial_addr = 0x80000000ULL;
+            initial_addr = simrv::xlen::VirtAddr{0x80000000ULL};
         }
     }
-    base_address_ = initial_addr & ~0xFULL;
-    cursor_byte_ = static_cast<int>(initial_addr & 0xFULL);
+    base_address_ = initial_addr.raw() & ~0xFULL;
+    cursor_byte_ = static_cast<int>(initial_addr.raw() & 0xFULL);
     cursor_row_ = 0;
     physical_mode_ = false;
     mode_ = InputMode::Normal;

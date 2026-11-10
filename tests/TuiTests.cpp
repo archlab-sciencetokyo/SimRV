@@ -4376,7 +4376,7 @@ void test_memory_modal_and_hart_modal() {
 
     // 1. Test MemoryModal navigation and inspection
     const simrv::xlen::Address start_addr = simrv::memory::kDramBaseAddress + 0x1000;
-    MemoryModal::open(start_addr, machine, nullptr);
+    MemoryModal::open(simrv::xlen::VirtAddr{start_addr}, machine, nullptr);
     expect(MemoryModal::current_address() == start_addr, "MemoryModal opens at target address");
     expect(MemoryModal::input_mode() == MemoryModal::InputMode::Normal,
            "MemoryModal starts in Normal mode");
@@ -4456,7 +4456,7 @@ void test_memory_modal_and_hart_modal() {
     expect(found_hart_table, "HartModal renders hart table header");
 
     // 3. Test MemoryModal interactive hex and ascii cell clicking
-    MemoryModal::open(0x80000000ULL, machine, nullptr);
+    MemoryModal::open(simrv::xlen::VirtAddr{0x80000000ULL}, machine, nullptr);
     constexpr unsigned int xlen = 64;
     // Row 2 byte 0 at rel_x = 16
     expect(MemoryModal::handle_cell_click(2, 16, xlen), "Clicking byte 0 at row 2 succeeds");
